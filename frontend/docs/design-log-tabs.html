@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 — 통합 작업대 「로그」 (리뷰어 비정상로그 · 시스템 오류로그)</title>
+<style>
+  /* ═══ 통합 작업대(workdesk.html)의 실제 토큰·클래스를 그대로 옮겨 온 시안 ═══
+     색·간격·표 규칙을 새로 만들지 않았다 — 실제 화면과 눈으로 대조하기 위한 목업이라
+     여기서 예뻐 보이고 실제에선 달라지는 일이 없어야 한다. */
+  :root{
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --adv:#6d5ac9;--adv-soft:#efecfa;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9edf3;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;color-scheme:light}
+
+  /* ── 시안 문서 껍데기(실제 화면 아님) ── */
+  .doc{max-width:1420px;margin:0 auto;padding:26px 20px 60px}
+  .doc h1{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
+  .doc .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .docnote{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 17px;margin-bottom:16px;font-size:13px;line-height:1.7}
+  .docnote h2{font-size:14px;font-weight:800;margin:0 0 8px}
+  .docnote ul{margin:0;padding-left:19px} .docnote li{margin-bottom:5px}
+  .docnote b{color:var(--accent-deep)}
+  .docnote .q{background:var(--warn-soft);border:1px solid #f0dcc0;border-radius:10px;padding:10px 13px;margin-top:10px}
+  .docnote .q b{color:var(--warn)}
+  .screenlabel{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:22px 0 7px}
+  .screen{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--paper);box-shadow:0 10px 30px rgba(16,24,40,.09)}
+
+  /* ── workdesk 상단바 ── */
+  .top{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .top .logo{font-weight:800;letter-spacing:-.02em;font-size:15px}
+  .top .logo .tag{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);padding:2px 9px;border-radius:999px;margin-left:8px;letter-spacing:.05em}
+  .nav{display:flex;gap:0;margin-left:6px;background:var(--card2);border-radius:10px;padding:3px}
+  .navb{font:inherit;font-size:12.5px;font-weight:700;height:30px;padding:0 12px;border-radius:8px;border:none;background:none;color:var(--muted);cursor:pointer}
+  .navb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .navb .nb{font-size:10px;font-weight:800;color:var(--bad);margin-left:3px}
+  .top .sp{flex:1}
+  .rolebadge{font-size:11px;font-weight:750;padding:4px 12px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-deep)}
+  .btn{font:inherit;font-size:12px;font-weight:700;padding:0 13px;height:32px;display:inline-flex;align-items:center;gap:6px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--accent-line);background:var(--card2)}
+  .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.xs{height:24px;padding:0 9px;font-size:11px;border-radius:7px}
+
+  /* ── 본문 ── */
+  .ovwrap{padding:18px 22px;background:var(--paper);min-height:560px}
+  .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;max-width:1300px}
+  .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)}
+  .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent}
+  .bd.no{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+  .bd.wn{background:#FEF3C7;color:#92400E;border-color:transparent}
+  .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5;max-width:1300px}
+  .ovnote b{color:var(--muted)}
+  .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
+  .empty{color:var(--faint);font-size:13px;text-align:center;padding:40px 10px}
+
+  /* ── ★ 서브탭 = 작업대의 .seg 알약(신규 컴포넌트 아님) ── */
+  .segbar{display:flex;align-items:center;gap:8px;margin:0 0 13px;flex-wrap:wrap;max-width:1300px}
+  .seg{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex:none}
+  .seg:hover{border-color:var(--line2)}
+  .seg .cnt{font-size:10px;font-weight:700;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
+  .seg .unbmini{font-size:9px;font-weight:800;color:#fff;background:var(--bad);border-radius:20px;padding:0 5px;line-height:1.6}
+  .seg.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  .seg.on .cnt{background:rgba(255,255,255,.18);color:#fff}
+  .segsp{flex:1}
+
+  /* ── 로그 표(작업오더·등록리뷰어DB와 공유하는 .lgwrap/.lgtable 그대로) ── */
+  .lgwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);max-width:1300px}
+  table.lgtable{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:940px}
+  table.lgtable th{position:sticky;top:0;z-index:1;background:var(--card2);text-align:left;padding:8px 10px;font-size:10px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--line);white-space:nowrap}
+  table.lgtable td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.5}
+  table.lgtable tbody tr:last-child td{border-bottom:none}
+  table.lgtable tbody tr.lgrow:hover td{background:#f7faff}
+  .lgtable .c-sev{width:64px;white-space:nowrap}
+  .lgtable .c-ts{width:118px;white-space:nowrap;color:var(--muted)}
+  .lgtable .c-tab{width:240px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
+  .lgtable .c-nm{width:70px;white-space:nowrap}
+  .lgtable .c-ph{width:114px;white-space:nowrap}
+  .lgtable .c-prob{min-width:240px;word-break:break-word}
+  .lgtable .c-act{min-width:240px;word-break:break-word;color:var(--muted)}
+  .lgtable .c-btn{width:1%;white-space:nowrap}
+  .lgtable .c-cnt{width:56px;white-space:nowrap;text-align:right;color:var(--muted)}
+  .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
+  .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+  .lgtable tr.lgdone td{opacity:.55}
+  .lgtable tr.lgrow{cursor:pointer}
+  .lgtable .lgchev{display:inline-block;color:var(--muted);font-size:12px;width:13px}
+  .lgtable .lgcapdot{font-size:12px;margin-left:2px}
+  .lgtable tr.lgdetail>td{background:#fbfdff;padding:0}
+  .lgexpand{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;padding:12px 14px}
+  .lgexptext{flex:1;min-width:280px;font-size:12.5px;line-height:1.7}
+  .lgexptext b{color:var(--muted);font-weight:750;margin-right:4px}
+  .lgexpacts{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start}
+  .lgcap img{max-width:230px;max-height:180px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;background:#fff}
+  .lgcaphint{font-size:11px;color:var(--muted);margin-top:5px}
+  .mockimg{width:230px;height:150px;border-radius:8px;border:1px solid var(--line);background:
+      linear-gradient(#fff,#fff) padding-box,
+      repeating-linear-gradient(135deg,#f4f6f9 0 10px,#eef2f7 10px 20px);
+      display:grid;place-items:center;color:var(--faint);font-size:11.5px;font-weight:700}
+  /* 시스템 오류로그 전용 미세 보강(같은 표 idiom 안에서만) */
+  .lgtable .c-flow{width:180px;white-space:nowrap;font-weight:650}
+  .lgtable .c-flow i{display:block;font-style:normal;font-size:10.5px;font-weight:500;color:var(--faint)}
+  .lgtable .c-cat{width:92px;white-space:nowrap}
+  .catchip{font-size:10px;font-weight:750;padding:2px 7px;border-radius:6px;display:inline-block}
+  .ocount{font-size:10.5px;font-weight:800;background:var(--bad-soft);color:var(--bad);padding:1px 6px;border-radius:6px}
+  .kv{font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+  pre.stack{margin:8px 0 0;padding:9px 11px;background:#0f172a;color:#cbd5e1;border-radius:8px;font-size:11px;line-height:1.6;overflow:auto;max-height:150px}
+  .tabpane[hidden]{display:none}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <h1>시안 — 통합 작업대 <b>「로그」</b> 메뉴</h1>
+  <div class="sub">「리뷰어 로그」 → <b>「로그」</b>로 이름을 바꾸고, 안에서 <b>리뷰어 비정상로그</b>(기본) / <b>시스템 오류로그</b> 두 탭으로 나눈 화면 목업입니다. 아래 알약을 실제로 눌러 전환·행 펼침까지 확인할 수 있습니다.</div>
+
+  <div class="docnote">
+    <h2>이 시안이 정한 것</h2>
+    <ul>
+      <li><b>메뉴 이름 = 「로그」</b> · 뱃지는 <b>두 탭 미해결 건수의 합</b> 하나로 표시합니다(C/S 뱃지와 같은 방식 — 한쪽만 도착했다고 다른 쪽을 0으로 접지 않습니다).</li>
+      <li><b>기본 탭 = 리뷰어 비정상로그.</b> 진입 시 항상 이 탭이 먼저 열립니다(대시보드 중요알림 <span class="kv">#view=logs</span> 딥링크도 동일).</li>
+      <li><b>시스템 오류로그의 데이터 = 이미 쌓이고 있는 <span class="kv">error_logs</span></b>(마이그레이션 026/028 · 관리자 대시보드 “오류디버깅” 탭이 쓰던 원장)입니다. 새 저장소·새 수집 경로를 만들지 않습니다.</li>
+      <li><b>“모든 오류의 기준 = 통합 작업대” 반영</b> — 시스템 오류도 관리자 대시보드의 <i>카드 목록 + 우측 패널</i> 형태가 아니라, <b>작업대의 로그 표(같은 <span class="kv">.lgtable</span>) + 행 펼침</b>으로 통일했습니다. 두 탭의 열 의미(상태 · 발생시점 · 대상 · 오류내용 · 조치안내)가 1:1로 대응해, 탭을 옮겨도 읽는 법이 바뀌지 않습니다.</li>
+      <li><b>권한</b> — 리뷰어 비정상로그는 지금처럼 내부인 전원(AE는 담당 업체 탭만, 해결 처리는 master/admin). <b>시스템 오류로그 탭은 master/admin에게만 노출</b>합니다(경로·스택·요청 컨텍스트가 실려 담당 스코프로 나눌 수 있는 데이터가 아닙니다 — 등록리뷰어DB와 같은 판단). AE에게는 알약 자체가 안 보입니다.</li>
+    </ul>
+    <div class="q">
+      <b>확인이 필요한 2가지</b> (답을 주시면 그대로 구현합니다)
+      <ul style="margin-top:6px">
+        <li><b>①</b> 관리자 대시보드의 기존 <b>「오류디버깅」 탭은 그대로 둘까요, 없앨까요?</b> 시안은 <b>남겨두고 작업대에도 추가</b>(같은 원장을 두 화면이 봄)로 그렸습니다. 없애는 쪽이면 그쪽 탭을 제거하고 작업대로 일원화합니다.</li>
+        <li><b>②</b> 시스템 오류로그에 관리자 대시보드에 있던 <b>AI 다중에이전트 분석(오류검증·레드팀·블루팀·감독관·결정자)</b>까지 가져올까요? 시안은 펼침 패널에 <b>[🤖 AI 분석] 버튼만</b> 두고, 눌렀을 때의 진행도 화면은 이번 범위에서 뺐습니다(1차는 <b>보기·상태처리</b>까지).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="screenlabel">화면 — 통합 작업대 › 로그</div>
+  <div class="screen">
+
+    <!-- 상단바 -->
+    <div class="top">
+      <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">작업대</button>
+        <button class="navb">관측</button>
+        <button class="navb">업체관리</button>
+        <button class="navb on">로그<span class="nb" id="navBadge">🔴7</span></button>
+        <button class="navb">작업오더</button>
+        <button class="navb">모집공고</button>
+        <button class="navb">C/S</button>
+        <button class="navb">리뷰검수</button>
+        <button class="navb">등록리뷰어DB</button>
+        <button class="navb">입금관리</button>
+        <button class="navb">설정</button>
+      </nav>
+      <span class="sp"></span>
+      <span class="rolebadge">admin · 박세희</span>
+      <button class="btn">로그아웃</button>
+    </div>
+
+    <div class="ovwrap">
+
+      <!-- ═══ 서브탭 = .seg 알약 (기본: 리뷰어 비정상로그) ═══ -->
+      <div class="segbar">
+        <div class="seg on" id="segA" onclick="pick('A')">리뷰어 비정상로그 <span class="cnt">5</span> <span class="unbmini">2</span></div>
+        <div class="seg" id="segB" onclick="pick('B')">시스템 오류로그 <span class="cnt">2</span> <span class="unbmini">1</span></div>
+        <span class="segsp"></span>
+        <span style="font-size:11px;color:var(--faint)">🔴 = 즉시 손봐야 하는 중요 건수</span>
+      </div>
+
+      <!-- ══════════ 탭 A · 리뷰어 비정상로그 (기본) ══════════ -->
+      <div class="tabpane" id="paneA">
+        <div class="mh">
+          <h1>리뷰어 비정상로그</h1>
+          <span class="bd no">중요 2</span>
+          <span class="bd g">미해결 5</span>
+          <span style="flex:1"></span>
+          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox"> 해결된 로그 포함</label>
+          <button class="btn">새로고침</button>
+          <button class="btn">캡처 미첨부 정밀확인</button>
+          <input class="ovsearch" placeholder="캠페인/리뷰어/내용 검색">
+        </div>
+        <div class="ovnote">구매양식 <b>시트 소실(유령 written)</b>·<b>미반영 적체</b>·<b>구매캡쳐 미첨부</b> 등을 시스템이 자동 감지해 캠페인별 한글 문장으로 기록합니다. 소실 건은 자동 재기록되며(하단 행 비고 'system'), 반복 소실·수동 필요 건은 🔴 중요로 표시됩니다.</div>
+        <div class="ovnote" style="margin-bottom:8px">행을 클릭하면 아래로 <b>펼쳐져 상세·제출 캡처</b>를 보고 그 자리에서 <b>해결</b> 처리할 수 있습니다.</div>
+
+        <div class="lgwrap"><table class="lgtable">
+          <thead><tr>
+            <th class="c-btn"></th><th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
+            <th class="c-nm">이름</th><th class="c-ph">전화번호</th>
+            <th class="c-prob">오류내용</th><th class="c-act">조치안내</th>
+          </tr></thead>
+          <tbody>
+            <tr class="lgrow lgcrit" onclick="ex('a1')">
+              <td class="c-btn"><span class="lgchev" id="ch-a1">▾</span></td>
+              <td class="c-sev"><span class="bd no">중요</span></td>
+              <td class="c-ts">2026-08-04 09:12</td>
+              <td class="c-tab" title="힙스 골라담기 8월 100건">힙스 골라담기 8월 100건</td>
+              <td class="c-nm">이지유</td><td class="c-ph">010-2841-7734</td>
+              <td class="c-prob">구매양식이 시트에서 사라짐(기록됐던 142행이 다른 내용으로 바뀜).</td>
+              <td class="c-act">자동 재기록을 진행합니다 — 반영되면 시트 하단 행 비고에 [시스템 재기록 · 확인요망]으로 표기됩니다.</td>
+            </tr>
+            <tr class="lgdetail" id="d-a1" hidden><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext">
+                <b>오류내용</b> 구매양식이 시트에서 사라짐(기록됐던 142행이 다른 내용으로 바뀜).<br>
+                <b>조치안내</b> 자동 재기록을 진행합니다 — 반영되면 시트 하단 행 비고에 [시스템 재기록 · 확인요망]으로 표기됩니다.
+              </div>
+              <div class="lgexpacts">
+                <button class="btn xs">작업대 ↗</button>
+                <button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C">취소 처리</button>
+                <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
+              </div>
+            </div></td></tr>
+
+            <tr class="lgrow lgcrit" onclick="ex('a2')">
+              <td class="c-btn"><span class="lgchev" id="ch-a2">▾</span><span class="lgcapdot" title="제출 캡처 있음">🖼</span></td>
+              <td class="c-sev"><span class="bd no">중요</span></td>
+              <td class="c-ts">2026-08-04 08:47</td>
+              <td class="c-tab" title="콰이어트 7월 재진행">콰이어트 7월 재진행</td>
+              <td class="c-nm">양미경</td><td class="c-ph">010-5520-1188</td>
+              <td class="c-prob">현금영수증 캡처 자리에 다른 형식의 이미지가 올라옴(확신 93%).</td>
+              <td class="c-act">리뷰어에게 재첨부를 안내했고 담당자에게도 전달되었습니다.</td>
+            </tr>
+            <tr class="lgdetail" id="d-a2"><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext">
+                <b>오류내용</b> 현금영수증 캡처 자리에 다른 형식의 이미지가 올라옴(확신 93%).<br>
+                <b>조치안내</b> 리뷰어에게 재첨부를 안내했고 담당자에게도 전달되었습니다.
+              </div>
+              <div class="lgcap">
+                <div class="mockimg">📷 제출 캡처 (샘플 자리)</div>
+                <div class="lgcaphint">📷 리뷰어가 제출한 캡처 — 클릭하면 크게 보기</div>
+              </div>
+              <div class="lgexpacts">
+                <button class="btn xs">작업대 ↗</button>
+                <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
+              </div>
+            </div></td></tr>
+
+            <tr class="lgrow" onclick="ex('a3')">
+              <td class="c-btn"><span class="lgchev" id="ch-a3">▾</span></td>
+              <td class="c-sev"><span class="bd wn">주의</span></td>
+              <td class="c-ts">2026-08-04 08:05</td>
+              <td class="c-tab" title="어나더 8월 1차">어나더 8월 1차</td>
+              <td class="c-nm">박지훈</td><td class="c-ph">010-3312-9040</td>
+              <td class="c-prob">구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.</td>
+              <td class="c-act">구매캡쳐 보완 필요.</td>
+            </tr>
+            <tr class="lgdetail" id="d-a3" hidden><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext"><b>오류내용</b> 구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.<br><b>조치안내</b> 구매캡쳐 보완 필요.</div>
+              <div class="lgexpacts"><button class="btn xs">작업대 ↗</button><button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button></div>
+            </div></td></tr>
+
+            <tr class="lgrow" onclick="ex('a4')">
+              <td class="c-btn"><span class="lgchev" id="ch-a4">▾</span></td>
+              <td class="c-sev"><span class="bd">정보</span></td>
+              <td class="c-ts">2026-08-03 21:33</td>
+              <td class="c-tab" title="힙스 골라담기 8월 100건">힙스 골라담기 8월 100건</td>
+              <td class="c-nm">최다은</td><td class="c-ph">010-7781-2255</td>
+              <td class="c-prob">기록 행이 118→121행으로 이동됨(시트 중간 행 삽입·정렬 감지).</td>
+              <td class="c-act">자동 보정 완료 — 조치 불필요.</td>
+            </tr>
+            <tr class="lgdetail" id="d-a4" hidden><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext"><b>오류내용</b> 기록 행이 118→121행으로 이동됨.<br><b>조치안내</b> 자동 보정 완료 — 조치 불필요.</div>
+              <div class="lgexpacts"><button class="btn xs">작업대 ↗</button><button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button></div>
+            </div></td></tr>
+
+            <tr class="lgrow lgdone" onclick="ex('a5')">
+              <td class="c-btn"><span class="lgchev" id="ch-a5">▾</span></td>
+              <td class="c-sev"><span class="bd wn">주의</span><div class="lgby">✔ 해결됨</div></td>
+              <td class="c-ts">2026-08-03 15:20</td>
+              <td class="c-tab" title="콰이어트 7월 재진행">콰이어트 7월 재진행</td>
+              <td class="c-nm">김서연</td><td class="c-ph">010-4402-6611</td>
+              <td class="c-prob">구매양식을 제출했으나, 아직 시트에 입력되지 못함(상태: queued).</td>
+              <td class="c-act">자동복구 대기 중 — 조치 불필요.</td>
+            </tr>
+            <tr class="lgdetail" id="d-a5" hidden><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext"><b>오류내용</b> 구매양식을 제출했으나, 아직 시트에 입력되지 못함(상태: queued).<br><span style="color:var(--faint)">✔ 확인: 박은비</span></div>
+              <div class="lgexpacts"><button class="btn xs">작업대 ↗</button></div>
+            </div></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <!-- ══════════ 탭 B · 시스템 오류로그 ══════════ -->
+      <div class="tabpane" id="paneB" hidden>
+        <div class="mh">
+          <h1>시스템 오류로그</h1>
+          <span class="bd no">치명 1</span>
+          <span class="bd g">미해결 2</span>
+          <span style="flex:1"></span>
+          <select class="ovsearch" style="width:auto">
+            <option>미해결(신규＋확인중)</option><option>신규</option><option>확인중</option><option>해결</option><option>무시</option><option>전체</option>
+          </select>
+          <select class="ovsearch" style="width:auto">
+            <option>전체 종류</option><option>호출한도 초과</option><option>로딩시간 초과</option><option>DB</option><option>외부 API</option><option>권한</option><option>입력검증</option>
+          </select>
+          <button class="btn">새로고침</button>
+          <input class="ovsearch" placeholder="기능/단계/오류내용 검색">
+        </div>
+        <div class="ovnote">서버·DB·외부 API(구글 시트/Drive/AI)에서 발생한 <b>비정상 이벤트</b>를 자동 수집해 한국어 한 문장으로 풀이합니다. 같은 유형은 <b>한 줄로 묶고 발생 횟수만 누적</b>합니다(중복 폭주 방지). <b>master/admin 전용</b>입니다.</div>
+        <div class="ovnote" style="margin-bottom:8px">행을 클릭하면 아래로 <b>펼쳐져 원본 메시지·오류코드·발생 위치·스택</b>을 보고 그 자리에서 <b>확인중 / 해결 / 무시</b>로 처리할 수 있습니다.</div>
+
+        <div class="lgwrap"><table class="lgtable">
+          <thead><tr>
+            <th class="c-btn"></th><th class="c-sev">상태</th><th class="c-ts">최근 발생</th>
+            <th class="c-flow">기능 · 단계</th><th class="c-cat">종류</th><th class="c-cnt">횟수</th>
+            <th class="c-prob">오류내용</th><th class="c-act">조치안내</th>
+          </tr></thead>
+          <tbody>
+            <tr class="lgrow lgcrit" onclick="ex('b1')">
+              <td class="c-btn"><span class="lgchev" id="ch-b1">▾</span></td>
+              <td class="c-sev"><span class="bd no">치명</span><div class="lgby">신규</div></td>
+              <td class="c-ts">2026-08-04 09:40<div class="lgby">3분 전</div></td>
+              <td class="c-flow">시트 기록<i>시트 쓰기</i></td>
+              <td class="c-cat"><span class="catchip" style="background:#EF444422;color:#EF4444">호출한도 초과</span></td>
+              <td class="c-cnt"><span class="ocount">×34</span></td>
+              <td class="c-prob">시트 기록 시트 쓰기에서 호출한도 초과 에러가 외부 API(구글 등)에서 발생했습니다.</td>
+              <td class="c-act">구글 시트 분당 쿼터 초과 — 큐가 자동 재시도합니다. 반복되면 <b>주문 예약 슬롯</b>·저우선 작업 비중을 확인하세요.</td>
+            </tr>
+            <tr class="lgdetail" id="d-b1"><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext">
+                <b>원본 메시지</b> <span class="kv">Quota exceeded for quota metric 'Write requests' and limit 'Write requests per minute per user'</span><br>
+                <b>오류코드</b> <span class="kv">429</span> &nbsp; <b>발생 위치</b> 외부 API &nbsp; <b>최초 발생</b> 2026-08-04 09:12<br>
+                <b>요청</b> <span class="kv">POST /api/submit/order</span> &nbsp; <b>작업</b> <span class="kv">sync_queue · order_append</span>
+                <pre class="stack">GoogleApiError: Quota exceeded for quota metric 'Write requests'
+    at sheetsThrottle.throttledCall (utils/sheetsThrottle.js:118:11)
+    at batchWriteByGrid (services/sheets.service.js:642:22)
+    at processQueue (services/syncQueue.service.js:1126:9)</pre>
+              </div>
+              <div class="lgexpacts">
+                <button class="btn xs">확인중으로</button>
+                <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
+                <button class="btn xs">무시</button>
+                <button class="btn xs" style="border-color:#C4B5FD;color:#6D28D9">🤖 AI 분석</button>
+              </div>
+            </div></td></tr>
+
+            <tr class="lgrow" onclick="ex('b2')">
+              <td class="c-btn"><span class="lgchev" id="ch-b2">▾</span></td>
+              <td class="c-sev"><span class="bd" style="background:var(--bad-soft);color:var(--bad);border-color:transparent">에러</span><div class="lgby">확인중</div></td>
+              <td class="c-ts">2026-08-04 07:58<div class="lgby">1시간 전</div></td>
+              <td class="c-flow">AI 이미지분석<i>AI 분석 호출</i></td>
+              <td class="c-cat"><span class="catchip" style="background:#F59E0B22;color:#F59E0B">로딩시간 초과</span></td>
+              <td class="c-cnt"><span class="ocount">×6</span></td>
+              <td class="c-prob">AI 이미지분석 AI 분석 호출에서 로딩시간 초과(타임아웃) 에러가 외부 API(구글 등)에서 발생했습니다.</td>
+              <td class="c-act">판정은 fail-open(통과)으로 처리되어 리뷰어 제출은 막히지 않았습니다. 반복되면 키 상태를 확인하세요.</td>
+            </tr>
+            <tr class="lgdetail" id="d-b2" hidden><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext">
+                <b>원본 메시지</b> <span class="kv">timeout of 20000ms exceeded</span><br>
+                <b>오류코드</b> <span class="kv">ETIMEDOUT</span> &nbsp; <b>발생 위치</b> 외부 API &nbsp; <b>최초 발생</b> 2026-08-02 11:30<br>
+                <b>요청</b> <span class="kv">POST /api/diag/review-upload</span>
+              </div>
+              <div class="lgexpacts">
+                <button class="btn xs">확인중으로</button>
+                <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
+                <button class="btn xs">무시</button>
+                <button class="btn xs" style="border-color:#C4B5FD;color:#6D28D9">🤖 AI 분석</button>
+              </div>
+            </div></td></tr>
+
+            <tr class="lgrow lgdone" onclick="ex('b3')">
+              <td class="c-btn"><span class="lgchev" id="ch-b3">▾</span></td>
+              <td class="c-sev"><span class="bd wn">경고</span><div class="lgby">✔ 해결</div></td>
+              <td class="c-ts">2026-08-03 18:22<div class="lgby">15시간 전</div></td>
+              <td class="c-flow">DB<i>DB 조회</i></td>
+              <td class="c-cat"><span class="catchip" style="background:#DC262622;color:#DC2626">DB</span></td>
+              <td class="c-cnt"><span class="ocount" style="background:var(--card2);color:var(--muted)">×2</span></td>
+              <td class="c-prob">DB DB 조회에서 대상 없음 에러가 DB에서 발생했습니다.</td>
+              <td class="c-act">마이그레이션 미적용 컬럼 — 배포 후 자동 해소되었습니다.</td>
+            </tr>
+            <tr class="lgdetail" id="d-b3" hidden><td colspan="8"><div class="lgexpand">
+              <div class="lgexptext">
+                <b>원본 메시지</b> <span class="kv">column "review_fee_snapshot" does not exist</span><br>
+                <b>오류코드</b> <span class="kv">42703</span> &nbsp; <b>발생 위치</b> DB<br>
+                <span style="color:var(--faint)">✔ 확인: 박세희 · “082 재적용으로 해소”</span>
+              </div>
+              <div class="lgexpacts"><button class="btn xs">다시 열기</button></div>
+            </div></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+    </div><!-- /ovwrap -->
+  </div><!-- /screen -->
+
+  <div class="docnote" style="margin-top:20px">
+    <h2>두 탭의 열이 1:1로 대응합니다 (탭을 옮겨도 읽는 법이 같습니다)</h2>
+    <ul>
+      <li><b>상태</b> — 리뷰어: 중요/주의/정보 + 해결됨 &nbsp;·&nbsp; 시스템: 치명/에러/경고 + 신규·확인중·해결·무시</li>
+      <li><b>발생시점</b> — 리뷰어: 발생 시각 &nbsp;·&nbsp; 시스템: <b>최근 발생</b>(같은 유형을 묶으므로 “마지막에 언제 또 났나”가 판단 기준)</li>
+      <li><b>대상</b> — 리뷰어: 작업명 · 이름 · 전화번호 &nbsp;·&nbsp; 시스템: 기능 · 단계 · 종류 · 횟수</li>
+      <li><b>오류내용 / 조치안내</b> — 두 탭 모두 <b>서버가 만든 한국어 한 문장</b>을 그대로 씁니다(화면에서 문장을 새로 만들지 않습니다).</li>
+      <li><b>펼침 패널</b> — 두 탭 모두 “근거 + 그 자리에서 처리”. 리뷰어는 제출 캡처, 시스템은 원본 메시지·스택.</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+  function pick(k){
+    document.getElementById('segA').classList.toggle('on', k==='A');
+    document.getElementById('segB').classList.toggle('on', k==='B');
+    document.getElementById('paneA').hidden = (k!=='A');
+    document.getElementById('paneB').hidden = (k!=='B');
+  }
+  function ex(id){
+    var d=document.getElementById('d-'+id); if(!d) return;
+    d.hidden = !d.hidden;
+    var c=document.getElementById('ch-'+id); if(c) c.textContent = d.hidden ? '▾' : '▴';
+  }
+  // 기본 열림 상태를 셰브런에 맞춰 초기화
+  ['a2','b1'].forEach(function(id){ var c=document.getElementById('ch-'+id); if(c) c.textContent='▴'; });
+</script>
+</body>
+</html>
