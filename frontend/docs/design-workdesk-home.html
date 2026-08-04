@@ -120,6 +120,23 @@
   .c-row:first-of-type{border-top:none}
   .c-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650;font-size:11.5px}
 
+  /* ═══ 시안 B-2 — 타일 클릭 후(작업보드) 이동 동선 ═══ */
+  .b2-tb1{display:flex;gap:6px;align-items:center;padding:8px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+  .b2-adv{font-size:11px;font-weight:750;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card2);color:var(--muted);white-space:nowrap}
+  .b2-adv.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+  .b2-tb2{display:flex;gap:6px;align-items:center;padding:7px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+  .b2-tab{font-size:11px;font-weight:700;padding:4px 11px;border-radius:8px;color:var(--muted);white-space:nowrap}
+  .b2-tab.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .b2-gridtbl{width:100%;border-collapse:collapse;font-size:10.5px}
+  .b2-gridtbl th{background:var(--card2);color:var(--faint);font-weight:750;text-align:left;padding:6px 9px;border:1px solid var(--line);white-space:nowrap}
+  .b2-gridtbl td{padding:6px 9px;border:1px solid var(--line);white-space:nowrap;color:var(--muted)}
+  .b2-cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .b2-cmp .lbl{font-size:11px;font-weight:800;margin-bottom:6px}
+  .b2-cmp .lbl .pill{margin-left:6px}
+  .b2-mini{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--paper)}
+  .b2-mini .top{padding:8px 14px}
+  .b2-mini .hint{font-size:10px;color:var(--faint);padding:8px 14px 10px}
+
   .hide{display:none!important}
   .solo-note{margin:18px 0 0;font-size:.78rem;color:var(--muted)}
 </style>
@@ -268,6 +285,85 @@
       </div>
     </div></div></div>
     <p class="note"><b>요지:</b> nav를 그대로 두되 홈에서는 <b>메뉴 자체를 타일로 펼쳐</b> "이 시스템에 무엇이 있는가"를 한눈에 보여준다. 관리자 대시보드에서 리뷰웹시스템[3버전]으로 넘어오는 전환기(교육·온보딩)에 강점. 타일 뱃지·브리핑 레일의 숫자는 전부 기존 뱃지 재료의 재표시라 별도 집계가 없다. 역할별로 타일이 접힌다(AE는 등록리뷰어DB·입금관리·관측 타일 미표시 = nav 정책과 1:1).</p>
+
+    <!-- ── B-2: 타일 클릭 후 — 다른 메뉴로 가는 길 ── -->
+    <h2 style="font-size:1rem;margin-top:34px">B-2 · 타일을 눌러 들어간 뒤 — 다른 메뉴로 가는 길</h2>
+    <div class="pros">
+      <span>nav는 셸이 한 번만 그리고 계속 살아 있음(renderShell) — 상시 유지가 기본값</span>
+      <span>nav 맨 앞에 🏠 홈 버튼 추가 = 코드 변경 두 줄</span>
+      <span class="warn">③ nav 폐지(홈 경유 강제)는 기각 — 전 메뉴 이동이 2클릭이 됨</span>
+    </div>
+    <p class="note" style="margin:0 0 14px"><b>핵심:</b> workdesk의 nav는 뷰마다 다시 그리는 게 아니라 <b>상단 셸에 한 번 그려져 계속 살아 있다</b>(`renderShell` → `switchView`는 본문 `#viewroot`만 교체). 그래서 타일로 작업보드에 들어가도 <b>상단 nav로 나머지 메뉴에 1클릭 이동</b>하는 것이 기본이고, 홈 복귀는 <b>🏠 홈 버튼</b> 또는 브라우저 뒤로가기(기존 SPA 히스토리 `_navPush`가 뷰 전환을 이미 쌓는다)로 한다. 아래는 <b>진행상품 타일(작업보드) 클릭 직후</b> 화면.</p>
+    <div class="frame"><div class="bar"><i></i><i></i><i></i></div><div class="scr"><div class="cv">
+      <div class="top">
+        <span class="logo">아이에이리뷰 <span class="tag">리뷰웹시스템 3.0</span></span>
+        <nav class="nav">
+          <span class="navb">🏠 홈</span><span class="navb on">작업보드</span><span class="navb">관측</span><span class="navb">업체관리</span>
+          <span class="navb">로그 <span class="bd">3</span></span><span class="navb">작업오더 <span class="bd">2</span></span><span class="navb">모집공고</span>
+          <span class="navb">C/S <span class="bd">16</span></span><span class="navb">리뷰검수 <span class="bd">4</span></span><span class="navb">등록리뷰어DB</span>
+          <span class="navb">입금관리</span><span class="navb">설정</span>
+        </nav>
+        <span class="sp"></span>
+        <span class="rolebadge">망고 · 관리자</span>
+      </div>
+      <!-- 기존 작업바(업체 칩 + 탭 줄) 그대로 -->
+      <div class="b2-tb1">
+        <span class="cap" style="margin-right:4px">업체</span>
+        <span class="b2-adv on">헬시푸드</span><span class="b2-adv">주식회사 클린리빙</span><span class="b2-adv">캠프온</span><span class="b2-adv fnt">미지정 (4)</span>
+      </div>
+      <div class="b2-tb2">
+        <span class="cap" style="margin-right:4px">작업</span>
+        <span class="b2-tab on">비타민C 100건</span><span class="b2-tab">콜라겐 젤리 50건</span><span class="b2-tab">유산균 상시</span>
+      </div>
+      <div class="body" style="padding-top:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span class="h3" style="font-size:14px">헬시푸드 비타민C 100건</span>
+          <span class="pill p-acc">진행중 67/100</span>
+          <span class="sp"></span>
+          <span class="btn">전체화면</span><span class="btn">우측 레일</span>
+        </div>
+        <div class="card" style="overflow:hidden">
+          <table class="b2-gridtbl">
+            <tr><th>#</th><th>구매일자</th><th>주문자</th><th>수취인</th><th>연락처</th><th>결제금액</th><th>리뷰제출</th><th>입금</th><th>비고</th></tr>
+            <tr><td>1</td><td>8/1 (금)</td><td>김○○</td><td>김○○</td><td>010-****-1234</td><td>28,900</td><td style="color:var(--safe);font-weight:700">O</td><td>8/3</td><td></td></tr>
+            <tr><td>2</td><td>8/1 (금)</td><td>이○○</td><td>이○○</td><td>010-****-5678</td><td>28,900</td><td style="color:var(--safe);font-weight:700">O</td><td></td><td></td></tr>
+            <tr><td>3</td><td>8/2 (토)</td><td>박○○</td><td>박○○</td><td>010-****-9012</td><td>28,900</td><td></td><td></td><td>system</td></tr>
+            <tr><td colspan="9" style="text-align:center;color:var(--faint);padding:14px">… (기존 작업보드 시트 그리드 그대로 — 이 화면은 변경 없음)</td></tr>
+          </table>
+        </div>
+      </div>
+    </div></div></div>
+
+    <!-- 홈 화면 상단바 두 가지 처리 비교 -->
+    <div class="b2-cmp">
+      <div>
+        <div class="lbl">① nav 상시 유지 <span class="pill p-safe">권장</span></div>
+        <div class="b2-mini">
+          <div class="top">
+            <span class="logo" style="font-size:12px">아이에이리뷰</span>
+            <nav class="nav" style="transform:scale(.92);transform-origin:left center">
+              <span class="navb on">🏠 홈</span><span class="navb">작업보드</span><span class="navb">작업오더 <span class="bd">2</span></span><span class="navb">C/S <span class="bd">16</span></span><span class="navb" style="padding:0 7px">…</span>
+            </nav>
+            <span class="sp"></span>
+            <span class="rolebadge" style="font-size:9.5px">망고 · 관리자</span>
+          </div>
+          <div class="hint">홈에서도 nav가 그대로 보인다. 타일 = 큰 입구, nav = 빠른 입구(중복이 아니라 역할 분담). 상단바가 어느 화면에서든 동일 → 화면 들썩임 0, 구현 = nav에 🏠 버튼 한 줄 + switchView 분기 한 줄.</div>
+        </div>
+      </div>
+      <div>
+        <div class="lbl">② 홈에서만 nav 숨김 <span class="pill p-warn">선택</span></div>
+        <div class="b2-mini">
+          <div class="top">
+            <span class="logo" style="font-size:12px">아이에이리뷰</span>
+            <span class="sp"></span>
+            <span style="font-size:10px;color:var(--faint);border:1px dashed var(--line2);border-radius:7px;padding:3px 9px">nav 없음 — 타일이 유일한 메뉴</span>
+            <span class="rolebadge" style="font-size:9.5px">망고 · 관리자</span>
+          </div>
+          <div class="hint">홈은 히어로+타일이 화면을 온전히 써서 첫인상이 가장 깨끗하다. 대신 홈↔다른 뷰를 오갈 때 상단바에 nav가 나타났다 사라져 들썩이고, 홈에서 다른 메뉴로 가려면 반드시 타일을 거친다. 다른 뷰에 들어간 뒤는 ①과 완전히 동일.</div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>기각한 안 ③ (nav 폐지 · 홈 경유 강제):</b> 모든 메뉴 이동이 "홈으로 → 타일 클릭" 2클릭이 된다. C/S 처리 중 작업오더 접수, 검수 중 로그 확인처럼 탭 간 왕복이 하루 수십 번인 화면이라 숙련 직원에게 명백한 퇴보 — 채택하지 않는다. <b>어느 쪽이든 뒤로가기로도 홈에 돌아온다</b>(기존 SPA 히스토리가 뷰 전환을 항목으로 쌓고 있어 추가 구현 없음).</p>
   </section>
 
   <!-- ═══════════════════════ 시안 C ═══════════════════════ -->

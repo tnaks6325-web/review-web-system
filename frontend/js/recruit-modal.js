@@ -66,6 +66,24 @@
           </div></div>
       </div>
 
+      <!-- 리뷰타입 (★ 087) — 값 목록의 단일 출처는 server/src/utils/reviewType.js.
+           data-val 은 **표준 key**라 서버 저장값과 그대로 왕복한다(라벨은 화면 표기 전용).
+           ★ 이 줄은 참여형 전용 섹션 **밖**에 둔다 — 레거시 공고도 리뷰타입을 지정해야 하고,
+             접힌 섹션 안에 두면 존재를 모른다(085 리뷰어 숨김 토글에서 실측한 함정). -->
+      <div class="rf-hrow"><span class="rf-hl">리뷰타입</span>
+        <div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_review_type_btns">
+            <button class="rchan-btn" data-group="review_type" data-val="" onclick="selectRfBtn('review_type',this)">미지정</button>
+            <button class="rchan-btn" data-group="review_type" data-val="photo" onclick="selectRfBtn('review_type',this)">📷 포토</button>
+            <button class="rchan-btn" data-group="review_type" data-val="text" onclick="selectRfBtn('review_type',this)">📝 텍스트</button>
+            <button class="rchan-btn" data-group="review_type" data-val="confirm" onclick="selectRfBtn('review_type',this)">✅ 구매확정</button>
+            <button class="rchan-btn" data-group="review_type" data-val="star" onclick="selectRfBtn('review_type',this)">⭐ 별점</button>
+            <button class="rchan-btn" data-group="review_type" data-val="mixed" onclick="selectRfBtn('review_type',this)">🧩 혼합</button>
+          </div>
+          <div id="rf_review_type_hint" style="font-size:.7rem;color:var(--t3,#94A3B8);margin-top:5px"></div>
+          <input id="rf_review_type" type="hidden">
+        </div></div>
+
       <!-- 배송유형 / 리뷰비 -->
       <div class="rf-grid2">
         <div class="rf-hrow"><span class="rf-hl">배송유형</span>

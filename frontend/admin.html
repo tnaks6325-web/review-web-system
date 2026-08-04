@@ -819,7 +819,7 @@ body{ letter-spacing:-.01em; }
             <option value="">전체 캠페인</option>
           </select>
           <select id="tabDashReviewTypeFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-            <option value="">전체 리뷰유형</option>
+            <option value="">전체 리뷰타입</option>
           </select>
           <input type="text" id="tabDashSearch" placeholder="탭명/상품명/캠페인/담당자 검색..." oninput="renderTabDashTable()" style="flex:1;min-width:140px;padding:5px 10px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
           <span id="tabDashCount" style="font-size:.75rem;color:var(--t3);white-space:nowrap">0건</span>
@@ -1984,10 +1984,11 @@ body{ letter-spacing:-.01em; }
   <div class="tc-popover-label">리뷰타입</div>
   <div class="tc-option-row" id="tcOptReview">
     <button class="tc-opt" data-val="">미지정</button>
-    <button class="tc-opt" data-val="실배송">실배송</button>
-    <button class="tc-opt" data-val="빈박스">빈박스</button>
+    <button class="tc-opt" data-val="포토">포토</button>
+    <button class="tc-opt" data-val="텍스트">텍스트</button>
     <button class="tc-opt" data-val="구매확정">구매확정</button>
-    <button class="tc-opt" data-val="믹스">믹스</button>
+    <button class="tc-opt" data-val="별점">별점</button>
+    <button class="tc-opt" data-val="혼합">혼합</button>
   </div>
   <div class="tc-popover-label">입금방식</div>
   <div class="tc-option-row" id="tcOptPayment">

@@ -1099,6 +1099,10 @@ const _setHandlers = {
   notices:      _delegate(_reviewerRoutes, 'get', '/notices/all'),
   noticeSave:   _delegate(_reviewerRoutes, 'post', '/notices/save'),
   noticeDelete: _delegate(_reviewerRoutes, 'post', '/notices/delete'),
+  // ★ 087: 리뷰타입 옛 값 정리 — 원본은 `/api/diag/review-type-cleanup`.
+  //   인트라넷 SSO 토큰(via:'intranet')은 `/api/diag/*` 에 **도달 자체가 불가**라
+  //   리뷰웹시스템[3버전]에서 이 정리를 부르려면 Track B 경로가 필요하다(로직 복제 0).
+  reviewTypeCleanup: _delegate(require('./diag.routes'), 'post', '/review-type-cleanup'),
 };
 router.get('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
   _setHandlers.nicknameGet(req, res, next));
@@ -1118,6 +1122,9 @@ router.post('/settings/notices/save', authMiddleware, adminOrMasterMiddleware, (
   _setHandlers.noticeSave(req, res, next));
 router.post('/settings/notices/delete', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.noticeDelete(req, res, next));
+// ★ 087: 원본과 같은 권한(admin/master). dryRun 기본은 원본 핸들러가 판정한다.
+router.post('/settings/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.reviewTypeCleanup(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
    시스템 오류로그 — 리뷰웹시스템[3버전] 「로그」 탭의 두 번째 서브탭

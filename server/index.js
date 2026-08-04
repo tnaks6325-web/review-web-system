@@ -32,6 +32,7 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'reviewer_hidden'],        // 085 — 공개 /list WHERE 절(없으면 리뷰어 공고목록 전면 42703)
   ['recruit_campaigns', 'transfer_bank'],         // 086 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['recruit_campaigns', 'transfer_memo'],         // 086 — 위와 같은 문장에 들어가므로 함께 막아야 한다
+  ['recruit_campaigns', 'review_type'],           // 087 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
 ];
 
 async function _runOneMigration(pool, sql) {

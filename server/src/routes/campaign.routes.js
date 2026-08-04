@@ -22,6 +22,9 @@ const { isActiveEditor } = require('../services/reviewerCampaignEditor.service')
 const {
   normalizeFeeSchedules, currentReviewFee, resolveReviewFee, kstDateStr,
 } = require('../utils/campaignFee');
+// ★ 087: 리뷰타입 판정은 utils/reviewType 단일 출처 — 여기서 정규식을 다시 만들지 말 것
+//   (화면마다 규칙을 두면 "공고는 구매확정인데 검수는 리뷰"로 갈라진다)
+const { normalizeReviewType } = require('../utils/reviewType');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -1509,6 +1512,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 저장, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트 공고) — 목록에서만 숨김, 참여는 정상
       transfer_bank, transfer_memo, // ★ 086: 입금 이체은행(kbank|hana, 빈 값=자동)·받는분 통장표시
+      review_type, // ★ 087: 리뷰타입(photo|text|confirm|star|mixed) — 미지정=NULL=기존 동작
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -1546,9 +1550,9 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
         start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
-        transfer_bank, transfer_memo)
+        transfer_bank, transfer_memo, review_type)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -1590,6 +1594,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
         _normTransferBank(transfer_bank),                       // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정)
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(), // ★ 086
+        normalizeReviewType(review_type),                       // ★ 087: 판정 불가·미전송=NULL(기존 동작)
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -1635,6 +1640,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 교체, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트) — undefined=유지, true/false=명시 변경
       transfer_bank, transfer_memo, // ★ 086: undefined=유지 / ''=자동으로 되돌림
+      review_type, // ★ 087: undefined=유지 / ''=미지정으로 해제 (아래 UPDATE $39가 참조)
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
@@ -1750,6 +1756,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
                              WHEN $37::text = '' THEN NULL ELSE $37::text END,
         transfer_memo = CASE WHEN $38::text IS NULL THEN transfer_memo
                              WHEN $38::text = '' THEN NULL ELSE $38::text END,
+        -- ★ 087: 리뷰타입. null=유지 / ''=미지정으로 되돌리기 — 위 CASE 센티널과 같은 방식.
+        --   ★ 리뷰타입 UI 가 없는 화면(리뷰어앱 인라인 수정 등)은 아예 전송하지 않으므로
+        --     '미전달=유지'가 곧 "옛 화면이 저장해도 값이 안 지워진다"의 보장이다(옵션표와 같은 원칙).
+        review_type = CASE WHEN $39::text IS NULL THEN review_type
+                           WHEN $39::text = '' THEN NULL ELSE $39::text END,
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -1781,6 +1792,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
         (transfer_bank === undefined || transfer_bank === null) ? null : (_normTransferBank(transfer_bank) || ''), // $37 ★ 086
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
+        // $39 ★ 087: undefined/null=유지. ''=미지정으로 해제. 판정 불가값도 ''(=해제) —
+        //   모르는 문자열을 그대로 저장하면 화면·검수가 각자 다르게 해석한다.
+        (review_type === undefined || review_type === null) ? null : (normalizeReviewType(review_type) || ''),
       ]
     );
 
