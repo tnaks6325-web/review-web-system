@@ -40,7 +40,7 @@ async function headerStats({ limit = 500 } = {}) {
     tabsAnalyzed: 0, tabsWithoutHeaders: 0,
     channels: { coupang: 0, naver: 0, both: 0, unknown: 0 },
     roles: [], unmapped: [], statusConflicts: [],
-    suggestedTemplate: { core: [], channel: {}, work: [] },
+    suggestedTemplate: { core: [], channel: {}, work: [] }, suggestedCore: [],
     thresholds: { core: CORE_RATIO, rare: RARE_RATIO },
   };
   let rows;
@@ -171,6 +171,16 @@ async function headerStats({ limit = 500 } = {}) {
     work: roles.filter(r => r.layer === 'work').map(r => ({ role: r.role, label: r.label, layer: r.layer })),
   };
 
+  /* ★ "통계에서 불러오기"가 채울 **실제 헤더 이름** 목록.
+     역할이 아니라 이름이어야 하는 이유: 작업표에 만들 열의 이름이 곧 매퍼 판정을 결정한다
+     (예 '연락처'로 만들어야 제출이 그 칸에 전화번호를 쓴다). 역할마다 가장 많이 쓰이는
+     표기를 고른다 — 우리 시트들이 실제로 쓰는 이름이라 리뷰어·직원 모두에게 낯설지 않다.
+     ★ 이 파생을 프론트에 두지 않는다(사본 금지 — 두 곳에서 다른 이름을 고르면 어긋난다). */
+  const suggestedCore = roles
+    .filter(r => r.layer !== 'channel' && r.layer !== 'work' && r.frequency === 'fixed')
+    .map(r => (r.headerVariants[0] || {}).name)
+    .filter(Boolean);
+
   const statusConflicts = [...byConflict.values()]
     .map(c => ({
       header: c.header,
@@ -191,8 +201,114 @@ async function headerStats({ limit = 500 } = {}) {
     unmapped,
     statusConflicts,
     suggestedTemplate,
+    suggestedCore,
     thresholds: { core: CORE_RATIO, rare: RARE_RATIO },
   };
 }
 
-module.exports = { headerStats, CORE_RATIO, RARE_RATIO };
+/* ══════════════════════════════════════════════════════════════════
+   표준 열 템플릿 — 관리자가 확정하는 "우리 작업표의 기본 열"
+   ══════════════════════════════════════════════════════════════════
+   ★ 저장은 `app_settings` 키 하나(JSON) — 신규 테이블·마이그레이션 없음.
+     헤더 학습 리포트는 "무엇이 흔한가"를 보여줄 뿐이고, **무엇을 쓸지 정하는 건 사람**이다.
+     그 결정을 여기에 못박아 M2(작업표 생성)의 기본값으로 쓴다.
+   ★ 저장하는 것은 **역할이 아니라 열 이름**이다 — 작업표에 만들 열의 이름이 곧 매퍼 판정을
+     결정하기 때문(예 '연락처'라고 만들어야 제출이 그 칸에 전화번호를 쓴다).
+   ★ Q3 확정(채널별 기본): 코어 = 항상 들어가는 열, 채널별 = 그 채널일 때만 붙는 열.
+     업체별 원장은 만들지 않는다.
+   ══════════════════════════════════════════════════════════════════ */
+const TEMPLATE_KEY = 'worktable_template';
+const MAX_COLS = 60;        // 오붙여넣기·무한증식 방지(시트 열 수 현실 상한을 넉넉히 넘김)
+const MAX_NAME_LEN = 40;    // 시트 헤더로 쓸 이름이라 길면 표가 무너진다
+/** 채널 키 — 현금영수증 발행방법과 **같은 4채널**(utils/cashReceiptChannels.js 가 단일 출처). */
+const { CASH_RECEIPT_CHANNELS } = require('../utils/cashReceiptChannels');
+const CHANNEL_KEYS = CASH_RECEIPT_CHANNELS.map(c => c.key);
+
+/** 열 이름 목록 정규화: 트림 · 빈값 제거 · 길이 제한 · **대소문자 무시 중복 제거**(순서 보존). */
+function _normNames(arr) {
+  const out = [];
+  const seen = new Set();
+  for (const v of (Array.isArray(arr) ? arr : [])) {
+    const name = String(v == null ? '' : v).trim().slice(0, MAX_NAME_LEN);
+    if (!name) continue;
+    const k = name.toLowerCase();
+    if (seen.has(k)) continue;      // 같은 열을 두 번 만들면 시트가 깨진다
+    seen.add(k);
+    out.push(name);
+    if (out.length >= MAX_COLS) break;
+  }
+  return out;
+}
+
+/**
+ * 템플릿 열 이름들을 분류하고 **사람이 알아야 할 경고**를 붙인다.
+ * ★ 분류는 매퍼 파생 단일 출처(`classifyHeaders`) — 여기서 규칙을 다시 만들지 않는다.
+ */
+function _annotate(names) {
+  const cls = classifyHeaders(names, {});
+  const roleCount = new Map();
+  cls.forEach(c => { if (c.role) roleCount.set(c.role, (roleCount.get(c.role) || 0) + 1); });
+  return cls.map(c => ({
+    name: c.header,
+    role: c.role,
+    label: c.label,
+    tier: c.tier,
+    // ★ 같은 역할이 두 칸 이상 = 제출이 **같은 값을 두 칸에 쓴다**(대개 실수).
+    duplicateRole: !!(c.role && roleCount.get(c.role) > 1),
+    // 역할 없음 = 제출이 값을 쓰지 않는 열(리뷰제출·입금 같은 상태 칸이나 관리자 메모면 정상).
+    writtenBySubmit: !!c.role && c.tier !== 'status',
+  }));
+}
+
+function _emptyTemplate() {
+  const channels = {};
+  CHANNEL_KEYS.forEach(k => { channels[k] = []; });
+  return { core: [], channels, updatedAt: null, updatedBy: null };
+}
+
+/** 저장된 템플릿(없으면 빈 템플릿) + 분류/경고. 조회 실패는 빈 템플릿(fail-soft). */
+async function getTemplate() {
+  let saved = _emptyTemplate();
+  try {
+    const db = getPool();
+    const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [TEMPLATE_KEY]);
+    if (rows.length && rows[0].value) {
+      const j = JSON.parse(rows[0].value);
+      saved.core = _normNames(j.core);
+      CHANNEL_KEYS.forEach(k => { saved.channels[k] = _normNames((j.channels || {})[k]); });
+      saved.updatedAt = j.updatedAt || null;
+      saved.updatedBy = j.updatedBy || null;
+    }
+  } catch (err) {
+    // 파싱 실패·조회 실패 모두 "설정 없음"으로 수렴 — 설정 화면이 통째로 죽지 않게.
+    logger.warn(`[worktable/getTemplate] 실패 — 빈 템플릿 반환: ${err.message}`);
+    saved = _emptyTemplate();
+  }
+  const channelColumns = {};
+  CHANNEL_KEYS.forEach(k => { channelColumns[k] = _annotate(saved.channels[k]); });
+  return { ...saved, configured: saved.core.length > 0, columns: _annotate(saved.core), channelColumns };
+}
+
+/** 템플릿 저장. 유효성은 서버가 최종 판정(정규화 후 저장·반환). */
+async function saveTemplate({ core, channels, by } = {}) {
+  const next = _emptyTemplate();
+  next.core = _normNames(core);
+  CHANNEL_KEYS.forEach(k => { next.channels[k] = _normNames((channels || {})[k]); });
+  next.updatedAt = new Date().toISOString();
+  next.updatedBy = String(by || '').slice(0, 100) || null;
+
+  const db = getPool();
+  await db.query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [TEMPLATE_KEY, JSON.stringify(next)]
+  );
+  const channelColumns = {};
+  CHANNEL_KEYS.forEach(k => { channelColumns[k] = _annotate(next.channels[k]); });
+  return { ...next, configured: next.core.length > 0, columns: _annotate(next.core), channelColumns };
+}
+
+module.exports = {
+  headerStats, getTemplate, saveTemplate,
+  CORE_RATIO, RARE_RATIO, TEMPLATE_KEY, CHANNEL_KEYS, MAX_COLS, MAX_NAME_LEN,
+};
