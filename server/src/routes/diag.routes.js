@@ -1505,17 +1505,21 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
     if (!base64) return pass('no_image');
     if (String(slotKey || 'review') !== 'review') return pass('not_review_slot');
 
-    let classified = null;
-    try {
-      const { classifySubmissionImage } = require('../services/gemini.service');
-      classified = await classifySubmissionImage(base64, mimeType || 'image/jpeg');
-    } catch (_) { classified = null; }   // AI 장애 = 무판정 통과
-
+    // ★ 기대 채널을 **먼저** 읽는다 — 예시이미지 선택에 필요하고, 제출 시점 검수와
+    //   같은 samples 를 써야 AI 캐시가 공유된다(첨부 판정이 제출 때 히트).
     let expectedChannel = null;
+    let samples = [];
     try {
       const exp = await inspect.loadTabExpectations({ sheetId, tabName });
       expectedChannel = exp.expectedChannel;
-    } catch (_) { /* 채널을 모르면 대조만 생략 */ }
+      samples = await inspect.loadSamplesFor(expectedChannel);
+    } catch (_) { /* 채널을 모르면 대조만 생략(예시도 미동봉) */ }
+
+    let classified = null;
+    try {
+      const { classifySubmissionImage } = require('../services/gemini.service');
+      classified = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
+    } catch (_) { classified = null; }   // AI 장애 = 무판정 통과
 
     const v = inspect.precheckPolicy({ classified, expectedChannel, slotKey: slotKey || 'review' });
     res.json({
@@ -1647,6 +1651,19 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       logger.info(`[review-upload] 옵션 서브폴더: ${optionFolderName} → ${optFolder.id}`);
     }
 
+    // ── 판별 예시이미지 1회 준비 ──
+    //   ★ 루프 밖에서 한 번만 — 파일마다 다시 읽으면 Drive 호출이 파일 수만큼 늘어난다.
+    //   ★★ 슬롯 검수(verifyCapture)와 2차 검수가 **같은 값**을 써야 AI 캐시가 공유된다(콜 순증 0).
+    //   등록된 예시가 없으면 빈 배열 = 오늘과 완전히 같은 동작.
+    let _inspectSamples = [];
+    try {
+      const _ri = require('../services/reviewInspect.service');
+      if (slot === 'review') {
+        const _exp = await _ri.loadTabExpectations({ sheetId, tabName });
+        _inspectSamples = await _ri.loadSamplesFor(_exp.expectedChannel);
+      }
+    } catch (_) { _inspectSamples = []; }   // 준비 실패 = 예시 없이 진행(동작 불변)
+
     // ── 3단계: 파일 업로드 (복수 파일 루프) ──
     const uploadResults = [];
     for (let i = 0; i < files.length; i++) {
@@ -1674,6 +1691,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
             slotKey: slot, companyBusinessNo: _companyBizNo,
+            // ★★ 아래 2차 검수와 **같은 예시이미지**를 넘긴다 — 다르면 캐시 키가 갈려
+            //   같은 이미지에 AI 콜이 두 번 나간다(순증 0 이라는 전제가 깨진다).
+            samples: _inspectSamples,
           });
         } catch (_) { verdict = null; }   // 검수 실패가 업로드 결과를 뒤집지 않는다
         // 알림 기록은 판정과 분리한다 — 여기서 실패해도 리뷰어 화면의 재첨부 안내(verdict)는 남아야 한다.
@@ -1783,6 +1803,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
             fileId: r.fileId, fileHash: _hash,
             sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: slot,
+            samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
           });
         } catch (_) { /* 위 서비스가 이미 삼키지만 이중 방어 */ }
       }

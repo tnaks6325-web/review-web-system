@@ -438,6 +438,11 @@
   .risbs img{width:100%;border:1px solid var(--line);border-radius:8px}
   .riocr{font-size:12px;line-height:1.6;background:var(--bg2,#F6F8FA);border:1px solid var(--line);border-radius:9px;padding:9px 11px;white-space:pre-wrap}
   .rimft{padding:11px 14px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+  /* 판별 예시이미지 등록 */
+  .risgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+  .risbox{border:1px solid var(--line);border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:6px}
+  .risbox img{width:100%;max-height:150px;object-fit:contain;border:1px solid var(--line);border-radius:7px;background:var(--bg2,#F6F8FA)}
+  .rinone{font-size:11px;color:var(--muted);text-align:center;padding:22px 0;border:1px dashed var(--line);border-radius:7px}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -2439,6 +2444,9 @@ function _riRenderHead(sum){
     <span class="sp" style="flex:1"></span>
     ${chip('open','의심＋불량')}${chip('pass','통과')}${chip('pending','미검수')}${chip('resolved','확인됨')}${chip('all','전체')}
     ${t?`<button class="btn" onclick="riOpenProductNames()">⚙ 기대 상품명</button>`:''}
+    ${isAdmin?`<button class="btn" onclick="riOpenSamples()">🖼 판별 예시</button>`:''}
+    ${isAdmin?`<button class="btn" onclick="riRunSweep()">↻ 과거분 검수</button>`:''}
+    <button class="btn" onclick="riExportCsv()">CSV</button>
     <button class="btn" onclick="_loadInspect()">새로고침</button></div>
     <div class="ovnote">리뷰 캡처가 업체에 전달되기 전에 자동으로 거른 결과입니다. <b>제출은 막지 않으며</b> 다시 받을지는 확인 후 결정합니다.
       ${STATE.riScoped?'<b style="color:var(--muted)">(담당 업체 작업만 표시됩니다)</b>':''}
@@ -2480,7 +2488,9 @@ function _riReasons(c){
   if(c.duplicate && c.duplicate.verdict==='fail')
     out.push(`같은 파일이 이미 제출됨 — ${c.duplicate.matchTab||''} ${c.duplicate.matchReviewer||''} ${c.duplicate.matchRow?c.duplicate.matchRow+'행':''}`.trim());
   if(c.similarity && c.similarity.verdict==='warn')
-    out.push(`본문 ${Math.round((c.similarity.score||0)*100)}% 겹침 — ${c.similarity.matchReviewer||''} ${c.similarity.matchRow?c.similarity.matchRow+'행':''}`.trim());
+    out.push(`본문 ${Math.round((c.similarity.score||0)*100)}% 겹침 — ${c.similarity.matchReviewer||''} ${c.similarity.matchRow?c.similarity.matchRow+'행':''}${c.similarity.matchTab&&c.similarity.scope==='global'?' ('+c.similarity.matchTab+')':''}`.trim());
+  if(c.author && c.author.verdict==='warn')
+    out.push(`같은 작성자 표기(${c.author.ocr||''})가 ${(c.author.others||[]).join(', ')} 제출에도 있음`);
   return out;
 }
 /** 카드의 탭명을 눌러 그 작업만 본다 — [⚙ 기대 상품명]은 탭이 정해져야 열린다. */
@@ -2511,7 +2521,10 @@ function riOpenDetail(i){
           ${line(pr.verdict||'skip','상품명', pr.verdict==='skip'?'비교할 기대 상품명이 없습니다 — [⚙ 기대 상품명]에서 등록하세요':('캡처 "'+esc(pr.ocr||'')+'"<br>기대 '+esc((pr.expected||[]).join(' / '))))}
           ${line(dup.verdict||'skip','같은 파일', dup.verdict==='fail'?esc(`${dup.matchTab||''} ${dup.matchReviewer||''} ${dup.matchRow?dup.matchRow+'행':''}`):'')}
           ${line(sim.verdict||'skip','본문 겹침', sim.score!=null?(Math.round(sim.score*100)+'% '+esc(sim.matchReviewer||'')):'')}
-          ${line('skip','작성자 이름','화면에 마스킹되어 나와 대조하지 않습니다(수집만)')}
+          ${line((c.author&&c.author.verdict)||'skip','작성자 표기',
+            (c.author&&c.author.verdict==='warn')
+              ? `"${esc(c.author.ocr||'')}" 가 <b>${esc((c.author.others||[]).join(', '))}</b> 제출에도 나타납니다 — 실명 대조가 아니라 <b>같은 표기의 재사용</b>만 봅니다`
+              : '실명 대조는 하지 않습니다(화면에 마스킹되어 나옴). 같은 표기가 다른 리뷰어 제출에 반복되는지만 봅니다')}
         </table>
         ${dup.verdict==='fail'&&dup.matchFileId?`<div class="risbs"><div><div class="rimeta">지금 제출</div><img src="${_riImg(r.file_id)}" alt=""></div><div><div class="rimeta">이전 제출 · ${esc(dup.matchReviewer||'')}</div><img src="${_riImg(dup.matchFileId)}" alt=""></div></div>`:''}
         ${r.ocr_text?`<div class="riocr"><div class="rimeta">캡처에서 읽어낸 리뷰 글</div>${esc(r.ocr_text)}</div>`:''}
@@ -2544,6 +2557,65 @@ async function riOpenProductNames(){
   const s=await api('/api/trackb/review-inspect/product-names',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,text:v})});
   if(!s||!s.ok){ alert('저장 실패: '+((s&&s.error)||'')); return; }
   _loadInspect();
+}
+/** 판별 예시이미지 — 등록하면 채널 판별 정확도가 올라간다(없어도 검수는 동작). */
+async function riOpenSamples(){
+  const r=await api('/api/trackb/review-inspect/samples');
+  if(!r||!r.ok){ alert('불러오기 실패'); return; }
+  const rows=(r.samples||[]).map(s=>`<div class="risbox">
+      <div class="rirow"><b>${s.emoji} ${esc(s.label)}</b>
+        <span class="ribdg ${s.imageUrl?'ri-ok':'ri-p'}">${s.imageUrl?'등록됨':'없음'}</span></div>
+      ${s.imageUrl?`<img src="${esc(s.imageUrl)}" alt="">`:'<div class="rinone">등록된 예시가 없습니다</div>'}
+      <div class="rirow"><input type="file" accept="image/*" onchange="riUploadSample('${s.key}',this)" style="font-size:11px;flex:1;min-width:0">
+        ${s.imageUrl?`<button class="btn" onclick="riClearSample('${s.key}')">제거</button>`:''}</div>
+    </div>`).join('');
+  let m=$('#riModal'); if(!m){ m=document.createElement('div'); m.id='riModal'; m.className='rimodal'; document.body.appendChild(m); }
+  m.innerHTML=`<div class="rimodal-in"><div class="rimh"><b>리뷰 판별 예시이미지</b>
+      <span class="rimeta">채널별 정상 리뷰 화면을 등록하면 AI 판별이 정확해집니다 — 없어도 검수는 동작합니다</span>
+      <span class="sp" style="flex:1"></span><button class="btn" onclick="riCloseDetail()">닫기</button></div>
+    <div class="rimbody" style="grid-template-columns:1fr"><div class="risgrid">${rows}</div></div></div>`;
+  m.style.display='flex';
+}
+async function riUploadSample(key, input){
+  const f=input.files&&input.files[0]; if(!f) return;
+  if(f.size>5*1024*1024){ alert('이미지는 5MB 이하로 올려주세요.'); input.value=''; return; }
+  try{
+    const b64=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(String(rd.result).split(',')[1]);rd.onerror=rej;rd.readAsDataURL(f);});
+    const up=await fetch(API_BASE+'/api/order/guide-image',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},
+      body:JSON.stringify({imageBase64:b64,mimeType:f.type||'image/jpeg',fileName:'reviewsample_'+key+'_'+Date.now()})}).then(x=>x.json());
+    if(!up||!up.ok||!up.url) throw new Error((up&&up.error)||'업로드 실패');
+    const s=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify({key,imageUrl:up.url})});
+    if(!s||!s.ok) throw new Error((s&&s.error)||'저장 실패');
+    riOpenSamples();
+  }catch(e){ alert('등록 실패: '+e.message); } finally { input.value=''; }
+}
+async function riClearSample(key){
+  if(!confirm('이 예시이미지를 제거할까요?')) return;
+  const s=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify({key,imageUrl:''})});
+  if(!s||!s.ok){ alert('제거 실패'); return; }
+  riOpenSamples();
+}
+/** 과거 제출분 따라잡기 — 한 번에 몰아치지 않게 서버가 사이클 캡으로 통제한다. */
+async function riRunSweep(){
+  if(!confirm('아직 검수되지 않은 과거 제출분을 검수합니다.\n한 번에 최대 20건씩 처리되며, 남은 건은 10분마다 자동으로 이어집니다.\n진행할까요?')) return;
+  const r=await api('/api/trackb/review-inspect/sweep',{method:'POST',body:JSON.stringify({limit:20})});
+  if(!r||!r.ok){ alert('실행 실패: '+((r&&r.error)||'')); return; }
+  if(r.busy){ alert('이미 검수가 돌고 있습니다. 잠시 후 다시 시도하세요.'); return; }
+  alert(`검수 완료 — 대상 ${r.scanned||0}건 / 처리 ${r.done||0} / 실패 ${r.failed||0}`);
+  _loadInspect();
+}
+/** CSV — 헤더 인증이 필요해 fetch→blob 으로 받는다(기존 CSV 내려받기와 같은 방식). */
+async function riExportCsv(){
+  const t=STATE.riTab;
+  let url=API_BASE+'/api/trackb/review-inspect/export.csv?status='+encodeURIComponent(STATE.riStatus||'all');
+  if(t) url+='&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName);
+  try{
+    const res=await fetch(url,{headers:{Authorization:'Bearer '+token()}});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const blob=await res.blob(); const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='review-inspect.csv'; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  }catch(e){ alert('CSV 내려받기 실패: '+e.message); }
 }
 function _riSyncNavBadge(n){
   const nb=$('#riNavBadge'); if(!nb || !Number.isFinite(n)) return;
