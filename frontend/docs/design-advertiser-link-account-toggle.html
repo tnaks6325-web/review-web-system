@@ -45,7 +45,7 @@ h1{font-size:21px;font-weight:800;margin:0 0 6px}
 .linkmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .linkused{font-size:11.5px;color:var(--muted)}
 .lockbadge{font-size:11px;font-weight:750;padding:2px 9px;border-radius:999px}
 .lockbadge.open{background:var(--warn-soft);color:var(--warn)} .lockbadge.lock{background:var(--safe-soft);color:var(--safe)} .lockbadge.off{background:var(--bad-soft);color:var(--bad)}
-.linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5}
+.linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5;min-height:35px}
 .acctrow{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);margin-bottom:7px}
 .acctid{font-weight:650;font-size:13px} .acctst{font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px}
 .acctst.on{background:var(--safe-soft);color:var(--safe)} .acctst.off{background:var(--warn-soft);color:var(--warn)}
@@ -68,8 +68,9 @@ h1{font-size:21px;font-weight:800;margin:0 0 6px}
 .sw[aria-checked="true"]{background:var(--safe)}
 .sw[aria-checked="true"]::after{transform:translateX(19px)}
 .sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.acctbody.dim{opacity:.45;pointer-events:none;filter:grayscale(.5)}
-.offnote{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px dashed var(--line2);border-radius:9px;padding:9px 11px;margin-bottom:10px;line-height:1.5}
+.acctbody.dim{opacity:.5;filter:grayscale(.4);transition:opacity .15s,filter .15s}
+.acctbody.dim:hover,.acctbody.dim:focus-within{opacity:1;filter:none}
+.offnote{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px dashed var(--line2);border-radius:9px;padding:9px 11px;margin-bottom:10px;line-height:1.5;min-height:55px}
 .offnote b{color:var(--ink)}
 
 /* 상태표 */
@@ -169,8 +170,11 @@ ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)} u
   </div>
 
   <ul class="tight">
-    <li>토글 OFF에서도 <b>계정 목록은 지워지지 않습니다</b> — 흐리게 잠기기만 하므로, 다시 켜면 그대로 쓸 수 있습니다(계정을 지웠다 다시 만드는 일 없음).</li>
-    <li>토글 ON인데 <b>활성 계정이 0개</b>면 아무도 못 들어가므로, 그 상태에서는 저장을 막고 "계정을 먼저 발급하세요"로 안내합니다(잠금 사고 방지).</li>
+    <li>토글 OFF에서도 <b>계정 목록은 지워지지 않습니다</b> — 흐리게 표시만 되므로, 다시 켜면 그대로 쓸 수 있습니다(계정을 지웠다 다시 만드는 일 없음).</li>
+    <li>흐린 상태에서도 <b>계정 발급·수정은 그대로 됩니다</b>(마우스를 올리면 선명해짐). 클릭을 막으면 계정을 만들 수 없어 토글도 켤 수 없는 교착이 생깁니다.</li>
+    <li>활성 계정이 0개면 <b>토글이 비활성</b>이고, 서버도 켜기를 거부합니다(아무도 못 들어가는 잠금 방지).</li>
+    <li>마지막 활성 계정을 비활성/삭제할 때 토글이 켜져 있으면 <b>잠금 경고</b>를 먼저 띄웁니다(막지는 않되 조용히 잠기지 않게).</li>
+    <li>토글 ON/OFF로 <b>카드 높이가 변하지 않습니다</b> — 안내문 자리에 2줄분 높이를 예약했습니다(1120·900·700px 폭에서 높이 차 0 실측).</li>
   </ul>
 </div>
 
@@ -181,18 +185,19 @@ ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)} u
     <tr><td class="k">미사용 (기본)</td><td>없음</td><td><span class="pill open">🔓 공개</span></td><td>바로 그 업체 뷰로 입장 (읽기전용·마스킹·소유 탭만)</td></tr>
     <tr><td class="k">미사용</td><td>있음</td><td><span class="pill open">🔓 공개</span></td><td><b>바로 입장</b> — 계정이 있어도 막지 않음 <span style="color:var(--bad);font-weight:700">(← 현재와 달라지는 지점)</span></td></tr>
     <tr><td class="k">사용</td><td>있음</td><td><span class="pill lock">🔒 로그인 필요</span></td><td>로그인 화면 → 그 업체 계정으로 로그인해야 입장</td></tr>
-    <tr><td class="k">사용</td><td>없음</td><td colspan="2"><b>저장 불가</b> — 켜기 전에 계정 발급을 요구(아무도 못 들어가는 상태 차단)</td></tr>
+    <tr><td class="k">사용</td><td>없음</td><td colspan="2"><b>켤 수 없음</b> — 계정 발급을 먼저 요구(토글 비활성 + 서버 거부). 켠 뒤 계정을 지워 이 상태가 되면 <b>열리지 않고 잠깁니다</b>(보안이 조용히 풀리지 않도록 fail-closed — 토글을 끄거나 계정을 다시 발급해 복구)</td></tr>
     <tr><td class="k">— (링크 폐기)</td><td>무관</td><td><span class="pill off">⛔ 폐기됨</span></td><td>링크 자체가 무효 — 계정 로그인 경로만 남음</td></tr>
   </table>
 </div>
 
 <div class="doc">
-  <h2><span class="n">4</span>구현 범위(참고)</h2>
+  <h2><span class="n">4</span>구현 내역</h2>
   <div class="note">
-    <p style="margin:0 0 8px"><b>서버</b> — 게이트 판정을 "계정 존재"에서 "명시 플래그"로 옮깁니다. <code>advertisers.account_login_required</code>(기본 <code>FALSE</code>) 1컬럼 추가 →
-    <code>loginByLinkToken</code>이 계정 존재 여부 대신 이 플래그를 보고 <code>requiresLogin</code>을 반환. 토글 저장은 기존 <code>POST /api/trackb/advertiser-link</code>에 액션 하나 추가(신규 엔드포인트 0), <code>adminOrMaster</code> 권한 그대로.</p>
-    <p style="margin:0 0 8px"><b>안전장치</b> — 켤 때 활성 계정 0개면 서버가 거부(프론트 안내 + 서버 재검증). 끌 때는 계정을 건드리지 않음(비활성/삭제 아님).</p>
-    <p style="margin:0"><b>기존 업체 이관</b> — 지금 계정이 있어서 "로그인 필요"로 동작하던 업체는 마이그레이션에서 <code>account_login_required=TRUE</code>로 1회 백필합니다. <b>배포 순간 동작이 바뀌지 않습니다</b>(계정 있던 곳은 계속 로그인 요구, 없던 곳은 계속 공개). 새로 만드는 업체만 기본 공개.</p>
+    <p style="margin:0 0 8px"><b>서버</b> — 게이트 판정을 "계정 존재"에서 명시 플래그로 이동. <code>trackb_advertiser_links.login_required</code>(기본 <code>FALSE</code>) 1컬럼 추가(migration 083) →
+    <code>loginByLinkToken</code>이 <b>이미 SELECT 하던 그 행</b>에서 읽으므로 쿼리 순증 0. 토글 저장은 기존 <code>POST /api/trackb/advertiser-link</code>에 <code>action:'login-required'</code> 하나 추가(신규 엔드포인트 0), <code>adminOrMaster</code> 권한 그대로.</p>
+    <p style="margin:0 0 8px"><b>안전장치</b> — 켤 때 활성 계정 0개면 서버가 거부. 끌 때는 계정을 건드리지 않음(비활성·삭제 아님). 켠 뒤 계정이 사라져도 링크는 <b>열리지 않는다</b>(fail-closed — "계정 없으면 통과" 폴백을 두면 켜 둔 보안이 조용히 풀린다).</p>
+    <p style="margin:0 0 8px"><b>기존 업체 이관</b> — 지금 활성 계정이 있어 "로그인 필요"로 동작하던 업체는 마이그레이션에서 <code>TRUE</code>로 1회 백필합니다. <b>배포 순간 광고주가 보는 동작은 그대로</b>(계정 있던 곳은 계속 로그인 요구, 없던 곳은 계속 공개). 앞으로 만드는 업체·계정만 기본 공개. 백필은 <code>login_required IS NULL</code> 인 행만 건드려, 파일이 다시 돌아도 관리자가 꺼 둔 값을 되켜지 않습니다.</p>
+    <p style="margin:0"><b>회귀가드</b> — <code>server/tests/advertiserLinkLoginToggle.test.js</code>(36케이스) + <code>trackBIntranetSso.test.js</code>에 게이트·토글 케이스 추가.</p>
   </div>
 </div>
 

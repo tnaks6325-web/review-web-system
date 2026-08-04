@@ -216,15 +216,16 @@ async function loginByLinkToken(linkToken, _pool = pool) {
   const tok = String(linkToken || '').trim();
   if (!tok) return { success: false, error: '유효하지 않은 링크입니다.' };
   const { rows } = await _pool.query(
-    `SELECT l.advertiser_id, a.name AS advertiser_name, a.status AS advertiser_status
+    `SELECT l.advertiser_id, l.login_required, a.name AS advertiser_name, a.status AS advertiser_status
        FROM trackb_advertiser_links l JOIN advertisers a ON a.id = l.advertiser_id
       WHERE l.token = $1 AND l.active = TRUE LIMIT 1`, [tok]);
   if (rows.length === 0) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
   if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
-  // ★ 계정 게이트: 이 업체에 활성 로그인 계정이 있으면 링크만으로 자동입장 불가 → 로그인 요구(requiresLogin).
-  //   즉 "계정을 만들면 그 업체의 고유 URL이 자동으로 로그인 필요로 전환"된다(무계정=공개 링크, 유계정=로그인 게이트).
-  const acc = await _pool.query('SELECT 1 FROM advertiser_users WHERE advertiser_id = $1 AND active = TRUE LIMIT 1', [rows[0].advertiser_id]);
-  if (acc.rows.length > 0) {
+  // ★ 로그인 게이트 = **명시 플래그**(083 `login_required`). 관리자가 업체관리에서 "광고주 계정 사용"을
+  //   켠 업체만 로그인 화면을 거친다. 계정을 발급해도 켜지 않으면 링크는 그대로 공개(=계정은 선택적 보안).
+  //   ★ 완화 금지: 여기서 "계정이 없으면 그냥 통과"로 폴백하지 말 것 — 계정이 삭제·비활성된 순간
+  //     켜 둔 보안이 조용히 풀린다. 잠긴 업체는 관리자가 계정을 다시 발급하거나 토글을 끄면 된다(fail-closed).
+  if (rows[0].login_required === true) {
     return { success: false, requiresLogin: true, advertiserId: rows[0].advertiser_id, advertiserName: rows[0].advertiser_name };
   }
   _pool.query('UPDATE trackb_advertiser_links SET last_used_at = NOW() WHERE token = $1', [tok]).catch(() => {});
