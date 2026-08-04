@@ -16824,6 +16824,8 @@ function openReviewRelocate() {
           <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
           <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
         </div>
+        <button onclick="_reviewFolderBackfill(false)" style="width:100%;margin-top:8px;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-images"></i> 선택 탭 폴더 이미지 연결 (백필 미리보기)</button>
+        <div style="font-size:.66rem;color:#9CA3AF;margin-top:4px">※ 그 탭의 <b>[리뷰] 폴더 안 이미지</b>를 파일명 이름으로 명단 행과 연결해 업체 뷰어 미리보기에 표시합니다. 폴더 연결이 없으면 자동으로 찾아(없으면 생성) 매핑합니다. 키워드·이동 없음 — 폴더 링크 칸이 비면 탭에 연결된 폴더를 씁니다.</div>
         <button onclick="_relocateFolderAudit()" style="width:100%;margin-top:8px;padding:9px;background:#0F172A;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-clipboard-list"></i> 리뷰폴더 현황 점검 (활성 탭 전체)</button>
         <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
 
@@ -16980,6 +16982,46 @@ function _relocateCopyLink(inputId) {
     navigator.clipboard.writeText(v).then(done).catch(() => { el.select(); document.execCommand('copy'); done(); });
   } else {
     el.select(); document.execCommand('copy'); done();
+  }
+}
+
+// ── 선택 탭 [리뷰] 폴더 이미지 연결 백필 — POST /api/drive/review-folder-backfill ──
+//   폴더 안 이미지를 파일명 이름↔행 결정적 매칭으로 원장(review_submissions)·대표 이미지에 연결.
+//   업체 뷰어 "리뷰 이미지 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
+async function _reviewFolderBackfill(apply) {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
+  const folderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();   // 비우면 탭 연결 폴더 자동
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '연결 중' : '폴더 스캔 중'}...</div>`;
+  try {
+    const res = await gasPost({
+      action: 'reviewFolderBackfill',
+      sheetId: t.sheetId, tabName: t.tabName,
+      folderUrl: folderUrl || undefined,
+      dryRun: !apply,
+    });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    const lk = res.link || {};
+    const samp = (arr, label) => (arr && arr.length)
+      ? `<div style="font-size:.66rem;color:#9CA3AF;margin-top:3px;font-family:monospace;word-break:break-all">${label}: ${arr.slice(0, 10).map(escHtml).join(', ')}${arr.length > 10 ? ` 외 ${arr.length - 10}` : ''}</div>` : '';
+    const body = `
+      <div style="font-size:.74rem;color:#374151;margin-top:6px">폴더 이미지 <b>${res.fileCount}</b>장 · 명단 <b>${res.indexRowCount}</b>행${res.mapped ? ' · <span style="color:#059669">폴더 자동 매핑됨</span>' : ''}</div>
+      <div style="font-size:.72rem;color:#4338CA;margin-top:4px"><i class="fas fa-link"></i> 연결 ${lk.linked || 0} · 기존 ${lk.already || 0} · 모호 ${lk.ambiguous || 0} · 명단없음 ${lk.unmatched || 0}${apply ? ` · 원장기록 ${lk.recorded || 0}` : ''}</div>
+      ${samp((lk.samples || {}).ambiguous, '모호(동명 2행+)')}${samp((lk.samples || {}).unmatched, '명단없음')}
+      <div style="font-size:.66rem;color:#9CA3AF;margin-top:4px">※ 모호/명단없음 파일은 자동 연결하지 않습니다 — 파일명을 <b>이름_순번</b> 형식으로 맞추면 다음 실행에서 연결됩니다.</div>`;
+    if (apply) {
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> 연결 완료 — 업체 뷰어 미리보기에 바로 반영됩니다.</div>${body}`;
+      showToast(`이미지 ${lk.linked || 0}건 연결 · 원장 ${lk.recorded || 0}건 기록`, 'success');
+    } else {
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#0F172A;font-weight:700"><i class="fas fa-eye"></i> 미리보기 (아직 아무것도 기록하지 않음)</div>${body}
+        <button onclick="_reviewFolderBackfill(true)" style="width:100%;margin-top:10px;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 실제 연결 실행 (연결 ${lk.linked || 0}건 + 원장 기록)</button>`;
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(e.message || '실패')}</div>`;
   }
 }
 

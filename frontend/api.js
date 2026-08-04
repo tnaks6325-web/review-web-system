@@ -228,6 +228,7 @@ const _ACTION_MAP = {
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
   'relocateOrphanReviews': { method: 'POST', path: '/api/drive/relocate-orphan-reviews' },
+  'reviewFolderBackfill': { method: 'POST', path: '/api/drive/review-folder-backfill' },
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
   'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
   'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
