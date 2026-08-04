@@ -1,6 +1,6 @@
 /**
  * ═══════════════════════════════════════════════════════════
- * Track B — 백그라운드 평행 트랙(DB-first 통합 작업대의 그림자).
+ * Track B — 백그라운드 평행 트랙(DB-first 리뷰웹시스템[3버전]의 그림자).
  *
  * ★ 무영향 보장(선행조성 3원칙): 추가만 · 읽기만(라이브를 읽어 B를 만듦) · 격리(master/광고주 스코프).
  *   - 기존 participants.service(Phase1 shadow)를 재사용해 로스터를 채우고, 여기서 "정렬무관 내용키 +
@@ -956,7 +956,7 @@ async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
 //   ★ latestCloseout 정의 = settlementForTab 의 스텝퍼 ①(마감자료)이 이 시점부터 라이브(closeoutAvailable).
 // ══════════════════════════════════════════════════════════════════════════
 // 활성 명단(투영 물리행 + participant_edits 오버레이 합성) — 마감자료 CSV·건수의 단일 소스.
-//   ★ SF-3: 제거(_hidden) 오버레이 행은 제외(작업대에서 안 보이는 행이 CSV에 재등장 방지),
+//   ★ SF-3: 제거(_hidden) 오버레이 행은 제외(작업보드에서 안 보이는 행이 CSV에 재등장 방지),
 //     이름/수취인/차수/옵션/제출/입금 편집 보정도 반영 — workdeskTab 합성과 동일 규칙.
 async function _closeoutRoster(sheetId, tabName) {
   const db = getPool();
@@ -1605,7 +1605,7 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
   return Object.fromEntries(out);
 }
 
-// ── 통합 작업대 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
+// ── 리뷰웹시스템[3버전] 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
 //   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
 //     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단). staff는 라우트가 이미 차단.
 async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null } = {}) {
@@ -1823,7 +1823,7 @@ async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson) 
   return !!(rowJson && typeof rowJson === 'object' && Object.prototype.hasOwnProperty.call(rowJson, colName));
 }
 
-// ── 통합 작업대 편집(오버레이-only, 물리컬럼 무편집) ──
+// ── 리뷰웹시스템[3버전] 편집(오버레이-only, 물리컬럼 무편집) ──
 //   앵커: order_submission_id(불변 UUID) > manual(물리행 UUID, 재투영 면역) > identity_key(중복 아니면) > 거부.
 //   단일 tx + 대상행 FOR UPDATE(동일행 직렬화) + revert(활성)→insert(신규, append-only 감사).
 //   부분유니크 uq_participant_edits_active 가 cross-row 레이스 backstop(23505 → concurrent_edit_conflict).
@@ -1985,7 +1985,7 @@ async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
   }));
 }
 
-// ══ 통합 작업대 커스텀 열(행별 자유메모) + 셀 배경색(드래그 범위, migration 080) ══
+// ══ 리뷰웹시스템[3버전] 커스텀 열(행별 자유메모) + 셀 배경색(드래그 범위, migration 080) ══
 //   ★ 격리: participant_edits/write-back 무접촉 신규 테이블만 사용 — 시트에 절대 쓰지 않는다.
 //   ★ 앵커는 편집 오버레이와 동일 철학(order > manual > identity) — 재투영에도 값이 같은 행을 따라간다.
 async function listCustomColumns({ sheetId, tabName } = {}) {
@@ -2477,7 +2477,7 @@ async function applyWritebackFull({ sheetId, tabName } = {}) {
   return r.skipped ? r : { applied: true, ...r };
 }
 
-// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — Track B 통합 작업대 사이드바 ──
+// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — Track B 리뷰웹시스템[3버전] 사이드바 ──
 //   서버 원본(계정 귀속) → 개인화 + 기기 무관 유지. 계정당 1행 upsert(키 배열). 순수 개인 데이터·격리.
 async function getWorkdeskFavorites(ownerKey) {
   const k = String(ownerKey || '').trim();

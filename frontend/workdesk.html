@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>통합 작업대 (Track B · 그림자)</title>
+<title>리뷰웹시스템[3버전] (Track B · 그림자)</title>
 <!-- 관리자 대시보드에서 가져온 공유 모듈(cs-inquiry.js 등)이 <i class="fas fa-*"> 아이콘을 쓴다.
      admin.html 과 **같은 CDN·같은 버전**을 쓰므로 두 화면의 아이콘이 어긋나지 않는다.
      못 불러와도 글자만 빠질 뿐 동작은 그대로(모듈은 아이콘에 기능을 걸지 않는다). -->
@@ -522,7 +522,7 @@
   .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠(맨 앞=조치 칸) */
   .lgtable tr.lgdone td{opacity:.55}
   /* ── 등록리뷰어DB 전용(rv 접두) ──
-     ★ 접두를 나눠 쓰는 이유: 작업대 '작업세부' 패널이 .worow/.wodetail 같은 이름을 이미 쓰고 있어
+     ★ 접두를 나눠 쓰는 이유: 작업보드 '작업세부' 패널이 .worow/.wodetail 같은 이름을 이미 쓰고 있어
        클래스가 겹치면 그쪽 규칙(display:grid 등)이 이 표의 <tr> 에 걸려 표가 통째로 무너진다(실측). */
   .rvsubbtn{font:inherit;font-size:11.5px;font-weight:750;line-height:1;padding:3px 7px;border-radius:999px;
     border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-deep);cursor:pointer}
@@ -599,7 +599,7 @@
   .errgate.no{border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-soft);color:#8a4b06}
   /* 작업오더 목록 펼침행 — 팝업 대신 행 아래에서 펼친다(리뷰어 로그와 같은 방식).
      ★ 클래스는 전부 `wol`(work-order list) 접두 — `.worow`/`.wodetail`/`.wochip` 은
-       이미 작업대 탭의 '작업세부' 패널이 쓰고 있어(위 161~167줄) 이름이 겹치면
+       이미 작업보드 탭의 '작업세부' 패널이 쓰고 있어(위 161~167줄) 이름이 겹치면
        그쪽 그리드 규칙(display:grid)이 이 표의 <tr> 에 걸려 표가 통째로 무너진다(실측). */
   .lgtable tr.wolrow{cursor:pointer}
   .lgtable tr.wolrow.wolopen td{background:var(--accent-soft)}
@@ -964,7 +964,7 @@
 const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
 // 토큰 핸드오프 2경로: ① 인트라넷 SSO(#sso=<token> 프래그먼트, 크로스오리진이라 URL 경유 — 도착 즉시 저장 후
 //   주소창에서 제거, 새 신원 도착이므로 기존 세션 덮어씀) ② admin.html raw_sso(localStorage, 기존 세션 존중).
-// ── 리뷰어 로그 → 작업대 딥링크(#go=) 수신 ──
+// ── 리뷰어 로그 → 작업보드 딥링크(#go=) 수신 ──
 //   ★ initToken 보다 반드시 먼저 읽는다: #sso= 가 함께 오면 initToken이 해시 전체를 지우기 때문.
 //   여기서는 읽기만 하고 지우지 않는다(뒤따르는 #sso=/#adv= 핸들러가 같은 해시를 봐야 함) —
 //   실제 제거는 소비 시점(_consumeGo)에서 한다.
@@ -1001,7 +1001,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
   const r=await fetch(API_BASE+path,o);
   if(r.status===401 && token() && path.indexOf('login')===-1){   // 서버가 토큰 거부(만료 등) — 재로그인 유도
-    _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
+    _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "리뷰웹시스템[3버전]" 버튼으로 오면 자동 로그인)');
     return new Promise(()=>{});   // 종결 상태: 화면이 로그인으로 교체됐으므로 대기 중이던 렌더 콜백을 영구 보류(사라진 요소 접근 차단)
   }
   return r.json(); }
@@ -1045,7 +1045,7 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
               ownSettle:{}, ownSettleFor:null,                // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
-              // ── 작업대 그리드 뷰 상태(클라이언트 전용, 탭 전환 시 초기화) ──
+              // ── 작업보드 그리드 뷰 상태(클라이언트 전용, 탭 전환 시 초기화) ──
               gFilters:{}, gHidden:new Set(), gGroupBy:null, gCollapsed:new Set(), gSort:null, gSelCols:[],
               settleOpen:false, _gMenuCol:null, _gMenuInit:false, _gDragInit:false };
 
@@ -1062,9 +1062,9 @@ async function boot(){
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
   if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
-    return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
+    return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "리뷰웹시스템[3버전]" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
-  _consumeGo();   // 리뷰어 로그 딥링크 → 작업대 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
+  _consumeGo();   // 리뷰어 로그 딥링크 → 작업보드 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
   // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
@@ -1083,12 +1083,12 @@ function _consumeGo(){
 }
 function renderLogin(msg){
   document.body.classList.remove('advm');   // 광고주 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃 원복)
-  $('#app').innerHTML = `<div class="loginbox"><h2>통합 작업대 로그인</h2>
+  $('#app').innerHTML = `<div class="loginbox"><h2>리뷰웹시스템[3버전] 로그인</h2>
     <input id="lname" placeholder="아이디 (관리자 / AE / 광고주)" autocomplete="username">
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
     <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
     <div class="err" id="lerr">${msg?esc(msg):''}</div>
-    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집 + 소유 지정(초기매핑), 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹). <b>인트라넷 계정 또는 전용 접속 링크로도 로그인 없이 진입 가능</b>.</div></div>`;
+    <div class="note">리뷰웹시스템[3버전](Track B)입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집 + 소유 지정(초기매핑), 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹). <b>인트라넷 계정 또는 전용 접속 링크로도 로그인 없이 진입 가능</b>.</div></div>`;
   $('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 }
 async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
@@ -1109,14 +1109,14 @@ function logout(){ sessionStorage.removeItem('admin_token');
 
 function renderShell(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
-  const isStaff = STATE.role==='staff';   // AE — 작업대(담당 탭) + 소유 지정(초기매핑, 자기 담당 업체만)
+  const isStaff = STATE.role==='staff';   // AE — 작업보드(담당 탭) + 소유 지정(초기매핑, 자기 담당 업체만)
   const isAdv = STATE.role==='advertiser';   // 업체(광고주) — 전용 뷰어(폭 상한 고정·좌측 작업 목록)
   document.body.classList.toggle('advm', isAdv);   // body.advm = --app-max:1680px 고정(시안)
   $('#app').innerHTML = `
     <div class="top">
-      <span class="logo">통합 작업대 <span class="tag">${isAdv?'업체 전용':'TRACK B · 그림자'}</span></span>
+      <span class="logo">리뷰웹시스템[3버전] <span class="tag">${isAdv?'업체 전용':'TRACK B · 그림자'}</span></span>
       ${isAdmin?`<nav class="nav">
-        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
+        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
@@ -1129,7 +1129,7 @@ function renderShell(){
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
-        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
+        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
@@ -1157,7 +1157,7 @@ function renderShell(){
   if(isAdmin || isStaff) _lgBootBadge();   // 로그 — 리뷰어 비정상 + 시스템 오류(admin/master만) 중요 건수 합
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
-   통합 작업대에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
+   리뷰웹시스템[3버전]에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
    (코드리뷰 지적) → 가벼운 주기 갱신. 쿼리 1개짜리 count 라 부담이 없고,
    ★ 화면이 가려져 있으면 쉰다(백그라운드 탭이 종일 두드리지 않게) + 복귀 즉시 1회 갱신. */
 const CS_BADGE_POLL_MS = 60000;
@@ -1201,19 +1201,19 @@ function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
    외부 호출이 뷰 없는 상태로 떨어져 빈 화면이 되는 것을 막는다(뷰 이름 하나만 옮기면 되게). */
 function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
-  const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
+  const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업보드 뷰에만 존재
+  const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업보드 뷰에만
   if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
-  if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
+  if(v!=='workdesk') _measureChrome();   // 작업보드를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
-  //   여기서도 쌓으면 뒤로가기가 "탭 없는 작업대"를 한 번 더 거쳐 두 번 눌러야 돌아온다.
+  //   여기서도 쌓으면 뒤로가기가 "탭 없는 작업보드"를 한 번 더 거쳐 두 번 눌러야 돌아온다.
   if(!STATE.pendingTab && !STATE.pendingAdv) _navPush();
 }
 
 // ══ 브라우저 뒤로/앞으로 (SPA 히스토리) ═══════════════════════════════════════
-//   업체관리에서 작업을 열면 작업대로 화면이 통째로 바뀌는데 히스토리에 아무것도 안 쌓여
-//   뒤로가기가 통합 작업대를 벗어나(또는 아무 반응 없이) 버렸다. 뷰·연 작업·선택 업체를
+//   업체관리에서 작업을 열면 작업보드로 화면이 통째로 바뀌는데 히스토리에 아무것도 안 쌓여
+//   뒤로가기가 리뷰웹시스템[3버전]을 벗어나(또는 아무 반응 없이) 버렸다. 뷰·연 작업·선택 업체를
 //   history state 로 쌓아 뒤로/앞으로가 화면 전환을 되짚게 한다.
 // ★ URL 은 건드리지 않는다(같은 URL 로도 pushState 는 별개 항목을 만든다) — #sso=/#adv=/#go=
 //   프래그먼트 계약과 충돌하지 않고, 주소를 공유해도 딥링크·PII 가 새지 않는다.
@@ -1252,7 +1252,7 @@ function _navApply(st){
   try{
     const v=st.view||'workdesk';
     if(v==='workdesk'){ STATE.pendingTab = st.tab ? Object.assign({__nav:true}, st.tab) : null;
-      if(!st.tab) STATE.cur=null;          // "탭 없는 작업대"로 되돌아간 상태 — 열린 작업도 함께 비운다
+      if(!st.tab) STATE.cur=null;          // "탭 없는 작업보드"로 되돌아간 상태 — 열린 작업도 함께 비운다
       if(st.advView) STATE.advView=st.advView; }   // 업체 첫 화면(대시보드/전체 작업) 복원
     if(v==='ownership') STATE.pendingAdv = st.advId ? {id:st.advId,__nav:true} : null;
     switchView(v);
@@ -1355,7 +1355,7 @@ document.addEventListener('fullscreenchange', ()=>{   // 브라우저 전체화�
   if(!document.fullscreenElement){ if(_fsByWide && _wideMode()) _applyWide(false); _fsByWide=false; }
 });
 
-// ══ 작업대 뷰 ══
+// ══ 작업보드 뷰 ══
 function renderWorkdeskView(){
   // 열 작업이 예약되지 않았으면(=본문이 "위에서 작업을 선택하세요"로 뜬다) 열린 작업도 비운다.
   //   ★ 첫 await 전이라 switchView 의 _navPush 가 이 값을 보고, 히스토리 항목이 실제 화면과 어긋나지 않는다.
@@ -1670,7 +1670,7 @@ function _renderTabList(){
   //   미확인 코멘트 수(refreshUnseen)가 [확인 필요] 위젯의 재료라 사이드바만 다시 그리면 그 항목이 stale 로 남는다.
   if(STATE.role==='advertiser'){ _renderAdvSidebar(); if(!STATE.cur) _renderAdvHome(); return; }
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
-  const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업대 뷰가 아닐 때
+  const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업보드 뷰가 아닐 때
   const gs=_wGroups();
   if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
@@ -2812,7 +2812,7 @@ async function showEditHistory(){
    서버 미해결 상태가 진실원본 — [확인]하면 전 관리자 화면·알림에서 함께 사라진다. */
 
 
-/** 통합 작업대 범용 모달(작업오더 상세 등) — 가벼운 오버레이 하나 */
+/** 리뷰웹시스템[3버전] 범용 모달(작업오더 상세 등) — 가벼운 오버레이 하나 */
 function _modal(title, bodyHtml){
   let o=document.getElementById('wdModal');
   if(!o){ o=document.createElement('div'); o.id='wdModal';
@@ -2932,7 +2932,7 @@ function _woToggle(i){
   if(open) _woFillDetail(i);
 }
 /** 펼침 내용 = **관리자 대시보드와 같은 렌더러**(js/work-order-detail.js `_woDetailHtml`).
- *  사본을 만들면 "관리자 화면엔 첨부 이미지가 뜨는데 작업대엔 URL만 뜬다"로 갈라진다.
+ *  사본을 만들면 "관리자 화면엔 첨부 이미지가 뜨는데 작업보드엔 URL만 뜬다"로 갈라진다.
  *  첨부 이미지(guide-image 프록시·Drive)는 그 렌더러가 <img>로 임베드하고 클릭하면 라이트박스로 크게 본다. */
 function _woFillDetail(i){
   const box=document.getElementById('wolbox-'+i); if(!box||box.dataset.filled) return;
@@ -3175,7 +3175,7 @@ async function renderCampaignsView(){
   await _loadPerm();
   await loadRecruitList();     // index-recruit.js — 관리자 대시보드와 같은 로더
 }
-/** index-recruit.js 가 기대하는 컨테이너·전역을 통합 작업대에 맞춰 채운다(사본 금지) */
+/** index-recruit.js 가 기대하는 컨테이너·전역을 리뷰웹시스템[3버전]에 맞춰 채운다(사본 금지) */
 function _rcRenderHead(total){
   $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
@@ -3547,7 +3547,7 @@ async function renderSettingsView(){
 }
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
-      통합 작업대엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
+      리뷰웹시스템[3버전]엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
 /* ── 이미지 교체요청 = C/S 문의 화면 위의 "처리 대기 큐" 띠 (시안 C) ──────────
    설계·시안 문서 = frontend/docs/design-cs-review-edit-merge.html
 
@@ -3884,7 +3884,7 @@ function riStepDetail(d){
 function riCloseDetail(){ const m=$('#riModal'); if(m){ m.style.display='none'; m.dataset.riKind=''; } STATE.riDetailIdx=null; }
 /* ★ 리스너는 **한 번만** 건다 — 팝업을 열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 칸 건너뛴다.
    ★ 상세 팝업이 실제로 떠 있을 때만 가로챈다(riKind) — 판별 예시 모달의 입력칸 커서 이동을 막지 않는다.
-   ★ 입력 중(input/textarea/select/contenteditable)에는 손대지 않는다(작업대 그리드 방향키 규율과 동일). */
+   ★ 입력 중(input/textarea/select/contenteditable)에는 손대지 않는다(작업보드 그리드 방향키 규율과 동일). */
 document.addEventListener('keydown', (e)=>{
   if(e.altKey||e.ctrlKey||e.metaKey) return;
   const m=$('#riModal');
@@ -4073,7 +4073,7 @@ function _renderRvBody(){
     ${_rvPager()}`;
 }
 /* 타계정 펼침 — 그 리뷰어 행 **바로 아래**에 상세를 편다(작업오더 펼침행과 같은 방식).
-   ★ 클래스는 rv 접두로 분리한다 — 작업대 '작업세부' 패널이 .worow/.wodetail 을 이미 쓰고 있어
+   ★ 클래스는 rv 접두로 분리한다 — 작업보드 '작업세부' 패널이 .worow/.wodetail 을 이미 쓰고 있어
      이름이 겹치면 그쪽 display:grid 가 <tr> 에 걸려 표가 통째로 무너진다(이 저장소 실측 사고). */
 function _rvToggleSub(i, btn){
   const tr=document.querySelector(`tr.rvsubrow[data-rvsub="${i}"]`);
@@ -4177,7 +4177,7 @@ async function _rvDelete(i){
    「로그」 뷰 — 서브탭 2개 (리뷰어 비정상로그 · 시스템 오류로그)
 
    ★ 기본 탭은 **리뷰어 비정상로그**(사용자 확정). 시안 = docs/design-log-tabs.html
-   ★ 서브탭은 작업대에 이미 있는 `.seg` 알약을 그대로 쓴다(신규 컴포넌트 0).
+   ★ 서브탭은 작업보드에 이미 있는 `.seg` 알약을 그대로 쓴다(신규 컴포넌트 0).
    ★ **시스템 오류로그는 master/admin 전용** — 경로·스택·요청 컨텍스트가 실려 AE 의
      "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(서버도 adminOrMaster 로 강제).
      AE 에게는 알약 자체를 그리지 않는다.
@@ -4291,7 +4291,7 @@ function _renderLogsBody(q){
     // 조치 버튼은 표에서 제거하고 펼침 패널로 이동한다([확인] 버튼 제거 요청).
     //   여기서 _logOpenWorkdesk/_cancelLogOrder/_resolveLog/_canResolveLog 를 참조 = 회귀가드 대상.
     const acts=[];
-    if(l.sheetId&&l.tabName) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_logOpenWorkdesk(${l.id})" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다">작업대 ↗</button>`);
+    if(l.sheetId&&l.tabName) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_logOpenWorkdesk(${l.id})" title="이 리뷰어의 행이 있는 작업보드를 새 탭으로 엽니다">작업보드 ↗</button>`);
     if(!resolved && _canResolveLog()){
       if(_LOG_CANCELABLE.has(l.eventType)) acts.push(`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="event.stopPropagation();_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 — 다시 기록되지 않습니다">취소 처리</button>`);
       acts.push(`<button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="event.stopPropagation();_resolveLog(${l.id})" title="이 알림을 해결 처리 — 모든 관리자 화면에서 사라집니다">✔ 해결</button>`);
@@ -4324,7 +4324,7 @@ function _logViewImage(fileId){ if(!/^[-\w]{20,}$/.test(String(fileId||'')))retu
   let ov=document.getElementById('lgimgov'); if(!ov){ ov=document.createElement('div'); ov.id='lgimgov'; ov.className='modalov'; ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
   ov.innerHTML=`<div class="modalbox" style="width:auto;max-width:96vw"><div class="modalhd"><b>제출 캡처</b> <a class="btn xs" href="${url}" target="_blank" rel="noopener">새 탭 ↗</a> <button class="btn xs" onclick="document.getElementById('lgimgov').remove()">닫기</button></div><div class="modalbd" style="text-align:center"><img src="${url}" style="max-width:92vw;max-height:80vh;border-radius:8px"></div></div>`;
 }
-// 로그 → 그 리뷰어가 있는 작업대를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
+// 로그 → 그 리뷰어가 있는 작업보드를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
 //   — 프래그먼트는 서버 로그·Referer에 안 실려 연락처가 새지 않고, 도착 즉시 주소창에서 제거된다.
 //   토큰도 함께 넘기는 이유: 새 탭은 sessionStorage를 물려받지 못해(인트라넷 SSO 세션) 로그인 화면으로 떨어진다.
 //   ★ 권한 확대 아님 — 새 탭도 서버의 스코프 검증(canAccessTab)을 그대로 거친다.
@@ -4396,9 +4396,9 @@ async function _resolveLog(id){
    시스템 오류로그 (「로그」 뷰 두 번째 서브탭) — error_logs(026/028)
 
    ★ 데이터·수집 경로는 그대로다. 관리자 대시보드의 「오류디버깅」 화면을 이리로 옮긴 것
-     (사용자 확정 2026-08: 통합 작업대가 메인, 대시보드 폐기 → 창구 단일화).
+     (사용자 확정 2026-08: 리뷰웹시스템[3버전]이 메인, 대시보드 폐기 → 창구 단일화).
    ★ 표는 **리뷰어 비정상로그와 같은 `.lgtable` + 행 펼침**을 쓴다 — 두 탭의 열 의미가
-     1:1 로 대응해야 탭을 옮겨도 읽는 법이 안 바뀐다(모든 오류의 기준 = 통합 작업대).
+     1:1 로 대응해야 탭을 옮겨도 읽는 법이 안 바뀐다(모든 오류의 기준 = 리뷰웹시스템[3버전]).
    ★ 무거운 **AI 다중에이전트 분석만 모달**로 분리(리뷰검수 상세 팝업과 같은 방식).
    ★ 서버가 기본으로 관리자 대시보드(`/api/admin/*`)에서 난 오류를 빼고 준다 —
      제외 건수는 응답의 excludedCount 로 받아 **화면에 표기**한다(조용한 누락 금지).
@@ -4475,8 +4475,8 @@ function _renderSysHead(r){
     <div class="ovnote" style="margin-bottom:8px;color:var(--muted)">
       ${STATE.sysIncludeAdminUi
         ? `※ <b>관리자 대시보드(/api/admin/*)에서 발생한 오류를 포함</b>해 보고 있습니다. <a href="javascript:void(0)" onclick="STATE.sysIncludeAdminUi=false;_loadSysLogs()">기본(제외)으로 돌아가기</a>`
-        : `※ <b>관리자 대시보드(/api/admin/*)에서 발생한 오류 ${ex}건은 제외</b>했습니다 — 통합 작업대가 메인이라 없어질 화면의 오류는 목록을 채우지 않습니다.
-           작업대 <b>로그인·SSO 경로</b>에서 난 오류는 admin 경로여도 그대로 표시합니다.
+        : `※ <b>관리자 대시보드(/api/admin/*)에서 발생한 오류 ${ex}건은 제외</b>했습니다 — 리뷰웹시스템[3버전]이 메인이라 없어질 화면의 오류는 목록을 채우지 않습니다.
+           작업보드 <b>로그인·SSO 경로</b>에서 난 오류는 admin 경로여도 그대로 표시합니다.
            ${ex?`<a href="javascript:void(0)" onclick="STATE.sysIncludeAdminUi=true;_loadSysLogs()">제외분 포함해 보기</a>`:''}`}
     </div>`;
 }
@@ -4793,7 +4793,7 @@ function renderOverviewBody(q){
   const rows=it.map((o,i)=>({o,i})).filter(({o})=>!q||((o.tabName||'')+(o.spreadsheetTitle||'')).includes(q)).map(({o,i})=>{
     const v=_cutoverVerdict(o);
     return `<tr>
-      <td class="ovnm" onclick="openTabFromOverview(${i})" title="작업대에서 열기"><b>${esc(o.tabName)}</b><div class="ovsub">${esc(o.spreadsheetTitle)}</div></td>
+      <td class="ovnm" onclick="openTabFromOverview(${i})" title="작업보드에서 열기"><b>${esc(o.tabName)}</b><div class="ovsub">${esc(o.spreadsheetTitle)}</div></td>
       <td class="num">${o.b.total}</td>
       <td class="num">${cmp(o.a.total,o.b.total)}</td>
       <td class="num">${cmp(o.a.submitted,o.b.submitted)}</td>
@@ -4809,7 +4809,7 @@ function renderOverviewBody(q){
       <td class="ctr">${_wbCell(o)}</td>
       <td class="ctr"><span class="${v.cls==='ok'?'ok':(v.cls==='no'?'no':'')}" style="font-weight:700${v.cls==='warn'?';color:var(--warn)':''}" title="${esc(v.title)}">${esc(v.txt)}</span></td>
     </tr>`;
-  }).join('')||`<tr><td colspan="13" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
+  }).join('')||`<tr><td colspan="13" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업보드의 "그림자 투영"을 기다리세요.</td></tr>`;
   $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th><th>원본</th><th>write-back</th><th title="카운트·소유·발주·진짜불일치0 종합">cutover</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
@@ -5061,7 +5061,7 @@ async function renderOwnershipView(){
     <div class="advlist"><div class="sh row" style="font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:4px 6px 9px">업체(광고주)<button class="addadv" onclick="showAddAdvertiser()">＋ 업체 추가</button></div><div id="advs"><div class="empty">불러오는 중…</div></div></div>
     <div class="own-panel" id="ownPanel"><div class="empty">왼쪽에서 업체를 선택하세요.</div></div></div>`;
   // 탭 인덱스(시트명/탭명 조회용): 매핑용 전체 목록(forMapping=1 — staff도 전체 탭명 수신, 미소유 시트 매핑 가능).
-  //   작업대 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
+  //   작업보드 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
   if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
   buildTabIndex(STATE.mapTabs);
   const isAdminRole = STATE.role==='master'||STATE.role==='admin';
@@ -5271,7 +5271,7 @@ function advLinkCopy(){ const el=$('#advLinkUrl'); if(!el) return; el.select();
   const done=()=>toast('링크 복사됨 — 광고주에게 전달하세요');
   try{ navigator.clipboard.writeText(el.value).then(done).catch(()=>{ document.execCommand('copy'); done(); }); }
   catch(_){ try{ document.execCommand('copy'); done(); }catch(e){ toast('복사 실패 — 수동 선택하세요'); } } }
-// ── 광고주 로그인 계정(업체별) — master/admin 만. 광고주는 이 아이디/비번으로 통합작업대에 로그인 →
+// ── 광고주 로그인 계정(업체별) — master/admin 만. 광고주는 이 아이디/비번으로 리뷰웹시스템[3버전]에 로그인 →
 //   role='advertiser' → 이 업체 소유 탭만·마스킹·읽기전용으로 열람. 계정 CRUD = /api/trackb/advertiser-account. ──
 function _advAcctHtml(a){
   if(!(STATE.role==='master'||STATE.role==='admin')) return '';   // 계정관리는 관리자만
@@ -5374,7 +5374,7 @@ function buildTabIndex(list){ STATE.sheetMap={}; STATE.tabIndex={};
     STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
 
 async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={}; STATE.ownBrand=null;
-  if(!(opt&&opt.nav)) _navPush();   // 업체 선택도 히스토리 1칸 — 작업대에서 뒤로가면 보던 업체 패널로 돌아온다
+  if(!(opt&&opt.nav)) _navPush();   // 업체 선택도 히스토리 1칸 — 작업보드에서 뒤로가면 보던 업체 패널로 돌아온다
   STATE.ownSettle={}; STATE.ownSettleFor=a.id;
   document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
@@ -5390,7 +5390,7 @@ async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCu
   renderOwnPanel(a, (r&&r.items)||[]);
   if(STATE.ownTabs.some(t=>t.salesId)) loadOwnSettlement(a.id);   // 정산 컬럼 비동기 필(링크 탭 0이면 호출 생략)
 }
-// 연결된 탭 클릭 → 작업대에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
+// 연결된 탭 클릭 → 작업보드에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
 function openOwnTab(i){ const t=(STATE.ownTabs||[])[i]; if(!t) return;
   STATE.pendingTab={sheetId:t.sheetId, tabGid:t.tabGid, tabName:t.tabName, spreadsheetTitle:t.spreadsheetTitle||sheetTitle(t.sheetId)};
   switchView('workdesk'); }
@@ -5411,7 +5411,7 @@ function renderOwnPanel(a, items){
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
-      <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
+      <label class="setvis" title="이 거래처가 리뷰웹시스템[3버전]에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
     ${accessBlock}
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
     <div class="sect" id="owntabsSect">${_ownTabsHtml()}</div>
@@ -5519,7 +5519,7 @@ function _ownTabsHtml(){
   const body=ot.length
     ? `${chips}<div class="otwrap"><div class="othead"><span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span><span>견적서</span><span>마감자료</span><span>계산서</span><span>입금액/총비용</span><span>입금일</span><span>비고</span><span></span></div>${list||'<div class="empty" style="padding:14px">이 브랜드의 탭 없음</div>'}</div>`
     : `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
-  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기 · 정산(견적·계산서·입금)은 정산 링크된 탭만 표시</span></div>${body}`;
+  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업보드로 열기 · 정산(견적·계산서·입금)은 정산 링크된 탭만 표시</span></div>${body}`;
 }
 // 날짜 → M/D 축약(관제실 표기), 금액 → 천단위 콤마.
 function _md(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:esc(String(d||'')); }
@@ -5592,7 +5592,7 @@ boot();
        recruit-modal.js : 발행·수정 모달 마크업+CSS(admin.html 에서 이관한 공유 모듈)
        index-recruit.js : 목록 로드·프리필·저장 로직
      ★ index-recruit.js 는 경로 베이스만 갈아끼우면 그대로 동작한다 —
-       통합 작업대는 AE 도 쓰므로 admin 전용 경로 대신 Track B 네임스페이스로 보낸다.
+       리뷰웹시스템[3버전]은 AE 도 쓰므로 admin 전용 경로 대신 Track B 네임스페이스로 보낸다.
      ══════════════════════════════════════════════════════════════ -->
 <!-- 모집공고 발행·수정 모달 — 공유 마크업(js/recruit-modal.js)에서 마운트.
      ★ body 직속이어야 한다 — 뷰 안(.ovwrap 스크롤 컨테이너)에 두면 오버레이가
@@ -5629,13 +5629,13 @@ boot();
 <script src="js/campaign-cards.js"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
-     통합 작업대에서만 미리보기가 비어 보인다(실측). -->
+     리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/recruit-modal.js"></script>
 <script src="js/manual-order.js"></script>
 <script src="js/index-recruit.js"></script>
 <script>
-/* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 통합 작업대 것으로 잇는다.
+/* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.
    ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */
 (function () {
   var W = window;

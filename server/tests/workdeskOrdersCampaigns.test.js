@@ -1,12 +1,12 @@
 /**
- * workdeskOrdersCampaigns.test.js — 통합 작업대 '작업오더·모집공고' 탭 회귀가드
+ * workdeskOrdersCampaigns.test.js — 리뷰웹시스템[3버전] '작업오더·모집공고' 탭 회귀가드
  * 실행: node tests/workdeskOrdersCampaigns.test.js
  *
  * 이 화면의 위험은 두 가지다.
  *  ① **권한** — 두 탭은 AE 에게도 열려 있는데, 작업오더 접수는 시트/탭 등록의 단일 관문이고
  *     공고 발행·수정은 정원·금액을 바꾼다. 게이트가 한 칸만 어긋나면 아무나 누른다.
  *     → 라우터 스택을 **실제로 검사**한다.
- *  ② **사본 드리프트** — 카드·모달·저장 로직을 통합 작업대용으로 베끼면 관리자 대시보드와
+ *  ② **사본 드리프트** — 카드·모달·저장 로직을 리뷰웹시스템[3버전]용으로 베끼면 관리자 대시보드와
  *     계속 어긋난다(레포가 반복해서 경고한 그것). → 같은 파일을 쓰는지 고정한다.
  */
 const assert = require('assert');
@@ -19,7 +19,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 function t(name, fn) { fn(); pass++; console.log('  ✓ ' + name); }
 
-console.log('\n▶ 통합 작업대 작업오더·모집공고 회귀가드\n');
+console.log('\n▶ 리뷰웹시스템[3버전] 작업오더·모집공고 회귀가드\n');
 
 /* ── 1) 권한 — 라우터 스택 실검사 ──────────────────────────── */
 console.log('1) 권한 게이트');
@@ -110,7 +110,7 @@ t('★ 발행·수정 모달 마크업은 공유 모듈 한 벌뿐', () => {
     'admin.html 에 인라인 모달이 남아 있으면 두 벌이 된다');
   assert.strictEqual((MODAL.match(/id="rf_title"/g) || []).length, 1, '공유 모듈에 모달이 없다');
   assert.strictEqual((HTML.match(/id="rf_title"/g) || []).length, 0,
-    '통합 작업대가 모달을 베끼면 안 된다 — 모듈을 마운트해야 한다');
+    '리뷰웹시스템[3버전]이 모달을 베끼면 안 된다 — 모듈을 마운트해야 한다');
 });
 t('모달 CSS도 모듈에 함께 있다(스타일 없이 뜨는 것 방지)', () => {
   assert.ok(/\.rf-split\{/.test(MODAL), '모듈에 CSS 없음');
@@ -128,7 +128,7 @@ t('모달 로드 순서 — 마크업이 저장 로직보다 먼저', () => {
       (i ? 'workdesk' : 'admin') + ': recruit-modal.js 가 index-recruit.js 뒤에 있으면 프리필이 필드를 못 찾는다');
   });
 });
-t('★ 통합 작업대는 목록·저장 로직을 베끼지 않고 그대로 호출', () => {
+t('★ 리뷰웹시스템[3버전]은 목록·저장 로직을 베끼지 않고 그대로 호출', () => {
   assert.ok(/await loadRecruitList\(\)/.test(HTML), 'index-recruit.js 의 로더를 써야 한다');
   assert.ok(/openRecruitModal\(\)/.test(HTML), '발행 모달도 같은 함수');
   assert.ok(!/function loadRecruitList/.test(HTML), '사본 정의가 있으면 안 된다');
@@ -235,7 +235,7 @@ t('처리 버튼 클릭이 행 토글로 번지지 않는다', () => {
   assert.ok(/onclick="event\.stopPropagation\(\);_woAccept\(/.test(HTML)
     && /onclick="event\.stopPropagation\(\);_woStatus\(/.test(HTML));
 });
-t('★★ 펼침행 클래스는 `wol` 접두 — 작업대 탭의 .worow/.wodetail/.wochip 과 겹치면 표가 무너진다', () => {
+t('★★ 펼침행 클래스는 `wol` 접두 — 작업보드 탭의 .worow/.wodetail/.wochip 과 겹치면 표가 무너진다', () => {
   // 실측 사고: `.worow{display:grid}`(작업세부 패널용)가 이 표의 <tr> 에 걸려
   //   8칸이 2열 그리드로 접혔고, `.wochip` 재정의는 그쪽 옵션 칩 색을 바꿔버렸다.
   ['worow', 'wodetail', 'wochip'].forEach(c => {
@@ -249,7 +249,7 @@ t('★★ 펼침행 클래스는 `wol` 접두 — 작업대 탭의 .worow/.wodet
 });
 
 t('★ 상세 본문은 관리자 대시보드와 **같은 렌더러**(사본 금지)', () => {
-  assert.ok(/_woDetailHtml\(o\)/.test(HTML), '통합 작업대가 공유 렌더러를 호출해야 한다');
+  assert.ok(/_woDetailHtml\(o\)/.test(HTML), '리뷰웹시스템[3버전]이 공유 렌더러를 호출해야 한다');
   assert.ok(/function _woDetailHtml\(o\) \{/.test(WOD), '렌더러는 모듈에 있어야 한다');
   assert.ok(!/function _woDetailHtml/.test(APP), 'index-app.js 에 사본이 남아 있다');
   assert.ok(!/function _woDetailHtml/.test(HTML), 'workdesk.html 에 사본을 만들면 안 된다');
@@ -263,21 +263,21 @@ t('두 화면이 같은 모듈을 로드한다(admin·admin-siand·workdesk)', (
   });
   assert.ok(/<script src="js\/work-order-detail\.js"><\/script>/.test(HTML), 'workdesk 미로드');
 });
-t('★ 모듈은 호스트 전역에 기대지 않는다(통합 작업대엔 escHtml 이 없다)', () => {
+t('★ 모듈은 호스트 전역에 기대지 않는다(리뷰웹시스템[3버전]엔 escHtml 이 없다)', () => {
   assert.ok(/function _escFallback\(s\)/.test(WOD) && /function escHtml\(s\)/.test(WOD),
-    'escHtml 폴백이 없으면 통합 작업대에서 상세가 통째로 터진다');
+    'escHtml 폴백이 없으면 리뷰웹시스템[3버전]에서 상세가 통째로 터진다');
   // ★ 로드 시점 캡처 금지 — 이 모듈은 index-app.js **앞에** 로드되므로 그때는 window.escHtml 이 없다.
   //   캡처하면 admin 에서도 폴백이 쓰여 원본과 출력이 조용히 달라진다(실측).
   assert.ok(!/var escHtml = \(typeof window/.test(WOD), 'escHtml 을 로드 시점에 캡처하고 있다');
   assert.ok(/\.replace\(\/&\/g, "&amp;"\)\.replace\(\/<\/g, "&lt;"\)\.replace\(\/>\/g, "&gt;"\)\.replace\(\/"\/g, "&quot;"\)/.test(WOD),
     '폴백이 index-app.js 의 escHtml 과 다른 구현이면 출력이 갈라진다');
-  // 모듈이 정의하지 않은 _wo* 를 참조하면 통합 작업대에서만 죽는다 → 정적으로 막는다
+  // 모듈이 정의하지 않은 _wo* 를 참조하면 리뷰웹시스템[3버전]에서만 죽는다 → 정적으로 막는다
   const defined = new Set([...WOD.matchAll(/^function (_?\w+)\s*\(/gm)].map(m => m[1])
     .concat([...WOD.matchAll(/^const (\w+)\s*=/gm)].map(m => m[1])));
   const used = new Set([...WOD.matchAll(/\b(_wo\w+|_driveId|woImageModal)\s*\(/g)].map(m => m[1]));
   const missing = [...used].filter(n => !defined.has(n));
   assert.deepStrictEqual(missing, [], '모듈 안에서 정의되지 않은 참조: ' + missing.join(', '));
-  // ★ 반대 방향 — 관리자 대시보드 전용 전역이 모듈로 딸려오면 통합 작업대에서 죽는다.
+  // ★ 반대 방향 — 관리자 대시보드 전용 전역이 모듈로 딸려오면 리뷰웹시스템[3버전]에서 죽는다.
   //   실측: 함수 범위를 잘못 잡아 woCreateCampaign(showToast·openRecruitModal·_woCache 사용)이
   //   통째로 딸려왔고, 공개 목록에 없어 **admin 의 '공고 발행' 버튼이 조용히 고장**났다.
   const bare = WOD.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

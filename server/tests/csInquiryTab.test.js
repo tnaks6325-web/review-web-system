@@ -1,5 +1,5 @@
 /**
- * csInquiryTab.test.js — C/S 문의창구를 통합 작업대 상단탭에 연동한 것의 회귀가드
+ * csInquiryTab.test.js — C/S 문의창구를 리뷰웹시스템[3버전] 상단탭에 연동한 것의 회귀가드
  * 실행: node tests/csInquiryTab.test.js
  *
  * 위험 두 가지를 고정한다.
@@ -7,7 +7,7 @@
  *     기존 `/api/cs/*` 는 master/admin 전용(cs.routes.js 머리말: "staff·리뷰어는 접근 불가")이고
  *     Track B 프록시도 **같은 게이트**여야 한다. 한 칸만 어긋나면 AE 전원에게 열린다.
  *     → 라우터 스택을 실제로 검사한다.
- *  ② **사본 드리프트** — 화면 코드를 통합 작업대용으로 베끼면 답장·메모·상태변경 중
+ *  ② **사본 드리프트** — 화면 코드를 리뷰웹시스템[3버전]용으로 베끼면 답장·메모·상태변경 중
  *     하나만 고쳐도 두 화면이 갈라진다. → 같은 모듈을 쓰는지 고정한다.
  */
 const assert = require('assert');
@@ -19,7 +19,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ C/S 문의창구 · 통합 작업대 연동 회귀가드\n');
+console.log('\n▶ C/S 문의창구 · 리뷰웹시스템[3버전] 연동 회귀가드\n');
 
 /* ── 1) 권한 — 라우터 스택 실검사 ──────────────────────────── */
 console.log('1) 권한 게이트');
@@ -88,7 +88,7 @@ t('★ 마크업도 모듈이 들고 있다(두 화면이 같은 판을 마운�
   assert.ok(/id="csInquiryMount"/.test(ADM), 'admin.html 마운트 지점 없음');
   assert.ok(!/id="csRoomListWrap"/.test(ADM), 'admin.html 에 마크업 사본이 남아 있다');
   assert.ok(!/id="csRoomListWrap"/.test(WD), 'workdesk.html 에 마크업 사본이 있다');
-  assert.ok(/CsInquiry\.mount\('csInquiryMount'\)/.test(WD), '통합 작업대가 모듈 마운트를 안 쓴다');
+  assert.ok(/CsInquiry\.mount\('csInquiryMount'\)/.test(WD), '리뷰웹시스템[3버전]이 모듈 마운트를 안 쓴다');
 });
 t('세 화면이 같은 모듈을 로드한다', () => {
   [['admin.html', ADM], ['admin-siand.html', SIA], ['workdesk.html', WD]].forEach(([n, s]) => {
@@ -107,9 +107,9 @@ t('★ 전역 공개 — onclick 문자열·SSE 훅이 이름 그대로 쓴다',
   assert.ok(/window\.csOnSSE/.test(MOD) || /csOnSSE: csOnSSE/.test(MOD),
     'index-payment.js 의 SSE 훅이 끊긴다');
 });
-t('★ 모듈은 호스트 전역에 기대지 않는다(통합 작업대엔 escHtml·showToast 가 없다)', () => {
+t('★ 모듈은 호스트 전역에 기대지 않는다(리뷰웹시스템[3버전]엔 escHtml·showToast 가 없다)', () => {
   assert.ok(/function _escFallback\(s\)/.test(MOD) && /function escHtml\(s\)/.test(MOD),
-    'escHtml 폴백이 없으면 통합 작업대에서 화면이 통째로 터진다');
+    'escHtml 폴백이 없으면 리뷰웹시스템[3버전]에서 화면이 통째로 터진다');
   // ★ 로드 시점 캡처 금지 — 이 모듈은 index-app.js 앞에 로드되므로 그때는 window.escHtml 이 없다.
   //   캡처해 버리면 admin 에서도 폴백이 쓰여 원본과 출력이 조용히 달라진다(실측으로 확인한 함정).
   assert.ok(!/var escHtml = \(typeof window/.test(MOD), 'escHtml 을 로드 시점에 캡처하고 있다');
@@ -130,7 +130,7 @@ t('★ api.js 가 /api/cs 만 재기준한다 — 전역 미설정이면 동작 
   assert.strictEqual((API.match(/_resolveApiPath\(route\.path\)/g) || []).length, 3,
     'gasGet(GET·POST 분기)·gasPost 세 곳 모두 거쳐야 한다');
 });
-t('통합 작업대만 Track B 네임스페이스를 가리킨다', () => {
+t('리뷰웹시스템[3버전]만 Track B 네임스페이스를 가리킨다', () => {
   assert.ok(/window\.CS_API_BASE = '\/api\/trackb\/cs'/.test(WD));
   assert.ok(!/CS_API_BASE\s*=/.test(ADM) && !/CS_API_BASE\s*=/.test(SIA),
     'admin 이 베이스를 바꾸면 기존 경로가 죽는다');
@@ -139,8 +139,8 @@ t('통합 작업대만 Track B 네임스페이스를 가리킨다', () => {
     '베이스는 모듈 로드보다 먼저 정해져야 한다');
 });
 
-/* ── 4) 통합 작업대 배선 ────────────────────────────────────── */
-console.log('\n4) 통합 작업대 배선');
+/* ── 4) 리뷰웹시스템[3버전] 배선 ────────────────────────────────────── */
+console.log('\n4) 리뷰웹시스템[3버전] 배선');
 /* ★★ 이미지 교체요청이 이 탭 안으로 들어오면서(시안 C = 문의 화면 위의 대기 큐 띠)
    AE 에게도 **메뉴는** 열렸다 — AE 가 그 화면에서 하는 일이 교체요청 처리다.
    보안 경계는 "메뉴가 보이나"가 아니라 **"AE 화면에 문의 본문을 그리나"** 로 옮겼고,
@@ -170,11 +170,11 @@ t('탭 안(#viewroot)에 그린다 — 팝업·새 창 아님', () => {
   // 모듈 마크업은 .admin-tab-pane(기본 display:none) — active 를 줘야 보인다
   assert.ok(/getElementById\('tab-cs-inquiry'\); if\(pane\) pane\.classList\.add\('active'\)/.test(WD));
 });
-t('★ nav 뱃지는 DOM 이 아니라 값으로 받는다(#csInquiryBadge 는 통합 작업대에 없다)', () => {
+t('★ nav 뱃지는 DOM 이 아니라 값으로 받는다(#csInquiryBadge 는 리뷰웹시스템[3버전]에 없다)', () => {
   assert.ok(/function _csSyncNavBadge\(n\)/.test(WD));
   assert.ok(/!Number\.isFinite\(n\)\) return/.test(WD), '값이 없을 때 뱃지를 지우면 안 된다');
   assert.ok(!/_csSyncNavBadge[\s\S]{0,200}getElementById\('csInquiryBadge'\)/.test(WD),
-    '#csInquiryBadge 를 읽으면 통합 작업대에선 늘 0이 된다(실측)');
+    '#csInquiryBadge 를 읽으면 리뷰웹시스템[3버전]에선 늘 0이 된다(실측)');
 });
 t('★★ 모듈 뱃지 갱신은 **훅**으로 받는다 — window 함수를 감싸는 방식은 동작하지 않는다', () => {
   // 실측(코드리뷰 지적): loadCsRooms·csRefreshBadge 는 렉시컬 스코프의 csUpdateBadge 를
@@ -182,11 +182,11 @@ t('★★ 모듈 뱃지 갱신은 **훅**으로 받는다 — window 함수를 �
   //   → 뱃지가 부팅 시각 값에 영영 머무른다. 훅은 모듈 안에서 부른다.
   assert.ok(/window\.CS_ON_BADGE === "function"\) window\.CS_ON_BADGE\(Number\(count\) \|\| 0\)/.test(MOD),
     '모듈이 호스트 훅을 부르지 않는다');
-  assert.ok(/window\.CS_ON_BADGE = function \(n\)/.test(WD), '통합 작업대가 훅을 등록하지 않는다');
+  assert.ok(/window\.CS_ON_BADGE = function \(n\)/.test(WD), '리뷰웹시스템[3버전]이 훅을 등록하지 않는다');
   assert.ok(!/W\.csUpdateBadge = function/.test(WD), '동작하지 않는 래퍼 방식이 되살아났다');
   // #csInquiryBadge 가 없어도 훅은 불려야 한다 → early return 을 되살리면 안 됨
   assert.ok(!/const b = document\.getElementById\("csInquiryBadge"\);\s*\n\s*if \(!b\) return;/.test(MOD),
-    'early return 이 돌아오면 통합 작업대에서 훅이 안 불린다');
+    'early return 이 돌아오면 리뷰웹시스템[3버전]에서 훅이 안 불린다');
 });
 t('★ 부팅 1회로 끝내지 않는다 — 주기 갱신 + 화면 가려지면 쉼', () => {
   assert.ok(/CS_BADGE_POLL_MS/.test(WD) && /setInterval\(/.test(WD), '주기 갱신이 없다');

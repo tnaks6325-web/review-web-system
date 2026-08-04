@@ -76,7 +76,7 @@ async function loginStaff(name, pw) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 인트라넷(inadd-webapp) 계정 로그인 — Track B 통합작업대 SSO(세션 이어받기).
+// 인트라넷(inadd-webapp) 계정 로그인 — Track B 리뷰웹시스템[3버전] SSO(세션 이어받기).
 //   자격 검증은 인트라넷 서버(POST /api/auth/login, Cloudflare D1 서버측 대조)에 프록시 —
 //   공유키 불필요(사용자 비밀번호가 결속 비밀). 성공 시 review JWT 발급.
 //   ★ 권한(사용자 확정 정책 1a): 기본 'staff'(담당 업체 스코프). 'admin'(전체 열람·편집) 승격 = INTRANET_SSO_ADMIN_USERS
@@ -143,12 +143,12 @@ async function loginIntranet(name, pw, _fetch = fetch) {
     const allowGroupsSet = String(process.env.INTRANET_SSO_ALLOWED_GROUPS || '').split(',').map(s => s.trim()).filter(Boolean).length;
     if (allowGroupsSet) {
       if (!_matchGroups(process.env.INTRANET_SSO_ALLOWED_GROUPS)) {
-        return { success: false, error: '통합 작업대 사용 대상 부서/파트가 아닙니다. 관리자에게 문의하세요.' };
+        return { success: false, error: '리뷰웹시스템[3버전] 사용 대상 부서/파트가 아닙니다. 관리자에게 문의하세요.' };
       }
     } else {
       const allowedRoles = _csv(process.env.INTRANET_SSO_ALLOWED_ROLES);
       if (allowedRoles.length && !allowedRoles.includes(iRole)) {
-        return { success: false, error: '통합 작업대 사용 권한이 없는 인트라넷 계정입니다. 관리자에게 문의하세요.' };
+        return { success: false, error: '리뷰웹시스템[3버전] 사용 권한이 없는 인트라넷 계정입니다. 관리자에게 문의하세요.' };
       }
     }
   }

@@ -230,7 +230,7 @@ ok('구간표에 종료일 입력칸이 없다(서버 모델과 1:1 — 빈틈·
   })());
 ok('모달 CSS 는 #recruitModal 로 스코프된다(호스트 화면 오염 금지)',
   /#recruitModal \.rf-fee-box\{/.test(modal) && /#recruitModal \.rf-fee-row\{/.test(modal));
-ok('구간 CSS 변수에 폴백이 있다(admin 테마 없는 통합 작업대에서도 테두리가 산다)',
+ok('구간 CSS 변수에 폴백이 있다(admin 테마 없는 리뷰웹시스템[3버전]에서도 테두리가 산다)',
   /#recruitModal \.rf-fee-head\{[^}]*var\(--t3,#94A3B8\)/.test(modal));
 
 ok('행 추가·읽기·렌더·점검 함수가 전부 있다',

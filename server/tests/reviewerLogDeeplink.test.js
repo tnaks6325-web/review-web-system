@@ -1,4 +1,4 @@
-// 리뷰어 로그 → 연락처 표기 + 작업대 딥링크 런타임 가드.
+// 리뷰어 로그 → 연락처 표기 + 작업보드 딥링크 런타임 가드.
 // workdesk.html 인라인 스크립트에서 대상 함수를 추출해 최소 DOM 스텁 위에서 실제 호출한다
 // (문자열 grep은 스코프·실행경로를 못 본다 — CLAUDE.md '#361 핫픽스' 교훈).
 const fs = require('fs');
@@ -122,7 +122,7 @@ t('7. _logOpenWorkdesk: 토큰이 없으면 sso= 를 붙이지 않는다(빈 값
   TOKEN = 'jwt.abc.def';
 });
 
-t('8. _logOpenWorkdesk: 시트/탭 없는 로그는 아무 것도 열지 않음(빈 작업대 방지)', () => {
+t('8. _logOpenWorkdesk: 시트/탭 없는 로그는 아무 것도 열지 않음(빈 작업보드 방지)', () => {
   opened = [];
   STATE.logs = [{ id: 9, sheetId: '', tabName: '', phone8: '1' }];
   F._logOpenWorkdesk(9);
@@ -137,7 +137,7 @@ t('9. _consumeGo: 탭 예약 + 강조 대상 지정 + 주소창 해시 제거(�
   STATE.pendingTab = null; STATE.pendingFocus = null; STATE.view = 'logs';
   F.__setGo({ s: 'S1', t: '탄소매트 900건', g: '55', p: '12345678', n: '손아리' });
   F._consumeGo();
-  assert.strictEqual(STATE.view, 'workdesk', '작업대 뷰로 안 감');
+  assert.strictEqual(STATE.view, 'workdesk', '작업보드 뷰로 안 감');
   assert.deepStrictEqual(STATE.pendingTab.sheetId, 'S1');
   assert.deepStrictEqual(STATE.pendingTab.tabName, '탄소매트 900건');
   assert.deepStrictEqual(STATE.pendingFocus, { phone8: '12345678', name: '손아리' });
@@ -215,14 +215,14 @@ t('17. listReviewerEvents가 phone8·tabGid를 내려준다(프론트 계약)', 
 
 // ── 6) 관리자 대시보드 중요알림 = 유형별 요약 카드 ────────────────
 //   알림이 너무 많이 쌓여 관리가 안 되던 문제 → per-alert 스택 대신 유형별 건수 요약 1장.
-//   개별 확인·처리·이미지는 통합작업대 리뷰어 로그 뷰에서 한다.
+//   개별 확인·처리·이미지는 리뷰웹시스템[3버전] 리뷰어 로그 뷰에서 한다.
 const APP = fs.readFileSync(path.join(__dirname, '../../frontend/js/index-app.js'), 'utf8');
 
 t('18. 대시보드는 유형별 요약 카드로 그린다(per-alert 스택 제거)', () => {
   assert.ok(/function _raRenderSummary/.test(APP), '요약 렌더 함수가 있어야 함');
   assert.ok(/byTypeCritical/.test(APP), '서버 유형별 집계(byTypeCritical)를 사용해야 함');
   assert.ok(!/_raOpenWorkdesk/.test(APP), 'per-alert 딥링크 카드는 제거돼야 함');
-  assert.ok(!/_raResolve\b/.test(APP) && !/_raCancelOrder/.test(APP), '개별 확인·취소 버튼은 대시보드에서 제거(처리는 작업대)');
+  assert.ok(!/_raResolve\b/.test(APP) && !/_raCancelOrder/.test(APP), '개별 확인·취소 버튼은 대시보드에서 제거(처리는 작업보드)');
 });
 
 t('19. 요약은 카테고리로 묶고 미지 유형도 기타로 합산(조용한 누락 금지)', () => {
@@ -232,7 +232,7 @@ t('19. 요약은 카테고리로 묶고 미지 유형도 기타로 합산(조용
   assert.ok(/if \(!totalCritical\) \{ if \(card\) card\.remove\(\); return; \}/.test(APP), '0건이면 요약 카드를 제거해야 함');
 });
 
-t('20. 요약 카드는 통합작업대 리뷰어 로그 뷰(#view=logs)를 연다(계약 왕복)', () => {
+t('20. 요약 카드는 리뷰웹시스템[3버전] 리뷰어 로그 뷰(#view=logs)를 연다(계약 왕복)', () => {
   assert.ok(/function openWorkdeskLogs/.test(APP), '로그 뷰 오프너가 있어야 함');
   assert.ok(/hash = "view=logs"/.test(APP), '#view=logs 딥링크여야 함');
   assert.ok(/onclick="openWorkdeskLogs\(\)"/.test(APP), '카테고리·버튼이 로그 뷰를 열어야 함');
@@ -246,7 +246,7 @@ t('21. 요약 카드도 토큰을 URL 에 싣지 않는다(raw_sso 핸드오프)
   assert.ok(!/sso=/.test(fn), 'admin 경로에선 토큰을 URL 로 넘길 필요가 없다');
 });
 
-// ── 7) 통합작업대 리뷰어 로그 — [확인] 제거 + 펼침행 이미지 미리보기 ──
+// ── 7) 리뷰웹시스템[3버전] 리뷰어 로그 — [확인] 제거 + 펼침행 이미지 미리보기 ──
 t('22. 로그 표에서 [확인] 버튼 제거 + 행 클릭 펼침(actions는 펼침 패널)', () => {
   const lgBody = HTML.slice(HTML.indexOf('function _renderLogsBody'), HTML.indexOf('function _logImgUrl'));
   assert.ok(/onclick="_toggleLogRow\(/.test(lgBody), '행 클릭 시 펼쳐져야 함');

@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>설정 화면 정돈 시안 2종 — 통합 작업대 · 관리자 대시보드 공용</title>
+<title>설정 화면 정돈 시안 2종 — 리뷰웹시스템[3버전] · 관리자 대시보드 공용</title>
 <style>
-  /* 통합 작업대(workdesk.html)의 토큰을 그대로 가져와 "실물과 같은 화면"으로 보이게 한다.
+  /* 리뷰웹시스템[3버전](workdesk.html)의 토큰을 그대로 가져와 "실물과 같은 화면"으로 보이게 한다.
      ★ color-scheme:light 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다.
      ★ 외부 리소스 0 (아이콘은 이모지) — 오프라인에서도 그대로 열린다. */
   :root{
@@ -53,7 +53,7 @@
   table.cmp td b{color:var(--ink)}
   table.cmp tr:last-child td{border-bottom:none}
 
-  /* ═══ 브라우저 프레임 (통합 작업대 실화면 재현 — 폭만 1180px로 축약) ═══ */
+  /* ═══ 브라우저 프레임 (리뷰웹시스템[3버전] 실화면 재현 — 폭만 1180px로 축약) ═══ */
   .frame{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--paper);box-shadow:0 10px 34px rgba(16,24,40,.13)}
   .fbar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:#e9edf3;border-bottom:1px solid var(--line2)}
   .fbar i{width:10px;height:10px;border-radius:50%;background:#d3d8e0;display:block}
@@ -178,7 +178,7 @@
     두 시안 모두 <b>기능·저장 동작·필드 ID는 그대로</b> 두고 <b>겉모양만</b> 정돈한다.
   </p>
   <div class="metachips">
-    <span class="mchip">대상 <b>통합 작업대 설정 탭 · 관리자 대시보드 설정 탭</b></span>
+    <span class="mchip">대상 <b>리뷰웹시스템[3버전] 설정 탭 · 관리자 대시보드 설정 탭</b></span>
     <span class="mchip">공유 모듈 <b>frontend/js/admin-settings.js</b></span>
     <span class="mchip">시안만 보기 <b>?v=A</b> · <b>?v=B</b></span>
   </div>
@@ -194,7 +194,7 @@
     스크롤 위치로 기억해야 한다. 설명문이 각 묶음마다 3~4줄씩 붙어 글자 밀도도 높다.
   </p>
   <div class="frame">
-    <div class="fbar"><i></i><i></i><i></i><span>통합 작업대 › 설정 (현재)</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span>리뷰웹시스템[3버전] › 설정 (현재)</span></div>
     <div class="fbody" style="background:#fff">
       <div class="pagehead" style="margin-bottom:16px">
         <h3>설정</h3>
@@ -258,10 +258,10 @@
   </div>
 
   <div class="frame">
-    <div class="fbar"><i></i><i></i><i></i><span>통합 작업대 › 설정 — 시안 A (카드 스택)</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span>리뷰웹시스템[3버전] › 설정 — 시안 A (카드 스택)</span></div>
     <div class="ftop">
-      <span class="flogo">통합 작업대</span>
-      <span class="fnav"><b>작업대</b><b>관측</b><b>업체관리</b><b>작업오더</b><b>모집공고</b><b>C/S</b><b class="on">설정</b></span>
+      <span class="flogo">리뷰웹시스템[3버전]</span>
+      <span class="fnav"><b>작업보드</b><b>관측</b><b>업체관리</b><b>작업오더</b><b>모집공고</b><b>C/S</b><b class="on">설정</b></span>
       <span class="fsp"></span><span class="frole">admin · 김수만</span>
     </div>
     <div class="fbody">
@@ -420,10 +420,10 @@
   </div>
 
   <div class="frame">
-    <div class="fbar"><i></i><i></i><i></i><span>통합 작업대 › 설정 — 시안 B (좌측 목차)</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span>리뷰웹시스템[3버전] › 설정 — 시안 B (좌측 목차)</span></div>
     <div class="ftop">
-      <span class="flogo">통합 작업대</span>
-      <span class="fnav"><b>작업대</b><b>관측</b><b>업체관리</b><b>작업오더</b><b>모집공고</b><b>C/S</b><b class="on">설정</b></span>
+      <span class="flogo">리뷰웹시스템[3버전]</span>
+      <span class="fnav"><b>작업보드</b><b>관측</b><b>업체관리</b><b>작업오더</b><b>모집공고</b><b>C/S</b><b class="on">설정</b></span>
       <span class="fsp"></span><span class="frole">admin · 김수만</span>
     </div>
     <div class="fbody">
@@ -524,7 +524,7 @@
         회귀가드(<code>tests/workdeskSettingsTab.test.js</code>)와 로더가 이름으로 묶여 있다.</li>
       <li><b>채널 슬롯은 계속 표에서 생성</b>한다 — 손으로 4칸을 적어 두면 채널을 늘릴 때 한 칸이 조용히 빠진다(실측 사고).</li>
       <li><b>AI 판별 예시 슬롯 목록은 서버 응답 그대로</b> 그린다 — 프론트에 사본을 만들지 않는다.</li>
-      <li>색은 <b>리터럴 고정</b>(호스트 테마 변수 의존 금지) — 통합 작업대에는 <code>--t1</code>·<code>--p</code>가 없어 무효값이 된다.
+      <li>색은 <b>리터럴 고정</b>(호스트 테마 변수 의존 금지) — 리뷰웹시스템[3버전]에는 <code>--t1</code>·<code>--p</code>가 없어 무효값이 된다.
         지금처럼 <code>as-standalone</code> 토큰 주입 + 폴백을 유지한다.</li>
       <li>폭 상한 <b>1120px</b>(<code>#sthead .mh</code> · <code>#adminSettingsMount</code>)은 그대로 — 카드가 화면 끝까지 늘어나지 않게.</li>
     </ul>
@@ -532,7 +532,7 @@
 </section>
 
 <footer>
-  설정 화면 정돈 시안 · 대상 = <b>frontend/js/admin-settings.js</b>(관리자 대시보드 · 통합 작업대 공용 모듈) ·
+  설정 화면 정돈 시안 · 대상 = <b>frontend/js/admin-settings.js</b>(관리자 대시보드 · 리뷰웹시스템[3버전] 공용 모듈) ·
   시안만 보기 <code>?v=A</code> / <code>?v=B</code>
 </footer>
 

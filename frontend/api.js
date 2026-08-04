@@ -187,7 +187,7 @@ const _ACTION_MAP = {
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
 
-  // 리뷰어 비정상 로그 (한글 자연어, migration 062 — 중요알림 카드/통합작업대 로그 창)
+  // 리뷰어 비정상 로그 (한글 자연어, migration 062 — 중요알림 카드/리뷰웹시스템[3버전] 로그 창)
   'reviewerLogsList':   { method: 'GET',  path: '/api/trackb/reviewer-logs' },
   'reviewerLogResolve': { method: 'POST', path: '/api/trackb/reviewer-logs/resolve' },
   'reviewerLogCancelOrder': { method: 'POST', path: '/api/trackb/reviewer-logs/cancel-order' },
@@ -370,7 +370,7 @@ function _getAuthHeaders() {
 /**
  * 라우트 경로 재기준 — 같은 화면 모듈을 다른 네임스페이스로 재사용하기 위한 최소 장치.
  *
- * 통합 작업대(workdesk.html)는 인트라넷 SSO 토큰(`via:'intranet'`)을 쓰는데,
+ * 리뷰웹시스템[3버전](workdesk.html)는 인트라넷 SSO 토큰(`via:'intranet'`)을 쓰는데,
  * authMiddleware 가 그 토큰을 **`/api/trackb/*` 로만 격리**하므로 `/api/cs/*` 에는
  * 도달 자체가 불가능하다. 그래서 서버에 같은 모양의 프록시(`/api/trackb/cs/*`)를 두고
  * 프론트는 **베이스 문자열만** 갈아끼운다 — C/S 화면 코드는 한 벌 그대로다.

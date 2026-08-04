@@ -2,7 +2,7 @@
    관리자 설정 패널 (공유 모듈) — 내 닉네임 · 회사 사업자번호(제공정보) · 리뷰어 소식·공지
 
    원래 admin.html 인라인 마크업 + index-app.js 안에만 있던 설정 화면을 **모듈로 뺐다**.
-   통합 작업대(Track B)가 리뷰웹시스템을 대체하려면 이 설정들도 작업대에서 해야 하는데,
+   리뷰웹시스템[3버전](Track B)이 기존 관리자 대시보드를 대체하려면 이 설정들도 작업보드에서 해야 하는데,
    사본을 만들면 문구·필드·저장 로직 중 하나만 고쳐도 두 화면이 갈라진다
    (cs-inquiry.js · recruit-modal.js · work-order-detail.js 와 같은 규율).
 
@@ -10,13 +10,13 @@
      (saveMyNickname·saveCompanyBusinessNo·uploadCashReceiptGuide·clearCashReceiptGuide·
       loadReviewerNoticesAdmin·saveReviewerNotice·editReviewerNotice·toggleReviewerNotice…)과
      index-app.js 의 탭 전환 훅, 회귀가드가 이름으로 묶여 있다.
-   ★ 호스트 전역(escHtml·showToast·API_BASE_URL)이 없는 화면(통합 작업대)을 위해 폴백을 둔다.
+   ★ 호스트 전역(escHtml·showToast·API_BASE_URL)이 없는 화면(리뷰웹시스템[3버전])을 위해 폴백을 둔다.
    ★ 호스트 테마(css/index.css 의 --t1·--p·.admin-section-header)가 없는 화면에서는
      마운트 시 1회 감지해 `as-standalone` 클래스로 같은 값을 주입한다 —
      그래서 **admin.html 의 마크업·렌더 결과는 한 바이트도 바뀌지 않는다**
-     (recruit-modal.js 가 var() 폴백 없이 통합 작업대에서 무너졌던 실측 사고의 재발 방지).
+     (recruit-modal.js 가 var() 폴백 없이 리뷰웹시스템[3버전]에서 무너졌던 실측 사고의 재발 방지).
    ★ 서버 경로는 `window.ADMIN_SETTINGS_API` 재기준(campaign-cards 의 CAMPAIGN_ADMIN_API 와 같은 장치) —
-     통합 작업대는 `/api/trackb/settings/*`(인트라넷 SSO 토큰이 도달 가능한 유일한 경로).
+     리뷰웹시스템[3버전]은 `/api/trackb/settings/*`(인트라넷 SSO 토큰이 도달 가능한 유일한 경로).
 
    사용: <div id="adminSettingsMount"></div>
          <script src="js/admin-settings.js"></script>
@@ -46,7 +46,7 @@
 
   /* ── 서버 경로 ────────────────────────────────────────────────
      기본값 = 관리자 대시보드가 지금 쓰는 경로 그대로(동작 불변).
-     window.ADMIN_SETTINGS_API 가 설정된 화면(통합 작업대)에서만 그 베이스 + 접미사로 간다. */
+     window.ADMIN_SETTINGS_API 가 설정된 화면(리뷰웹시스템[3버전])에서만 그 베이스 + 접미사로 간다. */
   var EP_DEFAULT = {
     nickname:     "/api/admin/my-nickname",          // GET · POST
     providerInfo: "/api/tab/provider-info",          // GET
@@ -347,8 +347,8 @@ async function saveCompanyBusinessNo() {
      채널 표(utils/cashReceiptChannels.js · utils/reviewSampleChannels.js)의 사본을
      프론트에 두면 채널을 늘렸을 때 한 칸이 조용히 빠진다(실측: 현영 안내가 2슬롯에 머물렀다).
    ★ 서버 경로는 재기준(ADMIN_SETTINGS_API)을 쓰지 않는다 — `/api/trackb/review-inspect/samples`
-     는 관리자 대시보드(admin_token)와 통합 작업대(인트라넷 SSO) **양쪽에서 닿는 경로**다
-     (작업표 표준 열 패널과 같은 판단). 통합작업대 리뷰검수 탭의 [🖼 판별 예시] 모달과
+     는 관리자 대시보드(admin_token)와 리뷰웹시스템[3버전](인트라넷 SSO) **양쪽에서 닿는 경로**다
+     (작업표 표준 열 패널과 같은 판단). 리뷰웹시스템[3버전] 리뷰검수 탭의 [🖼 판별 예시] 모달과
      **같은 저장소**라 어느 쪽에서 올려도 결과가 같다.
    ══════════════════════════════════════════════════════════════ */
 var SMP_EP = '/api/trackb/review-inspect/samples';
@@ -423,7 +423,7 @@ function _smpRender(elId, kind, list) {
   el.innerHTML = list.map(function (s) { return _smpCardHtml(kind, s); }).join('');
 }
 
-/** 등록 현황 불러오기 — **이미 서버에 올려둔 예시가 그대로 채워진다**(통합작업대에서 올린 것 포함). */
+/** 등록 현황 불러오기 — **이미 서버에 올려둔 예시가 그대로 채워진다**(리뷰웹시스템[3버전]에서 올린 것 포함). */
 async function loadAiSamples() {
   var rc = document.getElementById('asSmpReceipt');
   if (!rc) return;
@@ -649,7 +649,7 @@ async function deleteReviewerNotice(id) {
    ★ 저장하는 것은 역할이 아니라 **열 이름**이다 — 작업표에 만들 열의 이름이 곧 시스템 판정을
      결정한다(예 '연락처'로 만들어야 구매양식 제출이 그 칸에 전화번호를 쓴다).
    ★ 서버 경로는 재기준(ADMIN_SETTINGS_API)을 쓰지 않는다 — `/api/trackb/worktable/*` 는
-     관리자 대시보드(admin_token)와 통합 작업대(인트라넷 SSO) **양쪽에서 그대로 닿는 유일한 경로**라
+     관리자 대시보드(admin_token)와 리뷰웹시스템[3버전](인트라넷 SSO) **양쪽에서 그대로 닿는 유일한 경로**라
      호스트별로 다를 이유가 없다(다르게 두면 두 화면이 서로 다른 설정을 보게 된다).
    ══════════════════════════════════════════════════════════════ */
 var WT_EP = { stats: '/api/trackb/worktable/header-stats', template: '/api/trackb/worktable/template' };
@@ -1154,7 +1154,7 @@ function _wtRenderReport(d) {
 }
 
   /* ── 마운트 ──────────────────────────────────────────────────
-     ★ 호스트 테마가 없으면(통합 작업대) `as-standalone` 으로 같은 토큰을 주입한다.
+     ★ 호스트 테마가 없으면(리뷰웹시스템[3버전]) `as-standalone` 으로 같은 토큰을 주입한다.
        admin.html 은 테마가 있어 클래스가 붙지 않으므로 **렌더 결과가 그대로**다. */
   var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, notice: _noticeHtml };
   var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, notice: loadReviewerNoticesAdmin };
@@ -1199,7 +1199,7 @@ function _wtRenderReport(d) {
       '.as-standalone{--t1:#0F172A;--t2:#475569;--t3:#94A3B8;--t4:#9CA3AF;--p:#3182f6;--border:#E5E7EB;color:var(--t1)}' +
       '.as-standalone .admin-section-header{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}' +
       /* ══ 시안 B — 좌측 목차 + 한 번에 한 묶음 (frontend/docs/design-admin-settings-wireframe.html ?v=B) ══
-         ★ 색은 전부 리터럴 — 호스트 테마(--t1·--p)는 통합 작업대에 없어 무효값이 된다.
+         ★ 색은 전부 리터럴 — 호스트 테마(--t1·--p)는 리뷰웹시스템[3버전]에 없어 무효값이 된다.
          ★ 관리자 대시보드도 같은 모듈이라 함께 바뀐다(사본을 만들지 않는다는 규율의 대가이자 목적). */
       '.as-b{display:grid;grid-template-columns:236px minmax(0,1fr);gap:18px;align-items:start}' +
       '.as-bnav{position:sticky;top:0;background:#fff;border:1px solid #E5E7EB;border-radius:13px;padding:8px;' +
@@ -1263,7 +1263,7 @@ function _wtRenderReport(d) {
       /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
       '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
       /* 작업표 표준 열 — ★ 색은 리터럴 고정(호스트 테마 변수에 의존하지 않는다).
-         admin.html·통합 작업대 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
+         admin.html·리뷰웹시스템[3버전] 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
       '.as-wtlist{display:flex;flex-direction:column;gap:6px}' +
       '.as-wtempty{color:#9CA3AF;font-size:.8rem;padding:14px 10px;text-align:center;border:1px dashed #E5E7EB;border-radius:8px}' +
       '.as-wtrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid #E5E7EB;border-radius:8px;padding:7px 10px;background:#fff}' +

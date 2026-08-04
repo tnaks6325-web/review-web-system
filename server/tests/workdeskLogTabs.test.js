@@ -1,5 +1,5 @@
 /**
- * workdeskLogTabs.test.js — 통합 작업대 「로그」 2탭 회귀가드
+ * workdeskLogTabs.test.js — 리뷰웹시스템[3버전] 「로그」 2탭 회귀가드
  * 실행: node tests/workdeskLogTabs.test.js
  *
  * 이 변경의 위험은 넷이다.
@@ -7,8 +7,8 @@
  *     나눌 수 있는 데이터가 아니라 master/admin 전용이어야 한다. 그리고 레포가 이미 밟은 함정 —
  *     역할 미들웨어 앞에 `authMiddleware` 를 빠뜨리면 **마스터 포함 전원 403**.
  *     → 라우터 스택을 **실제로 검사**한다.
- *  ② **제외 규칙** — `/api/admin/*` 을 통째로 걸러내면 **작업대 로그인·SSO 장애가 무신호**가 된다
- *     (로그인 4경로는 이름만 admin 이고 실제 호출자는 통합 작업대다).
+ *  ② **제외 규칙** — `/api/admin/*` 을 통째로 걸러내면 **작업보드 로그인·SSO 장애가 무신호**가 된다
+ *     (로그인 4경로는 이름만 admin 이고 실제 호출자는 리뷰웹시스템[3버전]이다).
  *     → 판정 순수함수를 **실행**해 그 예외가 살아 있는지 고정한다.
  *  ③ **창구 단일화** — 관리자 대시보드의 「오류디버깅」 화면이 남아 있으면 창구가 둘이 되고,
  *     index-app.js 에서 코드만 지우고 HTML 버튼을 남기면 **누르면 ReferenceError 로 죽는 탭**이 된다.
@@ -26,7 +26,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 const t = (name, cond) => { assert(cond, name); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ 통합 작업대 「로그」 2탭 회귀가드\n');
+console.log('\n▶ 리뷰웹시스템[3버전] 「로그」 2탭 회귀가드\n');
 
 const WD = F('workdesk.html');
 
@@ -69,11 +69,11 @@ console.log('\n3) 관리자 대시보드 오류 제외 규칙');
 const flt = require('../src/utils/adminUiErrorFilter');
 t('/api/admin/* 일반 경로 = 제외 대상',
   flt.isAdminUiError({ flow: 'admin', context: { path: '/api/admin/reviewer-list' } }) === true);
-t('★ 작업대 로그인 4경로는 제외하지 않는다(SSO 장애 무신호 방지)',
+t('★ 작업보드 로그인 4경로는 제외하지 않는다(SSO 장애 무신호 방지)',
   flt.WORKDESK_ADMIN_PATHS.length === 4 &&
   ['/api/admin/login', '/api/admin/staff-login', '/api/admin/advertiser-login', '/api/admin/intranet-login']
     .every(p => flt.isAdminUiError({ flow: 'admin', context: { path: p } }) === false));
-t('★ 그 4경로가 실제로 통합 작업대의 로그인 폴백이다(문서가 아니라 코드와 대조)',
+t('★ 그 4경로가 실제로 리뷰웹시스템[3버전]의 로그인 폴백이다(문서가 아니라 코드와 대조)',
   flt.WORKDESK_ADMIN_PATHS.every(p => WD.includes(p)));
 t('공용 인프라 오류(flow≠admin)는 남긴다',
   flt.isAdminUiError({ flow: 'order_submit', context: { path: '/api/submit/order' } }) === false &&
@@ -101,7 +101,7 @@ t('admin.routes 목록이 제외를 opt-in 으로 받고 제외 건수를 함께
   /wantsExclusion\(req\.query\.excludeAdminUi\)/.test(AD) && /excludedCount/.test(AD));
 t('★ 제외 적용 시 요약(뱃지)도 같은 기준으로 센다(표와 헤더가 어긋나지 않게)',
   /sumCond/.test(AD) && /sevCond/.test(AD));
-t('작업대 프록시는 기본 제외 · includeAdminUi 로만 포함',
+t('작업보드 프록시는 기본 제외 · includeAdminUi 로만 포함',
   /excludeAdminUi: req\.query\.includeAdminUi \? '' : '1'/.test(TB));
 
 /* ── 4) 창구 단일화 — 관리자 대시보드 흔적 0 ───────────────── */
@@ -118,10 +118,10 @@ t('index-app.js — 오류디버깅 함수·상수 제거',
 t('★ 죽은 호출 잔재 0 — 탭 분기·뱃지 호출도 함께 지웠다',
   !/loadErrorLogs\(\)/.test(IA) && !/_updateErrorLogBadge/.test(IA) && !/errorLogBadge/.test(IA));
 t('제거 사유가 코드에 남아 있다(다음 사람이 되살리지 않게)',
-  /통합 작업대 「로그」/.test(IA) && /시스템 오류로그/.test(IA));
+  /리뷰웹시스템\[3버전\] 「로그」/.test(IA) && /시스템 오류로그/.test(IA));
 
 /* ── 5) 프론트 배선 ───────────────────────────────────────── */
-console.log('\n5) 통합 작업대 배선');
+console.log('\n5) 리뷰웹시스템[3버전] 배선');
 t('nav 이름이 「로그」', /switchView\('logs'\)">로그<span id="lgNavBadge">/.test(WD));
 t('옛 이름(리뷰어 로그) nav 버튼 없음', !/">리뷰어 로그<span id="lgNavBadge"/.test(WD));
 t('서브탭 알약은 기존 .seg 재사용(신규 컴포넌트 0)',

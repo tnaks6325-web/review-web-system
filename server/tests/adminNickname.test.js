@@ -21,7 +21,7 @@ const csRoutes = read('src/routes/cs.routes.js');
 const revRoutes = read('src/routes/reviewer.routes.js');
 const adminRoutes = read('src/routes/admin.routes.js');
 const migration = read('migrations/078_admin_nicknames.sql');
-/* ★ 닉네임 칸의 마크업·로직은 공유 모듈(js/admin-settings.js)로 이관됐다(통합 작업대와 한 벌).
+/* ★ 닉네임 칸의 마크업·로직은 공유 모듈(js/admin-settings.js)로 이관됐다(리뷰웹시스템[3버전]과 한 벌).
    admin.html·admin-siand.html 은 마운트 지점만 들고 있으므로 "모듈 + 그 화면"으로 함께 본다
    (recruit-modal.js 를 뺐을 때 cashReceiptGuide 가드를 넓힌 것과 같은 방식 — 검사 의미는 불변). */
 const settingsJs = read('../frontend/js/admin-settings.js');
@@ -105,7 +105,7 @@ console.log('\n② 메시지 마스킹(리뷰어 메시지는 손대지 않음)'
       && !/id="myNicknameInput"/.test(read('../frontend/admin.html'))
       && !/id="myNicknameInput"/.test(read('../frontend/admin-siand.html'))
       && !/function saveMyNickname/.test(read('../frontend/js/index-app.js')));
-    ok('★ 통합 작업대도 같은 모듈 — 서버 경로만 Track B 네임스페이스로 재기준',
+    ok('★ 리뷰웹시스템[3버전]도 같은 모듈 — 서버 경로만 Track B 네임스페이스로 재기준',
       (() => { const w = read('../frontend/workdesk.html');
         return /js\/admin-settings\.js/.test(w)
           && /window\.ADMIN_SETTINGS_API\s*=\s*'\/api\/trackb\/settings'/.test(w); })());

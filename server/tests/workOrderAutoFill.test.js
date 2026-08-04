@@ -48,7 +48,7 @@ ok('어디에도 없으면 빈 값', wm.pickWorkManager({ title: '7월 진행' }
 
 /* ═══ ② 구매채널 판정(프론트 순수함수를 실제로 실행) ═══ */
 // 작업오더 상세 렌더·담당자 매핑은 공유 모듈(js/work-order-detail.js)로 이관 —
-//   통합 작업대가 같은 상세를 쓰기 위함. 검사 의미는 그대로, 읽는 대상만 넓힌다.
+//   리뷰웹시스템[3버전]이 같은 상세를 쓰기 위함. 검사 의미는 그대로, 읽는 대상만 넓힌다.
 const appSrc = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const chanSrc = appSrc.slice(appSrc.indexOf('const WO_CHANNEL_HOSTS'), appSrc.indexOf('/** 작업오더에서 채널 추정'));
 const _chan = new Function(chanSrc + '\n return _woChannelFromUrl;')();

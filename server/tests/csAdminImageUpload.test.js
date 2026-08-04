@@ -19,7 +19,7 @@
  *  ④ 프론트: 첨부 3경로(파일선택 버튼·Ctrl+V·드래그앤드롭)가 전부 같은 업로드 함수로 수렴
  *     (사본을 두면 한쪽만 8MB·5장 제한이 걸리는 드리프트가 난다).
  *  ⑤ 전송은 업로드 완료된 첨부만 대상(인플라이트 업로드 중 전송 차단) — 리뷰어측과 동일 규칙.
- *  ⑥ 통합 작업대(Track B) 프록시도 `/upload`를 위임한다 — 관리자 화면에만 넣으면 워크데스크만
+ *  ⑥ 리뷰웹시스템[3버전](Track B) 프록시도 `/upload`를 위임한다 — 관리자 화면에만 넣으면 워크데스크만
  *     이 기능이 조용히 빠진 채로 남는다(다른 6개 경로와 같은 1:1 대칭 유지).
  */
 const assert = require('assert');
@@ -86,7 +86,7 @@ ok('api.js 액션 매핑(csAdminUpload)', /'csAdminUpload':\s*\{ method: 'POST',
 ok('최대 5장 제한(리뷰어측과 동일)', /_csPending\.length >= 5/.test(appJs));
 ok('8MB 초과 파일 차단(프론트 사전 검증)', /f\.size > 8 \* 1024 \* 1024/.test(appJs));
 
-console.log('\n⑤ 통합 작업대(Track B) 프록시 대칭');
+console.log('\n⑤ 리뷰웹시스템[3버전](Track B) 프록시 대칭');
 ok('trackB가 /cs/upload도 위임(다른 6개 경로와 동일 패턴)',
   /upload:\s*_delegate\(_csRoutes, 'post', '\/upload'\)/.test(trackBRoutes));
 ok('trackB 마운트 경로도 authMiddleware+adminOrMaster로 보호',

@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>이미지 교체요청 → C/S 문의 메뉴 통합 시안 3종 — 통합 작업대</title>
+<title>이미지 교체요청 → C/S 문의 메뉴 통합 시안 3종 — 리뷰웹시스템[3버전]</title>
 <style>
-  /* 통합 작업대(workdesk.html)의 토큰을 그대로 가져와 "실물과 같은 화면"으로 보이게 한다.
+  /* 리뷰웹시스템[3버전](workdesk.html)의 토큰을 그대로 가져와 "실물과 같은 화면"으로 보이게 한다.
      ★ color-scheme:light 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다. */
   :root{
     color-scheme:light;
@@ -54,7 +54,7 @@
   .callout ul{margin:7px 0 0 17px;font-size:12.5px;color:var(--muted);line-height:1.7}
   .callout li b{color:var(--ink)}
 
-  /* ═══ 브라우저 프레임 (통합 작업대 실화면 재현 — 폭만 1180px로 축약) ═══ */
+  /* ═══ 브라우저 프레임 (리뷰웹시스템[3버전] 실화면 재현 — 폭만 1180px로 축약) ═══ */
   .frame{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--paper);
     box-shadow:0 10px 34px rgba(16,24,40,.13)}
   .fbar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:#e9edf3;border-bottom:1px solid var(--line2)}
@@ -223,13 +223,13 @@
 <div class="doc">
 
 <header class="hd">
-  <div class="eyebrow">통합 작업대 · 상단 메뉴 정리</div>
+  <div class="eyebrow">리뷰웹시스템[3버전] · 상단 메뉴 정리</div>
   <h1>이미지 교체요청을 「C/S 문의」 메뉴 안으로 — 구분 방식 시안 3종</h1>
   <p class="lead">상단 메뉴에서 <b>이미지 교체요청</b>을 빼고 <b>C/S 문의</b> 안으로 넣었을 때,
      한 화면 안에서 <b>리뷰어 C/S 문의</b>와 <b>이미지 교체요청</b>이 어떻게 구분되어 보일지를
      실제 화면 그대로 목업했습니다. 어느 안으로 갈지 골라 주시면 그대로 구현합니다.</p>
   <div class="metachips">
-    <span class="mchip">대상 <b>통합 작업대 workdesk.html</b></span>
+    <span class="mchip">대상 <b>리뷰웹시스템[3버전] workdesk.html</b></span>
     <span class="mchip">현재 메뉴 <b>11개</b> → 통합 후 <b>10개</b></span>
     <span class="mchip">구분 색 <b>문의=파랑 · 교체요청=주황</b></span>
     <span class="mchip">폭 <b>1180px로 축약</b>(실제 상한 1920px)</span>
@@ -276,11 +276,11 @@
   </div>
 
   <div class="frame">
-    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 리뷰웹시스템[3버전]</span></div>
     <div class="top">
-      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <span class="logo">리뷰웹시스템[3버전]<span class="tg">TRACK B · 그림자</span></span>
       <nav class="nav">
-        <button class="navb">작업대</button>
+        <button class="navb">작업보드</button>
         <button class="navb">관측</button>
         <button class="navb">업체관리</button>
         <button class="navb">리뷰어 로그</button>
@@ -364,11 +364,11 @@
   <p class="cap-under">A-1. [💬 리뷰어 문의] 쪽 — <b>지금 C/S 화면과 완전히 동일</b>합니다(대화 안 교체요청 카드도 그대로).</p>
 
   <div class="frame" style="margin-top:22px">
-    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 리뷰웹시스템[3버전]</span></div>
     <div class="top">
-      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <span class="logo">리뷰웹시스템[3버전]<span class="tg">TRACK B · 그림자</span></span>
       <nav class="nav">
-        <button class="navb">작업대</button><button class="navb">관측</button><button class="navb">업체관리</button>
+        <button class="navb">작업보드</button><button class="navb">관측</button><button class="navb">업체관리</button>
         <button class="navb">리뷰어 로그</button><button class="navb">작업오더</button><button class="navb">모집공고</button>
         <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
         <button class="navb">리뷰검수</button><button class="navb">등록리뷰어DB</button><button class="navb">설정</button>
@@ -430,9 +430,9 @@
   <div class="frame">
     <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — AE 로그인</span></div>
     <div class="top">
-      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <span class="logo">리뷰웹시스템[3버전]<span class="tg">TRACK B · 그림자</span></span>
       <nav class="nav">
-        <button class="navb">작업대</button><button class="navb">업체관리</button><button class="navb">리뷰어 로그</button>
+        <button class="navb">작업보드</button><button class="navb">업체관리</button><button class="navb">리뷰어 로그</button>
         <button class="navb">작업오더</button><button class="navb">모집공고</button>
         <button class="navb on">C/S 문의<span class="bdg">🟠2</span></button>
         <button class="navb">리뷰검수</button><button class="navb">설정</button>
@@ -482,11 +482,11 @@
   </div>
 
   <div class="frame">
-    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 리뷰웹시스템[3버전]</span></div>
     <div class="top">
-      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <span class="logo">리뷰웹시스템[3버전]<span class="tg">TRACK B · 그림자</span></span>
       <nav class="nav">
-        <button class="navb">작업대</button><button class="navb">관측</button><button class="navb">업체관리</button>
+        <button class="navb">작업보드</button><button class="navb">관측</button><button class="navb">업체관리</button>
         <button class="navb">리뷰어 로그</button><button class="navb">작업오더</button><button class="navb">모집공고</button>
         <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
         <button class="navb">리뷰검수</button><button class="navb">등록리뷰어DB</button><button class="navb">설정</button>
@@ -582,11 +582,11 @@
   </div>
 
   <div class="frame">
-    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 리뷰웹시스템[3버전]</span></div>
     <div class="top">
-      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <span class="logo">리뷰웹시스템[3버전]<span class="tg">TRACK B · 그림자</span></span>
       <nav class="nav">
-        <button class="navb">작업대</button><button class="navb">관측</button><button class="navb">업체관리</button>
+        <button class="navb">작업보드</button><button class="navb">관측</button><button class="navb">업체관리</button>
         <button class="navb">리뷰어 로그</button><button class="navb">작업오더</button><button class="navb">모집공고</button>
         <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
         <button class="navb">리뷰검수</button><button class="navb">등록리뷰어DB</button><button class="navb">설정</button>
@@ -696,7 +696,7 @@
 </section>
 
 <footer style="margin-top:56px;padding-top:18px;border-top:1px solid #d9dfe9;font-size:11.5px;color:var(--faint)">
-  시안 문서 · 이미지 교체요청 ↔ C/S 문의 메뉴 통합 · 통합 작업대(workdesk.html) 기준 ·
+  시안 문서 · 이미지 교체요청 ↔ C/S 문의 메뉴 통합 · 리뷰웹시스템[3버전](workdesk.html) 기준 ·
   화면은 실제 화면 요소를 재현한 목업이며 데이터는 예시입니다.
 </footer>
 

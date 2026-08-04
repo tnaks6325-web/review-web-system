@@ -2,16 +2,16 @@
    C/S 문의창구 (공유 모듈)
 
    원래 admin.html 인라인 마크업 + index-app.js 안에만 있던 화면 코드를 **모듈로 뺐다**.
-   통합 작업대에서도 같은 문의창구를 써야 하는데, 사본을 만들면 답장·메모·상태변경 중
+   리뷰웹시스템[3버전]에서도 같은 문의창구를 써야 하는데, 사본을 만들면 답장·메모·상태변경 중
    하나만 고쳐도 두 화면이 갈라진다(모집공고 모달·작업오더 상세와 같은 규율).
 
    ★ 함수명·본문은 한 글자도 바꾸지 않았다 — 생성 HTML 안의 onclick 문자열
      (csSendReply·csSaveMemo·csToggleStatus·csViewImage·csOpenConversation·
      csPickFiles·csRemoveAttach·csHandlePaste…)과
      index-payment.js 의 SSE 훅(window.csOnSSE), 회귀가드가 이름으로 묶여 있다.
-   ★ 호스트 전역(escHtml·showToast)이 없는 화면(통합 작업대)을 위해 폴백을 둔다.
+   ★ 호스트 전역(escHtml·showToast)이 없는 화면(리뷰웹시스템[3버전])을 위해 폴백을 둔다.
    ★ 서버 경로는 **api.js 의 `window.CS_API_BASE` 재기준**으로 갈아끼운다 —
-     통합 작업대는 `/api/trackb/cs/*`(인트라넷 SSO 토큰이 도달 가능한 유일한 경로).
+     리뷰웹시스템[3버전]은 `/api/trackb/cs/*`(인트라넷 SSO 토큰이 도달 가능한 유일한 경로).
 
    사용: <div id="csInquiryMount"></div> + <script src="js/cs-inquiry.js"></script>
    ══════════════════════════════════════════════════════════════ */
@@ -489,11 +489,11 @@ function csUpdateBadge(count) {
     if (count > 0) { b.textContent = count; b.style.display = "inline-block"; }
     else b.style.display = "none";
   }
-  /* 호스트 훅 — 이 모듈의 미확인 수를 자기 UI(통합 작업대 nav 뱃지)에도 반영하게 한다.
+  /* 호스트 훅 — 이 모듈의 미확인 수를 자기 UI(리뷰웹시스템[3버전] nav 뱃지)에도 반영하게 한다.
      ★ 밖에서 window.csUpdateBadge 를 감싸는 방식은 **동작하지 않는다**: 모듈 내부 호출
        (loadCsRooms·csRefreshBadge)은 렉시컬 스코프의 이 함수를 직접 부르므로 래퍼를
        거치지 않는다(코드리뷰 지적 · 실측). 그래서 훅을 안에서 부른다.
-     ★ #csInquiryBadge 가 없어도(=통합 작업대) 훅은 호출된다 — 위 early return 을 없앤 이유.
+     ★ #csInquiryBadge 가 없어도(=리뷰웹시스템[3버전]) 훅은 호출된다 — 위 early return 을 없앤 이유.
      ★ 훅 미설정(관리자 대시보드)이면 아무 일도 안 한다 = 기존 동작 불변. */
   try {
     if (typeof window.CS_ON_BADGE === "function") window.CS_ON_BADGE(Number(count) || 0);
@@ -523,7 +523,7 @@ function csOnSSE(evtType, data) {
 
 /* ── 리뷰이미지 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
    ★ 경로는 C/S 와 같은 방식으로 재기준한다(window.REVIEW_EDIT_API_BASE):
-     관리자 대시보드 = /api/review-edit, 통합 작업대 = /api/trackb/review-edit
+     관리자 대시보드 = /api/review-edit, 리뷰웹시스템[3버전] = /api/trackb/review-edit
      (인트라넷 SSO 토큰은 /api/review-edit/* 에 도달 자체가 불가능하다).
    ★ 처리 후 **서버 값으로 다시 읽는다** — 프론트에서 낙관적으로 그리면 서버가 거부했을 때
      화면만 승인된 것처럼 남는다. */
@@ -572,7 +572,7 @@ function csReloadAfterReviewEdit() {
 }
 
   /* ── 마운트 ────────────────────────────────────────────────
-     마크업도 모듈이 들고 있다 — admin.html 에 남겨두면 통합 작업대에 같은 화면을
+     마크업도 모듈이 들고 있다 — admin.html 에 남겨두면 리뷰웹시스템[3버전]에 같은 화면을
      띄우려고 사본을 만들게 된다. id 는 그대로라 기존 JS 가 전부 그대로 동작한다.
 
      ★ #csConvPane 은 max-width:860px — 넓은 화면(QHD 이상)에서 대화창이 끝없이

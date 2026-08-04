@@ -1,5 +1,5 @@
 /**
- * reviewerDbTab.test.js — 통합 작업대 '등록리뷰어DB' 탭 회귀가드
+ * reviewerDbTab.test.js — 리뷰웹시스템[3버전] '등록리뷰어DB' 탭 회귀가드
  * 실행: node tests/reviewerDbTab.test.js        (서버 기동 불필요)
  *       PGTEST_URL=postgres://... node tests/reviewerDbTab.test.js   (진짜 PG로 SQL까지 검증)
  *

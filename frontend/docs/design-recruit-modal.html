@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>모집공고 수정 UI 리디자인 시안 3종 — 통합 작업대</title>
+<title>모집공고 수정 UI 리디자인 시안 3종 — 리뷰웹시스템[3버전]</title>
 <style>
 /* ══════════════════════════════════════════════════════════════
    모집공고 발행·수정 모달 리디자인 시안 (목업 전용 · 제품 코드 아님)
@@ -203,7 +203,7 @@ select.in{appearance:none;background-image:linear-gradient(45deg,transparent 50%
 <div class="eyebrow">DESIGN PROPOSAL</div>
 <h1>모집공고 발행·수정 UI 리디자인 — 시안 3종</h1>
 <p class="lead">
-  통합 작업대(<code>workdesk.html</code>)와 관리자 대시보드가 공유하는 <b>모집공고 모달</b>(<code>js/recruit-modal.js</code>)의
+  리뷰웹시스템[3버전](<code>workdesk.html</code>)와 관리자 대시보드가 공유하는 <b>모집공고 모달</b>(<code>js/recruit-modal.js</code>)의
   리디자인 시안입니다. 세 시안 모두 <b>필드 ID·저장 로직은 그대로</b>이고 바뀌는 것은 배치와 컨테이너 문법뿐입니다.
 </p>
 <div class="chips">
@@ -664,7 +664,7 @@ select.in{appearance:none;background-image:linear-gradient(45deg,transparent 50%
   <ul>
     <li>세 시안 모두 <b>필드 ID 65개 불변</b> → <code>index-recruit.js</code>의 프리필·저장·자동점검 로직 <b>무수정</b>.
       바뀌는 것은 <code>js/recruit-modal.js</code>의 마크업/CSS와 회귀가드(<code>tests/recruitModalLayout.test.js</code>)의 레이아웃 단언뿐.</li>
-    <li>인라인 <code>style=</code>로 흩어진 색·간격을 <b>클래스 + 폴백 붙은 CSS 변수</b>로 모은다 — 통합 작업대(admin 테마 없음)에서도 같은 모양이 나오는 현행 원칙 유지.</li>
+    <li>인라인 <code>style=</code>로 흩어진 색·간격을 <b>클래스 + 폴백 붙은 CSS 변수</b>로 모은다 — 리뷰웹시스템[3버전](admin 테마 없음)에서도 같은 모양이 나오는 현행 원칙 유지.</li>
     <li>A는 현행 DOM 순서를 거의 그대로 쓰므로 가장 빠르고, B·C는 섹션 컨테이너 재배치가 필요하다(필드는 그대로 이동).</li>
   </ul>
 </div>

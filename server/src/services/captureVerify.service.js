@@ -14,7 +14,7 @@ const { logger } = require('../utils/logger');
 // 이 확신도 미만은 판정하지 않는다(모호한 캡처로 리뷰어를 붙잡지 않기 위한 하한)
 const MIN_CONFIDENCE = Number(process.env.CAPTURE_VERIFY_MIN_CONFIDENCE || 0.7);
 // ★ "확실히 아니다" 하한 — 이 이상일 때만 관리자 실시간 알림(critical)으로 승격한다.
-//   0.7~0.9 구간은 리뷰어 유도(인라인 경고) + 통합작업대 로그(warn)까지만 —
+//   0.7~0.9 구간은 리뷰어 유도(인라인 경고) + 리뷰웹시스템[3버전] 로그(warn)까지만 —
 //   애매한 판정까지 빨간 알림을 띄우면 급한 건(주문 소실)이 묻힌다(늑대소년 방지).
 const SURE_CONFIDENCE = Number(process.env.CAPTURE_VERIFY_SURE_CONFIDENCE || 0.9);
 const ENABLED = process.env.CAPTURE_VERIFY !== '0';
@@ -94,7 +94,7 @@ function _slotScope({ sheetId, tabName, slotKey, rowIndex }) {
  * 실패해도 업로드에는 영향 없음 — 알림은 부가 신호다.
  *
  * ★ 확실히 아님(verdict.sure) → `critical` = 관리자 대시보드 빨간 알림 카드 + SSE 실시간.
- *   애매(0.7~0.9) → `warn` = 통합작업대 "리뷰어 로그"에만. 둘 다 제출은 막지 않는다.
+ *   애매(0.7~0.9) → `warn` = 리뷰웹시스템[3버전] "리뷰어 로그"에만. 둘 다 제출은 막지 않는다.
  * ★ 도배 방지: 같은 (탭·행·슬롯)에 **미해결** 알림이 이미 있으면 새로 쌓지 않는다.
  *   (reviewer_event_logs의 부분유니크는 order_submission_id 기준이라 캡처 알림엔 안 걸린다.)
  */

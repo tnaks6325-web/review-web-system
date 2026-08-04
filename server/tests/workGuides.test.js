@@ -1,6 +1,6 @@
 'use strict';
 /**
- * 회귀가드 — 통합 작업대 [업무가이드] 메뉴
+ * 회귀가드 — 리뷰웹시스템[3버전] [업무가이드] 메뉴
  *
  * 실행: node tests/workGuides.test.js
  *

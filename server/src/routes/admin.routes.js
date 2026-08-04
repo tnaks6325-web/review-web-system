@@ -42,7 +42,7 @@ router.post('/staff-login', async (req, res, next) => {
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/admin/intranet-login — 인트라넷(inadd) 계정으로 AE(staff) 로그인
-//   Track B 통합작업대 SSO: 인트라넷 서버에 자격 프록시 검증 후 review JWT(role='staff') 발급.
+//   Track B 리뷰웹시스템[3버전] SSO: 인트라넷 서버에 자격 프록시 검증 후 review JWT(role='staff') 발급.
 //   인트라넷 로그인 성공 시점에 이 엔드포인트로 받은 토큰을 #sso 프래그먼트로 이어받는다.
 // ═══════════════════════════════════════════════════════════
 const { intranetLoginLimiter } = require('../middleware/rateLimit.middleware');
@@ -1153,7 +1153,7 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
     if (severity) { params.push(severity); where.push(`severity = $${params.length}`); }
     if (flow)     { params.push(flow);     where.push(`flow = $${params.length}`); }
     if (source)   { params.push(source);   where.push(`source = $${params.length}`); }
-    // ── 관리자 대시보드에서 발생한 오류 제외(통합 작업대 전용 · opt-in) ──
+    // ── 관리자 대시보드에서 발생한 오류 제외(리뷰웹시스템[3버전] 전용 · opt-in) ──
     //   규칙 단일 출처 = utils/adminUiErrorFilter. 기본은 미적용이라 다른 소비처 동작 불변.
     //   ★ 제외 건수를 함께 세어 화면이 "N건 제외"를 표기한다(조용한 누락 금지).
     const excludeAdminUi = wantsExclusion(req.query.excludeAdminUi);

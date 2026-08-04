@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>기간별 리뷰비 — 설계안 · 모집공고 수정 시안 (통합 작업대)</title>
+<title>기간별 리뷰비 — 설계안 · 모집공고 수정 시안 (리뷰웹시스템[3버전])</title>
 <style>
 /* 목업 문서 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨지므로 라이트 고정 (레포 관례) */
 :root{color-scheme:light}
@@ -63,7 +63,7 @@ th{background:#F7F9FC;font-weight:800;font-size:.74rem;color:#475569}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.78rem}
 
-/* ══ 통합 작업대 껍데기 목업 ══ */
+/* ══ 리뷰웹시스템[3버전] 껍데기 목업 ══ */
 .wd{border-radius:16px;overflow:hidden;border:1px solid #CBD5E1;box-shadow:0 8px 30px rgba(15,23,42,.13);background:#F8FAFC}
 .wd-top{background:#111827;color:#fff;padding:9px 14px;display:flex;align-items:center;gap:12px;font-size:.78rem}
 .wd-top .logo{font-weight:900;letter-spacing:-.02em}
@@ -159,7 +159,7 @@ footer{text-align:center;color:#94A3B8;font-size:.72rem;padding:26px 0}
       기간(구간)별 리뷰비를 등록하고, <b>참여한 시점의 금액이 영구히 고정</b>되도록 하는 안입니다.
     </div>
     <div class="meta">
-      <span>기준 화면 · 통합 작업대(workdesk) 모집공고 탭</span>
+      <span>기준 화면 · 리뷰웹시스템[3버전](workdesk) 모집공고 탭</span>
       <span>v2 · 2026-08-04 · <b>구현 완료</b></span>
       <span>migration 082</span>
     </div>
@@ -314,7 +314,7 @@ ALTER TABLE order_submissions     ADD COLUMN review_fee_snapshot INTEGER;</code>
 
 <!-- ══════════ 4 ══════════ -->
 <section class="card" id="p4">
-  <h2>4. 화면 시안 — 통합 작업대 › 모집공고 수정</h2>
+  <h2>4. 화면 시안 — 리뷰웹시스템[3버전] › 모집공고 수정</h2>
   <p style="color:#64748B;font-size:.82rem;margin-bottom:12px">
     실제 모달(<code>js/recruit-modal.js</code>) 레이아웃 그대로입니다. <b>기본정보의 “리뷰비” 한 줄이 접히는 구간표로 확장</b>되고,
     나머지 필드·ID는 한 글자도 바뀌지 않습니다. 아래 목업은 <b>실제로 조작해 볼 수 있습니다</b>(구간 추가·삭제·날짜 변경).
@@ -322,12 +322,12 @@ ALTER TABLE order_submissions     ADD COLUMN review_fee_snapshot INTEGER;</code>
 
   <div class="wd">
     <div class="wd-top">
-      <span class="logo">통합 작업대</span>
+      <span class="logo">리뷰웹시스템[3버전]</span>
       <span style="opacity:.6">|</span><span style="opacity:.85">인아드 체험단</span>
       <span class="sp"></span><span class="who">만두 (admin)</span>
     </div>
     <div class="wd-tabs">
-      <div>작업대</div><div>업체관리</div><div>작업오더</div><div class="on">모집공고</div>
+      <div>작업보드</div><div>업체관리</div><div>작업오더</div><div class="on">모집공고</div>
       <div>등록리뷰어DB</div><div>리뷰어 로그</div><div>C/S 문의창구</div><div>설정</div>
     </div>
     <div class="wd-body">
@@ -505,7 +505,7 @@ ALTER TABLE order_submissions     ADD COLUMN review_fee_snapshot INTEGER;</code>
   <div class="callout c-good">
     <b>리뷰어앱 인라인 공고수정(스코프 토큰)에는 노출하지 않습니다</b> —
     그 화면의 수정 가능 필드는 서버 화이트리스트 12컬럼과 1:1이고, 금액 구간은 정산에 직결되는 값이라
-    관리자/통합 작업대에서만 편집합니다(기존 “옵션 편집 불가”와 같은 판단).
+    관리자/리뷰웹시스템[3버전]에서만 편집합니다(기존 “옵션 편집 불가”와 같은 판단).
   </div>
 </section>
 
@@ -547,7 +547,7 @@ ALTER TABLE order_submissions     ADD COLUMN review_fee_snapshot INTEGER;</code>
   <h3>운영 순서 (권장)</h3>
   <ol style="font-size:.86rem">
     <li>배포 직후, <b>구간을 등록하기 전에</b> 리뷰어 누적 금액이 배포 전과 같은지 확인(구간 0개 = 기존 동작).</li>
-    <li>문제의 공고를 통합 작업대 › 모집공고에서 열고 <b>📅 기간별 리뷰비</b>를 켠 뒤 두 줄 입력 → 저장.</li>
+    <li>문제의 공고를 리뷰웹시스템[3버전] › 모집공고에서 열고 <b>📅 기간별 리뷰비</b>를 켠 뒤 두 줄 입력 → 저장.</li>
     <li>7월 참여자 화면에서 1,000원으로 표시되는지 확인. 8월 신규 참여는 1,500원.</li>
   </ol>
 
@@ -570,7 +570,7 @@ ALTER TABLE order_submissions     ADD COLUMN review_fee_snapshot INTEGER;</code>
   </ul>
 </section>
 
-<footer>기간별 리뷰비 설계안 v1 · 통합 작업대 기준 · 구현 전 검토용 시안</footer>
+<footer>기간별 리뷰비 설계안 v1 · 리뷰웹시스템[3버전] 기준 · 구현 전 검토용 시안</footer>
 </div>
 
 <script>

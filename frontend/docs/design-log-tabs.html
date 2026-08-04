@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>시안 — 통합 작업대 「로그」 (리뷰어 비정상로그 · 시스템 오류로그)</title>
+<title>시안 — 리뷰웹시스템[3버전] 「로그」 (리뷰어 비정상로그 · 시스템 오류로그)</title>
 <style>
-  /* ═══ 통합 작업대(workdesk.html)의 실제 토큰·클래스를 그대로 옮겨 온 시안 ═══
+  /* ═══ 리뷰웹시스템[3버전](workdesk.html)의 실제 토큰·클래스를 그대로 옮겨 온 시안 ═══
      색·간격·표 규칙을 새로 만들지 않았다 — 실물과 눈으로 대조하기 위한 목업이라
      여기서만 예뻐 보이고 실제 화면에서 달라지는 일이 없어야 한다. */
   :root{
@@ -61,7 +61,7 @@
   .ovnote b{color:var(--muted)}
   .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
 
-  /* ── ★ 서브탭 = 작업대의 .seg 알약(신규 컴포넌트 아님) ── */
+  /* ── ★ 서브탭 = 작업보드의 .seg 알약(신규 컴포넌트 아님) ── */
   .segbar{display:flex;align-items:center;gap:8px;margin:0 0 13px;flex-wrap:wrap;max-width:1300px}
   .seg{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 14px;cursor:pointer;white-space:nowrap;flex:none}
   .seg:hover{border-color:var(--line2)}
@@ -113,7 +113,7 @@
   pre.stack{margin:8px 0 0;padding:9px 11px;background:#0f172a;color:#cbd5e1;border-radius:8px;font-size:11px;line-height:1.6;overflow:auto;max-height:150px}
   .tabpane[hidden]{display:none}
 
-  /* ── AI 분석 모달(작업대 .modalov/.modalbox 규격) ── */
+  /* ── AI 분석 모달(작업보드 .modalov/.modalbox 규격) ── */
   .modalov{position:relative;background:rgba(15,35,42,.5);padding:22px;display:flex;justify-content:center}
   .modalbox{background:var(--card);border-radius:14px;width:940px;max-width:100%;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13.5px;font-weight:750}
@@ -141,46 +141,46 @@
 <body>
 <div class="doc">
 
-  <h1>시안 — 통합 작업대 <b>「로그」</b> 메뉴</h1>
+  <h1>시안 — 리뷰웹시스템[3버전] <b>「로그」</b> 메뉴</h1>
   <div class="sub">「리뷰어 로그」 → <b>「로그」</b>로 이름을 바꾸고, 안에서 <b>리뷰어 비정상로그</b>(기본) / <b>시스템 오류로그</b> 두 탭으로 나눈 화면 목업입니다. 아래 알약을 실제로 눌러 전환·행 펼침까지 확인할 수 있습니다.</div>
 
   <div class="docnote">
     <div class="ok">
       <b>확정된 것</b> (2026-08-04 사용자 확정)
       <ul style="margin-top:6px">
-        <li><b>통합 작업대가 메인</b> — 관리자 대시보드는 더 이상 필요 없습니다. 오류 창구는 작업대 하나로 일원화하고, 관리자 대시보드의 「오류디버깅」 탭은 <b>제거</b>합니다(창구가 둘이면 어느 쪽이 진실인지 갈립니다).</li>
-        <li><b>관리자 대시보드에서 발생한 오류는 가져오지 않습니다</b> — 없어질 화면의 오류가 작업대 목록을 채우면 정작 봐야 할 게 묻힙니다. 판정 기준은 아래 “제외 규칙”.</li>
-        <li><b>AI 다중에이전트 분석은 그대로 유지</b> — 오류검증 · 레드팀 · 블루팀 · 감독관 · 예방가드 · 결정자 6역할과 이행요청 게이트를 작업대 시스템 오류로그에서 그대로 씁니다.</li>
+        <li><b>리뷰웹시스템[3버전]이 메인</b> — 관리자 대시보드는 더 이상 필요 없습니다. 오류 창구는 작업보드 하나로 일원화하고, 관리자 대시보드의 「오류디버깅」 탭은 <b>제거</b>합니다(창구가 둘이면 어느 쪽이 진실인지 갈립니다).</li>
+        <li><b>관리자 대시보드에서 발생한 오류는 가져오지 않습니다</b> — 없어질 화면의 오류가 작업보드 목록을 채우면 정작 봐야 할 게 묻힙니다. 판정 기준은 아래 “제외 규칙”.</li>
+        <li><b>AI 다중에이전트 분석은 그대로 유지</b> — 오류검증 · 레드팀 · 블루팀 · 감독관 · 예방가드 · 결정자 6역할과 이행요청 게이트를 작업보드 시스템 오류로그에서 그대로 씁니다.</li>
       </ul>
     </div>
     <h2>화면이 정한 것</h2>
     <ul>
       <li><b>메뉴 이름 = 「로그」</b> · 뱃지는 <b>두 탭 미해결 건수의 합</b> 하나로 표시합니다(C/S 뱃지와 같은 방식 — 한쪽만 도착했다고 다른 쪽을 0으로 접지 않습니다).</li>
       <li><b>기본 탭 = 리뷰어 비정상로그.</b> 진입 시 항상 이 탭이 먼저 열립니다(대시보드 중요알림 <span class="kv">#view=logs</span> 딥링크도 동일).</li>
-      <li><b>시스템 오류로그의 데이터 = 이미 쌓이고 있는 <span class="kv">error_logs</span></b>(마이그레이션 026/028). 새 저장소·새 수집 경로를 만들지 않습니다 — 화면만 작업대로 옮깁니다.</li>
-      <li><b>“모든 오류의 기준 = 통합 작업대”</b> — 시스템 오류도 관리자 대시보드의 <i>카드 목록 + 우측 패널</i>이 아니라 <b>작업대의 로그 표(같은 <span class="kv">.lgtable</span>) + 행 펼침</b>으로 통일했습니다. 두 탭의 열 의미(상태 · 발생시점 · 대상 · 오류내용 · 조치안내)가 1:1로 대응해, 탭을 옮겨도 읽는 법이 바뀌지 않습니다. 무거운 AI 분석만 <b>모달</b>로 분리합니다(리뷰검수 상세 팝업과 같은 방식).</li>
+      <li><b>시스템 오류로그의 데이터 = 이미 쌓이고 있는 <span class="kv">error_logs</span></b>(마이그레이션 026/028). 새 저장소·새 수집 경로를 만들지 않습니다 — 화면만 작업보드로 옮깁니다.</li>
+      <li><b>“모든 오류의 기준 = 리뷰웹시스템[3버전]”</b> — 시스템 오류도 관리자 대시보드의 <i>카드 목록 + 우측 패널</i>이 아니라 <b>작업보드의 로그 표(같은 <span class="kv">.lgtable</span>) + 행 펼침</b>으로 통일했습니다. 두 탭의 열 의미(상태 · 발생시점 · 대상 · 오류내용 · 조치안내)가 1:1로 대응해, 탭을 옮겨도 읽는 법이 바뀌지 않습니다. 무거운 AI 분석만 <b>모달</b>로 분리합니다(리뷰검수 상세 팝업과 같은 방식).</li>
       <li><b>권한</b> — 리뷰어 비정상로그는 지금처럼 내부인 전원(AE는 담당 업체 탭만, 해결 처리는 master/admin). <b>시스템 오류로그 탭은 master/admin에게만 노출</b>합니다(경로·스택·요청 컨텍스트가 실려 담당 스코프로 나눌 수 있는 데이터가 아닙니다 — 등록리뷰어DB와 같은 판단). AE에게는 알약 자체가 안 보입니다.</li>
     </ul>
 
     <div class="q">
       <b>제외 규칙 — “관리자 대시보드에서 발생한 오류”를 어떻게 가려내나</b>
       <ul style="margin-top:6px">
-        <li>서버는 이미 요청 경로로 오류의 출처를 나눠 저장하고 있습니다: <span class="kv">/api/admin/*</span> 에서 난 오류는 <span class="kv">flow = 'admin'</span> 으로 기록됩니다(<span class="kv">error.middleware.js</span>). <b>관리자 대시보드만 쓰는 표면</b>이라 이 한 줄이 곧 “대시보드에서 난 오류”입니다 — 인트라넷 SSO 토큰은 <span class="kv">/api/admin/*</span> 에 도달 자체가 불가능하므로 작업대 오류가 여기 섞이지 않습니다.</li>
-        <li><b>단, 로그인 4경로는 예외로 남깁니다</b> — <span class="kv">/api/admin/login</span> · <span class="kv">staff-login</span> · <span class="kv">advertiser-login</span> · <span class="kv">intranet-login</span> 은 이름만 admin이지 <b>통합 작업대가 직접 호출하는 로그인 경로</b>입니다(workdesk.html:1025~1028). 통째로 걸러내면 <b>작업대 로그인·SSO 장애가 아무 화면에도 안 뜨는 무신호 상태</b>가 됩니다. → 그래서 “<span class="kv">/api/admin/*</span> 제외, 로그인 4경로는 유지”가 정확한 규칙입니다.</li>
+        <li>서버는 이미 요청 경로로 오류의 출처를 나눠 저장하고 있습니다: <span class="kv">/api/admin/*</span> 에서 난 오류는 <span class="kv">flow = 'admin'</span> 으로 기록됩니다(<span class="kv">error.middleware.js</span>). <b>관리자 대시보드만 쓰는 표면</b>이라 이 한 줄이 곧 “대시보드에서 난 오류”입니다 — 인트라넷 SSO 토큰은 <span class="kv">/api/admin/*</span> 에 도달 자체가 불가능하므로 작업보드 오류가 여기 섞이지 않습니다.</li>
+        <li><b>단, 로그인 4경로는 예외로 남깁니다</b> — <span class="kv">/api/admin/login</span> · <span class="kv">staff-login</span> · <span class="kv">advertiser-login</span> · <span class="kv">intranet-login</span> 은 이름만 admin이지 <b>리뷰웹시스템[3버전]이 직접 호출하는 로그인 경로</b>입니다(workdesk.html:1025~1028). 통째로 걸러내면 <b>작업보드 로그인·SSO 장애가 아무 화면에도 안 뜨는 무신호 상태</b>가 됩니다. → 그래서 “<span class="kv">/api/admin/*</span> 제외, 로그인 4경로는 유지”가 정확한 규칙입니다.</li>
         <li><b>제외는 조용히 하지 않습니다</b> — 목록 상단에 “<i>관리자 대시보드 경로에서 발생한 N건은 제외했습니다</i>”를 표기하고, 필요하면 그 자리에서 포함해 볼 수 있게 합니다(조용한 누락 금지).</li>
-        <li>시트·Drive·AI·DB·큐·리뷰어 제출 등 <b>공용 인프라 오류는 그대로 남습니다</b> — 관리자 대시보드에서 눌러 났든 작업대에서 눌러 났든 같은 기능의 같은 고장이라 가려내면 손해입니다.</li>
+        <li>시트·Drive·AI·DB·큐·리뷰어 제출 등 <b>공용 인프라 오류는 그대로 남습니다</b> — 관리자 대시보드에서 눌러 났든 작업보드에서 눌러 났든 같은 기능의 같은 고장이라 가려내면 손해입니다.</li>
       </ul>
     </div>
   </div>
 
-  <div class="screenlabel">화면 1 — 통합 작업대 › 로그</div>
+  <div class="screenlabel">화면 1 — 리뷰웹시스템[3버전] › 로그</div>
   <div class="screen">
 
     <!-- 상단바 -->
     <div class="top">
-      <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
+      <span class="logo">리뷰웹시스템[3버전] <span class="tag">TRACK B · 그림자</span></span>
       <nav class="nav">
-        <button class="navb">작업대</button>
+        <button class="navb">작업보드</button>
         <button class="navb">관측</button>
         <button class="navb">업체관리</button>
         <button class="navb on">로그<span class="nb">🔴7</span></button>
@@ -245,7 +245,7 @@
                 <b>조치안내</b> 자동 재기록을 진행합니다 — 반영되면 시트 하단 행 비고에 [시스템 재기록 · 확인요망]으로 표기됩니다.
               </div>
               <div class="lgexpacts">
-                <button class="btn xs">작업대 ↗</button>
+                <button class="btn xs">작업보드 ↗</button>
                 <button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C">취소 처리</button>
                 <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
               </div>
@@ -270,7 +270,7 @@
                 <div class="lgcaphint">📷 리뷰어가 제출한 캡처 — 클릭하면 크게 보기</div>
               </div>
               <div class="lgexpacts">
-                <button class="btn xs">작업대 ↗</button>
+                <button class="btn xs">작업보드 ↗</button>
                 <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
               </div>
             </div></td></tr>
@@ -286,7 +286,7 @@
             </tr>
             <tr class="lgdetail" id="d-a3" hidden><td colspan="8"><div class="lgexpand">
               <div class="lgexptext"><b>오류내용</b> 구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.<br><b>조치안내</b> 구매캡쳐 보완 필요.</div>
-              <div class="lgexpacts"><button class="btn xs">작업대 ↗</button><button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button></div>
+              <div class="lgexpacts"><button class="btn xs">작업보드 ↗</button><button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button></div>
             </div></td></tr>
 
             <tr class="lgrow" onclick="ex('a4')">
@@ -300,7 +300,7 @@
             </tr>
             <tr class="lgdetail" id="d-a4" hidden><td colspan="8"><div class="lgexpand">
               <div class="lgexptext"><b>오류내용</b> 기록 행이 118→121행으로 이동됨.<br><b>조치안내</b> 자동 보정 완료 — 조치 불필요.</div>
-              <div class="lgexpacts"><button class="btn xs">작업대 ↗</button><button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button></div>
+              <div class="lgexpacts"><button class="btn xs">작업보드 ↗</button><button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button></div>
             </div></td></tr>
 
             <tr class="lgrow lgdone" onclick="ex('a5')">
@@ -314,7 +314,7 @@
             </tr>
             <tr class="lgdetail" id="d-a5" hidden><td colspan="8"><div class="lgexpand">
               <div class="lgexptext"><b>오류내용</b> 구매양식을 제출했으나, 아직 시트에 입력되지 못함(상태: queued).<br><span style="color:var(--faint)">✔ 확인: 박은비</span></div>
-              <div class="lgexpacts"><button class="btn xs">작업대 ↗</button></div>
+              <div class="lgexpacts"><button class="btn xs">작업보드 ↗</button></div>
             </div></td></tr>
           </tbody>
         </table></div>
@@ -338,8 +338,8 @@
         </div>
         <div class="ovnote">서버·DB·외부 API(구글 시트/Drive/AI)에서 발생한 <b>비정상 이벤트</b>를 자동 수집해 한국어 한 문장으로 풀이합니다. 같은 유형은 <b>한 줄로 묶고 발생 횟수만 누적</b>합니다(중복 폭주 방지). <b>master/admin 전용</b>입니다.</div>
         <div class="ovnote" style="margin-bottom:8px;color:var(--muted)">
-          ※ <b>관리자 대시보드(<span class="kv">/api/admin/*</span>)에서 발생한 오류 12건은 제외</b>했습니다 — 통합 작업대가 메인이라 없어질 화면의 오류는 목록을 채우지 않습니다.
-          작업대 <b>로그인·SSO 경로</b>에서 난 오류는 admin 경로여도 <b>그대로 표시</b>합니다.
+          ※ <b>관리자 대시보드(<span class="kv">/api/admin/*</span>)에서 발생한 오류 12건은 제외</b>했습니다 — 리뷰웹시스템[3버전]이 메인이라 없어질 화면의 오류는 목록을 채우지 않습니다.
+          작업보드 <b>로그인·SSO 경로</b>에서 난 오류는 admin 경로여도 <b>그대로 표시</b>합니다.
           <a href="javascript:void(0)" style="color:var(--accent)">제외분 포함해 보기</a>
         </div>
 

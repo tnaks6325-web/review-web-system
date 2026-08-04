@@ -64,7 +64,7 @@ body{ letter-spacing:-.01em; }
 
 
 /* 모집공고 발행·수정 모달(#recruitModal)의 마크업·CSS는 js/recruit-modal.js 로 이관 —
-   통합 작업대와 한 벌로 쓴다(사본을 두면 두 화면이 어긋난다). */
+   리뷰웹시스템[3버전]과 한 벌로 쓴다(사본을 두면 두 화면이 어긋난다). */
 .dash-filter-btn{ min-height:40px; }
 
 /* ── 모달 토스 정리 (헤더·여백·버튼 정렬) ── */
@@ -662,9 +662,9 @@ body{ letter-spacing:-.01em; }
             <i class="fas fa-gauge-high"></i>
             <span>시트API 모니터</span>
           </button>
-          <button class="btn-header-sq btn-header-mirror" onclick="openWorkdesk()" title="Track B 통합 작업대(그림자) — 구글시트 대체 평행 트랙: 명단·상태·소유 열람/편집 리허설. 라이브 무영향 (자동 로그인)">
+          <button class="btn-header-sq btn-header-mirror" onclick="openWorkdesk()" title="Track B 리뷰웹시스템[3버전](그림자) — 구글시트 대체 평행 트랙: 명단·상태·소유 열람/편집 리허설. 라이브 무영향 (자동 로그인)">
             <i class="fas fa-layer-group"></i>
-            <span>통합 작업대</span>
+            <span>리뷰웹시스템[3버전]</span>
           </button>
           <button class="btn-header-sq" onclick="window.open('/docs/prd-userflow.html','_blank')" title="시스템 소개서 — PRD·유저플로우·와이어프레임 보고서 (새창)">
             <i class="fas fa-book-open"></i>
@@ -737,7 +737,7 @@ body{ letter-spacing:-.01em; }
         </div>
 
         <!-- 리뷰어 소식·공지 관리 — 마크업·로직은 공유 모듈(js/admin-settings.js).
-             통합 작업대 설정 탭과 한 벌로 쓴다(사본 금지). -->
+             리뷰웹시스템[3버전] 설정 탭과 한 벌로 쓴다(사본 금지). -->
         <div id="rvNoticeMount" style="min-width:0"></div>
 
         <!-- 작업오더 간편보기 (최신 4건) -->
@@ -1165,7 +1165,7 @@ body{ letter-spacing:-.01em; }
         </div>
       </div><!-- /tab-reviewers -->
 
-      <!-- ★ C/S 문의창구 탭 — 마크업·로직은 공유 모듈(js/cs-inquiry.js). 통합 작업대와 한 벌로 쓴다. -->
+      <!-- ★ C/S 문의창구 탭 — 마크업·로직은 공유 모듈(js/cs-inquiry.js). 리뷰웹시스템[3버전]과 한 벌로 쓴다. -->
       <div id="csInquiryMount"></div>
 
       <!-- ★ 모집공고 관리 탭 -->
@@ -1413,7 +1413,7 @@ body{ letter-spacing:-.01em; }
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
         <!-- 내 닉네임 · 회사 사업자번호(제공정보) · 현금영수증 발행방법 이미지 —
-             마크업·로직은 공유 모듈(js/admin-settings.js). 통합 작업대 설정 탭과 한 벌로 쓴다(사본 금지). -->
+             마크업·로직은 공유 모듈(js/admin-settings.js). 리뷰웹시스템[3버전] 설정 탭과 한 벌로 쓴다(사본 금지). -->
         <div id="adminSettingsMount"></div>
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
@@ -1571,8 +1571,8 @@ body{ letter-spacing:-.01em; }
       <!-- 주문 원장(DB 주체) 인라인 뷰어/편집 -->
       <div id="tab-order-ledger" class="admin-tab-pane" style="padding:16px"></div>
 
-      <!-- 오류디버깅(Error Debugging) 탭 제거 — 통합 작업대 「로그」 → 시스템 오류로그로 이관
-           (사용자 확정 2026-08: 통합 작업대가 메인 · 창구 단일화). error_logs 원장·수집 경로는 그대로. -->
+      <!-- 오류디버깅(Error Debugging) 탭 제거 — 리뷰웹시스템[3버전] 「로그」 → 시스템 오류로그로 이관
+           (사용자 확정 2026-08: 리뷰웹시스템[3버전]이 메인 · 창구 단일화). error_logs 원장·수집 경로는 그대로. -->
 
     </main>
   </div><!-- /screenAdmin -->
@@ -1776,7 +1776,7 @@ body{ letter-spacing:-.01em; }
 </div><!-- /screenOrderForm -->
 
 <!-- ────────── 모집공고 등록/수정 모달 ────────── -->
-<!-- 모집공고 발행·수정 모달 — 공유 마크업(js/recruit-modal.js)에서 마운트. 통합 작업대와 한 벌로 쓴다. -->
+<!-- 모집공고 발행·수정 모달 — 공유 마크업(js/recruit-modal.js)에서 마운트. 리뷰웹시스템[3버전]과 한 벌로 쓴다. -->
 <div id="recruitModalMount"></div>
 
 <!-- ────────── 모집공고 공통 설정 모달 ────────── -->
@@ -2416,14 +2416,14 @@ body{ letter-spacing:-.01em; }
 
 <script src="js/config.js"></script>
 
-<!-- 작업오더 상세 렌더러 — 통합 작업대와 한 벌로 쓰는 공유 모듈. index-app.js 앞에 둔다
+<!-- 작업오더 상세 렌더러 — 리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈. index-app.js 앞에 둔다
      (호출부·onclick 문자열이 전역 이름으로 참조하므로 먼저 정의돼 있어야 한다). -->
 <script src="js/work-order-detail.js"></script>
 <!-- C/S 문의창구 — 같은 이유로 공유 모듈. 마크업(#csInquiryMount)도 여기서 마운트한다. -->
 <!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
-<!-- 관리자 설정 패널(내 닉네임 · 회사 사업자번호 · 리뷰어 소식·공지) — 통합 작업대와 한 벌로 쓰는 공유 모듈.
+<!-- 관리자 설정 패널(내 닉네임 · 회사 사업자번호 · 리뷰어 소식·공지) — 리뷰웹시스템[3버전]과 한 벌로 쓰는 공유 모듈.
      ★ index-app.js **앞**에 둔다: 전역 이름을 여기서 노출하므로 순서가 바뀌면 뒤에 오는 선언이 덮는다. -->
 <script src="js/admin-settings.js"></script>
 
@@ -2584,7 +2584,7 @@ body{ letter-spacing:-.01em; }
      ══════════════════════════════════════════════════════ -->
 <script src="js/index-order-ledger.js"></script>
 
-<!-- 관리자 설정 패널 마운트 — 마크업은 js/admin-settings.js 한 벌(통합 작업대와 공용).
+<!-- 관리자 설정 패널 마운트 — 마크업은 js/admin-settings.js 한 벌(리뷰웹시스템[3버전]과 공용).
      ★ autoload:false — 값 불러오기는 종전대로 **탭 전환 시점**(index-app.js 의 switchAdminTab)에
        한다. 여기서 바로 부르면 로그인 전에도 요청이 나가 로드 타이밍이 달라진다. -->
 <script>

@@ -326,7 +326,7 @@ t('편집 프리필·모달 초기화가 이체 설정을 복원/초기화한다
   assert.ok(/_rfPickTransferBank\(""\)/.test(recruitJs), '신규 공고 초기화가 없다');
 });
 
-t('통합 작업대에 입금관리 탭이 있다', () => {
+t('리뷰웹시스템[3버전]에 입금관리 탭이 있다', () => {
   assert.ok(/data-v="payment"[\s\S]{0,60}입금관리/.test(wd), 'nav 버튼이 없다');
   assert.ok(/v==='payment'\) renderPaymentView\(\)/.test(wd), 'switchView 라우팅이 없다');
   assert.ok(/async function renderPaymentView/.test(wd));
