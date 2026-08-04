@@ -145,7 +145,7 @@
     <div class="chips">
       <span class="chip a">대상 독자: 운영 직원 (비개발자)</span>
       <span class="chip">작성일 2026-08-04</span>
-      <span class="chip">v1.0 시안 — 확정 전</span>
+      <span class="chip">v1.1 시안 — 이체은행 자동분류 반영</span>
     </div>
   </header>
 
@@ -176,7 +176,7 @@
     <div class="card">
       <div class="flow">
         <div class="fstep sys"><span class="fn">자동</span><span class="ft">① 입금대상 취합</span><span class="fd">모든 작업에서 "리뷰 제출완료 + 아직 미입금"인 건을 시스템이 매일 자동으로 모은다</span></div>
-        <div class="fstep"><span class="fn">직원</span><span class="ft">② 확인 후 다운로드</span><span class="fd">목록을 훑어보고 [케이뱅크] 또는 [하나은행] 서식 엑셀로 내려받는다 — <b>이 순간 다운로드 기록(회차)이 남는다</b></span></div>
+        <div class="fstep"><span class="fn">직원</span><span class="ft">② 확인 후 다운로드</span><span class="fd">목록을 훑어보고 은행별로 내려받는다 — <b>각 건은 작업 설정에 따라 케이뱅크/하나은행으로 자동 분류</b>되어 있고, 다운로드 순간 회차 기록이 남는다</span></div>
         <div class="fstep"><span class="fn">직원</span><span class="ft">③ 은행 이체</span><span class="fd">내려받은 파일을 은행 사이트에 그대로 올려 다건이체 (지금과 동일)</span></div>
         <div class="fstep"><span class="fn">직원</span><span class="ft">④ 결과 업로드</span><span class="fd">은행이 주는 이체결과 파일을 해당 회차에 업로드한다</span></div>
         <div class="fstep ok"><span class="fn">자동</span><span class="ft">⑤ 입금일 기록</span><span class="fd">"이체완료/처리완료"인 <b>성공 건에만</b> 입금일이 자동 기록. 실패 건은 미입금으로 남아 다시 잡힌다</span></div>
@@ -217,9 +217,62 @@
     </div>
   </section>
 
-  <!-- ═══════════ 04 은행 서식 ═══════════ -->
+  <!-- ═══════════ 04 이체 은행 자동분류 ═══════════ -->
   <section>
-    <div class="shead"><span class="snum">04</span><h2>은행 서식 — 실제 파일 분석 결과</h2></div>
+    <div class="shead"><span class="snum">04</span><h2>이체 은행은 작업마다 자동으로 정해집니다</h2></div>
+    <p class="sdesc">
+      어느 은행으로 이체할지는 그 작업의 <b>상품구입비(물건비) 수취 방식</b>에 따라 갈립니다.
+      이 수취 방식은 <b>인트라넷 작업오더를 작성할 때 이미 선택</b>하는 값이므로, 시스템이 그 값을 이어받아
+      작업(공고)별 이체 은행을 자동으로 분류합니다 — 직원이 건별로 은행을 고를 필요가 없습니다.
+    </p>
+    <div class="card">
+      <h3>자동분류 규칙</h3>
+      <div class="tblwrap"><table>
+        <tr><th>작업오더의 물건비 수취 방식</th><th>의미</th><th>이체 은행</th></tr>
+        <tr>
+          <td><b>현금이체</b></td>
+          <td>상품구입비를 현금으로 이체받아 진행하는 작업</td>
+          <td><span class="pill acc">하나은행</span> 다건이체로 입금</td>
+        </tr>
+        <tr>
+          <td><b>수수료 (세금계산서)</b></td>
+          <td>수수료(3.3% 또는 정률)를 적용해 세금계산서로 수취하는 작업</td>
+          <td><span class="pill acc">케이뱅크</span> 다건이체로 입금</td>
+        </tr>
+      </table></div>
+      <div class="flow">
+        <div class="fstep"><span class="fn">인트라넷</span><span class="ft">작업오더 작성</span><span class="fd">물건비 수취 방식(현금이체 / 수수료·세금계산서)을 선택 — 지금도 하고 있는 일, 추가 입력 없음</span></div>
+        <div class="fstep sys"><span class="fn">자동</span><span class="ft">접수·공고 발행 시 이어받기</span><span class="fd">작업 접수·모집공고 발행 때 그 값으로 이체 은행이 자동 설정된다</span></div>
+        <div class="fstep"><span class="fn">직원 (필요시)</span><span class="ft">모집공고 수정에서 확인·변경</span><span class="fd">공고 수정 모달에 <b>[하나은행 / 케이뱅크]</b> 선택칸이 생겨 자동값을 확인하고, 예외 작업은 손으로 바꿀 수 있다</span></div>
+        <div class="fstep ok"><span class="fn">자동</span><span class="ft">은행별 분류 다운로드</span><span class="fd">입금대상 목록이 은행별로 나뉘고, 각 은행 파일에는 <b>그 은행으로 분류된 건만</b> 담긴다</span></div>
+      </div>
+      <div class="callout warn">
+        <b>은행이 정해지지 않은 작업은 조용히 빼지 않습니다.</b>
+        작업오더 없이 수동 생성한 공고 등 수취 방식을 알 수 없는 작업의 건은 <b>"은행 미지정 N건"</b>으로 화면에 표시되고
+        다운로드에서 제외됩니다. 모집공고 수정에서 은행을 지정하면 다음 회차부터 포함됩니다.
+        (자동값이 틀렸을 때를 대비해 수동 변경이 항상 우선합니다 — 손으로 바꾼 값은 자동값이 덮어쓰지 않습니다)
+      </div>
+    </div>
+    <div class="mock">
+      <div class="mock-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> 모집공고 수정 모달 › 기본정보 (추가되는 칸)</div>
+      <div class="mock-body">
+        <div class="mrow" style="gap:14px">
+          <span style="font-size:13px; font-weight:650; color:var(--muted)">이체은행</span>
+          <span class="mbtn p">하나은행 (현금이체)</span>
+          <span class="mbtn">케이뱅크 (수수료·세금계산서)</span>
+          <span class="pill acc">작업오더에서 자동 설정됨</span>
+        </div>
+        <p class="sdesc" style="font-size:12.5px">
+          담당자·구매채널 줄과 같은 방식의 선택 버튼입니다. 작업오더의 수취 방식이 자동으로 채워져 있고,
+          예외 작업만 손으로 바꾸면 됩니다. 바꾸면 "수동 지정" 표시가 남고 이후 자동값이 덮어쓰지 않습니다.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 05 은행 서식 ═══════════ -->
+  <section>
+    <div class="shead"><span class="snum">05</span><h2>은행 서식 — 실제 파일 분석 결과</h2></div>
     <p class="sdesc">지금 쓰고 계신 실제 파일 4개(케이뱅크 등록·결과, 하나은행 등록·결과)를 분석해 서식을 그대로 따릅니다. 은행 사이트에 <b>수정 없이 바로 올릴 수 있는 형태</b>로 만들어 드립니다. (아래 표의 이름·계좌는 설명용 가짜 예시입니다)</p>
 
     <div class="grid2">
@@ -269,39 +322,46 @@
     </div>
   </section>
 
-  <!-- ═══════════ 05 화면 시안: 입금관리 탭 ═══════════ -->
+  <!-- ═══════════ 06 화면 시안: 입금관리 탭 ═══════════ -->
   <section>
-    <div class="shead"><span class="snum">05</span><h2>화면 시안 ① — 오늘의 입금대상</h2></div>
+    <div class="shead"><span class="snum">06</span><h2>화면 시안 ① — 오늘의 입금대상</h2></div>
     <p class="sdesc">관리자 대시보드에 <b>"입금관리"</b> 화면이 생깁니다. 들어오면 오늘 입금해야 할 건이 바로 보입니다.</p>
     <div class="mock">
       <div class="mock-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> 관리자 대시보드 › 입금관리</div>
       <div class="mock-body">
         <div class="mrow">
           <div class="mstat"><div class="k">오늘 입금대상</div><div class="v">37건</div></div>
-          <div class="mstat"><div class="k">합계 금액</div><div class="v">1,142,300원</div></div>
+          <div class="mstat"><div class="k">케이뱅크 분류 (수수료 작업)</div><div class="v">22건</div></div>
+          <div class="mstat"><div class="k">하나은행 분류 (현금이체 작업)</div><div class="v">15건</div></div>
           <div class="mstat warn"><div class="k">⚠ 계좌미비</div><div class="v">3건</div></div>
-          <div class="mstat warn"><div class="k">↻ 이전 실패 재대상</div><div class="v">2건</div></div>
+          <div class="mstat warn"><div class="k">⚠ 은행 미지정</div><div class="v">1건</div></div>
         </div>
         <div class="mrow">
-          <span class="mbtn p">⬇ 케이뱅크 서식 다운로드 (37건)</span>
-          <span class="mbtn p">⬇ 하나은행 서식 다운로드 (37건)</span>
+          <span class="mbtn p">⬇ 케이뱅크 서식 다운로드 (22건)</span>
+          <span class="mbtn p">⬇ 하나은행 서식 다운로드 (15건)</span>
           <span class="mbtn">계좌미비 3건 보기</span>
+          <span class="mbtn">은행 미지정 1건 보기</span>
         </div>
         <div class="tblwrap"><table>
-          <tr><th>☑</th><th>작업(탭)</th><th>리뷰어</th><th>제출일</th><th>은행/계좌</th><th>예금주</th><th>금액</th><th>통장표시</th><th>비고</th></tr>
-          <tr><td>☑</td><td>파우더 100건</td><td>김리뷰</td><td class="mono">08-04</td><td class="mono">신한 110-123-…</td><td>김리뷰</td><td class="num">26,900</td><td>파우더망고</td><td></td></tr>
-          <tr><td>☑</td><td>쉐이크 50건</td><td>이체험</td><td class="mono">08-04</td><td class="mono">카카오뱅크 3333-…</td><td>이체험</td><td class="num">23,400</td><td>쉐이크만두</td><td></td></tr>
-          <tr><td>☑</td><td>쉐이크 50건</td><td>박후기</td><td class="mono">08-03</td><td class="mono">우리 1002-83-…</td><td>박후기</td><td class="num">23,400</td><td>쉐이크만두</td><td><span class="pill bad">이전 이체 실패</span></td></tr>
-          <tr><td>—</td><td>선크림 30건</td><td>최참여</td><td class="mono">08-04</td><td class="mono" style="color:var(--fail)">계좌 미등록</td><td>—</td><td class="num">17,800</td><td>선크림망고</td><td><span class="pill warn">계좌미비 — 제외됨</span></td></tr>
+          <tr><th>☑</th><th>작업(탭)</th><th>이체은행</th><th>리뷰어</th><th>제출일</th><th>은행/계좌</th><th>예금주</th><th>금액</th><th>통장표시</th><th>비고</th></tr>
+          <tr><td>☑</td><td>파우더 100건</td><td><span class="pill acc">케이뱅크</span></td><td>김리뷰</td><td class="mono">08-04</td><td class="mono">신한 110-123-…</td><td>김리뷰</td><td class="num">26,900</td><td>파우더망고</td><td></td></tr>
+          <tr><td>☑</td><td>쉐이크 50건</td><td><span class="pill acc">하나은행</span></td><td>이체험</td><td class="mono">08-04</td><td class="mono">카카오뱅크 3333-…</td><td>이체험</td><td class="num">23,400</td><td>쉐이크만두</td><td></td></tr>
+          <tr><td>☑</td><td>쉐이크 50건</td><td><span class="pill acc">하나은행</span></td><td>박후기</td><td class="mono">08-03</td><td class="mono">우리 1002-83-…</td><td>박후기</td><td class="num">23,400</td><td>쉐이크만두</td><td><span class="pill bad">이전 이체 실패</span></td></tr>
+          <tr><td>—</td><td>선크림 30건</td><td><span class="pill acc">케이뱅크</span></td><td>최참여</td><td class="mono">08-04</td><td class="mono" style="color:var(--fail)">계좌 미등록</td><td>—</td><td class="num">17,800</td><td>선크림망고</td><td><span class="pill warn">계좌미비 — 제외됨</span></td></tr>
+          <tr><td>—</td><td>수동공고 A</td><td><span class="pill warn">미지정</span></td><td>정참여</td><td class="mono">08-04</td><td class="mono">국민 6387-01-…</td><td>정참여</td><td class="num">19,900</td><td>—</td><td><span class="pill warn">은행 미지정 — 공고 수정에서 지정</span></td></tr>
         </table></div>
-        <p class="sdesc" style="font-size:12.5px">체크박스로 이번 회차에서 뺄 건을 제외할 수 있고, 금액 칸은 클릭해서 수정할 수 있습니다(수정 이력이 남습니다). 다운로드 버튼을 누르는 순간 체크된 건들이 <b>한 회차로 묶여 잠깁니다</b>.</p>
+        <p class="sdesc" style="font-size:12.5px">
+          각 건의 이체은행은 <b>작업오더의 물건비 수취 방식으로 자동 분류</b>됩니다(04번 규칙). 케이뱅크 버튼에는 케이뱅크 분류 건만,
+          하나은행 버튼에는 하나은행 분류 건만 담깁니다. 체크박스로 이번 회차에서 뺄 건을 제외할 수 있고, 금액 칸은 클릭해서 수정할 수 있습니다(수정 이력이 남습니다).
+          다운로드 버튼을 누르는 순간 체크된 건들이 <b>한 회차로 묶여 잠깁니다</b>.
+        </p>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════ 06 화면 시안: 회차(다운로드 기록) ═══════════ -->
+  <!-- ═══════════ 07 화면 시안: 회차(다운로드 기록) ═══════════ -->
   <section>
-    <div class="shead"><span class="snum">06</span><h2>화면 시안 ② — 이체 회차 기록과 결과 업로드</h2></div>
+    <div class="shead"><span class="snum">07</span><h2>화면 시안 ② — 이체 회차 기록과 결과 업로드</h2></div>
     <p class="sdesc">다운로드할 때마다 <b>회차</b>가 하나 생기고, 누가 언제 몇 건을 내려받았는지 기록이 남습니다. 은행 이체를 마치면 그 회차 줄의 [결과 업로드]를 눌러 은행 결과 파일을 올립니다.</p>
     <div class="mock">
       <div class="mock-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> 관리자 대시보드 › 입금관리 › 이체 회차</div>
@@ -336,9 +396,9 @@
     </div>
   </section>
 
-  <!-- ═══════════ 07 안전장치 ═══════════ -->
+  <!-- ═══════════ 08 안전장치 ═══════════ -->
   <section>
-    <div class="shead"><span class="snum">07</span><h2>안전장치 — 실수해도 사고로 이어지지 않게</h2></div>
+    <div class="shead"><span class="snum">08</span><h2>안전장치 — 실수해도 사고로 이어지지 않게</h2></div>
     <div class="grid2">
       <div class="card">
         <h3>💸 이중입금 방지</h3>
@@ -374,9 +434,9 @@
     </div>
   </section>
 
-  <!-- ═══════════ 08 확정이 필요한 질문 ═══════════ -->
+  <!-- ═══════════ 09 확정이 필요한 질문 ═══════════ -->
   <section>
-    <div class="shead"><span class="snum">08</span><h2>개발 착수 전 확정이 필요한 것</h2></div>
+    <div class="shead"><span class="snum">09</span><h2>개발 착수 전 확정이 필요한 것</h2></div>
     <p class="sdesc">아래는 실제 파일과 데이터를 보고도 답을 하나로 정할 수 없어 <b>운영진 확인이 필요한 결정</b>입니다. 답이 정해지는 대로 개발을 시작합니다.</p>
     <div class="card qa">
       <div>
@@ -402,13 +462,13 @@
     </div>
   </section>
 
-  <!-- ═══════════ 09 만드는 순서 ═══════════ -->
+  <!-- ═══════════ 10 만드는 순서 ═══════════ -->
   <section>
-    <div class="shead"><span class="snum">09</span><h2>만드는 순서 (단계별 출시)</h2></div>
+    <div class="shead"><span class="snum">10</span><h2>만드는 순서 (단계별 출시)</h2></div>
     <div class="card">
       <div class="tblwrap"><table>
         <tr><th>단계</th><th>내용</th><th>이 단계만으로 얻는 것</th></tr>
-        <tr><td class="mono">M1</td><td><b>입금대상 추출 + 은행서식 다운로드 + 회차 기록</b> — 대상 목록 화면, 케이뱅크·하나은행 엑셀 생성, 다운로드 잠금·회차 취소, 계좌미비 노출</td><td>매일 아침 시트를 뒤지며 취합하던 STEP 1~2가 사라짐. 이중입금 잠금 확보</td></tr>
+        <tr><td class="mono">M1</td><td><b>입금대상 추출 + 은행별 자동분류 + 서식 다운로드 + 회차 기록</b> — 대상 목록 화면, 작업오더 수취방식→이체은행 자동분류, 모집공고 수정 모달 은행 선택칸, 케이뱅크·하나은행 엑셀 생성, 다운로드 잠금·회차 취소, 계좌미비·은행 미지정 노출</td><td>매일 아침 시트를 뒤지며 취합하던 STEP 1~2가 사라짐. 이중입금 잠금 확보</td></tr>
         <tr><td class="mono">M2</td><td><b>이체결과 업로드 + 자동 반영</b> — 결과 파일 해석(두 은행), 짝 맞추기, 확인 화면, 성공 건만 입금 기록(시스템 + 시트 입금컬럼)</td><td>STEP 4(시트에 날짜 적기)가 사라짐. 실패건 오기록 원천 차단</td></tr>
         <tr><td class="mono">M3</td><td><b>운영 보강</b> — 리뷰어 알림(입금완료 시), 월별 입금 집계·CSV, 실패 사유 통계, 탭별 금액 규칙 설정</td><td>정산 마감·통계 업무 단축</td></tr>
       </table></div>
@@ -417,7 +477,7 @@
   </section>
 
   <footer>
-    리뷰웹시스템 · 입금대상 추출·이체결과 반영 PRD 시안 v1.0 — 2026-08-04 · 문서 속 이름·계좌·금액은 모두 설명용 가짜 예시입니다.
+    리뷰웹시스템 · 입금대상 추출·이체결과 반영 PRD 시안 v1.1 — 2026-08-04 · 문서 속 이름·계좌·금액은 모두 설명용 가짜 예시입니다.
   </footer>
 </div>
 </body>
