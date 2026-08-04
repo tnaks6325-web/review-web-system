@@ -207,6 +207,20 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
       logger.warn(`[worktable/create] 작업오더 URL 연결 실패(시트는 생성됨): ${e.message}`);
     }
 
+    /* ★★ 만든 직후 그 시트를 **즉시 미러**한다 — 프로덕션 실측으로 잡은 문제.
+       행 배정(`claimRow`)은 RAW 미러 스냅샷에서 빈 줄을 찾는데, 방금 만든 탭은 아직 미러에
+       없다(주기 5분). 그 사이에 주문이 들어오면 준비된 빈 줄을 **못 보고 표 아래에 새로 붙는다**
+       — 작업표를 미리 만든 의미가 사라진다.
+       ★ best-effort: 실패해도 시트·표는 이미 만들어졌으므로 되돌리지 않는다(다음 주기가 메운다). */
+    let mirrored = null;
+    try {
+      const r = await require('./rawMirror.service').mirrorOneSheet(targetSheetId, { force: true });
+      mirrored = { tabs: r && r.tabsMirrored, rows: r && r.rowsWritten };
+    } catch (e) {
+      logger.warn(`[worktable/create] 생성 직후 미러 실패(다음 주기가 메운다): ${e.message}`);
+      mirrored = { error: e.message };
+    }
+
     /* ── 작업대 표에도 같은 줄을 미리 보이게(M2b-2) ────────────────────────
        ★ **시트가 1순위 산출물**이다 — 여기서 실패해도 시트는 이미 만들어졌으므로
          전체를 실패로 되돌리지 않고 사유만 실어 보낸다(사람이 다시 만들면 중복 탭이 생긴다).
@@ -227,7 +241,7 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
     logger.info(`[worktable/create] ${wo.id} → ${title} (${body.length}행, 헤더 ${headerRow}행) by ${by}`);
     return {
       ok: true, sheetId: targetSheetId, gid: newGid, tabName: title, tabUrl, createdFile,
-      headerRow, columns: header, rowsWritten: body.length, filled, slots, usedTemplate,
+      headerRow, columns: header, rowsWritten: body.length, filled, slots, usedTemplate, mirrored,
       warnings: plan.warnings,
     };
   } catch (err) {
