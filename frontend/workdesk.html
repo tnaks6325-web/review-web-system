@@ -954,6 +954,37 @@
 .gdcard:hover .gdgo{color:var(--acc,#2563A8)}
 #gdhead .mh{max-width:1120px}
 
+/* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (design-workdesk-home.html)
+   클래스는 전부 hm- 접두 신설 — 기존 .gauge/.kpi/.worow 류와 이름 충돌 금지(레포 실측 사고 전례).
+   폭 상한 1380px = 모집공고 카드 컨테이너와 같은 값(hug-left + 우측 여백 흘리기). */
+#hmwrap{max-width:1380px;padding:18px 22px 34px}
+.hm-hero{border-radius:18px;padding:24px 28px;background:linear-gradient(115deg,#1d4ed8 0%,#2563eb 45%,#3b82f6 100%);color:#fff;position:relative;overflow:hidden}
+.hm-hero::after{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.08)}
+.hm-hero::before{content:'';position:absolute;right:80px;bottom:-110px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.06)}
+.hm-hi{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.hm-sub{font-size:12px;opacity:.85;margin-top:4px}
+.hm-stats{display:flex;gap:28px;margin-top:16px;position:relative;z-index:1}
+.hm-st .n{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums}
+.hm-st .n.hot{color:#fecaca}
+.hm-st .l{font-size:10.5px;opacity:.8}
+.hm-wrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start;margin-top:16px}
+@media(max-width:1000px){.hm-wrap{grid-template-columns:1fr}}
+.hm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:12px}
+.hm-tile{font:inherit;text-align:left;position:relative;display:flex;flex-direction:column;gap:7px;min-height:104px;padding:15px 14px;border-radius:14px;border:1px solid var(--line);background:var(--card);cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,.04);transition:border-color .15s,box-shadow .2s,transform .1s}
+.hm-tile:hover{border-color:var(--accent-line);box-shadow:0 6px 16px rgba(16,24,40,.08)}
+.hm-tile:active{transform:scale(.98)}
+.hm-ic{width:34px;height:34px;border-radius:10px;background:var(--card2);display:grid;place-items:center;font-size:15px}
+.hm-nm{font-size:12.5px;font-weight:750;color:var(--ink)}
+.hm-ds{font-size:10px;color:var(--faint)}
+.hm-bd{position:absolute;top:11px;right:11px;font-size:10px;font-weight:800;color:#fff;background:var(--bad);border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.hm-brief{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 13px 9px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.hm-bh{font-size:12.5px;font-weight:800;margin:0 2px 6px}
+.hm-row{font:inherit;width:100%;text-align:left;display:flex;align-items:center;gap:9px;padding:9px 6px;border:none;border-top:1px solid var(--line);background:none;font-size:11.5px;color:var(--ink);cursor:pointer;border-radius:0}
+.hm-row:hover{background:var(--card2)}
+.hm-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650}
+.hm-row .cnt{font-variant-numeric:tabular-nums;color:var(--accent-deep);white-space:nowrap}
+.hm-bn{font-size:9.5px;color:var(--faint);padding:8px 6px 4px;border-top:1px solid var(--line)}
+
 </style>
 </head>
 <body>
@@ -1037,7 +1068,7 @@ function parseTabMeta(name){ const s=String(name||''); const m={};
   else if(segs.length===1&&(m.channel||m.count||m.viral)) m.product=segs[0];   // 차수만으론 상품 추정 안 함(탭명 중복 노출 방지)
   return m; }
 
-let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
+let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:null,   // view '' = 첫 진입 기본(홈/광고주 workdesk)은 renderShell 이 결정
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
               railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
@@ -1102,9 +1133,10 @@ function logout(){ sessionStorage.removeItem('admin_token');
   // ★ 교체요청 목록(re)에는 **리뷰어 실명·연락처**가 들어 있다 — 역할이 바뀌어도 남아 있으면
   //   다음 사람이 그 화면을 열 때 이전 계정의 담당 범위가 잠깐 그려진다(서버 응답 전 stale 렌더).
   //   reMode 도 같이 비운다: AE 기본값 'full' 이 그대로 남아 관리자 화면이 펼쳐진 채로 뜬다.
-  Object.assign(STATE,{ role:'',name:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
+  Object.assign(STATE,{ role:'',name:'',view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false });
   _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
+  _NAVRI.n=null;                    // 리뷰검수 값도 같은 이유(홈 타일·브리핑이 이 값을 본다)
   boot(); }
 
 function renderShell(){
@@ -1116,6 +1148,7 @@ function renderShell(){
     <div class="top">
       <span class="logo">리뷰웹시스템[3버전] <span class="tag">${isAdv?'업체 전용':'TRACK B · 그림자'}</span></span>
       ${isAdmin?`<nav class="nav">
+        <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
@@ -1129,6 +1162,7 @@ function renderShell(){
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
+        <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
@@ -1150,7 +1184,9 @@ function renderShell(){
     </div>
     <div id="viewroot"></div>`;
   _applyVwMode();               // 저장된 FHD/QHD 모드를 스위치·body에 반영(셸을 다시 그릴 때마다)
-  switchView(STATE.view||'workdesk');
+  // 첫 진입 기본 뷰 = 홈(시안 B 타일 런처형 · ① nav 상시 유지). 광고주는 홈이 없다(전용 대시보드 유지).
+  // 딥링크(#go=·#view=)는 boot 이 STATE.view 를 먼저 세팅하므로 종전대로 그 화면으로 직행한다.
+  switchView(STATE.view||(isAdv?'workdesk':'home'));
   if(isAdmin) _csStartBadgePoll();
   if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
   if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
@@ -1203,7 +1239,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업보드 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업보드 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='home') renderHomeView(); else if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업보드를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
@@ -2864,7 +2900,13 @@ async function _loadOrders(){
   STATE.wo=r.data||[]; STATE.woCounts=r.counts||{};
   if(typeof r.canEdit==='boolean') STATE.canEdit=r.canEdit;
   _renderWoHead(); _renderWoBody();
-  const nb=$('#woNavBadge'); if(nb){ const n=STATE.woCounts.submitted|0; nb.textContent=n>0?(' 🔵'+n):''; }
+  _woSyncNavBadge();
+}
+/* nav·홈 타일이 같은 재료(STATE.woCounts)를 본다 — 표기는 여기 한 곳에서만(값 단일 출처).
+   작업오더 뷰(_loadOrders)와 홈(_homeLoad) 어느 쪽이 갱신하든 둘 다 이 함수를 거친다. */
+function _woSyncNavBadge(){
+  const nb=$('#woNavBadge'); if(nb){ const n=(STATE.woCounts&&STATE.woCounts.submitted)|0; nb.textContent=n>0?(' 🔵'+n):''; }
+  if(typeof _homeSyncBadges==='function') _homeSyncBadges();
 }
 function _renderWoHead(){
   const c=STATE.woCounts||{};
@@ -3642,6 +3684,109 @@ async function renderSettingsView(){
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
   AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','worktable','notice'] : ['nickname'] });
 }
+
+/* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (frontend/docs/design-workdesk-home.html) ══
+   ★ 홈은 **읽기 전용 + 이동**만 한다 — 타일·브리핑 줄 클릭 = switchView 뿐, 처리 로직 사본 0.
+   ★ 숫자는 전부 기존 nav 뱃지 재료(_NAVCS·_NAVLG·_NAVRI·STATE.woCounts)와 같은 값 —
+     홈 전용 집계를 만들면 뱃지와 어긋난다. 갱신도 각 *SyncNavBadge 가 _homeSyncBadges 를 불러 수렴.
+   ★ 조회 실패/미도착 칸은 0이 아니라 '?'·'–' (조용한 정상 위장 금지 — 관측 뷰 배포 스큐 규칙과 동일).
+   ★ 히어로 숫자도 기존 엔드포인트 3개 재사용(신규 API 0): /api/trackb/tabs · /campaigns/list · /work-orders/list.
+   ★ 광고주는 이 홈을 보지 않는다(전용 대시보드 _renderAdvDash 유지) — nav 자체가 없어 도달 불가. */
+function _hmMenus(){
+  // ★ 역할은 자기 스코프에서 다시 구한다 — 다른 함수의 const 에 기대면 ReferenceError 로 화면이 조용히 죽는다(리뷰검수 무한로딩 실측 사고).
+  const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  return [
+    {v:'workdesk',  ic:'🗂', nm:'작업보드',     ds:'작업별 시트 그리드'},
+    {v:'orders',    ic:'📦', nm:'작업오더',     ds:'접수 · 상태 관리',   bd:'hmWoBadge'},
+    {v:'campaigns', ic:'📢', nm:'모집공고',     ds:'발행 · 관제'},
+    {v:'cs',        ic:'🎧', nm:'C/S',          ds:'문의 · 교체요청',    bd:'hmCsBadge'},
+    {v:'inspect',   ic:'🔍', nm:'리뷰검수',     ds:'의심 · 불량 판정',   bd:'hmRiBadge'},
+    {v:'logs',      ic:'🧾', nm:'로그',         ds:'비정상 · 오류',      bd:'hmLgBadge'},
+    {v:'ownership', ic:'🏢', nm:'업체관리',     ds:'소유 · 정산 연결'},
+    // nav 정책과 1:1 — AE(staff) nav 에 없는 메뉴는 타일도 없다(눌러도 403 인 막다른 길을 만들지 않는다)
+    ...(isAdmin?[
+      {v:'overview',  ic:'📡', nm:'관측',         ds:'Track B 전환 현황'},
+      {v:'payment',   ic:'💸', nm:'입금관리',     ds:'리뷰비 이체 회차'},
+      {v:'reviewers', ic:'👥', nm:'등록리뷰어DB', ds:'전사 리뷰어 조회'},
+    ]:[]),
+    {v:'guides',    ic:'📚', nm:'업무가이드',   ds:'직원 안내서'},
+    {v:'settings',  ic:'⚙️', nm:'설정',         ds:'닉네임 · 이미지 · 열'},
+  ];
+}
+function renderHomeView(){
+  const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  const d=new Date();
+  const dstr=(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+'일월화수목금토'[d.getDay()]+')';
+  const tiles=_hmMenus().map(m=>
+    `<button class="hm-tile" onclick="switchView('${m.v}')">${m.bd?`<span class="hm-bd" id="${m.bd}" style="display:none"></span>`:''}
+       <span class="hm-ic">${m.ic}</span><span class="hm-nm">${m.nm}</span><span class="hm-ds">${m.ds}</span></button>`).join('');
+  // 브리핑 줄 — 문의(cs)는 admin 만 조회하므로 AE 에겐 줄 자체를 안 그린다(영원한 '–' 방지, 서버 게이트와 1:1)
+  const brow=(v,ic,label,id)=>`<button class="hm-row" onclick="switchView('${v}')"><span>${ic}</span><span class="nm">${label}</span><b class="cnt" id="${id}">–</b></button>`;
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="hmwrap">
+    <div class="hm-hero">
+      <div class="hm-hi">${esc(STATE.name||STATE.role||'')}님, 오늘도 좋은 하루 되세요 ☀️</div>
+      <div class="hm-sub">${dstr} · 리뷰웹시스템[3버전]이 오늘의 현황을 요약했어요</div>
+      <div class="hm-stats">
+        <div class="hm-st"><div class="n" id="hmStTabs">?</div><div class="l">진행 중 작업</div></div>
+        <div class="hm-st"><div class="n" id="hmStOpen">?</div><div class="l">모집중 공고</div></div>
+        <div class="hm-st"><div class="n" id="hmStToday">?</div><div class="l">오늘 참여 확정</div></div>
+        <div class="hm-st"><div class="n hot" id="hmStNeed">?</div><div class="l">확인 필요</div></div>
+      </div>
+    </div>
+    <div class="hm-wrap">
+      <div class="hm-grid">${tiles}</div>
+      <div class="hm-brief">
+        <div class="hm-bh">📌 오늘의 브리핑</div>
+        ${brow('orders','📦','접수 대기 오더','hmBrWo')}
+        ${isAdmin?brow('cs','💬','미확인 문의','hmBrCs'):''}
+        ${brow('cs','🖼','이미지 교체요청 대기','hmBrRe')}
+        ${brow('inspect','🔍','리뷰검수 의심·불량','hmBrRi')}
+        ${brow('logs','🚨','리뷰어 비정상·오류 로그','hmBrLg')}
+        <div class="hm-bn">숫자는 상단 메뉴 뱃지와 같은 값입니다 · '–' = 아직 조회되지 않음</div>
+      </div>
+    </div>
+  </div></div>`;
+  _homeSyncBadges();   // 이미 도착해 있는 뱃지 값을 즉시 반영(부팅 조회를 기다리지 않는다)
+  _homeLoad();
+}
+/** 히어로 숫자 채우기 — 전부 기존 엔드포인트 재사용, 건별 fail-soft('?' 유지). 반환 promise 는 테스트용. */
+async function _homeLoad(){
+  await Promise.allSettled([
+    api('/api/trackb/tabs?limit=300').then(r=>{
+      const el=document.getElementById('hmStTabs');
+      if(el && r && r.ok && Array.isArray(r.tabs)) el.textContent=String(r.tabs.length);
+    }),
+    api('/api/trackb/campaigns/list').then(r=>{
+      if(!(r && r.ok && Array.isArray(r.data))) return;
+      // 참여형 = 상태엔진 값(state), 레거시 = status 로만 판단(상태엔진 미적용) — admin/list 응답 계약 그대로
+      const open=r.data.filter(c=>c.state==='open' || (!c.state && c.status==='active')).length;
+      let today=0; for(const c of r.data){ if(c.ops && Number.isFinite(c.ops.todaySubmitted)) today+=c.ops.todaySubmitted; }
+      const e1=document.getElementById('hmStOpen'); if(e1) e1.textContent=String(open);
+      const e2=document.getElementById('hmStToday'); if(e2) e2.textContent=String(today);
+    }),
+    api('/api/trackb/work-orders/list?status=submitted').then(r=>{
+      // nav 뱃지와 같은 재료(STATE.woCounts)에 실어 같은 함수로 그린다 — 홈 전용 계산 금지
+      if(r && r.ok){ STATE.woCounts=r.counts||{}; _woSyncNavBadge(); }
+    }),
+  ]);
+}
+/** nav 뱃지 재료 → 홈 타일 뱃지·브리핑 줄·히어로 '확인 필요' 반영. 홈이 안 떠 있으면 no-op. */
+function _homeSyncBadges(){
+  if(!document.getElementById('hmwrap')) return;
+  const wo=(STATE.woCounts && Number.isFinite(STATE.woCounts.submitted)) ? STATE.woCounts.submitted : null;
+  const cs=_NAVCS.cs, re=_NAVCS.re, ri=_NAVRI.n;
+  const csTotal=(cs===null && re===null) ? null : (cs||0)+(re||0);
+  const lg=(_NAVLG.rv===null && _NAVLG.sys===null) ? null : (_NAVLG.rv|0)+(_NAVLG.sys|0);
+  const tile=(id,v)=>{ const el=document.getElementById(id); if(!el) return;
+    if(v!==null && v>0){ el.textContent=String(v); el.style.display=''; } else { el.style.display='none'; } };
+  tile('hmWoBadge',wo); tile('hmCsBadge',csTotal); tile('hmRiBadge',ri); tile('hmLgBadge',lg);
+  const cnt=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=(v===null)?'–':(v+'건'); };
+  cnt('hmBrWo',wo); cnt('hmBrCs',cs); cnt('hmBrRe',re); cnt('hmBrRi',ri); cnt('hmBrLg',lg);
+  // 확인 필요 = 도착한 값의 합. 아무것도 안 왔으면 '?'(0 으로 꾸미지 않는다).
+  const known=[wo,csTotal,ri,lg].filter(v=>v!==null);
+  const el=document.getElementById('hmStNeed'); if(el) el.textContent=known.length?String(known.reduce((a,b)=>a+b,0)):'?';
+}
+/* ══ 홈 끝 ══ */
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
       리뷰웹시스템[3버전]엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
@@ -3798,6 +3943,7 @@ function _reFullHtml(st, rows){
 const _NAVCS = { cs:null, re:null };
 function _reSyncNavBadge(n){ if(!Number.isFinite(n)) return; _NAVCS.re=n; _renderCsNavBadge(); }
 function _renderCsNavBadge(){
+  if(typeof _homeSyncBadges==='function') _homeSyncBadges();   // 홈 타일·브리핑도 같은 값으로(값 단일 출처 — 홈 없으면 no-op, typeof = 블록 단위 vm 추출 테스트 격리)
   const nb=$('#csNavBadge'); if(!nb) return;
   if(_NAVCS.cs===null && _NAVCS.re===null) return;
   const total=(_NAVCS.cs||0)+(_NAVCS.re||0);
@@ -4073,9 +4219,14 @@ async function riExportCsv(){
     setTimeout(()=>URL.revokeObjectURL(a.href),3000);
   }catch(e){ alert('CSV 내려받기 실패: '+e.message); }
 }
+/* ★ 값을 _NAVRI 에 먼저 기억한다 — 홈 타일·브리핑이 nav 뱃지와 같은 값을 보게(값 단일 출처).
+   DOM(#riNavBadge)에서 되읽으면 ' 🔴4' 문자열 파싱이 되어 표기 형식에 결합된다. */
+const _NAVRI = { n:null };
 function _riSyncNavBadge(n){
-  const nb=$('#riNavBadge'); if(!nb || !Number.isFinite(n)) return;
-  nb.textContent = n>0 ? (' 🔴'+n) : '';
+  if(!Number.isFinite(n)) return;           // 값이 없으면 그대로 둔다(지우지 않는다 — C/S 뱃지와 같은 규율)
+  _NAVRI.n=n;
+  const nb=$('#riNavBadge'); if(nb) nb.textContent = n>0 ? (' 🔴'+n) : '';
+  if(typeof _homeSyncBadges==='function') _homeSyncBadges();
 }
 /** 부팅 시 1회 — 탭을 열지 않아도 손볼 건수가 보이게(교체요청 뱃지와 같은 규율) */
 async function _riBootBadge(){
@@ -4320,6 +4471,7 @@ function switchLogTab(t){
    ★ 둘 다 null 이면 뱃지를 건드리지 않는다(조회 실패로 숫자가 사라지면 "손볼 것 없음"으로 오독). */
 const _NAVLG = { rv:null, sys:null };
 function _lgSyncNavBadge(){
+  if(typeof _homeSyncBadges==='function') _homeSyncBadges();   // 홈 타일·브리핑도 같은 값으로(값 단일 출처 — 홈 없으면 no-op, typeof = 블록 단위 vm 추출 테스트 격리)
   const b=$('#lgNavBadge'); if(!b) return;
   if(_NAVLG.rv===null && _NAVLG.sys===null) return;
   const n=(_NAVLG.rv|0)+(_NAVLG.sys|0);

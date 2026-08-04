@@ -240,6 +240,13 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **항목 ↔ 화면 일치**: `renderWorkdeskView` 는 예약 없으면 `STATE.cur=null`, `renderOwnershipView` 는 복원이 아니면 `STATE.advCur=null` 로 **첫 await 전에** 비운다 — 안 그러면 "본문은 작업 선택 안내인데 항목엔 옛 작업"이 남아 뒤로/앞으로가 없던 화면을 되살린다.
 - 복원 범위 = **어느 화면·어느 작업·어느 업체**까지. 그리드 필터·숨김열 등 표 상태는 탭 전환 시 초기화되는 클라이언트 상태라 대상 아님(`selTab` 기존 계약 유지). 회귀가드 `server/tests/workdeskHistoryNav.test.js`(27케이스 — 배선 + **나브 함수를 vm 으로 꺼내 실제 실행**해 적재 순서·중복 억제·lock 검증). 실제 http 오리진 + 스텁 API 브라우저 실행으로 업체관리→작업→뒤로×3→앞으로×3 왕복 확인.
 
+### 리뷰웹시스템[3버전] 첫 진입 홈 (시안 B 타일 런처형 · ① nav 상시 유지)
+- 내부인(master/admin/AE) 첫 진입 기본 뷰 = **홈**(`renderHomeView`) — 그라데이션 히어로(인사 + 오늘 요약 4칸: 진행 중 작업·모집중 공고·오늘 참여 확정·확인 필요) + **메뉴 타일 그리드**(nav 의 카드화, 역할별 접힘 = nav 정책 1:1) + 우측 "오늘의 브리핑" 레일. 시안 = `frontend/docs/design-workdesk-home.html`(B안 + B-2 ①). nav 맨 앞 **🏠 홈** 버튼(admin·staff 두 nav — 타일=학습용 큰 입구, nav=빠른 입구 역할 분담), **광고주는 홈 미도달**(nav 자체가 없음 · 전용 대시보드 유지). `STATE.view` 초기값 `''` — 기본 뷰 결정은 renderShell 의 `isAdv?'workdesk':'home'` 한 곳, 딥링크(`#go=`·`#view=`)는 boot 이 view 를 먼저 세팅해 종전대로 직행. logout 리셋에 `view:''` 포함(재로그인 = 홈).
+- ★★ **홈은 읽기 전용 + 이동만** — 타일·브리핑 줄 클릭 = `switchView` 뿐, 처리 로직 사본 0(교체요청 승인·오더 접수는 각 탭의 기존 코드로 이동만 한다).
+- ★★ **숫자 = nav 뱃지 재료 그대로**(홈 전용 집계 금지): `_NAVCS`(C/S 문의+교체요청) · `_NAVRI`(리뷰검수 — 이번에 신설, `_riSyncNavBadge`가 값을 먼저 기억. **DOM `#riNavBadge` 되읽기 금지** — ' 🔴4' 문자열 파싱이 되어 표기 형식에 결합) · `_NAVLG`(로그) · `STATE.woCounts`(작업오더 — **`#woNavBadge` 표기는 `_woSyncNavBadge` 한 곳뿐**, 작업오더 뷰/홈 어느 쪽이 갱신하든 같은 함수). 각 `*SyncNavBadge` 가 `_homeSyncBadges()` 를 불러 수렴(홈 미표시 = no-op). ★ 훅 호출은 `typeof _homeSyncBadges==='function'` 가드 — 런타임엔 항상 있지만, **블록 단위 vm 추출 회귀가드**(workdeskLogTabs 등)의 sandbox 에는 없어 가드 없이는 그 테스트들이 ReferenceError 로 죽는다(실측).
+- ★ 히어로 숫자도 **기존 엔드포인트 3개 재사용**(신규 API 0): `/api/trackb/tabs` · `/campaigns/list`(참여형 state==='open' + 레거시 status==='active', ops.todaySubmitted 합산) · `/work-orders/list?status=submitted`(counts 를 `STATE.woCounts` 에 실어 `_woSyncNavBadge` 경유). ★ **실패/미도착 칸은 '?'·'–'** — 0 으로 꾸미지 않는다(조용한 정상 위장 금지, 관측 뷰 배포 스큐 규칙과 동일). AE 에겐 "미확인 문의" 브리핑 줄 자체를 안 그린다(AE 는 문의 미조회라 영원한 '–' 가 된다).
+- CSS 는 전부 `hm-` 접두 + `#hmwrap{max-width:1380px}`(모집공고 카드 컨테이너와 같은 값). 회귀가드 `server/tests/workdeskHome.test.js`(39케이스 — 정적 배선 + **vm 런타임 실행**(sandbox 에 isAdmin 전역을 일부러 두지 않음), 변이시험 4종 검출 확인) + 실브라우저 http 오리진 검증(렌더·타일 이동·🏠 복귀·히스토리 뒤로가기·성공/실패 경로 숫자).
+
 ### 리뷰웹시스템[3버전] 화면 폭 상한 (FHD/QHD 토글) · 열 너비 고정
 - **문제 2개**: ① 창을 넓힐수록 헤더·업체 칩바·탭바·본문이 끝없이 따라 늘어났다. ② 시트 그리드가 컨테이너를 꽉 채우려고 **주소 열이 잔여폭을 흡수**해, 같은 열이 창 크기·숨긴 열 수마다 다른 너비가 됐다(작업을 오갈 때마다 열 위치를 다시 찾음).
 - **상한**: `--app-max` 토큰 하나(`:root` 기본 1920 + `body[data-vw="fhd"|"qhd"]` = 1920/2560), 우측 상단 좌우 슬라이딩 스위치(`.vwsw` `#vwToggle`, `localStorage.wd_viewport_mode`, **기본 FHD**=좁은 쪽). 적용은 `.top`·`.tb1`·`.tb2`·`.wrap`·`.ovwrap` 5곳.
@@ -345,7 +352,19 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **옛 값은 화면에서 지우지 않는다** — 선택지에서 빠진 `실배송·빈박스·믹스` 도 배지 색 맵·CSS 를 남겨 그대로 표시한다(무엇이 설정돼 있었는지 알아야 한다). 정리는 **자동 마이그레이션이 아니라** `POST /api/diag/review-type-cleanup`(dryRun 기본, admin/master) — ★★ 배송유형 이관은 **blank-only**(접수가 채운 값을 덮지 않는다). 안 돌려도 안전(판정에서 null 로 떨어진다).
 - ★ migration 087 은 **컬럼 추가만**(백필 0) · **TEXT**(082 의 42804 계열 회피) · **DB CHECK 없음**(판정을 코드와 DB 에 이중화하면 어휘 확장 때마다 저장이 실패한다).
 - 회귀가드 `tests/reviewType.test.js`(55케이스 — 순수함수·`precheckPolicy` **실행** + 배선 + 권한 경계 + 사본 일치. 변이시험 2종으로 검출 확인). 테마 없는 호스트에서 모달 **실브라우저 렌더** 확인.
-- **다음(2차)**: 제출 슬롯 치환(`captureSlots` + 소비처 4곳 동시) · AI kind `purchase_confirm` 추가(기존 3줄 불변 · 캐시 접두 `classify3:`) · 구매확정 예시이미지(지문 `pc_` 접두) · `captureVerify._expectedKind`.
+- 회귀가드 `tests/reviewType.test.js`(81케이스), 변이시험 5종 검출 확인.
+
+### ★★ 리뷰타입 2차 — 구매확정 제출 슬롯 + AI 판별
+- ★★ **구매확정 단독은 슬롯을 만들지 않는다(완화 금지 · 실측으로 잡은 함정)**: 프론트(`search-app.js:1841`)는 `captureSlots.length > 1` 일 때만 슬롯 UI 를 그리고 단일 첨부 경로는 slotKey 를 안 보내 서버에서 `'review'` 가 된다. 여기서 `[CONFIRM_SLOT]`(길이 1)을 돌려주면 `requiredSlotKeys` 는 `['confirm']` 을 요구하는데 실제 제출은 `'review'` 로 들어와 **완료 판정이 영영 안 된다**(구매확정 제출 전멸). → 슬롯은 종전대로 두고 **기대 화면 종류만** 리뷰타입에서 파생한다.
+- ★★ **기대 종류 = `captureVerify._expectedKind(slotKey, reviewType)`** — 슬롯 key 만으로는 정해지지 않는다. `review`+confirm → `purchase_confirm` / `confirm` 슬롯(현영 2슬롯) → `purchase_confirm` / `receipt` 는 리뷰타입 무관. **reviewType 없으면 종전과 완전히 동일.** ★ 회귀가드가 **동기 호출**로 검증한다 — `verifyCapture`(async)로 간접 확인하면 단언이 `process.exit(0)` 뒤로 밀려 **조용히 실행되지 않는다**(변이시험으로 실측·수정).
+- **현영과 겹칠 때만 2슬롯**: `[구매확정, 현금영수증]`(리뷰 자리를 치환). 관리자 `capture_slots` 명시는 여전히 최우선.
+- ★★ **조회 단일 출처 = `reviewTypeContext.service.js`**(`reviewTypeForTab`, 탭당 60초 캐시) — 소비처 4곳(리뷰어 화면 슬롯 `search.service` · 완료 판정 `submit.routes` · 업로드 폴더 라벨 `diag review-upload` · 교체요청 라벨 `reviewEdit` 2곳)이 각자 SQL 을 쓰면 조용히 갈라진다. 판정 자체는 `utils/reviewType` 에 맡긴다(규칙 사본 0). ★ **조회 실패는 캐시에 넣지 않는다**(일시 장애를 60초 굳히지 않는다). ★ 행 단위(시트 작업옵션 칸)는 여기서 모르므로 **공고 > 탭**까지만 — 혼합 탭은 null 로 떨어져 오늘 동작 그대로.
+- **AI**: `classifySubmissionImage` kind 에 `purchase_confirm` 추가 — ★★ **기존 3줄은 한 글자도 바꾸지 않고** 4번째 줄만 넣었다(오래 검증된 슬롯 검수가 그대로 쓴다). ★★ 캐시 접두 `classify2:`→`classify3:`(옛 캐시가 새 종류를 모른 채 히트하는 것 차단, 가드는 `classify[2-9]\d*:` 로 버전 상향 허용).
+- ★★ **구매확정 갈래는 어떤 판정에도 잠그지 않는다(완화 금지)**: 예시이미지 등록 전에는 정확도가 낮아 오탐이 곧 정상 제출 차단(참여 소각)이다 → pass/warn 만. 킬스위치 `REVIEW_CONFIRM_VERIFY=0`.
+- ★★ **역방향도 경고까지만**: 리뷰 작업 자리에 구매확정 화면이 오면 종전엔 `other` 로 떨어져 차단 대상이었다. 새 종류 도입만으로 **판정이 갑자기 세지면 안 되므로** `purchase_confirm_on_review` warn 으로 둔다 — 잠금은 여전히 `other` 한 갈래뿐(차단 범위를 넓히는 게 아니라 좁히는 방향이라 fail-open 원칙과 맞다).
+- ⚠ **배선 형태가 바뀌어 기존 가드 2종의 패턴을 함께 갱신**했다(`captureSlotVerify`·`reviewInspect` — 검사 의미는 불변).
+- 회귀가드 `tests/reviewType.test.js` 81케이스(슬롯 파생·기대 종류·잠금 범위 **실행** + 소비처 4곳 배선), 변이시험 5종 검출 확인.
+- **다음(3차)**: 구매확정 판별 예시이미지 등록 화면(`utils/purchaseConfirmChannels.js` + 설정탭 — ★ 캐시 지문 `pc_` 접두 필수) · 리뷰어 단일 첨부 화면의 "구매확정 완료 화면을 올려주세요" 안내문(`search.service` 가 이미 `reviewType` 을 내려준다) · 행 단위(시트 작업옵션 칸) 판정.
 
 ### ★★ 리뷰비 입금 자동화 M1 — 입금대상 추출 · 은행별 분류 · 회차(다운로드) 잠금 (migration 086)
 - **배경**: 매일 ① 구글시트에서 새로 리뷰 제출한 사람을 눈으로 찾고 ② 계좌를 다건이체 파일에 옮겨 적고 ③ 이체 후 시트 입금칸에 날짜를 적는 수작업. M1이 ①②를 없앤다(③ = M2).

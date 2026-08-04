@@ -45,17 +45,19 @@ const revEdit = readS('routes/reviewEdit.routes.js');
 ok('완료 판정(submit)이 공용 유틸 사용 — 자체 구현 없음',
   /require\('\.\.\/utils\/captureSlots'\)/.test(submit)
   && !/function requiredSlotKeys\(captureSlots\) \{/.test(submit));
-ok('완료 판정이 income_type을 함께 읽는다(안 읽으면 현영 자동 슬롯을 못 봄)',
+// ★ 087 2차에서 슬롯 파생이 리뷰타입까지 보게 되어 인자가 하나 늘었다 —
+//   검사 의미(세 재료를 다 읽는가)는 그대로고, 리뷰타입 인자 존재를 함께 고정한다.
+ok('완료 판정이 income_type·리뷰타입을 함께 읽는다(안 읽으면 현영/구매확정 슬롯을 못 봄)',
   /tc\.income_type AS income_type/.test(submit)
-  && /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type\)/.test(submit));
+  && /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(submit));
 ok('검색 응답이 파생 슬롯을 내려준다',
-  /effectiveCaptureSlots\(row\.captureSlots, row\.incomeType\)/.test(search)
+  /effectiveCaptureSlots\(row\.captureSlots, row\.incomeType, _rtMap\.get/.test(search)
   && /tc\.income_type\s+AS "incomeType"/.test(search));
-ok('업로드 폴더 라벨이 공용 유틸 사용',
-  /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot\)/.test(diag));
+ok('업로드 폴더 라벨이 공용 유틸 사용(리뷰타입 포함 — 087 2차)',
+  /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(diag));
 ok('리뷰 교체요청도 같은 라벨 규칙(파일이 다른 폴더로 흩어지지 않게)',
-  /slotLabelOf\(cfg\.capture_slots, cfg\.income_type, slot\)/.test(revEdit)
-  && /slotLabelOf\(tc\[0\]\?\.capture_slots, tc\[0\]\?\.income_type, k\)/.test(revEdit));
+  /slotLabelOf\(cfg\.capture_slots, cfg\.income_type, slot, await reviewTypeForTab/.test(revEdit)
+  && /slotLabelOf\(tc\[0\]\?\.capture_slots, tc\[0\]\?\.income_type, k, _rt\)/.test(revEdit));
 
 /* ═══ 3단계: 검수 정책(실제 핸들러 · Gemini 스텁) ═══ */
 const orig = Module.prototype.require;
