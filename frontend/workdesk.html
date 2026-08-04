@@ -329,28 +329,6 @@
      헤더(.mh)도 **같은 값**으로 캡한다(위 규칙 — 어긋나면 제목만 화면 끝으로 밀린다). */
   #sthead .mh{max-width:1120px}
   #adminSettingsMount{max-width:1120px}
-  /* 작업표 — 역할 카드가 3열로 흐르는 구조라 표보다 좁게. 헤더도 **같은 값**으로 캡(위 규칙). */
-  #wthead .mh{max-width:1240px}
-  #wtbody{max-width:1240px}
-  /* 작업표 · 헤더 학습 리포트 — 계층(고정/자동/채널/작업/상태)을 색으로 구분해 한눈에 읽히게. */
-  .wtgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px}
-  .wtcard{border:1px solid var(--line);border-radius:10px;padding:11px 13px;background:var(--card)}
-  .wtcard .wth{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
-  .wtcard .wtn{font-weight:700;font-size:13.5px}
-  .wtcard .wtr{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
-  .wtcard .wtv{margin-top:6px;font-size:11.5px;color:var(--faint);line-height:1.7;word-break:break-all}
-  .wtlayer{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:5px;border:1px solid transparent}
-  .wtlayer.core{background:#E9F0F9;border-color:#B7CFE9;color:#2563A8}
-  .wtlayer.auto{background:#E5F3EE;border-color:#A6D6C6;color:#127A5E}
-  .wtlayer.channel{background:#FBF2E1;border-color:#E7D2A3;color:#9A6414}
-  .wtlayer.work{background:#F3E9F9;border-color:#D8BCE9;color:#7A3FA8}
-  .wtlayer.status{background:#EEF0F3;border-color:#D5DAE1;color:#59626F}
-  .wtfreq{font-size:10.5px;font-weight:650;padding:2px 6px;border-radius:5px}
-  .wtfreq.fixed{background:#E5F3EE;color:#127A5E}
-  .wtfreq.common{background:#FBF2E1;color:#9A6414}
-  .wtfreq.rare{background:#FAE9E7;color:#B3382E}
-  .wtbar{height:5px;border-radius:3px;background:var(--line);margin-top:7px;overflow:hidden}
-  .wtbar i{display:block;height:100%;background:var(--acc,#2563A8)}
   .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5} .ovnote b{color:var(--muted)}
   .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
   .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
@@ -830,7 +808,6 @@ function renderShell(){
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
-        <button class="navb" data-v="worktable" onclick="switchView('worktable')">작업표</button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
         <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
@@ -906,7 +883,7 @@ function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='worktable') renderWorktableView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
@@ -2441,7 +2418,7 @@ async function renderSettingsView(){
     <div class="ovnote">관리자 대시보드의 설정과 <b>같은 화면·같은 저장소</b>입니다 — 어느 쪽에서 바꿔도 결과가 같습니다.
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임만 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','notice'] : ['nickname'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','worktable','notice'] : ['nickname'] });
 }
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
@@ -2522,83 +2499,6 @@ window.CS_REVIEW_EDIT_ON_RESOLVED = function(){ try{ if(STATE.view==='reedit') _
 const _RI_LABEL = { fail:'불량', suspect:'의심', pass:'통과', pending:'미검수', unverifiable:'판정 불가', resolved:'확인됨' };
 const _RI_CHAN  = { coupang:'쿠팡', naver:'네이버', kakao:'카카오메이커스', oliveyoung:'올리브영' };
 function _riImg(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
-
-// ══════════════════════════════════════════════════════════════════
-// 작업표 — M1: 헤더 학습 리포트 (읽기 전용)
-//   운영 중인 실제 탭들의 헤더를 집계해 "무엇이 고정이고 무엇이 변칙인가"를 통계로 보여 준다.
-//   ★ 여기서 승인된 코어 열이 M2(작업표 생성) 미리보기의 기본 템플릿이 된다.
-//   ★ 분류는 서버가 매퍼에서 파생한다(프론트에 키워드 사본을 두지 않는다 — 드리프트 금지).
-// ══════════════════════════════════════════════════════════════════
-async function renderWorktableView(){
-  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="wthead"></div><div id="wtbody"><div class="empty">불러오는 중…</div></div></div>`;
-  await _loadWorktableStats();
-}
-async function _loadWorktableStats(){
-  const r = await api('/api/trackb/worktable/header-stats');
-  const b = $('#wtbody');
-  $('#wthead').innerHTML=`<div class="mh"><h1>작업표</h1>
-    <span class="sp" style="flex:1"></span>
-    <button class="btn" onclick="_loadWorktableStats()">새로고침</button></div>`;
-  if(!b) return;
-  if(!r || !r.ok || !r.data){ b.innerHTML=`<div class="empty">헤더 통계를 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; return; }
-  _wtRender(r.data);
-}
-function _wtRender(d){
-  const LAYER={core:'고정',auto:'자동',channel:'채널',work:'작업별',status:'상태'};
-  const FREQ={fixed:'거의 전부',common:'흔함',rare:'일부만'};
-  const pct = x => Math.round((x||0)*100)+'%';
-  const ch = d.channels||{};
-  const card = r => `<div class="wtcard">
-      <div class="wth">
-        <span class="wtn">${esc(r.label||r.role)}</span>
-        <span class="wtlayer ${esc(r.layer||'work')}">${esc(LAYER[r.layer]||r.layer||'')}</span>
-        <span class="wtfreq ${esc(r.frequency||'rare')}">${esc(FREQ[r.frequency]||'')}</span>
-        <span class="wtr">${r.tabCount}개 탭 · ${pct(r.ratio)}</span>
-      </div>
-      <div class="wtbar"><i style="width:${Math.min(100,Math.round((r.ratio||0)*100))}%"></i></div>
-      <div class="wtv">${(r.headerVariants||[]).map(v=>esc(v.name)+' ('+v.count+')').join(' · ')||'—'}</div>
-    </div>`;
-
-  const core = (d.roles||[]).filter(r=>r.frequency==='fixed');
-  const rest = (d.roles||[]).filter(r=>r.frequency!=='fixed');
-
-  $('#wtbody').innerHTML = `
-    <div class="ovnote">분석한 탭 <b>${d.tabsAnalyzed}</b>개${d.tabsWithoutHeaders?` · 헤더 미감지 ${d.tabsWithoutHeaders}개(미러 대기)`:''}
-      &nbsp;·&nbsp; 채널 추정: 쿠팡 ${ch.coupang||0} · 네이버 ${ch.naver||0} · 동시진행 ${ch.both||0} · 미상 ${ch.unknown||0}
-      <br>비율 = 그 열을 가진 탭의 비율. <b>${pct(d.thresholds&&d.thresholds.core)}</b> 이상이면 "거의 전부"(코어 후보),
-      <b>${pct(d.thresholds&&d.thresholds.rare)}</b> 미만이면 "일부만"(변칙 후보)로 봅니다.
-      이 분류는 <b>작업표 생성 시 기본값 제안</b>에만 쓰이며, 실제 생성은 미리보기에서 사람이 확정합니다.</div>
-
-    ${(d.statusConflicts||[]).length ? `<div class="sect"><div class="st">⚠ 확인 필요 — 상태 칸에 제출이 겹쳐 쓸 수 있는 열</div>
-      <div class="ovnote" style="margin-top:0">아래 열은 그 탭에서 <b>리뷰제출·입금 상태 칸</b>으로 쓰이는데,
-        구매양식 제출도 같은 열에 값을 씁니다(헤더 이름이 두 규칙에 모두 걸림). 제출이 상태 표시를 덮어쓸 수 있으니
-        <b>헤더 이름을 바꾸는 편이 안전</b>합니다. 작업표를 새로 만들 때는 이 이름을 피해 주세요.</div>
-      <div class="wtgrid">${(d.statusConflicts||[]).map(c=>`<div class="wtcard" style="border-color:#E7D2A3">
-        <div class="wth"><span class="wtn">${esc(c.header)}</span>
-          <span class="wtlayer status">${esc(c.roleLabel)}</span>
-          <span class="wtfreq common">제출도 씀: ${esc(c.mapperLabel)}</span>
-          <span class="wtr">${c.tabCount}개 탭</span></div>
-      </div>`).join('')}</div></div>` : ''}
-
-    <div class="sect"><div class="st">코어 후보 — 거의 모든 작업에 있는 열</div>
-      ${core.length?`<div class="wtgrid">${core.map(card).join('')}</div>`:'<div class="empty">아직 집계된 열이 없습니다.</div>'}</div>
-
-    <div class="sect" style="margin-top:16px"><div class="st">작업별·채널별 열 — 있을 때만 붙는 열</div>
-      ${rest.length?`<div class="wtgrid">${rest.map(card).join('')}</div>`:'<div class="empty">해당 없음</div>'}</div>
-
-    <div class="sect" style="margin-top:16px"><div class="st">미분류 헤더 — 시스템이 역할을 모르는 열 (상위 ${(d.unmapped||[]).length}개)</div>
-      <div class="ovnote" style="margin-top:0">관리자가 미리 적어 두는 작업지시·업체 요청 칸이 여기 모입니다.
-        자주 나오는 것은 작업표 템플릿의 <b>작업별 열</b> 후보이고, 드문 것은 그 작업만의 메모 열입니다.</div>
-      ${(d.unmapped||[]).length?`<div class="wtgrid">${(d.unmapped||[]).map(u=>`<div class="wtcard">
-          <div class="wth"><span class="wtn">${esc(u.name)}</span>
-            <span class="wtfreq ${esc(u.frequency||'rare')}">${esc(FREQ[u.frequency]||'')}</span>
-            <span class="wtr">${u.tabCount}개 탭 · ${pct(u.ratio)}</span></div>
-          <div class="wtbar"><i style="width:${Math.min(100,Math.round((u.ratio||0)*100))}%"></i></div>
-        </div>`).join('')}</div>`:'<div class="empty">미분류 헤더가 없습니다.</div>'}</div>
-
-    <div class="ovnote" style="margin-top:18px">다음 단계(M2): 여기서 확정한 코어 열로
-      <b>작업오더 → [작업표 생성]</b> 미리보기를 채웁니다. 아직 생성 기능은 열려 있지 않습니다.</div>`;
-}
 
 async function renderInspectView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rihead"></div><div id="ribody"><div class="empty">불러오는 중…</div></div></div>`;

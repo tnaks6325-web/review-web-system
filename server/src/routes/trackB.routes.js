@@ -1166,4 +1166,22 @@ router.get('/worktable/header-stats', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+// 표준 열 템플릿 — 관리자가 확정하는 "우리 작업표의 기본 열"(M2 생성 미리보기의 기본값).
+//   ★ 리포트는 통계를 보여줄 뿐이고 **무엇을 쓸지 정하는 건 사람**이라, 그 결정을 여기 못박는다.
+//   ★ 전사 설정이라 adminOrMaster(AE 는 열람·수정 모두 불가 — 리포트와 같은 판단).
+router.get('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { getTemplate } = require('../services/worktable.service');
+    res.json({ ok: true, data: await getTemplate() });
+  } catch (err) { next(err); }
+});
+router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { saveTemplate } = require('../services/worktable.service');
+    const b = req.body || {};
+    const data = await saveTemplate({ core: b.core, channels: b.channels, by: _by(req) });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
