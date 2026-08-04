@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>작업표 열 구성 확장 — 유저플로우 와이어프레임 (시안 v1.0)</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --faint:#8A93A3; --line:#E2E6EC;
+    --blue:#2563A8; --blue-bg:#E9F0F9; --blue-edge:#B7CFE9;
+    --green:#127A5E; --green-bg:#E5F3EE; --green-edge:#A6D6C6;
+    --amber:#9A6414; --amber-bg:#FBF2E1; --amber-edge:#E7D2A3;
+    --purple:#7A3FA8; --purple-bg:#F3E9F9; --purple-edge:#D8BCE9;
+    --gray:#59626F; --gray-bg:#EEF0F3; --gray-edge:#D5DAE1;
+    --done:#0F7B4F; --done-bg:#EAF7F0;
+    --ask:#B3382E; --ask-bg:#FAE9E7; --ask-edge:#EFC5C0;
+    --side:#4F46E5; --side-bg:#EEEDFC;
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:44px 20px 72px; display:flex; flex-direction:column; gap:40px}
+  .eyebrow{margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--side)}
+  h1{margin:0 0 12px; font-size:clamp(26px,4vw,36px); font-weight:800; letter-spacing:-.026em; line-height:1.2}
+  .lede{margin:0; max-width:72ch; color:var(--muted); font-size:15.5px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+
+  section{display:flex; flex-direction:column; gap:14px}
+  h2{margin:0; font-size:19px; font-weight:750; letter-spacing:-.015em; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .num{flex:none; width:25px; height:25px; border-radius:7px; display:grid; place-items:center;
+       background:var(--ink); color:var(--paper); font-size:12.5px; font-weight:800}
+  h3{margin:14px 0 0; font-size:14.5px; font-weight:750}
+  .rule{margin:0; color:var(--muted); font-size:14px; max-width:78ch}
+  .rule strong,.rule b{color:var(--ink); font-weight:700}
+
+  .badge{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:750; border-radius:999px; padding:3px 11px}
+  .badge.done{background:var(--done-bg); color:var(--done); border:1px solid #A9DCC3}
+  .badge.plan{background:var(--side-bg); color:var(--side); border:1px solid #C7C3F2}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; box-shadow:var(--shadow)}
+
+  /* ── 화면 목업 공통 ── */
+  .mock{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; box-shadow:var(--shadow)}
+  .mock .mtitle{font-size:12px; font-weight:750; color:var(--faint); letter-spacing:.06em; margin-bottom:10px}
+  .mock .cap{margin:10px 0 0; font-size:12.5px; color:var(--muted)}
+  .mock .cap b{color:var(--ink)}
+
+  /* 설정 패널 행(열 구성) */
+  .chrow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; border:1px solid var(--line);
+         border-radius:9px; padding:8px 12px; background:var(--card); margin-bottom:7px; font-size:13px}
+  .chrow.common{border-color:#BFDBFE; background:#F8FBFF}
+  .chrow .lb{flex:none; width:130px; font-weight:700}
+  .chrow.common .lb{color:#1D4ED8}
+  .chrow .lb i{font-style:normal; font-weight:500; font-size:11px; color:var(--faint); display:block}
+  .chrow .hintx{flex:1; min-width:160px; color:var(--faint); font-size:12px}
+  .chip{display:inline-flex; align-items:center; gap:3px; border:1px solid #BFDBFE; background:#EFF6FF;
+        border-radius:7px; padding:2px 8px; font-size:12px; font-weight:650; color:#1D4ED8}
+  .chip s{opacity:.45; text-decoration:none; font-size:10px}
+  .addbox{flex:none; margin-left:auto; display:inline-flex; gap:5px; align-items:center}
+  .addbox input{width:110px; padding:4px 9px; border:1.5px solid #D1D5DB; border-radius:7px; font-size:12px; background:var(--card); color:var(--ink)}
+  .addbox .bt{display:grid; place-items:center; min-width:26px; height:26px; padding:0 7px; border:1.5px solid #BFDBFE;
+              background:#EFF6FF; color:#1D4ED8; border-radius:7px; font-size:12.5px; font-weight:750}
+  .addbox .bt.pk{border-color:#D1D5DB; background:var(--card); color:var(--muted); font-size:10.5px}
+  .delx{color:#B91C1C; border:1px solid #FECACA; background:#FEF2F2; border-radius:7px; font-size:11px; font-weight:700; padding:3px 8px}
+
+  /* 미리보기 스트립 */
+  .pv{border:1px solid var(--line); border-radius:9px; background:#FCFDFE; padding:9px 12px 10px; margin-bottom:7px}
+  .pvh{font-size:11.5px; font-weight:750; color:var(--muted); margin-bottom:7px}
+  .pvh span{font-weight:400; color:var(--faint)}
+  .pvrow{display:flex; align-items:stretch; border:1px solid #DCE3EC; border-radius:7px; overflow:hidden; background:var(--card)}
+  .pvc{flex:0 1 auto; min-width:0; padding:5px 8px; font-size:11px; font-weight:650; color:#374151; text-align:center;
+       white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-right:1px solid #EDF0F4; background:#F8FAFC}
+  .pvc:last-child{border-right:none}
+  .pvc.core{background:var(--blue-bg); color:var(--blue)}
+  .pvc.auto{background:var(--green-bg); color:var(--green)}
+  .pvc.chn{background:var(--amber-bg); color:var(--amber)}
+  .pvc.wrk{background:var(--purple-bg); color:var(--purple)}
+  .pvc.stat{background:var(--gray-bg); color:var(--gray)}
+  .pvc.addc{flex:0 0 auto; background:var(--card); color:var(--faint); font-weight:600; border-left:1px dashed #CBD5E1}
+  .pvc.sel{outline:2px solid #2563EB; outline-offset:-2px}
+  .pvtool{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:7px; padding:6px 9px;
+          border:1px solid #DBEAFE; background:#F5F9FF; border-radius:7px; font-size:12px}
+  .pvtool b{color:#1D4ED8}
+  .pvtool .m{color:var(--muted)}
+  .pvtool .b{border:1px solid #BFDBFE; background:var(--card); color:#1D4ED8; border-radius:6px; font-size:11px; font-weight:650; padding:2px 9px}
+  .pvtool .b.x{color:#B91C1C; border-color:#FECACA}
+  .pvtool .b.c{margin-left:auto; color:var(--muted); border-color:#D1D5DB}
+
+  /* 채널 적용 알약 */
+  .pills{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px}
+  .pill{border:1.5px solid #D1D5DB; background:var(--card); color:var(--muted); border-radius:999px;
+        font-size:11.5px; font-weight:700; padding:3px 12px}
+  .pill.on{border-color:#2563EB; background:#EFF6FF; color:#1D4ED8}
+  .pill.newp{border-style:dashed}
+
+  /* 상세 목록 행 */
+  .dtrow{display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px;
+         padding:6px 10px; background:var(--card); margin-bottom:6px; font-size:12.5px}
+  .dtrow .no{color:var(--faint); font-size:11px; min-width:16px}
+  .dtrow .nm{font-weight:700; min-width:72px}
+  .dtrow .role{font-size:11px; color:#1D4ED8; background:#EFF6FF; border:1px solid #BFDBFE; border-radius:5px; padding:1px 7px; white-space:nowrap}
+  .dtrow .role.none{color:var(--muted); background:var(--gray-bg); border-color:var(--gray-edge)}
+  .dtrow .fill{flex:1; min-width:0; font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .dtrow .old-btns{margin-left:auto; display:inline-flex; gap:4px}
+  .dtrow .old-btns i{font-style:normal; width:22px; height:22px; display:grid; place-items:center; border:1px solid #D1D5DB; border-radius:5px; font-size:11px; color:var(--muted)}
+  .strike{position:relative}
+  .strike::after{content:""; position:absolute; inset:0; background:linear-gradient(to top right, transparent 47%, #B3382E 48%, #B3382E 52%, transparent 53%); pointer-events:none; opacity:.7}
+
+  /* 유형 체크(작업표 만들기 모달) */
+  .tchk{display:flex; align-items:flex-start; gap:9px; border:1px solid var(--line); border-radius:9px; padding:9px 12px; background:var(--card); margin-bottom:7px; font-size:13px}
+  .tchk .cb{flex:none; width:17px; height:17px; border:1.5px solid #9CA3AF; border-radius:4px; display:grid; place-items:center; font-size:11px; margin-top:2px}
+  .tchk.on{border-color:#BFDBFE; background:#F8FBFF}
+  .tchk.on .cb{border-color:#2563EB; background:#2563EB; color:#fff}
+  .tchk .tt{font-weight:700}
+  .tchk .why{display:block; font-weight:400; font-size:11.5px; color:var(--muted)}
+  .tchk .autotag{margin-left:auto; flex:none; font-size:10.5px; font-weight:750; color:var(--green); background:var(--green-bg); border:1px solid var(--green-edge); border-radius:999px; padding:1px 8px}
+
+  /* 플로우 스텝 */
+  .flow{display:flex; gap:10px; flex-wrap:wrap; counter-reset:st}
+  .st{flex:1 1 200px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px 15px; box-shadow:var(--shadow); position:relative}
+  .st::before{counter-increment:st; content:counter(st); position:absolute; top:-10px; left:12px; width:22px; height:22px;
+              border-radius:7px; background:var(--side); color:#fff; font-size:12px; font-weight:800; display:grid; place-items:center}
+  .st b{display:block; font-size:13.5px; margin:4px 0 4px}
+  .st p{margin:0; font-size:12.5px; color:var(--muted)}
+
+  /* 규칙/질문 카드 */
+  ul.rules{margin:0; padding-left:20px; font-size:13.5px; color:var(--muted); display:flex; flex-direction:column; gap:6px}
+  ul.rules b{color:var(--ink)}
+  .ask{border:1px solid var(--ask-edge); background:var(--ask-bg); border-radius:12px; padding:14px 17px}
+  .ask h3{margin:0 0 8px; color:var(--ask); font-size:14px}
+  .ask ol{margin:0; padding-left:20px; font-size:13.5px; display:flex; flex-direction:column; gap:7px}
+  .ask b{color:var(--ink)}
+  .ask .draft{font-size:12px; color:var(--muted)}
+
+  .cols2{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px}
+  .arrow-note{font-size:12px; font-weight:750; color:var(--faint); text-align:center; margin:2px 0}
+
+  .legend{display:flex; gap:8px; flex-wrap:wrap}
+  .key{display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:999px; font-size:12px; font-weight:650; border:1px solid var(--line); background:var(--card)}
+  .dot{width:9px; height:9px; border-radius:3px; flex:none}
+
+  footer{border-top:1px solid var(--line); padding-top:20px; color:var(--faint); font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">설정 › 작업표 표준 열 — 확장 시안</p>
+    <h1>작업표 열 구성 확장<br>유저플로우 와이어프레임 <span style="font-size:.5em;color:var(--faint);font-weight:600">v1.0 · 2026-08-04</span></h1>
+    <p class="lede">
+      작업표(구매양식이 채워질 시트)의 열 구성을 <b>채널·작업유형까지 넓혀 미리 준비</b>해 두는 기능의 계획서입니다.
+      아래 <b>A는 이번에 바로 반영</b>했고, <b>B·C·D는 이 시안을 확정한 뒤</b> 단계대로 구현합니다.
+      화면 그림은 실제 설정 화면과 같은 모양으로 그렸습니다.
+    </p>
+    <div class="legend" style="margin-top:14px">
+      <span class="key"><span class="dot" style="background:var(--blue)"></span>공통 열(제출이 채움)</span>
+      <span class="key"><span class="dot" style="background:var(--green)"></span>자동 열(시스템이 채움)</span>
+      <span class="key"><span class="dot" style="background:var(--amber)"></span>채널 열</span>
+      <span class="key"><span class="dot" style="background:var(--purple)"></span>작업유형 열</span>
+      <span class="key"><span class="dot" style="background:var(--gray)"></span>상태 열(리뷰제출·입금)</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════ A ═══════════════ -->
+  <section>
+    <h2><span class="num">A</span> 공통 열 상세 — 설명을 배지 오른쪽 한 줄로 <span class="badge done">✅ 반영 완료</span></h2>
+    <p class="rule">
+      각 열의 <b>구매양식 제출 매칭 설명</b>이 둘째 줄로 내려가 행이 두꺼워지던 것을,
+      <b>배지 오른쪽 같은 줄</b>로 올려 행 높이를 종전과 같게 유지합니다. 긴 설명은 말줄임(…)하고
+      마우스를 올리면 전체 문장이 풍선말로 보입니다.
+    </p>
+    <div class="cols2">
+      <div class="mock">
+        <div class="mtitle">종전 (두 줄 행)</div>
+        <div class="dtrow strike" style="flex-wrap:wrap">
+          <span class="no">3</span><span class="nm">수취인</span>
+          <span class="role">시스템 인식: 수취인</span>
+          <span style="flex-basis:100%;font-size:11px;color:var(--muted);padding-left:24px">구매양식 [수취인] 입력값이 들어갑니다</span>
+        </div>
+      </div>
+      <div class="mock">
+        <div class="mtitle">변경 후 (한 줄 행 · 반영 완료)</div>
+        <div class="dtrow">
+          <span class="no">3</span><span class="nm">수취인</span>
+          <span class="role">시스템 인식: 수취인</span>
+          <span class="fill">구매양식 [수취인] 입력값이 들어갑니다</span>
+        </div>
+        <div class="dtrow">
+          <span class="no">4</span><span class="nm">연락처</span>
+          <span class="role">시스템 인식: 연락처</span>
+          <span class="fill">구매양식 [연락처] 입력값이 들어갑니다</span>
+        </div>
+        <div class="dtrow">
+          <span class="no">13</span><span class="nm">리뷰제출</span>
+          <span class="role none">제출이 값을 쓰지 않는 열</span>
+          <span class="fill">구매양식 제출 항목과 매칭되지 않습니다 — 상태 표시·관리자 기입용 칸이면 정상…</span>
+        </div>
+        <p class="cap">좁은 화면(모바일)에서는 잘려서 안 보이는 것보다 낫도록 설명이 아랫줄로 내려갑니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ B ═══════════════ -->
+  <section>
+    <h2><span class="num">B</span> 작업표 미리보기 — "지금 양식을 채널에 적용해 보기" <span class="badge plan">시안 · 확정 대기</span></h2>
+    <p class="rule">
+      지금 미리보기는 공통 열 끝에 <b>"＋채널" 자리 표시</b>만 있어서, 쿠팡 작업표가 실제로 어떤 모양이 되는지는
+      머릿속으로 합쳐 봐야 합니다. 미리보기 위에 <b>채널 알약 버튼</b>을 두고, 누르면 <b>공통 + 그 채널 열이
+      합쳐진 완성 양식</b>이 그대로 보이게 합니다. 채널 열 칸도 클릭하면 같은 툴바로 조절할 수 있어
+      "조절 창구는 미리보기 하나"라는 원칙이 그대로 유지됩니다.
+    </p>
+    <div class="mock">
+      <div class="mtitle">목업 — [🛒 쿠팡]을 누른 상태</div>
+      <div class="pills">
+        <span class="pill">기본(공통만)</span>
+        <span class="pill on">🛒 쿠팡</span>
+        <span class="pill">🟢 네이버</span>
+        <span class="pill">🫒 올리브영</span>
+        <span class="pill">🎁 카카오메이커스</span>
+      </div>
+      <div class="pv">
+        <div class="pvh">작업표 미리보기 <span>— 공통 15열 + 쿠팡 1열 · 칸을 누르면 순서·빼기 조절</span></div>
+        <div class="pvrow">
+          <span class="pvc auto">번호</span><span class="pvc auto">구매일자</span>
+          <span class="pvc core">주문자</span><span class="pvc core">수취인</span>
+          <span class="pvc chn sel">쿠팡ID</span>
+          <span class="pvc core">연락처</span><span class="pvc core">주소</span><span class="pvc core">은행</span>
+          <span class="pvc core">계좌번호</span><span class="pvc core">예금주</span><span class="pvc core">결제금액</span>
+          <span class="pvc core">주문번호</span><span class="pvc stat">리뷰제출</span><span class="pvc stat">입금</span><span class="pvc core">비고</span>
+        </div>
+        <div class="pvtool">
+          <b>5. 쿠팡ID</b> <span class="m">쿠팡 채널 열 · 시스템 인식: 구매채널ID</span>
+          <span class="b">◀ 왼쪽</span><span class="b">오른쪽 ▶</span><span class="b x">✕ 빼기</span><span class="b c">닫기</span>
+        </div>
+      </div>
+      <p class="cap"><b>채널 칸(황색)</b>은 그 채널 행의 열을 그대로 보여주고, 조절하면 그 채널 행의 값이 바뀝니다.
+        기본(공통만)으로 돌아오면 지금과 완전히 같은 화면입니다. <b>저장은 지금처럼 [저장] 버튼 하나</b> — 알약은 보기·조절 전환일 뿐 따로 저장되지 않습니다.</p>
+    </div>
+    <h3>유저플로우</h3>
+    <div class="flow">
+      <div class="st"><b>채널 알약 클릭</b><p>미리보기가 공통 + 그 채널 열이 합쳐진 완성 양식으로 바뀝니다.</p></div>
+      <div class="st"><b>칸 클릭으로 조절</b><p>공통 칸은 공통 안에서, 채널 칸은 채널 안에서 순서·빼기를 조절합니다.</p></div>
+      <div class="st"><b>[저장]</b><p>기존 저장 버튼 그대로. 어떤 알약을 보고 있었는지는 저장과 무관합니다.</p></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ C ═══════════════ -->
+  <section>
+    <h2><span class="num">C</span> 작업채널 추가 — 지마켓 같은 새 채널 <span class="badge plan">시안 · 확정 대기</span></h2>
+    <p class="rule">
+      채널 행이 기본 4개(쿠팡·네이버·올리브영·카카오메이커스)로 고정돼 있어 지마켓 같은 새 채널 작업은
+      열 구성을 준비할 수 없습니다. 채널 행 아래 <b>[＋ 작업채널 추가]</b>로 채널을 직접 늘릴 수 있게 합니다.
+      추가한 채널은 기존 채널 행과 <b>완전히 같은 방식</b>으로 열을 담고, B의 미리보기 알약에도 자동으로 나타납니다.
+    </p>
+    <div class="mock">
+      <div class="mtitle">목업 — 지마켓 채널을 추가한 상태</div>
+      <div class="chrow"><span class="lb">🛒 쿠팡</span><span class="chip"><s>◀</s> 쿠팡ID <s>▶</s> <s>✕</s></span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span></span></div>
+      <div class="chrow"><span class="lb">🟢 네이버</span><span class="chip"><s>◀</s> 네이버아이디 <s>▶</s> <s>✕</s></span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span></span></div>
+      <div class="chrow"><span class="lb">🫒 올리브영</span><span class="hintx">추가 열 없음</span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span></span></div>
+      <div class="chrow"><span class="lb">🎁 카카오메이커스</span><span class="hintx">추가 열 없음</span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span></span></div>
+      <div class="chrow" style="border-style:dashed">
+        <span class="lb">🆕 지마켓 <i>직접 추가한 채널</i></span>
+        <span class="chip"><s>◀</s> 지마켓ID <s>▶</s> <s>✕</s></span>
+        <span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span><span class="delx">채널 삭제</span></span>
+      </div>
+      <div class="pills" style="margin-top:8px">
+        <span class="pill newp">＋ 작업채널 추가</span>
+      </div>
+      <p class="cap">[＋ 작업채널 추가] → 채널 이름 입력 → 새 채널 행이 생깁니다. 저장하면 그대로 보관됩니다(새 데이터베이스 없이 지금 설정 저장소에 함께 저장).</p>
+    </div>
+    <h3>규칙 (안전장치)</h3>
+    <ul class="rules">
+      <li><b>기본 4채널은 삭제할 수 없습니다</b> — 현금영수증 발행방법 안내 등 다른 기능과 짝을 이루는 채널이라, 지우면 그쪽 화면이 함께 흔들립니다. 직접 추가한 채널만 [채널 삭제]가 보입니다.</li>
+      <li><b>열이 담긴 채널을 삭제할 때는 확인창</b> — "지마켓 채널과 그 열 1개 구성을 삭제할까요?"를 한 번 묻습니다(작업표가 이미 만들어진 시트에는 영향 없음 — 설정만 지워집니다).</li>
+      <li><b>채널 자동 판정은 기본 4채널까지만</b> — 상품 주소(URL)를 보고 채널을 알아내는 자동 기능은 기본 채널만 지원합니다. 직접 추가한 채널은 작업표를 만들 때 담당자가 목록에서 직접 고릅니다(틀린 자동 추측보다 안전).</li>
+      <li><b>현금영수증 발행방법 이미지 슬롯은 그대로 4채널</b> — 작업표 채널과 현영 안내는 별개 기능이라 따라 늘지 않습니다. 새 채널에 현영 작업이 생기면 그때 따로 정합니다.</li>
+      <li>같은 이름 채널 중복 추가 차단 · 공통에 이미 있는 열은 채널에 못 담는 기존 규칙 그대로.</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ D ═══════════════ -->
+  <section>
+    <h2><span class="num">D</span> 작업유형별 열 구성 — 상황에 따라 붙는 열 <span class="badge plan">시안 · 확정 대기</span></h2>
+    <p class="rule">
+      채널과 별개로, <b>"이 작업이 어떤 상황인가"</b>에 따라 필요한 열이 다릅니다.
+      옵션이 여러 개인 상품은 <b>옵션</b> 열이, 리뷰 형태를 행마다 적어두는 작업은 <b>리뷰옵션</b> 열이,
+      택배발송대행 작업은 <b>택배송장번호</b> 열이 필요합니다. 이를 <b>작업유형</b> 묶음으로 미리 준비해 두고,
+      작업표를 만들 때 해당 유형을 켜면 그 열들이 덧붙습니다.
+      <b>작업표의 최종 열 = 공통 + 채널 + 켜진 유형들</b>입니다.
+    </p>
+    <div class="mock">
+      <div class="mtitle">목업 ① — 설정 화면: 채널 묶음 아래 "작업유형별 열" 묶음</div>
+      <div class="chrow" style="border-color:var(--purple-edge);background:#FDFBFF"><span class="lb" style="color:var(--purple)">🎛 상품옵션 <i>옵션이 2종 이상인 작업</i></span><span class="chip" style="border-color:var(--purple-edge);background:var(--purple-bg);color:var(--purple)"><s>◀</s> 옵션 <s>▶</s> <s>✕</s></span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span><span class="delx">유형 삭제</span></span></div>
+      <div class="chrow" style="border-color:var(--purple-edge);background:#FDFBFF"><span class="lb" style="color:var(--purple)">📝 리뷰유형 <i>행마다 리뷰 형태를 적는 작업</i></span><span class="chip" style="border-color:var(--purple-edge);background:var(--purple-bg);color:var(--purple)"><s>◀</s> 리뷰옵션 <s>▶</s> <s>✕</s></span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span><span class="delx">유형 삭제</span></span></div>
+      <div class="chrow" style="border-color:var(--purple-edge);background:#FDFBFF"><span class="lb" style="color:var(--purple)">📦 택배발송대행 <i>실배송을 대행 발송하는 작업</i></span><span class="chip" style="border-color:var(--purple-edge);background:var(--purple-bg);color:var(--purple)"><s>◀</s> 택배송장번호 <s>▶</s> <s>✕</s></span><span class="addbox"><input placeholder="열 이름"><span class="bt pk">▼</span><span class="bt">＋</span><span class="delx">유형 삭제</span></span></div>
+      <div class="pills" style="margin-top:8px"><span class="pill newp">＋ 작업유형 추가</span></div>
+      <p class="cap">기본 제공 3종은 <b>예시로 미리 채워 제안</b>하되, 이름·열은 자유롭게 고치거나 지울 수 있습니다.
+        채널 행과 같은 블록 UI(같은 빌더)라 배우는 방법이 하나입니다.</p>
+    </div>
+    <div class="arrow-note">▼ 준비해 둔 유형은 작업표를 만들 때 이렇게 쓰입니다 ▼</div>
+    <div class="mock">
+      <div class="mtitle">목업 ② — 작업오더 [📋 작업표] 미리보기: 유형 선택</div>
+      <div class="tchk on">
+        <span class="cb">✓</span>
+        <span><span class="tt">🎛 상품옵션</span><span class="why">옵션 열 1개가 덧붙고, 행마다 옵션명이 미리 적힙니다.</span></span>
+        <span class="autotag">자동 제안 — 작업오더에 옵션 2종</span>
+      </div>
+      <div class="tchk">
+        <span class="cb"></span>
+        <span><span class="tt">📝 리뷰유형</span><span class="why">리뷰옵션 열 1개가 덧붙습니다(값은 담당자가 적어 둡니다).</span></span>
+      </div>
+      <div class="tchk">
+        <span class="cb"></span>
+        <span><span class="tt">📦 택배발송대행</span><span class="why">택배송장번호 열 1개가 덧붙습니다.</span></span>
+      </div>
+      <div class="pv" style="margin-top:10px">
+        <div class="pvh">최종 열 미리보기 <span>— 공통 15 + 쿠팡 1 + 상품옵션 1 = 17열</span></div>
+        <div class="pvrow">
+          <span class="pvc auto">번호</span><span class="pvc auto">구매일자</span>
+          <span class="pvc wrk">옵션</span>
+          <span class="pvc core">주문자</span><span class="pvc core">수취인</span><span class="pvc chn">쿠팡ID</span>
+          <span class="pvc core">연락처</span><span class="pvc core">주소</span><span class="pvc core">…</span>
+          <span class="pvc stat">리뷰제출</span><span class="pvc stat">입금</span><span class="pvc core">비고</span>
+        </div>
+      </div>
+      <p class="cap"><b>자동 제안은 체크만 미리 해 줄 뿐, 최종 확정은 담당자가 합니다</b>(학습·자동화는 제안까지 — 이 화면의 기존 원칙 그대로).
+        제안 근거: 작업오더에 옵션이 2종 이상 → 상품옵션 / 공고에 리뷰타입 설정 → 리뷰유형 / 택배발송대행은 자동 근거가 없어 항상 수동.</p>
+    </div>
+    <h3>규칙 (안전장치)</h3>
+    <ul class="rules">
+      <li><b>겹침 차단</b> — 공통·채널에 이미 있는 열 이름은 유형에 담을 수 없습니다(작업표에 같은 열이 2번 생기는 것 차단 — 기존 규칙의 확장).</li>
+      <li><b>'옵션' 열의 기존 보호 규칙 그대로</b> — 시스템은 옵션 칸에 값이 이미 있으면 절대 덮어쓰지 않습니다(관리자 작업지시 보존).</li>
+      <li><b>유형을 하나도 안 켜면 지금과 완전히 같은 작업표</b>가 만들어집니다(안 쓰면 무변화).</li>
+      <li>유형 삭제는 설정만 지웁니다 — 이미 만들어진 시트는 건드리지 않습니다.</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ 전체 플로우 ═══════════════ -->
+  <section>
+    <h2><span class="num">E</span> 전체 유저플로우 — 설정 한 번, 작업마다 자동</h2>
+    <div class="flow">
+      <div class="st"><b>설정에서 준비 (한 번)</b><p>공통 열 + 채널별 열(지마켓 포함) + 작업유형별 열을 담아 [저장]. 미리보기 알약으로 채널별 완성 양식을 확인.</p></div>
+      <div class="st"><b>작업오더 접수</b><p>지금과 같습니다 — 달라지는 것 없음.</p></div>
+      <div class="st"><b>[📋 작업표] 미리보기</b><p>채널은 상품 주소로 자동 판정(기본 4채널) 또는 직접 선택. 유형은 자동 제안 + 담당자 체크.</p></div>
+      <div class="st"><b>[이 구성으로 만들기]</b><p>공통+채널+유형이 합쳐진 작업표가 생성됩니다. 이후 구매양식 제출이 열을 채우는 것은 기존 그대로.</p></div>
+    </div>
+    <h3>구현 순서 (각 단계가 독립 배포 — 안 쓰면 기존 동작 그대로)</h3>
+    <ul class="rules">
+      <li><b>1단계 = B 채널 적용 미리보기</b> — 화면만 바뀌고 저장 구조는 무변경이라 가장 안전합니다.</li>
+      <li><b>2단계 = C 작업채널 추가</b> — 설정 저장소에 채널 목록이 추가됩니다(새 데이터베이스 없음).</li>
+      <li><b>3단계 = D 작업유형</b> — 설정 저장소에 유형 묶음 + 작업표 미리보기에 체크 UI + 자동 제안.</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ 질문 ═══════════════ -->
+  <section>
+    <div class="ask">
+      <h3>⚑ 확정이 필요한 질문 — 답을 주시면 그 기준으로 구현을 시작합니다</h3>
+      <ol>
+        <li><b>B "적용하기"의 의미</b> — 이 시안은 "그 채널의 완성 양식을 미리보기에서 그대로 보고·조절하는 것"으로 그렸습니다. 다른 의미(예: 버튼을 눌러야 채널에 반영·저장)였다면 알려주세요. <span class="draft">초안: 보기·조절 전환, 저장은 기존 [저장] 하나.</span></li>
+        <li><b>C 채널 이름 변경</b> — 초안은 "삭제 후 다시 추가"입니다(이름만 바꾸는 기능은 후속). 이름 변경이 자주 필요하면 처음부터 넣겠습니다.</li>
+        <li><b>D 유형 열이 붙는 위치</b> — 초안은 옵션·리뷰옵션처럼 <b>구매일자 뒤(앞쪽)</b>, 택배송장번호처럼 기록용 열은 <b>비고 앞(뒤쪽)</b>으로, 유형을 만들 때 앞/뒤를 고르게 했습니다. 전부 맨 뒤로 통일하는 게 낫다면 알려주세요.</li>
+        <li><b>D 기본 제공 3종의 이름·열</b> — 상품옵션→'옵션' / 리뷰유형→'리뷰옵션' / 택배발송대행→'택배송장번호'가 실제 시트 관례와 맞는지 확인해 주세요(열 이름이 곧 시스템 판정을 결정합니다).</li>
+        <li><b>D 자동 제안 규칙</b> — "옵션 2종 이상 → 상품옵션 자동 체크"에 동의하시는지. 오탐이 걱정되면 제안 없이 전부 수동 체크로 시작할 수 있습니다.</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    작업표 열 구성 확장 와이어프레임 v1.0 · 2026-08-04 · A = 반영 완료, B·C·D = 시안(확정 대기) ·
+    관련 화면: 설정 › 작업표 표준 열(관리자 대시보드·리뷰웹시스템[3버전] 공용), 작업오더 [📋 작업표] 미리보기
+  </footer>
+</div>
+</body>
+</html>
