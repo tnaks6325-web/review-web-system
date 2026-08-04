@@ -1573,6 +1573,7 @@ async function loadTabs(){
   STATE.finTruncated=!!r.truncated;
   STATE.finUnavailable=!!r.finishedUnavailable;
   STATE.dailyUnavailable=!!r.dailyUnavailable;
+  if(r.kstDate) STATE.kstDate=r.kstDate;   // 두 흡수 경로가 같은 기준을 갖게(자정 자가치유)
   STATE.tabs.forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(!t.stats){ const s=_prevStats[k]; if(s) t.stats=s; }
     // ★ 마감 조회가 실패한 응답으로 기존 마감 표시를 지우지 않는다(그러면 마감 작업이 보드로 되살아난다)
@@ -1837,6 +1838,14 @@ async function toggleTodayDone(i, ev){
   if(!(r&&r.ok)){                                       // 실패하면 되돌린다(화면만 바뀐 채 두지 않는다)
     t.todayDone=!want; _finRenderList(); _renderWorktabs(); _renderTabList();
     toast((r&&r.error)||'오늘 완료 처리 실패');
+    return;
+  }
+  // ★★ 자정을 넘긴 채 떠 있던 화면 자가치유: 서버가 쓴 날짜가 이 화면이 알던 "오늘"과 다르면
+  //   **다른 탭들의 체크도 전부 어제 것**이다(내가 누른 것만 맞고 나머지는 stale) → 목록을 다시 받는다.
+  //   서버 날짜(KST)를 기준으로 삼는다 — 클라이언트 시계를 믿지 않는다.
+  if(r.date && STATE.kstDate && r.date!==STATE.kstDate){
+    toast('날짜가 바뀌어 오늘 완료 표시를 새로 불러왔어요');
+    await _finEnsureStats(true); _finRenderList(); _renderWorktabs(); _renderTabList();
   }
 }
 function _finTab(sheetId,tabName){ return STATE.tabs.find(t=>t.sheetId===sheetId&&t.tabName===tabName)||null; }
@@ -1860,6 +1869,7 @@ function _finAbsorb(r){
   STATE.statsUnavailable=!!r.statsUnavailable;
   STATE.dailyUnavailable=!!r.dailyUnavailable;
   STATE.finTruncated=!!r.truncated;
+  if(r.kstDate) STATE.kstDate=r.kstDate;   // 서버가 판정한 "오늘" — 자정 넘긴 화면의 자가치유 기준
   const by={}; r.tabs.forEach(n=>{ by[n.sheetId+'\t'+n.tabName]=n; });
   STATE.tabs.forEach(t=>{ const n=by[t.sheetId+'\t'+t.tabName]; if(!n) return;
     if(n.stats) t.stats=n.stats;
@@ -2118,9 +2128,11 @@ function _renderWorktabs(){
   if(STATE.role==='advertiser'){ host.innerHTML=''; return; }
   const list=_wtList();
   // ★ 마감된 작업은 줄에서 자동 정리한다(마감은 전사 공통이라 다른 직원이 마감해도 내 줄에서 빠진다).
-  //   목록이 아직 안 왔을 때(STATE.tabs 비어 있음)는 정리하지 않는다 — 안 그러면 부팅 때 전부 지워진다.
+  //   ★★ 정리 대상은 **목록에서 확인된 마감 탭뿐** — 목록에 없는 키는 그대로 둔다.
+  //     `t && !isFinished(t)` 로 거르면 목록이 아직 안 왔거나 상한(limit 300)에 잘린 탭까지 사라져
+  //     사용자의 열린 줄이 조용히 소실된다(× 로 닫는 것 외엔 되돌릴 방법도 없다).
   if((STATE.tabs||[]).length){
-    const alive=list.filter(k=>{ const t=_wtTabFor(k); return t && !isFinished(t); });
+    const alive=list.filter(k=>{ const t=_wtTabFor(k); return !(t && isFinished(t)); });
     if(alive.length!==list.length){ STATE.worktabs=alive; STATE._wtDirty=true; _wtSaveLocal(); _wtPush(); }
   }
   const cur=STATE.cur, now=_wtList();

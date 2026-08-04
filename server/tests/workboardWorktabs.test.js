@@ -211,10 +211,19 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     /api\('\/api\/trackb\/workdesk\/worktabs'/.test(WD) && !/@open␟/.test(WD));
   t('탭 키 규약은 즐겨찾기와 동일(_favKey 재사용 — 두 벌이면 같은 탭이 다른 키가 된다)',
     /function _wtIdxOf\(t\)\{ return _wtList\(\)\.indexOf\(_favKey\(t\)\); \}/.test(WD));
+  // ★★ 정리 대상은 "목록에서 확인된 마감 탭"뿐. `t && !isFinished(t)` 로 거르면 목록에 없는 탭
+  //   (아직 안 왔거나 limit 300 에 잘린 탭)까지 사라져 사용자의 열린 줄이 조용히 소실된다.
   t('★ 마감된 작업은 열린 줄에서 자동 정리(전사 공통이라 남이 마감해도 빠진다)',
-    /const alive=list\.filter\(k=>\{ const t=_wtTabFor\(k\); return t && !isFinished\(t\); \}\);/.test(WD));
-  t('★★ 목록이 아직 안 왔을 때는 정리하지 않는다(부팅 때 전부 지워지는 사고 방지)',
-    /if\(\(STATE\.tabs\|\|\[\]\)\.length\)\{[\s\S]{0,200}alive/.test(WD));
+    /const alive=list\.filter\(k=>\{ const t=_wtTabFor\(k\); return !\(t && isFinished\(t\)\); \}\);/.test(WD));
+  t('★★ 목록에 없는 탭은 지우지 않는다(목록 미도착·상한 절단으로 열린 줄이 소실되는 사고 차단)',
+    !/return t && !isFinished\(t\)/.test(WD));
+  t('★★ 목록이 아직 안 왔을 때는 정리 자체를 안 한다(부팅 때 전부 지워지는 사고 방지)',
+    /if\(\(STATE\.tabs\|\|\[\]\)\.length\)\{[\s\S]{0,260}alive/.test(WD));
+  // ★ 자정 경계 — 서버가 판정한 날짜를 화면이 실제로 소비해야 stale 체크가 자가치유된다
+  t('★ 서버 kstDate 를 기록한다(두 흡수 경로 모두)', (WD.match(/if\(r\.kstDate\) STATE\.kstDate=r\.kstDate/g) || []).length === 2);
+  t('★★ 자정을 넘긴 화면 자가치유 — 토글 응답 날짜가 다르면 목록을 다시 받는다',
+    /if\(r\.date && STATE\.kstDate && r\.date!==STATE\.kstDate\)\{[\s\S]{0,220}_finEnsureStats\(true\)/.test(WD));
+  t('오늘 완료 토글 응답에 서버 날짜가 실린다(자가치유의 재료)', /return \{ ok: true, done: true, created: rows\.length > 0, date: today \}/.test(SVC_SRC));
   t('★ 오늘 완료한 탭은 줄 **뒤로** 민다(시트에서 탭 뒤로 끌던 동작)',
     /\.\.\.known\.filter\(x=>!isTodayDone\(x\.t\)\), \.\.\.known\.filter\(x=>isTodayDone\(x\.t\)\)/.test(WD));
   t('★★ 오늘 완료는 목록에서 사라지지 않는다(사라지는 건 마감뿐) — 정렬만 뒤로',
