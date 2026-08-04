@@ -2990,6 +2990,7 @@ async function _wtpLoad(){
   if(!r||!r.ok){ document.getElementById('wtPlanBox').innerHTML=`<div style="padding:28px;color:#B91C1C;font-size:13px">불러오지 못했습니다: ${esc((r&&r.error)||'오류')}<div style="margin-top:14px"><button class="btn" onclick="closeWtPlan()">닫기</button></div></div>`; return; }
   _WTP.plan=r.data.plan; _WTP.workOrder=r.data.workOrder; _WTP.templateConfigured=r.data.templateConfigured;
   _wtpRender();
+  if(!_WTP.sheetsLoaded){ _WTP.sheetsLoaded=1; _wtpFillSheets(); }   // 대상 시트 목록은 1회만
 }
 function _wtpOnEdit(){ _wtpSyncForm(); _wtpLoad(); }   // 값 읽기는 _wtpSyncForm 한 벌(사본 금지)
 /* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 여기서 지정한다.
@@ -3019,6 +3020,55 @@ function _wtpSyncForm(){
   if(g('wtpStart')) f.startDate=g('wtpStart').value;
   if(g('wtpSkipWe')) f.skipWeekends=g('wtpSkipWe').checked;
   if(f.holidays==null) f.holidays=((_WTP.plan&&_WTP.plan.holidays)||[]).slice();
+}
+
+/* 대상 시트 목록 — 이미 등록된 시트(작업 탭이 있는 파일)에서 고른다.
+   ★ 목록은 기존 `/api/trackb/tabs` 재사용(신규 엔드포인트 0). 실패해도 '새 시트 파일'로 만들 수 있다. */
+async function _wtpFillSheets(){
+  const sel=document.getElementById('wtpSheet'); if(!sel) return;
+  sel.innerHTML='<option value="">불러오는 중…</option>';
+  try{
+    const r=await api('/api/trackb/tabs');
+    const seen={}, opts=[];
+    ((r&&r.items)||[]).forEach(t=>{ const id=t.sheetId||t.sheet_id; if(!id||seen[id])return; seen[id]=1;
+      opts.push(`<option value="${esc(id)}">${esc(t.spreadsheetTitle||t.spreadsheet_title||id)}</option>`); });
+    sel.innerHTML=opts.length?opts.join(''):'<option value="">(등록된 시트 없음 — 새 시트 파일로 만드세요)</option>';
+  }catch(_){ sel.innerHTML='<option value="">(목록을 불러오지 못했습니다)</option>'; }
+}
+function _wtpModeChange(){
+  const m=document.getElementById('wtpMode').value;
+  const w=document.getElementById('wtpSheetWrap');
+  if(w) w.style.display=(m==='new')?'none':'';
+}
+async function wtpCreate(){
+  const btn=document.getElementById('wtpCreateBtn'), msg=document.getElementById('wtpCreateMsg');
+  if(!btn||btn.disabled) return;
+  const mode=document.getElementById('wtpMode').value;
+  const sheetId=(document.getElementById('wtpSheet')||{}).value||'';
+  const tabName=(document.getElementById('wtpTabName')||{}).value||'';
+  if(mode==='existing'&&!sheetId){ _toast('대상 시트를 고르세요'); return; }
+  const p=_WTP.plan;
+  if(!confirm(`작업표를 만듭니다.\n\n· 탭 이름: ${tabName}\n· ${p.totals.rows}행 (${p.columns.length}열)\n· 날짜 ${p.totals.days}일\n\n계속할까요?`)) return;
+  btn.disabled=true; const old=btn.textContent; btn.textContent='만드는 중…';
+  if(msg) msg.textContent='시트를 만들고 있습니다. 잠시 기다려 주세요…';
+  _wtpSyncForm();
+  const f=_WTP.form||{};
+  const r=await api('/api/trackb/worktable/create',{method:'POST',body:JSON.stringify({
+    workOrderId:_WTP.id, mode, sheetId, tabName,
+    planOptions:{ total:f.total, daily:f.daily, startDate:f.startDate,
+                  skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[] },
+  })});
+  if(r&&r.ok){
+    if(msg) msg.innerHTML=`✅ <b>${esc(r.tabName)}</b> 탭을 만들었습니다 (${r.rowsWritten}행). `
+      +`<a href="${esc(r.tabUrl)}" target="_blank" rel="noopener" style="color:#1D4ED8">시트 열기 ↗</a>`
+      +` · 작업오더에 URL을 연결했습니다. <b>접수는 확인 후 직접</b> 눌러 주세요.`;
+    btn.textContent='만들어짐'; _toast('작업표를 만들었습니다');
+    try{ _loadOrders(); }catch(_){}
+  }else{
+    btn.disabled=false; btn.textContent=old;
+    const why=(r&&r.blockers&&r.blockers.length)?r.blockers.map(b=>b.message).join(' / '):((r&&r.error)||'오류');
+    if(msg) msg.innerHTML=`<b style="color:#B91C1C">만들지 못했습니다: ${esc(why)}</b>`;
+  }
 }
 
 function _wtpRender(){
@@ -3082,11 +3132,25 @@ function _wtpRender(){
       ${msg(p.blockers,'#B91C1C','#FEF2F2','#FECACA')}
       ${msg(p.warnings,'#92400E','#FFFBEB','#FDE68A')}
 
-      <div style="border-top:1px solid #E5E7EB;padding-top:12px;display:flex;align-items:center;gap:10px">
-        <button class="btn" onclick="closeWtPlan()">닫기</button>
-        <button class="btn pri" disabled title="다음 배포에서 열립니다" style="opacity:.5;cursor:default">이 구성으로 만들기</button>
-        <span style="font-size:12px;color:#6B7280">지금은 <b>확인용 미리보기</b>입니다 — 실제 표·시트 생성은 다음 단계에서 열립니다.
-        ${p.canCreate?'':'<b style="color:#B91C1C">지금 구성으로는 만들 수 없습니다(위 빨간 사유).</b>'}</span>
+      <div style="border-top:1px solid #E5E7EB;padding-top:12px;display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <label style="font-size:12px;color:#6B7280">만들 위치<br>
+            <select id="wtpMode" onchange="_wtpModeChange()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px">
+              <option value="existing">기존 시트에 탭 추가</option>
+              <option value="new">새 시트 파일</option>
+            </select></label>
+          <label id="wtpSheetWrap" style="font-size:12px;color:#6B7280;flex:1;min-width:220px">대상 시트<br>
+            <select id="wtpSheet" style="width:100%;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></select></label>
+          <label style="font-size:12px;color:#6B7280;flex:1;min-width:200px">탭 이름<br>
+            <input id="wtpTabName" maxlength="90" value="${esc(wo.title||'')}" style="width:100%;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn" onclick="closeWtPlan()">닫기</button>
+          <button class="btn pri" id="wtpCreateBtn" onclick="wtpCreate()" ${p.canCreate?'':'disabled style="opacity:.5;cursor:default"'}>이 구성으로 만들기</button>
+          <span id="wtpCreateMsg" style="font-size:12px;color:#6B7280">${p.canCreate
+            ? '시트 탭이 만들어지고 작업오더에 URL이 자동으로 연결됩니다. <b>접수는 확인 후 직접</b> 눌러 주세요.'
+            : '<b style="color:#B91C1C">지금 구성으로는 만들 수 없습니다(위 빨간 사유).</b>'}</span>
+        </div>
       </div>
     </div>`;
 }

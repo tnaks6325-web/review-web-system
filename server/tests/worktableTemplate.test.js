@@ -190,12 +190,13 @@ ok('★ 역할 미들웨어 앞에 authMiddleware 가 있다(빠지면 마스터
     const names = hs.route.stack.map(s => s.handle.name);
     return names.indexOf('authMiddleware') < names.indexOf('adminOrMasterMiddleware');
   })());
-ok('작업표 쓰기 라우트는 템플릿 저장 하나뿐(PUT/DELETE 없음)',
+ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리기 어려운 표면 최소화)',
   (() => {
     const wt = _layers.filter(l => /^\/worktable/.test(l.route.path));
     const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
-    return writes.length === 1 && writes[0].route.path === '/worktable/template'
-      && writes[0].route.methods.post && !writes[0].route.methods.put && !writes[0].route.methods.delete;
+    const paths = writes.map(l => l.route.path).sort();
+    return paths.join(',') === '/worktable/create,/worktable/template'
+      && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
   ['get', 'post'].every(m => {
