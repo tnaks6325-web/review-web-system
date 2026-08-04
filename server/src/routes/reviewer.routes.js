@@ -456,7 +456,7 @@ router.get('/review-earnings', async (req, res, next) => {
     if (sheetIds.length) {
       const { rows: orders } = await pool.query(
         `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow", price,
-                review_fee_snapshot AS "feeSnapshot", created_at AS "orderedAt"
+                review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt"
            FROM order_submissions
           WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
             AND deleted_at IS NULL AND sheet_row IS NOT NULL AND sheet_id = ANY($2)`,

@@ -238,8 +238,10 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   const map = {};
   if (!sheetIds.length) return map;
   const { rows } = await pool.query(
+    // ★ order_submissions 의 제출 시각 컬럼은 **submitted_at** 이다(created_at 이 아니다 — 001:179).
+    //   틀리면 42703 으로 이 쿼리가 통째로 죽어 입금대상 화면이 서버오류가 된다.
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
-            price, review_fee_snapshot AS "feeSnapshot", created_at AS "orderedAt"
+            price, review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt"
        FROM order_submissions
       WHERE deleted_at IS NULL AND sheet_row IS NOT NULL
         AND sheet_id = ANY($1) AND tab_name = ANY($2)`,
