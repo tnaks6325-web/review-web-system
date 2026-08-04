@@ -1501,14 +1501,61 @@ const _ADV_COL_RULES = [
   //   입금자·입금명·입금정보·입금메모·입금주·입금계좌·입금은행·입금자명 등 이름/계좌/자유텍스트 컬럼은 매칭 안 됨(PII 유출 차단).
   ['입금일',    /^\s*입금\s*(완료|확인|처리)?\s*(일|일자|날짜|여부|상태)?\s*$/],
 ];
-function _advertiserColumns(rawHeaders) {
+// opts.submitCol / submitCol2 = 그 탭의 "리뷰제출 / 입금" 상태 칸 헤더명(review_index → campaign_participants 복제값).
+// ★★ 상태 칸이 키워드 판정을 이긴다(worktable 분류기와 같은 규율) — 먼저 **선점**해야 하는 이유 2가지:
+//   ① 리뷰제출 열 헤더가 키워드에 안 걸리는 탭(예 '카페/블로그 발행')에서 그 열이 통째로 빠졌다(실제 신고).
+//   ② 반대로 '입금일자' 같은 헤더는 위쪽 구매일자 규칙(/일자|날짜/)이 먼저 삼켜, 구매일자 칸에 입금일이
+//      들어가고 입금 칸은 사라지는 오배치가 난다. 선점하면 두 사고가 동시에 막힌다.
+function _advertiserColumns(rawHeaders, opts = {}) {
   const hs = (rawHeaders || []).map(h => String(h == null ? '' : h).trim()).filter(Boolean);
-  const used = new Set(), out = [];
-  for (const [, re] of _ADV_COL_RULES) {
+  const pin = {};
+  const pinHeader = (concept, name) => {
+    const v = String(name == null ? '' : name).trim(); if (!v) return;
+    const hit = hs.find(h => h === v);                       // 실재하는 헤더만(정확 일치)
+    if (hit && !Object.values(pin).includes(hit)) pin[concept] = hit;
+  };
+  pinHeader('리뷰제출일', opts.submitCol);
+  pinHeader('입금일', opts.submitCol2);
+  const used = new Set(Object.values(pin)), out = [];
+  for (const [concept, re] of _ADV_COL_RULES) {
+    if (pin[concept]) { out.push(pin[concept]); continue; }   // 선점된 상태 칸(출력 순서는 규칙 순서 그대로)
     const hit = hs.find(h => !used.has(h) && re.test(h));
     if (hit) { used.add(hit); out.push(hit); }   // 개념당 첫 매칭 헤더 1개, 요청 순서 유지
   }
   return out;
+}
+
+// ── 리뷰 이미지(행별) — 업체 뷰어 미리보기 패널용. 읽기 전용·Drive 무접촉(파일ID만 반환). ──
+//   키 = review_index.row_index(= campaign_participants.seq/sheet_row). 원장(032 review_submissions)이 1순위,
+//   그 이전에 저장된 대표 이미지(031 review_index.review_file_id)는 폴백으로 합류시킨다.
+//   ★ 파일 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(추측 불가 fileId) — 신규 저장소 0.
+const _RV_MAX_PER_ROW = 12;
+async function reviewImagesForTab({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('reviewImagesForTab: sheetId, tabName 필수');
+  const db = getPool();
+  const out = new Map();
+  const push = (rowIndex, fileId, slot, at) => {
+    if (rowIndex == null || !fileId) return;
+    const k = String(rowIndex);
+    if (!out.has(k)) out.set(k, []);
+    const arr = out.get(k);
+    if (arr.length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
+    arr.push({ fileId, slot: slot || 'review', at: at || null });
+  };
+  const { rows: subs } = await db.query(
+    `SELECT row_index, file_id, slot_key, COALESCE(uploaded_at, created_at) AS at
+       FROM review_submissions
+      WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND file_id IS NOT NULL
+      ORDER BY row_index, slot_key, COALESCE(uploaded_at, created_at) NULLS LAST`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));   // fail-soft: 이미지가 없어도 표는 떠야 한다
+  for (const r of subs) push(r.row_index, r.file_id, r.slot_key, r.at);
+  const { rows: idx } = await db.query(
+    `SELECT row_index, review_file_id, review_file_at
+       FROM review_index
+      WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  for (const r of idx) push(r.row_index, r.review_file_id, 'review', r.review_file_at);
+  return Object.fromEntries(out);
 }
 
 // ── 통합 작업대 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
@@ -1550,7 +1597,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8,
             round, option_text AS option, product_name AS product,
             is_submitted AS submitted, is_paid AS paid, source,
-            order_submission_id, identity_key, row_json
+            order_submission_id, identity_key, row_json, submit_col, submit_col2
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE
       ORDER BY seq`, [sheetId, tabName]);
@@ -1623,7 +1670,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       raw = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
     }
     if (showEdits) headers = raw;                                   // 내부: 시트 전체 헤더
-    else { advHeaders = _advertiserColumns(raw); headers = advHeaders; }   // 광고주: 화이트리스트만
+    else {
+      // 광고주: 화이트리스트만. 그 탭의 상태 칸(리뷰제출/입금)은 키워드보다 우선 선점 —
+      //   헤더가 키워드에 안 걸리는 탭에서 리뷰제출 열이 통째로 빠지던 것을 막는다.
+      const sc = roster.find(r => r.submit_col) || {}, sc2 = roster.find(r => r.submit_col2) || {};
+      advHeaders = _advertiserColumns(raw, { submitCol: sc.submit_col, submitCol2: sc2.submit_col2 });
+      headers = advHeaders;
+    }
   }
   // identity 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
   const identCount = new Map();
@@ -2434,7 +2487,8 @@ module.exports = {
   unlinkSettlement,
   setSettlementVisible,
   settlementForTab,
-  settlementSummaryForAdvertiser, advertiserWorkSummary, saveTabMemo,
+  settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
+  __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   settlementVisibleFor,
   generateCloseout,
   latestCloseout,

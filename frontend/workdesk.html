@@ -95,6 +95,11 @@
   .ambox.rest{border-color:color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-soft)} .ambox.rest .v{color:var(--warn)}
   .ambox.rest.zero{border-color:color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft)} .ambox.rest.zero .v{color:var(--safe)}
   .ambox.paidamt{border-color:color-mix(in srgb,var(--safe) 30%,var(--line))} .ambox.paidamt .v{color:var(--safe)}
+  /* 견적서·계산서 칸: 번호/상태칩/일자를 한 줄에(금액 칸과 같은 높이로 맞춤) */
+  .ambox.st .v{font-size:12px;font-weight:650;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:20px}
+  .ambox.st .v .asv{font-weight:750;font-size:12.5px}
+  .ambox.st .v .asd{color:var(--faint);font-weight:600;font-size:11px}
+  .ambox .asoff{color:var(--faint);font-weight:600}
   /* ── 업체 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ──
      ★ 클래스는 전부 ad* 접두 — .gauge(원형 게이지)·.dgrid(관측 뷰)·.kpi(.stripA 하위) 등
        기존 소유 클래스와 겹치면 남의 화면이 조용히 무너진다(실측 사고 전례). */
@@ -158,6 +163,29 @@
   .adtodo .tgo{font-size:10.5px;color:var(--accent);font-weight:700;flex:none}
   .adtodo.none{cursor:default;justify-content:center;color:var(--muted);font-size:12px;background:var(--card2)}
   .adtodo.none:hover{border-color:var(--line);background:var(--card2)}
+  /* ── 업체 뷰어: 시트 그리드 우측 리뷰 이미지 미리보기 패널 ──
+     그리드는 열 고정폭 합이라 넓은 화면에서 오른쪽이 비는데, 그 자리를 미리보기로 쓴다.
+     행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
+  .advgw{display:flex;gap:12px;align-items:flex-start}
+  .advgw>#gridhost{flex:1 1 auto;min-width:0}
+  .rvpane{flex:0 0 340px;border:1px solid var(--line);border-radius:12px;background:var(--card);
+          padding:11px 12px;position:sticky;top:12px;max-height:calc(100vh - 300px - var(--tbh));overflow:auto}
+  @media(max-width:1100px){.advgw{flex-direction:column}.rvpane{position:static;flex:none;width:100%;max-height:none}}
+  .rvpane .rvhd{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);
+                display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px}
+  .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
+  .rvwho{font-size:12.5px;font-weight:750;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rvwho span{font-weight:600;color:var(--faint);font-size:11px;margin-left:5px}
+  .rvimg{display:block;width:100%;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:zoom-in;background:var(--card2)}
+  .rvimg:last-child{margin-bottom:0}
+  .rvslot{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px}
+  .rvnone{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+          border:1px dashed var(--line2);border-radius:10px;background:var(--card2);text-align:center;padding:16px}
+  .rvnone b{font-size:13px;font-weight:750;color:var(--muted)}
+  .rvnone span{font-size:11px;color:var(--faint)}
+  .rvnone.warn b{color:var(--warn)}
+  .sheetgrid tbody tr.rvon>td{background:var(--accent-soft)}
+  .sheetgrid tbody tr.rvon>td.gfz{background:var(--accent-soft)}
   /* 사이드바 그룹(진행 중 / 완료) 구분 */
   .awside .awdiv{height:1px;background:var(--line);margin:9px 4px}
   .awside .awgh{font-size:9.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:9px 6px 6px;display:flex;align-items:center;justify-content:space-between}
@@ -1691,7 +1719,9 @@ function renderWorkdesk(wd){
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
-    <div id="gridhost">${tableSection}</div>`;
+    ${STATE.role==='advertiser'
+      ? `<div class="advgw"><div id="gridhost">${tableSection}</div><aside class="rvpane" id="rvPane"></aside></div>`
+      : `<div id="gridhost">${tableSection}</div>`}`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
   //   남은 청크가 없을 때(작은 표)는 여기서 바로 '못 찾음'까지 확정한다.
@@ -1701,6 +1731,89 @@ function renderWorkdesk(wd){
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
+  if(STATE.role==='advertiser') _rvBoot(STATE.cur);   // 업체: 리뷰 이미지 미리보기 패널
+}
+
+// ══ 업체 뷰어 — 리뷰 이미지 미리보기(그리드 우측 패널) ═══════════════════════════
+//   행 클릭 또는 ↑↓ 키로 선택이 이동하고 그 행의 리뷰 캡처를 즉시 보여준다.
+//   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
+//   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
+function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
+const _RV_SLOT={review:'리뷰 캡처',cash_receipt:'현금영수증'};
+async function _rvBoot(t){
+  STATE.rvImgs=null; STATE.rvSel=null;
+  _rvRender();   // 선택 전 안내
+  if(!t) return;
+  const r=await api(`/api/trackb/workdesk/review-images?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  // 조회 실패해도 표는 그대로 — 패널만 "불러오지 못했습니다"(fail-soft)
+  STATE.rvImgs=(r&&r.ok&&r.rows)?r.rows:(r?{}:null);
+  _rvBind();
+  const first=document.querySelector('#gbody tr[data-rid]');   // 첫 행을 기본 선택(바로 보이게)
+  if(first) _rvSelect(first.dataset.rid,{scroll:false}); else _rvRender();
+}
+// 행 클릭 + ↑↓ 이동은 위임으로 1회만 바인딩(재렌더로 tbody가 통째로 갈려도 유지된다)
+function _rvBind(){
+  if(STATE._rvBound) return; STATE._rvBound=true;
+  document.addEventListener('click', e=>{
+    if(STATE.role!=='advertiser' || !document.getElementById('rvPane')) return;
+    const tr=e.target&&e.target.closest?e.target.closest('#gbody tr[data-rid]'):null;
+    if(tr) _rvSelect(tr.dataset.rid,{scroll:false});
+  });
+  document.addEventListener('keydown', e=>{
+    if(STATE.role!=='advertiser' || !document.getElementById('rvPane')) return;
+    if(e.key!=='ArrowUp'&&e.key!=='ArrowDown') return;
+    const el=e.target;   // 입력 중이거나 모달이 떠 있으면 방향키를 가로채지 않는다
+    if(el&&(/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.isContentEditable)) return;
+    if(document.querySelector('.modalov,#woImgOv')) return;
+    const rows=[...document.querySelectorAll('#gbody tr[data-rid]')]; if(!rows.length) return;
+    e.preventDefault();
+    const cur=rows.findIndex(tr=>tr.dataset.rid===STATE.rvSel);
+    const next=cur<0 ? 0 : Math.max(0, Math.min(rows.length-1, cur+(e.key==='ArrowDown'?1:-1)));
+    _rvSelect(rows[next].dataset.rid,{scroll:true});
+  });
+}
+function _rvSelect(rid,opt){
+  STATE.rvSel=rid;
+  document.querySelectorAll('#gbody tr.rvon').forEach(tr=>tr.classList.remove('rvon'));
+  const tr=rid?document.querySelector(`#gbody tr[data-rid="${(rid+'').replace(/"/g,'')}"]`):null;
+  if(tr){ tr.classList.add('rvon'); if(opt&&opt.scroll&&tr.scrollIntoView) tr.scrollIntoView({block:'nearest'}); }
+  _rvRender();
+}
+// 필터·정렬·숨김 재렌더 후 선택 표시 복원(선택 행이 사라졌으면 첫 행으로)
+function _rvReapply(){
+  if(STATE.role!=='advertiser'||!document.getElementById('rvPane')) return;
+  const rows=[...document.querySelectorAll('#gbody tr[data-rid]')];
+  if(!rows.length){ STATE.rvSel=null; _rvRender(); return; }
+  const keep=rows.some(tr=>tr.dataset.rid===STATE.rvSel);
+  _rvSelect(keep?STATE.rvSel:rows[0].dataset.rid,{scroll:false});
+}
+function _rvRender(){
+  const pane=$('#rvPane'); if(!pane) return;
+  const hd=`<div class="rvhd">리뷰 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
+  if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
+  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 리뷰어의 리뷰 이미지가 여기 표시됩니다.</span></div>`; return; }
+  const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
+  const who=rj['수취인']||rj['수령인']||r.recipient||r.name||'';
+  const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
+  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>리뷰 이미지를 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
+  const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
+  if(!files.length){
+    // 시트에 제출 표시가 있는데 이미지가 없는 경우와, 아예 미제출인 경우를 구분해 알린다(둘 다 사실대로).
+    pane.innerHTML=hd+who2+(r.submitted
+      ? `<div class="rvnone"><b>리뷰 이미지 미등록</b><span>시트에는 제출로 표시되어 있지만 캡처 이미지가 등록되지 않았습니다.</span></div>`
+      : `<div class="rvnone warn"><b>리뷰 미작성 · 미제출</b><span>아직 이 리뷰어의 리뷰가 제출되지 않았습니다.</span></div>`);
+    return;
+  }
+  let lastSlot=null;
+  const imgs=files.map(f=>{
+    const u=_rvUrl(f.fileId); if(!u) return '';
+    const slot=f.slot||'review';
+    const lbl=(files.some(x=>(x.slot||'review')!==slot)&&slot!==lastSlot)?`<div class="rvslot">${esc(_RV_SLOT[slot]||slot)}</div>`:'';
+    lastSlot=slot;
+    return lbl+`<img class="rvimg" src="${esc(u)}" alt="리뷰 이미지" loading="lazy" onclick="woImageModal(this.src)">`;
+  }).join('');
+  pane.innerHTML=hd+who2+(imgs||`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
 }
 
 // ── 시안 A: 상단 요약 미니 셀 스트립(상품/모집/구매시간/배송 + 참여·제출·입금 + 정산 통합) ──
@@ -1779,10 +1892,15 @@ function renderSettlement(){
   const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:'<span class="stpoff">견적 없음</span>';
   const invSub=inv?`<span class="bb ${(_SETTLE_INV[inv.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_INV[inv.status]||[inv.status])[0]}</span>${inv.date?` · ${esc(String(inv.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
   const paySub=pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>${pay.date?` · ${esc(String(pay.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
-  // 광고주 정산 카드 금액 4칸(시안): 총비용=견적서 금액 우선·계약금액 폴백 / 남은 입금액=총비용−입금액(화면 파생).
-  //   _advSettleMoney 는 광고주 화면에만 붙는다 — 내부 화면은 종전 스텝퍼 그대로(무회귀).
-  const advMoney=!canLink?_advSettleMoney(d,q):'';
-  box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">${canLink?'정산':'정산 현황'} ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${canLink&&d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${!canLink&&pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||''}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
+  // ★ 광고주 정산 현황 = 6칸(견적서·계산서·총비용·입금액·입금일·남은 입금액) — 사용자 확정.
+  //   내부(master/admin/staff)는 종전 스텝퍼 그대로(무회귀). 스텝퍼는 견적/계산서/입금 상태를 6칸이 이미
+  //   담고 있어 광고주 화면에서는 중복이라 띄우지 않는다.
+  if(!canLink){
+    box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 현황 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||''}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>`:''}${d.proxyDown?'<span class="bb warn" title="정산 시스템 조회 지연 — 잠시 후 다시 확인해 주세요">연동 지연</span>':''}</div>
+      <div class="stpcard">${_advSettleFields(d,q,inv,pay)}</div></div>`;
+    return;
+  }
+  box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
     <div class="stpcard">
       <div class="stprow">
         ${_step(1,'마감자료',coState,coSub)}
@@ -1793,22 +1911,32 @@ function renderSettlement(){
         <div class="stparrow">→</div>
         ${_step(4,'입금',pay&&pay.status==='paid'?'done':(pay?'wait':'off'),paySub)}
       </div>
-      ${advMoney}
-      ${canLink?`<div class="stpfoot"><span class="stpby">연결: ${esc(d.linkedBy||'')}</span><button class="btn xs" onclick="openLinkModal()">계약 변경</button><button class="btn xs" onclick="unlinkSettle()">연결 해제</button></div>`:''}
+      <div class="stpfoot"><span class="stpby">연결: ${esc(d.linkedBy||'')}</span><button class="btn xs" onclick="openLinkModal()">계약 변경</button><button class="btn xs" onclick="unlinkSettle()">연결 해제</button></div>
     </div></div>`;
 }
-// 광고주 정산 카드 금액 4칸 — 총비용(견적서 금액 우선) / 입금액 / 입금일(최근) / 남은 입금액(파생).
-function _advSettleMoney(d,q){
+// 광고주 정산 6칸 — 견적서 / 계산서 / 총비용(견적서 금액 우선) / 입금액 / 입금일(최근) / 남은 입금액(파생).
+//   ★ 남은 입금액 = 총비용 − 입금액. 목록 표·대시보드와 **같은 파생식**(갈리면 화면끼리 숫자가 어긋난다).
+function _advSettleFields(d,q,inv,pay){
   const quoteAmt=(q&&q.totalAmount>0)?+q.totalAmount:null;
   const totalCost=quoteAmt!=null?quoteAmt:((d.amount!=null&&+d.amount>0)?+d.amount:null);
   const paid=(d.paidAmount!=null&&!isNaN(+d.paidAmount))?+d.paidAmount:null;
-  if(totalCost==null&&paid==null) return '';
   const rest=totalCost!=null?Math.max(totalCost-(paid||0),0):null;
   const won=n=>n==null?'—':(+n).toLocaleString('ko-KR');
+  const day=v=>v?esc(String(v).slice(0,10)):'—';
+  const qLbl=q&&q.status?(_SETTLE_Q[q.status]||[q.status,''])[0]:null, qTone=q&&q.status?(_SETTLE_Q[q.status]||['',''])[1]:'';
+  const iLbl=inv&&inv.status?(_SETTLE_INV[inv.status]||[inv.status,''])[0]:null, iTone=inv&&inv.status?(_SETTLE_INV[inv.status]||['','neutral'])[1]:'';
+  const qCell=(q&&(q.quoteNumber||qLbl))
+    ? `${q.quoteNumber?`<b class="asv">${esc(q.quoteNumber)}</b>`:''}${qLbl?`<span class="bb ${qTone}">${esc(qLbl)}</span>`:''}${q.quoteDate?`<span class="asd">${day(q.quoteDate)}</span>`:''}`
+    : '<span class="asoff">—</span>';
+  const iCell=(inv&&(iLbl||inv.date))
+    ? `${iLbl?`<span class="bb ${iTone||''}">${esc(iLbl)}</span>`:''}${inv.date?`<span class="asd">${day(inv.date)}</span>`:''}`
+    : '<span class="asoff">—</span>';
   return `<div class="advmoney">
+    <div class="ambox st"><div class="k">견적서</div><div class="v">${qCell}</div></div>
+    <div class="ambox st"><div class="k">계산서</div><div class="v">${iCell}</div></div>
     <div class="ambox"><div class="k">총비용${quoteAmt!=null?' (견적서 기준)':''}</div><div class="v">${won(totalCost)}${totalCost!=null?'<small>원</small>':''}</div></div>
     <div class="ambox paidamt"><div class="k">입금액</div><div class="v">${won(paid)}${paid!=null?'<small>원</small>':''}</div></div>
-    <div class="ambox"><div class="k">입금일 (최근)</div><div class="v">${d.paidDate?esc(String(d.paidDate).slice(0,10)):'—'}</div></div>
+    <div class="ambox"><div class="k">입금일 (최근)</div><div class="v">${d.paidDate?day(d.paidDate):'—'}</div></div>
     <div class="ambox rest${rest===0?' zero':''}"><div class="k">남은 입금액</div><div class="v">${rest==null?'—':(rest===0?'완납 ✓':won(rest)+'<small>원</small>')}</div></div>
   </div>`;
 }
@@ -2169,7 +2297,8 @@ function buildGrid(wd){
         tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv); }
     });
     // data-p8/data-nm = 리뷰어 로그 딥링크가 이 행을 찾아 강조하는 키(표시에는 영향 없음)
-    return `<tr data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
+    // data-rid = 행 식별자(업체 뷰어의 리뷰 미리보기 선택 키) — 셀에만 있던 것을 행에도 올려 tr 단위로 잡는다.
+    return `<tr data-rid="${esc(r.id)}" data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
   };
   // 본문 행 배열(청크 렌더용) — 그룹 여부에 따라
   let bodyArr=[], emptyBody='';
@@ -2217,7 +2346,7 @@ function buildGrid(wd){
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
-  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); _fitGrid(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작
+  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); _fitGrid(); _rvReapply(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작(+미리보기 선택 복원)
 // ★★ 표폭 = '보이는 열 고정폭의 합' 못박기 (역할 무관·창 크기 무관)
 //   과거엔 언더플로 시 주소 열이 잔여폭을 흡수해 표를 꽉 채웠다 → 같은 열이 창 크기·숨긴 열 수에 따라
 //   매번 다른 너비가 되어, 여러 작업을 오가며 데이터를 훑는 실사용자가 열 위치를 다시 찾아야 했다.

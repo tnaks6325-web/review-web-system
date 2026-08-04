@@ -412,6 +412,17 @@ router.get('/workdesk/settlement', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
+// ── 행별 리뷰 이미지(파일ID) — 업체 뷰어 미리보기 패널. 내부인 + 소유 광고주(_ensureThreadScope). ──
+//   ★ 파일ID만 반환하고 이미지는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(신규 저장소·신규 프록시 0).
+router.get('/workdesk/review-images', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json({ ok: true, rows: await svc.reviewImagesForTab({ sheetId, tabName }) });
+  } catch (err) { next(err); }
+});
+
 router.post('/settlement/visibility', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, visible } = req.body || {};
