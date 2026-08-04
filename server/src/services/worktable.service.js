@@ -220,9 +220,13 @@ async function headerStats({ limit = 500 } = {}) {
 const TEMPLATE_KEY = 'worktable_template';
 const MAX_COLS = 60;        // 오붙여넣기·무한증식 방지(시트 열 수 현실 상한을 넉넉히 넘김)
 const MAX_NAME_LEN = 40;    // 시트 헤더로 쓸 이름이라 길면 표가 무너진다
+const MAX_CUSTOM_CHANNELS = 12;   // 직접 추가 채널 상한(폭주 방지 — 현실 채널 수를 넉넉히 넘김)
+const MAX_WORK_TYPES = 12;        // 작업유형 상한(같은 이유)
 /** 채널 키 — 현금영수증 발행방법과 **같은 4채널**(utils/cashReceiptChannels.js 가 단일 출처). */
 const { CASH_RECEIPT_CHANNELS } = require('../utils/cashReceiptChannels');
 const CHANNEL_KEYS = CASH_RECEIPT_CHANNELS.map(c => c.key);
+/** 기본 4채널 키 집합 — **삭제 불가**(현영 발행방법 안내 등 다른 기능과 짝을 이룬다). */
+const BUILTIN_CHANNEL_KEYS = new Set(CHANNEL_KEYS);
 
 /** 열 이름 목록 정규화: 트림 · 빈값 제거 · 길이 제한 · **대소문자 무시 중복 제거**(순서 보존). */
 function _normNames(arr) {
@@ -262,13 +266,106 @@ function _annotate(names) {
   }));
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   직접 추가한 작업채널 · 작업유형 (와이어프레임 C·D)
+   ══════════════════════════════════════════════════════════════════
+   ★★ 저장은 여전히 `app_settings` **한 키**다 — 신규 테이블·마이그레이션 0.
+   ★ **키는 서버가 발급**한다(`c1`·`t1` …). 화면이 보낸 키는 형식이 맞을 때만 인정하고,
+     기본 4채널 키와 겹치면 거부한다 — 겹치면 그 채널 열이 조용히 덮인다.
+   ★ 한 번 발급한 키는 바꾸지 않는다(라벨만 바꾼다) — 키가 바뀌면 그 채널에 담아 둔
+     열 구성이 통째로 고아가 된다(현영 이미지 키와 같은 규율).
+   ══════════════════════════════════════════════════════════════════ */
+const KEY_RE = /^[a-z][a-z0-9_]{0,23}$/;
+const MAX_LABEL_LEN = 24;
+
+/** `c` / `t` 접두 + 번호 발급기 — 기존 키의 최대 번호 다음 값(삭제 후 재사용 안 함). */
+function _keyMinter(prefix, existing) {
+  let max = 0;
+  existing.forEach(k => {
+    const m = new RegExp('^' + prefix + '(\\d+)$').exec(String(k || ''));
+    if (m) max = Math.max(max, parseInt(m[1], 10) || 0);
+  });
+  return () => `${prefix}${++max}`;
+}
+
+/** 직접 추가 채널 목록 정규화 — [{key,label}]. 기본 채널 키·중복 키·빈 라벨은 버린다. */
+function _normCustomChannels(arr) {
+  const list = Array.isArray(arr) ? arr : [];
+  const keys = list.map(c => (c && c.key) || '').filter(k => KEY_RE.test(k) && !BUILTIN_CHANNEL_KEYS.has(k));
+  const mint = _keyMinter('c', keys);
+  const out = [];
+  const seenKey = new Set(BUILTIN_CHANNEL_KEYS);
+  const seenLabel = new Set(CASH_RECEIPT_CHANNELS.map(c => c.label.toLowerCase()));
+  for (const c of list) {
+    const label = String((c && c.label) || '').trim().slice(0, MAX_LABEL_LEN);
+    if (!label || seenLabel.has(label.toLowerCase())) continue;   // 같은 이름 채널 중복 차단
+    let key = String((c && c.key) || '').trim();
+    if (!KEY_RE.test(key) || seenKey.has(key)) key = mint();
+    seenKey.add(key); seenLabel.add(label.toLowerCase());
+    out.push({ key, label });
+    if (out.length >= MAX_CUSTOM_CHANNELS) break;
+  }
+  return out;
+}
+
+/**
+ * 작업유형 목록 정규화 — [{key,label,desc,position,columns}].
+ * position: 'front' = 자동 열(번호·구매일자) 바로 뒤 / 'back' = 맨 뒤(비고 앞).
+ *   ★ 값이 이상하면 'back'(맨 뒤) — 앞쪽에 잘못 끼면 기존 열 순서를 흔든다.
+ */
+function _normWorkTypes(arr) {
+  const list = Array.isArray(arr) ? arr : [];
+  const keys = list.map(t => (t && t.key) || '').filter(k => KEY_RE.test(k));
+  const mint = _keyMinter('t', keys);
+  const out = [];
+  const seenKey = new Set();
+  const seenLabel = new Set();
+  for (const t of list) {
+    const label = String((t && t.label) || '').trim().slice(0, MAX_LABEL_LEN);
+    if (!label || seenLabel.has(label.toLowerCase())) continue;
+    let key = String((t && t.key) || '').trim();
+    if (!KEY_RE.test(key) || seenKey.has(key)) key = mint();
+    seenKey.add(key); seenLabel.add(label.toLowerCase());
+    out.push({
+      key, label,
+      desc: String((t && t.desc) || '').trim().slice(0, 80),
+      position: (t && t.position) === 'front' ? 'front' : 'back',
+      columns: _normNames(t && t.columns),
+    });
+    if (out.length >= MAX_WORK_TYPES) break;
+  }
+  return out;
+}
+
+/** 기본 4채널 + 직접 추가 채널 — 화면·계획이 함께 쓰는 채널 목록 단일 출처. */
+function channelList(tpl) {
+  const custom = ((tpl && tpl.customChannels) || []).map(c => ({ key: c.key, label: c.label, icon: '🏷', custom: true }));
+  return CASH_RECEIPT_CHANNELS.map(c => ({ key: c.key, label: c.label, icon: c.icon, custom: false })).concat(custom);
+}
+
 function _emptyTemplate() {
   const channels = {};
   CHANNEL_KEYS.forEach(k => { channels[k] = []; });
   // templateSheetId = 작업표를 만들 때 복사할 회사 템플릿 시트(서식·공지문 원본).
   //   ★ 전사 설정이라 서버에 둔다 — 종전엔 관리자 브라우저 localStorage 에만 있어
   //     서버가 알 수 없었고 사람마다 값이 달랐다(프로덕션 테스트에서 드러난 문제).
-  return { core: [], channels, templateSheetId: '', updatedAt: null, updatedBy: null };
+  return { core: [], channels, customChannels: [], workTypes: [], templateSheetId: '', updatedAt: null, updatedBy: null };
+}
+
+/** 저장·조회가 함께 쓰는 파생 — 채널별/유형별 열 분류(사본 금지). */
+function _decorate(t) {
+  const channelColumns = {};
+  Object.keys(t.channels || {}).forEach(k => { channelColumns[k] = _annotate(t.channels[k]); });
+  const workTypeColumns = {};
+  (t.workTypes || []).forEach(w => { workTypeColumns[w.key] = _annotate(w.columns); });
+  return {
+    ...t,
+    configured: (t.core || []).length > 0,
+    columns: _annotate(t.core),
+    channelColumns,
+    workTypeColumns,
+    channelList: channelList(t),
+  };
 }
 
 /** 구글시트 URL 또는 ID → ID. 잘못된 값은 빈 문자열(추측 금지). */
@@ -289,7 +386,11 @@ async function getTemplate() {
     if (rows.length && rows[0].value) {
       const j = JSON.parse(rows[0].value);
       saved.core = _normNames(j.core);
-      CHANNEL_KEYS.forEach(k => { saved.channels[k] = _normNames((j.channels || {})[k]); });
+      saved.customChannels = _normCustomChannels(j.customChannels);
+      saved.workTypes = _normWorkTypes(j.workTypes);
+      // ★ 채널 열은 **기본 4채널 + 저장된 커스텀 채널 키**에 대해서만 읽는다
+      //   (목록에 없는 키의 열은 버린다 — 삭제된 채널의 열이 유령으로 남지 않게).
+      channelList(saved).forEach(c => { saved.channels[c.key] = _normNames((j.channels || {})[c.key]); });
       saved.templateSheetId = normalizeSheetId(j.templateSheetId);
       saved.updatedAt = j.updatedAt || null;
       saved.updatedBy = j.updatedBy || null;
@@ -299,16 +400,17 @@ async function getTemplate() {
     logger.warn(`[worktable/getTemplate] 실패 — 빈 템플릿 반환: ${err.message}`);
     saved = _emptyTemplate();
   }
-  const channelColumns = {};
-  CHANNEL_KEYS.forEach(k => { channelColumns[k] = _annotate(saved.channels[k]); });
-  return { ...saved, configured: saved.core.length > 0, columns: _annotate(saved.core), channelColumns };
+  return _decorate(saved);
 }
 
 /** 템플릿 저장. 유효성은 서버가 최종 판정(정규화 후 저장·반환). */
-async function saveTemplate({ core, channels, templateSheetId, by } = {}) {
+async function saveTemplate({ core, channels, customChannels, workTypes, templateSheetId, by } = {}) {
   const next = _emptyTemplate();
   next.core = _normNames(core);
-  CHANNEL_KEYS.forEach(k => { next.channels[k] = _normNames((channels || {})[k]); });
+  next.customChannels = _normCustomChannels(customChannels);
+  next.workTypes = _normWorkTypes(workTypes);
+  // 커스텀 채널 정규화에서 키가 새로 발급될 수 있으므로 **정규화된 목록 기준**으로 열을 받는다.
+  channelList(next).forEach(c => { next.channels[c.key] = _normNames((channels || {})[c.key]); });
   next.templateSheetId = normalizeSheetId(templateSheetId);
   next.updatedAt = new Date().toISOString();
   next.updatedBy = String(by || '').slice(0, 100) || null;
@@ -319,12 +421,11 @@ async function saveTemplate({ core, channels, templateSheetId, by } = {}) {
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
     [TEMPLATE_KEY, JSON.stringify(next)]
   );
-  const channelColumns = {};
-  CHANNEL_KEYS.forEach(k => { channelColumns[k] = _annotate(next.channels[k]); });
-  return { ...next, configured: next.core.length > 0, columns: _annotate(next.core), channelColumns };
+  return _decorate(next);
 }
 
 module.exports = {
-  headerStats, getTemplate, saveTemplate, normalizeSheetId,
+  headerStats, getTemplate, saveTemplate, normalizeSheetId, channelList,
   CORE_RATIO, RARE_RATIO, TEMPLATE_KEY, CHANNEL_KEYS, MAX_COLS, MAX_NAME_LEN,
+  MAX_CUSTOM_CHANNELS, MAX_WORK_TYPES,
 };
