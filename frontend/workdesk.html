@@ -576,7 +576,33 @@
   .woldoc{max-width:900px;line-height:1.7}
   .woldoc img{max-width:min(100%,360px)}
   .wolnote{margin-top:10px;font-size:11.5px;color:var(--muted)}
-  /* 이미지 교체요청 전용 탭 — 카드 격자. ★ 클래스는 're' 접두(기존 .worow/.wodetail 충돌 전례) */
+  /* 이미지 교체요청 — C/S 문의 화면 위의 "처리 대기 큐" 띠(시안 C).
+     ★ 클래스는 're' 접두(기존 .worow/.wodetail 충돌 전례).
+     ★ 폭은 아래 문의 화면(목록 360 + gap 12 + 대화창 860 + 좌우 패딩 16×2)과 같은 값으로 맞춘다 —
+       띠만 넓으면 "그 화면의 것"으로 안 보인다(헤더 .mh 폭 상한과 같은 규율). */
+  #reQueueMount,#csTopNote{max-width:1264px;padding:0 16px}
+  #csTopNote:not(:empty){padding-top:14px}
+  .requeue{border:1px solid #FED7AA;background:#FFF7ED;border-radius:12px;overflow:hidden;margin-bottom:12px}
+  .requeue.q0{background:var(--card);border-color:var(--line)}   /* 대기 0건 = 한 줄로 조용히 */
+  .reqh{display:flex;align-items:center;gap:9px;padding:9px 13px;flex-wrap:wrap}
+  .requeue:not(.qcollapsed) .reqh{border-bottom:1px solid #FED7AA}
+  .requeue.q0:not(.qcollapsed) .reqh{border-bottom-color:var(--line)}
+  .reqt{font-size:12.5px;font-weight:800;color:#9A3412}
+  .requeue.q0 .reqt{color:var(--muted)}
+  .reqrail{display:flex;gap:9px;padding:11px 13px;overflow-x:auto}
+  .reqitem{flex:0 0 250px;background:var(--card);border:1px solid #FED7AA;border-radius:10px;padding:9px;display:flex;gap:8px}
+  .reqitem .reqim{width:54px;height:54px;flex:0 0 54px;border-radius:8px;border:1px solid #FED7AA;background:#FFF7ED;
+    object-fit:cover;cursor:zoom-in;display:block}
+  .reqitem .reqm{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.5}
+  .reqitem .reqm b{display:block;color:var(--ink);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .reqitem .reqm .rq2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .reqacts{display:flex;gap:6px;margin-top:6px}
+  /* 띠 안의 작은 버튼·메타 — .btn.sm / .remeta 는 이 화면에 전역 정의가 없어 여기서 스코프로 준다
+     (.recard .remeta 를 전역으로 풀면 다른 뷰의 표기까지 바뀐다) */
+  .requeue .btn.sm{height:24px;font-size:11px;padding:0 9px;border-radius:7px}
+  .requeue .remeta{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .reqbody{padding:11px 13px}
+  .reqfilters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:11px}
   .recards{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:12px}
   .recard{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:12px 14px;box-shadow:var(--shadow-card)}
   .recard .rehd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;font-size:12.5px}
@@ -979,7 +1005,12 @@ async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').valu
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){ sessionStorage.removeItem('admin_token');
-  Object.assign(STATE,{ role:'',name:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[] });   // 역할 전환 재로그인 대비 메모리 잔재 정리
+  // 역할 전환 재로그인 대비 메모리 잔재 정리
+  // ★ 교체요청 목록(re)에는 **리뷰어 실명·연락처**가 들어 있다 — 역할이 바뀌어도 남아 있으면
+  //   다음 사람이 그 화면을 열 때 이전 계정의 담당 범위가 잠깐 그려진다(서버 응답 전 stale 렌더).
+  //   reMode 도 같이 비운다: AE 기본값 'full' 이 그대로 남아 관리자 화면이 펼쳐진 채로 뜬다.
+  Object.assign(STATE,{ role:'',name:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
+                        re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false });
   boot(); }
 
 function renderShell(){
@@ -997,8 +1028,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
-        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
-        <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span><span id="reNavBadge"></span></button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
@@ -1008,7 +1038,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
-        <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="reNavBadge"></span></button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
@@ -1068,10 +1098,14 @@ function setVwMode(m){
   _measureChrome();   // 상한 변경 → .top 줄바꿈이 달라질 수 있음(--toph 재실측). 표폭은 고정이라 _fitGrid 불필요
 }
 function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
-function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+/* ★ 'reedit'(옛 전용 탭)은 'cs' 로 흡수됐다 — 이미지 교체요청이 C/S 문의 화면 위의 대기 큐가 됐다.
+   옛 이름을 여기서 한 번 갈아끼운다: 브라우저 히스토리에 남은 항목(_navApply)·북마크·
+   외부 호출이 뷰 없는 상태로 떨어져 빈 화면이 되는 것을 막는다(뷰 이름 하나만 옮기면 되게). */
+function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
+  STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
@@ -2926,16 +2960,34 @@ async function _edRemove(id,name){
    화면은 **관리자 대시보드와 같은 모듈**(js/cs-inquiry.js) 하나뿐이다 — 여기서는
    마운트만 하고 목록 로드는 그 모듈의 loadCsRooms() 를 그대로 부른다(사본 금지).
    서버 경로는 window.CS_API_BASE 로 /api/trackb/cs/* 를 가리킨다(SSO 토큰 격리 때문).
-   ★ 관리자(master/admin) 전용 — 문의 본문에 리뷰어 실명·연락처·주소·주문정보가 그대로
-     실려 있어 AE의 "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단). */
+   ★★ 문의 **본문**은 여전히 master/admin 전용 — 리뷰어 실명·연락처·주소·주문정보가 그대로
+     실려 AE의 "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단).
+     달라진 것은 **메뉴가 AE에게도 보인다**는 것뿐이고, AE 화면에는 문의창구 모듈을
+     **마운트조차 하지 않는다**(그리지 않으면 요청도 안 나가고, 최종 방어는 여전히 서버 403).
+   ★ 이미지 교체요청(시안 C)은 이 화면 **위의 대기 큐 띠**로 얹는다 — 문의 화면은 손대지 않고
+     (목록·대화창·cs-inquiry.js 무변경) 위에 한 겹 더 놓는 방식이라 두 기능이 영역으로 구분된다. */
 async function renderCsView(){
-  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="csInquiryMount"></div></div>`;
-  if(!window.CsInquiry){ $('#viewroot').innerHTML=`<div class="ovwrap"><div class="empty">문의창구 모듈(js/cs-inquiry.js)을 불러오지 못했습니다.</div></div>`; return; }
-  CsInquiry.mount('csInquiryMount');
-  // 모듈 마크업은 관리자 대시보드의 탭 판(.admin-tab-pane = 기본 display:none)이다.
-  //   여기선 탭 전환이 없으므로 active 를 직접 준다(그 CSS가 없는 화면에서도 무해).
-  const pane=document.getElementById('tab-cs-inquiry'); if(pane) pane.classList.add('active');
-  try{ await loadCsRooms(); }catch(_){ }   // nav 뱃지는 모듈의 CS_ON_BADGE 훅이 따라온다
+  const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="csTopNote"></div><div id="reQueueMount"></div><div id="csInquiryMount"></div></div>`;
+  _reRenderQueue();          // 띠 자리를 먼저 잡아 두고(불러오는 중) 아래 문의 화면을 붙인다
+  if(isAdmin){
+    if(!window.CsInquiry){ $('#csInquiryMount').innerHTML=`<div class="empty">문의창구 모듈(js/cs-inquiry.js)을 불러오지 못했습니다.</div>`; }
+    else{
+      CsInquiry.mount('csInquiryMount');
+      // 모듈 마크업은 관리자 대시보드의 탭 판(.admin-tab-pane = 기본 display:none)이다.
+      //   여기선 탭 전환이 없으므로 active 를 직접 준다(그 CSS가 없는 화면에서도 무해).
+      const pane=document.getElementById('tab-cs-inquiry'); if(pane) pane.classList.add('active');
+      try{ await loadCsRooms(); }catch(_){ }   // nav 뱃지는 모듈의 CS_ON_BADGE 훅이 따라온다
+    }
+  }else{
+    // AE — 문의 본문은 안 그린다. "왜 없는지"를 **맨 위에서** 말해주지 않으면 고장으로 오해한다
+    //   (목록 아래에 두면 카드가 길어 화면 밖으로 밀린다 — 실측).
+    $('#csTopNote').innerHTML=`<div class="ovnote">
+      리뷰어 문의 본문에는 실명·연락처·주소·주문정보가 포함되어 <b>관리자만 열람</b>합니다.
+      담당 업체의 <b>이미지 교체요청</b>은 아래에서 그대로 처리하실 수 있고,
+      처리하면 <b>리뷰어 채팅에 안내가 자동 전송</b>됩니다.</div>`;
+  }
+  await _loadReedit();
 }
 /* ── 설정 탭 ────────────────────────────────────────────────
    화면은 **관리자 대시보드와 같은 모듈**(js/admin-settings.js) 하나뿐이다 — 마운트만 한다.
@@ -2959,54 +3011,147 @@ async function renderSettingsView(){
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
       통합 작업대엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
-/* ── 이미지 교체요청 전용 탭 ─────────────────────────────────
-   C/S 대화창에서도 처리할 수 있지만(사용자 확정), 목록으로 몰아 보는 창구를 따로 둔다.
-   ★ **AE(staff)에게도 열려 있다** — 단 서버(`/api/trackb/review-edit/list`)가 담당 탭으로 거른다.
-     C/S 문의 탭은 여전히 master/admin 전용이라, AE 는 문의 본문을 보지 않고 이 탭으로만 처리한다.
-   ★ 카드·승인·반려는 **C/S 대화창과 같은 코드**(cs-review-edit-card.js + cs-inquiry.js 핸들러). */
-async function renderReeditView(){
-  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rehead"></div><div id="rebody"><div class="empty">불러오는 중…</div></div></div>`;
-  await _loadReedit();
+/* ── 이미지 교체요청 = C/S 문의 화면 위의 "처리 대기 큐" 띠 (시안 C) ──────────
+   설계·시안 문서 = frontend/docs/design-cs-review-edit-merge.html
+
+   옛 전용 탭(상단 nav 'reedit')을 없애고 C/S 문의 안으로 넣었다. 두 기능은 **영역으로** 구분된다:
+   위 = 주황 띠(교체요청) / 아래 = 지금 그대로의 문의 화면(목록＋대화창).
+
+   ★ 띠는 세 모드다 — rail(대기 건만 가로로) / full([모두 보기] = 상태 필터 + 카드 격자) /
+     collapsed([접기] = 헤더 한 줄). **대기 0건이면 자동으로 한 줄**로 줄어(.q0) 문의 화면을 안 가린다.
+   ★ 승인·반려·카드는 **C/S 대화창과 같은 코드**(cs-review-edit-card.js + cs-inquiry.js 핸들러) —
+     사본을 만들면 "띠에서 승인한 것과 대화창에서 승인한 것"이 갈라진다.
+   ★ **AE(staff)도 처리한다** — 서버(`/api/trackb/review-edit/list`)가 담당 탭으로 거르고,
+     AE 화면에는 아래 문의 화면이 아예 없어 이 띠가 화면 전체가 된다(그래서 full 모드로 연다). */
+const _RE_MODES = { rail:1, full:1, collapsed:1 };
+function _reMode(){
+  // 기본 = rail. AE 는 아래에 문의 화면이 없으므로 처음부터 펼친다(빈 화면에 띠만 있는 꼴 방지).
+  if(!_RE_MODES[STATE.reMode]) STATE.reMode = (STATE.role==='staff') ? 'full' : 'rail';
+  // 옛 'reedit' 링크·히스토리로 들어왔으면 목록을 펼쳐 준다(그 사람이 보러 온 것이 그 화면이다)
+  if(STATE.reOpenQueue){ STATE.reOpenQueue=false; STATE.reMode='full'; }
+  return STATE.reMode;
 }
+function reSetMode(m){ if(_RE_MODES[m]){ STATE.reMode=m; _reRenderQueue(); } }
 async function _loadReedit(){
   const st = STATE.reStatus || 'pending';
   const r = await api('/api/trackb/review-edit/list?status='+encodeURIComponent(st));
-  const b = $('#rebody');
-  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">교체요청을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _reRenderHead(0); return; }
+  if(!r || !r.ok){ STATE.re = null; STATE.reErr = (r&&r.error)||'불러오지 못했습니다.'; _reRenderQueue(); return; }
   STATE.re = r.requests || [];
+  STATE.reErr = null;
   STATE.reScoped = !!r.scoped;              // staff = 담당 탭만 걸러진 목록
-  _reRenderHead(STATE.re.length);
-  _reRenderBody();
+  STATE.rePending = Number.isFinite(r.pendingCount) ? r.pendingCount
+                  : (st==='pending' ? STATE.re.length : (Number.isFinite(STATE.rePending)?STATE.rePending:null));
+  _reRenderQueue();
   _reSyncNavBadge(Number.isFinite(r.pendingCount) ? r.pendingCount : null);
 }
-function _reRenderHead(n){
-  const st = STATE.reStatus || 'pending';
-  const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.reStatus='${k}';_loadReedit()">${l}</button>`;
-  $('#rehead').innerHTML=`<div class="mh"><h1>이미지 교체요청</h1>
-    <span class="sp" style="flex:1"></span>
-    ${chip('pending','처리 대기')}${chip('approved','승인')}${chip('rejected','반려')}${chip('cancelled','취소')}
-    <button class="btn" onclick="_loadReedit()">새로고침</button></div>
-    <div class="ovnote">리뷰어가 올린 교체 이미지를 확인하고 승인·반려합니다. <b>처리하면 리뷰어 채팅(C/S 문의)에 자동으로 안내가 전송</b>되므로 따로 연락하지 않아도 됩니다.
-      ${STATE.reScoped?'<b style="color:var(--muted)">(담당 업체 작업만 표시됩니다)</b>':''}
-      <span style="color:var(--muted)">· ${n}건</span></div>`;
+/** 목록 행 → 카드 meta (카드는 C/S 대화창과 같은 렌더러라 모양이 어긋날 수 없다) */
+function _reMeta(r){
+  return { requestId:r.id, status:r.status, oldFileId:r.old_file_id, newFileId:r.new_file_id,
+           reason:r.reason, adminNote:r.admin_note, rowIndex:r.row_index, slotKey:r.slot_key };
 }
-function _reRenderBody(){
-  const rows = STATE.re || [];
-  const b = $('#rebody');
-  if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 교체요청이 없습니다.</div>`; return; }
-  if(!window.CsReviewEditCard){ b.innerHTML=`<div class="empty">카드 렌더러(js/cs-review-edit-card.js)를 불러오지 못했습니다.</div>`; return; }
-  const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
-  b.innerHTML = `<div class="recards">` + rows.map(r=>{
-    // 목록 행 → 카드 meta 로 맞춘다(카드는 C/S 대화창과 같은 렌더러라 모양이 어긋날 수 없다)
-    const meta = { requestId:r.id, status:r.status, oldFileId:r.old_file_id, newFileId:r.new_file_id,
-                   reason:r.reason, adminNote:r.admin_note, rowIndex:r.row_index, slotKey:r.slot_key };
-    const rid = String(r.id||'').replace(/[^\w-]/g,'');
+function _reRid(r){ return String((r&&r.id)||'').replace(/[^\w-]/g,''); }
+function _reFmtAt(iso){ return iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):''; }
+
+function _reRenderQueue(){
+  const host = $('#reQueueMount'); if(!host) return;   // 다른 뷰에 있으면 아무 것도 안 한다
+  const mode = _reMode();
+  const rows = STATE.re;                                // null = 아직 못 읽음
+  const st   = STATE.reStatus || 'pending';
+  // 대기 건수 = 서버가 준 pendingCount 우선(다른 상태를 보는 중에도 "몇 건 남았나"가 맞아야 한다)
+  const pend = Number.isFinite(STATE.rePending) ? STATE.rePending
+             : (rows ? rows.filter(r=>r.status==='pending').length : null);
+  const zero = pend === 0;
+  const cnt  = (pend===null||pend===undefined) ? '불러오는 중…' : (zero?'처리 대기 없음':('처리 대기 '+pend+'건'));
+
+  const head = `<div class="reqh">
+      <span class="reqt">🖼 이미지 교체요청 · ${esc(cnt)}</span>
+      ${STATE.reScoped?'<span class="remeta">담당 업체 작업만</span>':''}
+      <span class="sp" style="flex:1"></span>
+      ${mode==='full'
+        ? `<button class="btn" onclick="reSetMode('rail')">대기만 보기</button>`
+        : `<button class="btn" onclick="reSetMode('full')">모두 보기</button>`}
+      ${mode==='collapsed'
+        ? `<button class="btn" onclick="reSetMode('rail')">펼치기 ▾</button>`
+        : `<button class="btn" onclick="reSetMode('collapsed')">접기 ▴</button>`}
+      <button class="btn" onclick="_loadReedit()">새로고침</button>
+    </div>`;
+
+  let body = '';
+  if(mode === 'collapsed')      body = '';
+  else if(mode === 'full')      body = `<div class="reqbody">${_reFullHtml(st, rows)}</div>`;
+  else                          body = _reRailHtml(rows);
+
+  host.innerHTML = `<div class="requeue${zero?' q0':''}${mode==='collapsed'?' qcollapsed':''}">${head}${body}</div>`;
+  _reFitCsHeight();
+}
+
+/* ★★ 띠가 먹은 세로만큼 아래 문의 화면을 줄인다 — 안 하면 답장 입력칸이 화면 밖으로 밀린다.
+   cs-inquiry.js 의 대화 영역 높이는 **인라인 스타일** `calc(100vh - 250px)` 이라
+   클래스 CSS로는 못 이긴다(!important 를 쓰면 그 모듈의 계약을 밖에서 덮는 셈).
+   ★ 공유 모듈은 건드리지 않는다 — 관리자 대시보드에는 이 띠가 없어 같이 줄면 안 된다.
+     그래서 **이 화면에서만** 실측 높이를 빼서 인라인 값을 다시 쓴다(모드 전환마다 재계산).
+   ★ 100vh 는 그대로 두어 창 크기 변화는 브라우저가 알아서 따라간다(resize 리스너 불필요). */
+function _reFitCsHeight(){
+  const wrap = document.getElementById('csRoomListWrap');
+  const row  = wrap && wrap.parentElement;          // 모듈이 만든 [목록|대화창] flex 행
+  if(!row) return;                                  // AE(문의 화면 없음)·아직 마운트 전 = 할 일 없음
+  const q = document.getElementById('reQueueMount');
+  const h = q ? Math.round(q.getBoundingClientRect().height) : 0;
+  row.style.height = `calc(100vh - 250px - ${h}px)`;
+}
+
+/** rail — 처리 대기 건만 가로로. 여기서 바로 승인·반려한다(대화방을 열지 않아도 되게). */
+function _reRailHtml(rows){
+  if(STATE.reErr) return `<div class="reqbody"><div class="empty">교체요청을 불러오지 못했습니다. (${esc(STATE.reErr)})</div></div>`;
+  if(rows === null || rows === undefined) return `<div class="reqbody"><div class="empty">불러오는 중…</div></div>`;
+  const pending = rows.filter(r=>r.status==='pending');
+  if(!pending.length) return '';   // 대기 0건이면 헤더 한 줄만(문의 화면을 가리지 않는다)
+  const RAIL_MAX = 8;              // 가로 스크롤이 끝없이 길어지지 않게 — 나머지는 [모두 보기]로
+  const shown = pending.slice(0, RAIL_MAX);
+  const rest  = pending.length - shown.length;
+  return `<div class="reqrail">` + shown.map(r=>{
+    const rid = _reRid(r);
+    const nid = String(r.new_file_id||'').replace(/[^-\w]/g,'');
+    const oid = String(r.old_file_id||'').replace(/[^-\w]/g,'');
+    // 썸네일은 **변경 요청분**을 보여주고, 클릭하면 기존↔변경을 나란히 크게 본다(공용 렌더러의 zoomPair)
+    const thumb = /^[-\w]{20,}$/.test(nid)
+      ? `<img class="reqim" src="${esc(API_BASE)}/api/drive/image/${encodeURIComponent(nid)}" alt="변경 요청" loading="lazy"
+           onclick="CsReviewEditCard.zoomPair('${oid}','${nid}','new')">`
+      : `<div class="reqim" style="display:grid;place-items:center;color:var(--faint);font-size:10px">없음</div>`;
+    return `<div class="reqitem">${thumb}
+      <div class="reqm">
+        <b>${esc(r.reviewer_name||'-')} · ${esc(r.campaign_label||r.tab_name||'')}</b>
+        <div class="rq2">${esc(r.reason||'(사유 없음)')}</div>
+        <div class="reqacts">
+          <button class="btn sm" onclick="csApproveReviewEdit('${rid}')">승인</button>
+          <button class="btn sm" onclick="csRejectReviewEdit('${rid}')">반려</button>
+        </div>
+      </div></div>`;
+  }).join('') + (rest>0
+    ? `<div class="reqitem" style="flex:0 0 104px;align-items:center;justify-content:center">
+         <button class="btn" onclick="reSetMode('full')">＋${rest}건</button></div>`
+    : '') + `</div>`;
+}
+
+/** full — 옛 전용 탭 화면 그대로(상태 필터 + 카드 격자). 이미지 대조 폭이 필요한 작업이라 형태를 지킨다. */
+function _reFullHtml(st, rows){
+  const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.reStatus='${k}';_loadReedit()">${l}</button>`;
+  const filters = `<div class="reqfilters">
+      ${chip('pending','처리 대기')}${chip('approved','승인')}${chip('rejected','반려')}${chip('cancelled','취소')}
+      <span class="sp" style="flex:1"></span>
+      <span class="remeta">처리하면 리뷰어 채팅에 안내가 자동 전송됩니다</span></div>`;
+  if(STATE.reErr) return filters + `<div class="empty">교체요청을 불러오지 못했습니다. (${esc(STATE.reErr)})</div>`;
+  if(rows === null || rows === undefined) return filters + `<div class="empty">불러오는 중…</div>`;
+  if(!rows.length) return filters + `<div class="empty">해당하는 교체요청이 없습니다.</div>`;
+  if(!window.CsReviewEditCard) return filters + `<div class="empty">카드 렌더러(js/cs-review-edit-card.js)를 불러오지 못했습니다.</div>`;
+  return filters + `<div class="recards">` + rows.map(r=>{
+    const rid = _reRid(r);
     return `<div class="recard">
       <div class="rehd"><b>${esc(r.campaign_label||r.tab_name||'')}</b>
         <span class="remeta">${esc(r.reviewer_name||'')} · ${esc(_fmtPhone(r.phone8||''))}</span>
         <span class="sp" style="flex:1"></span>
-        <span class="remeta">${esc(fmt(r.created_at))}</span></div>
-      ${window.CsReviewEditCard.html(meta,{admin:true,
+        <span class="remeta">${esc(_reFmtAt(r.created_at))}</span></div>
+      ${window.CsReviewEditCard.html(_reMeta(r),{admin:true,
          onApprove:`csApproveReviewEdit('${rid}')`, onReject:`csRejectReviewEdit('${rid}')`})}
     </div>`;
   }).join('') + `</div>`;
@@ -3022,8 +3167,10 @@ async function _reBootBadge(){
     if(r && r.ok) _reSyncNavBadge(Number.isFinite(r.pendingCount) ? r.pendingCount : (r.requests||[]).length);
   }catch(_){ }
 }
-/* 대화창·전용 탭 어느 쪽에서 처리하든 목록을 최신화한다(cs-inquiry.js 가 부르는 훅) */
-window.CS_REVIEW_EDIT_ON_RESOLVED = function(){ try{ if(STATE.view==='reedit') _loadReedit(); else _reBootBadge(); }catch(_){ } };
+/* 대화창·대기 큐 어느 쪽에서 처리하든 목록을 최신화한다(cs-inquiry.js 가 부르는 훅).
+   ★ 판정 기준은 **화면에 띠가 있는지**(#reQueueMount) — 뷰 이름으로 보면 'reedit'→'cs' 통합 때처럼
+     이름이 바뀌는 순간 갱신이 조용히 멈춘다. */
+window.CS_REVIEW_EDIT_ON_RESOLVED = function(){ try{ if(document.getElementById('reQueueMount')) _loadReedit(); else _reBootBadge(); }catch(_){ } };
 
 /* ══════════════════════════════════════════════════════════════
    리뷰검수 탭 (M3) — 자동검수가 걸러낸 것만 모아 사람이 확정한다.

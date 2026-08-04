@@ -21,7 +21,15 @@
 --      "다음 구간 시작 전날까지" 가 자동이라 **빈틈·겹침이 구조적으로 불가능**하다.
 CREATE TABLE IF NOT EXISTS campaign_fee_schedules (
   id             BIGSERIAL PRIMARY KEY,
-  campaign_id    UUID NOT NULL REFERENCES recruit_campaigns(id) ON DELETE CASCADE,
+  -- ★★ campaign_id 는 **반드시 recruit_campaigns.id 와 같은 타입(TEXT)** 이어야 한다(018:9).
+  --    UUID 로 적으면 PG 가 42804(`Key columns "campaign_id" and "id" are of incompatible types:
+  --    uuid and text`)로 FK 생성을 거부하는데, 러너가 파일 다중문장을 **한 암묵 트랜잭션**으로
+  --    돌리므로 **파일 전체가 롤백**된다 → 아래 ② 의 ALTER 2 개까지 같이 사라진다.
+  --    42804 는 index.js 의 DUP_OBJECT_CODES 에 없어 _migrations 에도 미기록 → 배포마다
+  --    재시도하고 매번 같은 자리에서 실패 = **컬럼이 영영 안 생기는데 서버는 정상 부팅**.
+  --    실제로 이 상태로 배포돼 리뷰어 [참여하기] 가 전면 42703 으로 막혔다(2026-08 사고).
+  --    같은 이유로 campaign_applications(018:37)·campaign_options(061:10) 도 전부 TEXT 다.
+  campaign_id    TEXT NOT NULL REFERENCES recruit_campaigns(id) ON DELETE CASCADE,
   effective_from DATE NOT NULL,                       -- KST 날짜. 이 날부터 적용
   review_fee     INTEGER NOT NULL CHECK (review_fee >= 0),
   memo           TEXT DEFAULT '',                     -- 관리자 전용 메모(리뷰어 미노출)

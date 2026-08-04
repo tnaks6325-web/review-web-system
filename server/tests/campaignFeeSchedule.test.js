@@ -167,6 +167,53 @@ ok('같은 날 두 금액은 DB 가 막는다(UNIQUE)',
 ok('공고 삭제 시 구간도 함께 정리(고아 행 방지)',
   /REFERENCES recruit_campaigns\(id\) ON DELETE CASCADE/.test(mig));
 
+/* ══ ⑥ FK 타입 정합 — 이 가드가 없어서 실제로 사고가 났다(2026-08) ══
+ *  082 가 campaign_id 를 UUID 로 선언했는데 recruit_campaigns.id 는 TEXT 라
+ *  PG 가 42804 로 FK 생성을 거부 → 러너의 암묵 트랜잭션에서 **파일 전체 롤백**
+ *  → ADD COLUMN review_fee_snapshot 2 개가 영영 안 생겼고, 42804 는 DUP 코드가
+ *  아니라 _migrations 에도 미기록 → 배포마다 재시도·매번 실패인데 **서버는 정상 부팅**.
+ *  결과 = 리뷰어 [참여하기] 전면 42703. 종전 가드는 REFERENCES **문자열만** 봐서 통과했다.
+ *  → 문자열이 아니라 **타입을 참조 대상에서 읽어 대조**한다(전 마이그레이션 대상). */
+const migDir = path.join(__dirname, '..', 'migrations');
+const allMig = fs.readdirSync(migDir).filter(f => f.endsWith('.sql'))
+  .map(f => ({ f, sql: fs.readFileSync(path.join(migDir, f), 'utf8') }));
+const stripComments = (s) => s.replace(/--[^\n]*/g, '');
+
+// recruit_campaigns.id 의 실제 선언 타입(하드코딩 금지 — 018 이 바뀌면 기대값도 따라가야 한다)
+const campIdType = (() => {
+  for (const { sql } of allMig) {
+    const m = stripComments(sql).match(/CREATE TABLE (?:IF NOT EXISTS )?recruit_campaigns\s*\(([\s\S]*?)\n\s*\);/);
+    if (!m) continue;
+    const col = m[1].split('\n').map(s => s.trim()).find(s => /^id\s+\w/i.test(s));
+    if (col) return col.split(/\s+/)[1].toUpperCase();
+  }
+  return null;
+})();
+ok('recruit_campaigns.id 선언 타입을 마이그레이션에서 읽어낸다(가드 자체가 살아 있는지)',
+  campIdType === 'TEXT');
+
+// 전 마이그레이션에서 recruit_campaigns(id) 를 참조하는 컬럼의 선언 타입을 모은다
+const fkRefs = [];
+for (const { f, sql } of allMig) {
+  const re = /^\s*(\w+)\s+(\w+)[^\n]*REFERENCES\s+recruit_campaigns\s*\(\s*id\s*\)/gim;
+  let m;
+  while ((m = re.exec(stripComments(sql)))) fkRefs.push({ file: f, col: m[1], type: m[2].toUpperCase() });
+}
+ok('★★ recruit_campaigns(id) 참조 컬럼은 전부 참조 대상과 같은 타입 — 하나라도 다르면 그 파일 전체가 롤백된다',
+  fkRefs.length >= 3 && fkRefs.every(r => r.type === campIdType),
+  );
+ok('082 의 campaign_id 도 TEXT(사고 당사자 — 되돌리지 말 것)',
+  fkRefs.some(r => r.file.startsWith('082') && r.type === 'TEXT')
+  && !/campaign_id\s+UUID/i.test(stripComments(mig)));
+
+/* ══ ⑦ 부팅 프리플라이트 — "서버는 멀쩡한데 참여만 조용히 안 되는" 상태 차단 ══ */
+const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+const reqBlock = (idx.match(/const REQUIRED_SCHEMA = \[([\s\S]*?)\];/) || [, ''])[1];
+ok('★ REQUIRED_SCHEMA 에 campaign_applications.review_fee_snapshot 등록(없으면 apply 전면 42703)',
+  /\['campaign_applications',\s*'review_fee_snapshot'\]/.test(reqBlock));
+ok('★ REQUIRED_SCHEMA 에 order_submissions.review_fee_snapshot 등록(없으면 금액이 조용히 0원)',
+  /\['order_submissions',\s*'review_fee_snapshot'\]/.test(reqBlock));
+
 /* ══ ⑤ 프론트 배선 ══ */
 ok('모달에 구간표 UI(스위치·행 컨테이너·자동점검)가 있다',
   /id="rf_fee_sched_on"/.test(modal) && /id="rf_fee_rows"/.test(modal)
