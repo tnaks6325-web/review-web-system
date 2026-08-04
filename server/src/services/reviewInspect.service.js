@@ -40,6 +40,9 @@ const AUTHOR_REUSE = process.env.REVIEW_INSPECT_AUTHOR_REUSE !== '0';
 // ★ 잠금 제외 채널 — 위 불변식 ③
 const BLOCK_EXEMPT_CHANNELS = String(process.env.REVIEW_PRECHECK_EXEMPT || 'kakao')
   .split(',').map(s => s.trim()).filter(Boolean);
+/* ★ 087 2차: 구매확정 화면 판정. 끄면 구매확정 탭은 1차 필터를 아예 건너뛴다(도입 전과 동일).
+   이 갈래는 **켜져 있어도 절대 잠그지 않는다** — pass/warn 만 낸다. */
+const CONFIRM_VERIFY = process.env.REVIEW_CONFIRM_VERIFY !== '0';
 
 let _pool;
 function _db() {
@@ -88,14 +91,30 @@ function precheckPolicy({ classified, expectedChannel, slotKey = 'review', revie
   // 1차는 리뷰 슬롯만 — 영수증 슬롯은 기존 제출 시점 검수(captureVerify)가 그대로 담당한다.
   if (String(slotKey || 'review') !== 'review') return skip('not_review_slot');
 
-  /* ★★ 087 안전핀 (완화 금지) — 구매확정 작업은 1차 필터를 돌리지 않는다.
-     구매확정건의 리뷰어는 **리뷰 화면이 아니라 구매확정 완료 화면**을 올린다. AI 는 아직
-     그 화면을 아는 종류가 없어 `kind='other'` 로 판정하고, 아래 잠금 규칙이 확신 0.9 이상에서
-     첨부를 막는다 → **정상 제출이 전면 차단**된다(이 기능의 최악 사고인 '참여 소각').
-     구매확정 화면 자체를 판별하는 층(kind: purchase_confirm)이 붙기 전까지는 판정하지 않는 것이
-     맞다 — 모르면 통과가 이 파일의 1번 불변식이다.
+  /* ★★ 087 안전핀 (완화 금지) — 구매확정 작업은 **어떤 경우에도 잠그지 않는다**.
+     구매확정건의 리뷰어는 리뷰 화면이 아니라 '구매확정 완료 화면'을 올린다. 2차에서 AI 에
+     `purchase_confirm` 종류를 붙였지만 **판별 예시이미지가 등록되기 전에는 정확도가 낮아**
+     오탐이 곧 정상 제출 차단(= 참여 소각)이 된다. 그래서 이 갈래는 pass/warn 만 낸다.
+     ★ 킬스위치 `REVIEW_CONFIRM_VERIFY=0` 이면 판정 자체를 생략(종전 skip 동작).
      ★ reviewType 이 null(미지정·판정 실패)이면 여기 걸리지 않는다 = 오늘 동작 그대로. */
-  if (reviewType === 'confirm') return skip('purchase_confirm_tab');
+  if (reviewType === 'confirm') {
+    if (!CONFIRM_VERIFY) return skip('purchase_confirm_tab');
+    if (!classified || typeof classified !== 'object') return skip('no_verdict');
+    const c = Number(classified.confidence) || 0;
+    if (classified.kind === 'purchase_confirm') {
+      return { verdict: 'pass', code: 'confirm_ok', message: '구매확정 완료 화면으로 확인했어요.',
+               channel: '', confidence: c, blockable: false };
+    }
+    // 리뷰 화면을 올린 경우가 가장 흔한 실수 — 무엇을 올려야 하는지 콕 집어 알려준다.
+    if (c < BLOCK_CONFIDENCE) return skip('low_confidence');
+    return {
+      verdict: 'warn', code: 'not_purchase_confirm',
+      message: classified.kind === 'review'
+        ? '이 작업은 리뷰가 아니라 **구매확정**입니다. 구매확정이 완료된 화면을 캡처해 주세요.'
+        : '구매확정 완료 화면이 아닌 것 같아요. "구매확정" 표시가 보이는 화면을 캡처해 주세요.',
+      channel: '', confidence: c, blockable: false,
+    };
+  }
   // ★ 불변식 ① — 판정 재료가 없으면 통과. AI 장애가 제출을 막는 사유가 되면 안 된다.
   if (!classified || typeof classified !== 'object') return skip('no_verdict');
 
@@ -108,6 +127,17 @@ function precheckPolicy({ classified, expectedChannel, slotKey = 'review', revie
     // 영수증을 리뷰 자리에 올린 경우는 기존 슬롯 검수가 이미 다루는 영역이라
     // 여기서는 같은 말을 두 번 하지 않고 통과시킨다(중복 경고 방지).
     if (kind === 'receipt') return skip('receipt_handled_elsewhere');
+    /* ★★ 087 2차 역방향 — 리뷰 작업 자리에 '구매확정 완료 화면'이 온 경우.
+       새 종류를 도입했다는 이유만으로 **판정이 갑자기 세지면 안 된다**: 종전에는 이런 화면이
+       `other` 로 떨어져 차단 대상이었는데, 지금 그대로 두면 같은 이미지가 계속 차단된다.
+       잠금은 `other` 한 갈래뿐이라는 불변식(②)을 지켜 여기서는 **경고까지만** 한다
+       — 차단 범위를 넓히는 게 아니라 좁히는 방향이라 fail-open 원칙과도 맞는다. */
+    if (kind === 'purchase_confirm') {
+      if (conf < CHANNEL_WARN_CONFIDENCE) return skip('low_confidence');
+      return { verdict: 'warn', code: 'purchase_confirm_on_review',
+               message: '구매확정 화면으로 보여요. 이 작업은 리뷰 작성 건이라 별점과 리뷰 내용이 보이는 화면이 필요합니다.',
+               channel, confidence: conf, blockable: false };
+    }
     if (conf < BLOCK_CONFIDENCE) return skip('low_confidence');
     // ★ 불변식 ③ — 잠금 제외 채널의 작업은 경고까지만.
     const exempt = expectedChannel && BLOCK_EXEMPT_CHANNELS.includes(expectedChannel);

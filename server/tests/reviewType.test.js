@@ -96,10 +96,23 @@ const inspect = require('../src/services/reviewInspect.service');
 // 구매확정 완료 화면이 오늘 받는 판정: kind='other' + 높은 확신
 const CONFIRM_SHOT = { kind: 'other', confidence: 0.95, channel: '' };
 
-t('★★ 구매확정 탭이면 skip — 이 핀이 풀리면 정상 제출이 전면 차단된다', (() => {
-  const v = inspect.precheckPolicy({ classified: CONFIRM_SHOT, expectedChannel: 'coupang',
-                                     slotKey: 'review', reviewType: 'confirm' });
-  return v.verdict === 'skip' && v.code === 'purchase_confirm_tab';
+/* ★★ 불변식은 "skip 이냐"가 아니라 **"절대 잠그지 않느냐"** 다.
+   1차에서는 판정 층이 없어 skip 이었고 2차에서 pass/warn 으로 올렸다 —
+   구현이 어느 쪽이든 **block 이 나오면 정상 제출 전면 차단(참여 소각)** 이라는 점이 핵심이다.
+   그래서 코드 형태가 아니라 결과를 고정한다(테스트를 통과시키려고 코드를 되돌리는 일 방지). */
+t('★★ 구매확정 탭은 어떤 판정에도 잠기지 않는다 — 이 불변식이 풀리면 정상 제출이 전면 차단된다', (() => {
+  const shots = [
+    CONFIRM_SHOT,                                              // other 0.95
+    { kind: 'review', confidence: 0.99, channel: 'coupang' },  // 리뷰 화면 오첨부
+    { kind: 'purchase_confirm', confidence: 0.95 },            // 정상
+    { kind: 'other', confidence: 0.30 },                       // 저확신
+    null,                                                       // AI 장애
+  ];
+  return shots.every(c => {
+    const v = inspect.precheckPolicy({ classified: c, expectedChannel: 'coupang',
+                                       slotKey: 'review', reviewType: 'confirm' });
+    return v.verdict !== 'block' && v.blockable === false;
+  });
 })());
 
 t('★ 리뷰타입 미지정(null)이면 종전 그대로 차단된다 = 무회귀', (() => {
@@ -248,6 +261,121 @@ t('★ 미리보기를 본 뒤에만 적용 버튼이 보인다(숫자 확인 �
 t('적용은 confirm 뒤에만', /if \(!dryRun && !confirm\(/.test(SET));
 t('★ 펼칠 때 자동 실행하지 않는다(설정 화면 열 때마다 전 탭 훑기 금지)',
   /function loadReviewTypeCleanup\(\) \{ _setNavBadge/.test(SET));
+
+/* ══ 2차: 슬롯 파생 + AI 판별 ══════════════════════════════ */
+
+/* ── 10) 슬롯 파생 (순수함수 실행) ─────────────────────────── */
+console.log('\n10) 캡처 슬롯 파생');
+const CS = require('../src/utils/captureSlots');
+
+t('★★ 구매확정 단독은 슬롯을 만들지 않는다 — 길이 1을 돌려주면 완료 판정이 영영 안 된다', (() => {
+  // 프론트는 length>1 일 때만 슬롯 UI 를 그리고, 단일 첨부는 slotKey 를 안 보내 'review' 가 된다.
+  // 여기서 ['confirm'] 을 요구하면 필요 슬롯 ⊄ 제출 슬롯 → 구매확정 제출 전멸.
+  return CS.effectiveCaptureSlots(null, '', 'confirm') === null
+      && JSON.stringify(CS.requiredSlotKeys(null, '', 'confirm')) === '["review"]';
+})());
+
+t('구매확정 + 현영 = 2슬롯, 리뷰 자리가 구매확정으로 치환된다', (() => {
+  const eff = CS.effectiveCaptureSlots(null, '사업자현영', 'confirm');
+  return eff.length === 2 && eff[0].key === 'confirm' && eff[1].key === 'receipt'
+      && JSON.stringify(CS.requiredSlotKeys(null, '사업자현영', 'confirm')) === '["confirm","receipt"]';
+})());
+
+t('★ 리뷰타입 없음/포토 = 종전 동작 완전 동일(무회귀)', (() => {
+  const a = JSON.stringify(CS.effectiveCaptureSlots(null, '', null));
+  const b = JSON.stringify(CS.effectiveCaptureSlots(null, '', 'photo'));
+  const c = JSON.stringify(CS.effectiveCaptureSlots(null, '사업자현영', null));
+  const d = JSON.stringify(CS.effectiveCaptureSlots(null, '사업자현영', 'photo'));
+  return a === 'null' && b === 'null' && c === d
+      && CS.effectiveCaptureSlots(null, '사업자현영', null)[0].key === 'review';
+})());
+
+t('★ 관리자가 capture_slots 를 명시했으면 리뷰타입보다 우선(종전 계약)', (() => {
+  const mine = [{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }];
+  return JSON.stringify(CS.effectiveCaptureSlots(mine, '사업자현영', 'confirm')) === JSON.stringify(mine);
+})());
+
+t('슬롯 라벨도 리뷰타입을 본다', CS.slotLabel(null, '사업자현영', 'confirm', 'confirm') === '구매확정');
+
+/* ── 11) AI 기대 화면 종류 ───────────────────────────────── */
+console.log('\n11) 기대 화면 종류 (_expectedKind)');
+const CV = require('../src/services/captureVerify.service');
+{
+  /* ★ 동기 호출로 검증한다. verifyCapture(async)의 `expected` 로 간접 확인하면
+     단언이 `process.exit(0)` 뒤로 밀려 **조용히 실행되지 않는다**(변이시험으로 실측). */
+  const kindOf = CV._expectedKind;
+  t('★ 구매확정 작업의 리뷰 자리는 구매확정 화면을 기대한다(단일 첨부 경로 = slotKey "review")',
+    kindOf('review', 'confirm') === 'purchase_confirm');
+  t('★ 리뷰타입 없으면 종전 그대로 review',
+    kindOf('review', null) === 'review' && kindOf('review', 'photo') === 'review');
+  t('영수증 자리는 리뷰타입과 무관하게 receipt', kindOf('receipt', 'confirm') === 'receipt');
+  t('confirm 슬롯(현영 2슬롯)도 구매확정 화면', kindOf('confirm', null) === 'purchase_confirm');
+  t('모르는 슬롯은 검수 대상 아님', kindOf('nope', 'confirm') === null);
+}
+
+const GEM = S('src/services/gemini.service.js');
+t('★★ kind 판정 기준 3줄은 한 글자도 안 바뀌었다(오래 검증된 슬롯 검수가 그대로 쓴다)',
+  GEM.includes('- "review": 쇼핑몰 리뷰 화면. 별점(★), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임.')
+  && GEM.includes('- "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호, 사업자등록번호, 지출증빙, 거래일시 중 하나 이상이 보임.')
+  && GEM.includes('- "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).'));
+t('purchase_confirm 종류 추가 + 화이트리스트 + JSON 형식',
+  /- "purchase_confirm": 구매확정 완료 화면/.test(GEM)
+  && /\['review', 'receipt', 'purchase_confirm', 'other'\]\.includes\(p\.kind\)/.test(GEM)
+  && /"kind":"review\|receipt\|purchase_confirm\|other"/.test(GEM));
+t('★★ 캐시 접두 상향 — 옛 캐시가 새 종류를 모른 채 히트하는 것 차단',
+  /_getCacheKey\('classify3:'/.test(GEM) && !/_getCacheKey\('classify2:'/.test(GEM));
+
+/* ── 12) ★★ 잠금 범위 — 넓히지 않는다 ──────────────────── */
+console.log('\n12) 1차 필터 — 구매확정 갈래는 절대 잠그지 않는다');
+const CONFIRM_SHOT2 = { kind: 'purchase_confirm', confidence: 0.95, channel: '' };
+
+t('구매확정 작업 + 구매확정 화면 = pass', (() => {
+  const v = inspect.precheckPolicy({ classified: CONFIRM_SHOT2, slotKey: 'review', reviewType: 'confirm' });
+  return v.verdict === 'pass' && v.code === 'confirm_ok';
+})());
+t('★★ 구매확정 작업에 리뷰 화면을 올려도 **차단하지 않는다**(경고까지)', (() => {
+  const v = inspect.precheckPolicy({ classified: { kind: 'review', confidence: 0.99, channel: 'coupang' },
+                                     slotKey: 'review', reviewType: 'confirm' });
+  return v.verdict === 'warn' && v.blockable === false && /구매확정/.test(v.message);
+})());
+t('★★ 구매확정 작업에 엉뚱한 이미지(other 0.99)여도 차단하지 않는다 = 참여 소각 방지', (() => {
+  const v = inspect.precheckPolicy({ classified: CONFIRM_SHOT, slotKey: 'review', reviewType: 'confirm' });
+  return v.verdict !== 'block' && v.blockable === false;
+})());
+t('★★ 역방향 — 리뷰 작업 자리에 구매확정 화면도 경고까지만(새 종류 도입으로 판정이 세지면 안 된다)', (() => {
+  const v = inspect.precheckPolicy({ classified: CONFIRM_SHOT2, slotKey: 'review', reviewType: null });
+  return v.verdict === 'warn' && v.code === 'purchase_confirm_on_review' && v.blockable === false;
+})());
+t('★ 잠금은 여전히 other 한 갈래뿐 = 무회귀', (() => {
+  const v = inspect.precheckPolicy({ classified: CONFIRM_SHOT, expectedChannel: 'coupang',
+                                     slotKey: 'review', reviewType: null });
+  return v.verdict === 'block' && v.code === 'not_review';
+})());
+const INS2 = S('src/services/reviewInspect.service.js');
+t('킬스위치 REVIEW_CONFIRM_VERIFY — 끄면 구매확정 갈래는 판정 자체를 건너뛴다',
+  /REVIEW_CONFIRM_VERIFY/.test(INS2) && /if \(!CONFIRM_VERIFY\) return skip\('purchase_confirm_tab'\)/.test(INS2));
+
+/* ── 13) 소비처 4곳이 전부 리뷰타입을 본다 ──────────────── */
+console.log('\n13) 슬롯 소비처 4곳 (하나만 빠져도 제출이 깨진다)');
+const SRCH = S('src/services/search.service.js');
+const SUB = S('src/routes/submit.routes.js');
+const RE = S('src/routes/reviewEdit.routes.js');
+t('① 리뷰어 화면 슬롯 (search.service)',
+  /effectiveCaptureSlots\(row\.captureSlots, row\.incomeType, _rtMap\.get/.test(SRCH));
+t('② 제출 완료 판정 (submit.routes)',
+  /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(SUB));
+t('③ 업로드 폴더 라벨 + 검수 기대값 (diag review-upload)',
+  /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(DIAG)
+  && /reviewType: _tabReviewType/.test(DIAG));
+t('④ 교체요청 라벨 2곳 (reviewEdit)',
+  (RE.match(/reviewTypeForTab\(/g) || []).length >= 2);
+t('★ 조회는 단일 출처 서비스 하나 — 네 곳이 각자 SQL 을 쓰면 조용히 갈라진다',
+  [SRCH, SUB, DIAG, RE].every(f => /reviewTypeContext\.service/.test(f)));
+const RTC = S('src/services/reviewTypeContext.service.js');
+t('★ 그 서비스도 판정은 utils/reviewType 에 맡긴다(규칙 사본 0)',
+  /require\('\.\.\/utils\/reviewType'\)/.test(RTC) && /resolveReviewType\(/.test(RTC));
+t('★ 조회 실패는 캐시에 넣지 않는다(일시 장애를 60초 굳히지 않는다)',
+  /return null;\s*\/\/ ★ 캐시에 넣지 않는다/.test(RTC));
 
 console.log(`\n✅ ${pass}건 통과\n`);
 process.exit(0);

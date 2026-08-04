@@ -17,6 +17,7 @@ const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
 const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
+const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -1577,11 +1578,16 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // 슬롯 라벨 해석: capture_slots에서 slot.key에 매칭되는 label을 찾는다.
     //   기본 'review' 슬롯은 하위폴더를 만들지 않아 기존 레이아웃을 그대로 유지한다.
+    // ★ 087 2차: 이 탭의 리뷰타입 — 슬롯 라벨과 AI 기대 화면 종류가 **같은 값**을 봐야 한다.
+    //   fail-soft(null = 종전 동작).
+    let _tabReviewType = null;
+    try { _tabReviewType = await reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
+
     let slotLabel = null;
     if (slot !== 'review') {
       // 라벨 판정은 공용 유틸(utils/captureSlots) — 검색·완료판정과 같은 규칙이라
       // 현영 자동 슬롯(receipt)도 '현금영수증' 서브폴더로 일관되게 들어간다.
-      slotLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot);
+      slotLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot, _tabReviewType);
     }
     if (tabRows[0]?.folder_url) {
       targetFolderId = driveService.extractFolderIdFromUrl(tabRows[0].folder_url);
@@ -1696,7 +1702,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         try {
           verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
-            slotKey: slot, companyBusinessNo: _companyBizNo,
+            slotKey: slot, companyBusinessNo: _companyBizNo, reviewType: _tabReviewType,
             // ★★ 아래 2차 검수와 **같은 예시이미지**를 넘긴다 — 다르면 캐시 키가 갈려
             //   같은 이미지에 AI 콜이 두 번 나간다(순증 0 이라는 전제가 깨진다).
             samples: _inspectSamples,

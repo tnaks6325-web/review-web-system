@@ -173,8 +173,10 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('★ kind 판정 기준 3줄이 그대로다(이 문구를 바꾸면 오래 검증된 판정이 달라진다)',
     /- "review": 쇼핑몰 리뷰 화면\. 별점\(★\), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임\./.test(gem)
     && /- "other": 둘 다 아님\(상품 사진, 주문내역, 빈 화면 등\)\./.test(gem));
+  // ★ 접두는 kind·필드가 늘 때마다 올라간다(2→3…). 버전 상향은 허용하되
+  //   **접두 없는 옛 키로 되돌아가는 것**은 막는다(검사 의미 불변).
   ok('★ 캐시 접두를 올려 옛 캐시(새 필드 없음)가 히트하지 않게 했다',
-    /_getCacheKey\('classify2:'/.test(gem) && !/_getCacheKey\('classify:'/.test(gem));
+    /_getCacheKey\('classify[2-9]\d*:'/.test(gem) && !/_getCacheKey\('classify:'/.test(gem));
   ok('채널·본문·상품명·근거 필드 추가', /channel: CH\.includes/.test(gem)
     && /reviewText: String/.test(gem) && /productName: String/.test(gem) && /signals: Array\.isArray/.test(gem));
 
@@ -289,7 +291,7 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     SAMP.sampleSettingKey('kakao_feed') === 'review_inspect_sample_kakao_feed'
     && SAMP.isReviewSampleKey('oy_pc') === true && SAMP.isReviewSampleKey('evil') === false);
   ok('★★ 캐시 키에 예시 지문이 섞인다 — 안 그러면 예시를 등록·교체해도 옛 판정이 히트한다',
-    /_getCacheKey\('classify2:' \+ sampleSig \+ ':' \+ base64Data\)/.test(gem)
+    /_getCacheKey\('classify[2-9]\d*:' \+ sampleSig \+ ':' \+ base64Data\)/.test(gem)
     && /sampleSig = samples\.length/.test(gem));
   ok('★★ 두 호출부가 같은 samples 를 넘긴다 — 다르면 같은 이미지에 AI 콜이 두 번',
     /samples: _inspectSamples,/.test(diag)

@@ -19,6 +19,7 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 // 같은 답을 봐야 한다(어긋나면 "슬롯 2개인데 1장에 완료" 같은 제출 파손).
 // ═══════════════════════════════════════════════════════════
 const { requiredSlotKeys } = require('../utils/captureSlots');
+const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 
 // ═══════════════════════════════════════════════════════════
 // 한국 실명 판별 유틸리티
@@ -479,7 +480,10 @@ router.post('/review', async (req, res, next) => {
         [sheetId, tabName, rowIndex]
       );
       const wasSubmitted = ctxRows[0]?.is_submitted === true;
-      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type);
+      // ★ 087 2차: 슬롯 파생은 리뷰타입까지 봐야 한다 — 넷 중 하나만 빠지면
+      //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
+      const _rt = await reviewTypeForTab({ sheetId, tabName });
+      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
       const isMultiSlot = !(required.length === 1 && required[0] === 'review');
 
       if (isMultiSlot) {
