@@ -240,6 +240,13 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **항목 ↔ 화면 일치**: `renderWorkdeskView` 는 예약 없으면 `STATE.cur=null`, `renderOwnershipView` 는 복원이 아니면 `STATE.advCur=null` 로 **첫 await 전에** 비운다 — 안 그러면 "본문은 작업 선택 안내인데 항목엔 옛 작업"이 남아 뒤로/앞으로가 없던 화면을 되살린다.
 - 복원 범위 = **어느 화면·어느 작업·어느 업체**까지. 그리드 필터·숨김열 등 표 상태는 탭 전환 시 초기화되는 클라이언트 상태라 대상 아님(`selTab` 기존 계약 유지). 회귀가드 `server/tests/workdeskHistoryNav.test.js`(27케이스 — 배선 + **나브 함수를 vm 으로 꺼내 실제 실행**해 적재 순서·중복 억제·lock 검증). 실제 http 오리진 + 스텁 API 브라우저 실행으로 업체관리→작업→뒤로×3→앞으로×3 왕복 확인.
 
+### 리뷰웹시스템[3버전] 첫 진입 홈 (시안 B 타일 런처형 · ① nav 상시 유지)
+- 내부인(master/admin/AE) 첫 진입 기본 뷰 = **홈**(`renderHomeView`) — 그라데이션 히어로(인사 + 오늘 요약 4칸: 진행 중 작업·모집중 공고·오늘 참여 확정·확인 필요) + **메뉴 타일 그리드**(nav 의 카드화, 역할별 접힘 = nav 정책 1:1) + 우측 "오늘의 브리핑" 레일. 시안 = `frontend/docs/design-workdesk-home.html`(B안 + B-2 ①). nav 맨 앞 **🏠 홈** 버튼(admin·staff 두 nav — 타일=학습용 큰 입구, nav=빠른 입구 역할 분담), **광고주는 홈 미도달**(nav 자체가 없음 · 전용 대시보드 유지). `STATE.view` 초기값 `''` — 기본 뷰 결정은 renderShell 의 `isAdv?'workdesk':'home'` 한 곳, 딥링크(`#go=`·`#view=`)는 boot 이 view 를 먼저 세팅해 종전대로 직행. logout 리셋에 `view:''` 포함(재로그인 = 홈).
+- ★★ **홈은 읽기 전용 + 이동만** — 타일·브리핑 줄 클릭 = `switchView` 뿐, 처리 로직 사본 0(교체요청 승인·오더 접수는 각 탭의 기존 코드로 이동만 한다).
+- ★★ **숫자 = nav 뱃지 재료 그대로**(홈 전용 집계 금지): `_NAVCS`(C/S 문의+교체요청) · `_NAVRI`(리뷰검수 — 이번에 신설, `_riSyncNavBadge`가 값을 먼저 기억. **DOM `#riNavBadge` 되읽기 금지** — ' 🔴4' 문자열 파싱이 되어 표기 형식에 결합) · `_NAVLG`(로그) · `STATE.woCounts`(작업오더 — **`#woNavBadge` 표기는 `_woSyncNavBadge` 한 곳뿐**, 작업오더 뷰/홈 어느 쪽이 갱신하든 같은 함수). 각 `*SyncNavBadge` 가 `_homeSyncBadges()` 를 불러 수렴(홈 미표시 = no-op). ★ 훅 호출은 `typeof _homeSyncBadges==='function'` 가드 — 런타임엔 항상 있지만, **블록 단위 vm 추출 회귀가드**(workdeskLogTabs 등)의 sandbox 에는 없어 가드 없이는 그 테스트들이 ReferenceError 로 죽는다(실측).
+- ★ 히어로 숫자도 **기존 엔드포인트 3개 재사용**(신규 API 0): `/api/trackb/tabs` · `/campaigns/list`(참여형 state==='open' + 레거시 status==='active', ops.todaySubmitted 합산) · `/work-orders/list?status=submitted`(counts 를 `STATE.woCounts` 에 실어 `_woSyncNavBadge` 경유). ★ **실패/미도착 칸은 '?'·'–'** — 0 으로 꾸미지 않는다(조용한 정상 위장 금지, 관측 뷰 배포 스큐 규칙과 동일). AE 에겐 "미확인 문의" 브리핑 줄 자체를 안 그린다(AE 는 문의 미조회라 영원한 '–' 가 된다).
+- CSS 는 전부 `hm-` 접두 + `#hmwrap{max-width:1380px}`(모집공고 카드 컨테이너와 같은 값). 회귀가드 `server/tests/workdeskHome.test.js`(39케이스 — 정적 배선 + **vm 런타임 실행**(sandbox 에 isAdmin 전역을 일부러 두지 않음), 변이시험 4종 검출 확인) + 실브라우저 http 오리진 검증(렌더·타일 이동·🏠 복귀·히스토리 뒤로가기·성공/실패 경로 숫자).
+
 ### 리뷰웹시스템[3버전] 화면 폭 상한 (FHD/QHD 토글) · 열 너비 고정
 - **문제 2개**: ① 창을 넓힐수록 헤더·업체 칩바·탭바·본문이 끝없이 따라 늘어났다. ② 시트 그리드가 컨테이너를 꽉 채우려고 **주소 열이 잔여폭을 흡수**해, 같은 열이 창 크기·숨긴 열 수마다 다른 너비가 됐다(작업을 오갈 때마다 열 위치를 다시 찾음).
 - **상한**: `--app-max` 토큰 하나(`:root` 기본 1920 + `body[data-vw="fhd"|"qhd"]` = 1920/2560), 우측 상단 좌우 슬라이딩 스위치(`.vwsw` `#vwToggle`, `localStorage.wd_viewport_mode`, **기본 FHD**=좁은 쪽). 적용은 `.top`·`.tb1`·`.tb2`·`.wrap`·`.ovwrap` 5곳.
@@ -311,6 +318,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **시스템이 값을 넣는 칸은 번호·구매일자·옵션 셋뿐** — 나머지는 빈 칸으로 두고 구매양식 제출이 채운다(기존 경로 그대로). 구매일자는 `M / D (요일)` 그대로 써야 063 시트 일정 인식이 읽는다.
 - ★★ **쓰기 표면 = 시트 + `work_orders.work_sheet_url` 뿐**. 주문원장·투영·큐·행배정 무접촉, **`tab_configs` 등록은 여전히 접수(accept)가 유일한 관문**(등록 게이트 불변식 유지 — 화면도 "접수는 확인 후 직접" 이라고 말한다). **시트 탭을 시스템이 지우지 않는다**(되돌리기 어려운 파괴는 사람 손에).
 - 대상 시트 목록은 기존 `/api/trackb/tabs` 재사용(신규 엔드포인트 0, 1회 로드). `POST /worktable/create`(auth + internal + editorOnly).
+- ★★ **템플릿 시트는 선택 항목**(프로덕션 테스트로 잡음): 종전 '새 시트생성'은 `templateSheetId`를 **관리자 브라우저 localStorage**(`rapp_template_sheet_id`)에서만 읽어 **서버는 알 수 없고 사람마다 값이 달랐다**. → 해석 순서 = **요청값 → 전사 설정(`app_settings.worktable_template.templateSheetId`) → env**, 그래도 없으면 **빈 탭으로 만든다**(서식·공지문만 없고 열·행은 동일). 하드 의존으로 두면 설정 안 된 조직에서 기능이 통째로 막힌다. ★ 빈 탭이면 **헤더는 1행**(덮을 메타·공지문이 없다), 템플릿 복사본만 헤더 행을 탐지한다. ★ 템플릿 없이 만들면 화면이 "서식 없이 만들었습니다"라고 **말한다**(조용한 누락 금지). 설정 화면(`설정 › 작업표 표준 열`)에 입력칸 — 시트 주소를 붙여넣으면 ID로 정규화(`normalizeSheetId`, 잘못된 값은 빈 값 = 추측 금지).
 - 회귀가드 `tests/worktablePlan.test.js`(71케이스 — 계획 재계산·잠금 게이트·gid 지정·라이브 무접촉·쓰기 표면 1곳·행 생성 실행). ⚠ 실제 구글시트 쓰기는 자격증명이 필요해 **배포 후 실물 1건으로 확인**해야 한다.
 ### 작업표 생성 M2b-2 — 작업대 표에 미리 보이게 (스켈레톤 행)
 - 시트를 만든 직후 같은 줄을 `campaign_participants` 에 넣어 **주문 0건이어도 통합작업대 표에 N줄이 보인다**(`participants.createWorktableSlots`). `review_index` 는 이름 없는 행을 버려(`if (!name) return null`) 시트만으로는 빈 줄이 표에 안 나온다.

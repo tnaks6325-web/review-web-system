@@ -736,6 +736,16 @@ function _worktableHtml() {
           <span style="font-size:.73rem;color:var(--t3)">둘 다 <b>공통</b> 행을 통째로 바꿉니다(채널 행은 그대로).</span>
         </div>
 
+        <div style="margin-top:14px">
+          <div style="font-size:.82rem;font-weight:700;margin-bottom:4px">템플릿 시트 <span style="font-weight:500;color:var(--t3)">— 선택</span></div>
+          <p style="font-size:.75rem;color:var(--t3);margin:0 0 6px;line-height:1.6">
+            작업표를 만들 때 <b>서식·상단 공지문을 가져올 원본 시트</b>입니다. 비워 두면 서식 없이 열·행만 만듭니다.
+            시트 주소를 그대로 붙여넣어도 됩니다.
+          </p>
+          <input type="text" id="wtTplSheet" placeholder="https://docs.google.com/spreadsheets/d/... (비워 두면 서식 없음)"
+            style="width:100%;max-width:620px;padding:7px 10px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;outline:none">
+        </div>
+
         <div style="font-size:.8rem;font-weight:700;margin:14px 0 5px">공통 열 상세 <span style="font-weight:500;color:var(--t3)">— 순서와 시스템 인식</span></div>
         <div id="wtColList" class="as-wtlist"><div class="as-wtempty">불러오는 중…</div></div>
 
@@ -1051,6 +1061,8 @@ async function loadWorktableTemplate() {
     if (!_wtTpl.channels) _wtTpl.channels = {};
     _wtRenderCols();
     _wtRenderChans();
+    var tpl = document.getElementById('wtTplSheet');
+    if (tpl) tpl.value = _wtTpl.templateSheetId || '';
     var at = document.getElementById('wtSavedAt');
     if (at) {
       at.textContent = _wtTpl.updatedAt
@@ -1072,10 +1084,16 @@ async function wtSaveTemplate() {
     channels[c.key] = ((_wtTpl.channels || {})[c.key] || []).slice();
   });
   try {
-    var j = await _wtFetch(WT_EP.template, { core: _wtTpl.core, channels: channels });
+    var tplEl = document.getElementById('wtTplSheet');
+    var j = await _wtFetch(WT_EP.template, {
+      core: _wtTpl.core, channels: channels,
+      templateSheetId: tplEl ? tplEl.value : (_wtTpl.templateSheetId || ''),
+    });
     _wtTpl = j.data;
     _wtRenderCols();
     _wtRenderChans();
+    var tpl = document.getElementById('wtTplSheet');
+    if (tpl) tpl.value = _wtTpl.templateSheetId || '';
     var at = document.getElementById('wtSavedAt');
     if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
     _wtDirty(false);
