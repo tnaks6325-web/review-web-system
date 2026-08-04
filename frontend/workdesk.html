@@ -3398,8 +3398,13 @@ function riFilterTab(i){
   STATE.riTab={sheetId:r.sheet_id,tabName:r.tab_name};
   _loadInspect();
 }
+/* 상세는 **여러 건을 연달아 훑는 화면**이다 — 한 건 보고 닫고 다음 카드를 찾아 다시 누르는 왕복을
+   없애려고 ← → 로 옆 건으로 옮겨 다닌다. 순서는 화면의 카드 순서 그대로(STATE.ri). */
 function riOpenDetail(i){
-  const r=(STATE.ri||[])[i]; if(!r) return;
+  const rows=STATE.ri||[];
+  const idx=Math.max(0, Math.min(rows.length-1, Number(i)||0));
+  const r=rows[idx]; if(!r) return;
+  STATE.riDetailIdx=idx;
   const c=r.checks||{};
   const line=(v,label,extra)=>`<tr><td><span class="ribdg ${v==='fail'?'ri-f':v==='warn'?'ri-s':v==='skip'?'ri-p':'ri-ok'}">${v==='fail'?'불량':v==='warn'?'의심':v==='skip'?'안 함':'통과'}</span></td><td><b>${label}</b>${extra?'<br><span class="rimeta">'+extra+'</span>':''}</td></tr>`;
   const dup=c.duplicate||{}, sim=c.similarity||{}, pr=c.product||{}, fm=c.format||{};
@@ -3408,6 +3413,9 @@ function riOpenDetail(i){
       <span class="rimeta">${esc(r.tab_name||'')}</span>
       <span class="sp" style="flex:1"></span>
       <span class="rimeta">${r.ai_confidence?('AI 확신 '+Math.round(r.ai_confidence*100)+'%'):''}</span>
+      <button class="btn" onclick="riStepDetail(-1)" title="이전 (←)"${idx<=0?' disabled':''}>‹</button>
+      <span class="rimeta" style="white-space:nowrap">${idx+1} / ${rows.length}</span>
+      <button class="btn" onclick="riStepDetail(1)" title="다음 (→)"${idx>=rows.length-1?' disabled':''}>›</button>
       <button class="btn" onclick="riCloseDetail()">닫기</button></div>
     <div class="rimbody">
       <div class="rimleft">
@@ -3433,9 +3441,33 @@ function riOpenDetail(i){
       ${r.status==='resolved'?'<span class="rimeta">확인 처리된 건입니다.</span>':`<button class="btn pri" onclick="riResolve('${esc(r.file_id)}',true)">확인 처리(통과)</button>`}
     </div></div>`;
   let m=$('#riModal'); if(!m){ m=document.createElement('div'); m.id='riModal'; m.className='rimodal'; document.body.appendChild(m); }
+  // ★ #riModal 은 [판별 예시] 모달과 **같은 요소를 재사용**한다 — 방향키를 어느 쪽에서 가로챌지
+  //   구분하려면 표식이 필요하다(없으면 예시 모달에서도 화살표가 먹어 엉뚱한 건으로 넘어간다).
+  m.dataset.riKind='detail';
   m.innerHTML=html; m.style.display='flex';
 }
-function riCloseDetail(){ const m=$('#riModal'); if(m) m.style.display='none'; }
+/** 옆 건으로 이동. ★ 끝에서 순환하지 않는다 — 처음으로 튀면 "어디까지 봤는지"를 잃는다. */
+function riStepDetail(d){
+  const rows=STATE.ri||[], cur=STATE.riDetailIdx;
+  if(!rows.length || !Number.isFinite(cur)) return;
+  const nx=cur+d;
+  if(nx<0 || nx>=rows.length) return;
+  riOpenDetail(nx);
+}
+function riCloseDetail(){ const m=$('#riModal'); if(m){ m.style.display='none'; m.dataset.riKind=''; } STATE.riDetailIdx=null; }
+/* ★ 리스너는 **한 번만** 건다 — 팝업을 열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 칸 건너뛴다.
+   ★ 상세 팝업이 실제로 떠 있을 때만 가로챈다(riKind) — 판별 예시 모달의 입력칸 커서 이동을 막지 않는다.
+   ★ 입력 중(input/textarea/select/contenteditable)에는 손대지 않는다(작업대 그리드 방향키 규율과 동일). */
+document.addEventListener('keydown', (e)=>{
+  if(e.altKey||e.ctrlKey||e.metaKey) return;
+  const m=$('#riModal');
+  if(!m || m.style.display!=='flex' || m.dataset.riKind!=='detail') return;
+  const t=e.target, tag=((t&&t.tagName)||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||tag==='select'||(t&&t.isContentEditable)) return;
+  if(e.key==='ArrowLeft'){ e.preventDefault(); riStepDetail(-1); }
+  else if(e.key==='ArrowRight'){ e.preventDefault(); riStepDetail(1); }
+  else if(e.key==='Escape'){ e.preventDefault(); riCloseDetail(); }
+});
 async function riResolve(fileId, close){
   const r=await api('/api/trackb/review-inspect/resolve',{method:'POST',body:JSON.stringify({fileId})});
   if(!r||!r.ok){ alert('확인 처리 실패: '+((r&&r.error)||'')); return; }
@@ -3469,6 +3501,7 @@ async function riOpenSamples(){
         ${s.imageUrl?`<button class="btn" onclick="riClearSample('${s.key}')">제거</button>`:''}</div>
     </div>`).join('');
   let m=$('#riModal'); if(!m){ m=document.createElement('div'); m.id='riModal'; m.className='rimodal'; document.body.appendChild(m); }
+  m.dataset.riKind='samples';   // ★ 상세가 아니다 — 방향키를 가로채지 않는다(파일 선택칸 조작 보존)
   m.innerHTML=`<div class="rimodal-in"><div class="rimh"><b>리뷰 판별 예시이미지</b>
       <span class="rimeta">채널별 정상 리뷰 화면을 등록하면 AI 판별이 정확해집니다 — 없어도 검수는 동작합니다</span>
       <span class="sp" style="flex:1"></span><button class="btn" onclick="riCloseDetail()">닫기</button></div>
