@@ -535,7 +535,13 @@
   .tchip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
   .tchip .cb{width:13px;height:13px;border-radius:3px;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:9px;color:#fff} .tchip.on .cb{background:var(--accent);border-color:var(--accent)}
   .assignbtn{margin-top:12px}
-  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .25s} .toast.show{opacity:1}
+  /* ★★ pointer-events:none 필수 — #toast 는 항상 DOM 에 있고 숨김이 opacity:0 뿐이라(display/visibility 아님)
+     제거하면 화면 중앙 상단(top:16px, left:50%)의 투명한 상자가 상단 메뉴(.nav) 위에 그대로 얹혀
+     그 자리에 오는 메뉴 버튼의 클릭을 삼킨다. 게다가 textContent 가 남아 상자 폭이 문구 길이만큼
+     유지되므로(토스트 1회 이후 영구) 긴 오류 문구가 뜬 뒤엔 등록리뷰어DB·설정까지 통째로 안 눌린다.
+     실측: 2560px 에서 "저장 실패…" 토스트 후 이미지 교체요청·리뷰검수·등록리뷰어DB·설정 4개 전부 9/9 지점 차단.
+     같은 화면의 .wdtoast 는 처음부터 pointer-events:none 이라 무사했다 — 이쪽만 빠져 있었다. */
+  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;pointer-events:none;transition:opacity .25s} .toast.show{opacity:1}
   /* ── P1 탭 스레드 ── */
   .thlist{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
   .thitem{border:1px solid var(--line);border-radius:11px;padding:10px 13px;background:var(--card)}
