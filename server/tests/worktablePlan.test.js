@@ -99,6 +99,29 @@ ok('주말 포함으로 바꿀 수 있다',
     const p = P.buildWorktablePlan({ workOrder: { ...WO, recruit_count: 10, daily_count: 3, start_date: '2026-08-14' }, template: TPL, options: { skipWeekends: false } });
     return p.dates.map(d => d.date).join(',') === '2026-08-14,2026-08-15,2026-08-16,2026-08-17';
   })());
+ok('★ 제외 날짜(공휴일·업체 휴무)만큼 뒤로 밀린다',
+  (() => {
+    const p2 = P.buildWorktablePlan({
+      workOrder: { recruit_count: 9, daily_count: 3, start_date: '2026-08-13' },
+      template: TPL, options: { holidays: ['2026-08-17'] } });
+    return p2.dates.map(d => d.date).join(',') === '2026-08-13,2026-08-14,2026-08-18';
+  })());
+ok('★ 제외 날짜는 형식이 맞는 값만 — 잘못된 값은 무시(날짜 분배가 통째로 깨지는 것보다 낫다)',
+  (() => {
+    const p2 = P.buildWorktablePlan({
+      workOrder: { recruit_count: 3, daily_count: 3, start_date: '2026-08-13' },
+      template: TPL, options: { holidays: ['2026-08-17', '잘못된값', '2026-08-17', ''] } });
+    return p2.holidays.join(',') === '2026-08-17';   // 중복 제거 + 정렬 + 형식 검증
+  })());
+ok('진행 기간 밖의 제외 날짜는 영향이 없다고 알려준다(오타·잘못 고른 날 노출)',
+  (() => {
+    const p2 = P.buildWorktablePlan({
+      workOrder: { recruit_count: 3, daily_count: 3, start_date: '2026-08-13' },
+      template: TPL, options: { holidays: ['2026-12-25'] } });
+    return p2.warnings.some(w => w.code === 'holiday_outside') && p2.canCreate;
+  })());
+ok('제외 날짜가 없으면 경고도 없다(도배 방지)',
+  !P.buildWorktablePlan({ workOrder: WO, template: TPL }).warnings.some(w => w.code === 'holiday_outside'));
 ok('휴무일 지정도 건너뛴다',
   (() => {
     const r = P.distributeDates({ total: 4, daily: 2, startDate: '2026-08-10', holidays: ['2026-08-11'] });
@@ -239,8 +262,18 @@ ok('★★ 프론트가 날짜·옵션을 다시 계산하지 않는다(서버 �
       && !/addDays|getUTCDay|Date\.UTC|setDate\(|86400000/.test(body);
   })());
 ok('조정하면 서버에 다시 물어본다(로컬 재계산 금지)',
-  /function _wtpOnEdit\(\)[\s\S]{0,300}_wtpLoad\(\)/.test(wdesk)
+  /function _wtpOnEdit\(\)[\s\S]{0,200}_wtpLoad\(\)/.test(wdesk)
   && /worktable\/plan\?/.test(wdesk));
+ok('★ 제외 날짜 UI 가 붙어 있고 판정 사본이 없다(서버가 형식·중복·정렬 최종 판정)',
+  /function wtpHolAdd/.test(wdesk) && /function wtpHolDel/.test(wdesk)
+  && /q\.set\('holidays',f\.holidays\.join\(','\)\)/.test(wdesk)
+  && /p\.holidays\|\|\[\]/.test(wdesk));
+ok('★ 제외 날짜는 다른 칸을 고쳐도 유지된다 — 값 읽기는 _wtpSyncForm 한 벌(사본 금지)',
+  /function _wtpSyncForm/.test(wdesk)
+  && /if\(f\.holidays==null\) f\.holidays/.test(wdesk)
+  && /function _wtpOnEdit\(\)\{ _wtpSyncForm\(\); _wtpLoad\(\); \}/.test(wdesk));
+ok('라우트가 holidays 쿼리를 받는다',
+  /if \(q\.holidays\) opt\.holidays = String\(q\.holidays\)\.split\(','\)/.test(routes));
 ok('열 이름·옵션명은 esc() 통과(시트·사용자 자유 문자열)',
   /esc\(c\.name\)/.test(wdesk) && /esc\(b\.key\)/.test(wdesk) && /esc\(d\.label\)/.test(wdesk));
 ok('★ 생성 버튼은 아직 잠겨 있고 그 사실을 화면이 말한다(반쯤 되는 기능으로 오인 금지)',
