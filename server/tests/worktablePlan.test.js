@@ -467,6 +467,11 @@ ok('POST /worktable/delete 권한(내부인 + 편집 명단)',
 ok('★ 스켈레톤 생성 실패가 시트 생성을 되돌리지 않는다(시트가 1순위 산출물)',
   /작업대 표 행 생성 실패\(시트는 만들어짐\)/.test(createSrc)
   && /slots = \{ error: e\.message \}/.test(createSrc));
+ok('★★ 만든 직후 그 시트를 즉시 미러한다 — 안 하면 주문이 준비된 빈 줄을 못 보고 아래에 붙는다',
+  /mirrorOneSheet\(targetSheetId, \{ force: true \}\)/.test(createSrc)
+  && /생성 직후 미러 실패\(다음 주기가 메운다\)/.test(createSrc));
+ok('★ 미러 실패가 생성을 되돌리지 않는다(시트·표는 이미 만들어졌다)',
+  /mirrored = \{ error: e\.message \}/.test(createSrc));
 ok('킬스위치 WORKTABLE_DB_ROWS=0 이면 시트만 만든다',
   /process\.env\.WORKTABLE_DB_ROWS !== '0'/.test(createSrc));
 ok('프론트: 되돌리기 버튼 + "시트는 안 지워진다"를 화면이 말한다',
