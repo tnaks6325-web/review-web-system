@@ -27,6 +27,7 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'multi_daily_limit'],      // 063 — apply 게이트·공고 저장
   ['recruit_campaigns', 'sub_hold_ttl_min'],       // 063 — 공개 /list 명시 SELECT
   ['trackb_advertiser_links', 'login_required'],   // 083 — 광고주 링크 로그인 게이트·업체관리 링크/계정 카드
+  ['recruit_campaigns', 'reviewer_hidden'],        // 085 — 공개 /list WHERE 절(없으면 리뷰어 공고목록 전면 42703)
 ];
 
 async function _runOneMigration(pool, sql) {
