@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>설정 화면 정돈 — 와이어프레임 (시안 A · B)</title>
+<style>
+  /* 와이어프레임 = 색·이미지를 빼고 **구조와 치수만** 남긴 골격.
+     ★ color-scheme:light 고정 — 다크에서 회색이 뒤집히면 골격 대비가 무너진다.
+     ★ 외부 리소스 0 — 오프라인에서도 그대로 열린다. */
+  :root{
+    color-scheme:light;
+    --pg:#eceff3;            /* 문서 바탕 */
+    --wf-paper:#e9edf2;      /* 화면 배경(앱의 --paper 자리) */
+    --wf-fill:#ffffff;       /* 면(카드) */
+    --wf-fill2:#f2f4f7;      /* 인셋(한 단계 아래 면) */
+    --wf-line:#c3cad4;       /* 골격 선 */
+    --wf-line2:#dde2e9;      /* 약한 선 */
+    --wf-ink:#2b3440;        /* 라벨 글자 */
+    --wf-mut:#7b8593;        /* 보조 글자 */
+    --wf-bar:#d6dbe3;        /* 글자 자리 막대 */
+    --wf-mark:#1f2937;       /* 주석 번호 */
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+    --mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--pg);color:var(--wf-ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .doc{max-width:1240px;margin:0 auto;padding:0 18px 96px}
+
+  header.hd{padding:40px 0 6px}
+  .eyebrow{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--wf-mut)}
+  h1{font-size:25px;font-weight:800;letter-spacing:-.02em;margin:8px 0 8px}
+  p.lead{color:#5b6472;font-size:13.5px;max-width:920px}
+  p.lead b{color:var(--wf-ink)}
+  .metachips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px}
+  .mchip{font-size:11px;font-weight:700;color:var(--wf-mut);background:#fff;border:1px solid var(--wf-line2);border-radius:999px;padding:4px 11px}
+  .mchip b{color:var(--wf-ink)}
+
+  section{margin-top:44px}
+  .sec-label{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--wf-mut);margin-bottom:4px}
+  h2{font-size:18.5px;font-weight:800;letter-spacing:-.02em}
+  h2 .tag{font-size:10.5px;font-weight:800;vertical-align:middle;margin-left:8px;padding:3px 9px;border-radius:999px;background:#fff;border:1px solid var(--wf-line2);color:var(--wf-mut)}
+  p.desc{color:#5b6472;font-size:12.8px;max-width:940px;margin-top:8px}
+  p.desc b{color:var(--wf-ink)}
+  code{font-family:var(--mono);font-size:.92em;background:#fff;border:1px solid var(--wf-line2);border-radius:5px;padding:1px 5px}
+
+  /* ═══ 와이어프레임 프레임 ═══ */
+  .wf{background:var(--wf-paper);border:1.5px solid var(--wf-line);border-radius:10px;padding:0;overflow:hidden;margin-top:16px}
+  .wfbar{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1.5px dashed var(--wf-line);background:#fff}
+  .wfbar .dot{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--wf-line)}
+  .wfbar .ttl{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--wf-mut);text-transform:uppercase}
+  .wfbar .sp{flex:1}
+  .wfbar .dim{font-family:var(--mono);font-size:10px;color:var(--wf-mut)}
+  .wfstage{padding:16px 18px 22px}
+
+  /* 앱 상단 크롬(골격만) */
+  .wtop{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--wf-line);border-radius:8px;padding:8px 11px;margin-bottom:14px}
+  .wtop .lg{font-family:var(--mono);font-size:10.5px;font-weight:800;letter-spacing:.04em}
+  .wtab{font-family:var(--mono);font-size:10px;color:var(--wf-mut);border:1.5px solid var(--wf-line2);border-radius:6px;padding:3px 8px}
+  .wtab.on{border-color:var(--wf-line);color:var(--wf-ink);font-weight:800;border-style:solid;background:var(--wf-fill2)}
+  .wtop .sp{flex:1}
+
+  /* 공통 골격 부품 */
+  .box{background:var(--wf-fill);border:1.5px solid var(--wf-line);border-radius:8px}
+  .box.inset{background:var(--wf-fill2);border-style:solid;border-color:var(--wf-line2)}
+  .box.dash{border-style:dashed}
+  .lbl{font-family:var(--mono);font-size:9.5px;font-weight:800;letter-spacing:.07em;color:var(--wf-mut);text-transform:uppercase}
+  .bar{height:8px;border-radius:3px;background:var(--wf-bar)}
+  .bar.t{height:11px}                       /* 제목 줄 */
+  .bar.s{height:6px;background:#e3e7ed}     /* 설명 줄 */
+  .rows{display:flex;flex-direction:column;gap:5px}
+  .ctl{height:30px;border:1.5px solid var(--wf-line);border-radius:7px;background:#fff;display:flex;align-items:center;padding:0 9px;font-family:var(--mono);font-size:10px;color:var(--wf-mut)}
+  .ctl.btn{border-style:solid;background:var(--wf-fill2);color:var(--wf-ink);font-weight:800;justify-content:center;padding:0 14px}
+  .ctl.btn.sm{height:24px;font-size:9.5px;padding:0 9px}
+  .ctl.pill{height:20px;border-radius:999px;font-size:9px;padding:0 9px}
+  .ph{border:1.5px dashed var(--wf-line);border-radius:7px;background:#fbfcfd;display:grid;place-items:center;font-family:var(--mono);font-size:9.5px;color:var(--wf-mut);text-align:center;line-height:1.5;position:relative}
+  .ph::after{content:'';position:absolute;inset:0;background:
+      linear-gradient(to top right,transparent calc(50% - .6px),var(--wf-line2) 50%,transparent calc(50% + .6px)),
+      linear-gradient(to bottom right,transparent calc(50% - .6px),var(--wf-line2) 50%,transparent calc(50% + .6px));opacity:.7}
+  .ph span{position:relative;z-index:1;background:#fbfcfdcc;padding:1px 4px;border-radius:3px}
+  .flexsp{flex:1}
+
+  /* 주석 마커 */
+  .mk{display:inline-grid;place-items:center;width:17px;height:17px;flex:none;border-radius:50%;background:var(--wf-mark);color:#fff;font-family:var(--mono);font-size:9.5px;font-weight:800;line-height:1}
+  .mkrow{display:flex;align-items:center;gap:7px}
+
+  /* 치수 표기 */
+  .dimtag{font-family:var(--mono);font-size:9px;color:var(--wf-mut);border:1px solid var(--wf-line2);border-radius:4px;padding:0 5px;background:#fff;white-space:nowrap}
+
+  /* ── 시안 A 골격 ── */
+  .aCard{background:var(--wf-fill);border:1.5px solid var(--wf-line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+  .aHead{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1.5px solid var(--wf-line2)}
+  .aIcoPh{width:26px;height:26px;flex:none;border-radius:7px;border:1.5px dashed var(--wf-line);background:#fbfcfd}
+  .aHeadTxt{flex:1;min-width:0}
+  .aBody{padding:13px}
+  .aInsetB{background:var(--wf-fill2);border:1.5px solid var(--wf-line2);border-radius:9px;padding:11px;margin-top:12px}
+  .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+  .tile{background:#fff;border:1.5px solid var(--wf-line2);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+  .foldrow{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--wf-line2);border-radius:8px;padding:9px 11px;margin-top:9px}
+  .chrow{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--wf-line2);border-radius:8px;padding:7px 10px}
+  .chrow + .chrow{margin-top:5px}
+  .chrow.cm{border-color:var(--wf-line);background:var(--wf-fill2)}
+  .cchip{font-family:var(--mono);font-size:9.5px;color:var(--wf-mut);border:1.5px solid var(--wf-line2);border-radius:6px;padding:2px 7px;background:#fff}
+
+  /* ── 시안 B 골격 ── */
+  .bWrap{display:grid;grid-template-columns:236px minmax(0,1fr);gap:14px}
+  .bNav{background:var(--wf-fill);border:1.5px solid var(--wf-line);border-radius:10px;padding:8px;align-self:start}
+  .bItem{display:flex;align-items:center;gap:8px;border:1.5px solid transparent;border-radius:7px;padding:8px 9px}
+  .bItem.on{border-color:var(--wf-line);background:var(--wf-fill2)}
+  .bPanel{background:var(--wf-fill);border:1.5px solid var(--wf-line);border-radius:10px;overflow:hidden}
+  .bHead{padding:13px 15px;border-bottom:1.5px solid var(--wf-line2)}
+  .bSec{padding:13px 15px}
+  .bSec + .bSec{border-top:1.5px dashed var(--wf-line2)}
+  .bSlot{display:flex;align-items:center;gap:10px;border:1.5px solid var(--wf-line2);border-radius:8px;padding:8px 10px;background:#fff}
+  .bSlot + .bSlot{margin-top:5px}
+
+  /* 주석 목록 */
+  .notes{margin-top:14px;background:#fff;border:1.5px solid var(--wf-line2);border-radius:10px;padding:13px 15px}
+  .notes .nt{font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--wf-mut);margin-bottom:9px}
+  .notes ul{list-style:none;display:flex;flex-direction:column;gap:8px}
+  .notes li{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#5b6472;line-height:1.6}
+  .notes li b{color:var(--wf-ink)}
+  .notes li .mk{margin-top:2px}
+
+  table.spec{width:100%;border-collapse:collapse;margin-top:14px;background:#fff;border:1.5px solid var(--wf-line2);border-radius:10px;overflow:hidden}
+  table.spec th,table.spec td{padding:9px 12px;font-size:12px;text-align:left;border-bottom:1px solid var(--wf-line2);vertical-align:top}
+  table.spec th{background:var(--wf-fill2);font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--wf-mut);text-transform:uppercase}
+  table.spec td code{background:var(--wf-fill2);border-color:var(--wf-line2)}
+  table.spec tr:last-child td{border-bottom:none}
+
+  .callout{border:1.5px solid var(--wf-line2);background:#fff;border-radius:10px;padding:14px 16px;margin-top:16px}
+  .callout .ct{font-size:12.5px;font-weight:800;margin-bottom:6px}
+  .callout p,.callout li{font-size:12.3px;color:#5b6472;line-height:1.66}
+  .callout ul{margin:6px 0 0 17px}
+  .callout b{color:var(--wf-ink)}
+
+  .capt{font-size:11px;color:var(--wf-mut);margin-top:9px;text-align:center;font-family:var(--mono)}
+  footer{margin-top:56px;padding-top:20px;border-top:1.5px solid var(--wf-line2);font-size:11.5px;color:var(--wf-mut)}
+  @media(max-width:1000px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.bWrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="doc">
+
+<header class="hd" id="dochead">
+  <div class="eyebrow">WIREFRAME · 설정 화면 정돈</div>
+  <h1>설정 메뉴 정돈 — 와이어프레임</h1>
+  <p class="lead">
+    색·아이콘·실제 이미지는 빼고 <b>영역이 어떻게 나뉘고 무엇이 어디에 놓이는지</b>만 남긴 골격입니다.
+    같은 내용(내 닉네임 · 제공정보 · AI 판별 예시 · 작업표 표준 열 · 리뷰어 공지)을
+    <b>A = 카드 스택</b> / <b>B = 좌측 목차</b> 두 구조로 그렸습니다. 번호는 아래 주석과 연결됩니다.
+  </p>
+  <div class="metachips">
+    <span class="mchip">대상 <b>통합 작업대 · 관리자 대시보드 설정 탭</b></span>
+    <span class="mchip">공유 모듈 <b>frontend/js/admin-settings.js</b></span>
+    <span class="mchip">색 시안 <b>design-admin-settings-ui.html</b></span>
+    <span class="mchip">와이어프레임만 <b>?v=A</b> · <b>?v=B</b> · <b>?v=BEFORE</b></span>
+  </div>
+</header>
+
+<!-- ═════════ BEFORE ═════════ -->
+<section id="secBefore">
+  <div class="sec-label">BEFORE</div>
+  <h2>지금 구조 — 면이 하나</h2>
+  <p class="desc">
+    묶음 5개가 <b>같은 평면</b>에 이어 붙고, 경계는 <code>&lt;hr&gt;</code> 한 줄뿐이다.
+    바탕이 나뉘지 않으니 "어디부터 어디까지가 한 설정인지"를 <b>제목 글자만으로</b> 판단해야 한다.
+  </p>
+  <div class="wf">
+    <div class="wfbar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="ttl">현재 · 설정</span><span class="sp"></span><span class="dim">면 1개 · 구분선 4개</span></div>
+    <div class="wfstage" style="background:#fff">
+      <div class="rows" style="margin-bottom:14px"><div class="bar t" style="width:70px"></div><div class="bar s" style="width:380px"></div></div>
+
+      <div class="rows" style="gap:7px">
+        <div class="mkrow"><span class="mk">1</span><div class="bar t" style="width:210px"></div></div>
+        <div class="bar s" style="width:620px"></div><div class="bar s" style="width:520px"></div>
+        <div style="display:flex;gap:7px;max-width:520px;margin-top:4px"><div class="ctl flexsp">입력</div><div class="ctl btn">저장</div></div>
+      </div>
+      <div style="border-top:1.5px solid var(--wf-line2);margin:16px 0"></div>
+
+      <div class="rows" style="gap:7px">
+        <div class="bar t" style="width:190px"></div>
+        <div class="bar s" style="width:560px"></div>
+        <div style="display:flex;gap:7px;max-width:420px;margin-top:4px"><div class="ctl flexsp">입력</div><div class="ctl btn">저장</div></div>
+        <div class="mkrow" style="margin-top:8px"><span class="mk">2</span><div class="bar" style="width:250px"></div></div>
+        <div class="tiles" style="margin-top:2px">
+          <div class="tile"><div class="bar" style="width:60%"></div><div class="ph" style="height:62px"><span>이미지</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">파일</div><div class="ctl btn sm">제거</div></div></div>
+          <div class="tile"><div class="bar" style="width:60%"></div><div class="ph" style="height:62px"><span>이미지</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">파일</div><div class="ctl btn sm">제거</div></div></div>
+          <div class="tile"><div class="bar" style="width:60%"></div><div class="ph" style="height:62px"><span>비어 있음</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">파일</div><div class="ctl btn sm">제거</div></div></div>
+          <div class="tile"><div class="bar" style="width:60%"></div><div class="ph" style="height:62px"><span>비어 있음</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">파일</div><div class="ctl btn sm">제거</div></div></div>
+        </div>
+      </div>
+      <div style="border-top:1.5px solid var(--wf-line2);margin:16px 0"></div>
+
+      <div class="rows" style="gap:7px">
+        <div class="bar t" style="width:230px"></div>
+        <div class="bar s" style="width:600px"></div>
+        <div class="mkrow" style="margin-top:6px"><span class="mk">3</span><span class="lbl">같은 모양 타일 4 + 9 = 13칸이 계속 이어짐</span></div>
+        <div class="tiles" style="grid-template-columns:repeat(5,minmax(0,1fr));margin-top:2px">
+          <div class="tile" style="padding:6px"><div class="bar" style="width:70%"></div><div class="ph" style="height:38px"><span>없음</span></div></div>
+          <div class="tile" style="padding:6px"><div class="bar" style="width:70%"></div><div class="ph" style="height:38px"><span>없음</span></div></div>
+          <div class="tile" style="padding:6px"><div class="bar" style="width:70%"></div><div class="ph" style="height:38px"><span>없음</span></div></div>
+          <div class="tile" style="padding:6px"><div class="bar" style="width:70%"></div><div class="ph" style="height:38px"><span>없음</span></div></div>
+          <div class="tile" style="padding:6px"><div class="bar" style="width:70%"></div><div class="ph" style="height:38px"><span>없음</span></div></div>
+        </div>
+        <div class="lbl" style="text-align:center;margin-top:8px">⋯ 아래로 8칸 더 · 작업표 표준 열 · 리뷰어 공지</div>
+      </div>
+    </div>
+  </div>
+  <div class="notes">
+    <div class="nt">주석</div>
+    <ul>
+      <li><span class="mk">1</span><span><b>묶음 경계가 선 하나</b> — 배경이 같아 스크롤 중에는 어느 설정을 보고 있는지 위치로만 기억한다.</span></li>
+      <li><span class="mk">2</span><span><b>상하 관계가 안 보인다</b> — "현금영수증 발행방법 이미지"는 위 사업자번호의 하위 블록인데 같은 평면·같은 굵기다.</span></li>
+      <li><span class="mk">3</span><span><b>용도가 정반대인 칸이 같은 모양</b> — 발행방법(리뷰어에게 보임)과 AI 예시(리뷰어에게 안 보임)가 구분되지 않는다.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═════════ 시안 A ═════════ -->
+<section id="secA">
+  <div class="sec-label">시안 A</div>
+  <h2>카드 스택 <span class="tag">추천</span><span class="tag">항목 순서 유지</span></h2>
+  <p class="desc">
+    <b>배경 / 카드 / 인셋</b> 3단으로 면을 나눈다. 묶음 하나 = 카드 하나, 카드 안의 하위 블록은 한 단계 어두운 인셋.
+    카드 머리에 <b>제목 · 한 줄 설명 · 상태칩 · 그 카드의 액션</b>을 고정 배치해 카드마다 같은 자리에서 같은 정보를 읽는다.
+  </p>
+  <div class="wf">
+    <div class="wfbar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="ttl">시안 A · 카드 스택</span><span class="sp"></span><span class="dim">본문 폭 상한 1120px</span></div>
+    <div class="wfstage">
+      <div class="wtop">
+        <span class="lg">통합 작업대</span>
+        <span class="wtab">작업대</span><span class="wtab">업체관리</span><span class="wtab">모집공고</span><span class="wtab">C/S</span><span class="wtab on">설정</span>
+        <span class="sp"></span><span class="wtab">admin</span>
+      </div>
+      <div class="rows" style="margin-bottom:12px"><div class="bar t" style="width:70px"></div><div class="bar s" style="width:380px"></div></div>
+
+      <!-- 카드 1 -->
+      <div class="aCard">
+        <div class="aHead">
+          <span class="mk">1</span>
+          <div class="aIcoPh"></div>
+          <div class="aHeadTxt rows"><div class="bar t" style="width:110px"></div><div class="bar s" style="width:230px"></div></div>
+          <span class="ctl pill">상태</span>
+        </div>
+        <div class="aBody rows" style="gap:9px">
+          <div class="bar s" style="width:82%"></div>
+          <div style="display:flex;gap:7px;max-width:520px;align-items:center"><span class="lbl">내 계정</span><div class="ctl flexsp">닉네임 입력</div><div class="ctl btn">저장</div></div>
+        </div>
+      </div>
+
+      <!-- 카드 2 -->
+      <div class="aCard">
+        <div class="aHead">
+          <span class="mk">2</span>
+          <div class="aIcoPh"></div>
+          <div class="aHeadTxt rows"><div class="bar t" style="width:190px"></div><div class="bar s" style="width:280px"></div></div>
+          <span class="ctl pill">2 / 4</span>
+        </div>
+        <div class="aBody">
+          <div class="rows" style="gap:8px">
+            <div class="bar s" style="width:70%"></div>
+            <div style="display:flex;gap:7px;max-width:460px"><div class="ctl flexsp">사업자번호</div><div class="ctl btn">저장</div></div>
+          </div>
+          <div class="aInsetB">
+            <div class="mkrow" style="margin-bottom:9px">
+              <span class="mk">3</span><span class="lbl">하위 블록 · 인셋</span>
+              <span class="flexsp"></span><span class="dimtag">bg #f1f4f8 · radius 11 · pad 13</span>
+            </div>
+            <div class="tiles">
+              <div class="tile"><div style="display:flex;gap:5px;align-items:center"><div class="bar" style="width:52px"></div><span class="flexsp"></span><span class="ctl pill">등록</span></div><div class="ph" style="height:76px"><span>썸네일</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">바꾸기</div><div class="ctl btn sm">제거</div></div></div>
+              <div class="tile"><div style="display:flex;gap:5px;align-items:center"><div class="bar" style="width:52px"></div><span class="flexsp"></span><span class="ctl pill">등록</span></div><div class="ph" style="height:76px"><span>썸네일</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">바꾸기</div><div class="ctl btn sm">제거</div></div></div>
+              <div class="tile"><div style="display:flex;gap:5px;align-items:center"><div class="bar" style="width:52px"></div><span class="flexsp"></span><span class="ctl pill">없음</span></div><div class="ph" style="height:76px"><span>비어 있음</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">＋ 등록</div></div></div>
+              <div class="tile"><div style="display:flex;gap:5px;align-items:center"><div class="bar" style="width:52px"></div><span class="flexsp"></span><span class="ctl pill">없음</span></div><div class="ph" style="height:76px"><span>비어 있음</span></div><div style="display:flex;gap:5px"><div class="ctl btn sm">＋ 등록</div></div></div>
+            </div>
+            <div class="bar s" style="width:46%;margin-top:9px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 카드 3 -->
+      <div class="aCard">
+        <div class="aHead">
+          <span class="mk">4</span>
+          <div class="aIcoPh"></div>
+          <div class="aHeadTxt rows"><div class="bar t" style="width:170px"></div><div class="bar s" style="width:330px"></div></div>
+          <span class="ctl pill">0 / 13</span><span class="ctl btn sm">↻</span>
+        </div>
+        <div class="aBody">
+          <div class="bar s" style="width:76%"></div>
+          <div class="aInsetB">
+            <div class="mkrow" style="margin-bottom:9px"><span class="lbl">현금영수증 판별 예시 · 4칸</span></div>
+            <div class="tiles">
+              <div class="tile"><div class="bar" style="width:56px"></div><div class="ph" style="height:56px"><span>비어 있음</span></div><div class="ctl btn sm">＋ 등록</div></div>
+              <div class="tile"><div class="bar" style="width:56px"></div><div class="ph" style="height:56px"><span>비어 있음</span></div><div class="ctl btn sm">＋ 등록</div></div>
+              <div class="tile"><div class="bar" style="width:56px"></div><div class="ph" style="height:56px"><span>비어 있음</span></div><div class="ctl btn sm">＋ 등록</div></div>
+              <div class="tile"><div class="bar" style="width:56px"></div><div class="ph" style="height:56px"><span>비어 있음</span></div><div class="ctl btn sm">＋ 등록</div></div>
+            </div>
+          </div>
+          <div class="foldrow">
+            <span class="mk">5</span>
+            <div class="rows" style="gap:3px"><div class="bar" style="width:120px"></div><div class="bar s" style="width:200px"></div></div>
+            <span class="flexsp"></span><span class="ctl pill">접힘</span><span class="lbl">▾</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 카드 4 -->
+      <div class="aCard">
+        <div class="aHead">
+          <div class="aIcoPh"></div>
+          <div class="aHeadTxt rows"><div class="bar t" style="width:130px"></div><div class="bar s" style="width:250px"></div></div>
+          <span class="ctl pill">15열</span><span class="ctl btn sm">저장</span>
+        </div>
+        <div class="aBody">
+          <div class="chrow cm"><span class="lbl" style="width:96px">공통 · 모든 채널</span><span class="cchip">열</span><span class="cchip">열</span><span class="cchip">열</span><span class="cchip">열</span><span class="cchip">＋10</span></div>
+          <div class="chrow"><span class="lbl" style="width:96px">채널 1</span><span class="cchip">열</span><span class="cchip">＋ 추가</span></div>
+          <div class="chrow"><span class="lbl" style="width:96px">채널 2</span><span class="cchip">열</span><span class="cchip">＋ 추가</span></div>
+        </div>
+      </div>
+
+      <!-- 카드 5 -->
+      <div class="aCard" style="margin-bottom:0">
+        <div class="aHead">
+          <div class="aIcoPh"></div>
+          <div class="aHeadTxt rows"><div class="bar t" style="width:150px"></div><div class="bar s" style="width:210px"></div></div>
+          <span class="ctl btn sm">작성</span><span class="ctl btn sm">↻</span>
+        </div>
+        <div class="aBody">
+          <div class="chrow"><span class="ctl pill">고정</span><div class="rows" style="gap:3px"><div class="bar" style="width:160px"></div><div class="bar s" style="width:110px"></div></div><span class="flexsp"></span><span class="ctl btn sm">수정</span><span class="ctl btn sm">내리기</span></div>
+          <div class="chrow"><div class="rows" style="gap:3px"><div class="bar" style="width:200px"></div><div class="bar s" style="width:110px"></div></div><span class="flexsp"></span><span class="ctl btn sm">수정</span><span class="ctl btn sm">내리기</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="capt">배경(회색) › 카드(흰색) › 인셋(연회색) — 면의 밝기만으로 계층이 읽힌다</div>
+
+  <div class="notes">
+    <div class="nt">주석</div>
+    <ul>
+      <li><span class="mk">1</span><span><b>카드 머리 = 고정 4요소</b> — 아이콘칩 · 제목/한 줄 설명 · 상태칩 · 액션 버튼. 모든 카드가 같은 자리라 훑어보기가 된다.</span></li>
+      <li><span class="mk">2</span><span><b>상태칩은 "지금 몇 개 채워졌나"</b> — <code>2/4</code> · <code>0/13</code> · <code>미설정</code>. 카드를 펼쳐보지 않아도 비어 있는 설정이 보인다.</span></li>
+      <li><span class="mk">3</span><span><b>인셋 = 카드 안의 묶음</b> — 사업자번호(상위)와 발행방법 이미지(하위)의 관계를 배경 밝기로 표현한다.</span></li>
+      <li><span class="mk">4</span><span><b>용도가 반대인 두 이미지군을 카드로 분리</b> — 위 카드는 "리뷰어에게 보이는 안내", 이 카드는 "AI만 보는 기준". 카드 경계가 곧 경고문 역할.</span></li>
+      <li><span class="mk">5</span><span><b>리뷰 판별 예시 9칸은 기본 접힘</b> — 접힌 줄에 요약(9칸 중 n장)만. 평소 건드리지 않는 설정이 화면 절반을 먹지 않게.</span></li>
+    </ul>
+  </div>
+
+  <table class="spec">
+    <tr><th style="width:170px">요소</th><th>치수·규칙</th></tr>
+    <tr><td><b>본문 폭</b></td><td><code>max-width:1120px</code> — 지금 <code>#sthead .mh</code> · <code>#adminSettingsMount</code> 값 그대로(카드가 화면 끝까지 늘어나지 않게)</td></tr>
+    <tr><td><b>카드</b></td><td>radius <code>14</code> · border <code>1px #e6eaf0</code> · 머리 padding <code>14/18</code> · 본문 padding <code>16/18</code> · 카드 간 간격 <code>14</code></td></tr>
+    <tr><td><b>인셋</b></td><td>배경 <code>#f1f4f8</code> · radius <code>11</code> · padding <code>13/14</code> · 카드 본문과 <code>14</code> 띄움</td></tr>
+    <tr><td><b>이미지 타일</b></td><td><code>grid repeat(4, minmax(0,1fr))</code> · gap <code>10</code> · 썸네일 높이 <code>92</code>(발행방법) / <code>70</code>(AI 예시) · 1000px 이하 2열</td></tr>
+    <tr><td><b>파일 입력</b></td><td>날것의 <code>&lt;input type=file&gt;</code>은 <code>display:none</code> + <code>label</code> 버튼(<code>바꾸기</code> / <code>＋ 등록</code>)으로 대체 — <b>id·onchange 핸들러는 그대로</b></td></tr>
+    <tr><td><b>상태칩</b></td><td>등록 = 초록 계열 / 없음 = 회색. 값은 <b>이미 받아 둔 응답에서 세기만</b> 한다(신규 API 0)</td></tr>
+  </table>
+</section>
+
+<!-- ═════════ 시안 B ═════════ -->
+<section id="secB">
+  <div class="sec-label">시안 B</div>
+  <h2>좌측 목차 + 한 번에 한 묶음 <span class="tag">스크롤 대신 이동</span></h2>
+  <p class="desc">
+    좌측에 <b>목차(5항목 · 등록 현황 배지)</b>, 우측에 <b>고른 묶음 하나</b>만. 한 화면에 한 주제라 설명을 넉넉히 두고
+    이미지 칸은 <b>가로 목록형</b>(썸네일 52 + 이름/부가설명 + 상태 + 버튼)으로 눕혀 13칸도 훑기 쉽게 한다.
+  </p>
+  <div class="wf">
+    <div class="wfbar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="ttl">시안 B · 좌측 목차</span><span class="sp"></span><span class="dim">목차 236px + 본문 1fr · gap 18</span></div>
+    <div class="wfstage">
+      <div class="wtop">
+        <span class="lg">통합 작업대</span>
+        <span class="wtab">작업대</span><span class="wtab">업체관리</span><span class="wtab">모집공고</span><span class="wtab">C/S</span><span class="wtab on">설정</span>
+        <span class="sp"></span><span class="wtab">admin</span>
+      </div>
+      <div class="rows" style="margin-bottom:12px"><div class="bar t" style="width:70px"></div><div class="bar s" style="width:380px"></div></div>
+
+      <div class="bWrap">
+        <nav class="bNav">
+          <div class="mkrow" style="padding:4px 9px 7px"><span class="mk">1</span><span class="lbl">설정 항목</span></div>
+          <div class="bItem"><div class="aIcoPh" style="width:18px;height:18px;border-radius:5px"></div><div class="bar" style="width:66px"></div><span class="flexsp"></span><span class="ctl pill">미설정</span></div>
+          <div class="bItem on"><div class="aIcoPh" style="width:18px;height:18px;border-radius:5px"></div><div class="bar" style="width:56px"></div><span class="flexsp"></span><span class="ctl pill">2/4</span></div>
+          <div class="bItem"><div class="aIcoPh" style="width:18px;height:18px;border-radius:5px"></div><div class="bar" style="width:76px"></div><span class="flexsp"></span><span class="ctl pill">0/13</span></div>
+          <div class="bItem"><div class="aIcoPh" style="width:18px;height:18px;border-radius:5px"></div><div class="bar" style="width:86px"></div><span class="flexsp"></span><span class="ctl pill">15열</span></div>
+          <div class="bItem"><div class="aIcoPh" style="width:18px;height:18px;border-radius:5px"></div><div class="bar" style="width:62px"></div><span class="flexsp"></span><span class="ctl pill">2</span></div>
+          <div style="border-top:1.5px dashed var(--wf-line2);margin-top:7px;padding:8px 9px 3px"><div class="bar s" style="width:88%"></div><div class="bar s" style="width:64%;margin-top:4px"></div></div>
+        </nav>
+
+        <div class="bPanel">
+          <div class="bHead">
+            <div class="mkrow" style="margin-bottom:7px"><span class="mk">2</span><div class="bar t" style="width:190px"></div></div>
+            <div class="rows"><div class="bar s" style="width:88%"></div><div class="bar s" style="width:62%"></div></div>
+          </div>
+          <div class="bSec">
+            <div class="lbl" style="margin-bottom:8px">회사 사업자번호</div>
+            <div style="display:flex;gap:7px;max-width:440px"><div class="ctl flexsp">사업자번호</div><div class="ctl btn">저장</div></div>
+          </div>
+          <div class="bSec">
+            <div class="mkrow" style="margin-bottom:8px"><span class="mk">3</span><span class="lbl">현금영수증 발행방법 이미지 · 4개 중 2개 등록</span></div>
+            <div class="bSlot"><div class="ph" style="width:46px;height:46px;flex:none"><span>썸</span></div><div class="rows" style="gap:4px"><div class="bar" style="width:70px"></div><div class="bar s" style="width:190px"></div></div><span class="flexsp"></span><span class="ctl pill">등록</span><span class="ctl btn sm">바꾸기</span><span class="ctl btn sm">제거</span></div>
+            <div class="bSlot"><div class="ph" style="width:46px;height:46px;flex:none"><span>썸</span></div><div class="rows" style="gap:4px"><div class="bar" style="width:82px"></div><div class="bar s" style="width:190px"></div></div><span class="flexsp"></span><span class="ctl pill">등록</span><span class="ctl btn sm">바꾸기</span><span class="ctl btn sm">제거</span></div>
+            <div class="bSlot"><div class="ph" style="width:46px;height:46px;flex:none"><span>없음</span></div><div class="rows" style="gap:4px"><div class="bar" style="width:92px"></div><div class="bar s" style="width:150px"></div></div><span class="flexsp"></span><span class="ctl pill">없음</span><span class="ctl btn sm">＋ 등록</span></div>
+            <div class="bSlot"><div class="ph" style="width:46px;height:46px;flex:none"><span>없음</span></div><div class="rows" style="gap:4px"><div class="bar" style="width:118px"></div><div class="bar s" style="width:150px"></div></div><span class="flexsp"></span><span class="ctl pill">없음</span><span class="ctl btn sm">＋ 등록</span></div>
+            <div class="box dash" style="margin-top:10px;padding:9px 11px;display:flex;gap:8px;align-items:flex-start">
+              <span class="mk">4</span><div class="rows" style="gap:4px;flex:1"><div class="bar s" style="width:92%"></div><div class="bar s" style="width:70%"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="lbl" style="margin-top:11px">다른 목차를 고르면 우측 본문만 교체 — 좌측 목차·상단 헤더는 그대로</div>
+    </div>
+  </div>
+  <div class="capt">한 화면 = 한 주제. 세로 스택이 사라져 밀도가 가장 낮다</div>
+
+  <div class="notes">
+    <div class="nt">주석</div>
+    <ul>
+      <li><span class="mk">1</span><span><b>목차 = 설정 5묶음 + 등록 현황 배지</b> — 화면을 열기 전에 무엇이 비어 있는지 보인다(A의 상태칩을 앞으로 당긴 것).</span></li>
+      <li><span class="mk">2</span><span><b>설명은 본문 머리에 한 번만</b> — 한 묶음만 있으므로 각 항목마다 안내문을 반복할 필요가 없다.</span></li>
+      <li><span class="mk">3</span><span><b>이미지 슬롯은 가로 목록형</b> — 썸네일 52px + 이름 + 부가설명(등록일·노출 여부) + 상태 + 버튼. 타일 격자보다 세로 스캔이 빠르다.</span></li>
+      <li><span class="mk">4</span><span><b>혼동 방지 안내</b> — "여기 이미지는 리뷰어에게 보이는 안내이고, AI 판별 예시는 목차의 다른 항목" 한 줄. 화면이 나뉘어 있어야 성립한다.</span></li>
+    </ul>
+  </div>
+
+  <table class="spec">
+    <tr><th style="width:170px">요소</th><th>치수·규칙</th></tr>
+    <tr><td><b>레이아웃</b></td><td><code>grid 236px / minmax(0,1fr)</code> · gap <code>18</code> · 전체 폭 상한 <code>1120px</code> · 1000px 이하 1열(목차가 위로)</td></tr>
+    <tr><td><b>목차</b></td><td><code>position:sticky; top:0</code> · 항목 높이 <code>36</code> · 선택 항목만 배경 강조 · 배지는 등록 현황 숫자</td></tr>
+    <tr><td><b>본문 패널</b></td><td>머리(제목+설명) + 하위 섹션들. 섹션 경계는 <code>border-top 1px</code> · padding <code>16/20</code></td></tr>
+    <tr><td><b>목록 슬롯</b></td><td>높이 <code>68</code> · 썸네일 <code>52×52</code> · 우측 액션 고정 · 슬롯 간 간격 <code>6</code></td></tr>
+    <tr><td><b>새로 필요한 것</b></td><td>목차 렌더 · 선택 섹션 상태 · 등록 현황 집계 — <b>A에는 없는 추가 구현</b></td></tr>
+  </table>
+</section>
+
+<!-- ═════════ 판단 ═════════ -->
+<section id="secCmp">
+  <div class="sec-label">판단</div>
+  <h2>구조로 본 차이</h2>
+  <table class="spec">
+    <tr><th style="width:150px">기준</th><th>A · 카드 스택</th><th>B · 좌측 목차</th></tr>
+    <tr><td><b>면 구조</b></td><td>3단(배경/카드/인셋) — 계층이 색으로 읽힘</td><td>2단(배경/패널) — 애초에 한 묶음만 보임</td></tr>
+    <tr><td><b>이동 방식</b></td><td>스크롤(지금과 동일)</td><td>목차 클릭 — 조작 흐름이 바뀜</td></tr>
+    <tr><td><b>빈 설정 발견</b></td><td>스크롤하며 카드 상태칩</td><td>목차 배지로 열기 전에</td></tr>
+    <tr><td><b>구현 범위</b></td><td>패널 HTML을 카드로 감싸고 CSS 추가 — <b>필드 ID·저장 함수 무변경</b></td><td>+ 목차·섹션 전환 상태·집계 신규</td></tr>
+    <tr><td><b>두 화면 영향</b></td><td>관리자 대시보드도 카드가 얹히는 정도</td><td>관리자 대시보드는 이미 설정 탭이 있어 <b>목차가 두 겹</b>이 될 수 있음</td></tr>
+  </table>
+  <div class="callout">
+    <div class="ct">추천 — A</div>
+    <p>지금 불편의 원인은 "항목이 많다"가 아니라 <b>"면이 나뉘지 않았다"</b>이고, A는 그 원인만 고치면서
+      항목 위치를 그대로 둔다. A로 정돈한 뒤에도 길게 느껴지면 <b>카드 접기</b>를 얹는 편이 목차(B)보다 싸고 되돌리기 쉽다.</p>
+  </div>
+  <div class="callout">
+    <div class="ct">둘 중 무엇을 고르든 지킬 것</div>
+    <ul>
+      <li><b>필드 ID·onclick 이름 불변</b> — <code>myNicknameInput</code> · <code>crGuideImg&lt;Cap&gt;</code> · <code>saveMyNickname()</code> 등은 로더·회귀가드가 이름으로 묶여 있다.</li>
+      <li><b>채널 슬롯은 표에서 생성</b> · <b>AI 예시 슬롯은 서버 응답 그대로</b> — 프론트 사본을 만들면 채널을 늘렸을 때 한 칸이 조용히 빠진다.</li>
+      <li><b>색은 리터럴 고정</b> + <code>as-standalone</code> 토큰 주입 유지 — 통합 작업대에는 <code>--t1</code>·<code>--p</code>가 없다.</li>
+      <li><b>폭 상한 1120px</b> 유지(<code>#sthead .mh</code> · <code>#adminSettingsMount</code>).</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  설정 화면 정돈 와이어프레임 · 색 시안 = <b>design-admin-settings-ui.html</b> ·
+  대상 모듈 = <b>frontend/js/admin-settings.js</b>(관리자 대시보드 · 통합 작업대 공용) ·
+  단독 보기 <code>?v=A</code> / <code>?v=B</code> / <code>?v=BEFORE</code>
+</footer>
+
+</div>
+<script>
+  // 이미지 추출·비교용: ?v=A|B|BEFORE 면 그 골격만 표시
+  (function () {
+    var v = new URLSearchParams(location.search).get('v');
+    if (!v) return;
+    v = v.toUpperCase();
+    var keep = { A: 'secA', B: 'secB', BEFORE: 'secBefore' }[v];
+    if (!keep) return;
+    ['dochead', 'secBefore', 'secA', 'secB', 'secCmp'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && id !== keep) el.style.display = 'none';
+    });
+    var f = document.querySelector('footer'); if (f) f.style.display = 'none';
+    var k = document.getElementById(keep);
+    if (k) { k.style.marginTop = '0'; k.style.paddingTop = '18px'; }
+  })();
+</script>
+</body>
+</html>
