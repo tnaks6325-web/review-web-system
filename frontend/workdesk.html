@@ -3142,8 +3142,20 @@ async function wtpDelete(){
     r=await send(true);
   }
   if(r&&r.ok){ _toast(`작업표를 내렸습니다 (${r.deleted}줄)`); const msg=document.getElementById('wtpCreateMsg');
-    if(msg) msg.innerHTML=`작업대 표에서 <b>${r.deleted}줄</b>을 내렸습니다. 구글시트 탭은 그대로이니 필요하면 직접 삭제하세요.`; }
+    if(msg) msg.innerHTML=`작업대 표에서 <b>${r.deleted}줄</b>을 내렸습니다.`
+      +` <button class="btn xs" onclick="wtpDeleteTab()">구글시트 탭도 삭제</button>`; }
   else _toast('⚠ 삭제 실패'+(r&&r.error?': '+r.error:''));
+}
+/* 구글시트 탭 삭제 — ★ 아무도 안 쓴 탭만(주문·참여자 0건일 때 서버가 허용).
+   되돌리기가 어려운 동작이라 한 번 더 묻고, 서버가 gid 를 이름으로 재조회해 지운다. */
+async function wtpDeleteTab(){
+  const m=_WTP&&_WTP.made; if(!m){ _toast('삭제할 작업표 정보가 없습니다'); return; }
+  if(!confirm(`구글시트에서 "${m.tabName}" 탭을 삭제합니다.\n\n· 되돌릴 수 없습니다.\n· 주문·참여자가 한 명이라도 있으면 서버가 거부합니다.\n\n계속할까요?`)) return;
+  const r=await api('/api/trackb/worktable/delete-tab',{method:'POST',
+    body:JSON.stringify({sheetId:m.sheetId,tabName:m.tabName})});
+  const msg=document.getElementById('wtpCreateMsg');
+  if(r&&r.ok){ _toast('시트 탭을 삭제했습니다'); if(msg) msg.innerHTML=`✅ <b>${esc(m.tabName)}</b> 탭을 시트에서 삭제했습니다.`; }
+  else { _toast('⚠ '+((r&&r.error)||'삭제 실패')); if(msg) msg.innerHTML=`<b style="color:#B91C1C">${esc((r&&r.error)||'삭제 실패')}</b>`; }
 }
 
 function _wtpRender(){

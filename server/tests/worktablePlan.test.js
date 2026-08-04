@@ -355,11 +355,22 @@ ok('★★ 구매일자는 시트 형식 그대로 쓰인다(063 시트 일정 �
   })());
 ok('열 문자 변환(A·Z·AA·AZ)',
   C.colLetter(0) === 'A' && C.colLetter(25) === 'Z' && C.colLetter(26) === 'AA' && C.colLetter(51) === 'AZ');
-ok('★★ 라이브 경로 무접촉 — 주문원장·투영·큐·행배정을 건드리지 않는다',
+ok('★★ 생성 경로는 라이브 무접촉 — 주문원장·투영·큐·행배정을 건드리지 않는다',
   (() => {
-    // 주석을 걷어낸 실행 코드에서만 판정(설명에는 등장할 수 있다)
-    const code = createSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    // ★ 범위는 createWorktable 함수 본문 — 삭제 경로는 "사용 중인가"를 **읽어야** 하므로 별도 판정.
+    const i = createSrc.indexOf('async function createWorktable');
+    const j = createSrc.indexOf('async function deleteWorktableTab');
+    const code = createSrc.slice(i, j > i ? j : createSrc.length)
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
     return !/order_submissions|campaign_participants|sheet_row_claims|enqueue\(|reconcileStuckOrders|review_index/.test(code);
+  })());
+ok('★ 삭제 경로가 원장을 보는 것은 **읽기뿐**(SELECT) — 지우거나 고치지 않는다',
+  (() => {
+    const i = createSrc.indexOf('async function deleteWorktableTab');
+    const body = createSrc.slice(i);
+    return /SELECT COUNT\(\*\) FROM campaign_participants/.test(body)
+      && /SELECT COUNT\(\*\) FROM order_submissions/.test(body)
+      && !/(INSERT INTO|UPDATE|DELETE FROM)\s+(order_submissions|review_index)/i.test(body);
   })());
 ok('★ 쓰기 표면은 시트 + work_orders.work_sheet_url 뿐(탭 등록은 여전히 접수가 관문)',
   (() => {
@@ -367,8 +378,15 @@ ok('★ 쓰기 표면은 시트 + work_orders.work_sheet_url 뿐(탭 등록은 �
     const writes = createSrc.match(/\b(?:INSERT INTO|UPDATE)\s+(?!SET\b)\w+/gi) || [];
     return writes.length === 1 && /work_orders/i.test(writes[0]) && !/DELETE FROM/i.test(createSrc);
   })());
-ok('★ 시트 탭을 시스템이 지우지 않는다(되돌리기 어려운 파괴는 사람 손에)',
-  !/deleteSheet|deleteRows|drive\.files\.delete/.test(createSrc));
+ok('★ 생성 경로는 아무것도 지우지 않는다(파일 삭제·행 삭제 없음)',
+  (() => {
+    const i = createSrc.indexOf('async function createWorktable');
+    const j = createSrc.indexOf('async function deleteWorktableTab');
+    const body = createSrc.slice(i, j > i ? j : createSrc.length);
+    return !/deleteSheet|deleteRows|drive\.files\.delete/.test(body);
+  })());
+ok('★★ 파일(스프레드시트) 자체는 어디서도 지우지 않는다 — 탭 삭제만 연다',
+  !/drive\.files\.delete|deleteSpreadsheet/.test(createSrc));
 ok('헤더 줄 위치는 가정하지 않고 탐지한다(템플릿이 바뀌어도 따라감)',
   /require\('\.\.\/utils\/sheetHeader'\)/.test(createSrc)
   && /detectSheetHeader\(values \|\| \[\]/.test(createSrc));
@@ -478,6 +496,33 @@ ok('프론트: 되돌리기 버튼 + "시트는 안 지워진다"를 화면이 �
   /onclick="wtpDelete\(\)"/.test(wdesk)
   && /구글시트 탭은 지워지지 않습니다/.test(wdesk)
   && /내부에서 진행한 테스트건이 맞습니까/.test(wdesk));
+
+/* ══════════════════════════════════════════════════════════
+   K. 시트 탭 삭제 — 아무도 안 쓴 탭만
+   ══════════════════════════════════════════════════════════ */
+console.log('\nK. 시트 탭 삭제');
+ok('POST /worktable/delete-tab 권한(내부인 + 편집 명단)',
+  (() => {
+    const l = layers.find(x => x.route.path === '/worktable/delete-tab' && x.route.methods.post);
+    if (!l) return false;
+    const nm = l.route.stack.map(s => s.handle.name);
+    return nm[0] === 'authMiddleware' && nm.includes('internalMiddleware') && nm.includes('editorOnlyMiddleware');
+  })());
+ok('★★ 주문·참여자가 1건이라도 있으면 거부(되돌릴 수 없는 파괴 차단)',
+  /이 탭에는 이미 주문·참여자 \$\{n\}건이 있어/.test(createSrc)
+  && /FROM campaign_participants[\s\S]{0,200}FROM order_submissions/.test(createSrc));
+ok('★ 확인 실패는 삭제하지 않는다(fail-closed — 모르면 파괴하지 않는다)',
+  /사용 여부 확인 실패 — 삭제 중단/.test(createSrc)
+  && /확인하지 못해 중단했습니다/.test(createSrc));
+ok('★★ gid 는 서버가 이름으로 재조회 — 클라이언트 gid 를 믿고 지우면 엉뚱한 탭이 사라진다',
+  /getSpreadsheetMeta\(sheetId\)[\s\S]{0,300}find\(x => String\(x\.properties\.title\) === String\(tabName\)\)/.test(createSrc)
+  && !/deleteSheet: \{ sheetId: (b|req)\./.test(createSrc));
+ok('마지막 남은 탭은 미리 막는다(구글이 거부하는 동작)',
+  /sheetCount <= 1/.test(createSrc));
+ok('탭 삭제 후 표의 줄도 함께 내린다',
+  /deleteWorktableRows\(\{ sheetId, tabName, confirmed: true/.test(createSrc));
+ok('프론트: 되돌릴 수 없음을 한 번 더 묻는다',
+  /onclick="wtpDeleteTab\(\)"/.test(wdesk) && /되돌릴 수 없습니다/.test(wdesk));
 
 console.log(`\n✅ worktablePlan: ${n}개 통과`);
 process.exit(0);   // trackB.routes 가 DB 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

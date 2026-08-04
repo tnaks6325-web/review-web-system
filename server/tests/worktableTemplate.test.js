@@ -195,7 +195,7 @@ ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리�
     const wt = _layers.filter(l => /^\/worktable/.test(l.route.path));
     const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
     const paths = writes.map(l => l.route.path).sort();
-    return paths.join(',') === '/worktable/create,/worktable/delete,/worktable/template'
+    return paths.join(',') === '/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/template'
       && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
