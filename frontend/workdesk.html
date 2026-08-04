@@ -5105,7 +5105,7 @@ function renderWorkOrderSection(wd){
   }
   const fields=[['상품',d.productOption],['모집 인원',d.recruitCount],['일건수',d.dailyCountText||d.dailyCount],
     ['구매시간',d.purchaseTime],['배송',d.deliveryType],['페이',d.payAmount?Number(d.payAmount).toLocaleString()+'원':''],
-    ['리뷰유형',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],
+    ['리뷰타입',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],
     ['리뷰가이드',d.reviewGuide],['특이사항',d.specialNotes],['상품 URL',d.productUrl],
     ['시작일',d.startDate?String(d.startDate).slice(0,10):''],
     ...(STATE.role!=='advertiser'?[['담당',d.managerName]]:[])];   // 담당자 실명은 내부만(광고주 미노출)

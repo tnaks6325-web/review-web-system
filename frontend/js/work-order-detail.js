@@ -312,7 +312,7 @@ function _woDetailHtml(o) {
     _woKv("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || ""),
     _woKv("배송유형", o.delivery_type),
     _woKv("택배대행", o.courier_proxy ? "예" : ""),
-    _woKv("리뷰유형", o.review_type),
+    _woKv("리뷰타입", o.review_type),
     _woKv("물건비", o.goods_cost_type),
     _woSection("상품확인용URL", o.product_url, urlR),
     _woSection("작업시트탭URL", o.work_sheet_url, urlR),
@@ -616,6 +616,10 @@ function _woCampaignPrefill(o) {
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
+    // ★ 087: 리뷰타입 — 인트라넷 발주 폼의 값이 그대로 온다(`포토` · `구매확정` ·
+    //   `혼합(포토 10건, 텍스트 20건, …)`). 표준 key 변환은 발행 폼이 하고 저장 시 서버가 다시 정규화한다.
+    //   ★ 여기서 미리 변환하지 않는 이유 = 이 모듈은 상세 표시도 겸해 **원문**을 그대로 보여줘야 한다.
+    review_type:   o.review_type || "",
     product_url:   o.product_url || "",
     // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
     product_name:  _pi.name || "",

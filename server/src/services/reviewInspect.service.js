@@ -16,6 +16,8 @@
  */
 const crypto = require('crypto');
 const { logger } = require('../utils/logger');
+// ★ 087: 리뷰타입 판정은 utils/reviewType 단일 출처(여기서 규칙을 다시 만들면 화면과 갈라진다)
+const { resolveReviewType } = require('../utils/reviewType');
 
 /* ── 스위치·임계값 (전부 env 로 끌 수 있다) ───────────────────────────── */
 const ENABLED = process.env.REVIEW_INSPECT !== '0';            // 2차 검수 전체
@@ -79,12 +81,21 @@ function expectedChannelKey(channel) {
  * @returns {{verdict:'pass'|'warn'|'block'|'skip', code:string, message:string,
  *            channel:string, confidence:number, blockable:boolean}}
  */
-function precheckPolicy({ classified, expectedChannel, slotKey = 'review' } = {}) {
+function precheckPolicy({ classified, expectedChannel, slotKey = 'review', reviewType = null } = {}) {
   const skip = (code) => ({ verdict: 'skip', code, message: '', channel: '', confidence: 0, blockable: false });
 
   if (!PRECHECK_ENABLED) return skip('disabled');
   // 1차는 리뷰 슬롯만 — 영수증 슬롯은 기존 제출 시점 검수(captureVerify)가 그대로 담당한다.
   if (String(slotKey || 'review') !== 'review') return skip('not_review_slot');
+
+  /* ★★ 087 안전핀 (완화 금지) — 구매확정 작업은 1차 필터를 돌리지 않는다.
+     구매확정건의 리뷰어는 **리뷰 화면이 아니라 구매확정 완료 화면**을 올린다. AI 는 아직
+     그 화면을 아는 종류가 없어 `kind='other'` 로 판정하고, 아래 잠금 규칙이 확신 0.9 이상에서
+     첨부를 막는다 → **정상 제출이 전면 차단**된다(이 기능의 최악 사고인 '참여 소각').
+     구매확정 화면 자체를 판별하는 층(kind: purchase_confirm)이 붙기 전까지는 판정하지 않는 것이
+     맞다 — 모르면 통과가 이 파일의 1번 불변식이다.
+     ★ reviewType 이 null(미지정·판정 실패)이면 여기 걸리지 않는다 = 오늘 동작 그대로. */
+  if (reviewType === 'confirm') return skip('purchase_confirm_tab');
   // ★ 불변식 ① — 판정 재료가 없으면 통과. AI 장애가 제출을 막는 사유가 되면 안 된다.
   if (!classified || typeof classified !== 'object') return skip('no_verdict');
 
@@ -435,18 +446,20 @@ async function _workOrderForTab({ sheetId, tabName } = {}) {
   }
 }
 
-/** 탭 설정에서 기대 채널·기대 상품명을 읽는다. 실패는 빈 값(대조 생략). */
+/** 탭 설정에서 기대 채널·기대 상품명·리뷰타입을 읽는다. 실패는 빈 값(대조 생략). */
 async function loadTabExpectations({ sheetId, tabName } = {}) {
-  const out = { expectedChannel: null, productNames: [] };
+  const out = { expectedChannel: null, productNames: [], reviewType: null };
   if (!sheetId || !tabName) return out;
   try {
     // ★ LATERAL 최신 1행 — 서브쿼리를 둘로 나누면 채널과 커스텀값이 서로 **다른 공고**에서
     //   올 수 있다(같은 탭에 공고가 여러 개면 실제로 갈린다). 한 행에서 둘 다 가져온다.
+    // ★ 087: 리뷰타입도 **같은 행에서** 가져온다 — 따로 조회하면 채널과 다른 공고의 값이 섞인다.
     const { rows } = await _db().query(
-      `SELECT c.inspect_product_names, rc.channel, rc.channel_custom
+      `SELECT c.inspect_product_names, c.review_type AS tab_review_type,
+              rc.channel, rc.channel_custom, rc.review_type AS camp_review_type
          FROM tab_configs c
          LEFT JOIN LATERAL (
-              SELECT channel, channel_custom
+              SELECT channel, channel_custom, review_type
                 FROM recruit_campaigns
                WHERE linked_sheet_id = c.sheet_id AND linked_tab_name = c.tab_name
                ORDER BY created_at DESC
@@ -460,6 +473,11 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     if (!r) return out;
     const ch = r.channel === '직접입력' ? (r.channel_custom || '') : (r.channel || '');
     out.expectedChannel = expectedChannelKey(ch);
+    // ★ 087: 행 단위 값(시트 작업옵션 칸)은 여기서 알 수 없다 → 공고 > 탭 순서만 본다.
+    //   행 값까지 더한 최종 판정은 호출부가 resolveReviewType 으로 합친다(단일 출처).
+    out.reviewType = resolveReviewType({
+      campaignType: r.camp_review_type, tabReviewType: r.tab_review_type,
+    });
     out.productNames = String(r.inspect_product_names || '')
       .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
     if (out.productNames.length) { out.productSource = 'manual'; return out; }
