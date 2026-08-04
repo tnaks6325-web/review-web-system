@@ -135,6 +135,7 @@ async function loadMyNickname() {
     if (!d || d.ok === false) throw new Error((d && d.error) || '조회 실패');
     input.value = d.nickname || '';
     if (who) who.textContent = '내 계정: ' + (d.loginName || '-');
+    _setNavBadge('nickname', d.nickname ? d.nickname : '미설정', d.nickname ? '' : 'warn');
     if (hint) {
       hint.innerHTML = d.nickname
         ? `리뷰어에게는 <b style="color:#1B64DA">${escHtml(d.nickname)}</b> 이름으로 보입니다.`
@@ -190,19 +191,42 @@ function _setCashReceiptGuideDisplay(channel, url) {
   if (!img || !none) return;
   if (url) { img.src = url; img.style.display = ''; none.style.display = 'none'; }
   else { img.src = ''; img.style.display = 'none'; none.style.display = ''; }
+  /* 목록형 슬롯의 상태칩·버튼도 함께 — ★ 없으면 조용히 건너뛴다(구조가 달라도 안 죽는다). */
+  const st = document.getElementById('crGuideStat' + cap);
+  if (st) { st.textContent = url ? '등록됨' : '없음'; st.className = 'as-stat ' + (url ? 'on' : 'off'); }
+  const btn = document.getElementById('crGuideBtn' + cap);
+  if (btn) btn.textContent = url ? '바꾸기' : '＋ 등록';
+  const del = document.getElementById('crGuideDel' + cap);
+  if (del) del.style.display = url ? '' : 'none';
+  const sub = document.getElementById('crGuideSub' + cap);
+  if (sub) {
+    sub.innerHTML = url
+      ? '현영 공고의 작업내용에서 <b>리뷰어에게</b> 이 이미지가 보입니다'
+      : '등록된 이미지가 없습니다 — 문구 안내만 나갑니다';
+  }
 }
 
 function _businessHtml() {
+  /* ★ 슬롯은 목록형 한 줄(시안 B) — 썸네일 52 + 이름/부가설명 + 상태칩 + 버튼.
+     타일 격자보다 세로 스캔이 빨라 채널이 늘어도 화면이 번잡해지지 않는다.
+     ★ id(crGuideImg/None/File<Cap>)·onchange 는 한 글자도 바꾸지 않는다 —
+       로더(_setCashReceiptGuideDisplay)와 회귀가드가 이름으로 묶여 있다.
+     ★ 날것의 <input type=file> 은 숨기고 <label for> 버튼으로 누른다(값·이벤트 경로는 동일). */
   const slots = CR_GUIDE_CHANNELS.map(c => `
-            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">${c.emoji} ${c.label}</div>
-              <img id="crGuideImg${c.cap}" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
-              <div id="crGuideNone${c.cap}" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="file" id="crGuideFile${c.cap}" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('${c.key}', this)">
-                <button onclick="clearCashReceiptGuide('${c.key}')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
-              </div>
-            </div>`).join('');
+              <div class="as-slot">
+                <div class="as-slotth">
+                  <img id="crGuideImg${c.cap}" alt="" style="display:none">
+                  <span id="crGuideNone${c.cap}" class="as-slotnone">없음</span>
+                </div>
+                <div class="as-slotbody">
+                  <div class="as-slotnm">${c.emoji} ${c.label}</div>
+                  <div class="as-slotsub" id="crGuideSub${c.cap}">등록된 이미지가 없습니다 — 문구 안내만 나갑니다</div>
+                </div>
+                <span class="as-stat off" id="crGuideStat${c.cap}">없음</span>
+                <input type="file" id="crGuideFile${c.cap}" accept="image/*" class="as-file" onchange="uploadCashReceiptGuide('${c.key}', this)">
+                <label class="as-btn" id="crGuideBtn${c.cap}" for="crGuideFile${c.cap}">＋ 등록</label>
+                <button class="as-btn del" id="crGuideDel${c.cap}" style="display:none" onclick="clearCashReceiptGuide('${c.key}')">제거</button>
+              </div>`).join('');
   return `
         <!-- 회사 공통 사업자번호 설정 -->
         <div class="admin-section-header">
@@ -223,14 +247,13 @@ function _businessHtml() {
         </div>
 
         <!-- 현금영수증 발행방법 이미지 (채널별 · 회사 공통 1회) -->
-        <div style="margin-top:18px">
-          <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin-bottom:4px">
-            🧾 현금영수증 발행방법 이미지 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span>
-          </div>
+        <div class="as-sub">
+          <div class="as-subt">🧾 현금영수증 발행방법 이미지 <span>— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span></div>
           <!-- ★ 채널 목록은 서버 utils/cashReceiptChannels.js 가 단일 출처 —
                슬롯을 늘릴 땐 그쪽 표에 먼저 추가한다(회귀가드가 일치를 고정). -->
-          <div style="display:flex;gap:14px;flex-wrap:wrap">${slots}
+          <div class="as-slots">${slots}
           </div>
+          <div class="as-foot">등록하지 않은 채널은 <b>문구 안내만</b> 나갑니다(이미지 없이도 공고는 정상 노출).</div>
         </div>`;
 }
 
@@ -243,7 +266,13 @@ async function loadCompanyBusinessNo() {
     if (data && data.ok) {
       input.value = data.companyBusinessNo || '';
       const g = data.cashReceiptGuides || {};
-      for (const c of CR_GUIDE_CHANNELS) _setCashReceiptGuideDisplay(c.key, g[c.key] || '');
+      let filled = 0;
+      for (const c of CR_GUIDE_CHANNELS) {
+        const url = g[c.key] || '';
+        if (url) filled++;
+        _setCashReceiptGuideDisplay(c.key, url);
+      }
+      _setNavBadge('business', filled + ' / ' + CR_GUIDE_CHANNELS.length, filled ? '' : 'warn');
     }
   } catch (e) {
     console.warn('[companyBusinessNo] load 실패:', e.message);
@@ -347,30 +376,44 @@ function _aisamplesHtml() {
           <b style="color:#B91C1C">리뷰어 화면에는 나가지 않습니다</b>(위 발행방법 이미지와 다릅니다).
           등록하지 않아도 검수는 동작하며, 채널 판별 정확도만 낮아집니다.
         </p>
-        <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin:14px 0 6px">
-          🧾 현금영수증 판별 예시 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 현영 탭의 <b>영수증 캡처 슬롯</b> 검수에 쓰입니다(채널당 1장)</span>
+        <div class="as-sub">
+          <div class="as-subt">🧾 현금영수증 판별 예시 <span>— 현영 탭의 <b>영수증 캡처 슬롯</b> 검수에 쓰입니다(채널당 1장)</span></div>
+          <div id="asSmpReceipt" class="as-slots"><div class="as-smpload">불러오는 중…</div></div>
         </div>
-        <div id="asSmpReceipt" class="as-smpgrid"><div class="as-smpload">불러오는 중…</div></div>
-        <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin:18px 0 6px">
-          🖼 리뷰 판별 예시 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 리뷰 화면·채널 판별(첨부 즉시 필터 · 제출 후 검수)에 쓰입니다</span>
-        </div>
-        <div id="asSmpReview" class="as-smpgrid"><div class="as-smpload">불러오는 중…</div></div>`;
+        <div class="as-sub">
+          <div class="as-subt">🖼 리뷰 판별 예시 <span>— 리뷰 화면·채널 판별(첨부 즉시 필터 · 제출 후 검수)에 쓰입니다</span></div>
+          <div id="asSmpReview" class="as-slots"><div class="as-smpload">불러오는 중…</div></div>
+        </div>`;
 }
 
-/** 슬롯 카드 1장. kind = 'receipt' | 'review' (저장 창구가 갈리는 유일한 값) */
+/** 슬롯 1줄. kind = 'receipt' | 'review' (저장 창구가 갈리는 유일한 값)
+    ★ 발행방법 슬롯과 **같은 목록형**(as-slot) — 두 곳이 다른 모양이면 "같은 일인데 화면이 다르다"가 된다.
+    ★ id(asSmpFile_*)·onchange 는 불변. 파일 입력은 숨기고 label 로 누른다. */
 function _smpCardHtml(kind, s) {
   var id = kind + '_' + s.key;
   var url = s.imageUrl || '';
-  return '<div class="as-smpcard">' +
-    '<div class="as-smpname">' + escHtml((s.emoji || '') + ' ' + (s.label || s.key)) + '</div>' +
-    (url
-      ? '<img src="' + escHtml(url) + '" alt="" class="as-smpimg">'
-      : '<div class="as-smpnone">등록된 예시가 없습니다</div>') +
-    '<div class="as-smpact">' +
-      '<input type="file" accept="image/*" id="asSmpFile_' + escHtml(id) + '" ' +
-        'onchange="uploadAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\', this)">' +
-      (url ? '<button class="as-smpdel" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\')">제거</button>' : '') +
-    '</div></div>';
+  return '<div class="as-slot">' +
+    '<div class="as-slotth">' +
+      (url ? '<img src="' + escHtml(url) + '" alt="">' : '<span class="as-slotnone">없음</span>') +
+    '</div>' +
+    /* ★ 부가설명 줄은 두지 않는다 — 슬롯이 13개라 같은 문장이 13번 반복되면
+         그 자체가 소음이 된다(상태칩이 이미 등록/없음을 말한다). */
+    '<div class="as-slotbody">' +
+      '<div class="as-slotnm">' + escHtml((s.emoji || '') + ' ' + (s.label || s.key)) + '</div>' +
+    '</div>' +
+    '<span class="as-stat ' + (url ? 'on' : 'off') + '">' + (url ? '등록됨' : '없음') + '</span>' +
+    '<input type="file" accept="image/*" class="as-file" id="asSmpFile_' + escHtml(id) + '" ' +
+      'onchange="uploadAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\', this)">' +
+    '<label class="as-btn" for="asSmpFile_' + escHtml(id) + '">' + (url ? '바꾸기' : '＋ 등록') + '</label>' +
+    (url ? '<button class="as-btn del" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\')">제거</button>' : '') +
+    '</div>';
+}
+
+/** 목차 배지 — 등록된 예시 / 전체 슬롯. 슬롯 목록은 서버 응답이 유일 출처라 여기서도 세기만 한다. */
+function _smpBadge(j) {
+  var all = (j.receiptSamples || []).concat(j.samples || []);
+  var filled = all.filter(function (s) { return !!s.imageUrl; }).length;
+  _setNavBadge('aisamples', filled + ' / ' + all.length, filled ? '' : 'warn');
 }
 
 function _smpRender(elId, kind, list) {
@@ -388,6 +431,7 @@ async function loadAiSamples() {
     var j = await _smpFetch(null);
     _smpRender('asSmpReceipt', 'receipt', j.receiptSamples || []);
     _smpRender('asSmpReview', 'review', j.samples || []);
+    _smpBadge(j);
   } catch (e) {
     var msg = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
     rc.innerHTML = msg;
@@ -446,7 +490,7 @@ let _rvNotices = [];
 function _noticeHtml() {
   return `
         <!-- 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
-        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+        <div class="as-noticebox" style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
             <div style="display:flex;gap:6px">
@@ -478,6 +522,7 @@ async function loadReviewerNoticesAdmin() {
     if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
     _rvNotices = data.notices || [];
     _renderReviewerNoticesAdmin(_rvNotices);
+    _setNavBadge('notice', String(_rvNotices.length) + '건', _rvNotices.length ? '' : 'warn');
   } catch (err) {
     wrap.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.8rem;padding:10px">오류: ${escHtml(err.message)}</div>`;
   }
@@ -705,6 +750,8 @@ function _worktableHtml() {
 
 /* ── 코어 열 목록 렌더 ── */
 function _wtRenderCols() {
+  /* 목차 배지는 여기서 갱신한다 — 로더에만 두면 열을 더하거나 뺀 뒤 숫자가 옛값에 머문다. */
+  if (_wtTpl && _wtTpl.core) _setNavBadge('worktable', _wtTpl.core.length + '열', _wtTpl.core.length ? '' : 'warn');
   var box = document.getElementById('wtColList');
   if (!box) return;
   var cols = (_wtTpl && _wtTpl.columns) || [];
@@ -1078,7 +1125,38 @@ function _wtRenderReport(d) {
        admin.html 은 테마가 있어 클래스가 붙지 않으므로 **렌더 결과가 그대로**다. */
   var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, notice: _noticeHtml };
   var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, notice: loadReviewerNoticesAdmin };
-  var SEP = '<hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">';
+  /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
+     ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
+  var PANEL_NAV = {
+    nickname:  { ic: '👤', nm: '내 닉네임' },
+    business:  { ic: '🏢', nm: '제공정보' },
+    aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
+    worktable: { ic: '📋', nm: '작업표 표준 열' },
+    notice:    { ic: '📣', nm: '리뷰어 공지' },
+  };
+  var _navKeys = [];        // 이번 마운트에 그린 목차 키(순서 그대로)
+
+  /** 목차 배지 — 로더가 "지금 몇 개 채워졌나"를 넣는다. 없으면 조용히 무시(부분 마운트·조회 실패). */
+  function _setNavBadge(key, text, tone) {
+    var b = document.getElementById('asBadge_' + key);
+    if (!b) return;
+    b.textContent = text;
+    b.className = 'as-bbadge' + (tone === 'warn' ? ' warn' : '');
+  }
+
+  /** 목차 전환 — 화면에는 고른 묶음 하나만.
+      ★ 패널은 전부 DOM 에 두고 보이기만 토글한다: 로더들이 id 로 값을 쓰므로
+        안 그린 패널이 있으면 그 값이 조용히 비어 버린다(admin.html 은 탭 전환 때 한 번만 부른다). */
+  function asSelectPanel(key) {
+    if (!PANELS[key]) return;
+    _navKeys.forEach(function (k) {
+      var sec = document.getElementById('asSec_' + k);
+      var nav = document.getElementById('asNav_' + k);
+      if (sec) sec.className = 'as-bsec' + (k === key ? ' on' : '');
+      if (nav) nav.className = 'as-bitem' + (k === key ? ' on' : '');
+    });
+    try { sessionStorage.setItem('as_panel', key); } catch (_) {}
+  }
 
   function _injectStyles() {
     if (document.getElementById('adminSettingsStyles')) return;
@@ -1087,16 +1165,70 @@ function _wtRenderReport(d) {
     st.textContent =
       '.as-standalone{--t1:#0F172A;--t2:#475569;--t3:#94A3B8;--t4:#9CA3AF;--p:#3182f6;--border:#E5E7EB;color:var(--t1)}' +
       '.as-standalone .admin-section-header{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}' +
+      /* ══ 시안 B — 좌측 목차 + 한 번에 한 묶음 (frontend/docs/design-admin-settings-wireframe.html ?v=B) ══
+         ★ 색은 전부 리터럴 — 호스트 테마(--t1·--p)는 통합 작업대에 없어 무효값이 된다.
+         ★ 관리자 대시보드도 같은 모듈이라 함께 바뀐다(사본을 만들지 않는다는 규율의 대가이자 목적). */
+      '.as-b{display:grid;grid-template-columns:236px minmax(0,1fr);gap:18px;align-items:start}' +
+      '.as-bnav{position:sticky;top:0;background:#fff;border:1px solid #E5E7EB;border-radius:13px;padding:8px;' +
+        'box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.05)}' +
+      '.as-bnavt{font-size:.66rem;font-weight:800;letter-spacing:.08em;color:#9CA3AF;padding:7px 10px 5px}' +
+      '.as-bitem{display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:none;background:none;' +
+        'border-radius:9px;font:inherit;font-size:.82rem;font-weight:700;color:#667085;cursor:pointer;text-align:left}' +
+      '.as-bitem:hover{background:#F5F7FA}' +
+      '.as-bitem.on{background:#EFF6FF;color:#1D4ED8}' +
+      '.as-bitem .ic{width:20px;text-align:center;font-size:.95rem;flex:none}' +
+      '.as-bitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.as-bbadge{flex:none;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+        'font-size:.66rem;font-weight:750;color:#6B7280;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:999px;padding:1px 7px}' +
+      '.as-bbadge.warn{background:#FFFBEB;border-color:#FDE68A;color:#B45309}' +
+      '.as-bitem.on .as-bbadge{background:#fff;border-color:#BFDBFE;color:#1D4ED8}' +
+      '.as-bnavfoot{font-size:.7rem;color:#9CA3AF;line-height:1.55;padding:9px 10px 3px;border-top:1px solid #F1F3F6;margin-top:7px}' +
+      '.as-bnavfoot b{color:#6B7280}' +
+      '.as-bmain{min-width:0;background:#fff;border:1px solid #E5E7EB;border-radius:13px;padding:16px 20px;' +
+        'box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.05)}' +
+      '.as-bsec{display:none}.as-bsec.on{display:block}' +
+      /* ★ 패널 머리 정규화 — admin.html 의 .admin-section-header 는 **sticky + 좌우 -16px 풀블리드 +
+         페이지색 반투명 배경**이다(탭 전체를 가로지르는 머리띠로 설계됐다). 흰 패널 안에 그대로 두면
+         회색 띠가 패널을 뚫고 나가고 스크롤 시 화면 위에 붙는다 → B 안에서는 평범한 제목 줄로 돌린다.
+         두 호스트가 같은 모양이 되도록 as-standalone 규칙보다 뒤에 둔다(같은 특이성 = 나중이 이김). */
+      '.as-b .admin-section-header{position:static;margin:0 0 10px;padding:0 0 10px;background:transparent;' +
+        'backdrop-filter:none;-webkit-backdrop-filter:none;border-bottom:1px solid #EEF0F4}' +
+      /* 공지 패널은 자기 테두리를 갖고 있다(대시보드 카드로도 쓰이므로) — B 안에서는 패널이 곧 카드라 벗긴다 */
+      '.as-b .as-noticebox{border:none!important;background:transparent!important;padding:0!important;border-radius:0!important}' +
+      /* 패널 안의 하위 묶음 = 구분선 + 소제목(인셋 박스를 겹치지 않는다 — 한 번에 한 묶음이라 필요 없다) */
+      '.as-sub{margin-top:16px;padding-top:14px;border-top:1px solid #EEF0F4}' +
+      '.as-subt{font-size:.8rem;font-weight:750;color:#111827;margin-bottom:9px}' +
+      '.as-subt span{font-weight:400;color:#9CA3AF;font-size:.72rem}' +
+      '.as-subt span b{color:#6B7280}' +
+      '.as-foot{font-size:.72rem;color:#9CA3AF;margin-top:9px}.as-foot b{color:#6B7280}' +
+      /* 이미지 슬롯 = 목록형 한 줄(발행방법·AI 예시 공용 — 두 곳이 같은 모양) */
+      '.as-slots{display:flex;flex-direction:column;gap:6px}' +
+      '.as-slot{display:flex;align-items:center;gap:11px;border:1px solid #E5E7EB;border-radius:10px;padding:8px 11px;background:#fff}' +
+      '.as-slotth{width:52px;height:52px;flex:none;border-radius:8px;border:1px solid #E5E7EB;background:#FBFCFE;' +
+        'display:grid;place-items:center;overflow:hidden}' +
+      '.as-slotth img{max-width:100%;max-height:100%;object-fit:contain}' +
+      '.as-slotnone{font-size:.64rem;color:#9CA3AF}' +
+      '.as-slotbody{flex:1;min-width:0}' +
+      '.as-slotnm{font-size:.82rem;font-weight:750;color:#111827}' +
+      '.as-slotsub{font-size:.71rem;color:#9CA3AF;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.as-slotsub b{color:#6B7280}' +
+      '.as-stat{flex:none;font-size:.68rem;font-weight:750;border-radius:999px;padding:2px 9px;border:1px solid transparent;white-space:nowrap}' +
+      '.as-stat.on{background:#E5F3EE;color:#127A5E;border-color:#C6E8D3}' +
+      '.as-stat.off{background:#F3F4F6;color:#9CA3AF;border-color:#E5E7EB}' +
+      /* 날것의 파일 입력은 감추고 label 로 누른다 — id·onchange 경로는 그대로다(회귀가드가 id 를 본다) */
+      '.as-file{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0}' +
+      '.as-btn{flex:none;display:inline-flex;align-items:center;font:inherit;font-size:.72rem;font-weight:700;line-height:1.2;' +
+        'padding:6px 11px;border-radius:8px;border:1px solid #D1D5DB;background:#fff;color:#374151;cursor:pointer;white-space:nowrap}' +
+      '.as-btn:hover{background:#F9FAFB}' +
+      '.as-btn.del{color:#B42318;border-color:#F7C9C9;background:#FFF5F5}' +
+      '@media (max-width:1000px){' +
+        '.as-b{grid-template-columns:1fr}' +
+        '.as-bnav{position:static;display:flex;flex-wrap:wrap;gap:4px}' +
+        '.as-bnavt,.as-bnavfoot{display:none}' +
+        '.as-bitem{width:auto}.as-bitem .nm{flex:0 1 auto}}' +
+      '@media (max-width:640px){.as-slot{flex-wrap:wrap}.as-slotbody{flex:1 1 100%;order:3}}' +
       /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
-      '.as-smpgrid{display:flex;gap:12px;flex-wrap:wrap}' +
       '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
-      '.as-smpcard{flex:1;min-width:190px;max-width:250px;border:1px solid #E5E7EB;border-radius:10px;padding:10px;background:#fff}' +
-      '.as-smpname{font-size:.78rem;font-weight:700;color:#111827;margin-bottom:6px}' +
-      '.as-smpimg{display:block;max-width:100%;max-height:150px;border-radius:8px;border:1px solid #E5E7EB;object-fit:contain;margin-bottom:6px}' +
-      '.as-smpnone{font-size:.72rem;color:#9CA3AF;margin-bottom:6px;padding:14px 0;text-align:center;border:1px dashed #E5E7EB;border-radius:8px}' +
-      '.as-smpact{display:flex;gap:6px;align-items:center}' +
-      '.as-smpact input[type=file]{font-size:.7rem;flex:1;min-width:0}' +
-      '.as-smpdel{padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer}' +
       /* 작업표 표준 열 — ★ 색은 리터럴 고정(호스트 테마 변수에 의존하지 않는다).
          admin.html·통합 작업대 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
       '.as-wtlist{display:flex;flex-direction:column;gap:6px}' +
@@ -1192,7 +1324,37 @@ function _wtRenderReport(d) {
     list = list.filter(function (k) { return !!PANELS[k]; });
     _injectStyles();
     if (!_hostHasTheme()) el.classList.add('as-standalone');
-    el.innerHTML = list.map(function (k) { return PANELS[k](); }).join(SEP);
+
+    if (list.length < 2) {
+      /* 패널 1개(대시보드의 리뷰어 공지 카드·AE 의 닉네임)는 목차가 의미 없다 — 종전 그대로 그린다. */
+      _navKeys = [];
+      el.innerHTML = list.map(function (k) { return PANELS[k](); }).join('');
+    } else {
+      /* 시안 B — 좌측 목차 + 한 번에 한 묶음.
+         ★ 패널은 전부 그려 두고 보이기만 토글한다(asSelectPanel 주석 참조).
+         ★ 초기 선택은 지난번에 보던 묶음(없으면 첫 항목) — 저장하러 다시 들어오는 화면이라
+           매번 첫 항목으로 되돌아가면 같은 클릭을 반복하게 된다. */
+      _navKeys = list.slice();
+      var init = list[0];
+      try { var last = sessionStorage.getItem('as_panel'); if (last && list.indexOf(last) >= 0) init = last; } catch (_) {}
+      var nav = list.map(function (k) {
+        var m = PANEL_NAV[k] || { ic: '•', nm: k };
+        return '<button type="button" class="as-bitem' + (k === init ? ' on' : '') + '" id="asNav_' + k + '"' +
+          ' onclick="asSelectPanel(\'' + k + '\')">' +
+          '<span class="ic">' + m.ic + '</span><span class="nm">' + escHtml(m.nm) + '</span>' +
+          '<span class="as-bbadge" id="asBadge_' + k + '">–</span></button>';
+      }).join('');
+      var secs = list.map(function (k) {
+        return '<section class="as-bsec' + (k === init ? ' on' : '') + '" id="asSec_' + k + '">' + PANELS[k]() + '</section>';
+      }).join('');
+      el.innerHTML =
+        '<div class="as-b">' +
+          '<nav class="as-bnav"><div class="as-bnavt">설정 항목</div>' + nav +
+            '<div class="as-bnavfoot">숫자는 <b>등록 현황</b>입니다 — 비어 있는 설정이 목차에서 바로 보입니다.</div>' +
+          '</nav>' +
+          '<div class="as-bmain">' + secs + '</div>' +
+        '</div>';
+    }
     if (o.autoload !== false) list.forEach(function (k) { try { LOADERS[k](); } catch (_) {} });
     return true;
   }
@@ -1201,6 +1363,7 @@ function _wtRenderReport(d) {
 
   /* 전역 노출 — 생성 HTML 의 onclick 문자열과 index-app.js 의 탭 전환 훅이 이 이름들을 부른다.
      ★ index-app.js 에는 같은 이름의 선언이 남아 있으면 안 된다(뒤에 로드되어 이걸 덮는다). */
+  window.asSelectPanel = asSelectPanel;   /* 목차 버튼 onclick */
   window.loadMyNickname = loadMyNickname;
   window.saveMyNickname = saveMyNickname;
   window.loadCompanyBusinessNo = loadCompanyBusinessNo;
