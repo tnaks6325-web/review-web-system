@@ -263,7 +263,19 @@ function _annotate(names) {
 function _emptyTemplate() {
   const channels = {};
   CHANNEL_KEYS.forEach(k => { channels[k] = []; });
-  return { core: [], channels, updatedAt: null, updatedBy: null };
+  // templateSheetId = 작업표를 만들 때 복사할 회사 템플릿 시트(서식·공지문 원본).
+  //   ★ 전사 설정이라 서버에 둔다 — 종전엔 관리자 브라우저 localStorage 에만 있어
+  //     서버가 알 수 없었고 사람마다 값이 달랐다(프로덕션 테스트에서 드러난 문제).
+  return { core: [], channels, templateSheetId: '', updatedAt: null, updatedBy: null };
+}
+
+/** 구글시트 URL 또는 ID → ID. 잘못된 값은 빈 문자열(추측 금지). */
+function normalizeSheetId(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  const m = /\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/.exec(s);
+  if (m) return m[1];
+  return /^[a-zA-Z0-9_-]{20,}$/.test(s) ? s : '';
 }
 
 /** 저장된 템플릿(없으면 빈 템플릿) + 분류/경고. 조회 실패는 빈 템플릿(fail-soft). */
@@ -276,6 +288,7 @@ async function getTemplate() {
       const j = JSON.parse(rows[0].value);
       saved.core = _normNames(j.core);
       CHANNEL_KEYS.forEach(k => { saved.channels[k] = _normNames((j.channels || {})[k]); });
+      saved.templateSheetId = normalizeSheetId(j.templateSheetId);
       saved.updatedAt = j.updatedAt || null;
       saved.updatedBy = j.updatedBy || null;
     }
@@ -290,10 +303,11 @@ async function getTemplate() {
 }
 
 /** 템플릿 저장. 유효성은 서버가 최종 판정(정규화 후 저장·반환). */
-async function saveTemplate({ core, channels, by } = {}) {
+async function saveTemplate({ core, channels, templateSheetId, by } = {}) {
   const next = _emptyTemplate();
   next.core = _normNames(core);
   CHANNEL_KEYS.forEach(k => { next.channels[k] = _normNames((channels || {})[k]); });
+  next.templateSheetId = normalizeSheetId(templateSheetId);
   next.updatedAt = new Date().toISOString();
   next.updatedBy = String(by || '').slice(0, 100) || null;
 
@@ -309,6 +323,6 @@ async function saveTemplate({ core, channels, by } = {}) {
 }
 
 module.exports = {
-  headerStats, getTemplate, saveTemplate,
+  headerStats, getTemplate, saveTemplate, normalizeSheetId,
   CORE_RATIO, RARE_RATIO, TEMPLATE_KEY, CHANNEL_KEYS, MAX_COLS, MAX_NAME_LEN,
 };
