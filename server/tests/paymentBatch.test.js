@@ -386,6 +386,46 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
       assert.ok(bad, '알 수 없는 은행이 저장됐다');
     });
 
+    // ★★ 이 검사가 없어서 42703(order_submissions.created_at 오타)이 배포까지 갔다.
+    //   빈 DB 로 호출하면 rows.length===0 조기 반환이라 **후속 조인 쿼리가 한 줄도 안 돈다**.
+    //   반드시 대상 행을 하나 만들어 _loadCampaigns/_loadOrderPrices/_loadAccounts/_loadTabLabels
+    //   네 쿼리를 전부 실행시켜야 컬럼명 오타가 잡힌다.
+    await ta('★ 입금대상 추출이 후속 조인까지 실제로 실행된다(컬럼명 오타 차단)', async () => {
+      const SID = '__GUARD_SHEET__', TAB = '__GUARD_TAB__';
+      await pool.query(`DELETE FROM review_index WHERE sheet_id=$1`, [SID]);
+      await pool.query(`DELETE FROM order_submissions WHERE sheet_id=$1`, [SID]);
+      await pool.query(
+        `INSERT INTO review_index (reviewer_name, sheet_id, tab_name, row_index, is_submitted, is_submitted2, row_json, start_date, phone8)
+         VALUES ('가드','${SID}','${TAB}', 1, TRUE, 'NONE', '{}'::jsonb, '8 / 1 (토)', '99999999')`);
+      await pool.query(
+        `INSERT INTO order_submissions (sheet_id, tab_name, sheet_row, price) VALUES ($1,$2,1,'10000')`, [SID, TAB]);
+      try {
+        const out = await svc.listPaymentTargets({ sheetId: SID });
+        assert.ok(out.items.length === 1, `대상이 ${out.items.length}건 — 조인 경로를 못 탔다`);
+        assert.strictEqual(out.items[0].productPrice, 10000, '주문 결제금액이 붙지 않았다(조인 실패)');
+      } finally {
+        await pool.query(`DELETE FROM review_index WHERE sheet_id=$1`, [SID]);
+        await pool.query(`DELETE FROM order_submissions WHERE sheet_id=$1`, [SID]);
+      }
+    });
+
+    await ta('★ 조회하는 컬럼이 실제 스키마에 있다(order_submissions 는 submitted_at)', async () => {
+      const { rows } = await pool.query(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_name='order_submissions' AND column_name IN ('created_at','submitted_at')`);
+      const have = new Set(rows.map(r => r.column_name));
+      assert.ok(have.has('submitted_at'), 'order_submissions.submitted_at 이 없다');
+      // 서비스와 리뷰어 라우트가 없는 컬럼을 참조하지 않는지(같은 실수 재발 방지)
+      for (const f of ['src/services/payment.service.js', 'src/routes/reviewer.routes.js']) {
+        const src = R(f);
+        const q = src.match(/SELECT[^`]*FROM order_submissions/g) || [];
+        for (const one of q) {
+          assert.ok(!/\bcreated_at\b/.test(one),
+            `${f} 가 order_submissions 에서 created_at 을 읽는다(42703)`);
+        }
+      }
+    });
+
     await ta('은행 서식 파일이 실제로 만들어진다(두 은행)', async () => {
       const items = [{ bank_code: '045', bank_account: '9002176640741', amount: 26900,
         transfer_memo: '파우더망고', account_holder: '김리뷰' }];

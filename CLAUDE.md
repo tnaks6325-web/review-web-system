@@ -328,7 +328,9 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **프리플라이트 등록**: `recruit_campaigns.transfer_bank`/`transfer_memo`는 공고 create/update의 INSERT·SET 목록에 들어가므로 컬럼이 없으면 **공고 발행·수정이 전면 42703**. `REQUIRED_SCHEMA`에 등록(083/085와 같은 규율).
 - **화면**: 통합 작업대 **[입금관리] 탭**(`/api/trackb/payment/*`, **adminOrMaster 전용** — 계좌번호 전체 노출이라 AE·광고주 차단, 등록리뷰어DB와 같은 판단). 은행별 다운로드 버튼(그 은행 건만) · 보류 사유 표기 · 통장표시 미설정 경고 · 회차 표(다시 받기/취소). 다운로드·취소는 confirm + 잠금/이중입금 안내 필수. 공고 모달에 **[이체은행] 3버튼(자동/하나/케이뱅크) + [통장표시](8자)** 추가.
 - **문서**: PRD `frontend/docs/prd-payment-transfer.html` · 리뷰어 화면 시안 `design-payment-reviewer-view.html` · 직원 안내서 `입금관리_사용안내.html`.
-- 회귀가드 `tests/paymentBatch.test.js`(46케이스 — 순수함수 실행 + 라우터 스택 실검사 + 배선 + **PGTEST_URL 시 진짜 PG로 부분유니크·CHECK·서식 생성 검증**). ⚠ `PGTEST_URL`은 **파일 최상단에서 `DATABASE_URL`로 옮겨야** 한다(pool은 require 시점에 읽는다 — 뒤늦게 설정하면 연결이 안 잡힌다).
+- ★★ **`order_submissions` 의 제출 시각 컬럼은 `submitted_at` 이다(`created_at` 아님, 001:179)** — 배포 사고: 입금대상 조회가 42703 으로 죽어 [입금관리]가 전면 "서버오류"였다. **같은 오타가 `reviewer.routes` review-earnings 에도 있었고**(복사 원본), 그쪽은 fail-soft catch 에 삼켜져 **리뷰어 카드 상품비·누적 금액이 조용히 비어 있었다** — 함께 고쳤다.
+- ★★ **빈 DB 로 서비스를 호출하는 테스트는 조인 쿼리를 한 줄도 실행하지 않는다** — `listPaymentTargets` 는 대상 0건이면 조기 반환이라 `_loadCampaigns`/`_loadOrderPrices`/`_loadAccounts`/`_loadTabLabels` 4개 쿼리가 안 돌고 컬럼명 오타가 통과한다. 회귀가드는 **대상 행을 실제로 만들어** 후속 조인까지 태우고, `information_schema` 로 컬럼 존재까지 대조한다(변이시험으로 검출 확인).
+- 회귀가드 `tests/paymentBatch.test.js`(48케이스 — 순수함수 실행 + 라우터 스택 실검사 + 배선 + **PGTEST_URL 시 진짜 PG로 부분유니크·CHECK·서식 생성·조인 실행·컬럼 존재 검증**). ⚠ `PGTEST_URL`은 **파일 최상단에서 `DATABASE_URL`로 옮겨야** 한다(pool은 require 시점에 읽는다 — 뒤늦게 설정하면 연결이 안 잡힌다).
 - **다음(M2)**: 이체결과 파일 업로드 → 짝 맞추기(계좌+금액+예금주) → 성공 건만 입금 기록(시스템 + 시트 입금칸) → 리뷰어 참여상품 정보에 입금 시점·입금명 표시 → 실패 건 "계좌 확인" 안내.
 
 ### 현금영수증 안내 (1단계 — 발행방법 노출)
