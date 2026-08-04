@@ -26,6 +26,8 @@ const order = readS('routes/order.routes.js');
 const staff = readF('staff.html');
 const wdesk = readF('workdesk.html');
 const idxApp = readF('js/index-app.js');
+const adminHtml = readF('admin.html');
+const setJs = readF('js/admin-settings.js');
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
@@ -127,7 +129,7 @@ ok('★★ 시트URL 생략 시 문자열 "undefined" 가 저장되지 않는다
   /String\(b\.work_sheet_url \|\| ''\)\.trim\(\)/.test(order)
   && !/String\(b\.work_sheet_url\)\.trim\(\)/.test(order));
 ok('상태 칸 겹침은 리포트에 실려 화면에 뜬다(서버·프론트 배선)',
-  /statusConflicts/.test(svcSrc) && /statusConflicts/.test(wdesk));
+  /statusConflicts/.test(svcSrc) && /statusConflicts/.test(setJs));
 
 /* 채널 추정 */
 ok('채널 추정 — 쿠팡/네이버/동시/미상', (() => {
@@ -144,8 +146,20 @@ ok('빈 헤더 배열은 빈 결과(방어)', wt.classifyHeaders([], {}).length 
 /* ══════════════════════════════════════════════════════════
    B. 집계 서비스 — 읽기 전용·시트 무접촉
    ══════════════════════════════════════════════════════════ */
-ok('★ 집계 서비스에 쓰기 SQL 이 없다(순수 읽기)',
-  !/\b(INSERT INTO|UPDATE\s+\w+\s+SET|DELETE FROM)\b/i.test(svcSrc));
+ok('★ 쓰기는 app_settings 템플릿 1곳뿐 — 운영 테이블은 절대 안 건드린다',
+  (() => {
+    // 'DO UPDATE SET'(업서트 절)은 대상 테이블이 아니므로 제외 — 테이블을 지목하는 쓰기만 센다.
+    const writes = svcSrc.match(/\b(?:INSERT INTO|UPDATE)\s+(?!SET\b)\w+/gi) || [];
+    return !/DELETE FROM/i.test(svcSrc)
+      && writes.length === 1 && /app_settings/i.test(writes[0]);
+  })());
+ok('★ 집계(headerStats)는 여전히 순수 읽기 — 쓰기 구문이 그 함수 안에 없다',
+  (() => {
+    const i = svcSrc.indexOf('async function headerStats');
+    const j = svcSrc.indexOf('표준 열 템플릿', i);
+    const body = svcSrc.slice(i, j > i ? j : svcSrc.length);
+    return !/\b(INSERT INTO|UPDATE\s+\w+\s+SET|DELETE FROM)\b/i.test(body);
+  })());
 ok('★ RAW 미러만 읽는다 — 구글시트 재읽기 0(쿼터 무영향)',
   /raw_sheet_tabs/.test(svcSrc)
   && !/sheets\.|throttledCall|getSpreadsheetMeta/.test(svcSrc));
@@ -176,9 +190,20 @@ ok('★ 역할 미들웨어 앞에 authMiddleware 가 있다(빠지면 마스터
     const names = hs.route.stack.map(s => s.handle.name);
     return names.indexOf('authMiddleware') < names.indexOf('adminOrMasterMiddleware');
   })());
-ok('작업표 라우트는 읽기 전용 — POST/PUT/DELETE 미등록',
-  !_layers.some(l => /^\/worktable/.test(l.route.path)
-    && (l.route.methods.post || l.route.methods.put || l.route.methods.delete)));
+ok('작업표 쓰기 라우트는 템플릿 저장 하나뿐(PUT/DELETE 없음)',
+  (() => {
+    const wt = _layers.filter(l => /^\/worktable/.test(l.route.path));
+    const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
+    return writes.length === 1 && writes[0].route.path === '/worktable/template'
+      && writes[0].route.methods.post && !writes[0].route.methods.put && !writes[0].route.methods.delete;
+  })());
+ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
+  ['get', 'post'].every(m => {
+    const l = _find('/worktable/template', m);
+    if (!l) return false;
+    const names = l.route.stack.map(s => s.handle.name);
+    return names.indexOf('authMiddleware') === 0 && names.includes('adminOrMasterMiddleware');
+  }));
 
 /* ══════════════════════════════════════════════════════════
    D. 작업시트탭URL 필수 해제 (PRD Q2 확정) — 제출은 선택, 접수는 유지
@@ -206,26 +231,57 @@ ok('관리자 접수 안내 문구가 새 흐름을 알려준다',
   /작업표를 생성한 뒤 접수해주세요/.test(idxApp));
 
 /* ══════════════════════════════════════════════════════════
-   E. 통합작업대 화면 배선
+   E. 화면 배선 — 작업표는 "설정" 안에, 공유 모듈 한 벌
    ══════════════════════════════════════════════════════════ */
-ok('작업표 탭이 nav 에 있고 switchView 가 분기한다',
-  /data-v="worktable"/.test(wdesk) && /v==='worktable'\) renderWorktableView\(\)/.test(wdesk));
-ok('작업표 탭은 관리자 nav 에만 노출(AE nav 미포함 — 서버 adminOrMaster 와 1:1)',
+ok('★ 작업표는 상단 탭이 아니라 **설정 안**에 있다(사용자 확정) — nav 잔재·죽은 렌더 함수 0',
+  !/data-v="worktable"/.test(wdesk)
+  && !/renderWorktableView/.test(wdesk)
+  && !/_wtRenderReport|_loadWorktableStats/.test(wdesk));
+ok('통합 작업대 설정 패널 목록에 worktable 이 있다(관리자만 — 서버 adminOrMaster 와 1:1)',
+  /panels: isAdmin \? \['nickname','business','worktable','notice'\] : \['nickname'\]/.test(wdesk));
+ok('관리자 대시보드 설정 탭에도 같은 패널이 뜬다(공유 모듈 — 두 화면이 갈라지지 않는다)',
+  /panels: \['nickname', 'business', 'worktable'\]/.test(adminHtml)
+  && /loadWorktableTemplate\(\)/.test(idxApp));
+ok('★ 화면은 설정 공유 모듈 한 벌 — workdesk/admin.html 에 사본 없음',
+  /WT_EP/.test(setJs) && /header-stats/.test(setJs)
+  && !/header-stats/.test(wdesk) && !/header-stats/.test(adminHtml));
+ok('★ 리포트·표준열 경로는 재기준하지 않는다(두 화면이 같은 설정을 본다)',
+  /\/api\/trackb\/worktable\/header-stats/.test(setJs)
+  && /\/api\/trackb\/worktable\/template/.test(setJs));
+ok('경로 표(EP_DEFAULT·EP_SUFFIX) 키 개수는 그대로 — 작업표는 표에 넣지 않았다',
   (() => {
-    const navs = wdesk.split('isStaff?`<nav class="nav">');
-    return /data-v="worktable"/.test(navs[0]) && !/data-v="worktable"/.test(navs[1] || '');
+    const d = (setJs.match(/var EP_DEFAULT = \{[\s\S]*?\};/) || [''])[0];
+    const f = (setJs.match(/var EP_SUFFIX = \{[\s\S]*?\};/) || [''])[0];
+    const keys = t => (t.match(/^\s{4}\w+:/gm) || []).length;
+    return keys(d) > 0 && keys(d) === keys(f);
   })());
 ok('리포트는 서버 분류 결과를 그릴 뿐 — 프론트에 키워드 사본 없음',
-  /header-stats/.test(wdesk)
-  && !/includes\('수취인'\)|includes\('예금주'\)/.test(wdesk));
-ok('헤더·본문 폭 상한이 같은 값(어긋나면 제목만 화면 끝으로 밀린다 — 레포 규칙)',
+  !/includes\('수취인'\)|includes\('예금주'\)/.test(setJs));
+ok('출력은 전부 escHtml() 통과(헤더명·열이름은 사용자·시트에서 온 자유 문자열)',
+  !/\+ *(u\.name|c\.header|c\.name|v\.name) *\+/.test(setJs)
+  && /escHtml\(c\.name\)/.test(setJs) && /escHtml\(u\.name\)/.test(setJs));
+ok('채널별 추가 열은 현영 4채널 표를 재사용한다(채널 목록 사본 금지)',
+  /CR_GUIDE_CHANNELS\.map/.test(setJs) && /wtCh_/.test(setJs));
+ok('★ 채널 열은 블록 편집(추가·✕제거·◀▶이동) — 채널당 한 줄(라벨+블록) 레이아웃',
+  /function wtChAdd/.test(setJs) && /function wtChDel/.test(setJs) && /function wtChMove/.test(setJs)
+  && /as-wtchrow/.test(setJs) && /as-wtchlabel/.test(setJs) && /wtChips_/.test(setJs));
+ok('★ 저장은 배열 그대로 — 쉼표 구분 파싱이 없다(열 이름에 쉼표가 들어가도 안전)',
   (() => {
-    const h = /#wthead \.mh\{max-width:(\d+)px\}/.exec(wdesk);
-    const b = /#wtbody\{max-width:(\d+)px\}/.exec(wdesk);
-    return h && b && h[1] === b[1];
+    // wtSaveTemplate 본문에 split(',') 가 없어야 한다(이미지 dataURL split 은 다른 함수라 무관)
+    const i = setJs.indexOf('async function wtSaveTemplate');
+    const j = setJs.indexOf('\nasync function', i + 10);
+    const body = setJs.slice(i, j > i ? j : i + 2000);
+    return i > -1 && !/split\(','\)/.test(body) && /channels\[c\.key\] = \(\(_wtTpl\.channels \|\| \{\}\)\[c\.key\] \|\| \[\]\)\.slice\(\)/.test(setJs);
   })());
-ok('출력은 전부 esc() 통과(헤더명은 시트에서 온 자유 문자열)',
-  !/\$\{(u\.name|r\.label|v\.name)\}/.test(wdesk));
+ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
+  /escHtml\(n\)/.test(setJs)
+  && /function wtChAdd[\s\S]{0,600}_wtDirty\(true\)/.test(setJs)
+  && /function wtChDel[\s\S]{0,300}_wtDirty\(true\)/.test(setJs)
+  && /function wtChMove[\s\S]{0,400}_wtDirty\(true\)/.test(setJs));
+ok('리포트는 펼칠 때 1회만 로드(설정 열 때마다 무거운 집계 금지)',
+  /_wtStats\) return _wtRenderReport/.test(setJs));
+ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
+  /저장하지 않은 변경이 있습니다/.test(setJs));
 
 console.log(`\n✅ worktableTemplate: ${n}개 통과`);
 // orderLedger.service 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다(레포 관용구).

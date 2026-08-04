@@ -13,6 +13,9 @@ const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
+// ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
+//   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
+const { logger } = require('../utils/logger');
 
 function _by(req) { return String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100); }
 function _role(req) { return (req.admin && req.admin.role) || ''; }
@@ -306,6 +309,19 @@ router.get('/ownership/settlement', authMiddleware, internalMiddleware, async (r
   try {
     if (!req.query.advertiserId) return res.status(400).json({ ok: false, error: 'advertiserId 필수' });
     res.json({ ok: true, items: await svc.settlementSummaryForAdvertiser({ advertiserId: req.query.advertiserId }) });
+  } catch (err) { next(err); }
+});
+
+// ── 업체용 뷰어 "내 작업 목록"(화면 A) — 광고주 본인 소유 탭 요약 배치. ──
+//   ★ advertiserId 는 쿼리가 아니라 토큰(req.admin.advertiser_id)에서만 — 남의 업체 요약 도달 불가(IDOR 차단).
+//   ★ 광고주 렌즈는 서비스(advertiserWorkSummary)가 강제 — 내부 필드(비고·담당·salesId)는 응답에 아예 없음.
+//   내부인은 기존 /ownership/settlement(소유지정 뷰)를 쓰므로 이 경로는 advertiser 전용으로 좁힌다.
+router.get('/my-work-summary', authMiddleware, async (req, res, next) => {
+  try {
+    if (_role(req) !== 'advertiser') return res.status(403).json({ ok: false, error: '광고주 전용 경로입니다.' });
+    const advertiserId = (req.admin && req.admin.advertiser_id) || null;
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체 연결이 없는 계정입니다.' });
+    res.json({ ok: true, ...(await svc.advertiserWorkSummary({ advertiserId })) });
   } catch (err) { next(err); }
 });
 
@@ -1116,6 +1132,59 @@ router.post('/reviewers/memo', authMiddleware, adminOrMasterMiddleware, async (r
   } catch (err) { next(err); }
 });
 
+/* 리뷰어 삭제(완전삭제) — master/admin(사용자 확정).
+   ★★ **이력은 함께 지워지지 않는다.** 주문·참여·문의는 전부 `phone8`(연락처 뒤 8자리)로 매달려
+     있고 `reviewers(id)` 를 FK 로 참조하는 테이블이 하나도 없다(001 스키마 확인). 그래서 이 행만
+     사라지고 그 사람의 기록은 그대로 남는다 — 지운 결과가 "흔적 없이 사라짐"이 아니라
+     **"등록만 취소됨"**(로그인·참여 게이트가 미등록으로 판정)이다. 관리자가 이걸 모르고 누르면
+     "지웠는데 왜 로그에 남아 있냐"가 되므로 **건수를 먼저 보여준다**.
+   ★ 2단 확인: force 없이 부르면 이력 건수만 세어 `needConfirm` 으로 돌려주고 **아무것도 지우지 않는다**
+     (프론트가 그 숫자를 보여주고 다시 묻는다). 이력이 0이면 그 자리에서 바로 지운다.
+   ★ 집계는 **fail-soft** — 옛 배포·테이블 부재로 카운트 쿼리가 실패해도 삭제 기능 자체가 죽지 않게
+     하되, 세지 못한 사실을 `countsPartial` 로 알린다(0건으로 조용히 속이지 않는다). */
+router.post('/reviewers/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = String((req.body && req.body.id) || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ ok: false, error: 'id(UUID)가 필요합니다.' });
+    }
+    const force = (req.body && req.body.force) === true;
+
+    const { rows: who } = await pool.query('SELECT id, name, phone, phone8 FROM reviewers WHERE id = $1', [id]);
+    if (!who.length) return res.status(404).json({ ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' });
+    const r = who[0];
+    const p8 = String(r.phone8 || '');
+
+    // 이력 집계(삭제 대상이 아니라 **경고 재료**). 쿼리 하나가 실패해도 나머지는 센다.
+    const counts = { orders: 0, applications: 0, inquiries: 0 };
+    let countsPartial = false;
+    if (p8) {
+      const probes = [
+        ['orders', 'SELECT COUNT(*)::int AS n FROM order_submissions WHERE phone8 = $1'],
+        ['applications', 'SELECT COUNT(*)::int AS n FROM campaign_applications WHERE phone8 = $1 OR owner_phone8 = $1'],
+        ['inquiries', 'SELECT COUNT(*)::int AS n FROM cs_threads WHERE reviewer_phone8 = $1'],
+      ];
+      for (const [key, sql] of probes) {
+        try { const { rows } = await pool.query(sql, [p8]); counts[key] = rows[0].n | 0; }
+        catch (e) { countsPartial = true; logger.warn(`[reviewers/delete] ${key} 집계 실패: ${e.message}`); }
+      }
+    }
+    const historyTotal = counts.orders + counts.applications + counts.inquiries;
+
+    if (!force && (historyTotal > 0 || countsPartial)) {
+      return res.json({
+        ok: false, needConfirm: true, counts, countsPartial, historyTotal,
+        reviewer: { id: r.id, name: r.name, phone: r.phone },
+      });
+    }
+
+    const { rowCount } = await pool.query('DELETE FROM reviewers WHERE id = $1', [id]);
+    if (!rowCount) return res.status(404).json({ ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' });
+    logger.warn(`[reviewers/delete] ${req.admin && req.admin.name} 가 리뷰어 삭제 — ${r.name}/${r.phone} (이력 ${historyTotal}건 잔존)`);
+    res.json({ ok: true, deleted: 1, counts, historyTotal });
+  } catch (err) { next(err); }
+});
+
 router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { listReviewerEvents, unresolvedCounts } = require('../services/reviewerEventLog.service');
@@ -1162,6 +1231,24 @@ router.get('/worktable/header-stats', authMiddleware, adminOrMasterMiddleware, a
   try {
     const { headerStats } = require('../services/worktable.service');
     const data = await headerStats({ limit: parseInt((req.query || {}).limit, 10) || 500 });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+});
+
+// 표준 열 템플릿 — 관리자가 확정하는 "우리 작업표의 기본 열"(M2 생성 미리보기의 기본값).
+//   ★ 리포트는 통계를 보여줄 뿐이고 **무엇을 쓸지 정하는 건 사람**이라, 그 결정을 여기 못박는다.
+//   ★ 전사 설정이라 adminOrMaster(AE 는 열람·수정 모두 불가 — 리포트와 같은 판단).
+router.get('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { getTemplate } = require('../services/worktable.service');
+    res.json({ ok: true, data: await getTemplate() });
+  } catch (err) { next(err); }
+});
+router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { saveTemplate } = require('../services/worktable.service');
+    const b = req.body || {};
+    const data = await saveTemplate({ core: b.core, channels: b.channels, by: _by(req) });
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 });

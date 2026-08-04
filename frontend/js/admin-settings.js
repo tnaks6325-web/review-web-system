@@ -462,11 +462,347 @@ async function deleteReviewerNotice(id) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   ★ 작업표 표준 열 (M1) — 통계 리포트 + 우리 표준 코어 열 확정
+   ──────────────────────────────────────────────────────────────
+   리포트는 "우리 시트들이 실제로 어떤 열을 쓰는가"를 보여줄 뿐이고,
+   **무엇을 쓸지 정하는 것은 사람**이다. 여기서 확정한 열이 작업표 생성(M2)의 기본값이 된다.
+
+   ★ 저장하는 것은 역할이 아니라 **열 이름**이다 — 작업표에 만들 열의 이름이 곧 시스템 판정을
+     결정한다(예 '연락처'로 만들어야 구매양식 제출이 그 칸에 전화번호를 쓴다).
+   ★ 서버 경로는 재기준(ADMIN_SETTINGS_API)을 쓰지 않는다 — `/api/trackb/worktable/*` 는
+     관리자 대시보드(admin_token)와 통합 작업대(인트라넷 SSO) **양쪽에서 그대로 닿는 유일한 경로**라
+     호스트별로 다를 이유가 없다(다르게 두면 두 화면이 서로 다른 설정을 보게 된다).
+   ══════════════════════════════════════════════════════════════ */
+var WT_EP = { stats: '/api/trackb/worktable/header-stats', template: '/api/trackb/worktable/template' };
+var _wtTpl = null;      // { core:[names], channels:{key:[names]}, columns:[...], ... }
+var _wtStats = null;    // 헤더 학습 리포트(펼칠 때 1회 로드)
+
+async function _wtFetch(url, body) {
+  var opt = body ? { method: 'POST', headers: _headers(), body: JSON.stringify(body) } : { headers: _headers() };
+  var r = await fetch(_apiBase() + url, opt);
+  var j = await r.json().catch(function () { return null; });
+  if (!j) throw new Error('HTTP ' + r.status);
+  if (j.ok === false) throw new Error(j.error || '요청 실패');
+  return j;
+}
+
+function _worktableHtml() {
+  /* 채널별 추가 열 — ★ 채널당 **한 줄**(라벨 + 열 블록들 + 추가 입력).
+     쉼표 구분 텍스트가 아니라 블록 단위 추가·제거·◀▶ 이동(사용자 확정 — 더 직관적으로). */
+  var chans = CR_GUIDE_CHANNELS.map(function (c) {
+    return '<div class="as-wtchrow">' +
+      '<span class="as-wtchlabel">' + c.emoji + ' ' + c.label + '</span>' +
+      '<span class="as-wtchips" id="wtChips_' + c.key + '"></span>' +
+      '<span class="as-wtchadd">' +
+        '<input type="text" id="wtCh_' + c.key + '" maxlength="40" placeholder="열 이름" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();wtChAdd(\'' + c.key + '\');}">' +
+        '<button onclick="wtChAdd(\'' + c.key + '\')" title="이 채널에 열 추가">＋</button>' +
+      '</span></div>';
+  }).join('');
+  return `
+        <!-- 작업표 표준 열 -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-table" style="color:#0EA5E9;margin-right:6px"></i>작업표 표준 열
+          </span>
+          <span id="wtSavedAt" style="font-size:.72rem;color:var(--t3)"></span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
+          작업표를 만들 때 <b>항상 들어갈 열</b>을 여기서 정합니다. 순서도 그대로 표에 적용됩니다.
+          아래 <b>헤더 학습 리포트</b>는 우리 시트들이 실제로 쓰는 열 통계이니, 정할 때 근거로 보세요.
+        </p>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+          <input type="text" id="wtNewCol" maxlength="40" placeholder="열 이름 (예: 수취인)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();wtAddCol();}"
+            style="flex:1;min-width:160px;max-width:280px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
+          <button onclick="wtAddCol()" style="padding:8px 14px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-plus"></i> 추가
+          </button>
+          <button onclick="wtLoadSuggested()" style="padding:8px 14px;background:#EFF6FF;color:#1D4ED8;border:1.5px solid #BFDBFE;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-wand-magic-sparkles"></i> 통계에서 불러오기
+          </button>
+        </div>
+        <div id="wtColList" class="as-wtlist"><div class="as-wtempty">불러오는 중…</div></div>
+
+        <div style="margin-top:16px">
+          <div style="font-size:.82rem;font-weight:700;margin-bottom:4px">채널별 추가 열</div>
+          <p style="font-size:.75rem;color:var(--t3);margin:0 0 8px;line-height:1.6">
+            그 채널일 때만 붙는 열입니다(예: 쿠팡 작업엔 쿠팡ID). 오른쪽 칸에 이름을 넣고 [＋]로 추가하고,
+            블록의 ◀▶로 순서를 바꾸고 ✕로 뺍니다. 비워두면 추가 열 없이 코어 열만 만듭니다.
+          </p>
+          <div class="as-wtchbox">${chans}</div>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
+          <button onclick="wtSaveTemplate()"
+            style="padding:8px 18px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-save"></i> 저장
+          </button>
+          <span id="wtSaveHint" style="font-size:.74rem;color:var(--t3)"></span>
+        </div>
+
+        <div style="margin-top:20px;border-top:1px dashed #E5E7EB;padding-top:14px">
+          <button onclick="wtToggleReport()" id="wtReportBtn"
+            style="padding:7px 14px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-chart-simple"></i> 헤더 학습 리포트 펼치기
+          </button>
+          <div id="wtReport" style="display:none;margin-top:12px"></div>
+        </div>`;
+}
+
+/* ── 코어 열 목록 렌더 ── */
+function _wtRenderCols() {
+  var box = document.getElementById('wtColList');
+  if (!box) return;
+  var cols = (_wtTpl && _wtTpl.columns) || [];
+  if (!cols.length) {
+    box.innerHTML = '<div class="as-wtempty">아직 정한 열이 없습니다. 위에서 <b>통계에서 불러오기</b>를 누르면 우리 시트들이 실제로 쓰는 열로 채워집니다.</div>';
+    return;
+  }
+  box.innerHTML = cols.map(function (c, i) {
+    var note = c.role
+      ? '<span class="as-wtrole">시스템 인식: ' + escHtml(c.label) + '</span>'
+      : '<span class="as-wtrole none">제출이 값을 쓰지 않는 열</span>';
+    var warn = c.duplicateRole
+      ? '<span class="as-wtwarn">⚠ 같은 역할의 열이 둘 이상 — 제출이 두 칸에 같은 값을 씁니다</span>' : '';
+    return '<div class="as-wtrow">' +
+      '<span class="as-wtno">' + (i + 1) + '</span>' +
+      '<span class="as-wtname">' + escHtml(c.name) + '</span>' +
+      note + warn +
+      '<span class="as-wtbtns">' +
+        '<button onclick="wtMoveCol(' + i + ',-1)" title="위로">↑</button>' +
+        '<button onclick="wtMoveCol(' + i + ',1)" title="아래로">↓</button>' +
+        '<button onclick="wtDelCol(' + i + ')" title="삭제" class="del">✕</button>' +
+      '</span></div>';
+  }).join('');
+}
+
+/* 편집은 이름 배열(_wtTpl.core)에 하고, 표시는 서버가 준 분류(columns)를 쓴다.
+   ★ 저장 전 임시 편집분은 역할을 모르므로 role:null 로 두되 "저장하면 판정됩니다"로 안내한다
+     — 프론트에 분류 규칙 사본을 두지 않기 위해서다(매퍼 파생 단일 출처 유지). */
+function _wtSyncColumns() {
+  var byName = {};
+  ((_wtTpl && _wtTpl.columns) || []).forEach(function (c) { byName[c.name.toLowerCase()] = c; });
+  _wtTpl.columns = (_wtTpl.core || []).map(function (n) {
+    return byName[n.toLowerCase()] || { name: n, role: null, label: null, tier: null, duplicateRole: false };
+  });
+  _wtRenderCols();
+  _wtDirty(true);
+}
+function _wtDirty(on) {
+  var h = document.getElementById('wtSaveHint');
+  if (h) h.innerHTML = on ? '<b style="color:#B45309">저장하지 않은 변경이 있습니다</b>' : '';
+}
+
+function wtAddCol() {
+  var inp = document.getElementById('wtNewCol');
+  if (!inp || !_wtTpl) return;
+  var name = (inp.value || '').trim();
+  if (!name) return;
+  var dup = (_wtTpl.core || []).some(function (n) { return n.toLowerCase() === name.toLowerCase(); });
+  if (dup) { showToast('이미 있는 열입니다', true); return; }
+  _wtTpl.core.push(name);
+  inp.value = '';
+  _wtSyncColumns();
+}
+function wtDelCol(i) {
+  if (!_wtTpl || !_wtTpl.core[i]) return;
+  _wtTpl.core.splice(i, 1);
+  _wtSyncColumns();
+}
+function wtMoveCol(i, dir) {
+  if (!_wtTpl) return;
+  var j = i + dir;
+  if (j < 0 || j >= _wtTpl.core.length) return;
+  var t = _wtTpl.core[i]; _wtTpl.core[i] = _wtTpl.core[j]; _wtTpl.core[j] = t;
+  _wtSyncColumns();
+}
+
+/* ── 채널별 추가 열 — 블록 편집 ──
+   편집은 _wtTpl.channels[key] 배열에 직접 하고 저장 때 그대로 보낸다(쉼표 파싱 없음 —
+   열 이름에 쉼표가 들어가도 안전하고, 화면에 보이는 블록이 곧 저장되는 값이다). */
+function _wtRenderChans() {
+  if (!_wtTpl) return;
+  CR_GUIDE_CHANNELS.forEach(function (c) {
+    var box = document.getElementById('wtChips_' + c.key);
+    if (!box) return;
+    var arr = (_wtTpl.channels && _wtTpl.channels[c.key]) || [];
+    box.innerHTML = arr.length ? arr.map(function (n, i) {
+      return '<span class="as-wtchip">' +
+        '<button onclick="wtChMove(\'' + c.key + '\',' + i + ',-1)" title="왼쪽으로"' + (i === 0 ? ' disabled' : '') + '>◀</button>' +
+        '<b>' + escHtml(n) + '</b>' +
+        '<button onclick="wtChMove(\'' + c.key + '\',' + i + ',1)" title="오른쪽으로"' + (i === arr.length - 1 ? ' disabled' : '') + '>▶</button>' +
+        '<button class="x" onclick="wtChDel(\'' + c.key + '\',' + i + ')" title="빼기">✕</button>' +
+        '</span>';
+    }).join('') : '<span class="as-wtchnone">추가 열 없음</span>';
+  });
+}
+function wtChAdd(key) {
+  if (!_wtTpl) return;
+  var inp = document.getElementById('wtCh_' + key);
+  var name = inp ? String(inp.value || '').trim() : '';
+  if (!name) return;
+  if (!_wtTpl.channels) _wtTpl.channels = {};
+  var arr = _wtTpl.channels[key] || (_wtTpl.channels[key] = []);
+  if (arr.some(function (n) { return n.toLowerCase() === name.toLowerCase(); })) { showToast('이미 있는 열입니다', true); return; }
+  arr.push(name);
+  if (inp) inp.value = '';
+  _wtRenderChans();
+  _wtDirty(true);
+}
+function wtChDel(key, i) {
+  if (!_wtTpl || !_wtTpl.channels || !_wtTpl.channels[key]) return;
+  _wtTpl.channels[key].splice(i, 1);
+  _wtRenderChans();
+  _wtDirty(true);
+}
+function wtChMove(key, i, dir) {
+  if (!_wtTpl || !_wtTpl.channels) return;
+  var arr = _wtTpl.channels[key] || [];
+  var j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  _wtRenderChans();
+  _wtDirty(true);
+}
+
+/** 통계에서 불러오기 — 서버가 고른 "역할별 가장 흔한 실제 헤더 이름"으로 채운다. */
+async function wtLoadSuggested() {
+  try {
+    if (!_wtStats) { var j = await _wtFetch(WT_EP.stats); _wtStats = j.data || {}; }
+    var s = (_wtStats && _wtStats.suggestedCore) || [];
+    if (!s.length) { showToast('통계에서 코어 열을 찾지 못했습니다 (분석된 탭이 없을 수 있습니다)', true); return; }
+    if ((_wtTpl.core || []).length && !confirm('지금 목록을 통계 기반 ' + s.length + '개 열로 바꿉니다. 계속할까요?')) return;
+    _wtTpl.core = s.slice();
+    _wtSyncColumns();
+    showToast(s.length + '개 열을 불러왔습니다 — 확인 후 저장하세요');
+  } catch (e) { showToast('불러오기 실패: ' + e.message, true); }
+}
+
+async function loadWorktableTemplate() {
+  if (!document.getElementById('wtColList')) return;
+  try {
+    var j = await _wtFetch(WT_EP.template);
+    _wtTpl = j.data || { core: [], channels: {}, columns: [] };
+    if (!_wtTpl.core) _wtTpl.core = [];
+    if (!_wtTpl.channels) _wtTpl.channels = {};
+    _wtRenderCols();
+    _wtRenderChans();
+    var at = document.getElementById('wtSavedAt');
+    if (at) {
+      at.textContent = _wtTpl.updatedAt
+        ? '최근 저장: ' + String(_wtTpl.updatedAt).slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '')
+        : '아직 저장된 표준 열이 없습니다';
+    }
+    _wtDirty(false);
+  } catch (e) {
+    var box = document.getElementById('wtColList');
+    if (box) box.innerHTML = '<div class="as-wtempty">표준 열을 불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function wtSaveTemplate() {
+  if (!_wtTpl) return;
+  // ★ 블록이 곧 저장값 — 배열 그대로 보낸다(쉼표 파싱 없음).
+  var channels = {};
+  CR_GUIDE_CHANNELS.forEach(function (c) {
+    channels[c.key] = ((_wtTpl.channels || {})[c.key] || []).slice();
+  });
+  try {
+    var j = await _wtFetch(WT_EP.template, { core: _wtTpl.core, channels: channels });
+    _wtTpl = j.data;
+    _wtRenderCols();
+    _wtRenderChans();
+    var at = document.getElementById('wtSavedAt');
+    if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
+    _wtDirty(false);
+    showToast('작업표 표준 열을 저장했습니다 (' + (_wtTpl.core || []).length + '개)');
+  } catch (e) { showToast('저장 실패: ' + e.message, true); }
+}
+
+/* ── 헤더 학습 리포트(펼칠 때 1회 로드 — 설정 화면을 열 때마다 무거운 집계를 돌리지 않는다) ── */
+async function wtToggleReport() {
+  var box = document.getElementById('wtReport');
+  var btn = document.getElementById('wtReportBtn');
+  if (!box) return;
+  var open = box.style.display !== 'none';
+  box.style.display = open ? 'none' : '';
+  if (btn) btn.innerHTML = open
+    ? '<i class="fas fa-chart-simple"></i> 헤더 학습 리포트 펼치기'
+    : '<i class="fas fa-chart-simple"></i> 헤더 학습 리포트 접기';
+  if (open) return;
+  if (_wtStats) return _wtRenderReport(_wtStats);
+  box.innerHTML = '<div class="as-wtempty">불러오는 중…</div>';
+  try {
+    var j = await _wtFetch(WT_EP.stats);
+    _wtStats = j.data || {};
+    _wtRenderReport(_wtStats);
+  } catch (e) {
+    box.innerHTML = '<div class="as-wtempty">리포트를 불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _wtRenderReport(d) {
+  var box = document.getElementById('wtReport');
+  if (!box) return;
+  var LAYER = { core: '고정', auto: '자동', channel: '채널', work: '작업별', status: '상태' };
+  var FREQ = { fixed: '거의 전부', common: '흔함', rare: '일부만' };
+  var pct = function (x) { return Math.round((x || 0) * 100) + '%'; };
+  var ch = d.channels || {};
+  var card = function (r) {
+    return '<div class="as-wtcard">' +
+      '<div class="as-wth"><span class="as-wtn">' + escHtml(r.label || r.role) + '</span>' +
+      '<span class="as-wtlayer ' + escHtml(r.layer || 'work') + '">' + escHtml(LAYER[r.layer] || r.layer || '') + '</span>' +
+      '<span class="as-wtfreq ' + escHtml(r.frequency || 'rare') + '">' + escHtml(FREQ[r.frequency] || '') + '</span>' +
+      '<span class="as-wtr">' + r.tabCount + '개 탭 · ' + pct(r.ratio) + '</span></div>' +
+      '<div class="as-wtbar"><i style="width:' + Math.min(100, Math.round((r.ratio || 0) * 100)) + '%"></i></div>' +
+      '<div class="as-wtv">' + ((r.headerVariants || []).map(function (v) { return escHtml(v.name) + ' (' + v.count + ')'; }).join(' · ') || '—') + '</div>' +
+      '</div>';
+  };
+  var core = (d.roles || []).filter(function (r) { return r.frequency === 'fixed'; });
+  var rest = (d.roles || []).filter(function (r) { return r.frequency !== 'fixed'; });
+  var conflicts = d.statusConflicts || [];
+
+  box.innerHTML =
+    '<div class="as-wtnote">분석한 탭 <b>' + d.tabsAnalyzed + '</b>개' +
+      (d.tabsWithoutHeaders ? ' · 헤더 미감지 ' + d.tabsWithoutHeaders + '개(미러 대기)' : '') +
+      ' &nbsp;·&nbsp; 채널 추정: 쿠팡 ' + (ch.coupang || 0) + ' · 네이버 ' + (ch.naver || 0) +
+      ' · 동시진행 ' + (ch.both || 0) + ' · 미상 ' + (ch.unknown || 0) +
+      '<br>비율 = 그 열을 가진 탭의 비율. <b>' + pct(d.thresholds && d.thresholds.core) + '</b> 이상이면 "거의 전부"(코어 후보)입니다.</div>' +
+    (conflicts.length
+      ? '<div class="as-wtsec">⚠ 확인 필요 — 상태 칸에 제출이 겹쳐 쓸 수 있는 열</div>' +
+        '<div class="as-wtnote">아래 열은 그 탭에서 <b>리뷰제출·입금 상태 칸</b>인데 구매양식 제출도 같은 열에 값을 씁니다. ' +
+        '제출이 상태 표시를 덮어쓸 수 있으니 <b>헤더 이름을 바꾸는 편이 안전</b>합니다.</div>' +
+        '<div class="as-wtgrid">' + conflicts.map(function (c) {
+          return '<div class="as-wtcard warn"><div class="as-wth"><span class="as-wtn">' + escHtml(c.header) + '</span>' +
+            '<span class="as-wtlayer status">' + escHtml(c.roleLabel) + '</span>' +
+            '<span class="as-wtfreq common">제출도 씀: ' + escHtml(c.mapperLabel) + '</span>' +
+            '<span class="as-wtr">' + c.tabCount + '개 탭</span></div></div>';
+        }).join('') + '</div>'
+      : '') +
+    '<div class="as-wtsec">코어 후보 — 거의 모든 작업에 있는 열</div>' +
+    (core.length ? '<div class="as-wtgrid">' + core.map(card).join('') + '</div>' : '<div class="as-wtempty">아직 집계된 열이 없습니다.</div>') +
+    '<div class="as-wtsec">작업별·채널별 열 — 있을 때만 붙는 열</div>' +
+    (rest.length ? '<div class="as-wtgrid">' + rest.map(card).join('') + '</div>' : '<div class="as-wtempty">해당 없음</div>') +
+    '<div class="as-wtsec">미분류 헤더 — 시스템이 역할을 모르는 열</div>' +
+    '<div class="as-wtnote">관리자가 미리 적어 두는 작업지시·업체 요청 칸이 여기 모입니다.</div>' +
+    ((d.unmapped || []).length
+      ? '<div class="as-wtgrid">' + (d.unmapped || []).map(function (u) {
+          return '<div class="as-wtcard"><div class="as-wth"><span class="as-wtn">' + escHtml(u.name) + '</span>' +
+            '<span class="as-wtfreq ' + escHtml(u.frequency || 'rare') + '">' + escHtml(FREQ[u.frequency] || '') + '</span>' +
+            '<span class="as-wtr">' + u.tabCount + '개 탭 · ' + pct(u.ratio) + '</span></div>' +
+            '<div class="as-wtbar"><i style="width:' + Math.min(100, Math.round((u.ratio || 0) * 100)) + '%"></i></div></div>';
+        }).join('') + '</div>'
+      : '<div class="as-wtempty">미분류 헤더가 없습니다.</div>');
+}
+
   /* ── 마운트 ──────────────────────────────────────────────────
      ★ 호스트 테마가 없으면(통합 작업대) `as-standalone` 으로 같은 토큰을 주입한다.
        admin.html 은 테마가 있어 클래스가 붙지 않으므로 **렌더 결과가 그대로**다. */
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, worktable: _worktableHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, worktable: loadWorktableTemplate, notice: loadReviewerNoticesAdmin };
   var SEP = '<hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">';
 
   function _injectStyles() {
@@ -475,7 +811,59 @@ async function deleteReviewerNotice(id) {
     st.id = 'adminSettingsStyles';
     st.textContent =
       '.as-standalone{--t1:#0F172A;--t2:#475569;--t3:#94A3B8;--t4:#9CA3AF;--p:#3182f6;--border:#E5E7EB;color:var(--t1)}' +
-      '.as-standalone .admin-section-header{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}';
+      '.as-standalone .admin-section-header{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}' +
+      /* 작업표 표준 열 — ★ 색은 리터럴 고정(호스트 테마 변수에 의존하지 않는다).
+         admin.html·통합 작업대 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
+      '.as-wtlist{display:flex;flex-direction:column;gap:6px}' +
+      '.as-wtempty{color:#9CA3AF;font-size:.8rem;padding:14px 10px;text-align:center;border:1px dashed #E5E7EB;border-radius:8px}' +
+      '.as-wtrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid #E5E7EB;border-radius:8px;padding:7px 10px;background:#fff}' +
+      '.as-wtno{font-size:.72rem;color:#9CA3AF;min-width:18px;font-variant-numeric:tabular-nums}' +
+      '.as-wtname{font-size:.85rem;font-weight:650;color:#111827;min-width:90px}' +
+      '.as-wtrole{font-size:.72rem;color:#1D4ED8;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:5px;padding:2px 7px}' +
+      '.as-wtrole.none{color:#6B7280;background:#F3F4F6;border-color:#E5E7EB}' +
+      '.as-wtwarn{font-size:.72rem;color:#B45309;background:#FEF3C7;border:1px solid #FDE68A;border-radius:5px;padding:2px 7px}' +
+      '.as-wtbtns{margin-left:auto;display:flex;gap:4px}' +
+      '.as-wtbtns button{width:26px;height:26px;border:1px solid #D1D5DB;background:#fff;border-radius:6px;cursor:pointer;font-size:.8rem;color:#374151;line-height:1}' +
+      '.as-wtbtns button.del{color:#B91C1C;border-color:#FECACA}' +
+      '.as-wtsec{font-size:.75rem;font-weight:750;letter-spacing:.03em;color:#6B7280;margin:16px 0 8px}' +
+      '.as-wtnote{font-size:.74rem;color:#9CA3AF;line-height:1.6;margin-bottom:8px}' +
+      '.as-wtnote b{color:#4B5563}' +
+      '.as-wtgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}' +
+      '.as-wtcard{border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;background:#fff}' +
+      '.as-wtcard.warn{border-color:#FDE68A;background:#FFFBEB}' +
+      '.as-wth{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}' +
+      '.as-wtn{font-weight:700;font-size:.82rem;color:#111827}' +
+      '.as-wtr{margin-left:auto;font-size:.72rem;color:#6B7280;font-variant-numeric:tabular-nums}' +
+      '.as-wtv{margin-top:5px;font-size:.71rem;color:#9CA3AF;line-height:1.6;word-break:break-all}' +
+      '.as-wtlayer{font-size:.65rem;font-weight:700;padding:1px 6px;border-radius:4px;border:1px solid transparent}' +
+      '.as-wtlayer.core{background:#E9F0F9;border-color:#B7CFE9;color:#2563A8}' +
+      '.as-wtlayer.auto{background:#E5F3EE;border-color:#A6D6C6;color:#127A5E}' +
+      '.as-wtlayer.channel{background:#FBF2E1;border-color:#E7D2A3;color:#9A6414}' +
+      '.as-wtlayer.work{background:#F3E9F9;border-color:#D8BCE9;color:#7A3FA8}' +
+      '.as-wtlayer.status{background:#EEF0F3;border-color:#D5DAE1;color:#59626F}' +
+      '.as-wtfreq{font-size:.65rem;font-weight:650;padding:1px 6px;border-radius:4px}' +
+      '.as-wtfreq.fixed{background:#E5F3EE;color:#127A5E}' +
+      '.as-wtfreq.common{background:#FBF2E1;color:#9A6414}' +
+      '.as-wtfreq.rare{background:#FAE9E7;color:#B3382E}' +
+      '.as-wtbar{height:4px;border-radius:2px;background:#E5E7EB;margin-top:6px;overflow:hidden}' +
+      '.as-wtbar i{display:block;height:100%;background:#2563A8}' +
+      /* 채널별 추가 열 — 채널 한 줄 = 라벨 + 블록들 + 추가 입력 */
+      '.as-wtchbox{display:flex;flex-direction:column;gap:7px}' +
+      '.as-wtchrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;background:#fff}' +
+      '.as-wtchlabel{flex:none;width:110px;font-size:.8rem;font-weight:700;color:#111827}' +
+      '.as-wtchips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:200px}' +
+      '.as-wtchnone{font-size:.74rem;color:#9CA3AF}' +
+      '.as-wtchip{display:inline-flex;align-items:center;gap:3px;border:1px solid #BFDBFE;background:#EFF6FF;border-radius:7px;padding:3px 6px}' +
+      '.as-wtchip b{font-size:.79rem;font-weight:650;color:#1D4ED8;padding:0 3px}' +
+      '.as-wtchip button{width:20px;height:20px;border:none;background:transparent;border-radius:5px;cursor:pointer;font-size:.62rem;color:#60A5FA;line-height:1;padding:0}' +
+      '.as-wtchip button:hover:not(:disabled){background:#DBEAFE;color:#1D4ED8}' +
+      '.as-wtchip button:disabled{opacity:.25;cursor:default}' +
+      '.as-wtchip button.x{color:#F87171;font-size:.68rem}' +
+      '.as-wtchip button.x:hover{background:#FEE2E2;color:#B91C1C}' +
+      '.as-wtchadd{flex:none;display:inline-flex;gap:5px;margin-left:auto}' +
+      '.as-wtchadd input{width:130px;padding:5px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none;background:#fff;color:#111827}' +
+      '.as-wtchadd button{width:29px;height:29px;border:1.5px solid #BFDBFE;background:#EFF6FF;color:#1D4ED8;border-radius:7px;cursor:pointer;font-size:.85rem;font-weight:700;line-height:1}' +
+      '@media (max-width:640px){.as-wtchlabel{width:100%}.as-wtchadd{margin-left:0}}';
     document.head.appendChild(st);
   }
   function _hostHasTheme() {
@@ -516,6 +904,16 @@ async function deleteReviewerNotice(id) {
   window.uploadCashReceiptGuide = uploadCashReceiptGuide;
   window.clearCashReceiptGuide = clearCashReceiptGuide;
   window.CR_GUIDE_CHANNELS = CR_GUIDE_CHANNELS;
+  window.loadWorktableTemplate = loadWorktableTemplate;
+  window.wtAddCol = wtAddCol;
+  window.wtDelCol = wtDelCol;
+  window.wtMoveCol = wtMoveCol;
+  window.wtChAdd = wtChAdd;
+  window.wtChDel = wtChDel;
+  window.wtChMove = wtChMove;
+  window.wtLoadSuggested = wtLoadSuggested;
+  window.wtSaveTemplate = wtSaveTemplate;
+  window.wtToggleReport = wtToggleReport;
   window.loadReviewerNoticesAdmin = loadReviewerNoticesAdmin;
   window.saveReviewerNotice = saveReviewerNotice;
   window.toggleReviewerNoticeForm = toggleReviewerNoticeForm;
