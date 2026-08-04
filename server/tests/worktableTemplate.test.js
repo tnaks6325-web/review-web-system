@@ -264,7 +264,7 @@ ok('출력은 전부 escHtml() 통과(헤더명·열이름은 사용자·시트�
   !/\+ *(u\.name|c\.header|c\.name|v\.name) *\+/.test(setJs)
   && /escHtml\(c\.name\)/.test(setJs) && /escHtml\(u\.name\)/.test(setJs));
 ok('채널별 추가 열은 현영 4채널 표를 재사용한다(채널 목록 사본 금지)',
-  /CR_GUIDE_CHANNELS\.map/.test(setJs) && /wtCh_/.test(setJs));
+  /CR_GUIDE_CHANNELS\.map/.test(setJs) && /function _wtChannels/.test(setJs));
 ok('★ 기본 4채널 + 직접 추가 채널 = _wtChannels() 한 벌(목록 사본 금지)',
   /function _wtChannels\(\)[\s\S]{0,400}CR_GUIDE_CHANNELS\.map/.test(setJs)
   && /_wtTpl && _wtTpl\.customChannels/.test(setJs)
@@ -285,14 +285,12 @@ ok('★ 열 추가 후보 = 헤더 학습 리포트의 열들(역할 변형 + �
   /function _wtBuildCandidates/.test(setJs)
   && /_wtStats \|\| \{\}\)\.roles[\s\S]{0,220}headerVariants/.test(setJs)
   && /_wtStats \|\| \{\}\)\.unmapped/.test(setJs));
-ok('★ 공통·채널·작업유형 행은 **같은 빌더** 한 벌(_wtRowHtml) — 사본을 두면 버튼 동작이 갈린다',
-  /function _wtRowHtml\(key, label/.test(setJs)
-  && setJs.includes("_wtRowHtml('core'")                       // 공통(모든 채널) 행
-  && /_wtChannels\(\)\.map\(function \(c\) \{[\s\S]{0,400}_wtRowHtml\(c\.key/.test(setJs)   // 채널 행
-  && /_wtTypes\(\)\.map\(function \(t\) \{[\s\S]{0,700}_wtRowHtml\('wt:' \+ t\.key/.test(setJs) // 유형 행
-  && setJs.includes("wtPickToggle(\\'' + key")                 // [▼] 는 빌더 안에 한 번만
-  && (setJs.match(/id="wtChips_/g) || []).length === 1
-  && (setJs.match(/id="wtPick_/g) || []).length === 1);
+ok('★★ 채널·작업유형은 **알약 줄 한 벌**(_wtRenderPills) — 채널마다 행을 그리던 사본이 없다',
+  /function _wtRenderPills/.test(setJs)
+  && /_wtChannels\(\)\.map\(function \(c\) \{[\s\S]{0,400}wtPvChan/.test(setJs)
+  && /_wtTypes\(\)[\s\S]{0,400}wtPvType/.test(setJs)
+  && !/function _wtRowHtml|function _wtRowsHtml/.test(setJs)     // 행 빌더 제거됨
+  && (setJs.match(/id="wtChips_core"/g) || []).length === 1);
 ok('★ 공통 = 표준 열 한 벌(별도 개념 없음) — core 배열을 두 뷰가 함께 본다',
   /function _wtListFor/.test(setJs)
   && /key === 'core'\) return \(_wtTpl\.core/.test(setJs)
@@ -311,31 +309,31 @@ ok('공통 기본값 프리셋 15열이 사용자 확정 목록과 일치한다'
 ok('★ 프리셋은 버튼으로만 — 저장값이 없을 때 조용히 적용되지 않는다(확정은 사람이)',
   /function wtLoadPreset/.test(setJs) && /onclick="wtLoadPreset\(\)"/.test(setJs)
   && !/core = WT_PRESET_CORE[\s\S]{0,80}loadWorktableTemplate/.test(setJs));
-ok('프리셋·통계불러오기는 공통만 바꾼다(채널 행 보존)',
+ok('프리셋·통계불러오기는 공통만 바꾼다(채널·유형 열 보존)',
   /_wtTpl\.core = WT_PRESET_CORE\.slice\(\)/.test(setJs)
   && !/wtLoadPreset[\s\S]{0,400}_wtTpl\.channels\s*=/.test(setJs));
 ok('★★ 후보 클릭은 **인덱스**로 넘긴다 — onclick 문자열에 열 이름을 넣지 않는다(따옴표 탈출 차단)',
   (() => {
-    const m = /onclick="wtPickAdd\([^"]*"/.exec(setJs);
-    // h.i(인덱스)만 들어가고 c.name/h.c.name 같은 이름 참조가 없어야 한다
+    const m = /onclick="wtAddPick\([^"]*"/.exec(setJs);
     return !!m && /h\.i/.test(m[0]) && !/name/.test(m[0]);
   })());
 ok('통계는 지연 로드 + 캐시 한 벌(_wtEnsureStats) — 고르기·리포트·불러오기가 같은 것을 쓴다',
   /async function _wtEnsureStats/.test(setJs)
   && (setJs.match(/_wtFetch\(WT_EP\.stats\)/g) || []).length === 1);
 ok('★ 자유 입력은 그대로 — 새 이름도 만들 수 있다(고르기는 보조 수단)',
-  /function wtChAdd/.test(setJs)
-  && setJs.includes('id="wtCh_')                       // 공용 빌더의 입력칸
-  && setJs.includes("wtChAdd(\\'' + key")              // [＋] 버튼
-  && /placeholder="' \+ placeholder \+ '"/.test(setJs));
+  /function wtChAdd\(key, name\)/.test(setJs)
+  && setJs.includes('id="wtAddInput"')                 // 팝오버의 유일한 입력칸
+  && /function wtAddSubmit[\s\S]{0,300}wtChAdd\(_wtAddTo, name\)/.test(setJs));
 ok('이미 담긴 후보는 비활성(중복 추가 클릭 자체가 불가)',
-  /dup \? ' disabled' : ''/.test(setJs) && /as-wtpickchip.*dup/.test(setJs));
-ok('한 번에 한 목록만 열린다(어느 행에 넣는지 헷갈리지 않게)',
-  /function _wtAllRowKeys[\s\S]{0,300}\['core'\][\s\S]{0,200}_wtChannels\(\)[\s\S]{0,200}_wtTypes\(\)/.test(setJs)
-  && /_wtAllRowKeys\(\)\.forEach\(function \(k\) \{[\s\S]{0,220}display = 'none'/.test(setJs));
-ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
+  /dup \? ' disabled' : ''/.test(setJs) && /as-wtpickchip.*dup/.test(setJs)
+  && /_wtListFor\(_wtAddTo\)/.test(setJs));
+ok('★★ 담는 곳은 한 번에 하나 — 켠 알약들만 후보로 보여 주고 고르게 한다(조용한 추측 금지)',
+  /function _wtAddTargets[\s\S]{0,700}_wtPvChan[\s\S]{0,400}_wtPvTypes/.test(setJs)
+  && /onclick="wtAddTarget\(/.test(setJs)
+  && /function wtAddOpen[\s\S]{0,400}_wtAddTo = t\.length > 1/.test(setJs));
+ok('렌더는 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
   /escHtml\(n\)/.test(setJs)
-  // 공통·채널 모든 편집이 _wtAfterEdit 로 수렴하고, 거기서 dirty 가 켜진다
+  // 공통·채널·유형 모든 열 편집이 _wtAfterEdit 로 수렴하고, 거기서 dirty 가 켜진다
   && /function _wtAfterEdit[\s\S]{0,300}_wtDirty\(true\)/.test(setJs)
   && ['wtChAdd', 'wtChDel', 'wtChMove'].every(function (f) {
        var i = setJs.indexOf('function ' + f + '(');
@@ -352,12 +350,12 @@ ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
    이름 블록만으로는 "작업표가 실제로 어떤 표가 되는지"가 안 그려져 표 머리 축소판을 깐다.
    고정할 것은 모양이 아니라 ① 자리(공통 아래·채널 위) ② 편집 즉시 따라 갱신
    ③ 데이터 사본 없음 ④ **한 줄** 유지(줄바꿈·가로 스크롤 금지) 넷이다. */
-ok('★ 미리보기는 공통 블록 바로 아래 — 채널·유형 행보다 먼저 온다(순서가 곧 실제 표의 앞부분)',
+ok('★ 순서 = 🌐 공통 요약 → 채널·유형 알약 줄 → 미리보기(담기·조절이 끝나는 자리)',
   (() => {
-    const i = setJs.indexOf("_wtRowHtml('core'");
-    const p = setJs.indexOf('id="wtPreview"');
-    const c = setJs.indexOf('id="wtRows"', i);     // 채널·유형 행 묶음이 들어가는 자리
-    return i > -1 && p > i && c > p;
+    const i = setJs.indexOf('id="wtChips_core"');
+    const pl = setJs.indexOf('_wtPillRowsHtml()', i);
+    const pv = setJs.indexOf('id="wtPreview"', pl);
+    return i > -1 && pl > i && pv > pl && !/id="wtRows"/.test(setJs);
   })());
 ok('★ 편집할 때마다 따라 갱신 — _wtRenderCols 가 미리보기를 부른다(로더에만 두면 옛 순서가 남는다)',
   /function _wtRenderCols\(\)[\s\S]{0,400}_wtRenderPreview\(\)/.test(setJs));
@@ -375,21 +373,26 @@ ok('★★ 한 줄 유지 — 줄바꿈·가로 스크롤 없이 칸만 줄인�
       && /flex:0 1 auto/.test(cell)              // 균등(1 1 0)이면 짧은 이름까지 잘린다(실측)
       && /title="/.test(setJs.slice(setJs.indexOf('function _wtRenderPreview'), setJs.indexOf('function _wtRenderCols')));
   })());
-ok('★ 채널 열은 특정 채널을 그리지 않고 자리만 알린다(틀린 채널을 그리느니 자리 표시)',
-  /as-wtpvc add[\s\S]{0,120}＋채널/.test(setJs));
+ok('★★ [＋ 열 추가] 는 미리보기 **오른쪽 끝**에 있고, 열이 0개일 때도 있다(처음 담을 창구)',
+  (() => {
+    const i = setJs.indexOf('function _wtRenderPreview');
+    const body = setJs.slice(i, setJs.indexOf('\nfunction wtPvSel', i));
+    // 빈 상태 분기와 일반 분기 **양쪽** 에 addCell 이 들어간다
+    return /addcell" onclick="wtAddOpen\(\)/.test(body)
+      && (body.match(/addCell/g) || []).length >= 3
+      && /cells \+ addCell/.test(body);
+  })());
 
 /* ── 공통 열 조절 창구 단일화 + 제출 매칭 설명(사용자 확정 2026-08-04) ────────
    종전엔 공통 행 칩·작업표 미리보기·공통 열 상세 세 곳이 같은 배열을 그렸고 그중
    둘(칩 ◀▶✕ · 상세 ↑↓✕)이 편집까지 돼 창구가 갈렸다 → **조절은 미리보기 하나**,
    공통 행은 추가 창구만, 상세는 읽기 전용 설명표(시스템 인식 + 구매양식 제출 매칭). */
-ok('★★ 공통 행은 칩을 그리지 않는다 — 요약 + "미리보기에서 조절" 안내만(중복 창구 제거)',
+ok('★★ 🌐 공통 줄은 개수 요약만 — 담기·조절은 미리보기 하나(중복 창구 제거)',
   (() => {
     const i = setJs.indexOf('function _wtRenderChans');
-    const body = setJs.slice(i, setJs.indexOf('\nfunction wtChAdd', i));
-    // core 분기가 칩 map 이전에 return 하고, 안내가 미리보기를 가리킨다
-    const core = /if \(key === 'core'\) \{[\s\S]{0,400}?return;\s*\}/.exec(body);
-    return i > -1 && !!core && /작업표 미리보기/.test(core[0]) && !/as-wtchip"/.test(core[0])
-      && body.indexOf(core[0]) < body.indexOf('as-wtchip');
+    const body = setJs.slice(i, setJs.indexOf('\n/** 열 담기 단일 경로', i));
+    return i > -1 && /작업표 미리보기/.test(body) && !/as-wtchip/.test(body)
+      && !/onclick/.test(body);   // 요약 줄에는 편집 버튼이 없다
   })());
 ok('★★ 미리보기 칸 클릭 = 조절(선택 → ◀▶✕) — onclick 은 인덱스만(열 이름 미포함 = 따옴표 탈출 차단)',
   (() => {
@@ -403,9 +406,10 @@ ok('★ 툴바 이동·빼기는 기존 단일 편집 경로(wtChMove/wtChDel)�
 ok('★★ 미리보기가 조절하는 대상은 **그 묶음의 저장 배열** — 합성 인덱스로 직접 splice 하지 않는다',
   (() => {
     const i = setJs.indexOf('function wtPvMove');
-    const j = setJs.indexOf('function _wtRenderCols');
-    const body = setJs.slice(i, j > i ? j : i + 3000);
-    return i > -1 && !/\.splice\(/.test(body) && /_wtListFor\(s\.list\)/.test(body);
+    const j = setJs.indexOf('function wtPvDel');
+    const body = setJs.slice(i, j > i ? j : i + 1500);
+    return i > -1 && !/\.splice\(/.test(body) && /_wtListFor\(s\.list\)/.test(body)
+      && /function wtPvDel[\s\S]{0,500}wtChDel\(s\.list, s\.idx\)/.test(setJs);
   })());
 ok('★ onclick 함수 3종은 window 에 노출된다(IIFE 스코프 — 빠지면 클릭이 ReferenceError 로 조용히 죽는다)',
   ['wtPvSel', 'wtPvMove', 'wtPvDel'].every(f => setJs.includes('window.' + f + ' = ' + f)));
@@ -496,9 +500,9 @@ ok('★★ 미리보기 합성 순서 = 서버 buildColumns 와 **같다**(사�
     });
   })());
 
-ok('★ 미리보기 채널 알약 — 누르면 그 채널이 합쳐진 완성 양식을 본다(보기·조절 전환, 저장과 무관)',
+ok('★ 채널 알약 — 누르면 그 채널이 합쳐진 완성 양식을 본다(보기·조절 전환, 저장과 무관)',
   /function wtPvChan\(key\)[\s\S]{0,300}_wtRenderPreview\(\)/.test(setJs)
-  && /_wtPvPills[\s\S]{0,900}onclick="wtPvChan/.test(setJs)
+  && /_wtRenderPills[\s\S]{0,1200}onclick="wtPvChan/.test(setJs)
   && !/wtPvChan[\s\S]{0,200}_wtFetch|wtPvChan[\s\S]{0,200}wtSaveTemplate/.test(setJs));
 ok('★ 작업유형 알약은 다중 토글(켠 유형 열이 합쳐진다)',
   /function wtPvType\(key\)[\s\S]{0,300}_wtPvTypes\.splice/.test(setJs)
@@ -509,18 +513,25 @@ ok('★ 지워진 채널·유형을 보고 있었으면 기본으로 되돌린�
 
 /* ── C. 커스텀 작업채널 ── */
 const wsvc = require('../src/services/worktable.service');
-ok('★★ 기본 4채널은 삭제 불가 — 커스텀만 [채널 삭제] 가 보이고, 서버도 기본 키를 커스텀으로 안 받는다',
+ok('★★ 기본 4채널은 삭제 불가 — 커스텀만 삭제 버튼이 보이고, 서버도 기본 키를 커스텀으로 안 받는다',
   /function wtDelChannel[\s\S]{0,300}if \(!c \|\| !c\.custom\) return;/.test(setJs)
+  && /c\.custom[\s\S]{0,240}wtDelChannel/.test(setJs)          // 관리 팝오버에서 커스텀에만 렌더
+  && /기본 채널 · 지울 수 없음/.test(setJs)
   && /BUILTIN_CHANNEL_KEYS/.test(svcSrc)
   && /!BUILTIN_CHANNEL_KEYS\.has\(k\)/.test(svcSrc));
+ok('★ 삭제·이름변경은 평소 화면이 아니라 [⚙ 관리] 안에서만(오클릭 방지 — 시안 B 확정)',
+  /function wtOpenChanMgr/.test(setJs) && /function wtOpenTypeMgr/.test(setJs)
+  && /onclick="wtOpenChanMgr\(\)"[\s\S]{0,80}채널 관리/.test(setJs)
+  // 알약 자체에는 삭제가 붙지 않는다
+  && !/wtPvChan\('[^']*'\)"[^>]*>[\s\S]{0,60}wtDelChannel/.test(setJs));
 ok('★ 열이 담긴 채널·유형 삭제는 한 번 더 묻는다(시트 무영향도 함께 안내)',
   /function wtDelChannel[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs)
   && /function wtDelType[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs));
 ok('★★ 채널 키는 **서버가 발급**한다 — 화면 임시 키는 저장 응답으로 교체된다(고아 방지)',
   /_keyMinter\('c', keys\)/.test(svcSrc) && /_keyMinter\('t', keys\)/.test(svcSrc)
-  && /function wtSaveTemplate[\s\S]{0,900}_wtRenderRows\(\)/.test(setJs));
+  && /function wtSaveTemplate[\s\S]{0,1100}_wtRenderChans\(\)/.test(setJs));
 ok('★ 같은 이름 채널·유형 중복 추가 차단(화면·서버 양쪽)',
-  /이미 있는 채널입니다/.test(setJs) && /이미 있는 작업유형입니다/.test(setJs)
+  /이미 있는 채널입니다/.test(setJs) && /이미 있는 작업유형 이름입니다/.test(setJs)
   && /seenLabel\.has\(label\.toLowerCase\(\)\)/.test(svcSrc));
 ok('★ 상한이 있다(폭주 방지) — 채널·유형 각각',
   /MAX_CUSTOM_CHANNELS/.test(svcSrc) && /MAX_WORK_TYPES/.test(svcSrc)
@@ -597,8 +608,117 @@ ok('★ 서버 라우트가 workTypes 를 받는다(미전송 = 없음)',
   /q\.workTypes != null\) opt\.workTypes = String\(q\.workTypes\)\.split\(','\)/.test(routes)
   && /customChannels: b\.customChannels, workTypes: b\.workTypes/.test(routes));
 ok('★ onclick 함수는 전부 window 에 노출된다(IIFE — 빠지면 클릭이 조용히 죽는다)',
-  ['wtPvChan', 'wtPvType', 'wtAddChannel', 'wtDelChannel', 'wtAddType', 'wtDelType', 'wtToggleTypePos']
+  ['wtPvChan', 'wtPvType', 'wtAddChannel', 'wtDelChannel', 'wtRenameChannel', 'wtDelType',
+   'wtOpenChanMgr', 'wtOpenTypeMgr', 'wtOpenTypeModal', 'wtCloseTypeModal', 'wtTypePos',
+   'wtTypeColAdd', 'wtTypeColDel', 'wtTypeSave', 'wtAddOpen', 'wtAddClose', 'wtAddTarget',
+   'wtAddSubmit', 'wtAddPick']
     .every(f => setJs.includes('window.' + f + ' = ' + f)));
+
+
+/* ══════════════════════════════════════════════════════════════
+   G. 시안 B — 팝오버·모달 화면 + 작업오더 기반 자동 선택
+   ══════════════════════════════════════════════════════════════ */
+ok('★★ 브라우저 기본 입력창(prompt)으로 작업유형을 만들지 않는다 — 전용 모달',
+  (() => {
+    // 채널 추가·이름변경은 여전히 prompt(간단한 한 줄), 작업유형은 모달이어야 한다
+    const i = setJs.indexOf('function wtOpenTypeModal');
+    const j = setJs.indexOf('function wtDelType');
+    const body = setJs.slice(i, j > i ? j : i + 9000);
+    return i > -1 && !/prompt\(/.test(body)
+      && /as-wtmodalwrap/.test(setJs) && /function _wtRenderTypeModal/.test(setJs);
+  })());
+ok('★★ 모달은 body 직속 마운트(설정 패널 안에 두면 오버레이가 화면 흐름에 섞인다 — 레포 실측 교훈)',
+  /function _wtTypeMount[\s\S]{0,600}document\.body\.appendChild/.test(setJs));
+ok('★ 모달 입력값은 다시 그릴 때 날아가지 않는다(_wtTypeSync 한 벌로 읽는다)',
+  /function _wtTypeSync/.test(setJs)
+  && ['wtTypePos', 'wtTypeColAdd', 'wtTypeColDel', 'wtTypeSave'].every(f => {
+       const i = setJs.indexOf('function ' + f + '(');
+       return i > -1 && /_wtTypeSync\(\)/.test(setJs.slice(i, i + 600));
+     }));
+ok('★ 유형 모달에서도 "공통에 있는 열" 은 담지 못한다(같은 열 2번 생성 차단 — 담기 경로 공통 규칙)',
+  /function wtTypeColAdd[\s\S]{0,900}이미 공통 열입니다/.test(setJs));
+ok('★ 자동 선택 조건 목록은 **서버가 내려 준 것**을 그린다(프론트 규칙 사본 금지)',
+  /function _wtTriggers\(\)[\s\S]{0,200}_wtTpl\.triggers/.test(setJs)
+  && /_wtTriggers\(\)\.map/.test(setJs)
+  && !/options_2plus|courier_proxy|delivery_real/.test(setJs));   // 조건 키가 프론트에 하드코딩되지 않음
+
+/* ── 작업오더 기반 자동 선택(사용자 확정: 쿠팡 + 상품옵션 2가지 → 채널 쿠팡 + 상품옵션 유형) ── */
+const wsvc2 = require('../src/services/worktable.service');
+const plan2 = require('../src/utils/worktablePlan');
+ok('★ 조건 목록은 서버 단일 출처 — 판정 함수가 그 키를 전부 안다',
+  wsvc2.WORK_TYPE_TRIGGERS.length >= 6
+  && wsvc2.WORK_TYPE_TRIGGERS.every(t => t.key && t.label)
+  && wsvc2.WORK_TYPE_TRIGGERS.some(t => t.key === 'auto'));
+ok('★★ 조건 판정 실행 — 작업오더 칸에서 파생된다',
+  (() => {
+    const ev = plan2.evalWorkTypeTrigger;
+    const wo = { courier_proxy: true, delivery_type: '실배송', review_type: '포토' };
+    return ev('options_2plus', { optionCount: 2 }) === true
+      && ev('options_2plus', { optionCount: 1 }) === false
+      && ev('courier_proxy', { workOrder: wo }) === true
+      && ev('courier_proxy', { workOrder: { courier_proxy: false } }) === false
+      && ev('courier_proxy', { workOrder: { courier_proxy: 'true' } }) === true   // 문자열 boolean 도 인정
+      && ev('delivery_real', { workOrder: wo }) === true
+      && ev('delivery_empty', { workOrder: wo }) === false
+      && ev('review_type_set', { workOrder: wo }) === true
+      && ev('review_type_set', { workOrder: { review_type: '  ' } }) === false
+      && ev('always', {}) === true && ev('never', { optionCount: 9 }) === false;
+  })());
+ok('★★ 값 없음·모르는 값 = 기존 동작(옵션 열 보유 + 옵션 2종 이상) — 옛 저장분이 조용히 안 달라진다',
+  (() => {
+    const ev = plan2.evalWorkTypeTrigger;
+    return ev('', { hasOptionColumn: true, optionCount: 2 }) === true
+      && ev('무슨값', { hasOptionColumn: true, optionCount: 2 }) === true
+      && ev('auto', { hasOptionColumn: false, optionCount: 5 }) === false
+      && ev('auto', { hasOptionColumn: true, optionCount: 1 }) === false;
+  })());
+ok('★★ 사용자 시나리오 실행 — "쿠팡 + 상품옵션 2가지" 작업오더 → 채널 쿠팡 · 상품옵션 유형 자동 선택',
+  (() => {
+    const tpl = {
+      core: ['번호', '구매일자', '수취인', '연락처', '비고'],
+      channels: { coupang: ['쿠팡ID'] }, customChannels: [],
+      workTypes: [
+        { key: 't1', label: '상품옵션', position: 'front', columns: ['옵션'], autoTrigger: 'options_2plus' },
+        { key: 't2', label: '택배발송대행', position: 'back', columns: ['택배송장번호'], autoTrigger: 'courier_proxy' },
+      ],
+    };
+    const wo = {
+      recruit_count: 10, daily_count: 5, start_date: '2026-08-10',
+      product_url: 'https://www.coupang.com/vp/products/123',
+      product_options_json: JSON.stringify([{ name: 'A', options: [{ label: '레드' }, { label: '블루' }] }]),
+      courier_proxy: false,
+    };
+    const p = plan2.buildWorktablePlan({ workOrder: wo, template: tpl, options: {} });
+    if (p.channel !== 'coupang') return false;
+    if (p.suggestedWorkTypes.join(',') !== 't1') return false;       // 상품옵션만 제안
+    // 화면이 그 제안을 켠 뒤(=담당자가 확인) 만들면 옵션 열이 실제로 붙는다
+    const p2 = plan2.buildWorktablePlan({ workOrder: wo, template: tpl, options: { workTypes: p.suggestedWorkTypes } });
+    const names = p2.columns.map(c => c.name);
+    return names.indexOf('옵션') === 2 && names.indexOf('쿠팡ID') > 0 && names.indexOf('택배송장번호') < 0;
+  })());
+ok('★ 제안 근거를 화면이 말한다(근거 없는 자동 체크 금지)',
+  /function workTypeTriggerReason/.test(readS('utils/worktablePlan.js'))
+  && /suggestReason: suggested \? workTypeTriggerReason/.test(readS('utils/worktablePlan.js'))
+  && /자동 제안 — \$\{esc\(t\.suggestReason\)\}/.test(wdesk));
+ok('★ 옵션 개수는 **작업오더가 말한 종류 수**로 센다 — 총 건수 0(미정)이어도 제안이 죽지 않는다',
+  (() => {
+    const tpl = { core: ['번호'], channels: {}, customChannels: [],
+      workTypes: [{ key: 't1', label: '상품옵션', position: 'front', columns: ['옵션'], autoTrigger: 'options_2plus' }] };
+    const wo = { recruit_count: 0, product_options_json: JSON.stringify([{ name: 'A', options: [{ label: 'ㄱ' }, { label: 'ㄴ' }] }]) };
+    return plan2.buildWorktablePlan({ workOrder: wo, template: tpl, options: {} }).suggestedWorkTypes.join(',') === 't1';
+  })());
+ok('★ 작업표 미리보기가 자동 선택 결과를 화면에 말해 준다(조용히 켜 두지 않는다)',
+  /autoOn\s*=\s*types\.filter\(t=>t\.suggested&&t\.enabled\)/.test(wdesk)
+  && /작업오더를 보고 \$\{autoOn\.length\}종이 자동 선택됨/.test(wdesk));
+ok('★★ 자동 선택 조건은 **저장 페이로드 안**에 실린다 — 빠뜨리면 조용히 auto 로 되돌아간다(실측 버그)',
+  (() => {
+    const i = setJs.indexOf('async function wtSaveTemplate');
+    const body = setJs.slice(i, setJs.indexOf('\n/* ──', i) > i ? setJs.indexOf('\n/* ──', i) : i + 2500);
+    return i > -1
+      && /workTypes: _wtTypes\(\)\.map/.test(body)
+      && /autoTrigger: t\.autoTrigger/.test(body)        // ← 페이로드 안에 있어야 한다
+      && /autoTrigger: WORK_TYPE_TRIGGER_KEYS\.has\(trig\) \? trig : 'auto'/.test(svcSrc);
+  })());
 
 console.log(`\n✅ worktableTemplate: ${n}개 통과`);
 // orderLedger.service 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다(레포 관용구).

@@ -3598,6 +3598,12 @@ function _wtpRender(){
     .concat((p.channels||[]).map(c=>`<option value="${esc(c.key)}"${p.channel===c.key&&(_WTP.form&&_WTP.form.channel)?' selected':''}>${esc(c.label)}${c.custom?' (직접 추가)':''}</option>`)).join('');
   /* 작업유형 — 그 작업일 때만 붙는 열 묶음. ★ 제안은 체크를 미리 해 줄 뿐 확정은 담당자가 한다. */
   const types=(p.workTypes||[]);
+  /* ★ 자동 반영 결과를 화면이 **말해 준다** — 체크만 조용히 켜 두면 담당자가 왜 켜졌는지 모른다.
+     (작업오더가 "쿠팡 + 상품옵션 2가지"면 채널 쿠팡 · 상품옵션 유형이 켜진 채로 열린다.) */
+  const autoOn=types.filter(t=>t.suggested&&t.enabled);
+  const autoNote=autoOn.length
+    ? ` · <b style="color:#127A5E">작업오더를 보고 ${autoOn.length}종이 자동 선택됨</b>`
+    : '';
   const typeHtml=types.length
     ? types.map(t=>`<label style="display:flex;align-items:flex-start;gap:8px;border:1px solid ${t.enabled?'#D8BCE9':'#E5E7EB'};background:${t.enabled?'#FDFBFF':'#fff'};border-radius:9px;padding:8px 11px;font-size:13px;cursor:pointer">
         <input type="checkbox" class="wtpType" value="${esc(t.key)}" ${t.enabled?'checked':''} onchange="_wtpOnEdit()" style="margin-top:3px">
@@ -3637,7 +3643,8 @@ function _wtpRender(){
           <select id="wtpChannel" onchange="_wtpOnEdit()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px">${chOpts}</select></label>
       </div>
 
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">작업유형 <span style="font-weight:400;color:#9CA3AF">— 켜면 그 열이 덧붙습니다</span></div>
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">작업유형
+          <span style="font-weight:400;color:#9CA3AF">— 켜면 그 열이 덧붙습니다${autoNote}</span></div>
         <div style="display:flex;flex-direction:column;gap:6px">${typeHtml}</div></div>
 
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">표 구성 (${p.columns.length}열)</div>${cols||'<span style="font-size:12.5px;color:#9CA3AF">열이 없습니다</span>'}</div>
