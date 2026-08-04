@@ -884,6 +884,23 @@
 .btn.sm{padding:3px 9px;font-size:11.5px}
 .btn.danger{color:#B3382E;border-color:#EAB6B0}
 
+/* ── 📘 업무가이드 ── */
+.gdsec{max-width:1120px;margin:0 0 26px}
+.gdh{font-size:14px;font-weight:750;color:var(--t2,#59626F);margin:0 0 10px;letter-spacing:-.01em}
+.gdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:11px}
+.gdcard{display:flex;align-items:flex-start;gap:12px;text-decoration:none;color:inherit;
+  border:1px solid var(--line,#E1E5EB);border-radius:12px;padding:14px 15px;background:var(--card,#fff);
+  box-shadow:0 1px 2px rgba(18,21,26,.04);transition:border-color .12s,box-shadow .12s,transform .12s}
+.gdcard:hover{border-color:#B7CFE9;box-shadow:0 4px 14px rgba(18,21,26,.09);transform:translateY(-1px)}
+.gdic{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:17px;
+  background:var(--acc-bg,#E9F0F9);border:1px solid var(--acc-edge,#B7CFE9)}
+.gdb{min-width:0;flex:1}
+.gdt{font-size:14px;font-weight:730;letter-spacing:-.012em;margin-bottom:3px}
+.gdd{font-size:12.5px;color:var(--t3,#8B94A1);line-height:1.5}
+.gdgo{flex:none;color:var(--t3,#8B94A1);font-size:14px;margin-top:2px}
+.gdcard:hover .gdgo{color:var(--acc,#2563A8)}
+#gdhead .mh{max-width:1120px}
+
 </style>
 </head>
 <body>
@@ -1056,6 +1073,7 @@ function renderShell(){
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리</button>
+        <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
@@ -1065,6 +1083,7 @@ function renderShell(){
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
+        <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
       ${isAdv?'':`<div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
@@ -1130,7 +1149,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
@@ -3317,6 +3336,85 @@ async function _pmCancel(id, seq){
   if(!r || !r.ok){ toast((r&&r.error)||'취소 실패'); return; }
   toast('회차를 취소했습니다');
   await _pmLoad();
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   📘 업무가이드 — 직원용 안내서 모음
+   ★ 목록은 **여기 한 곳**에서만 관리한다(WORK_GUIDES). 문서를 추가하면 이 배열에 한 줄
+     넣으면 되고, 사본을 만들면 "어떤 화면에서는 안 보이는 안내서"가 생긴다.
+   ★ 내부 설계문서(prd- · design- 접두 파일)는 **일부러 넣지 않는다** — 직원이 실제로 따라 하는
+     절차서·문제해결·기능이해만 담아야 목록이 쓸모를 유지한다.
+   ★ 광고주(advertiser)에게는 nav 자체가 없다(내부 업무 문서).
+   ══════════════════════════════════════════════════════════════ */
+const WORK_GUIDES = [
+  { cat:'업무 절차', icon:'💸', title:'입금관리 사용 안내',
+    desc:'입금대상을 뽑아 케이뱅크·하나은행 다건이체 서식으로 내려받고 회차를 남기는 방법',
+    file:'입금관리_사용안내.html', tag:'입금' },
+  { cat:'업무 절차', icon:'🧾', title:'외부모집 구매양식 수동제출',
+    desc:'카톡으로 모집한 외부 리뷰어의 슬래시 양식을 붙여넣어 접수하는 절차',
+    file:'외부모집_구매양식_수동제출_안내.html', tag:'주문' },
+  { cat:'업무 절차', icon:'📋', title:'구매양식 시트 입력 순서',
+    desc:'시트 수기 입력 위치·취소 처리 방법 (행을 지우면 아래 기록이 전부 밀립니다)',
+    file:'구매양식_시트_입력순서_안내.html', tag:'시트' },
+  { cat:'업무 절차', icon:'🧪', title:'대량구매 테스트 공고 만들기',
+    desc:'리뷰어 목록에는 안 뜨지만 실제 참여·제출까지 되는 내부 테스트 공고 만들기',
+    file:'대량구매_테스트공고_만들기.html', tag:'공고' },
+  { cat:'업무 절차', icon:'🧾', title:'현금영수증 발행방법 이미지 등록',
+    desc:'채널별(쿠팡·네이버·올리브영·카카오메이커스) 발행방법 이미지를 설정에 올리는 방법',
+    file:'현금영수증_발행방법_이미지_등록_안내.html', tag:'설정' },
+
+  { cat:'문제 해결', icon:'⚠️', title:'리뷰비 칸 누락 → 참여하기가 안 될 때',
+    desc:'리뷰어가 [참여하기]를 눌러도 안 되는 증상의 원인과 조치 순서',
+    file:'리뷰비칸_누락_참여불가_조치_유저플로우.html', tag:'장애' },
+  { cat:'문제 해결', icon:'🏷', title:'옵션칸에 상품명이 적히는 문제',
+    desc:'제출 시 시트 옵션 칸이 상품명으로 덮이던 문제의 원인과 대처',
+    file:'옵션칸_상품명_오기입_해결방안.html', tag:'시트' },
+
+  { cat:'기능 이해', icon:'📖', title:'시스템 소개서 (전체)',
+    desc:'전체 구조·유저플로우·와이어프레임 — 처음 오신 분은 여기부터',
+    file:'prd-userflow.html', tag:'전체' },
+  { cat:'기능 이해', icon:'🙋', title:'리뷰어 직접참여 캠페인',
+    desc:'리뷰어가 앱에서 직접 참여하고 자리를 잡는 방식(홀드·시간창·정원) 소개',
+    file:'intro-reviewer-participation.html', tag:'공고' },
+  { cat:'기능 이해', icon:'🧩', title:'모집공고 상품옵션 — 변경 전/후',
+    desc:'옵션별 정원·하루한도를 쓰는 공고에서 화면이 어떻게 달라지는지',
+    file:'campaign-options-before-after.html', tag:'공고' },
+  { cat:'기능 이해', icon:'🔄', title:'작업오더 → 모집공고 자동반영',
+    desc:'공고 발행 시 어떤 칸이 작업오더에서 자동으로 채워지고 어떤 칸은 직접 입력인지',
+    file:'작업오더-모집공고_자동반영_와이어프레임.html', tag:'공고' },
+];
+
+function renderGuidesView(){
+  STATE.gdq = STATE.gdq || '';
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="gdhead"></div><div id="gdbody"></div></div>`;
+  _gdRender();
+}
+
+function _gdRender(){
+  const q = String(STATE.gdq||'').trim().toLowerCase();
+  const hit = g => !q || (g.title+' '+g.desc+' '+g.cat+' '+(g.tag||'')).toLowerCase().includes(q);
+  const list = WORK_GUIDES.filter(hit);
+  const cats = [...new Set(WORK_GUIDES.map(g=>g.cat))];
+
+  $('#gdhead').innerHTML=`<div class="mh"><h1>업무가이드</h1>
+    <span class="bd g">${list.length}개</span>
+    <span class="sp" style="flex:1"></span>
+    <input class="ovsearch" id="gdq" placeholder="안내서 검색" value="${esc(STATE.gdq||'')}"
+      oninput="STATE.gdq=this.value;_gdRender();document.getElementById('gdq').focus()"></div>`;
+
+  $('#gdbody').innerHTML = !list.length
+    ? `<div class="empty">"${esc(STATE.gdq)}" 에 맞는 안내서가 없습니다.</div>`
+    : cats.map(c=>{
+        const items = list.filter(g=>g.cat===c);
+        if(!items.length) return '';
+        return `<div class="gdsec"><h2 class="gdh">${esc(c)}</h2><div class="gdgrid">${
+          items.map(g=>`<a class="gdcard" href="/docs/${encodeURIComponent(g.file)}" target="_blank" rel="noopener">
+            <div class="gdic">${g.icon}</div>
+            <div class="gdb"><div class="gdt">${esc(g.title)}</div><div class="gdd">${esc(g.desc)}</div></div>
+            <div class="gdgo">↗</div></a>`).join('')
+        }</div></div>`;
+      }).join('');
 }
 
 async function renderSettingsView(){
