@@ -192,6 +192,31 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 리뷰 자동검수 배치 스윕(M2): 미검수 재시도 + 과거 제출분 따라잡기 ──
+  //   인라인 검수는 신규 제출만 본다. AI 가 죽어 있던 건(pending)과 배포 이전 제출분을
+  //   여기서 따라잡는다. 시트 API 무접촉 — Drive 다운로드·AI 는 사이클 캡으로 통제.
+  //   ★ 다른 크론과 분(minute)을 겹치지 않게 둔다(*/5 미러·*/2 리컨실과 충돌 회피).
+  if (process.env.REVIEW_INSPECT !== '0' && process.env.REVIEW_INSPECT_SWEEP !== '0') {
+    const riSchedule = process.env.REVIEW_INSPECT_SWEEP_SCHEDULE || '4-59/10 * * * *';
+    let riRunning = false;
+    cron.schedule(riSchedule, async () => {
+      if (riRunning) return;
+      riRunning = true;
+      try {
+        const { runInspectSweep } = require('../services/reviewInspect.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('review_inspect_sweep', () => runInspectSweep());
+        if (r && (r.done || r.failed || r.gaveUp)) {
+          logger.info(`[CRON-ReviewInspect] scanned=${r.scanned}, done=${r.done}, failed=${r.failed}, gaveUp=${r.gaveUp}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-ReviewInspect] error: ${err.message}`);
+      } finally {
+        riRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
   //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
   //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).

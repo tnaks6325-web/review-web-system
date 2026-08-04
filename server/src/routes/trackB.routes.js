@@ -904,6 +904,57 @@ router.post('/review-inspect/product-names', authMiddleware, _reInternal, async 
   }
 });
 
+/* 검수 결과 CSV — 업체 전달 전 사람이 훑어보는 용도(PII 포함 → 내부인만) */
+router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const sc = await _riScopeQuery(req);
+    if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
+    let items = await _inspectSvc.listInspections({
+      sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'all'), limit: 500,
+    });
+    if (sc.scoped && !sc.tabName) {
+      const allow = new Set((sc.allow || []).map(t => JSON.stringify([t.sheetId, t.tabName])));
+      items = items.filter(it => allow.has(JSON.stringify([it.sheet_id, it.tab_name])));
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="review-inspect.csv"');
+    res.send(_inspectSvc.inspectionsCsv(items));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'CSV 생성에 실패했습니다.' });
+  }
+});
+
+/* 판별 예시이미지 — 조회는 내부인, **저장은 adminOrMaster**(전사 설정이라 AE가 못 바꾼다) */
+router.get('/review-inspect/samples', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    res.json({ ok: true, samples: await _inspectSvc.sampleSettings() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '예시이미지를 불러오지 못했습니다.' });
+  }
+});
+router.post('/review-inspect/samples', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const url = await _inspectSvc.saveSample({ key: String(b.key || ''), imageUrl: b.imageUrl });
+    res.json({ ok: true, key: b.key, imageUrl: url });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || '저장에 실패했습니다.' });
+  }
+});
+
+/* 배치 스윕 수동 실행 — 과거분 따라잡기를 관리자가 당길 수 있게(master/admin) */
+router.post('/review-inspect/sweep', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const { withJobLock } = require('../utils/jobLock');
+    const limit = Math.min(Number((req.body || {}).limit) || 20, 100);
+    const r = await withJobLock('review_inspect_sweep', () => _inspectSvc.runInspectSweep({ limit }),
+      { onBusy: () => ({ busy: true }) });
+    res.json({ ok: true, ...(r || {}) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '스윕 실행에 실패했습니다.' });
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    C/S 문의창구 — 통합 작업대 상단탭
 

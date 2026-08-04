@@ -32,15 +32,18 @@ function _expectedKind(slotKey) {
  *            confidence:number, message:string, businessNo:string, amount:number}}
  *   status: ok=형식 일치 / mismatch=명백히 다른 형식(경고) / skipped=판정 안 함(통과)
  */
-async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo } = {}) {
+async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, samples } = {}) {
   const expected = _expectedKind(slotKey);
   const skip = (message) => ({ status: 'skipped', expected, got: null, confidence: 0, message, businessNo: '', amount: 0, sure: false });
   if (!ENABLED || !expected || !base64) return skip('');
 
   let r;
   try {
+    // ★★ `samples`(판별 예시이미지)는 **호출부가 주는 대로 그대로 넘긴다** —
+    //   같은 이미지에 대해 검수 경로와 다른 값을 쓰면 캐시 키가 갈려 AI 콜이 두 번 나간다.
+    //   예시가 등록돼 있지 않으면 빈 배열이라 오늘과 동작이 완전히 같다.
     const { classifySubmissionImage } = require('./gemini.service');
-    r = await classifySubmissionImage(base64, mimeType);
+    r = await classifySubmissionImage(base64, mimeType, { samples });
   } catch (e) {
     return skip('');   // AI 장애 = 통과(제출을 막지 않는다)
   }
