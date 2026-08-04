@@ -76,7 +76,28 @@
             <option value="회수건">회수건</option>
           </select></div>
         <div class="rf-hrow"><span class="rf-hl">리뷰비 (원)</span>
-          <input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100"></div>
+          <input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100" oninput="renderFeeSchedule()"></div>
+      </div>
+
+      <!-- ── 기간별 리뷰비(082) — 날짜마다 다른 금액을 지급할 때만 켠다 ──
+           끄면(구간 0개) 위 '리뷰비' 한 값으로 종전과 100% 동일하게 동작한다.
+           참여한 리뷰어에겐 **참여 시점 금액이 영구 고정**되므로, 나중에 금액을 올려도
+           과거 참여자의 리뷰 내역·누적 합계는 바뀌지 않는다. -->
+      <div class="rf-fee-box">
+        <label class="rf-fee-sw">
+          <input type="checkbox" id="rf_fee_sched_on" onchange="onFeeScheduleToggle(this.checked)">
+          📅 기간별 리뷰비
+          <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.68rem">— 예) 7월 1,000원 · 8월 1,500원</span>
+        </label>
+        <div id="rf_fee_sched_section" style="display:none;margin-top:8px">
+          <div class="rf-fee-head"><span>적용 시작일</span><span style="text-align:right">리뷰비(원)</span><span>메모(관리자만)</span><span></span></div>
+          <div id="rf_fee_rows"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <button type="button" class="rchan-btn" style="font-size:.72rem" onclick="addFeeRow()"><i class="fas fa-plus"></i> 구간 추가</button>
+            <div id="rf_fee_summary" style="font-size:.66rem;color:var(--t3,#94A3B8)"></div>
+          </div>
+          <div id="rf_fee_check" style="margin-top:6px"></div>
+        </div>
       </div>
 
       <!-- 안내배지 -->
@@ -424,6 +445,23 @@
 .rf-opt-row .rform-input{font-size:.74rem;padding:6px 7px;margin:0}
 .rf-opt-row .rf-opt-pay,.rf-opt-row .rf-opt-rt,.rf-opt-row .rf-opt-dl{text-align:right}
 .rf-opt-row .rf-opt-prod.rf-dup{background:#FAFBFD;color:var(--t2,#475569)}
+/* 기간별 리뷰비(082) — 시작일 · 금액 · 메모 (종료일은 받지 않는다: 빈틈·겹침 원천 차단) */
+#recruitModal .rf-fee-box{border:1.5px solid #12b886;border-radius:12px;padding:10px 11px;background:#F6FFFB;margin-bottom:9px}
+#recruitModal .rf-fee-sw{display:flex;align-items:center;gap:9px;font-weight:800;font-size:.8rem;cursor:pointer}
+#recruitModal .rf-fee-sw input{width:16px;height:16px;accent-color:#12b886}
+#recruitModal .rf-fee-head,#recruitModal .rf-fee-row{display:grid;grid-template-columns:1.05fr .8fr 1.35fr 24px;gap:6px;align-items:center}
+#recruitModal .rf-fee-head{font-size:.62rem;font-weight:800;color:var(--t3,#94A3B8);padding:0 2px 4px;
+  border-bottom:1px solid var(--border,#E2E8F0);margin-bottom:6px}
+#recruitModal .rf-fee-row{margin-bottom:6px}
+#recruitModal .rf-fee-row .rform-input{font-size:.74rem;padding:6px 7px;margin:0}
+#recruitModal .rf-fee-row .rf-fee-amt{text-align:right}
+#recruitModal .rf-fee-row.rf-fee-now{background:#ECFDF5;border-radius:8px;padding:3px;margin:0 -3px 6px}
+#recruitModal .rf-fee-del{border:none;background:none;color:#CBD5E1;font-size:.95rem;font-weight:800;cursor:pointer}
+#recruitModal .rf-fee-del:hover{color:#EF4444}
+#recruitModal .rf-fee-chk{font-size:.7rem;font-weight:700;display:flex;gap:6px;align-items:flex-start;margin-top:4px}
+#recruitModal .rf-fee-chk.ok{color:#0ca678}
+#recruitModal .rf-fee-chk.warn{color:#B45309}
+#recruitModal .rf-fee-chk.err{color:#DC2626}
 /* 좁은 화면: 세로로 되돌리고 미리보기는 접어 둔다(입력이 우선) */
 @media (max-width:900px){
   .rf-split{flex-direction:column;overflow-y:auto}

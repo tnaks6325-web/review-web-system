@@ -29,6 +29,12 @@ const MIN_TEXT = Number(process.env.REVIEW_INSPECT_MIN_TEXT || 30);
 // ★ 두 글의 길이가 이 비율 이상일 때만 "포함 관계"(word_similarity)까지 본다.
 //   낮추면 짧은 관용구가 긴 리뷰에 들어있다는 이유로 오탐이 난다(findSimilarText 주석 참조).
 const SIM_LEN_RATIO = Number(process.env.REVIEW_INSPECT_SIM_LEN_RATIO || 0.5);
+/* ★ 비교 범위 — 기본 'tab'(같은 작업 안에서만). 'global' 이면 **다른 캠페인에 같은 글을
+   돌려쓰는 것**까지 잡지만, 비교 대상이 전체로 늘어 쿼리가 무거워진다(trgm GIN 인덱스가
+   있어도 행 수에 비례). 운영 규모를 보고 켤 것. */
+const SIM_SCOPE = String(process.env.REVIEW_INSPECT_SIM_SCOPE || 'tab');
+// 작성자 표기 재사용 탐지 — 경고 전용(차단 절대 없음). 끄려면 0.
+const AUTHOR_REUSE = process.env.REVIEW_INSPECT_AUTHOR_REUSE !== '0';
 // ★ 잠금 제외 채널 — 위 불변식 ③
 const BLOCK_EXEMPT_CHANNELS = String(process.env.REVIEW_PRECHECK_EXEMPT || 'kakao')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -121,6 +127,106 @@ function precheckPolicy({ classified, expectedChannel, slotKey = 'review' } = {}
 }
 
 /* ══════════════════════════════════════════════════════════════════
+ * 판별 예시이미지 (few-shot)
+ *
+ * ★★ 예시는 **판정 호출부 전부가 같은 것을 넘겨야** 한다 — 한쪽만 넘기면 캐시 키가
+ *   갈려 같은 이미지에 AI 콜이 두 번 나간다(review-upload 의 verifyCapture ↔ 검수).
+ *   그래서 "이 탭의 기대 채널 → 예시 목록"을 여기서 한 번 만들어 양쪽에 같이 준다.
+ * ★ 채널을 모르면 **빈 배열**(예시 미동봉) — 9장을 다 보내면 토큰·지연이 커져
+ *   첨부 즉시 판별의 응답성을 해친다.
+ * ════════════════════════════════════════════════════════════════ */
+const SAMPLES_ENABLED = process.env.REVIEW_INSPECT_SAMPLES !== '0';
+const _sampleCache = new Map();                 // settingKey → { data, mimeType, ts }
+const SAMPLE_TTL = Number(process.env.REVIEW_INSPECT_SAMPLE_TTL_MS || 30 * 60 * 1000);
+
+/** Drive 프록시 URL → base64. 실패는 null(그 예시만 빠지고 판정은 계속). */
+async function _fetchSample(url) {
+  try {
+    const m = /\/api\/drive\/image\/([-\w]{20,})/.exec(String(url || ''));
+    if (!m) return null;
+    const { downloadFile } = require('./drive.service');
+    const f = await downloadFile(m[1]);
+    if (!f || !f.buffer) return null;
+    return { data: f.buffer.toString('base64'), mimeType: f.mimeType || 'image/jpeg' };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 예시이미지 로드 실패(생략): ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * 기대 채널에 해당하는 예시이미지들. 등록된 게 없으면 빈 배열 =
+ * **오늘과 완전히 같은 동작**(예시를 안 올리면 아무것도 안 바뀐다).
+ */
+async function loadSamplesFor(expectedChannel) {
+  if (!SAMPLES_ENABLED || !expectedChannel) return [];
+  try {
+    const { samplesForChannel, sampleSettingKey } = require('../utils/reviewSampleChannels');
+    const slots = samplesForChannel(expectedChannel);
+    if (!slots.length) return [];
+    const keys = slots.map(s => sampleSettingKey(s.key));
+    const { rows } = await _db().query(
+      'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [keys]
+    );
+    const urlOf = {};
+    for (const r of rows) if (r.value) urlOf[r.key] = r.value;
+
+    const out = [];
+    const now = Date.now();
+    for (const s of slots) {
+      const k = sampleSettingKey(s.key);
+      const url = urlOf[k];
+      if (!url) continue;
+      const hit = _sampleCache.get(k);
+      if (hit && hit.url === url && (now - hit.ts) < SAMPLE_TTL) {
+        out.push({ key: s.key, label: s.label, data: hit.data, mimeType: hit.mimeType });
+        continue;
+      }
+      const f = await _fetchSample(url);
+      if (!f) continue;
+      _sampleCache.set(k, { ...f, url, ts: now });
+      out.push({ key: s.key, label: s.label, data: f.data, mimeType: f.mimeType });
+    }
+    return out;
+  } catch (e) {
+    logger.warn(`[reviewInspect] 예시이미지 준비 실패(미동봉): ${e.message}`);
+    return [];
+  }
+}
+
+/** 관리자 화면용 — 슬롯별 등록 여부. */
+async function sampleSettings() {
+  const { REVIEW_SAMPLES, sampleSettingKey, REVIEW_SAMPLE_KEYS } = require('../utils/reviewSampleChannels');
+  const out = REVIEW_SAMPLES.map(s => ({ ...s, imageUrl: '' }));
+  try {
+    const { rows } = await _db().query(
+      'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [REVIEW_SAMPLE_KEYS]
+    );
+    const m = {};
+    for (const r of rows) m[r.key] = r.value || '';
+    for (const s of out) s.imageUrl = m[sampleSettingKey(s.key)] || '';
+  } catch (e) {
+    logger.warn(`[reviewInspect] 예시이미지 조회 실패: ${e.message}`);
+  }
+  return out;
+}
+
+/** 예시이미지 저장(''=제거). https 절대 URL만 — 관리자 화면에 <img src>로 나간다. */
+async function saveSample({ key, imageUrl } = {}) {
+  const { isReviewSampleKey, sampleSettingKey } = require('../utils/reviewSampleChannels');
+  if (!isReviewSampleKey(key)) throw new Error('알 수 없는 예시 슬롯입니다.');
+  const url = String(imageUrl ?? '').trim();
+  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
+  await _db().query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [sampleSettingKey(key), url]
+  );
+  _sampleCache.delete(sampleSettingKey(key));   // 교체 즉시 반영
+  return url;
+}
+
+/* ══════════════════════════════════════════════════════════════════
  * 2차 검수 (M1) — 제출 이후 대조
  * ════════════════════════════════════════════════════════════════ */
 
@@ -170,6 +276,94 @@ function computeStatus(checks) {
   return 'pass';
 }
 
+/* ── 기대 상품명 공급 ─────────────────────────────────────────────
+   ★ 우선순위: ① 탭에 직접 적어둔 값(`inspect_product_names`) → ② 연결된 작업오더.
+     ①이 있으면 ②는 보지 않는다 — 관리자가 명시한 값이 항상 이긴다(시트 표기와
+     작업오더 표기가 다를 때 손으로 잡는 칸이라, 자동값이 섞이면 그 의도가 무너진다). */
+
+/** "옵션 없음"류는 상품명이 아니라 **서술**이다 — 기대값에 넣으면 아무 리뷰나 통과한다. */
+const _NON_PRODUCT = /^(옵션\s*없음|없음|단일(\s*상품)?|해당\s*없음|기본|공통|-|없슴)$/;
+function _isNonProduct(s) { return _NON_PRODUCT.test(String(s || '').trim()); }
+
+/** 가격·수량 꼬리 제거 — "힙스 31400원" → "힙스", "A 28,900원" → "A" */
+function _stripPriceTail(s) {
+  return String(s || '')
+    .replace(/결제\s*금액\s*[:：]?\s*[\d,]+\s*원?/g, ' ')
+    .replace(/[\d,]{3,}\s*원/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * 작업오더 → 기대 상품명 후보(순수함수).
+ * ★ 후보를 넉넉히 모으는 쪽이 맞다 — 하나라도 맞으면 통과이므로, 후보가 많을수록
+ *   **오탐(정상 리뷰를 의심 처리)이 줄고** 미탐만 조금 늘어난다. 이 기능의 실패 선호와 일치.
+ */
+function productNamesFromWorkOrder(wo) {
+  const out = [];
+  const push = (s) => {
+    const v = _stripPriceTail(String(s || '').replace(/\|/g, '')).trim();
+    if (v && v.length >= 2 && !_isNonProduct(v)) out.push(v);
+  };
+  if (!wo) return out;
+
+  // ① 구조화 JSON — [{ name, base:{pay}, options:[{label,pay}] }] (프론트 _woOptionRows 와 같은 형태)
+  try {
+    const arr = JSON.parse(wo.product_options_json || '[]');
+    if (Array.isArray(arr)) for (const p of arr) push(p && p.name);
+  } catch (_) { /* 깨진 JSON 은 무시하고 아래 텍스트 경로로 */ }
+
+  // ② 자유서술 텍스트 — 줄 단위, 구분자 앞 조각이 상품명
+  //    실측 형식: "A - 옵1 - 결제금액 28,900원" / "상품A / 레드 / 12,000원" / "힙스 31400원"
+  for (const line of String(wo.product_option || '').split(/[\n\r]+/)) {
+    const t = line.trim();
+    if (!t) continue;
+    const head = t.split(/\s*[-–/|]\s*/)[0];
+    push(head);
+  }
+
+  // 중복 제거(정규화 기준) — 같은 상품이 JSON·텍스트 양쪽에 있을 수 있다
+  const seen = new Set();
+  return out.filter(v => {
+    const k = _normProduct(v);
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/**
+ * 이 탭에 연결된 작업오더 1건. Track B 링크 우선 → work_orders.linked_tab_* 폴백.
+ * ★ work_orders 는 **읽기만** 한다(Track A 승인 흐름이 linked_tab_* 를 보고 분기하므로).
+ */
+async function _workOrderForTab({ sheetId, tabName } = {}) {
+  try {
+    // ★★ 우선순위를 ORDER BY 로 **명시**한다 — 두 조건을 OR 로만 묶으면 Track B 링크가
+    //   있어도 `created_at` 이 더 최근인 폴백 오더가 이긴다(실측으로 잡힘).
+    //   0 = Track B 링크(명시적 지정) / 1 = work_orders.linked_tab_* 폴백.
+    const { rows } = await _db().query(
+      `SELECT w.title, w.product_option, w.product_options_json,
+              CASE WHEN EXISTS (SELECT 1 FROM trackb_work_order_links l
+                                 WHERE l.work_order_id = w.id AND l.deleted_at IS NULL
+                                   AND l.sheet_id = $1 AND l.tab_name = $2)
+                   THEN 0 ELSE 1 END AS link_rank
+         FROM work_orders w
+        WHERE w.deleted_at IS NULL
+          AND ( EXISTS (SELECT 1 FROM trackb_work_order_links l
+                         WHERE l.work_order_id = w.id AND l.deleted_at IS NULL
+                           AND l.sheet_id = $1 AND l.tab_name = $2)
+                OR (w.linked_tab_sheet_id = $1 AND w.linked_tab_name = $2) )
+        ORDER BY link_rank, w.created_at DESC
+        LIMIT 1`,
+      [sheetId, tabName]
+    );
+    return rows[0] || null;
+  } catch (e) {
+    logger.warn(`[reviewInspect] 작업오더 조회 실패(상품명 대조 생략): ${e.message}`);
+    return null;
+  }
+}
+
 /** 탭 설정에서 기대 채널·기대 상품명을 읽는다. 실패는 빈 값(대조 생략). */
 async function loadTabExpectations({ sheetId, tabName } = {}) {
   const out = { expectedChannel: null, productNames: [] };
@@ -197,10 +391,46 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     out.expectedChannel = expectedChannelKey(ch);
     out.productNames = String(r.inspect_product_names || '')
       .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+    if (out.productNames.length) { out.productSource = 'manual'; return out; }
+
+    // 직접 적어둔 값이 없으면 연결된 작업오더에서 파생한다
+    const wo = await _workOrderForTab({ sheetId, tabName });
+    const derived = productNamesFromWorkOrder(wo);
+    if (derived.length) { out.productNames = derived; out.productSource = 'work_order'; }
   } catch (e) {
     logger.warn(`[reviewInspect] 탭 기대값 조회 실패(대조 생략): ${e.message}`);
   }
   return out;
+}
+
+/** 관리자 화면용 — 이 탭의 기대 상품명 현황(수동값 + 작업오더 파생값을 함께 보여준다). */
+async function productNameSettings({ sheetId, tabName } = {}) {
+  const out = { manual: '', derived: [], effective: [], source: 'none' };
+  try {
+    const { rows } = await _db().query(
+      'SELECT inspect_product_names FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    out.manual = String(rows[0]?.inspect_product_names || '');
+    out.derived = productNamesFromWorkOrder(await _workOrderForTab({ sheetId, tabName }));
+    const manualList = out.manual.split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+    if (manualList.length) { out.effective = manualList; out.source = 'manual'; }
+    else if (out.derived.length) { out.effective = out.derived; out.source = 'work_order'; }
+  } catch (e) {
+    logger.warn(`[reviewInspect] 기대 상품명 조회 실패: ${e.message}`);
+  }
+  return out;
+}
+
+/** 탭별 기대 상품명 저장(줄바꿈 구분). 빈 값 = 해제(작업오더 파생으로 되돌아간다). */
+async function saveProductNames({ sheetId, tabName, text } = {}) {
+  const v = String(text == null ? '' : text)
+    .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean).slice(0, 20).join('\n').slice(0, 2000);
+  await _db().query(
+    'UPDATE tab_configs SET inspect_product_names = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+    [v, sheetId, tabName]
+  );
+  return v;
 }
 
 /**
@@ -260,7 +490,7 @@ async function findSimilarText({ text, fileId, sheetId, tabName } = {}) {
   if (t.length < MIN_TEXT) return { verdict: 'skip', reason: 'too_short' };
   try {
     const { rows } = await _db().query(
-      `SELECT file_id, reviewer_name, row_index,
+      `SELECT file_id, reviewer_name, row_index, tab_name,
               CASE WHEN LEAST(length(ocr_text), length($1))::numeric
                         / GREATEST(length(ocr_text), length($1)) >= $6
                    THEN GREATEST(similarity(ocr_text, $1),
@@ -269,23 +499,57 @@ async function findSimilarText({ text, fileId, sheetId, tabName } = {}) {
                    ELSE similarity(ocr_text, $1)
               END AS score
          FROM review_inspections
-        WHERE sheet_id = $2 AND tab_name = $3
+        WHERE ($7::boolean OR (sheet_id = $2 AND tab_name = $3))
           AND file_id <> COALESCE($4, '')
           AND ocr_text IS NOT NULL AND length(ocr_text) >= $5
         ORDER BY score DESC
         LIMIT 1`,
-      [t, sheetId, tabName, fileId || null, MIN_TEXT, SIM_LEN_RATIO]
+      [t, sheetId, tabName, fileId || null, MIN_TEXT, SIM_LEN_RATIO, SIM_SCOPE === 'global']
     );
     const top = rows[0];
     if (!top || !(Number(top.score) >= SIM_THRESHOLD)) {
-      return { verdict: 'pass', score: top ? Number(top.score) : 0, scope: 'tab' };
+      return { verdict: 'pass', score: top ? Number(top.score) : 0, scope: SIM_SCOPE };
     }
     return {
-      verdict: 'warn', score: Number(top.score), scope: 'tab',
+      verdict: 'warn', score: Number(top.score), scope: SIM_SCOPE,
       matchFileId: top.file_id, matchReviewer: top.reviewer_name || '', matchRow: top.row_index,
+      matchTab: top.tab_name || '',
     };
   } catch (e) {
     logger.warn(`[reviewInspect] 유사도 대조 실패(통과 처리): ${e.message}`);
+    return { verdict: 'skip' };
+  }
+}
+
+/**
+ * 작성자 표기(마스킹) 재사용 — 같은 `김**` 이 **다른 리뷰어**의 제출에 반복 등장하면
+ * 한 계정으로 여러 명의 리뷰를 대신 쓰고 있다는 신호다.
+ *
+ * ★ 이름 대조가 아니다(마스킹이라 실명과 맞출 수 없다). **같은 표기의 재등장 패턴**만 본다.
+ * ★ 흔한 마스킹(`김**`)은 동명이인이 많아 **경고까지만** — 절대 차단하지 않는다.
+ * ★ 최소 길이 가드: `*` 하나뿐인 값 등 너무 짧은 표기는 신호가 못 된다.
+ */
+async function findAuthorReuse({ authorMask, fileId, sheetId, tabName, reviewerName } = {}) {
+  const a = String(authorMask || '').trim();
+  if (a.length < 2 || !AUTHOR_REUSE) return { verdict: 'skip' };
+  try {
+    const { rows } = await _db().query(
+      `SELECT DISTINCT reviewer_name, tab_name
+         FROM review_inspections
+        WHERE ocr_author = $1
+          AND file_id <> COALESCE($2, '')
+          AND COALESCE(reviewer_name,'') <> COALESCE($3,'')
+          AND ($4::boolean OR (sheet_id = $5 AND tab_name = $6))
+        LIMIT 5`,
+      [a, fileId || null, reviewerName || '', SIM_SCOPE === 'global', sheetId, tabName]
+    );
+    if (!rows.length) return { verdict: 'pass', ocr: a };
+    return {
+      verdict: 'warn', ocr: a,
+      others: rows.map(r => r.reviewer_name).filter(Boolean).slice(0, 5),
+    };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 작성자 재사용 대조 실패(통과): ${e.message}`);
     return { verdict: 'skip' };
   }
 }
@@ -297,6 +561,7 @@ async function findSimilarText({ text, fileId, sheetId, tabName } = {}) {
  */
 async function inspectSubmission({
   base64, mimeType, fileId, fileHash, sheetId, tabName, rowIndex, reviewerName, slotKey = 'review',
+  ...opts
 } = {}) {
   if (!ENABLED || !fileId || !sheetId || !tabName) return null;
   try {
@@ -305,17 +570,21 @@ async function inspectSubmission({
     // 리뷰 슬롯이 아니면 형식 판정만 남기고 끝낸다(영수증엔 상품명·본문 대조가 무의미).
     const isReview = String(slotKey || 'review') === 'review';
 
+    // ★ 기대값을 **먼저** 읽는다 — 예시이미지 선택에 기대 채널이 필요하고,
+    //   같은 samples 를 써야 review-upload 의 verifyCapture 와 캐시가 공유된다.
+    const exp = isReview ? await loadTabExpectations({ sheetId, tabName }) : { expectedChannel: null, productNames: [] };
+
     let cls = null;
     if (base64) {
       try {
         // ★ 첨부 시점 1차 필터가 이미 같은 이미지를 판정했다면 캐시 히트 = AI 콜 0
         const { classifySubmissionImage } = require('./gemini.service');
-        cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg');
+        const samples = opts.samples || await loadSamplesFor(exp.expectedChannel);
+        cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
       } catch (_) { cls = null; }   // fail-open
     }
 
     const checks = {};
-    const exp = isReview ? await loadTabExpectations({ sheetId, tabName }) : { expectedChannel: null, productNames: [] };
 
     // ① 형식·채널
     if (!cls) {
@@ -345,8 +614,10 @@ async function inspectSubmission({
       ? await findSimilarText({ text: cls && cls.reviewText, fileId, sheetId, tabName })
       : { verdict: 'skip' };
 
-    // ⑤ 작성자 — 수집만, 판정하지 않는다(마스킹·닉네임이라 실명 대조 불가)
-    checks.author = { verdict: 'skip', ocr: (cls && cls.authorMask) || '' };
+    // ⑤ 작성자 — 실명 대조는 하지 않는다(마스킹이라 불가). 대신 **같은 표기의 재사용**만 본다.
+    checks.author = isReview
+      ? await findAuthorReuse({ authorMask: cls && cls.authorMask, fileId, sheetId, tabName, reviewerName })
+      : { verdict: 'skip', ocr: (cls && cls.authorMask) || '' };
 
     const status = computeStatus(checks);
     await _upsertInspection({
@@ -400,8 +671,212 @@ async function saveFileHash({ fileId, fileHash } = {}) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+ * M2 배치 스윕 — 미검수 재시도 + 과거 제출분 따라잡기
+ *
+ * ★ 인라인 검수는 **신규 제출만** 본다. AI 가 죽어 있던 건(pending)과
+ *   기능 배포 이전 제출분은 여기서 따라잡는다.
+ * ★ 시트 API 무접촉(쿼터 영향 0). Drive 다운로드 + AI 는 **사이클 캡**으로 통제한다.
+ * ★ 재시도 상한을 넘으면 `unverifiable` 로 종결 — 무한 재시도 금지
+ *   (스마트빌드 실패 시트 처리와 같은 규율).
+ * ════════════════════════════════════════════════════════════════ */
+const SWEEP_BATCH = Number(process.env.REVIEW_INSPECT_BATCH || 20);
+const SWEEP_DAYS = Number(process.env.REVIEW_INSPECT_BACKFILL_DAYS || 30);
+const SWEEP_MAX_ATTEMPTS = Number(process.env.REVIEW_INSPECT_MAX_ATTEMPTS || 3);
+
+/** 스윕 대상 — ① 재시도(pending, 상한 미만) ② 검수 이력 없는 과거 제출분(최근분 우선). */
+async function _sweepTargets(limit) {
+  const { rows } = await _db().query(
+    `(SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
+             s.file_hash, COALESCE(i.attempts, 0) AS attempts, 0 AS pri
+        FROM review_inspections i
+        JOIN review_submissions s ON s.file_id = i.file_id
+       WHERE i.status = 'pending' AND COALESCE(i.attempts, 0) < $2
+       ORDER BY i.updated_at ASC
+       LIMIT $1)
+     UNION ALL
+     (SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.reviewer_name, s.slot_key,
+             s.file_hash, 0 AS attempts, 1 AS pri
+        FROM review_submissions s
+        LEFT JOIN review_inspections i ON i.file_id = s.file_id
+       WHERE i.file_id IS NULL
+         AND s.uploaded_at > NOW() - ($3 || ' days')::interval
+       ORDER BY s.uploaded_at DESC
+       LIMIT $1)
+     ORDER BY pri, attempts
+     LIMIT $1`,
+    [limit, SWEEP_MAX_ATTEMPTS, String(SWEEP_DAYS)]
+  );
+  return rows;
+}
+
+/** 재시도 상한을 넘긴 pending 을 종결한다(관리자 화면이 옛 건으로 차는 것 방지). */
+async function _giveUpStale() {
+  try {
+    const { rowCount } = await _db().query(
+      `UPDATE review_inspections
+          SET status = 'unverifiable', updated_at = NOW()
+        WHERE status = 'pending' AND COALESCE(attempts, 0) >= $1`,
+      [SWEEP_MAX_ATTEMPTS]
+    );
+    return rowCount || 0;
+  } catch (_) { return 0; }
+}
+
+/**
+ * 스윕 1사이클. ★ 절대 throw 하지 않는다(cron 이 죽으면 안 된다).
+ * @returns {{scanned:number, done:number, failed:number, gaveUp:number}}
+ */
+async function runInspectSweep({ limit } = {}) {
+  const out = { scanned: 0, done: 0, failed: 0, gaveUp: 0 };
+  if (!ENABLED) return out;
+  try {
+    out.gaveUp = await _giveUpStale();
+    const targets = await _sweepTargets(Math.min(Number(limit) || SWEEP_BATCH, 100));
+    out.scanned = targets.length;
+    if (!targets.length) return out;
+
+    const { downloadFile } = require('./drive.service');
+    for (const t of targets) {
+      try {
+        const f = await downloadFile(t.file_id);
+        if (!f || !f.buffer) throw new Error('파일을 받지 못했습니다');
+        const b64 = f.buffer.toString('base64');
+        const r = await inspectSubmission({
+          base64: b64, mimeType: f.mimeType || 'image/jpeg',
+          fileId: t.file_id, fileHash: t.file_hash || hashBase64(b64),
+          sheetId: t.sheet_id, tabName: t.tab_name, rowIndex: t.row_index,
+          reviewerName: t.reviewer_name, slotKey: t.slot_key || 'review',
+        });
+        // 과거분은 원장에 지문이 없다 — 이번에 계산한 값을 채워 이후 중복 대조의 재료로 만든다
+        if (!t.file_hash) await saveFileHash({ fileId: t.file_id, fileHash: hashBase64(b64) });
+        if (r) out.done += 1; else out.failed += 1;
+      } catch (e) {
+        out.failed += 1;
+        // 실패해도 행은 남겨 attempts 가 올라가게 한다(상한 초과 시 위에서 종결)
+        await _upsertInspection({
+          fileId: t.file_id, sheetId: t.sheet_id, tabName: t.tab_name, rowIndex: t.row_index,
+          reviewerName: t.reviewer_name, slotKey: t.slot_key || 'review',
+          status: 'pending', checks: { sweep: { verdict: 'skip', error: String(e.message || '').slice(0, 120) } },
+          channel: null, device: null, ocrProduct: null, ocrText: null, ocrAuthor: null,
+          fileHash: t.file_hash || null, confidence: null,
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn(`[reviewInspect] 스윕 실패(무시): ${e.message}`);
+  }
+  return out;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * 관리자 검수 탭(M3) 조회
+ * ════════════════════════════════════════════════════════════════ */
+
+const _LIST_STATUSES = ['pending', 'pass', 'suspect', 'fail', 'unverifiable', 'resolved'];
+
+/**
+ * 검수 목록. 기본은 **손볼 것만**(의심+불량) — 통과 건까지 나열하면 정작 볼 게 묻힌다.
+ * @param status 'open'(기본, suspect+fail) | 'all' | 개별 status
+ */
+async function listInspections({ sheetId, tabName, status = 'open', limit = 200 } = {}) {
+  const where = [];
+  const params = [];
+  if (sheetId) { params.push(sheetId); where.push(`i.sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); where.push(`i.tab_name = $${params.length}`); }
+  if (status === 'open') {
+    where.push(`i.status IN ('suspect','fail')`);
+  } else if (status !== 'all' && _LIST_STATUSES.includes(status)) {
+    params.push(status); where.push(`i.status = $${params.length}`);
+  }
+  params.push(Math.min(Number(limit) || 200, 500));
+  const { rows } = await _db().query(
+    `SELECT i.id, i.file_id, i.sheet_id, i.tab_name, i.row_index, i.reviewer_name, i.slot_key,
+            i.status, i.checks, i.channel, i.ocr_product, i.ocr_text, i.ai_confidence,
+            i.inspected_at, i.resolved_at, i.resolved_by, i.created_at,
+            s.file_url, s.file_name
+       FROM review_inspections i
+       LEFT JOIN review_submissions s ON s.file_id = i.file_id
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY CASE i.status WHEN 'fail' THEN 0 WHEN 'suspect' THEN 1 ELSE 2 END,
+               i.created_at DESC
+      LIMIT $${params.length}`,
+    params
+  );
+  return rows;
+}
+
+/** 탭별 검수 현황 집계(상단 요약 + nav 뱃지). */
+async function inspectionSummary({ sheetId, tabName } = {}) {
+  const where = [];
+  const params = [];
+  if (sheetId) { params.push(sheetId); where.push(`sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); where.push(`tab_name = $${params.length}`); }
+  const { rows } = await _db().query(
+    `SELECT status, COUNT(*)::int AS c FROM review_inspections
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      GROUP BY status`,
+    params
+  );
+  const out = { pass: 0, suspect: 0, fail: 0, pending: 0, unverifiable: 0, resolved: 0, open: 0 };
+  for (const r of rows) if (out[r.status] !== undefined) out[r.status] = r.c;
+  out.open = out.suspect + out.fail;
+  return out;
+}
+
+/**
+ * 관리자 확인 종결. ★ 원판정(checks)은 지우지 않는다 — 나중에 "왜 통과시켰나"를
+ * 되짚을 수 있어야 기준을 고칠 수 있다(오탐 누적이 임계값 조정의 근거다).
+ */
+async function resolveInspection({ fileId, by } = {}) {
+  const { rowCount } = await _db().query(
+    `UPDATE review_inspections
+        SET status = 'resolved', resolved_at = NOW(), resolved_by = $2, updated_at = NOW()
+      WHERE file_id = $1 AND status <> 'resolved'`,
+    [fileId, by || '']
+  );
+  return { ok: true, resolved: rowCount || 0 };
+}
+
+/** 한 건의 스코프 판정용 — 그 파일이 어느 (시트,탭)인지. */
+async function inspectionScope(fileId) {
+  const { rows } = await _db().query(
+    'SELECT sheet_id, tab_name FROM review_inspections WHERE file_id = $1 LIMIT 1', [fileId]
+  );
+  return rows[0] || null;
+}
+
+/** 검수 결과 CSV — 업체 전달 전 사람이 훑어보는 용도. UTF-8 BOM(엑셀). */
+function inspectionsCsv(rows) {
+  const head = ['상태', '탭', '행', '리뷰어', '채널', '판정사유', '캡처 상품명', '검수시각'];
+  const esc = (v) => {
+    const s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const reason = (c) => {
+    const o = [];
+    if (c?.format?.verdict === 'fail') o.push('리뷰 화면 아님');
+    if (c?.format?.verdict === 'warn') o.push('채널 다름');
+    if (c?.product?.verdict === 'warn') o.push('상품명 다름');
+    if (c?.duplicate?.verdict === 'fail') o.push(`같은 파일(${c.duplicate.matchTab || ''} ${c.duplicate.matchReviewer || ''})`.trim());
+    if (c?.similarity?.verdict === 'warn') o.push(`본문 ${Math.round((c.similarity.score || 0) * 100)}% 겹침`);
+    if (c?.author?.verdict === 'warn') o.push(`작성자 표기 재사용(${(c.author.others || []).join(',')})`);
+    return o.join(' / ');
+  };
+  const body = (rows || []).map(r => [
+    r.status, r.tab_name, r.row_index ?? '', r.reviewer_name || '',
+    channelLabel(r.channel) || '', reason(r.checks || {}), r.ocr_product || '',
+    r.inspected_at ? new Date(r.inspected_at).toISOString() : '',
+  ].map(esc).join(','));
+  return '﻿' + [head.join(','), ...body].join('\n');
+}
+
 module.exports = {
   precheckPolicy, expectedChannelKey, channelLabel,
+  productNamesFromWorkOrder, productNameSettings, saveProductNames,
+  loadSamplesFor, sampleSettings, saveSample,
+  findAuthorReuse, runInspectSweep, inspectionsCsv,
+  listInspections, inspectionSummary, resolveInspection, inspectionScope,
   hashBase64, matchProductName, computeStatus,
   loadTabExpectations, findDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,

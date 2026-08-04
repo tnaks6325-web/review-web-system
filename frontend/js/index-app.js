@@ -1834,8 +1834,10 @@ async function woAccept(id) {
   const url = ((o && o.work_sheet_url) || "").trim();
 
   // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
+  // ★ 시트탭URL은 AE 제출 단계에서 선택 항목 — 미첨부 오더는 접수 전에 시트를 마련해야 한다.
+  //   (접수 = 그 탭을 tab_configs·campaigns 에 등록하는 관문이라 등록할 탭이 있어야 성립)
   if (!url) {
-    woNotice("작업시트탭URL이 없습니다.\nAE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.");
+    woNotice("작업시트탭URL이 없습니다.\n시트탭 주소(…/edit#gid=숫자)를 입력하거나 작업표를 생성한 뒤 접수해주세요.");
     return;
   }
   if (!/[#?&]gid=\d+/.test(url)) {

@@ -19,6 +19,9 @@ const {
 const { deriveSchedules, tabsOfCampaigns, scheduleFor, describeTabDates } = require('../services/campaignSchedule.service');
 const { sanitizeWorkDetail, sanitizeGuideHtml } = require('../utils/sanitizeGuideHtml');
 const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
+const {
+  normalizeFeeSchedules, currentReviewFee, resolveReviewFee, kstDateStr,
+} = require('../utils/campaignFee');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -165,6 +168,89 @@ async function _saveCampaignOptions(campaignId, options) {
   } finally {
     client.release();
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 기간별 리뷰비(082) — 구간표 저장·조회
+//   판정 자체는 utils/campaignFee.js 가 **단일 출처**(화면마다 규칙을 따로 만들면
+//   "카드는 1,000원인데 합계는 1,500원"으로 갈라진다). 여기는 원장 입출력만 담당.
+// ═══════════════════════════════════════════════════════════
+
+/** 구간 저장(replace-set). 배열 아님=미전달=변경 없음(옵션표와 같은 계약).
+ *  ★ 옵션 저장과 동일한 잠금 계층(recruit_campaigns 행 FOR UPDATE)을 써서 apply 와 상호배제 —
+ *    참여 판정이 "저장 중간 상태"의 구간표를 보는 창을 없앤다. 실패 시 전체 롤백(부분 저장 없음). */
+async function _saveFeeSchedules(campaignId, schedules) {
+  if (!Array.isArray(schedules)) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    if (!lock.length) { await client.query('ROLLBACK'); return; }
+    const keep = schedules.map(s => s.effectiveFrom);
+    for (const s of schedules) {
+      await client.query(
+        `INSERT INTO campaign_fee_schedules (campaign_id, effective_from, review_fee, memo, updated_at)
+         VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (campaign_id, effective_from) DO UPDATE SET
+           review_fee = EXCLUDED.review_fee, memo = EXCLUDED.memo, updated_at = NOW()`,
+        [campaignId, s.effectiveFrom, s.reviewFee, s.memo || '']);
+    }
+    // 목록에서 빠진 구간은 삭제 — 구간은 "설정값"이라 참여 이력을 들고 있지 않다.
+    // ★ 이미 참여한 건은 review_fee_snapshot 이 지켜주므로 구간을 지워도 과거 표기는 안 바뀐다.
+    if (keep.length) {
+      await client.query('DELETE FROM campaign_fee_schedules WHERE campaign_id=$1 AND effective_from <> ALL($2::date[])',
+        [campaignId, keep]);
+    } else {
+      await client.query('DELETE FROM campaign_fee_schedules WHERE campaign_id=$1', [campaignId]);
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** 공고 1건의 구간 목록(프리필·판정 공용). 조회 실패는 [](=기존 review_fee 폴백) — fail-soft. */
+async function _loadFeeSchedules(db, campaignId) {
+  try {
+    const { rows } = await db.query(
+      `SELECT to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom",
+              review_fee AS "reviewFee", COALESCE(memo,'') AS memo
+         FROM campaign_fee_schedules WHERE campaign_id=$1 ORDER BY effective_from`,
+      [campaignId]);
+    return rows;
+  } catch (_) {
+    return [];
+  }
+}
+
+/** 목록용 배치 조회(캠페인 N개 → 1쿼리). @returns Map campaignId → 구간배열 */
+async function _fetchFeeSchedulesFor(db, ids) {
+  const out = new Map();
+  const list = (ids || []).filter(Boolean);
+  if (!list.length) return out;
+  try {
+    const { rows } = await db.query(
+      `SELECT campaign_id AS "campaignId", to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom",
+              review_fee AS "reviewFee"
+         FROM campaign_fee_schedules WHERE campaign_id = ANY($1) ORDER BY campaign_id, effective_from`,
+      [list]);
+    for (const r of rows) {
+      if (!out.has(r.campaignId)) out.set(r.campaignId, []);
+      out.get(r.campaignId).push({ effectiveFrom: r.effectiveFrom, reviewFee: r.reviewFee });
+    }
+  } catch (_) { /* fail-soft: 구간 없음 = 기존 review_fee */ }
+  return out;
+}
+
+/** 카드·목록에 보일 리뷰비를 "오늘 기준 구간값"으로 덮어쓴다(구간 없으면 무동작 = 기존 값 그대로).
+ *  ★ 프론트는 종전대로 review_fee 한 필드만 읽는다 — 화면 코드를 건드리지 않고 표시를 맞춘다. */
+function _applyCurrentFee(view, schedules, now) {
+  if (!view || !Array.isArray(schedules) || !schedules.length) return view;
+  if (view.review_fee !== undefined) view.review_fee = currentReviewFee(schedules, view.review_fee, now);
+  return view;
 }
 
 /** 캠페인 옵션 뷰 목록(정렬: 활성 먼저, 마감 하단). campState 반영해 selectable 계산. 옵션 없으면 []. */
@@ -456,7 +542,7 @@ function _participationActivationErrors(c) {
 }
 
 // GET /api/campaign/list 5초 서버 캐시(rows+counts만 캐시, 상태는 매 요청 신선한 시각으로 재계산)
-let _listCache = { at: 0, rows: null, countsMap: null };
+let _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
 const LIST_CACHE_MS = 5000;
 
 // ═══════════════════════════════════════════════════════════
@@ -528,7 +614,7 @@ router.get('/list', async (req, res, next) => {
   try {
     await _ensureTables();
     const now = new Date();
-    let { rows, countsMap, optionsMap } = _listCache;
+    let { rows, countsMap, optionsMap, feeMap } = _listCache;
     if (!rows || now.getTime() - _listCache.at > LIST_CACHE_MS) {
       const q = await pool.query(`
         SELECT id, title, channel, channel_custom, manager, time_range,
@@ -549,12 +635,15 @@ router.get('/list', async (req, res, next) => {
       const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
       countsMap = await fetchCampaignCounts(pool, partIds, now);
       optionsMap = await _fetchOptionsForCampaigns(pool, partIds, now);
-      _listCache = { at: now.getTime(), rows, countsMap, optionsMap };
+      // ★ 082: 기간별 리뷰비 — 목록 캐시(5초) 안에서 1쿼리로 상각. 구간 없는 공고는 무영향.
+      feeMap = await _fetchFeeSchedulesFor(pool, rows.map(r => r.id));
+      _listCache = { at: now.getTime(), rows, countsMap, optionsMap, feeMap };
     }
     // ★ 시트 일정 파생(063) — 자체 1분 캐시라 목록 캐시 밖에서 호출해도 저비용. 실패=null(폴백).
     const schedMap = await deriveSchedules(pool, tabsOfCampaigns(rows), now);
     const data = rows.map(r => {
       const view = _publicView(r, countsMap.get(r.id), now, scheduleFor(schedMap, r));
+      _applyCurrentFee(view, feeMap && feeMap.get(r.id), now);   // ★ 082: 카드 리뷰비 = 오늘 구간
       // 카드 옵션명+잔여(옵션 등록 참여형만). 상태는 매 요청 신선한 view 기준.
       const opts = optionsMap && optionsMap.get(r.id);
       if (r.participation_mode && opts && opts.length) {
@@ -605,15 +694,17 @@ router.get('/:id', async (req, res, next) => {
       return res.json({ ok: true, data: _scopedEditorView(rows[0]) });
     }
     if (_isAdminReq(req)) {
-      // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필)
+      // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = rows[0].participation_mode ? await _loadOptionsRaw(pool, id) : [];
-      return res.json({ ok: true, data: rows[0], options });
+      const feeSchedules = await _loadFeeSchedules(pool, id);
+      return res.json({ ok: true, data: rows[0], options, feeSchedules });
     }
     const now = new Date();
     const row = rows[0];
     const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
     const schedMap = row.participation_mode ? await deriveSchedules(pool, tabsOfCampaigns([row]), now) : null;
     const view = _publicView(row, countsMap && countsMap.get(id), now, schedMap && scheduleFor(schedMap, row));
+    _applyCurrentFee(view, await _loadFeeSchedules(pool, id), now);   // ★ 082: 오늘 구간 리뷰비
     if (row.participation_mode) {
       // 옵션명+잔여만 공개(금액 등 상세는 참여 후 work-detail에서)
       const opts = await _loadOptionViews(pool, id, view, now);
@@ -1106,12 +1197,28 @@ async function _applyParticipation(req, res, next, campPre) {
     // 명의 표기값은 서버 권위(등록된 sub_accounts 값 우선 — 요청 오타로 홀드/신원판별 표기가 갈라지는 것 방지)
     const insName = isSubApply ? String((subEntry && subEntry.name) || subName).trim() : name;
     const insPhone = isSubApply ? String((subEntry && subEntry.phone) || subPhoneRaw) : rawPhone;
+    // ★ 082: 참여 시점 리뷰비를 이 건에 새긴다 = **리뷰어가 화면에서 본 금액**(사용자 확정: 기준일 = 참여일).
+    //   이후 관리자가 구간표를 어떻게 고쳐도 이 건의 표기는 안 바뀐다.
+    //   ★ 캠페인 행을 이미 잠근 안이라 저장 중간 상태를 볼 수 없다. 조회 실패는 null(=날짜 기준 폴백) — 참여를 막지 않는다.
+    //   ★★ SAVEPOINT 필수: 트랜잭션 안에서는 **실패한 쿼리 하나가 tx 전체를 abort** 시킨다
+    //      (구간 테이블이 아직 없는 배포 창 등) → 스냅샷 조회 실패가 참여 INSERT 를 통째로
+    //      죽이는 것을 격리한다. 주문원장의 홀드확정 SAVEPOINT 와 같은 규율.
+    let feeSnapshot = null;
+    try {
+      await client.query('SAVEPOINT fee_snap');
+      const sched = await _loadFeeSchedules(client, id);
+      if (sched.length) feeSnapshot = currentReviewFee(sched, camp.review_fee, now);
+      await client.query('RELEASE SAVEPOINT fee_snap');
+    } catch (_) {
+      feeSnapshot = null;
+      try { await client.query('ROLLBACK TO SAVEPOINT fee_snap'); } catch (_e) { /* noop */ }
+    }
     const ins = await client.query(
       `INSERT INTO campaign_applications
-         (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key)
-       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8)
+         (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key, review_fee_snapshot)
+       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9)
        RETURNING id, expires_at, option_key`,
-      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null]);
+      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot]);
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));
@@ -1355,7 +1462,7 @@ router.post('/admin/:id/flags', authMiddleware, adminOrMasterMiddleware, async (
        b.popular === undefined ? null : b.popular === true]);
     if (!rows.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     // ★ /list 5초 캐시 즉시 무효화 — 토글 직후 재조회가 옛 순서를 돌려주지 않게(리뷰어 홈 별표 UX)
-    _listCache = { at: 0, rows: null, countsMap: null };
+    _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
     res.json({ ok: true, pinnedAt: rows[0].pinned_at, isPopular: rows[0].is_popular });
   } catch (err) {
     next(err);
@@ -1376,6 +1483,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       start_date, // ★ 062: 시작일(YYYY-MM-DD) — 시작일 전 게시 시 오픈예정 카운트다운
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min, // ★ 063: 타계정 추가참여(§09-1·5·2)
       options, // ★ 061: 상품옵션 목록(참여형)
+      fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 저장, 미전달=변경 없음)
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -1459,7 +1567,14 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     const normOpts = _normalizeOptionsInput(options);
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id), ...(optionsWarning ? { optionsWarning } : {}) });
+    // ★ 082: 기간별 리뷰비 구간 저장(제공 시). 실패해도 공고 생성은 유지하고 경고만 표면화한다 —
+    //   조용히 삼키면 "저장했는데 구간이 없다"가 되고, throw 하면 멀쩡한 공고 발행이 통째로 막힌다.
+    const normFees = normalizeFeeSchedules(fee_schedules);
+    let feeWarning = null;
+    if (normFees) { try { await _saveFeeSchedules(rows[0].id, normFees); } catch (e) { feeWarning = '리뷰비 구간 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + feeWarning); } }
+    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id),
+      feeSchedules: await _loadFeeSchedules(pool, rows[0].id),
+      ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}) });
   } catch (err) {
     next(err);
   }
@@ -1488,6 +1603,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       //   ※ 아래 UPDATE의 $33~$35가 이 이름들을 참조하므로 구조분해 누락 = 수정 저장 전면 ReferenceError(500).
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min,
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
+      fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 교체, 미전달=변경 없음)
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
@@ -1634,7 +1750,14 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const normOpts = _normalizeOptionsInput(options);
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id), ...(optionsWarning ? { optionsWarning } : {}) });
+    // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
+    //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
+    const normFees = normalizeFeeSchedules(fee_schedules);
+    let feeWarning = null;
+    if (normFees) { try { await _saveFeeSchedules(id, normFees); } catch (e) { feeWarning = '리뷰비 구간 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + feeWarning); } }
+    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
+      feeSchedules: await _loadFeeSchedules(pool, id),
+      ...(optionsWarning ? { optionsWarning } : {}), ...(feeWarning ? { feeWarning } : {}) });
   } catch (err) {
     next(err);
   }

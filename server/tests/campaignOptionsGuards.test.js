@@ -29,7 +29,7 @@ ok('apply: 전부 마감 시 option_unavailable(NULL 우회 금지)', /reason: '
 ok('apply: 미선택 option_required / 잘못된 옵션 option_invalid', /reason: 'option_required'/.test(routes) && /reason: 'option_invalid'/.test(routes));
 ok('apply: 소진 사유코드 option_soldout/option_today_done', /option_soldout/.test(routes) && /option_today_done/.test(routes));
 ok('apply: 옵션게이트는 캠페인 행 FOR UPDATE 안에서 카운트 재집계', /FOR UPDATE', \[id\]\)[\s\S]*?fetchOptionCounts\(client, id, now\)/.test(routes));
-ok('apply INSERT에 option_key 포함($8, 063 owner_phone8 포함)', /VALUES \(\$1,\$2,\$3,\$4,\$5,'applied',\$6,\$7,\$8\)/.test(routes) && /chosenOpt \? chosenOpt\.opt_key : null/.test(routes));
+ok('apply INSERT에 option_key 포함($8, 063 owner_phone8 포함)', /VALUES \(\$1,\$2,\$3,\$4,\$5,'applied',\$6,\$7,\$8(,\$9)?\)/.test(routes) && /chosenOpt \? chosenOpt\.opt_key : null/.test(routes));
 
 // ── change-option ──
 ok('change-option: 캠페인 행 FOR UPDATE 직렬화', /change-option[\s\S]*?SELECT \* FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));

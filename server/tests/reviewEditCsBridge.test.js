@@ -286,6 +286,25 @@ t('★★ 잘못된 id 로 승인/반려해도 **응답이 온다**(Express4 han
   assert.ok(!/<button/.test(ro), '★ 리뷰어 카드에 버튼이 있다');
   pass += 1; console.log('  ✓ ★★ 카드 실제 렌더 — 실명 미노출 · 절대 URL · 리뷰어 버튼 없음');
 
+  /* ★ 이미지 클릭 = 기존↔변경 **둘 다** 크게 보기(한 장만 뜨면 대조가 안 된다) */
+  const OLD = 'A'.repeat(22), NEW = 'B'.repeat(22);
+  const clicks = (html.match(/onclick="([^"]*zoomPair[^"]*)"/g) || []);
+  assert.strictEqual(clicks.length, 2, '★ 두 썸네일 모두 zoomPair(둘 다 보기)로 열려야 한다');
+  clicks.forEach((c) => {
+    assert.ok(c.includes(OLD) && c.includes(NEW), '★ 클릭 호출에 기존·변경 파일ID 가 모두 실려야 한다');
+  });
+  assert.ok(!/zoom\(this\.src\)/.test(html), '★ 클릭한 한 장만 띄우는 옛 호출이 남아 있다');
+  assert.ok(/function zoomPair/.test(CARD) && /zoomPair: zoomPair/.test(CARD), 'zoomPair 가 없거나 노출되지 않는다');
+  // 호스트 라이트박스(URL 한 장짜리)로 위임하면 "클릭한 것만 보인다"로 되돌아간다
+  const pairBody = CARD.slice(CARD.indexOf('function zoomPair'));
+  assert.ok(!/woImageModal/.test(pairBody.slice(0, pairBody.indexOf('window.CsReviewEditCard'))),
+    '★ zoomPair 가 단일 이미지 라이트박스로 위임한다');
+  // onclick 문자열 탈출 차단(파일ID 문자셋 밖은 제거)
+  const evil = ctx.window.CsReviewEditCard.html(
+    { requestId: 'r2', status: 'pending', oldFileId: OLD + '", alert(1), "', newFileId: NEW }, { admin: true });
+  assert.ok(!/alert\(1\)/.test(evil), '★ 파일ID 를 통한 onclick 문자열 탈출이 가능하다');
+  pass += 1; console.log('  ✓ ★ 이미지 클릭 → 기존·변경 동시 보기(단일 위임 없음 · onclick 탈출 차단)');
+
   console.log(`\n✅ ${pass} checks passed\n`);
   process.exit(0);
 })();

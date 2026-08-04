@@ -21,7 +21,14 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 // ── 변경① apply 내정보 게이트 ──
 ok('apply: profileMissing 재사용(identity.service)', /require\('\.\.\/services\/identity\.service'\)/.test(routes) && /profileMissing\(reg\.rows\[0\]\)/.test(routes));
 ok('apply: profile_missing 403 + missing 목록 반환', /reason: 'profile_missing', missing/.test(routes));
-ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞 (063 owner_phone8 포함)', routes.indexOf("reason: 'profile_missing'") < routes.indexOf("VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8)"));
+// ★ 082: INSERT 에 review_fee_snapshot($9)이 붙었다 — 순서 검사 의미는 그대로.
+//   ★ 위치를 못 찾으면(-1) 통과로 새지 않게 존재부터 단언한다(약한 단언은 잘못된 이유로 통과한다).
+{
+  const _iGate = routes.indexOf("reason: 'profile_missing'");
+  const _iIns = routes.indexOf("VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9)");
+  ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞 (063 owner_phone8 · 082 리뷰비 스냅샷 포함)',
+    _iGate > 0 && _iIns > 0 && _iGate < _iIns);
+}
 ok('apply: 등록 조회가 프로필 필드 포함(name/address/bank_*) + 063 sub_accounts', /SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts\s+FROM reviewers/.test(routes));
 
 // ── 변경② 공고 등록/수정 참여형 필드 ──
