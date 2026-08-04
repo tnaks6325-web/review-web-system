@@ -31,6 +31,24 @@ ok(/EXISTS \([\s\S]*advertiser_users[\s\S]*active = TRUE/.test(mig),
 ok(/SET DEFAULT FALSE/.test(mig) && /SET NOT NULL/.test(mig), 'A4: 기본 FALSE(공개) + NOT NULL');
 ok(!/DROP\s+(TABLE|COLUMN)/i.test(mig), 'A5: 파괴적 구문 없음');
 
+// 084 — 083 의 사각지대(활성 계정은 있는데 링크 행이 아직 없는 업체) 메우기.
+//   링크 행은 058 이 일괄 생성하지 않고 관리자가 패널을 열 때 ensure 로 지연 생성되므로,
+//   083 만으로는 그 업체들이 배포 후 "계정 있는데 공개 링크"가 된다(동작 불변 약속이 깨지는 구멍).
+const mig2 = R('migrations/084_advertiser_link_backfill_missing.sql');
+ok(/INSERT INTO trackb_advertiser_links/.test(mig2) && /login_required/.test(mig2), 'A6: 누락 링크 행 생성');
+ok(/EXISTS \(SELECT 1 FROM advertiser_users[\s\S]*active = TRUE\)/.test(mig2),
+  'A7: 대상 = 활성 계정 보유 업체만(최소 침습)');
+ok(/NOT EXISTS \(SELECT 1 FROM trackb_advertiser_links/.test(mig2) && /ON CONFLICT \(advertiser_id\) DO NOTHING/.test(mig2),
+  'A8: 이미 행이 있으면 손대지 않는다(관리자가 꺼 둔 값 보존·재실행 안전)');
+ok(/TRUE, TRUE, 'migration:084'/.test(mig2), 'A9: login_required=TRUE 로 생성(구코드의 로그인 게이트 재현)');
+ok(/gen_random_bytes\(24\)/.test(mig2) && /translate\(/.test(mig2), 'A10: 토큰은 서비스와 같은 규격(랜덤 24B base64url)');
+ok(/status <> 'ended'/.test(mig2), 'A11: 종료 거래처 제외');
+
+// 부팅 프리플라이트 — 083 이 락 타임아웃으로 미적용된 채 뜨면 컬럼 참조 3곳이 42703 으로 죽어
+//   광고주 링크 로그인·업체관리 카드가 전면 500 이 된다(무신호 전면장애). 그래서 필수 스키마에 등록.
+ok(/\['trackb_advertiser_links', 'login_required'\]/.test(R('index.js')),
+  'A12: REQUIRED_SCHEMA 프리플라이트에 login_required 등록');
+
 // ═══ B. 서버 게이트 ═══
 const authSrc = R('src/services/auth.service.js');
 const fn = authSrc.slice(authSrc.indexOf('async function loginByLinkToken'),
@@ -52,8 +70,12 @@ ok(/action === 'login-required'/.test(linkRoute) && /setAdvertiserLinkLoginRequi
 const svcSrc = R('src/services/trackB.service.js');
 const setFn = svcSrc.slice(svcSrc.indexOf('async function setAdvertiserLinkLoginRequired'),
   svcSrc.indexOf('// ── 담당 AE(inad_pm) 매칭'));
-ok(/SELECT 1 FROM advertiser_users[\s\S]*active = TRUE/.test(setFn) && /if \(want\)/.test(setFn),
+ok(/\$2 = FALSE OR EXISTS \(SELECT 1 FROM advertiser_users[\s\S]*active = TRUE/.test(setFn),
   'C3: 켤 때만 활성 계정 존재를 요구(계정 0개로 켜면 아무도 못 들어온다)');
+ok(/UPDATE trackb_advertiser_links SET login_required[\s\S]*EXISTS \(SELECT 1 FROM advertiser_users/.test(setFn),
+  'C3b: ★ 계정 검사와 갱신이 한 UPDATE 안에서(TOCTOU — 검사 직후 마지막 계정이 꺼지는 경합 차단)');
+ok(/SELECT 1 FROM advertisers WHERE id = \$1/.test(setFn) && setFn.indexOf('SELECT 1 FROM advertisers') < setFn.indexOf('ensureAdvertiserLink'),
+  'C3c: 없는 거래처는 ensure 의 FK 500 전에 404(켜기 요청이 "계정 없음"으로 오인되지 않게)');
 ok(!/DELETE FROM advertiser_users|UPDATE advertiser_users/.test(setFn),
   'C4: ★ 토글은 계정을 지우거나 비활성화하지 않는다(다시 켜면 그대로 사용)');
 ok(/ensureAdvertiserLink/.test(setFn), 'C5: 링크 행이 없으면 ensure 후 적용(업체마다 URL 보유 계약 유지)');
@@ -67,14 +89,23 @@ const linkHtml = wd.slice(wd.indexOf('function _advLinkHtml'), wd.indexOf('async
 ok(/const lockOn=!!\(lk && lk\.loginRequired\)/.test(linkHtml), 'D1: 배지 판정 = 서버 플래그(lockOn)');
 ok(!/hasAcct/.test(linkHtml), 'D2: ★ 계정 존재로 배지를 정하던 판정 제거(서버와 화면이 갈리지 않는다)');
 ok(/lockbadge lock/.test(linkHtml) && /lockbadge open/.test(linkHtml), 'D3: 🔒/🔓 배지 유지');
+// ★ 공개 링크의 노출 범위를 실제보다 약하게 적지 않는다 — 광고주 뷰의 수취인·연락처·주소는
+//   마스킹되지 않는다(_advertiserColumns). "마스킹"이라 적으면 관리자가 위험을 과소평가한다.
+ok(!/소유 탭·마스킹·읽기전용/.test(linkHtml), 'D3b: 공개 안내에서 잘못된 "마스킹" 표현 제거');
+ok(/리뷰어 연락처·주소 포함/.test(linkHtml), 'D3c: 공개 시 PII 포함 사실 명시');
 
 const acctHtml = wd.slice(wd.indexOf('function _advAcctHtml'), wd.indexOf('async function _advAcctLoginToggle') > 0
   ? wd.indexOf('async function _advAcctLoginToggle') : wd.indexOf('// 광고주 계정 사용/미사용 토글'));
 ok(/role="switch"/.test(acctHtml) && /aria-checked="\$\{lockOn\?'true':'false'\}"/.test(acctHtml),
   'D4: 토글 스위치(접근성 role/aria-checked)');
-ok(/advAcctLoginToggle\('\$\{esc\(a\.id\)\}',\$\{lockOn\?'false':'true'\}\)/.test(acctHtml), 'D5: 토글 배선(현재값 반전)');
-ok(/\$\{\(!lockOn && !hasActive\)\?'disabled':''\}/.test(acctHtml),
-  'D6: 활성 계정 0개면 켜기 비활성(서버 거부와 같은 규칙 — 실패할 클릭을 만들지 않는다)');
+ok(/advAcctLoginToggle\('\$\{_advQ\(a\.id\)\}',\$\{lockOn\?'false':'true'\}\)/.test(acctHtml), 'D5: 토글 배선(현재값 반전)');
+ok(/_advQ\(v\)\{ return esc\(v\)\.replace\(\/'\/g,'&#39;'\)/.test(wd),
+  'D5b: onclick 인자 이스케이프는 esc + 작은따옴표(파일 내 관용구와 동일 — esc 만으로는 속성이 깨진다)');
+ok(/\(!lkKnown \|\| \(!lockOn && !hasActive\)\)\?'disabled':''/.test(acctHtml),
+  'D6: 활성 계정 0개(또는 링크 조회 실패)면 토글 비활성 — 실패할 클릭을 만들지 않는다');
+// ★ "조회 실패"와 "꺼짐"을 구분한다 — 합치면 실제로 잠긴 업체가 "미사용/공개"로 보여 관리자가 오판한다.
+ok(/const lkKnown=!!\(STATE\.advLink && STATE\.advLink\.token\)/.test(acctHtml), 'D6b: 링크 조회 성공 여부를 별도 판정');
+ok(/확인 중/.test(acctHtml), 'D6c: 조회 실패는 "확인 중"으로 표시(공개로 오표시 금지)');
 ok(/class="acctbody\$\{lockOn\?'':' dim'\}"/.test(acctHtml), 'D7: 미사용이면 계정 영역 흐리게');
 
 ok(/async function advAcctLoginToggle/.test(wd), 'D8: 토글 핸들러 존재');
@@ -83,6 +114,9 @@ ok(/action:'login-required'/.test(toggleFn), 'D9: 라우트 action 일치');
 ok(/if\(!on && !confirm\(/.test(toggleFn),
   'D10: 보안이 풀리는 방향(ON→OFF)에서만 확인 — 켜는 쪽은 마찰 없이');
 ok(/_advLinkReload\(\)/.test(toggleFn), 'D11: 저장 후 재조회(두 카드가 같은 서버 값을 다시 그린다)');
+// 링크로 발급된 JWT 는 최대 8시간 유효해 토글 ON 이 기존 세션을 끊지 않는다(링크 폐기도 같은 한계).
+//   안내가 없으면 "켰는데 왜 아직 보이지"가 된다 → 켤 때 토스트로 알린다.
+ok(/이미 접속 중인 세션은 최대 8시간 유지/.test(toggleFn), 'D11b: 켤 때 기존 세션 유지 한계 고지');
 
 // 높이 안정 — 토글 ON/OFF 로 문구 줄 수가 달라져도 카드 높이가 흔들리지 않도록 2줄분 예약
 const css = wd.slice(0, wd.indexOf('</style>'));

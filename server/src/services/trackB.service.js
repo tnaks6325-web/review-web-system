@@ -456,21 +456,29 @@ async function setAdvertiserLinkActive({ advertiserId, active, by = '' } = {}) {
 //   ★ 켤 때만 활성 계정 1개 이상을 요구한다 — 계정 0개인 채로 켜면 링크도 막히고 로그인도 불가해
 //     **아무도 못 들어가는 잠금 상태**가 된다(끌 때는 계정을 건드리지 않으므로 검사 없음).
 //   ★ 링크 행이 아직 없으면 ensure 로 만든 뒤 적용(모든 업체가 고유 URL 보유라는 기존 계약 유지).
+//   ★ 존재 검사는 generate 와 같이 **먼저** 한다 — 없는 업체면 ensure 의 INSERT 가 FK 23503 으로 터져
+//     500 이 되고(사유 불명), 켜는 요청이면 "계정이 없습니다" 400 으로 원인을 오인하게 된다.
+//   ★ 활성 계정 검사와 갱신은 **한 UPDATE 안에서**(WHERE EXISTS) 한다 — 따로 두면 검사 통과 직후
+//     마지막 계정이 비활성화될 때 막으려던 잠금 상태가 그대로 만들어진다(TOCTOU).
 async function setAdvertiserLinkLoginRequired({ advertiserId, required, by = '' } = {}) {
   if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
   const want = required === true || required === 'true';
-  if (want) {
-    const acc = await getPool().query(
-      'SELECT 1 FROM advertiser_users WHERE advertiser_id = $1 AND active = TRUE LIMIT 1', [advertiserId]);
-    if (!acc.rows.length) {
-      return { ok: false, code: 400, error: '활성 광고주 계정이 없습니다. 계정을 먼저 발급한 뒤 켜세요(아무도 들어올 수 없게 됩니다).' };
-    }
-  }
+  const exists = await getPool().query('SELECT 1 FROM advertisers WHERE id = $1', [advertiserId]);
+  if (!exists.rows.length) return { ok: false, code: 404, error: '거래처를 찾을 수 없습니다.' };
   await ensureAdvertiserLink({ advertiserId, by });
   const { rows } = await getPool().query(
-    'UPDATE trackb_advertiser_links SET login_required = $2 WHERE advertiser_id = $1 RETURNING login_required AS "loginRequired"',
+    `UPDATE trackb_advertiser_links SET login_required = $2
+      WHERE advertiser_id = $1
+        AND ($2 = FALSE OR EXISTS (SELECT 1 FROM advertiser_users au
+                                    WHERE au.advertiser_id = $1 AND au.active = TRUE))
+      RETURNING login_required AS "loginRequired"`,
     [advertiserId, want]);
-  if (!rows.length) return { ok: false, code: 404, error: '발급된 링크가 없습니다.' };
+  if (!rows.length) {
+    // UPDATE 가 0행 = (a) 켜려는데 활성 계정 0개 → 잠금 방지 거부  (b) 링크 행 없음(ensure 실패)
+    return want
+      ? { ok: false, code: 400, error: '활성 광고주 계정이 없습니다. 계정을 먼저 발급한 뒤 켜세요(아무도 들어올 수 없게 됩니다).' }
+      : { ok: false, code: 404, error: '발급된 링크가 없습니다.' };
+  }
   logger.info(`[trackB] 광고주 계정 로그인 ${want ? '사용(링크=로그인 필요)' : '미사용(링크=공개)'}: ${advertiserId} by ${by}`);
   return { ok: true, loginRequired: rows[0].loginRequired };
 }

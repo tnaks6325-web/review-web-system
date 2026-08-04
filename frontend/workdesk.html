@@ -537,7 +537,6 @@
      2줄분 min-height 를 예약한다(문구 길이가 달라도 레이아웃이 안 튄다 — .linkhint 도 동일). */
   /* .st 는 여러 섹션 공용이라 flex 로 바꾸지 않고, 토글이 있는 헤더만 .sthead 로 스코프한다. */
   .sect .st.sthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:23px}
-  .sect .st.sthead .sthint{margin-left:0}
   .swrap{display:flex;align-items:center;gap:9px;margin-left:auto}
   .swrap .slabel{font-size:11.5px;font-weight:750;letter-spacing:0;text-transform:none}
   .swrap .slabel.on{color:var(--safe)} .swrap .slabel.off{color:var(--faint)}
@@ -3567,7 +3566,9 @@ function _advLinkHtml(a){
     : `<span class="lockbadge open">🔓 공개 — 로그인 없이 열람</span>`;
   const hint = !lk.active ? '이 링크는 폐기되어 아무도 접근할 수 없습니다. "다시 활성"으로 복구.'
     : lockOn ? '이 링크를 열면 로그인 화면이 먼저 뜹니다. 링크만으로는 들어갈 수 없습니다.'
-    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.';
+    // ★ "마스킹"이라 적지 않는다 — 광고주 뷰의 수취인·연락처·주소는 마스킹되지 않는다(_advertiserColumns).
+    //   공개 링크의 노출 범위를 실제보다 약하게 읽히게 하면 관리자가 위험을 과소평가한다.
+    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·읽기전용, <b>리뷰어 연락처·주소 포함</b>)를 볼 수 있습니다.';
   return `<div class="sect"><div class="st">광고주 접속 링크 <span class="sthint">업체마다 자동 생성된 고유 URL — 광고주에게 전달</span></div>
     <div class="linkrow"><input id="advLinkUrl" readonly value="${esc(url)}" onclick="this.select()"><button class="btn xs pri" onclick="advLinkCopy()">복사</button></div>
     <div class="linkmeta">${mode} <span class="linkused">${esc(used)}</span><span style="flex:1"></span>
@@ -3616,17 +3617,23 @@ function _advAcctHtml(a){
   const suggest = String(a.name||'').trim().replace(/\s+/g,'');
   // ★ 사용/미사용 토글 = 접속 링크가 로그인을 요구하는지(083). 끄면 계정은 **지우지 않고 잠그기만** 하므로
   //   다시 켤 때 그대로 쓸 수 있다. 켜기는 활성 계정이 있어야 가능(없으면 아무도 못 들어감) — 서버도 재검증.
+  // ★ 링크 조회 실패(null)와 "꺼짐"을 구분한다 — 둘을 합치면 실제로 잠긴 업체가 "미사용/공개"로 보여
+  //   관리자가 "안 잠겼네"로 오판한다(표시 전용이라 서버 게이트는 안전하지만 오판 자체가 위험).
+  const lkKnown=!!(STATE.advLink && STATE.advLink.token);
   const lockOn=!!(STATE.advLink && STATE.advLink.loginRequired);
   const hasActive=accts.some(u=>u.active);
-  const note = lockOn
+  const note = !lkKnown
+    ? '<b>확인 중</b> — 접속 링크 정보를 불러오지 못했습니다. 새로고침 후에도 같으면 관리자에게 문의하세요.'
+    : lockOn
     ? '<b>사용 중</b> — 링크를 열면 로그인 화면이 먼저 뜹니다. 아래 계정의 아이디·비밀번호를 광고주에게 전달하세요.'
     : '<b>미사용</b> — 접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 위 스위치를 켜세요.';
+  const swLabel = !lkKnown ? '확인 중' : (lockOn?'사용 중':'미사용');
   return `<div class="sect"><div class="st sthead">광고주 계정
       <span class="swrap">
-        <span class="slabel ${lockOn?'on':'off'}">${lockOn?'사용 중':'미사용'}</span>
+        <span class="slabel ${lockOn?'on':'off'}">${swLabel}</span>
         <button class="sw" role="switch" aria-checked="${lockOn?'true':'false'}" aria-label="광고주 계정 사용"
-          title="${lockOn?'끄면 링크만으로 입장합니다(계정은 보존)':(hasActive?'켜면 링크를 열 때 로그인 화면이 뜹니다':'활성 계정을 먼저 발급하세요')}"
-          ${(!lockOn && !hasActive)?'disabled':''} onclick="advAcctLoginToggle('${esc(a.id)}',${lockOn?'false':'true'})"></button>
+          title="${!lkKnown?'접속 링크 정보를 불러오지 못해 변경할 수 없습니다':lockOn?'끄면 링크만으로 입장합니다(계정은 보존)':(hasActive?'켜면 링크를 열 때 로그인 화면이 뜹니다':'활성 계정을 먼저 발급하세요')}"
+          ${(!lkKnown || (!lockOn && !hasActive))?'disabled':''} onclick="advAcctLoginToggle('${_advQ(a.id)}',${lockOn?'false':'true'})"></button>
       </span></div>
     <div class="acctnote">${note}</div>
     <div class="acctbody${lockOn?'':' dim'}">
@@ -3637,12 +3644,17 @@ function _advAcctHtml(a){
       <button class="btn pri" onclick="advAcctAdd('${esc(a.id)}')">＋ 계정 발급</button>
     </div></div></div>`;
 }
+// onclick 문자열 인자용 이스케이프 — esc 는 &<>" 만 치환하므로 작은따옴표가 들어오면 속성이 깨진다.
+//   이 파일의 계정 버튼들이 쓰던 관용구(esc(x).replace(/'/g,'&#39;'))를 함수로 모은 것.
+function _advQ(v){ return esc(v).replace(/'/g,'&#39;'); }
 // 광고주 계정 사용/미사용 토글 — 접속 링크의 로그인 요구를 켜고 끈다(083). 계정은 지우지 않는다.
 //   ★ 보안이 풀리는 방향(ON→OFF)에서만 확인을 받는다 — 끄는 순간 링크를 아는 사람이 바로 들어온다.
+//   ★ 켤 때는 "이미 들어와 있는 세션"을 알린다 — 링크로 발급된 JWT 는 최대 8시간 유효해
+//     토글이 즉시 로그아웃시키지 않는다(링크 폐기도 같은 한계). 모르면 "켰는데 왜 아직 보이지"가 된다.
 async function advAcctLoginToggle(advertiserId, on){
   if(!on && !confirm('광고주 계정 로그인을 끌까요?\n이 업체의 접속 링크를 아는 사람은 로그인 없이 바로 들어오게 됩니다.\n(발급된 계정은 지워지지 않습니다.)')) return;
   const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'login-required',advertiserId,required:!!on})});
-  if(r&&r.ok){ toast(on?'광고주 계정 사용 — 링크에 로그인 필요':'광고주 계정 미사용 — 링크만으로 입장'); await _advLinkReload(); }
+  if(r&&r.ok){ toast(on?'광고주 계정 사용 — 지금부터 링크에 로그인 필요(이미 접속 중인 세션은 최대 8시간 유지)':'광고주 계정 미사용 — 링크만으로 입장'); await _advLinkReload(); }
   else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
 async function _advAcctReload(){ const cur=STATE.advCur; if(!cur) return;
