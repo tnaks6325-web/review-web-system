@@ -261,6 +261,45 @@ async function run() {
   assert.ok(/다시 시도/.test(HTML.split('async function _lkLoad')[1].split('function _lkRender')[0]), '7k: 실패 시 [다시 시도]로 종결');
   console.log('  7. 사본 금지 · 프론트 배선 ✓');
 
+  // ═══ 8. 작업오더 ← 계약건(088) · 접수 시 자동 매칭 ═══
+  const ORDER = fs.readFileSync(path.join(__dirname, '../src/routes/order.routes.js'), 'utf8');
+  const MIG = fs.readFileSync(path.join(__dirname, '../migrations/088_work_order_contract.sql'), 'utf8');
+  const BOOT = fs.readFileSync(path.join(__dirname, '../index.js'), 'utf8');
+  const WOD = fs.readFileSync(path.join(__dirname, '../../frontend/js/work-order-detail.js'), 'utf8');
+
+  for (const col of ['sales_id', 'contract_number', 'quote_id']) {
+    assert.ok(new RegExp(`ADD COLUMN IF NOT EXISTS\\s+${col}\\s+TEXT`).test(MIG), `8a: 088 ${col} TEXT 컬럼(082 의 42804 계열 회피)`);
+  }
+  assert.ok(!/REFERENCES/i.test(MIG), '8a2: 인트라넷 키에 FK 를 걸지 않는다(D1 무접촉 규율)');
+  assert.ok(/\['work_orders', 'sales_id'\]/.test(BOOT), '8b: REQUIRED_SCHEMA 등록(컬럼 누락 = 오더 접수 전면 42703)');
+  for (const f of ['sales_id', 'contract_number', 'quote_id']) {
+    assert.ok(new RegExp(`'${f}'`).test(ORDER.split('INTAKE_EDITABLE_FIELDS')[1].split('];')[0]), `8c: intake 수정 가능 필드 ${f}`);
+  }
+
+  // ★★ INSERT 컬럼 수 ≡ VALUES 자리 수 ≡ 파라미터 수 — 컬럼을 추가하며 가장 흔하게 깨지는 자리.
+  const ins = ORDER.split('INSERT INTO work_orders')[1];
+  const colList = ins.slice(ins.indexOf('(') + 1, ins.indexOf('VALUES')).replace(/\)\s*$/, '');
+  const nCols = colList.split(',').map(s => s.trim()).filter(Boolean).length;
+  const valsSeg = ins.slice(ins.indexOf('VALUES'), ins.indexOf('RETURNING'));
+  const nVals = (valsSeg.match(/\$\d+|'submitted'/g) || []).length;
+  assert.equal(nCols, nVals, `8d: INSERT 컬럼 ${nCols} ≡ VALUES ${nVals}`);
+  const maxPlaceholder = Math.max(...(valsSeg.match(/\$(\d+)/g) || []).map(s => +s.slice(1)));
+  const argsSeg = ORDER.slice(ORDER.indexOf('RETURNING *`,', ORDER.indexOf('INSERT INTO work_orders')));
+  const nArgs = argsSeg.slice(0, argsSeg.indexOf('\n  );')).split('\n')
+    .filter(l => /^\s{6}\S/.test(l) && !/^\s*\/\//.test(l)).length;
+  assert.equal(nArgs, maxPlaceholder, `8e: 파라미터 ${nArgs} ≡ 최대 자리표시자 $${maxPlaceholder}`);
+
+  // 접수 자동 연결 — 기존 링크는 덮지 않고, 실패해도 접수는 성공(fail-soft)
+  const acc = ORDER.split('8b) 정산 계약 자동 연결')[1].split('res.json({')[0];
+  assert.ok(/if \(o\.sales_id\)/.test(acc), '8f: 계약 미첨부 오더는 종전 동작(자동 연결 안 함)');
+  assert.ok(/deleted_at IS NULL LIMIT 1/.test(acc) && /kept_existing/.test(acc), '8g: 기존 링크가 있으면 덮지 않는다');
+  assert.ok(/catch \(linkErr\)/.test(acc) && /접수는 완료/.test(acc), '8h: fail-soft — 연결 실패해도 접수 성공');
+  assert.ok(/INSERT INTO trackb_settlement_links/.test(acc) && !/UPDATE trackb_settlement_links/.test(acc),
+    '8i: 쓰기 표면은 링크 INSERT 하나(기존 행 UPDATE 없음)');
+  assert.ok(/_woKv\("계약건", o\.contract_number\)/.test(WOD), '8j: 작업오더 상세에 계약건 표기');
+  assert.ok(/접수할 때<\/b>|<b>접수할 때 자동으로 매칭<\/b>/.test(HTML), '8k: 미연결 안내가 자동 매칭 규칙을 설명');
+  console.log('  8. 작업오더 계약건(088) — 스키마·프리플라이트·INSERT 정합·자동 연결 ✓');
+
   console.log('✅ contractMatch 테스트 전체 통과');
 }
 

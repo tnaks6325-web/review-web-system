@@ -2347,7 +2347,7 @@ function renderSettlement(){
   if(d.hidden){ box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div><div class="stpcard"><div class="empty" style="padding:16px">정산 정보는 비공개로 설정되어 있습니다.</div></div></div>`; return; }
   if(!d.linked){
     box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div>
-      <div class="stpcard nolink"><div class="stpnl"><b>매칭된 계약이 없습니다.</b><span>이 업체로 등록된 인트라넷 계약(C-번호)을 매칭하면 견적·계산서·입금 상태가 여기 표시됩니다.</span></div>
+      <div class="stpcard nolink"><div class="stpnl"><b>매칭된 계약이 없습니다.</b><span>이 업체로 등록된 인트라넷 계약(C-번호)을 매칭하면 견적·계산서·입금 상태가 여기 표시됩니다. 인트라넷 리뷰오더에 계약건이 붙어 있으면 <b>접수할 때 자동으로 매칭</b>됩니다.</span></div>
       ${canLink?`<button class="btn pri" onclick="openLinkModal()">계약 매칭</button>`:''}</div></div>`;
     return;
   }

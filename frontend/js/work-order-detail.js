@@ -305,6 +305,9 @@ function _woDetailHtml(o) {
     // 담당AE = 인트라넷 표기 실명 우선, 없으면 제출 계정. 작업담당은 매핑 닉네임을 병기(065).
     _woKv("담당AE", o.manager_name || o.created_by),
     _woKv("작업담당", _woManagerLabel(o.work_manager)),
+    // 계약건(088) — 인트라넷 리뷰오더 등록에서 고른 계약. 접수하면 이 계약이 정산에 자동 연결된다.
+    //   ★ 값이 없는 과거 오더는 줄 자체가 안 나온다(_woKv 가 빈 값을 버림) = 종전 화면 그대로.
+    _woKv("계약건", o.contract_number),
     _woSection("상품·옵션", prodText, txtR),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),

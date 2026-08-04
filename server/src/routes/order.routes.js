@@ -49,6 +49,7 @@ const INTAKE_EDITABLE_FIELDS = [
   'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
+  'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
 ];
 const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
 
@@ -144,8 +145,9 @@ async function _insertWorkOrder(b, createdBy) {
       (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
        purchase_time, inflow_keyword, inflow_type, inflow_guide, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
-       product_url, work_sheet_url, goods_cost_type, manager_name, work_manager, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'submitted',$24)
+       product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
+       sales_id, contract_number, quote_id, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'submitted',$27)
      RETURNING *`,
     [
       _genOrderId(),
@@ -174,6 +176,10 @@ async function _insertWorkOrder(b, createdBy) {
       b.goods_cost_type || '',
       b.manager_name || '',
       pickWorkManager(b),   // 작업담당(박세희/박은비/랜덤) — 표준키 work_manager + 별칭·본문 폴백
+      // 인트라넷 계약건(088) — 접수 시 정산 계약을 자동 연결하는 재료. 빈 값이면 종전 동작(사람이 매칭).
+      String(b.sales_id || '').trim(),
+      String(b.contract_number || '').trim(),
+      String(b.quote_id || '').trim(),
       createdBy,
     ]
   );
@@ -928,6 +934,33 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       [id, nextStatus, sheetId, tabName, gid, (req.admin?.name || '')]
     );
 
+    // 8b) 정산 계약 자동 연결 (088) — 인트라넷 리뷰오더 등록에서 고른 계약을 그대로 이 탭에 매칭한다.
+    //   ★★ 이것이 "계약 매칭을 따로 하지 않아도 되는" 이유. 리뷰웹의 계약 매칭 화면은 이 규칙 이전에
+    //      들어온 과거 작업건을 메우는 용도로만 남는다.
+    //   ★ 이미 링크가 있으면 **덮지 않는다** — 사람이 고쳐 놓은 매칭을 재접수 한 번으로 되돌리면 안 된다.
+    //   ★ fail-soft: 실패해도 접수는 성공(계약은 나중에 화면에서 매칭할 수 있다).
+    let settlementLinked = null;
+    if (o.sales_id) {
+      try {
+        const { rows: exist } = await pool.query(
+          `SELECT sales_id FROM trackb_settlement_links
+            WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`, [sheetId, tabName]);
+        if (exist.length) {
+          settlementLinked = (exist[0].sales_id === o.sales_id) ? 'already' : 'kept_existing';
+        } else {
+          await pool.query(
+            `INSERT INTO trackb_settlement_links (sheet_id, tab_name, sales_id, quote_id, contract_number, linked_by)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [sheetId, tabName, o.sales_id, o.quote_id || null, o.contract_number || '', '자동(작업오더)']);
+          settlementLinked = 'linked';
+          logger.info(`[order/accept] 정산 계약 자동 연결: ${sheetId}/${tabName} → ${o.contract_number || o.sales_id}`);
+        }
+      } catch (linkErr) {
+        settlementLinked = 'failed';
+        logger.warn(`[order/accept] 정산 계약 자동 연결 실패 (접수는 완료): ${linkErr.message}`);
+      }
+    }
+
     logger.info(`[order/accept] ${id} → 탭 "${tabName}" (${wasRegistered ? '기존탭 연결' : '신규 등록'}), 캠페인=${spreadsheetTitle}, 빌드=${indexBuilt}`);
 
     res.json({
@@ -938,6 +971,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       alreadyRegistered: wasRegistered,
       idempotent,
       indexBuilt,
+      settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
     });
   } catch (err) {
     next(err);

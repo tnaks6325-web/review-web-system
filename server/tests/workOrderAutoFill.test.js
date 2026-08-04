@@ -84,8 +84,11 @@ ok('★ 랜덤 목록도 같다',
 const ord = readS('routes/order.routes.js');
 ok('인트라넷·AE 양쪽에서 work_manager 를 받는다',
   /'goods_cost_type', 'work_manager'/.test(ord) && /'work_manager',\s+\/\/ 작업담당/.test(ord));
+// ⚠ 088(계약건 컬럼)에서 컬럼 목록 중간에 sales_id/contract_number/quote_id 가 들어와 옛 패턴
+//   (`manager_name, work_manager, status, created_by`)이 드리프트했다 — 검사 의미는 불변(INSERT 에
+//   work_manager 가 있고 값은 pickWorkManager 에서 온다)이라 패턴만 갱신한다.
 ok('신규 오더 INSERT 에 work_manager 포함(별칭·본문 폴백 경유)',
-  /manager_name, work_manager, status, created_by/.test(ord) && /pickWorkManager\(b\)/.test(ord));
+  /manager_name, work_manager,/.test(ord) && /status, created_by\)/.test(ord) && /pickWorkManager\(b\)/.test(ord));
 ok('컬럼 자동생성 안전장치(마이그레이션 실패 대비)',
   /ADD COLUMN IF NOT EXISTS work_manager/.test(ord));
 ok('마이그레이션 065 존재',
