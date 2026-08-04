@@ -403,6 +403,18 @@ router.get('/settlement/sales-search', authMiddleware, internalMiddleware, async
   try { res.json(await svc.intranetSalesSearch({ q: req.query.q, limit: req.query.limit })); }
   catch (err) { next(err); }
 });
+// 계약 매칭 후보 — 그 작업을 소유한 업체(광고주DB)의 계약만 + 작업명 유사도 추천.
+//   ★ 게이트는 링크(POST /settlement/link)와 **같은 `_ensureEditScope`** — 후보를 보는 사람 = 매칭할 사람.
+//     (계약 목록엔 업체명·계약금액이 실리므로 열람 범위를 링크 권한보다 넓히지 않는다.)
+router.get('/settlement/contract-candidates', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, scope, q } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.contractCandidatesForTab({ sheetId, tabName, scope, q });
+    res.status(out.ok ? 200 : (out.code || 502)).json(out);
+  } catch (err) { next(err); }
+});
 router.post('/settlement/link', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, salesId, quoteId } = req.body || {};

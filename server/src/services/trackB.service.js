@@ -14,6 +14,7 @@
  */
 const { logger } = require('../utils/logger');
 const participants = require('./participants.service');
+const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
 
 let _pool;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -744,6 +745,122 @@ function _mapSales(r) {
     paymentDate: r.payment_date || null, invoiceDate: r.invoice_date || null,
     // 입금매칭(인트라넷 계약관리 sales_bank_matches 의 집계 파생값): 누적 입금액 + 최근 입금일
     paidAmount: Number(r.matched_bank_amount) || 0, paidDate: r.matched_bank_date || null,
+    // ── 계약 매칭(작업명 유사도) 재료 — 추가만. 기존 소비처(스텝퍼·정산 요약)는 이 필드를 안 본다.
+    //    ★ 신형 계약등록 폼은 업체를 `business_name`(사업자명)에 넣는다(`advertiser_name`은 레거시라 대개 공란).
+    businessName: String(r.business_name || '').trim(),
+    brandProduct: String(r.brand_product || '').trim(),
+    contractDetail: String(r.contract_detail || '').trim(),
+    contractMonth: r.contract_month || null,
+    registrationDate: r.registration_date || null,
+    attributionMonth: r.attribution_month || null,
+    contractAmount: Number(r.contract_amount) || 0,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 계약 매칭(계약 "연결" → "매칭") — 그 작업을 소유한 업체의 계약만 후보로 두고 작업명 유사도로 추천.
+//   ★★ 종전 자유검색(intranetSalesSearch)은 전체 계약을 대상으로 해 **타 업체 계약을 남의 탭에 붙이는
+//      오링크가 구조적으로 가능**했다. 후보를 업체로 좁히면 그 사고 자체가 안 생긴다.
+//   ★ 인트라넷 D1 무접촉(HTTP GET 프록시만) — 이 경로도 읽기 전용.
+// ══════════════════════════════════════════════════════════════════════════
+
+// 탭 소유 업체(= Track B `advertisers`, 이름은 인트라넷 광고주DB `business_name` 과 정확일치가 강제됨).
+//   탭지정 소유 > 시트전체 소유 우선(작업목록 그룹핑 주석과 같은 규칙). 조회 실패·미지정은 null.
+async function advertiserForTab({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) return null;
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT a.id AS "advertiserId", a.name AS "advertiserName", ac.tab_gid AS "tabGid"
+       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+      WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1
+      ORDER BY a.name, ac.created_at`, [sheetId]).catch(() => ({ rows: [] }));
+  if (!rows.length) return null;
+  const scoped = rows.filter(r => r.tabGid != null);
+  let hit = null;
+  if (scoped.length) {
+    const { rows: gids } = await db.query(
+      `SELECT DISTINCT tab_gid FROM raw_sheet_tabs WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL`,
+      [sheetId, tabName]).catch(() => ({ rows: [] }));
+    const gidSet = new Set(gids.map(g => String(g.tab_gid)));
+    hit = scoped.find(r => gidSet.has(String(r.tabGid))) || null;
+  }
+  if (!hit) hit = rows.find(r => r.tabGid == null) || null;
+  return hit ? { id: hit.advertiserId, name: hit.advertiserName } : null;
+}
+
+// 업체명으로 그 업체의 계약 목록. 30초 캐시(업체별).
+//   ★★ 서버 응답을 **항상 이름으로 재필터**한다 — 인트라넷 `where` 파서는 값에 '=' 가 섞이거나 컬럼명이
+//      없으면 절을 통째로 무시하고 **전체 계약**을 돌려준다(조용히 남의 계약이 후보로 섞임).
+const _intraSalesByAdvCache = new Map();   // normalizedName → { at, items }
+async function intranetSalesForAdvertiser(advertiserName) {
+  const nm = String(advertiserName || '').trim();
+  if (!nm) return { ok: true, items: [] };
+  const key = cm.normalizeKey(nm);
+  const now = Date.now();
+  const cached = _intraSalesByAdvCache.get(key);
+  if (cached && now - cached.at < 30 * 1000) return { ok: true, items: cached.items };
+
+  const mine = (r) => cm.contractAdvertiserNames(r).some(n => cm.normalizeKey(n) === key);
+  const out = new Map();
+  let reached = false;
+  const cols = nm.includes('=') ? [] : ['business_name', 'advertiser_name'];   // '=' 포함 이름은 where 파서가 못 씀
+  for (const col of cols) {
+    try {
+      const j = await _intranetGet(`/api/tables/sales?where=${encodeURIComponent(`${col}=${nm}`)}&limit=200&sort=created_at&order=DESC`);
+      reached = true;
+      for (const raw of (j.data || [])) { const r = _mapSales(raw); if (mine(r)) out.set(r.salesId, r); }
+    } catch (e) { logger.warn(`[trackB] 인트라넷 계약 조회 실패(${col}): ${e.message}`); }
+  }
+  // 폴백: 정확일치 조회로 0건이면 이름 검색 후 같은 기준으로 다시 거른다(표기·컬럼 차이 흡수).
+  if (!out.size) {
+    try {
+      const j = await _intranetGet(`/api/tables/sales?search=${encodeURIComponent(nm)}&limit=200&sort=created_at&order=DESC`);
+      reached = true;
+      for (const raw of (j.data || [])) { const r = _mapSales(raw); if (mine(r)) out.set(r.salesId, r); }
+    } catch (e) { logger.warn(`[trackB] 인트라넷 계약 검색 실패: ${e.message}`); }
+  }
+  if (!reached) return { ok: false, error: 'intranet_unreachable', items: [] };
+  const items = [...out.values()];
+  if (_intraSalesByAdvCache.size > 200) _intraSalesByAdvCache.clear();   // 업체 수만큼 무한정 쌓이지 않게(단순 상한)
+  _intraSalesByAdvCache.set(key, { at: now, items });
+  return { ok: true, items };
+}
+
+/**
+ * 계약 매칭 후보 + 자동 추천.
+ *   scope='advertiser'(기본) — 그 작업을 소유한 업체의 계약만. 업체 미지정·계약 0건이면 전체 검색으로 폴백하고
+ *     `fallbackReason` 으로 그 사실을 화면에 **말한다**(조용히 전체를 보여주면 왜 남의 계약이 뜨는지 모른다).
+ *   scope='all' — 담당자가 명시적으로 전체에서 찾을 때(계약이 다른 이름으로 등록된 경우의 탈출구).
+ * 추천(recommendedSalesId)은 **업체 범위일 때만** 낸다 — 근거가 "그 업체 계약"일 때만 신뢰할 수 있다.
+ */
+async function contractCandidatesForTab({ sheetId, tabName, scope = 'advertiser', q = '' } = {}) {
+  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+  const adv = await advertiserForTab({ sheetId, tabName }).catch(() => null);
+  const advKey = adv ? cm.normalizeKey(adv.name) : '';
+  const decorate = (items) => items.map(it => Object.assign({}, it, {
+    // 후보가 그 업체 계약인지(전체 검색에서 남의 계약을 고를 때 화면이 경고할 재료)
+    advertiserMatch: advKey ? cm.contractAdvertiserNames(it).some(n => cm.normalizeKey(n) === advKey) : null,
+  }));
+
+  if (scope === 'all') {
+    const r = await intranetSalesSearch({ q, limit: 50 });
+    if (!r.ok) return { ok: false, error: r.error, scope: 'all', advertiser: adv, items: [] };
+    const ranked = cm.rankContracts(tabName, r.items);
+    return { ok: true, scope: 'all', advertiser: adv, items: decorate(ranked.items), recommendedSalesId: null, tie: false, parsed: ranked.parsed };
+  }
+
+  if (!adv) {
+    return { ok: true, scope: 'all', advertiser: null, fallbackReason: 'no_advertiser', items: [], recommendedSalesId: null, tie: false };
+  }
+  const r = await intranetSalesForAdvertiser(adv.name);
+  if (!r.ok) return { ok: false, error: r.error, scope: 'advertiser', advertiser: adv, items: [] };
+  if (!r.items.length) {
+    return { ok: true, scope: 'advertiser', advertiser: adv, fallbackReason: 'no_contracts', items: [], recommendedSalesId: null, tie: false };
+  }
+  const ranked = cm.rankContracts(tabName, r.items);
+  return {
+    ok: true, scope: 'advertiser', advertiser: adv,
+    items: decorate(ranked.items), recommendedSalesId: ranked.recommendedSalesId, tie: ranked.tie, parsed: ranked.parsed,
   };
 }
 
@@ -753,7 +870,20 @@ function _mapSales(r) {
 async function linkSettlement({ sheetId, tabName, salesId, quoteId = null, by = '' } = {}) {
   if (!sheetId || !tabName || !salesId) return { ok: false, code: 400, error: 'sheetId, tabName, salesId 필수' };
   let contractNumber = '', advertiserName = '';
-  try { const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(salesId)}`); contractNumber = String((j.data && j.data.contract_number) || '').trim(); advertiserName = String((j.data && j.data.advertiser_name) || '').trim(); } catch (_) {}
+  try {
+    const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(salesId)}`);
+    contractNumber = String((j.data && j.data.contract_number) || '').trim();
+    // ★ 신형 계약은 업체를 business_name 에 넣는다(advertiser_name 은 레거시) — 둘 다 본다.
+    advertiserName = String((j.data && (j.data.business_name || j.data.advertiser_name)) || '').trim();
+  } catch (_) {}
+  // 오링크(타 업체 계약을 남의 탭에 매칭) 경고 — ★ 차단은 하지 않는다(계약이 다른 이름으로 등록된 정상 케이스가 있다).
+  //   화면이 확인을 받고 보내며, 여기서는 신호와 로그만 남긴다. 판정 불가(업체 미지정·조회 실패)는 null.
+  let mismatch = null;
+  try {
+    const owner = await advertiserForTab({ sheetId, tabName });
+    if (owner && advertiserName) mismatch = cm.normalizeKey(owner.name) !== cm.normalizeKey(advertiserName);
+    if (mismatch) logger.warn(`[trackB] 정산 매칭 업체 불일치: ${sheetId}/${tabName}(소유:${owner.name}) ← 계약 업체:${advertiserName}`);
+  } catch (_) {}
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
@@ -765,7 +895,7 @@ async function linkSettlement({ sheetId, tabName, salesId, quoteId = null, by = 
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
   finally { client.release(); }
   logger.info(`[trackB] 정산 링크: ${sheetId}/${tabName} → 계약 ${contractNumber || salesId}(업체:${advertiserName || '?'}) by ${by}`);
-  return { ok: true, contractNumber, advertiserName };
+  return { ok: true, contractNumber, advertiserName, mismatch };
 }
 async function unlinkSettlement({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
@@ -2563,6 +2693,9 @@ module.exports = {
   sheetAssignableByStaff,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
+  advertiserForTab,
+  intranetSalesForAdvertiser,
+  contractCandidatesForTab,
   linkSettlement,
   unlinkSettlement,
   setSettlementVisible,
