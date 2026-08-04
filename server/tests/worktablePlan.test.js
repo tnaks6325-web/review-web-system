@@ -277,11 +277,85 @@ ok('라우트가 holidays 쿼리를 받는다',
   /if \(q\.holidays\) opt\.holidays = String\(q\.holidays\)\.split\(','\)/.test(routes));
 ok('열 이름·옵션명은 esc() 통과(시트·사용자 자유 문자열)',
   /esc\(c\.name\)/.test(wdesk) && /esc\(b\.key\)/.test(wdesk) && /esc\(d\.label\)/.test(wdesk));
-ok('★ 생성 버튼은 아직 잠겨 있고 그 사실을 화면이 말한다(반쯤 되는 기능으로 오인 금지)',
-  /이 구성으로 만들기<\/button>/.test(wdesk)
-  && /확인용 미리보기<\/b>입니다/.test(wdesk));
+ok('★ 생성 버튼은 잠긴 계획에서 비활성 + 사유를 화면이 말한다',
+  /id="wtpCreateBtn"[\s\S]{0,120}p\.canCreate\?''\:'disabled/.test(wdesk)
+  && /지금 구성으로는 만들 수 없습니다\(위 빨간 사유\)/.test(wdesk));
 ok('표준 열 미설정이면 어디서 정하는지 안내한다',
   /설정 › 작업표 표준 열<\/b>에서 먼저 정하세요/.test(wdesk));
+
+/* ══════════════════════════════════════════════════════════
+   I. 생성(M2b-1) — 시트 쓰기·권한·라이브 무접촉
+   ══════════════════════════════════════════════════════════ */
+console.log('\nI. 작업표 생성');
+const createSrc = readS('services/worktableCreate.service.js');
+const C = require('../src/services/worktableCreate.service');
+
+ok('POST /worktable/create 등록 + 권한(내부인 + 편집 명단)',
+  (() => {
+    const l = layers.find(x => x.route.path === '/worktable/create' && x.route.methods.post);
+    if (!l) return false;
+    const names = l.route.stack.map(s => s.handle.name);
+    return names[0] === 'authMiddleware' && names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware');
+  })());
+ok('★★ 계획은 서버가 다시 계산한다 — 화면이 보낸 행 목록을 믿지 않는다',
+  /buildWorktablePlan\(\{ workOrder: wo, template, options: planOptions/.test(createSrc)
+  && !/req\.body[\s\S]{0,80}\.rows/.test(readS('routes/trackB.routes.js')));
+ok('★ 잠긴 계획은 생성하지 않는다(미리보기 잠금 = 서버 게이트, 같은 판정)',
+  /if \(!plan\.canCreate\)[\s\S]{0,120}return \{ ok: false/.test(createSrc));
+ok('★★ clearSheetValues 를 쓰지 않는다 — gid 를 안 받아 **다른 탭을 지울 수 있다**(런타임 확인으로 잡은 위험)',
+  !/clearSheetValues\(/.test(createSrc));
+ok('시트 쓰기는 전부 gid 를 지정한다(탭 오지정 차단)',
+  (() => {
+    const calls = createSrc.match(/writeSheet\([\s\S]*?\);/g) || [];
+    return calls.length >= 2 && calls.every(c => /\{ gid: newGid \}/.test(c));
+  })());
+ok('★ 시스템이 값을 넣는 칸은 번호·구매일자·옵션 셋뿐(나머지는 제출이 채운다)',
+  (() => {
+    const plan2 = P.buildWorktablePlan({
+      workOrder: { recruit_count: 2, daily_count: 1, start_date: '2026-08-10',
+        product_url: 'https://www.coupang.com/a',
+        product_options_json: JSON.stringify([{ options: [{ label: 'A' }, { label: 'B' }] }]) },
+      template: { core: ['번호', '구매일자', '옵션', '수취인', '연락처'], channels: { coupang: ['쿠팡ID'] } } });
+    const v = C.planToSheetValues(plan2);
+    return v.header.join(',') === '번호,구매일자,옵션,수취인,연락처,쿠팡ID'
+      && v.body[0].join('|') === '1|8 / 10 (월)|A|||'
+      && v.body[1].join('|') === '2|8 / 11 (화)|B|||';
+  })());
+ok('★★ 구매일자는 시트 형식 그대로 쓰인다(063 시트 일정 인식이 읽는 값)',
+  (() => {
+    const plan2 = P.buildWorktablePlan({
+      workOrder: { recruit_count: 1, daily_count: 1, start_date: '2026-08-10' },
+      template: { core: ['구매일자'], channels: {} } });
+    return C.planToSheetValues(plan2).body[0][0] === '8 / 10 (월)';
+  })());
+ok('열 문자 변환(A·Z·AA·AZ)',
+  C.colLetter(0) === 'A' && C.colLetter(25) === 'Z' && C.colLetter(26) === 'AA' && C.colLetter(51) === 'AZ');
+ok('★★ 라이브 경로 무접촉 — 주문원장·투영·큐·행배정을 건드리지 않는다',
+  (() => {
+    // 주석을 걷어낸 실행 코드에서만 판정(설명에는 등장할 수 있다)
+    const code = createSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    return !/order_submissions|campaign_participants|sheet_row_claims|enqueue\(|reconcileStuckOrders|review_index/.test(code);
+  })());
+ok('★ 쓰기 표면은 시트 + work_orders.work_sheet_url 뿐(탭 등록은 여전히 접수가 관문)',
+  (() => {
+    // ★ 주석의 '언급'이 아니라 **쓰기 구문**만 센다(tab_configs 는 주석에서 설명된다).
+    const writes = createSrc.match(/\b(?:INSERT INTO|UPDATE)\s+(?!SET\b)\w+/gi) || [];
+    return writes.length === 1 && /work_orders/i.test(writes[0]) && !/DELETE FROM/i.test(createSrc);
+  })());
+ok('★ 시트 탭을 시스템이 지우지 않는다(되돌리기 어려운 파괴는 사람 손에)',
+  !/deleteSheet|deleteRows|drive\.files\.delete/.test(createSrc));
+ok('헤더 줄 위치는 가정하지 않고 탐지한다(템플릿이 바뀌어도 따라감)',
+  /require\('\.\.\/utils\/sheetHeader'\)/.test(createSrc)
+  && /detectSheetHeader\(values \|\| \[\]/.test(createSrc));
+ok('템플릿 미설정·탭이름 공란은 명확히 거부',
+  /TEMPLATE_SHEET_ID 가 설정되지 않았습니다/.test(createSrc)
+  && /탭 이름이 비어 있습니다/.test(createSrc));
+ok('프론트: 생성 버튼·대상 시트·탭 이름이 붙어 있다',
+  /onclick="wtpCreate\(\)"/.test(wdesk) && /id="wtpSheet"/.test(wdesk) && /id="wtpTabName"/.test(wdesk));
+ok('★ 생성 후 접수는 사람이 누른다고 화면이 말한다(등록 관문 유지)',
+  /접수는 확인 후 직접<\/b> 눌러 주세요/.test(wdesk));
+ok('★ 대상 시트 목록은 기존 /tabs 재사용(신규 엔드포인트 0) · 1회만 로드',
+  /api\('\/api\/trackb\/tabs'\)/.test(wdesk) && /_WTP\.sheetsLoaded/.test(wdesk));
 
 console.log(`\n✅ worktablePlan: ${n}개 통과`);
 process.exit(0);   // trackB.routes 가 DB 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

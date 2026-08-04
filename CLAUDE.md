@@ -303,7 +303,16 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **미리보기** `GET /api/trackb/worktable/plan?workOrderId=`(authMiddleware + internal + **editorOnly** — 표를 만들 사람이 본다): 읽기 전용, 조정값(total·daily·startDate·skipWeekends)은 **미전송 시 작업오더 값 유지**. 프론트(작업오더 펼침행 [📋 작업표])는 **서버 계획을 그대로 렌더**하고 조정 시 재조회한다(로컬 재계산 금지).
 - ★★ **`getPool()`은 `trackB.routes.js`에 없다** — 이 파일은 `const pool = require('../db/pool')`. 잘못 쓰면 정적 grep은 통과하고 **런타임 500**이 난다(개발 중 실제로 밟았고 런타임 실행 가드가 잡았다).
 - 회귀가드 `tests/worktablePlan.test.js`(55케이스 — 순수함수 실행 + 라우터 스택 실검사 + 프론트 배선). 실브라우저로 모달 렌더·조정 재조회·잠금 표시·XSS 이스케이프 확인.
-- **다음(M2b)**: 실제 생성 — 동일 구성 시트 생성(`create-campaign-sheet` 재사용) + DB 스켈레톤 행. ★★ 스켈레톤은 **seq를 시트 실제 행번호에 맞춰야** 주문이 들어올 때 `importTabFromIndex`의 `ON CONFLICT (sheet_id,tab_name,seq)`가 **제자리 갱신**한다(어긋나면 100행 + 유입행이 겹쳐 보인다). `prepareRosterSlots`는 `_MANUAL_SEQ_BASE=900000` 별도 대역이라 그대로는 못 쓴다. 또 `source='manual'` 이면 `is_submitted/is_paid`가 그 CASE에서 **동결**되므로 상태 칸이 영영 갱신 안 된다 — 새 source 값(예 `worktable`)을 그 CASE에 합류시키되 `_reconcileSeen`(source='import'만 비활성)은 건드리지 않는 설계가 필요하다.
+### 작업표 생성 M2b-1 — 시트 만들기 (`worktableCreate.service.js`)
+- 미리보기 [이 구성으로 만들기] → **템플릿 탭 복사(서식·공지문 유지) + 열 이름 줄·N행을 설정 구성으로 다시 쓰기** + `work_orders.work_sheet_url` 자동 연결. 건수는 **작업오더 요구 값 그대로**(10·100·170·400 — 고정 100 아님, 사용자 확정).
+- ★★ **계획은 서버가 다시 계산한다** — 화면이 보낸 행 목록을 믿지 않는다(낡은 화면·조작 요청이 그대로 시트에 박히는 것 차단). 미리보기 잠금과 서버 게이트가 **같은 `canCreate` 판정**.
+- ★★ **`clearSheetValues` 를 쓰지 말 것** — 그 함수는 **gid 를 받지 않아**(범위 문자열만) 방금 만든 탭이 아니라 **첫 번째 탭을 지울 수 있다**(개발 중 런타임 확인으로 잡은 위험). 대신 gid 를 지원하는 `writeSheet` 로 **빈 값을 덮어써** 지운다. 폭 = 우리 열 수와 템플릿 헤더 폭 중 넓은 쪽(옛 헤더 잔존 방지), 본문 아래 20줄만 정리(경계 있는 정리 — 무한정 삭제 금지).
+- ★ **헤더 줄 위치는 가정하지 않고 탐지**(`utils/sheetHeader.detectSheetHeader`, **1-based 반환**) — 템플릿 상단 메타(A1 캠페인명·C1:R1 공지문)를 덮지 않는다. 못 찾으면 2행 폴백.
+- ★ **시스템이 값을 넣는 칸은 번호·구매일자·옵션 셋뿐** — 나머지는 빈 칸으로 두고 구매양식 제출이 채운다(기존 경로 그대로). 구매일자는 `M / D (요일)` 그대로 써야 063 시트 일정 인식이 읽는다.
+- ★★ **쓰기 표면 = 시트 + `work_orders.work_sheet_url` 뿐**. 주문원장·투영·큐·행배정 무접촉, **`tab_configs` 등록은 여전히 접수(accept)가 유일한 관문**(등록 게이트 불변식 유지 — 화면도 "접수는 확인 후 직접" 이라고 말한다). **시트 탭을 시스템이 지우지 않는다**(되돌리기 어려운 파괴는 사람 손에).
+- 대상 시트 목록은 기존 `/api/trackb/tabs` 재사용(신규 엔드포인트 0, 1회 로드). `POST /worktable/create`(auth + internal + editorOnly).
+- 회귀가드 `tests/worktablePlan.test.js`(71케이스 — 계획 재계산·잠금 게이트·gid 지정·라이브 무접촉·쓰기 표면 1곳·행 생성 실행). ⚠ 실제 구글시트 쓰기는 자격증명이 필요해 **배포 후 실물 1건으로 확인**해야 한다.
+- **다음(M2b-2)**: DB 스켈레톤 행(작업대에 미리 보이게) — 실제 생성 — 동일 구성 시트 생성(`create-campaign-sheet` 재사용) + DB 스켈레톤 행. ★★ 스켈레톤은 **seq를 시트 실제 행번호에 맞춰야** 주문이 들어올 때 `importTabFromIndex`의 `ON CONFLICT (sheet_id,tab_name,seq)`가 **제자리 갱신**한다(어긋나면 100행 + 유입행이 겹쳐 보인다). `prepareRosterSlots`는 `_MANUAL_SEQ_BASE=900000` 별도 대역이라 그대로는 못 쓴다. 또 `source='manual'` 이면 `is_submitted/is_paid`가 그 CASE에서 **동결**되므로 상태 칸이 영영 갱신 안 된다 — 새 source 값(예 `worktable`)을 그 CASE에 합류시키되 `_reconcileSeen`(source='import'만 비활성)은 건드리지 않는 설계가 필요하다.
 - 회귀가드 `tests/worktableTemplate.test.js`(39케이스 — 분류기 **실행** 검증(별칭 헤더 추종=사본이면 실패, 분류 ≡ 쓰기 표면 교차확인) + 집계 읽기전용/시트무접촉 + **라우터 스택 실검사** + 시트URL 해제·접수게이트 생존 + 프론트 배선).
 
 ### 업무가이드 메뉴 (리뷰웹시스템[3버전] — 직원용 안내서 모음)

@@ -1370,6 +1370,27 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
   } catch (err) { next(err); }
 });
 
+// 작업표 생성 — 시트 탭을 만들고 열 이름 줄 + N행을 쓴다.
+//   ★ 계획은 서버가 **다시 계산**한다(화면이 보낸 행 목록 미신뢰). 잠긴 계획은 생성하지 않는다.
+//   ★ 탭 등록(tab_configs)은 여전히 접수(accept)가 유일한 관문 — 여기서는 등록하지 않는다.
+router.post('/worktable/create', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { createWorktable } = require('../services/worktableCreate.service');
+    const b = req.body || {};
+    if (!b.workOrderId) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
+    const r = await createWorktable({
+      workOrderId: String(b.workOrderId),
+      mode: b.mode === 'new' ? 'new' : 'existing',
+      sheetId: b.sheetId || '',
+      fileTitle: b.fileTitle || '',
+      tabName: b.tabName || '',
+      planOptions: b.planOptions || {},
+      by: _by(req),
+    });
+    res.json(r);
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { saveTemplate } = require('../services/worktable.service');

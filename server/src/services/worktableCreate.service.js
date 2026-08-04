@@ -1,0 +1,195 @@
+/**
+ * worktableCreate.service.js — 작업표 생성 (M2b-1: 시트 만들기)
+ *
+ * 미리보기에서 확인한 계획(`worktablePlan.buildWorktablePlan`)을 **그대로** 시트에 만든다.
+ * 100건이면 100줄, 170건이면 170줄 — 건수는 작업오더가 요구하는 값 그대로다(사용자 확정).
+ *
+ * ★★ 설계 원칙(되돌리지 말 것)
+ *  ① **계획은 미리보기와 같은 함수**로 다시 계산한다 — 클라이언트가 보낸 행 목록을 믿지 않는다.
+ *     화면 값을 그대로 쓰면 낡은 화면·조작된 요청이 그대로 시트에 박힌다.
+ *  ② **막힌 계획(blockers)은 생성하지 않는다** — 미리보기 잠금과 서버 게이트가 같은 판정을 쓴다.
+ *  ③ **열 이름 줄은 설정 구성으로 다시 쓴다**(사용자 확정) — 템플릿 탭을 복사해 서식·공지문은
+ *     가져오되, 헤더 행과 그 아래 데이터는 우리가 정한 열로 덮는다.
+ *  ④ **라이브 경로 무접촉**: 주문 원장·행 배정·투영·큐를 건드리지 않는다. 이 서비스가 하는 쓰기는
+ *     ㉮ 시트(새 탭) ㉯ `work_orders.work_sheet_url` 뿐이다. 탭 등록(`tab_configs`)은 여전히
+ *     **접수(accept)** 가 유일한 관문이다(등록 게이트 불변식 유지).
+ *  ⑤ **되돌리기**: 잘못 만들었으면 시트 탭을 사람이 지운다. 시스템이 시트를 지우지 않는다
+ *     (되돌리기 어려운 파괴적 동작은 사람 손에 남긴다).
+ */
+'use strict';
+
+const { logger } = require('../utils/logger');
+const pool = require('../db/pool');
+const sheetsSvc = require('./sheets.service');
+const { buildWorktablePlan } = require('../utils/worktablePlan');
+const { getTemplate } = require('./worktable.service');
+
+/** 헤더 줄 위치를 찾는다(템플릿의 메타 영역·공지문 줄을 건너뛰기 위해). */
+const { detectSheetHeader } = require('../utils/sheetHeader');
+
+const MAX_SCAN_ROWS = 60;   // 헤더 탐지용 상단 스캔(공지문·메타 영역이 아무리 길어도 이 안)
+
+/** work_orders 한 건(계획에 필요한 필드만). */
+async function _loadWorkOrder(id) {
+  const { rows } = await pool.query(
+    `SELECT id, title, start_date, recruit_count, daily_count, product_url,
+            product_option, product_options_json, work_sheet_url, status
+       FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
+  return rows[0] || null;
+}
+
+/**
+ * 계획을 시트 행 배열로 변환.
+ * ★ 열 이름이 곧 어느 칸에 쓸지를 정한다 — `plan.columns[i].role` 로 판정하므로
+ *   여기서 키워드 규칙을 다시 만들지 않는다(분류는 매퍼 파생 단일 출처).
+ * ★ 시스템이 값을 넣는 칸은 **번호(seq)·구매일자(dateStr)·옵션(option)** 셋뿐이다.
+ *   나머지는 빈 칸으로 두고 리뷰어 구매양식 제출이 채운다(기존 경로 그대로).
+ */
+function planToSheetValues(plan) {
+  const header = plan.columns.map(c => c.name);
+  const idxSeq = plan.columns.findIndex(c => c.role === 'seq');
+  const idxDate = plan.columns.findIndex(c => c.role === 'dateStr');
+  const idxOpt = plan.columns.findIndex(c => c.role === 'option');
+  const body = plan.rows.map(r => {
+    const row = new Array(header.length).fill('');
+    if (idxSeq >= 0) row[idxSeq] = String(r.seq);
+    if (idxDate >= 0 && r.dateLabel) row[idxDate] = r.dateLabel;   // `M / D (요일)` — 063 시트 일정 인식이 읽는 형식
+    if (idxOpt >= 0 && r.optionKey) row[idxOpt] = r.optionKey;
+    return row;
+  });
+  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0 } };
+}
+
+/** A1 표기 열 문자(0-based index → 'A','B',…,'AA'). */
+function colLetter(i) {
+  let s = '', n = i;
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
+/**
+ * 새 탭에서 헤더 행 번호를 정한다.
+ * 템플릿을 복사한 탭은 상단에 메타 영역(A1 캠페인명 · C1:R1 공지문)이 있고 그 아래에 헤더가 온다.
+ * ★ 위치를 가정하지 않고 **실제로 탐지**한다 — 템플릿이 바뀌어도 따라간다.
+ * ★ 못 찾으면 `fallback`(기본 2행) — 헤더를 1행에 쓰면 공지문을 덮어쓴다.
+ */
+async function _resolveHeaderRow(sheetId, gid, fallback = 2) {
+  try {
+    const values = await sheetsSvc.readSheet(sheetId, `A1:BZ${MAX_SCAN_ROWS}`, { gid });
+    const det = detectSheetHeader(values || [], { maxScanRows: MAX_SCAN_ROWS });
+    // detectSheetHeader 는 **1-based** headerRowIndex 를 준다(그대로 시트 행 번호).
+    if (det && Number.isInteger(det.headerRowIndex) && det.headerRowIndex > 0) {
+      return { row: det.headerRowIndex, width: (det.headers || []).length };
+    }
+    // 헤더를 못 찾아도 템플릿의 가장 넓은 상단 행 폭은 알아 둔다(옛 헤더 지우기용).
+    const width = (values || []).slice(0, 10).reduce((m, r) => Math.max(m, (r || []).length), 0);
+    return { row: fallback, width };
+  } catch (e) {
+    logger.warn(`[worktable/create] 헤더 행 탐지 실패 — ${fallback}행으로 진행: ${e.message}`);
+    return { row: fallback, width: 0 };
+  }
+}
+
+/**
+ * 작업표 생성 — 시트 탭을 만들고 열 이름 줄 + N행을 쓴다.
+ *
+ * @param {object} p
+ *  p.workOrderId  작업오더 id
+ *  p.mode         'existing'(기존 시트 파일에 탭 추가) | 'new'(새 시트 파일)
+ *  p.sheetId      mode='existing' 일 때 대상 스프레드시트 id
+ *  p.fileTitle    mode='new' 일 때 새 파일 제목(미지정 = 작업오더 제목)
+ *  p.tabName      만들 탭 이름(미지정 = 작업오더 제목)
+ *  p.planOptions  미리보기에서 조정한 값(total·daily·startDate·skipWeekends·holidays·options)
+ *  p.by           수행자
+ */
+async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', fileTitle = '', tabName = '', planOptions = {}, by = 'admin' } = {}) {
+  const wo = await _loadWorkOrder(workOrderId);
+  if (!wo) return { ok: false, error: '작업오더를 찾을 수 없습니다.' };
+
+  // ★ 계획은 **서버가 다시 계산**한다 — 화면이 보낸 행 목록을 믿지 않는다.
+  const template = await getTemplate();
+  const plan = buildWorktablePlan({ workOrder: wo, template, options: planOptions || {} });
+  if (!plan.canCreate) {
+    return { ok: false, error: '지금 구성으로는 만들 수 없습니다.', blockers: plan.blockers };
+  }
+
+  const templateSheetId = process.env.TEMPLATE_SHEET_ID || '';
+  if (!templateSheetId) return { ok: false, error: 'TEMPLATE_SHEET_ID 가 설정되지 않았습니다.' };
+
+  const title = String(tabName || wo.title || '').trim().slice(0, 90);
+  if (!title) return { ok: false, error: '탭 이름이 비어 있습니다.' };
+
+  let targetSheetId = String(sheetId || '').trim();
+  let newGid = null;
+  let createdFile = false;
+
+  try {
+    if (mode === 'new') {
+      // 새 파일 = 템플릿 스프레드시트 통째 복사(기존 '새 시트생성' 과 같은 경로).
+      const copied = await sheetsSvc.copySpreadsheet(templateSheetId, String(fileTitle || wo.title || title).slice(0, 90));
+      targetSheetId = copied.id;
+      createdFile = true;
+      try { await sheetsSvc.shareSheetWithServiceAccount(targetSheetId); } catch (e) { logger.warn(`[worktable/create] SA 공유 실패(계속): ${e.message}`); }
+      const meta = await sheetsSvc.getSpreadsheetMeta(targetSheetId);
+      const first = (meta.sheets || [])[0];
+      if (!first) return { ok: false, error: '복사한 시트에 탭이 없습니다.' };
+      newGid = first.properties.sheetId;
+      await sheetsSvc.renameSheet(targetSheetId, newGid, title);
+    } else {
+      if (!targetSheetId) return { ok: false, error: '대상 시트를 선택하세요.' };
+      // 기존 파일에 템플릿 탭을 복사해 붙인다(서식·공지문 유지).
+      const tmplMeta = await sheetsSvc.getSpreadsheetMeta(templateSheetId);
+      const src = (tmplMeta.sheets || [])[0];
+      if (!src) return { ok: false, error: '템플릿 시트에 탭이 없습니다.' };
+      const copiedTab = await sheetsSvc.copySheetToSpreadsheet(templateSheetId, src.properties.sheetId, targetSheetId);
+      newGid = copiedTab.sheetId;
+      await sheetsSvc.renameSheet(targetSheetId, newGid, title);
+    }
+
+    // ── 열 이름 줄 + 데이터 쓰기 ─────────────────────────────────────────
+    const { row: headerRow, width: tmplWidth } = await _resolveHeaderRow(targetSheetId, newGid);
+    const { header, body, filled } = planToSheetValues(plan);
+
+    /* ★★ `clearSheetValues` 를 쓰지 않는다 — 그 함수는 **gid 를 받지 않아**(범위 문자열만)
+       방금 만든 탭이 아니라 **첫 번째 탭을 지울 수 있다**(개발 중 런타임 확인으로 잡은 위험).
+       대신 gid 를 지원하는 `writeSheet` 로 **빈 값을 덮어써** 옛 내용을 지운다.
+       ★ 폭은 우리 열 수와 템플릿 헤더 폭 중 넓은 쪽 — 템플릿의 옛 헤더가 오른쪽에 남지 않게. */
+    const width = Math.max(header.length, tmplWidth || 0, 1);
+    const pad = (row) => { const a = row.slice(); while (a.length < width) a.push(''); return a; };
+    const lastCol = colLetter(width - 1);
+
+    await sheetsSvc.writeSheet(targetSheetId, `A${headerRow}:${lastCol}${headerRow}`, [pad(header)], { gid: newGid });
+    if (body.length) {
+      await sheetsSvc.writeSheet(
+        targetSheetId, `A${headerRow + 1}:${lastCol}${headerRow + body.length}`, body.map(pad), { gid: newGid });
+    }
+    /* 템플릿에 샘플 행이 남아 있을 수 있어 그 아래 몇 줄을 비운다(경계 있는 정리 — 무한정 지우지 않는다). */
+    const TRAIL = 20;
+    await sheetsSvc.writeSheet(
+      targetSheetId,
+      `A${headerRow + 1 + body.length}:${lastCol}${headerRow + body.length + TRAIL}`,
+      Array.from({ length: TRAIL }, () => new Array(width).fill('')), { gid: newGid });
+
+    // ── 작업오더에 시트 URL 연결(접수는 여전히 사람이 누른다 — 등록 게이트 불변식 유지) ──
+    const tabUrl = `https://docs.google.com/spreadsheets/d/${targetSheetId}/edit#gid=${newGid}`;
+    try {
+      await pool.query(
+        `UPDATE work_orders SET work_sheet_url = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`,
+        [wo.id, tabUrl]);
+    } catch (e) {
+      logger.warn(`[worktable/create] 작업오더 URL 연결 실패(시트는 생성됨): ${e.message}`);
+    }
+
+    logger.info(`[worktable/create] ${wo.id} → ${title} (${body.length}행, 헤더 ${headerRow}행) by ${by}`);
+    return {
+      ok: true, sheetId: targetSheetId, gid: newGid, tabName: title, tabUrl, createdFile,
+      headerRow, columns: header, rowsWritten: body.length, filled,
+      warnings: plan.warnings,
+    };
+  } catch (err) {
+    logger.error(`[worktable/create] 실패: ${err.message}`);
+    return { ok: false, error: err.message, partial: newGid ? { sheetId: targetSheetId, gid: newGid } : null };
+  }
+}
+
+module.exports = { createWorktable, planToSheetValues, colLetter, _resolveHeaderRow };
