@@ -695,6 +695,58 @@ function onParticipationToggle(on) {
 }
 
 /** 👥 타계정 참여(063) 토글 — 하위 설정(하루한도·타계정 제한시간) 표시. 끄면 기본 [불가] 그대로. */
+/* ═══════════════════════════════════════════════════════════════════════
+   🧪 테스트 공고 만들기 — 대량구매(타계정 다건 일괄 제출) 검증용 프리셋
+   ─────────────────────────────────────────────────────────────────────
+   기존 발행 모달을 그대로 열고 값만 미리 채운다(신규 엔드포인트·신규 모달 0).
+   저장은 평소와 같은 [저장] 버튼 → 같은 검증·같은 라우트를 탄다.
+
+   ★ 왜 이 값들인가
+     - 상태 active + 리뷰어 숨김 : 리뷰어 목록엔 안 뜨지만 참여·제출은 진짜로 된다.
+       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막혀 테스트가 불가)
+     - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
+     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 15/10분).
+     - 구매 시간대 비움 = 자율주문(종일 오픈).
+   ★ 연결 탭만 사람이 고른다 — 어느 시트에 테스트 행을 쓸지는 시스템이 정할 수 없다.
+   ═══════════════════════════════════════════════════════════════════════ */
+async function openTestCampaignModal() {
+  await openRecruitModal(null);
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  const chk = (id, on, after) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.checked = !!on;
+    if (typeof after === "function") { try { after(!!on); } catch (_) { /* noop */ } }
+  };
+
+  set("rf_title", "🧪 [테스트] 대량구매 일괄제출 검증");
+  set("rf_status", "active");            // ★ 참여가 실제로 되어야 테스트가 된다
+  set("rf_review_fee", 1000);
+  set("rf_time_range", "");              // 자율주문(종일 오픈)
+  set("rf_window_start", "");
+  set("rf_window_end", "");
+  set("rf_hold_ttl", 30);                // 테스트 중 만료로 끊기지 않게
+
+  chk("rf_participation", true, onParticipationToggle);   // 참여형이라야 홀드·일괄제출 경로를 탄다
+  chk("rf_multi_account", true, onMultiAccountToggle);    // 타계정 허용 = 일괄 제출의 전제
+  set("rf_multi_daily", 5);              // 하루에 여러 명의로 참여 가능해야 배치가 켜진다
+  set("rf_sub_ttl", 30);
+  chk("rf_reviewer_hidden", true);       // ★ 리뷰어 목록 미노출
+
+  // 진행상품 표가 정원의 진실원본 — 한 줄 넣어 총모집/일건수를 파생시킨다
+  try {
+    renderOptRows([]);
+    addOptRow({ productName: "테스트 상품", optKey: "", payAmount: 10000, recruitTotal: 100, dailyLimit: 20 });
+    if (typeof _syncPreviewFromOptRows === "function") _syncPreviewFromOptRows();
+  } catch (_) { /* 표가 없는 축약 화면이면 건너뛴다 */ }
+
+  try { renderPartCheck(); } catch (_) { /* noop */ }
+  if (typeof showToast === "function") {
+    showToast("🧪 테스트 공고 값을 채웠어요. 연결 탭만 고른 뒤 저장하세요.", "info");
+  }
+}
+if (typeof window !== "undefined") window.openTestCampaignModal = openTestCampaignModal;
+
 function onMultiAccountToggle(on) {
   const sec = document.getElementById("rf_multi_section");
   if (sec) sec.style.display = on ? "" : "none";
@@ -1291,6 +1343,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
           if (_ma) { _ma.checked = c.multi_account_mode === true; onMultiAccountToggle(_ma.checked); }
           const _md = document.getElementById("rf_multi_daily"); if (_md) _md.value = c.multi_daily_limit ?? 0;
           const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 10;
+        }
+        /* 🧪 085 리뷰어 미노출 복원 */
+        {
+          const _rh = document.getElementById("rf_reviewer_hidden");
+          if (_rh) _rh.checked = c.reviewer_hidden === true;
         }
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
@@ -1954,6 +2011,10 @@ async function saveRecruitPost() {
         payload.multi_account_mode = !!document.getElementById("rf_multi_account").checked;
         payload.multi_daily_limit  = Math.max(0, parseInt(document.getElementById("rf_multi_daily")?.value, 10) || 0);
         payload.sub_hold_ttl_min   = Math.max(1, parseInt(document.getElementById("rf_sub_ttl")?.value, 10) || 10);
+      }
+      /* 🧪 085 리뷰어 미노출 — ★ 토글 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 기존값 유지) */
+      if (document.getElementById("rf_reviewer_hidden")) {
+        payload.reviewer_hidden = !!document.getElementById("rf_reviewer_hidden").checked;
       }
       const _cbRaw = document.getElementById("rf_close_buffer").value;
       payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);

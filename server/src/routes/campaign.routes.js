@@ -626,6 +626,10 @@ router.get('/list', async (req, res, next) => {
                multi_account_mode, sub_hold_ttl_min, is_popular, pinned_at
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
+          -- ★ 085: 리뷰어 미노출(비공개/테스트) 공고 제외. 이 API 가 리뷰어 홈 미리보기·공고 목록·
+          --   인기상품 게이트 모달의 유일한 출처라 여기 한 줄이 리뷰어 노출 경로 전체를 덮는다.
+          --   관리자 목록·상세·참여(apply)는 무변경 → 링크로 들어가 실제 참여·제출 테스트가 가능하다.
+          AND COALESCE(reviewer_hidden, FALSE) = FALSE
         ORDER BY
           CASE WHEN status = 'active' THEN 0 ELSE 1 END,
           (pinned_at IS NULL), pinned_at ASC,  -- ★ 064: 별표 고정 우선 — 먼저 별표한 순서대로(구 노출순서 정렬 대체)
@@ -1484,6 +1488,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min, // ★ 063: 타계정 추가참여(§09-1·5·2)
       options, // ★ 061: 상품옵션 목록(참여형)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 저장, 미전달=변경 없음)
+      reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트 공고) — 목록에서만 숨김, 참여는 정상
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -1520,9 +1525,9 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         created_by,
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
-        start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min)
+        start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -1561,6 +1566,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
           ? 10 : Math.max(1, Number(sub_hold_ttl_min) || 10),   // ★ 063 §09-2: 타계정 10분(≥1 클램프 — 0=즉시만료 footgun 차단)
+        reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -1604,6 +1610,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       multi_account_mode, multi_daily_limit, sub_hold_ttl_min,
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 교체, 미전달=변경 없음)
+      reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트) — undefined=유지, true/false=명시 변경
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
@@ -1712,6 +1719,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         multi_account_mode = COALESCE($33, multi_account_mode),
         multi_daily_limit = COALESCE($34, multi_daily_limit),
         sub_hold_ttl_min = COALESCE($35, sub_hold_ttl_min),
+        reviewer_hidden = COALESCE($36, reviewer_hidden),   -- ★ 085: 미전달=유지(옵션표와 같은 원칙)
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -1740,6 +1748,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 10), // $35
+        (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
       ]
     );
 

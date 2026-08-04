@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>대량구매 테스트 공고 만들기 — 리뷰어에게 안 보이는 내부 테스트</title>
+<style>
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:#F3F4F6; color:#1F2937; line-height:1.65; }
+  .wrap { max-width:920px; margin:0 auto; padding:32px 20px 80px; }
+  .hero { background:linear-gradient(135deg,#334155,#475569); border-radius:20px; padding:32px; color:#fff; margin-bottom:24px; }
+  .hero .tag { display:inline-block; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35); border-radius:999px; font-size:.75rem; font-weight:700; padding:4px 12px; margin-bottom:12px; }
+  .hero h1 { font-size:1.55rem; font-weight:800; letter-spacing:-.5px; margin-bottom:10px; }
+  .hero p { font-size:.94rem; opacity:.93; }
+  section { background:#fff; border:1px solid #E5E7EB; border-radius:16px; padding:26px 26px 30px; margin-bottom:22px; }
+  h2 { font-size:1.18rem; font-weight:800; margin-bottom:6px; display:flex; align-items:center; gap:10px; }
+  h2 .num { display:inline-flex; align-items:center; justify-content:center; width:27px; height:27px; border-radius:8px; background:#334155; color:#fff; font-size:.82rem; flex-shrink:0; }
+  .sub { font-size:.85rem; color:#6B7280; margin-bottom:18px; }
+  ol.steps { list-style:none; counter-reset:s; }
+  ol.steps > li { counter-increment:s; position:relative; padding:14px 0 14px 44px; border-bottom:1px solid #F3F4F6; }
+  ol.steps > li:last-child { border-bottom:none; }
+  ol.steps > li::before { content:counter(s); position:absolute; left:0; top:14px; width:28px; height:28px; border-radius:50%; background:#EFF6FF; color:#1D4ED8; font-weight:800; font-size:.82rem; display:grid; place-items:center; }
+  ol.steps b.t { display:block; font-size:.95rem; margin-bottom:3px; }
+  ol.steps p { font-size:.85rem; color:#4B5563; }
+  .btnchip { display:inline-block; background:#F8FAFC; border:1.5px solid #CBD5E1; border-radius:8px; padding:2px 9px; font-size:.8rem; font-weight:700; color:#475569; }
+  .btnchip.pri { background:#2563EB; border-color:#2563EB; color:#fff; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th { background:#F3F4F6; text-align:left; padding:9px 12px; border-bottom:2px solid #E5E7EB; font-size:.78rem; }
+  td { padding:9px 12px; border-bottom:1px solid #F3F4F6; vertical-align:top; }
+  .note { background:#F9FAFB; border:1px solid #E5E7EB; border-left:4px solid #3B82F6; border-radius:10px; padding:12px 16px; font-size:.85rem; margin-top:14px; }
+  .note.warn { border-left-color:#F59E0B; background:#FFFBEB; }
+  .note.bad { border-left-color:#EF4444; background:#FEF2F2; }
+  code { background:#F1F5F9; border-radius:5px; padding:1px 6px; font-size:.84em; }
+  footer { text-align:center; font-size:.75rem; color:#9CA3AF; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="tag">내부 테스트 안내</span>
+    <h1>대량구매(타계정 여러 건 한 번에) 테스트 공고 만들기</h1>
+    <p>리뷰어에게는 보이지 않으면서, 참여·구매양식 제출까지 <b>실제로 동작하는</b> 공고를 만드는 방법입니다.</p>
+  </div>
+
+  <section>
+    <h2><span class="num">1</span>만드는 방법 — 3단계</h2>
+    <p class="sub">관리자 대시보드 <b>모집공고</b> 탭(또는 통합 작업대 모집공고 탭)에서 진행합니다.</p>
+    <ol class="steps">
+      <li>
+        <b class="t">헤더의 <span class="btnchip">🧪 테스트 공고</span> 버튼을 누릅니다</b>
+        <p>공고 발행 창이 열리면서 테스트에 필요한 값이 <b>미리 채워집니다</b>(모집중 상태 · 리뷰어 숨김 · 타계정 허용 · 자율주문 · 자리 유효시간 30분).</p>
+      </li>
+      <li>
+        <b class="t">연결할 시트 탭만 고릅니다</b>
+        <p>구매양식이 기록될 작업 탭입니다. <b>실제 진행 중인 탭은 피하고</b> 테스트용으로 써도 되는 탭을 고르세요. 제출하면 그 탭에 실제로 행이 기록됩니다.</p>
+      </li>
+      <li>
+        <b class="t"><span class="btnchip pri">저장</span>을 누릅니다</b>
+        <p>공고 카드에 <b>🧪 리뷰어 숨김</b> 배지가 붙으면 완료입니다. 리뷰어 앱 공고 목록에는 뜨지 않습니다.</p>
+      </li>
+    </ol>
+    <div class="note">💡 값은 언제든 바꿔도 됩니다. 미리 채워진 것은 <b>테스트가 막히지 않는 값</b>일 뿐입니다.</div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>테스트하는 방법</h2>
+    <p class="sub">일괄 제출은 <b>한 사람이 여러 명의로 동시에 참여 중</b>일 때만 켜집니다.</p>
+    <ol class="steps">
+      <li><b class="t">공고 카드의 <span class="btnchip">👁 리뷰어 화면</span>이 아니라 <b>실제 링크</b>로 들어갑니다</b>
+        <p>미리보기 화면은 제출이 막혀 있어 대량구매 테스트가 되지 않습니다. 공고 주소(<code>campaign.html?id=…</code>)를 그대로 열어주세요.</p></li>
+      <li><b class="t">타계정을 2개 이상 등록한 계정으로 로그인합니다</b>
+        <p>리뷰어 홈 → 내정보에서 타계정을 등록할 수 있습니다. 등록된 명의가 2개 이상이어야 명의 선택 화면이 나옵니다.</p></li>
+      <li><b class="t">명의를 바꿔가며 2건 이상 참여합니다</b>
+        <p>참여 후 화면의 <span class="btnchip">＋ 타계정으로 추가참여하기</span>로 다른 명의를 더 잡습니다.</p></li>
+      <li><b class="t">구매양식이 명의별 카드로 펼쳐지는지 확인합니다</b>
+        <p>카드 위에 <b>“구매 캡처를 한 번에 올리세요”</b> 상자가 보이면 일괄 제출 모드입니다. 캡처를 여러 장 한꺼번에 올려 보세요.</p></li>
+      <li><b class="t">확인 포인트</b>
+        <p>① 사진이 고른 순서대로 위 카드부터 들어가는지 ② 사진 속 이름이 그 카드 명의와 다를 때 경고가 뜨는지 ③ 새로고침해도 입력값·사진이 되살아나는지 ④ 제출 후 명의별 결과가 한 줄씩 나오는지.</p></li>
+    </ol>
+    <div class="note warn">⏱ <b>자리 유효시간</b> — 테스트 공고는 30분으로 넉넉히 잡혀 있지만, 그 안에 구매·제출을 마쳐야 합니다. 시간이 지난 카드는 <b>⛔ 시간 만료</b>로 잠기고 제출에서 빠집니다.</div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>“리뷰어에게 숨김”이 정확히 무엇을 하나요</h2>
+    <table>
+      <thead><tr><th style="width:230px">항목</th><th>숨김 켰을 때</th></tr></thead>
+      <tbody>
+        <tr><td>리뷰어 앱 공고 목록</td><td><b>안 보입니다</b> (홈 미리보기 · 공고 목록 · 인기상품 안내 모달 모두)</td></tr>
+        <tr><td>관리자 공고 목록</td><td>그대로 보입니다 + <b>🧪 리뷰어 숨김</b> 배지</td></tr>
+        <tr><td>참여 · 구매양식 제출</td><td><b>정상 동작합니다</b> (그래서 테스트가 됩니다)</td></tr>
+        <tr><td>공고 링크로 직접 접속</td><td><b>들어와집니다</b> — 아래 주의 참고</td></tr>
+      </tbody>
+    </table>
+    <div class="note bad">⚠️ <b>목록에서만 숨깁니다.</b> 공고 주소를 아는 사람은 들어올 수 있습니다(로그인 잠금이 아닙니다). 테스트 링크를 리뷰어에게 공유하지 마세요. 테스트가 끝나면 공고 상태를 <b>마감</b>으로 바꾸거나 삭제해 주세요.</div>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>테스트가 끝난 뒤</h2>
+    <p class="sub">테스트 공고는 정리하는 것까지가 한 세트입니다.</p>
+    <table>
+      <thead><tr><th style="width:230px">할 일</th><th>이유</th></tr></thead>
+      <tbody>
+        <tr><td>공고를 <b>마감</b>으로 바꾸거나 삭제</td><td>링크를 아는 사람이 계속 참여할 수 있습니다.</td></tr>
+        <tr><td>연결한 탭의 <b>테스트 행 정리</b></td><td>제출한 건은 실제 주문으로 기록됩니다(시트·주문 원장).</td></tr>
+        <tr><td>남은 참여(자리) 정리</td><td>참여만 하고 제출하지 않은 자리는 시간이 지나면 자동으로 풀립니다.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>리뷰 관리 시스템 · 대량구매 테스트 공고 안내</footer>
+</div>
+</body>
+</html>

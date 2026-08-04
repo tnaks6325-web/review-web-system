@@ -2327,6 +2327,7 @@ async function renderCampaignsView(){
 function _rcRenderHead(total){
   $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
+    ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
