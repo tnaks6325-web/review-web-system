@@ -215,9 +215,8 @@ router.post('/intake', async (req, res, next) => {
     if (!b.title || !String(b.title).trim()) {
       return res.status(400).json({ ok: false, error: '작업명을 입력해주세요.' });
     }
-    if (!b.work_sheet_url || !String(b.work_sheet_url).trim()) {
-      return res.status(400).json({ ok: false, error: '작업시트탭URL은 필수입니다.' });
-    }
+    // ★ work_sheet_url 은 선택 항목 (작업표 생성 도입에 따라 제출 필수 해제).
+    //   시트 없이 제출된 오더는 접수 시점에 시트 URL을 채우거나 작업표를 생성해야 접수된다(accept 게이트 유지).
     const requester = (b.requester_name || b.created_by || '').toString().trim() || '인트라넷';
     const data = await _insertWorkOrder(b, requester);
     _emitWorkOrderNew(data);
@@ -396,9 +395,8 @@ async function _intakeUpdateHandler(req, res, next) {
       if (f === 'title' && !String(b[f]).trim()) {
         return res.status(400).json({ ok: false, error: '작업명은 비울 수 없습니다.' });
       }
-      if (f === 'work_sheet_url' && !String(b[f]).trim()) {
-        return res.status(400).json({ ok: false, error: '작업시트탭URL은 비울 수 없습니다.' });
-      }
+      // ★ work_sheet_url 은 선택 항목이 되었으므로 빈값(=시트 미첨부로 되돌리기) 허용.
+      //   접수 게이트가 URL+gid를 재검증하므로 빈값이 접수 흐름을 오염시키지 않는다.
       sets.push(`${f} = $${i++}`);
       if (f === 'start_date') vals.push(_dateOrNull(b[f]));
       else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
@@ -565,10 +563,9 @@ router.post('/submit', authMiddleware, async (req, res, next) => {
     if (!b.title || !String(b.title).trim()) {
       return res.status(400).json({ ok: false, error: '작업명을 입력해주세요.' });
     }
-    // ★ 필수: 작업시트탭URL (AE 요청 시 필수사항)
-    if (!b.work_sheet_url || !String(b.work_sheet_url).trim()) {
-      return res.status(400).json({ ok: false, error: '작업시트탭URL은 필수입니다.' });
-    }
+    // ★ 작업시트탭URL은 **선택 항목**(작업표 생성 도입으로 제출 필수 해제 — PRD Q2 확정).
+    //   시트를 미리 만들어 둔 경우엔 그대로 첨부하고, 통합작업대에서 작업표를 생성할 경우 비워 둔다.
+    //   접수(accept)는 여전히 URL+gid를 요구하므로 "접수된 오더 = linked_tab_* 보유" 불변식은 유지된다.
 
     const data = await _insertWorkOrder(b, req.admin?.name || '');
     _emitWorkOrderNew(data);
@@ -629,10 +626,8 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
     if (sets.length === 0) {
       return res.status(400).json({ ok: false, error: '수정할 항목이 없습니다.' });
     }
-    // 시트탭URL을 빈값으로 지우는 것은 금지 (필수 유지)
-    if (b.work_sheet_url !== undefined && !String(b.work_sheet_url).trim()) {
-      return res.status(400).json({ ok: false, error: '작업시트탭URL은 비울 수 없습니다.' });
-    }
+    // ★ 시트탭URL은 선택 항목 — 빈값으로 지우는 것도 허용(작업표 생성으로 진행 전환).
+    //   접수 게이트가 URL+gid를 재검증하므로 빈값이 접수 흐름을 오염시키지 않는다.
     // ★ 보완요청(revision) 상태에서 AE가 수정하면 재제출(submitted)으로 자동 복귀
     if (cur[0].status === 'revision') {
       sets.push(`status = 'submitted'`);
@@ -781,10 +776,16 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       });
     }
 
-    // 2) work_sheet_url 검증 (URL + gid 필수) — 현재 UX 유지
+    // 2) work_sheet_url 검증 (URL + gid 필수) — ★ 제출은 선택이지만 **접수는 여전히 탭이 있어야 성립**한다.
+    //   접수는 그 탭을 tab_configs·campaigns 에 등록하는 단일 관문이라, 등록할 탭이 없으면 할 일이 없다.
+    //   시트 미첨부 오더는 ① 시트탭URL을 채워 넣거나 ② 작업표를 생성(→ 시트 자동 생성)한 뒤 접수한다.
     const url = (o.work_sheet_url || '').trim();
     if (!url) {
-      return res.status(400).json({ ok: false, error: '작업시트탭URL이 없습니다. AE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.' });
+      return res.status(400).json({
+        ok: false,
+        error: '작업시트탭URL이 없습니다. 시트탭 주소(…/edit#gid=숫자)를 입력하거나 작업표를 생성한 뒤 접수해주세요.',
+        needsSheet: true,
+      });
     }
     const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
     if (!sheetIdMatch) {

@@ -1147,4 +1147,18 @@ router.post('/reviewer-logs/resolve', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+// ══════════════════════════════════════════════════════════════════
+// 작업표(worktable) — M1: 헤더 학습 리포트 (읽기 전용)
+//   "작업표에 어떤 열이 고정으로 들어가고 어떤 열이 변칙인가"를 운영 중인 실제 탭 통계로 답한다.
+//   ★ adminOrMaster — **전사 통계**라 AE의 "담당 탭" 스코프로 나눌 성격이 아니다
+//     (등록리뷰어DB·C/S 문의와 같은 판단). 시트 재읽기 0, 상태 변경 0.
+// ══════════════════════════════════════════════════════════════════
+router.get('/worktable/header-stats', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { headerStats } = require('../services/worktable.service');
+    const data = await headerStats({ limit: parseInt((req.query || {}).limit, 10) || 500 });
+    res.json({ ok: true, data });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

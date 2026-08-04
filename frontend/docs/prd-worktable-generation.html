@@ -153,6 +153,7 @@
   .m .bd .d{font-size:13px; color:var(--muted)}
   .m .bd .done{font-size:12.3px; color:var(--pass); font-weight:600}
 
+  .wtdone{font-size:11.5px; font-weight:700; color:var(--pass); background:var(--pass-bg); border:1px solid var(--pass-edge); border-radius:6px; padding:2px 8px; vertical-align:1px}
   .foot{border-top:1px solid var(--line); padding-top:18px; font-size:12.5px; color:var(--faint)}
   .tech{font-size:12px; color:var(--faint); font-family:var(--mono); background:var(--paper); border:1px solid var(--line-soft); border-radius:7px; padding:8px 11px; line-height:1.7}
 </style>
@@ -162,7 +163,7 @@
 
   <!-- ══════════ 헤더 ══════════ -->
   <header class="head">
-    <p class="eyebrow">PRD · Implementation Draft — v1.0 (시안)</p>
+    <p class="eyebrow">PRD · Implementation — v1.1 (방향 확정 · M1 착수)</p>
     <h1>작업표 생성<br>통합작업대에서 업체별 작업을 바로 만든다</h1>
     <p class="lede">
       지금은 100건짜리 작업을 시작하려면 <b>1번부터 100번까지 행이 미리 준비된 구글시트</b>를 만들어
@@ -175,6 +176,7 @@
       <span class="chip">작업오더 연동</span>
       <span class="chip">시트 의존 축소</span>
       <span class="chip">Track B 확장</span>
+      <span class="chip a">M1 배포됨</span>
       <span class="chip">2026-08-04</span>
     </div>
   </header>
@@ -505,9 +507,10 @@
     <p class="sdesc">각 단계는 독립적으로 배포·검증 가능하며, 앞 단계가 끝나야 다음이 의미를 갖습니다.</p>
     <div class="mile">
       <div class="m"><span class="no">M1</span><div class="bd">
-        <div class="t">헤더 학습 리포트 (읽기 전용)</div>
-        <div class="d">미러된 전 탭의 열 구성을 집계해 고정/변칙 통계 화면을 만든다. 이 문서의 3계층 분류를 실데이터로 확정.</div>
-        <div class="done">완료 기준: 관리자가 "우리 표준 코어 열"을 통계 근거와 함께 승인</div>
+        <div class="t">헤더 학습 리포트 (읽기 전용) &nbsp;<span class="wtdone">✓ 배포됨</span></div>
+        <div class="d">미러된 전 탭의 열 구성을 집계해 고정/변칙 통계 화면을 만든다. 이 문서의 3계층 분류를 실데이터로 확정.
+          → 통합작업대 <b>[작업표]</b> 탭. 함께 <b>작업오더 시트 URL 필수 해제</b>(Q2 확정) 적용.</div>
+        <div class="done">남은 것: 관리자가 리포트를 보고 "우리 표준 코어 열"을 확정 → M2 기본 템플릿으로 고정</div>
       </div></div>
       <div class="m"><span class="no">M2</span><div class="bd">
         <div class="t">템플릿 원장 + 생성 미리보기 + 작업표 생성 (모드 A)</div>
@@ -565,21 +568,77 @@
     </table></div>
   </section>
 
-  <!-- ══════════ 09 열린 질문 ══════════ -->
+  <!-- ══════════ 09 확정 사항 ══════════ -->
   <section>
-    <div class="shead"><span class="snum">09</span><h2>확정이 필요한 질문 (착수 전 결정 사항)</h2></div>
-    <div class="card">
-      <ul class="list">
-        <li><b>Q1. 출시 모드</b> — 제안대로 하이브리드(A: 시트 자동 생성·병행)로 시작할까요, 아니면 파일럿부터 DB 원본(B)으로 갈까요? <span class="why">제안 기본값: A. 라이브 경로 무변경이 가장 안전.</span></li>
-        <li><b>Q2. 작업오더 시트 URL 필수 해제 시점</b> — 지금은 URL이 필수 입력입니다. M2(파일럿)부터 선택으로 풀까요, M3(확대)부터 풀까요? <span class="why">제안 기본값: M2에서는 "작업표 생성 시 자동 면제"로만 풀고, 폼 자체의 필수 해제는 M3.</span></li>
-        <li><b>Q3. 템플릿의 소유 단위</b> — 업체별 기본 템플릿으로 관리할까요, 채널별(쿠팡/네이버…) 기본 + 업체 예외로 관리할까요? <span class="why">제안 기본값: 채널별 기본 + "직전 작업 복사" 버튼. 업체별 원장은 데이터가 쌓인 뒤 M3에서.</span></li>
-        <li><b>Q4. 광고주 열람</b> — 하이브리드 기간에 광고주에게는 시트를 계속 공유할까요, 광고주 링크(통합작업대)로 즉시 전환을 시도할까요?</li>
-      </ul>
+    <div class="shead"><span class="snum">09</span><h2>확정된 방향 (2026-08-04)</h2></div>
+    <p class="sdesc">착수 전 4개 결정 사항이 모두 확정되었습니다. 아래가 이 프로젝트의 기준선입니다.</p>
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>항목</th><th>확정</th><th>의미</th></tr>
+      <tr>
+        <td><b>Q1. 출시 모드</b></td>
+        <td><b>A. 하이브리드</b> (시트 자동 생성·병행)</td>
+        <td>주문 기록·행 배정 등 라이브 경로는 <b>한 줄도 바뀌지 않는다</b>. 없어지는 것은 "시트를 사람이 준비하는 일"뿐.</td>
+      </tr>
+      <tr>
+        <td><b>Q2. 시트 URL 필수 해제</b></td>
+        <td><b>즉시 해제</b> (M1과 함께 배포)</td>
+        <td>AE 작업오더 제출에서 시트 URL이 <b>선택 항목</b>이 되었다. 아래 "지금 적용된 것" 참조.</td>
+      </tr>
+      <tr>
+        <td><b>Q3. 템플릿 소유 단위</b></td>
+        <td><b>채널별 기본</b> (쿠팡/네이버/올리브영/카카오메이커스)</td>
+        <td>업체별 원장은 만들지 않는다. 채널이 열 구성을 결정하고, 작업별 차이는 미리보기에서 조정.</td>
+      </tr>
+      <tr>
+        <td><b>Q4. 광고주 열람</b></td>
+        <td><b>광고주 링크로 즉시 전환</b></td>
+        <td>하이브리드 기간에도 광고주에게 시트를 새로 공유하지 않는다. 업체별 고유 접속 링크(통합작업대)가 창구.</td>
+      </tr>
+    </table></div>
+
+    <div class="callout warn">
+      <div class="tt">Q2 즉시 해제의 실제 동작 — 제출은 선택, <b>접수는 여전히 탭이 필요</b></div>
+      <p>접수(接受)는 그 탭을 시스템에 등록하는 <b>단일 관문</b>이라, 등록할 탭이 없으면 접수가 성립하지 않습니다.
+      그래서 <b>제출 단계의 필수만 풀고 접수 게이트는 그대로 뒀습니다</b> — 이 덕분에
+      "접수된 오더는 연결 탭 정보를 항상 갖는다"는 기존 전제(모집공고 자동 채움이 여기에 의존)가 깨지지 않습니다.
+      M2 전까지 시트 미첨부 오더는 <b>관리자가 시트탭 주소를 채워 접수</b>하고, M2가 오면 그 자리를 [작업표 생성]이 대신합니다.</p>
+    </div>
+  </section>
+
+  <!-- ══════════ 10 지금 적용된 것 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">10</span><h2>지금 적용된 것 (M1 배포분)</h2></div>
+    <div class="grid2">
+      <div class="card">
+        <h3>① 작업오더 시트 URL — 선택 항목으로</h3>
+        <ul class="list">
+          <li><b>AE 오더 제출 화면</b>에서 시트 URL 옆의 <b>*</b> 표시가 사라졌다. 비워두고 제출할 수 있다.</li>
+          <li>내가 보낸 오더 목록에서 시트를 안 붙인 건은 <b>"시트 미첨부 — 접수 시 작업표 생성"</b>으로 표시된다(빈 값이 조용히 "-"로 숨지 않는다).</li>
+          <li>인트라넷에서 넘어오는 오더도 동일(서버 검증 해제).</li>
+          <li><b>접수 화면</b>은 시트가 없으면 "시트탭 주소를 입력하거나 작업표를 생성한 뒤 접수해주세요"로 안내한다.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>② 통합작업대 <b>[작업표]</b> 탭 — 헤더 학습 리포트</h3>
+        <ul class="list">
+          <li>운영 중인 전 탭의 열 구성을 집계해 <b>코어 후보 / 작업별·채널별 / 미분류</b> 세 묶음으로 보여준다.</li>
+          <li>각 열마다 <b>몇 개 탭에 있는지·비율</b>과 실제 쓰이는 헤더 이름 변형(예: 연락처·전화번호·핸드폰)을 함께 표시.</li>
+          <li>읽기 전용 — <b>구글시트 재읽기 0</b>(미러 스냅샷만 조회), 상태 변경 없음. 관리자·마스터만 열람.</li>
+          <li>여기서 승인된 코어 열이 M2 작업표 생성 미리보기의 기본값이 된다.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <div class="tt">분류 규칙을 사람이 적어 넣지 않았다 — 제출 코드에서 <b>파생</b>한다</div>
+      <p>"이 헤더가 수취인인가 연락처인가"의 판정은 <b>리뷰어 제출이 실제로 어느 칸에 쓰는지를 결정하는 바로 그 코드</b>를
+      실행해 되읽는 방식으로 얻습니다(각 항목에 표식을 넣어 어느 열에 꽂히는지 관측). 판정 규칙을 따로 베껴 두면
+      "제출은 A열에 쓰는데 작업표는 B열을 만드는" 어긋남이 조용히 생기기 때문입니다.
+      회귀 테스트가 이 파생 관계를 고정합니다(39개 검사).</p>
     </div>
   </section>
 
   <footer class="foot">
-    작업표 생성 PRD·구현방식 시안 v1.0 · 2026-08-04 · 이 문서는 제안 단계이며, 09의 질문이 확정되면 M1부터 착수합니다.<br>
+    작업표 생성 PRD·구현방식 v1.1 · 2026-08-04 · 09의 4개 결정 확정 → M1(헤더 학습 리포트) + Q2(시트 URL 필수 해제) 배포 완료. 다음은 M2(템플릿 원장 + 생성 미리보기 + 작업표 생성).<br>
     근거가 된 기존 기능: 발주 기준 명단 골격 생성 · RAW 미러 헤더 스냅샷 · 컬럼 판정 원장 · 시트 일정 자동 인식(063) · Track B 전환 스위치(부품6) · 새 시트생성(create-campaign-sheet)
   </footer>
 
