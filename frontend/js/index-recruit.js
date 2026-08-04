@@ -726,6 +726,13 @@ function onParticipationToggle(on) {
   // 옵션·작업내용은 탭 분리를 위해 참여형 섹션 밖 형제로 뒀다 — 같이 토글해야 한다
   const work = document.getElementById("rf_work_section");
   if (work) work.style.display = on ? "" : "none";
+  /* v2(레일 배치 모달): 참여형 전용 카드·블록은 data-part-only 로 일괄 토글 —
+     rf_part_section/rf_work_section 두 계약은 위에 그대로 두고(회귀가드), 나머지를 이걸로 덮는다.
+     레거시(일반) 공고를 열면 전용 카드가 숨고 안내(rf_legacy_note)가 대신 뜬다. */
+  document.querySelectorAll("#recruitModal [data-part-only]").forEach(el => { el.style.display = on ? "" : "none"; });
+  const _legacyNote = document.getElementById("rf_legacy_note");
+  if (_legacyNote) _legacyNote.style.display = on ? "none" : "";
+  if (window.RecruitModal && RecruitModal.refreshRail) RecruitModal.refreshRail();   // 레일 목차 동기화
   _syncRecruitPaneGate(on);
   if (on) {
     // 작업오더의 "2시~4시" 같은 진행시간 텍스트를 시각으로 프리필(비어있을 때만 — 관리자는 확인·수정)
@@ -1308,8 +1315,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
   const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "1";
   const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "10";
+  /* ★ v2: 참여형이 기본 — 신규 공고는 항상 켜져 열린다(스위치 UI 제거·hidden 체크박스 유지).
+     레거시(일반) 공고를 편집할 땐 아래 프리필의 else 분기가 다시 끈다. */
   const _partEl = document.getElementById("rf_participation");
-  if (_partEl) { _partEl.checked = false; onParticipationToggle(false); }
+  if (_partEl) { _partEl.checked = true; onParticipationToggle(true); }
   if (typeof renderOptRows === "function") renderOptRows([]);   // 🧩 옵션표 초기화(061)
   if (typeof renderFeeRows === "function") renderFeeRows([]);   // 📅 기간별 리뷰비 초기화(082) — 신규 공고는 항상 꺼짐
   window._wdInflowRawHtml = null;
@@ -1441,6 +1450,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         renderOptRowsWithProduct(json.options || [], wd.productLines);   // 🧩 옵션표 + 상품명 복원
         renderPartCheck();
+      } else {
+        /* ★ v2: 레거시(일반) 공고 — 참여형 기본에서 유일하게 꺼지는 경로.
+           초기화가 켜 둔 것을 여기서 꺼야 전용 카드가 숨고 레거시 안내가 뜬다. */
+        const pe = document.getElementById("rf_participation");
+        if (pe) { pe.checked = false; onParticipationToggle(false); }
       }
     } catch(e) {
       // ★ B1: 로드 실패 상태에서 저장하면 참여형 필드가 미복원 기본값으로 덮일 수 있음 → 저장 시 참여형 필드 미전송 플래그
