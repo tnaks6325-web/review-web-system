@@ -983,6 +983,7 @@ function logout(){ sessionStorage.removeItem('admin_token');
   //   reMode 도 같이 비운다: AE 기본값 'full' 이 그대로 남아 관리자 화면이 펼쳐진 채로 뜬다.
   Object.assign(STATE,{ role:'',name:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false });
+  _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
   boot(); }
 
 function renderShell(){
@@ -1000,7 +1001,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
-        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span><span id="reNavBadge"></span></button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
@@ -1010,7 +1011,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
-        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="reNavBadge"></span></button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
@@ -3027,9 +3028,18 @@ function _reFullHtml(st, rows){
     </div>`;
   }).join('') + `</div>`;
 }
-function _reSyncNavBadge(n){
-  const nb=$('#reNavBadge'); if(!nb || !Number.isFinite(n)) return;
-  nb.textContent = n>0 ? (' 🟠'+n) : '';
+/* nav 뱃지 — 문의 미확인 + 교체요청 대기를 **합쳐 한 숫자**로 보여준다(사용자 확정).
+   ★ 두 값은 서로 다른 시점에 따로 도착하므로 **각각 기억해 두고 합계만 그린다** —
+     한쪽만 들어왔다고 다른 쪽을 0으로 접으면 숫자가 들쭉날쭉해진다.
+   ★ 아직 아무 값도 못 받았으면 **그대로 둔다**(지우지 않는다 — 조회 실패로 뱃지가 사라지면
+     "손볼 것이 없다"로 오독된다). AE 는 문의를 조회하지 않으므로 cs 는 계속 null = 교체요청만 합산. */
+const _NAVCS = { cs:null, re:null };
+function _reSyncNavBadge(n){ if(!Number.isFinite(n)) return; _NAVCS.re=n; _renderCsNavBadge(); }
+function _renderCsNavBadge(){
+  const nb=$('#csNavBadge'); if(!nb) return;
+  if(_NAVCS.cs===null && _NAVCS.re===null) return;
+  const total=(_NAVCS.cs||0)+(_NAVCS.re||0);
+  nb.textContent = total>0 ? (' 🔴'+total) : '';
 }
 /** 부팅 시 1회 — 탭을 열지 않아도 대기 건수가 보이게(C/S 뱃지와 같은 규율) */
 async function _reBootBadge(){
@@ -3267,9 +3277,8 @@ async function _riBootBadge(){
 }
 
 function _csSyncNavBadge(n){
-  const nb=$('#csNavBadge');
-  if(!nb || !Number.isFinite(n)) return;    // 값이 없으면 그대로 둔다(지우지 않는다)
-  nb.textContent=n>0?(' 🔴'+n):'';
+  if(!Number.isFinite(n)) return;           // 값이 없으면 그대로 둔다(지우지 않는다)
+  _NAVCS.cs=n; _renderCsNavBadge();         // ★ 교체요청 대기와 합쳐 한 숫자로(_renderCsNavBadge)
 }
 
 const RV_PAGE = 50;

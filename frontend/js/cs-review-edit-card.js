@@ -172,17 +172,24 @@
       });
       document.body.appendChild(ov);
     }
+    /* ★ 두 장은 **같은 순간에** 나타나야 한다.
+       클릭한 쪽(보통 '변경 요청')은 카드 썸네일로 이미 캐시돼 즉시 뜨는데 '기존'은 그 자리에서
+       처음 받으므로, 그냥 두면 한 장이 먼저 뜨고 다른 한 장이 뒤늦게 끼어들며 레이아웃이 흔들린다
+       (대조하려고 연 화면인데 비교 시작 시점이 어긋난다) → **둘 다 그릴 준비가 될 때까지 감췄다가
+       한꺼번에 보여준다**. 감춘 동안은 "불러오는 중"을 띄워 멈춘 것처럼 보이지 않게 한다. */
     var side = function (u, label, tone, on) {
       return '<div data-ovclose="1" style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px">'
         + '<div style="font-size:.82rem;font-weight:800;color:' + tone + '">' + _esc(label)
         + (on ? ' <span style="font-size:.7rem;font-weight:700;color:#E5E7EB">· 클릭한 이미지</span>' : '') + '</div>'
-        + '<img src="' + _esc(u) + '" style="max-width:100%;max-height:78vh;object-fit:contain;border-radius:10px;'
-        + 'border:' + (on ? '3px solid ' + tone : '1px solid rgba(255,255,255,.25)') + ';background:#fff">'
+        + '<img data-pair="1" src="' + _esc(u) + '" style="max-width:100%;max-height:78vh;object-fit:contain;border-radius:10px;'
+        + 'border:' + (on ? '3px solid ' + tone : '1px solid rgba(255,255,255,.25)') + ';background:#fff;'
+        + 'opacity:0;transition:opacity .15s ease">'
         + '</div>';
     };
     var isNew = focus === 'new';
     ov.innerHTML = '<div data-ovclose="1" style="width:100%;max-width:1200px;display:flex;flex-direction:column;gap:10px;cursor:default">'
-      + '<div data-ovclose="1" style="display:flex;justify-content:flex-end">'
+      + '<div data-ovclose="1" style="display:flex;align-items:center;justify-content:flex-end;gap:10px">'
+      + '<span id="csReCardZoomWait" style="color:#E5E7EB;font-size:.78rem;font-weight:700">이미지 불러오는 중…</span>'
       + '<button onclick="document.getElementById(\'csReCardZoomPair\').style.display=\'none\'"'
       + ' style="padding:5px 13px;border-radius:8px;border:1px solid rgba(255,255,255,.35);background:transparent;'
       + 'color:#fff;font-size:.78rem;font-weight:700;cursor:pointer">닫기 ✕</button></div>'
@@ -191,6 +198,32 @@
       + side(uNew, '변경 요청', '#93C5FD', isNew)
       + '</div></div>';
     ov.style.display = 'flex';
+    _revealTogether(ov);
+  }
+
+  /** 한 장이 **그릴 준비**를 마쳤는지. load 만으로는 부족해 decode() 까지 기다린다(디코딩 지연 = 늦게 뜸). */
+  function _painted(img) {
+    return new Promise(function (resolve) {
+      var done = false, fin = function () { if (!done) { done = true; resolve(); } };
+      var dec = function () { if (img.decode) img.decode().then(fin, fin); else fin(); };
+      if (img.complete) return img.naturalWidth > 0 ? dec() : fin();   // 캐시 히트/이미 실패
+      img.addEventListener('load', dec);
+      img.addEventListener('error', fin);   // ★ 실패해도 진행 — 한 장이 깨졌다고 나머지까지 영영 안 뜨면 안 된다
+    });
+  }
+  /** 오버레이 안의 두 장을 **동시에** 드러낸다. 느린 쪽이 오래 걸려도 최대 대기 후엔 보여준다(fail-open). */
+  var _PAIR_WAIT_MS = 4000;
+  function _revealTogether(ov) {
+    var imgs = [].slice.call(ov.querySelectorAll('img[data-pair]'));
+    if (!imgs.length) return;
+    var shown = false;
+    var show = function () {
+      if (shown) return; shown = true;
+      imgs.forEach(function (im) { im.style.opacity = '1'; });
+      var w = ov.querySelector('#csReCardZoomWait'); if (w) w.style.display = 'none';
+    };
+    Promise.all(imgs.map(_painted)).then(show, show);
+    setTimeout(show, _PAIR_WAIT_MS);   // 네트워크가 막혀도 화면이 검은 채로 남지 않게
   }
 
   window.CsReviewEditCard = { html: html, zoom: zoom, zoomPair: zoomPair, imgUrl: imgUrl, STATUS: STATUS };
