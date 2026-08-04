@@ -571,7 +571,7 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
      SELECT t.sheet_id AS "sheetId", t.spreadsheet_title AS "spreadsheetTitle", t.tab_gid AS "tabGid",
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
-            tc.manager, wo.recruit_count AS "woRecruit",
+            tc.manager, wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
             tm.memo,
@@ -588,7 +588,7 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
        ) cnt ON TRUE
        LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
        LEFT JOIN LATERAL (
-         SELECT w.recruit_count FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id
+         SELECT w.recruit_count, w.start_date FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id
           WHERE l.sheet_id = t.sheet_id AND l.tab_name = t.tab_name AND l.deleted_at IS NULL
           ORDER BY l.created_at DESC LIMIT 1
        ) wo ON TRUE
@@ -838,6 +838,9 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
     invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
     payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
     amount: sales ? sales.amount : null,
+    // 입금매칭 누계/최근 입금일(광고주 정산 카드 금액 4칸용 — 내부 스텝퍼에도 추가만, 기존 필드 불변)
+    paidAmount: sales ? sales.paidAmount : null,
+    paidDate: sales ? _normIntraDate(sales.paidDate || sales.paymentDate) : null,
     salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: isAdv ? undefined : sales.manager } : null,
   };
 }
@@ -865,6 +868,7 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
       contractNumber: t.contractNumber || (sales && sales.contractNumber) || '',
       proxyDown: !sales,
       quoteDate: quote ? _normIntraDate(quote.quoteDate) : null,
+      quoteStatus: quote ? quote.status : null,
       invoiceDate: sales ? _normIntraDate(sales.invoiceDate) : null,
       invoiceStatus: sales ? sales.invoiceStatus : null,
       paidAmount: sales ? sales.paidAmount : null,                            // 현재까지 매칭된 입금 누계
@@ -876,6 +880,44 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
     };
   });
 }
+// ── 업체용 뷰어 "내 작업 목록"(화면 A) — 광고주 렌즈 요약 배치. ──
+//   ownedTabsForAdvertiser(카운트) + settlementSummaryForAdvertiser(정산 배치)를 광고주에게 내도 되는
+//   필드만으로 재구성한다. ★ 내부 필드(비고 memo·담당 manager·인트라넷 salesId·amountMismatch)는
+//   여기서 폐기 — 화면에서만 감추는 건 devtools 에 보이는 보안연극이다(csBridge meta 규율과 동일).
+//   정산 노출 토글 OFF 업체는 settlement 를 아예 계산·동봉하지 않는다(settlementHidden 신호만).
+async function advertiserWorkSummary({ advertiserId } = {}) {
+  if (!advertiserId) throw new Error('advertiserWorkSummary: advertiserId 필수');
+  const tabs = await ownedTabsForAdvertiser({ advertiserId });
+  const visible = await _settlementVisibleFor(advertiserId);
+  let setlByTab = new Map();
+  if (visible) {
+    const setl = await settlementSummaryForAdvertiser({ advertiserId }).catch(() => []);   // fail-soft: 정산만 빠지고 목록은 뜬다
+    setlByTab = new Map(setl.map(s => [s.sheetId + '\t' + s.tabName, s]));
+  }
+  return {
+    settlementHidden: !visible,
+    items: tabs.map(t => {
+      const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
+      return {
+        sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
+        active: t.active !== false,
+        total: t.bTotal || 0, submitted: t.bSub || 0, paid: t.bPaid || 0,
+        target: t.woRecruit || null,
+        startDate: t.woStartDate ? String(t.woStartDate).slice(0, 10) : null,
+        settlement: s ? {
+          contractNumber: s.contractNumber || '', proxyDown: !!s.proxyDown,
+          quoteStatus: s.quoteStatus || null, quoteDate: s.quoteDate || null,
+          invoiceStatus: s.invoiceStatus || null, invoiceDate: s.invoiceDate || null,
+          totalCost: s.totalCost != null ? s.totalCost : null,
+          paidAmount: s.paidAmount != null ? s.paidAmount : null,
+          paidDate: s.paidDate || null,
+          paymentStatus: s.paymentStatus || null,
+        } : null,
+      };
+    }),
+  };
+}
+
 // 인트라넷 날짜 정규화: 'YYYYMMDD'(팝빌 trade_date) → 'YYYY-MM-DD', 그 외는 앞 10자.
 function _normIntraDate(s) {
   const v = String(s || '').trim(); if (!v) return null;
@@ -2384,7 +2426,7 @@ module.exports = {
   unlinkSettlement,
   setSettlementVisible,
   settlementForTab,
-  settlementSummaryForAdvertiser, saveTabMemo,
+  settlementSummaryForAdvertiser, advertiserWorkSummary, saveTabMemo,
   settlementVisibleFor,
   generateCloseout,
   latestCloseout,

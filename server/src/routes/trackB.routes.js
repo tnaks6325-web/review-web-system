@@ -309,6 +309,19 @@ router.get('/ownership/settlement', authMiddleware, internalMiddleware, async (r
   } catch (err) { next(err); }
 });
 
+// ── 업체용 뷰어 "내 작업 목록"(화면 A) — 광고주 본인 소유 탭 요약 배치. ──
+//   ★ advertiserId 는 쿼리가 아니라 토큰(req.admin.advertiser_id)에서만 — 남의 업체 요약 도달 불가(IDOR 차단).
+//   ★ 광고주 렌즈는 서비스(advertiserWorkSummary)가 강제 — 내부 필드(비고·담당·salesId)는 응답에 아예 없음.
+//   내부인은 기존 /ownership/settlement(소유지정 뷰)를 쓰므로 이 경로는 advertiser 전용으로 좁힌다.
+router.get('/my-work-summary', authMiddleware, async (req, res, next) => {
+  try {
+    if (_role(req) !== 'advertiser') return res.status(403).json({ ok: false, error: '광고주 전용 경로입니다.' });
+    const advertiserId = (req.admin && req.admin.advertiser_id) || null;
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체 연결이 없는 계정입니다.' });
+    res.json({ ok: true, ...(await svc.advertiserWorkSummary({ advertiserId })) });
+  } catch (err) { next(err); }
+});
+
 // ── 연결탭 비고(자유 텍스트) 저장 — master/admin 전체 · staff 담당 탭만(_ensureEditScope). ──
 router.post('/tab-memo', authMiddleware, async (req, res, next) => {
   try {
