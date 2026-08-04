@@ -104,6 +104,9 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
         const g = String(t.tabGid == null ? '' : t.tabGid).trim();
         const f = fin.map[`${t.sheetId}\t${t.tabName}`] || (g ? fin.map[`${t.sheetId}\tgid:${g}`] : null);
         if (f) { t.finished = true; t.finishedAt = f.finishedAt; t.finishedBy = f.finishedBy; }
+        // ★ 오늘 완료는 **이름으로만** 찾는다(마감과 달리 gid 폴백이 없다) — 의도된 비대칭:
+        //   `trackb_tab_daily_done` 에는 tab_gid 컬럼이 없고, 이 상태는 **하루짜리**라 리네임으로 풀려도
+        //   다음날 어차피 초기화된다. 마감은 영구라 리네임 한 번에 보관함에서 사라지면 피해가 크다.
         const d = daily.map[`${t.sheetId}\t${t.tabName}`];
         if (d) { t.todayDone = true; t.todayDoneBy = d.doneBy; }
         // ★ stats 맵은 전 탭 무스코프다 — 응답엔 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지).
@@ -117,8 +120,12 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
 // ── 열린 작업 줄(개인별·순서 보존) — 작업보드 로그인 사용자 누구나(자기 것만) ──
 //   ★ 즐겨찾기와 같은 골격이되 **별도 원장**: 즐겨찾기는 Set 으로 접혀 순서가 사라진다(migration 089 주석).
 router.get('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, tabs: await svc.getWorkdeskWorktabs(_by(req)) }); }
-  catch (err) { next(err); }
+  try {
+    const r = await svc.getWorkdeskWorktabs(_by(req));
+    // ★ 조회 실패를 고지한다 — 없으면 프론트가 빈 배열을 "저장된 줄 없음"으로 신뢰해 로컬을 덮고,
+    //   다음 저장에서 서버 행이 통째로 대체된다(사용자 데이터 영구 삭제).
+    res.json({ ok: true, tabs: r.tabs, ...(r.ok ? {} : { worktabsUnavailable: true }) });
+  } catch (err) { next(err); }
 });
 router.post('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
   try {

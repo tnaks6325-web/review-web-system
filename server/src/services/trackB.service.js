@@ -2795,17 +2795,20 @@ async function tabStatsMap({ force = false } = {}) {
 /** 열린 작업 줄 — 계정당 1행, **순서 있는 배열**(드래그로 정한 탭 배치가 곧 이 순서다).
  *  ★ 즐겨찾기(`setWorkdeskFavorites`)와 달리 Set 으로 접지 않는다 — 접는 순간 순서가 사라진다. */
 const WORKTAB_CAP = 12;                     // 사용자 확정 ㉤ — 넘으면 화면이 안내(자동으로 닫지 않는다)
+// ★★ **성공/실패를 구분해 돌려준다**(빈 배열만 주면 안 된다): 조회 실패를 "저장된 줄이 없음"으로 읽으면
+//   프론트가 그것을 서버 원본으로 신뢰해 로컬 캐시까지 덮고, 다음 탭 하나를 여는 순간 **서버 행이
+//   1건짜리로 영구 대체**된다(되돌릴 수단 없음 — 코드리뷰 blocker). finishedTabsMap 과 같은 계약.
 async function getWorkdeskWorktabs(ownerKey) {
   const k = String(ownerKey || '').trim();
-  if (!k) return [];
+  if (!k) return { ok: true, tabs: [] };
   try {
     const { rows } = await getPool().query(
       `SELECT tabs FROM trackb_workdesk_worktabs WHERE owner_key=$1 LIMIT 1`, [k]);
     const v = rows[0] && rows[0].tabs;
-    return Array.isArray(v) ? v.filter(x => typeof x === 'string') : [];
+    return { ok: true, tabs: Array.isArray(v) ? v.filter(x => typeof x === 'string') : [] };
   } catch (err) {
-    logger.warn(`[trackB] getWorkdeskWorktabs 실패(빈 줄로 계속): ${err.message}`);
-    return [];
+    logger.warn(`[trackB] getWorkdeskWorktabs 실패(호출부가 로컬을 유지하고 고지한다): ${err.message}`);
+    return { ok: false, tabs: [] };
   }
 }
 async function setWorkdeskWorktabs(ownerKey, tabs) {
@@ -2814,15 +2817,27 @@ async function setWorkdeskWorktabs(ownerKey, tabs) {
   // 중복 제거(첫 등장 순서 유지) + 키 길이·개수 상한. ★ slice 로 자를 뿐 저장을 거부하지 않는다 —
   //   상한 초과는 "안내하고 사용자가 정리"가 정책이라 서버가 요청을 튕기면 화면이 멈춘다.
   const seen = new Set();
-  const arr = (Array.isArray(tabs) ? tabs : [])
-    .filter(x => typeof x === 'string' && x.length > 0 && x.length <= 300 && !seen.has(x) && seen.add(x))
-    .slice(0, WORKTAB_CAP);
-  await getPool().query(
-    `INSERT INTO trackb_workdesk_worktabs (owner_key, tabs, updated_at)
-     VALUES ($1, $2::jsonb, NOW())
-     ON CONFLICT (owner_key) DO UPDATE SET tabs=EXCLUDED.tabs, updated_at=NOW()`,
-    [k, JSON.stringify(arr)]);
-  return { ok: true, count: arr.length, cap: WORKTAB_CAP };
+  const clean = (Array.isArray(tabs) ? tabs : [])
+    .filter(x => typeof x === 'string' && x.length > 0 && x.length <= 300 && !seen.has(x) && seen.add(x));
+  // ★ 상한 초과는 **뒤에서 자른다**(가장 오래 안 본 앞쪽을 남기면 방금 연 탭이 저장되지 않아
+  //   "새로고침하니 마지막에 연 것만 사라지는" 이해 불가한 동작이 된다 — 화면도 12개에서 열기를 막는다).
+  const arr = clean.slice(0, WORKTAB_CAP);
+  try {
+    await getPool().query(
+      `INSERT INTO trackb_workdesk_worktabs (owner_key, tabs, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (owner_key) DO UPDATE SET tabs=EXCLUDED.tabs, updated_at=NOW()`,
+      [k, JSON.stringify(arr)]);
+  } catch (err) {
+    // ★ 마감·오늘 완료와 같은 규율 — 그냥 throw 하면 프론트의 catch 가 삼켜 **아무 신호 없이** 저장이
+    //   안 되고, 사용자는 다음 부팅에 줄이 사라진 것을 보고서야 안다(원인 추적 불가).
+    if (err && err.code === '42P01') {
+      logger.error(`[trackB] trackb_workdesk_worktabs 테이블 없음(migration 089 미적용): ${err.message}`);
+      return { ok: false, code: 'not_ready', error: '열린 작업 줄 저장이 아직 준비되지 않았습니다(migration 089 미적용).' };
+    }
+    throw err;
+  }
+  return { ok: true, count: arr.length, cap: WORKTAB_CAP, dropped: clean.length - arr.length };
 }
 
 /** 오늘(KST) 완료된 탭 → `{ ok, map }`. 키는 `sheetId\ttabName`.

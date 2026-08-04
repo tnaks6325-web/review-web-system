@@ -93,9 +93,14 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★ 상한 12 — 넘겨도 **저장 거부가 아니라** 잘라 담는다(요청을 튕기면 화면이 멈춘다)',
     capped.ok === true && capped.count === 12 && capped.cap === 12 && JSON.parse(SQL[0].p[1]).length === 12);
 
-  pool.query = async () => { throw new Error('relation "trackb_workdesk_worktabs" does not exist'); };
-  t('★ 조회 실패 = 빈 줄(개인 화면 편의 기능이라 목록 전체를 죽이지 않는다)',
-    JSON.stringify(await svc.getWorkdeskWorktabs('만두')) === '[]');
+  pool.query = async () => { const e = new Error('nope'); e.code = '42P01'; throw e; };
+  const gw = await svc.getWorkdeskWorktabs('만두');
+  t('★ 조회 실패해도 화면은 죽지 않는다(빈 줄)', JSON.stringify(gw.tabs) === '[]');
+  t('★★ 실패를 ok:false 로 **구분**한다 — 빈 배열만 주면 프론트가 "저장된 줄 없음"으로 신뢰해 로컬을 덮고, 다음 저장에서 서버 행이 통째로 대체된다(사용자 데이터 영구 삭제)',
+    gw.ok === false);
+  const sw = await svc.setWorkdeskWorktabs('만두', ['a']);
+  t('★ 저장의 42P01 도 진단 가능한 메시지로(프론트 catch 가 삼켜 무신호가 되던 경로)',
+    sw.ok === false && sw.code === 'not_ready' && /089/.test(sw.error));
 
   // ── 오늘 완료 ──
   const cs = require('../src/services/campaignState.service');
@@ -206,7 +211,36 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★★ 열린 줄 변경은 단일 커밋 지점(_wtCommit) — 사본을 두면 dirty 를 안 세워 부팅 경합이 되살아난다',
     /function _wtCommit\(list\)\{[\s\S]{0,220}STATE\._wtDirty=true/.test(WD));
   t('★★ 부팅 조회가 늦게 와도 내 변경을 덮지 않는다(실측 사고 — 방금 연 탭이 사라졌다)',
-    /if\(STATE\._wtDirty\)\{ _wtPush\(\); return; \}/.test(WD));
+    /if\(!STATE\._wtBootSynced && STATE\._wtDirty\)\{ STATE\._wtBootSynced=true; _wtPush\(\); return; \}/.test(WD));
+  // ★★ dirty 를 영구 깃발로 쓰면 세션 중 탭을 한 번 연 뒤로 서버 값을 영영 안 받아, 다른 창·다른 PC 의
+  //   변경이 한 방향으로만 지워진다("기기 무관 유지" 약속과 정면 충돌 — 코드리뷰 지적).
+  t('★★ 부팅 가드는 1회 한정(_wtBootSynced) — dirty 영구화 금지', /STATE\._wtBootSynced=true;\s*\n\s*STATE\.worktabs=r\.tabs/.test(WD));
+  t('★ 저장 성공 시 dirty 해제(서버와 같은 상태 → 다음 동기화를 받아들인다)',
+    /if\(r&&r\.ok\)\{ STATE\._wtDirty=false; return; \}/.test(WD));
+  // ★ 응답이 온 실패(ok:false)와 네트워크 예외(catch) **둘 다** 알려야 한다 — 한쪽만 보면
+  //   다른 쪽을 지워도 가드가 통과한다(변이시험이 실제로 통과시켰다).
+  t('★ 저장 실패를 조용히 삼키지 않는다 — 응답 실패 경로',
+    /if\(r&&r\.ok\)\{ STATE\._wtDirty=false; return; \}[\s\S]{0,200}toast\(\(r&&r\.error\)\|\|'열린 작업 줄을 저장하지 못했습니다'\)/.test(WD));
+  t('★ 저장 실패를 조용히 삼키지 않는다 — 네트워크 예외 경로',
+    /catch\(_\)\{ if\(!STATE\._wtWarned\)\{ STATE\._wtWarned=true; toast\('열린 작업 줄을 저장하지 못했습니다'\); \} \}/.test(WD));
+  t('★ 조회 실패 시 로컬을 유지하고 고지한다(서버 빈 배열로 로컬을 덮지 않는다)',
+    /if\(r\.worktabsUnavailable\)\{ STATE\.worktabsUnavailable=true; _renderWorktabs\(\); return; \}/.test(WD)
+    && /worktabsUnavailable[\s\S]{0,140}열린 작업 줄을 불러오지 못했습니다/.test(WD));
+  t('★★ 계정 전환 시 열린 줄·즐겨찾기 메모리 상태를 비운다(키가 계정별이어도 메모리를 안 비우면 무의미 — 이전 계정 탭명 노출 + 그 목록이 새 계정 서버 행에 저장)',
+    /worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null/.test(WD)
+    && (WD.match(/worktabs:null,_wtLoaded:false,_wtDirty:false/g) || []).length === 2);
+  t('★ 상한에서 **열기를 막는다**(서버가 뒤를 자르면 방금 연 탭만 사라져 이해 불가한 동작)',
+    /if\(list\.length>=WT_CAP\)\{ toast\(/.test(WD));
+  t('★ 드래그: 오른쪽으로 끌면 대상 뒤 — 끝자리로 옮길 수 있어야 한다(항상 앞이면 불가능)',
+    /list\.splice\(a<b\?at\+1:at, 0, from\);/.test(WD));
+  t('★ 렌더 함수는 서버에 쓰지 않는다(정리는 데이터 도착 지점 _wtPruneFinished)',
+    /function _renderWorktabs\(\)\{[\s\S]{0,900}?\}\n/.test(WD)
+    && !/function _renderWorktabs\(\)\{[\s\S]{0,1200}?_wtPush\(\)/.test(WD));
+  t('★ 자동 정리는 dirty 를 세우지 않는다(시스템 정리를 사용자 편집으로 치면 구식 로컬이 서버를 이긴다)',
+    /function _wtPruneFinished\(\)\{[\s\S]{0,600}STATE\.worktabs=alive; STATE\._wtLoaded=true; _wtSaveLocal\(\)/.test(WD)
+    && !/function _wtPruneFinished\(\)\{[\s\S]{0,600}_wtDirty=true/.test(WD));
+  t('★ 밤새 띄워 둔 화면도 자가치유(visibilitychange 복귀 시 날짜 확인)',
+    /visibilitychange[\s\S]{0,140}_finDayRollCheck\(\)/.test(WD) && /function _finDayRollCheck\(\)/.test(WD));
   t('★ 즐겨찾기 원장에 얹지 않는다(별도 엔드포인트 — Set 직렬화로 순서가 사라진다)',
     /api\('\/api\/trackb\/workdesk\/worktabs'/.test(WD) && !/@open␟/.test(WD));
   t('탭 키 규약은 즐겨찾기와 동일(_favKey 재사용 — 두 벌이면 같은 탭이 다른 키가 된다)',
@@ -218,7 +252,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★★ 목록에 없는 탭은 지우지 않는다(목록 미도착·상한 절단으로 열린 줄이 소실되는 사고 차단)',
     !/return t && !isFinished\(t\)/.test(WD));
   t('★★ 목록이 아직 안 왔을 때는 정리 자체를 안 한다(부팅 때 전부 지워지는 사고 방지)',
-    /if\(\(STATE\.tabs\|\|\[\]\)\.length\)\{[\s\S]{0,260}alive/.test(WD));
+    /function _wtPruneFinished\(\)\{\s*\n\s*if\(!\(STATE\.tabs\|\|\[\]\)\.length\) return;/.test(WD));
   // ★ 자정 경계 — 서버가 판정한 날짜를 화면이 실제로 소비해야 stale 체크가 자가치유된다
   t('★ 서버 kstDate 를 기록한다(두 흡수 경로 모두)', (WD.match(/if\(r\.kstDate\) STATE\.kstDate=r\.kstDate/g) || []).length === 2);
   t('★★ 자정을 넘긴 화면 자가치유 — 토글 응답 날짜가 다르면 목록을 다시 받는다',
