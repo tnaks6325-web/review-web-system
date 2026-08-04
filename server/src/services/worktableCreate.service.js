@@ -250,4 +250,67 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
   }
 }
 
-module.exports = { createWorktable, planToSheetValues, colLetter, _resolveHeaderRow };
+/**
+ * 작업표 시트 탭 삭제 — ★ **아무도 안 쓴 탭만** 지운다.
+ *
+ * 원래는 "시트는 사람이 지운다"로 뒀는데, 시스템이 만든 것을 시스템이 못 지우면 정리할
+ * 방법이 없다는 지적을 받아 열었다(사용자 확정). 대신 조건을 좁힌다:
+ *  ★★ **주문·참여자가 한 명이라도 있으면 거부**한다 — 시트 탭 삭제는 되돌리기가 어렵고
+ *     그 안에 사람 데이터가 있으면 손실이 크다(휴지통이 아니라 사라진다).
+ *  ★ gid 는 **서버가 이름으로 재조회**한다 — 클라이언트가 보낸 gid 를 믿고 지우면
+ *     낡은 화면이 **엉뚱한 탭을 지운다**.
+ */
+async function deleteWorktableTab({ sheetId, tabName, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName 이 필요합니다.' };
+
+  // ① 사람 데이터가 있으면 거부(작업대 표 + 주문 원장 양쪽 확인)
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         (SELECT COUNT(*) FROM campaign_participants
+           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+             AND (phone8 IS NOT NULL OR order_submission_id IS NOT NULL))::int AS "inTable",
+         (SELECT COUNT(*) FROM order_submissions
+           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL)::int AS "orders"`,
+      [sheetId, tabName]);
+    const n = (rows[0].inTable || 0) + (rows[0].orders || 0);
+    if (n > 0) {
+      return { ok: false, error: `이 탭에는 이미 주문·참여자 ${n}건이 있어 시트 탭을 지울 수 없습니다. 구글시트에서 직접 확인 후 지워 주세요.`, blocked: true, filled: n };
+    }
+  } catch (e) {
+    // ★ 확인 실패 = 지우지 않는다(fail-closed) — 모르면 파괴하지 않는다.
+    logger.warn(`[worktable/deleteTab] 사용 여부 확인 실패 — 삭제 중단: ${e.message}`);
+    return { ok: false, error: '이 탭이 사용 중인지 확인하지 못해 중단했습니다. 잠시 후 다시 시도하세요.' };
+  }
+
+  // ② gid 는 이름으로 재조회(클라이언트 값 미신뢰)
+  let gid = null, sheetCount = 0;
+  try {
+    const meta = await sheetsSvc.getSpreadsheetMeta(sheetId);
+    const list = meta.sheets || [];
+    sheetCount = list.length;
+    const hit = list.find(x => String(x.properties.title) === String(tabName));
+    if (!hit) return { ok: false, error: '그 이름의 탭을 시트에서 찾지 못했습니다(이미 지워졌을 수 있습니다).' };
+    gid = hit.properties.sheetId;
+  } catch (e) {
+    return { ok: false, error: '시트를 열지 못했습니다: ' + e.message };
+  }
+  // ★ 마지막 남은 탭은 지울 수 없다(구글이 거부한다) — 미리 안내한다.
+  if (sheetCount <= 1) return { ok: false, error: '이 시트의 마지막 탭이라 지울 수 없습니다.' };
+
+  try {
+    await sheetsSvc.sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId, requestBody: { requests: [{ deleteSheet: { sheetId: gid } }] },
+    });
+  } catch (e) {
+    return { ok: false, error: '탭 삭제 실패: ' + e.message };
+  }
+  // 표의 줄도 함께 내린다(빈 줄뿐이므로 확인 절차 불필요).
+  try {
+    await require('./participants.service').deleteWorktableRows({ sheetId, tabName, confirmed: true, by });
+  } catch (e) { logger.warn(`[worktable/deleteTab] 표 정리 실패(탭은 삭제됨): ${e.message}`); }
+  logger.info(`[worktable/deleteTab] ${tabName} (gid ${gid}) 삭제 by ${by}`);
+  return { ok: true, deletedTab: tabName, gid };
+}
+
+module.exports = { createWorktable, deleteWorktableTab, planToSheetValues, colLetter, _resolveHeaderRow };

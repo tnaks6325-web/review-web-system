@@ -1415,6 +1415,15 @@ router.post('/worktable/delete', authMiddleware, internalMiddleware, editorOnlyM
   } catch (err) { next(err); }
 });
 
+// 작업표 **시트 탭** 삭제 — 아무도 안 쓴 탭만(주문·참여자 0건). gid 는 서버가 이름으로 재조회.
+router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { deleteWorktableTab } = require('../services/worktableCreate.service');
+    const b = req.body || {};
+    res.json(await deleteWorktableTab({ sheetId: b.sheetId, tabName: b.tabName, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { saveTemplate } = require('../services/worktable.service');

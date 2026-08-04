@@ -115,7 +115,15 @@ async function loginIntranet(name, pw, _fetch = fetch) {
     return { success: false, error: '인트라넷 인증 서버에 연결할 수 없습니다.' };
   } finally { clearTimeout(timer); }
   if (!resp.ok || !body || !body.username) {
-    return { success: false, error: (body && body.error) || '이름 또는 비밀번호가 올바르지 않습니다.' };
+    /* ★ 실패 사유를 뭉개지 말 것 — 운영자가 조치할 대상이 완전히 다르다(실측으로 겪음).
+       ㉮ 'Unauthorized' = **서버 간 인증 키**(INTRANET_API_KEY) 미설정·불일치 → 사람 자격 문제가 아니다.
+       ㉯ 그 외 인트라넷 메시지 = 진짜 자격 불일치.
+       그냥 "비밀번호가 틀렸다"로 보이면 멀쩡한 계정으로 몇 번이고 다시 시도하게 된다. */
+    const raw = String((body && body.error) || '').trim();
+    if (/unauthorized/i.test(raw)) {
+      return { success: false, error: '인트라넷 서버가 이 요청을 거부했습니다(서버 간 인증 키 확인 필요 — INTRANET_API_KEY).', reason: 'service_key' };
+    }
+    return { success: false, error: raw || '이름 또는 비밀번호가 올바르지 않습니다.', reason: 'credentials' };
   }
   const display = String(body.display_name || body.username).trim();
   if (!display) {
