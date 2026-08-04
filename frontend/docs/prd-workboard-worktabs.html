@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>작업보드 작업탭 워크플로우 — PRD·와이어프레임 v1.0</title>
+<style>
+  /* 오프라인 열람 가능(외부 리소스 0). 화면 재현 목업이 있어 라이트 고정. */
+  :root{ color-scheme:light; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif; background:#f4f6fa; color:#1f2937; line-height:1.65; }
+  .page{ max-width:1080px; margin:0 auto; padding:28px 20px 80px; }
+  h1{ font-size:24px; letter-spacing:-.5px; }
+  h2{ font-size:19px; margin:44px 0 14px; padding-left:12px; border-left:5px solid #2563eb; letter-spacing:-.3px; }
+  h3{ font-size:15.5px; margin:22px 0 10px; color:#111827; }
+  p{ margin:8px 0; }
+  .sub{ color:#6b7280; font-size:13.5px; margin-top:6px; }
+  .card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; margin:14px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .pill{ display:inline-block; font-size:11.5px; font-weight:700; padding:2px 10px; border-radius:999px; vertical-align:2px; }
+  .pill.ok{ background:#dcfce7; color:#166534; }
+  .pill.warn{ background:#fef3c7; color:#92400e; }
+  .pill.info{ background:#dbeafe; color:#1d4ed8; }
+  .pill.dim{ background:#f3f4f6; color:#6b7280; }
+  table.t{ width:100%; border-collapse:collapse; font-size:13.5px; margin:10px 0; }
+  table.t th{ background:#f8fafc; text-align:left; font-weight:700; }
+  table.t th, table.t td{ border:1px solid #e5e7eb; padding:8px 12px; vertical-align:top; }
+  .good{ color:#166534; font-weight:700; }
+  .bad{ color:#b91c1c; font-weight:700; }
+  ul.l{ margin:8px 0 8px 20px; }
+  ul.l li{ margin:5px 0; }
+  code{ background:#eef2f7; border:1px solid #e2e8f0; border-radius:4px; padding:1px 6px; font-size:12.5px; font-family:Consolas,Menlo,monospace; }
+  .note{ background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:12px 16px; margin:12px 0; font-size:13.5px; }
+  .danger{ background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:12px 16px; margin:12px 0; font-size:13.5px; }
+  .decided{ background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:12px 16px; margin:10px 0; }
+  .decided b.q{ display:block; margin-bottom:4px; }
+  details{ margin:14px 0; }
+  details summary{ cursor:pointer; font-weight:700; padding:10px 14px; background:#eef2f7; border:1px solid #e2e8f0; border-radius:10px; }
+  details[open] summary{ border-radius:10px 10px 0 0; }
+  details .body{ border:1px solid #e2e8f0; border-top:none; border-radius:0 0 10px 10px; padding:14px 18px; background:#fff; }
+
+  /* ── 와이어프레임 공통 ── */
+  .wf{ background:#fff; border:2px solid #cbd5e1; border-radius:12px; padding:0; margin:14px 0; overflow:hidden; }
+  .wf .wf-cap{ background:#f1f5f9; border-bottom:1px solid #e2e8f0; padding:8px 14px; font-size:12.5px; font-weight:700; color:#475569; }
+  .wf .wf-body{ padding:14px; }
+  .anno{ font-size:12px; color:#2563eb; font-weight:700; }
+  .anno-line{ display:flex; gap:8px; align-items:flex-start; font-size:12.5px; margin:6px 0; }
+  .anno-line .n{ flex:none; width:20px; height:20px; border-radius:50%; background:#2563eb; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+
+  /* 상단 바 목업 */
+  .mock-top{ background:#0f172a; color:#e2e8f0; padding:8px 12px; font-size:12.5px; display:flex; gap:10px; align-items:center; border-radius:8px 8px 0 0; }
+  .mock-nav{ display:flex; gap:6px; flex-wrap:wrap; }
+  .mock-nav span{ padding:3px 9px; border-radius:6px; background:#1e293b; font-size:11.5px; }
+  .mock-nav span.on{ background:#2563eb; color:#fff; }
+  .bar{ display:flex; gap:6px; align-items:center; padding:7px 10px; border-bottom:1px solid #e5e7eb; overflow-x:auto; white-space:nowrap; }
+  .bar .lbl{ flex:none; font-size:10.5px; font-weight:800; color:#94a3b8; letter-spacing:.5px; }
+  /* 0단: 열린 작업 */
+  .bar.b0{ background:#eff6ff; }
+  .wtab0{ display:inline-flex; gap:6px; align-items:center; background:#fff; border:1px solid #bfdbfe; border-radius:8px 8px 0 0; padding:5px 8px 5px 12px; font-size:12.5px; color:#334155; }
+  .wtab0.on{ background:#2563eb; border-color:#2563eb; color:#fff; font-weight:700; }
+  .wtab0 .x{ opacity:.55; font-weight:700; cursor:pointer; }
+  .wtab0 .cand{ font-size:10.5px; background:#fef3c7; color:#92400e; border-radius:999px; padding:0 6px; font-weight:700; }
+  .wtab0.on .cand{ background:#fde68a; }
+  .btn-open{ display:inline-flex; align-items:center; gap:4px; border:1px dashed #93c5fd; color:#2563eb; border-radius:8px; padding:4px 10px; font-size:12px; font-weight:700; background:#fff; }
+  /* 1단: 업체 세그먼트(기존) */
+  .seg{ display:inline-flex; gap:5px; align-items:center; padding:4px 10px; border-radius:999px; background:#f1f5f9; font-size:12px; color:#475569; }
+  .seg.on{ background:#1f2937; color:#fff; }
+  .seg .cnt{ font-size:10.5px; opacity:.7; }
+  .seg .unb{ font-size:10.5px; color:#d97706; }
+  /* 2단: 그룹 탭(기존) */
+  .wtab2{ display:inline-flex; gap:5px; align-items:center; padding:6px 8px; font-size:12.5px; color:#475569; border-bottom:2px solid transparent; }
+  .wtab2.on{ color:#111827; font-weight:700; border-bottom-color:#2563eb; }
+  .wtab2 .st{ color:#cbd5e1; }
+  .wtab2 .st.f{ color:#f59e0b; }
+
+  /* 홈 목록 블록 목업 */
+  .hm-hero{ background:linear-gradient(120deg,#1d4ed8,#3b82f6); color:#fff; border-radius:10px; padding:14px 18px; display:flex; gap:22px; align-items:center; font-size:13px; }
+  .hm-hero .stat b{ display:block; font-size:19px; }
+  .blk{ border:1px solid #e5e7eb; border-radius:10px; margin-top:12px; overflow:hidden; }
+  .blk-h{ display:flex; gap:10px; align-items:center; padding:10px 14px; background:#f8fafc; border-bottom:1px solid #e5e7eb; font-size:13px; font-weight:800; }
+  .subtab{ display:inline-flex; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; font-size:12px; font-weight:700; }
+  .subtab span{ padding:4px 12px; background:#fff; color:#64748b; }
+  .subtab span.on{ background:#2563eb; color:#fff; }
+  .chip{ display:inline-block; font-size:11.5px; padding:2px 10px; border-radius:999px; background:#f1f5f9; color:#475569; }
+  .chip.on{ background:#1f2937; color:#fff; }
+  .srch{ margin-left:auto; border:1px solid #e2e8f0; border-radius:8px; padding:4px 10px; font-size:12px; color:#94a3b8; background:#fff; }
+  table.mt{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.mt th{ background:#fbfcfe; color:#64748b; font-weight:700; text-align:left; border-bottom:1px solid #e5e7eb; padding:7px 10px; }
+  table.mt td{ border-bottom:1px solid #f1f5f9; padding:8px 10px; }
+  table.mt tr.done td{ background:#fafafa; color:#9ca3af; }
+  .b{ display:inline-block; border-radius:6px; padding:3px 10px; font-size:11.5px; font-weight:700; border:1px solid transparent; }
+  .b.open{ background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+  .b.doneb{ background:#111827; color:#fff; }
+  .b.back{ background:#fff; color:#374151; border-color:#d1d5db; }
+  .s{ display:inline-block; border-radius:999px; padding:1px 9px; font-size:11px; font-weight:700; }
+  .s.run{ background:#dcfce7; color:#166534; }
+  .s.cand{ background:#fef3c7; color:#92400e; }
+  .s.fin{ background:#e5e7eb; color:#4b5563; }
+  .gauge{ display:inline-block; width:86px; height:9px; border-radius:5px; background:#e5e7eb; position:relative; vertical-align:middle; }
+  .gauge i{ position:absolute; inset:0 auto 0 0; border-radius:5px; background:#3b82f6; }
+
+  /* 확인 다이얼로그 목업 */
+  .dlg{ max-width:430px; margin:0 auto; border:1px solid #d1d5db; border-radius:14px; box-shadow:0 12px 30px rgba(0,0,0,.14); overflow:hidden; background:#fff; }
+  .dlg .dh{ padding:13px 18px; font-weight:800; font-size:14px; border-bottom:1px solid #f1f5f9; }
+  .dlg .db{ padding:14px 18px; font-size:13px; color:#374151; }
+  .dlg .df{ display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; background:#f8fafc; }
+
+  /* 결정 카드 */
+  .dec{ border:1px solid #e5e7eb; border-radius:12px; background:#fff; padding:16px 18px; margin:12px 0; }
+  .dec .dq{ font-weight:800; font-size:14.5px; margin-bottom:8px; }
+  .dec .opt{ display:flex; gap:10px; align-items:flex-start; border:1px solid #e5e7eb; border-radius:10px; padding:10px 12px; margin:8px 0; font-size:13px; }
+  .dec .opt.rec{ border-color:#86efac; background:#f0fdf4; }
+  .dec .opt .tag{ flex:none; font-size:11px; font-weight:800; border-radius:6px; padding:2px 8px; background:#e5e7eb; color:#4b5563; margin-top:1px; }
+  .dec .opt.rec .tag{ background:#16a34a; color:#fff; }
+  .flow{ display:flex; gap:0; align-items:stretch; flex-wrap:wrap; margin:12px 0; }
+  .flow .st{ background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 14px; font-size:12.5px; min-width:150px; }
+  .flow .st b{ display:block; font-size:13px; margin-bottom:3px; }
+  .flow .ar{ align-self:center; padding:0 8px; color:#94a3b8; font-weight:800; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>📑 작업보드 작업탭 워크플로우 — 구현계획(PRD)·와이어프레임 <span class="pill info">v1.0</span></h1>
+<p class="sub">2026-08-04 · 대상: 리뷰웹시스템[3버전](workdesk) 내부인 화면(관리자·AE) · 목적: <b>"브라우저에 시트 탭을 여러 개 열어두고, 진행 중인 것은 앞에, 끝난 것은 뒤로 보내던" 직원의 실제 워크플로우</b>를 작업보드 안에서 그대로 할 수 있게 한다.</p>
+
+<!-- ══════════════ 1. 배경 ══════════════ -->
+<h2>1. 배경 — 지금 직원은 이렇게 일한다</h2>
+<div class="card">
+  <p>실제 화면 관찰 + 직원 인터뷰로 확인한 시트 시절의 워크플로우와, 이번 계획에서 각각 무엇으로 바뀌는지의 대응표입니다.</p>
+  <table class="t">
+    <tr><th style="width:44%">시트 시절 (브라우저 + 구글시트)</th><th>리뷰웹시스템[3버전] (이번 계획)</th></tr>
+    <tr><td>진행 중인 작업 시트를 <b>브라우저 탭으로 여러 개</b> 열어둔다</td><td><b>㉮ "열린 작업" 줄</b> — 작업보드 상단 맨 위에 내가 열어둔 작업이 탭처럼 나란히. 계정에 저장되어 <b>다른 PC에서 로그인해도 그대로 유지</b>(브라우저보다 좋아지는 점)</td></tr>
+    <tr><td>진행 중인 탭을 <b>앞쪽에</b> 배치한다</td><td>열린 작업 줄의 순서는 <b>드래그로 자유 변경</b>. 작업보드에는 <b>진행 중인 작업만</b> 나타난다</td></tr>
+    <tr><td>완료된 시트 탭을 <b>뒤로 옮긴다</b></td><td><b>㉯ [✅ 완료] 버튼</b> — 누르면 그 작업이 전 직원의 작업보드에서 정리되어 <b>완료 보관함</b>으로 이동</td></tr>
+    <tr><td>뒤로 보낸 탭을 나중에 다시 찾아본다</td><td>홈 작업 목록의 <b>[완료 보관함]</b> 서브탭 — 열람 가능, <b>[진행중으로 복귀]</b> 클릭 한 번으로 되돌림</td></tr>
+    <tr><td>어떤 작업들이 있는지 <b>목록으로 훑는다</b> (관리자 대시보드에서 좋았다던 그 화면)</td><td><b>㉰ 홈 화면 "작업 목록" 블록</b> — 담당자·인원/제출·입금이 보이는 표. 줄을 클릭하면 그 작업이 열린다</td></tr>
+  </table>
+  <p class="sub">즉 이번 계획의 부품은 셋: <b>㉮ 열린 작업 줄(개인별)</b> · <b>㉯ 완료 상태(전사 공통)</b> · <b>㉰ 홈 작업 목록 블록</b>.</p>
+</div>
+
+<div class="note">💡 <b>현재 작업보드의 문제(코드로 확인)</b>: 상단 바가 "1단 = 업체 세그먼트, 2단 = 그 업체의 탭들"이라 <b>작업을 바꿀 때마다 업체를 거쳐야</b> 하고, 목록에 <b>순서·진행/완료 개념이 전혀 없으며</b>(서버 고정 정렬), 끝난 작업도 계속 같은 줄에 섞여 나옵니다. 또 작업보드 목록에는 담당자·제출·입금 수치가 없어 관리자 대시보드의 "작업 중인 탭 목록" 같은 한눈 훑기가 불가능합니다.</div>
+
+<!-- ══════════════ 2. 확정된 결정 ══════════════ -->
+<h2>2. 확정된 결정 4가지 <span class="pill ok">사용자 확정 2026-08-04</span></h2>
+<div class="card">
+  <div class="decided"><b class="q">① 완료 기준 = 수동 완료 + 자동 후보 배지</b>
+  담당자가 [✅ 완료] 버튼을 눌러야 완료됩니다(시트에서 탭을 뒤로 옮기던 그 행동). 시스템은 데이터가 다 찬 작업에 <span class="s cand">✓ 완료 후보</span> 배지만 붙여 알려줄 뿐, <b>자동으로 완료 처리하지 않습니다</b>. (제안은 시스템, 확정은 사람)</div>
+  <div class="decided"><b class="q">② 완료 보관 = 가벼운 완료 상태만</b>
+  완료는 <b>작업보드 화면에서만 분리되는 표시</b>입니다. 리뷰어 검색·인덱스·기존 아카이브 등 다른 시스템 동작은 전혀 건드리지 않아, <b>되돌리기(진행중 복귀)가 클릭 한 번</b>입니다. 기존 아카이브([마감으로 보내기])는 종전대로 관리자 대시보드에서 별도 진행합니다.</div>
+  <div class="decided"><b class="q">③ 작업 목록 나열 = 홈 화면에 블록 추가</b>
+  직원이 좋아했던 "작업 목록 나열"(담당자·인원/제출·입금이 보이는 표)은 <b>홈 화면 히어로 아래</b>에 둡니다. 작업보드는 탭(여닫기) 중심으로 유지합니다.</div>
+  <div class="decided"><b class="q">④ 탭바 = 기존 유지 + 열린 작업 줄 추가</b>
+  업체 세그먼트(1단)·그룹 탭(2단)은 그대로 두고, <b>맨 위에 "열린 작업" 줄을 추가</b>합니다(총 3단). 기존 습관(업체별 탐색·즐겨찾기)을 깨지 않으면서 브라우저 탭 방식이 얹힙니다.</div>
+</div>
+
+<!-- ══════════════ 3. 와이어프레임 A ══════════════ -->
+<h2>3. 와이어프레임 A — 작업보드 상단 3단 바</h2>
+<div class="wf">
+  <div class="wf-cap">화면 A · 작업보드 (관리자·AE 공통) — 상단 바가 2단 → 3단이 됩니다</div>
+  <div class="wf-body">
+    <div class="mock-top"><b>리뷰웹시스템[3버전]</b>
+      <span class="mock-nav"><span>🏠 홈</span><span class="on">작업보드</span><span>업체관리</span><span>작업오더</span><span>모집공고</span><span>C/S</span></span>
+    </div>
+    <div class="bar b0">
+      <span class="lbl">열린 작업</span>
+      <span class="wtab0 on">힙스 골라담기 100건 <span class="x">×</span></span>
+      <span class="wtab0">레브 바이럴_10건 <span class="cand">✓ 후보</span> <span class="x">×</span></span>
+      <span class="wtab0">테라토직 체험단 <span class="x">×</span></span>
+      <span class="wtab0">어니스트캄_마감 <span class="x">×</span></span>
+      <span class="btn-open">＋ 작업 열기</span>
+    </div>
+    <div class="bar">
+      <span class="lbl">업체</span>
+      <span class="seg">★ 즐겨찾기 <span class="cnt">4</span></span>
+      <span class="seg on">인애드컴퍼니 <span class="cnt">6</span> <span class="unb">💬 2</span></span>
+      <span class="seg">위드프랜즈 <span class="cnt">3</span></span>
+      <span class="seg">펫스토리 <span class="cnt">2</span></span>
+      <span class="seg">미지정 <span class="cnt">5</span></span>
+    </div>
+    <div class="bar" style="border-bottom:2px solid #e5e7eb">
+      <span class="wtab2 on"><span class="st f">★</span> 힙스 골라담기 100건</span>
+      <span class="wtab2"><span class="st">☆</span> 어니스트캄_업무 81건</span>
+      <span class="wtab2"><span class="st">☆</span> 오세x인애드 업무</span>
+      <span class="wtab2"><span class="st">☆</span> 스마트원솔루션_추가</span>
+    </div>
+    <div style="padding:26px; text-align:center; color:#94a3b8; font-size:13px; background:#fbfcfe;">(선택한 작업의 표 — 기존 그대로)</div>
+  </div>
+</div>
+<div class="card">
+  <div class="anno-line"><span class="n">1</span><div><b>열린 작업 줄(신규, 0단)</b> — 내가 열어둔 작업만 브라우저 탭처럼. <b>파란색 = 지금 보는 작업</b>. × = 닫기(목록에서 사라질 뿐, 작업 데이터와 무관). 드래그로 순서 변경. <b>계정별 서버 저장</b>이라 다른 PC·브라우저에서 로그인해도 그대로입니다(즐겨찾기와 같은 방식).</div></div>
+  <div class="anno-line"><span class="n">2</span><div><b>작업을 "연다" = 열린 줄에 추가된다</b> — 2단 그룹 탭·검색 결과·홈 목록 어디서 작업을 클릭하든, 그 작업이 열린 줄 끝에 추가되고 선택됩니다(브라우저에서 링크를 열면 탭이 생기는 것과 같음). 이미 열려 있으면 그 탭으로 이동만 합니다.</div></div>
+  <div class="anno-line"><span class="n">3</span><div><span class="s cand">✓ 후보</span> 배지 — 인원을 다 채우고 전건 제출·입금이 끝난 작업. "이제 완료 처리해도 됩니다"라는 <b>제안일 뿐 자동으로 사라지지 않습니다</b>.</div></div>
+  <div class="anno-line"><span class="n">4</span><div><b>1·2단(업체 세그먼트/그룹 탭)은 기존 그대로</b> — 단, <b>완료된 작업은 여기서 빠집니다</b>(작업보드 = 진행 중만). 업체 칩의 개수도 진행 중 기준으로 바뀝니다.</div></div>
+  <div class="anno-line"><span class="n">5</span><div><b>[＋ 작업 열기]</b> — 누르면 홈의 작업 목록으로 이동(또는 검색창 포커스). 목록에서 골라 여는 흐름.</div></div>
+  <div class="anno-line"><span class="n">6</span><div><b>완료된 작업이 열려 있었다면</b> — 열린 줄에서 자동으로 회색 처리 후 제거됩니다(완료는 전사 공통이므로 다른 직원 화면에서도 동일). 완료 작업을 다시 봐야 하면 완료 보관함에서 열 수 있고, 그때는 읽기 화면 상단에 "완료된 작업" 띠가 표시됩니다.</div></div>
+</div>
+
+<!-- ══════════════ 4. 와이어프레임 B ══════════════ -->
+<h2>4. 와이어프레임 B — 홈 화면 "작업 목록" 블록</h2>
+<div class="wf">
+  <div class="wf-cap">화면 B · 홈 (히어로 아래에 블록 추가) — 직원이 좋아했던 "관리자 대시보드식 나열"이 이 자리에 옵니다</div>
+  <div class="wf-body">
+    <div class="hm-hero">
+      <div>👋 <b>만두</b>님, 좋은 아침입니다</div>
+      <div class="stat"><b>12</b>진행 중 작업</div>
+      <div class="stat"><b>4</b>모집중 공고</div>
+      <div class="stat"><b>37</b>오늘 참여 확정</div>
+      <div class="stat"><b>3</b>확인 필요</div>
+    </div>
+    <div class="blk">
+      <div class="blk-h">📋 작업 목록
+        <span class="subtab"><span class="on">진행 중 12</span><span>완료 보관함 8</span></span>
+        <span class="chip on">전체</span><span class="chip">만두</span><span class="chip">망고</span>
+        <span class="srch">🔎 작업명·업체·담당자 검색</span>
+      </div>
+      <table class="mt">
+        <tr><th>작업명</th><th>업체</th><th>담당</th><th style="width:150px">인원/제출</th><th>입금</th><th>상태</th><th style="width:130px"></th></tr>
+        <tr>
+          <td><b>힙스 골라담기 100건</b></td><td>인애드컴퍼니</td><td>만두</td>
+          <td><span class="gauge"><i style="width:62%"></i></span> 62/100</td><td>40</td>
+          <td><span class="s run">진행 중</span></td>
+          <td><span class="b open">열기</span> <span class="b doneb">✅ 완료</span></td>
+        </tr>
+        <tr>
+          <td><b>레브 바이럴_10건</b></td><td>인애드컴퍼니</td><td>망고</td>
+          <td><span class="gauge"><i style="width:100%"></i></span> 10/10</td><td>10</td>
+          <td><span class="s cand">✓ 완료 후보</span></td>
+          <td><span class="b open">열기</span> <span class="b doneb">✅ 완료</span></td>
+        </tr>
+        <tr>
+          <td><b>테라토직 체험단</b></td><td>위드프랜즈</td><td>만두</td>
+          <td><span class="gauge"><i style="width:35%"></i></span> 7/20</td><td>2</td>
+          <td><span class="s run">진행 중</span></td>
+          <td><span class="b open">열기</span> <span class="b doneb">✅ 완료</span></td>
+        </tr>
+      </table>
+    </div>
+    <div class="blk">
+      <div class="blk-h">📋 작업 목록 <span class="subtab"><span>진행 중 12</span><span class="on">완료 보관함 8</span></span> <span class="sub" style="margin-left:6px">— [완료 보관함] 서브탭을 눌렀을 때</span></div>
+      <table class="mt">
+        <tr><th>작업명</th><th>업체</th><th>담당</th><th>인원/제출</th><th>완료일 · 완료자</th><th style="width:150px"></th></tr>
+        <tr class="done">
+          <td>어니스트캄_업무 81건</td><td>인애드컴퍼니</td><td>망고</td><td>81/81</td><td>7/29 · 망고</td>
+          <td><span class="b open">열람</span> <span class="b back">↩ 진행중으로 복귀</span></td>
+        </tr>
+        <tr class="done">
+          <td>든든푸드 전복죽</td><td>펫스토리</td><td>만두</td><td>30/30</td><td>7/22 · 만두</td>
+          <td><span class="b open">열람</span> <span class="b back">↩ 진행중으로 복귀</span></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="anno-line"><span class="n">1</span><div><b>표의 재료</b> — 관리자 대시보드 "작업 중인 탭 목록"과 같은 정보(담당자·인원/제출·입금)를 작업보드 목록에 합쳐서 보여줍니다. AE는 <b>담당 업체 작업만</b> 보입니다(작업보드와 같은 범위 규칙 — 서버가 강제).</div></div>
+  <div class="anno-line"><span class="n">2</span><div><b>줄 클릭(또는 [열기]) = 그 작업이 작업보드 탭으로 열림</b> — 홈 → 작업보드 화면 전환 + 열린 작업 줄에 추가. 뒤로가기를 누르면 홈으로 돌아옵니다(기존 히스토리 규칙 그대로).</div></div>
+  <div class="anno-line"><span class="n">3</span><div><b>[✅ 완료]는 확인창을 거칩니다</b>(아래 화면 C). 완료 처리하면 이 목록의 [완료 보관함]으로 이동하고, 전 직원의 작업보드·열린 작업 줄에서 정리됩니다.</div></div>
+  <div class="anno-line"><span class="n">4</span><div><b>[↩ 진행중으로 복귀]</b> — 실수했거나 작업이 재개되면 클릭 한 번으로 되돌립니다. 데이터는 아무것도 변하지 않았으므로 복귀 즉시 원래 자리(업체 그룹)에 다시 나타납니다.</div></div>
+  <div class="anno-line"><span class="n">5</span><div><b>담당자 칩([전체][만두][망고])</b> — 관리자 대시보드의 담당자 탭 버튼과 같은 사용감. 검색은 작업명·업체·담당자를 훑습니다.</div></div>
+</div>
+
+<!-- ══════════════ 5. 와이어프레임 C ══════════════ -->
+<h2>5. 와이어프레임 C — 완료 처리 흐름</h2>
+<div class="flow">
+  <div class="st"><b>① 완료 후보 발견</b>인원 충족 + 전건 제출·입금<br>→ <span class="s cand">✓ 완료 후보</span> 배지가 목록·탭에 표시</div>
+  <div class="ar">→</div>
+  <div class="st"><b>② [✅ 완료] 클릭</b>홈 목록 또는<br>작업보드 상단(열린 작업의 헤더)</div>
+  <div class="ar">→</div>
+  <div class="st"><b>③ 확인창</b>영향 범위를 문장으로 안내<br>(아래 목업)</div>
+  <div class="ar">→</div>
+  <div class="st"><b>④ 완료 보관함으로</b>전 직원 보드에서 정리<br>완료일·완료자 기록</div>
+  <div class="ar">⇄</div>
+  <div class="st"><b>↩ 복귀</b>보관함에서 클릭 한 번<br>(복귀자도 기록)</div>
+</div>
+<div class="wf">
+  <div class="wf-cap">화면 C · 완료 확인창 — 무슨 일이 일어나는지 정확히 말해준다 (조용한 처리 금지)</div>
+  <div class="wf-body" style="background:#f8fafc; padding:22px;">
+    <div class="dlg">
+      <div class="dh">✅ 이 작업을 완료 처리할까요?</div>
+      <div class="db">
+        <b>레브 바이럴_10건</b> (인애드컴퍼니 · 담당 망고)
+        <ul class="l" style="margin-top:8px">
+          <li>전 직원의 작업보드에서 <b>완료 보관함</b>으로 이동합니다.</li>
+          <li>구글시트·리뷰어 화면·데이터에는 <b>아무 영향이 없습니다.</b></li>
+          <li>언제든 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</li>
+        </ul>
+      </div>
+      <div class="df"><span class="b back">취소</span> <span class="b doneb">완료 처리</span></div>
+    </div>
+  </div>
+</div>
+<div class="note">⚠️ <b>완료 후보인데 아직 배지가 안 뜨는/잘못 뜨는 경우</b> — 배지는 시트에서 읽어온 제출·입금 수치로 판정하므로 시트 수기 데이터가 어긋나면 오탐·미탐이 있을 수 있습니다. 그래서 배지는 <b>제안 전용</b>이고, 배지가 없어도 [완료]는 언제든 누를 수 있으며(예: 조기 종료된 작업), 배지가 있어도 자동으로 처리되지 않습니다.</div>
+
+<!-- ══════════════ 6. 동작 규칙 ══════════════ -->
+<h2>6. 동작 규칙 (요약표)</h2>
+<div class="card">
+  <table class="t">
+    <tr><th style="width:26%">항목</th><th>규칙</th></tr>
+    <tr><td><b>열린 작업 줄</b></td><td><b>개인별</b>(계정 귀속 서버 저장, 기기 무관 유지 — 즐겨찾기와 같은 방식). 열기 = 줄에 추가, × = 닫기, 드래그 = 순서 변경. 남의 열린 탭에 영향 없음.</td></tr>
+    <tr><td><b>완료 상태</b></td><td><b>전사 공통</b>(한 명이 완료하면 모두의 보드에서 정리). 완료일·완료자·복귀자 기록. 데이터 무접촉(화면 분류일 뿐).</td></tr>
+    <tr><td><b>작업보드(1·2단)</b></td><td>진행 중 작업만 표시. 완료 작업은 업체 칩 개수에서도 제외.</td></tr>
+    <tr><td><b>완료 후보 판정</b></td><td>서버가 계산해 내려주는 인원·제출·입금 수치로 판정(관리자 대시보드의 "완료(핑크 행)" 판정과 같은 규칙). 제안 전용 — 자동 처리 없음.</td></tr>
+    <tr><td><b>완료 작업 열람</b></td><td>보관함 [열람]으로 열기 가능(읽기 정상). 화면 상단에 "완료된 작업" 띠 + [↩ 복귀] 버튼.</td></tr>
+    <tr><td><b>완료 권한</b></td><td>관리자(master/admin)는 전체, AE는 담당 업체 작업만(기존 편집 범위 규칙 재사용). 광고주는 버튼 자체가 없음.</td></tr>
+    <tr><td><b>광고주 화면</b></td><td><b>무영향</b> — 광고주는 전용 레이아웃(사이드바·대시보드)이라 이번 변경이 닿지 않음.</td></tr>
+    <tr><td><b>기존 아카이브</b></td><td><b>무접촉</b> — [마감으로 보내기]는 종전대로 관리자 대시보드에서. 단, 아카이브된 작업은 활성 목록에서 빠지므로 <b>완료 보관함에서도 사라짐</b>(한계로 화면에 고지).</td></tr>
+  </table>
+</div>
+
+<!-- ══════════════ 7. 남은 결정 ══════════════ -->
+<h2>7. 추가로 정하면 좋은 것 4가지 <span class="pill warn">권장안 제시 — 이대로 진행해도 무방</span></h2>
+
+<div class="dec">
+  <div class="dq">㉠ "완료 후보 ✓" 배지의 판정 기준</div>
+  <div class="opt rec"><span class="tag">권장</span><div><b>인원 충족 + 전건 제출 + 전건 입금</b> — 관리자 대시보드에서 이미 "완료(핑크 행)"로 칠하는 기준과 동일. 기준이 두 벌이 되지 않습니다.</div></div>
+  <div class="opt"><span class="tag">대안</span><div><b>인원 충족 + 전건 제출</b>(입금 제외) — 배지가 더 일찍 뜨지만, 입금이 남은 작업을 완료해 버리는 실수를 유도할 수 있습니다.</div></div>
+</div>
+
+<div class="dec">
+  <div class="dq">㉡ 홈 "작업 목록" 블록의 위치</div>
+  <div class="opt rec"><span class="tag">권장</span><div><b>히어로 바로 아래 · 전체폭</b> — 접속하자마자 보이고 표 컬럼(담당·게이지·입금)이 좁아지지 않습니다. 기존 타일·브리핑 레일은 그 아래로 내려갑니다.</div></div>
+  <div class="opt"><span class="tag">대안</span><div><b>타일 그리드 옆(좌측 열)</b> — 첫 화면 구성이 덜 바뀌지만 표 폭이 좁아져 컬럼을 줄여야 합니다.</div></div>
+</div>
+
+<div class="dec">
+  <div class="dq">㉢ 완료 처리 권한</div>
+  <div class="opt rec"><span class="tag">권장</span><div><b>관리자 전체 + AE는 담당 업체 작업만</b> — 기존 작업보드 편집 범위 규칙 그대로. 복귀가 클릭 한 번이라 위험이 낮습니다.</div></div>
+  <div class="opt"><span class="tag">대안</span><div><b>편집 허용명단(workdesk_editors)만</b> — 작업오더 접수·공고 발행과 같은 명단으로 조입니다. 완료가 잦은 일상 동작임을 감안하면 과한 마찰일 수 있습니다.</div></div>
+</div>
+
+<div class="dec">
+  <div class="dq">㉣ 열린 작업 줄의 개수 상한</div>
+  <div class="opt rec"><span class="tag">권장</span><div><b>12개</b> — 넘으면 "가장 오래 안 본 탭을 닫아주세요" 안내(자동으로 닫지 않음). 한 줄 가로 스크롤 유지.</div></div>
+  <div class="opt"><span class="tag">대안</span><div><b>무제한 + 가로 스크롤</b> — 브라우저와 동일하지만 탭 이름이 짧아져 구분이 어려워집니다.</div></div>
+</div>
+
+<!-- ══════════════ 8. 구현 단계 ══════════════ -->
+<h2>8. 구현 단계 제안</h2>
+<div class="card">
+  <table class="t">
+    <tr><th style="width:12%">단계</th><th style="width:48%">내용</th><th>배포하면 바로 좋아지는 것</th></tr>
+    <tr>
+      <td><b>M1</b><br><span class="pill info">완료+목록</span></td>
+      <td>완료 상태(전사 공통) 저장소 + [✅ 완료]/[↩ 복귀] + 완료 후보 배지 + <b>홈 작업 목록 블록</b>(진행 중/완료 보관함 서브탭, 담당자·인원/제출·입금 표) + 작업보드 1·2단에서 완료 작업 제외</td>
+      <td>"작업보드에 진행 중만 남는다" + "관리자 대시보드식 나열"이 홈에 생긴다 — 직원 요청 2건이 먼저 해결</td>
+    </tr>
+    <tr>
+      <td><b>M2</b><br><span class="pill info">열린 탭</span></td>
+      <td>"열린 작업" 줄(0단) — 계정별 서버 저장, 열기/닫기/드래그 순서, 완료 시 자동 정리, [＋ 작업 열기]</td>
+      <td>브라우저 탭 워크플로우 완성 — 업체를 거치지 않는 작업 전환</td>
+    </tr>
+  </table>
+  <p class="sub">M1·M2는 독립 배포 가능하며 순서를 바꿔도 됩니다. 두 단계 모두 기존 화면·데이터에 대해 <b>추가만</b> 하므로(아래 9절) 되돌리기가 쉽습니다.</p>
+</div>
+
+<!-- ══════════════ 9. 개발 부록 ══════════════ -->
+<h2>9. 개발 부록 <span class="pill dim">개발자용 — 건너뛰어도 됩니다</span></h2>
+<details>
+  <summary>데이터 모델 · API · 기존 코드 재사용 지점 (클릭해서 펼치기)</summary>
+  <div class="body">
+    <h3>새 저장소 (migration 088, 두 테이블 — 관용구: IF NOT EXISTS·soft delete·되돌리기 주석)</h3>
+    <ul class="l">
+      <li><code>trackb_tab_done</code> — 완료 상태(전사 공통): <code>(sheet_id, tab_name)</code> 키 + <code>tab_gid</code> + <code>done_at/done_by</code> + <code>deleted_at</code>(복귀 = soft delete, 이력 보존). 부분 인덱스 <code>WHERE deleted_at IS NULL</code>. Track A 무접촉 — <code>tab_configs</code>·<code>index_master</code>에 컬럼을 추가하지 않는다(그쪽은 아카이브·마감(is_closed)이 이미 쓰는 표면).</li>
+      <li><code>trackb_workdesk_worktabs</code> — 열린 작업 줄(개인별): <code>trackb_workdesk_favorites</code>(060)와 동일 형태 <code>(owner_key TEXT PK, tabs JSONB '[]', updated_at)</code>. 키 = <code>sheetId␟tabName␟tabGid</code>(즐겨찾기 <code>_favKey</code>와 동일 규약), 배열 순서 = 탭 순서. ⚠ 즐겨찾기 원장에 접두(<code>@open␟</code>)로 얹지 않는다 — 즐겨찾기는 Set으로 재직렬화되어 순서가 보존되지 않는다.</li>
+    </ul>
+    <h3>API (전부 <code>/api/trackb/*</code> — 인트라넷 SSO 토큰 격리 범위 안)</h3>
+    <ul class="l">
+      <li><code>GET/POST /api/trackb/workdesk/worktabs</code> — favorites 라우트(<code>trackB.routes.js:85-94</code>)와 동일 골격(authMiddleware, <code>_by(req)</code> owner key, 서버측 정규화·상한).</li>
+      <li><code>POST /api/trackb/workdesk/tab-done</code> <code>{sheetId, tabName, done:true|false}</code> — <code>_ensureEditScope</code>(master/admin 전체 · staff 담당 탭 <code>canAccessTab</code> · advertiser 차단). done=false = 복귀(soft delete 해제가 아니라 새 상태 행 or deleted_at 세팅 — 이력 보존 방식은 구현 시 확정).</li>
+      <li>목록 확장 — <code>GET /api/trackb/tabs</code> 응답에 <b>done 주석을 항상 동봉</b>(LEFT JOIN <code>trackb_tab_done</code>, fail-soft) + <code>?stats=1</code>일 때만 담당자·인원/제출/입금 수치 동봉(<code>tab_configs</code>·<code>index_master</code>·입금 서브쿼리 — 관리자 대시보드 <code>/api/tab/dashboard</code>의 집계식(<code>tabconfig.routes.js:1312-1339</code>) 재사용, 목록 쿼리 실패 시 stats만 비우고 목록은 반환). ★ 스코프의 단일 출처 = <code>scopedActiveTabs</code>(<code>trackB.service.js:1538-1561</code>) — 홈 목록·작업보드·완료 보관함이 전부 이 한 경로를 태워야 AE 담당 범위가 갈라지지 않는다. <code>/api/tab/dashboard</code>를 _delegate 프록시로 뚫지 않는 이유 = 그 응답은 전 탭(스코프 없음)이라 staff에게 담당 밖 데이터가 샌다.</li>
+    </ul>
+    <h3>프론트 재사용 지점 (workdesk.html)</h3>
+    <ul class="l">
+      <li>열린 줄 저장/동기화 = 즐겨찾기 패턴 복제(<code>:1641-1671</code> — 로컬 즉시 반영 + 서버 비동기 push + 부팅 시 서버 원본 동기화). 탭 키 규약 <code>_favKey</code>(<code>:1647</code>) 재사용.</li>
+      <li>홈 목록 줄 클릭 → 작업 열기 = <b><code>STATE.pendingTab</code> + <code>switchView('workdesk')</code></b> 기존 계약(<code>:1286-1296</code>, <code>:1446-1460</code>) 그대로 — 히스토리 "중간 항목 금지" 규칙과 자동 정합.</li>
+      <li>완료 후보 판정식 = 광고주 뷰 <code>_awStatus</code>(<code>:1474-1479</code>, 인원 충족+전건 제출)와 관리자 대시보드 핑크 행 판정(제출+입금 100%, <code>index-app.js:12978-12981</code>) 중 ㉠ 결정에 따름 — <b>판정은 서버 수치로 클라이언트가 파생</b>(표에 보이는 숫자와 같은 재료 = 배지와 표가 어긋날 수 없음).</li>
+      <li>작업보드 그룹핑 <code>_wGroups</code>(<code>:1680-1694</code>)에 done 필터 추가(완료 탭 제외), 검색 <code>wSearch</code>(<code>:1749</code>)는 완료 포함하되 "완료" 표기.</li>
+      <li>홈 블록 삽입 자리 = <code>.hm-hero</code>와 <code>.hm-wrap</code> 사이(<code>:3726-3747</code>). 홈 히어로 "진행 중 작업" 숫자(<code>:3753-3758</code>)는 같은 응답을 쓰므로 <b>진행 중 기준으로 자동 일치</b>.</li>
+    </ul>
+    <h3>격리·안전 (Track B 3원칙 준수)</h3>
+    <ul class="l">
+      <li><b>추가만</b> — 신규 테이블 2 + 신규/확장 라우트, 기존 테이블 스키마 무변경. <b>시트 쓰기 0 · Track A 핫패스(검색·주문원장·인덱스빌드) 참조 0.</b> 되돌리기 = 라우트 미마운트 + DROP TABLE 2.</li>
+      <li>완료는 <b>표시 계층</b> — <code>index_master.status</code>·아카이브·<code>is_closed</code>와 독립. 아카이브된 탭은 활성 목록에서 빠지므로 보관함에서도 사라짐(화면 고지).</li>
+      <li>배포 스큐 — 구백엔드 응답에 done/stats 필드가 없으면 프론트는 종전 화면 그대로(필드 부재 = 기능 미표시, 조용한 오작동 금지).</li>
+      <li>회귀가드(구현 시) — <code>tests/workboardWorktabs.test.js</code>: 라우터 스택 실검사 + 스텁 pool로 tab-done 스코프(staff 담당 밖 403) 실행 + <code>scopedActiveTabs</code> 단일 출처(사본 SQL 부재) + 프론트 배선(vm 렌더 — 프리변수 함정 대비) + 완료 제외가 업체 칩 개수에도 반영.</li>
+    </ul>
+  </div>
+</details>
+
+<!-- ══════════════ 10. 비범위 ══════════════ -->
+<h2>10. 이번에 하지 않는 것</h2>
+<div class="card">
+  <ul class="l">
+    <li><b>아카이브 자동 실행</b> — 완료 ≠ 아카이브. [마감으로 보내기]는 종전대로 관리자 대시보드에서(사용자 확정 ②). 완료 보관함에 아카이브 연결 버튼을 두는 것은 추후 별건.</li>
+    <li><b>구글시트·리뷰어 화면 변경 0</b> — 완료/열린 탭은 내부 화면 분류일 뿐.</li>
+    <li><b>광고주 화면 변경 0</b> — 광고주 전용 레이아웃은 이번 범위 밖.</li>
+    <li><b>작업 자동 완료</b> — 데이터 조건 충족 시 자동 처리하지 않음(사용자 확정 ①).</li>
+    <li><b>관리자 대시보드(admin.html) 변경 0</b> — "작업 중인 탭 목록"은 그대로 유지(폐기 예정 트랙이지만 이번 작업이 건드리지 않음).</li>
+  </ul>
+</div>
+
+<p class="sub" style="margin-top:30px">문서 버전 v1.0 · 2026-08-04 · 확정 결정 4건 반영(§2), 잔여 결정 4건 권장안 제시(§7). 이 문서는 <code>frontend/docs/prd-workboard-worktabs.html</code>로 저장소에 보관됩니다.</p>
+
+</div>
+</body>
+</html>
