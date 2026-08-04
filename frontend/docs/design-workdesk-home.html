@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>리뷰웹시스템[3버전] 첫 진입 홈(히어로+대시보드) 와이어프레임 시안 3종</title>
+<style>
+  /* ═══ workdesk.html Clarity Console 토큰과 동일 계열 — 시안이 실물 톤과 어긋나지 않게 ═══ */
+  :root{
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e9edf6;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .doc{max-width:1280px;margin:0 auto;padding:36px 18px 110px}
+  .eyebrow{font-size:.72rem;font-weight:800;letter-spacing:.13em;color:var(--accent)}
+  h1{font-size:clamp(1.3rem,3vw,1.75rem);font-weight:800;letter-spacing:-.02em;margin:6px 0 6px}
+  p.lead{color:var(--muted);font-size:.9rem;max-width:760px}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .chip{font-size:.7rem;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+  .chip b{color:var(--ink)}
+  section{margin-top:48px}
+  .sec-label{font-size:.7rem;font-weight:800;letter-spacing:.12em;color:var(--accent);margin-bottom:3px}
+  h2{font-size:1.15rem;font-weight:800;letter-spacing:-.015em}
+  .pros{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 16px}
+  .pros span{font-size:.68rem;font-weight:700;border-radius:7px;padding:3px 9px;background:var(--accent-soft);color:var(--accent-deep)}
+  .pros span.warn{background:var(--warn-soft);color:var(--warn)}
+  .note{font-size:.78rem;color:var(--muted);margin-top:12px;max-width:820px}
+  .note b{color:var(--ink)}
+
+  /* ═══ 데스크톱 프레임 (내부 1140px 실폭, 넘치면 가로 스크롤) ═══ */
+  .frame{background:#0f172a;border-radius:16px;padding:10px;box-shadow:0 14px 34px rgba(17,24,39,.25)}
+  .frame .bar{display:flex;gap:6px;padding:2px 6px 8px}
+  .frame .bar i{width:10px;height:10px;border-radius:50%;background:#334155;display:block}
+  .frame .bar i:first-child{background:#ef4444}.frame .bar i:nth-child(2){background:#f59e0b}.frame .bar i:nth-child(3){background:#22c55e}
+  .scr{background:var(--paper);border-radius:10px;overflow:auto}
+  .cv{min-width:1140px}
+
+  /* ═══ 공통 크롬(상단 헤더 + nav) — workdesk 실물 재현 ═══ */
+  .top{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:-.02em;font-size:14px}
+  .logo .tag{font-size:9.5px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);padding:2px 8px;border-radius:999px;margin-left:8px;letter-spacing:.05em}
+  .nav{display:flex;gap:0;margin-left:6px;background:var(--card2);border-radius:10px;padding:3px}
+  .navb{font-size:11.5px;font-weight:700;height:28px;padding:0 11px;border-radius:8px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+  .navb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .navb .bd{font-size:9px;font-weight:800;color:#fff;background:var(--bad);border-radius:999px;padding:0 5px;line-height:1.5}
+  .sp{flex:1}
+  .rolebadge{font-size:10.5px;font-weight:750;padding:3px 11px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-deep);white-space:nowrap}
+
+  /* ═══ 공용 부품 ═══ */
+  .body{padding:20px 22px 30px;max-width:1140px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.05)}
+  .h3{font-size:12.5px;font-weight:800;letter-spacing:-.01em}
+  .cap{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+  .kn{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15}
+  .ks{font-size:10.5px;color:var(--muted)}
+  .pill{font-size:9.5px;font-weight:800;border-radius:999px;padding:2px 8px;display:inline-block}
+  .p-bad{background:var(--bad-soft);color:var(--bad)} .p-warn{background:var(--warn-soft);color:var(--warn)}
+  .p-safe{background:var(--safe-soft);color:var(--safe)} .p-acc{background:var(--accent-soft);color:var(--accent-deep)}
+  .gg{height:6px;border-radius:3px;background:#e8edf4;overflow:hidden;display:flex}
+  .gg i{display:block;height:100%}
+  .gg .g1{background:var(--accent)} .gg .g2{background:#bcd3fb}
+  .btn{font-size:11.5px;font-weight:700;padding:0 12px;height:30px;display:inline-flex;align-items:center;gap:6px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);white-space:nowrap}
+  .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .mut{color:var(--muted)} .fnt{color:var(--faint)}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* ═══ 시안 A — 관제 센터형 ═══ */
+  .a-hero{display:flex;align-items:center;gap:18px;padding:18px 22px;border-radius:16px;background:linear-gradient(105deg,#eef4ff 0%,#fff 55%);border:1px solid var(--accent-line)}
+  .a-hero .hi{font-size:17px;font-weight:800;letter-spacing:-.02em}
+  .a-hero .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .a-srch{flex:1;max-width:400px;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line2);border-radius:11px;padding:9px 13px;color:var(--faint);font-size:12px}
+  .a-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
+  .a-kpi{padding:14px 16px;display:flex;flex-direction:column;gap:6px;position:relative}
+  .a-kpi .go{position:absolute;right:12px;top:12px;font-size:10px;color:var(--faint)}
+  .a-low{display:grid;grid-template-columns:1.5fr 1fr;gap:12px;margin-top:14px;align-items:start}
+  .a-td{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--line)}
+  .a-td:first-of-type{border-top:none}
+  .a-td .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:13px;flex:none}
+  .a-td .tt{font-size:12px;font-weight:650}
+  .a-td .ss{font-size:10.5px;color:var(--faint)}
+  .a-rc{display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:1px solid var(--line);font-size:11.5px}
+  .a-rc:first-of-type{border-top:none}
+
+  /* ═══ 시안 B — 타일 런처형 ═══ */
+  .b-hero{border-radius:18px;padding:26px 28px;background:linear-gradient(115deg,#1d4ed8 0%,#2563eb 45%,#3b82f6 100%);color:#fff;position:relative;overflow:hidden}
+  .b-hero::after{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.08)}
+  .b-hero::before{content:'';position:absolute;right:80px;bottom:-110px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.06)}
+  .b-hero .hi{font-size:19px;font-weight:800;letter-spacing:-.02em}
+  .b-hero .sub{font-size:12px;opacity:.85;margin-top:4px}
+  .b-stats{display:flex;gap:26px;margin-top:18px}
+  .b-st .n{font-size:21px;font-weight:800}
+  .b-st .l{font-size:10.5px;opacity:.8}
+  .b-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:16px}
+  .b-tile{padding:16px 14px;display:flex;flex-direction:column;gap:8px;position:relative;min-height:104px}
+  .b-tile .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:15px}
+  .b-tile .nm{font-size:12.5px;font-weight:750}
+  .b-tile .ds{font-size:10px;color:var(--faint)}
+  .b-tile .bd{position:absolute;top:12px;right:12px}
+  .b-wrap{display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start;margin-top:16px}
+
+  /* ═══ 시안 C — 브리핑 피드형 ═══ */
+  .c-wrap{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;align-items:start}
+  .c-hero{padding:20px 22px}
+  .c-hero .hi{font-size:16.5px;font-weight:800;letter-spacing:-.02em}
+  .c-hero .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .c-item{display:flex;gap:12px;padding:13px 0;border-top:1px solid var(--line)}
+  .c-item .tl{width:44px;flex:none;text-align:right;font-size:10px;color:var(--faint);padding-top:2px}
+  .c-item .dot{width:10px;flex:none;display:flex;justify-content:center;padding-top:4px}
+  .c-item .dot i{width:8px;height:8px;border-radius:50%;background:var(--line2);display:block}
+  .c-item.hot .dot i{background:var(--bad)} .c-item.warm .dot i{background:#f59e0b} .c-item.ok .dot i{background:var(--safe)}
+  .c-item .bx{flex:1;min-width:0}
+  .c-item .tt{font-size:12.5px;font-weight:700}
+  .c-item .ss{font-size:11px;color:var(--muted);margin-top:2px}
+  .c-mini{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .c-mk{padding:12px 14px}
+  .c-row{display:flex;align-items:center;gap:9px;padding:9px 0;border-top:1px solid var(--line);font-size:11.5px}
+  .c-row:first-of-type{border-top:none}
+  .c-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650;font-size:11.5px}
+
+  .hide{display:none!important}
+  .solo-note{margin:18px 0 0;font-size:.78rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="doc">
+  <header>
+    <div class="eyebrow">DESIGN · WORKDESK HOME</div>
+    <h1>리뷰웹시스템[3버전] 첫 진입 화면 — 히어로 + 대시보드 시안 3종</h1>
+    <p class="lead">현재 첫 진입은 곧바로 <b>작업보드의 "작업을 선택하세요" 빈 화면</b>이라, 로그인 직후 "지금 무엇을 해야 하는가"를 시스템이 말해주지 않는다. 아래 3안은 모두 <b>신규 API 0</b> 원칙 — 이미 존재하는 nav 뱃지 재료(작업오더 접수대기 · C/S 미확인+교체요청 · 리뷰검수 의심 · 리뷰어 비정상로그)와 기존 목록 API 응답을 첫 화면에 재배치만 한다. 내부 역할(master/admin/AE) 기준이며 광고주는 기존 전용 대시보드(부품4f-3)를 그대로 쓴다.</p>
+    <div class="meta">
+      <span class="chip">대상: <b>workdesk.html 내부인 첫 진입</b></span>
+      <span class="chip">데스크톱 FHD 기준 (내부 1140px 프레임)</span>
+      <span class="chip">단독 보기: <b>?v=A|B|C</b></span>
+      <span class="chip">신규 API 0 · 기존 뱃지/목록 재료 재배치</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════ 시안 A ═══════════════════════ -->
+  <section id="secA">
+    <div class="sec-label">시안 A</div>
+    <h2>관제 센터형 — "확인할 것"이 먼저 오는 홈</h2>
+    <div class="pros">
+      <span>할 일(알림) 중심 — 로그인 직후 바로 처리 동선</span>
+      <span>히어로가 낮아 정보 밀도 최고</span>
+      <span>기존 화면 문법(카드+표)과 가장 가까움</span>
+      <span class="warn">첫인상 임팩트는 약함</span>
+    </div>
+    <div class="frame"><div class="bar"><i></i><i></i><i></i></div><div class="scr"><div class="cv">
+      <div class="top">
+        <span class="logo">아이에이리뷰 <span class="tag">리뷰웹시스템 3.0</span></span>
+        <nav class="nav">
+          <span class="navb on">🏠 홈</span><span class="navb">작업보드</span><span class="navb">관측</span><span class="navb">업체관리</span>
+          <span class="navb">로그 <span class="bd">3</span></span><span class="navb">작업오더 <span class="bd">2</span></span><span class="navb">모집공고</span>
+          <span class="navb">C/S <span class="bd">16</span></span><span class="navb">리뷰검수 <span class="bd">4</span></span><span class="navb">등록리뷰어DB</span>
+          <span class="navb">입금관리</span><span class="navb">설정</span>
+        </nav>
+        <span class="sp"></span>
+        <span class="rolebadge">만두 · 관리자</span>
+      </div>
+      <div class="body">
+        <!-- 히어로: 낮은 스트립형 -->
+        <div class="a-hero">
+          <div>
+            <div class="hi">좋은 아침이에요, 만두님 👋</div>
+            <div class="sub">8월 4일 (화) · 확인이 필요한 항목 <b style="color:var(--bad)">9건</b> · 진행 중 작업 <b>14건</b></div>
+          </div>
+          <span class="sp"></span>
+          <div class="a-srch">🔍&nbsp; 작업명 · 업체명 · 리뷰어 검색&nbsp;&nbsp;<span style="margin-left:auto;font-size:10px;border:1px solid var(--line);border-radius:5px;padding:1px 6px;background:#fff">⌘K</span></div>
+          <span class="btn pri">＋ 작업오더 접수</span>
+        </div>
+
+        <!-- KPI 4칸: 각 칸 = nav 뱃지 재료, 클릭 시 그 탭으로 -->
+        <div class="a-kpis">
+          <div class="card a-kpi"><span class="go">작업오더 탭 →</span><span class="cap">접수 대기 오더</span><span class="kn" style="color:var(--bad)">2</span><span class="ks">신규 1 · 보완 재제출 1</span></div>
+          <div class="card a-kpi"><span class="go">C/S 탭 →</span><span class="cap">C/S 미확인</span><span class="kn" style="color:var(--warn)">16</span><span class="ks">문의 5 · 이미지 교체요청 11</span></div>
+          <div class="card a-kpi"><span class="go">리뷰검수 탭 →</span><span class="cap">리뷰검수 의심·불량</span><span class="kn">4</span><span class="ks">중복 2 · 본문 겹침 1 · 채널 불일치 1</span></div>
+          <div class="card a-kpi"><span class="go">로그 탭 →</span><span class="cap">리뷰어 비정상 로그</span><span class="kn">3</span><span class="ks">주문 미반영 1 · 캡처 미첨부 2</span></div>
+        </div>
+
+        <div class="a-low">
+          <!-- 확인 필요 큐: 종류 섞어 시간순 -->
+          <div class="card">
+            <div style="display:flex;align-items:center;padding:13px 14px 9px"><span class="h3">📌 지금 확인이 필요해요</span><span class="sp"></span><span class="fnt" style="font-size:10.5px">긴급한 순</span></div>
+            <div class="a-td"><span class="ic" style="background:var(--bad-soft)">🚨</span><div style="flex:1"><div class="tt">『헬시푸드 비타민C 100건』 주문 1건이 시트에 입력되지 못했습니다</div><div class="ss">리뷰어 비정상로그 · 12분 전</div></div><span class="btn">확인</span></div>
+            <div class="a-td"><span class="ic" style="background:var(--warn-soft)">📦</span><div style="flex:1"><div class="tt">새 작업오더 — 클렌징폼 상시 50건 (담당 AE: 김하늘)</div><div class="ss">작업오더 · 34분 전</div></div><span class="btn pri">접수하기</span></div>
+            <div class="a-td"><span class="ic" style="background:var(--accent-soft)">🖼</span><div style="flex:1"><div class="tt">리뷰이미지 교체요청 3건 — 『물티슈 캡형 80매』</div><div class="ss">C/S 처리 대기 큐 · 1시간 전</div></div><span class="btn">처리</span></div>
+            <div class="a-td"><span class="ic" style="background:var(--card2)">🔍</span><div style="flex:1"><div class="tt">리뷰검수 의심 2건 — 다른 리뷰어 제출과 본문 92% 겹침</div><div class="ss">리뷰검수 · 2시간 전</div></div><span class="btn">보기</span></div>
+          </div>
+          <!-- 최근 작업: 이어서 하기 -->
+          <div class="card">
+            <div style="display:flex;align-items:center;padding:13px 14px 9px"><span class="h3">🕘 최근 본 작업</span><span class="sp"></span><span class="fnt" style="font-size:10.5px">작업보드로 →</span></div>
+            <div class="a-rc"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">헬시푸드 비타민C 100건</b><span class="tnum mut">67/100</span><span class="pill p-acc">진행중</span></div>
+            <div class="a-rc"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">물티슈 캡형 80매 (2차)</b><span class="tnum mut">80/80</span><span class="pill p-safe">제출 마감</span></div>
+            <div class="a-rc"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">클렌징폼 딥클린 상시</b><span class="tnum mut">12/50</span><span class="pill p-acc">진행중</span></div>
+            <div class="a-rc"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">캠핑 랜턴 미니 30건</b><span class="tnum mut">30/30</span><span class="pill p-warn">입금 대기</span></div>
+            <div style="padding:10px 14px 14px"><span class="btn" style="width:100%;justify-content:center">전체 작업 목록 열기</span></div>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <p class="note"><b>요지:</b> 히어로는 인사+검색 한 줄로 최소화하고, 화면의 주인공은 <b>"확인 필요 큐"</b>다. KPI 4칸은 기존 nav 뱃지 4종(작업오더·C/S·리뷰검수·로그)의 재료를 그대로 크게 보여주는 것이라 숫자가 nav와 어긋날 일이 없다. 처리 버튼은 각 탭의 해당 화면으로 이동만 한다(홈에서 직접 처리하지 않음 = 처리 로직 사본 0).</p>
+  </section>
+
+  <!-- ═══════════════════════ 시안 B ═══════════════════════ -->
+  <section id="secB">
+    <div class="sec-label">시안 B</div>
+    <h2>타일 런처형 — 큰 히어로 + 메뉴 타일 그리드</h2>
+    <div class="pros">
+      <span>첫인상 임팩트 · "시스템 홈" 정체성 뚜렷</span>
+      <span>메뉴가 카드라 신규 입사자도 기능 전체를 조망</span>
+      <span>타일 뱃지 = nav 뱃지와 같은 값</span>
+      <span class="warn">한 화면당 정보량은 A보다 적음</span>
+      <span class="warn">숙련자에겐 클릭 1회 추가 느낌</span>
+    </div>
+    <div class="frame"><div class="bar"><i></i><i></i><i></i></div><div class="scr"><div class="cv">
+      <div class="top">
+        <span class="logo">아이에이리뷰 <span class="tag">리뷰웹시스템 3.0</span></span>
+        <span class="sp"></span>
+        <div class="a-srch" style="max-width:320px">🔍&nbsp; 통합 검색</div>
+        <span class="rolebadge">망고 · 관리자</span>
+      </div>
+      <div class="body">
+        <!-- 풀블리드 그라데이션 히어로 -->
+        <div class="b-hero">
+          <div class="hi">망고님, 오늘도 좋은 하루 되세요 ☀️</div>
+          <div class="sub">8월 4일 (화) · 리뷰웹시스템[3버전]이 오늘의 현황을 요약했어요</div>
+          <div class="b-stats">
+            <div class="b-st"><div class="n">14</div><div class="l">진행 중 작업</div></div>
+            <div class="b-st"><div class="n">86</div><div class="l">오늘 참여 확정</div></div>
+            <div class="b-st"><div class="n">52</div><div class="l">오늘 리뷰 제출</div></div>
+            <div class="b-st"><div class="n" style="color:#fecaca">9</div><div class="l">확인 필요</div></div>
+          </div>
+        </div>
+
+        <div class="b-wrap">
+          <div>
+            <!-- 메뉴 타일: nav의 카드화 -->
+            <div class="b-grid">
+              <div class="card b-tile"><span class="ic" style="background:var(--accent-soft)">🗂</span><span class="nm">작업보드</span><span class="ds">작업별 시트 그리드</span></div>
+              <div class="card b-tile"><span class="bd pill p-bad">2</span><span class="ic" style="background:var(--warn-soft)">📦</span><span class="nm">작업오더</span><span class="ds">접수 · 상태 관리</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--accent-soft)">📢</span><span class="nm">모집공고</span><span class="ds">발행 · 관제</span></div>
+              <div class="card b-tile"><span class="bd pill p-bad">16</span><span class="ic" style="background:var(--bad-soft)">🎧</span><span class="nm">C/S</span><span class="ds">문의 · 교체요청</span></div>
+              <div class="card b-tile"><span class="bd pill p-warn">4</span><span class="ic" style="background:var(--card2)">🔍</span><span class="nm">리뷰검수</span><span class="ds">의심 · 불량 판정</span></div>
+              <div class="card b-tile"><span class="bd pill p-warn">3</span><span class="ic" style="background:var(--bad-soft)">🧾</span><span class="nm">로그</span><span class="ds">비정상 · 오류</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--card2)">🏢</span><span class="nm">업체관리</span><span class="ds">소유 · 정산 연결</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--card2)">📡</span><span class="nm">관측</span><span class="ds">Track B 전환 현황</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--safe-soft)">💸</span><span class="nm">입금관리</span><span class="ds">리뷰비 이체 회차</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--card2)">👥</span><span class="nm">등록리뷰어DB</span><span class="ds">전사 리뷰어 조회</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--accent-soft)">📚</span><span class="nm">업무가이드</span><span class="ds">직원 안내서</span></div>
+              <div class="card b-tile"><span class="ic" style="background:var(--card2)">⚙️</span><span class="nm">설정</span><span class="ds">닉네임 · 이미지 · 열</span></div>
+            </div>
+          </div>
+          <!-- 우측 오늘의 브리핑 레일 -->
+          <div class="card" style="padding:14px 14px 10px">
+            <div class="h3" style="margin-bottom:8px">📌 오늘의 브리핑</div>
+            <div class="c-row"><span>🚨</span><span class="nm">주문 시트 미반영 1건</span><span class="pill p-bad">긴급</span></div>
+            <div class="c-row"><span>📦</span><span class="nm">접수 대기 오더 2건</span><span class="pill p-warn">대기</span></div>
+            <div class="c-row"><span>🖼</span><span class="nm">이미지 교체요청 11건</span><span class="pill p-warn">대기</span></div>
+            <div class="c-row"><span>💬</span><span class="nm">미확인 문의 5건</span><span class="pill p-warn">대기</span></div>
+            <div class="c-row"><span>🔍</span><span class="nm">검수 의심 4건</span><span class="pill p-acc">확인</span></div>
+            <div class="c-row"><span>💸</span><span class="nm">입금 대상 23건 (하나 12 · 케이 11)</span><span class="pill p-acc">준비</span></div>
+            <div style="padding:10px 0 6px"><span class="btn" style="width:100%;justify-content:center">전체 알림 보기</span></div>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <p class="note"><b>요지:</b> nav를 그대로 두되 홈에서는 <b>메뉴 자체를 타일로 펼쳐</b> "이 시스템에 무엇이 있는가"를 한눈에 보여준다. 관리자 대시보드에서 리뷰웹시스템[3버전]으로 넘어오는 전환기(교육·온보딩)에 강점. 타일 뱃지·브리핑 레일의 숫자는 전부 기존 뱃지 재료의 재표시라 별도 집계가 없다. 역할별로 타일이 접힌다(AE는 등록리뷰어DB·입금관리·관측 타일 미표시 = nav 정책과 1:1).</p>
+  </section>
+
+  <!-- ═══════════════════════ 시안 C ═══════════════════════ -->
+  <section id="secC">
+    <div class="sec-label">시안 C</div>
+    <h2>브리핑 피드형 — "오늘 할 일" 타임라인 + 진행 현황</h2>
+    <div class="pros">
+      <span>비서 브리핑 감각 — 읽는 순서 = 처리 순서</span>
+      <span>진행 게이지로 작업 흐름까지 한 화면</span>
+      <span>알림 종류가 섞여도 시간순이라 혼란 없음</span>
+      <span class="warn">항목이 많은 날은 스크롤 길어짐</span>
+      <span class="warn">피드 정렬(긴급도vs시간) 규칙 합의 필요</span>
+    </div>
+    <div class="frame"><div class="bar"><i></i><i></i><i></i></div><div class="scr"><div class="cv">
+      <div class="top">
+        <span class="logo">아이에이리뷰 <span class="tag">리뷰웹시스템 3.0</span></span>
+        <nav class="nav">
+          <span class="navb on">🏠 홈</span><span class="navb">작업보드</span><span class="navb">작업오더 <span class="bd">2</span></span>
+          <span class="navb">모집공고</span><span class="navb">C/S <span class="bd">16</span></span><span class="navb">리뷰검수 <span class="bd">4</span></span>
+          <span class="navb">로그 <span class="bd">3</span></span><span class="navb">더보기 ▾</span>
+        </nav>
+        <span class="sp"></span>
+        <span class="rolebadge">김하늘 · AE</span>
+      </div>
+      <div class="body">
+        <div class="c-wrap">
+          <!-- 좌: 히어로 + 브리핑 피드 -->
+          <div class="card c-hero">
+            <div class="hi">하늘님, 오늘 처리할 항목이 6건 있어요</div>
+            <div class="sub">8월 4일 (화) · 담당 업체 3곳 · 담당 탭 기준으로만 모았어요</div>
+            <div style="margin-top:14px">
+              <div class="c-item hot"><div class="tl">12분 전</div><div class="dot"><i></i></div><div class="bx"><div class="tt">『헬시푸드 비타민C 100건』 — 주문 1건 시트 미반영</div><div class="ss">리뷰어 비정상로그 · 재기록 대기 중 · 취소 건이면 [취소 처리]로 알려주세요</div></div><span class="btn">열기</span></div>
+              <div class="c-item warm"><div class="tl">34분 전</div><div class="dot"><i></i></div><div class="bx"><div class="tt">새 작업오더 도착 — 클렌징폼 상시 50건</div><div class="ss">접수하면 탭 등록·리뷰어 검색이 열립니다</div></div><span class="btn pri">접수</span></div>
+              <div class="c-item warm"><div class="tl">1시간 전</div><div class="dot"><i></i></div><div class="bx"><div class="tt">이미지 교체요청 3건 — 『물티슈 캡형 80매』</div><div class="ss">C/S 처리 대기 큐 · 기존↔변경 대조 후 승인/반려</div></div><span class="btn">처리</span></div>
+              <div class="c-item warm"><div class="tl">2시간 전</div><div class="dot"><i></i></div><div class="bx"><div class="tt">리뷰검수 의심 2건 — 본문 92% 겹침</div><div class="ss">불량이면 [확인 처리]로 종결하고 리뷰어에게 안내</div></div><span class="btn">보기</span></div>
+              <div class="c-item ok"><div class="tl">오늘</div><div class="dot"><i></i></div><div class="bx"><div class="tt">『캠핑 랜턴 미니 30건』 마감자료 생성 가능</div><div class="ss">제출 30/30 완료 · 정산 스텝퍼 ①에서 생성</div></div><span class="btn">생성</span></div>
+              <div class="c-item ok"><div class="tl">어제</div><div class="dot"><i></i></div><div class="bx"><div class="tt">『물티슈 캡형 80매』 모집 마감 — 공고 자동 종료됨</div><div class="ss">시트 일정 기준 · 날짜를 추가하면 자동 재개</div></div><span class="btn fnt" style="border:none">확인</span></div>
+            </div>
+          </div>
+          <!-- 우: KPI 미니 + 진행 게이지 -->
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div class="c-mini">
+              <div class="card c-mk"><span class="cap">오늘 참여 확정</span><div class="kn tnum">86</div><span class="ks" style="color:var(--safe)">▲ 12 어제보다</span></div>
+              <div class="card c-mk"><span class="cap">오늘 리뷰 제출</span><div class="kn tnum">52</div><span class="ks mut">목표 대비 74%</span></div>
+              <div class="card c-mk"><span class="cap">진행 중 작업</span><div class="kn tnum">14</div><span class="ks mut">담당 3곳</span></div>
+              <div class="card c-mk"><span class="cap">확인 필요</span><div class="kn tnum" style="color:var(--bad)">6</div><span class="ks mut">피드에서 처리</span></div>
+            </div>
+            <div class="card" style="padding:14px">
+              <div class="h3" style="margin-bottom:10px">📊 진행 중 작업 현황</div>
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <div><div style="display:flex;font-size:11px;margin-bottom:4px"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">헬시푸드 비타민C 100건</b><span class="tnum mut">67/100</span></div><div class="gg"><i class="g1" style="width:52%"></i><i class="g2" style="width:15%"></i></div></div>
+                <div><div style="display:flex;font-size:11px;margin-bottom:4px"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">클렌징폼 딥클린 상시</b><span class="tnum mut">12/50</span></div><div class="gg"><i class="g1" style="width:18%"></i><i class="g2" style="width:6%"></i></div></div>
+                <div><div style="display:flex;font-size:11px;margin-bottom:4px"><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">물티슈 캡형 80매 (2차)</b><span class="tnum mut">80/80</span></div><div class="gg"><i class="g1" style="width:100%"></i></div></div>
+              </div>
+              <div style="margin-top:10px;display:flex;gap:10px;font-size:10px;color:var(--faint)"><span>■ 진한 파랑 = 제출</span><span>■ 연한 파랑 = 참여(미제출)</span></div>
+            </div>
+            <div class="card" style="padding:12px 14px">
+              <div class="h3" style="margin-bottom:6px">⚡ 바로가기</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span class="btn">📢 공고 발행</span><span class="btn">🧾 수동 제출</span><span class="btn">💸 입금 회차</span><span class="btn">📚 업무가이드</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <p class="note"><b>요지:</b> 알림 4종을 종류별 칸이 아니라 <b>하나의 시간순 피드</b>로 합치고, 각 항목이 "무엇을 하면 되는지"를 한 줄 부제로 말한다(늑대소년 방지 — 긴급(빨강)은 critical만). AE로 로그인하면 <b>담당 탭 스코프로 서버가 이미 거른 값</b>만 온다(기존 `scopedActiveTabs` 정책 그대로). 우측 진행 게이지는 관리자 모집공고 카드의 게이지 분해(제출=진한 파랑/진행중=연한 파랑)와 같은 문법을 재사용한다.</p>
+  </section>
+
+  <!-- ═══════════════════════ 공통 비교 ═══════════════════════ -->
+  <section id="secCmp">
+    <div class="sec-label">비교 요약</div>
+    <h2>선택 가이드</h2>
+    <div class="card" style="padding:16px 18px;margin-top:12px;overflow-x:auto">
+      <table style="border-collapse:collapse;width:100%;min-width:640px;font-size:12px">
+        <tr style="text-align:left;color:var(--faint);font-size:10.5px;letter-spacing:.04em"><th style="padding:6px 10px">기준</th><th style="padding:6px 10px">A 관제 센터형</th><th style="padding:6px 10px">B 타일 런처형</th><th style="padding:6px 10px">C 브리핑 피드형</th></tr>
+        <tr style="border-top:1px solid var(--line)"><td style="padding:8px 10px;font-weight:700">숙련 직원 반복 사용</td><td style="padding:8px 10px;color:var(--safe);font-weight:700">◎ 최적</td><td style="padding:8px 10px">△</td><td style="padding:8px 10px">○</td></tr>
+        <tr style="border-top:1px solid var(--line)"><td style="padding:8px 10px;font-weight:700">신규 입사자 온보딩</td><td style="padding:8px 10px">○</td><td style="padding:8px 10px;color:var(--safe);font-weight:700">◎ 최적</td><td style="padding:8px 10px">○</td></tr>
+        <tr style="border-top:1px solid var(--line)"><td style="padding:8px 10px;font-weight:700">"오늘 할 일" 안내</td><td style="padding:8px 10px">○</td><td style="padding:8px 10px">△</td><td style="padding:8px 10px;color:var(--safe);font-weight:700">◎ 최적</td></tr>
+        <tr style="border-top:1px solid var(--line)"><td style="padding:8px 10px;font-weight:700">구현 난도(기존 재료 재배치)</td><td style="padding:8px 10px;color:var(--safe);font-weight:700">낮음</td><td style="padding:8px 10px;color:var(--safe);font-weight:700">낮음</td><td style="padding:8px 10px">중간(피드 정렬 규칙)</td></tr>
+        <tr style="border-top:1px solid var(--line)"><td style="padding:8px 10px;font-weight:700">역할(AE) 스코프 대응</td><td style="padding:8px 10px">KPI 값이 담당 스코프</td><td style="padding:8px 10px">타일 자체가 접힘</td><td style="padding:8px 10px">피드가 담당 건만</td></tr>
+      </table>
+    </div>
+    <p class="note"><b>공통 원칙(어느 안이든):</b> ① 홈은 <b>읽기 전용 + 이동</b>만 한다 — 처리 로직 사본을 홈에 두지 않는다(교체요청 승인·오더 접수는 각 탭의 기존 코드로 이동). ② 숫자는 전부 <b>기존 nav 뱃지 재료(`_NAVCS`·`_NAVLG` 등)와 같은 값</b> — 홈 전용 집계를 새로 만들면 뱃지와 어긋난다. ③ 조회 실패 칸은 0이 아니라 <b>“?”로 표기</b>(조용한 정상 위장 금지 — 관측 뷰 배포 스큐 규칙과 동일). ④ 첫 진입 기본 뷰를 홈으로 바꾸되 <b>히스토리 첫 항목은 replace</b>(뒤로가기 헛클릭 방지 — SPA 히스토리 규칙 그대로). ⑤ 광고주는 이 홈을 보지 않는다(기존 광고주 대시보드 유지).</p>
+  </section>
+
+  <p class="solo-note">단독 보기: 주소 뒤에 <b>?v=A</b> / <b>?v=B</b> / <b>?v=C</b> 를 붙이면 해당 시안만 표시됩니다.</p>
+</div>
+<script>
+  // ?v=A|B|C 단독 보기 (레포 시안 문서 공통 규칙)
+  (function(){
+    var v=(new URLSearchParams(location.search).get('v')||'').toUpperCase();
+    if(!['A','B','C'].includes(v)) return;
+    ['A','B','C'].forEach(function(k){ if(k!==v) document.getElementById('sec'+k).classList.add('hide'); });
+    document.getElementById('secCmp').classList.add('hide');
+  })();
+</script>
+</body>
+</html>
