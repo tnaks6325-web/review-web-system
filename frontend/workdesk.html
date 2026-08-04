@@ -3072,7 +3072,9 @@ async function _wtpFillSheets(){
   try{
     const r=await api('/api/trackb/tabs');
     const seen={}, opts=[];
-    ((r&&r.items)||[]).forEach(t=>{ const id=t.sheetId||t.sheet_id; if(!id||seen[id])return; seen[id]=1;
+    // ★ 이 API 의 목록 키는 `tabs` 다(`items` 아님) — 실제로 붙여 보고 잡은 버그.
+    //   잘못 읽으면 드롭다운이 **항상 비어** '새 시트 파일'밖에 못 고른다.
+    ((r&&(r.tabs||r.items))||[]).forEach(t=>{ const id=t.sheetId||t.sheet_id; if(!id||seen[id])return; seen[id]=1;
       opts.push(`<option value="${esc(id)}">${esc(t.spreadsheetTitle||t.spreadsheet_title||id)}</option>`); });
     sel.innerHTML=opts.length?opts.join(''):'<option value="">(등록된 시트 없음 — 새 시트 파일로 만드세요)</option>';
   }catch(_){ sel.innerHTML='<option value="">(목록을 불러오지 못했습니다)</option>'; }
