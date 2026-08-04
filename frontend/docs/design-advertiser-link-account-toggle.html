@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 광고주 접속링크 기본 공개 + 계정 로그인 토글</title>
+<style>
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --adv:#6d5ac9;--adv-soft:#efecfa;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.page{max-width:1120px;margin:0 auto;padding:26px 20px 80px}
+h1{font-size:21px;font-weight:800;margin:0 0 6px}
+.lead{color:var(--muted);font-size:13px;margin:0 0 22px}
+.doc{margin-top:34px}
+.doc h2{font-size:15px;font-weight:800;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.doc h2 .n{width:20px;height:20px;border-radius:6px;background:var(--accent-soft);color:var(--accent-deep);font-size:11px;display:grid;place-items:center;flex:none}
+.note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--muted)}
+.note b{color:var(--ink)}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:860px){.cmp{grid-template-columns:1fr}}
+.cmp .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;font-size:12.5px;color:var(--muted)}
+.cmp .box .lbl{font-size:10.5px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;margin-bottom:7px}
+.cmp .before .lbl{color:var(--bad)} .cmp .after .lbl{color:var(--safe)}
+.cmp .box p{margin:0 0 6px} .cmp .box p:last-child{margin:0}
+
+/* ── 실제 workdesk.html 업체관리 패널 스타일 재현 ── */
+.mock{background:var(--paper);border:1px solid var(--line2);border-radius:14px;padding:20px 22px;box-shadow:0 2px 10px rgba(16,24,40,.05)}
+.mockcap{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+.ph2{display:flex;align-items:center;gap:11px;margin-bottom:4px;padding-bottom:15px;border-bottom:1px solid var(--line)}
+.ph2 .big{width:40px;height:40px;border-radius:11px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
+.ph2 h2{margin:0;font-size:18px;font-weight:800} .ph2 .acc{font-size:12px;color:var(--muted)}
+.aechip{font-size:11.5px;font-weight:700;color:var(--adv);background:var(--adv-soft);border-radius:999px;padding:3px 10px}
+.setvis{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;white-space:nowrap}
+.acc2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+@media(max-width:860px){.acc2col{grid-template-columns:1fr}}
+.acc2col > .sect{margin-top:0;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:15px 16px}
+.sect .st{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sect .st .sthint{font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);font-size:11px}
+.linkrow{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.linkrow input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card2);color:var(--ink);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+.linkmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .linkused{font-size:11.5px;color:var(--muted)}
+.lockbadge{font-size:11px;font-weight:750;padding:2px 9px;border-radius:999px}
+.lockbadge.open{background:var(--warn-soft);color:var(--warn)} .lockbadge.lock{background:var(--safe-soft);color:var(--safe)} .lockbadge.off{background:var(--bad-soft);color:var(--bad)}
+.linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5;min-height:35px}
+.acctrow{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);margin-bottom:7px}
+.acctid{font-weight:650;font-size:13px} .acctst{font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px}
+.acctst.on{background:var(--safe-soft);color:var(--safe)} .acctst.off{background:var(--warn-soft);color:var(--warn)}
+.acctempty{font-size:12.5px;color:var(--muted);padding:9px 2px}
+.acctadd{display:flex;flex-direction:column;align-items:stretch;gap:8px;margin-top:8px}
+.acctadd input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font-size:13px}
+.acctadd > .btn{align-self:flex-start}
+.btn{font:inherit;font-size:12px;font-weight:700;padding:0 13px;height:32px;display:inline-flex;align-items:center;gap:6px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn.xs{height:26px;padding:0 10px;font-size:11.5px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.bad{color:var(--bad);border-color:var(--bad-soft)}
+.btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed}
+
+/* ── ★ 신규: 토글 스위치 ── */
+.swrap{display:flex;align-items:center;gap:9px;margin-left:auto}
+.swrap .slabel{font-size:11.5px;font-weight:750;letter-spacing:0;text-transform:none}
+.swrap .slabel.on{color:var(--safe)} .swrap .slabel.off{color:var(--faint)}
+.sw{position:relative;width:42px;height:23px;flex:none;border:none;padding:0;border-radius:999px;background:var(--line2);cursor:pointer;transition:background .18s}
+.sw::after{content:"";position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.3);transition:transform .18s}
+.sw[aria-checked="true"]{background:var(--safe)}
+.sw[aria-checked="true"]::after{transform:translateX(19px)}
+.sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.acctbody.dim{opacity:.5;filter:grayscale(.4);transition:opacity .15s,filter .15s}
+.acctbody.dim:hover,.acctbody.dim:focus-within{opacity:1;filter:none}
+.offnote{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px dashed var(--line2);border-radius:9px;padding:9px 11px;margin-bottom:10px;line-height:1.5;min-height:55px}
+.offnote b{color:var(--ink)}
+
+/* 상태표 */
+table.st8{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.st8 th,.st8 td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.st8 th{background:var(--card2);font-size:11px;font-weight:750;letter-spacing:.03em;color:var(--faint);text-transform:uppercase}
+.st8 tr:last-child td{border-bottom:none}
+.st8 td.k{font-weight:700;white-space:nowrap}
+.pill{font-size:10.5px;font-weight:750;padding:1px 8px;border-radius:999px}
+.pill.open{background:var(--warn-soft);color:var(--warn)} .pill.lock{background:var(--safe-soft);color:var(--safe)} .pill.off{background:var(--bad-soft);color:var(--bad)}
+.viewsw{display:flex;gap:6px;margin-bottom:12px}
+.viewsw button{font:inherit;font-size:12px;font-weight:700;height:30px;padding:0 13px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer}
+.viewsw button.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--card2);padding:1px 5px;border-radius:5px}
+ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)} ul.tight li{margin-bottom:5px}
+</style></head><body>
+<div class="page">
+
+<h1>시안 — 광고주 접속링크는 기본 공개, 계정 로그인은 <span style="color:var(--safe)">선택</span></h1>
+<p class="lead">통합 작업대 › 업체관리 › 거래처 패널. 아래 목업의 토글은 실제로 눌러 볼 수 있습니다.</p>
+
+<div class="doc">
+  <h2><span class="n">1</span>무엇이 달라지나</h2>
+  <div class="cmp">
+    <div class="box before"><div class="lbl">현재</div>
+      <p>업체에 <b>활성 계정이 하나라도 생기면</b> 접속 링크가 <b>자동으로</b> "로그인 필요"로 바뀝니다(계정 존재 = 게이트).</p>
+      <p>계정을 만들어 두고 링크는 그냥 열리게 두는 선택지가 없습니다. 끄려면 계정을 비활성/삭제해야 합니다.</p>
+    </div>
+    <div class="box after"><div class="lbl">변경안</div>
+      <p>링크는 <b>기본이 공개</b>. 계정이 있든 없든 링크만 열면 그 업체 뷰로 들어갑니다.</p>
+      <p>로그인을 요구할지는 <b>"광고주 계정" 카드의 토글 하나</b>로 결정합니다. 계정 발급 = 보안 적용이 아니라, <b>토글 ON = 보안 적용</b>.</p>
+    </div>
+  </div>
+</div>
+
+<div class="doc">
+  <h2><span class="n">2</span>목업 — 업체관리 거래처 패널</h2>
+  <div class="viewsw">
+    <button id="vb0" class="on" onclick="setSw(false)">토글 OFF — 계정 미사용(기본)</button>
+    <button id="vb1" onclick="setSw(true)">토글 ON — 계정 사용(로그인 필요)</button>
+  </div>
+
+  <div class="mock">
+    <div class="mockcap">workdesk › 업체관리 › 거래처 패널</div>
+    <div class="ph2">
+      <span class="big">힙</span>
+      <div style="flex:1"><h2>힙스컴퍼니</h2><div class="acc">거래처 ID: adv_8f3c… · 소유 3</div></div>
+      <span class="aechip">담당 AE · 박세희</span>
+      <label class="setvis"><input type="checkbox" checked disabled> 정산 노출</label>
+    </div>
+
+    <div class="acc2col">
+      <!-- 접속 링크 카드 -->
+      <div class="sect">
+        <div class="st">광고주 접속 링크 <span class="sthint">업체마다 자동 생성된 고유 URL — 광고주에게 전달</span></div>
+        <div class="linkrow">
+          <input readonly value="https://review-web-system.pages.dev/workdesk#adv=Qk9x…" onclick="this.select()">
+          <button class="btn xs pri">복사</button>
+        </div>
+        <div class="linkmeta">
+          <span class="lockbadge open" id="mBadge">🔓 공개 — 로그인 없이 열람</span>
+          <span class="linkused">마지막 접속 08-03 14:22</span>
+          <span style="flex:1"></span>
+          <button class="btn xs">링크 회전</button>
+          <button class="btn xs bad">폐기</button>
+        </div>
+        <div class="linkhint" id="mHint">이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.</div>
+      </div>
+
+      <!-- 광고주 계정 카드 (★ 토글 신규) -->
+      <div class="sect">
+        <div class="st">
+          광고주 계정
+          <span class="swrap">
+            <span class="slabel off" id="mSwLabel">미사용</span>
+            <button class="sw" id="mSw" role="switch" aria-checked="false" aria-label="광고주 계정 사용" onclick="setSw(this.getAttribute('aria-checked')!=='true')"></button>
+          </span>
+        </div>
+        <div class="offnote" id="mOffNote"><b>미사용</b> — 접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 위 스위치를 켜세요.</div>
+        <div class="acctbody dim" id="mAcctBody">
+          <div class="acctrow">
+            <span class="acctid">힙스컴퍼니</span>
+            <span class="acctst on">활성</span>
+            <span style="flex:1"></span>
+            <button class="btn xs">비번 재설정</button>
+            <button class="btn xs">비활성화</button>
+            <button class="btn xs bad">삭제</button>
+          </div>
+          <div class="acctadd">
+            <input placeholder="아이디" value="힙스컴퍼니">
+            <input placeholder="비밀번호(4자 이상)" type="text">
+            <button class="btn pri">＋ 계정 발급</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="tight">
+    <li>토글 OFF에서도 <b>계정 목록은 지워지지 않습니다</b> — 흐리게 표시만 되므로, 다시 켜면 그대로 쓸 수 있습니다(계정을 지웠다 다시 만드는 일 없음).</li>
+    <li>흐린 상태에서도 <b>계정 발급·수정은 그대로 됩니다</b>(마우스를 올리면 선명해짐). 클릭을 막으면 계정을 만들 수 없어 토글도 켤 수 없는 교착이 생깁니다.</li>
+    <li>활성 계정이 0개면 <b>토글이 비활성</b>이고, 서버도 켜기를 거부합니다(아무도 못 들어가는 잠금 방지).</li>
+    <li>마지막 활성 계정을 비활성/삭제할 때 토글이 켜져 있으면 <b>잠금 경고</b>를 먼저 띄웁니다(막지는 않되 조용히 잠기지 않게).</li>
+    <li>토글 ON/OFF로 <b>카드 높이가 변하지 않습니다</b> — 안내문 자리에 2줄분 높이를 예약했습니다(1120·900·700px 폭에서 높이 차 0 실측).</li>
+  </ul>
+</div>
+
+<div class="doc">
+  <h2><span class="n">3</span>링크를 열었을 때 실제 동작</h2>
+  <table class="st8">
+    <tr><th style="width:150px">계정 토글</th><th style="width:140px">활성 계정</th><th style="width:170px">링크 배지</th><th>광고주가 링크를 열면</th></tr>
+    <tr><td class="k">미사용 (기본)</td><td>없음</td><td><span class="pill open">🔓 공개</span></td><td>바로 그 업체 뷰로 입장 (읽기전용·마스킹·소유 탭만)</td></tr>
+    <tr><td class="k">미사용</td><td>있음</td><td><span class="pill open">🔓 공개</span></td><td><b>바로 입장</b> — 계정이 있어도 막지 않음 <span style="color:var(--bad);font-weight:700">(← 현재와 달라지는 지점)</span></td></tr>
+    <tr><td class="k">사용</td><td>있음</td><td><span class="pill lock">🔒 로그인 필요</span></td><td>로그인 화면 → 그 업체 계정으로 로그인해야 입장</td></tr>
+    <tr><td class="k">사용</td><td>없음</td><td colspan="2"><b>켤 수 없음</b> — 계정 발급을 먼저 요구(토글 비활성 + 서버 거부). 켠 뒤 계정을 지워 이 상태가 되면 <b>열리지 않고 잠깁니다</b>(보안이 조용히 풀리지 않도록 fail-closed — 토글을 끄거나 계정을 다시 발급해 복구)</td></tr>
+    <tr><td class="k">— (링크 폐기)</td><td>무관</td><td><span class="pill off">⛔ 폐기됨</span></td><td>링크 자체가 무효 — 계정 로그인 경로만 남음</td></tr>
+  </table>
+</div>
+
+<div class="doc">
+  <h2><span class="n">4</span>구현 내역</h2>
+  <div class="note">
+    <p style="margin:0 0 8px"><b>서버</b> — 게이트 판정을 "계정 존재"에서 명시 플래그로 이동. <code>trackb_advertiser_links.login_required</code>(기본 <code>FALSE</code>) 1컬럼 추가(migration 083) →
+    <code>loginByLinkToken</code>이 <b>이미 SELECT 하던 그 행</b>에서 읽으므로 쿼리 순증 0. 토글 저장은 기존 <code>POST /api/trackb/advertiser-link</code>에 <code>action:'login-required'</code> 하나 추가(신규 엔드포인트 0), <code>adminOrMaster</code> 권한 그대로.</p>
+    <p style="margin:0 0 8px"><b>안전장치</b> — 켤 때 활성 계정 0개면 서버가 거부. 끌 때는 계정을 건드리지 않음(비활성·삭제 아님). 켠 뒤 계정이 사라져도 링크는 <b>열리지 않는다</b>(fail-closed — "계정 없으면 통과" 폴백을 두면 켜 둔 보안이 조용히 풀린다).</p>
+    <p style="margin:0 0 8px"><b>기존 업체 이관</b> — 지금 활성 계정이 있어 "로그인 필요"로 동작하던 업체는 마이그레이션에서 <code>TRUE</code>로 1회 백필합니다. <b>배포 순간 광고주가 보는 동작은 그대로</b>(계정 있던 곳은 계속 로그인 요구, 없던 곳은 계속 공개). 앞으로 만드는 업체·계정만 기본 공개. 백필은 <code>login_required IS NULL</code> 인 행만 건드려, 파일이 다시 돌아도 관리자가 꺼 둔 값을 되켜지 않습니다.</p>
+    <p style="margin:0"><b>회귀가드</b> — <code>server/tests/advertiserLinkLoginToggle.test.js</code>(36케이스) + <code>trackBIntranetSso.test.js</code>에 게이트·토글 케이스 추가.</p>
+  </div>
+</div>
+
+</div>
+<script>
+function setSw(on){
+  document.getElementById('mSw').setAttribute('aria-checked', on?'true':'false');
+  var lab=document.getElementById('mSwLabel');
+  lab.textContent = on?'사용 중':'미사용'; lab.className='slabel '+(on?'on':'off');
+  document.getElementById('mAcctBody').className = 'acctbody' + (on?'':' dim');
+  document.getElementById('mOffNote').innerHTML = on
+    ? '<b>사용 중</b> — 링크를 열면 로그인 화면이 먼저 뜹니다. 아래 계정의 아이디·비밀번호를 광고주에게 전달하세요.'
+    : '<b>미사용</b> — 접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 위 스위치를 켜세요.';
+  var b=document.getElementById('mBadge');
+  b.className='lockbadge '+(on?'lock':'open');
+  b.textContent = on?'🔒 로그인 필요 — 이 업체 계정으로':'🔓 공개 — 로그인 없이 열람';
+  document.getElementById('mHint').innerHTML = on
+    ? '이 링크를 열면 로그인 화면이 뜹니다. 링크만으로는 들어갈 수 없습니다.'
+    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.';
+  document.getElementById('vb0').className = on?'':'on';
+  document.getElementById('vb1').className = on?'on':'';
+}
+</script>
+</body></html>

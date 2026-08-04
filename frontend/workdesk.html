@@ -510,7 +510,27 @@
   .linkmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .linkused{font-size:11.5px;color:var(--muted)}
   .linkempty{font-size:12.5px;color:var(--muted);padding:6px 2px 10px}
   .lockbadge{font-size:11px;font-weight:750;padding:2px 9px;border-radius:999px} .lockbadge.open{background:var(--warn-soft);color:var(--warn)} .lockbadge.lock{background:var(--safe-soft);color:var(--safe)} .lockbadge.off{background:var(--bad-soft);color:var(--bad)}
-  .linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5}
+  .linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5;min-height:35px}
+  /* ★ 광고주 계정 사용/미사용 토글(083). 켜고 끌 때 카드 높이가 흔들리지 않도록 안내문 블록에
+     2줄분 min-height 를 예약한다(문구 길이가 달라도 레이아웃이 안 튄다 — .linkhint 도 동일). */
+  /* .st 는 여러 섹션 공용이라 flex 로 바꾸지 않고, 토글이 있는 헤더만 .sthead 로 스코프한다. */
+  .sect .st.sthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:23px}
+  .sect .st.sthead .sthint{margin-left:0}
+  .swrap{display:flex;align-items:center;gap:9px;margin-left:auto}
+  .swrap .slabel{font-size:11.5px;font-weight:750;letter-spacing:0;text-transform:none}
+  .swrap .slabel.on{color:var(--safe)} .swrap .slabel.off{color:var(--faint)}
+  .sw{position:relative;width:42px;height:23px;flex:none;border:none;padding:0;border-radius:999px;background:var(--line2);cursor:pointer;transition:background .18s}
+  .sw::after{content:"";position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.3);transition:transform .18s}
+  .sw[aria-checked="true"]{background:var(--safe)}
+  .sw[aria-checked="true"]::after{transform:translateX(19px)}
+  .sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .sw[disabled]{opacity:.5;cursor:not-allowed}
+  .acctnote{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px dashed var(--line2);border-radius:9px;padding:9px 11px;margin-bottom:10px;line-height:1.5;min-height:55px}
+  .acctnote b{color:var(--ink)}
+  /* 미사용일 때는 "지금 로그인에 쓰이지 않는다"를 흐리게만 표시한다. ★ 클릭은 막지 않는다 —
+     토글을 켜려면 활성 계정이 먼저 있어야 하는데, 여기서 입력을 막으면 계정을 만들 길이 없어진다(교착). */
+  .acctbody.dim{opacity:.5;filter:grayscale(.4);transition:opacity .15s,filter .15s}
+  .acctbody.dim:hover,.acctbody.dim:focus-within{opacity:1;filter:none}
   .remainbar{margin:14px 0 4px;padding:11px 14px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid var(--line)}
   .remainbar.warn{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
   .remainbar.ok{background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 30%,transparent)}
@@ -3427,7 +3447,9 @@ function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeU
 function _advLinkHtml(a){
   if(!(STATE.role==='master'||STATE.role==='admin')) return '';
   const lk=STATE.advLink;
-  const hasAcct=(STATE.advAccts||[]).some(u=>u.advertiserId===a.id && u.active);   // 활성 계정 있으면 링크=로그인 게이트
+  // ★ 로그인 요구 여부는 **명시 플래그**(083 login_required) — 계정 존재로 자동 판정하지 않는다.
+  //   계정을 발급해 두고도 링크는 공개로 둘 수 있다(계정 = 선택적 보안). 서버 판정과 같은 값을 본다.
+  const lockOn=!!(lk && lk.loginRequired);
   if(!(lk && lk.token)){   // ensure로 항상 생성되나 방어(네트워크 실패 등)
     return `<div class="sect"><div class="st">광고주 접속 링크</div>
       <div class="linkempty">링크 준비 중… <button class="btn xs" onclick="advLinkGen('${esc(a.id)}',false)">지금 생성</button></div></div>`;
@@ -3435,11 +3457,11 @@ function _advLinkHtml(a){
   const url=_advLinkUrl(lk.token);
   const used=lk.lastUsedAt?('마지막 접속 '+_fmtTs(lk.lastUsedAt)):'접속 이력 없음';
   const mode = !lk.active ? `<span class="lockbadge off">⛔ 폐기됨 (접근 불가)</span>`
-    : hasAcct ? `<span class="lockbadge lock">🔒 로그인 필요 — 이 업체 계정으로</span>`
+    : lockOn ? `<span class="lockbadge lock">🔒 로그인 필요 — 이 업체 계정으로</span>`
     : `<span class="lockbadge open">🔓 공개 — 로그인 없이 열람</span>`;
   const hint = !lk.active ? '이 링크는 폐기되어 아무도 접근할 수 없습니다. "다시 활성"으로 복구.'
-    : hasAcct ? '이 업체는 계정이 있어 링크를 열면 로그인 화면이 뜹니다(아래 "광고주 계정"으로 로그인).'
-    : '아래 "광고주 계정"에서 계정을 만들면 이 링크가 자동으로 "로그인 필요"로 바뀝니다.';
+    : lockOn ? '이 링크를 열면 로그인 화면이 먼저 뜹니다. 링크만으로는 들어갈 수 없습니다.'
+    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.';
   return `<div class="sect"><div class="st">광고주 접속 링크 <span class="sthint">업체마다 자동 생성된 고유 URL — 광고주에게 전달</span></div>
     <div class="linkrow"><input id="advLinkUrl" readonly value="${esc(url)}" onclick="this.select()"><button class="btn xs pri" onclick="advLinkCopy()">복사</button></div>
     <div class="linkmeta">${mode} <span class="linkused">${esc(used)}</span><span style="flex:1"></span>
@@ -3486,13 +3508,36 @@ function _advAcctHtml(a){
     </div>`).join('');
   // 아이디 기본 제안: 거래처명에서 공백 제거(소문자·영숫자 유지). 관리자가 수정 가능.
   const suggest = String(a.name||'').trim().replace(/\s+/g,'');
-  return `<div class="sect"><div class="st">광고주 계정 <span class="sthint">이 아이디로 통합작업대 로그인 → 이 업체 정보만 열람(마스킹·읽기전용)</span></div>
+  // ★ 사용/미사용 토글 = 접속 링크가 로그인을 요구하는지(083). 끄면 계정은 **지우지 않고 잠그기만** 하므로
+  //   다시 켤 때 그대로 쓸 수 있다. 켜기는 활성 계정이 있어야 가능(없으면 아무도 못 들어감) — 서버도 재검증.
+  const lockOn=!!(STATE.advLink && STATE.advLink.loginRequired);
+  const hasActive=accts.some(u=>u.active);
+  const note = lockOn
+    ? '<b>사용 중</b> — 링크를 열면 로그인 화면이 먼저 뜹니다. 아래 계정의 아이디·비밀번호를 광고주에게 전달하세요.'
+    : '<b>미사용</b> — 접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 위 스위치를 켜세요.';
+  return `<div class="sect"><div class="st sthead">광고주 계정
+      <span class="swrap">
+        <span class="slabel ${lockOn?'on':'off'}">${lockOn?'사용 중':'미사용'}</span>
+        <button class="sw" role="switch" aria-checked="${lockOn?'true':'false'}" aria-label="광고주 계정 사용"
+          title="${lockOn?'끄면 링크만으로 입장합니다(계정은 보존)':(hasActive?'켜면 링크를 열 때 로그인 화면이 뜹니다':'활성 계정을 먼저 발급하세요')}"
+          ${(!lockOn && !hasActive)?'disabled':''} onclick="advAcctLoginToggle('${esc(a.id)}',${lockOn?'false':'true'})"></button>
+      </span></div>
+    <div class="acctnote">${note}</div>
+    <div class="acctbody${lockOn?'':' dim'}">
     ${rows||'<div class="acctempty">발급된 계정 없음 — 아래에서 만들어 광고주에게 전달하세요.</div>'}
     <div class="acctadd">
       <input id="acctId" placeholder="아이디" autocomplete="off" value="${esc(suggest)}">
       <input id="acctPw" placeholder="비밀번호(4자 이상)" autocomplete="new-password" type="text">
       <button class="btn pri" onclick="advAcctAdd('${esc(a.id)}')">＋ 계정 발급</button>
-    </div></div>`;
+    </div></div></div>`;
+}
+// 광고주 계정 사용/미사용 토글 — 접속 링크의 로그인 요구를 켜고 끈다(083). 계정은 지우지 않는다.
+//   ★ 보안이 풀리는 방향(ON→OFF)에서만 확인을 받는다 — 끄는 순간 링크를 아는 사람이 바로 들어온다.
+async function advAcctLoginToggle(advertiserId, on){
+  if(!on && !confirm('광고주 계정 로그인을 끌까요?\n이 업체의 접속 링크를 아는 사람은 로그인 없이 바로 들어오게 됩니다.\n(발급된 계정은 지워지지 않습니다.)')) return;
+  const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'login-required',advertiserId,required:!!on})});
+  if(r&&r.ok){ toast(on?'광고주 계정 사용 — 링크에 로그인 필요':'광고주 계정 미사용 — 링크만으로 입장'); await _advLinkReload(); }
+  else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
 async function _advAcctReload(){ const cur=STATE.advCur; if(!cur) return;
   const ac=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null);
@@ -3513,13 +3558,24 @@ async function advAcctResetPw(name){
   const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'edit',name,newPw:String(pw).trim()})});
   if(r&&r.success){ toast('비밀번호 변경: '+name); } else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
+// 마지막 활성 계정을 비활성/삭제하는데 "계정 사용"이 켜져 있으면 아무도 못 들어간다(링크도 로그인 화면).
+//   막지는 않되(관리자 의도일 수 있다) 반드시 사전에 알린다 — 조용한 잠금은 금지.
+function _advAcctLockoutOk(name){
+  if(!(STATE.advLink && STATE.advLink.loginRequired)) return true;
+  const cur=STATE.advCur; if(!cur) return true;
+  const others=(STATE.advAccts||[]).filter(u=>u.advertiserId===cur.id && u.active && u.name!==name);
+  if(others.length) return true;
+  return confirm('이 업체의 마지막 활성 계정입니다.\n"광고주 계정 사용"이 켜져 있어, 진행하면 접속 링크로도 로그인으로도 아무도 들어올 수 없게 됩니다.\n\n계속할까요? (스위치를 끄면 링크는 다시 열립니다)');
+}
 async function advAcctToggle(name,active){
+  if(!active && !_advAcctLockoutOk(name)) return;
   const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'edit',name,active})});
   if(r&&r.success){ toast((active?'활성화':'비활성화')+': '+name); await _advAcctReload(); }
   else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
 async function advAcctDelete(name){
   if(!confirm(`광고주 계정 '${name}'을(를) 삭제할까요?\n이 계정으로는 더 이상 로그인할 수 없게 됩니다.`)) return;
+  if(!_advAcctLockoutOk(name)) return;
   const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'delete',name})});
   if(r&&r.success){ toast('계정 삭제: '+name); await _advAcctReload(); }
   else toast('삭제 실패'+(r&&r.error?': '+r.error:''));

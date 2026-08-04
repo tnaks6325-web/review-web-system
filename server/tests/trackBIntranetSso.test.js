@@ -190,8 +190,11 @@ async function run() {
     if (/SELECT DISTINCT ac.sheet_id FROM advertiser_campaigns/.test(s)) return { rows: [{ sheet_id: 'S_owned1' }, { sheet_id: 'S_owned2' }, { sheet_id: null }] };
     if (/SELECT 1 FROM advertisers WHERE id/.test(s)) return { rows: vals[0] === 'adv_missing' ? [] : [{ 1: 1 }] };
     if (/INSERT INTO trackb_advertiser_links/.test(s)) return { rows: [{ token: vals[1], active: true }] };
-    if (/FROM trackb_advertiser_links WHERE advertiser_id/.test(s)) return { rows: vals[0] === 'adv_link' ? [{ advertiserId: 'adv_link', token: 'TOK', active: true, lastUsedAt: null, createdAt: null }] : [] };
+    if (/FROM trackb_advertiser_links WHERE advertiser_id/.test(s)) return { rows: vals[0] === 'adv_link' ? [{ advertiserId: 'adv_link', token: 'TOK', active: true, loginRequired: false, lastUsedAt: null, createdAt: null }] : [] };
     if (/UPDATE trackb_advertiser_links SET active/.test(s)) return { rows: vals[0] === 'adv_nolink' ? [] : [{ token: 'TOK', active: vals[1] }] };
+    // 083: 계정 사용 토글 — 활성 계정 유무는 업체 id로 흉내(adv_acct 만 계정 보유)
+    if (/SELECT 1 FROM advertiser_users WHERE advertiser_id/.test(s)) return { rows: vals[0] === 'adv_acct' ? [{ 1: 1 }] : [] };
+    if (/UPDATE trackb_advertiser_links SET login_required/.test(s)) return { rows: vals[0] === 'adv_nolink2' ? [] : [{ loginRequired: vals[1] }] };
     return { rows: [] };
   } });
   // 거래처 등록검증(인트라넷 광고주DB) 목 — 등록됨/미등록/도달불가 3태를 주입.
@@ -253,7 +256,24 @@ async function run() {
   assert.equal(lk.ok, false, '2.7e: 발급 안 된 업체 404'); assert.equal(lk.code, 404, '2.7e: 404');
   const ens = await svc.ensureAdvertiserLink({ advertiserId: 'adv_link', by: 'master' });
   assert.ok(ens && ens.token, '2.7f: ensure — 없으면 생성·있으면 유지 후 링크 반환(업체마다 항상 URL)');
+  assert.equal(g.loginRequired, false, '2.7g: 조회에 loginRequired 포함(프론트 배지·토글이 서버와 같은 값을 본다)');
   console.log('  2.7 광고주 접속 링크 — 발급/회전·조회·폐기·ensure·404 ✓');
+
+  // ═══ 2.7-2 setAdvertiserLinkLoginRequired(083) — 계정 사용/미사용 토글 ═══
+  //   ★ 이 토글이 로그인 게이트의 유일한 스위치다(계정 존재 = 자동 잠금 아님).
+  let tg = await svc.setAdvertiserLinkLoginRequired({ advertiserId: 'adv_acct', required: true, by: 'master' });
+  assert.equal(tg.ok, true, '2.7-2a: 활성 계정 있으면 켜기 성공'); assert.equal(tg.loginRequired, true, '2.7-2a: loginRequired=true');
+  tg = await svc.setAdvertiserLinkLoginRequired({ advertiserId: 'adv_link', required: true, by: 'master' });
+  assert.equal(tg.ok, false, '2.7-2b: 활성 계정 0개면 켜기 거부(아무도 못 들어오는 잠금 방지)');
+  assert.equal(tg.code, 400, '2.7-2b: 400'); assert.ok(/계정/.test(tg.error), '2.7-2b: 사유 안내');
+  tg = await svc.setAdvertiserLinkLoginRequired({ advertiserId: 'adv_link', required: false, by: 'master' });
+  assert.equal(tg.ok, true, '2.7-2c: 끄기는 계정 검사 없음(계정을 건드리지 않으므로)');
+  assert.equal(tg.loginRequired, false, '2.7-2c: loginRequired=false');
+  assert.ok(!q.some(x => /DELETE FROM advertiser_users|UPDATE advertiser_users/.test(x.s)),
+    '2.7-2d: 토글은 계정을 지우거나 비활성화하지 않는다(다시 켜면 그대로 사용)');
+  tg = await svc.setAdvertiserLinkLoginRequired({});
+  assert.equal(tg.ok, false, '2.7-2e: advertiserId 누락 400'); assert.equal(tg.code, 400, '2.7-2e: 400');
+  console.log('  2.7-2 계정 사용 토글 — 계정 있을 때만 켜기·끄기 자유·계정 무손상·400 ✓');
 
   // ═══ 2.8 loginByLinkToken — 유효 토큰 → advertiser JWT(via:link), 무효/종료/빈값 거부 ═══
   const mkPool = (row, hasAcct) => ({ async query(sql) { const s = String(sql);
@@ -269,10 +289,18 @@ async function run() {
   lr = await auth.loginByLinkToken('tok-x', mkPool({ advertiser_id: 'adv2', advertiser_name: 'X', advertiser_status: 'ended' }));
   assert.equal(lr.success, false, '2.8c: 종료 거래처 거부');
   lr = await auth.loginByLinkToken('', mkPool({})); assert.equal(lr.success, false, '2.8d: 빈 토큰 거부');
-  // 2.8e: 활성 계정 있는 업체 → 링크만으로 자동입장 불가, 로그인 요구(계정 생성 시 링크가 로그인 게이트로 전환)
-  lr = await auth.loginByLinkToken('tok-acct', mkPool({ advertiser_id: 'adv3', advertiser_name: 'Y', advertiser_status: 'active' }, true));
-  assert.equal(lr.success, false, '2.8e: 계정 있으면 자동입장 불가'); assert.equal(lr.requiresLogin, true, '2.8e: requiresLogin');
-  console.log('  2.8 loginByLinkToken — 무계정 공개·유계정 로그인게이트·무효/종료/빈값 거부 ✓');
+  // 2.8e(083): 로그인 게이트는 **명시 플래그**(login_required)로만 열린다.
+  lr = await auth.loginByLinkToken('tok-lock', mkPool({ advertiser_id: 'adv3', advertiser_name: 'Y', advertiser_status: 'active', login_required: true }, true));
+  assert.equal(lr.success, false, '2.8e: 플래그 ON → 자동입장 불가'); assert.equal(lr.requiresLogin, true, '2.8e: requiresLogin');
+  // ★★ 완화 금지선: 계정이 있어도 플래그가 꺼져 있으면 링크는 공개다(계정 = 선택적 보안).
+  lr = await auth.loginByLinkToken('tok-acct', mkPool({ advertiser_id: 'adv4', advertiser_name: 'Z', advertiser_status: 'active', login_required: false }, true));
+  assert.equal(lr.success, true, '2.8f: 활성 계정이 있어도 플래그 OFF면 링크만으로 입장(계정 생성=자동 잠금 아님)');
+  assert.equal(lr.role, 'advertiser', '2.8f: advertiser 권한');
+  // ★★ 반대 방향도 고정: 플래그 ON인데 계정이 사라져도 조용히 열리지 않는다(fail-closed).
+  lr = await auth.loginByLinkToken('tok-lock2', mkPool({ advertiser_id: 'adv5', advertiser_name: 'W', advertiser_status: 'active', login_required: true }, false));
+  assert.equal(lr.success, false, '2.8g: 플래그 ON + 계정 0개 → 열리지 않음(보안이 조용히 풀리지 않는다)');
+  assert.equal(lr.requiresLogin, true, '2.8g: requiresLogin 유지');
+  console.log('  2.8 loginByLinkToken — 플래그 기반 게이트(계정 존재 무관)·fail-closed·무효/종료/빈값 거부 ✓');
 
   // ═══ 3. staffOwnsAdvertiser ═══
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '김수만' }), true, '3a: TRIM 일치 허용');
