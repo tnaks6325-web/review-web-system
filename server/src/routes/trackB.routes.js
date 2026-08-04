@@ -793,6 +793,118 @@ router.post('/review-edit/reject', authMiddleware, _reInternal, async (req, res,
 });
 
 /* ══════════════════════════════════════════════════════════════
+   리뷰검수 — 통합 작업대 상단탭 (M3)
+
+   ★ 권한은 **이미지 교체요청 탭과 같다**(`_reInternal`): master/admin 전체,
+     staff(AE)는 담당 탭만, 광고주 차단. 검수 근거에 리뷰어 실명과 **리뷰 본문 OCR**이
+     실려 광고주에게 열 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단).
+   ★ Track B 경로에 두는 이유 = 인트라넷 SSO 토큰(via:'intranet')은 `/api/trackb/*` 로만
+     격리돼 있어, 다른 마운트에 두면 SSO 관리자가 아예 못 쓴다.
+   ══════════════════════════════════════════════════════════════ */
+const _inspectSvc = require('../services/reviewInspect.service');
+
+/** 이 파일이 내 스코프인가 — `_reCanTouch` 와 같은 규율(fail-closed, 절대 throw 안 함). */
+async function _riCanTouch(req, fileId) {
+  const fid = String(fileId || '');
+  if (!fid || fid.length > 200) return { ok: false, code: 400, error: 'fileId 가 올바르지 않습니다.' };
+  try {
+    const role = _role(req);
+    const sc = await _inspectSvc.inspectionScope(fid);
+    if (!sc) return { ok: false, code: 404, error: '검수 기록을 찾을 수 없습니다.' };
+    if (role === 'master' || role === 'admin') return { ok: true };
+    const okc = await svc.canAccessTab({
+      role: 'staff', staffName: req.admin && req.admin.name,
+      sheetId: sc.sheet_id, tabName: sc.tab_name,
+    });
+    return okc ? { ok: true } : { ok: false, code: 403, error: '담당하지 않은 작업(스코프 밖)' };
+  } catch (_) {
+    return { ok: false, code: 503, error: '담당 범위를 확인하지 못했습니다. 잠시 후 다시 시도하세요.' };
+  }
+}
+
+/** staff 는 (시트,탭)이 지정됐을 때 그 탭 접근권을 먼저 본다. 미지정이면 서비스가 스코프로 거른다. */
+async function _riScopeQuery(req) {
+  const role = _role(req);
+  const sheetId = req.query.sheetId ? String(req.query.sheetId) : null;
+  const tabName = req.query.tabName ? String(req.query.tabName) : null;
+  if (role === 'master' || role === 'admin') return { ok: true, sheetId, tabName, scoped: false };
+  if (sheetId && tabName) {
+    const okc = await svc.canAccessTab({
+      role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName,
+    });
+    return okc ? { ok: true, sheetId, tabName, scoped: true }
+               : { ok: false, code: 403, error: '담당하지 않은 작업(스코프 밖)' };
+  }
+  // 탭 미지정 staff — 담당 탭 전체를 대상으로 한다(빈 목록이면 담당이 없다는 뜻)
+  const tabs = await svc.scopedActiveTabs({ role: 'staff', staffName: (req.admin && req.admin.name) || '' });
+  return { ok: true, sheetId: null, tabName: null, scoped: true, allow: tabs || [] };
+}
+
+router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const sc = await _riScopeQuery(req);
+    if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
+    let items = await _inspectSvc.listInspections({
+      sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'open'),
+    });
+    let summary = await _inspectSvc.inspectionSummary({ sheetId: sc.sheetId, tabName: sc.tabName });
+    // staff + 탭 미지정 → 담당 탭만 남긴다(집계도 같은 기준으로 다시 센다)
+    if (sc.scoped && !sc.tabName) {
+      const allow = new Set((sc.allow || []).map(t => JSON.stringify([t.sheetId, t.tabName])));
+      items = items.filter(it => allow.has(JSON.stringify([it.sheet_id, it.tab_name])));
+      summary = { pass: 0, suspect: 0, fail: 0, pending: 0, unverifiable: 0, resolved: 0, open: 0 };
+      for (const it of items) if (summary[it.status] !== undefined) summary[it.status] += 1;
+      summary.open = summary.suspect + summary.fail;
+    }
+    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped });
+  } catch (err) {
+    logger.warn(`[review-inspect] 목록 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '검수 목록을 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String((req.body || {}).fileId || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const r = await _inspectSvc.resolveInspection({ fileId, by: (req.admin && req.admin.name) || '' });
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '확인 처리에 실패했습니다.' });
+  }
+});
+
+/* 기대 상품명 — 이게 비어 있으면 상품명 대조가 통째로 건너뛴다(조건 ②가 죽는다) */
+router.get('/review-inspect/product-names', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const sc = await _riScopeQuery(req);
+    if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
+    if (!sc.sheetId || !sc.tabName) return res.status(400).json({ ok: false, error: 'sheetId·tabName 이 필요합니다.' });
+    res.json({ ok: true, ...(await _inspectSvc.productNameSettings({ sheetId: sc.sheetId, tabName: sc.tabName })) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '기대 상품명을 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/review-inspect/product-names', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || ''), tabName = String(b.tabName || '');
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId·tabName 이 필요합니다.' });
+    const role = _role(req);
+    if (role !== 'master' && role !== 'admin') {
+      const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
+      if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
+    }
+    const saved = await _inspectSvc.saveProductNames({ sheetId, tabName, text: b.text });
+    res.json({ ok: true, saved });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '저장에 실패했습니다.' });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════
    C/S 문의창구 — 통합 작업대 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`) — 기존 `/api/cs/*` 정책을 그대로 옮겼다

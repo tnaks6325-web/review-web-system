@@ -249,8 +249,11 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **중복 판정**: 업로드 시 SHA-256을 `review_submissions.file_hash`에 **INSERT와 함께** 기록(나중 UPDATE로 미루면 그 사이 올라온 파일이 대조 대상을 놓친다). ★ **같은 (시트·탭·행·리뷰어) 재업로드는 중복이 아니다** — Drive는 재업로드마다 새 file_id를 만들어 이걸 잡으면 정상 재제출이 전부 불량이 된다.
 - **제출자명 검수는 하지 않는다**(수집만): 리뷰 화면 작성자는 `김**`·닉네임이라 실명 대조가 구조적으로 불가능 — 억지로 판정하면 멀쩡한 제출이 무더기로 의심 처리된다.
 - **킬스위치**: `REVIEW_PRECHECK=0`(1차 전체) · `REVIEW_PRECHECK_BLOCK=0`(**판정만 하고 잠그지 않는 관측 모드 — 운영 초기 권장**) · `REVIEW_INSPECT=0`(2차 전체).
-- **미구현(다음 단계)**: M2 배치 스윕(pending 재시도·과거분 해시/OCR 백필) · M3 통합작업대 "리뷰검수" 탭 UI · 예시이미지 등록 9칸. 지금은 판정이 `review_inspections`에 **쌓이기만** 하고 관리자 화면은 없다.
-- 회귀가드 `tests/reviewInspect.test.js`(56 + PGTEST_URL 시 5 = 61케이스 — 정책 순수함수 실행 · 스텁 pool 대조 · 배선 · **진짜 PG로 유사도 판정식 검증**). ★ 유사도는 스텁으로 못 잡는다: `PGTEST_URL=postgres://... node tests/reviewInspect.test.js`.
+- **기대 상품명 공급(조건 ②를 살리는 재료)**: 우선순위 = ① 탭에 직접 적어둔 `tab_configs.inspect_product_names` → ② 연결된 작업오더에서 파생(`productNamesFromWorkOrder` — `product_options_json`의 `name` + `product_option` 텍스트 줄 단위, 가격 꼬리 제거, **"옵션 없음/단일/해당없음"류 서술 제외**). ①이 있으면 ②는 안 본다(관리자 명시가 최우선, 빈 값 저장 = 해제 → ②로 복귀). **후보는 넉넉히** 모은다 — 하나라도 맞으면 통과라 후보가 많을수록 오탐이 줄고 미탐만 조금 는다(이 기능의 실패 선호와 일치). 기대값이 없으면 대조 자체를 skip 하고 **화면이 그 사실을 알려준다**(조건이 죽어 있는 걸 모르면 안 된다).
+- ★★ **작업오더 링크는 `ORDER BY`로 우선순위를 명시**(실측 버그): Track B 링크(`trackb_work_order_links`)와 `work_orders.linked_tab_*` 폴백을 **`OR`로만 묶으면** 링크가 있어도 `created_at`이 더 최근인 폴백 오더가 이겨 **엉뚱한 상품명으로 대조**한다. `CASE WHEN EXISTS(링크) THEN 0 ELSE 1 END`을 정렬 첫 키로 둔다. `work_orders`는 **읽기만**(Track A 승인 흐름이 `linked_tab_*`를 보고 분기).
+- **관리자 화면(M3)**: 통합작업대 **"리뷰검수" 탭**(`/api/trackb/review-inspect/*` — list·resolve·product-names GET/POST). 권한은 **이미지 교체요청 탭과 동일**(`_reInternal`: master/admin 전체 · staff 담당 탭만 · **광고주 차단** — 검수 근거에 리뷰어 실명·본문 OCR이 실린다). 탭 미지정 staff는 `scopedActiveTabs`로 거르고 집계도 같은 기준으로 다시 센다. 기본 필터 = **의심+불량**(통과까지 나열하면 볼 것이 묻힌다), 카드에 **판정 근거를 문장으로**(어느 탭 누구 것과 겹쳤는지 — 열어보지 않고 판단되게), 중복 건은 **나란히 보기**, [확인 처리]는 `status='resolved'`로 종결하되 **원판정 `checks`는 보존**(오탐 누적이 임계값 조정의 근거).
+- **미구현(다음 단계)**: M2 배치 스윕(pending 재시도·과거분 해시/OCR 백필) · 리뷰 판별 예시이미지 등록 9칸.
+- 회귀가드 `tests/reviewInspect.test.js`(73 + PGTEST_URL 시 6 = 79케이스 — 정책 순수함수 실행 · 스텁 pool 대조 · **라우터 스택 실검사** · 배선 · **진짜 PG로 유사도 판정식·링크 우선순위 검증**). ★ 유사도·동적 WHERE·링크 우선순위는 **스텁으로 못 잡는다**: `PGTEST_URL=postgres://... node tests/reviewInspect.test.js`. ★ trackB.routes를 require하면 DB 풀 핸들이 열려 프로세스가 안 끝난다 → 끝에 `process.exit(0)`(레포 관용구).
 
 ### ★ [상품 페이지 열기] = 링크유입 전용 (유입가이드 무력화 방지)
 - 작업내용 카드의 `🔗 상품 페이지 열기` 버튼은 **링크유입일 때만** 노출한다. 가이드유입 공고에 이 버튼이 뜨면 리뷰어가 상품 페이지로 바로 들어가, 검색어·경유 경로를 지정한 **유입가이드 첨부자료가 통째로 무의미해진다**(유입 실패 = 캠페인 목적 훼손).

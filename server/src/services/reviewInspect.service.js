@@ -170,6 +170,94 @@ function computeStatus(checks) {
   return 'pass';
 }
 
+/* ── 기대 상품명 공급 ─────────────────────────────────────────────
+   ★ 우선순위: ① 탭에 직접 적어둔 값(`inspect_product_names`) → ② 연결된 작업오더.
+     ①이 있으면 ②는 보지 않는다 — 관리자가 명시한 값이 항상 이긴다(시트 표기와
+     작업오더 표기가 다를 때 손으로 잡는 칸이라, 자동값이 섞이면 그 의도가 무너진다). */
+
+/** "옵션 없음"류는 상품명이 아니라 **서술**이다 — 기대값에 넣으면 아무 리뷰나 통과한다. */
+const _NON_PRODUCT = /^(옵션\s*없음|없음|단일(\s*상품)?|해당\s*없음|기본|공통|-|없슴)$/;
+function _isNonProduct(s) { return _NON_PRODUCT.test(String(s || '').trim()); }
+
+/** 가격·수량 꼬리 제거 — "힙스 31400원" → "힙스", "A 28,900원" → "A" */
+function _stripPriceTail(s) {
+  return String(s || '')
+    .replace(/결제\s*금액\s*[:：]?\s*[\d,]+\s*원?/g, ' ')
+    .replace(/[\d,]{3,}\s*원/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * 작업오더 → 기대 상품명 후보(순수함수).
+ * ★ 후보를 넉넉히 모으는 쪽이 맞다 — 하나라도 맞으면 통과이므로, 후보가 많을수록
+ *   **오탐(정상 리뷰를 의심 처리)이 줄고** 미탐만 조금 늘어난다. 이 기능의 실패 선호와 일치.
+ */
+function productNamesFromWorkOrder(wo) {
+  const out = [];
+  const push = (s) => {
+    const v = _stripPriceTail(String(s || '').replace(/\|/g, '')).trim();
+    if (v && v.length >= 2 && !_isNonProduct(v)) out.push(v);
+  };
+  if (!wo) return out;
+
+  // ① 구조화 JSON — [{ name, base:{pay}, options:[{label,pay}] }] (프론트 _woOptionRows 와 같은 형태)
+  try {
+    const arr = JSON.parse(wo.product_options_json || '[]');
+    if (Array.isArray(arr)) for (const p of arr) push(p && p.name);
+  } catch (_) { /* 깨진 JSON 은 무시하고 아래 텍스트 경로로 */ }
+
+  // ② 자유서술 텍스트 — 줄 단위, 구분자 앞 조각이 상품명
+  //    실측 형식: "A - 옵1 - 결제금액 28,900원" / "상품A / 레드 / 12,000원" / "힙스 31400원"
+  for (const line of String(wo.product_option || '').split(/[\n\r]+/)) {
+    const t = line.trim();
+    if (!t) continue;
+    const head = t.split(/\s*[-–/|]\s*/)[0];
+    push(head);
+  }
+
+  // 중복 제거(정규화 기준) — 같은 상품이 JSON·텍스트 양쪽에 있을 수 있다
+  const seen = new Set();
+  return out.filter(v => {
+    const k = _normProduct(v);
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+/**
+ * 이 탭에 연결된 작업오더 1건. Track B 링크 우선 → work_orders.linked_tab_* 폴백.
+ * ★ work_orders 는 **읽기만** 한다(Track A 승인 흐름이 linked_tab_* 를 보고 분기하므로).
+ */
+async function _workOrderForTab({ sheetId, tabName } = {}) {
+  try {
+    // ★★ 우선순위를 ORDER BY 로 **명시**한다 — 두 조건을 OR 로만 묶으면 Track B 링크가
+    //   있어도 `created_at` 이 더 최근인 폴백 오더가 이긴다(실측으로 잡힘).
+    //   0 = Track B 링크(명시적 지정) / 1 = work_orders.linked_tab_* 폴백.
+    const { rows } = await _db().query(
+      `SELECT w.title, w.product_option, w.product_options_json,
+              CASE WHEN EXISTS (SELECT 1 FROM trackb_work_order_links l
+                                 WHERE l.work_order_id = w.id AND l.deleted_at IS NULL
+                                   AND l.sheet_id = $1 AND l.tab_name = $2)
+                   THEN 0 ELSE 1 END AS link_rank
+         FROM work_orders w
+        WHERE w.deleted_at IS NULL
+          AND ( EXISTS (SELECT 1 FROM trackb_work_order_links l
+                         WHERE l.work_order_id = w.id AND l.deleted_at IS NULL
+                           AND l.sheet_id = $1 AND l.tab_name = $2)
+                OR (w.linked_tab_sheet_id = $1 AND w.linked_tab_name = $2) )
+        ORDER BY link_rank, w.created_at DESC
+        LIMIT 1`,
+      [sheetId, tabName]
+    );
+    return rows[0] || null;
+  } catch (e) {
+    logger.warn(`[reviewInspect] 작업오더 조회 실패(상품명 대조 생략): ${e.message}`);
+    return null;
+  }
+}
+
 /** 탭 설정에서 기대 채널·기대 상품명을 읽는다. 실패는 빈 값(대조 생략). */
 async function loadTabExpectations({ sheetId, tabName } = {}) {
   const out = { expectedChannel: null, productNames: [] };
@@ -197,10 +285,46 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     out.expectedChannel = expectedChannelKey(ch);
     out.productNames = String(r.inspect_product_names || '')
       .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+    if (out.productNames.length) { out.productSource = 'manual'; return out; }
+
+    // 직접 적어둔 값이 없으면 연결된 작업오더에서 파생한다
+    const wo = await _workOrderForTab({ sheetId, tabName });
+    const derived = productNamesFromWorkOrder(wo);
+    if (derived.length) { out.productNames = derived; out.productSource = 'work_order'; }
   } catch (e) {
     logger.warn(`[reviewInspect] 탭 기대값 조회 실패(대조 생략): ${e.message}`);
   }
   return out;
+}
+
+/** 관리자 화면용 — 이 탭의 기대 상품명 현황(수동값 + 작업오더 파생값을 함께 보여준다). */
+async function productNameSettings({ sheetId, tabName } = {}) {
+  const out = { manual: '', derived: [], effective: [], source: 'none' };
+  try {
+    const { rows } = await _db().query(
+      'SELECT inspect_product_names FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    out.manual = String(rows[0]?.inspect_product_names || '');
+    out.derived = productNamesFromWorkOrder(await _workOrderForTab({ sheetId, tabName }));
+    const manualList = out.manual.split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+    if (manualList.length) { out.effective = manualList; out.source = 'manual'; }
+    else if (out.derived.length) { out.effective = out.derived; out.source = 'work_order'; }
+  } catch (e) {
+    logger.warn(`[reviewInspect] 기대 상품명 조회 실패: ${e.message}`);
+  }
+  return out;
+}
+
+/** 탭별 기대 상품명 저장(줄바꿈 구분). 빈 값 = 해제(작업오더 파생으로 되돌아간다). */
+async function saveProductNames({ sheetId, tabName, text } = {}) {
+  const v = String(text == null ? '' : text)
+    .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean).slice(0, 20).join('\n').slice(0, 2000);
+  await _db().query(
+    'UPDATE tab_configs SET inspect_product_names = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+    [v, sheetId, tabName]
+  );
+  return v;
 }
 
 /**
@@ -400,8 +524,87 @@ async function saveFileHash({ fileId, fileHash } = {}) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════
+ * 관리자 검수 탭(M3) 조회
+ * ════════════════════════════════════════════════════════════════ */
+
+const _LIST_STATUSES = ['pending', 'pass', 'suspect', 'fail', 'unverifiable', 'resolved'];
+
+/**
+ * 검수 목록. 기본은 **손볼 것만**(의심+불량) — 통과 건까지 나열하면 정작 볼 게 묻힌다.
+ * @param status 'open'(기본, suspect+fail) | 'all' | 개별 status
+ */
+async function listInspections({ sheetId, tabName, status = 'open', limit = 200 } = {}) {
+  const where = [];
+  const params = [];
+  if (sheetId) { params.push(sheetId); where.push(`i.sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); where.push(`i.tab_name = $${params.length}`); }
+  if (status === 'open') {
+    where.push(`i.status IN ('suspect','fail')`);
+  } else if (status !== 'all' && _LIST_STATUSES.includes(status)) {
+    params.push(status); where.push(`i.status = $${params.length}`);
+  }
+  params.push(Math.min(Number(limit) || 200, 500));
+  const { rows } = await _db().query(
+    `SELECT i.id, i.file_id, i.sheet_id, i.tab_name, i.row_index, i.reviewer_name, i.slot_key,
+            i.status, i.checks, i.channel, i.ocr_product, i.ocr_text, i.ai_confidence,
+            i.inspected_at, i.resolved_at, i.resolved_by, i.created_at,
+            s.file_url, s.file_name
+       FROM review_inspections i
+       LEFT JOIN review_submissions s ON s.file_id = i.file_id
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY CASE i.status WHEN 'fail' THEN 0 WHEN 'suspect' THEN 1 ELSE 2 END,
+               i.created_at DESC
+      LIMIT $${params.length}`,
+    params
+  );
+  return rows;
+}
+
+/** 탭별 검수 현황 집계(상단 요약 + nav 뱃지). */
+async function inspectionSummary({ sheetId, tabName } = {}) {
+  const where = [];
+  const params = [];
+  if (sheetId) { params.push(sheetId); where.push(`sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); where.push(`tab_name = $${params.length}`); }
+  const { rows } = await _db().query(
+    `SELECT status, COUNT(*)::int AS c FROM review_inspections
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      GROUP BY status`,
+    params
+  );
+  const out = { pass: 0, suspect: 0, fail: 0, pending: 0, unverifiable: 0, resolved: 0, open: 0 };
+  for (const r of rows) if (out[r.status] !== undefined) out[r.status] = r.c;
+  out.open = out.suspect + out.fail;
+  return out;
+}
+
+/**
+ * 관리자 확인 종결. ★ 원판정(checks)은 지우지 않는다 — 나중에 "왜 통과시켰나"를
+ * 되짚을 수 있어야 기준을 고칠 수 있다(오탐 누적이 임계값 조정의 근거다).
+ */
+async function resolveInspection({ fileId, by } = {}) {
+  const { rowCount } = await _db().query(
+    `UPDATE review_inspections
+        SET status = 'resolved', resolved_at = NOW(), resolved_by = $2, updated_at = NOW()
+      WHERE file_id = $1 AND status <> 'resolved'`,
+    [fileId, by || '']
+  );
+  return { ok: true, resolved: rowCount || 0 };
+}
+
+/** 한 건의 스코프 판정용 — 그 파일이 어느 (시트,탭)인지. */
+async function inspectionScope(fileId) {
+  const { rows } = await _db().query(
+    'SELECT sheet_id, tab_name FROM review_inspections WHERE file_id = $1 LIMIT 1', [fileId]
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   precheckPolicy, expectedChannelKey, channelLabel,
+  productNamesFromWorkOrder, productNameSettings, saveProductNames,
+  listInspections, inspectionSummary, resolveInspection, inspectionScope,
   hashBase64, matchProductName, computeStatus,
   loadTabExpectations, findDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,
