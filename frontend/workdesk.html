@@ -398,6 +398,46 @@
   .recard .rehd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;font-size:12.5px}
   .recard .remeta{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
   @media (max-width:900px){ .recards{grid-template-columns:1fr} }
+
+  /* ── 리뷰검수 탭 ── 손볼 것만 카드로. 왼쪽 색 띠로 심각도를 한눈에 구분한다. */
+  .ricards{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:11px;max-width:1400px}
+  .ricard{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden;
+          box-shadow:var(--shadow-card);display:flex;flex-direction:column}
+  .ricard.ri-f{box-shadow:inset 3px 0 0 #B3382E,var(--shadow-card);border-color:#EAB6B0}
+  .ricard.ri-s{box-shadow:inset 3px 0 0 #9A6414,var(--shadow-card);border-color:#E7D2A3}
+  .ricard.ri-r{opacity:.62}
+  .rithumb{height:118px;background:var(--bg2,#EFF1F4);display:grid;place-items:center;cursor:pointer;overflow:hidden}
+  .rithumb img{width:100%;height:100%;object-fit:cover}
+  .rithumb span{font-size:11px;color:var(--muted)}
+  .ribd{padding:9px 11px;display:flex;flex-direction:column;gap:4px;flex:1}
+  .rirow{display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:12.5px}
+  .rimeta{font-size:11px;color:var(--muted)}
+  .rireason{font-size:11px;line-height:1.5;color:var(--muted)}
+  .rift{display:flex;gap:6px;padding:8px 11px;border-top:1px solid var(--line)}
+  .rift .btn{flex:1;font-size:11.5px;padding:5px 0}
+  .ribdg{font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;border:1px solid;white-space:nowrap;flex:none}
+  .ribdg.ri-f{color:#B3382E;background:#FAE9E7;border-color:#EAB6B0}
+  .ribdg.ri-s{color:#9A6414;background:#FBF2E1;border-color:#E7D2A3}
+  .ribdg.ri-ok,.ribdg.ri-p{color:#127A5E;background:#E5F3EE;border-color:#A6D6C6}
+  .ribdg.ri-p{color:#68717E;background:#F2F4F7;border-color:var(--line)}
+  .ribdg.ri-r{color:#68717E;background:#F2F4F7;border-color:var(--line)}
+  .ovnote-tally{margin-left:10px;color:var(--muted)}
+  /* 상세 모달 */
+  .rimodal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9000;padding:20px}
+  .rimodal-in{background:var(--card);border:1px solid var(--line);border-radius:14px;max-width:1000px;width:100%;
+              max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+  .rimh{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--line)}
+  .rimbody{display:grid;grid-template-columns:270px 1fr;gap:14px;padding:14px;overflow:auto}
+  @media (max-width:820px){ .rimbody{grid-template-columns:1fr} }
+  .rimleft img{width:100%;border:1px solid var(--line);border-radius:9px}
+  .rimright{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .ritbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .ritbl td{padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  .ritbl td:first-child{width:74px}
+  .risbs{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .risbs img{width:100%;border:1px solid var(--line);border-radius:8px}
+  .riocr{font-size:12px;line-height:1.6;background:var(--bg2,#F6F8FA);border:1px solid var(--line);border-radius:9px;padding:9px 11px;white-space:pre-wrap}
+  .rimft{padding:11px 14px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -741,6 +781,7 @@ function renderShell(){
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
         <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
+        <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
@@ -750,6 +791,7 @@ function renderShell(){
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
+        <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
       <div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
@@ -765,7 +807,8 @@ function renderShell(){
   _applyVwMode();               // 저장된 FHD/QHD 모드를 스위치·body에 반영(셸을 다시 그릴 때마다)
   switchView(STATE.view||'workdesk');
   if(isAdmin) _csStartBadgePoll();
-  if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
+  if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
+  if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
    통합 작업대에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
@@ -810,7 +853,7 @@ function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -2356,6 +2399,162 @@ async function _reBootBadge(){
 }
 /* 대화창·전용 탭 어느 쪽에서 처리하든 목록을 최신화한다(cs-inquiry.js 가 부르는 훅) */
 window.CS_REVIEW_EDIT_ON_RESOLVED = function(){ try{ if(STATE.view==='reedit') _loadReedit(); else _reBootBadge(); }catch(_){ } };
+
+/* ══════════════════════════════════════════════════════════════
+   리뷰검수 탭 (M3) — 자동검수가 걸러낸 것만 모아 사람이 확정한다.
+
+   ★ 기본 필터는 **의심+불량**. 통과 건까지 나열하면 정작 볼 것이 묻힌다.
+   ★ 판정 근거(어느 탭 누구 것과 겹쳤는지)를 카드에 한 줄로 적는다 —
+     "불량"만 뜨면 관리자가 매번 열어봐야 한다.
+   ══════════════════════════════════════════════════════════════ */
+const _RI_LABEL = { fail:'불량', suspect:'의심', pass:'통과', pending:'미검수', unverifiable:'판정 불가', resolved:'확인됨' };
+const _RI_CHAN  = { coupang:'쿠팡', naver:'네이버', kakao:'카카오메이커스', oliveyoung:'올리브영' };
+function _riImg(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
+
+async function renderInspectView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rihead"></div><div id="ribody"><div class="empty">불러오는 중…</div></div></div>`;
+  await _loadInspect();
+}
+async function _loadInspect(){
+  const st = STATE.riStatus || 'open';
+  const t  = STATE.riTab || null;   // {sheetId,tabName} — 미지정이면 전체(담당 범위)
+  let url = '/api/trackb/review-inspect/list?status='+encodeURIComponent(st);
+  if(t) url += '&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName);
+  const r = await api(url);
+  const b = $('#ribody');
+  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">검수 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _riRenderHead(null); return; }
+  STATE.ri = r.items || [];
+  STATE.riSummary = r.summary || null;
+  STATE.riScoped = !!r.scoped;
+  _riRenderHead(r.summary);
+  _riRenderBody();
+  _riSyncNavBadge(Number.isFinite(r.openCount) ? r.openCount : null);
+}
+function _riRenderHead(sum){
+  const st = STATE.riStatus || 'open';
+  const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.riStatus='${k}';_loadInspect()">${l}</button>`;
+  const t = STATE.riTab;
+  const tally = sum ? `<span class="ovnote-tally">통과 ${sum.pass} · 의심 ${sum.suspect} · 불량 ${sum.fail} · 미검수 ${sum.pending}</span>` : '';
+  $('#rihead').innerHTML=`<div class="mh"><h1>리뷰검수</h1>
+    <span class="sp" style="flex:1"></span>
+    ${chip('open','의심＋불량')}${chip('pass','통과')}${chip('pending','미검수')}${chip('resolved','확인됨')}${chip('all','전체')}
+    ${t?`<button class="btn" onclick="riOpenProductNames()">⚙ 기대 상품명</button>`:''}
+    <button class="btn" onclick="_loadInspect()">새로고침</button></div>
+    <div class="ovnote">리뷰 캡처가 업체에 전달되기 전에 자동으로 거른 결과입니다. <b>제출은 막지 않으며</b> 다시 받을지는 확인 후 결정합니다.
+      ${STATE.riScoped?'<b style="color:var(--muted)">(담당 업체 작업만 표시됩니다)</b>':''}
+      ${t?`<b style="color:var(--muted)"> · ${esc(t.tabName)}</b> <a href="javascript:void(0)" onclick="STATE.riTab=null;_loadInspect()">전체 보기</a>`:''}
+      ${tally}</div>`;
+}
+function _riRenderBody(){
+  const rows = STATE.ri || [];
+  const b = $('#ribody');
+  if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 검수 건이 없습니다.</div>`; return; }
+  b.innerHTML = `<div class="ricards">` + rows.map((r,i)=>{
+    const c = r.checks || {};
+    const reasons = _riReasons(c);
+    const cls = r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
+    const thumb = _riImg(r.file_id);
+    return `<div class="ricard ${cls}">
+      <div class="rithumb" onclick="riOpenDetail(${i})">${thumb?`<img src="${thumb}" alt="" loading="lazy">`:'<span>이미지 없음</span>'}</div>
+      <div class="ribd">
+        <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b>
+          <span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span></div>
+        <div class="rimeta"><a href="javascript:void(0)" onclick="riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
+        <div class="rireason">${reasons.length?reasons.map(esc).join('<br>'):'—'}</div>
+      </div>
+      <div class="rift">
+        <button class="btn" onclick="riOpenDetail(${i})">상세</button>
+        ${r.status==='resolved'?'':`<button class="btn" onclick="riResolve('${esc(r.file_id)}')">확인 처리</button>`}
+      </div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+/** 판정 근거를 사람 문장으로 — 카드에서 열어보지 않고도 판단되게 한다. */
+function _riReasons(c){
+  const out=[];
+  if(c.format && c.format.verdict==='fail') out.push('리뷰 화면이 아닌 것으로 판정됨');
+  if(c.format && c.format.verdict==='warn' && c.format.expectedChannel)
+    out.push(`채널 다름 — 작업 ${_RI_CHAN[c.format.expectedChannel]||c.format.expectedChannel} / 캡처 ${_RI_CHAN[c.format.channel]||c.format.channel||'불명'}`);
+  if(c.product && c.product.verdict==='warn')
+    out.push(`상품명 다름 — 캡처 "${(c.product.ocr||'').slice(0,40)}"`);
+  if(c.duplicate && c.duplicate.verdict==='fail')
+    out.push(`같은 파일이 이미 제출됨 — ${c.duplicate.matchTab||''} ${c.duplicate.matchReviewer||''} ${c.duplicate.matchRow?c.duplicate.matchRow+'행':''}`.trim());
+  if(c.similarity && c.similarity.verdict==='warn')
+    out.push(`본문 ${Math.round((c.similarity.score||0)*100)}% 겹침 — ${c.similarity.matchReviewer||''} ${c.similarity.matchRow?c.similarity.matchRow+'행':''}`.trim());
+  return out;
+}
+/** 카드의 탭명을 눌러 그 작업만 본다 — [⚙ 기대 상품명]은 탭이 정해져야 열린다. */
+function riFilterTab(i){
+  const r=(STATE.ri||[])[i]; if(!r) return;
+  STATE.riTab={sheetId:r.sheet_id,tabName:r.tab_name};
+  _loadInspect();
+}
+function riOpenDetail(i){
+  const r=(STATE.ri||[])[i]; if(!r) return;
+  const c=r.checks||{};
+  const line=(v,label,extra)=>`<tr><td><span class="ribdg ${v==='fail'?'ri-f':v==='warn'?'ri-s':v==='skip'?'ri-p':'ri-ok'}">${v==='fail'?'불량':v==='warn'?'의심':v==='skip'?'안 함':'통과'}</span></td><td><b>${label}</b>${extra?'<br><span class="rimeta">'+extra+'</span>':''}</td></tr>`;
+  const dup=c.duplicate||{}, sim=c.similarity||{}, pr=c.product||{}, fm=c.format||{};
+  const html=`<div class="rimodal-in">
+    <div class="rimh"><b>${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''}</b>
+      <span class="rimeta">${esc(r.tab_name||'')}</span>
+      <span class="sp" style="flex:1"></span>
+      <span class="rimeta">${r.ai_confidence?('AI 확신 '+Math.round(r.ai_confidence*100)+'%'):''}</span>
+      <button class="btn" onclick="riCloseDetail()">닫기</button></div>
+    <div class="rimbody">
+      <div class="rimleft">
+        ${_riImg(r.file_id)?`<img src="${_riImg(r.file_id)}" alt="">`:'<div class="empty">이미지 없음</div>'}
+        <div class="rimeta">${esc(r.file_name||'')}</div>
+      </div>
+      <div class="rimright">
+        <table class="ritbl">
+          ${line(fm.verdict||'skip','리뷰 화면·채널', fm.channel?((_RI_CHAN[fm.channel]||fm.channel)+(fm.expectedChannel?' (작업: '+(_RI_CHAN[fm.expectedChannel]||fm.expectedChannel)+')':'')):'')}
+          ${line(pr.verdict||'skip','상품명', pr.verdict==='skip'?'비교할 기대 상품명이 없습니다 — [⚙ 기대 상품명]에서 등록하세요':('캡처 "'+esc(pr.ocr||'')+'"<br>기대 '+esc((pr.expected||[]).join(' / '))))}
+          ${line(dup.verdict||'skip','같은 파일', dup.verdict==='fail'?esc(`${dup.matchTab||''} ${dup.matchReviewer||''} ${dup.matchRow?dup.matchRow+'행':''}`):'')}
+          ${line(sim.verdict||'skip','본문 겹침', sim.score!=null?(Math.round(sim.score*100)+'% '+esc(sim.matchReviewer||'')):'')}
+          ${line('skip','작성자 이름','화면에 마스킹되어 나와 대조하지 않습니다(수집만)')}
+        </table>
+        ${dup.verdict==='fail'&&dup.matchFileId?`<div class="risbs"><div><div class="rimeta">지금 제출</div><img src="${_riImg(r.file_id)}" alt=""></div><div><div class="rimeta">이전 제출 · ${esc(dup.matchReviewer||'')}</div><img src="${_riImg(dup.matchFileId)}" alt=""></div></div>`:''}
+        ${r.ocr_text?`<div class="riocr"><div class="rimeta">캡처에서 읽어낸 리뷰 글</div>${esc(r.ocr_text)}</div>`:''}
+      </div>
+    </div>
+    <div class="rimft">
+      ${r.status==='resolved'?'<span class="rimeta">확인 처리된 건입니다.</span>':`<button class="btn pri" onclick="riResolve('${esc(r.file_id)}',true)">확인 처리(통과)</button>`}
+    </div></div>`;
+  let m=$('#riModal'); if(!m){ m=document.createElement('div'); m.id='riModal'; m.className='rimodal'; document.body.appendChild(m); }
+  m.innerHTML=html; m.style.display='flex';
+}
+function riCloseDetail(){ const m=$('#riModal'); if(m) m.style.display='none'; }
+async function riResolve(fileId, close){
+  const r=await api('/api/trackb/review-inspect/resolve',{method:'POST',body:JSON.stringify({fileId})});
+  if(!r||!r.ok){ alert('확인 처리 실패: '+((r&&r.error)||'')); return; }
+  if(close) riCloseDetail();
+  _loadInspect();
+}
+/** 기대 상품명 — 비어 있으면 상품명 대조가 통째로 건너뛴다(조건이 하나 죽는다). */
+async function riOpenProductNames(){
+  const t=STATE.riTab; if(!t){ alert('탭을 먼저 선택하세요.'); return; }
+  const r=await api('/api/trackb/review-inspect/product-names?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+  if(!r||!r.ok){ alert('불러오기 실패'); return; }
+  const derived=(r.derived||[]).join('\n');
+  const cur = r.manual || '';
+  const msg = `이 작업의 기대 상품명 (한 줄에 하나, 하나라도 맞으면 통과)\n\n`
+    + (derived?`※ 작업오더에서 자동으로 찾은 값:\n${derived}\n\n비워두면 위 자동값을 씁니다.`:'※ 작업오더에서 찾은 상품명이 없습니다 — 직접 적어주세요.');
+  const v = prompt(msg, cur);
+  if(v===null) return;
+  const s=await api('/api/trackb/review-inspect/product-names',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,text:v})});
+  if(!s||!s.ok){ alert('저장 실패: '+((s&&s.error)||'')); return; }
+  _loadInspect();
+}
+function _riSyncNavBadge(n){
+  const nb=$('#riNavBadge'); if(!nb || !Number.isFinite(n)) return;
+  nb.textContent = n>0 ? (' 🔴'+n) : '';
+}
+/** 부팅 시 1회 — 탭을 열지 않아도 손볼 건수가 보이게(교체요청 뱃지와 같은 규율) */
+async function _riBootBadge(){
+  try{ const r=await api('/api/trackb/review-inspect/list?status=open');
+    if(r && r.ok) _riSyncNavBadge(Number.isFinite(r.openCount)?r.openCount:(r.items||[]).length);
+  }catch(_){ }
+}
 
 function _csSyncNavBadge(n){
   const nb=$('#csNavBadge');
