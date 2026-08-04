@@ -1914,6 +1914,10 @@ async function woCreateCampaign(id) {
     product_name:  _pi.name || "",
     price:         _pi.price || "",
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
+    // ★ 086: 이체은행은 **값을 강제하지 않고 [자동]으로 둔다** — 서버가 이 오더의 물건비
+    //   수취방식에서 파생하므로, 값을 박아두면 나중에 오더가 정정돼도 안 따라간다.
+    //   여기서는 화면 안내 문구에 판정 근거만 보여준다.
+    goods_cost_type: o.goods_cost_type || "",
     // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
     participation:  true,
     // ★ 062: 작업오더 시작일 → 발행폼 시작일 프리필(시작일 전 게시 시 "오픈 예정" 카운트다운)

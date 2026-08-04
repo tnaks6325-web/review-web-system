@@ -31,6 +31,17 @@ function _prepWorkDetail(wd) {
 }
 
 // ID 생성 헬퍼
+/**
+ * ★ 086: 이체 은행 값 정규화 — 'kbank' | 'hana' 두 값만 통과시킨다.
+ *   그 외(오타·구버전 클라이언트·임의 문자열)는 **null**(=자동 판정으로 되돌림).
+ *   자유 문자열을 그대로 저장하면 대상 추출에서 어느 은행에도 안 잡혀 그 탭 전체가
+ *   조용히 입금에서 빠진다 — 틀린 값보다 빈 값(레포 규율).
+ */
+function _normTransferBank(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  return (s === 'kbank' || s === 'hana') ? s : null;
+}
+
 function _genCampaignId() {
   return 'camp_' + crypto.randomBytes(6).toString('hex');
 }
@@ -1489,6 +1500,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       options, // ★ 061: 상품옵션 목록(참여형)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 저장, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트 공고) — 목록에서만 숨김, 참여는 정상
+      transfer_bank, transfer_memo, // ★ 086: 입금 이체은행(kbank|hana, 빈 값=자동)·받는분 통장표시
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -1525,9 +1537,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         created_by,
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
-        start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden)
+        start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min, reviewer_hidden,
+        transfer_bank, transfer_memo)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -1567,6 +1580,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
           ? 10 : Math.max(1, Number(sub_hold_ttl_min) || 10),   // ★ 063 §09-2: 타계정 10분(≥1 클램프 — 0=즉시만료 footgun 차단)
         reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
+        _normTransferBank(transfer_bank),                       // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정)
+        (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(), // ★ 086
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -1611,6 +1626,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
       fee_schedules, // ★ 082: 기간별 리뷰비 구간(배열 전달 시에만 교체, 미전달=변경 없음)
       reviewer_hidden, // ★ 085: 리뷰어 미노출(비공개/테스트) — undefined=유지, true/false=명시 변경
+      transfer_bank, transfer_memo, // ★ 086: undefined=유지 / ''=자동으로 되돌림
     } = req.body;
 
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
@@ -1720,6 +1736,12 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         multi_daily_limit = COALESCE($34, multi_daily_limit),
         sub_hold_ttl_min = COALESCE($35, sub_hold_ttl_min),
         reviewer_hidden = COALESCE($36, reviewer_hidden),   -- ★ 085: 미전달=유지(옵션표와 같은 원칙)
+        -- ★ 086: 이체 설정. null=유지 / ''=자동(작업오더 물건비 판정) 로 되돌리기.
+        --   시작일(start_date)과 같은 CASE 센티널 방식 — '지우기'와 '미전달'을 구분해야 한다.
+        transfer_bank = CASE WHEN $37::text IS NULL THEN transfer_bank
+                             WHEN $37::text = '' THEN NULL ELSE $37::text END,
+        transfer_memo = CASE WHEN $38::text IS NULL THEN transfer_memo
+                             WHEN $38::text = '' THEN NULL ELSE $38::text END,
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -1749,6 +1771,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 10), // $35
         (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
+        (transfer_bank === undefined || transfer_bank === null) ? null : (_normTransferBank(transfer_bank) || ''), // $37 ★ 086
+        (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
       ]
     );
 

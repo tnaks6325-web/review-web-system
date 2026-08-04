@@ -861,6 +861,29 @@
   .gcswatch.gcclear{background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);font-weight:800}
   /* ── 커스텀 열(자유 메모) — 헤더 라벨을 강조해 시트 원본 컬럼과 구분(삭제는 컬럼 ▾ 메뉴 안에) ── */
   th[data-col^="ccol:"] .lbl{color:var(--accent-deep)}
+/* ── 💸 입금관리(086) ── */
+.pmstats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.pmstat{flex:1 1 140px;min-width:130px;border:1px solid var(--line,#E1E5EB);border-radius:10px;padding:10px 13px;background:var(--card,#fff)}
+.pmstat .k{font-size:11.5px;color:var(--t3,#8B94A1)}
+.pmstat .v{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
+.pmstat.warn{border-color:#E7D2A3;background:#FBF2E1}
+.pmstat.warn .v{color:#9A6414}
+.pmrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.pmnote{font-size:12.5px;color:#7a5a12;background:#FBF2E1;border-left:3px solid #E0B571;border-radius:0 8px 8px 0;padding:9px 13px;margin-bottom:10px}
+.pmh2{font-size:15px;font-weight:750;margin:22px 0 9px}
+.pmtable td.num,.pmtable th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pmtable td.dim{color:var(--t3,#8B94A1);font-size:11.5px}
+.pmtable tr.off{opacity:.45}
+.pmb{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;white-space:nowrap}
+.pmb.kb{background:#E0EDFF;color:#1B4F9C} .pmb.hn{background:#E5F3EE;color:#127A5E}
+.pmb.no{background:#FAE9E7;color:#B3382E} .pmb.ok{background:#E5F3EE;color:#127A5E}
+.pmb.wait{background:#FBF2E1;color:#9A6414}
+.pmauto{display:inline-block;font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
+.pmauto.man{color:#1B4F9C;font-weight:700}
+.pmwarn{color:#B3382E;font-size:11.5px}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.btn.danger{color:#B3382E;border-color:#EAB6B0}
+
 </style>
 </head>
 <body>
@@ -1032,6 +1055,7 @@ function renderShell(){
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
+        <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
@@ -1106,7 +1130,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
@@ -3109,6 +3133,161 @@ async function renderCsView(){
          AE 도 이미지 교체요청을 처리하면 리뷰어 채팅에 메시지를 남기므로 표시 이름이 필요하다.
        · 회사 사업자번호·리뷰어 소식·공지 = master/admin 전용(전사 설정 · 리뷰어 홈 노출).
      프론트에서 감추는 것은 안내일 뿐이고 최종 방어는 서버다(AE 가 직접 호출해도 403). */
+
+/* ══════════════════════════════════════════════════════════════
+   💸 입금관리 — 리뷰비 입금 자동화 M1
+     오늘 입금할 건 추출 → 은행별 자동분류 → 다건이체 서식 다운로드 → 회차(잠금) 기록
+   ★ master/admin 전용(계좌번호 전체가 화면에 뜬다 — 등록리뷰어DB와 같은 규율).
+   ★ 다운로드하는 순간 그 건들은 잠긴다. 풀리는 경로는 [회차 취소] 하나뿐(M2에서 실패 판정 추가).
+   ══════════════════════════════════════════════════════════════ */
+const PAY_ISSUE_LABEL = {
+  no_bank:'이체은행 미지정', no_reviewer:'리뷰어 정보 없음', bank_unknown:'은행명 인식불가',
+  no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
+};
+const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
+
+async function renderPaymentView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="pmhead"></div><div id="pmbody"><div class="empty">불러오는 중…</div></div></div>`;
+  STATE.pmExcluded = STATE.pmExcluded || {};   // {key:true} = 이번 회차에서 뺀 건
+  await _pmLoad();
+}
+
+async function _pmLoad(){
+  const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
+  if(!t || !t.ok){ $('#pmbody').innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}</div>`; return; }
+  STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
+  _pmRender();
+}
+
+const _pmKey = it => it.sheetId+'||'+it.tabName+'||'+it.rowIndex;
+const _pmOn  = it => it.payable && !STATE.pmExcluded[_pmKey(it)];
+const _pmNum = n => (Number(n)||0).toLocaleString();
+
+function _pmRender(){
+  const items = STATE.pmItems||[];
+  const picked = b => items.filter(it=>it.bank===b && _pmOn(it));
+  const kb = picked('kbank'), hn = picked('hana');
+  const blocked = items.filter(it=>!it.payable);
+  const noMemo  = items.filter(it=>_pmOn(it) && (it.warnings||[]).includes('no_memo'));
+
+  $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
+    <span class="bd g">${items.filter(_pmOn).length}건 대상</span>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn" onclick="_pmLoad()">새로고침</button></div>`;
+
+  const stat=(k,v,cls)=>`<div class="pmstat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const dlBtn=(bank,label,list)=>list.length
+    ? `<button class="btn primary" onclick="_pmDownload('${bank}')">⬇ ${label} 서식 다운로드 (${list.length}건 · ${_pmNum(list.reduce((a,c)=>a+c.amount,0))}원)</button>`
+    : `<button class="btn" disabled>⬇ ${label} 대상 없음</button>`;
+
+  $('#pmbody').innerHTML = `
+    <div class="lgwrap" style="max-width:1400px">
+      <div class="pmstats">
+        ${stat('오늘 입금대상', items.filter(_pmOn).length+'건')}
+        ${stat('합계 금액', _pmNum(items.filter(_pmOn).reduce((a,c)=>a+c.amount,0))+'원')}
+        ${stat('케이뱅크', kb.length+'건')}
+        ${stat('하나은행', hn.length+'건')}
+        ${blocked.length?stat('⚠ 보류(계좌·은행)', blocked.length+'건','warn'):''}
+        ${noMemo.length?stat('⚠ 통장표시 없음', noMemo.length+'건','warn'):''}
+      </div>
+      <div class="pmrow">${dlBtn('kbank','케이뱅크',kb)} ${dlBtn('hana','하나은행',hn)}</div>
+      ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래 표에서 사유를 확인하세요. (계좌 등록·공고 이체은행 지정 후 다음 회차에 자동 포함)</div>`:''}
+      ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다. 모집공고 수정 → [통장표시]에서 지정하세요.</div>`:''}
+      ${_pmTargetTable(items)}
+      <h2 class="pmh2">이체 회차</h2>
+      ${_pmBatchTable(STATE.pmBatches||[])}
+    </div>`;
+}
+
+function _pmTargetTable(items){
+  if(!items.length) return `<div class="empty">입금할 건이 없습니다.</div>`;
+  const rows = items.map(it=>{
+    const k=_pmKey(it), on=_pmOn(it);
+    const badge = it.payable
+      ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
+      : `<span class="pmb no">보류</span>`;
+    const why = it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
+    return `<tr class="${on?'':'off'}">
+      <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle('${esc(k).replace(/'/g,"&#39;")}',this.checked)">`:'—'}</td>
+      <td>${esc(it.tabLabel)}</td>
+      <td>${badge}</td>
+      <td>${esc(it.reviewerName)}${it.isSub?'<span class="pmauto">타계정</span>':''}</td>
+      <td>${esc(it.startDate)}</td>
+      <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
+      <td>${esc(it.accountHolder||'-')}</td>
+      <td class="num">${_pmNum(it.amount)}</td>
+      <td class="num dim">${_pmNum(it.productPrice)}+${_pmNum(it.reviewFee)}</td>
+      <td>${esc(it.transferMemo||'')||'<span class="pmwarn">미설정</span>'}</td>
+      <td class="pmwarn">${esc(why)}</td></tr>`;
+  }).join('');
+  return `<div class="lgwrap"><table class="lgtable pmtable">
+    <thead><tr><th>☑</th><th>작업</th><th>이체은행</th><th>리뷰어</th><th>구매일</th><th>은행/계좌</th><th>예금주</th>
+      <th class="num">이체금액</th><th class="num">상품비+리뷰비</th><th>통장표시</th><th>보류 사유</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function _pmBatchTable(list){
+  if(!list.length) return `<div class="empty">아직 만든 회차가 없습니다.</div>`;
+  const st = b => b.status==='cancelled' ? '<span class="pmb no">취소됨</span>'
+    : b.status==='applied' ? '<span class="pmb ok">반영완료</span>'
+    : '<span class="pmb wait">결과 대기</span>';
+  return `<div class="lgwrap"><table class="lgtable pmtable">
+    <thead><tr><th>회차</th><th>만든 시각</th><th>은행</th><th class="num">건수</th><th class="num">금액</th>
+      <th>담당</th><th>다운로드</th><th>상태</th><th></th></tr></thead><tbody>
+    ${list.map(b=>`<tr>
+      <td class="mono">#${b.seq}</td>
+      <td class="mono">${esc(_pmDate(b.createdAt))}</td>
+      <td>${esc(b.bankLabel)}</td>
+      <td class="num">${b.itemCount}</td>
+      <td class="num">${_pmNum(b.totalAmount)}</td>
+      <td>${esc(b.createdBy||'-')}</td>
+      <td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
+      <td>${st(b)}</td>
+      <td>${b.status==='downloaded'?`<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
+           <button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`:''}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+function _pmDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return '-';
+  const k=new Date(d.getTime()+9*3600*1000); return k.toISOString().slice(5,16).replace('T',' '); }
+
+function _pmToggle(key, on){ if(on) delete STATE.pmExcluded[key]; else STATE.pmExcluded[key]=true; _pmRender(); }
+
+async function _pmDownload(bank){
+  const rows = (STATE.pmItems||[]).filter(it=>it.bank===bank && _pmOn(it))
+    .map(it=>({sheetId:it.sheetId, tabName:it.tabName, rowIndex:it.rowIndex}));
+  if(!rows.length){ toast('담을 건이 없습니다.'); return; }
+  const label = (PAY_BANKS.find(b=>b[0]===bank)||[])[1]||bank;
+  if(!confirm(`${label}으로 ${rows.length}건(${_pmNum(rows.reduce((a,c)=>{const it=(STATE.pmItems||[]).find(x=>x.sheetId===c.sheetId&&x.tabName===c.tabName&&x.rowIndex===c.rowIndex);return a+(it?it.amount:0);},0))}원)을 내려받습니다.\n\n다운로드하면 이 건들은 잠겨서 다음 목록에 다시 나오지 않습니다.\n(잘못 뽑았다면 [회차 취소]로 되돌릴 수 있어요)`)) return;
+  const r = await api('/api/trackb/payment/batch', { method:'POST', body: JSON.stringify({ bank, rows }) });
+  if(!r || !r.ok){ toast((r&&r.error)||'회차 생성 실패'); return; }
+  if((r.skipped||[]).length) toast(`${r.batch.itemCount}건 생성 · ${r.skipped.length}건은 제외됐습니다`);
+  await _pmRefile(r.batch.id);
+  STATE.pmExcluded = {};
+  await _pmLoad();
+}
+
+async function _pmRefile(id){
+  try{
+    const res = await fetch(API_BASE+'/api/trackb/payment/batch/'+id+'/file', { headers:{ Authorization:'Bearer '+token() } });
+    if(!res.ok){ const j=await res.json().catch(()=>({})); toast(j.error||'파일을 내려받지 못했습니다'); return; }
+    // 서버가 준 파일명(RFC 5987 filename*) 사용 — 없으면 폴백
+    let name='payment.xlsx';
+    const cd=res.headers.get('Content-Disposition')||'';
+    const m=cd.match(/filename\*=UTF-8''([^;]+)/);
+    if(m){ try{ name=decodeURIComponent(m[1]); }catch(_){} }
+    const blob=await res.blob(); const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  }catch(e){ toast('다운로드 실패: '+e.message); }
+}
+
+async function _pmCancel(id, seq){
+  if(!confirm(`#${seq} 회차를 취소할까요?\n\n담겨 있던 건들의 잠금이 풀려 다시 입금대상 목록에 나타납니다.\n(이미 은행에 올렸다면 취소하지 마세요 — 이중입금이 될 수 있습니다)`)) return;
+  const r = await api('/api/trackb/payment/batch/'+id+'/cancel', { method:'POST', body: JSON.stringify({}) });
+  if(!r || !r.ok){ toast((r&&r.error)||'취소 실패'); return; }
+  toast('회차를 취소했습니다');
+  await _pmLoad();
+}
+
 async function renderSettingsView(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="sthead"></div><div id="adminSettingsMount"></div></div>`;

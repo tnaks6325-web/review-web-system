@@ -305,6 +305,23 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **다음(M2b)**: 실제 생성 — 동일 구성 시트 생성(`create-campaign-sheet` 재사용) + DB 스켈레톤 행. ★★ 스켈레톤은 **seq를 시트 실제 행번호에 맞춰야** 주문이 들어올 때 `importTabFromIndex`의 `ON CONFLICT (sheet_id,tab_name,seq)`가 **제자리 갱신**한다(어긋나면 100행 + 유입행이 겹쳐 보인다). `prepareRosterSlots`는 `_MANUAL_SEQ_BASE=900000` 별도 대역이라 그대로는 못 쓴다. 또 `source='manual'` 이면 `is_submitted/is_paid`가 그 CASE에서 **동결**되므로 상태 칸이 영영 갱신 안 된다 — 새 source 값(예 `worktable`)을 그 CASE에 합류시키되 `_reconcileSeen`(source='import'만 비활성)은 건드리지 않는 설계가 필요하다.
 - 회귀가드 `tests/worktableTemplate.test.js`(39케이스 — 분류기 **실행** 검증(별칭 헤더 추종=사본이면 실패, 분류 ≡ 쓰기 표면 교차확인) + 집계 읽기전용/시트무접촉 + **라우터 스택 실검사** + 시트URL 해제·접수게이트 생존 + 프론트 배선).
 
+### ★★ 리뷰비 입금 자동화 M1 — 입금대상 추출 · 은행별 분류 · 회차(다운로드) 잠금 (migration 086)
+- **배경**: 매일 ① 구글시트에서 새로 리뷰 제출한 사람을 눈으로 찾고 ② 계좌를 다건이체 파일에 옮겨 적고 ③ 이체 후 시트 입금칸에 날짜를 적는 수작업. M1이 ①②를 없앤다(③ = M2).
+- **확정 정책(사용자 확정, 완화 금지)**: ① 이체금액 = **상품비(결제금액)+리뷰비**(리뷰비는 082 참여시점 판정) ② 이체 단위 = **A안 건별**(시트 행 1개 = 이체 1줄, 합산 금지) ③ 대상 = 제출완료 ∧ 미입금 ∧ **다운로드 이력 없음**(재다운로드도 이력) ④ 입금칸 기록값 = **결과 파일의 실제 이체시점**(M2) ⑤ 이체 실패는 리뷰어에게 **"등록한 계좌 정보를 확인해 주세요"로 알린다**(M2).
+- ★★ **이중입금 방지는 DB가 보장한다** — `uq_payment_items_active`(부분유니크, `(sheet_id,tab_name,row_index) WHERE status IN ('pending','paid')`). 코드 실수로도 뚫리지 않는다. 잠금 해제 경로는 **딱 둘** = 회차 취소(cancelled) · 이체 실패 판정(failed, M2). `createBatch`는 23505를 **그 건만 건너뛴다**(전체 실패로 만들면 매번 처음부터 다시 골라야 한다).
+- ★★ **은행 자동분류 = 작업오더 물건비**(`work_orders.goods_cost_type`): **현금 → 하나은행 / 계산서·세금·수수료 → 케이뱅크**. 판정은 `payment.service.bankFromGoodsCostType` 단일 출처(프론트 힌트 `_rfTransferHint`가 **같은 정규식 문자열**을 쓰는지 회귀가드가 고정). 공고 `transfer_bank`가 있으면 **사람이 정한 값이 항상 우선**, NULL이면 작업오더를 계속 따라간다(`''` 저장 = 자동으로 되돌리기, start_date와 같은 CASE 센티널).
+- ★★ **은행명 매칭은 정확 일치만**(`utils/bankCodes.js`) — 부분일치로 하면 `하나`가 `하나증권`(270)에 걸려 **남의 계좌로 송금**된다. 코드표 72개는 **케이뱅크 공식 대량이체 양식**('대량이체입력가이드' 시트)에서 그대로 옮겼고 하나은행도 같은 표준코드를 쓰므로 **표는 하나만 둔다**. 판정 실패는 추측하지 않고 null = 계좌미비로 화면에 드러남(틀린 값보다 빈 값).
+- ★ **케이뱅크 서식 은행명은 코드에서 파생한 정식명**(`bankNameByCode`) — 리뷰어 원문('신한')을 그대로 넣으면 양식 가이드의 "형식에 맞는 은행/증권사명 혹은 코드만" 검증에서 거부될 수 있다. ★ **하나은행 은행코드는 `String()`으로** — 숫자로 나가면 `'045'`의 앞 0이 사라진다(실제 운영 파일에 `45`로 찍힌 사례 있음).
+- ★ **금액·통장표시·계좌는 회차 생성 시점 값을 박제**(`payment_batch_items`) — 화면에서 다시 계산하지 않는다. 리뷰비 규칙·통장표시를 나중에 바꿔도 과거 입금 표기가 흔들리지 않는다(기간별 리뷰비 사고와 같은 함정).
+- ★ **쓰기 표면은 `payment_batches`/`payment_batch_items` 두 테이블뿐** — review_index·order_submissions·recruit_campaigns·**시트는 읽기만**. M1에 시트 API·큐 호출 0(회귀가드가 고정, exceljs `wb.worksheets`는 오탐이라 구글 API 패턴만 검사).
+- ★ **미입금 판정은 `search.service.PAYMENT_COL_KEYWORDS` 재사용**(SQL판), **리뷰비는 `utils/campaignFee.resolveReviewFee`** — 사본을 만들면 화면과 파일 금액이 갈라진다.
+- ★ **FK 타입**: `payment_batch_items.campaign_id`는 **TEXT**(`recruit_campaigns.id`가 TEXT). 082의 42804 사고(UUID로 선언 → 파일 전체 롤백) 재발 방지로 회귀가드가 018 원본과 대조.
+- ★ **프리플라이트 등록**: `recruit_campaigns.transfer_bank`/`transfer_memo`는 공고 create/update의 INSERT·SET 목록에 들어가므로 컬럼이 없으면 **공고 발행·수정이 전면 42703**. `REQUIRED_SCHEMA`에 등록(083/085와 같은 규율).
+- **화면**: 통합 작업대 **[입금관리] 탭**(`/api/trackb/payment/*`, **adminOrMaster 전용** — 계좌번호 전체 노출이라 AE·광고주 차단, 등록리뷰어DB와 같은 판단). 은행별 다운로드 버튼(그 은행 건만) · 보류 사유 표기 · 통장표시 미설정 경고 · 회차 표(다시 받기/취소). 다운로드·취소는 confirm + 잠금/이중입금 안내 필수. 공고 모달에 **[이체은행] 3버튼(자동/하나/케이뱅크) + [통장표시](8자)** 추가.
+- **문서**: PRD `frontend/docs/prd-payment-transfer.html` · 리뷰어 화면 시안 `design-payment-reviewer-view.html` · 직원 안내서 `입금관리_사용안내.html`.
+- 회귀가드 `tests/paymentBatch.test.js`(46케이스 — 순수함수 실행 + 라우터 스택 실검사 + 배선 + **PGTEST_URL 시 진짜 PG로 부분유니크·CHECK·서식 생성 검증**). ⚠ `PGTEST_URL`은 **파일 최상단에서 `DATABASE_URL`로 옮겨야** 한다(pool은 require 시점에 읽는다 — 뒤늦게 설정하면 연결이 안 잡힌다).
+- **다음(M2)**: 이체결과 파일 업로드 → 짝 맞추기(계좌+금액+예금주) → 성공 건만 입금 기록(시스템 + 시트 입금칸) → 리뷰어 참여상품 정보에 입금 시점·입금명 표시 → 실패 건 "계좌 확인" 안내.
+
 ### 현금영수증 안내 (1단계 — 발행방법 노출)
 - **판정의 진실원본은 탭 하나**: 연결 탭의 `tab_configs.income_type`에 '현영' 포함 → 발행 필요. 공고에는 컬럼을 만들지 않았고 모달은 **읽기 전용 표시**(`rf_cashrcpt_ro`, `refreshRecruitCashReceipt`)만 — 같은 값을 두 곳에서 관리하지 않는다.
 - **서버**(`_cashReceiptInfo`): work-detail(`GET /:id/work-detail`)과 관리자 미리보기(`/admin/:id/preview`) 응답에 `cashReceipt{required, businessNo, guideImageUrl}` 동봉. 채널(쿠팡/네이버)에 맞는 발행방법 이미지를 `app_settings.cash_receipt_guide_*`에서 고른다. **현영이 아니면 null**(일반 공고 응답·화면 불변), 조회 실패도 null(fail-soft).
