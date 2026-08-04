@@ -637,9 +637,25 @@ ok('★ 모달 입력값은 다시 그릴 때 날아가지 않는다(_wtTypeSync
      }));
 ok('★ 유형 모달에서도 "공통에 있는 열" 은 담지 못한다(같은 열 2번 생성 차단 — 담기 경로 공통 규칙)',
   /function wtTypeColAdd[\s\S]{0,900}이미 공통 열입니다/.test(setJs));
+ok('★★ 조건 목록을 못 받아도 **빈 드롭다운을 그리지 않는다** — 지금 값 유지 + 잠금 + 안내 + 다시 불러오기',
+  (() => {
+    const i = setJs.indexOf('function _wtRenderTypeModal');
+    const j = setJs.indexOf('\nasync function wtReloadTriggers', i);
+    const body = setJs.slice(i, j > i ? j : i + 6000);
+    return i > -1
+      && /var trigMissing = !trigs\.length/.test(body)
+      && /trigMissing[\s\S]{0,300}selected/.test(body)              // 지금 설정을 옵션으로 남긴다
+      && /trigMissing \? ' disabled' : ''/.test(body)                // 잠근다
+      && /조건 목록을 불러오지 못했습니다/.test(body)                  // 말한다
+      && /wtReloadTriggers\(\)/.test(body)                          // 되살릴 길
+      && /async function wtReloadTriggers[\s\S]{0,700}loadWorktableTemplate\(\)/.test(setJs)
+      && setJs.includes('window.wtReloadTriggers = wtReloadTriggers');
+  })());
+ok('★ 잠긴 상태에서는 조건 값을 읽지 않는다(의도치 않게 건드리는 경로를 만들지 않는다)',
+  /g\('wtTypeTrig'\) && !g\('wtTypeTrig'\)\.disabled/.test(setJs));
 ok('★ 자동 선택 조건 목록은 **서버가 내려 준 것**을 그린다(프론트 규칙 사본 금지)',
   /function _wtTriggers\(\)[\s\S]{0,200}_wtTpl\.triggers/.test(setJs)
-  && /_wtTriggers\(\)\.map/.test(setJs)
+  && /var trigs = _wtTriggers\(\)/.test(setJs)
   && !/options_2plus|courier_proxy|delivery_real/.test(setJs));   // 조건 키가 프론트에 하드코딩되지 않음
 
 /* ── 작업오더 기반 자동 선택(사용자 확정: 쿠팡 + 상품옵션 2가지 → 채널 쿠팡 + 상품옵션 유형) ── */
