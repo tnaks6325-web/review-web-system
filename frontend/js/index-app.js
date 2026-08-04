@@ -1682,7 +1682,7 @@ async function woSendMemo(id) {
 
 // 접수하기 (제출됨 → 접수됨)
 // ★ 업무 연계: 작업시트탭URL(gid 필수)이 가리키는 "그 탭"을 캠페인 탭 관리에 등록하고,
-//   작업오더 기본정보(담당자·시간대·리뷰유형·배송·택배대행)를 탭 메타에 자동 입력 → 상태 '접수됨' 전이.
+//   작업오더 기본정보(담당자·시간대·리뷰타입·배송·택배대행)를 탭 메타에 자동 입력 → 상태 '접수됨' 전이.
 //   동일 탭 재접수(2차 등)는 별도 탭을 만들지 않고 기존 한 줄을 유지(차수는 시트 차수컬럼 집계가 담당).
 //   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 async function woAccept(id) {
@@ -3585,11 +3585,18 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     ? `<span class="dash-cell-time">${escHtml(t.timeRange)}</span>`
     : empty;
 
-  // 리뷰타입 열
+  // 리뷰타입 열 — 값 목록의 단일 출처는 server/src/utils/reviewType.js.
+  // ★ 목록에 없는 옛 값(실배송·빈박스·믹스)도 **그대로 표시**한다. 선택지에서 빠졌다고
+  //   화면에서까지 지우면 관리자가 그 탭에 무엇이 설정돼 있었는지 알 수 없다(무색 배지로 남는다).
   const reviewClass = {
+    '포토': 'tc-review-포토',
+    '텍스트': 'tc-review-텍스트',
+    '구매확정': 'tc-review-구매확정',
+    '별점': 'tc-review-별점',
+    '혼합': 'tc-review-혼합',
+    // 옛 값(선택지에는 없음)
     '실배송': 'tc-review-실배송',
     '빈박스': 'tc-review-빈박스',
-    '구매확정': 'tc-review-구매확정',
     '믹스': 'tc-review-믹스'
   }[t.reviewType] || '';
   const reviewCell = t.reviewType
@@ -11926,7 +11933,7 @@ const _TAB_DASH_COLS = [
   { key:"tab_name",         label:"탭명",      cat:"core",  show:true,  align:"left" },
   { key:"display_name",     label:"표시명(상품)", cat:"meta", show:true,  align:"left" },
   { key:"manager",          label:"담당자",    cat:"core",  show:true,  align:"center" },
-  { key:"review_type",      label:"리뷰유형",  cat:"meta",  show:true,  align:"center" },
+  { key:"review_type",      label:"리뷰타입",  cat:"meta",  show:true,  align:"center" },
   { key:"payment_type",     label:"결제방식",  cat:"pay",   show:true,  align:"center" },
   { key:"time_range",       label:"주문시간대", cat:"meta",  show:true,  align:"center" },
   { key:"round",            label:"차수",      cat:"meta",  show:true,  align:"center" },
@@ -12034,7 +12041,7 @@ function _filterTabDashData() {
         // ★ display_name_map에서 차수별 표시명 오버라이드
         const dnMap = t.display_name_map || {};
         const roundDisplayName = dnMap[rd.round];
-        // ★ round_meta에서 차수별 부가정보(담당자, 리뷰유형, 결제방식, 주문시간대) 오버라이드
+        // ★ round_meta에서 차수별 부가정보(담당자, 리뷰타입, 결제방식, 주문시간대) 오버라이드
         const rmMap = t.round_meta || {};
         const rmData = rmMap[rd.round] || {};
         expanded.push(Object.assign({}, t, {
@@ -12172,10 +12179,10 @@ async function loadTabDashboard() {
     _renderTabDashManagerTabs();
     // ── 캠페인 필터 ──
     _populateFilterObj("tabDashCampaignFilter", "전체 캠페인", res.campaigns);
-    // ── 리뷰유형 필터 ──
+    // ── 리뷰타입 필터 ──
     const rtMap = {};
     (res.tabs||[]).forEach(t => { const rt = t.review_type || "(미지정)"; rtMap[rt] = (rtMap[rt]||0)+1; });
-    _populateFilter("tabDashReviewTypeFilter", "전체 리뷰유형", rtMap);
+    _populateFilter("tabDashReviewTypeFilter", "전체 리뷰타입", rtMap);
 
     // ── 컬럼 체크박스 ──
     _buildColToggleUI();
@@ -13887,7 +13894,7 @@ function openTabDashDetail(idx) {
       ["상태", `<span style="color:${stClr};font-weight:600">${stLabel}</span>`],
     ]},
     { title:"운영 설정", icon:"fa-cogs", color:"#3182f6", items:[
-      ["리뷰유형", t.review_type],
+      ["리뷰타입", t.review_type],
       ["주문시간대", t.time_range],
       ["차수", t.round],
 
@@ -13971,7 +13978,7 @@ function exportTabDashCSV() {
   const filtered = _filterTabDashData();
   if (filtered.length === 0) { showToast("내보낼 데이터가 없습니다.", "info"); return; }
 
-  const headers = ["상태","캠페인","탭명","표시명","담당자","리뷰유형","결제방식","주문시간대","차수",
+  const headers = ["상태","캠페인","탭명","표시명","담당자","리뷰타입","결제방식","주문시간대","차수",
     "총인원","제출완료","대량건","배송유형","NC모드","입금자명","이체은행","소득유형",
     "리뷰폴더","캡처폴더","시트URL","갱신일"];
   const rows = filtered.map(t => {

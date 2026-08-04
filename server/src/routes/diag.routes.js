@@ -1508,10 +1508,12 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
     // ★ 기대 채널을 **먼저** 읽는다 — 예시이미지 선택에 필요하고, 제출 시점 검수와
     //   같은 samples 를 써야 AI 캐시가 공유된다(첨부 판정이 제출 때 히트).
     let expectedChannel = null;
+    let reviewType = null;
     let samples = [];
     try {
       const exp = await inspect.loadTabExpectations({ sheetId, tabName });
       expectedChannel = exp.expectedChannel;
+      reviewType = exp.reviewType;        // ★ 087: 구매확정 작업이면 1차 필터를 돌리지 않는다(안전핀)
       samples = await inspect.loadSamplesFor(expectedChannel);
     } catch (_) { /* 채널을 모르면 대조만 생략(예시도 미동봉) */ }
 
@@ -1521,7 +1523,7 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
       classified = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
     } catch (_) { classified = null; }   // AI 장애 = 무판정 통과
 
-    const v = inspect.precheckPolicy({ classified, expectedChannel, slotKey: slotKey || 'review' });
+    const v = inspect.precheckPolicy({ classified, expectedChannel, slotKey: slotKey || 'review', reviewType });
     res.json({
       ok: true,
       verdict: v.verdict,          // pass | warn | block | skip
@@ -3383,6 +3385,65 @@ router.get('/row-claims', authMiddleware, adminOrMasterMiddleware, async (req, r
       [sheetId, tabName, fromRow, toRow]
     );
     res.json({ ok: true, count: rows.length, claims: rows });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/review-type-cleanup — 탭 설정 '리뷰타입' 칸의 옛 값 정리 (★ 087)
+//
+//   배경: 같은 `tab_configs.review_type` 칸을 두 어휘가 나눠 쓰고 있었다.
+//     · 인트라넷 발주 폼 : 포토·텍스트·구매확정·별점·혼합   ← 리뷰 결과물의 형태
+//     · 옛 탭 설정 팝오버: 실배송·빈박스·구매확정·믹스        ← 앞 둘은 사실 '배송유형'
+//   087 에서 선택지를 인트라넷 목록으로 통일했고, 남아 있는 옛 값을 여기서 제자리에 돌려놓는다.
+//     ① 실배송 / 빈박스 → `delivery_type` 으로 이관하고 리뷰타입 칸은 비운다
+//     ② 믹스 → 혼합 (같은 뜻, 표기만 통일)
+//
+//   ★★ ①은 `delivery_type` 이 **비어 있을 때만** 옮긴다(blank-only).
+//      접수(`/order/admin/accept`)가 작업오더에서 채워 넣은 배송유형을 덮으면 안 된다.
+//      이미 값이 있으면 리뷰타입 칸만 비운다 — 배송 정보는 이미 제자리에 있으므로 잃을 게 없다.
+//   ★ 자동 마이그레이션으로 돌리지 않은 이유: 기존 행을 건드리는 유일한 작업이라
+//      **무엇이 몇 건 바뀌는지 사람이 먼저 보고** 실행해야 한다(기본 dryRun).
+//   ★ 안 돌려도 안전하다 — 목록 밖 값은 `utils/reviewType` 판정에서 null 로 떨어져
+//      "오늘 동작 그대로"가 되고, 화면에는 옛 값이 그대로 표시된다.
+//
+//   body: { dryRun? = true } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+router.post('/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
+
+    // 무엇이 바뀔지 먼저 센다(dryRun·실행 공통 — 실행 후 결과와 대조할 수 있게)
+    const { rows: preview } = await pool.query(
+      `SELECT review_type,
+              COUNT(*)::int AS cnt,
+              COUNT(*) FILTER (WHERE COALESCE(delivery_type, '') = '')::int AS delivery_empty
+         FROM tab_configs
+        WHERE review_type IN ('실배송', '빈박스', '믹스')
+        GROUP BY review_type
+        ORDER BY review_type`
+    );
+    const total = preview.reduce((a, r) => a + r.cnt, 0);
+    if (dryRun || total === 0) {
+      return res.json({ ok: true, dryRun: true, total, preview,
+        note: total === 0 ? '정리할 옛 값이 없습니다.'
+                          : '실제 적용하려면 {dryRun:false} 로 다시 호출하세요.' });
+    }
+
+    // ① 실배송·빈박스 → 배송유형(비어 있을 때만) + 리뷰타입 칸 비우기
+    const { rowCount: moved } = await pool.query(
+      `UPDATE tab_configs
+          SET delivery_type = CASE WHEN COALESCE(delivery_type, '') = '' THEN review_type
+                                   ELSE delivery_type END,
+              review_type   = ''
+        WHERE review_type IN ('실배송', '빈박스')`
+    );
+    // ② 믹스 → 혼합
+    const { rowCount: renamed } = await pool.query(
+      `UPDATE tab_configs SET review_type = '혼합' WHERE review_type = '믹스'`
+    );
+
+    logger.info(`[review-type-cleanup] 배송유형 이관 ${moved}건 · 믹스→혼합 ${renamed}건`);
+    res.json({ ok: true, dryRun: false, total, preview, moved, renamed });
   } catch (err) { next(err); }
 });
 

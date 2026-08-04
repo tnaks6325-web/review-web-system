@@ -55,7 +55,7 @@ const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
   }
 })();
 
-// ── Auto-migration: round_meta JSONB 컬럼 추가 (차수별 부가정보: 담당자, 리뷰유형, 결제방식, 주문시간대 등) ──
+// ── Auto-migration: round_meta JSONB 컬럼 추가 (차수별 부가정보: 담당자, 리뷰타입, 결제방식, 주문시간대 등) ──
 (async () => {
   try {
     await pool.query(`

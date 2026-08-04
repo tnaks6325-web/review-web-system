@@ -542,7 +542,9 @@ function _rfPickTransferBank(val) {
 }
 
 function _rfPickBtn(group, val) {
-  const hidden = document.getElementById(group === "channel" ? "rf_channel" : "rf_manager");
+  // ★ hidden id 는 늘 `rf_<group>` — 그룹이 늘 때마다 삼항을 덧대면 새 그룹이 조용히 빠진다
+  //   (channel/manager 만 알던 옛 삼항을 일반화. 087 리뷰타입이 세 번째 그룹).
+  const hidden = document.getElementById("rf_" + group);
   const btn = document.querySelector(`#rf_${group}_btns .rchan-btn[data-val="${val}"]`);
   if (btn) { selectRfBtn(group, btn); return true; }
   if (group !== "channel" || !hidden) return false;
@@ -1403,6 +1405,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const _rh = document.getElementById("rf_reviewer_hidden");
           if (_rh) _rh.checked = c.reviewer_hidden === true;
         }
+        /* ✅ 087 리뷰타입 복원 — 저장값(표준 key)이 없으면 [미지정]이 선택된다 */
+        _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
@@ -1459,6 +1463,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
          값이 없으면(판정 불가·랜덤) 아무것도 건드리지 않아 기존처럼 빈 상태로 남는다. */
       if (prefill.channel) _rfPickBtn("channel", prefill.channel);
       if (prefill.manager) _rfPickBtn("manager", prefill.manager);
+      /* ★ 087: 작업오더의 리뷰타입(한국어·혼합 문자열) → 표준 key 버튼.
+         판정 불가값(실배송·빈박스 = 배송유형)은 ''로 떨어져 [미지정]이 된다 — 틀린 값보다 빈 값. */
+      if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
          탭 리네임 대비로 gid 우선 재매칭 후 이름 폴백. 미접수 오더는 값이 없어 그대로 수동. */
@@ -1586,7 +1593,7 @@ function closeRecruitModal() {
 ═══════════════════════════════════════ */
 function selectRfBtn(group, btn) {
   /* 같은 그룹 버튼만 비활성화 */
-  const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns');
+  const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns, #rf_review_type_btns');
   if (container) {
     container.querySelectorAll('.rchan-btn').forEach(b => b.classList.remove('active'));
   } else {
@@ -1607,7 +1614,47 @@ function selectRfBtn(group, btn) {
     /* ★ 086: 빈 값 = 자동(작업오더 물건비 판정). 서버에서 ''는 NULL 로 되돌아간다. */
     const el = document.getElementById('rf_transfer_bank');
     if (el) el.value = val || '';
+  } else if (group === 'review_type') {
+    /* ★ 087: 빈 값 = 미지정. 서버에서 ''는 NULL(해제)로 해석된다(CASE 센티널). */
+    const el = document.getElementById('rf_review_type');
+    if (el) el.value = val || '';
+    _renderReviewTypeHint(val || '');
   }
+}
+
+/* ★ 087 리뷰타입 안내 — 유형마다 리뷰어가 올리는 캡처가 달라지므로 그 결과를 미리 알려준다.
+   ★ '혼합'은 이 값만으로 행을 결정하지 못한다(어느 행이 무슨 유형인지는 시트 작업옵션 칸에만 있다)
+     → 그 사실을 화면에 적는다. 조용히 리뷰형으로 접으면 구매확정 행이 잘못 검수된다. */
+const RF_REVIEW_TYPE_HINTS = {
+  '':        '지정하지 않으면 지금과 동일하게 리뷰 캡처를 받습니다.',
+  photo:     '리뷰어는 리뷰 화면을 캡처해 제출합니다.',
+  text:      '리뷰어는 리뷰 화면을 캡처해 제출합니다.',
+  confirm:   '리뷰어는 리뷰 대신 <b>구매확정 완료 화면</b>을 제출합니다.',
+  star:      '리뷰어는 리뷰 화면을 캡처해 제출합니다.',
+  mixed:     '행마다 다른 유형이면 <b>시트 작업옵션 칸</b>에 적힌 값이 우선합니다.',
+};
+function _renderReviewTypeHint(val) {
+  const el = document.getElementById('rf_review_type_hint');
+  if (el) el.innerHTML = RF_REVIEW_TYPE_HINTS[val] || '';
+}
+
+/* 작업오더가 넘겨준 한국어 리뷰타입 → 표준 key.
+   ★ 판정의 진짜 단일 출처는 서버 `utils/reviewType.js` 이고 저장 시 서버가 다시 정규화한다.
+     여기 있는 건 **프리필로 어느 버튼을 누를지** 고르기 위한 최소 표다 —
+     회귀가드가 이 라벨 목록이 서버 REVIEW_TYPES 와 같은지 고정한다(workManager 사본 규율). */
+const RF_REVIEW_TYPE_LABELS = [
+  ['photo', '포토'], ['text', '텍스트'], ['confirm', '구매확정'], ['star', '별점'], ['mixed', '혼합'],
+];
+function _rfReviewTypeKey(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  if (RF_REVIEW_TYPE_LABELS.some(([k]) => k === s)) return s;   // 이미 key
+  if (/혼합|믹스/.test(s)) return 'mixed';                       // ★ 혼합 먼저(문자열에 '포토'가 함께 들어 있다)
+  if (/구매\s*확정/.test(s)) return 'confirm';
+  if (/포토|사진/.test(s)) return 'photo';
+  if (/별점|평점/.test(s)) return 'star';
+  if (/텍스트/.test(s)) return 'text';
+  return '';                                                     // 실배송·빈박스 = 배송유형이지 리뷰타입이 아니다
 }
 
 function selectChannel(btn) { selectRfBtn('channel', btn); }  /* 하위 호환 */
@@ -2044,6 +2091,14 @@ async function saveRecruitPost() {
     // work-detail 유입방식 역조회의 보조키(주: linked_campaign_id). 편집 시엔 미전송=COALESCE 유지.
     source_work_order_id: (!_recruitEditId && _woPrefillOrderId) ? _woPrefillOrderId : undefined,
   };
+
+  /* ✅ 087 리뷰타입 — ★ 버튼군 UI 가 있는 화면에서만 전송.
+     미전송이면 서버 CASE 센티널이 기존값을 유지한다(옵션표·이체설정과 같은 원칙) —
+     리뷰타입 칸이 없는 축약 화면에서 저장했다고 설정이 조용히 풀리면 안 된다.
+     ''(미지정) 전송은 "해제"로 해석되는데, 그건 사람이 [미지정]을 누른 경우뿐이다. */
+  if (document.getElementById("rf_review_type_btns")) {
+    payload.review_type = document.getElementById("rf_review_type")?.value || "";
+  }
 
   /* ⚡ 참여형(M2): 설정·작업내용 스냅샷 포함 + 게시 전 자동 점검(서버 게이트와 동일 3항목)
      ★ B1 가드: rf_participation 요소가 "존재하는 화면"에서만 전송 —
