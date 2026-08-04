@@ -51,11 +51,18 @@ ok('전체화면 모드는 상한을 푼다(표에 최대 폭)', /body\.widemode
 ok('★ none 을 쓰지 않는다 — calc() 안에서 무효라 상한이 통째로 죽는다',
   !/--app-max:\s*none/.test(cssNoComment));
 
-/* ── C. 상한이 걸린 4개 컨테이너 (하나만 빠져도 단이 어긋난다) ── */
-for (const sel of ['.top', '.tb1', '.tb2', '.wrap', '.ovwrap']) {
+/* ── C. 상한이 걸린 5개 컨테이너 (하나만 빠져도 단이 어긋난다) ──
+   ★ .tb2 만 margin-inline: .tb2 는 자기 자신이 가로 스크롤 컨테이너라 padding 상한이면 탭이 넘칠 때
+     스크롤 내용이 padding 을 뚫고 창 끝까지 그려진다(브라우저 스크롤 클리핑은 border-box 기준 — QHD 실측).
+     margin 은 border-box 자체를 상한 안으로 줄여 탭·스크롤바가 상한에서 잘린다(배경은 .taskbar 가 같은 색). */
+for (const sel of ['.top', '.tb1', '.wrap', '.ovwrap']) {
   const re = new RegExp(`\\${sel}\\s*\\{padding-inline:max\\([^)]*calc\\(\\(100% - var\\(--app-max\\)\\)`);
   ok(`${sel} 가 padding-inline 으로 상한을 받는다`, re.test(cssNoComment.replace(/\s*\{\s*/g, '{')));
 }
+ok('★ .tb2 는 margin-inline 으로 상한을 받는다(스크롤 컨테이너 — padding 이면 탭이 상한 밖까지 그려진다)',
+  /\.tb2\{margin-inline:max\([^)]*calc\(\(100% - var\(--app-max\)\)/.test(cssNoComment.replace(/\s*\{\s*/g, '{')));
+ok('★ .tb2 기본 선언에 좌우 padding 이 없다(margin 상한과 이중 오프셋 방지)',
+  /\.tb2\{[^}]*padding:0[;}]/.test(cssNoComment) && !/\.tb2\{[^}]*padding:0 12px/.test(cssNoComment));
 ok('★ 상한을 max-width 로 걸지 않는다 — sticky 배경 띠가 화면 중앙만 덮어 스크롤 시 끊긴다',
   !/\.(top|tb1|tb2)\s*\{[^}]*max-width:\s*var\(--app-max\)/.test(cssNoComment));
 ok('★ 상한 규칙이 각 바의 자체 padding 선언보다 뒤에 온다(동일 특이성 → 나중이 이김)', (() => {
@@ -146,5 +153,19 @@ ok('등록리뷰어DB 헤더(#rvhead .mh)가 표와 같은 1400px', /#rvhead \.m
 ok('리뷰어 로그 헤더(#lghead .mh)가 표와 같은 1300px', /#lghead \.mh\{max-width:1300px\}/.test(cssNoComment));
 ok('★ 공유 클래스 .mh 자체(단독 셀렉터)에는 max-width 를 걸지 않았다(다른 뷰까지 캡되면 안 된다)',
   !/(^|\})\s*\.mh\{[^}]*max-width/.test(cssNoComment.replace(/\n/g, ' ')));
+
+/* ── I. 작업보드 상단 요약 카드(.stripA .mcell) — 내용 폭만큼만(성장 금지) ──
+   flex:1 로 두면 넓은 화면에서 남는 폭을 카드들이 전부 나눠 먹어 "카드가 화면 끝까지 늘어나는" 신고 재현.
+   성장 0 + max-width 로 내용 기준 크기를 고정하고 남는 폭은 우측 여백으로 흘린다. */
+ok('★ .stripA .mcell 이 flex 성장을 하지 않는다(flex:0 1 auto)',
+  /\.stripA \.mcell\{[^}]*flex:0 1 auto/.test(cssNoComment));
+ok('★ .stripA .mcell 에 max-width 상한이 있다(긴 상품명은 …축약 + title 툴팁)',
+  /\.stripA \.mcell\{[^}]*max-width:300px/.test(cssNoComment));
+ok('★ 정산 셀(.mcell.setl)도 성장하지 않는다', (() => {
+  const m = cssNoComment.match(/\.stripA \.mcell\.setl\{[^}]*\}/);
+  return !!m && /flex:0 1 auto/.test(m[0]) && /max-width:/.test(m[0]) && !/flex:1/.test(m[0]);
+})());
+ok('★ 값 …축약이 살아 있다(.mcell .v ellipsis) — max-width 와 짝',
+  /\.stripA \.mcell \.v\{[^}]*text-overflow:ellipsis/.test(cssNoComment));
 
 console.log(`\n✅ workdeskWidthCap: ${n} cases passed`);
