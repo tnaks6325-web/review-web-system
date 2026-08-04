@@ -398,8 +398,8 @@ v1.2 변경: 세부 결정 5건 <b>전부 확정</b>(§7) — 특히 <b>마감 �
 <div class="card">
   <table class="t">
     <tr><th style="width:12%">단계</th><th style="width:48%">내용</th><th>배포하면 바로 좋아지는 것</th></tr>
-    <tr>
-      <td><b>M1</b><br><span class="pill info">마감+목록</span></td>
+    <tr style="background:#f0fdf4">
+      <td><b>M1</b><br><span class="pill ok">구현 완료</span></td>
       <td>마감 상태(전사 공통) 저장소 + [🏁 마감]/[↩ 복귀] + 마감 후보 배지 + <b>홈 작업 목록 블록</b>(진행 중/마감 보관함 서브탭, 담당자·인원/제출·입금 표) + 작업보드 1·2단에서 마감 작업 제외</td>
       <td>"작업보드에 진행 중만 남는다" + "작업 목록 나열"이 홈에 생긴다 — 직원 요청 2건이 먼저 해결</td>
     </tr>
@@ -410,6 +410,10 @@ v1.2 변경: 세부 결정 5건 <b>전부 확정</b>(§7) — 특히 <b>마감 �
     </tr>
   </table>
   <p class="sub">M1·M2는 독립 배포 가능합니다. 두 단계 모두 기존 화면·데이터에 대해 <b>추가만</b> 하므로(아래 9절) 되돌리기가 쉽습니다.</p>
+  <div class="decided" style="margin-top:12px"><b class="q">✅ M1 구현 완료 (2026-08-04)</b>
+  migration 088(<code>trackb_tab_finished</code>) + <code>POST /api/trackb/workdesk/tab-finish</code> + <code>GET /api/trackb/tabs</code> 확장 + 홈 작업 목록 블록·마감 확인창·작업보드 마감 바.
+  검증 = 진짜 PostgreSQL 16 으로 마이그레이션·부분 유니크·복귀 후 재마감·조인 실행 · 실제 브라우저 46시나리오 · 회귀가드 60케이스(변이시험 8종 검출 확인) · 기존 테스트 121개 파일 무회귀.
+  <b>구현 중 실제 취약점 1건을 발견해 고쳤습니다</b> — 버튼의 <code>onclick</code>에 시트에서 온 작업명을 넣으면 작은따옴표 하나로 임의 코드가 실행되어(브라우저로 재현) 이름 대신 <b>목록 번호</b>를 넘기도록 바꿨습니다.</div>
 </div>
 
 <!-- ══════════════ 9. 개발 부록 ══════════════ -->

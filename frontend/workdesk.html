@@ -1015,6 +1015,60 @@
 .hm-row .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650}
 .hm-row .cnt{font-variant-numeric:tabular-nums;color:var(--accent-deep);white-space:nowrap}
 .hm-bn{font-size:9.5px;color:var(--faint);padding:8px 6px 4px;border-top:1px solid var(--line)}
+/* ══ 홈 "작업 목록" 블록(히어로 바로 아래 · 전체폭) — PRD prd-workboard-worktabs.html §4 ══
+   ★ 클래스는 전부 wbl- 접두 신설 — 기존 hm- 계열·lgtable·worow 류와 이름 충돌 금지(레포 실측 사고 전례:
+     worow 재사용이 작업세부 패널의 grid 규칙에 걸려 표가 통째로 접혔다).
+   ★ 주석에 별표와 빗금을 붙여 쓰지 않는다 — 그 조합이 주석을 조기 종료시켜 뒤 문장이 셀렉터로 파싱되고
+     브라우저는 에러 없이 규칙을 통째로 삼킨다(root 변수 삼킴 사고와 같은 계열). */
+.wbl-box{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,.04);overflow:hidden}
+.wbl-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--card2)}
+.wbl-ttl{font-size:12.5px;font-weight:800;color:var(--ink)}
+.wbl-seg{display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+.wbl-seg button{font:inherit;font-size:11.5px;font-weight:750;padding:4px 12px;border:none;background:var(--card);color:var(--muted);cursor:pointer}
+.wbl-seg button.on{background:var(--accent);color:#fff}
+.wbl-today{font-size:11px;font-weight:750;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:999px;padding:2px 10px;font-variant-numeric:tabular-nums}
+.wbl-chip{font:inherit;font-size:11px;font-weight:700;padding:3px 11px;border-radius:999px;border:1px solid var(--line2);background:var(--card);color:var(--muted);cursor:pointer}
+.wbl-chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.wbl-q{margin-left:auto;font:inherit;font-size:11.5px;padding:5px 11px;border:1px solid var(--line2);border-radius:9px;background:var(--card);color:var(--ink);min-width:210px}
+.wbl-tw{max-height:420px;overflow:auto}
+table.wbl-t{width:100%;border-collapse:collapse;font-size:12px}
+table.wbl-t th{position:sticky;top:0;z-index:1;background:var(--card);color:var(--muted);font-weight:750;text-align:left;padding:7px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.wbl-t td{padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.wbl-t tbody tr{cursor:pointer}
+table.wbl-t tbody tr:hover{background:var(--card2)}
+table.wbl-t tr.fin td{color:var(--faint)}
+.wbl-nm{font-weight:700;color:var(--ink);max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wbl-sub{font-size:10px;color:var(--faint)}
+.wbl-g{display:inline-block;width:76px;height:8px;border-radius:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:6px}
+.wbl-g i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent)}
+.wbl-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.wbl-s{display:inline-block;border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:750;white-space:nowrap}
+.wbl-s.run{background:var(--safe-soft);color:var(--safe)}
+.wbl-s.cand{background:var(--warn-soft);color:var(--warn)}
+.wbl-s.fin{background:var(--card2);color:var(--muted)}
+.wbl-b{font:inherit;font-size:10.5px;font-weight:750;padding:3px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+.wbl-b:hover{border-color:var(--accent-line);color:var(--accent-deep)}
+.wbl-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.wbl-b.dark:hover{opacity:.85;color:#fff}
+.wbl-act{display:flex;gap:5px;justify-content:flex-end}
+.wbl-empty{padding:26px;text-align:center;color:var(--faint);font-size:12px}
+.wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
+/* 마감 확인창 — body 직속 오버레이(뷰 스크롤 컨테이너 안에 두면 화면 흐름에 섞인다: 레포 실측 사고) */
+.wbl-ov{position:fixed;inset:0;background:rgba(16,24,40,.45);display:grid;place-items:center;z-index:9000;padding:20px}
+.wbl-dlg{width:min(460px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 50px rgba(16,24,40,.25);overflow:hidden}
+.wbl-dh{padding:13px 18px;font-size:13.5px;font-weight:800;color:var(--ink);border-bottom:1px solid var(--line)}
+.wbl-db{padding:14px 18px;font-size:12px;color:var(--ink);line-height:1.65}
+.wbl-facts{margin:9px 0 3px;padding:9px 12px;background:var(--card2);border:1px solid var(--line);border-radius:9px;font-size:11.5px}
+.wbl-ul{margin:8px 0 0 17px;padding:0}
+.wbl-ul li{margin:3px 0;font-size:11.5px;color:var(--muted)}
+.wbl-chk{display:flex;gap:8px;align-items:flex-start;margin-top:12px;padding:10px 12px;background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:9px;font-size:11.5px;font-weight:750;color:var(--ink);cursor:pointer}
+.wbl-chk input{margin-top:2px}
+.wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
+.wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+.wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
+.wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
+/* 작업보드 본문 헤더의 마감 표시 */
+.wbl-finbar{display:flex;gap:9px;align-items:center;margin:0 0 12px;padding:9px 13px;background:var(--card2);border:1px solid var(--line2);border-radius:10px;font-size:11.5px;color:var(--muted)}
 
 </style>
 </head>
@@ -1481,8 +1535,23 @@ async function loadTabs(){
     return;
   }
   if(!r||!r.ok){ const b=$('#tb2'); if(b) b.innerHTML=`<span class="b2empty">작업 목록은 관리자 로그인에서 제공됩니다.</span>`; return; }
+  // ★ 작업바 로드는 stats=1 을 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다) — 대신 이미 받아둔
+  //   통계를 **이월**해 마감 후보 배지가 화면을 오갈 때마다 사라졌다 나타나지 않게 한다(_finStatsAt 캐시와 정합).
+  const _prevStats={}, _prevFin={};
+  (STATE.tabs||[]).forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
+    if(t.stats) _prevStats[k]=t.stats;
+    if(t.finished) _prevFin[k]={finishedAt:t.finishedAt,finishedBy:t.finishedBy}; });
   STATE.tabs=r.tabs||[];
+  STATE.finTruncated=!!r.truncated;
+  STATE.finUnavailable=!!r.finishedUnavailable;
+  STATE.tabs.forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
+    if(!t.stats){ const s=_prevStats[k]; if(s) t.stats=s; }
+    // ★ 마감 조회가 실패한 응답으로 기존 마감 표시를 지우지 않는다(그러면 마감 작업이 보드로 되살아난다)
+    if(r.finishedUnavailable && _prevFin[k]){ t.finished=true; t.finishedAt=_prevFin[k].finishedAt; t.finishedBy=_prevFin[k].finishedBy; } });
   _renderTabList();          // 계정별 캐시로 즉시 렌더
+  // ★ 홈 목록이 떠 있는 채로 이 응답이 도착하면 배열이 교체돼 **목록 DOM 의 인덱스가 stale** 이 된다
+  //   → 옆 작업을 마감/복귀할 수 있다. 같은 배열로 즉시 다시 그려 인덱스를 맞춘다.
+  if(document.getElementById('wblMount')) _finRenderList();
   refreshUnseen();           // 미확인(스레드) 배지 최초 조회 — 도착 시 재렌더
   _favSyncFromServer();      // 서버 원본으로 정렬(개인화·기기 무관) — 도착 시 재렌더
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
@@ -1708,9 +1777,238 @@ function toggleAdvFav(ev, el){
 // 즐겨찾기 세그먼트 키는 업체명과 절대 겹치지 않는 센티널(업체명에 NUL 문자는 못 들어감).
 //   평문 'fav'로 두면 실제로 'fav'라는 업체가 있을 때 두 칩이 동시에 활성화되고 서로의 목록을 보여준다.
 const W_FAV='\u0000fav';
+// ══ 작업 "마감"(전사 공통) — migration 088 · PRD frontend/docs/prd-workboard-worktabs.html ══════
+//   시트 시절 "끝난 탭은 뒤로" 워크플로우. 작업보드에는 **진행 중만** 남기고 마감분은 홈 보관함으로.
+//   ★ 마감은 화면 분류일 뿐 — 시트·리뷰어 화면·데이터 무접촉이라 복귀가 클릭 한 번이다.
+//   ★ 서버는 목록에서 마감 탭을 **거르지 않고 주석만** 준다(보관함이 같은 응답을 쓰므로). 거르는 건 여기.
+function isFinished(t){ return !!(t && t.finished); }
+// 마감 후보 = 인원 충족 + 전건 제출 + 전건 입금(사용자 확정 ㉠). 통계가 없으면 판정하지 않는다(false).
+//   ★ 제안 전용 — 후보가 아니어도 마감할 수 있고(조기 종료 작업), 후보여도 자동 처리하지 않는다.
+function isFinishCandidate(t){
+  const s=t&&t.stats; if(!s||!s.total) return false;
+  return (s.submitted|0)>=s.total && (s.paid|0)>=s.total;
+}
+function _finCanEdit(){ return STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff'; }
+function _finTab(sheetId,tabName){ return STATE.tabs.find(t=>t.sheetId===sheetId&&t.tabName===tabName)||null; }
+function _finDate(v){ if(!v) return ''; const d=new Date(v); return isNaN(d)?'':`${d.getMonth()+1}/${d.getDate()}`; }
+
+// 통계(담당자·인원/제출/입금·마감자료)를 STATE.tabs 에 **병합**한다.
+//   ★ 배열을 통째로 갈아끼우지 않는 이유 = 인덱스(selTab 계약)와 STATE.cur 객체 동일성이 깨진다.
+//     서버 30초 캐시 + 여기 60초 캐시 → 홈 진입·모달 오픈이 반복돼도 무거운 집계가 계속 나가지 않는다.
+async function _finEnsureStats(force){
+  if(!force && STATE._finStatsAt && (Date.now()-STATE._finStatsAt)<60000) return;
+  const r=await api('/api/trackb/tabs?limit=300&stats=1').catch(()=>null);
+  if(!(r&&r.ok&&Array.isArray(r.tabs))) return;          // fail-soft: 통계 없이도 목록은 그대로 동작
+  _finAbsorb(r);
+  STATE._finStatsAt=Date.now();
+}
+// 목록 응답을 STATE.tabs 에 흡수 — 서버가 "못 불러왔다"고 말한 항목은 **덮지 않는다**.
+//   ★★ 조회 실패를 빈 값으로 덮으면 마감 작업 전부가 작업보드로 되살아나고 보관함이 빈다(무신호 사고).
+//   ★ 통계도 마찬가지 — undefined 로 덮으면 마감 후보 배지가 통째로 사라진다(loadTabs 의 이월과 같은 규율).
+function _finAbsorb(r){
+  STATE.finUnavailable=!!r.finishedUnavailable;
+  STATE.statsUnavailable=!!r.statsUnavailable;
+  STATE.finTruncated=!!r.truncated;
+  const by={}; r.tabs.forEach(n=>{ by[n.sheetId+'\t'+n.tabName]=n; });
+  STATE.tabs.forEach(t=>{ const n=by[t.sheetId+'\t'+t.tabName]; if(!n) return;
+    if(n.stats) t.stats=n.stats;
+    if(!r.finishedUnavailable){ t.finished=!!n.finished; t.finishedAt=n.finishedAt; t.finishedBy=n.finishedBy; }
+  });
+  r.tabs.forEach(n=>{ if(!STATE.tabs.some(t=>t.sheetId===n.sheetId&&t.tabName===n.tabName)) STATE.tabs.push(n); });
+}
+// 마감/복귀 후 화면 수렴 — 떠 있는 화면만 갱신(홈 목록·작업바·본문 헤더 바).
+async function _finRefresh(){
+  await _finEnsureStats(true);
+  if(document.getElementById('wblMount')) _finRenderList();
+  if(document.getElementById('tb2')) _renderTabList();
+  const bar=document.getElementById('finBar'); if(bar) bar.outerHTML=_finBarHtml();
+}
+
+/* ── 작업보드 본문 헤더의 마감 바 ─────────────────────────────────────
+   광고주에겐 그리지 않는다(마감은 내부 업무). 마감된 작업을 열면 "마감된 작업" 표기 + 복귀 버튼. */
+function _finBarHtml(){
+  const t=STATE.cur; if(!t||!_finCanEdit()) return '';
+  if(isFinished(t)){
+    const when=_finDate(t.finishedAt), who=esc(t.finishedBy||'');
+    return `<div class="wbl-finbar" id="finBar"><span class="wbl-s fin">🏁 마감된 작업</span>
+      <span>${when?esc(when)+' 마감':''}${who?' · '+who:''} — 작업보드 목록에서 빠져 있고, 홈 <b>작업 목록 › 마감 보관함</b>에 있습니다.</span>
+      <span style="flex:1"></span>
+      <button class="wbl-b" onclick="doReopenCur()">↩ 진행중으로 복귀</button></div>`;
+  }
+  const cand=isFinishCandidate(t);
+  return `<div class="wbl-finbar" id="finBar">${cand?'<span class="wbl-s cand">✓ 마감 후보</span>':''}
+    <span>${cand?'인원·제출·입금이 모두 채워졌습니다 — 작업이 끝났다면 마감해 주세요.':'작업이 모두 끝나면 마감해 주세요. 마감해도 시트·리뷰어 화면은 그대로입니다.'}</span>
+    <span style="flex:1"></span>
+    <button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></div>`;
+}
+
+/* ── 마감 확인창 ────────────────────────────────────────────────────
+   ★★ 리뷰폴더 마감자료 검수 확인 체크를 눌러야 [마감]이 활성(사용자 확정 ㉠).
+      검수는 캡처 품질 판단이라 시스템 수치로 대신할 수 없다. 서버도 inspected 없으면 거부한다(이중 방어).
+   ★ 마감자료 미생성은 **경고만** — 마감자료를 쓰지 않는 작업 유형까지 막지 않는다(하드블록 금지). */
+let _FIN={sheetId:'',tabName:''};
+// ★★ onclick 에 시트에서 온 문자열(sheetId·tabName)을 절대 넣지 않는다 — **인덱스만** 넘긴다.
+//   HTML 속성은 엔티티가 디코드된 뒤 JS 로 파싱되므로 esc(따옴표 → &quot;)만으로는 문자열 탈출을 못 막는다:
+//   탭명 `x'),alert(1),String('` 하나로 임의 JS 가 실행되고 서버엔 잘린 탭명이 전송된다(실제 브라우저로 재현 확인).
+//   레포가 이미 밟은 함정이라 관용구가 있다(worktable 후보 클릭·교체요청 카드의 _idAttr).
+function openFinishModal(i){ const t=(STATE.tabs||[])[i]; if(t) _finOpen(t); }
+function openFinishCur(){ if(STATE.cur) _finOpen(STATE.cur); }
+function doReopen(i){ const t=(STATE.tabs||[])[i]; if(t) _finReopen(t); }
+function doReopenCur(){ if(STATE.cur) _finReopen(STATE.cur); }
+async function _finOpen(tab){
+  if(!_finCanEdit()||!tab) return;
+  const sheetId=tab.sheetId, tabName=tab.tabName;
+  _FIN={sheetId,tabName};
+  closeFinishModal();
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='finOv';
+  ov.innerHTML=`<div class="wbl-dlg"><div class="wbl-dh">🏁 이 작업을 마감할까요?</div>
+    <div class="wbl-db" id="finBody"><div style="color:var(--faint)">불러오는 중…</div></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="closeFinishModal()">취소</button>
+      <button class="wbl-b dark" id="finGo" disabled onclick="doFinish()">🏁 마감</button></div></div>`;
+  ov.addEventListener('click',e=>{ if(e.target===ov) closeFinishModal(); });
+  document.body.appendChild(ov);        // ★ body 직속 — 뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다
+  await _finEnsureStats();
+  const body=document.getElementById('finBody'); if(!body) return;   // 그 사이 닫혔으면 중단
+  const t=_finTab(sheetId,tabName)||tab;   // 통계 병합은 객체 동일성을 보존하므로 tab 그대로도 안전
+  const s=t.stats||null;
+  const facts=s
+    ? `인원/제출 <b>${s.submitted==null?'—':s.submitted}/${s.total==null?'—':s.total}</b> · 입금 <b>${s.paid|0}</b>${isFinishCandidate(t)?' <span class="wbl-s cand">✓ 마감 후보</span>':''}<br>
+       마감자료: ${s.closeoutDate?`<b>생성됨 ${esc(_finDate(s.closeoutDate))} · ${s.closeoutRows==null?'—':s.closeoutRows}건</b>`:'<b>미생성</b>'}`
+    : `<span style="color:var(--faint)">통계를 불러오지 못했습니다 — 수치 없이도 마감할 수 있습니다.</span>`;
+  body.innerHTML=`<b>${esc(t.tabName)}</b>${t.advertiserName?` (${esc(t.advertiserName)}${(s&&s.manager)?' · 담당 '+esc(s.manager):''})`:''}
+    <div class="wbl-facts">${facts}</div>
+    ${(s&&!s.closeoutDate)?`<div class="wbl-warn">⚠ 마감자료가 아직 생성되지 않았습니다 — 필요한 작업이라면 정산 카드에서 먼저 생성해 주세요(마감은 그대로 진행할 수 있습니다).</div>`:''}
+    <ul class="wbl-ul">
+      <li>전 직원의 작업보드에서 <b>마감 보관함</b>으로 이동합니다.</li>
+      <li>구글시트·리뷰어 화면·데이터에는 <b>아무 영향이 없습니다.</b></li>
+      <li>언제든 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</li>
+    </ul>
+    <label class="wbl-chk"><input type="checkbox" id="finChk" onchange="_finChk(this)">
+      <span>리뷰폴더의 마감자료(리뷰 캡처) 검수를 확인했습니다
+        <span class="sub">체크해야 [마감] 버튼이 활성화됩니다</span></span></label>`;
+}
+function _finChk(el){ const b=document.getElementById('finGo'); if(b) b.disabled=!el.checked; }
+function closeFinishModal(){ const o=document.getElementById('finOv'); if(o) o.remove(); }
+async function doFinish(){
+  const chk=document.getElementById('finChk');
+  if(!chk||!chk.checked) return;                      // 프론트 1차 게이트(서버가 최종 방어)
+  const go=document.getElementById('finGo'); if(go) go.disabled=true;
+  const t=_finTab(_FIN.sheetId,_FIN.tabName);
+  const r=await api('/api/trackb/workdesk/tab-finish',{method:'POST',body:JSON.stringify({
+    sheetId:_FIN.sheetId, tabName:_FIN.tabName, tabGid:(t&&t.tabGid)||'', finish:true, inspected:true })}).catch(()=>null);
+  if(!(r&&r.ok)){ toast((r&&r.error)||'마감 실패'); if(go) go.disabled=false; return; }
+  closeFinishModal(); toast('마감했습니다 — 홈 › 작업 목록 › 마감 보관함에서 볼 수 있어요');
+  await _finRefresh();
+}
+async function _finReopen(tab){
+  if(!_finCanEdit()||!tab) return;
+  const sheetId=tab.sheetId, tabName=tab.tabName;
+  // ★ 확인 문구에 **작업 이름을 반드시 넣는다** — 목록이 갱신되는 사이 인덱스가 어긋나 옆 작업이 대상이
+  //   됐을 때, 사용자가 그것을 알아챌 수 있는 유일한 장치다(마감 확인창은 이름이 보이지만 여긴 안 보였다).
+  if(!confirm(`"${tabName}"\n\n이 작업을 진행중으로 되돌릴까요?\n작업보드 목록에 다시 나타납니다.`)) return;
+  const r=await api('/api/trackb/workdesk/tab-finish',{method:'POST',body:JSON.stringify({sheetId,tabName,finish:false})}).catch(()=>null);
+  if(!(r&&r.ok)){ toast((r&&r.error)||'복귀 실패'); return; }
+  // 0행 갱신 = 이미 마감이 아니었다(다른 직원이 먼저 되돌림). "되돌렸습니다"로 꾸미지 않는다.
+  toast(r.reopened ? '진행중으로 되돌렸습니다' : '이미 진행중인 작업이었습니다');
+  await _finRefresh();
+}
+
+/* ── 홈 "작업 목록" 블록(히어로 바로 아래 · 전체폭) — 사용자 확정 ㉢ ────────────────
+   직원 인터뷰: "관리자 대시보드에서 작업 목록이 나열되어 보이던 게 좋았다".
+   ★ 데이터는 홈 히어로와 **같은 응답**(/api/trackb/tabs) — 신규 엔드포인트 0, 스코프도 서버가 이미 건다
+     (AE 는 담당 업체 작업만). 홈은 읽기 + 이동 + 마감만 하고 처리 로직 사본을 두지 않는다. */
+function _finVisible(){
+  const fin=STATE.finTab==='fin';
+  let list=(STATE.tabs||[]).filter(t=>isFinished(t)===fin);
+  const mgr=STATE.finMgr||'';
+  if(mgr) list=list.filter(t=>((t.stats&&t.stats.manager)||'')===mgr);
+  const q=(STATE.finQ||'').trim().toLowerCase();
+  if(q) list=list.filter(t=>`${t.tabName||''} ${t.advertiserName||''} ${t.spreadsheetTitle||''} ${(t.stats&&t.stats.manager)||''}`.toLowerCase().includes(q));
+  // 보관함은 최근 마감 순(방금 마감한 것이 위) · 진행 중은 서버 순서(업체·작업명) 유지
+  if(fin) list=list.slice().sort((a,b)=>String(b.finishedAt||'').localeCompare(String(a.finishedAt||'')));
+  return list;
+}
+function _finRenderList(){
+  const host=document.getElementById('wblMount'); if(!host) return;
+  const fin=STATE.finTab==='fin';
+  const all=STATE.tabs||[];
+  const nRun=all.filter(t=>!isFinished(t)).length, nFin=all.filter(t=>isFinished(t)).length;
+  const nCand=all.filter(t=>!isFinished(t)&&isFinishCandidate(t)).length;
+  // ★ 히어로 "진행 중 작업"도 **여기서만** 쓴다 — 두 곳에서 세면 마감 직후 히어로는 3, 목록은 2로 갈린다
+  //   (실제로 브라우저 검증이 이 어긋남을 잡았다). 같은 재료·한 명의 writer = 구조적으로 일치.
+  const hero=document.getElementById('hmStTabs'); if(hero) hero.textContent=String(nRun);
+  const mgrs=[...new Set(all.filter(t=>isFinished(t)===fin).map(t=>(t.stats&&t.stats.manager)||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+  const rows=_finVisible();
+  const canEdit=_finCanEdit();
+  const body=rows.length?rows.map(t=>{
+    const s=t.stats||{}, i=all.indexOf(t);
+    const tot=s.total==null?null:s.total, sub=s.submitted==null?null:s.submitted;
+    const pct=(tot&&sub!=null)?Math.min(100,Math.round(sub/tot*100)):0;
+    const prog=tot==null?'<span class="wbl-sub">—</span>'
+      :`<span class="wbl-g"><i style="width:${pct}%"></i></span><span class="wbl-num">${sub==null?'—':sub}/${tot}</span>`;
+    const st=fin?`<span class="wbl-s fin">🏁 마감</span>`
+      :(isFinishCandidate(t)?`<span class="wbl-s cand">✓ 마감 후보</span>`:`<span class="wbl-s run">진행 중</span>`);
+    const last=fin
+      ? `<td class="wbl-num">${esc(_finDate(t.finishedAt)||'—')}${t.finishedBy?' · '+esc(t.finishedBy):''}</td>`
+      : `<td class="wbl-num">${s.paid==null?'—':s.paid}</td>`;
+    const act=canEdit
+      // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
+      ? (fin?`<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열람</button>
+              <button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
+            :`<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열기</button>
+              <button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)
+      : `<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열기</button>`;
+    return `<tr class="${fin?'fin':''}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
+      <td><div class="wbl-nm">${esc(t.tabName)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
+      <td>${esc((s.manager)||'—')}</td>
+      <td>${prog}</td>${last}
+      <td>${st}</td>
+      <td><div class="wbl-act">${act}</div></td></tr>`;
+  }).join(''):'';
+  host.innerHTML=`<div class="wbl-box">
+    <div class="wbl-h">
+      <span class="wbl-ttl">📋 작업 목록</span>
+      <span class="wbl-seg">
+        <button class="${fin?'':'on'}" onclick="_finPickTab('run')">진행 중 ${nRun}</button>
+        <button class="${fin?'on':''}" onclick="_finPickTab('fin')">마감 보관함 ${nFin}</button>
+      </span>
+      ${(!fin&&nCand)?`<span class="wbl-today">✓ 마감 후보 ${nCand}건</span>`:''}
+      ${mgrs.length?`<button class="wbl-chip${STATE.finMgr?'':' on'}" onclick="_finPickMgr('')">전체</button>`+
+        mgrs.map(m=>`<button class="wbl-chip${STATE.finMgr===m?' on':''}" onclick="_finPickMgr(this.dataset.m)" data-m="${esc(m)}">${esc(m)}</button>`).join(''):''}
+      <input class="wbl-q" id="wblQ" placeholder="🔎 작업명 · 업체 · 담당자 검색" value="${esc(STATE.finQ||'')}" oninput="_finSearch(this.value)">
+    </div>
+    ${rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr>
+        <th>작업명</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th></th>
+      </tr></thead><tbody>${body}</tbody></table></div>`
+      : `<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`}
+    ${_finNoticeHtml()}
+    <div class="wbl-note">줄을 클릭하면 그 작업이 작업보드에서 열립니다 · 마감은 전 직원 공통이며 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</div>
+  </div>`;
+}
+// ★ 조회 실패·목록 잘림을 화면이 **말한다**(조용한 정상 위장 금지 — 관측 뷰 배포 스큐 규칙과 동일).
+//   특히 마감 조회 실패는 "마감 작업이 진행 중으로 보이는" 상태라, 말해주지 않으면 사용자가 오해한다.
+function _finNoticeHtml(){
+  const n=[];
+  if(STATE.finUnavailable) n.push('⚠ 마감 상태를 불러오지 못했습니다 — 마감한 작업이 진행 중으로 보일 수 있습니다(새로고침해 주세요).');
+  if(STATE.statsUnavailable) n.push('⚠ 인원·제출·입금 수치를 불러오지 못했습니다 — 표의 숫자와 마감 후보 배지가 비어 있습니다.');
+  if(STATE.finTruncated) n.push('⚠ 작업이 많아 목록 일부만 표시됩니다 — 마감한 작업을 정리하면 더 보입니다.');
+  return n.length?`<div class="wbl-warn" style="margin:0;border-radius:0;border-left:0;border-right:0">${n.map(esc).join('<br>')}</div>`:'';
+}
+function _finPickTab(v){ STATE.finTab=v; STATE.finMgr=''; _finRenderList(); }
+function _finPickMgr(m){ STATE.finMgr=m; _finRenderList(); }
+function _finSearch(v){ STATE.finQ=v; _finRenderList();
+  const el=document.getElementById('wblQ'); if(el){ el.focus(); el.setSelectionRange(el.value.length,el.value.length); } }
+// 홈 목록 → 작업 열기: 기존 pendingTab 계약 그대로(히스토리 "중간 항목 금지" 규칙과 자동 정합).
+function openTaskFromHome(i){
+  const t=(STATE.tabs||[])[i]; if(!t) return;
+  STATE.pendingTab={sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'', spreadsheetTitle:t.spreadsheetTitle||''};
+  switchView('workdesk');
+}
 function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '' (미지정)
   const favIdx=[], groups=new Map();
-  STATE.tabs.forEach((t,i)=>{ if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
+  // ★ 마감 작업은 상단 작업바(1·2단)에서 제외 = "작업보드에는 진행 중만"(업체 칩 개수도 자동으로 진행 중 기준).
+  //   인덱스는 STATE.tabs 원본 그대로 유지 → selTab(i) 계약 불변(건너뛰기만 한다).
+  STATE.tabs.forEach((t,i)=>{ if(isFinished(t)) return; if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
   // 정렬: 미지정은 항상 마지막 → 즐겨찾기한 업체가 앞 → 나머지 가나다순
   const gkeys=[...groups.keys()].sort((a,b)=>{
     if(!a) return 1; if(!b) return -1;
@@ -1740,6 +2038,10 @@ function _renderTabList(){
   const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업보드 뷰가 아닐 때
   const gs=_wGroups();
   if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; return; }
+  // ★ 탭은 있는데 전부 마감이면 그룹이 0개다 — 위 분기(STATE.tabs.length)를 못 타므로 여기서 따로 말한다.
+  //   안 그러면 "이 그룹에 작업이 없습니다"가 뜨는데 그룹 자체가 없어서 문구가 어긋난다.
+  if(!gs.length){ seghost.innerHTML='';
+    tabhost.innerHTML=`<span class="b2empty">진행 중인 작업이 없습니다 — 마감한 작업은 🏠 홈 › 작업 목록 › 마감 보관함에 있습니다.</span>`; return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
   // innerHTML 교체는 가로 스크롤 위치를 0으로 되감는다 → 업체가 많으면 방금 고른 칩이 화면 밖으로 사라짐.
   //   교체 전 위치를 저장했다가 복원하고, "선택이 실제로 바뀐 경우에만" 활성 항목을 시야로 끌어온다
@@ -1789,7 +2091,8 @@ function wSearch(q){
     return esc(s.slice(0,i))+'<mark>'+esc(s.slice(i,i+ql.length))+'</mark>'+esc(s.slice(i+ql.length)); };
   box.innerHTML = hits.length
     ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((i,ord)=>{ const t=STATE.tabs[i], n=_wUnseen(i);
-        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${esc(t.advertiserName||'미지정')} · ${esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+        // ★ 검색은 마감 작업도 찾아준다(작업바에선 빠졌지만 "그 작업 어디 갔지"를 여기서 해결) — 대신 마감이라고 말해준다.
+        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${isFinished(t)?'🏁 마감 · ':''}${esc(t.advertiserName||'미지정')} · ${esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
       }).join('')
     : `<div class="sempty">"${esc(q)}" 검색 결과 없음</div>`;
   box.classList.add('show');
@@ -1881,6 +2184,7 @@ function renderWorkdesk(wd){
     ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
+    ${_finBarHtml()}
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
@@ -3886,6 +4190,7 @@ function renderHomeView(){
         <div class="hm-st"><div class="n hot" id="hmStNeed">?</div><div class="l">확인 필요</div></div>
       </div>
     </div>
+    <div id="wblMount"></div>
     <div class="hm-wrap">
       <div class="hm-grid">${tiles}</div>
       <div class="hm-brief">
@@ -3900,14 +4205,18 @@ function renderHomeView(){
     </div>
   </div></div>`;
   _homeSyncBadges();   // 이미 도착해 있는 뱃지 값을 즉시 반영(부팅 조회를 기다리지 않는다)
+  if(STATE.tabs&&STATE.tabs.length) _finRenderList();   // 이미 받아둔 목록으로 즉시 렌더(도착 후 _homeLoad 가 갱신)
   _homeLoad();
 }
 /** 히어로 숫자 채우기 — 전부 기존 엔드포인트 재사용, 건별 fail-soft('?' 유지). 반환 promise 는 테스트용. */
 async function _homeLoad(){
   await Promise.allSettled([
-    api('/api/trackb/tabs?limit=300').then(r=>{
-      const el=document.getElementById('hmStTabs');
-      if(el && r && r.ok && Array.isArray(r.tabs)) el.textContent=String(r.tabs.length);
+    // ★ 작업 목록 블록과 **같은 응답**을 쓴다(신규 API 0) — stats=1 은 담당자·인원/제출/입금 표의 재료.
+    //   히어로 "진행 중 작업"도 마감분을 뺀 수 = 목록의 [진행 중] 개수와 구조적으로 일치한다.
+    api('/api/trackb/tabs?limit=300&stats=1').then(r=>{
+      if(!(r && r.ok && Array.isArray(r.tabs))) return;
+      STATE.tabs=[]; _finAbsorb(r); STATE._finStatsAt=Date.now();   // 흡수 = 실패 플래그·잘림 고지까지 함께 반영
+      _finRenderList();   // 목록 렌더가 히어로 "진행 중 작업" 숫자까지 함께 쓴다(단일 writer)
     }),
     api('/api/trackb/campaigns/list').then(r=>{
       if(!(r && r.ok && Array.isArray(r.data))) return;

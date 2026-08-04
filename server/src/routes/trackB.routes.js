@@ -77,7 +77,52 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
     // 역할 스코프: master/admin=전체 · staff=담당(inad_pm) · advertiser=소유 탭만.
     //   forMapping=1(소유지정 초기매핑): staff에 한해 전체 탭명 목록(서비스에서 advertiser는 무시 — 스코프 유지).
     const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1' });
-    res.json({ ok: true, count: tabs.length, tabs });
+    // ── 마감(전사 공통) 주석 + 작업목록 통계(?stats=1) ── migration 088 · PRD prd-workboard-worktabs.html
+    //   ★ 스코프 단일 출처는 위 scopedActiveTabs 하나 — 여기서는 그 결과에 **주석만** 얹는다.
+    //     서버가 마감 탭을 거르지 않는 이유 = 홈 "마감 보관함"이 같은 응답에서 마감분을 골라 그린다.
+    //   ★ 광고주(외부)에게는 주석을 붙이지 않는다 — 마감자(직원 이름)·담당자·캠페인명은 내부 정보다.
+    // ★ 목록이 상한에 닿았는지 알린다 — 마감 탭도 이 상한을 차지하므로(서버가 거르지 않는다) 마감이
+    //   쌓이면 **진행 중 작업이 조용히 잘려 나간다**. 잘림을 숨기면 "목록이 짧은 게 작업이 적어서인지
+    //   잘려서인지" 구분되지 않는다(투영 커버리지 truncated 선례).
+    const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 2000);
+    const out = { ok: true, count: tabs.length, tabs, truncated: tabs.length >= lim };
+    if (role !== 'advertiser') {
+      const fin = await svc.finishedTabsMap();
+      // stats=1 은 홈 작업 목록 전용(담당자·인원/제출/입금). 실패해도 목록 자체는 그대로 뜬다(fail-soft).
+      const stats = req.query.stats === '1' ? await svc.tabStatsMap() : null;
+      // ★★ 조회 실패를 **응답에 실어** 프론트가 기존 주석을 덮지 않게 한다 — 빈 맵만 주면 프론트가
+      //   "아무것도 마감 안 됨"으로 읽어 **마감 작업 전부가 작업보드로 되살아나고 보관함이 빈다**(무신호).
+      if (!fin.ok) out.finishedUnavailable = true;
+      if (stats && !stats.ok) out.statsUnavailable = true;
+      for (const t of tabs) {
+        // 이름 우선 → gid 폴백(운영 중 탭 리네임으로 마감이 조용히 풀리는 것 방지)
+        const g = String(t.tabGid == null ? '' : t.tabGid).trim();
+        const f = fin.map[`${t.sheetId}\t${t.tabName}`] || (g ? fin.map[`${t.sheetId}\tgid:${g}`] : null);
+        if (f) { t.finished = true; t.finishedAt = f.finishedAt; t.finishedBy = f.finishedBy; }
+        // ★ stats 맵은 전 탭 무스코프다 — 응답엔 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지).
+        if (stats && stats.map[`${t.sheetId}\t${t.tabName}`]) t.stats = stats.map[`${t.sheetId}\t${t.tabName}`];
+      }
+    }
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+// ── 작업 마감/복귀(전사 공통) — master/admin 전체 · staff 담당 탭만 · advertiser 차단 ──
+//   ★ finish=true 는 body.inspected(리뷰폴더 마감자료 검수 확인) 없이는 서비스가 거부한다 —
+//     확인창 체크를 우회한 요청을 서버가 막는다(프론트만 믿지 않는다).
+router.post('/workdesk/tab-finish', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, tabGid, finish, inspected } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const scope = await _ensureEditScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
+    // ★ 복귀는 명시적으로만 — `finish !== false` 로 두면 문자열 'false'·0 이 **마감으로** 해석된다.
+    const wantFinish = !(finish === false || finish === 'false' || finish === 0 || finish === '0');
+    const out = await svc.setTabFinished({
+      sheetId, tabName, tabGid,
+      finish: wantFinish, inspected: inspected === true, by: _by(req),
+    });
+    res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
 

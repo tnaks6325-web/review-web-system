@@ -63,7 +63,9 @@ const HB = homeBlock[0];
 
 {
   const paths = [...HB.matchAll(/api\('([^']+)'\)/g)].map(m => m[1]);
-  const allow = ['/api/trackb/tabs?limit=300', '/api/trackb/campaigns/list', '/api/trackb/work-orders/list?status=submitted'];
+  // ★ tabs 는 stats=1 을 달고 나간다(홈 "작업 목록" 블록의 담당자·인원/제출·입금 재료 — migration 088).
+  //   엔드포인트 **개수는 그대로 3개**라 이 검사의 의미(신규 API 0)는 불변 — 배선 형태가 바뀌었으니 패턴만 갱신한다.
+  const allow = ['/api/trackb/tabs?limit=300&stats=1', '/api/trackb/campaigns/list', '/api/trackb/work-orders/list?status=submitted'];
   ok('★ 신규 API 0 — 홈이 부르는 경로는 기존 3개뿐: ' + paths.join(', '),
     paths.length === 3 && paths.every(p => allow.includes(p)));
   ok('홈 블록에 fetch/POST 없음(읽기 전용)', !/fetch\(/.test(HB) && !/method\s*:\s*'POST'/i.test(HB));
@@ -82,8 +84,12 @@ ok('★ renderHomeView 도 역할을 자기 스코프에서 구한다',
   ok('홈 CSS 블록을 찾았다', !!cssBlock);
   const rules = cssBlock[0].replace(/\/\*[\s\S]*?\*\//g, '');
   const sels = [...rules.matchAll(/(^|\})\s*([^{}@]+)\{/g)].map(m => m[2].trim()).filter(Boolean);
-  ok('★ 홈 CSS 선택자는 전부 #hmwrap/.hm- 스코프(남의 화면 오염 금지): ' + sels.length + '개',
-    sels.length > 5 && sels.every(s => s.split(',').every(p => /^(#hmwrap|\.hm-)/.test(p.trim()))));
+  // ★ 이 검사의 의미 = "새 선택자는 전용 접두를 써서 남의 화면을 오염시키지 않는다".
+  //   holdover: 홈 아래 작업 목록 블록(migration 088)은 wbl- 접두를 쓴다 — 접두를 늘리는 것은 의미 불변,
+  //   대신 **접두 없는 일반 선택자**(.card, table 같은 것)는 여전히 금지된다.
+  ok('★ 홈 CSS 선택자는 전부 #hmwrap/.hm-/.wbl- 스코프(남의 화면 오염 금지): ' + sels.length + '개',
+    sels.length > 5 && sels.every(s => s.split(',').every(p => /^(#hmwrap|\.hm-|\.wbl-|table\.wbl-)/.test(p.trim()))),
+    sels.filter(s => s.split(',').some(p => !/^(#hmwrap|\.hm-|\.wbl-|table\.wbl-)/.test(p.trim()))).join(' | '));
 }
 
 /* ── B. 런타임(vm) — 실제 실행으로 프리변수·표시 규칙 고정 ─────────────── */
@@ -117,6 +123,14 @@ function makeSandbox(role, apiImpl) {
     // isAdmin 전역은 **일부러 없다** — 프리변수가 들어오면 ReferenceError 로 그 자리에서 터진다.
   };
   sb._woSyncNavBadge = () => { sb._homeSyncBadges && sb._homeSyncBadges(); }; // 블록 밖 함수 — nav 표기 없이 홈 동기화만
+  // 홈 아래 "작업 목록" 블록의 렌더러(블록 밖 함수, migration 088). **일부러 아무것도 쓰지 않는 스파이** —
+  //   히어로 "진행 중 작업"을 여기서만 쓴다는 계약이 깨지면(=_homeLoad 가 직접 쓰면) 아래 단언이 잡는다.
+  sb._finRenderListCalls = [];
+  sb._finRenderList = () => { sb._finRenderListCalls.push((sb.STATE.tabs || []).length); };
+  sb.isFinished = t => !!(t && t.finished);
+  // 목록 응답 흡수(블록 밖 함수) — 여기서는 "응답의 tabs 를 STATE.tabs 에 싣는다"는 계약만 재현한다.
+  //   (실패 플래그를 덮지 않는 규율 자체는 workboardFinish 가드 + 실브라우저 검증이 담당)
+  sb._finAbsorb = r => { (r.tabs || []).forEach(n => { if (!sb.STATE.tabs.some(x => x === n)) sb.STATE.tabs.push(n); }); };
   sb.window = sb; sb.globalThis = sb;
   vm.createContext(sb);
   vm.runInContext(HB.replace(/\/\* ══ 홈 끝 ══ \*\//, ''), sb);
@@ -168,7 +182,8 @@ function makeSandbox(role, apiImpl) {
   }
   { // 5. _homeLoad 성공 경로 — 기존 응답 계약(ok/data/state/ops·counts) 그대로 소비
     const apiImpl = p => {
-      if (p.startsWith('/api/trackb/tabs')) return Promise.resolve({ ok: true, tabs: [1, 2, 3] });
+      // 마감 1건 포함 — "진행 중"은 마감을 뺀 수라는 새 계약(088)의 재료
+      if (p.startsWith('/api/trackb/tabs')) return Promise.resolve({ ok: true, tabs: [{}, {}, { finished: true }] });
       if (p.startsWith('/api/trackb/campaigns/list')) return Promise.resolve({ ok: true, data: [
         { state: 'open' }, { status: 'active' },                                  // 참여형 open + 레거시 active
         { state: 'cutoff', ops: { todaySubmitted: 7 } }, { state: 'open', ops: { todaySubmitted: 3 } },
@@ -180,7 +195,13 @@ function makeSandbox(role, apiImpl) {
     const { sb, els } = makeSandbox('master', apiImpl);
     vm.runInContext('renderHomeView()', sb);
     await vm.runInContext('_homeLoad()', sb);
-    ok('진행 중 작업 = tabs 길이(3)', els.hmStTabs.textContent === '3');
+    // ★ 히어로 "진행 중 작업"의 writer 는 _finRenderList 한 곳(migration 088) — _homeLoad 는 재료만 넘긴다.
+    //   두 곳에서 세면 마감 직후 히어로 3 · 목록 [진행 중] 2 로 갈린다(브라우저 검증이 실제로 잡은 회귀).
+    ok('★ _homeLoad 는 히어로 숫자를 직접 쓰지 않는다(단일 writer 계약)', els.hmStTabs.textContent === '?');
+    // (renderHomeView 자체가 _homeLoad 를 부르므로 이 하네스에서는 호출이 2회 — 횟수가 아니라 "위임했는가"를 본다)
+    ok('★ tabs 응답을 STATE.tabs 에 실어 작업 목록 렌더러에 위임(같은 재료 = 숫자가 갈릴 수 없다)',
+      sb._finRenderListCalls.length >= 1 && sb._finRenderListCalls.every(n => n === 3)
+      && Array.isArray(sb.STATE.tabs) && sb.STATE.tabs.length === 3);
     ok('모집중 공고 = 참여형 open(2) + 레거시 active(1) = 3', els.hmStOpen.textContent === '3');
     ok('오늘 참여 확정 = ops.todaySubmitted 합(10)', els.hmStToday.textContent === '10');
     ok('★ 작업오더 수는 STATE.woCounts 에 실려 _woSyncNavBadge 경유(값 단일 출처)', els.hmBrWo.textContent === '4건');
