@@ -230,7 +230,7 @@
   @media(hover:none){.seg .segstar{width:13px;opacity:.35}}   /* 터치는 hover가 없어 상시 노출 */
 
   /* 2단: 선택 그룹의 탭(밑줄 탭) */
-  .tb2{display:flex;align-items:stretch;gap:2px;background:var(--card);padding:0 12px;overflow-x:auto;min-height:42px}
+  .tb2{display:flex;align-items:stretch;gap:2px;background:var(--card);padding:0;overflow-x:auto;min-height:42px}
   .tb2::-webkit-scrollbar{height:5px} .tb2::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
   .wtab{position:relative;display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding:11px 12px 10px;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;flex:none;transition:color .12s,background .12s}
   .wtab:hover{color:var(--ink);background:var(--card2)}
@@ -408,7 +408,12 @@
      전체화면 모드는 표에 최대 폭을 주는 모드라 상한을 푼다(none 은 calc 에서 못 쓰므로 100vw). */
   .top    {padding-inline:max(18px, calc((100% - var(--app-max)) / 2))}
   .tb1    {padding-inline:max(14px, calc((100% - var(--app-max)) / 2))}
-  .tb2    {padding-inline:max(12px, calc((100% - var(--app-max)) / 2))}
+  /* ★★ .tb2 만 margin-inline — .tb2 는 자기 자신이 가로 스크롤 컨테이너라, padding 으로 상한을 걸면
+     탭이 넘칠 때 스크롤 내용이 padding 영역을 "뚫고" 창 끝까지 그려진다(스크롤 클리핑은 padding-box 가
+     아니라 border-box 기준 — QHD 실측으로 좌우 여백 침범 확인). margin 은 border-box 자체를 상한 안으로
+     줄여 탭·스크롤바가 상한에서 정확히 잘린다. 배경은 부모 .taskbar 가 같은 var(--card)라 여백 띠 없음.
+     (.top/.tb1 은 스스로 스크롤하지 않아 padding 방식 유지 — tb1 의 스크롤러는 자식 .segwrap 이라 안전) */
+  .tb2    {margin-inline:max(12px, calc((100% - var(--app-max)) / 2))}
   .wrap   {padding-inline:max( 0px, calc((100% - var(--app-max)) / 2))}
   .ovwrap {padding-inline:max(22px, calc((100% - var(--app-max)) / 2))}
   body[data-vw="fhd"]{--app-max:1920px}   /* :root 기본값과 같은 값을 body 에도 명시 — 상한이 :root 한 줄에만 매달리지 않게 */
@@ -886,8 +891,11 @@
   @media(max-width:640px){ .lkrail{width:62px} }
   .setvis{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;flex:none;align-self:center}
   /* ═══ 시안 A · 상단 요약 미니 셀 스트립(참여자·제출·입금·정산 통합) ═══ */
+  /* ★ 요약 셀은 내용 폭만큼만(hug-left) — flex:1 로 두면 넓은 화면에서 남는 폭을 카드들이 전부 나눠 먹어
+     "카드가 화면 끝까지 늘어나는" 신고 재현. 성장 없이(0) 내용 기준 + min/max 만 두고, 남는 폭은 우측 여백
+     (모집공고 카드 컨테이너·C/S 대화창과 같은 원리). 좁은 화면 축소(shrink·wrap)는 종전 그대로. */
   .stripA{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
-  .stripA .mcell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:120px;flex:1 1 120px}
+  .stripA .mcell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:120px;max-width:300px;flex:0 1 auto}
   .stripA .mcell .k{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
   .stripA .mcell .v{font-size:14px;font-weight:700;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .stripA .mcell.kpi .v{font-size:17px;letter-spacing:-.01em}
@@ -896,7 +904,7 @@
   .spct.safe{background:var(--safe-soft);color:var(--safe)} .spct.acc{background:var(--accent-soft);color:var(--accent-deep)} .spct.warn{background:var(--warn-soft);color:var(--warn)}
   .stripA .mcell.kpi.s{border-color:color-mix(in srgb,var(--safe) 28%,var(--line))}
   .stripA .mcell.kpi.p{border-color:color-mix(in srgb,var(--accent) 26%,var(--line))}
-  .stripA .mcell.setl{cursor:pointer;flex:1 1 250px;min-width:230px} .stripA .mcell.setl:hover{border-color:var(--accent-line);background:var(--card2)}
+  .stripA .mcell.setl{cursor:pointer;flex:0 1 auto;min-width:230px;max-width:340px} .stripA .mcell.setl:hover{border-color:var(--accent-line);background:var(--card2)}
   .stripA .mcell.setl .v{font-size:12.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-weight:600}
   .stripA .mcell.setl .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s} .stripA .mcell.setl.open .caret{transform:rotate(180deg)}
   .schip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
