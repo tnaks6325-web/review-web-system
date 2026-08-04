@@ -86,8 +86,9 @@ ok('★ _fitGrid 가 역할로 분기하지 않는다 — 광고주/내부가 �
 })());
 
 /* ── E. 토글 UI·영속 ── */
-ok('우측 상단(.top 의 .sp 뒤)에 좌우 2단 스위치가 있다',
-  /<span class="sp"><\/span>\s*<div class="vwsw" id="vwToggle"/.test(src));
+// 업체용 뷰어 도입 후 스위치는 광고주에게 미노출(isAdv 조건부) — "sp 뒤 우측 상단 위치"라는 검사 의미는 유지.
+ok('우측 상단(.top 의 .sp 뒤)에 좌우 2단 스위치가 있다(광고주는 조건부 미노출)',
+  /<span class="sp"><\/span>\s*(\$\{isAdv\?'':`)?\s*<div class="vwsw" id="vwToggle"/.test(src));
 ok('스위치가 FHD·QHD 두 라벨과 노브를 가진다',
   /<span class="vwknob"><\/span><b>FHD<\/b><b>QHD<\/b>/.test(src));
 ok('노브 이동거리 = 라벨 폭(44px) — 어긋나면 노브가 라벨과 안 맞는다',

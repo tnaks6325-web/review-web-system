@@ -50,6 +50,54 @@
   @media(max-width:900px){.wrap,.wrap.railhidden{grid-template-columns:1fr}.rail{display:none}}
   .railtgl,.widetgl{font-size:12px}   /* 우측 상단 토글 */
 
+  /* ══ 업체용(광고주) 뷰어 — 좌측 세로 작업 목록 + 본문 폭 상한 (시안 design-advertiser-viewer.html) ══
+     상단 가로 탭(tb2) 대신 업체관리 사이드바 구성을 차용한다. 클래스는 aw* 접두로 신설 —
+     기존 .advitem/.owntab(업체관리 소유)·.worow(작업오더 탭 소유)와 이름 충돌 금지(실측 사고 전례). */
+  .wrap.advwrap{grid-template-columns:224px minmax(0,1fr) 300px}
+  .wrap.advwrap.railhidden{grid-template-columns:224px minmax(0,1fr)}
+  .wrap.advwrap.widemode{grid-template-columns:minmax(0,1fr)}
+  .wrap.advwrap.widemode .awside{display:none}
+  @media(max-width:900px){.wrap.advwrap,.wrap.advwrap.railhidden{grid-template-columns:1fr}.wrap.advwrap .awside{display:none}}
+  .awside{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
+  .awside .awsh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 6px 9px;display:flex;align-items:center;gap:6px}
+  .awside .awsh .cnt{font-weight:700;background:var(--card2);border-radius:999px;padding:1px 7px;font-size:10px;color:var(--muted)}
+  .awitem{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:9px;margin-bottom:4px;cursor:pointer;border:1px solid transparent}
+  .awitem:hover{background:var(--card2)}
+  .awitem.on{background:var(--accent-soft);border-color:var(--accent-line)}
+  .awitem .ava{width:36px;height:30px;border-radius:8px;background:var(--card2);color:var(--muted);display:grid;place-items:center;font-weight:800;font-size:10px;flex:none}
+  .awitem.on .ava{background:var(--card);color:var(--accent-deep)}
+  .awitem .nm{font-size:12px;font-weight:650;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .awitem .nm i{display:block;font-size:10px;font-style:normal;font-weight:500;color:var(--faint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .awitem .unb{font-size:10px;font-weight:700;color:var(--accent-deep);background:var(--accent-soft);border-radius:999px;padding:1px 6px;flex:none}
+  /* 화면 A — 내 작업 목록 표(업체관리 연결탭 표와 같은 컬럼 그리드 방식·고정폭 합) */
+  #advHome{max-width:1380px}
+  .awlhead,.awlrow{display:grid;grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 64px 64px 94px 94px 68px 94px 44px;gap:8px;align-items:center;min-width:1040px}
+  .awlhead{font-size:9.5px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding:0 14px 5px}
+  .awlrow{padding:10px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:box-shadow .2s,border-color .2s}
+  .awlrow:hover{border-color:var(--accent-line);box-shadow:0 5px 14px rgba(16,24,40,.07)}
+  .awlrow .adate{font-size:11.5px;font-variant-numeric:tabular-nums}
+  .awlrow .anm{min-width:0}
+  .awlrow .anm b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .awlrow .anm .asub{display:block;font-size:10.5px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .awlrow .acnt{font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+  .awlrow .acnt b{font-weight:700;color:var(--ink)} .awlrow .acnt .c-sub{color:var(--accent)} .awlrow .acnt .c-paid{color:var(--safe)}
+  .awlrow .amoney{font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .awlrow .amoney.rest b{color:var(--warn)} .awlrow .amoney.rest.zero b{color:var(--safe)}
+  .awlrow .aopen{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
+  .awlwrap{overflow-x:auto}
+  /* 화면 B(작업 상세) — 헤더·요약 스트립·정산 카드를 본문 데이터 폭과 같은 값으로 캡(광고주 화면만).
+     시트 그리드는 열 고정폭 합이라 원래 안 늘어남(_fitGrid) — 캡 불필요. */
+  body.advm .main .mh,body.advm .stripA,body.advm .setldetail,body.advm .wobar,body.advm .wodetail{max-width:1380px}
+  /* 정산 카드 금액 4칸(총비용/입금액/입금일/남은 입금액) */
+  .advmoney{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}
+  .ambox{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--card2)}
+  .ambox .k{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em}
+  .ambox .v{font-size:15px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+  .ambox .v small{font-size:10.5px;color:var(--faint);font-weight:600;margin-left:3px}
+  .ambox.rest{border-color:color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-soft)} .ambox.rest .v{color:var(--warn)}
+  .ambox.rest.zero{border-color:color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft)} .ambox.rest.zero .v{color:var(--safe)}
+  .ambox.paidamt{border-color:color-mix(in srgb,var(--safe) 30%,var(--line))} .ambox.paidamt .v{color:var(--safe)}
+
   /* 1단: 통합검색 + 업체 세그먼트(맨 앞 ★즐겨찾기) */
   .taskbar{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:var(--toph);z-index:4}
   .tb1{display:flex;align-items:center;gap:10px;background:var(--card2);border-bottom:1px solid var(--line);padding:8px 14px;position:relative}
@@ -272,6 +320,9 @@
   .ovwrap {padding-inline:max(22px, calc((100% - var(--app-max)) / 2))}
   body[data-vw="fhd"]{--app-max:1920px}   /* :root 기본값과 같은 값을 body 에도 명시 — 상한이 :root 한 줄에만 매달리지 않게 */
   body[data-vw="qhd"]{--app-max:2560px}
+  /* 업체(광고주) 뷰어: 상한 1680px 고정 — FHD/QHD 토글 미노출(시안 design-advertiser-viewer.html).
+     ★ 선언 순서가 규칙: data-vw 뒤(같은 특이성이라 뒤가 이겨 광고주 고정이 확정) · widemode 앞(전체화면은 여전히 해제). */
+  body.advm{--app-max:1680px}
   body.widemode{--app-max:100vw}
 
   /* 좌우 슬라이딩 2단 스위치(FHD ↔ QHD). 라벨 폭을 44px 로 고정해야 노브 이동거리가 정확히 한 칸 */
@@ -818,6 +869,7 @@ function _consumeGo(){
   try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
 }
 function renderLogin(msg){
+  document.body.classList.remove('advm');   // 광고주 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃 원복)
   $('#app').innerHTML = `<div class="loginbox"><h2>통합 작업대 로그인</h2>
     <input id="lname" placeholder="아이디 (관리자 / AE / 광고주)" autocomplete="username">
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
@@ -839,9 +891,11 @@ function logout(){ sessionStorage.removeItem('admin_token');
 function renderShell(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
   const isStaff = STATE.role==='staff';   // AE — 작업대(담당 탭) + 소유 지정(초기매핑, 자기 담당 업체만)
+  const isAdv = STATE.role==='advertiser';   // 업체(광고주) — 전용 뷰어(폭 상한 고정·좌측 작업 목록)
+  document.body.classList.toggle('advm', isAdv);   // body.advm = --app-max:1680px 고정(시안)
   $('#app').innerHTML = `
     <div class="top">
-      <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
+      <span class="logo">통합 작업대 <span class="tag">${isAdv?'업체 전용':'TRACK B · 그림자'}</span></span>
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
@@ -864,13 +918,13 @@ function renderShell(){
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
-      <div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
+      ${isAdv?'':`<div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
            aria-label="화면 폭 상한 전환" title="화면 폭 상한 — FHD 1920px / QHD 2560px (열 너비는 어느 쪽이든 고정)"
            onclick="toggleVwMode()"
-           onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleVwMode();}"><span class="vwknob"></span><b>FHD</b><b>QHD</b></div>
+           onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleVwMode();}"><span class="vwknob"></span><b>FHD</b><b>QHD</b></div>`}
       <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <button class="btn widetgl" id="wideToggle" onclick="toggleWide()" style="display:none" title="작업 목록·우측 레일을 숨겨 표를 화면 전체폭으로 (Esc로 해제)"></button>
-      <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
+      <span class="rolebadge">${isAdv?esc(STATE.name||'업체'):esc(STATE.role||'?')+(STATE.name?(' · '+esc(STATE.name)):'')}</span>
       <button class="btn" onclick="logout()">로그아웃</button>
     </div>
     <div id="viewroot"></div>`;
@@ -1076,6 +1130,20 @@ function renderWorkdeskView(){
   // 열 작업이 예약되지 않았으면(=본문이 "위에서 작업을 선택하세요"로 뜬다) 열린 작업도 비운다.
   //   ★ 첫 await 전이라 switchView 의 _navPush 가 이 값을 보고, 히스토리 항목이 실제 화면과 어긋나지 않는다.
   if(!STATE.pendingTab) STATE.cur=null;
+  // ── 업체(광고주) 뷰어: 상단 가로 탭바 대신 좌측 세로 작업 목록(업체관리 사이드바 차용) ──
+  //   기본 화면(작업 미선택) = "내 작업 목록" 표(화면 A). 작업바(#taskbar)가 없어 --tbh 는 0 실측.
+  if(STATE.role==='advertiser'){
+    $('#viewroot').innerHTML = `<div class="wrap advwrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
+      <aside class="awside" id="awside">
+        <div class="awsh">내 작업 <span class="cnt" id="awCnt">…</span></div>
+        <div id="awlist"><div class="empty" style="padding:10px">불러오는 중…</div></div>
+      </aside>
+      <div class="main" id="main"><div class="empty">불러오는 중…</div></div>
+      <div class="rail" id="rail"></div></div>`;
+    _syncRailToggle(); _syncWideToggle();
+    _watchChrome(); loadTabs();
+    return;
+  }
   const isMaster = STATE.role==='master';
   $('#viewroot').innerHTML = `<div class="taskbar" id="taskbar">
       <div class="tb1">
@@ -1098,6 +1166,24 @@ function renderWorkdeskView(){
 }
 async function loadTabs(){
   const r = await api('/api/trackb/tabs?limit=300');
+  // ── 업체(광고주): 소유 탭 + 작업 요약(카운트·정산)을 함께 받아 사이드바 + "내 작업 목록"(화면 A)을 그린다 ──
+  if(STATE.role==='advertiser'){
+    STATE.tabs=(r&&r.ok&&r.tabs)||[];
+    const s=await api('/api/trackb/my-work-summary').catch(()=>null);
+    STATE.advWork=(s&&s.ok)?{items:s.items||[],settlementHidden:!!s.settlementHidden}:{items:[],settlementHidden:false,failed:!s};
+    // 요약에만 있는 탭(아카이브 등)도 열람 대상 — STATE.tabs 에 합류(selTab 인덱스 계약 유지)
+    for(const it of STATE.advWork.items){
+      if(!STATE.tabs.some(t=>t.sheetId===it.sheetId&&t.tabName===it.tabName))
+        STATE.tabs.push({sheetId:it.sheetId,tabName:it.tabName,tabGid:it.tabGid||'',spreadsheetTitle:it.spreadsheetTitle||''});
+    }
+    _renderAdvSidebar();
+    refreshUnseen();
+    if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null; const o={nav:!!pt.__nav};
+      const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
+      if(idx>=0) selTab(idx,o); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1,o); } }
+    else _renderAdvHome();
+    return;
+  }
   if(!r||!r.ok){ const b=$('#tb2'); if(b) b.innerHTML=`<span class="b2empty">작업 목록은 관리자 로그인에서 제공됩니다.</span>`; return; }
   STATE.tabs=r.tabs||[];
   _renderTabList();          // 계정별 캐시로 즉시 렌더
@@ -1107,6 +1193,76 @@ async function loadTabs(){
   if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null; const o={nav:!!pt.__nav};
     const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
     if(idx>=0) selTab(idx,o); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1,o); } }
+}
+
+// ══ 업체(광고주) 뷰어 — 사이드바 + 내 작업 목록(화면 A) ═══════════════════════════
+//   데이터 소스 = /api/trackb/my-work-summary(광고주 렌즈: 내부 필드 서버에서 제거).
+//   시작일 = 발주 start_date 우선 → 탭명 앞 "M/D" 폴백. 남은 입금액 = 총비용 − 입금액(화면 파생).
+function _awItems(){ return (STATE.advWork&&STATE.advWork.items)||[]; }
+function _awTabIdx(it){ return STATE.tabs.findIndex(t=>t.sheetId===it.sheetId&&t.tabName===it.tabName); }
+function _awDate(it){   // 'M/D' 표기(사이드바 아바타·목록 첫 컬럼)
+  if(it.startDate){ const m=String(it.startDate).match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return `${+m[2]}/${+m[3]}`; }
+  const t=String(it.tabName||'').match(/^(\d{1,2})\s*\/\s*(\d{1,2})/); if(t) return `${+t[1]}/${+t[2]}`;
+  return '—';
+}
+function _awMoney(n){ return (n==null||isNaN(+n))?'—':(+n).toLocaleString('ko-KR'); }
+function _awStatus(it){   // 진행상황 칩 {label, tone}
+  const target=+it.target||0, total=+it.total||0, sub=+it.submitted||0;
+  const done=(total>0&&sub>=total&&(!target||total>=target))||it.active===false;
+  if(done) return {label:'완료',tone:'safe'};
+  const pct=target?Math.round(total/target*100):null;
+  return {label:pct!=null?`진행중 ${pct}%`:'진행중',tone:'ok'};
+}
+function _renderAdvSidebar(){
+  const host=$('#awlist'), cnt=$('#awCnt'); if(!host) return;
+  const items=_awItems();
+  if(cnt) cnt.textContent=String(items.length);
+  if(!items.length){ host.innerHTML=`<div class="empty" style="padding:10px">${STATE.advWork&&STATE.advWork.failed?'작업 목록을 불러오지 못했습니다.':'진행 중인 작업이 없습니다.'}</div>`; return; }
+  const cur=STATE.cur;
+  host.innerHTML = `<div class="awitem${cur?'':' on'}" onclick="advHome()"><span class="ava">≡</span><span class="nm">전체 현황<i>내 작업 목록으로</i></span></div>`
+    + items.map(it=>{
+      const i=_awTabIdx(it); if(i<0) return '';
+      const on=cur&&cur.sheetId===it.sheetId&&cur.tabName===it.tabName, st=_awStatus(it), n=_wUnseen(i);
+      return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(it.tabName)}${it.spreadsheetTitle?' · '+esc(it.spreadsheetTitle):''}">
+        <span class="ava">${esc(_awDate(it))}</span>
+        <span class="nm">${esc(it.tabName)}<i>${esc(st.label)}</i></span>
+        ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb ${st.tone}">${st.label==='완료'?'완료':'진행'}</span></div>`;
+    }).join('');
+}
+function advHome(){ STATE.cur=null; _navPush(); _renderAdvSidebar(); _renderAdvHome(); }
+function _renderAdvHome(){
+  const host=$('#main'); if(!host) return;
+  const aw=STATE.advWork;
+  if(!aw){ host.innerHTML=`<div class="empty">불러오는 중…</div>`; return; }
+  const items=_awItems();
+  if(!items.length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
+  const paidDone=items.filter(it=>{ const s=it.settlement; const tc=s&&s.totalCost; return tc!=null&&tc>0&&(s.paidAmount||0)>=tc; }).length;
+  const rows=items.map(it=>{
+    const i=_awTabIdx(it); if(i<0) return '';
+    const st=_awStatus(it), s=it.settlement;
+    const qs=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||[s.quoteStatus,''])[0]:null, qt=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||['',''])[1]:'';
+    const iv=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||[s.invoiceStatus,''])[0]:null, ivt=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||['','neutral'])[1]:'';
+    const tc=s&&s.totalCost!=null?+s.totalCost:null, pa=s&&s.paidAmount!=null?+s.paidAmount:null;
+    const rest=tc!=null?Math.max(tc-(pa||0),0):null;
+    const paidDate=s&&s.paidDate?String(s.paidDate).slice(5).replace('-','/').replace(/^0/,'').replace(/\/0/,'/'):'—';
+    return `<div class="awlrow" onclick="selTab(${i})" title="${esc(it.tabName)}">
+      <span class="adate">${esc(_awDate(it))}</span>
+      <span class="anm"><b>${esc(it.tabName)}</b><span class="asub">${esc(it.spreadsheetTitle||'')}</span></span>
+      <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
+      <span class="acnt"><b>${it.total||0}</b>${it.target?`/${it.target}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
+      <span>${qs?`<span class="bb ${qt}">${esc(qs)}</span>`:'<span class="bb">—</span>'}</span>
+      <span>${iv?`<span class="bb ${ivt||''}">${esc(iv)}</span>`:'<span class="bb">—</span>'}</span>
+      <span class="amoney"><b>${_awMoney(tc)}</b></span>
+      <span class="amoney"><b>${_awMoney(pa)}</b></span>
+      <span class="adate">${esc(paidDate)}</span>
+      <span class="amoney rest${rest===0?' zero':''}"><b>${rest==null?'—':(rest===0?'0 ✓':_awMoney(rest))}</b></span>
+      <span class="aopen">열람 ›</span></div>`;
+  }).join('');
+  host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 진행 업무 현황</h1>
+      <span class="bd">작업 ${items.length}건</span>${paidDone?`<span class="bd g">입금 완료 ${paidDone}건</span>`:''}
+      ${aw.settlementHidden?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
+    <div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>
+    ${rows}</div></div>`;
 }
 // ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) ──
 //   서버 원본(/api/trackb/workdesk/favorites, 계정 귀속) + 계정별 localStorage 캐시(즉시 렌더·오프라인 폴백).
@@ -1172,6 +1328,7 @@ function _wActiveSeg(gs){
   return gs.length?gs[0].key:null;
 }
 function _renderTabList(){
+  if(STATE.role==='advertiser'){ _renderAdvSidebar(); return; }   // 광고주 = 좌측 사이드바(세그먼트/탭바 없음)
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
   const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업대 뷰가 아닐 때
   const gs=_wGroups();
@@ -1315,10 +1472,10 @@ function renderWorkdesk(wd){
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
     ${_curSheetLabel()}
-    ${STATE.role==='advertiser'?'<span class="bd">열람 전용(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     ${summaryStrip(wd,d,m,c)}
-    <div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>
+    <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
     <div id="gridhost">${tableSection}</div>`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
@@ -1336,12 +1493,16 @@ function renderWorkdesk(wd){
 function summaryStrip(wd,d,m,c){
   const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
   const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
-  const meta=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
-    .map(([k,v])=>`<div class="mcell"><div class="k">${esc(k)}</div><div class="v" title="${esc(v)}">${esc(v)}</div></div>`).join('');
+  const isAdv=STATE.role==='advertiser';
+  // 광고주 렌즈: 담당자 표기(내부 실명) 대신 시작일 칸 — 정산 미니 셀도 없음(정산 카드가 항상 펼쳐져 있음).
+  const metaPairs=isAdv
+    ? [['상품',d.productOption||m.campaignName||'—'],['시작일',d.startDate?String(d.startDate).slice(0,10):'—'],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
+    : [['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']];
+  const meta=metaPairs.map(([k,v])=>`<div class="mcell"><div class="k">${esc(k)}</div><div class="v" title="${esc(v)}">${esc(v)}</div></div>`).join('');
   const kpi=`<div class="mcell kpi"><div class="k">참여자${target&&target!==c.total?` / 목표 ${target}`:''}</div><div class="v">${c.total||0}${target&&target!==c.total?`<small>/ ${target}</small>`:''}<span class="spct acc">${pT}%</span></div></div>`
     +`<div class="mcell kpi s"><div class="k">제출완료</div><div class="v">${c.submitted||0}<small>/ ${c.total||0}</small><span class="spct safe">${pS}%</span></div></div>`
     +`<div class="mcell kpi p"><div class="k">입금완료</div><div class="v">${c.paid||0}<small>/ ${c.total||0}</small><span class="spct acc">${pP}%</span></div></div>`;
-  const setl=`<div class="mcell setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()"><div class="k">정산</div><div class="v"><span class="setlsummary" style="color:var(--faint)">불러오는 중…</span><span class="caret">▼</span></div></div>`;
+  const setl=isAdv?'':`<div class="mcell setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()"><div class="k">정산</div><div class="v"><span class="setlsummary" style="color:var(--faint)">불러오는 중…</span><span class="caret">▼</span></div></div>`;
   return `<div class="stripA">${meta}${kpi}${setl}</div>`;
 }
 // 정산 미니 셀 클릭 → 하단 상세(스텝퍼) 펼침/접기
@@ -1382,6 +1543,11 @@ function renderSettlement(){
   const st=STATE.settle; if(!st) return; const box=$('#settlementsec'); if(!box) return; const d=st.data;
   const cellS=$('#setlCell .setlsummary'); if(cellS) cellS.outerHTML=setlSummaryHtml(d);   // 스트립 정산 셀 동기화
   const canLink=STATE.role!=='advertiser';
+  // 광고주 렌즈: 비공개·미연결 모두 같은 안내 한 줄(내부 용어 '계약 연결'·노출 토글 존재를 드러내지 않는다).
+  if(!canLink && (d.hidden || !d.linked)){
+    box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 현황</div><div class="stpcard"><div class="empty" style="padding:14px">정산 정보가 아직 준비되지 않았습니다. 궁금하신 내용은 담당자에게 문의해 주세요.</div></div></div>`;
+    return;
+  }
   if(d.hidden){ box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div><div class="stpcard"><div class="empty" style="padding:16px">정산 정보는 비공개로 설정되어 있습니다.</div></div></div>`; return; }
   if(!d.linked){
     box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div>
@@ -1399,7 +1565,10 @@ function renderSettlement(){
   const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:'<span class="stpoff">견적 없음</span>';
   const invSub=inv?`<span class="bb ${(_SETTLE_INV[inv.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_INV[inv.status]||[inv.status])[0]}</span>${inv.date?` · ${esc(String(inv.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
   const paySub=pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>${pay.date?` · ${esc(String(pay.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
-  box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
+  // 광고주 정산 카드 금액 4칸(시안): 총비용=견적서 금액 우선·계약금액 폴백 / 남은 입금액=총비용−입금액(화면 파생).
+  //   _advSettleMoney 는 광고주 화면에만 붙는다 — 내부 화면은 종전 스텝퍼 그대로(무회귀).
+  const advMoney=!canLink?_advSettleMoney(d,q):'';
+  box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">${canLink?'정산':'정산 현황'} ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${canLink&&d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${!canLink&&pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||''}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
     <div class="stpcard">
       <div class="stprow">
         ${_step(1,'마감자료',coState,coSub)}
@@ -1410,8 +1579,24 @@ function renderSettlement(){
         <div class="stparrow">→</div>
         ${_step(4,'입금',pay&&pay.status==='paid'?'done':(pay?'wait':'off'),paySub)}
       </div>
+      ${advMoney}
       ${canLink?`<div class="stpfoot"><span class="stpby">연결: ${esc(d.linkedBy||'')}</span><button class="btn xs" onclick="openLinkModal()">계약 변경</button><button class="btn xs" onclick="unlinkSettle()">연결 해제</button></div>`:''}
     </div></div>`;
+}
+// 광고주 정산 카드 금액 4칸 — 총비용(견적서 금액 우선) / 입금액 / 입금일(최근) / 남은 입금액(파생).
+function _advSettleMoney(d,q){
+  const quoteAmt=(q&&q.totalAmount>0)?+q.totalAmount:null;
+  const totalCost=quoteAmt!=null?quoteAmt:((d.amount!=null&&+d.amount>0)?+d.amount:null);
+  const paid=(d.paidAmount!=null&&!isNaN(+d.paidAmount))?+d.paidAmount:null;
+  if(totalCost==null&&paid==null) return '';
+  const rest=totalCost!=null?Math.max(totalCost-(paid||0),0):null;
+  const won=n=>n==null?'—':(+n).toLocaleString('ko-KR');
+  return `<div class="advmoney">
+    <div class="ambox"><div class="k">총비용${quoteAmt!=null?' (견적서 기준)':''}</div><div class="v">${won(totalCost)}${totalCost!=null?'<small>원</small>':''}</div></div>
+    <div class="ambox paidamt"><div class="k">입금액</div><div class="v">${won(paid)}${paid!=null?'<small>원</small>':''}</div></div>
+    <div class="ambox"><div class="k">입금일 (최근)</div><div class="v">${d.paidDate?esc(String(d.paidDate).slice(0,10)):'—'}</div></div>
+    <div class="ambox rest${rest===0?' zero':''}"><div class="k">남은 입금액</div><div class="v">${rest==null?'—':(rest===0?'완납 ✓':won(rest)+'<small>원</small>')}</div></div>
+  </div>`;
 }
 function openLinkModal(){
   const st=STATE.settle; if(!st) return;
@@ -1474,13 +1659,14 @@ async function dlCloseoutCsv(e){ if(e)e.preventDefault();
 function _ensureRailTabs(){
   const rail=$('#rail'); if(!rail) return;
   if(rail.querySelector('.railtabs')) return;   // 이미 구성됨(패널만 각 loader가 채움)
+  const isAdv=STATE.role==='advertiser';   // 광고주: Parity(내부 관측 도구) 탭 자체를 안 그린다 — 협업/댓글만
   rail.innerHTML=`<div class="railtabs">
       <button class="railtab" data-rt="thread" onclick="railTab('thread')">협업/댓글</button>
-      <button class="railtab" data-rt="parity" onclick="railTab('parity')">Parity</button>
+      ${isAdv?'':`<button class="railtab" data-rt="parity" onclick="railTab('parity')">Parity</button>`}
     </div>
     <div class="railpane" id="railThread"><div class="empty" style="padding:14px">불러오는 중…</div></div>
-    <div class="railpane" id="railParity"><div class="empty" style="padding:14px">불러오는 중…</div></div>`;
-  railTab(STATE.railTab||'thread');   // 기본 선택 = 협업/댓글
+    ${isAdv?'':`<div class="railpane" id="railParity"><div class="empty" style="padding:14px">불러오는 중…</div></div>`}`;
+  railTab(isAdv?'thread':(STATE.railTab||'thread'));   // 기본 선택 = 협업/댓글
 }
 function railTab(which){
   STATE.railTab=which;
@@ -3354,7 +3540,8 @@ function renderWorkOrderSection(wd){
     ['구매시간',d.purchaseTime],['배송',d.deliveryType],['페이',d.payAmount?Number(d.payAmount).toLocaleString()+'원':''],
     ['리뷰유형',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],
     ['리뷰가이드',d.reviewGuide],['특이사항',d.specialNotes],['상품 URL',d.productUrl],
-    ['시작일',d.startDate?String(d.startDate).slice(0,10):''],['담당',d.managerName]];
+    ['시작일',d.startDate?String(d.startDate).slice(0,10):''],
+    ...(STATE.role!=='advertiser'?[['담당',d.managerName]]:[])];   // 담당자 실명은 내부만(광고주 미노출)
   const opts=Array.isArray(d.options)?d.options:[];
   const optRow=opts.length?`<div class="worow"><span class="wk">옵션</span><span class="wv">${opts.map(o=>`<span class="wochip">${esc(o)}</span>`).join('')}</span></div>`:'';
   const rows=fields.filter(([k,v])=>v!=null&&String(v).trim()!=='').map(([k,v])=>`<div class="worow"><span class="wk">${esc(k)}</span><span class="wv">${esc(String(v))}</span></div>`).join('');
