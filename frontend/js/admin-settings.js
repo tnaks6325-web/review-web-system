@@ -87,7 +87,12 @@
     return j;
   }
   async function _post(key, body) {
-    var r = await fetch(_apiBase() + _ep(key), {
+    return _postAt(_ep(key), body);
+  }
+  /* 경로를 직접 지정하는 POST — 호스트별 재기준이 필요 없는(양쪽에서 그대로 닿는) 경로용.
+     작업표 표준열(WT_EP)·리뷰타입 정리(RTC_EP)가 쓴다. */
+  async function _postAt(path, body) {
+    var r = await fetch(_apiBase() + path, {
       method: "POST", headers: _headers(), body: JSON.stringify(body || {}),
     });
     var j = await r.json().catch(function () { return null; });
@@ -1156,8 +1161,81 @@ function _wtRenderReport(d) {
   /* ── 마운트 ──────────────────────────────────────────────────
      ★ 호스트 테마가 없으면(리뷰웹시스템[3버전]) `as-standalone` 으로 같은 토큰을 주입한다.
        admin.html 은 테마가 있어 클래스가 붙지 않으므로 **렌더 결과가 그대로**다. */
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, notice: loadReviewerNoticesAdmin };
+/* ══════════════════════════════════════════════════════════════
+   ★ 087 리뷰타입 정리 — 탭 설정 '리뷰타입' 칸에 남은 옛 값을 제자리로 되돌린다.
+
+   · 실배송 / 빈박스 → 배송유형(delivery_type)으로 이관하고 리뷰타입 칸은 비운다
+   · 믹스 → 혼합 (같은 뜻, 표기만 통일)
+
+   ★★ 화면을 두는 이유 = **미리보기를 사람이 보고 결정**해야 하기 때문이다.
+      기존 행을 건드리는 유일한 작업이라 자동 마이그레이션으로 돌리지 않았다.
+   ★★ 배송유형 이관은 서버에서 blank-only — 접수가 채운 값을 덮지 않는다.
+   ★ 안 돌려도 안전하다: 목록 밖 값은 판정(utils/reviewType)에서 null 로 떨어져
+      "오늘 동작 그대로"가 되고 화면에는 옛 값이 그대로 표시된다.
+   ══════════════════════════════════════════════════════════════ */
+/* ★ 서버 경로는 재기준(ADMIN_SETTINGS_API)을 쓰지 않는다 — `/api/trackb/settings/*` 는
+   관리자 대시보드(admin_token)와 리뷰웹시스템[3버전](인트라넷 SSO) **양쪽에서 그대로 닿는다**
+   (authMiddleware 는 admin 토큰을 받고, via:'intranet' 격리는 인트라넷 토큰을 trackb 로 **한정**할 뿐이다).
+   호스트마다 다른 경로로 보내면 두 화면이 서로 다른 결과를 본다 — 작업표 표준열과 같은 판단. */
+var RTC_EP = '/api/trackb/settings/review-type-cleanup';
+
+function _reviewTypeHtml() {
+  return `
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">✅ 리뷰타입 정리</span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
+          탭 설정의 <b>리뷰타입</b> 선택지가 <b>포토·텍스트·구매확정·별점·혼합</b>으로 통일됐습니다.
+          예전 목록에만 있던 값이 남아 있으면 제자리로 되돌립니다 —
+          <b>실배송·빈박스는 배송유형</b>으로 옮기고, <b>믹스는 혼합</b>으로 바꿉니다.<br>
+          <b>지금 그대로 두어도 안전합니다.</b> 목록에 없는 값은 판정에서 빠질 뿐 화면에는 그대로 보입니다.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="as-btn" id="rtcPreviewBtn" onclick="reviewTypeCleanupRun(true)">🔍 미리보기</button>
+          <button class="as-btn" id="rtcApplyBtn" style="display:none" onclick="reviewTypeCleanupRun(false)">적용하기</button>
+        </div>
+        <div id="rtcResult" style="font-size:.8rem;color:var(--t2);line-height:1.7"></div>`;
+}
+
+/** 미리보기·적용 공용. ★ dryRun=false 는 미리보기를 본 뒤에만 눌릴 수 있다(버튼이 그전엔 숨김). */
+async function reviewTypeCleanupRun(dryRun) {
+  var out = document.getElementById('rtcResult');
+  var applyBtn = document.getElementById('rtcApplyBtn');
+  if (!out) return;
+  if (!dryRun && !confirm('탭 설정의 옛 리뷰타입 값을 정리합니다.\n\n· 실배송/빈박스 → 배송유형으로 이관(배송유형이 비어 있을 때만)\n· 믹스 → 혼합\n\n진행할까요?')) return;
+  out.innerHTML = '<span style="color:var(--t3)">확인 중…</span>';
+  try {
+    var j = await _postAt(RTC_EP, { dryRun: !!dryRun });
+    if (!j || j.ok === false) throw new Error((j && j.error) || '실패');
+    var rows = (j.preview || []).map(function (r) {
+      var to = (r.review_type === '믹스') ? '혼합으로 표기 변경'
+             : ('배송유형으로 이관 — 그중 ' + r.delivery_empty + '건은 배송유형이 비어 있어 값이 옮겨집니다');
+      return '<li><b>' + r.review_type + '</b> ' + r.cnt + '건 → ' + to + '</li>';
+    }).join('');
+    if (!j.total) {
+      out.innerHTML = '<span style="color:var(--t2)">정리할 옛 값이 없습니다. 이미 전부 새 목록입니다.</span>';
+      if (applyBtn) applyBtn.style.display = 'none';
+      return;
+    }
+    if (j.dryRun) {
+      out.innerHTML = '<div style="margin-bottom:6px">대상 <b>' + j.total + '건</b></div><ul style="margin:0;padding-left:18px">' + rows + '</ul>'
+        + '<div style="margin-top:10px;color:var(--t3)">숫자를 확인한 뒤 [적용하기]를 누르세요.</div>';
+      if (applyBtn) applyBtn.style.display = '';
+    } else {
+      out.innerHTML = '<div style="color:#0F7B4F;font-weight:700">정리 완료 — 배송유형 이관 ' + j.moved + '건 · 믹스→혼합 ' + j.renamed + '건</div>';
+      if (applyBtn) applyBtn.style.display = 'none';
+      _setNavBadge('reviewtype', '완료');
+    }
+  } catch (e) {
+    out.innerHTML = '<span style="color:#B42318">실패: ' + escHtml(e.message) + '</span>';
+  }
+}
+
+/** ★ 펼칠 때 자동으로 돌리지 않는다 — 설정 화면을 열 때마다 전 탭을 훑을 이유가 없다. */
+function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
+
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
@@ -1165,6 +1243,7 @@ function _wtRenderReport(d) {
     business:  { ic: '🏢', nm: '제공정보' },
     aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
+    reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
     notice:    { ic: '📣', nm: '리뷰어 공지' },
   };
   var _navKeys = [];        // 이번 마운트에 그린 목차 키(순서 그대로)
@@ -1427,6 +1506,8 @@ function _wtRenderReport(d) {
   window.loadAiSamples = loadAiSamples;
   window.uploadAiSample = uploadAiSample;
   window.clearAiSample = clearAiSample;
+  window.loadReviewTypeCleanup = loadReviewTypeCleanup;
+  window.reviewTypeCleanupRun = reviewTypeCleanupRun;
   window.loadWorktableTemplate = loadWorktableTemplate;
   window.wtAddCol = wtAddCol;
   window.wtDelCol = wtDelCol;

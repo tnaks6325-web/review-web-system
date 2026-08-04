@@ -221,5 +221,33 @@ t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지
   ['admin.html', 'admin-siand.html', 'staff.html', 'workdesk.html',
    'js/index-app.js', 'js/work-order-detail.js'].every(f => !F(f).includes('리뷰유형')));
 
+/* ── 9) 정리 화면 — 리뷰웹시스템[3버전]에서 부를 수 있어야 한다 ── */
+console.log('\n9) 리뷰타입 정리 화면');
+const SET = F('js/admin-settings.js');
+{
+  // 라우터 스택 실검사 — 인트라넷 SSO 토큰은 /api/diag/* 에 도달 자체가 불가하므로 프록시가 필요하다
+  process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
+  const tb = require('../src/routes/trackB.routes');
+  const hit = tb.stack.filter(l => l.route && l.route.path === '/settings/review-type-cleanup');
+  t('Track B 프록시 등록 + 원본과 같은 권한(admin/master)',
+    hit.length === 1 && hit[0].route.stack.map(s => s.name).slice(0, 2)
+      .join(',') === 'authMiddleware,adminOrMasterMiddleware');
+}
+const TBS = S('src/routes/trackB.routes.js');
+t('★ 로직 복제 0 — 기존 diag 핸들러를 위임한다',
+  /_delegate\(require\('\.\/diag\.routes'\), 'post', '\/review-type-cleanup'\)/.test(TBS));
+t('설정 패널·목차·로더가 같은 키로 등록된다',
+  /reviewtype: _reviewTypeHtml/.test(SET) && /reviewtype: loadReviewTypeCleanup/.test(SET)
+  && /reviewtype: \{ ic: '✅'/.test(SET));
+t('★ 경로를 재기준하지 않는다 — 양쪽 호스트가 같은 경로로 같은 결과를 본다(작업표와 같은 판단)',
+  /RTC_EP = '\/api\/trackb\/settings\/review-type-cleanup'/.test(SET)
+  && !/reviewTypeCleanup:/.test(SET.slice(0, SET.indexOf('function _ep('))));
+t('★ 미리보기를 본 뒤에만 적용 버튼이 보인다(숫자 확인 없이 실행 불가)',
+  /id="rtcApplyBtn" style="display:none"/.test(SET)
+  && /reviewTypeCleanupRun\(true\)/.test(SET) && /reviewTypeCleanupRun\(false\)/.test(SET));
+t('적용은 confirm 뒤에만', /if \(!dryRun && !confirm\(/.test(SET));
+t('★ 펼칠 때 자동 실행하지 않는다(설정 화면 열 때마다 전 탭 훑기 금지)',
+  /function loadReviewTypeCleanup\(\) \{ _setNavBadge/.test(SET));
+
 console.log(`\n✅ ${pass}건 통과\n`);
 process.exit(0);
