@@ -4740,6 +4740,30 @@ function openCoverageMissing(){
     `<div class="ovnote">Track B 원장(<b>campaign_participants</b>)에 아직 행이 없는 활성 탭입니다. 관측 목록에는 <b>뜨지 않습니다</b>.${
       why.length?`<br>${why.join('<br>')}`:''}</div>${more}${rows}`);
 }
+// ── 일괄 cutover(master 전용) — 서버가 탭마다 단건 게이트(지금 시점 정밀 real=0)를 그대로 태운다.
+//    ★ force 는 보내지도 받지도 않는다(일괄 우회 금지) — 미통과 탭은 결과 모달에 사유로만 보고되고,
+//      정말 강제하려면 그 탭을 열어 단건 전환(+탭명 타이핑 마찰)으로 한다.
+const _CO_SKIP_LABELS = { already_db:'이미 전환됨', ghost:'유령(A·B 0행)', not_candidate:'triage 미충족',
+  parity_not_clean:'진짜 불일치 있음', parity_check_failed:'정밀검증 실패', empty_tab:'빈 탭', tab_not_found:'tab_configs 없음', error:'오류' };
+const _CO_REASON_LABELS = { count_mismatch:'카운트', unowned:'소유', no_work_order:'발주' };
+async function runCutoverAll(){
+  const it=STATE.ov||[]; const cand=it.filter(x=>x.cutoverCandidate).length;
+  if(!cand){ alert('전환 가능(카운트·소유·발주 충족) 탭이 없습니다.\n먼저 [전체 정밀 계산]과 업체 소유·발주 연결 상태를 확인하세요.'); return; }
+  if(!confirm(`전환 가능 ${cand}개 탭을 DB 원본(Track B)으로 전환합니다.\n\n· 각 탭은 지금 시점 정밀 검증(진짜 불일치 0)을 통과해야만 전환됩니다(미통과=건너뜀·보고).\n· 옵션 A(시트 미러 유지)라 되돌리기 가능하며, 시트 쓰기반영은 TRACK_B_WRITEBACK=1 일 때 상태 토글부터 동작합니다.\n\n진행할까요?`)) return;
+  const btn=$('#coAllBtn'); if(btn){btn.disabled=true;btn.textContent='전환 중…';}
+  const r=await api('/api/trackb/source-of-truth/all',{method:'POST',body:JSON.stringify({})});
+  if(!r||!r.ok){ alert('일괄 전환 실패: '+((r&&r.error)||'서버 오류')); if(btn){btn.disabled=false;btn.textContent='DB 원본 일괄 전환';} return; }
+  const rs=r.results||[]; const bad=rs.filter(x=>!x.ok);
+  const rows=rs.length?`<div style="overflow-x:auto"><table class="lgtable" style="table-layout:fixed;width:100%">
+    <thead><tr><th style="width:44%">탭</th><th style="width:18%">결과</th><th>사유</th></tr></thead><tbody>${
+    rs.map(x=>`<tr><td style="word-break:break-all">${esc(x.tabName||'')}</td>
+      <td>${x.ok?'<span class="bd g">전환됨</span>':'<span class="bd w">건너뜀</span>'}</td>
+      <td style="word-break:break-all">${x.ok?'':esc((_CO_SKIP_LABELS[x.skipped]||x.skipped||'')+(x.real!=null?` (진짜 불일치 ${x.real}건)`:'')+((x.reasons||[]).length?` — ${x.reasons.map(k=>_CO_REASON_LABELS[k]||k).join('·')} 미충족`:'')+(x.detail?` — ${x.detail}`:''))}</td></tr>`).join('')
+    }</tbody></table></div>`:`<div class="empty">대상 없음</div>`;
+  _modal(`DB 원본 일괄 전환 — 전환 ${r.flipped} / 건너뜀 ${r.skipped} / 총 ${r.total}`,
+    `<div class="ovnote">건너뜀 탭은 <b>전환되지 않았습니다</b>(강제 우회 없음). 사유를 해소한 뒤 다시 실행하거나, 예외는 그 탭을 열어 단건 전환하세요.${bad.length?'':' 모든 대상이 전환되었습니다.'}<br>시트 쓰기반영(write-back)은 Railway <b>TRACK_B_WRITEBACK=1</b> 설정 시 상태 토글부터 동작합니다.</div>${rows}`);
+  renderOverviewView();
+}
 function renderOverviewHead(){
   const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
   const nR = it.filter(x=>x.real===0).length, nRk = it.filter(x=>typeof x.real==='number').length;
@@ -4749,6 +4773,7 @@ function renderOverviewHead(){
     ${_ovCoverageChips()}
     <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주 + 신선한 진짜불일치0(세션 정밀 30분 내 또는 서버 스냅샷 24h 내) 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
     <span class="sp" style="flex:1"></span>
+    ${STATE.role==='master'?`<button class="btn" id="coAllBtn" onclick="runCutoverAll()" title="전환 가능(카운트·소유·발주·비유령) 탭 전부를 DB 원본으로 순차 전환합니다. 각 탭은 지금 시점 정밀 검증(진짜 불일치 0)을 통과해야만 전환되며, 미통과 탭은 사유와 함께 보고만 합니다(강제 우회 없음).">DB 원본 일괄 전환</button>`:''}
     <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>
     <input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
     <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. 실제 전환 게이트 = <b>진짜 불일치 0</b>(행 [정밀] 또는 "전체 정밀 계산"). 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;

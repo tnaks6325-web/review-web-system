@@ -1316,6 +1316,39 @@ async function setSourceOfTruth({ sheetId, tabName, value, by = 'admin', force =
   return { ok: true, sheetId, tabName, sourceOfTruth: value, parity, parityVerified: value === 'db' ? !parityErr : null };
 }
 
+// ── 일괄 cutover: "전환 가능(candidate)" 탭 전부에 단건 플립을 순차 시도 — master 전용(라우트) ──
+//   ★★ 게이트를 복제하지 않는다 — 판정은 setSourceOfTruth(단건과 같은 fail-closed: **지금 시점** 라이브
+//      parity real=0 · 비어있지 않음)가 그대로 한다. 여기서는 overview() triage 로 시도 대상만 고른다
+//      (화면의 `cutover 준비` 칩과 같은 신호 — 화면이 보여준 것과 다른 집합을 전환하면 안 된다).
+//   ★★ force 없음(완화 금지) — 일괄에서 게이트를 우회하면 클릭 한 번이 검증 안 된 탭을 무더기로
+//      전환한다. 게이트에 걸린 탭은 사유와 함께 보고만 하고, 예외는 단건 플립(+탭명 타이핑 마찰)으로.
+//   ★ overviewFn/flipFn 주입은 테스트용(모듈 내부 호출은 렉시컬이라 export 스터빙이 안 먹는다 —
+//     "밖에서 감싸기" 함정. 프로덕션 경로는 인자 없이 호출돼 실제 함수를 쓴다).
+async function cutoverAll({ by = 'admin', overviewFn = overview, flipFn = setSourceOfTruth } = {}) {
+  const items = await overviewFn();
+  const results = [];
+  for (const it of items) {
+    const key = { sheetId: it.sheetId, tabName: it.tabName };
+    if (it.sourceOfTruth === 'db') { results.push({ ...key, ok: false, skipped: 'already_db' }); continue; }
+    if (it.ghost) { results.push({ ...key, ok: false, skipped: 'ghost' }); continue; }
+    if (!it.cutoverCandidate) {
+      const why = [];
+      if (!it.countMatch) why.push('count_mismatch');
+      if (!it.owned) why.push('unowned');
+      if (!it.woLinked) why.push('no_work_order');
+      results.push({ ...key, ok: false, skipped: 'not_candidate', reasons: why });
+      continue;
+    }
+    try {
+      const r = await flipFn({ ...key, value: 'db', by });   // force 절대 미전달
+      results.push(r && r.ok ? { ...key, ok: true }
+        : { ...key, ok: false, skipped: (r && r.error) || 'unknown', ...(r && r.real != null ? { real: r.real } : {}) });
+    } catch (e) { results.push({ ...key, ok: false, skipped: 'error', detail: e.message }); }
+  }
+  const flipped = results.filter(r => r.ok).length;
+  return { total: results.length, flipped, skipped: results.length - flipped, results };
+}
+
 // 광고주 스코프: 이 업체가 소유한 (sheet_id, tab_gid) 집합. tab_gid NULL 소유 = 그 시트 전체.
 async function scopedTabsForAdvertiser(advertiserId) {
   if (!advertiserId) return { sheetIds: [], tabGids: [], allTabSheetIds: [] };
@@ -2560,6 +2593,7 @@ module.exports = {
   projectionCoverage,
   getSourceOfTruth,
   setSourceOfTruth,
+  cutoverAll,
   executeWriteback,
   writebackSweep,
   writebackStatus,
