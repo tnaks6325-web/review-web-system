@@ -301,16 +301,26 @@ const VERIFY_PROMPT = `당신은 온라인 쇼핑몰 주문 정보를 비교하�
  * @returns {{kind:'review'|'receipt'|'other', confidence:number, businessNo:string,
  *            amount:number, reason:string, elapsed:number, cached?:boolean}}
  */
-async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg') {
+async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts = {}) {
   if (!_initGemini()) throw new Error('Gemini API가 설정되지 않았습니다.');
   const startTime = Date.now();
+  /* ★★ 예시이미지(few-shot) — `opts.samples = [{label, data, mimeType}]`
+     "이런 화면이 정상 리뷰"의 실물을 함께 보여줘 채널 판별 정확도를 올린다.
+     ★ 캐시 키에 **예시 지문을 반드시 섞는다** — 안 그러면 예시를 등록·교체해도
+       옛 판정이 계속 히트해 등록이 무의미해진다.
+     ★ 호출부는 **모두 같은 samples 를 넘겨야 한다** — 한쪽만 넘기면 캐시 키가 갈려
+       같은 이미지에 AI 콜이 두 번 나간다(review-upload 의 verifyCapture ↔ 검수). */
+  const samples = Array.isArray(opts.samples) ? opts.samples.filter(s => s && s.data) : [];
+  const sampleSig = samples.length
+    ? crypto.createHash('sha1').update(samples.map(s => s.key || s.label || '').join('|')).digest('hex').slice(0, 12)
+    : '';
 
   // 같은 파일 재업로드·재시도는 캐시로 상각(extractOrderFromImage와 같은 저장소, 키에 용도 접두)
   // ★ 접두가 'classify2:' 인 이유: 응답에 channel/reviewText 등이 추가됐다. 옛 접두를 그대로 쓰면
   //   배포 직후 옛 캐시(새 필드 없음)가 히트해 채널이 undefined 인 판정이 나간다.
   //   이 캐시는 **첨부 시점 1차 필터 → 제출 시점 2차 검수** 사이의 재사용이 핵심이라
   //   (같은 이미지 = 같은 해시) AI 콜이 사실상 늘지 않는다.
-  const cacheHash = _getCacheKey('classify2:' + base64Data);
+  const cacheHash = _getCacheKey('classify2:' + sampleSig + ':' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
 
@@ -342,7 +352,19 @@ JSON 형식:
 {"kind":"review|receipt|other","confidence":0.0~1.0,"channel":"coupang|naver|kakao|oliveyoung 또는 빈문자","device":"pc|mobile 또는 빈문자","productName":"","reviewText":"","authorMask":"","signals":[],"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
 
   try {
-    const { text } = await _runModel([prompt, imagePart], 'classify');
+    // 예시가 있으면 **먼저** 보여주고(라벨과 함께) 마지막에 판별 대상을 준다 —
+    // 순서가 뒤섞이면 모델이 어느 것이 판별 대상인지 헷갈린다.
+    const parts = [];
+    if (samples.length) {
+      parts.push('아래는 정상 리뷰 화면의 예시입니다. 이 생김새를 참고해 판별하세요.');
+      for (const s of samples) {
+        parts.push(`[예시] ${s.label || s.key || ''}`);
+        parts.push({ inlineData: { data: String(s.data).replace(/^data:image\/[a-z]+;base64,/, ''), mimeType: s.mimeType || 'image/jpeg' } });
+      }
+      parts.push('― 여기까지 예시입니다. 이제 아래 이미지를 판별하세요. ―');
+    }
+    parts.push(prompt, imagePart);
+    const { text } = await _runModel(parts, 'classify');
     if (!text || !text.trim()) throw new Error('AI 응답이 비어 있습니다.');
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const p = JSON.parse(jsonStr);
