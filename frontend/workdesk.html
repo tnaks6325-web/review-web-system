@@ -423,6 +423,54 @@
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
   .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
   .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+
+  /* ══ 표 검색(툴바 왼쪽 인라인 + 스크롤 위치 눈금) — 시안 C · docs/design-grid-search.html ══
+     치는 즉시 표 안의 값을 찾아 노란색으로 칠하고, 그 자리로 화면(세로+가로)이 이동한다. */
+  .gsearch{position:relative;display:flex;align-items:center;flex:none}
+  .gsearch .ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:12px;pointer-events:none}
+  .gsearch input{font:inherit;font-size:12.5px;padding:5px 76px 5px 27px;border:1px solid var(--line2);border-radius:7px;
+                 background:var(--card);color:var(--ink);outline:none;width:230px;transition:border-color .12s,box-shadow .12s}
+  .gsearch input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .gsearch input.hasq{border-color:#e8c73c;box-shadow:0 0 0 3px #fff6cc}
+  .gsearch input.none{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+  .gsearch .cnt{position:absolute;right:44px;font-size:10.5px;font-weight:750;color:var(--muted);pointer-events:none;
+                font-variant-numeric:tabular-nums;white-space:nowrap}
+  .gsearch .cnt.none{color:var(--bad)}
+  .gsearch .nav2{position:absolute;right:5px;display:flex;gap:1px}
+  .gsearch .nb2{width:17px;height:19px;border:none;background:none;color:var(--faint);cursor:pointer;font-size:10px;
+                border-radius:4px;line-height:1;padding:0}
+  .gsearch .nb2:hover:not(:disabled){background:var(--card2);color:var(--accent-deep)}
+  .gsearch .nb2:disabled{opacity:.3;cursor:default}
+  .gsmsg{font-size:11px;font-weight:650;color:var(--warn);background:var(--warn-soft);
+         border:1px solid #f0dcc0;border-radius:7px;padding:3px 9px;display:none}
+  .gsmsg.show{display:inline-block}
+  /* ★★ 하이라이트는 전부 !important — 이 표의 셀 배경은 이미 세 갈래로 칠해질 수 있다:
+        ① 담당자가 직접 칠한 셀 배경색(migration 080)은 **인라인 style** 이라 클래스로는 절대 못 이긴다
+        ② 편집된 셀(.gedit.edited)은 파란 배경  ③ 행 호버(tr:hover td)는 뒤쪽 규칙이라 하이라이트를 덮는다
+        셋 중 하나라도 못 이기면 "찾았다는데 노란 게 안 보이는 셀"이 생긴다.
+     ★ 기존 앰버(.rowhit = 리뷰어 로그 딥링크 행 강조)와 구분되도록 더 밝은 노랑 + 현재 건은 주황 테두리. */
+  table.sheetgrid td.gs-hit,
+  table.sheetgrid tbody tr:hover td.gs-hit,
+  table.sheetgrid td.gs-hit.gfz,
+  table.sheetgrid tbody tr:hover td.gs-hit.gfz{background:#fff3b0!important}
+  table.sheetgrid td.gs-cur,
+  table.sheetgrid tbody tr:hover td.gs-cur,
+  table.sheetgrid td.gs-cur.gfz,
+  table.sheetgrid tbody tr:hover td.gs-cur.gfz{
+    background:#ffe9c7!important;box-shadow:inset 0 0 0 2px #ff8a00}
+  mark.gs-mk{background:#ffe14d;color:inherit;border-radius:2px;padding:0 1px;font-weight:700}
+  td.gs-cur mark.gs-mk{background:#ff8a00;color:#fff}
+  /* 가로로 스크롤해 나가도 "이 행에 결과가 있다"가 남게 — 맨 왼쪽 # 칸에 세로 막대 */
+  table.sheetgrid tbody tr.gs-row td.gnum{box-shadow:inset 3px 0 0 #ffe14d}
+  table.sheetgrid tbody tr.gs-rowcur td.gnum{box-shadow:inset 3px 0 0 #ff8a00}
+  /* 스크롤 위치 눈금(시안 C) — 표 "바깥"에 자리를 만든다(표 위에 겹치면 오른쪽 끝 데이터를 가린다).
+     폭은 검색 여부와 무관하게 항상 잡아 둔다 = 검색할 때 표가 흔들리지 않는다. */
+  .gswrap{position:relative;padding-right:15px}
+  .gsmap{position:absolute;right:0;top:34px;bottom:2px;width:8px;border-radius:5px;background:rgba(16,24,40,.05);
+         z-index:5;pointer-events:none;opacity:0;transition:opacity .15s}
+  .gsmap.on{opacity:1}
+  .gsmap i{position:absolute;left:1px;right:1px;height:3px;border-radius:2px;background:#ffe14d;transform:translateY(-50%)}
+  .gsmap i.cur{background:#ff8a00;height:5px;left:0;right:0}
   /* ── 관측 대시보드 ── */
   .ovwrap{padding:18px 22px;overflow:auto;height:calc(100vh - 50px)}
 
@@ -2615,6 +2663,8 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t
   if(!_gs.some(g=>g.key===STATE.wSeg && g.idxs.includes(i))) STATE.wSeg=(t.advertiserName||'');
   // 탭 전환 = 헤더 구성이 달라지므로 그리드 뷰 상태(필터/숨김/그룹/정렬/정산펼침) 초기화
   STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.gSelCols=[]; STATE.freezeUpto=null; STATE.settleOpen=false; closeGColMenu(); closeGHidMenu();
+  // ★ 표 검색도 초기화 — 다른 작업의 검색어가 남아 있으면 "왜 여기만 노랗지"가 된다
+  STATE.gSearch=''; STATE.gsHits=[]; STATE.gsCur=-1; STATE.gsFiltered=0; STATE.gRows=[]; STATE.gVCols=[];
   _renderTabList();   // 상단 작업바 활성 표시 갱신(세그먼트가 바뀌었을 수 있어 재렌더)
   _wtOpen(t);         // ★ 작업을 여는 모든 경로(그룹 탭·검색·홈 목록·딥링크)가 여기로 수렴 → 열린 줄에 추가
   $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
@@ -3253,7 +3303,8 @@ function _scheduleBodyFlush(){
     const tb=document.getElementById('gbody'); if(!tb){ STATE._pendingBody=null; return; }
     tb.insertAdjacentHTML('beforeend', pp.rows.splice(0,_GRID_CHUNK).join(''));
     if(pp.rows.length){ _raf(step); _applyPendingFocus(false); }   // 중간에도 시도(대상이 이미 들어왔으면 즉시 강조)
-    else { STATE._pendingBody=null; _applyPendingFocus(true); }    // 마지막 청크까지 끝 → 없으면 '못 찾음' 확정
+    else { STATE._pendingBody=null; _applyPendingFocus(true);      // 마지막 청크까지 끝 → 없으면 '못 찾음' 확정
+      if(STATE.gSearch) _gsPaint(); }                              // 뒤늦게 들어온 행에도 검색 하이라이트를 칠한다
   };
   _raf(step);
 }
@@ -3327,6 +3378,10 @@ function buildGrid(wd){
       const both=x!==''&&y!==''&&!isNaN(nx)&&!isNaN(ny);
       return (both?nx-ny:String(x).localeCompare(String(y),'ko'))*sdir; });
   }
+  // ★ 표 검색이 볼 재료 — **화면에 그려질 순서·열 그대로** 남긴다(DOM 훑기 금지: 아래 청크 렌더 참조).
+  //   frozenW = 왼쪽 고정열 폭 합 → 검색 이동 시 결과가 고정열 뒤에 가려지지 않게 계산하는 데 쓴다.
+  STATE.gRows=rows; STATE.gVCols=vcols;
+  STATE.gFrozenW=vcols.slice(0,frozenN).reduce((s,c)=>s+_colW(c.key),0);
   // 단일 행 렌더(편집 셀 보존 · vcols 순서 · 인덱스로 고정/폭 계산)
   const rowHtml=(r)=>{
     const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
@@ -3394,7 +3449,17 @@ function buildGrid(wd){
     .concat(H.map(h=>`<option value="${esc(h)}"${STATE.gGroupBy===h?' selected':''}>${esc(h)} 기준</option>`)).join('');
   const nHid=STATE.gHidden.size, hasFilt=Object.values(STATE.gFilters).some(s=>s&&s.size);
   const selCols=(STATE.gSelCols||[]).filter(c=>!STATE.gHidden.has(c)&&allCols.includes(c)), nSel=selCols.length;
+  // ★ 검색창은 툴바 맨 앞(= 표 왼쪽 위). 값은 STATE.gSearch 에서 복원한다 —
+  //   필터·정렬·숨김으로 툴바가 다시 그려져도 치던 검색어가 날아가지 않게.
+  const gsVal=esc(STATE.gSearch||'');
   return `<div class="gridbar">
+      <div class="gsearch"><span class="ic">🔍</span>
+        <input id="gsInput" type="text" placeholder="표 안에서 찾기…" autocomplete="off" value="${gsVal}"
+               oninput="_gsInput(this.value)" onkeydown="_gsKey(event)">
+        <span class="cnt" id="gsCnt"></span>
+        <span class="nav2"><button class="nb2" id="gsPrev" title="이전 결과 (Shift+Enter)" onclick="_gsStep(-1)">▲</button><button class="nb2" id="gsNext" title="다음 결과 (Enter)" onclick="_gsStep(1)">▼</button></span>
+      </div>
+      <span class="gsmsg" id="gsMsg"></span>
       ${nSel?`<span class="gselact"><b>${nSel}개 열 선택</b><button class="btn xs pri" onclick="hideSelectedCols()">숨기기</button><button class="btn xs" onclick="clearColSel()">취소</button></span>`:''}
       <label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
       <label>행 그룹</label><select id="grpsel" onchange="setGGroup(this.value)">${grpOpts}</select>
@@ -3404,13 +3469,187 @@ function buildGrid(wd){
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
       <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소) · <b>셀 드래그</b>=범위 선택 → 배경색`:` · <b>열람 전용</b>`}</span></div>
-    <div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div>
+    <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
     <div id="addbox"></div>
     ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
-  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); _fitGrid(); _rvReapply(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작(+미리보기 선택 복원)
+  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); _fitGrid(); _rvReapply(); _gsReapply(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작(+미리보기 선택 복원 + 검색 하이라이트 복원)
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   표 검색 — 실시간 · 노란 하이라이트 · 자동 이동 (시안 C · docs/design-grid-search.html)
+   ══════════════════════════════════════════════════════════════════════════════
+   ★★ 매칭은 **데이터(STATE.gRows)** 에서 센다 — DOM 을 훑으면 안 된다.
+      이 그리드는 첫 _GRID_CHUNK(60)행만 즉시 그리고 나머지는 rAF 로 이어 붙이므로,
+      DOM 기준으로 세면 아직 안 그려진 행이 통째로 결과에서 빠진다("45건 중 12건만 찾히는" 버그).
+      대신 **이동할 때** 남은 청크를 먼저 다 그린 뒤 그 행으로 간다.
+   ★ 검색 대상 = 지금 화면에 보이는 값 그대로(gCellDisp) · 보이는 열만(숨긴 열 제외).
+      화면에 없는 칸으로는 "찾아갈" 수가 없고, 보이는 값과 찾히는 값이 어긋나면 그게 더 혼란스럽다.
+   ★ 입력 중 그리드 재렌더 금지 — 툴바(입력칸 자신)를 다시 그리면 한글 IME 조합이 깨진다
+      (홈 작업목록 검색에서 실측된 'ㅁ며면면' 사고와 같은 자리). 여기서는 #gbody 셀과
+      카운터 텍스트만 건드린다. */
+function _gsTr(rid){ const b=document.getElementById('gbody'); return b?b.querySelector('tr[data-rid='+JSON.stringify(String(rid))+']'):null; }
+// 남은 청크를 지금 다 그린다(이동 대상이 아직 없을 수 있으므로). 한 번만 치르는 비용이고, 안 하면 못 찾아간다.
+function _gsFlushAll(){
+  const p=STATE._pendingBody; if(!p||!p.rows||!p.rows.length) return;
+  const tb=document.getElementById('gbody'); if(!tb){ STATE._pendingBody=null; return; }
+  tb.insertAdjacentHTML('beforeend', p.rows.join(''));
+  STATE._pendingBody=null;   // 진행 중이던 rAF 루프는 이 값을 보고 스스로 멈춘다
+  _applyPendingFocus(true);
+}
+// 일치 목록 계산(표시 순서대로). 4자리 이상 숫자를 쳤으면 "숫자만" 비교도 함께 본다(010-3498-2400 ↔ 34982400).
+function _gsCompute(){
+  const q=String(STATE.gSearch||'').trim();
+  const rows=STATE.gRows||[], cols=STATE.gVCols||[];
+  if(!q){ STATE.gsHits=[]; STATE.gsCur=-1; STATE.gsFiltered=0; return; }
+  const lq=q.toLowerCase(), dq=q.replace(/[^0-9]/g,''), useD=dq.length>=4;
+  const hits=[];
+  rows.forEach((r,ri)=>{ cols.forEach((c,ci)=>{
+    const s=String(gCellDisp(r,c.key)||''); if(!s) return;
+    if(s.toLowerCase().indexOf(lq)>=0){ hits.push({rid:r.id,ri:ri,ci:ci,mk:q}); return; }
+    if(useD){ const d=s.replace(/[^0-9]/g,''); if(d&&d.indexOf(dq)>=0) hits.push({rid:r.id,ri:ri,ci:ci,mk:''}); }
+  }); });
+  // 필터로 걸러져 화면에 없는 행에도 결과가 있으면 **말해준다**(조용히 빼놓지 않는다)
+  let off=0;
+  try{
+    const shown=new Set(rows.map(r=>r.id));
+    (((STATE.wd||{}).roster)||[]).forEach(r=>{ if(shown.has(r.id)) return;
+      if(cols.some(c=>{ const s=String(gCellDisp(r,c.key)||''); return s&&(s.toLowerCase().indexOf(lq)>=0||(useD&&s.replace(/[^0-9]/g,'').indexOf(dq)>=0)); })) off++; });
+  }catch(_){ off=0; }
+  STATE.gsFiltered=off;
+  STATE.gsHits=hits;
+  STATE.gsCur = hits.length ? Math.min(Math.max(STATE.gsCur,0), hits.length-1) : -1;
+}
+// 하이라이트 걷어내기 — 셀 내용은 텍스트 노드만 되돌린다(배지·↩ 버튼 등 다른 요소는 안 건드림)
+function _gsClear(){
+  const b=document.getElementById('gbody'); if(!b) return;
+  b.querySelectorAll('td.gs-hit,td.gs-cur').forEach(td=>{
+    td.classList.remove('gs-hit','gs-cur');
+    td.querySelectorAll('mark.gs-mk').forEach(m=>{ m.parentNode.replaceChild(document.createTextNode(m.textContent), m); });
+    td.normalize();
+  });
+  b.querySelectorAll('tr.gs-row,tr.gs-rowcur').forEach(tr=>tr.classList.remove('gs-row','gs-rowcur'));
+}
+// 일치한 "글자"만 <mark> 로 감싼다 — 텍스트 노드만 훑으므로 배지/버튼 마크업이 깨지지 않는다.
+function _gsMark(td,q){
+  if(!q) return;
+  const lq=q.toLowerCase();
+  const walk=(node)=>{
+    for(let n=node.firstChild;n;n=n.nextSibling){
+      if(n.nodeType===3){
+        const t=n.nodeValue||'', i=t.toLowerCase().indexOf(lq);
+        if(i>=0){
+          const frag=document.createDocumentFragment();
+          if(i>0) frag.appendChild(document.createTextNode(t.slice(0,i)));
+          const mk=document.createElement('mark'); mk.className='gs-mk'; mk.textContent=t.substr(i,q.length);
+          frag.appendChild(mk);
+          if(i+q.length<t.length) frag.appendChild(document.createTextNode(t.slice(i+q.length)));
+          n.parentNode.replaceChild(frag,n);
+          return true;
+        }
+      } else if(n.nodeType===1 && n.tagName!=='MARK'){ if(walk(n)) return true; }
+    }
+    return false;
+  };
+  try{ walk(td); }catch(_){ }
+}
+function _gsPaint(){
+  _gsClear();
+  const hits=STATE.gsHits||[];
+  hits.forEach((h,i)=>{
+    const tr=_gsTr(h.rid); if(!tr) return;                 // 아직 안 그려진 행(청크) — 이동할 때 그린다
+    const td=tr.children[h.ci]; if(!td) return;            // 셀 위치 = vcols 인덱스(그린 순서와 1:1)
+    td.classList.add('gs-hit'); tr.classList.add('gs-row');
+    _gsMark(td,h.mk);
+    if(i===STATE.gsCur){ td.classList.add('gs-cur'); tr.classList.add('gs-rowcur'); }
+  });
+  _gsDrawMap();
+}
+// ★ 세로뿐 아니라 **가로**도 맞춘다 — 이 표는 옆으로도 길어(주소·계좌번호는 오른쪽 끝)
+//   세로만 맞추면 "찾았다는데 화면엔 안 보이는" 일이 생긴다. 왼쪽 고정열 뒤에 가리지도 않게 한다.
+function _gsScrollTo(tr,ci){
+  const host=$('.gridscroll'); if(!host||!tr) return;
+  const td=tr.children[ci]; if(!td) return;
+  const sr=host.getBoundingClientRect(), cr=td.getBoundingClientRect();
+  const th=host.querySelector('thead th');
+  const headH=th?th.getBoundingClientRect().height:30;
+  const fz=STATE.gFrozenW||0;
+  if(!td.classList.contains('gfz')){                        // 고정열은 항상 보이므로 가로 이동 불필요
+    const l=cr.left-sr.left, r=cr.right-sr.left;
+    if(l<fz+10) host.scrollLeft += l-fz-16;
+    else if(r>host.clientWidth-10) host.scrollLeft += r-host.clientWidth+16;
+  }
+  const t=cr.top-sr.top, b=cr.bottom-sr.top;
+  if(t<headH+6) host.scrollTop += t-headH-40;
+  else if(b>host.clientHeight-6) host.scrollTop += b-host.clientHeight+40;
+}
+// 스크롤 위치 눈금(시안 C) — 표 전체에서 결과가 어디쯤 흩어져 있는지. 행 그룹 머리행 높이는 안 세므로 대략적 분포.
+function _gsDrawMap(){
+  const map=document.getElementById('gsMap'); if(!map) return;
+  const hits=STATE.gsHits||[], n=(STATE.gRows||[]).length;
+  if(!hits.length||!n){ map.innerHTML=''; map.classList.remove('on'); return; }
+  map.classList.add('on');
+  const seen=new Set(); let html='';
+  hits.forEach((h,i)=>{
+    const cur=(i===STATE.gsCur);
+    if(seen.has(h.ri)&&!cur) return; if(!cur) seen.add(h.ri);
+    html+=`<i class="${cur?'cur':''}" style="top:${(((h.ri+0.5)/n)*100).toFixed(2)}%"></i>`;
+  });
+  map.innerHTML=html;
+}
+function _gsStatus(){
+  const inp=document.getElementById('gsInput'), cnt=document.getElementById('gsCnt'), msg=document.getElementById('gsMsg');
+  const q=String(STATE.gSearch||'').trim(), hits=STATE.gsHits||[];
+  if(inp){ inp.classList.toggle('hasq', !!q&&hits.length>0); inp.classList.toggle('none', !!q&&!hits.length); }
+  if(cnt){ cnt.classList.toggle('none', !!q&&!hits.length);
+    cnt.textContent = !q ? '' : (hits.length ? (STATE.gsCur+1)+' / '+hits.length : '결과 없음'); }
+  const p=document.getElementById('gsPrev'), nx=document.getElementById('gsNext');
+  if(p) p.disabled=!hits.length; if(nx) nx.disabled=!hits.length;
+  if(msg){
+    const parts=[];
+    if(q&&hits.length) parts.push(new Set(hits.map(h=>h.rid)).size+'개 행 · '+hits.length+'칸 일치');
+    if(q&&STATE.gsFiltered) parts.push('필터로 숨겨진 '+STATE.gsFiltered+'행에도 결과가 있습니다');
+    msg.textContent=parts.join(' · ');
+    msg.classList.toggle('show', parts.length>0);
+  }
+}
+// 현재 결과로 이동(필요하면 남은 행을 먼저 그리고, 접힌 그룹이면 그 그룹만 펼친다)
+function _gsGo(){
+  const h=(STATE.gsHits||[])[STATE.gsCur]; if(!h) return;
+  _gsFlushAll();
+  let tr=_gsTr(h.rid);
+  if(!tr && STATE.gGroupBy){
+    const row=(STATE.gRows||[])[h.ri];
+    if(row){ const k=gCellDisp(row,STATE.gGroupBy);
+      if(STATE.gCollapsed&&STATE.gCollapsed.has(k)){ STATE.gCollapsed.delete(k); rerenderGrid(); _gsFlushAll(); tr=_gsTr(h.rid); } }
+  }
+  _gsPaint(); _gsStatus();
+  if(tr) _gsScrollTo(tr,h.ci);
+}
+let _gsTimer=null;
+function _gsInput(v){
+  STATE.gSearch=v;
+  clearTimeout(_gsTimer);
+  _gsTimer=setTimeout(()=>{ STATE.gsCur=-1; _gsCompute(); if((STATE.gsHits||[]).length){ STATE.gsCur=0; _gsGo(); } else { _gsPaint(); _gsStatus(); } },120);
+}
+function _gsStep(d){
+  const hits=STATE.gsHits||[]; if(!hits.length) return;
+  STATE.gsCur=(STATE.gsCur+d+hits.length)%hits.length;   // 마지막 다음 = 처음(표 검색은 훑는 일이라 순환이 자연스럽다)
+  _gsGo();
+}
+function _gsKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); if(!(STATE.gsHits||[]).length){ _gsCompute(); if((STATE.gsHits||[]).length){ STATE.gsCur=0; _gsGo(); } else _gsStatus(); } else _gsStep(e.shiftKey?-1:1); }
+  else if(e.key==='ArrowDown'){ e.preventDefault(); _gsStep(1); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); _gsStep(-1); }
+  else if(e.key==='Escape'){ e.preventDefault(); e.stopPropagation(); STATE.gSearch=''; STATE.gsCur=-1; _gsCompute(); _gsPaint(); _gsStatus();
+    const i=document.getElementById('gsInput'); if(i){ i.value=''; i.blur(); } }
+}
+// 재렌더(필터·정렬·숨김·그룹) 후 하이라이트만 다시 칠한다 — **이동은 하지 않는다**(사용자가 보던 자리를 뺏지 않게)
+function _gsReapply(){
+  const inp=document.getElementById('gsInput'); if(inp) inp.value=STATE.gSearch||'';
+  _gsCompute(); _gsPaint(); _gsStatus();
+}
 // ★★ 표폭 = '보이는 열 고정폭의 합' 못박기 (역할 무관·창 크기 무관)
 //   과거엔 언더플로 시 주소 열이 잔여폭을 흡수해 표를 꽉 채웠다 → 같은 열이 창 크기·숨긴 열 수에 따라
 //   매번 다른 너비가 되어, 여러 작업을 오가며 데이터를 훑는 실사용자가 열 위치를 다시 찾아야 했다.
