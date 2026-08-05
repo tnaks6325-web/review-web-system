@@ -323,6 +323,7 @@ const _ACTION_MAP = {
   'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
   'orderAdminAccept':      { method: 'POST', path: '/api/order/admin/accept' },
   'orderAdminUpdate':      { method: 'PUT',  path: '/api/order/admin/update' },
+  'orderAdminEdit':        { method: 'PUT',  path: '/api/order/admin/edit' },
   'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
   'orderAdminDelete':      { method: 'DELETE', path: '/api/order/admin/delete' },
   'productPreview':        { method: 'POST', path: '/api/product/preview' },

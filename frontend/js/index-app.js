@@ -1595,10 +1595,27 @@ function _renderWorkOrderCard(o) {
         ${o.linked_campaign_id
           ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.8rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
           : `<button onclick="woCreateCampaignGuarded('${o.id}')" style="font-size:.8rem;font-weight:700;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고생성</button>`}
+        <button onclick="woAdminEdit('${o.id}')" title="작업오더 내용을 직접 수정합니다 (인트라넷 보낸오더 카드에도 반영)" style="font-size:.8rem;font-weight:700;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-pen"></i> 관리자 수정</button>
         <button onclick="woDelete('${o.id}')" title="작업오더 삭제 (인트라넷에서도 삭제됨)" style="font-size:.8rem;font-weight:700;background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA;border-radius:8px;padding:8px 16px;cursor:pointer;margin-left:auto"><i class="fas fa-trash-alt"></i> 삭제</button>
       </div>
     </div>
   </div>`;
+}
+
+// ✏ 작업오더 관리자 수정 — 공유 모달(work-order-detail.js woAdminEditModal) 한 벌.
+//   저장 경로만 호스트가 주입(orderAdminEdit) — 성공 시 목록 재조회로 카드가 새 값을 그린다.
+//   인트라넷 "보낸 오더"는 리뷰웹 원장을 실시간 조회하므로 자동 반영(서버가 알림 메모 push).
+function woAdminEdit(id) {
+  const o = (_woCache || []).find(x => x.id === id);
+  if (!o) { showToast("오더를 찾을 수 없습니다.", true); return; }
+  if (typeof woAdminEditModal !== "function") { showToast("수정 모달 모듈을 불러오지 못했습니다.", true); return; }
+  woAdminEditModal(o, {
+    save: fields => gasGet({ action: "orderAdminEdit", id, ...fields }, 60000),
+    onSaved: r => {
+      showToast("✏ 수정 저장됨" + (r.delivered ? " — 인트라넷 알림 전송" : (r.deliverError === "webhook 미설정" ? "" : " (인트라넷 알림 실패)")));
+      loadWorkOrders();
+    },
+  });
 }
 
 // 작업오더 카드 상세 펼치기/접기
