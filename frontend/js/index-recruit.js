@@ -1547,6 +1547,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _previewOpen = true;
   _renderPreview();
   _attachPreviewListeners();
+
+  /* 🧹 4칸 정리 도우미(개선 ③·④) — 신규 프리필·기발행 스냅샷 모두 열리는 순간 같은 감지가 돈다 */
+  try { renderRecruitFieldCleanup(); } catch (_) { /* 감지 실패가 모달을 막으면 안 된다 */ }
 }
 
 // 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
@@ -2454,6 +2457,140 @@ function _detachPreviewListeners() {
     if (el) el.removeEventListener("change", _onPreviewInput);
   });
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   🧹 4칸 정리 도우미 (4칸 정리 개선 ③·④ — docs/모집공고_4칸정리_개선_와이어프레임.html)
+   ─────────────────────────────────────────────────────────────────────
+   감지는 자동·경고 전용(게시는 절대 막지 않는다), 정리는 항상 **전/후 미리보기 → 사람 [적용]**
+   (조용한 자동수정 금지 — 슬래시양식 보정 배지와 같은 규율).
+   ★ 판정 = "정리 함수를 돌려보고 달라지는가" — 정리 규칙의 단일 출처는
+     work-order-detail.js(_woStripReviewMeta/_woPickSections)이고, 관리자 카드 배지
+     (campaign-cards.js needsFieldCleanup)도 같은 함수를 쓴다(감지≠정리 드리프트 금지).
+   ★ 유입가이드가 원본 HTML 모드(dataset.rawHtml='1' — 이미지 포함 보존)면 값 수정을
+     제안하지 않는다 — textarea 를 고치는 순간 원본 서식·이미지가 빠진다(안내만).
+   ═══════════════════════════════════════════════════════════════════════ */
+const _CLEAN_MIX_RE = /(주소|연락처|폰번호|전화번호|입금|계좌|송금)/;
+const _cleanEsc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function _cleanNormText(v) {
+  return String(v || "").replace(/\n{3,}/g, "\n\n").trim();
+}
+function _cleanReviewValue(v) {
+  if (typeof _woStripReviewMeta !== "function" || typeof _woPickSections !== "function") return _cleanNormText(v);
+  return _woStripReviewMeta(_woPickSections(String(v || ""), ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]));
+}
+/** 유의사항 원문 덤프 지문 — 카드 배지(_campNeedsFieldCleanup)와 같은 규칙 */
+function _cleanNotesDirty(v) {
+  const t = String(v || "");
+  return /\[(유입방식|유입가이드|링크유입|리뷰등록 가이드|리뷰가이드)\]/.test(t)
+    || /(?:쿠팡\s*)?상품번호\s*[:：]/.test(t) || /▶\s*옵션\s*[:：]\s*결제금액\s*◀/.test(t);
+}
+/** 유입가이드에서 진입 방법이 아닌 안내 조각(주소·연락처류) 추출 — 줄/'/' 구분 단위 */
+function _cleanInflowSplit(v) {
+  const keep = [], move = [];
+  String(v || "").split(/\r?\n/).forEach(line => {
+    if (!_CLEAN_MIX_RE.test(line)) { keep.push(line); return; }
+    const parts = line.split("/");
+    if (parts.length > 1) {
+      const k = parts.filter(p => !_CLEAN_MIX_RE.test(p));
+      const m = parts.filter(p => _CLEAN_MIX_RE.test(p));
+      if (k.length) keep.push(k.map(s => s.trim()).join(" / "));
+      move.push(...m.map(s => s.trim()).filter(Boolean));
+    } else {
+      move.push(line.trim());
+    }
+  });
+  return { keep: keep.join("\n").replace(/\n{3,}/g, "\n\n").trim(), move: move.filter(Boolean) };
+}
+
+function renderRecruitFieldCleanup() {
+  const $ = id => document.getElementById(id);
+  const warnHtml = (msg, btnLabel, kind) =>
+    `<div class="rf-clean-warn">⚠ ${msg}` +
+    (btnLabel ? ` <button type="button" class="rchan-btn" onclick="rfCleanPreview('${kind}')">${btnLabel}</button>` : "") +
+    `</div><div id="rf_clean_pv_${kind}"></div>`;
+
+  // ① 리뷰가이드 — 정리해 보고 달라지면 오염(신규 프리필은 이미 깨끗해 no-op)
+  const rv = $("rf_wd_review"), cR = $("rf_clean_review");
+  if (rv && cR) {
+    const cur = _cleanNormText(rv.value);
+    cR.innerHTML = (cur && _cleanReviewValue(rv.value) !== cur)
+      ? warnHtml("유입 메타·상품번호 줄이 섞여 있어요(리뷰어 화면 이중 표기)", "🧹 리뷰가이드만 남기기", "review")
+      : "";
+  }
+  // ② 유의사항 — 공고 카드(참여 전 공개)에 내부 원문 지문
+  const nt = $("rf_notes"), cN = $("rf_clean_notes");
+  if (nt && cN) {
+    cN.innerHTML = _cleanNotesDirty(nt.value)
+      ? warnHtml("공고 카드에 <b>모두에게 공개</b>되는 칸이에요 — 내부 원문(섹션 라벨·상품번호)이 감지됐어요", "🧹 비우기", "notes")
+      : "";
+  }
+  // ③ 유입가이드 — 진입 방법 외 안내 조각(원본 HTML 모드는 값 수정 제안 없음)
+  const infl = $("rf_wd_inflow"), cI = $("rf_clean_inflow");
+  if (infl && cI) {
+    const rawMode = infl.dataset.rawHtml === "1";
+    const { move } = _cleanInflowSplit(infl.value);
+    if (!move.length) cI.innerHTML = "";
+    else if (rawMode) cI.innerHTML = `<div class="rf-clean-warn">⚠ 주소·연락처류 안내가 섞인 것 같아요 — 원본 서식(이미지 포함) 공고라 자동 이동은 못 해요. 특이사항으로 옮기려면 직접 수정해주세요</div>`;
+    else cI.innerHTML = warnHtml("진입 방법 외의 안내문이 섞인 것 같아요 — 참여자 주의사항이면 특이사항으로", "↘ 특이사항으로 이동", "inflow");
+  }
+}
+
+/** 🧹 미리보기 — 무엇이 지워지고/옮겨지고 무엇이 남는지 보여준 뒤에만 [적용]이 가능하다 */
+function rfCleanPreview(kind) {
+  const pv = document.getElementById("rf_clean_pv_" + kind);
+  if (!pv) return;
+  const btns = `<div class="rf-cpv-btns"><button type="button" class="rchan-btn" onclick="document.getElementById('rf_clean_pv_${kind}').innerHTML=''">취소</button>` +
+    `<button type="button" class="rchan-btn" style="background:var(--p,#3182F6);border-color:var(--p,#3182F6);color:#fff" onclick="rfCleanApply('${kind}')">적용</button></div>`;
+  if (kind === "review") {
+    const cur = _cleanNormText(document.getElementById("rf_wd_review").value);
+    const cleaned = _cleanReviewValue(cur);
+    const keptSet = new Set(cleaned.split("\n").map(s => s.trim()));
+    const body = cur.split("\n").map(l =>
+      (l.trim() && !keptSet.has(l.trim())) ? `<span class="cut">${_cleanEsc(l)}</span>` : `<span class="keep">${_cleanEsc(l)}</span>`
+    ).join("\n");
+    pv.innerHTML = `<div class="rf-clean-pv"><div class="rf-cpv-t">🧹 정리 미리보기 — 빨간 줄이 지워집니다. 확인 후 [적용]</div><pre>${body}</pre>${btns}</div>`;
+  } else if (kind === "notes") {
+    const cur = document.getElementById("rf_notes").value;
+    pv.innerHTML = `<div class="rf-clean-pv"><div class="rf-cpv-t">🧹 비우기 미리보기 — 아래 내용이 전부 지워집니다(공개용 안내는 직접 작성)</div><pre><span class="cut">${_cleanEsc(cur)}</span></pre>${btns}</div>`;
+  } else if (kind === "inflow") {
+    const { keep, move } = _cleanInflowSplit(document.getElementById("rf_wd_inflow").value);
+    pv.innerHTML = `<div class="rf-clean-pv"><div class="rf-cpv-t">↘ 이동 미리보기 — 확인 후 [적용]</div>` +
+      `<div>유입가이드에 남는 내용</div><pre><span class="keep">${_cleanEsc(keep || "(비어 있음)")}</span></pre>` +
+      `<div>특이사항으로 옮겨질 내용</div><pre><span class="cut">${_cleanEsc(move.join("\n"))}</span></pre>${btns}</div>`;
+  }
+}
+
+function rfCleanApply(kind) {
+  if (kind === "review") {
+    const el = document.getElementById("rf_wd_review");
+    el.value = _cleanReviewValue(el.value);
+  } else if (kind === "notes") {
+    document.getElementById("rf_notes").value = "";
+  } else if (kind === "inflow") {
+    const infl = document.getElementById("rf_wd_inflow");
+    const nt = document.getElementById("rf_wd_notes");
+    const { keep, move } = _cleanInflowSplit(infl.value);
+    infl.value = keep;
+    if (nt && move.length) nt.value = (nt.value ? nt.value.replace(/\s+$/, "") + "\n" : "") + move.join("\n");
+  }
+  renderRecruitFieldCleanup();   // 경고 재판정(정리됐으면 사라진다)
+  _onPreviewInput();             // 우측 미리보기도 새 값으로
+}
+if (typeof window !== "undefined") {
+  window.rfCleanPreview = rfCleanPreview;
+  window.rfCleanApply = rfCleanApply;
+}
+
+/* 입력 중에도 감지 갱신(디바운스) — 모달 마운트가 스크립트보다 먼저라 로드 시점 바인딩 가능 */
+let _cleanDebounce = null;
+["rf_wd_review", "rf_wd_inflow", "rf_notes"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("input", () => {
+    clearTimeout(_cleanDebounce);
+    _cleanDebounce = setTimeout(() => { try { renderRecruitFieldCleanup(); } catch (_) {} }, 250);
+  });
+});
 
 /* 배지/채널/담당자 변경 시에도 미리보기 갱신 */
 const _origSelectRfBtn = selectRfBtn;

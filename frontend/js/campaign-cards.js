@@ -277,6 +277,28 @@
     return `<div class="poptchip" style="font-size:.68rem;font-weight:700;color:#4B5563;background:#F3F4F6;border-radius:7px;padding:4px 8px;margin-top:6px;display:inline-block">🧩 옵션 ${opts.length}종${hint ? ` · <b style="color:#B45309">${_esc(hint)}</b>` : ''}</div>`;
   }
 
+  /** 🧹 본문 정리 필요 판정(4칸 정리 개선 ④) — 기발행 공고 스냅샷에 작업오더 원문 덤프가 남았는가.
+   *  ★ 판정 = "정리 함수를 돌려보고 달라지는가" — 감지 규칙을 따로 만들면 정리(스트립)와 갈라진다.
+   *    정리 함수(_woStripReviewMeta/_woPickSections)는 work-order-detail.js 소유(단일 출처)라,
+   *    그 모듈이 없는 호스트(리뷰어 페이지)에선 판정하지 않는다(false = 배지 미표시, fail-soft). */
+  function _campNeedsFieldCleanup(c) {
+    try {
+      if (typeof _woStripReviewMeta !== 'function' || typeof _woPickSections !== 'function') return false;
+      // 유의사항(공고 카드 공개 칸)에 내부 라벨·상품번호·옵션:결제금액 — 원문 덤프의 지문
+      const notes = String(c.notes || '');
+      const notesDirty = /\[(유입방식|유입가이드|링크유입|리뷰등록 가이드|리뷰가이드)\]/.test(notes)
+        || /(?:쿠팡\s*)?상품번호\s*[:：]/.test(notes) || /▶\s*옵션\s*[:：]\s*결제금액\s*◀/.test(notes);
+      // 리뷰가이드: 정리해 보고 달라지면 오염(줄 수 정규화 뒤 비교 — 공백 차이 오탐 방지)
+      let wd = c.work_detail;
+      if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = {}; } }
+      const norm = t => String(t || '').replace(/<br\s*\/?>/gi, '\n').replace(/\n{3,}/g, '\n\n').trim();
+      const rg = norm(wd && wd.reviewGuide);
+      const rgDirty = !!rg && _woStripReviewMeta(
+        _woPickSections(rg, ['리뷰등록 가이드', '리뷰가이드', '리뷰 가이드'])) !== rg;
+      return notesDirty || rgDirty;
+    } catch (_) { return false; }
+  }
+
   /** 관리자 카드 하단 = 스펙 두 줄(유입방식·결제방식·총 모집 / 연결 탭) */
   function _adminSpec(c) {
     const chips = [];
@@ -412,7 +434,11 @@
     //   렌더될 일이 없지만, admin 분기로 한 번 더 못 박는다(공개 뷰에 관리 레이어 유출 금지 규율).
     const hidBadge = (admin && c.reviewer_hidden === true)
       ? `<span class="pt-pop" style="background:#475569">🧪 리뷰어 숨김</span>` : '';
-    const topleft = (ribbon || popBadge || hidBadge) ? `<div class="pt-topleft">${hidBadge}${popBadge}${ribbon}</div>` : '';
+    // 🧹 본문 정리 필요(4칸 정리 개선 ④) — 기발행 공고의 유의사항/리뷰가이드에 작업오더 원문
+    // 덤프가 남아 있으면 관리자에게만 표시. 수정 모달을 열면 같은 감지가 [🧹 정리]를 띄운다.
+    const cleanBadge = (admin && _campNeedsFieldCleanup(c))
+      ? `<span class="pt-pop" style="background:#B45309" title="유의사항·리뷰가이드에 작업오더 원문이 남아 있어요 — 수정 모달에서 🧹 정리">🧹 본문 정리</span>` : '';
+    const topleft = (ribbon || popBadge || hidBadge || cleanBadge) ? `<div class="pt-topleft">${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
@@ -978,5 +1004,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup };
 })();
