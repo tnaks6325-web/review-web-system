@@ -205,10 +205,12 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   /* ── 5) 프론트 배선 ──────────────────────────────────────────── */
   console.log('\n5) 배선 · 열 고정 · 오늘 완료 표시');
   t('목록 행 액션에 [공고] 버튼이 들어간다', /_campBtnHtml\(t,i\)/.test(WD));
-  t('★ 버튼 열 고정 — .wbl-act 는 고정 폭 grid(flex 로 되돌리면 줄마다 흔들린다)',
-    /\.wbl-act\{display:grid;grid-template-columns:92px 46px 88px 64px/.test(WD));
-  t('마감 보관함·열람전용은 칸 수가 달라 별도 template', /\.wbl-act\.fin\{grid-template-columns/.test(WD) && /\.wbl-act\.ro\{grid-template-columns/.test(WD));
-  t('버튼이 칸을 채운다(width:100%)', /\.wbl-act \.wbl-b\{width:100%/.test(WD));
+  // v3(사용자 확정): 통합 .wbl-act grid → **독립 헤더열**로 승격. 검사 의미는 그대로 "버튼은 줄마다 자기 열" —
+  //   이제 표 구조가 정렬을 보장하므로, 남은 고정폭 요구는 저장폴더 칸 내부 3분할뿐이다.
+  t('★ 버튼 열 고정 — 저장폴더 칸은 고정 3분할 grid(비활성이어도 자리 유지)',
+    /\.wbl-fol\{display:inline-grid;grid-template-columns:repeat\(3,40px\)/.test(WD));
+  t('통합 .wbl-act grid 는 부활 금지(열 정렬은 표 구조가 담당)', !/\.wbl-act\{display:grid/.test(WD));
+  t('모집공고는 독립 헤더열', /<th class="wbl-c">모집공고<\/th>/.test(WD));
   t('★ 오늘 완료 라벨 스왑 부활 금지(폭이 달라져 열이 어긋난다)',
     !/\$\{td\?'해제':'☑ 오늘 완료'\}/.test(WD) && /title="\$\{td\?'오늘 완료됨[^"]*}">☑ 오늘 완료</.test(WD));
   t('★ 켜짐은 파란 채움으로 말한다', /\.wbl-b\.today\.on\{background:var\(--accent\);/.test(WD));
