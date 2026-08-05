@@ -120,9 +120,11 @@ console.log('\n2) 서비스 실행');
 
   /* ═══ 5) 소비처 배선 ═════════════════════════════════════════ */
   console.log('\n5) 소비처 배선');
+  // 조립이 submissionSamples 한 곳으로 수렴 — 영수증 슬롯 분기는 서비스 안(검사 의미 불변)
   ok('★★ 영수증 슬롯 업로드에 현금영수증 예시가 동봉된다',
     /slot === 'review' \|\| slot === 'receipt'/.test(diag)
-    && /await _ri\.loadReceiptSamplesFor\(_exp\.expectedChannel\)/.test(diag));
+    && /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: slot \}\)/.test(diag)
+    && /slotKey === 'receipt'\s*\?\s*await loadReceiptSamplesFor\(expectedChannel\)/.test(svc));
   ok('★★ 슬롯 검수와 2차 검수가 같은 samples 를 쓴다(같은 이미지에 AI 콜 2번 금지)',
     (diag.match(/samples: _inspectSamples/g) || []).length >= 2);
   ok('★ 채널 판정은 기존 loadTabExpectations 재사용 — 채널 파생 규칙 사본 없음',
@@ -143,8 +145,9 @@ console.log('\n2) 서비스 실행');
   ok('★ 전부 authMiddleware 뒤 — 무인증 도달 불가',
     layers.every(l => l.mw.includes('authMiddleware')));
   const tb = readS('routes/trackB.routes.js');
+  // 자동 분류 예시(routeSamples)가 같은 응답에 합류(검사 의미 불변 — 두 목록은 그대로)
   ok('GET 이 두 목록을 함께 반환(설정 화면이 한 번에 그린다)',
-    /res\.json\(\{ ok: true, samples, receiptSamples \}\)/.test(tb));
+    /res\.json\(\{ ok: true, samples, receiptSamples, routeSamples \}\)/.test(tb));
   ok('★ kind 미지정은 기존대로 리뷰 예시 — 리뷰웹시스템[3버전] [🖼 판별 예시] 모달 동작 불변',
     /String\(b\.kind \|\| ''\) === 'receipt'/.test(tb));
 

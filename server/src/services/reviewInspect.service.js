@@ -306,6 +306,72 @@ async function saveReceiptSample({ channel, imageUrl } = {}) {
   return url;
 }
 
+/* ── 자동 분류(파일 라우팅) 판별 예시 — 구매캡처·구매확정 (utils/routeSampleKinds 단일 출처) ──
+ * 주문내역과 구매확정 화면은 생김새가 비슷해, **두 장이 모두 등록**돼야 구매캡처
+ * 자동 이동이 켜진다(captureRoute.needsRouteSamples — 사용자 확정 2026-08-05).
+ * ★ key 는 `route_` 접두 — classify 캐시 지문이 예시 key 로 만들어지므로
+ *   리뷰(coupang_pc…)·현금영수증(receipt_*) 예시와 절대 겹치면 안 된다. */
+async function loadRouteSamples() {
+  if (!SAMPLES_ENABLED) return [];
+  try {
+    const { ROUTE_SAMPLE_KINDS } = require('../utils/routeSampleKinds');
+    return await _loadSampleSlots(ROUTE_SAMPLE_KINDS.map(s => ({
+      key: 'route_' + s.key, label: s.label, settingKey: s.settingKey, kind: s.kind,
+    })));
+  } catch (e) {
+    logger.warn(`[reviewInspect] 자동분류 예시 준비 실패(미동봉): ${e.message}`);
+    return [];
+  }
+}
+
+/** 관리자 화면용 — 자동 분류 예시 슬롯별 등록 여부. */
+async function routeSampleSettings() {
+  const { ROUTE_SAMPLE_KINDS, ROUTE_SAMPLE_SETTING_KEYS, routeSampleSettingKey } = require('../utils/routeSampleKinds');
+  const out = ROUTE_SAMPLE_KINDS.map(s => ({ key: s.key, label: s.label, emoji: s.emoji || '🛒', imageUrl: '' }));
+  try {
+    const { rows } = await _db().query(
+      'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [ROUTE_SAMPLE_SETTING_KEYS]
+    );
+    const m = {};
+    for (const r of rows) m[r.key] = r.value || '';
+    for (const s of out) s.imageUrl = m[routeSampleSettingKey(s.key)] || '';
+  } catch (e) {
+    logger.warn(`[reviewInspect] 자동분류 예시 조회 실패: ${e.message}`);
+  }
+  return out;
+}
+
+/** 자동 분류 예시 저장(''=제거). 슬롯 화이트리스트는 utils/routeSampleKinds 단일 출처. */
+async function saveRouteSample({ key, imageUrl } = {}) {
+  const { isRouteSampleKey, routeSampleSettingKey } = require('../utils/routeSampleKinds');
+  const k = String(key || '');
+  if (!isRouteSampleKey(k)) throw new Error('알 수 없는 예시 슬롯입니다.');
+  const url = String(imageUrl ?? '').trim();
+  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
+  await _db().query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [routeSampleSettingKey(k), url]
+  );
+  _sampleCache.delete(routeSampleSettingKey(k));   // 교체 즉시 반영
+  return url;
+}
+
+/**
+ * ★★ 제출 이미지 판별에 동봉할 예시의 **단일 조립 지점** — 1차 필터(review-precheck)·
+ * 업로드 검수(review-upload verifyCapture)·2차 검수(inspectSubmission)·소급 스윕이
+ * 전부 이 함수를 쓴다. 조립처가 갈리면 sampleSig(캐시 지문)가 갈려 **같은 이미지에
+ * AI 콜이 두 번** 나간다(순증 0 전제가 깨진다 — 완화 금지).
+ * 자동 분류 예시(route)는 채널과 무관하게 등록돼 있으면 항상 동봉한다(2장 상한).
+ */
+async function submissionSamples({ expectedChannel, slotKey = 'review' } = {}) {
+  const base = slotKey === 'receipt'
+    ? await loadReceiptSamplesFor(expectedChannel)
+    : await loadSamplesFor(expectedChannel);
+  const route = await loadRouteSamples();
+  return base.concat(route);
+}
+
 /** 관리자 화면용 — 슬롯별 등록 여부. */
 async function sampleSettings() {
   const { REVIEW_SAMPLES, sampleSettingKey, REVIEW_SAMPLE_KEYS } = require('../utils/reviewSampleChannels');
@@ -698,7 +764,7 @@ async function inspectSubmission({
       try {
         // ★ 첨부 시점 1차 필터가 이미 같은 이미지를 판정했다면 캐시 히트 = AI 콜 0
         const { classifySubmissionImage } = require('./gemini.service');
-        const samples = opts.samples || await loadSamplesFor(exp.expectedChannel);
+        const samples = opts.samples || await submissionSamples({ expectedChannel: exp.expectedChannel, slotKey });
         cls = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
       } catch (_) { cls = null; }   // fail-open
     }
@@ -995,6 +1061,7 @@ module.exports = {
   productNamesFromWorkOrder, productNameSettings, saveProductNames,
   loadSamplesFor, sampleSettings, saveSample,
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
+  loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, inspectionsCsv,
   listInspections, inspectionSummary, resolveInspection, inspectionScope,
   hashBase64, matchProductName, computeStatus,
