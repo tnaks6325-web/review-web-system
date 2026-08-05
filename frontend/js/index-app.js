@@ -1685,7 +1685,9 @@ async function woSendMemo(id) {
 //   작업오더 기본정보(담당자·시간대·리뷰타입·배송·택배대행)를 탭 메타에 자동 입력 → 상태 '접수됨' 전이.
 //   동일 탭 재접수(2차 등)는 별도 탭을 만들지 않고 기존 한 줄을 유지(차수는 시트 차수컬럼 집계가 담당).
 //   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
-async function woAccept(id) {
+// ★ pickGid: 탭 교정 재접수 — URL의 gid가 시트에 없을 때(404 gidNotFound) 팝업에서
+//   사람이 고른 탭의 gid. 서버가 이 gid로 접수하고 work_sheet_url까지 교정한다.
+async function woAccept(id, pickGid) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
@@ -1696,7 +1698,7 @@ async function woAccept(id) {
     woNotice("작업시트탭URL이 없습니다.\n시트탭 주소(…/edit#gid=숫자)를 입력하거나 작업표를 생성한 뒤 접수해주세요.");
     return;
   }
-  if (!/[#?&]gid=\d+/.test(url)) {
+  if (!/[#?&]gid=\d+/.test(url) && !pickGid) {
     woNotice("작업시트탭URL에 gid가 없습니다.\n특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.\n\n현재 URL:\n" + url);
     return;
   }
@@ -1705,12 +1707,21 @@ async function woAccept(id) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 접수 처리중...'; }
   try {
     // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
-    const r = await gasGet({ action: "orderAdminAccept", id }, 60000);
+    const payload = pickGid ? { action: "orderAdminAccept", id, gid: pickGid } : { action: "orderAdminAccept", id };
+    const r = await gasGet(payload, 60000);
     if (!(r && r.ok)) {
+      // ★ URL의 gid가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서
+      //   사람이 골라 재접수(교정 흐름). 공용 팝업 = work-order-detail.js woAcceptTabPicker.
+      if (r && r.gidNotFound && typeof woAcceptTabPicker === "function") {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
+        woAcceptTabPicker(r, g => woAccept(id, g));
+        return;
+      }
       showToast((r && r.error) || "접수 실패", true);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
       return;
     }
+    if (r.gidCorrected) showToast("🔧 시트탭URL의 gid를 고른 탭으로 교정해 접수했습니다.");
 
     // 3) 결과 안내 (신규 등록 vs 기존 탭 연결 = 차수 추가)
     const tabName = r.tabName || "";

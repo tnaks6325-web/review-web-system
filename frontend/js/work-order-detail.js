@@ -717,6 +717,70 @@ function _woCampaignPrefill(o) {
   return prefill;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   접수 실패(gid 미발견) 탭 교정 팝업 — 관리자 대시보드·리뷰웹시스템[3버전] 공용.
+
+   서버 /admin/accept 가 "gid=… 탭을 찾을 수 없음" 404 에 availableTabs(그 시트의
+   실제 탭 목록)를 실어 주면, 사람이 올바른 탭을 골라 body.gid 로 재접수한다.
+   ★ 자동 이름매칭 폴백은 두지 않는다 — 고르는 것은 항상 사람("잘못된 탭 연결이
+     빈칸보다 나쁨" 규율). 서버는 고른 gid 로 work_sheet_url 까지 교정한다.
+   ★ 탭명은 시트에서 온 외부 문자열 — onclick 문자열 보간 금지, DOM 생성 +
+     addEventListener 로만 배선한다(M1 실측 XSS 규율). */
+function woAcceptTabPicker(resp, onPick) {
+  var tabs = (resp && resp.availableTabs) || [];
+  var old = document.getElementById("woTabPickModal");
+  if (old) old.remove();
+  var ov = document.createElement("div");
+  ov.id = "woTabPickModal";
+  ov.style.cssText = "position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:480px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.3);overflow:hidden";
+  var head = document.createElement("div");
+  head.style.cssText = "padding:16px 18px 12px;border-bottom:1px solid #E5E7EB";
+  var h = document.createElement("div");
+  h.textContent = "⚠ 시트에 없는 탭 주소(gid=" + String(resp && resp.urlGid || "?") + ")";
+  h.style.cssText = "font-size:15px;font-weight:700;color:#B91C1C;margin-bottom:6px";
+  var p = document.createElement("div");
+  p.textContent = "작업시트탭URL의 gid가 이 시트에 없습니다(탭을 지웠다 다시 만들면 gid가 바뀝니다). 아래에서 올바른 탭을 고르면 URL을 교정해 접수합니다.";
+  p.style.cssText = "font-size:12.5px;color:#6B7280;line-height:1.5";
+  head.appendChild(h); head.appendChild(p);
+  var list = document.createElement("div");
+  list.style.cssText = "overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:6px";
+  tabs.forEach(function (t) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = (t.title || "(이름 없음)") + (t.hidden ? "  (숨김 탭)" : "");
+    b.title = "gid=" + String(t.gid || "");
+    b.style.cssText = "text-align:left;padding:10px 12px;border:1.5px solid #D1D5DB;border-radius:8px;background:#F9FAFB;font-size:13.5px;cursor:pointer";
+    b.addEventListener("mouseenter", function () { b.style.background = "#EEF2FF"; b.style.borderColor = "#6366F1"; });
+    b.addEventListener("mouseleave", function () { b.style.background = "#F9FAFB"; b.style.borderColor = "#D1D5DB"; });
+    b.addEventListener("click", function () {
+      if (!confirm('"' + (t.title || "") + '" 탭으로 접수할까요?\n\n작업오더의 시트탭URL도 이 탭 주소로 교정됩니다.')) return;
+      ov.remove();
+      if (typeof onPick === "function") onPick(String(t.gid || ""), t);
+    });
+    list.appendChild(b);
+  });
+  if (!tabs.length) {
+    var empty = document.createElement("div");
+    empty.textContent = "이 시트에서 탭 목록을 가져오지 못했습니다. 시트에서 올바른 탭 주소를 복사해 작업시트탭URL을 수정해주세요.";
+    empty.style.cssText = "font-size:13px;color:#6B7280;padding:14px";
+    list.appendChild(empty);
+  }
+  var foot = document.createElement("div");
+  foot.style.cssText = "padding:10px 14px;border-top:1px solid #E5E7EB;text-align:right";
+  var cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "취소";
+  cancel.style.cssText = "padding:8px 16px;border:1.5px solid #D1D5DB;border-radius:8px;background:#fff;font-size:13px;cursor:pointer";
+  cancel.addEventListener("click", function () { ov.remove(); });
+  foot.appendChild(cancel);
+  box.appendChild(head); box.appendChild(list); box.appendChild(foot);
+  ov.appendChild(box);
+  ov.addEventListener("click", function (e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
   // 전역 공개 — index-app.js 의 기존 호출부와 onclick/onerror 문자열이 이름 그대로 쓴다.
   //   (모듈 안에서 선언만 하면 admin 화면의 기존 호출이 전부 깨진다)
   var EXPORTS = {
@@ -740,6 +804,7 @@ function _woCampaignPrefill(o) {
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,
     _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
     _woOptionRows: _woOptionRows, _woCampaignPrefill: _woCampaignPrefill,
+    woAcceptTabPicker: woAcceptTabPicker,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
   window.WorkOrderDetail = EXPORTS;
