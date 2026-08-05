@@ -1,0 +1,221 @@
+/**
+ * 시트 데이터 반영 점검(sheet-sync audit) 회귀가드
+ *
+ * 이 가드가 고정하는 것
+ *   1. 분류(classifySyncRow)는 순수함수 — 반영 사슬(RAW→인덱스→작업보드)의 끊긴 곳을
+ *      실제 실행으로 검증(9케이스). boardRows > indexRows(수동/작업표 행)는 플래그가 아니다.
+ *   2. 감사(auditSheetSync)는 읽기 전용(쓰기 SQL 0) · 분모는 tab_configs ·
+ *      컷오프 필터는 "이전 등록 + 등록일 미상"을 남긴다(조용한 누락 금지).
+ *   3. 수리(repairSheetSync)는 신규 쓰기 경로 0 — 기존 함수 3개를 mirror→build→project
+ *      순서로만 호출하고, 한 단계 실패·빌드 락이 다음 단계를 죽이지 않는다.
+ *   4. 라우트 2개는 authMiddleware + adminOrMasterMiddleware 뒤(/api/trackb/* — 인트라넷 SSO 도달 가능).
+ *   5. 프론트 페이지는 onclick 에 인덱스만 넘긴다(시트발 문자열 보간 금지 — XSS 규율).
+ *
+ * 실행: node tests/sheetSyncAudit.test.js
+ */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const R = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const FRONT = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
+
+let pass = 0;
+function t(name, fn) { fn(); pass++; console.log('  ✓ ' + name); }
+async function ta(name, fn) { await fn(); pass++; console.log('  ✓ ' + name); }
+
+const svc = require('../src/services/sheetSyncAudit.service');
+const { classifySyncRow } = svc;
+
+(async () => {
+
+/* ══ 1) 분류 순수함수 ══════════════════════════════════════ */
+console.log('\n1) classifySyncRow — 반영 사슬 진단');
+
+t('정상(전 사슬 도달) = ok · 플래그 0', () => {
+  const c = classifySyncRow({ rawRows: 100, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 90, boardRows: 90 });
+  assert.strictEqual(c.severity, 'ok'); assert.strictEqual(c.flags.length, 0);
+});
+t('RAW 미러 없음 → no_raw_mirror(broken)', () => {
+  const c = classifySyncRow({ rawRows: null, mirroredAt: null, idxStatus: 'active', idxBuiltAt: 'x', indexRows: 10, boardRows: 10 });
+  assert.ok(c.flags.includes('no_raw_mirror')); assert.strictEqual(c.severity, 'broken');
+});
+t('인덱스 등록 자체 없음 → index_missing', () => {
+  const c = classifySyncRow({ rawRows: 50, mirroredAt: 'x', idxStatus: null, indexRows: 0, boardRows: 0 });
+  assert.ok(c.flags.includes('index_missing'));
+});
+t('인덱스 비활성 상태 → index_inactive', () => {
+  const c = classifySyncRow({ rawRows: 50, mirroredAt: 'x', idxStatus: 'skipped', idxBuiltAt: 'x', indexRows: 0, boardRows: 0 });
+  assert.ok(c.flags.includes('index_inactive'));
+});
+t('빌드 오류 → index_error(오류 문구 동봉)', () => {
+  const c = classifySyncRow({ rawRows: 50, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', idxErrorMsg: 'Quota exceeded', indexRows: 0, boardRows: 0 });
+  assert.ok(c.flags.includes('index_error')); assert.ok(c.reasonKo.includes('Quota'));
+});
+t('한 번도 빌드 안 됨 → index_never_built', () => {
+  const c = classifySyncRow({ rawRows: 50, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: null, indexRows: 0, boardRows: 0 });
+  assert.ok(c.flags.includes('index_never_built'));
+});
+t('시트엔 데이터 있는데 인덱스 0행 → index_empty(헤더 인식 실패 의심)', () => {
+  const c = classifySyncRow({ rawRows: 50, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 0 });
+  assert.ok(c.flags.includes('index_empty'));
+});
+t('인덱스는 있는데 작업보드 0행 → not_projected(broken)', () => {
+  const c = classifySyncRow({ rawRows: 100, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 90, boardRows: 0 });
+  assert.ok(c.flags.includes('not_projected')); assert.strictEqual(c.severity, 'broken');
+});
+t('작업보드가 인덱스보다 적음 → projection_behind(behind — broken 아님)', () => {
+  const c = classifySyncRow({ rawRows: 100, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 90, boardRows: 70 });
+  assert.deepStrictEqual(c.flags, ['projection_behind']); assert.strictEqual(c.severity, 'behind');
+});
+t('★ 작업보드가 인덱스보다 많음(수동/작업표 행) = 정상 + boardExtra 정보만', () => {
+  const c = classifySyncRow({ rawRows: 100, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 90, boardRows: 120 });
+  assert.strictEqual(c.severity, 'ok'); assert.strictEqual(c.boardExtra, 30);
+});
+
+/* ══ 2) 감사 — 스텁 pool 실제 실행 ═════════════════════════ */
+console.log('\n2) auditSheetSync — 읽기 전용 · 컷오프 필터');
+
+const captured = [];
+const mkRow = (o) => Object.assign({
+  sheetId: 'S1', tabName: 'T', tabGid: '1', displayName: 'T', campaignName: null,
+  registeredAt: '2026-07-01T00:00:00Z', rawRows: 10, mirroredAt: 'x',
+  idxStatus: 'active', idxBuiltAt: 'x', idxErrorMsg: null, indexRows: 5, boardRows: 5,
+}, o);
+svc.__setPoolForTest({
+  query: async (sql, params) => {
+    captured.push(String(sql));
+    return { rows: [
+      mkRow({ tabName: 'old-ok', registeredAt: '2026-07-01T00:00:00Z' }),
+      mkRow({ tabName: 'old-broken', registeredAt: '2026-06-15T00:00:00Z', boardRows: 0 }),
+      mkRow({ tabName: 'new-tab', registeredAt: '2026-07-25T00:00:00Z' }),
+      mkRow({ tabName: 'unknown-date', registeredAt: null }),
+    ] };
+  },
+});
+
+await ta('컷오프(2026-07-20): 이전 등록 + 등록일 미상만 남고 이후 등록은 제외', async () => {
+  const out = await svc.auditSheetSync({ before: '2026-07-20' });
+  const names = out.items.map(i => i.tabName);
+  assert.ok(names.includes('old-ok') && names.includes('old-broken'), '이전 등록 누락');
+  assert.ok(names.includes('unknown-date'), '등록일 미상이 조용히 빠졌다 — 누락 금지');
+  assert.ok(!names.includes('new-tab'), '컷오프 이후 등록이 섞였다');
+  assert.strictEqual(out.before, '2026-07-20');
+  const unk = out.items.find(i => i.tabName === 'unknown-date');
+  assert.strictEqual(unk.regUnknown, true);
+});
+await ta('문제 탭(broken)이 목록 앞에 온다 + flagged 집계', async () => {
+  const out = await svc.auditSheetSync({ before: '2026-07-20' });
+  assert.strictEqual(out.items[0].tabName, 'old-broken');
+  assert.strictEqual(out.flagged, 1);
+});
+await ta('잘못된 before 형식은 무시(전수 감사) — 예외로 죽지 않는다', async () => {
+  const out = await svc.auditSheetSync({ before: '7/20' });
+  assert.strictEqual(out.before, null);
+  assert.strictEqual(out.items.length, 4);
+});
+t('★ 감사는 읽기 전용 — 쓰기 SQL 0', () => {
+  assert.ok(captured.length > 0);
+  captured.forEach(sql => assert.ok(!/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/i.test(sql), '감사에 쓰기 SQL이 들어왔다'));
+});
+t('★ 분모는 tab_configs(등록 작업 전체) — listActiveTabs 로 세면 끊긴 탭이 분모에서 빠진다', () => {
+  const sql = captured[0];
+  assert.ok(/FROM tab_configs/i.test(sql), '분모가 tab_configs 가 아니다');
+  assert.ok(/is_closed/i.test(sql), '아카이브 탭 제외가 없다');
+});
+svc.__setPoolForTest(null);
+
+/* ══ 3) 수리 — 순서·독립 실패·신규 쓰기 경로 0 ═════════════ */
+console.log('\n3) repairSheetSync — mirror→build→project 순서 고정');
+
+function mkDeps(overrides = {}) {
+  const calls = [];
+  const deps = {
+    mirrorOneSheet: async () => { calls.push('mirror'); return { tabsMirrored: 1, rowsWritten: 10 }; },
+    buildOneSheet: async () => { calls.push('build'); return { ok: true }; },
+    projectTab: async () => { calls.push('project'); return { imported: 5 }; },
+    compareWithIndex: async () => { calls.push('compare'); return { indexRows: 5, dbRows: 5, inSync: true }; },
+    ...overrides,
+  };
+  return { deps, calls };
+}
+
+await ta('정상 경로: mirror → build → project → compare 순서', async () => {
+  const { deps, calls } = mkDeps();
+  const out = await svc.repairSheetSync({ sheetId: 'S', tabName: 'T', deps });
+  assert.deepStrictEqual(calls, ['mirror', 'build', 'project', 'compare']);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.compare.inSync, true);
+});
+await ta('★ 미러 실패해도 빌드·투영은 계속(한 단계 실패가 전체를 죽이지 않는다)', async () => {
+  const { deps, calls } = mkDeps({ mirrorOneSheet: async () => { throw new Error('quota'); } });
+  const out = await svc.repairSheetSync({ sheetId: 'S', tabName: 'T', deps });
+  assert.ok(calls.includes('build') && calls.includes('project'));
+  assert.strictEqual(out.steps.mirror.ok, false);
+  assert.ok(out.steps.mirror.error.includes('quota'));
+});
+await ta('★ 빌드 락(locked) = 보고만 하고 투영은 진행', async () => {
+  const { deps, calls } = mkDeps({ buildOneSheet: async () => ({ ok: false, locked: true, error: '타 사용자가 갱신중입니다.' }) });
+  const out = await svc.repairSheetSync({ sheetId: 'S', tabName: 'T', deps });
+  assert.strictEqual(out.steps.build.locked, true);
+  assert.ok(calls.includes('project'));
+});
+await ta('투영 실패 = ok:false(성공으로 꾸미지 않는다)', async () => {
+  const { deps } = mkDeps({ projectTab: async () => { throw new Error('db down'); } });
+  const out = await svc.repairSheetSync({ sheetId: 'S', tabName: 'T', deps });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.steps.project.ok, false);
+});
+await ta('sheetId/tabName 없으면 즉시 거부', async () => {
+  await assert.rejects(() => svc.repairSheetSync({ sheetId: '', tabName: '' }));
+});
+t('★ 수리는 신규 쓰기 경로 0 — 서비스 파일에 직접 INSERT/UPDATE 없음(기존 함수 3개만 재사용)', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  assert.ok(!/\b(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/i.test(src),
+    '수리가 SQL 을 직접 쓴다 — 반영 규칙 사본 금지(mirrorOneSheet/buildOneSheet/projectTab 만)');
+  ['mirrorOneSheet', 'buildOneSheet', 'projectTab', 'compareWithIndex'].forEach(fn =>
+    assert.ok(src.includes(fn), fn + ' 호출이 없다'));
+});
+
+/* ══ 4) 라우트 — 스택 실검사 ═══════════════════════════════ */
+console.log('\n4) 라우트 권한');
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
+const router = require('../src/routes/trackB.routes');
+const layers = router.stack.filter(l => l.route).map(l => ({
+  path: l.route.path, methods: Object.keys(l.route.methods), mw: l.route.stack.map(s => s.name),
+}));
+const audit = layers.find(l => l.path === '/sheet-sync/audit');
+const repair = layers.find(l => l.path === '/sheet-sync/repair');
+
+t('감사 GET · 수리 POST 라우트가 등록돼 있다', () => {
+  assert.ok(audit && audit.methods.includes('get'), 'GET /sheet-sync/audit 없음');
+  assert.ok(repair && repair.methods.includes('post'), 'POST /sheet-sync/repair 없음');
+});
+t('★ 둘 다 authMiddleware + adminOrMasterMiddleware — AE(staff)·광고주 차단', () => {
+  [audit, repair].forEach(l => {
+    assert.ok(l.mw.includes('authMiddleware'), l.path + ': authMiddleware 없음');
+    assert.ok(l.mw.includes('adminOrMasterMiddleware'), l.path + ': adminOrMasterMiddleware 없음');
+  });
+});
+
+/* ══ 5) 프론트 배선 ════════════════════════════════════════ */
+console.log('\n5) 프론트(sheet-sync-audit.html)');
+const HTML = FRONT('sheet-sync-audit.html');
+
+t('감사·수리 두 엔드포인트를 호출한다', () => {
+  assert.ok(HTML.includes('/api/trackb/sheet-sync/audit'));
+  assert.ok(HTML.includes('/api/trackb/sheet-sync/repair'));
+});
+t('★ onclick 은 인덱스만 넘긴다(시트발 탭명 문자열 보간 금지 — XSS 규율)', () => {
+  assert.ok(/repairOne\(' \+ i \+ '\)/.test(HTML), '반영 버튼이 인덱스 방식이 아니다');
+  assert.ok(!/repairOne\('\s*"?\s*\+\s*(esc\()?it\./.test(HTML), 'onclick 에 탭 데이터가 보간됐다');
+});
+t('escape 처리(esc)와 api.js(API_BASE_URL) 사용', () => {
+  assert.ok(/function esc\(/.test(HTML));
+  assert.ok(/src="api\.js"/.test(HTML));
+  assert.ok(!/window\.API_BASE_URL/.test(HTML), 'window.API_BASE_URL 은 존재하지 않는다(레포 실측 함정) — bare 식별자');
+});
+
+console.log('\n✅ 전체 통과: ' + pass + '케이스');
+process.exit(0);
+})().catch(e => { console.error('\n❌ 실패:', e); process.exit(1); });

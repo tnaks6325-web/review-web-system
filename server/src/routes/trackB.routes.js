@@ -261,6 +261,25 @@ router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res
     res.json({ ok: true, items, coverage });
   } catch (err) { next(err); }
 });
+// ── 시트 데이터 반영 점검(sheet-sync audit) — adminOrMaster ──
+//   등록된 작업(tab_configs) 전수를 분모로 "시트 → 검색인덱스 → 작업보드" 반영 사슬의 끊긴 곳을
+//   진단(읽기 전용·시트 API 무접촉). ?before=YYYY-MM-DD 면 그 날짜 이전 등록(+ 등록일 미상)만.
+//   수리는 기존 반영 경로 3개(mirrorOneSheet → buildOneSheet → projectTab)만 재사용 — 신규 쓰기 경로 0.
+const sheetSync = require('../services/sheetSyncAudit.service');
+router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { before, limit } = req.query;
+    res.json({ ok: true, ...(await sheetSync.auditSheetSync({ before, limit })) });
+  } catch (err) { next(err); }
+});
+router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json(await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+
 // ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
 router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await svc.parityAll({ store: true, source: 'manual' })) }); }
