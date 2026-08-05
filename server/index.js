@@ -35,6 +35,8 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'review_type'],           // 087 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'sales_id'],                    // 088 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'guide_images'],                // 090 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
+  ['review_inspections', 'resolution'],           // 092 — 리뷰검수 목록 SELECT·확인 UPDATE(없으면 리뷰검수 탭 전면 42703)
+  ['tab_configs', 'inspect_product_aliases'],     // 092 — 기대값 조회·별칭 학습(조회는 fail-soft지만 대조가 조용히 죽는다)
 ];
 
 async function _runOneMigration(pool, sql) {

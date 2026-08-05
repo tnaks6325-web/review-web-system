@@ -442,6 +442,19 @@ function _cleanProductForMatch(s) {
  *   기대값이 없으면 'skip'(대조 안 함) — 판정 불가를 불량으로 취급하지 않는다.
  * @returns {{verdict:'pass'|'warn'|'skip', expected:string[], ocr:string}}
  */
+/** 정규화 기준 중복 없이 병합 — 별칭 가산용(원본 표기는 보존). */
+function _mergeProductNames(base, extra) {
+  const seen = new Set();
+  const out = [];
+  for (const v of [...(base || []), ...(extra || [])]) {
+    const k = _normProduct(v);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
+  }
+  return out;
+}
+
 function matchProductName(ocr, expectedList) {
   const list = (Array.isArray(expectedList) ? expectedList : [])
     .map(s => String(s || '').trim()).filter(Boolean);
@@ -569,7 +582,7 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     //   올 수 있다(같은 탭에 공고가 여러 개면 실제로 갈린다). 한 행에서 둘 다 가져온다.
     // ★ 087: 리뷰타입도 **같은 행에서** 가져온다 — 따로 조회하면 채널과 다른 공고의 값이 섞인다.
     const { rows } = await _db().query(
-      `SELECT c.inspect_product_names, c.review_type AS tab_review_type,
+      `SELECT c.inspect_product_names, c.inspect_product_aliases, c.review_type AS tab_review_type,
               rc.channel, rc.channel_custom, rc.review_type AS camp_review_type
          FROM tab_configs c
          LEFT JOIN LATERAL (
@@ -592,14 +605,23 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     out.reviewType = resolveReviewType({
       campaignType: r.camp_review_type, tabReviewType: r.tab_review_type,
     });
+    // ★ 별칭(=[정상] 확인에서 학습된 인정 표기)은 어느 소스든 **가산만** 한다 —
+    //   manual/work_order 우선순위 규칙(manual 있으면 파생 안 봄)을 절대 바꾸지 않는다.
+    const aliases = String(r.inspect_product_aliases || '')
+      .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
     out.productNames = String(r.inspect_product_names || '')
       .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
-    if (out.productNames.length) { out.productSource = 'manual'; return out; }
+    if (out.productNames.length) {
+      out.productSource = 'manual';
+      out.productNames = _mergeProductNames(out.productNames, aliases);
+      return out;
+    }
 
     // 직접 적어둔 값이 없으면 연결된 작업오더에서 파생한다
     const wo = await _workOrderForTab({ sheetId, tabName });
     const derived = productNamesFromWorkOrder(wo);
-    if (derived.length) { out.productNames = derived; out.productSource = 'work_order'; }
+    if (derived.length) { out.productNames = _mergeProductNames(derived, aliases); out.productSource = 'work_order'; }
+    else if (aliases.length) { out.productNames = aliases; out.productSource = 'aliases'; }
   } catch (e) {
     logger.warn(`[reviewInspect] 탭 기대값 조회 실패(대조 생략): ${e.message}`);
   }
@@ -608,13 +630,14 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
 
 /** 관리자 화면용 — 이 탭의 기대 상품명 현황(수동값 + 작업오더 파생값을 함께 보여준다). */
 async function productNameSettings({ sheetId, tabName } = {}) {
-  const out = { manual: '', derived: [], effective: [], source: 'none' };
+  const out = { manual: '', aliases: '', derived: [], effective: [], source: 'none' };
   try {
     const { rows } = await _db().query(
-      'SELECT inspect_product_names FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      'SELECT inspect_product_names, inspect_product_aliases FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
       [sheetId, tabName]
     );
     out.manual = String(rows[0]?.inspect_product_names || '');
+    out.aliases = String(rows[0]?.inspect_product_aliases || '');   // [정상] 확인에서 학습된 인정 별칭
     out.derived = productNamesFromWorkOrder(await _workOrderForTab({ sheetId, tabName }));
     const manualList = out.manual.split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
     if (manualList.length) { out.effective = manualList; out.source = 'manual'; }
@@ -623,6 +646,18 @@ async function productNameSettings({ sheetId, tabName } = {}) {
     logger.warn(`[reviewInspect] 기대 상품명 조회 실패: ${e.message}`);
   }
   return out;
+}
+
+/** 학습된 인정 별칭 편집·비우기(줄바꿈 구분) — 자동 학습이지만 사람이 언제든 다듬을 수 있어야
+ *  "조용한 자동수정"이 아니다. 빈 값 = 전부 비움. */
+async function saveProductAliases({ sheetId, tabName, text } = {}) {
+  const v = String(text == null ? '' : text)
+    .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean).slice(0, 60).join('\n').slice(0, 4000);
+  await _db().query(
+    'UPDATE tab_configs SET inspect_product_aliases = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+    [v, sheetId, tabName]
+  );
+  return v;
 }
 
 /** 탭별 기대 상품명 저장(줄바꿈 구분). 빈 값 = 해제(작업오더 파생으로 되돌아간다). */
@@ -1026,7 +1061,7 @@ async function listInspections({ sheetId, tabName, status = 'open', limit = 200 
   const { rows } = await _db().query(
     `SELECT i.id, i.file_id, i.sheet_id, i.tab_name, i.row_index, i.reviewer_name, i.slot_key,
             i.status, i.checks, i.channel, i.ocr_product, i.ocr_text, i.ai_confidence,
-            i.inspected_at, i.resolved_at, i.resolved_by, i.created_at,
+            i.resolution, i.inspected_at, i.resolved_at, i.resolved_by, i.created_at,
             s.file_url, s.file_name
        FROM review_inspections i
        LEFT JOIN review_submissions s ON s.file_id = i.file_id
@@ -1061,14 +1096,92 @@ async function inspectionSummary({ sheetId, tabName } = {}) {
  * 관리자 확인 종결. ★ 원판정(checks)은 지우지 않는다 — 나중에 "왜 통과시켰나"를
  * 되짚을 수 있어야 기준을 고칠 수 있다(오탐 누적이 임계값 조정의 근거다).
  */
-async function resolveInspection({ fileId, by } = {}) {
-  const { rowCount } = await _db().query(
+/* ── 사람 확인 = 학습 신호 ────────────────────────────────────────────
+ * 확인 처리를 [정상(ok = AI 오탐)]/[불량 맞음(bad)] 두 갈래로 기록한다(migration 092).
+ * ★ [정상] 처리에서 상품명 의심 건의 캡처 표기를 그 탭의 **인정 별칭**으로 자동 등록 —
+ *   같은 표기의 오탐이 다시 나오지 않는다(수동 검수가 그대로 판별 기준을 키우는 학습 루프).
+ *   별칭은 기대 상품명에 가산 병합만 하므로(우선순위 규칙 불변) 잡는 범위가 좁아질 뿐
+ *   정상 제출을 새로 불량으로 모는 방향의 회귀가 없다.
+ */
+const _RESOLUTIONS = ['ok', 'bad'];
+
+/** 인정 상품명 별칭 자동 등록 — 개행 목록, 정규화 중복 제거, 상한(60줄·줄당 120자·총 4000자). */
+async function _addProductAliases({ sheetId, tabName, names } = {}) {
+  const add = (Array.isArray(names) ? names : [])
+    .map(s => String(s || '').replace(/[\n\r]+/g, ' ').trim().slice(0, 120)).filter(Boolean);
+  if (!add.length || !sheetId || !tabName) return 0;
+  try {
+    const { rows } = await _db().query(
+      'SELECT inspect_product_aliases FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]);
+    if (!rows.length) return 0;
+    const cur = String(rows[0].inspect_product_aliases || '')
+      .split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+    const merged = _mergeProductNames(cur, add).slice(0, 60);
+    const added = merged.length - cur.length;
+    if (added <= 0) return 0;
+    await _db().query(
+      'UPDATE tab_configs SET inspect_product_aliases = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+      [merged.join('\n').slice(0, 4000), sheetId, tabName]);
+    return added;
+  } catch (e) {
+    logger.warn(`[reviewInspect] 별칭 등록 실패(무시 — migration 092 확인): ${e.message}`);
+    return 0;
+  }
+}
+
+/** [정상] 확인 건에서 학습할 별칭 후보 — 상품명 의심으로 잡혔던 캡처 표기만. */
+function _aliasCandidate(row) {
+  if (!row) return null;
+  const pr = (row.checks && row.checks.product) || {};
+  if (pr.verdict !== 'warn') return null;
+  const v = _cleanProductForMatch(row.ocr_product || pr.ocr || '');
+  return v && v.length >= 4 ? v : null;   // 너무 짧은 조각은 별칭으로 안 삼는다(아무거나 통과 방지)
+}
+
+async function resolveInspection({ fileId, by, resolution } = {}) {
+  const rkind = _RESOLUTIONS.includes(resolution) ? resolution : null;
+  const { rows } = await _db().query(
     `UPDATE review_inspections
-        SET status = 'resolved', resolved_at = NOW(), resolved_by = $2, updated_at = NOW()
-      WHERE file_id = $1 AND status <> 'resolved'`,
-    [fileId, by || '']
+        SET status = 'resolved', resolution = COALESCE($3, resolution),
+            resolved_at = NOW(), resolved_by = $2, updated_at = NOW()
+      WHERE file_id = $1 AND status <> 'resolved'
+      RETURNING sheet_id, tab_name, ocr_product, checks`,
+    [fileId, by || '', rkind]
   );
-  return { ok: true, resolved: rowCount || 0 };
+  let aliasAdded = 0;
+  if (rkind === 'ok' && rows[0]) {
+    const cand = _aliasCandidate(rows[0]);
+    if (cand) {
+      aliasAdded = await _addProductAliases({
+        sheetId: rows[0].sheet_id, tabName: rows[0].tab_name, names: [cand],
+      });
+    }
+  }
+  return { ok: true, resolved: rows.length, aliasAdded };
+}
+
+/**
+ * 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결한다(1632건 백로그용).
+ * ★ adminOrMaster 전용(라우트) — 대량 종결은 되돌리기 어렵다.
+ * ★ resolution 'ok' 면 상품명 의심 건들의 캡처 표기를 별칭으로 **한 번에** 학습한다.
+ */
+async function resolveInspectionsBulk({ sheetId, tabName, resolution = 'ok', by } = {}) {
+  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
+  const rkind = _RESOLUTIONS.includes(resolution) ? resolution : 'ok';
+  const { rows } = await _db().query(
+    `UPDATE review_inspections
+        SET status = 'resolved', resolution = $4, resolved_at = NOW(), resolved_by = $3, updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2 AND status IN ('suspect', 'fail')
+      RETURNING sheet_id, tab_name, ocr_product, checks`,
+    [sheetId, tabName, by || '', rkind]
+  );
+  let aliasAdded = 0;
+  if (rkind === 'ok' && rows.length) {
+    const cands = rows.map(_aliasCandidate).filter(Boolean).slice(0, 30);
+    if (cands.length) aliasAdded = await _addProductAliases({ sheetId, tabName, names: cands });
+  }
+  return { ok: true, resolved: rows.length, aliasAdded };
 }
 
 /** 한 건의 스코프 판정용 — 그 파일이 어느 (시트,탭)인지. */
@@ -1106,12 +1219,12 @@ function inspectionsCsv(rows) {
 
 module.exports = {
   precheckPolicy, expectedChannelKey, channelLabel,
-  productNamesFromWorkOrder, productNameSettings, saveProductNames,
+  productNamesFromWorkOrder, productNameSettings, saveProductNames, saveProductAliases,
   loadSamplesFor, sampleSettings, saveSample,
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
-  listInspections, inspectionSummary, resolveInspection, inspectionScope,
+  listInspections, inspectionSummary, resolveInspection, resolveInspectionsBulk, inspectionScope,
   hashBase64, matchProductName, computeStatus,
   loadTabExpectations, findDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,

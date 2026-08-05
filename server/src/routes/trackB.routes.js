@@ -1101,10 +1101,30 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
     const fileId = String((req.body || {}).fileId || '');
     const g = await _riCanTouch(req, fileId);
     if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const r = await _inspectSvc.resolveInspection({ fileId, by: (req.admin && req.admin.name) || '' });
+    // resolution: 'ok'(정상 = AI 오탐 — 학습 신호) | 'bad'(불량 맞음) | 미지정(옛 화면 호환)
+    const r = await _inspectSvc.resolveInspection({
+      fileId, by: (req.admin && req.admin.name) || '',
+      resolution: String((req.body || {}).resolution || ''),
+    });
     res.json({ ok: true, ...r });
   } catch (err) {
     res.status(500).json({ ok: false, error: '확인 처리에 실패했습니다.' });
+  }
+});
+
+/* 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결(대량 백로그용).
+   ★ adminOrMaster — 대량 종결은 되돌리기 어렵다(건별 확인은 종전대로 staff 담당 탭 허용).
+   ★ resolution 'ok' 면 상품명 의심 건의 캡처 표기를 그 탭 인정 별칭으로 함께 학습한다. */
+router.post('/review-inspect/resolve-bulk', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await _inspectSvc.resolveInspectionsBulk({
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+      resolution: String(b.resolution || 'ok'), by: (req.admin && req.admin.name) || '',
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '일괄 확인 처리에 실패했습니다.' });
   }
 });
 
@@ -1130,8 +1150,11 @@ router.post('/review-inspect/product-names', authMiddleware, _reInternal, async 
       const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
       if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
     }
-    const saved = await _inspectSvc.saveProductNames({ sheetId, tabName, text: b.text });
-    res.json({ ok: true, saved });
+    // text = 기대 상품명(수동) / aliases = 학습된 인정 별칭 — 각각 온 필드만 저장(미전송 = 유지)
+    const out = { ok: true };
+    if (b.text !== undefined) out.saved = await _inspectSvc.saveProductNames({ sheetId, tabName, text: b.text });
+    if (b.aliases !== undefined) out.aliases = await _inspectSvc.saveProductAliases({ sheetId, tabName, text: b.aliases });
+    res.json(out);
   } catch (err) {
     res.status(500).json({ ok: false, error: '저장에 실패했습니다.' });
   }
