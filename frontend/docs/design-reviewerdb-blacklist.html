@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>등록리뷰어DB 자동 블랙리뷰어 시스템 — 실화면 목업 시안</title>
+<style>
+  :root{ color-scheme: light; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif; background:#f4f6f9; color:#1f2937; line-height:1.6; padding:28px 16px 80px; }
+  .doc{ max-width:1240px; margin:0 auto; }
+  h1{ font-size:24px; margin-bottom:6px; }
+  .sub{ color:#6b7280; font-size:13px; margin-bottom:26px; }
+  h2{ font-size:18px; margin:44px 0 12px; padding-left:10px; border-left:4px solid #dc2626; }
+  h3{ font-size:15px; margin:20px 0 8px; color:#7f1d1d; }
+  p{ font-size:14px; margin-bottom:8px; }
+  .sec{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:22px 24px; margin-bottom:18px; }
+  .note{ background:#fffbeb; border:1px solid #fcd34d; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  .danger{ background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  .good{ background:#ecfdf5; border:1px solid #6ee7b7; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  table.plan{ width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; }
+  table.plan th{ background:#f3f4f6; text-align:left; padding:8px 10px; border:1px solid #e5e7eb; white-space:nowrap; }
+  table.plan td{ padding:8px 10px; border:1px solid #e5e7eb; vertical-align:top; }
+  code{ background:#eef2ff; color:#3730a3; padding:1px 6px; border-radius:4px; font-size:12px; font-family:Consolas,Menlo,monospace; }
+  ul,ol{ margin:6px 0 10px 22px; font-size:14px; }
+  li{ margin-bottom:4px; }
+  .qa{ border-left:3px solid #a78bfa; background:#faf5ff; padding:10px 14px; border-radius:0 8px 8px 0; margin:8px 0; font-size:13px; }
+  .qa b{ color:#6d28d9; }
+  .tag-step{ display:inline-block; background:#b91c1c; color:#fff; border-radius:6px; padding:2px 9px; font-size:11px; font-weight:800; margin-right:6px; }
+
+  /* ═══ 실화면 목업(리뷰웹시스템[3버전] 등록리뷰어DB — 현재 화면과 같은 라이트 톤) ═══ */
+  .wf{ background:#fafafa; border:1.5px dashed #cbd5e1; border-radius:12px; padding:18px; margin:14px 0 26px; }
+  .wf-cap{ font-size:12px; color:#64748b; margin-bottom:10px; font-weight:700; }
+  .app{ background:#fff; border:1px solid #d1d5db; border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.08); overflow:hidden; }
+  .mh{ display:flex; align-items:center; gap:8px; padding:14px 16px 6px; flex-wrap:wrap; }
+  .mh h1{ font-size:17px; margin:0; }
+  .bd{ display:inline-block; border:1px solid #d1d5db; border-radius:999px; padding:1px 9px; font-size:11px; color:#6b7280; background:#fff; font-weight:700; }
+  .bd.g{ background:#ecfdf5; border-color:#6ee7b7; color:#047857; }
+  .sp{ flex:1; }
+  .inp{ border:1px solid #d1d5db; border-radius:8px; padding:6px 10px; font-size:12px; background:#fff; color:#111827; }
+  .btn{ display:inline-block; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:700; border:1px solid #d1d5db; background:#fff; color:#374151; cursor:default; }
+  .ovnote{ margin:6px 16px 10px; font-size:11.5px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:7px 12px; }
+  .chips{ display:flex; gap:6px; padding:0 16px 10px; flex-wrap:wrap; align-items:center; }
+  .chip{ display:inline-block; border-radius:999px; padding:3px 12px; font-size:12px; font-weight:700; border:1px solid #d1d5db; background:#fff; color:#4b5563; }
+  .chip.on{ background:#111827; border-color:#111827; color:#fff; }
+  .chip.cand{ border-color:#fca5a5; color:#b91c1c; }
+  .csum{ font-size:11.5px; color:#9ca3af; margin-left:6px; }
+  .twrap{ overflow-x:auto; border-top:1px solid #e5e7eb; }
+  table.lg{ border-collapse:collapse; font-size:12px; min-width:1560px; width:100%; }
+  table.lg th{ background:#f9fafb; color:#6b7280; font-size:11px; text-align:left; padding:8px 8px; border-bottom:2px solid #e5e7eb; white-space:nowrap; position:sticky; top:0; }
+  table.lg td{ padding:8px; border-bottom:1px solid #f1f5f9; vertical-align:middle; white-space:nowrap; }
+  table.lg td.addr{ max-width:170px; overflow:hidden; text-overflow:ellipsis; }
+  tr.cand td{ background:#fff7f7; }
+  tr.blk td{ background:#fef2f2; }
+  .muted{ color:#c4c9d4; }
+  .b{ display:inline-block; border-radius:6px; padding:2px 7px; font-size:10.5px; font-weight:800; }
+  .b-ok{ background:#dcfce7; color:#15803d; }
+  .b-blk{ background:#b91c1c; color:#fff; }
+  .b-cand{ background:#fee2e2; color:#b91c1c; border:1px dashed #fca5a5; }
+  .b-warn{ background:#fef3c7; color:#b45309; }
+  .b-gray{ background:#f3f4f6; color:#6b7280; }
+  .rv-no{ color:#dc2626; font-weight:800; }
+  .rv-od{ color:#b45309; font-weight:700; }
+  .memo{ display:flex; gap:4px; }
+  .memo input{ width:120px; border:1px solid #e5e7eb; border-radius:6px; padding:4px 8px; font-size:11px; }
+  .del{ border:1px solid #fca5a5; color:#b91c1c; background:#fff; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:700; }
+  /* 빨간 사각 토글(사용자 확정: 사각형) — OFF=참여가능(회색) / ON=블랙리스트(빨강) */
+  .sqsw{ display:inline-flex; align-items:center; gap:6px; }
+  .sq{ width:40px; height:20px; border-radius:4px; background:#e5e7eb; position:relative; flex:none; border:1px solid #d1d5db; }
+  .sq::after{ content:''; position:absolute; top:2px; left:2px; width:15px; height:14px; border-radius:3px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25); }
+  .sq.on{ background:#dc2626; border-color:#b91c1c; }
+  .sq.on::after{ left:auto; right:2px; }
+  .sqlb{ font-size:10.5px; font-weight:800; color:#9ca3af; }
+  .sq.on + .sqlb, .sqlb.on{ color:#b91c1c; }
+  .pgr{ display:flex; gap:6px; justify-content:center; padding:12px; font-size:12px; color:#6b7280; }
+  /* 확인 다이얼로그 목업 */
+  .dlg{ max-width:430px; margin:0 auto; background:#fff; border:1px solid #d1d5db; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.15); overflow:hidden; }
+  .dlg .h{ padding:11px 16px; border-bottom:1px solid #e5e7eb; font-weight:800; font-size:13px; background:#f9fafb; }
+  .dlg .bd2{ padding:14px 16px; font-size:12.5px; }
+  /* 후속조치 미니 목업(공고별 팝업 상단) */
+  .mini{ max-width:700px; background:#fff; border:1px solid #d1d5db; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,.10); overflow:hidden; }
+  .mini .h{ padding:10px 14px; border-bottom:1px solid #e5e7eb; font-weight:800; font-size:12.5px; background:#f9fafb; }
+  .mini table{ width:100%; border-collapse:collapse; font-size:12px; }
+  .mini th{ background:#fff5f5; color:#b91c1c; font-size:10.5px; text-align:left; padding:6px 10px; border-bottom:1.5px solid #fecaca; }
+  .mini td{ padding:7px 10px; border-bottom:1px solid #f1f5f9; }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<h1>🚨 등록리뷰어DB — 자동 블랙리뷰어 시스템 (실화면 목업 시안)</h1>
+<div class="sub">design-reviewerdb-blacklist.html · v1.0 · 2026-08-05 — 리뷰웹시스템[3버전] 등록리뷰어DB 탭 기준 · 시안 확정 후 구현</div>
+
+<!-- ═══ 1. 표시값 정의 ═══ -->
+<h2>1. 표시값 정의 (사용자 지시 그대로)</h2>
+<div class="sec">
+  <table class="plan">
+    <tr><th>표시값</th><th>판정 기준</th><th>표시</th></tr>
+    <tr><td><b>기한경과 (X건)</b></td><td>참여(구매) 후 <b>14일</b>이 지나도록 리뷰 미제출인 행 수</td><td><span class="rv-od">기한경과 2건</span> (주황)</td></tr>
+    <tr><td><b>리뷰미작성 (X건)</b></td><td>참여(구매) 후 <b>30일</b>이 지나도록 리뷰 미제출인 행 수</td><td><span class="rv-no">리뷰미작성 1건</span> (빨강)</td></tr>
+    <tr><td><b>누적참여 (X건)</b></td><td>이 리뷰어 명의 + <b>등록된 타계정 명의 전부</b>의 참여(로스터 확정) 행 수</td><td>23건 <span style="color:#9ca3af;font-size:11px">(타계정 4)</span></td></tr>
+    <tr><td><b>🚨 블랙리스트 후보</b></td><td><b>리뷰미작성 1건 이상</b>이면 자동 표시(연빨강 행 배경 + 후보 배지)</td><td><span class="b b-cand">🚨 후보</span></td></tr>
+  </table>
+  <div class="note"><b>판정 기준 재정의(이번 지시로 확정):</b> 두 값 모두 "아직 리뷰를 안 낸 행"을 경과일수로 나눈 것이다 —
+  14일↑ = 기한경과(같은 행이 30일을 넘으면 <b>리뷰미작성으로 승격</b>, 이중 계수 없음).
+  기준 일수는 설정탭 <b>[🚫 블랙리스트 관리기준]</b>에서 변경(기본 <b>14 / 30</b>으로 조정 — 현재 기본 14/14에서 변경).
+  ※ 기존 091의 "기한경과 = 제출은 했으나 늦게" 정의는 이 정의로 <b>대체</b>한다(참여가능 리뷰어 관리 팝업의 "이전 리뷰" 칸도 같은 계산으로 통일 — 판정 단일 출처 유지).</div>
+  <ul>
+    <li><b>자동은 "후보 표시"까지</b> — 실제 블랙리스트 등록(참여 제한)은 항상 사람이 토글로 결정한다(오탐 자동 차단 금지, 기존 규율 그대로).</li>
+    <li>구매 시점을 모르는 옛 데이터(주문원장 미연결 행)는 경과일수를 셀 수 없어 <b>건수에서 제외</b>하고, 누적참여에는 포함한다(조용히 0으로 꾸미지 않고 계산 가능한 것만 센다).</li>
+  </ul>
+</div>
+
+<!-- ═══ 2. 실화면 목업 ═══ -->
+<h2>2. 실화면 목업 — 등록리뷰어DB 탭 (현재 13열 + 신규 3열 + 토글)</h2>
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">화면 A</span> 기존 화면 그대로 + <b>누적참여 · 이전 리뷰</b> 컬럼 추가 + 삭제 버튼 <b>바로 왼쪽</b>에 참여설정 토글 (표는 가로 스크롤 — 실제 화면과 동일)</div>
+  <div class="app">
+    <div class="mh">
+      <h1>등록리뷰어DB</h1>
+      <span class="bd g">2,038명</span><span class="bd">1–50</span>
+      <span class="sp"></span>
+      <select class="inp"><option>상태 전체</option></select>
+      <input class="inp" style="width:250px" placeholder="이름 / 연락처 / 등록 계좌번호 검색 후 Enter">
+      <span class="btn">새로고침</span>
+      <span class="btn">⬇ 엑셀 다운로드</span>
+    </div>
+    <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요. 수정은 <b>관리자 메모·참여설정</b>만 가능합니다.</div>
+    <div class="chips">
+      <span class="chip on">전체</span>
+      <span class="chip">참여가능</span>
+      <span class="chip">블랙리스트 <b style="color:#fca5a5">12</b></span>
+      <span class="chip cand">🚨 후보 (미작성 1건↑) <b>7</b></span>
+      <span class="chip">기한경과만 <b style="color:#d97706">21</b></span>
+      <span class="csum">판정 기준: 기한경과 14일 · 리뷰미작성 30일 — 설정 › 블랙리스트 관리기준</span>
+    </div>
+    <div class="twrap">
+      <table class="lg">
+        <thead><tr>
+          <th>이름</th><th>연락처</th><th>주소</th><th>은행</th><th>계좌번호</th><th>예금주</th>
+          <th>주민번호</th><th>소득유형</th><th>타계정</th>
+          <th style="background:#f0fdf4">누적참여</th>
+          <th style="background:#fff5f5">이전 리뷰</th>
+          <th>등록일</th><th>상태</th><th>관리자 메모</th>
+          <th style="background:#fff5f5">참여설정</th><th></th>
+        </tr></thead>
+        <tbody>
+          <tr class="blk">
+            <td style="font-weight:700">홍길동 <span class="b b-blk">블랙리스트</span></td>
+            <td>010-1010-1234</td><td class="addr">서울 강서구 마곡중앙로 12…</td>
+            <td>국민</td><td>110-222-334455</td><td>홍길동</td><td>930101-1******</td><td>사업소득</td>
+            <td style="text-align:center">2 ▾</td>
+            <td><b>15건</b> <span style="color:#9ca3af;font-size:10.5px">(타 3)</span></td>
+            <td><span class="rv-no">리뷰미작성 1건</span> · <span class="rv-od">기한경과 1건</span></td>
+            <td class="muted">25.11.02</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input value="8/1 미작성 안내함"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq on"></span><span class="sqlb on">블랙리스트</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:700">김철수</td>
+            <td>010-2020-5678</td><td class="addr">부산 해운대구 센텀중앙로…</td>
+            <td>신한</td><td>110-333-556677</td><td>김철수</td><td>880505-1******</td><td>기타소득</td>
+            <td style="text-align:center"><span class="muted">0</span></td>
+            <td><b>31건</b></td>
+            <td><span style="color:#15803d">정상 · 최근 3일 전</span></td>
+            <td class="muted">25.09.14</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input placeholder="메모…"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq"></span><span class="sqlb">참여가능</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:700">이영희</td>
+            <td>010-3030-9012</td><td class="addr">인천 연수구 송도과학로…</td>
+            <td>우리</td><td>1002-444-778899</td><td>이영희</td><td>910707-2******</td><td>사업소득</td>
+            <td style="text-align:center">1 ▾</td>
+            <td><b>18건</b> <span style="color:#9ca3af;font-size:10.5px">(타 1)</span></td>
+            <td><span class="rv-od">기한경과 2건</span></td>
+            <td class="muted">25.12.20</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input placeholder="메모…"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq"></span><span class="sqlb">참여가능</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+          <tr class="cand">
+            <td style="font-weight:700">박민수 <span class="b b-cand">🚨 후보</span></td>
+            <td>010-4040-3456</td><td class="addr">대구 수성구 동대구로…</td>
+            <td>하나</td><td>620-555-990011</td><td>박민수</td><td>950303-1******</td><td>사업소득</td>
+            <td style="text-align:center"><span class="muted">0</span></td>
+            <td><b>9건</b></td>
+            <td><span class="rv-no">리뷰미작성 2건</span></td>
+            <td class="muted">26.01.08</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input placeholder="메모…"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq"></span><span class="sqlb">참여가능</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:700">정수빈</td>
+            <td>010-5050-2468</td><td class="addr">경기 성남시 분당구 판교역로…</td>
+            <td>케이뱅크</td><td>100-666-112233</td><td>정수빈</td><td>970909-2******</td><td>기타소득</td>
+            <td style="text-align:center"><span class="muted">0</span></td>
+            <td><b>4건</b></td>
+            <td><span style="color:#15803d">정상 · 최근 15일 전</span></td>
+            <td class="muted">26.03.02</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input placeholder="메모…"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq"></span><span class="sqlb">참여가능</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+          <tr class="cand">
+            <td style="font-weight:700">강하늘 <span class="b b-cand">🚨 후보</span></td>
+            <td>010-6060-1357</td><td class="addr">광주 서구 상무중앙로…</td>
+            <td>농협</td><td>352-777-445566</td><td>강하늘</td><td>890202-2******</td><td>사업소득</td>
+            <td style="text-align:center">4 ▾</td>
+            <td><b>27건</b> <span style="color:#9ca3af;font-size:10.5px">(타 11)</span></td>
+            <td><span class="rv-no">리뷰미작성 1건</span> · <span class="rv-od">기한경과 3건</span></td>
+            <td class="muted">25.08.19</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input placeholder="메모…"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq"></span><span class="sqlb">참여가능</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:700">문성대</td>
+            <td>010-7070-8062</td><td class="addr">대전 유성구 대학로…</td>
+            <td>토스뱅크</td><td>1000-888-667788</td><td>문성대</td><td>860606-1******</td><td>사업소득</td>
+            <td style="text-align:center"><span class="muted">0</span></td>
+            <td><span class="muted">집계 실패 ?</span></td>
+            <td><span class="muted">집계 실패 ?</span></td>
+            <td class="muted">26.02.11</td><td><span class="b b-ok">활성</span></td>
+            <td><div class="memo"><input placeholder="메모…"><span class="btn" style="padding:3px 8px">저장</span></div></td>
+            <td><span class="sqsw"><span class="sq"></span><span class="sqlb">참여가능</span></span></td>
+            <td><span class="del">삭제</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pgr"><span class="btn">← 이전</span><span style="align-self:center">1 / 41</span><span class="btn">다음 →</span></div>
+  </div>
+  <div class="note" style="margin-top:12px">
+    <b>화면 규칙</b> — ① 신규 컬럼은 <b>타계정 오른쪽</b>(참여 관련 값끼리 묶음), 토글은 <b>삭제 바로 왼쪽</b>(사용자 확정 위치).
+    ② 🚨 후보 행 = 연빨강 배경 / 블랙리스트 행 = 빨강 배경(이름 옆 배지 병기).
+    ③ 집계가 실패한 행은 <b>"집계 실패 ?"</b>로 표기 — 0건·정상으로 꾸미지 않는다(무신호 금지 규율).
+    ④ 검색창은 기존 이름/연락처에 <b>등록 계좌번호</b> 추가(공고별 팝업 검색과 동일 능력).
+    ⑤ 필터 칩·엑셀 다운로드는 현재 페이지 조건 기준(참고 캡처의 필터·엑셀 반영).
+  </div>
+</div>
+
+<!-- 토글 확인 다이얼로그 -->
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">화면 B</span> 토글 클릭 시 확인 — 조용한 즉시 반영 금지(전 공고에 영향이 가는 전역 설정)</div>
+  <div style="display:flex;gap:18px;flex-wrap:wrap;justify-content:center">
+    <div class="dlg">
+      <div class="h">🚫 블랙리스트로 전환</div>
+      <div class="bd2">
+        <b>박민수 (010-4040-3456)</b> 님을 블랙리스트로 등록할까요?<br><br>
+        · 근거: <span class="rv-no">리뷰미작성 2건</span> (기준 30일)<br>
+        · 사유(선택): <input class="inp" style="width:98%" value="리뷰 미작성 2건 — 26.08.05 자동 집계"><br><br>
+        <span style="color:#6b7280;font-size:11.5px">등록하면 <b>참여형 공고의 참여 리뷰어 관리 팝업 상단에 자동 표시</b>되며,
+        신규 참여는 안내 메시지와 함께 제한됩니다. 이미 진행 중인 홀드·확정 건은 유지됩니다.
+        공고별로 예외 허용(건별 참여)이 가능합니다.</span>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+          <span class="btn">취소</span><span class="btn" style="background:#dc2626;border-color:#dc2626;color:#fff">블랙리스트 등록</span>
+        </div>
+      </div>
+    </div>
+    <div class="dlg">
+      <div class="h">✅ 참여가능으로 되돌리기</div>
+      <div class="bd2">
+        <b>홍길동 (010-1010-1234)</b> 님을 블랙리스트에서 해제할까요?<br><br>
+        · 등록: 26.08.01 만두 — "리뷰 미작성 안내 무응답"<br><br>
+        <span style="color:#6b7280;font-size:11.5px">해제해도 미작성·기한경과 건수 표시는 그대로 남습니다(기록은 사라지지 않음).</span>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+          <span class="btn">취소</span><span class="btn" style="background:#10b981;border-color:#10b981;color:#fff">해제</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 3. 데이터·구현 계획 ═══ -->
+<h2>3. 구현 계획 (데이터 · 성능 · 기존 시스템 연결)</h2>
+<div class="sec">
+  <h3>저장할 것 vs 조회 때 계산할 것</h3>
+  <table class="plan">
+    <tr><th>값</th><th>방식</th><th>이유</th></tr>
+    <tr><td>블랙리스트 여부·사유</td><td><b>기존 <code>blacklist</code> 테이블 재사용</b>(phone UNIQUE·reason·added_by) — 토글이 이 테이블에 등록/삭제</td><td>신규 저장소 0. 공고별 게이트(091)의 "전역" 판정과 같은 테이블이라 후속조치(팝업 자동 표시)가 바로 이어진다</td></tr>
+    <tr><td>누적참여·기한경과·미작성 건수</td><td><b>저장하지 않고 조회 시 파생</b> — 현재 페이지(최대 50명)의 본인+타계정 phone8을 모아 <code>review_index</code> LEFT JOIN <code>order_submissions</code>(구매 시점 = <code>submitted_at</code>) 배치 1쿼리</td><td>컬럼으로 박제하면 리뷰 제출 순간마다 갱신 배치가 필요해진다. 페이지당 50명 × 인덱스 조회라 가볍고, 30초 캐시로 재조회 상각</td></tr>
+    <tr><td>판정 일수(14/30)</td><td>기존 <code>app_settings.reviewer_gate_criteria</code>(설정탭 "블랙리스트 관리기준") — 기본값을 14/30으로 조정, 문구를 "기한경과 일수 / 리뷰미작성 일수"로 재정의</td><td>091에서 이미 만든 설정을 그대로 사용(신규 키 0). <b>공고별 팝업의 "이전 리뷰" 칸도 같은 계산식으로 교체</b>(판정 단일 출처 — 두 화면이 다른 숫자를 보이면 안 된다)</td></tr>
+  </table>
+
+  <h3>API (전부 adminOrMaster — 등록리뷰어DB 기존 권한 그대로)</h3>
+  <table class="plan">
+    <tr><th>변경</th><th>내용</th></tr>
+    <tr><td><code>GET /api/trackb/reviewers</code> 확장</td><td>기존 응답에 <code>reviewStats{joined, joinedSub, overdue, nowrite}</code> + <code>blacklisted{reason, addedBy, addedAt}</code> 동봉(집계 실패 시 <code>statsUnavailable</code> — 프론트가 '?'). 검색 <code>q</code>에 계좌번호 숫자 부분일치 추가. 필터 <code>flag=blacklist|candidate|overdue</code></td></tr>
+    <tr><td><code>POST /api/trackb/reviewers/blacklist</code> 신설</td><td><code>{phone, on:true|false, reason?}</code> — 기존 <code>blacklist</code> 테이블 등록/해제(등록자·시각 기록). 기존 <code>/api/blacklist</code>(GAS 호환)는 무변경</td></tr>
+    <tr><td>CSV</td><td>현재 조건(필터·검색) 그대로 다운로드 — 계좌·주민번호는 <b>미포함</b>(이름·연락처·건수·상태만, 파일 유출 반경 최소화)</td></tr>
+  </table>
+
+  <h3>지켜지는 기존 규율</h3>
+  <ul>
+    <li><b>자동 차단 없음</b> — 시스템은 후보 표시까지, 등록은 사람이 토글 + confirm(사유 입력 가능, 근거 건수 자동 제안).</li>
+    <li><b>자리표시자↔파라미터 정합</b>(이 라우트에서 이미 실측 500이 난 함정) — 계좌 검색 조건 추가 시 회귀가드로 고정.</li>
+    <li><b>집계 실패는 '?'</b> — 빈 값·0으로 꾸미지 않고, 토글은 집계와 무관하게 동작(표시가 죽어도 관리 기능은 산다).</li>
+    <li>타계정 phone8 수집은 <code>sub_accounts</code> JSON에서 — 후보 판정·누적참여 모두 <b>본인+타계정 합산</b>(사용자 지시 "타계정 포함").</li>
+  </ul>
+</div>
+
+<!-- ═══ 4. 후속조치 미리보기 ═══ -->
+<h2>4. 후속조치 미리보기 — 공고별 참여 리뷰어 관리 팝업 상단에 블랙리스트 자동 표시</h2>
+<div class="sec">
+  <p>이 시안 확정 후 진행할 후속: 공고 카드 [🚫 리뷰어] 팝업을 열면 <b>전역 블랙리스트가 맨 위 붉은 구역에 자동으로 나타난다</b>(검색 불필요).
+  기본값 = 차단(마감 위장), 공고별로 체크하면 <b>이 공고만 허용 예외</b> — "안 구해지는 공고엔 참여시킨다"의 클릭 한 번 버전.</p>
+  <div class="wf" style="margin-bottom:8px">
+    <div class="wf-cap"><span class="tag-step">후속 미리보기</span> 참여 리뷰어 관리 팝업 상단 (기존 팝업에 구역 추가 — 화면 사본 없음)</div>
+    <div class="mini">
+      <div class="h">🚫 참여 리뷰어 관리 — 우레온 모이스처 바디 리셋 미스트 150ml</div>
+      <table>
+        <tr><th colspan="4">전역 블랙리스트 12명 — 이 공고에서는 기본 차단됩니다. 참여시키려면 체크(허용 예외)하세요.</th></tr>
+        <tr><td>☐ <b>홍길동</b> (***-1234)</td><td><span class="rv-no">미작성 1건</span></td><td><span class="b b-blk">블랙리스트</span></td><td><span class="b b-gray">차단 · 마감 위장</span></td></tr>
+        <tr><td>☑ <b>서규리</b> (***-4882)</td><td><span class="rv-od">기한경과 1건</span></td><td><span class="b b-blk">블랙리스트</span></td><td><span class="b b-ok">이 공고 허용 예외 ✓</span></td></tr>
+        <tr><td colspan="4" style="color:#9ca3af;font-size:11px">… 아래는 기존 화면 그대로(검색 · 예외 목록 · 안내 메시지 설정) …</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="danger"><b>⚠ 효력 범위 결정 필요(아래 Q1):</b> 현재 전역 블랙리스트의 <b>참여 자동 차단</b>은 옵트인(<code>CAMPAIGN_REVIEWER_GATE_GLOBAL=1</code>, 기본 꺼짐)이다.
+  후속조치까지 가면 두 가지 방식이 가능하다 — <b>(a)</b> 전역 강제 ON: 토글만 켜면 모든 참여형 공고에서 즉시 차단(팝업 표시는 현황 확인용)
+  / <b>(b)</b> 전역 강제 OFF 유지: 팝업 상단에 표시만 하고, 공고별로 [모두 차단] 버튼을 눌러야 그 공고에 적용(공고 단위 통제).</div>
+</div>
+
+<!-- ═══ 5. 확인 필요 결정 ═══ -->
+<h2>5. 확인이 필요한 결정 (답 주시면 구현 착수)</h2>
+<div class="sec">
+  <div class="qa"><b>Q1. 토글의 효력 범위:</b> 블랙리스트 토글 ON이 <b>(a) 즉시 모든 참여형 공고 차단</b>(전역 강제 ON — 안내는 사유 고지형 기본)
+  / <b>(b) 공고별 팝업에 표시 + 공고마다 적용 버튼</b> 중 어느 쪽인가요? <small>(a)가 참고 캡처의 의도에 가깝고 운영이 단순합니다 — (a) 권장, 이 경우 후속조치에서 전역 강제를 함께 켭니다.</small></div>
+  <div class="qa"><b>Q2. 판정 기준 확정:</b> 기한경과 = 미제출 14일↑, 리뷰미작성 = 미제출 30일↑(승격·이중 계수 없음), 기본값 14/30 — 이대로 확정인가요?
+  기존 공고별 팝업의 "이전 리뷰" 칸도 같은 계산으로 교체합니다.</div>
+  <div class="qa"><b>Q3. 삭제 버튼과의 관계:</b> 블랙리스트 리뷰어의 [삭제]는 그대로 두나요? <small>(삭제하면 등록만 취소되고 이력은 남는 기존 동작 — 블랙리스트 행 삭제 시 blacklist 테이블 기록은 보존 권장)</small></div>
+  <div class="qa"><b>Q4. 엑셀 다운로드 범위:</b> 계좌·주민번호는 CSV에서 제외(이름·연락처 뒤4·건수·상태만)로 설계했습니다 — 전체 값이 필요하면 말씀해주세요.</div>
+</div>
+
+<div style="text-align:center;color:#9ca3af;font-size:12px;margin-top:40px">design-reviewerdb-blacklist.html · v1.0 — 시안 확정 + Q1~Q4 답변 후 구현 착수</div>
+</div>
+</body>
+</html>
