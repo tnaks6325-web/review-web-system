@@ -116,4 +116,62 @@ ok('참여형 기본·제목·채팅방 등 다른 키 불변',
 ok('관리자 상세 표시(_woDetailHtml)는 무접촉 — 원문 보존 취지 유지',
   !/_woStripReviewMeta/.test(src.slice(src.indexOf('function _woDetailHtml'), src.indexOf('function _woDetailHtml') + 4000)));
 
+/* ══ ④ 2단계 — 첨부 이미지 구조화(guide_images, 090) ══ */
+console.log('\n[④] guide_images 구조화(2단계)');
+const TOK = '1mdb2dR2Bz_4sX2V251kl3Xt';   // guide-image 토큰(20자+ [-\w])
+const IMG_URL = 'https://sublime-magic-production-790b.up.railway.app/api/order/guide-image/' + TOK;
+ok('_woGuideImages: 배열·JSON 문자열 양쪽 파싱, 실패는 []',
+  W._woGuideImages({ guide_images: [IMG_URL] }).length === 1
+  && W._woGuideImages({ guide_images: JSON.stringify([IMG_URL]) }).length === 1
+  && W._woGuideImages({ guide_images: '{깨진 json' }).length === 0
+  && W._woGuideImages({}).length === 0);
+ok('★ 구조 배열 → 유입가이드 HTML 에 <img> 로 실린다(파싱 없이)',
+  (() => {
+    const h = W._woBuildInflowHtml({ inflow_type: 'guide', inflow_guide: '검색어: 립밤', guide_images: [IMG_URL] });
+    return h.includes('<img') && h.includes(TOK) && h.includes('검색어: 립밤');
+  })());
+ok('★ 과도기(텍스트 블록 + 배열 동시 전송)에도 같은 이미지는 1번만(토큰 중복 제거)',
+  (() => {
+    const o = { inflow_type: 'guide',
+      inflow_guide: '검색어: 립밤\n\n[유입가이드 첨부 이미지]\n1. 유입.png (29KB, Drive 저장됨)\n' + IMG_URL,
+      guide_images: [IMG_URL] };
+    const h = W._woBuildInflowHtml(o);
+    return (h.match(new RegExp(TOK, 'g')) || []).length === 1;
+  })());
+ok('관리자 상세도 구조 첨부를 그린다 — 단 원문에 같은 URL 이 있으면 중복 0(무회귀)',
+  (() => {
+    // 상세 렌더의 <img> 는 src+data-openurl 두 속성에 토큰이 들어가므로 **이미지 태그 수**로 센다
+    const imgCount = h => (h.match(/<img/g) || []).length;
+    const both = W._woDetailHtml({ inflow_type: 'guide', inflow_guide: '검색어: 립밤\n' + IMG_URL, guide_images: [IMG_URL] });
+    const pure = W._woDetailHtml({ inflow_type: 'guide', inflow_guide: '검색어: 립밤', guide_images: [IMG_URL] });
+    return imgCount(both) === 1 && imgCount(pure) === 1 && pure.includes(TOK);
+  })());
+
+// intake 배선(정적) — 088 과 같은 규율: 마이그레이션 + REQUIRED_SCHEMA + INSERT 합류
+const ordSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'order.routes.js'), 'utf8');
+const idxSrc = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+ok('마이그레이션 090 존재(ADD COLUMN IF NOT EXISTS — 멱등)',
+  /ADD COLUMN IF NOT EXISTS guide_images TEXT DEFAULT ''/.test(
+    fs.readFileSync(path.join(__dirname, '..', 'migrations', '090_work_order_guide_images.sql'), 'utf8')));
+ok('REQUIRED_SCHEMA 등록 — 컬럼 없으면 부팅 거부(인트라넷 접수 전면 42703 차단)',
+  /\['work_orders', 'guide_images'\]/.test(idxSrc));
+ok('INTAKE 편집 필드 합류 + 배열 정규화 분기',
+  /'guide_images',\s+\/\/ 첨부 이미지/.test(ordSrc)
+  && /f === 'guide_images'\) vals\.push\(_guideImagesJson\(b\[f\]\)\)/.test(ordSrc));
+ok('★ INSERT 컬럼 수 ≡ VALUES 자리 수 ≡ 파라미터 수(가장 흔하게 깨지는 자리)',
+  (() => {
+    const m = ordSrc.match(/INSERT INTO work_orders\s*\(([\s\S]*?)\)\s*VALUES \(([\s\S]*?)\)/);
+    if (!m) return false;
+    const cols = m[1].split(',').map(s => s.trim()).filter(Boolean);
+    const vals = m[2].split(',').map(s => s.trim()).filter(Boolean);
+    if (!cols.includes('guide_images')) return false;
+    if (cols.length !== vals.length) return false;
+    const params = vals.filter(v => /^\$\d+$/.test(v)).length;
+    const maxP = Math.max(...vals.filter(v => /^\$\d+$/.test(v)).map(v => Number(v.slice(1))));
+    return params === maxP;   // $1..$N 연속(중복·건너뜀 없음)
+  })());
+ok('_guideImagesJson 정규화 — https 만·상한 8장·비배열/깨진 JSON 은 빈 값',
+  /function _guideImagesJson/.test(ordSrc) && /\.slice\(0, 8\)/.test(ordSrc)
+  && /https\?:\\\/\\\//.test(ordSrc));
+
 console.log(`\n✅ campaignFieldPrefill: ${n}개 통과`);

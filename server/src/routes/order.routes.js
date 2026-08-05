@@ -50,6 +50,7 @@ const INTAKE_EDITABLE_FIELDS = [
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
   'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
+  'guide_images',   // 첨부 이미지 URL 배열(JSON) — 090 · 칸=칸 매핑 2단계
 ];
 const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
 
@@ -135,6 +136,21 @@ function _intOrZero(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// guide_images(090 · 칸=칸 매핑 2단계): 첨부 이미지 URL 배열 → 정규화된 JSON 문자열.
+// 배열/JSON 문자열 어느 쪽이 와도 받아주되, http(s) URL 만 · 최대 8장 · 항목 600자 컷 —
+// <img src>로 그대로 나가는 값이라 자유 문자열을 저장하지 않는다. 실패·빈 값은 ''(종전 동작).
+function _guideImagesJson(v) {
+  try {
+    const arr = Array.isArray(v) ? v : ((typeof v === 'string' && v.trim()) ? JSON.parse(v) : []);
+    if (!Array.isArray(arr)) return '';
+    const clean = arr
+      .filter(u => typeof u === 'string' && /^https?:\/\//i.test(u.trim()))
+      .map(u => u.trim().slice(0, 600))
+      .slice(0, 8);
+    return clean.length ? JSON.stringify(clean) : '';
+  } catch (_) { return ''; }
+}
+
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy) {
   const optionsJson = (typeof b.product_options_json === 'string')
@@ -143,11 +159,11 @@ async function _insertWorkOrder(b, createdBy) {
   const { rows } = await pool.query(
     `INSERT INTO work_orders
       (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
-       purchase_time, inflow_keyword, inflow_type, inflow_guide, delivery_type, courier_proxy,
+       purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
        sales_id, contract_number, quote_id, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'submitted',$27)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,'submitted',$28)
      RETURNING *`,
     [
       _genOrderId(),
@@ -162,6 +178,7 @@ async function _insertWorkOrder(b, createdBy) {
       b.inflow_keyword || '',
       b.inflow_type || '',
       b.inflow_guide || '',
+      _guideImagesJson(b.guide_images),   // 첨부 이미지 URL 배열(090) — 미전송·구버전 인트라넷은 ''
       b.delivery_type || '',
       b.courier_proxy === true || b.courier_proxy === 'true',
       b.review_type || '',
@@ -409,6 +426,7 @@ async function _intakeUpdateHandler(req, res, next) {
       sets.push(`${f} = $${i++}`);
       if (f === 'start_date') vals.push(_dateOrNull(b[f]));
       else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
+      else if (f === 'guide_images') vals.push(_guideImagesJson(b[f]));   // 배열 → 정규화 JSON(090)
       else if (INTAKE_INT_FIELDS.has(f)) vals.push(_intOrZero(b[f]));
       else vals.push(b[f]);
       touched++;
