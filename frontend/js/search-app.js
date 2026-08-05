@@ -2200,6 +2200,27 @@ function _csClearVerdict(slotKey) {
   const el = document.getElementById("csVerdict_" + slotKey);
   if (el) el.remove();
 }
+/* 자동 분류(파일 라우팅) 안내 — 파일이 다른 칸으로 옮겨졌을 때의 파란 정보 블록.
+   경고(_csShowVerdict)와 별개 요소 — 반려/이동/경고가 한 자리에서 뒤섞이지 않게. */
+function _csShowRouteNotice(slotKey, message) {
+  const slotEl = document.getElementById("csSlot_" + slotKey);
+  if (!slotEl) return;
+  let el = document.getElementById("csRoute_" + slotKey);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "csRoute_" + slotKey;
+    el.style.cssText = "margin-top:8px;padding:9px 11px;border-radius:9px;background:#EFF6FF;" +
+      "border:1px solid #BFDBFE;color:#1E40AF;font-size:.78rem;font-weight:600;line-height:1.5";
+    slotEl.appendChild(el);
+  }
+  el.innerHTML = "ℹ️ " + escHtml(message) +
+    '<div style="font-size:.72rem;font-weight:500;margin-top:4px;color:#8A93A3">' +
+    "잘못 옮겨졌다면 담당자에게 알려주세요 — 원위치로 되돌릴 수 있어요.</div>";
+}
+function _csClearRouteNotice(slotKey) {
+  const el = document.getElementById("csRoute_" + slotKey);
+  if (el) el.remove();
+}
 
 function _csOnFilesSelected(input, slotKey) {
   const files = Array.from(input.files || []);
@@ -2764,6 +2785,7 @@ async function _submitReviewSlots(item) {
   const memo = document.getElementById("csMemo")?.value.trim() || "";
 
   const uploadErrors = [];
+  const slotOutcome = {};   // 자동 분류 결과: { stayed(그 칸에 남은 파일 있음), movedTo:[대상 슬롯키] }
   try {
     // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
     for (const slot of slotsToUpload) {
@@ -2794,17 +2816,43 @@ async function _submitReviewSlots(item) {
           }))
         }, 180000);
         if (!upRes || (!upRes.ok && !upRes.success)) {
+          // 전부 중복 반려로 실패한 경우 — 그 슬롯에 빨간 안내를 남기고 실패로 처리
+          const rj0 = upRes && Array.isArray(upRes.files) ? upRes.files.find(r => r && r.rejected) : null;
+          if (rj0) {
+            slotOutcome[slot.key] = { stayed: false, movedTo: [] };
+            _csShowVerdict(slot.key, rj0.message || "이미 제출된 파일과 같아 등록되지 않았어요.", true);
+          }
           throw new Error(upRes?.error || "이미지 업로드 실패");
         }
         /* ★ AI 검수 결과(3단계) — 슬롯 형식이 다르면 그 자리에 경고를 띄우고 재첨부를 권한다.
            업로드는 이미 끝났고 제출도 막지 않는다(오탐으로 정당한 제출이 차단되는 쪽이 더 나쁘다).
-           다시 올리면 교체되고, 그대로 두면 관리자 알림에 남아 사람이 확인한다. */
-        const bad = (upRes.files || []).find(r => r && r.verdict && r.verdict.status === "mismatch");
-        if (bad) _csShowVerdict(slot.key, bad.verdict.message, bad.verdict.sure);
-        else _csClearVerdict(slot.key);
+           다시 올리면 교체되고, 그대로 두면 관리자 알림에 남아 사람이 확인한다.
+           ★ 자동 분류: routed(다른 칸으로 이동) / rejected(중복 반려)가 오면 그 사실을
+             그 슬롯 자리에 안내한다 — 이동으로 비워진 필수 칸은 아래 완료 판정에서 미충족. */
+        const flist = upRes.files || [];
+        const rejectedF = flist.filter(r => r && r.rejected);
+        const routedF = flist.filter(r => r && r.routed);
+        const stayed = flist.some(r => r && r.fileId && !r.routed);
+        slotOutcome[slot.key] = { stayed, movedTo: routedF.map(r => r.routed.to) };
+        const bad = flist.find(r => r && r.verdict && r.verdict.status === "mismatch" && !r.routed && !r.rejected);
+        if (rejectedF.length) {
+          _csClearRouteNotice(slot.key);
+          _csShowVerdict(slot.key, rejectedF[0].message || "이미 제출된 파일과 같아 등록되지 않았어요.", true);
+        } else if (routedF.length) {
+          _csClearVerdict(slot.key);
+          _csShowRouteNotice(slot.key, routedF[0].routed.message || "첨부하신 이미지가 다른 종류로 확인되어 옮겨 드렸어요.");
+        } else if (bad) {
+          _csClearRouteNotice(slot.key);
+          _csShowVerdict(slot.key, bad.verdict.message, bad.verdict.sure);
+        } else {
+          _csClearVerdict(slot.key);
+          _csClearRouteNotice(slot.key);
+        }
         if (status) {
-          status.textContent = bad ? "⚠ 확인 필요" : "✓ 업로드됨";
-          status.className = bad ? "mr-slot-status wait" : "mr-slot-status ok";
+          status.textContent = !stayed && rejectedF.length ? "⛔ 반려됨"
+            : !stayed && routedF.length ? "↪ 다른 칸으로 이동"
+            : bad ? "⚠ 확인 필요" : "✓ 업로드됨";
+          status.className = (bad || !stayed) ? "mr-slot-status wait" : "mr-slot-status ok";
         }
       } catch (slotErr) {
         uploadErrors.push(`${slot.label || slot.key}: ${slotErr.message || "실패"}`);
@@ -2842,9 +2890,16 @@ async function _submitReviewSlots(item) {
     _clearSearchCache();
 
     // 이번 제출 후 충족된 슬롯 = 기존 제출 + 이번 업로드 성공
+    //   ★ 자동 분류로 파일이 옮겨진/반려된 슬롯은 "남은 파일이 있을 때만" 충족으로 센다.
+    //     서버 result.complete(원장 기준)가 최종 판정이고, 이 계산은 표시 폴백이다.
     const justUploaded = new Set(slotsToUpload
       .filter(s => !uploadErrors.some(e => e.startsWith((s.label || s.key) + ":")))
+      .filter(s => !slotOutcome[s.key] || slotOutcome[s.key].stayed)
       .map(s => s.key));
+    // 자동 이동으로 채워진 대상 슬롯도 충족으로 계산(예: 리뷰 칸 파일이 현금영수증 칸으로)
+    Object.keys(slotOutcome).forEach(k => (slotOutcome[k].movedTo || []).forEach(mk => {
+      if (slots.some(s => s.key === mk)) justUploaded.add(mk);
+    }));
     const coveredKeys = new Set([...submitted, ...justUploaded]);
     const complete = (typeof result.complete === 'boolean')
       ? result.complete
@@ -2986,6 +3041,24 @@ async function submitReview() {
 
         if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
           throw new Error(uploadResult?.error || "이미지 업로드 실패");
+        }
+
+        // ── 자동 분류(파일 라우팅) 결과 반영: 리뷰 칸에 남은 파일이 없으면 제출을 기록하지 않는다 ──
+        //   (전부 다른 폴더로 이동/중복 반려됐는데 제출 완료로 찍히면 "리뷰 캡처 0장에 완료"가 된다)
+        const _rtFiles = uploadResult.files || [];
+        const _rtStayed = _rtFiles.some(r => r && r.fileId && !r.routed);
+        if (!_rtStayed && _rtFiles.length) {
+          const _rj = _rtFiles.find(r => r && r.rejected);
+          const _mv = _rtFiles.find(r => r && r.routed);
+          throw new Error(_rj ? (_rj.message || "이미 제출된 파일과 같아 등록되지 않았어요.")
+            : _mv ? ((_mv.routed && _mv.routed.message) || "첨부한 이미지가 리뷰 캡처가 아닌 것으로 확인되어 옮겨졌어요. 리뷰 캡처를 다시 첨부해주세요.")
+            : "이미지 업로드 실패");
+        }
+        const _rtMoved = _rtFiles.filter(r => r && r.routed).length;
+        const _rtRejected = _rtFiles.filter(r => r && r.rejected).length;
+        if (_rtMoved || _rtRejected) {
+          showToast((_rtMoved ? `${_rtMoved}장은 다른 종류의 캡처로 확인되어 해당 폴더로 옮겼어요. ` : "")
+            + (_rtRejected ? `${_rtRejected}장은 이미 제출된 파일과 같아 등록되지 않았어요.` : ""), "warning", 6000);
         }
 
         // ── Step 2: 시트에 제출 시점 기록 ──

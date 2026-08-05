@@ -299,11 +299,14 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     && /classifySubmissionImage\(base64, mimeType, \{ samples \}\)/.test(readS('services/captureVerify.service.js')));
   // ★ 창(window)은 "루프 앞에서 준비한다"를 고정하기 위한 것 — 주석이 늘면 함께 넓힌다
   //   (검사 의미는 불변: 준비 블록과 파일 루프 사이에 다른 준비가 끼어들지 않는다).
+  // ★ 창을 3500자로 넓혔다 — 자동 분류(파일 라우팅) 판정 재료 준비가 샘플 준비와 루프 사이에
+  //   들어왔다(검사 의미 불변: 샘플 준비는 여전히 루프 앞 1회).
   ok('예시는 파일 루프 밖에서 1회 준비(파일 수만큼 Drive 호출이 늘지 않게)',
-    /let _inspectSamples = \[\];[\s\S]{0,800}for \(let i = 0; i < files\.length/.test(diag));
+    /let _inspectSamples = \[\];[\s\S]{0,3500}for \(let i = 0; i < files\.length/.test(diag));
+  // 조립은 submissionSamples 한 곳으로 수렴 — 슬롯 분기는 서비스 안에 있다(검사 의미 불변)
   ok('★ 슬롯에 맞는 예시를 고른다 — 영수증 슬롯엔 현금영수증 예시(리뷰 예시를 주면 판정이 흔들린다)',
-    /slot === 'review'\s*\?\s*await _ri\.loadSamplesFor\(/.test(diag)
-    && /:\s*await _ri\.loadReceiptSamplesFor\(/.test(diag));
+    /submissionSamples\(\{ expectedChannel: _expectedChannel, slotKey: slot \}\)/.test(diag)
+    && /slotKey === 'receipt'\s*\?\s*await loadReceiptSamplesFor\(expectedChannel\)/.test(readS('services/reviewInspect.service.js')));
   ok('★ 등록된 예시가 없으면 빈 배열 = 오늘과 동작 동일',
     /if \(!SAMPLES_ENABLED \|\| !expectedChannel\) return \[\];/.test(readS('services/reviewInspect.service.js')));
 

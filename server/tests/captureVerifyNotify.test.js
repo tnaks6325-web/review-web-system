@@ -129,8 +129,10 @@ require.cache[logPath] = {
     /logCaptureMismatch\(\{[\s\S]{0,200}rowIndex \}\)/.test(diag));
   ok('형식이 맞으면 자동 해결을 호출한다',
     /verdict\.status === 'ok'[\s\S]{0,220}resolveCaptureMismatch\(\{/.test(diag));
+  // ★ 판정 catch 와 알림 try 사이에 자동 분류(파일 라우팅) 블록이 들어왔다 —
+  //   검사 의미 불변: 판정 try 는 스스로 닫히고, 알림 기록은 별도 try 로 분리돼 있다.
   ok('★ 알림 기록 실패가 리뷰어 화면의 재첨부 안내를 지우지 않는다(판정/알림 try 분리)',
-    /verdict = null; \}\s*\/\/ 검수 실패가 업로드 결과를 뒤집지 않는다\s*\n\s*\/\/ 알림 기록은 판정과 분리한다/.test(diag));
+    /verdict = null; \}\s*\/\/ 검수 실패가 업로드 결과를 뒤집지 않는다[\s\S]{0,7000}\/\/ 알림 기록은 판정과 분리한다/.test(diag));
   ok('★★ 업로드·제출 차단 코드가 없다(fail-open 유지)',
     !/verdict[\s\S]{0,80}return res\.json\(\{ ok: false/.test(diag));
   ok('응답에 sure 를 실어 리뷰어 화면이 강조할 수 있게',

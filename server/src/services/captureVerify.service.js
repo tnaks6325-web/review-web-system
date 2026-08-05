@@ -76,7 +76,8 @@ async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, sam
   }
 
   const label = { review: '리뷰 캡처', receipt: '현금영수증 캡처',
-                  purchase_confirm: '구매확정 완료 화면', other: '알 수 없는 이미지' };
+                  purchase_confirm: '구매확정 완료 화면',
+                  order_capture: '구매캡처(주문내역) 화면', other: '알 수 없는 이미지' };
   // 형식 자체가 다른 경우만 "확실히 아님" 후보 — 확신도가 SURE 이상이면 관리자 알림으로 승격.
   const sure = r.confidence >= SURE_CONFIDENCE;
   return {

@@ -321,10 +321,11 @@ t('★★ kind 판정 기준 3줄은 한 글자도 안 바뀌었다(오래 검�
   && GEM.includes('- "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).'));
 t('purchase_confirm 종류 추가 + 화이트리스트 + JSON 형식',
   /- "purchase_confirm": 구매확정 완료 화면/.test(GEM)
-  && /\['review', 'receipt', 'purchase_confirm', 'other'\]\.includes\(p\.kind\)/.test(GEM)
-  && /"kind":"review\|receipt\|purchase_confirm\|other"/.test(GEM));
+  // 자동 분류(파일 라우팅)에서 order_capture 가 추가됐다 — purchase_confirm 생존 검사는 그대로
+  && /\['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'\]\.includes\(p\.kind\)/.test(GEM)
+  && /"kind":"review\|receipt\|purchase_confirm\|order_capture\|other"/.test(GEM));
 t('★★ 캐시 접두 상향 — 옛 캐시가 새 종류를 모른 채 히트하는 것 차단',
-  /_getCacheKey\('classify3:'/.test(GEM) && !/_getCacheKey\('classify2:'/.test(GEM));
+  /_getCacheKey\('classify[4-9]\d*:'/.test(GEM) && !/_getCacheKey\('classify[23]:'/.test(GEM));
 
 /* ── 12) ★★ 잠금 범위 — 넓히지 않는다 ──────────────────── */
 console.log('\n12) 1차 필터 — 구매확정 갈래는 절대 잠그지 않는다');

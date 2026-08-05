@@ -11,7 +11,7 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
-const { slotLabel: slotLabelOf } = require('../utils/captureSlots');
+const { slotLabel: slotLabelOf, effectiveCaptureSlots } = require('../utils/captureSlots');
 const { verifyCapture, logCaptureMismatch, resolveCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
@@ -1515,7 +1515,9 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
       const exp = await inspect.loadTabExpectations({ sheetId, tabName });
       expectedChannel = exp.expectedChannel;
       reviewType = exp.reviewType;        // ★ 087: 구매확정 작업이면 1차 필터를 돌리지 않는다(안전핀)
-      samples = await inspect.loadSamplesFor(expectedChannel);
+      // ★★ 조립은 submissionSamples 한 곳 — 업로드 검수·2차 검수와 같은 배열이어야
+      //   캐시 지문(sampleSig)이 일치해 첨부 판정이 제출 때 히트한다(AI 콜 순증 0).
+      samples = await inspect.submissionSamples({ expectedChannel, slotKey: 'review' });
     } catch (_) { /* 채널을 모르면 대조만 생략(예시도 미동봉) */ }
 
     let classified = null;
@@ -1634,6 +1636,10 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       return res.json({ ok: false, error: '리뷰 폴더를 확보하지 못했습니다. 잠시 후 다시 시도해주세요.' });
     }
 
+    // ★ 자동 분류(파일 라우팅)의 이동 목적지 계산용 — 슬롯/옵션 서브폴더로 내려가기 전의
+    //   그 탭 [리뷰] 폴더를 기억해 둔다(targetFolderId 는 아래에서 계속 변이된다).
+    const reviewBaseFolderId = targetFolderId;
+
     // ── 1.5단계: 슬롯 서브폴더 ([리뷰] → {슬롯라벨}) ──
     // 'review'(기본) 슬롯은 하위폴더 없이 [리뷰] 바로 아래 — 기존 동작/정리로직 보존.
     // 그 외 슬롯(예: 현금영수증)은 라벨 서브폴더로 분리한다.
@@ -1664,17 +1670,33 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   ★★ 슬롯 검수(verifyCapture)와 2차 검수가 **같은 값**을 써야 AI 캐시가 공유된다(콜 순증 0).
     //   등록된 예시가 없으면 빈 배열 = 오늘과 완전히 같은 동작.
     let _inspectSamples = [];
+    let _expectedChannel = null;
+    const _riSvc = require('../services/reviewInspect.service');
     try {
-      const _ri = require('../services/reviewInspect.service');
       // ★ 슬롯에 맞는 예시를 고른다 — 리뷰 슬롯엔 리뷰 화면, 영수증 슬롯엔 그 채널의
       //   현금영수증 실물. 반대로 주면 "영수증 자리에 리뷰가 왔다"는 판정이 흔들린다.
+      // ★★ 조립은 submissionSamples 한 곳 — 1차 필터·2차 검수와 같은 배열이어야
+      //   캐시 지문(sampleSig)이 일치한다(AI 콜 순증 0). 자동 분류 예시(구매캡처·구매확정)도
+      //   여기서 함께 실린다.
       if (slot === 'review' || slot === 'receipt') {
-        const _exp = await _ri.loadTabExpectations({ sheetId, tabName });
-        _inspectSamples = slot === 'review'
-          ? await _ri.loadSamplesFor(_exp.expectedChannel)
-          : await _ri.loadReceiptSamplesFor(_exp.expectedChannel);
+        try { _expectedChannel = (await _riSvc.loadTabExpectations({ sheetId, tabName })).expectedChannel; } catch (_) {}
+        _inspectSamples = await _riSvc.submissionSamples({ expectedChannel: _expectedChannel, slotKey: slot });
       }
     } catch (_) { _inspectSamples = []; }   // 준비 실패 = 예시 없이 진행(동작 불변)
+
+    // ── 자동 분류(파일 라우팅) 판정 재료 — 규칙은 utils/captureRoute 전이표 단일 출처 ──
+    const _fileRoute = require('../services/fileRoute.service');
+    const { routeDecision: _routeDecision, routeMode: _routeMode,
+            rejectEnabled: _routeRejectEnabled, routeSlotLabel: _routeSlotLabel } = require('../utils/captureRoute');
+    const _sampleKindSet = new Set(_inspectSamples.map(s => s.kind));
+    // ★ 구매캡처 이동은 예시 2장(구매캡처+구매확정)이 모두 등록돼야 발동(사용자 확정)
+    const _hasRouteSamples = _sampleKindSet.has('order_capture') && _sampleKindSet.has('purchase_confirm');
+    let _hasReceiptSlot = false;
+    try {
+      _hasReceiptSlot = (effectiveCaptureSlots(tabRows[0]?.capture_slots, tabRows[0]?.income_type, _tabReviewType) || [])
+        .some(sl => sl.key === 'receipt');
+    } catch (_) {}
+    const _receiptLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, 'receipt', _tabReviewType) || '현금영수증';
 
     // ── 3단계: 파일 업로드 (복수 파일 루프) ──
     const uploadResults = [];
@@ -1708,9 +1730,85 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             samples: _inspectSamples,
           });
         } catch (_) { verdict = null; }   // 검수 실패가 업로드 결과를 뒤집지 않는다
-        // 알림 기록은 판정과 분리한다 — 여기서 실패해도 리뷰어 화면의 재첨부 안내(verdict)는 남아야 한다.
+
+        // ── 자동 분류(파일 라우팅): 오제출을 올바른 폴더로 이동 / 중복이면 휴지통+반려 ──
+        //   판정 = utils/captureRoute 전이표(확신 ≥0.9 sure 만) · 실행 = fileRoute.service.
+        //   ★★ 반려의 유일한 근거는 SHA-256 정확 일치(findSlotDuplicate) — AI 단독 반려 없음.
+        //   ★ 어떤 실패도 업로드를 뒤집지 않는다(fail-open — 라우팅만 생략되고 현행 경고 유지).
+        let routed = null, rejected = null, routePlan = null, finalSlot = slot;
         try {
-          if (verdict && verdict.status === 'mismatch') {
+          const _mode = _routeMode();
+          if (_mode !== 'off' && verdict && verdict.status === 'mismatch') {
+            const rd = _routeDecision({
+              slotKey: slot, verdict, hasReceiptSlot: _hasReceiptSlot,
+              hasRouteSamples: _hasRouteSamples, expectedChannel: _expectedChannel,
+            });
+            if (rd.action === 'route') {
+              const toLabel = _routeSlotLabel(rd.toSlot);
+              const gotLabel = _routeSlotLabel(verdict.got) || verdict.got;
+              const pct = Math.round((verdict.confidence || 0) * 100);
+              if (_mode === 'dry') {
+                // 관측 모드 — 계획만 기록하고 아무것도 옮기지 않는다(출시 결정 근거 수집)
+                routePlan = { toSlot: rd.toSlot, toLabel };
+                await _fileRoute.logRouteEvent({
+                  eventType: 'capture_route_plan', severity: 'info', resolved: true,
+                  sheetId, tabName, reviewerName,
+                  message: `[관측] ${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 이미지를 ${gotLabel}(AI 확신 ${pct}%)으로 판정 — 자동 이동 대상입니다(관측 모드라 이동하지 않음).`,
+                  context: { fileId: uploaded.id, from: slot, to: rd.toSlot, row: String(rowIndex ?? ''), dry: true },
+                });
+              } else {
+                const _fh = _riSvc.hashBase64(file.data);
+                const dup = await _fileRoute.findSlotDuplicate({
+                  sheetId, tabName, rowIndex, reviewerName,
+                  toSlot: rd.toSlot, fileHash: _fh, fileId: uploaded.id,
+                });
+                if (dup && _routeRejectEnabled()) {
+                  // 중복 반려 — 방금 파일을 휴지통으로(영구삭제 아님, 30일 복구창)
+                  await driveService.trashFiles([{ id: uploaded.id, name: uploaded.name }]);
+                  rejected = {
+                    reason: 'duplicate',
+                    message: `이 파일은 ${toLabel} 칸에 이미 제출된 것과 같은 파일이라 등록되지 않았어요. ${_routeSlotLabel(slot)} 캡처를 올려주세요.`,
+                  };
+                  await _fileRoute.logRouteEvent({
+                    eventType: 'capture_dup_rejected', severity: 'warn',
+                    sheetId, tabName, reviewerName,
+                    message: `${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 파일이 ${toLabel} 칸의 기존 제출과 동일 파일(SHA-256 일치)이라 휴지통으로 옮기고 반려했습니다.`,
+                    context: { fileId: uploaded.id, matchFileId: dup.file_id, from: slot, to: rd.toSlot, row: String(rowIndex ?? '') },
+                  });
+                } else if (!dup) {
+                  const toFolderId = await _fileRoute.resolveTargetFolder({
+                    target: rd.target, sheetId, tabName, reviewBaseFolderId, receiptLabel: _receiptLabel,
+                  });
+                  if (toFolderId) {
+                    await driveService.moveFile(uploaded.id, toFolderId, targetFolderId);
+                    finalSlot = rd.toSlot;
+                    routed = {
+                      from: slot, to: rd.toSlot, toLabel,
+                      message: `첨부하신 이미지가 ${gotLabel}(으)로 확인되어 ${toLabel} ${rd.target === 'capture' ? '폴더' : '칸'}으로 옮겨 드렸어요.`
+                        + (slot === 'review' ? ' 리뷰 캡처를 여기에 다시 올려주세요.' : ''),
+                    };
+                    await _fileRoute.logRouteEvent({
+                      eventType: 'capture_routed', severity: 'warn',
+                      sheetId, tabName, reviewerName,
+                      message: `${reviewerName || '리뷰어'}님이 ${rowIndex ? rowIndex + '행 ' : ''}${_routeSlotLabel(slot)} 칸에 올린 이미지가 ${gotLabel}(AI 확신 ${pct}%)으로 판정되어 ${toLabel} 폴더로 자동 이동했습니다. 리뷰어 화면에는 안내가 표시됐습니다.`,
+                      context: { fileId: uploaded.id, from: slot, to: rd.toSlot, row: String(rowIndex ?? '') },
+                    });
+                  }
+                }
+                // dup && 반려 스위치 꺼짐 → 이동하지 않는다(대상 폴더에 중복 사본을 만들지 않음 — 현행 경고만)
+              }
+            }
+          }
+        } catch (routeErr) {
+          // 이동/휴지통 단계에서 던져졌으면 routed/rejected 는 세워지기 전이라 그대로 현행 경고 경로.
+          logger.warn(`[review-upload] 자동 분류 실패(무시 — 현행 경고 유지): ${routeErr.message}`);
+        }
+
+        // 알림 기록은 판정과 분리한다 — 여기서 실패해도 리뷰어 화면의 재첨부 안내(verdict)는 남아야 한다.
+        //   ★ 자동 이동/반려된 파일은 capture_mismatch 를 남기지 않는다 — capture_routed /
+        //     capture_dup_rejected 가 그 자리를 대신한다(같은 파일에 알림 2건 = 도배).
+        try {
+          if (verdict && verdict.status === 'mismatch' && !routed && !rejected) {
             // 리뷰어가 [그대로 제출]을 눌러도 사람이 볼 수 있게 관리자 알림으로 남긴다
             // (verdict.sure = AI가 확실히 아니라고 본 경우 → critical 승격 = 대시보드 빨간 알림)
             await logCaptureMismatch({ sheetId, tabName, reviewerName, slotKey: slot,
@@ -1721,17 +1819,26 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           }
         } catch (_) { /* 알림 경로 실패는 업로드·판정에 영향 없음 */ }
 
-        uploadResults.push({
-          index: i + 1,
-          fileId: uploaded.id,
-          fileName: uploaded.name,
-          webViewLink: uploaded.webViewLink || '',
-          verdict: verdict && verdict.status !== 'skipped'
-            ? { status: verdict.status, message: verdict.message, sure: !!verdict.sure } : null,
-        });
-
-        logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 업로드: ${uploaded.name} → ${uploaded.id}` +
-          (verdict && verdict.status === 'mismatch' ? ` ⚠ 형식 불일치(${verdict.expected}≠${verdict.got})` : ''));
+        if (rejected) {
+          // 중복 반려 — 파일은 휴지통으로 갔고 원장에도 싣지 않는다(fileId 미반환)
+          uploadResults.push({ index: i + 1, rejected: rejected.reason, message: rejected.message });
+          logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 중복 반려(휴지통): ${uploaded.name}`);
+        } else {
+          uploadResults.push({
+            index: i + 1,
+            fileId: uploaded.id,
+            fileName: uploaded.name,
+            webViewLink: uploaded.webViewLink || '',
+            slotKey: finalSlot,                          // 라우팅 반영 후 최종 슬롯(원장 기록 기준)
+            routed: routed || undefined,                 // {from,to,toLabel,message} — 자동 이동됨
+            routePlan: routePlan || undefined,           // 관측 모드의 이동 계획(이동 안 함)
+            verdict: verdict && verdict.status !== 'skipped'
+              ? { status: verdict.status, message: verdict.message, sure: !!verdict.sure } : null,
+          });
+          logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 업로드: ${uploaded.name} → ${uploaded.id}` +
+            (routed ? ` ↪ 자동 이동(${routed.from}→${routed.to})`
+              : (verdict && verdict.status === 'mismatch' ? ` ⚠ 형식 불일치(${verdict.expected}≠${verdict.got})` : '')));
+        }
       } catch (uploadErr) {
         logger.error(`[review-upload] 파일 ${i + 1} 업로드 실패: ${uploadErr.message}`);
         uploadResults.push({
@@ -1763,7 +1870,10 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       // A-1: 대표 파일을 review_index 행에 기록
       //   ★ 대표 이미지는 기본 'review' 슬롯만 기록한다. 현금영수증 등 다른 슬롯이
       //     대표 리뷰 이미지를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
-      if (slot === 'review') {
+      //   ★ 자동 분류로 슬롯 구성이 바뀐 호출은 아래 recomputePrimary 가 원장 기준으로
+      //     대표를 다시 계산한다(여기 레거시 경로는 라우팅 없을 때 종전 그대로).
+      const _routedAny = uploadResults.some(r => r && (r.routed || r.rejected));
+      if (slot === 'review' && !_routedAny) {
         try {
           const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
           await pool.query(
@@ -1799,8 +1909,13 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
                    reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key,
                    file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash)`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
-             r.fileId, fUrl, r.fileName, slot, _hash]
+             r.fileId, fUrl, r.fileName, r.slotKey || slot, _hash]
           );
+          // 자동 분류로 이동된 파일은 이동 이력을 함께 남긴다(되돌리기의 유일한 재료)
+          if (r.routed) {
+            await require('../services/fileRoute.service')
+              .markRouted({ fileId: r.fileId, fromSlot: r.routed.from, by: 'auto:upload' });
+          }
         } catch (subErr) {
           logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
         }
@@ -1814,19 +1929,28 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           await _inspect.inspectSubmission({
             base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
             fileId: r.fileId, fileHash: _hash,
-            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: slot,
+            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: r.slotKey || slot,
             samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
           });
         } catch (_) { /* 위 서비스가 이미 삼키지만 이중 방어 */ }
       }
+
+      // 자동 분류로 review 슬롯 구성이 바뀌었으면 대표 이미지를 원장 기준으로 재계산
+      //   (영수증이 대표로 남거나, 옮겨 들어온 리뷰가 대표에 안 잡히는 것 방지)
+      if (_routedAny) {
+        await require('../services/fileRoute.service').recomputePrimary({ sheetId, tabName, rowIndex: rowIdx });
+      }
     }
 
+    const _rejectedResults = uploadResults.filter(r => r && r.rejected);
     res.json({
       ok: successCount > 0,
       uploaded: successCount,
       total: files.length,
       files: uploadResults,
       reviewFolderUrl: reviewFolderUrl || '',
+      // 전부 반려면 실패 사유를 최상위 error 로도 실어준다(단일 첨부 화면의 기존 오류 표시 경로)
+      ...(successCount === 0 && _rejectedResults.length ? { error: _rejectedResults[0].message } : {}),
     });
   } catch (err) {
     logger.error(`[review-upload] ${err.message}`);
