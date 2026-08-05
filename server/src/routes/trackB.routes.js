@@ -95,8 +95,14 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       // 오늘 완료(전사 공통, migration 089) — 마감과 **다른 상태**다. 마감은 보드에서 빼고,
       //   오늘 완료는 뒤로 밀고 회색으로만 표시한다(다음날 자동 해제).
       const daily = await svc.dailyDoneMap();
+      // 연결된 모집공고 주석([공고] 버튼 재료) — 홈 작업 목록 전용(stats=1). 실패해도 목록은 뜬다.
+      //   ★ 조회 실패를 빈 맵으로 접으면 화면이 "공고 없음"으로 읽어 **이미 있는 공고를 또 발행**한다.
+      //   ★ fresh=1 = 공고를 방금 저장한 직후의 재조회(30초 캐시를 건너뛴다). 없으면 발행하고도
+      //     한동안 [＋공고발행]이 그대로 남아 "저장이 안 된 것"으로 보인다.
+      const camps = req.query.stats === '1' ? await svc.tabCampaignsMap({ force: req.query.fresh === '1' }) : null;
       if (!fin.ok) out.finishedUnavailable = true;
       if (stats && !stats.ok) out.statsUnavailable = true;
+      if (camps && !camps.ok) out.campaignsUnavailable = true;
       if (!daily.ok) out.dailyUnavailable = true;
       out.kstDate = daily.date;          // 화면이 "오늘"의 기준을 서버 시각으로 잡게(클라 시계 불신)
       for (const t of tabs) {
@@ -111,6 +117,13 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
         if (d) { t.todayDone = true; t.todayDoneBy = d.doneBy; }
         // ★ stats 맵은 전 탭 무스코프다 — 응답엔 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지).
         if (stats && stats.map[`${t.sheetId}\t${t.tabName}`]) t.stats = stats.map[`${t.sheetId}\t${t.tabName}`];
+        // ★ 공고 주석도 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지 — stats 와 같은 규율).
+        //   이름 우선 → gid 폴백(마감 주석과 같은 키 규칙). 한 탭에 여럿이면 그대로 배열로 내려보내
+        //   화면이 생성일과 함께 보여주고 고르게 한다(사용자 확정).
+        if (camps) {
+          const c = camps.map[`${t.sheetId}\t${t.tabName}`] || (g ? camps.map[`${t.sheetId}\tgid:${g}`] : null);
+          if (c && c.length) t.campaigns = c;
+        }
       }
     }
     res.json(out);

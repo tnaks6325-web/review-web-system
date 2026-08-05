@@ -30,6 +30,11 @@ let _recruitLastList = [];
 
 async function loadRecruitList() {
   const wrap = document.getElementById("recruitListWrap");
+  /* ★ 목록 컨테이너가 없는 화면에서 열린 모달(리뷰웹시스템[3버전] 홈 작업목록 → [공고])이
+     저장 후 이 함수를 부르면 여기서 TypeError 가 나고, saveRecruit 의 catch 가 그것을
+     **"저장 오류"로 표시**한다 — 실제로는 저장에 성공했는데도. 그릴 곳이 없으면 조용히 넘긴다
+     (그 화면의 갱신은 CAMP_ON_SAVED 훅이 담당). */
+  if (!wrap) return;
   wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
   try {
     const res  = await fetch(_campApi("/list"), {
@@ -2236,6 +2241,9 @@ async function saveRecruitPost() {
     showToast(_recruitEditId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
     closeRecruitModal();
     loadRecruitList();
+    /* ★ 목록 밖에서 열린 모달(홈 작업목록 팝업)이 자기 화면을 갱신할 수 있게 알린다.
+       훅 미설정 = 관리자 대시보드 동작 불변(레포의 CS_ON_BADGE 와 같은 방식). */
+    try { if (typeof window.CAMP_ON_SAVED === "function") window.CAMP_ON_SAVED(); } catch(_) {}
   } catch(e) {
     showToast("저장 오류: " + e.message, "error");
   } finally {

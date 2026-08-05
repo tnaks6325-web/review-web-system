@@ -2789,6 +2789,78 @@ async function tabStatsMap({ force = false } = {}) {
   }
 }
 
+/** 작업 ↔ 연결된 모집공고 주석 맵 — 홈 작업 목록의 [공고] 버튼 재료(`?stats=1` 전용).
+ *
+ *  ★★ **상태 판정은 카드·리뷰어 목록과 같은 계산을 쓴다**(`computeCampaignState` + 같은 재료).
+ *    여기서 status 컬럼만 보고 "모집중"을 흉내 내면 **목록엔 모집중인데 참여는 거부**되는
+ *    화면 간 불일치가 그대로 생긴다(레포가 반복해서 밟은 함정). 그래서 `/campaign/admin/list`
+ *    핸들러와 **같은 3종 재료**(counts · 시트 일정 · now)를 그대로 모아 넘긴다.
+ *  ★ 키는 마감 주석과 같은 규칙 — **이름 + gid 폴백**(운영 중 탭 리네임으로 공고 연결이 조용히
+ *    풀리면 담당자가 "공고 없음"으로 읽고 **이미 있는 공고를 또 발행**한다).
+ *  ★ 한 작업에 공고가 여럿일 수 있다(차수 재발행 등) → **배열**로 돌려주고 화면이 고르게 한다
+ *    (사용자 확정: 생성일과 함께 보여주고 선택). 정렬은 최신 생성 순.
+ *  ★★ 이 맵도 **전 탭 무스코프**다 — 응답에 통째로 싣지 말 것(호출부 tabs 루프가 유일한 스코프).
+ *  ★ 읽기 전용 · fail-soft · `{ok, map}`(빈 맵과 조회 실패를 화면이 구분해야 한다 — 088 규율).
+ *  30초 프로세스 캐시(홈 진입 왕복 상각, tabStatsMap 과 같은 값). */
+let _tabCampCache = { at: 0, map: null };
+const _TAB_CAMP_TTL_MS = 30 * 1000;
+async function tabCampaignsMap({ force = false } = {}) {
+  if (!force && _tabCampCache.map && (Date.now() - _tabCampCache.at) < _TAB_CAMP_TTL_MS) {
+    return { ok: true, map: _tabCampCache.map };
+  }
+  try {
+    const db = getPool();
+    const now = new Date();
+    // 연결 탭이 있는 공고만(전 공고를 훑지 않는다). 상태 계산에 여러 컬럼이 필요해 행 전체를 받는다.
+    const { rows } = await db.query(
+      `SELECT * FROM recruit_campaigns
+        WHERE COALESCE(linked_sheet_id, '') <> '' AND COALESCE(linked_tab_name, '') <> ''
+        ORDER BY created_at DESC`);
+    const map = {};
+    if (!rows.length) { _tabCampCache = { at: Date.now(), map }; return { ok: true, map }; }
+
+    const { computeCampaignState, fetchCampaignCounts } = require('./campaignState.service');
+    const { deriveSchedules, scheduleFor } = require('./campaignSchedule.service');
+    const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
+    // ★ 상태 재료 조회 실패는 **주석 전체를 죽이지 않는다** — 공고 목록·생성일은 그대로 쓰고
+    //   상태만 비운다(화면이 회색 점으로 그린다). admin/list 와 같은 판단.
+    let countsMap = new Map(), schedMap = null;
+    try {
+      const tabsOf = rows.map(r => ({ sheetId: r.linked_sheet_id, tabName: r.linked_tab_name, tabGid: r.linked_tab_gid }));
+      [countsMap, schedMap] = await Promise.all([
+        fetchCampaignCounts(db, partIds, now),
+        deriveSchedules(db, tabsOf, now),
+      ]);
+    } catch (e) {
+      logger.warn(`[trackB] tabCampaignsMap 상태 재료 실패(공고 목록만 표시): ${e.message}`);
+    }
+    for (const r of rows) {
+      let state = null, stateReason = null;
+      try {
+        const st = computeCampaignState(
+          r, countsMap.get(r.id) || { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 },
+          now, schedMap ? scheduleFor(schedMap, r) : null);
+        state = st.state; stateReason = st.stateReason || null;
+      } catch (_) { /* 판정 실패 = 상태 없음(공고 자체는 계속 보인다) */ }
+      const item = {
+        id: r.id, title: r.title || '', createdAt: r.created_at || null,
+        status: r.status || '', participationMode: !!r.participation_mode,
+        state, stateReason,
+      };
+      const push = (k) => { (map[k] || (map[k] = [])).push(item); };
+      push(_FIN_KEY(r.linked_sheet_id, r.linked_tab_name));
+      // gid 폴백 — **빈 gid 는 키를 만들지 않는다**(만들면 gid 없는 탭이 전부 한 키로 뭉친다).
+      const g = String(r.linked_tab_gid == null ? '' : r.linked_tab_gid).trim();
+      if (g) push(`${r.linked_sheet_id}\tgid:${g}`);
+    }
+    _tabCampCache = { at: Date.now(), map };
+    return { ok: true, map };
+  } catch (err) {
+    logger.warn(`[trackB] tabCampaignsMap 실패(공고 주석 없이 계속 — 호출부가 고지한다): ${err.message}`);
+    return { ok: false, map: {} };
+  }
+}
+
 // ══ M2: 열린 작업 줄(개인별) + 오늘 완료(전사 공통) — migration 089 ═══════════════════════
 //   PRD: frontend/docs/prd-workboard-worktabs.html §1(두 상태 비교). 마감(088)과 **다른 것**이다.
 
@@ -2895,6 +2967,7 @@ module.exports = {
   finishedTabsMap,
   setTabFinished,
   tabStatsMap,
+  tabCampaignsMap,
   identityKey,
   classifyParity,
   projectTab,
