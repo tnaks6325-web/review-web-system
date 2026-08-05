@@ -4673,7 +4673,7 @@ async function renderSettingsView(){
     <div class="ovnote">관리자 대시보드의 설정과 <b>같은 화면·같은 저장소</b>입니다 — 어느 쪽에서 바꿔도 결과가 같습니다.
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임만 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','worktable','notice'] : ['nickname'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','worktable','gatecriteria','notice'] : ['nickname'] });
 }
 
 /* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (frontend/docs/design-workdesk-home.html) ══
@@ -6917,6 +6917,8 @@ boot();
 <script>window.ADMIN_SETTINGS_API = '/api/trackb/settings';</script>
 <script src="js/admin-settings.js"></script>
 <script src="js/campaign-cards.js"></script>
+<!-- 공고별 참여 리뷰어 관리(블랙리스트 건별, 091) — 공유 모달(admin.html 과 한 벌) -->
+<script src="js/campaign-reviewer-gate.js"></script>
 <!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
      이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
      리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->

@@ -409,6 +409,36 @@ function clearHold(p8){
 // 상품/리뷰가이드/첨부이미지 정규화는 js/campaign-workdetail.js(공용 렌더러)로 이관 — 관리자 미리보기와 동일 코드 보장.
 function _escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+/* ═══ 참여 리뷰어 게이트(091) — 차단 응답(reviewer_blocked) 표시 ═══
+   gate:'closed' = 마감 위장 — **실제 마감 화면과 같은 렌더 경로(renderPre)를 그대로** 쓴다.
+   전용 화면을 새로 만들면 미묘한 차이로 위장이 들통난다(관리자 미리보기 격리와 같은 규율).
+   gate:'policy' = 사유 고지 — 문구는 서버(GATE_MESSAGES 단일 출처)가 준 것을 그대로 표시. */
+let _gateMask = null;
+function _renderGateBlocked(j){
+  if(j && j.gate === 'policy'){
+    _gateMask = 'policy';
+    renderPre();
+    let box = $('gateNotice');
+    if(!box){
+      box = document.createElement('div');
+      box.id = 'gateNotice'; box.className = 'cardbx'; box.style.borderColor = '#F59E0B';
+      const sec = $('vPre').querySelector('.sec');
+      sec.insertBefore(box, $('preCard').nextSibling);
+    }
+    box.style.display = '';
+    box.innerHTML = '<div class="wd-tt" style="color:#B45309">⚠️ 공고 참여가 불가합니다</div>'
+      + '<div style="font-size:.8rem;color:#6b7280;line-height:1.6;margin-top:4px">'
+      + String(j.error || '이전 리뷰 미작성 또는 리뷰 기한 경과로 인해 공고 참여가 불가합니다')
+          .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      + '<br>궁금한 점은 리뷰 내역 → 1:1 문의를 이용해주세요.</div>';
+    return;
+  }
+  // 마감 위장(기본) — 카드 리본·버튼까지 진짜 마감과 동일해야 한다
+  _gateMask = 'closed';
+  if(_camp){ _camp.state = 'closed'; _camp.stateReason = ''; }
+  renderPre();
+}
+
 /* ═══ 참여 전 화면 ═══ */
 function renderPre(){
   const c = _camp;
@@ -446,6 +476,8 @@ function renderPre(){
   //   "모집중일 때 리뷰어가 보는 화면"을 볼 수 없다 → 관리자에게만 열린 모습으로 보여준다(클릭은 여전히 차단).
   //   위 상태·옵션 판정을 모두 끝낸 뒤 마지막에 덮어써야 일관되게 열린 화면이 된다.
   if(PREVIEW && _pvForceOpen){ jb.disabled = false; jb.textContent = '참여하기'; $('preFootNote').textContent = ''; }
+  // ★ 참여 리뷰어 게이트(091) 사유 고지형 — 폴링·재렌더에도 잠금 유지(마감 위장형은 _gateMask가 state를 덮는다)
+  if(_gateMask === 'policy'){ jb.disabled = true; jb.textContent = '참여 불가'; }
   renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
   renderPopNotice();    // ★ 064: 인기상품 참여 조건 안내(인기 공고만)
   renderCrNotice();     // ★ D안 ①: 현금영수증 대상 공고 참여 전 예고
@@ -863,6 +895,8 @@ async function _doApply(optionKey, sub){
       return;
     }
     if(j.reason === 'profile_missing'){ renderMissing(j.missing || []); return; }
+    // ★ 공고별 참여 리뷰어 게이트(091) — 자리 미점유 상태에서 차단 안내(마감 위장/사유 고지)
+    if(j.reason === 'reviewer_blocked'){ _renderGateBlocked(j); return; }
     // ★ 064: 인기상품 선행조건 미충족 → 일반 모집 목록 모달(테이블+참여 CTA)
     if(j.reason === 'popular_locked'){ toast('일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요'); openPopGate(j); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
@@ -1343,6 +1377,9 @@ async function loadCampaign(){
   if(j.serverNow) CampCards.setServerNow(j.serverNow);
   _camp = j.data;
   if(!_camp.participation_mode){ location.replace('/'); return; }
+  // ★ 공고별 참여 리뷰어 게이트(091) — 마감 위장: 서버가 reviewer_blocked(gate:'closed')를 준 뒤에는
+  //   폴링·카운트다운 재조회가 화면을 '모집중'으로 되돌리면 위장이 깨진다 → 상태를 계속 마감으로 덮는다.
+  if(_gateMask === 'closed'){ _camp.state = 'closed'; _camp.stateReason = ''; }
   // ★ 카운트다운 0 도달 시 카드 티커가 이 함수를 재호출한다(CampCards.startTicker).
   //   그때 무조건 renderPre()를 하면 **작업가이드·제출완료를 보고 있던 화면이 참여 전으로 튕긴다**
   //   (리뷰어가 구매 진행 중 cutoff를 맞으면 구매양식이 사라지는 기존 버그). 참여 전 화면일 때만 다시 그린다.
