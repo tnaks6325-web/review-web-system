@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 업체뷰어 구매캡쳐·리뷰캡쳐 폴더 바로가기 배치 (3안)</title>
+<style>
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --adv:#6d5ac9;--adv-soft:#efecfa;
+  --buy:#0e7490;--buy-soft:#e6f7fb;--rev:#b45309;--rev-soft:#fdf3e7;
+  --new:#e11d74;--new-soft:#fdeef5;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.page{max-width:1240px;margin:0 auto;padding:26px 20px 90px}
+h1{font-size:21px;font-weight:800;margin:0 0 6px}
+.lead{color:var(--muted);font-size:13px;margin:0 0 10px;max-width:900px}
+.lead b{color:var(--ink)}
+.note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--muted);margin-bottom:26px}
+.note b{color:var(--ink)}
+.note ul{margin:6px 0 0;padding-left:18px} .note li{margin-bottom:5px}
+
+.opt{margin-top:40px}
+.opt>h2{font-size:16px;font-weight:800;margin:0 0 4px;display:flex;align-items:center;gap:9px}
+.opt>h2 .n{min-width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--accent-deep);font-size:13px;font-weight:800;display:grid;place-items:center;padding:0 8px}
+.opt>h2 .reco{font-size:10px;font-weight:800;letter-spacing:.05em;color:var(--safe);background:var(--safe-soft);border:1px solid color-mix(in srgb,var(--safe) 30%,transparent);border-radius:999px;padding:2px 9px}
+.opt .sum{color:var(--muted);font-size:12.5px;margin:0 0 14px;max-width:900px}
+.opt .sum b{color:var(--ink)}
+.proscons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+@media(max-width:760px){.proscons{grid-template-columns:1fr}}
+.proscons .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:12px;color:var(--muted)}
+.proscons .lbl{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.proscons .pro .lbl{color:var(--safe)} .proscons .con .lbl{color:var(--warn)}
+.proscons ul{margin:0;padding-left:16px} .proscons li{margin-bottom:4px}
+
+.mockcap{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin:16px 0 8px;display:flex;align-items:center;gap:7px}
+.mockcap .loc{font-size:9.5px;color:var(--accent-deep);background:var(--accent-soft);border-radius:999px;padding:1px 8px;letter-spacing:0}
+.frame{background:var(--paper);border:1px solid var(--line2);border-radius:13px;overflow:hidden;box-shadow:0 2px 10px rgba(16,24,40,.05);padding:13px 14px}
+.frame .fh{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.frame .fh h3{font-size:14px;margin:0;font-weight:800;letter-spacing:-.02em}
+.bd{font-size:9.5px;font-weight:750;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);background:var(--card);white-space:nowrap}
+.bd.a{color:var(--adv);border-color:color-mix(in srgb,var(--adv) 28%,var(--line));background:var(--adv-soft)}
+
+/* NEW 하이라이트 */
+.hl{position:relative;outline:2px solid color-mix(in srgb,var(--new) 55%,transparent);outline-offset:1px;border-radius:8px}
+.newtag{position:absolute;top:-9px;right:-6px;z-index:3;font-size:8.5px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--new);border-radius:999px;padding:1px 6px;box-shadow:0 1px 4px rgba(225,29,116,.35)}
+
+/* 폴더 버튼(공용) */
+.fbtn{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:750;border-radius:8px;padding:4px 9px;border:1px solid;cursor:pointer;white-space:nowrap;background:var(--card)}
+.fbtn.buy{color:var(--buy);border-color:color-mix(in srgb,var(--buy) 32%,transparent);background:var(--buy-soft)}
+.fbtn.rev{color:var(--rev);border-color:color-mix(in srgb,var(--rev) 32%,transparent);background:var(--rev-soft)}
+.fbtn.mini{padding:3px 7px;font-size:10px;border-radius:7px}
+.fbtn .up{font-size:9px;opacity:.75}
+.fbtn.off{color:var(--faint);border-color:var(--line);background:var(--card2);cursor:default}
+
+/* 표 목업 */
+.tbl{background:var(--card);border:1px solid var(--line);border-radius:11px;overflow:hidden;font-size:11px;min-width:0;overflow-x:auto}
+.tr{display:grid;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.tr:last-child{border-bottom:0}
+.tr.hd{background:var(--card2);font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--faint);padding:7px 12px}
+.tr .nm b{display:block;font-size:11.5px;letter-spacing:-.01em}
+.tr .nm .sub{font-size:9.5px;color:var(--faint)}
+.tr .chip{font-size:9px;font-weight:750;border-radius:999px;padding:1px 7px;background:var(--accent-soft);color:var(--accent-deep);white-space:nowrap;justify-self:start}
+.tr .chip.done{background:var(--safe-soft);color:var(--safe)}
+.tr .money{text-align:right;font-weight:700}
+.tr .mut{color:var(--faint)}
+.tr .open{color:var(--accent-deep);font-weight:750;font-size:10.5px;white-space:nowrap}
+.cols-a{grid-template-columns:34px 1.55fr .68fr .95fr .62fr .95fr .55fr .42fr}
+.cols-b{grid-template-columns:34px 1.5fr .66fr .9fr .72fr .72fr .55fr .42fr}
+.ellip{color:var(--faint);font-size:10px;text-align:center}
+
+/* 상세 화면 목업 */
+.dwrap{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+.dhead{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:11px}
+.dhead h4{font-size:13.5px;margin:0;font-weight:800;letter-spacing:-.02em}
+.dhead .sp{flex:1}
+.roster{border:1px dashed var(--line2);border-radius:9px;background:var(--card2);color:var(--faint);font-size:10.5px;display:grid;place-items:center;height:74px;margin-top:10px}
+.fcards{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}
+.fcard{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--card)}
+.fcard .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:16px;flex:none}
+.fcard.buy .ic{background:var(--buy-soft)} .fcard.rev .ic{background:var(--rev-soft)}
+.fcard .tx{flex:1;min-width:0}
+.fcard .tx b{display:block;font-size:11.5px}
+.fcard .tx span{font-size:9.5px;color:var(--faint)}
+.fcard .go{font-size:10.5px;font-weight:750;color:var(--accent-deep);white-space:nowrap}
+.panelcap{font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:12px 0 6px}
+.rvpanel{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--card)}
+.rvthumbs{display:flex;gap:7px;margin-top:8px}
+.rvthumbs i{width:52px;height:52px;border-radius:8px;background:var(--card2);border:1px solid var(--line);display:grid;place-items:center;font-style:normal;font-size:16px;color:var(--faint)}
+.abar{display:flex;align-items:center;gap:8px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:10px;padding:8px 11px;margin-top:10px}
+.abar .t{font-size:10.5px;font-weight:750;color:var(--accent-deep);flex:1}
+
+/* 결합 배지(C안) */
+.duo{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;justify-self:start}
+.duo a{font-size:10px;font-weight:750;padding:3px 8px;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.duo a.b{color:var(--buy);background:var(--buy-soft)}
+.duo a.r{color:var(--rev);background:var(--rev-soft);border-left:1px solid var(--line2)}
+.duo a.off{color:var(--faint);background:var(--card2)}
+
+/* 비교표 */
+.cmp{margin-top:44px}
+.cmp table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:12px}
+.cmp th,.cmp td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+.cmp th{background:var(--card2);font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--faint)}
+.cmp tr:last-child td{border-bottom:0}
+.cmp td b{color:var(--ink)}
+</style></head><body><div class="page">
+
+<h1>업체뷰어 — 구매캡쳐·리뷰캡쳐 폴더 바로가기 배치 시안 (3안)</h1>
+<p class="lead">각 작업(탭)마다 드라이브의 <b>[구매캡처]</b> 폴더(<code>tab_configs.capture_folder_url</code>)와 <b>[리뷰]</b> 폴더(<code>tab_configs.folder_url</code>) 바로가기를 업체뷰어에 노출하는 3가지 배치안입니다. 공통 전제(모든 안 동일):</p>
+<div class="note"><ul>
+  <li><b>전체 작업 목록 표</b>에 폴더 바로가기 전용 헤더(컬럼)를 신설한다 — 대시보드 "최근 작업" 표는 같은 렌더러를 쓰므로 자동 반영.</li>
+  <li><b>진행중 상세(작업 열람 화면)</b> 안에도 같은 바로가기가 있어야 한다.</li>
+  <li>폴더 URL 미연결 탭은 회색 비활성 표시(<span class="fbtn off mini">— 미연결</span>)로 자리를 유지해 컬럼 정렬이 흔들리지 않게 한다.</li>
+  <li>클릭 시 새 탭으로 드라이브 폴더 열기. 행 클릭(열람)과 이벤트 분리(stopPropagation).</li>
+  <li><span style="color:var(--new);font-weight:800">분홍 테두리 + NEW</span> 표시가 이번에 추가되는 요소입니다.</li>
+</ul></div>
+
+<!-- ═══════════════ 시안 A ═══════════════ -->
+<section class="opt">
+  <h2><span class="n">A안</span> 아이콘 단일 컬럼 + 상세 헤더 버튼 <span class="reco">추천</span></h2>
+  <p class="sum">표에는 <b>"자료 폴더" 단일 컬럼</b>으로 🛒/📸 아이콘 버튼 2개를 나란히 배치해 공간을 아끼고, 상세 화면에서는 <b>헤더(작업명 줄) 우측</b>에 같은 버튼을 배치합니다. 어느 화면에서든 같은 위치·같은 모양이라 학습 비용이 가장 낮습니다.</p>
+
+  <div class="mockcap">전체 작업 목록 표 <span class="loc">신설 컬럼: 자료 폴더 (계산서와 총비용 사이)</span></div>
+  <div class="frame">
+    <div class="fh"><h3>어니스트캄 — 전체 작업</h3><span class="bd">작업 316건</span></div>
+    <div class="tbl" style="min-width:840px">
+      <div class="tr hd cols-a"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span class="hl" style="outline-offset:3px"><span class="newtag">NEW</span>자료 폴더</span><span>견적서 · 계산서</span><span class="money">남은 입금액</span><span></span></div>
+      <div class="tr cols-a"><span class="mut">6/26</span><span class="nm"><b>6/26(쿠팡)블랑루스_젤리미스트 270건</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 99%</span><span><b>269</b>/270 · 245 · 0</span><span style="display:flex;gap:5px"><span class="fbtn buy mini">🛒 구매</span><span class="fbtn rev mini">📸 리뷰</span></span><span class="mut">수락 · 발행</span><span class="money">0 ✓</span><span class="open">열람 ›</span></div>
+      <div class="tr cols-a"><span class="mut">5/6</span><span class="nm"><b>5/6(메이커스)메디슨벨_알약패치 200건</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 84%</span><span><b>167</b>/200 · 151 · 0</span><span style="display:flex;gap:5px"><span class="fbtn buy mini">🛒 구매</span><span class="fbtn rev mini">📸 리뷰</span></span><span class="mut">수락 · 대기</span><span class="money">1,200,000</span><span class="open">열람 ›</span></div>
+      <div class="tr cols-a"><span class="mut">5/29</span><span class="nm"><b>5/29솔라르프리_수세미 카페/블로그 바이럴</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 32%</span><span><b>31</b> · 10 · 0</span><span style="display:flex;gap:5px"><span class="fbtn off mini">— 미연결</span><span class="fbtn rev mini">📸 리뷰</span></span><span class="mut">— · —</span><span class="money mut">—</span><span class="open">열람 ›</span></div>
+      <div class="tr"><span class="ellip">⋯ 313건 더</span></div>
+    </div>
+  </div>
+
+  <div class="mockcap">진행중 상세 <span class="loc">헤더 우측(업체 전용 열람 배지 옆)</span></div>
+  <div class="frame"><div class="dwrap">
+    <div class="dhead"><h4>5/6(메이커스)메디슨벨_알약패치 200건</h4><span class="bd a">업체 전용 열람</span><span class="sp"></span>
+      <span class="hl" style="display:inline-flex;gap:6px;padding:2px"><span class="newtag">NEW</span><span class="fbtn buy">🛒 구매캡쳐 폴더 <span class="up">↗</span></span><span class="fbtn rev">📸 리뷰캡쳐 폴더 <span class="up">↗</span></span></span></div>
+    <div class="roster">참여자 명단(화이트리스트 컬럼 · 읽기 전용) — 기존 그대로</div>
+    <div class="panelcap">리뷰 이미지 미리보기 — 기존 그대로</div>
+    <div class="rvpanel"><div class="rvthumbs"><i>🖼</i><i>🖼</i><i>🖼</i><i>🖼</i></div></div>
+  </div></div>
+
+  <div class="proscons">
+    <div class="box pro"><div class="lbl">장점</div><ul><li>컬럼 1개만 추가 — 이미 11컬럼인 표의 가로폭 부담 최소.</li><li>표·상세 어디서든 같은 버튼 모양 = 일관성.</li><li>상세에서 스크롤 없이 헤더에서 즉시 접근.</li></ul></div>
+    <div class="box con"><div class="lbl">단점</div><ul><li>아이콘 버튼이 작아 첫 인지에는 약간의 학습 필요.</li><li>헤더가 좁은 화면에서 줄바꿈될 수 있음(래핑 허용으로 해결).</li></ul></div>
+  </div>
+</section>
+
+<!-- ═══════════════ 시안 B ═══════════════ -->
+<section class="opt">
+  <h2><span class="n">B안</span> 구매·리뷰 분리 컬럼 + 상세 폴더 카드</h2>
+  <p class="sum">표에 <b>"구매캡쳐" / "리뷰캡쳐" 두 개의 독립 컬럼</b>을 두어 헤더만 봐도 용도가 즉시 읽히게 하고, 상세 화면에서는 명단 아래·미리보기 위에 <b>큼직한 폴더 카드 2장</b>을 배치합니다. 폴더 접근이 업체의 핵심 동선일 때 가장 명시적인 안입니다.</p>
+
+  <div class="mockcap">전체 작업 목록 표 <span class="loc">신설 컬럼 2개: 구매캡쳐 · 리뷰캡쳐</span></div>
+  <div class="frame">
+    <div class="fh"><h3>어니스트캄 — 전체 작업</h3><span class="bd">작업 316건</span></div>
+    <div class="tbl" style="min-width:840px">
+      <div class="tr hd cols-b"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span class="hl" style="outline-offset:3px"><span class="newtag">NEW</span>구매캡쳐</span><span class="hl" style="outline-offset:3px">리뷰캡쳐</span><span class="money">남은 입금액</span><span></span></div>
+      <div class="tr cols-b"><span class="mut">6/26</span><span class="nm"><b>6/26(쿠팡)블랑루스_젤리미스트 270건</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 99%</span><span><b>269</b>/270 · 245 · 0</span><span class="open">폴더 열기 ↗</span><span class="open">폴더 열기 ↗</span><span class="money">0 ✓</span><span class="open">열람 ›</span></div>
+      <div class="tr cols-b"><span class="mut">5/6</span><span class="nm"><b>5/6(메이커스)메디슨벨_알약패치 200건</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 84%</span><span><b>167</b>/200 · 151 · 0</span><span class="open">폴더 열기 ↗</span><span class="open">폴더 열기 ↗</span><span class="money">1,200,000</span><span class="open">열람 ›</span></div>
+      <div class="tr cols-b"><span class="mut">5/29</span><span class="nm"><b>5/29솔라르프리_수세미 카페/블로그 바이럴</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 32%</span><span><b>31</b> · 10 · 0</span><span class="mut">—</span><span class="open">폴더 열기 ↗</span><span class="money mut">—</span><span class="open">열람 ›</span></div>
+      <div class="tr"><span class="ellip">⋯ 313건 더</span></div>
+    </div>
+  </div>
+
+  <div class="mockcap">진행중 상세 <span class="loc">명단 아래 · 리뷰 미리보기 위 — "자료 폴더" 카드 2장</span></div>
+  <div class="frame"><div class="dwrap">
+    <div class="dhead"><h4>5/6(메이커스)메디슨벨_알약패치 200건</h4><span class="bd a">업체 전용 열람</span></div>
+    <div class="roster">참여자 명단(읽기 전용) — 기존 그대로</div>
+    <div class="panelcap">자료 폴더</div>
+    <div class="fcards hl" style="outline-offset:3px"><span class="newtag">NEW</span>
+      <div class="fcard buy"><span class="ic">🛒</span><span class="tx"><b>구매캡쳐 폴더</b><span>[구매캡처] · Google Drive</span></span><span class="go">열기 ↗</span></div>
+      <div class="fcard rev"><span class="ic">📸</span><span class="tx"><b>리뷰캡쳐 폴더</b><span>[리뷰] · Google Drive</span></span><span class="go">열기 ↗</span></div>
+    </div>
+    <div class="panelcap">리뷰 이미지 미리보기 — 기존 그대로</div>
+    <div class="rvpanel"><div class="rvthumbs"><i>🖼</i><i>🖼</i><i>🖼</i><i>🖼</i></div></div>
+  </div></div>
+
+  <div class="proscons">
+    <div class="box pro"><div class="lbl">장점</div><ul><li>헤더 자체가 라벨 — 설명 없이도 용도가 100% 명확.</li><li>상세의 카드가 커서 클릭 타겟·발견성 최고.</li></ul></div>
+    <div class="box con"><div class="lbl">단점</div><ul><li>컬럼이 2개 늘어 표가 13컬럼 — 노트북 화면에서 가로 스크롤 가능성.</li><li>상세에서 카드가 미리보기를 아래로 밀어 세로 공간 소모.</li></ul></div>
+  </div>
+</section>
+
+<!-- ═══════════════ 시안 C ═══════════════ -->
+<section class="opt">
+  <h2><span class="n">C안</span> 결합 배지 컬럼 + 대시보드 게이지 연동 + 상세 액션바</h2>
+  <p class="sum">표에는 <b>구매|리뷰가 한 몸인 분할 배지</b>("자료" 컬럼 1개)를 쓰고, <b>대시보드 "진행 중 작업" 게이지 행에도 같은 배지</b>를 노출해 대시보드에서 바로 폴더로 이동할 수 있게 합니다. 상세에서는 명단 바로 위 <b>파란 액션바</b>에 배치합니다. 접근 지점이 가장 많은 안입니다.</p>
+
+  <div class="mockcap">전체 작업 목록 표 <span class="loc">신설 컬럼: 자료 (분할 배지 1개)</span></div>
+  <div class="frame">
+    <div class="fh"><h3>어니스트캄 — 전체 작업</h3><span class="bd">작업 316건</span></div>
+    <div class="tbl" style="min-width:840px">
+      <div class="tr hd cols-a"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span class="hl" style="outline-offset:3px"><span class="newtag">NEW</span>자료</span><span>견적서 · 계산서</span><span class="money">남은 입금액</span><span></span></div>
+      <div class="tr cols-a"><span class="mut">6/26</span><span class="nm"><b>6/26(쿠팡)블랑루스_젤리미스트 270건</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 99%</span><span><b>269</b>/270 · 245 · 0</span><span class="duo"><a class="b">🛒 구매</a><a class="r">📸 리뷰</a></span><span class="mut">수락 · 발행</span><span class="money">0 ✓</span><span class="open">열람 ›</span></div>
+      <div class="tr cols-a"><span class="mut">5/6</span><span class="nm"><b>5/6(메이커스)메디슨벨_알약패치 200건</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 84%</span><span><b>167</b>/200 · 151 · 0</span><span class="duo"><a class="b">🛒 구매</a><a class="r">📸 리뷰</a></span><span class="mut">수락 · 대기</span><span class="money">1,200,000</span><span class="open">열람 ›</span></div>
+      <div class="tr cols-a"><span class="mut">5/29</span><span class="nm"><b>5/29솔라르프리_수세미 카페/블로그 바이럴</b><span class="sub">어니스트캄_업무시트 1</span></span><span class="chip">진행중 32%</span><span><b>31</b> · 10 · 0</span><span class="duo"><a class="off">🛒 —</a><a class="r">📸 리뷰</a></span><span class="mut">— · —</span><span class="money mut">—</span><span class="open">열람 ›</span></div>
+      <div class="tr"><span class="ellip">⋯ 313건 더</span></div>
+    </div>
+  </div>
+
+  <div class="mockcap">대시보드 — 진행 중 작업 게이지 <span class="loc">퍼센트 왼쪽에 분할 배지 (C안만 해당)</span></div>
+  <div class="frame"><div class="dwrap">
+    <div class="panelcap" style="margin-top:0">진행 중 작업</div>
+    <div style="display:grid;grid-template-columns:34px 1.3fr 1.2fr auto 46px;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--line)">
+      <span class="mut" style="font-size:10px">5/6</span>
+      <span class="nm" style="font-size:11px"><b>메디슨벨_알약패치 200건</b></span>
+      <span><span style="display:block;height:7px;border-radius:99px;background:var(--card2);overflow:hidden"><i style="display:block;height:100%;width:76%;background:var(--accent)"></i></span><span class="mut" style="font-size:9px">참여 167 · 제출 151 · 목표 200</span></span>
+      <span class="duo hl" style="outline-offset:2px"><span class="newtag">NEW</span><a class="b">🛒</a><a class="r">📸</a></span>
+      <span style="font-weight:800;color:var(--accent-deep);font-size:12px;text-align:right">84%</span>
+    </div>
+    <div style="display:grid;grid-template-columns:34px 1.3fr 1.2fr auto 46px;align-items:center;gap:10px;padding:7px 4px">
+      <span class="mut" style="font-size:10px">6/26</span>
+      <span class="nm" style="font-size:11px"><b>블랑루스_젤리미스트 270건</b></span>
+      <span><span style="display:block;height:7px;border-radius:99px;background:var(--card2);overflow:hidden"><i style="display:block;height:100%;width:99%;background:var(--accent)"></i></span><span class="mut" style="font-size:9px">참여 269 · 제출 245 · 목표 270</span></span>
+      <span class="duo"><a class="b">🛒</a><a class="r">📸</a></span>
+      <span style="font-weight:800;color:var(--accent-deep);font-size:12px;text-align:right">99%</span>
+    </div>
+  </div></div>
+
+  <div class="mockcap">진행중 상세 <span class="loc">헤더 아래 액션바</span></div>
+  <div class="frame"><div class="dwrap">
+    <div class="dhead"><h4>5/6(메이커스)메디슨벨_알약패치 200건</h4><span class="bd a">업체 전용 열람</span></div>
+    <div class="abar hl" style="outline-offset:3px"><span class="newtag">NEW</span><span class="t">📁 작업 자료 폴더</span><span class="fbtn buy">🛒 구매캡쳐 열기 <span class="up">↗</span></span><span class="fbtn rev">📸 리뷰캡쳐 열기 <span class="up">↗</span></span></div>
+    <div class="roster">참여자 명단(읽기 전용) — 기존 그대로</div>
+    <div class="panelcap">리뷰 이미지 미리보기 — 기존 그대로</div>
+    <div class="rvpanel"><div class="rvthumbs"><i>🖼</i><i>🖼</i><i>🖼</i><i>🖼</i></div></div>
+  </div></div>
+
+  <div class="proscons">
+    <div class="box pro"><div class="lbl">장점</div><ul><li>대시보드→표→상세 어디서든 폴더 접근 — 클릭 동선 최단.</li><li>분할 배지는 컬럼 1개 폭으로 두 링크를 담아 공간 효율적.</li></ul></div>
+    <div class="box con"><div class="lbl">단점</div><ul><li>노출 지점이 3곳이라 구현·유지보수 범위가 가장 넓음.</li><li>대시보드 게이지 행이 다소 빽빽해짐(모바일에서 배지 숨김 필요).</li></ul></div>
+  </div>
+</section>
+
+<!-- ═══════════════ 비교 ═══════════════ -->
+<section class="cmp">
+  <h2 style="font-size:16px;font-weight:800;margin:0 0 10px">한눈 비교</h2>
+  <table>
+    <tr><th style="width:120px"></th><th>A안 — 아이콘 단일 컬럼 (추천)</th><th>B안 — 분리 컬럼 + 카드</th><th>C안 — 결합 배지 + 대시보드</th></tr>
+    <tr><td><b>표 컬럼 추가</b></td><td>1개 ("자료 폴더", 버튼 2개)</td><td>2개 ("구매캡쳐"/"리뷰캡쳐")</td><td>1개 ("자료", 분할 배지)</td></tr>
+    <tr><td><b>상세 배치</b></td><td>헤더 우측 버튼</td><td>명단 아래 폴더 카드 2장</td><td>헤더 아래 액션바</td></tr>
+    <tr><td><b>대시보드 노출</b></td><td>최근 작업 표(자동)</td><td>최근 작업 표(자동)</td><td>최근 작업 표 + 진행 게이지 행</td></tr>
+    <tr><td><b>표 가로폭 부담</b></td><td>낮음</td><td>높음(13컬럼)</td><td>낮음</td></tr>
+    <tr><td><b>발견성</b></td><td>중</td><td>상</td><td>상</td></tr>
+    <tr><td><b>구현 범위</b></td><td>최소</td><td>중간</td><td>최대(3개 화면)</td></tr>
+  </table>
+  <div class="note" style="margin-top:14px"><b>공통 구현 메모</b><ul>
+    <li>서버: <code>advertiserWorkSummary</code>(trackB.service.js)의 items에 <code>folderUrl</code>·<code>captureFolderUrl</code> 2필드 동봉(이미 tab_configs에 존재, 광고주 노출 무해).</li>
+    <li>프론트: <code>_awRowHtml</code>·<code>_awListHtml</code> 헤더에 컬럼 추가, 상세는 <code>renderWorkdesk</code> 광고주 분기에 삽입. 링크는 <code>target="_blank" rel="noopener"</code> + <code>event.stopPropagation()</code>.</li>
+    <li>미연결 탭은 회색 표시 + 툴팁 "폴더가 아직 연결되지 않았습니다 — 담당자에게 문의".</li>
+  </ul></div>
+</section>
+
+</div></body></html>

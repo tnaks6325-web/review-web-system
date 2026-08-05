@@ -1739,8 +1739,14 @@ function _awDate(it){   // 'M/D' 표기(사이드바 아바타·목록 첫 컬�
   return '—';
 }
 function _awMoney(n){ return (n==null||isNaN(+n))?'—':(+n).toLocaleString('ko-KR'); }
+// ★ 목표 인원 단일 출처 — 발주 연동값(recruit_count) 우선, 없으면 탭명 끝 "N건" 파싱 폴백.
+//   둘 다 없으면 0(목표 미설정). 참여수(total)를 목표로 쓰던 폴백은 진행률이 무조건 100%가 되는 거짓말이라 금지.
+function _awTarget(it){
+  const t=+it.target||0; if(t) return t;
+  const m=String(it.tabName||'').match(/(\d+)\s*건/); return m?+m[1]:0;
+}
 function _awStatus(it){   // 진행상황 칩 {label, tone}
-  const target=+it.target||0, total=+it.total||0, sub=+it.submitted||0;
+  const target=_awTarget(it), total=+it.total||0, sub=+it.submitted||0;
   const done=(total>0&&sub>=total&&(!target||total>=target))||it.active===false;
   if(done) return {label:'완료',tone:'safe'};
   const pct=target?Math.round(total/target*100):null;
@@ -1802,7 +1808,7 @@ function _awRowHtml(it){
     <span class="adate">${esc(_awDate(it))}</span>
     <span class="anm"><b>${esc(it.tabName)}</b><span class="asub">${esc(it.spreadsheetTitle||'')}</span></span>
     <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
-    <span class="acnt"><b>${it.total||0}</b>${it.target?`/${it.target}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
+    <span class="acnt"><b>${it.total||0}</b>${_awTarget(it)?`/${_awTarget(it)}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
     <span>${qs?`<span class="bb ${qt}">${esc(qs)}</span>`:'<span class="bb">—</span>'}</span>
     <span>${iv?`<span class="bb ${ivt||''}">${esc(iv)}</span>`:'<span class="bb">—</span>'}</span>
     <span class="amoney"><b>${_awMoney(tc)}</b></span>
@@ -1832,7 +1838,7 @@ function _renderAdvDash(){
   const running=items.filter(it=>!_awDone(it)), doneList=items.filter(_awDone);
   // 참여 진척은 "진행 중" 작업만 — 끝난 숫자가 섞이면 진척이 희석된다.
   let rTot=0,rTgt=0,rSub=0;
-  running.forEach(it=>{ rTot+=+it.total||0; rSub+=+it.submitted||0; rTgt+=(+it.target||+it.total||0); });
+  running.forEach(it=>{ rTot+=+it.total||0; rSub+=+it.submitted||0; rTgt+=(_awTarget(it)||+it.total||0); });
   const rPct=rTgt?Math.round(rTot/rTgt*100):0, sPct=rTot?Math.round(rSub/rTot*100):0;
   // 정산 집계(연결된 건만) — 미연결 건수는 조용히 빼지 않고 부제로 고지한다.
   const linked=setlOn?items.filter(it=>it.settlement):[];
@@ -1853,15 +1859,17 @@ function _renderAdvDash(){
   // ② 진행 중 작업 게이지 — 진한 막대=제출, 연한=참여했지만 미제출. 합계 폭 = 참여율.
   const prog=running.length?running.map(it=>{
     const i=_awTabIdx(it); if(i<0) return '';
-    const tgt=+it.target||+it.total||0, tot=+it.total||0, sub=+it.submitted||0;
-    const pct=tgt?Math.round(tot/tgt*100):0;
-    const w1=tgt?Math.min(sub/tgt*100,100):0, w2=tgt?Math.max(Math.min((tot-sub)/tgt*100,100-w1),0):0;
+    const tgt=_awTarget(it), tot=+it.total||0, sub=+it.submitted||0;
+    // 목표 있음 → 진행률 = 참여/목표. 목표 미설정 → 제출률(제출/참여)로 대체 표기(무조건 100% 금지).
+    const pct=tgt?Math.round(tot/tgt*100):(tot?Math.round(sub/tot*100):null);
+    const base=tgt||tot;
+    const w1=base?Math.min(sub/base*100,100):0, w2=base?Math.max(Math.min((tot-sub)/base*100,100-w1),0):0;
     return `<div class="adprow" onclick="selTab(${i})" title="${esc(it.tabName)}">
       <span class="pd">${esc(_awDate(it))}</span>
       <span class="pn"><b>${esc(it.tabName)}</b><i>${esc(it.spreadsheetTitle||'')}${tgt?` · 목표 ${tgt}명`:''}</i></span>
       <span class="adgauge"><span class="adbar"><i class="b1" style="width:${w1.toFixed(1)}%"></i><i class="b2" style="width:${w2.toFixed(1)}%"></i></span>
         <span class="adglab"><span>참여 <b>${tot}</b> · 제출 <b>${sub}</b></span><span>${tgt?`목표 ${tgt}`:''}</span></span></span>
-      <span class="ppct">${pct}%</span></div>`;
+      <span class="ppct"${tgt?'':' title="목표 미설정 — 제출률(제출/참여) 기준"'}>${pct!=null?pct+'%':'—'}</span></div>`;
   }).join(''):`<div class="empty" style="padding:14px">진행 중인 작업이 없습니다.</div>`;
   // ③ 정산 파이프라인(견적→계산서→입금) — 연결된 건 기준
   const pipe=setlOn?`<div class="adpanel"><div class="pt">정산 현황</div>
