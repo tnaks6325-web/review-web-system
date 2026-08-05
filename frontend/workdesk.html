@@ -278,7 +278,7 @@
   .sugm{color:var(--faint);font-size:11px;white-space:nowrap;flex:none}
   /* 연결탭 목록 — 컬럼형 그리드(헤더·행 동일 템플릿, 정보를 행 전체 폭에 펼침). 좁은 화면은 otwrap 가로 스크롤 */
   .otwrap{overflow-x:auto;padding-bottom:2px}
-  .othead,.owntab{display:grid;grid-template-columns:44px minmax(170px,1.5fr) 90px minmax(100px,1fr) 80px 88px 60px 108px 64px 64px 64px 148px 64px minmax(120px,1fr) 44px;gap:10px;align-items:center;min-width:1420px}
+  .othead,.owntab{display:grid;grid-template-columns:44px minmax(170px,1.5fr) 90px minmax(100px,1fr) 80px 88px 60px 108px 92px 64px 64px 64px 148px 64px minmax(120px,1fr) 44px;gap:10px;align-items:center;min-width:1522px}
   .othead{font-size:9.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);padding:0 14px 5px}
   .owntab{padding:9px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
   .owntab:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08);border-color:var(--accent-line)}
@@ -297,6 +297,12 @@
   .owntab .odate{font-size:11.5px;font-variant-numeric:tabular-nums}
   .owntab .omoney{font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .owntab .omoney .pd-ok{color:var(--safe);font-weight:700} .owntab .omoney .pd-part{color:var(--warn);font-weight:700} .owntab .omoney .pd-zero{color:var(--faint)}
+  /* 계약 칸 — 미매칭이면 [계약 매칭] 어포던스, 매칭됐으면 계약번호(클릭 = 다시 매칭) */
+  .owntab .octr{overflow:visible}
+  .octrb{display:inline-block;max-width:100%;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:999px;cursor:pointer;
+    border:1px dashed var(--accent-line);color:var(--accent-deep);background:transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .octrb:hover{background:var(--accent-soft)}
+  .octrb.on{border-style:solid;border-color:transparent;background:var(--accent-soft);font-variant-numeric:tabular-nums}
   .owntab .omemo{font-size:11.5px;color:var(--muted);cursor:text;border-radius:6px;padding:3px 6px;margin:-3px -6px}
   .owntab .omemo:hover{background:var(--card2);outline:1px dashed var(--accent-line)}
   .owntab .omemo i{color:var(--faint);font-style:normal;opacity:.6}
@@ -2525,7 +2531,7 @@ function toggleSettleDetail(){ STATE.settleOpen=!STATE.settleOpen; const dt=$('#
 function setlSummaryHtml(d){
   if(!d) return `<span class="setlsummary" style="color:var(--faint)">불러오는 중…</span>`;
   if(d.hidden) return `<span class="setlsummary"><span class="schip">비공개</span></span>`;
-  if(!d.linked) return `<span class="setlsummary"><span class="schip warn">미연결</span><span style="color:var(--faint);font-weight:500">계약 연결 필요</span></span>`;
+  if(!d.linked) return `<span class="setlsummary"><span class="schip warn">미매칭</span><span style="color:var(--faint);font-weight:500">계약 매칭 필요</span></span>`;
   const st=_setlStage(d);
   return `<span class="setlsummary">${d.contractNumber?`<span class="schip ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span>${_wonFmt(d.amount)}</span>`:''}<span class="schip ${st.tone}">${esc(st.label)}</span></span>`;
 }
@@ -2557,7 +2563,7 @@ function renderSettlement(){
   const st=STATE.settle; if(!st) return; const box=$('#settlementsec'); if(!box) return; const d=st.data;
   const cellS=$('#setlCell .setlsummary'); if(cellS) cellS.outerHTML=setlSummaryHtml(d);   // 스트립 정산 셀 동기화
   const canLink=STATE.role!=='advertiser';
-  // 광고주 렌즈: 비공개·미연결 모두 같은 안내 한 줄(내부 용어 '계약 연결'·노출 토글 존재를 드러내지 않는다).
+  // 광고주 렌즈: 비공개·미매칭 모두 같은 안내 한 줄(내부 용어 '계약 매칭'·노출 토글 존재를 드러내지 않는다).
   if(!canLink && (d.hidden || !d.linked)){
     box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 현황</div><div class="stpcard"><div class="empty" style="padding:14px">정산 정보가 아직 준비되지 않았습니다. 궁금하신 내용은 담당자에게 문의해 주세요.</div></div></div>`;
     return;
@@ -2629,24 +2635,36 @@ function _advSettleFields(d,q,inv,pay){
 }
 function openLinkModal(){
   const st=STATE.settle; if(!st) return;
+  openContractMatchModal({ sheetId:st.tab.sheetId, tabName:st.tab.tabName, linked:!!(st.data&&st.data.linked) });
+}
+// ★★ 계약 매칭 팝업은 **한 벌**(작업보드 정산 카드 · 업체관리 연결탭 공용). 화면마다 사본을 두면
+//    후보 규칙·확인 문구·매칭 후 동기화가 갈라진다(작업내용 렌더러 공용화와 같은 규율).
+//    ctx = {sheetId, tabName, linked} — 어느 화면에서 열었든 이 문맥만으로 동작한다.
+function openContractMatchModal(ctx){
+  if(!ctx||!ctx.sheetId||!ctx.tabName) return;
+  closeLinkModal();
+  _LK={items:[],scope:'advertiser',ctx:ctx};
   const wrap=document.createElement('div'); wrap.className='modalov'; wrap.id='linkmodal';
   wrap.innerHTML=`<div class="modalbox" style="width:660px"><div class="modalhd"><b>계약 매칭</b>
-      <span style="font-size:11.5px;color:var(--faint);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(st.tab.tabName||'')}</span>
+      <span style="font-size:11.5px;color:var(--faint);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx.tabName||'')}</span>
+      ${ctx.linked?`<button class="btn xs" onclick="unlinkSettle()">매칭 해제</button>`:''}
       <button class="btn xs" onclick="closeLinkModal()">닫기</button></div>
     <div class="modalbd" id="lkbody"><div class="empty" style="padding:20px">계약 후보를 불러오는 중…</div></div></div>`;
   document.body.appendChild(wrap); wrap.addEventListener('click',e=>{ if(e.target===wrap) closeLinkModal(); });
   _lkLoad('advertiser','');
 }
-function closeLinkModal(){ const m=$('#linkmodal'); if(m) m.remove(); _LK={items:[],scope:'advertiser'}; }
+function closeLinkModal(){ const m=$('#linkmodal'); if(m) m.remove(); _LK={items:[],scope:'advertiser',ctx:null}; }
+// 지금 매칭 대상 탭 — 팝업 문맥이 있으면 그것, 없으면 작업보드에서 열어 둔 탭(기존 호출부 계약 유지).
+function _lkTab(){ if(_LK.ctx&&_LK.ctx.sheetId) return _LK.ctx; const st=STATE.settle; return (st&&st.tab)||null; }
 
 // ══ 계약 매칭 — 그 작업을 소유한 업체의 계약만 후보로 두고, 작업명과 가장 닮은 계약을 추천 ══
 //   ★ 판정(유사도·추천)은 전부 서버(utils/contractMatch)가 한다. 화면은 서버가 준 순서·점수를 그대로 그린다
 //     — 화면에서 다시 매기면 "추천은 A인데 정렬은 B"로 갈린다.
 //   ★ 후보 클릭은 **배열 인덱스**로 넘긴다(onclick 문자열에 인트라넷에서 온 값을 넣지 않는다).
-let _LK={items:[],scope:'advertiser'};
+let _LK={items:[],scope:'advertiser',ctx:null};
 let _lkTimer=null;
 async function _lkLoad(scope,q){
-  const st=STATE.settle; if(!st) return; const t=st.tab; const box=$('#lkbody'); if(!box) return;
+  const t=_lkTab(); if(!t) return; const box=$('#lkbody'); if(!box) return;
   _LK.scope=scope;
   box.innerHTML='<div class="empty" style="padding:20px">계약 후보를 불러오는 중…</div>';
   const url=`/api/trackb/settlement/contract-candidates?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&scope=${encodeURIComponent(scope)}${q?'&q='+encodeURIComponent(q):''}`;
@@ -2716,7 +2734,7 @@ function searchSales(q){   // 전체 검색 모드 입력 디바운스
   _lkTimer=setTimeout(()=>{ _lkLoad('all',v); },300);
 }
 async function pickSales(idx){
-  const st=STATE.settle; if(!st) return; const t=st.tab;
+  const t=_lkTab(); if(!t) return;
   const s=_LK.items[Number(idx)]; if(!s||!s.salesId) return;
   // ★ 다른 업체 계약을 고르면 되묻는다(차단은 안 한다 — 계약이 다른 이름으로 등록된 정상 케이스가 있다).
   if(s.advertiserMatch===false){
@@ -2724,13 +2742,34 @@ async function pickSales(idx){
     if(!confirm(`이 계약의 업체는 "${s.businessName||s.advertiserName||'?'}" 로, 이 작업의 업체${own?`("${own}")`:''}와 다릅니다.\n그래도 매칭할까요?`)) return;
   }
   const r=await api('/api/trackb/settlement/link',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,salesId:s.salesId})});
-  if(r&&r.ok){ toast(r.mismatch?'계약 매칭됨 (업체 불일치 — 확인 필요)':'계약 매칭됨'); closeLinkModal(); loadSettlement(t); }
+  if(r&&r.ok){ toast(r.mismatch?'계약 매칭됨 (업체 불일치 — 확인 필요)':'계약 매칭됨'); closeLinkModal();
+    _contractMatchApplied(t.sheetId,t.tabName,s.salesId,s.contractNumber||''); }
   else toast((r&&r.error)||'매칭 실패');
 }
 async function unlinkSettle(){
-  const st=STATE.settle; if(!st) return; const t=st.tab;
+  const t=_lkTab(); if(!t) return;
+  if(!confirm('이 작업의 계약 매칭을 해제할까요?\n(계약·견적 원본은 그대로이고, 이 작업과의 연결만 끊습니다)')) return;
   const r=await api('/api/trackb/settlement/unlink',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
-  if(r&&r.ok){ toast('매칭 해제'); loadSettlement(t); } else toast((r&&r.error)||'실패');
+  if(r&&r.ok){ toast('매칭 해제'); closeLinkModal(); _contractMatchApplied(t.sheetId,t.tabName,null,''); }
+  else toast((r&&r.error)||'실패');
+}
+// ★★ 매칭/해제 후 동기화는 **여기 한 곳**에서만 — 두 화면(작업보드 정산 카드 · 업체관리 연결탭)이
+//    같은 결과를 본다. 화면마다 따로 갱신하면 "업체관리에서 매칭했는데 작업보드는 미매칭"으로 갈린다.
+function _contractMatchApplied(sheetId,tabName,salesId,contractNumber){
+  // ① 업체관리 연결탭 목록 — 그 탭이 지금 들고 있는 목록에 있으면 즉시 반영(재조회 없이)
+  let ownHit=false;
+  for(const t of (STATE.ownTabs||[])) if(t.sheetId===sheetId&&t.tabName===tabName){
+    t.salesId=salesId||null; t.contractNumber=contractNumber||''; ownHit=true;
+  }
+  if(ownHit){
+    // 옛 계약의 견적·계산서·입금 숫자를 남겨두지 않는다(다른 계약 금액이 그대로 보이는 사고 차단).
+    if(STATE.ownSettle) delete STATE.ownSettle[sheetId+'\t'+tabName];
+    _rerenderOwnTabs();
+    if(STATE.ownSettleFor&&(STATE.ownTabs||[]).some(t=>t.salesId)) loadOwnSettlement(STATE.ownSettleFor);
+  }
+  // ② 작업보드 정산 카드 — 그 탭을 열어 둔 상태면 재조회(스텝퍼·요약 셀이 함께 갱신된다)
+  const st=STATE.settle;
+  if(st&&st.tab&&st.tab.sheetId===sheetId&&st.tab.tabName===tabName) loadSettlement(st.tab);
 }
 async function toggleSettleVis(advertiserId,visible){
   const r=await api('/api/trackb/settlement/visibility',{method:'POST',body:JSON.stringify({advertiserId,visible})});
@@ -6469,6 +6508,7 @@ function _ownTabsHtml(){
       <span class="ocol ${tgt==='—'?'dim':''}">${esc(tgt)}</span>
       <span class="ocol ${t.manager?'':'dim'}">${esc(t.manager||'—')}</span>
       <span class="ocnt"><b>${total}</b> · <b class="c-sub">${sub}</b> · <b class="c-paid">${paid}</b></span>
+      <span class="ocol octr">${_ownContractCell(t,i)}</span>
       <span class="ocol odate">${quoteCell}</span>
       <span class="ocol odate">${closeoutCell}</span>
       <span class="ocol odate">${invoiceCell}</span>
@@ -6478,9 +6518,20 @@ function _ownTabsHtml(){
       <span class="openb">열기 ›</span></div>`;
   }).join('');
   const body=ot.length
-    ? `${chips}<div class="otwrap"><div class="othead"><span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span><span>견적서</span><span>마감자료</span><span>계산서</span><span>입금액/총비용</span><span>입금일</span><span>비고</span><span></span></div>${list||'<div class="empty" style="padding:14px">이 브랜드의 탭 없음</div>'}</div>`
+    ? `${chips}<div class="otwrap"><div class="othead"><span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span><span>계약</span><span>견적서</span><span>마감자료</span><span>계산서</span><span>입금액/총비용</span><span>입금일</span><span>비고</span><span></span></div>${list||'<div class="empty" style="padding:14px">이 브랜드의 탭 없음</div>'}</div>`
     : `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
-  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업보드로 열기 · 정산(견적·계산서·입금)은 정산 링크된 탭만 표시</span></div>${body}`;
+  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 탭만 표시</span></div>${body}`;
+}
+// 계약 칸 — 매칭됐으면 계약번호(클릭 = 다시 매칭), 아니면 [계약 매칭] 버튼.
+//   ★ 행 클릭(작업보드로 열기)과 격리(stopPropagation) · onclick 에는 **인덱스만** 넘긴다(값 문자열 주입 금지).
+function _ownContractCell(t,i){
+  if(t.salesId) return `<span class="octrb on" onclick="ownMatchContract(event,${i})" title="${esc(t.contractNumber||'계약 매칭됨')} — 클릭하면 다시 매칭">${esc(t.contractNumber||'매칭됨')}</span>`;
+  return `<span class="octrb" onclick="ownMatchContract(event,${i})" title="이 작업에 인트라넷 계약(C-번호)을 매칭합니다">계약 매칭</span>`;
+}
+// 업체관리에서 계약 매칭 — 작업보드와 **같은 팝업**을 그 탭 문맥으로 연다(사본 없음).
+function ownMatchContract(ev,i){ ev.stopPropagation();
+  const t=(STATE.ownTabs||[])[i]; if(!t) return;
+  openContractMatchModal({ sheetId:t.sheetId, tabName:t.tabName, linked:!!t.salesId });
 }
 // 날짜 → M/D 축약(관제실 표기), 금액 → 천단위 콤마.
 function _md(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:esc(String(d||'')); }

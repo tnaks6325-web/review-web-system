@@ -300,6 +300,80 @@ async function run() {
   assert.ok(/접수할 때<\/b>|<b>접수할 때 자동으로 매칭<\/b>/.test(HTML), '8k: 미연결 안내가 자동 매칭 규칙을 설명');
   console.log('  8. 작업오더 계약건(088) — 스키마·프리플라이트·INSERT 정합·자동 연결 ✓');
 
+  // ═══ 9. 어휘 통일 + 업체관리 진입점 + 두 화면 동기화 ═══
+  //   ★ 창구가 둘(작업보드 정산 카드 · 업체관리 연결탭)이 되었으므로 팝업·동기화는 **한 벌**이어야 한다.
+  //     사본을 두면 "업체관리에서 매칭했는데 작업보드는 미매칭"으로 갈린다.
+  assert.ok(!/계약 연결 필요|>미연결</.test(HTML), '9a: 작업 정산 요약 어휘가 "계약 매칭"으로 통일(계약 연결 잔존 0)');
+  assert.ok(/계약 매칭 필요/.test(HTML), '9a2: 미매칭 안내 문구');
+  assert.ok(!/정산 링크된 탭만/.test(HTML) && /계약이 매칭된 탭만 표시/.test(HTML), '9a3: 업체관리 안내도 매칭 어휘');
+
+  // 팝업 단일 출처 — 정의 1개, 두 화면이 같은 함수를 부른다.
+  assert.equal((HTML.match(/function openContractMatchModal\(/g) || []).length, 1, '9b: 계약 매칭 팝업 정의는 하나(사본 금지)');
+  assert.ok(/function openLinkModal\(\)\{[\s\S]{0,300}openContractMatchModal\(/.test(HTML), '9b2: 작업보드 정산 카드도 공용 팝업을 연다');
+  assert.ok(/function ownMatchContract\([\s\S]{0,300}openContractMatchModal\(/.test(HTML), '9b3: 업체관리도 같은 팝업을 연다');
+  // 팝업 안쪽은 문맥(_lkTab)만 본다 — STATE.settle 직접 참조가 남아 있으면 업체관리에서 열었을 때 죽는다.
+  const lkSeg = HTML.slice(HTML.indexOf('async function _lkLoad'), HTML.indexOf('function _contractMatchApplied'));
+  assert.ok(!/STATE\.settle/.test(lkSeg), '9c: 후보 조회·선택·해제는 STATE.settle(작업보드 전용 상태)에 의존하지 않는다');
+  assert.ok(/const t=_lkTab\(\)/.test(lkSeg), '9c2: 대상 탭은 팝업 문맥에서 가져온다');
+
+  // 업체관리 연결탭 계약 칸 — 헤더·행·onclick 계약
+  assert.ok(/<span>참여·제출·입금<\/span><span>계약<\/span><span>견적서<\/span>/.test(HTML), '9d: 연결탭 표에 [계약] 헤더');
+  assert.ok(/onclick="ownMatchContract\(event,\$\{i\}\)"/.test(HTML), '9d2: 계약 칸 클릭은 인덱스만 전달(시트에서 온 문자열 주입 금지)');
+  assert.ok(/function ownMatchContract\(ev,i\)\{ ?ev\.stopPropagation\(\)/.test(HTML), '9d3: 행 클릭(작업보드 열기)과 격리');
+
+  // ★★ 그리드 열 수 ≡ 헤더 칸 수 — 열을 끼워 넣을 때 가장 흔하게 깨지는 자리라 **세어서** 고정한다.
+  const gridCols = (HTML.match(/\.othead,\.owntab\{display:grid;grid-template-columns:([^;]+);/) || [, ''])[1]
+    .replace(/minmax\([^)]*\)/g, 'X').trim().split(/\s+/).filter(Boolean).length;
+  const headCells = ((HTML.match(/<div class="othead">([\s\S]*?)<\/div>/) || [, ''])[1].match(/<span>/g) || []).length;
+  assert.equal(gridCols, headCells, `9e: 그리드 열 ${gridCols} ≡ 헤더 칸 ${headCells}`);
+
+  // 동기화 — 단일 지점 + link/unlink 양쪽에서 호출 + 두 화면 갱신
+  assert.equal((HTML.match(/function _contractMatchApplied\(/g) || []).length, 1, '9f: 동기화 지점은 하나');
+  // ★ 동기화는 문자열 존재가 아니라 **실행**으로 확인한다(`if(false) delete …` 같은 무력화를 grep 은 통과시킨다).
+  const applied = HTML.slice(HTML.indexOf('function _contractMatchApplied('), HTML.indexOf('async function toggleSettleVis'));
+  function runApplied(open) {
+    const calls = [];
+    const box = {
+      STATE: {
+        ownTabs: [{ sheetId: 'S1', tabName: 'T', salesId: 'OLD', contractNumber: 'C-OLD' }, { sheetId: 'S1', tabName: 'U', salesId: 'KEEP' }],
+        ownSettle: { 'S1\tT': { totalCost: 111 }, 'S1\tU': { totalCost: 222 } },
+        ownSettleFor: 'ADV', settle: { tab: { sheetId: 'S1', tabName: open } },
+      },
+      _rerenderOwnTabs: () => calls.push('rerender'),
+      loadOwnSettlement: id => calls.push('ownSettlement:' + id),
+      loadSettlement: t => calls.push('settlement:' + t.tabName),
+    };
+    vm.createContext(box); vm.runInContext(applied, box);
+    box._contractMatchApplied('S1', 'T', 'NEW', 'C-NEW');
+    return { calls, S: box.STATE };
+  }
+  let a1 = runApplied('T');
+  assert.equal(a1.S.ownTabs[0].salesId, 'NEW', '9f2: 업체관리 연결탭 행이 새 계약으로 갱신');
+  assert.equal(a1.S.ownTabs[0].contractNumber, 'C-NEW', '9f2b: 계약번호 갱신');
+  assert.equal(a1.S.ownTabs[1].salesId, 'KEEP', '9f2c: 다른 탭은 건드리지 않는다');
+  assert.ok(a1.calls.includes('rerender'), '9f2d: 연결탭 섹션 재렌더');
+  assert.equal(a1.S.ownSettle['S1\tT'], undefined, '9f4: 옛 계약의 금액 요약을 남기지 않는다(다른 계약 숫자 잔존 차단)');
+  assert.ok(a1.S.ownSettle['S1\tU'], '9f4b: 다른 탭 요약은 보존');
+  assert.ok(a1.calls.includes('ownSettlement:ADV'), '9f3: 정산 요약(견적·계산서·입금) 재조회');
+  assert.ok(a1.calls.includes('settlement:T'), '9f5: 그 탭을 열어 둔 작업보드 정산 카드도 재조회');
+  const a2 = runApplied('OTHER');
+  assert.ok(!a2.calls.some(c => c.startsWith('settlement:')), '9f6: 다른 탭을 보고 있으면 작업보드 카드는 건드리지 않는다');
+  const pick = HTML.slice(HTML.indexOf('async function pickSales('), HTML.indexOf('// ★★ 매칭/해제 후 동기화'));
+  assert.ok((pick.match(/_contractMatchApplied\(/g) || []).length === 2, '9g: 매칭·해제 둘 다 같은 동기화 지점을 부른다');
+  assert.ok(!/loadSettlement\(t\);\s*\}\s*else toast\(\(r&&r\.error\)\|\|'매칭 실패'\)/.test(pick), '9g2: 매칭 후 작업보드만 갱신하던 옛 경로 부활 금지');
+
+  // 계약 칸 렌더러 실제 실행 — 매칭/미매칭 두 상태
+  const cellSrc = HTML.slice(HTML.indexOf('function _ownContractCell('), HTML.indexOf('// 업체관리에서 계약 매칭'));
+  const cb = { esc: sb.esc }; vm.createContext(cb); vm.runInContext(cellSrc, cb);
+  const cellOn = cb._ownContractCell({ salesId: 'S1', contractNumber: 'C-20260702-010' }, 3);
+  assert.ok(/octrb on/.test(cellOn) && /C-20260702-010/.test(cellOn) && /ownMatchContract\(event,3\)/.test(cellOn), '9h: 매칭됨 = 계약번호(클릭 시 다시 매칭)');
+  const cellOff = cb._ownContractCell({ salesId: null, tabName: 't' }, 0);
+  assert.ok(/계약 매칭/.test(cellOff) && !/octrb on/.test(cellOff), '9h2: 미매칭 = [계약 매칭] 어포던스');
+  // 계약번호는 인트라넷에서 온 값 — 본문·title 속성 양쪽에 escape 되어 들어간다(태그·따옴표 탈출 불가).
+  const cellXss = cb._ownContractCell({ salesId: 'x', contractNumber: '"><img src=x>' }, 1);
+  assert.ok(!/<img/i.test(cellXss) && /&lt;img/.test(cellXss) && !/title="">/.test(cellXss), '9h3: 계약번호는 escape(태그·속성 탈출 없음)');
+  console.log('  9. 어휘 통일 · 업체관리 진입점 · 두 화면 동기화 ✓');
+
   console.log('✅ contractMatch 테스트 전체 통과');
 }
 
