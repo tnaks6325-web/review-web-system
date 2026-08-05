@@ -110,6 +110,27 @@
                  accountTail: '', inGlobalBlacklist: false,
                  gate: { mode: r.mode, messageType: r.message_type }, history: null };
       });
+      // ★ 전역 블랙리스트 자동 표시(Q1=B, 후속조치): 검색 없이 맨 위에 나타난다.
+      //   전역 자동 차단은 꺼져 있으므로(옵트인) 기본은 참여가능 — 이 공고에서 차단하려면
+      //   체크 해제 또는 [블랙리스트 모두 차단]. 이미 예외 행이 있는 사람은 그 행에 상태만 합친다.
+      //   서버가 필드를 아예 안 실었으면(조회 실패·구버전) 구역을 그리지 않는다 — "블랙 0명" 위장 금지.
+      if (Array.isArray(j.globalBlacklist)) {
+        var byP8 = {};
+        S.items.forEach(function (it, i) { byP8[it.phone8] = i; });
+        var front = [];
+        j.globalBlacklist.forEach(function (g) {
+          if (byP8[g.phone8] != null) {
+            var it = S.items[byP8[g.phone8]];
+            it.inGlobalBlacklist = true;
+            if (!it.history) it.history = g.history || null;
+            if (!it.name) it.name = g.name || '';
+          } else {
+            front.push({ name: g.name || '', phone8: g.phone8, phoneMasked: g.phoneMasked || '',
+                         accountTail: '', inGlobalBlacklist: true, gate: null, history: g.history || null });
+          }
+        });
+        S.items = front.concat(S.items);   // 블랙리스트가 항상 위(사용자 확정 후속조치)
+      }
       render();
     } catch (e) {
       // ★ 로딩 자리표시자를 깐 화면은 어떤 예외에도 종결시킨다(무한로딩 금지)
@@ -176,7 +197,10 @@
       + '<div class="rg-cell">기본 상태<b style="color:#15803d">전원 참여가능</b>차단한 사람만 예외 저장</div>'
       + '<div class="rg-cell red">이 공고 차단<b>' + (counts.block | 0) + '명</b></div>'
       + '<div class="rg-cell">허용 예외<b>' + (counts.allow | 0) + '명</b>블랙리스트지만 이 공고는 허용</div>'
-      + '<div class="rg-cell" style="margin-left:auto"><button type="button" class="rg-btn" onclick="ReviewerGate._csv()">⬇ 예외 목록 CSV</button></div>'
+      + (Array.isArray(d.globalBlacklist)
+          ? '<div class="rg-cell" style="border-color:#fca5a5">전역 블랙리스트<b style="color:#b91c1c">' + d.globalBlacklist.length + '명</b>아래 표 맨 위에 표시됨</div>'
+            + '<div class="rg-cell" style="margin-left:auto;display:flex;align-items:center"><button type="button" class="rg-btn" style="border-color:#fca5a5;color:#b91c1c" onclick="ReviewerGate._blockAll()">🚫 블랙리스트 모두 차단</button></div>'
+          : '<div class="rg-cell" style="margin-left:auto;border-color:#fcd34d;color:#b45309">전역 블랙리스트 조회 실패 — 표시 안 됨</div>')
       + '</div>'
       + '<div class="rg-srch"><input id="rgQ" placeholder="이름 / 전화번호 뒤 4자리 / 등록 계좌번호 검색 (검색된 사람만 표에 추가됩니다)" onkeydown="if(event.key===\'Enter\')ReviewerGate._search()">'
       + '<button type="button" class="rg-btn" onclick="ReviewerGate._search()">🔍 검색</button></div>'
@@ -260,22 +284,22 @@
     } catch (e) { alert('저장 실패: ' + (e.message || e)); }
   }
 
-  function _csv() {
-    var d = S.data || {};
-    var rows = [['구분', '이름', '연락처끝4', '메시지', '처리자', '일시']];
-    (d.blocks || []).forEach(function (r) {
-      rows.push(['차단', r.reviewer_name || '', String(r.phone8 || '').slice(-4), r.message_type === 'policy' ? '사유고지' : '마감위장', r.created_by || '', r.created_at || '']);
+  /* [블랙리스트 모두 차단] — 전역 블랙리스트 중 아직 차단/허용 예외가 아닌 인원을 일괄 스테이징.
+     ★ 사람이 명시한 허용 예외(allow)는 덮지 않는다(건별 허용은 의도된 결정 — 조용한 되돌림 금지).
+     저장은 여전히 [선택 적용] confirm 경유(즉시 서버 반영 아님). */
+  function _blockAll() {
+    var n = 0;
+    S.items.forEach(function (it) {
+      if (!it.inGlobalBlacklist) return;
+      var st = S.staged[it.phone8];
+      var mode = st ? st.mode : (it.gate && it.gate.mode) || '';
+      if (mode === 'block' || mode === 'allow') return;
+      S.staged[it.phone8] = { phone8: it.phone8, name: it.name, mode: 'block', messageType: S.msgType };
+      n++;
     });
-    (d.allows || []).forEach(function (r) {
-      rows.push(['허용예외', r.reviewer_name || '', String(r.phone8 || '').slice(-4), '', r.created_by || '', r.created_at || '']);
-    });
-    var csv = '\uFEFF' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = 'reviewer-gate-' + (S.campId || '') + '.csv';
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    if (!n) { alert('추가로 차단할 블랙리스트 인원이 없습니다(이미 차단됐거나 허용 예외로 지정됨).'); return; }
+    render();
   }
 
-  window.ReviewerGate = { open: open, close: close, _toggle: _toggle, _msg: _msg, _hist: _hist, _search: _search, _apply: _apply, _csv: _csv };
+  window.ReviewerGate = { open: open, close: close, _toggle: _toggle, _msg: _msg, _hist: _hist, _search: _search, _apply: _apply, _blockAll: _blockAll };
 })();

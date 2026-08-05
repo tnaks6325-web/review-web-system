@@ -55,12 +55,14 @@ console.log('\n② 컬럼 순서(사용자 확정)');
 const thead = /<thead><tr>([\s\S]*?)<\/tr><\/thead>/.exec(
   /_renderRvBody[\s\S]*?<\/tbody><\/table>/.exec(jsNoComment)[0]);
 const cols = [...thead[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(m => m[1].trim());
-const want = ['이름', '연락처', '주소', '은행', '계좌번호', '예금주', '주민번호', '소득유형', '타계정', '등록일'];
-ok(`앞 10개 = ${want.join(' · ')}`, JSON.stringify(cols.slice(0, 10)) === JSON.stringify(want));
-ok('그 뒤에 상태·관리자 메모·삭제(요청에 없던 기존 열을 지우지 않았다)',
-  cols[10] === '상태' && cols[11] === '관리자 메모' && cols.length === 13);
+/* 2026-08-05 자동 블랙리뷰어(091-2)로 갱신: 타계정 뒤에 누적참여·이전 리뷰,
+   삭제 바로 왼쪽에 참여설정 — 나머지 순서는 종전 사용자 확정 그대로. */
+const want = ['이름', '연락처', '주소', '은행', '계좌번호', '예금주', '주민번호', '소득유형', '타계정', '누적참여', '이전 리뷰', '등록일'];
+ok(`앞 12개 = ${want.join(' · ')}`, JSON.stringify(cols.slice(0, 12)) === JSON.stringify(want));
+ok('그 뒤에 상태·관리자 메모·참여설정·삭제(기존 열을 지우지 않았고 토글은 삭제 바로 왼쪽)',
+  cols[12] === '상태' && cols[13] === '관리자 메모' && cols[14] === '참여설정' && cols.length === 16);
 ok(`펼침행 colspan(${/colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) ? 'RV_COLSPAN' : '?'}) 이 열 수와 같다`,
-  /const RV_COLSPAN = 13;/.test(jsNoComment) && /colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) && cols.length === 13);
+  /const RV_COLSPAN = 16;/.test(jsNoComment) && /colspan="\$\{RV_COLSPAN\}"/.test(jsNoComment) && cols.length === 16);
 
 /* ── ③ 줄바꿈 금지 ── */
 console.log('\n③ 주소 말고는 전부 한 줄(행 높이 붕괴 방지)');

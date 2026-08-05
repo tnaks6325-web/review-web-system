@@ -60,13 +60,15 @@ function decideReviewerGate({ gateRow, inGlobalBlacklist } = {}) {
 }
 
 /**
- * 블랙리스트 관리기준(설정탭, 사용자 확정 Q4) 정규화.
- *   nowriteDays: 참여 확정 후 이 일수가 지나도록 리뷰 미제출 → "리뷰 미작성" 판정
- *   overdueDays: 리뷰 기한 일수 — 제출은 했으나 구매 후 이 일수 이후 제출 → "기한 경과" 판정
+ * 블랙리스트 관리기준(설정탭) 정규화 — 2026-08-05 사용자 확정으로 **재정의**:
+ *   두 값 모두 "아직 리뷰를 안 낸 행"을 구매 후 경과일수로 나눈 것이다.
+ *   overdueDays(14): 미제출 14일↑ = "기한경과"  ← 같은 행이 30일을 넘으면 미작성으로 **승격**(이중 계수 없음)
+ *   nowriteDays(30): 미제출 30일↑ = "리뷰미작성" — 1건 이상이면 등록리뷰어DB에서 블랙리스트 후보 표시
+ *   (옛 정의 "기한경과 = 제출은 했으나 늦게"는 폐기 — 등록리뷰어DB·공고별 팝업이 같은 계산을 본다)
  * ★ _int 규율(082): 빈 값을 0으로 접지 않는다 — Number('')===0 이라 가드 없으면
  *   "미설정"이 조용히 0일(전건 미작성 판정)이 된다.
  */
-const CRITERIA_DEFAULTS = { nowriteDays: 14, overdueDays: 14 };
+const CRITERIA_DEFAULTS = { nowriteDays: 30, overdueDays: 14 };
 
 function _days(v, dflt) {
   if (v == null || v === '') return dflt;
