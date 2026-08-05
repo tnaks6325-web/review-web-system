@@ -69,6 +69,7 @@ t('★ 마감 체크는 isFinishCandidate 그대로(판정 사본 금지)', /f==
 const candCalls = [];
 const hero = { textContent: '' };
 const host = { innerHTML: '' };
+let bodyEl = null;   // #wblBody — 검색이 갱신하는 조각(아래 IME 절에서 붙인다)
 const sandbox = {
   STATE: { tabs: [], finTab: 'run', finMgr: '', finQ: '', finFilter: '' },
   isFinished: t2 => !!(t2 && t2.finished),
@@ -79,7 +80,8 @@ const sandbox = {
   esc: v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   toast: () => {}, api: async () => ({ ok: true }),
   window: {}, console,
-  document: { getElementById: id => id === 'wblMount' ? host : (id === 'hmStTabs' ? hero : null) },
+  // ★ 검색이 본문만 갈아 끼우는지 보려면 #wblBody 를 **실제로 갖고 있어야** 한다(없으면 폴백 경로만 검사하게 된다).
+  document: { getElementById: id => id === 'wblMount' ? host : (id === 'hmStTabs' ? hero : (id === 'wblBody' ? bodyEl : null)) },
 };
 vm.createContext(sandbox);
 vm.runInContext(BLOCK, sandbox, { filename: 'wbl-block.js' });
@@ -175,6 +177,37 @@ t('보관함 행도 칸 수 동일(빈 칸 유지 — 열 수가 사람·모드�
   (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 10);
 sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = '';
 t('탭 전환이 필터를 초기화한다', (sandbox._finPickTab('fin'), sandbox.STATE.finFilter === ''));
+
+/* ── 2.5) 한글 IME 조합 — 검색은 **본문만** 다시 그린다 ──────────────────────────
+   사용자 신고: 검색칸에 '면' 을 치면 'ㅁㅕㄴ' 으로 쪼개졌다. 원인은 입력 한 글자마다
+   _finRenderList 가 헤더까지 innerHTML 로 교체해 **입력칸 DOM 이 재생성**되면서 브라우저의
+   조합 상태가 파괴된 것. 그래서 여기서는 "검색 시 host(=헤더 포함 껍데기)가 그대로인가"를 본다
+   — 문자열 grep 으로는 못 잡고(호출은 여전히 있으니), **실행해서 DOM 이 안 갈리는지** 봐야 한다. */
+console.log('\n2.5) 한글 IME 조합 (검색 = 본문만 갱신)');
+sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = ''; sandbox.STATE.finQ = '';
+sandbox.STATE.tabs = [tOpen, tNone];
+sandbox._finRenderList();
+t('전체 렌더는 본문을 #wblBody 로 감싼다(검색이 갈아 끼울 지점)', /<div id="wblBody">/.test(host.innerHTML));
+bodyEl = { innerHTML: '' };
+const shellBefore = host.innerHTML;
+const heroBefore = hero.textContent;
+sandbox._finSearch('모집');
+t('★ 검색은 헤더(입력칸 포함) DOM 을 재생성하지 않는다 — IME 조합 파괴 원인 제거',
+  host.innerHTML === shellBefore, '검색 후 host.innerHTML 이 바뀌었다(입력칸 재생성 = 조합 끊김)');
+t('★ 검색 결과는 #wblBody 에만 반영된다', /모집중탭/.test(bodyEl.innerHTML) && !/공고없는탭/.test(bodyEl.innerHTML));
+t('검색 상태는 STATE.finQ 에 남는다(재렌더 시 값 유지)', sandbox.STATE.finQ === '모집');
+t('히어로 숫자는 검색과 무관(all 기준 — 흔들리지 않는다)', hero.textContent === heroBefore);
+// 자모 단위(조합 중간값)로도 죽지 않아야 한다 — 조합 중 input 이벤트가 실제로 이 값들을 보낸다
+sandbox._finSearch('ㅁ');
+t('조합 중간값(자모)에도 예외 없이 본문만 갱신', host.innerHTML === shellBefore && /조건에 맞는 작업이 없습니다/.test(bodyEl.innerHTML));
+sandbox._finSearch('');
+t('검색어를 지우면 전체 복귀', /모집중탭/.test(bodyEl.innerHTML) && /공고없는탭/.test(bodyEl.innerHTML));
+t('★ 재생성 후 focus/커서 복구 코드는 제거됐다(조합을 되살리지 못하는 우회책 — 부활 금지)',
+  !/setSelectionRange/.test(WD.slice(WD.indexOf('function _finSearch'), WD.indexOf('function _finSearch') + 600)));
+t('★ 본문 조각은 한 벌 — 전체 렌더와 검색이 같은 _finBodyHtml 을 쓴다(사본 금지)',
+  (WD.match(/function _finBodyHtml\(/g) || []).length === 1 && (WD.match(/_finBodyHtml\(\)/g) || []).length >= 2);
+bodyEl = null;   // 이후 절은 전체 렌더 경로를 그대로 검사한다
+sandbox.STATE.finQ = '';
 
 /* ── 3) 서버 stats 배선 — tabStatsMap 실제 실행(스텁 pool) ────────── */
 console.log('\n3) tabStatsMap 폴더 필드 (서비스 실행)');
