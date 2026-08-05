@@ -1054,6 +1054,29 @@ async function _applyParticipation(req, res, next, campPre) {
       return res.status(403).json({ ok: false, reason: 'not_registered', error: '리뷰어 등록 후 참여할 수 있어요.' });
     }
 
+    // ★ 공고별 참여 리뷰어 게이트(091) — 홀드 생성 전 차단 = 자리 미점유·당일 참여권 무손실.
+    //   판정 단일 출처 = utils/reviewerGate(공고별 allow > block > 전역 옵트인). 키는 소유자(로그인) p8 —
+    //   타계정 명의 차단은 후속(문서화된 한계). 기존 홀드·확정 건은 건드리지 않는다(사용자 확정 Q1).
+    //   ★★ SAVEPOINT 격리(082 규율): 테이블 부재·조회 실패가 tx 를 abort 시켜 참여를 죽이면 안 된다.
+    //   fail-open — 막는 기능의 오류로 정상 참여가 막히는 쪽이 못 막는 것보다 나쁘다(신원게이트와 같은 규율).
+    if (require('../utils/reviewerGate').gateEnabled()) {
+      let gateDecision = null;
+      try {
+        await client.query('SAVEPOINT rg_gate');
+        const { checkApplyGate } = require('../services/reviewerGate.service');
+        gateDecision = await checkApplyGate(client, id, p8);
+        await client.query('RELEASE SAVEPOINT rg_gate');
+      } catch (e) {
+        try { await client.query('ROLLBACK TO SAVEPOINT rg_gate'); } catch (_e) { /* noop */ }
+        logger.warn('[reviewerGate] apply 판정 실패(fail-open): ' + e.message);
+      }
+      if (gateDecision && gateDecision.blocked) {
+        await client.query('ROLLBACK');
+        // gate:'closed' = 마감 위장(프론트가 실제 마감 화면과 동일 렌더) / 'policy' = 사유 고지
+        return res.status(403).json({ ok: false, reason: 'reviewer_blocked', gate: gateDecision.gate, error: gateDecision.message });
+      }
+    }
+
     // ★ M2 변경①: 내정보 완비 게이트를 "참여 시점"으로 전진 — 구매양식 신원게이트(#272)가 제출 순간
     //   차단하면 리뷰어는 이미 결제 후 15분 홀드 안에서 막힌다(돈 쓴 뒤 좌절 + 당일 재참여 불가).
     //   여기서 미리 막으면 홀드 미생성 = 자리 미점유 = 당일 참여권 무손실. 제출 단계 검사는 안전망으로 유지.

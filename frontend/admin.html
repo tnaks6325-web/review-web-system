@@ -2565,6 +2565,9 @@ body{ letter-spacing:-.01em; }
      ══════════════════════════════════════════════════════ -->
 <script src="js/recruit-modal.js"></script>
 <script src="js/campaign-cards.js"></script>
+<!-- 공고별 참여 리뷰어 관리(블랙리스트 건별, 091) — 카드 [🚫 리뷰어] 버튼이 여는 공유 모달.
+     campaign-cards.js 뒤에 로드해도 무방(버튼 렌더 시점에 window.ReviewerGate 존재만 본다). -->
+<script src="js/campaign-reviewer-gate.js"></script>
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/index-recruit.js"></script>
 
@@ -2593,7 +2596,7 @@ body{ letter-spacing:-.01em; }
     function _mountAdminSettings() {
       if (!window.AdminSettings) return;
       AdminSettings.mount('rvNoticeMount', { panels: ['notice'], autoload: false });
-      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'aisamples', 'worktable'], autoload: false });
+      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'aisamples', 'worktable', 'gatecriteria'], autoload: false });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _mountAdminSettings);
     else _mountAdminSettings();

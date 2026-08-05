@@ -1395,6 +1395,63 @@ router.post('/reviewers/delete', authMiddleware, adminOrMasterMiddleware, async 
   } catch (err) { next(err); }
 });
 
+/* ══════════════════════════════════════════════════════════════
+   모집공고별 참여가능 리뷰어 게이트 (블랙리스트 건별 관리, migration 091)
+   ★ 전부 adminOrMaster — 검색이 **계좌번호**까지 받는 화면이라 등록리뷰어DB와 같은 판단
+     (AE·광고주 차단, 응답의 연락처·계좌는 뒤4자리만).
+   ★ Track B 경로 하나로 관리자 대시보드(admin_token)·리뷰웹시스템[3버전](인트라넷 SSO)
+     양쪽이 그대로 닿는다(리뷰타입 정리 RTC_EP와 같은 판단 — 호스트별 재기준 불필요).
+   ★ 42P01(마이그레이션 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 isAdminApi 밖이라
+     그대로 올리면 마스킹된 200 "서버 오류"가 되어 원인을 알 길이 없다(088 규율).
+   ══════════════════════════════════════════════════════════════ */
+function _rgNotReady(res, err) {
+  if (err && err.code === '42P01') {
+    res.json({ ok: false, code: 'not_ready', error: '참여 리뷰어 게이트 준비 전입니다(migration 091 미적용) — 배포 완료 후 다시 시도해주세요.' });
+    return true;
+  }
+  return false;
+}
+
+router.get('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { listGates, getCriteria } = require('../services/reviewerGate.service');
+    const data = await listGates(String(req.params.id));
+    res.json({ ok: true, ...data, criteria: await getCriteria() });
+  } catch (err) { if (!_rgNotReady(res, err)) next(err); }
+});
+
+router.get('/campaigns/:id/reviewer-gate/search', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { searchReviewers } = require('../services/reviewerGate.service');
+    res.json({ ok: true, ...(await searchReviewers(String(req.params.id), req.query.q)) });
+  } catch (err) { if (!_rgNotReady(res, err)) next(err); }
+});
+
+router.post('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { applyGateChanges, listGates } = require('../services/reviewerGate.service');
+    const campaignId = String(req.params.id);
+    const out = await applyGateChanges(campaignId, (req.body || {}).changes, _by(req));
+    logger.info(`[reviewerGate] ${_by(req)} 가 공고 ${campaignId} 예외 ${out.applied.length}건 적용`);
+    res.json({ ok: true, ...out, ...(await listGates(campaignId)) });
+  } catch (err) { if (!_rgNotReady(res, err)) next(err); }
+});
+
+// 블랙리스트 관리기준(사용자 확정 Q4 — 판정 일수 별도 설정) : 설정탭 "블랙리스트 관리기준" 패널이 사용
+router.get('/settings/reviewer-gate-criteria', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { getCriteria } = require('../services/reviewerGate.service');
+    res.json({ ok: true, criteria: await getCriteria() });
+  } catch (err) { next(err); }
+});
+
+router.post('/settings/reviewer-gate-criteria', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { saveCriteria } = require('../services/reviewerGate.service');
+    res.json({ ok: true, criteria: await saveCriteria(req.body || {}) });
+  } catch (err) { next(err); }
+});
+
 router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { listReviewerEvents, unresolvedCounts } = require('../services/reviewerEventLog.service');

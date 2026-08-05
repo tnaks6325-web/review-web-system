@@ -1752,8 +1752,70 @@ async function reviewTypeCleanupRun(dryRun) {
 /** ★ 펼칠 때 자동으로 돌리지 않는다 — 설정 화면을 열 때마다 전 탭을 훑을 이유가 없다. */
 function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, notice: loadReviewerNoticesAdmin };
+/* ══════════════════════════════════════════════════════════════
+   ★ 블랙리스트 관리기준 (091 · 사용자 확정 Q4 — 판정 일수 별도 설정)
+   공고별 참여 리뷰어 관리(🚫) 화면의 "이전 리뷰" 판정에 쓰는 기준 일수 두 개.
+   ★ 판정 자체는 서버(utils/reviewerGate)가 하고 여기는 일수만 저장한다 —
+     차단 여부는 관리자가 건별로 정하며(자동 차단 없음), 이 기준은 표시·판단 보조다.
+   ★ 경로는 재기준하지 않는다(RTC_EP 와 같은 판단 — 양쪽 호스트에서 그대로 닿는다). */
+var RGC_EP = '/api/trackb/settings/reviewer-gate-criteria';
+
+function _gateCriteriaHtml() {
+  return `
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">🚫 블랙리스트 관리기준</span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
+          모집공고의 <b>[🚫 리뷰어]</b>(참여 리뷰어 관리) 화면에서 "이전 리뷰" 상태를 판정하는 기준입니다.<br>
+          기준을 바꿔도 <b>자동으로 차단되지 않습니다</b> — 차단은 항상 관리자가 건별로 정합니다.
+        </p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <label style="font-size:.74rem;color:var(--t2)">리뷰 미작성 판정 일수<br>
+            <input type="number" id="rgcNowrite" min="1" max="365" style="width:110px;padding:7px 10px;border:1px solid var(--border,#d1d5db);border-radius:8px;font-size:.8rem">
+            <span style="font-size:.68rem;color:var(--t3)">일 — 참여(구매) 후 이 일수가 지나도록 리뷰 미제출이면 "리뷰 미작성"</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <label style="font-size:.74rem;color:var(--t2)">리뷰 기한 일수<br>
+            <input type="number" id="rgcOverdue" min="1" max="365" style="width:110px;padding:7px 10px;border:1px solid var(--border,#d1d5db);border-radius:8px;font-size:.8rem">
+            <span style="font-size:.68rem;color:var(--t3)">일 — 제출은 했지만 구매 후 이 일수 이후 제출이면 "기한 경과"</span>
+          </label>
+        </div>
+        <button class="as-btn" onclick="saveGateCriteria()">저장</button>
+        <span id="rgcMsg" style="font-size:.74rem;margin-left:8px"></span>`;
+}
+
+async function loadGateCriteria() {
+  try {
+    var r = await fetch(_apiBase() + RGC_EP, { headers: _headers() });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+    var c = j.criteria || {};
+    var n = document.getElementById('rgcNowrite'); if (n) n.value = c.nowriteDays || 14;
+    var o = document.getElementById('rgcOverdue'); if (o) o.value = c.overdueDays || 14;
+    _setNavBadge('gatecriteria', (c.nowriteDays || 14) + '일 / ' + (c.overdueDays || 14) + '일');
+  } catch (e) {
+    _setNavBadge('gatecriteria', '?', 'warn');   // 조회 실패를 기본값처럼 꾸미지 않는다
+  }
+}
+
+async function saveGateCriteria() {
+  var msg = document.getElementById('rgcMsg');
+  try {
+    var j = await _postAt(RGC_EP, {
+      nowriteDays: (document.getElementById('rgcNowrite') || {}).value,
+      overdueDays: (document.getElementById('rgcOverdue') || {}).value,
+    });
+    if (!j || !j.ok) throw new Error((j && j.error) || '저장 실패');
+    if (msg) { msg.textContent = '저장했습니다'; msg.style.color = '#0F7B4F'; }
+    loadGateCriteria();
+  } catch (e) {
+    if (msg) { msg.textContent = '실패: ' + (e.message || e); msg.style.color = '#B42318'; }
+  }
+}
+
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
@@ -1762,6 +1824,7 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
     aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
     reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
+    gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
     notice:    { ic: '📣', nm: '리뷰어 공지' },
   };
   var _navKeys = [];        // 이번 마운트에 그린 목차 키(순서 그대로)
@@ -2119,6 +2182,8 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
   window.clearAiSample = clearAiSample;
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;
   window.reviewTypeCleanupRun = reviewTypeCleanupRun;
+  window.saveGateCriteria = saveGateCriteria;       /* 블랙리스트 관리기준(091) 저장 버튼 onclick */
+  window.loadGateCriteria = loadGateCriteria;
   window.loadWorktableTemplate = loadWorktableTemplate;
   window.wtAddCol = wtAddCol;
   window.wtDelCol = wtDelCol;

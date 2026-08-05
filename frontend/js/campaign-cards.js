@@ -370,10 +370,16 @@
     const sheetBtn = sheetUrl
       ? `<button type="button" class="uic" onclick="${stop}window.open('${_esc(sheetUrl)}','_blank','noopener')" title="연결된 구글시트 열기">📄 시트</button>`
       : `<button type="button" class="uic" disabled title="연결된 시트가 없습니다" style="opacity:.4;cursor:default">📄 시트</button>`;
+    // 🚫 참여 리뷰어(공고별 블랙리스트 건별 관리, 091) — apply 게이트가 있는 참여형만 의미가 있다
+    //   (레거시는 카톡 신청이라 차단 지점이 없음). 모듈 미로드 화면(리뷰어 홈 등)에는 버튼을 안 그린다.
+    const gateBtn = (c.participation_mode && typeof window !== 'undefined' && window.ReviewerGate)
+      ? `<button type="button" class="uic" onclick="${stop}ReviewerGate.open('${id}')" title="이 공고에 참여할 수 없는 리뷰어를 건별로 관리">🚫 리뷰어</button>`
+      : '';
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')">✏️ 수정</button>
       ${sheetBtn}
       <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')">📡 관제${bdg}</button>
+      ${gateBtn}
       ${pubToggle}
     </div>`;
   }
