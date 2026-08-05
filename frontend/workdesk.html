@@ -571,6 +571,20 @@
     font-size:11px;font-weight:700;border-bottom:1px solid var(--line)}
   table.rvsubtbl td{padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
   table.rvsubtbl tbody tr:last-child td{border-bottom:none}
+  /* 참여설정 빨간 사각 토글(091-2, 사용자 확정: 사각형·확인창 없이 즉시 적용) —
+     OFF=참여가능(회색) / ON=블랙리스트(빨강). 행 배경·이름 배지는 쓰지 않는다(사용자 확정). */
+  .rvsq{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+  .rvsq .sq{width:38px;height:19px;border-radius:4px;background:var(--line);position:relative;flex:none;
+    border:1px solid var(--line);transition:background .12s}
+  .rvsq .sq::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:13px;border-radius:3px;
+    background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .12s,right .12s}
+  .rvsq.on .sq{background:#dc2626;border-color:#b91c1c}
+  .rvsq.on .sq::after{left:20px}
+  .rvsq .lb{font-size:10.5px;font-weight:800;color:var(--muted);white-space:nowrap}
+  .rvsq.on .lb{color:#b91c1c}
+  .rvsq.busy{opacity:.5;pointer-events:none}
+  .rv-no{color:#dc2626;font-weight:800}
+  .rv-od{color:#b45309;font-weight:700}
   .rvmemo{display:flex;gap:5px;align-items:center}
   .rvmemo .ovsearch{flex:1;min-width:0;font-size:11.5px;padding:4px 7px}
   .rvmemosave{font-size:11px;padding:4px 9px;height:auto;flex-shrink:0;white-space:nowrap}
@@ -5275,13 +5289,16 @@ async function _loadReviewers(){
   const qs = new URLSearchParams({ limit:String(RV_PAGE), offset:String(STATE.rvOffset||0) });
   if(STATE.rvq) qs.set('q', STATE.rvq);
   if(STATE.rvStatus) qs.set('status', STATE.rvStatus);
+  if(STATE.rvFlag) qs.set('flag', STATE.rvFlag);   // 자동 블랙리뷰어 필터(blacklist/available/candidate/overdue)
   const r = await api('/api/trackb/reviewers?'+qs.toString());
   const b=$('#rvbody');
   if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">리뷰어 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _renderRvHead(0); return; }
   STATE.rv = r.items||[]; STATE.rvTotal = r.total|0;
+  STATE.rvStatsUnavailable = r.statsUnavailable === true;   // 집계 실패 = '?' 표기(0으로 꾸미지 않음)
   _renderRvHead(r.total|0);
   _renderRvBody();
 }
+function _rvSetFlag(f){ STATE.rvFlag = (STATE.rvFlag===f?'':f); STATE.rvOffset=0; _loadReviewers(); }
 function _renderRvHead(total){
   const from=(STATE.rvOffset|0)+1, to=Math.min((STATE.rvOffset|0)+RV_PAGE, total);
   $('#rvhead').innerHTML=`<div class="mh"><h1>등록리뷰어DB</h1>
@@ -5293,16 +5310,22 @@ function _renderRvHead(total){
       <option value="active"${STATE.rvStatus==='active'?' selected':''}>활성</option>
       <option value="inactive"${STATE.rvStatus==='inactive'?' selected':''}>비활성</option>
     </select>
-    <input id="rvq" class="ovsearch" style="width:220px" placeholder="이름 또는 연락처 검색 후 Enter"
+    <input id="rvq" class="ovsearch" style="width:240px" placeholder="이름 / 연락처 / 계좌번호 검색 후 Enter"
            value="${esc(STATE.rvq||'')}"
            onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
     <button class="btn" onclick="STATE.rvOffset=0;_loadReviewers()">새로고침</button></div>
     <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요.
-      수정은 <b>관리자 메모</b>만 가능합니다(이름·연락처·계좌 등은 조회 전용).</div>`;
+      수정은 <b>관리자 메모·참여설정</b>만 가능합니다(이름·연락처·계좌 등은 조회 전용).</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 16px 10px">
+      ${[['','전체'],['available','참여가능'],['blacklist','블랙리스트'],['candidate','🚨 후보 (미작성 1건↑)'],['overdue','기한경과만']]
+        .map(([f,lb])=>`<button class="btn" style="padding:3px 12px;border-radius:999px;font-size:.72rem${(STATE.rvFlag||'')===f?';background:#111827;border-color:#111827;color:#fff':''}"
+          onclick="_rvSetFlag('${f}')">${lb}</button>`).join('')}
+      <span style="font-size:.68rem;color:var(--muted)">판정 기준: 기한경과 = 미제출 14일↑ · 리뷰미작성 = 미제출 30일↑ — 설정 › 블랙리스트 관리기준</span>
+    </div>`;
 }
 /* 컬럼 순서는 **사용자 확정**: 이름·연락처·주소·은행·계좌번호·예금주·주민번호·소득유형·타계정·등록일.
    상태·관리자메모·삭제는 그 뒤에 붙인다(요청에 없던 기존 열이라 지우지 않고 뒤로 보냈다). */
-const RV_COLSPAN = 13;
+const RV_COLSPAN = 16;   // 13 + 누적참여·이전 리뷰·참여설정(091-2 자동 블랙리뷰어)
 function _renderRvBody(){
   const rows = STATE.rv||[];
   const b=$('#rvbody');
@@ -5314,8 +5337,11 @@ function _renderRvBody(){
       <th class="c-nm">이름</th><th class="c-ph">연락처</th><th>주소</th>
       <th class="c-bank">은행</th><th class="c-num" style="width:126px">계좌번호</th><th class="c-hold">예금주</th>
       <th class="c-num" style="width:112px">주민번호</th><th style="width:86px">소득유형</th>
-      <th style="width:58px">타계정</th><th class="c-num" style="width:78px">등록일</th>
-      <th style="width:58px">상태</th><th style="width:176px">관리자 메모</th><th style="width:56px"></th>
+      <th style="width:58px">타계정</th>
+      <th style="width:92px">누적참여</th><th style="width:150px">이전 리뷰</th>
+      <th class="c-num" style="width:78px">등록일</th>
+      <th style="width:58px">상태</th><th style="width:176px">관리자 메모</th>
+      <th style="width:96px">참여설정</th><th style="width:56px"></th>
     </tr></thead><tbody>${rows.map((r,i)=>`
       <tr>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
@@ -5330,6 +5356,8 @@ function _renderRvBody(){
             ? `<button type="button" class="rvsubbtn" data-rvi="${i}" onclick="_rvToggleSub(${i},this)"
                  title="타계정 정보 펼치기">${r.subCount}<span class="rvcar">▾</span></button>`
             : '<span style="color:var(--muted)">0</span>'}</td>
+        <td>${_rvStatsCell(r)}</td>
+        <td>${_rvReviewCell(r)}</td>
         <td class="c-num" style="color:var(--muted)">${fmtD(r.registeredAt)}</td>
         <td>${r.status==='inactive'?'<span class="bd">비활성</span>':'<span class="bd g">활성</span>'}</td>
         <td><div class="rvmemo">
@@ -5339,12 +5367,58 @@ function _renderRvBody(){
               <button type="button" class="btn rvmemosave" disabled onclick="_rvSaveMemo(this.previousElementSibling)"
                       title="메모를 저장합니다(Enter 로도 저장)">저장</button>
             </div></td>
+        <td style="text-align:center">${_rvBlkSwitch(r,i)}</td>
         <td style="text-align:center"><button type="button" class="rvdel" onclick="_rvDelete(${i})"
               title="이 리뷰어를 삭제합니다">삭제</button></td>
       </tr>
       <tr class="rvsubrow" data-rvsub="${i}" hidden><td colspan="${RV_COLSPAN}"></td></tr>`).join('')}</tbody></table></div>
     ${_rvPager()}`;
 }
+/* ── 자동 블랙리뷰어 표시(091-2) — 누적참여·이전 리뷰·참여설정 토글 ──
+   ★ 집계 실패(statsUnavailable)는 '?' — 0건·정상으로 꾸미지 않는다(무신호 금지).
+   ★ 후보(미작성 1건↑)는 빨간 건수 텍스트가 곧 표시 — 행 배경·이름 배지는 쓰지 않는다(사용자 확정). */
+function _rvStatsCell(r){
+  if(STATE.rvStatsUnavailable || !r.reviewStats) return '<span style="color:var(--muted)">집계 실패 ?</span>';
+  const s=r.reviewStats;
+  return `<b>${s.joined|0}건</b>${(s.joinedSub|0)>0?` <span style="color:var(--muted);font-size:10.5px">(타 ${s.joinedSub|0})</span>`:''}`;
+}
+function _rvReviewCell(r){
+  if(STATE.rvStatsUnavailable || !r.reviewStats) return '<span style="color:var(--muted)">집계 실패 ?</span>';
+  const s=r.reviewStats, parts=[];
+  if((s.nowrite|0)>0) parts.push(`<span class="rv-no">리뷰미작성 ${s.nowrite|0}건</span>`);
+  if((s.overdue|0)>0) parts.push(`<span class="rv-od">기한경과 ${s.overdue|0}건</span>`);
+  if(parts.length) return parts.join(' · ');
+  return (s.joined|0)>0 ? '<span style="color:#15803d">정상</span>' : '<span style="color:var(--muted)">참여 이력 없음</span>';
+}
+function _rvBlkSwitch(r,i){
+  const on = !!r.blacklisted;
+  const tip = on ? `블랙리스트 (${esc((r.blacklisted&&r.blacklisted.addedBy)||'')} 등록) — 누르면 참여가능으로 되돌립니다`
+                 : '누르면 블랙리스트로 등록합니다 (공고별 참여 리뷰어 관리 팝업 상단에 자동 표시)';
+  return `<span class="rvsq${on?' on':''}" onclick="_rvBlkToggle(${i},this)" title="${esc(tip)}">
+    <span class="sq"></span><span class="lb">${on?'블랙리스트':'참여가능'}</span></span>`;
+}
+/* 토글 = 즉시 적용(사용자 확정: 확인창 없음) — 낙관 반영 후 실패 시 되돌린다.
+   사유는 현재 집계를 자동 기록(미작성 N·기한경과 N — 나중에 왜 등록했는지 남는다). */
+async function _rvBlkToggle(i, el){
+  const r=(STATE.rv||[])[i]; if(!r || el.classList.contains('busy')) return;
+  const toOn = !r.blacklisted;
+  el.classList.add('busy'); el.classList.toggle('on', toOn);
+  el.querySelector('.lb').textContent = toOn?'블랙리스트':'참여가능';
+  const s=r.reviewStats||{};
+  const reason = toOn ? `자동 집계 — 미작성 ${s.nowrite|0}건 · 기한경과 ${s.overdue|0}건` : '';
+  const resp = await api('/api/trackb/reviewers/blacklist', { method:'POST', body: JSON.stringify({ phone:r.phone, on:toOn, reason }) });
+  el.classList.remove('busy');
+  if(resp && resp.ok){
+    r.blacklisted = toOn ? { reason, addedBy:'나', addedAt:new Date().toISOString() } : null;
+    toast(toOn ? '블랙리스트에 등록했습니다 — 공고별 [🚫 리뷰어] 팝업 상단에 표시됩니다' : '참여가능으로 되돌렸습니다');
+  }else{
+    // 실패 = 낙관 반영 롤백(화면이 서버와 어긋난 채 남지 않게)
+    el.classList.toggle('on', !toOn);
+    el.querySelector('.lb').textContent = !toOn?'블랙리스트':'참여가능';
+    toast('저장 실패'+(resp&&resp.error?': '+resp.error:''));
+  }
+}
+
 /* 타계정 펼침 — 그 리뷰어 행 **바로 아래**에 상세를 편다(작업오더 펼침행과 같은 방식).
    ★ 클래스는 rv 접두로 분리한다 — 작업보드 '작업세부' 패널이 .worow/.wodetail 을 이미 쓰고 있어
      이름이 겹치면 그쪽 display:grid 가 <tr> 에 걸려 표가 통째로 무너진다(이 저장소 실측 사고). */

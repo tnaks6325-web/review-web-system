@@ -121,7 +121,10 @@ async function searchReviewers(campaignId, q, db = pool) {
   return { items, hasMore, total: slice.length };
 }
 
-/** 이전 리뷰 집계 — 미작성/기한경과 판정 일수는 설정탭 "블랙리스트 관리기준"(Q4) */
+/** 이전 리뷰 집계 — 판정 일수는 설정탭 "블랙리스트 관리기준".
+ *  ★ 재정의(2026-08-05 사용자 확정): 두 값 모두 **미제출 행**의 경과일수 —
+ *    기한경과 = 14일↑(단 30일 미만 — 넘으면 미작성으로 승격, 이중 계수 없음) / 리뷰미작성 = 30일↑.
+ *  구매 시점을 모르는 행(주문원장 미연결)은 경과일수를 셀 수 없어 건수에서 제외(누적참여에는 포함). */
 async function _reviewHistory(p8s, db = pool) {
   const c = await getCriteria(db);
   const { rows } = await db.query(
@@ -130,20 +133,95 @@ async function _reviewHistory(p8s, db = pool) {
             COUNT(*) FILTER (WHERE ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)::int AS done,
             COUNT(*) FILTER (WHERE NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)
                                AND os.submitted_at IS NOT NULL
-                               AND os.submitted_at < NOW() - ($2 || ' days')::interval)::int AS nowrite,
-            COUNT(*) FILTER (WHERE (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)
-                               AND os.submitted_at IS NOT NULL AND ri.review_file_at IS NOT NULL
-                               AND ri.review_file_at > os.submitted_at + ($3 || ' days')::interval)::int AS overdue
+                               AND os.submitted_at < NOW() - ($3 || ' days')::interval)::int AS nowrite,
+            COUNT(*) FILTER (WHERE NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL)
+                               AND os.submitted_at IS NOT NULL
+                               AND os.submitted_at < NOW() - ($2 || ' days')::interval
+                               AND os.submitted_at >= NOW() - ($3 || ' days')::interval)::int AS overdue
        FROM review_index ri
        LEFT JOIN order_submissions os
               ON os.sheet_id = ri.sheet_id AND os.tab_name = ri.tab_name
              AND os.sheet_row = ri.row_index AND os.deleted_at IS NULL
       WHERE ri.phone8 = ANY($1)
       GROUP BY ri.phone8`,
-    [p8s, String(c.nowriteDays), String(c.overdueDays)]);
+    [p8s, String(c.overdueDays), String(c.nowriteDays)]);
   const m = new Map();
   rows.forEach(r => m.set(r.phone8, r));
   return m;
+}
+
+/* ── 등록리뷰어DB 목록 주석(누적참여·이전 리뷰·블랙리스트) — 페이지 행(≤200)만 배치 집계 ──
+   rows: [{phone8, phone, subPhone8s:[]}] → 같은 순서의 배열 반환.
+   ★ 누적참여·미작성·기한경과는 **본인+타계정 phone8 합산**(사용자 지시 "타계정 포함").
+   ★ 실패는 호출측 fail-soft('?') — 여기서는 throw 그대로 올린다(조용한 0 금지). */
+async function annotateReviewerRows(rows, db = pool) {
+  const list = Array.isArray(rows) ? rows : [];
+  const all = [...new Set(list.flatMap(r => [r.phone8, ...(r.subPhone8s || [])]).filter(p => p && p.length === 8))];
+  const hist = all.length ? await _reviewHistory(all, db) : new Map();
+  let blkMap = new Map();
+  if (all.length) {
+    const b = await db.query(
+      `SELECT RIGHT(REGEXP_REPLACE(phone,'[^0-9]','','g'), 8) AS p8, reason, added_by, added_at
+         FROM blacklist
+        WHERE RIGHT(REGEXP_REPLACE(phone,'[^0-9]','','g'), 8) = ANY($1)`, [all]);
+    b.rows.forEach(r => blkMap.set(r.p8, r));
+  }
+  const zero = { joined: 0, done: 0, nowrite: 0, overdue: 0 };
+  return list.map(r => {
+    const own = hist.get(r.phone8) || zero;
+    const subs = (r.subPhone8s || []).map(p => hist.get(p) || zero);
+    const sum = (k) => (Number(own[k]) || 0) + subs.reduce((a, h) => a + (Number(h[k]) || 0), 0);
+    const blk = blkMap.get(r.phone8) || null;
+    return {
+      stats: {
+        joined: sum('joined'), joinedSub: subs.reduce((a, h) => a + (Number(h.joined) || 0), 0),
+        done: sum('done'), nowrite: sum('nowrite'), overdue: sum('overdue'),
+      },
+      candidate: sum('nowrite') >= 1,   // 미작성 1건↑ = 블랙리스트 후보(표시만 — 자동 차단 없음)
+      blacklisted: blk ? { reason: blk.reason || '', addedBy: blk.added_by || '', addedAt: blk.added_at } : null,
+    };
+  });
+}
+
+/* ── 전역 블랙리스트 등록/해제 — 등록리뷰어DB 토글(즉시 적용, 사용자 확정) ──
+   기존 blacklist 테이블(001, phone UNIQUE) 재사용. 효력 = 공고별 팝업 상단 자동 표시(Q1=B —
+   전역 자동 차단은 여전히 CAMPAIGN_REVIEWER_GATE_GLOBAL 옵트인 뒤에만). */
+async function setGlobalBlacklist({ phone, on, reason, by }, db = pool) {
+  const clean = String(phone || '').replace(/[^0-9]/g, '');
+  if (clean.length < 8) throw new Error('전화번호가 올바르지 않습니다.');
+  if (on) {
+    await db.query(
+      `INSERT INTO blacklist (phone, name, reason, added_by)
+       SELECT $1, (SELECT name FROM reviewers WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1 LIMIT 1), $2, $3
+       ON CONFLICT (phone) DO UPDATE SET reason = EXCLUDED.reason, added_by = EXCLUDED.added_by, added_at = NOW()`,
+      [clean, String(reason || '').slice(0, 200), String(by || '')]);
+    return { on: true };
+  }
+  await db.query(`DELETE FROM blacklist WHERE REGEXP_REPLACE(phone,'[^0-9]','','g') = $1`, [clean]);
+  return { on: false };
+}
+
+/* ── 공고별 팝업 상단용: 전역 블랙리스트 목록(+이 공고 예외 상태·이전 리뷰) ── */
+async function listGlobalBlacklist(campaignId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT b.name, b.reason, b.added_by, b.added_at,
+            REGEXP_REPLACE(b.phone,'[^0-9]','','g') AS digits,
+            RIGHT(REGEXP_REPLACE(b.phone,'[^0-9]','','g'), 8) AS p8
+       FROM blacklist b
+      ORDER BY b.added_at DESC
+      LIMIT 200`);
+  const p8s = [...new Set(rows.map(r => r.p8).filter(p => p && p.length === 8))];
+  let hist = null;
+  try { hist = p8s.length ? await _reviewHistory(p8s, db) : new Map(); }
+  catch (e) { logger.warn('[reviewerGate] 블랙리스트 이력 집계 실패(fail-soft): ' + e.message); }
+  return rows.map(r => ({
+    name: r.name || '',
+    phone8: r.p8,
+    phoneMasked: r.digits ? ('***-' + r.digits.slice(-4)) : '',
+    reason: r.reason || '',
+    inGlobalBlacklist: true,
+    history: hist ? summarizeHistory(hist.get(r.p8) || { joined: 0 }) : summarizeHistory(null),
+  }));
 }
 
 /* ── 일괄 적용 — 기존 활성 행 release 후 INSERT(append-only = 관리 이력 보존) ── */
@@ -203,5 +281,6 @@ async function saveCriteria(raw, db = pool) {
 module.exports = {
   checkApplyGate, listGates, searchReviewers, applyGateChanges,
   getCriteria, saveCriteria,
+  annotateReviewerRows, setGlobalBlacklist, listGlobalBlacklist,
   CRITERIA_KEY, SEARCH_LIMIT, MAX_CHANGES,
 };

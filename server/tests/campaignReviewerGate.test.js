@@ -65,10 +65,11 @@ const gate = require('../src/utils/reviewerGate');
   console.log('\n[B] 블랙리스트 관리기준 정규화 (사용자 확정 Q4)');
   {
     const c = gate.normalizeCriteria(null);
-    ok('기본값 14일/14일', c.nowriteDays === 14 && c.overdueDays === 14);
+    ok('기본값 = 기한경과 14일 / 리뷰미작성 30일(2026-08-05 사용자 확정 재정의)',
+      c.nowriteDays === 30 && c.overdueDays === 14);
   }
   ok('★ 빈 문자열은 0일이 아니라 기본값(082 _int 규율)',
-    gate.normalizeCriteria({ nowriteDays: '' }).nowriteDays === 14);
+    gate.normalizeCriteria({ nowriteDays: '' }).nowriteDays === 30);
   ok('범위 클램프 1..365', gate.normalizeCriteria({ nowriteDays: 0, overdueDays: 9999 }).nowriteDays === 1
     && gate.normalizeCriteria({ overdueDays: 9999 }).overdueDays === 365);
   ok('문자 숫자 허용', gate.normalizeCriteria({ nowriteDays: '30' }).nowriteDays === 30);

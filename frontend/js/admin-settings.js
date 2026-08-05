@@ -1766,19 +1766,20 @@ function _gateCriteriaHtml() {
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">🚫 블랙리스트 관리기준</span>
         </div>
         <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
-          모집공고의 <b>[🚫 리뷰어]</b>(참여 리뷰어 관리) 화면에서 "이전 리뷰" 상태를 판정하는 기준입니다.<br>
+          <b>등록리뷰어DB</b>와 모집공고 <b>[🚫 리뷰어]</b>(참여 리뷰어 관리) 화면의 "이전 리뷰" 판정 기준입니다.
+          두 값 모두 <b>아직 리뷰를 안 낸 건</b>을 구매 후 경과일수로 나눕니다(기한경과 14일↑ → 30일을 넘으면 리뷰미작성으로 승격).<br>
           기준을 바꿔도 <b>자동으로 차단되지 않습니다</b> — 차단은 항상 관리자가 건별로 정합니다.
         </p>
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-          <label style="font-size:.74rem;color:var(--t2)">리뷰 미작성 판정 일수<br>
+          <label style="font-size:.74rem;color:var(--t2)">리뷰미작성 판정 일수 (기본 30)<br>
             <input type="number" id="rgcNowrite" min="1" max="365" style="width:110px;padding:7px 10px;border:1px solid var(--border,#d1d5db);border-radius:8px;font-size:.8rem">
-            <span style="font-size:.68rem;color:var(--t3)">일 — 참여(구매) 후 이 일수가 지나도록 리뷰 미제출이면 "리뷰 미작성"</span>
+            <span style="font-size:.68rem;color:var(--t3)">일 — 구매 후 이 일수가 지나도록 리뷰 미제출이면 <b>리뷰미작성</b>(1건↑ = 블랙리스트 후보)</span>
           </label>
         </div>
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-          <label style="font-size:.74rem;color:var(--t2)">리뷰 기한 일수<br>
+          <label style="font-size:.74rem;color:var(--t2)">기한경과 판정 일수 (기본 14)<br>
             <input type="number" id="rgcOverdue" min="1" max="365" style="width:110px;padding:7px 10px;border:1px solid var(--border,#d1d5db);border-radius:8px;font-size:.8rem">
-            <span style="font-size:.68rem;color:var(--t3)">일 — 제출은 했지만 구매 후 이 일수 이후 제출이면 "기한 경과"</span>
+            <span style="font-size:.68rem;color:var(--t3)">일 — 구매 후 이 일수가 지나도록 리뷰 미제출이면 <b>기한경과</b>(리뷰미작성 일수를 넘으면 미작성으로 승격)</span>
           </label>
         </div>
         <button class="as-btn" onclick="saveGateCriteria()">저장</button>
@@ -1791,9 +1792,9 @@ async function loadGateCriteria() {
     var j = await r.json().catch(function () { return null; });
     if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
     var c = j.criteria || {};
-    var n = document.getElementById('rgcNowrite'); if (n) n.value = c.nowriteDays || 14;
+    var n = document.getElementById('rgcNowrite'); if (n) n.value = c.nowriteDays || 30;
     var o = document.getElementById('rgcOverdue'); if (o) o.value = c.overdueDays || 14;
-    _setNavBadge('gatecriteria', (c.nowriteDays || 14) + '일 / ' + (c.overdueDays || 14) + '일');
+    _setNavBadge('gatecriteria', '기한 ' + (c.overdueDays || 14) + '일 / 미작성 ' + (c.nowriteDays || 30) + '일');
   } catch (e) {
     _setNavBadge('gatecriteria', '?', 'warn');   // 조회 실패를 기본값처럼 꾸미지 않는다
   }

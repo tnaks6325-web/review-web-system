@@ -1361,10 +1361,43 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
       if (d) {
         params.push('%' + d + '%');
         ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
+        // 등록 계좌번호 부분일치(블랙리뷰어 추적 — 이름·번호를 바꿔 재가입해도 계좌로 찾는다)
+        params.push('%' + d + '%');
+        ors.push(`REGEXP_REPLACE(COALESCE(bank_account,''),'[^0-9]','','g') LIKE $${params.length}`);
       }
       where.push('(' + ors.join(' OR ') + ')');
     }
     if (status) { params.push(status); where.push(`status = $${params.length}`); }
+    // ── 자동 블랙리뷰어 필터(091-2) ──
+    //   blacklist/available = blacklist 테이블 EXISTS(가벼움).
+    //   candidate(미작성 1건↑)/overdue(기한경과 1건↑)는 review_index 파생 서브쿼리 —
+    //   ★ 판정은 본인 명의 phone8 기준(타계정 미작성건은 표의 건수 표시에만 합산 · 문서화된 한계).
+    const flag = String(req.query.flag || '').trim();
+    if (flag === 'blacklist' || flag === 'available') {
+      const ex = `EXISTS (SELECT 1 FROM blacklist b WHERE RIGHT(REGEXP_REPLACE(b.phone,'[^0-9]','','g'), 8) = reviewers.phone8)`;
+      where.push(flag === 'blacklist' ? ex : `NOT ${ex}`);
+    } else if (flag === 'candidate' || flag === 'overdue') {
+      const { getCriteria } = require('../services/reviewerGate.service');
+      const c = await getCriteria();
+      const unsub = `NOT (ri.is_submitted = TRUE OR ri.review_file_id IS NOT NULL) AND os.submitted_at IS NOT NULL`;
+      let cond;
+      if (flag === 'candidate') {          // 미작성(30일↑) 1건 이상
+        params.push(String(c.nowriteDays));
+        cond = `${unsub} AND os.submitted_at < NOW() - ($${params.length} || ' days')::interval`;
+      } else {                             // "기한경과만"(14일↑ ~ 30일 미만 — 미작성 승격분 제외)
+        params.push(String(c.overdueDays));
+        const pOver = params.length;
+        params.push(String(c.nowriteDays));
+        cond = `${unsub} AND os.submitted_at < NOW() - ($${pOver} || ' days')::interval
+                        AND os.submitted_at >= NOW() - ($${params.length} || ' days')::interval`;
+      }
+      where.push(`reviewers.phone8 IN (
+        SELECT ri.phone8 FROM review_index ri
+        LEFT JOIN order_submissions os ON os.sheet_id = ri.sheet_id AND os.tab_name = ri.tab_name
+              AND os.sheet_row = ri.row_index AND os.deleted_at IS NULL
+        WHERE ${cond}
+        GROUP BY ri.phone8)`);
+    }
     const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
     const { rows: cnt } = await pool.query(`SELECT COUNT(*)::int AS n FROM reviewers ${w}`, params);
@@ -1382,7 +1415,41 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
         ORDER BY registered_at DESC
         LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
 
-    res.json({ ok: true, items: rows, total: cnt[0].n, limit, offset });
+    // ── 자동 블랙리뷰어 주석(091-2): 누적참여(타계정 포함)·미작성/기한경과·블랙리스트 상태 ──
+    //   페이지 행(≤200)만 배치 집계 — 저장 없음(컬럼 박제 금지, 조회 시 파생).
+    //   ★ 실패는 fail-soft + statsUnavailable — 프론트가 '?' 표기(0·정상으로 꾸미지 않는다, 088 규율).
+    let statsUnavailable = false;
+    try {
+      const { annotateReviewerRows } = require('../services/reviewerGate.service');
+      const anns = await annotateReviewerRows(rows.map(r => ({
+        phone8: r.phone8,
+        subPhone8s: (Array.isArray(r.subAccounts) ? r.subAccounts : [])
+          .map(s => String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8))
+          .filter(p => p.length === 8),
+      })));
+      rows.forEach((r, i) => {
+        r.reviewStats = anns[i].stats;
+        r.blCandidate = anns[i].candidate;
+        r.blacklisted = anns[i].blacklisted;
+      });
+    } catch (e) {
+      statsUnavailable = true;
+      logger.warn('[reviewers] 블랙리뷰어 주석 집계 실패(fail-soft): ' + e.message);
+    }
+    res.json({ ok: true, items: rows, total: cnt[0].n, limit, offset, ...(statsUnavailable ? { statsUnavailable: true } : {}) });
+  } catch (err) { next(err); }
+});
+
+/* 전역 블랙리스트 토글(등록리뷰어DB 참여설정 스위치) — 즉시 적용(사용자 확정: 확인창 없음).
+   기존 blacklist 테이블 재사용 · 효력 = 공고별 [🚫 리뷰어] 팝업 상단 자동 표시(Q1=B —
+   전 공고 자동 차단은 여전히 CAMPAIGN_REVIEWER_GATE_GLOBAL=1 옵트인 뒤에만). */
+router.post('/reviewers/blacklist', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { setGlobalBlacklist } = require('../services/reviewerGate.service');
+    const b = req.body || {};
+    const out = await setGlobalBlacklist({ phone: b.phone, on: b.on === true, reason: b.reason, by: _by(req) });
+    logger.info(`[reviewers/blacklist] ${_by(req)} — ${String(b.phone || '').slice(-4)} ${out.on ? '등록' : '해제'}`);
+    res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
 
@@ -1472,9 +1539,14 @@ function _rgNotReady(res, err) {
 
 router.get('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { listGates, getCriteria } = require('../services/reviewerGate.service');
+    const { listGates, getCriteria, listGlobalBlacklist } = require('../services/reviewerGate.service');
     const data = await listGates(String(req.params.id));
-    res.json({ ok: true, ...data, criteria: await getCriteria() });
+    // 전역 블랙리스트를 팝업 상단에 자동 표시(후속조치, Q1=B — 표시일 뿐 자동 차단 아님).
+    // 조회 실패는 fail-soft(필드 미동봉 → 프론트가 구역을 안 그림 — 빈 배열로 "블랙 0명" 꾸미지 않는다).
+    let globalBlacklist;
+    try { globalBlacklist = await listGlobalBlacklist(String(req.params.id)); }
+    catch (e) { logger.warn('[reviewer-gate] 블랙리스트 목록 실패(fail-soft): ' + e.message); }
+    res.json({ ok: true, ...data, criteria: await getCriteria(), ...(globalBlacklist ? { globalBlacklist } : {}) });
   } catch (err) { if (!_rgNotReady(res, err)) next(err); }
 });
 
