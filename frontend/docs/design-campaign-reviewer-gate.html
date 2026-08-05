@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>모집공고별 참여가능 리뷰어 관리 (블랙리스트 건별) — 유저플로우·와이어프레임 시안</title>
+<style>
+  /* 오프라인 열람 가능(외부 리소스 0) · 화면 재현 목업은 라이트 고정 */
+  :root{ color-scheme: light; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif; background:#f4f6f9; color:#1f2937; line-height:1.6; padding:28px 16px 80px; }
+  .doc{ max-width:1080px; margin:0 auto; }
+  h1{ font-size:24px; margin-bottom:6px; }
+  .sub{ color:#6b7280; font-size:13px; margin-bottom:26px; }
+  h2{ font-size:18px; margin:44px 0 12px; padding-left:10px; border-left:4px solid #10b981; }
+  h3{ font-size:15px; margin:22px 0 8px; color:#065f46; }
+  p{ font-size:14px; margin-bottom:8px; }
+  .sec{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:22px 24px; margin-bottom:18px; }
+  .note{ background:#fffbeb; border:1px solid #fcd34d; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  .danger{ background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  .good{ background:#ecfdf5; border:1px solid #6ee7b7; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+  table.plan{ width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; }
+  table.plan th{ background:#f3f4f6; text-align:left; padding:8px 10px; border:1px solid #e5e7eb; white-space:nowrap; }
+  table.plan td{ padding:8px 10px; border:1px solid #e5e7eb; vertical-align:top; }
+  code{ background:#eef2ff; color:#3730a3; padding:1px 6px; border-radius:4px; font-size:12px; font-family:Consolas,Menlo,monospace; }
+  ul,ol{ margin:6px 0 10px 22px; font-size:14px; }
+  li{ margin-bottom:4px; }
+  .flow{ display:flex; flex-wrap:wrap; gap:8px; align-items:stretch; margin:14px 0; }
+  .fstep{ background:#eff6ff; border:1.5px solid #93c5fd; border-radius:10px; padding:10px 14px; font-size:13px; min-width:150px; flex:1; }
+  .fstep b{ display:block; color:#1d4ed8; font-size:12px; margin-bottom:3px; }
+  .farr{ align-self:center; color:#9ca3af; font-size:18px; font-weight:bold; }
+  .fstep.rv{ background:#fdf4ff; border-color:#e9d5ff; } .fstep.rv b{ color:#7c3aed; }
+
+  /* ─── 와이어프레임 공통 ─── */
+  .wf{ background:#fafafa; border:1.5px dashed #cbd5e1; border-radius:12px; padding:18px; margin:14px 0 26px; }
+  .wf-cap{ font-size:12px; color:#64748b; margin-bottom:10px; font-weight:700; }
+  .mock{ background:#fff; border:1px solid #d1d5db; border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.08); overflow:hidden; }
+  .mhd{ display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid #e5e7eb; background:#f9fafb; }
+  .mhd .tt{ font-weight:800; font-size:14px; }
+  .mhd .x{ margin-left:auto; color:#9ca3af; font-weight:700; cursor:default; }
+  .mbody{ padding:16px 18px; }
+  .btn{ display:inline-block; border-radius:8px; padding:7px 14px; font-size:13px; font-weight:700; border:1px solid #d1d5db; background:#fff; color:#374151; cursor:default; }
+  .btn.pri{ background:#10b981; border-color:#10b981; color:#fff; }
+  .btn.warn{ background:#fff; border-color:#f59e0b; color:#b45309; }
+  .btn.ghost{ border-style:dashed; color:#6b7280; }
+  .btn.sm{ padding:4px 10px; font-size:12px; }
+  .chip{ display:inline-block; border-radius:999px; padding:3px 12px; font-size:12px; font-weight:700; border:1px solid #d1d5db; background:#fff; color:#4b5563; margin-right:4px; }
+  .chip.on{ background:#111827; border-color:#111827; color:#fff; }
+  .badge{ display:inline-block; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:800; }
+  .b-ok{ background:#dcfce7; color:#15803d; }
+  .b-blk{ background:#fee2e2; color:#b91c1c; }
+  .b-gbl{ background:#111827; color:#fff; }
+  .b-warn{ background:#fef3c7; color:#b45309; }
+  .b-gray{ background:#f3f4f6; color:#6b7280; }
+  .srch{ display:flex; gap:8px; margin:10px 0; }
+  .srch input{ flex:1; border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; font-size:13px; background:#fff; }
+  table.grid{ width:100%; border-collapse:collapse; font-size:13px; }
+  table.grid th{ background:#f9fafb; color:#6b7280; font-size:12px; text-align:left; padding:8px 8px; border-bottom:2px solid #e5e7eb; white-space:nowrap; }
+  table.grid td{ padding:9px 8px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+  table.grid tr.off td{ background:#fff7f7; }
+  .ck{ display:inline-block; width:16px; height:16px; border:2px solid #10b981; border-radius:4px; background:#10b981; position:relative; vertical-align:-3px; }
+  .ck::after{ content:'✓'; color:#fff; font-size:11px; position:absolute; left:2px; top:-3px; }
+  .ck.off{ background:#fff; border-color:#d1d5db; } .ck.off::after{ content:''; }
+  .split{ display:flex; gap:16px; align-items:flex-start; }
+  .split .l{ flex:1.7; min-width:0; }
+  .split .r{ flex:1; min-width:230px; }
+  .panel{ background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; font-size:13px; margin-bottom:12px; }
+  .panel .ph{ font-weight:800; font-size:12px; color:#374151; margin-bottom:8px; }
+  .radio{ display:flex; gap:8px; align-items:flex-start; padding:8px 10px; border:1.5px solid #e5e7eb; border-radius:8px; margin-bottom:8px; background:#fff; }
+  .radio.on{ border-color:#10b981; background:#f0fdf4; }
+  .radio .dot{ width:14px; height:14px; border-radius:50%; border:2px solid #d1d5db; margin-top:3px; flex:none; }
+  .radio.on .dot{ border-color:#10b981; background:radial-gradient(circle, #10b981 45%, #fff 50%); }
+  .radio b{ font-size:13px; display:block; }
+  .radio small{ color:#6b7280; font-size:12px; }
+  .summ{ display:flex; gap:10px; margin:8px 0 14px; flex-wrap:wrap; }
+  .scell{ background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:8px 14px; font-size:12px; color:#6b7280; }
+  .scell b{ display:block; font-size:17px; color:#111827; }
+  .scell.red b{ color:#dc2626; }
+  /* 리뷰어 모바일 목업 */
+  .phone{ width:340px; margin:0 auto; background:#fff; border:1px solid #d1d5db; border-radius:22px; box-shadow:0 8px 28px rgba(0,0,0,.10); overflow:hidden; }
+  .phd{ padding:11px 16px; border-bottom:1px solid #f1f5f9; font-weight:800; font-size:13px; background:#f9fafb; }
+  .pbd{ padding:16px; }
+  .lockcard{ border:1px solid #e5e7eb; border-radius:12px; padding:22px 16px; text-align:center; background:#f9fafb; }
+  .lockcard .ico{ font-size:30px; margin-bottom:8px; }
+  .lockcard b{ display:block; font-size:15px; margin-bottom:6px; }
+  .lockcard p{ font-size:12.5px; color:#6b7280; margin:0; }
+  .arr-down{ text-align:center; color:#9ca3af; font-size:20px; margin:6px 0; }
+  .tag-step{ display:inline-block; background:#1d4ed8; color:#fff; border-radius:6px; padding:2px 9px; font-size:11px; font-weight:800; margin-right:6px; }
+  .qa{ border-left:3px solid #a78bfa; background:#faf5ff; padding:10px 14px; border-radius:0 8px 8px 0; margin:8px 0; font-size:13px; }
+  .qa b{ color:#6d28d9; }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<h1>🚫 모집공고별 참여가능 리뷰어 관리 (블랙리스트 건별 관리)</h1>
+<div class="sub">유저플로우 · 와이어프레임 시안 v1.0 — 직원 아이디어(캡처 2장) 기반 구현계획 · 2026-08-05 · 시안 단계(구현 전 확인용)</div>
+
+<!-- ═══════════════ 1. 아이디어 파악 ═══════════════ -->
+<h2>1. 아이디어 파악 — 무엇을 만드는가</h2>
+<div class="sec">
+  <p><b>한 줄 요약:</b> 모집공고 편집 화면에서 <b>"이 공고에 참여할 수 없는 리뷰어"를 건별(공고별)로 지정</b>하고,
+  차단된 리뷰어가 참여를 시도하면 <b>관리자가 고른 안내 메시지</b>(마감 위장 / 사유 고지)를 보여준다.</p>
+
+  <h3>캡처에서 읽은 요구사항</h3>
+  <table class="plan">
+    <tr><th>캡처 항목</th><th>해석</th></tr>
+    <tr><td>공고별 관리 ("건별")</td><td>블랙리스트여도 <b>이 공고에서는 참여 허용</b>이 가능해야 한다 — 모집이 안 구해지는 공고엔 블랙리스트 리뷰어라도 참여시켜야 하기 때문. 반대로 평소 정상 리뷰어를 <b>이 공고만 차단</b>도 가능.</td></tr>
+    <tr><td>2000여명 전부 불러오기 ❌</td><td>전체 명단 로드·전체 저장 금지. <b>검색해서 찾은 사람만 표에 띄우고, 설정을 바꾼 사람만 저장</b>한다.</td></tr>
+    <tr><td>"2000명 전체체크가 기본"</td><td>기본값 = 전원 참여가능. 즉 <b>차단 목록(deny-list) 방식</b> — 체크를 해제한(차단한) 사람만 DB에 행이 생긴다. 전원 체크 상태를 저장할 필요가 없다.</td></tr>
+    <tr><td>체크박스 해제 → 참여불가</td><td>검색 결과 표에서 체크 해제 + [선택 적용] = 그 리뷰어들 이 공고 참여 차단.</td></tr>
+    <tr><td>안내 메시지 설정 2종</td><td>차단된 리뷰어가 참여 시도할 때 보일 문구를 관리자가 선택: ① <b>"공고가 마감되었습니다"</b>(마감 위장 — 차단 사실을 드러내지 않음) ② <b>"이전 리뷰 미작성 &amp; 리뷰 기한 경과로 인해 공고 참여가 불가합니다"</b>(사유 고지).</td></tr>
+    <tr><td>검색 = 이름 / 전화번호 뒤4자리 / 닉네임 <b>+ 등록 계좌번호</b></td><td>노란 메모 "+등록 계좌번호" — 같은 사람이 이름·번호를 바꿔 등록해도 <b>계좌번호로 추적</b>해 찾겠다는 의도로 해석.</td></tr>
+    <tr><td>이전 리뷰 상태 표시 (리뷰 미작성 N건 · 기한 경과 N건 · 정상)</td><td>차단 여부를 판단할 근거를 표에서 바로 보여준다. 기존 데이터(참여 확정 이력 + 리뷰 제출 이력)에서 파생 가능.</td></tr>
+    <tr><td>필터 (전체/참여가능/블랙리스트/리뷰미작성/기한경과) · 엑셀 다운로드 · 관리 이력</td><td>보조 기능 — 단계(M2~M3)로 나눠 구현.</td></tr>
+  </table>
+
+  <h3>기존 시스템과의 연결점 (코드 확인 완료)</h3>
+  <ul>
+    <li><b>전역 블랙리스트는 이미 있다</b>: <code>blacklist</code> 테이블(001, phone UNIQUE·사유·등록자) + <code>/api/blacklist</code> 관리 API. 단 <b>현재 참여(apply) 게이트에서 강제되지 않는다</b>(GAS 시절 이관만 된 상태).</li>
+    <li><b>참여 게이트 자리도 이미 있다</b>: <code>POST /api/campaign/:id/apply</code>가 등록 리뷰어 검증(<code>not_registered</code>) → 내정보(<code>profile_missing</code>) → 당일 이력(<code>already_today</code>) 순서로 사유코드를 돌려주는 구조 — <b>여기에 사유코드 하나를 추가</b>하는 방식이라 홀드·정원 로직 무접촉.</li>
+    <li><b>리뷰 미작성/기한 경과 판정 재료</b>: 참여 확정(<code>campaign_applications.submitted</code> / <code>order_submissions</code>) 대비 리뷰 제출(<code>review_index.is_submitted</code>·<code>review_submissions</code>) — 새 수집 없이 파생.</li>
+    <li><b>캡처의 S/A/B/C 등급은 현 시스템에 없다</b> → 1차에서는 등급 대신 "이전 리뷰 상태"로 대체하고, 등급제는 별도 기획(후속)으로 분리 제안.</li>
+  </ul>
+</div>
+
+<!-- ═══════════════ 2. 핵심 설계 결정 ═══════════════ -->
+<h2>2. 핵심 설계 결정 (구현계획의 뼈대)</h2>
+<div class="sec">
+  <h3>② 저장 모델 — "차단한 사람만 저장" (deny-list)</h3>
+  <div class="good"><b>2000명 문제의 해법:</b> 전원 체크(참여가능)가 기본이므로 <b>DB에는 예외만 저장</b>한다.
+  신규 테이블 <code>campaign_reviewer_gates</code> 1개 — 공고당 행 수 = 차단/허용 예외 인원수(보통 0~수십 명).</div>
+  <table class="plan">
+    <tr><th>컬럼</th><th>내용</th></tr>
+    <tr><td><code>campaign_id</code> <b>TEXT</b></td><td>공고 FK — ★ <code>recruit_campaigns.id</code>가 TEXT이므로 <b>반드시 TEXT</b>(082에서 UUID로 선언했다 마이그레이션 파일 전체가 영영 안 붙은 42804 사고 재발 방지 — 기존 회귀가드가 자동 대조).</td></tr>
+    <tr><td><code>phone8</code></td><td>판정 키 — 홀드·검색·타계정과 같은 명의 키. 이름이 아니라 번호로 키잉(동명이인 오차단 방지).</td></tr>
+    <tr><td><code>mode</code></td><td><code>block</code>(이 공고 참여 차단) | <code>allow</code>(전역 블랙리스트지만 이 공고는 허용 — "건별"의 핵심).</td></tr>
+    <tr><td><code>message_type</code></td><td>block일 때만: <code>closed</code>(마감 위장) | <code>policy</code>(사유 고지). allow는 NULL.</td></tr>
+    <tr><td><code>reviewer_name</code>, <code>created_by</code>, <code>created_at</code>, <code>released_at</code></td><td>표시용 이름 스냅샷 + 감사 이력. 해제는 <b>소프트(released_at)</b> — 삭제하지 않아 "관리 이력"이 그대로 나온다. 활성 행 부분유니크 <code>(campaign_id, phone8) WHERE released_at IS NULL</code>.</td></tr>
+  </table>
+
+  <h3>② 판정 규칙 — 우선순위 3단 (완화 금지)</h3>
+  <ol>
+    <li><b>공고별 allow</b> 있으면 → 통과 (전역 블랙리스트보다 우선 — "이 공고는 참여시킨다")</li>
+    <li><b>공고별 block</b> 있으면 → 차단 + 그 행의 <code>message_type</code> 문구</li>
+    <li><b>전역 <code>blacklist</code></b>에 있으면 → 차단 (기본 문구 = 사유 고지형) — ★ 단 이 3단계는 <b>env 옵트인</b>(<code>CAMPAIGN_REVIEWER_GATE_GLOBAL=1</code>)으로만 켠다. 전역 블랙리스트는 지금까지 참여를 막지 않았으므로, 배포 즉시 강제하면 <b>기존에 잘 참여하던 리뷰어가 조용히 막히는 회귀</b>가 된다. 1차 출시는 공고별 게이트만.</li>
+  </ol>
+  <div class="danger"><b>★ 판정 단일 출처:</b> 위 3단은 순수함수 <code>utils/reviewerGate.js</code>(가칭) 하나에만 둔다.
+  소비처(apply 게이트 · 관리 표의 "참여 상태" 배지 · 관제)가 각자 규칙을 만들면 "표에는 참여가능인데 실제 참여는 거부"로 갈라진다 — 리뷰비 <code>resolveReviewFee</code>와 같은 규율.</div>
+
+  <h3>③ 적용 지점 — apply 게이트 1곳 (+ 위장 마감의 한계 고지)</h3>
+  <ul>
+    <li>차단 판정은 <code>POST /api/campaign/:id/apply</code>의 <b>등록 리뷰어 검증 직후, 홀드 생성 전</b>에 넣는다 → 자리 미점유(정원 무오염), 403 + <code>reason:'reviewer_blocked'</code> + 설정된 안내 문구.</li>
+    <li><b>마감 위장(closed형)은 응답 문구·화면만 마감처럼</b> 보여준다: <code>campaign.html</code>이 이 응답을 받으면 기존 마감 화면과 동일한 UI를 렌더.</li>
+  </ul>
+  <div class="note"><b>⚠ 위장의 한계(화면에도 고지할 것):</b> 공고 <b>목록 카드</b>는 무인증·개인 무관 렌더라 차단 리뷰어에게도 "모집중"으로 보인다.
+  위장이 완전해지려면 목록까지 사람별로 달라져야 하는데 그건 목록 캐시(5초)·무인증 구조와 충돌 → <b>1차 범위 밖</b>.
+  실제 동선은 "카드 탭 → 참여하기 → '공고가 마감되었습니다'"로, 위장 목적(차단 사실 비노출)은 달성된다.</li></div>
+
+  <h3>④ 관리 UI — 검색 기반, 전체 로드 없음</h3>
+  <ul>
+    <li>진입: 모집공고 카드 <b>[🚫 참여 리뷰어]</b> 버튼(관제 📡 옆) → 전용 모달. 창구는 <b>리뷰웹시스템[3버전] 모집공고 탭 + 관리자 대시보드 공용</b>(공유 모듈 <code>js/campaign-reviewer-gate.js</code> 한 벌 — 모달 사본 금지).</li>
+    <li>검색 API: <code>GET /api/campaign/admin/:id/reviewer-search?q=</code> — 이름 부분일치 ∪ 전화 뒤4자리 ∪ 닉네임 ∪ <b>계좌번호 숫자 부분일치</b>. 서버 LIMIT 50(더 있으면 "N건 더 — 검색어를 좁혀주세요"). 응답에 리뷰어별 <b>이전 리뷰 상태 + 현재 판정</b>(위 단일 출처 함수) 동봉.</li>
+    <li>이미 차단/허용된 인원은 검색 없이도 보이도록 <b>"이 공고의 예외 목록"이 모달 기본 화면</b>(= 저장된 행만, 보통 0~수십 건).</li>
+  </ul>
+
+  <h3>⑤ 권한·보안</h3>
+  <ul>
+    <li>관리 API 전부 <code>authMiddleware + adminOrMaster</code>. <b>계좌번호로 검색되는 화면</b>이므로 등록리뷰어DB와 같은 판단으로 <b>AE(staff)·광고주 차단</b>, 결과 표의 연락처는 뒤4자리·계좌는 뒤4자리만 표시(전체값 미반환 = 데이터 최소화).</li>
+    <li>리뷰어앱 공고수정 스코프 토큰(<code>via:'reviewer_campaign'</code>)·인트라넷 토큰은 이 경로에 <b>도달 불가</b>(기존 격리 유지) — 차단 목록 조회·변경은 권한 상승 표면이라 화이트리스트에 넣지 않는다.</li>
+    <li>Track B 경로(<code>/api/trackb/campaigns/:id/reviewer-gate</code>)는 <code>_delegate</code> 프록시로 동일 핸들러 재사용(인트라넷 SSO 관리자용 — 단 adminOrMaster 동일).</li>
+  </ul>
+</div>
+
+<!-- ═══════════════ 3. 유저플로우 ═══════════════ -->
+<h2>3. 유저플로우 (관리자 · 리뷰어)</h2>
+<div class="sec">
+  <h3>관리자 흐름</h3>
+  <div class="flow">
+    <div class="fstep"><b>STEP 1</b>모집공고 탭 → 공고 카드 [🚫 참여 리뷰어]</div>
+    <div class="farr">→</div>
+    <div class="fstep"><b>STEP 2</b>예외 목록 확인 + 리뷰어 검색<br>(이름·전화뒤4·닉네임·계좌)</div>
+    <div class="farr">→</div>
+    <div class="fstep"><b>STEP 3</b>체크 해제(차단) / 체크(허용)<br>+ 안내 메시지 선택</div>
+    <div class="farr">→</div>
+    <div class="fstep"><b>STEP 4</b>[선택 적용] → 변경 요약 확인 → 저장</div>
+  </div>
+  <h3>리뷰어 흐름 (차단된 경우)</h3>
+  <div class="flow">
+    <div class="fstep rv"><b>리뷰어</b>공고 카드 탭 (목록에선 모집중으로 보임)</div>
+    <div class="farr">→</div>
+    <div class="fstep rv"><b>참여하기</b>apply 요청 → 서버 게이트 판정 (자리 미점유)</div>
+    <div class="farr">→</div>
+    <div class="fstep rv"><b>안내 A</b>🔒 "공고가 마감되었습니다"<br>(마감 위장형)</div>
+  </div>
+  <div class="flow" style="margin-top:-4px">
+    <div class="fstep rv" style="visibility:hidden"></div>
+    <div class="farr" style="visibility:hidden">→</div>
+    <div class="fstep rv" style="visibility:hidden"></div>
+    <div class="farr">↘</div>
+    <div class="fstep rv"><b>안내 B</b>⚠ "이전 리뷰 미작성 &amp; 리뷰 기한 경과로 인해 공고 참여가 불가합니다" (사유 고지형)</div>
+  </div>
+</div>
+
+<!-- ═══════════════ 4. 와이어프레임 ═══════════════ -->
+<h2>4. 와이어프레임 (화면 목업)</h2>
+
+<!-- S1 진입 -->
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">S1</span> 진입 — 모집공고 카드에 [🚫 참여 리뷰어] 버튼 (관제 옆)</div>
+  <div class="mock" style="max-width:360px">
+    <div class="mbody" style="padding:14px">
+      <div style="display:flex; gap:10px;">
+        <div style="width:74px;height:74px;background:#eef2f7;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:11px">썸네일</div>
+        <div style="min-width:0">
+          <div style="font-weight:800;font-size:13px;line-height:1.35">우레온 모이스처 바디 리셋 미스트 150ml…</div>
+          <div style="font-size:11.5px;color:#6b7280;margin-top:3px">모집중 · 오늘 5/20 · 누적 15/100</div>
+          <div style="margin-top:6px"><span class="badge b-blk">차단 3명</span> <span style="font-size:11px;color:#9ca3af">← 예외 설정이 있으면 카드에 표시</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <span class="btn sm">✏️ 수정</span>
+        <span class="btn sm">📡 관제</span>
+        <span class="btn sm warn">🚫 참여 리뷰어</span>
+        <span class="btn sm">👁 리뷰어 화면</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- S2 관리 모달 -->
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">S2</span> 참여 리뷰어 관리 모달 — 기본 화면 = 이 공고의 예외 목록 + 검색 (2000명 전체 로드 없음)</div>
+  <div class="mock">
+    <div class="mhd"><span class="tt">🚫 참여 리뷰어 관리 — 우레온 모이스처 바디 리셋 미스트 150ml</span><span class="x">✕</span></div>
+    <div class="mbody">
+      <div class="summ">
+        <div class="scell">전체 등록 리뷰어<b>2,038명</b><span style="color:#15803d">기본 = 전원 참여가능</span></div>
+        <div class="scell red">이 공고 차단<b>3명</b></div>
+        <div class="scell">이 공고 허용 예외<b>1명</b><span>블랙리스트지만 허용</span></div>
+        <div class="scell" style="margin-left:auto"><span class="btn sm">⬇ 엑셀 다운로드</span><br><small style="color:#9ca3af">예외 목록 CSV</small></div>
+      </div>
+
+      <div class="srch">
+        <input value="홍길" placeholder="이름 / 전화번호 뒤 4자리 / 닉네임 / 등록 계좌번호 검색">
+        <span class="btn">🔍 검색</span>
+      </div>
+      <div style="margin-bottom:10px">
+        <span class="chip on">전체</span><span class="chip">참여가능</span><span class="chip">이 공고 차단</span><span class="chip">블랙리스트</span><span class="chip">리뷰 미작성</span><span class="chip">기한 경과</span>
+      </div>
+
+      <div class="split">
+        <div class="l">
+          <table class="grid">
+            <tr>
+              <th style="width:34px"><span class="ck"></span></th>
+              <th>이름</th><th>연락처</th><th>계좌</th><th>이전 리뷰</th><th>전역 상태</th><th>이 공고</th>
+            </tr>
+            <tr class="off">
+              <td><span class="ck off"></span></td>
+              <td><b>홍길동</b> <small style="color:#9ca3af">길동이</small></td>
+              <td>***-1234</td><td>…7788</td>
+              <td><span style="color:#dc2626;font-weight:700">리뷰 미작성 (1건)</span></td>
+              <td><span class="badge b-gbl">블랙리스트</span></td>
+              <td><span class="badge b-blk">차단됨 · 마감 위장</span></td>
+            </tr>
+            <tr>
+              <td><span class="ck"></span></td>
+              <td><b>김철수</b></td>
+              <td>***-5678</td><td>…2201</td>
+              <td>정상 (최근 3일 전)</td>
+              <td><span class="badge b-ok">정상</span></td>
+              <td><span class="badge b-gray">기본(참여가능)</span></td>
+            </tr>
+            <tr>
+              <td><span class="ck"></span></td>
+              <td><b>이영희</b></td>
+              <td>***-9012</td><td>…5544</td>
+              <td><span style="color:#b45309;font-weight:700">기한 경과 (2건)</span></td>
+              <td><span class="badge b-gbl">블랙리스트</span></td>
+              <td><span class="badge b-ok">허용 예외 ✓</span> <small style="color:#6b7280">이 공고는 참여 가능</small></td>
+            </tr>
+            <tr class="off">
+              <td><span class="ck off"></span></td>
+              <td><b>박민수</b></td>
+              <td>***-3456</td><td>…0912</td>
+              <td><span style="color:#dc2626;font-weight:700">리뷰 미작성 (2건)</span></td>
+              <td><span class="badge b-ok">정상</span></td>
+              <td><span class="badge b-blk">차단됨 · 사유 고지</span></td>
+            </tr>
+          </table>
+          <div style="font-size:12px;color:#6b7280;margin-top:8px">검색 결과 4명 · <b>체크 = 참여가능 / 해제 = 이 공고 참여불가</b> · 변경된 사람만 저장됩니다</div>
+          <div style="font-size:12px;color:#9ca3af;margin-top:2px">※ 결과가 50명을 넘으면 "N건 더 있음 — 검색어를 좁혀주세요" (전체 로드하지 않음)</div>
+        </div>
+
+        <div class="r">
+          <div class="panel">
+            <div class="ph">🔔 차단 시 안내 메시지 (해제한 인원에 적용)</div>
+            <div class="radio on"><span class="dot"></span><span><b>공고가 마감되었습니다</b><small>마감 위장 — 차단 사실을 드러내지 않음. 목록 카드는 모집중으로 보이고, [참여하기] 시점에 마감 안내.</small></span></div>
+            <div class="radio"><span class="dot"></span><span><b>이전 리뷰 미작성 &amp; 리뷰 기한 경과</b><small>"이전 리뷰 미작성 또는 리뷰 기한 경과로 인해 공고 참여가 불가합니다." — 사유 고지형.</small></span></div>
+          </div>
+          <div class="panel">
+            <div class="ph">💡 도움말</div>
+            <ul style="margin:0 0 0 16px;font-size:12px;color:#6b7280">
+              <li>블랙리스트 리뷰어도 이 공고에서 체크하면 <b>허용 예외</b>로 참여 가능(건별 관리).</li>
+              <li>설정 변경은 <b>관리 이력</b>에 남습니다.</li>
+              <li>이미 진행 중인 홀드·확정 건은 취소되지 않습니다(신규 참여만 차단).</li>
+            </ul>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <span class="btn">취소</span>
+            <span class="btn pri">선택 적용 (변경 2건)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- S3 confirm -->
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">S3</span> 적용 확인 — 무엇이 어떻게 바뀌는지 요약 후 저장 (조용한 저장 금지)</div>
+  <div class="mock" style="max-width:460px">
+    <div class="mhd"><span class="tt">변경 내용 확인</span><span class="x">✕</span></div>
+    <div class="mbody">
+      <table class="grid">
+        <tr><th>리뷰어</th><th>변경</th><th>안내 메시지</th></tr>
+        <tr><td>홍길동 (***-1234)</td><td><span class="badge b-blk">차단</span></td><td>공고가 마감되었습니다</td></tr>
+        <tr><td>박민수 (***-3456)</td><td><span class="badge b-blk">차단</span></td><td>리뷰 미작성·기한 경과 사유 고지</td></tr>
+      </table>
+      <div class="note" style="margin-top:12px">차단은 <b>새 참여 신청만</b> 막습니다. 이미 잡힌 자리(홀드)나 제출완료 건은 그대로 유지됩니다.</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+        <span class="btn">돌아가기</span><span class="btn pri">저장</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- S4/S5 리뷰어 화면 -->
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">S4·S5</span> 리뷰어 화면 — 차단된 리뷰어가 [참여하기]를 누른 직후 (campaign.html, 자리 미점유)</div>
+  <div style="display:flex; gap:22px; flex-wrap:wrap; justify-content:center">
+    <div>
+      <div style="text-align:center;font-size:12px;color:#64748b;font-weight:700;margin-bottom:8px">A. 마감 위장형 (기존 마감 화면과 동일)</div>
+      <div class="phone">
+        <div class="phd">우레온 모이스처 바디 리셋 미스트</div>
+        <div class="pbd">
+          <div class="lockcard">
+            <div class="ico">🔒</div>
+            <b>공고가 마감되었습니다</b>
+            <p>현재 공고의 모집이 마감되어<br>참여가 불가합니다.</p>
+          </div>
+          <div class="arr-down">↓</div>
+          <div style="text-align:center"><span class="btn" style="width:100%;text-align:center">다른 공고 보러가기 →</span></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div style="text-align:center;font-size:12px;color:#64748b;font-weight:700;margin-bottom:8px">B. 사유 고지형</div>
+      <div class="phone">
+        <div class="phd">우레온 모이스처 바디 리셋 미스트</div>
+        <div class="pbd">
+          <div class="lockcard" style="background:#fffbeb;border-color:#fcd34d">
+            <div class="ico">⚠️</div>
+            <b>공고 참여가 불가합니다</b>
+            <p>이전 리뷰 미작성 또는 리뷰 기한 경과로 인해<br>이 공고에 참여할 수 없습니다.<br><br>문의는 리뷰 내역 → 1:1 문의를 이용해주세요.</p>
+          </div>
+          <div class="arr-down">↓</div>
+          <div style="text-align:center"><span class="btn" style="width:100%;text-align:center">내 리뷰 내역 확인하기 →</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note" style="margin-top:14px">두 화면 모두 <b>자리를 점유하지 않은 상태</b>에서 뜬다(홀드 생성 전 게이트 — <code>profile_missing</code>과 같은 지점).
+  위장형은 기존 마감 화면 컴포넌트를 <b>그대로 재사용</b>해 진짜 마감과 픽셀 단위로 같아야 한다(전용 화면을 새로 만들면 미묘한 차이로 위장이 들통난다).</div>
+</div>
+
+<!-- S6 이력 -->
+<div class="wf">
+  <div class="wf-cap"><span class="tag-step">S6</span> 관리 이력 (모달 하단 접힘 섹션) — released_at 소프트 해제라 삭제 없이 전체 이력 보존</div>
+  <div class="mock" style="max-width:640px">
+    <div class="mbody">
+      <table class="grid">
+        <tr><th>일시</th><th>리뷰어</th><th>변경</th><th>메시지</th><th>처리자</th></tr>
+        <tr><td>8/5 14:02</td><td>홍길동 (***-1234)</td><td><span class="badge b-blk">차단</span></td><td>마감 위장</td><td>만두</td></tr>
+        <tr><td>8/5 14:02</td><td>박민수 (***-3456)</td><td><span class="badge b-blk">차단</span></td><td>사유 고지</td><td>만두</td></tr>
+        <tr><td>8/4 10:31</td><td>이영희 (***-9012)</td><td><span class="badge b-ok">허용 예외</span></td><td>—</td><td>망고</td></tr>
+        <tr><td>8/3 18:20</td><td>강하늘 (***-1357)</td><td><span class="badge b-gray">차단 해제</span></td><td>—</td><td>만두</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ 5. API·구현 단계 ═══════════════ -->
+<h2>5. 구현 계획 (단계 · API · 회귀가드)</h2>
+<div class="sec">
+  <h3>단계 나누기</h3>
+  <table class="plan">
+    <tr><th>단계</th><th>내용</th><th>비고</th></tr>
+    <tr><td><b>M1 서버</b></td><td>migration <code>campaign_reviewer_gates</code>(FK TEXT·부분유니크·소프트 해제) + 판정 단일 출처 <code>utils/reviewerGate.js</code> + apply 게이트 배선(<code>reviewer_blocked</code>) + 관리 API 3종(아래) + <code>campaign.html</code> 응답 분기(위장/고지 화면)</td><td>홀드·정원·시트 무접촉. 킬스위치 <code>CAMPAIGN_REVIEWER_GATE=0</code>(게이트 전체 즉시 무력화 = 기존 동작 100%)</td></tr>
+    <tr><td><b>M2 관리 UI</b></td><td>공유 모듈 <code>js/campaign-reviewer-gate.js</code>(모달 한 벌 — 리뷰웹시스템[3버전]·관리자 대시보드 공용) + 카드 버튼·차단 N명 배지 + 적용 확인(S3)</td><td>검색 기반, LIMIT 50, 전체 로드 없음</td></tr>
+    <tr><td><b>M3 보조</b></td><td>관리 이력 표(S6) + 예외 목록 CSV(UTF-8 BOM) + 필터 칩(리뷰 미작성/기한 경과 파생 판정)</td><td>파생 판정은 fail-soft(집계 실패 시 상태 칸 '?' — 0으로 꾸미지 않음)</td></tr>
+    <tr><td><b>후속(별도 확인)</b></td><td>전역 블랙리스트 apply 강제(<code>…_GLOBAL=1</code> 옵트인) · 리뷰어 등급제(S/A/B/C) · 공고 복제 시 예외 목록 이월 여부</td><td>회귀 위험·정책 결정이라 사용자 확인 후</td></tr>
+  </table>
+
+  <h3>API (전부 authMiddleware + adminOrMaster)</h3>
+  <table class="plan">
+    <tr><th>메서드·경로</th><th>역할</th></tr>
+    <tr><td><code>GET /api/campaign/admin/:id/reviewer-gate</code></td><td>이 공고의 예외 목록(차단/허용) + 요약 카운트 + 이력</td></tr>
+    <tr><td><code>GET /api/campaign/admin/:id/reviewer-search?q=</code></td><td>리뷰어 검색(이름∪전화뒤4∪닉네임∪계좌 부분일치, LIMIT 50) — 각 행에 이전 리뷰 상태·전역 상태·이 공고 판정 동봉. 연락처·계좌는 뒤4자리만 반환</td></tr>
+    <tr><td><code>POST /api/campaign/admin/:id/reviewer-gate</code></td><td>일괄 적용 <code>{changes:[{phone8, mode:'block'|'allow'|'clear', messageType?}]}</code> — 기존 활성 행 release 후 INSERT(append-only)</td></tr>
+    <tr><td><code>/api/trackb/campaigns/:id/reviewer-gate*</code></td><td>위 3종 <code>_delegate</code> 프록시(인트라넷 SSO 관리자 도달용, 권한 동일)</td></tr>
+  </table>
+
+  <h3>회귀가드 계획 (레포 규율 승계)</h3>
+  <ul>
+    <li><code>tests/campaignReviewerGate.test.js</code> — ① 판정 순수함수 실행(allow &gt; block &gt; 전역, 킬스위치=전부 통과) ② <b>스텁 pool로 apply 라우트 실제 호출</b>(차단 403 시 <b>홀드 INSERT 0건</b>까지 — 문자열 grep만으로는 스코프·실행경로를 못 보는 기존 교훈) ③ FK 타입 TEXT ≡ 018 대조 ④ 라우터 스택 실검사(권한 미들웨어 체인 — <code>authMiddleware</code> 없는 역할 미들웨어 = 전원 403 사고 재발 방지) ⑤ 스코프 토큰 미도달 ⑥ 응답에 계좌·연락처 전체값 미포함.</li>
+    <li>모달은 <b>테마 없는 호스트(리뷰웹시스템[3버전])에서 실브라우저 렌더</b> 확인(공유 모듈 var() 폴백 규율). onclick에는 <b>배열 인덱스만</b>(리뷰어 이름·닉네임은 외부 문자열 — XSS 규율).</li>
+  </ul>
+
+  <h3>확인이 필요한 결정 (구현 착수 전 답 주시면 반영)</h3>
+  <div class="qa"><b>Q1.</b> 차단 시점에 <b>이미 잡혀 있는 홀드/확정 건</b>은 그대로 두는 것으로 설계했습니다(신규 신청만 차단). 기존 홀드도 강제 취소해야 하나요? <small>(강제 취소는 결제 진행 중인 리뷰어의 자리를 뺏는 파괴 동작이라 기본 제외 권장)</small></div>
+  <div class="qa"><b>Q2.</b> 안내 메시지 2종은 <b>고정 문구</b>로 시작합니다. 공고별 자유 문구 입력까지 필요한가요? <small>(자유 문구는 리뷰어에게 그대로 나가는 외부 노출 텍스트라 검수 부담 증가)</small></div>
+  <div class="qa"><b>Q3.</b> 전역 블랙리스트(기존 <code>blacklist</code> 테이블)의 apply 강제는 <b>옵트인 후속</b>으로 뺐습니다. 1차부터 켤까요?</div>
+  <div class="qa"><b>Q4.</b> "리뷰 미작성 / 기한 경과" 판정 기준: <b>미작성</b> = 참여 확정 후 N일(기본 14일) 경과했는데 리뷰 미제출, <b>기한 경과</b> = 제출은 했으나 기한 이후 — 이 기준으로 괜찮은가요? 기한 일수 설정이 따로 필요한가요?</div>
+</div>
+
+<!-- ═══════════════ 6. 잔여 위험 ═══════════════ -->
+<h2>6. 잔여 위험 · 한계 (문서화)</h2>
+<div class="sec">
+  <ul>
+    <li><b>목록 카드는 위장되지 않는다</b> — 차단 리뷰어도 카드에서는 모집중으로 보이고 [참여하기]에서 마감 안내를 받는다(§2-③). 완전 위장은 무인증 목록 구조와 충돌해 1차 범위 밖.</li>
+    <li><b>phone8 키잉의 귀결</b> — 리뷰어가 다른 번호로 재가입하면 차단이 따라가지 않는다. 계좌번호 검색(노란 메모)이 이를 추적하는 보조 수단이며, 계좌 기반 자동 차단은 오차단 위험(가족 공용 계좌 등)이 있어 <b>사람이 검색해 확인 후 수동 차단</b>까지만.</li>
+    <li><b>타계정 참여와의 관계</b> — 차단 판정은 <b>명의 phone8 기준</b>이므로, 차단된 본인이 타계정 명의로 신청하면 1차에서는 막히지 않는다. 소유자(<code>owner_phone8</code>) 합산 차단은 후속(§09 타계정 규칙과 정합 검토 필요).</li>
+    <li><b>사유 고지형 문구의 정확성</b> — "리뷰 미작성·기한 경과" 문구를 실제로는 다른 사유(단순 관리 차단)에 붙이면 리뷰어 항의 소지가 있다 → 적용 확인(S3)에서 그 리뷰어의 실제 이전 리뷰 상태와 문구가 안 맞으면 ⚠ 경고 표시(차단은 막지 않음).</li>
+  </ul>
+</div>
+
+<div style="text-align:center;color:#9ca3af;font-size:12px;margin-top:40px">design-campaign-reviewer-gate.html · v1.0 · 2026-08-05 — 시안 확인 후 M1부터 구현 착수</div>
+</div>
+</body>
+</html>
