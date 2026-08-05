@@ -251,6 +251,47 @@ const fileRoute = require('../src/services/fileRoute.service');
     ok('E13: fileRoute — 휴지통·핑퐁 방지·dryRun 무변경');
   }
 
+  /* ═══ F. 2026-08-05 실측 신고 3건 보완 ═══ */
+  {
+    // F1: 구매확정 탭의 2차 검수 — 구매확정 화면을 불량으로 몰지 않는다
+    const ri = read('src/services/reviewInspect.service.js');
+    assert.ok(ri.includes("exp.reviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review']"),
+      '2차 검수 형식 판정이 리뷰타입(confirm)을 본다');
+    assert.ok(ri.includes('!_okKinds.includes(cls.kind) && cls.confidence >= BLOCK_CONFIDENCE'),
+      'fail 조건이 okKinds 기반(잡는 범위를 좁히는 방향만)');
+    ok('F1: ★★ 구매확정 작업의 구매확정 화면 = 정상 제출(2차 검수도 087 안전핀과 같은 규율)');
+
+    // F2: 소급 재검수 — resolved·pass 보존 + pending 리셋 + 스윕 락
+    assert.ok(ri.includes('async function reinspectTab') && ri.includes("status IN ('fail', 'suspect', 'unverifiable')"),
+      '재검수 대상 = fail/suspect/unverifiable 만(resolved·pass 보존)');
+    assert.ok(ri.includes("withJobLock('review_inspect_sweep'"), '재검수 스윕도 같은 잡 락');
+    const tb2 = read('src/routes/trackB.routes.js');
+    assert.ok(/'\/review-inspect\/reinspect', authMiddleware, adminOrMasterMiddleware/.test(tb2), '재검수 = adminOrMaster');
+    const wd2 = readFront('workdesk.html');
+    assert.ok(wd2.includes('riReinspectTab') && wd2.includes('/api/trackb/review-inspect/reinspect'), '리뷰검수 탭 [♻ 재검수] 배선');
+    ok('F2: 소급 재검수(리뷰타입 뒤늦은 변경) — 초기화 범위·권한·UI 배선');
+
+    // F3: 상품명 매칭 — 실측 신고 원문 그대로 통과해야 한다(말줄임·번호·URL 꼬리)
+    const { matchProductName } = require('../src/services/reviewInspect.service');
+    const realOcr = '이노크아든 빨아쓰는 면마스크 다회용…';
+    const realExpected = ['상품', '1. 이노크아든 빨아쓰는 면마스크 다회용 성인용 대형 패션 필터 교체형 (https:', '[합계] 최종모집인원 200명'];
+    assert.strictEqual(matchProductName(realOcr, realExpected).verdict, 'pass',
+      '실측 신고 케이스(이노크아든)가 pass 여야 함');
+    assert.strictEqual(matchProductName('힙스 골라담기...', ['2) 힙스 골라담기 세트']).verdict, 'pass', '... 말줄임 + 번호');
+    assert.strictEqual(matchProductName('전혀 다른 상품명입니다', ['이노크아든 빨아쓰는 면마스크']).verdict, 'warn',
+      '진짜 다른 상품은 여전히 의심(느슨해지되 죽지 않음)');
+    assert.strictEqual(matchProductName('이노크아든 빨아쓰는 면마스크', []).verdict, 'skip', '기대값 없음 = skip 불변');
+    ok('F3: ★ 상품명 매칭 — 말줄임(…)·선행 번호·URL 꼬리를 벗기고 대조(실측 원문 실행)');
+
+    // F4: 구매확정 예시 = 모바일·PC 2슬롯(사용자 확정), 기존 settingKey 보존
+    const rk2 = read('src/utils/routeSampleKinds.js');
+    assert.ok(rk2.includes("key: 'purchase_confirm_pc'") && rk2.includes('route_sample_purchase_confirm_pc'), 'PC 슬롯 추가');
+    assert.ok(rk2.includes("settingKey: 'route_sample_purchase_confirm'"), '기존(모바일) settingKey 보존 — 올려둔 이미지 유실 금지');
+    const { ROUTE_SAMPLE_KINDS } = require('../src/utils/routeSampleKinds');
+    assert.strictEqual(ROUTE_SAMPLE_KINDS.filter(s => s.kind === 'purchase_confirm').length, 2, 'purchase_confirm kind 2슬롯');
+    ok('F4: 구매확정 예시 모바일·PC 2슬롯(kind 동일 = 게이트는 한 장만 있어도 켜짐)');
+  }
+
   console.log(`\n✅ fileAutoRoute 회귀가드 ${n}케이스 통과`);
   process.exit(0);
 })().catch((e) => { console.error('❌ 실패:', e); process.exit(1); });

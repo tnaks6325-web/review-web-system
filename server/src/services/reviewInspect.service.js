@@ -421,6 +421,22 @@ function _normProduct(s) {
 }
 
 /**
+ * 대조 전 정리 — 실측(2026-08-05 이노크아든 건)에서 "같은 상품인데 다름"이 나온 원인 3가지를 벗긴다:
+ *   ① 캡처 상품명의 꼬리 말줄임(`…`/`...`) — 쇼핑몰 화면이 긴 이름을 자른다
+ *   ② 기대값의 선행 번호(`1. `) — 작업오더 상품 목록 표기가 붙어 온다
+ *   ③ 기대값의 URL 꼬리(`(https:…`) — 상품 URL 이 이름 뒤에 딸려 온다
+ * 정리 후 부분 포함(includes)으로 잡히게 하는 게 목적 — 지우는 오탐이 나도
+ * 대조가 느슨해질 뿐(미탐 방향) 정상 제출을 불량으로 몰지 않는다.
+ */
+function _cleanProductForMatch(s) {
+  return String(s || '')
+    .replace(/(…|‥|\.{2,})\s*$/g, ' ')      // 꼬리 말줄임
+    .replace(/^\s*\d+\s*[.)]\s*/, '')        // 선행 번호 "1. " / "2)"
+    .replace(/\(?\s*https?:\S*/gi, ' ')      // URL 꼬리(괄호 열림 포함 — "(https:" 절단형까지)
+    .trim();
+}
+
+/**
  * 캡처 속 상품명 ↔ 기대 상품명 대조.
  * ★ 쇼핑몰 화면은 상품명을 줄여 쓰거나 말줄임(…)하므로 **부분 포함도 일치로 인정**한다.
  *   기대값이 없으면 'skip'(대조 안 함) — 판정 불가를 불량으로 취급하지 않는다.
@@ -429,11 +445,13 @@ function _normProduct(s) {
 function matchProductName(ocr, expectedList) {
   const list = (Array.isArray(expectedList) ? expectedList : [])
     .map(s => String(s || '').trim()).filter(Boolean);
-  const o = _normProduct(ocr);
+  // ★ 말줄임·번호·URL 을 벗긴 뒤 대조한다(_cleanProductForMatch) — 벗기지 않으면
+  //   "이노크아든 …다회용…" vs "1. 이노크아든 …교체형 (https:" 처럼 같은 상품이 다름으로 나온다.
+  const o = _normProduct(_cleanProductForMatch(ocr));
   if (!list.length) return { verdict: 'skip', expected: [], ocr: String(ocr || '') };
   if (!o) return { verdict: 'skip', expected: list, ocr: '' };
   for (const e of list) {
-    const n = _normProduct(e);
+    const n = _normProduct(_cleanProductForMatch(e));
     if (!n) continue;
     if (o.includes(n) || n.includes(o)) return { verdict: 'pass', expected: list, ocr: String(ocr) };
     // 말줄임 대비: 앞 6글자가 겹치면 같은 상품으로 본다(오탐보다 미탐을 택함)
@@ -772,9 +790,15 @@ async function inspectSubmission({
     const checks = {};
 
     // ① 형식·채널
+    // ★★ 구매확정 작업(reviewType 'confirm')의 리뷰 자리는 **구매확정 완료 화면이 정상 제출**이다 —
+    //   1차 필터 안전핀(087)·captureVerify._expectedKind 와 같은 규율. 이 분기가 없으면
+    //   구매확정 탭의 정상 제출 전건이 "리뷰 화면이 아닌 것으로 판정됨" 불량이 된다(실측 신고).
+    //   리뷰 화면도 불량으로 몰지 않는다(잡는 범위를 좁히는 fail-open 방향만).
+    //   공고를 뒤늦게 구매확정으로 바꾼 탭은 리뷰검수 [♻ 재검수]로 소급 재판정한다(reinspectTab).
+    const _okKinds = exp.reviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review'];
     if (!cls) {
       checks.format = { verdict: 'skip', reason: 'no_ai' };
-    } else if (isReview && cls.kind !== 'review' && cls.confidence >= BLOCK_CONFIDENCE) {
+    } else if (isReview && !_okKinds.includes(cls.kind) && cls.confidence >= BLOCK_CONFIDENCE) {
       checks.format = { verdict: 'fail', kind: cls.kind, confidence: cls.confidence };
     } else {
       checks.format = {
@@ -912,6 +936,30 @@ async function _giveUpStale() {
  * 스윕 1사이클. ★ 절대 throw 하지 않는다(cron 이 죽으면 안 된다).
  * @returns {{scanned:number, done:number, failed:number, gaveUp:number}}
  */
+/**
+ * 소급 재검수 — 그 탭의 의심(suspect)·불량(fail)·판정불가(unverifiable)를 pending 으로
+ * 되돌리고 즉시 스윕 1회를 돌린다. **공고 리뷰타입을 뒤늦게 바꾼 경우**(예: 구매확정으로
+ * 전환 — 옛 판정이 전부 "리뷰 화면 아님" 불량으로 남는 실측 신고)의 소급 적용 정식 경로.
+ * ★ resolved(관리자 확인 종결)·pass 는 건드리지 않는다 — 사람의 종결과 통과 판정은 보존.
+ * ★ attempts 0 리셋 — 재시도 상한으로 unverifiable 종결된 건도 다시 본다.
+ * ★ 스윕이 이미 도는 중이면 busy 로 알리고 초기화만 남긴다(10분 크론이 이어받는다).
+ */
+async function reinspectTab({ sheetId, tabName, limit = 100 } = {}) {
+  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
+  const { rowCount } = await _db().query(
+    `UPDATE review_inspections
+        SET status = 'pending', attempts = 0, updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2
+        AND status IN ('fail', 'suspect', 'unverifiable')`,
+    [sheetId, tabName]);
+  const cap = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 100);
+  const { withJobLock } = require('../utils/jobLock');
+  const sweep = await withJobLock('review_inspect_sweep',
+    () => runInspectSweep({ limit: cap }),
+    { onBusy: () => ({ busy: true }) });
+  return { ok: true, reset: rowCount || 0, ...(sweep || {}) };
+}
+
 async function runInspectSweep({ limit } = {}) {
   const out = { scanned: 0, done: 0, failed: 0, gaveUp: 0 };
   if (!ENABLED) return out;
@@ -1062,7 +1110,7 @@ module.exports = {
   loadSamplesFor, sampleSettings, saveSample,
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
-  findAuthorReuse, runInspectSweep, inspectionsCsv,
+  findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
   listInspections, inspectionSummary, resolveInspection, inspectionScope,
   hashBase64, matchProductName, computeStatus,
   loadTabExpectations, findDuplicate, findSimilarText,
