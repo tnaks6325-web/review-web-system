@@ -88,6 +88,7 @@
       .pcard .pt-badge{font-size:.6rem;font-weight:800;border-radius:6px;padding:2px 6px;box-shadow:0 1px 3px rgba(0,0,0,.16);white-space:nowrap}
       .pcard .pt-badge.ch{background:rgba(255,255,255,.95);color:#1550b8}
       .pcard .pt-badge.dl{background:rgba(21,27,38,.76);color:#fff}
+      .pcard .pt-badge.cr{background:#FFF7ED;color:#B45309;border:1px solid #FDBA74}
       /* 좌측 상단: 관리자수정 버튼 + 상태 리본 */
       .pcard .pt-topleft{position:absolute;top:8px;left:8px;z-index:6;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
       .pcard .pt-ribbon{font-size:.6rem;font-weight:900;border-radius:6px;padding:2px 7px;color:#fff}
@@ -375,8 +376,16 @@
     const gateBtn = (c.participation_mode && typeof window !== 'undefined' && window.ReviewerGate)
       ? `<button type="button" class="uic" onclick="${stop}ReviewerGate.open('${id}')" title="이 공고에 참여할 수 없는 리뷰어를 건별로 관리">🚫 리뷰어</button>`
       : '';
+    // 👁 보기 = 리뷰어가 [참여하기]를 누르면 보는 화면(작업가이드·현금영수증 안내 포함) 미리보기.
+    //   마감·투입완료·게시전 공고도 [모집중 가정] 토글로 전 과정 확인 — 기존 openReviewerPreview
+    //   (campaign.html?preview=1, DB write 0) 재사용이라 홀드·정원 카운터를 오염시키지 않는다.
+    //   참여형만(레거시 공고는 campaign.html이 리뷰어 홈으로 리다이렉트해 막다른 길).
+    const viewBtn = c.participation_mode
+      ? `<button type="button" class="uic" onclick="${stop}openReviewerPreview('${id}')" title="리뷰어가 참여하면 보는 화면 확인 (마감 공고 포함 · 참여 기록 안 남음)">👁 보기</button>`
+      : `<button type="button" class="uic" disabled title="참여형 공고만 리뷰어 화면 미리보기를 지원합니다" style="opacity:.4;cursor:default">👁 보기</button>`;
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')">✏️ 수정</button>
+      ${viewBtn}
       ${sheetBtn}
       <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')">📡 관제${bdg}</button>
       ${gateBtn}
@@ -414,8 +423,11 @@
       ? `<button type="button" class="pstarchip${c.pinned_at ? ' on' : ''}" title="${c.pinned_at ? '별표 해제(우선노출 해제)' : '별표 — 목록 최상단 고정(여러 개면 먼저 별표한 순서대로)'}"
           onclick="event.stopPropagation();event.preventDefault();CampCards.togglePin('${_esc(c.id)}', ${c.pinned_at ? 'false' : 'true'})">${c.pinned_at ? '⭐' : '☆'}</button>`
       : '';
-    const badges = (channel || c.delivery_type || starChip)
-      ? `<div class="pt-badges">${starChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}</div>`
+    // 🧾 현금영수증 대상 배지(D안 ① — 참여 전 인지). 서버가 연결 탭 income_type으로 판정한
+    //   cashReceiptRequired === true 일 때만(필드 부재 = 구버전 백엔드/조회 실패 → 배지 없음).
+    const crChip = c.cashReceiptRequired === true ? `<span class="pt-badge cr">🧾 현금영수증</span>` : '';
+    const badges = (channel || c.delivery_type || starChip || crChip)
+      ? `<div class="pt-badges">${starChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
     // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다

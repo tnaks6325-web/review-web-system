@@ -478,7 +478,12 @@ router.get('/provider-info', async (req, res, next) => {
       incomeType   = rows[0]?.income_type   || '';
     }
 
-    res.json({ ok: true, providerMemo, incomeType, companyBusinessNo, cashReceiptGuides });
+    // ★ D안 ③(제출 화면 재안내)용 — 라벨 붙은 배열(등록된 이미지만). 채널 라벨을 프론트에
+    //   사본으로 두지 않기 위해 서버가 표(CASH_RECEIPT_CHANNELS) 그대로 내려준다.
+    const cashReceiptGuideList = CASH_RECEIPT_CHANNELS
+      .filter(c => cashReceiptGuides[c.key])
+      .map(c => ({ key: c.key, label: c.label, imageUrl: cashReceiptGuides[c.key] }));
+    res.json({ ok: true, providerMemo, incomeType, companyBusinessNo, cashReceiptGuides, cashReceiptGuideList });
   } catch (err) {
     next(err);
   }

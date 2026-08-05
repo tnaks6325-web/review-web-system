@@ -27,10 +27,22 @@ ok('현영 탭은 리뷰+현금영수증 2슬롯 자동',
   JSON.stringify(keys(cs.effectiveCaptureSlots(null, '사업자현영'))) === JSON.stringify(['review', 'receipt']));
 ok('관리자 명시 설정(capture_slots)이 최우선',
   JSON.stringify(keys(cs.effectiveCaptureSlots([{ key: 'a', label: 'A' }], '사업자현영'))) === JSON.stringify(['a']));
-ok('★ 완료 판정이 화면과 같은 답을 낸다(현영)',
-  JSON.stringify(cs.requiredSlotKeys(null, '현영')) === JSON.stringify(['review', 'receipt']));
+/* ★ 사용자 확정(2026-08-05): 현금영수증은 발행확정(배송완료·구매확정 후 0~3일) 전에는 캡처가
+ *   존재할 수 없어 **완료 판정에서 제외**(required:false) — 화면 슬롯은 2개 그대로, 필수는 리뷰만. */
+ok('★ 현영 탭 완료 판정 = 리뷰만(현금영수증 슬롯은 선택 — 화면엔 뜨되 완료를 막지 않음)',
+  JSON.stringify(cs.requiredSlotKeys(null, '현영')) === JSON.stringify(['review'])
+  && cs.effectiveCaptureSlots(null, '현영').find(s => s.key === 'receipt').required === false);
 ok('★ 완료 판정이 화면과 같은 답을 낸다(일반)',
   JSON.stringify(cs.requiredSlotKeys(null, '')) === JSON.stringify(['review']));
+ok('관리자 명시 capture_slots는 required 미지정 = 전부 필수(무회귀)',
+  JSON.stringify(cs.requiredSlotKeys([{ key: 'a', label: 'A' }, { key: 'b', label: 'B' }], '현영'))
+    === JSON.stringify(['a', 'b']));
+ok('관리자 명시 required:false는 그 슬롯만 선택으로',
+  JSON.stringify(cs.requiredSlotKeys([{ key: 'a', label: 'A' }, { key: 'b', label: 'B', required: false }], ''))
+    === JSON.stringify(['a']));
+ok('전부 선택(병적 설정)은 전체 필수로 폴백 — "아무 슬롯 없이 완료" 차단',
+  JSON.stringify(cs.requiredSlotKeys([{ key: 'a', label: 'A', required: false }], ''))
+    === JSON.stringify(['a']));
 ok('업로드 폴더 라벨도 같은 출처', cs.slotLabel(null, '사업자현영', 'receipt') === '현금영수증');
 ok('key만 있는 잘못된 설정은 걸러낸다', cs.effectiveCaptureSlots([{ label: '라벨만' }], '') === null);
 ok('현영 판정 규칙은 한 곳',

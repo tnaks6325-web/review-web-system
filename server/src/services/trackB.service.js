@@ -15,6 +15,7 @@
 const { logger } = require('../utils/logger');
 const participants = require('./participants.service');
 const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
+const { isCashReceiptIncome } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 
 let _pool;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -2755,6 +2756,7 @@ async function tabStatsMap({ force = false } = {}) {
     const { rows } = await getPool().query(
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
+              tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
               im.row_count AS "rowCount", im.submitted_count AS "submittedCount",
               COALESCE(paid.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
@@ -2778,6 +2780,10 @@ async function tabStatsMap({ force = false } = {}) {
         total: Number.isFinite(+r.rowCount) ? +r.rowCount : null,
         submitted: Number.isFinite(+r.submittedCount) ? +r.submittedCount : null,
         paid: +r.paidCount || 0,
+        // 홈 [저장폴더] 버튼 재료 — tab_configs 를 이미 읽는 이 쿼리에 얹어 쿼리 순증 0.
+        //   현영 여부 판정은 captureSlots.isCashReceiptIncome 단일 규칙(슬롯 자동 2슬롯과 같은 기준).
+        folderUrl: r.folderUrl || null, captureFolderUrl: r.captureFolderUrl || null,
+        cashReceipt: isCashReceiptIncome(r.incomeType),
         closeoutDate: r.closeoutDate || null, closeoutRows: r.closeoutRows == null ? null : +r.closeoutRows,
       };
     }

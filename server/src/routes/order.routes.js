@@ -1054,9 +1054,162 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// PUT /api/order/admin/edit — 작업오더 관리자 수동 수정
+//   (시안: frontend/docs/작업오더_관리자수정_와이어프레임.html · 2026-08-05 사용자 확정)
+// body: { id, ...ADMIN_EDIT_FIELDS 중 바꿀 필드만 }
+// · 전달된 필드만 부분 수정(PATCH). ★ 빈 값('')은 "지움"이 아니라 "변경 없음"(시안 확정 —
+//   칸 비우기 사고 방지, 프론트도 바뀐 필드만 보낸다).
+// · ★ 편집 불가 3종(완화 금지): 상태(status)=전용 [상태 변경] 흐름 / 계약건(sales_id·
+//   contract_number·quote_id)=인트라넷 발주 확정값·정산 매칭 보호 / work_sheet_url=
+//   접수·작업표 생성·gid 교정 재접수가 관리. guide_images 는 1차 제외(업로드 UI 필요).
+// · 인트라넷 동기화: 값 자체는 인트라넷 "보낸 오더" 목록이 리뷰웹 원장을 실시간 조회하므로
+//   자동 반영 — 여기서는 "무엇이 바뀌었나" 요약을 memo_log 에 남기고 기존 처리메모
+//   webhook 으로 알림만 push 한다(수신부 무변경, fail-soft).
+// ═══════════════════════════════════════════════════════════
+const ADMIN_EDIT_FIELDS = [
+  'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
+  'pay_amount', 'daily_count', 'daily_count_text', 'purchase_time',
+  'inflow_keyword', 'inflow_type', 'inflow_guide',
+  'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
+  'review_guide', 'special_notes', 'product_url', 'goods_cost_type', 'work_manager',
+];
+const ADMIN_EDIT_LABELS = {
+  title: '작업명', start_date: '시작일', manager_name: '담당AE', product_option: '상품·옵션',
+  product_options_json: '상품옵션표', pay_amount: '결제금액', daily_count: '일일건수',
+  daily_count_text: '일일건수(텍스트)', purchase_time: '구매시간대', inflow_keyword: '유입키워드',
+  inflow_type: '유입방식', inflow_guide: '유입가이드', delivery_type: '배송유형',
+  courier_proxy: '택배대행', review_type: '리뷰타입', recruit_count: '총모집',
+  review_guide: '리뷰가이드', special_notes: '특이사항', product_url: '상품URL',
+  goods_cost_type: '물건비', work_manager: '작업담당',
+};
+// 긴 텍스트는 diff 원문 대신 "내용 수정"으로 요약(메모 도배 방지)
+const ADMIN_EDIT_LONGTEXT = new Set(['product_option', 'product_options_json', 'inflow_guide', 'review_guide', 'special_notes']);
+
+function _d10(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    const p = n => String(n).padStart(2, '0');
+    return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate());
+  }
+  return String(v).slice(0, 10);
+}
+
+router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const b = req.body || {};
+    const id = String(b.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+
+    const { rows: cur } = await pool.query(`SELECT * FROM work_orders WHERE id = $1 LIMIT 1`, [id]);
+    if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    const o = cur[0];
+    if (o.deleted_at) return res.status(409).json({ ok: false, error: '삭제된 작업오더는 수정할 수 없습니다.' });
+    if (o.status === 'done') return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
+
+    // 동적 SET — 화이트리스트 밖 필드(status/sales_id/work_sheet_url 등)는 조용히 무시가 아니라
+    // 도달 자체가 불가(목록을 순회하므로). 값이 실제로 달라진 필드만 SET + diff 기록.
+    const sets = [], vals = [], changes = [];
+    let i = 1;
+    for (const f of ADMIN_EDIT_FIELDS) {
+      if (b[f] === undefined) continue;
+      let nv, curCmp, nvCmp;
+      if (f === 'courier_proxy') {
+        nv = (b[f] === true || b[f] === 'true');
+        curCmp = (o.courier_proxy === true || o.courier_proxy === 'true') ? '예' : '아니오';
+        nvCmp = nv ? '예' : '아니오';
+      } else if (f === 'start_date') {
+        if (!String(b[f]).trim()) continue;              // 빈 값 = 변경 없음
+        nv = _dateOrNull(b[f]);
+        if (nv === null) continue;                        // 형식 오류 = 무시(지우지 않는다)
+        curCmp = _d10(o.start_date); nvCmp = _d10(nv);
+      } else if (INTAKE_INT_FIELDS.has(f)) {
+        if (String(b[f]).trim() === '') continue;
+        nv = _intOrZero(b[f]);
+        curCmp = String(_intOrZero(o[f])); nvCmp = String(nv);
+      } else {
+        nv = String(b[f]);
+        if (!nv.trim()) continue;                         // 빈 값 = 변경 없음
+        curCmp = String(o[f] == null ? '' : o[f]); nvCmp = nv;
+      }
+      if (String(curCmp) === String(nvCmp)) continue;     // 값 동일 = no-op(메모 도배 방지)
+      sets.push(`${f} = $${i++}`);
+      vals.push(nv);
+      changes.push({ field: f, from: curCmp, to: nvCmp });
+    }
+    if (sets.length === 0) return res.json({ ok: true, data: o, unchanged: true, changed: [] });
+
+    vals.push(id);
+    const { rows: upd } = await pool.query(
+      `UPDATE work_orders SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`,
+      vals
+    );
+
+    // 수정 요약 → memo_log 누적 + 인트라넷 알림 push (admin_memo 는 덮지 않는다 — 처리메모 칸 보호)
+    const by = req.admin?.name || '';
+    const at = new Date().toISOString();
+    const trunc = v => { v = String(v == null ? '' : v); return v === '' ? '(비어있음)' : (v.length > 40 ? v.slice(0, 40) + '…' : v); };
+    const memoText = `📝 리뷰웹 관리자 수정 (${by || '관리자'})\n` + changes.map(c =>
+      ADMIN_EDIT_LONGTEXT.has(c.field)
+        ? `· ${ADMIN_EDIT_LABELS[c.field] || c.field}: 내용 수정`
+        : `· ${ADMIN_EDIT_LABELS[c.field] || c.field}: ${trunc(c.from)} → ${trunc(c.to)}`
+    ).join('\n');
+    const { delivered, deliverError } = await _pushIntranetMemo(o, memoText, by, at);
+    try {
+      let log = [];
+      try { const p = JSON.parse(upd[0].memo_log || '[]'); if (Array.isArray(p)) log = p; } catch (_) {}
+      log.push({ memo: memoText, by, at, delivered, error: deliverError, kind: 'admin_edit' });
+      if (log.length > 100) log = log.slice(-100);
+      await pool.query(`UPDATE work_orders SET memo_log = $2 WHERE id = $1`, [id, JSON.stringify(log)]);
+      upd[0].memo_log = JSON.stringify(log);
+    } catch (logErr) {
+      logger.warn(`[order/edit] memo_log 기록 실패 (수정은 완료): ${logErr.message}`);
+    }
+
+    logger.info(`[order/edit] ${id} 관리자 수정 by ${by}: ${changes.map(c => c.field).join(', ')}`);
+    res.json({ ok: true, data: upd[0], changed: changes.map(c => c.field), delivered, deliverError });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── 인트라넷 처리메모 webhook push (공용 헬퍼) ─────────────────
+//   send-memo(처리메모 전송)와 admin/edit(관리자 수정 알림)이 같은 채널을 쓴다 —
+//   인트라넷은 이 payload 를 review_order_memos 로 받아 "보낸 오더" 카드의
+//   주황 처리메모 블록에 표시한다(수신부 무변경). fail-soft(실패해도 호출측 저장은 성공).
+// 필요 env: INTRANET_MEMO_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
+async function _pushIntranetMemo(o, memo, sentBy, sentAt) {
+  let delivered = false, deliverError = null;
+  const hook = process.env.INTRANET_MEMO_WEBHOOK_URL;
+  if (hook) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const resp = await fetch(hook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
+        body: JSON.stringify({
+          order_id: o.id, title: o.title, requester_name: o.created_by, status: o.status,
+          memo, sent_by: sentBy, sent_at: sentAt,
+        }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      delivered = resp.ok;
+      if (!resp.ok) deliverError = 'HTTP ' + resp.status;
+    } catch (e) {
+      deliverError = e.message;
+      logger.warn(`[order] 인트라넷 메모 webhook 실패: ${e.message}`);
+    }
+  } else {
+    deliverError = 'webhook 미설정';
+  }
+  return { delivered, deliverError };
+}
+
 // PUT /api/order/admin/send-memo — 처리메모 저장 + 인트라넷으로 즉시 push(webhook)
 // body: { id, memo }
-// 필요 env: INTRANET_MEMO_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
 router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     await _ensureTables();
@@ -1077,32 +1230,8 @@ router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (r
     const sentBy = req.admin?.name || '';
     const sentAt = new Date().toISOString();
 
-    // 인트라넷 webhook push
-    let delivered = false, deliverError = null;
-    const hook = process.env.INTRANET_MEMO_WEBHOOK_URL;
-    if (hook) {
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 8000);
-        const resp = await fetch(hook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
-          body: JSON.stringify({
-            order_id: o.id, title: o.title, requester_name: o.created_by, status: o.status,
-            memo, sent_by: sentBy, sent_at: sentAt,
-          }),
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        delivered = resp.ok;
-        if (!resp.ok) deliverError = 'HTTP ' + resp.status;
-      } catch (e) {
-        deliverError = e.message;
-        logger.warn(`[order] 인트라넷 메모 webhook 실패: ${e.message}`);
-      }
-    } else {
-      deliverError = 'webhook 미설정';
-    }
+    // 인트라넷 webhook push (공용 헬퍼)
+    const { delivered, deliverError } = await _pushIntranetMemo(o, memo, sentBy, sentAt);
 
     // 로그 누적 (최근 100건 유지)
     log.push({ memo, by: sentBy, at: sentAt, delivered, error: deliverError });

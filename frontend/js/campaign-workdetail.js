@@ -151,7 +151,11 @@
         + '</div>'
         + (cr.guideImageUrl ? '<img src="' + escAttr(cr.guideImageUrl) + '" alt="현금영수증 발행방법" style="margin-top:8px">' : '')
         + '<div style="font-size:.72rem;color:#B45309;font-weight:700;margin-top:8px">'
-        + '⚠ 리뷰 제출 때 발행 내역 캡처가 필요해요 — 결제 화면을 지나기 전에 꼭 발행해 주세요.</div>'
+        + '⚠ 결제 화면을 지나기 전에 꼭 발행을 신청해 주세요 — 결제가 끝난 뒤에는 적용하기 어려워요.</div>'
+        /* ★ D안(사용자 확정 2026-08-05): 발행확정(일련번호 부여)은 배송완료·구매확정 후 0~3일 —
+           그래서 발행 내역 캡처는 구매양식 제출의 필수 항목이 아니고, 확정된 뒤에 따로 제출한다. */
+        + '<div style="font-size:.72rem;color:#92400E;margin-top:4px">'
+        + '📌 발행 내역 캡처는 발행이 확정된 뒤(배송완료·구매확정 후 0~3일) 제출하면 돼요 — 구매양식 제출 때 필수가 아니에요.</div>'
         + '</div>';
     }
 
