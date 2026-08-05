@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>홈 작업목록 개선 3종 — 점검 결과 · 구현계획 와이어프레임</title>
+<style>
+  :root{color-scheme:light;
+    --ink:#1a2233;--muted:#5b667a;--faint:#98a2b3;--line:#e5e8ee;--line2:#d8dde6;
+    --card:#fff;--card2:#f7f8fa;--bg:#eef1f5;
+    --accent:#2f6bff;--accent-deep:#1d4fd7;--accent-soft:#eaf0ff;--accent-line:#c5d4ff;
+    --safe:#177a4c;--safe-soft:#e7f6ee;--warn:#a15c00;--warn-soft:#fdf3e2;
+    --bad:#c22f2f;--bad-soft:#fdecec}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.65;padding:28px 16px 80px}
+  .page{max-width:980px;margin:0 auto}
+  h1{font-size:21px;margin-bottom:4px}
+  .lead{color:var(--muted);font-size:12.5px;margin-bottom:22px}
+  h2{font-size:16px;margin:34px 0 10px;padding-left:10px;border-left:4px solid var(--accent)}
+  h3{font-size:13.5px;margin:18px 0 8px}
+  p{margin:6px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:10px 0;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .tag{display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 9px;vertical-align:2px;margin-right:4px}
+  .tag.fix{background:var(--bad-soft);color:var(--bad)}
+  .tag.new{background:var(--accent-soft);color:var(--accent-deep)}
+  .tag.ok{background:var(--safe-soft);color:var(--safe)}
+  .tag.q{background:var(--warn-soft);color:var(--warn)}
+  code{background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Consolas,monospace}
+  table.doc{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}
+  table.doc th{background:var(--card2);text-align:left;padding:7px 10px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);white-space:nowrap}
+  table.doc td{padding:7px 10px;border:1px solid var(--line);vertical-align:top}
+  ul{padding-left:20px;margin:6px 0}
+  li{margin:3px 0}
+  .warnbox{background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:10px;padding:10px 14px;font-size:12.5px;margin:8px 0}
+  .okbox{background:var(--safe-soft);border:1px solid #cde9da;border-radius:10px;padding:10px 14px;font-size:12.5px;margin:8px 0}
+  .small{font-size:11.5px;color:var(--muted)}
+  /* ── 목업(실제 화면 CSS 축약 재현) ── */
+  .mock{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--card);margin:10px 0;box-shadow:0 2px 8px rgba(16,24,40,.06)}
+  .mock-cap{font-size:11px;color:var(--faint);padding:6px 12px;background:var(--card2);border-bottom:1px solid var(--line)}
+  .m-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--card2)}
+  .m-ttl{font-size:12.5px;font-weight:800}
+  .m-seg{display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+  .m-seg span{font-size:11px;font-weight:750;padding:4px 11px;background:var(--card);color:var(--muted)}
+  .m-seg span.on{background:var(--accent);color:#fff}
+  .m-chip{font-size:11px;font-weight:750;padding:3px 11px;border-radius:999px;border:1px solid var(--line2);background:var(--card);color:var(--muted)}
+  .m-chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .m-chip.f-today.on{background:var(--accent);border-color:var(--accent)}
+  .m-chip.f-pay.on{background:#7a4bd6;border-color:#7a4bd6}
+  .m-chip.f-cand.on{background:var(--warn);border-color:var(--warn)}
+  .m-q{margin-left:auto;font-size:11px;padding:5px 11px;border:1px solid var(--line2);border-radius:9px;color:var(--faint);background:var(--card)}
+  .m-tw{max-height:250px;overflow:auto}
+  table.m-t{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+  table.m-t th{position:sticky;top:0;z-index:2;background:var(--card);color:var(--muted);font-weight:750;text-align:left;padding:7px 11px;border-bottom:1px solid var(--line);white-space:nowrap;box-shadow:0 1px 0 var(--line)}
+  table.m-t td{padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .m-nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+  .m-sub{font-size:10px;color:var(--faint)}
+  .m-g{display:inline-block;width:66px;height:8px;border-radius:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:6px}
+  .m-g i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent)}
+  .m-num{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11.5px}
+  .m-s{display:inline-block;border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:750;white-space:nowrap}
+  .m-s.run{background:var(--safe-soft);color:var(--safe)}
+  .m-s.cand{background:var(--warn-soft);color:var(--warn)}
+  .m-b{display:inline-block;font-size:10.5px;font-weight:750;padding:3px 8px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);white-space:nowrap;text-align:center}
+  .m-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .m-b.dim{color:var(--faint);border-style:dashed}
+  .m-fol{display:inline-flex;gap:3px}
+  .m-fol .m-b{padding:3px 6px}
+  .m-act{display:grid;grid-template-columns:88px 92px 46px 88px 64px;gap:5px;justify-content:end;align-items:center}
+  .m-unpaid{color:var(--bad);font-weight:750}
+  .arrow{color:var(--accent-deep);font-weight:800}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>🏠 홈 작업목록 개선 3종 — 점검 결과 · 구현계획</h1>
+<div class="lead">리뷰웹시스템[3버전] 홈 「작업 목록」(workdesk.html) · 작성 2026-08-05 · 요청 3건: ① 헤더행 고정 ② 폴더 바로가기 버튼(구매캡처·리뷰·현영) ③ 필터 3종(금일 진행 / 입금 체크 / 마감 체크)</div>
+
+<!-- ════════════════════ 1. 점검 결과 ════════════════════ -->
+<h2>1. 점검 결과 (실측 완료)</h2>
+
+<div class="card">
+  <h3><span class="tag fix">버그 확정</span>① 헤더행이 고정되지 않는 원인 — 실브라우저로 재현·확정</h3>
+  <p>표 헤더에는 이미 <code>position:sticky</code>가 선언돼 있습니다(<code>table.wbl-t th</code>). 그런데도 스크롤하면 헤더가 함께 사라지는 이유를 실제 페이지(스텁 API + http 오리진)로 재현해 확인했습니다:</p>
+  <ul>
+    <li><b>원인 = 전역 규칙 <code>table{ … overflow:hidden }</code>(workdesk.html 354행)</b>이 홈 목록 표(<code>.wbl-t</code>)에도 적용됩니다. 조상에 <code>overflow:hidden</code>이 끼면 sticky의 기준이 스크롤 컨테이너(<code>.wbl-tw</code>)가 아니라 <b>표 자신</b>이 되고, 표는 스크롤하지 않으므로 sticky가 영영 발동하지 않습니다.</li>
+    <li>같은 문제를 <b>작업보드 시트그리드가 이미 밟았고 이미 우회</b>했습니다 — <code>table.sheetgrid{overflow:visible}</code>(386행 주석: "overflow:visible = 상단 table{overflow:hidden} 무효화 → thead sticky 동작"). 홈 목록만 이 우회가 빠져 있었습니다.</li>
+    <li>격리 재현(전역 규칙 없는 최소 페이지)에서는 sticky가 정상 동작 → 전역 규칙이 범인임을 교차 확인.</li>
+  </ul>
+  <div class="okbox">✅ <b>수정 = CSS 한 줄</b>: <code>table.wbl-t{overflow:visible}</code> 추가(시트그리드와 같은 관용구). 추가로 sticky 경계선이 스크롤을 따라가지 않도록 <code>border-collapse:separate;border-spacing:0</code> + th <code>box-shadow</code> 전환을 함께 적용(collapse 모드에서는 th의 border-bottom이 셀에 귀속돼 스크롤과 함께 밀리는 브라우저 특성).</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag ok">데이터 확인</span>② 폴더 바로가기 — 폴더 3종의 저장 위치</h3>
+  <table class="doc">
+    <tr><th>폴더</th><th>실제 위치(Drive)</th><th>URL 저장 여부</th><th>버튼 구현 방식</th></tr>
+    <tr><td>🖼 리뷰폴더</td><td><code>{시트제목}/{탭명}/[리뷰]</code></td><td>✅ <code>tab_configs.folder_url</code></td><td>저장된 URL 새창(즉시)</td></tr>
+    <tr><td>🛒 구매캡처폴더</td><td><code>{시트제목}/{탭명}/[구매캡처]</code></td><td>✅ <code>tab_configs.capture_folder_url</code></td><td>저장된 URL 새창(즉시)</td></tr>
+    <tr><td>🧾 현영폴더</td><td><code>[리뷰]/현금영수증</code> <b>서브폴더</b></td><td>❌ 미저장(업로드 시 즉석 생성 — diag review-upload 1637행)</td><td>클릭 시 서버가 Drive에서 찾아 URL 반환(신규 소형 API)</td></tr>
+  </table>
+  <ul>
+    <li><b>서버 비용 0에 가까움</b>: 홈 목록 통계(<code>tabStatsMap</code>)가 <b>이미 <code>tab_configs</code>를 SELECT</b>하므로, 그 쿼리에 <code>folder_url</code>·<code>capture_folder_url</code>·<code>income_type</code> 컬럼만 추가하면 리뷰·캡처 버튼은 <b>쿼리 순증 0</b>으로 나온다.</li>
+    <li><b>광고주 자동 제외</b>: stats 주석 자체가 내부인 전용(advertiser 미동봉)이라 폴더 버튼도 광고주에게 구조적으로 안 나간다(별도 게이트 불필요).</li>
+    <li><b>현영 버튼 노출 조건</b>: 현영 서브폴더는 <code>income_type</code>에 '현영'이 포함된 탭에서만 생긴다(캡처 슬롯 자동 2슬롯 판정과 같은 기준 — <code>utils/captureSlots.isCashReceiptIncome</code> 재사용, 판정 사본 금지). 현영 탭이 아니면 버튼 자체를 그리지 않는다.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="tag ok">데이터 확인</span>③ 필터 3종 — 판정 재료가 전부 이미 응답에 있다</h3>
+  <p>홈 목록 응답(<code>/api/trackb/tabs?stats=1</code>)에는 이미 <code>stats.total / submitted / paid</code>(인원·제출·입금), <code>todayDone</code>(오늘 완료), <code>finished</code>(마감)가 실려 있습니다. <b>신규 서버 집계 없이 프론트 필터만으로 3종이 성립</b>합니다.</p>
+  <ul>
+    <li>현재 헤더의 <b>"✓ 마감 후보 8건" 배지는 표시 전용(클릭 불가)</b> — 이번에 클릭 가능한 필터로 승격.</li>
+    <li>마감 후보 판정(<code>isFinishCandidate</code> = 인원 충족 + 전건 제출 + 전건 입금)은 이미 있는 함수를 그대로 쓴다(판정 사본 금지).</li>
+  </ul>
+</div>
+
+<!-- ════════════════════ 2. 와이어프레임 ════════════════════ -->
+<h2>2. 구현 와이어프레임</h2>
+
+<p class="small">아래 목업은 실제 화면 CSS를 축약 재현한 것입니다. <b>표 안을 스크롤해 보세요 — 헤더행이 고정됩니다</b>(①의 수정 결과를 이 문서에서 미리 체험).</p>
+
+<div class="mock">
+  <div class="mock-cap">목업 — 개선 후 홈 작업 목록 (헤더 고정 + 필터 3종 + 폴더 바로가기 열)</div>
+  <div class="m-h">
+    <span class="m-ttl">📋 작업 목록</span>
+    <span class="m-seg"><span class="on">진행 중 102</span><span>마감 보관함 0</span></span>
+    <span class="m-chip f-today on">📅 금일 진행 74</span>
+    <span class="m-chip f-pay">💰 입금 체크 21</span>
+    <span class="m-chip f-cand">🏁 마감 체크 8</span>
+    <span class="m-chip on">전체</span><span class="m-chip">만두</span><span class="m-chip">망고</span>
+    <span class="m-q">🔎 작업명 · 업체 · 담당자 검색</span>
+  </div>
+  <div class="m-tw">
+    <table class="m-t">
+      <thead><tr><th>작업명</th><th>담당</th><th>인원/제출</th><th>입금</th><th>상태</th><th style="text-align:right">폴더 / 처리</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div class="m-nm">0612)네이버_멀티비타민_50건</div><div class="m-sub">에이치디에스컴퍼니</div></td>
+          <td>만두</td>
+          <td><span class="m-g"><i style="width:82%"></i></span><span class="m-num">41/50</span></td>
+          <td class="m-num">43</td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b" title="구매캡처 폴더">🛒</span><span class="m-b" title="리뷰 폴더">🖼</span><span class="m-b" title="현영 폴더">🧾</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">0720)네이버_멀티비타민_50건</div><div class="m-sub">에이치디에스컴퍼니</div></td>
+          <td>망고</td>
+          <td><span class="m-g"><i style="width:86%"></i></span><span class="m-num">44/51</span></td>
+          <td class="m-num"><span class="m-unpaid">43 <small>(미입금 1)</small></span></td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b" title="구매캡처 폴더">🛒</span><span class="m-b" title="리뷰 폴더">🖼</span><span class="m-b dim" title="현영 탭 아님 — 버튼 없음(빈 칸)">·</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">(완)5/8_쟈니베어_쿠팡_육실화_126건</div><div class="m-sub">스마트윈솔루션</div></td>
+          <td>—</td>
+          <td><span class="m-g"><i style="width:99%"></i></span><span class="m-num">126/127</span></td>
+          <td class="m-num">110</td>
+          <td><span class="m-s cand">✓ 마감 후보</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b">🛒</span><span class="m-b">🖼</span><span class="m-b">🧾</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">6/10_쟈니베어_쿠팡_온열안대_500건</div><div class="m-sub">스마트윈솔루션</div></td>
+          <td>망고</td>
+          <td><span class="m-g"><i style="width:99%"></i></span><span class="m-num">497/499</span></td>
+          <td class="m-num">497</td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b">🛒</span><span class="m-b">🖼</span><span class="m-b">🧾</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">6/12_쟈니베어_쿠팡_육실화_240건</div><div class="m-sub">스마트윈솔루션</div></td>
+          <td>만두</td>
+          <td><span class="m-g"><i style="width:98%"></i></span><span class="m-num">236/240</span></td>
+          <td class="m-num"><span class="m-unpaid">233 <small>(미입금 3)</small></span></td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b">🛒</span><span class="m-b">🖼</span><span class="m-b">🧾</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">7/23_쟈니베어_쿠팡_양면테이프_63건</div><div class="m-sub">스마트윈솔루션</div></td>
+          <td>박은비</td>
+          <td><span class="m-g"><i style="width:81%"></i></span><span class="m-num">46/57</span></td>
+          <td class="m-num">46</td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b">🛒</span><span class="m-b dim" title="아직 폴더 미생성 — 첫 캡처 제출 시 자동 생성">🖼</span><span class="m-b">🧾</span></span>
+            <span class="m-b">● 공고</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">7/8_희망케어_쿠팡_세련닷_15건</div><div class="m-sub">스마트윈솔루션</div></td>
+          <td>—</td>
+          <td><span class="m-sub">—</span></td>
+          <td class="m-num">—</td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b">🛒</span><span class="m-b">🖼</span><span class="m-b dim">·</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+        <tr>
+          <td><div class="m-nm">7/8_쟈니베어_쿠팡_아로마온열안대_443건</div><div class="m-sub">스마트윈솔루션</div></td>
+          <td>망고</td>
+          <td><span class="m-g"><i style="width:97%"></i></span><span class="m-num">430/443</span></td>
+          <td class="m-num">427</td>
+          <td><span class="m-s run">진행 중</span></td>
+          <td><div class="m-act">
+            <span class="m-fol"><span class="m-b">🛒</span><span class="m-b">🖼</span><span class="m-b">🧾</span></span>
+            <span class="m-b">＋공고발행</span><span class="m-b">열기</span><span class="m-b">☑ 오늘 완료</span><span class="m-b dark">🏁 마감</span>
+          </div></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── A 헤더 고정 ── -->
+<div class="card">
+  <h3><span class="tag fix">A</span> 헤더행 고정 — CSS 수정만(마크업·JS 무변경)</h3>
+  <ul>
+    <li><code>table.wbl-t{overflow:visible}</code> — 전역 <code>table{overflow:hidden}</code> 상쇄(시트그리드 관용구 그대로).</li>
+    <li><code>border-collapse:collapse → separate + border-spacing:0</code> + th는 <code>border-bottom</code> 대신 <code>box-shadow:0 1px 0 var(--line)</code> — collapse 모드에서 헤더 경계선이 본문과 함께 밀리는 브라우저 특성 회피.</li>
+    <li>th <code>z-index</code>를 버튼(공고·폴더)보다 위로 — 스크롤 시 버튼이 헤더를 뚫고 그려지는 것 방지.</li>
+  </ul>
+</div>
+
+<!-- ── B 폴더 바로가기 ── -->
+<div class="card">
+  <h3><span class="tag new">B</span> 폴더 바로가기 버튼 — 줄마다 🛒 캡처 · 🖼 리뷰 · 🧾 현영</h3>
+  <table class="doc">
+    <tr><th>버튼</th><th>동작</th><th>없을 때</th></tr>
+    <tr><td>🛒 구매캡처</td><td><code>capture_folder_url</code> 새창(<code>noopener</code>)</td><td rowspan="2">비활성 + 안내 툴팁 "아직 폴더가 생성되지 않았습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다"</td></tr>
+    <tr><td>🖼 리뷰</td><td><code>folder_url</code> 새창</td></tr>
+    <tr><td>🧾 현영</td><td>클릭 시 <code>GET /api/trackb/tab-folders?sheetId&amp;tabName</code>(신규 소형 API)로 <code>[리뷰]/현금영수증</code> 서브폴더를 Drive에서 찾아 새창. <b>현영 탭(income_type '현영')에만 렌더</b></td><td>"현영 캡처가 아직 없어 폴더가 만들어지지 않았습니다" 토스트(생성하지 않음 — 읽기 전용)</td></tr>
+  </table>
+  <ul>
+    <li><b>배치 = 처리 열 왼쪽에 고정폭 한 칸 추가</b>: <code>.wbl-act</code> grid <code>92px 46px 88px 64px</code> → <code>88px 92px 46px 88px 64px</code>(폴더칸 88px 선두). "버튼은 줄마다 자기 열을 지킨다" 규율 유지 — 3개 아이콘은 그 칸 안에서 고정 3분할이라 현영 버튼이 없어도 열이 흔들리지 않는다(빈 자리 유지). 마감 보관함(.fin)·열람전용(.ro) template도 같은 칸을 선두에 추가.</li>
+    <li><b>서버 ①</b>: <code>tabStatsMap</code> SELECT에 <code>folder_url·capture_folder_url·income_type</code> 3컬럼 추가 → stats 주석에 <code>folderUrl / captureFolderUrl / cashReceipt</code>(불리언)로 동봉. <b>쿼리 순증 0 · 광고주 미동봉(기존 stats 규율 그대로)</b>.</li>
+    <li><b>서버 ②(현영 전용)</b>: <code>GET /api/trackb/tab-folders</code> — <code>internalMiddleware</code>(내부인 전용), <code>folder_url</code>에서 폴더ID 추출 → Drive에서 이름 '현금영수증' 서브폴더 <b>find-only</b>(생성 안 함 — 폴더 생성은 업로드·스마트빌드의 기존 단일 경로 유지). <code>driveThrottledCall</code> lane 준수 + 탭당 10분 캐시(찾으면 URL은 불변이라 길게 캐시해도 안전) + fail-soft(실패 = 사유 반환, 500 금지).</li>
+    <li><b>onclick에는 인덱스만</b> 넘긴다(<code>openTabFolder(i,'capture')</code>) — 시트에서 온 탭명·URL을 onclick 문자열에 넣지 않는다(M1 실측 XSS 규율). URL은 렌더 시 <code>https://drive.google.com</code> 호스트 검증 후에만 사용.</li>
+  </ul>
+</div>
+
+<!-- ── C 필터 3종 ── -->
+<div class="card">
+  <h3><span class="tag new">C</span> 필터 3종 — 판정 정의(단일 출처)와 상호작용</h3>
+  <table class="doc">
+    <tr><th>필터</th><th>판정(진행 중 목록 대상)</th><th>배지 숫자</th><th>정렬</th></tr>
+    <tr><td>📅 금일 진행</td><td>오늘 완료(☑)가 <b>아닌</b> 작업 = 오늘 처리할 몫이 남은 작업</td><td>해당 작업 수</td><td>서버 순서 유지</td></tr>
+    <tr><td>💰 입금 체크</td><td><code>제출(submitted) &gt; 입금(paid)</code> — 제출됐는데 입금 안 된 건이 있는 작업</td><td>해당 작업 수</td><td><b>미입금 건수 큰 순</b> + 입금 칸에 <span class="m-unpaid">빨간 (미입금 N)</span> 병기</td></tr>
+    <tr><td>🏁 마감 체크</td><td><code>isFinishCandidate</code>(인원 충족+전건 제출+전건 입금) — <b>기존 함수 그대로</b>(사본 금지)</td><td>해당 작업 수(기존 "✓ 마감 후보 N건" 배지가 이 필터 칩으로 승격)</td><td>서버 순서 유지</td></tr>
+  </table>
+  <ul>
+    <li><b>단일 토글</b>: 셋 중 하나만 켜진다(다시 누르면 해제 = 전체). 담당자 칩·검색과는 <b>AND</b> 결합(교집합).</li>
+    <li><b>진행 중 탭에서만 노출</b>(마감 보관함에서는 의미 없음 — 숨김). 필터 상태는 <code>STATE.finFilter</code> 하나로 관리하고 <code>_finVisible()</code> 한 곳에서만 거른다(목록·배지 숫자가 같은 판정을 공유 — 갈라짐 구조적 차단).</li>
+    <li><b>통계 조회 실패 시</b>(<code>statsUnavailable</code>): 입금·마감 필터는 판정 재료가 없다 → 칩을 비활성 + "수치를 불러오지 못해 이 필터를 쓸 수 없습니다" 툴팁(빈 결과를 "해당 없음"으로 위장하지 않는다 — 무신호 금지 규율). 금일 진행은 todayDone만 쓰므로 계속 동작.</li>
+    <li>기존 "✓ 마감 후보 N건" 표시 배지는 제거하고 필터 칩이 그 역할을 흡수(같은 정보 두 번 표시 안 함).</li>
+  </ul>
+</div>
+
+<!-- ════════════════════ 3. 변경 지점 요약 ════════════════════ -->
+<h2>3. 변경 지점 · 구현 순서</h2>
+<div class="card">
+  <table class="doc">
+    <tr><th>순서</th><th>파일</th><th>변경</th></tr>
+    <tr><td>1</td><td><code>server/src/services/trackB.service.js</code></td><td><code>tabStatsMap</code> SELECT + 맵 값에 <code>folderUrl·captureFolderUrl·cashReceipt</code> 3필드(쿼리 순증 0)</td></tr>
+    <tr><td>2</td><td><code>server/src/routes/trackB.routes.js</code></td><td><code>GET /tab-folders</code> 신규(internal · find-only · 캐시 · fail-soft) — 현영 서브폴더 해석</td></tr>
+    <tr><td>3</td><td><code>frontend/workdesk.html</code></td><td>CSS(헤더 고정 3줄 + 폴더칸 grid) · <code>_finVisible</code> 필터 분기 · 헤더 칩 3개 · 행 폴더 버튼 · <code>openTabFolder(i,kind)</code></td></tr>
+    <tr><td>4</td><td><code>server/tests/homeTasklistFilters.test.js</code>(신규)</td><td>회귀가드 — 아래 목록</td></tr>
+  </table>
+  <p class="small"><b>회귀가드 계획</b>: ① sticky 상쇄 CSS 존재(전역 table 규칙 대비 — 선언 grep이 아니라 <b>실브라우저로 스크롤 후 th 위치 실측</b>, 이번 재현 하네스 재사용) ② 필터 판정을 vm으로 실행(입금 체크 = submitted&gt;paid, 마감 체크 ≡ isFinishCandidate 동일 함수 참조) ③ stats 배선(3필드) + <b>광고주 응답에 폴더 URL 0</b> ④ tab-folders 라우터 스택 실검사(internal 게이트) + find-only(Drive create 미호출 스파이) ⑤ onclick 인덱스만(문자열 보간 부재) ⑥ 기존 가드 패턴 드리프트 점검(<code>workboardFinish</code>·<code>homeCampaignButton</code>의 .wbl-act grid 검사가 칸 수 변경으로 깨질 수 있음 — 검사 의미 불변으로 갱신).</p>
+</div>
+
+<!-- ════════════════════ 4. 확정이 필요한 결정 ════════════════════ -->
+<h2>4. 확정이 필요한 결정 포인트 <span class="tag q">답 주시면 그대로 구현</span></h2>
+<div class="card">
+  <table class="doc">
+    <tr><th>#</th><th>질문</th><th>권장(기본값)</th></tr>
+    <tr><td>Q1</td><td>"📅 금일 진행"의 정의 — <b>오늘 완료 체크가 안 된 작업</b>으로 충분한가요? (모집공고가 오늘 열려 있는 작업만 등 더 좁은 정의도 가능하지만, 공고 없는 작업이 빠지는 부작용이 있습니다)</td><td><b>오늘 완료 미체크 = 금일 진행</b>(단순·전 작업 커버)</td></tr>
+    <tr><td>Q2</td><td>현영 폴더가 아직 없을 때(캡처 0건) 버튼을 누르면 — 안내만 할까요, 빈 폴더를 미리 만들어 드릴까요?</td><td><b>안내만(find-only)</b> — 폴더 생성 경로를 업로드·스마트빌드 하나로 유지(사본 경로 금지)</td></tr>
+    <tr><td>Q3</td><td>목록 높이(현재 420px 고정)를 화면 높이 기반으로 키울까요? (헤더가 고정되면 길게 써도 안전해집니다)</td><td><b>420px → <code>min(60vh, 640px)</code></b>로 확대(선택 사항)</td></tr>
+    <tr><td>Q4</td><td>폴더 버튼 위치 — 처리 열 왼쪽 새 칸(위 목업) vs 작업명 아래 서브라벨 옆 소형 아이콘</td><td><b>처리 열 왼쪽 새 칸</b>(고정폭 grid 규율 유지 · 클릭 영역 안정)</td></tr>
+  </table>
+  <p class="small">답이 없으면 권장(기본값)으로 진행합니다.</p>
+</div>
+
+<!-- ════════════════════ 5. 무접촉 보장 ════════════════════ -->
+<h2>5. 건드리지 않는 것 (무접촉 보장)</h2>
+<div class="card">
+  <ul>
+    <li>시트 쓰기 0 · 주문원장/큐/행배정 무접촉 · Track A 무접촉 — 전부 읽기(폴더 URL·통계)와 화면 표시뿐.</li>
+    <li>전역 <code>table{}</code> 규칙 자체는 수정하지 않는다(다른 화면의 둥근 모서리 클리핑이 그 규칙에 의존) — <code>.wbl-t</code>에서만 상쇄.</li>
+    <li>마감·오늘 완료·공고 버튼의 기존 동작/판정/API 무변경 — 필터는 <code>_finVisible()</code>의 표시 분기만 늘린다.</li>
+    <li>신규 마이그레이션 0 · 신규 저장소 0(현영 폴더 URL은 저장하지 않고 캐시만 — 저장하면 리네임·재생성 시 stale 포인터가 남는다).</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
