@@ -51,7 +51,9 @@ ok('진입 시 자리표시자는 그대로(로딩 표시 자체는 유지)',
 const block = /const _RI_LABEL = \{[\s\S]*?\n(?=\/\*\* 카드의 탭명을 눌러)/.exec(src);
 ok('리뷰검수 렌더 블록을 추출했다', !!block);
 // 상세 팝업 + 좌우 이동 + 키보드 리스너 블록(riOpenDetail ~ keydown 리스너)
-const detailBlock = /function riOpenDetail\(i\)\{[\s\S]*?\n\}\);\n(?=async function riResolve)/.exec(src);
+// ★ 확인 2분화(학습 루프) 도입으로 riResolve 앞에 설명 주석 블록이 생겼다 — 주석 유무를
+//   모두 허용(검사 의미 불변: 추출 경계는 여전히 riResolve 직전).
+const detailBlock = /function riOpenDetail\(i\)\{[\s\S]*?\n\}\);\n(?=(?:\/\*[\s\S]{0,600}?\*\/\n)?async function riResolve)/.exec(src);
 ok('상세 팝업 블록을 추출했다', !!detailBlock);
 
 /** 아주 작은 DOM 흉내 — innerText 대신 innerHTML 문자열만 본다. */
