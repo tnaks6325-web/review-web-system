@@ -198,7 +198,7 @@ ok('목록·상세의 카드 리뷰비는 오늘 구간으로 표시(카드와 �
   && /_applyCurrentFee\(view, await _loadFeeSchedules\(pool, id\), now\)/.test(camp));
 ok('목록 구간 조회는 배치 1쿼리 + 목록 캐시에 실려 상각된다',
   /_fetchFeeSchedulesFor\(pool, rows\.map\(r => r\.id\)\)/.test(camp)
-  && /_listCache = \{ at: now\.getTime\(\), rows, countsMap, optionsMap, feeMap \}/.test(camp));
+  && /_listCache = \{ at: now\.getTime\(\), rows, countsMap, optionsMap, feeMap/.test(camp));   // crMap 등 뒤 필드 추가 허용(검사 의미 = feeMap 이 목록 캐시에 실림)
 ok('구간 조회 실패는 [] 폴백(fail-soft) — 공고 목록이 죽지 않는다',
   /async function _loadFeeSchedules[\s\S]{0,600}catch \(_\) \{\s*\n\s*return \[\];/.test(camp));
 
