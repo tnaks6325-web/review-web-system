@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마감 공고 리뷰어 화면 확인 + 현금영수증 안내 시점 시안</title>
+<style>
+  /* 화면 재현 목업 — 다크모드에서 색이 뒤집히면 "실물과 같다"가 깨지므로 라이트 고정 */
+  :root{ color-scheme: light; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif; background:#F3F5F9; color:#1F2937; line-height:1.55; padding:28px 16px 80px; }
+  .wrap{ max-width:1180px; margin:0 auto; }
+  h1{ font-size:1.5rem; margin-bottom:6px; }
+  .sub{ color:#6B7280; font-size:.9rem; margin-bottom:22px; }
+  h2{ font-size:1.15rem; margin:38px 0 12px; padding-left:10px; border-left:4px solid #2563EB; }
+  h3{ font-size:.98rem; margin:18px 0 8px; }
+  .card{ background:#fff; border:1px solid #E5E7EB; border-radius:14px; padding:18px 20px; margin-bottom:14px; }
+  .note{ background:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:10px 14px; font-size:.85rem; margin:10px 0; }
+  .good{ background:#ECFDF5; border-color:#A7F3D0; }
+  .bad{ background:#FEF2F2; border-color:#FECACA; }
+  table{ border-collapse:collapse; width:100%; font-size:.84rem; }
+  th,td{ border:1px solid #E5E7EB; padding:8px 10px; text-align:left; vertical-align:top; }
+  th{ background:#F8FAFC; white-space:nowrap; }
+  code{ background:#F1F5F9; border-radius:4px; padding:1px 5px; font-size:.82em; }
+  .tag{ display:inline-block; font-size:.72rem; font-weight:800; border-radius:999px; padding:2px 10px; margin-right:6px; }
+  .tA{ background:#DBEAFE; color:#1D4ED8; } .tB{ background:#EDE9FE; color:#6D28D9; }
+  .tC{ background:#FEF3C7; color:#B45309; } .tD{ background:#DCFCE7; color:#15803D; }
+  .switch{ margin:14px 0 20px; font-size:.83rem; color:#475569; }
+  .switch a{ color:#2563EB; font-weight:700; text-decoration:none; margin-right:10px; }
+
+  /* ── 플로우 다이어그램 ── */
+  .flow{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
+  .fstep{ background:#EFF6FF; border:1.5px solid #93C5FD; border-radius:10px; padding:8px 12px; font-size:.82rem; font-weight:700; color:#1E40AF; }
+  .fstep.cr{ background:#FFF7ED; border-color:#FDBA74; color:#B45309; }
+  .fstep.gray{ background:#F1F5F9; border-color:#CBD5E1; color:#64748B; font-weight:600; }
+  .farr{ color:#94A3B8; font-weight:800; }
+
+  /* ── 모바일 목업 프레임 ── */
+  .phones{ display:flex; flex-wrap:wrap; gap:18px; margin:14px 0; }
+  .phone{ width:300px; background:#fff; border:1.5px solid #CBD5E1; border-radius:20px; overflow:hidden; box-shadow:0 4px 14px rgba(15,23,42,.08); flex-shrink:0; }
+  .ph-top{ background:#0F172A; color:#E2E8F0; font-size:.68rem; padding:5px 12px; display:flex; justify-content:space-between; }
+  .ph-cap{ background:#F8FAFC; border-bottom:1px solid #E5E7EB; font-size:.72rem; font-weight:800; color:#334155; padding:6px 12px; }
+  .ph-body{ padding:12px; font-size:.74rem; }
+  .mk{ border:1px solid #E5E7EB; border-radius:10px; padding:9px 10px; margin-bottom:8px; background:#fff; }
+  .mk .tt{ font-weight:800; font-size:.74rem; margin-bottom:4px; color:#111827; }
+  .mk .bd{ color:#4B5563; font-size:.7rem; }
+  .mk.cr{ background:#FFF7ED; border-color:#FDBA74; }
+  .mk.cr .tt{ color:#B45309; }
+  .mk.dim{ opacity:.45; }
+  .imgbox{ background:repeating-linear-gradient(45deg,#F1F5F9,#F1F5F9 8px,#E2E8F0 8px,#E2E8F0 16px); border:1px dashed #CBD5E1; border-radius:8px; height:74px; display:flex; align-items:center; justify-content:center; color:#64748B; font-size:.68rem; margin-top:6px; }
+  .btn{ display:block; text-align:center; background:#2563EB; color:#fff; border-radius:9px; font-weight:800; font-size:.76rem; padding:9px 0; margin-top:8px; }
+  .btn.warn{ background:#F59E0B; }
+  .btn.ghost{ background:#fff; color:#2563EB; border:1.5px solid #93C5FD; }
+  .chip{ display:inline-block; font-size:.62rem; font-weight:800; border-radius:999px; padding:1px 7px; }
+  .chip.cr{ background:#FFEDD5; color:#B45309; border:1px solid #FDBA74; }
+  .chip.gr{ background:#F1F5F9; color:#64748B; }
+  .slotrow{ display:flex; gap:6px; margin-top:6px; }
+  .slot{ flex:1; border:1.5px dashed #CBD5E1; border-radius:8px; padding:8px 4px; text-align:center; font-size:.66rem; color:#64748B; }
+  .slot.cr{ border-color:#FDBA74; background:#FFF7ED; color:#B45309; font-weight:700; }
+
+  /* ── 관리자 카드 목업 ── */
+  .acard{ width:270px; background:#fff; border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; box-shadow:0 2px 8px rgba(15,23,42,.06); }
+  .acard .thumb{ position:relative; height:120px; background:#E2E8F0; display:flex; align-items:center; justify-content:center; color:#94A3B8; font-size:.75rem; }
+  .acard .ovl{ position:absolute; inset:0; background:rgba(15,23,42,.55); backdrop-filter:grayscale(1); display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; font-size:.72rem; gap:2px; }
+  .acard .ovl b{ font-size:.95rem; letter-spacing:1px; }
+  .acard .abody{ padding:10px 12px; font-size:.74rem; }
+  .acard .aacts{ display:flex; gap:5px; padding:9px 10px; border-top:1px solid #F1F5F9; }
+  .aic{ flex:1; text-align:center; border:1px solid #D9DEE8; border-radius:8px; font-size:.68rem; font-weight:700; color:#334155; padding:6px 0; background:#fff; }
+  .aic.new{ border-color:#2563EB; color:#1D4ED8; background:#EFF6FF; box-shadow:0 0 0 2px rgba(37,99,235,.18); }
+  .callout{ font-size:.72rem; color:#1D4ED8; font-weight:700; margin-top:6px; }
+
+  .cmp{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin-top:10px; }
+  .cmp .card{ margin:0; }
+  .pv-note{ background:#EEF2FF; border:1px solid #C7D2FE; border-radius:8px; font-size:.68rem; color:#3730A3; padding:6px 8px; margin-bottom:8px; font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧾 마감 공고 리뷰어 화면 확인 + 현금영수증 발행방법 안내 시점 시안</h1>
+  <div class="sub">
+    모집공고 탭 — 오늘 투입완료·최종 마감된 공고도 <b>리뷰어가 [참여하기]를 누르면 보이는 화면</b>(구매가이드·현금영수증 발행방법 안내)을
+    그대로 확인할 수 있게 하는 변경 + 현금영수증 발행방법을 <b>언제 안내할지</b>에 따른 시안 4종.
+    작성 2026-08-05 · 대상: 리뷰웹시스템[3버전] 모집공고 탭
+  </div>
+  <div class="switch" id="vswitch">
+    단독 보기: <a href="?v=A">시안 A</a> <a href="?v=B">시안 B</a> <a href="?v=C">시안 C</a> <a href="?v=D">시안 D (권장)</a> <a href="?">전체 보기</a>
+  </div>
+
+  <!-- ════════════════ 0. 구현계획 ════════════════ -->
+  <section data-view="plan">
+  <h2>0. 구현계획 — 마감 공고도 리뷰어 화면을 보는 방법</h2>
+  <div class="card">
+    <h3>문제</h3>
+    <p style="font-size:.86rem">
+      오늘 모집이 끝났거나(투입완료) 완전히 마감된 공고는 리뷰어 링크로 들어가면 <b>잠금 화면만</b> 보인다.
+      그래서 담당자가 "이 공고에 구매가이드가 제대로 들어갔나, 현영 건인데 현금영수증 발행방법 안내가 나가고 있나"를
+      확인하려면 방법이 없었다(참여를 실제로 해 볼 수도 없음).
+    </p>
+    <h3 style="margin-top:14px">해결 — 이미 있는 "관리자 미리보기"를 카드에서 바로 연다 (서버 변경 0)</h3>
+    <p style="font-size:.86rem">
+      수정 모달 안에만 있던 <b>[👁 리뷰어 화면]</b>(미리보기 모드)을 모집공고 <b>카드 액션 줄에 버튼으로 추가</b>한다.
+      미리보기는 기존 <code>campaign.html?preview=1#tok=</code> + <code>GET /admin/:id/preview</code> 합성 응답을 그대로 재사용
+      — <b>마감·오픈전 공고도 [모집중 가정] 토글(기본 ON)로 참여 전 → 작업가이드(현금영수증 안내 포함) → 제출 완료 전 과정</b>을 볼 수 있고,
+      DB에 아무것도 쓰지 않아 홀드·정원 카운터를 오염시키지 않는다.
+    </p>
+    <table style="margin-top:12px">
+      <tr><th>단계</th><th>변경</th><th>파일</th><th>비고</th></tr>
+      <tr><td>①</td><td>카드 액션 줄에 <b>[👁 보기]</b> 버튼 추가 (수정 · 시트 · 관제 · 게시 옆) — <b>마감/게시전/오픈전 포함 모든 참여형 공고</b></td><td><code>frontend/js/campaign-cards.js</code></td><td>기존 <code>openReviewerPreview</code>(index-recruit.js) 호출 재사용. 진짜 admin 토큰일 때만 노출(스코프 토큰은 미리보기 API 403 → 버튼 자체를 안 그림)</td></tr>
+      <tr><td>②</td><td>리뷰웹시스템[3버전]은 <code>/api/campaign/admin/:id/preview</code> 401/403 시 <code>/api/trackb/campaigns/:id/preview</code> 폴백(기존 규칙 그대로)</td><td><code>campaign.html</code> (기존)</td><td>변경 없음 — 이미 구현됨</td></tr>
+      <tr><td>③</td><td>현금영수증 안내 시점 변경(아래 채택 시안에 따라)</td><td><code>campaign-workdetail.js</code> · <code>campaign.html</code> · <code>search-app.js</code></td><td>공용 렌더러라 <b>관리자 미리보기에도 자동 반영</b> — "미리보기 ≠ 실제 화면" 불가</td></tr>
+      <tr><td>④</td><td>회귀가드 추가/갱신</td><td><code>tests/campaignAdminPreview.test.js</code> 등</td><td>제출 차단 4중 가드 유지 확인</td></tr>
+    </table>
+    <div class="note good" style="margin-top:12px">
+      ✅ 현금영수증 정보(<code>cashReceipt{required, businessNo, guideImageUrl}</code>)는 이미 work-detail과 관리자 미리보기 응답에 함께 실린다
+      — 연결 탭 진행방식(<code>income_type</code>)에 '현영'이 포함된 공고만, 채널(쿠팡/네이버/올리브영/카카오메이커스)에 맞는 발행방법 이미지를 고른다.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>모집공고 카드 변화 (마감 공고 예시)</h3>
+    <div style="display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start">
+      <div>
+        <div style="font-size:.76rem; font-weight:800; color:#64748B; margin-bottom:6px">지금 — 마감 공고는 확인 불가</div>
+        <div class="acard">
+          <div class="thumb">상품 썸네일
+            <div class="ovl"><span>오늘 모집 완료</span><b>07 : 45 : 40</b><span>8/6(목) 오픈 다시 오픈</span></div>
+          </div>
+          <div class="abody"><b>우레온 모이스처 바디 리셋 미스트 150ml</b><br><span class="chip cr">현영</span> <span class="chip gr">가이드유입</span></div>
+          <div class="aacts"><span class="aic">✏ 수정</span><span class="aic">📄 시트</span><span class="aic">📡 관제</span><span class="aic">게시 ●</span></div>
+        </div>
+      </div>
+      <div style="align-self:center; font-size:1.4rem; color:#94A3B8">→</div>
+      <div>
+        <div style="font-size:.76rem; font-weight:800; color:#1D4ED8; margin-bottom:6px">변경 — [👁 보기] 버튼 추가</div>
+        <div class="acard">
+          <div class="thumb">상품 썸네일
+            <div class="ovl"><span>오늘 모집 완료</span><b>07 : 45 : 40</b><span>8/6(목) 오픈 다시 오픈</span></div>
+          </div>
+          <div class="abody"><b>우레온 모이스처 바디 리셋 미스트 150ml</b><br><span class="chip cr">현영</span> <span class="chip gr">가이드유입</span></div>
+          <div class="aacts"><span class="aic">✏ 수정</span><span class="aic new">👁 보기</span><span class="aic">📄 시트</span><span class="aic">📡 관제</span><span class="aic">게시 ●</span></div>
+        </div>
+        <div class="callout">클릭 → 리뷰어 화면 미리보기 새창 (마감이어도 [모집중 가정]으로 전 과정 확인)</div>
+      </div>
+    </div>
+    <div class="flow" style="margin-top:16px">
+      <span class="fstep">모집공고 카드 (마감·투입완료 포함)</span><span class="farr">→</span>
+      <span class="fstep">👁 보기</span><span class="farr">→</span>
+      <span class="fstep">참여 전 화면</span><span class="farr">→</span>
+      <span class="fstep cr">참여 후 작업가이드<br>🧾 현금영수증 안내 확인</span><span class="farr">→</span>
+      <span class="fstep">구매양식 (제출 차단)</span><span class="farr">→</span>
+      <span class="fstep gray">제출 완료 화면</span>
+    </div>
+  </div>
+  </section>
+
+  <!-- ════════════════ 시안 A ════════════════ -->
+  <section data-view="A">
+  <h2><span class="tag tA">시안 A</span>참여 직후 · 결제 전 — 작업가이드 안 (현행 위치 유지·강화)</h2>
+  <div class="card">
+    <p style="font-size:.85rem">
+      리뷰어가 [참여하기]를 눌러 자리를 잡은 직후 열리는 <b>작업내용 4카드 화면</b>에서, 상품 카드 <b>바로 뒤</b>(=결제로 넘어가기 전 시점)에
+      🧾 발행 안내 카드를 보여준다. <b>지금 구현되어 있는 위치</b>이며, 이 시안은 위치를 유지하고 눈에 더 띄게(필수 배지·접기 불가) 강화만 한다.
+    </p>
+    <div class="flow">
+      <span class="fstep gray">공고 카드</span><span class="farr">→</span>
+      <span class="fstep">참여하기 (자리 확보)</span><span class="farr">→</span>
+      <span class="fstep cr">🧾 발행방법 안내 ★여기</span><span class="farr">→</span>
+      <span class="fstep">상품 구매(결제)</span><span class="farr">→</span>
+      <span class="fstep gray">캡처 제출</span>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">참여 직후 — 작업가이드 화면</div>
+        <div class="ph-body">
+          <div class="mk"><div class="tt">⏱ 내 자리 유지시간 14:32</div></div>
+          <div class="mk"><div class="tt">📦 상품 · 옵션 · 결제금액</div><div class="bd">우레온 바디 미스트 150ml · 12,900원</div></div>
+          <div class="mk cr">
+            <div class="tt">🧾 현금영수증 발행 안내 (필수)</div>
+            <div class="bd">결제 단계에서 <b>지출증빙 현금영수증</b>을 선택하고 아래 사업자번호로 발행해 주세요.<br>사업자번호 <b>123-45-67890</b></div>
+            <div class="imgbox">채널별 발행방법 이미지 (쿠팡)</div>
+            <div class="bd" style="margin-top:5px">📌 제출할 때 <b>발행 내역 캡처</b>도 함께 필요합니다.</div>
+          </div>
+          <div class="mk"><div class="tt">🧭 유입가이드</div><div class="bd">검색어로 진입 → 상품 페이지…</div></div>
+          <div class="mk dim"><div class="tt">✍ 리뷰 가이드</div></div>
+          <a class="btn">구매양식 작성하기</a>
+        </div>
+      </div>
+    </div>
+    <div class="cmp">
+      <div class="card note good"><b>장점</b><br>· 발행은 <b>결제 시점</b>에 해야 하므로, 결제 직전 안내가 시점상 가장 정확<br>· 이미 구현된 위치 — 추가 개발 최소(강조 스타일만)<br>· 작업내용은 참여 후 공개 원칙과 충돌 없음</div>
+      <div class="card note bad"><b>단점</b><br>· 가이드를 빠르게 스크롤해 지나치면 결제 때 잊을 수 있음<br>· 제출 시점엔 재안내가 없어 "캡처 필요"를 잊으면 보완 왕복 발생</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ════════════════ 시안 B ════════════════ -->
+  <section data-view="B">
+  <h2><span class="tag tB">시안 B</span>참여 전 — 공고 카드·상세에서 미리 예고</h2>
+  <div class="card">
+    <p style="font-size:.85rem">
+      [참여하기]를 누르기 <b>전</b>, 공고 카드와 참여 전 상세 화면에 <b>"🧾 현금영수증 발행 필요 작업"</b> 배지·안내 블록을 노출한다.
+      발행방법 <b>이미지 전체는 참여 후에만</b>(작업내용은 참여 후 공개 원칙 — 참여 전에는 "필요하다"는 사실과 준비물만 예고).
+    </p>
+    <div class="flow">
+      <span class="fstep cr">공고 카드 🧾 배지 ★여기</span><span class="farr">→</span>
+      <span class="fstep cr">참여 전 상세 — 발행 필요 예고 ★여기</span><span class="farr">→</span>
+      <span class="fstep">참여하기</span><span class="farr">→</span>
+      <span class="fstep gray">작업가이드 (상세 발행방법)</span><span class="farr">→</span>
+      <span class="fstep gray">결제 · 제출</span>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">리뷰어 홈 — 공고 카드</div>
+        <div class="ph-body">
+          <div class="mk">
+            <div class="imgbox" style="height:88px">썸네일</div>
+            <div class="tt" style="margin-top:6px">우레온 바디 미스트 150ml</div>
+            <div class="bd"><span class="chip cr">🧾 현금영수증 발행</span> <span class="chip gr">바로참여</span> 💰 1,000원</div>
+          </div>
+        </div>
+      </div>
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">참여 전 상세 화면</div>
+        <div class="ph-body">
+          <div class="mk"><div class="tt">우레온 바디 미스트 150ml</div><div class="bd">오늘 5자리 남음 · 리뷰비 1,000원</div></div>
+          <div class="mk cr">
+            <div class="tt">🧾 이 작업은 현금영수증 발행이 필요해요</div>
+            <div class="bd">결제할 때 <b>지출증빙 현금영수증</b> 발행 + 발행 내역 <b>캡처 제출</b>이 필요한 작업입니다.<br>자세한 발행방법은 <b>참여 후</b> 작업가이드에서 안내됩니다.</div>
+          </div>
+          <a class="btn">참여하기</a>
+        </div>
+      </div>
+    </div>
+    <div class="cmp">
+      <div class="card note good"><b>장점</b><br>· 참여 결정 <b>전에</b> 조건(발행+캡처)을 알게 됨 — "몰랐다" 이탈·문의 감소<br>· 발행이 부담스러운 리뷰어가 미리 거를 수 있어 지각·미제출 감소</div>
+      <div class="card note bad"><b>단점</b><br>· 공개 목록 응답에 현영 여부 필드 추가 필요(서버 화이트리스트 변경)<br>· 참여 전 화면만 보고 발행방법을 봤다고 착각할 수 있음(상세는 참여 후)<br>· 단독으로는 결제 시점 안내가 없어 <b>단독 채택 불가 — A와 조합 전제</b></div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ════════════════ 시안 C ════════════════ -->
+  <section data-view="C">
+  <h2><span class="tag tC">시안 C</span>제출 단계 — 캡처 업로드 화면에서 재안내</h2>
+  <div class="card">
+    <p style="font-size:.85rem">
+      구매를 마치고 <b>구매양식·캡처를 제출하는 화면</b>에서 안내한다. 현영 탭은 이미 자동으로 [리뷰 캡처]+[현금영수증 캡처] 2슬롯이 뜨는데,
+      영수증 슬롯 옆에 <b>발행방법 이미지 다시 보기</b>를 붙여 "발행을 아직 안 했다면 지금 하라"고 재안내한다.
+    </p>
+    <div class="flow">
+      <span class="fstep gray">참여하기</span><span class="farr">→</span>
+      <span class="fstep gray">작업가이드</span><span class="farr">→</span>
+      <span class="fstep gray">상품 구매(결제)</span><span class="farr">→</span>
+      <span class="fstep cr">제출 화면 — 영수증 슬롯 + 발행방법 다시 보기 ★여기</span>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">구매양식 제출 화면 (현영 탭 = 2슬롯)</div>
+        <div class="ph-body">
+          <div class="mk"><div class="tt">구매양식</div><div class="bd">주문자 · 아이디 · 수취인 · 연락처 · 주소 …</div></div>
+          <div class="mk cr">
+            <div class="tt">📎 캡처 첨부 (2장 필요)</div>
+            <div class="slotrow">
+              <div class="slot">🖼 리뷰 캡처<br>첨부됨 ✓</div>
+              <div class="slot cr">🧾 현금영수증 캡처<br>미첨부</div>
+            </div>
+            <div class="bd" style="margin-top:6px">아직 발행 전이라면 지금 발행해 주세요 →</div>
+            <a class="btn ghost" style="margin-top:6px">🧾 발행방법 다시 보기</a>
+          </div>
+          <a class="btn warn">제출하기</a>
+        </div>
+      </div>
+    </div>
+    <div class="cmp">
+      <div class="card note good"><b>장점</b><br>· "영수증 캡처가 필요하다"를 제출 직전에 확실히 상기 — 캡처 누락 보완 왕복 감소<br>· 결제 후 사후 발행(기간 내)이 가능한 채널에선 구제 경로가 됨</div>
+      <div class="card note bad"><b>단점</b><br>· 결제가 이미 끝난 뒤라 <b>발행 시점을 놓친 경우 되돌릴 수 없음</b> — 단독 채택 불가<br>· 채널에 따라 사후 발행이 불가하면 안내가 늦음</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ════════════════ 시안 D ════════════════ -->
+  <section data-view="D">
+  <h2><span class="tag tD">시안 D (권장)</span>전 구간 3시점 조합 — 예고 → 상세 → 재확인</h2>
+  <div class="card">
+    <p style="font-size:.85rem">
+      현금영수증은 <b>놓치면 되돌리기 어려운 결제 시점 행동</b>이므로 한 시점에만 안내하지 않고,
+      부담이 다른 <b>세 시점에 역할을 나눠</b> 안내한다: <b>참여 전 = 예고(배지 한 줄)</b> ·
+      <b>참여 직후 = 상세(발행방법 이미지, 현행 위치)</b> · <b>제출 시 = 재확인(영수증 슬롯 + 다시 보기)</b>.
+    </p>
+    <div class="flow">
+      <span class="fstep cr">① 공고 카드·상세<br>🧾 배지 예고</span><span class="farr">→</span>
+      <span class="fstep">참여하기</span><span class="farr">→</span>
+      <span class="fstep cr">② 작업가이드<br>발행방법 상세 (현행)</span><span class="farr">→</span>
+      <span class="fstep">결제 (여기서 발행)</span><span class="farr">→</span>
+      <span class="fstep cr">③ 제출 화면<br>영수증 슬롯 + 다시 보기</span>
+    </div>
+    <div class="phones">
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">① 참여 전 — 배지 예고</div>
+        <div class="ph-body">
+          <div class="mk">
+            <div class="imgbox" style="height:70px">썸네일</div>
+            <div class="tt" style="margin-top:6px">우레온 바디 미스트</div>
+            <div class="bd"><span class="chip cr">🧾 현금영수증 발행</span> 💰 1,000원</div>
+          </div>
+          <a class="btn">참여하기</a>
+        </div>
+      </div>
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">② 참여 직후 — 발행방법 상세</div>
+        <div class="ph-body">
+          <div class="mk"><div class="tt">📦 상품 · 결제금액</div><div class="bd">12,900원</div></div>
+          <div class="mk cr">
+            <div class="tt">🧾 현금영수증 발행 안내 (필수)</div>
+            <div class="bd">지출증빙 선택 · 사업자번호 <b>123-45-67890</b></div>
+            <div class="imgbox">채널별 발행방법 이미지</div>
+          </div>
+          <div class="mk dim"><div class="tt">🧭 유입가이드</div></div>
+        </div>
+      </div>
+      <div class="phone">
+        <div class="ph-top"><span>9:41</span><span>●●●</span></div>
+        <div class="ph-cap">③ 제출 시 — 재확인</div>
+        <div class="ph-body">
+          <div class="mk cr">
+            <div class="tt">📎 캡처 2장 필요</div>
+            <div class="slotrow">
+              <div class="slot">🖼 리뷰<br>✓</div>
+              <div class="slot cr">🧾 영수증<br>미첨부</div>
+            </div>
+            <a class="btn ghost" style="margin-top:6px">발행방법 다시 보기</a>
+          </div>
+          <a class="btn warn">제출하기</a>
+        </div>
+      </div>
+    </div>
+    <div class="cmp">
+      <div class="card note good"><b>장점</b><br>· 놓칠 수 있는 세 구멍(모르고 참여 / 결제 때 잊음 / 캡처 누락)을 전부 막음<br>· ②는 현행 그대로라 추가 개발은 ①(배지)·③(다시 보기 버튼)만<br>· 각 시점의 정보량을 다르게(배지→상세→버튼) 해 피로도 낮음</div>
+      <div class="card note bad"><b>단점</b><br>· 세 곳을 손대므로 변경 범위가 가장 넓음(공개 목록 필드 + 제출 화면)<br>· 반복 안내가 과하다고 느끼는 리뷰어가 있을 수 있음(정보량 차등으로 완화)</div>
+    </div>
+  </div>
+  </section>
+
+  <!-- ════════════════ 비교 요약 ════════════════ -->
+  <section data-view="plan">
+  <h2>비교 요약</h2>
+  <div class="card">
+    <table>
+      <tr><th></th><th>안내 시점</th><th>변경 범위</th><th>결제 전 안내</th><th>캡처 누락 방지</th><th>참여 전 인지</th></tr>
+      <tr><td><b>A</b></td><td>참여 직후 (현행 위치 강화)</td><td>최소 (스타일만)</td><td>✅</td><td>—</td><td>—</td></tr>
+      <tr><td><b>B</b></td><td>참여 전 예고 (+A 조합 전제)</td><td>중간 (공개 목록 필드)</td><td>✅(A와 조합 시)</td><td>—</td><td>✅</td></tr>
+      <tr><td><b>C</b></td><td>제출 시 재안내 (단독 불가)</td><td>중간 (제출 화면)</td><td>❌ 늦음</td><td>✅</td><td>—</td></tr>
+      <tr><td><b>D (권장)</b></td><td>①예고+②상세+③재확인</td><td>넓음 (①+③ 추가)</td><td>✅</td><td>✅</td><td>✅</td></tr>
+    </table>
+    <div class="note" style="margin-top:12px">
+      ⚠ B·C는 단독으로는 결제 시점 안내가 빠지거나 늦으므로 <b>단독 채택 불가</b> — A(결제 전 상세)는 어떤 조합에서도 유지되어야 한다.
+      마감 공고 확인용 [👁 보기] 버튼(0장)은 <b>어느 시안을 골라도 동일하게 적용</b>된다(공용 렌더러라 미리보기에 자동 반영).
+    </div>
+  </div>
+  </section>
+</div>
+<script>
+  // ?v=A|B|C|D 단독 보기 (구현계획·비교 요약은 항상 표시)
+  (function(){
+    var v = new URLSearchParams(location.search).get('v');
+    if(!v) return;
+    v = v.toUpperCase();
+    document.querySelectorAll('section[data-view]').forEach(function(s){
+      if(s.dataset.view !== v && s.dataset.view !== 'plan') s.style.display = 'none';
+    });
+  })();
+</script>
+</body>
+</html>
