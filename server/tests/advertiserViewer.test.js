@@ -284,7 +284,8 @@ async function run() {
   ok('행 클릭·키 이동이 위임 1회 바인딩(재렌더로 tbody 가 갈려도 유지)', /if\(STATE\._rvBound\) return; STATE\._rvBound=true;/.test(src));
   ok('★ 미제출 행은 패널 가운데에 "리뷰 미작성 · 미제출" 표기', /리뷰 미작성 · 미제출/.test(src));
   ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 이미지 미등록/.test(src));
-  ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\); \} \}/.test(src));
+  // 표 검색(_gsReapply) 도입으로 뒤에 호출이 하나 더 붙었다 — 검사 의미(재렌더 끝에 선택 복원 배선)는 불변.
+  ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\);/.test(src));
   ok('미리보기 패널 CSS(sticky · 340px · 미제출 안내 박스)',
     /\.rvpane\{flex:0 0 340px/.test(css) && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
 
