@@ -1083,14 +1083,40 @@ table.wbl-t tr.fin td{color:var(--faint)}
 .wbl-s.fin{background:var(--card2);color:var(--muted)}
 .wbl-s.today{background:#e0e7ff;color:#3730a3}
 .wbl-b.today{border-color:var(--accent-line);color:var(--accent-deep)}
-.wbl-b.today.on{background:var(--accent-soft)}
+/* ★★ 오늘 완료는 **글자를 바꾸지 않고 색으로** 말한다(시안 design-home-campaign-popup.html ⑥).
+   종전엔 라벨을 '☑ 오늘 완료' ↔ '해제' 로 갈아끼웠는데 ① 폭이 달라져 아래 줄과 어긋나고
+   ② '해제'가 무엇을 해제하는지 한 번 더 생각하게 된다. 켜짐 = 파란 채움. */
+.wbl-b.today.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.wbl-b.today.on:hover{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff}
 table.wbl-t tr.tdone td{background:var(--card2);color:var(--faint)}
 table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-b{font:inherit;font-size:10.5px;font-weight:750;padding:3px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
 .wbl-b:hover{border-color:var(--accent-line);color:var(--accent-deep)}
 .wbl-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
 .wbl-b.dark:hover{opacity:.85;color:#fff}
-.wbl-act{display:flex;gap:5px;justify-content:flex-end}
+/* ★★ 버튼은 줄마다 **자기 열**을 지킨다 — flex(내용 폭)로 두면 글자 길이에 따라 좌우로 흔들려
+   같은 버튼이 줄마다 다른 자리에 온다(줄을 옮길 때마다 눈으로 다시 찾게 된다).
+   고정 폭 격자라 모든 줄의 열 경계가 정확히 같고, 버튼은 그 칸을 꽉 채운다.
+   ★ 진행 중(4칸)과 마감 보관함(2칸)은 버튼 수가 달라 template 을 따로 준다. */
+.wbl-act{display:grid;grid-template-columns:92px 46px 88px 64px;gap:5px;justify-content:end}
+.wbl-act.ro{grid-template-columns:92px 46px}         /* 편집 권한 없음 = 공고·열기만 */
+.wbl-act.fin{grid-template-columns:92px 46px 118px}  /* 마감 보관함 = 공고·열람·복귀 */
+.wbl-act .wbl-b{width:100%;padding:3px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis}
+.wbl-actcol{width:1px;white-space:nowrap}
+/* [공고] 버튼 — 기존 wbl-b 위에 상태 점만 얹는다(새 버튼 문법을 만들지 않는다).
+   ★ 연결됨·미발행·조회실패가 **전부 같은 칸**이라 줄마다 어긋나지 않는다. */
+.wbl-b.cmp{border-color:var(--accent-line);color:var(--accent-deep)}
+.wbl-b.cmp:hover{background:var(--accent-soft)}
+.wbl-b.cmp.none{border-color:var(--line2);color:var(--muted)}
+.wbl-cdot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:1px;background:var(--faint)}
+.wbl-cdot.open{background:var(--safe)}
+.wbl-cdot.pre{background:#f59e0b}
+/* 공고 선택(한 작업에 여러 공고) — 생성일과 함께 보여주고 사람이 고른다(자동 선택 금지) */
+.wbl-pick{display:block;width:100%;text-align:left;font:inherit;font-size:12px;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;padding:9px 12px;margin-top:7px;cursor:pointer;color:var(--ink)}
+.wbl-pick:hover{border-color:var(--accent-line);background:var(--card2)}
+.wbl-pick .pt{font-weight:750;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wbl-pick .pm{font-size:10.5px;color:var(--faint);margin-top:2px;display:block}
 .wbl-empty{padding:26px;text-align:center;color:var(--faint);font-size:12px}
 .wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
 /* 마감 확인창 — body 직속 오버레이(뷰 스크롤 컨테이너 안에 두면 화면 흐름에 섞인다: 레포 실측 사고) */
@@ -1157,7 +1183,7 @@ function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ local
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
   Object.assign(STATE,{ role:'',name:'',cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
-                        favs:null,_favLoaded:false,_finStatsAt:0 });
+                        favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,campsUnavailable:false });
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
   const r=await fetch(API_BASE+path,o);
@@ -1271,7 +1297,8 @@ function logout(){ sessionStorage.removeItem('admin_token');
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false,
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
-                        finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false });
+                        finUnavailable:false,statsUnavailable:false,dailyUnavailable:false,finTruncated:false,worktabsUnavailable:false,
+                        campEdit:null,campsUnavailable:false });
   _NAVCS.cs=null; _NAVCS.re=null;   // 합산 뱃지도 초기화 — 안 하면 이전 계정의 건수가 다음 로그인에 남는다
   _NAVRI.n=null;                    // 리뷰검수 값도 같은 이유(홈 타일·브리핑이 이 값을 본다)
   boot(); }
@@ -1590,9 +1617,10 @@ async function loadTabs(){
   if(!r||!r.ok){ const b=$('#tb2'); if(b) b.innerHTML=`<span class="b2empty">작업 목록은 관리자 로그인에서 제공됩니다.</span>`; return; }
   // ★ 작업바 로드는 stats=1 을 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다) — 대신 이미 받아둔
   //   통계를 **이월**해 마감 후보 배지가 화면을 오갈 때마다 사라졌다 나타나지 않게 한다(_finStatsAt 캐시와 정합).
-  const _prevStats={}, _prevFin={}, _prevTd={};
+  const _prevStats={}, _prevFin={}, _prevTd={}, _prevCamp={};
   (STATE.tabs||[]).forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(t.stats) _prevStats[k]=t.stats;
+    if(t.campaigns) _prevCamp[k]=t.campaigns;   // 공고 주석도 stats 와 같은 이월(작업바 로드엔 안 실린다)
     if(t.finished) _prevFin[k]={finishedAt:t.finishedAt,finishedBy:t.finishedBy};
     if(t.todayDone) _prevTd[k]=true; });
   STATE.tabs=r.tabs||[];
@@ -1602,6 +1630,7 @@ async function loadTabs(){
   if(r.kstDate) STATE.kstDate=r.kstDate;   // 두 흡수 경로가 같은 기준을 갖게(자정 자가치유)
   STATE.tabs.forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
     if(!t.stats){ const s=_prevStats[k]; if(s) t.stats=s; }
+    if(!t.campaigns){ const c=_prevCamp[k]; if(c) t.campaigns=c; }
     // ★ 마감 조회가 실패한 응답으로 기존 마감 표시를 지우지 않는다(그러면 마감 작업이 보드로 되살아난다)
     if(r.finishedUnavailable && _prevFin[k]){ t.finished=true; t.finishedAt=_prevFin[k].finishedAt; t.finishedBy=_prevFin[k].finishedBy; }
     if(r.dailyUnavailable && _prevTd[k]) t.todayDone=true; });
@@ -1904,12 +1933,16 @@ async function _finEnsureStats(force){
 function _finAbsorb(r){
   STATE.finUnavailable=!!r.finishedUnavailable;
   STATE.statsUnavailable=!!r.statsUnavailable;
+  STATE.campsUnavailable=!!r.campaignsUnavailable;
   STATE.dailyUnavailable=!!r.dailyUnavailable;
   STATE.finTruncated=!!r.truncated;
   if(r.kstDate) STATE.kstDate=r.kstDate;   // 서버가 판정한 "오늘" — 자정 넘긴 화면의 자가치유 기준
   const by={}; r.tabs.forEach(n=>{ by[n.sheetId+'\t'+n.tabName]=n; });
   STATE.tabs.forEach(t=>{ const n=by[t.sheetId+'\t'+t.tabName]; if(!n) return;
     if(n.stats) t.stats=n.stats;
+    // ★ 공고 주석: 조회 실패면 **덮지 않는다**(빈 값으로 덮으면 화면이 '공고 없음'으로 읽어
+    //   담당자가 이미 있는 공고를 또 발행한다). 성공했으면 없어진 연결도 반영해야 하므로 [] 로 대입.
+    if(!r.campaignsUnavailable) t.campaigns=n.campaigns||[];
     if(!r.finishedUnavailable){ t.finished=!!n.finished; t.finishedAt=n.finishedAt; t.finishedBy=n.finishedBy; }
     // 오늘 완료도 같은 규율 — 조회 실패 응답으로 체크를 지우면 "체크했는데 풀렸다"가 된다
     if(!r.dailyUnavailable){ t.todayDone=!!n.todayDone; t.todayDoneBy=n.todayDoneBy; }
@@ -2033,6 +2066,108 @@ function _finVisible(){
   else { const n=list.filter(t=>!isTodayDone(t)), d=list.filter(t=>isTodayDone(t)); list=[...n,...d]; }
   return list;
 }
+/* ══ 홈 작업목록 → 연결된 모집공고 [공고] 버튼 ═══════════════════════════════════════
+   시안: frontend/docs/design-home-campaign-popup.html
+
+   ★★ **새 화면을 만들지 않는다** — 모집공고 탭에서 쓰는 그 모달(js/recruit-modal.js)을
+     `openRecruitModal(공고id)` 로 그대로 연다. 축약 폼을 따로 만들면 필드가 빠져 저장 시
+     기존 설정이 빈 값으로 덮인다(리뷰어앱 축약 편집에서 겪은 함정).
+   ★ 상태 점은 **서버가 카드·리뷰어 목록과 같은 계산으로** 준 값을 그대로 그린다(화면에서 다시 세지 않는다).
+   ★ 한 작업에 공고가 여럿이면 **생성일과 함께 보여주고 사람이 고른다**(사용자 확정 — 최신을 말없이 열지 않는다).
+   ★ onclick 에는 **인덱스만** 넘긴다 — 시트에서 온 작업명·공고 제목을 문자열로 넣으면 따옴표 하나로 탈출된다. */
+const _CAMP_LABEL={open:'모집중',preopen:'오픈예정',cutoff:'오늘 구매마감',daily_done:'오늘 모집완료',
+                   soft_full:'모집완료',closed:'마감',rest_day:'휴무일'};
+function _campLabel(c){
+  if(!c) return '';
+  if(c.state && c.state!=='legacy') return _CAMP_LABEL[c.state]||c.state;
+  // 레거시(일반) 공고는 상태 엔진이 'legacy' 만 돌려준다 — status 컬럼이 그 공고의 진실이다.
+  return c.status==='active'?'진행중':(c.status==='draft'?'임시저장':'마감');
+}
+/** 점 색 등급 — 0 열림(초록) · 1 오늘만 닫힘/예정(주황) · 2 닫힘·판정불가(회색) */
+function _campRank(c){
+  const st=c&&c.state;
+  if(st==='open') return 0;
+  if(st==='preopen'||st==='cutoff'||st==='daily_done'||st==='soft_full') return 1;
+  if(st==='legacy'||!st) return (c&&c.status==='active')?0:2;
+  return 2;
+}
+function _campBtnHtml(t,i){
+  const stop='event.stopPropagation();';
+  // ★ 조회 실패를 "공고 없음"으로 보여주면 **이미 있는 공고를 또 발행**한다 — 비활성 + 사유(목록 상단에도 고지).
+  if(STATE.campsUnavailable) return `<button class="wbl-b cmp" disabled title="공고 연결 정보를 불러오지 못했습니다 — 새로고침해 주세요"><i class="wbl-cdot"></i>공고 ?</button>`;
+  const cs=Array.isArray(t.campaigns)?t.campaigns:[];
+  if(!cs.length){
+    return STATE.campEdit
+      ? `<button class="wbl-b cmp none" onclick="${stop}openTabCampaign(${i})" title="연결된 모집공고가 없습니다 — 이 작업의 탭이 채워진 발행 화면을 엽니다">＋공고발행</button>`
+      : `<button class="wbl-b cmp none" disabled title="연결된 모집공고가 없습니다(발행은 편집 허용명단 담당자만)">공고 없음</button>`;
+  }
+  const best=cs.reduce((a,c)=>Math.min(a,_campRank(c)),2);
+  const dot=best===0?'open':(best===1?'pre':'');
+  const tip=cs.length>1
+    ? `연결된 공고 ${cs.length}건 — 눌러서 고르기`
+    : `${cs[0].title||'(제목 없음)'}${_campLabel(cs[0])?' · '+_campLabel(cs[0]):''}`;
+  return `<button class="wbl-b cmp" onclick="${stop}openTabCampaign(${i})" title="${esc(tip)}"><i class="wbl-cdot ${dot}"></i>공고${cs.length>1?' '+cs.length:''}</button>`;
+}
+/** 편집 허용명단(workdesk_editors) — 홈 전용 플래그.
+ *  ★ `STATE.canEdit` 를 쓰지 않는다: 그 값은 작업보드 그리드 편집(role!=='advertiser')에도 쓰여
+ *    작업 탭을 한 번 열면 덮어써진다 → 홈에서 발행 버튼이 잘못 보인다. 서버가 최종 방어지만
+ *    "눌러도 아무 일 없는 버튼"은 두지 않는다. */
+async function _loadCampPerm(){
+  if(STATE.campEdit!=null) return STATE.campEdit;
+  const r=await api('/api/trackb/perm').catch(()=>null);
+  STATE.campEdit=!!(r&&r.ok&&r.canEdit);
+  return STATE.campEdit;
+}
+async function openTabCampaign(i){
+  const t=(STATE.tabs||[])[i]; if(!t) return;
+  if(typeof openRecruitModal!=='function'){ toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
+  const cs=Array.isArray(t.campaigns)?t.campaigns:[];
+  if(cs.length>1) return _campPickerOpen(i);
+  if(cs.length===1) return _campOpenModal(cs[0].id);
+  if(!(await _loadCampPerm())){ toast('공고 발행 권한이 없습니다(편집 허용명단).'); return; }
+  await _campOpenModal(null,{linked_sheet_id:t.sheetId, linked_tab_name:t.tabName, linked_tab_gid:t.tabGid||''});
+}
+async function _campOpenModal(id, prefill){
+  if(window.RecruitModal) RecruitModal.mount();     // 모달 마크업은 body 직속(뷰 스크롤에 섞이지 않게)
+  // 연결 탭 드롭다운은 _recruitTabList 에 의존한다 — 열기 전에 반드시 채운다(작업오더 경로와 같은 순서).
+  try{ if(typeof loadRecruitTabOptions==='function') await loadRecruitTabOptions(); }catch(_){ }
+  try{ await openRecruitModal(id||null, prefill); }
+  catch(e){ toast('모달 열기 실패: '+((e&&e.message)||'')); }
+}
+/* 공고가 여럿인 작업 — 제목 + **생성일** + 상태를 보여주고 고르게 한다(사용자 확정). */
+function _campPickerOpen(i){
+  const t=(STATE.tabs||[])[i]; if(!t) return;
+  _campPickerClose();
+  const cs=t.campaigns||[];
+  const rows=cs.map((c,ci)=>`<button class="wbl-pick" onclick="_campPick(${i},${ci})">
+      <span class="pt"><i class="wbl-cdot ${_campRank(c)===0?'open':(_campRank(c)===1?'pre':'')}"></i>${esc(c.title||'(제목 없음)')}</span>
+      <span class="pm">${esc(_campDateFull(c.createdAt)||'생성일 미상')} 생성${_campLabel(c)?' · '+esc(_campLabel(c)):''}</span>
+    </button>`).join('');
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='campPickOv';
+  ov.onclick=(e)=>{ if(e.target===ov) _campPickerClose(); };
+  ov.innerHTML=`<div class="wbl-dlg"><div class="wbl-dh">📢 어느 공고를 여시겠어요?</div>
+    <div class="wbl-db">이 작업에 <b>${cs.length}건</b>의 모집공고가 연결돼 있습니다(차수 재발행 등).
+      <div class="wbl-sub" style="margin-top:3px">${esc(t.tabName)}</div>${rows}</div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_campPickerClose()">취소</button></div></div>`;
+  document.body.appendChild(ov);
+}
+function _campPickerClose(){ const o=document.getElementById('campPickOv'); if(o) o.remove(); }
+function _campPick(i,ci){
+  const t=(STATE.tabs||[])[i], c=t&&(t.campaigns||[])[ci];
+  _campPickerClose();
+  if(c) _campOpenModal(c.id);
+}
+function _campDateFull(v){ if(!v) return ''; const d=new Date(v); return isNaN(d)?'':`${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()}`; }
+/* 공고 저장/삭제 후 — 홈 목록이 떠 있으면 주석을 **강제로 새로 받아** 다시 그린다.
+   ★ 서버 30초 캐시 때문에 그냥 새로고침하면 방금 발행한 공고가 한동안 안 잡혀
+     [＋공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
+window.CAMP_ON_SAVED=function(){
+  if(!document.getElementById('wblMount')) return;
+  api('/api/trackb/tabs?limit=300&stats=1&fresh=1').then(r=>{
+    if(r&&r.ok&&Array.isArray(r.tabs)){ _finAbsorb(r); STATE._finStatsAt=Date.now(); _finRenderList(); }
+  }).catch(()=>{});
+};
+
 function _finRenderList(){
   const host=document.getElementById('wblMount'); if(!host) return;
   const fin=STATE.finTab==='fin';
@@ -2062,18 +2197,18 @@ function _finRenderList(){
       : `<td class="wbl-num">${s.paid==null?'—':s.paid}</td>`;
     const act=canEdit
       // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
-      ? (fin?`<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열람</button>
+      ? (fin?`${_campBtnHtml(t,i)}<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열람</button>
               <button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
-            :`<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열기</button>
-              <button class="wbl-b today${td?' on':''}" onclick="toggleTodayDone(${i},event)" title="${td?'오늘 완료 해제':'오늘 할 일을 끝냈다면 체크 — 다음날 자동으로 풀립니다'}">${td?'해제':'☑ 오늘 완료'}</button>
+            :`${_campBtnHtml(t,i)}<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열기</button>
+              <button class="wbl-b today${td?' on':''}" onclick="toggleTodayDone(${i},event)" title="${td?'오늘 완료됨 — 다시 누르면 해제됩니다':'오늘 할 일을 끝냈다면 클릭 — 다음날 자동으로 풀립니다'}">☑ 오늘 완료</button>
               <button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)
-      : `<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열기</button>`;
+      : `${_campBtnHtml(t,i)}<button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">열기</button>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
       <td><div class="wbl-nm">${esc(t.tabName)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
       <td>${esc((s.manager)||'—')}</td>
       <td>${prog}</td>${last}
       <td>${st}</td>
-      <td><div class="wbl-act">${act}</div></td></tr>`;
+      <td class="wbl-actcol"><div class="wbl-act${canEdit?(fin?' fin':''):' ro'}">${act}</div></td></tr>`;
   }).join(''):'';
   host.innerHTML=`<div class="wbl-box">
     <div class="wbl-h">
@@ -2102,6 +2237,7 @@ function _finNoticeHtml(){
   const n=[];
   if(STATE.finUnavailable) n.push('⚠ 마감 상태를 불러오지 못했습니다 — 마감한 작업이 진행 중으로 보일 수 있습니다(새로고침해 주세요).');
   if(STATE.statsUnavailable) n.push('⚠ 인원·제출·입금 수치를 불러오지 못했습니다 — 표의 숫자와 마감 후보 배지가 비어 있습니다.');
+  if(STATE.campsUnavailable) n.push('⚠ 연결된 모집공고를 불러오지 못했습니다 — [공고] 버튼이 잠시 비활성입니다(공고가 없다는 뜻이 아닙니다).');
   if(STATE.dailyUnavailable) n.push('⚠ 오늘 완료 표시를 불러오지 못했습니다 — 체크한 작업이 미완료로 보일 수 있습니다(새로고침해 주세요).');
   if(STATE.finTruncated) n.push('⚠ 작업이 많아 목록 일부만 표시됩니다 — 마감한 작업을 정리하면 더 보입니다.');
   if(STATE.worktabsUnavailable) n.push('⚠ 열린 작업 줄을 불러오지 못했습니다 — 이 기기에 남아 있던 목록을 그대로 쓰고 있습니다(새로고침해 주세요).');
@@ -4482,6 +4618,11 @@ async function _homeLoad(){
       STATE.tabs=[]; _finAbsorb(r); STATE._finStatsAt=Date.now();   // 흡수 = 실패 플래그·잘림 고지까지 함께 반영
       _finRenderList();   // 목록 렌더가 히어로 "진행 중 작업" 숫자까지 함께 쓴다(단일 writer)
     }),
+    // 편집 허용명단(공고 발행 가능 여부) — 도착하면 [＋공고발행] 노출이 확정된다(그 전엔 비활성 표기).
+    //   ★ typeof 가드는 레포 관용구(_homeSyncBadges 와 같은 이유): 런타임엔 항상 있지만 **블록 단위
+    //     vm 추출 회귀가드**(workdeskHome)의 sandbox 에는 이 함수가 없어 가드 없이는 그 테스트가 죽는다.
+    (typeof _loadCampPerm==='function'?_loadCampPerm():Promise.resolve()).then(()=>{
+      if(document.getElementById('wblMount')) _finRenderList(); }),
     api('/api/trackb/campaigns/list').then(r=>{
       if(!(r && r.ok && Array.isArray(r.data))) return;
       // 참여형 = 상태엔진 값(state), 레거시 = status 로만 판단(상태엔진 미적용) — admin/list 응답 계약 그대로
