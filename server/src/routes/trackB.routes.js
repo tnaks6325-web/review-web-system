@@ -130,6 +130,59 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── 홈 [저장폴더] 현영 버튼 — [리뷰]/{현금영수증} 서브폴더 해석 ──────────────────────
+//   현영 서브폴더는 업로드 시 즉석 생성되고 URL 이 어디에도 저장돼 있지 않다(리뷰·구매캡처와 다른 점).
+//   ★ find-only — 여기서 폴더를 만들지 않는다(사용자 확정 Q2). 폴더 생성 경로는 업로드(review-upload)·
+//     스마트빌드(reviewFolders) 단일 경로 유지 — 사본 경로를 두면 라벨·소유권 규칙이 갈라진다.
+//   ★ fail-soft — 어떤 실패도 200 + 사유로 돌려준다(클릭 한 번에 500 을 보여줄 이유가 없다).
+//   찾은 URL 은 불변이라 길게(10분), 미발견은 짧게(60초 — 그 사이 첫 현영 캡처가 올 수 있다) 캐시.
+const _tabFolderCache = new Map();
+router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) => {
+  const sheetId = String(req.query.sheetId || '').trim();
+  const tabName = String(req.query.tabName || '').trim();
+  if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId·tabName이 필요합니다.' });
+  const key = `${sheetId}\t${tabName}`;
+  const hit = _tabFolderCache.get(key);
+  if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
+    return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
+  }
+  try {
+    // staff(AE)는 담당 탭만 — 폴더 URL 도 담당 스코프 밖으로 새지 않는다(마감·스레드와 같은 규율).
+    if (_role(req) === 'staff') {
+      const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
+      if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
+    }
+    const { rows } = await pool.query(
+      `SELECT folder_url, capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`,
+      [sheetId, tabName]);
+    const tc = rows[0];
+    if (!tc) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
+    const { isCashReceiptIncome, slotLabel } = require('../utils/captureSlots');
+    // 관리자 명시 capture_slots 에 receipt 슬롯이 있는 탭도 허용(라벨은 그 설정을 따른다 — 업로드와 같은 규칙).
+    const hasReceipt = isCashReceiptIncome(tc.income_type)
+      || (Array.isArray(tc.capture_slots) && tc.capture_slots.some(s => s && s.key === 'receipt'));
+    if (!hasReceipt) return res.json({ ok: false, error: '현금영수증 발행 대상 작업이 아닙니다.' });
+    const driveService = require('../services/drive.service');   // 지연 require — 테스트가 이 라우터를 스텁 pool 로 실행할 때 Drive 스택 무부하
+    const reviewFolderId = tc.folder_url ? driveService.extractFolderIdFromUrl(tc.folder_url) : null;
+    if (!reviewFolderId) {
+      return res.json({ ok: false, error: '리뷰 폴더가 아직 없습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다.' });
+    }
+    const label = slotLabel(tc.capture_slots, tc.income_type, 'receipt', null) || '현금영수증';
+    const found = await driveService.findFolderByName(label, reviewFolderId);   // ★ find-only
+    if (!found) {
+      const msg = '현영 캡처가 아직 없어 폴더가 만들어지지 않았습니다.';
+      _tabFolderCache.set(key, { at: Date.now(), url: null, msg });
+      return res.json({ ok: false, error: msg });
+    }
+    const url = found.webViewLink || `https://drive.google.com/drive/folders/${found.id}`;
+    _tabFolderCache.set(key, { at: Date.now(), url });
+    res.json({ ok: true, url });
+  } catch (err) {
+    logger.warn(`[trackB] tab-folders 해석 실패(${tabName}): ${err.message}`);
+    res.json({ ok: false, error: '폴더 정보를 불러오지 못했습니다 — 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
 // ── 열린 작업 줄(개인별·순서 보존) — 작업보드 로그인 사용자 누구나(자기 것만) ──
 //   ★ 즐겨찾기와 같은 골격이되 **별도 원장**: 즐겨찾기는 Set 으로 접혀 순서가 사라진다(migration 089 주석).
 router.get('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
