@@ -94,8 +94,13 @@ ok('buildGrid 가 표시 순서·표시 열·고정열 폭을 남긴다',
   /STATE\.gRows=rows; STATE\.gVCols=vcols;/.test(src)
   && /STATE\.gFrozenW=vcols\.slice\(0,frozenN\)\.reduce/.test(src));
 const go = fnSrc('_gsGo');
-ok('★ 이동 전에 남은 청크를 먼저 그린다(_gsFlushAll) — 안 하면 못 찾아간다',
-  /_gsFlushAll\(\)/.test(go));
+// ★ "호출이 있나"만 보면 안 된다 — _gsGo 안에는 그룹 펼침 분기에도 _gsFlushAll() 이 있어서
+//   정작 맨 앞의 호출을 지워도 통과한다(변이시험으로 실측). **행을 찾기 전에** 그리는지 순서를 본다.
+ok('★ 이동 전에 남은 청크를 먼저 그린다(_gsFlushAll 이 첫 _gsTr 조회보다 앞) — 안 하면 못 찾아간다', (() => {
+  const iFlush = go.indexOf('_gsFlushAll()');
+  const iLookup = go.indexOf('_gsTr(');
+  return iFlush > 0 && iLookup > 0 && iFlush < iLookup;
+})());
 const flush = fnSrc('_gsFlushAll');
 ok('_gsFlushAll 이 남은 행을 붙이고 진행 중 rAF 루프를 멈춘다',
   /insertAdjacentHTML\('beforeend'/.test(flush) && /STATE\._pendingBody=null/.test(flush));
