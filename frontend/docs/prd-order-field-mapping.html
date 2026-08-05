@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>인트라넷 리뷰오더 ↔ 리뷰웹 작업오더 — 필드 매핑 PRD &amp; 유저플로우</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   인트라넷 리뷰오더 ↔ 리뷰웹 작업오더 구조 동기화 PRD (승인용 · 목업 전용)
+   목적: 리뷰웹이 통짜 텍스트를 "추측(파싱)"해 프리필하는 구조를 폐기하고,
+         칸 = 칸 1:1 매핑으로 알맞은 자리에 알맞은 내용만 흐르게 한다.
+   조사 근거: inadd-webapp(public/static/js/review-orders.js · src/routes/api.ts)
+             review-web-system(server/src/routes/order.routes.js · frontend/js/work-order-detail.js)
+   외부 리소스 0 · color-scheme 고정
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#EDF1F8; --ink:#0F172A; --t2:#475569; --t3:#94A3B8; --t4:#B0BAC9;
+  --line:#E2E8F0; --line2:#EDF1F6;
+  --p:#3182F6; --p-deep:#1B64DA; --p-soft:#EEF4FE;
+  --g:#12B886; --g-soft:#F0FBF6; --g-deep:#0B8A64;
+  --w:#B45309; --w-soft:#FFF8ED;
+  --err:#DC2626; --err-soft:#FEECEC;
+  --vio:#7C3AED; --vio-soft:#F5F0FF;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;
+  font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif}
+.doc{max-width:1200px;margin:0 auto;padding:34px 18px 90px}
+
+.eyebrow{font-size:.7rem;font-weight:800;letter-spacing:.13em;color:var(--p)}
+h1{font-size:1.5rem;font-weight:800;letter-spacing:-.02em;margin:7px 0}
+.lead{color:var(--t2);font-size:.87rem;max-width:900px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:.7rem;font-weight:700;color:var(--t2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+.chip b{color:var(--ink)}
+
+section{margin-top:36px}
+.sec-no{display:inline-block;font-size:.68rem;font-weight:800;background:var(--p);color:#fff;border-radius:8px;padding:3px 11px;margin-bottom:6px}
+h2{font-size:1.14rem;font-weight:800;letter-spacing:-.015em;margin-bottom:8px}
+h3{font-size:.9rem;font-weight:800;margin:18px 0 8px}
+p.d{font-size:.82rem;color:var(--t2);max-width:920px;margin-bottom:10px}
+p.d b{color:var(--ink)}
+code{background:#F1F5FB;border-radius:5px;padding:1px 5px;font-size:.88em;font-family:ui-monospace,Consolas,monospace}
+
+/* 표 */
+.tbl{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:.75rem;min-width:840px}
+td,th{padding:8px 12px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}
+th{font-size:.65rem;font-weight:800;color:var(--t3);background:#FCFDFF;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+td b{font-weight:800}
+.st{display:inline-block;font-size:.62rem;font-weight:800;border-radius:6px;padding:2px 7px;white-space:nowrap}
+.st.g{background:var(--g-soft);color:var(--g-deep)}
+.st.y{background:var(--w-soft);color:var(--w)}
+.st.r{background:var(--err-soft);color:var(--err)}
+.st.b{background:var(--p-soft);color:var(--p-deep)}
+
+/* 흐름 다이어그램 */
+.flow{display:flex;gap:0;align-items:stretch;flex-wrap:wrap;margin:12px 0}
+.fnode{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;min-width:190px;flex:1}
+.fnode .ft{font-size:.74rem;font-weight:800;margin-bottom:5px}
+.fnode .fs{font-size:.62rem;font-weight:700;color:var(--t4);margin-bottom:4px}
+.fnode .fd{font-size:.69rem;color:var(--t2);line-height:1.65}
+.fnode.bad{border-color:#F3C1C1;background:#FFFBFB}
+.fnode.good{border-color:#B7E4CF;background:#FBFFFD}
+.fnode .rx{color:var(--err);font-weight:800}
+.fnode .gx{color:var(--g-deep);font-weight:800}
+.farrow{display:flex;align-items:center;padding:0 8px;color:var(--t4);font-weight:800;font-size:1.05rem}
+@media (max-width:900px){.flow{flex-direction:column}.farrow{transform:rotate(90deg);justify-content:center;padding:2px 0}}
+
+/* 유저플로우 목업 */
+.uf{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;margin-top:10px}
+@media (max-width:920px){.uf{grid-template-columns:1fr}}
+.uflab{font-size:.7rem;font-weight:800;padding:4px 11px;border-radius:999px;display:inline-block;margin-bottom:8px}
+.uflab.b{background:var(--err-soft);color:var(--err)}
+.uflab.a{background:var(--g-soft);color:var(--g-deep)}
+.mock{background:#fff;border:1px solid var(--line);border-radius:13px;padding:13px 15px;box-shadow:0 2px 8px rgba(15,23,42,.05)}
+.mock .mt{font-size:.76rem;font-weight:800;margin-bottom:9px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.mock .mt .mn{font-size:.62rem;font-weight:700;color:var(--t3)}
+.fld{display:grid;grid-template-columns:86px 1fr;gap:9px;align-items:start;padding:5px 0}
+.fld>label{font-size:.7rem;font-weight:700;color:var(--t2);text-align:right;padding-top:6px}
+.ta{width:100%;border:1.5px solid var(--line);border-radius:8px;font-size:.71rem;padding:7px 9px;color:var(--ink);
+    font-family:inherit;line-height:1.65;background:#fff;white-space:pre-wrap;word-break:break-word}
+.ta.warn{border-color:#F0B45E;background:#FFFDF8}
+.ta .cut{background:#FEE2E2;border-radius:3px;padding:0 2px}
+.dest{display:inline-block;font-size:.6rem;font-weight:800;border-radius:6px;padding:1px 7px;margin-left:5px;vertical-align:1px}
+.dest.inflow{background:#E0F2FE;color:#075985}
+.dest.review{background:var(--g-soft);color:var(--g-deep)}
+.dest.notes{background:var(--vio-soft);color:var(--vio)}
+.dest.pub{background:var(--w-soft);color:var(--w)}
+.payload{background:#0F172A;color:#D7E3F4;border-radius:10px;padding:11px 13px;font-size:.68rem;line-height:1.75;
+  font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.payload .k{color:#7DD3FC}
+.payload .bad{color:#FCA5A5;text-decoration:line-through}
+.payload .new{color:#86EFAC}
+.cap{font-size:.68rem;color:var(--t3);font-weight:600;margin-top:7px;line-height:1.6}
+.cap b{color:var(--ink)}
+
+/* 단계 카드 */
+.phases{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-top:12px}
+@media (max-width:960px){.phases{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.phases{grid-template-columns:1fr}}
+.ph{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.ph .pt{font-size:.72rem;font-weight:800;margin-bottom:5px}
+.ph .pn{display:inline-block;font-size:.62rem;font-weight:800;border-radius:6px;padding:2px 8px;margin-bottom:6px}
+.ph .pn.done{background:var(--g-soft);color:var(--g-deep)}
+.ph .pn.next{background:var(--p-soft);color:var(--p-deep)}
+.ph .pn.later{background:var(--line2);color:var(--t3)}
+.ph p{font-size:.69rem;color:var(--t2);line-height:1.65}
+
+.note{font-size:.78rem;color:var(--t2);margin-top:14px;background:#fff;border:1px solid var(--line);
+  border-left:3px solid var(--p);border-radius:10px;padding:12px 15px}
+.note b{font-weight:800;color:var(--ink)}
+.note ul{margin:6px 0 0 17px} .note li{margin-bottom:4px}
+.note.gr{border-left-color:var(--g)}
+.note.wr{border-left-color:#F59E0B}
+</style>
+</head>
+<body>
+<div class="doc">
+
+<div class="eyebrow">PRD · FIELD MAPPING &amp; USER FLOW</div>
+<h1>인트라넷 리뷰오더 ↔ 리뷰웹 작업오더 — 구조 동기화 매핑 계획</h1>
+<p class="lead">
+  리뷰웹이 작업오더의 통짜 텍스트를 <b>추측(섹션 파싱)</b>해 발행폼을 채우는 구조를 폐기하고,
+  <b>인트라넷 리뷰오더의 칸 = 리뷰웹의 칸</b>이 1:1로 흐르게 만드는 계획입니다.
+  양쪽 코드를 실제로 조사한 결과가 근거이며, 결론부터: <b>API 는 이미 칸별로 주고받고 있습니다</b> —
+  섞는 곳은 인트라넷 <b>폼의 조립 함수 단 한 곳</b>이고, 그 섞인 것을 <b>세 곳</b>이 도로 풀고 있습니다.
+</p>
+<div class="chips">
+  <span class="chip">조사 <b>inadd-webapp + review-web-system 실코드</b></span>
+  <span class="chip">핵심 발견 <b>섞는 곳 1 · 푸는 곳 3</b></span>
+  <span class="chip">호환 <b>배포 순서 무관(가산적)</b></span>
+</div>
+
+<!-- ═══ 1. 조사 결과 ═══ -->
+<section>
+  <span class="sec-no">STEP 1 — 조사 결과</span>
+  <h2>지금 데이터가 흐르는 길 — 어디서 섞이고, 어디서 도로 푸는가</h2>
+
+  <div class="flow">
+    <div class="fnode">
+      <div class="fs">인트라넷 · AE 입력</div>
+      <div class="ft">① 리뷰오더 폼</div>
+      <div class="fd">유입가이드 / 리뷰등록 가이드 / 특이사항이 <b>각각 다른 입력칸</b> — 여기까지는 이미 분리돼 있다.</div>
+    </div>
+    <div class="farrow">→</div>
+    <div class="fnode bad">
+      <div class="fs">인트라넷 · review-orders.js</div>
+      <div class="ft">② 제출 시 조립 <span class="rx">← 섞는 곳(유일)</span></div>
+      <div class="fd"><code>reviewOrderBuildReviewGuide()</code>가<br>
+      <span class="rx">review_guide = [유입방식] + [유입가이드]<br>(유입 원문 재복제!) + [리뷰등록 가이드]</span><br>
+      <code>reviewOrderImageText()</code>가 inflow_guide 에 첨부 파일명·URL 블록을 덧붙임.</div>
+    </div>
+    <div class="farrow">→</div>
+    <div class="fnode">
+      <div class="fs">api.ts → 리뷰웹 intake</div>
+      <div class="ft">③ 전송·저장 (이미 칸별)</div>
+      <div class="fd"><code>REVIEW_ORDER_FIELDS</code> 화이트리스트 → <code>/api/order/intake</code> → <code>work_orders</code> 컬럼별 저장. <b>구조는 이미 1:1</b> — 값만 오염된 채 흐른다.</div>
+    </div>
+    <div class="farrow">→</div>
+    <div class="fnode bad">
+      <div class="fs">세 곳이 각자 도로 푼다</div>
+      <div class="ft">④ 역파싱 3곳 <span class="rx">← 추측</span></div>
+      <div class="fd">ⓐ 인트라넷 표시 <code>reviewOrderReviewGuideOnly()</code><br>
+      ⓑ 리뷰웹 발행 프리필 <code>_woPickSections()+스트립</code><br>
+      ⓒ 리뷰웹 오더 상세 <code>_woDetailHtml()</code><br>
+      → 셋의 파싱 규칙이 조금씩 달라 어긋나면 4칸 오염(장수돌침대 건).</div>
+    </div>
+  </div>
+
+  <div class="note wr"><b>조사로 확정된 사실 3가지</b>
+    <ul>
+      <li><b>API·DB 는 죄가 없다</b> — <code>inflow_type / inflow_guide / review_guide / special_notes</code>가 처음부터 별도 필드·별도 컬럼으로 오간다. 문제는 <b>review_guide 라는 필드에 담기는 값</b>이 폼 조립 함수 때문에 3개 칸의 혼합물이라는 것.</li>
+      <li><b>인트라넷 스스로도 피해자</b> — 자기 화면에 리뷰가이드를 보여줄 때 <code>reviewOrderReviewGuideOnly()</code>로 자기가 섞은 것을 도로 풀고 있다(수정 화면은 blob 원문이 그대로 열려 AE 가 라벨째 편집).</li>
+      <li><b>첨부 이미지는 이중 전달</b> — inflow_guide 와 review_guide 양쪽에 파일명·URL 텍스트 블록으로 들어간다. 리뷰웹은 review_guide 쪽 것을 "승격"(<code>_woReviewImgHtml</code>)해 쓰는데, inflow_guide 쪽에서도 이미 이미지를 렌더하므로 <b>한쪽(review_guide)은 순수 잉여</b>다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ 2. 필드 매핑 표 ═══ -->
+<section>
+  <span class="sec-no">STEP 2 — 필드 매핑 표</span>
+  <h2>전 필드 대조 — 폼 입력 → 전송 키 → 리뷰웹 컬럼 → 발행폼 → 리뷰어 화면</h2>
+  <p class="d">🟢 = 이미 1:1(변경 없음) · 🔴 = 혼합(이번에 고칠 것) · 🔵 = 파생값(리뷰웹이 판정·정상). To-be 열이 이 PRD 의 약속입니다.</p>
+  <div class="tbl"><table>
+    <tr><th>인트라넷 폼 입력칸</th><th>전송 키(payload)</th><th>work_orders 컬럼</th><th>As-is 값</th><th style="width:88px">상태</th><th>To-be (매핑 후)</th><th>발행폼 → 리뷰어 화면 자리</th></tr>
+    <tr><td>유입방식 라디오</td><td>inflow_type</td><td>inflow_type</td><td>코드(guide/link) 그대로</td><td><span class="st g">🟢 1:1</span></td><td>그대로</td><td>유입 버튼 노출 판정(구조 필드)</td></tr>
+    <tr><td>유입가이드 텍스트</td><td rowspan="2">inflow_guide</td><td rowspan="2">inflow_guide</td><td rowspan="2">가이드 텍스트<br><b>+ [첨부 이미지] 파일명·URL 블록</b></td><td rowspan="2"><span class="st y">🟡 혼합(경미)</span></td><td rowspan="2"><b>가이드 텍스트만</b><br>(첨부는 guide_images 로 분리 — 2단계)</td><td rowspan="2">발행폼 [유입가이드] → 리뷰어 🔎 유입가이드 카드</td></tr>
+    <tr><td>첨부 이미지(≤4장)</td></tr>
+    <tr><td>리뷰등록 가이드 텍스트</td><td>review_guide</td><td>review_guide</td><td class="st r" style="display:table-cell"><b>[유입방식]+[유입가이드]<br>(유입 재복제)+[리뷰등록 가이드]</b></td><td><span class="st r">🔴 혼합(핵심)</span></td><td><b>리뷰등록 가이드 텍스트만</b><br>(조립 함수 폐기 — 1단계)</td><td>발행폼 [리뷰가이드] → 리뷰어 📝 리뷰 가이드 카드</td></tr>
+    <tr><td>특이사항 텍스트</td><td>special_notes</td><td>special_notes</td><td>그대로(단, AE 가 안 씀)</td><td><span class="st g">🟢 1:1</span></td><td>그대로 + <b>칸 용도 힌트</b>(3단계)</td><td>발행폼 [특이사항] → 리뷰어 ⚠️ 특이사항 카드(참여자만)</td></tr>
+    <tr><td><i>(대응 입력 없음)</i></td><td>—</td><td>—</td><td>리뷰웹 프리필이 review_guide 원문을 유의사항에 주입</td><td><span class="st g">🟢 해결됨</span></td><td><b>유의사항 = 자동 주입 없음</b><br>(4칸 정리 개선 ① — 구현 완료)</td><td>발행폼 [유의사항] → <b>공고 카드(참여 전 공개)</b> — 관리자 직접 작성</td></tr>
+    <tr><td>진행 상품·옵션 표</td><td>product_option</td><td>product_option</td><td>요약 텍스트</td><td><span class="st g">🟢 1:1</span></td><td>그대로 (+ 구조 JSON 은 기존 product_options_json 경로)</td><td>진행상품 표 → 상품·옵션·결제금액 카드</td></tr>
+    <tr><td>작업명/시트URL/시작일/구매시간</td><td>title · work_sheet_url · start_date · purchase_time</td><td>동명 컬럼</td><td>그대로</td><td><span class="st g">🟢 1:1</span></td><td>그대로</td><td>제목·연결탭·모집조건</td></tr>
+    <tr><td>일건수/모집건수/결제합계</td><td>daily_count · recruit_count · pay_amount</td><td>동명 컬럼</td><td>그대로</td><td><span class="st g">🟢 1:1</span></td><td>그대로</td><td>모집조건(정원) — 시트 일정 있으면 시트 우선</td></tr>
+    <tr><td>리뷰타입/배송/물건비</td><td>review_type · delivery_type · goods_cost_type</td><td>동명 컬럼</td><td>요약 문자열</td><td><span class="st g">🟢 1:1</span></td><td>그대로</td><td>리뷰타입 버튼·배송유형·이체은행 자동판정</td></tr>
+    <tr><td>계약건 선택(필수)</td><td>sales_id · contract_number · quote_id</td><td>동명 컬럼(088)</td><td>서버가 원본에서 재확정</td><td><span class="st g">🟢 1:1</span></td><td>그대로</td><td>접수 시 정산 자동 연결</td></tr>
+    <tr><td>상품 URL</td><td>product_url</td><td>product_url</td><td>첫 상품 URL</td><td><span class="st b">🔵 파생 소비</span></td><td>그대로</td><td>구매채널 호스트 판정 + 상품정보 수집</td></tr>
+    <tr><td>작업담당(박세희/박은비/랜덤)</td><td>work_manager</td><td>work_manager</td><td>그대로</td><td><span class="st b">🔵 파생 소비</span></td><td>그대로</td><td>담당자 만두/망고 매핑(랜덤=빈 값)</td></tr>
+  </table></div>
+  <p class="d" style="margin-top:8px">결론: <b>고칠 대상은 🔴 review_guide 조립 1곳 + 🟡 첨부 블록 분리</b>뿐이고, 나머지 매핑은 이미 계약대로 흐른다.
+  리뷰웹의 역파싱(pickSections·스트립)은 매핑이 완성된 뒤에도 <b>과거 오더 호환용으로 유지</b>한다(제거하지 않음 — 아래 호환성).</p>
+</section>
+
+<!-- ═══ 3. To-be 원칙 + 단계 ═══ -->
+<section>
+  <span class="sec-no">STEP 3 — 계획</span>
+  <h2>To-be 원칙 — "조립은 표시 직전에만, 전송·저장은 칸 그대로"</h2>
+  <p class="d">한 문장 규칙: <b>필드에는 그 필드의 내용만 담는다.</b> 여러 칸을 합친 보기 좋은 문서(카톡 게시문·상세 화면)는
+  필요할 때 <b>구조 필드에서 표시 시점에 조립</b>한다 — 저장된 값을 파싱해 되찾는 것의 정반대 방향이다.</p>
+
+  <div class="phases">
+    <div class="ph"><span class="pn done">0단계 · 구현 완료</span>
+      <div class="pt">리뷰웹 수비(4칸 정리 ①+②)</div>
+      <p>유의사항 자동 주입 폐지 + 리뷰가이드 메타 줄 스트립. 매핑이 완성돼도 <b>과거 오더·수기 편집 오염을 계속 걸러 주는 안전망</b>으로 유지.</p></div>
+    <div class="ph"><span class="pn next">1단계 · 핵심(인트라넷 1곳)</span>
+      <div class="pt">review_guide 순수화</div>
+      <p><code>reviewOrderBuildReviewGuide()</code> 폐기 → <b>review_guide = 리뷰등록 가이드 입력값 그대로</b>. 인트라넷 표시·수정 화면의 역파싱(<code>reviewOrderReviewGuideOnly</code>)은 과거 오더용으로 유지.</p></div>
+    <div class="ph"><span class="pn later">2단계 · 첨부 구조화</span>
+      <div class="pt">guide_images JSON 필드</div>
+      <p>첨부 이미지를 파일명 텍스트 블록이 아니라 <b>URL 배열</b>로 전송(<code>guide_images</code>) → inflow_guide 도 순수 텍스트로. 리뷰웹 <code>work_orders</code> 컬럼 1개 추가(TEXT/JSONB · 백필 0 · REQUIRED_SCHEMA 등록).</p></div>
+    <div class="ph"><span class="pn later">3단계 · 입력 단계 안내</span>
+      <div class="pt">칸 목적지 힌트 + 특이사항 유도</div>
+      <p>리뷰오더 폼 각 칸에 <b>"이 내용이 리뷰어 화면 어디에 나가는지"</b> 배지 표기. 유입가이드에 주소·연락처류 문구 감지 시 "특이사항 칸이 맞아요" 안내(경고 전용).</p></div>
+  </div>
+</section>
+
+<!-- ═══ 4. 유저플로우 와이어프레임 ═══ -->
+<section>
+  <span class="sec-no">STEP 4 — 유저플로우</span>
+  <h2>같은 발주, 두 흐름 — As-is(섞고 → 셋이 풀기) vs To-be(칸 = 칸)</h2>
+
+  <h3>ⓐ 인트라넷 · 리뷰오더 폼 (AE 작성)</h3>
+  <div class="uf">
+    <div>
+      <span class="uflab b">AS-IS — 제출 순간 섞인다</span>
+      <div class="mock">
+        <div class="mt">리뷰오더 발주 폼</div>
+        <div class="fld"><label>유입가이드</label>
+          <div class="ta">장수돌침대 전기매트 검색 → 2번째 상품
+(+ 첨부 이미지 1장)</div></div>
+        <div class="fld"><label>리뷰등록 가이드</label>
+          <div class="ta">전체 별점 5건 - 배송이 빠르다 등</div></div>
+        <div class="fld"><label>특이사항</label>
+          <div class="ta" style="color:var(--t4);font-style:italic">(비어 있음 — 어디에 나가는 칸인지 몰라 안 씀)</div></div>
+        <div class="cap">[오더 보내기]를 누르면 <b style="color:var(--err)">조립 함수가 세 칸을 한 문자열로 합쳐</b> review_guide 로 전송.</div>
+      </div>
+    </div>
+    <div>
+      <span class="uflab a">TO-BE — 칸마다 목적지가 보이고, 그대로 간다</span>
+      <div class="mock">
+        <div class="mt">리뷰오더 발주 폼 <span class="mn">(3단계 힌트 포함)</span></div>
+        <div class="fld"><label>유입가이드</label>
+          <div><div class="ta">장수돌침대 전기매트 검색 → 2번째 상품</div>
+          <div class="cap">→ 리뷰어 화면 <span class="dest inflow">🔎 유입가이드 카드</span>에 그대로 나갑니다 · 첨부는 이미지로 함께</div></div></div>
+        <div class="fld"><label>리뷰등록 가이드</label>
+          <div><div class="ta">전체 별점 5건 - 배송이 빠르다 등</div>
+          <div class="cap">→ <span class="dest review">📝 리뷰 가이드 카드</span>에 그대로</div></div></div>
+        <div class="fld"><label>특이사항</label>
+          <div><div class="ta">택배받을 주소·폰번호 정확하게 입력!</div>
+          <div class="cap">→ <span class="dest notes">⚠️ 특이사항 카드(참여자만)</span> — 주소·연락처 안내는 여기</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>ⓑ 전송 페이로드 (인트라넷 → 리뷰웹 <code>/api/order/intake</code>)</h3>
+  <div class="uf">
+    <div>
+      <span class="uflab b">AS-IS</span>
+      <div class="payload"><span class="k">inflow_guide</span>: "장수돌침대 … 검색\n\n<span class="bad">[유입가이드 첨부 이미지]\n1. 유입.png (29KB, Drive 저장됨)\nhttps://…/guide-image/1mdb…</span>"
+<span class="k">review_guide</span>: "<span class="bad">[유입방식] 유입가이드\n\n[유입가이드]\n장수돌침대 … 검색(재복제)\n\n[첨부 이미지 블록(재복제)]\n\n</span>[리뷰등록 가이드]\n전체 별점 5건 …"
+<span class="k">special_notes</span>: ""</div>
+      <div class="cap">유입 내용이 <b>세 번</b>(inflow_guide 1 + review_guide 2) 실려 간다.</div>
+    </div>
+    <div>
+      <span class="uflab a">TO-BE</span>
+      <div class="payload"><span class="k">inflow_guide</span>: "장수돌침대 … 검색"
+<span class="k">review_guide</span>: "전체 별점 5건 - 배송이 빠르다 등"
+<span class="k">special_notes</span>: "택배받을 주소·폰번호 정확하게 입력!"
+<span class="new">guide_images</span>: ["https://…/guide-image/1mdb…"]   <span style="color:#94A3B8">← 2단계</span></div>
+      <div class="cap">각 키에 그 내용만 — 리뷰웹은 <b>파싱 없이 그대로 꽂는다</b>.</div>
+    </div>
+  </div>
+
+  <h3>ⓒ 리뷰웹 · 발행폼 프리필 → 리뷰어 화면</h3>
+  <div class="uf">
+    <div>
+      <span class="uflab b">AS-IS — 추측이 3곳에서 반복</span>
+      <div class="mock">
+        <div class="mt">발행폼 4칸 채워지는 방식</div>
+        <div class="cap" style="margin:0 0 8px">유입가이드 ← inflow_guide 에서 첨부 블록 <b>제거 파싱</b><br>
+        리뷰가이드 ← review_guide 에서 [리뷰등록 가이드] <b>추출 파싱</b> + 메타 스트립<br>
+        특이사항 ← special_notes (그대로 — 대개 빈 값)<br>
+        유의사항 ← <s>review_guide 원문 덤프</s> <b style="color:var(--g-deep)">(개선 ①로 해결)</b></div>
+        <div class="cap"><b style="color:var(--err)">파싱 규칙이 어긋나는 순간</b> 리뷰어 화면 4카드에 같은 내용이 2~3중 표기(장수돌침대 실측).</div>
+      </div>
+    </div>
+    <div>
+      <span class="uflab a">TO-BE — 매핑이라 어긋날 방법이 없다</span>
+      <div class="mock">
+        <div class="mt">발행폼 4칸 채워지는 방식</div>
+        <div class="cap" style="margin:0 0 8px">유입가이드 ← <b>inflow_guide 그대로</b> (+ guide_images 는 이미지로)<br>
+        리뷰가이드 ← <b>review_guide 그대로</b><br>
+        특이사항 ← <b>special_notes 그대로</b><br>
+        유의사항 ← <b>빈 칸(관리자 직접)</b></div>
+        <div class="cap">기존 파싱 코드는 <b>지우지 않고 폴백으로 유지</b> — 라벨이 있는 옛 오더가 들어오면 종전처럼 풀고, 순수 값이 오면 파싱이 자연히 no-op(아래 호환성).</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 5. 호환성 ═══ -->
+<section>
+  <span class="sec-no">STEP 5 — 호환성</span>
+  <h2>배포 순서 무관 — 어느 쪽이 먼저 나가도 깨지지 않는 근거</h2>
+  <div class="tbl"><table>
+    <tr><th>상황</th><th>review_guide 에 오는 값</th><th>리뷰웹 동작</th><th>결과</th></tr>
+    <tr><td><b>둘 다 배포 전</b> (지금)</td><td>[라벨] 혼합 blob</td><td>pickSections 추출 + 메타 스트립(0단계)</td><td><span class="st g">정상 — 종전보다 깨끗</span></td></tr>
+    <tr><td><b>리뷰웹만 배포</b> (0단계)</td><td>[라벨] 혼합 blob</td><td>동일 — 추출·스트립이 오염 흡수</td><td><span class="st g">정상</span></td></tr>
+    <tr><td><b>인트라넷만 배포</b> (1단계 먼저)</td><td><b>순수 리뷰가이드</b>(라벨 없음)</td><td>pickSections 는 [라벨] 없으면 <b>전문 그대로</b> 반환 → 그게 이미 순수 값. 스트립도 지울 게 없어 no-op</td><td><span class="st g">정상 — 파싱이 자연 소멸</span></td></tr>
+    <tr><td><b>과거 오더</b> (배포 후 열람·재발행)</td><td>[라벨] 혼합 blob (저장분)</td><td>파싱 폴백이 계속 풀어준다 — <b>그래서 역파싱 코드를 제거하지 않는다</b></td><td><span class="st g">정상</span></td></tr>
+    <tr><td><b>2단계 guide_images</b> 한쪽만</td><td colspan="2">필드 미전송이면 리뷰웹이 종전 텍스트 블록 경로 사용 / 컬럼 없으면 인트라넷 전송값 무시</td><td><span class="st g">가산적</span></td></tr>
+  </table></div>
+  <div class="note wr"><b>주의 2건 (구현 시 지켜야 하는 것)</b>
+    <ul>
+      <li><b>인트라넷 편집(PUT) 화면</b> — 과거 오더를 열면 리뷰등록 가이드 칸에 blob 이 열린다. 저장 전 <b>표시용 분해값으로 프리필</b>(이미 있는 <code>reviewOrderReviewGuideOnly</code> 재사용)해 재저장 시 자연 정화되게 한다. 단 <b>자동 재저장은 하지 않는다</b>(사람이 저장할 때만).</li>
+      <li><b>카톡 게시문 등 "합쳐 보여주는" 소비처</b> — 필요하면 구조 필드에서 표시 시점 조립으로 전환(저장값 파싱 금지). 조사 범위에서 리뷰웹의 상세 화면(<code>_woDetailHtml</code>)은 이미 섹션별 렌더라 순수 값이 와도 그대로 동작한다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ 6. 구현 메모 ═══ -->
+<div class="note gr">
+  <b>구현 메모 (승인 시 진행 순서)</b>
+  <ul>
+    <li><b>0단계(완료)</b> — 리뷰웹 <code>work-order-detail.js</code>: 유의사항 프리필 폐지 + <code>_woStripReviewMeta</code>. 회귀가드 <code>tests/campaignFieldPrefill.test.js</code>(실측 원문 픽스처 15케이스).</li>
+    <li><b>1단계(인트라넷 PR 1건)</b> — <code>review-orders.js</code>: 제출 payload 의 <code>review_guide: reviewOrderBuildReviewGuide(products)</code> → <code>reviewOrderValue('review-order-guide')</code>. 조립 함수는 카톡 미리보기 등 표시용으로만 남긴다. 편집 프리필 분해값 적용. 인트라넷은 main 머지 = 자동배포(D1 마이그레이션 없음 — 이 단계는 스키마 0).</li>
+    <li><b>2단계(양쪽 PR 각 1건)</b> — 리뷰웹: <code>work_orders.guide_images</code> 컬럼 + intake 필드 허용 + 프리필이 배열 우선·텍스트 블록 폴백. 인트라넷: 업로드 결과 URL 배열 전송. 양방향 가산적.</li>
+    <li><b>3단계(인트라넷 PR 1건)</b> — 폼 칸별 목적지 힌트 + 특이사항 유도(경고 전용·하드블록 없음).</li>
+    <li>리뷰웹 4칸 정리 <b>개선 ③(🧹 정리 도우미)·④(기발행 소급)</b>은 이 매핑과 독립적으로 유효(과거 오더·수기 편집이 남는 한 필요) — 별도 진행.</li>
+  </ul>
+</div>
+
+<p class="d" style="margin-top:16px;font-weight:700">승인해 주시면 1단계(인트라넷 review_guide 순수화)부터 진행합니다 — 두 저장소 모두 이 세션에 있어 양쪽 PR 을 함께 만들 수 있습니다.</p>
+
+</div>
+</body>
+</html>

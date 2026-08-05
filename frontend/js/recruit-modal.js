@@ -336,7 +336,7 @@
       <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유의사항</span>
         <div>
           <textarea id="rf_notes" class="rform-input" rows="2"
-            placeholder="리뷰어에게 전달할 유의사항을 자유롭게 입력하세요" style="resize:vertical"></textarea>
+            placeholder="참여 전 모두에게 공개되는 짧은 안내만 — 예) 와우회원 전용 · 계정당 1회" style="resize:vertical"></textarea>
           <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">공고 카드에 노출되는 안내문</div>
         </div></div>
       <div class="rf-grid2">

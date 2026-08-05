@@ -129,8 +129,9 @@ ok('⑥-6b 그 응답에 카톡·상품·가이드 필드가 섞이지 않는다
 })());
 
 // B: 발행 프리필 정화(신규 스냅샷 클린)
-ok('B-1 프리필 wd_review는 _woPickSections로 리뷰등록만',
-  /wd_review:\s*\(typeof _woPickSections === "function"[\s\S]{0,120}리뷰등록 가이드/.test(app));
+// ★ 4칸 정리 개선 ②에서 _woStripReviewMeta 로 한 번 더 감쌌다 — 검사 의미(리뷰등록 섹션만) 불변, 패턴만 갱신.
+ok('B-1 프리필 wd_review는 _woPickSections로 리뷰등록만(+메타 스트립)',
+  /wd_review:\s*_woStripReviewMeta\(typeof _woPickSections === "function"[\s\S]{0,120}리뷰등록 가이드/.test(app));
 ok('B-2 유입가이드 HTML에 review_guide 첨부 이미지 승격(_woBuildInflowHtml)',
   /_woBuildInflowHtml/.test(app) && /wd_inflow_html: _wdInflowHtml/.test(app));
 ok('B-3 비링크 landing_url product_url 폴백 제거(유입가이드형에 버튼 안 뜸)',

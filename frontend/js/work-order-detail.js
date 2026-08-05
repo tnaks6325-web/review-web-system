@@ -571,6 +571,23 @@ function _woBuildInflowHtml(o) {
   return base + imgs;
 }
 
+/* 리뷰가이드 프리필용 메타 줄 스트립(4칸 정리 개선 ② — docs/design-campaign-field-cleanup.html):
+   구조 필드가 이미 담당하는 값(유입 라벨·첨부 이미지 메타·상품번호·옵션:결제금액)이
+   리뷰가이드 텍스트에 남아 리뷰어 화면에 이중 표기되던 것을 걷어낸다.
+   ★ 줄 단위 · 패턴이 확실한 것만 지운다 — 본문 문장을 지우는 오탐이, 메타를 놓치는 것보다 나쁘다.
+     (문장 속 '결제금액'·'상품번호를 확인' 같은 서술은 콜론·라벨 형식이 아니라 안 걸린다) */
+function _woStripReviewMeta(raw) {
+  if (!raw || !String(raw).trim()) return "";
+  return String(raw).split(/\r?\n/)
+    .filter(ln => !/^\s*\[(유입방식|유입가이드|링크유입)\]/.test(ln))                          // 유입 라벨 줄(전문 폴백 케이스)
+    .filter(ln => !/^\s*\[[^\]]*첨부\s*이미지\]\s*$/.test(ln))                                 // [유입가이드 첨부 이미지]
+    .filter(ln => !/^\s*\d+\.\s.*\((?:[^)]*(?:저장됨|업로드))[^)]*\)\s*$/.test(ln))            // 1. 파일명.png (29KB, Drive 저장됨)
+    .filter(ln => !/^\s*https?:\/\/\S*(?:guide-image\/|drive\.google\.com)\S*\s*$/i.test(ln))  // 첨부 저장 주소 단독 줄
+    .filter(ln => !/^\s*(?:쿠팡\s*)?상품번호\s*[:：]/.test(ln))                                // 쿠팡상품번호: …
+    .filter(ln => !/^\s*▶\s*옵션\s*[:：]\s*결제금액\s*◀/.test(ln))                            // ▶옵션:결제금액◀…
+    .join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // 작업오더의 첫 상품명·결제금액 → 공고 상품정보 기본값 (자동수집 실패해도 폼에 기본 표시)
 function _woFirstProductInfo(o) {
   // 1) 구조화 JSON 우선
@@ -627,7 +644,11 @@ function _woCampaignPrefill(o) {
     // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
     product_name:  _pi.name || "",
     price:         _pi.price || "",
-    notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
+    // ★ 유의사항(notes)은 프리필하지 않는다(4칸 정리 개선 ① — docs/design-campaign-field-cleanup.html 원인 1).
+    //   공고 카드에 **참여 전 모두에게 공개**되는 칸인데 종전엔 "유입방식: ○○" + review_guide 원문 전체를
+    //   붙여 넣어 상품번호·옵션:결제금액·내부 섹션 라벨까지 노출됐다(실측: 장수돌침대 공고).
+    //   유입방식은 inflowType(구조 필드)이 이미 담당 — 공개용 안내는 관리자가 직접 쓴다.
+    notes:         "",
     // ★ 086: 이체은행은 **값을 강제하지 않고 [자동]으로 둔다** — 서버가 이 오더의 물건비
     //   수취방식에서 파생하므로, 값을 박아두면 나중에 오더가 정정돼도 안 따라간다.
     //   여기서는 화면 안내 문구에 판정 근거만 보여준다.
@@ -648,8 +669,10 @@ function _woCampaignPrefill(o) {
     wd_inflow_text: o.inflow_type === "link"
       ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요."
       : ((!_wdInflowHtml && o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
-    // ★ 리뷰가이드는 [리뷰등록 가이드] 섹션만 스냅샷(유입방식·유입가이드·첨부 이미지 메타 제외) — 관리자 상세와 동일 규율
-    wd_review:      (typeof _woPickSections === "function"
+    // ★ 리뷰가이드는 [리뷰등록 가이드] 섹션만 스냅샷 + 메타 줄 스트립(4칸 정리 개선 ②) —
+    //   [라벨]이 하나도 없어 전문 폴백될 때도 첨부 파일명·저장 URL·상품번호·▶옵션:결제금액◀ 줄은
+    //   걷어낸다(구조 필드가 이미 보여주는 값 — 리뷰어 화면 이중 표기의 원인 2·4).
+    wd_review:      _woStripReviewMeta(typeof _woPickSections === "function"
                       ? _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"])
                       : (o.review_guide || "")),
     wd_notes:       o.special_notes || "",
@@ -695,6 +718,7 @@ function _woCampaignPrefill(o) {
     _woChannelFromUrl: _woChannelFromUrl, _woChannel: _woChannel,
     _woPlainGuideToHtml: _woPlainGuideToHtml, _woReviewImgHtml: _woReviewImgHtml,
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,
+    _woStripReviewMeta: _woStripReviewMeta,
     _woOptionRows: _woOptionRows, _woCampaignPrefill: _woCampaignPrefill,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
