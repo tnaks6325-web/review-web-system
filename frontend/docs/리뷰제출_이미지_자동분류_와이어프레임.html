@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>제출 이미지 자동 분류·이동 — 구현계획 와이어프레임 v1.0</title>
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#ffffff; --line:#e3e8f0; --t1:#1c2333; --t2:#5a6478; --t3:#8b93a7;
+    --blue:#2563eb; --blue-bg:#eff6ff; --green:#16a34a; --green-bg:#f0fdf4;
+    --red:#dc2626; --red-bg:#fef2f2; --amber:#d97706; --amber-bg:#fffbeb;
+    --purple:#7c3aed; --purple-bg:#f5f3ff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:var(--bg); color:var(--t1); line-height:1.65; padding:32px 16px 80px;}
+  .wrap{max-width:1080px; margin:0 auto;}
+  h1{font-size:24px; margin-bottom:6px;}
+  h2{font-size:18px; margin:0 0 14px; display:flex; align-items:center; gap:8px;}
+  h2 .no{display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:8px; background:var(--t1); color:#fff; font-size:13px; flex:none;}
+  h3{font-size:14.5px; margin:18px 0 8px;}
+  .sub{color:var(--t2); font-size:13.5px; margin-bottom:24px;}
+  .sec{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:22px;}
+  .badge{display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:700; vertical-align:2px;}
+  .b-ok{background:var(--green-bg); color:var(--green); border:1px solid #bbf7d0;}
+  .b-new{background:var(--purple-bg); color:var(--purple); border:1px solid #ddd6fe;}
+  .b-warn{background:var(--amber-bg); color:var(--amber); border:1px solid #fde68a;}
+  .b-danger{background:var(--red-bg); color:var(--red); border:1px solid #fecaca;}
+  .b-info{background:var(--blue-bg); color:var(--blue); border:1px solid #bfdbfe;}
+  table{width:100%; border-collapse:collapse; font-size:13px; margin:10px 0;}
+  th{background:#f8fafc; text-align:left; padding:8px 10px; border:1px solid var(--line); font-size:12.5px; color:var(--t2); white-space:nowrap;}
+  td{padding:8px 10px; border:1px solid var(--line); vertical-align:top;}
+  code{background:#f1f5f9; border:1px solid #e2e8f0; border-radius:4px; padding:1px 5px; font-size:12px; font-family:'D2Coding',Consolas,monospace; color:#334155; word-break:break-all;}
+  .callout{border-radius:10px; padding:12px 14px; font-size:13px; margin:12px 0;}
+  .co-danger{background:var(--red-bg); border:1px solid #fecaca;}
+  .co-amber{background:var(--amber-bg); border:1px solid #fde68a;}
+  .co-blue{background:var(--blue-bg); border:1px solid #bfdbfe;}
+  .co-green{background:var(--green-bg); border:1px solid #bbf7d0;}
+  ul.tight{margin:6px 0 6px 20px;} ul.tight li{margin:4px 0; font-size:13.5px;}
+  .star{color:var(--red); font-weight:800;}
+  /* 흐름도 */
+  .flow{display:flex; flex-direction:column; gap:0; align-items:center; margin:16px 0;}
+  .fnode{background:#fff; border:1.5px solid var(--t1); border-radius:10px; padding:10px 18px; font-size:13px; font-weight:600; text-align:center; min-width:280px;}
+  .fnode small{display:block; font-weight:400; color:var(--t2); font-size:11.5px; margin-top:2px;}
+  .farrow{width:2px; height:20px; background:var(--t3); position:relative;}
+  .farrow::after{content:''; position:absolute; bottom:-1px; left:-4px; border:5px solid transparent; border-top-color:var(--t3);}
+  .fbranch{display:flex; gap:14px; flex-wrap:wrap; justify-content:center; margin-top:8px;}
+  .fcase{flex:1; min-width:180px; max-width:250px; border-radius:10px; padding:10px 12px; font-size:12.5px;}
+  .fcase b{display:block; font-size:12px; margin-bottom:4px;}
+  .fc-green{background:var(--green-bg); border:1.5px solid #86efac;}
+  .fc-blue{background:var(--blue-bg); border:1.5px solid #93c5fd;}
+  .fc-red{background:var(--red-bg); border:1.5px solid #fca5a5;}
+  .fc-gray{background:#f8fafc; border:1.5px solid #cbd5e1;}
+  .fc-amber{background:var(--amber-bg); border:1.5px solid #fcd34d;}
+  /* 목업(리뷰어·관리자 화면 재현) — 실물 재현 영역은 라이트 고정 */
+  .mock{color-scheme:light; background:#eef1f6; border:1px dashed #b8c0d0; border-radius:12px; padding:18px; margin:12px 0;}
+  .mock .mtitle{font-size:11.5px; color:var(--t3); font-weight:700; letter-spacing:.4px; margin-bottom:10px;}
+  .phone{max-width:390px; margin:0 auto; background:#fff; border:1px solid #d6dce8; border-radius:16px; padding:16px; box-shadow:0 4px 14px rgba(20,30,60,.08);}
+  .slotcard{border:1px solid #e3e8f0; border-radius:12px; padding:12px; margin-bottom:10px;}
+  .slotcard .sname{font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px;}
+  .slotcard .sname .req{font-size:10.5px; color:#fff; background:#334155; border-radius:4px; padding:1px 5px;}
+  .slotcard .sname .opt{font-size:10.5px; color:#64748b; background:#f1f5f9; border-radius:4px; padding:1px 5px;}
+  .thumbrow{display:flex; gap:8px; margin-top:8px;}
+  .thumb{width:64px; height:64px; border-radius:8px; background:linear-gradient(135deg,#dbeafe,#e0e7ff); display:flex; align-items:center; justify-content:center; font-size:22px; position:relative; border:1px solid #c7d2fe;}
+  .thumb.receipt{background:linear-gradient(135deg,#fef9c3,#fde68a); border-color:#fcd34d;}
+  .thumb .x{position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:#334155; color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center;}
+  .thumb.ghost{background:#f1f5f9; border:1.5px dashed #cbd5e1; color:#94a3b8; font-size:20px;}
+  .notice{border-radius:10px; padding:10px 12px; font-size:12px; margin-top:8px; line-height:1.55;}
+  .n-blue{background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af;}
+  .n-red{background:#fef2f2; border:1px solid #fecaca; color:#b91c1c;}
+  .n-amber{background:#fffbeb; border:1px solid #fde68a; color:#92400e;}
+  .mbtn{display:inline-block; border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:700; margin-top:8px; cursor:default;}
+  .mb-primary{background:#2563eb; color:#fff;}
+  .mb-ghost{background:#fff; border:1px solid #cbd5e1; color:#334155;}
+  .mb-disabled{background:#e2e8f0; color:#94a3b8;}
+  /* 관리자 카드 목업 */
+  .admincard{max-width:430px; margin:0 auto; background:#fff; border:1px solid #e3e8f0; border-left:4px solid #dc2626; border-radius:12px; padding:14px 16px; box-shadow:0 3px 10px rgba(20,30,60,.07);}
+  .admincard.blue{border-left-color:#2563eb;}
+  .admincard .ahead{display:flex; justify-content:space-between; align-items:center; font-size:13.5px; font-weight:800;}
+  .pill{font-size:11px; font-weight:800; border-radius:999px; padding:2px 9px;}
+  .pill.red{background:#fef2f2; color:#dc2626; border:1px solid #fecaca;}
+  .pill.blue{background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe;}
+  .pill.green{background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;}
+  .admincard .meta{font-size:12px; color:#5a6478; margin-top:4px;}
+  .admincard .body{font-size:12.5px; margin-top:8px;}
+  .pair{display:flex; gap:10px; margin-top:10px;}
+  .pair .pcol{flex:1; text-align:center; font-size:11px; color:#5a6478;}
+  .pair .pimg{height:84px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:26px; margin-bottom:4px;}
+  .pair .from{background:linear-gradient(135deg,#fef9c3,#fde68a); border:1px solid #fcd34d;}
+  .pair .to{background:#f1f5f9; border:1.5px dashed #cbd5e1;}
+  .abtns{display:flex; gap:8px; margin-top:12px;}
+  .abtn{flex:1; text-align:center; border-radius:8px; padding:7px 0; font-size:12px; font-weight:700; cursor:default;}
+  .ab-line{border:1px solid #cbd5e1; color:#334155; background:#fff;}
+  .ab-fill{background:#1c2333; color:#fff;}
+  /* 설정 목업 */
+  .setrow{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid #eef1f6; font-size:12.5px;}
+  .setrow:last-child{border-bottom:none;}
+  .seg{display:flex; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden;}
+  .seg span{padding:5px 11px; font-size:11.5px; color:#64748b; background:#fff;}
+  .seg span.on{background:#1c2333; color:#fff; font-weight:700;}
+  .kv{font-size:12px; color:var(--t3);}
+  .m-note{font-size:11.5px; color:var(--t3); margin-top:8px; text-align:center;}
+  .phase{display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;}
+  .phcard{flex:1; min-width:250px; border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:#fbfcfe;}
+  .phcard h4{font-size:13.5px; margin-bottom:6px;}
+  .phcard .tag{font-size:10.5px; font-weight:800; border-radius:5px; padding:1px 7px; margin-left:6px; vertical-align:1px;}
+  .toc{font-size:13px; color:var(--t2); background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 18px; margin-bottom:22px;}
+  .toc a{color:var(--blue); text-decoration:none;}
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#12151c; --card:#1a1f2a; --line:#2a3142; --t1:#e6eaf2; --t2:#9aa4b8; --t3:#6b7488;
+      --blue-bg:#16233f; --green-bg:#12291b; --red-bg:#33191b; --amber-bg:#302510; --purple-bg:#231b38;}
+    th{background:#212736;} code{background:#232a3a; border-color:#2f3849; color:#c3cad9;}
+    .fnode{background:var(--card); border-color:var(--t2);}
+    .fc-gray{background:#212736; border-color:#3a4356;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>📁 리뷰제출 이미지 자동 분류·이동 시스템 <span class="badge b-ok">검토 결론: 구현 가능</span></h1>
+<div class="sub">
+  구현계획 와이어프레임 v1.0 · 2026-08-05 · 대상: 리뷰제출 캡처(리뷰/현금영수증/구매캡처)의 오제출 자동 감지 → 올바른 폴더로 이동 → 중복이면 반려<br>
+  근거 코드: <code>captureVerify.service.js</code> · <code>gemini.service.classifySubmissionImage</code> · <code>diag.routes.js /review-upload</code> · <code>drive.service.moveFile/trashFiles</code> · <code>review_submissions.file_hash</code>
+</div>
+
+<div class="toc">
+  <b>목차</b> —
+  <a href="#s1">① 구현 가능 여부(부품 대조)</a> ·
+  <a href="#s2">② 분류·이동 규칙 매트릭스</a> ·
+  <a href="#s3">③ 처리 흐름도</a> ·
+  <a href="#s4">④ 화면 와이어프레임 4종</a> ·
+  <a href="#s5">⑤ 안전장치(완화 금지)</a> ·
+  <a href="#s6">⑥ 단계별 구현 계획</a> ·
+  <a href="#s7">⑦ 잔여 위험·결정 필요 항목</a>
+</div>
+
+<!-- ═══════════ ① 구현 가능 여부 ═══════════ -->
+<div class="sec" id="s1">
+<h2><span class="no">1</span>구현 가능 여부 — 필요한 부품 대 이미 있는 부품</h2>
+<p style="font-size:13.5px;">
+결론부터: <b>구현 가능하다.</b> 필요한 9개 부품 중 6개가 이미 운영 중인 코드라 그대로 재사용하고,
+신설은 3개(구매캡처 판별 종류·이동 이력 원장·슬롯 정합 보강)뿐이다.
+특히 <b>AI 호출 순증이 0</b>이다 — 업로드 시점에 이미 <code>verifyCapture</code>가 이미지 종류를 판별하고 있어서(2026-07 도입, 현재는 경고만),
+이 시스템은 <b>그 판정값을 그대로 재사용해 "경고"를 "이동"으로 승격</b>하는 것이다.
+</p>
+<table>
+  <tr><th style="width:26%;">필요한 부품</th><th>현재 상태</th><th style="width:13%;">판정</th></tr>
+  <tr><td>이미지 종류 AI 판별<br><span class="kv">(리뷰/현금영수증/구매확정/기타)</span></td>
+      <td><code>classifySubmissionImage</code> — kind 4종 + 확신도 + 채널. 이미지 해시 키 캐시라 재판별 비용 0. 판별 예시이미지(few-shot) 13슬롯 운영 중.</td>
+      <td><span class="badge b-ok">재사용</span></td></tr>
+  <tr><td>업로드 시점 검수 훅</td>
+      <td><code>/api/image/review-upload</code>가 파일마다 <code>verifyCapture</code> 실행 — "리뷰 자리에 영수증" 등 불일치를 이미 감지(현재는 인라인 경고+관리자 알림까지).</td>
+      <td><span class="badge b-ok">재사용</span></td></tr>
+  <tr><td>대상 폴더 3종 경로</td>
+      <td>[리뷰] = <code>ensureReviewFolderPath</code> / [리뷰]→현금영수증 = 슬롯 서브폴더(<code>slotLabel</code>) / [구매캡처] = <code>ensureCaptureFolderPath</code>. 전부 idempotent 확보 가능.</td>
+      <td><span class="badge b-ok">재사용</span></td></tr>
+  <tr><td>파일 이동</td>
+      <td><code>drive.service.moveFile(fileId, newParent, oldParent)</code> 존재(교체요청 승인 흐름이 이미 사용).</td>
+      <td><span class="badge b-ok">재사용</span></td></tr>
+  <tr><td>중복 판정 재료</td>
+      <td><code>review_submissions.file_hash</code>(SHA-256, 업로드 INSERT와 동시 기록·081) — Drive 호출 없이 DB만으로 정확 일치 판정.</td>
+      <td><span class="badge b-ok">재사용</span></td></tr>
+  <tr><td>삭제(반려 시)</td>
+      <td><code>trashFiles</code> = 휴지통 이동(30일 복구 가능). 영구삭제 API는 쓰지 않는다.</td>
+      <td><span class="badge b-ok">재사용</span></td></tr>
+  <tr><td>구매캡처(주문내역 화면) 판별</td>
+      <td><b>없음</b> — 현재 kind 4종에 '주문내역/결제내역 캡처'가 없어 <code>other</code>나 <code>purchase_confirm</code>으로 흩어진다. kind <code>order_capture</code> 신설 + 캐시 접두 <code>classify3:</code>→<code>classify4:</code> 상향 필요(087 2차와 같은 규율 — 기존 판정 기준 줄은 한 글자도 안 바꾸고 줄만 추가).</td>
+      <td><span class="badge b-new">신설</span></td></tr>
+  <tr><td>이동 이력 + 되돌리기</td>
+      <td><b>없음</b> — 자동 이동은 오판 시 되돌릴 수 있어야 한다. <code>review_submissions</code>에 <code>routed_from_slot / routed_at / routed_by</code> 컬럼 추가(마이그레이션 1건) + 관리자 [원위치로 되돌리기] 버튼.</td>
+      <td><span class="badge b-new">신설</span></td></tr>
+  <tr><td>슬롯·대표이미지 정합</td>
+      <td><b>부분</b> — 이동하면 <code>review_submissions.slot_key</code> 갱신 + 대표 이미지(<code>review_index.review_file_*</code>, review 슬롯 전용) 재계산 + 완료 판정(<code>requiredSlotKeys</code>) 재평가 배선 필요.</td>
+      <td><span class="badge b-new">보강</span></td></tr>
+</table>
+
+<div class="callout co-blue">
+<b>💡 핵심 통찰 — 이 기능은 "새 검수 시스템"이 아니라 "기존 검수의 후속 동작 추가"다.</b><br>
+지금도 리뷰 자리에 현금영수증을 올리면 시스템이 <b>알고 있다</b>(AI 확신 90%+ 면 관리자 빨간 알림까지 발생 — 좌측 스크린샷의 "리뷰 화면이 아닌 것으로 판정됨" 카드가 그것).
+다만 알기만 하고 <b>아무것도 옮기지 않는다</b>. 이 계획은 그 판정 뒤에 ①이동 ②중복반려 두 동작을 붙이는 것이라, 판별 정확도·호출량·검수 타이밍은 전부 검증된 현행 그대로다.
+</div>
+</div>
+
+<!-- ═══════════ ② 규칙 매트릭스 ═══════════ -->
+<div class="sec" id="s2">
+<h2><span class="no">2</span>분류·이동 규칙 매트릭스 (제출된 자리 × AI 판정 → 동작)</h2>
+<p style="font-size:13px; color:var(--t2);">이동은 <b>정의된 전이만</b> 한다(아래 표 밖의 조합은 전부 현행 유지 = 경고만). AI 확신도 90% 이상(<code>sure</code>)에서만 이동하고, 70~90% 구간은 지금처럼 경고만 한다.</p>
+<table>
+  <tr><th>제출된 자리</th><th>AI 판정 (확신 ≥ 90%)</th><th>대상 폴더</th><th>동작</th></tr>
+  <tr>
+    <td rowspan="3"><b>리뷰 칸</b><br><span class="kv">[리뷰] 폴더</span></td>
+    <td>현금영수증 (<code>receipt</code>)</td>
+    <td>[리뷰] → 현금영수증</td>
+    <td><span class="badge b-info">이동</span> 그 탭에 현금영수증 슬롯(현영 탭)이 있을 때만. 없으면 <b>이동 안 함 + 경고만</b>(현행) — "폴더가 있는 경우"라는 요구 그대로.</td>
+  </tr>
+  <tr>
+    <td>구매캡처 (<code>order_capture</code> 신설)</td>
+    <td>[구매캡처]</td>
+    <td><span class="badge b-info">이동</span> + 리뷰 칸은 <b>미충족</b>으로 되돌리고 "리뷰 캡처를 다시 올려주세요" 안내(리뷰 없이 완료 처리되는 것 방지).</td>
+  </tr>
+  <tr>
+    <td>기타 (<code>other</code>)</td>
+    <td>—</td>
+    <td><span class="badge b-warn">현행 유지</span> 1차 필터(2회 잠금+우회 체크) 그대로 — 어디로 옮겨야 할지 모르는 파일은 옮기지 않는다.</td>
+  </tr>
+  <tr>
+    <td rowspan="2"><b>현금영수증 칸</b><br><span class="kv">[리뷰]→현금영수증</span></td>
+    <td>리뷰 화면 (<code>review</code>)</td>
+    <td>[리뷰]</td>
+    <td><span class="badge b-info">이동</span> + 리뷰 칸 충족 처리 + 대표 이미지 비어 있으면 채움. 영수증 칸은 미충족으로(영수증은 선택 슬롯이라 제출 자체는 막히지 않음).</td>
+  </tr>
+  <tr>
+    <td>구매캡처 (<code>order_capture</code>)</td>
+    <td>[구매캡처]</td>
+    <td><span class="badge b-info">이동</span> + 영수증 칸 미충족 안내.</td>
+  </tr>
+  <tr>
+    <td><b>모든 칸 공통</b></td>
+    <td colspan="2">이동 대상 칸에 <b>같은 SHA-256 지문</b>의 파일이 이미 제출돼 있음<br><span class="kv">(같은 행 · 같은 리뷰어 · 대상 슬롯 원장 대조 — DB만, Drive 호출 0)</span></td>
+    <td><span class="badge b-danger">중복 반려</span> 방금 올린 파일을 <b>휴지통</b>으로 + 그 파일 제출 거절 응답 + "이미 같은 파일이 ○○ 칸에 제출되어 있어요" 안내. <b>AI 판정이 아니라 해시 정확 일치라 오탐이 구조적으로 없다.</b></td>
+  </tr>
+  <tr>
+    <td><b>판정 불가</b></td>
+    <td colspan="2">AI 미설정 · 장애 · 확신 70% 미만 · 카카오메이커스 채널(피드형 예외)</td>
+    <td><span class="badge b-ok">통과</span> fail-open 불변 — 아무것도 옮기지 않고 현행 그대로 진행.</td>
+  </tr>
+</table>
+
+<div class="callout co-amber">
+<b>⚠ 기존 중복 규율과의 경계 (혼동 주의)</b> — 2차 검수의 <code>findDuplicate</code>는
+"<b>다른 사람·다른 자리</b>에 같은 지문"을 불량 신호로 보고, "같은 (시트·탭·행·리뷰어) 재업로드는 중복이 아니다"가 완화 금지 규칙이다.
+이번 반려의 중복은 정반대 스코프 — "<b>같은 행·같은 리뷰어의 대상 슬롯</b>에 같은 지문의 <b>다른 파일</b>이 이미 있음"(= 한 파일을 두 칸에 넣은 것)이다.
+시맨틱이 달라 <b>기존 함수를 재사용하지 않고 별도 함수(<code>findSlotDuplicate</code>)로 분리</b>한다 — 합치면 정상 재제출이 반려되는 사고가 난다.
+</div>
+</div>
+
+<!-- ═══════════ ③ 처리 흐름도 ═══════════ -->
+<div class="sec" id="s3">
+<h2><span class="no">3</span>처리 흐름도 — <code>/review-upload</code> 파일 루프 확장</h2>
+<div class="flow">
+  <div class="fnode">① 리뷰어가 캡처 첨부 → 제출<small>1차 필터(첨부 즉시 review-precheck)는 현행 그대로 — 여기선 변경 없음</small></div>
+  <div class="farrow"></div>
+  <div class="fnode">② Drive 업로드 + SHA-256 지문 기록<small>현행 그대로 (review_submissions.file_hash)</small></div>
+  <div class="farrow"></div>
+  <div class="fnode">③ AI 검수 verifyCapture<small>현행 그대로 — 캐시 히트라 AI 콜 순증 0</small></div>
+  <div class="farrow"></div>
+  <div class="fnode" style="border-color:var(--purple);">④ <b>신설</b> routeDecision(판정, 탭 슬롯 구성)<small>이동 전이표 대조 + 대상 폴더 확보 가능 여부 + 모드(끔/관측/자동)</small></div>
+  <div class="fbranch">
+    <div class="fcase fc-green"><b>✓ 형식 일치 / 판정불가 / 애매(70~90%)</b>현행 그대로 종료 — 일치면 통과, 애매면 경고+알림만. 아무것도 옮기지 않는다.</div>
+    <div class="fcase fc-blue"><b>↗ 불일치 · 확신 ≥90% · 전이표 有</b>⑤ 대상 슬롯 중복 검사(해시)로</div>
+    <div class="fcase fc-gray"><b>✕ 불일치인데 대상 폴더 없음</b>(비현영 탭에 영수증 등) 이동 안 함 — 현행 경고+알림 유지.</div>
+  </div>
+  <div class="farrow" style="margin-top:8px;"></div>
+  <div class="fnode" style="border-color:var(--purple);">⑤ <b>신설</b> 대상 슬롯 중복 검사<small>같은 행·같은 리뷰어·대상 슬롯 원장에서 같은 file_hash + 다른 file_id 조회 (DB 1쿼리)</small></div>
+  <div class="fbranch">
+    <div class="fcase fc-blue"><b>중복 없음 → 이동</b>moveFile → slot_key·이동이력 갱신 → 대표이미지·완료판정 재계산 → 응답에 <code>moved:{from,to}</code> → 리뷰어 화면 "옮겨 드렸어요" 안내 + 관리자 이동 알림(info)</div>
+    <div class="fcase fc-red"><b>중복 있음 → 반려</b>방금 파일 trashFiles(휴지통) → 원장 소프트 취소 → 응답에 <code>rejected:'duplicate'</code> → 리뷰어 화면 "이미 제출된 파일" 안내 + 그 칸 재첨부 요구 → 관리자 알림(warn)</div>
+  </div>
+</div>
+<div class="callout co-blue" style="margin-top:16px;">
+<b>비용 계산</b> — AI 콜 +0 (기존 판정 재사용) · Drive 콜 = 오제출 파일당 이동 1회(또는 휴지통 1회) + 폴더 확보 0~1회 ·
+DB = 중복 검사 1쿼리 + 갱신 2~3쿼리. 오제출은 예외 상황이라 총량이 작고, 시트 API는 <b>일절 건드리지 않는다</b>(쿼터 무영향).
+</div>
+</div>
+
+<!-- ═══════════ ④ 화면 와이어프레임 ═══════════ -->
+<div class="sec" id="s4">
+<h2><span class="no">4</span>화면 와이어프레임 4종</h2>
+
+<h3>④-1 리뷰어 제출 화면 — 자동 이동 안내 (파란 정보, 제출은 계속됨)</h3>
+<div class="mock">
+  <div class="mtitle">MOCKUP · search.html 캡처 슬롯 (현영 탭 = 2슬롯)</div>
+  <div class="phone">
+    <div class="slotcard">
+      <div class="sname">📸 리뷰 캡처 <span class="req">필수</span></div>
+      <div class="thumbrow">
+        <div class="thumb ghost">＋</div>
+      </div>
+      <div class="notice n-blue">
+        ℹ️ 첨부하신 이미지가 <b>현금영수증</b>으로 확인되어 아래 <b>[현금영수증] 칸으로 옮겨 드렸어요.</b><br>
+        리뷰 캡처를 여기에 다시 올려주세요.
+      </div>
+    </div>
+    <div class="slotcard">
+      <div class="sname">🧾 현금영수증 캡처 <span class="opt">선택 · 발행확정 후</span></div>
+      <div class="thumbrow">
+        <div class="thumb receipt">🧾<span class="x">×</span></div>
+      </div>
+      <div class="notice n-blue" style="background:#f0fdf4; border-color:#bbf7d0; color:#166534;">✓ 자동 분류로 이 칸에 등록됐어요.</div>
+    </div>
+    <span class="mbtn mb-disabled">제출 완료 (리뷰 캡처 필요)</span>
+    <div class="m-note">이동 후 슬롯 충족 상태를 재계산 — 필수 칸이 비면 제출 버튼이 잠긴다</div>
+  </div>
+</div>
+
+<h3>④-2 리뷰어 제출 화면 — 중복 반려 (빨간 안내, 그 파일만 거절)</h3>
+<div class="mock">
+  <div class="mtitle">MOCKUP · 반려 케이스 — 리뷰 칸에 이미 낸 파일을 현금영수증 칸에 또 올림</div>
+  <div class="phone">
+    <div class="slotcard">
+      <div class="sname">🧾 현금영수증 캡처 <span class="opt">선택</span></div>
+      <div class="thumbrow"><div class="thumb ghost">＋</div></div>
+      <div class="notice n-red">
+        ⛔ 이 파일은 <b>리뷰 칸에 이미 제출된 것과 같은 파일</b>이라 등록되지 않았어요.<br>
+        현금영수증 발행 내역 캡처를 올려주세요. <span style="color:#7f1d1d;">(올린 파일은 저장되지 않았습니다)</span>
+      </div>
+    </div>
+    <div class="m-note">반려는 파일 단위 — 같은 제출의 다른 정상 파일은 그대로 접수된다</div>
+  </div>
+</div>
+
+<h3>④-3 관리자 알림 카드 — 이동 이력 + 되돌리기 (검수 카드 확장)</h3>
+<div class="mock">
+  <div class="mtitle">MOCKUP · 리뷰웹시스템[3버전] 리뷰검수 탭 / 관리자 알림 — 기존 capture_mismatch 카드에 이동 정보가 붙는다</div>
+  <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:center;">
+    <div class="admincard blue" style="flex:1; min-width:300px; max-width:430px;">
+      <div class="ahead">이지원 · 94행 <span class="pill blue">자동 이동</span></div>
+      <div class="meta">7/16(쿠팡)체크오 마시는 비타민 100건 · 방금 전</div>
+      <div class="body">리뷰 칸에 올라온 이미지가 <b>현금영수증(AI 확신 96%)</b>으로 판정되어 <b>[현금영수증] 폴더로 이동</b>했습니다. 리뷰어 화면에는 재첨부 안내가 표시됐습니다.</div>
+      <div class="pair">
+        <div class="pcol"><div class="pimg from">🧾</div>이동한 파일</div>
+        <div class="pcol"><div class="pimg to">📂</div>[리뷰] → 현금영수증</div>
+      </div>
+      <div class="abtns">
+        <div class="abtn ab-line">↩ 원위치로 되돌리기</div>
+        <div class="abtn ab-fill">확인 처리</div>
+      </div>
+    </div>
+    <div class="admincard" style="flex:1; min-width:300px; max-width:430px;">
+      <div class="ahead">김하늘 · 12행 <span class="pill red">중복 반려</span></div>
+      <div class="meta">7/21(네이버)슬립테크 베개 50건 · 5분 전</div>
+      <div class="body">현금영수증 칸에 올라온 파일이 <b>리뷰 칸의 기존 제출과 동일 파일(SHA-256 일치)</b>이라 휴지통으로 옮기고 반려했습니다.</div>
+      <div class="abtns">
+        <div class="abtn ab-line">🗑 휴지통에서 복구</div>
+        <div class="abtn ab-fill">확인 처리</div>
+      </div>
+    </div>
+  </div>
+  <div class="m-note">되돌리기 = moveFile 역방향 + slot_key 원복 + 이력 reverted 기록 / 복구 = Drive 휴지통 복원(30일 내)</div>
+</div>
+
+<h3>④-4 관리자 설정 — 모드 스위치 (설정탭 · 단계 출시)</h3>
+<div class="mock">
+  <div class="mtitle">MOCKUP · 설정 › AI 검수 › 자동 분류 (admin-settings.js 공유 모듈 — 관리자 대시보드·리뷰웹시스템[3버전] 한 벌)</div>
+  <div class="phone" style="max-width:460px;">
+    <div style="font-size:13.5px; font-weight:800; margin-bottom:6px;">📁 제출 이미지 자동 분류</div>
+    <div class="setrow"><span>동작 모드</span>
+      <div class="seg"><span>끔</span><span>관측</span><span class="on">자동 이동</span></div></div>
+    <div class="setrow"><span>중복 반려</span>
+      <div class="seg"><span>끔</span><span class="on">켬</span></div></div>
+    <div class="setrow"><span>이동 확신도 하한</span><span class="kv">90% (AUTO_ROUTE_CONFIDENCE)</span></div>
+    <div class="setrow"><span>제외 채널</span><span class="kv">카카오메이커스 (피드형 오탐 방지)</span></div>
+    <div class="notice n-amber" style="margin-top:10px;">
+      관측 모드 = 판정·이동 계획만 로그에 남기고 실제로 옮기지 않습니다. <b>운영 초기 2주 관측 → 오탐률 확인 후 자동 이동 승격을 권장.</b>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════ ⑤ 안전장치 ═══════════ -->
+<div class="sec" id="s5">
+<h2><span class="no">5</span>안전장치 — 완화 금지 목록 (레포 규율 정합)</h2>
+<ul class="tight">
+  <li><span class="star">★★</span> <b>제출 차단의 유일 근거는 결정적 판정(SHA-256 정확 일치)뿐이다.</b> AI 판정으로는 절대 반려하지 않는다 — 1차 필터의 "차단은 <code>other</code>+90% 한 갈래뿐, 오탐 = 참여 소각" 규율을 그대로 계승. AI가 하는 일은 <b>이동까지</b>다(이동은 가역, 반려는 비가역적 사용자 경험이라 근거의 급이 달라야 한다).</li>
+  <li><span class="star">★★</span> <b>삭제는 휴지통(trashFiles)만</b> — 영구삭제 API를 쓰지 않는다. 30일 복구창 + 관리자 카드 [휴지통에서 복구] 버튼. 되돌리기 어려운 파괴는 시스템이 하지 않는다는 레포 원칙.</li>
+  <li><span class="star">★★</span> <b>이동은 전이표에 정의된 조합만</b> — 표 밖 조합(예: other 판정, 대상 폴더 없는 탭)은 전부 현행 유지. "확인 불가 = 옮기지 않음"(옵션 칸 blank-only와 같은 fail-closed 방향).</li>
+  <li><span class="star">★★</span> <b>이동 이력 없는 이동 금지</b> — 모든 이동은 <code>routed_from_slot/routed_at</code>을 남기고 관리자 알림(info)을 발생시킨다. 조용한 자동수정 금지(슬래시양식 보정 배지와 같은 규율). 되돌리기는 이 이력이 유일한 재료다.</li>
+  <li><span class="star">★</span> <b>fail-open 불변</b> — AI 미설정·장애·타임아웃·저확신·중복검사 쿼리 실패는 전부 "아무것도 안 함"(현행 동작). 자동 분류가 죽어도 업로드·제출은 산다.</li>
+  <li><span class="star">★</span> <b>카카오메이커스 채널 제외</b> — 별점 없는 피드형 화면이 공존해 리뷰 판정 자체가 흔들리는 채널(<code>REVIEW_PRECHECK_EXEMPT</code>와 같은 목록)은 자동 이동 대상에서 뺀다.</li>
+  <li><span class="star">★</span> <b>킬스위치 3단</b> — <code>AUTO_FILE_ROUTE=0</code>(전체 끔) / <code>AUTO_FILE_ROUTE=dry</code>(관측) / <code>AUTO_FILE_ROUTE_REJECT=0</code>(이동은 하되 반려만 끔). 기본값 = 끔(opt-in — 배포 순간 동작 불변).</li>
+  <li><span class="star">★</span> <b>대표 이미지·완료 판정 정합</b> — review 슬롯에서 파일이 나가면 <code>review_file_*</code>을 남은 리뷰 파일로 재계산(없으면 비움 — 업체 뷰어 미리보기가 영수증을 리뷰로 보여주는 사고 방지). 이동 결과는 업로드 응답에 실려 프론트가 슬롯 충족을 재계산한다.</li>
+  <li><span class="star">★</span> <b>구매캡처 kind 추가 시 기존 판정 보존</b> — 프롬프트는 줄 추가만(기존 3줄 불변), 캐시 접두 <code>classify4:</code> 상향(옛 캐시가 새 종류를 모른 채 히트하는 것 차단). 087 2차가 밟은 길 그대로.</li>
+</ul>
+</div>
+
+<!-- ═══════════ ⑥ 단계별 구현 계획 ═══════════ -->
+<div class="sec" id="s6">
+<h2><span class="no">6</span>단계별 구현 계획</h2>
+<div class="phase">
+  <div class="phcard">
+    <h4>M1 — 판별 확장 + 관측 <span class="tag" style="background:var(--purple-bg); color:var(--purple);">1차 배포</span></h4>
+    <ul class="tight">
+      <li>kind <code>order_capture</code> 신설(<code>gemini.service</code> 프롬프트 줄 추가 + 캐시 <code>classify4:</code>)</li>
+      <li><code>routeDecision</code> 순수함수 + 전이표(<code>utils/captureRoute.js</code> 단일 출처)</li>
+      <li>관측 모드: 이동 계획을 로그·관리자 알림으로만 (<code>AUTO_FILE_ROUTE=dry</code>)</li>
+      <li>마이그레이션: <code>review_submissions</code>에 <code>routed_from_slot/routed_at/routed_by</code></li>
+      <li>구매캡처 판별 예시이미지 슬롯(설정탭 aisamples 패널 확장, 캐시 지문 접두 분리)</li>
+    </ul>
+  </div>
+  <div class="phcard">
+    <h4>M2 — 자동 이동 <span class="tag" style="background:var(--blue-bg); color:var(--blue);">관측 검증 후</span></h4>
+    <ul class="tight">
+      <li><code>review-upload</code>에 이동 실행 배선(moveFile + slot_key·이력·대표이미지 갱신)</li>
+      <li>업로드 응답 <code>moved</code> 동봉 → 프론트(<code>search-app.js</code>) 슬롯 재계산 + ④-1 안내</li>
+      <li>관리자 카드 [원위치로 되돌리기](역이동 + 이력 reverted)</li>
+      <li>완료 판정 재평가 — 이동으로 필수 슬롯이 비면 제출 버튼 잠금</li>
+    </ul>
+  </div>
+  <div class="phcard">
+    <h4>M3 — 중복 반려 <span class="tag" style="background:var(--red-bg); color:var(--red);">최후 단계</span></h4>
+    <ul class="tight">
+      <li><code>findSlotDuplicate</code>(같은 행·같은 리뷰어·대상 슬롯 해시 대조 — 기존 findDuplicate와 분리)</li>
+      <li>중복 시 trashFiles + 원장 소프트 취소 + 응답 <code>rejected:'duplicate'</code> + ④-2 안내</li>
+      <li>관리자 카드 [휴지통에서 복구]</li>
+      <li>회귀가드: 전이표 실행 검증 + 반려는 해시 일치에서만 발생(AI 단독 반려 부재를 변이시험으로 고정) + 스텁 pool로 업로드 루프 실제 실행 + 기존 <code>captureSlotVerify</code>·<code>reviewInspect</code> 가드 패턴 동반 갱신</li>
+    </ul>
+  </div>
+</div>
+<div class="callout co-green" style="margin-top:14px;">
+<b>왜 3단계인가</b> — 이동(가역)과 반려(사용자 경험상 비가역)는 리스크 급이 다르다. 관측 모드로 실제 오제출 분포·AI 오탐률을 확인한 뒤 이동을 켜고,
+이동이 안정된 뒤에야 반려를 켠다. 각 단계는 킬스위치로 독립적으로 되돌릴 수 있고, 기본값이 전부 "끔"이라 배포 자체는 무영향이다.
+</div>
+</div>
+
+<!-- ═══════════ ⑦ 잔여 위험·결정 필요 ═══════════ -->
+<div class="sec" id="s7">
+<h2><span class="no">7</span>잔여 위험 · 사용자 결정 필요 항목</h2>
+<table>
+  <tr><th style="width:30%;">항목</th><th>내용</th><th style="width:24%;">제안 기본값</th></tr>
+  <tr><td>🔴 구매캡처 ↔ 구매확정 화면 구분</td>
+      <td>둘 다 "주문 관련 화면"이라 AI가 헷갈릴 수 있는 가장 약한 고리. 구매확정 리뷰타입 탭에서는 구매캡처 이동을 잘못 발동하면 정상 제출이 옮겨진다.</td>
+      <td>구매확정(<code>confirm</code>) 리뷰타입 탭은 구매캡처 자동 이동 제외 + 예시이미지 등록 후 활성화</td></tr>
+  <tr><td>출시 모드</td>
+      <td>관측(dry)으로 시작할지, 바로 자동 이동으로 켤지.</td>
+      <td>관측 2주 → 자동 이동 (오탐률 근거 확보)</td></tr>
+  <tr><td>반려 문구·재첨부 유도</td>
+      <td>반려가 리뷰어에게 "제출 실패"로 읽히면 문의가 늘어난다. 문구는 "이미 제출돼 있어요"(안심) 톤으로.</td>
+      <td>④-2 목업 문구</td></tr>
+  <tr><td>과거 오제출 소급 정리</td>
+      <td>이 시스템은 새 제출부터 적용. 이미 잘못 들어가 있는 파일은 별도 배치(2차 검수 스윕에 이동 제안 추가)로 — 범위 밖, 필요 시 후속.</td>
+      <td>1차 범위 제외</td></tr>
+  <tr><td>비현영 탭의 영수증 제출</td>
+      <td>영수증 슬롯이 없는 탭이라 이동 대상 폴더가 없다. 요구사항("폴더가 있는 경우")대로 이동하지 않고 경고만 — 폴더를 즉석 생성하지 않는 이유는 그 탭의 슬롯 구성(완료 판정)이 바뀌기 때문.</td>
+      <td>경고만 (현행 유지)</td></tr>
+</table>
+<p style="font-size:12.5px; color:var(--t3); margin-top:10px;">
+문서 위치: <code>frontend/docs/리뷰제출_이미지_자동분류_와이어프레임.html</code> · 구현 착수 전 사용자 확정이 필요한 것은 위 표의 상위 3개 항목이다.
+</p>
+</div>
+
+</div>
+</body>
+</html>
