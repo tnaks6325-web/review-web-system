@@ -4087,10 +4087,20 @@ function _wtpRender(){
     </div>`;
 }
 
-async function _woAccept(id){
-  if(!confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
-  const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify({id})});
-  if(r&&r.ok){ _toast(r.skipped?'이미 등록된 오더입니다.':('접수 완료'+(r.tabName?' — '+r.tabName:''))); _loadOrders(); }
+async function _woAccept(id, pickGid){
+  // pickGid = 탭 교정 재접수(gid 미발견 404 팝업에서 고른 탭) — 그때는 confirm 을 이미 팝업이 받았다.
+  if(!pickGid && !confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
+  const body = pickGid ? {id, gid:pickGid} : {id};
+  const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify(body)});
+  if(r&&r.ok){
+    _toast(r.skipped?'이미 등록된 오더입니다.':((r.gidCorrected?'🔧 URL 교정 후 ':'')+'접수 완료'+(r.tabName?' — '+r.tabName:'')));
+    _loadOrders();
+  }
+  // ★ URL 의 gid 가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서 사람이 골라
+  //   재접수. 팝업은 관리자 대시보드와 공용(work-order-detail.js woAcceptTabPicker).
+  else if(r&&r.gidNotFound&&typeof woAcceptTabPicker==='function'){
+    woAcceptTabPicker(r, g=>_woAccept(id, g));
+  }
   else _toast('⚠ 접수 실패'+(r&&r.error?': '+r.error:''));
 }
 /* ══════════════════════════════════════════════════════════════

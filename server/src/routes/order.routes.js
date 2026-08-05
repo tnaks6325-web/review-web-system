@@ -818,12 +818,18 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     if (!sheetIdMatch) {
       return res.status(400).json({ ok: false, error: '유효한 구글 스프레드시트 URL이 아닙니다.' });
     }
+    // ★ 탭 교정 재접수: URL의 gid가 시트에 없을 때(탭 삭제 후 재생성 = gid 변경 등) 프론트가
+    //   아래 404 응답의 availableTabs 에서 사람이 고른 gid 를 body.gid 로 다시 보낸다.
+    //   사람이 명시적으로 고른 값만 URL 보다 우선한다(자동 이름매칭 폴백은 두지 않는다 —
+    //   "잘못된 탭 연결이 빈칸보다 나쁨" 규율).
+    const pickGid = String((req.body || {}).gid || '').trim();
     const gidMatch = url.match(/[#?&]gid=(\d+)/);
-    if (!gidMatch) {
+    if (!gidMatch && !/^\d+$/.test(pickGid)) {
       return res.status(400).json({ ok: false, error: '작업시트탭URL에 gid가 없습니다. 특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.' });
     }
     const sheetId = sheetIdMatch[1];
-    const gid = gidMatch[1];
+    const gid = /^\d+$/.test(pickGid) ? pickGid : gidMatch[1];
+    const gidCorrected = /^\d+$/.test(pickGid) && (!gidMatch || gidMatch[1] !== pickGid);
 
     // 멱등 표시: 같은 작업오더가 이미 같은 탭에 연결됨 (재클릭 안전 — 아래 업서트는 모두 idempotent)
     const idempotent = (String(o.linked_tab_gid || '') === gid && o.linked_tab_sheet_id === sheetId);
@@ -839,7 +845,21 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
     const targetSheet = meta.find(s => String(s.properties.sheetId) === gid);
     if (!targetSheet) {
-      return res.status(404).json({ ok: false, error: `gid=${gid} 에 해당하는 탭을 시트에서 찾을 수 없습니다. (탭이 삭제되었거나 URL이 잘못됨)` });
+      // ★ 막다른 길 방지: 이 시트에 실제로 있는 탭 목록을 함께 돌려줘 프론트가
+      //   "탭 골라서 접수" 교정 흐름을 열 수 있게 한다(사람이 고른 탭만 body.gid 재시도).
+      const availableTabs = meta.slice(0, 200).map(s => ({
+        gid: String(s.properties.sheetId),
+        title: s.properties.title,
+        hidden: !!s.properties.hidden,
+      }));
+      return res.status(404).json({
+        ok: false,
+        error: `gid=${gid} 에 해당하는 탭을 시트에서 찾을 수 없습니다. (탭이 삭제되었거나 URL이 잘못됨)`,
+        gidNotFound: true,
+        sheetId,
+        urlGid: gid,
+        availableTabs,
+      });
     }
     const tabName = targetSheet.properties.title;
     const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${gid}`;
@@ -939,6 +959,9 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     //   그 외(이미 reviewing 이후)는 상태 유지 — 동일 탭 재접수/재클릭 안전.
     //   processed_by 는 /admin/status 와 동일하게 항상 처리자(req.admin.name)로 기록.
     const nextStatus = ACCEPT_ELIGIBLE.includes(o.status) ? 'reviewing' : o.status;
+    //   ★ 탭 교정 재접수(gidCorrected)면 work_sheet_url 도 고른 탭 주소로 함께 교정한다 —
+    //     안 고치면 다음 재접수·프리필(gid 우선 재매칭)이 계속 죽은 gid 를 본다.
+    //     사람이 명시적으로 고른 경우에만 덮는다($7 = null 이면 기존 값 유지).
     const { rows: upd } = await pool.query(
       `UPDATE work_orders SET
          status = $2,
@@ -946,10 +969,11 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
          linked_tab_name = $4,
          linked_tab_gid = $5,
          processed_by = $6,
+         work_sheet_url = COALESCE($7, work_sheet_url),
          updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [id, nextStatus, sheetId, tabName, gid, (req.admin?.name || '')]
+      [id, nextStatus, sheetId, tabName, gid, (req.admin?.name || ''), (gidCorrected ? tabSheetUrl : null)]
     );
 
     // 8b) 정산 계약 자동 연결 (088) — 인트라넷 리뷰오더 등록에서 고른 계약을 그대로 이 탭에 매칭한다.
@@ -989,6 +1013,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       alreadyRegistered: wasRegistered,
       idempotent,
       indexBuilt,
+      gidCorrected,       // true = 사람이 고른 탭으로 URL 의 죽은 gid 를 교정해 접수함
       settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
     });
   } catch (err) {

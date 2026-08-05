@@ -24,6 +24,10 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **예외(복원 성격, 모드 무관)**: 아카이브 복구, DB 재구축(`syncTabListToDB({allowNewTabs:true})` — 재해복구는 시트 현황 복원이라 게이트 우회), 탭명·gid 교정(`sync-tab-names`/fix-swap). migration 057 = 전환 시 `index_master(active)`에만 있던 탭 1회 백필(app_settings `migration_057_tab_backfill_done` 가드로 재배포 시 재실행 안 함). 회귀가드 `tests/tabRegistrationGate.test.js`.
 - 운영 함의: 접수 전 탭은 리뷰어 검색이 안 되므로 **모집 시작 전에 접수 먼저**. 긴급 복원은 Railway `TAB_REGISTRATION_MODE=auto`.
 
+### 작업오더 접수 gid 미발견 → 탭 골라 교정 재접수
+- **사고(2026-08-05)**: 작업시트탭URL의 gid가 그 시트에 없어(탭 삭제 후 재생성 = gid 변경 / 다른 시트의 gid) 접수가 404 막다른 길. `getSpreadsheetMeta`는 무캐시 실시간 조회라 이 404 = **시트에 그 gid 탭이 진짜 없음**이다.
+- **해결**: `/api/order/admin/accept` 404에 `gidNotFound`+`availableTabs`(실제 탭 목록) 동봉 → 공유 팝업 `woAcceptTabPicker`(work-order-detail.js, admin·workdesk 공용)에서 **사람이 탭을 골라** `body.gid`로 재접수. 서버는 고른 gid를 URL gid보다 우선하고 **`work_sheet_url`도 함께 교정**(COALESCE — 교정 시에만, 안 고치면 프리필·재접수가 계속 죽은 gid를 본다). ★ **자동 이름매칭 폴백 금지**(잘못된 탭 연결이 빈칸보다 나쁨) ★ 탭명은 시트발 외부 문자열 — 팝업은 textContent+addEventListener만(onclick 보간 금지). 회귀가드 `tests/orderAcceptTabPicker.test.js`(10케이스 — 팝업 vm 실행 XSS 포함).
+
 ### 작업오더 도착 알림 (관리자 실시간)
 - 신규 제출(`POST /api/order/submit`·`/intake`)·보완 재제출(revision→submitted)은 SSE `work_order_new` 발신(`sse.emitWorkOrderNew`, 페이로드 최소 — 가이드 본문 미포함). 관리자 대시보드는 SSE(실시간)+2분 폴링(폴백)을 `_woCheckNewOrders` **단일 진입점**으로 수렴해 **우측하단 미확인 알림 카드**(자동 소멸 없음 — 클릭해야만 닫힘, 최신 5장+"외 N건" 요약)와 **OS 알림**(`requireInteraction:true`, 오더별 tag, 4건+는 요약 1건)을 띄운다. 알림 클릭 → `openWoDetailModal`(내용 전체 = `_woDetailHtml`+메모로그, [작업오더 탭에서 처리]).
 - 확인 여부는 `localStorage.wo_notif_seen_v1`(프루닝 = 현재 submitted 목록과의 생존 교집합)에 기록 — **미확인 카드는 새로고침·재접속에도 재표시**, 타 관리자가 접수/삭제하면 reconcile로 자동 회수. 스택/모달은 JS 동적 생성이라 admin.html·admin-siand.html 공용(HTML/CSS 무수정). 한계: SSE 단절 중 재제출은 폴링만으로 구별 불가(updated_at 비교는 메모 전송 오탐이라 미사용). 회귀가드 `tests/workOrderNotify.test.js`.
