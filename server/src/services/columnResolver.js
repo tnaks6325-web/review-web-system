@@ -149,8 +149,19 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
         if (SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) submitColIdx = hi;
       }
     }
+    // ★★ 8/4 재발(면마스크 탭 실측): 3단계(최후수단, 바로 위 두 단계가 못 찾았을 때만 도달)는
+    //   '리뷰' 단독 매칭까지 허용해야 하는 이유가 있다 — 이 탭처럼 완료열 이름이 아예 '리뷰'
+    //   뿐(리뷰제출/리뷰완료 접미 없음)인 정상 시트도 실재한다. 문제는 이 단계에 제외패턴이
+    //   없어서, 완료열이 헤더 순서상 '주문자제출'(이름열, '제출' 포함)보다 뒤에 있으면
+    //   '주문자제출'을 먼저 집어 전원 제출완료로 오판정한다(2단계에서 이미 걸러지던 예외를
+    //   3단계가 다시 무방비로 통과시킴). → 2단계와 동일하게 이름열 제외패턴을 적용해
+    //   '리뷰' 단독 매칭은 허용하되 이름류 열은 여전히 걸러낸다.
     if (submitColIdx < 0) {
-      submitColIdx = headers.findIndex(h => SUBMIT_KEYWORDS.some(k => h.toLowerCase().includes(k.toLowerCase())));
+      submitColIdx = headers.findIndex(h => {
+        const hl = h.toLowerCase();
+        if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) return false;
+        return SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()));
+      });
     }
   }
 
