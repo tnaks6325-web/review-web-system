@@ -319,9 +319,13 @@
             <div>
               <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
               <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div>
+              <div id="rf_clean_inflow"></div>
             </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">리뷰가이드</span>
-            <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea></div>
+            <div>
+              <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
+              <div id="rf_clean_review"></div>
+            </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">특이사항</span>
             <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택 — 참여한 리뷰어에게만 공개"></textarea></div>
         </div>
@@ -338,6 +342,7 @@
           <textarea id="rf_notes" class="rform-input" rows="2"
             placeholder="참여 전 모두에게 공개되는 짧은 안내만 — 예) 와우회원 전용 · 계정당 1회" style="resize:vertical"></textarea>
           <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">공고 카드에 노출되는 안내문</div>
+          <div id="rf_clean_notes"></div>
         </div></div>
       <div class="rf-grid2">
         <div class="rf-hrow"><span class="rf-hl">상태</span>
@@ -584,7 +589,16 @@
   .rf-pvtoggle{display:block}
 }
 .rf-pvtoggle{display:none;width:100%;margin:0;padding:9px;background:#EEF3FD;color:var(--p,#3182F6);
-             border:none;border-top:1px solid var(--border,#E2E8F0);font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit}`;
+             border:none;border-top:1px solid var(--border,#E2E8F0);font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit}
+/* 🧹 4칸 정리 도우미(개선 ③·④) — 감지 경고 + 전/후 미리보기(적용은 사람이) */
+.rf-clean-warn{font-size:.7rem;font-weight:700;color:#B45309;display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:5px}
+.rf-clean-warn .rchan-btn{font-size:.68rem;padding:3px 10px;background:#FEF3C7;border-color:#F59E0B;color:#92400E}
+.rf-clean-pv{border:1.5px dashed #F0B45E;border-radius:9px;background:#FFFDF6;padding:8px 10px;margin-top:6px;font-size:.7rem;color:var(--t2,#475569)}
+.rf-clean-pv .rf-cpv-t{font-weight:800;color:#92400E;margin-bottom:4px}
+.rf-clean-pv pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;margin:4px 0;line-height:1.65}
+.rf-clean-pv .cut{background:#FEE2E2;text-decoration:line-through;border-radius:3px;padding:0 2px}
+.rf-clean-pv .keep{background:#DCFCE7;border-radius:3px;padding:0 2px}
+.rf-clean-pv .rf-cpv-btns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}`;
   function injectCss() {
     if (document.getElementById('recruit-modal-css')) return;
     var st = document.createElement('style');
