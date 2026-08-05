@@ -1313,27 +1313,27 @@ function renderShell(){
       <span class="logo">리뷰웹시스템[3버전] <span class="tag">${isAdv?'업체 전용':'TRACK B · 그림자'}</span></span>
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
-        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
-        <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
-        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
-        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
-        <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
-        <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
+        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
+        <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="payment" onclick="switchView('payment')">입금관리</button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
+        <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
+        <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
-        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
-        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
+        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업보드</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="inspect" onclick="switchView('inspect')">리뷰검수<span id="riNavBadge"></span></button>
+        <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
@@ -4577,18 +4577,21 @@ async function renderSettingsView(){
 function _hmMenus(){
   // ★ 역할은 자기 스코프에서 다시 구한다 — 다른 함수의 const 에 기대면 ReferenceError 로 화면이 조용히 죽는다(리뷰검수 무한로딩 실측 사고).
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  // 순서 = 상단 nav 와 동일(작업오더 → 모집공고 → 작업보드 → 입금관리 → C/S → 업체관리 → 리뷰검수 → 로그 → 등록리뷰어DB → 업무가이드 → 설정)
+  // nav 정책과 1:1 — AE(staff) nav 에 없는 메뉴는 타일도 없다(눌러도 403 인 막다른 길을 만들지 않는다)
   return [
-    {v:'workdesk',  ic:'🗂', nm:'작업보드',     ds:'작업별 시트 그리드'},
     {v:'orders',    ic:'📦', nm:'작업오더',     ds:'접수 · 상태 관리',   bd:'hmWoBadge'},
     {v:'campaigns', ic:'📢', nm:'모집공고',     ds:'발행 · 관제'},
-    {v:'cs',        ic:'🎧', nm:'C/S',          ds:'문의 · 교체요청',    bd:'hmCsBadge'},
-    {v:'inspect',   ic:'🔍', nm:'리뷰검수',     ds:'의심 · 불량 판정',   bd:'hmRiBadge'},
-    {v:'logs',      ic:'🧾', nm:'로그',         ds:'비정상 · 오류',      bd:'hmLgBadge'},
-    {v:'ownership', ic:'🏢', nm:'업체관리',     ds:'소유 · 정산 연결'},
-    // nav 정책과 1:1 — AE(staff) nav 에 없는 메뉴는 타일도 없다(눌러도 403 인 막다른 길을 만들지 않는다)
+    {v:'workdesk',  ic:'🗂', nm:'작업보드',     ds:'작업별 시트 그리드'},
     ...(isAdmin?[
       {v:'overview',  ic:'📡', nm:'관측',         ds:'Track B 전환 현황'},
       {v:'payment',   ic:'💸', nm:'입금관리',     ds:'리뷰비 이체 회차'},
+    ]:[]),
+    {v:'cs',        ic:'🎧', nm:'C/S',          ds:'문의 · 교체요청',    bd:'hmCsBadge'},
+    {v:'ownership', ic:'🏢', nm:'업체관리',     ds:'소유 · 정산 연결'},
+    {v:'inspect',   ic:'🔍', nm:'리뷰검수',     ds:'의심 · 불량 판정',   bd:'hmRiBadge'},
+    {v:'logs',      ic:'🧾', nm:'로그',         ds:'비정상 · 오류',      bd:'hmLgBadge'},
+    ...(isAdmin?[
       {v:'reviewers', ic:'👥', nm:'등록리뷰어DB', ds:'전사 리뷰어 조회'},
     ]:[]),
     {v:'guides',    ic:'📚', nm:'업무가이드',   ds:'직원 안내서'},
