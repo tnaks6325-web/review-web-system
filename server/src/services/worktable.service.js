@@ -309,7 +309,30 @@ function _normCustomChannels(arr) {
 }
 
 /**
- * 작업유형 목록 정규화 — [{key,label,desc,position,columns}].
+ * ★★ 작업유형 **자동 선택 조건** — 작업오더 내용을 보고 그 유형을 켤지 정하는 규칙(사용자 확정).
+ *
+ * 예) 작업오더가 "쿠팡 작업 + 상품옵션 2가지" 면 → 채널은 상품 URL 로 쿠팡이 잡히고,
+ *     `options_2plus` 조건을 가진 '상품옵션' 유형이 켜진 채로 작업표 미리보기가 열린다.
+ *
+ * ★ **닫힌 목록**이다(자유 입력 금지) — 조건은 `work_orders` 의 **실제 칸**에서 파생돼야 하고,
+ *   판정은 `utils/worktablePlan.evalWorkTypeTrigger` 한 곳에서만 한다(규칙 사본 금지).
+ * ★ 값이 없거나 모르는 값은 `auto` = **기존 동작 그대로**(옵션 열을 가진 유형만 옵션 2종 이상일 때
+ *   제안). 조건이 늘어도 이미 저장된 설정이 조용히 달라지지 않는다.
+ */
+const WORK_TYPE_TRIGGERS = [
+  { key: 'auto',            label: '기본 — 옵션 열이 있으면 옵션 2가지 이상일 때' },
+  { key: 'never',           label: '직접 고를 때만 (자동 선택 안 함)' },
+  { key: 'always',          label: '항상 켬' },
+  { key: 'options_2plus',   label: '상품옵션이 2가지 이상일 때' },
+  { key: 'courier_proxy',   label: '택배대행이 \'예\'일 때' },
+  { key: 'delivery_real',   label: '배송유형이 실배송일 때' },
+  { key: 'delivery_empty',  label: '배송유형이 빈박스일 때' },
+  { key: 'review_type_set', label: '리뷰유형이 적혀 있을 때' },
+];
+const WORK_TYPE_TRIGGER_KEYS = new Set(WORK_TYPE_TRIGGERS.map(t => t.key));
+
+/**
+ * 작업유형 목록 정규화 — [{key,label,desc,position,autoTrigger,columns}].
  * position: 'front' = 자동 열(번호·구매일자) 바로 뒤 / 'back' = 맨 뒤(비고 앞).
  *   ★ 값이 이상하면 'back'(맨 뒤) — 앞쪽에 잘못 끼면 기존 열 순서를 흔든다.
  */
@@ -326,10 +349,13 @@ function _normWorkTypes(arr) {
     let key = String((t && t.key) || '').trim();
     if (!KEY_RE.test(key) || seenKey.has(key)) key = mint();
     seenKey.add(key); seenLabel.add(label.toLowerCase());
+    const trig = String((t && t.autoTrigger) || '').trim();
     out.push({
       key, label,
       desc: String((t && t.desc) || '').trim().slice(0, 80),
       position: (t && t.position) === 'front' ? 'front' : 'back',
+      // 모르는 값은 'auto' — 기존 저장분(필드 없음)이 그대로 옛 동작을 유지한다.
+      autoTrigger: WORK_TYPE_TRIGGER_KEYS.has(trig) ? trig : 'auto',
       columns: _normNames(t && t.columns),
     });
     if (out.length >= MAX_WORK_TYPES) break;
@@ -365,6 +391,8 @@ function _decorate(t) {
     channelColumns,
     workTypeColumns,
     channelList: channelList(t),
+    // 화면이 조건 드롭다운을 그릴 때 쓰는 목록 — 서버가 내려 준다(프론트 사본 금지).
+    triggers: WORK_TYPE_TRIGGERS,
   };
 }
 
@@ -427,5 +455,5 @@ async function saveTemplate({ core, channels, customChannels, workTypes, templat
 module.exports = {
   headerStats, getTemplate, saveTemplate, normalizeSheetId, channelList,
   CORE_RATIO, RARE_RATIO, TEMPLATE_KEY, CHANNEL_KEYS, MAX_COLS, MAX_NAME_LEN,
-  MAX_CUSTOM_CHANNELS, MAX_WORK_TYPES,
+  MAX_CUSTOM_CHANNELS, MAX_WORK_TYPES, WORK_TYPE_TRIGGERS,
 };

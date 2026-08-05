@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>홈 작업목록 → [공고] 팝업 시안 — 리뷰웹시스템[3버전]</title>
+<style>
+  /* 실물 재현 목업이므로 라이트 고정 — 다크에서 색이 뒤집히면 "실제 화면과 같다"가 깨진다. */
+  :root{ color-scheme:light;
+    /* workdesk.html 의 토큰 그대로 */
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e9edf6;color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;
+       font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+       font-variant-numeric:tabular-nums}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 18px 120px}
+
+  header.doc{padding:40px 0 4px}
+  .eyebrow{font-size:.72rem;font-weight:800;letter-spacing:.13em;color:var(--accent)}
+  h1{font-size:clamp(1.4rem,3.2vw,1.95rem);font-weight:800;letter-spacing:-.02em;margin:7px 0}
+  p.lead{color:var(--muted);font-size:.9rem;max-width:820px}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+  .chip{font-size:.7rem;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+  .chip b{color:var(--ink)}
+
+  section{margin-top:46px}
+  .sec-label{font-size:.7rem;font-weight:800;letter-spacing:.12em;color:var(--accent);margin-bottom:3px}
+  h2{font-size:1.16rem;font-weight:800;letter-spacing:-.015em}
+  h3{font-size:.95rem;font-weight:800;margin:22px 0 8px}
+  p.desc{color:var(--muted);font-size:.83rem;margin-top:7px;max-width:900px}
+  p.desc b{color:var(--ink)}
+
+  .callout{margin-top:14px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+           border-radius:11px;padding:12px 15px;font-size:.82rem;color:var(--muted)}
+  .callout b{color:var(--ink)}
+  .callout.warn{border-left-color:#f59e0b;background:#fffdf7}
+  .callout.ok{border-left-color:var(--safe);background:#f7fdf9}
+
+  /* ══ 브라우저 프레임 ══ */
+  .browser{margin-top:16px;border-radius:14px;overflow:hidden;background:var(--paper);
+           box-shadow:0 18px 44px rgba(16,24,40,.16);border:1px solid #d8dfe9}
+  .bbar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:#e7ecf3;border-bottom:1px solid #d8dfe9}
+  .bdot{width:10px;height:10px;border-radius:50%;background:#cfd6e0}
+  .burl{flex:1;margin-left:8px;background:#fff;border:1px solid #dbe2ec;border-radius:7px;padding:3px 10px;
+        font-size:.68rem;color:var(--faint)}
+  .bview{padding:0;position:relative;min-height:120px}
+
+  /* ══ workdesk 상단바 (축약 재현) ══ */
+  .top{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .logo{font-size:13px;font-weight:800}
+  .logo .tag{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);
+             padding:2px 9px;border-radius:999px;margin-left:8px;letter-spacing:.05em}
+  .nav{display:flex;gap:0;margin-left:6px;background:var(--card2);border-radius:10px;padding:3px}
+  .navb{font-size:12.5px;font-weight:700;height:30px;padding:0 13px;border-radius:8px;border:none;background:none;color:var(--muted)}
+  .navb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .rolebadge{margin-left:auto;font-size:11px;font-weight:750;padding:4px 12px;border-radius:999px;background:var(--accent-soft);
+             border:1px solid var(--accent-line);color:var(--accent-deep)}
+  .ovwrap{padding:16px 18px 22px}
+
+  /* ══ 홈 히어로 (축약) ══ */
+  .hm-hero{border-radius:18px;padding:18px 22px;background:linear-gradient(115deg,#1d4ed8 0%,#2563eb 45%,#3b82f6 100%);color:#fff;position:relative;overflow:hidden}
+  .hm-hero::after{content:'';position:absolute;right:-60px;top:-80px;width:230px;height:230px;border-radius:50%;background:rgba(255,255,255,.08)}
+  .hm-hi{font-size:16px;font-weight:800;letter-spacing:-.02em}
+  .hm-sub{font-size:11.5px;opacity:.85;margin-top:3px}
+  .hm-stats{display:flex;gap:26px;margin-top:13px;position:relative;z-index:1}
+  .hm-st .n{font-size:19px;font-weight:800}
+  .hm-st .l{font-size:10.5px;opacity:.8}
+
+  /* ══ 열린 작업 줄(0단) 축약 ══ */
+  .tb0{display:flex;gap:6px;align-items:center;margin-top:14px;flex-wrap:wrap}
+  .wt0{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--muted);
+       background:var(--card);border:1px solid var(--line2);border-radius:9px;padding:4px 10px}
+  .wt0.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+  .wt0 .x{color:var(--faint);font-weight:700}
+
+  /* ══ 작업 목록 (wbl-*) — workdesk.html 원본 규칙 그대로 ══ */
+  .wbl-box{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(16,24,40,.04);overflow:hidden}
+  .wbl-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--card2)}
+  .wbl-ttl{font-size:12.5px;font-weight:800;color:var(--ink)}
+  .wbl-seg{display:inline-flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+  .wbl-seg button{font:inherit;font-size:11.5px;font-weight:750;padding:4px 12px;border:none;background:var(--card);color:var(--muted);cursor:pointer}
+  .wbl-seg button.on{background:var(--accent);color:#fff}
+  .wbl-today{font-size:11px;font-weight:750;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:999px;padding:2px 10px}
+  .wbl-chip{font:inherit;font-size:11px;font-weight:700;padding:3px 11px;border-radius:999px;border:1px solid var(--line2);background:var(--card);color:var(--muted);cursor:pointer}
+  .wbl-chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .wbl-q{margin-left:auto;font:inherit;font-size:11.5px;padding:5px 11px;border:1px solid var(--line2);border-radius:9px;background:var(--card);color:var(--ink);min-width:200px}
+  table.wbl-t{width:100%;border-collapse:collapse;font-size:12px}
+  table.wbl-t th{background:var(--card);color:var(--muted);font-weight:750;text-align:left;padding:7px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.wbl-t td{padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:middle}
+  table.wbl-t tbody tr{cursor:pointer}
+  table.wbl-t tbody tr:hover{background:var(--card2)}
+  table.wbl-t tr.tdone td{background:var(--card2);color:var(--faint)}
+  table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
+  .wbl-nm{font-weight:700;color:var(--ink);max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wbl-sub{font-size:10px;color:var(--faint)}
+  .wbl-g{display:inline-block;width:76px;height:8px;border-radius:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:6px}
+  .wbl-g i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent)}
+  .wbl-num{white-space:nowrap}
+  .wbl-s{display:inline-block;border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:750;white-space:nowrap}
+  .wbl-s.run{background:var(--safe-soft);color:var(--safe)}
+  .wbl-s.cand{background:var(--warn-soft);color:var(--warn)}
+  .wbl-s.fin{background:var(--card2);color:var(--muted)}
+  .wbl-s.today{background:#e0e7ff;color:#3730a3}
+  .wbl-b{font:inherit;font-size:10.5px;font-weight:750;padding:3px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+  .wbl-b:hover{border-color:var(--accent-line);color:var(--accent-deep)}
+  .wbl-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .wbl-b:disabled{opacity:.45;cursor:not-allowed}
+  .wbl-act{display:flex;gap:5px;justify-content:flex-end}
+  .wbl-note{font-size:9.5px;color:var(--faint);padding:8px 14px;border-top:1px solid var(--line)}
+  .wbl-warn{font-size:11px;color:var(--warn);background:var(--warn-soft);border-top:1px solid #f0dcb8;padding:7px 14px}
+
+  /* ★ 신설 — [공고] 버튼(cmp-*) : 기존 wbl-b 위에 상태 점만 얹는다(새 버튼 문법을 만들지 않는다) */
+  .wbl-b.cmp{border-color:var(--accent-line);color:var(--accent-deep);background:#fff}
+  .wbl-b.cmp:hover{background:var(--accent-soft)}
+  .cdot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;vertical-align:1px}
+  .cdot.open{background:var(--safe);box-shadow:0 0 0 2px var(--safe-soft)}
+  .cdot.pre{background:#f59e0b;box-shadow:0 0 0 2px var(--warn-soft)}
+  .cdot.closed{background:var(--faint);box-shadow:0 0 0 2px var(--card2)}
+  .wbl-b.cmp.none{border-color:var(--line2);color:var(--muted)}
+
+  /* 주석 말풍선 */
+  .anno{position:relative;margin:10px 0 0}
+  .anno .tagn{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:800;color:#fff;background:var(--accent);
+              border-radius:999px;padding:3px 11px}
+  .anno .txt{display:inline-block;margin-left:8px;font-size:.78rem;color:var(--muted)}
+  .anno .txt b{color:var(--ink)}
+
+  /* ══ 표 ══ */
+  table.doc{width:100%;border-collapse:collapse;margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:.79rem}
+  table.doc th{background:var(--card2);color:var(--muted);font-weight:800;text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);font-size:.72rem;letter-spacing:.02em}
+  table.doc td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--muted)}
+  table.doc td b{color:var(--ink)}
+  table.doc tr:last-child td{border-bottom:none}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;background:var(--card2);border:1px solid var(--line);
+       border-radius:5px;padding:1px 5px;color:#334155}
+
+  /* ══ 동기화 지도 ══ */
+  .flow{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin-top:16px}
+  .fbox{flex:1;min-width:172px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 13px}
+  .fbox .ft{font-size:.74rem;font-weight:800;color:var(--ink)}
+  .fbox .fd{font-size:.7rem;color:var(--muted);margin-top:4px;line-height:1.5}
+  .fbox.hi{border-color:var(--accent-line);background:var(--accent-soft)}
+  .fbox.hi .fd{color:var(--accent-deep)}
+  .farrow{align-self:center;color:var(--faint);font-weight:800;font-size:1rem}
+
+  /* ══════════ 모집공고 모달 재현 (rf-*) ══════════ */
+  .ov{position:fixed;inset:0;background:rgba(16,24,40,.5);display:none;place-items:center;z-index:9000;padding:22px}
+  .ov.on{display:grid}
+  .rf-box{width:min(1280px,97vw);max-height:92vh;background:#fff;border-radius:16px;display:flex;flex-direction:column;
+          overflow:hidden;box-shadow:0 26px 64px rgba(16,24,40,.32)}
+  .rf-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #E2E8F0;background:#fff}
+  .rf-head .h3{font-size:.95rem;font-weight:800;color:#0F172A}
+  .rf-head .sub{font-size:.7rem;color:#94A3B8}
+  .rf-head .sp{flex:1}
+  .rf-x{font:inherit;font-size:.78rem;font-weight:750;border:1px solid #E2E8F0;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;color:#334155}
+  .rf-x.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+
+  /* 작업 문맥 띠 — "지금 어느 작업의 공고를 보고 있는가" */
+  .rf-ctx{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:8px 16px;background:#EFF4FF;border-bottom:1px solid #D7E3FD;font-size:.74rem;color:#1D4ED8}
+  .rf-ctx b{color:#0F172A}
+  .rf-ctx .sp{flex:1}
+  .rf-ctx .lk{font-size:.68rem;font-weight:750;background:#fff;border:1px solid #D7E3FD;border-radius:999px;padding:2px 9px;color:#1D4ED8}
+
+  .rf-split{display:flex;flex:1;min-height:0;overflow:hidden}
+  .rf-rail{width:176px;flex-shrink:0;border-right:1px solid #E2E8F0;background:#FAFCFF;padding:11px 9px;overflow-y:auto}
+  .rf-rail-t{font-size:.62rem;font-weight:800;letter-spacing:.08em;color:#94A3B8;padding:0 4px 7px}
+  .rf-ri{display:flex;align-items:center;gap:6px;padding:6px 7px;border-radius:8px;font-size:.72rem;font-weight:700;color:#475569;cursor:pointer}
+  .rf-ri:hover{background:#EFF4FF}
+  .rf-ri.on{background:#E0EAFF;color:#1D4ED8}
+  .rf-ri .gr{color:#CBD5E1;cursor:grab}
+  .rf-ri .mk{margin-left:auto;font-size:.66rem}
+  .rf-ri .mk.req{color:#DC2626}
+  .rf-ri .mk.warn{color:#B45309}
+  .rf-ri .mk.ok{color:#12B886}
+  .rf-rtip{font-size:.6rem;color:#94A3B8;line-height:1.5;padding:9px 5px 0;border-top:1px solid #E9EEF6;margin-top:9px}
+  .rf-rpbtn{display:block;width:100%;margin-top:6px;font:inherit;font-size:.66rem;font-weight:750;border:1px solid #E2E8F0;background:#fff;border-radius:7px;padding:4px 6px;cursor:pointer;color:#475569}
+
+  .rf-main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .rf-body{padding:13px 15px;display:flex;flex-direction:column;gap:11px;overflow-y:auto;flex:1;min-height:0;background:#fff}
+  .rf-card{border:1px solid #E2E8F0;border-radius:12px;background:#fff;overflow:hidden;flex-shrink:0}
+  .rf-ch{display:flex;align-items:center;gap:8px;padding:8px 13px;background:#F8FAFD;border-bottom:1px solid #E2E8F0}
+  .rf-ct{font-size:.77rem;font-weight:800;color:#0F172A}
+  .rf-cn{font-size:.66rem;color:#94A3B8}
+  .rf-pin{font-size:.58rem;font-weight:800;color:#64748B;background:#E9EEF6;border-radius:5px;padding:1px 5px}
+  .rf-cb{padding:11px 13px}
+  .rf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:900px){.rf-grid2{grid-template-columns:1fr}}
+  .rf-hrow{display:grid;grid-template-columns:82px 1fr;gap:8px;align-items:center;margin-bottom:8px}
+  .rf-hrow.top{align-items:start}
+  .rf-hl{font-size:.72rem;font-weight:700;color:#475569;text-align:right;line-height:1.25}
+  .rf-in{width:100%;font:inherit;font-size:.76rem;border:1px solid #E2E8F0;border-radius:8px;padding:6px 9px;background:#fff;color:#0F172A}
+  .rf-in:focus{outline:none;border-color:#93B4FB;box-shadow:0 0 0 3px #EFF4FF}
+  .req{color:#DC2626}
+  .rbtn{font:inherit;font-size:.7rem;font-weight:750;border:1px solid #E2E8F0;background:#fff;border-radius:8px;padding:4px 10px;cursor:pointer;color:#475569}
+  .rbtn.on{background:#E0EAFF;border-color:#93B4FB;color:#1D4ED8}
+  .rowbtns{display:flex;gap:6px;flex-wrap:wrap}
+  .prodhead,.prodrow{display:grid;grid-template-columns:1.3fr 1.1fr .8fr .6fr .6fr 28px;gap:6px;align-items:center}
+  .prodhead{font-size:.64rem;font-weight:800;color:#94A3B8;padding:0 2px 5px}
+  .prodrow{margin-bottom:6px}
+  .prodsum{font-size:.68rem;color:#475569;background:#F8FAFD;border:1px solid #E9EEF6;border-radius:8px;padding:6px 9px;margin-top:4px}
+  .rf-foot{display:flex;gap:8px;align-items:center;padding:10px 15px;border-top:1px solid #E2E8F0;background:#F8FAFD}
+  .rf-foot .sp{flex:1}
+  .rf-del{font:inherit;font-size:.72rem;font-weight:750;border:1px solid #FBD5D5;background:#fff;color:#DC2626;border-radius:8px;padding:6px 11px;cursor:pointer}
+
+  /* ★ 세로 flex 로 두면 카드가 flex 자식이 되어 눌린다(썸네일만 남고 본문이 0px) — 미리보기는 그냥 블록 흐름 + 스크롤 */
+  .rf-side{width:340px;flex-shrink:0;border-left:1px solid #E2E8F0;background:#F7F9FC;overflow-y:auto}
+  @media(max-width:1120px){.rf-side{display:none}}
+  .rf-sh{padding:10px 0 4px;text-align:center;font-size:.76rem;font-weight:700;color:#2563eb}
+  .rf-scap{font-size:.66rem;color:#94A3B8;text-align:center;margin:6px 0}
+
+  /* 미리보기 카드(리뷰어 카드 축약 재현) */
+  .pcard{width:250px;margin:0 auto;background:#fff;border:1px solid #E9EEF6;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(16,24,40,.06)}
+  .pthumb{position:relative;aspect-ratio:1/1;background:#EEF2F9;display:grid;place-items:center;font-size:1.9rem;color:#B6C0CF}
+  .pbadges{position:absolute;top:7px;right:7px;display:flex;gap:4px}
+  .pb{font-size:.55rem;font-weight:800;border-radius:5px;padding:1px 6px}
+  .pb.ch{background:#FCE7F3;color:#BE185D}
+  .pb.dl{background:#111827;color:#fff}
+  .pcd{position:absolute;left:0;right:0;bottom:0;top:0;display:grid;place-items:center;background:rgba(16,24,40,.28);color:#fff;font-size:.72rem;font-weight:800;letter-spacing:-.01em}
+  .pbody{padding:9px 10px 11px}
+  .ptitle{font-size:.76rem;font-weight:800;line-height:1.3;min-height:2.6em;color:#0F172A}
+  .pmeta{font-size:.62rem;color:#94A3B8;margin-top:4px}
+  .pg{height:6px;border-radius:4px;background:#EEF2F9;margin-top:7px;overflow:hidden}
+  .pg i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#2563eb)}
+  .pgn{font-size:.6rem;color:#64748B;margin-top:3px}
+  .pfee{display:flex;gap:5px;margin-top:7px;font-size:.62rem}
+  .pfee span{background:#F1F5FB;border-radius:6px;padding:2px 7px;color:#475569;font-weight:700}
+  .pjoin{margin-top:8px;text-align:center;background:#2563eb;color:#fff;font-size:.7rem;font-weight:800;border-radius:9px;padding:6px}
+
+  .phonebox{background:#F0F2FA;border-radius:16px;padding:11px;max-width:300px;margin:0 auto 16px}
+  .holdbar{display:flex;align-items:center;gap:8px;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:11px;padding:8px 11px;margin-bottom:10px}
+  .holdbar span{flex:1;font-size:.7rem;font-weight:700;color:#92400E}
+  .holdbar b{font-size:.78rem;color:#B45309}
+  .wdcard{background:#fff;border-radius:12px;padding:9px 11px;margin-bottom:8px;border:1px solid #EAEEF5}
+  .wdcard .t{font-size:.68rem;font-weight:800;color:#0F172A;margin-bottom:4px}
+  .wdcard .l{font-size:.64rem;color:#64748B;line-height:1.6}
+
+  /* 토스트 */
+  .toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(18px);opacity:0;pointer-events:none;
+         background:#101828;color:#fff;font-size:.78rem;font-weight:700;border-radius:10px;padding:10px 18px;z-index:9500;
+         box-shadow:0 12px 30px rgba(16,24,40,.3);transition:opacity .2s,transform .2s}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .footnote{margin-top:52px;padding-top:18px;border-top:1px solid #d8dfe9;font-size:.72rem;color:var(--faint);line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="eyebrow">디자인 시안 · 리뷰웹시스템[3버전]</div>
+  <h1>홈 작업목록에서 <span style="color:var(--accent)">[📢 공고]</span> 한 번으로 그 작업의 모집공고를 열고 바로 고친다</h1>
+  <p class="lead">
+    지금은 홈에서 작업을 보다가 그 작업의 공고를 손보려면 <b>상단 [모집공고] 탭 → 카드 더미에서 그 공고 찾기 → 수정</b> 순으로
+    화면을 두 번 갈아타야 한다. 작업목록 줄마다 [공고] 버튼을 두어 <b>그 자리에서 팝업으로</b> 열고,
+    팝업은 <b>모집공고 탭에서 쓰는 그 모달을 그대로</b> 띄운다 — 별도 화면을 새로 만들지 않으므로 저장 결과가 갈릴 수 없다.
+  </p>
+  <div class="meta">
+    <span class="chip">대상 <b>홈(작업 목록) · 모집공고</b></span>
+    <span class="chip">화면 <b>workdesk.html</b></span>
+    <span class="chip">모달 <b>js/recruit-modal.js (공유)</b></span>
+    <span class="chip">새 화면 <b>0개</b></span>
+    <span class="chip">신규 API <b>0개</b></span>
+    <span class="chip">작성 <b>2026-08-05</b></span>
+  </div>
+  <div class="callout ok">
+    <b>이 문서를 보는 법</b> — 아래 화면은 그림이 아니라 <b>실제로 눌리는 목업</b>입니다.
+    작업목록의 <b>[📢 공고]</b> 버튼을 눌러 보세요. 팝업이 실물과 같은 3단(목차 · 입력 · 미리보기)으로 열립니다.
+  </div>
+</header>
+
+<!-- ═══════════════ 1. 화면 1 — 홈 작업목록 ═══════════════ -->
+<section>
+  <div class="sec-label">화면 1</div>
+  <h2>홈 › 작업 목록 — 줄마다 [📢 공고]</h2>
+  <p class="desc">
+    지금 있는 버튼(<b>열기 · ☑ 오늘 완료 · 🏁 마감</b>) 왼쪽에 <b>[📢 공고]</b> 하나가 붙는다.
+    버튼 앞의 <b>작은 점</b>이 그 공고의 지금 상태(<span style="color:var(--safe);font-weight:800">● 모집중</span> ·
+    <span style="color:#b45309;font-weight:800">● 오픈예정</span> ·
+    <span style="color:var(--faint);font-weight:800">● 마감</span>)라서, 열어 보지 않아도 목록에서 상태가 읽힌다.
+  </p>
+
+  <div class="browser">
+    <div class="bbar"><i class="bdot"></i><i class="bdot"></i><i class="bdot"></i>
+      <div class="burl">review-web-system.pages.dev/workdesk.html</div></div>
+    <div class="bview">
+      <div class="top">
+        <div class="logo">아이에이리뷰<span class="tag">3버전</span></div>
+        <div class="nav">
+          <button class="navb on">🏠 홈</button><button class="navb">작업보드</button><button class="navb">업체관리</button>
+          <button class="navb">작업오더</button><button class="navb">모집공고</button><button class="navb">C/S</button>
+        </div>
+        <div class="rolebadge">만두 · 관리자</div>
+      </div>
+
+      <div class="ovwrap">
+        <div class="hm-hero">
+          <div class="hm-hi">만두님, 오늘도 좋은 하루 되세요 ☀️</div>
+          <div class="hm-sub">2026년 8월 5일 수요일 · 리뷰웹시스템[3버전]이 오늘의 현황을 요약했어요</div>
+          <div class="hm-stats">
+            <div class="hm-st"><div class="n">7</div><div class="l">진행 중 작업</div></div>
+            <div class="hm-st"><div class="n">5</div><div class="l">모집중 공고</div></div>
+            <div class="hm-st"><div class="n">38</div><div class="l">오늘 참여 확정</div></div>
+            <div class="hm-st"><div class="n" style="color:#fecaca">3</div><div class="l">확인 필요</div></div>
+          </div>
+        </div>
+
+        <div class="tb0">
+          <span class="wt0 on">📄 8/1파미고_올레샷_블로그 <span class="x">×</span></span>
+          <span class="wt0">📄 7/28라온_수분크림_포토 <span class="x">×</span></span>
+          <span class="wt0">📄 8/3힙스_골라담기 <span class="x">×</span></span>
+        </div>
+
+        <div class="wbl-box">
+          <div class="wbl-h">
+            <span class="wbl-ttl">📋 작업 목록</span>
+            <span class="wbl-seg"><button class="on">진행 중 7</button><button>마감 보관함 24</button></span>
+            <span class="wbl-today">오늘 완료 2 / 7</span>
+            <span class="wbl-today" style="background:var(--warn-soft);border-color:#f0dcb8;color:var(--warn)">✓ 마감 후보 1건</span>
+            <button class="wbl-chip on">전체</button>
+            <button class="wbl-chip">만두</button>
+            <button class="wbl-chip">망고</button>
+            <input class="wbl-q" placeholder="🔎 작업명 · 업체 · 담당자 검색">
+          </div>
+
+          <table class="wbl-t">
+            <thead><tr>
+              <th>작업명</th><th>담당</th><th>인원/제출</th><th>입금</th><th>상태</th><th></th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td><div class="wbl-nm">8/1파미고_올레샷_블로그 바이럴</div><div class="wbl-sub">파미고</div></td>
+                <td>만두</td>
+                <td><span class="wbl-g"><i style="width:42%"></i></span><span class="wbl-num">42/100</span></td>
+                <td class="wbl-num">31</td>
+                <td><span class="wbl-s run">진행 중</span></td>
+                <td><div class="wbl-act">
+                  <button class="wbl-b cmp" onclick="openRf(event,'open')" title="연결된 공고: 올레샷 블로그 바이럴 100건 · 모집중">
+                    <i class="cdot open"></i>📢 공고</button>
+                  <button class="wbl-b">열기</button>
+                  <button class="wbl-b">☑ 오늘 완료</button>
+                  <button class="wbl-b dark">🏁 마감</button>
+                </div></td>
+              </tr>
+              <tr>
+                <td><div class="wbl-nm">8/3힙스_골라담기_포토리뷰</div><div class="wbl-sub">힙스</div></td>
+                <td>망고</td>
+                <td><span class="wbl-g"><i style="width:12%"></i></span><span class="wbl-num">6/50</span></td>
+                <td class="wbl-num">0</td>
+                <td><span class="wbl-s run">진행 중</span></td>
+                <td><div class="wbl-act">
+                  <button class="wbl-b cmp" onclick="openRf(event,'pre')" title="연결된 공고: 힙스 골라담기 50건 · 8/6 오픈 예정">
+                    <i class="cdot pre"></i>📢 공고</button>
+                  <button class="wbl-b">열기</button>
+                  <button class="wbl-b">☑ 오늘 완료</button>
+                  <button class="wbl-b dark">🏁 마감</button>
+                </div></td>
+              </tr>
+              <tr class="tdone">
+                <td><div class="wbl-nm">7/28라온_수분크림_포토리뷰</div><div class="wbl-sub">라온코스메틱</div></td>
+                <td>만두</td>
+                <td><span class="wbl-g"><i style="width:100%"></i></span><span class="wbl-num">80/80</span></td>
+                <td class="wbl-num">80</td>
+                <td><span class="wbl-s today">☑ 오늘 완료</span></td>
+                <td><div class="wbl-act">
+                  <button class="wbl-b cmp" onclick="openRf(event,'closed')" title="연결된 공고: 라온 수분크림 80건 · 모집 마감">
+                    <i class="cdot closed"></i>📢 공고</button>
+                  <button class="wbl-b">열기</button>
+                  <button class="wbl-b today on">해제</button>
+                  <button class="wbl-b dark">🏁 마감</button>
+                </div></td>
+              </tr>
+              <tr>
+                <td><div class="wbl-nm">8/5비프리_유산균_구매확정</div><div class="wbl-sub">비프리</div></td>
+                <td>망고</td>
+                <td><span class="wbl-g"><i style="width:0%"></i></span><span class="wbl-num">0/30</span></td>
+                <td class="wbl-num">0</td>
+                <td><span class="wbl-s run">진행 중</span></td>
+                <td><div class="wbl-act">
+                  <button class="wbl-b cmp none" onclick="openRf(event,'new')" title="이 작업에 연결된 공고가 없습니다 — 작업오더 값으로 채워 발행 화면을 엽니다">
+                    ＋ 공고 발행</button>
+                  <button class="wbl-b">열기</button>
+                  <button class="wbl-b">☑ 오늘 완료</button>
+                  <button class="wbl-b dark">🏁 마감</button>
+                </div></td>
+              </tr>
+              <tr>
+                <td><div class="wbl-nm">8/4미가온_홍삼스틱_실배송</div><div class="wbl-sub">미가온</div></td>
+                <td>만두</td>
+                <td><span class="wbl-g"><i style="width:66%"></i></span><span class="wbl-num">33/50</span></td>
+                <td class="wbl-num">20</td>
+                <td><span class="wbl-s cand">✓ 마감 후보</span></td>
+                <td><div class="wbl-act">
+                  <button class="wbl-b cmp" disabled title="공고 연결 정보를 불러오지 못했습니다">📢 공고 ?</button>
+                  <button class="wbl-b">열기</button>
+                  <button class="wbl-b">☑ 오늘 완료</button>
+                  <button class="wbl-b dark">🏁 마감</button>
+                </div></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="wbl-warn">⚠ 일부 작업의 공고 연결을 불러오지 못했습니다 — 그 줄의 [공고] 버튼은 잠시 비활성입니다(새로고침해 주세요).</div>
+          <div class="wbl-note">줄을 클릭하면 그 작업이 작업보드에서 열립니다 · 마감은 전 직원 공통이며 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="anno"><span class="tagn">① 상태 점</span><span class="txt">
+    <b>모집중 / 오픈예정 / 마감</b>을 버튼 앞 점 하나로 — 목록에서 "이 작업 공고가 지금 열려 있나"가 바로 읽힌다.
+    점의 판정은 카드·목록과 <b>같은 상태 계산</b>(<code>computeCampaignState</code>)을 쓴 서버 값을 그대로 그린다(화면에서 다시 세지 않는다).</span></div>
+  <div class="anno"><span class="tagn">② 공고 없음</span><span class="txt">
+    <b>＋ 공고 발행</b>로 바뀐다. 누르면 <b>같은 모달</b>이 발행 모드로 열리고 연결 탭·담당자·구매채널이 이미 채워져 있다
+    (작업오더 → 모집공고 자동채움 경로 그대로).</span></div>
+  <div class="anno"><span class="tagn">③ 조회 실패</span><span class="txt">
+    비활성 + <b>목록 상단에 사유 고지</b>. 조용히 "공고 없음"으로 보이면 담당자가 <b>이미 있는 공고를 또 발행</b>한다 —
+    이 화면의 fail-soft 규칙(모르면 모른다고 말한다)과 같다.</span></div>
+  <div class="anno"><span class="tagn">④ 권한</span><span class="txt">
+    편집 권한이 없는 사람(허용명단 밖)에게는 버튼 문구가 <b>[👁 공고 보기]</b>가 되고 모달이 읽기 전용으로 열린다.
+    <b>＋ 공고 발행</b>은 아예 안 보인다(눌러도 아무 일 없는 버튼은 두지 않는다).</span></div>
+</section>
+
+<!-- ═══════════════ 2. 화면 2 — 팝업 ═══════════════ -->
+<section>
+  <div class="sec-label">화면 2</div>
+  <h2>[📢 공고] 클릭 → 팝업 (공고 모습 + 그 자리에서 수정)</h2>
+  <p class="desc">
+    팝업은 <b>새로 만든 화면이 아니다</b>. 모집공고 탭의 [수정]을 눌렀을 때 뜨는 그 모달(<code>js/recruit-modal.js</code>)을
+    <code>openRecruitModal(공고id)</code> 로 그대로 연다. 그래서 <b>왼쪽에서 값을 고치면 오른쪽 미리보기(리뷰어가 보는 카드 · 참여 후 화면)가 즉시 따라 그려지고</b>,
+    [저장]은 모집공고 탭의 저장과 같은 경로를 탄다.
+  </p>
+  <p class="desc">
+    다른 점은 <b>맨 위 파란 띠 한 줄</b>뿐이다 — "지금 어느 작업에서 열었는지"와 그 작업의 연결 탭을 알려 준다.
+    작업목록에서 열었는데 <b>엉뚱한 공고</b>가 떠 있으면 그 자리에서 알아채야 하기 때문이다.
+  </p>
+
+  <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="rf-x pri" onclick="openRf(event,'open')">📢 모집중 공고 열어보기</button>
+    <button class="rf-x" onclick="openRf(event,'pre')">📢 오픈예정 공고</button>
+    <button class="rf-x" onclick="openRf(event,'closed')">📢 마감 공고</button>
+    <button class="rf-x" onclick="openRf(event,'new')">＋ 공고 발행(미연결 작업)</button>
+  </div>
+  <p class="desc" style="margin-top:8px">↑ 버튼을 누르거나, 위 화면 1의 표에서 직접 눌러도 같은 팝업이 열립니다.</p>
+
+  <div class="anno"><span class="tagn">⑤ 3단 그대로</span><span class="txt">
+    <b>좌 목차(⠿ 끌어 배치) · 중 입력 카드 · 우 미리보기</b> — 모집공고 탭에서 보던 그 배치. 사람마다 익힌 순서가 그대로 유지된다.</span></div>
+  <div class="anno"><span class="tagn">⑥ 공고 "모습"</span><span class="txt">
+    오른쪽 미리보기가 곧 <b>리뷰어가 실제로 보는 화면</b>이다(같은 렌더러 <code>campaign-cards.js</code> ·
+    <code>campaign-workdetail.js</code>). 모형 카드를 따로 그리지 않으므로 "미리보기 ≠ 실제"가 생길 수 없다.</span></div>
+  <div class="anno"><span class="tagn">⑦ 닫으면 제자리</span><span class="txt">
+    저장하든 취소하든 <b>홈 목록으로 되돌아온다</b>(화면 이동 없음). 저장했다면 그 줄의 상태 점·인원이 즉시 갱신된다.</span></div>
+</section>
+
+<!-- ═══════════════ 3. 동기화 ═══════════════ -->
+<section>
+  <div class="sec-label">동기화</div>
+  <h2>"모집공고 기능과 동기화" = 사본을 만들지 않는다</h2>
+  <p class="desc">
+    같은 공고를 고치는 창구가 둘이 되면 한쪽에만 필드가 늘어나 <b>"여기선 저장되는데 저기선 안 되는"</b> 상태가 된다.
+    그래서 팝업은 <b>화면·저장·검증을 전부 기존 모집공고 기능에 위임</b>하고, 홈은 <b>여는 일만</b> 한다.
+  </p>
+
+  <div class="flow">
+    <div class="fbox"><div class="ft">홈 작업목록</div>
+      <div class="fd">줄의 <b>[📢 공고]</b> 클릭<br>→ 인덱스만 넘김(<code>openTabCampaign(i)</code>)</div></div>
+    <div class="farrow">→</div>
+    <div class="fbox hi"><div class="ft">기존 함수 그대로</div>
+      <div class="fd"><code>openRecruitModal(공고id)</code><br>작업오더 탭·모집공고 탭이 이미 쓰는 그 호출</div></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><div class="ft">공유 모달</div>
+      <div class="fd"><code>js/recruit-modal.js</code><br>+ 프리필·저장 <code>index-recruit.js</code></div></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><div class="ft">저장 = 한 경로</div>
+      <div class="fd"><code>PUT /campaigns/admin/:id</code><br>모집공고 탭 저장과 동일</div></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><div class="ft">즉시 반영</div>
+      <div class="fd">모집공고 탭 카드 · 리뷰어 목록/상세<br>· 홈 목록의 상태 점</div></div>
+  </div>
+
+  <table class="doc">
+    <thead><tr><th style="width:20%">항목</th><th style="width:40%">이 시안</th><th>이렇게 안 하면</th></tr></thead>
+    <tbody>
+      <tr><td><b>팝업 화면</b></td><td>모집공고 모달 <b>그대로</b>(마크업·CSS·필드 ID 무변경)</td>
+          <td>축약 폼을 새로 만들면 필드가 빠져 <b>저장 시 기존 설정이 빈 값으로 덮인다</b>(리뷰어앱 축약 편집에서 실제로 겪은 함정)</td></tr>
+      <tr><td><b>공고 찾기</b></td><td>서버가 목록 응답에 <b>연결 공고 주석</b>을 실어 준다(작업 ↔ 공고는 <code>linked_tab_*</code> 로 이미 연결돼 있다)</td>
+          <td>화면에서 공고 전체를 받아 짝지으면 홈 진입마다 무거워지고, 짝짓기 규칙이 서버와 갈린다</td></tr>
+      <tr><td><b>상태 점</b></td><td>카드·리뷰어 목록과 <b>같은 상태 계산</b> 결과를 그대로 표시</td>
+          <td>"목록엔 모집중인데 참여는 거부"처럼 화면마다 다른 상태가 보인다</td></tr>
+      <tr><td><b>권한</b></td><td>지금의 <b>편집 허용명단</b> 그대로(명단 밖은 읽기 전용, 광고주는 홈 자체가 없음)</td>
+          <td>홈에서만 우회로 편집이 열려 정원·금액이 통제 밖에서 바뀐다</td></tr>
+      <tr><td><b>실패</b></td><td>연결 조회 실패는 <b>버튼 비활성 + 사유 고지</b></td>
+          <td>"공고 없음"으로 보여 <b>중복 발행</b>이 일어난다</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <b>일부러 넣지 않은 것</b> — ① 팝업 안에서의 <b>공고 삭제</b>는 모집공고 탭에만 둔다(작업 목록에서 실수로 지우면 되돌리기 어렵다).
+    ② 한 작업에 공고가 <b>2개 이상</b> 연결된 경우(차수 재발행 등)에는 바로 열지 않고 <b>어느 공고인지 고르는 작은 목록</b>을 먼저 띄운다 —
+    말없이 최신 것을 여는 쪽이 더 위험하다.
+  </div>
+</section>
+
+<!-- ═══════════════ 4. 구현 메모 ═══════════════ -->
+<section>
+  <div class="sec-label">구현 메모</div>
+  <h2>바꿔야 하는 곳 (예상)</h2>
+  <table class="doc">
+    <thead><tr><th style="width:26%">위치</th><th>변경</th></tr></thead>
+    <tbody>
+      <tr><td><b>서버 · 작업 목록</b></td>
+          <td>홈 목록 응답의 각 작업에 <code>campaign{ id, title, state }</code> 주석 추가.
+              짝짓기는 <b>gid 우선 → 탭명</b>(리네임 대비, 마감 주석과 같은 규칙) · <b>읽기 전용 · fail-soft</b>
+              (실패 시 <code>campaignUnavailable</code> 로 고지, 빈 값으로 접지 않는다) · <b>광고주에겐 미동봉</b></td></tr>
+      <tr><td><b>홈 목록 렌더</b></td>
+          <td><code>_finRenderList()</code> 액션 그룹에 버튼 1개. <b>onclick 에는 인덱스만</b> 넘긴다
+              (시트에서 온 작업명·공고 제목을 문자열로 넣으면 따옴표 하나로 탈출된다 — 이 화면에서 실제로 재현된 사고)</td></tr>
+      <tr><td><b>모달 로드</b></td>
+          <td>workdesk 는 이미 공유 모달을 마운트하고 <code>openRecruitModal()</code> 을 쓴다(작업오더 탭 경로) — <b>추가 로드 없음</b></td></tr>
+      <tr><td><b>저장 후</b></td>
+          <td>저장 콜백에서 홈 목록만 <b>다시 그린다</b>(상태 점·인원 갱신). 목록 배열을 갈아끼울 땐 반드시 재렌더 —
+              stale 인덱스를 든 DOM 이 <b>옆 작업</b>을 열게 된다</td></tr>
+      <tr><td><b>회귀가드</b></td>
+          <td>버튼 배선 · 인덱스 전달(문자열 보간 부재) · 권한별 노출 · 조회 실패 시 기존 표시 미덮음 · 모달 사본 부재</td></tr>
+    </tbody>
+  </table>
+  <p class="desc">※ 위 표는 이 시안이 승인됐을 때의 <b>예상 작업 범위</b>이며, 이 문서 자체는 화면 시안입니다(코드 변경 없음).</p>
+</section>
+
+<div class="footnote">
+  리뷰웹시스템[3버전] · 홈 작업목록 ↔ 모집공고 연동 시안 · 2026-08-05<br>
+  화면 재현 근거 — 작업 목록 <code>frontend/workdesk.html</code> (<code>_finRenderList</code>, <code>.wbl-*</code>) ·
+  공고 모달 <code>frontend/js/recruit-modal.js</code> (<code>.rf-split</code> 3단) ·
+  미리보기 <code>frontend/js/campaign-cards.js</code> · <code>campaign-workdetail.js</code>
+</div>
+</div>
+
+<!-- ═══════════════ 모집공고 모달 (팝업 재현) ═══════════════ -->
+<div class="ov" id="ov" onclick="if(event.target===this)closeRf()">
+  <div class="rf-box">
+    <div class="rf-head">
+      <div>
+        <div class="h3">📢 <span id="rfTitle">모집공고 수정</span></div>
+        <div class="sub" id="rfSub">모집공고 탭에서 여는 것과 같은 화면입니다 · 저장하면 양쪽에 함께 반영됩니다</div>
+      </div>
+      <div class="sp"></div>
+      <button class="rf-x" onclick="alert('실제 화면에서는 리뷰어가 보는 참여 화면이 새 창으로 열립니다.')">👁 리뷰어 화면</button>
+      <button class="rf-x" onclick="closeRf()">✕ 닫기</button>
+    </div>
+
+    <!-- ★ 홈에서 열었을 때만 붙는 한 줄 — 어느 작업의 공고인지 -->
+    <div class="rf-ctx">
+      <span>📋 작업 <b id="rfCtxTab">8/1파미고_올레샷_블로그 바이럴</b> <span id="rfCtxWord">에 연결된 공고</span></span>
+      <span class="lk" id="rfCtxState">● 모집중</span>
+      <span class="sp"></span>
+      <span style="color:#64748B">연결 탭 <b id="rfCtxLink">파미고 8월 시트 › 8/1 블로그 바이럴</b></span>
+    </div>
+
+    <div class="rf-split">
+      <!-- 좌: 레일 -->
+      <nav class="rf-rail">
+        <div class="rf-rail-t">섹션 — ⠿ 끌어서 배치</div>
+        <div class="rf-ri on"><span class="gr">⠿</span>🔗 연결 · 기본<span class="mk ok">✓</span></div>
+        <div class="rf-ri"><span class="gr">⠿</span>📦 진행상품<span class="mk ok">✓</span></div>
+        <div class="rf-ri"><span class="gr">⠿</span>⏱ 모집 조건<span class="mk warn">⚠</span></div>
+        <div class="rf-ri"><span class="gr">⠿</span>💰 리뷰비 · 이체<span class="mk ok">✓</span></div>
+        <div class="rf-ri"><span class="gr">⠿</span>🏷 상품정보<span class="mk ok">✓</span></div>
+        <div class="rf-ri"><span class="gr">⠿</span>📋 작업내용<span class="mk req">●</span></div>
+        <div class="rf-ri"><span class="gr">⠿</span>🚀 게시 · 점검<span class="mk ok">✓</span></div>
+        <div class="rf-rtip">● 필수 미입력 · ⚠ 경고 · ✓ 입력됨<br>레일에서 끌면 본문 순서가 함께 바뀌고, 이 브라우저의 내 화면에 저장됩니다.</div>
+        <button class="rf-rpbtn">↺ 기본 순서(발행 흐름)</button>
+        <button class="rf-rpbtn">✏️ 수정 최적화</button>
+      </nav>
+
+      <!-- 중: 입력 카드 -->
+      <div class="rf-main">
+        <div class="rf-body">
+
+          <div class="rf-card">
+            <div class="rf-ch"><span class="rf-pin">고정</span><span class="rf-ct">🔗 연결 · 기본</span>
+              <span class="rf-cn">시트·탭이 없으면 공고가 동작하지 않습니다</span></div>
+            <div class="rf-cb">
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">시트명 <span class="req">*</span></span>
+                  <select class="rf-in" id="rfSheet"><option>파미고 8월 시트</option></select></div>
+                <div class="rf-hrow"><span class="rf-hl">탭명 <span class="req">*</span></span>
+                  <select class="rf-in" id="rfTab"><option>8/1 블로그 바이럴</option></select></div>
+              </div>
+              <div style="font-size:.7rem;color:#12B886;font-weight:700;margin:-2px 0 8px 90px">🔗 이 작업의 탭이 그대로 선택돼 있습니다</div>
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">담당자 <span class="req">*</span></span>
+                  <div class="rowbtns"><button class="rbtn on">🥟 만두</button><button class="rbtn">🥭 망고</button></div></div>
+                <div class="rf-hrow"><span class="rf-hl">구매채널 <span class="req">*</span></span>
+                  <div class="rowbtns"><button class="rbtn on">🛒 쿠팡</button><button class="rbtn">🟢 네이버</button>
+                    <button class="rbtn">🫒 올리브영</button><button class="rbtn">💛 카카오</button></div></div>
+              </div>
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">배송유형</span>
+                  <select class="rf-in"><option>빈택배</option><option>실배송</option><option>회수건</option></select></div>
+                <div class="rf-hrow"><span class="rf-hl">팀채팅방 <span class="req">*</span></span>
+                  <input class="rf-in" value="https://open.kakao.com/o/..."></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rf-card">
+            <div class="rf-ch"><span class="rf-ct">📦 진행상품 · 옵션</span>
+              <span class="rf-cn">옵션마다 한 줄 · 정원 자동 산출</span></div>
+            <div class="rf-cb">
+              <div class="prodhead"><span>상품명</span><span>옵션명</span><span style="text-align:right">결제금액</span>
+                <span style="text-align:right">총인원</span><span style="text-align:right">일건수</span><span></span></div>
+              <div class="prodrow">
+                <input class="rf-in" id="rfProd1" value="올레샷 클렌징폼"><input class="rf-in" value="200ml 1개">
+                <input class="rf-in" value="18,900" style="text-align:right">
+                <input class="rf-in" value="60" style="text-align:right"><input class="rf-in" value="12" style="text-align:right">
+                <button class="rbtn" style="padding:4px 7px">✕</button>
+              </div>
+              <div class="prodrow">
+                <input class="rf-in" id="rfProd2" value="올레샷 클렌징폼" style="color:#94A3B8"><input class="rf-in" value="200ml 2개">
+                <input class="rf-in" value="34,900" style="text-align:right">
+                <input class="rf-in" value="40" style="text-align:right"><input class="rf-in" value="8" style="text-align:right">
+                <button class="rbtn" style="padding:4px 7px">✕</button>
+              </div>
+              <div class="prodsum">합계 — 총모집 <b>100명</b> · 하루 <b>20건</b> (표에서 자동 산출되어 모집 조건에 반영됩니다)</div>
+            </div>
+          </div>
+
+          <div class="rf-card">
+            <div class="rf-ch"><span class="rf-ct">⏱ 모집 조건</span><span class="rf-cn">시작일 · 구매시간대 · 자리 유효시간</span></div>
+            <div class="rf-cb">
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">시작일</span><input class="rf-in" type="date" value="2026-08-01"></div>
+                <div class="rf-hrow"><span class="rf-hl">구매시간대</span>
+                  <div style="display:flex;gap:6px;align-items:center">
+                    <input class="rf-in" value="10:00" style="width:88px"><span style="color:#94A3B8">~</span>
+                    <input class="rf-in" value="18:00" style="width:88px"></div></div>
+              </div>
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">종료일</span><input class="rf-in" type="date" value="2026-08-14"></div>
+                <div class="rf-hrow"><span class="rf-hl">자리 유효시간</span><input class="rf-in" value="15" style="width:88px"></div>
+              </div>
+              <div style="font-size:.7rem;color:#B45309;background:#FDF6EC;border:1px solid #F0DCB8;border-radius:8px;padding:7px 10px">
+                ⚠ 시트 일정에서 읽은 마감일(8/12)과 입력한 종료일(8/14)이 다릅니다 — <b>시트를 따릅니다</b>.</div>
+            </div>
+          </div>
+
+          <div class="rf-card">
+            <div class="rf-ch"><span class="rf-ct">💰 리뷰비 · 이체</span><span class="rf-cn">기간별 리뷰비 · 통장표시</span></div>
+            <div class="rf-cb">
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">리뷰비 (원)</span><input class="rf-in" value="1,500"></div>
+                <div class="rf-hrow"><span class="rf-hl">통장표시</span><input class="rf-in" value="올레샷리뷰"></div>
+              </div>
+              <div class="rf-hrow"><span class="rf-hl">이체은행</span>
+                <div class="rowbtns"><button class="rbtn on">자동</button><button class="rbtn">하나</button><button class="rbtn">케이뱅크</button></div></div>
+            </div>
+          </div>
+
+          <div class="rf-card">
+            <div class="rf-ch"><span class="rf-ct">🚀 게시 · 점검</span><span class="rf-cn">저장 직전 자동점검</span></div>
+            <div class="rf-cb">
+              <div class="rf-hrow"><span class="rf-hl">공고 제목 <span class="req">*</span></span>
+                <input class="rf-in" id="rfName" value="올레샷 클렌징폼 블로그 바이럴 (100건)"></div>
+              <div class="rf-grid2">
+                <div class="rf-hrow"><span class="rf-hl">상태</span>
+                  <select class="rf-in"><option>진행중(active)</option><option>임시저장</option><option>마감</option></select></div>
+                <div class="rf-hrow"><span class="rf-hl">리뷰어 숨김</span>
+                  <div class="rowbtns"><button class="rbtn">🧪 숨김</button><span style="font-size:.68rem;color:#94A3B8;align-self:center">목록에 노출 중</span></div></div>
+              </div>
+              <div style="font-size:.7rem;color:#12B886;background:#F0FBF6;border:1px solid #CBEFDF;border-radius:8px;padding:7px 10px">
+                ✓ 자동점검 통과 — 연결 탭 · 담당자 · 구매채널 · 정원 · 리뷰비 모두 확인되었습니다.</div>
+            </div>
+          </div>
+
+        </div>
+        <div class="rf-foot">
+          <button class="rf-del" id="rfDel" title="삭제는 모집공고 탭에서만 — 이 시안의 결정">🗑 삭제(모집공고 탭에서)</button>
+          <span class="sp"></span>
+          <button class="rf-x" onclick="closeRf()">취소</button>
+          <button class="rf-x pri" onclick="saveRf()">💾 저장</button>
+        </div>
+      </div>
+
+      <!-- 우: 미리보기 -->
+      <aside class="rf-side">
+        <div class="rf-sh">👁 미리보기</div>
+        <div class="rf-scap">▦ 홈 · 목록에서 리뷰어가 보는 카드</div>
+        <div class="pcard">
+          <div class="pthumb">🧴
+            <div class="pbadges"><span class="pb ch">쿠팡</span><span class="pb dl">빈택배</span></div>
+            <div class="pcd" id="pvOverlay" style="display:none">오늘 구매마감까지 02:14:31</div>
+          </div>
+          <div class="pbody">
+            <div class="ptitle" id="pvTitle">올레샷 클렌징폼 블로그 바이럴 (100건)</div>
+            <div class="pmeta">10:00 ~ 18:00 · 하루 20건</div>
+            <div class="pg"><i style="width:42%"></i></div>
+            <div class="pgn" id="pvGauge">참여 42 / 100명</div>
+            <div class="pfee"><span>상품비 18,900</span><span>리뷰비 1,500</span></div>
+            <div class="pjoin" id="pvBtn">바로 참여하기</div>
+          </div>
+        </div>
+        <div class="rf-scap" style="margin-top:14px">📱 리뷰어가 참여한 뒤 보는 화면</div>
+        <div class="phonebox">
+          <div class="holdbar"><span>⏳ 구매양식 제출까지</span><b>14:52</b></div>
+          <div class="wdcard"><div class="t">📦 상품 · 옵션 · 결제금액</div>
+            <div class="l">올레샷 클렌징폼 / 200ml 1개<br>결제금액 18,900원</div></div>
+          <div class="wdcard"><div class="t">🧾 현금영수증 안내</div>
+            <div class="l">지출증빙 · 사업자번호 000-00-00000<br>발행방법 이미지(쿠팡)</div></div>
+          <div class="wdcard"><div class="t">🔗 유입 가이드</div>
+            <div class="l">검색어 "올레샷 클렌징폼" 으로 진입 후<br>3번째 상품 클릭</div></div>
+          <div class="wdcard"><div class="t">✍ 리뷰 가이드</div>
+            <div class="l">블로그 본문 800자 이상 · 사진 5장 이상</div></div>
+        </div>
+        <div style="font-size:.64rem;color:#94A3B8;text-align:center;padding:0 14px 16px;line-height:1.6">
+          이 미리보기는 리뷰어 화면과 <b>같은 렌더러</b>로 그립니다 —<br>모형이 아니라 실제 화면이라 어긋날 수 없습니다.
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  var RF = {
+    open:   { title:'모집공고 수정',   tab:'8/1파미고_올레샷_블로그 바이럴', link:'파미고 8월 시트 › 8/1 블로그 바이럴',
+              sheet:'파미고 8월 시트',  stab:'8/1 블로그 바이럴', prod:'올레샷 클렌징폼',
+              name:'올레샷 클렌징폼 블로그 바이럴 (100건)',
+              state:'● 모집중',   sc:'#12B886', btn:'바로 참여하기',  gauge:'참여 42 / 100명', ovl:'' },
+    pre:    { title:'모집공고 수정',   tab:'8/3힙스_골라담기_포토리뷰',      link:'힙스 8월 시트 › 8/3 골라담기',
+              sheet:'힙스 8월 시트',    stab:'8/3 골라담기',      prod:'힙스 골라담기',
+              name:'힙스 골라담기 포토리뷰 (50건)',
+              state:'● 오픈예정', sc:'#B45309', btn:'8/6 오픈 예정',  gauge:'참여 6 / 50명',   ovl:'오픈까지 1일 03:12' },
+    closed: { title:'모집공고 수정',   tab:'7/28라온_수분크림_포토리뷰',     link:'라온 7월 시트 › 7/28 수분크림',
+              sheet:'라온 7월 시트',    stab:'7/28 수분크림',     prod:'라온 수분크림',
+              name:'라온 수분크림 포토리뷰 (80건)',
+              state:'● 마감',    sc:'#98A2B3', btn:'모집 마감',      gauge:'참여 80 / 80명',  ovl:'모집 완료' },
+    'new':  { title:'모집공고 발행',   tab:'8/5비프리_유산균_구매확정',      link:'비프리 8월 시트 › 8/5 유산균',
+              sheet:'비프리 8월 시트',  stab:'8/5 유산균',        prod:'비프리 유산균',
+              name:'비프리 유산균 구매확정 (30건)',
+              state:'● 미발행',  sc:'#98A2B3', btn:'바로 참여하기',  gauge:'참여 0 / 30명',   ovl:'' }
+  };
+  function openRf(ev, kind){
+    if(ev){ ev.stopPropagation(); }
+    var d = RF[kind] || RF.open;
+    document.getElementById('rfTitle').textContent = d.title;
+    document.getElementById('rfSub').textContent = (kind==='new')
+      ? '작업오더 값으로 미리 채워진 발행 화면입니다 · 모집공고 탭의 [＋ 새 공고]와 같은 모달'
+      : '모집공고 탭에서 여는 것과 같은 화면입니다 · 저장하면 양쪽에 함께 반영됩니다';
+    document.getElementById('rfCtxTab').textContent  = d.tab;
+    document.getElementById('rfCtxLink').textContent = d.link;
+    var st = document.getElementById('rfCtxState');
+    st.textContent = d.state; st.style.color = d.sc;
+    document.getElementById('rfSheet').options[0].text = d.sheet;
+    document.getElementById('rfTab').options[0].text   = d.stab;
+    document.getElementById('rfProd1').value = d.prod;
+    document.getElementById('rfProd2').value = d.prod;
+    document.getElementById('rfName').value  = d.name;
+    document.getElementById('pvTitle').textContent  = d.name;
+    document.getElementById('rfCtxWord').textContent = (kind==='new')
+      ? '— 연결된 공고가 없어 새로 발행합니다' : '에 연결된 공고';
+    document.getElementById('rfDel').style.display = (kind==='new') ? 'none' : '';
+    document.getElementById('pvBtn').textContent   = d.btn;
+    document.getElementById('pvGauge').textContent = d.gauge;
+    var ov = document.getElementById('pvOverlay');
+    ov.style.display = d.ovl ? 'grid' : 'none'; ov.textContent = d.ovl;
+    document.getElementById('ov').classList.add('on');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeRf(){
+    document.getElementById('ov').classList.remove('on');
+    document.body.style.overflow = '';
+  }
+  function saveRf(){
+    closeRf();
+    toast('공고를 저장했습니다 — 모집공고 탭·리뷰어 화면에 즉시 반영됩니다');
+  }
+  function toast(msg){
+    var t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('on');
+    setTimeout(function(){ t.classList.remove('on'); }, 2600);
+  }
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeRf(); });
+  // 팝업 상태를 바로 열어 보기 — ?open=open|pre|closed|new (문서 공유용)
+  (function(){
+    var m = /[?&]open=([a-z]+)/.exec(location.search);
+    if(m && RF[m[1]]) openRf(null, m[1]);
+  })();
+</script>
+</body>
+</html>

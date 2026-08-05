@@ -213,6 +213,53 @@ function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
   }));
 }
 
+/* ── 작업유형 자동 선택 조건 ─────────────────────────────────────────────
+   "작업오더 내용을 보고 그 유형을 켜 둘까?"를 판정한다(사용자 확정 — 쿠팡 작업 + 상품옵션 2가지면
+   채널 쿠팡 + 작업유형 상품옵션이 켜진 표가 만들어져야 한다).
+
+   ★★ 판정은 **여기 한 곳**뿐이다 — 조건 목록은 `worktable.service.WORK_TYPE_TRIGGERS`(화면용 라벨),
+     판정은 이 함수(동작). 화면에 판정 사본을 두면 "체크는 켜졌는데 서버는 안 켠" 상태가 된다.
+   ★ 조건은 전부 `work_orders` 의 **실제 칸**에서 나온다. 모르는 값·판정 실패는 **켜지 않는다**
+     (틀린 열을 만드느니 담당자가 직접 켜는 게 낫다 — 이 화면의 fail-soft 원칙).
+   ★ `auto`(기본·옛 저장분) = 종전 동작 = 옵션 열을 가진 유형만 옵션 2종 이상일 때. */
+function evalWorkTypeTrigger(trigger, ctx = {}) {
+  const t = String(trigger || 'auto');
+  const wo = ctx.workOrder || {};
+  const optionCount = Math.max(0, parseInt(ctx.optionCount, 10) || 0);
+  const hasOptionColumn = !!ctx.hasOptionColumn;
+  const delivery = String(wo.delivery_type == null ? '' : wo.delivery_type);
+  const reviewType = String(wo.review_type == null ? '' : wo.review_type).trim();
+
+  switch (t) {
+    case 'never': return false;
+    case 'always': return true;
+    case 'options_2plus': return optionCount >= 2;
+    // ★ boolean 컬럼이지만 문자열('true'/'Y')로 올 수 있어 둘 다 인정한다(빈 값·false 는 안 켬).
+    case 'courier_proxy': return wo.courier_proxy === true || /^(true|t|y|yes|1|예)$/i.test(String(wo.courier_proxy || ''));
+    case 'delivery_real': return /실배송|실\s*발송/.test(delivery);
+    case 'delivery_empty': return /빈박스|빈\s*박스/.test(delivery);
+    case 'review_type_set': return reviewType.length > 0;
+    case 'auto':
+    default:
+      return hasOptionColumn && optionCount >= 2;   // 종전 동작 보존
+  }
+}
+
+/** 조건별 "왜 켜졌는지" 한 줄 — 화면이 그대로 보여 준다(근거 없는 자동 체크 금지). */
+function workTypeTriggerReason(trigger, ctx = {}) {
+  const wo = (ctx.workOrder || {});
+  const n = Math.max(0, parseInt(ctx.optionCount, 10) || 0);
+  switch (String(trigger || 'auto')) {
+    case 'always': return '항상 켜는 유형';
+    case 'options_2plus': return `작업오더에 상품옵션 ${n}가지`;
+    case 'courier_proxy': return '작업오더 택배대행 = 예';
+    case 'delivery_real': return `작업오더 배송유형 = ${String(wo.delivery_type || '실배송')}`;
+    case 'delivery_empty': return `작업오더 배송유형 = ${String(wo.delivery_type || '빈박스')}`;
+    case 'review_type_set': return `작업오더 리뷰유형 = ${String(wo.review_type || '')}`.trim();
+    case 'auto': default: return `작업오더에 상품옵션 ${n}가지`;
+  }
+}
+
 /**
  * 작업표 계획 산출 — 미리보기와 실제 생성이 **같이 쓰는** 단일 출처.
  *
@@ -247,6 +294,9 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     .map(h => ymdStr(parseYmd(h))))].sort();
 
   const optKeys = o.options != null ? o.options : optionKeysFromWorkOrder(wo);
+  /* 자동 선택 조건이 세는 "옵션 가지 수" — 배분 형태({key,count})로 와도 같은 수를 센다. */
+  const optionKindCount = (Array.isArray(optKeys) ? optKeys : [])
+    .map(x => (typeof x === 'string' ? x : String((x && x.key) || ''))).filter(v => v.trim()).length;
   const { buckets, rowOptions } = distributeOptions({ total, options: optKeys });
   const { days, rowDates } = distributeDates({ total, daily, startDate, skipWeekends, holidays });
 
@@ -317,11 +367,17 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   const allTypes = ((template && template.workTypes) || []).map(t => {
     const cols = classifyHeaders((t.columns || []).map(s => String(s || '').trim()).filter(Boolean), {});
     const hasOption = cols.some(c => c.role === 'option');
+    const trigger = String(t.autoTrigger || 'auto');
+    /* ★ 옵션 개수는 **배분 결과(buckets)가 아니라 작업오더가 말한 옵션 종류 수**로 센다 —
+       배분은 총 건수가 0이면 비어 있어서, "건수를 아직 안 정한 오더"에서 제안이 조용히 죽는다. */
+    const ctx = { workOrder: wo, optionCount: optionKindCount, hasOptionColumn: hasOption };
+    const suggested = evalWorkTypeTrigger(trigger, ctx);
     return {
       key: t.key, label: t.label, desc: t.desc || '', position: t.position === 'front' ? 'front' : 'back',
+      autoTrigger: trigger,
       columns: cols.map(c => ({ name: c.header, role: c.role, label: c.label, tier: c.tier })),
-      suggested: hasOption && buckets.length >= 2,
-      suggestReason: (hasOption && buckets.length >= 2) ? `작업오더에 옵션 ${buckets.length}종` : '',
+      suggested,
+      suggestReason: suggested ? workTypeTriggerReason(trigger, ctx) : '',
       enabled: workTypes.includes(t.key),
     };
   });
@@ -362,5 +418,6 @@ function _channelChoices(template) {
 module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
+  evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,
 };

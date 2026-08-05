@@ -80,14 +80,18 @@ const closeGColMenu = () => {}, closeGHidMenu = () => {};
 // ★ selTab/switchView 가 새 전역을 부르게 되면 이 목록도 함께 늘릴 것.
 let navPushed = 0;
 const _navPush = () => { navPushed++; };
+// 열린 작업 줄(0단, migration 089)로 selTab 이 갖게 된 의존 — 이 파일의 관심은 1·2단 상태 전이라
+//   스텁으로 둔다(줄 자체의 동작은 workboardWorktabs 가드 + 실브라우저 검증이 담당).
+let wtOpened = [];
+const _wtOpen = t => { wtOpened.push(t && t.tabName); };
 const sheetTitle = sid => (({ S1:'로스터A', S2:'로스터B', S3:'로스터C' })[sid] || sid);
 
 // eslint-disable-next-line no-new-func
 const load = new Function('STATE','$','esc','document','localStorage','refreshUnseen','_favLoad','W_FAV',
-  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu','sheetTitle','_favSaveLocal','_favPushServer','_navPush',
+  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu','sheetTitle','_favSaveLocal','_favPushServer','_navPush','_wtOpen',
   bodies + '\n return {' + WANT.join(',') + '};');
 const F = load(STATE, $, esc, document, localStorage, refreshUnseen, _favLoad, W_FAV,
-  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu, sheetTitle, ()=>{}, ()=>{}, _navPush);
+  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu, sheetTitle, ()=>{}, ()=>{}, _navPush, _wtOpen);
 // wPickSearch/selTab 은 서로를 호출하므로 추출본끼리 연결(전역 선언과 동일한 관계 재현)
 const selTab = F.selTab;
 
