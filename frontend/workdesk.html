@@ -5291,6 +5291,7 @@ function _riRenderHead(sum){
     <span class="sp" style="flex:1"></span>
     ${chip('open','의심＋불량')}${chip('pass','통과')}${chip('pending','미검수')}${chip('resolved','확인됨')}${chip('all','전체')}
     ${t?`<button class="btn" onclick="riOpenProductNames()">⚙ 기대 상품명</button>`:''}
+    ${t&&isAdmin?`<button class="btn" onclick="riReinspectTab()" title="공고 리뷰타입을 뒤늦게 바꿨을 때(예: 구매확정) 이 작업의 의심·불량 판정을 새 기준으로 다시 매깁니다">♻ 재검수</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riOpenSamples()">🖼 판별 예시</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riRunSweep()">↻ 과거분 검수</button>`:''}
     <button class="btn" onclick="riExportCsv()">CSV</button>
@@ -5476,6 +5477,17 @@ async function riClearSample(key){
   riOpenSamples();
 }
 /** 과거 제출분 따라잡기 — 한 번에 몰아치지 않게 서버가 사이클 캡으로 통제한다. */
+/* 소급 재검수 — 공고 리뷰타입을 뒤늦게 바꾼 작업(구매확정 전환 등)의 옛 판정을 새 기준으로.
+   서버가 의심·불량·판정불가를 pending 으로 되돌리고 즉시 스윕 1회를 돌린다(100건 초과분은 10분 크론). */
+async function riReinspectTab(){
+  const t=STATE.riTab; if(!t){ alert('작업(탭)을 먼저 선택하세요. (카드의 작업명을 누르면 선택됩니다)'); return; }
+  if(!confirm(`${t.tabName}\n\n이 작업의 의심·불량·판정불가 건을 초기화하고 현재 기준(공고 리뷰타입 포함)으로 다시 검수합니다.\n· [확인됨] 처리한 건과 통과 건은 그대로 둡니다.\n· 한 번에 최대 100건, 남은 건은 10분마다 자동으로 이어집니다.\n진행할까요?`)) return;
+  const r=await api('/api/trackb/review-inspect/reinspect',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,limit:100})});
+  if(!r||!r.ok){ alert('재검수 실패: '+((r&&r.error)||'')); return; }
+  if(r.busy){ alert(`판정 ${r.reset||0}건을 초기화했습니다.\n검수가 이미 돌고 있어 순서대로 다시 매겨집니다(최대 10분).`); _loadInspect(); return; }
+  alert(`재검수 완료 — 초기화 ${r.reset||0}건 / 재판정 ${r.done||0}건 / 실패 ${r.failed||0}건`);
+  _loadInspect();
+}
 async function riRunSweep(){
   if(!confirm('아직 검수되지 않은 과거 제출분을 검수합니다.\n한 번에 최대 20건씩 처리되며, 남은 건은 10분마다 자동으로 이어집니다.\n진행할까요?')) return;
   const r=await api('/api/trackb/review-inspect/sweep',{method:'POST',body:JSON.stringify({limit:20})});

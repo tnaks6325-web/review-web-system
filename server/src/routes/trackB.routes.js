@@ -1225,6 +1225,20 @@ router.post('/reviewer-logs/route-revert', authMiddleware, adminOrMasterMiddlewa
   }
 });
 
+/* 소급 재검수 — 공고 리뷰타입을 뒤늦게 바꾼 탭(예: 구매확정 전환)의 옛 의심·불량 판정을
+   초기화하고 새 기준으로 다시 매긴다(master/admin). resolved·pass 는 보존. */
+router.post('/review-inspect/reinspect', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const out = await _inspectSvc.reinspectTab({
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''), limit: b.limit,
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || '재검수에 실패했습니다.' });
+  }
+});
+
 /* 배치 스윕 수동 실행 — 과거분 따라잡기를 관리자가 당길 수 있게(master/admin) */
 router.post('/review-inspect/sweep', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   try {

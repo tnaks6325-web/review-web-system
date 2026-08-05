@@ -10,11 +10,17 @@
  * ★ settingKey = app_settings 키. 소비처: reviewInspect.loadRouteSamples(판정 동봉) ·
  *   routeSampleSettings/saveRouteSample(설정 화면) — 전부 이 표를 본다(사본 금지).
  */
+/* ★ 구매확정 완료 화면은 **모바일·PC 두 슬롯**(사용자 확정 2026-08-05) — 같은 kind
+ *   'purchase_confirm' 이라 게이트(needsRouteSamples = kind 집합 판정)는 **둘 중 하나만
+ *   등록돼도** 켜진다. 기존 단일 슬롯의 settingKey 는 그대로 = 이미 올린 이미지 보존
+ *   (라벨만 '모바일'로 — 실제 등록분이 모바일 캡처였다). */
 const ROUTE_SAMPLE_KINDS = [
-  { key: 'order_capture',    kind: 'order_capture',    label: '구매캡처(주문내역) 화면', emoji: '🛒',
+  { key: 'order_capture',       kind: 'order_capture',    label: '구매캡처(주문내역) 화면', emoji: '🛒',
     settingKey: 'route_sample_order_capture' },
-  { key: 'purchase_confirm', kind: 'purchase_confirm', label: '구매확정 완료 화면',      emoji: '✅',
+  { key: 'purchase_confirm',    kind: 'purchase_confirm', label: '구매확정 완료 화면 (모바일)', emoji: '✅',
     settingKey: 'route_sample_purchase_confirm' },
+  { key: 'purchase_confirm_pc', kind: 'purchase_confirm', label: '구매확정 완료 화면 (PC)',     emoji: '🖥️',
+    settingKey: 'route_sample_purchase_confirm_pc' },
 ];
 const ROUTE_SAMPLE_SETTING_KEYS = ROUTE_SAMPLE_KINDS.map(s => s.settingKey);
 
