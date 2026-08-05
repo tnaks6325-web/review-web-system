@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 — 작업보드 표 검색(실시간 · 노란 하이라이트 · 자동 이동)</title>
+<style>
+  /* ═══ 리뷰웹시스템[3버전](workdesk.html)의 실제 토큰·클래스를 그대로 옮겨 온 시안 ═══
+     색·간격·표 규칙(열 고정폭·고정열·sticky 헤더)을 새로 만들지 않았다 — 실물과 눈으로 대조하기
+     위한 목업이라, 여기서만 예뻐 보이고 실제 화면에서 달라지는 일이 없어야 한다.
+     ★ 이 문서의 표는 진짜로 동작한다(가짜 데이터 45행) — 검색창에 쳐 보면 실제 감을 볼 수 있다. */
+  :root{
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --adv:#6d5ac9;--adv-soft:#efecfa;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+    --mono:'SF Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    /* 검색 하이라이트 팔레트 — 아래 "색 충돌" 절 참조 */
+    --hit:#fff3b0;        /* 일치 셀 바탕(연한 노랑) */
+    --hit-mk:#ffe14d;     /* 일치한 글자(진한 노랑) */
+    --cur:#ff8a00;        /* 지금 보고 있는 한 건(주황 테두리) */
+    --cur-bg:#ffe9c7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9edf3;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+       -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;color-scheme:light}
+
+  /* ── 시안 문서 껍데기(실제 화면 아님) ── */
+  .doc{max-width:1500px;margin:0 auto;padding:26px 20px 70px}
+  .doc h1{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
+  .doc .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .docnote{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 17px;margin-bottom:16px;font-size:13px;line-height:1.75}
+  .docnote h2{font-size:14px;font-weight:800;margin:0 0 9px}
+  .docnote ul{margin:0;padding-left:19px} .docnote li{margin-bottom:6px}
+  .docnote b{color:var(--accent-deep)}
+  .docnote .ok{background:var(--safe-soft);border:1px solid #c9e9d5;border-radius:10px;padding:10px 13px;margin-bottom:10px}
+  .docnote .ok b{color:var(--safe)}
+  .docnote .q{background:var(--warn-soft);border:1px solid #f0dcc0;border-radius:10px;padding:10px 13px;margin-top:10px}
+  .docnote .q b{color:var(--warn)}
+  .docnote .danger{background:var(--bad-soft);border:1px solid #f3cdcd;border-radius:10px;padding:10px 13px;margin-top:10px}
+  .docnote .danger b{color:var(--bad)}
+  .screenlabel{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:26px 0 7px;
+               display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .screenlabel .pick{font-size:10.5px;font-weight:750;letter-spacing:0;text-transform:none;color:var(--accent-deep);
+                     background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:999px;padding:2px 10px}
+  .screenlabel .rec{background:var(--safe-soft);border-color:#c9e9d5;color:var(--safe)}
+  .screen{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--paper);box-shadow:0 10px 30px rgba(16,24,40,.09)}
+  .vnav{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap}
+  .vnav a{font-size:12px;font-weight:700;text-decoration:none;color:var(--muted);background:var(--card);
+          border:1px solid var(--line);border-radius:999px;padding:5px 13px}
+  .vnav a:hover{border-color:var(--accent-line);color:var(--accent-deep)}
+  .vnav a.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  .cmp{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  .cmp th,.cmp td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  .cmp th{background:var(--card2);font-size:11px;font-weight:750;color:var(--muted)}
+  .cmp td b{color:var(--accent-deep)}
+
+  /* ── workdesk 상단바(맥락용 · 축약) ── */
+  .top{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .top .logo{font-weight:800;letter-spacing:-.02em;font-size:15px}
+  .top .logo .tag{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);
+                  padding:2px 9px;border-radius:999px;margin-left:8px;letter-spacing:.05em}
+  .nav{display:flex;gap:0;margin-left:6px;background:var(--card2);border-radius:10px;padding:3px}
+  .navb{font:inherit;font-size:12.5px;font-weight:700;height:30px;padding:0 12px;border-radius:8px;border:none;background:none;color:var(--muted);cursor:pointer}
+  .navb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .top .sp{flex:1}
+  .rolebadge{font-size:11px;font-weight:750;padding:4px 12px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-deep)}
+  .tb2{display:flex;align-items:stretch;gap:2px;background:var(--card);min-height:40px;border-bottom:1px solid var(--line);overflow:hidden}
+  .wtab{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding:10px 12px;white-space:nowrap;border-bottom:2px solid transparent}
+  .wtab.on{color:var(--accent-deep);font-weight:700;border-bottom-color:var(--accent)}
+
+  /* ── 본문 ── */
+  .main{padding:16px 18px 20px;background:var(--paper)}
+  .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .mh h1{font-size:18px;margin:0;font-weight:800;letter-spacing:-.02em}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)}
+  .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent}
+  .btn{font:inherit;font-size:12px;font-weight:700;padding:0 13px;height:32px;display:inline-flex;align-items:center;gap:6px;
+       border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+  .btn:hover{border-color:var(--accent-line);background:var(--card2)}
+  .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.xs{height:26px;padding:0 9px;font-size:11px;border-radius:7px}
+  .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed}
+
+  /* ── 그리드 툴바(실물 .gridbar 그대로) ── */
+  .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
+  .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
+  .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+
+  /* ── 시트형 그리드(실물 .sheetgrid 그대로) ── */
+  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:430px;background:var(--card);position:relative}
+  table.sheetgrid{border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap;min-width:0;overflow:visible;table-layout:fixed}
+  table.sheetgrid th,table.sheetgrid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px 9px;text-align:left;height:30px}
+  table.sheetgrid td{overflow:hidden;text-overflow:ellipsis}
+  table.sheetgrid th{overflow:hidden}
+  table.sheetgrid thead th{position:sticky;top:0;z-index:3;background:var(--card2);font-weight:700;color:var(--muted);font-size:10.5px;
+                           border-bottom:2px solid var(--line2);user-select:none;cursor:pointer}
+  table.sheetgrid thead th.gseq{cursor:default}
+  table.sheetgrid .gfz{position:sticky;background:var(--card);z-index:2}
+  table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
+  .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
+  table.sheetgrid td.gctr{text-align:center} table.sheetgrid th.gctr .th-in{justify-content:center}
+  table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
+  .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
+  .th-in{display:flex;align-items:center;gap:4px}
+  .src{font-size:9px;font-weight:750;padding:1px 5px;border-radius:5px;background:var(--accent-soft);color:var(--accent-deep);margin-left:3px}
+
+  /* ══════════════════════════════════════════════════════════════════════════════
+     ★ 검색 하이라이트 — 이 시안의 핵심
+     ══════════════════════════════════════════════════════════════════════════════
+     ① 일치한 셀 = 연한 노랑 바탕  ② 일치한 "글자"만 = 진한 노랑  ③ 지금 보고 있는 한 건 = 주황 테두리.
+     ★★ 전부 !important — 이 표의 셀 배경은 세 갈래로 이미 칠해질 수 있다:
+        · 사용자 지정 셀 배경색(migration 080)은 **인라인 style** 이라 클래스로는 절대 못 이긴다
+        · 편집된 셀(.gedit.edited)은 파란 배경
+        · 행 호버(tr:hover td)는 후순위 규칙이라 하이라이트를 덮는다
+        셋 중 하나라도 이기지 못하면 "찾았다는데 노란 게 안 보이는" 셀이 생긴다. */
+  table.sheetgrid td.gs-hit,
+  table.sheetgrid tbody tr:hover td.gs-hit,
+  table.sheetgrid td.gs-hit.gfz,
+  table.sheetgrid tbody tr:hover td.gs-hit.gfz{background:var(--hit)!important}
+  table.sheetgrid td.gs-cur,
+  table.sheetgrid tbody tr:hover td.gs-cur,
+  table.sheetgrid td.gs-cur.gfz,
+  table.sheetgrid tbody tr:hover td.gs-cur.gfz{
+    background:var(--cur-bg)!important;box-shadow:inset 0 0 0 2px var(--cur);border-radius:3px}
+  mark.gs-mk{background:var(--hit-mk);color:inherit;border-radius:2px;padding:0 1px;font-weight:700}
+  td.gs-cur mark.gs-mk{background:var(--cur);color:#fff}
+  /* 일치 행 표시(맨 왼쪽 # 칸에 노란 막대) — 가로로 스크롤해 나가도 "이 행에 결과가 있다"가 남는다 */
+  table.sheetgrid tbody tr.gs-row td.gnum{box-shadow:inset 3px 0 0 var(--hit-mk)}
+  table.sheetgrid tbody tr.gs-rowcur td.gnum{box-shadow:inset 3px 0 0 var(--cur)}
+
+  /* ── 검색 입력(툴바 인라인 · A/C안) ── */
+  .gsearch{position:relative;display:flex;align-items:center;flex:none}
+  .gsearch .ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:12px;pointer-events:none}
+  .gsearch input{font:inherit;font-size:12.5px;padding:5px 76px 5px 27px;border:1px solid var(--line2);border-radius:7px;
+                 background:var(--card);color:var(--ink);outline:none;width:230px;transition:border-color .12s,box-shadow .12s}
+  .gsearch input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .gsearch input.hasq{border-color:#e8c73c;box-shadow:0 0 0 3px #fff6cc}
+  .gsearch input.none{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+  .gsearch .cnt{position:absolute;right:44px;font-size:10.5px;font-weight:750;color:var(--muted);pointer-events:none;
+                font-variant-numeric:tabular-nums;white-space:nowrap}
+  .gsearch .cnt.none{color:var(--bad)}
+  .gsearch .nav2{position:absolute;right:5px;display:flex;gap:1px}
+  .gsearch .nb2{width:17px;height:19px;border:none;background:none;color:var(--faint);cursor:pointer;font-size:10px;
+                border-radius:4px;line-height:1;padding:0}
+  .gsearch .nb2:hover:not(:disabled){background:var(--card2);color:var(--accent-deep)}
+  .gsearch .nb2:disabled{opacity:.3;cursor:default}
+  .gsearch .clr{position:absolute;right:5px;width:18px;height:18px;border:none;background:var(--card2);color:var(--muted);
+                border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0;display:none}
+  /* 검색 중 안내(툴바 오른쪽) */
+  .gsmsg{font-size:11px;font-weight:650;color:var(--warn);background:var(--warn-soft);
+         border:1px solid #f0dcc0;border-radius:7px;padding:3px 9px;display:none}
+  .gsmsg.show{display:inline-block}
+
+  /* ── B안: 표 위 전용 검색줄 ── */
+  .gsbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);
+         border-radius:10px;padding:8px 11px;margin-bottom:8px}
+  .gsbar .gsearch input{width:300px}
+  .gsbar .sep{width:1px;align-self:stretch;background:var(--line);margin:0 2px}
+  .gsbar .opt{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);font-weight:650;cursor:pointer}
+  .gsbar .opt input{margin:0;accent-color:var(--accent)}
+  .gsbar select{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
+  .gsbar .hint{font-size:10.5px;color:var(--faint);margin-left:auto}
+  .gsbar .hint kbd{font-family:var(--mono);font-size:10px;background:var(--card2);border:1px solid var(--line2);
+                   border-bottom-width:2px;border-radius:4px;padding:0 4px}
+
+  /* ── C안: 스크롤 미니맵(일치 위치 눈금) ── */
+  /* ★ 눈금 띠는 표 "바깥"에 자리를 만들어 둔다 — 표 위에 겹쳐 띄우면 오른쪽 끝 데이터(계좌번호 등)를 가린다 */
+  .gswrap{position:relative;padding-right:15px}
+  .gsmap{position:absolute;right:0;top:34px;bottom:2px;width:8px;border-radius:5px;background:rgba(16,24,40,.05);
+         z-index:5;pointer-events:none}
+  .gsmap i{position:absolute;left:1px;right:1px;height:3px;border-radius:2px;background:var(--hit-mk);transform:translateY(-50%)}
+  .gsmap i.cur{background:var(--cur);height:5px;left:0;right:0}
+
+  .caption{font-size:11.5px;color:var(--muted);margin:8px 2px 0;line-height:1.65}
+  .caption b{color:var(--ink)}
+  .demo-hint{font-size:11.5px;font-weight:700;color:var(--accent-deep);background:var(--accent-soft);
+             border:1px solid var(--accent-line);border-radius:8px;padding:6px 11px;display:inline-block;margin-bottom:9px}
+  @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>시안 — 작업보드 표 검색 (실시간 · 노란 하이라이트 · 자동 이동)</h1>
+  <div class="sub">리뷰웹시스템[3버전] 작업보드 › 시트 그리드 왼쪽 위 검색창 · 3가지 안 비교 · 2026-08-05</div>
+
+  <div class="vnav" id="vnav"></div>
+
+  <div class="docnote">
+    <h2>요청한 것</h2>
+    <ul>
+      <li>작업보드 <b>표 왼쪽 위에 검색창</b>을 둔다.</li>
+      <li><b>실시간</b>으로(치는 즉시) 표 안의 값을 찾는다.</li>
+      <li>찾은 곳으로 <b>화면이 스스로 이동</b>한다.</li>
+      <li>찾은 영역이 <b>노란색 배경</b>으로 칠해져 눈에 바로 들어온다.</li>
+    </ul>
+    <div class="ok" style="margin-top:11px">
+      <b>이 문서의 표는 진짜로 동작합니다.</b> 아래 세 시안 모두 가짜 데이터 45행이 들어 있어,
+      검색창에 <b>이름(예: 김영희) · 은행(카카오뱅크) · 주소 일부(부산) · 금액(9900) · 날짜(7/31)</b> 등을 쳐 보면
+      실제 감을 그대로 확인할 수 있습니다. 위/아래 화살표(<kbd>↑</kbd><kbd>↓</kbd>)나 <kbd>Enter</kbd>로 다음 결과로 넘어갑니다.
+    </div>
+    <div class="q">
+      <b>세 안의 차이는 "검색창을 어디에 두느냐"와 "옵션을 얼마나 주느냐"뿐입니다.</b>
+      하이라이트·자동 이동·결과 세기 동작은 셋 다 완전히 같습니다(같은 코드 한 벌을 씁니다 —
+      사본을 두면 화면마다 검색 결과가 달라지는 일이 생깁니다).
+    </div>
+  </div>
+
+  <!-- ══════════════ A안 ══════════════ -->
+  <div class="screenlabel" data-v="A">시안 A — 툴바 인라인 검색 <span class="pick rec">추천</span></div>
+  <div class="screen" data-v="A">
+    <div class="top">
+      <span class="logo">리뷰웹시스템[3버전] <span class="tag">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">🏠 홈</button><button class="navb on">작업보드</button>
+        <button class="navb">관측</button><button class="navb">업체관리</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">admin · 김수만</span>
+    </div>
+    <div class="tb2">
+      <div class="wtab">0710)친구사이_하절기 8차</div>
+      <div class="wtab on">0729)이노크아든_면마스크 200건(실배)</div>
+    </div>
+    <div class="main">
+      <div class="mh"><h1>0729)이노크아든_면마스크 200건(실배)</h1>
+        <span class="bd g">참여자 45</span><span class="bd">시트 그리드 · 열람</span></div>
+      <div class="demo-hint">↓ 검색창에 <b>김영희</b> 또는 <b>부산</b> 을 쳐 보세요</div>
+      <div class="gridbar">
+        <!-- ★ 검색창이 툴바 맨 앞(표 왼쪽 위) — 기존 항목은 그대로 오른쪽으로 밀린다 -->
+        <div class="gsearch">
+          <span class="ic">🔍</span>
+          <input type="text" placeholder="표 안에서 찾기…" data-gs="A" autocomplete="off">
+          <span class="cnt"></span>
+          <span class="nav2"><button class="nb2 prev" title="이전 결과 (Shift+Enter)">▲</button><button class="nb2 next" title="다음 결과 (Enter)">▼</button></span>
+        </div>
+        <span class="gsmsg"></span>
+        <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+        <label>행 그룹</label><select><option>그룹 없음</option></select>
+        <button class="btn xs">숨긴 열 0</button>
+        <button class="btn xs">편집 이력</button>
+        <button class="btn xs">＋ 열 추가</button>
+      </div>
+      <div class="gridscroll" data-grid="A"></div>
+    </div>
+  </div>
+  <div class="caption" data-v="A">
+    <b>가장 작은 변경.</b> 지금 툴바(고정 열 · 행 그룹 · 숨긴 열 …) 맨 앞에 검색창 하나만 끼운다 — 표 위에 새 줄이 생기지 않아
+    표가 보이는 높이를 한 줄도 잃지 않는다. 입력칸 안에 <b>결과 개수(3 / 24)</b>와 <b>▲▼ 이동 버튼</b>이 함께 들어간다.
+  </div>
+
+  <!-- ══════════════ B안 ══════════════ -->
+  <div class="screenlabel" data-v="B">시안 B — 표 위 전용 검색줄(옵션 포함)</div>
+  <div class="screen" data-v="B">
+    <div class="top">
+      <span class="logo">리뷰웹시스템[3버전] <span class="tag">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">🏠 홈</button><button class="navb on">작업보드</button>
+        <button class="navb">관측</button><button class="navb">업체관리</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">admin · 김수만</span>
+    </div>
+    <div class="tb2">
+      <div class="wtab">0710)친구사이_하절기 8차</div>
+      <div class="wtab on">0729)이노크아든_면마스크 200건(실배)</div>
+    </div>
+    <div class="main">
+      <div class="mh"><h1>0729)이노크아든_면마스크 200건(실배)</h1>
+        <span class="bd g">참여자 45</span><span class="bd">시트 그리드 · 열람</span></div>
+      <div class="demo-hint">↓ <b>일치하는 행만 보기</b>를 켜 보세요 — 검색이 곧 필터가 됩니다</div>
+      <!-- ★ 표 바로 위 전용 줄 -->
+      <div class="gsbar">
+        <div class="gsearch">
+          <span class="ic">🔍</span>
+          <input type="text" placeholder="표 안에서 찾기 — 이름 · 연락처 · 주소 · 금액…" data-gs="B" autocomplete="off">
+          <span class="cnt"></span>
+          <span class="nav2"><button class="nb2 prev" title="이전 결과">▲</button><button class="nb2 next" title="다음 결과">▼</button></span>
+        </div>
+        <div class="sep"></div>
+        <label class="opt" style="gap:6px">찾을 곳
+          <select data-gscol="B"><option value="">모든 열</option></select>
+        </label>
+        <label class="opt"><input type="checkbox" data-gsonly="B">일치하는 행만 보기</label>
+        <span class="gsmsg"></span>
+        <span class="hint"><kbd>Enter</kbd> 다음 · <kbd>Shift+Enter</kbd> 이전 · <kbd>Esc</kbd> 지우기</span>
+      </div>
+      <div class="gridbar">
+        <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+        <label>행 그룹</label><select><option>그룹 없음</option></select>
+        <button class="btn xs">숨긴 열 0</button>
+        <button class="btn xs">편집 이력</button>
+        <button class="btn xs">＋ 열 추가</button>
+      </div>
+      <div class="gridscroll" data-grid="B"></div>
+    </div>
+  </div>
+  <div class="caption" data-v="B">
+    <b>찾는 일이 잦은 사람 기준.</b> 입력칸이 넓고, <b>찾을 곳(열 지정)</b>과 <b>일치하는 행만 보기</b>를 함께 준다.
+    "부산 사는 사람만 추려서 보기" 같은 일이 한 번에 된다. 대신 <b>표 위에 줄이 하나 늘어</b> 한 화면에 보이는 행이 약 1줄 줄어든다.
+  </div>
+
+  <!-- ══════════════ C안 ══════════════ -->
+  <div class="screenlabel" data-v="C">시안 C — 툴바 인라인 + 스크롤 위치 눈금</div>
+  <div class="screen" data-v="C">
+    <div class="top">
+      <span class="logo">리뷰웹시스템[3버전] <span class="tag">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">🏠 홈</button><button class="navb on">작업보드</button>
+        <button class="navb">관측</button><button class="navb">업체관리</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">admin · 김수만</span>
+    </div>
+    <div class="tb2">
+      <div class="wtab">0710)친구사이_하절기 8차</div>
+      <div class="wtab on">0729)이노크아든_면마스크 200건(실배)</div>
+    </div>
+    <div class="main">
+      <div class="mh"><h1>0729)이노크아든_면마스크 200건(실배)</h1>
+        <span class="bd g">참여자 45</span><span class="bd">시트 그리드 · 열람</span></div>
+      <div class="demo-hint">↓ <b>카카오뱅크</b> 를 쳐 보세요 — 표 오른쪽 끝 세로 눈금에 결과 위치가 표시됩니다</div>
+      <div class="gridbar">
+        <div class="gsearch">
+          <span class="ic">🔍</span>
+          <input type="text" placeholder="표 안에서 찾기…" data-gs="C" autocomplete="off">
+          <span class="cnt"></span>
+          <span class="nav2"><button class="nb2 prev" title="이전 결과">▲</button><button class="nb2 next" title="다음 결과">▼</button></span>
+        </div>
+        <span class="gsmsg"></span>
+        <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+        <label>행 그룹</label><select><option>그룹 없음</option></select>
+        <button class="btn xs">숨긴 열 0</button>
+        <button class="btn xs">편집 이력</button>
+      </div>
+      <div class="gswrap">
+        <div class="gridscroll" data-grid="C"></div>
+        <div class="gsmap" data-gsmap="C"></div>
+      </div>
+    </div>
+  </div>
+  <div class="caption" data-v="C">
+    <b>A안에 위치 감각만 더한 것.</b> 표 오른쪽 끝 얇은 띠에 결과가 표 전체 어디쯤에 흩어져 있는지 눈금으로 보여준다
+    (지금 보고 있는 건은 주황). 200~400행짜리 큰 작업에서 "위쪽에 몰려 있네"가 한눈에 보인다.
+  </div>
+
+  <!-- ══════════════ 비교표 ══════════════ -->
+  <div class="docnote" style="margin-top:26px">
+    <h2>세 안 비교</h2>
+    <table class="cmp">
+      <tr><th style="width:96px">항목</th><th>A · 툴바 인라인</th><th>B · 전용 검색줄</th><th>C · 인라인 + 눈금</th></tr>
+      <tr><td>표가 보이는 높이</td><td><b>그대로</b>(줄 안 늘어남)</td><td>약 1줄 줄어듦</td><td><b>그대로</b></td></tr>
+      <tr><td>열 지정 검색</td><td>없음(전체 열)</td><td><b>있음</b></td><td>없음(전체 열)</td></tr>
+      <tr><td>일치 행만 보기</td><td>없음</td><td><b>있음</b></td><td>없음</td></tr>
+      <tr><td>결과 위치 감</td><td>왼쪽 # 칸 노란 막대</td><td>왼쪽 # 칸 노란 막대</td><td><b>+ 오른쪽 세로 눈금</b></td></tr>
+      <tr><td>만드는 범위</td><td>가장 작음</td><td>중간(필터 상태와 얽힘)</td><td>작음(+눈금)</td></tr>
+    </table>
+    <div class="ok" style="margin-top:12px">
+      <b>추천 = A안.</b> 요청하신 네 가지(왼쪽 위 · 실시간 · 자동 이동 · 노란 배경)를 전부 만족하면서 화면을 한 줄도 뺏지 않습니다.
+      B안의 <b>[일치하는 행만 보기]</b>가 꼭 필요하시면 <b>A안 + 그 체크박스 하나만</b> 얹는 형태(A+)도 가능합니다 —
+      실제로 눌러 보시고 알려주시면 그대로 맞추겠습니다.
+    </div>
+  </div>
+
+  <!-- ══════════════ 동작 규칙 ══════════════ -->
+  <div class="docnote">
+    <h2>동작 규칙 (세 안 공통)</h2>
+    <ul>
+      <li><b>실시간</b> — 글자를 칠 때마다 즉시 찾는다(입력이 멈춘 뒤 아주 짧게 기다렸다가 = 큰 표에서도 안 버벅임).</li>
+      <li><b>화면이 찾아간다 — 위아래뿐 아니라 좌우로도.</b> 이 표는 옆으로도 길어서(주소·계좌번호는 오른쪽 끝),
+          세로만 맞추면 "찾았다는데 화면엔 안 보이는" 일이 생긴다. 좌우 스크롤도 함께 맞추되
+          <b>고정된 왼쪽 열(#·참여자·연락처) 뒤에 가려지지 않는 위치</b>까지 계산해서 이동한다.</li>
+      <li><b>노란색은 두 겹</b> — 일치한 <b>셀 전체</b>는 연한 노랑, 그 안에서 실제로 <b>일치한 글자</b>는 진한 노랑.
+          지금 보고 있는 한 건만 <b>주황 테두리</b>로 구분해, 결과가 20건이어도 "지금 어디를 보고 있는지"를 잃지 않는다.</li>
+      <li><b>결과 사이 이동</b> — <kbd>Enter</kbd>(다음) · <kbd>Shift+Enter</kbd>(이전) · ▲▼ 버튼. 마지막에서 다음을 누르면 처음으로 돌아온다
+          (표 검색은 훑는 일이라 순환이 자연스럽다 — 목록을 끝까지 봤다는 신호는 <b>n / m</b> 숫자가 대신한다).</li>
+      <li><b>못 찾으면 못 찾았다고 말한다</b> — 입력칸이 빨갛게 되고 "결과 없음". 조용히 아무 일도 안 하지 않는다.</li>
+      <li><b><kbd>Esc</kbd></b> = 검색어 지우기 + 하이라이트 해제(표는 원래 자리 그대로).</li>
+      <li><b>대소문자·띄어쓰기 무시</b> — <span class="kv">Sme1008</span> 을 <span class="kv">sme1008</span> 로 쳐도 찾고,
+          <span class="kv">010-3498-2400</span> 은 <span class="kv">34982400</span> 으로도 찾는다(숫자만 남겨 비교).</li>
+    </ul>
+    <div class="q">
+      <b>검색 대상 = 지금 화면에 보이는 값 그대로.</b> 시트 원본이 <span class="kv">2026-07-29</span> 라도 화면에 <span class="kv">7/29 (수)</span> 로
+      보이면 <b>7/29 로 쳐서 찾힌다</b>(반대로 원본값으로는 안 찾힌다). 화면에 보이는 것과 찾히는 것이 어긋나면 그게 더 혼란스럽기 때문.
+      <b>숨긴 열은 검색하지 않는다</b> — 화면에 없는 칸으로는 "찾아갈" 수가 없다.
+    </div>
+    <div class="danger">
+      <b>만들 때 반드시 지킬 것 (실제 코드에 있는 함정)</b>
+      <ul style="margin-top:7px">
+        <li><b>표는 한 번에 다 그려지지 않는다.</b> 작업보드 그리드는 첫 60행만 즉시 그리고 나머지는 뒤이어 채운다(큰 표가 멈추지 않게).
+            그래서 <b>화면(DOM)만 훑는 검색은 아직 안 그려진 행을 통째로 놓친다</b> — "45건 중 12건만 찾히는" 버그가 된다.
+            검색은 <b>데이터 전체</b>에서 세고, 이동할 행이 아직 안 그려졌으면 <b>그 행까지 먼저 그린 뒤</b> 이동해야 한다.</li>
+        <li><b>노란 배경은 인라인 배경색을 이겨야 한다.</b> 이 표의 셀은 담당자가 직접 칠한 배경색(셀 배경색 기능)이 인라인으로 들어갈 수 있고,
+            편집된 셀은 파란 배경, 행에 마우스를 올리면 하늘색이 덮인다. 하이라이트가 이 셋을 못 이기면
+            <b>"찾았다는데 노란 게 안 보이는 셀"</b>이 생긴다.</li>
+        <li><b>기존 노란색과 겹치지 않게.</b> 이미 리뷰어 로그에서 넘어온 행을 <b>행 전체 앰버</b>로 잠깐 강조하는 기능이 있다.
+            검색은 <b>셀 단위</b>라 색이 서로 다른 층에서 동작하지만, 같은 색을 쓰면 둘이 구분되지 않는다(그래서 검색은 더 밝은 노랑 + 주황 테두리).</li>
+        <li><b>필터·행 그룹과 정합.</b> 필터가 걸려 안 보이는 행에 일치가 있으면 <b>"필터로 숨겨진 N건에도 결과가 있습니다"</b> 라고 알린다
+            (조용히 빼놓지 않는다). 접힌 그룹 안이면 그 그룹을 펼치고 이동한다.</li>
+        <li><b>탭을 바꾸면 검색어를 비운다.</b> 다른 작업의 검색어가 남아 있으면 "왜 여기만 노랗지"가 된다.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="docnote">
+    <h2>확인 부탁드릴 것</h2>
+    <ul>
+      <li><b>A · B · C 중 어느 안</b>으로 갈까요? (추천은 A)</li>
+      <li>B안의 <b>[일치하는 행만 보기]</b>를 A안에 얹을까요, 빼고 갈까요?</li>
+      <li>검색 대상에 <b>참여자 이름·연락처(왼쪽 고정 3열)</b>도 포함하는 게 맞을까요?
+          (지금 시안은 <b>포함</b>했습니다 — 사람 이름으로 찾는 일이 가장 잦아 보여서)</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════════
+   목업 데이터 + 검색 엔진 (세 시안이 같은 코드 한 벌을 쓴다 — 사본 금지)
+   ══════════════════════════════════════════════════════════════════════════════ */
+const COLS = [
+  {key:'#',       w:35,  kind:'seq'},
+  {key:'참여자',   w:105, kind:'name'},
+  {key:'연락처',   w:120, kind:'phone', ctr:true},
+  {key:'번호',     w:43},
+  {key:'담당자',   w:56},
+  {key:'구매일자', w:73,  ctr:true},
+  {key:'주문번호', w:121},
+  {key:'주문자제출',w:74},
+  {key:'수취인',   w:62},
+  {key:'id',       w:102},
+  {key:'연락처2',  w:120, label:'연락처', ctr:true},
+  {key:'주소',     w:330},
+  {key:'은행',     w:88},
+  {key:'계좌번호', w:114},
+  {key:'예금주',   w:60},
+  {key:'결제금액', w:66},
+  {key:'리뷰제출', w:102, ok:true},
+  {key:'입금',     w:48,  ctr:true, ok:true},
+];
+const FROZEN = 3;   // #, 참여자, 연락처 = 왼쪽 고정
+const FROZEN_W = COLS.slice(0,FROZEN).reduce((s,c)=>s+c.w,0);
+
+const NAMES=['이보윤','홍순덕','한정숙','백지원','김영희','김은비','조성아','정다영','조해선','이승미','노민지','정지수','이정화','유하은','이수민','배상엽','임서령','이형배','신은경','김미란','박정순','최유리','강다혜','문소영','오세진','류지현','전보라','고은샘','남기정','서예린','윤태희','장미숙','편해영','추소연','현지수','명다은','방수현','석지영','선우진','설미경','성유진','소하늘','손예지','송가영','신다솜'];
+const BANKS=['카카오뱅크','우리','국민','신한','농협','기업은행','케이뱅크','토스뱅크','우리은행','국민은행'];
+const CITIES=['대구 북구 관음로','경상남도 창원시 의창구 동읍 용잠길','경남 진주시 금산면 중천로','전라북도 부안군 부안읍 석정로','경기 광주시 벌원길','서울특별시 송파구 오금로','경기도 의정부시 오목로','부산광역시 부산진구 백양대로','울산광역시 중구 해오름9길','경상남도 창원시 의창구 팔용로','경기도 남양주시 오남읍 진건오남로','광주 북구 상촌로','경기도 시흥시 목감남서로','경남 김해시 가락로','전북 익산시 동산동 우남아파트','경기도 김포시 걸포2로','광주광역시 남구 서문대로','경기도 고양시 일산동구 풍산로','경기 광명시 사성로','서울시 강북구 노해로'];
+const IDS=['ls444','hsda81','soskawk1','wldnjs0770','bluesky5867','silver-light','sunfl72','jdy918','i9745','seongmi1213','dtd1324','jungjisu4092','glycenter','sjhslove48','Sme1008','yeooow','tjfhddl','vespa1250','trea1986','mmgo7788'];
+
+function pad(n,w){ return String(n).padStart(w,'0'); }
+function mkRows(n){
+  const out=[];
+  for(let i=0;i<n;i++){
+    const nm=NAMES[i%NAMES.length];
+    const ph='010-'+pad(1000+((i*1373)%8999),4)+'-'+pad(1000+((i*7919)%8999),4);
+    const day=29+Math.floor(i/22);
+    out.push({
+      seq:19+i,
+      '#':String(19+i),
+      '참여자':nm,
+      '연락처':ph,
+      '번호':String(1+i),
+      '담당자':'망고',
+      '구매일자':'7/'+(day>31?31:day)+' ('+['월','화','수','목','금','토','일'][i%7]+')',
+      '주문번호':'20260729'+pad(600000+i*137,6),
+      '주문자제출':nm,
+      '수취인':nm,
+      'id':IDS[i%IDS.length]+(i%3===0?'@naver.com':''),
+      '연락처2':ph,
+      '주소':CITIES[i%CITIES.length]+' '+(10+i)+' '+(100+i)+'동 '+(1000+i*3)+'호',
+      '은행':BANKS[i%BANKS.length],
+      '계좌번호':(i%2? '3333-0'+(i%9)+'-'+pad(100000+i*77,6) : pad(1002+i,4)+'-'+pad(200+i,3)+'-'+pad(100000+i*31,6)),
+      '예금주':nm,
+      '결제금액':'9900',
+      '리뷰제출':(i%9===5?'':'7/'+(30+(i%2))+' '+pad(9+(i%12),2)+':'+pad((i*7)%60,2)),
+      '입금':(i%9===5?'':'8/'+(1+(i%3))),
+      manual:(i%11===7),
+    });
+  }
+  return out;
+}
+const ROWS = mkRows(45);
+
+/* ── 그리드 렌더 (실물 buildGrid 의 고정열·고정폭 규칙 그대로) ── */
+function buildGrid(host){
+  const lefts=[]; let acc=0;
+  COLS.forEach((c,i)=>{ lefts[i]=acc; acc+=c.w; });
+  const cstyle=(i)=>{ const c=COLS[i]; let s=`min-width:${c.w}px;width:${c.w}px;`;
+    if(i<FROZEN){ s+=`left:${lefts[i]}px;`; if(i===FROZEN-1) s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
+  const cls=(i,extra)=>`class="${i<FROZEN?'gfz ':''}${extra||''}"`;
+  const thead='<tr>'+COLS.map((c,i)=>
+    `<th ${cls(i,(c.kind==='seq'?'gseq ':'')+(c.ctr?'gctr':''))} style="${cstyle(i)}"><div class="th-in"><span class="lbl">${c.label||c.key}</span></div></th>`
+  ).join('')+'</tr>';
+  const tbody=ROWS.map((r,ri)=>{
+    const tds=COLS.map((c,i)=>{
+      const v=r[c.key]==null?'':String(r[c.key]);
+      if(c.kind==='seq')  return `<td ${cls(i,'gnum')} style="${cstyle(i)}" data-c="${i}">${v}</td>`;
+      if(c.kind==='name') return `<td ${cls(i,'gnm')} style="${cstyle(i)}" data-c="${i}">${v}${r.manual?'<span class="src">수동</span>':'<span class="src">주문</span>'}</td>`;
+      if(c.kind==='phone')return `<td ${cls(i,'gcell gph gctr')} style="${cstyle(i)}" data-c="${i}">${v}</td>`;
+      const extra='gcell'+(v?'':' gempty')+(c.ok&&v?' gok':'')+(c.ctr?' gctr':'');
+      return `<td ${cls(i,extra)} style="${cstyle(i)}" data-c="${i}" title="${v}">${v||''}</td>`;
+    }).join('');
+    return `<tr data-r="${ri}">${tds}</tr>`;
+  }).join('');
+  host.innerHTML=`<table class="sheetgrid" style="width:${acc}px"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+}
+
+/* ── 검색 엔진 ────────────────────────────────────────────────────────────────
+   ★ 매칭은 **데이터**에서 계산한다(DOM 훑기 금지) — 실제 화면은 청크 렌더라
+     아직 안 그려진 행이 있고, DOM 기준이면 그 행이 통째로 결과에서 빠진다. */
+const ONLY_DIGITS = s => s.replace(/[^0-9]/g,'');
+function norm(s){ return String(s==null?'':s).toLowerCase().replace(/\s+/g,''); }
+
+function findHits(q, opt){
+  const out=[];
+  const nq=norm(q); if(!nq) return out;
+  const dq=ONLY_DIGITS(q);
+  const useDigits = dq.length>=4 ? dq : '';   // 4자리 이상 숫자를 쳤을 때만 "숫자만" 비교로 보조 매칭(010-3498-2400 ↔ 34982400)
+  ROWS.forEach((r,ri)=>{
+    COLS.forEach((c,ci)=>{
+      if(opt && opt.col && c.key!==opt.col) return;
+      const raw=String(r[c.key]==null?'':r[c.key]);
+      if(!raw) return;
+      let at=norm(raw).indexOf(nq);
+      let mode='text';
+      if(at<0 && useDigits){ const d=ONLY_DIGITS(raw); if(d && d.indexOf(useDigits)>=0){ at=0; mode='digits'; } }
+      if(at<0) return;
+      out.push({r:ri, c:ci, mode});
+    });
+  });
+  return out;
+}
+function escHtml(s){ return String(s).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
+/* 일치한 "글자"만 진한 노랑으로 감싼다(표시값 기준, 공백 무시 매칭이라 위치를 되짚어 계산) */
+function markHtml(raw, q, mode){
+  const s=String(raw);
+  if(mode==='digits') return `<mark class="gs-mk">${escHtml(s)}</mark>`;
+  const nq=norm(q); if(!nq) return escHtml(s);
+  // 원문 인덱스 ↔ 정규화 인덱스 매핑
+  const map=[]; let n='';
+  for(let i=0;i<s.length;i++){ const ch=s[i]; if(/\s/.test(ch)) continue; n+=ch.toLowerCase(); map.push(i); }
+  const at=n.indexOf(nq); if(at<0) return escHtml(s);
+  const from=map[at], to=map[at+nq.length-1];
+  return escHtml(s.slice(0,from))+'<mark class="gs-mk">'+escHtml(s.slice(from,to+1))+'</mark>'+escHtml(s.slice(to+1));
+}
+
+/* ── 시안 인스턴스 ── */
+function mount(v){
+  const host=document.querySelector(`[data-grid="${v}"]`); if(!host) return;
+  buildGrid(host);
+  const input=document.querySelector(`[data-gs="${v}"]`);
+  const box=input.closest('.gsearch');
+  const cnt=box.querySelector('.cnt');
+  const btnPrev=box.querySelector('.prev'), btnNext=box.querySelector('.next');
+  const msg=input.closest('.gridbar,.gsbar').querySelector('.gsmsg');
+  const colSel=document.querySelector(`[data-gscol="${v}"]`);
+  const onlyChk=document.querySelector(`[data-gsonly="${v}"]`);
+  const map=document.querySelector(`[data-gsmap="${v}"]`);
+  if(colSel && !colSel.dataset.filled){
+    colSel.dataset.filled='1';
+    COLS.filter(c=>c.kind!=='seq').forEach(c=>{
+      const o=document.createElement('option'); o.value=c.key; o.textContent=(c.label||c.key); colSel.appendChild(o); });
+  }
+  let hits=[], cur=-1, q='';
+
+  function clearMarks(){
+    host.querySelectorAll('td.gs-hit,td.gs-cur').forEach(td=>{
+      td.classList.remove('gs-hit','gs-cur');
+      if(td.dataset.orig!=null){ td.innerHTML=td.dataset.orig; delete td.dataset.orig; }
+    });
+    host.querySelectorAll('tr.gs-row,tr.gs-rowcur').forEach(tr=>tr.classList.remove('gs-row','gs-rowcur'));
+  }
+  function paint(){
+    clearMarks();
+    hits.forEach((h,i)=>{
+      const tr=host.querySelector(`tr[data-r="${h.r}"]`); if(!tr) return;
+      const td=tr.querySelector(`td[data-c="${h.c}"]`); if(!td) return;
+      if(td.dataset.orig==null) td.dataset.orig=td.innerHTML;
+      const c=COLS[h.c];
+      const raw=String(ROWS[h.r][c.key]==null?'':ROWS[h.r][c.key]);
+      const badge=(c.kind==='name')?(ROWS[h.r].manual?'<span class="src">수동</span>':'<span class="src">주문</span>'):'';
+      td.innerHTML=markHtml(raw,q,h.mode)+badge;
+      td.classList.add('gs-hit');
+      tr.classList.add('gs-row');
+      if(i===cur){ td.classList.add('gs-cur'); tr.classList.add('gs-rowcur'); }
+    });
+    drawMap();
+  }
+  /* ★ 가로 스크롤도 맞춘다 — 고정열(왼쪽 260px) 뒤에 가려지지 않는 위치까지 */
+  function scrollToCur(){
+    const h=hits[cur]; if(!h) return;
+    const tr=host.querySelector(`tr[data-r="${h.r}"]`); if(!tr) return;
+    const td=tr.querySelector(`td[data-c="${h.c}"]`); if(!td) return;
+    const sr=host.getBoundingClientRect(), cr=td.getBoundingClientRect();
+    const headH=host.querySelector('thead th').getBoundingClientRect().height;
+    if(h.c>=FROZEN){   // 고정열은 항상 보이므로 가로 이동 불필요
+      const l=cr.left-sr.left, r=cr.right-sr.left;
+      if(l < FROZEN_W+10) host.scrollLeft += l-FROZEN_W-16;
+      else if(r > host.clientWidth-10) host.scrollLeft += r-host.clientWidth+16;
+    }
+    const t=cr.top-sr.top, b=cr.bottom-sr.top;
+    if(t < headH+6) host.scrollTop += t-headH-40;
+    else if(b > host.clientHeight-6) host.scrollTop += b-host.clientHeight+40;
+  }
+  function drawMap(){
+    if(!map) return;
+    if(!hits.length){ map.innerHTML=''; return; }
+    const rows=ROWS.length;
+    const seen=new Set(); let html='';
+    hits.forEach((h,i)=>{
+      const key=h.r+(i===cur?':c':'');
+      if(seen.has(key)&&i!==cur) return; seen.add(key);
+      const pct=((h.r+0.5)/rows)*100;
+      html+=`<i class="${i===cur?'cur':''}" style="top:${pct}%"></i>`;
+    });
+    map.innerHTML=html;
+  }
+  function applyOnly(){
+    const on=onlyChk&&onlyChk.checked;
+    const rset=new Set(hits.map(h=>h.r));
+    host.querySelectorAll('tbody tr').forEach(tr=>{
+      tr.style.display=(on&&q&&!rset.has(+tr.dataset.r))?'none':'';
+    });
+  }
+  function status(){
+    input.classList.toggle('hasq', !!q && hits.length>0);
+    input.classList.toggle('none', !!q && hits.length===0);
+    cnt.classList.toggle('none', !!q && hits.length===0);
+    cnt.textContent = !q ? '' : (hits.length ? (cur+1)+' / '+hits.length : '결과 없음');
+    btnPrev.disabled=btnNext.disabled=!hits.length;
+    // 몇 개 행에 걸쳐 몇 칸이 걸렸는지 — "24건"이 24명인지 24칸인지 헷갈리지 않게 풀어서 말한다
+    if(msg){
+      if(q && hits.length){
+        const nRows=new Set(hits.map(h=>h.r)).size;
+        msg.textContent=`${nRows}개 행 · ${hits.length}칸 일치`;
+        msg.classList.add('show');
+      } else { msg.textContent=''; msg.classList.remove('show'); }
+    }
+  }
+  function run(next){
+    q=input.value.trim();
+    const opt={col: colSel? colSel.value : ''};
+    hits=findHits(q,opt);
+    cur=hits.length? (next===false?hits.length-1:0) : -1;
+    paint(); applyOnly(); status();
+    if(cur>=0) scrollToCur();
+  }
+  function step(d){
+    if(!hits.length) return;
+    cur=(cur+d+hits.length)%hits.length;   // 순환
+    paint(); status(); scrollToCur();
+  }
+  let t=null;
+  input.addEventListener('input',()=>{ clearTimeout(t); t=setTimeout(run,120); });   // 실시간(짧은 디바운스)
+  input.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); if(!hits.length) run(); else step(e.shiftKey?-1:1); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); step(1); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); step(-1); }
+    else if(e.key==='Escape'){ e.preventDefault(); input.value=''; run(); input.blur(); }
+  });
+  btnNext.addEventListener('click',()=>step(1));
+  btnPrev.addEventListener('click',()=>step(-1));
+  if(colSel) colSel.addEventListener('change',run);
+  if(onlyChk) onlyChk.addEventListener('change',()=>{ applyOnly(); if(cur>=0) scrollToCur(); });
+  host.addEventListener('scroll',drawMap,{passive:true});
+}
+['A','B','C'].forEach(mount);
+
+/* ── ?v=A|B|C 단독 보기 (레포 시안 문서 관용구) ── */
+(function(){
+  const m=(location.search||'').match(/[?&]v=([ABC])/i);
+  const v=m?m[1].toUpperCase():'';
+  const nav=document.getElementById('vnav');
+  nav.innerHTML=['','A','B','C'].map(x=>
+    `<a href="?${x?'v='+x:''}" class="${(v===x)?'on':''}">${x?('시안 '+x+'만 보기'):'전체 비교'}</a>`).join('');
+  if(!v) return;
+  document.querySelectorAll('[data-v]').forEach(el=>{ if(el.dataset.v!==v) el.remove(); });
+})();
+</script>
+</body>
+</html>
