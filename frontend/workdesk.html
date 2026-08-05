@@ -3763,7 +3763,22 @@ function _woEditActions(o){
     ? ` <button class="btn xs wolink" onclick="event.stopPropagation();_woCampaign('${id}')" title="연결된 모집공고를 열어 리뷰어 화면을 바로 확인합니다">👁 모집공고</button>`
     : ` <button class="btn xs" onclick="event.stopPropagation();_woCampaign('${id}')" title="이 작업오더 내용으로 모집공고를 채워 열고, 리뷰어가 볼 화면을 바로 미리 봅니다">📢 모집공고</button>`;
   return acc+wt+camp
-    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${id}')" title="진행 상태를 바꿉니다">상태변경</button>`;
+    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${id}')" title="진행 상태를 바꿉니다">상태변경</button>`
+    +` <button class="btn xs" onclick="event.stopPropagation();_woAdminEdit('${id}')" title="작업오더 내용을 직접 수정합니다 (인트라넷 보낸오더 카드에도 반영)">✏ 관리자 수정</button>`;
+}
+/* ✏ 관리자 수정 — 공유 모달(js/work-order-detail.js woAdminEditModal) 한 벌.
+   저장 경로만 이 호스트 것(/api/trackb/work-orders/edit — 편집 허용명단 게이트)을 주입한다. */
+function _woAdminEdit(id){
+  const o=(STATE.wo||[]).find(x=>x.id===id);
+  if(!o){ _toast('오더를 찾을 수 없습니다.'); return; }
+  if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
+  woAdminEditModal(o,{
+    save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id,...fields})}),
+    onSaved: r=>{
+      _toast('✏ 수정 저장됨'+(r&&r.delivered?' — 인트라넷 알림 전송':''));
+      _loadOrders();
+    }
+  });
 }
 function _woToggle(i){
   const d=document.getElementById('woldetail-'+i); if(!d) return;

@@ -804,11 +804,16 @@ function _delegate(routerRef, method, path) {
 const _orderRoutes = require('./order.routes');
 const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
+const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
 
 router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _acceptHandler(req, res, next));
 router.put('/work-orders/status', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _statusHandler(req, res, next));
+// 관리자 수동 수정 — 인트라넷 SSO 토큰(via:'intranet')은 /api/order/* 에 도달 불가라 여기로 위임.
+// 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · 편집 허용명단만 수정).
+router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _adminEditHandler(req, res, next));
 
 // ── 모집공고 ────────────────────────────────────────────────
 //   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.

@@ -718,6 +718,198 @@ function _woCampaignPrefill(o) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   작업오더 관리자 수정 모달 — 관리자 대시보드·리뷰웹시스템[3버전] 공용 한 벌.
+   (시안: frontend/docs/작업오더_관리자수정_와이어프레임.html · 2026-08-05 확정)
+
+   · 호스트가 opts.save(fields) 로 자기 API 경로를 주입한다(admin=orderAdminEdit /
+     workdesk=/api/trackb/work-orders/edit) — 모달 사본을 두면 두 화면이 갈라진다.
+   · 바뀐 필드만 전송(PATCH). 빈 값은 "변경 없음"(서버도 같은 규칙).
+   · 편집 불가 3종(상태·계약건·작업시트탭URL)은 읽기 전용 표시만.
+   · ★ 오더 값은 외부(인트라넷·AE) 문자열 — 전부 .value / textContent 로만 주입한다
+     (innerHTML 보간 금지, M1 실측 XSS 규율). */
+function woAdminEditModal(order, opts) {
+  var o = order || {}, save = (opts || {}).save, onSaved = (opts || {}).onSaved;
+  var old = document.getElementById("woAdminEditModal");
+  if (old) old.remove();
+
+  var initial = {};   // field → 초기값(문자열) — 저장 시 diff 의 기준
+  var readers = {};   // field → 현재 화면 값을 읽는 함수
+
+  function mk(tag, css, parent) {
+    var n = document.createElement(tag);
+    if (css) n.style.cssText = css;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function card(parent, title) {
+    var c = mk("div", "border:1px solid #E5E7EB;border-radius:10px;margin-bottom:14px", parent);
+    var h = mk("div", "font-size:12px;font-weight:800;color:#4B5563;background:#F3F4F6;padding:7px 12px;border-radius:10px 10px 0 0", c);
+    h.textContent = title;
+    return mk("div", "padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px 14px", c);
+  }
+  function label(parent, text) {
+    var w = mk("label", "display:block;font-size:12px", parent);
+    var l = mk("span", "display:block;font-size:11px;font-weight:700;color:#6B7280;margin-bottom:3px", w);
+    l.textContent = text;
+    return w;
+  }
+  function field(parent, f, text, opts2) {
+    opts2 = opts2 || {};
+    var w = label(parent, text);
+    if (opts2.full) w.style.gridColumn = "1 / -1";
+    var cur = o[f] == null ? "" : String(o[f]);
+    if (f === "start_date") cur = cur.slice(0, 10);
+    var inp;
+    if (opts2.area) {
+      inp = mk("textarea", "width:100%;border:1.5px solid #D1D5DB;border-radius:7px;padding:7px 10px;font-size:12.5px;min-height:64px;font-family:inherit;box-sizing:border-box", w);
+    } else {
+      inp = mk("input", "width:100%;border:1.5px solid #D1D5DB;border-radius:7px;padding:7px 10px;font-size:12.5px;box-sizing:border-box", w);
+      inp.type = opts2.type || "text";
+    }
+    inp.value = cur;   // ★ 보간 금지 — 프로퍼티 대입만
+    initial[f] = cur;
+    readers[f] = function () { return inp.value; };
+    if (opts2.hint) {
+      var h = mk("div", "font-size:10.5px;color:" + (opts2.warn ? "#B45309" : "#9CA3AF") + ";margin-top:3px", w);
+      h.textContent = opts2.hint;
+    }
+    return inp;
+  }
+  function pills(parent, f, text, values, opts2) {
+    opts2 = opts2 || {};
+    var w = label(parent, text);
+    if (opts2.full) w.style.gridColumn = "1 / -1";
+    var cur = o[f] == null ? "" : String(o[f]);
+    if (f === "courier_proxy") cur = (o[f] === true || o[f] === "true") ? "true" : "false";
+    var list = values.slice();
+    // 현재 값이 목록 밖(레거시 표기)이면 지우지 않고 알약으로 함께 보여준다
+    if (cur && !list.some(function (v) { return v.v === cur; })) list.push({ v: cur, l: cur });
+    var row = mk("div", "display:flex;gap:6px;flex-wrap:wrap", w);
+    var sel = cur;
+    var btns = [];
+    list.forEach(function (it) {
+      var b = mk("button", "", row);
+      b.type = "button";
+      b.textContent = it.l;
+      b.addEventListener("click", function () { sel = it.v; paint(); });
+      btns.push({ b: b, v: it.v });
+    });
+    function paint() {
+      btns.forEach(function (x) {
+        x.b.style.cssText = "font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:20px;cursor:pointer;border:1.5px solid " +
+          (x.v === sel ? "#4F46E5;background:#4F46E5;color:#fff" : "#D1D5DB;background:#fff;color:#6B7280");
+      });
+    }
+    paint();
+    initial[f] = cur;
+    readers[f] = function () { return sel; };
+    if (opts2.hint) {
+      var h = mk("div", "font-size:10.5px;color:#9CA3AF;margin-top:3px", w);
+      h.textContent = opts2.hint;
+    }
+  }
+  function roField(parent, text, value, full) {
+    var w = label(parent, text);
+    if (full) w.style.gridColumn = "1 / -1";
+    var v = mk("div", "border:1.5px solid #E5E7EB;border-radius:7px;padding:7px 10px;font-size:12px;background:#F3F4F6;color:#9CA3AF;word-break:break-all", w);
+    v.textContent = value || "—";
+  }
+
+  var ov = mk("div", "position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:18px");
+  ov.id = "woAdminEditModal";
+  var box = mk("div", "background:#fff;border-radius:13px;max-width:740px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden", ov);
+
+  var head = mk("div", "display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid #E5E7EB;background:#F9FAFB", box);
+  var ht = mk("b", "font-size:14.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", head);
+  ht.textContent = "✏ 작업오더 관리자 수정 — " + (o.title || "");
+  var xBtn = mk("button", "border:0;background:none;font-size:20px;color:#9CA3AF;cursor:pointer;flex:none", head);
+  xBtn.type = "button"; xBtn.textContent = "✕";
+  xBtn.addEventListener("click", function () { ov.remove(); });
+
+  var body = mk("div", "padding:16px 18px;overflow-y:auto", box);
+
+  var c1 = card(body, "📌 기본 정보");
+  field(c1, "title", "작업명 *", { full: true, hint: "⚠ 접수된 오더의 작업명을 바꿔도 이미 등록된 시트 탭 이름은 바뀌지 않습니다.", warn: true });
+  field(c1, "start_date", "시작일", { type: "date" });
+  field(c1, "purchase_time", "구매시간대");
+  field(c1, "manager_name", "담당AE");
+  pills(c1, "work_manager", "작업담당", [
+    { v: "박세희", l: "박세희(만두)" }, { v: "박은비", l: "박은비(망고)" }, { v: "랜덤", l: "랜덤" },
+  ]);
+
+  var c2 = card(body, "📦 진행 조건");
+  field(c2, "recruit_count", "총 모집건수", { type: "number" });
+  field(c2, "daily_count", "일일 진행건수", { type: "number" });
+  pills(c2, "delivery_type", "배송유형", [{ v: "실배송", l: "실배송" }, { v: "빈박스", l: "빈박스" }]);
+  pills(c2, "courier_proxy", "택배대행", [{ v: "true", l: "예" }, { v: "false", l: "아니오" }]);
+  pills(c2, "review_type", "리뷰타입", [
+    { v: "포토", l: "포토" }, { v: "텍스트", l: "텍스트" }, { v: "구매확정", l: "구매확정" },
+    { v: "별점", l: "별점" }, { v: "혼합", l: "혼합" },
+  ]);
+  pills(c2, "goods_cost_type", "물건비", [{ v: "현금", l: "현금" }, { v: "계산서", l: "계산서" }],
+    { hint: "입금관리의 은행 자동분류(하나/케이뱅크)가 이 값을 따라갑니다." });
+
+  var c3 = card(body, "🛍 상품 · 유입");
+  field(c3, "product_url", "상품확인용 URL", { full: true });
+  field(c3, "product_option", "상품 · 옵션 · 결제금액", { full: true, area: true });
+  field(c3, "pay_amount", "결제금액(원)", { type: "number" });
+  pills(c3, "inflow_type", "유입방식", [{ v: "guide", l: "가이드유입" }, { v: "link", l: "링크유입" }]);
+  field(c3, "inflow_keyword", "유입 키워드", { full: true });
+  field(c3, "inflow_guide", "유입가이드", { full: true, area: true, hint: "⚠ 내용을 수정하지 않으면 원본(첨부 이미지 포함)이 그대로 보존됩니다.", warn: true });
+
+  var c4 = card(body, "📝 가이드 · 특이사항");
+  field(c4, "review_guide", "리뷰등록 가이드", { full: true, area: true });
+  field(c4, "special_notes", "특이사항", { full: true, area: true });
+
+  var c5 = card(body, "🔒 수정할 수 없는 항목");
+  var stLabel = (typeof WO_LABELS === "object" && WO_LABELS[o.status]) ? WO_LABELS[o.status] : (o.status || "");
+  roField(c5, "상태", stLabel + " — 상태는 [상태 변경] 버튼이 담당");
+  roField(c5, "계약건", o.contract_number || o.sales_id ? String(o.contract_number || o.sales_id) + " — 인트라넷 발주에서 확정" : "(없음)");
+  roField(c5, "작업시트탭URL", (o.work_sheet_url || "(없음)") + " — 접수·작업표 생성이 관리", true);
+
+  var foot = mk("div", "display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid #E5E7EB;background:#F9FAFB;flex-wrap:wrap", box);
+  var note = mk("span", "font-size:11.5px;color:#15803D;font-weight:600", foot);
+  note.textContent = "✅ 저장하면 인트라넷 \"보낸 오더\" 카드에도 자동 반영됩니다 (수정 알림 메모 전송)";
+  var btnRow = mk("span", "display:flex;gap:8px", foot);
+  var cancelBtn = mk("button", "font-size:12.5px;font-weight:700;padding:8px 16px;border-radius:8px;border:1.5px solid #D1D5DB;background:#fff;color:#374151;cursor:pointer", btnRow);
+  cancelBtn.type = "button"; cancelBtn.textContent = "취소";
+  cancelBtn.addEventListener("click", function () { ov.remove(); });
+  var saveBtn = mk("button", "font-size:12.5px;font-weight:700;padding:8px 18px;border-radius:8px;border:1.5px solid #4F46E5;background:#4F46E5;color:#fff;cursor:pointer", btnRow);
+  saveBtn.type = "button"; saveBtn.textContent = "저장";
+  saveBtn.addEventListener("click", function () {
+    // 바뀐 필드만 전송 — 빈 값은 "변경 없음"(서버와 같은 규칙이라 안 보내는 게 정직하다)
+    var fields = {};
+    var n = 0;
+    for (var f in readers) {
+      if (!Object.prototype.hasOwnProperty.call(readers, f)) continue;
+      var v = readers[f]();
+      if (v === initial[f]) continue;
+      if (String(v).trim() === "") continue;   // 지움이 아니라 변경 없음
+      fields[f] = v;
+      n++;
+    }
+    if (!n) { alert("변경된 내용이 없습니다."); return; }
+    if (typeof save !== "function") { alert("저장 경로가 연결되지 않았습니다."); return; }
+    saveBtn.disabled = true; saveBtn.textContent = "저장 중…";
+    Promise.resolve(save(fields)).then(function (r) {
+      if (r && r.ok) {
+        ov.remove();
+        if (typeof onSaved === "function") onSaved(r);
+      } else {
+        saveBtn.disabled = false; saveBtn.textContent = "저장";
+        alert("저장 실패: " + ((r && r.error) || "서버 오류"));
+      }
+    }).catch(function (e) {
+      saveBtn.disabled = false; saveBtn.textContent = "저장";
+      alert("저장 실패: " + e.message);
+    });
+  });
+
+  ov.addEventListener("click", function (e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
+/* ══════════════════════════════════════════════════════════════
    접수 실패(gid 미발견) 탭 교정 팝업 — 관리자 대시보드·리뷰웹시스템[3버전] 공용.
 
    서버 /admin/accept 가 "gid=… 탭을 찾을 수 없음" 404 에 availableTabs(그 시트의
@@ -805,6 +997,7 @@ function woAcceptTabPicker(resp, onPick) {
     _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
     _woOptionRows: _woOptionRows, _woCampaignPrefill: _woCampaignPrefill,
     woAcceptTabPicker: woAcceptTabPicker,
+    woAdminEditModal: woAdminEditModal,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
   window.WorkOrderDetail = EXPORTS;
