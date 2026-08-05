@@ -296,6 +296,8 @@ function _woProductLines(o) {
 function _woDetailHtml(o) {
   const prodText = _woProductLines(o);
   const guide = _woCleanGuide(o.inflow_guide);
+  // 구조 첨부(090) — 유입 원문·리뷰가이드 원문에 이미 있는 URL(토큰)은 제외 = 이중 표기 없음
+  const structDetailImgs = _woReviewImgHtml(_woGuideImages(o).join("\n"), String(o.inflow_guide || "") + String(o.review_guide || ""));
   const rg = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]);
   const sn = _woPickSections(o.special_notes, ["특이사항"]);
   const txtR = t => _woLinkify(t).replace(/\n/g, "<br>");   // 텍스트(줄바꿈 보존)
@@ -323,7 +325,11 @@ function _woDetailHtml(o) {
     sn ? _woSection("특이사항", sn, txtR) : "",
     o.inflow_type === "link"
       ? _woKv("유입방법", "링크유입")
-      : (guide ? _woSection("유입가이드", guide, guideR) : ""),
+      : (guide ? _woSection("유입가이드", guide, guideR)
+               : (structDetailImgs ? _woSection("유입가이드", "첨부 이미지", txtR) : "")),
+    // 구조 첨부(guide_images, 090) — 텍스트 안 URL 과 토큰 중복 제거라 과도기(양쪽 전송)엔 빈 값 = 종전 화면 그대로.
+    //   인트라넷이 텍스트 블록을 끊는 시점부터 이 블록이 이미지를 담당한다.
+    o.inflow_type === "link" ? "" : structDetailImgs,
   ].join("");
 }
 
@@ -552,7 +558,20 @@ function _woReviewImgHtml(raw, existingHtml) {
   return out;
 }
 
-// 발행 프리필용 유입가이드 HTML: inflow_guide 본문(이미지 포함) + review_guide에 섞여온 첨부 이미지 승격.
+// guide_images(090 · 칸=칸 매핑 2단계) — 첨부 이미지 URL 배열. DB 는 JSON 문자열, 화면 전달은 배열일 수
+// 있어 양쪽 다 받는다. 파싱 실패·비배열은 [](= 종전 텍스트 블록 승격 경로 폴백, 가산적).
+function _woGuideImages(o) {
+  try {
+    const v = o && o.guide_images;
+    if (!v) return [];
+    const arr = Array.isArray(v) ? v : JSON.parse(String(v));
+    return Array.isArray(arr) ? arr.filter(u => typeof u === "string" && u.trim()) : [];
+  } catch (_) { return []; }
+}
+
+// 발행 프리필용 유입가이드 HTML: inflow_guide 본문(이미지 포함) + 구조 첨부(guide_images, 090)
+// + review_guide에 섞여온 첨부 이미지 승격. 셋 다 **파일ID 토큰 기준 중복 제거**라 인트라넷이
+// 텍스트 블록과 배열을 함께 보내는 과도기에도 같은 이미지가 두 번 그려지지 않는다.
 // 이미지가 하나도 없고 평문 유입가이드면 "" 반환(호출부가 wd_inflow_text 평문 경로 사용 = 기존 동작).
 function _woBuildInflowHtml(o) {
   if (o.inflow_type === "link") return "";
@@ -561,7 +580,8 @@ function _woBuildInflowHtml(o) {
     base = /<[a-z][^>]*>/i.test(o.inflow_guide) ? o.inflow_guide
          : (typeof _woPlainGuideToHtml === "function" ? _woPlainGuideToHtml(o.inflow_guide) : "");
   }
-  const imgs = _woReviewImgHtml(o.review_guide, base);
+  const structImgs = _woReviewImgHtml(_woGuideImages(o).join("\n"), base);
+  const imgs = structImgs + _woReviewImgHtml(o.review_guide, base + structImgs);
   if (!imgs) return base;   // 승격할 이미지 없음 → base 그대로(빈 문자열이면 평문 경로)
   // 이미지는 있는데 base가 비면(평문 inflow_guide·이미지 없음) 그 텍스트를 escape해 함께 보존
   if (!base && o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) {
@@ -718,7 +738,7 @@ function _woCampaignPrefill(o) {
     _woChannelFromUrl: _woChannelFromUrl, _woChannel: _woChannel,
     _woPlainGuideToHtml: _woPlainGuideToHtml, _woReviewImgHtml: _woReviewImgHtml,
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,
-    _woStripReviewMeta: _woStripReviewMeta,
+    _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
     _woOptionRows: _woOptionRows, _woCampaignPrefill: _woCampaignPrefill,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
