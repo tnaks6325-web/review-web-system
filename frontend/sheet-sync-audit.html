@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>시트 데이터 반영 점검</title>
+  <script src="api.js"></script>
+  <style>
+    :root { --p:#2563eb; --err:#dc2626; --warn:#d97706; --ok:#059669; --bd:#e5e7eb; --t1:#111827; --t2:#6b7280; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f5f6f8; color:var(--t1); padding:20px; }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    .sub { color: var(--t2); font-size: 13px; margin-bottom: 16px; line-height:1.6; }
+    .card { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:16px; margin-bottom:14px; }
+    .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .bar label { font-size:13px; color:var(--t2); }
+    input[type=date], input[type=text], input[type=password] { border:1px solid var(--bd); border-radius:8px; padding:8px 10px; font-size:13px; }
+    .btn { border:0; border-radius:8px; padding:9px 14px; font-size:13px; font-weight:700; cursor:pointer; background:var(--p); color:#fff; }
+    .btn.ghost { background:#fff; color:var(--t1); border:1px solid var(--bd); }
+    .btn.warn { background:var(--warn); }
+    .btn:disabled { opacity:.5; cursor:default; }
+    table { width:100%; border-collapse:collapse; font-size:12.5px; }
+    th, td { border-bottom:1px solid var(--bd); padding:8px 8px; text-align:left; vertical-align:top; }
+    th { background:#f9fafb; font-size:12px; color:var(--t2); white-space:nowrap; position:sticky; top:0; }
+    .tag { display:inline-block; border-radius:999px; padding:2px 8px; font-size:11px; font-weight:700; }
+    .tag.broken { background:#fee2e2; color:#991b1b; }
+    .tag.behind { background:#fef3c7; color:#92400e; }
+    .tag.ok { background:#d1fae5; color:#065f46; }
+    .mono { font-family:monospace; font-size:11px; color:var(--t2); word-break:break-all; }
+    .reason { color:var(--t2); line-height:1.5; max-width:360px; }
+    .num { text-align:right; white-space:nowrap; }
+    #summary { font-size:13px; margin:10px 0; }
+    #summary b { font-size:15px; }
+    .toast { position:fixed; right:16px; bottom:16px; background:#111827; color:#fff; padding:10px 14px; border-radius:8px; font-size:13px; z-index:99; }
+    .stepres { font-size:11px; color:var(--t2); margin-top:4px; line-height:1.5; }
+    #loginBox { max-width:360px; }
+    #loginBox input { width:100%; margin-bottom:8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔎 시트 데이터 반영 점검</h1>
+  <div class="sub">
+    등록된 작업 전체를 대상으로 <b>구글시트 → 검색인덱스 → 작업보드(리뷰웹시스템[3버전])</b> 반영 사슬이 끊긴 곳을 찾습니다.<br/>
+    [반영]을 누르면 그 작업의 시트를 다시 읽어(RAW 미러 → 인덱스 빌드 → 작업보드 투영) 최신 값으로 맞춥니다.
+    데이터를 지우는 동작은 없습니다(읽기 + 반영만).
+  </div>
+
+  <div class="card" id="loginBox" style="display:none">
+    <div style="font-weight:700; margin-bottom:8px">관리자 로그인이 필요합니다</div>
+    <input id="lgId" type="text" placeholder="관리자 아이디" />
+    <input id="lgPw" type="password" placeholder="비밀번호" />
+    <button class="btn" onclick="doLogin()">로그인</button>
+  </div>
+
+  <div class="card" id="ctrlBox" style="display:none">
+    <div class="bar">
+      <label>등록 기준일(이 날짜 <b>이전</b> 등록 작업만):</label>
+      <input type="date" id="beforeDate" value="2026-07-20" />
+      <button class="btn" id="btnAudit" onclick="runAudit()">점검 실행</button>
+      <button class="btn ghost" onclick="document.getElementById('beforeDate').value=''; runAudit()">전체 작업 점검</button>
+      <span style="flex:1"></span>
+      <button class="btn warn" id="btnRepairAll" onclick="repairAll()" style="display:none">⚠ 문제 작업 전체 반영</button>
+    </div>
+    <div id="summary"></div>
+  </div>
+
+  <div class="card" style="overflow:auto; max-height:72vh">
+    <table>
+      <thead><tr>
+        <th>상태</th><th>작업명</th><th>등록일</th>
+        <th class="num">시트(RAW)행</th><th class="num">인덱스행</th><th class="num">작업보드행</th>
+        <th>진단</th><th>처리</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="8" style="color:var(--t2)">위에서 [점검 실행]을 눌러주세요.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let ITEMS = [];            // 감사 결과(반영 버튼은 인덱스로만 참조 — 문자열 보간 금지)
+  let _busy = false;
+
+  function tok() { return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || ''; }
+  function hdrs() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok() }; }
+  function esc(v) { return v == null ? '' : String(v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function toast(msg, err) {
+    const t = document.createElement('div'); t.className = 'toast';
+    if (err) t.style.background = '#dc2626';
+    t.textContent = msg; document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  function boot() {
+    const has = !!tok();
+    document.getElementById('loginBox').style.display = has ? 'none' : 'block';
+    document.getElementById('ctrlBox').style.display = has ? 'block' : 'none';
+  }
+  async function doLogin() {
+    try {
+      const r = await fetch(API_BASE_URL + '/api/admin/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: document.getElementById('lgId').value.trim(), pw: document.getElementById('lgPw').value })
+      });
+      const j = await r.json();
+      if (j && j.token) { sessionStorage.setItem('admin_token', j.token); boot(); toast('로그인되었습니다'); }
+      else toast('로그인 실패: ' + ((j && j.error) || '아이디/비밀번호 확인'), true);
+    } catch (e) { toast('로그인 오류: ' + e.message, true); }
+  }
+
+  async function runAudit() {
+    if (_busy) return;
+    const before = document.getElementById('beforeDate').value;
+    const tb = document.getElementById('tbody');
+    tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">점검 중… (작업 수에 따라 수십 초 걸릴 수 있습니다)</td></tr>';
+    try {
+      const q = before ? ('?before=' + encodeURIComponent(before)) : '';
+      const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/audit' + q, { headers: hdrs() });
+      if (r.status === 401 || r.status === 403) { toast('권한이 없습니다. 관리자 계정으로 로그인해주세요.', true); boot(); return; }
+      const j = await r.json();
+      if (!j || j.ok === false) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--err)">점검 실패: ' + esc((j && j.error) || '서버 오류') + ' <button class="btn ghost" onclick="runAudit()">다시 시도</button></td></tr>'; return; }
+      ITEMS = j.items || [];
+      render(j);
+    } catch (e) {
+      tb.innerHTML = '<tr><td colspan="8" style="color:var(--err)">점검 실패: ' + esc(e.message) + ' <button class="btn ghost" onclick="runAudit()">다시 시도</button></td></tr>';
+    }
+  }
+
+  function fmtDate(v) { return v ? String(v).slice(0, 10) : '알 수 없음'; }
+  function sevTag(s) {
+    if (s === 'broken') return '<span class="tag broken">미반영</span>';
+    if (s === 'behind') return '<span class="tag behind">뒤짐</span>';
+    return '<span class="tag ok">정상</span>';
+  }
+
+  function render(meta) {
+    const flagged = ITEMS.filter(i => i.severity !== 'ok');
+    document.getElementById('summary').innerHTML =
+      '점검 대상 <b>' + ITEMS.length + '</b>개 작업 중 문제 <b style="color:' + (flagged.length ? 'var(--err)' : 'var(--ok)') + '">' + flagged.length + '</b>개'
+      + (meta.before ? ' · 기준: <b>' + esc(meta.before) + '</b> 이전 등록(등록일 미상 포함)' : ' · 전체 작업')
+      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다(상한 초과)</b>' : '');
+    document.getElementById('btnRepairAll').style.display = flagged.length ? 'inline-block' : 'none';
+
+    const tb = document.getElementById('tbody');
+    if (!ITEMS.length) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">해당 조건의 작업이 없습니다.</td></tr>'; return; }
+    tb.innerHTML = ITEMS.map((it, i) =>
+      '<tr id="row' + i + '">'
+      + '<td>' + sevTag(it.severity) + '</td>'
+      + '<td><b>' + esc(it.displayName || it.tabName) + '</b><div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div></td>'
+      + '<td>' + (it.regUnknown ? '<span style="color:var(--warn)">알 수 없음</span>' : esc(fmtDate(it.registeredAt))) + '</td>'
+      + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">없음</span>' : it.rawRows) + '</td>'
+      + '<td class="num">' + it.indexRows + (it.idxStatus && it.idxStatus !== 'active' ? '<div class="mono">' + esc(it.idxStatus) + '</div>' : '') + '</td>'
+      + '<td class="num">' + it.boardRows + (it.boardExtra ? '<div class="mono">(+' + it.boardExtra + ' 수동/작업표)</div>' : '') + '</td>'
+      + '<td class="reason">' + esc(it.reasonKo) + '<div class="stepres" id="res' + i + '"></div></td>'
+      + '<td>' + (it.severity !== 'ok' ? '<button class="btn" id="fix' + i + '" onclick="repairOne(' + i + ')">반영</button>' : '') + '</td>'
+      + '</tr>').join('');
+  }
+
+  async function repairOne(i) {
+    const it = ITEMS[i];
+    if (!it || _busy) return;
+    const btn = document.getElementById('fix' + i);
+    const res = document.getElementById('res' + i);
+    if (btn) { btn.disabled = true; btn.textContent = '반영 중…'; }
+    try {
+      const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/repair', {
+        method: 'POST', headers: hdrs(),
+        body: JSON.stringify({ sheetId: it.sheetId, tabName: it.tabName })
+      });
+      const j = await r.json();
+      if (!j) throw new Error('빈 응답');
+      const s = j.steps || {};
+      const line = (name, st) => !st ? name + ': 미실행'
+        : st.locked ? name + ': ⏳ 다른 빌드 진행 중(잠시 후 다시)'
+        : st.ok ? name + ': ✓' : name + ': ✕ ' + (st.error || '실패');
+      if (res) res.innerHTML = esc([line('시트읽기', s.mirror), line('인덱스', s.build), line('작업보드', s.project)].join(' · '))
+        + (j.compare ? '<br/>반영 후: 인덱스 ' + j.compare.indexRows + '행 / 작업보드 ' + j.compare.dbRows + '행' + (j.compare.inSync ? ' (일치 ✓)' : '') : '');
+      if (btn) { btn.textContent = j.ok ? '완료' : '재시도'; btn.disabled = !!j.ok; }
+      if (!j.ok) toast('일부 단계가 실패했습니다 — 진단 칸의 결과를 확인해주세요', true);
+    } catch (e) {
+      if (res) res.textContent = '반영 실패: ' + e.message;
+      if (btn) { btn.textContent = '재시도'; btn.disabled = false; }
+    }
+  }
+
+  async function repairAll() {
+    const flagged = ITEMS.map((it, i) => ({ it, i })).filter(x => x.it.severity !== 'ok');
+    if (!flagged.length) return;
+    if (!confirm('문제로 표시된 ' + flagged.length + '개 작업의 시트를 순서대로 다시 읽어 반영합니다.\n(작업당 수 초~수십 초, 구글시트 읽기 한도를 지키며 순차 실행)\n진행할까요?')) return;
+    _busy = true;
+    const btn = document.getElementById('btnRepairAll');
+    for (let k = 0; k < flagged.length; k++) {
+      btn.textContent = '반영 중… (' + (k + 1) + '/' + flagged.length + ')';
+      _busy = false; await repairOne(flagged[k].i); _busy = true;
+    }
+    _busy = false;
+    btn.textContent = '⚠ 문제 작업 전체 반영';
+    toast('전체 반영이 끝났습니다. [점검 실행]으로 결과를 다시 확인해주세요.');
+  }
+
+  boot();
+</script>
+</body>
+</html>
