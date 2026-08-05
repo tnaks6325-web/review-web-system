@@ -2820,16 +2820,17 @@ async function tabCampaignsMap({ force = false } = {}) {
     if (!rows.length) { _tabCampCache = { at: Date.now(), map }; return { ok: true, map }; }
 
     const { computeCampaignState, fetchCampaignCounts } = require('./campaignState.service');
-    const { deriveSchedules, scheduleFor } = require('./campaignSchedule.service');
+    // ★★ 일정 대상 목록도 **공유 헬퍼**(tabsOfCampaigns)로 뽑는다 — 손으로 map 하면
+    //   그쪽의 필터(참여형 + gid 보유)와 갈라져 카드와 다른 일정이 적용된다(사본 금지).
+    const { deriveSchedules, scheduleFor, tabsOfCampaigns } = require('./campaignSchedule.service');
     const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
     // ★ 상태 재료 조회 실패는 **주석 전체를 죽이지 않는다** — 공고 목록·생성일은 그대로 쓰고
     //   상태만 비운다(화면이 회색 점으로 그린다). admin/list 와 같은 판단.
     let countsMap = new Map(), schedMap = null;
     try {
-      const tabsOf = rows.map(r => ({ sheetId: r.linked_sheet_id, tabName: r.linked_tab_name, tabGid: r.linked_tab_gid }));
       [countsMap, schedMap] = await Promise.all([
         fetchCampaignCounts(db, partIds, now),
-        deriveSchedules(db, tabsOf, now),
+        deriveSchedules(db, tabsOfCampaigns(rows), now),
       ]);
     } catch (e) {
       logger.warn(`[trackB] tabCampaignsMap 상태 재료 실패(공고 목록만 표시): ${e.message}`);

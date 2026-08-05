@@ -150,6 +150,9 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   const fn = SVC_SRC.slice(SVC_SRC.indexOf('async function tabCampaignsMap'), SVC_SRC.indexOf('// ══ M2: 열린 작업 줄'));
   t('★ computeCampaignState 를 쓴다(status 컬럼으로 상태를 흉내 내지 않는다)', /computeCampaignState\(/.test(fn));
   t('★ 시트 일정(deriveSchedules)도 같은 재료로 넘긴다(카드와 같은 정원·마감)', /deriveSchedules\(/.test(fn) && /scheduleFor\(/.test(fn));
+  // ★ 대상 목록도 공유 헬퍼로 — 손으로 map 하면 그쪽 필터(참여형 + gid 보유)와 갈라져 다른 일정이 적용된다.
+  t('★ 일정 대상은 공유 헬퍼 tabsOfCampaigns 로 뽑는다(사본 금지)',
+    /deriveSchedules\(db, tabsOfCampaigns\(rows\), now\)/.test(fn) && !/tabsOf\s*=\s*rows\.map/.test(fn));
   t('연결 탭 있는 공고만 조회한다(전 공고 스캔 금지)', /linked_sheet_id, ''\) <> ''/.test(fn) || /COALESCE\(linked_sheet_id/.test(fn));
   t('쓰기 없음 — 읽기 전용', !/\b(INSERT|UPDATE|DELETE)\b/i.test(fn));
 
