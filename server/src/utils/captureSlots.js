@@ -15,7 +15,12 @@
  */
 
 const REVIEW_SLOT = { key: 'review', label: '리뷰' };
-const RECEIPT_SLOT = { key: 'receipt', label: '현금영수증' };
+/* ★★ 현금영수증 슬롯은 **선택(required:false)** — 완료 판정에서 제외한다(사용자 확정 2026-08-05).
+ *   현금영수증이 국세청에 전송되어 일련번호가 부여(발행확정)되는 시점은 배송완료·구매확정 후
+ *   0~3일 뒤라서, 제출 시점에 캡처가 **물리적으로 존재할 수 없다**. 필수로 두면 정상 제출이
+ *   전부 "부분 제출"로 잠긴다. 화면에는 슬롯을 계속 보여주되(발행확정 후 제출 가능 안내),
+ *   리뷰 캡처만으로 완료 처리한다. 되돌리려면 이 플래그만 제거하면 된다. */
+const RECEIPT_SLOT = { key: 'receipt', label: '현금영수증', required: false };
 // ★ 087 2차: 구매확정 작업은 리뷰를 쓰지 않고 '구매확정 완료 화면'을 낸다.
 const CONFIRM_SLOT = { key: 'confirm', label: '구매확정' };
 
@@ -58,10 +63,17 @@ function effectiveCaptureSlots(captureSlots, incomeType, reviewType) {
 /**
  * 제출 완료로 치기 위해 필요한 슬롯 key 목록.
  * effectiveCaptureSlots와 **같은 입력에서 같은 답**을 내야 한다(둘이 어긋나면 제출이 깨짐).
+ *
+ * ★ `required:false` 슬롯(현금영수증)은 제외 — 화면에는 뜨지만 완료를 막지 않는다.
+ *   관리자 명시 capture_slots는 required 필드가 없으면 종전대로 전부 필수(무회귀),
+ *   JSONB에 `"required": false`를 적으면 그 슬롯만 선택이 된다.
+ * ★ 전부 선택으로 설정된 병적 케이스는 전체 필수로 폴백 — "아무 슬롯 없이 완료"를 막는다.
  */
 function requiredSlotKeys(captureSlots, incomeType, reviewType) {
   const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType);
-  return eff ? eff.map(s => s.key) : ['review'];
+  if (!eff) return ['review'];
+  const req = eff.filter(s => s.required !== false).map(s => s.key);
+  return req.length ? req : eff.map(s => s.key);
 }
 
 /** 슬롯 key → 표시 라벨(업로드 서브폴더명·안내문 공용). 모르는 key는 key 그대로. */

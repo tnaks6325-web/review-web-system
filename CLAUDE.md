@@ -463,6 +463,13 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - 회귀가드 `tests/paymentBatch.test.js`(48케이스 — 순수함수 실행 + 라우터 스택 실검사 + 배선 + **PGTEST_URL 시 진짜 PG로 부분유니크·CHECK·서식 생성·조인 실행·컬럼 존재 검증**). ⚠ `PGTEST_URL`은 **파일 최상단에서 `DATABASE_URL`로 옮겨야** 한다(pool은 require 시점에 읽는다 — 뒤늦게 설정하면 연결이 안 잡힌다).
 - **다음(M2)**: 이체결과 파일 업로드 → 짝 맞추기(계좌+금액+예금주) → 성공 건만 입금 기록(시스템 + 시트 입금칸) → 리뷰어 참여상품 정보에 입금 시점·입금명 표시 → 실패 건 "계좌 확인" 안내.
 
+### ★★ 현금영수증 안내 D안(3시점) + 캡처 선택화 (사용자 확정 2026-08-05)
+- **실제 워크플로우(사용자 확정)**: ① 공고 확인 시 현금영수증건 인지 → ② 결제 단계에서 지출증빙 발행 신청 → ③ **발행확정(일련번호)은 배송완료·구매확정 후 0~3일** — 그래서 발행 내역 캡처는 제출 시점에 존재할 수 없다.
+- **안내 3시점(D안, 시안 `frontend/docs/design-cashreceipt-timing.html`)**: ① 참여 전 = 공개 목록/상세 `cashReceiptRequired` 불리언(campaign.routes `_cashReceiptFlags` 배치 파생, 목록 5초 캐시 상각) → 카드 `🧾 현금영수증` 배지(`pt-badge cr`) + 참여 전 상세 `renderCrNotice`(campaign.html). ★ **불리언만 공개** — 사업자번호·발행방법 이미지는 종전대로 참여 후 work-detail. ★ **조회 실패 = 필드 미동봉**(프론트는 `=== true`만 배지 — false로 꾸미지 않음, 필드 부재 = 구버전 백엔드). ② 참여 직후 = 기존 🧾 카드(위치 불변) + "발행확정 0~3일 · 캡처는 구매양식 제출 필수 아님" 문구. ③ 제출 화면 = 영수증 슬롯 재안내 + **[발행방법 다시 보기]**(`_csLoadCrGuides` — provider-info 신규 `cashReceiptGuideList`(채널 표 파생·라벨 동봉 = 프론트 채널 사본 0), https URL만 렌더).
+- ★★ **현금영수증 캡처는 완료 판정에서 제외(선택 슬롯)**: `RECEIPT_SLOT.required=false` → `requiredSlotKeys`가 `required:false` 슬롯을 거른다(전부 선택인 병적 설정은 전체 필수 폴백). **화면 슬롯은 여전히 2개**(선택 표기 + 발행확정 후 제출 안내). ★★ `submit.routes`의 슬롯 모드 판정은 **required 개수가 아니라 `effectiveCaptureSlots`(화면 슬롯) 기준** — required로 판정하면 현영 탭이 fast-path를 타서 **영수증만 올려도 완료**가 된다(리뷰 캡처 0장). 관리자 명시 `capture_slots`는 required 미지정 = 전부 필수(무회귀), JSONB `"required": false`로 슬롯별 선택화 가능. 한계(문서화): 리뷰 캡처만으로 완료된 행은 대기 탭에서 빠지므로 영수증 늦은 제출은 완료 카드 경로/관리자 수집으로 — 필요 시 후속.
+- **마감 공고 확인 = 카드 [👁 보기]**(`campaign-cards.js` `_adminActions`): 모집공고 카드(마감·투입완료·게시전 포함)에서 기존 `openReviewerPreview`(campaign.html `preview=1#tok=`, DB write 0, [모집중 가정] 토글)를 바로 연다 — 참여형만 활성(레거시는 비활성+사유 툴팁). 서버 변경 0.
+- 회귀가드 `tests/cashReceiptTiming.test.js`(21케이스). ⚠ 이 변경으로 `adminCardSync`(미리보기 버튼 부재 가드 → 재추가 반영)·`captureSlotVerify`·`reviewType`·`cashReceiptGuide(Doc)` 가드의 기대값을 함께 갱신했다(검사 의미는 사용자 확정 반영).
+
 ### 현금영수증 안내 (1단계 — 발행방법 노출)
 - **판정의 진실원본은 탭 하나**: 연결 탭의 `tab_configs.income_type`에 '현영' 포함 → 발행 필요. 공고에는 컬럼을 만들지 않았고 모달은 **읽기 전용 표시**(`rf_cashrcpt_ro`, `refreshRecruitCashReceipt`)만 — 같은 값을 두 곳에서 관리하지 않는다.
 - **서버**(`_cashReceiptInfo`): work-detail(`GET /:id/work-detail`)과 관리자 미리보기(`/admin/:id/preview`) 응답에 `cashReceipt{required, businessNo, guideImageUrl}` 동봉. 채널(쿠팡/네이버)에 맞는 발행방법 이미지를 `app_settings.cash_receipt_guide_*`에서 고른다. **현영이 아니면 null**(일반 공고 응답·화면 불변), 조회 실패도 null(fail-soft).
