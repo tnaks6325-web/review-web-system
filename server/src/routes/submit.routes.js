@@ -18,7 +18,7 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 // 캡처 슬롯 판정은 utils/captureSlots 하나로 — 검색 응답·완료 판정·업로드 폴더가
 // 같은 답을 봐야 한다(어긋나면 "슬롯 2개인데 1장에 완료" 같은 제출 파손).
 // ═══════════════════════════════════════════════════════════
-const { requiredSlotKeys } = require('../utils/captureSlots');
+const { requiredSlotKeys, effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 
 // ═══════════════════════════════════════════════════════════
@@ -484,7 +484,12 @@ router.post('/review', async (req, res, next) => {
       //   "슬롯은 2개인데 1장에 완료"(또는 그 반대)가 되어 제출이 깨진다.
       const _rt = await reviewTypeForTab({ sheetId, tabName });
       const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
-      const isMultiSlot = !(required.length === 1 && required[0] === 'review');
+      // ★★ 슬롯 모드 판정은 required 개수가 아니라 **화면 슬롯(effectiveCaptureSlots)** 기준.
+      //   현금영수증 슬롯이 선택(required:false)이 되면서 현영 탭도 required=['review'] 하나가 됐는데,
+      //   그걸 근거로 fast-path를 타면 **영수증만 올리고 제출해도 완료**가 된다(리뷰 캡처 0장).
+      //   슬롯 UI가 뜨는 탭은 원장 대조를 거쳐 "필수 슬롯 ⊆ 제출 슬롯"을 확인해야 한다.
+      const _effSlots = effectiveCaptureSlots(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
+      const isMultiSlot = Array.isArray(_effSlots) && _effSlots.length > 1;
 
       if (isMultiSlot) {
         // 원장에서 이 행의 제출된 distinct 슬롯 조회

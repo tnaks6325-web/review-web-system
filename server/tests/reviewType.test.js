@@ -277,8 +277,9 @@ t('★★ 구매확정 단독은 슬롯을 만들지 않는다 — 길이 1을 �
 
 t('구매확정 + 현영 = 2슬롯, 리뷰 자리가 구매확정으로 치환된다', (() => {
   const eff = CS.effectiveCaptureSlots(null, '사업자현영', 'confirm');
+  // ★ 현금영수증 슬롯은 선택(required:false, 사용자 확정 2026-08-05) — 완료 판정에선 confirm만
   return eff.length === 2 && eff[0].key === 'confirm' && eff[1].key === 'receipt'
-      && JSON.stringify(CS.requiredSlotKeys(null, '사업자현영', 'confirm')) === '["confirm","receipt"]';
+      && JSON.stringify(CS.requiredSlotKeys(null, '사업자현영', 'confirm')) === '["confirm"]';
 })());
 
 t('★ 리뷰타입 없음/포토 = 종전 동작 완전 동일(무회귀)', (() => {

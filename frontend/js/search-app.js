@@ -2080,16 +2080,23 @@ function _renderCaptureSlots(item, slots, paneCard) {
 
   slots.forEach((slot, i) => {
     const isDone = submitted.has(slot.key);
+    // ★ D안(사용자 확정 2026-08-05): required:false 슬롯(현금영수증)은 **선택** —
+    //   발행확정(배송완료·구매확정 후 0~3일) 전에는 캡처가 존재할 수 없어 완료 판정에서 빠진다.
+    //   서버(requiredSlotKeys)가 같은 플래그로 판정하므로 여기는 표시만 맞춘다.
+    const optional = slot.required === false;
     const statusHtml = isDone
       ? `<span class="mr-slot-status ok" id="csStatus_${slot.key}">✓ 제출됨</span>`
-      : `<span class="mr-slot-status wait" id="csStatus_${slot.key}">대기</span>`;
+      : `<span class="mr-slot-status wait" id="csStatus_${slot.key}">${optional ? '선택' : '대기'}</span>`;
+    const optionalHint = (optional && !isDone)
+      ? `<div style="font-size:.72rem;color:#B45309;margin:6px 2px 0;line-height:1.5">🧾 현금영수증은 발행 확정(배송완료·구매확정 후 0~3일) 뒤에 제출해도 돼요 — 지금 없어도 제출할 수 있어요.</div>`
+      : '';
     const slotEl = document.createElement("div");
     slotEl.className = "mr-slot";
     slotEl.id = `csSlot_${slot.key}`;
     slotEl.innerHTML = `
       <div class="mr-slot-header">
         <div class="mr-slot-num">${i + 1}</div>
-        <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
+        <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${optional ? ' <span style="font-size:.72rem;color:#B45309;font-weight:700">(선택 · 발행 확정 후 제출)</span>' : ''}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
         ${statusHtml}
       </div>
       <div class="mr-slot-dropzone" id="csDz_${slot.key}"
@@ -2103,9 +2110,15 @@ function _renderCaptureSlots(item, slots, paneCard) {
           <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
         </div>
         <div class="mr-slot-preview hidden" id="csPreview_${slot.key}"></div>
-      </div>`;
+      </div>
+      ${optionalHint}
+      <div id="csGuide_${slot.key}"></div>`;
     wrap.appendChild(slotEl);
   });
+
+  // ★ D안 ③: 현금영수증 슬롯이 있으면 발행방법 이미지를 "다시 보기"로 재안내(결제 후 재확인 시점).
+  //   fail-soft — 조회 실패·미등록이면 아무것도 안 그린다(제출 흐름 무영향).
+  if (slots.some(s => s.key === 'receipt')) _csLoadCrGuides(item);
 
   // 공통 비고 입력 (행 1개이므로 단일 메모)
   const memoEl = document.createElement("textarea");
@@ -2118,6 +2131,32 @@ function _renderCaptureSlots(item, slots, paneCard) {
 
   const stepNav = paneCard.querySelector(".step-nav");
   paneCard.insertBefore(wrap, stepNav);
+}
+
+/* ★ D안 ③ — 현금영수증 슬롯 아래 "발행방법 다시 보기" (접이식).
+ *   이미지·라벨은 서버 provider-info의 cashReceiptGuideList(채널 표 단일 출처) 그대로 —
+ *   프론트에 채널 사본을 두지 않는다. 등록된 이미지가 없거나 조회 실패 = 아무것도 안 그림. */
+async function _csLoadCrGuides(item) {
+  try {
+    const data = await gasGet({ action: 'getProviderInfo', sheetId: item.sheetId, tabName: item.tabName });
+    // https 절대 URL만 <img src>로(저장 라우트도 같은 제약) + 따옴표 포함 값은 버림(속성 breakout 방지)
+    const list = ((data && data.ok && Array.isArray(data.cashReceiptGuideList)) ? data.cashReceiptGuideList : [])
+      .filter(g => g && /^https:\/\/[^"'<>\s]+$/.test(String(g.imageUrl || '')));
+    const box = document.getElementById('csGuide_receipt');
+    if (!box || !list.length) return;
+    const bizNo = String((data && data.companyBusinessNo) || '').trim();
+    box.innerHTML = `
+      <details style="margin-top:8px;border:1.5px solid #FDBA74;border-radius:10px;background:#FFF7ED;padding:8px 12px">
+        <summary style="cursor:pointer;font-size:.8rem;font-weight:800;color:#B45309">🧾 발행방법 다시 보기 — 아직 발행 전이라면 확인하세요</summary>
+        ${bizNo ? `<div style="font-size:.8rem;color:#1F2937;margin-top:6px">지출증빙 · 사업자번호 <b style="color:#B45309">${_safeText(bizNo)}</b></div>` : ''}
+        ${list.map(g => `
+          <div style="margin-top:8px">
+            <div style="font-size:.72rem;font-weight:700;color:#92400E">${_safeText(g.label || g.key)}</div>
+            <img src="${_safeText(g.imageUrl)}" alt="현금영수증 발행방법" loading="lazy"
+                 style="max-width:100%;border-radius:8px;margin-top:4px;border:1px solid #FDE68A">
+          </div>`).join('')}
+      </details>`;
+  } catch (e) { /* fail-soft — 재안내는 보조 정보라 제출 흐름을 막지 않는다 */ }
 }
 
 async function _csAddFiles(slotKey, newFiles) {
