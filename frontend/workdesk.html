@@ -5284,9 +5284,22 @@ function _riRenderHead(sum){
   // ★ isAdmin 은 renderNav 안의 const 라 여기서는 보이지 않는다 — 다른 렌더 함수들과 같은 방식으로 다시 구한다.
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
   const st = STATE.riStatus || 'open';
-  const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.riStatus='${k}';_loadInspect()">${l}</button>`;
+  // ★ 상태·탭 전환 시 유형 필터 초기화(남으면 "왜 안 보이지"가 된다 — 그리드 검색어 초기화 규율)
+  const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.riStatus='${k}';STATE.riType='all';_loadInspect()">${l}</button>`;
   const t = STATE.riTab;
   const tally = sum ? `<span class="ovnote-tally">통과 ${sum.pass} · 의심 ${sum.suspect} · 불량 ${sum.fail} · 미검수 ${sum.pending}</span>` : '';
+  // 오류유형 필터 — 판정 근거(checks)는 이미 목록에 실려 온다(서버 변경 0, 화면에서 세기만)
+  const _rows = STATE.ri || [];
+  const _tcnt = {};
+  for(const r of _rows) for(const k of _riIssueTypes(r)) _tcnt[k]=(_tcnt[k]||0)+1;
+  const curType = STATE.riType || 'all';
+  const tchip=(k,l,n)=>`<button class="btn${curType===k?' pri':''}" style="font-size:.72rem;padding:3px 10px" onclick="riTypeSet('${k}')">${l}${n!=null?' '+n:''}</button>`;
+  const typeRow = _rows.length
+    ? `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        ${tchip('all','전체 유형',_rows.length)}
+        ${RI_TYPES.map(([k,l])=>_tcnt[k]?tchip(k,l,_tcnt[k]):'').join('')}
+        <span class="rimeta">한 건이 여러 유형이면 각 칩에 모두 세어집니다</span></div>`
+    : '';
   $('#rihead').innerHTML=`<div class="mh"><h1>리뷰검수</h1>
     <span class="sp" style="flex:1"></span>
     ${chip('open','의심＋불량')}${chip('pass','통과')}${chip('pending','미검수')}${chip('resolved','확인됨')}${chip('all','전체')}
@@ -5299,18 +5312,44 @@ function _riRenderHead(sum){
     <button class="btn" onclick="_loadInspect()">새로고침</button></div>
     <div class="ovnote">리뷰 캡처가 업체에 전달되기 전에 자동으로 거른 결과입니다. <b>제출은 막지 않으며</b> 다시 받을지는 확인 후 결정합니다.
       ${STATE.riScoped?'<b style="color:var(--muted)">(담당 업체 작업만 표시됩니다)</b>':''}
-      ${t?`<b style="color:var(--muted)"> · ${esc(t.tabName)}</b> <a href="javascript:void(0)" onclick="STATE.riTab=null;_loadInspect()">전체 보기</a>`:''}
-      ${tally}</div>`;
+      ${t?`<b style="color:var(--muted)"> · ${esc(t.tabName)}</b> <a href="javascript:void(0)" onclick="STATE.riTab=null;STATE.riType='all';_loadInspect()">전체 보기</a>`:''}
+      ${tally}${typeRow}</div>`;
 }
+/* 오류유형 판정 — 카드 근거 문장(_riReasons)과 같은 분기(갈리면 "칩 건수 ≠ 카드 문장"이 된다) */
+const RI_TYPES=[['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
+function _riIssueTypes(r){
+  const c=(r&&r.checks)||{}, out=[];
+  if(c.format&&c.format.verdict==='fail') out.push('format_fail');
+  if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
+  if(c.product&&c.product.verdict==='warn') out.push('product');
+  if(c.duplicate&&c.duplicate.verdict==='fail') out.push('duplicate');
+  if(c.similarity&&c.similarity.verdict==='warn') out.push('similarity');
+  if(c.author&&c.author.verdict==='warn') out.push('author');
+  return out;
+}
+function riTypeSet(k){ STATE.riType=k; _riRenderHead(STATE.riSummary); _riRenderBody(); }
 function _riRenderBody(){
   const rows = STATE.ri || [];
   const b = $('#ribody');
   if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 검수 건이 없습니다.</div>`; return; }
-  b.innerHTML = `<div class="ricards">` + rows.map((r,i)=>{
+  // ★ 유형 필터는 화면에서만 거른다 — onclick 인덱스는 **원본 STATE.ri 기준**을 유지해
+  //   상세 열기·확인 처리가 필터와 무관하게 같은 건을 가리키게 한다.
+  const curType = STATE.riType || 'all';
+  const view = rows.map((r,i)=>[r,i]).filter(([r])=>curType==='all'||_riIssueTypes(r).includes(curType));
+  if(!view.length){ b.innerHTML=`<div class="empty">이 유형의 검수 건이 없습니다. <a href="javascript:void(0)" onclick="riTypeSet('all')">전체 유형 보기</a></div>`; return; }
+  b.innerHTML = `<div class="ricards">` + view.map(([r,i])=>{
     const c = r.checks || {};
     const reasons = _riReasons(c);
     const cls = r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
     const thumb = _riImg(r.file_id);
+    // 수동 분류(이동) — 현재 칸(slot_key)에 따라 갈 수 있는 곳만. AI가 "리뷰화면 아님"으로
+    // 판정한 카드는 AI가 추정한 종류 쪽 버튼을 강조한다(사람이 최종 결정).
+    const _fmKind = c.format && c.format.verdict==='fail' ? (c.format.got||'') : '';
+    const routeBtns = r.status==='resolved' ? '' : (r.slot_key==='receipt'
+      ? `<button class="btn" style="font-size:.7rem;border-color:#93C5FD;color:#1D4ED8" onclick="riRouteManual(${i},'review')">🖼 리뷰로 이동</button>
+         <button class="btn" style="font-size:.7rem;border-color:#93C5FD;color:#1D4ED8" onclick="riRouteManual(${i},'order_capture')">🛒 구매캡처로 이동</button>`
+      : `<button class="btn" style="font-size:.7rem;border-color:${_fmKind==='receipt'?'#F59E0B':'#FCD9A0'};color:#92400E${_fmKind==='receipt'?';font-weight:800':''}" onclick="riRouteManual(${i},'receipt')">🧾 현금영수증으로 이동</button>
+         <button class="btn" style="font-size:.7rem;border-color:${_fmKind==='order_capture'?'#2563EB':'#BFDBFE'};color:#1D4ED8${_fmKind==='order_capture'?';font-weight:800':''}" onclick="riRouteManual(${i},'order_capture')">🛒 구매캡처로 이동</button>`);
     return `<div class="ricard ${cls}">
       <div class="rithumb" onclick="riOpenDetail(${i})">${thumb?`<img src="${thumb}" alt="" loading="lazy">`:'<span>이미지 없음</span>'}</div>
       <div class="ribd">
@@ -5325,8 +5364,29 @@ function _riRenderBody(){
           ? (r.resolution?`<span class="rimeta">${r.resolution==='ok'?'✓ 정상(오탐)':'✕ 불량 맞음'}</span>`:'')
           : `<button class="btn" style="border-color:#86EFAC;color:#15803D" title="AI 판정이 틀렸고 정상 제출입니다 — 상품명 의심 건은 캡처 표기를 인정 상품명으로 학습합니다" onclick="riResolve('${esc(r.file_id)}','ok')">✓ 정상</button><button class="btn" style="border-color:#FCA5A5;color:#B91C1C" title="실제 불량이 맞습니다 — 판정 근거가 학습 통계에 남습니다" onclick="riResolve('${esc(r.file_id)}','bad')">✕ 불량</button>`}
       </div>
+      ${routeBtns?`<div class="rift" style="margin-top:2px">${routeBtns}</div>`:''}
     </div>`;
   }).join('') + `</div>`;
+}
+/* 수동 분류(이동) — 자동분류와 같은 실행부(서버 fileRoute)를 타므로 결과가 동일하고
+   로그 탭 [↩ 원위치]로 되돌릴 수 있다. 이동 성공 = 그 검수 건 정상(오제출) 자동 종결. */
+async function riRouteManual(i, target){
+  const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
+  const lbl = target==='receipt'?'현금영수증':target==='order_capture'?'구매캡처(주문내역)':'리뷰';
+  if(!confirm(`${r.reviewer_name||''}${r.row_index?' · '+r.row_index+'행':''}\n\n이 파일을 [${lbl}] 폴더로 옮기고 이 검수 건을 정상(오제출)으로 종결합니다.\n로그 탭의 [↩ 원위치]로 되돌릴 수 있습니다.\n진행할까요?`)) return;
+  const res=await api('/api/trackb/review-inspect/route-manual',{method:'POST',body:JSON.stringify({fileId:r.file_id, target})});
+  if(!res||!res.ok){ alert('이동 실패: '+((res&&res.error)||'')); return; }
+  // 학습 결합(M3): 수동 분류 1회 = 학습 1건 — 대상 예시 슬롯에 자리가 있으면 승격 제안
+  if(res.promote && confirm(`이동했습니다.\n\n이 실물을 [${res.promote.label}] 판별 예시로도 등록할까요?\n(같은 오제출을 AI가 더 정확히 잡게 됩니다)`)){
+    const body = res.promote.kind==='receipt'
+      ? {kind:'receipt', channel:res.promote.key, imageUrl:API_BASE+'/api/drive/image/'+r.file_id, mode:'add'}
+      : {kind:'route', key:res.promote.key, imageUrl:API_BASE+'/api/drive/image/'+r.file_id, mode:'add'};
+    const pr=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify(body)});
+    if(pr&&pr.ok){ STATE._riSmpCache=null; alert('판별 예시로 등록했습니다.'); }
+    else alert('예시 등록 실패: '+((pr&&pr.error)||''));
+  }
+  riCloseDetail();
+  _loadInspect();
 }
 /** 판정 근거를 사람 문장으로 — 카드에서 열어보지 않고도 판단되게 한다. */
 function _riReasons(c){
@@ -5348,6 +5408,7 @@ function _riReasons(c){
 function riFilterTab(i){
   const r=(STATE.ri||[])[i]; if(!r) return;
   STATE.riTab={sheetId:r.sheet_id,tabName:r.tab_name};
+  STATE.riType='all';   // 탭 전환 = 유형 필터 초기화
   _loadInspect();
 }
 /* 상세는 **여러 건을 연달아 훑는 화면**이다 — 한 건 보고 닫고 다음 카드를 찾아 다시 누르는 왕복을
@@ -5456,10 +5517,12 @@ async function riPromoteSample(i){
     smp={samples:j.samples||[],receiptSamples:j.receiptSamples||[],routeSamples:j.routeSamples||[]};
     STATE._riSmpCache=smp;
   }
+  // ★ 누적 등록 — 기존 예시를 지우지 않고 추가한다(슬롯당 5장, 서버가 상한 강제).
+  const _cnt=s=>_riSmpUrls(s).length;
   const slots=[
-    ...smp.samples.map(s=>({kind:'review',key:s.key,label:'🖼 리뷰 · '+(s.label||s.key),filled:!!s.imageUrl})),
-    ...smp.receiptSamples.map(s=>({kind:'receipt',key:s.key,label:'🧾 현금영수증 · '+(s.label||s.key),filled:!!s.imageUrl})),
-    ...smp.routeSamples.map(s=>({kind:'route',key:s.key,label:'🛒 자동분류 · '+(s.label||s.key),filled:!!s.imageUrl})),
+    ...smp.samples.map(s=>({kind:'review',key:s.key,label:'🖼 리뷰 · '+(s.label||s.key),cnt:_cnt(s)})),
+    ...smp.receiptSamples.map(s=>({kind:'receipt',key:s.key,label:'🧾 현금영수증 · '+(s.label||s.key),cnt:_cnt(s)})),
+    ...smp.routeSamples.map(s=>({kind:'route',key:s.key,label:'🛒 자동분류 · '+(s.label||s.key),cnt:_cnt(s)})),
   ];
   STATE._riPromote={fileId:r.file_id, slots};
   let p=document.getElementById('riSmpPick');
@@ -5467,18 +5530,21 @@ async function riPromoteSample(i){
   p.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center';
   p.innerHTML=`<div style="background:#fff;color:#1c2333;border-radius:12px;max-width:440px;width:92%;max-height:80vh;overflow:auto;padding:16px 18px">
     <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">이 캡처를 어느 판별 예시로 등록할까요?</div>
-    <div style="font-size:.75rem;color:#6b7280;margin-bottom:10px">현장에서 실제로 걸러진 실물이 그대로 AI 판정의 기준이 됩니다. 이미 등록된 칸을 고르면 교체됩니다.</div>
-    ${slots.map((s,si)=>`<button style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:${s.filled?'#f8fafc':'#fff'};cursor:pointer;font-size:.8rem" onclick="riPromotePick(${si})">${esc(s.label)} ${s.filled?'<span style="color:#16a34a;font-size:.7rem">등록됨 — 교체</span>':'<span style="color:#9ca3af;font-size:.7rem">비어 있음</span>'}</button>`).join('')}
+    <div style="font-size:.75rem;color:#6b7280;margin-bottom:10px">현장에서 실제로 걸러진 실물이 그대로 AI 판정의 기준이 됩니다. <b>기존 예시는 지워지지 않고 추가</b>됩니다(슬롯당 최대 ${RI_SMP_CAP}장 — 같은 레이아웃 반복보다 서로 다른 변형이 정확도를 올립니다).</div>
+    ${slots.map((s,si)=>s.cnt>=RI_SMP_CAP
+      ? `<div style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;font-size:.8rem">${esc(s.label)} <span style="color:#b91c1c;font-size:.7rem;font-weight:700">${s.cnt} / ${RI_SMP_CAP}장 — 가득참 ([🖼 판별 예시]에서 정리)</span></div>`
+      : `<button style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:${s.cnt?'#f8fafc':'#fff'};cursor:pointer;font-size:.8rem" onclick="riPromotePick(${si})">${esc(s.label)} <span style="color:${s.cnt?'#16a34a':'#9ca3af'};font-size:.7rem;font-weight:700">${s.cnt} / ${RI_SMP_CAP}장 — ＋추가</span></button>`).join('')}
     <div style="text-align:right;margin-top:10px"><button class="btn" onclick="document.getElementById('riSmpPick').remove()">취소</button></div>
   </div>`;
 }
+const RI_SMP_CAP=5;   // 표시용 — 상한의 진실원본은 서버(SAMPLE_SLOT_CAP)
+function _riSmpUrls(s){ return (s&&s.imageUrls) || (s&&s.imageUrl?[s.imageUrl]:[]); }   // 구백엔드 호환
 async function riPromotePick(si){
   const st=STATE._riPromote; const s=st&&st.slots[si]; if(!s) return;
-  if(s.filled && !confirm('이미 등록된 예시가 있습니다. 이 캡처로 교체할까요?')) return;
   const imageUrl=API_BASE+'/api/drive/image/'+st.fileId;   // 기존 무인증 프록시 재사용(신규 저장소 0)
-  const body = s.kind==='review' ? {key:s.key, imageUrl}
-    : s.kind==='receipt' ? {kind:'receipt', channel:s.key, imageUrl}
-    : {kind:'route', key:s.key, imageUrl};
+  const body = s.kind==='review' ? {key:s.key, imageUrl, mode:'add'}
+    : s.kind==='receipt' ? {kind:'receipt', channel:s.key, imageUrl, mode:'add'}
+    : {kind:'route', key:s.key, imageUrl, mode:'add'};
   const r=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify(body)});
   const p=document.getElementById('riSmpPick'); if(p) p.remove();
   if(!r||!r.ok){ alert('등록 실패: '+((r&&r.error)||'')); return; }
@@ -5514,13 +5580,20 @@ async function riOpenProductNames(){
 async function riOpenSamples(){
   const r=await api('/api/trackb/review-inspect/samples');
   if(!r||!r.ok){ alert('불러오기 실패'); return; }
-  const rows=(r.samples||[]).map(s=>`<div class="risbox">
+  const rows=(r.samples||[]).map(s=>{
+    const urls=_riSmpUrls(s);
+    return `<div class="risbox">
       <div class="rirow"><b>${s.emoji} ${esc(s.label)}</b>
-        <span class="ribdg ${s.imageUrl?'ri-ok':'ri-p'}">${s.imageUrl?'등록됨':'없음'}</span></div>
-      ${s.imageUrl?`<img src="${esc(s.imageUrl)}" alt="">`:'<div class="rinone">등록된 예시가 없습니다</div>'}
-      <div class="rirow"><input type="file" accept="image/*" onchange="riUploadSample('${s.key}',this)" style="font-size:11px;flex:1;min-width:0">
-        ${s.imageUrl?`<button class="btn" onclick="riClearSample('${s.key}')">제거</button>`:''}</div>
-    </div>`).join('');
+        <span class="ribdg ${urls.length?'ri-ok':'ri-p'}">${urls.length?urls.length+' / '+RI_SMP_CAP+'장':'없음'}</span></div>
+      ${urls.length
+        ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${urls.map((u,ui)=>`<span style="position:relative;display:inline-block">
+             <img src="${esc(u)}" alt="" style="width:74px;height:98px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb">
+             <button onclick="riClearSample('${s.key}',${ui})" title="이 장만 제거" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:99px;background:#EF4444;color:#fff;border:none;font-size:10px;cursor:pointer;line-height:1">✕</button>
+           </span>`).join('')}</div>`
+        : '<div class="rinone">등록된 예시가 없습니다</div>'}
+      <div class="rirow"><input type="file" accept="image/*" onchange="riUploadSample('${s.key}',this)" style="font-size:11px;flex:1;min-width:0"${urls.length>=RI_SMP_CAP?' disabled title="가득참 — 기존 장을 지우고 추가하세요"':''}></div>
+    </div>`;
+  }).join('');
   let m=$('#riModal'); if(!m){ m=document.createElement('div'); m.id='riModal'; m.className='rimodal'; document.body.appendChild(m); }
   m.dataset.riKind='samples';   // ★ 상세가 아니다 — 방향키를 가로채지 않는다(파일 선택칸 조작 보존)
   m.innerHTML=`<div class="rimodal-in"><div class="rimh"><b>리뷰 판별 예시이미지</b>
@@ -5537,15 +5610,17 @@ async function riUploadSample(key, input){
     const up=await fetch(API_BASE+'/api/order/guide-image',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token()},
       body:JSON.stringify({imageBase64:b64,mimeType:f.type||'image/jpeg',fileName:'reviewsample_'+key+'_'+Date.now()})}).then(x=>x.json());
     if(!up||!up.ok||!up.url) throw new Error((up&&up.error)||'업로드 실패');
-    const s=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify({key,imageUrl:up.url})});
+    const s=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify({key,imageUrl:up.url,mode:'add'})});
     if(!s||!s.ok) throw new Error((s&&s.error)||'저장 실패');
+    STATE._riSmpCache=null;
     riOpenSamples();
   }catch(e){ alert('등록 실패: '+e.message); } finally { input.value=''; }
 }
-async function riClearSample(key){
-  if(!confirm('이 예시이미지를 제거할까요?')) return;
-  const s=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify({key,imageUrl:''})});
-  if(!s||!s.ok){ alert('제거 실패'); return; }
+async function riClearSample(key, idx){
+  if(!confirm('이 예시이미지 한 장을 제거할까요?')) return;
+  const s=await api('/api/trackb/review-inspect/samples',{method:'POST',body:JSON.stringify({key,mode:'remove',index:idx})});
+  if(!s||!s.ok){ alert('제거 실패: '+((s&&s.error)||'')); return; }
+  STATE._riSmpCache=null;
   riOpenSamples();
 }
 /** 과거 제출분 따라잡기 — 한 번에 몰아치지 않게 서버가 사이클 캡으로 통제한다. */

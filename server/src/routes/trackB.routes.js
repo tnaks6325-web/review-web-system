@@ -1112,6 +1112,57 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
   }
 });
 
+/* 수동 분류(이동) — "리뷰가 아니다 → 현금영수증/구매캡처로". 실행은 fileRoute.service
+   재사용(사본 0 — 자동 이동과 같은 상태·같은 되돌리기). 이동 성공 시 그 검수 건은
+   정상(오제출 = resolution 'ok')으로 자동 종결하고, 학습 결합으로 그 실물을 대상 판별
+   예시로 승격할 수 있는 슬롯이면 promote 제안을 동봉한다(등록은 사람이 확인 후). */
+router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String((req.body || {}).fileId || '');
+    const target = String((req.body || {}).target || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const by = (req.admin && req.admin.name) || '';
+    const out = await require('../services/fileRoute.service').manualRoute({ fileId, target, by });
+    if (!out.ok) return res.status(400).json(out);
+    try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    let promote = null;
+    try { promote = await _routePromoteSuggestion(out); } catch (_) {}
+    res.json({ ...out, promote });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '이동에 실패했습니다.' });
+  }
+});
+
+/** 수동 분류한 실물의 예시 승격 제안 — 대상 슬롯이 판별 예시로 쓰이고 자리가 남을 때만.
+ *  ★ 제안까지만(자동 등록 없음) — 등록은 프론트 confirm 을 거쳐 기존 samples POST(mode:'add')로. */
+async function _routePromoteSuggestion({ to, sheetId, tabName } = {}) {
+  const cap = _inspectSvc.SAMPLE_SLOT_CAP;
+  if (to === 'order_capture') {
+    const s = (await _inspectSvc.routeSampleSettings()).find(x => x.key === 'order_capture');
+    if (s && (s.imageUrls || []).length < cap) return { kind: 'route', key: 'order_capture', label: s.label || '구매캡처(주문내역) 화면' };
+    return null;
+  }
+  if (to === 'receipt') {
+    const ch = (await _inspectSvc.loadTabExpectations({ sheetId, tabName })).expectedChannel;
+    if (!ch) return null;
+    const s = (await _inspectSvc.receiptSampleSettings()).find(x => x.key === ch);
+    if (s && (s.imageUrls || []).length < cap) return { kind: 'receipt', key: ch, label: '현금영수증 · ' + (s.label || ch) };
+    return null;
+  }
+  return null;   // review 대상은 PC/모바일 구분을 모른다 — 잘못된 슬롯 제안보다 무제안
+}
+
+/* 자동분류 정확도 — 수동 분류(정답) vs AI 관측 계획 대조. 읽기 전용(설정탭 카드). */
+router.get('/review-inspect/route-stats', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const out = await require('../services/fileRoute.service').routeAccuracyStats({ days: req.query.days });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '통계를 불러오지 못했습니다.' });
+  }
+});
+
 /* 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결(대량 백로그용).
    ★ adminOrMaster — 대량 종결은 되돌리기 어렵다(건별 확인은 종전대로 staff 담당 탭 허용).
    ★ resolution 'ok' 면 상품명 의심 건의 캡처 표기를 그 탭 인정 별칭으로 함께 학습한다. */
@@ -1200,18 +1251,20 @@ router.get('/review-inspect/samples', authMiddleware, _reInternal, async (req, r
 router.post('/review-inspect/samples', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
+    // mode: 'add'(누적) | 'remove'+index(개별 삭제) | 미지정(종전 = 교체/전체 제거)
+    const op = { imageUrl: b.imageUrl, mode: b.mode, index: b.index };
     if (String(b.kind || '') === 'receipt') {
       const channel = String(b.channel || b.key || '');
-      const url = await _inspectSvc.saveReceiptSample({ channel, imageUrl: b.imageUrl });
-      return res.json({ ok: true, kind: 'receipt', channel, imageUrl: url });
+      const urls = await _inspectSvc.saveReceiptSample({ channel, ...op });
+      return res.json({ ok: true, kind: 'receipt', channel, imageUrls: urls, imageUrl: urls[0] || '' });
     }
     if (String(b.kind || '') === 'route') {
       // 자동 분류 예시(구매캡처·구매확정) — 슬롯 화이트리스트는 utils/routeSampleKinds 단일 출처
-      const url = await _inspectSvc.saveRouteSample({ key: String(b.key || ''), imageUrl: b.imageUrl });
-      return res.json({ ok: true, kind: 'route', key: b.key, imageUrl: url });
+      const urls = await _inspectSvc.saveRouteSample({ key: String(b.key || ''), ...op });
+      return res.json({ ok: true, kind: 'route', key: b.key, imageUrls: urls, imageUrl: urls[0] || '' });
     }
-    const url = await _inspectSvc.saveSample({ key: String(b.key || ''), imageUrl: b.imageUrl });
-    res.json({ ok: true, key: b.key, imageUrl: url });
+    const urls = await _inspectSvc.saveSample({ key: String(b.key || ''), ...op });
+    res.json({ ok: true, key: b.key, imageUrls: urls, imageUrl: urls[0] || '' });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message || '저장에 실패했습니다.' });
   }

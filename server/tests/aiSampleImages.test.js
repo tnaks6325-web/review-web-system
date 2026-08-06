@@ -70,9 +70,12 @@ console.log('\n2) 서비스 실행');
   /* 저장 — 화이트리스트 · https 절대 URL */
   _q = []; stub([]);
   await RI.saveReceiptSample({ channel: 'kakao', imageUrl: 'https://api.example.com/api/drive/image/BBBBBBBBBBBBBBBBBBBBB' });
-  ok('저장은 app_settings 업서트 1회 — 운영 테이블 무접촉',
-    _q.length === 1 && /INSERT INTO app_settings/.test(_q[0].sql)
-    && _q[0].params[0] === 'cash_receipt_sample_kakao');
+  // ★ 누적 도입으로 저장 전 현재 목록 SELECT 1회가 추가됐다 — 검사 의미는 불변:
+  //   모든 쿼리가 app_settings 만 만지고(운영 테이블 무접촉), 쓰기는 업서트 1회뿐.
+  ok('저장은 app_settings 읽기+업서트뿐 — 운영 테이블 무접촉',
+    _q.every(q => /app_settings/.test(q.sql))
+    && _q.filter(q => /INSERT INTO app_settings/.test(q.sql)).length === 1
+    && _q.find(q => /INSERT INTO app_settings/.test(q.sql)).params[0] === 'cash_receipt_sample_kakao');
 
   let threw = null;
   try { await RI.saveReceiptSample({ channel: 'evil', imageUrl: 'https://x/y' }); } catch (e) { threw = e; }
@@ -84,7 +87,10 @@ console.log('\n2) 서비스 실행');
 
   _q = []; stub([]);
   const cleared = await RI.saveReceiptSample({ channel: 'coupang', imageUrl: '' });
-  ok('빈 값 저장 = 제거(해제 경로가 따로 없다)', cleared === '' && _q[0].params[1] === '');
+  // 누적 도입 후 반환은 URL 목록(배열) — 빈 값 저장 = 빈 목록 + 업서트 값 ''(검사 의미 불변).
+  const _clrUp = _q.find(q => /INSERT INTO app_settings/.test(q.sql));
+  ok('빈 값 저장 = 제거(해제 경로가 따로 없다)',
+    Array.isArray(cleared) && cleared.length === 0 && _clrUp && _clrUp.params[1] === '');
 
   /* 로드 — 채널 모르면 미동봉, 등록 전이면 빈 배열 */
   _q = []; stub([]);
@@ -163,8 +169,9 @@ console.log('\n2) 서비스 실행');
     /SMP_EP = '\/api\/trackb\/review-inspect\/samples'/.test(set));
   ok('★ 업로드는 guide-image Drive+프록시 인프라 재사용(신규 저장소 0)',
     /_post\('guideImage'/.test(set) && /aisample_/.test(set));
+  // 누적 도입으로 mode:'add' 가 붙었다 — 검사 의미 불변(receipt=channel 저장 창구).
   ok('★ 현금영수증은 channel, 리뷰는 슬롯 key 로 저장한다',
-    /\{ kind: 'receipt', channel: key, imageUrl: uj\.url \}/.test(set));
+    /\{ kind: 'receipt', channel: key, imageUrl: uj\.url, mode: 'add' \}/.test(set));
   ok('★ 리뷰어에게 나가지 않는다는 사실을 화면이 명시(발행방법 이미지와 혼동 방지)',
     /리뷰어 화면에는 나가지 않습니다/.test(set));
   ok('패널 등록(PANELS/LOADERS) + 전역 노출',
