@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>리뷰검수 — "무엇과 중복인지" 한눈에 (카드·팝업 와이어프레임)</title>
+<style>
+  /* 화면 재현 목업이라 라이트로 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다 */
+  :root{ color-scheme:light; }
+  *{box-sizing:border-box}
+  body{margin:0;background:#F5F6F8;color:#1E293B;
+       font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif;
+       font-size:14px;line-height:1.65}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-size:1.5rem;margin:0 0 6px;letter-spacing:-.02em}
+  .lead{color:#64748B;font-size:.9rem;margin:0 0 26px}
+  h2{font-size:1.05rem;margin:34px 0 10px;padding-bottom:7px;border-bottom:2px solid #E2E8F0;letter-spacing:-.01em}
+  h3{font-size:.9rem;margin:20px 0 8px;color:#334155}
+  p{margin:8px 0}
+  .muted{color:#64748B;font-size:.83rem}
+  .panel{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:16px 18px;margin:12px 0}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:900px){ .cols{grid-template-columns:1fr} }
+  .tag{display:inline-block;font-size:.7rem;font-weight:800;letter-spacing:.04em;
+       padding:2px 8px;border-radius:99px;margin-bottom:8px}
+  .tag.now{background:#FEF3F2;color:#B42318;border:1px solid #F3C8C4}
+  .tag.new{background:#F1FBF4;color:#15803D;border:1px solid #C4E8CE}
+
+  /* ── 실제 검수 카드 CSS 재현 (workdesk.html 과 같은 값) ── */
+  .nc-card{width:262px;background:#fff;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden;
+           display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(16,24,40,.05)}
+  .nc-type{display:flex;align-items:center;gap:6px;padding:6px 11px 6px 9px;font-size:11px;font-weight:800;border-left:4px solid}
+  .nc-type .t{font-size:9px;font-weight:800;letter-spacing:.08em;opacity:.7;margin-left:auto;flex:none}
+  .nc-type.t-dup{border-color:#DC2626;background:#FEF3F2;color:#9F1D1D}
+  .nc-type.t-sim{border-color:#7C3AED;background:#F7F3FE;color:#5B21B6}
+  .nc-th{height:150px;background:#EFF1F4;display:grid;place-items:center;position:relative;
+         color:#94A3B8;font-size:11px;font-weight:700}
+  .nc-th .bdg{position:absolute;top:7px;right:7px;background:#FEE4E2;color:#B42318;
+              font-size:10px;font-weight:800;border-radius:99px;padding:2px 8px}
+  .nc-body{padding:8px 11px 7px}
+  .nc-name{font-size:13px;font-weight:800}
+  .nc-tab{font-size:11px;color:#2563EB;text-decoration:underline;display:block;margin:2px 0 6px;word-break:break-all}
+  .nc-rsn{font-size:11.5px;color:#475569;line-height:1.5}
+  .nc-act{padding:0 11px 10px}
+  .nc-main{display:flex;width:100%;align-items:center;justify-content:center;gap:5px;border-radius:9px;
+           padding:7px 0;font-size:12px;font-weight:800;border:1px solid}
+  .m-red{background:#FEF3F2;color:#B91C1C;border-color:#F3C8C4}
+  .m-green{background:#F1FBF4;color:#15803D;border-color:#C4E8CE}
+  .nc-sub{display:flex;gap:6px;margin-top:6px}
+  .nc-g{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid #E2E8F0;
+        background:#fff;border-radius:8px;padding:5px 0;font-size:11px;font-weight:700;color:#3A445A}
+  .nc-g.ok{color:#15803D}.nc-g.bad{color:#B91C1C}.nc-g.more{flex:0 0 36px;color:#94A3B8;font-weight:800}
+
+  /* ── ★ 이번에 새로 넣는 것: 관계 줄 ── */
+  .rel{display:flex;align-items:stretch;gap:0;border:1px solid #F3C8C4;border-radius:9px;
+       overflow:hidden;margin:6px 0 7px;background:#FFF8F8}
+  .rel.sim{border-color:#E0D3F9;background:#FAF8FE}
+  .rel .side{flex:1;min-width:0;padding:5px 8px}
+  .rel .lbl{font-size:9px;font-weight:800;letter-spacing:.04em;color:#94A3B8;text-transform:uppercase}
+  .rel .row{font-size:12.5px;font-weight:800;color:#B42318;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rel .row.keep{color:#15803D}
+  .rel.sim .row{color:#6D28D9} .rel.sim .row.keep{color:#475569}
+  .rel .who{font-size:10.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rel .arw{flex:0 0 30px;display:grid;place-items:center;background:rgba(255,255,255,.75);
+            border-left:1px dashed #F3C8C4;border-right:1px dashed #F3C8C4;font-size:13px;color:#B42318;font-weight:800}
+  .rel.sim .arw{border-color:#E0D3F9;color:#6D28D9}
+  .relnote{font-size:10.5px;color:#8A93A3;margin:-2px 0 6px}
+  .flag{display:inline-block;font-size:9.5px;font-weight:800;border-radius:5px;padding:1px 5px;margin-left:4px;vertical-align:1px}
+  .flag.red{background:#FEE4E2;color:#B42318}
+  .flag.blue{background:#EFF6FF;color:#1D4ED8}
+  .flag.gray{background:#F1F5F9;color:#475569}
+
+  /* ── 팝업 목업 ── */
+  .pop{background:#fff;border-radius:16px;max-width:460px;box-shadow:0 20px 50px rgba(15,23,42,.18);
+       border:1px solid #E2E8F0;overflow:hidden}
+  .pop .ph{display:flex;align-items:center;gap:10px;padding:16px 20px 0}
+  .pop .pic{width:40px;height:40px;border-radius:12px;background:#FEF2F2;display:grid;place-items:center;font-size:1.25rem;flex:none}
+  .pop .pt{font-size:1rem;font-weight:800}
+  .pop .ps{font-size:.74rem;color:#64748B;margin-top:1px}
+  .pop .pb{padding:14px 20px 0}
+  .who{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:9px 13px;font-size:.82rem;margin-bottom:10px}
+  .pair{display:flex;gap:10px;margin-bottom:12px}
+  .pane{flex:1;border:2px solid;border-radius:10px;padding:8px}
+  .pane.del{border-color:#FCA5A5;background:#FFF5F5}
+  .pane.keep{border-color:#86EFAC;background:#F7FEF9}
+  .pane .cap{font-size:.7rem;font-weight:800;margin-bottom:6px}
+  .pane.del .cap{color:#B91C1C} .pane.keep .cap{color:#15803D}
+  .pane .img{height:110px;border-radius:8px;background:#E2E8F0;display:grid;place-items:center;color:#94A3B8;font-size:11px}
+  .pane .meta{font-size:.7rem;color:#475569;margin-top:5px;line-height:1.45}
+  .dolist{list-style:none;margin:0 0 12px;padding:0}
+  .dolist li{display:flex;gap:8px;font-size:.82rem;padding:4px 0;align-items:flex-start}
+  .dolist li i{width:6px;height:6px;border-radius:99px;background:#DC2626;margin-top:8px;flex:none}
+  .notify{border:1px solid #E2E8F0;border-radius:10px;padding:9px 12px;margin-bottom:10px;background:#F8FAFC}
+  .notify .nl{display:flex;gap:7px;align-items:center;font-size:.8rem;font-weight:700}
+  .notify textarea{width:100%;margin-top:6px;border:1px solid #CBD5E1;border-radius:9px;padding:8px 10px;
+                   font-size:.78rem;font-family:inherit;line-height:1.5;resize:vertical;color:#334155}
+  .undo{background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:8px 13px;font-size:.76rem;color:#92400E}
+  .pf{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px 18px}
+  .btn{border:1px solid #CBD5E1;background:#fff;border-radius:9px;padding:7px 14px;font-size:.82rem;font-weight:700;color:#334155}
+  .btn.danger{background:#DC2626;border-color:#DC2626;color:#fff}
+
+  table{width:100%;border-collapse:collapse;font-size:.83rem;margin:10px 0}
+  th,td{border:1px solid #E2E8F0;padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#F8FAFC;font-weight:800;font-size:.78rem;color:#475569}
+  code{background:#F1F5F9;border-radius:4px;padding:1px 5px;font-size:.85em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .note{background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:11px 14px;font-size:.85rem;color:#78350F;margin:12px 0}
+  .okbox{background:#F1FBF4;border:1px solid #C4E8CE;border-radius:10px;padding:11px 14px;font-size:.85rem;color:#14532D;margin:12px 0}
+  .steps{counter-reset:s;list-style:none;padding:0;margin:10px 0}
+  .steps li{counter-increment:s;position:relative;padding:8px 0 8px 34px;font-size:.87rem;border-bottom:1px dashed #E2E8F0}
+  .steps li:last-child{border-bottom:0}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:8px;width:22px;height:22px;border-radius:99px;
+                    background:#1E293B;color:#fff;font-size:.72rem;font-weight:800;display:grid;place-items:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>리뷰검수 — “무엇과 중복인지”가 카드에서 바로 보이게</h1>
+<p class="lead">
+  지금은 <b>이수진 40행</b> 카드를 열어야 <b>31행</b>과 중복이라는 걸 알 수 있습니다.
+  카드에 <b>“40행 → 31행”</b> 관계 줄을 넣어, 목록을 훑는 것만으로 짝을 파악하도록 바꿉니다.
+  <span class="muted">(카드 · 확인 팝업 · 상세 팝업 세 곳)</span>
+</p>
+
+<h2>1. 지금 무엇이 불편한가</h2>
+<div class="cols">
+  <div class="panel">
+    <span class="tag now">지금</span>
+    <div class="nc-card">
+      <div class="nc-type t-dup">📄 같은 파일 (중복 제출) <span style="opacity:.6">+1</span><span class="t">DUP</span></div>
+      <div class="nc-th">캡처 이미지<span class="bdg">불량</span></div>
+      <div class="nc-body">
+        <div class="nc-name">이수진 · 40행</div>
+        <a class="nc-tab">7/24(네이버)메디슨벨_파라다이스 그레인 200건</a>
+        <div class="nc-rsn">
+          같은 파일이 이미 제출됨 — 7/24(네이버)메디슨벨_파라다이스 그레인 200건 이수진 31행<br>
+          본문 100% 겹침 — 이수진 31행
+        </div>
+      </div>
+      <div class="nc-act">
+        <div class="nc-main m-red">🗑 중복파일 제거</div>
+        <div class="nc-sub"><span class="nc-g ok">✓ 정상</span><span class="nc-g bad">✕ 불량</span><span class="nc-g more">⋯</span></div>
+      </div>
+    </div>
+    <ul class="muted" style="margin:12px 0 0;padding-left:18px">
+      <li><b>줄 번호가 문장 끝에 묻혀 있다</b> — 긴 작업명을 지나야 “31행”이 나온다.</li>
+      <li><b>어느 쪽이 이 건인지</b> 문장만으로는 순간 헷갈린다(40행? 31행?).</li>
+      <li>작업명이 <b>두 번</b> 나온다(제목 줄 + 사유 줄). 같은 작업이면 반복이다.</li>
+      <li>본문 겹침도 같은 짝인데 <b>따로 적혀</b> 있어 두 번 읽게 된다.</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <span class="tag new">바뀐 뒤</span>
+    <div class="nc-card">
+      <div class="nc-type t-dup">📄 같은 파일 (중복 제출)<span class="t">DUP</span></div>
+      <div class="nc-th">캡처 이미지<span class="bdg">불량</span></div>
+      <div class="nc-body">
+        <div class="nc-name">이수진 · 40행</div>
+        <a class="nc-tab">7/24(네이버)메디슨벨_파라다이스 그레인 200건</a>
+
+        <!-- ★ 새 요소: 관계 줄 -->
+        <div class="rel">
+          <div class="side">
+            <div class="lbl">이 건</div>
+            <div class="row">40행</div>
+          </div>
+          <div class="arw">▶</div>
+          <div class="side">
+            <div class="lbl">이미 제출됨</div>
+            <div class="row keep">31행</div>
+          </div>
+        </div>
+        <div class="relnote">같은 작업 · 같은 리뷰어 · 본문도 100% 겹침</div>
+      </div>
+      <div class="nc-act">
+        <div class="nc-main m-red">🗑 중복파일 제거</div>
+        <div class="nc-sub"><span class="nc-g ok">✓ 정상</span><span class="nc-g bad">✕ 불량</span><span class="nc-g more">⋯</span></div>
+      </div>
+    </div>
+    <ul class="muted" style="margin:12px 0 0;padding-left:18px">
+      <li><b>40행 ▶ 31행</b>이 한 덩어리로 보인다 — 왼쪽이 이 건, 오른쪽이 원본.</li>
+      <li>같은 작업·같은 리뷰어면 <b>이름·작업명을 반복하지 않는다</b>.</li>
+      <li>본문 겹침처럼 <b>같은 짝을 가리키는 사유</b>는 아래 한 줄로 합친다.</li>
+      <li>버튼·판정·권한은 <b>그대로</b> — 바뀌는 건 표기뿐.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>2. 관계 줄 표기 규칙 (네 가지 경우)</h2>
+<p class="muted">왼쪽은 항상 <b>지금 보고 있는 건</b>, 오른쪽은 <b>이미 있던 것</b>입니다. 다른 점만 덧붙입니다.</p>
+
+<div class="panel" style="display:flex;gap:20px;flex-wrap:wrap">
+
+  <div style="width:262px">
+    <div style="font-size:.8rem;font-weight:800;margin-bottom:6px">① 같은 작업 · 같은 리뷰어 <span class="muted">(가장 흔함)</span></div>
+    <div class="rel">
+      <div class="side"><div class="lbl">이 건</div><div class="row">40행</div></div>
+      <div class="arw">▶</div>
+      <div class="side"><div class="lbl">이미 제출됨</div><div class="row keep">31행</div></div>
+    </div>
+    <div class="relnote">같은 작업 · 같은 리뷰어</div>
+    <p class="muted" style="font-size:.78rem">이름·작업명은 카드 제목에 이미 있으니 반복하지 않는다.</p>
+  </div>
+
+  <div style="width:262px">
+    <div style="font-size:.8rem;font-weight:800;margin-bottom:6px">② 같은 작업 · <b style="color:#B42318">다른 리뷰어</b></div>
+    <div class="rel">
+      <div class="side"><div class="lbl">이 건</div><div class="row">40행</div><div class="who">이수진</div></div>
+      <div class="arw">▶</div>
+      <div class="side"><div class="lbl">이미 제출됨</div><div class="row keep">31행</div><div class="who">김철수</div></div>
+    </div>
+    <div class="relnote">같은 작업 <span class="flag red">다른 리뷰어</span></div>
+    <p class="muted" style="font-size:.78rem">사람이 다르면 <b>양쪽에 이름</b>을 적고 빨간 표시를 단다(도용 신호).</p>
+  </div>
+
+  <div style="width:262px">
+    <div style="font-size:.8rem;font-weight:800;margin-bottom:6px">③ <b style="color:#1D4ED8">다른 작업</b> · 같은 리뷰어</div>
+    <div class="rel" style="border-color:#F2DFC0;background:#FFFDF7">
+      <div class="side"><div class="lbl">이 건</div><div class="row" style="color:#8A4B06">41행</div></div>
+      <div class="arw" style="border-color:#F2DFC0;color:#8A4B06">▶</div>
+      <div class="side"><div class="lbl">이미 제출됨</div><div class="row keep" style="color:#475569">12행</div>
+        <div class="who">노티드_두바이쫀득쿠키</div></div>
+    </div>
+    <div class="relnote">다른 작업 · 같은 리뷰어 <span class="flag blue">한 화면에 여러 리뷰일 수 있음</span></div>
+    <p class="muted" style="font-size:.78rem">오른쪽에 <b>작업명</b>을 붙인다. 이 경우 주 버튼은 이미 <b>[✓ 정상]</b>이다.</p>
+  </div>
+
+  <div style="width:262px">
+    <div style="font-size:.8rem;font-weight:800;margin-bottom:6px">④ 짝을 알 수 없을 때</div>
+    <div class="rel" style="border-color:#E2E8F0;background:#F8FAFC">
+      <div class="side"><div class="lbl">이 건</div><div class="row" style="color:#475569">40행</div></div>
+      <div class="arw" style="border-color:#E2E8F0;color:#94A3B8">▶</div>
+      <div class="side"><div class="lbl">이미 제출됨</div><div class="row keep" style="color:#94A3B8">줄 번호 없음</div></div>
+    </div>
+    <div class="relnote">원본 줄이 기록되지 않은 건 <span class="flag gray">상세에서 확인</span></div>
+    <p class="muted" style="font-size:.78rem">모르면 <b>모른다고 적는다</b> — 빈칸으로 두면 “같은 줄”로 오해된다.</p>
+  </div>
+
+</div>
+
+<h3>본문 겹침(✍)도 같은 문법</h3>
+<div class="panel" style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+  <div class="nc-card">
+    <div class="nc-type t-sim">✍ 본문 겹침 100%<span class="t">SIM</span></div>
+    <div class="nc-th">캡처 이미지</div>
+    <div class="nc-body">
+      <div class="nc-name">이수진 · 40행</div>
+      <a class="nc-tab">7/24(네이버)메디슨벨_파라다이스 그레인 200건</a>
+      <div class="rel sim">
+        <div class="side"><div class="lbl">이 건</div><div class="row">40행</div></div>
+        <div class="arw">▶</div>
+        <div class="side"><div class="lbl">겹친 리뷰</div><div class="row keep">31행</div></div>
+      </div>
+      <div class="relnote">같은 작업 · 같은 리뷰어 · 본문 100% 일치</div>
+    </div>
+    <div class="nc-act">
+      <div class="nc-main" style="background:#F7F3FE;color:#6D28D9;border:1px solid #E0D3F9">👁 나란히 보기</div>
+      <div class="nc-sub"><span class="nc-g ok">✓ 정상</span><span class="nc-g bad">✕ 불량</span><span class="nc-g more">⋯</span></div>
+    </div>
+  </div>
+  <div style="flex:1;min-width:260px">
+    <p>겹침·중복은 <b>둘 다 “어느 줄과 짝인가”</b>가 핵심 정보입니다. 같은 모양으로 그리면
+      유형이 달라도 읽는 법이 안 바뀝니다.</p>
+    <div class="okbox">
+      <b>같은 짝이면 한 번만 말한다.</b> 위 예처럼 <b>중복 파일 + 본문 겹침</b>이 둘 다 31행을 가리키면,
+      관계 줄은 하나만 그리고 아래 설명에 <code>본문도 100% 겹침</code>을 덧붙입니다.
+      짝이 서로 다르면(파일은 31행, 본문은 55행) 관계 줄을 <b>두 줄</b>로 나눕니다.
+    </div>
+  </div>
+</div>
+
+<h2>3. 확인 팝업 — 어느 줄이 지워지고 어느 줄이 남는지</h2>
+<div class="cols">
+  <div>
+    <span class="tag new">[🗑 중복파일 제거] 팝업</span>
+    <div class="pop">
+      <div class="ph">
+        <div class="pic">🗑</div>
+        <div><div class="pt">중복파일을 제거할까요?</div>
+          <div class="ps">같은 파일이 두 줄에 제출되어 있습니다 — 나중 제출본을 제거합니다</div></div>
+      </div>
+      <div class="pb">
+        <div class="who"><b>이수진</b> · 40행 <span style="color:#2563EB;font-size:.75rem">— 7/24(네이버)메디슨벨_파라다이스 그레인 200건</span></div>
+
+        <!-- ★ 팝업 맨 위에도 같은 관계 줄 -->
+        <div class="rel">
+          <div class="side"><div class="lbl">제거</div><div class="row">40행 · 이 건</div></div>
+          <div class="arw">▶</div>
+          <div class="side"><div class="lbl">보존</div><div class="row keep">31행 · 먼저 제출</div></div>
+        </div>
+
+        <div class="pair">
+          <div class="pane del">
+            <div class="cap">🗑 제거 · 40행</div>
+            <div class="img">지금 제출본</div>
+            <div class="meta">이수진 · 7월 24일 오후 11:20 제출</div>
+          </div>
+          <div class="pane keep">
+            <div class="cap">✓ 보존 · 31행</div>
+            <div class="img">이전 제출본</div>
+            <div class="meta">이수진 · 7월 24일 오후 10:05 제출</div>
+          </div>
+        </div>
+
+        <ul class="dolist">
+          <li><i></i><span><b>40행</b>의 사진을 <b>휴지통</b>으로 보냅니다 — <b>31행</b>은 그대로 남습니다</span></li>
+          <li><i></i><span>이 검수 건을 <b>불량 맞음(중복 제출)</b>으로 종결합니다</span></li>
+        </ul>
+
+        <div class="notify">
+          <div class="nl"><input type="checkbox" checked> 리뷰어에게 1:1 문의로 안내 전송</div>
+          <textarea rows="3">중복이미지 제출로 반려되었습니다.
+
+앞서 제출하신 사진과 같은 사진이 다시 올라와, 나중에 올리신 사진은 등록되지 않았습니다.</textarea>
+          <div class="muted" style="font-size:.71rem;margin-top:3px">반려된 사진과 이미 제출된 사진을 함께 보여줍니다 — 문구는 설정에서 바꿀 수 있어요.</div>
+        </div>
+
+        <div class="undo">🗑 영구삭제가 아닙니다 — Drive 휴지통에서 <b>30일간 복구</b>할 수 있습니다</div>
+      </div>
+      <div class="pf"><span class="btn">취소</span><span class="btn danger">🗑 중복파일 제거</span></div>
+    </div>
+  </div>
+
+  <div>
+    <span class="tag new">상세 팝업 머리</span>
+    <div class="panel" style="padding:0;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid #E2E8F0">
+        <b style="font-size:.92rem">이수진 · 40행</b>
+        <span style="font-size:.78rem;color:#64748B">7/24(네이버)메디슨벨…</span>
+        <span style="margin-left:auto;font-size:.75rem;color:#64748B">AI 확신 100%</span>
+        <span class="btn" style="padding:3px 9px">‹</span><span style="font-size:.75rem">42 / 200</span><span class="btn" style="padding:3px 9px">›</span>
+      </div>
+      <div style="padding:12px 14px">
+        <div class="rel" style="margin-top:0">
+          <div class="side"><div class="lbl">이 건</div><div class="row">40행 · 이수진</div>
+            <div class="who">7월 24일 오후 11:20 제출</div></div>
+          <div class="arw">▶</div>
+          <div class="side"><div class="lbl">이미 제출됨</div><div class="row keep">31행 · 이수진</div>
+            <div class="who">7월 24일 오후 10:05 제출</div></div>
+        </div>
+        <div class="relnote">같은 작업 · 같은 리뷰어 · 파일 지문 동일 · 본문 100% 겹침</div>
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <div class="pane del" style="flex:1"><div class="cap">40행 (이 건)</div><div class="img">캡처</div></div>
+          <div class="pane keep" style="flex:1"><div class="cap">31행 (이미 제출됨)</div><div class="img">캡처</div></div>
+        </div>
+        <p class="muted" style="font-size:.78rem;margin-top:8px">
+          좌우 화살표(‹ ›)로 다음 건을 볼 때도 관계 줄이 <b>같은 자리</b>에 있어, 시선이 안 흔들립니다.
+        </p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>줄 번호는 관리자 화면에만 씁니다.</b> 리뷰어에게 나가는 반려 안내에는 지금처럼
+      줄 번호를 넣지 않고 <b>참여 순번 · 상품 · 제출일</b>로 가리킵니다(리뷰어는 시트 줄 번호를 모릅니다).
+    </div>
+  </div>
+</div>
+
+<h2>4. 무엇이 바뀌고, 무엇이 그대로인가</h2>
+<table>
+  <tr><th style="width:26%">항목</th><th style="width:37%">지금</th><th>바뀐 뒤</th></tr>
+  <tr><td><b>중복 사유 표기</b></td>
+      <td>“같은 파일이 이미 제출됨 — 〈긴 작업명〉 이수진 31행”</td>
+      <td><b>관계 줄</b> <code>40행 ▶ 31행</code> + 아래 한 줄 설명</td></tr>
+  <tr><td><b>본문 겹침 표기</b></td>
+      <td>“본문 100% 겹침 — 이수진 31행” (따로 한 줄)</td>
+      <td>같은 짝이면 <b>관계 줄에 합침</b>, 다른 짝이면 관계 줄 두 개</td></tr>
+  <tr><td><b>작업명</b></td>
+      <td>제목 줄 + 사유 줄에 <b>두 번</b></td>
+      <td>같은 작업이면 <b>한 번</b>, 다른 작업일 때만 오른쪽에 표기</td></tr>
+  <tr><td><b>확인 팝업</b></td><td>사진 두 장(제거/보존)</td>
+      <td>사진 위에 <b>제거 40행 ▶ 보존 31행</b> 관계 줄, 조치 문장에도 줄 번호</td></tr>
+  <tr><td><b>상세 팝업</b></td><td>표에 값으로만 있음</td><td>머리 바로 아래에 <b>같은 관계 줄</b></td></tr>
+  <tr><td>판정 규칙(불량/의심/통과)</td><td colspan="2" style="background:#F8FAFC"><b>그대로</b> — 표기만 바꿉니다</td></tr>
+  <tr><td>버튼 구성·권한</td><td colspan="2" style="background:#F8FAFC"><b>그대로</b></td></tr>
+  <tr><td>리뷰어에게 가는 문구</td><td colspan="2" style="background:#F8FAFC"><b>그대로</b>(설정에서 관리, 줄 번호 미노출)</td></tr>
+</table>
+
+<h2>5. 만드는 순서</h2>
+<ol class="steps">
+  <li><b>관계 줄을 그리는 함수 한 벌</b>을 만든다 — 카드 · 확인 팝업 · 상세 팝업이 같은 것을 쓴다.
+      (사본을 두면 화면마다 좌우가 뒤집히거나 한쪽만 안 바뀐다.)</li>
+  <li>중복(같은 파일)과 본문 겹침이 <b>같은 줄을 가리키는지</b> 비교해, 같으면 한 줄로 합치고 다르면 두 줄로 나눈다.</li>
+  <li>카드의 기존 사유 문장에서 <b>줄 번호·작업명 부분을 걷어낸다</b>(관계 줄이 대신 말하므로 중복 표기 제거).</li>
+  <li>확인 팝업의 조치 문장에 줄 번호를 넣는다 — “<b>40행</b>의 사진을 휴지통으로, <b>31행</b>은 그대로”.</li>
+  <li>회귀가드에 <b>네 가지 경우</b>(같은 작업/다른 작업 × 같은 사람/다른 사람)와
+      <b>줄 번호 없음</b>을 고정하고, 리뷰어 문구에 줄 번호가 <b>들어가지 않는지</b>도 함께 검사한다.</li>
+</ol>
+
+<div class="okbox">
+  <b>서버는 손대지 않아도 됩니다.</b> 필요한 값(상대 줄 번호 · 상대 작업명 · 상대 리뷰어 · 제출 시각)은
+  이미 검수 결과에 실려 화면까지 오고 있습니다. 이번 변경은 <b>그 값을 어떻게 보여주는가</b>에 관한 것입니다.
+</div>
+
+<p class="muted" style="margin-top:28px">
+  리뷰웹시스템 · 리뷰검수 — 중복 관계 표기 와이어프레임 · 2026-08-06
+</p>
+
+</div>
+</body>
+</html>
