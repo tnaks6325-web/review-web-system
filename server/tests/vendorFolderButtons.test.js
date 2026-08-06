@@ -25,6 +25,11 @@ const HTML = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'
 const ROUTES = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
 const SVC = fs.readFileSync(path.join(__dirname, '../src/services/trackB.service.js'), 'utf8');
 const DOC = fs.readFileSync(path.join(__dirname, '../../frontend/docs/design-vendor-folder-buttons.html'), 'utf8');
+// ★ "그 호출이 코드에 없다" 류 판정은 **주석을 제외**하고 봐야 한다(설명문에 옛 호출을 적어 두므로).
+//   ★★ 단 **줄 주석만** 지운다 — 블록 주석 정규식(`/\*…\*/`)은 이 파일의 정규식 리터럴을 물어
+//     41KB(코드 3분의 1)를 통째로 삼켰다(실측). 지우려는 것보다 큰 것을 지우는 도구는 쓰지 않는다.
+const noComments = src => src.replace(/^[ \t]*\/\/.*$/gm, '');
+const ROUTES_CODE = noComments(ROUTES);
 
 let pass = 0;
 const t = (name, cond, extra) => { assert.ok(cond, name + (extra ? ` — ${extra}` : '')); console.log('  ✓ ' + name); pass++; };
@@ -57,19 +62,38 @@ async function run() {
   t('일반 진행방식 = 아님', cs.hasCashReceiptSlot(null, '계산서') === false);
   t('관리자 명시 capture_slots 의 receipt 도 대상(라우트의 옛 compound 규칙 흡수)',
     cs.hasCashReceiptSlot([{ key: 'review' }, { key: 'receipt' }], '계산서') === true);
-  // ★ 관리자 명시 설정이 최우선이라는 effectiveCaptureSlots 규칙을 그대로 따른다 — 슬롯을 [review] 로
-  //   못박은 탭은 업로드가 현영 서브폴더를 만들지 않으므로 '대상 아님'이 사실이다.
-  t('★ 슬롯을 review 만으로 명시한 탭은 아님(업로드 경로와 같은 판정)',
-    cs.hasCashReceiptSlot([{ key: 'review' }], '사업자현영') === false);
+  // ★★ 코드리뷰가 잡은 회귀 고정: capture_slots 의 **유일한 writer**(tabconfig.routes)는 key 를 위치로
+  //   부여해 `receipt` 를 절대 저장하지 않는다(0번=review, 그 외 slot2…). 그래서 key 만 보면 관리자가
+  //   [리뷰, 현금영수증] 으로 설정한 현영 탭의 버튼이 죽는다 — **라벨로도 찾아야** 한다.
+  t('★★ 수동 슬롯(key=slot2, label=현금영수증)도 대상 — 실제 writer 가 만드는 모양',
+    cs.hasCashReceiptSlot([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }], '사업자현영') === true);
+  t('★ 라벨 변형(지출증빙)도 인정', cs.hasCashReceiptSlot([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '지출증빙' }], '사업자현영') === true);
+  t('비현영 탭이라도 현금영수증 슬롯을 설정했으면 대상(업로드가 그 폴더를 만든다)',
+    cs.hasCashReceiptSlot([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }], '계산서') === true);
+  t('현영인데 슬롯에 현금영수증 칸이 전혀 없으면 슬롯 없음(오설정)',
+    cs.hasCashReceiptSlot([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '추가컷' }], '사업자현영') === false);
+  // ★ 그 오설정을 '대상 아님'으로 뭉개지 않는다 — 무엇을 고쳐야 하는지 말하는 문구가 따로 있다.
+  t('★ 오설정은 안내 문구를 돌려준다(대상 아님과 구분)',
+    cs.cashReceiptNote([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '추가컷' }], '사업자현영') === cs.CR_MISCONFIG_NOTE
+    && cs.cashReceiptNote(null, '계산서') === null && cs.cashReceiptNote(null, '사업자현영') === null);
+  // ★ 폴더 이름은 그 슬롯의 실제 라벨 — slotLabel(...,'receipt') 로 찾으면 'receipt' 폴더를 뒤진다.
+  t('★ 폴더 이름 재료 = 슬롯 label',
+    cs.cashReceiptSlotInfo([{ key: 'review', label: '리뷰' }, { key: 'slot2', label: '현금영수증' }], '사업자현영').slot.label === '현금영수증'
+    && cs.cashReceiptSlotInfo(null, '사업자현영').slot.label === '현금영수증');
   t('빈 값·null 은 아님(추측 금지)', cs.hasCashReceiptSlot(null, null) === false && cs.hasCashReceiptSlot([], '') === false);
   t('★ 규칙은 effectiveCaptureSlots 파생(사본 금지)',
-    /function hasCashReceiptSlot[\s\S]{0,220}effectiveCaptureSlots\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
+    /function cashReceiptSlotInfo[\s\S]{0,260}effectiveCaptureSlots\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
+  t('★ hasCashReceiptSlot 은 cashReceiptSlotInfo 위임(판정 사본 0)',
+    /function hasCashReceiptSlot\(captureSlots, incomeType\) \{\s*return !!cashReceiptSlotInfo\(/.test(fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8')));
 
   const CSSRC = fs.readFileSync(path.join(__dirname, '../src/utils/captureSlots.js'), 'utf8');
   t('export 되어 세 소비처가 같은 함수를 쓴다', /module\.exports = \{[\s\S]{0,400}hasCashReceiptSlot/.test(CSSRC));
   t('★ tabStatsMap(홈) 도 같은 함수', /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType\)/.test(SVC));
   t('★ /tab-folders 허용 판정도 같은 함수(눌리는데 거부 금지)',
-    /if \(!hasCashReceiptSlot\(tc\.capture_slots, tc\.income_type\)\)/.test(ROUTES));
+    /const cr = cashReceiptSlotInfo\(tc\.capture_slots, tc\.income_type\);/.test(ROUTES) && /if \(!cr\.slot\)/.test(ROUTES));
+  t('★★ Drive 폴더 이름은 슬롯 실제 label(슬롯 key 가 receipt 가 아닐 수 있다)',
+    /const label = \(cr\.slot && cr\.slot\.label\) \|\| '현금영수증';/.test(ROUTES) && !/slotLabel\([^)]*'receipt'/.test(ROUTES_CODE));
+  t("★ 오설정은 '대상 아님' 이 아니라 고칠 곳을 말한다", /cr\.incomeSaysCashReceipt \? CR_MISCONFIG_NOTE/.test(ROUTES));
   t('현영 판정 사본 없음 — isCashReceiptIncome 직접 호출이 trackB 서비스·라우트에 남지 않았다',
     !/isCashReceiptIncome\(/.test(SVC) && !/isCashReceiptIncome\(/.test(ROUTES));
 
@@ -96,6 +120,17 @@ async function run() {
     t('annotate 미지정이어도 폴더 재료는 온다(통계 주석만 opt-in)',
       out.statsUnavailable === false && out.rows[0].folderUrl);
   }
+
+  /* ═══ 2b. /ownership/tabs — staff 는 담당 업체가 아니면 폴더 URL 미수신 ═══ */
+  console.log('\n2b) 업체관리 목록의 staff 폴더 스코프');
+  t('담당 여부는 기존 헬퍼 한 쿼리(inad_pm)로 판정', /svc\.staffOwnsAdvertiser\(\{ advertiserId: req\.query\.advertiserId/.test(ROUTES_CODE));
+  t('★ 담당 밖이면 폴더 URL·현영 판정을 비운다', /folderUrl: null, captureFolderUrl: null, cashReceipt: false/.test(ROUTES_CODE));
+  t('★ 조용히 비우지 않고 folderScoped:false 로 고지', /folderScoped: false/.test(ROUTES_CODE));
+  t('★ admin/master 응답은 종전 그대로(플래그 미동봉)', /\.\.\.\(folderScoped \? \{\} : \{ folderScoped: false \}\)/.test(ROUTES_CODE));
+  t('프론트가 그 플래그를 소비 — 버튼은 사유를 말하고 표 상단에 안내',
+    /\(STATE\.ownTabMeta\|\|\{\}\)\.folderScoped===false/.test(HTML) && /담당하지 않은 업체라 <b>\[자료\]<\/b>/.test(HTML));
+  t('meta 에 folderScoped 를 실어 둔다(구버전 응답은 true 로 수렴 = 동작 불변)',
+    /folderScoped: rt\.folderScoped===false \? false : true/.test(HTML));
 
   /* ═══ 3. 서버 — /tab-folders?kind=info 가산 분기 ═══ */
   console.log('\n3) /tab-folders?kind=info(작업보드 상단 재료)');
@@ -138,6 +173,21 @@ async function run() {
       !calls.some(c => /review_index/.test(c)));
     const cached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'admin');
     t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 1, 'queries=' + calls.length);
+    // ★★★ 블로커 재발 차단 — **캐시 히트가 스코프 게이트를 우회하지 않는다**:
+    //   admin 이 채운 캐시 키에 담당 밖 staff 가 접근해도 403 이어야 한다(종전엔 200 + Drive 링크 2개).
+    //   `canAccessTab` 을 스텁해 "담당 아님"을 만들고, **같은 키**로 두 번 부른다.
+    const realCanAccess = svc.canAccessTab;
+    svc.canAccessTab = async () => false;
+    const staffCached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'staff');
+    t('★★ 캐시된 탭도 담당 밖 staff 는 403(캐시가 스코프를 우회하지 않는다)',
+      staffCached.code === 403 && !staffCached.b.folderUrl && !staffCached.b.captureFolderUrl, JSON.stringify(staffCached));
+    const staffCached2 = await run1({ sheetId: 'S1', tabName: 'T1' }, 'staff');   // 현영(receipt) 분기도 같은 규율
+    t('★★ 현영 분기도 캐시보다 스코프가 먼저(10분 캐시 창으로 새던 경로)',
+      staffCached2.code === 403 && !staffCached2.b.url, JSON.stringify(staffCached2));
+    svc.canAccessTab = realCanAccess;
+    t('★ 소스 순서 고정 — 스코프 검사가 캐시 조회보다 앞',
+      ROUTES_CODE.indexOf("_role(req) === 'staff'") < ROUTES_CODE.indexOf('_tabFolderInfoCache.get(key)')
+      && ROUTES_CODE.indexOf("_role(req) === 'staff'") < ROUTES_CODE.indexOf('_tabFolderCache.get(key)'));
     // 미등록 탭은 사유를 말한다(빈 값으로 위장하지 않는다)
     poolMod.query = async () => ({ rows: [] });
     const none = await run1({ kind: 'info', sheetId: 'S9', tabName: 'T9' }, 'admin');
@@ -197,6 +247,25 @@ async function run() {
       b[2].dis && /알 수 없습니다/.test(b[2].attrs), b[2].attrs);
   }
   {
+    // ★ own 의 두 가지 '모른다' — 담당 밖 업체 / tab_configs 행 없음
+    const sb = mk({});
+    sb.STATE.ownTabMeta = { folderScoped: false };
+    sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T5', folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: true }];
+    let b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));
+    t('★ 담당 밖 업체 = 비활성 + 문의 안내(폴더 미생성으로 위장하지 않는다)',
+      b.every(x => x.dis) && /담당하지 않은 업체/.test(b[0].attrs), b[0].attrs);
+    sb.STATE.ownTabMeta = {};
+    sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T6', hasTabConfig: false }];
+    b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));
+    t('★ 탭 설정 미등록 = "등록 정보가 없습니다"(폴더 없음과 다른 사실)',
+      b.every(x => x.dis) && /등록 정보가 없습니다/.test(b[0].attrs), b[0].attrs);
+    sb.STATE.ownTabs = [{ sheetId: 'S1', tabName: 'T7', folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: false,
+      cashReceiptNote: '진행방식은 현영인데 캡처 슬롯 설정에 현금영수증 칸이 없습니다 — 탭 설정을 확인해 주세요.' }];
+    b = btns(vm.runInContext("_folBtnsHtml(STATE.ownTabs[0],0,'own')", sb));
+    t("★ 오설정은 서버 문구 그대로('대상 아님' 으로 뭉개지 않는다)",
+      b[2].dis && /슬롯 설정에 현금영수증 칸이 없습니다/.test(b[2].attrs) && !b[0].dis, b[2].attrs);
+  }
+  {
     // 홈(home) — stats 병합 객체에서 읽고, stats 자체가 없으면 그 사실을 말한다
     const sb = mk({});
     sb.STATE.tabs = [{ sheetId: 'S1', tabName: 'H1', stats: { folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: false } }, { sheetId: 'S1', tabName: 'H2' }];
@@ -254,11 +323,18 @@ async function run() {
   t('★ 배치 = 진척 다음 · 계약 앞(시안 A)',
     HTML.indexOf("if(c.mat) cells.push(`<span class=\"ocol omat\">") < HTML.indexOf('cells.push(`<span class="ocol octr">'));
   t('작업보드 상단 툴바(.gridbar)에 폴더 버튼 묶음', /\$\{_folBarHtml\(\)\}\s*\n\s*<span class="gnote">/.test(HTML));
-  t('★ 탭을 열 때 지연조회 1회(_folEnsureCur)', /_folEnsureCur\(\);\s+\/\/ 상단 폴더 3버튼 재료/.test(HTML));
+  // ★ .catch() 필수 — finally 가 DOM 을 건드리므로 거기서 throw 하면 처리되지 않은 rejection 이 된다.
+  t('★ 탭을 열 때 지연조회 1회 + .catch()', /_folEnsureCur\(\)\.catch\(\(\)=>\{\}\);/.test(HTML));
   t('★ 지연조회는 kind=info 경로(무거운 stats=1 금지)',
     /tab-folders\?kind=info/.test(HTML) && !/_folEnsureCur[\s\S]{0,600}stats=1/.test(HTML));
-  t('★ 이미 재료가 있으면 요청하지 않는다(_fol·stats 보유 시 조기 반환)',
-    /if\(!t\|\|STATE\.role==='advertiser'\|\|t\._fol\|\|t\.stats\|\|t\._folLoad\) return;/.test(HTML));
+  // ★ 성공한 재료가 있으면 재요청 없음 — 단 **실패는 다시 시도**한다(일시 장애로 버튼이 세션 내내
+  //   죽어 있으면 사용자에게 되살릴 방법이 없다). 그래서 조기 반환 조건은 `_fol && !_fol.err`.
+  t('★ 성공 재료 보유 시 조기 반환 · 실패는 재시도 허용',
+    /if\(!t\|\|STATE\.role==='advertiser'\|\|t\.stats\|\|t\._folLoad\|\|\(t\._fol&&!t\._fol\.err\)\) return;/.test(HTML));
+  t('★★ 실패한 _fol 이 나중에 도착한 stats 를 덮지 않는다(세션 내내 버튼이 죽던 경로)',
+    /const f=\(t\._fol&&!t\._fol\.err\)\?t\._fol:\(t\.stats\|\|t\._fol\);/.test(HTML));
+  t('★★ 배포 스큐 — kind 표식이 없는 응답은 info 로 믿지 않는다',
+    /if\(r&&r\.kind!=='info'\) t\._fol=\{err:'서버 업데이트 대기/.test(HTML) && /kind: 'info'/.test(ROUTES));
   t('★ 도착 후에는 버튼 묶음만 갈아치운다(그리드 전체 재렌더 금지 — 편집 셀·검색 하이라이트 보존)',
     /const el=\$\('#folBar'\); if\(el&&STATE\.cur===t\) el\.innerHTML=_folBtnsInner/.test(HTML));
   t('★ 다른 작업으로 옮긴 뒤 도착한 응답은 반영하지 않는다(STATE.cur===t 확인)', /STATE\.cur===t/.test(HTML));
@@ -269,6 +345,9 @@ async function run() {
     !/\.ovm-hd\{max-width:1400px\}/.test(HTML) && !/id="owntabsSect" style="max-width:1400px"/.test(HTML));
   t('큰 버튼 변형 CSS(.wbl-fol.folbig)', /\.wbl-fol\.folbig\{display:inline-flex/.test(HTML));
   t('자료 칸 CSS(.owntab .omat)', /\.owntab \.omat\{overflow:visible/.test(HTML));
+
+  t('★ 광고주 렌즈 렌더러(_awFolderBtns)도 같은 URL 검증(_folUrlOk)을 태운다',
+    /const b=\(url,cls,ic,label\)=> _folUrlOk\(url\)/.test(HTML));
 
   /* ═══ 6. 시안 문서와의 일치(문서↔제품 드리프트 가드) ═══ */
   console.log('\n6) 시안 문서 일치');

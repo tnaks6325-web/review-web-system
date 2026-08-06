@@ -77,16 +77,42 @@ function requiredSlotKeys(captureSlots, incomeType, reviewType) {
 }
 
 /**
- * 이 탭이 **현금영수증 캡처 슬롯을 갖는지** — 현영 폴더 바로가기(버튼 활성 ↔ 서버 폴더 해석)의 단일 규칙.
+ * 이 탭의 **현금영수증 캡처 슬롯**을 찾아 돌려준다(없으면 null) — 현영 폴더 바로가기의 단일 규칙.
+ *   반환 = { slot, incomeSaysCashReceipt } — 버튼 활성(홈·업체관리·작업보드)과 서버 폴더 해석이
+ *   **같은 함수**를 써야 "눌리는데 서버가 거부" / "대상인데 버튼이 안 눌림" 두 방향 오류가 안 생긴다.
  *
- * ★★ income_type '현영' 뿐 아니라 **관리자가 명시한 capture_slots 의 receipt 슬롯도 인정**한다.
- *   화면(버튼)과 서버(폴더 해석)가 서로 다른 규칙을 쓰면 두 방향으로 다 틀린다 —
- *   "눌리는데 서버가 거부"(오해를 부르는 막다른 길) 또는 "대상인데 버튼이 안 눌림"(기능 소실).
- *   그래서 effectiveCaptureSlots 파생 결과를 그대로 본다(규칙 사본 0).
+ * ★★ **key 로 찾지 말 것 — 라벨로도 찾는다**(코드리뷰가 잡은 실측 회귀):
+ *   `capture_slots` 의 유일한 writer(`tabconfig.routes` 캡처 슬롯 저장)는 key 를 **위치로** 부여한다
+ *   (`0번=review`, 그 외 `slot2`,`slot3`…) — 즉 **`receipt` 라는 key 는 영영 저장되지 않는다**.
+ *   그래서 key 만 보면 관리자가 `[리뷰, 현금영수증]` 으로 직접 설정한 현영 탭이 "대상 아님"이 되어
+ *   버튼이 죽는다(업로드는 그 슬롯 라벨로 `[리뷰]/현금영수증` 폴더를 실제로 만들어 둔 상태).
+ *   자동 파생 슬롯은 key `receipt`, 수동 설정은 라벨로 — 둘 다 인정한다.
+ *
+ * ★ **폴더 이름은 이 슬롯의 label** 이다(업로드가 그 라벨로 서브폴더를 만든다). `slotLabel(...,'receipt')`
+ *   로 찾으면 수동 슬롯 탭에서 문자열 `receipt` 라는 폴더를 뒤지게 된다(찾을 수 없는 이름).
  */
-function hasCashReceiptSlot(captureSlots, incomeType) {
+const _CR_LABEL_RE = /현금영수증|현영|지출증빙/;
+function cashReceiptSlotInfo(captureSlots, incomeType) {
   const eff = effectiveCaptureSlots(captureSlots, incomeType, null);
-  return Array.isArray(eff) && eff.some(s => s && s.key === 'receipt');
+  const slot = Array.isArray(eff)
+    ? (eff.find(s => s && (s.key === 'receipt' || _CR_LABEL_RE.test(String(s.label || '')))) || null)
+    : null;
+  return { slot, incomeSaysCashReceipt: isCashReceiptIncome(incomeType) };
+}
+/** 현금영수증 슬롯 보유 여부(버튼 활성 판정) — 규칙은 cashReceiptSlotInfo 한 곳. */
+function hasCashReceiptSlot(captureSlots, incomeType) {
+  return !!cashReceiptSlotInfo(captureSlots, incomeType).slot;
+}
+/**
+ * 진행방식은 현영인데 슬롯에서 현금영수증 칸을 못 찾은 경우의 안내 문구(오설정 신호).
+ * ★ 이 문구가 있어야 "대상 아님"으로 뭉개지 않는다 — 관리자가 **무엇을 고쳐야 하는지** 알 수 있다.
+ *   화면(버튼 툴팁)과 서버(클릭 시 응답)가 같은 문장을 쓰도록 여기 한 곳에 둔다.
+ */
+const CR_MISCONFIG_NOTE = '진행방식은 현영인데 캡처 슬롯 설정에 현금영수증 칸이 없습니다 — 탭 설정을 확인해 주세요.';
+/** 오설정 안내가 필요한가(현영인데 슬롯 없음) — 없으면 null(정상: 대상이거나 애초에 비대상). */
+function cashReceiptNote(captureSlots, incomeType) {
+  const r = cashReceiptSlotInfo(captureSlots, incomeType);
+  return (!r.slot && r.incomeSaysCashReceipt) ? CR_MISCONFIG_NOTE : null;
 }
 
 /** 슬롯 key → 표시 라벨(업로드 서브폴더명·안내문 공용). 모르는 key는 key 그대로. */
@@ -98,5 +124,6 @@ function slotLabel(captureSlots, incomeType, key, reviewType) {
 
 module.exports = {
   REVIEW_SLOT, RECEIPT_SLOT, CONFIRM_SLOT,
-  isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel, hasCashReceiptSlot,
+  isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel,
+  hasCashReceiptSlot, cashReceiptSlotInfo, cashReceiptNote, CR_MISCONFIG_NOTE,
 };

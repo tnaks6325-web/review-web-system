@@ -2099,7 +2099,9 @@ function _brandLens(){
 }
 function _awFolderBtns(it, big){
   if(STATE.brandId&&!it.folderUrl&&!it.captureFolderUrl) return '';   // 브랜드 세션: 폴더 비공개면 자리도 없음
-  const b=(url,cls,ic,label)=> url
+  //   ★ URL 검증은 내부 렌더러와 **같은 규칙**(_folUrlOk) — esc 는 속성 탈출만 막고
+  //     `javascript:` 같은 스킴은 그대로 실행된다. 검증 실패는 미연결과 같은 회색 자리.
+  const b=(url,cls,ic,label)=> _folUrlOk(url)
     ? `<a class="fol ${cls}${big?' big':''}" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${label} 폴더 열기 (Google Drive)">${ic} ${big?label+' 폴더':cls==='buy'?'구매':'리뷰'} <span class="up">↗</span></a>`
     : `<span class="fol off${big?' big':''}" title="폴더가 아직 연결되지 않았습니다 — 담당자에게 문의하세요">${ic} —</span>`;
   return b(it.captureFolderUrl,'buy','🛒','구매캡쳐')+b(it.folderUrl,'rev','📸','리뷰캡쳐');
@@ -2944,16 +2946,26 @@ function _folRow(src,i){
      cr===undefined = 현영 대상 여부 미상(구버전 백엔드) → '대상 아님'으로 단정하지 않는다. */
 function _folMat(t,src){
   if(!t) return {known:false,why:'작업 정보를 찾지 못했습니다'};
-  if(src==='own')   // 업체관리: 연결탭 응답이 폴더 재료를 직접 싣는다(추가 조회 없음)
-    return {known:true,cap:t.captureFolderUrl,rev:t.folderUrl,cr:t.cashReceipt};
-  if(src==='cur'){  // 작업보드: 홈에서 온 stats 가 있으면 그것, 없으면 kind=info 지연조회 결과
-    const f=t._fol||t.stats;
+  if(src==='own'){  // 업체관리: 연결탭 응답이 폴더 재료를 직접 싣는다(추가 조회 없음)
+    // ★ 담당 밖 업체는 서버가 폴더 URL 을 비워 보낸다(folderScoped:false) — '폴더 미생성'이 아니라 그 사유를 말한다.
+    if((STATE.ownTabMeta||{}).folderScoped===false)
+      return {known:false,why:'담당하지 않은 업체의 작업입니다 — 폴더 링크는 담당 AE·관리자에게 문의하세요'};
+    // ★ tab_configs 행 자체가 없는 탭(LEFT JOIN NULL)은 "폴더가 없다"가 아니라 "등록 정보가 없다".
+    //   구버전 백엔드는 이 플래그를 안 보내므로 undefined 는 종전대로 '등록됨'으로 본다(스큐 무해).
+    if(t.hasTabConfig===false)
+      return {known:false,why:'이 탭은 등록 정보가 없습니다(탭 설정 미등록) — 폴더를 알 수 없습니다'};
+    return {known:true,cap:t.captureFolderUrl,rev:t.folderUrl,cr:t.cashReceipt,crNote:t.cashReceiptNote};
+  }
+  if(src==='cur'){  // 작업보드: kind=info 지연조회 결과, 없으면 홈에서 온 stats
+    // ★★ 실패한 _fol 이 나중에 도착한 stats 를 영영 덮지 않게 한다(코드리뷰가 잡은 실측 경로):
+    //   직행 진입 → info 일시 실패 → 홈 방문(stats 병합) → 재진입 이면 버튼이 세션 내내 죽어 있었다.
+    const f=(t._fol&&!t._fol.err)?t._fol:(t.stats||t._fol);
     if(!f) return {known:false,why:'폴더 정보를 불러오는 중입니다'};
     if(f.err) return {known:false,why:f.err};
-    return {known:true,cap:f.captureFolderUrl,rev:f.folderUrl,cr:f.cashReceipt};
+    return {known:true,cap:f.captureFolderUrl,rev:f.folderUrl,cr:f.cashReceipt,crNote:f.cashReceiptNote};
   }
   if(!t.stats) return {known:false,why:'수치를 불러오지 못해 폴더 정보를 알 수 없습니다(새로고침해 주세요)'};
-  return {known:true,cap:t.stats.captureFolderUrl,rev:t.stats.folderUrl,cr:t.stats.cashReceipt};
+  return {known:true,cap:t.stats.captureFolderUrl,rev:t.stats.folderUrl,cr:t.stats.cashReceipt,crNote:t.stats.cashReceiptNote};
 }
 function _folBtnsInner(t,i,src,big){
   const m=_folMat(t,src);
@@ -2967,7 +2979,9 @@ function _folBtnsInner(t,i,src,big){
     + b('review',L[1],m.known&&_folUrlOk(m.rev),_folUrlOk(m.rev)?'리뷰 폴더 열기':tipNoFolder)
     + b('receipt',L[2],m.known&&m.cr===true,
         m.cr===true?'현금영수증 폴더 열기'
-          :(m.cr===undefined?'현금영수증 대상 여부를 알 수 없습니다(서버 응답에 값이 없습니다)':'현금영수증 발행 대상 작업이 아닙니다'));
+          :(m.cr===undefined?'현금영수증 대상 여부를 알 수 없습니다(서버 응답에 값이 없습니다)'
+            // 오설정(현영인데 슬롯에 현금영수증 칸 없음)은 서버가 준 문장을 그대로 — '대상 아님'으로 뭉개지 않는다.
+            :(m.crNote||'현금영수증 발행 대상 작업이 아닙니다')));
 }
 function _folBtnsHtml(t,i,src){ return `<span class="wbl-fol">${_folBtnsInner(t,i,src||'home',false)}</span>`; }
 /* 작업보드 상단(툴바 오른쪽) — 작업이 **하나로 특정된** 자리라 라벨을 다 쓰는 큰 버튼을 쓴다.
@@ -2982,12 +2996,19 @@ function _folBarHtml(){
    ★ 이미 stats 가 병합돼 있으면(홈을 거쳐 온 경우) 아무 요청도 하지 않는다. */
 async function _folEnsureCur(){
   const t=STATE.cur;
-  if(!t||STATE.role==='advertiser'||t._fol||t.stats||t._folLoad) return;
+  // ★ 성공한 재료가 있으면 재요청 없음. **실패는 다시 시도한다** — 한 번의 일시 장애로 버튼이
+  //   세션 내내 죽어 있으면 사용자에게 되살릴 방법이 없다(작업을 다시 열면 재시도 = 자연스러운 복구).
+  if(!t||STATE.role==='advertiser'||t.stats||t._folLoad||(t._fol&&!t._fol.err)) return;
   t._folLoad=true;
   try{
     const r=await api('/api/trackb/tab-folders?kind=info&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
-    t._fol=(r&&r.ok)?{captureFolderUrl:r.captureFolderUrl,folderUrl:r.folderUrl,cashReceipt:r.cashReceipt}
-                    :{err:(r&&r.error)||'폴더 정보를 불러오지 못했습니다'};
+    // ★★ kind 표식이 없으면 **info 응답이 아니다** — 구버전 백엔드(Pages 가 Railway 보다 앞선 배포 스큐)는
+    //   kind 를 모르고 현영 분기로 답하는데, 그 `{ok:true,url}` 을 그대로 믿으면 폴더가 멀쩡히 있는데도
+    //   "아직 폴더가 생성되지 않았습니다"로, `{ok:false,'현금영수증 발행 대상 아님'}` 이면 구매·리뷰 버튼까지
+    //   그 문구로 위장된다(실측 시나리오). 표식이 없으면 '모른다'로 두고 사유를 말한다.
+    if(r&&r.kind!=='info') t._fol={err:'서버 업데이트 대기 — 폴더 정보를 알 수 없습니다(잠시 후 다시 열어 주세요)'};
+    else t._fol=(r&&r.ok)?{captureFolderUrl:r.captureFolderUrl,folderUrl:r.folderUrl,cashReceipt:r.cashReceipt,cashReceiptNote:r.cashReceiptNote}
+                         :{err:(r&&r.error)||'폴더 정보를 불러오지 못했습니다'};
   }catch(_){ t._fol={err:'폴더 정보를 불러오지 못했습니다'}; }
   finally{
     t._folLoad=false;
@@ -3363,7 +3384,9 @@ function renderWorkdesk(wd){
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
-  _folEnsureCur();         // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0)
+  // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0).
+  //   ★ .catch() 필수 — finally 가 DOM 을 건드리므로 거기서 throw 하면 처리되지 않은 rejection 이 된다.
+  _folEnsureCur().catch(()=>{});
   if(STATE.role==='advertiser') _rvBoot(STATE.cur);   // 업체: 리뷰 이미지 미리보기 패널
 }
 
@@ -8627,7 +8650,8 @@ async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCu
   STATE.advLink=(lk&&lk.ok&&lk.link)||null;   // 이 업체 접속 링크(있으면 token/active)
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   // ★ 마감/통계 조회 실패는 플래그로 온다 — 화면이 "마감자료 검수 0건"으로 위장하지 않고 사유를 적는다.
-  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable } : { unreachable:true };
+  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable,
+    folderScoped: rt.folderScoped===false ? false : true } : { unreachable:true };
   STATE.ownItems=(r&&r.items)||[];   // 소유 캠페인(설정 패널이 읽는다)
   _ovmQ=''; _ovmF='all';
   renderOwnPanel(a, STATE.ownItems);
@@ -8715,8 +8739,11 @@ function _ownTabsHtml(){
     return `<div class="st">연결된 탭 0</div><div class="empty" style="padding:14px">연결된 탭 없음 — [소유 시트]에서 시트를 지정하면 그 시트의 탭이 여기 나옵니다.</div>`;
   }
   const meta=STATE.ownTabMeta||{};
-  const warn=(meta.statsUnavailable||meta.finishedUnavailable)
-    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '';
+  const warn=((meta.statsUnavailable||meta.finishedUnavailable)
+    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '')
+    // ★ 담당하지 않은 업체는 서버가 폴더 링크를 내려주지 않는다 — 그 사실을 말한다(회색 버튼만 두면 오독).
+    + (meta.folderScoped===false
+      ? `<div class="ovm-warn">⚠ 담당하지 않은 업체라 <b>[자료]</b> 폴더 링크는 표시되지 않습니다(담당 AE·관리자에게 문의).</div>` : '');
   return `<div class="st">연결된 탭 ${ot.length} <span class="sthint">최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 탭만 표시</span></div>
     <div class="ovm-tools">
       <div class="tr">

@@ -15,7 +15,7 @@
 const { logger } = require('../utils/logger');
 const participants = require('./participants.service');
 const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
-const { hasCashReceiptSlot } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
+const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 
 let _pool;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -670,6 +670,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
             tc.manager, tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl",
             tc.capture_slots AS "captureSlots", tc.income_type AS "incomeType",
+            (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
@@ -709,6 +710,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
   //     전송 낭비이고, 화면이 필요한 것은 불리언 하나다(프론트 재판정 금지 = 규칙이 갈라지지 않는다).
   for (const r of rows) {
     r.cashReceipt = hasCashReceiptSlot(r.captureSlots, r.incomeType);
+    const note = cashReceiptNote(r.captureSlots, r.incomeType);
+    if (note) r.cashReceiptNote = note;
     delete r.captureSlots; delete r.incomeType;
   }
   // ── 마감 여부·마감자료 검수 대기 주석 — ★ 판정은 finishCandidate 한 곳, 재료는 홈과 같은 tabStatsMap.
@@ -3107,6 +3110,8 @@ async function tabStatsMap({ force = false } = {}) {
         //     income_type 만 봐서, 수동 슬롯 탭은 "버튼은 비활성인데 서버는 허용"으로 갈라져 있었다.
         folderUrl: r.folderUrl || null, captureFolderUrl: r.captureFolderUrl || null,
         cashReceipt: hasCashReceiptSlot(r.captureSlots, r.incomeType),
+        // 오설정(현영인데 슬롯에 현금영수증 칸 없음)일 때만 실린다 — '대상 아님'으로 뭉개지 않게.
+        ...(cashReceiptNote(r.captureSlots, r.incomeType) ? { cashReceiptNote: cashReceiptNote(r.captureSlots, r.incomeType) } : {}),
         closeoutDate: r.closeoutDate || null, closeoutRows: r.closeoutRows == null ? null : +r.closeoutRows,
       };
     }

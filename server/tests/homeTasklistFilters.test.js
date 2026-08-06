@@ -282,10 +282,18 @@ const svc = require('../src/services/trackB.service');
   r4 = await call({ sheetId: 'S1', tabName: 'D' });
   t('리뷰 폴더 없음 = 자동 생성 시점 안내', r4.out.ok === false && /리뷰 폴더가 아직 없습니다/.test(r4.out.error));
   // ⑥ staff 스코프 — 담당 밖 탭은 403(폴더 URL 도 스코프 밖으로 새지 않는다)
+  //   ★★ **캐시가 채워진 키로도** 확인한다(코드리뷰가 잡은 테스트 공백): 종전 검사는 한 번도 캐시되지
+  //     않은 탭명을 써서, 캐시 히트가 스코프 게이트를 건너뛰던 구멍을 통과시켰다. admin 으로 먼저
+  //     같은 키를 성공시켜 캐시를 데운 뒤 담당 밖 staff 로 부른다.
+  tabRow = { folder_url: 'https://drive.google.com/drive/folders/rv9', capture_slots: null, income_type: '현영' };
+  driveFound = { id: 'sub9', webViewLink: 'https://drive.google.com/drive/folders/sub9' };
+  const warm = await call({ sheetId: 'S1', tabName: 'E' });
+  t('캐시 워밍(admin) 성공', warm.out.ok === true && /sub9/.test(warm.out.url || ''));
   const origScope = svc.canAccessTab;
   svc.canAccessTab = async () => false;
   r4 = await call({ sheetId: 'S1', tabName: 'E' }, { role: 'staff', name: 'AE1' });
-  t('★ staff 담당 밖 = 403(마감·스레드와 같은 스코프 규율)', r4.status === 403 && r4.out.ok === false);
+  t('★★ staff 담당 밖 = 403 — **캐시된 탭에서도**(캐시가 스코프를 우회하지 않는다)',
+    r4.status === 403 && r4.out.ok === false && !r4.out.url);
   svc.canAccessTab = origScope;
   // ⑦ DB 예외 = fail-soft 200
   pool.query = async () => { throw new Error('db down'); };
