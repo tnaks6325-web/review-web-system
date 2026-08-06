@@ -152,6 +152,15 @@
           <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${timeFmt(m.createdAt)}</div>
         </div>`;
       }
+      // 검수 결과(반려·이동) = 문구 + 사진 카드. 관리자 화면과 **같은 렌더러**를 쓴다.
+      if (m.msgType === 'inspect_result' && window.CsReviewEditCard && window.CsReviewEditCard.inspectHtml) {
+        return `<div style="display:flex;flex-direction:column;align-items:flex-start;max-width:88%">
+          <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${esc(m.senderName || '관리자')}</div>
+          <div style="background:#fff;border-radius:4px 14px 14px 14px;padding:10px 12px;font-size:.85rem;line-height:1.55;box-shadow:0 1px 2px rgba(27,35,52,.07);white-space:pre-wrap">${esc(m.content || '')}
+            ${window.CsReviewEditCard.inspectHtml(m.meta || {})}</div>
+          <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${timeFmt(m.createdAt)}</div>
+        </div>`;
+      }
       const imgs = Array.isArray(m.imageUrls) ? m.imageUrls : [];
       const imgHtml = imgs.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;max-width:80%;margin-top:${m.content ? '4px' : '0'}">` +
         imgs.map(u => `<img src="${esc(u)}" alt="첨부 사진" onclick="ReviewerCS.viewImage('${esc(u)}')"

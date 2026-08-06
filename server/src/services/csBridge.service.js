@@ -214,7 +214,7 @@ async function markReviewEditCancelled(r) {
  *   (교체요청 카드 upsert 와 달리 "관리자가 확인할 도착물"이 아니다).
  * ★ SSE 페이로드의 발신자 이름은 반드시 리뷰어용으로 치환(닉네임 fail-closed 규율).
  */
-async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by } = {}) {
+async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card } = {}) {
   try {
     if (!phone8 || !String(message || '').trim()) return null;
     const campaignKey = campaignKeyOf(sheetId, tabName);
@@ -243,10 +243,27 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     }
 
     const senderName = _clip(by || '관리자', 100);   // DB 엔 로그인명(책임추적) — 표시 치환은 읽는 시점
+    /* ★ 사진 카드(선택) — 교체요청 카드와 같은 구조(meta + 파일ID, 프론트가 신뢰 베이스로 URL 재구성).
+       ★★ meta 는 리뷰어 응답에 **그대로 실린다** — 관리자 실명·시트 제목을 넣지 않는다(080 규율).
+       ★ 파일ID 형식이 아닌 값은 버린다(잘못된 값이 <img> 로 나가지 않게). */
+    const _fid = (v) => { const s = String(v || '').replace(/[^-\w]/g, ''); return s.length >= 10 ? s : ''; };
+    const meta = card ? {
+      kind: _clip(card.kind, 40),
+      fileId: _fid(card.fileId),
+      matchFileId: _fid(card.matchFileId),
+      work: _clip(card.work || tabName || '', 120),
+      product: _clip(card.product, 120),
+      ordinal: Number(card.ordinal) || 0,
+      submittedAt: card.submittedAt || null,
+      matchProduct: _clip(card.matchProduct, 120),
+      matchOrdinal: Number(card.matchOrdinal) || 0,
+      matchAt: card.matchAt || null,
+      to: _clip(card.to, 40),
+    } : null;
     const { rows: mRows } = await pool.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content)
-       VALUES ($1,'admin',$2,$3) RETURNING id, created_at AS "createdAt"`,
-      [threadId, senderName, text]
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
+       VALUES ($1,'admin',$2,$3,$4,$5::jsonb) RETURNING id, created_at AS "createdAt"`,
+      [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null]
     );
     await pool.query(
       `UPDATE cs_threads
@@ -262,6 +279,7 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
         senderName: adminNickname.toReviewerName(senderName, nickMap),
         content: text, imageUrls: [], createdAt: mRows[0].createdAt,
         campaignLabel: tabName || '문의',
+        msgType: meta ? 'inspect_result' : 'text', meta: meta || null,   // 실시간 푸시에도 카드가 그려지게
       });
     } catch (_) {}
     try { broadcast('cs_message', { threadId, senderRole: 'admin', reviewerPhone8: phone8 }); } catch (_) {}
