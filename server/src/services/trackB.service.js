@@ -403,6 +403,89 @@ async function listAdvertisersWithOwnership() {
   return rows;
 }
 
+// ══ 마감자료 검수 대기 판정 — ★★ 판정 단일 출처 ══════════════════════════════════════
+//   "이제 마감해도 되는 작업" = 인원 충족 + 전건 제출 + 전건 입금(088 사용자 확정 ㉠의 마감 후보와 **같은 규칙**).
+//   ★★ 재료는 홈 작업목록과 같은 tabStatsMap(index_master + review_index PAID) 하나다 —
+//     업체관리가 campaign_participants(bTotal/bSub/bPaid)로 따로 세면 **같은 작업이 홈에서는 마감 후보,
+//     업체관리에서는 아님**으로 갈린다(레포가 반복해 밟은 화면 간 불일치).
+//   ★ 통계가 없으면 판정하지 않는다(false) — 모르면 제안하지 않는다. 제안 전용이라 자동 처리는 없다.
+//   ★ 프론트는 이 불리언을 **그대로 소비**한다(화면 재계산 금지 — 홈 [공고] 버튼과 같은 규율).
+function finishCandidate(stats) {
+  if (!stats) return false;
+  const total = Number(stats.total);
+  if (!Number.isFinite(total) || total <= 0) return false;
+  return (Number(stats.submitted) || 0) >= total && (Number(stats.paid) || 0) >= total;
+}
+
+// ══ 업체별 개요 집계 — 업체관리 첫 화면(업체 미선택)의 표 재료 ═══════════════════════════
+//   ★★ 인트라넷 무접촉(로컬 DB만) — 그래서 항상 즉시 채워진다. 입금액은 인트라넷 sales 에만 있어
+//     여기서 셀 수 없으므로 **개요에 미입금 열을 두지 않는다**(업체를 고르면 표에서 채워진다).
+//     0 으로 꾸미거나 인트라넷을 17업체분 두들기는 쪽은 둘 다 택하지 않았다.
+//   ★ 판정·집계는 연결탭 표와 **같은 재료**(tabStatsMap·finishedTabsMap·trackb_settlement_links)로
+//     계산해 배지·칩·표 숫자가 갈리지 않게 한다.
+//   ★ fail-soft 지만 **조용하지 않다** — 소스별 실패를 플래그로 올려 화면이 '?'로 고지한다(088 규율).
+async function advertiserOverview() {
+  const db = getPool();
+  const out = { ok: true, byAdvertiser: {}, link: {}, statsUnavailable: false, finishedUnavailable: false, contractsUnavailable: false, linksUnavailable: false };
+  // ① 업체 ↔ 소유 탭 (ownedTabsForAdvertiser 와 같은 소유 해석: 시트전체=그 시트 모든 탭 / 탭지정=그 탭만)
+  let ownRows = [];
+  try {
+    const { rows } = await db.query(
+      `WITH own AS (
+         SELECT advertiser_id, sheet_id, tab_gid FROM advertiser_campaigns WHERE deleted_at IS NULL
+       ), tabs AS (
+         SELECT DISTINCT ON (rst.sheet_id, rst.tab_gid) rst.sheet_id, rst.tab_gid, rst.tab_name
+           FROM raw_sheet_tabs rst
+          WHERE rst.is_system_tab = FALSE
+          ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC
+       )
+       SELECT o.advertiser_id AS "advertiserId", t.sheet_id AS "sheetId",
+              t.tab_gid AS "tabGid", t.tab_name AS "tabName"
+         FROM tabs t JOIN own o ON o.sheet_id = t.sheet_id AND (o.tab_gid IS NULL OR o.tab_gid = t.tab_gid)`);
+    ownRows = rows;
+  } catch (err) {
+    logger.warn(`[trackB] advertiserOverview 소유탭 조회 실패: ${err.message}`);
+    return { ...out, ok: false };
+  }
+  // ② 계약 매칭된 (시트·탭) 집합
+  const linked = new Set();
+  try {
+    const { rows } = await db.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName" FROM trackb_settlement_links WHERE deleted_at IS NULL`);
+    for (const r of rows) linked.add(_FIN_KEY(r.sheetId, r.tabName));
+  } catch (err) {
+    out.contractsUnavailable = true;
+    logger.warn(`[trackB] advertiserOverview 계약 링크 조회 실패: ${err.message}`);
+  }
+  // ③ 통계·마감 (둘 다 캐시 — 홈이 이미 불러왔으면 왕복 0)
+  const st = await tabStatsMap();
+  const fin = await finishedTabsMap();
+  out.statsUnavailable = !st.ok;
+  out.finishedUnavailable = !fin.ok;
+  // ④ 접속 링크 상태(업체별 1행) — 읽기만(없으면 미생성 = null, 여기서 만들지 않는다)
+  try {
+    const { rows } = await db.query(
+      `SELECT advertiser_id AS "advertiserId", active, login_required AS "loginRequired",
+              last_used_at AS "lastUsedAt", (token IS NOT NULL) AS "hasToken"
+         FROM trackb_advertiser_links`);
+    for (const r of rows) out.link[r.advertiserId] = { active: !!r.active, loginRequired: !!r.loginRequired, lastUsedAt: r.lastUsedAt, hasToken: !!r.hasToken };
+  } catch (err) {
+    out.linksUnavailable = true;
+    logger.warn(`[trackB] advertiserOverview 접속링크 조회 실패: ${err.message}`);
+  }
+  for (const r of ownRows) {
+    const k = _FIN_KEY(r.sheetId, r.tabName);
+    const g = String(r.tabGid == null ? '' : r.tabGid).trim();
+    const a = (out.byAdvertiser[r.advertiserId] ||= { works: 0, noMatch: 0, finishCand: 0 });
+    a.works += 1;
+    if (!out.contractsUnavailable && !linked.has(k)) a.noMatch += 1;
+    // 마감 여부는 이름 우선 → gid 폴백(탭 리네임으로 마감이 조용히 풀리지 않게 — 088 과 같은 규칙)
+    const finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
+    if (!finished && finishCandidate(st.map[k])) a.finishCand += 1;
+  }
+  return out;
+}
+
 // ── 이미 소유 지정된 시트 ID 집합 — 업체추가 폼의 시트 드롭다운에서 제외용(한 시트 중복 소유 방지). ──
 //   활성 소유(deleted_at IS NULL)만. 시트전체(tab_gid NULL)·특정탭 소유 모두 그 시트를 '지정됨'으로 본다.
 async function ownedSheetIds() {
@@ -619,7 +702,18 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
        ) co ON TRUE
        LEFT JOIN trackb_tab_memos tm ON tm.sheet_id = t.sheet_id AND tm.tab_name = t.tab_name
       ORDER BY COALESCE(cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
-  return rows;
+  // ── 마감 여부·마감자료 검수 대기 주석 — ★ 판정은 finishCandidate 한 곳, 재료는 홈과 같은 tabStatsMap.
+  //   화면(필터 칩·개요 배지)은 이 불리언을 그대로 소비한다(프론트 재계산 금지 = 숫자가 갈리지 않는다).
+  //   ★ fail-soft: 통계·마감 조회가 죽어도 표는 뜬다(그 경우 판정만 false — 라우트가 플래그로 고지).
+  const st = await tabStatsMap();
+  const fin = await finishedTabsMap();
+  for (const r of rows) {
+    const k = _FIN_KEY(r.sheetId, r.tabName);
+    const g = String(r.tabGid == null ? '' : r.tabGid).trim();
+    r.finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
+    r.finishCand = !r.finished && finishCandidate(st.map[k]);
+  }
+  return { rows, statsUnavailable: !st.ok, finishedUnavailable: !fin.ok };
 }
 
 // ══ 인트라넷(inadd-webapp, Cloudflare D1) 광고주DB 자동완성 프록시 ══
@@ -1094,7 +1188,7 @@ async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserI
 //   ★ 광고주 렌즈 없음 — 이 함수의 소비 라우트는 internalMiddleware(master/admin/staff)로 제한할 것.
 async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
   if (!advertiserId) throw new Error('settlementSummaryForAdvertiser: advertiserId 필수');
-  const tabs = await ownedTabsForAdvertiser({ advertiserId });
+  const tabs = (await ownedTabsForAdvertiser({ advertiserId })).rows;
   const linked = tabs.filter(t => t.salesId);
   const bySales = new Map();
   for (const t of linked) if (!bySales.has(t.salesId)) bySales.set(t.salesId, null);
@@ -1145,7 +1239,7 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
     if (!br.length) return { settlementHidden: true, brand: null, items: [] };   // 삭제된 브랜드 링크 = 빈 화면(fail-closed)
     brand = br[0];
   }
-  let tabs = await ownedTabsForAdvertiser({ advertiserId });
+  let tabs = (await ownedTabsForAdvertiser({ advertiserId })).rows;
   if (brand) tabs = tabs.filter(t => brandByTab.get(t.sheetId + '\t' + t.tabName) === brand.id);
   const visible = (await _settlementVisibleFor(advertiserId)) && (!brand || brand.settlement_visible === true);
   let setlByTab = new Map();
@@ -1246,7 +1340,7 @@ async function assignBrandTabs({ advertiserId, brandId, tabs } = {}) {
   const db = getPool();
   const own = await db.query('SELECT id FROM trackb_brands WHERE id=$1 AND advertiser_id=$2 AND deleted_at IS NULL', [brandId, advertiserId]);
   if (!own.rows.length) return { ok: false, code: 404, error: '브랜드를 찾을 수 없습니다.' };
-  const owned = new Set((await ownedTabsForAdvertiser({ advertiserId })).map(t => t.sheetId + '\t' + t.tabName));
+  const owned = new Set((await ownedTabsForAdvertiser({ advertiserId })).rows.map(t => t.sheetId + '\t' + t.tabName));
   const want = [];
   for (const t of (Array.isArray(tabs) ? tabs : []).slice(0, 2000)) {
     const sid = String((t && t.sheetId) || ''), tn = String((t && t.tabName) || '');
@@ -3199,6 +3293,8 @@ module.exports = {
   listOwnership,
   listAdvertisersWithOwnership,
   ownedTabsForAdvertiser,
+  finishCandidate,
+  advertiserOverview,
   createAdvertiserScoped,
   deleteAdvertiser,
   ownedSheetIds,
@@ -3221,6 +3317,9 @@ module.exports = {
   brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
   settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
+  // 회귀가드 전용 — tabStatsMap 의 30초 프로세스 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
+  //   운영 코드에서 부르지 말 것: 캐시는 "모든 내부 사용자의 홈 진입 경로"에 붙은 비용 절감 장치다.
+  __resetTabStatsCacheForTest() { _tabStatsCache = { at: 0, map: null }; },
   settlementVisibleFor,
   generateCloseout,
   latestCloseout,
