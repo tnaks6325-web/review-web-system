@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>검수 결과가 리뷰어에게 어떻게 전달되나 — 유형별 메시지 목업</title>
+<style>
+  /* 오프라인 열람 — 외부 리소스 0, 라이트 고정. */
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#F2F4F7; color:#1B2334; line-height:1.65; padding:28px 16px 100px; }
+  .wrap { max-width:1120px; margin:0 auto; }
+  h1 { font-size:1.38rem; margin-bottom:4px; }
+  h2 { font-size:1.1rem; margin:44px 0 8px; padding-bottom:8px; border-bottom:2px solid #313B52; }
+  p, li, td, th { font-size:.87rem; }
+  .sub { color:#64748B; font-size:.85rem; margin-bottom:18px; }
+  .doc { background:#fff; border:1px solid #E4E7EE; border-radius:12px; padding:17px 19px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; background:#fff; margin:9px 0; }
+  th, td { border:1px solid #E4E7EE; padding:8px 11px; text-align:left; vertical-align:top; font-size:.83rem; }
+  th { background:#F8F9FB; font-size:.79rem; }
+  ul { padding-left:20px; margin:6px 0; } li { margin:4px 0; }
+  .now { display:inline-block; font-size:.66rem; font-weight:800; background:#E5F3EE; color:#127A5E; border-radius:99px; padding:1px 8px; }
+  .add { display:inline-block; font-size:.66rem; font-weight:800; background:#FEF3C7; color:#92400E; border-radius:99px; padding:1px 8px; }
+  .none { display:inline-block; font-size:.66rem; font-weight:800; background:#F1F3F7; color:#68717E; border-radius:99px; padding:1px 8px; }
+  .note { background:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:11px 15px; font-size:.84rem; margin:11px 0; }
+  .star { color:#DC2626; font-weight:800; }
+
+  /* 흐름 */
+  .flow { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0; }
+  .fs { flex:1; min-width:175px; background:#fff; border:1px solid #E4E7EE; border-radius:11px; padding:12px 14px; }
+  .fs .n { font-size:.63rem; font-weight:800; letter-spacing:.08em; color:#94A3B8; }
+  .fs .t { font-size:.87rem; font-weight:800; margin:2px 0 5px; }
+  .fs .d { font-size:.77rem; color:#64748B; line-height:1.5; }
+  .fs .who { display:inline-block; font-size:.63rem; font-weight:800; border-radius:99px; padding:1px 8px; margin-bottom:5px; }
+  .fs .who.adm { background:#EFF6FF; color:#1D4ED8; } .fs .who.rev { background:#F1FBF4; color:#15803D; }
+
+  /* 폰 — 리뷰어 1:1 문의함 */
+  .phones { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
+  .ph { width:270px; background:#fff; border:1px solid #D8DEE8; border-radius:18px; overflow:hidden; box-shadow:0 2px 10px rgba(27,35,52,.08); }
+  .ph-top { background:#3182F6; color:#fff; padding:9px 13px; font-size:.78rem; font-weight:800; display:flex; align-items:center; gap:6px; }
+  .ph-top .b { margin-left:auto; font-size:.64rem; background:rgba(255,255,255,.22); border-radius:99px; padding:1px 7px; }
+  .chat { background:#F1F4F8; padding:12px 11px 14px; min-height:120px; }
+  .caption { font-size:.66rem; color:#94A3B8; text-align:center; margin-bottom:9px; }
+  .msg { background:#fff; border-radius:4px 14px 14px 14px; padding:10px 12px; font-size:.79rem; line-height:1.55; box-shadow:0 1px 2px rgba(27,35,52,.07); }
+  .msg .from { font-size:.68rem; font-weight:800; color:#3182F6; margin-bottom:4px; }
+  .msg .time { font-size:.62rem; color:#A9B1BF; margin-top:5px; text-align:right; }
+  .msg b { color:#111827; }
+  .msg .hl { color:#B91C1C; font-weight:800; }
+  /* 메시지 안 이미지 카드 */
+  .imgcard { border:1px solid #E5E7EB; border-radius:10px; padding:9px; margin-top:8px; background:#FBFCFE; }
+  .imgcard .cap { font-size:.68rem; font-weight:800; color:#6B7280; margin-bottom:6px; }
+  .pair { display:flex; gap:7px; }
+  .pair > div { flex:1; }
+  .pair .lb { font-size:.63rem; font-weight:800; margin-bottom:3px; }
+  .pair .lb.del { color:#B91C1C; } .pair .lb.keep { color:#15803D; }
+  .shot { height:82px; border-radius:6px; background:linear-gradient(160deg,#E4E7EE,#CFD6E0); display:grid; place-items:center; font-size:1.1rem; border:1px solid #E5E7EB; }
+  .shot.del { border-color:#FCA5A5; } .shot.keep { border-color:#86EFAC; }
+  .pair .sub2 { font-size:.62rem; color:#6B7280; margin-top:3px; line-height:1.35; }
+  .single { display:flex; gap:8px; align-items:center; }
+  .single .shot { width:58px; flex:none; height:74px; }
+  .work { font-size:.68rem; color:#3182F6; font-weight:700; margin-top:7px; }
+  .lbl { font-size:.68rem; font-weight:800; color:#94A3B8; letter-spacing:.06em; margin:18px 0 7px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>검수 결과가 리뷰어에게 어떻게 전달되나</h1>
+<p class="sub">유형별로 <b>리뷰어가 실제로 받게 될 메시지</b>를 그대로 그렸습니다. 메시지는 리뷰어 홈의 <b>1:1 문의함</b>으로 도착합니다(카톡이 아니라 앱 안 채팅). | 2026-08-06</p>
+
+<h2>1. 전달 흐름</h2>
+<div class="flow">
+  <div class="fs"><span class="who adm">관리자</span><div class="n">1단계</div><div class="t">리뷰검수에서 조치</div>
+    <div class="d">카드에서 [✕ 불량] 또는 [🗑 중복파일 제거]를 누릅니다.</div></div>
+  <div class="fs"><span class="who adm">관리자</span><div class="n">2단계</div><div class="t">확인 팝업에서 문구 확인</div>
+    <div class="d"><b>“리뷰어에게 안내 전송”이 기본으로 켜져</b> 있고, 사유 문구가 미리 채워져 있습니다. 보내기 전에 자유롭게 고칠 수 있습니다.</div></div>
+  <div class="fs"><span class="who rev">리뷰어</span><div class="n">3단계</div><div class="t">1:1 문의함에 도착</div>
+    <div class="d">리뷰어 홈 <b>1:1문의 탭에 빨간 숫자</b>가 붙고, 앱을 열어두었다면 즉시 표시됩니다.</div></div>
+  <div class="fs"><span class="who rev">리뷰어</span><div class="n">4단계</div><div class="t">확인하고 다시 제출</div>
+    <div class="d">메시지에서 <b>어느 작업의 어떤 사진</b>이 문제였는지 보고, 그 채팅으로 바로 문의하거나 다시 제출합니다.</div></div>
+</div>
+<div class="note">보내는 사람 이름은 <b>관리자 닉네임</b>(만두·망고 등)으로 표시됩니다 — 담당자 실명은 리뷰어에게 나가지 않습니다.</div>
+
+<h2>2. 유형별로 무엇이 전달되나</h2>
+<div class="doc">
+<table>
+<tr><th style="width:20%">검수 유형</th><th style="width:22%">관리자 조치</th><th style="width:14%">전달 여부</th><th>리뷰어가 받는 내용</th></tr>
+<tr><td>📄 같은 파일(중복)</td><td>🗑 중복파일 제거</td><td><span class="add">이번에 추가</span></td>
+    <td><b>“중복이미지 제출로 반려되었습니다.”</b> + <b>제거된 사진</b>과 <b>이미 제출돼 있던 사진</b>을 나란히 + 어느 작업인지</td></tr>
+<tr><td>📵 리뷰화면 아님</td><td>✕ 불량</td><td><span class="now">지금도 감</span></td>
+    <td>판별된 종류를 담은 사유(예: “현금영수증 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다”) + 그 사진</td></tr>
+<tr><td>📵 리뷰화면 아님</td><td>🧾/🛒 다른 칸으로 이동</td><td><span class="add">이번에 추가</span></td>
+    <td>“올려주신 사진은 <b>현금영수증</b>으로 확인되어 그 칸으로 옮겼습니다. <b>리뷰 캡처를 추가로</b> 올려주세요.”</td></tr>
+<tr><td>🏷 상품명 다름</td><td>✓ 정상(별칭 학습)</td><td><span class="none">보내지 않음</span></td>
+    <td>시스템 오탐이라 리뷰어가 할 일이 없습니다(조용히 통과 처리).</td></tr>
+<tr><td>🏷 상품명 다름</td><td>✕ 불량</td><td><span class="now">지금도 감</span></td>
+    <td>“캡처의 상품이 이 작업의 상품과 달라 보입니다” + 그 사진</td></tr>
+<tr><td>🔀 채널 다름</td><td>✓ 정상 / ✕ 불량</td><td><span class="now">불량일 때만</span></td>
+    <td>“쿠팡 작업에 네이버 캡처가 제출되었습니다” + 그 사진</td></tr>
+<tr><td>✍ 본문 겹침</td><td>✕ 불량</td><td><span class="now">지금도 감</span></td>
+    <td>“앞서 제출하신 리뷰와 내용이 거의 같습니다” + 그 사진</td></tr>
+<tr><td>👤 작성자 표기</td><td>✓ 정상 / ✕ 불량</td><td><span class="now">불량일 때만</span></td>
+    <td>관리자가 작성한 사유</td></tr>
+</table>
+<div class="note"><b>공통</b> — 어떤 경우에도 <b>전송 여부는 관리자가 끌 수 있고</b>, 전송이 실패하면 “안내 전송 실패”라고 관리자 화면이 알려줍니다(조용히 안 보내고 넘어가지 않습니다).</div>
+</div>
+
+<h2>3. 리뷰어가 받는 실제 화면</h2>
+<div class="lbl">리뷰어 홈 → 1:1 문의함</div>
+<div class="phones">
+
+  <!-- 중복 -->
+  <div class="ph">
+    <div class="ph-top">💬 1:1 문의<span class="b">새 메시지 1</span></div>
+    <div class="chat">
+      <div class="caption">오늘</div>
+      <div class="msg">
+        <div class="from">만두</div>
+        <span class="hl">중복이미지 제출로 반려되었습니다.</span><br>
+        앞서 제출하신 사진과 같은 사진이 다시 올라와, 나중에 올리신 사진은 등록되지 않았습니다.
+        <div class="imgcard">
+          <div class="cap">어떤 사진이 중복이었는지</div>
+          <div class="pair">
+            <div><div class="lb del">✕ 반려된 사진</div><div class="shot del">🖼</div>
+              <div class="sub2">8/6 오후 2:31 제출<br>③ 한경희 선풍기 (블랙)</div></div>
+            <div><div class="lb keep">✓ 이미 제출된 사진</div><div class="shot keep">🖼</div>
+              <div class="sub2">7/29 오후 9:58 제출<br>① 한경희 선풍기 (블랙)</div></div>
+          </div>
+          <div class="work">📋 0629)친구사이_하절기 7차</div>
+        </div>
+        이번 건은 <b>다른 리뷰 화면</b>을 캡처해 다시 제출해 주세요.
+        <div class="time">오후 2:34</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 리뷰화면 아님 -->
+  <div class="ph">
+    <div class="ph-top">💬 1:1 문의<span class="b">새 메시지 1</span></div>
+    <div class="chat">
+      <div class="caption">오늘</div>
+      <div class="msg">
+        <div class="from">망고</div>
+        제출하신 리뷰 캡처가 검수에서 반려되었습니다.<br><br>
+        사유: <span class="hl">현금영수증 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다</span>
+        <div class="imgcard">
+          <div class="cap">반려된 사진</div>
+          <div class="single"><div class="shot del">🧾</div>
+            <div class="sub2">8/6 오전 11:24 제출<br>① 우레온 바디미스트</div></div>
+          <div class="work">📋 7/23(쿠팡)우레온_바디미스트 100건</div>
+        </div>
+        올바른 캡처로 다시 제출해 주세요. 궁금한 점은 이 채팅으로 답장 주시면 됩니다.
+        <div class="time">오전 11:40</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 이동 안내 -->
+  <div class="ph">
+    <div class="ph-top">💬 1:1 문의<span class="b">새 메시지 1</span></div>
+    <div class="chat">
+      <div class="caption">오늘</div>
+      <div class="msg">
+        <div class="from">만두</div>
+        올려주신 사진은 <b>현금영수증</b>으로 확인되어 <b>현금영수증 칸으로 옮겨</b> 두었습니다.
+        <div class="imgcard">
+          <div class="cap">옮긴 사진</div>
+          <div class="single"><div class="shot">🧾</div>
+            <div class="sub2">8/6 오전 11:24 제출<br>→ 현금영수증 칸</div></div>
+          <div class="work">📋 6/26레노버라방_지출증빙</div>
+        </div>
+        <b>리뷰 캡처는 아직 비어 있어요</b> — 리뷰 화면을 캡처해 추가로 올려주세요.
+        <div class="time">오전 11:42</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 본문 겹침 -->
+  <div class="ph">
+    <div class="ph-top">💬 1:1 문의<span class="b">새 메시지 1</span></div>
+    <div class="chat">
+      <div class="caption">어제</div>
+      <div class="msg">
+        <div class="from">망고</div>
+        제출하신 리뷰 캡처가 검수에서 반려되었습니다.<br><br>
+        사유: <span class="hl">앞서 제출하신 리뷰와 내용이 거의 같습니다(100% 일치)</span>
+        <div class="imgcard">
+          <div class="cap">반려된 사진</div>
+          <div class="single"><div class="shot del">🖼</div>
+            <div class="sub2">8/5 오후 6:02 제출<br>③ 한경희 선풍기 (블랙)</div></div>
+          <div class="work">📋 0629)친구사이_하절기 7차</div>
+        </div>
+        건마다 <b>새로 작성한 리뷰</b>가 필요합니다. 다시 작성해 제출해 주세요.
+        <div class="time">오후 6:15</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<h2>4. “어떤 작업의 어떤 이미지인지”를 어떻게 보여주나</h2>
+<div class="doc">
+<ul>
+  <li><b>가능합니다.</b> 리뷰이미지 교체요청 메시지가 이미 같은 방식으로 <b>사진 두 장(기존/변경 요청)</b>을 채팅 안에 보여주고 있어, 그 구조를 그대로 씁니다 — <b>새로 만드는 저장소나 링크는 없습니다.</b></li>
+  <li>사진은 <b>리뷰어 본인이 낸 것</b>만 들어갑니다(남의 제출물은 어떤 경우에도 나가지 않습니다). 사진을 누르면 크게 볼 수 있습니다.</li>
+  <li><b>작업 표기</b>는 리뷰어가 리뷰 내역에서 이미 보고 있는 작업명을 그대로 씁니다. 건 구분은 <b>참여 순번 ①②③ + 상품(옵션)</b>으로 하고 <b>관리용 줄 번호는 쓰지 않습니다.</b></li>
+  <li>중복 건은 <b>반려된 사진</b>과 <b>이미 제출돼 있던 사진</b>을 나란히 보여 “왜 반려인지”가 설명 없이도 보이게 합니다.</li>
+</ul>
+<div class="note"><span class="star">★</span> 반려해도 <b>사진은 영구삭제되지 않습니다</b>(휴지통 30일 보관) — 잘못 눌렀거나 리뷰어가 이의를 제기하면 되돌릴 수 있습니다.</div>
+</div>
+
+<h2>5. 이대로 만들면 되는지</h2>
+<div class="doc">
+<table>
+<tr><th style="width:34%">항목</th><th>내용</th></tr>
+<tr><td>중복 제거 시 문구</td><td><b>“중복이미지 제출로 반려되었습니다.”</b>(요청하신 문구) + 안내 문장 + 사진 두 장</td></tr>
+<tr><td>이동(현금영수증·구매캡처) 안내</td><td>새로 추가 — 옮겼다는 사실과 <b>리뷰 캡처가 아직 비어 있다</b>는 점을 함께 알립니다</td></tr>
+<tr><td>전송 여부</td><td>모든 경우 <b>기본 켬 + 관리자가 끌 수 있음</b>, 문구는 보내기 전 수정 가능</td></tr>
+<tr><td>보내지 않는 경우</td><td>[✓ 정상] 처리(오탐)와 일괄 정상 처리 — 리뷰어가 할 일이 없습니다</td></tr>
+</table>
+<p style="margin-top:8px">이대로 진행해도 되면 <b>“만들어줘”</b>만 주시면 됩니다. 문구를 바꾸고 싶은 유형이 있으면 그 문장을 알려주세요.</p>
+</div>
+
+</div>
+</body>
+</html>
