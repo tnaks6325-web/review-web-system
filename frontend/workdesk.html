@@ -164,7 +164,10 @@
   .folhead{display:inline-flex;gap:6px;align-items:center}
   /* 화면 B(작업 상세) — 헤더·요약 스트립·정산 카드를 본문 데이터 폭과 같은 값으로 캡(광고주 화면만).
      시트 그리드는 열 고정폭 합이라 원래 안 늘어남(_fitGrid) — 캡 불필요. */
-  body.advm .main .mh,body.advm .stripA,body.advm .setldetail,body.advm .wobar,body.advm .wodetail{max-width:1380px}
+  body.advm .main .mh,body.advm .tp3grid,body.advm .setldetail,body.advm .wobar,body.advm .wodetail{max-width:1380px}
+  /* ★ 광고주는 정산 열이 없어 2열(.n2)이라 1380 을 다 쓰면 두 카드가 지나치게 넓어진다.
+     위 줄이 .tp3grid.n2(0,2,0)보다 특이성이 높아(0,2,1) 그냥 두면 920 상한이 죽는다 — 실측으로 잡았다. */
+  body.advm .tp3grid.n2{max-width:920px}
   /* 정산 카드 금액 4칸(총비용/입금액/입금일/남은 입금액) */
   .advmoney{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px}
   .ambox{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--card2)}
@@ -403,6 +406,27 @@
   .mhsheet{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);
     border-radius:7px;padding:3px 9px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
+  /* ══ 작업보드 제목 행(.mh.mh-wb) — 마감 안내 문구 + [🏁 마감] 이 작업명과 **같은 행** ══════════
+     ★★ nowrap 이 없으면 안 된다: flex 는 **줄바꿈을 먼저 하고 축소는 그다음**이라(줄나눔 판정은 축소 전
+        max-content 기준) min-width:0 만 주면 좁은 폭에서 [마감]이 아랫줄로 떨어진다 — 시안 검증에서 실측.
+        nowrap + (제목·시트명·문구의) min-width:0 이 한 벌이어야 어떤 폭에서도 한 행을 지킨다.
+     ★ 스코프는 mh-wb 한정 — 공유 클래스 .mh 를 건드리면 작업오더·모집공고 등 다른 뷰 헤더까지 nowrap 이 된다. */
+  .mh.mh-wb{flex-wrap:nowrap}
+  .mh.mh-wb h1,.mh.mh-wb .mhsheet{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+  .mh.mh-wb .bd,.mh.mh-wb .btn,.mh.mh-wb .wchip{flex:none}
+  .tp3fin{display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto}
+  .tp3fin .ft{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+  .tp3fin .wbl-s,.tp3fin .wbl-b{flex:none}
+  /* 좁은 화면에서는 뒷문장만 접는다 — 지우는 게 아니라 title 툴팁으로 남긴다 */
+  @media(max-width:1280px){.tp3fin .ft .opt{display:none}}
+  /* master 도구 3종(Track B 전환·write-back 시뮬·그림자 투영)은 [⋯] 로 접는다 —
+     주 행동인 [마감]이 오른쪽 끝을 갖고, 도구가 그 앞을 밀지 않게 한다. */
+  .mhtools{position:relative;flex:none}
+  .mhmenu{position:absolute;right:0;top:calc(100% + 5px);background:var(--card);border:1px solid var(--line2);
+    border-radius:10px;box-shadow:var(--shadow-card);padding:5px;z-index:20;min-width:200px;display:none}
+  .mhtools.open .mhmenu{display:block}
+  .mhmenu .btn{display:flex;width:100%;justify-content:flex-start;border:none;background:none;height:30px;margin:0}
+  .mhmenu .btn:hover{background:var(--card2)}
   .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent} .bd.w{background:var(--warn-soft);color:var(--warn);border-color:transparent} .bd.ovcov-miss{cursor:pointer}
   .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
   .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
@@ -1093,19 +1117,47 @@
   /* ★ 요약 셀은 내용 폭만큼만(hug-left) — flex:1 로 두면 넓은 화면에서 남는 폭을 카드들이 전부 나눠 먹어
      "카드가 화면 끝까지 늘어나는" 신고 재현. 성장 없이(0) 내용 기준 + min/max 만 두고, 남는 폭은 우측 여백
      (모집공고 카드 컨테이너·C/S 대화창과 같은 원리). 좁은 화면 축소(shrink·wrap)는 종전 그대로. */
-  .stripA{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
-  .stripA .mcell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:120px;max-width:300px;flex:0 1 auto}
-  .stripA .mcell .k{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
-  .stripA .mcell .v{font-size:14px;font-weight:700;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .stripA .mcell.kpi .v{font-size:17px;letter-spacing:-.01em}
-  .stripA .mcell .v small{font-size:11px;font-weight:600;color:var(--faint);margin-left:2px}
-  .stripA .spct{font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:2px}
-  .spct.safe{background:var(--safe-soft);color:var(--safe)} .spct.acc{background:var(--accent-soft);color:var(--accent-deep)} .spct.warn{background:var(--warn-soft);color:var(--warn)}
-  .stripA .mcell.kpi.s{border-color:color-mix(in srgb,var(--safe) 28%,var(--line))}
-  .stripA .mcell.kpi.p{border-color:color-mix(in srgb,var(--accent) 26%,var(--line))}
-  .stripA .mcell.setl{cursor:pointer;flex:0 1 auto;min-width:230px;max-width:340px} .stripA .mcell.setl:hover{border-color:var(--accent-line);background:var(--card2)}
-  .stripA .mcell.setl .v{font-size:12.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-weight:600}
-  .stripA .mcell.setl .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s} .stripA .mcell.setl.open .caret{transform:rotate(180deg)}
+  /* ══ 작업보드 상단 3단 (시안 B · frontend/docs/design-workboard-top-3section.html) ═══════════
+     제목 행(마감 문구 + [마감] 포함) + [작업 조건 · 진행 현황 · 정산] 3분할 카드.
+     종전 8칸 스트립(.stripA .mcell)은 성격이 다른 값(조건/숫자/정산)이 같은 모양으로 섞여 위계가 없었고,
+     마감 안내가 전폭 띠 한 줄을 상시 차지했다 — 둘 다 이 구조로 흡수한다.
+     ★ 폭 상한 1380px = 모집공고 카드 컨테이너·광고주 캡과 같은 값(hug-left + 남는 폭은 오른쪽 여백). */
+  .tp3grid{display:grid;grid-template-columns:minmax(250px,1.05fr) minmax(280px,1.1fr) minmax(230px,.95fr);
+           gap:9px;margin-bottom:8px;max-width:1380px}
+  .tp3grid.n2{grid-template-columns:minmax(250px,1.05fr) minmax(280px,1.1fr);max-width:920px}   /* 광고주 = 정산 열 없음 */
+  @media(max-width:1000px){.tp3grid,.tp3grid.n2{grid-template-columns:1fr}}
+  .tp3col{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-width:0}
+  .tp3t{font-size:9.5px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;
+        display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  /* 작업 조건 — 라벨/값 2열. 값은 min-width:0 이라야 긴 상품명이 카드를 밀지 않고 …축약된다(title 툴팁 보존) */
+  .tp3kv{display:grid;grid-template-columns:58px minmax(0,1fr);gap:3px 8px;font-size:12.5px;margin:0}
+  .tp3kv dt{font-size:11px;color:var(--faint);font-weight:650;padding-top:1px}
+  .tp3kv dd{margin:0;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tp3wo{margin-top:9px;padding-top:9px;border-top:1px dashed var(--line2);display:flex;align-items:center;gap:8px;font-size:11.5px}
+  .tp3wo b{color:var(--warn);font-weight:700}
+  .tp3wo .btn{margin-left:auto;height:27px;font-size:11px;padding:0 11px}
+  /* 진행 현황 — 숫자 + 막대(“얼마나 남았나”를 암산하지 않게) */
+  .tp3g{display:flex;align-items:center;gap:10px;padding:5px 0}
+  .tp3g + .tp3g{border-top:1px solid var(--line)}
+  .tp3g .lb{font-size:11px;color:var(--muted);font-weight:650;width:58px;flex:none}
+  .tp3g .nm{font-size:16px;font-weight:800;letter-spacing:-.02em;width:92px;flex:none}
+  .tp3g .nm small{font-size:10.5px;font-weight:600;color:var(--faint);margin-left:1px}
+  .tp3g .track{flex:1;height:6px;border-radius:4px;background:var(--line);overflow:hidden;min-width:40px}
+  .tp3g .track i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+  .tp3g .track i.s{background:var(--safe)}
+  .tp3g .pc{font-size:10.5px;font-weight:800;width:36px;text-align:right;flex:none;color:var(--muted)}
+  /* 정산 — 카드 클릭 = 하단 상세(스텝퍼) 펼침/접기(종전 .mcell.setl 계약 그대로) */
+  .tp3col.setl{cursor:pointer}
+  .tp3col.setl:hover{border-color:var(--accent-line);background:var(--card2)}
+  .tp3col.setl .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s}
+  .tp3col.setl.open .caret{transform:rotate(180deg)}
+  .tp3setl{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12.5px;font-weight:650}
+  .setlsummary{display:block;min-width:0}
+  .tp3steps{display:flex;gap:4px;margin-top:10px}
+  .tp3steps i{flex:1;height:4px;border-radius:3px;background:var(--line)}
+  .tp3steps i.on{background:var(--accent)}
+  .tp3steplb{display:flex;justify-content:space-between;margin-top:5px;font-size:9.5px;color:var(--faint);font-weight:700}
+  .tp3mbtn{margin-top:9px}
   .schip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
   .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
   .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
@@ -1322,8 +1374,8 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
 .wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
 .wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
-/* 작업보드 본문 헤더의 마감 표시 */
-.wbl-finbar{display:flex;gap:9px;align-items:center;margin:0 0 12px;padding:9px 13px;background:var(--card2);border:1px solid var(--line2);border-radius:10px;font-size:11.5px;color:var(--muted)}
+/* 작업보드 본문 헤더의 마감 표시는 전폭 띠(.wbl-finbar)를 폐기하고 제목 행 조각(.tp3fin)으로 옮겼다 —
+   시안 B(docs/design-workboard-top-3section.html · 사용자 확정). 상태 칩(.wbl-s)·버튼(.wbl-b)은 그대로 쓴다. */
 
 </style>
 </head>
@@ -2351,22 +2403,41 @@ async function _finRefresh(){
   const bar=document.getElementById('finBar'); if(bar) bar.outerHTML=_finBarHtml();
 }
 
-/* ── 작업보드 본문 헤더의 마감 바 ─────────────────────────────────────
-   광고주에겐 그리지 않는다(마감은 내부 업무). 마감된 작업을 열면 "마감된 작업" 표기 + 복귀 버튼. */
+/* ── 작업보드 제목 행의 마감 조각 (시안 B) ───────────────────────────
+   ★ 종전엔 전폭 띠(.wbl-finbar)로 한 줄을 상시 차지했다 — "가끔 한 번 누르는 버튼" 하나 때문에.
+     이제 **작업명과 같은 행** 오른쪽 끝에 [안내 문구 + 버튼]으로 붙는다(사용자 확정).
+   ★ 루트에 id="finBar" 를 유지해야 _finRefresh 의 outerHTML 교체가 계속 동작한다(계약 불변).
+   ★ 광고주에겐 그리지 않는다(마감은 내부 업무). 마감된 작업을 열면 "마감된 작업" 표기 + 복귀 버튼.
+   ★ 긴 문장의 뒷부분은 .opt — 좁은 화면에서 CSS 가 접고 title 툴팁으로 전문을 남긴다(지우지 않는다). */
 function _finBarHtml(){
   const t=STATE.cur; if(!t||!_finCanEdit()) return '';
   if(isFinished(t)){
     const when=_finDate(t.finishedAt), who=esc(t.finishedBy||'');
-    return `<div class="wbl-finbar" id="finBar"><span class="wbl-s fin">🏁 마감된 작업</span>
-      <span>${when?esc(when)+' 마감':''}${who?' · '+who:''} — 작업보드 목록에서 빠져 있고, 홈 <b>작업 목록 › 마감 보관함</b>에 있습니다.</span>
-      <span style="flex:1"></span>
-      <button class="wbl-b" onclick="doReopenCur()">↩ 진행중으로 복귀</button></div>`;
+    const head=`${when?esc(when)+' 마감':''}${who?' · '+who:''}`;
+    return `<span class="tp3fin" id="finBar"><span class="wbl-s fin">🏁 마감된 작업</span>` +
+      `<span class="ft" title="${esc(_finDate(t.finishedAt)||'')}${who?' · '+who:''} — 작업보드 목록에서 빠져 있고, 홈 작업 목록 › 마감 보관함에 있습니다.">` +
+      `${head}<span class="opt">${head?' — ':''}작업보드 목록에서 빠져 있고, 홈 <b>작업 목록 › 마감 보관함</b>에 있습니다.</span></span>` +
+      `<button class="wbl-b" onclick="doReopenCur()">↩ 진행중으로 복귀</button></span>`;
   }
   const cand=isFinishCandidate(t);
-  return `<div class="wbl-finbar" id="finBar">${cand?'<span class="wbl-s cand">✓ 마감 후보</span>':''}
-    <span>${cand?'인원·제출·입금이 모두 채워졌습니다 — 작업이 끝났다면 마감해 주세요.':'작업이 모두 끝나면 마감해 주세요. 마감해도 시트·리뷰어 화면은 그대로입니다.'}</span>
-    <span style="flex:1"></span>
-    <button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></div>`;
+  const txt=cand
+    ? ['인원·제출·입금이 모두 채워졌습니다', ' — 작업이 끝났다면 마감해 주세요.']
+    : ['작업이 모두 끝나면 마감해 주세요.', ' 마감해도 시트·리뷰어 화면은 그대로입니다.'];
+  return `<span class="tp3fin" id="finBar">${cand?'<span class="wbl-s cand">✓ 마감 후보</span>':''}` +
+    `<span class="ft" title="${esc(txt[0]+txt[1])}">${esc(txt[0])}<span class="opt">${esc(txt[1])}</span></span>` +
+    `<button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></span>`;
+}
+/* master 도구 [⋯] 드롭다운 — 리스너는 **최상위에 1회만** 등록(열 때마다 걸면 겹쳐 쌓인다). */
+function toggleMhTools(ev){
+  if(ev) ev.stopPropagation();
+  const w=document.getElementById('mhTools'); if(!w) return;
+  w.classList.toggle('open');
+  if(!STATE._mhToolsBound){
+    STATE._mhToolsBound=true;
+    const close=()=>{ const t=document.getElementById('mhTools'); if(t) t.classList.remove('open'); };
+    document.addEventListener('click',e=>{ const t=document.getElementById('mhTools'); if(t&&!t.contains(e.target)) close(); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') close(); });
+  }
 }
 
 /* ── 마감 확인창 ────────────────────────────────────────────────────
@@ -3046,11 +3117,15 @@ function renderWorkdesk(wd){
   const sot=wd.sourceOfTruth||'sheet';
   const sotBadge=`<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
-  $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
+  // ★ 제목 행 = [작업명 · 시트 · 배지] ―― 남는 폭 ―― [마감 안내 + 🏁 마감] [⋯ 도구](master)
+  //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
+  //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
+  $('#main').innerHTML=`<div class="mh mh-wb"><h1 title="${esc(STATE.cur.tabName)}">${esc(STATE.cur.tabName)}</h1>
     ${_curSheetLabel()}
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}<span class="bd g">참여자 ${c.total||0}</span>${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
-    ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    <span class="sp" style="flex:1"></span>
     ${_finBarHtml()}
+    ${isMaster?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구(진실원천 전환 · write-back 시뮬 · 그림자 투영)" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button></span></span>`:''}</div>
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
@@ -3151,31 +3226,68 @@ function _rvRender(){
   pane.innerHTML=hd+who2+(imgs||`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
 }
 
-// ── 시안 A: 상단 요약 미니 셀 스트립(상품/모집/구매시간/배송 + 참여·제출·입금 + 정산 통합) ──
+/* ── 시안 B: 상단 3단 — [작업 조건 · 진행 현황 · 정산] 3분할 카드 ──────────────────────
+   시안 = frontend/docs/design-workboard-top-3section.html (사용자 확정 2026-08-06).
+   ★ 값 계산(target·pT/pS/pP·광고주 렌즈 분기)은 종전 그대로 — 바뀐 것은 배치와 표시뿐이다.
+   ★ 발주 '미연결' 배너는 ① 작업 조건 카드 안쪽 줄로 흡수한다(전폭 배너 제거).
+     연결된 경우의 작업세부 펼침(.wodetail)은 renderWorkOrderSection 이 종전대로 아래에 그린다. */
 function summaryStrip(wd,d,m,c){
   const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
   const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
   const isAdv=STATE.role==='advertiser';
-  // 광고주 렌즈: 담당자 표기(내부 실명) 대신 시작일 칸 — 정산 미니 셀도 없음(정산 카드가 항상 펼쳐져 있음).
+  // 광고주 렌즈: 담당자 표기(내부 실명) 대신 시작일 칸 — 정산 열도 없음(정산 카드가 항상 펼쳐져 있음).
   const metaPairs=isAdv
     ? [['상품',d.productOption||m.campaignName||'—'],['시작일',d.startDate?String(d.startDate).slice(0,10):'—'],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
     : [['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']];
-  const meta=metaPairs.map(([k,v])=>`<div class="mcell"><div class="k">${esc(k)}</div><div class="v" title="${esc(v)}">${esc(v)}</div></div>`).join('');
-  const kpi=`<div class="mcell kpi"><div class="k">참여자${target&&target!==c.total?` / 목표 ${target}`:''}</div><div class="v">${c.total||0}${target&&target!==c.total?`<small>/ ${target}</small>`:''}<span class="spct acc">${pT}%</span></div></div>`
-    +`<div class="mcell kpi s"><div class="k">제출완료</div><div class="v">${c.submitted||0}<small>/ ${c.total||0}</small><span class="spct safe">${pS}%</span></div></div>`
-    +`<div class="mcell kpi p"><div class="k">입금완료</div><div class="v">${c.paid||0}<small>/ ${c.total||0}</small><span class="spct acc">${pP}%</span></div></div>`;
-  const setl=isAdv?'':`<div class="mcell setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()"><div class="k">정산</div><div class="v"><span class="setlsummary" style="color:var(--faint)">불러오는 중…</span><span class="caret">▼</span></div></div>`;
-  return `<div class="stripA">${meta}${kpi}${setl}</div>`;
+  const kv=metaPairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
+  const cond=`<div class="tp3col"><div class="tp3t">작업 조건</div><dl class="tp3kv">${kv}</dl>${_woUnlinkedRow(wd)}</div>`;
+  const g=(lb,n,den,pc,cls)=>`<div class="tp3g"><span class="lb">${lb}</span>`+
+    `<span class="nm">${n}<small>/${den}</small></span>`+
+    `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
+    `<span class="pc">${pc}%</span></div>`;
+  const prog=`<div class="tp3col"><div class="tp3t">진행 현황</div>`+
+    g('참여자',c.total||0,target||(c.total||0),pT)+
+    g('제출완료',c.submitted||0,c.total||0,pS,'s')+
+    g('입금완료',c.paid||0,c.total||0,pP)+`</div>`;
+  // ★ 초기 상태도 setlSummaryHtml(null) 한 곳에서 만든다 — 여기서 따로 조립하면 로드 전/후 구조가 갈려
+  //   교체 후에만 단계 막대가 폭을 쓰는(=로드 전엔 flex 행에 갇히는) 어긋남이 생긴다(실브라우저로 잡았다).
+  const setl=isAdv?'':`<div class="tp3col setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
+    `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
+  return `<div class="tp3grid${isAdv?' n2':''}">${cond}${prog}${setl}</div>`;
+}
+// 발주 미연결 줄 — 작업 조건 카드 안쪽(admin/master 만, 광고주·AE 에겐 종전대로 미노출)
+function _woUnlinkedRow(wd){
+  if(wd.detail) return '';
+  if(!(STATE.role==='master'||STATE.role==='admin')) return '';
+  return `<div class="tp3wo"><b>⚠ 작업발주 미연결</b>`+
+    `<button class="btn pri" title="발주(작업오더)를 연결하면 작업세부가 표시되고 모집 인원만큼 명단을 준비할 수 있습니다." onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
 }
 // 정산 미니 셀 클릭 → 하단 상세(스텝퍼) 펼침/접기
 function toggleSettleDetail(){ STATE.settleOpen=!STATE.settleOpen; const dt=$('#setldetail'); if(dt) dt.hidden=!STATE.settleOpen; const c=$('#setlCell'); if(c) c.classList.toggle('open',STATE.settleOpen); }
 // 스트립 정산 셀 요약(로드 상태별) — 상세는 #settlementsec(펼침 시)
 function setlSummaryHtml(d){
-  if(!d) return `<span class="setlsummary" style="color:var(--faint)">불러오는 중…</span>`;
-  if(d.hidden) return `<span class="setlsummary"><span class="schip">비공개</span></span>`;
-  if(!d.linked) return `<span class="setlsummary"><span class="schip warn">미매칭</span><span style="color:var(--faint);font-weight:500">계약 매칭 필요</span></span>`;
+  // ★ 루트는 항상 <span class="setlsummary"> — 갱신이 $('#setlCell .setlsummary').outerHTML 교체라
+  //   루트 클래스가 바뀌면 두 번째 갱신부터 대상을 못 찾는다(계약 불변).
+  const wrap=(inner,steps)=>`<span class="setlsummary"><span class="tp3setl">${inner}</span>${steps||''}</span>`;
+  if(!d) return wrap(`<span style="color:var(--faint);font-weight:500">불러오는 중…</span>`);
+  if(d.hidden) return wrap(`<span class="schip">비공개</span>`);
+  if(!d.linked) return wrap(`<span class="schip warn">미매칭</span><span style="color:var(--faint);font-weight:500">계약 매칭 필요</span>`,_setlStepsHtml(d));
   const st=_setlStage(d);
-  return `<span class="setlsummary">${d.contractNumber?`<span class="schip ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span>${_wonFmt(d.amount)}</span>`:''}<span class="schip ${st.tone}">${esc(st.label)}</span></span>`;
+  return wrap(`${d.contractNumber?`<span class="schip ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span>${_wonFmt(d.amount)}</span>`:''}<span class="schip ${st.tone}">${esc(st.label)}</span>`,_setlStepsHtml(d));
+}
+/* 정산 4단계 진행 표시(마감자료→견적서→계산서→입금) — 펼치지 않고도 어디까지 왔는지 보인다.
+   ★ 표시 보조일 뿐 판정을 새로 만들지 않는다: 재료는 _setlStage 와 같은 필드를 본다. */
+function _setlStepsHtml(d){
+  const lb=['마감자료','견적서','계산서','입금'];
+  let n=0;
+  if(d&&d.linked){
+    if(d.closeout&&d.closeout.date) n=1;
+    if(d.quote&&d.quote.quoteNumber) n=2;
+    if(d.invoice&&d.invoice.status==='issued') n=3;
+    if(d.payment&&d.payment.status==='paid') n=4;
+  }
+  return `<span class="tp3steps">${lb.map((_,i)=>`<i class="${i<n?'on':''}"></i>`).join('')}</span>`+
+    `<span class="tp3steplb">${lb.map(x=>`<span>${esc(x)}</span>`).join('')}</span>`;
 }
 function _setlStage(d){
   const q=d.quote,inv=d.invoice,pay=d.payment,co=d.closeout;
@@ -7410,11 +7522,9 @@ async function flipSoT(value, force){
 // ══ 작업오더(발주) 연동 — 연결 상태 바 + 작업세부 표(펼침) + 명단 준비(admin/master) ══
 function renderWorkOrderSection(wd){
   const d=wd.detail||null, isAdmin=(STATE.role==='master'||STATE.role==='admin');
-  if(!d){
-    if(!isAdmin) return '';
-    return `<div class="wobar"><span class="wt">작업발주 미연결</span><span class="wsub">발주(작업오더)를 연결하면 작업세부가 표시되고 모집 인원만큼 명단을 준비할 수 있습니다.</span>
-      <span style="flex:1"></span><button class="btn pri" onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
-  }
+  // ★ 미연결 안내는 전폭 배너를 없애고 상단 3단의 ① 작업 조건 카드 안쪽 줄(_woUnlinkedRow)로 옮겼다.
+  //   여기서 또 그리면 같은 말이 두 번 나온다(시안 B · 사용자 확정).
+  if(!d) return '';
   const fields=[['상품',d.productOption],['모집 인원',d.recruitCount],['일건수',d.dailyCountText||d.dailyCount],
     ['구매시간',d.purchaseTime],['배송',d.deliveryType],['페이',d.payAmount?Number(d.payAmount).toLocaleString()+'원':''],
     ['리뷰타입',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],

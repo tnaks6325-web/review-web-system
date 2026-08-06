@@ -154,18 +154,64 @@ ok('리뷰어 로그 헤더(#lghead .mh)가 표와 같은 1300px', /#lghead \.mh
 ok('★ 공유 클래스 .mh 자체(단독 셀렉터)에는 max-width 를 걸지 않았다(다른 뷰까지 캡되면 안 된다)',
   !/(^|\})\s*\.mh\{[^}]*max-width/.test(cssNoComment.replace(/\n/g, ' ')));
 
-/* ── I. 작업보드 상단 요약 카드(.stripA .mcell) — 내용 폭만큼만(성장 금지) ──
-   flex:1 로 두면 넓은 화면에서 남는 폭을 카드들이 전부 나눠 먹어 "카드가 화면 끝까지 늘어나는" 신고 재현.
-   성장 0 + max-width 로 내용 기준 크기를 고정하고 남는 폭은 우측 여백으로 흘린다. */
-ok('★ .stripA .mcell 이 flex 성장을 하지 않는다(flex:0 1 auto)',
-  /\.stripA \.mcell\{[^}]*flex:0 1 auto/.test(cssNoComment));
-ok('★ .stripA .mcell 에 max-width 상한이 있다(긴 상품명은 …축약 + title 툴팁)',
-  /\.stripA \.mcell\{[^}]*max-width:300px/.test(cssNoComment));
-ok('★ 정산 셀(.mcell.setl)도 성장하지 않는다', (() => {
-  const m = cssNoComment.match(/\.stripA \.mcell\.setl\{[^}]*\}/);
-  return !!m && /flex:0 1 auto/.test(m[0]) && /max-width:/.test(m[0]) && !/flex:1/.test(m[0]);
+/* ── I. 작업보드 상단 3단(.tp3grid) — 넓은 화면에서 끝없이 늘어나지 않는다 ──
+   종전 8칸 스트립(.stripA .mcell)을 시안 B의 3분할 카드로 바꾸면서 검사 대상도 함께 옮겼다
+   (검사 의미는 불변 = "상단이 화면 끝까지 늘어나지 않고 남는 폭은 우측 여백으로 흘린다").
+   시안 = frontend/docs/design-workboard-top-3section.html */
+ok('★ .tp3grid 에 폭 상한이 있다(모집공고 카드 컨테이너와 같은 1380px)',
+  /\.tp3grid\{[^}]*max-width:1380px/.test(cssNoComment));
+ok('★ 광고주(정산 열 없음) 2열 변형에도 상한이 있다',
+  /\.tp3grid\.n2\{[^}]*max-width:920px/.test(cssNoComment));
+ok('★ 값 …축약이 살아 있다(.tp3kv dd ellipsis) — 긴 상품명이 카드를 밀지 않는다',
+  /\.tp3kv dd\{[^}]*text-overflow:ellipsis/.test(cssNoComment));
+ok('★ 종전 스트립(.stripA .mcell)은 남아 있지 않다(사본 금지 — 두 벌이면 드리프트)',
+  !/\.stripA/.test(cssNoComment) && !/class="mcell/.test(src));
+
+/* ── J. 제목 행(.mh.mh-wb) — 마감 안내 + [🏁 마감] 이 작업명과 **같은 행** (사용자 확정) ──
+   ★★ flex 는 줄바꿈을 먼저 하고 축소는 그다음이라(줄나눔 판정 = 축소 전 max-content) nowrap 이 없으면
+      좁은 폭에서 [마감]이 아랫줄로 떨어진다 — 시안 검증에서 실측. nowrap + min-width:0 이 한 벌. */
+ok('★ 작업보드 제목 행이 nowrap(줄바꿈 금지)', /\.mh\.mh-wb\{[^}]*flex-wrap:nowrap/.test(cssNoComment));
+ok('★ 제목·시트명이 축소 가능(min-width:0 + …축약)', (() => {
+  const m = cssNoComment.match(/\.mh\.mh-wb h1,\.mh\.mh-wb \.mhsheet\{[^}]*\}/);
+  return !!m && /min-width:0/.test(m[0]) && /text-overflow:ellipsis/.test(m[0]);
 })());
-ok('★ 값 …축약이 살아 있다(.mcell .v ellipsis) — max-width 와 짝',
-  /\.stripA \.mcell \.v\{[^}]*text-overflow:ellipsis/.test(cssNoComment));
+ok('★ 마감 안내 문구도 축소 가능(.tp3fin .ft min-width:0)',
+  /\.tp3fin \.ft\{[^}]*min-width:0/.test(cssNoComment));
+ok('★ 공유 클래스 .mh 자체에는 nowrap 을 걸지 않았다(다른 뷰 헤더까지 바뀌면 안 된다)',
+  !/(^|\})\s*\.mh\{[^}]*flex-wrap:nowrap/.test(cssNoComment.replace(/\n/g, ' ')));
+ok('마감 조각이 제목 행 안에서 렌더된다(전폭 띠 .wbl-finbar 폐기)',
+  /class="mh mh-wb"[\s\S]{0,900}?\$\{_finBarHtml\(\)\}/.test(src) && !/class="wbl-finbar"/.test(src));
+ok('★ _finBarHtml 루트가 id="finBar" 를 유지한다(_finRefresh 의 outerHTML 교체 계약)', (() => {
+  const m = src.match(/function _finBarHtml\(\)\{[\s\S]*?\n\}/);
+  if (!m) return false;
+  const roots = m[0].match(/<span class="tp3fin" id="finBar">/g) || [];
+  return roots.length === 2 && /document\.getElementById\('finBar'\)/.test(src);
+})());
+ok('★ master 도구 3종이 [⋯] 메뉴 안에 있다(주 행동 [마감]이 오른쪽 끝을 갖는다)', (() => {
+  const m = src.match(/<span class="mhtools" id="mhTools">[\s\S]*?<\/span><\/span>/);
+  if (!m) return false;
+  // 진실원천 전환 버튼은 const flipBtn 으로 조립돼 메뉴에 ${flipBtn} 으로 들어간다
+  return /\$\{flipBtn\}/.test(m[0]) && /showWritebackSim\(\)/.test(m[0]) && /id="projBtn"/.test(m[0])
+    && /const flipBtn=isMaster\?`<button class="btn" id="sotBtn"/.test(src);
+})());
+ok('★ 도구 버튼이 제목 행에 낱개로 남아 있지 않다(메뉴 밖 노출 0)', (() => {
+  const mh = src.match(/<div class="mh mh-wb">[\s\S]*?<\/div>\n/);
+  if (!mh) return false;
+  const outside = mh[0].replace(/<span class="mhtools"[\s\S]*?<\/span><\/span>/, '');
+  return !/showWritebackSim|projBtn|flipBtn/.test(outside);
+})());
+ok('★ [⋯] 바깥클릭/Esc 리스너는 1회만 등록(열 때마다 걸면 겹쳐 쌓인다)',
+  /_mhToolsBound/.test(src) && (src.match(/document\.addEventListener\('click',e=>\{ const t=document\.getElementById\('mhTools'\)/g) || []).length === 1);
+
+/* ── K. 발주 '미연결' 안내는 한 곳에서만 — 상단 ① 작업 조건 카드 안쪽 줄 ── */
+ok('★ 미연결 배너가 renderWorkOrderSection 에서 제거됐다(같은 말 두 번 금지)', (() => {
+  const m = src.match(/function renderWorkOrderSection\(wd\)\{[\s\S]*?\n\}/);
+  return !!m && /if\(!d\) return '';/.test(m[0]) && !/작업발주 미연결/.test(m[0]);
+})());
+ok('★ 미연결 줄은 _woUnlinkedRow 한 곳(admin/master 만, 광고주·AE 미노출)', (() => {
+  const m = src.match(/function _woUnlinkedRow\(wd\)\{[\s\S]*?\n\}/);
+  return !!m && /role==='master'\|\|STATE\.role==='admin'/.test(m[0]) && /openWorkOrderPicker\(\)/.test(m[0])
+    && (src.match(/작업발주 미연결/g) || []).length === 1;
+})());
 
 console.log(`\n✅ workdeskWidthCap: ${n} cases passed`);
