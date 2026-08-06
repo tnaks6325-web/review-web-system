@@ -645,17 +645,21 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     // ★ LATERAL 최신 1행 — 서브쿼리를 둘로 나누면 채널과 커스텀값이 서로 **다른 공고**에서
     //   올 수 있다(같은 탭에 공고가 여러 개면 실제로 갈린다). 한 행에서 둘 다 가져온다.
     // ★ 087: 리뷰타입도 **같은 행에서** 가져온다 — 따로 조회하면 채널과 다른 공고의 값이 섞인다.
+    // ★★ 리뷰타입은 **별도 LATERAL**(`reviewTypeContext.CAMPAIGN_REVIEW_TYPE_LATERAL` 단일 출처)로
+    //   찾는다 — 채널 LATERAL 은 `channel`+`channel_custom` 이 **같은 행**에서 와야 하므로
+    //   그대로 두고, 리뷰타입만 리네임(gid 폴백)·차수 재발행(값 있는 최신 공고)에 강한 규칙을 쓴다.
+    //   두 규칙을 한 LATERAL 에 합치면 채널 짝이 깨진다.
     const { rows } = await _db().query(
       `SELECT c.inspect_product_names, c.inspect_product_aliases, c.review_type AS tab_review_type,
-              rc.channel, rc.channel_custom, rc.review_type AS camp_review_type
+              rc.channel, rc.channel_custom, rt.review_type AS camp_review_type
          FROM tab_configs c
          LEFT JOIN LATERAL (
-              SELECT channel, channel_custom, review_type
+              SELECT channel, channel_custom
                 FROM recruit_campaigns
                WHERE linked_sheet_id = c.sheet_id AND linked_tab_name = c.tab_name
                ORDER BY created_at DESC
                LIMIT 1
-         ) rc ON TRUE
+         ) rc ON TRUE${require('./reviewTypeContext.service').CAMPAIGN_REVIEW_TYPE_LATERAL}
         WHERE c.sheet_id = $1 AND c.tab_name = $2
         LIMIT 1`,
       [sheetId, tabName]
