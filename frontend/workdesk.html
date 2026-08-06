@@ -6101,7 +6101,8 @@ function _riRenderBody(){
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
         ${relHtml}
-        ${_riConfirmMisset(r)?`<div class="rirtfix">이 작업 <b>리뷰타입 미설정</b> — 공고에서 <b>구매확정</b>으로 저장한 뒤 [♻ 재검수]하면 통과됩니다</div>`:''}
+        ${_riConfirmMisset(r)?`<div class="rirtfix">이 작업 <b>리뷰타입 미설정</b> — 공고에서 <b>구매확정</b>으로 저장한 뒤 다시 검수하면 통과됩니다
+          ${STATE.role==='master'||STATE.role==='admin'?`<button class="btn" style="margin-top:5px;font-size:11px;padding:3px 9px" onclick="event.stopPropagation();riReinspectTab(${i})">♻ 이 작업 재검수</button>`:''}</div>`:''}
         ${reasons.length?`<div class="rireason">${reasons.map(esc).join('<br>')}</div>`:(relHtml?'':'<div class="rireason">—</div>')}
       </div>
       ${r.status==='resolved'
@@ -6704,8 +6705,13 @@ async function riClearSample(key, idx){
 /** 과거 제출분 따라잡기 — 한 번에 몰아치지 않게 서버가 사이클 캡으로 통제한다. */
 /* 소급 재검수 — 공고 리뷰타입을 뒤늦게 바꾼 작업(구매확정 전환 등)의 옛 판정을 새 기준으로.
    서버가 의심·불량·판정불가를 pending 으로 되돌리고 즉시 스윕 1회를 돌린다(100건 초과분은 10분 크론). */
-async function riReinspectTab(){
-  const t=STATE.riTab; if(!t){ alert('작업(탭)을 먼저 선택하세요. (카드의 작업명을 누르면 선택됩니다)'); return; }
+async function riReinspectTab(i){
+  // ★ 상단 버튼은 인자 없이(선택된 작업) / 카드 안내 버튼은 그 카드의 작업으로 — 진입만 둘,
+  //   실행은 한 함수(사본을 두면 확인 문구·후처리가 갈린다). 상단 버튼은 **작업을 고른 뒤에만**
+  //   보여 찾기 어렵다는 신고가 있었다(2026-08-06).
+  const r0 = (i!=null) ? (STATE.ri||[])[i] : null;
+  const t = r0 ? { sheetId:r0.sheet_id, tabName:r0.tab_name } : STATE.riTab;
+  if(!t){ alert('작업(탭)을 먼저 선택하세요. (카드의 작업명을 누르면 선택됩니다)'); return; }
   if(!confirm(`${t.tabName}\n\n이 작업의 의심·불량·판정불가 건을 초기화하고 현재 기준(공고 리뷰타입 포함)으로 다시 검수합니다.\n· [확인됨] 처리한 건과 통과 건은 그대로 둡니다.\n· 한 번에 최대 100건, 남은 건은 10분마다 자동으로 이어집니다.\n진행할까요?`)) return;
   const r=await api('/api/trackb/review-inspect/reinspect',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,limit:100})});
   if(!r||!r.ok){ alert('재검수 실패: '+((r&&r.error)||'')); return; }
