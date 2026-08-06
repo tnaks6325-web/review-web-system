@@ -421,13 +421,16 @@ function _smpCardHtml(kind, s) {
   var id = kind + '_' + s.key;
   var urls = _smpUrls(s);
   var full = urls.length >= AS_SMP_CAP;
-  /* ★ 누적: 슬롯 하나 = 여러 장. 장별 ✕(개별 삭제)이고 [＋ 추가]는 지우지 않고 쌓는다. */
+  /* ★ 누적: 슬롯 하나 = 여러 장. 장별 ✕(개별 삭제)이고 [＋ 추가]는 지우지 않고 쌓는다.
+     ★ 썸네일 클릭 = 크게 보기(_smpZoom) — 40px 썸네일로는 "무엇을 기준으로 등록했는지"를
+       확인할 수 없어 등록만 하고 검증이 안 되던 문제(실사용 신고). onclick 은 인덱스만 넘긴다. */
   var thumbs = urls.length
     ? urls.map(function (u, i) {
-        return '<span style="position:relative;display:inline-block;margin-right:6px">' +
-          '<img src="' + escHtml(u) + '" alt="" style="width:40px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;display:block">' +
+        return '<span class="as-smpth">' +
+          '<img src="' + escHtml(u) + '" alt="" loading="lazy" title="클릭하면 크게 봅니다" ' +
+            'onclick="_smpZoom(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\',' + i + ')">' +
           '<button title="이 장만 제거" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\',' + i + ')" ' +
-            'style="position:absolute;top:-5px;right:-1px;width:15px;height:15px;border-radius:99px;background:#EF4444;color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0">✕</button>' +
+            'class="as-smpx">✕</button>' +
           '</span>';
       }).join('')
     : '<span class="as-slotnone">없음</span>';
@@ -446,6 +449,93 @@ function _smpCardHtml(kind, s) {
       : '<label class="as-btn" for="asSmpFile_' + escHtml(id) + '">＋ 추가</label>') +
     '</div>';
 }
+
+/* ── 크게 보기(라이트박스) ───────────────────────────────────────────
+ * ★ 등록해 둔 예시가 "정말 그 화면인지" 확인할 수 있어야 한다 — 40px 썸네일로는 불가능했다.
+ * ★ 슬롯 목록은 서버 응답이 유일 출처(_smpLast) — 프론트가 URL 사본을 따로 들지 않는다.
+ * ★ body 직속 마운트(패널은 스크롤 컨테이너 안이라 오버레이가 화면 흐름에 섞인다).
+ * ★ 색·크기는 리터럴 고정(호스트 테마 없는 리뷰웹시스템[3버전]에서도 같은 모양). */
+var _smpLast = null;      // 마지막으로 받은 samples 응답(슬롯 → 이미지 목록)
+var _smpZoomCtx = null;   // {urls, idx, label}
+
+function _smpSlotOf(kind, key) {
+  if (!_smpLast) return null;
+  var list = kind === 'receipt' ? (_smpLast.receiptSamples || [])
+    : kind === 'route' ? (_smpLast.routeSamples || []) : (_smpLast.samples || []);
+  for (var i = 0; i < list.length; i++) if (String(list[i].key) === String(key)) return list[i];
+  return null;
+}
+
+function _smpZoom(kind, key, idx) {
+  var s = _smpSlotOf(kind, key);
+  if (!s) { showToast('목록을 다시 불러온 뒤 열어주세요.', true); return; }
+  var urls = _smpUrls(s);
+  if (!urls.length) return;
+  _smpZoomCtx = { urls: urls, idx: Math.max(0, Math.min(urls.length - 1, Number(idx) || 0)),
+                  label: (s.emoji || '') + ' ' + (s.label || s.key), kind: kind, key: key };
+  _smpZoomRender();
+}
+
+function _smpZoomRender() {
+  var c = _smpZoomCtx;
+  if (!c) return;
+  var el = document.getElementById('asSmpZoom');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'asSmpZoom';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) { if (e.target === el) _smpZoomClose(); });
+  }
+  var multi = c.urls.length > 1;
+  el.className = 'as-zoom';
+  el.innerHTML =
+    '<div class="as-zoombox">' +
+      '<div class="as-zoomh">' +
+        '<b>' + escHtml(c.label) + '</b>' +
+        '<span class="as-zoomn">' + (c.idx + 1) + ' / ' + c.urls.length + '장</span>' +
+        '<span style="flex:1"></span>' +
+        (multi ? '<button class="as-btn" onclick="_smpZoomStep(-1)" title="이전 (←)"' + (c.idx <= 0 ? ' disabled' : '') + '>‹</button>' +
+                 '<button class="as-btn" onclick="_smpZoomStep(1)" title="다음 (→)"' + (c.idx >= c.urls.length - 1 ? ' disabled' : '') + '>›</button>' : '') +
+        '<button class="as-btn" onclick="_smpZoomClose()">닫기</button>' +
+      '</div>' +
+      '<div class="as-zoomimg"><img src="' + escHtml(c.urls[c.idx]) + '" alt=""></div>' +
+      '<div class="as-zoomft">이 이미지는 <b>AI 판정의 기준</b>으로만 쓰이며 리뷰어 화면에는 나가지 않습니다.' +
+        '<button class="as-btn del" style="margin-left:auto" onclick="_smpZoomDel()">이 장 제거</button></div>' +
+    '</div>';
+}
+
+function _smpZoomStep(d) {
+  var c = _smpZoomCtx;
+  if (!c) return;
+  var n = c.idx + d;
+  if (n < 0 || n >= c.urls.length) return;   // ★ 끝에서 순환하지 않는다(어디까지 봤는지 잃지 않게)
+  c.idx = n;
+  _smpZoomRender();
+}
+function _smpZoomClose() {
+  var el = document.getElementById('asSmpZoom');
+  if (el) el.remove();
+  _smpZoomCtx = null;
+}
+async function _smpZoomDel() {
+  var c = _smpZoomCtx;
+  if (!c) return;
+  var kind = c.kind, key = c.key, idx = c.idx;
+  _smpZoomClose();
+  await clearAiSample(kind, key, idx);
+}
+/* ★ 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓여 한 번에 여러 장 건너뛴다.
+   ★ 입력 중(input/textarea)에는 가로채지 않는다(다른 설정 칸 조작 보존). */
+document.addEventListener('keydown', function (e) {
+  if (!_smpZoomCtx) return;
+  var t = e.target || {};
+  var tag = String(t.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.key === 'Escape') { _smpZoomClose(); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { _smpZoomStep(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { _smpZoomStep(1); e.preventDefault(); }
+});
 
 /** 목차 배지 — 등록된 예시 / 전체 슬롯. 슬롯 목록은 서버 응답이 유일 출처라 여기서도 세기만 한다. */
 function _smpBadge(j) {
@@ -467,6 +557,7 @@ async function loadAiSamples() {
   if (!rc) return;
   try {
     var j = await _smpFetch(null);
+    _smpLast = j;   // ★ 크게 보기의 URL 출처 = 서버 응답 그대로(프론트 사본 금지)
     _smpRender('asSmpReceipt', 'receipt', j.receiptSamples || []);
     _smpRender('asSmpReview', 'review', j.samples || []);
     // 자동 분류 예시 — 구백엔드(routeSamples 미반환)면 안내만(배포 스큐 허위 표시 방지)
@@ -2093,6 +2184,24 @@ async function saveGateCriteria() {
       '@media (max-width:640px){.as-slot{flex-wrap:wrap}.as-slotbody{flex:1 1 100%;order:3}}' +
       /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
       '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
+      /* 등록 예시 썸네일 — 클릭하면 크게 본다(40px 로는 내용 확인이 불가능했다) */
+      '.as-smpth{position:relative;display:inline-block;margin-right:7px}' +
+      '.as-smpth img{width:54px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #E5E7EB;display:block;cursor:zoom-in}' +
+      '.as-smpth img:hover{border-color:#2563A8;box-shadow:0 0 0 2px rgba(37,99,168,.15)}' +
+      '.as-smpx{position:absolute;top:-6px;right:-3px;width:16px;height:16px;border-radius:999px;background:#EF4444;' +
+        'color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0}' +
+      /* 크게 보기 오버레이 — body 직속, 리터럴 색 */
+      '.as-zoom{position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.62);display:flex;' +
+        'align-items:center;justify-content:center;padding:24px}' +
+      '.as-zoombox{background:#fff;border-radius:14px;max-width:880px;width:100%;max-height:92vh;' +
+        'display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(15,23,42,.35)}' +
+      '.as-zoomh{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #E5E7EB;font-size:.86rem}' +
+      '.as-zoomn{font-size:.72rem;color:#6B7280;font-weight:700}' +
+      '.as-zoomimg{flex:1;min-height:0;overflow:auto;background:#F3F4F6;display:grid;place-items:center;padding:12px}' +
+      '.as-zoomimg img{max-width:100%;max-height:74vh;border-radius:8px;border:1px solid #E5E7EB;background:#fff}' +
+      '.as-zoomft{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid #E5E7EB;' +
+        'font-size:.72rem;color:#6B7280}' +
+      '.as-zoomft b{color:#B91C1C}' +
       /* 작업표 표준 열 — ★ 색은 리터럴 고정(호스트 테마 변수에 의존하지 않는다).
          admin.html·리뷰웹시스템[3버전] 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
       '.as-wtlist{display:flex;flex-direction:column;gap:6px}' +
@@ -2351,6 +2460,11 @@ async function saveGateCriteria() {
   window.loadAiSamples = loadAiSamples;
   window.uploadAiSample = uploadAiSample;
   window.clearAiSample = clearAiSample;
+  /* ★ onclick 에서 부르는 함수는 window 노출 필수 — 빠지면 클릭이 조용히 ReferenceError */
+  window._smpZoom = _smpZoom;
+  window._smpZoomStep = _smpZoomStep;
+  window._smpZoomClose = _smpZoomClose;
+  window._smpZoomDel = _smpZoomDel;
   window.previewRouteSweep = previewRouteSweep;   // 오제출 소급 정리(미리보기)
   window.runRouteSweep = runRouteSweep;           // 오제출 소급 정리(실행)
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;
