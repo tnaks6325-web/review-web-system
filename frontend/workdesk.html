@@ -6071,7 +6071,7 @@ function _riRenderBody(){
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
         ${relHtml}
-        <div class="rireason">${reasons.length?reasons.map(esc).join('<br>'):(relHtml?'':'—')}</div>
+        ${reasons.length?`<div class="rireason">${reasons.map(esc).join('<br>')}</div>`:(relHtml?'':'<div class="rireason">—</div>')}
       </div>
       ${r.status==='resolved'
         ? (r.resolution?`<div class="nc-act"><span class="rimeta">${r.resolution==='ok'?'✓ 정상(오탐) 처리됨':'✕ 불량 맞음 처리됨'}</span></div>`:'')
