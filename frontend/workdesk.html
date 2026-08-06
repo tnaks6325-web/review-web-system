@@ -7781,16 +7781,21 @@ async function renderOwnershipView(){
   if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
   buildTabIndex(STATE.mapTabs);
   const isAdminRole = STATE.role==='master'||STATE.role==='admin';
-  const [r, os, ac]=await Promise.all([
-    // ?overview=1 — 업체별 작업수·계약 미매칭·마감자료 검수 대기·접속링크 상태를 같은 응답에 받는다
-    //   (신규 엔드포인트 0 · 로컬 DB 집계라 인트라넷 무접촉). 실패 소스는 overview 플래그로 온다.
-    api('/api/trackb/advertisers?overview=1'),
-    api('/api/trackb/owned-sheets').catch(()=>null),
-    isAdminRole ? api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null) : Promise.resolve(null),
-  ]);
+  // ★★ 자리표시자('불러오는 중…')를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다 — 네트워크 오류로
+  //   여기서 reject 되면 사이드바·패널 두 칸이 영원히 '불러오는 중…'에 매달린다(리뷰검수 무한로딩 사고와 같은 자리).
+  let r=null, os=null, ac=null;
+  try{
+    [r, os, ac]=await Promise.all([
+      // ?overview=1 — 업체별 작업수·계약 미매칭·마감자료 검수 대기·접속링크 상태를 같은 응답에 받는다
+      //   (신규 엔드포인트 0 · 로컬 DB 집계라 인트라넷 무접촉). 실패 소스는 overview 플래그로 온다.
+      api('/api/trackb/advertisers?overview=1'),
+      api('/api/trackb/owned-sheets').catch(()=>null),
+      isAdminRole ? api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null) : Promise.resolve(null),
+    ]);
+  }catch(err){ _ovmLoadFailed(err&&err.message); return; }
   STATE.ownedSheetIds = new Set((os&&os.ok&&os.sheetIds)||[]);   // 업체추가 시트 드롭다운 제외용
   STATE.advAccts = (ac&&ac.success&&ac.users)||[];               // 광고주 로그인 계정(업체별) — master/admin만
-  if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
+  if(!r||!r.ok){ _ovmLoadFailed((r&&r.error)||'업체 목록을 불러올 수 없습니다(admin/master 권한 필요)'); return; }
   STATE.advs=r.items||[];
   // ★ 집계 실패는 "0건"이 아니라 "모름"이다 — 플래그를 들고 다니며 화면이 '?'로 고지한다(088 무신호 규율).
   STATE.ovMeta = r.overview || null;
@@ -7827,6 +7832,29 @@ function _ovmHl(v,q){ const t=esc(v==null?'':v); if(!q) return t;
   const raw=String(v);
   return esc(raw.slice(0,i))+'<mark class="awhi">'+esc(raw.slice(i,i+q.length))+'</mark>'+esc(raw.slice(i+q.length)); }
 
+// 업체관리 로드 실패 종결 — 두 칸 모두 사유 + [다시 시도]로 끝낸다(조용히 매달리는 화면 금지).
+function _ovmLoadFailed(why){
+  const msg=esc(why||'불러오지 못했습니다');
+  const side=$('#advs'); if(side) side.innerHTML=`<div class="empty" style="padding:16px 10px">업체 목록을 불러오지 못했습니다</div>`;
+  const p=$('#ownPanel');
+  if(p) p.innerHTML=`<div class="ovm-empty" style="max-width:520px;margin:40px auto"><b>업체관리를 불러오지 못했습니다</b>${msg}
+    <div style="margin-top:11px"><button class="btn pri" onclick="renderOwnershipView()">다시 시도</button></div></div>`;
+  const foot=$('#ovmFoot'); if(foot) foot.innerHTML='';
+}
+
+/* ── 개요 집계의 "모름" 판정 — ★ 소스별 실패 플래그를 여기 한 곳에서 읽는다.
+   `ok` 만 보면 tabStatsMap 만 죽은 경우(ok=true, statsUnavailable=true)가 **0건으로 위장**된다.
+   화면 3곳(사이드바 배지·사이드바 칩·개요 표)이 같은 판정을 쓴다.                              */
+function _ovmCandKnown(){ const m=STATE.ovMeta; return !!(m && m.ok && !m.statsUnavailable && !m.finishedUnavailable); }
+function _ovmCandWhy(){ const m=STATE.ovMeta;
+  if(!m) return '집계를 불러오지 못했습니다';
+  if(!m.ok) return '업체별 집계를 불러오지 못했습니다';
+  if(m.statsUnavailable) return '작업 통계를 불러오지 못해 판정할 수 없습니다';
+  if(m.finishedUnavailable) return '마감 정보를 불러오지 못해 판정할 수 없습니다';
+  return ''; }
+function _ovmMatchKnown(){ const m=STATE.ovMeta; return !!(m && m.ok && !m.contractsUnavailable); }
+function _ovmLinkKnown(){ const m=STATE.ovMeta; return !!(m && m.ok && !m.linksUnavailable); }
+
 /* ── 사이드바: 업체 목록(검색·필터) ── ★ 목록 컨테이너만 교체한다(입력칸을 다시 그리면 한글 IME
    조합이 깨져 'ㅁ며면면'이 된다 — 홈 작업목록 검색에서 실측한 사고와 같은 자리). */
 function _ovmAdvSearch(v){ _ovmAdvQ=String(v||''); _ovmRenderAdvs(); }
@@ -7847,8 +7875,9 @@ function _ovmRenderAdvs(){
   const q=_ovmAdvQ.trim();
   box.innerHTML = list.map(({a,i})=>{
     // 처리필요 배지 = 마감자료 검수 대기(사용자 확정) — 계약 미매칭·미입금은 표의 필터 칩으로 본다.
-    const badge = (STATE.ovMeta && !STATE.ovMeta.ok) ? ''
-      : (a.finishCand>0 ? `<span class="ovm-b" title="마감자료 검수 대기 ${a.finishCand}건">${a.finishCand}</span>` : '');
+    //   ★ 판정 재료(통계·마감)를 못 불러왔으면 배지를 그리지 않는다 — 0 으로 위장하면 대기 건이 통째로 사라진다.
+    const badge = !_ovmCandKnown() ? ''
+      : (a.finishCand>0 ? `<span class="ovm-b" title="마감자료 검수 대기 ${a.finishCand}건 (리뷰인덱스 기준)">${a.finishCand}</span>` : '');
     return `<div class="advitem${STATE.advCur&&STATE.advCur.id===a.id?' on':''}" data-i="${i}" onclick="selAdv(${i})" title="${esc(a.name)}">`
       +`<span class="ava">${esc((a.name||'?').slice(0,1))}</span>`
       +`<span class="nm">${_ovmHl(a.name,q)}<i class="pmn ${a.inadPm?'':'noae'}">${a.inadPm?('AE '+esc(a.inadPm)):'AE 미지정'}</i></span>`
@@ -7861,10 +7890,12 @@ function _ovmRenderAdvs(){
     const all=(STATE.advs||[]).length;
     const noae=(STATE.advs||[]).filter(a=>!String(a.inadPm||'').trim()).length;
     const todo=(STATE.advs||[]).filter(a=>a.finishCand>0).length;
-    const ovOk=!(STATE.ovMeta&&!STATE.ovMeta.ok);
+    // ★ 판정 불가면 숫자를 '?'로 두고 **클릭도 막는다** — 누르면 "조건에 맞는 업체가 없습니다"라는
+    //   확정적 문장이 나와 "처리할 것 없음"으로 오독된다(연결탭 칩과 같은 규율).
+    const ovOk=_ovmCandKnown();
     chips.innerHTML=`<span class="ovm-chip${_ovmAdvF==='all'?' on':''}" onclick="_ovmAdvSetF('all',this)">전체 <b class="n">${all}</b></span>`
       +`<span class="ovm-chip warn${_ovmAdvF==='noae'?' on':''}" onclick="_ovmAdvSetF('noae',this)">AE 미지정 <b class="n">${noae}</b></span>`
-      +`<span class="ovm-chip warn${_ovmAdvF==='todo'?' on':''}"${ovOk?'':' title="집계를 불러오지 못했습니다"'} onclick="_ovmAdvSetF('todo',this)">마감자료 검수 <b class="n">${ovOk?todo:'?'}</b></span>`;
+      +`<span class="ovm-chip warn${_ovmAdvF==='todo'?' on':''}"${ovOk?'':' disabled title="'+_ovmCandWhy()+'"'} onclick="${ovOk?`_ovmAdvSetF('todo',this)`:''}">마감자료 검수 <b class="n">${ovOk?todo:'?'}</b></span>`;
   }
 }
 // 사이드바 하단 — 업체 미지정 시트(지정 전에는 계약·정산이 붙지 않는다). 상시 노출(종전엔 추가 폼 안에만 있었다).
@@ -7881,9 +7912,13 @@ function _ovmRenderFoot(){
 /* ── 전체 개요(업체 미선택) — 빈 폼 대신 "어느 업체를 봐야 하는가"를 먼저 보여준다 ──
    ★ 숫자는 서버 집계(로컬 DB)를 그대로 쓴다. 미입금은 인트라넷 sales 에만 있어 여기서 못 세므로
      열을 두지 않고, 업체를 고르면 표에서 채워진다고 화면이 말한다(0 으로 꾸미지 않는다). */
-function _ovmRenderOverview(){
+function _ovmRenderOverview(opt){
   const p=$('#ownPanel'); if(!p) return;
+  // ★ 업체 패널에서 개요로 돌아오면 히스토리 항목도 개요여야 한다 — 안 쌓으면 현재 항목이 여전히
+  //   그 업체라 뒤로가기 한 번이 "아무 일도 안 일어나는" 헛클릭이 된다(_navPush 규율).
+  const wasAdv=!!STATE.advCur;
   STATE.advCur=null; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
+  if(wasAdv && !(opt&&opt.nav) && typeof _navPush==='function') _navPush();
   const advs=STATE.advs||[];
   const meta=STATE.ovMeta;
   const owned=STATE.ownedSheetIds||new Set();
@@ -7891,21 +7926,27 @@ function _ovmRenderOverview(){
   const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid)).length;
   const works=advs.reduce((n,a)=>n+(+a.works||0),0);
   const bad=!meta||!meta.ok;
-  const num=(v,hot)=>bad?'<span class="ovm-num z" title="집계를 불러오지 못했습니다">?</span>'
+  // ★★ 열마다 재료가 달라 실패도 따로 온다 — 한 덩어리로 묶으면 "계약 링크만 죽었는데 미매칭 0"처럼
+  //   조용한 위장이 생긴다. 모름(?) · 없음(—) · 값을 세 갈래로 구분한다(코드리뷰 지적).
+  const num=(v,hot,known,why)=>!known?`<span class="ovm-num z" title="${esc(why||'집계를 불러오지 못했습니다')}">?</span>`
     :(v>0?`<span class="ovm-num${hot?' hot':''}">${v}건</span>`:'<span class="ovm-num z">—</span>');
+  const matchKnown=_ovmMatchKnown(), candKnown=_ovmCandKnown(), linkKnown=_ovmLinkKnown();
   const rows=advs.map((a,i)=>{
     const lk=a.link;
-    const lkb = !lk ? '<span class="ovm-fin" title="접속 링크 미생성 — 업체를 열면 자동 생성됩니다">미생성</span>'
+    // ★ "모름"을 "미생성"으로 적으면 **적극적으로 틀린 안내**가 된다(폐기·로그인필요 링크를
+    //   "열면 자동 생성됩니다"라고 말하게 된다) — 조회 실패는 ? 로.
+    const lkb = !linkKnown ? `<span class="ovm-fin" title="${esc(_ovmCandWhy()||'접속링크 상태를 불러오지 못했습니다')}">?</span>`
+      : !lk ? '<span class="ovm-fin" title="접속 링크 미생성 — 업체를 열면 자동 생성됩니다">미생성</span>'
       : !lk.active ? '<span class="ovm-fin cand">폐기</span>'
       : lk.loginRequired ? '<span class="ovm-fin" style="background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent-line)">로그인</span>'
       : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
     const acct=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
-    return `<div class="ovm-ovt r" data-i="${i}" onclick="selAdv(${i})" role="button" tabindex="0">`
+    return `<div class="ovm-ovt r" data-i="${i}" onclick="selAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selAdv(${i});}" role="button" tabindex="0">`
       +`<span class="an"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><b>${esc(a.name)}</b></span>`
       +`<span class="c${a.inadPm?'':' dim'}" style="${a.inadPm?'':'color:var(--warn)'}">${a.inadPm?esc(a.inadPm):'미지정'}</span>`
       +`<span class="ovm-num${(+a.works)?'':' z'}">${bad?'?':(+a.works||0)}</span>`
-      +num(+a.noMatch||0,false)
-      +num(+a.finishCand||0,true)
+      +num(+a.noMatch||0,false,matchKnown,'계약 매칭 정보를 불러오지 못했습니다')
+      +num(+a.finishCand||0,true,candKnown,_ovmCandWhy())
       +`<span>${STATE.role==='master'||STATE.role==='admin'?lkb:'<span class="ovm-fin">—</span>'}</span>`
       +`<span class="c${acct?'':' dim'}">${STATE.role==='master'||STATE.role==='admin'?(acct?acct+'개':'없음'):'—'}</span>`
       +`</div>`;
@@ -7914,7 +7955,7 @@ function _ovmRenderOverview(){
     <div class="ovm-ovh"><h2>업체 ${advs.length}곳 · 작업 ${bad?'?':works.toLocaleString('ko-KR')}건</h2>
       <span class="s">캠페인 시트 ${total}개 중 ${total-free}개가 업체에 지정됨</span></div>
     <p class="ovm-lead">업체를 고르면 그 업체의 작업·정산·접속설정으로 들어갑니다. <b>마감자료 검수</b>가 있는 업체부터 보세요.
-      ${bad?'<b style="color:var(--warn)"> · 집계를 불러오지 못해 숫자를 ?로 표시합니다</b>':''}</p>
+      ${(bad||!candKnown||!matchKnown||!linkKnown)?`<b style="color:var(--warn)"> · ${esc(bad?'집계를 불러오지 못해 숫자를 ?로 표시합니다':'일부 집계를 불러오지 못해 그 칸만 ?로 표시합니다')}</b>`:''}</p>
     ${free?`<div class="ovm-cta"><span class="ct"><b>⚠ 업체가 지정되지 않은 시트 ${free}개</b>
         <span>지정 전에는 계약·정산이 붙지 않습니다.</span></span>
       <button class="btn pri" onclick="showAddAdvertiser()">＋ 거래처 등록 · 매칭</button></div>`:''}
@@ -7933,6 +7974,7 @@ function _ovmOpenDrawer(tab){
   _ovmDrawer=tab; _ovmDTab=tab;
   const d=$('#ovmDrawer'); if(!d) return;
   d.innerHTML=_ovmDrawerHtml(tab,a);
+  d.removeAttribute('aria-hidden');
   d.classList.add('on'); const sc=$('#ovmScrim'); if(sc) sc.classList.add('on');
   const f=d.querySelector('input:not([readonly]):not([disabled]),select,button.btn');
   if(f) try{ f.focus({preventScroll:true}); }catch(_){ f.focus(); }
@@ -7942,7 +7984,9 @@ function _ovmCloseDrawer(silent){
   if(!_ovmDrawer && !silent) return;
   _ovmDrawer=null;
   const d=$('#ovmDrawer'), sc=$('#ovmScrim');
-  if(d) d.classList.remove('on'); if(sc) sc.classList.remove('on');
+  // ★ 화면 밖 패널이 Tab 순서에 남으면 키보드 사용자가 보이지 않는 폼에 갇힌다.
+  if(d){ d.classList.remove('on'); d.setAttribute('aria-hidden','true'); d.innerHTML=''; }
+  if(sc) sc.classList.remove('on');
 }
 const _OVM_DTITLE={link:'접속 링크',acct:'광고주 계정',own:'소유 캠페인',add:'거래처 등록',unm:'업체 미지정 시트'};
 function _ovmDrawerHtml(tab,a){
@@ -7953,8 +7997,9 @@ function _ovmDrawerHtml(tab,a){
   else if(tab==='own') body=_ovmOwnsHtml(a)+_ovmAddOwnHtml();
   else if(tab==='add') body=_ovmAddAdvHtml();
   else if(tab==='unm') body=_ovmUnmatchedHtml();
-  const tabs=(['link','acct','own'].indexOf(tab)>=0 && a)
-    ? `<div class="ovm-dtabs">`+['link','acct','own'].map(k=>
+  const keys=isAdmin?['link','acct','own']:['own'];   // staff 에게 "admin 만 관리합니다" 막다른 길을 주지 않는다
+  const tabs=(keys.indexOf(tab)>=0 && a && keys.length>1)
+    ? `<div class="ovm-dtabs">`+keys.map(k=>
         `<span class="ovm-chip${tab===k?' on':''}" onclick="_ovmOpenDrawer('${k}')">${_OVM_DTITLE[k]}</span>`).join('')+`</div>`
     : '';
   const sub=(tab==='add'||tab==='unm')?'':(a?' · '+esc(a.name):'');
@@ -7998,7 +8043,7 @@ function _ovmUnmatchedHtml(){
   const rows=free.map(sid=>{
     const tabs=((STATE.sheetMap[sid]||{}).tabs||[]).length;
     return `<div class="own"><span class="ic">▤</span><div class="info"><b>${esc(sheetTitle(sid))}</b><span>탭 ${tabs}개</span></div>
-      <button class="btn xs pri" onclick="_ovmAddForSheet('${esc(sid)}')">거래처 등록</button></div>`;
+      <button class="btn xs pri" onclick="_ovmAddForSheet('${_advQ(sid)}')">거래처 등록</button></div>`;
   }).join('');
   return `<div class="sect"><div class="st">업체 미지정 시트 ${free.length}
       <span class="sthint">지정 전에는 계약·정산이 붙지 않습니다</span></div>${rows}</div>`;
@@ -8400,7 +8445,14 @@ async function saveAe(){ const a=STATE.advCur; if(!a) return;
      헤더 칸 수 ≡ 행 칸 수 ≡ grid 열 수 는 회귀가드가 두 빌더를 실행해 대조한다.               */
 function _ownTabsHtml(){
   const ot=STATE.ownTabs||[];
-  if(!ot.length) return `<div class="st">연결된 탭 0</div><div class="empty" style="padding:14px">연결된 탭 없음 — [소유 시트]에서 시트를 지정하면 그 시트의 탭이 여기 나옵니다.</div>`;
+  if(!ot.length){
+    // ★ 조회가 죽은 것과 정말 0건인 것을 구분한다 — 실패인데 "시트를 지정하세요"라고 하면 오독시킨다.
+    if((STATE.ownTabMeta||{}).unreachable)
+      return `<div class="st">연결된 탭 <span class="sthint">불러오지 못함</span></div>
+        <div class="ovm-empty"><b>연결된 탭을 불러오지 못했습니다</b>잠시 후 다시 시도하세요.
+          <div style="margin-top:9px"><button class="btn xs" onclick="selAdv((STATE.advs||[]).findIndex(x=>STATE.advCur&&x.id===STATE.advCur.id))">다시 시도</button></div></div>`;
+    return `<div class="st">연결된 탭 0</div><div class="empty" style="padding:14px">연결된 탭 없음 — [소유 시트]에서 시트를 지정하면 그 시트의 탭이 여기 나옵니다.</div>`;
+  }
   const meta=STATE.ownTabMeta||{};
   const warn=(meta.statsUnavailable||meta.finishedUnavailable)
     ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '';
@@ -8408,7 +8460,7 @@ function _ownTabsHtml(){
     <div class="ovm-tools">
       <div class="tr">
         <label class="ovm-srch"><span class="ic">🔍</span>
-          <input id="ovmQ" placeholder="작업명 · 브랜드 · 상품 · 계약번호 · 비고 검색" autocomplete="off" oninput="_ovmSearch(this.value)">
+          <input id="ovmQ" value="${esc(_ovmQ)}" placeholder="작업명 · 브랜드 · 상품 · 계약번호 · 비고 검색" autocomplete="off" oninput="_ovmSearch(this.value)">
           <button class="clr" title="지우기" onclick="_ovmClear()">×</button></label>
         <span class="ovm-cnt" id="ovmCnt"></span>
         <span style="flex:1"></span>
@@ -8561,10 +8613,10 @@ function _ownRowsHtml(){
   if(!list) return _ovmHead()+`<div class="ovm-empty"><b>조건에 맞는 작업이 없습니다</b>${q?`검색어 “${esc(q)}”`:'선택한 필터'}에 맞는 작업이 없습니다. 검색어를 지우거나 [전체]를 눌러보세요.</div>`;
   return _ovmHead()+list;
 }
-// 행만 다시 그린다(도구줄·입력칸 무접촉) + 건수·칩 숫자 갱신.
-function _ovmRenderRows(){
+// 건수·칩 표기 — ★ 전체 렌더(비고 저장·정산 도착)와 행 렌더가 **같은 함수**를 쓴다.
+//   한쪽만 채우면 검색 중 비고를 저장했을 때 입력칸·건수는 비어 보이는데 표는 계속 걸러진 상태가 된다.
+function _ovmSyncCnt(){
   const box=$('#ownRows'); if(!box) return;
-  box.innerHTML=_ownRowsHtml();
   const ot=STATE.ownTabs||[], q=_ovmQ.trim();
   const shown=box.querySelectorAll('.owntab').length;
   const cnt=$('#ovmCnt');
@@ -8572,10 +8624,18 @@ function _ovmRenderRows(){
     ? `<b>${shown}</b>건 표시 <span style="color:var(--faint)">/ 전체 ${ot.length}</span>` : `<b>${ot.length}</b>건`;
   const fc=$('#ovmFchips'); if(fc) fc.innerHTML=_ovmFilterChips();
 }
+// 행만 다시 그린다(도구줄·입력칸 무접촉) + 건수·칩 숫자 갱신.
+function _ovmRenderRows(){
+  const box=$('#ownRows'); if(!box) return;
+  box.innerHTML=_ownRowsHtml();
+  _ovmSyncCnt();
+}
 function _ovmSearch(v){ _ovmQ=String(v||''); _ovmRenderRows(); }
 function _ovmClear(){ _ovmQ=''; const el=$('#ovmQ'); if(el){ el.value=''; el.focus(); } _ovmRenderRows(); }
 function _ovmSetF(f,el){ _ovmF=f; _ovmRenderRows(); }
-function setOwnBrandByName(name){ STATE.ownBrand=name||null; _ovmRenderRows();
+// ★ 미분류는 빈 문자열('')이 유효한 선택값이다 — `name||null` 로 접으면 [미분류] 칩이
+//   눌러도 전체로 되돌아가 **브랜드 없는 탭만 보기 기능이 죽는다**(코드리뷰가 실행으로 잡음).
+function setOwnBrandByName(name){ STATE.ownBrand = (name===''? '' : (name||null)); _ovmRenderRows();
   const box=$('#owntabsSect'); if(box){ const row=box.querySelectorAll('.ovm-tools .tr')[2]; if(row) row.innerHTML=_ovmBrandChips(); } }
 // 계약 칸 — 매칭됐으면 계약번호(클릭 = 다시 매칭), 아니면 [계약 매칭] 버튼.
 //   ★ 행 클릭(작업보드로 열기)과 격리(stopPropagation) · onclick 에는 **인덱스만** 넘긴다(값 문자열 주입 금지).
@@ -8621,7 +8681,11 @@ function editTabMemo(ev,i){ ev.stopPropagation(); const t=(STATE.ownTabs||[])[i]
 function _memoKey(ev){ if(ev.key==='Enter') ev.target.blur(); else if(ev.key==='Escape'){ ev.target.dataset.esc='1'; ev.target.blur(); } }
 async function saveOwnMemo(i,inp){ const t=(STATE.ownTabs||[])[i];
   // 편집 종료 시점 = 연기된 재렌더(_ownRerenderPending)까지 함께 소화(최신 STATE 로 강제 렌더).
-  const rerender=()=>{ STATE._ownRerenderPending=false; const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
+  // ★ 행 컨테이너가 있으면 행만 갈아치운다 — 섹션을 통째로 그리면 검색어·건수 표기가 초기화되는데
+  //   표는 계속 걸러진 상태라 "왜 3건만 보이지"의 원인이 화면에서 사라진다(코드리뷰 지적).
+  const rerender=()=>{ STATE._ownRerenderPending=false;
+    if($('#ownRows')){ _ovmRenderRows(); return; }
+    const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
   if(!t||inp.dataset.esc){ rerender(); return; }
   const memo=inp.value.trim();
   if(memo===(t.memo||'')){ rerender(); return; }
@@ -8650,7 +8714,11 @@ async function rmOwn(sheetId, tabGid){ const a=STATE.advCur; if(!a) return;
   await api('/api/trackb/ownership',{method:'DELETE',body:JSON.stringify({advertiserId:a.id, sheetId, tabGid:tabGid||null})});
   toast('소유 해제'); refreshAdvCounts(); selAdv(STATE.advs.indexOf(a));
 }
-async function refreshAdvCounts(){ const r=await api('/api/trackb/advertisers?overview=1'); if(r&&r.ok){ STATE.advs=r.items||[];
+async function refreshAdvCounts(){
+  // ★ 소유가 바뀌면 '업체 미지정 시트 N' 도 함께 바뀐다 — 사이드바에 상시 노출되므로 같이 갱신한다.
+  const os=await api('/api/trackb/owned-sheets').catch(()=>null);
+  if(os&&os.ok) STATE.ownedSheetIds=new Set(os.sheetIds||[]);
+  const r=await api('/api/trackb/advertisers?overview=1').catch(()=>null); if(r&&r.ok){ STATE.advs=r.items||[];
   STATE.ovMeta=r.overview||STATE.ovMeta;
   // 목록을 다시 그린다 — 소유 수·처리필요 배지가 함께 바뀌므로 .ct 만 갱신하면 배지가 stale 로 남는다.
   _ovmRenderAdvs(); _ovmRenderFoot(); } }

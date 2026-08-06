@@ -135,13 +135,29 @@ async function run() {
   ]);
   svc.__setPoolForTest(db);
   svc.__resetTabStatsCacheForTest && svc.__resetTabStatsCacheForTest();
-  const own = await svc.ownedTabsForAdvertiser({ advertiserId: 'A' });
+  const own = await svc.ownedTabsForAdvertiser({ advertiserId: 'A', annotate: true });
   t('★ {rows, statsUnavailable, finishedUnavailable} 로 반환(실패를 화면이 고지할 수 있게)',
     Array.isArray(own.rows) && 'statsUnavailable' in own && 'finishedUnavailable' in own);
   t('행마다 finishCand/finished 주석', own.rows[0].finishCand === true && own.rows[0].finished === false
     && own.rows[1].finishCand === false);
   t('★ 판정 재료는 홈과 같은 tabStatsMap(연결탭 표의 bTotal/bSub/bPaid 로 따로 세지 않는다)',
     /const st = await tabStatsMap\(\);[\s\S]{0,420}finishCandidate\(st\.map\[k\]\)/.test(SVC));
+  // ★★ 주석(통계·마감)은 opt-in — 광고주 경로(advertiserWorkSummary → /my-work-summary, 무로그인 공개
+  //   링크로도 도달)와 정산 요약·브랜드 배정에 review_index 전체 GROUP BY 를 얹으면 안 된다(CLAUDE.md).
+  {
+    const before = db.q.length;
+    const plain = await svc.ownedTabsForAdvertiser({ advertiserId: 'A' });   // annotate 미지정
+    const asked = db.q.slice(before).map(x => x.s).join(' | ');
+    t('★ annotate 없으면 통계·마감을 조회하지 않는다(광고주 경로 비용 0)',
+      !/FROM tab_configs tc/.test(asked) && !/trackb_tab_finished/.test(asked), asked.slice(0, 120));
+    t('annotate 없으면 판정 주석도 없다(모르는 값을 false 로 단정하지 않게 화면이 안 쓴다)',
+      plain.rows[0].finishCand === undefined && plain.statsUnavailable === false);
+    t('★ 주석을 켜는 곳은 /ownership/tabs 하나뿐', (ROUTES.match(/annotate: true/g) || []).length === 1);
+    // 선언부(`async function ...({ advertiserId, annotate = false })`)는 제외하고 **호출부**만 본다.
+    t('★ 광고주·정산·브랜드 경로는 annotate 를 켜지 않는다',
+      !/await ownedTabsForAdvertiser\(\{ advertiserId, annotate/.test(SVC)
+      && (SVC.match(/ownedTabsForAdvertiser\(\{ advertiserId \}\)\)\.rows/g) || []).length >= 3);
+  }
 
   /* ═══ 4. 라우터 ═══ */
   console.log('\n4) 라우터 · 핸들러 실행');
@@ -185,6 +201,13 @@ async function run() {
     out.body.items[1].works === 0 && out.body.items[1].noMatch === 0);
   t('접속링크 상태 병합 · 없는 업체는 null', out.body.items[0].link.loginRequired === true && out.body.items[1].link === null);
   t('★ overview 플래그를 응답에 실어 화면이 고지할 수 있게 한다', out.body.overview && out.body.overview.ok === true);
+  // ★ 접속링크 상태(공개/로그인/폐기·마지막 접속)는 보안 설정 메타 — 링크 CRUD 가 전부 adminOrMaster 인데
+  //   목록만 staff 에게 열면 서버가 프론트보다 넓어진다(프론트는 이미 admin 분기).
+  svc.__resetTabStatsCacheForTest();
+  const staffOut = await runHandler(advL, { query: { overview: '1' }, admin: { role: 'staff', name: 'ae' } });
+  t('★ staff 응답에는 접속링크 상태가 실리지 않는다', staffOut.body.items.every(it => it.link === undefined),
+    JSON.stringify(staffOut.body.items[0]).slice(0, 160));
+  t('staff 도 작업수·미매칭·검수 집계는 받는다(담당 판단에 필요)', staffOut.body.items[0].works === 1);
   out = await runHandler(advL, { query: {}, admin: { role: 'admin', name: 'k' } });
   t('★ overview 미지정이면 종전 응답 그대로(기존 소비처 무영향)',
     out.body.items[0].works === undefined && out.body.overview === undefined);
@@ -242,6 +265,60 @@ async function run() {
   t('개요·연결탭이 같은 판정을 쓴다(서버 불리언 소비 — 프론트 재계산 금지)',
     /t\.finishCand/.test(HTML) && !/function isOwnFinishCandidate/.test(HTML));
 
+  // ★★ B1 — 소스별 실패 플래그를 화면이 실제로 소비하는가(ok 만 보면 statsUnavailable 이 0 으로 위장된다)
+  {
+    const sb = { STATE: { ovMeta: null } };
+    vm.createContext(sb);
+    vm.runInContext(grab('_ovmCandKnown') + grab('_ovmCandWhy') + grab('_ovmMatchKnown') + grab('_ovmLinkKnown'), sb);
+    const set = m => { sb.STATE.ovMeta = m; };
+    const known = () => vm.runInContext('[_ovmCandKnown(),_ovmMatchKnown(),_ovmLinkKnown()]', sb);
+    set({ ok: true }); assert.deepEqual(known(), [true, true, true], '플래그 없으면 전부 known');
+    set({ ok: true, statsUnavailable: true });
+    t('★ statsUnavailable = 마감자료 검수 판정 불가(ok 만 보면 0 으로 위장된다)', known()[0] === false && known()[1] === true);
+    set({ ok: true, finishedUnavailable: true });
+    t('★ finishedUnavailable = 판정 불가', known()[0] === false);
+    set({ ok: true, contractsUnavailable: true });
+    t('★ contractsUnavailable = 계약 미매칭 "모름"(다 매칭됨으로 위장 금지)', known()[1] === false);
+    set({ ok: true, linksUnavailable: true });
+    t('★ linksUnavailable = 접속링크 "모름"(미생성으로 위장 금지 — 폐기·로그인필요를 틀리게 안내한다)', known()[2] === false);
+    set({ ok: false }); assert.deepEqual(known(), [false, false, false], 'ok:false 면 전부 모름');
+    set(null); assert.deepEqual(known(), [false, false, false], '집계 미도착도 모름');
+    set({ ok: true, statsUnavailable: true });
+    t('모름 사유를 문장으로 말한다', /통계/.test(vm.runInContext('_ovmCandWhy()', sb)));
+  }
+  t('★ 개요 접속링크 열은 모름(?)과 미생성을 구분한다', /!linkKnown \?[\s\S]{0,160}: !lk \?/.test(HTML));
+  t('★ 사이드바 검수 칩은 판정 불가면 클릭도 막는다(확정 문장 오독 차단)',
+    /ovOk\?'':' disabled title="'\+_ovmCandWhy\(\)\+'"'/.test(HTML));
+  // ★★ B2 — 미분류('') 브랜드 필터가 살아 있는가(실행으로 확인)
+  {
+    const sb = { STATE: { ownBrand: null, ownBrandList: ['브랜드A', '브랜드B'] }, _ovmRenderRows() {}, $: () => null };
+    vm.createContext(sb);
+    vm.runInContext(grab('setOwnBrandByName') + grab('setOwnBrand'), sb);
+    const pick = i => { vm.runInContext(`setOwnBrand(${i})`, sb); return sb.STATE.ownBrand; };
+    t('브랜드 전체(-1) → null', pick(-1) === null);
+    t('브랜드 선택(0) → 그 브랜드', pick(0) === '브랜드A');
+    t('★★ 미분류(-2) → 빈 문자열(null 로 접으면 브랜드 없는 탭만 보기가 죽는다)', pick(-2) === '');
+  }
+  // ★ M1 — 전체 렌더에서도 검색어·건수가 살아 있는가
+  t('★ 검색 입력칸에 현재 검색어를 싣는다(전체 렌더 후에도 유지)', /id="ovmQ" value="\$\{esc\(_ovmQ\)\}"/.test(HTML));
+  t('★ 비고 저장 후 재렌더도 행 경로로 수렴(검색어·건수 초기화 방지)',
+    /const rerender=\(\)=>\{ STATE\._ownRerenderPending=false;\s*\n\s*if\(\$\('#ownRows'\)\)\{ _ovmRenderRows\(\); return; \}/.test(HTML));
+  t('건수·칩 표기는 한 함수(_ovmSyncCnt)로 수렴', (HTML.match(/function _ovmSyncCnt\(/g) || []).length === 1
+    && /function _ovmRenderRows\(\)\{[\s\S]{0,160}_ovmSyncCnt\(\);/.test(HTML));
+  // ★ M4 — 로딩 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다
+  t('★ 목록 조회 실패·예외를 화면이 종결한다(무한 "불러오는 중" 금지)',
+    /catch\(err\)\{ _ovmLoadFailed\(err&&err\.message\); return; \}/.test(HTML)
+    && /function _ovmLoadFailed\(why\)\{/.test(HTML) && /onclick="renderOwnershipView\(\)"/.test(HTML));
+  t('연결탭 조회 실패는 "연결된 탭 없음"이라고 행동을 지시하지 않는다',
+    /unreachable\)\s*\n?\s*return `<div class="st">연결된 탭 <span class="sthint">불러오지 못함/.test(HTML));
+  t('닫은 설정 패널은 Tab 순서에서 빠진다(화면 밖 폼 갇힘 방지)',
+    /d\.classList\.remove\('on'\); d\.setAttribute\('aria-hidden','true'\); d\.innerHTML='';/.test(HTML));
+  t('개요 행은 Enter/Space 로도 열린다', /onkeydown="if\(event\.key==='Enter'\|\|event\.key===' '\)/.test(HTML));
+  t('[← 전체 개요] 복귀도 히스토리에 쌓는다(뒤로가기 헛클릭 방지)', /if\(wasAdv && !\(opt&&opt\.nav\) && typeof _navPush==='function'\) _navPush\(\);/.test(HTML));
+  t('소유 변경 후 미지정 시트 배너도 갱신(사이드바 상시 노출이라 stale 이 눈에 띈다)',
+    /async function refreshAdvCounts\(\)\{[\s\S]{0,300}owned-sheets/.test(HTML));
+  t('staff 설정 패널은 소유 시트만(막다른 길 제거)', /const keys=isAdmin\?\['link','acct','own'\]:\['own'\];/.test(HTML));
+
   /* ═══ 6. 동적 열 구성 ═══ */
   console.log('\n6) 동적 열 구성(헤더 ≡ grid)');
   const src = grab('_ovmGrid') + '\n' + grab('_ovmHead');
@@ -292,6 +369,19 @@ async function run() {
       && vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린' }, 'all', '없는말') === false);
   }
 
+  // ★ 서버 finishCandidate ↔ 프론트 isFinishCandidate 등가 — 한쪽만 손대는 드리프트 차단
+  {
+    const sb = {}; vm.createContext(sb); vm.runInContext(grab('isFinishCandidate'), sb);
+    const client = vm.runInContext('isFinishCandidate', sb);
+    for (const st2 of [{ total: 100, submitted: 100, paid: 100 }, { total: 100, submitted: 99, paid: 100 },
+      { total: 100, submitted: 100, paid: 99 }, { total: 0, submitted: 0, paid: 0 }, { total: 5 },
+      { total: 10, submitted: 12, paid: 11 }, null, {}]) {
+      assert.equal(client({ stats: st2 }), svc.finishCandidate(st2),
+        '판정 등가: ' + JSON.stringify(st2));
+    }
+    t('★ 서버·프론트 마감 후보 판정이 실제로 같은 답을 낸다(현실 입력 8종)', true);
+  }
+
   /* ═══ 7. 무신호 금지 + CSS 무결성 ═══ */
   console.log('\n7) 무신호 금지 · CSS 무결성');
   t('★ 통계·마감 실패 시 연결탭 표가 사유를 적는다', /ovm-warn[\s\S]{0,200}마감자료 검수/.test(HTML));
@@ -306,7 +396,8 @@ async function run() {
     const boxes = { '#advs': { innerHTML: '' }, '#ovmAdvChips': { innerHTML: '' } };
     sb.$ = sel => boxes[sel] || null;
     vm.createContext(sb);
-    vm.runInContext(grab('_ovmAdvMatch') + '\n' + grab('_ovmRenderAdvs'), sb);
+    // 실제 헬퍼를 함께 올린다 — 배지 조건이 _ovmCandKnown 을 거치므로 플래그 로직까지 함께 실행된다.
+    vm.runInContext([grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmRenderAdvs')].join('\n'), sb);
     const render = (advs, ovMeta) => { sb.STATE.advs = advs; sb.STATE.ovMeta = ovMeta;
       boxes['#advs'].innerHTML = ''; vm.runInContext('_ovmRenderAdvs()', sb); return boxes['#advs'].innerHTML; };
     const A = [{ id: 'A', name: '업체A', inadPm: 'AE', owned: 1, finishCand: 3 }, { id: 'B', name: '업체B', inadPm: 'AE', owned: 1, finishCand: 0 }];
@@ -315,6 +406,11 @@ async function run() {
     html = render(A, { ok: false });
     t('★ 집계 실패(ovMeta.ok=false)면 배지를 아예 그리지 않는다(0·임의 숫자로 위장 금지)',
       !/ovm-b/.test(html), html.slice(0, 200));
+    html = render(A, { ok: true, statsUnavailable: true });
+    t('★★ ok:true 인데 통계만 죽은 경우도 배지를 그리지 않는다(이 경로가 "0건"으로 위장되던 자리)',
+      !/ovm-b/.test(html), html.slice(0, 200));
+    html = render(A, { ok: true, finishedUnavailable: true });
+    t('★ 마감 정보만 죽은 경우도 배지 미표시', !/ovm-b/.test(html));
     html = render([{ id: 'C', name: '업체C', inadPm: '', owned: 0, finishCand: 0 }], { ok: true });
     t('AE 미지정은 사이드바에서 경고색으로 표기', /class="pmn noae"/.test(html) && /AE 미지정/.test(html));
     t('★ 사이드바 행 onclick 은 인덱스만(업체명 문자열 주입 금지)', /onclick="selAdv\(0\)"/.test(html));

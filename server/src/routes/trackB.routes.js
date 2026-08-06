@@ -406,13 +406,17 @@ router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, 
     // ?overview=1 — 업체관리 첫 화면(업체 미선택) 개요 표 재료를 같은 응답에 얹는다(신규 엔드포인트 0).
     //   ★ 로컬 DB만 집계(인트라넷 무접촉) · 실패 소스는 *Unavailable 플래그로 고지(0 으로 꾸미지 않는다).
     if (req.query.overview === '1') {
+      const isAdmin = _role(req) === 'master' || _role(req) === 'admin';
       const ov = await svc.advertiserOverview();
       if (ov && ov.ok) {
         for (const it of items) {
           const a = ov.byAdvertiser[it.id];
           if (a) { it.works = a.works; it.noMatch = a.noMatch; it.finishCand = a.finishCand; }
           else { it.works = 0; it.noMatch = 0; it.finishCand = 0; }   // 소유 탭이 0건인 업체(집계 대상 없음)
-          it.link = ov.link[it.id] || null;                            // null = 링크 미생성(여기서 만들지 않는다)
+          // ★ 접속링크 상태(공개/로그인/폐기·마지막 접속)는 **admin/master 에만** 싣는다 —
+          //   링크를 다루는 다른 모든 라우트가 adminOrMaster 이고 프론트도 staff 에겐 안 그린다.
+          //   서버가 프론트보다 넓어지면 그게 곧 노출이다. null = 링크 미생성(여기서 만들지 않는다).
+          if (isAdmin) it.link = ov.link[it.id] || null;
         }
       }
       return res.json({ ok: true, items, overview: ov ? {
@@ -514,7 +518,7 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
     if (!req.query.advertiserId) return res.status(400).json({ ok: false, error: 'advertiserId 필수' });
     // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
     //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
-    const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId });
+    const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
     res.json({ ok: true, items: own.rows, statsUnavailable: own.statsUnavailable, finishedUnavailable: own.finishedUnavailable });
   } catch (err) { next(err); }
 });

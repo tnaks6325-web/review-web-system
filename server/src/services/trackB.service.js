@@ -650,7 +650,7 @@ async function sheetAssignableByStaff({ sheetId, staffName } = {}) {
 // ── 업체 소유 시트의 전체 탭 나열(소유지정 상세 패널): 시트전체 소유=그 시트 모든 탭, 탭지정 소유=그 탭만.
 //    정렬 = "생성 최신순" 근사: 시스템에 탭 생성시각 원천이 없어 MIN(campaign_participants.first_seen_at)
 //    (재투영에도 보존되는 최초 관측시각) 우선, 미투영 탭은 raw_sheet_tabs.mirrored_at 폴백.
-async function ownedTabsForAdvertiser({ advertiserId } = {}) {
+async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
   if (!advertiserId) throw new Error('ownedTabsForAdvertiser: advertiserId 필수');
   const db = getPool();
   const { rows } = await db.query(
@@ -705,6 +705,11 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
   // ── 마감 여부·마감자료 검수 대기 주석 — ★ 판정은 finishCandidate 한 곳, 재료는 홈과 같은 tabStatsMap.
   //   화면(필터 칩·개요 배지)은 이 불리언을 그대로 소비한다(프론트 재계산 금지 = 숫자가 갈리지 않는다).
   //   ★ fail-soft: 통계·마감 조회가 죽어도 표는 뜬다(그 경우 판정만 false — 라우트가 플래그로 고지).
+  // ★★ annotate 는 **opt-in** 이다 — tabStatsMap 은 review_index 전체 GROUP BY 라 CLAUDE.md 가
+  //   "통계는 홈 전용, 작업바 로드엔 붙이지 않는다"로 못박은 비용이다. 이 함수의 소비처 중
+  //   광고주 경로(advertiserWorkSummary → /my-work-summary, 무로그인 공개 링크로도 도달)와
+  //   정산 요약·브랜드 배정은 주석을 쓰지 않으므로 켜지 않는다. 켜는 곳은 /ownership/tabs 하나.
+  if (!annotate) return { rows, statsUnavailable: false, finishedUnavailable: false };
   const st = await tabStatsMap();
   const fin = await finishedTabsMap();
   for (const r of rows) {
