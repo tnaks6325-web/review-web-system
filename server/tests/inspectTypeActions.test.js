@@ -52,6 +52,9 @@ function seqPool(handlers) {
     const code =
       grab(/function _riIssueTypes\(r\)\{[\s\S]*?\n\}/) + '\n' +
       grab(/const RI_TYPE_META=\{[\s\S]*?\n\};/) + '\n' +
+      grab(/const _RI_KIND=\{[\s\S]*?\n?\};/) + '\n' +
+      grab(/function _riFmtKind\(fm\)\{[^\n]*\}/) + '\n' +
+      grab(/function _riKindLabel\(fm\)\{[^\n]*\}/) + '\n' +
       grab(/function _riPrimaryIssue\(r\)\{[\s\S]*?\n\}/) + '\n' +
       grab(/function _riTypeLabel\(p,c\)\{[\s\S]*?\n\}/) + '\n' +
       grab(/function _riCardActions\(r,i\)\{[\s\S]*?\n\}/);
@@ -88,6 +91,26 @@ function seqPool(handlers) {
     const rcp = F.act(R({ format: { verdict: 'fail', got: 'review' } }, { slot_key: 'receipt' }), 1);
     assert.ok(/riRouteManual\(1,'review'\)/.test(rcp.main.h), '영수증 칸의 리뷰 화면 → 주 = 리뷰로 이동');
     ok('A3: 리뷰화면 아님 — AI got 이 주 이동 버튼을 정한다(불명 = 불량)');
+
+    // A3b: ★★ 원장은 `kind`, 자동분류 판정값은 `got` — 이름이 갈려 현금영수증으로 판별된 건이
+    //   "종류 불명"으로 떨어져 이동 버튼이 안 뜨던 실측 사고. 두 이름이 **같은 결과**여야 한다.
+    const byKind = F.act(R({ format: { verdict: 'fail', kind: 'receipt' } }), 1);
+    assert.ok(/riRouteManual\(1,'receipt'\)/.test(byKind.main.h),
+      '★ 원장 필드 kind 로도 이동 버튼이 뜬다(재검수 없이 소급 적용)');
+    assert.strictEqual(F.label('format_fail', { format: { kind: 'receipt' } }),
+      '📵 리뷰화면 아님 — 현금영수증으로 보임');
+    assert.strictEqual(F.label('format_fail', { format: { got: 'receipt' } }),
+      '📵 리뷰화면 아님 — 현금영수증으로 보임', 'got/kind 표기가 갈리지 않는다');
+    assert.ok(/riRouteManual\(1,'order_capture'\)/.test(F.act(R({ format: { verdict: 'fail', kind: 'order_capture' } }), 1).main.h));
+    assert.ok(/riBadPopup\(1\)/.test(F.act(R({ format: { verdict: 'fail' } }), 1).main.h),
+      '종류 불명은 종전대로 [✕ 불량](어디로 보낼지 모르면 이동 제안 금지)');
+    assert.ok(!/c\.format\.got\)\|\|''/.test(wd) && /function _riFmtKind\(fm\)\{ return \(fm&&\(fm\.got\|\|fm\.kind\)\)\|\|''; \}/.test(wd),
+      '★ 종류 판독은 _riFmtKind 한 곳(사본 금지 — 화면마다 종류가 갈린다)');
+    // 근거 문장이 종류를 말한다(반려 사유 프리필로 그대로 나간다)
+    const reasonFn = /function _riReasons\(c\)\{[\s\S]*?\n\}/.exec(wd)[0];
+    assert.ok(/화면으로 판별되었습니다 — 리뷰 화면이 아닙니다/.test(reasonFn) && /_riKindLabel\(c\.format\)/.test(reasonFn),
+      '★ 근거 문장이 판별된 종류를 말한다');
+    ok('A3b: ★★ kind/got 이름 흡수 — 현금영수증 판별 건에 이동 버튼·종류 표기가 뜬다');
 
     // A4: 상품명 = 별칭 학습 / 채널 = 추정 오인 / 본문겹침 = 나란히 보기
     const prod = F.act(R({ product: { verdict: 'warn' } }), 2);

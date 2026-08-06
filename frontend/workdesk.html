@@ -5650,11 +5650,16 @@ function _riPrimaryIssue(r){
   for(const k of ['duplicate','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
   return null;
 }
+/* ★★ AI 가 판별한 화면 종류의 **단일 출처** — 원장(2차 검수)은 `kind`, 자동분류 판정값은 `got`
+   으로 이름이 갈려 있어(실측: 현금영수증으로 판별된 건이 카드엔 "종류 불명"으로 떨어져 이동
+   버튼이 안 뜸) 여기 한 곳에서 흡수한다. 옛 레코드도 kind 를 갖고 있어 **재검수 없이 소급 적용**된다. */
+const _RI_KIND={receipt:'현금영수증',order_capture:'주문내역(구매캡처)',purchase_confirm:'구매확정 완료 화면',review:'리뷰 화면'};
+function _riFmtKind(fm){ return (fm&&(fm.got||fm.kind))||''; }
+function _riKindLabel(fm){ return _RI_KIND[_riFmtKind(fm)]||''; }
 function _riTypeLabel(p,c){
   if(!p) return '이상 없음';
   if(p==='format_fail'){
-    const got=(c&&c.format&&c.format.got)||'';
-    const gl={receipt:'현금영수증',order_capture:'주문내역',purchase_confirm:'구매확정 화면',review:'리뷰 화면'}[got];
+    const gl=_riKindLabel(c&&c.format);
     return '📵 리뷰화면 아님'+(gl?' — '+gl+'으로 보임':'');
   }
   if(p==='similarity'){
@@ -5683,7 +5688,7 @@ function _riCardActions(r,i){
   // ★ 중복 = 제거만(이동 버튼 제외 — 어디로 옮겨도 중복은 남는다)
   if(p==='duplicate') return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
   if(p==='format_fail'){
-    const got=(c.format&&c.format.got)||'';
+    const got=_riFmtKind(c.format);
     if(!isReceiptSlot&&got==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.bad,A.ok], more:[A.mvC]};
     if(got==='order_capture'||got==='purchase_confirm') return {main:{...A.mvC,m:'m-amber'}, subs:[A.bad,A.ok], more:isReceiptSlot?[A.mvV]:[A.mvR]};
     if(isReceiptSlot&&got==='review') return {main:{...A.mvV,m:'m-blue'}, subs:[A.bad,A.ok], more:[A.mvC]};
@@ -5831,7 +5836,12 @@ function _riChanReason(fm){
 /** 판정 근거를 사람 문장으로 — 카드에서 열어보지 않고도 판단되게 한다. */
 function _riReasons(c){
   const out=[];
-  if(c.format && c.format.verdict==='fail') out.push('리뷰 화면이 아닌 것으로 판정됨');
+  // ★ 종류를 알면 종류를 말한다 — "리뷰 화면이 아님"만으로는 무엇으로 보이는지 몰라
+  //   담당자가 어디로 옮길지 판단할 수 없다(반려 사유 프리필로도 그대로 나간다).
+  if(c.format && c.format.verdict==='fail'){
+    const gl=_riKindLabel(c.format);
+    out.push(gl?`${gl} 화면으로 판별되었습니다 — 리뷰 화면이 아닙니다`:'리뷰 화면이 아닌 것으로 판정됨');
+  }
   if(c.format && c.format.verdict==='warn' && c.format.expectedChannel)
     out.push(_riChanReason(c.format));
   if(c.product && c.product.verdict==='warn')
@@ -5879,9 +5889,11 @@ function riOpenDetail(i){
       </div>
       <div class="rimright">
         <table class="ritbl">
-          ${line(fm.verdict||'skip','리뷰 화면·채널', fm.expectedChannel&&fm.verdict==='warn'
-            ? esc(_riChanReason(fm))
-            : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':''))}
+          ${line(fm.verdict||'skip','리뷰 화면·채널', fm.verdict==='fail'
+            ? (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨')
+            : (fm.expectedChannel&&fm.verdict==='warn'
+              ? esc(_riChanReason(fm))
+              : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':'')))}
           ${line(pr.verdict||'skip','상품명', pr.verdict==='skip'?'비교할 기대 상품명이 없습니다 — [⚙ 기대 상품명]에서 등록하세요':('캡처 "'+esc(pr.ocr||'')+'"<br>기대 '+esc((pr.expected||[]).join(' / '))))}
           ${line(dup.verdict||'skip','같은 파일', dup.verdict==='fail'?esc(`${dup.matchTab||''} ${dup.matchReviewer||''} ${dup.matchRow?dup.matchRow+'행':''}`):'')}
           ${line(sim.verdict||'skip','본문 겹침', sim.score!=null?(Math.round(sim.score*100)+'% '+esc(sim.matchReviewer||'')):'')}
