@@ -614,7 +614,21 @@ mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 1px}
 
 <!-- ═══════════ 7. 정할 것 ═══════════ -->
 <div class="sec" id="decide">
-<h2>정해주셔야 하는 것</h2>
+<h2>정해주셔야 하는 것 <span class="tag" style="color:var(--safe);background:var(--safe-soft);border-color:#cfe9d8">2026-08-06 확정 · 구현 완료</span></h2>
+<div class="note cool" style="margin-bottom:14px"><div class="nt">확정된 답</div>
+<ul>
+<li><b>① 시안 A</b> — 업체 작업대. 지금 흐름을 지키며 정리(서버 변경은 개요 집계 1개).</li>
+<li><b>② 표 기본 열 = 권장안</b> — 정산상세 접힌 상태 기본 + 마지막 선택을 브라우저에 기억.</li>
+<li><b>③ '처리필요' = 마감자료 검수 대기만</b> — 사이드바·개요의 빨간 배지는 <b>이제 마감할 수 있는 작업</b>(인원 충족·전건 제출·전건 입금)만 센다. 계약 미매칭·미입금은 배지에서 빼고 <b>표의 필터 칩</b>으로 남겼다(칩 숫자로는 계속 보인다).</li>
+<li><b>④ 개요 집계 = 권장안</b> — 서버에 집계 1개 추가.</li>
+</ul></div>
+<div class="note warm" style="margin-bottom:14px"><div class="nt">구현에서 달라진 것 (아래 목업과 다른 부분)</div>
+<ul>
+<li><b>개요 표에 '미입금' 열을 두지 않았다</b> — 입금액은 인트라넷 계약에서만 오므로 17개 업체분을 개요에서 세려면 인트라넷을 그만큼 두들겨야 한다. 그 자리에 <b>계약 미매칭 · 마감자료 검수</b> 두 열을 두었고(둘 다 로컬에서 정확히 셀 수 있어 항상 채워진다), 미입금은 업체를 고른 뒤 표의 [미입금] 필터로 본다. 화면에도 그렇게 적었다.</li>
+<li><b>표에 <code>🏁 마감</code> 배지를 추가</b>했다 — '마감자료 검수' 칩이 생기면서 "이미 마감한 작업"과 구분이 필요해졌다.</li>
+<li><b>업체관리 화면이 내부 스크롤로 바뀌었다</b> — 도구줄 고정(sticky)이 실제로 발동하려면 스크롤되는 컨테이너가 필요했다. 덤으로 사이드바와 [미지정 시트] 버튼이 항상 보인다.</li>
+</ul></div>
+<p class="sub" style="margin-bottom:8px">아래는 결정 당시의 질문과 권장안입니다(기록용).</p>
 <div class="decide">
   <div class="dq"><div class="qq"><span class="n">1</span>두 시안 중 무엇으로 갈까요?</div>
     <div class="opt"><b>A</b> — 지금 흐름을 지키며 정리. 학습비용 거의 0, 서버 변경 0. 업체를 골라야 작업이 보이는 것은 그대로.</div>
