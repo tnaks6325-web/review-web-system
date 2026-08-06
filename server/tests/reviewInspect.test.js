@@ -346,9 +346,11 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('스윕 수동 실행도 adminOrMaster + 같은 락',
     /router\.post\('\/review-inspect\/sweep', authMiddleware, adminOrMasterMiddleware/.test(tb)
     && /withJobLock\('review_inspect_sweep'/.test(tb));
-  ok('프론트 — 예시 등록·과거분 검수·CSV 버튼',
-    /riOpenSamples\(\)/.test(wdk) && /riRunSweep\(\)/.test(wdk) && /riExportCsv\(\)/.test(wdk)
-    && /riUploadSample/.test(wdk));
+  /* ⚠ 2026-08-06: [↻ 과거분 검수]·[CSV] 는 화면에서 제거(사용자 확정 — 기능 불필요).
+       과거분 따라잡기는 10분 크론이 계속 돈다(수동 버튼만 없앤 것)이라 서버는 무변경. */
+  ok('프론트 — 예시 등록 버튼(제거된 과거분 검수·CSV 는 흔적 0)',
+    /riOpenSamples\(\)/.test(wdk) && /riUploadSample/.test(wdk)
+    && !/riRunSweep|riExportCsv/.test(wdk));
   ok('★ 관리자 전용 버튼은 isAdmin 일 때만 렌더(AE 에겐 안 보인다)',
     /\$\{isAdmin\?`<button class="btn" onclick="riOpenSamples\(\)"/.test(wdk));
 

@@ -1151,14 +1151,31 @@ async function _giveUpStale() {
  * ★ attempts 0 리셋 — 재시도 상한으로 unverifiable 종결된 건도 다시 본다.
  * ★ 스윕이 이미 도는 중이면 busy 로 알리고 초기화만 남긴다(10분 크론이 이어받는다).
  */
-async function reinspectTab({ sheetId, tabName, limit = 100 } = {}) {
-  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
-  const { rowCount } = await _db().query(
-    `UPDATE review_inspections
-        SET status = 'pending', attempts = 0, updated_at = NOW()
-      WHERE sheet_id = $1 AND tab_name = $2
-        AND status IN ('fail', 'suspect', 'unverifiable')`,
-    [sheetId, tabName]);
+async function reinspectTab({ sheetId, tabName, fileIds, limit = 100 } = {}) {
+  /* ★★ 대상 지정 두 가지 — **작업(탭) 전체** 또는 **화면이 고른 건들(fileIds)**.
+     후자는 "리뷰화면 아님만 일괄 재검수" 같은 **유형별 재검수**에 쓴다.
+     ★ 유형 판정은 화면(`_riIssueTypes`)이 단일 출처다 — 서버에 유형 조건을 다시 만들면
+       "칩 건수 ≠ 재검수 대상"으로 갈라진다. 그래서 서버는 **파일ID 목록만** 받는다.
+     ★ 상한 500 — 화면 목록 자체가 최대 500건이라 그보다 클 수 없다(초과분은 잘라 보고). */
+  const ids = Array.isArray(fileIds)
+    ? [...new Set(fileIds.map(v => String(v || '')).filter(Boolean))].slice(0, 500)
+    : null;
+  if (!ids || !ids.length) {
+    if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName 또는 fileIds 가 필요합니다.' };
+  }
+  const { rowCount } = ids && ids.length
+    ? await _db().query(
+      `UPDATE review_inspections
+          SET status = 'pending', attempts = 0, updated_at = NOW()
+        WHERE file_id = ANY($1::text[])
+          AND status IN ('fail', 'suspect', 'unverifiable')`,
+      [ids])
+    : await _db().query(
+      `UPDATE review_inspections
+          SET status = 'pending', attempts = 0, updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND status IN ('fail', 'suspect', 'unverifiable')`,
+      [sheetId, tabName]);
   const cap = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 100);
   const { withJobLock } = require('../utils/jobLock');
   const sweep = await withJobLock('review_inspect_sweep',
