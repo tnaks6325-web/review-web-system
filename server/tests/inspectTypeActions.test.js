@@ -100,6 +100,25 @@ function seqPool(handlers) {
     assert.ok(/riOpenDetail\(2\)/.test(sim.main.h) && /나란히 보기/.test(sim.main.t), '대조 없는 불량 클릭 방지 배치');
     ok('A4: 상품명=학습 / 채널=오인 정상 / 본문겹침=나란히 보기 우선');
 
+    // A4b: ★★ 채널 불일치는 방향이 뒤집혀 읽히면 안 된다 — 병기가 아니라 문장 한 줄.
+    //   (실사용 신고: "작업 쿠팡 / 캡처 네이버"를 정반대로 읽었고, 그 문구가 반려 사유로
+    //    리뷰어에게 그대로 나간다.)
+    const chanCode = /function _riChanReason\(fm\)\{[\s\S]*?\n\}/.exec(wd);
+    assert.ok(chanCode, '_riChanReason 추출');
+    const sb2 = { _RI_CHAN: { coupang: '쿠팡', naver: '네이버' } };
+    vm.createContext(sb2); vm.runInContext(chanCode[0], sb2);
+    assert.strictEqual(sb2._riChanReason({ expectedChannel: 'coupang', channel: 'naver' }),
+      '쿠팡 작업에 네이버 캡처가 제출되었습니다');
+    assert.strictEqual(sb2._riChanReason({ expectedChannel: 'naver', channel: 'coupang' }),
+      '네이버 작업에 쿠팡 캡처가 제출되었습니다');
+    assert.strictEqual(sb2._riChanReason({ expectedChannel: 'naver' }),
+      '네이버 작업인데 캡처의 채널을 알 수 없습니다', '캡처 채널 불명도 문장으로');
+    assert.ok(!/작업 \$\{.*\} \/ 캡처/.test(wd), '★ 옛 "작업 X / 캡처 Y" 병기 부활 금지');
+    assert.ok((wd.match(/작업에 \$\{got\} 캡처가 제출되었습니다/g) || []).length === 1
+      && /out\.push\(_riChanReason\(c\.format\)\)/.test(wd) && /esc\(_riChanReason\(fm\)\)/.test(wd),
+      '★ 카드·상세·반려 사유가 같은 함수 한 벌을 쓴다(사본 금지 — 화면마다 방향이 갈린다)');
+    ok('A4b: ★★ 채널 불일치 = "X 작업에 Y 캡처가 제출되었습니다" 단일 문장(사본 0)');
+
     // A5: ★ 어느 유형이든 [✓ 정상]·[✕ 불량] 모두 도달 가능(주+보조 안에)
     for (const checks of [
       { duplicate: { verdict: 'fail', matchFileId: 'M' } }, { format: { verdict: 'fail', got: 'receipt' } },
