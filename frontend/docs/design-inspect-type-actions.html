@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리뷰검수 — 유형별 맞춤 조치 버튼 + 카드 재디자인 (시안)</title>
+<style>
+  /* 오프라인 열람 가능 — 외부 리소스 0. 화면 재현은 라이트 고정. */
+  :root { color-scheme: light;
+    /* 차용한 원칙(Impeccable/Taste 의 매체 무관 부분): 순수 검정·순수 회백 금지(틴트),
+       hairline 테두리 우선(그림자 남용 금지), 과도한 라운드 금지, 라벨 = 소형 대문자 트래킹,
+       인터랙션 액센트는 한 색(파랑) — 유형 색은 "의미(시맨틱)"에만 쓴다. */
+    --bg:#F5F6F8; --card:#FFFFFF; --line:#E4E7EE; --ink:#1B2334; --mut:#6B7486;
+    --acc:#1D4ED8;
+    --t-dup:#DC2626; --t-fmt:#D97706; --t-prod:#16A34A; --t-chan:#0E7490; --t-sim:#7C3AED; --t-auth:#64748B;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:var(--bg); color:var(--ink); line-height:1.62; padding:32px 16px 100px; }
+  .wrap { max-width:1060px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin-bottom:4px; }
+  h2 { font-size:1.1rem; margin:42px 0 12px; padding-bottom:8px; border-bottom:2px solid #313B52; }
+  p, li { font-size:.87rem; }
+  .sub { color:var(--mut); font-size:.84rem; margin-bottom:20px; }
+  .doc { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; margin:8px 0; font-size:.83rem; background:#fff; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#F8F9FB; font-size:.79rem; }
+  code { background:#F1F3F7; border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.79rem; font-family:Consolas,monospace; }
+  ul { padding-left:20px; margin:6px 0; }
+  .star { color:#DC2626; font-weight:800; }
+  .note { background:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:11px 15px; font-size:.83rem; margin:10px 0; }
+  .mockzone { background:#EDF0F4; border:2px dashed #9AA4B5; border-radius:14px; padding:22px; margin:14px 0; display:flex; gap:16px; flex-wrap:wrap; align-items:flex-start; }
+  .mock-title { flex-basis:100%; font-size:.74rem; font-weight:800; color:var(--mut); letter-spacing:.05em; margin-bottom:2px; }
+
+  /* ══ 카드 재디자인 (구현 기준 CSS) ══ */
+  .nc { width:308px; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 1px 2px rgba(27,35,52,.05); }
+  /* ① 유형 헤더 — 카드의 첫 정보는 "무슨 문제인가". 색은 의미에만 쓴다(왼쪽 굵은 스트립 + 옅은 띠) */
+  .nc-type { display:flex; align-items:center; gap:7px; padding:7px 12px 7px 10px; font-size:.72rem; font-weight:800; border-left:4px solid; }
+  .nc-type .tag { font-size:.62rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; opacity:.75; margin-left:auto; }
+  .nc-type.dup  { border-color:var(--t-dup);  background:#FEF3F2; color:#9F1D1D; }
+  .nc-type.fmt  { border-color:var(--t-fmt);  background:#FFF8EB; color:#8A4B06; }
+  .nc-type.prod { border-color:var(--t-prod); background:#F1FBF4; color:#14672F; }
+  .nc-type.chan { border-color:var(--t-chan); background:#EFF9FB; color:#0B5A6E; }
+  .nc-type.sim  { border-color:var(--t-sim);  background:#F7F3FE; color:#5B21B6; }
+  .nc-type.auth { border-color:var(--t-auth); background:#F4F6F8; color:#475569; }
+  /* ② 본문 — 썸네일 + 누가/어디 + 근거 1줄. 카드 어디를 눌러도 상세(버튼 제외) */
+  .nc-body { display:flex; gap:11px; padding:11px 12px 9px; cursor:pointer; }
+  .nc-th { width:64px; height:86px; border-radius:7px; background:linear-gradient(160deg,#E4E7EE,#CCD3DE); flex:none; display:flex; align-items:center; justify-content:center; font-size:1.25rem; }
+  .nc-who { display:flex; justify-content:space-between; align-items:baseline; gap:6px; }
+  .nc-who b { font-size:.86rem; }
+  .nc-who .st { font-size:.64rem; font-weight:800; border-radius:99px; padding:1px 8px; background:#FEE2E2; color:#B91C1C; flex:none; }
+  .nc-tab { font-size:.72rem; color:var(--acc); text-decoration:underline; margin-top:1px; }
+  .nc-why { font-size:.73rem; color:#525C70; margin-top:4px; }
+  .nc-why b { color:var(--ink); }
+  /* ③ 조치 — 주 조치 1개(전폭·유형색) + 보조 ghost + [⋯]. 버튼은 유형마다 다르다(핵심) */
+  .nc-act { padding:0 12px 12px; }
+  .nc-main { display:flex; width:100%; align-items:center; justify-content:center; gap:6px; border:none; border-radius:9px; padding:9px 0; font-size:.81rem; font-weight:800; color:#fff; cursor:pointer; }
+  .nc-main.red { background:var(--t-dup); } .nc-main.amber { background:var(--t-fmt); }
+  .nc-main.green { background:var(--t-prod); } .nc-main.blue { background:var(--acc); }
+  .nc-main.vio { background:var(--t-sim); }
+  .nc-sub { display:flex; gap:6px; margin-top:6px; }
+  .nc-g { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:4px; border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 0; font-size:.73rem; font-weight:700; color:#3A445A; cursor:pointer; }
+  .nc-g.ok { color:#15803D; } .nc-g.bad { color:#B91C1C; }
+  .nc-g.more { flex:0 0 40px; color:var(--mut); font-weight:800; }
+  .cap { flex-basis:100%; font-size:.72rem; color:var(--mut); line-height:1.55; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>리뷰검수 — 유형별 맞춤 조치 버튼 + 카드 재디자인 (시안)</h1>
+<p class="sub">"모든 카드에 같은 버튼"을 폐기하고, <b>주 유형이 곧 주 버튼</b>이 되게 한다(예: 중복 카드엔 [🗑 중복파일 제거]만, 이동 버튼 없음). | 2026-08-06</p>
+
+<h2>0. 디자인 스킬 검토 결과 (설치 판단)</h2>
+<div class="doc">
+<table>
+<tr><th style="width:16%">스킬</th><th style="width:14%">판단</th><th>근거</th></tr>
+<tr><td><b>Taste Skill</b><br>(tasteskill.dev)</td><td><b>미설치</b></td><td>~18,000단어의 마케팅 랜딩/히어로 중심 지침으로 <b>React·Next.js·Tailwind·GSAP·이미지 생성 도구를 전제</b>한다. 이 레포의 프론트는 Vanilla JS 단일 HTML(workdesk·admin)이라 스택이 불일치하고, "이미지 생성 도구가 있으면 반드시 사용" 규칙은 우리 시안 문서의 <b>오프라인·외부 리소스 0 규율과 충돌</b>. 목적(탈-템플릿 미감)은 기존 설치 스킬 <code>frontend-design</code>과 중복.</td></tr>
+<tr><td><b>Impeccable</b><br>(impeccable.style)</td><td><b>미설치</b></td><td>25개 명령 + 플레이북 + <b>자동 검출기 훅(CLI 설치·프로젝트 파일 변경)</b>으로 구성된 툴체인. 방향성 지도는 <code>frontend-design</code>과, 자동 점검은 이 레포의 회귀가드·<code>/simplify</code> 체계와 역할이 겹치고, 검출기는 Tailwind/React 류 코드베이스를 겨냥한다. 서드파티 훅을 운영 레포에 심는 것은 이 레포의 규율(단일 출처·회귀가드 중심)과 맞지 않음.</td></tr>
+<tr><td colspan="3">✅ 대신 <b>매체 무관으로 전달되는 원칙만 차용해 이 시안에 직접 적용</b>했다: 순수 검정 금지(틴트 잉크 <code>#1B2334</code>) · hairline 테두리 우선(그림자 최소) · 과도한 라운드 금지 · 라벨 = 소형 대문자 트래킹 · <b>인터랙션 액센트는 한 색(파랑), 유형 색은 의미에만</b> · 상태(빈/실패)를 항상 말하기.</td></tr>
+</table>
+</div>
+
+<h2>1. 유형별 조치 매트릭스 (구현 기준)</h2>
+<div class="doc">
+<table>
+<tr><th style="width:17%">주 유형</th><th style="width:26%">주 조치 (전폭 버튼 1개)</th><th style="width:30%">보조 (ghost)</th><th>숨김([⋯] 안) — 이유</th></tr>
+<tr><td>📄 <b>같은 파일(중복)</b></td><td style="color:#B91C1C"><b>🗑 중복파일 제거</b> (휴지통 30일)</td><td>✓ 정상 · ✕ 불량</td><td><b>이동 2종 제외</b> — 어디로 옮겨도 중복은 남는다. 제거가 유일한 해소.</td></tr>
+<tr><td>📵 <b>리뷰화면 아님</b> — AI가 <b>영수증</b>으로 봄</td><td style="color:#8A4B06"><b>🧾 현금영수증으로 이동</b></td><td>✕ 불량(재제출 요청) · ✓ 정상</td><td>🛒 구매캡처 이동(AI 추정과 다른 이동은 보조 경로)</td></tr>
+<tr><td>📵 리뷰화면 아님 — AI가 <b>주문내역/구매확정</b>으로 봄</td><td style="color:#8A4B06"><b>🛒 구매캡처로 이동</b></td><td>✕ 불량 · ✓ 정상</td><td>🧾 현금영수증 이동</td></tr>
+<tr><td>📵 리뷰화면 아님 — <b>종류 불명</b></td><td style="color:#B91C1C"><b>✕ 불량 (반려 안내 전송)</b></td><td>✓ 정상</td><td>이동 2종 — 어디로 보낼지 AI도 모르면 사람이 상세에서 보고 [⋯]로.</td></tr>
+<tr><td>🏷 <b>상품명 다름</b></td><td style="color:#14672F"><b>✓ 정상 — 이 표기를 별칭으로 학습</b></td><td>⚙ 기대 상품명 · ✕ 불량</td><td>이동·제거 — 파일 위치 문제가 아니다. (오탐 최다 유형 = 학습이 주 조치)</td></tr>
+<tr><td>🔀 <b>채널 다름</b></td><td style="color:#0B5A6E"><b>✓ 정상 — 채널 추정 오인</b></td><td>🖼 판별 예시로 등록 · ✕ 불량</td><td>이동·제거 — 탭 채널은 URL 호스트 추정값이라 우리가 틀렸을 가능성이 높은 유형.</td></tr>
+<tr><td>✍ <b>본문 겹침</b></td><td style="color:#5B21B6"><b>👁 겹친 제출과 나란히 보기</b> (상세)</td><td>✕ 불량(재작성 요청) · ✓ 정상</td><td>이동·제거 — 글 문제라 파일 조치가 없다. 대조 없이 누르는 불량을 막는 배치.</td></tr>
+<tr><td>👤 <b>작성자 표기</b></td><td style="color:#475569"><b>👁 반복 제출 목록 보기</b> (상세)</td><td>✓ 정상 · ✕ 불량</td><td>이동·제거 — 경고 전용 유형(실명 대조 아님).</td></tr>
+<tr><td>🧾 <b>영수증 칸의 오제출</b>(slot=receipt)</td><td style="color:#1D4ED8"><b>🖼 리뷰로 이동</b></td><td>🛒 구매캡처로 이동 · ✕ 불량</td><td>🗑 제거(중복 동반 시만 승격)</td></tr>
+</table>
+<ul>
+  <li><span class="star">★★ 주 유형 우선순위(복합 건)</span>: <b>같은 파일 &gt; 리뷰화면 아님 &gt; 상품명 &gt; 본문 겹침 &gt; 채널 &gt; 작성자</b> — 조치가 확실한 것부터. 나머지 유형은 근거 줄에 함께 표기하고 그 조치는 [⋯]에 전부 들어간다.</li>
+  <li><span class="star">★ [✓ 정상]·[✕ 불량]은 어느 유형에서든 도달 가능</span>(주/보조/⋯ 어디든 반드시 존재) — 맞춤 배치는 "빠른 길"이지 선택지 축소가 아니다.</li>
+  <li><span class="star">★</span> [✕ 불량]은 항상 반려 사유 전송 팝업(기구현) 경유, 이동·제거는 전용 확인 팝업(#562 시안) 경유.</li>
+  <li>통과·미검수(문제 없는) 카드 = 조치 영역 없이 본문만(회색 유형 띠 "이상 없음").</li>
+</ul>
+</div>
+
+<h2>2. 카드 재디자인 — 유형별 실물 목업</h2>
+<div class="mockzone">
+<div class="mock-title">새 카드 구조 = ① 유형 띠(색=의미) → ② 본문(클릭=상세) → ③ 맞춤 조치(주 1 + 보조 2 + ⋯)</div>
+
+<!-- 중복 -->
+<div class="nc">
+  <div class="nc-type dup">📄 같은 파일 (중복 제출)<span class="tag">DUP</span></div>
+  <div class="nc-body">
+    <div class="nc-th">📱</div>
+    <div style="flex:1;min-width:0">
+      <div class="nc-who"><b>신명기 · 48행</b><span class="st">불량</span></div>
+      <div class="nc-tab">6/26레노버라방_리뷰</div>
+      <div class="nc-why"><b>지출증빙 현금영수증 48행</b>과 같은 파일 · AI 확신 100%</div>
+    </div>
+  </div>
+  <div class="nc-act">
+    <button class="nc-main red">🗑 중복파일 제거</button>
+    <div class="nc-sub"><span class="nc-g ok">✓ 정상</span><span class="nc-g bad">✕ 불량</span><span class="nc-g more">⋯</span></div>
+  </div>
+</div>
+
+<!-- 리뷰화면 아님(영수증) -->
+<div class="nc">
+  <div class="nc-type fmt">📵 리뷰화면 아님 — 현금영수증으로 보임<span class="tag">FMT</span></div>
+  <div class="nc-body">
+    <div class="nc-th">🧾</div>
+    <div style="flex:1;min-width:0">
+      <div class="nc-who"><b>권아람 · 65행</b><span class="st">불량</span></div>
+      <div class="nc-tab">6/26레노버라방_지출증빙 현금영수증</div>
+      <div class="nc-why">리뷰 칸에 <b>현금영수증 화면</b>이 제출됨 · AI 확신 96%</div>
+    </div>
+  </div>
+  <div class="nc-act">
+    <button class="nc-main amber">🧾 현금영수증으로 이동</button>
+    <div class="nc-sub"><span class="nc-g bad">✕ 불량</span><span class="nc-g ok">✓ 정상</span><span class="nc-g more">⋯</span></div>
+  </div>
+</div>
+
+<!-- 상품명 -->
+<div class="nc">
+  <div class="nc-type prod">🏷 상품명 다름<span class="tag">PROD</span></div>
+  <div class="nc-body">
+    <div class="nc-th">📱</div>
+    <div style="flex:1;min-width:0">
+      <div class="nc-who"><b>이지영 · 44행</b><span class="st" style="background:#FEF3C7;color:#92400E">의심</span></div>
+      <div class="nc-tab">0706)비타민,글루타치온_블로그</div>
+      <div class="nc-why">캡처 "<b>레노버 IdeaPad Slim 3…</b>" ≠ 기대 상품명</div>
+    </div>
+  </div>
+  <div class="nc-act">
+    <button class="nc-main green">✓ 정상 — 이 표기를 별칭으로 학습</button>
+    <div class="nc-sub"><span class="nc-g">⚙ 기대 상품명</span><span class="nc-g bad">✕ 불량</span><span class="nc-g more">⋯</span></div>
+  </div>
+</div>
+
+<!-- 채널 -->
+<div class="nc">
+  <div class="nc-type chan">🔀 채널 다름<span class="tag">CHAN</span></div>
+  <div class="nc-body">
+    <div class="nc-th">📱</div>
+    <div style="flex:1;min-width:0">
+      <div class="nc-who"><b>박소정 · 299행</b><span class="st" style="background:#FEF3C7;color:#92400E">의심</span></div>
+      <div class="nc-tab">동절기 체험단 1차</div>
+      <div class="nc-why">작업 <b>쿠팡</b> / 캡처 <b>네이버</b> 리뷰 화면 — 탭 채널은 추정값</div>
+    </div>
+  </div>
+  <div class="nc-act">
+    <button class="nc-main blue">✓ 정상 — 채널 추정 오인</button>
+    <div class="nc-sub"><span class="nc-g">🖼 예시로 등록</span><span class="nc-g bad">✕ 불량</span><span class="nc-g more">⋯</span></div>
+  </div>
+</div>
+
+<!-- 본문 겹침 -->
+<div class="nc">
+  <div class="nc-type sim">✍ 본문 겹침 92%<span class="tag">SIM</span></div>
+  <div class="nc-body">
+    <div class="nc-th">📱</div>
+    <div style="flex:1;min-width:0">
+      <div class="nc-who"><b>김태경 · 94행</b><span class="st">불량</span></div>
+      <div class="nc-tab">0616)쿠팡_작심홈_냉감베개</div>
+      <div class="nc-why"><b>김태경 93행</b> 제출과 본문 92% 일치</div>
+    </div>
+  </div>
+  <div class="nc-act">
+    <button class="nc-main vio">👁 겹친 제출과 나란히 보기</button>
+    <div class="nc-sub"><span class="nc-g bad">✕ 불량 (재작성 요청)</span><span class="nc-g ok">✓ 정상</span><span class="nc-g more">⋯</span></div>
+  </div>
+</div>
+
+<!-- 복합 유형 -->
+<div class="nc">
+  <div class="nc-type dup">📄 같은 파일 <span style="font-weight:600;opacity:.7">＋ 리뷰화면 아님</span><span class="tag">DUP+FMT</span></div>
+  <div class="nc-body">
+    <div class="nc-th">🧾</div>
+    <div style="flex:1;min-width:0">
+      <div class="nc-who"><b>권아람 · 65행</b><span class="st">불량</span></div>
+      <div class="nc-tab">6/26레노버라방_리뷰</div>
+      <div class="nc-why">지출증빙 65행과 같은 파일 · 현금영수증 화면으로 보임</div>
+    </div>
+  </div>
+  <div class="nc-act">
+    <button class="nc-main red">🗑 중복파일 제거</button>
+    <div class="nc-sub"><span class="nc-g bad">✕ 불량</span><span class="nc-g ok">✓ 정상</span><span class="nc-g more">⋯</span></div>
+  </div>
+</div>
+
+<div class="cap">· [⋯] = 그 카드에서 숨긴 나머지 조치 전부(이동 2종·제거·예시 등록·기대 상품명)를 담는 작은 메뉴 — 맞춤 배치는 빠른 길이지 선택지 축소가 아니다<br>
+· 복합 유형(마지막 카드) = 우선순위 1위 유형이 주 버튼을 정하고, 나머지 유형은 띠·근거에 병기<br>
+· 카드 본문 아무 곳이나 클릭 = 상세(버튼만 제외) — 종전 [상세] 버튼 제거로 한 줄 확보</div>
+</div>
+
+<h2>3. 지금 카드와 무엇이 다른가</h2>
+<div class="doc">
+<table>
+<tr><th>항목</th><th>지금</th><th>시안</th></tr>
+<tr><td>조치 버튼</td><td>모든 카드 동일 5~6개(상세·정상·불량·이동 2종) — 중복 카드에도 이동 버튼</td><td><b>유형이 주 버튼을 정한다</b>(주 1 + 보조 2 + ⋯) — 클릭 오류·시선 낭비 감소</td></tr>
+<tr><td>유형 표시</td><td>근거 문장 속에 섞임</td><td><b>카드 최상단 색 띠</b>(필터 칩과 같은 6색) — 훑어보기로 분류 가능</td></tr>
+<tr><td>상세 진입</td><td>[상세] 버튼 + 썸네일</td><td>카드 본문 전체 클릭(버튼 제거)</td></tr>
+<tr><td>시각 규율</td><td>버튼별 임의 인라인 색</td><td>차용 원칙 적용 — 틴트 잉크·hairline·액센트 1색·유형색은 의미만</td></tr>
+</table>
+<div class="note"><b>확인 필요 결정</b> — ① [🗑 중복파일 제거] 실행 규칙은 #562 시안 기본값(나중 제출본 제거·휴지통 30일·불량 종결) 그대로 진행 ② "리뷰화면 아님(불명)" 주 조치 = ✕ 불량(반려 전송) ③ [⋯] 메뉴 도입(vs 모든 버튼 상시 노출). 이대로 진행해도 되면 "진행해줘" — 카드 렌더러 교체 + dedup-manual 구현까지 한 PR로 갑니다.</div>
+</div>
+
+</div>
+</body>
+</html>
