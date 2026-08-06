@@ -1872,6 +1872,10 @@ function openSubmitMulti(items) {
     if (strip) strip.style.display = "none";
   }
 
+  // ★ 내 제출 현황 — "어느 건에 무엇을 냈는지"를 모르는 상태에서 새로 내는 것이
+  //   중복 제출의 주된 원인이었다(실측). 정보 확인 그리드보다 **먼저** 보여준다.
+  _renderMySubmitStatus(items);
+
   // STEP1: 다건 정보 확인 그리드 렌더
   _renderMultiInfoGrid(items);
 
@@ -1893,6 +1897,54 @@ function openSubmitMulti(items) {
 
   goStep(1);
   showScreen("screenSubmit");
+}
+
+/**
+ * 내 제출 현황 — 이 작업에서 내가 참여한 건들과 각 건에 낸 사진·제출일.
+ * ★ 줄 번호는 쓰지 않는다(관리용 번호) — 화면의 참여 순번 ①②③ + 상품(옵션)으로 가리킨다.
+ * ★ 서버 변경 없이 이미 받은 목록(items)만 쓴다. 제출한 건이 하나도 없으면 그리지 않는다
+ *   (첫 참여자에게 빈 상자를 보여줄 이유가 없다).
+ */
+function _renderMySubmitStatus(items) {
+  const host = document.getElementById("infoGrid");
+  if (!host || !host.parentNode) return;
+  const id = "mySubmitStatus";
+  const old = document.getElementById(id);
+  if (old) old.remove();
+  const list = Array.isArray(items) ? items : [];
+  if (!list.some(it => it && it.isSubmitted)) return;   // 낸 것이 없으면 안내가 필요 없다
+
+  const rowHtml = list.map((it, i) => {
+    const label = escHtml(it.tcDisplayName || it.productName || "상품명 없음");
+    const { options } = extractProductOption(it.row || {});
+    const opt = options.length ? ` (${escHtml(options.map(o => o.value).filter(Boolean).join("/"))})` : "";
+    const done = !!it.isSubmitted;
+    const when = done ? _dupWhen(it.reviewFileAt) : "";
+    const thumb = (done && it.reviewFileId)
+      ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(it.reviewFileId)}" alt=""
+           style="width:34px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;flex:none">`
+      : `<div style="width:34px;height:44px;border-radius:5px;background:#F1F3F7;flex:none"></div>`;
+    return `<div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-bottom:1px solid #EEF1F5">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.79rem;font-weight:700">${i + 1}. ${label}${opt}</div>
+        <div style="font-size:.72rem;color:#6B7280">${done ? (when ? escHtml(when) + " 제출" : "제출완료") : "아직 제출 전"}</div>
+      </div>
+      <span style="flex:none;font-size:.68rem;font-weight:800;border-radius:999px;padding:2px 9px;${done
+        ? "background:#E5F3EE;color:#127A5E" : "background:#F1F3F7;color:#68717E"}">${done ? "제출완료" : "대기"}</span>
+    </div>`;
+  }).join("");
+
+  const box = document.createElement("div");
+  box.id = id;
+  box.style.cssText = "margin-bottom:12px;border:1px solid #E5E7EB;border-radius:12px;overflow:hidden;background:#fff";
+  box.innerHTML =
+    `<div style="padding:9px 11px;background:#F8FAFC;border-bottom:1px solid #E5E7EB;font-size:.8rem;font-weight:800">`
+    + `내 제출 현황 <span style="font-weight:600;color:#6B7280">— 이 작업에 참여한 ${list.length}건</span></div>`
+    + rowHtml
+    + `<div style="padding:9px 11px;background:#F1FBF4;border-top:1px solid #C4E8CE;font-size:.73rem;color:#14532D;line-height:1.5">`
+    + `<b>건마다 다른 리뷰가 필요해요.</b> 이미 낸 사진·글과 같은 것을 다시 올리면 확인 요청을 받게 됩니다.</div>`;
+  host.parentNode.insertBefore(box, host);
 }
 
 /** STEP1: 다건 정보 확인 그리드 (각 항목별 섹션 구분) */
@@ -2286,7 +2338,14 @@ const _preState = {};                // scope → { blocked, count, overridden, 
 function _preCtx(idx) {
   const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
   const it = rows[idx || 0] || rows[0] || {};
-  return { sheetId: it.sheetId || '', tabName: it.tabName || '' };
+  // ★ 줄 번호·이름·연락처를 함께 보낸다 — 서버가 "이 리뷰어가 **다른 건에** 이미 낸 사진인지"를
+  //   첨부 즉시 대조하기 위한 최소 정보다(같은 건 재첨부는 중복으로 치지 않으므로 줄 번호가 필요).
+  return {
+    sheetId: it.sheetId || '', tabName: it.tabName || '',
+    rowIndex: (it.rowIndex != null ? it.rowIndex : null),
+    reviewerName: it.name || (authSession && authSession.name) || '',
+    phone8: (authSession && authSession.phone8) || '',
+  };
 }
 
 function _preGet(scope) {
@@ -2309,6 +2368,59 @@ function _preOverride(scope) {
 }
 
 /** 판정 결과를 앵커 요소 아래에 그린다. 앵커가 없으면 조용히 넘어간다. */
+/* ── 첨부 즉시 "이미 낸 사진" 안내 ──────────────────────────────────
+ * ★★ 사진이 저장되기 **전**이라 리뷰어가 사진만 바꾸면 끝나는 유일한 시점이다.
+ * ★ 알려주기만 하고 **막지 않는다**(사용자 확정 ①) — 우리가 잘못 알아봤을 때 정상 리뷰어가
+ *   제출을 못 하게 되는 쪽이 더 큰 피해다(1차 필터의 fail-open 규율과 같다).
+ * ★ 줄 번호는 리뷰어 화면에 쓰지 않는다(관리용 번호) — 같은 작업이면 화면의 참여 순번(①②③)으로,
+ *   못 찾으면 "다른 건"으로 가리키고, 다른 작업이면 작업명 없이 "다른 작업"이라고만 한다.
+ */
+function _dupWhen(iso) {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    const h = d.getHours();
+    return `${d.getMonth() + 1}월 ${d.getDate()}일 ${h < 12 ? '오전' : '오후'} ${((h % 12) || 12)}:${String(d.getMinutes()).padStart(2, '0')}`;
+  } catch (_) { return ''; }
+}
+/** 같은 작업이면 그 줄이 화면의 몇 번째 건인지 — 없으면 0(=순번 미표기). */
+function _dupOrdinal(rowIndex) {
+  const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
+  const i = rows.findIndex(r => r && r.rowIndex === rowIndex);
+  return i >= 0 ? i + 1 : 0;
+}
+function _preRenderDup(scope, anchor) {
+  const s = _preGet(scope);
+  const id = 'dup_' + scope.replace(/[^A-Za-z0-9_]/g, '_');
+  let el = document.getElementById(id);
+  const d = s.dup;
+  if (!d) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.addEventListener('click', (e) => e.stopPropagation());   // 드롭존 파일창이 같이 열리지 않게
+    anchor.appendChild(el);
+  }
+  const ord = d.sameTab ? _dupOrdinal(d.rowIndex) : 0;
+  const where = d.sameTab
+    ? (ord ? `같은 작업 <b>${ord}번 건</b>으로` : '같은 작업의 <b>다른 건</b>으로')
+    : '<b>다른 작업</b>에';
+  const when = _dupWhen(d.uploadedAt);
+  const thumb = d.fileId
+    ? `<img src="${API_BASE_URL}/api/drive/image/${encodeURIComponent(d.fileId)}" alt=""
+         style="width:44px;height:58px;object-fit:cover;border-radius:6px;border:1px solid #F3C8C4;flex:none">` : '';
+  el.style.cssText = 'margin-top:8px;padding:10px 12px;border-radius:9px;background:#FEF3F2;'
+    + 'border:1px solid #F3C8C4;color:#B42318;font-size:.78rem;font-weight:700;line-height:1.5';
+  el.innerHTML =
+    '이미 제출한 사진이에요'
+    + `<div style="font-weight:500;margin-top:4px;color:#7F1D1D">이 사진은 ${when ? `<b>${escHtml(when)}</b>에 ` : ''}${where} 제출하셨어요.`
+    + ' 이번 건은 <b>다른 리뷰 화면</b>을 캡처해 올려주세요.</div>'
+    + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}`
+        + '<div style="font-weight:500;font-size:.73rem;color:#7F1D1D">앞서 낸 사진<br>(같은 사진이에요)</div></div>' : '')
+    + '<div style="font-weight:500;font-size:.72rem;margin-top:6px;color:#8A93A3">'
+    + '그래도 이 사진이 맞다면 그대로 제출하셔도 됩니다 — 담당자가 확인합니다.</div>';
+}
+
 function _preRender(scope, anchorId) {
   const s = _preGet(scope);
   const anchor = document.getElementById(anchorId || s._anchorId || '');
@@ -2316,6 +2428,8 @@ function _preRender(scope, anchorId) {
   if (!anchor) return;
   const id = 'pre_' + scope.replace(/[^A-Za-z0-9_]/g, '_');
   let el = document.getElementById(id);
+  // ★ 중복 안내는 형식 판정과 독립 — 형식이 '통과'여도(=verdict pass/skip) 떠야 한다.
+  _preRenderDup(scope, anchor);
   if (!s.verdict || s.verdict === 'skip') { if (el) el.remove(); return; }
   if (!el) {
     el = document.createElement('div');
@@ -2365,6 +2479,7 @@ async function _preCheckOne(fileObj, ctx) {
       body: JSON.stringify({
         base64: fileObj.b64, mimeType: fileObj.type || 'image/jpeg',
         sheetId: ctx.sheetId, tabName: ctx.tabName, slotKey: ctx.slotKey || 'review',
+        rowIndex: ctx.rowIndex, reviewerName: ctx.reviewerName, phone8: ctx.phone8,
       }),
     });
     if (!r.ok) return null;
@@ -2390,6 +2505,12 @@ async function _preCheckFiles(scope, anchorId, fileObjs, ctx) {
   for (const r of results) {
     if (!r || !r.verdict) continue;
     if (!worst || (rank[r.verdict] || 0) > (rank[worst.verdict] || 0)) worst = r;
+  }
+  // ★ 중복 경고는 형식 판정과 **따로** 모은다 — AI 가 통과시킨 사진도 "이미 낸 사진"일 수 있다.
+  //   사용자 확정 ①: 알려주기만 하고 막지 않는다(잘못 알아본 경우에도 제출이 가능해야 한다).
+  cur_dup: {
+    const d = (results.find(r => r && r.duplicate) || {}).duplicate || null;
+    _preGet(scope).dup = d;
   }
   const cur = _preGet(scope);
   if (!worst) { cur.verdict = ''; cur.blocked = false; cur.message = ''; _preRender(scope, anchorId); return; }
@@ -2845,8 +2966,12 @@ async function _submitReviewSlots(item) {
           _csClearRouteNotice(slot.key);
           _csShowVerdict(slot.key, bad.verdict.message, bad.verdict.sure);
         } else {
-          _csClearVerdict(slot.key);
+          // ★ 첨부 즉시 경고를 지나쳐 제출된 "앞서 낸 사진과 같은 사진" — 저장은 됐으니
+          //   반려가 아니라 안내다(파일을 지우지 않는다). 담당자 확인 대상임을 그 자리에서 알린다.
+          const dupN = flist.find(r => r && r.duplicateNotice);
           _csClearRouteNotice(slot.key);
+          if (dupN) _csShowVerdict(slot.key, dupN.duplicateNotice, false);
+          else _csClearVerdict(slot.key);
         }
         if (status) {
           status.textContent = !stayed && rejectedF.length ? "⛔ 반려됨"
