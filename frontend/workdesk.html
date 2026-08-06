@@ -938,6 +938,8 @@
   .rirel.k-sim .ar{border-color:#E0D3F9;color:#6D28D9}
   .rirel.k-warn .ar{border-color:#F2DFC0;color:#8A4B06}
   .rirel.k-none .ar{border-color:#E2E8F0;color:#94A3B8}
+  .rirtfix{font-size:11px;line-height:1.5;color:#8A4B06;background:#FFF8EB;border:1px solid #F2DFC0;
+           border-radius:8px;padding:5px 8px;margin:0 0 5px}
   .rirelnote{font-size:10.5px;color:#8A93A3;margin:-1px 0 5px;line-height:1.45}
   .rirelflag{display:inline-block;font-size:9.5px;font-weight:800;border-radius:5px;padding:1px 5px;margin-left:3px}
   .rirelflag.f-red{background:#FEE4E2;color:#B42318}
@@ -5931,6 +5933,9 @@ async function _loadInspect(){
     STATE.ri = r.items || [];
     STATE.riSummary = r.summary || null;
     STATE.riScoped = !!r.scoped;
+    // ★ 리뷰타입 = "이 작업은 무슨 화면을 기대하는가" — 구매확정 작업인데 불량이 나오는
+    //   이유가 화면에 안 보이던 실사고(2026-08-06) 대응. 필드 부재(구버전 백엔드) = 표시만 생략.
+    STATE.riRT = new Map((r.reviewTypes||[]).map(x=>[x.sheetId+'\u0000'+x.tabName, x]));
     _riRenderHead(r.summary);
     _riRenderBody();
     _riSyncNavBadge(Number.isFinite(r.openCount) ? r.openCount : null);
@@ -5993,6 +5998,31 @@ function _riIssueTypes(r){
    ★ 같은 작업·같은 리뷰어면 이름·작업명을 **반복하지 않는다**(카드 제목에 이미 있다).
    ★ 짝의 줄 번호를 모르면 **"줄 번호 없음"이라고 적는다** — 빈칸으로 두면 "같은 줄"로 오해된다.
    ★ 줄 번호는 **관리자 화면 전용** — 리뷰어에게 나가는 문구에는 넣지 않는다(참여 순번·상품으로). */
+/* ══ 리뷰타입(그 작업이 기대하는 화면) 표기 ══
+   ★★ 실사고(2026-08-06): 구매확정 작업인데 리뷰검수가 "리뷰 화면이 아님" 불량을 냈다.
+     원인 = `tab_configs.review_type` 에 **배송유형('실배송')** 이 들어 있어 리뷰타입 판정이
+     null(= 리뷰형 기본)이 됐고 공고에도 리뷰타입이 없었다. 그런데 **화면 어디에도 그 사실이
+     안 보여** 담당자가 원인을 알 길이 없었다 → 판정과 근거값을 여기서 문장으로 말한다.
+   ★ 필드가 없으면(구버전 백엔드) 아무것도 그리지 않는다 — 없는 것을 "미지정"으로 꾸미지 않는다. */
+const _RI_RT_LABEL={photo:'포토',text:'텍스트',confirm:'구매확정',star:'별점',mixed:'혼합'};
+function _riRT(r){ return (STATE.riRT||new Map()).get((r.sheet_id||'')+'\u0000'+(r.tab_name||'')) || null; }
+/** 이 건이 "구매확정 캡처인데 리뷰타입 미설정이라 불량"인가 — 조치가 명확한 유일한 케이스. */
+function _riConfirmMisset(r){
+  const c=r.checks||{}, rt=_riRT(r);
+  return !!(rt && rt.type!=='confirm' && c.format && c.format.verdict==='fail'
+            && _riFmtKind(c.format)==='purchase_confirm');
+}
+/** 왜 그렇게 판정했는지 한 문장 — 상세 팝업의 '리뷰 화면·채널' 줄에 붙인다. */
+function _riRTNote(r){
+  const rt=_riRT(r); if(!rt) return '';
+  if(rt.type==='confirm') return '이 작업은 <b>구매확정</b> — 구매확정 완료 화면도 정상으로 봅니다';
+  const lbl=_RI_RT_LABEL[rt.type];
+  if(lbl) return `이 작업의 리뷰타입 = <b>${esc(lbl)}</b> — 리뷰 화면을 기대합니다`;
+  // 미지정 — 왜 미지정인지까지 말한다(옛 배송유형 값이 남아 있으면 그게 원인이다)
+  const legacy=['실배송','빈박스'].includes(String(rt.tabRaw||'').trim())
+    ? ` (탭 설정값 "${esc(rt.tabRaw)}"은 <b>배송유형</b>이라 리뷰타입으로 인정되지 않습니다)` : '';
+  return `이 작업은 리뷰타입 <b>미지정</b> — 리뷰 화면을 기대합니다${legacy}`;
+}
 const _riNm = (v) => String(v==null?'':v).replace(/\s+/g,'');
 function _riRelPairs(r){
   const c=(r&&r.checks)||{}, out=[];
@@ -6071,6 +6101,7 @@ function _riRenderBody(){
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
         ${relHtml}
+        ${_riConfirmMisset(r)?`<div class="rirtfix">이 작업 <b>리뷰타입 미설정</b> — 공고에서 <b>구매확정</b>으로 저장한 뒤 [♻ 재검수]하면 통과됩니다</div>`:''}
         ${reasons.length?`<div class="rireason">${reasons.map(esc).join('<br>')}</div>`:(relHtml?'':'<div class="rireason">—</div>')}
       </div>
       ${r.status==='resolved'
@@ -6401,11 +6432,12 @@ function riOpenDetail(i){
       <div class="rimright">
         ${_riRelHtml(r)}
         <table class="ritbl">
-          ${line(fm.verdict||'skip','리뷰 화면·채널', fm.verdict==='fail'
+          ${line(fm.verdict||'skip','리뷰 화면·채널', (fm.verdict==='fail'
             ? (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨')
             : (fm.expectedChannel&&fm.verdict==='warn'
               ? esc(_riChanReason(fm))
-              : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':'')))}
+              : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':'')))
+            + (_riRTNote(r)?`<br>${_riRTNote(r)}`:''))}
           ${line(pr.verdict||'skip','상품명', pr.verdict==='skip'?'비교할 기대 상품명이 없습니다 — [⚙ 기대 상품명]에서 등록하세요':('캡처 "'+esc(pr.ocr||'')+'"<br>기대 '+esc((pr.expected||[]).join(' / '))))}
           ${line(dup.verdict||'skip','같은 파일', dup.verdict==='fail'?esc(`${dup.matchTab||''} ${dup.matchReviewer||''} ${dup.matchRow?dup.matchRow+'행':''}`):'')}
           ${line(sim.verdict||'skip','본문 겹침', sim.score!=null?(Math.round(sim.score*100)+'% '+esc(sim.matchReviewer||'')):'')}

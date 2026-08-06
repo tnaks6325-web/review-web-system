@@ -1204,7 +1204,15 @@ router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res)
       for (const it of items) if (summary[it.status] !== undefined) summary[it.status] += 1;
       summary.open = summary.suspect + summary.fail;
     }
-    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped });
+    // ★ 이 작업의 리뷰타입을 **판정 근거값과 함께** 실어 보낸다 — 구매확정 작업인데
+    //   "리뷰 화면이 아님" 불량이 나오는 이유가 화면 어디에도 안 보이던 실사고(2026-08-06) 대응.
+    //   읽기 전용·fail-soft(실패 = 빈 배열 = 표시만 생략, 목록은 그대로 뜬다).
+    let reviewTypes = [];
+    try {
+      reviewTypes = await require('../services/reviewTypeContext.service')
+        .reviewTypeDetailsForTabs(items.map(it => ({ sheetId: it.sheet_id, tabName: it.tab_name })));
+    } catch (_) { /* 표시 보조 — 목록을 죽이지 않는다 */ }
+    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped, reviewTypes });
   } catch (err) {
     logger.warn(`[review-inspect] 목록 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: '검수 목록을 불러오지 못했습니다.' });
