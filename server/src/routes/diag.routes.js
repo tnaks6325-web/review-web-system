@@ -1498,9 +1498,28 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
   // ★★ 이 핸들러는 어떤 경우에도 500 을 내지 않는다 — 1차 필터의 장애가
   //    리뷰어의 첨부·제출을 막으면 막으려던 사고보다 큰 피해가 된다(fail-open).
   try {
-    const { base64, mimeType, sheetId, tabName, slotKey } = req.body || {};
+    const { base64, mimeType, sheetId, tabName, slotKey, rowIndex, reviewerName, phone8 } = req.body || {};
     const inspect = require('../services/reviewInspect.service');
-    const pass = (code) => res.json({ ok: true, verdict: 'skip', code, message: '', blocked: false });
+
+    /* ── 중복 대조(첨부 즉시) ─────────────────────────────────────────
+     * ★★ 리뷰어가 스스로 고칠 수 있는 **유일한 시점**이다 — 사진이 저장되기 전이라
+     *   다른 사진으로 바꾸기만 하면 끝난다(제출 후 2차 검수는 관리자 사후처리가 된다).
+     * ★ 형식 판정(아래)과 **독립적으로** 계산해 응답에 얹는다 — AI 가 죽어도 중복 경고는 나가고,
+     *   중복 조회가 죽어도 형식 판정은 나간다. 둘 다 fail-open.
+     * ★ 기존 응답 계약(verdict/blocked)은 건드리지 않는다 — `duplicate` 필드만 **가산**이라
+     *   구버전 프론트는 아무 영향이 없다. */
+    const dupOf = async () => {
+      if (!base64) return null;
+      try {
+        return await inspect.findOwnDuplicate({
+          fileHash: inspect.hashBase64(base64),
+          sheetId, tabName, rowIndex, reviewerName, phone8,
+        });
+      } catch (_) { return null; }
+    };
+    const pass = async (code) => res.json({
+      ok: true, verdict: 'skip', code, message: '', blocked: false, duplicate: await dupOf(),
+    });
 
     if (!inspect.PRECHECK_ENABLED) return pass('disabled');
     if (!base64) return pass('no_image');
@@ -1534,6 +1553,7 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
       message: v.message,
       channel: v.channel,
       blocked: v.verdict === 'block',
+      duplicate: await dupOf(),    // ★ 가산 — 이미 낸 사진이면 {fileId, sameTab, rowIndex, uploadedAt}
     });
   } catch (err) {
     logger.warn(`[review-precheck] 판정 실패(통과 처리): ${err.message}`);
@@ -1926,12 +1946,19 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         //   ★ 절대 throw 하지 않는다(서비스가 내부에서 삼킨다) — 업로드는 이미 끝났고,
         //     검수 실패가 "파일은 올라갔는데 제출 실패"로 보이면 안 된다.
         try {
-          await _inspect.inspectSubmission({
+          const _ins = await _inspect.inspectSubmission({
             base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
             fileId: r.fileId, fileHash: _hash,
             sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: r.slotKey || slot,
             samples: _inspectSamples,   // ★ 위 verifyCapture 와 같은 값 = 캐시 공유(콜 순증 0)
           });
+          // ★ 첨부 즉시 경고(1차)를 지나쳐 제출된 중복은 **리뷰어에게 그 자리에서** 한 번 더 알린다.
+          //   관리자 쪽은 위 검수 기록이 리뷰검수 탭에 바로 뜨므로 별도 알림을 새로 쌓지 않는다
+          //   (같은 사실로 두 번 울리면 늑대소년이 된다 — 캡처 알림 도배 방지 규율).
+          //   ★ 파일은 지우지 않는다 — 정당한 재제출을 잃지 않기 위해 안내까지만.
+          if (_ins && _ins.checks && _ins.checks.duplicate && _ins.checks.duplicate.verdict === 'fail') {
+            r.duplicateNotice = '앞서 제출하신 사진과 같은 사진이에요. 담당자가 확인 후 다시 요청드릴 수 있습니다.';
+          }
         } catch (_) { /* 위 서비스가 이미 삼키지만 이중 방어 */ }
       }
 

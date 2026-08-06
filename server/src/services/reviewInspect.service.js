@@ -770,6 +770,53 @@ async function findDuplicate({ fileHash, fileId, sheetId, tabName, rowIndex, rev
 }
 
 /**
+ * 첨부 즉시 중복 대조 — **그 리뷰어 본인이 앞서 낸 사진**과 같은 파일인지(사용자 확정 ②:
+ * 작업 무관 본인 전체). 사진이 저장되기 **전**에 알려주는 것이 이 함수의 존재 이유다.
+ *
+ * ★★ 같은 자리(같은 작업·같은 줄) 재첨부는 **중복이 아니다** — 잘못 올려 다시 올리는 정상
+ *    재제출이라, 이걸 잡으면 멀쩡한 리뷰어가 갇힌다(2차 검수 findDuplicate 와 같은 규율).
+ * ★ 본인 확인은 **이름 + (가능하면) 연락처 뒤 8자리** — 지문이 맞는 행만 대조하므로 비용이 없다.
+ *   동명이인 오탐이 나더라도 **경고일 뿐 차단이 아니라서**(사용자 확정 ①) 피해가 없다.
+ * ★ 반환하는 파일ID는 **본인 것뿐** — 남의 제출물은 어떤 경우에도 나가지 않는다.
+ * ★ 판정 불가·조회 실패는 전부 null(경고 없음) = 오늘과 동작 동일(fail-open).
+ */
+async function findOwnDuplicate({ fileHash, sheetId, tabName, rowIndex, reviewerName, phone8 } = {}) {
+  const name = String(reviewerName || '').trim();
+  if (!fileHash || !name) return null;
+  try {
+    const { rows } = await _db().query(
+      `SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.uploaded_at,
+              (SELECT r.phone8 FROM review_index r
+                WHERE r.sheet_id = s.sheet_id AND r.tab_name = s.tab_name
+                  AND r.row_index = s.row_index LIMIT 1) AS phone8
+         FROM review_submissions s
+        WHERE s.file_hash = $1
+          AND COALESCE(s.slot_key, 'review') <> 'trashed'
+          AND REPLACE(COALESCE(s.reviewer_name, ''), ' ', '') = REPLACE($2, ' ', '')
+          AND NOT (s.sheet_id = $3 AND s.tab_name = $4
+                   AND COALESCE(s.row_index, -1) = COALESCE($5::int, -1))
+        ORDER BY s.uploaded_at DESC NULLS LAST
+        LIMIT 5`,
+      [fileHash, name, sheetId || '', tabName || '', rowIndex ?? null]
+    );
+    if (!rows.length) return null;
+    // ★ 연락처를 알 수 있으면 **본인 행만** 남긴다(동명이인 오탐 축소). 모르면 이름만으로 진행.
+    const p8 = String(phone8 || '').replace(/\D/g, '');
+    const pick = (p8.length === 8 ? rows.filter(r => !r.phone8 || r.phone8 === p8) : rows)[0] || null;
+    if (!pick) return null;
+    return {
+      fileId: pick.file_id,
+      sameTab: !!(sheetId && tabName) && pick.sheet_id === sheetId && pick.tab_name === tabName,
+      rowIndex: pick.row_index,
+      uploadedAt: pick.uploaded_at,
+    };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 첨부 중복 대조 실패(경고 생략): ${e.message}`);
+    return null;
+  }
+}
+
+/**
  * 본문 텍스트 겹침 — 같은 탭 안에서만 비교(기본).
  *
  * ★★ 판정식이 `similarity` 단독이 아닌 이유 (로컬 PG16 실측):
@@ -1325,7 +1372,7 @@ module.exports = {
   listInspections, inspectionSummary, resolveInspection, resolveInspectionsBulk, inspectionScope,
   notifyInspectionReject,
   hashBase64, matchProductName, computeStatus,
-  loadTabExpectations, findDuplicate, findSimilarText,
+  loadTabExpectations, findDuplicate, findOwnDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,
   ENABLED, PRECHECK_ENABLED, PRECHECK_BLOCK,
   BLOCK_CONFIDENCE, SIM_THRESHOLD, MIN_TEXT, SIM_LEN_RATIO, BLOCK_EXEMPT_CHANNELS,
