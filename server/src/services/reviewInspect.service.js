@@ -177,8 +177,63 @@ function precheckPolicy({ classified, expectedChannel, slotKey = 'review', revie
  *   첨부 즉시 판별의 응답성을 해친다.
  * ════════════════════════════════════════════════════════════════ */
 const SAMPLES_ENABLED = process.env.REVIEW_INSPECT_SAMPLES !== '0';
-const _sampleCache = new Map();                 // settingKey → { data, mimeType, ts }
+const _sampleCache = new Map();                 // `${settingKey}|${url}` → { data, mimeType, ts }
 const SAMPLE_TTL = Number(process.env.REVIEW_INSPECT_SAMPLE_TTL_MS || 30 * 60 * 1000);
+/* 누적 상한 — "많이"가 아니라 "다르게"가 정확도를 올린다(few-shot은 종류당 2~5장에서 포화).
+ * 슬롯당 저장 5장 / 한 판정 동봉 6장. 초과는 조용히 자르지 않고 화면·로그가 말한다. */
+const SAMPLE_SLOT_CAP = Math.max(1, Number(process.env.REVIEW_INSPECT_SAMPLE_SLOT_CAP || 5));
+const SAMPLE_ATTACH_CAP = Math.max(1, Number(process.env.REVIEW_INSPECT_SAMPLE_ATTACH_CAP || 6));
+
+/**
+ * 예시 슬롯 값 파싱 — ★ 하위호환이 핵심: 종전 값은 URL 문자열 1개였다.
+ * "문자열 = 1장짜리 배열"로 읽어 기존 등록분 유실 0(마이그레이션 0).
+ */
+function parseSampleUrls(value) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v) return [];
+  if (v.startsWith('[')) {
+    try {
+      const a = JSON.parse(v);
+      return (Array.isArray(a) ? a : []).map(s => String(s || '').trim())
+        .filter(u => /^https:\/\/\S+$/i.test(u)).slice(0, SAMPLE_SLOT_CAP);
+    } catch (_) { return []; }
+  }
+  return [v];
+}
+
+/**
+ * 예시 슬롯 편집 단일 지점 — 리뷰/현금영수증/자동분류 세 저장 창구가 전부 이걸 쓴다
+ * (사본을 두면 한쪽만 상한·중복 규칙이 달라진다).
+ * mode: 'add'(누적 — 기본 UI) | 'remove'+index(개별 삭제) | 미지정(종전 동작 = 교체/전체 제거)
+ */
+async function _mutateSampleList(settingKey, { imageUrl, mode, index } = {}) {
+  const url = String(imageUrl ?? '').trim();
+  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
+  const { rows } = await _db().query('SELECT value FROM app_settings WHERE key = $1 LIMIT 1', [settingKey]);
+  let list = parseSampleUrls(rows[0] && rows[0].value);
+  if (mode === 'add') {
+    if (!url) throw new Error('추가할 imageUrl이 필요합니다.');
+    if (!list.includes(url)) {
+      if (list.length >= SAMPLE_SLOT_CAP) {
+        throw new Error(`슬롯당 최대 ${SAMPLE_SLOT_CAP}장입니다 — 덜 닮은 기존 예시를 지우고 등록하세요.`);
+      }
+      list = list.concat([url]);
+    }
+  } else if (mode === 'remove') {
+    const i = Number(index);
+    if (!Number.isInteger(i) || i < 0 || i >= list.length) throw new Error('지울 예시를 찾지 못했습니다.');
+    list = list.filter((_, j) => j !== i);
+  } else {
+    list = url ? [url] : [];   // 종전 동작 100%: 단일 교체 / ''=전부 제거(옛 화면 호환)
+  }
+  await _db().query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [settingKey, list.length ? JSON.stringify(list) : '']
+  );
+  for (const k of _sampleCache.keys()) if (k.startsWith(settingKey + '|')) _sampleCache.delete(k);
+  return list;
+}
 
 /** Drive 프록시 URL → base64. 실패는 null(그 예시만 빠지고 판정은 계속). */
 async function _fetchSample(url) {
@@ -213,18 +268,50 @@ async function _loadSampleSlots(slots) {
   const now = Date.now();
   for (const s of slots) {
     const k = s.settingKey;
-    const url = urlOf[k];
-    if (!url) continue;
-    const hit = _sampleCache.get(k);
-    if (hit && hit.url === url && (now - hit.ts) < SAMPLE_TTL) {
-      out.push({ key: s.key, label: s.label, kind: s.kind, data: hit.data, mimeType: hit.mimeType });
-      continue;
+    // ★ 누적: 슬롯 하나 = 이미지 여러 장. key 에 **URL 해시 접미**(#xxxx)를 붙인다 —
+    //   gemini 의 캐시 지문(sampleSig)이 key 목록으로 만들어지므로, 장수·구성이 바뀌면
+    //   지문이 바뀌어 옛 캐시가 새 예시를 모른 채 히트하는 것을 막는다(classify 접두 상향과 같은 규율).
+    for (const url of parseSampleUrls(urlOf[k])) {
+      const imgId = crypto.createHash('sha1').update(url).digest('hex').slice(0, 8);
+      const sampleKey = s.key + '#' + imgId;
+      const ck = k + '|' + url;
+      const hit = _sampleCache.get(ck);
+      if (hit && (now - hit.ts) < SAMPLE_TTL) {
+        out.push({ key: sampleKey, label: s.label, kind: s.kind, data: hit.data, mimeType: hit.mimeType });
+        continue;
+      }
+      const f = await _fetchSample(url);
+      if (!f) continue;
+      _sampleCache.set(ck, { ...f, ts: now });
+      out.push({ key: sampleKey, label: s.label, kind: s.kind, data: f.data, mimeType: f.mimeType });
     }
-    const f = await _fetchSample(url);
-    if (!f) continue;
-    _sampleCache.set(k, { ...f, url, ts: now });
-    out.push({ key: s.key, label: s.label, kind: s.kind, data: f.data, mimeType: f.mimeType });
   }
+  return out;
+}
+
+/**
+ * 동봉 상한 트림 — 슬롯별 **최근 등록 우선 + 라운드로빈**으로 고르게 줄인다.
+ * ★ 라운드로빈이라 각 슬롯이 최소 1장은 살아남는다 — 특정 슬롯(예: 자동분류 예시)이
+ *   통째로 잘려 판별 재료가 사라지는 것 방지. 잘리면 로그로 말한다(조용한 절단 금지).
+ */
+function _trimSamples(samples, cap = SAMPLE_ATTACH_CAP) {
+  if (!Array.isArray(samples) || samples.length <= cap) return samples || [];
+  const groups = new Map();
+  for (const s of samples) {
+    const base = String(s.key || '').split('#')[0];
+    if (!groups.has(base)) groups.set(base, []);
+    groups.get(base).push(s);
+  }
+  for (const arr of groups.values()) arr.reverse();   // 뒤에 붙은 것 = 최근 등록 → 우선
+  const out = [];
+  let added = true;
+  while (out.length < cap && added) {
+    added = false;
+    for (const arr of groups.values()) {
+      if (arr.length && out.length < cap) { out.push(arr.shift()); added = true; }
+    }
+  }
+  logger.info(`[reviewInspect] 예시 ${samples.length}장 → ${out.length}장 동봉(판정당 상한 ${cap})`);
   return out;
 }
 
@@ -282,7 +369,7 @@ async function receiptSampleSettings() {
     );
     const m = {};
     for (const r of rows) m[r.key] = r.value || '';
-    for (const s of out) s.imageUrl = m[cashReceiptSampleSettingKey(s.key)] || '';
+    for (const s of out) { s.imageUrls = parseSampleUrls(m[cashReceiptSampleSettingKey(s.key)]); s.imageUrl = s.imageUrls[0] || ''; }
   } catch (e) {
     logger.warn(`[reviewInspect] 현금영수증 예시 조회 실패: ${e.message}`);
   }
@@ -290,20 +377,12 @@ async function receiptSampleSettings() {
 }
 
 /** 현금영수증 예시 저장(''=제거). 채널 화이트리스트는 utils/cashReceiptChannels 단일 출처. */
-async function saveReceiptSample({ channel, imageUrl } = {}) {
+async function saveReceiptSample({ channel, imageUrl, mode, index } = {}) {
   const { isCashReceiptChannelKey, cashReceiptSampleSettingKey } = require('../utils/cashReceiptChannels');
   const ch = String(channel || '');
   // ★ 화이트리스트 — 목록에 없는 키를 받으면 임의 app_settings 키가 생성된다.
   if (!isCashReceiptChannelKey(ch)) throw new Error('알 수 없는 채널입니다.');
-  const url = String(imageUrl ?? '').trim();
-  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
-  await _db().query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [cashReceiptSampleSettingKey(ch), url]
-  );
-  _sampleCache.delete(cashReceiptSampleSettingKey(ch));   // 교체 즉시 반영
-  return url;
+  return _mutateSampleList(cashReceiptSampleSettingKey(ch), { imageUrl, mode, index });
 }
 
 /* ── 자동 분류(파일 라우팅) 판별 예시 — 구매캡처·구매확정 (utils/routeSampleKinds 단일 출처) ──
@@ -334,7 +413,7 @@ async function routeSampleSettings() {
     );
     const m = {};
     for (const r of rows) m[r.key] = r.value || '';
-    for (const s of out) s.imageUrl = m[routeSampleSettingKey(s.key)] || '';
+    for (const s of out) { s.imageUrls = parseSampleUrls(m[routeSampleSettingKey(s.key)]); s.imageUrl = s.imageUrls[0] || ''; }
   } catch (e) {
     logger.warn(`[reviewInspect] 자동분류 예시 조회 실패: ${e.message}`);
   }
@@ -342,19 +421,11 @@ async function routeSampleSettings() {
 }
 
 /** 자동 분류 예시 저장(''=제거). 슬롯 화이트리스트는 utils/routeSampleKinds 단일 출처. */
-async function saveRouteSample({ key, imageUrl } = {}) {
+async function saveRouteSample({ key, imageUrl, mode, index } = {}) {
   const { isRouteSampleKey, routeSampleSettingKey } = require('../utils/routeSampleKinds');
   const k = String(key || '');
   if (!isRouteSampleKey(k)) throw new Error('알 수 없는 예시 슬롯입니다.');
-  const url = String(imageUrl ?? '').trim();
-  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
-  await _db().query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [routeSampleSettingKey(k), url]
-  );
-  _sampleCache.delete(routeSampleSettingKey(k));   // 교체 즉시 반영
-  return url;
+  return _mutateSampleList(routeSampleSettingKey(k), { imageUrl, mode, index });
 }
 
 /**
@@ -369,7 +440,8 @@ async function submissionSamples({ expectedChannel, slotKey = 'review' } = {}) {
     ? await loadReceiptSamplesFor(expectedChannel)
     : await loadSamplesFor(expectedChannel);
   const route = await loadRouteSamples();
-  return base.concat(route);
+  // ★ 판정당 동봉 상한 — 장수만큼 토큰·지연이 늘어 첨부 즉시 판별의 응답성을 해친다.
+  return _trimSamples(base.concat(route));
 }
 
 /** 관리자 화면용 — 슬롯별 등록 여부. */
@@ -382,7 +454,7 @@ async function sampleSettings() {
     );
     const m = {};
     for (const r of rows) m[r.key] = r.value || '';
-    for (const s of out) s.imageUrl = m[sampleSettingKey(s.key)] || '';
+    for (const s of out) { s.imageUrls = parseSampleUrls(m[sampleSettingKey(s.key)]); s.imageUrl = s.imageUrls[0] || ''; }
   } catch (e) {
     logger.warn(`[reviewInspect] 예시이미지 조회 실패: ${e.message}`);
   }
@@ -390,18 +462,10 @@ async function sampleSettings() {
 }
 
 /** 예시이미지 저장(''=제거). https 절대 URL만 — 관리자 화면에 <img src>로 나간다. */
-async function saveSample({ key, imageUrl } = {}) {
+async function saveSample({ key, imageUrl, mode, index } = {}) {
   const { isReviewSampleKey, sampleSettingKey } = require('../utils/reviewSampleChannels');
   if (!isReviewSampleKey(key)) throw new Error('알 수 없는 예시 슬롯입니다.');
-  const url = String(imageUrl ?? '').trim();
-  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
-  await _db().query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [sampleSettingKey(key), url]
-  );
-  _sampleCache.delete(sampleSettingKey(key));   // 교체 즉시 반영
-  return url;
+  return _mutateSampleList(sampleSettingKey(key), { imageUrl, mode, index });
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1230,5 +1294,6 @@ module.exports = {
   inspectSubmission, saveFileHash,
   ENABLED, PRECHECK_ENABLED, PRECHECK_BLOCK,
   BLOCK_CONFIDENCE, SIM_THRESHOLD, MIN_TEXT, SIM_LEN_RATIO, BLOCK_EXEMPT_CHANNELS,
+  parseSampleUrls, SAMPLE_SLOT_CAP, SAMPLE_ATTACH_CAP, _trimSamples,
   __setPoolForTest,
 };

@@ -394,6 +394,10 @@ function _aisamplesHtml() {
           <div id="asSmpRoute" class="as-slots"><div class="as-smpload">불러오는 중…</div></div>
         </div>
         <div class="as-sub">
+          <div class="as-subt">🎯 오제출 자동분류 정확도 <span>— 리뷰검수에서 사람이 수동 분류한 결과(정답)와 AI의 관측 판단을 대조합니다. 일치율이 충분히 오르면 자동 이동(auto) 전환을 검토하세요</span></div>
+          <div id="asRtStats" style="font-size:.78rem;color:#6B7280;margin-top:6px;line-height:1.6">불러오는 중…</div>
+        </div>
+        <div class="as-sub">
           <div class="as-subt">🧹 오제출 소급 정리 <span>— 과거 제출분에서 잘못 들어간 캡처(리뷰 칸의 영수증 등)를 찾아 올바른 폴더로 이동합니다. <b>미리보기 → 실행</b> 2단계(자동으로 옮기지 않습니다)</span></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 0">
             <select id="asRtTab" style="flex:1;min-width:220px;max-width:420px;padding:7px 9px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none">
@@ -409,30 +413,44 @@ function _aisamplesHtml() {
 /** 슬롯 1줄. kind = 'receipt' | 'review' (저장 창구가 갈리는 유일한 값)
     ★ 발행방법 슬롯과 **같은 목록형**(as-slot) — 두 곳이 다른 모양이면 "같은 일인데 화면이 다르다"가 된다.
     ★ id(asSmpFile_*)·onchange 는 불변. 파일 입력은 숨기고 label 로 누른다. */
+var AS_SMP_CAP = 5;   // 표시용 — 상한의 진실원본은 서버(SAMPLE_SLOT_CAP)
+/** 슬롯 값 — 신백엔드 imageUrls 배열, 구백엔드 imageUrl 단일(하위호환). */
+function _smpUrls(s) { return (s && s.imageUrls) || (s && s.imageUrl ? [s.imageUrl] : []); }
+
 function _smpCardHtml(kind, s) {
   var id = kind + '_' + s.key;
-  var url = s.imageUrl || '';
+  var urls = _smpUrls(s);
+  var full = urls.length >= AS_SMP_CAP;
+  /* ★ 누적: 슬롯 하나 = 여러 장. 장별 ✕(개별 삭제)이고 [＋ 추가]는 지우지 않고 쌓는다. */
+  var thumbs = urls.length
+    ? urls.map(function (u, i) {
+        return '<span style="position:relative;display:inline-block;margin-right:6px">' +
+          '<img src="' + escHtml(u) + '" alt="" style="width:40px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #E5E7EB;display:block">' +
+          '<button title="이 장만 제거" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\',' + i + ')" ' +
+            'style="position:absolute;top:-5px;right:-1px;width:15px;height:15px;border-radius:99px;background:#EF4444;color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0">✕</button>' +
+          '</span>';
+      }).join('')
+    : '<span class="as-slotnone">없음</span>';
   return '<div class="as-slot">' +
-    '<div class="as-slotth">' +
-      (url ? '<img src="' + escHtml(url) + '" alt="">' : '<span class="as-slotnone">없음</span>') +
-    '</div>' +
+    '<div class="as-slotth" style="width:auto;min-width:44px;display:flex;align-items:center">' + thumbs + '</div>' +
     /* ★ 부가설명 줄은 두지 않는다 — 슬롯이 13개라 같은 문장이 13번 반복되면
          그 자체가 소음이 된다(상태칩이 이미 등록/없음을 말한다). */
     '<div class="as-slotbody">' +
       '<div class="as-slotnm">' + escHtml((s.emoji || '') + ' ' + (s.label || s.key)) + '</div>' +
     '</div>' +
-    '<span class="as-stat ' + (url ? 'on' : 'off') + '">' + (url ? '등록됨' : '없음') + '</span>' +
+    '<span class="as-stat ' + (urls.length ? 'on' : 'off') + '">' + (urls.length ? urls.length + ' / ' + AS_SMP_CAP : '없음') + '</span>' +
     '<input type="file" accept="image/*" class="as-file" id="asSmpFile_' + escHtml(id) + '" ' +
       'onchange="uploadAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\', this)">' +
-    '<label class="as-btn" for="asSmpFile_' + escHtml(id) + '">' + (url ? '바꾸기' : '＋ 등록') + '</label>' +
-    (url ? '<button class="as-btn del" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\')">제거</button>' : '') +
+    (full
+      ? '<span class="as-btn" style="opacity:.45;cursor:default" title="슬롯당 최대 ' + AS_SMP_CAP + '장 — 덜 닮은 장을 지우고 추가하세요">가득참</span>'
+      : '<label class="as-btn" for="asSmpFile_' + escHtml(id) + '">＋ 추가</label>') +
     '</div>';
 }
 
 /** 목차 배지 — 등록된 예시 / 전체 슬롯. 슬롯 목록은 서버 응답이 유일 출처라 여기서도 세기만 한다. */
 function _smpBadge(j) {
   var all = (j.receiptSamples || []).concat(j.samples || []).concat(j.routeSamples || []);
-  var filled = all.filter(function (s) { return !!s.imageUrl; }).length;
+  var filled = all.filter(function (s) { return _smpUrls(s).length > 0; }).length;
   _setNavBadge('aisamples', filled + ' / ' + all.length, filled ? '' : 'warn');
 }
 
@@ -459,6 +477,7 @@ async function loadAiSamples() {
     }
     _smpBadge(j);
     _rtLoadTabs();   // 소급 정리 탭 목록(지연·fail-soft)
+    _rtLoadStats();  // 자동분류 정확도(지연·fail-soft — 구백엔드면 안내만)
   } catch (e) {
     var msg = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
     rc.innerHTML = msg;
@@ -468,6 +487,32 @@ async function loadAiSamples() {
 }
 
 /** 예시 업로드 — guide-image Drive+프록시 인프라 재사용(발행방법 이미지와 같은 경로). */
+/** 자동분류 정확도 — 사람 수동 분류(정답) vs AI 관측 계획 대조(읽기 전용, 저장 없음).
+ *  ★ fail-soft: 통계가 죽어도 예시 등록 화면은 살아야 한다. 구백엔드(404) = 배포 대기 안내. */
+async function _rtLoadStats() {
+  var el = document.getElementById('asRtStats');
+  if (!el) return;
+  try {
+    var r = await fetch(_apiBase() + '/api/trackb/review-inspect/route-stats', { headers: _headers() });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || j.ok !== true) { el.textContent = '아직 통계를 지원하지 않습니다(배포 대기).'; return; }
+    if (!j.total) {
+      el.innerHTML = '최근 ' + j.days + '일간 수동 분류 기록이 없습니다 — 리뷰검수의 [🧾 현금영수증으로 이동]·[🛒 구매캡처로 이동]으로 분류하면 여기 정확도가 쌓입니다.';
+      return;
+    }
+    var pct = Math.round((j.match / j.total) * 100);
+    el.innerHTML =
+      '최근 ' + j.days + '일 · 수동 분류 <b>' + j.total + '건</b> 기준 — ' +
+      '<b style="color:' + (pct >= 95 ? '#15803D' : '#B45309') + '">AI 판단 일치 ' + j.match + '건 (' + pct + '%)</b>' +
+      ' · AI 미탐 ' + j.miss + '건 · AI 상이 <b style="color:#B91C1C">' + j.differ + '건</b><br>' +
+      (pct >= 95
+        ? '일치율이 95% 이상입니다 — Railway 에서 <code>AUTO_FILE_ROUTE=auto</code> 전환을 검토할 수 있습니다(전환은 사람이 결정).'
+        : '미탐·상이 건의 실물을 위 판별 예시에 추가하면 일치율이 올라갑니다(수동 분류 완료 팝업의 등록 제안 이용).');
+  } catch (e) {
+    el.textContent = '통계를 불러오지 못했습니다: ' + e.message;
+  }
+}
+
 async function uploadAiSample(kind, key, input) {
   var file = input.files && input.files[0];
   if (!file) return;
@@ -486,26 +531,28 @@ async function uploadAiSample(kind, key, input) {
     });
     if (!uj.ok || !uj.url) throw new Error(uj.error || '업로드 실패');
     // ★ kind 로 저장 창구를 가른다 — receipt 는 channel, route 는 kind+key, review 는 슬롯 key.
+    //   mode:'add' = 누적(기존 예시를 지우지 않는다) — 상한 초과는 서버가 사유와 함께 거부.
     await _smpFetch(kind === 'receipt'
-      ? { kind: 'receipt', channel: key, imageUrl: uj.url }
+      ? { kind: 'receipt', channel: key, imageUrl: uj.url, mode: 'add' }
       : kind === 'route'
-        ? { kind: 'route', key: key, imageUrl: uj.url }
-        : { key: key, imageUrl: uj.url });
-    showToast('✅ 예시이미지가 등록되었습니다.');
+        ? { kind: 'route', key: key, imageUrl: uj.url, mode: 'add' }
+        : { key: key, imageUrl: uj.url, mode: 'add' });
+    showToast('✅ 예시이미지가 추가되었습니다.');
     loadAiSamples();
   } catch (e) {
     showToast('❌ 등록 실패: ' + e.message, true);
   } finally { input.value = ''; }
 }
 
-async function clearAiSample(kind, key) {
-  if (!confirm('이 예시이미지를 제거할까요?\nAI 판정은 계속 동작하며, 그 채널의 판별 정확도만 낮아집니다.')) return;
+async function clearAiSample(kind, key, idx) {
+  if (!confirm('이 예시이미지 한 장을 제거할까요?\nAI 판정은 계속 동작하며, 그 슬롯의 판별 정확도만 낮아질 수 있습니다.')) return;
   try {
+    // ★ 개별 삭제(mode:'remove'+index) — 슬롯 전체가 아니라 고른 한 장만 지운다.
     await _smpFetch(kind === 'receipt'
-      ? { kind: 'receipt', channel: key, imageUrl: '' }
+      ? { kind: 'receipt', channel: key, mode: 'remove', index: idx }
       : kind === 'route'
-        ? { kind: 'route', key: key, imageUrl: '' }
-        : { key: key, imageUrl: '' });
+        ? { kind: 'route', key: key, mode: 'remove', index: idx }
+        : { key: key, mode: 'remove', index: idx });
     showToast('제거했습니다.');
     loadAiSamples();
   } catch (e) {
