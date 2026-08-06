@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리뷰검수 카드 리디자인 시안 2종 — 빨강 피로 해소</title>
+<style>
+  /* 오프라인 열람 — 외부 리소스 0, 라이트 고정. */
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#F2F4F7; color:#1B2334; line-height:1.6; padding:28px 16px 90px; }
+  .wrap { max-width:1180px; margin:0 auto; }
+  h1 { font-size:1.35rem; margin-bottom:4px; }
+  h2 { font-size:1.08rem; margin:40px 0 4px; }
+  .h2sub { font-size:.82rem; color:#64748B; margin-bottom:12px; }
+  p, li { font-size:.86rem; }
+  .doc { background:#fff; border:1px solid #E4E7EE; border-radius:12px; padding:16px 18px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; font-size:.82rem; background:#fff; margin:8px 0; }
+  th, td { border:1px solid #E4E7EE; padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#F8F9FB; font-size:.78rem; }
+  .star { color:#DC2626; font-weight:800; }
+  ul { padding-left:20px; margin:6px 0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:11px; background:#EDF0F4; border:2px dashed #9AA4B5; border-radius:14px; padding:16px; }
+
+  /* ── 공통 뼈대 ── */
+  .c { background:#fff; border:1px solid #E4E7EE; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 1px 2px rgba(27,35,52,.05); }
+  .cb { display:flex; gap:9px; padding:9px 10px 7px; cursor:pointer; flex:1; }
+  .th { width:50px; height:66px; border-radius:6px; background:linear-gradient(160deg,#E4E7EE,#CFD6E0); flex:none; display:grid; place-items:center; font-size:1.05rem; }
+  .who { display:flex; justify-content:space-between; gap:5px; align-items:baseline; font-size:.8rem; }
+  .tab { font-size:.68rem; color:#2563EB; text-decoration:underline; }
+  .why { font-size:.68rem; color:#525C70; margin-top:2px; line-height:1.45; }
+  .bdg { font-size:.6rem; font-weight:800; border-radius:99px; padding:1px 7px; flex:none; }
+  .bdg.f { background:#FAE9E7; color:#B3382E; border:1px solid #EAB6B0; }
+  .bdg.s { background:#FBF2E1; color:#9A6414; border:1px solid #E7D2A3; }
+
+  /* ══ 시안 A — 소프트 틴트: 채움 버튼 폐지, 주 조치 = 유형색 8% 틴트 ══ */
+  .a .tp { display:flex; align-items:center; gap:5px; padding:5px 10px 5px 8px; font-size:.66rem; font-weight:800; border-left:4px solid; }
+  .a .tp .tg { font-size:.55rem; letter-spacing:.08em; opacity:.65; margin-left:auto; }
+  .a .tp.dup{border-color:#DC2626;background:#FEF3F2;color:#9F1D1D} .a .tp.fmt{border-color:#D97706;background:#FFF8EB;color:#8A4B06}
+  .a .tp.prod{border-color:#16A34A;background:#F1FBF4;color:#14672F} .a .tp.sim{border-color:#7C3AED;background:#F7F3FE;color:#5B21B6}
+  .a .act { padding:0 10px 9px; }
+  .a .main { display:flex; width:100%; align-items:center; justify-content:center; gap:5px; border-radius:8px; padding:7px 0; font-size:.74rem; font-weight:800; cursor:pointer; border:1px solid; }
+  .a .main.dup { background:#FEF3F2; color:#B91C1C; border-color:#F3C8C4; }
+  .a .main.mv  { background:#FFF8EB; color:#8A4B06; border-color:#F2DFC0; }
+  .a .main.ok  { background:#F1FBF4; color:#15803D; border-color:#C4E8CE; }
+  .a .main.see { background:#F7F3FE; color:#6D28D9; border-color:#E0D3F9; }
+  .a .sub { display:flex; gap:5px; margin-top:5px; }
+  .a .g { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:3px; border:1px solid #E4E7EE; background:#fff; border-radius:7px; padding:5px 0; font-size:.68rem; font-weight:700; color:#3A445A; cursor:pointer; white-space:nowrap; }
+  .a .g.ok{color:#15803D} .a .g.bad{color:#B91C1C} .a .g.more{flex:0 0 32px;color:#8A93A5;font-weight:800}
+
+  /* ══ 시안 B — 모노 컴팩트: 색은 왼쪽 보더·글자만, 조치 = 한 줄 동일 무게 ══ */
+  .b .c { border-left:4px solid; }
+  .b .c.dup{border-left-color:#DC2626} .b .c.fmt{border-left-color:#D97706}
+  .b .c.prod{border-left-color:#16A34A} .b .c.sim{border-left-color:#7C3AED}
+  .b .tp { display:flex; align-items:center; gap:5px; padding:6px 10px 0 10px; font-size:.66rem; font-weight:800; }
+  .b .tp.dup{color:#B91C1C} .b .tp.fmt{color:#B45309} .b .tp.prod{color:#15803D} .b .tp.sim{color:#6D28D9}
+  .b .act { display:flex; gap:5px; padding:0 10px 9px; }
+  .b .bt { display:inline-flex; align-items:center; justify-content:center; gap:3px; border:1px solid #E4E7EE; background:#fff; border-radius:7px; padding:6px 0; font-size:.68rem; font-weight:700; color:#3A445A; cursor:pointer; white-space:nowrap; }
+  .b .bt.main { flex:2.2; font-weight:800; }
+  .b .bt.main.dup{color:#B91C1C;border-color:#F3C8C4} .b .bt.main.mv{color:#B45309;border-color:#F2DFC0}
+  .b .bt.main.ok{color:#15803D;border-color:#C4E8CE} .b .bt.main.see{color:#6D28D9;border-color:#E0D3F9}
+  .b .bt.h { flex:1; }
+  .b .bt.h.ok{color:#15803D} .b .bt.h.bad{color:#B91C1C}
+  .b .bt.more { flex:0 0 32px; color:#8A93A5; font-weight:800; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>리뷰검수 카드 리디자인 — 시안 2종</h1>
+<p class="h2sub">문제: 리뷰화면 아님(불명) 102건의 <b>전폭 빨간 채움 버튼</b>이 화면을 도배해 눈이 피로하고, 정작 급한 카드가 안 튄다. | 2026-08-06</p>
+
+<div class="doc">
+<table>
+<tr><th style="width:20%">공통 변경 (두 시안 동일)</th><th>내용</th></tr>
+<tr><td><span class="star">★</span> 채움(filled) 버튼 폐지</td><td>빨강·주황 <b>채움 배경을 전부 제거</b> — 색은 글자·테두리·틴트로만. 100장이 늘어서도 벽이 안 된다(경보는 상태 배지·유형 띠가 이미 말한다 = 삼중 빨강 해소).</td></tr>
+<tr><td><span class="star">★</span> 정상/불량만 있는 카드</td><td>주 조치가 [✕ 불량]뿐인 유형(리뷰화면 아님·불명, 작성자 등)은 전폭 버튼 대신 <b>[✓ 정상] | [✕ 불량] 좌우 반반</b> + [⋯] — 중복 카드의 보조줄과 같은 배치(사용자 요청).</td></tr>
+<tr><td>버튼 문구 축약</td><td>"✕ 불량 (반려 안내 전송)" → <b>"✕ 불량"</b> — 반려 전송 여부·문구는 어차피 전용 팝업이 설명한다(카드가 말할 필요 없음).</td></tr>
+<tr><td>동작 무변경</td><td>매트릭스(주 조치·[⋯]·우선순위)·팝업·API 전부 그대로 — 바뀌는 것은 버튼의 옷뿐.</td></tr>
+</table>
+</div>
+
+<h2>시안 A — 소프트 틴트</h2>
+<p class="h2sub">주 조치의 "이 카드에선 이걸 눌러라" 강조는 유지하되, 채움 대신 <b>유형색 8% 틴트 + 색 글자</b>로 낮춘다. 카드 구조(주 1 + 보조 2)는 현행 그대로.</p>
+<div class="a"><div class="grid">
+
+  <div class="c"><div class="tp fmt">📵 리뷰화면 아님<span class="tg">FMT</span></div>
+    <div class="cb"><div class="th">📄</div><div style="flex:1;min-width:0">
+      <div class="who"><b>박순희 · 101행</b><span class="bdg f">불량</span></div>
+      <div class="tab">0729)이노크아든_면마스크 200건</div><div class="why">리뷰 화면이 아닌 것으로 판정됨</div></div></div>
+    <div class="act"><div class="sub" style="margin-top:0">
+      <span class="g ok">✓ 정상</span><span class="g bad">✕ 불량</span><span class="g more">⋯</span></div></div></div>
+
+  <div class="c"><div class="tp dup">📄 같은 파일 (중복)<span class="tg">DUP</span></div>
+    <div class="cb"><div class="th">📱</div><div style="flex:1;min-width:0">
+      <div class="who"><b>신명기 · 48행</b><span class="bdg f">불량</span></div>
+      <div class="tab">6/26레노버라방_리뷰</div><div class="why">지출증빙 48행과 같은 파일</div></div></div>
+    <div class="act"><button class="main dup">🗑 중복파일 제거</button>
+      <div class="sub"><span class="g ok">✓ 정상</span><span class="g bad">✕ 불량</span><span class="g more">⋯</span></div></div></div>
+
+  <div class="c"><div class="tp fmt">📵 현금영수증으로 보임<span class="tg">FMT</span></div>
+    <div class="cb"><div class="th">🧾</div><div style="flex:1;min-width:0">
+      <div class="who"><b>권아람 · 65행</b><span class="bdg f">불량</span></div>
+      <div class="tab">6/26레노버라방_지출증빙</div><div class="why">리뷰 칸에 현금영수증 화면 제출</div></div></div>
+    <div class="act"><button class="main mv">🧾 현금영수증으로 이동</button>
+      <div class="sub"><span class="g bad">✕ 불량</span><span class="g ok">✓ 정상</span><span class="g more">⋯</span></div></div></div>
+
+  <div class="c"><div class="tp prod">🏷 상품명 다름<span class="tg">PROD</span></div>
+    <div class="cb"><div class="th">📱</div><div style="flex:1;min-width:0">
+      <div class="who"><b>이지영 · 44행</b><span class="bdg s">의심</span></div>
+      <div class="tab">0706)비타민_블로그</div><div class="why">캡처 "레노버 IdeaPad…" ≠ 기대값</div></div></div>
+    <div class="act"><button class="main ok">✓ 정상 — 별칭으로 학습</button>
+      <div class="sub"><span class="g">⚙ 기대 상품명</span><span class="g bad">✕ 불량</span><span class="g more">⋯</span></div></div></div>
+
+  <div class="c"><div class="tp sim">✍ 본문 겹침 100% ＋1<span class="tg">SIM</span></div>
+    <div class="cb"><div class="th">📱</div><div style="flex:1;min-width:0">
+      <div class="who"><b>김예진 · 394행</b><span class="bdg f">불량</span></div>
+      <div class="tab">0629)친구사이_하절기 7차</div><div class="why">김예진 388행과 본문 100% 일치</div></div></div>
+    <div class="act"><button class="main see">👁 겹친 제출과 나란히 보기</button>
+      <div class="sub"><span class="g bad">✕ 불량</span><span class="g ok">✓ 정상</span><span class="g more">⋯</span></div></div></div>
+
+</div></div>
+
+<h2>시안 B — 모노 컴팩트</h2>
+<p class="h2sub">색을 <b>왼쪽 보더 + 라벨 글자</b>까지만 쓰고 옅은 배경 띠도 뺀다. 조치는 <b>한 줄</b>(주 조치 넓게 + ✓/✕ + ⋯) — 카드가 한 단 낮아져 같은 화면에 한 줄 더 들어온다.</p>
+<div class="b"><div class="grid">
+
+  <div class="c fmt"><div class="tp fmt">📵 리뷰화면 아님</div>
+    <div class="cb"><div class="th">📄</div><div style="flex:1;min-width:0">
+      <div class="who"><b>박순희 · 101행</b><span class="bdg f">불량</span></div>
+      <div class="tab">0729)이노크아든_면마스크 200건</div><div class="why">리뷰 화면이 아닌 것으로 판정됨</div></div></div>
+    <div class="act"><span class="bt h ok">✓ 정상</span><span class="bt h bad">✕ 불량</span><span class="bt more">⋯</span></div></div>
+
+  <div class="c dup"><div class="tp dup">📄 같은 파일 (중복)</div>
+    <div class="cb"><div class="th">📱</div><div style="flex:1;min-width:0">
+      <div class="who"><b>신명기 · 48행</b><span class="bdg f">불량</span></div>
+      <div class="tab">6/26레노버라방_리뷰</div><div class="why">지출증빙 48행과 같은 파일</div></div></div>
+    <div class="act"><span class="bt main dup">🗑 중복파일 제거</span><span class="bt h ok">✓</span><span class="bt h bad">✕</span><span class="bt more">⋯</span></div></div>
+
+  <div class="c fmt"><div class="tp fmt">📵 현금영수증으로 보임</div>
+    <div class="cb"><div class="th">🧾</div><div style="flex:1;min-width:0">
+      <div class="who"><b>권아람 · 65행</b><span class="bdg f">불량</span></div>
+      <div class="tab">6/26레노버라방_지출증빙</div><div class="why">리뷰 칸에 현금영수증 화면 제출</div></div></div>
+    <div class="act"><span class="bt main mv">🧾 현금영수증으로 이동</span><span class="bt h ok">✓</span><span class="bt h bad">✕</span><span class="bt more">⋯</span></div></div>
+
+  <div class="c prod"><div class="tp prod">🏷 상품명 다름</div>
+    <div class="cb"><div class="th">📱</div><div style="flex:1;min-width:0">
+      <div class="who"><b>이지영 · 44행</b><span class="bdg s">의심</span></div>
+      <div class="tab">0706)비타민_블로그</div><div class="why">캡처 "레노버 IdeaPad…" ≠ 기대값</div></div></div>
+    <div class="act"><span class="bt main ok">✓ 정상 — 별칭 학습</span><span class="bt h bad">✕</span><span class="bt more">⋯</span></div></div>
+
+  <div class="c sim"><div class="tp sim">✍ 본문 겹침 100% ＋1</div>
+    <div class="cb"><div class="th">📱</div><div style="flex:1;min-width:0">
+      <div class="who"><b>김예진 · 394행</b><span class="bdg f">불량</span></div>
+      <div class="tab">0629)친구사이_하절기 7차</div><div class="why">김예진 388행과 본문 100% 일치</div></div></div>
+    <div class="act"><span class="bt main see">👁 나란히 보기</span><span class="bt h ok">✓</span><span class="bt h bad">✕</span><span class="bt more">⋯</span></div></div>
+
+</div></div>
+
+<h2>비교 · 권장</h2>
+<div class="doc">
+<table>
+<tr><th></th><th>시안 A — 소프트 틴트</th><th>시안 B — 모노 컴팩트</th></tr>
+<tr><td>주 조치 강조</td><td><b>유지</b>(틴트 전폭 버튼) — "이 카드에선 이걸 눌러라"가 여전히 한눈에</td><td>약화(넓이+색 글자만) — 대신 화면이 가장 조용함</td></tr>
+<tr><td>카드 높이</td><td>현행과 동일</td><td><b>한 단 낮음</b>(조치 1줄) — 같은 화면에 더 많이</td></tr>
+<tr><td>✓/✕ 가독</td><td>글자 포함("✓ 정상")</td><td>주 조치 있는 카드는 아이콘만(✓/✕) — 익숙해지면 빠르나 첫 학습 필요</td></tr>
+<tr><td>권장</td><td colspan="2"><b>A 권장</b> — 유형별 "주 조치" 설계(방금 확정)의 강조를 살리면서 빨강 피로만 정확히 제거한다. B는 밀도가 필요해지면(모니터당 카드 수 부족) 후속 전환.</td></tr>
+</table>
+<ul>
+  <li><span class="star">★</span> 두 시안 공통 — 정상/불량만 있는 카드(리뷰화면 아님·불명)는 <b>좌우 반반 배치</b>, 채움 빨강 0, "반려 안내 전송" 문구는 팝업으로 이동.</li>
+  <li>구현은 CSS·버튼 마크업만(매트릭스 로직 `_riCardActions`·팝업·API 무변경) — 확정 주시면 바로 반영합니다.</li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>
