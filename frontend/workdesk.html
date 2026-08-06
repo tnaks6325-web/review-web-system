@@ -865,6 +865,12 @@
 
   /* ── 리뷰검수 탭 ── 손볼 것만 카드로. 왼쪽 색 띠로 심각도를 한눈에 구분한다. */
   .ricards{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:11px;max-width:1400px}
+  /* ★ 헤더 버튼바를 **카드 영역과 같은 폭**으로 캡한다 — 캡이 없으면 `.sp{flex:1}` 이 남는 폭을
+     다 먹어 버튼이 카드보다 훨씬 오른쪽에 뜬다(작업오더·모집공고와 같은 처리).
+     ★ 값은 반드시 `.ricards` 의 max-width 와 **같아야** 오른쪽 끝이 맞는다.
+     계산: 5장 = 5×268 + 4×11(gap) = 1384 → 1400 이면 정확히 5장/줄, 6장(1663)엔 못 미친다. */
+  #rihead .mh{max-width:1400px}
+  #rihead .ovnote{max-width:1400px}
   .ricard{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden;
           box-shadow:var(--shadow-card);display:flex;flex-direction:column}
   .ricard.ri-f{box-shadow:inset 3px 0 0 #B3382E,var(--shadow-card);border-color:#EAB6B0}
@@ -916,6 +922,23 @@
   .nc-sub{display:flex;gap:6px;margin-top:6px}
   .nc-g{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 0;font-size:11px;font-weight:700;color:#3A445A;cursor:pointer;white-space:nowrap}
   .nc-g.ok{color:#15803D}.nc-g.bad{color:#B91C1C}
+  /* ★ 눌리는 것이 눌리는 것처럼 보이게 — 채움 버튼을 안 쓰기로 했으므로(빨간 벽 방지)
+     상태 변화는 **틴트 농도·테두리·1px 눌림**으로만 준다. 색은 변형마다 다르므로
+     개별 색을 다시 적지 않고 `filter` 로 공통 처리한다(m-red/m-green/… 전부 자동 적용). */
+  .nc-main,.nc-g,.rirtfix .btn{transition:filter .12s ease,background-color .12s ease,border-color .12s ease,box-shadow .12s ease,transform .07s ease}
+  .nc-main:hover{filter:brightness(.965);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .nc-main:active{filter:brightness(.92);transform:translateY(1px);box-shadow:none}
+  .nc-g:hover{background:var(--bg2,#F1F5F9);border-color:#CBD5E1}
+  .nc-g.ok:hover{background:#F1FBF4;border-color:#C4E8CE}
+  .nc-g.bad:hover{background:#FEF3F2;border-color:#F3C8C4}
+  .nc-g:active{filter:brightness(.95);transform:translateY(1px)}
+  .nc-th:hover img{filter:brightness(.94)}
+  .nc-th img{transition:filter .12s ease}
+  /* ★ 움직임을 줄이도록 설정한 사용자에게는 이동·전환을 끈다(색 변화는 남긴다) */
+  @media (prefers-reduced-motion:reduce){
+    .nc-main,.nc-g,.rirtfix .btn,.nc-th img{transition:none}
+    .nc-main:active,.nc-g:active{transform:none}
+  }
   .nc-g.more{flex:0 0 36px;color:var(--muted);font-weight:800}
   /* ★★ 관계 줄 — "무엇과 중복인지"를 카드에서 바로 읽히게(시안 design-inspect-duplicate-relation.html).
      왼쪽 = 지금 보고 있는 건 / 오른쪽 = 이미 있던 것. 카드·확인 팝업·상세 팝업이 **같은 모양**을 쓴다.
@@ -6213,7 +6236,8 @@ function riMoreMenu(i){
   let p=document.getElementById('riMorePop');
   if(!p){ p=document.createElement('div'); p.id='riMorePop'; document.body.appendChild(p); }
   p.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center';
-  p.onclick=e=>{ if(e.target===p) p.remove(); };
+  /* ★ 바깥 클릭으로는 닫지 않는다(사용자 확정 2026-08-06) — 확인 팝업은 [취소]로만 닫는다.
+     입력해 둔 반려 사유가 실수 클릭 한 번에 날아가던 것을 막는다. */
   p.innerHTML=`<div style="background:#fff;color:#1e293b;border-radius:12px;width:92%;max-width:300px;padding:12px 14px;box-shadow:0 18px 48px rgba(15,23,42,.3)">
     <div style="font-size:.78rem;font-weight:800;margin-bottom:8px">${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''} — 나머지 조치</div>
     ${items.map(it=>`<button style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:.8rem;font-weight:700" onclick="document.getElementById('riMorePop').remove();${it.h}">${it.t}</button>`).join('')}
@@ -6232,7 +6256,7 @@ function _rcPopup(o){
   let p=document.getElementById('rcPop');
   if(!p){ p=document.createElement('div'); p.id='rcPop'; document.body.appendChild(p); }
   p.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
-  p.onclick=e=>{ if(e.target===p) riRcClose(); };
+  /* ★ 바깥 클릭으로는 닫지 않는다(위와 같은 이유) — [취소] 버튼이 유일한 닫기다. */
   p.innerHTML=`<div style="background:#fff;color:#1e293b;border-radius:16px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 64px rgba(15,23,42,.35)">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 20px 0">
       <div style="width:40px;height:40px;border-radius:12px;background:${o.danger?'#FEF2F2':'#EFF6FF'};display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex:none">${o.icon||'❓'}</div>
