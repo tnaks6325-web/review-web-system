@@ -5818,12 +5818,22 @@ async function _riDedupExec(i){
   riCloseDetail();
   _loadInspect();
 }
+/* ★ 채널 불일치는 **문장 한 줄**로 쓴다 — 종전 "작업 쿠팡 / 캡처 네이버" 병기는 어느 쪽이
+   작업이고 어느 쪽이 제출물인지 순간적으로 뒤집혀 읽혔다(실사용 신고 — 반려 사유로 그대로
+   리뷰어에게 나가므로 더 위험하다). 표기는 "X 작업에 Y 캡처가 제출되었습니다" 하나로 고정하고,
+   카드·상세·반려 사유 프리필이 **같은 함수**를 쓴다(사본을 두면 화면마다 방향이 갈린다). */
+function _riChanReason(fm){
+  const work=_RI_CHAN[fm.expectedChannel]||fm.expectedChannel;
+  const got=fm.channel?(_RI_CHAN[fm.channel]||fm.channel):'';
+  return got ? `${work} 작업에 ${got} 캡처가 제출되었습니다`
+             : `${work} 작업인데 캡처의 채널을 알 수 없습니다`;
+}
 /** 판정 근거를 사람 문장으로 — 카드에서 열어보지 않고도 판단되게 한다. */
 function _riReasons(c){
   const out=[];
   if(c.format && c.format.verdict==='fail') out.push('리뷰 화면이 아닌 것으로 판정됨');
   if(c.format && c.format.verdict==='warn' && c.format.expectedChannel)
-    out.push(`채널 다름 — 작업 ${_RI_CHAN[c.format.expectedChannel]||c.format.expectedChannel} / 캡처 ${_RI_CHAN[c.format.channel]||c.format.channel||'불명'}`);
+    out.push(_riChanReason(c.format));
   if(c.product && c.product.verdict==='warn')
     out.push(`상품명 다름 — 캡처 "${(c.product.ocr||'').slice(0,40)}"`);
   if(c.duplicate && c.duplicate.verdict==='fail')
@@ -5869,7 +5879,9 @@ function riOpenDetail(i){
       </div>
       <div class="rimright">
         <table class="ritbl">
-          ${line(fm.verdict||'skip','리뷰 화면·채널', fm.channel?((_RI_CHAN[fm.channel]||fm.channel)+(fm.expectedChannel?' (작업: '+(_RI_CHAN[fm.expectedChannel]||fm.expectedChannel)+')':'')):'')}
+          ${line(fm.verdict||'skip','리뷰 화면·채널', fm.expectedChannel&&fm.verdict==='warn'
+            ? esc(_riChanReason(fm))
+            : (fm.channel?esc(_RI_CHAN[fm.channel]||fm.channel)+' 캡처로 확인':''))}
           ${line(pr.verdict||'skip','상품명', pr.verdict==='skip'?'비교할 기대 상품명이 없습니다 — [⚙ 기대 상품명]에서 등록하세요':('캡처 "'+esc(pr.ocr||'')+'"<br>기대 '+esc((pr.expected||[]).join(' / '))))}
           ${line(dup.verdict||'skip','같은 파일', dup.verdict==='fail'?esc(`${dup.matchTab||''} ${dup.matchReviewer||''} ${dup.matchRow?dup.matchRow+'행':''}`):'')}
           ${line(sim.verdict||'skip','본문 겹침', sim.score!=null?(Math.round(sim.score*100)+'% '+esc(sim.matchReviewer||'')):'')}
