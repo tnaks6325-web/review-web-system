@@ -239,9 +239,13 @@ const CTX = require('../src/services/reviewTypeContext.service');
     assert.ok(/const _riAdmin = STATE\.role==='master' \|\| STATE\.role==='admin';[\s\S]{0,300}_riAdmin\?\[\{h:`riReinspectTab\(\$\{i\}\)`,t:'♻ 이 작업 재검수'\}\]:\[\]/.test(WD),
       "★★ [⋯] 메뉴에 항상 있다(관리자만 — 서버 게이트와 1:1)");
     // ★ 상단 버튼은 숨기지 말고 **왜 안 되는지 말한다**(숨기면 "어디 있냐"가 된다)
-    assert.ok(/\$\{isAdmin\?`<button class="btn"\$\{t\?'':' style="opacity:\.5"'\} onclick="riReinspectTab\(\)"/.test(WD)
-      && /작업\(탭\)을 먼저 고르세요 — 카드의 작업명을 누르면 선택됩니다/.test(WD),
-      '★ 작업 미선택이어도 버튼을 보여주고 고르는 법을 말한다');
+    assert.ok(/\$\{isAdmin\?`<button class="btn"\$\{reOn\?'':' style="opacity:\.5"'\} onclick="riReinspectTab\(\)"/.test(WD)
+      && /유형 칩이나 작업을 먼저 고르세요/.test(WD),
+      '★ 대상 미선택이어도 버튼을 보여주고 고르는 법을 말한다');
+    // ★★ 라벨이 **무엇이 돌지**를 말한다(유형 칩 선택 시 그 유형 / 작업 선택 시 그 작업)
+    assert.ok(/const reLbl = curType!=='all' \? `♻ \$\{RI_TYPE_META\[curType\]/.test(WD)
+      && /const reOn = curType!=='all' \|\| !!t;/.test(WD),
+      '★ 대상이 라벨에 드러난다(무엇이 돌지 모르는 버튼 금지)');
     assert.ok(/\+ \(_riRTNote\(r\)\?`<br>\$\{_riRTNote\(r\)\}`:''\)/.test(WD),
       '상세 팝업 리뷰 화면·채널 줄에 기대 설명');
     ok('D6: 배선 — 목록 수신 · 카드 조치 안내 · 상세 설명');

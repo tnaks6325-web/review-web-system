@@ -1530,7 +1530,10 @@ router.post('/review-inspect/reinspect', authMiddleware, adminOrMasterMiddleware
   try {
     const b = req.body || {};
     const out = await _inspectSvc.reinspectTab({
-      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''), limit: b.limit,
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+      // 유형별 일괄 재검수 — 화면이 고른 건들만(유형 판정은 화면 단일 출처)
+      fileIds: Array.isArray(b.fileIds) ? b.fileIds : null,
+      limit: b.limit,
     });
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) {
