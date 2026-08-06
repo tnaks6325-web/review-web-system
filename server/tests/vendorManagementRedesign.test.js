@@ -298,7 +298,27 @@ async function run() {
   t('★ 마감자료 검수 칩은 판정 불가면 비활성 + ?', /candKnown\?n\('cand'\):'\?'/.test(HTML) && /!candKnown/.test(HTML));
   t('★ 미입금 칩은 정산 요약 도착 전 …(0 으로 위장 금지)', /setlArrived\?n\('unpaid'\):'…'/.test(HTML));
   t('★ 개요 집계 실패 시 숫자를 ? 로 표기', /집계를 불러오지 못했습니다"\)>\?/.test(HTML) || /bad\?'\?'/.test(HTML));
-  t('★ 개요 집계 실패 시 사이드바 배지 미표시', /STATE\.ovMeta && !STATE\.ovMeta\.ok\) \? ''/.test(HTML));
+  // ★★ 배지 규칙은 **실행**으로 본다 — grep 은 "집계 실패인데도 배지를 그리는" 변이를 통과시킨다(변이시험 실측).
+  {
+    const sb = { STATE: { advs: [], ovMeta: { ok: true }, advCur: null, role: 'admin' },
+      _ovmAdvQ: '', _ovmAdvF: 'all', esc: v => String(v == null ? '' : v), _ovmHl: v => String(v == null ? '' : v),
+      document: { querySelectorAll: () => [] } };
+    const boxes = { '#advs': { innerHTML: '' }, '#ovmAdvChips': { innerHTML: '' } };
+    sb.$ = sel => boxes[sel] || null;
+    vm.createContext(sb);
+    vm.runInContext(grab('_ovmAdvMatch') + '\n' + grab('_ovmRenderAdvs'), sb);
+    const render = (advs, ovMeta) => { sb.STATE.advs = advs; sb.STATE.ovMeta = ovMeta;
+      boxes['#advs'].innerHTML = ''; vm.runInContext('_ovmRenderAdvs()', sb); return boxes['#advs'].innerHTML; };
+    const A = [{ id: 'A', name: '업체A', inadPm: 'AE', owned: 1, finishCand: 3 }, { id: 'B', name: '업체B', inadPm: 'AE', owned: 1, finishCand: 0 }];
+    let html = render(A, { ok: true });
+    t('마감자료 검수 대기가 있는 업체만 배지', (html.match(/ovm-b/g) || []).length === 1 && /">3<\/span>/.test(html), html.slice(0, 200));
+    html = render(A, { ok: false });
+    t('★ 집계 실패(ovMeta.ok=false)면 배지를 아예 그리지 않는다(0·임의 숫자로 위장 금지)',
+      !/ovm-b/.test(html), html.slice(0, 200));
+    html = render([{ id: 'C', name: '업체C', inadPm: '', owned: 0, finishCand: 0 }], { ok: true });
+    t('AE 미지정은 사이드바에서 경고색으로 표기', /class="pmn noae"/.test(html) && /AE 미지정/.test(html));
+    t('★ 사이드바 행 onclick 은 인덱스만(업체명 문자열 주입 금지)', /onclick="selAdv\(0\)"/.test(html));
+  }
   t('개요에 미입금 열을 두지 않는다(인트라넷 의존 — 대신 안내 문구)', /미입금 현황은 업체를 고르면/.test(HTML));
   // 신설 클래스는 ovm- 접두 — 기존 클래스 재정의 금지
   const cssBlock = (HTML.match(/<style[^>]*>([\s\S]*?)<\/style>/) || [, ''])[1];
