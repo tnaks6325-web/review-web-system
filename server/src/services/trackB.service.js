@@ -952,7 +952,7 @@ async function _quoteForSales(salesId) {
 
 // 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
 //   광고주(Q4-c): settlement_visible=FALSE 면 {hidden:true}(금액·상태 미포함). TRUE 면 금액 포함 전체.
-async function settlementForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
+async function settlementForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {
   if (!sheetId || !tabName) throw new Error('settlementForTab: sheetId, tabName 필수');
   const db = getPool();
   const { rows } = await db.query(
@@ -960,8 +960,8 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
        FROM trackb_settlement_links WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`, [sheetId, tabName]);
   const link = rows[0] || null;
   const isAdv = role === 'advertiser';
-  // 광고주 노출 게이트(Q4-c 안전장치): 토글 OFF 면 정산 자체 비공개.
-  if (isAdv && !(await _settlementVisibleFor(advertiserId))) {
+  // 광고주 노출 게이트(Q4-c 안전장치): 토글 OFF 면 정산 자체 비공개. 브랜드 세션은 브랜드 토글도 AND(094).
+  if (isAdv && (!(await _settlementVisibleFor(advertiserId)) || (brandId && !(await _brandSettlementVisible(brandId))))) {
     return { linked: !!link, hidden: true };
   }
   // S3: 마감자료(①)는 P3(migration 055) 도착 전까지 데이터 원천 없음 — 준비중으로 표기(오해 방지).
@@ -1042,9 +1042,9 @@ async function _settlementLinkForTab(sheetId, tabName) {
   return rows[0] || null;
 }
 // 견적서 문서(버전 이력 포함). 광고주 게이트 통과 못 하면 hidden(내용 미포함).
-async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
+async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {
   if (!sheetId || !tabName) throw new Error('quoteDocForTab: sheetId, tabName 필수');
-  if (role === 'advertiser' && !(await _settlementVisibleFor(advertiserId))) return { linked: false, hidden: true };
+  if (role === 'advertiser' && (!(await _settlementVisibleFor(advertiserId)) || (brandId && !(await _brandSettlementVisible(brandId))))) return { linked: false, hidden: true };
   const link = await _settlementLinkForTab(sheetId, tabName);
   if (!link || !link.salesId) return { linked: false };
   let quote = null, proxyDown = false;
@@ -1061,9 +1061,9 @@ async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId 
   return { linked: true, contractNumber: link.contractNumber || '', proxyDown, versions };
 }
 // 계산서(전자세금계산서) 발행 요약 — sales 상태 + tax_invoices 이력(sales_id 역링크).
-async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
+async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserId = null, brandId = null } = {}) {
   if (!sheetId || !tabName) throw new Error('invoiceDocForTab: sheetId, tabName 필수');
-  if (role === 'advertiser' && !(await _settlementVisibleFor(advertiserId))) return { linked: false, hidden: true };
+  if (role === 'advertiser' && (!(await _settlementVisibleFor(advertiserId)) || (brandId && !(await _brandSettlementVisible(brandId))))) return { linked: false, hidden: true };
   const link = await _settlementLinkForTab(sheetId, tabName);
   if (!link || !link.salesId) return { linked: false };
   const sales = await _salesById(link.salesId);
@@ -1128,17 +1128,37 @@ async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
 //   필드만으로 재구성한다. ★ 내부 필드(비고 memo·담당 manager·인트라넷 salesId·amountMismatch)는
 //   여기서 폐기 — 화면에서만 감추는 건 devtools 에 보이는 보안연극이다(csBridge meta 규율과 동일).
 //   정산 노출 토글 OFF 업체는 settlement 를 아예 계산·동봉하지 않는다(settlementHidden 신호만).
-async function advertiserWorkSummary({ advertiserId } = {}) {
+//   브랜드 렌즈(094): brandId 가 오면(브랜드 링크 세션) ① 그 브랜드에 배정된 탭만 ② 정산은
+//   업체 토글 AND 브랜드 settlement_visible ③ 폴더 URL 은 folders_visible 아니면 폐기(서버에서 미전송).
+//   대행사 세션(brandId 없음)에는 items[].brandId 주석 + brands 목록(관리 화면 재료)을 동봉한다.
+async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
   if (!advertiserId) throw new Error('advertiserWorkSummary: advertiserId 필수');
-  const tabs = await ownedTabsForAdvertiser({ advertiserId });
-  const visible = await _settlementVisibleFor(advertiserId);
+  const db = getPool();
+  const { rows: bmap } = await db.query(
+    'SELECT brand_id AS "brandId", sheet_id AS "sheetId", tab_name AS "tabName" FROM trackb_brand_tab_map WHERE advertiser_id=$1', [advertiserId]);
+  const brandByTab = new Map(bmap.map(m => [m.sheetId + '\t' + m.tabName, m.brandId]));
+  let brand = null;
+  if (brandId) {
+    const { rows: br } = await db.query(
+      `SELECT id, name, color, settlement_visible, folders_visible FROM trackb_brands
+        WHERE id=$1 AND advertiser_id=$2 AND deleted_at IS NULL`, [brandId, advertiserId]);
+    if (!br.length) return { settlementHidden: true, brand: null, items: [] };   // 삭제된 브랜드 링크 = 빈 화면(fail-closed)
+    brand = br[0];
+  }
+  let tabs = await ownedTabsForAdvertiser({ advertiserId });
+  if (brand) tabs = tabs.filter(t => brandByTab.get(t.sheetId + '\t' + t.tabName) === brand.id);
+  const visible = (await _settlementVisibleFor(advertiserId)) && (!brand || brand.settlement_visible === true);
   let setlByTab = new Map();
   if (visible) {
     const setl = await settlementSummaryForAdvertiser({ advertiserId }).catch(() => []);   // fail-soft: 정산만 빠지고 목록은 뜬다
     setlByTab = new Map(setl.map(s => [s.sheetId + '\t' + s.tabName, s]));
   }
+  const foldersOn = !brand || brand.folders_visible === true;
+  const brandsOut = brandId ? undefined : (await brandsForAdvertiser({ advertiserId }).catch(() => null));
   return {
     settlementHidden: !visible,
+    brand: brand ? { id: brand.id, name: brand.name, color: brand.color } : null,
+    brands: brandsOut && brandsOut.ok ? brandsOut.brands : undefined,
     items: tabs.map(t => {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
       return {
@@ -1147,8 +1167,10 @@ async function advertiserWorkSummary({ advertiserId } = {}) {
         total: t.bTotal || 0, submitted: t.bSub || 0, paid: t.bPaid || 0,
         target: t.woRecruit || null,
         startDate: t.woStartDate ? String(t.woStartDate).slice(0, 10) : null,
-        // A안: 자료 폴더 바로가기 — 드라이브 [리뷰]·[구매캡처] 폴더 URL(광고주 노출 무해).
-        folderUrl: t.folderUrl || null, captureFolderUrl: t.captureFolderUrl || null,
+        brandId: brandByTab.get(t.sheetId + '\t' + t.tabName) || null,
+        // A안: 자료 폴더 바로가기 — 브랜드 세션은 folders_visible 토글이 꺼져 있으면 서버에서 폐기.
+        folderUrl: foldersOn ? (t.folderUrl || null) : null,
+        captureFolderUrl: foldersOn ? (t.captureFolderUrl || null) : null,
         settlement: s ? {
           contractNumber: s.contractNumber || '', proxyDown: !!s.proxyDown,
           quoteStatus: s.quoteStatus || null, quoteDate: s.quoteDate || null,
@@ -1161,6 +1183,94 @@ async function advertiserWorkSummary({ advertiserId } = {}) {
       };
     }),
   };
+}
+
+// ═══ 브랜드 분류·화면 공유(094) — 대행사(광고주) 셀프서비스 ═══
+//   시안 §3(사용자 확정): 셀프 분류 · 브랜드별 고유 링크 · 정산/폴더 기본 숨김 + 브랜드별 토글 · A안 브랜딩.
+//   ★ 모든 함수가 advertiser_id 스코프 안에서만 동작(자기 브랜드·자기 소유 탭만) — IDOR 차단은 쿼리 조건이 담당.
+function _brandRow(b) {
+  return { id: b.id, name: b.name, color: b.color, linkToken: b.link_token, linkActive: b.link_active === true,
+    settlementVisible: b.settlement_visible === true, foldersVisible: b.folders_visible === true };
+}
+async function brandsForAdvertiser({ advertiserId } = {}) {
+  if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT b.*, COALESCE(m.cnt,0) AS cnt
+       FROM trackb_brands b
+       LEFT JOIN (SELECT brand_id, COUNT(*) AS cnt FROM trackb_brand_tab_map GROUP BY brand_id) m ON m.brand_id=b.id
+      WHERE b.advertiser_id=$1 AND b.deleted_at IS NULL ORDER BY b.created_at ASC`, [advertiserId]);
+  return { ok: true, brands: rows.map(b => ({ ..._brandRow(b), tabCount: Number(b.cnt) || 0 })) };
+}
+async function createBrand({ advertiserId, name, color } = {}) {
+  const nm = String(name || '').trim().slice(0, 60);
+  if (!advertiserId || !nm) return { ok: false, code: 400, error: '브랜드 이름을 입력하세요.' };
+  const id = 'brd_' + require('crypto').randomBytes(6).toString('hex');
+  const token = require('crypto').randomBytes(24).toString('base64url');
+  const col = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : '#2563eb';
+  const { rows } = await getPool().query(
+    `INSERT INTO trackb_brands (id, advertiser_id, name, color, link_token) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [id, advertiserId, nm, col, token]);
+  return { ok: true, brand: { ..._brandRow(rows[0]), tabCount: 0 } };
+}
+async function updateBrand({ advertiserId, brandId, action, name, color, on } = {}) {
+  if (!advertiserId || !brandId) return { ok: false, code: 400, error: 'brandId 필수' };
+  const db = getPool();
+  const own = await db.query('SELECT id FROM trackb_brands WHERE id=$1 AND advertiser_id=$2 AND deleted_at IS NULL', [brandId, advertiserId]);
+  if (!own.rows.length) return { ok: false, code: 404, error: '브랜드를 찾을 수 없습니다.' };
+  if (action === 'rename') {
+    const nm = String(name || '').trim().slice(0, 60); if (!nm) return { ok: false, code: 400, error: '이름을 입력하세요.' };
+    const col = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : null;
+    await db.query(`UPDATE trackb_brands SET name=$2${col ? ', color=$3' : ''} WHERE id=$1`, col ? [brandId, nm, col] : [brandId, nm]);
+    return { ok: true };
+  }
+  if (action === 'delete') {   // soft delete — 링크 즉시 무효(loginByLinkToken 이 deleted_at 검사) + 배정 해제
+    await db.query('UPDATE trackb_brands SET deleted_at=NOW(), link_active=FALSE WHERE id=$1', [brandId]);
+    await db.query('DELETE FROM trackb_brand_tab_map WHERE brand_id=$1', [brandId]);
+    return { ok: true };
+  }
+  if (action === 'link-active') { await db.query('UPDATE trackb_brands SET link_active=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
+  if (action === 'link-rotate') {   // 유출 대응 — 새 토큰 발급(이전 링크 즉시 무효)
+    const token = require('crypto').randomBytes(24).toString('base64url');
+    await db.query('UPDATE trackb_brands SET link_token=$2, link_active=TRUE WHERE id=$1', [brandId, token]);
+    return { ok: true, linkToken: token };
+  }
+  if (action === 'settlement-visible') { await db.query('UPDATE trackb_brands SET settlement_visible=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
+  if (action === 'folders-visible') { await db.query('UPDATE trackb_brands SET folders_visible=$2 WHERE id=$1', [brandId, on === true]); return { ok: true }; }
+  return { ok: false, code: 400, error: '알 수 없는 action: ' + action };
+}
+// 배정 전체 교체(배정 모달 저장) — tabs 에 있는 탭은 이 브랜드로, 이 브랜드에 배정돼 있었는데 빠진 탭은 해제.
+//   ★ 소유 검증: ownedTabsForAdvertiser 목록에 없는 탭은 조용히 무시(다른 업체 탭 배정 불가).
+async function assignBrandTabs({ advertiserId, brandId, tabs } = {}) {
+  if (!advertiserId || !brandId) return { ok: false, code: 400, error: 'brandId 필수' };
+  const db = getPool();
+  const own = await db.query('SELECT id FROM trackb_brands WHERE id=$1 AND advertiser_id=$2 AND deleted_at IS NULL', [brandId, advertiserId]);
+  if (!own.rows.length) return { ok: false, code: 404, error: '브랜드를 찾을 수 없습니다.' };
+  const owned = new Set((await ownedTabsForAdvertiser({ advertiserId })).map(t => t.sheetId + '\t' + t.tabName));
+  const want = [];
+  for (const t of (Array.isArray(tabs) ? tabs : []).slice(0, 2000)) {
+    const sid = String((t && t.sheetId) || ''), tn = String((t && t.tabName) || '');
+    if (sid && tn && owned.has(sid + '\t' + tn)) want.push([sid, tn]);
+  }
+  await db.query('DELETE FROM trackb_brand_tab_map WHERE brand_id=$1', [brandId]);   // 전체 교체(빠진 탭 = 해제)
+  for (const [sid, tn] of want) {
+    await db.query(
+      `INSERT INTO trackb_brand_tab_map (brand_id, advertiser_id, sheet_id, tab_name) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (advertiser_id, sheet_id, tab_name) DO UPDATE SET brand_id=$1`, [brandId, advertiserId, sid, tn]);
+  }
+  return { ok: true, assigned: want.length };
+}
+// 브랜드 세션의 탭 스코프(라우트 _ensureThreadScope 가 호출) — 브랜드에 배정된 탭만 접근.
+async function brandTabAllowed({ brandId, advertiserId, sheetId, tabName } = {}) {
+  if (!brandId || !advertiserId || !sheetId || !tabName) return false;
+  const { rows } = await getPool().query(
+    'SELECT 1 FROM trackb_brand_tab_map WHERE brand_id=$1 AND advertiser_id=$2 AND sheet_id=$3 AND tab_name=$4 LIMIT 1',
+    [brandId, advertiserId, sheetId, tabName]);
+  return rows.length > 0;
+}
+async function _brandSettlementVisible(brandId) {
+  const { rows } = await getPool().query('SELECT settlement_visible FROM trackb_brands WHERE id=$1 AND deleted_at IS NULL', [brandId]);
+  return rows.length ? rows[0].settlement_visible === true : false;   // 브랜드 못 찾으면 fail-closed(숨김)
 }
 
 // 인트라넷 날짜 정규화: 'YYYYMMDD'(팝빌 trade_date) → 'YYYY-MM-DD', 그 외는 앞 10자.
@@ -3108,6 +3218,7 @@ module.exports = {
   settlementForTab,
   quoteDocForTab,
   invoiceDocForTab,
+  brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
   settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   settlementVisibleFor,

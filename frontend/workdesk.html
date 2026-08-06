@@ -97,7 +97,7 @@
   .awschip:hover{border-color:var(--accent-line)}
   .awschip.on{color:#fff;background:var(--accent);border-color:var(--accent)}
   mark.awhi{background:#fff3bf;border-radius:3px;padding:0 1px;color:inherit}
-  /* 견적서·계산서 팝업 뷰어(설계 §2) — 클래스 qd*/qv*/idc* 접두 */
+  /* 견적서·계산서 팝업 뷰어(설계 §2) — 클래스 qd· qv· idc 접두 */
   .bb.docv{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
   .bb.docv:hover{filter:brightness(.93)}
   .ambox.st.docv{cursor:pointer} .ambox.st.docv:hover{border-color:var(--accent-line);background:var(--accent-soft)}
@@ -129,6 +129,29 @@
   .idc .cell{padding:10px 15px;border-top:1px solid var(--line);font-size:12px}
   .idc .cell .k{font-size:10px;color:var(--faint);font-weight:800;letter-spacing:.03em;display:block;margin-bottom:2px}
   .idc .cell b{font-size:13px}
+  /* 브랜드 관리(094) — 대행사 셀프서비스. 클래스 brd· bas 접두 */
+  .brdlist{display:grid;gap:9px;max-width:1380px}
+  .brdcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .brddot{width:12px;height:12px;border-radius:4px;flex:none}
+  .brdname{font-size:13px;font-weight:800;min-width:96px}
+  .brdmeta{font-size:11.5px;color:var(--muted);flex:1;min-width:120px}
+  .brdacts{display:flex;gap:5px;flex-wrap:wrap}
+  .tgl{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
+  .tgl .sw{width:30px;height:17px;border-radius:999px;background:var(--line2);position:relative;flex:none;transition:background .15s}
+  .tgl .sw:after{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s}
+  .tgl.on .sw{background:var(--safe)} .tgl.on .sw:after{left:15px}
+  .tgl.on{color:var(--safe);font-weight:750}
+  .basrow{display:flex;align-items:center;gap:9px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px;cursor:pointer}
+  .basrow:last-child{border-bottom:none} .basrow:hover{background:var(--card2)}
+  .basrow input{width:15px;height:15px;flex:none;accent-color:var(--accent)}
+  /* 브랜드 열람 세션 — 서버가 안 내려준 칸은 컬럼째 제거(자리만 남으면 "미연결"로 오해).
+     기본 12칸: 시작일·작업명·진행상황·참여·자료폴더·견적서·계산서·총비용·입금액·입금일·남은입금액·열람 */
+  body.brandv.nostl .awlhead>span:nth-child(n+6):nth-child(-n+11),
+  body.brandv.nostl .awlrow>span:nth-child(n+6):nth-child(-n+11){display:none}
+  body.brandv.nofol .awlhead>span:nth-child(5),body.brandv.nofol .awlrow>span:nth-child(5){display:none}
+  body.brandv.nofol .awlhead,body.brandv.nofol .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 64px 64px 94px 94px 68px 94px 44px;min-width:auto}
+  body.brandv.nostl .awlhead,body.brandv.nostl .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 110px 44px;min-width:auto}
+  body.brandv.nostl.nofol .awlhead,body.brandv.nostl.nofol .awlrow{grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 44px;min-width:auto}
   /* A안: 자료 폴더 바로가기(🛒 구매캡쳐 / 📸 리뷰캡쳐) — 표 셀 미니 버튼 + 상세 헤더 버튼 공용 */
   .afol{display:flex;gap:4px;align-items:center}
   .fol{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:750;border-radius:7px;padding:2px 7px;border:1px solid;background:var(--card);text-decoration:none;white-space:nowrap;cursor:pointer}
@@ -1347,7 +1370,7 @@ function token(){ return sessionStorage.getItem('admin_token') || ''; }
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
-  Object.assign(STATE,{ role:'',name:'',cur:null,tabs:[],
+  Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,campsUnavailable:false,finFilter:'' });
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
@@ -1396,6 +1419,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
+              brandId:null, advName:'',       // 094: 브랜드 링크 세션(brand_id 클레임) · 운영사(대행사) 이름(A안 표기)
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
               ownSettle:{}, ownSettleFor:null,                // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
@@ -1415,6 +1439,7 @@ async function boot(){
       else return renderLogin('접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.'); } }
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
+  STATE.brandId=me.brand_id||null; STATE.advName=me.adv_name||'';   // 094: 브랜드 링크 세션(A안 — 운영사 표기)
   if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
     return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "리뷰웹시스템[3버전]" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
@@ -1436,7 +1461,7 @@ function _consumeGo(){
   try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
 }
 function renderLogin(msg){
-  document.body.classList.remove('advm');   // 광고주 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃 원복)
+  document.body.classList.remove('advm','brandv','nostl','nofol');   // 광고주·브랜드 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃·칸 원복)
   $('#app').innerHTML = `<div class="loginbox"><h2>리뷰웹시스템[3버전] 로그인</h2>
     <input id="lname" placeholder="아이디 (관리자 / AE / 광고주)" autocomplete="username">
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
@@ -1460,7 +1485,7 @@ function logout(){ sessionStorage.removeItem('admin_token');
   //   키 분리가 무의미**하다: _wtLoaded 가 true 로 남아 새 계정 캐시를 읽지 않고 이전 계정 배열을 그대로
   //   그리며(스코프 밖 탭명 노출), _wtDirty 가 true 로 남으면 _wtSyncFromServer 가 새 계정 GET 을 버리고
   //   **이전 계정 목록을 새 계정 서버 행에 저장**한다(코드리뷰 blocker).
-  Object.assign(STATE,{ role:'',name:'',view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
+  Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false,
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
@@ -1475,9 +1500,11 @@ function renderShell(){
   const isStaff = STATE.role==='staff';   // AE — 작업보드(담당 탭) + 소유 지정(초기매핑, 자기 담당 업체만)
   const isAdv = STATE.role==='advertiser';   // 업체(광고주) — 전용 뷰어(폭 상한 고정·좌측 작업 목록)
   document.body.classList.toggle('advm', isAdv);   // body.advm = --app-max:1680px 고정(시안)
+  document.body.classList.toggle('brandv', isAdv && !!STATE.brandId);   // 094: 브랜드 열람 세션(칸 축소 렌즈)
+  _brandLens();
   $('#app').innerHTML = `
     <div class="top">
-      <span class="logo">리뷰웹시스템[3버전] <span class="tag">${isAdv?'업체 전용':'TRACK B · 그림자'}</span></span>
+      <span class="logo">리뷰웹시스템[3버전] <span class="tag">${isAdv?(STATE.brandId?'브랜드 열람':'업체 전용'):'TRACK B · 그림자'}</span>${STATE.brandId&&STATE.advName?` <span class="tag" title="이 화면은 ${esc(STATE.advName)}이(가) 공유한 열람 전용 화면입니다">운영: ${esc(STATE.advName)}</span>`:''}</span>
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
@@ -1767,7 +1794,8 @@ async function loadTabs(){
   if(STATE.role==='advertiser'){
     STATE.tabs=(r&&r.ok&&r.tabs)||[];
     const s=await api('/api/trackb/my-work-summary').catch(()=>null);
-    STATE.advWork=(s&&s.ok)?{items:s.items||[],settlementHidden:!!s.settlementHidden}:{items:[],settlementHidden:false,failed:!s};
+    STATE.advWork=(s&&s.ok)?{items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,brands:s.brands||[]}:{items:[],settlementHidden:false,brand:null,brands:[],failed:!s};
+    _brandLens();   // 094: 브랜드 세션의 미전송 칸(정산·폴더) 컬럼 제거
     // 요약에만 있는 탭(아카이브 등)도 열람 대상 — STATE.tabs 에 합류(selTab 인덱스 계약 유지)
     for(const it of STATE.advWork.items){
       if(!STATE.tabs.some(t=>t.sheetId===it.sheetId&&t.tabName===it.tabName))
@@ -1834,7 +1862,21 @@ function _awTarget(it){
   const m=String(it.tabName||'').match(/(\d+)\s*건/); return m?+m[1]:0;
 }
 // A안: 자료 폴더 바로가기 버튼 한 벌 — 표 셀(미니)·상세 헤더(big) 공용. 미연결은 회색 배지로 자리 유지(컬럼 정렬 보호).
+// A안(사용자 확정): 브랜드 화면에도 운영 주체(대행사)를 표기 — 문의처가 분명해진다.
+function _brandBadge(){
+  return STATE.brandId&&STATE.advName
+    ? `<span class="bd a" title="${esc(STATE.advName)}이(가) 공유한 열람 전용 화면입니다">운영: ${esc(STATE.advName)}</span>` : '';
+}
+// 094 브랜드 렌즈: 서버가 정산/폴더를 아예 안 내려준 브랜드 세션은 그 **칸 자체를 제거**한다
+//   (숨김이 아니라 미전송이므로 자리만 남으면 "— 미연결"로 오해된다).
+function _brandLens(){
+  const b=document.body, aw=STATE.advWork;
+  if(!STATE.brandId||!aw){ b.classList.remove('nostl','nofol'); return; }
+  b.classList.toggle('nostl', aw.settlementHidden===true);
+  b.classList.toggle('nofol', !(aw.items||[]).some(it=>it.folderUrl||it.captureFolderUrl));
+}
 function _awFolderBtns(it, big){
+  if(STATE.brandId&&!it.folderUrl&&!it.captureFolderUrl) return '';   // 브랜드 세션: 폴더 비공개면 자리도 없음
   const b=(url,cls,ic,label)=> url
     ? `<a class="fol ${cls}${big?' big':''}" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${label} 폴더 열기 (Google Drive)">${ic} ${big?label+' 폴더':cls==='buy'?'구매':'리뷰'} <span class="up">↗</span></a>`
     : `<span class="fol off${big?' big':''}" title="폴더가 아직 연결되지 않았습니다 — 담당자에게 문의하세요">${ic} —</span>`;
@@ -1919,8 +1961,11 @@ function _renderAdvSidebar(){
   const items=_awQItems(), cur=STATE.cur, view=STATE.advView||'dash';
   // 상단 2줄 = [대시보드](기본) · [전체 작업]. 아래는 진행 중 / 완료 그룹(진행 중이 항상 위).
   const totalN=_awItems().length, qn=_awNorm(STATE.advQ);
+  const brandsN=(STATE.advWork&&STATE.advWork.brands&&STATE.advWork.brands.length)||0;
   const nav=`<div class="awitem${!cur&&view==='dash'?' on':''}" onclick="advHome('dash')"><span class="ava">📊</span><span class="nm">대시보드<i>전체 현황</i></span></div>`
-    +`<div class="awitem${!cur&&view==='list'?' on':''}" onclick="advHome('list')"><span class="ava">📋</span><span class="nm">전체 작업<i>목록 표${totalN?' · '+totalN+'건':''}${qn?' · 검색 중':''}</i></span></div>`;
+    +`<div class="awitem${!cur&&view==='list'?' on':''}" onclick="advHome('list')"><span class="ava">📋</span><span class="nm">전체 작업<i>목록 표${totalN?' · '+totalN+'건':''}${qn?' · 검색 중':''}</i></span></div>`
+    // 094: 브랜드 관리 — 대행사(광고주 본세션) 전용. 브랜드 링크 세션에는 메뉴 자체가 없다(열람 전용).
+    +(STATE.brandId?'':`<div class="awitem${!cur&&view==='brands'?' on':''}" onclick="advHome('brands')"><span class="ava">🏷️</span><span class="nm">브랜드 관리<i>${brandsN?brandsN+'개 브랜드':'브랜드사별 분류·공유'}</i></span></div>`);
   if(!items.length){
     host.innerHTML=nav+`<div class="awdiv"></div><div class="empty" style="padding:10px">${qn?'검색과 일치하는 작업이 없습니다.':(STATE.advWork&&STATE.advWork.failed?'작업 목록을 불러오지 못했습니다.':'진행 중인 작업이 없습니다.')}</div>`;
     return;
@@ -1940,7 +1985,7 @@ function _renderAdvSidebar(){
 }
 // 첫 화면 전환: 'dash'(대시보드·기본) | 'list'(전체 작업 표). 작업 선택은 selTab 이 그대로 담당.
 function advHome(view){
-  STATE.cur=null; STATE.advView=(view==='list')?'list':'dash';
+  STATE.cur=null; STATE.advView=(view==='list')?'list':(view==='brands'?'brands':'dash');
   _navPush(); _renderAdvSidebar(); _renderAdvHome();
 }
 function _renderAdvHome(){
@@ -1948,7 +1993,8 @@ function _renderAdvHome(){
   const aw=STATE.advWork;
   if(!aw){ host.innerHTML=`<div class="empty">불러오는 중…</div>`; return; }
   if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
-  if((STATE.advView||'dash')==='list') _renderAdvList(); else _renderAdvDash();
+  const v=STATE.advView||'dash';
+  if(v==='list') _renderAdvList(); else if(v==='brands'&&!STATE.brandId) _renderAdvBrands(); else _renderAdvDash();
 }
 // ★ 표 행 빌더는 한 벌 — 대시보드 "최근 작업"은 이걸 limit 만 달리해 호출한다(사본을 두면 두 화면의 컬럼·판정이 어긋난다).
 function _awRowHtml(it){
@@ -1982,7 +2028,7 @@ function _renderAdvList(){
   const paidDone=items.filter(it=>{ const {tc,pa}=_awSetl(it); return tc!=null&&tc>0&&(pa||0)>=tc; }).length;
   $('#main').innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 전체 작업</h1>
       <span class="bd">작업 ${items.length}건</span>${paidDone?`<span class="bd g">입금 완료 ${paidDone}건</span>`:''}
-      ${aw.settlementHidden?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
+      ${_brandBadge()}${aw.settlementHidden&&!STATE.brandId?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
     <div class="awsbar">
       <div class="awsbox"><span class="ic">🔍</span><input id="awsq" placeholder="작업명 검색 — 예: 넛세린, 쿠팡, 메이커스…" value="${esc(STATE.advQ||'')}" oninput="_awQ(this.value)" onkeydown="_awQKey(event)" autocomplete="off"><span class="awsclr" onclick="_awQClear()" title="검색 지우기 (ESC)">✕</span></div>
       <span class="awschip${f==='all'?' on':''}" data-f="all" onclick="_awF('all')">전체</span>
@@ -1991,6 +2037,103 @@ function _renderAdvList(){
       <span class="awscount" id="awscount">${_awCountHtml()}</span>
     </div>
     <div id="awlbody">${_awListBody()}</div></div>`;
+}
+// ── 화면 A-3: 브랜드 관리(094) — 대행사 셀프서비스(시안 §3 와이어프레임 A~C) ──
+//   데이터 = STATE.advWork.brands(요약 응답 동봉) + items[].brandId. 조작 후엔 요약 재수신으로 수렴.
+async function _brandsReload(){
+  const s=await api('/api/trackb/my-work-summary').catch(()=>null);
+  if(s&&s.ok) STATE.advWork={items:s.items||[],settlementHidden:!!s.settlementHidden,brand:s.brand||null,brands:s.brands||[]};
+  _renderAdvSidebar(); if((STATE.advView||'')==='brands') _renderAdvBrands();
+}
+function _brandLinkUrl(tok){ return location.origin+location.pathname.replace(/[^/]*$/,'')+'workdesk.html#adv='+encodeURIComponent(tok||''); }
+function _renderAdvBrands(){
+  const host=$('#main'); if(!host) return;
+  const brands=(STATE.advWork&&STATE.advWork.brands)||[], items=_awItems();
+  const unassigned=items.filter(it=>!it.brandId).length;
+  const card=b=>{
+    const off=!b.linkActive;
+    return `<div class="brdcard">
+      <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
+      <span class="brdname">${esc(b.name)}</span>
+      <span class="brdmeta">작업 ${b.tabCount||0}건 배정${off?' · <b style="color:var(--bad)">링크 정지됨</b>':''}</span>
+      <label class="tgl${b.settlementVisible?' on':''}" title="켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 숨김)" onclick="brandFlag('${esc(b.id)}','settlement-visible',${!b.settlementVisible});return false"><span class="sw"></span>정산 공개</label>
+      <label class="tgl${b.foldersVisible?' on':''}" title="켜면 브랜드사도 구매캡쳐·리뷰캡쳐 폴더 버튼을 봅니다 (기본: 비노출)" onclick="brandFlag('${esc(b.id)}','folders-visible',${!b.foldersVisible});return false"><span class="sw"></span>폴더 공개</label>
+      <span class="brdacts">
+        <button class="btn xs" onclick="brandCopyLink('${esc(b.id)}')">🔗 링크 복사</button>
+        <button class="btn xs" onclick="brandAssignModal('${esc(b.id)}')">작업 배정</button>
+        <button class="btn xs" onclick="brandFlag('${esc(b.id)}','link-active',${off})">${off?'링크 재개':'링크 정지'}</button>
+        <button class="btn xs" onclick="brandRotate('${esc(b.id)}')" title="이전 링크를 무효화하고 새 링크 발급(유출 대응)">링크 재발급</button>
+        <button class="btn xs" onclick="brandRename('${esc(b.id)}')">이름</button>
+        <button class="btn xs" onclick="brandDelete('${esc(b.id)}')" style="color:var(--bad)">삭제</button>
+      </span></div>`;
+  };
+  host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 브랜드 관리</h1>
+      <span class="bd a">업체 전용</span><span style="flex:1"></span><button class="btn" onclick="brandCreate()">+ 브랜드 추가</button></div>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 배정된 작업만 볼 수 있고,
+      <b>정산 정보(견적서·계산서·금액)와 자료 폴더는 기본 숨김</b> — 브랜드별 토글로 공개를 선택합니다. 브랜드사 화면에는 "운영: ${esc(STATE.name||'')}"가 표기됩니다.</p>
+    <div class="brdlist">${brands.map(card).join('')||''}
+      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.'}</div>
+    </div></div>`;
+}
+async function brandCreate(){
+  const name=prompt('브랜드 이름(예: 메이커스)'); if(!name||!name.trim()) return;
+  const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name:name.trim()})}).catch(()=>null);
+  if(!r||!r.ok) return alert((r&&r.error)||'브랜드 추가에 실패했습니다.');
+  _brandsReload();
+}
+async function brandRename(id){
+  const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
+  const name=prompt('브랜드 이름',b.name); if(!name||!name.trim()||name.trim()===b.name) return;
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action:'rename',name:name.trim()})}).catch(()=>null);
+  if(!r||!r.ok) return alert((r&&r.error)||'변경에 실패했습니다.'); _brandsReload();
+}
+async function brandDelete(id){
+  const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
+  if(!confirm(`"${b.name}" 브랜드를 삭제할까요?\n— 공유 링크가 즉시 무효화되고, 배정된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.`)) return;
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action:'delete'})}).catch(()=>null);
+  if(!r||!r.ok) return alert((r&&r.error)||'삭제에 실패했습니다.'); _brandsReload();
+}
+async function brandFlag(id,action,on){
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action,on:!!on})}).catch(()=>null);
+  if(!r||!r.ok) return alert((r&&r.error)||'변경에 실패했습니다.'); _brandsReload();
+}
+async function brandRotate(id){
+  if(!confirm('링크를 재발급할까요? 이전에 전달한 링크는 즉시 사용할 수 없게 됩니다.')) return;
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action:'link-rotate'})}).catch(()=>null);
+  if(!r||!r.ok) return alert((r&&r.error)||'재발급에 실패했습니다.');
+  await _brandsReload(); brandCopyLink(id);
+}
+function brandCopyLink(id){
+  const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b||!b.linkToken) return;
+  const url=_brandLinkUrl(b.linkToken);
+  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(
+    ()=>alert(`"${b.name}" 열람 링크가 복사되었습니다.\n브랜드사에 전달하세요 — 이 링크로는 ${b.name}에 배정된 작업만 보입니다.`),
+    ()=>prompt('아래 링크를 복사해 전달하세요.',url));
+}
+// 작업 배정 모달(와이어프레임 B) — 체크된 작업 = 이 브랜드. 다른 브랜드 배정 작업을 체크하면 이 브랜드로 이동.
+function brandAssignModal(id){
+  const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
+  const items=_awItems();
+  const rows=items.map((it,ix)=>{
+    const mine=it.brandId===id, other=it.brandId&&it.brandId!==id;
+    const ob=other?((STATE.advWork.brands||[]).find(x=>x.id===it.brandId)||{}).name:'';
+    return `<label class="basrow"><input type="checkbox" data-ix="${ix}" ${mine?'checked':''}>
+      <span style="flex:1;font-weight:650">${esc(it.tabName)}</span>
+      ${other?`<span class="bd" title="체크하면 ${esc(b.name)}(으)로 이동">현재: ${esc(ob||'다른 브랜드')}</span>`:(mine?'<span class="bd g">배정됨</span>':'<span class="bd">미분류</span>')}</label>`;
+  }).join('');
+  _modal(`작업 배정 — ${b.name}`,
+    `<p style="font-size:12px;color:var(--muted);margin:0 0 10px">체크한 작업이 <b>${esc(b.name)}</b> 브랜드사 화면에 보입니다. 체크를 해제하면 미분류로 돌아갑니다.</p>
+     <div style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px" id="basList">${rows||'<div class="empty">작업이 없습니다.</div>'}</div>
+     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" onclick="document.getElementById('wdModal').remove()">취소</button><button class="btn" style="background:var(--accent);border-color:var(--accent);color:#fff" onclick="brandAssignSave('${esc(id)}')">저장</button></div>`);
+}
+async function brandAssignSave(id){
+  const items=_awItems(), tabs=[];
+  document.querySelectorAll('#basList input[type=checkbox]').forEach(cb=>{
+    if(cb.checked){ const it=items[+cb.dataset.ix]; if(it) tabs.push({sheetId:it.sheetId,tabName:it.tabName}); } });
+  const r=await api('/api/trackb/brands/assign',{method:'POST',body:JSON.stringify({brandId:id,tabs})}).catch(()=>null);
+  if(!r||!r.ok) return alert((r&&r.error)||'저장에 실패했습니다.');
+  const m=document.getElementById('wdModal'); if(m) m.remove();
+  _brandsReload();
 }
 // ── 화면 A-1(기본): 대시보드 ── KPI · 진행 게이지 · 정산 파이프라인 · 확인 필요 · 최근 작업
 //   ★ 신규 API 0 — 전부 /my-work-summary + 기존 unseen 응답에서 파생.
@@ -2064,8 +2207,8 @@ function _renderAdvDash(){
   // ⑤ 최근 작업 = 화면 A 표 그대로 상위 4건(렌더러 공용)
   const RECENT=4;
   $('#main').innerHTML=`<div id="advDash">
-    <div class="mh"><h1>${esc(STATE.name||'업체')} — 업무 현황</h1><span class="bd a">업체 전용 열람</span>
-      ${aw.settlementHidden?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
+    <div class="mh"><h1>${esc(STATE.name||'업체')} — 업무 현황</h1><span class="bd a">${STATE.brandId?'브랜드 전용 열람':'업체 전용 열람'}</span>
+      ${_brandBadge()}${aw.settlementHidden&&!STATE.brandId?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
     <div class="adkpis">${kpis}</div>
     <div class="adgrid">
       <div class="adpanel"><div class="pt">진행 중 작업 <span class="more" onclick="advHome('list')">전체 작업 보기 →</span></div>${prog}</div>

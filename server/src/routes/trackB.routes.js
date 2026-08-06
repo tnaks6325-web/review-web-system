@@ -39,7 +39,13 @@ async function _ensureThreadScope(req, sheetId, tabName) {
   if (role === 'master' || role === 'admin') return { ok: true };
   if (role === 'staff' || role === 'advertiser') {
     const okc = await svc.canAccessTab({ role, staffName: (req.admin && req.admin.name) || null, advertiserId: (req.admin && req.admin.advertiser_id) || null, sheetId, tabName });
-    return okc ? { ok: true } : { ok: false, code: 403, error: '스코프 밖 탭(담당/소유 아님)' };
+    if (!okc) return { ok: false, code: 403, error: '스코프 밖 탭(담당/소유 아님)' };
+    // 094: 브랜드 링크 세션은 소유 탭 중에서도 **그 브랜드에 배정된 탭만**(타 브랜드 작업 도달 불가).
+    if (role === 'advertiser' && req.admin && req.admin.brand_id) {
+      const okb = await svc.brandTabAllowed({ brandId: req.admin.brand_id, advertiserId: req.admin.advertiser_id, sheetId, tabName });
+      if (!okb) return { ok: false, code: 403, error: '스코프 밖 탭(브랜드 미배정)' };
+    }
+    return { ok: true };
   }
   return { ok: false, code: 403, error: '권한이 없습니다.' };
 }
@@ -509,7 +515,51 @@ router.get('/my-work-summary', authMiddleware, async (req, res, next) => {
     if (_role(req) !== 'advertiser') return res.status(403).json({ ok: false, error: '광고주 전용 경로입니다.' });
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     if (!advertiserId) return res.status(403).json({ ok: false, error: '업체 연결이 없는 계정입니다.' });
-    res.json({ ok: true, ...(await svc.advertiserWorkSummary({ advertiserId })) });
+    // 094: 브랜드 링크 세션(brand_id 클레임)은 배정 탭만 + 브랜드 토글 렌즈. brandId 는 토큰에서만(IDOR 차단).
+    res.json({ ok: true, ...(await svc.advertiserWorkSummary({ advertiserId, brandId: (req.admin && req.admin.brand_id) || null })) });
+  } catch (err) { next(err); }
+});
+
+// ── 브랜드 분류·공유(094) — 광고주(대행사) 셀프서비스. 관리자 개입 0(사용자 확정). ──
+//   게이트: role=advertiser + advertiser_id + **브랜드 세션 아님**(브랜드 링크는 열람 전용 — CRUD 도달 불가).
+function _advSelf(req) {
+  const a = req.admin || {};
+  if (a.role !== 'advertiser' || !a.advertiser_id || a.brand_id) return null;
+  return a.advertiser_id;
+}
+router.get('/brands', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const o = await svc.brandsForAdvertiser({ advertiserId });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+router.post('/brands/create', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { name, color } = req.body || {};
+    const o = await svc.createBrand({ advertiserId, name, color });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+router.post('/brands/update', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { brandId, action, name, color, on } = req.body || {};
+    const o = await svc.updateBrand({ advertiserId, brandId, action, name, color, on });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+router.post('/brands/assign', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { brandId, tabs } = req.body || {};
+    const o = await svc.assignBrandTabs({ advertiserId, brandId, tabs });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
   } catch (err) { next(err); }
 });
 
@@ -608,7 +658,7 @@ router.get('/workdesk/settlement', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부+광고주 소유 탭
-    const out = await svc.settlementForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    const out = await svc.settlementForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null, brandId: (req.admin && req.admin.brand_id) || null });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
@@ -618,7 +668,7 @@ router.get('/workdesk/quote-doc', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const out = await svc.quoteDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    const out = await svc.quoteDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null, brandId: (req.admin && req.admin.brand_id) || null });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
@@ -628,7 +678,7 @@ router.get('/workdesk/invoice-doc', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const out = await svc.invoiceDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    const out = await svc.invoiceDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null, brandId: (req.admin && req.admin.brand_id) || null });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
