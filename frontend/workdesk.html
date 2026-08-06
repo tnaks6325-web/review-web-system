@@ -69,7 +69,7 @@
   .awitem .unb{font-size:10px;font-weight:700;color:var(--accent-deep);background:var(--accent-soft);border-radius:999px;padding:1px 6px;flex:none}
   /* 화면 A — 내 작업 목록 표(업체관리 연결탭 표와 같은 컬럼 그리드 방식·고정폭 합) */
   #advHome{max-width:1380px}
-  .awlhead,.awlrow{display:grid;grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 64px 64px 94px 94px 68px 94px 44px;gap:8px;align-items:center;min-width:1040px}
+  .awlhead,.awlrow{display:grid;grid-template-columns:60px minmax(190px,1.4fr) 92px 128px 110px 64px 64px 94px 94px 68px 94px 44px;gap:8px;align-items:center;min-width:1150px}
   .awlhead{font-size:9.5px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding:0 14px 5px}
   .awlrow{padding:10px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:box-shadow .2s,border-color .2s}
   .awlrow:hover{border-color:var(--accent-line);box-shadow:0 5px 14px rgba(16,24,40,.07)}
@@ -83,6 +83,16 @@
   .awlrow .amoney.rest b{color:var(--warn)} .awlrow .amoney.rest.zero b{color:var(--safe)}
   .awlrow .aopen{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
   .awlwrap{overflow-x:auto}
+  /* A안: 자료 폴더 바로가기(🛒 구매캡쳐 / 📸 리뷰캡쳐) — 표 셀 미니 버튼 + 상세 헤더 버튼 공용 */
+  .afol{display:flex;gap:4px;align-items:center}
+  .fol{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:750;border-radius:7px;padding:2px 7px;border:1px solid;background:var(--card);text-decoration:none;white-space:nowrap;cursor:pointer}
+  .fol.buy{color:#0e7490;border-color:rgba(14,116,144,.32);background:#e6f7fb}
+  .fol.rev{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 32%,transparent);background:var(--warn-soft)}
+  .fol.off{color:var(--faint);border-color:var(--line);background:var(--card2);cursor:default}
+  .fol:hover:not(.off){filter:brightness(.96)}
+  .fol .up{font-size:9px;opacity:.75}
+  .fol.big{font-size:11px;padding:4px 10px;border-radius:8px}
+  .folhead{display:inline-flex;gap:6px;align-items:center}
   /* 화면 B(작업 상세) — 헤더·요약 스트립·정산 카드를 본문 데이터 폭과 같은 값으로 캡(광고주 화면만).
      시트 그리드는 열 고정폭 합이라 원래 안 늘어남(_fitGrid) — 캡 불필요. */
   body.advm .main .mh,body.advm .stripA,body.advm .setldetail,body.advm .wobar,body.advm .wodetail{max-width:1380px}
@@ -1745,6 +1755,20 @@ function _awTarget(it){
   const t=+it.target||0; if(t) return t;
   const m=String(it.tabName||'').match(/(\d+)\s*건/); return m?+m[1]:0;
 }
+// A안: 자료 폴더 바로가기 버튼 한 벌 — 표 셀(미니)·상세 헤더(big) 공용. 미연결은 회색 배지로 자리 유지(컬럼 정렬 보호).
+function _awFolderBtns(it, big){
+  const b=(url,cls,ic,label)=> url
+    ? `<a class="fol ${cls}${big?' big':''}" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${label} 폴더 열기 (Google Drive)">${ic} ${big?label+' 폴더':cls==='buy'?'구매':'리뷰'} <span class="up">↗</span></a>`
+    : `<span class="fol off${big?' big':''}" title="폴더가 아직 연결되지 않았습니다 — 담당자에게 문의하세요">${ic} —</span>`;
+  return b(it.captureFolderUrl,'buy','🛒','구매캡쳐')+b(it.folderUrl,'rev','📸','리뷰캡쳐');
+}
+// 상세 헤더용 — 현재 탭을 요약 목록에서 찾아 big 버튼으로. 둘 다 미연결이면 아예 숨김(상세는 자리 유지 불필요).
+function _awFolderHead(){
+  const c=STATE.cur; if(!c) return '';
+  const it=_awItems().find(t=>t.sheetId===c.sheetId&&t.tabName===c.tabName);
+  if(!it||(!it.folderUrl&&!it.captureFolderUrl)) return '';
+  return `<span class="folhead">${_awFolderBtns(it,true)}</span>`;
+}
 function _awStatus(it){   // 진행상황 칩 {label, tone}
   const target=_awTarget(it), total=+it.total||0, sub=+it.submitted||0;
   const done=(total>0&&sub>=total&&(!target||total>=target))||it.active===false;
@@ -1809,6 +1833,7 @@ function _awRowHtml(it){
     <span class="anm"><b>${esc(it.tabName)}</b><span class="asub">${esc(it.spreadsheetTitle||'')}</span></span>
     <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
     <span class="acnt"><b>${it.total||0}</b>${_awTarget(it)?`/${_awTarget(it)}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
+    <span class="afol">${_awFolderBtns(it)}</span>
     <span>${qs?`<span class="bb ${qt}">${esc(qs)}</span>`:'<span class="bb">—</span>'}</span>
     <span>${iv?`<span class="bb ${ivt||''}">${esc(iv)}</span>`:'<span class="bb">—</span>'}</span>
     <span class="amoney"><b>${_awMoney(tc)}</b></span>
@@ -1820,7 +1845,7 @@ function _awRowHtml(it){
 function _awMD(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:String(d||'').slice(0,10); }
 function _awListHtml(items, limit){
   const rows=(limit?items.slice(0,limit):items).map(_awRowHtml).join('');
-  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
+  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>자료 폴더</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
 }
 // ── 화면 A-2: 전체 작업(목록 표) ──
 function _renderAdvList(){
@@ -2744,7 +2769,7 @@ function renderWorkdesk(wd){
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
     ${_curSheetLabel()}
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}<span class="bd g">참여자 ${c.total||0}</span>${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     ${_finBarHtml()}
     ${summaryStrip(wd,d,m,c)}
