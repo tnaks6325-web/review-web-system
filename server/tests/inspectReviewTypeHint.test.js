@@ -234,6 +234,14 @@ const CTX = require('../src/services/reviewTypeContext.service');
     assert.ok(/const r0 = \(i!=null\) \? \(STATE\.ri\|\|\[\]\)\[i\] : null;/.test(WD)
       && /const t = r0 \? \{ sheetId:r0\.sheet_id, tabName:r0\.tab_name \} : STATE\.riTab;/.test(WD),
       '인자 있으면 그 카드의 작업 / 없으면 선택된 작업(상단 버튼 동작 불변)');
+    // ★★ 재검수는 **어느 카드에서든** 닿아야 한다 — 상단 버튼은 "작업을 고른 뒤"에만,
+    //   카드 안내 버튼은 "리뷰타입 미설정"일 때만 떠서 정작 필요할 때 안 보였다(실사용 신고).
+    assert.ok(/const _riAdmin = STATE\.role==='master' \|\| STATE\.role==='admin';[\s\S]{0,300}_riAdmin\?\[\{h:`riReinspectTab\(\$\{i\}\)`,t:'♻ 이 작업 재검수'\}\]:\[\]/.test(WD),
+      "★★ [⋯] 메뉴에 항상 있다(관리자만 — 서버 게이트와 1:1)");
+    // ★ 상단 버튼은 숨기지 말고 **왜 안 되는지 말한다**(숨기면 "어디 있냐"가 된다)
+    assert.ok(/\$\{isAdmin\?`<button class="btn"\$\{t\?'':' style="opacity:\.5"'\} onclick="riReinspectTab\(\)"/.test(WD)
+      && /작업\(탭\)을 먼저 고르세요 — 카드의 작업명을 누르면 선택됩니다/.test(WD),
+      '★ 작업 미선택이어도 버튼을 보여주고 고르는 법을 말한다');
     assert.ok(/\+ \(_riRTNote\(r\)\?`<br>\$\{_riRTNote\(r\)\}`:''\)/.test(WD),
       '상세 팝업 리뷰 화면·채널 줄에 기대 설명');
     ok('D6: 배선 — 목록 수신 · 카드 조치 안내 · 상세 설명');

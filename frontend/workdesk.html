@@ -5968,7 +5968,7 @@ function _riRenderHead(sum){
     <span class="sp" style="flex:1"></span>
     ${chip('open','의심＋불량')}${chip('pass','통과')}${chip('pending','미검수')}${chip('resolved','확인됨')}${chip('all','전체')}
     ${t?`<button class="btn" onclick="riOpenProductNames()">⚙ 기대 상품명</button>`:''}
-    ${t&&isAdmin?`<button class="btn" onclick="riReinspectTab()" title="공고 리뷰타입을 뒤늦게 바꿨을 때(예: 구매확정) 이 작업의 의심·불량 판정을 새 기준으로 다시 매깁니다">♻ 재검수</button>`:''}
+    ${isAdmin?`<button class="btn"${t?'':' style="opacity:.5"'} onclick="riReinspectTab()" title="${t?'공고 리뷰타입을 뒤늦게 바꿨을 때(예: 구매확정) 이 작업의 의심·불량 판정을 새 기준으로 다시 매깁니다':'작업(탭)을 먼저 고르세요 — 카드의 작업명을 누르면 선택됩니다'}">♻ 재검수</button>`:''}
     ${t&&isAdmin?`<button class="btn" onclick="riResolveAllTab()" title="이 작업의 미확인 의심·불량 전부를 정상(오탐)으로 종결 — 상품명 의심 건은 인정 표기로 학습됩니다">✔ 일괄 정상</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riOpenSamples()">🖼 판별 예시</button>`:''}
     ${isAdmin?`<button class="btn" onclick="riRunSweep()">↻ 과거분 검수</button>`:''}
@@ -6195,7 +6195,13 @@ function _riCardActions(r,i){
 function riMoreMenu(i){
   const r=(STATE.ri||[])[i]; if(!r) return;
   const act=_riCardActions(r,i); if(!act) return;
-  const items=[{h:`riOpenDetail(${i})`,t:'👁 상세 보기'},...act.more];
+  // ★★ [♻ 이 작업 재검수]는 **어느 카드에서든** 닿아야 한다 — 종전엔 상단 버튼이
+  //   "작업(탭)을 고른 뒤"에만 뜨고, 카드 안내 버튼은 "리뷰타입 미설정"일 때만 떠서
+  //   정작 필요한 순간에 어디에도 안 보였다(사용자 신고 2026-08-06).
+  //   ★ 권한은 서버 게이트(adminOrMaster)와 1:1 — 눌러도 안 되는 항목은 넣지 않는다.
+  const _riAdmin = STATE.role==='master' || STATE.role==='admin';
+  const items=[{h:`riOpenDetail(${i})`,t:'👁 상세 보기'},...act.more,
+    ...(_riAdmin?[{h:`riReinspectTab(${i})`,t:'♻ 이 작업 재검수'}]:[])];
   let p=document.getElementById('riMorePop');
   if(!p){ p=document.createElement('div'); p.id='riMorePop'; document.body.appendChild(p); }
   p.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center';
