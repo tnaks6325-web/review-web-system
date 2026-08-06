@@ -230,7 +230,8 @@ function seqPool(handlers) {
       '★ 상태 전환 시 유형 필터 초기화');
     assert.ok(/riRouteManual\(\$\{i\},'receipt'\)/.test(wd) && /riRouteManual\(\$\{i\},'order_capture'\)/.test(wd),
       '카드 이동 버튼 — onclick 은 인덱스만(문자열 보간 금지)');
-    assert.ok(/\[↩ 원위치\]로 되돌릴 수 있습니다/.test(wd), '확인창이 되돌리기 경로를 알려준다');
+    // ⚠ 시스템 confirm → 전용 팝업(_rcPopup) 전환으로 문구 형태가 바뀌었다 — 검사 의미 불변.
+    assert.ok(/\[원위치\]로 언제든 되돌릴 수 있습니다/.test(wd), '확인창이 되돌리기 경로를 알려준다');
     assert.ok(/res\.promote && confirm/.test(wd) && /mode:'add'/.test(wd),
       '이동 후 승격 제안 — 사람이 confirm 해야 등록(조용한 자동 등록 금지)');
     assert.ok(/기존 예시는 지워지지 않고 추가/.test(wd), '승격 팝업이 누적임을 말한다');
