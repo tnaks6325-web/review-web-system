@@ -863,6 +863,11 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
   - **범위 밖(다음 red-blue-judge 단계)**: 위험군(소유권키 필드·manual append/clear)의 **실제 시트 적용** — 시뮬레이션엔 뜨지만 apply 제외. import행 이름/수취인/phone8·manual은 B 내부 오버레이 유지. 잔여(비파괴): revert 후 시트의 'O'는 안 지워짐(blank-only), `is_paid`는 `deposit_mark`와 상태칸 공유(blank-only라 무클로버, 극보수 시 `is_submitted`만 먼저).
 - **활성화/전환 순서**: 머지→Railway 배포(마이그레이션 자동, 플래그 OFF=무영향) → master가 탭별 "그림자 투영"(또는 `TRACK_B_PROJECTION=1`)으로 B 채움 → parity real 0 + 준비도 충족 관측(권고 2주) → 작업별 `source_of_truth` 플립(부품6, cutover)로 그 탭만 Track B 원본화(현재 P1=스위치·게이트만, 실쓰기 반영은 P2 엔진) → 안정 후 시트 폐기. 소유 매핑은 소유지정 UI로 하나씩 입력.
 
+## 디자인 스킬 2종 (.claude/skills — 필요할 때 꺼내 쓰는 도구, 2026-08-06 설치)
+- **`impeccable`**(Apache 2.0, v4.0.4 공식 빌드): 새 웹사이트·새 화면·전면 리디자인·디자인 크리틱/오딧용(인트라넷·업무 도구 포함). 훅·자동 검출기는 미설치 — 스킬을 쓸 때만 동작. `/impeccable` 명시 호출 가능.
+- **`design-taste-frontend`**(MIT, tasteskill): 새 홍보/랜딩·포트폴리오·소비자용 페이지 신규 제작·리디자인용(React/Next.js+Tailwind 새 프로젝트에서 진가).
+- ★★ **트리거 경계(두 스킬 공통, description 에 새겨져 있음)**: 기존 리뷰웹시스템(workdesk/admin) 화면의 기능 수정·버그 수정·소규모 UI 조정에는 쓰지 않는다 — 이 CLAUDE.md 의 규율(단일 출처·회귀가드·기존 idiom·시안 문서의 오프라인·외부 리소스 0)이 우선한다. 수정은 각 SKILL.md 의 frontmatter description 뿐(본문 원본 무수정 — 설치 메모 주석 참조).
+
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.
