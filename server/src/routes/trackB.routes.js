@@ -1199,7 +1199,10 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
     let notify = null;
     const rejectMessage = String((req.body || {}).rejectMessage || '').trim();
     if (resolution === 'bad' && rejectMessage) {
-      notify = await _inspectSvc.notifyInspectionReject({ fileId, message: rejectMessage, by });
+      notify = await _inspectSvc.notifyInspectionReject({
+        fileId, message: rejectMessage, by,
+        card: (req.body || {}).card || { kind: 'reject' },   // 반려된 사진을 함께 보여준다
+      });
     }
     res.json({ ok: true, ...r, notify });
   } catch (err) {
@@ -1221,9 +1224,18 @@ router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (
     const out = await require('../services/fileRoute.service').manualRoute({ fileId, target, by });
     if (!out.ok) return res.status(400).json(out);
     try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    // 이동 안내 — "옮겼다 + 리뷰 캡처가 아직 비어 있다"를 리뷰어가 알아야 다음 행동을 한다.
+    let notify = null;
+    const moveMessage = String((req.body || {}).rejectMessage || '').trim();
+    if (moveMessage) {
+      notify = await _inspectSvc.notifyInspectionReject({
+        fileId, message: moveMessage, by,
+        card: { kind: 'moved', to: target, ...(req.body || {}).card },
+      });
+    }
     let promote = null;
     try { promote = await _routePromoteSuggestion(out); } catch (_) {}
-    res.json({ ...out, promote });
+    res.json({ ...out, promote, notify });
   } catch (err) {
     res.status(500).json({ ok: false, error: '이동에 실패했습니다.' });
   }
@@ -1260,9 +1272,58 @@ router.post('/review-inspect/dedup-manual', authMiddleware, _reInternal, async (
     const out = await require('../services/fileRoute.service').dedupManual({ fileId, by });
     if (!out.ok) return res.status(400).json(out);
     try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'bad' }); } catch (_) {}
-    res.json(out);
+    // 리뷰어 안내 — 문구는 설정(설정 › 리뷰어 안내문구)에서 관리하고 화면이 보내기 전 수정할 수 있다.
+    // ★ 제거는 이미 끝났다 — 전송 실패해도 되돌리지 않고 결과만 알린다(조용한 미전송 금지).
+    let notify = null;
+    const rejectMessage = String((req.body || {}).rejectMessage || '').trim();
+    if (rejectMessage) {
+      notify = await _inspectSvc.notifyInspectionReject({
+        fileId, message: rejectMessage, by,
+        card: { kind: 'duplicate', matchFileId: out.matchFileId || '', ...(req.body || {}).card },
+      });
+    }
+    res.json({ ...out, notify });
   } catch (err) {
     res.status(500).json({ ok: false, error: '중복파일 제거에 실패했습니다.' });
+  }
+});
+
+/* ── 리뷰어 안내문구(유형별) — 설정 화면에서 직접 편집 ─────────────────
+   ★ 문구·유형 목록의 단일 출처는 utils/inspectMessages.js — 화면은 서버가 준 표를 그대로 그린다
+     (프론트에 문구 사본을 두면 "설정에서 고쳤는데 나가는 문장은 그대로"가 된다).
+   ★ 조회는 내부인(팝업 프리필에 필요), 저장은 adminOrMaster(전사 설정). */
+router.get('/settings/inspect-messages', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const IM = require('../utils/inspectMessages');
+    let saved = {};
+    try {
+      const { rows } = await pool.query('SELECT value FROM app_settings WHERE key = $1 LIMIT 1', [IM.SETTING_KEY]);
+      if (rows[0] && rows[0].value) saved = JSON.parse(rows[0].value) || {};
+    } catch (_) { /* 미설정·파싱 실패 = 기본 문구 */ }
+    res.json({
+      ok: true,
+      kinds: IM.INSPECT_MSG_KINDS.map(k => ({ key: k.key, label: k.label, desc: k.desc, def: k.def })),
+      messages: IM.merge(saved),
+      maxLen: IM.MAX_LEN,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '안내문구를 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/settings/inspect-messages', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const IM = require('../utils/inspectMessages');
+    // ★ 빈 값 = 그 유형만 기본 문구로 되돌리기(빈 메시지가 리뷰어에게 나가지 않는다).
+    const clean = IM.normalize((req.body || {}).messages || {});
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [IM.SETTING_KEY, JSON.stringify(clean)]
+    );
+    res.json({ ok: true, messages: IM.merge(clean) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '저장에 실패했습니다.' });
   }
 });
 

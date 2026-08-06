@@ -578,6 +578,99 @@ async function loadAiSamples() {
 }
 
 /** 예시 업로드 — guide-image Drive+프록시 인프라 재사용(발행방법 이미지와 같은 경로). */
+/* ══ 리뷰어 안내문구(검수 결과) ═════════════════════════════════════
+ * 유형별로 리뷰어에게 나갈 문장을 직접 쓴다. ★ 유형 목록·기본 문구는 **서버가 준 표**를 그대로
+ * 그린다(프론트 사본 금지 — 설정과 실제 전송이 갈리면 "고쳤는데 그대로"가 된다).
+ * ★ 빈칸 저장 = 그 유형만 기본 문구로 되돌리기(빈 메시지가 리뷰어에게 나가지 않는다).
+ */
+var IMSG_EP = '/api/trackb/settings/inspect-messages';
+var _imsgKinds = [];
+
+function _inspectmsgHtml() {
+  return `
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-comment-dots" style="color:#2563A8;margin-right:6px"></i>리뷰어 안내문구 (검수 결과)
+          </span>
+          <button onclick="loadInspectMessages()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
+          리뷰검수에서 <b>[✕ 불량] · [🗑 중복파일 제거] · [이동]</b>을 눌렀을 때 리뷰어의 <b>1:1 문의</b>로 나가는 문장입니다.
+          처리 팝업에 이 문장이 미리 채워지고, <b>보내기 전에 그때그때 고칠 수도</b> 있습니다.
+          <b style="color:#B91C1C">전송 여부는 항상 관리자가 선택</b>합니다.
+        </p>
+        <div style="font-size:.75rem;color:var(--t3);background:#F8FAFC;border:1px solid #E5E7EB;border-radius:9px;padding:9px 12px;margin-bottom:12px;line-height:1.6">
+          쓸 수 있는 치환어 — <code>{reason}</code> 판정 근거 문장 · <code>{work}</code> 작업명 · <code>{to}</code> 옮긴 칸 이름<br>
+          <span style="color:#9CA3AF">비워두고 저장하면 그 유형만 기본 문구로 돌아갑니다.</span>
+        </div>
+        <div id="asImsgList"><div class="as-smpload">불러오는 중…</div></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+          <button onclick="saveInspectMessages()" style="padding:8px 16px;background:#2563A8;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer">저장</button>
+          <span id="asImsgMsg" style="font-size:.76rem;color:#6B7280"></span>
+        </div>`;
+}
+
+async function loadInspectMessages() {
+  var box = document.getElementById('asImsgList');
+  if (!box) return;
+  try {
+    var r = await fetch(_apiBase() + IMSG_EP, { headers: _headers() });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+    _imsgKinds = j.kinds || [];
+    box.innerHTML = _imsgKinds.map(function (k) {
+      var v = (j.messages || {})[k.key] || '';
+      return '<div style="border:1px solid #E5E7EB;border-radius:10px;padding:11px 13px;margin-bottom:9px;background:#fff">'
+        + '<div style="font-size:.84rem;font-weight:750">' + escHtml(k.label) + '</div>'
+        + '<div style="font-size:.72rem;color:#9CA3AF;margin:1px 0 7px">' + escHtml(k.desc || '') + '</div>'
+        + '<textarea id="asImsg_' + escHtml(k.key) + '" rows="5" style="width:100%;border:1px solid #D1D5DB;border-radius:8px;'
+        + 'padding:8px 10px;font-size:.78rem;font-family:inherit;line-height:1.55;resize:vertical"></textarea>'
+        + '<button onclick="_imsgReset(\'' + escHtml(k.key) + '\')" style="margin-top:5px;padding:3px 9px;background:#F3F4F6;color:#374151;border:none;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer">기본 문구로</button>'
+        + '</div>';
+    }).join('');
+    // ★ 값은 value 로 넣는다(HTML 보간 금지 — 저장된 문장에 무엇이 있든 안전하게)
+    _imsgKinds.forEach(function (k) {
+      var t = document.getElementById('asImsg_' + k.key);
+      if (t) t.value = (j.messages || {})[k.key] || '';
+    });
+    _setNavBadge('inspectmsg', _imsgKinds.length + '종', '');
+  } catch (e) {
+    box.innerHTML = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _imsgReset(key) {
+  var k = _imsgKinds.find(function (x) { return x.key === key; });
+  var t = document.getElementById('asImsg_' + key);
+  if (k && t) t.value = k.def || '';
+}
+
+async function saveInspectMessages() {
+  var msg = document.getElementById('asImsgMsg');
+  var payload = {};
+  _imsgKinds.forEach(function (k) {
+    var t = document.getElementById('asImsg_' + k.key);
+    payload[k.key] = t ? String(t.value || '').trim() : '';
+  });
+  try {
+    var r = await fetch(_apiBase() + IMSG_EP, {
+      method: 'POST', headers: _headers(), body: JSON.stringify({ messages: payload }),
+    });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+    // 저장 결과(빈칸은 기본 문구로 되돌아간 값)를 화면에 반영 — "저장했는데 화면은 빈칸" 방지
+    _imsgKinds.forEach(function (k) {
+      var t = document.getElementById('asImsg_' + k.key);
+      if (t) t.value = (j.messages || {})[k.key] || '';
+    });
+    if (msg) { msg.textContent = '✅ 저장했습니다.'; setTimeout(function () { msg.textContent = ''; }, 2500); }
+    showToast('✅ 안내문구를 저장했습니다.');
+  } catch (e) {
+    if (msg) msg.textContent = '❌ 저장 실패: ' + e.message;
+    showToast('❌ 저장 실패: ' + e.message, true);
+  }
+}
+
 /** 자동분류 정확도 — 사람 수동 분류(정답) vs AI 관측 계획 대조(읽기 전용, 저장 없음).
  *  ★ fail-soft: 통계가 죽어도 예시 등록 화면은 살아야 한다. 구백엔드(404) = 배포 대기 안내. */
 async function _rtLoadStats() {
@@ -2076,14 +2169,15 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
     nickname:  { ic: '👤', nm: '내 닉네임' },
     business:  { ic: '🏢', nm: '제공정보' },
     aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
+    inspectmsg: { ic: '💬', nm: '리뷰어 안내문구' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
     reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
     gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
@@ -2458,6 +2552,9 @@ async function saveGateCriteria() {
   window.clearCashReceiptGuide = clearCashReceiptGuide;
   window.CR_GUIDE_CHANNELS = CR_GUIDE_CHANNELS;
   window.loadAiSamples = loadAiSamples;
+  window.loadInspectMessages = loadInspectMessages;
+  window.saveInspectMessages = saveInspectMessages;
+  window._imsgReset = _imsgReset;
   window.uploadAiSample = uploadAiSample;
   window.clearAiSample = clearAiSample;
   /* ★ onclick 에서 부르는 함수는 window 노출 필수 — 빠지면 클릭이 조용히 ReferenceError */

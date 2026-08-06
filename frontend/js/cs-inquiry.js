@@ -385,6 +385,16 @@ function _csRenderMessages(messages) {
     const imgHtml = imgs.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;max-width:78%;margin-top:${m.content ? '4px' : '0'}">` +
       imgs.map(u => `<img src="${escHtml(u)}" alt="첨부 사진" onclick="csViewImage('${escHtml(u)}')"
         style="width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;cursor:zoom-in;background:#fff">`).join('') + `</div>` : '';
+    // 검수 결과(반려·이동) — 리뷰어에게 나간 문구와 사진을 관리자도 같은 모양으로 본다.
+    if (m.msgType === 'inspect_result' && window.CsReviewEditCard && window.CsReviewEditCard.inspectHtml) {
+      const ts1 = m.createdAt ? new Date(m.createdAt).toLocaleString("ko-KR", { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : "";
+      return `<div style="display:flex;flex-direction:column;align-items:flex-end">
+        <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || '관리자')}</div>
+        <div style="max-width:86%;background:#EFF6FF;border-radius:14px 4px 14px 14px;padding:10px 12px;font-size:.85rem;line-height:1.55;white-space:pre-wrap">${escHtml(m.content || '')}
+          ${window.CsReviewEditCard.inspectHtml(m.meta || {})}</div>
+        <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts1}</div>
+      </div>`;
+    }
     // 리뷰이미지 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
     //   렌더러는 리뷰어 화면·전용 탭과 공용(js/cs-review-edit-card.js) — 사본 금지.
     if (m.msgType === 'review_edit' && window.CsReviewEditCard) {

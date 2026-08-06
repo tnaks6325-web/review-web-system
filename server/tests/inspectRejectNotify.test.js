@@ -134,8 +134,14 @@ const CSB = require('../src/services/csBridge.service');
     assert.ok(/riBadPopup\(\$\{i\}\)/.test(wd) && /riBadPopup\(\$\{idx\},true\)/.test(wd),
       '카드·상세 [✕ 불량] = 전용 팝업(인덱스 전달)');
     assert.ok(/id="riBadSend" checked/.test(wd), '★ 전송 체크 기본 켬');
-    assert.ok(/_riReasons\(r\.checks\|\|\{\}\)/.test(wd) && /검수에서 반려되었습니다/.test(wd),
+    // ⚠ 문구는 설정(설정 › 리뷰어 안내문구)이 진실원본이 됐다 — 프론트는 유형별 틀을 받아
+    //   판정 근거({reason})만 끼운다. 검사 의미 불변: 근거가 프리필되고 사람이 고칠 수 있다.
+    assert.ok(/_riReasons\(r\.checks\|\|\{\}\)/.test(wd)
+      && /_riMsgFor\(_riPrimaryIssue\(r\)\|\|'format_fail'/.test(wd)
+      && /reason: reasons\.length\?reasons\.join/.test(wd),
       '사유 = 판정 근거 프리필(사람이 고쳐 보낸다)');
+    assert.ok(!/const def='제출하신 리뷰 캡처가/.test(wd),
+      '★ 프론트에 문구 사본을 두지 않는다(설정에서 고쳐도 안 바뀌는 사고 차단)');
     assert.ok(/rejectMessage:msg/.test(wd), '전송 페이로드 배선');
     assert.ok(/반려 안내 전송 실패/.test(wd) && /res\.notify \|\| !res\.notify\.sent/.test(wd),
       '★ 전송 실패는 반드시 화면이 말한다(확인 완료와 구분)');

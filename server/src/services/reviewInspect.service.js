@@ -1278,7 +1278,7 @@ async function resolveInspection({ fileId, by, resolution } = {}) {
  *   관리자가 알게 한다(조용한 미전송 금지). 절대 throw 하지 않는다.
  * ★ 연락처는 review_index.phone8(시트 현재값 = 그 행 소유자의 최종 진실 — 소유권 규율)만 쓴다.
  */
-async function notifyInspectionReject({ fileId, message, by } = {}) {
+async function notifyInspectionReject({ fileId, message, by, card } = {}) {
   const msg = String(message || '').trim();
   if (!fileId || !msg) return { sent: false, error: '전송할 사유가 없습니다.' };
   try {
@@ -1297,6 +1297,9 @@ async function notifyInspectionReject({ fileId, message, by } = {}) {
     const out = await require('./csBridge.service').postInspectionReject({
       sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
       reviewerName: r.reviewer_name, phone8: r.phone8, message: msg, by,
+      // ★ 사진 카드 재료 — "어떤 작업의 어떤 사진인지"를 채팅에서 바로 보게 한다.
+      //   ★ 리뷰어에게 나가는 값이라 **관리자 실명·시트 제목은 담지 않는다**(meta 는 응답에 그대로 실린다).
+      card: card ? { fileId, ...card, work: r.tab_name || '' } : null,
     });
     if (!out) return { sent: false, error: '메시지 전송에 실패했습니다 — 1:1 문의로 직접 안내해 주세요.' };
     return { sent: true, threadId: out.threadId };
