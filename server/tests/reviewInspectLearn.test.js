@@ -152,13 +152,16 @@ function stubPool(handlers) {
     const ri = read('src/services/reviewInspect.service.js');
     assert.ok(ri.includes('i.resolution, i.inspected_at'), '목록 SELECT 에 resolution');
     const tb = read('src/routes/trackB.routes.js');
-    assert.ok(tb.includes("resolution: String((req.body || {}).resolution || '')"), 'resolve 라우트가 resolution 전달');
+    // ⚠ 반려 통지 도입으로 배선 형태가 바뀌었다(const 분리) — 검사 의미 불변: resolution 이 서비스까지 간다.
+    assert.ok(tb.includes("const resolution = String((req.body || {}).resolution || '')")
+      && tb.includes('resolveInspection({ fileId, by, resolution })'), 'resolve 라우트가 resolution 전달');
     assert.ok(/'\/review-inspect\/resolve-bulk', authMiddleware, adminOrMasterMiddleware/.test(tb),
       '일괄 = adminOrMaster(건별은 종전대로 staff 담당 탭)');
     ok('D2: 라우트 배선 + 일괄 권한 경계');
 
     const wd = readFront('workdesk.html');
-    assert.ok(wd.includes("riResolve('${esc(r.file_id)}','ok')") && wd.includes("riResolve('${esc(r.file_id)}','bad')"),
+    // ⚠ 불량은 전용 팝업(riBadPopup — 반려 사유 전송)으로 배선이 바뀌었다 — 검사 의미 불변: 2분화 생존.
+    assert.ok(wd.includes("riResolve('${esc(r.file_id)}','ok')") && wd.includes('riBadPopup(${i})'),
       '카드 [✓ 정상]/[✕ 불량] 2분화');
     assert.ok(wd.includes('riResolveAllTab') && wd.includes('/review-inspect/resolve-bulk'), '[✔ 일괄 정상] 배선');
     assert.ok(wd.includes('riPromoteSample') && wd.includes("API_BASE+'/api/drive/image/'+st.fileId"),

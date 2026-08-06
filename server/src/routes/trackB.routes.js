@@ -1121,11 +1121,17 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
     const g = await _riCanTouch(req, fileId);
     if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     // resolution: 'ok'(정상 = AI 오탐 — 학습 신호) | 'bad'(불량 맞음) | 미지정(옛 화면 호환)
-    const r = await _inspectSvc.resolveInspection({
-      fileId, by: (req.admin && req.admin.name) || '',
-      resolution: String((req.body || {}).resolution || ''),
-    });
-    res.json({ ok: true, ...r });
+    const by = (req.admin && req.admin.name) || '';
+    const resolution = String((req.body || {}).resolution || '');
+    const r = await _inspectSvc.resolveInspection({ fileId, by, resolution });
+    // 불량 확인 + 사유가 오면 리뷰어 1:1 문의 채팅에 반려 안내 자동 전송(실패해도 확인은 유지 —
+    // 결과를 notify 로 실어 화면이 "전송 실패"를 말하게 한다. 조용한 미전송 금지).
+    let notify = null;
+    const rejectMessage = String((req.body || {}).rejectMessage || '').trim();
+    if (resolution === 'bad' && rejectMessage) {
+      notify = await _inspectSvc.notifyInspectionReject({ fileId, message: rejectMessage, by });
+    }
+    res.json({ ok: true, ...r, notify });
   } catch (err) {
     res.status(500).json({ ok: false, error: '확인 처리에 실패했습니다.' });
   }

@@ -5395,7 +5395,7 @@ function _riRenderBody(){
         <button class="btn" onclick="riOpenDetail(${i})">상세</button>
         ${r.status==='resolved'
           ? (r.resolution?`<span class="rimeta">${r.resolution==='ok'?'✓ 정상(오탐)':'✕ 불량 맞음'}</span>`:'')
-          : `<button class="btn" style="border-color:#86EFAC;color:#15803D" title="AI 판정이 틀렸고 정상 제출입니다 — 상품명 의심 건은 캡처 표기를 인정 상품명으로 학습합니다" onclick="riResolve('${esc(r.file_id)}','ok')">✓ 정상</button><button class="btn" style="border-color:#FCA5A5;color:#B91C1C" title="실제 불량이 맞습니다 — 판정 근거가 학습 통계에 남습니다" onclick="riResolve('${esc(r.file_id)}','bad')">✕ 불량</button>`}
+          : `<button class="btn" style="border-color:#86EFAC;color:#15803D" title="AI 판정이 틀렸고 정상 제출입니다 — 상품명 의심 건은 캡처 표기를 인정 상품명으로 학습합니다" onclick="riResolve('${esc(r.file_id)}','ok')">✓ 정상</button><button class="btn" style="border-color:#FCA5A5;color:#B91C1C" title="실제 불량이 맞습니다 — 반려 사유를 리뷰어 1:1 문의로 전송할 수 있습니다" onclick="riBadPopup(${i})">✕ 불량</button>`}
       </div>
       ${routeBtns?`<div class="rift" style="margin-top:2px">${routeBtns}</div>`:''}
     </div>`;
@@ -5491,7 +5491,7 @@ function riOpenDetail(i){
       ${r.status==='resolved'
         ? `<span class="rimeta">확인 처리된 건입니다.${r.resolution?` (${r.resolution==='ok'?'정상(오탐)':'불량 맞음'})`:''}</span>`
         : `<button class="btn pri" onclick="riResolve('${esc(r.file_id)}','ok',true)" title="AI 오탐 — 정상 제출로 종결(상품명 의심 건은 인정 표기로 학습)">✓ 정상(오탐) 처리</button>
-           <button class="btn" style="border-color:#FCA5A5;color:#B91C1C" onclick="riResolve('${esc(r.file_id)}','bad',true)">✕ 불량 맞음</button>`}
+           <button class="btn" style="border-color:#FCA5A5;color:#B91C1C" onclick="riBadPopup(${idx},true)">✕ 불량 맞음</button>`}
     </div></div>`;
   let m=$('#riModal'); if(!m){ m=document.createElement('div'); m.id='riModal'; m.className='rimodal'; document.body.appendChild(m); }
   // ★ #riModal 은 [판별 예시] 모달과 **같은 요소를 재사용**한다 — 방향키를 어느 쪽에서 가로챌지
@@ -5527,6 +5527,56 @@ async function riResolve(fileId, resolution, close){
   const r=await api('/api/trackb/review-inspect/resolve',{method:'POST',body:JSON.stringify({fileId, resolution: resolution||''})});
   if(!r||!r.ok){ alert('확인 처리 실패: '+((r&&r.error)||'')); return; }
   if(close) riCloseDetail();
+  _loadInspect();
+}
+/* [✕ 불량] 전용 팝업 — 반려 사유를 확인·수정해 리뷰어 1:1 문의로 자동 전송한다(기본 켬).
+   시스템 confirm() 대신 화면 중앙 전용 UI(design-inspect-confirm-popup.html 시안).
+   사유는 판정 근거(_riReasons — 카드 문장과 같은 분기)로 프리필하고 사람이 고쳐 보낸다. */
+function riBadPopup(i, fromDetail){
+  const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
+  const reasons=_riReasons(r.checks||{});
+  const def='제출하신 리뷰 캡처가 검수에서 반려되었습니다.\n\n사유: '+(reasons.length?reasons.join(' / '):'검수 기준 미충족')
+    +'\n\n올바른 캡처로 다시 제출해 주세요. 궁금한 점은 이 채팅으로 답장 주시면 됩니다.';
+  STATE._riBad={i, fromDetail:!!fromDetail};
+  let p=document.getElementById('riBadPop');
+  if(!p){ p=document.createElement('div'); p.id='riBadPop'; document.body.appendChild(p); }
+  p.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
+  p.innerHTML=`<div style="background:#fff;color:#1e293b;border-radius:16px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 64px rgba(15,23,42,.35)">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 20px 0">
+      <div style="width:40px;height:40px;border-radius:12px;background:#FEF2F2;display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex:none">✕</div>
+      <div><div style="font-size:1rem;font-weight:800">불량으로 확인할까요?</div>
+        <div style="font-size:.74rem;color:#64748B;margin-top:1px">검수 건을 종결하고, 반려 사유를 리뷰어에게 안내할 수 있습니다</div></div>
+    </div>
+    <div style="padding:14px 20px 0">
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:9px 13px;font-size:.82rem;margin-bottom:12px">
+        <b style="font-size:.86rem">${esc(r.reviewer_name||'이름없음')}</b>${r.row_index?' · '+r.row_index+'행':''} <span style="color:#2563EB;font-size:.75rem">— ${esc(r.tab_name||'')}</span></div>
+      <label style="display:flex;gap:7px;align-items:center;font-size:.82rem;font-weight:700;margin-bottom:6px;cursor:pointer">
+        <input type="checkbox" id="riBadSend" checked onchange="document.getElementById('riBadMsgWrap').style.opacity=this.checked?'1':'.4';document.getElementById('riBadMsg').disabled=!this.checked">
+        리뷰어에게 1:1 문의로 반려 안내 전송</label>
+      <div id="riBadMsgWrap">
+        <textarea id="riBadMsg" rows="7" style="width:100%;border:1px solid #CBD5E1;border-radius:10px;padding:9px 11px;font-size:.8rem;font-family:inherit;line-height:1.5;resize:vertical"></textarea>
+        <div style="font-size:.72rem;color:#94A3B8;margin-top:3px">사유는 AI 판정 근거로 미리 채워져 있습니다 — 보내기 전에 자유롭게 고치세요. 리뷰어 화면에는 관리자 닉네임으로 표시됩니다.</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px 18px">
+      <button class="btn" onclick="document.getElementById('riBadPop').remove()">취소</button>
+      <button class="btn" style="background:#DC2626;border-color:#DC2626;color:#fff;font-weight:700" onclick="riBadSubmit()">✕ 불량 처리</button>
+    </div></div>`;
+  document.getElementById('riBadMsg').value=def;
+}
+async function riBadSubmit(){
+  const st=STATE._riBad; const r=st&&(STATE.ri||[])[st.i]; if(!r) return;
+  const send=document.getElementById('riBadSend').checked;
+  const msg=send?String(document.getElementById('riBadMsg').value||'').trim():'';
+  if(send && !msg){ alert('전송할 사유를 입력하거나, 전송 체크를 해제해 주세요.'); return; }
+  const res=await api('/api/trackb/review-inspect/resolve',{method:'POST',
+    body:JSON.stringify({fileId:r.file_id, resolution:'bad', rejectMessage:msg})});
+  const p=document.getElementById('riBadPop'); if(p) p.remove();
+  if(!res||!res.ok){ alert('불량 처리 실패: '+((res&&res.error)||'')); return; }
+  // ★ 조용한 미전송 금지 — 전송을 켰는데 실패했으면 반드시 말한다(확인 자체는 완료됨).
+  if(send && (!res.notify || !res.notify.sent))
+    alert('불량으로 확인했습니다.\n⚠ 반려 안내 전송 실패: '+((res.notify&&res.notify.error)||'알 수 없는 오류'));
+  if(st.fromDetail) riCloseDetail();
   _loadInspect();
 }
 /* 일괄 정상 처리 — 그 작업의 미확인 의심·불량 전부를 [정상(오탐)]으로 종결(대량 백로그용).
