@@ -1,0 +1,1247 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 업체관리 화면 리디자인 (2종)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   업체관리(리뷰웹시스템[3버전] · Track B 소유·정산) 화면 리디자인 시안 문서.
+   - 외부 리소스 0 (오프라인 열람 가능) · 아이콘은 이 파일 안에 그린 SVG.
+   - color-scheme:light 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다.
+   - 목업은 가짜 데이터로 실제 동작한다(검색·필터·열 접기·패널 열기).
+   - ?v=A 또는 ?v=B 를 붙이면 그 시안만 단독으로 본다(이미지 추출용).
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#5d6b7f;--faint:#8b95a6;
+  --line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#15803d;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#c92a2e;--bad-soft:#fdf0f0;
+  --adv:#5f4bbd;--adv-soft:#efecfa;--adv-line:#ddd6f6;
+  --hl:#fff3b0;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --sh1:0 1px 2px rgba(16,24,40,.05);
+  --sh2:0 2px 10px rgba(16,24,40,.06);
+  --sh3:0 10px 34px rgba(16,24,40,.13);
+}
+*{box-sizing:border-box}
+html{scrollbar-color:var(--line2) transparent}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;caret-color:var(--accent)}
+::selection{background:#dbe6ff;color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:#b4c0ce;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
+svg{display:block}
+.i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i.sm{width:13px;height:13px}
+.i.lg{width:17px;height:17px}
+
+/* ── 문서 골격 ── */
+.page{max-width:1480px;margin:0 auto;padding:30px 20px 110px}
+h1{font-size:23px;font-weight:800;letter-spacing:-.025em;margin:0 0 8px}
+.lead{color:var(--muted);font-size:13.5px;margin:0 0 8px;max-width:900px}
+.lead b{color:var(--ink)}
+.meta{font-size:12px;color:var(--faint);margin:0 0 26px}
+.sec{margin-top:44px}
+.sec>h2{font-size:16px;font-weight:800;letter-spacing:-.02em;margin:0 0 4px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sec>h2 .tag{font-size:10px;font-weight:800;letter-spacing:.04em;padding:2px 8px;border-radius:999px;
+  color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line)}
+.sec>.sub{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:900px}
+.note{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 17px;font-size:13px;color:var(--muted);box-shadow:var(--sh1)}
+.note+.note{margin-top:10px}
+.note b{color:var(--ink)}
+.note>.nt{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.note ul{margin:7px 0 0;padding-left:19px}.note li{margin-bottom:6px}.note li:last-child{margin-bottom:0}
+.note.warm{background:var(--warn-soft);border-color:#f0e0c4;color:#7a4c0d}
+.note.warm b,.note.warm .nt{color:#5f3a06}
+.note.cool{background:var(--accent-soft);border-color:var(--accent-line);color:#274a8f}
+.note.cool b,.note.cool .nt{color:#1a3873}
+
+/* 문제 목록 */
+.probs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-top:14px}
+@media(max-width:900px){.probs{grid-template-columns:1fr}}
+.prob{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:var(--sh1)}
+.prob .pt{font-size:13px;font-weight:800;margin-bottom:5px;display:flex;gap:7px;align-items:center}
+.prob .pd{font-size:12.5px;color:var(--muted)}
+.prob .pd b{color:var(--ink)}
+.prob.pick{border-color:var(--accent-line);background:linear-gradient(180deg,var(--accent-soft),var(--card) 62%)}
+.prob .pick-b{font-size:9.5px;font-weight:800;letter-spacing:.04em;color:var(--accent-deep);background:var(--card);
+  border:1px solid var(--accent-line);border-radius:999px;padding:1px 7px;margin-left:auto}
+
+/* 비교표 / 대조표 */
+table.t{width:100%;max-width:1240px;border-collapse:separate;border-spacing:0;font-size:12.5px;background:var(--card);
+  border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:var(--sh1)}
+table.t th,table.t td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+table.t thead th{font-size:10.5px;font-weight:800;letter-spacing:.04em;color:var(--muted);background:var(--card2);white-space:nowrap}
+table.t tbody tr:last-child td{border-bottom:0}
+table.t td b{font-weight:700}
+table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
+table.t .a{background:#fbfcff}
+.tscroll{overflow-x:auto}
+.ok-m{color:var(--safe);font-weight:700}
+.no-m{color:var(--bad);font-weight:700}
+.dim-m{color:var(--faint)}
+
+/* 목업 프레임 */
+.mockcap{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);
+  margin:22px 0 9px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.mockcap .live{font-size:9.5px;letter-spacing:.03em;color:var(--safe);background:var(--safe-soft);
+  border:1px solid #cfe9d8;border-radius:999px;padding:2px 8px;text-transform:none}
+.shell{border:1px solid var(--line2);border-radius:16px;background:var(--card);box-shadow:var(--sh2);overflow:hidden}
+.shell .bar{display:flex;align-items:center;gap:7px;padding:8px 13px;background:var(--card2);border-bottom:1px solid var(--line)}
+.shell .bar .dots{display:flex;gap:5px}
+.shell .bar .dots i{width:9px;height:9px;border-radius:50%;background:var(--line2);display:block}
+.shell .bar .fw{font-size:10px;font-weight:700;color:var(--faint);white-space:nowrap}
+.shell .bar .url{flex:1;font-size:10.5px;color:var(--faint);background:var(--card);border:1px solid var(--line);
+  border-radius:7px;padding:3px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scroller{overflow-x:auto;background:var(--paper)}
+
+/* ══ 목업 내부 (vm-) ══ */
+/* 목업 폭 = 실제 앱(FHD 상한 1920 · 사이드바 제외)에 가깝게. ★ 좁히면 작업명·금액이 잘려
+   "찾을 수 있게 한다"는 이 시안의 목적이 무너진다(실측으로 잡음). */
+.vm{width:1420px;font-size:13px;background:var(--paper)}
+/* 앱 상단 */
+.vm-top{display:flex;align-items:center;gap:8px;background:var(--card);border-bottom:1px solid var(--line);padding:8px 14px}
+.vm-logo{font-size:13px;font-weight:800;letter-spacing:-.02em}
+.vm-tag{font-size:9px;font-weight:800;letter-spacing:.05em;color:var(--adv);background:var(--adv-soft);
+  border:1px solid var(--adv-line);border-radius:999px;padding:2px 7px}
+.vm-nav{display:flex;gap:2px;margin-left:8px;flex:1;overflow:hidden}
+.vm-nav span{font-size:11.5px;font-weight:650;color:var(--muted);padding:4px 8px;border-radius:8px;white-space:nowrap}
+.vm-nav span.on{background:var(--adv-soft);color:var(--adv);font-weight:750}
+.vm-me{font-size:11px;font-weight:700;color:var(--muted);background:var(--card2);border:1px solid var(--line);
+  border-radius:999px;padding:3px 10px;white-space:nowrap}
+
+/* 공통 컨트롤 */
+.vm button,.vm input,.vm select{font:inherit;color:inherit}
+.b{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;height:28px;padding:0 10px;
+  border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;
+  transition:background .15s var(--ease),border-color .15s,box-shadow .15s;white-space:nowrap}
+.b:hover{background:var(--card2);border-color:#bcc7d5}
+.b:active{transform:translateY(.5px)}
+.b.pri{background:var(--accent);border-color:var(--accent-deep);color:#fff;box-shadow:0 1px 2px rgba(37,99,235,.28)}
+.b.pri:hover{background:var(--accent-deep)}
+.b.qt{border-color:transparent;background:transparent;color:var(--muted)}
+.b.qt:hover{background:var(--card2);color:var(--ink)}
+.b.dgr{color:var(--bad);border-color:#f0cdcd}
+.b.dgr:hover{background:var(--bad-soft)}
+.b[disabled]{opacity:.45;cursor:not-allowed;background:var(--card2);border-color:var(--line);box-shadow:none}
+.b.xs{height:24px;padding:0 8px;font-size:11px;border-radius:7px}
+.fld{height:30px;border:1px solid var(--line2);border-radius:8px;background:var(--card);padding:0 10px;font-size:12px;
+  transition:border-color .15s,box-shadow .15s}
+.fld:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.fld::placeholder{color:var(--faint)}
+select.fld{padding-right:24px;appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 13px) 13px,calc(100% - 9px) 13px;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;transition:border-color .15s,background .15s}
+.chip:hover{border-color:var(--accent-line);background:#fbfcff}
+.chip.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.chip .n{font-weight:800;font-variant-numeric:tabular-nums}
+.chip.alert{color:var(--warn);border-color:#eddcc0;background:var(--warn-soft)}
+.chip.alert.on{background:#fbeed6;border-color:#e2c795;color:#7a4c0d}
+.bdg{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;border-radius:999px;padding:2px 7px;
+  border:1px solid var(--line);background:var(--card2);color:var(--muted);white-space:nowrap}
+.bdg.g{color:var(--safe);background:var(--safe-soft);border-color:#cfe9d8}
+.bdg.w{color:var(--warn);background:var(--warn-soft);border-color:#eddcc0}
+.bdg.r{color:var(--bad);background:var(--bad-soft);border-color:#f0cdcd}
+.bdg.b{color:var(--accent-deep);background:var(--accent-soft);border-color:var(--accent-line)}
+.bdg.v{color:var(--adv);background:var(--adv-soft);border-color:var(--adv-line)}
+mark{background:var(--hl);color:inherit;border-radius:2px;padding:0 1px}
+.sw{width:34px;height:19px;border-radius:999px;border:1px solid var(--line2);background:var(--card2);position:relative;
+  cursor:pointer;flex:none;transition:background .18s var(--ease),border-color .18s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;
+  box-shadow:var(--sh1);transition:transform .18s var(--ease)}
+.sw[aria-checked="true"]{background:var(--accent);border-color:var(--accent-deep)}
+.sw[aria-checked="true"]::after{transform:translateX(15px)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--line2);flex:none;display:inline-block}
+.dot.run{background:var(--accent)}.dot.done{background:var(--safe)}.dot.hold{background:var(--warn)}
+.bar{display:block;height:4px;border-radius:99px;background:var(--card2);overflow:hidden;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--accent)}
+.bar i.p2{background:var(--safe)}
+.sk{display:inline-block;height:9px;width:38px;border-radius:99px;
+  background:linear-gradient(90deg,var(--card2) 25%,#e8edf3 37%,var(--card2) 63%);background-size:400% 100%;
+  animation:skm 1.4s linear infinite}
+@keyframes skm{0%{background-position:100% 0}100%{background-position:0 0}}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}}
+
+/* 본문 2단 */
+.vm-body{display:flex;align-items:stretch;min-height:610px;position:relative}
+.vm-side{width:214px;flex:none;border-right:1px solid var(--line);background:var(--card);display:flex;flex-direction:column}
+.vm-side .sh{padding:11px 11px 8px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
+.vm-side .shrow{display:flex;align-items:center;gap:6px}
+.vm-side .shrow .ttl{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);flex:1}
+.vm-srch{display:flex;align-items:center;gap:6px;height:29px;border:1px solid var(--line2);border-radius:8px;
+  background:var(--card);padding:0 8px;transition:border-color .15s,box-shadow .15s}
+.vm-srch:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.vm-srch .i{color:var(--faint)}
+.vm-srch input{border:0;background:transparent;outline:0;flex:1;min-width:0;font-size:12px}
+.vm-srch input::placeholder{color:var(--faint)}
+.vm-list{flex:1;overflow:auto;padding:7px}
+.vm-adv{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:9px;cursor:pointer;
+  border:1px solid transparent;margin-bottom:2px;transition:background .13s}
+.vm-adv:hover{background:var(--card2)}
+.vm-adv.on{background:var(--adv-soft);border-color:var(--adv-line)}
+.vm-adv .av{width:25px;height:25px;border-radius:8px;background:var(--card2);color:var(--muted);display:grid;
+  place-items:center;font-weight:800;font-size:11px;flex:none}
+.vm-adv.on .av{background:var(--card);color:var(--adv)}
+.vm-adv .nm{flex:1;min-width:0}
+.vm-adv .nm b{display:block;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-adv .nm i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-top:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-adv .nm i.no{color:var(--warn);font-weight:650}
+.vm-adv .rt{display:flex;align-items:center;gap:5px;flex:none}
+.vm-adv .ct{font-size:10px;font-weight:800;color:var(--muted);background:var(--card2);border-radius:999px;padding:1px 6px}
+.vm-adv.on .ct{background:var(--card);color:var(--adv)}
+.vm-side .foot{border-top:1px solid var(--line);padding:9px 10px;display:flex;flex-direction:column;gap:6px}
+.vm-unmatched{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;color:#7a4c0d;
+  background:var(--warn-soft);border:1px solid #eddcc0;border-radius:9px;padding:7px 9px;cursor:pointer;text-align:left;width:100%}
+.vm-unmatched:hover{background:#fbeed6}
+.vm-unmatched .n{margin-left:auto;font-weight:800}
+
+.vm-main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--paper)}
+
+/* 업체 헤더 */
+.vm-hd{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px 0}
+.vm-hd .r1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.vm-hd .av{width:34px;height:34px;border-radius:10px;background:var(--adv-soft);color:var(--adv);display:grid;
+  place-items:center;font-weight:800;font-size:14px;flex:none}
+.vm-hd h3{margin:0;font-size:16px;font-weight:800;letter-spacing:-.02em}
+.vm-hd .idl{font-size:10.5px;color:var(--faint)}
+.vm-hd .sp{flex:1}
+.vm-hd .aeb{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.vm-hd .aeb b{color:var(--ink)}
+.vm-hd .setl{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:650;color:var(--muted)}
+.vm-hd .r2{display:flex;align-items:center;gap:7px;padding:10px 0 0;flex-wrap:wrap}
+.vm-hd .r2 .lbl{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-right:2px}
+.vm-tabs{display:flex;gap:3px;margin:12px 0 0}
+.vm-tabs span{font-size:12px;font-weight:700;color:var(--muted);padding:7px 11px;border-radius:9px 9px 0 0;cursor:pointer;
+  border:1px solid transparent;border-bottom:0;position:relative;top:1px}
+.vm-tabs span:hover{color:var(--ink);background:var(--card2)}
+.vm-tabs span.on{color:var(--accent-deep);background:var(--paper);border-color:var(--line);font-weight:750}
+
+/* 도구줄 */
+.vm-tools{background:var(--card);border-bottom:1px solid var(--line);padding:9px 16px;display:flex;flex-direction:column;gap:8px;
+  position:sticky;top:0;z-index:4}
+.vm-tools .tr{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.vm-tools .big{flex:1;min-width:220px;max-width:420px;height:31px}
+.vm-tools .cnt{font-size:11.5px;color:var(--muted);font-weight:650}
+.vm-tools .cnt b{color:var(--ink);font-weight:800}
+.vm-grp{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:var(--card)}
+.vm-grp button{border:0;background:transparent;font-size:11px;font-weight:700;color:var(--muted);height:26px;padding:0 9px;
+  cursor:pointer;border-right:1px solid var(--line);display:inline-flex;align-items:center;gap:4px}
+.vm-grp button:last-child{border-right:0}
+.vm-grp button:hover{background:var(--card2);color:var(--ink)}
+.vm-grp button.on{background:var(--accent-soft);color:var(--accent-deep)}
+
+/* 표 */
+.vm-tbl{flex:1;overflow:auto;padding:11px 16px 18px}
+.vm-th,.vm-tr{display:grid;gap:8px;align-items:center}
+.vm-th{font-size:9.5px;font-weight:800;letter-spacing:.045em;text-transform:uppercase;color:var(--muted);
+  padding:0 12px 6px;position:sticky;top:0;background:var(--paper);z-index:2}
+.vm-tr{padding:8px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:6px;
+  cursor:pointer;box-shadow:var(--sh1);transition:border-color .15s,box-shadow .15s,transform .15s var(--ease)}
+.vm-tr:hover{border-color:var(--accent-line);box-shadow:0 2px 10px rgba(37,99,235,.09);transform:translateY(-1px)}
+.vm-c{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-c.dim{color:var(--faint)}
+.vm-nm b{font-size:12.5px;font-weight:750;display:flex;align-items:center;gap:6px;min-width:0}
+.vm-nm b span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vm-nm i{display:block;font-style:normal;font-size:10.5px;color:var(--muted);margin-top:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-prog{font-size:11px;font-weight:800;color:var(--muted)}
+.vm-prog .bar{margin-top:3px;width:100%}
+.vm-cnt{font-size:11.5px;font-weight:750;white-space:nowrap}
+.vm-cnt .s{color:var(--accent-deep)}.vm-cnt .p{color:var(--safe)}.vm-cnt .z{color:var(--faint)}
+.vm-money b{font-weight:800}
+.vm-money .pd-ok{color:var(--safe)}.vm-money .pd-part{color:var(--warn)}.vm-money .pd-zero{color:var(--faint)}
+.vm-ctr{font-size:10.5px;font-weight:800;border-radius:7px;padding:3px 7px;border:1px dashed #e0c9a0;color:var(--warn);
+  background:var(--warn-soft);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.vm-ctr:hover{background:#fbeed6}
+.vm-ctr.on{border:1px solid var(--line);border-style:solid;color:var(--muted);background:var(--card2);font-weight:700}
+.vm-memo{font-size:11.5px;color:var(--muted);border-radius:6px;padding:2px 5px;border:1px dashed transparent;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.vm-memo:hover{border-color:var(--line2);background:var(--card2)}
+.vm-memo.empty{color:var(--faint);font-style:italic;opacity:0;transition:opacity .13s}
+.vm-tr:hover .vm-memo.empty{opacity:1}
+.vm-open{font-size:11px;font-weight:750;color:var(--accent-deep);display:inline-flex;align-items:center;gap:3px;opacity:.5;transition:opacity .15s}
+.vm-tr:hover .vm-open{opacity:1}
+.vm-empty{text-align:center;padding:40px 20px;color:var(--muted);font-size:12.5px;background:var(--card);
+  border:1px dashed var(--line2);border-radius:13px}
+.vm-empty b{display:block;font-size:13.5px;color:var(--ink);margin-bottom:5px}
+.vm-more{text-align:center;font-size:11px;color:var(--faint);padding:8px 0 2px}
+
+/* 우측 슬라이드 패널(시안 A) */
+.vm-scrim{position:absolute;inset:0;background:rgba(16,24,40,.28);opacity:0;pointer-events:none;transition:opacity .2s var(--ease);z-index:8}
+.vm-scrim.on{opacity:1;pointer-events:auto}
+.vm-drawer{position:absolute;top:0;right:0;bottom:0;width:392px;background:var(--card);border-left:1px solid var(--line2);
+  box-shadow:var(--sh3);transform:translateX(100%);transition:transform .24s var(--ease);z-index:9;display:flex;flex-direction:column}
+.vm-drawer.on{transform:none}
+.vm-drawer .dh{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.vm-drawer .dh b{font-size:13.5px;font-weight:800;flex:1}
+.vm-drawer .dtabs{display:flex;gap:4px;padding:9px 14px 0}
+.vm-drawer .dtabs .chip{font-size:11px}
+.vm-drawer .dbody{flex:1;overflow:auto;padding:13px 14px 20px}
+.vm-fs{border:1px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:11px;background:var(--card)}
+.vm-fs>.t{font-size:11.5px;font-weight:800;margin:0 0 8px;display:flex;align-items:center;gap:7px}
+.vm-fs>.t .sp{flex:1}
+.vm-fs .hint{font-size:11px;color:var(--muted);margin-top:7px;line-height:1.5}
+.vm-linkrow{display:flex;gap:6px}
+.vm-linkrow input{flex:1;min-width:0;height:29px;border:1px solid var(--line2);border-radius:8px;background:var(--card2);
+  padding:0 9px;font-size:11px;color:var(--muted)}
+.vm-acct{display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:var(--card)}
+.vm-acct .id{font-size:12px;font-weight:750;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.vm-own{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px}
+.vm-own .oi{width:26px;height:26px;border-radius:8px;background:var(--card2);color:var(--muted);display:grid;place-items:center;flex:none}
+.vm-own .oinfo{flex:1;min-width:0}
+.vm-own .oinfo b{display:block;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-own .oinfo i{display:block;font-style:normal;font-size:10.5px;color:var(--muted)}
+.vm-form label{display:block;font-size:11px;font-weight:750;color:var(--muted);margin:9px 0 4px}
+.vm-form label:first-child{margin-top:0}
+.vm-form .fld,.vm-form select{width:100%;height:31px}
+.vm-form .row2{display:flex;gap:6px}
+
+/* 전체 개요(업체 미선택) */
+.vm-ov{padding:16px;max-width:1060px}
+.vm-ov .ovh{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:3px}
+.vm-ov .ovh h3{margin:0;font-size:16.5px;font-weight:800;letter-spacing:-.02em}
+.vm-ov .ovh .s{font-size:12px;color:var(--muted)}
+.vm-ov .lead2{font-size:12.5px;color:var(--muted);margin:0 0 13px}
+.vm-cta{display:flex;align-items:center;gap:11px;background:linear-gradient(100deg,var(--warn-soft),#fffaf2);
+  border:1px solid #eddcc0;border-radius:13px;padding:12px 14px;margin-bottom:13px}
+.vm-cta .ci{width:32px;height:32px;border-radius:10px;background:#fff;border:1px solid #eddcc0;color:var(--warn);
+  display:grid;place-items:center;flex:none}
+.vm-cta .ct{flex:1}
+.vm-cta .ct b{display:block;font-size:13px;font-weight:800;color:#5f3a06}
+.vm-cta .ct span{font-size:11.5px;color:#7a4c0d}
+.vm-ovt{display:grid;grid-template-columns:minmax(160px,1.4fr) 74px 66px 92px 96px 104px 92px;gap:9px;align-items:center}
+.vm-ovt.h{font-size:9.5px;font-weight:800;letter-spacing:.045em;text-transform:uppercase;color:var(--muted);padding:0 12px 6px}
+.vm-ovt.r{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px 12px;margin-bottom:5px;
+  cursor:pointer;box-shadow:var(--sh1);transition:border-color .15s,transform .15s var(--ease)}
+.vm-ovt.r:hover{border-color:var(--adv-line);transform:translateY(-1px)}
+.vm-ovt .an{display:flex;align-items:center;gap:8px;min-width:0}
+.vm-ovt .an .av{width:24px;height:24px;border-radius:7px;background:var(--adv-soft);color:var(--adv);display:grid;
+  place-items:center;font-weight:800;font-size:10.5px;flex:none}
+.vm-ovt .an b{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-num{font-size:12.5px;font-weight:750}
+.vm-num.z{color:var(--faint);font-weight:600}
+.vm-num.warn{color:var(--warn);font-weight:800}
+
+/* ══ 시안 B ══ */
+.vmb-rail{width:72px;flex:none;border-right:1px solid var(--line);background:var(--card);
+  display:flex;flex-direction:column;align-items:center;padding:9px 0;gap:4px;overflow:auto}
+.vmb-rail .rl{font-size:8.5px;font-weight:800;letter-spacing:.05em;color:var(--faint);margin-bottom:2px}
+.vmb-av{width:42px;height:42px;border-radius:11px;background:var(--card2);color:var(--muted);display:grid;place-items:center;
+  font-weight:800;font-size:12px;cursor:pointer;border:1px solid transparent;position:relative;flex:none;
+  transition:background .13s,color .13s}
+.vmb-av:hover{background:#e8edf3;color:var(--ink)}
+.vmb-av.on{background:var(--adv-soft);color:var(--adv);border-color:var(--adv-line)}
+.vmb-av .bd2{position:absolute;top:-2px;right:-2px;min-width:15px;height:15px;border-radius:999px;background:var(--warn);
+  color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center;padding:0 3px;border:1.5px solid var(--card)}
+.vmb-av.all{font-size:10px;letter-spacing:-.02em}
+.vmb-av.all.on{background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent-line)}
+.vmb-av.wb{background:var(--warn-soft);color:var(--warn);border-color:#eddcc0}
+.vmb-av.wb.on{box-shadow:0 0 0 2px #f5e2bf}
+.vmb-hero{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px 10px}
+.vmb-hero .h1r{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+.vmb-hero h3{margin:0;font-size:16.5px;font-weight:800;letter-spacing:-.02em}
+.vmb-hero .sub{font-size:12px;color:var(--muted)}
+.vmb-srch{display:flex;align-items:center;gap:7px;height:36px;border:1px solid var(--line2);border-radius:10px;
+  background:var(--card);padding:0 11px;max-width:520px;transition:border-color .15s,box-shadow .15s}
+.vmb-srch:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.vmb-srch input{border:0;background:transparent;outline:0;flex:1;min-width:0;font-size:13px}
+.vmb-srch .clr{font-size:10.5px;font-weight:700;color:var(--faint);cursor:pointer;white-space:nowrap}
+.vmb-srch .clr:hover{color:var(--bad)}
+.vmb-advbar{display:flex;align-items:center;gap:9px;background:var(--adv-soft);border:1px solid var(--adv-line);
+  border-radius:12px;padding:9px 12px;margin-bottom:10px;flex-wrap:wrap}
+.vmb-advbar .av{width:28px;height:28px;border-radius:9px;background:var(--card);color:var(--adv);display:grid;
+  place-items:center;font-weight:800;font-size:12px;flex:none}
+.vmb-advbar b{font-size:13.5px;font-weight:800}
+.vmb-advbar .mt{font-size:11.5px;color:#4a3d92}
+.vmb-advbar .sp{flex:1}
+.vmb-detail{border-top:1px dashed var(--adv-line);margin-top:9px;padding-top:11px;width:100%;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+@media(max-width:900px){.vmb-detail{grid-template-columns:1fr}}
+.vmb-list{flex:1;overflow:auto;padding:11px 16px 18px}
+.vmb-row{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:10px 13px;margin-bottom:7px;
+  cursor:pointer;box-shadow:var(--sh1);transition:border-color .15s,box-shadow .15s,transform .15s var(--ease)}
+.vmb-row:hover{border-color:var(--accent-line);box-shadow:0 2px 10px rgba(37,99,235,.09);transform:translateY(-1px)}
+.vmb-r1{display:flex;align-items:center;gap:8px;min-width:0}
+.vmb-r1 .t{font-size:13px;font-weight:750;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vmb-r1 .sp{flex:1}
+.vmb-r1 .sheet{font-size:10.5px;color:var(--muted);white-space:nowrap}
+/* ★ 아래 줄은 고정 격자 — flex 로 두면 값이 행마다 다른 x 좌표에 와서 세로로 훑을 수 없다
+   (실측: 24행이 전부 어긋나 스캔 불가). 이 격자 폭을 바꿀 때는 브라우저로 다시 확인할 것. */
+.vmb-r2{display:grid;grid-template-columns:184px 96px 208px 148px minmax(0,1fr);gap:12px;align-items:center;margin-top:9px}
+.vmb-seg{display:flex;align-items:center;gap:7px;min-width:0}
+.vmb-prog .pt{display:flex;justify-content:space-between;font-size:11px;font-weight:750;margin-bottom:3px;gap:6px}
+.vmb-prog .pt .z{color:var(--faint)}
+.vmb-r2 .cell{min-width:0;font-size:11.5px}
+.vmb-r2 .cell.r{text-align:right}
+.vmb-nx{font-size:10.5px;font-weight:700;color:var(--muted);white-space:nowrap}
+.vmb-nx.done{color:var(--safe)}
+.vmb-memo{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* ★ 전역 svg{display:block} 때문에 아이콘이 글줄을 끊어 비고가 두 줄로 내려간다(실측) */
+.vmb-memo svg{display:inline-block;vertical-align:-2px;margin-right:2px}
+.vmb-pipe{display:flex;align-items:center;gap:0}
+.vmb-pipe .st{display:flex;align-items:center;gap:5px}
+.vmb-pipe .pd{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--line2);background:var(--card);flex:none}
+.vmb-pipe .pd.f{background:var(--safe);border-color:var(--safe)}
+.vmb-pipe .pd.w{background:var(--warn);border-color:var(--warn)}
+.vmb-pipe .ln{width:16px;height:1.5px;background:var(--line2)}
+.vmb-pipe .ln.f{background:var(--safe)}
+.vmb-pipe .pl{font-size:9.5px;font-weight:700;color:var(--muted)}
+.vmb-wb{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-bottom:7px;
+  display:grid;grid-template-columns:26px minmax(150px,1.3fr) 1fr 118px;gap:11px;align-items:center;box-shadow:var(--sh1)}
+.vmb-wb .si{width:26px;height:26px;border-radius:8px;background:var(--card2);color:var(--muted);display:grid;place-items:center}
+.vmb-wb .sn b{display:block;font-size:12.5px;font-weight:750}
+.vmb-wb .sn i{display:block;font-style:normal;font-size:10.5px;color:var(--muted)}
+.vmb-wb .inp{display:flex;align-items:center;gap:6px}
+.vmb-wb .inp .fld{flex:1;min-width:0}
+
+/* 하단 캡션 */
+.cap{font-size:11.5px;color:var(--muted);margin:9px 2px 0;display:flex;gap:7px;align-items:flex-start}
+.cap .i{color:var(--faint);margin-top:2px}
+.decide{display:grid;gap:10px;margin-top:14px}
+.dq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 15px;box-shadow:var(--sh1)}
+.dq .qq{font-size:13px;font-weight:800;margin-bottom:7px;display:flex;gap:8px;align-items:flex-start}
+.dq .qq .n{width:19px;height:19px;border-radius:6px;background:var(--accent-soft);color:var(--accent-deep);font-size:10.5px;
+  font-weight:800;display:grid;place-items:center;flex:none;margin-top:1px}
+.dq .opt{font-size:12.5px;color:var(--muted);padding-left:27px;margin-bottom:4px}
+.dq .opt b{color:var(--ink)}
+.dq .rec{padding-left:27px;font-size:12px;color:var(--safe);font-weight:700;margin-top:5px}
+.foot-n{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint)}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.4"/><path d="M10.4 10.4 14 14"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.4v9.2M3.4 8h9.2"/></symbol>
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+<symbol id="i-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-link" viewBox="0 0 16 16"><path d="M6.6 9.4 9.4 6.6"/><path d="M7.6 4.6 8.9 3.3a2.6 2.6 0 0 1 3.7 3.7l-1.3 1.3"/><path d="M8.4 11.4 7.1 12.7a2.6 2.6 0 0 1-3.7-3.7l1.3-1.3"/></symbol>
+<symbol id="i-user" viewBox="0 0 16 16"><circle cx="8" cy="6" r="2.6"/><path d="M3.4 13.2a4.9 4.9 0 0 1 9.2 0"/></symbol>
+<symbol id="i-grid" viewBox="0 0 16 16"><rect x="2.6" y="2.6" width="10.8" height="10.8" rx="1.6"/><path d="M2.6 6.4h10.8M6.4 6.4v7"/></symbol>
+<symbol id="i-out" viewBox="0 0 16 16"><path d="M9.6 3.4h3v3"/><path d="M12.6 3.4 8 8"/><path d="M12 9.6v2.2a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 11.8V5.2A1.2 1.2 0 0 1 4.2 4h2.2"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.6" y="5.6" width="7.8" height="7.8" rx="1.5"/><path d="M10.4 5.6V4.2A1.6 1.6 0 0 0 8.8 2.6H4.2A1.6 1.6 0 0 0 2.6 4.2v4.6a1.6 1.6 0 0 0 1.6 1.6h1.4"/></symbol>
+<symbol id="i-rot" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.8-3.85"/><path d="M13.2 2.6v2.9h-2.9"/></symbol>
+<symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.8 14 13H2z"/><path d="M8 6.6v3M8 11.2h.01"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path d="M3.4 8.6l3 3 6.2-7"/></symbol>
+<symbol id="i-slide" viewBox="0 0 16 16"><path d="M2.6 5h10.8M2.6 11h10.8"/><circle cx="6" cy="5" r="1.7"/><circle cx="10.4" cy="11" r="1.7"/></symbol>
+<symbol id="i-doc" viewBox="0 0 16 16"><path d="M9 2.6H4.6A1.6 1.6 0 0 0 3 4.2v7.6a1.6 1.6 0 0 0 1.6 1.6h6.8a1.6 1.6 0 0 0 1.6-1.6V6.4z"/><path d="M9 2.6v3.8h4"/></symbol>
+<symbol id="i-won" viewBox="0 0 16 16"><path d="M3 4.6l2.2 6.8 2.4-5 2.4 5 2.2-6.8"/><path d="M2.4 7.6h11.2"/></symbol>
+<symbol id="i-tag" viewBox="0 0 16 16"><path d="M8.4 2.6H13v4.6l-6 6-4.6-4.6z"/><circle cx="10.6" cy="5.2" r=".9"/></symbol>
+</defs></svg>
+
+<div class="page">
+
+<h1>업체관리 화면 리디자인 — 시안 2종</h1>
+<p class="lead">리뷰웹시스템[3버전] <b>업체관리</b> 화면을 다시 짠 시안입니다. <b>기능은 하나도 빼지 않았습니다</b> — 거래처 등록, 담당 AE 지정, 정산 노출, 접속 링크(복사·회전·폐기), 광고주 계정(발급·비번·활성·삭제), 소유 캠페인 지정·해제, 연결된 탭 표(계약 매칭·견적서·마감자료·계산서·입금·비고·열기)가 전부 그대로 있습니다. 바뀐 것은 <b>그 기능들을 어디에 두고 어떻게 찾게 하는지</b>입니다.</p>
+<p class="meta">아래 두 목업은 가짜 데이터로 <b>실제 동작</b>합니다 — 검색을 치고, 필터를 누르고, 열을 접고, 패널을 열어보세요. · <code>?v=A</code> / <code>?v=B</code> 로 시안 하나만 볼 수 있습니다.</p>
+
+<!-- ═══════════ 1. 문제 ═══════════ -->
+<div class="sec" id="why">
+<h2>왜 다시 짜는가</h2>
+<p class="sub">현재 화면은 기능이 모자란 게 아니라, <b>같은 화면이 성격이 다른 네 가지 일을 한 번에 담고 있으면서 우선순위가 없습니다.</b> 그래서 매일 하는 일(정산·진척 훑기, 작업 찾아 열기)이 어쩌다 하는 일(거래처 등록, 계정 발급) 뒤에 밀려 있습니다.</p>
+
+<div class="probs">
+  <div class="prob pick"><div class="pt">연결된 탭 316건을 찾을 수 없다<span class="pick-b">지적됨</span></div>
+    <div class="pd">검색창이 없어 <b>스크롤로 눈으로</b> 찾습니다. 브랜드 칩은 40개가 <b>3줄로 넘쳐</b> 필터 구실을 못 하고, 표는 16열 1,522px라 가로로도 밀어야 합니다.</div></div>
+  <div class="prob pick"><div class="pt">기본 화면이 '거래처 추가 폼'<span class="pick-b">지적됨</span></div>
+    <div class="pd">들어가면 <b>빈 입력 폼</b>이 뜨고 오른쪽 절반이 비어 있습니다. 정작 알고 싶은 <b>전체 현황</b>(시트 34개 중 미지정 9개, AE 미지정 업체)은 어디에도 요약되지 않습니다.</div></div>
+  <div class="prob pick"><div class="pt">기능은 맞는데 경험이 떨어진다<span class="pick-b">지적됨</span></div>
+    <div class="pd">한 화면에 <b>설정·목록·표·폼이 세로로 나열</b>돼 있어 매일 보는 표가 가장 아래 있습니다. 상태·금액·날짜가 전부 같은 크기 같은 색이라 <b>무엇이 급한지 표가 말해주지 않습니다.</b></div></div>
+</div>
+
+<div class="note cool" style="margin-top:13px"><div class="nt"><svg class="i"><use href="#i-check"/></svg>이 리디자인이 지키는 선</div>
+<ul>
+<li><b>기능 삭제 0</b> — 지금 있는 버튼·토글·입력은 전부 남습니다(아래 <a href="#keep">기능 보존 대조표</a>에서 하나씩 대조).</li>
+<li><b>업체 중심 구조 유지</b> — 왼쪽에서 업체를 고르는 흐름은 익숙하니 버리지 않습니다(시안 B는 여기에 '전 업체 보기'를 <b>더합니다</b>).</li>
+<li><b>서버 변경 최소</b> — 시안 A는 <b>서버 변경 0</b>으로 만들 수 있습니다(시안 B는 통합 목록 조회 1개가 필요하며, 아래 구현 노트에 적었습니다).</li>
+<li><b>숫자를 꾸미지 않는다</b> — 못 불러온 칸은 <code>?</code>, 아직 오는 중인 칸은 뼈대(스켈레톤)로 둡니다. 0으로 채워 정상처럼 보이게 하지 않습니다.</li>
+</ul></div>
+</div>
+
+<!-- ═══════════ 2. 두 시안 요약 ═══════════ -->
+<div class="sec" id="cmp">
+<h2>두 시안이 갈리는 지점</h2>
+<p class="sub">둘 다 검색·필터·상태 표기를 갖추지만, <b>"화면의 주인이 업체냐 작업이냐"</b>가 다릅니다.</p>
+<div class="tscroll"><table class="t">
+<thead><tr><th style="width:126px"></th><th class="a">시안 A · 업체 작업대</th><th>시안 B · 작업 목록 우선</th></tr></thead>
+<tbody>
+<tr><td class="k">기본 화면</td><td class="a">업체 <b>전체 개요 표</b>(업체별 작업수·미매칭·미입금·링크 상태) — 거래처 추가는 이 화면의 버튼</td><td><b>전 업체 통합 작업 목록</b>(1,204건) — 업체를 안 골라도 일감이 바로 보임</td></tr>
+<tr><td class="k">업체 고르기</td><td class="a">왼쪽 사이드바(<b>검색 가능</b>) — 지금과 같은 자리·같은 흐름</td><td>왼쪽 <b>62px 아바타 레일</b> = 필터. 고르면 범위가 그 업체로 좁혀짐</td></tr>
+<tr><td class="k">작업 목록</td><td class="a"><b>표</b> — 열을 세 묶음(작업·진척·정산)으로 <b>접고 펼침</b>. 기본은 가로 스크롤 없음</td><td><b>2줄 리스트 행</b> — 어느 화면폭에서도 가로 스크롤 0, 정산은 4단 점으로 압축</td></tr>
+<tr><td class="k">접속링크·계정<br>소유 시트</td><td class="a">헤더 버튼 → <b>우측 슬라이드 패널</b>(필요할 때만 열림, 표를 가리지 않음)</td><td>업체 바 [자세히] → <b>그 자리에서 아래로 펼침</b>(패널 없음)</td></tr>
+<tr><td class="k">거래처 등록·시트 매칭</td><td class="a">개요 화면 상단 <b>미지정 9개 배너</b> → 패널에서 등록</td><td><b>미지정 시트 워크벤치</b> — 9개를 줄로 늘어놓고 줄마다 업체명 검색해 즉시 매칭</td></tr>
+<tr><td class="k">잘 맞는 일</td><td class="a">업체 하나를 붙잡고 끝내는 일 — 등록·링크 발급·그 업체 정산 점검</td><td>업체를 넘나드는 일 — <b>미매칭·미입금만 훑어 한 번에 처리</b></td></tr>
+<tr><td class="k">약점</td><td class="a">여전히 <b>업체를 골라야</b> 작업이 보임(전 업체를 한 번에 훑진 못함)</td><td>업체별 설정이 <b>한 줄로 압축</b>돼 링크·계정 작업은 A보다 한 단계 깊음 · 행 밀도 낮음</td></tr>
+<tr><td class="k">서버 변경</td><td class="a"><b>없음</b>(개요 표의 미매칭·미입금 칸만 집계 1개 추가하면 완성도↑)</td><td><b>통합 목록 조회 1개 필요</b></td></tr>
+</tbody></table></div>
+</div>
+
+<!-- ═══════════ 3. 시안 A ═══════════ -->
+<div class="sec" id="secA">
+<h2>시안 A · 업체 작업대 <span class="tag">지금 구조를 지키며 정리</span></h2>
+<p class="sub">왼쪽 업체 목록은 그대로 두고 <b>검색</b>을 붙였습니다. 오른쪽은 위에서 아래로 나열하던 것을 <b>가로 도구줄 + 표</b>로 바꾸고, 설정(접속링크·계정·소유 시트·소유 추가)은 <b>우측 패널로 치웠습니다</b>. 업체를 고르지 않은 상태는 빈 폼이 아니라 <b>전체 개요 표</b>입니다.</p>
+
+<div class="mockcap">목업 A — 업체 선택 상태 <span class="live">실제 동작 · 검색·필터·열 접기·패널</span></div>
+<div class="shell">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
+    <span class="fw">폭 1420px (FHD 기준 · 실제 앱은 최대 1920px로 더 넓습니다)</span></div>
+  <div class="scroller"><div class="vm" id="A" style="position:relative">
+    <div class="vm-top">
+      <span class="vm-logo">리뷰웹시스템[3버전]</span><span class="vm-tag">TRACK B</span>
+      <nav class="vm-nav"><span>홈</span><span>작업오더</span><span>모집공고</span><span>작업보드</span><span>입금관리</span><span>C/S</span><span class="on">업체관리</span><span>리뷰검수</span><span>로그</span><span>설정</span></nav>
+      <span class="vm-me">admin · 김수만</span>
+    </div>
+    <div class="vm-body">
+      <!-- 사이드바 -->
+      <aside class="vm-side">
+        <div class="sh">
+          <div class="shrow"><span class="ttl">업체 · 광고주</span>
+            <button class="b xs" id="aAdd"><svg class="i sm"><use href="#i-plus"/></svg>업체</button></div>
+          <label class="vm-srch"><svg class="i sm"><use href="#i-search"/></svg>
+            <input id="aAdvQ" placeholder="업체명·AE 검색" autocomplete="off"></label>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <span class="chip on" data-af="all">전체 <b class="n">17</b></span>
+            <span class="chip alert" data-af="noae">AE 미지정 <b class="n">1</b></span>
+            <span class="chip alert" data-af="todo">처리필요 <b class="n">4</b></span>
+          </div>
+        </div>
+        <div class="vm-list" id="aAdvs"></div>
+        <div class="foot">
+          <button class="vm-unmatched" id="aUnm"><svg class="i sm"><use href="#i-alert"/></svg>업체 미지정 시트<span class="n">9</span></button>
+        </div>
+      </aside>
+      <!-- 본문 -->
+      <div class="vm-main" id="aMain"></div>
+      <div class="vm-scrim" id="aScrim"></div>
+      <div class="vm-drawer" id="aDrawer"></div>
+    </div>
+  </div></div>
+</div>
+<div class="cap"><svg class="i"><use href="#i-slide"/></svg><span><b>도구줄</b>이 표 위에 고정(sticky)됩니다 — 316건을 아래로 내려도 검색·필터가 따라옵니다. 상태 칩의 숫자는 <b>필터이면서 요약</b>입니다(별도 요약 카드를 만들지 않은 이유).</span></div>
+
+<div class="note" style="margin-top:16px"><div class="nt">무엇이 달라졌나 (A)</div>
+<ul>
+<li><b>작업 검색</b> — 작업명·브랜드·상품·계약번호를 한 칸에서 찾고, 맞은 글자는 노랗게 표시합니다. 사이드바에는 <b>업체 검색</b>이 따로 붙습니다.</li>
+<li><b>브랜드 칩 40개 → 상위 5개 + 드롭다운</b> — 3줄로 넘치던 칩 구름을 자주 쓰는 다섯 개만 남기고 나머지는 선택 목록으로 접었습니다.</li>
+<li><b>열 접기</b> — [작업정보] [진척] [정산상세] 세 묶음. 기본값은 정산상세만 접힌 상태이고 <b>그때는 가로 스크롤이 없습니다.</b> 견적서·마감자료·계산서·입금일 4열은 필요할 때만 펼칩니다.</li>
+<li><b>설정은 우측 패널</b> — 접속 링크·계정·소유 시트·소유 추가가 헤더 버튼 뒤로 갑니다. 링크 버튼 자체가 <b>공개/로그인 상태를 배지로</b> 보여주므로 열지 않아도 상태를 압니다.</li>
+<li><b>업체 미선택 = 전체 개요 표</b> — 업체별 작업수·미매칭·미입금·AE·링크 상태를 한 표로. 행을 누르면 그 업체로 들어갑니다.</li>
+<li><b>미지정 시트 9개</b>가 사이드바 하단에 상시 보입니다(현재는 추가 폼에 들어가야만 보임).</li>
+</ul></div>
+</div>
+
+<!-- ═══════════ 4. 시안 B ═══════════ -->
+<div class="sec" id="secB">
+<h2>시안 B · 작업 목록 우선 <span class="tag">업체는 필터가 된다</span></h2>
+<p class="sub">화면의 주인을 <b>작업</b>으로 바꿉니다. 들어가면 전 업체 작업이 이미 목록으로 있고, 왼쪽 아바타 레일은 <b>범위를 좁히는 필터</b>입니다. 그래서 "계약 미매칭만 모아 처리", "미입금만 훑기"가 <b>업체를 옮겨 다니지 않고</b> 끝납니다.</p>
+
+<div class="mockcap">목업 B — 전 업체 통합 목록 <span class="live">실제 동작 · 검색·필터·레일·펼침·워크벤치</span></div>
+<div class="shell">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
+    <span class="fw">폭 1420px (FHD 기준 · 실제 앱은 최대 1920px로 더 넓습니다)</span></div>
+  <div class="scroller"><div class="vm" id="B">
+    <div class="vm-top">
+      <span class="vm-logo">리뷰웹시스템[3버전]</span><span class="vm-tag">TRACK B</span>
+      <nav class="vm-nav"><span>홈</span><span>작업오더</span><span>모집공고</span><span>작업보드</span><span>입금관리</span><span>C/S</span><span class="on">업체관리</span><span>리뷰검수</span><span>로그</span><span>설정</span></nav>
+      <span class="vm-me">admin · 김수만</span>
+    </div>
+    <div class="vm-body">
+      <aside class="vmb-rail" id="bRail"></aside>
+      <div class="vm-main">
+        <div class="vmb-hero" id="bHero"></div>
+        <div class="vmb-list" id="bList"></div>
+      </div>
+    </div>
+  </div></div>
+</div>
+<div class="cap"><svg class="i"><use href="#i-tag"/></svg><span>아래 줄은 <b>고정 격자</b>라 제출 진척·계약·정산·금액·비고가 행마다 같은 자리에 옵니다(세로로 훑을 수 있음). 정산은 <b>견적 → 마감자료 → 계산서 → 입금</b> 4점으로 압축하고 화면에는 <b>“다음: 계산서”</b> 처럼 할 일만 적습니다 — 날짜는 점에 마우스를 올리면 나오고, 네 날짜를 나란히 비교해야 하면 [표로 보기]로 시안 A의 표를 씁니다.</span></div>
+
+<div class="note" style="margin-top:16px"><div class="nt">무엇이 달라졌나 (B)</div>
+<ul>
+<li><b>업체를 안 골라도 일이 보인다</b> — 첫 화면이 전 업체 작업 목록입니다. "거래처 추가 폼이 기본이라 낭비"가 구조적으로 사라집니다.</li>
+<li><b>가로 스크롤 0</b> — 16열 표를 2줄 행으로 접었습니다. 좁은 화면·노트북에서도 정보가 잘리지 않습니다.</li>
+<li><b>레일 배지</b> — 업체 아바타에 처리필요 건수가 뜹니다(어느 업체를 봐야 하는지 목록을 열기 전에 압니다).</li>
+<li><b>업체 설정은 한 줄</b> — 이름·AE·링크·계정·정산노출이 한 줄 바에 모이고, [자세히]를 누르면 그 자리에서 펼쳐집니다(패널·모달 없음).</li>
+<li><b>미지정 시트 워크벤치</b> — 9개 시트를 줄로 늘어놓고 각 줄에서 거래처명을 검색해 바로 매칭합니다. 폼을 9번 반복하지 않습니다.</li>
+</ul></div>
+</div>
+
+<!-- ═══════════ 5. 기능 보존 대조표 ═══════════ -->
+<div class="sec" id="keep">
+<h2>기능 보존 대조표</h2>
+<p class="sub">지금 화면의 기능이 두 시안에서 <b>어디로 갔는지</b> 하나씩 대조했습니다. 빠진 것은 없습니다.</p>
+<div class="tscroll"><table class="t">
+<thead><tr><th style="width:196px">현재 기능</th><th class="a" style="width:270px">시안 A 위치</th><th style="width:270px">시안 B 위치</th><th>비고</th></tr></thead>
+<tbody>
+<tr><td class="k">업체 목록·선택</td><td class="a">왼쪽 사이드바 <b>+ 검색·필터 칩</b></td><td>왼쪽 아바타 레일 <b>+ 상단 범위 스위치</b></td><td>A는 이름까지 보임 / B는 공간 절약</td></tr>
+<tr><td class="k">＋ 업체 추가(거래처 등록)</td><td class="a">사이드바 [＋업체] → 우측 패널 폼</td><td>레일 [＋] → 워크벤치 상단 폼</td><td>인트라넷 광고주DB 자동완성·정확일치 게이트 그대로</td></tr>
+<tr><td class="k">업체 삭제</td><td class="a">사이드바 행 hover × (지금과 동일)</td><td>업체 바 [자세히] 안 [업체 삭제]</td><td>확인 다이얼로그 유지</td></tr>
+<tr><td class="k">담당 AE 지정·변경</td><td class="a">업체 헤더 AE 칩 [변경]</td><td>업체 바 AE 칩 [변경]</td><td>AE 부서 자동완성 유지</td></tr>
+<tr><td class="k">정산 노출 토글</td><td class="a">업체 헤더 우측 스위치</td><td>업체 바 우측 스위치</td><td>체크박스 → 스위치로 표기만 변경</td></tr>
+<tr><td class="k">접속 링크(복사·회전·폐기·재활성)</td><td class="a">헤더 [접속링크] → 패널 · <b>버튼에 공개/로그인 배지</b></td><td>업체 바 링크 배지 → [자세히] 펼침</td><td>마지막 접속 시각·경고 문구 유지</td></tr>
+<tr><td class="k">광고주 계정(사용 토글·발급·비번·활성·삭제)</td><td class="a">헤더 [계정] → 패널</td><td>업체 바 계정 배지 → [자세히] 펼침</td><td>마지막 활성계정 잠금 경고 유지</td></tr>
+<tr><td class="k">소유 캠페인 목록·해제</td><td class="a">헤더 [소유 시트] → 패널</td><td>[자세히] 펼침 안 소유 카드</td><td>시트 전체 / 특정 탭 구분 유지</td></tr>
+<tr><td class="k">소유 추가(시트 전체·특정 탭)</td><td class="a">같은 패널 하단 폼</td><td>같은 펼침 하단 폼</td><td>탭 체크칩 그대로</td></tr>
+<tr><td class="k">연결된 탭 목록(316)</td><td class="a">본문 표 <b>+ 검색·상태필터·열접기</b></td><td>2줄 리스트 <b>+ 전 업체 통합 검색</b></td><td>최신순 정렬·클릭하면 작업보드 열기 유지</td></tr>
+<tr><td class="k">브랜드 필터 칩</td><td class="a">상위 5칩 + 드롭다운(전체)</td><td>브랜드 드롭다운</td><td>미분류 항목 포함</td></tr>
+<tr><td class="k">진행 게이지 / 참여·제출·입금</td><td class="a">진행 % + 막대 · 참여·제출·입금 카운트 열</td><td>아래 줄 첫 칸 <b>제출 n/m + %</b> 막대</td><td>원형 게이지 → 가로 막대(줄에서 읽기 쉬움)</td></tr>
+<tr><td class="k">계약 매칭 / 다시 매칭</td><td class="a">[계약] 열 버튼(같은 팝업)</td><td>행 2줄 계약 칩(같은 팝업)</td><td>공용 팝업 그대로 재사용</td></tr>
+<tr><td class="k">견적서·마감자료·계산서·입금일</td><td class="a">[정산상세] 펼치면 4열</td><td>4점 + “다음: ○○” · 날짜는 마우스오버</td><td>미링크 <code>—</code> / 실패 <code>?</code> 표기 유지</td></tr>
+<tr><td class="k">입금액 / 총비용 · 금액 불일치 ⚠</td><td class="a">전용 열(기본 노출)</td><td>행 우측 금액</td><td>완납·부분·0 색 구분 유지</td></tr>
+<tr><td class="k">비고 인라인 편집</td><td class="a">비고 열 클릭 → 입력(빈 칸은 행에 올릴 때만 표시)</td><td>아래 줄 마지막 칸 클릭 → 입력</td><td>Enter 저장·Esc 취소 유지</td></tr>
+<tr><td class="k">잔여(미지정) 시트 안내</td><td class="a">사이드바 하단 상시 + 개요 배너</td><td>레일 하단 + 워크벤치</td><td>전체 34개 중 9개 표기 유지</td></tr>
+</tbody></table></div>
+</div>
+
+<!-- ═══════════ 6. 공통 개선 ═══════════ -->
+<div class="sec" id="common">
+<h2>두 시안에 공통으로 들어간 것</h2>
+<div class="note"><ul>
+<li><b>상태를 색과 굵기로 말한다</b> — 계약 미매칭은 점선 테두리 주황 버튼(할 일처럼 보이게), 완납은 초록, 부분입금은 주황, 미입금 0은 회색. 지금은 전부 같은 검정입니다.</li>
+<li><b>빈 상태가 가르친다</b> — "검색 결과 없음"에서 끝내지 않고 무엇을 지우거나 바꾸면 되는지 알려줍니다.</li>
+<li><b>오는 중 / 못 불러옴 구분</b> — 정산 칸은 도착 전 뼈대(스켈레톤), 인트라넷 연결 실패는 <code>?</code>, 계약 미링크는 <code>—</code>. 세 상태가 눈으로 구분됩니다.</li>
+<li><b>키보드로 쓸 수 있다</b> — 검색창·칩·버튼에 포커스 링(파란 테두리)이 보입니다. 지금은 포커스가 어디 있는지 보이지 않습니다.</li>
+<li><b>숫자는 자릿수 고정(tabular)</b> — 금액·건수가 행마다 흔들리지 않습니다.</li>
+<li><b>아이콘을 그려 씁니다</b> — 검색·링크·계정 같은 조작 아이콘은 이모지 대신 이 파일 안에 그린 SVG입니다(선 굵기·크기가 한 벌로 통일).</li>
+</ul></div>
+</div>
+
+<!-- ═══════════ 7. 정할 것 ═══════════ -->
+<div class="sec" id="decide">
+<h2>정해주셔야 하는 것</h2>
+<div class="decide">
+  <div class="dq"><div class="qq"><span class="n">1</span>두 시안 중 무엇으로 갈까요?</div>
+    <div class="opt"><b>A</b> — 지금 흐름을 지키며 정리. 학습비용 거의 0, 서버 변경 0. 업체를 골라야 작업이 보이는 것은 그대로.</div>
+    <div class="opt"><b>B</b> — 전 업체 작업을 한 번에 훑음. 정산 처리가 빨라지지만 통합 조회 1개 추가가 필요하고 업체별 설정은 한 단계 깊어짐.</div>
+    <div class="opt"><b>A → B 순차</b> — A를 먼저 적용(서버 무변경)하고, 통합 목록이 필요해지면 B의 '전 업체 보기'를 A 위에 탭으로 추가.</div>
+    <div class="rec">권장: <b>A → B 순차</b>. A의 표·검색·필터를 그대로 재사용하므로 B는 '보기 방식 하나 추가'가 됩니다.</div></div>
+
+  <div class="dq"><div class="qq"><span class="n">2</span>표의 기본 열은 무엇까지 보일까요?</div>
+    <div class="opt">시안은 <b>정산상세(견적서·마감자료·계산서·입금일) 접힌 상태</b>를 기본값으로 뒀습니다 — 그때만 가로 스크롤이 없습니다.</div>
+    <div class="opt">정산 담당이 매일 네 날짜를 다 본다면 기본을 <b>펼친 상태</b>로 바꿀 수 있습니다(가로 스크롤 발생).</div>
+    <div class="rec">권장: 접힌 상태 기본 + 마지막 선택을 브라우저에 기억(사람마다 다르게).</div></div>
+
+  <div class="dq"><div class="qq"><span class="n">3</span>'처리필요'를 무엇으로 셀까요?</div>
+    <div class="opt">시안은 <b>계약 미매칭 + 미입금(총비용은 있는데 입금액 부족)</b> 두 가지를 합해 셌습니다.</div>
+    <div class="opt">여기에 <b>마감자료 미생성</b>, <b>AE 미지정</b>을 넣을지 결정이 필요합니다(넣으면 배지 숫자가 커져 급한 것이 묻힐 수 있습니다).</div>
+    <div class="rec">권장: 계약 미매칭 · 미입금 두 개만. 나머지는 별도 칩으로 두고 합산하지 않음.</div></div>
+
+  <div class="dq"><div class="qq"><span class="n">4</span>개요 표의 '미매칭·미입금' 숫자를 서버에서 받을까요?</div>
+    <div class="opt">지금 API는 <b>업체를 고른 뒤에야</b> 그 업체 작업·정산을 조회합니다. 개요 표에서 17개 업체 숫자를 다 채우려면 <b>집계 조회 1개</b>가 필요합니다.</div>
+    <div class="opt">추가하지 않으면 그 두 칸은 <code>—</code>로 두고 업체를 고를 때 채웁니다(개요의 가치는 절반).</div>
+    <div class="rec">권장: 집계 1개 추가. 읽기 전용·업체당 한 줄이라 부담이 작고, 이 화면의 첫 인상을 결정합니다.</div></div>
+</div>
+</div>
+
+<!-- ═══════════ 8. 구현 노트 ═══════════ -->
+<div class="sec" id="impl">
+<h2>구현 노트 (개발용)</h2>
+<div class="note"><div class="nt">기존 규율과 맞춘 지점</div>
+<ul>
+<li><b>검색 입력을 재렌더하지 않는다</b> — 홈 작업목록 검색에서 겪은 <code>ㅁ며면면</code> IME 사고와 같은 자리입니다. 목업도 <b>행 컨테이너만</b> 다시 그리고 도구줄·입력칸은 건드리지 않습니다(<code>#aRows</code>/<code>#bRows</code>).</li>
+<li><b>onclick 에 시트발 문자열을 넣지 않는다</b> — 목업의 모든 행·칩은 <code>data-i</code> 인덱스 + <code>addEventListener</code>입니다(탭명 XSS 실측 전례).</li>
+<li><b>렌더러는 한 벌</b> — 시안 A의 행 빌더와 B의 행 빌더는 같은 데이터 모델을 읽습니다. 구현 시 표 행·리스트 행이 <b>같은 정규화 함수</b>(브랜드·상품·채널·목표 파생 = 기존 <code>parseTabMeta</code>)를 쓰게 하면 두 보기가 어긋나지 않습니다.</li>
+<li><b>계약 매칭 팝업은 기존 공용 모달</b>(<code>openContractMatchModal</code>) 그대로 — 사본 금지. 매칭 후 동기화도 기존 <code>_contractMatchApplied</code> 한 곳.</li>
+<li><b>우측 패널은 뷰 스크롤 컨테이너 밖</b>(body 직속 또는 뷰 루트 직속 + <code>position:fixed</code>)에 두어야 합니다 — 스크롤 컨테이너 안에 넣으면 오버레이가 화면 흐름에 섞입니다(모집공고 모달 실측 사고).</li>
+<li><b>권한</b> — 접속링크·계정·업체 삭제·AE 변경은 지금처럼 master/admin 만 보이고, staff(AE)는 담당 업체 범위만. 광고주 role 은 이 화면에 도달하지 않습니다(nav 미노출).</li>
+</ul></div>
+<div class="note warm" style="margin-top:10px"><div class="nt"><svg class="i"><use href="#i-alert"/></svg>솔직한 한계</div>
+<ul>
+<li>목업의 작업 목록은 <b>24건만</b> 그렸습니다(실제 316건은 스크롤). 브랜드·상태 칩의 숫자는 316건 기준으로 적어 실제 분포를 반영했습니다.</li>
+<li>시안 A 개요 표의 <b>미매칭·미입금</b> 칸은 위 4번 결정 전까지 실제로는 <code>—</code>입니다(목업은 집계가 있다고 가정한 모습).</li>
+<li>시안 B의 통합 목록은 <b>신규 조회 1개</b>가 필요합니다. 없이 시작하려면 업체를 고른 뒤에만 목록이 차는 형태가 되어 B의 장점이 사라집니다.</li>
+<li>정산 4단 점(B)은 날짜를 <b>마우스오버</b>로만 보여줍니다 — 날짜를 나란히 비교해야 하는 작업에는 A의 표가 낫습니다.</li>
+</ul></div>
+</div>
+
+<div class="foot-n">업체관리 리디자인 시안 · 리뷰웹시스템[3버전] · 이 문서는 외부 리소스 없이 열립니다(오프라인 열람 가능). <code>?v=A</code> / <code>?v=B</code> 로 시안 단독 보기.</div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   목업 공용 — 가짜 데이터 + 렌더러. 실제 동작(검색·필터·접기·패널).
+   ★ 검색 입력칸은 절대 재렌더하지 않는다(IME 조합 파괴 방지) — 행 컨테이너만 교체.
+   ★ 클릭 대상은 data-i 인덱스 + addEventListener (문자열 보간 금지).
+   ══════════════════════════════════════════════════════════════ */
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]})}
+function won(n){return n==null?'—':Number(n).toLocaleString('ko-KR')}
+/* 검색어 하이라이트 — escape 후 텍스트 노드에만 mark */
+function hl(s,q){var t=esc(s); if(!q) return t;
+  var i=String(s).toLowerCase().indexOf(q.toLowerCase()); if(i<0) return t;
+  return esc(String(s).slice(0,i))+'<mark>'+esc(String(s).slice(i,i+q.length))+'</mark>'+esc(String(s).slice(i+q.length));}
+function ic(id,cls){return '<svg class="i '+(cls||'')+'"><use href="#i-'+id+'"/></svg>'}
+
+/* ── 업체 ── */
+var ADVS=[
+ {id:'jys',n:'자연생각',ae:'김수만',own:1,works:41,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'hon',n:'어니스트캄',ae:'황운하',own:1,works:316,todo:34,unpaid:12,link:'open',acct:0,setl:true},
+ {id:'swn',n:'스마트윈솔루션',ae:'이만수',own:1,works:28,todo:2,unpaid:2,link:'lock',acct:2,setl:true},
+ {id:'hds',n:'에이치디에스컴퍼니',ae:'이만수',own:1,works:19,todo:0,unpaid:0,link:'lock',acct:1,setl:true},
+ {id:'y2s',n:'와이투에스 코리아',ae:'이만수',own:1,works:23,todo:1,unpaid:1,link:'open',acct:0,setl:false},
+ {id:'rmn',n:'주식회사 르만',ae:'이만수',own:1,works:12,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'ppc',n:'주식회사 포파코',ae:'황운하',own:1,works:37,todo:6,unpaid:3,link:'lock',acct:1,setl:true},
+ {id:'dsh',n:'주식회사 더스타힐',ae:'이만수',own:1,works:16,todo:0,unpaid:0,link:'off',acct:1,setl:true},
+ {id:'yig',n:'주식회사 유일기획',ae:'이만수',own:1,works:22,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'kos',n:'주식회사 키오스킨',ae:'황운하',own:1,works:31,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'gff',n:'주식회사 지에프에프지',ae:'',own:1,works:9,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'ogm',n:'주식회사 올곧은무역',ae:'이만수',own:1,works:14,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'dgp',n:'주식회사 디지털플래닝',ae:'이만수',own:1,works:26,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'hsb',n:'주식회사 하우스브릿지',ae:'황운하',own:1,works:18,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'drc',n:'주식회사 닥터스코스메틱',ae:'황운하',own:1,works:21,todo:0,unpaid:0,link:'open',acct:0,setl:true},
+ {id:'ose',n:'(주)오쎄',ae:'이만수',own:2,works:34,todo:3,unpaid:1,link:'lock',acct:1,setl:true},
+ {id:'nsr',n:'넛세린코리아',ae:'김수만',own:1,works:27,todo:0,unpaid:0,link:'open',acct:0,setl:true}
+];
+var SHEET_HON='어니스트캄_업무시트 1';
+/* ── 작업(연결된 탭) ── ctr=계약번호(null=미매칭) / q,c,iv,pd=견적·마감·계산서·입금일 / pa,tc=입금액,총비용 */
+var W=[
+ {adv:'hon',n:'3/16(메이커스)메디슬벨_알약패지',sh:SHEET_HON,br:'메디슬벨',pr:'알약패지',ch:'메이커스',tg:'300건',mg:'만두',t:300,s:212,p:180,ctr:'C-2609-118',q:'3/12',c:null,iv:'3/28',pa:8400000,tc:12600000,pd:'4/2',memo:'2차 잔금 4월 예정',st:'run'},
+ {adv:'hon',n:'아라새우_네이버x쿠팡',sh:SHEET_HON,br:'아라새우',pr:'네이버x쿠팡',ch:'',tg:'120건',mg:'만두',t:120,s:118,p:118,ctr:'C-2608-091',q:'2/28',c:'3/20',iv:'3/22',pa:6300000,tc:6300000,pd:'3/29',memo:'',st:'done'},
+ {adv:'hon',n:'넛세린_유산균(쿠팡)200건',sh:SHEET_HON,br:'넛세린',pr:'유산균',ch:'쿠팡',tg:'200건',mg:'망고',t:200,s:96,p:40,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'엘라비에_콜라겐앰플 2차',sh:SHEET_HON,br:'엘라비에',pr:'콜라겐앰플',ch:'쿠팡',tg:'150건 · 2차',mg:'만두',t:150,s:150,p:96,ctr:'C-2609-140',q:'3/18',c:'4/1',iv:null,pa:0,tc:7500000,pd:null,memo:'계산서 발행 요청함',st:'run'},
+ {adv:'hon',n:'디어써고_클렌징밤(네이버)',sh:SHEET_HON,br:'디어써고',pr:'클렌징밤',ch:'네이버',tg:'80건',mg:'망고',t:80,s:41,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'쿠팡트래픽',sh:SHEET_HON,br:'',pr:'',ch:'',tg:'',mg:'',t:0,s:0,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'상시 운영 탭',st:'hold'},
+ {adv:'hon',n:'솔라르프리_선크림(올리브영)',sh:SHEET_HON,br:'솔라르프리',pr:'선크림',ch:'올리브영',tg:'60건',mg:'망고',t:60,s:58,p:58,ctr:'C-2607-052',q:'1/30',c:'2/24',iv:'2/26',pa:2940000,tc:2940000,pd:'3/5',memo:'',st:'done'},
+ {adv:'hon',n:'11/20 세럼카인드바디세럼(은비)',sh:SHEET_HON,br:'세럼카인드',pr:'바디세럼',ch:'은비',tg:'100건',mg:'망고',t:100,s:74,p:40,ctr:'C-2610-004',q:'4/2',c:null,iv:null,pa:0,tc:4800000,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'우레온_비타민D(쿠팡)90건',sh:SHEET_HON,br:'우레온',pr:'비타민D',ch:'쿠팡',tg:'90건',mg:'만두',t:90,s:88,p:88,ctr:'C-2608-077',q:'2/20',c:'3/12',iv:'3/14',pa:4230000,tc:4230000,pd:'3/21',memo:'',st:'done'},
+ {adv:'hon',n:'밥스누_반려간식 3차',sh:SHEET_HON,br:'밥스누',pr:'반려간식',ch:'네이버',tg:'70건 · 3차',mg:'망고',t:70,s:33,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'아라새우12월(마감)',sh:SHEET_HON,br:'아라새우',pr:'12월',ch:'',tg:'',mg:'만두',t:60,s:60,p:60,ctr:'C-2601-011',q:'11/28',c:'12/22',iv:'12/24',pa:3100000,tc:3100000,pd:'12/30',memo:'종료',st:'done'},
+ {adv:'hon',n:'노티드_바디워시(카카오메이커스)',sh:SHEET_HON,br:'노티드',pr:'바디워시',ch:'메이커스',tg:'50건',mg:'망고',t:50,s:22,p:0,ctr:'C-2610-021',q:null,c:null,iv:null,pa:0,tc:2650000,pd:null,memo:'견적서 미발행',st:'run'},
+ {adv:'hon',n:'체크중(kmn)',sh:SHEET_HON,br:'',pr:'체크중',ch:'kmn',tg:'',mg:'',t:0,s:0,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'hold'},
+ {adv:'hon',n:'밤보늬_유아로션 카페/블로그',sh:SHEET_HON,br:'밤보늬',pr:'유아로션',ch:'바이럴',tg:'40건',mg:'만두',t:40,s:40,p:12,ctr:'C-2609-165',q:'3/25',c:'4/3',iv:'4/4',pa:900000,tc:2000000,pd:'4/8',memo:'부분입금',st:'run'},
+ {adv:'hon',n:'블랑루스_립틴트(쿠팡)',sh:SHEET_HON,br:'블랑루스',pr:'립틴트',ch:'쿠팡',tg:'110건',mg:'망고',t:110,s:64,p:20,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'말따_캣타워(네이버)',sh:SHEET_HON,br:'말따',pr:'캣타워',ch:'네이버',tg:'35건',mg:'만두',t:35,s:35,p:35,ctr:'C-2608-133',q:'2/14',c:'3/6',iv:'3/8',pa:1750000,tc:1750000,pd:'3/15',memo:'',st:'done'},
+ {adv:'hon',n:'시크릿에이지_아이크림 1차',sh:SHEET_HON,br:'시크릿에이지',pr:'아이크림',ch:'쿠팡',tg:'95건 · 1차',mg:'망고',t:95,s:12,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'모집 시작',st:'run'},
+ {adv:'hon',n:'파미고_올레샷 블로그 바이럴',sh:SHEET_HON,br:'파미고',pr:'올레샷',ch:'바이럴',tg:'45건',mg:'만두',t:45,s:45,p:45,ctr:'C-2609-088',q:'3/4',c:'3/26',iv:'3/27',pa:2250000,tc:2250000,pd:'4/1',memo:'',st:'done'},
+ {adv:'hon',n:'굿데이허니_프로폴리스',sh:SHEET_HON,br:'굿데이허니',pr:'프로폴리스',ch:'쿠팡',tg:'55건',mg:'망고',t:55,s:31,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'오클리앙_핸드크림(올리브영)',sh:SHEET_HON,br:'오클리앙',pr:'핸드크림',ch:'올리브영',tg:'30건',mg:'만두',t:30,s:28,p:28,ctr:'C-2607-119',q:'1/22',c:'2/12',iv:'2/13',pa:1440000,tc:1440000,pd:'2/20',memo:'',st:'done'},
+ {adv:'hon',n:'헤바_샴푸바 2차',sh:SHEET_HON,br:'헤바',pr:'샴푸바',ch:'네이버',tg:'65건 · 2차',mg:'망고',t:65,s:65,p:0,ctr:'C-2610-033',q:'4/5',c:null,iv:null,pa:0,tc:3250000,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'오토오브맘 하프슈거',sh:SHEET_HON,br:'오토오브맘',pr:'하프슈거',ch:'메이커스',tg:'25건',mg:'만두',t:25,s:9,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'hon',n:'리뷰폼_테스트(내부)',sh:SHEET_HON,br:'',pr:'테스트',ch:'',tg:'',mg:'',t:0,s:0,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'내부 테스트',st:'hold'},
+ {adv:'hon',n:'글렌펜데스_디퓨저(쿠팡)',sh:SHEET_HON,br:'글렌펜데스',pr:'디퓨저',ch:'쿠팡',tg:'75건',mg:'망고',t:75,s:52,p:52,ctr:'C-2609-201',q:'3/20',c:'4/6',iv:'4/7',pa:3600000,tc:3600000,pd:'4/12',memo:'',st:'run'},
+ /* 다른 업체(시안 B 전 업체 모드용) */
+ {adv:'ppc',n:'4/2(쿠팡)포파코_실리콘용기 200건',sh:'포파코_업무시트',br:'포파코',pr:'실리콘용기',ch:'쿠팡',tg:'200건',mg:'만두',t:200,s:88,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'ppc',n:'포파코_텀블러(네이버) 1차',sh:'포파코_업무시트',br:'포파코',pr:'텀블러',ch:'네이버',tg:'90건 · 1차',mg:'망고',t:90,s:90,p:30,ctr:'C-2609-233',q:'3/22',c:'4/4',iv:'4/5',pa:1200000,tc:4500000,pd:'4/10',memo:'잔금 확인 필요',st:'run'},
+ {adv:'swn',n:'스마트윈_창호필름(쿠팡)',sh:'스마트윈_업무시트',br:'스마트윈',pr:'창호필름',ch:'쿠팡',tg:'60건',mg:'만두',t:60,s:44,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'swn',n:'스마트윈_방충망 2차',sh:'스마트윈_업무시트',br:'스마트윈',pr:'방충망',ch:'네이버',tg:'40건 · 2차',mg:'망고',t:40,s:40,p:16,ctr:'C-2610-050',q:'4/8',c:null,iv:null,pa:600000,tc:2000000,pd:'4/15',memo:'',st:'run'},
+ {adv:'ose',n:'3/28 오쎄_기능성베개(메이커스)',sh:'오쎄_업무시트 A',br:'오쎄',pr:'기능성베개',ch:'메이커스',tg:'130건',mg:'만두',t:130,s:71,p:0,ctr:null,q:null,c:null,iv:null,pa:null,tc:null,pd:null,memo:'',st:'run'},
+ {adv:'ose',n:'오쎄_라텍스토퍼(쿠팡)',sh:'오쎄_업무시트 B',br:'오쎄',pr:'라텍스토퍼',ch:'쿠팡',tg:'70건',mg:'망고',t:70,s:70,p:70,ctr:'C-2608-190',q:'2/26',c:'3/18',iv:'3/19',pa:3500000,tc:3500000,pd:'3/26',memo:'',st:'done'},
+ {adv:'y2s',n:'와이투에스_무선청소기(네이버)',sh:'와이투에스_업무시트',br:'와이투에스',pr:'무선청소기',ch:'네이버',tg:'50건',mg:'만두',t:50,s:50,p:20,ctr:'C-2609-260',q:'3/29',c:'4/9',iv:null,pa:800000,tc:2500000,pd:'4/14',memo:'',st:'run'},
+ {adv:'jys',n:'자연생각_현미밥(쿠팡) 3차',sh:'자연생각_업무시트',br:'자연생각',pr:'현미밥',ch:'쿠팡',tg:'85건 · 3차',mg:'망고',t:85,s:85,p:85,ctr:'C-2608-311',q:'2/18',c:'3/10',iv:'3/11',pa:4100000,tc:4100000,pd:'3/18',memo:'',st:'done'},
+ {adv:'kos',n:'키오스킨_토너패드(올리브영)',sh:'키오스킨_업무시트',br:'키오스킨',pr:'토너패드',ch:'올리브영',tg:'110건',mg:'만두',t:110,s:97,p:97,ctr:'C-2609-302',q:'3/14',c:'4/2',iv:'4/3',pa:5400000,tc:5400000,pd:'4/9',memo:'',st:'run'},
+ {adv:'nsr',n:'넛세린코리아_멀티비타(쿠팡)',sh:'넛세린_업무시트',br:'넛세린',pr:'멀티비타',ch:'쿠팡',tg:'140건',mg:'망고',t:140,s:126,p:126,ctr:'C-2609-355',q:'3/8',c:'3/30',iv:'3/31',pa:6800000,tc:6800000,pd:'4/6',memo:'',st:'run'}
+];
+/* 미지정 시트(9개) */
+var UNM=[
+ {n:'11.21엘라비에_업무시트',tabs:4,first:'11/21'},{n:'12.24메이커스_업무시트',tabs:2,first:'12/24'},
+ {n:'2.25메이커스_업무시트',tabs:1,first:'2/25'},{n:'굿데이허니프로폴리스_시트',tabs:3,first:'1/9'},
+ {n:'대기_넛세린_업무시트',tabs:1,first:'2/2'},{n:'서일농원_업무시트',tabs:2,first:'3/3'},
+ {n:'제스메이즈_업무시트',tabs:1,first:'3/18'},{n:'퓨도토_업무시트',tabs:1,first:'3/25'},
+ {n:'오토오브맘하프슈거_시트',tabs:2,first:'4/1'}
+];
+/* 브랜드 분포(316건 기준 — 실제 화면 값) */
+var BRANDS=[['엘라비에',15],['디어써고',13],['넛세린',12],['메디슬벨',11],['솔라르프리',9],['우레온',9],['밥스누',8],['노티드',7],['밤보늬',6],['블랑루스',6],['말따',5],['시크릿에이지',5],['파미고',5],['아라새우',4],['굿데이허니',3],['글렌펜데스',3],['오클리앙',3],['헤바',3],['오토오브맘',2],['미분류',150]];
+
+function advById(id){for(var i=0;i<ADVS.length;i++) if(ADVS[i].id===id) return ADVS[i]; return null}
+function isTodo(w){ if(!w.ctr) return true; if(w.tc && (w.pa||0)<w.tc) return true; return false }
+function pct(w){ return w.t? Math.round(w.s/w.t*100) : 0 }
+
+/* ══════════════════════════════════════════════════════════════
+   시안 A
+   ══════════════════════════════════════════════════════════════ */
+var A={adv:'hon',advQ:'',advF:'all',q:'',f:'all',brand:'',cols:{info:true,prog:true,setl:false},drawer:null,dtab:'link'};
+
+function aAdvList(){
+  var q=A.advQ.trim().toLowerCase();
+  var list=ADVS.filter(function(a){
+    if(A.advF==='noae'&&a.ae) return false;
+    if(A.advF==='todo'&&!a.todo) return false;
+    if(!q) return true;
+    return a.n.toLowerCase().indexOf(q)>=0 || (a.ae||'').toLowerCase().indexOf(q)>=0;
+  });
+  if(!list.length) return '<div class="vm-empty" style="padding:22px 12px"><b>업체 없음</b>검색어나 필터를 바꿔보세요.</div>';
+  return list.map(function(a){
+    var i=ADVS.indexOf(a);
+    return '<div class="vm-adv'+(A.adv===a.id?' on':'')+'" data-i="'+i+'" role="button" tabindex="0">'
+      +'<span class="av">'+esc(a.n.slice(0,1))+'</span>'
+      +'<span class="nm"><b>'+hl(a.n,A.advQ)+'</b><i class="'+(a.ae?'':'no')+'">'+(a.ae?('AE '+hl(a.ae,A.advQ)):'AE 미지정')+'</i></span>'
+      +'<span class="rt">'+(a.todo?'<span class="bdg w" title="계약 미매칭·미입금 합계">'+a.todo+'</span>':'')
+      +'<span class="ct">'+a.works+'</span></span></div>';
+  }).join('');
+}
+/* 개요(업체 미선택) */
+function aOverview(){
+  var rows=ADVS.map(function(a,i){
+    var lk = a.link==='off'?'<span class="bdg r">폐기</span>':a.link==='lock'?'<span class="bdg b">로그인</span>':'<span class="bdg g">공개</span>';
+    return '<div class="vm-ovt r" data-i="'+i+'" role="button" tabindex="0">'
+      +'<span class="an"><span class="av">'+esc(a.n.slice(0,1))+'</span><b>'+esc(a.n)+'</b></span>'
+      +'<span class="vm-c'+(a.ae?'':' dim')+'">'+(a.ae?esc(a.ae):'미지정')+'</span>'
+      +'<span class="vm-num">'+a.works+'</span>'
+      +'<span class="vm-num '+(a.todo?'warn':'z')+'">'+(a.todo?a.todo+'건':'—')+'</span>'
+      +'<span class="vm-num '+(a.unpaid?'warn':'z')+'">'+(a.unpaid?a.unpaid+'건':'—')+'</span>'
+      +'<span>'+lk+'</span>'
+      +'<span class="vm-c'+(a.acct?'':' dim')+'">'+(a.acct?a.acct+'개':'없음')+'</span></div>';
+  }).join('');
+  return '<div class="vm-ov">'
+    +'<div class="ovh"><h3>업체 17곳 · 작업 1,204건</h3><span class="s">캠페인 시트 34개 중 25개가 업체에 지정됨</span></div>'
+    +'<p class="lead2">업체를 고르면 그 업체의 작업·정산·접속설정으로 들어갑니다. 아래 표에서 <b>처리필요</b>가 있는 업체부터 보세요.</p>'
+    +'<div class="vm-cta"><span class="ci">'+ic('alert')+'</span>'
+      +'<span class="ct"><b>업체가 지정되지 않은 시트 9개</b><span>지정 전에는 정산·계약 매칭이 붙지 않습니다. 지금 매칭하세요.</span></span>'
+      +'<button class="b pri" id="aCta">'+ic('plus','sm')+'거래처 등록·매칭</button></div>'
+    +'<div class="vm-ovt h"><span>업체</span><span>담당 AE</span><span>작업</span><span>처리필요</span><span>미입금</span><span>접속링크</span><span>계정</span></div>'
+    +rows+'</div>';
+}
+/* 업체 헤더 + 도구줄 + 표 */
+function aPanel(){
+  var a=advById(A.adv);
+  var lkBdg = a.link==='off'?'<span class="bdg r">폐기</span>':a.link==='lock'?'<span class="bdg b">로그인</span>':'<span class="bdg g">공개</span>';
+  return '<div class="vm-hd">'
+    +'<div class="r1"><span class="av">'+esc(a.n.slice(0,1))+'</span>'
+      +'<div><h3>'+esc(a.n)+'</h3><div class="idl">거래처 ID: adv_54aa7de96f3f · 소유 캠페인 '+a.own+' · 연결된 탭 '+a.works+'</div></div>'
+      +'<span class="sp"></span>'
+      +'<span class="aeb">담당 AE <b>'+(a.ae?esc(a.ae):'미지정')+'</b> <button class="b xs" data-d="ae">변경</button></span>'
+      +'<span class="setl">정산 노출 <button class="sw" role="switch" aria-checked="'+(a.setl?'true':'false')+'" data-sw="setl" aria-label="정산 노출"></button></span></div>'
+    +'<div class="r2"><span class="lbl">설정</span>'
+      +'<button class="b" data-d="link">'+ic('link','sm')+'접속 링크 '+lkBdg+'</button>'
+      +'<button class="b" data-d="acct">'+ic('user','sm')+'광고주 계정 '+(a.acct?'<span class="bdg">'+a.acct+'개</span>':'<span class="bdg w">없음</span>')+'</button>'
+      +'<button class="b" data-d="own">'+ic('grid','sm')+'소유 시트 <span class="bdg">'+a.own+'</span></button>'
+      +'<span class="sp" style="flex:1"></span>'
+      +'<button class="b qt" data-d="del">'+ic('x','sm')+'업체 삭제</button></div>'
+    +'<div class="vm-tabs"><span class="on">연결된 탭</span><span>브랜드별</span><span>정산 요약</span></div></div>'
+    + aTools(a) + '<div class="vm-tbl"><div id="aRows"></div></div>';
+}
+function aTools(a){
+  var f=A.f, top=BRANDS.slice(0,5);
+  var chips='<span class="chip'+(f==='all'?' on':'')+'" data-f="all">전체 <b class="n">'+a.works+'</b></span>'
+    +'<span class="chip alert'+(f==='nomatch'?' on':'')+'" data-f="nomatch">계약 미매칭 <b class="n">34</b></span>'
+    +'<span class="chip alert'+(f==='unpaid'?' on':'')+'" data-f="unpaid">미입금 <b class="n">12</b></span>'
+    +'<span class="chip'+(f==='run'?' on':'')+'" data-f="run">진행 중 <b class="n">21</b></span>'
+    +'<span class="chip'+(f==='done'?' on':'')+'" data-f="done">완료 <b class="n">295</b></span>';
+  var bsel='<select class="fld" id="aBrand" style="height:26px;font-size:11px" aria-label="브랜드"><option value="">브랜드 전체 ('+BRANDS.length+')</option>'
+    +BRANDS.map(function(b){return '<option value="'+esc(b[0])+'"'+(A.brand===b[0]?' selected':'')+'>'+esc(b[0])+' '+b[1]+'</option>'}).join('')+'</select>';
+  var bchips=top.map(function(b){return '<span class="chip'+(A.brand===b[0]?' on':'')+'" data-b="'+esc(b[0])+'">'+esc(b[0])+' <b class="n">'+b[1]+'</b></span>'}).join('');
+  return '<div class="vm-tools">'
+    +'<div class="tr"><label class="vm-srch big"><svg class="i sm"><use href="#i-search"/></svg>'
+      +'<input id="aQ" placeholder="작업명 · 브랜드 · 상품 · 계약번호 검색" autocomplete="off">'
+      +'<span class="b qt xs" id="aQx" title="지우기">'+ic('x','sm')+'</span></label>'
+      +'<span class="cnt" id="aCnt"></span><span style="flex:1"></span>'
+      +'<span class="vm-grp" role="group" aria-label="열 묶음">'
+        +'<button data-c="info" class="'+(A.cols.info?'on':'')+'">작업정보</button>'
+        +'<button data-c="prog" class="'+(A.cols.prog?'on':'')+'">진척</button>'
+        +'<button data-c="setl" class="'+(A.cols.setl?'on':'')+'">정산상세</button></span></div>'
+    +'<div class="tr">'+chips+'<span style="width:8px"></span>'+bchips+bsel+'</div></div>';
+}
+/* 열 폭 — ★ 기본 상태(정산상세 접힘)의 합이 표 폭 안에 들어와야 한다.
+   "기본은 가로 스크롤 없음"이 이 시안의 약속이므로 여기 숫자를 늘릴 때는
+   브라우저로 다시 재야 한다(폭 합이 넘치면 약속이 조용히 깨진다 — 실측으로 잡음).
+   기준: 목업 표 폭 978px · gap 8px × 11 = 88px → 열에 쓸 수 있는 폭 890px. */
+function aGrid(){
+  var c=[];
+  c.push('48px');                                    /* 진행 */
+  c.push('minmax(220px,2fr)');                       /* 작업(캠페인 탭) — 가장 중요한 식별자 */
+  if(A.cols.info) c.push('76px','minmax(82px,1fr)','62px','72px','44px');
+  if(A.cols.prog) c.push('92px');
+  c.push('80px');                                    /* 계약 */
+  if(A.cols.setl) c.push('52px','52px','52px','52px');
+  c.push('148px');                                   /* 입금액/총비용 — 8,400,000 / 12,600,000 이 안 잘려야 한다 */
+  c.push('minmax(84px,1fr)');                        /* 비고 */
+  c.push('40px');                                    /* 열기 */
+  return c.join(' ');
+}
+function aHead(){
+  var h='<span>진행</span><span>캠페인 탭</span>';
+  if(A.cols.info) h+='<span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span>';
+  if(A.cols.prog) h+='<span>참여·제출·입금</span>';
+  h+='<span>계약</span>';
+  if(A.cols.setl) h+='<span>견적서</span><span>마감</span><span>계산서</span><span>입금일</span>';
+  h+='<span>입금액/총비용</span><span>비고</span><span></span>';
+  return '<div class="vm-th" style="grid-template-columns:'+aGrid()+'">'+h+'</div>';
+}
+function aRowHtml(w,i){
+  var q=A.q.trim(), p=pct(w);
+  var money;
+  if(!w.ctr) money='<span class="dim">—</span>';
+  else if(w.tc==null) money='<span class="sk" title="정산 요약을 불러오는 중"></span>';
+  else{
+    var cls=(w.pa&&w.pa>=w.tc)?'pd-ok':((w.pa||0)>0?'pd-part':'pd-zero');
+    money='<b class="'+cls+'">'+won(w.pa)+'</b> <span class="dim">/</span> '+won(w.tc);
+  }
+  var ctr = w.ctr
+    ? '<span class="vm-ctr on" title="'+esc(w.ctr)+' — 클릭하면 다시 매칭">'+hl(w.ctr,q)+'</span>'
+    : '<span class="vm-ctr" title="인트라넷 계약을 매칭합니다">'+ic('plus','sm')+'매칭</span>';
+  var r='<div class="vm-tr" style="grid-template-columns:'+aGrid()+'" data-i="'+i+'" role="button" tabindex="0">';
+  r+='<span class="vm-prog">'+(w.t?p+'%':'<span class="dim">—</span>')+'<span class="bar"><i class="'+(p>=100?'p2':'')+'" style="width:'+p+'%"></i></span></span>';
+  r+='<span class="vm-nm"><b><i class="dot '+w.st+'"></i><span>'+hl(w.n,q)+'</span></b><i>'+esc(w.sh)+'</i></span>';
+  if(A.cols.info){
+    r+='<span class="vm-c'+(w.br?'':' dim')+'">'+(w.br?hl(w.br,q):'—')+'</span>';
+    r+='<span class="vm-c'+(w.pr?'':' dim')+'" title="'+esc(w.pr)+'">'+(w.pr?hl(w.pr,q):'—')+'</span>';
+    r+='<span class="vm-c">'+(w.ch?'<span class="bdg">'+esc(w.ch)+'</span>':'<span class="dim">—</span>')+'</span>';
+    r+='<span class="vm-c'+(w.tg?'':' dim')+'">'+(w.tg||'—')+'</span>';
+    r+='<span class="vm-c'+(w.mg?'':' dim')+'">'+(w.mg||'—')+'</span>';
+  }
+  if(A.cols.prog) r+='<span class="vm-cnt">'+(w.t?('<b>'+w.t+'</b> · <b class="s">'+w.s+'</b> · <b class="'+(w.p?'p':'z')+'">'+w.p+'</b>'):'<span class="dim">—</span>')+'</span>';
+  r+='<span>'+ctr+'</span>';
+  if(A.cols.setl){
+    var d=function(v){ return !w.ctr?'<span class="vm-c dim">—</span>':(v?'<span class="vm-c">'+esc(v)+'</span>':'<span class="vm-c dim">—</span>') };
+    r+=d(w.q)+d(w.c)+d(w.iv)+d(w.pd);
+  }
+  r+='<span class="vm-c vm-money">'+money+'</span>';
+  r+='<span class="vm-memo'+(w.memo?'':' empty')+'" title="클릭하여 비고 편집">'+(w.memo?hl(w.memo,q):'비고…')+'</span>';
+  r+='<span class="vm-open">열기'+ic('chev','sm')+'</span>';
+  return r+'</div>';
+}
+function aFilterWorks(){
+  var q=A.q.trim().toLowerCase();
+  return W.map(function(w,i){return {w:w,i:i}}).filter(function(o){
+    var w=o.w;
+    if(w.adv!==A.adv) return false;
+    if(A.brand && A.brand!=='미분류' && w.br!==A.brand) return false;
+    if(A.brand==='미분류' && w.br) return false;
+    if(A.f==='nomatch' && w.ctr) return false;
+    if(A.f==='unpaid' && !(w.tc && (w.pa||0)<w.tc)) return false;
+    if(A.f==='run' && w.st!=='run') return false;
+    if(A.f==='done' && w.st!=='done') return false;
+    if(!q) return true;
+    return [w.n,w.br,w.pr,w.ctr,w.memo].some(function(v){return String(v||'').toLowerCase().indexOf(q)>=0});
+  });
+}
+function aRenderRows(){
+  var box=$('#aRows'); if(!box) return;
+  var list=aFilterWorks(), a=advById(A.adv);
+  var cnt=$('#aCnt');
+  if(cnt) cnt.innerHTML = (A.q||A.brand||A.f!=='all')
+    ? '<b>'+list.length+'</b>건 표시 <span style="color:var(--faint)">/ 전체 '+a.works+'</span>'
+    : '<b>'+a.works+'</b>건';
+  if(!list.length){
+    box.innerHTML='<div class="vm-empty"><b>조건에 맞는 작업이 없습니다</b>'
+      +(A.q?'검색어 “'+esc(A.q)+'”':'선택한 필터')+'에 맞는 작업이 없습니다. 검색어를 지우거나 [전체]를 눌러보세요.</div>';
+    return;
+  }
+  box.innerHTML = aHead()+list.map(function(o){return aRowHtml(o.w,o.i)}).join('')
+    + '<div class="vm-more">이 목업은 '+list.length+'건만 그렸습니다 — 실제로는 '+a.works+'건이 이 아래로 이어집니다</div>';
+}
+/* 우측 패널 */
+function aDrawerHtml(){
+  var a=advById(A.adv), t=A.dtab, body='';
+  if(t==='link'){
+    var mode = a.link==='off'?'<span class="bdg r">폐기됨 · 접근 불가</span>'
+      : a.link==='lock'?'<span class="bdg b">로그인 필요</span>':'<span class="bdg g">공개 · 로그인 없이 열람</span>';
+    body='<div class="vm-fs"><div class="t">접속 링크 '+mode+'</div>'
+      +'<div class="vm-linkrow"><input readonly value="https://review-web-system.pages.dev/workdesk#adv=nXqKq9TU7adIrC1Nb58h1zk4aA9Z">'
+      +'<button class="b pri">'+ic('copy','sm')+'복사</button></div>'
+      +'<div class="hint">마지막 접속 2026. 8. 6. 오후 7:31 · 이 링크를 아는 사람은 이 업체 뷰(소유 탭·읽기전용, <b>리뷰어 연락처·주소 포함</b>)를 볼 수 있습니다.</div>'
+      +'<div style="display:flex;gap:6px;margin-top:9px"><button class="b">'+ic('rot','sm')+'링크 회전</button><button class="b dgr">폐기</button></div></div>'
+      +'<div class="vm-fs"><div class="t">이 링크로 보이는 범위<span class="sp"></span></div>'
+      +'<div class="hint">소유 캠페인 '+a.own+'개의 탭 '+a.works+'건 · 읽기 전용 · 금액 노출 '+(a.setl?'<b>켜짐</b>':'<b>꺼짐</b>')+'</div></div>';
+  } else if(t==='acct'){
+    var lock=a.link==='lock';
+    body='<div class="vm-fs"><div class="t">로그인 요구<span class="sp"></span>'
+      +'<span style="font-size:11px;font-weight:700;color:'+(lock?'var(--accent-deep)':'var(--faint)')+'">'+(lock?'사용 중':'미사용')+'</span>'
+      +'<button class="sw" role="switch" aria-checked="'+(lock?'true':'false')+'" data-sw="lock" aria-label="로그인 요구"></button></div>'
+      +'<div class="hint">'+(lock?'링크를 열면 로그인 화면이 먼저 뜹니다. 아래 계정을 광고주에게 전달하세요.':'접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 스위치를 켜세요.')+'</div></div>'
+      +'<div class="vm-fs"><div class="t">발급된 계정 '+(a.acct?'<span class="bdg">'+a.acct+'</span>':'')+'</div>'
+      +(a.acct? '<div class="vm-acct"><span class="id">'+esc(a.n.replace(/\s+/g,''))+'</span><span class="bdg g">활성</span>'
+          +'<button class="b xs">비번</button><button class="b xs">비활성</button><button class="b xs dgr">삭제</button></div>'
+        : '<div class="hint" style="margin:0 0 9px">발급된 계정 없음 — 아래에서 만들어 광고주에게 전달하세요.</div>')
+      +'<div class="vm-form"><div class="row2"><input class="fld" placeholder="아이디" value="'+esc(a.n.replace(/\s+/g,''))+'"><input class="fld" placeholder="비밀번호(4자 이상)"></div>'
+      +'<button class="b pri" style="margin-top:8px">'+ic('plus','sm')+'계정 발급</button></div></div>';
+  } else if(t==='own'){
+    body='<div class="vm-fs"><div class="t">소유 캠페인 <span class="bdg">'+a.own+'</span></div>'
+      +'<div class="vm-own"><span class="oi">'+ic('grid','sm')+'</span><span class="oinfo"><b>'+esc(a.id==='hon'?SHEET_HON:(a.n+'_업무시트'))+'</b><i>시트 전체 · 모든 탭 자동 포함</i></span>'
+      +'<span class="bdg b">시트 전체</span><button class="b xs qt" title="소유 해제">'+ic('x','sm')+'</button></div>'
+      +(a.own>1?'<div class="vm-own"><span class="oi">'+ic('doc','sm')+'</span><span class="oinfo"><b>'+esc(a.n)+'_업무시트 B</b><i>시트 전체 · 모든 탭 자동 포함</i></span><span class="bdg b">시트 전체</span><button class="b xs qt">'+ic('x','sm')+'</button></div>':'')
+      +'</div>'
+      +'<div class="vm-fs"><div class="t">소유 추가</div><div class="vm-form">'
+      +'<label>캠페인 시트</label><select class="fld"><option>— 시트 선택 —</option>'
+        +UNM.map(function(u){return '<option>'+esc(u.n)+'</option>'}).join('')+'</select>'
+      +'<label>범위</label><div style="display:flex;gap:6px"><span class="chip on">시트 전체(모든 탭)</span><span class="chip">특정 탭만</span></div>'
+      +'<button class="b pri" style="margin-top:11px">'+ic('plus','sm')+'소유 지정</button></div></div>';
+  } else if(t==='add'){
+    body='<div class="vm-fs"><div class="t">새 거래처 등록</div><div class="vm-form">'
+      +'<label>① 캠페인 시트 <span style="color:var(--bad)">*</span></label><select class="fld"><option>— 시트 선택 —</option>'
+        +UNM.map(function(u){return '<option>'+esc(u.n)+' (탭 '+u.tabs+')</option>'}).join('')+'</select>'
+      +'<label>② 거래처명 <span style="color:var(--bad)">*</span> <span style="font-weight:400;color:var(--faint)">인트라넷 광고주DB 검색</span></label>'
+      +'<input class="fld" placeholder="예: (주)콩고물">'
+      +'<div style="font-size:11px;color:var(--safe);font-weight:700;margin-top:5px">'+ic('check','sm')+' 인트라넷 광고주DB 등록 확인됨</div>'
+      +'<label>담당 AE</label><input class="fld" placeholder="예: 박세희">'
+      +'<button class="b pri" style="margin-top:12px">'+ic('plus','sm')+'업체 등록 + 시트 소유 지정</button>'
+      +'<div class="hint">등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>';
+  } else if(t==='unm'){
+    body='<div class="vm-fs"><div class="t">업체 미지정 시트 <span class="bdg w">9</span></div>'
+      +'<div class="hint" style="margin:0 0 10px">지정 전에는 계약·정산이 붙지 않습니다. 시트를 눌러 등록 화면으로 이동하세요.</div>'
+      +UNM.map(function(u){return '<div class="vm-own"><span class="oi">'+ic('doc','sm')+'</span>'
+        +'<span class="oinfo"><b>'+esc(u.n)+'</b><i>탭 '+u.tabs+'개 · 최초 '+esc(u.first)+'</i></span>'
+        +'<button class="b xs pri">매칭</button></div>'}).join('')+'</div>';
+  } else if(t==='ae'){
+    body='<div class="vm-fs"><div class="t">담당 AE 변경</div><div class="vm-form">'
+      +'<label>담당 AE <span style="font-weight:400;color:var(--faint)">인트라넷 AE 부서 자동완성</span></label>'
+      +'<input class="fld" value="'+esc(a.ae||'')+'" placeholder="예: 박세희">'
+      +'<div style="font-size:11px;color:var(--safe);font-weight:700;margin-top:5px">'+ic('check','sm')+' 인트라넷 등록 AE 확인됨</div>'
+      +'<div style="display:flex;gap:6px;margin-top:11px"><button class="b pri">저장</button><button class="b" data-close="1">취소</button></div></div></div>';
+  } else if(t==='del'){
+    body='<div class="vm-fs" style="border-color:#f0cdcd"><div class="t" style="color:var(--bad)">'+ic('alert','sm')+' 업체 삭제</div>'
+      +'<div class="hint"><b>'+esc(a.n)+'</b> 업체를 목록에서 삭제하면 연결된 소유 캠페인 '+a.own+'건도 함께 해제됩니다. 숨김 처리이므로 필요하면 복구할 수 있습니다.</div>'
+      +'<div style="display:flex;gap:6px;margin-top:11px"><button class="b dgr">삭제</button><button class="b" data-close="1">취소</button></div></div>';
+  }
+  var titles={link:'접속 링크',acct:'광고주 계정',own:'소유 캠페인',add:'거래처 등록',unm:'미지정 시트',ae:'담당 AE',del:'업체 삭제'};
+  var tabs='';
+  if(['link','acct','own'].indexOf(t)>=0){
+    tabs='<div class="dtabs">'
+      +['link','acct','own'].map(function(k){return '<span class="chip'+(t===k?' on':'')+'" data-dt="'+k+'">'+titles[k]+'</span>'}).join('')
+      +'</div>';
+  }
+  return '<div class="dh">'+ic('slide','lg')+'<b>'+(titles[t]||'')+(t==='add'||t==='unm'?'':' · '+esc(a?a.n:''))+'</b>'
+    +'<button class="b xs qt" data-close="1" aria-label="닫기">'+ic('x','sm')+'</button></div>'
+    +tabs+'<div class="dbody">'+body+'</div>';
+}
+function aOpenDrawer(t){ A.dtab=t; A.drawer=t;
+  var d=$('#aDrawer'); d.innerHTML=aDrawerHtml(); d.classList.add('on'); $('#aScrim').classList.add('on');
+  /* 열면 포커스를 패널로 옮긴다 — 키보드 사용자가 패널 안에서 바로 조작하고 ESC 가 통한다 */
+  var f=d.querySelector('input:not([readonly]),select,button'); if(f) f.focus({preventScroll:true}); }
+function aCloseDrawer(){ if(!A.drawer) return; A.drawer=null;
+  $('#aDrawer').classList.remove('on'); $('#aScrim').classList.remove('on'); }
+function aRenderMain(){
+  var m=$('#aMain'); if(!m) return;
+  m.innerHTML = A.adv? aPanel() : aOverview();
+  if(A.adv) aRenderRows();
+}
+function aRenderAdvs(){ $('#aAdvs').innerHTML=aAdvList(); }
+
+function aInit(){
+  var root=$('#A'); if(!root) return;
+  aRenderAdvs(); aRenderMain();
+  /* 사이드바 검색 — 목록만 교체(입력칸은 그대로 두어 IME 조합 보존) */
+  $('#aAdvQ').addEventListener('input',function(){ A.advQ=this.value; aRenderAdvs(); });
+  root.addEventListener('click',function(e){
+    var t=e.target;
+    var af=t.closest('[data-af]'); if(af){ A.advF=af.dataset.af;
+      root.querySelectorAll('[data-af]').forEach(function(c){c.classList.toggle('on',c===af)}); aRenderAdvs(); return; }
+    var adv=t.closest('.vm-adv'); if(adv){ A.adv=ADVS[+adv.dataset.i].id; A.q='';A.f='all';A.brand=''; aCloseDrawer(); aRenderAdvs(); aRenderMain(); return; }
+    var ovr=t.closest('.vm-ovt.r'); if(ovr){ A.adv=ADVS[+ovr.dataset.i].id; A.q='';A.f='all';A.brand=''; aRenderAdvs(); aRenderMain(); return; }
+    if(t.closest('#aAdd')){ A.adv=null; aRenderAdvs(); aRenderMain(); aOpenDrawer('add'); return; }
+    if(t.closest('#aCta')){ aOpenDrawer('add'); return; }
+    if(t.closest('#aUnm')){ aOpenDrawer('unm'); return; }
+    var d=t.closest('[data-d]'); if(d){ aOpenDrawer(d.dataset.d); return; }
+    var dt=t.closest('[data-dt]'); if(dt){ aOpenDrawer(dt.dataset.dt); return; }
+    if(t.closest('[data-close]')||t.closest('#aScrim')){ aCloseDrawer(); return; }
+    var sw=t.closest('[data-sw]'); if(sw){ var on=sw.getAttribute('aria-checked')==='true'; sw.setAttribute('aria-checked',on?'false':'true');
+      var a=advById(A.adv); if(a){ if(sw.dataset.sw==='setl') a.setl=!on; else if(sw.dataset.sw==='lock') a.link=on?'open':'lock'; } return; }
+    var cg=t.closest('[data-c]'); if(cg){ A.cols[cg.dataset.c]=!A.cols[cg.dataset.c];
+      cg.classList.toggle('on',A.cols[cg.dataset.c]); aRenderRows(); return; }
+    var fc=t.closest('[data-f]'); if(fc){ A.f=fc.dataset.f;
+      root.querySelectorAll('.vm-tools [data-f]').forEach(function(c){c.classList.toggle('on',c===fc)}); aRenderRows(); return; }
+    var bc=t.closest('[data-b]'); if(bc){ A.brand = (A.brand===bc.dataset.b)?'':bc.dataset.b;
+      root.querySelectorAll('.vm-tools [data-b]').forEach(function(c){c.classList.toggle('on',c.dataset.b===A.brand)});
+      var sel=$('#aBrand'); if(sel) sel.value=A.brand; aRenderRows(); return; }
+    if(t.closest('#aQx')){ A.q=''; var qi=$('#aQ'); if(qi){qi.value='';qi.focus();} aRenderRows(); return; }
+  });
+  /* 검색·브랜드 선택은 위임(도구줄은 재렌더되지 않으므로 매번 다시 붙지 않는다) */
+  root.addEventListener('input',function(e){ if(e.target.id==='aQ'){ A.q=e.target.value; aRenderRows(); } });
+  root.addEventListener('change',function(e){ if(e.target.id==='aBrand'){ A.brand=e.target.value;
+    root.querySelectorAll('.vm-tools [data-b]').forEach(function(c){c.classList.toggle('on',c.dataset.b===A.brand)}); aRenderRows(); } });
+  /* ESC = 패널 닫기. ★ 리스너는 document 에 한 번만 — #A 에 붙이면 포커스가 패널·본문 밖에
+     있을 때 키가 올라오지 않아 "닫히지 않는 오버레이"가 된다(브라우저 검증으로 실측). */
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&A.drawer) aCloseDrawer(); });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   시안 B
+   ══════════════════════════════════════════════════════════════ */
+var B={scope:'all',q:'',f:'all',brand:'',open:false,wb:false};
+
+function bRail(){
+  var h='<span class="rl">업체</span>'
+    +'<button class="vmb-av all'+(B.scope==='all'?' on':'')+'" data-s="all" title="전 업체 작업 보기">전체</button>'
+    +'<div style="height:1px;background:var(--line);width:32px;margin:4px 0"></div>';
+  h+=ADVS.map(function(a,i){
+    return '<button class="vmb-av'+(B.scope===a.id?' on':'')+'" data-s="'+a.id+'" title="'+esc(a.n)+(a.ae?' · AE '+esc(a.ae):' · AE 미지정')+'">'
+      +esc(a.n.replace(/^(주식회사|\(주\))\s*/,'').slice(0,2))
+      +(a.todo?'<span class="bd2">'+a.todo+'</span>':'')+'</button>';
+  }).join('');
+  h+='<div style="height:1px;background:var(--line);width:32px;margin:4px 0"></div>'
+    +'<button class="vmb-av wb'+(B.scope==='__wb'?' on':'')+'" data-s="__wb" title="업체 미지정 시트 9개 매칭">'
+    +ic('alert')+'<span class="bd2">9</span></button>';
+  return h;
+}
+function bHero(){
+  var a = B.scope==='all'?null:advById(B.scope);
+  var total = B.scope==='all'? 1204 : (a?a.works:0);
+  var head = B.scope==='__wb'
+    ? '<div class="h1r"><h3>업체 미지정 시트 9개</h3><span class="sub">시트를 업체에 매칭하면 계약·정산이 붙습니다</span></div>'
+    : '<div class="h1r"><h3>'+(a?esc(a.n):'전 업체 작업')+'</h3>'
+      +'<span class="sub">'+(a?('소유 캠페인 '+a.own+' · 연결된 탭 '+a.works):'업체 17곳 · 작업 1,204건')+'</span>'
+      +(a?'':'<span class="bdg v">업체를 고르면 그 업체로 좁혀집니다</span>')+'</div>';
+  var advbar='';
+  if(a){
+    var lk = a.link==='off'?'<span class="bdg r">링크 폐기</span>':a.link==='lock'?'<span class="bdg b">링크 로그인</span>':'<span class="bdg g">링크 공개</span>';
+    advbar='<div class="vmb-advbar"><span class="av">'+esc(a.n.slice(0,1))+'</span>'
+      +'<b>'+esc(a.n)+'</b>'
+      +'<span class="mt">담당 AE <b>'+(a.ae?esc(a.ae):'미지정')+'</b></span>'
+      +lk+(a.acct?'<span class="bdg">계정 '+a.acct+'</span>':'<span class="bdg w">계정 없음</span>')
+      +'<span class="mt">정산 노출</span><button class="sw" role="switch" aria-checked="'+(a.setl?'true':'false')+'" data-bsw="setl" aria-label="정산 노출"></button>'
+      +'<span class="sp"></span>'
+      +'<button class="b" id="bMore">'+ic(B.open?'down':'chev','sm')+(B.open?'접기':'자세히')+'</button>'
+      + (B.open? bDetail(a) : '')
+      +'</div>';
+  }
+  var tools = B.scope==='__wb' ? '' :
+    '<label class="vmb-srch"><svg class="i"><use href="#i-search"/></svg>'
+      +'<input id="bQ" placeholder="'+(a?'이 업체 작업 검색':'전 업체 작업 검색')+' — 작업명·브랜드·상품·계약번호" autocomplete="off">'
+      +'<span class="clr" id="bQx">지우기 (ESC)</span></label>'
+    +'<div class="tr" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:9px">'
+      +'<span class="chip'+(B.f==='all'?' on':'')+'" data-bf="all">전체 <b class="n">'+total+'</b></span>'
+      +'<span class="chip alert'+(B.f==='nomatch'?' on':'')+'" data-bf="nomatch">계약 미매칭 <b class="n">'+(B.scope==='all'?86:34)+'</b></span>'
+      +'<span class="chip alert'+(B.f==='unpaid'?' on':'')+'" data-bf="unpaid">미입금 <b class="n">'+(B.scope==='all'?22:12)+'</b></span>'
+      +'<span class="chip'+(B.f==='run'?' on':'')+'" data-bf="run">진행 중 <b class="n">'+(B.scope==='all'?68:21)+'</b></span>'
+      +'<span class="chip'+(B.f==='done'?' on':'')+'" data-bf="done">완료 <b class="n">'+(B.scope==='all'?1114:295)+'</b></span>'
+      +'<span style="flex:1"></span><span class="cnt" id="bCnt" style="font-size:11.5px;color:var(--muted);font-weight:650"></span>'
+      +'<button class="b xs">'+ic('grid','sm')+'표로 보기</button></div>';
+  return head+advbar+tools;
+}
+function bDetail(a){
+  return '<div class="vmb-detail">'
+    +'<div class="vm-fs" style="margin:0"><div class="t">'+ic('link','sm')+'접속 링크</div>'
+      +'<div class="vm-linkrow"><input readonly value="…/workdesk#adv=nXqKq9TU7adIrC1Nb…"><button class="b xs pri">'+ic('copy','sm')+'복사</button></div>'
+      +'<div class="hint">마지막 접속 2026. 8. 6. · 읽기 전용 · 리뷰어 연락처·주소 포함</div>'
+      +'<div style="display:flex;gap:6px;margin-top:8px"><button class="b xs">'+ic('rot','sm')+'회전</button><button class="b xs dgr">폐기</button></div></div>'
+    +'<div class="vm-fs" style="margin:0"><div class="t">'+ic('user','sm')+'광고주 계정<span class="sp"></span>'
+      +'<button class="sw" role="switch" aria-checked="'+(a.link==='lock'?'true':'false')+'" data-bsw="lock" aria-label="로그인 요구"></button></div>'
+      +(a.acct?'<div class="vm-acct" style="margin:0 0 6px"><span class="id">'+esc(a.n.replace(/\s+/g,''))+'</span><span class="bdg g">활성</span><button class="b xs">비번</button><button class="b xs dgr">삭제</button></div>':'<div class="hint" style="margin:0 0 7px">발급된 계정 없음</div>')
+      +'<div style="display:flex;gap:6px"><input class="fld" style="flex:1;min-width:0" placeholder="아이디"><button class="b xs pri">'+ic('plus','sm')+'발급</button></div></div>'
+    +'<div class="vm-fs" style="margin:0"><div class="t">'+ic('grid','sm')+'소유 캠페인 <span class="bdg">'+a.own+'</span></div>'
+      +'<div class="vm-own" style="margin:0"><span class="oi">'+ic('grid','sm')+'</span><span class="oinfo"><b>'+esc(a.id==='hon'?SHEET_HON:(a.n+'_업무시트'))+'</b><i>시트 전체 · 모든 탭 포함</i></span><button class="b xs qt">'+ic('x','sm')+'</button></div>'
+      +'<div style="display:flex;gap:6px;margin-top:8px"><select class="fld" style="flex:1;min-width:0"><option>＋ 시트 선택…</option></select><button class="b xs pri">지정</button></div></div>'
+    +'<div class="vm-fs" style="margin:0"><div class="t">'+ic('slide','sm')+'업체 설정</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="b xs">담당 AE 변경</button><button class="b xs">거래처 정보</button><button class="b xs dgr">업체 삭제</button></div>'
+      +'<div class="hint">담당 AE·정산 노출은 위 바에서 바로 바꿀 수 있습니다.</div></div>'
+    +'</div>';
+}
+/* 정산 4단 — ★ 점 옆에 날짜를 다 적으면 줄이 소음이 된다(실측). 날짜는 마우스오버로 두고
+   화면에는 "다음에 할 일" 한마디만 적는다(훑을 때 필요한 정보는 그것 하나다). */
+function bPipe(w){
+  var steps=[['견적',w.q],['마감자료',w.c],['계산서',w.iv],['입금',w.pd]];
+  if(!w.ctr) return '<span class="cell"><span class="vm-c dim">계약 매칭 전</span></span>';
+  var next=null;
+  for(var i=0;i<steps.length;i++){ if(!steps[i][1]){ next=steps[i][0]; break; } }
+  var h='<span class="cell"><span class="vmb-seg"><span class="vmb-pipe">';
+  steps.forEach(function(s2,i){
+    var done=!!s2[1], part = (i===3 && !done && (w.pa||0)>0);
+    h+='<span class="st" title="'+esc(s2[0])+(done?' '+esc(s2[1]):' 미완료')+'"><span class="pd '+(done?'f':(part?'w':''))+'"></span></span>';
+    if(i<3) h+='<span class="ln'+(done?' f':'')+'"></span>';
+  });
+  h+='</span><span class="vmb-nx'+(next?'':' done')+'">'+(next?('다음: '+next):'정산 완료')+'</span></span></span>';
+  return h;
+}
+function bRowHtml(w,i){
+  var q=B.q.trim(), p=pct(w), a=advById(w.adv);
+  var money;
+  if(!w.ctr) money='<span class="vm-c dim">—</span>';
+  else if(w.tc==null) money='<span class="sk"></span>';
+  else{
+    var cls=(w.pa&&w.pa>=w.tc)?'pd-ok':((w.pa||0)>0?'pd-part':'pd-zero');
+    money='<span class="vm-money"><b class="'+cls+'">'+won(w.pa)+'</b> <span class="dim">/ '+won(w.tc)+'</span></span>';
+  }
+  /* 위 줄 오른쪽: 전 업체 모드에선 업체명, 업체 모드에선 시트명(오쎄처럼 시트가 둘일 때 필요) */
+  var right = (B.scope==='all'&&a) ? '<span class="bdg v">'+hl(a.n,q)+'</span>' : '<span class="sheet">'+esc(w.sh)+'</span>';
+  return '<div class="vmb-row" data-i="'+i+'" role="button" tabindex="0" title="'+esc(w.n)+' · '+esc(w.sh)+'">'
+    +'<div class="vmb-r1"><i class="dot '+w.st+'"></i><span class="t">'+hl(w.n,q)+'</span>'
+      +(w.br?'<span class="bdg v">'+hl(w.br,q)+'</span>':'')
+      +(w.ch?'<span class="bdg">'+esc(w.ch)+'</span>':'')
+      +'<span class="sp"></span>'+right
+      +'<span class="vm-open">열기'+ic('chev','sm')+'</span></div>'
+    +'<div class="vmb-r2">'
+      +'<span class="cell vmb-prog"><span class="pt"><span>'+(w.t?('제출 <b>'+w.s+'</b>/'+w.t):'<span class="z">진행 전</span>')+'</span>'
+        +'<span class="'+(w.t?'':'z')+'">'+(w.t?p+'%':'—')+'</span></span>'
+        +'<span class="bar"><i class="'+(p>=100?'p2':'')+'" style="width:'+p+'%"></i></span></span>'
+      +'<span class="cell">'+(w.ctr?'<span class="vm-ctr on">'+hl(w.ctr,q)+'</span>':'<span class="vm-ctr">'+ic('plus','sm')+'계약 매칭</span>')+'</span>'
+      + bPipe(w)
+      +'<span class="cell r">'+money+'</span>'
+      +'<span class="cell vmb-memo" title="'+esc(w.memo||'')+'">'+(w.memo?(ic('doc','sm')+' '+hl(w.memo,q)):'')+'</span>'
+    +'</div></div>';
+}
+function bFilter(){
+  var q=B.q.trim().toLowerCase();
+  return W.map(function(w,i){return {w:w,i:i}}).filter(function(o){
+    var w=o.w;
+    if(B.scope!=='all' && w.adv!==B.scope) return false;
+    if(B.f==='nomatch' && w.ctr) return false;
+    if(B.f==='unpaid' && !(w.tc && (w.pa||0)<w.tc)) return false;
+    if(B.f==='run' && w.st!=='run') return false;
+    if(B.f==='done' && w.st!=='done') return false;
+    if(!q) return true;
+    return [w.n,w.br,w.pr,w.ctr,w.memo,(advById(w.adv)||{}).n].some(function(v){return String(v||'').toLowerCase().indexOf(q)>=0});
+  });
+}
+function bWorkbench(){
+  return '<div class="note cool" style="margin-bottom:11px;border-radius:12px">'
+    +'<b>줄마다 거래처명을 검색해 바로 매칭합니다.</b> 폼을 9번 반복하지 않습니다. 인트라넷 광고주DB에 있는 이름만 등록됩니다.</div>'
+    +UNM.map(function(u,i){
+      return '<div class="vmb-wb"><span class="si">'+ic('doc','sm')+'</span>'
+        +'<span class="sn"><b>'+esc(u.n)+'</b><i>탭 '+u.tabs+'개 · 최초 '+esc(u.first)+'</i></span>'
+        +'<span class="inp"><input class="fld" placeholder="거래처명 검색 (인트라넷 광고주DB)"><input class="fld" style="width:96px" placeholder="담당 AE"></span>'
+        +'<span style="display:flex;gap:6px;justify-content:flex-end"><button class="b xs">탭 보기</button><button class="b xs pri">매칭</button></span></div>';
+    }).join('');
+}
+function bRenderRows(){
+  var box=$('#bList'); if(!box) return;
+  if(B.scope==='__wb'){ box.innerHTML=bWorkbench(); return; }
+  var list=bFilter(), total=B.scope==='all'?1204:(advById(B.scope)||{}).works;
+  var cnt=$('#bCnt');
+  if(cnt) cnt.innerHTML=(B.q||B.f!=='all')?'<b>'+list.length+'</b>건 표시 / 전체 '+total:'';
+  if(!list.length){
+    box.innerHTML='<div class="vm-empty"><b>조건에 맞는 작업이 없습니다</b>'
+      +(B.q?'검색어 “'+esc(B.q)+'”':'선택한 필터')+'에 맞는 작업이 없습니다. ESC로 검색을 지우거나 [전체]를 눌러보세요.</div>';
+    return;
+  }
+  var head='<div class="vmb-row" style="box-shadow:none;border:0;background:transparent;padding:0 13px 4px;cursor:default;margin-bottom:2px">'
+    +'<div class="vmb-r2" style="margin:0;font-size:9.5px;font-weight:800;letter-spacing:.045em;color:var(--muted)">'
+    +'<span>제출 진척</span><span>계약</span><span>정산 진행</span><span class="r">입금액 / 총비용</span><span>비고</span></div></div>';
+  box.innerHTML=head+list.map(function(o){return bRowHtml(o.w,o.i)}).join('')
+    +'<div class="vm-more">이 목업은 '+list.length+'건만 그렸습니다 — 실제로는 '+total+'건이 이 아래로 이어집니다</div>';
+}
+function bRenderHero(){ var h=$('#bHero'); if(h) h.innerHTML=bHero(); }
+function bRenderRail(){ var r=$('#bRail'); if(r) r.innerHTML=bRail(); }
+
+function bInit(){
+  var root=$('#B'); if(!root) return;
+  bRenderRail(); bRenderHero(); bRenderRows();
+  root.addEventListener('click',function(e){
+    var t=e.target;
+    var s=t.closest('[data-s]'); if(s){ B.scope=s.dataset.s; B.q=''; B.f='all'; B.open=false;
+      bRenderRail(); bRenderHero(); bRenderRows(); return; }
+    if(t.closest('#bMore')){ B.open=!B.open; bRenderHero(); return; }
+    var bf=t.closest('[data-bf]'); if(bf){ B.f=bf.dataset.bf;
+      root.querySelectorAll('[data-bf]').forEach(function(c){c.classList.toggle('on',c===bf)}); bRenderRows(); return; }
+    if(t.closest('#bQx')){ B.q=''; var qi=$('#bQ'); if(qi){qi.value='';qi.focus();} bRenderRows(); return; }
+    var sw=t.closest('[data-bsw]'); if(sw){ var on=sw.getAttribute('aria-checked')==='true';
+      sw.setAttribute('aria-checked',on?'false':'true');
+      var a=advById(B.scope); if(a){ if(sw.dataset.bsw==='setl') a.setl=!on; else a.link=on?'open':'lock'; } return; }
+  });
+  root.addEventListener('input',function(e){ if(e.target.id==='bQ'){ B.q=e.target.value; bRenderRows(); } });
+  root.addEventListener('keydown',function(e){ if(e.key==='Escape'&&e.target.id==='bQ'){ B.q=''; e.target.value=''; bRenderRows(); } });
+}
+
+aInit(); bInit();
+
+/* ── ?v=A|B 단독 보기 (레포 시안 문서 관용구) ── */
+(function(){
+  var m=(location.search||'').match(/[?&]v=([AB])/i); if(!m) return;
+  var keep=m[1].toUpperCase()==='A'?'secA':'secB';
+  document.querySelectorAll('.page > *').forEach(function(el){
+    if(el.id!==keep) el.style.display='none';
+  });
+  var s=document.getElementById(keep); if(s){ s.style.marginTop='0';
+    s.querySelectorAll('.note,.cap,.sub').forEach(function(el){el.style.display='none'}); }
+  document.querySelector('.page').style.padding='16px 12px 30px';
+})();
+})();
+</script>
+</body></html>
