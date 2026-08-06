@@ -49,24 +49,47 @@ const CSB = require('../src/services/csBridge.service');
     const orig = CSB.postInspectionReject;
     CSB.postInspectionReject = async (p) => { calls.push(p); return { threadId: 7, messageId: 9 }; };
 
-    // A1: phone8 발견 → csBridge 로 그대로 전달, sent:true
-    RI.__setPoolForTest({ query: async (sql, params) => ({ rows: [{
-      sheet_id: 's', tab_name: 't', row_index: 48, reviewer_name: '신명기', phone8: '12345678',
-    }] }) });
+    const _row = (o) => ({ query: async () => ({ rows: [Object.assign({
+      sheet_id: 's', tab_name: 't', row_index: 48, reviewer_name: '신명기',
+      p_row: null, p_link: null, p_pl: null, p_name: null, name_cnt: 0,
+    }, o)] }) });
+
+    // A1: 시트 현재값(그 줄의 연락처) → csBridge 로 그대로 전달, sent:true
+    RI.__setPoolForTest(_row({ p_row: '12345678' }));
     const r1 = await RI.notifyInspectionReject({ fileId: 'F', message: '사유입니다', by: '만두' });
     assert.strictEqual(r1.sent, true);
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].phone8, '12345678');
     assert.strictEqual(calls[0].message, '사유입니다');
-    ok('A1: phone8 해석(review_index — 시트 현재값 = 소유권 규율) 후 csBridge 전달');
+    ok('A1: ① 시트 현재값(review_index — 소유권 규율)이 최우선');
 
-    // A2: phone8 없음 → 미전송 + 사람 안내(csBridge 미호출)
-    RI.__setPoolForTest({ query: async () => ({ rows: [{ sheet_id: 's', tab_name: 't', row_index: 1, reviewer_name: '김', phone8: null }] }) });
+    // A1b: ★ 시트 값이 없어도 포기하지 않는다 — ②결정적 링크 → ③확정신원 → ④유일 동명
+    //   (종전엔 ①만 봐서 row_index 가 NULL 이거나 연락처 칸이 비면 전건 미전송이었다)
+    for (const [k, via] of [['p_link', 'link'], ['p_pl', 'participation'], ['p_name', 'name']]) {
+      RI.__setPoolForTest(_row({ [k]: '87654321' }));
+      const g = await RI.resolveReviewerPhone8('F');
+      assert.strictEqual(g.phone8, '87654321');
+      assert.strictEqual(g.via, via, `${k} → via:${via}`);
+    }
+    RI.__setPoolForTest(_row({ p_row: '11111111', p_link: '22222222' }));
+    assert.strictEqual((await RI.resolveReviewerPhone8('F')).via, 'row', '★ 우선순위 고정(①이 ②를 이긴다)');
+    ok('A1b: ★ 4갈래 폴백 + 우선순위 고정(①시트 → ②결정적링크 → ③확정신원 → ④유일 동명)');
+
+    // A2: 어디에도 없음 → 미전송 + **사유를 구분한** 안내(csBridge 미호출)
+    RI.__setPoolForTest(_row({ row_index: null }));
     const r2 = await RI.notifyInspectionReject({ fileId: 'F', message: 'x', by: '' });
     assert.strictEqual(r2.sent, false);
+    assert.ok(/어느 줄인지 연결되어 있지 않/.test(r2.error), 'row_index 없음 = 그 사유를 말한다');
     assert.ok(/직접 안내/.test(r2.error), '실패 안내가 다음 행동(1:1 직접 안내)을 말한다');
     assert.strictEqual(calls.length, 1, '연락처 없으면 csBridge 미호출');
-    ok('A2: ★ 연락처 없음 = 미전송 + 명시 안내(조용한 미전송 금지)');
+
+    RI.__setPoolForTest(_row({ row_index: 48 }));
+    assert.ok(/48행의 연락처 칸이 비어/.test((await RI.resolveReviewerPhone8('F')).error),
+      '행은 있는데 시트 연락처가 빈 경우');
+    RI.__setPoolForTest(_row({ name_cnt: 3 }));
+    assert.ok(/3명이라 연락처를 특정할 수 없/.test((await RI.resolveReviewerPhone8('F')).error),
+      '동명이인 = 특정 불가(★ 아무에게나 보내지 않는다)');
+    ok('A2: ★ 연락처 없음 = 미전송 + **사유 구분** 안내(조용한 미전송·오배송 금지)');
 
     // A3: 빈 사유 = 미전송 / 조회 예외 = throw 없이 실패 반환
     assert.strictEqual((await RI.notifyInspectionReject({ fileId: 'F', message: '  ' })).sent, false);

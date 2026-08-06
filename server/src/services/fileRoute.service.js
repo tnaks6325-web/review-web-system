@@ -480,7 +480,10 @@ async function dedupManual({ fileId, by = '' } = {}) {
   if (!sub) return { ok: false, error: '원장에 없는 파일이라 제거할 수 없습니다.' };
   if (sub.slot_key === 'trashed') return { ok: false, error: '이미 제거된 파일입니다.' };
   const dup = insp && insp.checks && insp.checks.duplicate;
-  if (!dup || dup.verdict !== 'fail' || !dup.matchFileId) {
+  // ★ 근거는 **같은 지문의 기존 제출이 실제로 있는가**(matchFileId) 하나다 — 심각도(fail/warn)는
+  //   "한 캡처에 여러 리뷰" 완화로 갈릴 수 있으므로 게이트로 쓰지 않는다(사람이 보고 누르는 버튼).
+  //   근거 없는 파일은 여전히 거부(버튼 없는 유형의 API 직접 호출 차단).
+  if (!dup || !['fail', 'warn'].includes(dup.verdict) || !dup.matchFileId) {
     return { ok: false, error: '중복 근거(같은 지문의 기존 제출)가 없는 파일이라 제거할 수 없습니다.' };
   }
   try {

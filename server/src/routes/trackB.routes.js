@@ -1185,6 +1185,21 @@ router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res)
   }
 });
 
+/* 반려 안내를 보낼 수 있는 건인지 미리 확인 — 팝업이 열릴 때 1회.
+   ★ 연락처(phone8)는 응답에 담지 않는다(가능 여부·사유만 — 화면에 PII 를 늘리지 않는다).
+   ★ fail-soft: 확인 자체가 실패해도 팝업은 열려야 하므로 200 + canNotify:null(모름). */
+router.get('/review-inspect/notify-check', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String(req.query.fileId || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const r = await _inspectSvc.resolveReviewerPhone8(fileId);
+    res.json({ ok: true, canNotify: !!r.phone8, via: r.via || null, reason: r.phone8 ? null : (r.error || null) });
+  } catch (err) {
+    res.json({ ok: true, canNotify: null });
+  }
+});
+
 router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, res) => {
   try {
     const fileId = String((req.body || {}).fileId || '');
