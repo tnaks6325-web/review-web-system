@@ -167,12 +167,14 @@ async function run() {
     const info = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'admin');
     t('kind=info = 세 재료를 한 번에(folderUrl·captureFolderUrl·cashReceipt)',
       info.b.ok === true && info.b.folderUrl && info.b.captureFolderUrl && info.b.cashReceipt === true, JSON.stringify(info.b));
+    t("★★ 신규 응답에 kind:'info' 표식(배포 스큐 판별의 유일한 근거)", info.b.kind === 'info', JSON.stringify(info.b));
     t('★ Drive 무접촉 — tab_configs 한 줄 조회뿐',
       calls.length === 1 && /FROM tab_configs/.test(calls[0]), calls.join(' | '));
     t('★ 무거운 stats=1(review_index 전체 GROUP BY) 경로를 타지 않는다',
       !calls.some(c => /review_index/.test(c)));
     const cached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'admin');
     t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 1, 'queries=' + calls.length);
+    t("★★ **캐시 응답에도** kind 표식(한 경로만 붙이면 스큐 판별이 샌다)", cached.b.kind === 'info', JSON.stringify(cached.b));
     // ★★★ 블로커 재발 차단 — **캐시 히트가 스코프 게이트를 우회하지 않는다**:
     //   admin 이 채운 캐시 키에 담당 밖 staff 가 접근해도 403 이어야 한다(종전엔 200 + Drive 링크 2개).
     //   `canAccessTab` 을 스텁해 "담당 아님"을 만들고, **같은 키**로 두 번 부른다.
@@ -192,7 +194,7 @@ async function run() {
     poolMod.query = async () => ({ rows: [] });
     const none = await run1({ kind: 'info', sheetId: 'S9', tabName: 'T9' }, 'admin');
     t('★ 미등록 탭 = ok:false + 사유(프론트가 그 문구를 툴팁으로 보여준다)',
-      none.b.ok === false && /등록되지 않은 탭/.test(none.b.error), JSON.stringify(none.b));
+      none.b.ok === false && /등록되지 않은 탭/.test(none.b.error) && none.b.kind === 'info', JSON.stringify(none.b));
   }
 
   /* ═══ 4. 프론트 — 렌더러 한 벌 · 재료 정규화 실행 ═══ */
