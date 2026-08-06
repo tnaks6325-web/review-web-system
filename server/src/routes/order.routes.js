@@ -12,6 +12,7 @@ const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { fetchThumbFromUrl } = require('../utils/thumbFetch');
 const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
+const { LEGACY_DELIVERY_VALUES } = require('../utils/reviewType');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -924,8 +925,19 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
          display_name  = COALESCE(NULLIF(tab_configs.display_name,''),  EXCLUDED.display_name),
          manager       = COALESCE(NULLIF(tab_configs.manager,''),       EXCLUDED.manager),
          time_range    = COALESCE(NULLIF(tab_configs.time_range,''),    EXCLUDED.time_range),
-         review_type   = COALESCE(NULLIF(tab_configs.review_type,''),   EXCLUDED.review_type),
-         delivery_type = COALESCE(NULLIF(tab_configs.delivery_type,''), EXCLUDED.delivery_type),
+         -- ★★ 리뷰타입 칸에 **배송유형**('실배송'·'빈박스')이 들어 있으면 그것은 리뷰타입이
+         --   아니다 → 보존 대상에서 빼고 작업오더 값으로 교체한다. 그대로 두면 리뷰타입이
+         --   영영 '미지정'이라 **구매확정 작업의 정상 제출이 검수에서 전건 불량**이 된다
+         --   (2026-08-06 실사고 — 이노크아든_면마스크). 유효한 리뷰타입은 종전대로 보존.
+         review_type   = CASE WHEN tab_configs.review_type = ANY($12::text[])
+                              THEN EXCLUDED.review_type
+                              ELSE COALESCE(NULLIF(tab_configs.review_type,''), EXCLUDED.review_type) END,
+         -- ★ 잘못 들어가 있던 배송유형 값은 제 칸으로 옮긴다 — **blank-only**(접수·관리자가
+         --   이미 채운 delivery_type 은 절대 덮지 않는다).
+         delivery_type = COALESCE(NULLIF(tab_configs.delivery_type,''),
+                                  NULLIF(CASE WHEN tab_configs.review_type = ANY($12::text[])
+                                              THEN tab_configs.review_type ELSE '' END, ''),
+                                  EXCLUDED.delivery_type),
          updated_at    = NOW()`,
       [
         sheetId, tabName, gid, tabSheetUrl, spreadsheetTitle,
@@ -934,6 +946,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         //   관리자가 직접 고르게 한다(틀린 값보다 빈 값이 낫다).
         (o.title || ''), mapWorkManager(o.work_manager), (o.purchase_time || ''),
         (o.review_type || ''), (o.delivery_type || ''), courierProxy,
+        LEGACY_DELIVERY_VALUES,   // $12 — 어휘 단일 출처(utils/reviewType). 사본을 SQL 에 박지 않는다.
       ]
     );
 
