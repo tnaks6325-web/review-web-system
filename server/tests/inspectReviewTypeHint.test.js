@@ -219,8 +219,21 @@ const CTX = require('../src/services/reviewTypeContext.service');
     // 배선
     assert.ok(/STATE\.riRT = new Map\(\(r\.reviewTypes\|\|\[\]\)/.test(WD), '목록 응답을 받아 둔다');
     assert.ok(/_riConfirmMisset\(r\)\?`<div class="rirtfix">/.test(WD)
-      && /공고에서 <b>구매확정<\/b>으로 저장한 뒤 \[♻ 재검수\]/.test(WD),
+      && /공고에서 <b>구매확정<\/b>으로 저장한 뒤 다시 검수하면 통과됩니다/.test(WD),
       '★ 카드가 다음 행동(구매확정 저장 → 재검수)을 말한다');
+    // ★★ 안내가 가리키는 버튼은 **그 자리에 있어야** 한다 — 상단 [♻ 재검수]는 작업을 고른
+    //   뒤에만 보여 "재검수 버튼이 어디 있냐"는 신고가 실제로 났다(2026-08-06).
+    assert.ok(/riReinspectTab\(\$\{i\}\)/.test(WD), '★ 카드 안내에 그 작업 재검수 버튼');
+    assert.ok(/STATE\.role==='master'\|\|STATE\.role==='admin'\?`<button[\s\S]{0,200}riReinspectTab\(\$\{i\}\)/.test(WD),
+      '★ 권한 있는 사람에게만(서버 게이트 adminOrMaster 와 1:1 — 눌러도 안 되는 버튼 금지)');
+    assert.ok(/event\.stopPropagation\(\);riReinspectTab/.test(WD),
+      '★ 카드 본문 클릭(상세 열기)과 분리');
+    // 실행부는 한 벌 — 진입만 둘
+    assert.strictEqual((WD.match(/async function riReinspectTab\(/g) || []).length, 1,
+      '★ 재검수 실행 함수는 한 벌(확인 문구·후처리가 갈리지 않게)');
+    assert.ok(/const r0 = \(i!=null\) \? \(STATE\.ri\|\|\[\]\)\[i\] : null;/.test(WD)
+      && /const t = r0 \? \{ sheetId:r0\.sheet_id, tabName:r0\.tab_name \} : STATE\.riTab;/.test(WD),
+      '인자 있으면 그 카드의 작업 / 없으면 선택된 작업(상단 버튼 동작 불변)');
     assert.ok(/\+ \(_riRTNote\(r\)\?`<br>\$\{_riRTNote\(r\)\}`:''\)/.test(WD),
       '상세 팝업 리뷰 화면·채널 줄에 기대 설명');
     ok('D6: 배선 — 목록 수신 · 카드 조치 안내 · 상세 설명');
