@@ -612,6 +612,26 @@ router.get('/workdesk/settlement', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
+// 견적서 문서(버전 이력) — /workdesk/settlement 와 동일 게이트(_ensureThreadScope + 서비스 광고주 렌즈).
+router.get('/workdesk/quote-doc', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.quoteDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+// 계산서(전자세금계산서) 발행 요약 — 게이트 동일.
+router.get('/workdesk/invoice-doc', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.invoiceDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
 // ── 행별 리뷰 이미지(파일ID) — 업체 뷰어 미리보기 패널. 내부인 + 소유 광고주(_ensureThreadScope). ──
 //   ★ 파일ID만 반환하고 이미지는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍(신규 저장소·신규 프록시 0).
 router.get('/workdesk/review-images', authMiddleware, async (req, res, next) => {
