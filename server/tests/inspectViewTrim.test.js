@@ -126,6 +126,50 @@ const RI = require('../src/services/reviewInspect.service');
     ok('D2: 서버 status 필터 무변경(되살리기 쉽게)');
   }
 
+  /* ═══ E. 화면 정렬 · 인터랙션 · 팝업 닫힘 (사용자 확정 2026-08-06) ═══ */
+  console.log('\nE) 버튼바 끝맞춤 · 버튼 인터랙션 · 팝업');
+  {
+    // ★★ 헤더 버튼바 캡은 카드 영역 max-width 와 **같은 값**이어야 오른쪽 끝이 맞는다.
+    //   두 숫자를 따로 적어 두면 한쪽만 바뀌어 조용히 어긋난다 → 값 일치를 고정한다.
+    const cards = /\.ricards\{[^}]*max-width:(\d+)px/.exec(WD);
+    const head = /#rihead \.mh\{max-width:(\d+)px\}/.exec(WD);
+    assert.ok(cards && head, '.ricards / #rihead .mh 캡을 찾았다');
+    assert.strictEqual(head[1], cards[1],
+      `★★ 헤더 캡(${head && head[1]}) = 카드 영역 캡(${cards && cards[1]}) — 갈리면 버튼이 카드 밖으로 뜬다`);
+    assert.ok(/#rihead \.ovnote\{max-width:\d+px\}/.test(WD), '설명·유형 칩 줄도 같은 폭');
+    // 5장/줄이 유지되는 값인가 — 6장 문턱(6×268+5×11=1663)에 못 미쳐야 한다
+    const w = Number(cards[1]);
+    const col = /minmax\((\d+)px/.exec(WD.slice(WD.indexOf('.ricards{')))[1];
+    const gap = /\.ricards\{[^}]*gap:(\d+)px/.exec(WD)[1];
+    const fit = Math.floor((w + Number(gap)) / (Number(col) + Number(gap)));
+    assert.strictEqual(fit, 5, `★ 캡이 5장/줄을 만든다(현재 ${fit}장)`);
+    ok('E1: ★★ 헤더 버튼바 = 카드 영역과 같은 폭 · 5장/줄');
+
+    // 버튼 인터랙션 — 변형별 색을 다시 적지 않고 filter 로 공통 처리
+    assert.ok(/\.nc-main,\.nc-g,\.rirtfix \.btn\{transition:/.test(WD), '전환 지정');
+    assert.ok(/\.nc-main:hover\{filter:brightness/.test(WD) && /\.nc-main:active\{[^}]*transform:translateY\(1px\)/.test(WD),
+      '주 버튼 호버·누름');
+    assert.ok(/\.nc-g:hover\{background/.test(WD) && /\.nc-g\.ok:hover/.test(WD) && /\.nc-g\.bad:hover/.test(WD),
+      '보조 버튼 호버(정상·불량 색 유지)');
+    assert.ok(/@media \(prefers-reduced-motion:reduce\)\{[\s\S]{0,220}transform:none/.test(WD),
+      '★ 움직임 최소화 설정 존중(색 변화는 남기고 이동·전환만 끔)');
+    // ★ 채움 버튼으로 되돌아가지 않았는지 — 빨간 벽 방지 규율(시안 A)
+    assert.ok(!/\.nc-main:hover\{background:#(DC2626|B91C1C)/i.test(WD), '★ 호버에서 채움으로 바뀌지 않는다');
+    ok('E2: ★ 버튼 인터랙션(틴트·1px 눌림) + 움직임 최소화 존중');
+
+    // 팝업 — 바깥 클릭으로 닫히지 않는다(입력해 둔 사유가 날아가는 사고 방지)
+    const more = WD.slice(WD.indexOf('function riMoreMenu('), WD.indexOf('function riProductNames('));
+    const rc = WD.slice(WD.indexOf('function _rcPopup('), WD.indexOf('function _rcNotifyMsg('));
+    for (const [nm, blk] of [['[⋯] 메뉴', more], ['확인 팝업', rc]]) {
+      assert.ok(!/onclick=e=>\{ if\(e\.target===p\)/.test(blk), `★ ${nm} — 바깥 클릭 닫기 없음`);
+      assert.ok(/바깥 클릭으로는 닫지 않는다/.test(blk), `${nm} — 그 이유를 코드가 말한다`);
+    }
+    // ★ 닫는 길은 반드시 남아 있어야 한다(못 닫는 팝업 금지)
+    assert.ok(/riMorePop'\)\.remove\(\)">닫기<\/button>/.test(more), '[⋯] 에 [닫기]');
+    assert.ok(/onclick="riRcClose\(\)">취소<\/button>/.test(rc), '확인 팝업에 [취소]');
+    ok('E3: ★★ 바깥 클릭 닫기 제거 · 닫는 길은 유지(못 닫는 팝업 금지)');
+  }
+
   console.log(`\n✅ inspectViewTrim 회귀가드 ${n}케이스 통과`);
   process.exit(0);
 })().catch((e) => { console.error('❌ 실패:', e); process.exit(1); });
