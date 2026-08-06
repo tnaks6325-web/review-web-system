@@ -107,7 +107,7 @@ function seqPool(handlers) {
     assert.ok(!/c\.format\.got\)\|\|''/.test(wd) && /function _riFmtKind\(fm\)\{ return \(fm&&\(fm\.got\|\|fm\.kind\)\)\|\|''; \}/.test(wd),
       '★ 종류 판독은 _riFmtKind 한 곳(사본 금지 — 화면마다 종류가 갈린다)');
     // 근거 문장이 종류를 말한다(반려 사유 프리필로 그대로 나간다)
-    const reasonFn = /function _riReasons\(c\)\{[\s\S]*?\n\}/.exec(wd)[0];
+    const reasonFn = /function _riReasons\(c, opt\)\{[\s\S]*?\n\}/.exec(wd)[0];
     assert.ok(/화면으로 판별되었습니다 — 리뷰 화면이 아닙니다/.test(reasonFn) && /_riKindLabel\(c\.format\)/.test(reasonFn),
       '★ 근거 문장이 판별된 종류를 말한다');
     ok('A3b: ★★ kind/got 이름 흡수 — 현금영수증 판별 건에 이동 버튼·종류 표기가 뜬다');
@@ -225,8 +225,10 @@ function seqPool(handlers) {
     assert.ok(/_rcPopup\(/.test(routeFn) && !/\bconfirm\(/.test(routeFn),
       '★ 이동 확인 = 전용 팝업(시스템 confirm 미사용)');
     const dedupFn = /function riDedupPopup\(i\)\{[\s\S]*?\n\}/.exec(wd)[0];
-    assert.ok(/_rcPopup\(/.test(dedupFn) && /matchFileId/.test(dedupFn) && /보존 \(이전 제출\)/.test(dedupFn),
-      '중복 제거 팝업 = 두 장 비교(제거/보존 명시)');
+    // ⚠ 캡션이 "제거/보존 · 줄 번호"로 바뀌었다(관계 줄 도입) — 검사 의미 불변: 두 장 비교 + 제거/보존 명시
+    assert.ok(/_rcPopup\(/.test(dedupFn) && /matchFileId/.test(dedupFn)
+      && /🗑 제거 · \$\{esc\(myRow\)\}/.test(dedupFn) && /✓ 보존 · \$\{esc\(mtRow\)\}/.test(dedupFn),
+      '중복 제거 팝업 = 두 장 비교(제거/보존 + 줄 번호 명시)');
     assert.ok(/30일간 복구/.test(dedupFn), '휴지통 복구창 고지');
     ok('C2: 전용 팝업 — 이동(파랑)·제거(빨강, 두 장 비교)');
 

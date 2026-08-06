@@ -917,6 +917,31 @@
   .nc-g{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 0;font-size:11px;font-weight:700;color:#3A445A;cursor:pointer;white-space:nowrap}
   .nc-g.ok{color:#15803D}.nc-g.bad{color:#B91C1C}
   .nc-g.more{flex:0 0 36px;color:var(--muted);font-weight:800}
+  /* ★★ 관계 줄 — "무엇과 중복인지"를 카드에서 바로 읽히게(시안 design-inspect-duplicate-relation.html).
+     왼쪽 = 지금 보고 있는 건 / 오른쪽 = 이미 있던 것. 카드·확인 팝업·상세 팝업이 **같은 모양**을 쓴다.
+     ★ 색은 리터럴 고정 — 확인 팝업은 테마 변수가 없는 body 직속 오버레이다. */
+  .rirel{display:flex;align-items:stretch;border:1px solid #F3C8C4;border-radius:9px;overflow:hidden;
+         margin:6px 0 5px;background:#FFF8F8}
+  .rirel.k-sim{border-color:#E0D3F9;background:#FAF8FE}
+  .rirel.k-warn{border-color:#F2DFC0;background:#FFFDF7}
+  .rirel.k-none{border-color:#E2E8F0;background:#F8FAFC}
+  .rirel .sd{flex:1;min-width:0;padding:5px 8px}
+  .rirel .lb{font-size:9px;font-weight:800;letter-spacing:.04em;color:#94A3B8}
+  .rirel .rw{font-size:12.5px;font-weight:800;color:#B42318;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rirel .rw.keep{color:#15803D}
+  .rirel.k-sim .rw{color:#6D28D9} .rirel.k-sim .rw.keep{color:#475569}
+  .rirel.k-warn .rw{color:#8A4B06} .rirel.k-warn .rw.keep{color:#475569}
+  .rirel.k-none .rw{color:#475569} .rirel.k-none .rw.keep{color:#94A3B8}
+  .rirel .wh{font-size:10.5px;color:#64748B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rirel .ar{flex:0 0 30px;display:grid;place-items:center;background:rgba(255,255,255,.75);
+             border-left:1px dashed #F3C8C4;border-right:1px dashed #F3C8C4;font-size:13px;font-weight:800;color:#B42318}
+  .rirel.k-sim .ar{border-color:#E0D3F9;color:#6D28D9}
+  .rirel.k-warn .ar{border-color:#F2DFC0;color:#8A4B06}
+  .rirel.k-none .ar{border-color:#E2E8F0;color:#94A3B8}
+  .rirelnote{font-size:10.5px;color:#8A93A3;margin:-1px 0 5px;line-height:1.45}
+  .rirelflag{display:inline-block;font-size:9.5px;font-weight:800;border-radius:5px;padding:1px 5px;margin-left:3px}
+  .rirelflag.f-red{background:#FEE4E2;color:#B42318}
+  .rirelflag.f-blue{background:#EFF6FF;color:#1D4ED8}
   /* 상세 모달 */
   .rimodal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9000;padding:20px}
   .rimodal-in{background:var(--card);border:1px solid var(--line);border-radius:14px;max-width:1000px;width:100%;
@@ -5961,6 +5986,59 @@ function _riIssueTypes(r){
   if(c.author&&c.author.verdict==='warn') out.push('author');
   return out;
 }
+/* ══ 관계 줄 — "이 건 ▶ 짝" (시안 design-inspect-duplicate-relation.html, 사용자 확정) ══
+   ★★ **렌더러 한 벌** — 카드 · [🗑 제거] 확인 팝업 · 상세 팝업이 같은 것을 쓴다.
+     사본을 두면 화면마다 좌우가 뒤집히거나 한쪽만 안 바뀐다(이 저장소의 반복된 사고).
+   ★ 왼쪽은 **항상 지금 보고 있는 건**, 오른쪽은 이미 있던 것 — 방향을 뒤집지 말 것.
+   ★ 같은 작업·같은 리뷰어면 이름·작업명을 **반복하지 않는다**(카드 제목에 이미 있다).
+   ★ 짝의 줄 번호를 모르면 **"줄 번호 없음"이라고 적는다** — 빈칸으로 두면 "같은 줄"로 오해된다.
+   ★ 줄 번호는 **관리자 화면 전용** — 리뷰어에게 나가는 문구에는 넣지 않는다(참여 순번·상품으로). */
+const _riNm = (v) => String(v==null?'':v).replace(/\s+/g,'');
+function _riRelPairs(r){
+  const c=(r&&r.checks)||{}, out=[];
+  const push=(kind,m,note)=>{
+    const sameTab = !m.matchTab || m.matchTab===r.tab_name;
+    const sameRv  = !m.matchReviewer || _riNm(m.matchReviewer)===_riNm(r.reviewer_name);
+    // 같은 짝(작업·줄·리뷰어)을 가리키는 사유는 **한 줄로 합친다** — 두 번 읽게 하지 않는다.
+    const hit = out.find(o => o.sameTab===sameTab && o.matchRow===(m.matchRow??null)
+      && _riNm(o.matchReviewer)===_riNm(m.matchReviewer||''));
+    if(hit){ if(note) hit.notes.push(note); return; }
+    out.push({ kind, sameTab, sameRv,
+      matchRow: m.matchRow??null, matchTab: m.matchTab||'', matchReviewer: m.matchReviewer||'',
+      soft: kind==='sim' || m.sameReviewerOtherTab===true,
+      multi: m.sameReviewerOtherTab===true,
+      notes: note?[note]:[] });
+  };
+  const d=c.duplicate, sm=c.similarity;
+  if(d && ['fail','warn'].includes(d.verdict) && d.matchFileId) push('dup', d, null);
+  if(sm && sm.verdict==='warn') push('sim', sm, '본문 '+Math.round((sm.score||0)*100)+'% 겹침');
+  return out;
+}
+function _riRelHtml(r, opt){
+  const o=opt||{};
+  const pairs=_riRelPairs(r);
+  if(!pairs.length) return '';
+  const myRow = r.row_index ? r.row_index+'행' : '줄 번호 없음';
+  return pairs.map(p=>{
+    const cls = p.kind==='sim' ? 'k-sim' : p.multi ? 'k-warn' : (p.matchRow==null ? 'k-none' : '');
+    const rightRow = p.matchRow!=null ? p.matchRow+'행' : '줄 번호 없음';
+    const lLbl = o.leftLabel || '이 건';
+    const rLbl = o.rightLabel || (p.kind==='sim' ? '겹친 리뷰' : '이미 제출됨');
+    // 다른 리뷰어면 양쪽에 이름 / 같은 리뷰어인데 다른 작업이면 오른쪽에 작업명
+    const lWho = !p.sameRv ? esc(r.reviewer_name||'') : '';
+    const rWho = !p.sameRv ? esc(p.matchReviewer||'')
+               : (!p.sameTab ? esc(p.matchTab||'') : '');
+    const note = [ p.sameTab?'같은 작업':'다른 작업',
+                   p.sameRv?'같은 리뷰어':null, ...p.notes ].filter(Boolean).join(' · ')
+      + (!p.sameRv ? ' <span class="rirelflag f-red">다른 리뷰어</span>' : '')
+      + (p.multi ? ' <span class="rirelflag f-blue">한 화면에 여러 리뷰일 수 있음</span>' : '');
+    return `<div class="rirel ${cls}">
+      <div class="sd"><div class="lb">${esc(lLbl)}</div><div class="rw">${esc(myRow)}</div>${lWho?`<div class="wh">${lWho}</div>`:''}</div>
+      <div class="ar">▶</div>
+      <div class="sd"><div class="lb">${esc(rLbl)}</div><div class="rw keep">${esc(rightRow)}</div>${rWho?`<div class="wh">${rWho}</div>`:''}</div>
+    </div><div class="rirelnote">${note}</div>`;
+  }).join('');
+}
 function riTypeSet(k){ STATE.riType=k; _riRenderHead(STATE.riSummary); _riRenderBody(); }
 function _riRenderBody(){
   const rows = STATE.ri || [];
@@ -5973,7 +6051,8 @@ function _riRenderBody(){
   if(!view.length){ b.innerHTML=`<div class="empty">이 유형의 검수 건이 없습니다. <a href="javascript:void(0)" onclick="riTypeSet('all')">전체 유형 보기</a></div>`; return; }
   b.innerHTML = `<div class="ricards">` + view.map(([r,i])=>{
     const c = r.checks || {};
-    const reasons = _riReasons(c);
+    const reasons = _riReasons(c, {skipRel:true});   // 같은 파일·본문 겹침은 아래 관계 줄이 말한다
+    const relHtml = _riRelHtml(r);
     const cls = r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
     const thumb = _riImg(r.file_id);
     const p = _riPrimaryIssue(r);
@@ -5991,7 +6070,8 @@ function _riRenderBody(){
       <div class="nc-body" onclick="riOpenDetail(${i})">
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
-        <div class="rireason">${reasons.length?reasons.map(esc).join('<br>'):'—'}</div>
+        ${relHtml}
+        ${reasons.length?`<div class="rireason">${reasons.map(esc).join('<br>')}</div>`:(relHtml?'':'<div class="rireason">—</div>')}
       </div>
       ${r.status==='resolved'
         ? (r.resolution?`<div class="nc-act"><span class="rimeta">${r.resolution==='ok'?'✓ 정상(오탐) 처리됨':'✕ 불량 맞음 처리됨'}</span></div>`:'')
@@ -6210,14 +6290,18 @@ async function riDedupPopup(i){
   const dup=(r.checks&&r.checks.duplicate)||{};
   if(!['fail','warn'].includes(dup.verdict)||!dup.matchFileId){ alert('중복 근거(같은 지문의 기존 제출)가 없는 건입니다.'); return; }
   const msg = await _riMsgFor('duplicate', {});
-  const pairHtml=`<div style="display:flex;gap:10px;margin-bottom:12px">
+  const myRow = r.row_index ? r.row_index+'행' : '이 건';
+  const mtRow = dup.matchRow ? dup.matchRow+'행' : '먼저 제출';
+  // ★ 사진 위에 관계 줄 — 어느 줄이 지워지고 어느 줄이 남는지 먼저 보이게(카드와 같은 렌더러)
+  const relHtml = _riRelHtml(r, {leftLabel:'제거', rightLabel:'보존'});
+  const pairHtml=relHtml+`<div style="display:flex;gap:10px;margin-bottom:12px">
     <div style="flex:1;border:2px solid #FCA5A5;background:#FFF5F5;border-radius:10px;padding:8px">
-      <div style="font-size:.7rem;font-weight:800;color:#B91C1C;margin-bottom:6px">🗑 제거 (지금 제출)</div>
+      <div style="font-size:.7rem;font-weight:800;color:#B91C1C;margin-bottom:6px">🗑 제거 · ${esc(myRow)}</div>
       <div style="height:110px;border-radius:8px;overflow:hidden;background:#E2E8F0">${_riImg(r.file_id)?`<img src="${_riImg(r.file_id)}" style="width:100%;height:100%;object-fit:cover" alt="">`:''}</div>
       <div style="font-size:.7rem;color:#475569;margin-top:5px;line-height:1.45">${esc(r.tab_name||'')}<br>${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''}</div>
     </div>
     <div style="flex:1;border:2px solid #86EFAC;background:#F7FEF9;border-radius:10px;padding:8px">
-      <div style="font-size:.7rem;font-weight:800;color:#15803D;margin-bottom:6px">✓ 보존 (이전 제출)</div>
+      <div style="font-size:.7rem;font-weight:800;color:#15803D;margin-bottom:6px">✓ 보존 · ${esc(mtRow)}</div>
       <div style="height:110px;border-radius:8px;overflow:hidden;background:#E2E8F0">${_riImg(dup.matchFileId)?`<img src="${_riImg(dup.matchFileId)}" style="width:100%;height:100%;object-fit:cover" alt="">`:''}</div>
       <div style="font-size:.7rem;color:#475569;margin-top:5px;line-height:1.45">${esc(dup.matchTab||'')}<br>${esc(dup.matchReviewer||'')}${dup.matchRow?' · '+dup.matchRow+'행':''}</div>
     </div>
@@ -6226,7 +6310,7 @@ async function riDedupPopup(i){
     danger:true, icon:'🗑', title:'중복파일을 제거할까요?',
     sub:'같은 파일이 두 곳에 제출되어 있습니다 — 나중 제출본을 제거합니다',
     whoHtml:_rcWho(r), pairHtml,
-    doList:['지금 제출본(왼쪽)을 <b>휴지통</b>으로 보냅니다 — 이전 제출본은 그대로 남습니다',
+    doList:[`<b>${esc(myRow)}</b>의 사진을 <b>휴지통</b>으로 보냅니다 — <b>${esc(mtRow)}</b>은 그대로 남습니다`,
             '이 검수 건을 <b>불량 맞음(중복 제출)</b>으로 종결합니다'],
     notify:{ msg, fileId:r.file_id, hint:'반려된 사진과 이미 제출된 사진을 함께 보여줍니다 — 문구는 설정에서 바꿀 수 있어요.' },
     undoNote:'🗑 영구삭제가 아닙니다 — Drive 휴지통에서 <b>30일간 복구</b>할 수 있습니다', undoWarn:true,
@@ -6254,7 +6338,11 @@ function _riChanReason(fm){
              : `${work} 작업인데 캡처의 채널을 알 수 없습니다`;
 }
 /** 판정 근거를 사람 문장으로 — 카드에서 열어보지 않고도 판단되게 한다. */
-function _riReasons(c){
+/* ★ opt.skipRel = 관계 줄(_riRelHtml)이 이미 말하는 사유(같은 파일·본문 겹침)를 뺀다 —
+     카드에서 같은 정보를 두 번 적지 않기 위한 것. **반려 사유 프리필은 옵션 없이 부른다**
+     (리뷰어에게 가는 문장은 관계 줄이 없으므로 문장으로 다 말해야 한다). */
+function _riReasons(c, opt){
+  const skipRel = !!(opt&&opt.skipRel);
   const out=[];
   // ★ 종류를 알면 종류를 말한다 — "리뷰 화면이 아님"만으로는 무엇으로 보이는지 몰라
   //   담당자가 어디로 옮길지 판단할 수 없다(반려 사유 프리필로도 그대로 나간다).
@@ -6266,11 +6354,12 @@ function _riReasons(c){
     out.push(_riChanReason(c.format));
   if(c.product && c.product.verdict==='warn')
     out.push(`상품명 다름 — 캡처 "${(c.product.ocr||'').slice(0,40)}"`);
-  if(c.duplicate && c.duplicate.verdict==='warn' && c.duplicate.sameReviewerOtherTab)
+  if(skipRel){ /* 같은 파일·본문 겹침은 관계 줄이 말한다 */ }
+  else if(c.duplicate && c.duplicate.verdict==='warn' && c.duplicate.sameReviewerOtherTab)
     out.push(`같은 리뷰어가 다른 작업(${c.duplicate.matchTab||''})에도 같은 캡처를 냈습니다 — 한 화면에 여러 리뷰가 보이는 캡처일 수 있습니다`);
   else if(c.duplicate && c.duplicate.verdict==='fail')
     out.push(`같은 파일이 이미 제출됨 — ${c.duplicate.matchTab||''} ${c.duplicate.matchReviewer||''} ${c.duplicate.matchRow?c.duplicate.matchRow+'행':''}`.trim());
-  if(c.similarity && c.similarity.verdict==='warn')
+  if(!skipRel && c.similarity && c.similarity.verdict==='warn')
     out.push(`본문 ${Math.round((c.similarity.score||0)*100)}% 겹침 — ${c.similarity.matchReviewer||''} ${c.similarity.matchRow?c.similarity.matchRow+'행':''}${c.similarity.matchTab&&c.similarity.scope==='global'?' ('+c.similarity.matchTab+')':''}`.trim());
   if(c.author && c.author.verdict==='warn')
     out.push(`같은 작성자 표기(${c.author.ocr||''})가 ${(c.author.others||[]).join(', ')} 제출에도 있음`);
@@ -6310,6 +6399,7 @@ function riOpenDetail(i){
         <div class="rimeta">${esc(r.file_name||'')}</div>
       </div>
       <div class="rimright">
+        ${_riRelHtml(r)}
         <table class="ritbl">
           ${line(fm.verdict||'skip','리뷰 화면·채널', fm.verdict==='fail'
             ? (_riKindLabel(fm)?esc(_riKindLabel(fm))+' 화면으로 판별 — 리뷰 화면이 아닙니다':'리뷰 화면이 아닌 것으로 판정됨')
