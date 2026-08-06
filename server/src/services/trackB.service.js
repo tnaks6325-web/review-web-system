@@ -585,7 +585,8 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
      SELECT t.sheet_id AS "sheetId", t.spreadsheet_title AS "spreadsheetTitle", t.tab_gid AS "tabGid",
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
-            tc.manager, wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
+            tc.manager, tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl",
+            wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
             tm.memo,
@@ -1047,6 +1048,8 @@ async function advertiserWorkSummary({ advertiserId } = {}) {
         total: t.bTotal || 0, submitted: t.bSub || 0, paid: t.bPaid || 0,
         target: t.woRecruit || null,
         startDate: t.woStartDate ? String(t.woStartDate).slice(0, 10) : null,
+        // A안: 자료 폴더 바로가기 — 드라이브 [리뷰]·[구매캡처] 폴더 URL(광고주 노출 무해).
+        folderUrl: t.folderUrl || null, captureFolderUrl: t.captureFolderUrl || null,
         settlement: s ? {
           contractNumber: s.contractNumber || '', proxyDown: !!s.proxyDown,
           quoteStatus: s.quoteStatus || null, quoteDate: s.quoteDate || null,
