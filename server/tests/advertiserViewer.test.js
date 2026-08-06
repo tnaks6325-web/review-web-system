@@ -137,7 +137,7 @@ async function run() {
   ok('★ body.advm 상한(1680px)이 존재한다', iAdv > -1);
   ok('★ 선언 순서: data-vw 뒤(광고주 고정이 이김) · widemode 앞(전체화면은 해제)', iQhd > -1 && iWide > -1 && iQhd < iAdv && iAdv < iWide);
   ok('renderShell 이 광고주일 때 body.advm 을 붙인다', /classList\.toggle\('advm',\s*isAdv\)/.test(src));
-  ok('renderLogin 이 advm 잔재를 제거한다(로그아웃·만료 후 원복)', /renderLogin[\s\S]{0,300}classList\.remove\('advm'\)/.test(src));
+  ok('renderLogin 이 advm 잔재를 제거한다(로그아웃·만료 후 원복)', /renderLogin[\s\S]{0,300}classList\.remove\('advm'/.test(src));
   ok('★ FHD/QHD 토글은 광고주에게 안 그린다', /\$\{isAdv\?'':`<div class="vwsw"/.test(src));
 
   // ── 작업 선택 = 좌측 세로 목록(업체관리 차용) ──
@@ -175,8 +175,8 @@ async function run() {
 
   /* ═══ 5. 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ═══ */
   ok('첫 화면 기본값 = 대시보드(STATE.advView:\'dash\')', /advView:'dash'/.test(src));
-  ok('_renderAdvHome 이 advView 로 대시보드/전체 작업을 분기한다',
-    /if\(\(STATE\.advView\|\|'dash'\)==='list'\) _renderAdvList\(\); else _renderAdvDash\(\);/.test(src));
+  ok('_renderAdvHome 이 advView 로 대시보드/전체 작업/브랜드 관리를 분기한다',
+    /if\(v==='list'\) _renderAdvList\(\); else if\(v==='brands'&&!STATE\.brandId\) _renderAdvBrands\(\); else _renderAdvDash\(\);/.test(src));
   ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
   ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
     /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));
