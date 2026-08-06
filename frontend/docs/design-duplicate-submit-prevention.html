@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>중복 캡처 제출 — 원인 진단 · 유저플로우 · 해결 시안</title>
+<style>
+  /* 오프라인 열람 — 외부 리소스 0, 라이트 고정. */
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#F2F4F7; color:#1B2334; line-height:1.62; padding:28px 16px 100px; }
+  .wrap { max-width:1120px; margin:0 auto; }
+  h1 { font-size:1.38rem; margin-bottom:4px; }
+  h2 { font-size:1.1rem; margin:44px 0 6px; padding-bottom:8px; border-bottom:2px solid #313B52; }
+  h3 { font-size:.95rem; margin:22px 0 8px; color:#334155; }
+  p, li, td, th { font-size:.86rem; }
+  .sub { color:#64748B; font-size:.84rem; margin-bottom:18px; }
+  .doc { background:#fff; border:1px solid #E4E7EE; border-radius:12px; padding:17px 19px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; background:#fff; margin:9px 0; }
+  th, td { border:1px solid #E4E7EE; padding:7px 10px; text-align:left; vertical-align:top; font-size:.82rem; }
+  th { background:#F8F9FB; font-size:.78rem; }
+  code { background:#F1F3F7; border:1px solid #E4E7EE; border-radius:4px; padding:1px 5px; font-size:.78rem; font-family:Consolas,monospace; }
+  ul { padding-left:19px; margin:6px 0; }
+  li { margin:3px 0; }
+  .star { color:#DC2626; font-weight:800; }
+  .no { color:#B91C1C; font-weight:800; }
+  .yes { color:#15803D; font-weight:800; }
+  .note { background:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:11px 15px; font-size:.83rem; margin:10px 0; }
+  .decide { background:#EEF2FF; border:1px solid #C7D2FE; border-radius:10px; padding:11px 15px; font-size:.83rem; margin:10px 0; }
+
+  /* ── 플로우 ── */
+  .flow { display:flex; gap:10px; flex-wrap:wrap; align-items:stretch; margin:12px 0; }
+  .fstep { flex:1; min-width:170px; background:#fff; border:1px solid #E4E7EE; border-radius:11px; padding:11px 13px; position:relative; }
+  .fstep .n { font-size:.62rem; font-weight:800; letter-spacing:.08em; color:#94A3B8; }
+  .fstep .t { font-size:.86rem; font-weight:800; margin:2px 0 5px; }
+  .fstep .d { font-size:.75rem; color:#64748B; line-height:1.5; }
+  .fstep .gap { margin-top:8px; font-size:.73rem; background:#FEF3F2; border:1px solid #F3C8C4; color:#9F1D1D; border-radius:8px; padding:6px 8px; line-height:1.45; }
+  .fstep .fix { margin-top:8px; font-size:.73rem; background:#F1FBF4; border:1px solid #C4E8CE; color:#14672F; border-radius:8px; padding:6px 8px; line-height:1.45; }
+  .fstep.bad { border-color:#F3C8C4; }
+  .fstep.good { border-color:#C4E8CE; }
+
+  /* ── 폰 목업 ── */
+  .phones { display:flex; gap:16px; flex-wrap:wrap; }
+  .ph { width:250px; background:#fff; border:1px solid #D8DEE8; border-radius:16px; overflow:hidden; box-shadow:0 2px 10px rgba(27,35,52,.08); }
+  .ph-top { background:#F6F8FB; border-bottom:1px solid #E4E7EE; padding:7px 12px; font-size:.68rem; color:#94A3B8; display:flex; justify-content:space-between; }
+  .ph-b { padding:12px; }
+  .ph-t { font-size:.86rem; font-weight:800; margin-bottom:2px; }
+  .ph-s { font-size:.72rem; color:#64748B; margin-bottom:9px; }
+  .cap { display:grid; place-items:center; height:104px; border-radius:9px; background:linear-gradient(160deg,#E4E7EE,#CFD6E0); font-size:1.5rem; }
+  .cap.sm { height:66px; font-size:1.1rem; }
+  .btn { display:block; width:100%; text-align:center; border-radius:9px; padding:9px 0; font-size:.78rem; font-weight:800; margin-top:8px; border:1px solid transparent; }
+  .btn.pri { background:#1D4ED8; color:#fff; }
+  .btn.gh { background:#fff; color:#3A445A; border-color:#D8DEE8; }
+  .btn.dis { background:#F1F3F7; color:#A9B1BF; }
+  .warnbox { background:#FEF3F2; border:1px solid #F3C8C4; border-radius:10px; padding:9px 11px; margin-top:9px; }
+  .warnbox .h { font-size:.78rem; font-weight:800; color:#B91C1C; }
+  .warnbox .d { font-size:.72rem; color:#7F1D1D; margin-top:3px; line-height:1.45; }
+  .okbox { background:#F1FBF4; border:1px solid #C4E8CE; border-radius:10px; padding:9px 11px; margin-top:9px; }
+  .okbox .h { font-size:.78rem; font-weight:800; color:#15803D; }
+  .okbox .d { font-size:.72rem; color:#14532D; margin-top:3px; line-height:1.45; }
+  .rowlist { border:1px solid #E4E7EE; border-radius:10px; overflow:hidden; margin-top:8px; }
+  .rowlist .r { display:flex; align-items:center; gap:8px; padding:7px 9px; border-bottom:1px solid #EEF1F5; font-size:.74rem; }
+  .rowlist .r:last-child { border-bottom:none; }
+  .rowlist .th { width:30px; height:38px; border-radius:5px; background:linear-gradient(160deg,#E4E7EE,#CFD6E0); flex:none; display:grid; place-items:center; font-size:.8rem; }
+  .tag { font-size:.64rem; font-weight:800; border-radius:99px; padding:1px 7px; flex:none; }
+  .tag.done { background:#E5F3EE; color:#127A5E; }
+  .tag.wait { background:#F1F3F7; color:#68717E; }
+  .tag.dup { background:#FEE2E2; color:#B91C1C; }
+  .lbl { font-size:.66rem; font-weight:800; color:#94A3B8; letter-spacing:.06em; margin:14px 0 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>중복 캡처 제출은 왜 생기는가 — 원인 진단 · 유저플로우 · 해결 시안</h1>
+<p class="sub">리뷰검수 <b>📄 같은 파일 28건</b>을 실측 분석하고, 코드에서 막지 못하는 지점을 짚은 뒤 해결안을 제시한다. | 2026-08-06</p>
+
+<h2>1. 무슨 일이 벌어졌나 (실측 28건 패턴)</h2>
+<div class="doc">
+<table>
+<tr><th style="width:26%">패턴</th><th style="width:32%">실제 사례</th><th>해석</th></tr>
+<tr><td><b>같은 리뷰어 · 같은 작업 · 다른 행</b><br><span class="no">가장 많음</span></td>
+    <td>김예진 394행 ↔ 388행(0629 친구사이 하절기 7차)<br>황보리 124행 ↔ 121행<br>이다현 79행 ↔ 76행</td>
+    <td>한 사람이 <b>같은 작업에 여러 건 참여</b>(다회차·다계정)한 뒤 <b>같은 캡처를 여러 행에 올림</b>. 대부분 <b>본문 겹침 100%</b>도 함께 떠 리뷰 글까지 동일.</td></tr>
+<tr><td><b>같은 리뷰어 · 다른 작업</b></td>
+    <td>백은미 35행 — 노티드 두바이 쫀득쿠키 ↔ <b>노티드 우유크림폭탄떡</b></td>
+    <td>다른 상품인데 이전 상품 캡처 재사용. 갤러리에서 <b>비슷한 최근 사진</b>을 잘못 고른 전형.</td></tr>
+</table>
+<div class="note"><b>중요</b> — 이 중 일부는 <b>실수</b>(어느 행에 무엇을 냈는지 몰라 같은 사진 재선택)지만, <b>본문까지 100% 같은 건은 리뷰 재사용(부정)</b>일 가능성이 높다. 화면 개선은 실수를 없애고, 남는 건이 곧 <b>진짜 부정</b>이라 판단이 쉬워진다 — 두 원인을 분리하는 것이 이 개선의 첫 성과다.</div>
+</div>
+
+<h2>2. 왜 못 막았나 — 지금의 유저플로우 (문제 지점)</h2>
+<div class="flow">
+  <div class="fstep bad"><div class="n">STEP 1</div><div class="t">사진 고르기</div>
+    <div class="d">리뷰어가 휴대폰 갤러리에서 캡처를 고른다. 최근 사진들이 비슷하게 생겼다.</div>
+    <div class="gap">❌ 화면 어디에도 <b>"내가 이 작업에 이미 낸 사진"</b>이 안 보인다.</div></div>
+  <div class="fstep bad"><div class="n">STEP 2</div><div class="t">첨부 즉시 1차 필터</div>
+    <div class="d">AI 가 <b>리뷰 화면인지·어느 채널인지</b>만 본다(<code>/review-precheck</code>).</div>
+    <div class="gap">❌ <b>중복 대조를 아예 하지 않는다</b> — 요청에 행·리뷰어·파일지문이 실리지도 않는다. 같은 사진이어도 통과.</div></div>
+  <div class="fstep bad"><div class="n">STEP 3</div><div class="t">업로드 · 제출</div>
+    <div class="d">파일이 Drive 에 저장되고 원장에 지문(SHA-256)이 기록된다.</div>
+    <div class="gap">❌ 이때 검사하는 중복은 <b>"같은 행·같은 리뷰어·같은 칸"</b>뿐(<code>findSlotDuplicate</code>) — <b>다른 행·다른 작업 중복은 통과</b>. 사고 유형이 정확히 이 사각지대.</div></div>
+  <div class="fstep bad"><div class="n">STEP 4</div><div class="t">완료 화면</div>
+    <div class="d">"제출됐습니다 · 다시 제출하지 마세요"</div>
+    <div class="gap">❌ 리뷰어는 <b>잘못 냈다는 사실을 모른 채 종료</b>. 시트·업체 전달 경로에는 이미 반영.</div></div>
+  <div class="fstep bad"><div class="n">STEP 5</div><div class="t">(며칠 뒤) 관리자 검수</div>
+    <div class="d">2차 검수가 <b>다른 자리·다른 사람</b> 지문과 대조해 중복 발견(<code>findDuplicate</code>).</div>
+    <div class="gap">❌ 이미 저장·반영된 뒤라 <b>관리자가 사후에 지우고 재요청</b>해야 한다(지금 보고 계신 28건).</div></div>
+</div>
+<div class="doc">
+<h3>사각지대 표 — 어느 검사가 무엇을 보는가</h3>
+<table>
+<tr><th style="width:30%">검사 지점</th><th>같은 행 재업로드</th><th>같은 작업 <b>다른 행</b></th><th>다른 작업</th></tr>
+<tr><td>① 첨부 즉시 1차 필터</td><td class="no">안 봄</td><td class="no">안 봄</td><td class="no">안 봄</td></tr>
+<tr><td>② 업로드 시 자동분류</td><td class="yes">봄(교체 처리)</td><td class="no">안 봄</td><td class="no">안 봄</td></tr>
+<tr><td>③ 제출 후 2차 검수</td><td>제외(정상 재제출)</td><td class="yes">봄 → <b>사후</b></td><td class="yes">봄 → <b>사후</b></td></tr>
+</table>
+<p style="margin-top:8px"><span class="star">★</span> 결론: <b>리뷰어가 실수를 되돌릴 수 있는 시점(첨부·제출 전)에는 중복을 아무도 보지 않는다.</b> 질문하신 가설 — "이전 제출물 확인 없이 바로 새로 낼 수 있어서" — 가 맞고, 여기에 <b>시스템도 그 시점에 안 본다</b>는 원인이 하나 더 겹쳐 있다.</p>
+</div>
+
+<h2>3. 해결안 — 개선된 유저플로우</h2>
+<div class="flow">
+  <div class="fstep good"><div class="n">STEP 1</div><div class="t">제출 화면 진입</div>
+    <div class="d">그 작업에서 <b>내가 이미 낸 캡처</b>와 행별 제출 현황을 먼저 보여준다.</div>
+    <div class="fix">✅ 해결 <b>B</b> — "무엇을 냈는지" 확인 없이 새로 내는 상황 자체를 없앤다.</div></div>
+  <div class="fstep good"><div class="n">STEP 2</div><div class="t">첨부 즉시 중복 감지</div>
+    <div class="d">고른 사진의 지문을 그 자리에서 대조해 <b>이미 제출한 사진이면 즉시 알려준다</b>(어디에·언제 냈는지 + 썸네일).</div>
+    <div class="fix">✅ 해결 <b>A</b>(근본) — 파일이 저장되기 <b>전</b>이라 리뷰어가 사진만 바꾸면 끝난다.</div></div>
+  <div class="fstep good"><div class="n">STEP 3</div><div class="t">제출</div>
+    <div class="d">중복인 채로 강행하면 서버가 기록하고 관리자에게 <b>즉시</b> 알린다.</div>
+    <div class="fix">✅ 해결 <b>D</b> — 며칠 뒤가 아니라 그날 처리. 고의 재사용만 남는다.</div></div>
+  <div class="fstep good"><div class="n">STEP 4</div><div class="t">완료 · 내역</div>
+    <div class="d">리뷰 내역 카드에서 제출한 이미지를 바로 확인·교체 요청.</div>
+    <div class="fix">✅ 해결 <b>C</b> — 확인 경로를 팝업 안쪽에서 카드 표면으로 끌어올린다.</div></div>
+</div>
+
+<div class="lbl">화면 목업 — 리뷰어 휴대폰</div>
+<div class="phones">
+
+  <!-- 현재 -->
+  <div class="ph">
+    <div class="ph-top"><span>지금</span><span>제출 화면</span></div>
+    <div class="ph-b">
+      <div class="ph-t">리뷰 캡처 첨부</div>
+      <div class="ph-s">0629)친구사이_하절기 7차 · 394행</div>
+      <div class="cap">🖼</div>
+      <div style="font-size:.72rem;color:#64748B;margin-top:7px">사진을 고르면 바로 첨부됩니다.</div>
+      <span class="btn pri">제출하기</span>
+      <div style="font-size:.68rem;color:#B91C1C;margin-top:9px;line-height:1.5">
+        ❌ 388행에 <b>같은 사진</b>을 이미 냈지만 아무 표시가 없다 — 그대로 제출됨</div>
+    </div>
+  </div>
+
+  <!-- A: 첨부 즉시 중복 감지 -->
+  <div class="ph">
+    <div class="ph-top"><span>해결 A</span><span>첨부 즉시</span></div>
+    <div class="ph-b">
+      <div class="ph-t">리뷰 캡처 첨부</div>
+      <div class="ph-s">0629)친구사이_하절기 7차 · 394행</div>
+      <div class="cap">🖼</div>
+      <div class="warnbox">
+        <div class="h">이미 제출한 사진이에요</div>
+        <div class="d">이 사진은 <b>같은 작업 388행</b>에 <b>어제 21:58</b> 제출하셨어요.<br>이번 건은 <b>다른 리뷰 화면</b>을 캡처해서 올려주세요.</div>
+        <div style="display:flex;gap:7px;margin-top:8px;align-items:center">
+          <div class="cap sm" style="width:44px">🖼</div>
+          <div style="font-size:.68rem;color:#7F1D1D;line-height:1.4">388행에 제출한 사진<br>(같은 파일)</div>
+        </div>
+      </div>
+      <span class="btn pri">다른 사진 고르기</span>
+      <span class="btn gh" style="font-size:.72rem">그래도 이 사진이 맞아요</span>
+    </div>
+  </div>
+
+  <!-- B: 내가 이미 낸 캡처 -->
+  <div class="ph">
+    <div class="ph-top"><span>해결 B</span><span>제출 화면 상단</span></div>
+    <div class="ph-b">
+      <div class="ph-t">내 제출 현황</div>
+      <div class="ph-s">0629)친구사이_하절기 7차 — 내 참여 3건</div>
+      <div class="rowlist">
+        <div class="r"><div class="th">🖼</div><div style="flex:1"><b>388행</b><br><span style="color:#64748B">7/29 21:58 제출</span></div><span class="tag done">제출완료</span></div>
+        <div class="r"><div class="th">🖼</div><div style="flex:1"><b>390행</b><br><span style="color:#64748B">7/30 09:12 제출</span></div><span class="tag done">제출완료</span></div>
+        <div class="r"><div class="th" style="background:#F1F3F7">＋</div><div style="flex:1"><b>394행</b><br><span style="color:#64748B">지금 제출할 건</span></div><span class="tag wait">대기</span></div>
+      </div>
+      <div class="okbox"><div class="h">각 행마다 다른 리뷰가 필요해요</div>
+        <div class="d">이미 낸 사진·글과 <b>같은 것</b>을 다시 올리면 반려됩니다.</div></div>
+      <span class="btn pri">394행 캡처 첨부하기</span>
+    </div>
+  </div>
+
+  <!-- C: 리뷰 내역 -->
+  <div class="ph">
+    <div class="ph-top"><span>해결 C</span><span>리뷰 내역</span></div>
+    <div class="ph-b">
+      <div class="ph-t">제출완료</div>
+      <div class="ph-s">내가 낸 캡처를 카드에서 바로 확인</div>
+      <div class="rowlist">
+        <div class="r"><div class="th">🖼</div><div style="flex:1"><b>친구사이 하절기 7차</b> · 388행<br><span style="color:#64748B">7/29 제출 · 상품비 12,000 · 리뷰비 1,500</span></div></div>
+        <div class="r" style="background:#FFFBFB"><div class="th">🖼</div><div style="flex:1"><b>친구사이 하절기 7차</b> · 394행<br><span style="color:#B91C1C">388행과 같은 사진으로 확인됨</span></div><span class="tag dup">확인필요</span></div>
+      </div>
+      <span class="btn gh" style="font-size:.72rem">🖼 제출 이미지 확인 · 교체 요청</span>
+      <div style="font-size:.68rem;color:#64748B;margin-top:8px;line-height:1.45">
+        지금은 이 버튼이 <b>참여상품 정보 팝업 안쪽</b>에 있고 단건일 때만 보인다 → 카드 표면으로.</div>
+    </div>
+  </div>
+
+</div>
+
+<h2>4. 구현 관점 — 무엇을 고치면 되나</h2>
+<div class="doc">
+<table>
+<tr><th style="width:8%">안</th><th style="width:26%">변경</th><th style="width:34%">근거·비용</th><th>효과</th></tr>
+<tr><td><b>A</b><br><span class="star">근본</span></td>
+    <td><code>/api/diag/review-precheck</code> 에 <b>지문 대조</b> 추가 — 요청에 <code>rowIndex·reviewerName</code> 동봉, 서버가 <code>hashBase64</code> → <code>review_submissions.file_hash</code> 조회</td>
+    <td>지문은 <b>이미 업로드 시 기록</b>되고 <code>idx_review_sub_hash</code> <b>인덱스도 이미 있다</b> → 조회 1회, AI 콜 순증 0. 첨부 시점에 base64 를 이미 쥐고 있어 계산 비용 0.</td>
+    <td>파일이 저장되기 <b>전</b>에 리뷰어가 스스로 교정 — 실수형 중복이 사실상 사라진다</td></tr>
+<tr><td><b>B</b></td>
+    <td>제출 화면 상단에 <b>그 작업의 내 제출 현황</b>(행별 썸네일·제출일)</td>
+    <td>리뷰어 조회는 기존 무인증 phone8 스코프 경로 재사용 가능. 신규 저장소 0.</td>
+    <td>"어느 행에 무엇을 냈는지" 몰라서 나는 중복 제거</td></tr>
+<tr><td><b>C</b></td>
+    <td>리뷰 내역 완료 카드에서 <b>제출 이미지 확인</b>을 표면으로(현재는 참여상품 팝업 안 · 단건 한정)</td>
+    <td>기존 <code>review-edit</code> 게이트·화면 그대로 사용</td>
+    <td>제출 후 자가 점검이 쉬워짐</td></tr>
+<tr><td><b>D</b></td>
+    <td>업로드 시 <b>다른 행 중복</b>이면 즉시 리뷰어 안내 + 관리자 알림(<code>capture_dup_*</code>)</td>
+    <td>자동분류 실행부 재사용. ★ <b>파일은 지우지 않는다</b> — 정당한 재제출을 잃지 않기 위해 알림까지만.</td>
+    <td>며칠 뒤가 아니라 <b>그날</b> 처리</td></tr>
+</table>
+
+<h3>완화하면 안 되는 지점</h3>
+<ul>
+  <li><span class="star">★★</span> <b>같은 행·같은 리뷰어의 재업로드는 중복이 아니다</b> — Drive 는 재업로드마다 새 파일ID를 만들므로 이걸 막으면 <b>정상적인 재제출이 전부 반려</b>된다(현행 규칙 유지).</li>
+  <li><span class="star">★★</span> <b>A는 차단이 아니라 경고 + 우회로</b>를 기본으로 둔다 — 지문이 같아도 정당한 경우(관리자 요청으로 같은 화면 재제출 등)가 있고, 우리 판정 오류로 <b>제출 자체를 막으면 참여가 소각</b>된다(1차 필터의 fail-open 규율과 동일).</li>
+  <li><span class="star">★</span> 화면 개선은 <b>실수</b>를 없앨 뿐 <b>고의 재사용</b>은 다른 사진으로 우회한다 — 그래서 D(관리자 알림)와 본문 겹침 검사를 함께 남긴다.</li>
+</ul>
+
+<div class="decide"><b>확인이 필요한 결정</b><br>
+① <b>A의 강도</b> — (기본안) 경고 + [그래도 이 사진이 맞아요] 우회 허용 / (강경) 다른 행·다른 작업 중복은 첨부 자체를 차단<br>
+② <b>대조 범위</b> — (기본안) 그 리뷰어 본인의 제출물 전체(작업 무관) / (좁게) 같은 작업 안에서만<br>
+③ <b>B 표시 범위</b> — (기본안) 같은 작업의 내 참여 행 전부 / (넓게) 최근 참여 작업까지<br>
+답이 없으면 <b>기본안</b>으로 진행합니다.</div>
+</div>
+
+</div>
+</body>
+</html>
