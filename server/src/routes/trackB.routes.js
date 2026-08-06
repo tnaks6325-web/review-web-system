@@ -143,37 +143,77 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
 //   ★ fail-soft — 어떤 실패도 200 + 사유로 돌려준다(클릭 한 번에 500 을 보여줄 이유가 없다).
 //   찾은 URL 은 불변이라 길게(10분), 미발견은 짧게(60초 — 그 사이 첫 현영 캡처가 올 수 있다) 캐시.
 const _tabFolderCache = new Map();
+const _tabFolderInfoCache = new Map();
 router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) => {
   const sheetId = String(req.query.sheetId || '').trim();
   const tabName = String(req.query.tabName || '').trim();
   if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId·tabName이 필요합니다.' });
+  // kind=info = 작업보드 상단 폴더 버튼용 **가산 분기** — 그 탭의 세 폴더 재료를 한 번에 알려준다.
+  //   ★ 신규 엔드포인트 0(같은 라우트·같은 스코프 게이트) + Drive 무접촉(tab_configs 한 줄 조회).
+  //   ★ 홈처럼 stats=1(review_index 전체 GROUP BY)을 붙이지 않는다 — 작업 탭을 열 때마다 무거운
+  //     집계를 돌리는 것은 CLAUDE.md 가 못박은 금지선이다. 여기선 그 탭 한 줄만 읽는다.
+  const wantInfo = String(req.query.kind || '') === 'info';
   const key = `${sheetId}\t${tabName}`;
-  const hit = _tabFolderCache.get(key);
-  if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
-    return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
-  }
   try {
-    // staff(AE)는 담당 탭만 — 폴더 URL 도 담당 스코프 밖으로 새지 않는다(마감·스레드와 같은 규율).
+    // ★★ 스코프 게이트가 **캐시보다 먼저**다(코드리뷰가 잡은 실측 구멍): 캐시 히트를 위에서 반환하면
+    //   누군가 그 탭을 최근에 열어 둔 동안 **담당 밖 AE 가 Drive 링크를 그대로 받는다**(60초/10분 창).
+    //   "폴더 URL 도 담당 스코프 밖으로 새지 않는다"는 이 라우트의 불변식이 캐시 한 줄로 무력화됐다.
+    //   순서 고정 = 파싱 → **스코프** → 캐시 → 작업.
     if (_role(req) === 'staff') {
       const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
       if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
+    }
+    if (wantInfo) {
+      const ih = _tabFolderInfoCache.get(key);
+      if (ih && Date.now() - ih.at < 60000) return res.json({ ok: true, kind: 'info', ...ih.val });
+    } else {
+      const hit = _tabFolderCache.get(key);
+      if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
+        return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
+      }
+    }
+    const { cashReceiptSlotInfo, CR_MISCONFIG_NOTE } = require('../utils/captureSlots');
+    if (wantInfo) {
+      const r = await pool.query(
+        `SELECT folder_url, capture_folder_url, capture_slots, income_type
+           FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+      const t = r.rows[0];
+      if (!t) return res.json({ ok: false, kind: 'info', error: '등록되지 않은 탭입니다.' });
+      const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type);
+      const val = {
+        folderUrl: t.folder_url || null,
+        captureFolderUrl: t.capture_folder_url || null,
+        cashReceipt: !!cri.slot,
+        // 오설정(현영인데 슬롯 없음)일 때만 실린다 — 버튼 툴팁이 '대상 아님'으로 뭉개지 않게.
+        ...(!cri.slot && cri.incomeSaysCashReceipt ? { cashReceiptNote: CR_MISCONFIG_NOTE } : {}),
+      };
+      _tabFolderInfoCache.set(key, { at: Date.now(), val });
+      // ★ kind 를 되돌려준다 — 프론트가 **이 응답이 info 응답인지** 확인할 유일한 표식이다.
+      //   구버전 백엔드는 kind 를 모르고 현영(receipt) 분기로 답하는데, 표식이 없으면 프론트가 그
+      //   `{ok:true,url}` 을 info 로 오독해 "폴더 미생성"으로 위장한다(배포 스큐 실측 시나리오).
+      return res.json({ ok: true, kind: 'info', ...val });
     }
     const { rows } = await pool.query(
       `SELECT folder_url, capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`,
       [sheetId, tabName]);
     const tc = rows[0];
     if (!tc) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
-    const { isCashReceiptIncome, slotLabel } = require('../utils/captureSlots');
-    // 관리자 명시 capture_slots 에 receipt 슬롯이 있는 탭도 허용(라벨은 그 설정을 따른다 — 업로드와 같은 규칙).
-    const hasReceipt = isCashReceiptIncome(tc.income_type)
-      || (Array.isArray(tc.capture_slots) && tc.capture_slots.some(s => s && s.key === 'receipt'));
-    if (!hasReceipt) return res.json({ ok: false, error: '현금영수증 발행 대상 작업이 아닙니다.' });
+    // ★ 현영 대상 판정은 captureSlots.cashReceiptSlotInfo 단일 규칙 — 버튼 활성(홈·업체관리·작업보드)과
+    //   이 허용 판정이 **같은 함수**여야 "눌리는데 거부"/"대상인데 안 눌림"이 생기지 않는다.
+    const cr = cashReceiptSlotInfo(tc.capture_slots, tc.income_type);
+    if (!cr.slot) {
+      // ★ 사유를 구분한다 — 진행방식이 현영인데 슬롯에서 못 찾은 것과, 애초에 대상이 아닌 것은 다른 일이다
+      //   ("대상 아님"으로 뭉개면 관리자가 무엇을 고쳐야 할지 알 수 없다).
+      return res.json({ ok: false, error: cr.incomeSaysCashReceipt ? CR_MISCONFIG_NOTE : '현금영수증 발행 대상 작업이 아닙니다.' });
+    }
     const driveService = require('../services/drive.service');   // 지연 require — 테스트가 이 라우터를 스텁 pool 로 실행할 때 Drive 스택 무부하
     const reviewFolderId = tc.folder_url ? driveService.extractFolderIdFromUrl(tc.folder_url) : null;
     if (!reviewFolderId) {
       return res.json({ ok: false, error: '리뷰 폴더가 아직 없습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다.' });
     }
-    const label = slotLabel(tc.capture_slots, tc.income_type, 'receipt', null) || '현금영수증';
+    // ★ 폴더 이름 = 그 슬롯의 **실제 라벨**(업로드가 그 라벨로 서브폴더를 만든다).
+    //   종전 `slotLabel(...,'receipt')` 은 수동 슬롯 탭(key=slot2)에서 문자열 'receipt' 를 뒤졌다.
+    const label = (cr.slot && cr.slot.label) || '현금영수증';
     const found = await driveService.findFolderByName(label, reviewFolderId);   // ★ find-only
     if (!found) {
       const msg = '현영 캡처가 아직 없어 폴더가 만들어지지 않았습니다.';
@@ -519,7 +559,22 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
     // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
     //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
     const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
-    res.json({ ok: true, items: own.rows, statsUnavailable: own.statsUnavailable, finishedUnavailable: own.finishedUnavailable });
+    // ★★ staff(AE)는 담당 업체가 아니면 **폴더 URL 을 받지 않는다**(코드리뷰가 잡은 경계):
+    //   이 목록은 업체를 골라 보는 화면이라 AE 가 남의 업체도 열 수 있는데, 응답에 Drive 링크가
+    //   실려 있으면 [자료] 버튼이 곧 담당 밖 폴더 접근 수단이 된다(/tab-folders 는 서버가 막는데
+    //   여기는 열려 있어 같은 불변식이 한쪽만 지켜지던 상태). 담당 여부는 한 쿼리(inad_pm).
+    //   ★ 지우고 조용히 넘기지 않는다 — folderScoped:false 로 **사유를 화면이 말한다**.
+    let rows = own.rows;
+    let folderScoped = true;
+    if (_role(req) === 'staff') {
+      const mine = await svc.staffOwnsAdvertiser({ advertiserId: req.query.advertiserId, staffName: req.admin && req.admin.name });
+      if (!mine) {
+        folderScoped = false;
+        rows = rows.map(r => ({ ...r, folderUrl: null, captureFolderUrl: null, cashReceipt: false, cashReceiptNote: undefined }));
+      }
+    }
+    res.json({ ok: true, items: rows, statsUnavailable: own.statsUnavailable,
+      finishedUnavailable: own.finishedUnavailable, ...(folderScoped ? {} : { folderScoped: false }) });
   } catch (err) { next(err); }
 });
 

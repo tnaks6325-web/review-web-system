@@ -384,6 +384,7 @@
   .owntab .omoney{font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .owntab .omoney .pd-ok{color:var(--safe);font-weight:700} .owntab .omoney .pd-part{color:var(--warn);font-weight:700} .owntab .omoney .pd-zero{color:var(--faint)}
   /* 계약 칸 — 미매칭이면 [계약 매칭] 어포던스, 매칭됐으면 계약번호(클릭 = 다시 매칭) */
+  .owntab .omat{overflow:visible;line-height:1}   /* 자료 열: 3버튼 묶음이 세로로 붕 뜨지 않게 */
   .owntab .octr{overflow:visible}
   .octrb{display:inline-block;max-width:100%;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:999px;cursor:pointer;
     border:1px dashed var(--accent-line);color:var(--accent-deep);background:transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1075,14 +1076,17 @@
   .advitem .ovm-b{flex:none;font-size:10px;font-weight:800;border-radius:999px;padding:1px 6px;background:var(--warn-soft);color:var(--warn);
     border:1px solid color-mix(in srgb,var(--warn) 25%,transparent)}
   /* 업체 헤더 — 1줄 신원 + 2줄 설정 버튼 */
-  .ovm-hd{max-width:1400px}
+  /* ★ 폭 상한은 표의 열 합에 맞춘다 — [자료] 열(136px+gap)이 늘면서 종전 1400px 에서는
+     오른쪽이 잘려 가로 스크롤이 생겼다(사용자 신고). 헤더·도구줄·표 세 곳이 같은 값이어야
+     버튼이 '그 데이터의 오른쪽 끝'에 붙는다(#wohead/.mh 규칙과 같은 이유). */
+  .ovm-hd{max-width:1560px}
   .ovm-hd .r2{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:11px 0 0}
   .ovm-hd .r2 .lbl{font-size:10px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-right:2px}
   .ovm-setbtn{display:inline-flex;align-items:center;gap:6px}
   /* 도구줄 — 표 위 고정(316건을 내려도 검색·필터가 따라온다) */
   /* 스크롤 컨테이너 = .own-panel(위 .own-wrap 고정 높이 참조). top:-18px = 패널 상단 여백만큼
      끌어올려 표가 도구줄 아래로 정확히 사라지게 한다. .own-panel 의 overflow 를 없애면 이 sticky 가 죽는다. */
-  .ovm-tools{position:sticky;top:-18px;z-index:3;background:var(--paper);padding:11px 0 9px;margin-top:14px;max-width:1400px;
+  .ovm-tools{position:sticky;top:-18px;z-index:3;background:var(--paper);padding:11px 0 9px;margin-top:14px;max-width:1560px;
     display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
   .ovm-tools .tr{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   .ovm-tools .ovm-srch{flex:1;min-width:220px;max-width:420px;height:31px;background:var(--card)}
@@ -1494,6 +1498,10 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-btncol .wbl-b{padding:3px 8px;text-align:center}
 .wbl-fol{display:inline-grid;grid-template-columns:repeat(3,40px);gap:3px}
 .wbl-fol .wbl-b{width:100%;padding:3px 2px;text-align:center;overflow:hidden}
+/* 작업보드 상단(툴바 오른쪽) 변형 — 작업이 하나로 특정된 자리라 라벨을 다 쓴다.
+   ★ 3분할 고정 그리드를 풀고 내용 폭으로 눕힌다(툴바는 표 칸이 아니라 열 정렬 대상이 아니다). */
+.wbl-fol.folbig{display:inline-flex;gap:6px}
+.wbl-fol.folbig .wbl-b{width:auto;padding:4px 10px;font-size:11px}
 /* ★ 비활성 = 숨기지 않고 옅은색 + 클릭 불가 모양(사용자 확정 — 현영 비해당·폴더 미생성).
    숨기면 줄마다 버튼 수가 달라져 눈이 열을 다시 찾는다. */
 .wbl-b.dis,.wbl-b:disabled{color:#c3cad6;border-color:#edf0f5;background:var(--card2);cursor:not-allowed}
@@ -2091,7 +2099,9 @@ function _brandLens(){
 }
 function _awFolderBtns(it, big){
   if(STATE.brandId&&!it.folderUrl&&!it.captureFolderUrl) return '';   // 브랜드 세션: 폴더 비공개면 자리도 없음
-  const b=(url,cls,ic,label)=> url
+  //   ★ URL 검증은 내부 렌더러와 **같은 규칙**(_folUrlOk) — esc 는 속성 탈출만 막고
+  //     `javascript:` 같은 스킴은 그대로 실행된다. 검증 실패는 미연결과 같은 회색 자리.
+  const b=(url,cls,ic,label)=> _folUrlOk(url)
     ? `<a class="fol ${cls}${big?' big':''}" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${label} 폴더 열기 (Google Drive)">${ic} ${big?label+' 폴더':cls==='buy'?'구매':'리뷰'} <span class="up">↗</span></a>`
     : `<span class="fol off${big?' big':''}" title="폴더가 아직 연결되지 않았습니다 — 담당자에게 문의하세요">${ic} —</span>`;
   return b(it.captureFolderUrl,'buy','🛒','구매캡쳐')+b(it.folderUrl,'rev','📸','리뷰캡쳐');
@@ -2919,30 +2929,101 @@ function _finFilterNoteHtml(all,filt){
   const n=all.filter(t=>!isFinished(t)&&!(Array.isArray(t.campaigns)&&t.campaigns.length)).length;
   return n?`<div class="wbl-note" style="border-top:1px dashed var(--line)">ℹ️ 모집공고가 없는 작업 ${n}건은 [금일 진행] 필터에 표시되지 않습니다(모집 상태를 판정할 공고가 없음).</div>`:'';
 }
-/* ── [저장폴더] 열: [구매][리뷰][현영] 텍스트 버튼 3개(내부 고정 3분할 — 비활성이어도 자리 유지) ──
-   ★ 비활성은 숨기지 않고 옅은색(사용자 확정) + 사유 툴팁. onclick 은 인덱스만(XSS 규율).
-   ★ 현영 버튼은 서버 stats 의 cashReceipt(= income_type '현영', captureSlots 단일 규칙 파생)로만 판정. */
-function _folBtnsHtml(t,i){
-  const s=(t&&t.stats)||{};
-  const noStats=!t||!t.stats;
-  const tipNoStats='수치를 불러오지 못해 폴더 정보를 알 수 없습니다(새로고침해 주세요)';
+/* ── [저장폴더] 3버튼 [구매][리뷰][현영] — 홈 작업목록 · 업체관리 연결탭 · 작업보드 상단 **공용** ──
+   ★★ 렌더러·열기 동작은 한 벌이다(사본 금지) — 세 화면에 사본을 두면 한쪽만 URL 검증(_folUrlOk)이
+     풀리거나 현영 판정이 갈라진다. 화면이 다른 것은 재료가 담긴 자리와 버튼 크기뿐이므로
+     src('home'|'own'|'cur')로 재료 위치만 가른다(_folMat).
+   ★ 비활성은 숨기지 않고 옅은색(사용자 확정) + 사유 툴팁. onclick 은 **인덱스만**(XSS 규율 — 시트발
+     탭명·URL 을 onclick 문자열에 넣지 않는다).
+   ★ 현영은 서버가 준 cashReceipt(captureSlots.hasCashReceiptSlot 단일 규칙)로만 판정한다. */
+function _folRow(src,i){
+  if(src==='own') return (STATE.ownTabs||[])[i];
+  if(src==='cur') return STATE.cur;
+  return (STATE.tabs||[])[i];
+}
+/* 폴더 재료 정규화 — ★ "모른다"와 "없다"를 구분한다(조용한 거짓 안내 금지):
+     known:false = 아직 알 수 없음(통계 미도착·조회 실패) → 버튼 비활성 + **그 사유**를 말한다.
+     cr===undefined = 현영 대상 여부 미상(구버전 백엔드) → '대상 아님'으로 단정하지 않는다. */
+function _folMat(t,src){
+  if(!t) return {known:false,why:'작업 정보를 찾지 못했습니다'};
+  if(src==='own'){  // 업체관리: 연결탭 응답이 폴더 재료를 직접 싣는다(추가 조회 없음)
+    // ★ 담당 밖 업체는 서버가 폴더 URL 을 비워 보낸다(folderScoped:false) — '폴더 미생성'이 아니라 그 사유를 말한다.
+    if((STATE.ownTabMeta||{}).folderScoped===false)
+      return {known:false,why:'담당하지 않은 업체의 작업입니다 — 폴더 링크는 담당 AE·관리자에게 문의하세요'};
+    // ★ tab_configs 행 자체가 없는 탭(LEFT JOIN NULL)은 "폴더가 없다"가 아니라 "등록 정보가 없다".
+    //   구버전 백엔드는 이 플래그를 안 보내므로 undefined 는 종전대로 '등록됨'으로 본다(스큐 무해).
+    if(t.hasTabConfig===false)
+      return {known:false,why:'이 탭은 등록 정보가 없습니다(탭 설정 미등록) — 폴더를 알 수 없습니다'};
+    return {known:true,cap:t.captureFolderUrl,rev:t.folderUrl,cr:t.cashReceipt,crNote:t.cashReceiptNote};
+  }
+  if(src==='cur'){  // 작업보드: kind=info 지연조회 결과, 없으면 홈에서 온 stats
+    // ★★ 실패한 _fol 이 나중에 도착한 stats 를 영영 덮지 않게 한다(코드리뷰가 잡은 실측 경로):
+    //   직행 진입 → info 일시 실패 → 홈 방문(stats 병합) → 재진입 이면 버튼이 세션 내내 죽어 있었다.
+    const f=(t._fol&&!t._fol.err)?t._fol:(t.stats||t._fol);
+    if(!f) return {known:false,why:'폴더 정보를 불러오는 중입니다'};
+    if(f.err) return {known:false,why:f.err};
+    return {known:true,cap:f.captureFolderUrl,rev:f.folderUrl,cr:f.cashReceipt,crNote:f.cashReceiptNote};
+  }
+  if(!t.stats) return {known:false,why:'수치를 불러오지 못해 폴더 정보를 알 수 없습니다(새로고침해 주세요)'};
+  return {known:true,cap:t.stats.captureFolderUrl,rev:t.stats.folderUrl,cr:t.stats.cashReceipt,crNote:t.stats.cashReceiptNote};
+}
+function _folBtnsInner(t,i,src,big){
+  const m=_folMat(t,src);
   const tipNoFolder='아직 폴더가 생성되지 않았습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다';
+  const arg=src&&src!=='home'?`,'${src}'`:'';
   const b=(kind,label,on,tip)=>on
-    ? `<button class="wbl-b" onclick="event.stopPropagation();openTabFolder(${i},'${kind}')" title="${esc(tip)}">${label}</button>`
-    : `<button class="wbl-b dis" disabled onclick="event.stopPropagation()" title="${esc(noStats?tipNoStats:tip)}">${label}</button>`;
-  return `<span class="wbl-fol">
-    ${b('capture','구매',_folUrlOk(s.captureFolderUrl),_folUrlOk(s.captureFolderUrl)?'구매캡처 폴더 열기':tipNoFolder)}
-    ${b('review','리뷰',_folUrlOk(s.folderUrl),_folUrlOk(s.folderUrl)?'리뷰 폴더 열기':tipNoFolder)}
-    ${b('receipt','현영',!!s.cashReceipt,s.cashReceipt?'현금영수증 폴더 열기':'현금영수증 발행 대상 작업이 아닙니다')}
-  </span>`;
+    ? `<button class="wbl-b" onclick="event.stopPropagation();openTabFolder(${i},'${kind}'${arg})" title="${esc(tip)}">${label}${big?' ↗':''}</button>`
+    : `<button class="wbl-b dis" disabled onclick="event.stopPropagation()" title="${esc(m.known?tip:m.why)}">${label}</button>`;
+  const L=big?['🛒 구매캡처','📸 리뷰캡처','🧾 현금영수증']:['구매','리뷰','현영'];
+  return b('capture',L[0],m.known&&_folUrlOk(m.cap),_folUrlOk(m.cap)?'구매캡처 폴더 열기':tipNoFolder)
+    + b('review',L[1],m.known&&_folUrlOk(m.rev),_folUrlOk(m.rev)?'리뷰 폴더 열기':tipNoFolder)
+    + b('receipt',L[2],m.known&&m.cr===true,
+        m.cr===true?'현금영수증 폴더 열기'
+          :(m.cr===undefined?'현금영수증 대상 여부를 알 수 없습니다(서버 응답에 값이 없습니다)'
+            // 오설정(현영인데 슬롯에 현금영수증 칸 없음)은 서버가 준 문장을 그대로 — '대상 아님'으로 뭉개지 않는다.
+            :(m.crNote||'현금영수증 발행 대상 작업이 아닙니다')));
+}
+function _folBtnsHtml(t,i,src){ return `<span class="wbl-fol">${_folBtnsInner(t,i,src||'home',false)}</span>`; }
+/* 작업보드 상단(툴바 오른쪽) — 작업이 **하나로 특정된** 자리라 라벨을 다 쓰는 큰 버튼을 쓴다.
+   ★ 광고주에게는 그리지 않는다 — 광고주 화면엔 이미 자기 폴더 링크가 있고, /tab-folders 는
+     internalMiddleware 라 광고주가 누르면 403 막다른 길이 된다. */
+function _folBarHtml(){
+  if(STATE.role==='advertiser'||!STATE.cur) return '';
+  return `<span class="wbl-fol folbig" id="folBar" style="margin-left:auto">${_folBtnsInner(STATE.cur,0,'cur',true)}</span>`;
+}
+/* 작업보드용 폴더 재료 지연조회 — 그 탭 한 줄만 읽는 가벼운 경로(kind=info).
+   ★ 홈처럼 stats=1 을 부르지 않는다(review_index 전체 GROUP BY 를 탭 전환마다 돌리지 않는다).
+   ★ 이미 stats 가 병합돼 있으면(홈을 거쳐 온 경우) 아무 요청도 하지 않는다. */
+async function _folEnsureCur(){
+  const t=STATE.cur;
+  // ★ 성공한 재료가 있으면 재요청 없음. **실패는 다시 시도한다** — 한 번의 일시 장애로 버튼이
+  //   세션 내내 죽어 있으면 사용자에게 되살릴 방법이 없다(작업을 다시 열면 재시도 = 자연스러운 복구).
+  if(!t||STATE.role==='advertiser'||t.stats||t._folLoad||(t._fol&&!t._fol.err)) return;
+  t._folLoad=true;
+  try{
+    const r=await api('/api/trackb/tab-folders?kind=info&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+    // ★★ kind 표식이 없으면 **info 응답이 아니다** — 구버전 백엔드(Pages 가 Railway 보다 앞선 배포 스큐)는
+    //   kind 를 모르고 현영 분기로 답하는데, 그 `{ok:true,url}` 을 그대로 믿으면 폴더가 멀쩡히 있는데도
+    //   "아직 폴더가 생성되지 않았습니다"로, `{ok:false,'현금영수증 발행 대상 아님'}` 이면 구매·리뷰 버튼까지
+    //   그 문구로 위장된다(실측 시나리오). 표식이 없으면 '모른다'로 두고 사유를 말한다.
+    if(r&&r.kind!=='info') t._fol={err:'서버 업데이트 대기 — 폴더 정보를 알 수 없습니다(잠시 후 다시 열어 주세요)'};
+    else t._fol=(r&&r.ok)?{captureFolderUrl:r.captureFolderUrl,folderUrl:r.folderUrl,cashReceipt:r.cashReceipt,cashReceiptNote:r.cashReceiptNote}
+                         :{err:(r&&r.error)||'폴더 정보를 불러오지 못했습니다'};
+  }catch(_){ t._fol={err:'폴더 정보를 불러오지 못했습니다'}; }
+  finally{
+    t._folLoad=false;
+    // ★ 버튼 묶음만 갈아치운다(그리드 전체 재렌더 금지 — 편집 중 셀·검색 하이라이트를 잃는다).
+    //   그 사이 다른 작업으로 옮겼으면 아무것도 하지 않는다(stale 렌더 방지).
+    const el=$('#folBar'); if(el&&STATE.cur===t) el.innerHTML=_folBtnsInner(t,0,'cur',true);
+  }
 }
 // 폴더 URL 은 Drive 호스트일 때만 연다(시트/DB 를 거쳐 온 문자열을 그대로 새창에 넣지 않는다).
 function _folUrlOk(u){ return /^https:\/\/drive\.google\.com\//.test(String(u||'')); }
-async function openTabFolder(i,kind){
-  const t=(STATE.tabs||[])[i]; if(!t) return;
-  const s=t.stats||{};
+async function openTabFolder(i,kind,src){
+  const t=_folRow(src||'home',i); if(!t) return;
   if(kind==='capture'||kind==='review'){
-    const u=kind==='capture'?s.captureFolderUrl:s.folderUrl;
+    const m=_folMat(t,src||'home');
+    const u=kind==='capture'?m.cap:m.rev;
     if(_folUrlOk(u)) window.open(u,'_blank','noopener');
     return;
   }
@@ -3303,6 +3384,9 @@ function renderWorkdesk(wd){
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
+  // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0).
+  //   ★ .catch() 필수 — finally 가 DOM 을 건드리므로 거기서 throw 하면 처리되지 않은 rejection 이 된다.
+  _folEnsureCur().catch(()=>{});
   if(STATE.role==='advertiser') _rvBoot(STATE.cur);   // 업체: 리뷰 이미지 미리보기 패널
 }
 
@@ -4166,6 +4250,7 @@ function buildGrid(wd){
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
+      ${_folBarHtml()}
       <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소) · <b>셀 드래그</b>=범위 선택 → 배경색`:` · <b>열람 전용</b>`}</span></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
     <div id="addbox"></div>
@@ -8016,7 +8101,8 @@ const _OVM_COLS_KEY='wd_own_cols';
 function _ovmCols(){
   if(!STATE._ovmCols){
     let v=null; try{ v=JSON.parse(localStorage.getItem(_OVM_COLS_KEY)||'null'); }catch(_){ }
-    STATE._ovmCols = { info:!(v&&v.info===false), prog:!(v&&v.prog===false), setl:!!(v&&v.setl===true) };
+    // ★ [자료](폴더 바로가기)는 기본 켬(사용자 확정) — 끈 사람의 선택만 기억한다(mat===false).
+    STATE._ovmCols = { info:!(v&&v.info===false), prog:!(v&&v.prog===false), mat:!(v&&v.mat===false), setl:!!(v&&v.setl===true) };
   }
   return STATE._ovmCols;
 }
@@ -8564,7 +8650,8 @@ async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCu
   STATE.advLink=(lk&&lk.ok&&lk.link)||null;   // 이 업체 접속 링크(있으면 token/active)
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   // ★ 마감/통계 조회 실패는 플래그로 온다 — 화면이 "마감자료 검수 0건"으로 위장하지 않고 사유를 적는다.
-  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable } : { unreachable:true };
+  STATE.ownTabMeta = rt ? { statsUnavailable:!!rt.statsUnavailable, finishedUnavailable:!!rt.finishedUnavailable,
+    folderScoped: rt.folderScoped===false ? false : true } : { unreachable:true };
   STATE.ownItems=(r&&r.items)||[];   // 소유 캠페인(설정 패널이 읽는다)
   _ovmQ=''; _ovmF='all';
   renderOwnPanel(a, STATE.ownItems);
@@ -8601,7 +8688,7 @@ function renderOwnPanel(a, items){
       <button class="btn xs" onclick="_ovmRenderOverview()">← 전체 개요</button>
       ${isAdmin?`<button class="btn xs" onclick="deleteAdv(${(STATE.advs||[]).findIndex(x=>x.id===a.id)})">업체 삭제</button>`:''}
     </div>
-    <div class="sect" id="owntabsSect" style="max-width:1400px">${_ownTabsHtml()}</div>`;
+    <div class="sect" id="owntabsSect" style="max-width:1560px">${_ownTabsHtml()}</div>`;
   // 설정 패널이 열린 상태로 소유 지정·해제가 일어나면 그 패널 내용도 최신으로(닫았다 열 필요 없음).
   if(_ovmDrawer==='own'||_ovmDrawer==='link'||_ovmDrawer==='acct'){ const d=$('#ovmDrawer'); if(d) d.innerHTML=_ovmDrawerHtml(_ovmDrawer,a); }
 }
@@ -8652,8 +8739,11 @@ function _ownTabsHtml(){
     return `<div class="st">연결된 탭 0</div><div class="empty" style="padding:14px">연결된 탭 없음 — [소유 시트]에서 시트를 지정하면 그 시트의 탭이 여기 나옵니다.</div>`;
   }
   const meta=STATE.ownTabMeta||{};
-  const warn=(meta.statsUnavailable||meta.finishedUnavailable)
-    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '';
+  const warn=((meta.statsUnavailable||meta.finishedUnavailable)
+    ? `<div class="ovm-warn">⚠ ${meta.statsUnavailable?'작업 통계':'마감 정보'}를 불러오지 못해 <b>마감자료 검수</b> 판정을 표시할 수 없습니다(다른 값은 정상).</div>` : '')
+    // ★ 담당하지 않은 업체는 서버가 폴더 링크를 내려주지 않는다 — 그 사실을 말한다(회색 버튼만 두면 오독).
+    + (meta.folderScoped===false
+      ? `<div class="ovm-warn">⚠ 담당하지 않은 업체라 <b>[자료]</b> 폴더 링크는 표시되지 않습니다(담당 AE·관리자에게 문의).</div>` : '');
   return `<div class="st">연결된 탭 ${ot.length} <span class="sthint">최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 탭만 표시</span></div>
     <div class="ovm-tools">
       <div class="tr">
@@ -8665,6 +8755,7 @@ function _ownTabsHtml(){
         <span class="ovm-grp" role="group" aria-label="열 묶음">
           <button data-c="info" class="${_ovmCols().info?'on':''}" onclick="_ovmToggleCol('info',this)">작업정보</button>
           <button data-c="prog" class="${_ovmCols().prog?'on':''}" onclick="_ovmToggleCol('prog',this)">진척</button>
+          <button data-c="mat" class="${_ovmCols().mat?'on':''}" onclick="_ovmToggleCol('mat',this)">자료</button>
           <button data-c="setl" class="${_ovmCols().setl?'on':''}" onclick="_ovmToggleCol('setl',this)">정산상세</button>
         </span>
       </div>
@@ -8720,6 +8811,9 @@ function _ovmGrid(){
   if(c.info){ F(80); X(88,1); F(68); F(100); F(48); }  /* 브랜드·상품·채널·목표차수·담당
      ★ 목표·차수는 '100건·발주 · 2차'가 통째로 보여야 한다(84px 에선 잘렸다 — 실측). */
   if(c.prog) F(104);           /* 참여·제출·입금 */
+  if(c.mat)  F(136);           /* 자료(구매·리뷰·현영 폴더 바로가기)
+     ★ .wbl-fol 은 3×40px + gap 3px×2 = 126px 고정 그리드다. 136px = 그 폭이 칸을 뚫고 나가지 않는
+       최소치 + 여유. 좁히면 버튼이 칸 경계를 넘어 옆 열(계약) 위에 겹쳐 그려진다(실측). */
   F(92);                       /* 계약 */
   if(c.setl){ F(62); F(62); F(62); F(62); }            /* 견적서·마감자료·계산서·입금일 */
   F(148);                      /* 입금액/총비용 */
@@ -8733,6 +8827,7 @@ function _ovmHead(){
   h.push('<span>진행</span>','<span>캠페인 탭</span>');
   if(c.info) h.push('<span>브랜드</span>','<span>상품</span>','<span>채널</span>','<span>목표·차수</span>','<span>담당</span>');
   if(c.prog) h.push('<span>참여·제출·입금</span>');
+  if(c.mat)  h.push('<span>자료</span>');
   h.push('<span>계약</span>');
   if(c.setl) h.push('<span>견적서</span>','<span>마감자료</span>','<span>계산서</span>','<span>입금일</span>');
   h.push('<span>입금액/총비용</span>','<span>비고</span>','<span></span>');
@@ -8800,6 +8895,9 @@ function _ownRowsHtml(){
       cells.push(`<span class="ocol ${t.manager?'':'dim'}">${esc(t.manager||'—')}</span>`);
     }
     if(c.prog) cells.push(`<span class="ocnt"><b>${total}</b> · <b class="c-sub">${sub}</b> · <b class="c-paid">${paid}</b></span>`);
+    // 자료(폴더 바로가기) — ★ 렌더러는 홈·작업보드와 **한 벌**(_folBtnsHtml). 버튼 onclick 이
+    //   stopPropagation 하므로 폴더를 눌러도 행 클릭(작업보드로 열기)으로 튀지 않는다.
+    if(c.mat) cells.push(`<span class="ocol omat">${_folBtnsHtml(t,i,'own')}</span>`);
     cells.push(`<span class="ocol octr">${_ownContractCell(t,i)}</span>`);
     if(c.setl){ cells.push(`<span class="ocol odate">${quoteCell}</span>`,`<span class="ocol odate">${closeoutCell}</span>`,
       `<span class="ocol odate">${invoiceCell}</span>`,`<span class="ocol odate">${paidDateCell}</span>`); }

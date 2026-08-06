@@ -36,7 +36,7 @@ svg{display:block}
 .i.sm{width:12px;height:12px}
 
 /* 문서 골격 */
-.page{max-width:1460px;margin:0 auto;padding:30px 20px 110px}
+.page{max-width:1620px;margin:0 auto;padding:30px 20px 110px}
 h1{font-size:23px;font-weight:800;letter-spacing:-.025em;margin:0 0 8px}
 .lead{color:var(--muted);font-size:13.5px;margin:0 0 8px;max-width:940px}
 .lead b{color:var(--ink)}
@@ -86,7 +86,7 @@ table.t .a{background:#fbfcff}
 .scroller{overflow-x:auto;background:var(--paper)}
 
 /* ══ 목업 내부 ══ */
-.vm{width:1420px;font-size:13px;background:var(--paper)}
+.vm{width:1566px;font-size:13px;background:var(--paper)}
 .vm-top{display:flex;align-items:center;gap:8px;background:var(--card);border-bottom:1px solid var(--line);padding:8px 14px}
 .vm-logo{font-size:13px;font-weight:800;letter-spacing:-.02em}
 .vm-tag{font-size:9px;font-weight:800;letter-spacing:.05em;color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line);border-radius:999px;padding:2px 7px}
@@ -284,7 +284,7 @@ table.t .a{background:#fbfcff}
 <div class="shell">
   <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
     <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
-    <span class="fw">폭 1420px (FHD 기준)</span></div>
+    <span class="fw">폭 1566px (FHD 기준 · 자료 열 포함)</span></div>
   <div class="scroller"><div class="vm" id="A"></div></div>
 </div>
 <div class="cap"><svg class="i"><use href="#i-check"/></svg><span><b>비활성도 자리를 지킵니다</b> — 폴더가 연결되지 않았거나 현금영수증 대상이 아닌 작업도 버튼 칸을 비우지 않아, 줄마다 버튼 위치가 흔들리지 않습니다(홈에서 확정된 규칙). 커서를 올리면 왜 못 누르는지 말해 줍니다.</span></div>
@@ -306,7 +306,7 @@ table.t .a{background:#fbfcff}
 <div class="shell">
   <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
     <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
-    <span class="fw">폭 1420px (FHD 기준)</span></div>
+    <span class="fw">폭 1566px (FHD 기준 · 자료 열 포함)</span></div>
   <div class="scroller"><div class="vm" id="B"></div></div>
 </div>
 <div class="cap"><svg class="i"><use href="#i-alert"/></svg><span><b>정직한 단점</b>: 마우스를 올리기 전에는 어느 작업에 폴더가 있는지 알 수 없고, 터치·키보드 사용자에게는 사실상 숨은 기능이 됩니다. 지금 표에 이미 있는 <b>[열기 ›]</b>와도 붙어 있어 오클릭이 생깁니다.</span></div>
@@ -319,7 +319,7 @@ table.t .a{background:#fbfcff}
 <div class="shell">
   <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
     <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
-    <span class="fw">폭 1420px (FHD 기준)</span></div>
+    <span class="fw">폭 1566px (FHD 기준 · 자료 열 포함)</span></div>
   <div class="scroller"><div class="vm" id="C"></div></div>
 </div>
 <div class="cap"><svg class="i"><use href="#i-alert"/></svg><span><b>정직한 단점</b>: 링크가 세로로 정렬되지 않아 훑기가 안 되고, 글자 링크라 클릭 표적이 작습니다. 시트명이 긴 작업에서는 말줄임에 밀려 <b>링크가 잘려 사라질 수</b> 있습니다(마감 배지에서 실제로 겪은 문제).</span></div>
@@ -355,6 +355,25 @@ table.t .a{background:#fbfcff}
 
 <div class="note good" style="margin-top:14px"><div class="nt"><svg class="i"><use href="#i-check"/></svg>권장: A안 + 작업보드 상단(5절)</div>
 세 화면이 같은 모양이 되고, "폴더 연결이 안 된 작업"을 표에서 바로 발견할 수 있습니다. 폭 부담은 <b>[자료] 열 접기</b>로 이미 있는 장치(열 묶음 토글)가 흡수합니다. B안은 훑기·접근성을 잃고, C안은 잘림 위험을 안는데 둘 다 얻는 것은 폭 144px뿐입니다.</div>
+</div>
+
+<div class="sec" id="fixed">
+<h2>2026-08-06 확정 · 구현 완료</h2>
+<div class="note good"><div class="nt"><svg class="i"><use href="#i-check"/></svg>사용자 확정 4건</div>
+<ul>
+<li><b>① 배치 = A안</b>(연결된 탭 표에 <b>[자료]</b> 열) <b>+ ④ 작업보드 상단도 같이</b>(5절 · 큰 버튼).</li>
+<li><b>② [자료] 열 기본 = 켬</b> — 끈 선택만 브라우저에 기억합니다(<code>wd_own_cols</code>의 <code>mat:false</code>).</li>
+<li><b>③ 3버튼</b>(구매 · 리뷰 · 현영) — 대상이 아닌 작업은 숨기지 않고 옅은 비활성 + 사유 툴팁.</li>
+<li><b>표 가로폭</b> — 열이 늘어난 만큼 넓혔습니다: 업체관리 표 영역 상한 <b>1400px → 1560px</b>(헤더 · 도구줄 · 표 세 곳 같은 값). FHD(1920)에서 가로 스크롤 없음·작업명 잘림 없음을 실브라우저로 확인했습니다.</li>
+</ul></div>
+<div class="note" style="margin-top:10px"><div class="nt">구현에서 달라진 것(정직하게)</div>
+<ul>
+<li><b>자료 열 폭은 136px</b>(시안의 144px 아님) — 실제 버튼 묶음이 <code>3×40px + gap 3px×2 = 126px</code> 고정 그리드라 136px 이 칸을 뚫지 않는 최소치 + 여유입니다.</li>
+<li><b>작업보드 재료는 <code>/api/trackb/tab-folders?kind=info</code> 가산 분기</b>로 가져옵니다(그 탭 <b>한 줄</b>만 읽는 가벼운 조회 · 신규 엔드포인트 0). 홈을 거쳐 온 경우에는 이미 받아 둔 값을 재사용해 <b>요청이 0건</b>입니다.</li>
+<li><b>현영 판정을 한 규칙으로 합쳤습니다</b>(<code>captureSlots.hasCashReceiptSlot</code>) — 종전에는 홈 버튼은 <code>income_type</code>만 보고 서버 폴더 해석은 <code>capture_slots</code>까지 봐서, 수동 슬롯 탭이 <b>"버튼은 비활성인데 서버는 허용"</b>으로 갈라져 있었습니다.</li>
+<li><b>코드리뷰로 잡아 고친 것 5건</b> — ① 폴더 정보 <b>캐시가 담당(AE) 확인보다 먼저</b> 응답해, 누군가 그 작업을 최근에 열어 둔 동안 담당 밖 담당자에게 폴더 링크가 나가던 문제(순서를 확인 → 캐시로 고정) ② 관리자가 캡처 슬롯을 직접 <b>[리뷰, 현금영수증]</b> 으로 설정한 현영 작업에서 현영 버튼이 "대상 아님"으로 죽던 문제(슬롯을 <b>라벨로도</b> 찾고, 폴더도 그 라벨로 찾음) ③ 프론트가 백엔드보다 먼저 배포된 순간 버튼이 "폴더 미생성"으로 잘못 말하던 문제(응답에 표식을 넣어 "서버 업데이트 대기"로) ④ 한 번의 일시 실패가 세션 내내 버튼을 죽이던 문제(작업을 다시 열면 재시도) ⑤ 업체관리에서 <b>담당하지 않은 업체</b>의 폴더 링크는 서버가 아예 내려주지 않음(사유 표시).</li>
+<li><b>노트북(≈1440) 폭에서는 가로 스크롤이 생깁니다</b> — 그 폭은 <b>[자료] 없이도(12칸)</b> 이미 스크롤이 나는 폭이고(필요 1222px vs 여유 1152px), [자료]를 끄면 종전 폭으로 되돌아갑니다.</li>
+</ul></div>
 </div>
 
 <div class="sec" id="decide">

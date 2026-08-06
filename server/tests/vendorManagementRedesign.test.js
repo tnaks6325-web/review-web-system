@@ -323,25 +323,29 @@ async function run() {
   console.log('\n6) 동적 열 구성(헤더 ≡ grid)');
   const src = grab('_ovmGrid') + '\n' + grab('_ovmHead');
   let baseN = null;
-  for (const info of [true, false]) for (const prog of [true, false]) for (const setl of [true, false]) {
-    const sb = { _ovmCols: () => ({ info, prog, setl }) };
+  let combos = 0;
+  for (const info of [true, false]) for (const prog of [true, false]) for (const mat of [true, false]) for (const setl of [true, false]) {
+    const sb = { _ovmCols: () => ({ info, prog, mat, setl }) };
     vm.createContext(sb); vm.runInContext(src, sb);
     const [g, head] = vm.runInContext('[_ovmGrid(),_ovmHead()]', sb);
     const cols = g.cols.replace(/minmax\([^)]*\)/g, 'X').trim().split(/\s+/).filter(Boolean).length;
     const cells = (head.match(/<span>/g) || []).length;
-    assert.equal(cols, cells, `헤더 칸 ${cells} ≡ grid 열 ${cols} (info=${info} prog=${prog} setl=${setl})`);
+    assert.equal(cols, cells, `헤더 칸 ${cells} ≡ grid 열 ${cols} (info=${info} prog=${prog} mat=${mat} setl=${setl})`);
     assert.equal(g.n, cols, 'g.n = 실제 열 수');
     assert.ok(/min-width:\d+px/.test(head), 'min-width 를 헤더에도 싣는다');
     assert.ok(g.min > 0 && g.min < 3000, 'min-width 는 열 폭 합에서 파생');
-    if (info && prog && setl === false) baseN = cols;
+    combos++;
+    if (info && prog && mat && setl === false) baseN = cols;
   }
-  t('8가지 열 묶음 조합 전부에서 헤더 칸 ≡ grid 열', true);
-  t('★ 기본(정산상세 접힘)은 12칸 — 그 상태에서 가로 스크롤이 없어야 한다는 약속의 전제', baseN === 12, 'cols=' + baseN);
+  t('16가지 열 묶음 조합 전부에서 헤더 칸 ≡ grid 열', combos === 16, 'combos=' + combos);
+  // 기본 = 작업정보·진척·자료 켬 + 정산상세 접힘(사용자 확정) → 13칸. FHD 폭 상한(1560) 안에서
+  //   가로 스크롤이 없어야 한다는 약속의 전제이므로 숫자를 고정한다.
+  t('★ 기본(자료 켬·정산상세 접힘)은 13칸', baseN === 13, 'cols=' + baseN);
   {
-    const sb = { _ovmCols: () => ({ info: true, prog: true, setl: false }) };
+    const sb = { _ovmCols: () => ({ info: true, prog: true, mat: true, setl: false }) };
     vm.createContext(sb); vm.runInContext(src, sb);
     const off = vm.runInContext('_ovmGrid().min', sb);
-    sb._ovmCols = () => ({ info: true, prog: true, setl: true });
+    sb._ovmCols = () => ({ info: true, prog: true, mat: true, setl: true });
     const on = vm.runInContext('_ovmGrid().min', sb);
     t('★ 정산상세를 펼치면 min-width 가 커진다(접었을 때 폭도 함께 줄어든다)', on > off, `${off} → ${on}`);
   }
