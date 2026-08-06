@@ -1226,6 +1226,40 @@ async function resolveInspection({ fileId, by, resolution } = {}) {
 }
 
 /**
+ * [✕ 불량 맞음] → 리뷰어 1:1 문의 채팅에 반려 사유 자동 통지.
+ * ★ 확인(원장 기록)과 분리된 후처리 — 실패해도 불량 확인은 유지되고, 결과를 응답에 실어
+ *   관리자가 알게 한다(조용한 미전송 금지). 절대 throw 하지 않는다.
+ * ★ 연락처는 review_index.phone8(시트 현재값 = 그 행 소유자의 최종 진실 — 소유권 규율)만 쓴다.
+ */
+async function notifyInspectionReject({ fileId, message, by } = {}) {
+  const msg = String(message || '').trim();
+  if (!fileId || !msg) return { sent: false, error: '전송할 사유가 없습니다.' };
+  try {
+    const { rows } = await _db().query(
+      `SELECT i.sheet_id, i.tab_name, i.row_index, i.reviewer_name,
+              (SELECT phone8 FROM review_index r
+                WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                  AND r.row_index = i.row_index LIMIT 1) AS phone8
+         FROM review_inspections i WHERE i.file_id = $1 LIMIT 1`,
+      [fileId]);
+    const r = rows[0];
+    if (!r) return { sent: false, error: '검수 건을 찾지 못했습니다.' };
+    if (!r.phone8) {
+      return { sent: false, error: '리뷰어 연락처를 찾지 못해 메시지를 보내지 못했습니다 — 1:1 문의로 직접 안내해 주세요.' };
+    }
+    const out = await require('./csBridge.service').postInspectionReject({
+      sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
+      reviewerName: r.reviewer_name, phone8: r.phone8, message: msg, by,
+    });
+    if (!out) return { sent: false, error: '메시지 전송에 실패했습니다 — 1:1 문의로 직접 안내해 주세요.' };
+    return { sent: true, threadId: out.threadId };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 반려 통지 실패(${fileId}): ${e.message}`);
+    return { sent: false, error: '메시지 전송에 실패했습니다 — 1:1 문의로 직접 안내해 주세요.' };
+  }
+}
+
+/**
  * 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결한다(1632건 백로그용).
  * ★ adminOrMaster 전용(라우트) — 대량 종결은 되돌리기 어렵다.
  * ★ resolution 'ok' 면 상품명 의심 건들의 캡처 표기를 별칭으로 **한 번에** 학습한다.
@@ -1289,6 +1323,7 @@ module.exports = {
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
   listInspections, inspectionSummary, resolveInspection, resolveInspectionsBulk, inspectionScope,
+  notifyInspectionReject,
   hashBase64, matchProductName, computeStatus,
   loadTabExpectations, findDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,
