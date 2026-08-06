@@ -76,6 +76,19 @@ function requiredSlotKeys(captureSlots, incomeType, reviewType) {
   return req.length ? req : eff.map(s => s.key);
 }
 
+/**
+ * 이 탭이 **현금영수증 캡처 슬롯을 갖는지** — 현영 폴더 바로가기(버튼 활성 ↔ 서버 폴더 해석)의 단일 규칙.
+ *
+ * ★★ income_type '현영' 뿐 아니라 **관리자가 명시한 capture_slots 의 receipt 슬롯도 인정**한다.
+ *   화면(버튼)과 서버(폴더 해석)가 서로 다른 규칙을 쓰면 두 방향으로 다 틀린다 —
+ *   "눌리는데 서버가 거부"(오해를 부르는 막다른 길) 또는 "대상인데 버튼이 안 눌림"(기능 소실).
+ *   그래서 effectiveCaptureSlots 파생 결과를 그대로 본다(규칙 사본 0).
+ */
+function hasCashReceiptSlot(captureSlots, incomeType) {
+  const eff = effectiveCaptureSlots(captureSlots, incomeType, null);
+  return Array.isArray(eff) && eff.some(s => s && s.key === 'receipt');
+}
+
 /** 슬롯 key → 표시 라벨(업로드 서브폴더명·안내문 공용). 모르는 key는 key 그대로. */
 function slotLabel(captureSlots, incomeType, key, reviewType) {
   const eff = effectiveCaptureSlots(captureSlots, incomeType, reviewType) || [REVIEW_SLOT];
@@ -85,5 +98,5 @@ function slotLabel(captureSlots, incomeType, key, reviewType) {
 
 module.exports = {
   REVIEW_SLOT, RECEIPT_SLOT, CONFIRM_SLOT,
-  isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel,
+  isCashReceiptIncome, effectiveCaptureSlots, requiredSlotKeys, slotLabel, hasCashReceiptSlot,
 };

@@ -15,7 +15,7 @@
 const { logger } = require('../utils/logger');
 const participants = require('./participants.service');
 const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
-const { isCashReceiptIncome } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
+const { hasCashReceiptSlot } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 
 let _pool;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -669,6 +669,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
             tc.manager, tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl",
+            tc.capture_slots AS "captureSlots", tc.income_type AS "incomeType",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
             co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
@@ -702,6 +703,14 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
        ) co ON TRUE
        LEFT JOIN trackb_tab_memos tm ON tm.sheet_id = t.sheet_id AND tm.tab_name = t.tab_name
       ORDER BY COALESCE(cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
+  // ── 자료 폴더 바로가기(시안 A) 재료 — ★ 쿼리 순증 0(tab_configs 를 이미 조인하고 있다).
+  //   현영 대상 여부는 captureSlots.hasCashReceiptSlot 단일 규칙(홈 버튼·/tab-folders 와 같은 함수).
+  //   ★ 판정 원재료(capture_slots JSONB·income_type)는 응답에서 **버린다** — 316행 × JSONB 는 그냥
+  //     전송 낭비이고, 화면이 필요한 것은 불리언 하나다(프론트 재판정 금지 = 규칙이 갈라지지 않는다).
+  for (const r of rows) {
+    r.cashReceipt = hasCashReceiptSlot(r.captureSlots, r.incomeType);
+    delete r.captureSlots; delete r.incomeType;
+  }
   // ── 마감 여부·마감자료 검수 대기 주석 — ★ 판정은 finishCandidate 한 곳, 재료는 홈과 같은 tabStatsMap.
   //   화면(필터 칩·개요 배지)은 이 불리언을 그대로 소비한다(프론트 재계산 금지 = 숫자가 갈리지 않는다).
   //   ★ fail-soft: 통계·마감 조회가 죽어도 표는 뜬다(그 경우 판정만 false — 라우트가 플래그로 고지).
@@ -3068,6 +3077,7 @@ async function tabStatsMap({ force = false } = {}) {
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
               tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
+              tc.capture_slots AS "captureSlots",
               im.row_count AS "rowCount", im.submitted_count AS "submittedCount",
               COALESCE(paid.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
@@ -3092,9 +3102,11 @@ async function tabStatsMap({ force = false } = {}) {
         submitted: Number.isFinite(+r.submittedCount) ? +r.submittedCount : null,
         paid: +r.paidCount || 0,
         // 홈 [저장폴더] 버튼 재료 — tab_configs 를 이미 읽는 이 쿼리에 얹어 쿼리 순증 0.
-        //   현영 여부 판정은 captureSlots.isCashReceiptIncome 단일 규칙(슬롯 자동 2슬롯과 같은 기준).
+        //   ★ 현영 여부는 captureSlots.hasCashReceiptSlot 단일 규칙 — /tab-folders 가 폴더를 해석할 때
+        //     쓰는 것과 **같은 함수**다(income_type '현영' + 관리자 명시 receipt 슬롯). 종전에는 여기만
+        //     income_type 만 봐서, 수동 슬롯 탭은 "버튼은 비활성인데 서버는 허용"으로 갈라져 있었다.
         folderUrl: r.folderUrl || null, captureFolderUrl: r.captureFolderUrl || null,
-        cashReceipt: isCashReceiptIncome(r.incomeType),
+        cashReceipt: hasCashReceiptSlot(r.captureSlots, r.incomeType),
         closeoutDate: r.closeoutDate || null, closeoutRows: r.closeoutRows == null ? null : +r.closeoutRows,
       };
     }

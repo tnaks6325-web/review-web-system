@@ -323,7 +323,7 @@ async function run() {
 
   // ★★ 그리드 열 수 ≡ 헤더 칸 수 — 열을 끼워 넣을 때 가장 흔하게 깨지는 자리라 **세어서** 고정한다.
   //   업체관리 리디자인으로 열 구성이 **열 묶음 토글에 따라 동적**이 됐으므로(정적 CSS 값이 아님)
-  //   두 빌더(_ovmGrid·_ovmHead)를 실제로 실행해 8가지 조합 전부에서 칸 수가 같은지 본다(검사 의미 동일·더 강함).
+  //   두 빌더(_ovmGrid·_ovmHead)를 실제로 실행해 16가지 조합 전부에서 칸 수가 같은지 본다(검사 의미 동일·더 강함).
   {
     const grab = (name) => {
       const i = HTML.indexOf(`function ${name}(`);
@@ -335,14 +335,14 @@ async function run() {
       throw new Error(`${name} 블록 추출 실패`);
     };
     const src = grab('_ovmGrid') + '\n' + grab('_ovmHead');
-    for (const info of [true, false]) for (const prog of [true, false]) for (const setl of [true, false]) {
-      const sb = { _ovmCols: () => ({ info, prog, setl }) };
+    for (const info of [true, false]) for (const prog of [true, false]) for (const mat of [true, false]) for (const setl of [true, false]) {
+      const sb = { _ovmCols: () => ({ info, prog, mat, setl }) };
       vm.createContext(sb);
       vm.runInContext(src + ';[_ovmGrid(),_ovmHead()]', sb);
       const [g, head] = vm.runInContext('[_ovmGrid(),_ovmHead()]', sb);
       const gridCols = g.cols.replace(/minmax\([^)]*\)/g, 'X').trim().split(/\s+/).filter(Boolean).length;
       const headCells = (head.match(/<span>/g) || []).length;
-      assert.equal(gridCols, headCells, `9e: 그리드 열 ${gridCols} ≡ 헤더 칸 ${headCells} (info=${info} prog=${prog} setl=${setl})`);
+      assert.equal(gridCols, headCells, `9e: 그리드 열 ${gridCols} ≡ 헤더 칸 ${headCells} (info=${info} prog=${prog} mat=${mat} setl=${setl})`);
       assert.equal(g.n, gridCols, '9e2: _ovmGrid 가 보고한 열 수 = 실제 열 수');
       assert.ok(g.min > 0, '9e3: min-width 는 열 폭 합에서 파생(고정값 되돌림 금지)');
     }

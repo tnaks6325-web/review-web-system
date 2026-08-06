@@ -143,14 +143,25 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
 //   ★ fail-soft — 어떤 실패도 200 + 사유로 돌려준다(클릭 한 번에 500 을 보여줄 이유가 없다).
 //   찾은 URL 은 불변이라 길게(10분), 미발견은 짧게(60초 — 그 사이 첫 현영 캡처가 올 수 있다) 캐시.
 const _tabFolderCache = new Map();
+const _tabFolderInfoCache = new Map();
 router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) => {
   const sheetId = String(req.query.sheetId || '').trim();
   const tabName = String(req.query.tabName || '').trim();
   if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId·tabName이 필요합니다.' });
+  // kind=info = 작업보드 상단 폴더 버튼용 **가산 분기** — 그 탭의 세 폴더 재료를 한 번에 알려준다.
+  //   ★ 신규 엔드포인트 0(같은 라우트·같은 스코프 게이트) + Drive 무접촉(tab_configs 한 줄 조회).
+  //   ★ 홈처럼 stats=1(review_index 전체 GROUP BY)을 붙이지 않는다 — 작업 탭을 열 때마다 무거운
+  //     집계를 돌리는 것은 CLAUDE.md 가 못박은 금지선이다. 여기선 그 탭 한 줄만 읽는다.
+  const wantInfo = String(req.query.kind || '') === 'info';
   const key = `${sheetId}\t${tabName}`;
-  const hit = _tabFolderCache.get(key);
-  if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
-    return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
+  if (wantInfo) {
+    const ih = _tabFolderInfoCache.get(key);
+    if (ih && Date.now() - ih.at < 60000) return res.json({ ok: true, ...ih.val });
+  } else {
+    const hit = _tabFolderCache.get(key);
+    if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
+      return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
+    }
   }
   try {
     // staff(AE)는 담당 탭만 — 폴더 URL 도 담당 스코프 밖으로 새지 않는다(마감·스레드와 같은 규율).
@@ -158,16 +169,31 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
       const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
       if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
     }
+    const { slotLabel, hasCashReceiptSlot } = require('../utils/captureSlots');
+    if (wantInfo) {
+      const r = await pool.query(
+        `SELECT folder_url, capture_folder_url, capture_slots, income_type
+           FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+      const t = r.rows[0];
+      if (!t) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
+      const val = {
+        folderUrl: t.folder_url || null,
+        captureFolderUrl: t.capture_folder_url || null,
+        cashReceipt: hasCashReceiptSlot(t.capture_slots, t.income_type),
+      };
+      _tabFolderInfoCache.set(key, { at: Date.now(), val });
+      return res.json({ ok: true, ...val });
+    }
     const { rows } = await pool.query(
       `SELECT folder_url, capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`,
       [sheetId, tabName]);
     const tc = rows[0];
     if (!tc) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
-    const { isCashReceiptIncome, slotLabel } = require('../utils/captureSlots');
-    // 관리자 명시 capture_slots 에 receipt 슬롯이 있는 탭도 허용(라벨은 그 설정을 따른다 — 업로드와 같은 규칙).
-    const hasReceipt = isCashReceiptIncome(tc.income_type)
-      || (Array.isArray(tc.capture_slots) && tc.capture_slots.some(s => s && s.key === 'receipt'));
-    if (!hasReceipt) return res.json({ ok: false, error: '현금영수증 발행 대상 작업이 아닙니다.' });
+    // ★ 현영 대상 판정은 captureSlots.hasCashReceiptSlot 단일 규칙 — 버튼 활성(홈·업체관리·작업보드)과
+    //   이 허용 판정이 **같은 함수**여야 "눌리는데 거부"/"대상인데 안 눌림"이 생기지 않는다.
+    if (!hasCashReceiptSlot(tc.capture_slots, tc.income_type)) {
+      return res.json({ ok: false, error: '현금영수증 발행 대상 작업이 아닙니다.' });
+    }
     const driveService = require('../services/drive.service');   // 지연 require — 테스트가 이 라우터를 스텁 pool 로 실행할 때 Drive 스택 무부하
     const reviewFolderId = tc.folder_url ? driveService.extractFolderIdFromUrl(tc.folder_url) : null;
     if (!reviewFolderId) {

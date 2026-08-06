@@ -213,8 +213,10 @@ sandbox.STATE.finQ = '';
 console.log('\n3) tabStatsMap 폴더 필드 (서비스 실행)');
 t('SELECT 에 folder_url·capture_folder_url·income_type(tab_configs 를 이미 읽는 쿼리 — 순증 0)',
   /tc\.folder_url AS "folderUrl", tc\.capture_folder_url AS "captureFolderUrl", tc\.income_type AS "incomeType"/.test(SVC_SRC));
-t('★ 현영 판정은 captureSlots.isCashReceiptIncome 재사용(사본 금지)',
-  /require\('\.\.\/utils\/captureSlots'\)/.test(SVC_SRC) && /cashReceipt: isCashReceiptIncome\(r\.incomeType\)/.test(SVC_SRC));
+// ★ 현영 판정은 captureSlots 유틸 재사용(사본 금지). 규칙은 hasCashReceiptSlot 하나로 통일됐다 —
+//   /tab-folders 가 폴더를 해석할 때 쓰는 것과 **같은 함수**여야 "눌리는데 거부"가 안 생긴다.
+t('★ 현영 판정은 captureSlots.hasCashReceiptSlot 재사용(사본 금지)',
+  /require\('\.\.\/utils\/captureSlots'\)/.test(SVC_SRC) && /cashReceipt: hasCashReceiptSlot\(r\.captureSlots, r\.incomeType\)/.test(SVC_SRC));
 const svc = require('../src/services/trackB.service');
 (async () => {
   svc.__setPoolForTest({
