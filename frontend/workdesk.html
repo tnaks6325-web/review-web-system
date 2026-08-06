@@ -5843,7 +5843,7 @@ function _riIssueTypes(r){
   if(c.format&&c.format.verdict==='fail') out.push('format_fail');
   if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
   if(c.product&&c.product.verdict==='warn') out.push('product');
-  if(c.duplicate&&c.duplicate.verdict==='fail') out.push('duplicate');
+  if(c.duplicate&&(c.duplicate.verdict==='fail'||c.duplicate.verdict==='warn')) out.push('duplicate');
   if(c.similarity&&c.similarity.verdict==='warn') out.push('similarity');
   if(c.author&&c.author.verdict==='warn') out.push('author');
   return out;
@@ -5921,6 +5921,9 @@ function _riTypeLabel(p,c){
     const s=c&&c.similarity&&c.similarity.score;
     return '✍ 본문 겹침'+(s!=null?' '+Math.round(s*100)+'%':'');
   }
+  // ★ 같은 리뷰어 + 다른 작업 = "중복"이라고 단정하지 않는다(한 화면에 여러 리뷰일 수 있다)
+  if(p==='duplicate'&&c&&c.duplicate&&c.duplicate.sameReviewerOtherTab)
+    return '📄 같은 캡처 — 다른 작업에도 제출';
   return RI_TYPE_META[p].label;
 }
 function _riCardActions(r,i){
@@ -5941,7 +5944,13 @@ function _riCardActions(r,i){
   const isReceiptSlot=r.slot_key==='receipt';
   const moves=isReceiptSlot?[A.mvV,A.mvC]:[A.mvR,A.mvC];
   // ★ 중복 = 제거만(이동 버튼 제외 — 어디로 옮겨도 중복은 남는다)
-  if(p==='duplicate') return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
+  if(p==='duplicate'){
+    // ★ 같은 리뷰어가 다른 작업에도 낸 같은 캡처 = "한 화면에 여러 리뷰"일 수 있다 →
+    //   주 조치를 [제거]로 두면 정상 제출을 지우는 쪽으로 손이 간다. 사람이 보고 고르게 뒤집는다.
+    if(c.duplicate&&c.duplicate.sameReviewerOtherTab)
+      return {main:{...A.ok,t:'✓ 정상 — 한 캡처에 여러 리뷰',m:'m-green'}, subs:[A.dedup,A.bad], more:moves};
+    return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
+  }
   if(p==='format_fail'){
     const got=_riFmtKind(c.format);
     if(!isReceiptSlot&&got==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.bad,A.ok], more:[A.mvC]};
@@ -6002,6 +6011,7 @@ function _rcPopup(o){
           <input type="checkbox" id="rcNotifySend" checked onchange="document.getElementById('rcNotifyMsg').disabled=!this.checked;document.getElementById('rcNotifyMsg').style.opacity=this.checked?'1':'.45'">
           리뷰어에게 1:1 문의로 안내 전송</label>
         <textarea id="rcNotifyMsg" rows="5" style="width:100%;margin-top:6px;border:1px solid #CBD5E1;border-radius:9px;padding:8px 10px;font-size:.78rem;font-family:inherit;line-height:1.5;resize:vertical"></textarea>
+        <div id="rcNotifyWarn"></div>
         <div style="font-size:.71rem;color:#94A3B8;margin-top:3px">${esc(o.notify.hint||'')}</div></div>`:''}
       ${o.undoNote?`<div style="background:${o.undoWarn?'#FFFBEB':'#F0FDF4'};border:1px solid ${o.undoWarn?'#FDE68A':'#BBF7D0'};border-radius:10px;padding:8px 13px;font-size:.76rem;color:${o.undoWarn?'#92400E':'#166534'};margin-bottom:4px">${o.undoNote}</div>`:''}
     </div>
@@ -6010,7 +6020,25 @@ function _rcPopup(o){
       <button class="btn" style="background:${o.danger?'#DC2626':'#1D4ED8'};border-color:${o.danger?'#DC2626':'#1D4ED8'};color:#fff;font-weight:700" onclick="riRcOk()">${esc(o.btn||'실행')}</button>
     </div></div>`;
   // ★ 문구는 value 로 넣는다(innerHTML 보간 금지 — 설정값에 무엇이 들어 있든 그대로 안전하게)
-  if(o.notify){ const t=document.getElementById('rcNotifyMsg'); if(t) t.value=o.notify.msg||''; }
+  if(o.notify){
+    const t=document.getElementById('rcNotifyMsg'); if(t) t.value=o.notify.msg||'';
+    if(o.notify.fileId) _riNotifyCheck(o.notify.fileId,'rcNotifySend','rcNotifyMsg','rcNotifyWarn');
+  }
+}
+/* ★ 보낼 수 있는 건인지 **누르기 전에** 확인한다 — 종전엔 실행한 뒤에야 "연락처를 찾지 못했다"가
+     떠서, 담당자가 안내를 보냈다고 믿고 넘어가거나 원인을 알 길이 없었다.
+   ★ 못 보내는 건이면 전송 체크를 **끄고 사유를 말한다**(처리 자체는 그대로 진행 가능).
+   ★ 확인 실패(구백엔드·네트워크)는 **아무것도 바꾸지 않는다** — 모른다고 전송을 끄면
+     보낼 수 있는 건까지 조용히 안 나간다(fail-open). */
+async function _riNotifyCheck(fileId, cbId, msgId, warnId){
+  let j=null;
+  try{ j=await api('/api/trackb/review-inspect/notify-check?fileId='+encodeURIComponent(fileId)); }catch(_){ return; }
+  if(!j||j.canNotify!==false) return;
+  const cb=document.getElementById(cbId), t=document.getElementById(msgId), w=document.getElementById(warnId);
+  if(cb){ cb.checked=false; cb.disabled=true; }
+  if(t){ t.disabled=true; t.style.opacity='.45'; }
+  if(w){ w.style.cssText='margin-top:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:7px 10px;font-size:.73rem;color:#92400E;line-height:1.5';
+    w.textContent='⚠ '+(j.reason||'리뷰어 연락처를 찾지 못해 안내를 보낼 수 없습니다.'); }
 }
 /** 전송 체크가 켜져 있을 때만 문구를 돌려준다(꺼져 있으면 빈 문자열 = 전송 안 함). */
 function _rcNotifyMsg(){
@@ -6040,7 +6068,7 @@ async function riRouteManual(i, target){
     doList:[`이 파일을 <b>[${esc(lbl)}]</b> 폴더로 옮깁니다`,
             '이 검수 건을 <b>정상(오제출)</b>으로 종결합니다',
             '이동 후, 이 실물을 판별 예시로 등록할지 한 번 더 묻습니다'],
-    notify:{ msg, hint:'리뷰 캡처가 비어 있다는 사실을 함께 알립니다 — 문구는 설정에서 바꿀 수 있어요.' },
+    notify:{ msg, fileId:r.file_id, hint:'리뷰 캡처가 비어 있다는 사실을 함께 알립니다 — 문구는 설정에서 바꿀 수 있어요.' },
     undoNote:'↩ 로그 탭의 [원위치]로 언제든 되돌릴 수 있습니다',
     btn:`이동하기`, onOk:()=>_riRouteExec(i, target, _rcNotifyMsg()),
   });
@@ -6067,7 +6095,7 @@ async function _riRouteExec(i, target, notifyMsg){
 async function riDedupPopup(i){
   const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
   const dup=(r.checks&&r.checks.duplicate)||{};
-  if(dup.verdict!=='fail'||!dup.matchFileId){ alert('중복 근거(같은 지문의 기존 제출)가 없는 건입니다.'); return; }
+  if(!['fail','warn'].includes(dup.verdict)||!dup.matchFileId){ alert('중복 근거(같은 지문의 기존 제출)가 없는 건입니다.'); return; }
   const msg = await _riMsgFor('duplicate', {});
   const pairHtml=`<div style="display:flex;gap:10px;margin-bottom:12px">
     <div style="flex:1;border:2px solid #FCA5A5;background:#FFF5F5;border-radius:10px;padding:8px">
@@ -6087,7 +6115,7 @@ async function riDedupPopup(i){
     whoHtml:_rcWho(r), pairHtml,
     doList:['지금 제출본(왼쪽)을 <b>휴지통</b>으로 보냅니다 — 이전 제출본은 그대로 남습니다',
             '이 검수 건을 <b>불량 맞음(중복 제출)</b>으로 종결합니다'],
-    notify:{ msg, hint:'반려된 사진과 이미 제출된 사진을 함께 보여줍니다 — 문구는 설정에서 바꿀 수 있어요.' },
+    notify:{ msg, fileId:r.file_id, hint:'반려된 사진과 이미 제출된 사진을 함께 보여줍니다 — 문구는 설정에서 바꿀 수 있어요.' },
     undoNote:'🗑 영구삭제가 아닙니다 — Drive 휴지통에서 <b>30일간 복구</b>할 수 있습니다', undoWarn:true,
     btn:'🗑 중복파일 제거', onOk:()=>_riDedupExec(i, _rcNotifyMsg()),
   });
@@ -6125,7 +6153,9 @@ function _riReasons(c){
     out.push(_riChanReason(c.format));
   if(c.product && c.product.verdict==='warn')
     out.push(`상품명 다름 — 캡처 "${(c.product.ocr||'').slice(0,40)}"`);
-  if(c.duplicate && c.duplicate.verdict==='fail')
+  if(c.duplicate && c.duplicate.verdict==='warn' && c.duplicate.sameReviewerOtherTab)
+    out.push(`같은 리뷰어가 다른 작업(${c.duplicate.matchTab||''})에도 같은 캡처를 냈습니다 — 한 화면에 여러 리뷰가 보이는 캡처일 수 있습니다`);
+  else if(c.duplicate && c.duplicate.verdict==='fail')
     out.push(`같은 파일이 이미 제출됨 — ${c.duplicate.matchTab||''} ${c.duplicate.matchReviewer||''} ${c.duplicate.matchRow?c.duplicate.matchRow+'행':''}`.trim());
   if(c.similarity && c.similarity.verdict==='warn')
     out.push(`본문 ${Math.round((c.similarity.score||0)*100)}% 겹침 — ${c.similarity.matchReviewer||''} ${c.similarity.matchRow?c.similarity.matchRow+'행':''}${c.similarity.matchTab&&c.similarity.scope==='global'?' ('+c.similarity.matchTab+')':''}`.trim());
@@ -6283,6 +6313,7 @@ async function riBadPopup(i, fromDetail){
         리뷰어에게 1:1 문의로 반려 안내 전송</label>
       <div id="riBadMsgWrap">
         <textarea id="riBadMsg" rows="7" style="width:100%;border:1px solid #CBD5E1;border-radius:10px;padding:9px 11px;font-size:.8rem;font-family:inherit;line-height:1.5;resize:vertical"></textarea>
+        <div id="riBadWarn"></div>
         <div style="font-size:.72rem;color:#94A3B8;margin-top:3px">사유는 AI 판정 근거로 미리 채워져 있습니다 — 보내기 전에 자유롭게 고치세요. 리뷰어 화면에는 관리자 닉네임으로 표시됩니다.</div>
       </div>
     </div>
@@ -6291,6 +6322,7 @@ async function riBadPopup(i, fromDetail){
       <button class="btn" style="background:#DC2626;border-color:#DC2626;color:#fff;font-weight:700" onclick="riBadSubmit()">✕ 불량 처리</button>
     </div></div>`;
   document.getElementById('riBadMsg').value=def;
+  _riNotifyCheck(r.file_id,'riBadSend','riBadMsg','riBadWarn');
 }
 async function riBadSubmit(){
   const st=STATE._riBad; const r=st&&(STATE.ri||[])[st.i]; if(!r) return;

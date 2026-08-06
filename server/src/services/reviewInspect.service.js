@@ -759,7 +759,7 @@ async function findDuplicate({ fileHash, fileId, sheetId, tabName, rowIndex, rev
     const m = rows[0];
     return {
       verdict: 'fail',
-      matchFileId: m.file_id, matchTab: m.tab_name,
+      matchFileId: m.file_id, matchTab: m.tab_name, matchSheetId: m.sheet_id,
       matchReviewer: m.reviewer_name || '', matchRow: m.row_index,
       matchAt: m.uploaded_at,
     };
@@ -767,6 +767,60 @@ async function findDuplicate({ fileHash, fileId, sheetId, tabName, rowIndex, rev
     logger.warn(`[reviewInspect] 중복 대조 실패(통과 처리): ${e.message}`);
     return { verdict: 'skip' };
   }
+}
+
+/**
+ * ★★ "한 캡처에 여러 리뷰" 완화 — 같은 파일이라고 **다 중복이 아니다**(실사고 2026-08-06).
+ *
+ * 실제 신고: 리뷰어가 두 작업(노티드 두바이 쫀득쿠키 / 노티드 슈가베어 우유크림 폭탄떡)에
+ * 동시에 참여했고, 쿠팡 **리뷰관리 화면에는 두 리뷰가 한 화면에 나란히** 보였다. 그래서 캡처
+ * 한 장으로 두 건을 냈다 — **리뷰어가 맞게 행동한 것**인데 검수는 "중복파일"로 불량 처리했다.
+ *
+ * 그래서 같은 지문(hash)이라도 **세 갈래로 나눈다**:
+ *   ㉮ 같은 작업 안에서 재사용            → fail (분명한 중복 — 종전 그대로)
+ *   ㉯ **다른 리뷰어**가 같은 파일        → fail (도용 — 종전 그대로)
+ *   ㉰ **같은 리뷰어 + 다른 작업**        → warn (사람이 본다) — 자동 불량·자동 제거 대상 아님
+ *      └ 그 캡처에서 **두 작업의 기대 상품명이 모두** 읽히면 → pass (근거 있는 자동 통과)
+ *
+ * ★ 자동 통과는 **근거가 있을 때만** — 두 작업의 상품이 서로 다르고 둘 다 캡처에서 읽혀야 한다.
+ *   근거 없이 통과시키면 "다른 캠페인에 같은 캡처 돌려쓰기"(진짜 재사용)까지 열린다.
+ * ★ 근거를 못 찾아도 **fail 로는 되돌리지 않는다** — 정상 리뷰어를 불량으로 모는 쪽이,
+ *   사람이 한 번 더 보는 쪽보다 나쁘다(이 저장소의 fail-open 규율).
+ * ★ 조회 실패는 **판정을 바꾸지 않는다**(원래 verdict 유지) — 모르면 완화하지 않는다.
+ */
+const _normName = (s) => String(s == null ? '' : s).replace(/\s+/g, '');
+async function classifyDuplicateContext({ dup, cls, exp, sheetId, tabName, reviewerName } = {}) {
+  if (!dup || dup.verdict !== 'fail' || !dup.matchFileId) return dup;
+  const me = _normName(reviewerName), other = _normName(dup.matchReviewer);
+  const sameReviewer = !!me && me === other;
+  const otherWork = (dup.matchSheetId && dup.matchSheetId !== sheetId) || dup.matchTab !== tabName;
+  if (!sameReviewer || !otherWork) return dup;    // ㉮㉯ = 종전 그대로 불량
+
+  let hitHere = null, hitOther = null;
+  try {
+    const oexp = await loadTabExpectations({ sheetId: dup.matchSheetId || sheetId, tabName: dup.matchTab });
+    // 캡처에서 읽어낸 모든 문자열을 한 덩어리로 놓고 두 작업의 기대 상품명을 각각 찾는다.
+    const text = [cls && cls.productName, cls && cls.reviewText, ...(((cls && cls.signals) || []))]
+      .filter(Boolean).join(' \n ');
+    hitHere = _productHit(text, (exp && exp.productNames) || []);
+    hitOther = _productHit(text, (oexp && oexp.productNames) || []);
+  } catch (_) { /* 조회 실패 = 근거 없음(아래에서 warn) */ }
+
+  if (hitHere && hitOther && _normProduct(hitHere) !== _normProduct(hitOther)) {
+    return { ...dup, verdict: 'pass', multiReview: true, products: [hitHere, hitOther] };
+  }
+  return { ...dup, verdict: 'warn', sameReviewerOtherTab: true };
+}
+
+/** 기대 상품명 목록 중 그 캡처 텍스트에서 실제로 읽힌 것 하나(없으면 null). */
+function _productHit(text, names) {
+  const t = _normProduct(_cleanProductForMatch(text));
+  if (!t) return null;
+  for (const e of (names || [])) {
+    const n = _normProduct(_cleanProductForMatch(e));
+    if (n && n.length >= 3 && t.includes(n)) return e;
+  }
+  return null;
 }
 
 /**
@@ -960,8 +1014,11 @@ async function inspectSubmission({
       : { verdict: 'skip' };
 
     // ③ 같은 파일 — 슬롯 무관(영수증 재탕도 잡을 값어치가 있다)
-    checks.duplicate = await findDuplicate({
-      fileHash: hash, fileId, sheetId, tabName, rowIndex, reviewerName,
+    // ★ 같은 리뷰어가 **다른 작업**에 낸 같은 캡처는 "한 화면에 여러 리뷰"일 수 있다 →
+    //   classifyDuplicateContext 가 warn/pass 로 완화한다(같은 작업 재사용·타인 도용은 그대로 fail).
+    checks.duplicate = await classifyDuplicateContext({
+      dup: await findDuplicate({ fileHash: hash, fileId, sheetId, tabName, rowIndex, reviewerName }),
+      cls, exp, sheetId, tabName, reviewerName,
     });
 
     // ④ 본문 겹침 (리뷰 슬롯만)
@@ -1273,27 +1330,75 @@ async function resolveInspection({ fileId, by, resolution } = {}) {
 }
 
 /**
+ * 검수 건 → 리뷰어 연락처(phone8) 해석. **한 왕복**으로 4갈래를 함께 읽고 위에서부터 고른다.
+ *
+ * ★★ 왜 4갈래인가(실사고): 종전엔 ①만 봤는데, 검수 건의 `row_index` 는 **NULL 일 수 있고**
+ *   (업로드 시 이름↔행 매칭이 모호하면 `review_submissions.row_index` 가 비고 그대로 복제된다)
+ *   행이 있어도 **시트 연락처 칸이 비어 있으면** `review_index.phone8` 이 없다 → "연락처를 찾지 못함".
+ * ★★ 완화 금지: 아래 순서와 게이트는 **틀린 사람에게 반려 안내가 가지 않게** 하는 장치다.
+ *   ① 시트 현재값(그 줄의 연락처) — 소유권의 최종 진실(search.service 규율과 동일)
+ *   ② 업로드 원장이 **결정적으로** 연결한 인덱스 행(`review_submissions.review_index_id`)
+ *   ③ 확정 신원(`participation_links`) — ★ **이름이 같을 때만**(재배정된 행의 옛 주인 차단.
+ *      ①이 비었을 때만 보는 것도 search.service 의 stale-pl 규율 그대로)
+ *   ④ 같은 작업에서 **이름이 정확히 일치하는 리뷰어가 딱 한 명**일 때만(동명이인이면 포기)
+ * ★ 못 찾으면 **사유를 구분해** 돌려준다 — "왜 못 보냈는지"를 모르면 담당자가 손쓸 수가 없다.
+ */
+async function resolveReviewerPhone8(fileId) {
+  const { rows } = await _db().query(
+    `SELECT i.sheet_id, i.tab_name, i.row_index, i.reviewer_name,
+            (SELECT r.phone8 FROM review_index r
+              WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                AND r.row_index = i.row_index AND COALESCE(r.phone8,'') <> '' LIMIT 1) AS p_row,
+            (SELECT r.phone8 FROM review_submissions s
+                JOIN review_index r ON r.id = s.review_index_id
+              WHERE s.file_id = i.file_id AND COALESCE(r.phone8,'') <> '' LIMIT 1) AS p_link,
+            (SELECT pl.phone8 FROM participation_links pl
+              WHERE pl.sheet_id = i.sheet_id AND pl.tab_name = i.tab_name
+                AND pl.row_index = i.row_index AND COALESCE(pl.phone8,'') <> ''
+                AND REPLACE(COALESCE(pl.name,''),' ','') = REPLACE(COALESCE(i.reviewer_name,''),' ','')
+                AND COALESCE(i.reviewer_name,'') <> '' LIMIT 1) AS p_pl,
+            (SELECT MIN(r.phone8) FROM review_index r
+              WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                AND COALESCE(r.phone8,'') <> '' AND COALESCE(i.reviewer_name,'') <> ''
+                AND REPLACE(COALESCE(r.reviewer_name,''),' ','') = REPLACE(COALESCE(i.reviewer_name,''),' ','')
+              HAVING COUNT(DISTINCT r.phone8) = 1) AS p_name,
+            (SELECT COUNT(DISTINCT r.phone8) FROM review_index r
+              WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                AND COALESCE(r.phone8,'') <> '' AND COALESCE(i.reviewer_name,'') <> ''
+                AND REPLACE(COALESCE(r.reviewer_name,''),' ','') = REPLACE(COALESCE(i.reviewer_name,''),' ','')) AS name_cnt
+       FROM review_inspections i WHERE i.file_id = $1 LIMIT 1`,
+    [fileId]);
+  const r = rows[0];
+  if (!r) return { row: null, error: '검수 건을 찾지 못했습니다.' };
+
+  const pick = [['row', r.p_row], ['link', r.p_link], ['participation', r.p_pl], ['name', r.p_name]]
+    .find(([, v]) => v);
+  if (pick) return { row: r, phone8: pick[1], via: pick[0] };
+
+  // ★ 사유 구분 — 담당자가 무엇을 고쳐야 하는지 알아야 한다.
+  const cnt = Number(r.name_cnt || 0);
+  let why;
+  if (cnt > 1) why = `같은 이름(${r.reviewer_name || ''})이 이 작업에 ${cnt}명이라 연락처를 특정할 수 없습니다`;
+  else if (r.row_index == null) why = '이 캡처가 시트 어느 줄인지 연결되어 있지 않습니다';
+  else why = `시트 ${r.row_index}행의 연락처 칸이 비어 있습니다`;
+  return { row: r, error: `리뷰어 연락처를 찾지 못해 메시지를 보내지 못했습니다 — ${why}. 1:1 문의로 직접 안내해 주세요.` };
+}
+
+/**
  * [✕ 불량 맞음] → 리뷰어 1:1 문의 채팅에 반려 사유 자동 통지.
  * ★ 확인(원장 기록)과 분리된 후처리 — 실패해도 불량 확인은 유지되고, 결과를 응답에 실어
  *   관리자가 알게 한다(조용한 미전송 금지). 절대 throw 하지 않는다.
- * ★ 연락처는 review_index.phone8(시트 현재값 = 그 행 소유자의 최종 진실 — 소유권 규율)만 쓴다.
+ * ★ 연락처 해석은 `resolveReviewerPhone8` 단일 출처(위 4갈래 게이트).
  */
 async function notifyInspectionReject({ fileId, message, by, card } = {}) {
   const msg = String(message || '').trim();
   if (!fileId || !msg) return { sent: false, error: '전송할 사유가 없습니다.' };
   try {
-    const { rows } = await _db().query(
-      `SELECT i.sheet_id, i.tab_name, i.row_index, i.reviewer_name,
-              (SELECT phone8 FROM review_index r
-                WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
-                  AND r.row_index = i.row_index LIMIT 1) AS phone8
-         FROM review_inspections i WHERE i.file_id = $1 LIMIT 1`,
-      [fileId]);
-    const r = rows[0];
-    if (!r) return { sent: false, error: '검수 건을 찾지 못했습니다.' };
-    if (!r.phone8) {
-      return { sent: false, error: '리뷰어 연락처를 찾지 못해 메시지를 보내지 못했습니다 — 1:1 문의로 직접 안내해 주세요.' };
-    }
+    const got = await resolveReviewerPhone8(fileId);
+    const r = got.row;
+    if (!r) return { sent: false, error: got.error || '검수 건을 찾지 못했습니다.' };
+    if (!got.phone8) return { sent: false, error: got.error };
+    r.phone8 = got.phone8;
     const out = await require('./csBridge.service').postInspectionReject({
       sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
       reviewerName: r.reviewer_name, phone8: r.phone8, message: msg, by,
@@ -1374,6 +1479,8 @@ module.exports = {
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
   listInspections, inspectionSummary, resolveInspection, resolveInspectionsBulk, inspectionScope,
   notifyInspectionReject,
+  resolveReviewerPhone8,
+  classifyDuplicateContext,
   hashBase64, matchProductName, computeStatus,
   loadTabExpectations, findDuplicate, findOwnDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,

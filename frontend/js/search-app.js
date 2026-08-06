@@ -2417,6 +2417,12 @@ function _preRenderDup(scope, anchor) {
     + ' 이번 건은 <b>다른 리뷰 화면</b>을 캡처해 올려주세요.</div>'
     + (thumb ? `<div style="display:flex;gap:8px;align-items:center;margin-top:8px">${thumb}`
         + '<div style="font-weight:500;font-size:.73rem;color:#7F1D1D">앞서 낸 사진<br>(같은 사진이에요)</div></div>' : '')
+    /* ★ 다른 작업 건은 **정상일 수 있다** — 두 작업에 함께 참여해 리뷰 목록에 두 리뷰가
+       한 화면에 보이면 캡처 한 장으로 두 건을 내는 것이 맞다(실사고 2026-08-06).
+       그 경우까지 "다른 화면을 캡처하세요"라고만 하면 맞게 한 리뷰어가 헤맨다. */
+    + (d.sameTab ? ''
+        : '<div style="font-weight:500;font-size:.73rem;margin-top:6px;color:#7F1D1D">'
+          + '두 작업에 함께 참여해 <b>한 화면에 두 리뷰가 같이 보이는 캡처</b>라면 그대로 제출하셔도 괜찮아요.</div>')
     + '<div style="font-weight:500;font-size:.72rem;margin-top:6px;color:#8A93A3">'
     + '그래도 이 사진이 맞다면 그대로 제출하셔도 됩니다 — 담당자가 확인합니다.</div>';
 }
