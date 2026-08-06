@@ -989,6 +989,105 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   };
 }
 
+// ═══ 견적서·계산서 문서 뷰어(광고주 전체 작업 표의 칸 클릭 → 팝업) ═══
+//   견적서 = 인트라넷 quotes 상세(품목 포함)를 프록시 + trackb_quote_snapshots 버전 적재(093).
+//   계산서 = 인트라넷 tax_invoices(sales_id 역링크, 인트라넷 0087)를 프록시 — 발행 요약만(원본은 홈택스).
+//   게이트는 settlementForTab 과 동일: 탭에 링크된 계약만 도달 + 광고주 settlement_visible.
+const crypto = require('crypto');
+function _mapQuoteFull(q) {
+  if (!q) return null;
+  let items = [];
+  try { items = JSON.parse(q.items || '[]'); } catch (_) { items = []; }
+  if (!Array.isArray(items)) items = [];
+  return {
+    quoteNumber: String(q.quote_number || '').trim(),
+    quoteType: q.quote_type || 'online_marketing',
+    receiver: q.receiver || '', workName: q.work_name || '',
+    quoteDate: q.quote_date || null, validPeriod: q.valid_period || '',
+    managerName: q.manager_name || '', managerPhone: q.manager_phone || '',
+    items: items.slice(0, 20).map(it => ({
+      name: String((it && it.name) || ''), unitPrice: Number(it && it.unit_price) || 0,
+      count: Number(it && it.count) || 0, amount: Number(it && it.amount) || 0,
+      tax: Number(it && it.tax) || 0, note: String((it && it.note) || ''),
+    })),
+    supplyAmount: Number(q.supply_amount) || 0, vatAmount: Number(q.vat_amount) || 0,
+    totalAmount: Number(q.total_amount) || 0,
+    status: q.status || 'draft', sentAt: q.sent_at || null, acceptedAt: q.accepted_at || null,
+  };
+}
+// 내용 해시 — 상태 포함(내용이 같아도 draft→accepted 전이가 새 버전 = "초안/최종" 자동 라벨 근거).
+function _quoteHash(quote) {
+  const basis = JSON.stringify([quote.quoteNumber, quote.quoteType, quote.receiver, quote.workName,
+    quote.quoteDate, quote.items, quote.supplyAmount, quote.vatAmount, quote.totalAmount, quote.status]);
+  return crypto.createHash('sha256').update(basis).digest('hex').slice(0, 32);
+}
+// 스냅샷 적재(append-only) — 최신 버전과 해시가 같으면 write 0회. 경합의 UNIQUE 충돌은 무해(다음 조회로 수렴).
+async function _snapshotQuote(salesId, quote) {
+  if (!salesId || !quote) return;
+  const db = getPool(); const hash = _quoteHash(quote);
+  const { rows } = await db.query(
+    'SELECT version, content_hash FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version DESC LIMIT 1', [salesId]);
+  if (rows.length && rows[0].content_hash === hash) return;
+  const next = rows.length ? rows[0].version + 1 : 1;
+  try {
+    await db.query(
+      'INSERT INTO trackb_quote_snapshots (sales_id, version, content_hash, payload) VALUES ($1,$2,$3,$4)',
+      [salesId, next, hash, JSON.stringify(quote)]);
+  } catch (e) { logger.warn(`quote snapshot insert skipped: ${e.message}`); }
+}
+async function _settlementLinkForTab(sheetId, tabName) {
+  const { rows } = await getPool().query(
+    `SELECT sales_id AS "salesId", contract_number AS "contractNumber"
+       FROM trackb_settlement_links WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`, [sheetId, tabName]);
+  return rows[0] || null;
+}
+// 견적서 문서(버전 이력 포함). 광고주 게이트 통과 못 하면 hidden(내용 미포함).
+async function quoteDocForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
+  if (!sheetId || !tabName) throw new Error('quoteDocForTab: sheetId, tabName 필수');
+  if (role === 'advertiser' && !(await _settlementVisibleFor(advertiserId))) return { linked: false, hidden: true };
+  const link = await _settlementLinkForTab(sheetId, tabName);
+  if (!link || !link.salesId) return { linked: false };
+  let quote = null, proxyDown = false;
+  try {
+    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(link.salesId)}&limit=1`);
+    quote = _mapQuoteFull((j.data || [])[0]);
+  } catch (_) { proxyDown = true; }
+  if (quote) await _snapshotQuote(link.salesId, quote);
+  const { rows } = await getPool().query(
+    'SELECT version, payload, captured_at AS "capturedAt" FROM trackb_quote_snapshots WHERE sales_id=$1 ORDER BY version ASC LIMIT 30', [link.salesId]);
+  const versions = rows.map(r => ({ version: r.version, capturedAt: r.capturedAt, payload: r.payload }));
+  // 스냅샷이 아직 없는데 라이브 견적은 있는 경우(insert 실패 등) 라이브를 v1처럼 노출(fail-soft).
+  if (!versions.length && quote) versions.push({ version: 1, capturedAt: null, payload: quote });
+  return { linked: true, contractNumber: link.contractNumber || '', proxyDown, versions };
+}
+// 계산서(전자세금계산서) 발행 요약 — sales 상태 + tax_invoices 이력(sales_id 역링크).
+async function invoiceDocForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
+  if (!sheetId || !tabName) throw new Error('invoiceDocForTab: sheetId, tabName 필수');
+  if (role === 'advertiser' && !(await _settlementVisibleFor(advertiserId))) return { linked: false, hidden: true };
+  const link = await _settlementLinkForTab(sheetId, tabName);
+  if (!link || !link.salesId) return { linked: false };
+  const sales = await _salesById(link.salesId);
+  let records = [], proxyDown = false;
+  try {
+    const j = await _intranetGet(`/api/tables/tax_invoices?where=sales_id=${encodeURIComponent(link.salesId)}&limit=20`);
+    records = (j.data || []).map(t => ({
+      invoiceType: t.invoice_type || '', issueDate: t.issue_date || null,
+      supplierName: t.supplier_name || '', recipientName: t.recipient_name || '',
+      itemName: t.item_name || '',
+      supplyAmount: Number(t.supply_amount) || 0, taxAmount: Number(t.tax_amount) || 0,
+      totalAmount: Number(t.total_amount) || 0, status: t.status || '',
+      // 팝빌 UID 는 뒤 4자리만(문서 대조용) — 전체 식별자는 내부 정보라 미노출.
+      popbillTail: t.popbill_uid ? String(t.popbill_uid).slice(-4) : '',
+    }));
+  } catch (_) { proxyDown = true; }
+  return {
+    linked: true, contractNumber: link.contractNumber || '', proxyDown: proxyDown || (link.salesId && !sales),
+    invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
+    amount: sales ? sales.amount : null,
+    records,
+  };
+}
+
 // ── 소유지정 연결탭 정산 요약(관제실 컬럼: 견적서일·계산서일·입금액/총비용·입금일) — 내부 전용 배치. ──
 //   링크된 탭만 인트라넷 프록시(정산 링크 없는 탭은 프록시 0회). 같은 sales 를 공유하는 탭은 1회만 조회
 //   (_salesById/_quoteForSales 20초 캐시 공유). fail-soft: sales 조회 실패 = proxyDown 표기(스로우 금지).
@@ -3007,6 +3106,8 @@ module.exports = {
   unlinkSettlement,
   setSettlementVisible,
   settlementForTab,
+  quoteDocForTab,
+  invoiceDocForTab,
   settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
   settlementVisibleFor,

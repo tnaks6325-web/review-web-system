@@ -150,7 +150,7 @@ async function run() {
 
   // ── 화면 A: 내 작업 목록 표 ──
   ok('화면 A 컬럼: 시작일·진행상황·견적서·계산서·총비용·입금액·입금일·남은 입금액',
-    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>참여·제출·입금<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
+    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>참여·제출·입금<\/span><span>자료 폴더<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
   ok('남은 입금액 = 총비용 − 입금액 파생(0원 = 완납 표시)', /Math\.max\(tc-\(pa\|\|0\),0\)/.test(src) && src.includes("'0 ✓'"));
   ok('화면 A 컨테이너 폭 상한(1380px)', /#advHome\{max-width:1380px\}/.test(css));
 
@@ -164,7 +164,7 @@ async function run() {
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
   ok('정산 카드 6칸(_advSettleFields): 견적서/계산서/총비용/입금액/입금일/남은 입금액',
     /_advSettleFields\(d,q,inv,pay\)/.test(src)
-    && /<div class="k">견적서<\/div>/.test(src) && /<div class="k">계산서<\/div>/.test(src)
+    && /<div class="k">견적서 ⧉<\/div>/.test(src) && /<div class="k">계산서 ⧉<\/div>/.test(src)
     && /<div class="k">총비용/.test(src) && /<div class="k">입금액<\/div>/.test(src)
     && /<div class="k">입금일 \(최근\)<\/div>/.test(src) && /<div class="k">남은 입금액<\/div>/.test(src)
     && src.includes('완납 ✓'));
