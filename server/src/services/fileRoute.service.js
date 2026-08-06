@@ -459,6 +459,50 @@ async function manualRoute({ fileId, target, by = '' } = {}) {
 }
 
 /**
+ * 중복파일 수동 제거 — 검수의 duplicate fail 근거가 있는 파일만, **나중 제출본을 휴지통**으로
+ * 보내고 이전 제출본을 보존한다(자동 중복 반려와 같은 결말 — 사람이 확인 후 실행하는 판만 다르다).
+ * ★ 근거(matchFileId) 없는 파일은 거부 — 제거 버튼이 안 보이는 유형을 API 직접 호출로 지우는 것 차단.
+ * ★ 휴지통(trashFiles)만 — 영구삭제 API 금지(30일 복구창). 수동 경로에도 예외 없다.
+ */
+async function dedupManual({ fileId, by = '' } = {}) {
+  if (!fileId) return { ok: false, error: 'fileId가 필요합니다.' };
+  const driveService = require('./drive.service');
+  let sub, insp;
+  try {
+    const r1 = await _db().query(
+      `SELECT file_id, file_name, sheet_id, tab_name, row_index, reviewer_name, slot_key
+         FROM review_submissions WHERE file_id = $1 LIMIT 1`, [fileId]);
+    sub = r1.rows[0];
+    const r2 = await _db().query(
+      'SELECT checks FROM review_inspections WHERE file_id = $1 LIMIT 1', [fileId]);
+    insp = r2.rows[0];
+  } catch (e) { return { ok: false, error: `조회 실패: ${e.message}` }; }
+  if (!sub) return { ok: false, error: '원장에 없는 파일이라 제거할 수 없습니다.' };
+  if (sub.slot_key === 'trashed') return { ok: false, error: '이미 제거된 파일입니다.' };
+  const dup = insp && insp.checks && insp.checks.duplicate;
+  if (!dup || dup.verdict !== 'fail' || !dup.matchFileId) {
+    return { ok: false, error: '중복 근거(같은 지문의 기존 제출)가 없는 파일이라 제거할 수 없습니다.' };
+  }
+  try {
+    await driveService.trashFiles([{ id: fileId, name: sub.file_name || fileId }]);
+  } catch (e) { return { ok: false, error: `휴지통 이동 실패: ${e.message}` }; }
+  await _db().query(
+    `UPDATE review_submissions
+        SET routed_from_slot = COALESCE(routed_from_slot, slot_key), slot_key = 'trashed',
+            routed_at = NOW(), routed_by = $2
+      WHERE file_id = $1`, [fileId, 'dedup:' + (by || 'admin')]);
+  await recomputePrimary({ sheetId: sub.sheet_id, tabName: sub.tab_name, rowIndex: sub.row_index });
+  await logRouteEvent({
+    eventType: 'capture_dup_rejected', severity: 'warn', resolved: true,   // 사람이 한 행동 — 알림으로 쌓지 않는다
+    sheetId: sub.sheet_id, tabName: sub.tab_name, reviewerName: sub.reviewer_name,
+    message: `${sub.reviewer_name || '리뷰어'}님의 ${sub.row_index != null ? sub.row_index + '행 ' : ''}` +
+      `${routeSlotLabel(sub.slot_key)} 캡처(중복 제출)를 ${by || '관리자'}님이 휴지통으로 제거했습니다(이전 제출본 보존 · 30일 복구 가능).`,
+    context: { fileId, matchFileId: dup.matchFileId, from: sub.slot_key, manual: true },
+  });
+  return { ok: true, matchFileId: dup.matchFileId };
+}
+
+/**
  * 자동분류 정확도 관측 — 사람의 수동 분류(routed_by='manual:*')를 정답으로 놓고,
  * AI 관측 계획(capture_route_plan — dry 모드가 기록)과 대조한다.
  * match(AI도 같은 판단) / miss(AI는 못 잡음) / differ(AI가 다르게 판단).
@@ -491,7 +535,7 @@ async function routeAccuracyStats({ days = 30 } = {}) {
 module.exports = {
   findSlotDuplicate, resolveTargetFolder, markRouted, recomputePrimary,
   logRouteEvent, revertRoute, revertRouteFromEvent, sweepTab,
-  manualRoute, routeAccuracyStats,
+  manualRoute, dedupManual, routeAccuracyStats,
   routeMode, rejectEnabled,
   __setPoolForTest,
 };

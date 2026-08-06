@@ -789,6 +789,28 @@
   .ribdg.ri-p{color:#68717E;background:#F2F4F7;border-color:var(--line)}
   .ribdg.ri-r{color:#68717E;background:#F2F4F7;border-color:var(--line)}
   .ovnote-tally{margin-left:10px;color:var(--muted)}
+  /* ── 유형별 맞춤 카드(시안 design-inspect-type-actions) — 유형 색 띠 + 주 조치 1 + 보조 + ⋯.
+     유형 색은 의미에만, 인터랙션 액센트는 파랑 하나(차용 원칙). */
+  .nc-type{display:flex;align-items:center;gap:6px;padding:6px 11px 6px 9px;font-size:11px;font-weight:800;border-left:4px solid}
+  .nc-type .tag{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-left:auto;flex:none}
+  .nc-type.t-dup{border-color:#DC2626;background:#FEF3F2;color:#9F1D1D}
+  .nc-type.t-fmt{border-color:#D97706;background:#FFF8EB;color:#8A4B06}
+  .nc-type.t-prod{border-color:#16A34A;background:#F1FBF4;color:#14672F}
+  .nc-type.t-chan{border-color:#0E7490;background:#EFF9FB;color:#0B5A6E}
+  .nc-type.t-sim{border-color:#7C3AED;background:#F7F3FE;color:#5B21B6}
+  .nc-type.t-auth{border-color:#64748B;background:#F4F6F8;color:#475569}
+  .nc-type.t-none{border-color:#CBD5E1;background:#F6F7F9;color:#68717E}
+  .nc-body{display:flex;gap:10px;padding:10px 11px 8px;cursor:pointer;flex:1}
+  .nc-th{width:58px;height:78px;border-radius:7px;background:var(--bg2,#EFF1F4);flex:none;display:grid;place-items:center;overflow:hidden}
+  .nc-th img{width:100%;height:100%;object-fit:cover}
+  .nc-act{padding:0 11px 10px}
+  .nc-main{display:flex;width:100%;align-items:center;justify-content:center;gap:5px;border:none;border-radius:9px;padding:8px 0;font-size:12px;font-weight:800;color:#fff;cursor:pointer}
+  .nc-main.m-red{background:#DC2626}.nc-main.m-amber{background:#D97706}.nc-main.m-green{background:#16A34A}
+  .nc-main.m-blue{background:#1D4ED8}.nc-main.m-vio{background:#7C3AED}.nc-main.m-slate{background:#64748B}
+  .nc-sub{display:flex;gap:6px;margin-top:6px}
+  .nc-g{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 0;font-size:11px;font-weight:700;color:#3A445A;cursor:pointer;white-space:nowrap}
+  .nc-g.ok{color:#15803D}.nc-g.bad{color:#B91C1C}
+  .nc-g.more{flex:0 0 36px;color:var(--muted);font-weight:800}
   /* 상세 모달 */
   .rimodal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9000;padding:20px}
   .rimodal-in{background:var(--card);border:1px solid var(--line);border-radius:14px;max-width:1000px;width:100%;
@@ -5375,38 +5397,163 @@ function _riRenderBody(){
     const reasons = _riReasons(c);
     const cls = r.status==='fail'?'ri-f':r.status==='suspect'?'ri-s':r.status==='resolved'?'ri-r':'ri-p';
     const thumb = _riImg(r.file_id);
-    // 수동 분류(이동) — 현재 칸(slot_key)에 따라 갈 수 있는 곳만. AI가 "리뷰화면 아님"으로
-    // 판정한 카드는 AI가 추정한 종류 쪽 버튼을 강조한다(사람이 최종 결정).
-    const _fmKind = c.format && c.format.verdict==='fail' ? (c.format.got||'') : '';
-    const routeBtns = r.status==='resolved' ? '' : (r.slot_key==='receipt'
-      ? `<button class="btn" style="font-size:.7rem;border-color:#93C5FD;color:#1D4ED8" onclick="riRouteManual(${i},'review')">🖼 리뷰로 이동</button>
-         <button class="btn" style="font-size:.7rem;border-color:#93C5FD;color:#1D4ED8" onclick="riRouteManual(${i},'order_capture')">🛒 구매캡처로 이동</button>`
-      : `<button class="btn" style="font-size:.7rem;border-color:${_fmKind==='receipt'?'#F59E0B':'#FCD9A0'};color:#92400E${_fmKind==='receipt'?';font-weight:800':''}" onclick="riRouteManual(${i},'receipt')">🧾 현금영수증으로 이동</button>
-         <button class="btn" style="font-size:.7rem;border-color:${_fmKind==='order_capture'?'#2563EB':'#BFDBFE'};color:#1D4ED8${_fmKind==='order_capture'?';font-weight:800':''}" onclick="riRouteManual(${i},'order_capture')">🛒 구매캡처로 이동</button>`);
-    return `<div class="ricard ${cls}">
-      <div class="rithumb" onclick="riOpenDetail(${i})">${thumb?`<img src="${thumb}" alt="" loading="lazy">`:'<span>이미지 없음</span>'}</div>
-      <div class="ribd">
-        <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b>
-          <span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span></div>
-        <div class="rimeta"><a href="javascript:void(0)" onclick="riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
-        <div class="rireason">${reasons.length?reasons.map(esc).join('<br>'):'—'}</div>
+    const p = _riPrimaryIssue(r);
+    const meta = p ? RI_TYPE_META[p] : null;
+    const others = p ? _riIssueTypes(r).filter(k=>k!==p).length : 0;
+    const act = (r.status==='resolved') ? null : _riCardActions(r, i);
+    return `<div class="ricard${r.status==='resolved'?' ri-r':''}">
+      <div class="nc-type ${meta?meta.cls:'t-none'}">${esc(_riTypeLabel(p,c))}${others?` <span style="font-weight:600;opacity:.7">＋${others}</span>`:''}<span class="tag">${meta?meta.tag:''}</span></div>
+      <div class="nc-body" onclick="riOpenDetail(${i})">
+        <div class="nc-th">${thumb?`<img src="${thumb}" alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}</div>
+        <div style="flex:1;min-width:0">
+          <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b>
+            <span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span></div>
+          <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
+          <div class="rireason">${reasons.length?reasons.map(esc).join('<br>'):'—'}</div>
+        </div>
       </div>
-      <div class="rift">
-        <button class="btn" onclick="riOpenDetail(${i})">상세</button>
-        ${r.status==='resolved'
-          ? (r.resolution?`<span class="rimeta">${r.resolution==='ok'?'✓ 정상(오탐)':'✕ 불량 맞음'}</span>`:'')
-          : `<button class="btn" style="border-color:#86EFAC;color:#15803D" title="AI 판정이 틀렸고 정상 제출입니다 — 상품명 의심 건은 캡처 표기를 인정 상품명으로 학습합니다" onclick="riResolve('${esc(r.file_id)}','ok')">✓ 정상</button><button class="btn" style="border-color:#FCA5A5;color:#B91C1C" title="실제 불량이 맞습니다 — 반려 사유를 리뷰어 1:1 문의로 전송할 수 있습니다" onclick="riBadPopup(${i})">✕ 불량</button>`}
-      </div>
-      ${routeBtns?`<div class="rift" style="margin-top:2px">${routeBtns}</div>`:''}
+      ${r.status==='resolved'
+        ? (r.resolution?`<div class="nc-act"><span class="rimeta">${r.resolution==='ok'?'✓ 정상(오탐) 처리됨':'✕ 불량 맞음 처리됨'}</span></div>`:'')
+        : act?`<div class="nc-act">
+            <button class="nc-main ${act.main.m}" onclick="${act.main.h}">${act.main.t}</button>
+            <div class="nc-sub">${act.subs.map(s=>`<button class="nc-g ${s.cls||''}" onclick="${s.h}">${s.t}</button>`).join('')}<button class="nc-g more" onclick="riMoreMenu(${i})" title="나머지 조치">⋯</button></div>
+          </div>`:''}
     </div>`;
   }).join('') + `</div>`;
 }
+/* ── 유형별 맞춤 조치(시안 확정) — 주 유형이 주 버튼을 정한다 ──
+   ★★ 우선순위 = 조치가 확실한 것부터: 같은파일 > 리뷰화면아님 > 상품명 > 본문겹침 > 채널 > 작성자.
+   ★ [✓ 정상]/[✕ 불량]은 어느 유형에서든 주/보조 어딘가에 반드시 존재(빠른 길이지 선택지 축소가 아니다). */
+const RI_TYPE_META={
+  duplicate:{cls:'t-dup',tag:'DUP',label:'📄 같은 파일 (중복 제출)'},
+  format_fail:{cls:'t-fmt',tag:'FMT',label:'📵 리뷰화면 아님'},
+  product:{cls:'t-prod',tag:'PROD',label:'🏷 상품명 다름'},
+  similarity:{cls:'t-sim',tag:'SIM',label:'✍ 본문 겹침'},
+  channel:{cls:'t-chan',tag:'CHAN',label:'🔀 채널 다름'},
+  author:{cls:'t-auth',tag:'AUTH',label:'👤 작성자 표기'},
+};
+function _riPrimaryIssue(r){
+  const t=_riIssueTypes(r);
+  for(const k of ['duplicate','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
+  return null;
+}
+function _riTypeLabel(p,c){
+  if(!p) return '이상 없음';
+  if(p==='format_fail'){
+    const got=(c&&c.format&&c.format.got)||'';
+    const gl={receipt:'현금영수증',order_capture:'주문내역',purchase_confirm:'구매확정 화면',review:'리뷰 화면'}[got];
+    return '📵 리뷰화면 아님'+(gl?' — '+gl+'으로 보임':'');
+  }
+  if(p==='similarity'){
+    const s=c&&c.similarity&&c.similarity.score;
+    return '✍ 본문 겹침'+(s!=null?' '+Math.round(s*100)+'%':'');
+  }
+  return RI_TYPE_META[p].label;
+}
+function _riCardActions(r,i){
+  const c=r.checks||{};
+  const p=_riPrimaryIssue(r);
+  if(!p) return null;   // 통과·미검수 = 조치 영역 없음
+  const A={
+    detail:{h:`riOpenDetail(${i})`,t:'👁 상세'},
+    ok:{h:`riResolve('${esc(r.file_id)}','ok')`,t:'✓ 정상',cls:'ok'},
+    bad:{h:`riBadPopup(${i})`,t:'✕ 불량',cls:'bad'},
+    mvR:{h:`riRouteManual(${i},'receipt')`,t:'🧾 현금영수증으로 이동'},
+    mvC:{h:`riRouteManual(${i},'order_capture')`,t:'🛒 구매캡처로 이동'},
+    mvV:{h:`riRouteManual(${i},'review')`,t:'🖼 리뷰로 이동'},
+    dedup:{h:`riDedupPopup(${i})`,t:'🗑 중복파일 제거'},
+    names:{h:`riProductNames(${i})`,t:'⚙ 기대 상품명'},
+    promote:{h:`riPromoteSample(${i})`,t:'🖼 예시로 등록'},
+  };
+  const isReceiptSlot=r.slot_key==='receipt';
+  const moves=isReceiptSlot?[A.mvV,A.mvC]:[A.mvR,A.mvC];
+  // ★ 중복 = 제거만(이동 버튼 제외 — 어디로 옮겨도 중복은 남는다)
+  if(p==='duplicate') return {main:{...A.dedup,m:'m-red'}, subs:[A.ok,A.bad], more:moves};
+  if(p==='format_fail'){
+    const got=(c.format&&c.format.got)||'';
+    if(!isReceiptSlot&&got==='receipt') return {main:{...A.mvR,m:'m-amber'}, subs:[A.bad,A.ok], more:[A.mvC]};
+    if(got==='order_capture'||got==='purchase_confirm') return {main:{...A.mvC,m:'m-amber'}, subs:[A.bad,A.ok], more:isReceiptSlot?[A.mvV]:[A.mvR]};
+    if(isReceiptSlot&&got==='review') return {main:{...A.mvV,m:'m-blue'}, subs:[A.bad,A.ok], more:[A.mvC]};
+    // 종류 불명 — 어디로 보낼지 AI도 모르면 사람이 상세에서 보고 [⋯]로
+    return {main:{...A.bad,t:'✕ 불량 (반려 안내 전송)',m:'m-red'}, subs:[A.ok], more:moves};
+  }
+  if(p==='product') return {main:{...A.ok,t:'✓ 정상 — 이 표기를 별칭으로 학습',m:'m-green'}, subs:[A.names,A.bad], more:moves};
+  if(p==='channel') return {main:{...A.ok,t:'✓ 정상 — 채널 추정 오인',m:'m-blue'}, subs:[A.promote,A.bad], more:moves};
+  if(p==='similarity') return {main:{...A.detail,t:'👁 겹친 제출과 나란히 보기',m:'m-vio'}, subs:[A.bad,A.ok], more:moves};
+  return {main:{...A.detail,t:'👁 반복 제출 확인',m:'m-slate'}, subs:[A.ok,A.bad], more:moves};   // author
+}
+/* [⋯] = 그 카드에서 숨긴 나머지 조치 전부 — 맞춤 배치는 빠른 길이지 선택지 축소가 아니다 */
+function riMoreMenu(i){
+  const r=(STATE.ri||[])[i]; if(!r) return;
+  const act=_riCardActions(r,i); if(!act) return;
+  const items=[{h:`riOpenDetail(${i})`,t:'👁 상세 보기'},...act.more];
+  let p=document.getElementById('riMorePop');
+  if(!p){ p=document.createElement('div'); p.id='riMorePop'; document.body.appendChild(p); }
+  p.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center';
+  p.onclick=e=>{ if(e.target===p) p.remove(); };
+  p.innerHTML=`<div style="background:#fff;color:#1e293b;border-radius:12px;width:92%;max-width:300px;padding:12px 14px;box-shadow:0 18px 48px rgba(15,23,42,.3)">
+    <div style="font-size:.78rem;font-weight:800;margin-bottom:8px">${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''} — 나머지 조치</div>
+    ${items.map(it=>`<button style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:.8rem;font-weight:700" onclick="document.getElementById('riMorePop').remove();${it.h}">${it.t}</button>`).join('')}
+    <div style="text-align:right;margin-top:8px"><button class="btn" onclick="document.getElementById('riMorePop').remove()">닫기</button></div>
+  </div>`;
+}
+function riProductNames(i){
+  const r=(STATE.ri||[])[i]; if(!r) return;
+  riOpenProductNames({sheetId:r.sheet_id,tabName:r.tab_name});
+}
+/* ── 전용 확인 팝업 공용 골격(#562 확정 시안) — 시스템 confirm() 금지.
+   구성 = 아이콘+제목 / 대상 줄(리뷰어·행·탭 — 어긋난 클릭을 알아챌 유일한 장치) /
+   무슨 일이 일어나는지 목록 / 되돌리기 색 박스 / [취소]·[실행]. Esc·바깥 클릭 = 취소. */
+function _rcPopup(o){
+  STATE._rcOk=o.onOk||null;
+  let p=document.getElementById('rcPop');
+  if(!p){ p=document.createElement('div'); p.id='rcPop'; document.body.appendChild(p); }
+  p.style.cssText='position:fixed;inset:0;z-index:10001;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
+  p.onclick=e=>{ if(e.target===p) riRcClose(); };
+  p.innerHTML=`<div style="background:#fff;color:#1e293b;border-radius:16px;width:100%;max-width:460px;max-height:88vh;overflow:auto;box-shadow:0 24px 64px rgba(15,23,42,.35)">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 20px 0">
+      <div style="width:40px;height:40px;border-radius:12px;background:${o.danger?'#FEF2F2':'#EFF6FF'};display:flex;align-items:center;justify-content:center;font-size:1.25rem;flex:none">${o.icon||'❓'}</div>
+      <div><div style="font-size:1rem;font-weight:800">${esc(o.title||'')}</div>
+        <div style="font-size:.74rem;color:#64748B;margin-top:1px">${esc(o.sub||'')}</div></div>
+    </div>
+    <div style="padding:14px 20px 0">
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:9px 13px;font-size:.82rem;margin-bottom:12px">${o.whoHtml||''}</div>
+      ${o.pairHtml||''}
+      <ul style="list-style:none;margin:0 0 12px;padding:0">
+        ${(o.doList||[]).map(d=>`<li style="display:flex;gap:8px;font-size:.82rem;padding:4px 0;align-items:flex-start"><span style="width:6px;height:6px;border-radius:99px;background:${o.danger?'#DC2626':'#2563EB'};margin-top:8px;flex:none"></span><span>${d}</span></li>`).join('')}
+      </ul>
+      ${o.undoNote?`<div style="background:${o.undoWarn?'#FFFBEB':'#F0FDF4'};border:1px solid ${o.undoWarn?'#FDE68A':'#BBF7D0'};border-radius:10px;padding:8px 13px;font-size:.76rem;color:${o.undoWarn?'#92400E':'#166534'};margin-bottom:4px">${o.undoNote}</div>`:''}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px 18px">
+      <button class="btn" onclick="riRcClose()">취소</button>
+      <button class="btn" style="background:${o.danger?'#DC2626':'#1D4ED8'};border-color:${o.danger?'#DC2626':'#1D4ED8'};color:#fff;font-weight:700" onclick="riRcOk()">${esc(o.btn||'실행')}</button>
+    </div></div>`;
+}
+function riRcClose(){ const p=document.getElementById('rcPop'); if(p) p.remove(); STATE._rcOk=null; }
+async function riRcOk(){ const f=STATE._rcOk; riRcClose(); if(f) await f(); }
+function _rcWho(r){
+  return `<b style="font-size:.86rem">${esc(r.reviewer_name||'이름없음')}</b>${r.row_index?' · '+r.row_index+'행':''} <span style="color:#2563EB;font-size:.75rem">— ${esc(r.tab_name||'')}</span>`;
+}
+
 /* 수동 분류(이동) — 자동분류와 같은 실행부(서버 fileRoute)를 타므로 결과가 동일하고
-   로그 탭 [↩ 원위치]로 되돌릴 수 있다. 이동 성공 = 그 검수 건 정상(오제출) 자동 종결. */
-async function riRouteManual(i, target){
+   로그 탭 [↩ 원위치]로 되돌릴 수 있다. 이동 성공 = 그 검수 건 정상(오제출) 자동 종결.
+   진입(riRouteManual)은 전용 팝업을 열고, 실행(_riRouteExec)이 API 를 부른다. */
+function riRouteManual(i, target){
   const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
   const lbl = target==='receipt'?'현금영수증':target==='order_capture'?'구매캡처(주문내역)':'리뷰';
-  if(!confirm(`${r.reviewer_name||''}${r.row_index?' · '+r.row_index+'행':''}\n\n이 파일을 [${lbl}] 폴더로 옮기고 이 검수 건을 정상(오제출)으로 종결합니다.\n로그 탭의 [↩ 원위치]로 되돌릴 수 있습니다.\n진행할까요?`)) return;
+  _rcPopup({
+    icon: target==='receipt'?'🧾':target==='order_capture'?'🛒':'🖼',
+    title:`${lbl}(으)로 이동할까요?`, sub:'파일을 옮기고 이 검수 건을 종결합니다',
+    whoHtml:_rcWho(r),
+    doList:[`이 파일을 <b>[${esc(lbl)}]</b> 폴더로 옮깁니다`,
+            '이 검수 건을 <b>정상(오제출)</b>으로 종결합니다',
+            '이동 후, 이 실물을 판별 예시로 등록할지 한 번 더 묻습니다'],
+    undoNote:'↩ 로그 탭의 [원위치]로 언제든 되돌릴 수 있습니다',
+    btn:`이동하기`, onOk:()=>_riRouteExec(i, target),
+  });
+}
+async function _riRouteExec(i, target){
+  const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
   const res=await api('/api/trackb/review-inspect/route-manual',{method:'POST',body:JSON.stringify({fileId:r.file_id, target})});
   if(!res||!res.ok){ alert('이동 실패: '+((res&&res.error)||'')); return; }
   // 학습 결합(M3): 수동 분류 1회 = 학습 1건 — 대상 예시 슬롯에 자리가 있으면 승격 제안
@@ -5418,6 +5565,41 @@ async function riRouteManual(i, target){
     if(pr&&pr.ok){ STATE._riSmpCache=null; alert('판별 예시로 등록했습니다.'); }
     else alert('예시 등록 실패: '+((pr&&pr.error)||''));
   }
+  riCloseDetail();
+  _loadInspect();
+}
+/* 중복파일 제거(#562 확정 기본값) — **나중 제출본(지금 파일)을 휴지통**, 이전 제출본 보존.
+   팝업이 두 장을 나란히 보여 무엇이 지워지고 무엇이 남는지 명시한다. 종결 = 불량 맞음(중복). */
+function riDedupPopup(i){
+  const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
+  const dup=(r.checks&&r.checks.duplicate)||{};
+  if(dup.verdict!=='fail'||!dup.matchFileId){ alert('중복 근거(같은 지문의 기존 제출)가 없는 건입니다.'); return; }
+  const pairHtml=`<div style="display:flex;gap:10px;margin-bottom:12px">
+    <div style="flex:1;border:2px solid #FCA5A5;background:#FFF5F5;border-radius:10px;padding:8px">
+      <div style="font-size:.7rem;font-weight:800;color:#B91C1C;margin-bottom:6px">🗑 제거 (지금 제출)</div>
+      <div style="height:110px;border-radius:8px;overflow:hidden;background:#E2E8F0">${_riImg(r.file_id)?`<img src="${_riImg(r.file_id)}" style="width:100%;height:100%;object-fit:cover" alt="">`:''}</div>
+      <div style="font-size:.7rem;color:#475569;margin-top:5px;line-height:1.45">${esc(r.tab_name||'')}<br>${esc(r.reviewer_name||'')}${r.row_index?' · '+r.row_index+'행':''}</div>
+    </div>
+    <div style="flex:1;border:2px solid #86EFAC;background:#F7FEF9;border-radius:10px;padding:8px">
+      <div style="font-size:.7rem;font-weight:800;color:#15803D;margin-bottom:6px">✓ 보존 (이전 제출)</div>
+      <div style="height:110px;border-radius:8px;overflow:hidden;background:#E2E8F0">${_riImg(dup.matchFileId)?`<img src="${_riImg(dup.matchFileId)}" style="width:100%;height:100%;object-fit:cover" alt="">`:''}</div>
+      <div style="font-size:.7rem;color:#475569;margin-top:5px;line-height:1.45">${esc(dup.matchTab||'')}<br>${esc(dup.matchReviewer||'')}${dup.matchRow?' · '+dup.matchRow+'행':''}</div>
+    </div>
+  </div>`;
+  _rcPopup({
+    danger:true, icon:'🗑', title:'중복파일을 제거할까요?',
+    sub:'같은 파일이 두 곳에 제출되어 있습니다 — 나중 제출본을 제거합니다',
+    whoHtml:_rcWho(r), pairHtml,
+    doList:['지금 제출본(왼쪽)을 <b>휴지통</b>으로 보냅니다 — 이전 제출본은 그대로 남습니다',
+            '이 검수 건을 <b>불량 맞음(중복 제출)</b>으로 종결합니다'],
+    undoNote:'🗑 영구삭제가 아닙니다 — Drive 휴지통에서 <b>30일간 복구</b>할 수 있습니다', undoWarn:true,
+    btn:'🗑 중복파일 제거', onOk:()=>_riDedupExec(i),
+  });
+}
+async function _riDedupExec(i){
+  const r=(STATE.ri||[])[i]; if(!r||!r.file_id) return;
+  const res=await api('/api/trackb/review-inspect/dedup-manual',{method:'POST',body:JSON.stringify({fileId:r.file_id})});
+  if(!res||!res.ok){ alert('제거 실패: '+((res&&res.error)||'')); return; }
   riCloseDetail();
   _loadInspect();
 }
@@ -5635,8 +5817,8 @@ async function riPromotePick(si){
   alert('판별 예시로 등록했습니다 — 다음 판정부터 이 실물이 기준에 포함됩니다.');
 }
 /** 기대 상품명 — 비어 있으면 상품명 대조가 통째로 건너뛴다(조건이 하나 죽는다). */
-async function riOpenProductNames(){
-  const t=STATE.riTab; if(!t){ alert('탭을 먼저 선택하세요.'); return; }
+async function riOpenProductNames(tOverride){
+  const t=tOverride||STATE.riTab; if(!t){ alert('탭을 먼저 선택하세요.'); return; }
   const r=await api('/api/trackb/review-inspect/product-names?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
   if(!r||!r.ok){ alert('불러오기 실패'); return; }
   const derived=(r.derived||[]).join('\n');

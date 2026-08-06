@@ -1178,6 +1178,24 @@ async function _routePromoteSuggestion({ to, sheetId, tabName } = {}) {
   return null;   // review 대상은 PC/모바일 구분을 모른다 — 잘못된 슬롯 제안보다 무제안
 }
 
+/* 중복파일 수동 제거 — duplicate fail 근거가 있는 파일만(서버가 재검증), 나중 제출본을
+   휴지통으로 보내고 검수 건은 불량 맞음(중복 제출)으로 종결(#562 확정 기본값).
+   게이트 = 건별 확인과 동일(_riCanTouch — 내부인 + staff 담당 탭). */
+router.post('/review-inspect/dedup-manual', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String((req.body || {}).fileId || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const by = (req.admin && req.admin.name) || '';
+    const out = await require('../services/fileRoute.service').dedupManual({ fileId, by });
+    if (!out.ok) return res.status(400).json(out);
+    try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'bad' }); } catch (_) {}
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '중복파일 제거에 실패했습니다.' });
+  }
+});
+
 /* 자동분류 정확도 — 수동 분류(정답) vs AI 관측 계획 대조. 읽기 전용(설정탭 카드). */
 router.get('/review-inspect/route-stats', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   try {
