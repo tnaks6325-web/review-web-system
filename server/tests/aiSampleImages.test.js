@@ -177,6 +177,27 @@ console.log('\n2) 서비스 실행');
   ok('패널 등록(PANELS/LOADERS) + 전역 노출',
     /aisamples: _aisamplesHtml/.test(set) && /aisamples: loadAiSamples/.test(set)
     && /window\.loadAiSamples = loadAiSamples/.test(set));
+
+  /* ── 크게 보기(등록한 예시를 확인할 수 있어야 한다 — 40px 썸네일로는 불가능했다) ── */
+  ok('★ 썸네일 클릭 = 크게 보기(인덱스만 전달 — 문자열 보간 금지)',
+    /onclick="_smpZoom\(\\'' \+ escHtml\(kind\) \+ '\\','' \+ escHtml\(s\.key\) \+ '\\',' \+ i \+ '\)"/.test(set)
+    || /_smpZoom\(\\'/.test(set));
+  ok('★ 크게 보기 URL 출처 = 서버 응답(_smpLast) — 프론트가 URL 사본을 따로 들지 않는다',
+    /_smpLast = j;/.test(set) && /function _smpSlotOf\(kind, key\)/.test(set)
+    && /_smpUrls\(s\)/.test(set));
+  ok('★ onclick 함수는 window 노출(빠지면 클릭이 조용히 ReferenceError)',
+    /window\._smpZoom = _smpZoom/.test(set) && /window\._smpZoomStep = _smpZoomStep/.test(set)
+    && /window\._smpZoomClose = _smpZoomClose/.test(set) && /window\._smpZoomDel = _smpZoomDel/.test(set));
+  ok('★ 오버레이는 body 직속(패널은 스크롤 컨테이너라 화면 흐름에 섞인다)',
+    /document\.body\.appendChild\(el\)/.test(set.slice(set.indexOf('function _smpZoomRender'))));
+  ok('★ 키 리스너는 최상위 1회 등록 + 입력 중 미가로채기(겹쳐 쌓이면 여러 장 건너뛴다)',
+    (set.match(/document\.addEventListener\('keydown'/g) || []).length === 1
+    && /tag === 'input' \|\| tag === 'textarea'/.test(set)
+    && /if \(!_smpZoomCtx\) return;/.test(set));
+  ok('★ 끝에서 순환하지 않는다(어디까지 봤는지 잃지 않게)',
+    /if \(n < 0 \|\| n >= c\.urls\.length\) return;/.test(set));
+  ok('썸네일 크기 상향(54x70) + 라이트박스 CSS 리터럴 고정',
+    /\.as-smpth img\{width:54px;height:70px/.test(set) && /\.as-zoom\{position:fixed;inset:0;z-index:10050/.test(set));
   ok('★ 두 화면 모두 같은 패널을 띄운다(관리자 대시보드 · 리뷰웹시스템[3버전])',
     /panels: \[[^\]]*'aisamples'[^\]]*\], autoload: false/.test(adm)
     && /isAdmin \? \[[^\]]*'aisamples'[^\]]*\]/.test(wdk));
