@@ -188,7 +188,31 @@ function seqPool(handlers) {
     assert.ok(/30일간 복구/.test(dedupFn), '휴지통 복구창 고지');
     ok('C2: 전용 팝업 — 이동(파랑)·제거(빨강, 두 장 비교)');
 
+    /* ── 시안 A(v2) 확정 규칙 — 빨강 채움 금지 · 썸네일 상단 · 정상/불량만은 좌우 반반 ── */
+    const css = /\.nc-main\{[\s\S]*?\.nc-main\.m-slate\{[^}]*\}/.exec(wd);
+    assert.ok(css, '.nc-main 색 규칙 블록 추출');
+    assert.ok(/\.nc-main\{[^}]*border:1px solid/.test(css[0]) && !/\.nc-main\{[^}]*color:#fff/.test(css[0]),
+      '★★ 주 조치 = 테두리+틴트(채움·흰 글자 금지 — 빨간 벽 재발 차단)');
+    for (const m of ['m-red', 'm-amber', 'm-green', 'm-blue', 'm-vio', 'm-slate']) {
+      const rule = new RegExp('\\.nc-main\\.' + m + '\\{([^}]*)\\}').exec(css[0])[1];
+      assert.ok(/background:#[EF][0-9A-F]{5}/i.test(rule), `${m} 배경은 틴트(밝은 값)여야 한다: ${rule}`);
+      assert.ok(/border-color:/.test(rule) && /color:#[0-9A-F]{6}/i.test(rule), `${m} = 색 글자 + 테두리`);
+    }
+    ok('C0: ★★ 채움 버튼 금지 — 주 조치 6종 전부 틴트+색 글자+테두리');
+
     const body = /function _riRenderBody\(\)\{[\s\S]*?\n\}/.exec(wd)[0];
+    assert.ok(/const flat = act && \/riBadPopup\\\(\/\.test\(act\.main\.h\)/.test(body),
+      '주 조치가 [✕ 불량]뿐인 유형 감지(flat)');
+    assert.ok(/\$\{flat\?'':`<button class="nc-main/.test(body),
+      '★ flat 이면 전폭 버튼을 만들지 않는다(빨간 벽 방지)');
+    assert.ok(/t:'✓ 정상',cls:'ok'\},\{h:act\.main\.h,t:'✕ 불량',cls:'bad'\}/.test(body),
+      '★ 정상/불량만 있는 카드 = [✓ 정상] | [✕ 불량] 좌우 반반(사용자 확정)');
+    assert.ok(/nc-th" onclick="riOpenDetail\(\$\{i\}\)"/.test(body) && /nc-th .ribdg|<span class="ribdg \$\{cls\}/.test(body),
+      '★ 썸네일 상단 전폭(클릭=상세) + 상태 배지 썸네일 안');
+    assert.ok(/\.nc-th\{height:150px/.test(wd), '썸네일 높이 150px(시안 v2)');
+    assert.ok(!/✕ 불량 \(반려 안내 전송\)/.test(wd), '카드 문구 축약 — 전송 설명은 팝업 담당');
+    ok('C0b: ★ 썸네일 상단 150px · flat 카드 좌우 반반 · 문구 축약');
+
     assert.ok(!/>상세<\/button>/.test(body), '[상세] 버튼 제거 — 카드 본문 클릭이 상세');
     assert.ok(/nc-body" onclick="riOpenDetail\(\$\{i\}\)"/.test(body), '본문 클릭 = 상세');
     assert.ok(/event\.stopPropagation\(\);riFilterTab\(\$\{i\}\)/.test(body), '탭 링크는 상세 진입과 격리');
