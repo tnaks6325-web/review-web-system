@@ -127,6 +127,41 @@ async function run() {
   t('★ 담당 밖이면 폴더 URL·현영 판정을 비운다', /folderUrl: null, captureFolderUrl: null, cashReceipt: false/.test(ROUTES_CODE));
   t('★ 조용히 비우지 않고 folderScoped:false 로 고지', /folderScoped: false/.test(ROUTES_CODE));
   t('★ admin/master 응답은 종전 그대로(플래그 미동봉)', /\.\.\.\(folderScoped \? \{\} : \{ folderScoped: false \}\)/.test(ROUTES_CODE));
+  {
+    // ★ 정규식이 아니라 **핸들러를 실제로 호출**해 확인한다(스코프 판정은 실행으로만 증명된다).
+    const express = require('express');
+    const orig = express.Router;
+    let cap = null;
+    express.Router = function (...a) { const r = orig.apply(this, a); cap = cap || r; return r; };
+    delete require.cache[require.resolve('../src/routes/trackB.routes')];
+    const routes = require('../src/routes/trackB.routes');   // eslint-disable-line no-unused-vars
+    express.Router = orig;
+    const layer = cap.stack.find(l => l.route && l.route.path === '/ownership/tabs');
+    assert.ok(layer, '/ownership/tabs 라우트 존재');
+    const h = layer.route.stack[layer.route.stack.length - 1].handle;
+    const svc2 = require('../src/services/trackB.service');
+    const realOwned = svc2.ownedTabsForAdvertiser, realMine = svc2.staffOwnsAdvertiser;
+    svc2.ownedTabsForAdvertiser = async () => ({ rows: [{ sheetId: 'S1', tabName: 'T1',
+      folderUrl: 'https://drive.google.com/drive/folders/RV', captureFolderUrl: 'https://drive.google.com/drive/folders/CAP',
+      cashReceipt: true, hasTabConfig: true }], statsUnavailable: false, finishedUnavailable: false });
+    const callOwn = (role, mine) => new Promise(res => {
+      svc2.staffOwnsAdvertiser = async () => mine;
+      h({ query: { advertiserId: 'a1' }, admin: { role, name: 'AE1' } },
+        { json: b => res(b), status: () => ({ json: b => res(b) }) }, e => res({ err: String(e) }));
+    });
+    const asAdmin = await callOwn('admin', false);
+    t('admin 은 종전 그대로 폴더 URL 을 받는다(플래그 미동봉)',
+      asAdmin.items[0].folderUrl && asAdmin.items[0].captureFolderUrl && asAdmin.folderScoped === undefined, JSON.stringify(asAdmin).slice(0, 130));
+    const staffMine = await callOwn('staff', true);
+    t('담당 업체면 staff 도 종전 그대로', staffMine.items[0].folderUrl && staffMine.folderScoped === undefined);
+    const staffOther = await callOwn('staff', false);
+    t('★★ 담당 밖 업체 = 폴더 URL 두 개와 현영 판정이 비워져 나간다(버튼이 우회 수단이 되지 않는다)',
+      staffOther.items[0].folderUrl === null && staffOther.items[0].captureFolderUrl === null
+      && staffOther.items[0].cashReceipt === false, JSON.stringify(staffOther.items[0]));
+    t('★ 그리고 그 사실을 folderScoped:false 로 말한다(조용히 비우지 않는다)', staffOther.folderScoped === false);
+    t('다른 값(작업명·통계 플래그)은 그대로 나간다', staffOther.items[0].tabName === 'T1' && staffOther.statsUnavailable === false);
+    svc2.ownedTabsForAdvertiser = realOwned; svc2.staffOwnsAdvertiser = realMine;
+  }
   t('프론트가 그 플래그를 소비 — 버튼은 사유를 말하고 표 상단에 안내',
     /\(STATE\.ownTabMeta\|\|\{\}\)\.folderScoped===false/.test(HTML) && /담당하지 않은 업체라 <b>\[자료\]<\/b>/.test(HTML));
   t('meta 에 folderScoped 를 실어 둔다(구버전 응답은 true 로 수렴 = 동작 불변)',
