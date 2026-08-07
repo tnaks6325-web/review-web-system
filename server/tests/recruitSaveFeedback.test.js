@@ -405,6 +405,46 @@ ok('H17. 추천은 임계값 이상만·상한 3개·점수 내림차순',
       !r.some(x => /노티드|1차/.test(x.tabName)) &&
       r.every((x, i) => i === 0 || r[i - 1].score >= x.score);
   })());
+/* ★★ 정적 검사만으로는 `if (noTabs) {` → `if (false) {` 같은 **죽은 분기**를 통과시킨다
+   (변이시험 실측). 안내 함수를 가짜 DOM 위에서 **실제로 실행**해 무엇이 그려지는지 본다. */
+{
+  const body = pick(recruit, '_rfRefreshLinkedTabNote');
+  assert(body, '_rfRefreshLinkedTabNote 추출 실패');
+  const els = {
+    rf_linked_tab_note: { style: {}, innerHTML: '', className: '' },
+    rf_linked_tab: { value: '' },
+    rf_title: { value: '우레온 바디 미스트' },
+  };
+  sandbox.document = { getElementById: (id) => els[id] || null, querySelector: () => null };
+  sandbox.escHtml = (v) => String(v == null ? '' : v);
+  sandbox._recruitTabList = [];
+  sandbox._rfLinkedMiss = { source: 'campaign', tabName: '8/3 우레온_바디미스트', sheetId: 'S_A', orderId: null };
+  vm.runInContext('function _rfRefreshLinkedTabNote() ' + body, ctx);
+
+  sandbox._rfTabsErr = 'HTTP 500';
+  sandbox._rfRefreshLinkedTabNote();
+  const failHtml = els.rf_linked_tab_note.innerHTML;
+  ok('H18-1. ★ [실행] 목록이 비고 로드 실패면 "불러오지 못했어요" + [다시 불러오기]',
+    /불러오지 못했어요/.test(failHtml) && /rfReloadTabs\(this\)/.test(failHtml) &&
+    els.rf_linked_tab_note.style.display === '');
+  ok('H18-2. ★ [실행] 그 화면에서는 "시트명부터 직접 골라주세요"라고 하지 않는다',
+    !/시트명부터 직접 골라주세요/.test(failHtml));
+
+  sandbox._rfTabsErr = null;
+  sandbox._rfRefreshLinkedTabNote();
+  const emptyHtml = els.rf_linked_tab_note.innerHTML;
+  ok('H18-3. ★ [실행] 진짜 0건은 "작업 탭이 없어요 — 접수하면 나타납니다"(실패로 위장 금지)',
+    /작업 탭이 없어요/.test(emptyHtml) && /접수하면/.test(emptyHtml) &&
+    !/불러오지 못했어요/.test(emptyHtml));
+
+  els.rf_linked_tab.value = 'S_A||탭';
+  sandbox._rfRefreshLinkedTabNote();
+  ok('H18-4. ★ [실행] 탭이 선택돼 있으면 아무것도 그리지 않는다(무회귀)',
+    els.rf_linked_tab_note.style.display === 'none' && els.rf_linked_tab_note.innerHTML === '');
+  els.rf_linked_tab.value = '';
+  sandbox.document = { getElementById: () => null, querySelector: () => null };   // 원상복구
+}
+
 ok('H18. ★ 비슷한 게 없으면 아무것도 추천하지 않는다(빈 추천 > 틀린 추천)',
   sandbox._rfSuggestTabs('전혀 다른 상품 텀블러 스테인리스', 3).length === 0 &&
   sandbox._rfSuggestTabs('', 3).length === 0);
