@@ -5966,12 +5966,17 @@ function _coRows(){
 function _coChecklistHtml(ck,i){
   if(ck.loading) return `<div class="comuted" style="margin-top:8px">${esc(ck.note||'점검 중…')}</div>`;
   if(ck.error)   return `<div class="comuted" style="margin-top:8px;color:var(--danger)">${esc(ck.error)}</div>`;
-  const ic = s => s==='pass'?'<span class="cok">✓</span>' : (s==='fail'?'<span class="cbad">✕</span>':'<span class="cunk">?</span>');
+  /* ★ 경고 전용(advisory) 항목은 **막는 항목과 다르게** 그린다 — 같은 ✕ 로 그리면
+   *   "빨간 게 있는데 왜 이관 버튼이 살아 있지?"가 된다(서버 판정 그대로, 프론트 재판정 0). */
+  const ic = c => c.state==='pass' ? '<span class="cok">✓</span>'
+    : (c.advisory ? '<span class="cunk">⚠</span>'
+    : (c.state==='fail' ? '<span class="cbad">✕</span>' : '<span class="cunk">?</span>'));
+  const adv = (ck.advisories||[]).length;
   return `<div class="cochk">
-    ${(ck.checks||[]).map(c=>`<div class="corow">${ic(c.state)}
+    ${(ck.checks||[]).map(c=>`<div class="corow">${ic(c)}
       <div><b>${esc(c.label)}</b><div class="comuted">${esc(c.detail)}${c.state!=='pass'&&c.hint?' — '+esc(c.hint):''}</div>${_coFixBtn(c,i)}</div></div>`).join('')}
     <div class="coact">${ck.canCutover
-      ? `<span class="comuted">5항목 모두 통과 — 이관할 수 있습니다. 되돌리려면 [재연결].</span>
+      ? `<span class="comuted">이관할 수 있습니다${adv?' (⚠ 항목은 막지 않습니다)':''} — 끊기 직전에 시트를 마지막으로 한 번 더 읽어 반영합니다. 되돌리려면 [재연결].</span>
          <button class="btn dark" onclick="_coCutover(${i})">이관</button>`
       : `<span class="comuted">통과하지 못한 항목이 있어 이관할 수 없습니다. <b>?</b> 는 "확인 불가" — 통과가 아닙니다.</span>`}
     </div></div>`;
@@ -5982,7 +5987,7 @@ function _coChecklistHtml(ck,i){
 function _coFixBtn(c,i){
   if(c.state==='pass' || !c.fix) return '';
   if(c.fix==='refresh') return `<div class="cofix"><button class="btn" onclick="_coRefresh(${i})">↻ 시트 새로고침</button>
-    <span class="comuted">지금 구글시트를 다시 읽어 온 뒤 자동으로 재점검합니다.</span></div>`;
+    <span class="comuted">지금 구글시트를 다시 읽어 온 뒤 자동으로 재점검합니다${c.advisory?' (이관해도 같은 일이 한 번 더 일어납니다)':''}.</span></div>`;
   if(c.fix==='backfill') return `<div class="cofix"><button class="btn" onclick="_coBackfill(${i})">➕ 표에 자리 채우기</button>
     <span class="comuted">시트에 준비된 줄을 시스템 표에 만듭니다 — 시트는 건드리지 않습니다.</span></div>`;
   if(c.fix==='audit')   return `<div class="cofix"><button class="btn" onclick="_coAudit()">↗ 반영 점검 열기</button></div>`;
@@ -6073,7 +6078,10 @@ async function _coCutover(i){
   const pend = (STATE.co.checks[t.sheetId+'\u0000'+t.tabName]||{}).checks || [];
   const pd = pend.find(c => c.key==='pending' && /미반영 주문/.test(c.detail||''));
   const pline = pd ? `\n${pd.detail} — 시트가 아니라 시스템 표로 옮깁니다.\n` : '';
-  if(!confirm(`「${t.displayName||t.tabName}」 의 구글시트 연결을 끊습니다.\n${pline}\n이후 이 작업은 시트를 읽지도 쓰지도 않습니다.\n되돌리려면 [재연결]을 누르면 됩니다.\n\n진행할까요?`)) return;
+  if(!confirm(`「${t.displayName||t.tabName}」 의 구글시트 연결을 끊습니다.\n${pline}\n끊기 직전에 그 시트를 마지막으로 한 번 더 읽어 반영합니다(20초쯤 걸릴 수 있습니다).\n이후 이 작업은 시트를 읽지도 쓰지도 않습니다.\n되돌리려면 [재연결]을 누르면 됩니다.\n\n진행할까요?`)) return;
+  const ck = t.sheetId+'\u0000'+t.tabName;
+  // ★ 오래 걸리는 조치는 진행 문구를 보여준다(모르면 다시 누른다 — [시트 새로고침]과 같은 규율).
+  STATE.co.checks[ck] = { loading:true, note:'이관 중… 시트를 마지막으로 한 번 더 읽습니다 (20초쯤 걸릴 수 있습니다)' }; _coRows();
   try{
     const j = await api('/api/trackb/sheetless/cutover',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName })});
     if(!j || j.ok===false){ alert((j&&(j.error||j.message))||'이관하지 못했습니다.'); await _coCheck(i); return; }
@@ -6087,12 +6095,19 @@ async function _coCutover(i){
     if(h && h.failed) warn.push(`미반영 주문 ${h.failed}건을 옮기지 못했습니다${h.reasons?(' ('+h.reasons.join(', ')+')'):''} — 잠시 뒤 복구 작업이 다시 시도합니다.`);
     if(h && h.blocked) warn.push(`미반영 주문 ${h.blocked}건은 배정된 줄이 없어 옮기지 못했습니다.`);
     if(h && h.truncated) warn.push('미반영 주문이 많아 일부만 옮겼습니다 — 나머지는 복구 작업이 이어서 처리합니다.');
+    // ★ 마지막 반영 실패는 특히 크게 말한다 — 그 시트에만 있던 편집(직원 수기 줄)이 안 담겼을 수 있다.
+    if(j.reflect && j.reflect.ok===false) warn.push('시트 마지막 반영 실패: '+(j.reflect.message||'')
+      +' — [재연결] 후 [↻ 시트 새로고침] 을 하고 다시 이관하세요.');
     if(j.ledger && j.ledger.ok===false) warn.push('장부 재생성 실패: '+(j.ledger.message||j.ledger.reason));
     if(j.notice && j.notice.ok===false) warn.push('시트 안내문 기입 실패: '+(j.notice.message||j.notice.skipped||''));
     alert(done + (warn.length?('\n\n'+warn.join('\n')):''));
     delete STATE.co.checks[t.sheetId+'\u0000'+t.tabName];
     await _coLoad();
-  }catch(e){ alert('이관 실패: '+(e.message||'')); }
+  }catch(e){
+    // ★ 자리표시자를 깔았으면 어떤 예외에도 화면을 종결시킨다(영원한 '이관 중…' 금지).
+    alert('이관 실패: '+(e.message||''));
+    STATE.co.checks[ck] = { error:'이관 실패: '+(e.message||'') }; _coRows();
+  }
 }
 async function _coReconnect(i){
   const t = STATE.co.items[i]; if(!t) return;
