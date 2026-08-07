@@ -933,8 +933,41 @@ router.post('/order', async (req, res, next) => {
     //   → 신원 기록은 큐 워커(syncQueue order_append)에서 "다중컬럼 가드 통과 + 실제 시트쓰기 성공 후,
     //     실제로 쓴 행에만" 수행한다(거기서만 신뢰 가능한 시트행↔phone8 링크가 확정됨).
 
-    let queued = false;
+    // ★★ 무시트 탭(탈 구글시트 W2)은 **큐를 타지 않는다** — 작업표에 바로 기록하고 장부를
+    //   다시 만들어 같은 요청 안에서 완결시킨다. 큐를 태우면 존재하지 않는(또는 이관하며
+    //   버린) 구글 시트에 쓰려다 실패하고, reconcile 이 영원히 재시도한다.
+    //   ★ 판정은 `sheetlessScope` 단일 출처. 조회 실패는 false(fail-open = 종전 경로) —
+    //     최종 방어는 큐 실행부(syncQueue)가 쓰기 직전 다시 확인하는 백스톱이다.
+    let sheetlessDone = null;
     if (ledger.sheetRow) {
+      let isSl = false;
+      try {
+        isSl = await require('../utils/sheetlessScope').isSheetless(require('../db/pool'), sheetId, tabName);
+      } catch (_) { isSl = false; }
+      if (isSl) {
+        try {
+          sheetlessDone = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
+            sheetId, tabName, tabGid: ledger.tabGid || gid || '',
+            sheetRow: ledger.sheetRow, orderData,
+            orderSubmissionId: ledger.orderSubmissionId,
+            loginPhone8: loginPhone8 || '', loginName: loginName || '',
+          });
+        } catch (slErr) {
+          sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
+        }
+        if (!sheetlessDone.ok) {
+          logger.error(`[submit/order] 무시트 기록 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
+          logAbnormal({
+            flow: 'order_submit', step: 'sheetless_write', severity: 'critical',
+            error: new Error(`무시트 작업표 기록 실패: ${sheetlessDone.reason}`),
+            context: { sheetId, tabName, orderSubmissionId: ledger.orderSubmissionId },
+          });
+        }
+      }
+    }
+
+    let queued = false;
+    if (ledger.sheetRow && !sheetlessDone) {
       try {
         await enqueue('order_append', {
           sheetId,
@@ -957,7 +990,7 @@ router.post('/order', async (req, res, next) => {
           context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
         });
       }
-    } else {
+    } else if (!ledger.sheetRow) {
       logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
       logAbnormal({
         flow: 'order_submit', step: 'row_claim', severity: 'warn',
@@ -975,7 +1008,9 @@ router.post('/order', async (req, res, next) => {
       slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
-      mirrorStatus: queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
+      // 무시트는 큐 없이 같은 요청에서 끝난다 — 'written' 이 곧 완결(시트 경로의 종결값과 같은 값).
+      mirrorStatus: (sheetlessDone && sheetlessDone.ok) ? 'written'
+        : queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
       campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
     });
 

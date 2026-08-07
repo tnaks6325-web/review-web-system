@@ -804,9 +804,45 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       });
     }
 
-    // 2) work_sheet_url 검증 (URL + gid 필수) — ★ 제출은 선택이지만 **접수는 여전히 탭이 있어야 성립**한다.
+    // ════════════════════════════════════════════════════════════════════
+    // 2) 탭 해석 — 여기서만 갈린다. 아래 5)campaigns·6)tab_configs·8)상태전이·8b)계약연결은
+    //    두 경로가 **완전히 같은 코드**를 탄다(사본을 두면 무시트 작업만 메타가 비는 사고).
+    //
+    //  ㉮ 시트 경로(기존)   : work_sheet_url(gid) → 구글 메타 조회 → 그 탭
+    //  ㉯ 무시트 경로(W2·F1): 작업표를 그 자리에서 만들고 가상 탭을 발급 (구글 호출 0)
+    // ════════════════════════════════════════════════════════════════════
+    const wantSheetless = ((req.body || {}).sheetless === true || (req.body || {}).sheetless === 'true');
+    let sheetId, gid, tabName, spreadsheetTitle, tabSheetUrl;
+    let gidCorrected = false;
+    let sheetlessPlan = null;      // 무시트일 때만 채워짐(작업표 행·열 구성)
+
+    if (wantSheetless) {
+      const { createSheetlessWorktable, isVirtualSheetId } = require('../services/sheetlessAccept.service');
+      // ★ 재접수(2차 등)는 **새 작업표를 또 만들지 않는다** — 이미 연결된 가상 탭을 그대로 쓴다.
+      //   (차수 구분은 시트 경로와 동일하게 '차수' 컬럼 → review_index.round 가 담당)
+      const priorSheetId = String(o.linked_tab_sheet_id || '');
+      if (isVirtualSheetId(priorSheetId) && o.linked_tab_gid && o.linked_tab_name) {
+        sheetId = priorSheetId; gid = String(o.linked_tab_gid); tabName = o.linked_tab_name;
+        spreadsheetTitle = o.title || tabName; tabSheetUrl = '';
+      } else {
+        const made = await createSheetlessWorktable({
+          workOrder: o,
+          tabName: String((req.body || {}).tabName || '').trim(),
+          planOptions: (req.body || {}).planOptions || {},
+          by: (req.admin?.name || 'admin'),
+        });
+        if (!made.ok) {
+          return res.status(400).json({ ok: false, error: made.error, blockers: made.blockers || [], sheetless: true });
+        }
+        sheetId = made.sheetId; gid = made.gid; tabName = made.tabName;
+        spreadsheetTitle = made.campaignName; tabSheetUrl = '';
+        sheetlessPlan = made;
+      }
+    } else {
+    // 2-㉮) work_sheet_url 검증 (URL + gid 필수) — ★ 제출은 선택이지만 **접수는 여전히 탭이 있어야 성립**한다.
     //   접수는 그 탭을 tab_configs·campaigns 에 등록하는 단일 관문이라, 등록할 탭이 없으면 할 일이 없다.
-    //   시트 미첨부 오더는 ① 시트탭URL을 채워 넣거나 ② 작업표를 생성(→ 시트 자동 생성)한 뒤 접수한다.
+    //   시트 미첨부 오더는 ① 시트탭URL을 채워 넣거나 ② 작업표를 생성(→ 시트 자동 생성)하거나
+    //   ③ **무시트로 접수**(body.sheetless=true — 시트 없이 작업표만 만든다)한다.
     const url = (o.work_sheet_url || '').trim();
     if (!url) {
       return res.status(400).json({
@@ -828,12 +864,9 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     if (!gidMatch && !/^\d+$/.test(pickGid)) {
       return res.status(400).json({ ok: false, error: '작업시트탭URL에 gid가 없습니다. 특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.' });
     }
-    const sheetId = sheetIdMatch[1];
-    const gid = /^\d+$/.test(pickGid) ? pickGid : gidMatch[1];
-    const gidCorrected = /^\d+$/.test(pickGid) && (!gidMatch || gidMatch[1] !== pickGid);
-
-    // 멱등 표시: 같은 작업오더가 이미 같은 탭에 연결됨 (재클릭 안전 — 아래 업서트는 모두 idempotent)
-    const idempotent = (String(o.linked_tab_gid || '') === gid && o.linked_tab_sheet_id === sheetId);
+    sheetId = sheetIdMatch[1];
+    gid = /^\d+$/.test(pickGid) ? pickGid : gidMatch[1];
+    gidCorrected = /^\d+$/.test(pickGid) && (!gidMatch || gidMatch[1] !== pickGid);
 
     // 3) gid → 실제 탭 현재 제목 해석
     let meta;
@@ -843,7 +876,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
       return res.status(502).json({ ok: false, error: '시트 접근 권한이 없습니다. 서비스 계정을 편집자로 추가해주세요.', serviceAccount: sa });
     }
-    const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
+    spreadsheetTitle = meta._spreadsheetTitle || sheetId;
     const targetSheet = meta.find(s => String(s.properties.sheetId) === gid);
     if (!targetSheet) {
       // ★ 막다른 길 방지: 이 시트에 실제로 있는 탭 목록을 함께 돌려줘 프론트가
@@ -862,8 +895,12 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         availableTabs,
       });
     }
-    const tabName = targetSheet.properties.title;
-    const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${gid}`;
+    tabName = targetSheet.properties.title;
+    tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${gid}`;
+    }   // ← 탭 해석 분기 끝(여기서부터 두 경로가 같은 코드를 탄다)
+
+    // 멱등 표시: 같은 작업오더가 이미 같은 탭에 연결됨 (재클릭 안전 — 아래 업서트는 모두 idempotent)
+    const idempotent = (String(o.linked_tab_gid || '') === gid && o.linked_tab_sheet_id === sheetId);
 
     // 4) 기등록 판정 — gid 우선 매칭, 매칭된 행의 "실제 tab_name"까지 받아 키 정합 유지.
     //    (같은 gid가 다른 탭명으로 등록돼 있으면 아래 rename 동기화로 현재 제목에 맞춘다)
@@ -903,7 +940,9 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
        VALUES ($1, $2, $3)
        ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
          sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
-      [sheetId, spreadsheetTitle, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
+      // ★ 무시트 탭의 `sheet_url` 은 **빈 값** — 구글 URL 로 조립하면 죽은 링크가 되고,
+      //   화면·감사 도구가 그것을 진짜 시트로 오인해 열려 한다(호스트 검증에도 걸린다).
+      [sheetId, spreadsheetTitle, wantSheetless ? '' : `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
     );
 
     // 6) tab_configs 등록/갱신 — (sheet_id, 현재 탭 제목) 키로 단일 업서트.
@@ -916,9 +955,13 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     await pool.query(
       `INSERT INTO tab_configs
          (sheet_id, tab_name, tab_gid, sheet_url, campaign_name, display_name,
-          manager, time_range, review_type, delivery_type, taekhap, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NOW())
+          manager, time_range, review_type, delivery_type, taekhap, sheetless, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$13, NOW())
        ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+         -- ★★ 이관(무시트)은 **되돌리지 않는다**(OR) — 시트 URL 로 재접수했다고 조용히 시트
+         --   기반으로 되돌리면 크론이 옛 시트 값으로 장부를 덮어써 편집분이 사라진다(fail-closed).
+         --   되돌리기는 별도 명시 경로로만.
+         sheetless     = COALESCE(tab_configs.sheetless, FALSE) OR EXCLUDED.sheetless,
          tab_gid       = COALESCE(NULLIF(tab_configs.tab_gid,''),       EXCLUDED.tab_gid),
          sheet_url     = COALESCE(NULLIF(tab_configs.sheet_url,''),     EXCLUDED.sheet_url),
          campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
@@ -947,25 +990,51 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         (o.title || ''), mapWorkManager(o.work_manager), (o.purchase_time || ''),
         (o.review_type || ''), (o.delivery_type || ''), courierProxy,
         LEGACY_DELIVERY_VALUES,   // $12 — 어휘 단일 출처(utils/reviewType). 사본을 SQL 에 박지 않는다.
+        wantSheetless,            // $13 — 무시트 표식(096). 시트 경로는 FALSE 라 기존 동작 불변.
       ]
     );
 
-    // 7) 인덱스 빌드 (best-effort — 실패해도 등록·상태전이는 유지)
+    // ════════════════════════════════════════════════════════════════════
+    // 7) 장부 채우기 — 여기도 두 경로가 갈린다(재료가 다르다).
+    //   ㉮ 시트   : 구글에서 읽어 만든다(buildOneSheet + RAW 미러)
+    //   ㉯ 무시트 : 방금 만든 작업표에서 만든다(sheetlessLedger) — 구글 호출 0
+    // ★ 순서 계약: tab_configs 에 `sheetless=TRUE` 가 **들어간 뒤**에 불러야 한다
+    //   (`rebuildLedgers` 가 fail-closed 로 그 플래그를 확인한다).
+    // ════════════════════════════════════════════════════════════════════
     let indexBuilt = true;
-    try {
-      await buildOneSheet(sheetId);
-    } catch (buildErr) {
-      indexBuilt = false;
-      logger.warn(`[order/accept] 인덱스 빌드 실패 (등록은 완료): ${buildErr.message}`);
-    }
+    let sheetlessResult = null;
+    if (wantSheetless) {
+      try {
+        if (sheetlessPlan) {
+          sheetlessResult = await sheetlessPlan.persist();
+        } else {
+          // 재접수(이미 만들어진 작업표) — 장부만 현재 작업표 기준으로 다시 만든다.
+          const { rebuildLedgers } = require('../services/sheetlessLedger.service');
+          sheetlessResult = { ledger: await rebuildLedgers({ sheetId, tabName, by: `sheetless-reaccept:${req.admin?.name || ''}` }) };
+        }
+      } catch (slErr) {
+        // ★ 여기 실패는 "등록은 됐는데 아무 데도 안 보이는" 상태가 된다 → 조용히 넘기지 않는다.
+        indexBuilt = false;
+        sheetlessResult = { error: slErr.message };
+        logger.error(`[order/accept] 무시트 장부 생성 실패 (등록은 완료): ${slErr.message}`);
+      }
+    } else {
+      // 7-㉮) 인덱스 빌드 (best-effort — 실패해도 등록·상태전이는 유지)
+      try {
+        await buildOneSheet(sheetId);
+      } catch (buildErr) {
+        indexBuilt = false;
+        logger.warn(`[order/accept] 인덱스 빌드 실패 (등록은 완료): ${buildErr.message}`);
+      }
 
-    // 7b) RAW 미러 즉시 반영 (best-effort, 비차단 — 등록과 동시에 RAW 미러에 채워짐)
-    //     단일 시트만 미러(전체 미러 대기 없음), throttle 경유라 쿼터 안전. 실패해도 등록은 유지.
-    setImmediate(() => {
-      mirrorOneSheet(sheetId).catch(mirrorErr =>
-        logger.warn(`[order/accept] RAW 미러 즉시반영 실패 (등록은 완료): ${mirrorErr.message}`)
-      );
-    });
+      // 7b) RAW 미러 즉시 반영 (best-effort, 비차단 — 등록과 동시에 RAW 미러에 채워짐)
+      //     단일 시트만 미러(전체 미러 대기 없음), throttle 경유라 쿼터 안전. 실패해도 등록은 유지.
+      setImmediate(() => {
+        mirrorOneSheet(sheetId).catch(mirrorErr =>
+          logger.warn(`[order/accept] RAW 미러 즉시반영 실패 (등록은 완료): ${mirrorErr.message}`)
+        );
+      });
+    }
 
     // 8) 상태 전이 reviewing + 링크 기록
     //   접수하기 버튼이 노출되는 상태(submitted/revision/rejected)는 reviewing 으로 전이(모두 허용 전이),
@@ -1016,7 +1085,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       }
     }
 
-    logger.info(`[order/accept] ${id} → 탭 "${tabName}" (${wasRegistered ? '기존탭 연결' : '신규 등록'}), 캠페인=${spreadsheetTitle}, 빌드=${indexBuilt}`);
+    logger.info(`[order/accept] ${id} → 탭 "${tabName}"${wantSheetless ? '(무시트)' : ''} (${wasRegistered ? '기존탭 연결' : '신규 등록'}), 캠페인=${spreadsheetTitle}, 빌드=${indexBuilt}`);
 
     res.json({
       ok: true,
@@ -1028,6 +1097,13 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       indexBuilt,
       gidCorrected,       // true = 사람이 고른 탭으로 URL 의 죽은 gid 를 교정해 접수함
       settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
+      sheetless: wantSheetless || undefined,
+      // 무시트일 때만: 만든 작업표 줄 수·장부 결과(실패 사유 포함 — 조용한 누락 금지)
+      worktable: wantSheetless ? {
+        rows: sheetlessResult && sheetlessResult.slots ? sheetlessResult.slots.created : undefined,
+        indexRows: sheetlessResult && sheetlessResult.ledger ? sheetlessResult.ledger.indexRows : undefined,
+        error: sheetlessResult && sheetlessResult.error,
+      } : undefined,
     });
   } catch (err) {
     next(err);

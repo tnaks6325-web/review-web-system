@@ -77,7 +77,13 @@ async function _resolveFolders(sheetId, tabName, slot) {
 
   let reviewFolderId = cfg.folder_url ? driveService.extractFolderIdFromUrl(cfg.folder_url) : null;
   if (!reviewFolderId) {
-    const sheetTitle = cfg.campaign_name || tabName;
+    /* ★ 무시트 작업(D2-a)은 업체명 — review-upload 와 **같은 이름**이어야 한다.
+       갈리면 같은 탭의 캡처가 서로 다른 폴더 두 곳에 생긴다. */
+    let sheetTitle = cfg.campaign_name || tabName;
+    try {
+      const t = await require('../services/folderTitle.service').resolveSheetlessFolderTitle(sheetId, tabName);
+      if (t) sheetTitle = t;
+    } catch (_) { /* 판정 실패 = 기존 값 */ }
     const r = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);
     reviewFolderId = r.id;
     // 새로 만든 리뷰 폴더면 tab_configs 에 URL 저장(다음 업로드/조회 재사용)
