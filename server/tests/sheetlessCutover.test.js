@@ -130,8 +130,9 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     restore = stubDeps({ prepared: 10 });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
     ok('시트 준비 줄이 표보다 많으면 잠금', r.canCutover === false && r.blocking.includes('sheet_rows'));
-    ok('막힌 사유에 다음 행동을 적는다(백필 안내)',
-      /백필/.test(r.checks.find(c => c.key === 'sheet_rows').hint));
+    ok('막힌 사유에 다음 행동 + 그 자리 조치를 적는다',
+      /표를 먼저 채우세요/.test(r.checks.find(c => c.key === 'sheet_rows').hint)
+      && r.checks.find(c => c.key === 'sheet_rows').fix === 'audit');
     restore();
 
     // ★★ unknown 도 통과가 아니다 — 이 가드를 풀면 "모르면 열림"이 된다
@@ -436,7 +437,10 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       };
       sandbox.globalThis = sandbox;
       vm.createContext(sandbox);
-      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2) + '\n;this.__f = _coChecklistHtml;', sandbox);
+      const j = wd.indexOf('function _coFixBtn(');
+      assert(j > 0, '_coFixBtn 미발견');
+      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2)
+        + wd.slice(j, wd.indexOf('\n}', j) + 2) + '\n;this.__f = _coChecklistHtml;', sandbox);
       const pass = sandbox.__f({ canCutover: true, checks: [{ state: 'pass', label: 'L', detail: 'D' }] }, 0);
       const block = sandbox.__f({ canCutover: false, checks: [{ state: 'unknown', label: 'L', detail: 'D' }] }, 0);
       ok('★★ 통과면 [이관] 버튼이 실제로 그려진다', /_coCutover\(0\)/.test(pass) && />이관</.test(pass));
@@ -445,6 +449,33 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       ok('★ 통과 못 하면 [이관] 버튼 자체가 없다(눌러도 안 되는 버튼 금지)',
         !/_coCutover\(/.test(block) && /이관할 수 없습니다/.test(block));
     }
+    /* ★★ 막힌 항목은 그 자리에서 처리된다 — 종전 안내는 "시트 데이터 반영 점검 화면에서…" 라고만
+     *    했는데 그 화면은 **nav 어디에도 없어**(링크 0곳) 주소를 직접 쳐야 열렸다(사용자 신고).
+     *    조치 종류는 서버가 `fix` 로 말하고 화면은 그대로 그린다(프론트 재판정 0). */
+    {
+      const i = wd.indexOf('function _coFixBtn(');
+      assert(i > 0, '_coFixBtn 미발견');
+      const sandbox = { esc: (s) => String(s == null ? '' : s) };
+      sandbox.globalThis = sandbox;
+      vm.createContext(sandbox);
+      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2) + '\n;this.__f = _coFixBtn;', sandbox);
+      const ref = sandbox.__f({ state: 'fail', fix: 'refresh' }, 3);
+      const aud = sandbox.__f({ state: 'unknown', fix: 'audit' }, 3);
+      ok('★★ 새로고침이 필요한 항목엔 [시트 새로고침] 버튼이 붙는다(인덱스만 전달)',
+        /_coRefresh\(3\)/.test(ref) && /시트 새로고침/.test(ref));
+      ok('★ 다른 화면이 필요한 항목엔 [반영 점검 열기] 버튼', /_coAudit\(\)/.test(aud));
+      ok('★ 통과한 항목·조치 없는 항목엔 버튼을 만들지 않는다(눌러도 안 되는 버튼 금지)',
+        sandbox.__f({ state: 'pass', fix: 'refresh' }, 3) === ''
+        && sandbox.__f({ state: 'fail', fix: null }, 3) === '');
+    }
+    ok('★★ 새로고침은 기존 반영 도구를 그대로 쓴다(신규 엔드포인트 0) + 끝나면 자동 재점검',
+      /_coRefresh[\s\S]{0,700}sheet-sync\/repair/.test(wd) && /_coRefresh[\s\S]{0,900}_coCheck\(i\)/.test(wd));
+    ok('★ 반영 점검 화면으로 가는 길이 화면에 있다(주소 직접 입력 불필요)',
+      /_coAudit[\s\S]{0,120}sheet-sync-audit\.html/.test(wd) && /onclick="_coAudit\(\)">↗ 반영 점검</.test(wd));
+    ok('★ 안내문이 없는 화면 이름을 가리키지 않는다',
+      !/시트 데이터 반영 점검<\/b> 화면에서 먼저 하세요/.test(wd));
+    ok('★ 오래 걸리는 조치는 진행 문구를 보여준다(사람이 다시 누르지 않게)',
+      /ck\.note\|\|'점검 중…'/.test(wd) && /다시 읽는 중/.test(wd));
     ok('★ not_ready(096 미적용)를 화면이 말한다', /j\.code==='not_ready'/.test(wd));
     ok('★ 점검표는 서버 판정을 그대로 그린다(프론트 재판정 0) — canCutover 로만 분기',
       /ck\.canCutover/.test(wd) && !/canCutover\s*=\s*[^=]/.test(wd));

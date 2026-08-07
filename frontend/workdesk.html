@@ -1442,7 +1442,8 @@
 .cocard.done{background:var(--card2,#f7f9fb)}
 .cotop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .comuted{font-size:12.5px;color:var(--muted,#7a838d)}
-.cochk{margin-top:10px;border-top:1px dashed var(--line,#e3e7ec);padding-top:10px}
+.cofix{margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .cochk{margin-top:10px;border-top:1px dashed var(--line,#e3e7ec);padding-top:10px}
 .corow{display:flex;gap:9px;align-items:flex-start;padding:4px 0;font-size:13.5px}
 .cok{color:var(--safe,#0f8a5f);font-weight:800}
 .cbad{color:var(--danger,#c0392b);font-weight:800}
@@ -5924,10 +5925,11 @@ function _coRender(){
       <span class="sp" style="flex:1"></span>
       <input class="ovsearch" id="coq" placeholder="작업 검색" value="${esc(STATE.co.q||'')}"
         oninput="STATE.co.q=this.value;_coRows()">
+      <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
     <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
-      준비 작업(줄 채우기·시트 새로고침)은 <b>시트 데이터 반영 점검</b> 화면에서 먼저 하세요.
+      막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.
       ${m.filteredOld?`<br>지난 연도 작업 ${m.filteredOld}건은 목록에서 제외했습니다.`:''}
       ${m.truncated?'<br><b>목록이 잘렸습니다</b> — 검색으로 좁혀 보세요.':''}</div>
     <div class="cotools">${chip('todo','남음',m.remaining||0)}${chip('done','이관됨',m.done||0)}${chip('all','전체',all.length)}</div>`;
@@ -5957,17 +5959,39 @@ function _coRows(){
       }).join('')}</div>`;
 }
 function _coChecklistHtml(ck,i){
-  if(ck.loading) return `<div class="comuted" style="margin-top:8px">점검 중…</div>`;
+  if(ck.loading) return `<div class="comuted" style="margin-top:8px">${esc(ck.note||'점검 중…')}</div>`;
   if(ck.error)   return `<div class="comuted" style="margin-top:8px;color:var(--danger)">${esc(ck.error)}</div>`;
   const ic = s => s==='pass'?'<span class="cok">✓</span>' : (s==='fail'?'<span class="cbad">✕</span>':'<span class="cunk">?</span>');
   return `<div class="cochk">
     ${(ck.checks||[]).map(c=>`<div class="corow">${ic(c.state)}
-      <div><b>${esc(c.label)}</b><div class="comuted">${esc(c.detail)}${c.state!=='pass'&&c.hint?' — '+esc(c.hint):''}</div></div></div>`).join('')}
+      <div><b>${esc(c.label)}</b><div class="comuted">${esc(c.detail)}${c.state!=='pass'&&c.hint?' — '+esc(c.hint):''}</div>${_coFixBtn(c,i)}</div></div>`).join('')}
     <div class="coact">${ck.canCutover
       ? `<span class="comuted">5항목 모두 통과 — 이관할 수 있습니다. 되돌리려면 [재연결].</span>
          <button class="btn dark" onclick="_coCutover(${i})">이관</button>`
       : `<span class="comuted">통과하지 못한 항목이 있어 이관할 수 없습니다. <b>?</b> 는 "확인 불가" — 통과가 아닙니다.</span>`}
     </div></div>`;
+}
+/* ★★ 막힌 항목은 **그 자리에서** 처리한다 — 종전엔 안내가 "시트 데이터 반영 점검 화면에서…"
+ *    라고만 했는데 그 화면은 nav 어디에도 없어(링크 0곳) 주소를 직접 쳐야 열렸다(사용자 신고).
+ *    무엇을 누를지는 **서버가 `fix` 로 말한다**(프론트 재판정 0 규율). */
+function _coFixBtn(c,i){
+  if(c.state==='pass' || !c.fix) return '';
+  if(c.fix==='refresh') return `<div class="cofix"><button class="btn" onclick="_coRefresh(${i})">↻ 시트 새로고침</button>
+    <span class="comuted">지금 구글시트를 다시 읽어 온 뒤 자동으로 재점검합니다.</span></div>`;
+  if(c.fix==='audit')   return `<div class="cofix"><button class="btn" onclick="_coAudit()">↗ 반영 점검 열기</button></div>`;
+  return '';
+}
+function _coAudit(){ window.open('sheet-sync-audit.html','_blank','noopener'); }
+async function _coRefresh(i){
+  const t = STATE.co.items[i]; if(!t) return;
+  const k = t.sheetId+'\u0000'+t.tabName;
+  STATE.co.checks[k] = { loading:true, note:'시트를 다시 읽는 중… (한 번에 20초쯤 걸릴 수 있습니다)' }; _coRows();
+  try{
+    // 기존 반영 도구를 그대로 쓴다(신규 엔드포인트 0) — 미러 → 인덱스 빌드 → 투영 한 벌.
+    const j = await api('/api/trackb/sheet-sync/repair',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName })});
+    if(!j || j.ok===false){ STATE.co.checks[k] = { error:(j&&(j.error||j.message))||'새로고침 실패' }; _coRows(); return; }
+  }catch(e){ STATE.co.checks[k] = { error:'새로고침 실패: '+(e.message||'') }; _coRows(); return; }
+  await _coCheck(i);   // ★ 새로고침만 하고 끝내지 않는다 — 바로 다시 점검해 결과를 보여준다
 }
 async function _coCheck(i){
   const t = STATE.co.items[i]; if(!t) return;
