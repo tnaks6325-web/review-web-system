@@ -282,7 +282,12 @@ const PARTS = [
         id SERIAL, reviewer_name TEXT, sheet_id TEXT, tab_gid TEXT, tab_name TEXT, campaign_name TEXT,
         row_index INT, is_submitted BOOLEAN, is_submitted2 TEXT, product_url TEXT, product_name TEXT,
         submit_col TEXT, submit_col2 TEXT, row_json JSONB, start_date TEXT, end_date TEXT,
-        round TEXT, phone8 TEXT, built_at TIMESTAMPTZ)`);
+        round TEXT, phone8 TEXT, built_at TIMESTAMPTZ,
+        -- ★ 031(A-1) 대표 리뷰 이미지 — rebuildLedgers 가 재생성 전 스냅샷을 뜨는 칸(W3-a ㉯).
+        --   빠뜨리면 이 PG 섹션이 42703 으로 통째로 죽어 **가드가 아무것도 지키지 못한다**
+        --   (CI 는 PGTEST_URL 이 없어 안 드러난다 — 로컬 PG 로 돌렸을 때만 보인다).
+        review_file_id TEXT, review_file_url TEXT, review_file_name TEXT,
+        review_file_count INT, review_file_at TIMESTAMPTZ)`);
 
       await pool.query('DELETE FROM tab_configs WHERE sheet_id=$1', [S]);
       await pool.query('DELETE FROM campaign_participants WHERE sheet_id=$1', [S]);
