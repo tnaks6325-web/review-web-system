@@ -697,6 +697,17 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   mkS({ data: { defaultDaily: 0 } });
   ok('7k 하루 정원 0 = 채울 수 없어 꺼짐', A.applyCarryMode('next') === false);
 
+  // 7k-2. 이미 총량을 채운 공고 = 배분할 인원 0 → 균형 개념이 없어 꺼진다
+  mkS({ data: { submittedAll: 800, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 } });
+  eq('7k 총량 충족 = 배분할 인원 0', A.targetTotal(), 0);
+  ok('7k 총량 충족 = 균형 모드 꺼짐', A.applyCarryMode('next') === false);
+
+  // 7k-3. 오픈 전(시작일이 미래) — 오늘이 아니라 **시작일부터** 펼친다(오픈 전 날짜 조절은 무의미)
+  mkS({ data: { startDate: '2026-08-20', submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 } });
+  A.applyCarryMode('next');
+  eq('7k 오픈 전 = 시작일이 첫 줄', sandbox.S.horiz[0], '2026-08-20');
+  eq('7k 오픈 전 = 합계는 총량 전체', A.sumPlan(), 800);
+
   // 7l. ★ 이월 계산 불가(null)는 0 으로 꾸미지 않는다 — 얹을 것이 없을 뿐 구간은 펼친다
   mkS({ data: { carryPending: null } });
   ok('7l 이월 null 이어도 구간은 펼친다', A.applyCarryMode('next') === true);
