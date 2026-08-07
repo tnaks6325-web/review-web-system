@@ -872,17 +872,45 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       submittedAll: 5, todaySubmitted: 5, byDateSubmitted: { '2026-08-08': 5 }, todayUsed: 5,
       carryPending: null, todayNaturalQuota: 20,
     } });
-    ok('7A-10 시트 자리 부족 = 균형 모드 꺼짐', A.applyCarryMode('next') === false);
+    // ★★ 2026-08-07 사용자 신고로 규칙 변경: 시트 계획이 목표보다 적은 것은 **기능 불가가 아니라
+    //   "부족(파랑) — 저장불가"** 그 자체다(요구 ⑥). 종전엔 균형 모드를 통째로 끄고 안내문만
+    //   "어느 날의 인원을 늘려주세요"라고 말해, 시키는 대로 늘려도 아무 변화가 없는 막다른 길이었다.
+    ok('★ 시트 자리 부족이어도 균형 모드는 켜진다(늘리면 초록이 되는 창구)', A.applyCarryMode('next') === true);
+    eq('★ 꺼진 사유는 없다', sandbox.S.balanceOff, null);
+    eq('★ 부족분을 기록한다(안내 문구 재료)', sandbox.S.shortBy, 200);
+    eq('구간 = 앞으로의 시트 진행일 전부', sandbox.S.horiz.length, 5);
+    ok('균형 바는 "부족"으로 뜬다(합계 < 배분해야 할 인원)', A.sumPlan() < A.targetTotal(), [A.sumPlan(), A.targetTotal()]);
+    // 사람이 인원을 올리면 그대로 일치(저장가능)가 된다 — 안내문이 시키는 조치가 실제로 통해야 한다
+    sandbox.S.plan[sandbox.S.horiz[0]] += 200;
+    eq('★ 늘리면 합계가 맞는다(막다른 길 아님)', A.diffPlan(), 0);
+  }
+  {
+    // 진행일이 **아예 없을 때만** 균형 모드를 끈다
+    mkS({ data: {
+      scheduleDriven: true, scheduleDates: [], scheduleTotal: 300, recruitTotal: 300, defaultDaily: 0,
+      submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, carryPending: null, todayNaturalQuota: 0,
+    } });
+    ok('7A-10 진행일 0개 = 균형 모드 꺼짐', A.applyCarryMode('next') === false);
     eq('7A-10 사유는 "자리 부족"', sandbox.S.balanceOff, 'no_room');
-    eq('7A-10 얼마나 열 수 있는지도 기록(안내 문구 재료)', sandbox.S.capAhead, 100);
   }
   // ⚠ 실브라우저가 잡은 것: 안내 문구가 render() 아래에서 var 선언되는 `target` 을 참조해
   //   **undefined명**으로 렌더됐다(호이스팅). 정적 검사로는 못 잡는다 → 함수 호출을 고정한다.
-  ok('7A-10 ★ 안내 문구는 아래에서 선언되는 var 가 아니라 함수를 부른다(undefined 렌더 방지)',
-    /배분해야 할 인원\(<b>' \+ targetTotal\(\) \+ '명<\/b>\)/.test(cdpSrc));
+  ok('7A-10 ★ 안내 문구는 아래에서 선언되는 var 를 참조하지 않는다(undefined 렌더 방지)', (() => {
+    // 안내 문구 블록은 `var target = targetTotal()` **위**에 있다 → 그 안에서 bare `target` 을
+    //   쓰면 호이스팅으로 undefined 가 렌더된다(실브라우저가 잡은 것, 정적으로만 고정 가능).
+    const a = cdpSrc.indexOf("var offNote = ''");
+    const b = cdpSrc.indexOf('var balBlk', a);
+    // ⚠ 주석은 지우고 본다(경고 주석에 `target` 이라고 적혀 있다) — 블록 주석 정규식은 이 레포의
+    //   정규식 리터럴을 물어 코드를 통째로 삼키므로 **줄 주석만** 지운다.
+    const code = cdpSrc.slice(a, b).replace(/^\s*\/\/.*$/gm, '');
+    return a > 0 && b > a && !/\btarget\b(?!Total)/.test(code);
+  })());
   ok('7A-10 ★ 사유별 안내 문구가 다음 행동까지 말한다(시트 공고는 시트에 날짜 추가)',
-    /앞으로 열 수 있는 자리/.test(cdpSrc) && /시트에 진행 날짜를 더 넣거나/.test(cdpSrc)
+    /앞으로 진행할 날이 없어/.test(cdpSrc) && /시트에 진행 날짜를 더 넣어주세요/.test(cdpSrc)
     && /오늘 이미 확정·진행 중인 인원이 남은 배분수보다 많아/.test(cdpSrc));
+  ok('★ 부족 상태는 균형 모드 안에서 사유·다음 행동을 말한다(조용한 파랑 금지)',
+    /bal && S\.shortBy > 0 && diffPlan\(\) < 0/.test(cdpSrc) && /명<\/b>이 모자랍니다/.test(cdpSrc)
+    && /합계가 맞는 순간 저장할 수 있습니다/.test(cdpSrc));
 
   // 7A-11 ★★ 한 날에 평소 상한을 넘겨 여는 배치는 **경고한다**(막지는 않는다 — 사용자가 고른 방식)
   ok('7A-11 066 하루 상한 초과 경고 + 대안 제시',

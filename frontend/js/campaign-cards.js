@@ -259,11 +259,22 @@
       .pcard .uic .bdg{position:absolute;top:-7px;right:-6px;min-width:17px;height:17px;border-radius:99px;
         background:#EF4444;color:#fff;font-size:.58rem;font-weight:900;line-height:17px;padding:0 4px;
         box-shadow:0 1px 4px rgba(220,38,38,.45);font-variant-numeric:tabular-nums}
+      .pcard .uic .lbl{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      /* [⋯] 더보기 — 폭 고정(주 버튼이 남은 폭을 나눠 갖게) */
+      .pcard .uic.more{flex:0 0 auto;width:26px;padding:6px 0;font-size:.78rem;line-height:1}
       .pcard .ppub{display:flex;align-items:center;gap:5px;font-size:.61rem;font-weight:800;color:#6B7280;white-space:nowrap;padding-left:2px}
       .pcard .psw{width:30px;height:17px;border-radius:99px;background:#12b886;position:relative;flex-shrink:0;cursor:pointer}
       .pcard .psw::after{content:"";position:absolute;top:2px;left:15px;width:13px;height:13px;border-radius:50%;background:#fff;transition:left .15s}
       .pcard .psw.off{background:#CBD5E1}
       .pcard .psw.off::after{left:2px}
+      /* ── [⋯] 더보기 메뉴(body 직속) — 카드의 overflow:hidden 에 잘리지 않게 밖에 그린다.
+         호스트 테마가 없는 화면에도 얹히므로 색은 var() 없이 리터럴로 고정한다. ── */
+      .pcmenu{position:fixed;z-index:10080;background:#fff;border:1px solid #DDE3EE;border-radius:10px;
+        box-shadow:0 10px 28px rgba(15,23,42,.18);padding:5px;min-width:158px}
+      .pcmenu .pcmi{display:block;width:100%;text-align:left;border:0;background:none;font-family:inherit;
+        font-size:.72rem;font-weight:700;color:#2B3241;padding:8px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}
+      .pcmenu .pcmi:hover:not(:disabled){background:#F2F5FB;color:#1b64da}
+      .pcmenu .pcmi:disabled{opacity:.45;cursor:default}
       .pcard.pc-draft{border-style:dashed;border-color:#C7CEDB;background:#FCFCFD}
       /* 삭제 모드 — 켰을 때만 선택 오버레이. 평상시 카드에는 삭제 수단이 없다(오클릭 방지) */
       .pcard.pc-del{border-color:#F7BDBD}
@@ -426,34 +437,93 @@
     const sheetless = sid.indexOf(_VIRTUAL_SHEET_PREFIX) === 0;
     const sheetUrl = (sid && !sheetless) ? ('https://docs.google.com/spreadsheets/d/' + sid + '/edit' + (gid ? '#gid=' + gid : '')) : '';
     const sheetBtn = sheetUrl
-      ? `<button type="button" class="uic" onclick="${stop}window.open('${_esc(sheetUrl)}','_blank','noopener')" title="연결된 구글시트 열기">📄 시트</button>`
-      : `<button type="button" class="uic" disabled title="${sheetless ? '무시트 작업입니다 — 구글시트를 쓰지 않습니다' : '연결된 시트가 없습니다'}" style="opacity:.4;cursor:default">${sheetless ? '🗒 무시트' : '📄 시트'}</button>`;
+      ? `<button type="button" class="pcmi" onclick="${stop}window.open('${_esc(sheetUrl)}','_blank','noopener')" title="연결된 구글시트 열기">📄 연결된 시트 열기</button>`
+      : `<button type="button" class="pcmi" disabled title="${sheetless ? '무시트 작업입니다 — 구글시트를 쓰지 않습니다' : '연결된 시트가 없습니다'}">${sheetless ? '🗒 무시트 작업 (시트 없음)' : '📄 연결된 시트 없음'}</button>`;
     // 🚫 참여 리뷰어(공고별 블랙리스트 건별 관리, 091) — apply 게이트가 있는 참여형만 의미가 있다
     //   (레거시는 카톡 신청이라 차단 지점이 없음). 모듈 미로드 화면(리뷰어 홈 등)에는 버튼을 안 그린다.
     const gateBtn = (c.participation_mode && typeof window !== 'undefined' && window.ReviewerGate)
-      ? `<button type="button" class="uic" onclick="${stop}ReviewerGate.open('${id}')" title="이 공고에 참여할 수 없는 리뷰어를 건별로 관리">🚫 리뷰어</button>`
+      ? `<button type="button" class="pcmi" onclick="${stop}ReviewerGate.open('${id}')" title="이 공고에 참여할 수 없는 리뷰어를 건별로 관리">🚫 참여 리뷰어 관리</button>`
       : '';
     // 📅 인원조절(095) — 날짜별 모집 인원 조절·차수(물량 추가). apply 정원 게이트가 있는 참여형만
     //   의미가 있고(레거시는 dailyQuota 미사용), 모듈 미로드 화면에는 버튼을 안 그린다(게이트와 동일 규율).
     const planBtn = (c.participation_mode && typeof window !== 'undefined' && window.CampaignDailyPlan)
-      ? `<button type="button" class="uic" onclick="${stop}CampaignDailyPlan.open('${id}')" title="날짜별 모집 인원 조절(오늘·미래) + 차수(물량 추가) 관리">📅 인원</button>`
+      ? `<button type="button" class="pcmi" onclick="${stop}CampaignDailyPlan.open('${id}')" title="날짜별 모집 인원 조절(오늘·미래) + 차수(물량 추가) 관리">📅 날짜별 인원 조절</button>`
       : '';
     // 👁 보기 = 리뷰어가 [참여하기]를 누르면 보는 화면(작업가이드·현금영수증 안내 포함) 미리보기.
     //   마감·투입완료·게시전 공고도 [모집중 가정] 토글로 전 과정 확인 — 기존 openReviewerPreview
     //   (campaign.html?preview=1, DB write 0) 재사용이라 홀드·정원 카운터를 오염시키지 않는다.
     //   참여형만(레거시 공고는 campaign.html이 리뷰어 홈으로 리다이렉트해 막다른 길).
     const viewBtn = c.participation_mode
-      ? `<button type="button" class="uic" onclick="${stop}openReviewerPreview('${id}')" title="리뷰어가 참여하면 보는 화면 확인 (마감 공고 포함 · 참여 기록 안 남음)">👁 보기</button>`
-      : `<button type="button" class="uic" disabled title="참여형 공고만 리뷰어 화면 미리보기를 지원합니다" style="opacity:.4;cursor:default">👁 보기</button>`;
+      ? `<button type="button" class="uic" onclick="${stop}openReviewerPreview('${id}')" title="리뷰어가 참여하면 보는 화면 확인 (마감 공고 포함 · 참여 기록 안 남음)"><span class="lbl">👁 보기</span></button>`
+      : `<button type="button" class="uic" disabled title="참여형 공고만 리뷰어 화면 미리보기를 지원합니다" style="opacity:.4;cursor:default"><span class="lbl">👁 보기</span></button>`;
+    // ★★ 액션 줄은 **주 버튼 3개 + [⋯]** 만 둔다(시안 C — 사용자 확정 2026-08-07).
+    //   종전엔 6개를 한 줄에 욱여넣어 라벨이 잘리고 「게시」 토글과 겹쳤다(실측: 카드 244px 중
+    //   토글 57px 고정 → 버튼 하나에 27px 인데 글자는 35~48px 필요 = 6개 전부 넘침).
+    //   ★ 버튼이 더 늘어도 [⋯] 안으로 들어가므로 **같은 방식으로 다시 깨지지 않는다**.
+    //   ★ 관제의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
+    _ACT_MORE[c.id] = [sheetBtn, planBtn, gateBtn].filter(Boolean).join('');
     return `<div class="pact">
-      <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')">✏️ 수정</button>
+      <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')"><span class="lbl">✏️ 수정</span></button>
       ${viewBtn}
-      ${sheetBtn}
-      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')">📡 관제${bdg}</button>
-      ${planBtn}
-      ${gateBtn}
+      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')"><span class="lbl">📡 관제</span>${bdg}</button>
+      <button type="button" class="uic more" onclick="${stop}CampCards._more('${id}',this)"
+        title="더보기 — 시트 열기 · 날짜별 인원 조절 · 참여 리뷰어 관리">⋯</button>
       ${pubToggle}
     </div>`;
+  }
+
+  /* ── [⋯] 더보기 메뉴 ────────────────────────────────────────────────
+     ★★ **body 직속**이어야 한다 — `.pcard` 에 `overflow:hidden` 이 걸려 있어 카드 안에 그리면
+       메뉴가 통째로 잘린다(모달·오버레이를 스크롤 컨테이너 밖에 두는 레포 규율과 같은 이유).
+     ★ 색은 호스트 CSS 변수에 기대지 않는다(리터럴) — 이 모듈은 테마 없는 화면에도 얹힌다. */
+  var _ACT_MORE = Object.create(null);   // 공고 id → 메뉴에 들어갈 버튼 HTML
+  var _menuEl = null, _menuBound = false;
+
+  function _ensureMenu() {
+    if (_menuEl && document.body.contains(_menuEl)) return _menuEl;
+    _menuEl = document.createElement('div');
+    _menuEl.className = 'pcmenu';
+    _menuEl.style.display = 'none';
+    document.body.appendChild(_menuEl);
+    // ★ 항목을 고르면 메뉴를 닫는다 — 항목 onclick 이 stopPropagation 을 하므로(카드 클릭 차단)
+    //    아래 document 리스너까지 못 간다 → 이 요소에 캡처 단계로 건다(항목 핸들러보다 먼저 도달).
+    //    닫기는 setTimeout 으로 미뤄 항목의 동작(모달 열기 등)이 먼저 끝나게 한다.
+    _menuEl.addEventListener('click', function (e) {
+      var it = e.target.closest && e.target.closest('.pcmi');
+      if (it && !it.disabled) setTimeout(_closeMenu, 0);
+    }, true);
+    if (!_menuBound) {                     // ★ 리스너는 최상위에 한 번만(열 때마다 걸면 겹쳐 쌓인다)
+      _menuBound = true;
+      document.addEventListener('click', function (e) {
+        if (!e.target.closest || !e.target.closest('.uic.more')) _closeMenu();
+      });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') _closeMenu(); });
+      // 스크롤·리사이즈 시에는 닫는다 — body 직속이라 카드를 따라 움직이지 않는다
+      window.addEventListener('scroll', _closeMenu, true);
+      window.addEventListener('resize', _closeMenu);
+    }
+    return _menuEl;
+  }
+  function _closeMenu() {
+    if (_menuEl) { _menuEl.style.display = 'none'; _menuEl.removeAttribute('data-for'); }
+  }
+  function _more(id, btn) {
+    var m = _ensureMenu();
+    if (m.dataset.for === id && m.style.display === 'block') { _closeMenu(); return; }   // 같은 버튼 = 토글
+    var items = _ACT_MORE[id] || '';
+    if (!items) { _closeMenu(); return; }
+    m.innerHTML = items;
+    m.dataset.for = id;
+    m.style.visibility = 'hidden';
+    m.style.display = 'block';
+    var r = btn.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
+    // 오른쪽 끝을 버튼에 맞추되 화면 밖으로 나가지 않게, 위가 좁으면 아래로 편다
+    var left = Math.max(8, Math.min(window.innerWidth - mw - 8, r.right - mw));
+    var top = r.top - mh - 6;
+    if (top < 8) top = Math.min(window.innerHeight - mh - 8, r.bottom + 6);
+    m.style.left = left + 'px';
+    m.style.top = top + 'px';
+    m.style.visibility = '';
   }
 
   /**
@@ -672,6 +742,7 @@
   /** 목록 렌더: 참여형만 골라 2열 그리드로 그려넣음. 반환 = 그린 카드 수 */
   function renderInto(el, list, serverNowIso, onNeedRefresh) {
     _injectStyles();
+    _closeMenu();   // 목록을 다시 그리면 열려 있던 [⋯] 메뉴는 닫는다(가리키던 카드가 사라진다)
     if (serverNowIso) setServerNow(serverNowIso);
     _onNeedRefresh = onNeedRefresh || null;
     const parts = sortByAvailability((list || []).filter(c => c.participation_mode));
@@ -1153,5 +1224,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();

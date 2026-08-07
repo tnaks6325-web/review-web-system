@@ -143,8 +143,10 @@
   function effBase(d) {
     return (S.base[d] != null) ? S.base[d] : baseFor(d);
   }
-  /** 이월을 얹지 않았을 때의 진행 구간 — [{date,base,v}] 또는 null(400일 안에 못 채움).
-   *  ★ 출발값이 0인 날(시트 일정 공고의 휴무일·0명으로 저장한 날)은 진행일이 아니라 구간에서 빠진다. */
+  /** 이월을 얹지 않았을 때의 진행 구간 — { days:[{date,base,v}], sum, short }.
+   *  ★ 출발값이 0인 날(시트 일정 공고의 휴무일·0명으로 저장한 날)은 진행일이 아니라 구간에서 빠진다.
+   *  ★★ 400일 안에 목표를 못 채워도(`short`) **모아 둔 진행일을 그대로 돌려준다** — 그 상태가
+   *    바로 균형 바의 "부족(파랑)"이고, 사람이 날짜별 인원을 올리면 초록이 된다. */
   function walkDays(target) {
     var out = [], sum = 0, d = baseDate(), guard = 0;
     while (sum < target && guard++ < 400) {
@@ -153,7 +155,7 @@
       d = addDays(d, 1);
     }
     S.capAhead = sum;                                 // 못 채웠을 때 "얼마나 모자란지"를 말하는 재료
-    return (sum >= target) ? out : null;
+    return { days: out, sum: sum, short: sum < target };
   }
 
   /**
@@ -175,34 +177,35 @@
     //   잘못된 기준으로 "손 안 댔다"를 판정하면 조용히 아무것도 저장하지 않는 화면이 된다.
     if (S.data.todayNaturalQuota == null) { S.balanceOff = 'no_baseline'; return null; }
     var wd = walkDays(target);
-    if (!wd) { S.balanceOff = 'no_room'; return null; }  // 앞으로 열 자리가 배분해야 할 인원보다 적다
+    // ★★ 앞으로 진행일이 **아예 없을 때만** 균형 모드를 끈다. 시트 계획이 목표보다 적은 것은
+    //   기능 불가가 아니라 **"부족(파랑) — 저장불가"** 그 자체다(요구 ⑥). 종전엔 이때 균형 모드를
+    //   통째로 꺼 놓고 안내문만 "어느 날의 인원을 늘려주세요"라고 말해, 시키는 대로 늘려도 아무
+    //   변화가 없는 **막다른 길**이었다(사용자 신고 2026-08-07 · 시트 800명 공고).
+    if (!wd.days.length) { S.balanceOff = 'no_room'; return null; }
     var carry = (mode === 'extend') ? 0 : (carryAmt() || 0);
     // ★ 나눌 대상 = 이월 없이도 **온전히** 채워지는 진행일(마지막 부분일 제외) — 부분일까지 세면
     //   그 몫이 총량 맞추기에서 잘려 "이월 30명인데 29명만 얹혔다"가 된다(시안 실측).
-    var slots = Math.max(1, wd.filter(function (x) { return x.v >= x.base; }).length);
+    var slots = Math.max(1, wd.days.filter(function (x) { return x.v >= x.base; }).length);
     var per = (mode === 'spread') ? Math.floor(carry / slots) : 0;
     var rem = (mode === 'spread') ? (carry % slots) : 0;
-    var dates = [], plan = {}, cmap = {}, sum = 0, d = baseDate(), guard = 0, left = carry, si = 0;
-    while (sum < target && guard++ < 400) {
+    var dates = [], plan = {}, cmap = {}, sum = 0, left = carry, si = 0;
+    for (var i = 0; i < wd.days.length; i++) {
       if (dates.length >= MAX_ROWS) { S.balanceOff = 'too_long'; return null; }   // 너무 길다
-      var base = effBase(d);
-      if (base > 0) {
-        var add = 0;
-        if (left > 0) {
-          add = (mode === 'next') ? left : Math.min(left, per + (si < rem ? 1 : 0));
-          left -= add;
-        }
-        si++;
-        // ★ 오늘은 이미 확정·진행 중인 인원 아래로 잡히면 안 된다 — 저장된 조절이 그 사이 늘어난
-        //   확정 인원보다 작을 수 있고, 그대로 보내면 서버가 below_used 로 거절한다(막다른 길).
-        var v = Math.max(minFor(d), Math.min(base + add, target - sum, MAX_DAY));
-        dates.push(d); plan[d] = v; cmap[d] = Math.max(0, Math.min(add, v - base));
-        sum += v;
+      var d = wd.days[i].date, base = wd.days[i].base, add = 0;
+      if (left > 0) {
+        add = (mode === 'next') ? left : Math.min(left, per + (si < rem ? 1 : 0));
+        left -= add;
       }
-      d = addDays(d, 1);
+      si++;
+      // ★ 오늘은 이미 확정·진행 중인 인원 아래로 잡히면 안 된다 — 저장된 조절이 그 사이 늘어난
+      //   확정 인원보다 작을 수 있고, 그대로 보내면 서버가 below_used 로 거절한다(막다른 길).
+      var v = Math.max(minFor(d), Math.min(base + add, target - sum, MAX_DAY));
+      dates.push(d); plan[d] = v; cmap[d] = Math.max(0, Math.min(add, v - base));
+      sum += v;
+      if (sum >= target) break;   // 목표를 채웠으면 그 뒤 날은 구간에 넣지 않는다
     }
-    if (sum < target) { S.balanceOff = 'no_room'; return null; }
-    return { dates: dates, plan: plan, carry: cmap };
+    // 부족분 = 지금 구간의 시트/저장 계획만으로는 모자라는 인원(0이면 정확히 맞는다)
+    return { dates: dates, plan: plan, carry: cmap, shortBy: Math.max(0, target - sum) };
   }
 
   /** 그 날에 아직 얹혀 있는 이월분 — 배정량(S.carryMap)을 넘지 않는다.
@@ -232,6 +235,9 @@
     //   깎아 버린다. 총량 clamp 때문에 종료일 이후 계획은 어차피 열리지 않는(무해한) 값이다.
     //   S.plan 에는 남겨 두므로 저장 시 remove 로 나가지도 않는다(그대로 유지).
     S.outside = outside.sort();
+    // ★ 부족분은 **적용한 방식의 결과**에서 읽는다 — 렌더 중 방식별 종료일 비교(`em()`)가
+    //   buildHorizon 을 다시 부르므로 S 에 흘려 두면 다른 방식의 값으로 덮인다.
+    S.shortBy = h.shortBy || 0;
     S.horiz = h.dates.slice();
     S.carryMap = h.carry;
     S.plan = plan;
@@ -708,11 +714,20 @@
         today_over: '오늘 이미 확정·진행 중인 인원이 남은 배분수보다 많아 배분 표를 만들 수 없습니다 — 총량(차수)을 늘리거나 오늘이 지난 뒤 다시 조절해주세요.',
         no_baseline: '오늘 기준 정원을 서버에서 받지 못해 배분 표를 만들 수 없습니다 — 잠시 후 다시 열어주세요(아래 날짜별 조절은 그대로 씁니다).',
         // ★ `target` 은 아래에서 var 선언되므로 여기서는 undefined 다(호이스팅) — 함수를 직접 부른다
-        no_room: '앞으로 열 수 있는 자리(<b>' + (S.capAhead || 0) + '명</b>)가 배분해야 할 인원(<b>' + targetTotal() + '명</b>)보다 적어 배분 표를 만들 수 없습니다'
-          + (j.scheduleDriven === true ? ' — <b>시트에 진행 날짜를 더 넣거나</b> 아래에서 어느 날의 인원을 늘려주세요.' : ' — 아래에서 어느 날의 인원을 늘려주세요.'),
+        no_room: '앞으로 진행할 날이 없어 배분 표를 만들 수 없습니다'
+          + (j.scheduleDriven === true ? ' — <b>시트에 진행 날짜를 더 넣어주세요.</b>' : ' — 일 모집인원을 확인해주세요.'),
         too_long: '남은 기간이 ' + MAX_ROWS + '일을 넘어 배분 표를 만들 수 없습니다 — 아래에서 날짜별로 조절해주세요.',
       }[S.balanceOff];
       if (offMsg) offNote = '<div class="cdp-note warn">⚠ ' + offMsg + '</div>';
+    }
+    // ★ 균형 모드는 켜졌지만 지금 계획만으로는 목표에 못 미치는 상태 — **왜 파랑(부족)인지**와
+    //   다음 행동을 말한다. 여기서 인원을 늘리면 그대로 초록(저장가능)이 된다.
+    // ★ 아직 **지금도** 모자랄 때만 — 사람이 채워 합계가 맞았는데 "130명이 모자랍니다"가 남아
+    //   균형 바(딱 맞습니다)와 정면으로 어긋나던 것을 막는다(실브라우저가 잡음).
+    if (bal && S.shortBy > 0 && diffPlan() < 0) {
+      offNote = '<div class="cdp-note warn">⚠ 지금 <b>' + (j.scheduleDriven === true ? '시트' : '기본') + ' 계획</b>만으로는 배분해야 할 인원보다 <b>'
+        + S.shortBy + '명</b>이 모자랍니다 — 아래에서 날짜별 인원을 늘리면(또는 <b>[자동 맞춤]</b>) 합계가 맞는 순간 저장할 수 있습니다'
+        + (j.scheduleDriven === true ? '. 시트에 진행 날짜를 더 넣어도 됩니다.' : '.') + '</div>';
     }
 
     var carryBlk = '';
