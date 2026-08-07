@@ -92,6 +92,34 @@ async function deriveSchedules(db, tabs, now = new Date()) {
   }
   if (!wanted.length) return out;
 
+  /* ★★ 무시트 탭은 시트 일정 파생에서 뺀다(탈 구글시트 W2-b · D3-a 사용자 확정).
+     무시트 작업의 `raw_sheet_rows` 는 **우리가 작업표에서 만든 것**이라, 그것을 다시 읽어
+     일정을 파생하면 "시트가 진실원본"인 상태가 되어 **날짜별 인원 조절 모달이 영영 잠긴다**
+     (`savePlans` 가 schedule_driven 으로 거부). 날짜별 정원의 진실원본은 **달력**
+     (`campaign_daily_plans`)으로 일원화한다 — 발행 시 작업표 날짜가 달력에 프리필된다.
+     ★ 판정 실패는 종전대로(fail-open) — 게이트가 죽었다고 시트 기반 일정까지 멈추지 않는다. */
+  try {
+    const params2 = [];
+    const tuples2 = wanted.map(t => {
+      params2.push(t.sheetId, String(t.tabGid));
+      return `($${params2.length - 1},$${params2.length})`;
+    }).join(',');
+    const { rows: slRows } = await db.query(
+      `SELECT sheet_id, COALESCE(tab_gid,'') AS tab_gid FROM tab_configs
+        WHERE (sheet_id, COALESCE(tab_gid,'')) IN (${tuples2})
+          AND COALESCE(sheetless, FALSE) = TRUE`, params2);
+    if (slRows.length) {
+      const skip = new Set(slRows.map(r => _key(r.sheet_id, r.tab_gid)));
+      for (let i = wanted.length - 1; i >= 0; i--) {
+        if (!skip.has(wanted[i].key)) continue;
+        out.set(wanted[i].key, null);                       // 일정 미적용 = 달력이 정한다
+        _cache.set(wanted[i].key, { at: now.getTime(), value: null });
+        wanted.splice(i, 1);
+      }
+    }
+  } catch (_) { /* fail-open — 종전 경로 */ }
+  if (!wanted.length) return out;
+
   try {
     const params = [];
     const tuples = wanted.map(t => {

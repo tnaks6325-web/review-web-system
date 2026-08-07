@@ -52,6 +52,9 @@ const INTAKE_EDITABLE_FIELDS = [
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
   'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
   'guide_images',   // 첨부 이미지 URL 배열(JSON) — 090 · 칸=칸 매핑 2단계
+  // ★ 097(탈 구글시트 W2-b): 진행 일정 신호 — 시트 구매일자를 손으로 적던 규칙을 오더가 말해준다.
+  //   미전송(구버전 인트라넷) = NULL = 종전 동작(계획 계산 기본값 + 미리보기에서 지정).
+  'skip_weekends', 'holidays',
 ];
 const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
 
@@ -152,6 +155,27 @@ function _guideImagesJson(v) {
   } catch (_) { return ''; }
 }
 
+/* ★ 097: "안 보냄"(NULL) 과 "끔"(false) 을 구분한다 — 구버전 인트라넷이 값을 안 실어 보낼 때
+   `false` 로 접으면 **주말 제외가 조용히 꺼져** 토·일에도 구매일이 잡힌다. */
+function _boolOrNull(v) {
+  if (v === true || v === 'true') return true;
+  if (v === false || v === 'false') return false;
+  return null;
+}
+
+/* ★ 휴무일 = 'YYYY-MM-DD' 배열(JSON). 형식이 맞는 값만 받는다 — 잘못된 값 하나로 날짜 분배가
+   통째로 깨지는 것보다 그 날짜만 무시하는 쪽이 낫다(worktablePlan 의 holidays 규율과 같다). */
+function _holidaysJson(v) {
+  try {
+    const arr = Array.isArray(v) ? v : ((typeof v === 'string' && v.trim()) ? JSON.parse(v) : []);
+    if (!Array.isArray(arr)) return null;
+    const clean = [...new Set(arr
+      .map(d => String(d == null ? '' : d).trim())
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort().slice(0, 120);
+    return clean.length ? JSON.stringify(clean) : null;
+  } catch (_) { return null; }
+}
+
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy) {
   const optionsJson = (typeof b.product_options_json === 'string')
@@ -163,8 +187,8 @@ async function _insertWorkOrder(b, createdBy) {
        purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
-       sales_id, contract_number, quote_id, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,'submitted',$28)
+       sales_id, contract_number, quote_id, skip_weekends, holidays, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$29,$30,'submitted',$28)
      RETURNING *`,
     [
       _genOrderId(),
@@ -199,6 +223,10 @@ async function _insertWorkOrder(b, createdBy) {
       String(b.contract_number || '').trim(),
       String(b.quote_id || '').trim(),
       createdBy,
+      // ★ 097(W2-b): 진행 일정 신호. **미전송 = NULL = 종전 동작**(계획 계산 기본값 + 미리보기 지정) —
+      //   `false` 와 "안 보냄"을 구분해야 구버전 인트라넷이 주말 제외를 조용히 끄지 않는다.
+      _boolOrNull(b.skip_weekends),
+      _holidaysJson(b.holidays),
     ]
   );
   return rows[0];
@@ -428,6 +456,8 @@ async function _intakeUpdateHandler(req, res, next) {
       if (f === 'start_date') vals.push(_dateOrNull(b[f]));
       else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
       else if (f === 'guide_images') vals.push(_guideImagesJson(b[f]));   // 배열 → 정규화 JSON(090)
+      else if (f === 'skip_weekends') vals.push(_boolOrNull(b[f]));       // 097 — 안 보냄/끔 구분
+      else if (f === 'holidays') vals.push(_holidaysJson(b[f]));          // 097 — 배열 → 정규화 JSON
       else if (INTAKE_INT_FIELDS.has(f)) vals.push(_intOrZero(b[f]));
       else vals.push(b[f]);
       touched++;
