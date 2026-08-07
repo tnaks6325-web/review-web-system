@@ -272,7 +272,8 @@ ok('H5. 훅은 admin·workdesk 양쪽이 등록한다',
   /RECRUIT_OPEN_WORK_ORDER = async function/.test(readF('workdesk.html')));
 ok('H6. ★ 훅은 공고 모달을 먼저 닫는다 — 덮개(5000) 뒤에 열리면 안 뜬 것처럼 보인다',
   /closeRecruitModal[\s\S]{0,120}openWoDetailModal/.test(readF('js/index-app.js')) &&
-  /closeRecruitModal\(\);[\s\S]{0,160}switchView\('orders'\)/.test(readF('workdesk.html')));
+  /closeRecruitModal\(\);[\s\S]{0,200}switchView\('orders'\)/
+    .test(readF('workdesk.html').replace(/\/\*[\s\S]*?\*\//g, '')));   // 주석 제외 후 판정(설명이 길어져 창을 넘겼다)
 ok('H7. ★ 추천 클릭은 인덱스만 넘긴다(탭명은 시트발 외부 문자열 — onclick 보간 금지)',
   /onclick="rfPickSuggestedTab\(\$\{i\}\)"/.test(noteFn) &&
   !/onclick="rfPickSuggestedTab\('/.test(noteFn));
@@ -293,6 +294,27 @@ ok('H11. ★ 목록에 없는 탭은 여전히 선택하지 않는다(안내만 
   /if \(!_recruitTabList\.some\([\s\S]{0,90}?\) return _miss\(tabName\);/.test(pick(recruit, '_prefillLinkedTab')));
 ok('H12. _restoreLinkedTab 이 성공 여부를 돌려준다(목록에 없으면 select 가 조용히 빈다)',
   /return tabSel\.value === key;/.test(pick(recruit, '_restoreLinkedTab')));
+
+/* ★ 코드리뷰가 잡은 실측 경로: switchView('orders') 는 렌더 프라미스를 돌려주지 않는다(sync).
+   목록을 기다리지 않고 행 DOM 을 찾으면 ① 아직 '불러오는 중…' 자리표시자이고 ② STATE.wo 가
+   이전 방문의 stale 값이라 인덱스도 어긋나 **뷰만 바뀌고 펼침·스크롤이 조용히 실패**한다. */
+{
+  const wd = readF('workdesk.html');
+  const s = wd.indexOf('W.RECRUIT_OPEN_WORK_ORDER = async function');
+  const e = wd.indexOf('// 카드 렌더 후 머리말', s);
+  assert(s > 0 && e > s, 'workdesk 훅 블록 추출 실패');
+  const hook = wd.slice(s, e);
+  ok('H19. ★ 행 DOM 은 반드시 await 뒤에 만진다(목록 렌더를 기다린다)',
+    hook.indexOf('await') > -1 &&
+    hook.indexOf("getElementById('woldetail-") > hook.indexOf('await') &&
+    hook.indexOf('findIndex') > hook.indexOf('await'));
+  ok('H20. ★ 준비 신호로 `.empty` 를 쓰지 않는다 — 로딩 자리표시자가 바로 그 클래스라 즉시 참이 된다',
+    !/#wobody \.empty/.test(hook.replace(/\/\*[\s\S]*?\*\//g, '')) && /불러오는 중/.test(hook));
+  ok('H21. 무한 대기 금지 — 상한 뒤엔 사유를 말하고 끝낸다',
+    /_woWaitFor\([\s\S]{0,200}?,\s*\d+\)/.test(hook) &&
+    /function _woWaitFor/.test(wd) && /resolve\(false\)/.test(wd) &&
+    /목록을 불러오지 못했습니다/.test(hook));
+}
 
 /* 유사도 함수 실제 실행 */
 ['_rfMatchNorm', '_rfBigrams', '_rfTabScore', '_rfSuggestTabs'].forEach(n => {

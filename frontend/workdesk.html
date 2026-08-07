@@ -9236,16 +9236,47 @@ boot();
   W.RECRUIT_OPEN_WORK_ORDER = async function (id) {
     try {
       if (typeof closeRecruitModal === 'function') closeRecruitModal();
-      if (STATE.view !== 'orders') switchView('orders');
+      /* ★★ switchView 는 렌더 프라미스를 돌려주지 않는다(sync) — renderOrdersView 가 #viewroot 를
+         '불러오는 중…' 으로 갈아치운 직후 제어가 돌아온다. 여기서 곧장 행 DOM 을 찾으면
+         ① 아직 그려지지 않았고 ② STATE.wo 가 이전 방문의 stale 값이라 인덱스도 어긋난다
+         → 뷰만 바뀌고 펼침·스크롤이 **조용히 실패**한다(코드리뷰 지적, 실측 경로).
+         그래서 목록이 실제로 그려질 때까지 기다린 뒤에 인덱스를 구한다. */
+      const wasOrders = STATE.view === 'orders';
+      if (!wasOrders) switchView('orders');
+      if (!wasOrders || !(STATE.wo || []).length) {
+        /* ★ `#wobody .empty` 를 신호로 쓰면 안 된다 — renderOrdersView 가 깔아 두는
+           '불러오는 중…' 자리표시자가 바로 그 클래스라 즉시 참이 된다(대기가 무의미). */
+        const ok = await _woWaitFor(function () {
+          const b = document.getElementById('wobody');
+          return !!b && !/불러오는 중/.test(b.textContent || '');
+        }, 8000);
+        if (!ok) { _toast('작업오더 목록을 불러오지 못했습니다 — 잠시 후 다시 시도해주세요.'); return; }
+      }
       if (!(STATE.wo || []).length) { try { await _loadOrders(); } catch (_) {} }
       const i = (STATE.wo || []).findIndex(function (o) { return String(o.id) === String(id); });
       if (i < 0) { _toast('그 작업오더를 목록에서 찾지 못했습니다 — 상태 필터를 확인하세요.'); return; }
+      // 목록은 그려졌는데 그 행만 아직이면 잠깐 더 기다린다(렌더 청크 대비)
+      await _woWaitFor(function () { return !!document.getElementById('wolrow-' + i); }, 2000);
       const d = document.getElementById('woldetail-' + i);
       if (d && d.style.display === 'none') _woToggle(i);
       const row = document.getElementById('wolrow-' + i);
       if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      else _toast('작업오더 행을 찾지 못했습니다 — 목록에서 직접 열어주세요.');
     } catch (e) { try { _toast('작업오더 열기 실패'); } catch (_) {} }
   };
+  /** 조건이 참이 될 때까지 폴링(최대 ms). ★ 무한 대기 금지 — 못 그려지면 사유를 말하고 끝낸다. */
+  function _woWaitFor(fn, ms) {
+    return new Promise(function (resolve) {
+      const t0 = Date.now();
+      (function tick() {
+        let ok = false;
+        try { ok = !!fn(); } catch (_) {}
+        if (ok) return resolve(true);
+        if (Date.now() - t0 >= (ms || 4000)) return resolve(false);
+        setTimeout(tick, 80);
+      })();
+    });
+  }
   // 카드 렌더 후 머리말(건수·새 공고 버튼) 갱신 — index-recruit.js 는 목록만 그린다
   var _origRender = W._renderRecruitCards;
   if (typeof _origRender === 'function') {
