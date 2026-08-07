@@ -117,6 +117,15 @@
     + '#cdpModal .cdp-end{margin-top:10px;background:var(--bg2,#f8fafc);border:1px solid var(--border,#e2e8f0);border-radius:10px;padding:9px 13px;font-size:.76rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}'
     + '#cdpModal .cdp-end b{color:#1b64da}'
     + '#cdpModal .cdp-end .chg{color:#b45309;font-weight:700;font-size:.68rem}'
+    + '#cdpModal .cdp-heldblk{border:1.5px solid #DDD6FE;background:#F5F3FF;border-radius:12px;padding:11px 13px;margin-bottom:12px}'
+    + '#cdpModal .cdp-heldblk .hh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}'
+    + '#cdpModal .cdp-heldblk .hh b{font-size:.8rem;color:#5B21B6}'
+    + '#cdpModal .cdp-heldblk .hn{font-size:1.05rem;font-weight:800;color:#6D28D9}'
+    + '#cdpModal .cdp-heldblk .hn small{font-size:.62rem;font-weight:700;color:#7C3AED}'
+    + '#cdpModal .cdp-heldblk .hb{display:flex;gap:6px;flex-wrap:wrap}'
+    + '#cdpModal .cdp-heldblk .cdp-btn{border-color:#C4B5FD;color:#5B21B6}'
+    + '#cdpModal .cdp-heldblk .cdp-btn.hpri{background:#7C3AED;border-color:#7C3AED;color:#fff}'
+    + '#cdpModal .cdp-heldblk .hs{font-size:.64rem;color:#6D28D9;margin-top:6px}'
     + '#cdpModal .cdp-sec{margin-top:14px;border-top:1px solid var(--border,#e2e8f0);padding-top:11px}'
     + '#cdpModal .cdp-sec .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;font-weight:800;font-size:.76rem}'
     + '#cdpModal .cdp-rr{display:flex;align-items:center;gap:9px;font-size:.73rem;padding:4px 2px}'
@@ -179,7 +188,7 @@
   async function open(campId) {
     ensureMount();
     S = { campId: String(campId), title: '', data: null, plan: {}, base: {}, notes: [],
-          sessions: {}, choice: null, saving: false, baseEnd: null, error: null };
+          sessions: {}, choice: null, saving: false, baseEnd: null, error: null, carryStage: 0 };
     document.getElementById('cdpModal').style.display = 'flex';
     document.getElementById('cdpTitle').textContent = '모집인원 조절';
     document.getElementById('cdpBody').innerHTML = '<div class="cdp-note">불러오는 중…</div>';
@@ -208,6 +217,7 @@
     S.title = j.title || '';
     S.plan = {};
     S.base = {};
+    S.carryStage = 0;   // 이월 반영 스테이징은 저장/재조회 시 초기화(서버 잔량이 진실)
     (j.plans || []).forEach(function (p) {
       if (p.date >= j.today) { S.plan[p.date] = p.count; S.base[p.date] = p.count; }
     });
@@ -307,8 +317,32 @@
         + '<span class="cdp-rprog" style="color:' + (done ? '#16a34a' : '#1b64da') + '">' + got + '/' + (r.count || 0) + (done ? ' 완료' : '') + '</span></div>';
     }).join('');
 
+    // ★ 098 보류 이월 블록(보류 공고만) — 잔량 표시 + [오늘/내일/분산] 반영(계획 스테이징).
+    //   잔량 null = "조회 실패"를 말하고 반영을 잠근다(숫자를 지어내지 않는다 — 시안 확정).
+    let heldBlk = '';
+    if (S.data.carryMode === 'hold') {
+      const heldRaw = S.data.carryHeld;
+      const avail = heldRaw == null ? null : Math.max(0, Number(heldRaw) - S.carryStage);
+      const dis = killOff || avail === null || avail <= 0;
+      heldBlk = '<div class="cdp-heldblk">'
+        + '<div class="hh"><b>⏸ 보류된 이월</b><span class="hn">'
+        + (heldRaw == null ? '조회 실패' : avail + '명' + (S.carryStage > 0 ? ' <small>(반영 대기 +' + S.carryStage + ')</small>' : ''))
+        + '</span></div>'
+        + '<div class="hb">'
+        + '<button type="button" class="cdp-btn hpri" onclick="CampaignDailyPlan._heldApply(\'today\')"' + (dis ? ' disabled' : '') + '>오늘 정원에 +' + (avail || 0) + ' 반영</button>'
+        + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._heldApply(\'tomorrow\')"' + (dis ? ' disabled' : '') + '>내일에 반영</button>'
+        + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._heldApply(\'spread\')"' + (dis ? ' disabled' : '') + '>남은 날 분산</button>'
+        + '</div>'
+        + '<div class="hs">'
+        + (heldRaw == null
+          ? '잔량을 계산하지 못했습니다(기준선 조회 실패) — 잠시 후 다시 열어주세요.'
+          : '반영하지 않아도 물량은 사라지지 않습니다 — 총량까지 기본 일건수로 계속 모집되고 종료일만 뒤로 밀립니다. 반영은 아래 계획에 얹혀 [확정 저장]으로 확정됩니다.')
+        + '</div></div>';
+    }
+
     bd.innerHTML =
       (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
+      + heldBlk
       // ★ 코드리뷰 M1: 총원 충족 시 closed 가 영속되어 있어 차수를 추가해도 게시를 켜기 전에는
       //   모집이 재개되지 않는다(자동 재오픈은 수동 마감과 구분 불가라 하지 않음) — 화면이 말한다.
       + (j.status !== 'active'
@@ -474,8 +508,106 @@
     S.plan = {};
     Object.keys(S.base).forEach(function (d) { S.plan[d] = S.base[d]; });
     S.notes = [];
+    S.carryStage = 0;   // 이월 반영 스테이징도 함께 되돌림(계획에 얹은 값이 사라지므로)
     S.baseEnd = null;
     render();
+  }
+
+  /* ── 보류 이월 반영(098) — 계획에 얹는 스테이징. 저장 시 carryApply 로 잔량 차감 기록 ── */
+  function _heldApply(mode) {
+    if (!S || !S.data || S.data.carryMode !== 'hold' || S.data.planEnabled === false) return;
+    if (S.data.carryHeld == null) return;   // 잔량 모름 = 반영 잠금(숫자를 지어내지 않는다)
+    var avail = Math.max(0, Number(S.data.carryHeld) - S.carryStage);
+    if (avail <= 0) return;
+    if (mode === 'today') {
+      S.plan[S.data.today] = planFor(S.data.today) + avail;
+      S.notes.push('이월 반영 +' + avail + ' → 오늘');
+    } else if (mode === 'tomorrow') {
+      var t1 = addDays(S.data.today, 1);
+      S.plan[t1] = planFor(t1) + avail;
+      S.notes.push('이월 반영 +' + avail + ' → ' + fmtMD(t1));
+    } else {
+      // 남은 날 분산 = 내일부터 예상 종료일까지(없으면 7일) 고르게 — 축소-분산과 같은 규칙
+      var e = endDate();
+      var n = e ? Math.max(1, Math.round((Date.parse(e) - Date.parse(S.data.today)) / 86400000)) : 7;
+      n = Math.min(n, 110);   // 서버 저장 상한(120일) 선반영
+      var per = Math.floor(avail / n), extra = avail % n;
+      for (var k = 1; k <= n; k++) {
+        var d2 = addDays(S.data.today, k);
+        var add = per + (k <= extra ? 1 : 0);
+        if (add > 0) S.plan[d2] = planFor(d2) + add;
+      }
+      S.notes.push('이월 반영 +' + avail + ' → 남은 ' + n + '일 분산');
+    }
+    S.carryStage += avail;
+    render();
+    toast('반영을 계획에 얹었습니다 — [확정 저장]을 눌러야 확정됩니다');
+  }
+
+  /* ── 카드 ⏸ 칩 원클릭 반영(098 · 확정 ②) — 확인창 1개 + 즉시 저장(세부는 [📅 인원]로) ── */
+  var Q = null;   // { campId, held, today, todayPlan, title }
+  function ensureQuickMount() {
+    if (document.getElementById('cdpQuick')) return;
+    ensureMount();
+    var ov = document.createElement('div');
+    ov.id = 'cdpQuick';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10060;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:16px';
+    ov.innerHTML = '<div style="width:430px;max-width:100%;background:var(--card,#fff);color:var(--t1,#1f2937);border-radius:14px;padding:18px;box-shadow:0 12px 40px rgba(15,23,42,.3)">'
+      + '<h4 id="cdpQTitle" style="font-size:.86rem;margin:0 0 5px"></h4>'
+      + '<div id="cdpQDesc" style="font-size:.74rem;color:var(--t3,#475569);margin-bottom:12px"></div>'
+      + '<button type="button" class="cdp-btn" id="cdpQGo" onclick="CampaignDailyPlan._quickDo()" style="display:block;width:100%;text-align:left;margin-bottom:7px;padding:10px 13px;background:#7C3AED;border-color:#7C3AED;color:#fff;font-size:.76rem">✅ <b id="cdpQGoTx"></b></button>'
+      + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._quickDetail()" style="display:block;width:100%;text-align:left;margin-bottom:7px;padding:10px 13px;font-size:.74rem">📅 세부 선택 (날짜 골라 · 분산) — [📅 인원] 열기</button>'
+      + '<button type="button" onclick="CampaignDailyPlan._quickClose()" style="display:block;margin:4px auto 0;border:0;background:none;color:var(--t3,#94a3b8);font-size:.7rem;cursor:pointer;text-decoration:underline">그대로 두기 (반영하지 않음 — 물량은 사라지지 않습니다)</button>'
+      + '</div>';
+    document.body.appendChild(ov);
+  }
+  async function quickApplyHeld(campId) {
+    ensureQuickMount();
+    try {
+      var j = await _req('GET', EP + encodeURIComponent(String(campId)) + '/daily-plan');
+      if (j.carryMode !== 'hold') { toast('이월 보류 공고가 아닙니다'); return; }
+      if (j.carryHeld == null) { toast('보류 잔량을 계산하지 못했습니다 — [📅 인원]에서 확인해주세요'); return; }
+      var held = Math.max(0, Number(j.carryHeld) || 0);
+      if (held <= 0) { toast('반영할 보류 이월이 없습니다'); return; }
+      if (j.planEnabled === false) { toast('킬스위치(CAMPAIGN_DAILY_PLAN=0)로 계획이 꺼져 있어 반영할 수 없습니다'); return; }
+      if (j.scheduleDriven !== false) { toast('시트 일정 캠페인은 시트에서 조절합니다'); return; }
+      var todayPlan = (j.plans || []).reduce(function (v, p) { return p.date === j.today ? p.count : v; }, null);
+      if (todayPlan == null) todayPlan = j.defaultDaily || 0;
+      Q = { campId: String(campId), held: held, today: j.today, todayPlan: todayPlan, title: j.title || '' };
+      document.getElementById('cdpQTitle').textContent = '보류된 이월 ' + held + '명을 오늘 반영할까요?';
+      document.getElementById('cdpQDesc').textContent = (Q.title ? '「' + Q.title + '」 — ' : '') + '오늘 정원 ' + todayPlan + '명 → ' + (todayPlan + held) + '명. 총량은 변하지 않습니다.';
+      document.getElementById('cdpQGoTx').textContent = '오늘 정원에 +' + held + ' 반영';
+      document.getElementById('cdpQuick').style.display = 'flex';
+    } catch (e) {
+      toast('보류 정보를 불러오지 못했습니다: ' + (e.message || e));
+    }
+  }
+  async function _quickDo() {
+    if (!Q) return;
+    var q = Q;
+    _quickClose();
+    try {
+      await _req('POST', EP + encodeURIComponent(q.campId) + '/daily-plan', {
+        set: [{ date: q.today, count: q.todayPlan + q.held }],
+        remove: [],
+        carryApply: q.held,
+        note: '이월 반영 +' + q.held + ' → 오늘 (원클릭)',
+      });
+      toast('오늘 정원에 +' + q.held + ' 반영했습니다 — 카드·리뷰어 화면에 바로 표시됩니다');
+      refreshHost();
+    } catch (e) {
+      toast('반영 실패: ' + (e.message || e));
+    }
+  }
+  function _quickDetail() {
+    var q = Q;
+    _quickClose();
+    if (q) open(q.campId);
+  }
+  function _quickClose() {
+    var ov = document.getElementById('cdpQuick');
+    if (ov) ov.style.display = 'none';
+    Q = null;
   }
 
   /* ── 게이지 드래그 + −/＋ (렌더마다 위임 재바인딩 — #cdpRows 는 render 가 갈아치운다) ── */
@@ -552,7 +684,8 @@
     document.getElementById('cdpSaveBtn').disabled = true;
     try {
       var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/daily-plan',
-        { set: set, remove: remove, note: S.notes.join(' / ').slice(0, 500) });
+        { set: set, remove: remove, note: S.notes.join(' / ').slice(0, 500),
+          ...(S.carryStage > 0 ? { carryApply: S.carryStage } : {}) });   // 098: 보류 잔량 차감 기록
       S.notes = [];
       applyOverview(j);
       toast('저장했습니다 — 카드·리뷰어 화면에 바로 반영됩니다');
@@ -631,5 +764,7 @@
     _save: _save, _retry: _retry, _revert: _revert,
     _chExtend: _chExtend, _chSpread: _chSpread, _chCancel: _chCancel,
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
+    _heldApply: _heldApply,
+    quickApplyHeld: quickApplyHeld, _quickDo: _quickDo, _quickDetail: _quickDetail, _quickClose: _quickClose,
   };
 })();

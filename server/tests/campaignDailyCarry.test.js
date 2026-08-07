@@ -100,7 +100,7 @@ eq('총원 무제한(recruit_total 0)에서도 이월·상한 동작',
   const stub = {
     query: async (sql, params) => {
       q.push({ sql: sql.replace(/\s+/g, ' '), params });
-      if (/app_settings/.test(sql)) return { rows: [{ value: '2026-07-27' }] };
+      if (/app_settings/.test(sql)) return { rows: [{ key: 'campaign_carry_start', value: '2026-07-27' }] };  // 098: 기준선 2종 합본 쿼리는 key를 읽는다
       return { rows: [{ campaign_id: 'c1', active_holds: 1, today_active_holds: 1, submitted_all: 40,
                         today_submitted: 5, submitted_before_today: 35, submitted_since_carry: 35 }] };
     },

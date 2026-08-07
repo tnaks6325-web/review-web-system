@@ -1187,6 +1187,7 @@ function _cdpFail(res, err) {
     not_found: 404, not_participation: 400, schedule_driven: 409, schedule_unknown: 503,
     empty: 400, too_many: 400, bad_date: 400, past_date: 400, bad_count: 400, dup_date: 400,
     below_used: 422, no_round: 400, below_confirmed: 422,
+    bad_carry: 400, carry_not_hold: 400,   // 098: 이월 반영 검증
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
