@@ -2915,6 +2915,12 @@ async function saveRecruitPost() {
       try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
     }
     _woPrefillOrderId = null;
+    /* ★ 095(코드리뷰 M2): 차수 원장이 있는 공고는 총모집 전송값을 서버가 무시한다(차수 합계가
+       진실원본). 조용히 무시하면 "총모집을 고쳤는데 안 바뀐다"가 버그로 오해되므로 고지한다 —
+       토스트가 아니라 가운데 안내(campSaveFeedback)의 목록 첫 줄로(#604 토스트 예산 규율). */
+    if (saved && saved.recruitTotalLocked === true) {
+      _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
+    }
 
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
        안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */

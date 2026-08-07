@@ -314,10 +314,29 @@ router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit } = req.query;
-    res.json({ ok: true, ...(await sheetSync.auditSheetSync({ before, limit })) });
+    const { before, limit, includeArchived } = req.query;
+    res.json({ ok: true, ...(await sheetSync.auditSheetSync({
+      before, limit, includeArchived: includeArchived === '1' || includeArchived === 'true',
+    })) });
   } catch (err) { next(err); }
 });
+// tab_configs.tab_gid 백필 — 시트만 열리던 링크를 "그 탭이 열리는 링크"로. 기본은 미리보기.
+router.post('/sheet-sync/gid-backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun } = req.body || {};
+    res.json(await sheetSync.backfillTabGids({ dryRun: dryRun !== false, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+// 아카이브 복구 — ★ 복구 로직은 **기존 `/api/archive/restore` 핸들러에 위임**한다(사본 금지).
+//   그쪽이 index_master_archive → index_master · review_index_archive → review_index ·
+//   tab_configs 재생성(is_closed=FALSE) · 이력 기록까지 한 트랜잭션으로 이미 하고 있다.
+//   여기 두는 이유는 C/S·설정과 같다: 인트라넷 SSO 토큰(via:'intranet')은 /api/archive/* 에 도달 불가.
+//   ★ 게이트는 원본(authMiddleware)보다 좁힌다(adminOrMaster) — 프록시가 원본보다 넓어지면 안 된다.
+const _archiveRoutes = require('./archive.routes');
+const _archiveRestore = _delegate(_archiveRoutes, 'post', '/restore');
+router.post('/sheet-sync/unarchive', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _archiveRestore(req, res, next));
+
 router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body || {};
@@ -1126,6 +1145,62 @@ router.get('/campaigns/:id/preview', authMiddleware, internalMiddleware, (req, r
   _campHandlers.preview(req, res, next));
 router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.dismiss(req, res, next));
+
+// ── 날짜별 모집인원 조절 + 차수(095) ─────────────────────────
+//   경로는 재기준 없이 양쪽 호스트 공용(리뷰어 게이트와 같은 판단): admin_token(관리자 대시보드)도
+//   인트라넷 SSO admin 토큰(리뷰웹시스템[3버전])도 /api/trackb/* 에 그대로 닿는다.
+//   전부 adminOrMaster — 정원·총량 변경은 공고 관제 수동확정과 같은 급(AE 편집명단에 열지 않는다).
+//   스코프 토큰(via:'reviewer_campaign')은 authMiddleware 격리로 도달 자체가 불가.
+function _cdpNotReady(res, err) {
+  if (err && err.code === '42P01') {
+    res.json({ ok: false, code: 'not_ready', error: '모집인원 조절 준비 전입니다(migration 095 미적용) — 배포 완료 후 다시 시도해주세요.' });
+    return true;
+  }
+  return false;
+}
+function _cdpFail(res, err) {
+  // 서비스가 code 를 실은 검증/게이트 오류는 400대로 — errorHandler 마스킹(500 위장) 방지.
+  const codes = {
+    not_found: 404, not_participation: 400, schedule_driven: 409, schedule_unknown: 503,
+    empty: 400, too_many: 400, bad_date: 400, past_date: 400, bad_count: 400, dup_date: 400,
+    below_used: 422, no_round: 400, below_confirmed: 422,
+  };
+  if (err && err.code && codes[err.code]) {
+    res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
+    return true;
+  }
+  return false;
+}
+router.get('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { getPlanOverview } = require('../services/campaignPlan.service');
+    res.json({ ok: true, ...(await getPlanOverview(String(req.params.id))) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.post('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { savePlans, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await savePlans(campaignId, req.body, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.post('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await addRound(campaignId, req.body, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.delete('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await removeLastRound(campaignId, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
 
 /* ══════════════════════════════════════════════════════════════
    리뷰이미지 교체요청 — 리뷰웹시스템[3버전] 전용 탭 + C/S 대화창 카드

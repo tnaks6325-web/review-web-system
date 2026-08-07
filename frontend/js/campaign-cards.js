@@ -171,6 +171,12 @@
       .pcard .pgauge.full .pg-vl b{color:#B45309}
       .pcard .pg-carry{display:inline-block;margin-right:5px;padding:1px 5px;border-radius:5px;
         background:#EEF2FF;color:#4338CA;font-size:.62rem;font-weight:800;vertical-align:1px}
+      .pcard .pg-plan{display:inline-block;margin-right:5px;padding:1px 5px;border-radius:5px;
+        background:#FEF3C7;color:#92400E;font-size:.62rem;font-weight:800;vertical-align:1px}
+      /* 095: 차수 구분 줄(관리자 카드 전용) — 1차 200/200 완료 · 2차 12/100 · 총 212/300 */
+      .pcard .prounds{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:.62rem;color:#6B7280}
+      .pcard .prounds .rchip{background:#F1F5F9;border-radius:999px;padding:1px 7px;font-weight:800;color:#334155}
+      .pcard .prounds .rchip.done{background:#DCFCE7;color:#166534}
       .pcard .pg-track{height:6px;border-radius:99px;background:#EEF1F7;border:1px solid #E5E7EB;overflow:hidden}
       .pcard .pg-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3182f6,#1b64da)}
       .pcard .pgauge.full .pg-fill{background:linear-gradient(90deg,#F59E0B,#D97706)}
@@ -353,6 +359,24 @@
   }
 
   /** 관리자 카드 하단 = 액션 한 줄. 삭제는 없다(헤더 삭제 모드로 분리). */
+  /* 095: 차수 구분 줄(관리자 카드 전용). 차수 2개 이상일 때만(구분이 의미 있을 때) —
+     진행은 확정 순서대로 1차부터 차오른다(사용자 확정 "구분 표시 + 차수별 집계"). */
+  function _roundsLine(c) {
+    const rs = Array.isArray(c.rounds) ? c.rounds : [];
+    if (rs.length < 2) return '';
+    const conf = (c.ops && Number(c.ops.totalConfirmed)) || 0;
+    let prev = 0;
+    const chips = rs.map(r => {
+      const cnt = Number(r.count) || 0;
+      const got = Math.max(0, Math.min(cnt, conf - prev));
+      prev += cnt;
+      const done = cnt > 0 && got >= cnt;
+      return `<span class="rchip${done ? ' done' : ''}" title="${_esc((r.startDate ? r.startDate + ' 시작' : '') + (r.label ? ' · ' + r.label : ''))}">${r.roundNo}차 ${got}/${cnt}${done ? ' 완료' : ''}</span>`;
+    }).join('');
+    const total = Number(c.recruit_total) || prev;
+    return `<div class="prounds">${chips}<span>총 ${conf}/${total}</span></div>`;
+  }
+
   function _adminActions(c) {
     const id = _esc(c.id);
     const stop = 'event.stopPropagation();event.preventDefault();';
@@ -376,6 +400,11 @@
     const gateBtn = (c.participation_mode && typeof window !== 'undefined' && window.ReviewerGate)
       ? `<button type="button" class="uic" onclick="${stop}ReviewerGate.open('${id}')" title="이 공고에 참여할 수 없는 리뷰어를 건별로 관리">🚫 리뷰어</button>`
       : '';
+    // 📅 인원조절(095) — 날짜별 모집 인원 조절·차수(물량 추가). apply 정원 게이트가 있는 참여형만
+    //   의미가 있고(레거시는 dailyQuota 미사용), 모듈 미로드 화면에는 버튼을 안 그린다(게이트와 동일 규율).
+    const planBtn = (c.participation_mode && typeof window !== 'undefined' && window.CampaignDailyPlan)
+      ? `<button type="button" class="uic" onclick="${stop}CampaignDailyPlan.open('${id}')" title="날짜별 모집 인원 조절(오늘·미래) + 차수(물량 추가) 관리">📅 인원</button>`
+      : '';
     // 👁 보기 = 리뷰어가 [참여하기]를 누르면 보는 화면(작업가이드·현금영수증 안내 포함) 미리보기.
     //   마감·투입완료·게시전 공고도 [모집중 가정] 토글로 전 과정 확인 — 기존 openReviewerPreview
     //   (campaign.html?preview=1, DB write 0) 재사용이라 홀드·정원 카운터를 오염시키지 않는다.
@@ -388,6 +417,7 @@
       ${viewBtn}
       ${sheetBtn}
       <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')">📡 관제${bdg}</button>
+      ${planBtn}
       ${gateBtn}
       ${pubToggle}
     </div>`;
@@ -494,8 +524,13 @@
         const carryTip = carry > 0
           ? `<span class="pg-carry" title="전일까지 못 채운 ${carry}명이 오늘로 이월됐습니다. 오늘 다 채우면 내일은 원래 한도로 돌아갑니다.">+${carry} 이월</span>`
           : '';
+        // ★ 095: 오늘이 명시 조절일이면 "이월"이 아니라 "조절"로 말한다 — 안 보이면
+        //   "일건수 40인데 왜 20으로 뜨지"가 버그로 오해된다(서버가 조절일엔 carryAdded=0).
+        const planTip = (c.planAdjusted === true)
+          ? `<span class="pg-plan" title="오늘 모집 인원이 ${Number(c.todayPlanned) || 0}명으로 조절되어 있습니다(기본 ${Number(c.daily_limit) || 0}명) — [📅 인원]에서 변경">조절</span>`
+          : '';
         gauge = `<div class="pgauge${isFull ? ' full' : ''}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${carryTip}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${planTip}${carryTip}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
           <div class="pg-key"><span><i class="sub"></i>확정 <b>${subN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;
@@ -538,6 +573,7 @@
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${gauge}
+          ${_roundsLine(c)}
           ${_adminSpec(c)}
           ${_adminActions(c)}
         </div>

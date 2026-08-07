@@ -60,6 +60,10 @@
       <input type="date" id="beforeDate" value="2026-07-20" />
       <button class="btn" id="btnAudit" onclick="runAudit()">점검 실행</button>
       <button class="btn ghost" onclick="document.getElementById('beforeDate').value=''; runAudit()">전체 작업 점검</button>
+      <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer">
+        <input type="checkbox" id="incArchived" onchange="runAudit()" /> 아카이브된 작업도 보기
+      </label>
+      <button class="btn ghost" id="btnGid" onclick="gidBackfill()" title="시트 링크가 그 탭으로 바로 열리도록 탭 번호(gid)를 찾아 채웁니다">🔗 gid 채우기</button>
       <span style="flex:1"></span>
       <button class="btn warn" id="btnRepairAll" onclick="repairAll()" style="display:none">⚠ 문제 작업 전체 반영</button>
     </div>
@@ -145,7 +149,10 @@
     const tb = document.getElementById('tbody');
     tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">점검 중… (작업 수에 따라 수십 초 걸릴 수 있습니다)</td></tr>';
     try {
-      const q = before ? ('?before=' + encodeURIComponent(before)) : '';
+      const qs = [];
+      if (before) qs.push('before=' + encodeURIComponent(before));
+      if (document.getElementById('incArchived').checked) qs.push('includeArchived=1');
+      const q = qs.length ? ('?' + qs.join('&')) : '';
       const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/audit' + q, { headers: hdrs() });
       if (r.status === 401 || r.status === 403) { toast('권한이 없습니다. 관리자 계정으로 로그인해주세요.', true); boot(); return; }
       const j = await r.json();
@@ -182,7 +189,11 @@
     tb.innerHTML = ITEMS.map((it, i) =>
       '<tr id="row' + i + '">'
       + '<td>' + sevTag(it.severity) + '</td>'
-      + '<td><b>' + esc(it.displayName || it.tabName) + '</b><div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div></td>'
+      // 작업명 = 그 탭이 바로 열리는 구글시트 링크(gid 확보 시). gid 없으면 시트만 열리고 그 사실을 밝힌다.
+      + '<td>' + tabLink(it)
+      + '<div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div>'
+      + (it.archivedOnly ? '<div class="mono" style="color:var(--warn)">아카이브 ' + esc(fmtDate(it.archivedAt)) + ' · ' + (it.archivedRows || 0) + '행 보관</div>' : '')
+      + '</td>'
       + '<td>' + (it.regUnknown ? '<span style="color:var(--warn)">알 수 없음</span>' : esc(fmtDate(it.registeredAt))) + '</td>'
       // 시트 작업건수 = 헤더 아래 값이 있는 행(실제 작업). 미러 행 수(상단 정보·헤더 포함)는 참고로만.
       + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">미러 없음</span>'
@@ -191,11 +202,88 @@
       + '<td class="num">' + it.indexRows + (it.idxStatus && it.idxStatus !== 'active' ? '<div class="mono">' + esc(it.idxStatus) + '</div>' : '') + '</td>'
       + '<td class="num">' + it.boardRows + (it.boardExtra ? '<div class="mono">(+' + it.boardExtra + ' 수동/작업표)</div>' : '') + '</td>'
       + '<td class="reason">' + esc(it.reasonKo) + '<div class="stepres" id="res' + i + '"></div></td>'
-      + '<td>' + (it.severity !== 'ok' ? '<button class="btn" id="fix' + i + '" onclick="repairOne(' + i + ')">반영</button>' : '') + '</td>'
+      + '<td>' + rowActions(it, i) + '</td>'
       + '</tr>').join('');
   }
 
-  async function repairOne(i) {
+  // 시트 탭 직링크 — URL 은 서버가 준 tabUrl 만 쓰되 docs.google.com 인지 확인 후 렌더(신뢰 베이스 재구성).
+  const GID_SRC = { config: '', mirror: '시트 사본에서 찾음', index: '검색인덱스에서 찾음', ambiguous: '동명 탭이 여러 개라 탭 지정 불가' };
+  function tabLink(it) {
+    const name = esc(it.displayName || it.tabName);
+    const u = String(it.tabUrl || '');
+    if (!/^https:\/\/docs\.google\.com\//.test(u)) return '<b>' + name + '</b>';
+    const note = it.resolvedGid
+      ? (it.gidSource && GID_SRC[it.gidSource] ? '<span class="mono" title="' + esc(GID_SRC[it.gidSource]) + '">🔗</span>' : '')
+      : '<span class="mono" style="color:var(--warn)" title="' + esc(GID_SRC[it.gidSource] || '탭 번호(gid)를 몰라 시트 첫 탭이 열립니다 — [gid 채우기]를 눌러보세요') + '">(시트만)</span>';
+    return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><b>' + name + '</b></a> ' + note;
+  }
+
+  function rowActions(it, i) {
+    const btns = [];
+    if (it.flags && it.flags.indexOf('index_archived') >= 0) {
+      btns.push('<button class="btn warn" id="unarc' + i + '" onclick="unarchiveOne(' + i + ')">📦 복구+반영</button>');
+    }
+    if (it.severity !== 'ok') {
+      btns.push('<button class="btn" id="fix' + i + '" onclick="repairOne(' + i + ')">반영</button>');
+    }
+    return btns.join(' ');
+  }
+
+  // 아카이브 복구 → 곧바로 반영까지(=작업보드에 다시 나타나는 상태로 끝낸다)
+  async function unarchiveOne(i) {
+    const it = ITEMS[i]; if (!it) return;
+    const btn = document.getElementById('unarc' + i), res = document.getElementById('res' + i);
+    if (!confirm((it.displayName || it.tabName) + '\n\n아카이브에서 되살린 뒤 시트를 다시 읽어 작업보드까지 반영합니다.\n(보관 중이던 검색인덱스 데이터가 활성으로 돌아옵니다)\n\n진행할까요?')) return;
+    if (btn) { btn.disabled = true; btn.textContent = '복구 중…'; }
+    try {
+      const out = await postJson('/api/trackb/sheet-sync/unarchive', { tabs: [{ sheetId: it.sheetId, tabName: it.tabName }] });
+      if (!out || out.ok === false || out.error) {
+        if (res) res.textContent = '복구 실패: ' + ((out && (out.error || out.detail)) || '오류');
+        if (btn) { btn.disabled = false; btn.textContent = '📦 복구+반영'; }
+        return;
+      }
+      const r0 = (out.results || [])[0] || {};
+      if (r0.status === 'skipped') {
+        if (res) res.textContent = '복구 건너뜀: ' + esc(r0.reason || '아카이브에 없음');
+        if (btn) { btn.disabled = false; btn.textContent = '📦 복구+반영'; }
+        return;
+      }
+      if (res) res.textContent = '복구됨(' + (out.restoredRows || 0) + '행) · 이어서 반영 중…';
+      if (btn) btn.textContent = '반영 중…';
+      await repairOne(i, { keepRes: true });
+      if (btn) btn.textContent = '완료';
+      toast('복구 후 반영까지 마쳤습니다 — [점검 실행]으로 다시 확인하세요');
+    } catch (e) {
+      if (res) res.textContent = '복구 실패: ' + e.message;
+      if (btn) { btn.disabled = false; btn.textContent = '📦 복구+반영'; }
+    }
+  }
+
+  async function gidBackfill() {
+    const btn = document.getElementById('btnGid');
+    if (btn) { btn.disabled = true; btn.textContent = '확인 중…'; }
+    try {
+      const pre = await postJson('/api/trackb/sheet-sync/gid-backfill', { dryRun: true });
+      if (!pre || pre.ok === false) { toast('gid 조회 실패', true); return; }
+      if (!pre.fillable) {
+        toast(pre.missing ? ('gid 없는 작업 ' + pre.missing + '개 — 시트 사본·인덱스 어디에도 탭 번호가 없어 채울 수 없습니다') : '채울 gid 가 없습니다(모두 보유)');
+        return;
+      }
+      const sample = (pre.fill || []).slice(0, 5).map(f => '· ' + (f.displayName || f.tabName) + ' → gid ' + f.gid).join('\n');
+      if (!confirm('탭 번호(gid)가 비어 있는 작업 ' + pre.missing + '개 중 ' + pre.fillable + '개를 채웁니다.\n'
+        + '· 이미 gid 가 있는 작업은 건드리지 않습니다\n'
+        + (pre.skipped ? '· ' + pre.skipped + '개는 확정 불가(동명 탭 등)라 건너뜁니다\n' : '')
+        + '\n예시:\n' + sample + '\n\n진행할까요?')) return;
+      if (btn) btn.textContent = '채우는 중…';
+      const out = await postJson('/api/trackb/sheet-sync/gid-backfill', { dryRun: false });
+      toast((out && out.updated ? out.updated : 0) + '개 작업에 탭 번호를 채웠습니다 — 목록을 다시 불러옵니다');
+      await runAudit();
+    } catch (e) {
+      toast('gid 채우기 실패: ' + e.message, true);
+    } finally { if (btn) { btn.disabled = false; btn.textContent = '🔗 gid 채우기'; } }
+  }
+
+  async function repairOne(i, opts) {
     const it = ITEMS[i];
     if (!it || _busy) return;
     const btn = document.getElementById('fix' + i);
@@ -212,7 +300,9 @@
       const line = (name, st) => !st ? name + ': 미실행'
         : st.locked ? name + ': ⏳ 다른 빌드 진행 중(잠시 후 다시)'
         : st.ok ? name + ': ✓' : name + ': ✕ ' + (st.error || '실패');
-      if (res) res.innerHTML = esc([line('시트읽기', s.mirror), line('인덱스', s.build), line('작업보드', s.project)].join(' · '))
+      // 복구 → 반영으로 이어온 경우(keepRes)에는 앞 단계 결과를 지우지 않고 이어 붙인다.
+      const head = (opts && opts.keepRes && res) ? (res.innerHTML + '<br/>') : '';
+      if (res) res.innerHTML = head + esc([line('시트읽기', s.mirror), line('인덱스', s.build), line('작업보드', s.project)].join(' · '))
         + (j.compare ? '<br/>반영 후: 인덱스 ' + j.compare.indexRows + '행 / 작업보드 ' + j.compare.dbRows + '행' + (j.compare.inSync ? ' (일치 ✓)' : '') : '');
       if (btn) { btn.textContent = j.ok ? '완료' : '재시도'; btn.disabled = !!j.ok; }
       if (!j.ok) toast('일부 단계가 실패했습니다 — 진단 칸의 결과를 확인해주세요', true);
