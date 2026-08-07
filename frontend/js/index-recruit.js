@@ -1285,6 +1285,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _recruitBadges = [];
   window._recruitEditLoadFailed = false;
   window._recruitEditLoaded = null;   // ★ 064: 이전 편집의 로드값(sort_order 등)이 새 공고에 새는 것 방지
+  window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
+  window._recruitEditLoadedFees = null;
+  if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
+  /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
+  { const _sb = document.getElementById("recruitSaveBtn");
+    if (_sb) { _sb.disabled = false; _sb.classList.remove("busy", "done"); _sb.innerHTML = '<i class="fas fa-save"></i> 저장'; } }
 
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
@@ -1352,6 +1358,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const json = await res.json();
       const c = json.data || json;
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
+      window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
+      window._recruitEditLoadedFees = json.feeSchedules || [];
       document.getElementById("rf_title").value        = c.title || "";
       document.getElementById("rf_time_range").value   = c.time_range || "";
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
@@ -2073,16 +2081,154 @@ async function campDismiss(campId, appId) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   저장 후 안내 카드의 "바뀐 항목" 목록 재료
+   ───────────────────────────────────────────────────────────────
+   ★ 표시 보조일 뿐 **저장 여부를 가르지 않는다** — 여기서 무엇이 나오든
+     저장은 그대로 진행된다(빈 목록이어도 카드는 뜬다).
+   ★ 확실히 비교되는 필드만 센다. 모르는 필드는 목록에서 뺀다 —
+     틀린 목록은 빈 목록보다 나쁘다(그래서 목록이 비면 카드가 항목을
+     그리지 않고 중립 문구를 쓴다. "바뀐 내용 없음"이라고 단정하지 않는다).
+   ★ 비교 대상은 **저장 직전 payload ↔ 모달을 열 때 서버에서 받은 값**.
+     payload 에 없는 키(축약 화면이 미전송한 필드)는 애초에 비교하지 않는다.
+═══════════════════════════════════════════════════════════════ */
+const _RF_DIFF_FIELDS = [
+  ["title",             "공고 제목"],
+  ["manager",           "담당자"],
+  ["channel",           "구매채널"],
+  ["channel_custom",    "구매채널"],
+  ["time_range",        "구매시간대"],
+  ["delivery_type",     "배송유형"],
+  ["review_fee",        "리뷰비"],
+  ["notes",             "유의사항"],
+  ["chat_url",          "카톡 팀채팅방"],
+  ["linked_tab_name",   "연결 탭"],
+  ["linked_sheet_id",   "연결 탭"],
+  ["max_slots",         "모집인원"],
+  ["status",            "상태"],
+  ["deadline",          "종료일"],
+  ["review_type",       "리뷰타입"],
+  ["start_date",        "시작일"],
+  ["window_start",      "구매시간"],
+  ["window_end",        "구매시간"],
+  ["daily_limit",       "하루 진행 인원"],
+  ["recruit_total",     "총 모집인원"],
+  ["hold_ttl_min",      "자리 유효시간"],
+  ["close_buffer_min",  "마감 버퍼"],
+  ["multi_account_mode","타계정 참여"],
+  ["multi_daily_limit", "타계정 하루한도"],
+  ["sub_hold_ttl_min",  "타계정 자리 유효시간"],
+  ["reviewer_hidden",   "리뷰어에게 숨김"],
+  ["transfer_bank",     "이체은행"],
+  ["transfer_memo",     "통장표시"],
+  ["landing_url",       "상품 URL"],
+  ["thumbnail_url",     "썸네일"],
+  ["badges",            "배지"],
+];
+const _RF_DIFF_WORKDETAIL = [
+  ["productLines",    "상품 정보"],
+  ["inflowGuideHtml", "유입가이드"],
+  ["reviewGuide",     "리뷰가이드"],
+  ["specialNotes",    "특이사항"],
+];
+
+/** 값 정규화 — 서버가 준 형식(타임스탬프·'10:00:00'·숫자 문자열)과 폼 값의 표기 차이를 흡수 */
+function _rfNormVal(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "boolean") return v ? "1" : "0";
+  if (typeof v === "number")  return String(v);
+  if (Array.isArray(v))       return v.map(_rfNormVal).join("|");
+  if (typeof v === "object")  { try { return JSON.stringify(v); } catch(_) { return ""; } }
+  let s = String(v).trim();
+  const dm = s.match(/^(\d{4}-\d{2}-\d{2})[T ]/);   if (dm) return dm[1];   // 타임스탬프 → 날짜
+  const tm = s.match(/^(\d{2}:\d{2}):\d{2}$/);      if (tm) return tm[1];   // '10:00:00' → '10:00'
+  if (/^-?\d+\.0+$/.test(s)) s = s.replace(/\.0+$/, "");                    // numeric '1000.00' → '1000'
+  return s;
+}
+/** ★ 빈 값과 0 은 같은 상태로 본다(실측 오탐) — 서버가 NULL 로 준 숫자 칸을 폼이 0 으로
+ *  채워 되보내므로, 그대로 비교하면 **아무것도 안 고쳐도** "모집인원 바뀜"이 뜬다.
+ *  0 ↔ 비움은 서버가 어차피 같은 값(0)으로 저장하므로 표시하지 않아도 거짓이 아니다. */
+function _rfSame(a, b) {
+  const x = _rfNormVal(a), y = _rfNormVal(b);
+  if (x === y) return true;
+  const blankish = v => v === "" || v === "0";
+  return blankish(x) && blankish(y);
+}
+/** 옵션표/구간표는 서버(snake_case)와 폼(camelCase) 키가 달라 양쪽을 다 읽는다 */
+function _rfNormOptRows(list) {
+  return (Array.isArray(list) ? list : []).map(o => [
+    String(o.optKey ?? o.opt_key ?? "").trim(),
+    _rfNormVal(o.payAmount    ?? o.pay_amount    ?? 0),
+    _rfNormVal(o.recruitTotal ?? o.recruit_total ?? 0),
+    _rfNormVal(o.dailyLimit   ?? o.daily_limit   ?? 0),
+  ].join("~")).sort().join("|");
+}
+function _rfNormFeeRows(list) {
+  return (Array.isArray(list) ? list : []).map(r => [
+    _rfNormVal(r.effectiveFrom ?? r.effective_from ?? ""),
+    _rfNormVal(r.reviewFee     ?? r.review_fee     ?? 0),
+  ].join("~")).sort().join("|");
+}
+
+/** 저장 직전 payload ↔ 로드값 대조 → 바뀐 항목 라벨(중복 제거, 화면 순서 유지) */
+function _rfChangedLabels(payload) {
+  const loaded = window._recruitEditLoaded;
+  if (!loaded || window._recruitEditLoadFailed) return [];   // 모르면 목록을 만들지 않는다
+  const out = [];
+  const push = l => { if (l && out.indexOf(l) === -1) out.push(l); };
+
+  _RF_DIFF_FIELDS.forEach(([k, label]) => {
+    if (!(k in payload)) return;                              // 미전송 필드는 비교 대상 아님
+    if (!_rfSame(payload[k], loaded[k])) push(label);
+  });
+
+  if (payload.work_detail && typeof payload.work_detail === "object") {
+    const wd = loaded.work_detail || {};
+    _RF_DIFF_WORKDETAIL.forEach(([k, label]) => {
+      if (!_rfSame(payload.work_detail[k], wd[k])) push(label);
+    });
+  }
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    if (_rfNormOptRows(payload.options) !== _rfNormOptRows(window._recruitEditLoadedOpts)) push("진행상품·옵션");
+  }
+  if (Array.isArray(payload.fee_schedules) && Array.isArray(window._recruitEditLoadedFees)) {
+    if (_rfNormFeeRows(payload.fee_schedules) !== _rfNormFeeRows(window._recruitEditLoadedFees)) push("기간별 리뷰비");
+  }
+  return out;
+}
+
+/** 저장 차단·실패 안내 — 모달 안쪽(토스트 금지: 덮개 아래로 깔려 안 보인다) */
+function _rfSaveBlocked(msg, opts) {
+  if (typeof recruitSaveBlock === "function") {
+    recruitSaveBlock(msg, (opts && opts.go) || undefined);
+  } else {
+    showToast(msg, "error");   // 구버전 모듈 폴백
+  }
+}
+/** [점검 항목 보기 ↑] — 자동 점검 블록으로 스크롤 + 깜빡임 */
+function _rfGoToCheck() {
+  const body = document.querySelector("#recruitModal .modal-body");
+  const target = document.getElementById("rf_part_check") || document.getElementById("rf_status");
+  if (!target) return;
+  try { target.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  catch (_) { if (body) body.scrollTop = body.scrollHeight; }
+  target.classList.remove("rf-chk-blink");
+  void target.offsetWidth;
+  target.classList.add("rf-chk-blink");
+  setTimeout(() => target.classList.remove("rf-chk-blink"), 2400);
+}
+
 /* ═══════════════════════════════════════
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
 async function saveRecruitPost() {
+  if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();   // 지난 사유 지우고 시작
   const title    = document.getElementById("rf_title").value.trim();
   const channel  = document.getElementById("rf_channel").value.trim();
   const manager  = document.getElementById("rf_manager").value.trim();
   const chatUrl  = document.getElementById("rf_chat_url").value.trim();
-  if (!title)   { showToast("공고 제목을 입력해주세요.", "error"); return; }
-  if (!channel) { showToast("구매채널을 선택해주세요.", "error"); return; }
+  if (!title)   { _rfSaveBlocked("공고 제목을 입력해주세요."); document.getElementById("rf_title").focus(); return; }
+  if (!channel) { _rfSaveBlocked("구매채널을 선택해주세요."); return; }
 
   const tabKey      = document.getElementById("rf_linked_tab").value || "";
   const [sid, tab]  = tabKey ? tabKey.split("||") : ["", ""];
@@ -2133,7 +2279,11 @@ async function saveRecruitPost() {
     if (isPart) {
       if (payload.status === "active") {
         const errs = participationCheckErrors();
-        if (errs.length) { showToast("참여형 게시 불가: " + errs[0], "error"); renderPartCheck(); return; }
+        if (errs.length) {
+          renderPartCheck();
+          _rfSaveBlocked("게시할 수 없습니다 — " + errs[0], { go: _rfGoToCheck });
+          return;
+        }
       }
       /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
@@ -2187,7 +2337,7 @@ async function saveRecruitPost() {
       //     서버가 기존 옵션 유지(옵션 소실 방지, work_detail 가드와 동일 원칙). (이 지점은 저장 버튼 비활성화 전)
       if (document.getElementById("rf_opt_rows")) {
         const _optChk = (typeof _optSummary === "function") ? _optSummary() : { dup: false };
-        if (_optChk.dup) { showToast("옵션명이 중복됐어요. 옵션명을 다르게 하거나 삭제해주세요.", "error"); renderPartCheck(); return; }
+        if (_optChk.dup) { renderPartCheck(); _rfSaveBlocked("옵션명이 중복됐어요 — 옵션명을 다르게 하거나 삭제해주세요.", { go: _rfGoToCheck }); return; }
         payload.options = readOptRows();
       }
     }
@@ -2198,13 +2348,18 @@ async function saveRecruitPost() {
      스위치를 끄면 빈 배열을 보내 구간을 제거한다(= 기본 리뷰비 한 값으로 복귀). */
   if (document.getElementById("rf_fee_rows")) {
     const _feeChk = renderFeeSchedule();
-    if (_feeChk.dup) { showToast("리뷰비 구간의 시작일이 중복됐어요. 날짜를 다르게 하거나 삭제해주세요.", "error"); return; }
+    if (_feeChk.dup) { _rfSaveBlocked("리뷰비 구간의 시작일이 중복됐어요 — 날짜를 다르게 하거나 삭제해주세요."); return; }
     payload.fee_schedules = document.getElementById("rf_fee_sched_on")?.checked ? readFeeRows() : [];
   }
 
+  /* 저장 직전에 "무엇이 바뀌었나"를 계산해 둔다 — 모달을 닫은 뒤엔 폼 값을 읽을 수 없다 */
+  const _changed = _recruitEditId ? _rfChangedLabels(payload) : [];
+
   const btn = document.getElementById("recruitSaveBtn");
   btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 저장 중...';
+  btn.classList.add("busy");
+  btn.innerHTML = '<span class="rf-spin"></span> 저장 중…';
+  let _ok = false;   // 성공하면 버튼을 원복하지 않는다(✓ 저장됨 → 모달 닫힘으로 이어진다)
 
   try {
     let res;
@@ -2241,17 +2396,36 @@ async function saveRecruitPost() {
       try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
     }
     _woPrefillOrderId = null;
-    showToast(_recruitEditId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
+
+    /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
+       안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */
+    _ok = true;
+    const _wasEdit = !!_recruitEditId;
+    btn.disabled = true;
+    btn.classList.remove("busy");
+    btn.classList.add("done");
+    btn.innerHTML = "✓ 저장됨";
+    await new Promise(r => setTimeout(r, 400));
     closeRecruitModal();
+    if (typeof campSaveFeedback === "function") {
+      campSaveFeedback({ title: payload.title, changes: _changed, mode: _wasEdit ? "edit" : "create" });
+    } else {
+      showToast(_wasEdit ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
+    }
     loadRecruitList();
     /* ★ 목록 밖에서 열린 모달(홈 작업목록 팝업)이 자기 화면을 갱신할 수 있게 알린다.
        훅 미설정 = 관리자 대시보드 동작 불변(레포의 CS_ON_BADGE 와 같은 방식). */
     try { if (typeof window.CAMP_ON_SAVED === "function") window.CAMP_ON_SAVED(); } catch(_) {}
   } catch(e) {
-    showToast("저장 오류: " + e.message, "error");
+    /* ★ 실패는 자동으로 사라지지 않는다 — 모달을 열어 둔 채 사유를 남긴다.
+       (토스트로 내보내면 모달 덮개 아래로 깔려 "아무 반응 없음"이 된다) */
+    _rfSaveBlocked("저장하지 못했습니다 — " + (e && e.message ? e.message : "잠시 후 다시 시도해주세요"));
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-save"></i> 저장';
+    if (!_ok) {
+      btn.disabled = false;
+      btn.classList.remove("busy", "done");
+      btn.innerHTML = '<i class="fas fa-save"></i> 저장';
+    }
   }
 }
 
