@@ -30,7 +30,8 @@ const LIST_CAP = 800;
 const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었습니다 · 이 문서는 더 이상 반영되지 않으니 리뷰웹시스템에서 작업해 주세요';
 
 /* ═══════════════ 점검 항목 ═══════════════ */
-//  state: 'pass' | 'fail' | 'unknown'  — pass 가 아니면 전부 잠금(fail-closed)
+//  state: 'pass' | 'fail' | 'unknown'  — pass 가 아니면 잠금(fail-closed).
+//  단 `advisory:true` 인 항목은 **알려만 주고 잠그지 않는다**(아래 ④ 참조).
 /**
  * @param {string} [fix] 그 자리에서 누를 수 있는 조치 —
  *   `'refresh'` = 시트 새로고침(repair) · `'backfill'` = 표에 준비 자리 채우기(slot-backfill)
@@ -38,9 +39,11 @@ const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었�
  *   ★★ 막힌 항목이 **다른 화면 이름만 말하고 끝나면 안 된다**(실측: 안내가 가리킨
  *      "시트 데이터 반영 점검 화면"은 nav 어디에도 없어 주소를 직접 쳐야 열렸다).
  *      무엇을 누를지는 **서버가 말하고** 화면은 그대로 그린다(프론트 재판정 0 규율).
+ * @param {boolean} [advisory] 잠그지 않는 항목(경고 전용) — 화면은 ⚠ 로 그린다.
  */
-function _chk(key, label, state, detail, hint, fix) {
-  return { key, label, state, detail: detail || '', hint: hint || '', fix: fix || null };
+function _chk(key, label, state, detail, hint, fix, advisory) {
+  return { key, label, state, detail: detail || '', hint: hint || '', fix: fix || null,
+    advisory: !!advisory };
 }
 
 /** ① 시트에 준비된 줄이 시스템 표보다 많으면 안 된다(먼저 백필). */
@@ -128,24 +131,31 @@ async function _checkPending(db, tab) {
 }
 
 /**
- * ④ 시트의 **최신 상태를 우리가 갖고 있어야** 한다.
+ * ④ 시트의 최신 상태 — ★★ **알려만 주고 잠그지 않는다**(사용자 확정 2026-08-07).
  *
- * ★★ 종전엔 `mirrored_at` 의 경과 시간(30분)으로 봤는데 **틀린 판정이었다**(2026-08 실측):
- *    미러는 **내용이 바뀐 탭만** 다시 읽고 `mirrored_at` 을 갱신한다(변경 없으면 시트 단위로
- *    통째 skip). 즉 조용한 작업일수록 그 값이 낡아져 **이관하기 가장 좋은 작업(끝나서 조용한
- *    작업)이 영구히 막혔다** — 실제로 등록 작업 86건이 전부 이 항목에서 잠겼다.
- * ★ 그래서 "얼마나 오래됐나"가 아니라 **"그 뒤로 시트가 바뀌었나"** 를 본다.
- *   Drive 최종수정 시각을 그 자리에서 1콜 조회해 우리가 읽어 둔 시점과 대조한다.
+ * ★★ 왜 잠그지 않는가: "시트가 x분 전에 수정됐다"는 실무에서 거의 전부 **리뷰어가 리뷰를
+ *    제출한 것**이고 그 기록은 이미 서버에 있다(주문·리뷰 전부 DB-first). 게다가 이관은
+ *    **끊기 직전에 그 시트를 마지막으로 한 번 더 읽어 반영**하므로(`_reflectSheetOnce`)
+ *    이 항목이 막으려던 "그 편집이 사라진다"가 **구조적으로 사라졌다** — 통과시키는 것은
+ *    완화가 아니라 **사실 반영**이다(③ 미반영 주문 인계와 같은 논리).
+ * ★ 그래도 **표시는 남긴다**(`advisory`) — 방금 누가 시트를 고쳤다는 사실 자체는 담당자가
+ *   알아야 하고, [↻ 시트 새로고침]으로 미리 확인할 길도 그대로 둔다.
+ * ★★ **①(준비 자리)은 여전히 잠근다** — 그건 마지막 반영으로 채워지지 않는다(구매일자만 적힌
+ *    이름 없는 줄은 파서가 버려 인덱스·표 어디에도 안 들어간다). 잠금이 사라진 것은 ④ 하나뿐.
+ *
+ * 판정 자체는 종전 그대로(경과시간이 아니라 "읽어 둔 뒤로 바뀌었나", 시트 단위 최댓값 기준):
+ * ★ 미러는 **내용이 바뀐 탭만** 다시 읽고 `mirrored_at` 을 갱신하므로(변경 없으면 시트 단위 skip)
+ *   경과시간 기준으로 두면 조용한 작업일수록 낡아 보인다 — 그래서 Drive 최종수정 시각과 대조한다.
  * ★ 이 화면에서 **외부 API 를 쓰는 유일한 경로** — 사람이 [점검]을 누를 때만, 탭당 1콜,
  *   그리고 **시트 lane 이 아니라 drive lane**(주문 쓰기 슬롯을 건드리지 않는다).
- * ★ 조회 실패는 `unknown` = 잠금(fail-closed) — 모르면 열지 않는다.
  */
 async function _checkMirror(tab, now) {
   const label = '시트 최신 상태 확보';
   const mirroredAt = tab.mirroredAt ? new Date(tab.mirroredAt).getTime() : 0;
   if (!mirroredAt) {
     return _chk('mirror', label, 'unknown', '시트를 읽어 온 기록이 없습니다',
-      '아래 [시트 새로고침] 을 누르면 지금 읽어 옵니다.', 'refresh');
+      '이관할 때 마지막으로 한 번 더 읽어 반영합니다 — 미리 확인하려면 [시트 새로고침].',
+      'refresh', true);
   }
   /* ★★★ 비교 대상은 **시트 단위 최댓값**이다 — 탭 자기 값을 쓰면 오탐이 구조적으로 난다(운영 실측 2026-08-07).
    *    미러는 내용이 바뀐 탭만 `_upsertTabMeta` 하고 **checksum 같은 탭은 통째로 건너뛴다**
@@ -164,16 +174,19 @@ async function _checkMirror(tab, now) {
     remote = t ? new Date(t).getTime() : null;
   } catch (e) {
     return _chk('mirror', label, 'unknown', '구글에서 시트 상태를 확인하지 못했습니다: ' + e.message,
-      '잠시 뒤 다시 점검하세요.');
+      '이관을 막지는 않습니다 — 이관할 때 시트를 마지막으로 한 번 더 읽어 반영합니다.',
+      null, true);
   }
   if (!remote || Number.isNaN(remote)) {
     return _chk('mirror', label, 'unknown', '시트의 최종 수정 시각을 알 수 없습니다',
-      '시트 접근 권한을 확인한 뒤 다시 점검하세요.');
+      '이관을 막지는 않습니다 — 이관할 때 시트를 마지막으로 한 번 더 읽어 반영합니다.',
+      null, true);
   }
   const ago = Math.max(0, Math.floor((now.getTime() - remote) / 60000));
   if (remote > known) {
     return _chk('mirror', label, 'fail', `시트가 ${ago}분 전에 수정됐는데 아직 읽어 오지 않았습니다`,
-      '아래 [시트 새로고침] 을 누른 뒤 다시 점검하세요 — 지금 끊으면 그 편집이 사라집니다.', 'refresh');
+      '이관을 막지는 않습니다 — 끊기 직전에 그 시트를 마지막으로 한 번 더 읽어 반영합니다. ' +
+      '지금 확인하려면 [시트 새로고침].', 'refresh', true);
   }
   return _chk('mirror', label, 'pass', `시트 최종 수정 ${ago}분 전 · 그 이후로 바뀐 것 없음(읽어 둔 상태가 최신)`);
 }
@@ -218,7 +231,11 @@ async function _checkLedger(db, tab) {
   if (after < before) {
     return _chk('ledger', label, 'fail',
       `지금 ${before}명인데 이관 후 ${after}명 (열 ${cols}개 · 표 ${r.mirrorRows}줄)`,
-      '이관하면 그 차이만큼 리뷰어 검색에서 사라집니다 — 작업표의 열 이름 줄과 줄 채우기를 먼저 확인하세요.');
+      /* ★ [시트 새로고침](미러→빌드→투영)이 가장 흔한 원인을 그 자리에서 푼다 —
+       *   인덱스에는 있는데 아직 표로 투영되지 않은 인원이면 그 한 번으로 채워진다.
+       *   그래도 남으면 작업표의 열 이름 줄·줄 채우기를 봐야 한다. */
+      '이관하면 그 차이만큼 리뷰어 검색에서 사라집니다 — 아래 [시트 새로고침] 으로 표를 먼저 채운 뒤 ' +
+      '다시 점검하세요(그래도 남으면 작업표의 열 이름 줄을 확인).', 'refresh');
   }
   return _chk('ledger', label, 'pass',
     `열 ${cols}개 · 표 ${r.mirrorRows}줄 → 검색 명단 ${after}명(지금 ${before}명)`);
@@ -278,13 +295,18 @@ async function cutoverChecklist({ sheetId, tabName, now = new Date() } = {}) {
     await _checkMirror(tab, now),
     await _checkLedger(db, tab),
   ];
-  // ★★ fail-closed — pass 가 아닌 항목이 하나라도 있으면 잠근다('unknown' 포함).
-  const blocking = checks.filter(c => c.state !== 'pass');
+  /* ★★ fail-closed — pass 가 아닌 항목이 있으면 잠근다('unknown' 포함).
+   * ★ 예외는 **경고 전용(advisory) 항목뿐**(지금은 ④ 하나) — 그 항목이 막으려던 손실을
+   *   이관 절차 자체가 없앴기 때문이다(④ 주석 참조). 여기에 항목을 더 넣지 말 것:
+   *   ①(준비 자리)·②(대조)·③(자리 없는 주문)·⑤(명단 감소)는 **이관으로 복구되지 않는다**. */
+  const blocking = checks.filter(c => c.state !== 'pass' && !c.advisory);
+  const advisories = checks.filter(c => c.state !== 'pass' && c.advisory);
   return {
     ok: true, sheetId, tabName, tabGid: tab.tabGid || null, displayName: tab.displayName,
     already: false, checks,
     canCutover: blocking.length === 0,
     blocking: blocking.map(c => c.key),
+    advisories: advisories.map(c => c.key),
   };
 }
 
@@ -433,6 +455,9 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
     logger.warn(`[cutover] UNVERIFIED 이관 — ${tabName} (${sheetId}) by=${by} blocking=${(list.blocking || []).join(',')}`);
   }
 
+  // ★★ 끊기 **전에** 그 시트를 마지막으로 한 번 더 읽어 반영한다(순서가 계약 — 아래 함수 주석).
+  const reflect = await _reflectSheetOnce({ sheetId, tabName, by });
+
   await db.query(
     `UPDATE tab_configs SET sheetless = TRUE, sheetless_at = NOW(), sheetless_by = $3
       WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName, String(by || '').slice(0, 100)]);
@@ -464,7 +489,42 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
 
   logger.info(`[cutover] 이관 완료 — ${tabName} (${sheetId}) by=${by}${force && !list.canCutover ? ' [UNVERIFIED]' : ''}`);
   return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover),
-    handoff, ledger, notice };
+    reflect, handoff, ledger, notice };
+}
+
+/**
+ * 이관 직전 **마지막 반영** — 그 시트를 한 번 더 읽어 장부·작업표까지 담는다.
+ *
+ * ★★ 이것이 ④(시트 최신 상태)를 잠그지 않아도 되는 근거다(사용자 확정 2026-08-07):
+ *    "시트가 x분 전에 수정됐다"의 실체는 대개 리뷰어 제출이고 그건 이미 서버에 있다.
+ *    그래도 **시트에만 있고 서버엔 없는 것**(직원이 손으로 채운 줄)이 남을 수 있으므로,
+ *    끊기 직전에 한 번 읽어 오면 그 마지막 구멍까지 닫힌다.
+ * ★★ **순서가 계약**: 표식(`sheetless`)을 켜기 **전에** 불러야 한다 — 켠 뒤에는 미러·빌드가
+ *    그 탭을 제외하므로(`utils/sheetlessScope`) 아무것도 읽어 오지 못한다.
+ * ★ 실행부는 **기존 반영 도구 한 벌**(`repairSheetSync` = 미러(force) → 인덱스 빌드 → 투영):
+ *   사본 0. 그래서 시트 → `review_index` → `campaign_participants` 까지 들어가고, 뒤이은
+ *   장부 재생성(작업표 → 장부)이 그 값을 그대로 다시 쓴다(투영을 건너뛰면 지워진다).
+ * ★ **실패해도 이관은 유지**하고 사유를 응답에 실어 화면이 말한다(부수효과 규율) — 되돌리면
+ *   "표식은 껐는데 안내문은 붙은" 어중간한 상태가 된다. 남은 건은 [재연결] 후 재시도.
+ * 킬스위치 `SHEETLESS_CUTOVER_REFLECT=0`(마지막 반영 없이 이관 — 종전 동작).
+ */
+async function _reflectSheetOnce({ sheetId, tabName, by = '' } = {}) {
+  if (String(process.env.SHEETLESS_CUTOVER_REFLECT || '1') === '0') {
+    return { ok: true, skipped: 'disabled' };
+  }
+  try {
+    const r = await require('./sheetSyncAudit.service')
+      .repairSheetSync({ sheetId, tabName, by: by || 'cutover' });
+    const steps = (r && r.steps) || {};
+    if (!(r && r.ok)) {
+      logger.warn(`[cutover] 마지막 반영 미완료(이관은 유지) — ${tabName}: ` +
+        `${(steps.project && steps.project.error) || 'project 실패'}`);
+    }
+    return { ok: !!(r && r.ok), steps };
+  } catch (e) {
+    logger.warn(`[cutover] 마지막 반영 실패(이관은 유지) — ${tabName}: ${e.message}`);
+    return { ok: false, reason: 'error', message: e.message };
+  }
 }
 
 /**
