@@ -280,6 +280,35 @@ router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) { next(err); }
 });
 
+// ── 시트 우위 동기화(탈 구글시트 1차) — adminOrMaster ──
+//   slot-audit  : "시트에 준비된 인원 > 시스템 표 인원"인 작업 전수 점검(읽기 전용·시트 API 무접촉)
+//   slot-backfill: 시트 준비 행을 표의 빈 자리로 백필(추가만·멱등, dryRun 기본 true)
+//   quota-fix   : 공고 정원을 표 인원에 맞춤(쓰기 표면 = recruit_total 두 칸, 단일 옵션만 자동)
+const slotSync = require('../services/sheetSlotSync.service');
+router.get('/sheet-sync/slot-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { limit, scanCap } = req.query;
+    res.json({ ok: true, ...(await slotSync.auditSheetSuperiority({ limit, scanCap })) });
+  } catch (err) { next(err); }
+});
+router.post('/sheet-sync/slot-backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, dryRun } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    // ★ 명시적으로 false 를 보낼 때만 실행 — 값이 빠지면 미리보기(파괴적 기본값 금지).
+    const out = await slotSync.backfillSlots({ sheetId, tabName, dryRun: dryRun !== false, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/sheet-sync/quota-fix', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, campaignId } = req.body || {};
+    if (!sheetId || !tabName || !campaignId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, campaignId 필수' });
+    const out = await slotSync.applyQuotaFix({ sheetId, tabName, campaignId, by: _by(req) });
+    res.status(out.ok ? 200 : 409).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
 router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await svc.parityAll({ store: true, source: 'manual' })) }); }
