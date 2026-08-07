@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>탈 구글시트 W1+W2 적용 결과 보고서</title>
+<style>
+  :root{
+    color-scheme: light;
+    --ink:#1b1f24; --ink2:#41484f; --ink3:#6b7480;
+    --line:#dfe3e8; --line2:#eceff2;
+    --bg:#f6f7f9; --card:#fff;
+    --blue:#2563eb; --blueBg:#eef4ff; --blueLine:#c7dbff;
+    --green:#0f8a5f; --greenBg:#e9f8f1; --greenLine:#b7e6d2;
+    --amber:#a86a00; --amberBg:#fff6e5; --amberLine:#f2d9a8;
+    --red:#c0392b; --redBg:#fdeeec; --redLine:#f3c6c0;
+    --gray:#7a838d; --grayBg:#f1f3f5;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",sans-serif;
+    line-height:1.7; font-size:15px;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:0 20px 80px}
+
+  /* ── 표지 ── */
+  .cover{background:linear-gradient(135deg,#1f3352,#2c4a78); color:#fff; padding:44px 0 38px; margin-bottom:28px}
+  .cover .wrap{padding-bottom:0}
+  .kicker{font-size:13px; letter-spacing:.12em; opacity:.72; margin-bottom:10px}
+  .cover h1{margin:0 0 14px; font-size:30px; line-height:1.35; letter-spacing:-.02em}
+  .cover .sub{font-size:15px; opacity:.9; max-width:760px; margin:0}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:20px}
+  .meta span{background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.22);
+    padding:5px 12px; border-radius:999px; font-size:12.5px}
+
+  /* ── 공통 ── */
+  h2{font-size:21px; margin:44px 0 6px; letter-spacing:-.01em; display:flex; align-items:center; gap:10px}
+  h2 .n{display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px;
+    border-radius:8px; background:var(--ink); color:#fff; font-size:14px; flex:0 0 auto}
+  h2 + .lead{color:var(--ink2); margin:0 0 18px; padding-left:38px; font-size:14.5px}
+  h3{font-size:16px; margin:26px 0 10px}
+  p{margin:0 0 12px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:14px}
+  .muted{color:var(--ink3); font-size:13.5px}
+  .strong{font-weight:700}
+
+  .callout{border-radius:12px; padding:16px 18px; margin:16px 0; border:1px solid}
+  .callout .t{font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:8px}
+  .c-blue{background:var(--blueBg); border-color:var(--blueLine)}
+  .c-blue .t{color:var(--blue)}
+  .c-green{background:var(--greenBg); border-color:var(--greenLine)}
+  .c-green .t{color:var(--green)}
+  .c-amber{background:var(--amberBg); border-color:var(--amberLine)}
+  .c-amber .t{color:var(--amber)}
+  .c-red{background:var(--redBg); border-color:var(--redLine)}
+  .c-red .t{color:var(--red)}
+
+  /* ── 와이어프레임 ── */
+  .wf{background:#fbfcfd; border:1.5px solid var(--line); border-radius:12px; padding:18px; margin:16px 0}
+  .wf-title{font-size:12px; letter-spacing:.08em; color:var(--ink3); margin-bottom:14px; font-weight:700}
+  .box{background:#fff; border:1.5px solid #cfd6dd; border-radius:9px; padding:13px 15px}
+  .box.dash{border-style:dashed; background:#fafbfc}
+  .box .bt{font-weight:700; font-size:14px; margin-bottom:4px}
+  .box .bd{font-size:13px; color:var(--ink2); line-height:1.55}
+  .box.on{border-color:var(--greenLine); background:var(--greenBg)}
+  .box.off{border-color:var(--line); background:var(--grayBg); color:var(--gray)}
+  .box.off .bt{color:var(--gray)}
+  .box.off .bd{color:var(--gray)}
+
+  .flow{display:flex; align-items:stretch; gap:0; flex-wrap:wrap}
+  .flow .box{flex:1; min-width:150px}
+  .arrow{display:flex; align-items:center; justify-content:center; padding:0 10px; color:#9aa4ae; font-size:20px; flex:0 0 auto}
+
+  .cols2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .cols3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px}
+  @media(max-width:760px){.cols2,.cols3{grid-template-columns:1fr} .flow{flex-direction:column} .arrow{padding:6px 0; transform:rotate(90deg)}}
+
+  /* ── 한 바퀴 진행 띠 ── */
+  .lap{display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin:16px 0}
+  .lap .st{background:#fff; border:1.5px solid #cfd6dd; border-radius:10px; padding:13px 12px; text-align:center}
+  .lap .st .ic{font-size:22px; display:block; margin-bottom:6px}
+  .lap .st .nm{font-weight:700; font-size:13.5px; margin-bottom:4px}
+  .lap .st .ds{font-size:12px; color:var(--ink3); line-height:1.5}
+  .lap .st.done{border-color:var(--greenLine); background:var(--greenBg)}
+  .lap .st.done .ds{color:var(--green)}
+  .lap .st.todo{border-style:dashed; background:var(--grayBg)}
+  .lap .st.todo .nm{color:var(--gray)}
+  @media(max-width:760px){.lap{grid-template-columns:1fr 1fr}}
+
+  /* ── 장부 3권 ── */
+  .ledger{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:16px 0}
+  .ledger .bk{background:#fff; border:1.5px solid #cfd6dd; border-radius:10px; padding:15px; position:relative}
+  .ledger .bk .ico{font-size:24px; margin-bottom:8px}
+  .ledger .bk .nm{font-weight:700; font-size:14.5px; margin-bottom:5px}
+  .ledger .bk .ds{font-size:12.8px; color:var(--ink2); line-height:1.55}
+  .ledger .bk .use{margin-top:9px; padding-top:9px; border-top:1px dashed var(--line);
+    font-size:12px; color:var(--ink3)}
+  @media(max-width:760px){.ledger{grid-template-columns:1fr}}
+
+  /* ── 표 ── */
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:13.8px; background:#fff}
+  th,td{border:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top}
+  th{background:#f2f4f7; font-weight:700; font-size:13px}
+  td.c{text-align:center; white-space:nowrap}
+
+  .badge{display:inline-block; padding:3px 9px; border-radius:6px; font-size:12px; font-weight:700; white-space:nowrap}
+  .b-ok{background:var(--greenBg); color:var(--green); border:1px solid var(--greenLine)}
+  .b-wait{background:var(--grayBg); color:var(--gray); border:1px solid var(--line)}
+  .b-warn{background:var(--amberBg); color:var(--amber); border:1px solid var(--amberLine)}
+  .b-blue{background:var(--blueBg); color:var(--blue); border:1px solid var(--blueLine)}
+
+  ul.clean{margin:8px 0 12px; padding-left:0; list-style:none}
+  ul.clean li{position:relative; padding-left:24px; margin-bottom:8px}
+  ul.clean li::before{content:"✓"; position:absolute; left:2px; top:0; color:var(--green); font-weight:700}
+  ul.clean li.x::before{content:"×"; color:var(--red)}
+  ul.clean li.dot::before{content:"•"; color:var(--ink3)}
+  ul.clean li.wait::before{content:"○"; color:var(--gray)}
+
+  .steps{counter-reset:s; list-style:none; padding:0; margin:16px 0}
+  .steps li{counter-increment:s; position:relative; padding:14px 16px 14px 54px; background:#fff;
+    border:1px solid var(--line); border-radius:10px; margin-bottom:10px}
+  .steps li::before{content:counter(s); position:absolute; left:15px; top:14px; width:25px; height:25px;
+    border-radius:50%; background:var(--ink); color:#fff; display:flex; align-items:center;
+    justify-content:center; font-size:13px; font-weight:700}
+  .steps li.done{border-color:var(--greenLine); background:var(--greenBg)}
+  .steps li.done::before{background:var(--green)}
+  .steps li.now{border-color:var(--blueLine); background:var(--blueBg)}
+  .steps li.now::before{background:var(--blue)}
+  .steps .st{font-weight:700; margin-bottom:3px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .steps .sd{font-size:13.3px; color:var(--ink2)}
+
+  .foot{margin-top:50px; padding-top:20px; border-top:1px solid var(--line);
+    color:var(--ink3); font-size:12.5px}
+  .toc{background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 20px; margin-bottom:8px}
+  .toc ol{margin:6px 0 0; padding-left:20px; columns:2; column-gap:28px; font-size:13.8px}
+  @media(max-width:600px){.toc ol{columns:1}}
+  .toc a{color:var(--ink); text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="wrap">
+    <div class="kicker">적용 결과 보고서 · 누적</div>
+    <h1>탈 구글시트 · 1~2주차(W1+W2) 적용 결과</h1>
+    <p class="sub">구글시트를 걷어내기 위한 두 번째 공사까지 마쳤습니다.<br>
+      이제 <strong>작업 한 건이 접수부터 리뷰 제출까지 구글시트 없이 한 바퀴</strong> 돕니다.
+      다만 아직 <strong>아무 작업에도 켜지 않았습니다</strong>.</p>
+    <div class="meta">
+      <span>작성일 2026-08-07</span>
+      <span>대상 리뷰웹시스템 · 인트라넷</span>
+      <span>배포 완료 · 자동 반영</span>
+      <span>현재 사용자 체감 변화 없음</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<div class="toc">
+  <strong style="font-size:14px">목차</strong>
+  <ol>
+    <li><a href="#s1">한 줄 요약</a></li>
+    <li><a href="#s2">지금 화면에서 달라진 것</a></li>
+    <li><a href="#s3">"작업 한 바퀴"가 어디까지 왔나</a></li>
+    <li><a href="#s4">1주차에 만든 것 (복습)</a></li>
+    <li><a href="#s5">2주차에 만든 것 5가지</a></li>
+    <li><a href="#s6">직원이 손으로 하던 일이 어떻게 바뀌나</a></li>
+    <li><a href="#s7">공사 중에 잡은 위험</a></li>
+    <li><a href="#s8">검증 결과</a></li>
+    <li><a href="#s9">아직 못 하는 것</a></li>
+    <li><a href="#s10">전체 일정에서 지금 위치</a></li>
+  </ol>
+</div>
+
+<!-- ══════════ 1 ══════════ -->
+<h2 id="s1"><span class="n">1</span>한 줄 요약</h2>
+<p class="lead">두 주 동안 한 일을 한 문장으로.</p>
+
+<div class="callout c-blue">
+  <div class="t">요약</div>
+  <p style="margin:0">
+    1주차에는 <strong>시스템 작업표만으로 기존 기록을 똑같이 만들어내는 장치</strong>를 만들었고,
+    2주차에는 그 장치 위에서 <strong>작업 한 건이 접수 → 리뷰어 검색 → 구매양식 제출 → 리뷰 캡처 저장까지
+    구글에 한 번도 묻지 않고 완결</strong>되게 했습니다.
+    아직 <strong>어떤 작업에도 켜지 않았습니다</strong> — 켜는 화면과, 이미 진행 중인 작업을 옮기는 공사가 남아 있습니다.
+  </p>
+</div>
+
+<div class="wf">
+  <div class="wf-title">지금까지 · 앞으로</div>
+  <div class="cols2">
+    <div>
+      <div class="muted" style="margin-bottom:8px; font-weight:700">지금까지</div>
+      <div class="flow">
+        <div class="box"><div class="bt">📗 구글시트</div><div class="bd">직원이 손으로 채움<br>= 원본</div></div>
+        <div class="arrow">→</div>
+        <div class="box"><div class="bt">📋 시스템 기록</div><div class="bd">시트를 베껴서 만듦</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="muted" style="margin-bottom:8px; font-weight:700">앞으로(전환 후)</div>
+      <div class="flow">
+        <div class="box on"><div class="bt">🖥 작업표</div><div class="bd">시스템이 만들고<br>주문이 직접 채움</div></div>
+        <div class="arrow">→</div>
+        <div class="box on"><div class="bt">📋 시스템 기록</div><div class="bd">작업표에서 <strong>똑같이</strong> 만듦</div></div>
+      </div>
+    </div>
+  </div>
+  <p class="muted" style="margin:14px 0 0">
+    1주차가 오른쪽 그림의 <strong>화살표</strong>(만들어내는 장치)를 완성했고,
+    2주차가 <strong>왼쪽 상자</strong>(작업표를 만들고 채우는 손)를 완성했습니다.
+  </p>
+</div>
+
+<!-- ══════════ 2 ══════════ -->
+<h2 id="s2"><span class="n">2</span>지금 화면에서 달라진 것</h2>
+<p class="lead">직원·리뷰어·업체가 오늘 느낄 변화를 그대로 적었습니다.</p>
+
+<div class="callout c-green">
+  <div class="t">✓ 여전히 아무것도 달라지지 않았습니다 (의도한 결과입니다)</div>
+  <p style="margin:0">
+    두 주 내내 <strong>스위치는 전부 꺼진 상태로</strong> 배포됐습니다.
+    새로 만든 길은 <strong>"무시트"로 표시된 작업에서만</strong> 열리는데,
+    지금 그렇게 표시된 작업이 <strong>한 건도 없습니다</strong>.
+  </p>
+</div>
+
+<table>
+  <tr><th style="width:26%">보는 사람</th><th>오늘 달라지는 것</th><th class="c" style="width:15%">상태</th></tr>
+  <tr><td>리뷰어</td><td>없음 — 검색·참여·리뷰 제출 모두 종전 그대로</td><td class="c"><span class="badge b-ok">변화 없음</span></td></tr>
+  <tr><td>직원(작업보드)</td><td>없음 — 작업 목록·표·마감 모두 종전 그대로</td><td class="c"><span class="badge b-ok">변화 없음</span></td></tr>
+  <tr><td>업체(광고주)</td><td>없음 — 접속 링크·표·정산 모두 종전 그대로</td><td class="c"><span class="badge b-ok">변화 없음</span></td></tr>
+  <tr><td>구글시트</td><td>없음 — 읽기·쓰기 모두 종전 그대로</td><td class="c"><span class="badge b-ok">변화 없음</span></td></tr>
+  <tr><td>인트라넷 리뷰오더</td><td><strong>칸 2개가 늘었습니다</strong> — [주말 제외](기본 켬) · [휴무일]</td><td class="c"><span class="badge b-blue">칸 추가</span></td></tr>
+</table>
+
+<div class="callout c-amber">
+  <div class="t">⚠ 유일하게 눈에 보이는 변화 — 인트라넷 리뷰오더 폼</div>
+  <p style="margin:0">
+    오더를 낼 때 <strong>주말을 빼고 진행할지</strong>와 <strong>쉬는 날</strong>을 적는 칸이 생겼습니다.
+    <strong>비워 두어도 종전과 똑같이 동작</strong>합니다(주말은 기본으로 빠집니다).
+    적어 두면 리뷰웹에서 작업표를 만들 때 그 규칙이 <strong>미리 채워져</strong> 담당자가 매번 다시 지정하지 않아도 됩니다.
+  </p>
+</div>
+
+<!-- ══════════ 3 ══════════ -->
+<h2 id="s3"><span class="n">3</span>"작업 한 바퀴"가 어디까지 왔나</h2>
+<p class="lead">작업 한 건이 태어나서 끝날 때까지의 다섯 단계입니다.</p>
+
+<div class="wf">
+  <div class="wf-title">무시트 작업의 한 바퀴 — 초록 = 구글 없이 완결됨</div>
+  <div class="lap">
+    <div class="st done"><span class="ic">📥</span><div class="nm">① 접수</div><div class="ds">시트 주소 없이<br>작업표를 만든다</div></div>
+    <div class="st done"><span class="ic">🔍</span><div class="nm">② 리뷰어 검색</div><div class="ds">작업표에서<br>명단이 만들어진다</div></div>
+    <div class="st done"><span class="ic">🧾</span><div class="nm">③ 구매양식 제출</div><div class="ds">작업표에<br>바로 기록된다</div></div>
+    <div class="st done"><span class="ic">🖼</span><div class="nm">④ 리뷰 캡처</div><div class="ds">업체명 폴더에<br>저장된다</div></div>
+    <div class="st done"><span class="ic">📅</span><div class="nm">⑤ 그날 정원</div><div class="ds">달력이<br>기준이 된다</div></div>
+  </div>
+  <p class="muted" style="margin:8px 0 0">
+    다섯 단계 전부 <strong>구글 호출 0회</strong>로 완결됩니다. 다만 이 길은 아직 열리지 않았습니다(§2).
+  </p>
+</div>
+
+<div class="cols2">
+  <div class="card">
+    <h3 style="margin-top:0">1주차가 만든 것</h3>
+    <p class="muted" style="margin-bottom:8px">기록을 <strong>만들어내는 쪽</strong></p>
+    <ul class="clean" style="margin-bottom:0">
+      <li>무시트 표시(작업 단위 꼬리표)</li>
+      <li>작업표 → 기록 3권 생성기</li>
+      <li>구글을 부르는 자동작업 4곳 단속</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">2주차가 만든 것</h3>
+    <p class="muted" style="margin-bottom:8px">기록을 <strong>채우는 쪽</strong></p>
+    <ul class="clean" style="margin-bottom:0">
+      <li>시트 없는 접수</li>
+      <li>주문 즉시 완결</li>
+      <li>저장 폴더 이름 규칙</li>
+      <li>그날 정원 = 달력</li>
+      <li>인트라넷 일정 신호</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════ 4 ══════════ -->
+<h2 id="s4"><span class="n">4</span>1주차에 만든 것 (복습)</h2>
+<p class="lead">이미 보고드린 내용이라 짧게만 짚습니다.</p>
+
+<div class="ledger">
+  <div class="bk">
+    <div class="ico">🏷</div>
+    <div class="nm">무시트 표시</div>
+    <div class="ds">작업 하나하나에 "이 작업은 구글시트를 안 쓴다"는 꼬리표를 달 수 있게 했습니다.</div>
+    <div class="use">지금은 전부 꺼짐 = 종전 동작</div>
+  </div>
+  <div class="bk">
+    <div class="ico">🏭</div>
+    <div class="nm">기록 생성기</div>
+    <div class="ds">작업표만 있으면 시스템이 쓰는 기록 3권(명단·검색·원본미러)을 똑같이 만들어냅니다.</div>
+    <div class="use">시트가 만들던 것과 같은 규칙 사용</div>
+  </div>
+  <div class="bk">
+    <div class="ico">🚧</div>
+    <div class="nm">자동작업 단속</div>
+    <div class="ds">5분마다 구글시트를 읽어 오는 자동작업 4곳이, 표시된 작업은 건드리지 않게 막았습니다.</div>
+    <div class="use">안 막으면 시스템 편집분이 되돌아감</div>
+  </div>
+</div>
+
+<div class="callout c-amber">
+  <div class="t">그때 잡은 가장 큰 함정</div>
+  <p style="margin:0">
+    자동작업 4곳 중 <strong>한 곳(5분 주기 인덱스 빌드)을 빠뜨리면 기능이 통째로 무의미</strong>해집니다 —
+    시스템에서 고친 내용을 그 자동작업이 <strong>옛 시트 값으로 다시 덮어쓰기</strong> 때문입니다.
+    구현 중 실제로 빠져 있었고, 회귀 테스트가 잡아냈습니다.
+  </p>
+</div>
+
+<!-- ══════════ 5 ══════════ -->
+<h2 id="s5"><span class="n">5</span>2주차에 만든 것 5가지</h2>
+<p class="lead">이번 주에 새로 생긴 것들입니다.</p>
+
+<h3>① 시트 주소 없이 접수하기</h3>
+<div class="card">
+  <p style="margin-bottom:10px">
+    지금까지 작업 접수에는 <strong>구글시트 주소가 반드시 필요</strong>했습니다.
+    이제 시트 없이 접수하면 시스템이 <strong>가상의 작업 자리를 발급</strong>하고 그 자리에 작업표를 직접 만듭니다.
+  </p>
+  <div class="wf" style="margin:0">
+    <div class="wf-title">접수 흐름 비교</div>
+    <div class="cols2">
+      <div>
+        <div class="muted" style="margin-bottom:8px; font-weight:700">종전</div>
+        <div class="flow">
+          <div class="box"><div class="bt">시트 준비</div><div class="bd">사람이 100줄을<br>미리 만들어 둠</div></div>
+          <div class="arrow">→</div>
+          <div class="box"><div class="bt">주소 붙여 접수</div><div class="bd">구글에 물어<br>탭을 확인</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:8px; font-weight:700">무시트 접수</div>
+        <div class="flow">
+          <div class="box on"><div class="bt">그냥 접수</div><div class="bd">건수·일정만 있으면 됨</div></div>
+          <div class="arrow">→</div>
+          <div class="box on"><div class="bt">작업표 자동 생성</div><div class="bd">구글 호출 <strong>0회</strong></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ul class="clean" style="margin-bottom:0">
+    <li><strong>접수는 여전히 유일한 관문</strong>입니다 — 접수를 거쳐야 리뷰어 검색이 열리는 규칙은 그대로입니다.</li>
+    <li>2차·3차로 다시 접수해도 <strong>작업표를 또 만들지 않습니다</strong>(차수 컬럼이 담당).</li>
+    <li>한 번 무시트로 옮긴 작업은 <strong>시트 주소로 재접수해도 되돌아가지 않습니다</strong> — 조용히 되돌아가면 자동작업이 옛 시트 값으로 덮어씁니다.</li>
+  </ul>
+</div>
+
+<h3>② 구매양식 제출이 그 자리에서 끝난다</h3>
+<div class="card">
+  <p style="margin-bottom:10px">
+    종전에는 리뷰어가 제출하면 <strong>줄을 서서 순서를 기다렸다가</strong> 구글시트에 기록됐습니다(대기·재시도·사후검증이 딸려 있었습니다).
+    무시트 작업은 <strong>제출과 동시에 작업표에 기록되고 그대로 끝납니다</strong>.
+  </p>
+  <div class="wf" style="margin:0 0 12px">
+    <div class="wf-title">제출 후 처리</div>
+    <div class="cols2">
+      <div>
+        <div class="muted" style="margin-bottom:8px; font-weight:700">종전</div>
+        <div class="flow" style="flex-direction:column">
+          <div class="box"><div class="bt">제출 접수</div><div class="bd">시스템에 먼저 저장</div></div>
+          <div class="box dash" style="margin-top:8px"><div class="bt">⏳ 대기줄</div><div class="bd">시트에 쓸 차례를 기다림<br>실패하면 재시도·복구·사후검증</div></div>
+          <div class="box" style="margin-top:8px"><div class="bt">시트 기록</div><div class="bd">완료</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:8px; font-weight:700">무시트</div>
+        <div class="flow" style="flex-direction:column">
+          <div class="box on"><div class="bt">제출 접수 = 작업표 기록</div><div class="bd">같은 요청 안에서 끝<br>대기줄 없음</div></div>
+          <div class="box off" style="margin-top:8px"><div class="bt">대기줄</div><div class="bd">해당 없음</div></div>
+          <div class="box off" style="margin-top:8px"><div class="bt">사후검증</div><div class="bd">해당 없음</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ul class="clean" style="margin-bottom:0">
+    <li>기록이 <strong>어느 칸에 무엇을 쓸지는 종전과 같은 규칙</strong>을 그대로 씁니다(따로 만들지 않았습니다).</li>
+    <li>관리자가 미리 적어 둔 작업지시(예: <span class="strong">포토리뷰</span>)는 <strong>덮어쓰지 않습니다</strong> — 빈 칸에만 씁니다.</li>
+    <li>혹시라도 구글시트로 새는 길이 없도록 <strong>네 곳에서 막았습니다</strong>(제출·수동제출·복구·마지막 관문).</li>
+  </ul>
+</div>
+
+<h3>③ 리뷰 캡처 저장 폴더 이름</h3>
+<div class="card">
+  <p style="margin-bottom:10px">
+    리뷰 캡처는 <strong>[구글시트 파일 제목] → [작업 이름] → [리뷰]</strong> 폴더에 저장돼 왔습니다.
+    무시트 작업에는 그 시트 파일이 없으므로, 첫 칸을 <strong>업체 이름</strong>으로 바꿉니다(사용자 확정 사항).
+  </p>
+  <div class="wf" style="margin:0">
+    <div class="wf-title">폴더 경로</div>
+    <div class="flow">
+      <div class="box off"><div class="bt">시트 파일 제목</div><div class="bd">무시트에는 없음</div></div>
+      <div class="arrow">→</div>
+      <div class="box on"><div class="bt">업체 이름</div><div class="bd">시스템이 자동으로 찾음</div></div>
+      <div class="arrow">→</div>
+      <div class="box"><div class="bt">작업 이름</div><div class="bd">종전 그대로</div></div>
+      <div class="arrow">→</div>
+      <div class="box"><div class="bt">[리뷰]</div><div class="bd">종전 그대로</div></div>
+    </div>
+  </div>
+  <p class="muted" style="margin:12px 0 0">
+    ※ <strong>기존 시트 기반 작업의 폴더는 한 글자도 바뀌지 않습니다.</strong>
+    이미 만들어진 수백 개 폴더와 경로가 갈라지면 캡처가 두 곳으로 흩어집니다.
+  </p>
+</div>
+
+<h3>④ "그날 몇 명" 의 기준이 시트 → 달력으로</h3>
+<div class="card">
+  <p style="margin-bottom:10px">
+    종전에는 시트 <strong>구매일자 칸에 적힌 날짜 개수</strong>가 곧 그날 모집 정원이었습니다.
+    무시트에는 그 칸이 없으므로 <strong>같은 분배를 달력으로 옮겨 담고, 그 뒤로는 달력이 기준</strong>이 됩니다(사용자 확정 사항).
+  </p>
+  <div class="wf" style="margin:0 0 12px">
+    <div class="wf-title">그날 정원의 기준</div>
+    <div class="cols2">
+      <div>
+        <div class="muted" style="margin-bottom:8px; font-weight:700">종전</div>
+        <div class="box"><div class="bt">📗 시트 구매일자 칸</div><div class="bd">8/7 자리 5줄 → 그날 5명<br>조절하려면 시트를 고쳐야 함</div></div>
+      </div>
+      <div>
+        <div class="muted" style="margin-bottom:8px; font-weight:700">무시트</div>
+        <div class="box on"><div class="bt">📅 달력(모집인원 조절 화면)</div><div class="bd">공고를 낼 때 자동으로 채워짐<br><strong>[📅 인원] 버튼으로 바로 조절</strong></div></div>
+      </div>
+    </div>
+  </div>
+  <ul class="clean" style="margin-bottom:0">
+    <li><strong>관리자가 손으로 조절해 둔 날은 절대 덮어쓰지 않습니다</strong> — 공고를 다시 저장해도 그대로 남습니다.</li>
+    <li>지난 날짜는 넣지 않습니다(넣으면 화면에서 지울 수도 없는 줄이 쌓입니다).</li>
+    <li>달력 채우기가 실패해도 <strong>공고 발행은 성공</strong>하고, 실패 사유를 화면이 알려 줍니다.</li>
+  </ul>
+</div>
+
+<div class="callout c-red">
+  <div class="t">이 조각은 반드시 짝으로 나가야 했습니다</div>
+  <p style="margin:0">
+    "시트 일정 인식에서 빼기"와 "달력 채우기"는 <strong>둘 중 하나만 하면 사고</strong>입니다 —
+    빼기만 하면 정원이 <strong>발행폼에 적은 값으로 되돌아가고</strong>,
+    채우기만 하면 시스템이 그 작업을 여전히 "시트가 정하는 작업"으로 알아
+    <strong>[📅 인원] 조절 저장이 영영 거부</strong>됩니다(조절할 시트는 없는데 조절 창구도 잠기는 상태).
+  </p>
+</div>
+
+<h3>⑤ 인트라넷이 진행 규칙을 함께 보낸다</h3>
+<div class="card">
+  <p style="margin-bottom:10px">
+    작업표를 만들 때 <strong>주말을 뺄지</strong>와 <strong>업체 휴무일</strong>을 담당자가 매번 다시 지정해 왔습니다.
+    이제 오더를 낼 때 적어 두면 그대로 <strong>미리 채워집니다</strong>.
+  </p>
+  <table style="margin-top:0">
+    <tr><th style="width:30%">인트라넷에서 적은 값</th><th>리뷰웹 작업표 계획</th></tr>
+    <tr><td>비워 둠 <span class="badge b-wait">구버전 포함</span></td><td>종전 기본값 그대로 — <strong>주말은 빠짐</strong></td></tr>
+    <tr><td>[주말 제외] 체크 <span class="badge b-ok">기본</span></td><td>주말 제외</td></tr>
+    <tr><td>[주말 제외] 해제</td><td>주말도 진행일에 포함</td></tr>
+    <tr><td>[휴무일] <code>8/15, 8/18</code></td><td>그 날짜를 건너뛰고 뒤로 밀림</td></tr>
+  </table>
+  <div class="callout c-amber" style="margin-bottom:0">
+    <div class="t">"안 보냈다"와 "끄겠다"를 구분합니다</div>
+    <p style="margin:0">
+      두 시스템은 각자 배포되므로 <strong>인트라넷 배포가 늦는 기간</strong>이 생깁니다.
+      그때 "값이 없음"을 "주말 제외 안 함"으로 읽으면 <strong>주말 제외가 조용히 꺼진 채로</strong> 표가 만들어집니다.
+      그래서 값이 없으면 종전 기본값을 쓰고, <strong>명시적으로 해제했을 때만</strong> 주말을 포함합니다.
+    </p>
+  </div>
+</div>
+
+<!-- ══════════ 6 ══════════ -->
+<h2 id="s6"><span class="n">6</span>직원이 손으로 하던 일이 어떻게 바뀌나</h2>
+<p class="lead">전환이 끝났을 때 실제 업무가 어떻게 달라지는지입니다.</p>
+
+<table>
+  <tr><th style="width:30%">지금 하는 일</th><th>전환 후</th><th class="c" style="width:14%">준비</th></tr>
+  <tr>
+    <td>시트에 100줄을 미리 만들고 구매일자를 8/7×5 · 8/8×5 … 로 손으로 적음(주말 건너뛰고 휴무일 비움)</td>
+    <td>오더의 <strong>건수·시작일·일건수</strong>만 있으면 시스템이 분배해 작업표를 만듦 — 주말·휴무일 규칙도 오더가 알려 줌</td>
+    <td class="c"><span class="badge b-ok">완료</span></td>
+  </tr>
+  <tr>
+    <td>작업오더에 시트 주소를 붙여서 보냄</td>
+    <td>시트 주소 없이 접수 — 시스템이 작업 자리를 만듦</td>
+    <td class="c"><span class="badge b-ok">완료</span></td>
+  </tr>
+  <tr>
+    <td>제출이 시트에 잘 들어갔는지 확인하고, 안 들어간 건을 복구·수기 입력</td>
+    <td>제출 즉시 기록 완결 — <strong>확인할 대기줄 자체가 없음</strong></td>
+    <td class="c"><span class="badge b-ok">완료</span></td>
+  </tr>
+  <tr>
+    <td>"오늘은 20명만" 요청이 오면 시트 날짜를 지우거나 옮김</td>
+    <td>[📅 인원] 화면에서 그날 숫자를 바로 조절</td>
+    <td class="c"><span class="badge b-ok">완료</span></td>
+  </tr>
+  <tr>
+    <td>업체에 구글시트를 공유</td>
+    <td>업체 전용 접속 링크만 사용(이미 있는 기능) — 시트 공유 자체가 없어짐</td>
+    <td class="c"><span class="badge b-warn">전환 시</span></td>
+  </tr>
+  <tr>
+    <td>진행 중인 작업을 시트에서 계속 관리</td>
+    <td>기존 작업도 전부 시스템으로 이관</td>
+    <td class="c"><span class="badge b-wait">남은 공사</span></td>
+  </tr>
+</table>
+
+<!-- ══════════ 7 ══════════ -->
+<h2 id="s7"><span class="n">7</span>공사 중에 잡은 위험</h2>
+<p class="lead">만들면서 실제로 발견해 막은 것들입니다. 전부 "조용히 잘못되는" 종류입니다.</p>
+
+<ul class="clean">
+  <li><strong>자동작업이 편집을 되돌리는 문제</strong> — 5분마다 도는 자동작업 한 곳을 빠뜨려, 시스템에서 고친 내용이 옛 시트 값으로 덮이던 경로(1주차, 테스트가 검출).</li>
+  <li><strong>구매양식이 시트로 새는 경로</strong> — 이관 <em>전에</em> 이미 대기줄에 쌓여 있던 건들이 나중에 시트에 써지지 않도록, 마지막 관문에서 한 번 더 막았습니다.</li>
+  <li><strong>중간에 실패했는데 "완료"로 찍히는 경로</strong> — 기록 생성이 실패하면 완료로 표시하지 않고, 리뷰어↔줄 연결도 남기지 않습니다(잘못 남으면 <strong>남의 참여 내역이 열립니다</strong>).</li>
+  <li><strong>주문이 몰릴 때 검색 명단이 잠깐 비는 창</strong> — 기록을 다시 만드는 동안 겹치면 명단이 순간 비어 리뷰어에게 "내 참여가 사라진" 것처럼 보입니다. 작업 단위로 순서를 잡아 겹치지 않게 했습니다.</li>
+  <li><strong>폴더가 두 곳으로 갈라지는 경로</strong> — 폴더 이름을 정하는 곳이 세 군데인데, 하나라도 다르면 같은 작업의 캡처가 두 폴더에 생깁니다. 한 곳에서만 정하게 묶었습니다.</li>
+  <li><strong>조절 창구가 잠기는 경로</strong> — §5④의 빨간 상자. 두 조각을 함께 내보내 막았습니다.</li>
+  <li><strong>배포 시차에 주말 제외가 꺼지는 경로</strong> — §5⑤의 노란 상자.</li>
+</ul>
+
+<!-- ══════════ 8 ══════════ -->
+<h2 id="s8"><span class="n">8</span>검증 결과</h2>
+<p class="lead">"됐다"고 말하기 전에 무엇으로 확인했는지입니다.</p>
+
+<table>
+  <tr><th style="width:34%">검증 방법</th><th>결과</th></tr>
+  <tr><td>새로 만든 기능 전용 자동 점검</td><td>1주차 54항목 · 2주차 <strong>147항목</strong> 전부 통과</td></tr>
+  <tr><td>기존 기능 전체 자동 점검</td><td><strong>161개 점검 파일 · 실패 0</strong> (기존 동작 무회귀 확인)</td></tr>
+  <tr><td>실제 데이터베이스로 실행 검증</td><td>가짜 데이터로는 못 잡는 항목(저장 규칙·조회 정합)까지 <strong>진짜 DB에서 실행</strong>해 확인</td></tr>
+  <tr><td>일부러 고장 내 보기(변이시험)</td><td>1주차 12종 · 2주차 <strong>24종</strong> — 코드를 일부러 망가뜨렸을 때 점검이 <strong>전부 잡아냄</strong></td></tr>
+</table>
+
+<div class="callout c-amber">
+  <div class="t">일부러 고장 내 보기에서 드러난 것 — 점검 자체가 약했던 4건</div>
+  <p style="margin:0">
+    "코드를 망가뜨렸는데 점검이 통과"한 경우가 4건 있었습니다. 전부 <strong>점검이 구현을 그대로 따라가는</strong> 형태였습니다
+    (예: 상한을 400에서 999999로 바꿨더니 기대값도 함께 999999가 되어 통과).
+    <strong>기대값을 점검 쪽에 못 박아</strong> 네 건 모두 잡히도록 고쳤습니다.
+    점검이 통과했다고 안전한 게 아니라, <strong>점검을 깨뜨려 봐야</strong> 알 수 있습니다.
+  </p>
+</div>
+
+<!-- ══════════ 9 ══════════ -->
+<h2 id="s9"><span class="n">9</span>아직 못 하는 것</h2>
+<p class="lead">지금 상태의 한계를 그대로 적었습니다.</p>
+
+<ul class="clean">
+  <li class="x"><strong>스위치를 켜는 화면이 없습니다</strong> — 무시트 표시는 아직 사람이 화면에서 켤 수 없습니다(전환 관리 화면이 남은 공사).</li>
+  <li class="x"><strong>지금 켜면 안 됩니다</strong> — 입금 처리·마감자료 같은 뒤쪽 단계가 아직 시트를 전제로 동작합니다.</li>
+  <li class="x"><strong>진행 중인 작업은 아직 옮길 수 없습니다</strong> — 기존 작업 이관(점검 → 줄 맞추기 → 대조 → 연결 끊기)이 남아 있습니다.</li>
+  <li class="wait"><strong>업체에 나가는 시트 공유</strong>는 전환과 함께 자연히 없어집니다(전용 접속 링크로 대체 — 이미 있는 기능).</li>
+</ul>
+
+<div class="callout c-blue">
+  <div class="t">되돌리기</div>
+  <p style="margin:0" class="muted">
+    두 주 동안의 변경은 전부 <strong>추가</strong>이고 기존 동작을 고친 곳이 없습니다.
+    문제가 생기면 새로 생긴 표시·기능을 끄는 것만으로 <strong>즉시 종전 상태</strong>가 됩니다.
+  </p>
+</div>
+
+<!-- ══════════ 10 ══════════ -->
+<h2 id="s10"><span class="n">10</span>전체 일정에서 지금 위치</h2>
+<p class="lead">완전 전환까지 남은 단계입니다.</p>
+
+<ol class="steps">
+  <li class="done">
+    <div class="st">1주차 — 기록을 만들어내는 장치 <span class="badge b-ok">완료</span></div>
+    <div class="sd">무시트 표시 · 작업표 → 기록 3권 생성기 · 자동작업 4곳 단속</div>
+  </li>
+  <li class="done">
+    <div class="st">2주차 — 작업 한 바퀴 <span class="badge b-ok">완료</span></div>
+    <div class="sd">시트 없는 접수 · 주문 즉시 완결 · 폴더 업체명 · 그날 정원 달력 · 인트라넷 일정 신호</div>
+  </li>
+  <li class="now">
+    <div class="st">3주차 — 뒤쪽 단계 잇기 <span class="badge b-blue">다음</span></div>
+    <div class="sd">입금 처리·마감자료가 무시트 작업에서도 돌게 하고, 화면을 하나로 정리</div>
+  </li>
+  <li>
+    <div class="st">4주차 — 전환 관리 화면</div>
+    <div class="sd">사람이 스위치를 켜는 화면 + 켜기 전 자동 점검표(조건 미달이면 못 켜게)</div>
+  </li>
+  <li>
+    <div class="st">5주차 — 기존 작업 전량 이관</div>
+    <div class="sd">진행 중인 작업을 하나씩 점검 → 줄 맞추기 → 대조 → 연결 끊기(되돌릴 비상구 유지)</div>
+  </li>
+  <li>
+    <div class="st">완료 — 시트를 읽는 작업 0건</div>
+    <div class="sd">구글시트 공유·수기 입력이 업무에서 사라짐</div>
+  </li>
+</ol>
+
+<div class="callout c-green">
+  <div class="t">✓ 지금 상태를 한 문장으로</div>
+  <p style="margin:0">
+    <strong>새 길은 끝에서 끝까지 뚫렸고, 아직 차를 올리지 않았습니다.</strong>
+    올릴 준비(3~4주차)와, 지금 달리는 차를 옮기는 일(5주차)이 남았습니다.
+  </p>
+</div>
+
+<div class="foot">
+  탈 구글시트 W1+W2 적용 결과 보고서 · 2026-08-07 작성<br>
+  관련 문서 — 「탈구글시트 최종점검·결정사안」 · 「탈구글시트 최종단계 계획」 · 「시트 우위 동기화·연결 끊기」 · 「W1 적용 결과 보고서」
+</div>
+
+</div>
+</body>
+</html>
