@@ -336,9 +336,11 @@ await ta('시트가 더 많은 작업만 시트 우위로 분류 · 일치는 ok
     query: async (sql, params) => {
       const s = String(sql);
       if (/FROM tab_configs tc/.test(s) && /rawRows/.test(s)) return { rows: [
-        { sheetId: 'S', tabName: 'T1', tabGid: '1', displayName: '우레온', rawRows: 118, mirroredAt: 'x', boardRows: 2 },
-        { sheetId: 'S', tabName: 'T2', tabGid: '2', displayName: '동기화됨', rawRows: 118, mirroredAt: 'x', boardRows: 4 },
-        { sheetId: 'S', tabName: 'T3', tabGid: null, displayName: 'gid없음', rawRows: 50, mirroredAt: 'x', boardRows: 0 },
+        { sheetId: 'S', tabName: 'T1', tabGid: '1', displayName: '우레온', rawRows: 118, mirroredAt: 'x', boardRows: 2, registeredAt: '2026-08-01' },
+        { sheetId: 'S', tabName: 'T2', tabGid: '2', displayName: '동기화됨', rawRows: 118, mirroredAt: 'x', boardRows: 4, registeredAt: '2026-08-01' },
+        { sheetId: 'S', tabName: 'T3', tabGid: null, displayName: 'gid없음', rawRows: 50, mirroredAt: 'x', boardRows: 0, registeredAt: '2026-08-01' },
+        { sheetId: 'S', tabName: 'T4', tabGid: '4', displayName: '작년작업', rawRows: 118, mirroredAt: 'x', boardRows: 2, registeredAt: '2025-06-01' },
+        { sheetId: 'S', tabName: 'T5', tabGid: '5', displayName: '연도미상', rawRows: 118, mirroredAt: 'x', boardRows: 2 },
       ] };
       if (/array_agg\(seq\)/.test(s)) return { rows: [
         { sheetId: 'S', tabName: 'T1', seqs: [19, 20] },
@@ -356,7 +358,12 @@ await ta('시트가 더 많은 작업만 시트 우위로 분류 · 일치는 ok
   assert.strictEqual(t2.severity, 'ok', '이미 자리가 다 있는 탭이 문제로 잡혔다');
   assert.ok(!out.items.some(i => i.tabName === 'T3'), 'gid 없는 탭을 정밀 스캔했다(대상 아님)');
   assert.strictEqual(out.flagged, 1);
-  assert.strictEqual(out.total, 3, '분모가 등록 작업 전체가 아니다');
+  assert.strictEqual(out.total, 5, '분모가 등록 작업 전체가 아니다');
+  // ★ 연도 하한: 2025년 작업·연도 미상은 정밀 스캔 대상에서 빠지고 **건수로 고지**된다
+  assert.ok(!out.items.some(i => i.tabName === 'T4'), '2025년 작업이 스캔 대상에 남았다');
+  assert.ok(!out.items.some(i => i.tabName === 'T5'), '연도 미상이 스캔 대상에 남았다');
+  assert.strictEqual(out.filteredOld, 1, '과거 작업 제외 건수를 고지하지 않는다');
+  assert.strictEqual(out.yearUnknown, 1, '연도 미상 건수를 고지하지 않는다');
   svc.__setPoolForTest(null);
 });
 t('★ 분모는 tab_configs(등록 작업 전체) + 아카이브 제외', () => {

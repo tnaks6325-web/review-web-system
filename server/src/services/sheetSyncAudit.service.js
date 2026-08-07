@@ -25,6 +25,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
+const activity = require('../utils/tabActivity');
 
 const _HEADER_SCAN_ROWS = 60;   // 상단 캠페인 정보 블록을 넘기기 충분(campaignSchedule 과 같은 범위)
 const _DETAIL_CAP = 120;        // 정밀 보강(작업 행 수·인덱스 진단)을 돌릴 문제 탭 상한 — 초과는 고지
@@ -143,10 +144,13 @@ function classifySyncRow(r = {}) {
 
 // ── 감사: 등록 작업 전수(또는 컷오프 이전) 반영 상태 ─────────────────────────
 const _AUDIT_TAB_CAP = 1500;
-async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeArchived = false } = {}) {
+async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeArchived = false,
+                                since = null, includeUnknown = false, includeIgnored = false } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || _AUDIT_TAB_CAP, 1), _AUDIT_TAB_CAP);
   // 컷오프는 KST 날짜 문자열(YYYY-MM-DD)만 받는다 — 형식이 아니면 무시(전수 감사).
   const cutoff = (typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before)) ? before : null;
+  // 연도 하한 — 과거 자료(기본 2026-01-01 이전)는 목록에서 빼되 **건수는 고지**한다.
+  const sinceDay = activity.normalizeSince(since);
 
   const { rows } = await _db().query(
     `SELECT tc.sheet_id  AS "sheetId",
@@ -160,7 +164,8 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
             im.status    AS "idxStatus", im.built_at AS "idxBuiltAt", im."idxGid",
             im.error_msg AS "idxErrorMsg", im.skip_reason AS "idxSkipReason",
             ri.cnt       AS "indexRows",
-            cp.cnt       AS "boardRows"
+            cp.cnt       AS "boardRows",
+            ${activity.ACTIVITY_SELECT_SQL}
        FROM tab_configs tc
        LEFT JOIN LATERAL (
          SELECT MIN(c.created_at) AS reg_at FROM campaigns c WHERE c.sheet_id = tc.sheet_id
@@ -195,15 +200,28 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
          SELECT COUNT(*)::int AS cnt FROM campaign_participants p
           WHERE p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name AND p.deleted_at IS NULL
        ) cp ON TRUE
+       ${activity.ACTIVITY_LATERAL_SQL}
       WHERE (COALESCE(tc.is_closed, FALSE) = FALSE OR $2::boolean)
       ORDER BY reg.reg_at ASC NULLS FIRST, tc.sheet_id, tc.tab_name
       LIMIT $1`,
     [lim, !!includeArchived]
   );
 
+  // 사람이 [연도 확인]으로 시트에서 읽어 둔 실제 날짜(미러엔 표시 문자열만 남아 잃어버린 연도)
+  const probeMap = await _loadProbeMap();
+  // 담당자가 "복구할 필요 없다"고 치운 작업(데이터는 그대로 — 목록에서만 감춘다)
+  const ignoreMap = await _loadIgnoreMap();
+
   const items = [];
+  let filteredOld = 0, yearUnknown = 0, ignoredCount = 0;
   for (const r of rows) {
     const regUnknown = !r.registeredAt;
+    // ── 연도 하한: 과거 작업은 빼고, 연도를 모르는 작업은 따로 센다(조용한 누락 금지) ──
+    const act = activity.resolveActivity({ ...r, probedAt: probeMap[r.sheetId + '\t' + r.tabName] || null });
+    const verdict = activity.activityVerdict(act, sinceDay, includeUnknown);
+    if (verdict === 'old') { filteredOld++; continue; }
+    if (verdict === 'unknown') { yearUnknown++; continue; }
+    if (ignoreMap[r.sheetId + '\t' + r.tabName] && !includeIgnored) { ignoredCount++; continue; }
     // 컷오프가 있으면: 이전 등록 + 등록일 미상(놓치면 안 되는 쪽)만 남긴다.
     if (cutoff && !regUnknown) {
       const regDay = new Date(r.registeredAt).toISOString().slice(0, 10);
@@ -218,6 +236,8 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
       sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid || null,
       displayName: r.displayName, campaignName: r.campaignName || null,
       registeredAt: r.registeredAt, regUnknown,
+      activityAt: act.activityAt, activitySource: act.activitySource, yearUnknown: act.yearUnknown,
+      ignored: !!ignoreMap[r.sheetId + '\t' + r.tabName],
       rawRows: r.rawRows == null ? null : Number(r.rawRows),
       mirroredAt: r.mirroredAt || null, mirrorTabName: r.mirrorTabName || null,
       ...resolveTabGid(r),
@@ -258,7 +278,11 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
   // 아카이브에만 남은 탭(등록 목록에서 내려간 것)도 함께 — 복구 대상이라 화면에 보여야 한다.
   if (includeArchived) {
     const keys = new Set(items.map(i => i.sheetId + ' ' + i.tabName));
-    items.push(...await listArchivedOnly(keys));
+    for (const a of await listArchivedOnly(keys)) {
+      if (ignoreMap[a.sheetId + '\t' + a.tabName] && !includeIgnored) { ignoredCount++; continue; }
+      a.ignored = !!ignoreMap[a.sheetId + '\t' + a.tabName];
+      items.push(a);
+    }
   }
 
   // 문제 있는 탭이 먼저 보이게(broken → behind → ok), 같은 급은 등록 오래된 순.
@@ -269,6 +293,8 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
     total: items.length,
     flagged: items.filter(i => i.severity !== 'ok').length,
     includeArchived: !!includeArchived,
+    since: sinceDay, filteredOld, yearUnknown, includeUnknown: !!includeUnknown,
+    ignoredCount, includeIgnored: !!includeIgnored,
     detailCapped,
     truncated: rows.length >= lim,
     items,
@@ -473,4 +499,160 @@ async function listArchivedOnly(existingKeys, limit = 300) {
   }
 }
 
-module.exports = { auditSheetSync, repairSheetSync, classifySyncRow, resolveTabGid, backfillTabGids, __setPoolForTest, _AUDIT_TAB_CAP };
+// ── 연도 확인 — 시트의 **실제 날짜값**을 읽어 잃어버린 연도를 되찾는다 ────────────
+//
+// ★★ 왜 필요한가(실측): 시트 셀에는 진짜 날짜값 `2024. 7. 12` 가 들어 있는데 **표시 형식이
+//    `7 / 12 (금)`** 이라 연도가 안 보인다. RAW 미러는 `FORMATTED_VALUE`(=표시 문자열 그대로)로
+//    저장하므로 미러만 봐서는 연도를 알 수 없다 → 그 탭들이 전부 "연도 미상"이 된다.
+// ★★ **미러를 UNFORMATTED 로 바꾸면 안 된다**(완화 금지): 주문 행배정·다중컬럼 가드가
+//    "시트에 표기된 그대로"를 전제로 비교하고(orderLedger 가 일부러 같은 옵션으로 읽는다),
+//    바꾸는 순간 라이브 핫패스가 깨진다. 그래서 **연도 미상 탭의 날짜 컬럼만** 따로 읽는다.
+// ★ 읽는 값은 구글시트 **일련번호**(예: 45485) — `parseDateToken` 이 이미 40000~60000 범위를
+//   날짜로 해석한다(파서 사본 금지, 그대로 재사용).
+// ★ 시트 API 를 쓰는 유일한 경로다 → **사람이 버튼을 누를 때만** 돌고, throttle 을 타며,
+//   한 번에 `_PROBE_CAP` 탭까지만(초과분은 고지). 결과는 app_settings 한 키에 캐시해 재조회 0.
+// ★ 셀이 **텍스트로 직접 입력**된 시트(`7 / 12 (금)` 를 글자로 친 경우)는 일련번호가 아니므로
+//   여전히 연도를 알 수 없다 — 그건 미상으로 남기고 화면이 그 사실을 말한다(추측 금지).
+const _PROBE_KEY = 'tab_year_probe';   // { "sheetId\ttabName": "YYYY-MM-DD" }
+const _PROBE_CAP = 40;                 // 한 번에 읽을 탭 수(탭당 시트 API 1콜)
+
+async function _loadProbeMap() {
+  try {
+    const { rows } = await _db().query(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [_PROBE_KEY]);
+    if (!rows.length || !rows[0].value) return {};
+    const o = JSON.parse(rows[0].value);
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) {
+    logger.warn(`[sheetSync] 연도 확인 캐시 조회 실패: ${e.message}`);
+    return {};   // fail-soft — 캐시가 없으면 그냥 미상으로 보일 뿐이다
+  }
+}
+
+/** 0-based 컬럼 인덱스 → 시트 열 문자(A, B, ... AA) */
+function _colLetter(idx) {
+  let n = Number(idx) + 1, out = '';
+  while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
+  return out;
+}
+
+async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync' } = {}) {
+  const { throttledCall } = require('../utils/sheetsThrottle');
+  const { readSheet } = require('./sheets.service');
+  const { findDateColumnIndex } = require('./campaignSchedule.service');
+  const { parseDateToken } = require('../utils/koreanDate');
+  const db = _db();
+  const cap = Math.min(Math.max(parseInt(limit, 10) || _PROBE_CAP, 1), 100);
+
+  // 연도 미상 탭만 고른다(이미 아는 탭에 시트 API 를 쓰지 않는다)
+  const { rows } = await db.query(
+    `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+            COALESCE(NULLIF(tc.tab_gid,''), rst.tab_gid) AS "tabGid",
+            reg.reg_at AS "registeredAt", ${activity.ACTIVITY_SELECT_SQL}
+       FROM tab_configs tc
+       LEFT JOIN LATERAL (
+         SELECT MIN(c.created_at) AS reg_at FROM campaigns c WHERE c.sheet_id = tc.sheet_id
+       ) reg ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT r.tab_gid FROM raw_sheet_tabs r
+          WHERE r.sheet_id = tc.sheet_id AND r.tab_name = tc.tab_name
+          ORDER BY r.mirrored_at DESC NULLS LAST LIMIT 1
+       ) rst ON TRUE
+       ${activity.ACTIVITY_LATERAL_SQL}
+      WHERE COALESCE(tc.is_closed, FALSE) = FALSE
+      LIMIT $1`, [_AUDIT_TAB_CAP]);
+
+  const cached = await _loadProbeMap();
+  const targets = rows.filter(r => {
+    if (!r.tabGid) return false;                                   // gid 없이는 그 탭을 읽을 수 없다
+    if (cached[r.sheetId + '\t' + r.tabName]) return false;        // 이미 확인함(시트 재읽기 0)
+    return activity.resolveActivity(r).yearUnknown;
+  });
+  const pick = targets.slice(0, cap);
+  const capped = targets.length > pick.length;
+
+  const found = {}, failed = [];
+  for (const t of pick) {
+    try {
+      // 헤더 탐지는 미러로(시트 재읽기 없이) — 날짜 컬럼 위치만 알면 된다
+      const { rows: head } = await db.query(
+        `SELECT row_index, cells FROM raw_sheet_rows
+          WHERE sheet_id=$1 AND tab_gid=$2 AND row_index <= ${_HEADER_SCAN_ROWS} ORDER BY row_index`,
+        [t.sheetId, String(t.tabGid)]);
+      if (!head.rows.length) { failed.push({ ...t, reason: 'no_mirror' }); continue; }
+      const det = detectSheetHeader(head.rows.map(r => (Array.isArray(r.cells) ? r.cells : [])));
+      if (det.headerRowIndex == null) { failed.push({ ...t, reason: 'header_unrecognizable' }); continue; }
+      const colIdx = findDateColumnIndex(det.headers || []);
+      if (colIdx < 0) { failed.push({ ...t, reason: 'no_date_column' }); continue; }
+
+      // ★ 날짜 컬럼 **한 열만** 읽는다(넓은 시트에서도 전송량 일정) · gid 지정(리네임 안전)
+      const col = _colLetter(colIdx);
+      const esc = String(t.tabName).replace(/'/g, "''");
+      const vals = await throttledCall(() => readSheet(t.sheetId, `'${esc}'!${col}:${col}`,
+        { gid: String(t.tabGid), valueRenderOption: 'UNFORMATTED_VALUE' }));
+
+      let best = null;
+      for (const row of (vals || [])) {
+        const tok = parseDateToken(Array.isArray(row) ? row[0] : row);
+        if (!tok || tok.y == null) continue;      // 텍스트로 친 값은 연도가 없다 → 신호 아님
+        const iso = `${tok.y}-${String(tok.m || 1).padStart(2, '0')}-${String(tok.d || 1).padStart(2, '0')}`;
+        if (!best || iso > best) best = iso;      // 그 탭의 마지막 진행일
+      }
+      if (best) found[t.sheetId + '\t' + t.tabName] = best;
+      else failed.push({ ...t, reason: 'no_dated_cell' });
+    } catch (e) {
+      logger.warn(`[sheetSync] 연도 확인 실패(${t.sheetId}/${t.tabName}): ${e.message}`);
+      failed.push({ sheetId: t.sheetId, tabName: t.tabName, reason: 'read_error' });
+    }
+  }
+
+  if (Object.keys(found).length) {
+    const merged = { ...cached, ...found };
+    await db.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [_PROBE_KEY, JSON.stringify(merged)]);
+    logger.info(`[sheetSync] 연도 확인: ${Object.keys(found).length}개 탭 (by ${by})`);
+  }
+  return {
+    ok: true, unknownTabs: targets.length, probed: pick.length, capped,
+    resolved: Object.keys(found).length,
+    failed: failed.slice(0, 30).map(f => ({ tabName: f.tabName, reason: f.reason })),
+    failedCount: failed.length,
+    sample: Object.entries(found).slice(0, 10).map(([k, v]) => ({ tabName: k.split('\t')[1], date: v })),
+  };
+}
+
+// ── 목록에서 제외 — "복구할 필요 없는 작업"을 담당자가 치운다 ──────────────────
+//   ★★ **데이터를 지우지 않는다**(완화 금지): 시트·검색인덱스·아카이브·작업보드 어디도 건드리지
+//      않고, 이 점검 화면의 목록에서만 감춘다. 실제 삭제는 되돌릴 수 없어 점검 도구가 할 일이 아니다.
+//   ★ 저장은 app_settings 한 키(JSON) — 신규 테이블·마이그레이션 0(worktable_template 과 같은 관용구).
+//   ★ 되돌리기(undo)가 항상 가능하고, 제외 건수는 화면에 고지된다(조용한 누락 금지).
+const _IGNORE_KEY = 'sheet_sync_ignored';   // { "sheetId\ttabName": "제외 시각" }
+
+async function _loadIgnoreMap() {
+  try {
+    const { rows } = await _db().query(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [_IGNORE_KEY]);
+    if (!rows.length || !rows[0].value) return {};
+    const o = JSON.parse(rows[0].value);
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) {
+    logger.warn(`[sheetSync] 제외 목록 조회 실패: ${e.message}`);
+    return {};   // fail-soft — 못 읽으면 아무것도 감추지 않는다(숨기는 쪽으로 실패하지 않는다)
+  }
+}
+
+async function setIgnored({ sheetId, tabName, ignored = true, by = 'sheet-sync' } = {}) {
+  if (!sheetId || !tabName) throw new Error('setIgnored: sheetId, tabName 필수');
+  const map = await _loadIgnoreMap();
+  const key = sheetId + '\t' + tabName;
+  if (ignored) map[key] = new Date().toISOString();
+  else delete map[key];
+  await _db().query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [_IGNORE_KEY, JSON.stringify(map)]);
+  logger.info(`[sheetSync] 목록 ${ignored ? '제외' : '복원'}: ${sheetId}/${tabName} (by ${by})`);
+  return { ok: true, sheetId, tabName, ignored, total: Object.keys(map).length };
+}
+
+module.exports = { auditSheetSync, repairSheetSync, classifySyncRow, resolveTabGid, backfillTabGids, probeUnknownYears, setIgnored, __setPoolForTest, _AUDIT_TAB_CAP };
