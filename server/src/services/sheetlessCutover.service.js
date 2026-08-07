@@ -31,8 +31,15 @@ const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었�
 
 /* ═══════════════ 점검 항목 ═══════════════ */
 //  state: 'pass' | 'fail' | 'unknown'  — pass 가 아니면 전부 잠금(fail-closed)
-function _chk(key, label, state, detail, hint) {
-  return { key, label, state, detail: detail || '', hint: hint || '' };
+/**
+ * @param {string} [fix] 그 자리에서 누를 수 있는 조치 —
+ *   `'refresh'` = 시트 새로고침(repair) · `'audit'` = 반영 점검 화면 열기.
+ *   ★★ 막힌 항목이 **다른 화면 이름만 말하고 끝나면 안 된다**(실측: 안내가 가리킨
+ *      "시트 데이터 반영 점검 화면"은 nav 어디에도 없어 주소를 직접 쳐야 열렸다).
+ *      무엇을 누를지는 **서버가 말하고** 화면은 그대로 그린다(프론트 재판정 0 규율).
+ */
+function _chk(key, label, state, detail, hint, fix) {
+  return { key, label, state, detail: detail || '', hint: hint || '', fix: fix || null };
 }
 
 /** ① 시트에 준비된 줄이 시스템 표보다 많으면 안 된다(먼저 백필). */
@@ -40,7 +47,7 @@ async function _checkSheetRows(db, tab) {
   const label = '시트 준비 줄 ≤ 시스템 표';
   if (!tab.tabGid) {
     return _chk('sheet_rows', label, 'unknown', '탭 번호(gid)를 몰라 시트 사본을 읽을 수 없습니다',
-      '시트 데이터 반영 점검 화면의 [gid 채우기]를 먼저 실행하세요.');
+      '[반영 점검 열기] 에서 gid 를 채운 뒤 다시 점검하세요.', 'audit');
   }
   let read;
   try {
@@ -56,7 +63,7 @@ async function _checkSheetRows(db, tab) {
   const board = Number(tab.boardRows) || 0;
   if (prepared > board) {
     return _chk('sheet_rows', label, 'fail', `시트 ${prepared}줄 · 시스템 표 ${board}줄 (${prepared - board}줄 부족)`,
-      '시트 데이터 반영 점검 화면의 [슬롯 백필]로 표를 먼저 채우세요 — 지금 끊으면 그 줄들이 사라집니다.');
+      '[반영 점검 열기] 의 시트 우위 점검에서 표를 먼저 채우세요 — 지금 끊으면 그 줄들이 사라집니다.', 'audit');
   }
   return _chk('sheet_rows', label, 'pass', `시트 ${prepared}줄 · 시스템 표 ${board}줄`);
 }
@@ -119,7 +126,7 @@ async function _checkMirror(tab, now) {
   const mirroredAt = tab.mirroredAt ? new Date(tab.mirroredAt).getTime() : 0;
   if (!mirroredAt) {
     return _chk('mirror', label, 'unknown', '시트를 읽어 온 기록이 없습니다',
-      '시트 데이터 반영 점검 화면에서 그 시트를 한 번 새로고침하세요.');
+      '아래 [시트 새로고침] 을 누르면 지금 읽어 옵니다.', 'refresh');
   }
   // 우리가 "그 시트의 이 버전까지 읽었다"고 기록해 둔 시각. 없으면 읽어 온 시각으로 대신한다.
   const known = tab.sheetModifiedAt ? new Date(tab.sheetModifiedAt).getTime() : mirroredAt;
@@ -140,7 +147,7 @@ async function _checkMirror(tab, now) {
   const ago = Math.max(0, Math.floor((now.getTime() - remote) / 60000));
   if (remote > known) {
     return _chk('mirror', label, 'fail', `시트가 ${ago}분 전에 수정됐는데 아직 읽어 오지 않았습니다`,
-      '시트 데이터 반영 점검 화면에서 그 시트를 새로고침한 뒤 이관하세요 — 지금 끊으면 그 편집이 사라집니다.');
+      '아래 [시트 새로고침] 을 누른 뒤 다시 점검하세요 — 지금 끊으면 그 편집이 사라집니다.', 'refresh');
   }
   return _chk('mirror', label, 'pass', `시트 최종 수정 ${ago}분 전 · 그 이후로 바뀐 것 없음(읽어 둔 상태가 최신)`);
 }
