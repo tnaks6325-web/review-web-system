@@ -116,6 +116,30 @@
   }
 
   /**
+   * 첨부 이미지 배열(work_detail.reviewGuideImages / specialNotesImages) → <img> HTML.
+   *
+   * ★ 유입가이드는 HTML 안에 <img>를 갖지만 리뷰가이드·특이사항은 **평문** 필드라
+   *   사진을 배열로 따로 받는다(평문 칸을 HTML로 승격하면 기존 저장분의 '<옵션>' 같은
+   *   꺾쇠 글자가 태그로 오인돼 삭제된다 — 서버 sanitizeGuideHtml.js 주석 참조).
+   * ★ 호스트는 신뢰 베이스로 재구성 — 배열에 담긴 주소의 임의 호스트를 그대로 쓰지 않는다
+   *   (extractGuideImages 와 같은 규율). 우리 프록시 형식이 아니면 그리지 않는다.
+   * @returns {{html:string, tokens:string[]}} tokens = 중복 판정용 파일ID
+   */
+  function imageListHtml(list, apiBase, alt) {
+    var base = apiBase != null ? apiBase : (typeof window.API_BASE_URL !== 'undefined' ? window.API_BASE_URL : '');
+    if (!list || !list.length) return { html: '', tokens: [] };
+    var html = '', tokens = [], used = {};
+    for (var i = 0; i < list.length; i++) {
+      var m = String(list[i] || '').match(/\/api\/order\/guide-image\/([-\w]{20,})$/);
+      if (!m || used[m[1]]) continue;
+      used[m[1]] = 1;
+      tokens.push(m[1]);
+      html += '<img src="' + escAttr(base + '/api/order/guide-image/' + m[1]) + '" alt="' + escAttr(alt || '첨부 이미지') + '">';
+    }
+    return { html: html, tokens: tokens };
+  }
+
+  /**
    * 작업내용 카드 HTML.
    * @param {object} d  { workDetail, landingUrl, inflowType, selectedOption }
    * @param {object} o  { showLanding:bool(기본 true), showOption:bool(기본 true), apiBase }
@@ -159,9 +183,19 @@
         + '</div>';
     }
 
+    // 리뷰가이드·특이사항 첨부 이미지(그 카드 안에 그린다 — 유입가이드 밑에 나오면
+    // 리뷰어가 "구매 경로 안내"로 읽는다). 토큰은 아래 유입가이드 추출의 중복 판정에 넘긴다.
+    var revPack = imageListHtml(wd.reviewGuideImages, o.apiBase, '리뷰 가이드 이미지');
+    var notePack = imageListHtml(wd.specialNotesImages, o.apiBase, '특이사항 이미지');
+
     // 유입가이드
     var guideHtml = wd.inflowGuideHtml || '';
-    var extraImgs = extractGuideImages(wd.reviewGuide || '', guideHtml, o.apiBase);
+    // ★ seen 에 두 배열의 토큰을 함께 넘겨 같은 사진이 유입가이드 카드에 이중 노출되지 않게 한다
+    //   (레거시 경로: 리뷰가이드 '평문'에 섞여 온 주소는 종전대로 유입가이드 카드에 붙는다 — 무회귀)
+    var extraImgs = extractGuideImages(
+      wd.reviewGuide || '',
+      guideHtml + revPack.tokens.join(' ') + notePack.tokens.join(' '),
+      o.apiBase);
     var hasGuide = !!(guideHtml || extraImgs);   // 치환 전에 판정(아래에서 안내문으로 바뀜)
     if (!hasGuide) {
       guideHtml = '<span class="cwd-muted">등록된 유입가이드가 없어요.</span>';
@@ -181,17 +215,19 @@
     }
     html += '</div>';
 
-    // 리뷰 가이드 ([리뷰등록 가이드] 섹션만)
+    // 리뷰 가이드 ([리뷰등록 가이드] 섹션만) + 첨부 이미지
+    // ★ 사진만 있고 글이 비어도 카드를 낸다 — 안 그리면 관리자가 넣은 사진이 통째로 사라진다.
+    //   글의 섹션 규칙(pickReviewOnly)은 그대로 — 사진은 섹션과 무관하게 이 카드에 나온다.
     var reviewOnly = pickReviewOnly(wd.reviewGuide);
-    if (reviewOnly) {
+    if (reviewOnly || revPack.html) {
       html += '<div class="cwd-box"><div class="cwd-tt">📝 리뷰 가이드</div>'
-        + '<div class="cwd-body">' + escAttr(reviewOnly) + '</div></div>';
+        + '<div class="cwd-body">' + escAttr(reviewOnly) + revPack.html + '</div></div>';
     }
 
-    // 특이사항
-    if (wd.specialNotes) {
+    // 특이사항 + 첨부 이미지
+    if (wd.specialNotes || notePack.html) {
       html += '<div class="cwd-box"><div class="cwd-tt">📌 특이사항</div>'
-        + '<div class="cwd-body">' + escAttr(wd.specialNotes) + '</div></div>';
+        + '<div class="cwd-body">' + escAttr(wd.specialNotes || '') + notePack.html + '</div></div>';
     }
     return html;
   }
@@ -215,6 +251,7 @@
   window.CampWorkDetail = {
     renderInto: renderInto, cardsHtml: cardsHtml,
     fmtProduct: fmtProduct, pickReviewOnly: pickReviewOnly,
-    extractGuideImages: extractGuideImages, escAttr: escAttr, driveId: driveId,
+    extractGuideImages: extractGuideImages, imageListHtml: imageListHtml,
+    escAttr: escAttr, driveId: driveId,
   };
 })();

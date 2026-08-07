@@ -315,19 +315,38 @@
       <div class="rf-card" data-sec="work" id="rf_work_section" style="display:none">
         <div class="rf-ch"><span class="rf-ct">📝 작업내용</span><span class="rf-cn">참여한 리뷰어에게만 공개</span></div>
         <div class="rf-cb">
+          <!-- ★ 세 칸 모두 같은 구조: [입력창][첨부 이미지 스트립] (rows=3 통일 — 칸마다 높이가 다르면
+               오른쪽 썸네일 크기·[＋] 위치가 줄마다 달라진다). 스트립 동작은 index-recruit.js 의 _ig* 함수. -->
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유입가이드</span>
             <div>
-              <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
+              <div class="ig-wrap">
+                <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
+                <div class="ig-strip" id="rf_ig_inflow" tabindex="0" data-igf="inflow"></div>
+                <input type="file" id="rf_igf_inflow" accept="image/*" multiple class="ig-file" onchange="igPickFiles('inflow',this)">
+              </div>
               <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div>
+              <div class="ig-msg" id="rf_igm_inflow"></div>
               <div id="rf_clean_inflow"></div>
             </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">리뷰가이드</span>
             <div>
-              <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
+              <div class="ig-wrap">
+                <textarea id="rf_wd_review" class="rform-input" rows="3" placeholder="별점/포토 비율 등"></textarea>
+                <div class="ig-strip" id="rf_ig_review" tabindex="0" data-igf="review"></div>
+                <input type="file" id="rf_igf_review" accept="image/*" multiple class="ig-file" onchange="igPickFiles('review',this)">
+              </div>
+              <div class="ig-msg" id="rf_igm_review"></div>
               <div id="rf_clean_review"></div>
             </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">특이사항</span>
-            <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택 — 참여한 리뷰어에게만 공개"></textarea></div>
+            <div>
+              <div class="ig-wrap">
+                <textarea id="rf_wd_notes" class="rform-input" rows="3" placeholder="선택 — 참여한 리뷰어에게만 공개"></textarea>
+                <div class="ig-strip" id="rf_ig_notes" tabindex="0" data-igf="notes"></div>
+                <input type="file" id="rf_igf_notes" accept="image/*" multiple class="ig-file" onchange="igPickFiles('notes',this)">
+              </div>
+              <div class="ig-msg" id="rf_igm_notes"></div>
+            </div></div>
         </div>
       </div>
 
@@ -633,7 +652,74 @@
 .rf-clean-pv pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;margin:4px 0;line-height:1.65}
 .rf-clean-pv .cut{background:#FEE2E2;text-decoration:line-through;border-radius:3px;padding:0 2px}
 .rf-clean-pv .keep{background:#DCFCE7;border-radius:3px;padding:0 2px}
-.rf-clean-pv .rf-cpv-btns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}`;
+.rf-clean-pv .rf-cpv-btns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+/* 🖼 작업내용 첨부 이미지 — 입력창 오른쪽, 같은 높이 썸네일(시안 A · docs/design-workdetail-images.html)
+   ★ 세 칸(유입가이드·리뷰가이드·특이사항)이 같은 마크업·같은 위젯을 쓴다(사본 금지). */
+/* ★ box-sizing 을 호스트 리셋에 기대지 않는다 — content-box 인 화면에서는 스트립이 padding·border
+   만큼 더 높아져 입력창과 높이가 어긋난다(테마 없는 호스트에서 실측). */
+#recruitModal .ig-wrap,#recruitModal .ig-wrap *{box-sizing:border-box}
+#recruitModal .ig-wrap{display:flex;gap:8px;align-items:stretch}
+#recruitModal .ig-wrap>textarea.rform-input{flex:1;min-width:0;height:82px;min-height:82px;resize:vertical}
+#recruitModal .ig-strip{flex:none;width:326px;display:flex;gap:5px;align-items:stretch;height:82px;padding:4px;
+  border:1px dashed var(--border,#E2E8F0);border-radius:9px;background:var(--bg2,#F8FAFC);overflow:hidden;
+  transition:border-color .15s,background .15s}
+#recruitModal .ig-strip.drag{border-style:solid;border-color:var(--p,#3182F6);background:#EEF3FD}
+#recruitModal .ig-strip.err{border-color:#FCA5A5;background:#FEF2F2}
+#recruitModal .ig-file{display:none}
+#recruitModal .ig-thumb{position:relative;flex:none;width:74px;height:100%;border-radius:7px;overflow:hidden;padding:0;
+  border:1px solid var(--border,#E2E8F0);background:#EEF1F6;cursor:zoom-in}
+#recruitModal .ig-thumb img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+#recruitModal .ig-thumb .ig-x{position:absolute;top:3px;right:3px;width:17px;height:17px;border:none;border-radius:50%;
+  background:rgba(16,24,40,.62);color:#fff;font-size:.6rem;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+#recruitModal .ig-thumb .ig-x:hover{background:rgba(220,38,38,.92)}
+#recruitModal .ig-thumb .ig-n{position:absolute;left:3px;bottom:3px;font-size:.55rem;font-weight:800;color:#fff;
+  background:rgba(16,24,40,.55);border-radius:4px;padding:1px 4px;line-height:1.35}
+#recruitModal .ig-thumb .ig-g{position:absolute;left:0;top:0;bottom:0;width:13px;cursor:grab;display:grid;place-items:center;
+  background:linear-gradient(90deg,rgba(16,24,40,.5),rgba(16,24,40,0));color:#fff;font-size:.55rem;line-height:1}
+#recruitModal .ig-thumb.dragging{opacity:.4}
+#recruitModal .ig-thumb.dropL{box-shadow:inset 3px 0 0 var(--p,#3182F6)}
+#recruitModal .ig-thumb.dropR{box-shadow:inset -3px 0 0 var(--p,#3182F6)}
+#recruitModal .ig-thumb.up img{opacity:.35;filter:grayscale(.4)}
+#recruitModal .ig-thumb.up::after{content:"올리는 중";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:.55rem;font-weight:800;color:var(--p,#3182F6)}
+#recruitModal .ig-thumb.bad{border-color:#FCA5A5}
+#recruitModal .ig-thumb.bad img{opacity:.3}
+#recruitModal .ig-thumb.bad::after{content:"실패";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:.6rem;font-weight:800;color:#DC2626}
+#recruitModal .ig-add{flex:none;width:74px;height:100%;padding:0;border:1px dashed var(--border,#E2E8F0);border-radius:7px;
+  background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+  font-size:.6rem;font-weight:700;color:var(--t3,#94A3B8);font-family:inherit}
+#recruitModal .ig-add:hover{border-color:var(--p,#3182F6);color:var(--p,#3182F6);background:#F5F9FF}
+#recruitModal .ig-add .plus{font-size:.95rem;line-height:1;font-weight:400}
+#recruitModal .ig-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  cursor:pointer;border-radius:7px;text-align:center;padding:0 8px;border:none;background:transparent;font-family:inherit}
+#recruitModal .ig-empty:hover{background:#F5F9FF}
+#recruitModal .ig-empty .t1{font-size:.68rem;font-weight:800;color:var(--t3,#94A3B8)}
+#recruitModal .ig-empty .t2{font-size:.6rem;color:var(--t4,#94A3B8)}
+#recruitModal .ig-empty:hover .t1{color:var(--p,#3182F6)}
+#recruitModal .ig-msg{font-size:.64rem;font-weight:700;margin-top:3px;color:var(--t3,#94A3B8)}
+#recruitModal .ig-msg.warn{color:#B45309}
+#recruitModal .ig-msg.bad{color:#DC2626}
+#recruitModal .ig-msg.ok{color:#15803D}
+/* 좁은 화면: 스트립이 입력창 아래로(렌더러는 한 벌 — CSS만 바뀐다) */
+@media (max-width:1100px){
+  #recruitModal .ig-wrap{flex-direction:column}
+  #recruitModal .ig-strip{width:100%}
+}
+/* 🔍 확대 팝업 — body 직속(모달 스크롤 컨테이너 밖). z-index 는 모달(2000)보다 위 */
+#igLightbox{position:fixed;inset:0;z-index:3000;background:rgba(8,12,20,.84);display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:34px}
+#igLightbox.on{display:flex}
+#igLightbox img{max-width:min(980px,86vw);max-height:70vh;border-radius:10px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+#igLightbox .iglb-bar{display:flex;align-items:center;gap:13px;color:#E8EDF6;font-size:.78rem;font-weight:700}
+#igLightbox .iglb-btn{width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.28);
+  background:rgba(255,255,255,.1);color:#fff;font-size:1.05rem;cursor:pointer;display:grid;place-items:center;padding:0;font-family:inherit}
+#igLightbox .iglb-btn:disabled{opacity:.26;cursor:default}
+#igLightbox .iglb-btn:not(:disabled):hover{background:rgba(255,255,255,.24)}
+#igLightbox .iglb-close{position:absolute;top:18px;right:22px;width:36px;height:36px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:1.05rem;cursor:pointer;font-family:inherit}
+#igLightbox .iglb-fld{font-size:.68rem;font-weight:800;color:#93B4F5;letter-spacing:.03em}
+#igLightbox .iglb-tip{font-size:.62rem;color:#7E8BA0}`;
   function injectCss() {
     if (document.getElementById('recruit-modal-css')) return;
     var st = document.createElement('style');
