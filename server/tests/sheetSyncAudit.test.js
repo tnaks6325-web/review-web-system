@@ -216,6 +216,126 @@ t('escape 처리(esc)와 api.js(API_BASE_URL) 사용', () => {
   assert.ok(!/window\.API_BASE_URL/.test(HTML), 'window.API_BASE_URL 은 존재하지 않는다(레포 실측 함정) — bare 식별자');
 });
 
+/* ══ 6) 실제 작업 건수 · "어디에 없는가" 진단 ═══════════════ */
+console.log('\n6) 시트 작업건수(미러 행 수 아님) · 인덱스 미등록 원인 특정');
+
+// 실측 픽스처: 상단 캠페인 정보 9행 + 빈 줄 + 헤더 18행 + 데이터 15행 = 미러 33행, 실제 작업 15건
+const HDRS = ['번호', '담당자', '구매일자', '수취인', '연락처', '주소', '은행', '계좌번호', '예금주', '결제금액'];
+function auditPool({ tabs, imRows = [], arRows = [], dataCount = 15 }) {
+  const seen = { countSql: [], headScan: 0 };
+  return {
+    seen,
+    query: async (sql, params) => {
+      const s = String(sql);
+      if (/FROM tab_configs tc/.test(s) && /registeredAt/.test(s)) return { rows: tabs };
+      if (/row_index <= 60/.test(s)) {
+        seen.headScan++;
+        return { rows: [
+          { sheet_id: 'S', tab_gid: 'G', row_index: 1, cells: ['캠페인명', '6/10퓨비아표백제_네이버15건'] },
+          { sheet_id: 'S', tab_gid: 'G', row_index: 18, cells: HDRS },
+        ] };
+      }
+      if (/COUNT\(\*\)::int AS n FROM raw_sheet_rows/.test(s)) { seen.countSql.push({ s, params }); return { rows: [{ n: dataCount }] }; }
+      if (/FROM index_master WHERE sheet_id/.test(s)) return { rows: imRows };
+      if (/FROM index_master_archive/.test(s)) return { rows: arRows };
+      return { rows: [] };
+    },
+  };
+}
+const baseTab = {
+  sheetId: 'S', tabName: '6/10퓨비아표백제_네이버15건', tabGid: 'G',
+  displayName: '6/10퓨비아표백제_네이버15건', campaignName: null, registeredAt: '2026-06-10T00:00:00Z',
+  rawRows: 33, mirroredAt: 'x', idxStatus: null, idxBuiltAt: null, idxErrorMsg: null,
+  indexRows: 0, boardRows: 0,
+};
+
+await ta('★★ 시트 작업건수는 헤더 아래 값 있는 행(15) — 미러 행 수(33)를 그대로 쓰지 않는다', async () => {
+  const p = auditPool({ tabs: [baseTab] });
+  svc.__setPoolForTest(p);
+  const out = await svc.auditSheetSync({});
+  const it = out.items[0];
+  assert.strictEqual(it.dataRows, 15, '실제 작업 건수가 15가 아니다');
+  assert.strictEqual(it.rawRows, 33, '미러 행 수는 참고로 남겨야 한다');
+  // 헤더 아래(18행 초과)만 세는지 — 헤더 위 캠페인 정보가 섞이면 33이 된다
+  const cq = p.seen.countSql[0];
+  assert.ok(cq && cq.params[2] === 18, '헤더 행(18) 아래부터 세지 않는다');
+  assert.ok(/btrim\(v\) <> ''/.test(cq.s), '빈 행을 걸러내지 않는다');
+  svc.__setPoolForTest(null);
+});
+await ta('★ 인덱스 등록부에 같은 시트가 한 줄도 없음 → index_sheet_never_built', async () => {
+  svc.__setPoolForTest(auditPool({ tabs: [baseTab], imRows: [] }));
+  const out = await svc.auditSheetSync({});
+  assert.ok(out.items[0].flags.includes('index_sheet_never_built'), 'flags=' + out.items[0].flags);
+  assert.ok(/한 줄도 없/.test(out.items[0].reasonKo));
+  assert.strictEqual(out.items[0].indexHint.sheetIndexed, false);
+  svc.__setPoolForTest(null);
+});
+await ta('★★ 시트의 실제 탭 이름이 등록 이름과 다름 → index_renamed(양쪽 이름을 다 보여준다)', async () => {
+  // ★ 신호는 **미러의 현재 탭 이름**(gid 로 매칭된 행)이다 — index_master 에서 같은 gid 를 찾는
+  //   방식은 본 쿼리의 gid 우선 재매칭 때문에 도달 불가(진짜 PG 검증이 잡은 것).
+  svc.__setPoolForTest(auditPool({
+    tabs: [{ ...baseTab, mirrorTabName: '6/11퓨비아표백제_네이버15건' }], imRows: [] }));
+  const out = await svc.auditSheetSync({});
+  assert.ok(out.items[0].flags.includes('index_renamed'), 'flags=' + out.items[0].flags);
+  assert.ok(out.items[0].reasonKo.includes('6/11퓨비아표백제_네이버15건'), '시트의 실제 이름을 안 보여준다');
+  assert.ok(out.items[0].reasonKo.includes('6/10퓨비아표백제_네이버15건'), '등록된 이름(무엇을 고쳐야 하는지)을 안 보여준다');
+  assert.strictEqual(out.items[0].indexHint.renamedTo, '6/11퓨비아표백제_네이버15건');
+  svc.__setPoolForTest(null);
+});
+t('★★ 도달 불가 분기 금지 — 리네임 판정에 index_master gid 매칭을 쓰지 않는다', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function _indexHints(');
+  const fn = src.slice(i, src.indexOf('\n}', i));
+  assert.ok(/mirrorTabName/.test(fn), '미러의 현재 탭 이름을 신호로 쓰지 않는다');
+  assert.ok(!/String\(r\.tabGid\) === String\(t\.tabGid\)/.test(fn),
+    'index_master gid 매칭으로 리네임을 판정한다 — 본 쿼리가 gid 로 이미 매칭해 이 분기는 영영 실행되지 않는다');
+});
+await ta('★ 아카이브로 내려간 탭 → index_archived(정상일 수 있음을 함께 말한다)', async () => {
+  svc.__setPoolForTest(auditPool({ tabs: [baseTab],
+    imRows: [{ sheetId: 'S', tabName: '다른탭', tabGid: 'Z', status: 'active' }],
+    arRows: [{ sheetId: 'S', tabName: '6/10퓨비아표백제_네이버15건' }] }));
+  const out = await svc.auditSheetSync({});
+  assert.ok(out.items[0].flags.includes('index_archived'), 'flags=' + out.items[0].flags);
+  assert.ok(/아카이브/.test(out.items[0].reasonKo));
+  svc.__setPoolForTest(null);
+});
+await ta('일반 미등록 → 등록부 이름을 밝히고 같은 시트의 등록 탭을 예시로 보여준다', async () => {
+  svc.__setPoolForTest(auditPool({ tabs: [baseTab],
+    imRows: [{ sheetId: 'S', tabName: '다른탭A', tabGid: 'Z1', status: 'active' },
+             { sheetId: 'S', tabName: '다른탭B', tabGid: 'Z2', status: 'active' }] }));
+  const out = await svc.auditSheetSync({});
+  assert.ok(out.items[0].flags.includes('index_missing'), 'flags=' + out.items[0].flags);
+  assert.ok(/index_master/.test(out.items[0].reasonKo), '어느 등록부인지 말하지 않는다');
+  assert.ok(/작업목록에도 뜨지 않습니다/.test(out.items[0].reasonKo), '작업목록에서도 빠진다는 영향을 말하지 않는다');
+  assert.ok(/리뷰어 검색·구매양식 제출이 막히고/.test(out.items[0].reasonKo), '리뷰어 영향(검색·제출)을 말하지 않는다');
+  assert.ok(out.items[0].reasonKo.includes('다른탭A'), '같은 시트의 등록 탭 예시가 없다');
+  svc.__setPoolForTest(null);
+});
+t('★ 판정은 dataRows 우선 · dataRows 없으면 rawRows 폴백(무회귀)', () => {
+  // 미러 33행이지만 실제 작업 0건이면 index_empty 로 몰지 않는다
+  const a = classifySyncRow({ rawRows: 33, dataRows: 0, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 0 });
+  assert.ok(!a.flags.includes('index_empty'), '작업 행이 0인데 인덱스 0을 문제로 봤다');
+  const b = classifySyncRow({ rawRows: 33, mirroredAt: 'x', idxStatus: 'active', idxBuiltAt: 'x', indexRows: 0, boardRows: 0 });
+  assert.ok(b.flags.includes('index_empty'), 'dataRows 없을 때 rawRows 폴백이 깨졌다');
+});
+t('★ 정밀 진단은 문제 탭만 · gid 없는 탭은 건수를 지어내지 않는다', () => {
+  const body = R('src/services/sheetSyncAudit.service.js');
+  assert.ok(/severity !== 'ok'/.test(body), '문제 탭만 보강하지 않는다(전 탭 정밀 진단은 무겁다)');
+  assert.ok(/detailCapped/.test(body), '정밀 진단 절단을 고지하지 않는다');
+  const i = body.indexOf('async function _countDataRows(');
+  const fn = body.slice(i, body.indexOf('\n}', i));
+  assert.ok(/filter\(t => t\.tabGid\)/.test(fn), 'gid 없는 탭을 걸러내지 않는다');
+  assert.ok(/detectSheetHeader/.test(fn), '헤더 탐지 단일 출처를 안 쓴다');
+  assert.ok(/headerRowIndex == null\) continue/.test(fn), '헤더를 못 찾았는데 숫자를 만든다');
+});
+t('★ 프론트는 시트 작업건수를 주 숫자로 · 미러 행 수는 참고로만', () => {
+  assert.ok(/시트 작업건수/.test(HTML), '열 이름이 아직 미러 행 수 기준이다');
+  assert.ok(/it\.dataRows != null/.test(HTML), 'dataRows 를 안 쓴다');
+  assert.ok(/미러 ' \+ it\.rawRows \+ '행/.test(HTML), '미러 행 수를 참고 표기로 남기지 않았다');
+  assert.ok(/검색인덱스’ =|검색인덱스' =/.test(HTML) || /리뷰어가 이름·전화로/.test(HTML),
+    '검색인덱스가 무엇인지 화면이 설명하지 않는다');
+});
+
 console.log('\n✅ 전체 통과: ' + pass + '케이스');
 process.exit(0);
 })().catch(e => { console.error('\n❌ 실패:', e); process.exit(1); });

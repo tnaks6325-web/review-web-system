@@ -87,6 +87,14 @@ ok('cards: 별표는 진짜 admin_token 또는 관리자 목록만(스코프 토
   && !/const starChip = _adminTok\(\)/.test(cards));
 ok('cards: 별표 클릭은 카드 이동 차단(stopPropagation+preventDefault)', /pstarchip[\s\S]{0,200}stopPropagation\(\);event\.preventDefault\(\);CampCards\.togglePin/.test(cards));
 ok('cards: togglePin — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePin\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
+// ★★ 리뷰웹시스템[3버전](인트라넷 SSO `via:'intranet'`)은 authMiddleware가 `/api/trackb/*` 로만
+//    도달을 허용하므로, togglePin이 `/api/campaign/admin/...` 을 하드코딩하면 별표만 403
+//    ("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다 — 호스트 재기준(CAMPAIGN_ADMIN_API) 고정.
+ok('cards: togglePin 경로는 호스트가 재기준(CAMPAIGN_ADMIN_API) — trackb에서도 별표 동작',
+  /window\.CAMPAIGN_ADMIN_API/.test(cards)
+  && /function _flagsUrl\(campId\)/.test(cards)
+  && /await fetch\(_flagsUrl\(campId\)/.test(cards)
+  && !/['"]\/api\/campaign\/admin\/['"] ?\+ ?encodeURIComponent\(campId\) ?\+ ?['"]\/flags['"]/.test(cards));
 ok('flags: 토글 직후 /list 캐시 무효화(5초 stale 순서 방지)', /_listCache = \{ at: 0, rows: null, countsMap: null(, feeMap: null)? \};[\s\S]{0,200}pinnedAt/.test(routes));
 
 // ── 관리자 UI ──
