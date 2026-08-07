@@ -87,8 +87,14 @@ ok('B1. recruitSaveBlock / recruitSaveBlockClear 전역 노출',
   /window\.recruitSaveBlockClear\s*=\s*recruitSaveBlockClear/.test(modal));
 ok('B2. ★ 모달 푸터 **안쪽**에 붙인다(덮개 z-index 와 무관해진다)',
   /querySelector\('#recruitModal \.modal-footer'\)/.test(blk) && /foot\.appendChild\(bar\)/.test(blk));
+/* ★ 약한 패턴(`setTimeout\([^)]*bar\.remove`)은 `setTimeout(function(){ bar.remove(); },3000)` 을
+   통과시킨다(변이시험 실측) — 함수 리터럴의 ')' 때문. 그래서 "이 함수 안에서 무엇이든
+   지우는가"를 본다(흔들림 클래스 해제만 예외). */
 ok('B3. ★ 자동 소멸 없음 — 사라지면 원인을 다시 읽을 방법이 없다',
-  !/setTimeout\([^)]*bar\.remove/.test(blk) && !/bar\.classList\.add\('out'\)/.test(blk));
+  (() => {
+    const s = blk.replace(/foot\.classList\.remove\('rf-shake'\)/g, '');
+    return !/remove\(/.test(s) && !/classList\.add\('out'\)/.test(s);
+  })());
 ok('B4. 흔들림 1회 + 사유 텍스트 escape',
   /rf-shake/.test(blk) && /fbEsc\(text\)/.test(blk));
 ok('B5. #recruitModal .modal-footer 가 position:relative — 없으면 줄이 엉뚱한 곳에 뜬다',
