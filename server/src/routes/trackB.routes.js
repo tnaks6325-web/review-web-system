@@ -2319,6 +2319,25 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
+/* 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
+   ★ adminOrMaster — 검색 명단에서 사람을 빼는 조작이라 정원 변경(날짜별 인원)과 같은 급.
+   ★ dryRun 기본(`dryRun !== false`) — 값이 빠진 요청이 곧바로 실행되지 않는다. */
+router.post('/worktable/retire-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
+    const b = req.body || {};
+    try {
+      res.json(await retireRows({
+        sheetId: b.sheetId, tabName: b.tabName, rounds: b.rounds, seqs: b.seqs,
+        dryRun: b.dryRun !== false, by: _by(req),
+      }));
+    } catch (e) {
+      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { saveTemplate } = require('../services/worktable.service');

@@ -283,8 +283,58 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   };
 }
 
+/**
+ * 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
+ *
+ * 왜 필요한가(운영 실측 2026-08-07 · 쿠팡(26년)): 이관 전 검색 명단은 5·6차 50명뿐이었는데
+ * 이관 후 216명이 됐다. 시트 시절 투영이 `active = FALSE` 로 내려 둔 옛 차수 166줄을
+ * 장부 재생성이 그대로 되살렸기 때문이다. 그 줄들을 다시 내릴 창구가 어디에도 없었다.
+ *
+ * ★★ 순서가 계약: **작업표 soft-delete → 장부 재생성**. 반대로 하면 10분 투영
+ *    (`importTabFromIndex`)의 `deleted_at = NULL` 이 되살린다 — 그 upsert 는 **장부에 있는 줄만**
+ *    건드리므로, 장부에서 먼저 빼 두면 그 뒤로는 영원히 안전하다.
+ * ★ 무시트 탭만 — 시트 기반 탭은 시트가 진실원본이라 표에서만 내려도 다음 빌드가 되살린다
+ *   (되지도 않는 일을 한 것처럼 보이면 안 되므로 사유를 말하고 거부한다).
+ * ★ dryRun 기본 — 값이 빠진 요청이 곧바로 실행되지 않는다.
+ * ★ 대상은 **서버가 조건으로 다시 고른다**(화면이 보낸 행 목록 불신 — 작업표 탭 삭제와 같은 규율).
+ * ★ 하드삭제 아님(`deleted_at`) — 되돌릴 수 있고, 주문 원장·Drive 는 건드리지 않는다.
+ */
+async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = true, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
+  const db = getPool();
+
+  const { rows: tcRows } = await db.query(
+    `SELECT COALESCE(sheetless, FALSE) AS sheetless
+       FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+  if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다.');
+  if (!tcRows[0].sheetless) {
+    throw new LedgerError('not_sheetless',
+      '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하거나 이관 후 이용하세요.');
+  }
+
+  /* ★ 작업표 쓰기는 `participants.service` 가 소유한다(쓰기 소유자 규율) — 여기는 게이트·순서·장부만. */
+  const r = await require('./participants.service')
+    .retireRows({ sheetId, tabName, rounds, seqs, dryRun, by });
+  if (r.reason === 'empty') throw new LedgerError('empty', '정리할 대상을 고르지 않았습니다.');
+  if (dryRun) return { ...r, sheetId, tabName };
+  if (!r.retired) return { ...r, sheetId, tabName, indexRows: null };
+
+  /* ★ 장부 재생성이 실패하면 조용히 끝내지 않는다 — 표에서만 내려간 상태로 남으면
+     다음 투영이 되살릴 수 있으므로 사유를 응답에 실어 화면이 재실행을 안내한다. */
+  let ledger = null, ledgerError = null;
+  try {
+    ledger = await rebuildLedgers({ sheetId, tabName, by: `retire:${by}` });
+  } catch (e) {
+    ledgerError = (e && (e.code || e.message)) || 'rebuild_failed';
+    logger.warn(`[sheetlessLedger] 정리 후 장부 재생성 실패 tab=${tabName} — ${ledgerError}`);
+  }
+  logger.info(`[sheetlessLedger] 줄 정리 tab=${tabName} ${r.retired}줄 은퇴 · 명단 ${ledger ? ledger.indexRows : '?'}명 by=${by}`);
+  return { ...r, sheetId, tabName, indexRows: ledger ? ledger.indexRows : null, ledgerError };
+}
+
 module.exports = {
   rebuildLedgers,
+  retireRows,
   resolveHeaders,
   buildValues,
   LedgerError,
