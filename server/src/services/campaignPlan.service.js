@@ -124,9 +124,10 @@ async function getPlanOverview(campaignId) {
       //   킬스위치(CAMPAIGN_DAILY_CARRY=0)·095 계획·총량 clamp 를 프론트는 모르기 때문에
       //   이월이 하루치를 넘는 흔한 경우부터 화면 숫자가 서버와 갈린다(코드리뷰). 그래서
       //   **정원 판정의 단일 출처인 computeCampaignState 를 그대로 태워** 값을 실어 보낸다.
-      const stNow = computeCampaignState(camp, Object.assign({}, counts, {
-        plans: plansQ.rows.reduce((m, r) => { m[r.date] = Number(r.count) || 0; return m; }, {}),
-      }), new Date(), sch);
+      //   ★ counts 를 **그대로** 넘긴다 — fetchCampaignCounts 가 이미 `_loadPlanMaps` 로 계획을
+      //   실어 오므로, 여기서 plans 를 따로 만들어 덮으면 런타임(목록·apply)이 보는 재료와
+      //   갈려 "화면과 실제 정원이 다르다"를 새로 만든다(막으려던 것과 같은 사고).
+      const stNow = computeCampaignState(camp, counts, new Date(), sch);
       todayNaturalQuota = Number(stNow.dailyQuota) || 0;
     } catch (e) {
       logger.warn('[campaignPlan] 이월 계산 실패(fail-soft): ' + e.message);

@@ -781,6 +781,18 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   mkS({ data: { todayNaturalQuota: null } });
   ok('7A-4 기준값을 못 받으면 균형 모드를 켜지 않는다(잘못된 기준 저장 판정 금지)',
     A.applyCarryMode('next') === false);
+  // ★★ 서버는 런타임(목록·apply)과 **같은 재료**로 계산해야 한다 — counts 를 그대로 넘긴다.
+  //   plans 를 따로 만들어 덮으면 화면과 실제 정원이 갈리는 사고를 새로 만든다.
+  {
+    const cp = readS('services/campaignPlan.service.js');
+    ok('7A-4 서버는 computeCampaignState 에 counts 를 그대로 넘긴다(재료 사본 금지)',
+      /computeCampaignState\(camp, counts, new Date\(\), sch\)/.test(cp)
+      && !/computeCampaignState\(camp, Object\.assign/.test(cp));
+    ok('7A-4 오늘 기준값은 그 판정의 dailyQuota 를 그대로 쓴다(사본 공식 금지)',
+      /todayNaturalQuota = Number\(stNow\.dailyQuota\) \|\| 0;/.test(cp));
+    ok('7A-4 계산 실패는 null(0 으로 꾸미지 않는다)',
+      /carryHeld = null; carryPending = null; todayNaturalQuota = null;/.test(cp));
+  }
 
   // 7A-4b ★ 무관한 상향 조절이 실제로 남아 있는 이월을 0으로 숨기지 않는다
   mkS({ base: { '2026-08-20': 70 } });                 // 이월과 무관한 +30 저장분
