@@ -132,6 +132,25 @@
   .idc .cell .k{font-size:10px;color:var(--faint);font-weight:800;letter-spacing:.03em;display:block;margin-bottom:2px}
   .idc .cell b{font-size:13px}
   /* 브랜드 관리(094) — 대행사 셀프서비스. 클래스 brd· bas 접두 */
+  /* 브랜드 추가 인라인(2안 확정) — [+ 브랜드 추가] 버튼 자리가 그대로 입력창이 된다(시선 이동 0).
+     입력창은 240px 고정: 이름은 3~6글자라 폭을 늘리면 입력 끝↔[추가] 사이만 멀어진다. 색상 선택 없음. */
+  .bnslot{display:inline-flex;align-items:center;gap:6px}
+  .bnfield{display:flex;align-items:center;width:240px;background:var(--card);border:1.5px solid var(--accent);border-radius:8px;padding:5px 10px;box-shadow:0 0 0 3px var(--accent-soft)}
+  .bnfield.err{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+  .bnfield input{border:none;outline:none;flex:1;min-width:0;font-size:13px;font-family:inherit;background:transparent;color:var(--ink)}
+  .bnfield input::placeholder{color:var(--faint)}
+  .bnx{width:26px;height:26px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--muted);font-weight:800;font-size:12px;display:grid;place-items:center;cursor:pointer;flex:none}
+  .bnx:hover{color:var(--ink);border-color:var(--line)}
+  .bnerrwrap{max-width:1380px;text-align:right;margin:-2px 0 8px}
+  .bnerr{font-size:11px;color:var(--bad);background:var(--bad-soft);border-radius:7px;padding:4px 9px;display:inline-block}
+  .bnhint{font-size:10.5px;color:var(--faint)}
+  /* 카드 내 인라인 편집·확인(브라우저 prompt/confirm/alert 대체) */
+  .brdcard.editing{border-color:var(--accent);box-shadow:0 3px 12px rgba(37,99,235,.10)}
+  .brdcard.confirming{border-color:var(--warn);background:var(--warn-soft)}
+  .brdcard.confirming .brdmeta{color:var(--ink)}
+  .btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line2))}
+  .btn.danger:hover{background:var(--bad-soft)}
+  .belink{flex:1;min-width:180px;font-size:11.5px;font-family:inherit;color:var(--accent-deep);background:var(--card2);border:1px solid var(--line);border-radius:7px;padding:5px 9px}
   .brdlist{display:grid;gap:9px;max-width:1380px}
   .brdcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .brddot{width:12px;height:12px;border-radius:4px;flex:none}
@@ -374,6 +393,9 @@
   .owntab .ocol{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .owntab .ocol.dim{color:var(--faint)}
   .owntab .obr{font-weight:700}
+  /* 094 동기화: 광고주 지정 브랜드는 색 점 + 진한 글자(추정 파싱과 눈으로 구분된다) */
+  .owntab .obr.asg{color:var(--ink)}
+  .owntab .obdot{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px;vertical-align:1px}
   .owntab .ocnt{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
   .owntab .ocnt b{font-weight:700;color:var(--ink)} .owntab .ocnt .c-sub{color:var(--accent)} .owntab .ocnt .c-paid{color:var(--safe)}
   .owntab .openb{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
@@ -1592,7 +1614,7 @@ function token(){ return sessionStorage.getItem('admin_token') || ''; }
 function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
   // ★ 401 → 재로그인도 계정이 바뀔 수 있는 경로다. logout 과 같은 계정 귀속 상태를 비운다
   //   (안 비우면 다음 계정이 이전 계정의 열린 줄을 보고, 그것이 그 계정 서버 행에 저장된다).
-  Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',cur:null,tabs:[],
+  Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,cur:null,tabs:[],
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,campEdit:null,campsUnavailable:false,finFilter:'' });
   renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
@@ -1641,6 +1663,7 @@ let STATE = { role:'', name:'', view:'', tabs:[], cur:null, wd:null, freezeUpto:
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
               advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advQ:'', advF:'all',            // 전체 작업 검색어 · 상태 칩(all|run|done) — 화면 전환에도 유지
+              brandNew:null, brandEdit:null,  // 브랜드 추가 인라인(2안) · 카드 내 편집/확인 상태(브라우저 팝업 대체)
               brandId:null, advName:'',       // 094: 브랜드 링크 세션(brand_id 클레임) · 운영사(대행사) 이름(A안 표기)
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
@@ -1707,7 +1730,7 @@ function logout(){ sessionStorage.removeItem('admin_token');
   //   키 분리가 무의미**하다: _wtLoaded 가 true 로 남아 새 계정 캐시를 읽지 않고 이전 계정 배열을 그대로
   //   그리며(스코프 밖 탭명 노출), _wtDirty 가 true 로 남으면 _wtSyncFromServer 가 새 계정 GET 을 버리고
   //   **이전 계정 목록을 새 계정 서버 행에 저장**한다(코드리뷰 blocker).
-  Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
+  Object.assign(STATE,{ role:'',name:'',brandId:null,advName:'',advWork:null,advQ:'',advF:'all',brandNew:null,brandEdit:null,view:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[],
                         re:null,rePending:null,reScoped:false,reErr:null,reMode:null,reStatus:null,reOpenQueue:false,
                         worktabs:null,_wtLoaded:false,_wtDirty:false,_wtBootSynced:false,kstDate:null,
                         favs:null,_favLoaded:false,_finStatsAt:0,
@@ -2274,11 +2297,41 @@ function _renderAdvBrands(){
   const host=$('#main'); if(!host) return;
   const brands=(STATE.advWork&&STATE.advWork.brands)||[], items=_awItems();
   const unassigned=items.filter(it=>!it.brandId).length;
+  const be=STATE.brandEdit||null;
   const card=b=>{
     const off=!b.linkActive;
+    // 인라인 편집·확인 상태 — 이 카드가 대상이면 카드 자리에서 그대로 폼/확인 줄로 바뀐다(브라우저 팝업 없음).
+    if(be&&be.id===b.id&&be.mode==='rename') return `<div class="brdcard editing">
+      <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
+      <span class="bnfield${be.err?' err':''}"><input id="beq" value="${esc(be.name||'')}" maxlength="60"
+        oninput="brandEditInput(this.value)" onkeydown="brandEditKey(event)" autocomplete="off"></span>
+      <button class="btn xs" id="besave" onclick="brandRenameSave()"${String(be.name||'').trim()?'':' disabled'}>저장</button>
+      <button class="bnx" onclick="brandEditClose()" title="취소 (ESC)">✕</button>
+      ${be.err?`<span class="bnerr">${esc(be.err)}</span>`:'<span class="bnhint">Enter 저장 · ESC 취소</span>'}</div>`;
+    if(be&&be.id===b.id&&be.mode==='delete') return `<div class="brdcard confirming">
+      <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
+      <span class="brdname">${esc(b.name)}</span>
+      <span class="brdmeta">삭제하면 <b>공유 링크가 즉시 무효</b>가 되고, 배정된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.</span>
+      <button class="btn xs danger" onclick="brandDeleteConfirm()">삭제</button>
+      <button class="btn xs" onclick="brandEditClose()">취소</button>
+      ${be.err?`<span class="bnerr">${esc(be.err)}</span>`:''}</div>`;
+    if(be&&be.id===b.id&&be.mode==='rotate') return `<div class="brdcard confirming">
+      <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
+      <span class="brdname">${esc(b.name)}</span>
+      <span class="brdmeta">새 링크를 발급하면 <b>이전에 전달한 링크는 즉시 사용할 수 없게</b> 됩니다.</span>
+      <button class="btn xs" onclick="brandRotateConfirm()">재발급</button>
+      <button class="btn xs" onclick="brandEditClose()">취소</button>
+      ${be.err?`<span class="bnerr">${esc(be.err)}</span>`:''}</div>`;
+    if(be&&be.id===b.id&&be.mode==='link') return `<div class="brdcard editing">
+      <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
+      <span class="brdname">${esc(b.name)}</span>
+      <input id="belink" class="belink" readonly value="${esc(be.url||'')}" onclick="this.select()">
+      <span class="bnhint">복사가 자동으로 되지 않아 링크를 펼쳤습니다 — 선택해 복사하세요</span>
+      <button class="bnx" onclick="brandEditClose()" title="닫기">✕</button></div>`;
     return `<div class="brdcard">
       <span class="brddot" style="background:${esc(b.color||'#2563eb')}"></span>
       <span class="brdname">${esc(b.name)}</span>
+      ${be&&be.id===b.id&&be.mode==='err'?`<span class="bnerr">${esc(be.err||'')}</span>`:''}
       <span class="brdmeta">작업 ${b.tabCount||0}건 배정${off?' · <b style="color:var(--bad)">링크 정지됨</b>':''}</span>
       <label class="tgl${b.settlementVisible?' on':''}" title="켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 숨김)" onclick="brandFlag('${esc(b.id)}','settlement-visible',${!b.settlementVisible});return false"><span class="sw"></span>정산 공개</label>
       <label class="tgl${b.foldersVisible?' on':''}" title="켜면 브랜드사도 구매캡쳐·리뷰캡쳐 폴더 버튼을 봅니다 (기본: 비노출)" onclick="brandFlag('${esc(b.id)}','folders-visible',${!b.foldersVisible});return false"><span class="sw"></span>폴더 공개</label>
@@ -2291,48 +2344,125 @@ function _renderAdvBrands(){
         <button class="btn xs" onclick="brandDelete('${esc(b.id)}')" style="color:var(--bad)">삭제</button>
       </span></div>`;
   };
+  // 2안(사용자 확정): [+ 브랜드 추가] 버튼 **그 자리**가 입력창으로 바뀐다 — 클릭 지점 = 입력 지점(시선 이동 0),
+  //   목록은 한 줄도 밀리지 않는다. 색상 선택 없음(추가 순서대로 자동 배정). 브라우저 prompt 미사용.
+  const nb=STATE.brandNew||{};
+  const slot = nb.open
+    ? `<span class="bnslot">
+        <span class="bnfield${nb.err?' err':''}"><input id="bnq" placeholder="브랜드 이름" value="${esc(nb.name||'')}"
+          oninput="brandNewInput(this.value)" onkeydown="brandNewKey(event)" autocomplete="off" maxlength="60"></span>
+        <button class="btn" id="bnadd" onclick="brandNewSubmit()"${(nb.name||'').trim()?'':' disabled'}>추가</button>
+        <button class="bnx" onclick="brandNewClose()" title="닫기 (ESC)">✕</button></span>`
+    : `<button class="btn" onclick="brandNewOpen()">+ 브랜드 추가</button>`;
   host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 브랜드 관리</h1>
-      <span class="bd a">업체 전용</span><span style="flex:1"></span><button class="btn" onclick="brandCreate()">+ 브랜드 추가</button></div>
+      <span class="bd a">업체 전용</span><span style="flex:1"></span>${slot}</div>
+    ${nb.err?`<div class="bnerrwrap"><span class="bnerr">${esc(nb.err)}</span></div>`:''}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 배정된 작업만 볼 수 있고,
       <b>정산 정보(견적서·계산서·금액)와 자료 폴더는 기본 숨김</b> — 브랜드별 토글로 공개를 선택합니다. 브랜드사 화면에는 "운영: ${esc(STATE.name||'')}"가 표기됩니다.</p>
     <div class="brdlist">${brands.map(card).join('')||''}
-      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.'}</div>
+      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:(nb.open?'이름을 입력하고 Enter 를 누르세요.':'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.')}</div>
     </div></div>`;
+  if(nb.open) _bnFocus();
 }
-async function brandCreate(){
-  const name=prompt('브랜드 이름(예: 메이커스)'); if(!name||!name.trim()) return;
-  const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name:name.trim()})}).catch(()=>null);
-  if(!r||!r.ok) return alert((r&&r.error)||'브랜드 추가에 실패했습니다.');
-  _brandsReload();
+// ── 브랜드 추가 인라인(2안) ── 상태는 STATE.brandNew{open,name,err,busy}. 렌더가 통째로 다시 그려지므로
+//   입력 포커스·커서 위치를 복원한다(안 하면 한 글자 칠 때마다 포커스가 날아간다).
+function _bnFocus(){
+  const el=$('#bnq'); if(!el) return;
+  const pos=(STATE.brandNew&&STATE.brandNew.name||'').length;
+  el.focus(); try{ el.setSelectionRange(pos,pos); }catch(_){ }
 }
-async function brandRename(id){
+function brandNewOpen(){ STATE.brandNew={open:true,name:'',err:''}; _renderAdvBrands(); }
+function brandNewClose(){ STATE.brandNew=null; _renderAdvBrands(); }
+function brandNewInput(v){
+  const nb=STATE.brandNew||{open:true}; const had=!!nb.err;
+  nb.name=v; nb.err=''; STATE.brandNew=nb;
+  const add=$('#bnadd'); if(add) add.disabled=!String(v||'').trim();
+  if(had) _renderAdvBrands();   // 오류 줄이 떠 있었으면 지우면서 다시 그린다(그 외엔 재렌더 없음 = 타이핑 부드러움)
+}
+function brandNewKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); brandNewSubmit(); }
+  else if(e.key==='Escape'){ e.preventDefault(); brandNewClose(); }
+}
+async function brandNewSubmit(){
+  const nb=STATE.brandNew||{}; const name=String(nb.name||'').trim();
+  if(!name||nb.busy) return;
+  const brands=(STATE.advWork&&STATE.advWork.brands)||[];
+  // 중복은 서버도 막지만(400), 화면에서 먼저 알려 왕복 없이 고치게 한다.
+  if(brands.some(b=>String(b.name||'').trim().toLowerCase()===name.toLowerCase())){
+    STATE.brandNew={open:true,name,err:`이미 "${name}" 브랜드가 있습니다`}; _renderAdvBrands(); return;
+  }
+  nb.busy=true;
+  const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name,color:_bnColor(brands.length)})}).catch(()=>null);
+  nb.busy=false;
+  if(!r||!r.ok){ STATE.brandNew={open:true,name,err:(r&&r.error)||'브랜드 추가에 실패했습니다. 잠시 후 다시 시도해 주세요.'}; _renderAdvBrands(); return; }
+  STATE.brandNew={open:true,name:'',err:''};   // 입력칸 유지 = 연달아 등록
+  await _brandsReload();
+  toast(`브랜드 "${name}" 추가됨`);
+}
+// 색상 자동 배정(사용자 확정: 색 선택 UI 없음) — 추가 순서대로 순환해 목록·배정 화면에서 구분된다.
+const _BN_COLORS=['#2563eb','#0e7490','#16a34a','#b45309','#e11d74','#6d5ac9'];
+function _bnColor(i){ return _BN_COLORS[(+i||0)%_BN_COLORS.length]; }
+// ── 카드 내 인라인 편집·확인(브라우저 prompt/confirm/alert 미사용) ──
+//   STATE.brandEdit = {id, mode:'rename'|'delete'|'rotate'|'link', name, err} — 카드 한 장만 폼으로 바뀐다.
+function _bEdit(){ return STATE.brandEdit||null; }
+function brandEditOpen(id,mode){
   const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
-  const name=prompt('브랜드 이름',b.name); if(!name||!name.trim()||name.trim()===b.name) return;
-  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action:'rename',name:name.trim()})}).catch(()=>null);
-  if(!r||!r.ok) return alert((r&&r.error)||'변경에 실패했습니다.'); _brandsReload();
+  STATE.brandEdit={id,mode,name:b.name,err:''}; _renderAdvBrands();
+  if(mode==='rename'){ const el=$('#beq'); if(el){ el.focus(); el.select(); } }
 }
-async function brandDelete(id){
-  const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
-  if(!confirm(`"${b.name}" 브랜드를 삭제할까요?\n— 공유 링크가 즉시 무효화되고, 배정된 작업 ${b.tabCount||0}건은 미분류로 돌아갑니다.`)) return;
-  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action:'delete'})}).catch(()=>null);
-  if(!r||!r.ok) return alert((r&&r.error)||'삭제에 실패했습니다.'); _brandsReload();
+function brandEditClose(){ STATE.brandEdit=null; _renderAdvBrands(); }
+function brandEditInput(v){ const e=_bEdit(); if(!e) return; e.name=v; const btn=$('#besave'); if(btn) btn.disabled=!String(v||'').trim(); }
+function brandEditKey(ev){
+  if(ev.key==='Enter'){ ev.preventDefault(); brandRenameSave(); }
+  else if(ev.key==='Escape'){ ev.preventDefault(); brandEditClose(); }
+}
+async function brandRenameSave(){
+  const e=_bEdit(); if(!e||e.busy) return;
+  const name=String(e.name||'').trim(); if(!name) return;
+  const brands=(STATE.advWork&&STATE.advWork.brands)||[];
+  const cur=brands.find(b=>b.id===e.id);
+  if(cur&&name===cur.name) return brandEditClose();
+  if(brands.some(b=>b.id!==e.id&&String(b.name||'').trim().toLowerCase()===name.toLowerCase())){
+    e.err=`이미 "${name}" 브랜드가 있습니다`; _renderAdvBrands(); return;
+  }
+  e.busy=true;
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:e.id,action:'rename',name})}).catch(()=>null);
+  e.busy=false;
+  if(!r||!r.ok){ e.err=(r&&r.error)||'변경에 실패했습니다.'; _renderAdvBrands(); return; }
+  STATE.brandEdit=null; await _brandsReload(); toast(`브랜드 이름을 "${name}"(으)로 변경했습니다`);
+}
+async function brandDeleteConfirm(){
+  const e=_bEdit(); if(!e||e.busy) return;
+  e.busy=true;
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:e.id,action:'delete'})}).catch(()=>null);
+  e.busy=false;
+  if(!r||!r.ok){ e.err=(r&&r.error)||'삭제에 실패했습니다.'; _renderAdvBrands(); return; }
+  STATE.brandEdit=null; await _brandsReload(); toast('브랜드를 삭제했습니다 (공유 링크 무효)');
+}
+async function brandRotateConfirm(){
+  const e=_bEdit(); if(!e||e.busy) return;
+  e.busy=true;
+  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:e.id,action:'link-rotate'})}).catch(()=>null);
+  e.busy=false;
+  if(!r||!r.ok){ e.err=(r&&r.error)||'재발급에 실패했습니다.'; _renderAdvBrands(); return; }
+  STATE.brandEdit=null; await _brandsReload(); brandCopyLink(e.id);
 }
 async function brandFlag(id,action,on){
   const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action,on:!!on})}).catch(()=>null);
-  if(!r||!r.ok) return alert((r&&r.error)||'변경에 실패했습니다.'); _brandsReload();
+  if(!r||!r.ok){ STATE.brandEdit={id,mode:'err',err:(r&&r.error)||'변경에 실패했습니다.'}; _renderAdvBrands(); return; }
+  _brandsReload();
 }
-async function brandRotate(id){
-  if(!confirm('링크를 재발급할까요? 이전에 전달한 링크는 즉시 사용할 수 없게 됩니다.')) return;
-  const r=await api('/api/trackb/brands/update',{method:'POST',body:JSON.stringify({brandId:id,action:'link-rotate'})}).catch(()=>null);
-  if(!r||!r.ok) return alert((r&&r.error)||'재발급에 실패했습니다.');
-  await _brandsReload(); brandCopyLink(id);
-}
+function brandRename(id){ brandEditOpen(id,'rename'); }
+function brandDelete(id){ brandEditOpen(id,'delete'); }
+function brandRotate(id){ brandEditOpen(id,'rotate'); }
+// 복사 성공은 토스트, 클립보드가 막힌 환경(비HTTPS·권한 거부)은 카드 안에 링크를 펼쳐 직접 복사하게 한다.
 function brandCopyLink(id){
   const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b||!b.linkToken) return;
   const url=_brandLinkUrl(b.linkToken);
-  (navigator.clipboard?navigator.clipboard.writeText(url):Promise.reject()).then(
-    ()=>alert(`"${b.name}" 열람 링크가 복사되었습니다.\n브랜드사에 전달하세요 — 이 링크로는 ${b.name}에 배정된 작업만 보입니다.`),
-    ()=>prompt('아래 링크를 복사해 전달하세요.',url));
+  (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(url):Promise.reject()).then(
+    ()=>toast(`"${b.name}" 열람 링크를 복사했습니다 — 브랜드사에 전달하세요`),
+    ()=>{ STATE.brandEdit={id,mode:'link',url}; _renderAdvBrands();
+          const el=$('#belink'); if(el){ el.focus(); el.select(); } });
 }
 // 작업 배정 모달(와이어프레임 B) — 체크된 작업 = 이 브랜드. 다른 브랜드 배정 작업을 체크하면 이 브랜드로 이동.
 function brandAssignModal(id){
@@ -8781,10 +8911,17 @@ function _ovmFilterChips(){
     + c('fin','마감','',n('fin'),false,'마감 처리된 작업');
 }
 // 브랜드 칩 — 자주 쓰는 상위 5개만 칩으로, 나머지는 선택 목록으로 접는다(칩 40개가 3줄로 넘치던 것).
+// 브랜드 동기화(094): 광고주가 브랜드 관리에서 **지정한 브랜드가 정답**이고, 지정이 없을 때만
+//   종전처럼 작업명에서 추정 파싱한다. 두 출처가 갈리면 화면끼리 분류가 어긋나므로 여기 한 곳에서만 정한다.
+function _ownBrand(t){
+  if(t&&t.brandName) return { name:t.brandName, color:t.brandColor||'#2563eb', assigned:true };
+  const b=parseTabMeta((t&&t.tabName)||'').brand;
+  return b ? { name:b, color:null, assigned:false } : null;
+}
 function _ovmBrandChips(){
   const ot=STATE.ownTabs||[];
   const bc={}; let noBrand=0;
-  ot.forEach(t=>{ const b=parseTabMeta(t.tabName).brand; if(b) bc[b]=(bc[b]||0)+1; else noBrand++; });
+  ot.forEach(t=>{ const b=_ownBrand(t); if(b) bc[b.name]=(bc[b.name]||0)+1; else noBrand++; });
   const brands=Object.keys(bc).sort((a,b)=>bc[b]-bc[a]||a.localeCompare(b));
   STATE.ownBrandList=brands;
   if(STATE.ownBrand!==null&&STATE.ownBrand!==''&&!bc[STATE.ownBrand]) STATE.ownBrand=null;   // 목록 갱신으로 사라진 브랜드
@@ -8845,14 +8982,15 @@ function _ovmRowMatch(t,f,q){
   }
   const nq=String(q||'').trim().toLowerCase(); if(!nq) return true;
   const pm=parseTabMeta(t.tabName);
-  return [t.tabName,pm.brand,pm.product,t.contractNumber,t.memo,t.spreadsheetTitle]
+  const ob=_ownBrand(t);   // 검색어는 지정 브랜드명으로도 걸린다(작업명에 없는 브랜드로 배정한 경우)
+  return [t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo,t.spreadsheetTitle]
     .some(v=>String(v==null?'':v).toLowerCase().includes(nq));
 }
 function _ownRowsHtml(){
   const ot=STATE.ownTabs||[], c=_ovmCols(), g=_ovmGrid(), q=_ovmQ.trim();
-  const vis=ot.map((t,i)=>({t,i,pm:parseTabMeta(t.tabName)}))
-    .filter(({t,pm})=>(STATE.ownBrand===null||(STATE.ownBrand===''?!pm.brand:pm.brand===STATE.ownBrand)) && _ovmRowMatch(t,_ovmF,q));
-  const list=vis.map(({t,i,pm})=>{
+  const vis=ot.map((t,i)=>({t,i,pm:parseTabMeta(t.tabName),ob:_ownBrand(t)}))
+    .filter(({t,ob})=>(STATE.ownBrand===null||(STATE.ownBrand===''?!ob:(ob&&ob.name===STATE.ownBrand))) && _ovmRowMatch(t,_ovmF,q));
+  const list=vis.map(({t,i,pm,ob})=>{
     const target=(t.woRecruit&&+t.woRecruit)||pm.count||null;
     const total=t.bTotal||0, sub=t.bSub||0, paid=t.bPaid||0;
     const pct=total?Math.round(sub/total*100):0;
@@ -8888,7 +9026,10 @@ function _ownRowsHtml(){
     cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}</b>
         <span class="osub">${fbadge}${fbadge?' ':''}${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>`);
     if(c.info){
-      cells.push(`<span class="ocol ${pm.brand?'obr':'dim'}">${pm.brand?_ovmHl(pm.brand,q):'—'}</span>`);
+      // 지정 브랜드는 색 점 + 굵게(광고주가 정한 값), 추정 파싱은 종전 표기 그대로(회색 물음표 툴팁).
+      cells.push(ob
+        ? `<span class="ocol obr${ob.assigned?' asg':''}" title="${ob.assigned?'광고주가 브랜드 관리에서 지정한 브랜드':'작업명에서 추정한 브랜드(광고주 지정 없음)'}">${ob.assigned?`<i class="obdot" style="background:${esc(ob.color)}"></i>`:''}${_ovmHl(ob.name,q)}</span>`
+        : `<span class="ocol dim">—</span>`);
       cells.push(`<span class="ocol ${pm.product?'':'dim'}" title="${esc(pm.product||'')}">${pm.product?_ovmHl(pm.product,q):'—'}</span>`);
       cells.push(`<span class="ocol">${chan}</span>`);
       cells.push(`<span class="ocol ${tgt==='—'?'dim':''}">${esc(tgt)}</span>`);
