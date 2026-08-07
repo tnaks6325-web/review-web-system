@@ -36,7 +36,10 @@ function makeStub(opts = {}) {
     tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1', sheetless: false,
       sheetlessAt: null, sheetlessBy: null, mirroredAt: new Date().toISOString(), boardRows: 3 },
     prepared: 3,          // 시트 준비 줄
-    pendingOrders: 0, queued: 0,
+    // ③ 미반영 주문: handoff = 배정된 줄이 있어 표로 옮길 수 있는 건 / blocked = 옮길 자리 없는 건
+    pendingHandoff: 0, pendingBlocked: 0, queued: 0,
+    handoffRows: null,    // handoffPendingOrders 가 실제로 훑을 원장 행(미지정이면 빈 목록)
+    pendingThrows: false,
     parityReal: 0, parityThrows: false,
     ledgerThrows: null,   // { code, message }
     indexBefore: 2,       // 지금 review_index 명단 수(⑤ 대조 기준)
@@ -50,7 +53,12 @@ function makeStub(opts = {}) {
       if (/FROM tab_configs tc/.test(s) && /LEFT JOIN LATERAL/.test(s)) return { rows: [o.tab] };
       if (/UPDATE tab_configs SET sheetless = TRUE/.test(s)) return { rowCount: 1 };
       if (/UPDATE tab_configs SET sheetless = FALSE/.test(s)) return { rowCount: o.reconnectRows == null ? 1 : o.reconnectRows };
-      if (/FROM order_submissions/.test(s)) return { rows: [{ n: o.pendingOrders }] };
+      if (/FROM order_submissions/.test(s)) {
+        if (o.pendingThrows) throw new Error('os down');
+        // ★ 두 쿼리를 구분한다: 점검표(집계) vs 인계(원장 행 훑기)
+        if (/SELECT \*/.test(s)) return { rows: o.handoffRows || [] };
+        return { rows: [{ handoff: o.pendingHandoff, blocked: o.pendingBlocked }] };
+      }
       if (/FROM sync_queue/.test(s)) return { rows: [{ n: o.queued }] };
       if (/FROM review_index/.test(s)) {
         if (o.indexThrows) throw new Error('index down');
@@ -106,8 +114,9 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       found[m + ' ' + l.route.path] = l.route.stack.map(h => h.handle.name);
     }
     const keys = Object.keys(found);
-    ok('4경로 전부 등록: ' + keys.join(', '), keys.length === 4
+    ok('5경로 전부 등록: ' + keys.join(', '), keys.length === 5
       && found['GET /sheetless/list'] && found['GET /sheetless/checklist']
+      && found['GET /sheetless/slot-sweep']
       && found['POST /sheetless/cutover'] && found['POST /sheetless/reconnect']);
     ok('★ 전부 authMiddleware + adminOrMaster (AE·광고주 도달 불가)',
       keys.every(k => found[k].includes('authMiddleware') && found[k].includes('adminOrMasterMiddleware')));
@@ -130,8 +139,9 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     restore = stubDeps({ prepared: 10 });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
     ok('시트 준비 줄이 표보다 많으면 잠금', r.canCutover === false && r.blocking.includes('sheet_rows'));
-    ok('막힌 사유에 다음 행동을 적는다(백필 안내)',
-      /백필/.test(r.checks.find(c => c.key === 'sheet_rows').hint));
+    ok('막힌 사유에 다음 행동 + 그 자리 조치를 적는다',
+      /표를 먼저 채우세요/.test(r.checks.find(c => c.key === 'sheet_rows').hint)
+      && r.checks.find(c => c.key === 'sheet_rows').fix === 'audit');
     restore();
 
     // ★★ unknown 도 통과가 아니다 — 이 가드를 풀면 "모르면 열림"이 된다
@@ -160,12 +170,32 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     cutover.__setPoolForTest(null);
   }
   {
-    // 미반영 주문 / 미러 신선도
-    const { db } = makeStub({ pendingOrders: 3 });
+    /* ③ 미반영 주문 — 사용자 확정 2026-08-07 "B로 진행":
+     *  이관이 그 주문들을 **작업표로 인계**하므로 "시트에도 표에도 안 남는다"는 위험이 사라졌다.
+     *  → 통과시키는 것은 완화가 아니라 사실 반영. 단 **옮길 자리가 없는 건은 계속 잠근다**. */
+    let { db } = makeStub({ pendingHandoff: 3 });
     cutover.__setPoolForTest(db);
-    const restore = stubDeps({});
-    const r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
-    ok('시트에 못 쓴 주문이 남아 있으면 잠금', r.canCutover === false && r.blocking.includes('pending'));
+    let restore = stubDeps({});
+    let r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    const pc = r.checks.find(c => c.key === 'pending');
+    ok('★★ 배정된 줄이 있는 미반영 주문은 통과 — 이관이 표로 옮긴다',
+      r.canCutover === true && pc.state === 'pass' && /표로 옮깁니다/.test(pc.detail));
+    restore(); cutover.__setPoolForTest(null);
+
+    ({ db } = makeStub({ pendingBlocked: 2 }));
+    cutover.__setPoolForTest(db);
+    restore = stubDeps({});
+    r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★★ 옮길 자리(배정된 줄)가 없는 미반영 주문은 잠금 — 지금 끊으면 사라진다',
+      r.canCutover === false && r.blocking.includes('pending'));
+    restore(); cutover.__setPoolForTest(null);
+
+    ({ db } = makeStub({ pendingThrows: true }));
+    cutover.__setPoolForTest(db);
+    restore = stubDeps({});
+    r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('③ 조회 실패는 unknown = 잠금(fail-closed)',
+      r.canCutover === false && r.checks.find(c => c.key === 'pending').state === 'unknown');
     restore(); cutover.__setPoolForTest(null);
   }
   {
@@ -368,6 +398,179 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       /!tcRows\[0\]\.sheetless && !\(dryRun && preflight\)/.test(src));
   }
 
+  /* ══════════════ F2. 미반영 주문 인계 (사용자 확정 "B로 진행") ══════════════ */
+  console.log('\n[F2] 이관 시 미반영 주문을 작업표로 인계 — 시트에 쓰지 않는다');
+  const sheetlessOrder = require('../src/services/sheetlessOrder.service');
+  function stubWrite(impl) {
+    const _w = sheetlessOrder.writeOrderToWorktable;
+    const calls = [];
+    sheetlessOrder.writeOrderToWorktable = async (a) => { calls.push(a); return impl ? impl(a) : { ok: true, written: true }; };
+    return { calls, restore: () => { sheetlessOrder.writeOrderToWorktable = _w; } };
+  }
+  {
+    const rows = [
+      { id: 'o1', sheet_row: 5, tab_gid: '11', orderer: '김', recipient: '김', phone: '01012345678', price: '1000' },
+      { id: 'o2', sheet_row: 6, tab_gid: '11', orderer: '이', recipient: '이', phone: '01099998888', price: '2000' },
+    ];
+    const { db } = makeStub({ pendingHandoff: 2, handoffRows: rows });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const w = stubWrite();
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    w.restore(); restore(); cutover.__setPoolForTest(null);
+    ok('★ 미반영 주문마다 writeOrderToWorktable 을 부른다(실행부 사본 0)', w.calls.length === 2);
+    ok('★ 결과를 응답에 실어 화면이 말한다', r.handoff && r.handoff.written === 2 && r.handoff.failed === 0);
+    ok('★ orderData 는 원장 행에서 파생(매핑 사본 0)',
+      w.calls[0].orderData && w.calls[0].orderData.orderer === '김' && w.calls[0].orderData.price === '1000');
+    ok('★ 배정된 줄 그대로 사용(새 자리를 만들지 않는다)', w.calls[0].sheetRow === 5 && w.calls[1].sheetRow === 6);
+    ok('★ 복구 표기(recovered) 로 부른다 — reconcile 무시트 분기와 같은 형태', w.calls[0].recovered === true);
+  }
+  {
+    // ★★ 순서 계약: 표식을 켠 **뒤에** 인계한다(장부 재생성의 not_sheetless 게이트 때문).
+    const { db, log } = makeStub({ pendingHandoff: 1,
+      handoffRows: [{ id: 'o1', sheet_row: 5, tab_gid: '11' }] });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    let flagAtCall = null;
+    const w = stubWrite(() => {
+      flagAtCall = log.findIndex(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s));
+      return { ok: true };
+    });
+    await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    w.restore(); restore(); cutover.__setPoolForTest(null);
+    ok('★★ 인계 시점에 이미 무시트 표식이 켜져 있다', flagAtCall >= 0);
+  }
+  {
+    // 실패해도 이관은 유지하고 사유를 싣는다(절대 throw 안 함)
+    const { db } = makeStub({ pendingHandoff: 2, handoffRows: [
+      { id: 'o1', sheet_row: 5 }, { id: 'o2', sheet_row: null },
+    ] });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const w = stubWrite(() => { throw new Error('표 기록 실패'); });
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    w.restore(); restore(); cutover.__setPoolForTest(null);
+    ok('★ 인계 실패가 이관을 되돌리지 않는다', r.ok === true);
+    ok('★ 실패·자리없음 건수를 그대로 보고한다(조용한 누락 금지)',
+      r.handoff.failed === 1 && r.handoff.blocked === 1 && r.handoff.written === 0);
+    ok('★ 자리 없는 건은 write 를 부르지 않는다', w.calls.length === 1);
+  }
+  {
+    /* ★★ 실패 경로가 둘이다 — **예외**와 **{ok:false} 반환**. 변이시험이 실측으로 잡았다:
+     *    예외만 검사하면 `out.failed++` 를 `+= 0` 으로 바꿔도 통과한다. 둘 다 세고, **값까지** 단언한다. */
+    const { db } = makeStub({ pendingHandoff: 2, handoffRows: [{ id: 'o1', sheet_row: 5 }, { id: 'o2', sheet_row: 6 }] });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const w = stubWrite(() => ({ ok: false, reason: 'no_headers' }));
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    w.restore(); restore(); cutover.__setPoolForTest(null);
+    ok('★★ 예외가 아니라 {ok:false} 로 실패해도 건수를 그대로 센다',
+      r.handoff.failed === 2 && r.handoff.written === 0);
+    ok('★ 실패 사유를 응답에 실어 화면이 말한다',
+      Array.isArray(r.handoff.reasons) && r.handoff.reasons.includes('no_headers'));
+  }
+  {
+    // 조회 실패도 이관을 막지 않는다
+    const { db } = makeStub({ pendingHandoff: 0 });
+    db.query = (sql, p) => (/SELECT \* FROM order_submissions/.test(String(sql))
+      ? Promise.reject(new Error('os down'))
+      : makeStub({ pendingHandoff: 0 }).db.query(sql, p));
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const w = stubWrite();
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    w.restore(); restore(); cutover.__setPoolForTest(null);
+    ok('★ 인계 조회 실패도 이관은 유지 + 사유 동봉',
+      r.ok === true && r.handoff && r.handoff.ok === false && r.handoff.reason === 'query_failed');
+  }
+  {
+    const src = noLineComments(read('src/services/sheetlessCutover.service.js'));
+    ok('★★ 인계 대상 쿼리가 stuck_manual 을 먼저 처리한다(그것만 복구 작업으로 안 풀린다)',
+      /ORDER BY \(COALESCE\(mirror_status,'pending'\) <> 'stuck_manual'\)/.test(src));
+    ok('★ 인계는 시트에 쓰지 않는다(큐·시트 API 호출 0)',
+      !/enqueue\s*\(|appendSheet\s*\(|writeSheet\s*\(/.test(src));
+    ok('★ 킬스위치가 있다', /SHEETLESS_CUTOVER_HANDOFF/.test(src));
+  }
+
+  /* ══════════════ F3. 준비 자리 일괄 점검 ══════════════ */
+  console.log('\n[F3] 준비 자리 일괄 점검 — "시트가 더 많은 작업"만 추려서 답한다');
+  {
+    // 남은 작업 3건: A=부족 / B=이상 없음 / C=판정 불가(gid 없음), 그리고 이미 이관된 D
+    const tabs = [
+      { sheetId: 'S1', tabName: 'A', tabGid: '1', displayName: 'A', sheetless: false, boardRows: 20, mirroredAt: new Date().toISOString() },
+      { sheetId: 'S1', tabName: 'B', tabGid: '2', displayName: 'B', sheetless: false, boardRows: 50, mirroredAt: new Date().toISOString() },
+      { sheetId: 'S1', tabName: 'C', tabGid: null, displayName: 'C', sheetless: false, boardRows: 10, mirroredAt: new Date().toISOString() },
+      { sheetId: 'S1', tabName: 'D', tabGid: '4', displayName: 'D', sheetless: true, boardRows: 10, mirroredAt: new Date().toISOString() },
+    ];
+    const db = { query: async (sql) => (/FROM tab_configs tc/.test(String(sql)) ? { rows: tabs } : { rows: [] }) };
+    cutover.__setPoolForTest(db);
+    const slot = require('../src/services/sheetSlotSync.service');
+    const _rp = slot.readPreparedRows;
+    const seen = [];
+    slot.readPreparedRows = async (_db, { tabGid }) => {
+      seen.push(tabGid);
+      if (tabGid === '1') return { ok: true, prepared: Array.from({ length: 100 }, (_, i) => ({ seq: i + 2 })) };
+      return { ok: true, prepared: Array.from({ length: 30 }, (_, i) => ({ seq: i + 2 })) };
+    };
+    // ★ 목록과 **같은 스코프**(연도 필터 포함)를 탄다 — 화면에 안 보이는 작업을 훑으면 답이 안 맞는다.
+    const r = await cutover.sweepPreparedRows({ includeUnknown: true });
+    slot.readPreparedRows = _rp; cutover.__setPoolForTest(null);
+
+    ok('★★ 시트가 더 많은 작업만 추린다', r.short.length === 1 && r.short[0].tabName === 'A');
+    ok('★ 부족한 줄 수를 그대로 말한다(시트 100 · 표 20)',
+      r.short[0].missing === 80 && r.short[0].prepared === 100 && r.short[0].board === 20);
+    ok('이상 없는 작업은 건수로만 센다', r.okCount === 1);
+    ok('★★ 판정 불가를 "이상 없음"으로 꾸미지 않는다(따로 센다)',
+      r.unknown.length === 1 && r.unknown[0].tabName === 'C' && r.unknown[0].reason === 'no_gid');
+    ok('★ 이미 이관된 작업은 훑지 않는다', !seen.includes('4') && r.remaining === 3);
+    ok('★ 판정은 점검표 ①과 같은 함수(readPreparedRows) — 사본 0', seen.length === 2);
+  }
+  {
+    /* ★★ 판정 불가 갈래가 둘이다 — **gid 없음**(위 케이스)과 **읽기 실패**({ok:false}).
+     *    한쪽만 검사하면 나머지를 `okCount++` 로 접어도 통과한다(변이시험 N2 실측). */
+    const tabs = [{ sheetId: 'S1', tabName: 'A', tabGid: '1', displayName: 'A', sheetless: false,
+      boardRows: 5, mirroredAt: new Date().toISOString() }];
+    const db = { query: async (sql) => (/FROM tab_configs tc/.test(String(sql)) ? { rows: tabs } : { rows: [] }) };
+    cutover.__setPoolForTest(db);
+    const slot = require('../src/services/sheetSlotSync.service');
+    const _rp = slot.readPreparedRows;
+    slot.readPreparedRows = async () => ({ ok: false, reason: 'no_mirror', prepared: [] });
+    const r = await cutover.sweepPreparedRows({ includeUnknown: true });
+    slot.readPreparedRows = _rp; cutover.__setPoolForTest(null);
+    ok('★★ 시트 사본을 못 읽은 작업도 "이상 없음"으로 접지 않는다',
+      r.okCount === 0 && r.unknown.length === 1 && r.unknown[0].reason === 'no_mirror' && r.short.length === 0);
+  }
+  {
+    const src = noLineComments(read('src/services/sheetlessCutover.service.js'));
+    const body = src.slice(src.indexOf('async function sweepPreparedRows'), src.indexOf('async function enableSheetless'));
+    ok('★ 일괄 점검은 시트 API 를 부르지 않는다(RAW 미러만)',
+      !/getSheetModifiedTime|readSheet\s*\(|driveThrottledCall/.test(body));
+    ok('★ 읽기 전용 — 쓰기 쿼리 0', !/UPDATE |INSERT |DELETE /.test(body));
+    ok('★ 부족이 큰 작업부터 보여준다', /sort\(\(a, b\) => b\.missing - a\.missing\)/.test(body));
+  }
+  {
+    const rt = require('../src/routes/trackB.routes').stack
+      .filter(l => l.route && l.route.path === '/sheetless/slot-sweep')
+      .map(l => ({ methods: Object.keys(l.route.methods), mws: l.route.stack.map(s => s.handle.name) }))[0];
+    ok('일괄 점검 라우트가 GET 으로 등록돼 있다', !!rt && rt.methods.includes('get'));
+    ok('★ adminOrMaster 게이트', rt && rt.mws.includes('authMiddleware') && rt.mws.includes('adminOrMasterMiddleware'));
+  }
+  {
+    const wd = read('../frontend/workdesk.html');
+    ok('헤더에 [준비 자리 일괄 점검] 버튼', /onclick="_coSweep\(\)"/.test(wd));
+    ok('★ 없으면 "없다"고 분명히 말한다(빈 화면 금지)', /시트가 더 많은 작업은 없습니다/.test(wd));
+    ok('★ 판정 불가 건수를 화면이 고지한다', /판정 불가 \$\{unk\.length\}건|판정 불가 \$\{unk/.test(wd) || /판정 불가/.test(wd));
+    // ★★ 실패 경로가 둘이다 — **네트워크 예외(catch)** 와 **응답 실패({ok:false})**.
+    //    한쪽만 검사하면 다른 쪽을 지워도 통과한다(변이시험 N8 실측) → **둘 다** 센다.
+    const sweepFn = wd.slice(wd.indexOf('async function _coSweep'), wd.indexOf('function _coSweepReason'));
+    ok('★★ 실패 두 경로 모두 사유 + [다시 시도]로 화면을 종결시킨다',
+      (sweepFn.match(/일괄 점검 실패/g) || []).length === 2
+      && (sweepFn.match(/onclick="_coSweep\(\)"/g) || []).length === 2
+      && /catch\(e\)\{[\s\S]{0,200}일괄 점검 실패/.test(sweepFn)
+      && /j\.ok===false[\s\S]{0,200}다시 시도/.test(sweepFn));
+    ok('★ 부족한 작업엔 그 자리에서 조치 버튼', /_coSweep[\s\S]{0,2000}반영 점검에서 채우기/.test(wd));
+  }
+
   /* ══════════════ G. 부수효과 실패해도 이관 유지 ══════════════ */
   console.log('\n[G] 장부·시트 안내문 실패는 이관을 되돌리지 않고 사유를 싣는다');
   {
@@ -436,7 +639,10 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       };
       sandbox.globalThis = sandbox;
       vm.createContext(sandbox);
-      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2) + '\n;this.__f = _coChecklistHtml;', sandbox);
+      const j = wd.indexOf('function _coFixBtn(');
+      assert(j > 0, '_coFixBtn 미발견');
+      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2)
+        + wd.slice(j, wd.indexOf('\n}', j) + 2) + '\n;this.__f = _coChecklistHtml;', sandbox);
       const pass = sandbox.__f({ canCutover: true, checks: [{ state: 'pass', label: 'L', detail: 'D' }] }, 0);
       const block = sandbox.__f({ canCutover: false, checks: [{ state: 'unknown', label: 'L', detail: 'D' }] }, 0);
       ok('★★ 통과면 [이관] 버튼이 실제로 그려진다', /_coCutover\(0\)/.test(pass) && />이관</.test(pass));
@@ -445,11 +651,44 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       ok('★ 통과 못 하면 [이관] 버튼 자체가 없다(눌러도 안 되는 버튼 금지)',
         !/_coCutover\(/.test(block) && /이관할 수 없습니다/.test(block));
     }
+    /* ★★ 막힌 항목은 그 자리에서 처리된다 — 종전 안내는 "시트 데이터 반영 점검 화면에서…" 라고만
+     *    했는데 그 화면은 **nav 어디에도 없어**(링크 0곳) 주소를 직접 쳐야 열렸다(사용자 신고).
+     *    조치 종류는 서버가 `fix` 로 말하고 화면은 그대로 그린다(프론트 재판정 0). */
+    {
+      const i = wd.indexOf('function _coFixBtn(');
+      assert(i > 0, '_coFixBtn 미발견');
+      const sandbox = { esc: (s) => String(s == null ? '' : s) };
+      sandbox.globalThis = sandbox;
+      vm.createContext(sandbox);
+      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2) + '\n;this.__f = _coFixBtn;', sandbox);
+      const ref = sandbox.__f({ state: 'fail', fix: 'refresh' }, 3);
+      const aud = sandbox.__f({ state: 'unknown', fix: 'audit' }, 3);
+      ok('★★ 새로고침이 필요한 항목엔 [시트 새로고침] 버튼이 붙는다(인덱스만 전달)',
+        /_coRefresh\(3\)/.test(ref) && /시트 새로고침/.test(ref));
+      ok('★ 다른 화면이 필요한 항목엔 [반영 점검 열기] 버튼', /_coAudit\(\)/.test(aud));
+      ok('★ 통과한 항목·조치 없는 항목엔 버튼을 만들지 않는다(눌러도 안 되는 버튼 금지)',
+        sandbox.__f({ state: 'pass', fix: 'refresh' }, 3) === ''
+        && sandbox.__f({ state: 'fail', fix: null }, 3) === '');
+    }
+    ok('★★ 새로고침은 기존 반영 도구를 그대로 쓴다(신규 엔드포인트 0) + 끝나면 자동 재점검',
+      /_coRefresh[\s\S]{0,700}sheet-sync\/repair/.test(wd) && /_coRefresh[\s\S]{0,900}_coCheck\(i\)/.test(wd));
+    ok('★ 반영 점검 화면으로 가는 길이 화면에 있다(주소 직접 입력 불필요)',
+      /_coAudit[\s\S]{0,120}sheet-sync-audit\.html/.test(wd) && /onclick="_coAudit\(\)">↗ 반영 점검</.test(wd));
+    ok('★ 안내문이 없는 화면 이름을 가리키지 않는다',
+      !/시트 데이터 반영 점검<\/b> 화면에서 먼저 하세요/.test(wd));
+    ok('★ 오래 걸리는 조치는 진행 문구를 보여준다(사람이 다시 누르지 않게)',
+      /ck\.note\|\|'점검 중…'/.test(wd) && /다시 읽는 중/.test(wd));
     ok('★ not_ready(096 미적용)를 화면이 말한다', /j\.code==='not_ready'/.test(wd));
     ok('★ 점검표는 서버 판정을 그대로 그린다(프론트 재판정 0) — canCutover 로만 분기',
       /ck\.canCutover/.test(wd) && !/canCutover\s*=\s*[^=]/.test(wd));
     ok('이관 전 confirm + 되돌리기 안내', /_coCutover[\s\S]{0,900}confirm\(/.test(wd));
     ok('★ 부수효과 실패를 사용자에게 알린다', /장부 재생성 실패/.test(wd) && /시트 안내문 기입 실패/.test(wd));
+    // ★★ 인계는 성공도 말한다 — "몇 건을 어디로 옮겼는지" 모르면 담당자가 시트를 다시 확인하러 간다.
+    ok('★★ 이관 확인창이 미반영 주문 처리 방식을 먼저 말한다(시트 아님 · 표로)',
+      /_coCutover[\s\S]{0,900}시스템 표로 옮깁니다/.test(wd));
+    ok('★★ 이관 결과가 옮긴 건수를 말한다', /handoff[\s\S]{0,400}시스템 표로 옮겼습니다/.test(wd));
+    ok('★ 인계 실패·자리없음·절단을 각각 고지한다(조용한 누락 금지)',
+      /h\.failed/.test(wd) && /h\.blocked/.test(wd) && /h\.truncated/.test(wd));
     ok('★ 헤더 캡 = 본문 캡(같은 값 1120px)',
       /#cohead \.mh\{max-width:1120px\}/.test(wd) && /\.cowrap\{max-width:1120px/.test(wd));
     ok('CSS 는 co- 접두 신설', /\.cocard\{/.test(wd) && /\.cochk\{/.test(wd));

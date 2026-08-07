@@ -31,8 +31,15 @@ const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었�
 
 /* ═══════════════ 점검 항목 ═══════════════ */
 //  state: 'pass' | 'fail' | 'unknown'  — pass 가 아니면 전부 잠금(fail-closed)
-function _chk(key, label, state, detail, hint) {
-  return { key, label, state, detail: detail || '', hint: hint || '' };
+/**
+ * @param {string} [fix] 그 자리에서 누를 수 있는 조치 —
+ *   `'refresh'` = 시트 새로고침(repair) · `'audit'` = 반영 점검 화면 열기.
+ *   ★★ 막힌 항목이 **다른 화면 이름만 말하고 끝나면 안 된다**(실측: 안내가 가리킨
+ *      "시트 데이터 반영 점검 화면"은 nav 어디에도 없어 주소를 직접 쳐야 열렸다).
+ *      무엇을 누를지는 **서버가 말하고** 화면은 그대로 그린다(프론트 재판정 0 규율).
+ */
+function _chk(key, label, state, detail, hint, fix) {
+  return { key, label, state, detail: detail || '', hint: hint || '', fix: fix || null };
 }
 
 /** ① 시트에 준비된 줄이 시스템 표보다 많으면 안 된다(먼저 백필). */
@@ -40,7 +47,7 @@ async function _checkSheetRows(db, tab) {
   const label = '시트 준비 줄 ≤ 시스템 표';
   if (!tab.tabGid) {
     return _chk('sheet_rows', label, 'unknown', '탭 번호(gid)를 몰라 시트 사본을 읽을 수 없습니다',
-      '시트 데이터 반영 점검 화면의 [gid 채우기]를 먼저 실행하세요.');
+      '[반영 점검 열기] 에서 gid 를 채운 뒤 다시 점검하세요.', 'audit');
   }
   let read;
   try {
@@ -56,7 +63,7 @@ async function _checkSheetRows(db, tab) {
   const board = Number(tab.boardRows) || 0;
   if (prepared > board) {
     return _chk('sheet_rows', label, 'fail', `시트 ${prepared}줄 · 시스템 표 ${board}줄 (${prepared - board}줄 부족)`,
-      '시트 데이터 반영 점검 화면의 [슬롯 백필]로 표를 먼저 채우세요 — 지금 끊으면 그 줄들이 사라집니다.');
+      '[반영 점검 열기] 의 시트 우위 점검에서 표를 먼저 채우세요 — 지금 끊으면 그 줄들이 사라집니다.', 'audit');
   }
   return _chk('sheet_rows', label, 'pass', `시트 ${prepared}줄 · 시스템 표 ${board}줄`);
 }
@@ -77,23 +84,35 @@ async function _checkParity(tab) {
   }
 }
 
-/** ③ 시트에 아직 못 쓴 주문·대기 중인 쓰기가 0이어야 한다. */
+/**
+ * ③ 시트에 아직 못 쓴 주문 — **이관할 때 작업표로 옮긴다**(사용자 확정 2026-08-07 "B로 진행").
+ *
+ * ★★ 종전엔 미반영 주문이 1건이라도 있으면 무조건 잠갔다. 막으려던 위험은
+ *    "지금 끊으면 그 주문들이 **시트에도 표에도** 안 남는다" 였는데, 이제 이관이 그 주문들을
+ *    작업표로 인계하므로 **표에는 남는다** → 그 위험이 사라진다. 그래서 통과시키는 것은
+ *    완화가 아니라 **사실 반영**이다(fail-closed 는 여전히 아래 한 갈래에서 살아 있다).
+ * ★★ 다만 **배정된 줄이 없는 주문**은 옮길 자리가 없어 진짜로 사라진다 → 그건 계속 잠근다.
+ *    (그 줄은 복구 작업이 배정한다 — 잠시 뒤 다시 점검하면 인계 가능해진다.)
+ * ★ 쓰기 대기 큐는 잠금 사유에서 뺐다 — 이관 후 큐 실행부 백스톱이 사유와 함께 종결하고,
+ *   그 주문 자체는 위 집계에 잡혀 인계된다(같은 사실을 두 번 세면 영영 안 열린다).
+ */
 async function _checkPending(db, tab) {
   const label = '시트 반영 대기 0';
   try {
     const { rows } = await db.query(
-      `SELECT COUNT(*)::int AS n FROM order_submissions
+      `SELECT COUNT(*) FILTER (WHERE sheet_row IS NOT NULL)::int AS handoff,
+              COUNT(*) FILTER (WHERE sheet_row IS NULL)::int     AS blocked
+         FROM order_submissions
         WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
           AND COALESCE(mirror_status, 'pending') <> 'written'`, [tab.sheetId, tab.tabName]);
-    const orders = (rows[0] && rows[0].n) || 0;
-    const { rows: q } = await db.query(
-      `SELECT COUNT(*)::int AS n FROM sync_queue
-        WHERE status IN ('pending', 'processing')
-          AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2`, [tab.sheetId, tab.tabName]);
-    const queued = (q[0] && q[0].n) || 0;
-    if (orders || queued) {
-      return _chk('pending', label, 'fail', `미반영 주문 ${orders}건 · 쓰기 대기 ${queued}건`,
-        '먼저 반영을 끝내세요 — 지금 끊으면 그 주문들이 시트에도 표에도 안 남습니다.');
+    const handoff = (rows[0] && rows[0].handoff) || 0;
+    const blocked = (rows[0] && rows[0].blocked) || 0;
+    if (blocked) {
+      return _chk('pending', label, 'fail', `배정된 줄이 없는 미반영 주문 ${blocked}건`,
+        '옮길 자리가 없어 지금 끊으면 그 주문이 사라집니다 — 복구 작업이 줄을 배정할 때까지 기다렸다 다시 점검하세요.');
+    }
+    if (handoff) {
+      return _chk('pending', label, 'pass', `미반영 주문 ${handoff}건 — 이관할 때 표로 옮깁니다(시트에 쓰지 않습니다)`);
     }
     return _chk('pending', label, 'pass', '남은 것 없음');
   } catch (e) {
@@ -119,7 +138,7 @@ async function _checkMirror(tab, now) {
   const mirroredAt = tab.mirroredAt ? new Date(tab.mirroredAt).getTime() : 0;
   if (!mirroredAt) {
     return _chk('mirror', label, 'unknown', '시트를 읽어 온 기록이 없습니다',
-      '시트 데이터 반영 점검 화면에서 그 시트를 한 번 새로고침하세요.');
+      '아래 [시트 새로고침] 을 누르면 지금 읽어 옵니다.', 'refresh');
   }
   // 우리가 "그 시트의 이 버전까지 읽었다"고 기록해 둔 시각. 없으면 읽어 온 시각으로 대신한다.
   const known = tab.sheetModifiedAt ? new Date(tab.sheetModifiedAt).getTime() : mirroredAt;
@@ -140,7 +159,7 @@ async function _checkMirror(tab, now) {
   const ago = Math.max(0, Math.floor((now.getTime() - remote) / 60000));
   if (remote > known) {
     return _chk('mirror', label, 'fail', `시트가 ${ago}분 전에 수정됐는데 아직 읽어 오지 않았습니다`,
-      '시트 데이터 반영 점검 화면에서 그 시트를 새로고침한 뒤 이관하세요 — 지금 끊으면 그 편집이 사라집니다.');
+      '아래 [시트 새로고침] 을 누른 뒤 다시 점검하세요 — 지금 끊으면 그 편집이 사라집니다.', 'refresh');
   }
   return _chk('mirror', label, 'pass', `시트 최종 수정 ${ago}분 전 · 그 이후로 바뀐 것 없음(읽어 둔 상태가 최신)`);
 }
@@ -318,6 +337,57 @@ async function listCutoverTabs({ since = null, includeUnknown = false, limit = L
 }
 
 /**
+ * 준비 자리 일괄 점검 — **"우레온 같은 작업이 남아 있나"를 한 번에 답한다**(사용자 요청 2026-08-07).
+ *
+ * ★★ 왜 필요한가: 점검표 ①이 이미 같은 판정을 하지만 **탭 하나씩** 눌러야 나온다.
+ *    남은 작업이 85건이면 85번 눌러야 "있는지 없는지"를 아는데, 그게 이관 착수를 막고 있었다.
+ *    이 함수는 그 질문에만 답한다 — 부족한 작업만 추려서 돌려준다.
+ *
+ * ★★ 이것이 유일하게 "시트에만 있고 DB엔 없는" 것이다: 구매일자만 적힌 **아직 안 팔린 자리**.
+ *    파서가 이름 없는 행을 버려(`columnResolver`) 검색 명단에도 작업표에도 안 들어간다.
+ *    제출 데이터(구매양식·리뷰)는 전부 DB-first 라 시트를 볼 이유가 없다 — 그래서 여기만 본다.
+ *
+ * ★ 판정 재료는 점검표 ①과 **같은 함수**(`sheetSlotSync.readPreparedRows`) — 사본을 두면
+ *   "일괄 점검은 괜찮다는데 개별 점검은 막는다"가 된다.
+ * ★ **읽기 전용 · RAW 미러만 · 시트 API 0** — 85탭을 훑어도 구글 쿼터를 건드리지 않는다.
+ * ★ **판정 불가를 "부족 없음"으로 꾸미지 않는다**(gid 없음·미러 없음·구매일자 칸 없음) —
+ *   따로 세어 돌려준다. 모르는 것을 안전으로 접으면 이 점검의 의미가 사라진다.
+ */
+const SWEEP_CAP = 300;
+
+async function sweepPreparedRows({ since = null, includeUnknown = false, limit = SWEEP_CAP } = {}) {
+  const db = _db();
+  const list = await listCutoverTabs({ since, includeUnknown });
+  if (!list.ok) return list;
+  const targets = list.items.filter(t => !t.sheetless);
+  const lim = Math.min(Math.max(parseInt(limit, 10) || SWEEP_CAP, 1), SWEEP_CAP);
+  const scan = targets.slice(0, lim);
+
+  const short = [];    // 시트가 더 많은 작업(= 백필 필요)
+  const unknown = [];  // 판정 불가 — 조용히 통과시키지 않는다
+  let okCount = 0;
+  const slot = require('./sheetSlotSync.service');
+  for (const t of scan) {
+    if (!t.tabGid) { unknown.push({ ...t, reason: 'no_gid' }); continue; }
+    let read;
+    try { read = await slot.readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid }); }
+    catch (e) { unknown.push({ ...t, reason: 'error', message: e.message }); continue; }
+    if (!read || !read.ok) { unknown.push({ ...t, reason: (read && read.reason) || 'unknown' }); continue; }
+    const prepared = read.prepared.length;
+    const board = Number(t.boardRows) || 0;
+    if (prepared > board) short.push({ ...t, prepared, board, missing: prepared - board });
+    else okCount++;
+  }
+  short.sort((a, b) => b.missing - a.missing);
+  return {
+    ok: true, since: list.since,
+    scanned: scan.length, remaining: targets.length,
+    truncated: targets.length > scan.length,
+    okCount, short, unknown,
+  };
+}
+
+/**
  * 이관 — 무시트 표식을 켠다(= 그 작업의 시트 연결을 끊는다).
  * ★ 점검표 fail-closed · force 는 명시 요청일 때만.
  *
@@ -348,7 +418,11 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
     `UPDATE tab_configs SET sheetless = TRUE, sheetless_at = NOW(), sheetless_by = $3
       WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName, String(by || '').slice(0, 100)]);
 
-  // ── 부수효과 2종. 둘 다 실패해도 이관 자체는 유지하고 **사유를 응답에 실어** 화면이 말한다.
+  // ★★ 표식을 켠 **뒤에** 인계한다 — `writeOrderToWorktable` 이 부르는 장부 재생성이
+  //    시트 기반 탭을 `not_sheetless` 로 막기 때문(그 게이트를 풀지 않는다).
+  const handoff = await handoffPendingOrders({ sheetId, tabName, tabGid: tab.tabGid, by });
+
+  // ── 부수효과 3종. 전부 실패해도 이관 자체는 유지하고 **사유를 응답에 실어** 화면이 말한다.
   //    (되돌리면 크론이 다시 시트를 읽으므로, 부수효과 실패로 이관을 롤백할 이유가 없다.)
   let ledger = null;
   try {
@@ -370,7 +444,79 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
   }
 
   logger.info(`[cutover] 이관 완료 — ${tabName} (${sheetId}) by=${by}${force && !list.canCutover ? ' [UNVERIFIED]' : ''}`);
-  return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover), ledger, notice };
+  return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover),
+    handoff, ledger, notice };
+}
+
+/**
+ * 이관 시 **미반영 주문을 작업표로 인계**한다(사용자 확정 2026-08-07 "B로 진행").
+ *
+ * ★★ 왜 시트에 다시 쓰지 않는가 — 두 가지 이유가 결정적이다:
+ *    ① 곧 안 읽을 시트에 쓰는 것은 낭비이고, 쓰는 동안 시트가 또 바뀌면 ④가 다시 잠긴다.
+ *    ② **`stuck_manual` 은 시트 재기록으로 영영 안 풀린다**(reconcile 이 그 상태를 제외한다)
+ *       → 그런 주문이 하나라도 있는 작업은 "시트에 다 쓰고 나서 이관"이 **구조적으로 불가능**했다.
+ *    작업표로 옮기면 그 주문이 장부(검색 명단·리뷰내역·홈 통계)에 그대로 들어가 완결된다.
+ *
+ * ★★ **실행부는 `writeOrderToWorktable` 한 벌**(사본 0) — 이관 후 신규 주문이 타는 바로 그 경로다.
+ *    매핑(`mapOrderToSheetRow`)·옵션 blank-only·장부 재생성·완결 표시·신원 링크가 전부 거기 있다.
+ * ★ 원장 행 → orderData 변환도 `orderLedger._osRowToOrderData` 재사용(큐 실행부와 같은 함수).
+ * ★ **표식을 켠 뒤에 불러야 한다** — 그 함수가 부르는 장부 재생성이 시트 기반 탭을 막는다.
+ *
+ * ★ **절대 throw 하지 않는다** — 인계 실패로 이관을 되돌리면 "표식은 껐는데 시트 안내문은 붙은"
+ *   어중간한 상태가 된다. 사유를 응답에 실어 화면이 말하고, 남은 건은 아래 두 경로가 메운다:
+ *   ㉮ 2분 reconcile 의 무시트 분기(이제 이 탭이 무시트라 작업표로 재기록) ㉯ 재실행(멱등).
+ * ★ 그래서 상한을 넘길 때는 **`stuck_manual` 을 먼저** 처리한다 — 그것만이 ㉮로 안 풀린다.
+ *
+ * 킬스위치 `SHEETLESS_CUTOVER_HANDOFF=0`(인계 없이 이관 — 종전 동작).
+ */
+const HANDOFF_CAP = Math.max(1, parseInt(process.env.SHEETLESS_CUTOVER_HANDOFF_CAP || '200', 10) || 200);
+
+async function handoffPendingOrders({ sheetId, tabName, tabGid = '', by = '' } = {}) {
+  const base = { ok: true, written: 0, failed: 0, blocked: 0, total: 0, truncated: false };
+  if (String(process.env.SHEETLESS_CUTOVER_HANDOFF || '1') === '0') {
+    return { ...base, skipped: 'disabled' };
+  }
+  const db = _db();
+  let rows;
+  try {
+    const r = await db.query(
+      `SELECT * FROM order_submissions
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+          AND COALESCE(mirror_status, 'pending') <> 'written'
+        ORDER BY (COALESCE(mirror_status,'pending') <> 'stuck_manual'), submitted_at ASC
+        LIMIT $3`, [sheetId, tabName, HANDOFF_CAP + 1]);
+    rows = r.rows || [];
+  } catch (e) {
+    logger.warn(`[cutover] 미반영 주문 조회 실패(이관은 유지) — ${tabName}: ${e.message}`);
+    return { ...base, ok: false, reason: 'query_failed', message: e.message };
+  }
+  const truncated = rows.length > HANDOFF_CAP;
+  if (truncated) rows = rows.slice(0, HANDOFF_CAP);
+  if (!rows.length) return { ...base };
+
+  const { writeOrderToWorktable } = require('./sheetlessOrder.service');
+  const { _osRowToOrderData } = require('./orderLedger.service');
+  const out = { ...base, total: rows.length, truncated };
+  const reasons = [];
+  for (const os of rows) {
+    // ★ 배정된 줄이 없으면 옮길 자리가 없다 — 점검표 ③이 이미 잠그지만(force 우회 대비) 여기서도 센다.
+    if (!os.sheet_row) { out.blocked++; continue; }
+    try {
+      const w = await writeOrderToWorktable({
+        sheetId, tabName, tabGid: os.tab_gid || tabGid,
+        sheetRow: os.sheet_row, orderData: _osRowToOrderData(os),
+        orderSubmissionId: os.id, recovered: true,   // ★ 복구 표기 = reconcile 무시트 분기와 같은 호출 형태
+      });
+      if (w && w.ok) out.written++;
+      else { out.failed++; if (w && w.reason) reasons.push(w.reason); }
+    } catch (e) {
+      out.failed++; reasons.push(e.message || 'error');
+    }
+  }
+  if (reasons.length) out.reasons = Array.from(new Set(reasons)).slice(0, 5);
+  logger.info(`[cutover] 미반영 주문 인계 — ${tabName} 옮김 ${out.written} · 실패 ${out.failed} · ` +
+    `자리없음 ${out.blocked}${truncated ? ` · 상한 ${HANDOFF_CAP} 초과분은 복구 작업이 이어서 처리` : ''} by=${by}`);
+  return out;
 }
 
 /**
@@ -396,6 +542,8 @@ module.exports = {
   cutoverChecklist,
   listCutoverTabs,
   enableSheetless,
+  sweepPreparedRows,
+  handoffPendingOrders,
   disableSheetless,
   CUTOVER_NOTICE,
   __setPoolForTest,
