@@ -5476,6 +5476,11 @@ async function renderCampaignsView(){
   //   스크롤 컨테이너에 섞여 팝업이 아니라 페이지 하단 블록으로 보인다(실측).
   if(window.RecruitModal) RecruitModal.mount();
   await _loadPerm();
+  /* 연결 탭 드롭다운 재료 — 관리자 대시보드는 모집공고 탭 진입 시 목록과 **함께** 채운다
+     (index-app.js switchAdminTab). 여기만 빠져 있어 카드 [✏️ 수정]으로 연 모달의
+     시트 선택이 통째로 비어 있었다. 모달도 스스로 보장하지만(index-recruit), 뷰 진입 때
+     미리 최신화해 두면 첫 클릭이 기다리지 않는다. 목록 로드를 막지 않게 await 없이. */
+  try{ if(typeof loadRecruitTabOptions==='function') loadRecruitTabOptions(); }catch(_){ }
   await loadRecruitList();     // index-recruit.js — 관리자 대시보드와 같은 로더
 }
 /** index-recruit.js 가 기대하는 컨테이너·전역을 리뷰웹시스템[3버전]에 맞춰 채운다(사본 금지) */

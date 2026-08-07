@@ -280,6 +280,7 @@ async function toggleRecruitPublish(id, checked, inputEl) {
 function _recruitTabsApi() {
   return (typeof window !== "undefined" && window.RECRUIT_TABS_API) || "/api/tab/dashboard";
 }
+let _rfTabsErr = null;   // 탭 목록 로드 실패 사유(성공 = null) — "0건"과 "못 불러옴"을 구분해 말하려고 남긴다
 async function loadRecruitTabOptions() {
   try {
     /* ── API에서 직접 탭 목록을 가져옴 (DOM 의존 제거) ── */
@@ -328,9 +329,11 @@ async function loadRecruitTabOptions() {
       _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key });
     });
 
+    _rfTabsErr = null;
     _populateCampaignSelect();
   } catch(e) {
     console.warn("[recruit] 탭 옵션 로드 실패:", e);
+    _rfTabsErr = (e && e.message) || "불러오기 실패";
     /* API 실패 시 DOM fallback */
     const rows = document.querySelectorAll("[data-tabkey]");
     const seen = new Set();
@@ -355,8 +358,11 @@ async function loadRecruitTabOptions() {
       const display = nameEl ? nameEl.textContent.trim() : tab;
       _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key });
     });
+    // DOM 폴백이 실제로 건졌으면 실패로 취급하지 않는다(관리자 대시보드 경로)
+    if (_recruitTabList.length) _rfTabsErr = null;
     _populateCampaignSelect();
   }
+  try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 목록 상태가 바뀌면 안내도 다시 판단
 }
 
 /* 1단계: 캠페인(시트) 선택 드롭다운 구성 */
@@ -635,9 +641,28 @@ function _rfRefreshLinkedTabNote() {
   const title = (document.getElementById("rf_title")?.value || "").trim();
   _rfSugCache = _rfSuggestTabs(title, _RF_SUG_LIMIT);
   const miss = _rfLinkedMiss;
-  if (!miss && !_rfSugCache.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+  const noTabs = !_recruitTabList.length;
+  if (!miss && !noTabs && !_rfSugCache.length) { box.style.display = "none"; box.innerHTML = ""; return; }
 
   let html = "";
+  /* ★★ 목록이 통째로 비면 "비슷한 탭이 없다"가 아니라 **고를 수가 없는 상태**다 —
+     시트명부터 고르라고 하면 따를 수 없는 지시가 된다(실측 신고).
+     못 불러온 것과 진짜 0건을 구분해 말하고, 다시 시도할 길을 준다. */
+  if (noTabs) {
+    html += _rfTabsErr
+      ? `⚠ 시트·탭 목록을 <b>불러오지 못했어요</b> — 네트워크·권한 문제일 수 있어요.`
+      : `⚠ 고를 수 있는 <b>작업 탭이 없어요</b> — 작업오더를 접수하면 목록에 나타납니다(접수 후 5분쯤).`;
+    if (miss) html += `<br>이 공고에 저장된 탭: <span class="rf-ltwant">${escHtml(miss.tabName || "(이름 없음)")}</span>`;
+    html += `<div class="rf-ltrow"><button type="button" class="rf-ltwo" onclick="rfReloadTabs(this)">↻ 다시 불러오기</button>`;
+    if (miss && miss.orderId && typeof window.RECRUIT_OPEN_WORK_ORDER === "function") {
+      html += `<button type="button" class="rf-ltwo" onclick="rfOpenLinkedWorkOrder()">작업오더 열기 →</button>`;
+    }
+    html += `</div>`;
+    box.className = "rf-ltnote";
+    box.innerHTML = html;
+    box.style.display = "";
+    return;
+  }
   if (miss) {
     const where = miss.source === "order" ? "작업오더의" : "이 공고에 저장된";
     const why = miss.source === "order"
@@ -675,6 +700,14 @@ function rfPickSuggestedTab(i) {
   if (_restoreLinkedTab(s.sheetId, s.tabName)) _rfLinkedMiss = null;   // 사람이 골랐으면 사유 안내는 끝
   _rfRefreshLinkedTabNote();
 }
+/** [↻ 다시 불러오기] — 탭 목록을 다시 받고, 성공하면 저장돼 있던 탭을 자동으로 되살린다 */
+async function rfReloadTabs(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "불러오는 중…"; }
+  try { await loadRecruitTabOptions(); } catch (_) {}
+  const m = _rfLinkedMiss;
+  if (m && m.sheetId && m.tabName && _restoreLinkedTab(m.sheetId, m.tabName)) _rfLinkedMiss = null;
+  _rfRefreshLinkedTabNote();   // 여전히 비면 사유가 그대로 남는다(조용히 성공한 척하지 않는다)
+}
 /** [작업오더 열기] — 호스트가 훅을 등록한 화면에서만 버튼이 뜬다 */
 function rfOpenLinkedWorkOrder() {
   const id = _rfLinkedMiss && _rfLinkedMiss.orderId;
@@ -707,7 +740,7 @@ function _prefillLinkedTab(prefill) {
      기록만 하고 선택은 여전히 안 한다 — 잘못된 탭 연결이 빈칸보다 나쁘다는 규칙은 그대로. */
   const _miss = (name) => {
     _rfLinkedMiss = { source: "order", tabName: name || prefill.linked_tab_name || "",
-                      orderId: _woPrefillOrderId || null };
+                      sheetId: sid || prefill.linked_sheet_id || "", orderId: _woPrefillOrderId || null };
     return false;
   };
   if (!sid) return prefill.work_sheet_url || prefill.linked_tab_name ? _miss("") : false;
@@ -1778,9 +1811,18 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
+  _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
   { const _sb = document.getElementById("recruitSaveBtn");
     if (_sb) { _sb.disabled = false; _sb.classList.remove("busy", "done"); _sb.innerHTML = '<i class="fas fa-save"></i> 저장'; } }
+
+  /* ★★ 연결 탭 드롭다운은 `_recruitTabList` 에 의존한다 — 호스트가 채워 주지 않는 진입점이
+     있으면 **시트 선택 자체가 불가능**하다(실측: 리뷰웹시스템[3버전] 모집공고 카드 [✏️ 수정]은
+     campaign-cards.js 가 openRecruitModal 을 직접 불러 목록이 통째로 비어 있었다 →
+     gid 연결이 구조적으로 불가능했고, 자동점검만 "gid 가 필요해요"라고 했다).
+     진입점마다 호스트를 고치면 **새 진입점이 생길 때 또 빠진다** → 모달이 자기 의존을 보장한다.
+     이미 채워져 있으면 재요청하지 않으므로 기존 경로의 동작·요청 수는 그대로. */
+  if (!_recruitTabList.length) { try { await loadRecruitTabOptions(); } catch (_) {} }
 
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
@@ -1898,7 +1940,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       /* ★ 저장된 탭이 목록에 없으면(리네임·아카이브·미등록) select 가 조용히 비어 자동점검만
          "gid 가 필요해요"라고 한다 → 사유를 남겨 안내 박스가 설명하게 한다. */
       if (c.linked_tab_name && !_restoreLinkedTab(c.linked_sheet_id, c.linked_tab_name)) {
-        _rfLinkedMiss = { source: "campaign", tabName: c.linked_tab_name, orderId: null };
+        _rfLinkedMiss = { source: "campaign", tabName: c.linked_tab_name,
+                          sheetId: c.linked_sheet_id || "", orderId: null };
       }
 
       /* ⚡ 참여형(M2) 필드 복원 */

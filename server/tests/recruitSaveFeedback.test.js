@@ -320,6 +320,48 @@ ok('H12. _restoreLinkedTab 이 성공 여부를 돌려준다(목록에 없으면
     /목록을 불러오지 못했습니다/.test(hook));
 }
 
+/* ★★ 실측 신고(2026-08-07): 리뷰웹시스템[3버전] 모집공고 카드 [✏️ 수정]은 campaign-cards.js 가
+   openRecruitModal 을 **직접** 부르는데, 그 뷰는 loadRecruitTabOptions 를 호출하지 않았다
+   → `_recruitTabList` 가 비어 시트 드롭다운에 아무것도 안 뜨고 **gid 연결이 구조적으로 불가능**했다.
+   진입점마다 호스트를 고치면 새 진입점에서 또 빠지므로 **모달이 자기 의존을 보장**한다. */
+{
+  const openFn = pick(recruit, 'openRecruitModal');
+  ok('H22. ★ 모달이 탭 목록을 스스로 보장한다(호스트 호출 누락 방어)',
+    /if \(!_recruitTabList\.length\) \{[\s\S]{0,80}await loadRecruitTabOptions\(\)/.test(openFn));
+  ok('H23. 이미 채워져 있으면 재요청하지 않는다(기존 경로 요청 수 불변)',
+    /if \(!_recruitTabList\.length\)/.test(openFn));
+  ok('H24. 보장 호출은 편집 프리필보다 **앞**이다(뒤면 select 가 다시 비워진다)',
+    openFn.indexOf('await loadRecruitTabOptions()') > -1 &&
+    openFn.indexOf('await loadRecruitTabOptions()') < openFn.indexOf('_restoreLinkedTab('));
+  ok('H25. workdesk 모집공고 뷰도 진입 시 목록을 채운다(관리자 대시보드와 대칭)',
+    /renderCampaignsView[\s\S]{0,900}?loadRecruitTabOptions\(\)/.test(readF('workdesk.html')));
+
+  ok('H26. ★ 목록이 비면 "비슷한 탭이 없다"가 아니라 **고를 수 없는 상태**라고 말한다',
+    /const noTabs = !_recruitTabList\.length;/.test(noteFn) &&
+    /불러오지 못했어요/.test(noteFn) && /작업 탭이 없어요/.test(noteFn));
+  ok('H27. ★ 못 불러온 것과 진짜 0건을 구분한다(실패를 0건으로 위장하지 않는다)',
+    /_rfTabsErr\s*\n?\s*\?/.test(noteFn) && /let _rfTabsErr = null/.test(recruit) &&
+    /_rfTabsErr = \(e && e\.message\)/.test(recruit) && /_rfTabsErr = null;/.test(recruit));
+  ok('H28. 목록이 빈 화면에서는 "① 시트명부터 직접 골라주세요"라고 하지 않는다(따를 수 없는 지시)',
+    (() => {
+      const i = noteFn.indexOf('const noTabs');
+      const j = noteFn.indexOf('if (miss) {', i);
+      // ★ 주석에 그 문구를 인용해 두었으므로 주석을 걷어내고 본다(작은 조각이라 안전)
+      const body = noteFn.slice(i, j).replace(/\/\*[\s\S]*?\*\//g, '');
+      return i > -1 && j > i && !/시트명부터 직접 골라주세요/.test(body);
+    })());
+  ok('H29. [↻ 다시 불러오기] — 성공하면 저장돼 있던 탭을 자동 복원, 실패하면 사유를 남긴다',
+    (() => {
+      const r = pick(recruit, 'rfReloadTabs');
+      return /await loadRecruitTabOptions\(\)/.test(r) &&
+             /_restoreLinkedTab\(m\.sheetId, m\.tabName\)/.test(r) &&
+             /_rfRefreshLinkedTabNote\(\)/.test(r);
+    })());
+  ok('H30. 사유 기록에 sheetId 를 함께 남긴다(재로드 후 복원의 재료)',
+    /sheetId: sid \|\| prefill\.linked_sheet_id/.test(recruit) &&
+    /sheetId: c\.linked_sheet_id/.test(recruit));
+}
+
 /* 유사도 함수 실제 실행 */
 ['_rfMatchNorm', '_rfBigrams', '_rfTabScore', '_rfSuggestTabs'].forEach(n => {
   const body = pick(recruit, n);
@@ -363,6 +405,46 @@ ok('H17. 추천은 임계값 이상만·상한 3개·점수 내림차순',
       !r.some(x => /노티드|1차/.test(x.tabName)) &&
       r.every((x, i) => i === 0 || r[i - 1].score >= x.score);
   })());
+/* ★★ 정적 검사만으로는 `if (noTabs) {` → `if (false) {` 같은 **죽은 분기**를 통과시킨다
+   (변이시험 실측). 안내 함수를 가짜 DOM 위에서 **실제로 실행**해 무엇이 그려지는지 본다. */
+{
+  const body = pick(recruit, '_rfRefreshLinkedTabNote');
+  assert(body, '_rfRefreshLinkedTabNote 추출 실패');
+  const els = {
+    rf_linked_tab_note: { style: {}, innerHTML: '', className: '' },
+    rf_linked_tab: { value: '' },
+    rf_title: { value: '우레온 바디 미스트' },
+  };
+  sandbox.document = { getElementById: (id) => els[id] || null, querySelector: () => null };
+  sandbox.escHtml = (v) => String(v == null ? '' : v);
+  sandbox._recruitTabList = [];
+  sandbox._rfLinkedMiss = { source: 'campaign', tabName: '8/3 우레온_바디미스트', sheetId: 'S_A', orderId: null };
+  vm.runInContext('function _rfRefreshLinkedTabNote() ' + body, ctx);
+
+  sandbox._rfTabsErr = 'HTTP 500';
+  sandbox._rfRefreshLinkedTabNote();
+  const failHtml = els.rf_linked_tab_note.innerHTML;
+  ok('H18-1. ★ [실행] 목록이 비고 로드 실패면 "불러오지 못했어요" + [다시 불러오기]',
+    /불러오지 못했어요/.test(failHtml) && /rfReloadTabs\(this\)/.test(failHtml) &&
+    els.rf_linked_tab_note.style.display === '');
+  ok('H18-2. ★ [실행] 그 화면에서는 "시트명부터 직접 골라주세요"라고 하지 않는다',
+    !/시트명부터 직접 골라주세요/.test(failHtml));
+
+  sandbox._rfTabsErr = null;
+  sandbox._rfRefreshLinkedTabNote();
+  const emptyHtml = els.rf_linked_tab_note.innerHTML;
+  ok('H18-3. ★ [실행] 진짜 0건은 "작업 탭이 없어요 — 접수하면 나타납니다"(실패로 위장 금지)',
+    /작업 탭이 없어요/.test(emptyHtml) && /접수하면/.test(emptyHtml) &&
+    !/불러오지 못했어요/.test(emptyHtml));
+
+  els.rf_linked_tab.value = 'S_A||탭';
+  sandbox._rfRefreshLinkedTabNote();
+  ok('H18-4. ★ [실행] 탭이 선택돼 있으면 아무것도 그리지 않는다(무회귀)',
+    els.rf_linked_tab_note.style.display === 'none' && els.rf_linked_tab_note.innerHTML === '');
+  els.rf_linked_tab.value = '';
+  sandbox.document = { getElementById: () => null, querySelector: () => null };   // 원상복구
+}
+
 ok('H18. ★ 비슷한 게 없으면 아무것도 추천하지 않는다(빈 추천 > 틀린 추천)',
   sandbox._rfSuggestTabs('전혀 다른 상품 텀블러 스테인리스', 3).length === 0 &&
   sandbox._rfSuggestTabs('', 3).length === 0);
