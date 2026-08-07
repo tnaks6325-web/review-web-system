@@ -54,10 +54,19 @@ function resolveTabGid(r = {}) {
 }
 function _gidOut(r, gid, source) {
   const sheetId = String(r.sheetId || '');
-  const base = sheetId ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/edit` : null;
+  /* ★★ 무시트 작업은 **열 시트가 없다**(탈 구글시트 W3-b). 그런데 링크는 sheetId 로 조립되므로
+     가만두면 가상 ID(`wt_…`)로 **죽은 구글 링크**가 만들어져 담당자가 "왜 안 열리지"를 겪는다.
+     → 링크를 만들지 않고 `sheetless` 로 사유를 말한다(빈 링크 > 죽은 링크 — 이 함수가 이미
+     "열리는데 엉뚱한 탭보다 빈 링크가 낫다"로 세워 둔 규율과 같다).
+     ★ 판정은 서버가 실어 준 플래그가 진실원본 — ID 모양(`wt_`)으로 추측하지 않는다.
+       이관된 기존 작업은 **진짜 시트 ID 를 그대로 쓰면서** 무시트가 되므로 모양으로는 못 잡는다. */
+  const sheetless = r.sheetless === true;
+  const base = (sheetId && !sheetless)
+    ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/edit` : null;
   return {
     resolvedGid: gid || null,
     gidSource: source,
+    sheetless,
     // gid 를 못 구하면 시트만 여는 링크(그마저 없으면 null) — "열리는데 엉뚱한 탭"보다 정직하다.
     tabUrl: base ? (gid ? `${base}#gid=${encodeURIComponent(gid)}` : base) : null,
   };
@@ -158,6 +167,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
             tc.tab_gid   AS "tabGid",
             COALESCE(tc.display_name, tc.tab_name) AS "displayName",
             tc.campaign_name AS "campaignName",
+            COALESCE(tc.sheetless, FALSE) AS "sheetless",
             reg.reg_at   AS "registeredAt",
             rst."rawRows", rst."mirroredAt", rst."mirrorTabName", rst."mirrorGid",
             mc.n         AS "mirrorNameCount",

@@ -1432,6 +1432,11 @@
 .gdcard:hover .gdgo{color:var(--acc,#2563A8)}
 #gdhead .mh{max-width:1120px}
 
+/* 무시트 배지 — 작업명 옆 작은 알약. 홈 목록·작업보드 상단·업체관리 표 **공용**(ns- 접두 신설).
+   ★ 홈 전용이 아니므로 홈 CSS 블록 밖에 둔다(홈 스코프 가드의 의미를 흐리지 않게). */
+.ns-b{display:inline-block;border-radius:999px;padding:1px 7px;margin-left:5px;font-size:10px;font-weight:750;
+  white-space:nowrap;vertical-align:1px;background:#e8f0fe;color:#1a56c4;border:1px solid #c7dbff}
+
 /* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (design-workdesk-home.html)
    클래스는 전부 hm- 접두 신설 — 기존 .gauge/.kpi/.worow 류와 이름 충돌 금지(레포 실측 사고 전례).
    폭 상한 1380px = 모집공고 카드 컨테이너와 같은 값(hug-left + 우측 여백 흘리기). */
@@ -2957,6 +2962,18 @@ window.CAMP_ON_SAVED=function(){
      매번 새로 만들어져 **한글 IME 조합이 끊겼다**('면' → 'ㅁㅕㄴ'). 헤더 숫자(진행 중·오늘 완료·
      스위치 건수)는 전부 `all` 기준이라 검색으로 바뀌지 않으므로, 검색은 본문만 갈아 끼우면 된다.
    ★ 두 호출부(전체 렌더·검색)가 **같은 조각**을 쓴다 — 사본을 두면 검색 결과 행만 열 구성이 어긋난다. */
+/* ★★ 무시트 배지 — 화면이 "이 작업은 구글시트를 안 쓴다"고 말한다 (탈 구글시트 W3-b).
+   없으면 담당자가 어느 작업이 이관됐는지 화면만 봐서는 알 수 없어 시트를 찾으러 간다.
+   ★ 판정은 **서버가 실어 준 플래그 하나**(`sheetless`) — 시트 ID 모양(`wt_`)으로 추측하지 않는다.
+     이관된 기존 작업은 진짜 시트 ID 를 그대로 쓰면서 무시트가 되므로 모양으로는 못 잡는다.
+   ★ 필드 자체가 없으면(구버전 백엔드) **아무것도 그리지 않는다** — 모르는 것을
+     "시트를 쓴다"로 단정하지 않는다(조용한 오표시 금지).
+   ★ 렌더러는 한 벌 — 홈 목록·작업보드 상단·업체관리 표가 같은 것을 쓴다(사본을 두면 한쪽만 안 바뀐다). */
+function _nsBadge(t){
+  return (t && t.sheetless===true)
+    ? ' <span class="ns-b" title="구글시트를 쓰지 않는 작업입니다 — 표가 곧 원본이고, 시트를 열 필요가 없습니다">무시트</span>'
+    : '';
+}
 function _finBodyHtml(){
   const fin=STATE.finTab==='fin';
   const all=STATE.tabs||[];
@@ -2987,7 +3004,7 @@ function _finBodyHtml(){
       :(fin?`<button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
-      <td><div class="wbl-nm">${esc(t.tabName)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
+      <td><div class="wbl-nm">${esc(t.tabName)}${_nsBadge(t)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
       ${tdOpen}
       <td>${esc((s.manager)||'—')}</td>
       <td>${prog}</td>${last}
@@ -3494,6 +3511,7 @@ function renderWorkdesk(wd){
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
   $('#main').innerHTML=`<div class="mh mh-wb"><h1 title="${esc(STATE.cur.tabName)}">${esc(STATE.cur.tabName)}</h1>
+    ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
     ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     <span class="sp" style="flex:1"></span>
@@ -9028,7 +9046,7 @@ function _ownRowsHtml(){
       : (t.finishCand ? '<span class="ovm-fin cand" title="인원 충족·전건 제출·전건 입금 — 이제 마감할 수 있습니다">마감자료 검수</span>' : '');
     const cells=[];
     cells.push(gauge);
-    cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}</b>
+    cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}${_nsBadge(t)}</b>
         <span class="osub">${fbadge}${fbadge?' ':''}${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>`);
     if(c.info){
       // 지정 브랜드는 색 점 + 굵게(광고주가 정한 값), 추정 파싱은 종전 표기 그대로(회색 물음표 툴팁).

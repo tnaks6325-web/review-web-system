@@ -8,6 +8,10 @@
 (function () {
   'use strict';
 
+  // 무시트 작업(탈 구글시트)의 가상 시트ID 접두. 단일 출처 = 서버 sheetlessAccept.VIRTUAL_SHEET_PREFIX
+  //   — 최소 사본이고 회귀가드가 두 값의 일치를 고정한다(workManager 사본 규율).
+  const _VIRTUAL_SHEET_PREFIX = 'wt_';
+
   let _serverOffsetMs = 0;          // serverNow - Date.now()
   let _tickTimer = null;
   let _onNeedRefresh = null;        // 카운트다운 0 도달 시 목록 재조회 콜백
@@ -389,12 +393,16 @@
       : `<span class="ppub">게시<span class="psw${on ? '' : ' off'}" onclick="${stop}toggleRecruitPublish('${id}',${on ? 'false' : 'true'},this)"></span></span>`;
     // 연결된 구글시트로 이동하는 버튼(리뷰어 화면 미리보기 버튼 대체).
     //   sheetId 없으면 비활성(연결 탭 없는 공고 = 이동 대상 없음).
+    //   ★ 무시트 작업(탈 구글시트 W1~)은 가상 시트ID(wt_…)라 구글 URL 을 만들면 죽은 링크가 된다
+    //     → 비활성 + 사유. 판정 문자열은 서버 sheetlessAccept.VIRTUAL_SHEET_PREFIX 와 같아야 하고
+    //     회귀가드가 두 값의 일치를 고정한다(workManager 사본 규율).
     const sid = c.linked_sheet_id || '';
     const gid = c.linked_tab_gid || '';
-    const sheetUrl = sid ? ('https://docs.google.com/spreadsheets/d/' + sid + '/edit' + (gid ? '#gid=' + gid : '')) : '';
+    const sheetless = sid.indexOf(_VIRTUAL_SHEET_PREFIX) === 0;
+    const sheetUrl = (sid && !sheetless) ? ('https://docs.google.com/spreadsheets/d/' + sid + '/edit' + (gid ? '#gid=' + gid : '')) : '';
     const sheetBtn = sheetUrl
       ? `<button type="button" class="uic" onclick="${stop}window.open('${_esc(sheetUrl)}','_blank','noopener')" title="연결된 구글시트 열기">📄 시트</button>`
-      : `<button type="button" class="uic" disabled title="연결된 시트가 없습니다" style="opacity:.4;cursor:default">📄 시트</button>`;
+      : `<button type="button" class="uic" disabled title="${sheetless ? '무시트 작업입니다 — 구글시트를 쓰지 않습니다' : '연결된 시트가 없습니다'}" style="opacity:.4;cursor:default">${sheetless ? '🗒 무시트' : '📄 시트'}</button>`;
     // 🚫 참여 리뷰어(공고별 블랙리스트 건별 관리, 091) — apply 게이트가 있는 참여형만 의미가 있다
     //   (레거시는 카톡 신청이라 차단 지점이 없음). 모듈 미로드 화면(리뷰어 홈 등)에는 버튼을 안 그린다.
     const gateBtn = (c.participation_mode && typeof window !== 'undefined' && window.ReviewerGate)

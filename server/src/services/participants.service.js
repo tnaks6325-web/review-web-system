@@ -393,9 +393,14 @@ async function listActiveTabs({ limit = 500 } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
   const { rows } = await db.query(
+    /* ★ sheetless — 화면이 "이 작업은 구글시트를 안 쓴다"고 말하기 위한 재료(탈 구글시트 W3-b).
+       없으면 담당자가 어느 작업이 이관됐는지 화면만 봐서는 알 수 없고, 시트를 찾으러 간다.
+       ★ tab_configs 는 이미 등록 게이트라 LEFT JOIN 이 행을 늘리지 않는다(탭당 1행 PK). */
     `SELECT rst.sheet_id AS "sheetId", rst.spreadsheet_title AS "spreadsheetTitle",
-            rst.tab_gid AS "tabGid", rst.tab_name AS "tabName", rst.row_count AS "rowCount"
+            rst.tab_gid AS "tabGid", rst.tab_name AS "tabName", rst.row_count AS "rowCount",
+            COALESCE(tc.sheetless, FALSE) AS "sheetless"
        FROM raw_sheet_tabs rst
+       LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE
         AND EXISTS (SELECT 1 FROM index_master im
                      WHERE im.status='active' AND im.sheet_id=rst.sheet_id
