@@ -19,6 +19,9 @@ const path = require('path');
 const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
+// ★ 모집 정원 기준의 기본값은 **시스템표**(2026-08-07 사용자 확정)라 시트 일정 엔진 자체를
+//   검증하는 이 파일은 그 엔진을 켜고 돌린다(env 는 require 시점에 읽힌다 — 위에 둘 것).
+process.env.CAMPAIGN_SHEET_SCHEDULE = '1';
 const S = require('../src/services/campaignState.service');
 const SCH = require('../src/services/campaignSchedule.service');
 
