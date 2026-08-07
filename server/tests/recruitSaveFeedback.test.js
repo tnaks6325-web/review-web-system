@@ -257,6 +257,116 @@ ok('F4. FB_CSS 는 남의 규칙을 품지 않는다(#campSaveFb · @media · @k
     return bad.every(t => t.startsWith('#campSaveFb') || t.startsWith('@media') || t.startsWith('@keyframes'));
   })());
 
+console.log('\n── H. 연결 탭 — 사유 안내 + 제목 유사도 추천 ──');
+/* 왜: 프리필은 그 탭이 목록에 있을 때만 연결하고 없으면 빈칸으로 둔다(잘못된 탭 연결 방지).
+   그런데 화면이 그 사실을 말하지 않아 "작업오더에 시트가 있는데 왜 비지?"가 됐다. */
+const noteFn = pick(recruit, '_rfRefreshLinkedTabNote');
+ok('H1. 안내 컨테이너가 모달 마크업에 있다(연결 탭 바로 아래)',
+  /id="rf_linked_tab_note"/.test(modal) &&
+  modal.indexOf('rf_linked_tab_note') > modal.indexOf('id="rf_linked_tab"'));
+ok('H2. 탭이 선택돼 있으면 아무것도 띄우지 않는다(무회귀)',
+  /if \(sel && sel\.value\) \{ box\.style\.display = "none"/.test(noteFn));
+ok('H3. 사유 2종 — 작업오더의 탭 / 이 공고에 저장된 탭',
+  /작업오더의/.test(noteFn) && /이 공고에 저장된/.test(noteFn) &&
+  /접수하지 않았거나/.test(noteFn) && /이름이 바뀌었거나/.test(noteFn));
+ok('H4. ★ [작업오더 열기]는 호스트 훅이 있을 때만 그린다(눌러도 아무 일 없는 버튼 금지)',
+  /miss\.orderId && typeof window\.RECRUIT_OPEN_WORK_ORDER === "function"/.test(noteFn));
+ok('H5. 훅은 admin·workdesk 양쪽이 등록한다',
+  /window\.RECRUIT_OPEN_WORK_ORDER = function/.test(readF('js/index-app.js')) &&
+  /RECRUIT_OPEN_WORK_ORDER = async function/.test(readF('workdesk.html')));
+ok('H6. ★ 훅은 공고 모달을 먼저 닫는다 — 덮개(5000) 뒤에 열리면 안 뜬 것처럼 보인다',
+  /closeRecruitModal[\s\S]{0,120}openWoDetailModal/.test(readF('js/index-app.js')) &&
+  /closeRecruitModal\(\);[\s\S]{0,200}switchView\('orders'\)/
+    .test(readF('workdesk.html').replace(/\/\*[\s\S]*?\*\//g, '')));   // 주석 제외 후 판정(설명이 길어져 창을 넘겼다)
+ok('H7. ★ 추천 클릭은 인덱스만 넘긴다(탭명은 시트발 외부 문자열 — onclick 보간 금지)',
+  /onclick="rfPickSuggestedTab\(\$\{i\}\)"/.test(noteFn) &&
+  !/onclick="rfPickSuggestedTab\('/.test(noteFn));
+ok('H8. 탭명·시트명은 escape 해서 그린다',
+  /escHtml\(s\.tabName\)/.test(noteFn) && /escHtml\(miss\.tabName/.test(noteFn));
+ok('H9. ★ 제목 입력은 노트 div 만 갱신한다(입력칸 재렌더 = 한글 IME 파괴)',
+  (() => {
+    const b = pick(recruit, '_rfBindTitleSuggest');
+    return /addEventListener\("input"/.test(b) && /_rfRefreshLinkedTabNote/.test(b) &&
+           !/innerHTML/.test(b);
+  })());
+/* ★ 약한 패턴(`!/_restoreLinkedTab\(s\.sheetId/`)은 `_restoreLinkedTab(_rfSugCache[0].sheetId,…)`
+   같은 다른 표기의 자동 선택을 통과시킨다(변이시험 실측) → **호출 자체가 없어야** 한다. */
+ok('H10. ★ 안내 렌더러는 절대 선택하지 않는다 — 사람이 칩을 눌러야 연결된다',
+  !/_restoreLinkedTab/.test(noteFn) &&
+  /_restoreLinkedTab\(s\.sheetId, s\.tabName\)/.test(pick(recruit, 'rfPickSuggestedTab')));
+ok('H11. ★ 목록에 없는 탭은 여전히 선택하지 않는다(안내만 추가) — 잘못된 탭 연결이 빈칸보다 나쁘다',
+  /if \(!_recruitTabList\.some\([\s\S]{0,90}?\) return _miss\(tabName\);/.test(pick(recruit, '_prefillLinkedTab')));
+ok('H12. _restoreLinkedTab 이 성공 여부를 돌려준다(목록에 없으면 select 가 조용히 빈다)',
+  /return tabSel\.value === key;/.test(pick(recruit, '_restoreLinkedTab')));
+
+/* ★ 코드리뷰가 잡은 실측 경로: switchView('orders') 는 렌더 프라미스를 돌려주지 않는다(sync).
+   목록을 기다리지 않고 행 DOM 을 찾으면 ① 아직 '불러오는 중…' 자리표시자이고 ② STATE.wo 가
+   이전 방문의 stale 값이라 인덱스도 어긋나 **뷰만 바뀌고 펼침·스크롤이 조용히 실패**한다. */
+{
+  const wd = readF('workdesk.html');
+  const s = wd.indexOf('W.RECRUIT_OPEN_WORK_ORDER = async function');
+  const e = wd.indexOf('// 카드 렌더 후 머리말', s);
+  assert(s > 0 && e > s, 'workdesk 훅 블록 추출 실패');
+  const hook = wd.slice(s, e);
+  ok('H19. ★ 행 DOM 은 반드시 await 뒤에 만진다(목록 렌더를 기다린다)',
+    hook.indexOf('await') > -1 &&
+    hook.indexOf("getElementById('woldetail-") > hook.indexOf('await') &&
+    hook.indexOf('findIndex') > hook.indexOf('await'));
+  ok('H20. ★ 준비 신호로 `.empty` 를 쓰지 않는다 — 로딩 자리표시자가 바로 그 클래스라 즉시 참이 된다',
+    !/#wobody \.empty/.test(hook.replace(/\/\*[\s\S]*?\*\//g, '')) && /불러오는 중/.test(hook));
+  ok('H21. 무한 대기 금지 — 상한 뒤엔 사유를 말하고 끝낸다',
+    /_woWaitFor\([\s\S]{0,200}?,\s*\d+\)/.test(hook) &&
+    /function _woWaitFor/.test(wd) && /resolve\(false\)/.test(wd) &&
+    /목록을 불러오지 못했습니다/.test(hook));
+}
+
+/* 유사도 함수 실제 실행 */
+['_rfMatchNorm', '_rfBigrams', '_rfTabScore', '_rfSuggestTabs'].forEach(n => {
+  const body = pick(recruit, n);
+  assert(body, '함수 추출 실패: ' + n);
+  const sig = (recruit.slice(recruit.indexOf('function ' + n + '(') + ('function ' + n).length).match(/^\([^)]*\)/) || ['()'])[0];
+  vm.runInContext('function ' + n + sig + ' ' + body, ctx);
+});
+const consts = recruit.match(/const _RF_SUG_MIN\s*=\s*[\d.]+;[\s\S]*?const _RF_SUG_LIMIT\s*=\s*\d+;/);
+assert(consts, '_RF_SUG_* 추출 실패');
+vm.runInContext(consts[0], ctx);
+// ★ vm 의 top-level `const` 는 **컨텍스트 객체의 프로퍼티가 되지 않는다**(어휘 바인딩) —
+//   sandbox._RF_SUG_MIN 으로 읽으면 undefined 라 비교가 조용히 통과한다. 식으로 꺼낸다.
+const SUG_MIN = vm.runInContext('_RF_SUG_MIN', ctx);
+assert(typeof SUG_MIN === 'number' && SUG_MIN > 0, '_RF_SUG_MIN 값 추출 실패');
+const TITLE = '[공식몰] 우레온 모이스처 바디 리셋 미스트 150ml 등드름 가드름 모공각화증';
+const score = (tab) => sandbox._rfTabScore(sandbox._rfMatchNorm(TITLE), sandbox._rfMatchNorm(tab));
+ok('H13. 정규화 — 대괄호/날짜/용량을 잡음으로 뺀다',
+  sandbox._rfMatchNorm('[공식몰] 7/28 우레온 150ml 1개') === '우레온');
+ok('H14. 같은 상품 탭이 무관한 탭보다 높다',
+  score('7/28 우레온_바디미스트') > score('7/30 노티드 두바이 쫀득쿠키') &&
+  score('7/28 우레온_바디미스트') >= 0.6);
+/* ★ 겹침계수는 **짧을수록 100% 가 되기 쉽다** — 2자 탭명 '쿠키' 는 제목에 그 두 글자만 있어도
+   1.0 이 되어 엉뚱한 탭이 1순위로 추천된다. 그래서 3자 미만은 0점으로 접는다.
+   (정규화로 빈 문자열이 되는 '1차' 로는 이 가드가 실행되지 않는다 — 변이시험 실측) */
+const score2 = (t, tab) => sandbox._rfTabScore(sandbox._rfMatchNorm(t), sandbox._rfMatchNorm(tab));
+ok('H15. ★ 너무 짧은 탭명(2자)은 0점 — 겹침계수의 구조적 오탐을 막는다',
+  score2('노티드 두바이 쫀득쿠키', '쿠키') === 0 && score2('우레온 바디 미스트', '미스트') > 0 &&
+  score('1차') === 0);
+ok('H16. 무관한 탭은 임계값(0.45) 아래',
+  score("7/30 노티드 두바이 쫀득쿠키") < SUG_MIN);
+ok('H17. 추천은 임계값 이상만·상한 3개·점수 내림차순',
+  (() => {
+    sandbox._recruitTabList = [
+      { key:'A||우레온 바디미스트', sheetId:'A', tabName:'우레온 바디미스트', sheetName:'s' },
+      { key:'A||우레온 핸드크림',   sheetId:'A', tabName:'우레온 핸드크림',   sheetName:'s' },
+      { key:'B||노티드 쫀득쿠키',   sheetId:'B', tabName:'노티드 쫀득쿠키',   sheetName:'s' },
+      { key:'C||1차',              sheetId:'C', tabName:'1차',              sheetName:'s' },
+    ];
+    const r = sandbox._rfSuggestTabs(TITLE, 3);
+    return r.length >= 1 && r.length <= 3 && r[0].tabName === '우레온 바디미스트' &&
+      !r.some(x => /노티드|1차/.test(x.tabName)) &&
+      r.every((x, i) => i === 0 || r[i - 1].score >= x.score);
+  })());
+ok('H18. ★ 비슷한 게 없으면 아무것도 추천하지 않는다(빈 추천 > 틀린 추천)',
+  sandbox._rfSuggestTabs('전혀 다른 상품 텀블러 스테인리스', 3).length === 0 &&
+  sandbox._rfSuggestTabs('', 3).length === 0);
+
 console.log('\n── G. 시안 문서 ──');
 ok('G1. 시안 문서가 있고 외부 리소스를 쓰지 않는다(오프라인 열람)',
   doc.length > 3000 && !/<script[^>]+src=/.test(doc) && !/<link[^>]+href="http/.test(doc));

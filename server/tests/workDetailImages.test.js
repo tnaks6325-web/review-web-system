@@ -240,7 +240,10 @@ console.log('\n=== F. 배선·안전 규율 ===');
   ok('입력 중에는 방향키를 가로채지 않는다', /tag === "input" \|\| tag === "textarea"/.test(recjs));
 
   // 저장 배선
-  ok('★ 인플라이트(업로드 중) 저장 차단', /if \(_igBusy\(\)\) \{ showToast\("사진 업로드가 끝나면/.test(recjs));
+  /* ⚠ 패턴 갱신(2026-08-07): 모달이 떠 있는 동안의 차단 사유는 토스트가 아니라 **모달 안 인라인**
+     (`_rfSaveBlocked`)으로 나간다 — 리뷰웹시스템[3버전]의 토스트(z-index 60)는 이 모달
+     (5000+blur) 아래로 깔려 보이지 않는다. 검사 의미는 불변(업로드 중이면 안내 후 저장 중단). */
+  ok('★ 인플라이트(업로드 중) 저장 차단', /if \(_igBusy\(\)\) \{ _rfSaveBlocked\("사진 업로드가 끝나면[\s\S]{0,60}?return; \}/.test(recjs));
   ok('저장 payload 에 두 배열이 실린다',
     /reviewGuideImages: _igUrls\("review"\)/.test(recjs) && /specialNotesImages: _igUrls\("notes"\)/.test(recjs));
   ok('★ 미리보기와 저장이 같은 조립 함수를 쓴다(갈라질 수 없다)',

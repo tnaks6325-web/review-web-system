@@ -77,7 +77,11 @@ ok('프리필이 작업시트탭URL도 함께 넘긴다', /work_sheet_url:\s+o\.
 ok('★ 미접수 오더는 URL에서 시트ID·gid를 뽑아 목록과 대조',
   /if \(!sid && prefill\.work_sheet_url\)/.test(rec));
 ok('목록에 없는 탭은 여전히 선택하지 않는다(잘못된 탭 연결 방지)',
-  /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return false;/.test(rec));
+  /* ⚠ 패턴 갱신(2026-08-07): 사유 안내가 붙어 `return false` → `return _miss(tabName)` 이 됐다.
+     검사 의미는 불변 — **선택하지 않는다**(_miss 는 안내만 기록하고 false 를 돌려준다). */
+  /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return _miss\(tabName\);/.test(rec)
+  && /const _miss = [\s\S]{0,300}?return false;/.test(rec)
+  && !/const _miss = [\s\S]{0,300}?_restoreLinkedTab/.test(rec));
 
 /* ═══ 마이그레이션 실검증(PostgreSQL 있을 때) ═══ */
 (async () => {

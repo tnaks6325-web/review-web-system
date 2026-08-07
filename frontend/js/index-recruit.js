@@ -414,11 +414,15 @@ function onLinkedCampaignChange(camSel) {
   if (tabs.length === 0) {
     tabSel.innerHTML = `<option value="">해당 캠페인에 탭 없음</option>`;
   }
+  try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 시트를 바꾸면 탭이 비므로 안내를 다시 판단
 }
 
 /* 탭 선택 시 → 연결 정보 표시 */
 function onLinkedTabChange(sel) {
   if (typeof renderPartCheck === "function") renderPartCheck(); // 참여형 자동점검 즉시 갱신(N6)
+  // 탭을 고르면 안내가 사라지고, 지우면 다시 뜬다(사람이 고른 값이 최우선)
+  if (sel && sel.value) _rfLinkedMiss = null;
+  try { _rfRefreshLinkedTabNote(); } catch (_) {}
   const info = document.getElementById("rf_linked_tab_info");
   const txt  = document.getElementById("rf_linked_tab_text");
   if (sel.value) {
@@ -561,6 +565,132 @@ function _rfPickBtn(group, val) {
   return true;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   🔗 연결 탭 — "왜 비었는가" 안내 + 공고 제목 ↔ 탭명 유사도 추천
+   ───────────────────────────────────────────────────────────────
+   ★ 배경: 프리필은 그 탭이 **탭 목록에 있을 때만** 연결하고 없으면 일부러 빈칸으로
+     둔다(잘못된 탭에 리뷰어 주문이 기록되는 것이 빈칸보다 나쁘다). 그런데 화면은
+     그 사실을 말하지 않아 "작업오더에 시트가 있는데 왜 비어 있지?"가 됐다.
+   ★ 추천은 **제안까지만, 확정은 사람이**(자동 선택 금지 — 계약 매칭·작업표 학습과 같은 규율).
+     비슷한 게 없으면 **아무것도 추천하지 않는다**(빈 추천 > 틀린 추천).
+   ★ 유사도는 프론트에서 계산한다 — 탭 목록·공고 제목이 모두 화면에 이미 있어
+     서버 왕복이 필요 없다. 서버 `utils/contractMatch.js` 는 계약(업체·브랜드·금액)을
+     재료로 쓰는 **다른 판정**이라 재사용 대상이 아니다(사본이 아니라 별개 규칙).
+   ═══════════════════════════════════════════════════════════════ */
+let _rfLinkedMiss = null;     // {source:'order'|'campaign', tabName, orderId?} — 못 찾은 탭
+let _rfSugCache   = [];       // 추천 목록(onclick 은 인덱스만 넘긴다 — 탭명은 시트발 외부 문자열)
+let _rfSugTimer   = null;
+const _RF_SUG_MIN   = 0.45;   // 이 아래면 추천하지 않는다
+const _RF_SUG_LIMIT = 3;
+
+/** 매칭용 정규화 — 대괄호/괄호 안, 날짜(7/28·26.7.28), 용량·수량(150ml·300g·1개)은 잡음이라 뺀다 */
+function _rfMatchNorm(s) {
+  return String(s || "").toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
+    .replace(/\d{1,4}\s*[/.]\s*\d{1,2}(\s*[/.]\s*\d{1,4})?/g, " ")
+    .replace(/\d+\s*(ml|l|g|kg|개|매|세트|포|정|장|박스|차)/g, " ")
+    .replace(/[^0-9a-z가-힣]+/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+function _rfBigrams(s) {
+  const t = String(s || "").replace(/\s+/g, "");
+  const set = new Set();
+  for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2));
+  return set;
+}
+/** 0~1 점수. ★ 겹침계수(overlap)를 쓴다 — 탭명은 짧고 제목은 길어 Dice 는 늘 낮게 나온다. */
+function _rfTabScore(titleNorm, tabNorm) {
+  if (!titleNorm || !tabNorm) return 0;
+  if (tabNorm.replace(/\s+/g, "").length < 3) return 0;   // 너무 짧은 탭명은 오탐만 만든다
+  const A = _rfBigrams(tabNorm), B = _rfBigrams(titleNorm);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  A.forEach(g => { if (B.has(g)) inter++; });
+  const overlap = inter / Math.min(A.size, B.size);
+  const toks = tabNorm.split(" ").filter(t => t.length >= 2);
+  const flat = titleNorm.replace(/\s+/g, "");
+  const cover = toks.length ? toks.filter(t => flat.indexOf(t) > -1).length / toks.length : 0;
+  return Math.max(overlap, cover);
+}
+/** 제목과 비슷한 탭 상위 N개(임계값 미만 제외, 동점은 목록 순서 유지) */
+function _rfSuggestTabs(title, limit) {
+  const tn = _rfMatchNorm(title);
+  if (!tn) return [];
+  return _recruitTabList
+    .map((t, i) => ({ t, i, score: _rfTabScore(tn, _rfMatchNorm(t.tabName)) }))
+    .filter(x => x.score >= _RF_SUG_MIN)
+    .sort((a, b) => (b.score - a.score) || (a.i - b.i))
+    .slice(0, limit || _RF_SUG_LIMIT)
+    .map(x => ({ key: x.t.key, sheetId: x.t.sheetId, tabName: x.t.tabName,
+                 sheetName: x.t.sheetName, score: x.score }));
+}
+
+/** 안내 박스 갱신 — 탭이 선택돼 있으면 숨긴다. ★ 이 함수는 노트 div 만 건드린다(입력칸 무접촉). */
+function _rfRefreshLinkedTabNote() {
+  const box = document.getElementById("rf_linked_tab_note");
+  if (!box) return;
+  const sel = document.getElementById("rf_linked_tab");
+  if (sel && sel.value) { box.style.display = "none"; box.innerHTML = ""; _rfSugCache = []; return; }
+
+  const title = (document.getElementById("rf_title")?.value || "").trim();
+  _rfSugCache = _rfSuggestTabs(title, _RF_SUG_LIMIT);
+  const miss = _rfLinkedMiss;
+  if (!miss && !_rfSugCache.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+
+  let html = "";
+  if (miss) {
+    const where = miss.source === "order" ? "작업오더의" : "이 공고에 저장된";
+    const why = miss.source === "order"
+      ? "작업오더를 <b>아직 접수하지 않았거나</b>, 접수 직후라 아직 목록에 올라오지 않았을 수 있어요(접수 후 5분쯤)."
+      : "탭 이름이 바뀌었거나 목록에서 빠졌을 수 있어요.";
+    html += `⚠ ${where} 시트 탭 <span class="rf-ltwant">${escHtml(miss.tabName || "(이름 없음)")}</span> 을(를) 탭 목록에서 찾지 못했어요.<br>${why}`;
+    if (miss.orderId && typeof window.RECRUIT_OPEN_WORK_ORDER === "function") {
+      html += `<div class="rf-ltrow"><button type="button" class="rf-ltwo" onclick="rfOpenLinkedWorkOrder()">작업오더 열기 →</button></div>`;
+    }
+  } else {
+    html += `공고 제목과 비슷한 탭을 찾았어요 — 맞는 탭을 골라주세요.`;
+  }
+
+  if (_rfSugCache.length) {
+    html += `<div class="rf-ltrow"><span class="rf-ltcap">제목과 비슷한 탭</span>`;
+    _rfSugCache.forEach((s, i) => {
+      html += `<button type="button" class="rf-ltsug" onclick="rfPickSuggestedTab(${i})" title="${escHtml(s.sheetName + " > " + s.tabName)}">` +
+              `<span class="nm">${escHtml(s.tabName)}</span>` +
+              `<span class="pc">${Math.round(s.score * 100)}%</span>` +
+              `<span class="sh">${escHtml(s.sheetName || "")}</span></button>`;
+    });
+    html += `</div>`;
+  } else if (miss) {
+    html += `<div class="rf-ltrow"><span class="rf-ltcap">제목과 비슷한 탭도 찾지 못했어요 — 위 ① 시트명부터 직접 골라주세요.</span></div>`;
+  }
+  box.className = "rf-ltnote" + (miss ? "" : " plain");
+  box.innerHTML = html;
+  box.style.display = "";
+}
+
+/** 추천 칩 클릭 — ★ 인덱스만 받는다(탭명을 onclick 문자열에 넣지 않는다) */
+function rfPickSuggestedTab(i) {
+  const s = _rfSugCache[i];
+  if (!s) return;
+  if (_restoreLinkedTab(s.sheetId, s.tabName)) _rfLinkedMiss = null;   // 사람이 골랐으면 사유 안내는 끝
+  _rfRefreshLinkedTabNote();
+}
+/** [작업오더 열기] — 호스트가 훅을 등록한 화면에서만 버튼이 뜬다 */
+function rfOpenLinkedWorkOrder() {
+  const id = _rfLinkedMiss && _rfLinkedMiss.orderId;
+  if (id && typeof window.RECRUIT_OPEN_WORK_ORDER === "function") window.RECRUIT_OPEN_WORK_ORDER(id);
+}
+/** 제목을 고치면 추천을 다시 계산한다 — ★ 노트 div 만 갱신(입력칸 재렌더 금지 = IME 보호) */
+function _rfBindTitleSuggest() {
+  const el = document.getElementById("rf_title");
+  if (!el || el.dataset.ltBound === "1") return;
+  el.dataset.ltBound = "1";
+  el.addEventListener("input", () => {
+    clearTimeout(_rfSugTimer);
+    _rfSugTimer = setTimeout(_rfRefreshLinkedTabNote, 220);
+  });
+}
+
 /* 작업오더가 넘겨준 연결 탭을 드롭다운에서 고른다.
    ★ gid 우선 — 탭 이름은 운영 중 바뀌지만 gid 는 그대로다(이름만 보면 리네임된 탭을 못 찾는다). */
 function _prefillLinkedTab(prefill) {
@@ -573,20 +703,29 @@ function _prefillLinkedTab(prefill) {
     const gm = /[#?&]gid=(\d+)/.exec(prefill.work_sheet_url);
     if (sm && gm) { sid = sm[1]; gidFromUrl = gm[1]; }
   }
-  if (!sid) return false;
+  /* ★ 못 찾았으면 **왜 비었는지**를 화면이 말하게 한다(조용한 빈칸 금지).
+     기록만 하고 선택은 여전히 안 한다 — 잘못된 탭 연결이 빈칸보다 나쁘다는 규칙은 그대로. */
+  const _miss = (name) => {
+    _rfLinkedMiss = { source: "order", tabName: name || prefill.linked_tab_name || "",
+                      orderId: _woPrefillOrderId || null };
+    return false;
+  };
+  if (!sid) return prefill.work_sheet_url || prefill.linked_tab_name ? _miss("") : false;
   const gid = String(prefill.linked_tab_gid || gidFromUrl || "");
   const byGid = gid && _recruitTabList.find(t => t.sheetId === sid && String(t.tabGid || "") === gid);
   const tabName = (byGid && byGid.tabName) || prefill.linked_tab_name || "";
-  if (!tabName) return false;
+  if (!tabName) return _miss("");
   // 목록에 없는 탭(아카이브·미등록)이면 선택하지 않는다 — 잘못된 탭이 걸리는 것보다 낫다
-  if (!_recruitTabList.some(t => t.sheetId === sid && t.tabName === tabName)) return false;
-  _restoreLinkedTab(sid, tabName);
+  if (!_recruitTabList.some(t => t.sheetId === sid && t.tabName === tabName)) return _miss(tabName);
+  if (!_restoreLinkedTab(sid, tabName)) return _miss(tabName);
+  _rfLinkedMiss = null;
   return true;
 }
 
 /* 수정 모달 열 때: 저장된 연결 탭 복원 */
+/** @returns {boolean} 실제로 선택됐는지 — 목록에 없는 시트/탭이면 select 가 조용히 빈 값으로 남는다 */
 function _restoreLinkedTab(linkedSheetId, linkedTabName) {
-  if (!linkedSheetId || !linkedTabName) return;
+  if (!linkedSheetId || !linkedTabName) return false;
   _populateCampaignSelect(linkedSheetId);
   const camSel = document.getElementById("rf_linked_campaign");
   if (camSel) {
@@ -598,7 +737,9 @@ function _restoreLinkedTab(linkedSheetId, linkedTabName) {
   if (tabSel) {
     tabSel.value = key;
     onLinkedTabChange(tabSel);
+    return tabSel.value === key;
   }
+  return false;
 }
 
 /* ═══════════════════════════════════════
@@ -1661,6 +1802,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
   _refreshBadgeWrap();
   document.getElementById("rf_linked_tab_info").style.display = "none";
+  /* 🔗 연결 탭 안내·추천 초기화 — 지난번 공고의 사유가 새 모달에 남지 않게 */
+  _rfLinkedMiss = null; _rfSugCache = [];
+  { const _n = document.getElementById("rf_linked_tab_note"); if (_n) { _n.style.display = "none"; _n.innerHTML = ""; } }
   _populateCampaignSelect();   /* 1단계 캠페인 드롭다운 초기화 */
 
   /* ⚡ 참여형(M2) 필드 초기화 */
@@ -1751,7 +1895,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
       _refreshBadgeWrap();
 
       /* 연결 탭 복원 */
-      _restoreLinkedTab(c.linked_sheet_id, c.linked_tab_name);
+      /* ★ 저장된 탭이 목록에 없으면(리네임·아카이브·미등록) select 가 조용히 비어 자동점검만
+         "gid 가 필요해요"라고 한다 → 사유를 남겨 안내 박스가 설명하게 한다. */
+      if (c.linked_tab_name && !_restoreLinkedTab(c.linked_sheet_id, c.linked_tab_name)) {
+        _rfLinkedMiss = { source: "campaign", tabName: c.linked_tab_name, orderId: null };
+      }
 
       /* ⚡ 참여형(M2) 필드 복원 */
       if (c.participation_mode) {
@@ -1918,6 +2066,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   /* 🧹 4칸 정리 도우미(개선 ③·④) — 신규 프리필·기발행 스냅샷 모두 열리는 순간 같은 감지가 돈다 */
   try { renderRecruitFieldCleanup(); } catch (_) { /* 감지 실패가 모달을 막으면 안 된다 */ }
+
+  /* 🔗 연결 탭이 비어 있으면 사유 + 제목 유사도 추천을 띄운다(선택돼 있으면 아무것도 안 뜬다) */
+  try { _rfBindTitleSuggest(); _rfRefreshLinkedTabNote(); } catch (_) { /* 안내 실패가 모달을 막으면 안 된다 */ }
 }
 
 // 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
@@ -2675,7 +2826,9 @@ async function saveRecruitPost() {
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
       payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
       /* 🖼 업로드가 끝나기 전에 저장하면 그 사진이 조용히 빠진다 — 끝날 때까지 막는다 */
-      if (_igBusy()) { showToast("사진 업로드가 끝나면 저장할 수 있어요.", "error"); return; }
+      // ★ 모달이 떠 있는 동안의 차단 사유는 토스트로 내보내지 않는다 —
+      //   리뷰웹시스템[3버전]의 토스트(z-index 60)는 이 모달(5000+blur) 아래로 깔려 안 보인다.
+      if (_igBusy()) { _rfSaveBlocked("사진 업로드가 끝나면 저장할 수 있어요."); return; }
       // 평문 입력 → HTML 저장: escape 후 개행만 <br> (S3 — sanitize가 '<옵션>' 같은 텍스트를 태그로 오인해 삭제하는 것 방지)
       // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(서식 보존 — 서버가 sanitize)
       // ★ 사진은 위젯(_igState)이 진실원본 — 글을 고쳐도 유지되고, 조립은 _igComposeInflow 한 곳.

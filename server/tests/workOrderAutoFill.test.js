@@ -113,7 +113,11 @@ ok('★ 값이 없으면 건드리지 않는다(랜덤·판정불가 = 기존처
 ok('연결 탭은 gid 우선 재매칭(리네임된 탭도 찾음)',
   /String\(t\.tabGid \|\| ""\) === gid/.test(rec));
 ok('★ 목록에 없는 탭은 선택하지 않는다(잘못된 탭 연결 방지)',
-  /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return false;/.test(rec));
+  /* ⚠ 패턴 갱신(2026-08-07): 사유 안내가 붙어 `return false` → `return _miss(tabName)` 이 됐다.
+     검사 의미는 불변 — **선택하지 않는다**(_miss 는 안내만 기록하고 false 를 돌려준다). */
+  /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return _miss\(tabName\);/.test(rec)
+  && /const _miss = [\s\S]{0,300}?return false;/.test(rec)
+  && !/const _miss = [\s\S]{0,300}?_restoreLinkedTab/.test(rec));
 ok('올리브영 채널 버튼(관리자 화면 2종)',
   /data-val="올리브영"/.test(adm) && /data-val="올리브영"/.test(siand));
 /* ★ 판정값에 대응하는 버튼이 없으면 _rfPickBtn 이 '직접입력'으로 흡수해 값은 살지만,

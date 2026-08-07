@@ -64,6 +64,9 @@
       <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 90px">
         <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
       </div>
+      <!-- 탭이 비어 있을 때: 왜 비었는지(작업오더의 탭을 못 찾음) + 제목 유사도 추천.
+           ★ 조용한 빈칸 금지 — 자동점검은 "gid 가 필요해요"라고만 하고 사유를 말하지 않는다. -->
+      <div id="rf_linked_tab_note" style="display:none"></div>
       <div class="rf-grid2">
         <div class="rf-hrow"><span class="rf-hl">담당자 <span class="rform-req">*</span></span>
           <div>
@@ -644,6 +647,23 @@
 }
 .rf-pvtoggle{display:none;width:100%;margin:0;padding:9px;background:#EEF3FD;color:var(--p,#3182F6);
              border:none;border-top:1px solid var(--border,#E2E8F0);font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit}
+/* 🔗 연결 탭 안내 + 유사도 추천 — 탭이 비어 있을 때만 뜬다(선택되면 사라진다) */
+.rf-ltnote{margin:-2px 0 6px 90px;border:1px solid var(--border,#E2E8F0);border-left:3px solid #F59E0B;border-radius:9px;
+  background:#FFFDF6;padding:8px 10px;font-size:.72rem;color:var(--t2,#475569);line-height:1.55}
+.rf-ltnote.plain{border-left-color:var(--p,#3182F6);background:#F6F9FF}
+.rf-ltnote b{color:var(--t1,#0F172A)}
+.rf-ltnote .rf-ltwant{font-weight:800;color:#92400E;word-break:break-all}
+.rf-ltnote .rf-ltrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.rf-ltnote .rf-ltcap{font-weight:800;color:var(--t2,#475569)}
+.rf-ltsug{font-size:.71rem;font-weight:700;border:1px solid var(--border,#E2E8F0);background:#fff;color:var(--t1,#0F172A);
+  border-radius:999px;padding:4px 10px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;
+  max-width:100%;transition:border-color .12s,background .12s}
+.rf-ltsug:hover{border-color:var(--p,#3182F6);background:#F1F6FF}
+.rf-ltsug .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px}
+.rf-ltsug .pc{font-size:.66rem;font-weight:800;color:var(--p,#3182F6);background:#EFF4FF;border-radius:999px;padding:1px 6px;flex:none}
+.rf-ltsug .sh{font-size:.65rem;color:var(--t3,#94A3B8);flex:none}
+.rf-ltnote .rf-ltwo{font-size:.68rem;font-weight:800;color:#92400E;background:#FEF3C7;border:1px solid #F59E0B;
+  border-radius:7px;padding:3px 9px;cursor:pointer;font-family:inherit}
 /* 🧹 4칸 정리 도우미(개선 ③·④) — 감지 경고 + 전/후 미리보기(적용은 사람이) */
 .rf-clean-warn{font-size:.7rem;font-weight:700;color:#B45309;display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:5px}
 .rf-clean-warn .rchan-btn{font-size:.68rem;padding:3px 10px;background:#FEF3C7;border-color:#F59E0B;color:#92400E}
