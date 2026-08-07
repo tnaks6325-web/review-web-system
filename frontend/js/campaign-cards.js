@@ -659,6 +659,16 @@
   function _apiBase() {
     return (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
   }
+  /** 공고 관리 API 베이스 — 화면마다 도달 가능한 경로가 다르다(index-recruit.js `_campApi`와 같은 장치).
+   *   · 관리자 대시보드 / 리뷰어 앱 : /api/campaign/admin  (adminOrMaster)
+   *   · 리뷰웹시스템[3버전]        : /api/trackb/campaigns (내부인 + 편집명단, 같은 핸들러에 위임)
+   *  두 네임스페이스는 경로 모양이 같아 베이스 문자열만 갈아끼우면 된다. */
+  function _campAdminBase() {
+    return (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '/api/campaign/admin';
+  }
+  function _flagsUrl(campId) {
+    return _apiBase() + _campAdminBase() + '/' + encodeURIComponent(campId) + '/flags';
+  }
   function _toast(msg, isErr) {
     _injectStyles();
     const t = document.createElement('div');
@@ -941,12 +951,16 @@
   /** ★ 064: 리뷰어 홈 카드의 관리자 별표 토글 — POST /flags(adminOrMaster) 후 목록 재렌더.
    *  진짜 admin_token 전용(_realAdminTok — 스코프 토큰은 서버 403이라 버튼 미노출과 짝).
    *  성공 시: 홈이면 loadRecruitPreview() 재호출(서버가 /list 캐시를 즉시 무효화해 새 순서 반영),
-   *  로더가 없는 화면(campaign.html 상세 등)은 버튼 상태만 제자리 갱신. */
+   *  로더가 없는 화면(campaign.html 상세 등)은 버튼 상태만 제자리 갱신.
+   *  ★★ 경로는 호스트가 재기준한다(`window.CAMPAIGN_ADMIN_API` — index-recruit.js `_campApi`와 같은 장치):
+   *     리뷰웹시스템[3버전]은 인트라넷 SSO 토큰(`via:'intranet'`)을 쓰는데 그 토큰은 authMiddleware에서
+   *     `/api/trackb/*` 로만 도달 가능하므로, 여기서 `/api/campaign/admin/...` 을 하드코딩하면
+   *     별표만 403("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다. 전역 미설정 = 종전 경로. */
   async function togglePin(campId, on) {
     const tok = _realAdminTok();
     if (!tok) return;
     try {
-      const res = await fetch(API_BASE_URL + '/api/campaign/admin/' + encodeURIComponent(campId) + '/flags', {
+      const res = await fetch(_flagsUrl(campId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
         body: JSON.stringify({ pinned: on === true }),
