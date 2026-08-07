@@ -160,6 +160,26 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
       for (const item of items) {
         const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
         const depositColKey = item.depositColKey;
+
+        /* ★★ 무시트 탭 — 위의 `review_index.is_submitted2='PAID'` 는 **다음 장부 재생성에 지워진다**
+           (재생성이 review_index 를 지우고 작업표에서 다시 만든다). 시트 쓰기도 막혀 있으므로
+           작업표 입금 칸에 스탬프를 남겨야 **입금 표시가 살아남는다**.
+           ★ 입금 칸 헤더명은 파서가 감지한 `submit_col2` 를 쓰므로 depositColKey 가 없어도 동작한다
+             (그 값은 화면이 준 힌트일 뿐 — 무시트에서는 서버가 다시 정한다). */
+        try {
+          const st = await require('../services/sheetlessStatus.service').markStatusCell({
+            sheetId: item.sheetId, tabName: item.tabName, rowIndex,
+            kind: 'paid', value: stamp, by: req.admin?.name || 'payment',
+          });
+          if (st.handled) {
+            if (st.ok) logger.info(`[payment/mark-done:bg] 무시트 입금칸 기록 (tab=${item.tabName}, row=${rowIndex}, col=${st.column})`);
+            else logger.warn(`[payment/mark-done:bg] 무시트 입금칸 기록 실패 (tab=${item.tabName}, row=${rowIndex}) reason=${st.reason}`);
+            continue;   // ★ 시트 쓰기·deposit_mark 큐로 내려가지 않는다(무시트에는 쓸 시트가 없다)
+          }
+        } catch (e) {
+          logger.warn(`[payment/mark-done:bg] 무시트 판정 예외 → 시트 경로로 진행: ${e.message}`);
+        }
+
         if (!depositColKey || !rowIndex) continue; // 입금컬럼 미지정 행은 시트 기록 생략
         try {
           const cacheKey = item.sheetId + '||' + item.tabName;
