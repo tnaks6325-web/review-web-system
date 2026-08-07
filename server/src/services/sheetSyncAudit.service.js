@@ -33,6 +33,35 @@ let _pool = null;
 function _db() { if (!_pool) _pool = require('../db/pool'); return _pool; }
 function __setPoolForTest(p) { _pool = p || null; }
 
+// ── gid 해석(순수함수) — "시트만 열리는 링크"를 "그 탭이 열리는 링크"로 ─────────
+//   구글시트 URL 은 `#gid=<탭번호>` 가 있어야 그 탭으로 바로 들어간다. tab_configs.tab_gid 가
+//   비어 있는 등록 작업이 많아 지금까지는 시트 첫 탭만 열렸다.
+//   ★ 우선순위: 등록값(tab_configs) → RAW 미러(이름으로 찾되 **동명 탭이 1개일 때만**) → 검색인덱스.
+//   ★★ 동명 탭이 2개 이상이면 확정하지 않는다(null) — 잘못된 탭으로 데려가는 링크는 빈 링크보다 나쁘다
+//      (주문 행배정의 "동명탭 보류"와 같은 규율).
+//   ★ 순수함수 = 회귀가드가 직접 실행. 여기서 DB 를 읽지 않는다(본 쿼리가 재료를 이미 실어 온다).
+function resolveTabGid(r = {}) {
+  const cfg = String(r.tabGid == null ? '' : r.tabGid).trim();
+  if (cfg) return _gidOut(r, cfg, 'config');
+  const mirrorGid = String(r.mirrorGid == null ? '' : r.mirrorGid).trim();
+  const nameCount = Number(r.mirrorNameCount) || 0;
+  if (mirrorGid && nameCount <= 1) return _gidOut(r, mirrorGid, 'mirror');
+  if (mirrorGid && nameCount > 1) return _gidOut(r, '', 'ambiguous');   // 동명 탭 — 확정 불가
+  const idxGid = String(r.idxGid == null ? '' : r.idxGid).trim();
+  if (idxGid) return _gidOut(r, idxGid, 'index');
+  return _gidOut(r, '', null);
+}
+function _gidOut(r, gid, source) {
+  const sheetId = String(r.sheetId || '');
+  const base = sheetId ? `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/edit` : null;
+  return {
+    resolvedGid: gid || null,
+    gidSource: source,
+    // gid 를 못 구하면 시트만 여는 링크(그마저 없으면 null) — "열리는데 엉뚱한 탭"보다 정직하다.
+    tabUrl: base ? (gid ? `${base}#gid=${encodeURIComponent(gid)}` : base) : null,
+  };
+}
+
 // ── 진단 분류(순수함수 — 회귀가드가 직접 실행) ──────────────────────────────
 // row: { rawRows, dataRows, mirroredAt, idxStatus, idxBuiltAt, idxErrorMsg, indexRows, boardRows, indexHint }
 // 반환: { flags: string[], severity: 'broken'|'behind'|'ok', reasonKo: string }
@@ -114,7 +143,7 @@ function classifySyncRow(r = {}) {
 
 // ── 감사: 등록 작업 전수(또는 컷오프 이전) 반영 상태 ─────────────────────────
 const _AUDIT_TAB_CAP = 1500;
-async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
+async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeArchived = false } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || _AUDIT_TAB_CAP, 1), _AUDIT_TAB_CAP);
   // 컷오프는 KST 날짜 문자열(YYYY-MM-DD)만 받는다 — 형식이 아니면 무시(전수 감사).
   const cutoff = (typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before)) ? before : null;
@@ -126,8 +155,9 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
             COALESCE(tc.display_name, tc.tab_name) AS "displayName",
             tc.campaign_name AS "campaignName",
             reg.reg_at   AS "registeredAt",
-            rst."rawRows", rst."mirroredAt", rst."mirrorTabName",
-            im.status    AS "idxStatus", im.built_at AS "idxBuiltAt",
+            rst."rawRows", rst."mirroredAt", rst."mirrorTabName", rst."mirrorGid",
+            mc.n         AS "mirrorNameCount",
+            im.status    AS "idxStatus", im.built_at AS "idxBuiltAt", im."idxGid",
             im.error_msg AS "idxErrorMsg", im.skip_reason AS "idxSkipReason",
             ri.cnt       AS "indexRows",
             cp.cnt       AS "boardRows"
@@ -136,7 +166,8 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
          SELECT MIN(c.created_at) AS reg_at FROM campaigns c WHERE c.sheet_id = tc.sheet_id
        ) reg ON TRUE
        LEFT JOIN LATERAL (
-         SELECT r.row_count AS "rawRows", r.mirrored_at AS "mirroredAt", r.tab_name AS "mirrorTabName"
+         SELECT r.row_count AS "rawRows", r.mirrored_at AS "mirroredAt",
+                r.tab_name AS "mirrorTabName", r.tab_gid AS "mirrorGid"
            FROM raw_sheet_tabs r
           WHERE r.sheet_id = tc.sheet_id
             AND (r.tab_name = tc.tab_name
@@ -144,7 +175,12 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
           ORDER BY r.mirrored_at DESC NULLS LAST LIMIT 1
        ) rst ON TRUE
        LEFT JOIN LATERAL (
-         SELECT m.status, m.built_at, m.error_msg, m.skip_reason
+         -- 같은 이름의 미러 탭이 2개 이상이면 gid 를 확정할 수 없다(동명 탭 보류 — 오배정 방지)
+         SELECT COUNT(*)::int AS n FROM raw_sheet_tabs r2
+          WHERE r2.sheet_id = tc.sheet_id AND r2.tab_name = tc.tab_name
+       ) mc ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT m.status, m.built_at, m.error_msg, m.skip_reason, m.tab_gid AS "idxGid"
            FROM index_master m
           WHERE m.sheet_id = tc.sheet_id
             AND (m.tab_name = tc.tab_name
@@ -159,10 +195,10 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
          SELECT COUNT(*)::int AS cnt FROM campaign_participants p
           WHERE p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name AND p.deleted_at IS NULL
        ) cp ON TRUE
-      WHERE COALESCE(tc.is_closed, FALSE) = FALSE
+      WHERE (COALESCE(tc.is_closed, FALSE) = FALSE OR $2::boolean)
       ORDER BY reg.reg_at ASC NULLS FIRST, tc.sheet_id, tc.tab_name
       LIMIT $1`,
-    [lim]
+    [lim, !!includeArchived]
   );
 
   const items = [];
@@ -184,6 +220,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
       registeredAt: r.registeredAt, regUnknown,
       rawRows: r.rawRows == null ? null : Number(r.rawRows),
       mirroredAt: r.mirroredAt || null, mirrorTabName: r.mirrorTabName || null,
+      ...resolveTabGid(r),
       idxStatus: r.idxStatus || null, idxBuiltAt: r.idxBuiltAt || null,
       idxErrorMsg: r.idxErrorMsg || null,
       indexRows: Number(r.indexRows) || 0, boardRows: Number(r.boardRows) || 0,
@@ -218,6 +255,12 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
     }
   }
 
+  // 아카이브에만 남은 탭(등록 목록에서 내려간 것)도 함께 — 복구 대상이라 화면에 보여야 한다.
+  if (includeArchived) {
+    const keys = new Set(items.map(i => i.sheetId + ' ' + i.tabName));
+    items.push(...await listArchivedOnly(keys));
+  }
+
   // 문제 있는 탭이 먼저 보이게(broken → behind → ok), 같은 급은 등록 오래된 순.
   const rank = { broken: 0, behind: 1, ok: 2 };
   items.sort((a, b) => (rank[a.severity] - rank[b.severity]) || String(a.registeredAt || '').localeCompare(String(b.registeredAt || '')));
@@ -225,6 +268,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP } = {}) {
     before: cutoff,
     total: items.length,
     flagged: items.filter(i => i.severity !== 'ok').length,
+    includeArchived: !!includeArchived,
     detailCapped,
     truncated: rows.length >= lim,
     items,
@@ -350,4 +394,83 @@ async function repairSheetSync({ sheetId, tabName, by = 'sheet-sync-repair', dep
   return { ok, sheetId, tabName, steps, compare };
 }
 
-module.exports = { auditSheetSync, repairSheetSync, classifySyncRow, __setPoolForTest, _AUDIT_TAB_CAP };
+// ── tab_configs.tab_gid 백필 — 링크·매칭이 계속 어긋나지 않게 등록값을 채운다 ──
+//   ★★ 쓰기 표면 = `tab_configs.tab_gid` **한 칸**, 그리고 **비어 있을 때만**(`NULLIF(tab_gid,'') IS NULL`).
+//      이미 값이 있는 gid 는 절대 덮지 않는다 — 잘못된 gid 교정은 별도 경로(sync-tab-names/fix-swap)의 일이다.
+//   ★ 동명 탭(미러에 같은 이름 2개 이상)은 건너뛴다(확정 불가 — 오배정 방지).
+//   ★ dryRun 기본 true(미리보기 먼저).
+async function backfillTabGids({ dryRun = true, by = 'sheet-sync', limit = _AUDIT_TAB_CAP } = {}) {
+  const db = _db();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || _AUDIT_TAB_CAP, 1), _AUDIT_TAB_CAP);
+  const { rows } = await db.query(
+    `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+            COALESCE(tc.display_name, tc.tab_name) AS "displayName",
+            m."mirrorGid", m.n AS "mirrorNameCount", i."idxGid"
+       FROM tab_configs tc
+       LEFT JOIN LATERAL (
+         SELECT MIN(r.tab_gid) AS "mirrorGid", COUNT(*)::int AS n
+           FROM raw_sheet_tabs r
+          WHERE r.sheet_id = tc.sheet_id AND r.tab_name = tc.tab_name
+       ) m ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT im.tab_gid AS "idxGid" FROM index_master im
+          WHERE im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name LIMIT 1
+       ) i ON TRUE
+      WHERE NULLIF(tc.tab_gid, '') IS NULL
+      LIMIT $1`, [lim]);
+
+  const fill = [], skip = [];
+  for (const r of rows) {
+    const g = resolveTabGid({ ...r, tabGid: null });
+    if (g.resolvedGid) fill.push({ sheetId: r.sheetId, tabName: r.tabName, displayName: r.displayName, gid: g.resolvedGid, source: g.gidSource });
+    else skip.push({ sheetId: r.sheetId, tabName: r.tabName, displayName: r.displayName, reason: g.gidSource === 'ambiguous' ? '동명 탭이 여러 개라 확정 불가' : '시트 사본·인덱스 어디에도 gid 가 없음' });
+  }
+  if (dryRun) return { ok: true, dryRun: true, missing: rows.length, fillable: fill.length, updated: 0, fill: fill.slice(0, 50), skip: skip.slice(0, 50), skipped: skip.length };
+
+  let updated = 0;
+  for (const f of fill) {
+    // 조건부 UPDATE — 그 사이 누가 채웠으면 그대로 둔다(사람 값 보호).
+    const { rowCount } = await db.query(
+      `UPDATE tab_configs SET tab_gid = $3, updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND NULLIF(tab_gid, '') IS NULL`,
+      [f.sheetId, f.tabName, f.gid]);
+    if (rowCount) updated++;
+  }
+  logger.info(`[sheetSync] tab_gid 백필: ${updated}/${fill.length} (by ${by})`);
+  return { ok: true, dryRun: false, missing: rows.length, fillable: fill.length, updated, fill: fill.slice(0, 50), skip: skip.slice(0, 50), skipped: skip.length };
+}
+
+// ── 아카이브 전용 항목: tab_configs 에는 없고 아카이브에만 남은 탭 ──────────
+//   ★ 아카이브는 tab_configs 행이 남지 않을 수 있어(복원이 ON CONFLICT 로 다시 만든다) 본 목록에서 빠진다.
+//     "아카이브된 탭을 복구"하려면 화면에 보여야 하므로 별도로 읽어 합친다. 읽기 전용·fail-soft.
+async function listArchivedOnly(existingKeys, limit = 300) {
+  try {
+    const { rows } = await _db().query(
+      `SELECT ima.sheet_id AS "sheetId", ima.tab_name AS "tabName", ima.tab_gid AS "tabGid",
+              ima.campaign_name AS "campaignName", ima.archived_at AS "archivedAt",
+              ima.row_count AS "archivedRows"
+         FROM index_master_archive ima
+        ORDER BY ima.archived_at DESC NULLS LAST
+        LIMIT $1`, [Math.min(Math.max(parseInt(limit, 10) || 300, 1), 1000)]);
+    return rows
+      .filter(r => !existingKeys.has(r.sheetId + ' ' + r.tabName))
+      .map(r => ({
+        sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid || null,
+        displayName: r.tabName, campaignName: r.campaignName || null,
+        registeredAt: null, regUnknown: true,
+        rawRows: null, mirroredAt: null, mirrorTabName: null,
+        ...resolveTabGid({ sheetId: r.sheetId, tabGid: r.tabGid }),
+        idxStatus: null, idxBuiltAt: null, idxErrorMsg: null,
+        indexRows: 0, boardRows: 0, dataRows: null,
+        archivedOnly: true, archivedAt: r.archivedAt || null, archivedRows: r.archivedRows || 0,
+        indexHint: { tabName: r.tabName, archived: true, sheetIndexed: false, renamedTo: null, otherTabs: [] },
+        flags: ['index_archived'], severity: 'broken', boardExtra: 0,
+        reasonKo: '아카이브된 작업입니다(등록 목록에서 내려감) — [아카이브 복구]로 되살린 뒤 반영하면 작업보드에 다시 나타납니다',
+      }));
+  } catch (e) {
+    logger.warn(`[sheetSync] 아카이브 목록 조회 실패: ${e.message}`);
+    return [];
+  }
+}
+
+module.exports = { auditSheetSync, repairSheetSync, classifySyncRow, resolveTabGid, backfillTabGids, __setPoolForTest, _AUDIT_TAB_CAP };

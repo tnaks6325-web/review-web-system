@@ -38,14 +38,16 @@ async function setup() {
                          index_master, index_master_archive, tab_configs, campaigns CASCADE;
     CREATE TABLE campaigns (id SERIAL PRIMARY KEY, sheet_id TEXT, campaign_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE tab_configs (id SERIAL PRIMARY KEY, sheet_id TEXT NOT NULL, tab_name TEXT NOT NULL,
-      tab_gid TEXT, display_name TEXT, campaign_name TEXT, is_closed BOOLEAN DEFAULT FALSE, UNIQUE(sheet_id, tab_name));
+      tab_gid TEXT, display_name TEXT, campaign_name TEXT, is_closed BOOLEAN DEFAULT FALSE,
+      updated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(sheet_id, tab_name));
     CREATE TABLE raw_sheet_tabs (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_gid TEXT, tab_name TEXT,
       row_count INTEGER DEFAULT 0, mirrored_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE raw_sheet_rows (sheet_id TEXT, tab_gid TEXT, row_index INTEGER, cells JSONB,
       PRIMARY KEY (sheet_id, tab_gid, row_index));
     CREATE TABLE index_master (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, tab_gid TEXT,
       status TEXT DEFAULT 'active', built_at TIMESTAMPTZ, error_msg TEXT, skip_reason TEXT);
-    CREATE TABLE index_master_archive (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT);
+    CREATE TABLE index_master_archive (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT,
+      tab_gid TEXT, campaign_name TEXT, row_count INTEGER, archived_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE review_index (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, row_index INTEGER);
     CREATE TABLE campaign_participants (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, seq INTEGER,
       deleted_at TIMESTAMPTZ);`);
@@ -150,6 +152,48 @@ async function setup() {
     assert.ok(inc.items.some(i => i.tabName === TAB), '이전 등록 작업이 빠졌다');
     const exc = await svc.auditSheetSync({ before: '2026-06-01' });
     assert.ok(!exc.items.some(i => i.tabName === TAB), '기준일 이후 등록이 섞였다');
+  });
+
+  console.log('\n5) gid 해석·백필 (실제 SQL)');
+  await ta('★ tab_configs.tab_gid 가 비면 시트 사본에서 찾아 탭 링크를 만든다', async () => {
+    await pool.query(`UPDATE tab_configs SET tab_gid = NULL WHERE sheet_id=$1`, [SHEET]);
+    const out = await svc.auditSheetSync({ includeArchived: true });
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.strictEqual(it.resolvedGid, GID, 'gid 를 못 찾았다(시트만 열리는 링크가 된다)');
+    assert.strictEqual(it.gidSource, 'mirror');
+    assert.strictEqual(it.tabUrl, `https://docs.google.com/spreadsheets/d/${SHEET}/edit#gid=${GID}`);
+  });
+  await ta('★★ 동명 탭이 2개면 확정하지 않는다(엉뚱한 탭으로 데려가지 않음)', async () => {
+    await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name, row_count) VALUES ($1,'999',$2,5)`, [SHEET, TAB]);
+    const out = await svc.auditSheetSync({});
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.strictEqual(it.resolvedGid, null, '동명 탭인데 gid 를 정했다');
+    assert.strictEqual(it.gidSource, 'ambiguous');
+    await pool.query(`DELETE FROM raw_sheet_tabs WHERE tab_gid='999'`);
+  });
+  await ta('백필 실행 → tab_configs.tab_gid 채워짐 · 재실행은 0건(이미 있는 값 미덮음)', async () => {
+    const pre = await svc.backfillTabGids({});
+    assert.strictEqual(pre.fillable, 1, '채울 대상을 못 찾았다');
+    const out = await svc.backfillTabGids({ dryRun: false });
+    assert.strictEqual(out.updated, 1);
+    const { rows } = await pool.query(`SELECT tab_gid FROM tab_configs WHERE sheet_id=$1`, [SHEET]);
+    assert.strictEqual(rows[0].tab_gid, GID);
+    const again = await svc.backfillTabGids({ dryRun: false });
+    assert.strictEqual(again.updated, 0, '이미 gid 가 있는데 또 썼다');
+    assert.strictEqual(again.missing, 0);
+  });
+
+  console.log('\n6) 아카이브 전용 탭 합류');
+  await ta('★ 등록 목록에 없고 아카이브에만 있는 탭도 includeArchived 로 보인다(복구 대상)', async () => {
+    await pool.query(`INSERT INTO index_master_archive (sheet_id, tab_name, tab_gid, campaign_name, row_count, archived_at)
+                      VALUES ($1,'5/20지난차수_네이버30건','777','지난차수',30,NOW())`, [SHEET]);
+    const off = await svc.auditSheetSync({});
+    assert.ok(!off.items.some(i => i.tabName === '5/20지난차수_네이버30건'), '기본 조회에 아카이브 탭이 섞였다');
+    const on = await svc.auditSheetSync({ includeArchived: true });
+    const it = on.items.find(i => i.tabName === '5/20지난차수_네이버30건');
+    assert.ok(it, '아카이브 전용 탭이 목록에 없다 — 복구할 방법이 없어진다');
+    assert.strictEqual(it.archivedOnly, true);
+    assert.strictEqual(it.tabUrl, `https://docs.google.com/spreadsheets/d/${SHEET}/edit#gid=777`);
   });
 
   svc.__setPoolForTest(null);

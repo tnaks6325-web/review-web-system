@@ -169,12 +169,24 @@ await ta('투영 실패 = ok:false(성공으로 꾸미지 않는다)', async () 
 await ta('sheetId/tabName 없으면 즉시 거부', async () => {
   await assert.rejects(() => svc.repairSheetSync({ sheetId: '', tabName: '' }));
 });
-t('★ 수리는 신규 쓰기 경로 0 — 서비스 파일에 직접 INSERT/UPDATE 없음(기존 함수 3개만 재사용)', () => {
+t('★ 수리는 신규 쓰기 경로 0 — repairSheetSync 안에 직접 SQL 없음(기존 함수 3개만 재사용)', () => {
   const src = R('src/services/sheetSyncAudit.service.js');
-  assert.ok(!/\b(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/i.test(src),
+  const i = src.indexOf('async function repairSheetSync(');
+  const body = src.slice(i, src.indexOf('\n}', i));
+  assert.ok(!/\b(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/i.test(body),
     '수리가 SQL 을 직접 쓴다 — 반영 규칙 사본 금지(mirrorOneSheet/buildOneSheet/projectTab 만)');
   ['mirrorOneSheet', 'buildOneSheet', 'projectTab', 'compareWithIndex'].forEach(fn =>
     assert.ok(src.includes(fn), fn + ' 호출이 없다'));
+});
+t('★★ 이 서비스의 쓰기 표면은 `tab_configs.tab_gid` 한 칸뿐 · 비어 있을 때만', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const writes = src.match(/\b(INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET[^\n]*|DELETE\s+FROM\s+\w+)/gi) || [];
+  assert.strictEqual(writes.length, 1, '쓰기 SQL 이 늘었다: ' + JSON.stringify(writes));
+  assert.ok(/UPDATE tab_configs SET tab_gid/i.test(writes[0]), '예상 밖 쓰기: ' + writes[0]);
+  const i = src.indexOf('async function backfillTabGids(');
+  const body = src.slice(i, src.indexOf('\n}\n', i));
+  assert.ok(/NULLIF\(tab_gid, ''\) IS NULL/.test(body),
+    'gid 가 이미 있는 탭을 덮을 수 있다 — 백필은 빈 칸만 채운다(교정은 별도 경로의 일)');
 });
 
 /* ══ 4) 라우트 — 스택 실검사 ═══════════════════════════════ */
@@ -334,6 +346,110 @@ t('★ 프론트는 시트 작업건수를 주 숫자로 · 미러 행 수는 �
   assert.ok(/미러 ' \+ it\.rawRows \+ '행/.test(HTML), '미러 행 수를 참고 표기로 남기지 않았다');
   assert.ok(/검색인덱스’ =|검색인덱스' =/.test(HTML) || /리뷰어가 이름·전화로/.test(HTML),
     '검색인덱스가 무엇인지 화면이 설명하지 않는다');
+});
+
+/* ══ 7) gid 해석 · 탭 직링크 · 백필 · 아카이브 복구 ═══════════ */
+console.log('\n7) gid 해석 · 탭 직링크 · 아카이브 복구');
+
+t('★ gid 우선순위: 등록값 → 시트 사본(동명 1개일 때) → 검색인덱스', () => {
+  const S = { sheetId: 'SH' };
+  assert.strictEqual(svc.resolveTabGid({ ...S, tabGid: '111', mirrorGid: '222', mirrorNameCount: 1, idxGid: '333' }).resolvedGid, '111');
+  assert.strictEqual(svc.resolveTabGid({ ...S, tabGid: '', mirrorGid: '222', mirrorNameCount: 1, idxGid: '333' }).resolvedGid, '222');
+  assert.strictEqual(svc.resolveTabGid({ ...S, tabGid: '', mirrorGid: '', idxGid: '333' }).resolvedGid, '333');
+  assert.strictEqual(svc.resolveTabGid({ ...S, tabGid: '', mirrorGid: '', idxGid: '' }).resolvedGid, null);
+});
+t('★★ 동명 탭이 2개 이상이면 gid 를 확정하지 않는다(엉뚱한 탭 링크 금지)', () => {
+  const g = svc.resolveTabGid({ sheetId: 'SH', tabGid: '', mirrorGid: '222', mirrorNameCount: 2, idxGid: '333' });
+  assert.strictEqual(g.resolvedGid, null, '동명 탭인데 gid 를 정했다');
+  assert.strictEqual(g.gidSource, 'ambiguous');
+  assert.ok(!/#gid=/.test(g.tabUrl), '확정 못 했는데 탭 앵커를 붙였다');
+});
+t('★ 탭 링크는 docs.google.com 고정 + gid 있으면 #gid= 로 그 탭이 열린다', () => {
+  const g = svc.resolveTabGid({ sheetId: 'ABC', tabGid: '1244421967' });
+  assert.strictEqual(g.tabUrl, 'https://docs.google.com/spreadsheets/d/ABC/edit#gid=1244421967');
+  assert.strictEqual(svc.resolveTabGid({ sheetId: '', tabGid: '1' }).tabUrl, null, '시트 id 없이 링크를 만들었다');
+});
+
+await ta('gid 백필: 비어 있는 탭만 채우고, 동명 탭은 사유와 함께 건너뛴다', async () => {
+  const ups = [];
+  svc.__setPoolForTest({
+    query: async (sql, params) => {
+      const s = String(sql);
+      if (/NULLIF\(tc\.tab_gid, ''\) IS NULL/.test(s)) return { rows: [
+        { sheetId: 'S', tabName: 'A', displayName: 'A', mirrorGid: '10', mirrorNameCount: 1, idxGid: null },
+        { sheetId: 'S', tabName: 'B', displayName: 'B', mirrorGid: '20', mirrorNameCount: 3, idxGid: null },
+        { sheetId: 'S', tabName: 'C', displayName: 'C', mirrorGid: null, mirrorNameCount: 0, idxGid: '30' },
+      ] };
+      if (/UPDATE tab_configs SET tab_gid/.test(s)) { ups.push(params); return { rowCount: 1 }; }
+      return { rows: [] };
+    },
+  });
+  const pre = await svc.backfillTabGids({});
+  assert.strictEqual(pre.dryRun, true);
+  assert.strictEqual(pre.fillable, 2, 'A(미러)·C(인덱스) 두 개가 채워져야 한다');
+  assert.strictEqual(pre.skipped, 1, '동명 탭 B 가 건너뛰기로 보고되지 않았다');
+  assert.ok(/동명/.test(pre.skip[0].reason), '건너뛴 이유를 말하지 않는다');
+  assert.strictEqual(ups.length, 0, '미리보기가 UPDATE 를 실행했다');
+
+  const out = await svc.backfillTabGids({ dryRun: false });
+  assert.strictEqual(out.updated, 2);
+  assert.ok(ups.every(p => p[2] === '10' || p[2] === '30'), '엉뚱한 gid 를 썼다');
+  svc.__setPoolForTest(null);
+});
+
+await ta('★ 아카이브 전용 탭(등록 목록에 없음)은 includeArchived 일 때만 목록에 합류', async () => {
+  const arch = [{ sheetId: 'S', tabName: '지난차수', tabGid: '99', campaignName: 'X', archivedAt: '2026-06-01', row_count: 15 }];
+  const mk = (incl) => ({
+    query: async (sql) => {
+      const s = String(sql);
+      if (/FROM tab_configs tc/.test(s) && /registeredAt/.test(s)) return { rows: [] };
+      if (/FROM index_master_archive ima/.test(s)) return { rows: arch };
+      return { rows: [] };
+    },
+  });
+  svc.__setPoolForTest(mk());
+  const off = await svc.auditSheetSync({});
+  assert.strictEqual(off.items.length, 0, '기본 조회에 아카이브 탭이 섞였다');
+  const on = await svc.auditSheetSync({ includeArchived: true });
+  assert.strictEqual(on.items.length, 1);
+  assert.strictEqual(on.items[0].archivedOnly, true);
+  assert.ok(on.items[0].flags.includes('index_archived'));
+  assert.ok(/복구/.test(on.items[0].reasonKo), '다음 행동(복구)을 안내하지 않는다');
+  assert.strictEqual(on.items[0].tabUrl, 'https://docs.google.com/spreadsheets/d/S/edit#gid=99');
+  svc.__setPoolForTest(null);
+});
+
+t('★★ 아카이브 복구는 기존 /api/archive/restore 핸들러에 위임(복구 로직 사본 금지)', () => {
+  const ROUTES = R('src/routes/trackB.routes.js');
+  assert.ok(/_delegate\(_archiveRoutes, 'post', '\/restore'\)/.test(ROUTES), '기존 복구 핸들러에 위임하지 않는다');
+  const src = R('src/services/sheetSyncAudit.service.js');
+  assert.ok(!/index_master_archive[\s\S]{0,200}INSERT INTO index_master\b/.test(src),
+    '복구 로직 사본이 들어왔다 — archive.routes 의 트랜잭션 한 벌만 써야 한다');
+});
+t('★ 신규 라우트 2종도 authMiddleware + adminOrMaster(원본보다 넓히지 않는다)', () => {
+  const gid = layers.find(l => l.path === '/sheet-sync/gid-backfill');
+  const un = layers.find(l => l.path === '/sheet-sync/unarchive');
+  [gid, un].forEach(l => {
+    assert.ok(l, '라우트 누락');
+    assert.ok(l.mw.includes('authMiddleware') && l.mw.includes('adminOrMasterMiddleware'), l.path + ' 게이트 부족');
+  });
+  const ROUTES = R('src/routes/trackB.routes.js');
+  const i = ROUTES.indexOf("router.post('/sheet-sync/gid-backfill'");
+  const body = ROUTES.slice(i, ROUTES.indexOf('\nrouter.', i + 10));
+  assert.ok(/dryRun:\s*dryRun\s*!==\s*false/.test(body), 'gid 백필 기본값이 미리보기가 아니다');
+});
+t('★ 프론트: 탭 링크·아카이브 복구·gid 채우기 배선 + onclick 은 인덱스만', () => {
+  assert.ok(/function tabLink\(/.test(HTML), '탭 링크 렌더러가 없다');
+  assert.ok(/\^https:\\\/\\\/docs\\\.google\\\.com/.test(HTML), '링크 호스트 검증이 없다(신뢰 베이스 재구성)');
+  assert.ok(/rel="noopener"/.test(HTML), '새 창 링크에 noopener 가 없다');
+  assert.ok(/unarchiveOne\(' \+ i \+ '\)/.test(HTML), '복구 버튼이 인덱스 방식이 아니다');
+  assert.ok(HTML.includes('/api/trackb/sheet-sync/unarchive') && HTML.includes('/api/trackb/sheet-sync/gid-backfill'),
+    '신규 엔드포인트 호출이 없다');
+  assert.ok(/includeArchived=1/.test(HTML), '아카이브 포함 조회 배선이 없다');
+  // 복구는 반영까지 이어져야 "작업보드에 나타나는 상태"로 끝난다
+  const i = HTML.indexOf('async function unarchiveOne(');
+  const body = HTML.slice(i, HTML.indexOf('async function gidBackfill(', i));
+  assert.ok(/repairOne\(i, \{ keepRes: true \}\)/.test(body), '복구 후 반영으로 이어지지 않는다');
 });
 
 console.log('\n✅ 전체 통과: ' + pass + '케이스');

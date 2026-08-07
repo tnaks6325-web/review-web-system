@@ -314,10 +314,29 @@ router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit } = req.query;
-    res.json({ ok: true, ...(await sheetSync.auditSheetSync({ before, limit })) });
+    const { before, limit, includeArchived } = req.query;
+    res.json({ ok: true, ...(await sheetSync.auditSheetSync({
+      before, limit, includeArchived: includeArchived === '1' || includeArchived === 'true',
+    })) });
   } catch (err) { next(err); }
 });
+// tab_configs.tab_gid 백필 — 시트만 열리던 링크를 "그 탭이 열리는 링크"로. 기본은 미리보기.
+router.post('/sheet-sync/gid-backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun } = req.body || {};
+    res.json(await sheetSync.backfillTabGids({ dryRun: dryRun !== false, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+// 아카이브 복구 — ★ 복구 로직은 **기존 `/api/archive/restore` 핸들러에 위임**한다(사본 금지).
+//   그쪽이 index_master_archive → index_master · review_index_archive → review_index ·
+//   tab_configs 재생성(is_closed=FALSE) · 이력 기록까지 한 트랜잭션으로 이미 하고 있다.
+//   여기 두는 이유는 C/S·설정과 같다: 인트라넷 SSO 토큰(via:'intranet')은 /api/archive/* 에 도달 불가.
+//   ★ 게이트는 원본(authMiddleware)보다 좁힌다(adminOrMaster) — 프록시가 원본보다 넓어지면 안 된다.
+const _archiveRoutes = require('./archive.routes');
+const _archiveRestore = _delegate(_archiveRoutes, 'post', '/restore');
+router.post('/sheet-sync/unarchive', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _archiveRestore(req, res, next));
+
 router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body || {};
