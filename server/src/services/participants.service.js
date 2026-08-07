@@ -244,6 +244,55 @@ async function createWorktableSlots({ sheetId, tabName, tabGid = null, headerRow
 }
 
 /**
+ * 시트 준비 행 → 표 슬롯 백필 (시트 우위 동기화 · STEP B)
+ *
+ * createWorktableSlots 의 형제. 다른 점은 **자리 번호가 연속이 아니라는 것** — 저쪽은 우리가 방금
+ * 만든 작업표라 헤더 바로 아래부터 1,2,3… 이지만, 여기는 이미 운영 중인 시트의 준비 행이라
+ * 중간이 이미 채워져 있고 빈 자리만 띄엄띄엄이다. 그래서 호출부가 `seq`(시트 실제 행 번호)를 직접 준다.
+ *
+ * ★★ **seq = 시트 실제 행 번호**(완화 금지) — 어긋나면 그 자리에 주문이 들어올 때
+ *   `importTabFromIndex` 의 `ON CONFLICT (sheet_id, tab_name, seq)` 가 제자리 갱신을 못 하고
+ *   **새 행을 만들어** 빈 줄과 채워진 줄이 겹쳐 표가 두 겹이 된다.
+ * ★ `source='worktable'` — createWorktableSlots 와 같은 값을 쓴다(신규 값 금지).
+ *   ① `importTabFromIndex` 의 상태 CASE 가 `source IN ('import','worktable')` 라 리뷰어가 리뷰를
+ *   내면 리뷰제출·입금 표시가 정상적으로 켜지고 ② `_reconcileSeen` 은 `source='import'` 만
+ *   비활성화하므로 재투영에도 이 빈 줄이 살아남는다. 'manual' 로 두면 ①이 영영 안 켜진다.
+ * ★ `row_json` = 시트 헤더명→값 맵 — `importTabFromIndex` 가 review_index 에서 넣는 것과 **같은 모양**.
+ *   그래서 작업보드 그리드가 구매일자·리뷰옵션 같은 시트 칸을 채워진 행과 똑같이 그린다.
+ * ★ **ON CONFLICT DO NOTHING** — 이미 있는 자리는 절대 덮지 않는다(비파괴·멱등, 두 번 눌러도 안전).
+ */
+async function createSlotsFromSheetRows({ sheetId, tabName, tabGid = null, campaignName = null, rows = [], by = 'sheet-slot-sync' } = {}) {
+  if (!sheetId || !tabName) throw new Error('createSlotsFromSheetRows: sheetId, tabName 필수');
+  const list = (Array.isArray(rows) ? rows : [])
+    .filter(r => r && Number.isInteger(parseInt(r.seq, 10)) && parseInt(r.seq, 10) > 0)
+    .slice(0, 2000);
+  if (!list.length) return { created: 0, requested: 0 };
+
+  const db = getPool();
+  const ph = [], vals = [];
+  list.forEach((r, i) => {
+    const seq = parseInt(r.seq, 10);
+    const b = i * 4;
+    // 고정 4개($1~$4) 뒤로 행마다 4개(option_text, start_date, row_json, updated_by)
+    ph.push(`($1,$2,$3,$4,${seq},NULL,NULL,NULL,NULL,$${b + 5},$${b + 6},$${b + 7}::jsonb,'worktable',$${b + 8},NOW())`);
+    vals.push(
+      r.optionText ? String(r.optionText).slice(0, 200) : null,
+      r.startDate ? String(r.startDate).slice(0, 100) : null,
+      JSON.stringify(r.rowJson && typeof r.rowJson === 'object' ? r.rowJson : {}),
+      String(by).slice(0, 100)
+    );
+  });
+  const { rowCount } = await db.query(
+    `INSERT INTO campaign_participants
+       (sheet_id, tab_gid, tab_name, campaign_name, seq, reviewer_name, recipient_name, phone8, round,
+        option_text, start_date, row_json, source, updated_by, updated_at)
+     VALUES ${ph.join(',')}
+     ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
+    [sheetId, tabGid, tabName, campaignName, ...vals]);
+  return { created: rowCount, requested: list.length };
+}
+
+/**
  * 작업표 되돌리기 — 작업대 표에서 그 탭의 줄을 내린다. (시트는 건드리지 않는다)
  *
  * ★ 주문이 들어온 줄이 있으면 **바로 지우지 않고 목록을 돌려준다**(사용자 확정):
@@ -358,7 +407,7 @@ async function listActiveTabs({ limit = 500 } = {}) {
 }
 
 module.exports = {
-  createWorktableSlots, deleteWorktableRows,
+  createWorktableSlots, createSlotsFromSheetRows, deleteWorktableRows,
   importTabFromIndex,
   syncImportedTabs,
   listParticipants,
