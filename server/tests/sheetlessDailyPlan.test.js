@@ -93,6 +93,23 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     ok('날짜 컬럼을 찾아 날짜별 행 수를 센다', r.ok && r.byDate['2026-08-07'] === 2 && r.byDate['2026-08-10'] === 1);
     ok('어느 칸을 읽었는지 돌려준다(진단 가능)', r.dateHeader === '구매일자');
 
+    /* ★★★ 실제 작업표가 쓰는 표기로 검증한다 — 위 픽스처(`2026-08-07`)는 **제품이 쓰지 않는 모양**이라
+       이 버그를 통과시켰다(프로덕션 E2E 로 실측: 무시트 공고 달력 프리필이 늘 `unparsable`).
+       `planToSheetValues` 는 구매일자를 **전부 `M / D (요일)`** 로 쓰므로 열 안에 연도가 하나도 없고,
+       `parseDateColumn` 은 앵커가 없으면 전 행 null 을 돌려준다 → `fallbackAnchor` 가 필수다.
+       ★ 픽스처를 다시 ISO 로 되돌리면 이 회귀가 그대로 살아난다. */
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const M = kst.getUTCMonth() + 1, D = kst.getUTCDate(), Y = kst.getUTCFullYear();
+    const pad = n => String(n).padStart(2, '0');
+    dailyPlan.__setPoolForTest({ query: async () => ({ rows: [
+      { row_json: { '번호': '1', '구매일자': `${M} / ${D} (월)` } },
+      { row_json: { '번호': '2', '구매일자': `${M} / ${D} (월)` } },
+    ] }) });
+    const rk = await dailyPlan.readWorktableDates({ sheetId: 'wt_a', tabName: 'T1' });
+    ok('★★ 연도 없는 "M / D (요일)" 만 있는 열도 오늘을 앵커로 해석한다(작업표 실제 표기)',
+      rk.ok === true && rk.byDate[`${Y}-${pad(M)}-${pad(D)}`] === 2,
+      JSON.stringify({ ok: rk.ok, reason: rk.reason, byDate: rk.byDate }));
+
     dailyPlan.__setPoolForTest({ query: async () => ({ rows: [{ row_json: { '이름': '김' } }] }) });
     ok('날짜 칸이 없으면 사유를 말한다', (await dailyPlan.readWorktableDates({ sheetId: 'x', tabName: 'y' })).reason === 'no_date_column');
 
