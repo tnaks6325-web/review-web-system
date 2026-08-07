@@ -69,9 +69,17 @@ async function readWorktableDates({ sheetId, tabName }) {
     return v == null ? '' : String(v);
   });
 
-  // 연도 추론까지 **기존 파서**가 한다(`7 / 23 (목)` 처럼 연도 없는 표기가 실측상 흔하다)
+  /* 연도 추론까지 **기존 파서**가 한다(`7 / 23 (목)` 처럼 연도 없는 표기가 실측상 흔하다).
+     ★★ `fallbackAnchor` 는 선택이 아니다 — 작업표의 구매일자는 `planToSheetValues` 가
+     **전부 `M / D (요일)`** 로 쓰므로 열 안에 연도가 **하나도 없다**. 앵커가 없으면
+     `parseDateColumn` 이 전 행 null 을 돌려주고 프리필이 `unparsable` 로 조용히 죽는다
+     (프로덕션 E2E 로 실측 — 무시트 공고의 달력 프리필이 한 번도 성공한 적이 없었다).
+     다른 소비처(063 시트 일정·시트 우위 점검)는 이미 같은 앵커를 넘긴다 — 여기만 빠져 있었다. */
   const { parseDateColumn } = require('../utils/koreanDate');
-  const iso = parseDateColumn(raw);
+  const kstToday = new Date(Date.now() + 9 * 3600 * 1000);
+  const iso = parseDateColumn(raw, {
+    fallbackAnchor: { y: kstToday.getUTCFullYear(), m: kstToday.getUTCMonth() + 1 },
+  });
 
   const byDate = {};
   let parsed = 0;
