@@ -288,7 +288,9 @@
   function buildPlan(mode) {
     var out = [], sum = 0, d = START, guard = 0;
     var left = (mode === 'extend') ? 0 : CARRY;
-    var slots = Math.max(1, Math.ceil(TARGET / DEFAULT_DAILY));   // 대략의 진행일 수
+    // ★ 나눌 대상은 **끝까지 살아남는 진행일 수**(floor) — ceil 로 잡으면 마지막 부분일에 배정한
+    //   몫이 총량 맞추기에서 잘려 "이월 30명인데 29명만 얹혔다"가 된다(실측).
+    var slots = Math.max(1, Math.floor(TARGET / DEFAULT_DAILY));
     var per = Math.floor(CARRY / slots), rem = CARRY % slots;
     while (sum < TARGET && guard++ < 400) {
       var base = baseOf(d), add = 0;
@@ -422,8 +424,12 @@
     var days = rows.filter(function (r) { return carryOn(r) > 0; });
     var el = document.getElementById('carryWhere');
     if (mode === 'extend') {
-      el.innerHTML = '이월 <b>' + CARRY + '명</b>을 <b>어느 날에도 얹지 않고</b> 종료일 뒤로 넘겼습니다 — 각 날은 기본 '
-        + DEFAULT_DAILY + '명 그대로이고 마지막 날이 늘어납니다.';
+      // ★ 숫자는 실제 마지막 진행일에서 읽는다 — 문구에 기본 일건수를 박아 두면 표의 그 줄과
+      //   어긋난다(총량에 맞춰 마지막 날은 남은 만큼만 열린다).
+      var lastRow = null;
+      for (var i = rows.length - 1; i >= 0; i--) if (rows[i].plan > 0) { lastRow = rows[i]; break; }
+      el.innerHTML = '이월 <b>' + CARRY + '명</b>을 <b>종료일 연장</b>으로 넘겼습니다 — 추가된 종료일 <b>'
+        + (lastRow ? fmt(lastRow.date) : '-') + '</b>에 <b>' + (lastRow ? lastRow.plan : 0) + '명</b> 늘어납니다.';
     } else if (!days.length) {
       el.innerHTML = '이월 <b>' + CARRY + '명</b>이 지금 어느 날에도 얹혀 있지 않습니다 — [자동 맞춤]으로 배치하세요.';
     } else if (days.length === 1) {
