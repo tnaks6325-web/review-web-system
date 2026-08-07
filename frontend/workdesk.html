@@ -5964,8 +5964,7 @@ function _coChecklistHtml(ck,i){
     ${(ck.checks||[]).map(c=>`<div class="corow">${ic(c.state)}
       <div><b>${esc(c.label)}</b><div class="comuted">${esc(c.detail)}${c.state!=='pass'&&c.hint?' — '+esc(c.hint):''}</div></div></div>`).join('')}
     <div class="coact">${ck.canCutover
-      ? `<span class="comuted">이관하려면 작업 이름을 그대로 입력하세요:</span>
-         <input class="ovsearch" id="cocf${i}" placeholder="${esc(STATE.co.items[i].tabName)}" style="max-width:280px">
+      ? `<span class="comuted">5항목 모두 통과 — 이관할 수 있습니다. 되돌리려면 [재연결].</span>
          <button class="btn dark" onclick="_coCutover(${i})">이관</button>`
       : `<span class="comuted">통과하지 못한 항목이 있어 이관할 수 없습니다. <b>?</b> 는 "확인 불가" — 통과가 아닙니다.</span>`}
     </div></div>`;
@@ -5982,12 +5981,11 @@ async function _coCheck(i){
 }
 async function _coCutover(i){
   const t = STATE.co.items[i]; if(!t) return;
-  const el = document.getElementById('cocf'+i);
-  const confirmName = el ? el.value : '';
-  if(String(confirmName).trim() !== String(t.tabName).trim()){ alert('작업 이름을 정확히 입력해야 이관됩니다.'); return; }
+  // ★ 타이핑 확정은 없앴다(사용자 확정) — 대신 확인창이 **작업 이름을 문장에 넣어** 보여준다.
+  //   옆 줄을 잘못 눌렀다면 여기서 알아챈다. 되돌리기는 [재연결]로 언제든 가능.
   if(!confirm(`「${t.displayName||t.tabName}」 의 구글시트 연결을 끊습니다.\n\n이후 이 작업은 시트를 읽지도 쓰지도 않습니다.\n되돌리려면 [재연결]을 누르면 됩니다.\n\n진행할까요?`)) return;
   try{
-    const j = await api('/api/trackb/sheetless/cutover',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName, confirmName })});
+    const j = await api('/api/trackb/sheetless/cutover',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName })});
     if(!j || j.ok===false){ alert((j&&(j.error||j.message))||'이관하지 못했습니다.'); await _coCheck(i); return; }
     // ★ 부수효과(장부 재생성·시트 안내문) 실패는 조용히 넘기지 않는다 — 이관은 됐지만 알려야 한다.
     const warn = [];

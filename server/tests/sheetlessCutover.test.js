@@ -5,7 +5,7 @@
  * 고정하는 것:
  *  A. 라우트 4종 · 전부 adminOrMaster (표식을 켜는 유일한 창구)
  *  B. 점검표 fail-closed — pass 아닌 항목이 하나라도 있으면 잠근다(**unknown 포함**)
- *  C. 작업명 타이핑 확정 — 틀리면 쓰기 쿼리 0
+ *  C. 이관 게이트 = 점검표 하나 — 통과 못 하면 쓰기 쿼리 0 (타이핑 확정은 제거됨, 사용자 확정)
  *  D. force 는 서버에서 **명시 true 일 때만**(문자열 'true'·1 로 열리지 않는다)
  *  E. 되돌리기 — 0행이면 "되돌렸다"고 꾸미지 않고, 이관 이력은 지우지 않는다
  *  F. preflight — dryRun 과 함께일 때만. 단독이면 종전대로 not_sheetless
@@ -249,24 +249,15 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     cutover.__setPoolForTest(null);
   }
 
-  /* ══════════════ C. 타이핑 확정 ══════════════ */
-  console.log('\n[C] 작업명 타이핑 확정 — 틀리면 아무것도 쓰지 않는다');
-  {
-    const { db, log } = makeStub();
-    cutover.__setPoolForTest(db);
-    const restore = stubDeps({});
-    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', confirmName: '다른이름', by: 'q' });
-    ok('이름이 다르면 거부(confirm_mismatch)', r.ok === false && r.reason === 'confirm_mismatch');
-    ok('★ 거부 시 쓰기 쿼리 0', !log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s)));
-    restore(); cutover.__setPoolForTest(null);
-  }
+  /* ══════════════ C. 이관 게이트 = 점검표 하나 ══════════════ */
+  console.log('\n[C] 이관 게이트 — 점검표를 통과해야만 쓴다(타이핑 확정은 제거)');
   {
     const { db, log } = makeStub({ prepared: 3 });
     cutover.__setPoolForTest(db);
     const restore = stubDeps({ prepared: 10 });   // 점검 실패 상태
-    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', confirmName: 'T1', by: 'q' });
-    ok('이름이 맞아도 점검표를 통과 못 하면 거부', r.ok === false && r.reason === 'checklist_failed');
-    ok('★ 점검 실패 시에도 쓰기 쿼리 0', !log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s)));
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    ok('점검표를 통과 못 하면 거부', r.ok === false && r.reason === 'checklist_failed');
+    ok('★ 점검 실패 시 쓰기 쿼리 0', !log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s)));
     ok('막힌 항목을 알려준다', Array.isArray(r.blocking) && r.blocking.includes('sheet_rows'));
     restore(); cutover.__setPoolForTest(null);
   }
@@ -274,11 +265,40 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     const { db, log } = makeStub();
     cutover.__setPoolForTest(db);
     const restore = stubDeps({});
-    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', confirmName: 'T1', by: '만두' });
-    ok('전부 통과 + 이름 일치 → 이관', r.ok === true && !r.forced);
+    // ★★ 타이핑 확정 제거(사용자 확정 2026-08-07) — 이름을 안 보내도 점검 통과면 이관된다.
+    //    오클릭 방어는 ① 화면 확인창이 작업 이름을 문장에 넣어 보여주고 ② 점검표 fail-closed,
+    //    그리고 되돌리기([재연결])가 점검표 없이 언제든 가능한 것으로 남는다.
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: '만두' });
+    ok('★★ 작업명 입력 없이도 점검 통과면 이관된다', r.ok === true && !r.forced);
     ok('표식을 켜는 UPDATE 가 실제로 나간다',
       log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s) && /sheetless_at = NOW\(\)/.test(s)));
     restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    // ★ 이미 이관된 탭을 또 이관하지 않는다 — 다시 쓰면 sheetless_at/by(유일한 이관 이력)가
+    //   오늘 날짜로 덮여 "언제 누가 이관했나"를 잃는다.
+    const { db, log } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
+      sheetless: true, sheetlessAt: '2026-08-01T00:00:00Z', sheetlessBy: '만두',
+      mirroredAt: new Date().toISOString(), boardRows: 3 } });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    ok('★ 이미 이관된 탭은 already 로 끝낸다', r.ok === true && r.already === true);
+    ok('★ 그때 쓰기 쿼리 0(이관 이력 안 덮음)',
+      !log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s)));
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    // ★ 서버·라우트·화면 어디에도 타이핑 확정이 남아 있지 않아야 한다 — 한쪽만 되살리면
+    //   화면이 값을 못 보내 전면 잠금(서버만) 또는 죽은 입력칸(화면만)이 된다.
+    const svc = noLineComments(read('src/services/sheetlessCutover.service.js'));
+    const rt = noLineComments(read('src/routes/trackB.routes.js'));
+    const fe = noLineComments(readFe('workdesk.html'));
+    ok('★ 서버에 confirmName 판정 없음', !/confirmName/.test(svc) && !/confirm_mismatch/.test(svc));
+    ok('★ 라우트가 confirmName 을 받지 않는다', !/confirmName/.test(rt));
+    ok('★ 화면에 입력칸·이름 대조가 없다', !/cocf/.test(fe) && !/confirmName/.test(fe));
+    ok('★ 그래도 확인창은 남아 있고 작업 이름을 문장에 넣는다',
+      /_coCutover/.test(fe) && /confirm\(`「\$\{t\.displayName\|\|t\.tabName\}」 의 구글시트 연결을 끊습니다/.test(fe));
   }
 
   /* ══════════════ D. force 는 명시 true 일 때만 ══════════════ */
@@ -298,7 +318,7 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     const { db } = makeStub();
     cutover.__setPoolForTest(db);
     const restore = stubDeps({ prepared: 10 });
-    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', confirmName: 'T1', by: 'q', force: true });
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q', force: true });
     ok('force 면 점검 미통과여도 이관하되 forced 로 표시한다', r.ok === true && r.forced === true);
     restore(); cutover.__setPoolForTest(null);
   }
@@ -359,7 +379,7 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       if (a && a.dryRun) return { headers: ['a'], mirrorRows: 3, indexRows: 2 };   // 점검용은 통과
       throw Object.assign(new Error('장부 실패'), { code: 'no_headers' });          // 실제 재생성만 실패
     };
-    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', confirmName: 'T1', by: 'q' });
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
     ledger.rebuildLedgers = _rl;
     ok('★ 장부 재생성이 실패해도 이관은 성공으로 끝난다', r.ok === true);
     ok('★ 그리고 실패 사유를 응답에 실어 화면이 말한다(조용한 실패 금지)',
@@ -404,6 +424,26 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       await new Promise(r => setTimeout(r, 30));
       ok('★★ 조회가 실패해도 "불러오는 중…"에 매달리지 않고 사유 + [다시 시도]로 끝낸다',
         !/불러오는 중/.test(mount.html) && /다시 시도/.test(mount.html) && /네트워크 끊김/.test(mount.html));
+    }
+    // ★★ 점검표 렌더는 **실행해서** 본다 — 타이핑 입력칸을 지우면서 [이관] 버튼까지 같이
+    //    날려 버리면 "통과했는데 누를 게 없는" 화면이 되는데 grep 으로는 안 보인다.
+    {
+      const i = wd.indexOf('function _coChecklistHtml(');
+      assert(i > 0, '_coChecklistHtml 미발견');
+      const sandbox = {
+        STATE: { co: { items: [{ tabName: 'T1', displayName: 'T1' }] } },
+        esc: (s) => String(s == null ? '' : s),
+      };
+      sandbox.globalThis = sandbox;
+      vm.createContext(sandbox);
+      vm.runInContext(wd.slice(i, wd.indexOf('\n}', i) + 2) + '\n;this.__f = _coChecklistHtml;', sandbox);
+      const pass = sandbox.__f({ canCutover: true, checks: [{ state: 'pass', label: 'L', detail: 'D' }] }, 0);
+      const block = sandbox.__f({ canCutover: false, checks: [{ state: 'unknown', label: 'L', detail: 'D' }] }, 0);
+      ok('★★ 통과면 [이관] 버튼이 실제로 그려진다', /_coCutover\(0\)/.test(pass) && />이관</.test(pass));
+      ok('★★ 그 자리에 타이핑 입력칸은 없다(사용자 확정 — 단계 제거)',
+        !/<input/.test(pass) && !/이름을 그대로 입력/.test(pass));
+      ok('★ 통과 못 하면 [이관] 버튼 자체가 없다(눌러도 안 되는 버튼 금지)',
+        !/_coCutover\(/.test(block) && /이관할 수 없습니다/.test(block));
     }
     ok('★ not_ready(096 미적용)를 화면이 말한다', /j\.code==='not_ready'/.test(wd));
     ok('★ 점검표는 서버 판정을 그대로 그린다(프론트 재판정 0) — canCutover 로만 분기',
