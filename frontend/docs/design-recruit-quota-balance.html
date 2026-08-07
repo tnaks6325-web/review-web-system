@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 — 모집인원 조절 (총량 균형 · 이월 처리 토글)</title>
+<style>
+  /* 시안은 실제 화면과 같아야 하므로 라이트 모드로 고정한다(다크에서 색이 뒤집히면 대조가 깨진다) */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 26px 16px 60px;
+    background: #eef1f6;
+    font-family: "Malgun Gothic", "맑은 고딕", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+    color: #1f2430; -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 시안 안내(제품 화면 아님) ───────────────────────── */
+  .guide { max-width: 760px; margin: 0 auto 20px; }
+  .guide h1 { font-size: 1.06rem; margin: 0 0 8px; letter-spacing: -.3px; }
+  .guide p { margin: 0 0 12px; font-size: .82rem; line-height: 1.65; color: #4a5468; }
+  .checks { background: #fff; border: 1px solid #dfe4ec; border-radius: 12px; padding: 14px 16px; }
+  /* ★ 자식 선택자로 좁힌다 — .checks b 로 두면 라벨 문장 속 <b> 까지 block 이 되어 한 문장이
+     여러 줄로 쪼개진다(실측). */
+  .checks > b { font-size: .8rem; display: block; margin-bottom: 8px; }
+  .checks label { display: flex; gap: 9px; align-items: flex-start; font-size: .78rem; line-height: 1.55;
+    padding: 5px 0; color: #333c4d; cursor: pointer; }
+  .checks input { margin-top: 3px; flex: 0 0 auto; width: 14px; height: 14px; accent-color: #2f6fed; }
+  .checks .k { color: #2f6fed; font-weight: 700; }
+
+  /* ── 모달(실제 화면 재현) ────────────────────────────── */
+  .modal { max-width: 700px; margin: 0 auto; background: #fff; border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(22,30,50,.16); overflow: hidden; }
+  .mhead { display: flex; align-items: center; gap: 10px; padding: 15px 18px; border-bottom: 1px solid #e8ecf3; }
+  .mhead .ic { width: 26px; height: 26px; border-radius: 7px; background: #eef2fb; display: grid; place-items: center; font-size: .82rem; flex: 0 0 auto; }
+  .mhead h2 { font-size: .87rem; margin: 0; font-weight: 800; letter-spacing: -.2px; line-height: 1.45; flex: 1; }
+  .mhead .x { border: 0; background: none; font-size: 1.15rem; color: #97a0b2; cursor: pointer; padding: 0 2px; }
+  .mbody { padding: 15px 18px 4px; max-height: 74vh; overflow: auto; }
+  .mfoot { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid #e8ecf3; background: #fbfcfe; }
+  .mfoot .hint { flex: 1; font-size: .68rem; color: #7c8698; line-height: 1.5; }
+
+  .btn { border: 1px solid #d7dce6; background: #fff; color: #2b3241; border-radius: 8px;
+    padding: 7px 13px; font-size: .74rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .btn:hover { background: #f5f7fb; }
+  .btn.pri { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  .btn.pri:hover { background: #2560d8; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.sm { padding: 5px 10px; font-size: .69rem; }
+
+  /* ── ① 진행 현황(요구 2·3) ──────────────────────────── */
+  .stat { border: 1px solid #dde3ee; border-radius: 11px; padding: 12px 14px; margin-bottom: 11px; background: #fbfcff; }
+  .stat .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .stat .big { font-size: 1.02rem; font-weight: 800; letter-spacing: -.4px; }
+  .stat .big em { font-style: normal; color: #2f6fed; }
+  .stat .bar { height: 8px; border-radius: 5px; background: #e6ebf4; margin: 9px 0 8px; overflow: hidden; }
+  .stat .bar i { display: block; height: 100%; background: linear-gradient(90deg, #4b87f5, #2f6fed); border-radius: 5px; }
+  .stat .kv { display: flex; gap: 16px; flex-wrap: wrap; font-size: .73rem; color: #4d5768; }
+  .stat .kv b { color: #1f2430; }
+  .stat .kv .end { color: #b45309; }
+
+  /* ── ② 이월 처리 토글(요구 4) ───────────────────────── */
+  .carry { border: 1px solid #dde3ee; border-radius: 11px; padding: 12px 14px; margin-bottom: 11px; }
+  .carry .t { font-size: .76rem; font-weight: 800; margin-bottom: 3px; }
+  .carry .d { font-size: .69rem; color: #737d90; line-height: 1.55; margin-bottom: 9px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0; background: #eef1f7; border-radius: 9px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 8px 6px; border-radius: 7px; cursor: pointer;
+    font-family: inherit; font-size: .73rem; font-weight: 700; color: #5c6678; line-height: 1.4; transition: .12s; }
+  .seg button.on { background: #fff; color: #1b3fa0; box-shadow: 0 1px 4px rgba(20,30,60,.13); }
+  .seg button small { display: block; font-weight: 600; font-size: .63rem; color: #8a93a4; margin-top: 2px; }
+  .seg button.on small { color: #4f6ba8; }
+  .carry .prev { margin-top: 9px; font-size: .69rem; line-height: 1.6; color: #35507f;
+    background: #eff4ff; border: 1px solid #d6e2fb; border-radius: 8px; padding: 7px 10px; }
+
+  /* ── ③ 배분 균형 바(요구 6) — 항상 보이게 sticky ────── */
+  .bal { position: sticky; top: 0; z-index: 5; border-radius: 11px; padding: 11px 13px; margin-bottom: 12px;
+    border: 1.5px solid; display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+  .bal .ico { font-size: 1.05rem; line-height: 1; }
+  .bal .txt { flex: 1; min-width: 190px; }
+  .bal .l1 { font-size: .8rem; font-weight: 800; letter-spacing: -.2px; }
+  .bal .l2 { font-size: .69rem; margin-top: 2px; line-height: 1.5; }
+  .bal.ok  { background: #ecfdf3; border-color: #86dfae; color: #14653a; }
+  .bal.over{ background: #fef2f2; border-color: #f4a9a9; color: #a81f1f; }
+  .bal.under{background: #eff5ff; border-color: #a9c6f6; color: #1b46a8; }
+  .bal .num { font-variant-numeric: tabular-nums; }
+
+  /* ── ④ 날짜별 행 ────────────────────────────────────── */
+  .sec { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    font-size: .71rem; color: #6b7487; margin: 4px 2px 8px; flex-wrap: wrap; }
+  .sec b { color: #2b3241; }
+  .rows { display: flex; flex-direction: column; gap: 5px; }
+  .r { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 9px; }
+  .r.today { background: #f4f8ff; }
+  .r.rest { opacity: .82; }
+  .r .d { width: 86px; flex: 0 0 auto; font-size: .74rem; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+  .r .d .tag { font-size: .58rem; font-weight: 800; padding: 1px 5px; border-radius: 5px; }
+  .r .d .tag.t { background: #dbeafe; color: #1b46a8; }
+  .r .d .tag.a { background: #fef3c7; color: #92400e; }
+  .r .d .tag.rs { background: #eef1f7; color: #7c8698; }
+
+  .g { flex: 1; min-width: 60px; height: 22px; border-radius: 11px; background: #eef1f7; position: relative;
+    cursor: ew-resize; touch-action: none; }
+  .g .f { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 11px;
+    background: linear-gradient(90deg, #6ea2f8, #2f6fed); }
+  .g .k { position: absolute; top: 50%; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px;
+    background: #fff; border: 2.5px solid #2f6fed; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+  .g .base { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #b6c0d2; border-radius: 1px; }
+  /* ★ 초과/부족은 **줄이 아니라 합계의 성질**이라 행을 빨갛게 칠하지 않는다 —
+     "어느 줄이 초과인지"는 정할 수 없어 오해를 부른다. 신호는 위 균형 바 하나(판정 단일 출처). */
+
+  .ctl { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+  .ctl button { width: 27px; height: 27px; border-radius: 7px; border: 1px solid #d7dce6; background: #fff;
+    font-size: .9rem; line-height: 1; cursor: pointer; color: #40495a; font-family: inherit; }
+  .ctl button:hover { background: #f2f5fa; }
+  .ctl button:disabled { opacity: .35; cursor: not-allowed; }
+  .ctl .n { width: 56px; text-align: right; }
+  .ctl .n input { width: 100%; border: 1px solid transparent; background: none; text-align: right;
+    font-family: inherit; font-size: .84rem; font-weight: 800; color: #1f2430; padding: 1px 3px;
+    border-radius: 5px; font-variant-numeric: tabular-nums; }
+  .ctl .n input:focus { border-color: #2f6fed; background: #fff; outline: none; }
+  .ctl .n small { display: block; font-size: .6rem; color: #98a1b2; margin-top: 1px; }
+
+  .note { border: 1px solid #e3e8f1; background: #f8fafd; border-radius: 9px; padding: 9px 12px;
+    font-size: .68rem; color: #5a6478; line-height: 1.6; margin: 12px 0; }
+  .endline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between;
+    border: 1px solid #e3e8f1; border-radius: 9px; padding: 9px 12px; font-size: .73rem; margin: 12px 0 4px; }
+  .endline b { color: #b45309; }
+  .endline .chg { color: #2f6fed; font-weight: 700; }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(14px);
+    background: #22293a; color: #fff; padding: 10px 16px; border-radius: 9px; font-size: .75rem;
+    opacity: 0; pointer-events: none; transition: .18s; z-index: 50; max-width: 88vw; text-align: center; line-height: 1.5; }
+  .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 560px) {
+    .r .d { width: 72px; font-size: .69rem; }
+    .ctl .n { width: 48px; }
+    .seg { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="guide">
+  <h1>시안 — 모집인원 조절 (총량 균형 · 이월 처리 토글)</h1>
+  <p>가짜 데이터로 <b>실제로 조작</b>됩니다. 게이지를 끌거나 −/＋를 누르고, 숫자를 직접 입력해 보세요.
+     지금 화면에서 <b>“예상 종료일: 계산 불가”</b>로 뜨던 것과 <b>총량 대비 배분이 맞는지 알 수 없던 것</b>을 함께 고쳤습니다.</p>
+  <div class="checks">
+    <b>확인할 것 (요청하신 6가지)</b>
+    <label><input type="checkbox"><span><span class="k">①</span> 한 날의 인원을 <b>남은 모집수(760명)</b>보다 크게 올릴 수 없다 — 넘기면 그 값에서 멈추고 안내가 뜬다.</span></label>
+    <label><input type="checkbox"><span><span class="k">②</span> 조절하는 지금 시점의 <b>모집 현황(확정 45 / 총 800명)</b>이 맨 위에 늘 보인다.</span></label>
+    <label><input type="checkbox"><span><span class="k">③</span> <b>예상 종료일</b>이 항상 계산되어 표시되고, 조절하면 그 자리에서 바뀐다.</span></label>
+    <label><input type="checkbox"><span><span class="k">④</span> <b>이월 처리 방식 토글</b> — [종료일 고정·남은 날 분산] ↔ [일일 인원 유지·종료일 연장]. 고른 방식대로 <b>[자동 맞춤]</b>이 동작한다.</span></label>
+    <label><input type="checkbox"><span><span class="k">⑥</span> 배분 합계가 <b>초과 = 빨강(+N 줄이세요)</b> / <b>부족 = 파랑(−N 늘리세요)</b> / <b>일치 = 초록</b>이고, 초록일 때만 <b>[확정 저장]</b>이 눌린다.</span></label>
+  </div>
+</div>
+
+<div class="modal">
+  <div class="mhead">
+    <div class="ic">📅</div>
+    <h2>모집인원 조절 — [공식몰] 위프 탈취제 WHIFF 화장실 담배 새집증후군 홀애비 교실 초강력 냄새 제거 부아누아 블랙, 300g, 1개</h2>
+    <button class="x" type="button" title="닫기">✕</button>
+  </div>
+
+  <div class="mbody">
+
+    <!-- ① 진행 현황 (요구 2·3) -->
+    <div class="stat">
+      <div class="row1">
+        <span class="big">모집 현황 <em id="sDone">45</em> / <span id="sTotal">800</span>명</span>
+      </div>
+      <div class="bar"><i id="sBar" style="width:5.6%"></i></div>
+      <div class="kv">
+        <span>남은 모집 <b id="sRemain">755</b>명</span>
+        <span>예상 종료일 <b class="end" id="sEnd">8/29 (토)</b></span>
+        <span>남은 진행일 <b id="sDays">19</b>일</span>
+        <span>총량 기준 <b>시트 행 수 800건</b></span>
+      </div>
+    </div>
+
+    <!-- ② 이월 처리 토글 (요구 4) -->
+    <div class="carry">
+      <div class="t">이월(빠진 인원) 처리 방식</div>
+      <div class="d">어떤 날의 인원을 줄이면 그만큼이 <b>이월</b>됩니다. 그 인원을 어떻게 되돌릴지 미리 정해 두세요 — 아래 [자동 맞춤]이 이 방식대로 동작합니다.</div>
+      <div class="seg">
+        <button type="button" id="mFix" class="on">종료일 고정<small>남은 날에 나눠 담기</small></button>
+        <button type="button" id="mKeep">일일 인원 유지<small>종료일을 뒤로 연장</small></button>
+      </div>
+      <div class="prev" id="carryPrev">종료일 <b>8/29 (토)</b>을 지키고, 빠진 인원을 남은 진행일에 나눠 담습니다.</div>
+    </div>
+
+    <!-- ③ 배분 균형 (요구 6) -->
+    <div class="bal ok" id="bal">
+      <div class="ico" id="balIco">✓</div>
+      <div class="txt">
+        <div class="l1" id="balL1">배분 합계 760 / 배분해야 할 760명 — 딱 맞습니다</div>
+        <div class="l2" id="balL2">이대로 [확정 저장]을 누르면 반영됩니다.</div>
+      </div>
+      <button class="btn sm" type="button" id="autoBtn" style="display:none">자동 맞춤</button>
+    </div>
+
+    <div class="sec">
+      <span>날짜별 모집 계획 — 게이지를 끌거나 −/＋ · 숫자 직접 입력</span>
+      <span>기본 <b>시트 구매일자 기준</b> · 한 날 최대 <b id="sCap">760</b>명</span>
+    </div>
+
+    <div class="rows" id="rows"></div>
+
+    <div class="endline">
+      <span>예상 종료일: <b id="endTxt">8/29 (토)</b> <span class="chg" id="endChg"></span></span>
+      <button class="btn sm" type="button" id="resetBtn">조절 전으로 되돌리기</button>
+    </div>
+
+    <div class="note">
+      줄이면 그만큼이 <b>이월</b>되고, 위에서 고른 방식대로 [자동 맞춤]이 되돌립니다.
+      <b>총량(800건)은 어떤 조절로도 변하지 않습니다</b> — 총량을 늘리려면 [＋ 차수 추가]를 쓰세요.
+      배분 합계가 남은 모집수와 <b>정확히 같을 때만</b> 저장됩니다.
+    </div>
+  </div>
+
+  <div class="mfoot">
+    <span class="hint" id="footHint">조절은 [확정 저장]을 눌러야 반영됩니다</span>
+    <button class="btn" type="button">닫기</button>
+    <button class="btn pri" type="button" id="saveBtn">확정 저장</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── 가짜 데이터(실제 화면 값 재현) ───────────────────── */
+  var TOTAL        = 800;   // 총량 = 시트 행 수
+  var DONE_BEFORE  = 40;    // 어제까지 확정
+  var TODAY_USED   = 5;     // 오늘 이미 확정·진행 중(오늘 행의 최소값)
+  var DEFAULT_DAILY= 40;    // 그날 기본(시트 구매일자 행 수)
+  var START        = '2026-08-08';
+  var REST         = { '2026-08-15': 1, '2026-08-16': 1, '2026-08-17': 1 };  // 시트에 날짜가 없는 날
+
+  // 오늘 행부터 종료일까지 합계가 되어야 하는 값(= 총량 − 어제까지 확정)
+  var TARGET = TOTAL - DONE_BEFORE;          // 760
+  var DONE   = DONE_BEFORE + TODAY_USED;     // 45 (요구 ②: 현재 모집인원)
+
+  var YO = ['일','월','화','수','목','금','토'];
+  function addDays(iso, n) {
+    var t = Date.parse(iso + 'T00:00:00Z') + n * 86400000;
+    return new Date(t).toISOString().slice(0, 10);
+  }
+  function fmt(iso) {
+    var d = new Date(Date.parse(iso + 'T00:00:00Z'));
+    return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + ' (' + YO[d.getUTCDay()] + ')';
+  }
+  function isRest(iso) { return !!REST[iso]; }
+
+  /* 초기 계획: 기본 40명씩, 휴무일은 0 — 합계가 정확히 TARGET(760)이 되는 날까지 */
+  function buildInitial() {
+    var out = [], sum = 0, d = START, guard = 0;
+    while (sum < TARGET && guard++ < 400) {
+      var base = isRest(d) ? 0 : DEFAULT_DAILY;
+      var v = Math.min(base, TARGET - sum);
+      out.push({ date: d, base: base, plan: v });
+      sum += v;
+      d = addDays(d, 1);
+    }
+    return out;
+  }
+
+  var INIT = buildInitial();
+  var rows = INIT.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
+  var mode = 'fix';   // 'fix' = 종료일 고정 / 'keep' = 일일 인원 유지
+  var baseEndTxt = null;
+
+  /* ── 계산 ───────────────────────────────────────────── */
+  function sum() { return rows.reduce(function (s, r) { return s + r.plan; }, 0); }
+  function diff() { return sum() - TARGET; }                 // +초과 / −부족 / 0 일치
+  function endDate() {
+    for (var i = rows.length - 1; i >= 0; i--) if (rows[i].plan > 0) return rows[i].date;
+    return null;
+  }
+  function workDays() { return rows.filter(function (r) { return r.plan > 0; }).length; }
+  function minFor(i) { return i === 0 ? TODAY_USED : 0; }    // 오늘은 확정·진행분 아래로 못 내림
+  function maxFor() { return TARGET; }                       // 요구 ①: 남은 모집수를 넘길 수 없다
+  function scale() {
+    var mx = 100;
+    rows.forEach(function (r) { if (r.plan > mx) mx = r.plan; });
+    return mx;
+  }
+
+  /* ── 그리기 ─────────────────────────────────────────── */
+  var elRows = document.getElementById('rows');
+  var toastEl = document.getElementById('toast'), toastTimer = null;
+  function toast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { toastEl.classList.remove('on'); }, 2300);
+  }
+
+  function render() {
+    var sc = scale();
+    elRows.innerHTML = rows.map(function (r, i) {
+      var adjusted = r.plan !== (INIT[i] ? INIT[i].plan : null) || !INIT[i];
+      var pw = Math.min(100, r.plan / sc * 100);
+      var bw = Math.min(100, r.base / sc * 100);
+      var tags = (i === 0 ? '<span class="tag t">오늘</span>' : '')
+               + (isRest(r.date) && r.plan === 0 ? '<span class="tag rs">휴무</span>' : '')
+               + (adjusted ? '<span class="tag a">조절</span>' : '');
+      return '<div class="r' + (i === 0 ? ' today' : '') + (r.plan === 0 ? ' rest' : '') + '" data-i="' + i + '">'
+        + '<span class="d">' + fmt(r.date) + tags + '</span>'
+        + '<div class="g" data-i="' + i + '">'
+        +   '<div class="f" style="width:' + pw + '%"></div>'
+        +   '<div class="base" style="left:' + bw + '%"></div>'
+        +   '<div class="k" style="left:' + pw + '%"></div>'
+        + '</div>'
+        + '<div class="ctl">'
+        +   '<button type="button" data-i="' + i + '" data-s="-1"' + (r.plan <= minFor(i) ? ' disabled' : '') + '>−</button>'
+        +   '<span class="n"><input type="text" inputmode="numeric" data-i="' + i + '" value="' + r.plan + '">'
+        +     '<small>기본 ' + r.base + '</small></span>'
+        +   '<button type="button" data-i="' + i + '" data-s="1"' + (r.plan >= maxFor() ? ' disabled' : '') + '>＋</button>'
+        + '</div></div>';
+    }).join('');
+    paintTop();
+  }
+
+  function paintTop() {
+    var d = diff(), s = sum(), e = endDate();
+    var endTxt = e ? fmt(e) : '계산 불가';
+    if (baseEndTxt === null) baseEndTxt = endTxt;
+
+    /* ① 진행 현황(요구 ②·③) */
+    document.getElementById('sDone').textContent = DONE;
+    document.getElementById('sTotal').textContent = TOTAL;
+    document.getElementById('sRemain').textContent = TOTAL - DONE;
+    document.getElementById('sBar').style.width = (DONE / TOTAL * 100).toFixed(1) + '%';
+    document.getElementById('sEnd').textContent = endTxt;
+    document.getElementById('sDays').textContent = workDays();
+    document.getElementById('sCap').textContent = TARGET;
+    document.getElementById('endTxt').textContent = endTxt;
+    document.getElementById('endChg').textContent = (endTxt !== baseEndTxt) ? '(원래 ' + baseEndTxt + ' → 변경됨)' : '';
+
+    /* ③ 배분 균형(요구 ⑥) */
+    var bal = document.getElementById('bal');
+    var ico = document.getElementById('balIco');
+    var l1 = document.getElementById('balL1'), l2 = document.getElementById('balL2');
+    var auto = document.getElementById('autoBtn');
+    var save = document.getElementById('saveBtn');
+    var hint = document.getElementById('footHint');
+
+    bal.classList.remove('ok', 'over', 'under');
+    if (d === 0) {
+      bal.classList.add('ok'); ico.textContent = '✓';
+      l1.innerHTML = '배분 합계 <span class="num">' + s + '</span> / 배분해야 할 <span class="num">' + TARGET + '</span>명 — 딱 맞습니다';
+      l2.textContent = '이대로 [확정 저장]을 누르면 반영됩니다.';
+      auto.style.display = 'none';
+      save.disabled = false;
+      hint.textContent = '총량과 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다';
+    } else if (d > 0) {
+      bal.classList.add('over'); ico.textContent = '▲';
+      l1.innerHTML = '<span class="num">+' + d + '</span>명 초과 — <b>' + d + '명을 줄여주세요</b>';
+      l2.innerHTML = '배분 합계 <span class="num">' + s + '</span>명이 배분해야 할 <span class="num">' + TARGET + '</span>명보다 많습니다. 총량(' + TOTAL + '건)을 넘길 수 없어 저장되지 않습니다.';
+      auto.style.display = ''; auto.textContent = '자동으로 ' + d + '명 줄이기';
+      save.disabled = true;
+      hint.textContent = '초과 ' + d + '명 — 줄여야 저장할 수 있습니다';
+    } else {
+      bal.classList.add('under'); ico.textContent = '▼';
+      l1.innerHTML = '<span class="num">' + d + '</span>명 부족 — <b>' + (-d) + '명을 더 배분해주세요</b>';
+      l2.innerHTML = '배분 합계 <span class="num">' + s + '</span>명이 배분해야 할 <span class="num">' + TARGET + '</span>명보다 적습니다. 남은 물량이 어디에도 열리지 않아 저장되지 않습니다.';
+      auto.style.display = ''; auto.textContent = '자동으로 ' + (-d) + '명 채우기';
+      save.disabled = true;
+      hint.textContent = '부족 ' + (-d) + '명 — 채워야 저장할 수 있습니다';
+    }
+    paintCarryPreview();
+  }
+
+  /* ② 이월 처리 방식 미리보기(요구 ④) */
+  function paintCarryPreview() {
+    var d = diff(), e = endDate(), el = document.getElementById('carryPrev');
+    if (mode === 'fix') {
+      if (d === 0) {
+        el.innerHTML = '종료일 <b>' + (e ? fmt(e) : '-') + '</b>을 지키고, 빠진 인원을 남은 진행일에 나눠 담습니다.';
+      } else {
+        var days = spreadTargets().length;
+        var per = Math.ceil(Math.abs(d) / Math.max(1, days));
+        el.innerHTML = '지금 [자동 맞춤]을 누르면 <b>' + (e ? fmt(e) : '-') + ' 종료일을 그대로 두고</b> 남은 '
+          + days + '일' + (d > 0 ? '에서 약 ' + per + '명씩 덜어냅니다.' : '에 약 ' + per + '명씩 나눠 담습니다.');
+      }
+    } else {
+      if (d === 0) {
+        el.innerHTML = '각 날의 인원은 그대로 두고, 빠진 인원만큼 <b>종료일을 뒤로 연장</b>합니다.';
+      } else {
+        var sim = simulateKeep();
+        el.innerHTML = '지금 [자동 맞춤]을 누르면 <b>각 날 인원은 그대로 두고</b> 종료일이 <b>'
+          + (e ? fmt(e) : '-') + ' → ' + (sim ? fmt(sim) : '-') + '</b>로 ' + (d > 0 ? '당겨집니다' : '연장됩니다') + '.';
+      }
+    }
+  }
+
+  /* ── 자동 맞춤 ──────────────────────────────────────── */
+  // 종료일 고정: 지금 열려 있는 날(휴무 제외)에 골고루 나눠 담는다 — 마지막 날짜 불변
+  function spreadTargets() {
+    return rows.map(function (r, i) { return { r: r, i: i }; })
+      .filter(function (x) { return !isRest(x.r.date); });
+  }
+  function autoFix() {
+    var need = -diff();                 // +면 채워야 함, −면 줄여야 함
+    var t = spreadTargets();
+    if (!t.length) { toast('나눠 담을 진행일이 없습니다'); return; }
+    var guard = 0;
+    while (need !== 0 && guard++ < 5000) {
+      var moved = false;
+      for (var k = 0; k < t.length && need !== 0; k++) {
+        var x = t[k], step = need > 0 ? 1 : -1;
+        var nv = x.r.plan + step;
+        if (nv < minFor(x.i) || nv > maxFor()) continue;
+        x.r.plan = nv; need -= step; moved = true;
+      }
+      if (!moved) break;
+    }
+    if (need !== 0) toast('여기까지가 한계입니다 — ' + Math.abs(need) + '명은 날짜를 직접 조절해주세요');
+    render();
+  }
+  // 일일 인원 유지: 각 날 인원은 그대로, 뒤에 날짜를 붙이거나 떼어 종료일을 옮긴다
+  function simulateKeep() {
+    var copy = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
+    applyKeep(copy);
+    for (var i = copy.length - 1; i >= 0; i--) if (copy[i].plan > 0) return copy[i].date;
+    return null;
+  }
+  function applyKeep(arr) {
+    var s = arr.reduce(function (a, r) { return a + r.plan; }, 0);
+    var guard = 0;
+    while (s > TARGET && guard++ < 900) {          // 초과 → 뒤에서부터 덜어낸다
+      var last = -1;
+      for (var i = arr.length - 1; i >= 0; i--) if (arr[i].plan > 0) { last = i; break; }
+      if (last < 0) break;
+      var cut = Math.min(arr[last].plan - minFor(last), s - TARGET);
+      if (cut <= 0) { if (last === 0) break; arr.splice(last, 1); continue; }
+      arr[last].plan -= cut; s -= cut;
+      if (arr[last].plan === 0 && last === arr.length - 1) arr.pop();
+    }
+    while (s < TARGET && guard++ < 900) {          // 부족 → 뒤에 진행일을 붙인다
+      var d = addDays(arr.length ? arr[arr.length - 1].date : START, 1);
+      while (isRest(d)) { arr.push({ date: d, base: 0, plan: 0 }); d = addDays(d, 1); }
+      var v = Math.min(DEFAULT_DAILY, TARGET - s);
+      arr.push({ date: d, base: DEFAULT_DAILY, plan: v });
+      s += v;
+    }
+    return arr;
+  }
+  function autoKeep() { rows = applyKeep(rows); render(); }
+
+  /* ── 값 변경 ────────────────────────────────────────── */
+  function setVal(i, v) {
+    var r = rows[i]; if (!r) return;
+    v = Math.round(v);
+    if (v > maxFor()) { v = maxFor(); toast('한 날에 남은 모집수(' + TARGET + '명)보다 많이 넣을 수는 없습니다'); }
+    if (v < minFor(i)) {
+      v = minFor(i);
+      if (i === 0 && TODAY_USED > 0) toast('오늘은 이미 ' + TODAY_USED + '명이 확정·진행 중이라 그 아래로는 줄일 수 없습니다');
+    }
+    r.plan = v;
+  }
+
+  /* 게이지 드래그 */
+  var drag = null;
+  elRows.addEventListener('pointerdown', function (ev) {
+    var g = ev.target.closest('.g'); if (!g) return;
+    drag = { i: Number(g.dataset.i), el: g };
+    try { g.setPointerCapture(ev.pointerId); } catch (e) {}
+    dragTo(ev);
+  });
+  elRows.addEventListener('pointermove', function (ev) { if (drag) dragTo(ev); });
+  window.addEventListener('pointerup', function () { if (drag) { drag = null; render(); } });
+  function dragTo(ev) {
+    var b = drag.el.getBoundingClientRect();
+    var ratio = Math.max(0, Math.min(1, (ev.clientX - b.left) / b.width));
+    setVal(drag.i, ratio * scale());
+    // 드래그 중에는 그 줄만 갱신(전체 재렌더는 잡고 있는 손을 놓치게 한다)
+    var r = rows[drag.i], sc = scale(), pw = Math.min(100, r.plan / sc * 100);
+    drag.el.querySelector('.f').style.width = pw + '%';
+    drag.el.querySelector('.k').style.left = pw + '%';
+    var inp = drag.el.parentElement.querySelector('input');
+    if (inp) inp.value = r.plan;
+    paintTop();
+  }
+
+  /* −/＋ · 직접 입력 */
+  elRows.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.ctl button'); if (!b) return;
+    var i = Number(b.dataset.i);
+    setVal(i, rows[i].plan + Number(b.dataset.s));
+    render();
+  });
+  elRows.addEventListener('change', function (ev) {
+    var inp = ev.target.closest('input'); if (!inp) return;
+    var i = Number(inp.dataset.i);
+    var v = parseInt(String(inp.value).replace(/[^0-9]/g, ''), 10);
+    setVal(i, isNaN(v) ? rows[i].plan : v);
+    render();
+  });
+  elRows.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.target.blur(); }
+  });
+
+  /* 토글 · 버튼 */
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mFix').classList.toggle('on', m === 'fix');
+    document.getElementById('mKeep').classList.toggle('on', m === 'keep');
+    paintTop();
+  }
+  document.getElementById('mFix').addEventListener('click', function () { setMode('fix'); });
+  document.getElementById('mKeep').addEventListener('click', function () { setMode('keep'); });
+  document.getElementById('autoBtn').addEventListener('click', function () {
+    if (mode === 'fix') autoFix(); else autoKeep();
+    toast(mode === 'fix' ? '종료일을 지키고 남은 날에 나눠 담았습니다' : '각 날 인원을 지키고 종료일을 옮겼습니다');
+  });
+  document.getElementById('resetBtn').addEventListener('click', function () {
+    rows = INIT.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
+    render(); toast('조절 전으로 되돌렸습니다');
+  });
+  document.getElementById('saveBtn').addEventListener('click', function () {
+    if (diff() !== 0) return;
+    var e = endDate();
+    toast('저장했습니다 — 배분 ' + sum() + '명 · 종료일 ' + (e ? fmt(e) : '-') + ' (시안이라 실제 저장은 없습니다)');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
