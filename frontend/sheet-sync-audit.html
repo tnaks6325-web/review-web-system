@@ -28,6 +28,8 @@
     .tag.behind { background:#fef3c7; color:#92400e; }
     .tag.ok { background:#d1fae5; color:#065f46; }
     .mono { font-family:monospace; font-size:11px; color:var(--t2); word-break:break-all; }
+    .ns-b { display:inline-block; border-radius:999px; padding:1px 7px; font-size:10px; font-weight:750; white-space:nowrap;
+            background:#e8f0fe; color:#1a56c4; border:1px solid #c7dbff; }
     .reason { color:var(--t2); line-height:1.5; max-width:360px; }
     .num { text-align:right; white-space:nowrap; }
     #summary { font-size:13px; margin:10px 0; }
@@ -253,6 +255,8 @@
   function tabLink(it) {
     const name = esc(it.displayName || it.tabName);
     const u = String(it.tabUrl || '');
+    // 무시트 작업은 열 시트가 없다 — 링크 대신 사유를 말한다(서버가 tabUrl 을 아예 안 준다).
+    if (it.sheetless === true) return '<b>' + name + '</b> <span class="ns-b" title="구글시트를 쓰지 않는 작업입니다 — 표가 곧 원본입니다">무시트</span>';
     if (!/^https:\/\/docs\.google\.com\//.test(u)) return '<b>' + name + '</b>';
     const note = it.resolvedGid
       ? (it.gidSource && GID_SRC[it.gidSource] ? '<span class="mono" title="' + esc(GID_SRC[it.gidSource]) + '">🔗</span>' : '')
