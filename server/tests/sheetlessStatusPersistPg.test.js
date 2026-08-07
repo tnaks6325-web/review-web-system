@@ -106,7 +106,7 @@ async function seed() {
             review_file_url='https://u', review_file_name='cap.jpg',
             review_file_count=2, review_file_at=NOW()
       WHERE sheet_id=$1 AND tab_name=$2 AND row_index=3`, [SHEET, TAB]);
-  await ledger.rebuildLedgers({ sheetId: SHEET, tabName: TAB });
+  const rb = await ledger.rebuildLedgers({ sheetId: SHEET, tabName: TAB });
   ({ rows } = await pool.query(
     `SELECT is_submitted2, review_file_id, review_file_count FROM review_index
       WHERE sheet_id=$1 AND tab_name=$2 AND row_index=3`, [SHEET, TAB]));
@@ -114,6 +114,10 @@ async function seed() {
     rows[0] && rows[0].is_submitted2 !== 'PAID');
   ok('★★ 대표 리뷰 이미지는 보존된다(W3 수정)',
     rows[0] && rows[0].review_file_id === 'FID_KEEP' && rows[0].review_file_count === 2);
+  /* ★ 보고 값도 실제와 맞아야 한다 — 카운터만 0 으로 바꿔도 통과하면
+     "몇 건을 보존했는지"가 거짓말이 되고 조용한 소실을 감지할 수 없다(변이시험 M2). */
+  ok('보존 건수 보고가 실제와 일치(1건 대상 · 1건 복원)',
+    rb && rb.filesSeen === 1 && rb.filesKept === 1);
 
   console.log('\n[2] 작업표 칸에 쓰면 재생성을 통과한다 (왕복)');
   const p = await status.markStatusCell({ sheetId: SHEET, tabName: TAB, rowIndex: 3, kind: 'paid', value: '2026-08-07 15:30' });

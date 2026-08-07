@@ -98,6 +98,13 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
   status.__setPoolForTest({ query: async () => { throw new Error('db down'); } });
   const r3 = await status.markStatusCell({ sheetId: 'wt_a', tabName: 'T', rowIndex: 1, kind: 'paid', value: 'x' });
   ok('★ 무시트 판정 실패는 handled:false (시트 기반 입금 기록이 조용히 사라지지 않게)', r3.handled === false);
+  /* ★ 위 실행은 `isSheetless` 가 스스로 catch 해 false 를 돌려주는 경로만 탄다.
+     모듈 로드 실패 등으로 **바깥 catch** 가 열릴 때도 같아야 하는데, 그 갈래는 실행으로 못 만든다
+     → 코드 모양을 고정한다(변이시험 M7: 여기를 handled:true 로 바꾸면 시트 탭 입금 기록이 통째로 소실). */
+  const stSrc = noLineComments(srv('src/services/sheetlessStatus.service.js'));
+  const outer = stSrc.slice(stSrc.indexOf('sheetless = await require'), stSrc.indexOf('if (!sheetless)'));
+  ok('★ 판정 예외 갈래도 handled:false (종전 시트 경로로 보낸다)',
+    /catch \(_\) \{[\s\S]*?return \{ handled: false \};[\s\S]*?\}/.test(outer));
 }
 {
   // 장부 재생성이 실패해도 값은 작업표에 남았다 → 다음 재생성에 자동 반영
