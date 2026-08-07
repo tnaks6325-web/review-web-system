@@ -601,6 +601,30 @@ await ta('★★ 목록 제외는 **데이터를 지우지 않는다** — 감�
   assert.strictEqual(Object.keys(JSON.parse(saved[1])).length, 0, '되돌리기가 안 된다');
   svc.__setPoolForTest(null);
 });
+await ta('★★ 제외한 작업은 목록에서 빠지고 **건수가 실제로 집계**된다 + includeIgnored 로 복원 열람', async () => {
+  // ★ 문자열 존재만 보면 "세는 코드를 지워도" 통과한다(변이시험이 잡은 약한 단언) → 실행으로 확인.
+  const ignoreJson = JSON.stringify({ 'S1\told-ok': '2026-08-07T00:00:00Z' });
+  svc.__setPoolForTest({
+    query: async (sql) => {
+      const q = String(sql);
+      if (/SELECT value FROM app_settings/.test(q)) return { rows: [{ value: ignoreJson }] };
+      if (/FROM tab_configs tc/.test(q) && /registeredAt/.test(q)) return { rows: [
+        mkRow({ tabName: 'old-ok' }), mkRow({ tabName: 'keep-me' }),
+      ] };
+      return { rows: [] };
+    },
+  });
+  const off = await svc.auditSheetSync({});
+  assert.ok(!off.items.some(i => i.tabName === 'old-ok'), '제외한 작업이 목록에 남았다');
+  assert.strictEqual(off.ignoredCount, 1, '제외 건수가 집계되지 않았다 — 조용히 사라진다');
+  assert.ok(off.items.some(i => i.tabName === 'keep-me'), '제외하지 않은 작업까지 빠졌다');
+
+  const on = await svc.auditSheetSync({ includeIgnored: true });
+  const back = on.items.find(i => i.tabName === 'old-ok');
+  assert.ok(back, '[제외된 작업 보기]로도 안 보인다 — 되돌릴 방법이 없다');
+  assert.strictEqual(back.ignored, true, '제외 표시가 행에 없다(복원 버튼을 못 그린다)');
+  svc.__setPoolForTest(null);
+});
 t('★ 제외는 운영 데이터를 건드리지 않는다(삭제 SQL 0) + 건수 고지 + 복원 버튼', () => {
   const src = R('src/services/sheetSyncAudit.service.js');
   const i = src.indexOf('async function setIgnored(');
