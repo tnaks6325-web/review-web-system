@@ -110,6 +110,15 @@ function planOverrideFor(plans, dateStr) {
   if (!PLAN_ENABLED || !plans || !dateStr || plans[dateStr] == null) return null;
   return Math.max(0, Number(plans[dateStr]) || 0);
 }
+// ── 이월 보류(098) ──
+// carry_mode='hold' 공고는 자동 이월 가산을 멈추고(기본 일건수 + 날짜별 계획만),
+// 미달분은 "보류 잔량"으로 표시되어 관리자가 골라 반영한다(반영 = 날짜별 계획에 얹기).
+// 킬스위치 CAMPAIGN_CARRY_HOLD=0 = 전건 자동(현행)으로 즉시 복귀.
+const CARRY_HOLD_ENABLED = process.env.CAMPAIGN_CARRY_HOLD !== '0';
+/** 이 공고가 이월 보류인가 — dailyQuota 게이트·잔량 계산·카드 칩이 같은 판정을 쓴다(사본 금지). */
+function isCarryHold(c) {
+  return CARRY_HOLD_ENABLED && String((c && c.carry_mode) || 'auto') === 'hold';
+}
 // ★ 상한 — 이월이 아무리 쌓여도 하루 한도의 이 배수를 넘지 않는다.
 //   상한이 없으면 오래 미달한 캠페인이 어느 날 갑자기 수십 건을 한꺼번에 열어
 //   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
@@ -151,7 +160,9 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
     q = ov;
   } else {
     q = dl;
-    if (CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
+    // ★ 098: 보류 공고는 자동 이월을 얹지 않는다 — 미달분은 보류 잔량(heldCarry)으로 쌓이고
+    //   관리자가 날짜별 계획으로 골라 반영한다. 총량 clamp 는 그대로라 물량 소실은 없다.
+    if (!isCarryHold(c) && CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
       const sd = dateOnlyStr(c.start_date);
       const anchor = (sd && sd > carry.startDate) ? sd : carry.startDate;   // 늦게 시작한 캠페인은 자기 시작일부터
       const days = _dayDiff(anchor, carry.today) + 1;                        // 오늘 포함 경과일수
@@ -325,9 +336,11 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
   const out = new Map();
   const ids = (campaignIds || []).filter(Boolean);
   const carryStart = await _carryStartDate(pool);   // 이월 기준선(066) — 실패 시 null=이월 미적용
+  const holdStart = await _holdStartDate(pool);     // 보류 잔량 기준선(098) — 실패 시 null=잔량 계산 불가
   const blank = () => ({
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
     carry: carryStart ? { startDate: carryStart, submittedSince: 0 } : null,
+    hold: holdStart ? { startDate: holdStart, submittedSince: 0 } : null,
     plans: null,
   });
   for (const id of ids) out.set(id, blank());
@@ -337,6 +350,7 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
   //   ★ 캠페인은 자기 시작일 전에 확정이 있을 수 없으므로, 전역 기준선 하나로 세도
   //     max(시작일, 기준선) 기준으로 센 것과 같은 값이 나온다(쿼리 1개 유지).
   const carryFromUtc = carryStart ? new Date(Date.parse(carryStart + 'T00:00:00+09:00')).toISOString() : dayStart;
+  const holdFromUtc = holdStart ? new Date(Date.parse(holdStart + 'T00:00:00+09:00')).toISOString() : dayStart;
   const { rows } = await pool.query(
     `SELECT campaign_id,
             COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW())                              AS active_holds,
@@ -344,11 +358,12 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
             COUNT(*) FILTER (WHERE status='submitted')                                                     AS submitted_all,
             COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $2)                              AS today_submitted,
             COUNT(*) FILTER (WHERE status='submitted' AND (submitted_at < $2 OR submitted_at IS NULL))     AS submitted_before_today,
-            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $3 AND submitted_at < $2)        AS submitted_since_carry
+            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $3 AND submitted_at < $2)        AS submitted_since_carry,
+            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $4 AND submitted_at < $2)        AS submitted_since_hold
        FROM campaign_applications
       WHERE campaign_id = ANY($1)
       GROUP BY campaign_id`,
-    [ids, dayStart, carryFromUtc]
+    [ids, dayStart, carryFromUtc, holdFromUtc]
   );
   for (const r of rows) {
     out.set(r.campaign_id, {
@@ -359,6 +374,9 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       submittedBeforeToday: Number(r.submitted_before_today) || 0,
       carry: carryStart
         ? { startDate: carryStart, submittedSince: Number(r.submitted_since_carry) || 0 }
+        : null,
+      hold: holdStart
+        ? { startDate: holdStart, submittedSince: Number(r.submitted_since_hold) || 0 }
         : null,
       plans: null,
     });
@@ -374,6 +392,32 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
     }
   }
   return out;
+}
+
+/**
+ * 보류 잔량(098) — 누적 미달(보류 기준선 이후 ~ 어제) − 이미 반영한 합(appliedSum, 이력 원장).
+ * 재료는 dailyQuota 와 같은 counts(hold 창·plans) — 계산이 갈리면 "칩은 5인데 반영하니 3"이 된다.
+ * ★ null = "계산 불가"(보류 아님·기준선 모름·일건수 0) — 화면은 0으로 꾸미지 않고 칩을 숨기거나
+ *   "조회 실패"를 말한다. 잔량은 표시·반영 참고값일 뿐, 정원 자체는 dailyQuota(계획표)가 정한다.
+ */
+function heldCarry(c, counts, todayStr, appliedSum = 0) {
+  if (!isCarryHold(c)) return null;
+  const dl = Number(c.daily_limit) || 0;
+  const hold = counts && counts.hold;
+  if (!hold || !hold.startDate || !todayStr || dl <= 0) return null;
+  const sd = dateOnlyStr(c.start_date);
+  const anchor = (sd && sd > hold.startDate) ? sd : hold.startDate;
+  const daysBefore = _dayDiff(anchor, todayStr);   // 오늘 제외 경과일수(소급 없음 — 098 기준선)
+  if (daysBefore <= 0) return 0;
+  // 어제까지의 계획 누적 = 기본 일건수 × 일수 + 조절 증감분(095 계획표 — dailyQuota 와 같은 재료)
+  let planned = dl * daysBefore;
+  const plans = (PLAN_ENABLED && counts.plans) || null;
+  if (plans) {
+    for (const d of Object.keys(plans)) {
+      if (d >= anchor && d < todayStr) planned += Math.max(0, Number(plans[d]) || 0) - dl;
+    }
+  }
+  return Math.max(0, planned - (Number(hold.submittedSince) || 0) - Math.max(0, Number(appliedSum) || 0));
 }
 
 /**
@@ -422,21 +466,37 @@ function __resetPlanCacheForTest() { _planTableMissingAt = 0; }
  * ★ 조회 실패·미설정은 **null = 이월 미적용**(종전 동작). 알 수 없을 때 이월을 켜면
  *   기준을 모르는 채로 한도를 늘리게 되므로, 모르면 안 늘리는 쪽이 안전하다.
  */
-let _carryCache = { at: 0, val: null };
+let _blCache = { at: 0, carry: null, hold: null };
 const CARRY_CACHE_MS = 5 * 60 * 1000;
-async function _carryStartDate(pool) {
-  if (!CARRY_ENABLED || !pool || typeof pool.query !== 'function') return null;
-  if (Date.now() - _carryCache.at < CARRY_CACHE_MS) return _carryCache.val;
+/** 기준선 2종(이월 066 · 보류 잔량 098)을 **한 쿼리**로 읽는다 — 따로 읽으면 fetchCampaignCounts 의
+ *  쿼리 순서가 밀려 "카운트 쿼리는 두 번째"라는 기존 회귀가드 계약(066)이 깨진다. */
+async function _baselines(pool) {
+  if (!pool || typeof pool.query !== 'function') return { carry: null, hold: null };
+  if (Date.now() - _blCache.at < CARRY_CACHE_MS) return _blCache;
+  const next = { at: Date.now(), carry: null, hold: null };
   try {
-    const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = 'campaign_carry_start' LIMIT 1`);
-    const v = rows[0] && /^(\d{4}-\d{2}-\d{2})/.exec(String(rows[0].value || ''));
-    _carryCache = { at: Date.now(), val: v ? v[1] : null };
-  } catch (_) {
-    _carryCache = { at: Date.now(), val: null };
-  }
-  return _carryCache.val;
+    const { rows } = await pool.query(
+      `SELECT key, value FROM app_settings WHERE key IN ('campaign_carry_start', 'campaign_carry_hold_start')`);
+    for (const r of rows) {
+      const v = /^(\d{4}-\d{2}-\d{2})/.exec(String(r.value || ''));
+      if (!v) continue;
+      if (r.key === 'campaign_carry_start') next.carry = v[1];
+      else if (r.key === 'campaign_carry_hold_start') next.hold = v[1];
+    }
+  } catch (_) { /* 실패 = 둘 다 null(이월 미적용·잔량 계산 불가 — 모르면 안 늘리고 안 지어낸다) */ }
+  _blCache = next;
+  return _blCache;
 }
-function __resetCarryCacheForTest() { _carryCache = { at: 0, val: null }; }
+async function _carryStartDate(pool) {
+  if (!CARRY_ENABLED) return null;
+  return (await _baselines(pool)).carry;
+}
+async function _holdStartDate(pool) {
+  if (!CARRY_HOLD_ENABLED) return null;
+  return (await _baselines(pool)).hold;
+}
+function __resetCarryCacheForTest() { _blCache = { at: 0, carry: null, hold: null }; }
+function __resetHoldCacheForTest() { _blCache = { at: 0, carry: null, hold: null }; }
 
 // ═══════════════════════════════════════════════════════════
 // 상품옵션(campaign_options) — 옵션별 자리 계산 (061, PRD v1.1 §07)
@@ -549,6 +609,9 @@ module.exports = {
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
   CARRY_CAP_MULT,
+  isCarryHold,
+  heldCarry,
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
+  __resetHoldCacheForTest,
 };

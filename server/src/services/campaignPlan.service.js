@@ -16,7 +16,7 @@
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { kstTodayStr, dateOnlyStr } = require('./campaignState.service');
+const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, fetchCampaignCounts } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
@@ -94,6 +94,22 @@ async function getPlanOverview(campaignId) {
 
   const byDateSubmitted = {};
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
+  // 이월 보류(098): 모드 + 잔량. ★ 잔량 계산 실패는 null — 화면이 "조회 실패"를 말한다(0 위장 금지).
+  let carryHeld = null, carryAppliedSum = 0;
+  if (isCarryHold(camp)) {
+    try {
+      const counts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
+      const sums = await fetchCarryAppliedSums(pool, [camp.id]);
+      if (sums !== null) {   // null = 반영 합계 모름 → 잔량도 모름(부풀린 숫자 금지 — 코드리뷰 M3)
+        carryAppliedSum = sums.get(camp.id) || 0;
+        carryHeld = heldCarry(camp, counts, today, carryAppliedSum);
+      }
+    } catch (e) {
+      logger.warn('[campaignPlan] 보류 잔량 계산 실패(fail-soft): ' + e.message);
+      carryHeld = null;
+    }
+  }
+
   const rounds = roundsQ.rows.map(r => ({
     roundNo: r.round_no, count: Number(r.slot_count) || 0, startDate: r.start_date,
     label: r.label || '', createdBy: r.created_by || '', createdAt: r.created_at,
@@ -109,6 +125,10 @@ async function getPlanOverview(campaignId) {
     startDate: dateOnlyStr(camp.start_date),
     today,
     planEnabled: process.env.CAMPAIGN_DAILY_PLAN !== '0',
+    // 이월 보류(098) — carryHeld: null=계산 불가(조회 실패·기준선 없음), 숫자=잔여 보류 인원
+    carryMode: isCarryHold(camp) ? 'hold' : 'auto',
+    carryHeld,
+    carryAppliedSum,
     // 시트 일정 캠페인 = 읽기 전용(확정 ③). 'unknown' = 판정 실패(조절 잠금 + 사유 표시).
     scheduleDriven: schedule === 'unknown' ? null : !!schedule,
     scheduleDates: (schedule && schedule !== 'unknown')
@@ -172,6 +192,17 @@ async function savePlans(campaignId, body, actor) {
   });
   const note = String(b.note || '').slice(0, 500);
 
+  // 이월 반영(098): 반영량을 이력 원장에 남겨 보류 잔량에서 차감한다 — 반영 자체는 위 set(계획
+  // 얹기)이 수행하고, 이 값은 회계용. ★ 보류 공고에서만 의미(자동 공고에 기록하면 잔량 개념이 없다).
+  let carryApply = 0;
+  if (b.carryApply !== undefined && b.carryApply !== null) {
+    carryApply = Number(b.carryApply);
+    if (!Number.isInteger(carryApply) || carryApply <= 0 || carryApply > 100000) {
+      const e = new Error('이월 반영량이 올바르지 않습니다.'); e.code = 'bad_carry'; throw e;
+    }
+    if (!isCarryHold(camp)) { const e = new Error('이월 보류 공고가 아닙니다 — 반영할 보류분이 없습니다.'); e.code = 'carry_not_hold'; throw e; }
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -196,6 +227,33 @@ async function savePlans(campaignId, body, actor) {
       }
     }
 
+    // ★★ 이월 반영 잔량 재검증(코드리뷰 M2 — 캠페인 행 잠금 **안**에서): 두 관리자가 동시에
+    //   원클릭을 누르면 둘 다 낡은 잔량 H 를 들고 오는데, 첫 커밋이 carry_apply 를 남기므로
+    //   두 번째는 여기서 잔량 0 을 다시 계산해 carry_stale 로 거부된다(이중 반영·원장 과차감 차단).
+    //   ★ 잔량을 모르면(조회 실패) 반영을 거부한다(fail-closed — 모르는 채 원장에 기록하지 않는다).
+    //   SAVEPOINT 격리(082 규율) — 재계산 쿼리 실패가 tx 전체를 abort 시키지 않게.
+    if (carryApply > 0) {
+      let held = null, sp = false;
+      try { await client.query('SAVEPOINT cap_check'); sp = true; } catch (_) {}
+      try {
+        const counts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId);
+        const sums = await fetchCarryAppliedSums(client, [campaignId]);
+        if (sums !== null) held = heldCarry(camp, counts, today, sums.get(campaignId) || 0);
+        if (sp) await client.query('RELEASE SAVEPOINT cap_check');
+      } catch (_) {
+        if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT cap_check'); } catch (_) {} }
+        held = null;
+      }
+      if (held === null) {
+        const e = new Error('보류 잔량을 확인하지 못해 반영할 수 없습니다 — 잠시 후 다시 시도해주세요.');
+        e.code = 'carry_unknown'; throw e;
+      }
+      if (carryApply > held) {
+        const e = new Error(`남은 보류 이월(${held}명)보다 많이 반영할 수 없습니다 — 다른 관리자가 방금 반영했을 수 있어요. 화면을 새로고침해주세요.`);
+        e.code = 'carry_stale'; e.held = held; throw e;
+      }
+    }
+
     for (const x of set) {
       await client.query(
         `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
@@ -212,6 +270,11 @@ async function savePlans(campaignId, body, actor) {
     await client.query(
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'plan_save', $3)`,
       [campaignId, actor || null, JSON.stringify({ set, remove, note: note || undefined })]);
+    if (carryApply > 0) {
+      await client.query(
+        `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'carry_apply', $3)`,
+        [campaignId, actor || null, JSON.stringify({ amount: carryApply, note: note || undefined })]);
+    }
     await client.query('COMMIT');
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
     return { applied: set.length + remove.length };
@@ -379,11 +442,41 @@ async function fetchRoundsSummary(db, campaignIds) {
   return out;
 }
 
+/**
+ * 이월 반영 누적 합(098) 일괄 조회 → Map(campaignId → 반영 합계) | **실패 시 null**.
+ * ★★ 실패를 빈 Map 으로 접으면 호출부의 `|| 0`이 "반영 0"으로 오독해 **이미 반영한 인원까지
+ *   잔량에 다시 잡힌다**(부풀린 칩 → 원클릭 이중 반영 유도 — 코드리뷰 M3). 모르면 null 을 돌려
+ *   호출부가 잔량 자체를 null(계산 불가)로 수렴시킨다 — 숫자를 지어내지 않는다.
+ *   detail.amount 는 우리가 정수로 기록하지만, 손상 행 방어로 숫자 형태만 합산한다.
+ */
+async function fetchCarryAppliedSums(db, campaignIds) {
+  const out = new Map();
+  const ids = (campaignIds || []).filter(Boolean);
+  if (!ids.length) return out;
+  try {
+    const { rows } = await db.query(
+      `SELECT campaign_id, SUM((detail->>'amount')::bigint) AS s
+         FROM campaign_plan_events
+        WHERE action = 'carry_apply' AND campaign_id = ANY($1)
+          AND detail ? 'amount' AND detail->>'amount' ~ '^[0-9]+$'
+        GROUP BY campaign_id`, [ids]);
+    for (const r of rows) out.set(r.campaign_id, Number(r.s) || 0);
+    return out;
+  } catch (e) {
+    if (!(e && e.code === '42P01')) logger.warn('[campaignPlan] 이월 반영 합계 조회 실패(→잔량 계산 불가): ' + e.message);
+    return null;
+  }
+}
+
 module.exports = {
   getPlanOverview,
   savePlans,
   addRound,
   removeLastRound,
   roundsLockRecruitTotal,
+  // ★ 병합 중 유실 복구: 미export 면 campaign.routes 의 경합 자가치유가 TypeError→fail-soft 로
+  //   조용히 무력화된다(회귀가드가 export 존재를 고정).
+  repairRecruitTotalFromRounds,
   fetchRoundsSummary,
+  fetchCarryAppliedSums,
 };
