@@ -526,6 +526,21 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('★ 판정은 점검표 ①과 같은 함수(readPreparedRows) — 사본 0', seen.length === 2);
   }
   {
+    /* ★★ 판정 불가 갈래가 둘이다 — **gid 없음**(위 케이스)과 **읽기 실패**({ok:false}).
+     *    한쪽만 검사하면 나머지를 `okCount++` 로 접어도 통과한다(변이시험 N2 실측). */
+    const tabs = [{ sheetId: 'S1', tabName: 'A', tabGid: '1', displayName: 'A', sheetless: false,
+      boardRows: 5, mirroredAt: new Date().toISOString() }];
+    const db = { query: async (sql) => (/FROM tab_configs tc/.test(String(sql)) ? { rows: tabs } : { rows: [] }) };
+    cutover.__setPoolForTest(db);
+    const slot = require('../src/services/sheetSlotSync.service');
+    const _rp = slot.readPreparedRows;
+    slot.readPreparedRows = async () => ({ ok: false, reason: 'no_mirror', prepared: [] });
+    const r = await cutover.sweepPreparedRows({ includeUnknown: true });
+    slot.readPreparedRows = _rp; cutover.__setPoolForTest(null);
+    ok('★★ 시트 사본을 못 읽은 작업도 "이상 없음"으로 접지 않는다',
+      r.okCount === 0 && r.unknown.length === 1 && r.unknown[0].reason === 'no_mirror' && r.short.length === 0);
+  }
+  {
     const src = noLineComments(read('src/services/sheetlessCutover.service.js'));
     const body = src.slice(src.indexOf('async function sweepPreparedRows'), src.indexOf('async function enableSheetless'));
     ok('★ 일괄 점검은 시트 API 를 부르지 않는다(RAW 미러만)',
@@ -545,8 +560,14 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('헤더에 [준비 자리 일괄 점검] 버튼', /onclick="_coSweep\(\)"/.test(wd));
     ok('★ 없으면 "없다"고 분명히 말한다(빈 화면 금지)', /시트가 더 많은 작업은 없습니다/.test(wd));
     ok('★ 판정 불가 건수를 화면이 고지한다', /판정 불가 \$\{unk\.length\}건|판정 불가 \$\{unk/.test(wd) || /판정 불가/.test(wd));
-    ok('★★ 실패해도 화면을 종결시킨다(자리표시자에 매달리지 않는다)',
-      /_coSweep[\s\S]{0,1400}일괄 점검 실패[\s\S]{0,200}다시 시도/.test(wd));
+    // ★★ 실패 경로가 둘이다 — **네트워크 예외(catch)** 와 **응답 실패({ok:false})**.
+    //    한쪽만 검사하면 다른 쪽을 지워도 통과한다(변이시험 N8 실측) → **둘 다** 센다.
+    const sweepFn = wd.slice(wd.indexOf('async function _coSweep'), wd.indexOf('function _coSweepReason'));
+    ok('★★ 실패 두 경로 모두 사유 + [다시 시도]로 화면을 종결시킨다',
+      (sweepFn.match(/일괄 점검 실패/g) || []).length === 2
+      && (sweepFn.match(/onclick="_coSweep\(\)"/g) || []).length === 2
+      && /catch\(e\)\{[\s\S]{0,200}일괄 점검 실패/.test(sweepFn)
+      && /j\.ok===false[\s\S]{0,200}다시 시도/.test(sweepFn));
     ok('★ 부족한 작업엔 그 자리에서 조치 버튼', /_coSweep[\s\S]{0,2000}반영 점검에서 채우기/.test(wd));
   }
 
