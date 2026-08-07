@@ -539,12 +539,62 @@ t('★★ 미러 읽기 옵션을 바꾸지 않는다(주문 행배정·가드�
   const led = R('src/services/orderLedger.service.js');
   assert.ok(/FORMATTED_VALUE/.test(led), '주문원장 라이브 폴백이 미러와 다른 옵션을 쓴다(비교가 깨진다)');
 });
+t('★★ [실측 신고] 구매일 연도를 못 읽으면 등록일로 폴백 — 그 탭이 연도 확인 대상이어야 한다', () => {
+  const a2 = require('../src/utils/tabActivity');
+  const row = { sampleStartDate: '7 / 12 (금)', registeredAt: '2026-03-01' };   // 표기에 연도 없음
+  const act = a2.resolveActivity(row);
+  assert.strictEqual(act.activitySource, 'registered', '폴백 경로가 바뀌었다');
+  assert.strictEqual(act.yearUnknown, false, 'yearUnknown 이면 종전 대상 필터로도 잡혔을 것');
+  // ★ 핵심: yearUnknown 이 아니어도 **구매일 미확정**이라 확인 대상이어야 한다
+  assert.strictEqual(a2.purchaseUnconfirmed(row), true,
+    '구매일 미확정을 못 세면 2024·2025 작업이 등록일로 살아남고 교정도 안 된다');
+  assert.strictEqual(a2.purchaseUnconfirmed({ probedAt: '2024-07-12' }), false);
+  assert.strictEqual(a2.purchaseUnconfirmed({ sampleStartDate: '26.8.24(월)' }), false);
+});
+t('★★ 연도 확인 대상은 purchaseUnconfirmed 기준(yearUnknown 아님)', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function probeUnknownYears(');
+  const body = src.slice(i, src.indexOf('\n}\n', i));
+  assert.ok(/purchaseUnconfirmed/.test(body),
+    '대상 필터가 yearUnknown 기준이면 등록일로 폴백한 과거 작업이 영영 교정되지 않는다');
+  assert.ok(!/resolveActivity\(r\)\.yearUnknown/.test(body), '옛 대상 필터가 남아 있다');
+});
+await ta('★★ 확인 결과가 2024면 등록일(2026)을 이기고 목록에서 빠진다', async () => {
+  const probeJson = JSON.stringify({ 'S1\told-ok': '2024-07-12' });
+  svc.__setPoolForTest({
+    query: async (sql) => {
+      const q = String(sql);
+      if (/SELECT value FROM app_settings/.test(q)) return { rows: [{ value: probeJson }] };
+      if (/FROM tab_configs tc/.test(q) && /registeredAt/.test(q)) return { rows: [
+        mkRow({ tabName: 'old-ok', registeredAt: '2026-03-01', sampleStartDate: '7 / 12 (금)' }),
+        mkRow({ tabName: 'keep-me', registeredAt: '2026-03-01', sampleStartDate: '7 / 12 (금)' }),
+      ] };
+      return { rows: [] };
+    },
+  });
+  const out = await svc.auditSheetSync({});
+  assert.ok(!out.items.some(i => i.tabName === 'old-ok'), '확인된 구매일 2024 인데 목록에 남았다');
+  assert.strictEqual(out.filteredOld, 1);
+  // 아직 못 읽은 탭은 건수로 드러난다(그 상태에선 등록일로 임시 판정 중)
+  assert.strictEqual(out.purchaseUnconfirmed, 1, '구매일 미확정 건수를 고지하지 않는다');
+  svc.__setPoolForTest(null);
+});
+t("★ 'none'(글자로 친 날짜)은 신호로 쓰지 않는다 + 재조회를 막는다", () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  assert.ok(/probed !== 'none'/.test(src), "'none' 을 날짜처럼 썼다");
+  assert.ok(/= 'none';/.test(src), '확인 불가 탭을 기록하지 않아 매번 다시 읽는다(쿼터 낭비)');
+});
+t('★ 프론트가 구매일 미확정을 항상 드러내고 판정 근거를 행에 표시', () => {
+  assert.ok(/meta\.purchaseUnconfirmed/.test(HTML), '구매일 미확정 건수를 화면이 말하지 않는다');
+  assert.ok(/과거 작업이 섞여 보일 수 있습니다/.test(HTML), '무엇이 문제인지 설명하지 않는다');
+  assert.ok(/ACT_SRC/.test(HTML) && /등록일\(임시\)/.test(HTML), '판정 근거를 행에 안 보여준다');
+});
 t('★ 연도 확인은 미상 탭만 · 캐시된 탭은 다시 읽지 않는다 · 상한 초과는 고지', () => {
   const src = R('src/services/sheetSyncAudit.service.js');
   const i = src.indexOf('async function probeUnknownYears(');
   const body = src.slice(i, src.indexOf('\n}\n', i));
-  assert.ok(/yearUnknown/.test(body), '미상 탭만 고르지 않는다 — 아는 탭까지 시트를 읽는다');
-  assert.ok(/if \(cached\[/.test(body), '이미 확인한 탭을 또 읽는다');
+  assert.ok(/purchaseUnconfirmed/.test(body), '확인 대상을 좁히지 않는다 — 아는 탭까지 시트를 읽는다');
+  assert.ok(/!force && cached\[/.test(body), '이미 확인한 탭을 또 읽는다(force 일 때만 재확인해야 한다)');
   assert.ok(/capped/.test(body), '상한 초과를 고지하지 않는다');
   assert.ok(/tok\.y == null\) continue/.test(body),
     '연도 없는 값(글자로 친 날짜)을 신호로 썼다 — 추측 금지');

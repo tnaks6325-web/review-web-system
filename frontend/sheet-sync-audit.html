@@ -177,6 +177,11 @@
   }
 
   function fmtDate(v) { return v ? String(v).slice(0, 10) : '알 수 없음'; }
+  // 연도 판정의 근거 — '등록일'이면 구매일을 못 읽어 임시로 판정한 것(과거 작업이 섞일 수 있음)
+  const ACT_SRC = {
+    sheet_probe: '구매일(확인)', sheet_date: '구매일', order: '주문제출',
+    campaign: '공고생성', registered: '등록일(임시)',
+  };
   function sevTag(s) {
     if (s === 'broken') return '<span class="tag broken">미반영</span>';
     if (s === 'behind') return '<span class="tag behind">뒤짐</span>';
@@ -195,9 +200,15 @@
       + (meta.filteredOld ? '<span style="color:var(--t2)">' + esc(meta.since || '') + ' 이전 활동 <b>' + meta.filteredOld + '</b>건 숨김</span>' : '')
       + (meta.yearUnknown ? (meta.filteredOld ? ' · ' : '')
           + '<span style="color:var(--warn)">연도 미상 <b>' + meta.yearUnknown + '</b>건</span>'
-          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">보기</button>'
-          + ' <button class="btn ghost" style="padding:3px 9px" id="btnProbe" onclick="yearProbe()"'
-          + ' title="시트 셀에 실제로 들어 있는 날짜값(화면엔 7/12로만 보여도 안에는 2024.7.12)을 읽어 연도를 확정합니다">📅 시트에서 연도 확인</button>' : '')
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">보기</button>' : '')
+      // ★ 구매일 연도를 아직 확인하지 못한 작업 — 이 상태에서는 판정이 '시트 등록일'로 폴백해
+      //   2024·2025 작업이 목록에 남는다. 그래서 미상 여부와 무관하게 **항상** 드러낸다.
+      + (meta.purchaseUnconfirmed ? '<div style="margin-top:5px; color:var(--warn)">'
+          + '⚠ 구매일 연도를 아직 못 읽은 작업 <b>' + meta.purchaseUnconfirmed + '</b>건'
+          + ' — 이 작업들은 시트 등록일로 임시 판정되어 <b>과거 작업이 섞여 보일 수 있습니다.</b>'
+          + ' <button class="btn" style="padding:4px 10px" id="btnProbe" onclick="yearProbe()"'
+          + ' title="시트 셀에 실제로 들어 있는 날짜값(화면엔 7/12로만 보여도 안에는 2024.7.12)을 읽어 구매일 연도를 확정합니다">📅 시트에서 연도 확인</button>'
+          + '</div>' : '')
       + (meta.includeUnknown ? '<span style="color:var(--warn)">연도 미상 작업 포함해서 보는 중</span>'
           + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">숨기기</button>' : '')
       + (meta.ignoredCount ? ((meta.filteredOld || meta.yearUnknown) ? ' · ' : '')
@@ -222,7 +233,10 @@
       + '<div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div>'
       + (it.archivedOnly ? '<div class="mono" style="color:var(--warn)">아카이브 ' + esc(fmtDate(it.archivedAt)) + ' · ' + (it.archivedRows || 0) + '행 보관</div>' : '')
       + '</td>'
-      + '<td>' + (it.regUnknown ? '<span style="color:var(--warn)">알 수 없음</span>' : esc(fmtDate(it.registeredAt))) + '</td>'
+      + '<td>' + (it.regUnknown ? '<span style="color:var(--warn)">알 수 없음</span>' : esc(fmtDate(it.registeredAt)))
+          + (it.activityAt ? '<div class="mono" style="color:' + (it.activitySource === 'registered' ? 'var(--warn)' : 'var(--t2)') + '">'
+              + esc(ACT_SRC[it.activitySource] || it.activitySource) + ' ' + esc(it.activityAt) + '</div>' : '')
+          + '</td>'
       // 시트 작업건수 = 헤더 아래 값이 있는 행(실제 작업). 미러 행 수(상단 정보·헤더 포함)는 참고로만.
       + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">미러 없음</span>'
           : (it.dataRows != null ? '<b>' + it.dataRows + '</b><div class="mono">미러 ' + it.rawRows + '행</div>'
@@ -330,8 +344,8 @@
       (out.failed || []).forEach(f => { why[f.reason] = (why[f.reason] || 0) + 1; });
       const whyTxt = Object.keys(why).map(k => (PROBE_REASON[k] || k) + ' ' + why[k] + '건').join(' · ');
       toast('연도 확인: ' + out.resolved + '개 확정'
-        + (out.failedCount ? ' · ' + out.failedCount + '개 확인 불가' : '')
-        + (out.capped ? ' · 남은 탭은 다시 눌러주세요' : ''));
+        + (out.failedCount ? ' · ' + out.failedCount + '개는 글자로 입력돼 확인 불가' : '')
+        + (out.remaining ? ' · 남은 ' + out.remaining + '건은 버튼을 다시 눌러주세요' : ''));
       if (whyTxt) console.info('[연도 확인] 확인 불가 사유 — ' + whyTxt);
       await runAudit();
     } catch (e) {
