@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 모집공고 수정 · 유입가이드 첨부 이미지 미리보기 + 직접 첨부</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   모집공고 발행·수정 모달의 [유입가이드] 칸에
+   ① 첨부된 이미지를 입력창 높이에 맞춘 썸네일로 보여주고
+   ② 클릭하면 크게 보고
+   ③ 첨부가 없으면 그 자리에서 파일 추가(붙여넣기·드래그·파일선택)
+   하도록 하는 배치·동작 시안.
+
+   외부 리소스 0(오프라인 열람 가능) · color-scheme 고정 · 가짜 데이터로 실제 동작.
+   ?v=A / ?v=B 로 한 안만 단독 열람.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#5d6b7f;--faint:#8b95a6;
+  --line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#15803d;--safe-soft:#e9f7ee;--safe-line:#cfe9d8;
+  --warn:#b45309;--warn-soft:#fdf6ec;--warn-line:#f0e0c4;
+  --bad:#c92a2e;--bad-soft:#fdf0f0;--bad-line:#f3d4d4;
+  --adv:#5f4bbd;--adv-soft:#efecfa;--adv-line:#ddd6f6;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --sh1:0 1px 2px rgba(16,24,40,.05);--sh2:0 2px 10px rgba(16,24,40,.06);--sh3:0 12px 40px rgba(16,24,40,.16);
+}
+*{box-sizing:border-box}
+html{scrollbar-color:var(--line2) transparent}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+::selection{background:#dbe6ff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
+code{font-family:var(--mono);font-size:.88em;background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+
+/* ── 문서 골격 ── */
+.page{max-width:1240px;margin:0 auto;padding:30px 20px 120px}
+h1{font-size:23px;font-weight:800;letter-spacing:-.025em;margin:0 0 8px}
+.lead{color:var(--muted);font-size:13.5px;margin:0 0 8px;max-width:900px}
+.lead b{color:var(--ink)}
+.meta{font-size:12px;color:var(--faint);margin:0 0 10px}
+.vswitch{display:flex;gap:6px;margin:14px 0 0;flex-wrap:wrap}
+.vswitch a{font-size:11.5px;font-weight:700;text-decoration:none;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--line2);color:var(--muted);background:var(--card)}
+.vswitch a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+.sec{margin-top:44px}
+.sec>h2{font-size:16.5px;font-weight:800;letter-spacing:-.02em;margin:0 0 5px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sec>h2 .n{width:22px;height:22px;border-radius:7px;background:var(--adv-soft);color:var(--adv);border:1px solid var(--adv-line);
+  font-size:11px;font-weight:800;display:grid;place-items:center;flex:none}
+.tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line)}
+.tag.rec{color:var(--safe);background:var(--safe-soft);border-color:var(--safe-line)}
+.tag.warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
+.sec>.sub{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:900px}
+.sec>.sub b{color:var(--ink)}
+
+.note{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 17px;font-size:13px;color:var(--muted);box-shadow:var(--sh1)}
+.note+.note{margin-top:10px}
+.note b{color:var(--ink)}
+.note>.nt{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.note ul{margin:7px 0 0;padding-left:19px}.note li{margin-bottom:6px}.note li:last-child{margin-bottom:0}
+.note.cool{background:var(--accent-soft);border-color:var(--accent-line);color:#274a8f}
+.note.cool b,.note.cool .nt{color:#1a3873}
+.note.warm{background:var(--warn-soft);border-color:var(--warn-line);color:#7a4c0d}
+.note.warm b,.note.warm .nt{color:#5f3a06}
+.note.good{background:var(--safe-soft);border-color:var(--safe-line);color:#14622f}
+.note.good b,.note.good .nt{color:#0f4a24}
+.note.bad{background:var(--bad-soft);border-color:var(--bad-line);color:#8f2226}
+.note.bad b,.note.bad .nt{color:#7a1c20}
+
+table.t{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;background:var(--card);
+  border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:var(--sh1)}
+table.t th,table.t td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+table.t thead th{font-size:10.5px;font-weight:800;letter-spacing:.04em;color:var(--muted);background:var(--card2);white-space:nowrap}
+table.t tbody tr:last-child td{border-bottom:0}
+table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
+.ok{color:var(--safe);font-weight:700}.no{color:var(--bad);font-weight:700}.mid{color:var(--warn);font-weight:700}
+
+/* ══════════════════════════════════════════════════════════════════════
+   모달 재현 목업 (모집공고 수정 모달의 [작업내용] 카드 일부)
+   ══════════════════════════════════════════════════════════════════════ */
+.mock{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh2);overflow:hidden;margin-top:14px}
+.mock-hd{display:flex;align-items:center;gap:9px;padding:10px 15px;background:var(--card2);border-bottom:1px solid var(--line);
+  font-size:11.5px;font-weight:800;color:var(--muted);letter-spacing:.03em}
+.mock-hd .dot{width:8px;height:8px;border-radius:50%;background:var(--line2)}
+.mock-bd{padding:18px}
+
+/* 모달 안 카드 (recruit-modal.js .rf-card / .rf-hrow 재현) */
+.rfcard{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card)}
+.rfch{display:flex;align-items:center;gap:8px;padding:9px 13px;background:#f7f9fc;border-bottom:1px solid var(--line)}
+.rfct{font-size:12.5px;font-weight:800;color:var(--ink)}
+.rfcn{font-size:10.5px;color:var(--faint);font-weight:700}
+.rfcb{padding:14px 15px;display:flex;flex-direction:column;gap:13px}
+.rfrow{display:flex;gap:11px;align-items:flex-start}
+.rfhl{width:82px;flex:none;text-align:right;font-size:12px;font-weight:700;color:var(--muted);padding-top:8px}
+.rfrow>.rfv{flex:1;min-width:0}
+.rfin{width:100%;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:12.5px;
+  color:var(--ink);background:#fff;resize:vertical;line-height:1.5}
+.rfin:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.rfhint{font-size:10.5px;color:var(--faint);margin-top:4px}
+
+/* ── 유입가이드 = 입력창 + 이미지 스트립 ── */
+.ig-wrap{display:flex;gap:9px;align-items:stretch}          /* A안: 옆으로 */
+.ig-wrap.stack{flex-direction:column}                        /* B안: 아래로 */
+.ig-ta{flex:1;min-width:0;display:flex;flex-direction:column}
+.ig-ta textarea{height:82px;min-height:82px}
+.ig-strip{flex:none;display:flex;gap:6px;align-items:stretch;height:82px;
+  padding:4px;border:1px dashed var(--line2);border-radius:9px;background:#fbfcfe;
+  max-width:340px;overflow-x:auto;overflow-y:hidden;transition:border-color .15s,background .15s}
+.ig-wrap.stack .ig-strip{max-width:none;width:100%}
+.ig-strip.drag{border-color:var(--accent);background:var(--accent-soft);border-style:solid}
+.ig-strip.err{border-color:var(--bad-line);background:var(--bad-soft)}
+
+.ig-thumb{position:relative;flex:none;width:74px;height:100%;border-radius:7px;overflow:hidden;
+  border:1px solid var(--line);background:#eef1f6;cursor:zoom-in;padding:0}
+.ig-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.ig-thumb .ig-x{position:absolute;top:3px;right:3px;width:17px;height:17px;border:none;border-radius:50%;
+  background:rgba(16,24,40,.62);color:#fff;font-size:10px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+.ig-thumb .ig-x:hover{background:rgba(201,42,46,.9)}
+.ig-thumb .ig-n{position:absolute;left:3px;bottom:3px;font-size:9px;font-weight:800;color:#fff;
+  background:rgba(16,24,40,.55);border-radius:4px;padding:1px 4px;line-height:1.35}
+.ig-thumb.up img{opacity:.35;filter:grayscale(.4)}
+.ig-thumb.up::after{content:"올리는 중";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:9.5px;font-weight:800;color:var(--accent-deep)}
+.ig-thumb.bad{border-color:var(--bad-line)}
+.ig-thumb.bad img{opacity:.3}
+.ig-thumb.bad::after{content:"실패";position:absolute;inset:0;display:grid;place-items:center;font-size:10px;font-weight:800;color:var(--bad)}
+
+.ig-add{flex:none;width:74px;height:100%;border:1px dashed var(--line2);border-radius:7px;background:#fff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+  font-size:10px;font-weight:700;color:var(--muted);padding:0}
+.ig-add:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
+.ig-add .plus{font-size:16px;line-height:1;font-weight:400}
+.ig-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  cursor:pointer;border-radius:7px;text-align:center;padding:0 10px}
+.ig-empty:hover{background:var(--accent-soft)}
+.ig-empty .t1{font-size:11.5px;font-weight:800;color:var(--muted)}
+.ig-empty .t2{font-size:10px;color:var(--faint)}
+.ig-empty:hover .t1{color:var(--accent-deep)}
+.ig-msg{font-size:10.5px;margin-top:4px;font-weight:700}
+.ig-msg.warn{color:var(--warn)}.ig-msg.bad{color:var(--bad)}.ig-msg.ok{color:var(--safe)}
+.ig-hidden{display:none}
+
+/* 라이트박스 — body 직속, 모달 위 */
+.lb{position:fixed;inset:0;z-index:9999;background:rgba(8,12,20,.82);display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:34px}
+.lb.on{display:flex}
+.lb img{max-width:min(1000px,92vw);max-height:76vh;border-radius:10px;box-shadow:var(--sh3);background:#fff}
+.lb-bar{display:flex;align-items:center;gap:12px;color:#e8edf6;font-size:12.5px;font-weight:700}
+.lb-btn{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);
+  color:#fff;font-size:15px;cursor:pointer;display:grid;place-items:center;padding:0}
+.lb-btn:disabled{opacity:.28;cursor:default}
+.lb-btn:not(:disabled):hover{background:rgba(255,255,255,.22)}
+.lb-close{position:absolute;top:18px;right:22px;width:36px;height:36px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:17px;cursor:pointer}
+.lb-name{font-family:var(--mono);font-size:11px;color:#aebbd0;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 상태 실험용 버튼 줄 */
+.demo-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.demo-bar button{font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);
+  background:var(--card);color:var(--muted);cursor:pointer}
+.demo-bar button:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
+.demo-cap{font-size:11px;color:var(--faint);margin-top:8px}
+
+/* Before/After 나란히 */
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+@media(max-width:880px){.ba{grid-template-columns:1fr}}
+.ba .mock-hd.before{color:var(--bad);background:var(--bad-soft);border-bottom-color:var(--bad-line)}
+.ba .mock-hd.before .dot{background:var(--bad)}
+.ba .mock-hd.after{color:var(--safe);background:var(--safe-soft);border-bottom-color:var(--safe-line)}
+.ba .mock-hd.after .dot{background:var(--safe)}
+
+/* 흐름 다이어그램 */
+.flow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin-top:12px}
+.fbox{flex:1;min-width:160px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 13px;box-shadow:var(--sh1)}
+.fbox .ft{font-size:11px;font-weight:800;color:var(--adv);margin-bottom:4px}
+.fbox .fd{font-size:11.5px;color:var(--muted);line-height:1.5}
+.fbox .fd b{color:var(--ink)}
+.farr{align-self:center;color:var(--line2);font-size:17px;font-weight:700;flex:none}
+@media(max-width:880px){.farr{display:none}}
+
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:12.5px;margin-top:10px}
+.kv .kk{font-weight:700;color:var(--muted)}
+.kv .vv{color:var(--ink)}
+</style></head>
+<body>
+<div class="page">
+
+  <h1>시안 — 유입가이드 첨부 이미지: 썸네일 미리보기 + 그 자리에서 첨부</h1>
+  <p class="lead">모집공고 발행·수정 모달의 <b>[작업내용 › 유입가이드]</b> 칸에서
+     ① 첨부된 이미지를 <b>입력창 높이에 맞춘 썸네일</b>로 보여주고, ② 클릭하면 <b>크게 보고</b>,
+     ③ 첨부가 없으면 <b>그 자리에서 사진을 넣는다</b>(파일선택 · 복사붙여넣기 · 드래그앤드롭).</p>
+  <p class="meta">대상 = <code>frontend/js/recruit-modal.js</code>(마크업) + <code>frontend/js/index-recruit.js</code>(동작) ·
+     관리자 대시보드와 리뷰웹시스템[3버전] <b>공유 모듈이라 한 번 고치면 양쪽 반영</b> ·
+     <b>서버 변경 0 · 마이그레이션 0</b>(기존 <code>POST /api/order/guide-image</code> 재사용)</p>
+
+  <div class="vswitch" id="vsw">
+    <a href="?" data-v="">전체 보기</a>
+    <a href="?v=A" data-v="A">A안만</a>
+    <a href="?v=B" data-v="B">B안만</a>
+  </div>
+
+  <!-- ═══════════════ 0. 지금 무엇이 문제인가 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">0</span> 지금 무엇이 불편한가</h2>
+    <p class="sub">유입가이드에 이미지가 붙어 있어도 <b>관리자 화면에서는 볼 수 없고</b>, 텍스트를 한 글자만 고쳐도 이미지가 통째로 날아간다.</p>
+
+    <div class="ba">
+      <div class="mock">
+        <div class="mock-hd before"><span class="dot"></span>지금 (Before)</div>
+        <div class="mock-bd">
+          <div class="rfcard">
+            <div class="rfch"><span class="rfct">📝 작업내용</span><span class="rfcn">참여한 리뷰어에게만 공개</span></div>
+            <div class="rfcb">
+              <div class="rfrow"><span class="rfhl">유입가이드</span>
+                <div class="rfv">
+                  <textarea class="rfin" rows="4" readonly style="height:98px">쿠팡 검색어 : 장수돌침대 전기매트
+
+[이미지]
+[이미지]
+
+※ 이미지 2장 포함 — 수정하지 않으면 원본 서식(이미지 포함) 그대로 게시됩니다.</textarea>
+                  <div class="rfhint">있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div>
+                </div></div>
+            </div>
+          </div>
+          <div class="note bad" style="margin-top:12px">
+            <div class="nt">🚫 세 가지가 막혀 있다</div>
+            <ul>
+              <li><b>무슨 이미지인지 볼 수 없다</b> — <code>[이미지]</code> 라는 글자만 남는다.</li>
+              <li><b>한 글자만 고쳐도 이미지가 사라진다</b> — 텍스트를 건드리는 순간 “이미지가 빠진 평문으로 게시됩니다” 확인창이 뜬다.</li>
+              <li><b>이미지를 새로 넣을 방법이 없다</b> — 작업오더에 딸려 온 것만 쓸 수 있고, 관리자가 추가할 창구가 없다.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mock-hd after"><span class="dot"></span>제안 (After · A안)</div>
+        <div class="mock-bd">
+          <div class="rfcard">
+            <div class="rfch"><span class="rfct">📝 작업내용</span><span class="rfcn">참여한 리뷰어에게만 공개</span></div>
+            <div class="rfcb">
+              <div class="rfrow"><span class="rfhl">유입가이드</span>
+                <div class="rfv" id="mountHero"></div></div>
+            </div>
+          </div>
+          <div class="note good" style="margin-top:12px">
+            <div class="nt">✅ 위 목업은 실제로 동작합니다</div>
+            <ul>
+              <li>썸네일 <b>클릭</b> → 크게 보기(← → 이동 · Esc 닫기)</li>
+              <li>스트립에 사진 <b>드래그</b>해서 놓기 · 입력창에서 <b>Ctrl+V</b> · <b>[＋]</b> 눌러 파일 선택</li>
+              <li>텍스트를 고쳐도 <b>썸네일은 그대로 남습니다</b>(이미지 소실 없음)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 1. 배치 A ═══════════════ -->
+  <section class="sec" data-v="A">
+    <h2><span class="n">A</span> 입력창 오른쪽 — 같은 높이 썸네일 <span class="tag rec">추천</span></h2>
+    <p class="sub">사용자 지시 그대로 <b>입력창 높이에 맞춘</b> 썸네일이 오른쪽에 붙는다. 세로 공간을 전혀 더 쓰지 않아
+       모달의 다른 칸(리뷰가이드·특이사항)이 아래로 밀리지 않는다. 장수가 많으면 스트립만 <b>가로로 스크롤</b>된다.</p>
+
+    <div class="mock">
+      <div class="mock-hd"><span class="dot"></span>A — 유입가이드 칸 (첨부 2장)</div>
+      <div class="mock-bd">
+        <div class="rfcard"><div class="rfcb" style="padding:16px">
+          <div class="rfrow"><span class="rfhl">유입가이드</span><div class="rfv" id="mountA"></div></div>
+          <div class="rfrow"><span class="rfhl">리뷰가이드</span><div class="rfv">
+            <textarea class="rfin" rows="2" readonly>전체 별점 5건
+- 배송이 빠르다</textarea></div></div>
+        </div></div>
+        <div class="demo-bar" data-demo="A">
+          <button data-act="two">첨부 2장</button>
+          <button data-act="zero">첨부 없음</button>
+          <button data-act="many">첨부 6장(스크롤)</button>
+          <button data-act="uploading">업로드 중</button>
+          <button data-act="failed">업로드 실패</button>
+          <button data-act="cap">상한 8장</button>
+        </div>
+        <p class="demo-cap">↑ 버튼으로 상태를 바꿔 보세요. 어떤 상태에서도 <b>입력창 높이와 칸 위치가 변하지 않습니다</b>.</p>
+      </div>
+    </div>
+
+    <div class="note cool" style="margin-top:12px">
+      <div class="nt">A안이 지키는 것</div>
+      <ul>
+        <li><b>줄 높이 불변</b> — 첨부가 0장이든 8장이든 유입가이드 줄의 높이는 82px 고정. 스트립이 늘어나며 아래 칸을 밀어내지 않는다.</li>
+        <li><b>스트립 자체가 드롭존</b> — 비어 있을 때는 “사진을 끌어다 놓거나 붙여넣기”, 차 있을 때는 맨 뒤 <b>[＋]</b> 칸이 같은 역할을 한다.</li>
+        <li><b>좁은 화면에서는 자동으로 아래로 내려간다</b>(≤1080px) — 렌더러는 한 벌이고 <b>CSS만 바뀐다</b>(B안과 같은 코드).</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 2. 배치 B ═══════════════ -->
+  <section class="sec" data-v="B">
+    <h2><span class="n">B</span> 입력창 아래 — 전폭 스트립</h2>
+    <p class="sub">썸네일을 아래 줄에 전폭으로 편다. 한 화면에 더 많이 보이지만 유입가이드 줄이 <b>82px 더 길어져</b>
+       모달 스크롤이 늘고, 첨부 유무에 따라 아래 칸 위치가 움직인다.</p>
+
+    <div class="mock">
+      <div class="mock-hd"><span class="dot"></span>B — 유입가이드 칸 (첨부 4장)</div>
+      <div class="mock-bd">
+        <div class="rfcard"><div class="rfcb" style="padding:16px">
+          <div class="rfrow"><span class="rfhl">유입가이드</span><div class="rfv" id="mountB"></div></div>
+          <div class="rfrow"><span class="rfhl">리뷰가이드</span><div class="rfv">
+            <textarea class="rfin" rows="2" readonly>전체 별점 5건
+- 배송이 빠르다</textarea></div></div>
+        </div></div>
+        <div class="demo-bar" data-demo="B">
+          <button data-act="two">첨부 2장</button>
+          <button data-act="zero">첨부 없음</button>
+          <button data-act="many">첨부 6장</button>
+        </div>
+      </div>
+    </div>
+
+    <table class="t" style="margin-top:14px">
+      <thead><tr><th style="width:150px">비교</th><th>A — 오른쪽</th><th>B — 아래</th></tr></thead>
+      <tbody>
+        <tr><td class="k">세로 공간</td><td class="ok">추가 0px</td><td class="mid">+82px (항상)</td></tr>
+        <tr><td class="k">아래 칸 위치</td><td class="ok">첨부 유무와 무관하게 고정</td><td class="no">첨부가 생기면 아래로 밀림</td></tr>
+        <tr><td class="k">한눈에 보이는 장수</td><td class="mid">3~4장(그 뒤는 가로 스크롤)</td><td class="ok">7~8장</td></tr>
+        <tr><td class="k">입력창 폭</td><td class="mid">약 340px 좁아짐</td><td class="ok">그대로</td></tr>
+        <tr><td class="k">사용자 지시 부합</td><td class="ok">“입력창 높이에 맞춘 썸네일” 그대로</td><td class="mid">높이는 같지만 위치가 아래</td></tr>
+      </tbody>
+    </table>
+    <div class="note" style="margin-top:10px">
+      <b>결론</b> — 기본은 <b>A</b>. 다만 <b>같은 렌더러·같은 상태</b>를 쓰고 배치만 CSS로 가르므로,
+      좁은 화면에서는 A가 자동으로 B 모양이 된다(사본 없음).
+    </div>
+  </section>
+
+  <!-- ═══════════════ 3. 크게 보기 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">3</span> 크게 보기(라이트박스)</h2>
+    <p class="sub">썸네일을 누르면 모달 <b>위에</b> 어두운 오버레이가 뜨고 원본이 크게 보인다. 위 목업에서 실제로 눌러 볼 수 있다.</p>
+    <table class="t">
+      <thead><tr><th style="width:190px">동작</th><th>규칙</th><th style="width:330px">왜</th></tr></thead>
+      <tbody>
+        <tr><td class="k">여는 방법</td><td>썸네일 클릭 (커서 <code>zoom-in</code>)</td><td>레포의 <code>woImageModal</code>·교체요청 카드와 같은 관용구</td></tr>
+        <tr><td class="k">이동</td><td><b>← →</b> 키 / 좌우 버튼 · <b>끝에서 순환하지 않음</b></td><td>처음으로 튀면 어디까지 봤는지 잃는다(리뷰검수 상세와 같은 규율)</td></tr>
+        <tr><td class="k">닫기</td><td><b>Esc</b> · 바깥 클릭 · 우상단 ✕</td><td>닫는 길은 항상 남긴다</td></tr>
+        <tr><td class="k">마운트 위치</td><td><b>body 직속</b></td><td>모달(스크롤 컨테이너) 안에 두면 오버레이가 화면 흐름에 섞인다 — 실측된 함정</td></tr>
+        <tr><td class="k">키 리스너</td><td>최상위에 <b>1회만</b> 등록 · 입력 중(input/textarea)엔 미가로챔</td><td>열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 장 건너뛴다</td></tr>
+        <tr><td class="k">이미지 주소</td><td>onclick에 URL을 넣지 않고 <b>인덱스만</b> 전달</td><td>따옴표 하나로 탈출되는 XSS — 이 레포에서 실제로 재현된 적 있다</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 4. 첨부 3경로 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">4</span> 사진 넣는 3가지 길 — 한 함수로 수렴</h2>
+    <p class="sub">파일선택 · Ctrl+V 붙여넣기 · 드래그앤드롭이 전부 <b><code>_igUploadFile(file)</code> 한 함수</b>를 지난다.
+       사본을 두면 한쪽만 용량·장수 제한이 풀리는 드리프트가 난다(관리자 1:1문의 첨부에서 이미 겪은 함정).</p>
+
+    <div class="flow">
+      <div class="fbox"><div class="ft">① 파일 선택</div><div class="fd">스트립의 <b>[＋]</b> 또는 빈 드롭존 클릭 → 숨은 <code>&lt;input type=file multiple&gt;</code></div></div>
+      <div class="farr">→</div>
+      <div class="fbox"><div class="ft">② Ctrl+V</div><div class="fd">유입가이드 입력창·스트립에서 붙여넣기.<br><b>이미지일 때만</b> 가로채고 텍스트 붙여넣기는 기본 동작 유지</div></div>
+      <div class="farr">→</div>
+      <div class="fbox"><div class="ft">③ 드래그앤드롭</div><div class="fd">스트립 위로 파일을 끌면 파란 테두리.<br><b>파일 드래그일 때만</b> 반응(텍스트 드래그엔 무반응)</div></div>
+      <div class="farr">→</div>
+      <div class="fbox" style="border-color:var(--accent-line);background:var(--accent-soft)">
+        <div class="ft" style="color:var(--accent-deep)">_igUploadFile()</div>
+        <div class="fd">형식·용량·장수 검사 → 즉시 썸네일(회색) → <code>POST /api/order/guide-image</code> → 절대 프록시 URL 확정</div></div>
+    </div>
+
+    <table class="t" style="margin-top:14px">
+      <thead><tr><th style="width:170px">검사</th><th style="width:150px">값</th><th>어긋나면</th></tr></thead>
+      <tbody>
+        <tr><td class="k">형식</td><td><code>image/*</code></td><td>“사진 파일만 넣을 수 있어요” — 그 파일만 건너뜀</td></tr>
+        <tr><td class="k">용량</td><td>장당 <b>5MB</b></td><td>“5MB 이하 사진만…” (썸네일 업로드와 같은 값)</td></tr>
+        <tr><td class="k">장수</td><td>최대 <b>8장</b></td><td>[＋] 칸이 사라지고 “최대 8장까지” 안내 — 작업오더 <code>guide_images</code> 상한과 같은 값</td></tr>
+        <tr><td class="k">업로드 중 저장</td><td>—</td><td><b>저장 차단</b> + “사진 업로드가 끝나면 저장할 수 있어요”<br><span style="color:var(--faint)">인플라이트 첨부가 조용히 빠지는 것 방지(관리자 1:1문의와 같은 규율)</span></td></tr>
+        <tr><td class="k">업로드 실패</td><td>—</td><td>그 칸만 <b>빨간 “실패”</b>로 남기고 사유 표시 → [✕]로 지우거나 다시 시도.<br><span style="color:var(--faint)">조용히 사라지지 않는다</span></td></tr>
+        <tr><td class="k">저장되는 주소</td><td>서버가 돌려준 프록시 URL만</td><td>임의 문자열 금지 — 서버 <code>sanitizeGuideHtml</code>이 통과시키는 형태만 넣는다</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 5. 데이터 모델 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">5</span> 값은 어디에 담기나 <span class="tag warn">가장 중요한 부분</span></h2>
+    <p class="sub">유입가이드는 지금도 앞으로도 <b><code>work_detail.inflowGuideHtml</code> 한 칸</b>이다.
+       새 컬럼도, 새 테이블도, 새 엔드포인트도 만들지 않는다. 바뀌는 것은 <b>모달이 그 한 칸을 다루는 방식</b>뿐이다.</p>
+
+    <div class="note cool">
+      <div class="nt">모달이 여는 순간 — 한 칸을 둘로 나눈다</div>
+      <div class="kv">
+        <div class="kk">이미지부</div>
+        <div class="vv"><code>&lt;img&gt;</code> 태그들 → <b>썸네일 목록(배열)</b>로 뽑아낸다.
+          중복 판정은 <b>파일ID 토큰</b> 기준(호스트가 pages↔railway로 달라도 같은 장으로 본다 — <code>extractGuideImages</code>와 같은 규율)</div>
+        <div class="kk">텍스트부</div>
+        <div class="vv"><code>&lt;img&gt;</code>를 뺀 나머지 → 지금처럼 입력창에 평문 미리보기</div>
+      </div>
+    </div>
+
+    <div class="note good" style="margin-top:10px">
+      <div class="nt">저장할 때 — 최소 개입으로 다시 합친다</div>
+      <ul>
+        <li><b>텍스트를 안 고쳤으면</b> 원본 HTML을 <b>그대로</b> 둔다(단락·링크·이미지 위치 전부 보존 = 지금 동작 그대로).</li>
+        <li><b>사진을 지웠으면</b> 그 파일ID를 가진 <code>&lt;img&gt;</code> 태그 <b>하나만</b> 원본에서 뺀다.</li>
+        <li><b>사진을 더했으면</b> 원본 <b>끝에</b> <code>&lt;img&gt;</code>를 붙인다.</li>
+        <li><b>텍스트를 고쳤으면</b> 고친 평문을 escape 하고 <b>이미지들을 뒤에 다시 붙인다</b> → <span class="ok">이미지가 더 이상 사라지지 않는다</span>.</li>
+      </ul>
+    </div>
+
+    <div class="note warm" style="margin-top:10px">
+      <div class="nt">⚠ 그래도 남는 한 가지 — 텍스트를 고치면 “서식”은 여전히 잃는다</div>
+      본문 중간에 있던 이미지는 <b>맨 뒤로 모인다</b>. 링크·굵기 같은 서식도 평문이 된다(지금과 같음).
+      그래서 확인창은 없애지 않고 <b>문장만 바꾼다</b>:
+      <div style="margin-top:8px;background:#fff;border:1px solid var(--warn-line);border-radius:9px;padding:11px 13px;font-size:12.5px;color:var(--ink)">
+        “유입가이드 글을 고치셨어요 — <b>사진 2장은 그대로 유지</b>되고 글자만 다시 게시됩니다.
+        원본에 있던 <b>줄 서식·링크는 사라지고</b> 사진은 글 아래로 모입니다. 계속할까요?”
+      </div>
+      <div style="margin-top:7px;font-size:12px">
+        (지금 문구 = “원본에 있던 <b>이미지가 빠진</b> 평문으로 게시됩니다” — 실제로 이미지가 사라졌다.)
+      </div>
+    </div>
+
+    <table class="t" style="margin-top:14px">
+      <thead><tr><th style="width:230px">지금 있는 장치</th><th>어떻게 되나</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><code>[이미지]</code> 치환</td><td><b>사라진다</b> — 썸네일이 그 역할을 대신한다. 입력창엔 글자만 남아 편집이 쉬워진다.</td></tr>
+        <tr><td class="k">“※ 이미지 N장 포함 …” 꼬리표</td><td><b>사라진다</b> — 썸네일이 곧 그 안내다. 저장 시 이 문장을 지우던 정규식도 함께 정리.</td></tr>
+        <tr><td class="k"><code>dataset.rawHtml</code> 모드</td><td><b>그대로 유지</b> — “텍스트를 안 고쳤으면 원본 보존”의 판정 근거라 없애면 서식이 즉시 깨진다.</td></tr>
+        <tr><td class="k">🧹 정리 도우미</td><td><b>그대로</b> — rawHtml 모드에서는 값 수정 제안을 하지 않는다는 기존 규칙 유지.</td></tr>
+        <tr><td class="k">리뷰어 화면 렌더러</td><td><b>무수정</b> — <code>campaign-workdetail.js</code>가 이미 <code>inflowGuideHtml</code>의 <code>&lt;img&gt;</code>를 그린다.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 6. 상태 매트릭스 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">6</span> 어떤 상태에서 무엇이 보이나</h2>
+    <p class="sub">“모른다”와 “없다”를 구분한다 — 조회 실패를 “첨부 없음”으로 꾸미지 않는다.</p>
+    <table class="t">
+      <thead><tr><th style="width:210px">상태</th><th style="width:330px">화면</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr><td class="k">첨부 있음</td><td>썸네일 N칸 + 맨 뒤 <b>[＋]</b></td><td>순서 = 원본 HTML의 등장 순서</td></tr>
+        <tr><td class="k">첨부 없음</td><td>같은 자리에 점선 드롭존<br>“사진을 끌어다 놓거나 붙여넣기(Ctrl+V)”</td><td><b>칸을 숨기지 않는다</b> — 줄마다 모양이 달라지면 눈이 자리를 다시 찾는다</td></tr>
+        <tr><td class="k">업로드 중</td><td>회색 썸네일 + “올리는 중”</td><td>저장 버튼 잠금</td></tr>
+        <tr><td class="k">업로드 실패</td><td>빨간 “실패” 칸 + 사유 한 줄</td><td>자동으로 지우지 않는다 — 사람이 [✕]</td></tr>
+        <tr><td class="k">8장 참음</td><td>[＋] 숨김 + “최대 8장”</td><td>더 넣으려면 먼저 지운다</td></tr>
+        <tr><td class="k">레거시(일반) 공고</td><td>작업내용 카드 자체가 숨겨짐</td><td>참여형 전용 카드 — 기존 토글 계약 그대로</td></tr>
+        <tr><td class="k">저장본이 평문</td><td>썸네일 0장 + 드롭존</td><td>여기서 넣으면 그때부터 이미지가 생긴다</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 7. 구현 계획 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">7</span> 구현 계획</h2>
+    <p class="sub"><b>프론트 2파일 · 서버 0 · DB 0.</b> 관리자 대시보드와 리뷰웹시스템[3버전]이 같은 모듈을 쓰므로 양쪽이 함께 바뀐다.</p>
+    <table class="t">
+      <thead><tr><th style="width:230px">파일</th><th>바뀌는 것</th></tr></thead>
+      <tbody>
+        <tr><td class="k">recruit-modal.js<br><span style="font-weight:400;color:var(--faint)">마크업·CSS</span></td>
+            <td>유입가이드 줄을 <code>.ig-wrap</code>(입력창 + <code>#rf_wd_inflow_imgs</code> 스트립)으로 감싼다.
+                CSS는 <code>#recruitModal</code>·<code>.rf-*</code> 스코프 유지, <code>var()</code>엔 전부 폴백
+                (테마 없는 호스트에서도 같은 모양 — 기존 규율).
+                <b><code>rf_wd_inflow</code> id는 그대로</b>(프리필·저장·정리 도우미가 이 id에 묶여 있다).</td></tr>
+        <tr><td class="k">index-recruit.js<br><span style="font-weight:400;color:var(--faint)">동작</span></td>
+            <td>① <code>_igParse(html)</code> 이미지부/텍스트부 분리 ② <code>_igRender()</code> 썸네일 렌더(단일 출처)
+                ③ <code>_igUploadFile(file)</code> 3경로 수렴 ④ <code>_igLightbox(i)</code> 크게 보기
+                ⑤ <code>_igCompose()</code> 저장 시 재조립 → <code>payload.work_detail.inflowGuideHtml</code>
+                ⑥ <code>_htmlToPlainPreview</code>에서 <code>[이미지]</code>·꼬리표 제거 ⑦ 확인창 문구 교체 ⑧ 인플라이트 저장 차단</td></tr>
+        <tr><td class="k">서버</td><td class="ok">변경 없음 — <code>POST /api/order/guide-image</code>(Drive 저장 + 무인증 프록시 URL) 그대로 사용.
+                권한도 그대로(<code>authMiddleware</code>).</td></tr>
+        <tr><td class="k">리뷰어 화면</td><td class="ok">변경 없음 — 저장된 <code>&lt;img&gt;</code>를 <code>campaign-workdetail.js</code>가 이미 그린다.
+                모달 우측 <b>미리보기에도 자동 반영</b>(같은 공용 렌더러).</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:12px">
+      <div class="nt">회귀가드 (신규 <code>server/tests/inflowGuideImages.test.js</code>)</div>
+      <ul>
+        <li><b>분리 → 재조립이 값을 잃지 않는다</b> — 실측 원문(작업오더 프리필 HTML)을 <code>_igParse</code>→<code>_igCompose</code>로 왕복시켜 <b>바이트 동일</b>함을 vm 실행으로 확인(무수정 시).</li>
+        <li><b>텍스트를 고쳐도 이미지 토큰이 전부 살아남는다</b> — 이 변경의 존재 이유라 실행으로 고정.</li>
+        <li><b>업로드 3경로가 같은 함수를 지난다</b> — 사본이 생기면 실패.</li>
+        <li><b>onclick에 URL 문자열이 없다</b>(인덱스만) · 라이트박스는 <b>body 직속</b> · 키 리스너 <b>1회</b>.</li>
+        <li><b>인플라이트 중 저장이 차단된다</b> — 스텁으로 저장 함수를 실행해 확인.</li>
+        <li>기존 가드 갱신 예정 — <code>recruitModalLayout.test.js</code>(유입가이드 줄 구조 · CSS 토큰 균형),
+            <code>campaignM3Guards.test.js</code>·<code>woCampaignMapDoc.test.js</code>(rawHtml 배선 형태가 바뀌므로 패턴 동반 갱신, 검사 의미는 불변),
+            <code>campaignFieldCleanupUI.test.js</code>(정리 도우미 rawHtml 보호).</li>
+      </ul>
+    </div>
+
+    <div class="note warm" style="margin-top:10px">
+      <div class="nt">되돌리기</div>
+      두 파일의 되돌림만으로 끝난다(서버·DB 무접촉). 이미 <b>저장된 이미지는 그대로 남는다</b> —
+      저장 형식이 지금과 같은 <code>inflowGuideHtml</code> 안의 <code>&lt;img&gt;</code>이기 때문이다.
+    </div>
+  </section>
+
+  <!-- ═══════════════ 8. 확인 필요 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">8</span> 확정이 필요한 것</h2>
+    <table class="t">
+      <thead><tr><th style="width:44px">#</th><th style="width:290px">질문</th><th>기본안(답 없으면 이대로)</th></tr></thead>
+      <tbody>
+        <tr><td class="k">1</td><td>배치는 <b>A(오른쪽)</b>인가 B(아래)인가?</td><td><b>A</b> — 지시하신 “입력창 높이에 맞춘”에 부합하고 아래 칸이 안 밀린다</td></tr>
+        <tr><td class="k">2</td><td>썸네일에서 <b>삭제</b>를 허용할까?</td><td><b>허용</b>(칸 우상단 ✕, 확인창 1번). 넣기만 되고 못 지우면 잘못 넣은 사진을 되돌릴 방법이 없다</td></tr>
+        <tr><td class="k">3</td><td>사진 <b>순서 바꾸기</b>(드래그 정렬)도 필요한가?</td><td><b>이번엔 제외</b> — 리뷰어 화면에서는 가이드 아래 나열이라 순서 영향이 작다. 필요하면 후속</td></tr>
+        <tr><td class="k">4</td><td>장수 상한 <b>8장</b>이 맞나?</td><td><b>8장</b> — 작업오더 <code>guide_images</code> 상한과 같은 값(두 값이 다르면 넘어오다 잘린다)</td></tr>
+        <tr><td class="k">5</td><td><b>리뷰가이드·특이사항</b> 칸에도 같은 걸 붙일까?</td><td><b>유입가이드만</b> — 이미지가 실제로 오는 칸이고, 리뷰어 화면도 유입가이드만 HTML로 렌더한다</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<!-- 라이트박스 — body 직속 -->
+<div class="lb" id="lb">
+  <button class="lb-close" id="lbClose" title="닫기 (Esc)">✕</button>
+  <img id="lbImg" alt="">
+  <div class="lb-bar">
+    <button class="lb-btn" id="lbPrev" title="이전 (←)">‹</button>
+    <span id="lbCnt">1 / 2</span>
+    <button class="lb-btn" id="lbNext" title="다음 (→)">›</button>
+  </div>
+  <div class="lb-name" id="lbName"></div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   목업 동작 — 실제 구현의 형태를 그대로 흉내낸다.
+   · 이미지 목록은 배열 하나(단일 출처), 렌더러도 한 벌
+   · onclick 대신 이벤트 위임 + data-i(인덱스만) — URL 문자열 보간 금지
+   · 라이트박스는 body 직속 / 키 리스너 최상위 1회
+   ══════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  /* ── ?v= 로 한 안만 보기 ── */
+  var V = (new URLSearchParams(location.search).get('v') || '').toUpperCase();
+  Array.prototype.forEach.call(document.querySelectorAll('#vsw a'), function (a) {
+    if ((a.getAttribute('data-v') || '') === V) a.classList.add('on');
+  });
+  if (V === 'A' || V === 'B') {
+    Array.prototype.forEach.call(document.querySelectorAll('.sec[data-v]'), function (s) {
+      if (s.getAttribute('data-v') !== V) s.style.display = 'none';
+    });
+  }
+
+  /* ── 가짜 이미지(데이터 URI — 외부 리소스 0) ── */
+  function fake(label, c1, c2) {
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient></defs>' +
+      '<rect width="640" height="480" fill="url(#g)"/>' +
+      '<rect x="34" y="34" width="572" height="412" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="3" rx="14"/>' +
+      '<text x="320" y="232" font-family="sans-serif" font-size="40" font-weight="700" fill="#ffffff" text-anchor="middle">' + label + '</text>' +
+      '<text x="320" y="282" font-family="sans-serif" font-size="21" fill="#ffffff" fill-opacity=".82" text-anchor="middle">유입가이드 첨부 이미지</text>' +
+      '</svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+  var SAMPLES = [
+    { name: '검색어_진입경로.png',  src: fake('검색 진입', '#2563eb', '#7c3aed') },
+    { name: '상품선택_화면.png',    src: fake('상품 선택', '#0891b2', '#0d9488') },
+    { name: '옵션선택_안내.png',    src: fake('옵션 선택', '#b45309', '#d97706') },
+    { name: '장바구니_확인.png',    src: fake('장바구니', '#be123c', '#e11d48') },
+    { name: '결제_직전화면.png',    src: fake('결제 직전', '#4338ca', '#6d28d9') },
+    { name: '리뷰등록_위치.png',    src: fake('리뷰 등록', '#15803d', '#65a30d') },
+    { name: '추가안내_1.png',       src: fake('추가 안내', '#334155', '#64748b') },
+    { name: '추가안내_2.png',       src: fake('추가 안내', '#7c2d12', '#9a3412') }
+  ];
+  function pick(n, state) {
+    return SAMPLES.slice(0, n).map(function (s, i) {
+      return { id: 'tok' + i, name: s.name, src: s.src, state: state || 'ok' };
+    });
+  }
+
+  var MAX = 8, MAX_MB = 5;
+
+  /* ── 라이트박스 (한 벌, body 직속) ── */
+  var lb = document.getElementById('lb'), lbImg = document.getElementById('lbImg'),
+      lbCnt = document.getElementById('lbCnt'), lbName = document.getElementById('lbName'),
+      lbPrev = document.getElementById('lbPrev'), lbNext = document.getElementById('lbNext');
+  var LB = { list: [], i: 0 };
+  function lbOpen(list, i) {
+    LB.list = list.filter(function (x) { return x.state !== 'bad'; });
+    LB.i = Math.max(0, Math.min(i, LB.list.length - 1));
+    if (!LB.list.length) return;
+    lbPaint(); lb.classList.add('on');
+  }
+  function lbPaint() {
+    var it = LB.list[LB.i]; if (!it) return;
+    lbImg.src = it.src; lbImg.alt = it.name;
+    lbCnt.textContent = (LB.i + 1) + ' / ' + LB.list.length;
+    lbName.textContent = it.name;
+    lbPrev.disabled = LB.i === 0;               /* 끝에서 순환하지 않는다 */
+    lbNext.disabled = LB.i === LB.list.length - 1;
+  }
+  function lbStep(d) { var n = LB.i + d; if (n < 0 || n >= LB.list.length) return; LB.i = n; lbPaint(); }
+  function lbClose() { lb.classList.remove('on'); lbImg.removeAttribute('src'); }
+  lbPrev.addEventListener('click', function () { lbStep(-1); });
+  lbNext.addEventListener('click', function () { lbStep(1); });
+  document.getElementById('lbClose').addEventListener('click', lbClose);
+  lb.addEventListener('click', function (e) { if (e.target === lb) lbClose(); });
+  /* 키 리스너는 최상위 1회 — 열 때마다 걸면 겹쳐 쌓인다 */
+  document.addEventListener('keydown', function (e) {
+    if (!lb.classList.contains('on')) return;
+    var t = e.target, tag = (t && t.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || (t && t.isContentEditable)) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === 'Escape') { lbClose(); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { lbStep(-1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { lbStep(1); e.preventDefault(); }
+  });
+
+  /* ── 위젯 (렌더러 한 벌 — A/B는 클래스만 다름) ── */
+  function makeWidget(mount, opts) {
+    opts = opts || {};
+    var st = { imgs: [], msg: '', msgKind: '' };
+
+    mount.innerHTML =
+      '<div class="ig-wrap' + (opts.stack ? ' stack' : '') + '">' +
+        '<div class="ig-ta">' +
+          '<textarea class="rfin" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>' +
+        '</div>' +
+        '<div class="ig-strip" tabindex="0"></div>' +
+      '</div>' +
+      '<div class="rfhint">있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div>' +
+      '<div class="ig-msg"></div>' +
+      '<input type="file" accept="image/*" multiple class="ig-hidden">';
+
+    var ta = mount.querySelector('textarea'),
+        strip = mount.querySelector('.ig-strip'),
+        msgEl = mount.querySelector('.ig-msg'),
+        fileIn = mount.querySelector('input[type=file]');
+
+    ta.value = opts.text || '쿠팡 검색어 : 장수돌침대 전기매트';
+
+    function say(m, kind) { st.msg = m || ''; st.msgKind = kind || ''; paint(); }
+
+    /* 렌더 — 이 함수 하나가 모든 상태를 그린다 */
+    function paint() {
+      var h = '';
+      if (!st.imgs.length) {
+        h = '<div class="ig-empty" data-add="1">' +
+              '<div class="t1">＋ 사진 넣기</div>' +
+              '<div class="t2">끌어다 놓기 · Ctrl+V · 클릭</div>' +
+            '</div>';
+      } else {
+        st.imgs.forEach(function (im, i) {
+          var cls = 'ig-thumb' + (im.state === 'up' ? ' up' : im.state === 'bad' ? ' bad' : '');
+          h += '<button type="button" class="' + cls + '" data-i="' + i + '" title="' + esc(im.name) + ' — 클릭하면 크게 보기">' +
+                 '<img src="' + esc(im.src) + '" alt="">' +
+                 '<span class="ig-n">' + (i + 1) + '</span>' +
+                 '<span class="ig-x" data-del="' + i + '" title="이 사진 빼기">✕</span>' +
+               '</button>';
+        });
+        if (st.imgs.length < MAX) {
+          h += '<button type="button" class="ig-add" data-add="1" title="사진 추가">' +
+                 '<span class="plus">＋</span><span>추가</span></button>';
+        }
+      }
+      strip.innerHTML = h;
+      strip.classList.toggle('err', st.imgs.some(function (x) { return x.state === 'bad'; }));
+      msgEl.textContent = st.msg;
+      msgEl.className = 'ig-msg ' + st.msgKind;
+    }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    /* 3경로가 지나는 단 하나의 함수 */
+    function uploadFile(f) {
+      if (st.imgs.length >= MAX) { say('사진은 최대 ' + MAX + '장까지 넣을 수 있어요 — 먼저 지워주세요.', 'warn'); return; }
+      if (!/^image\//.test(f.type)) { say('사진 파일만 넣을 수 있어요.', 'bad'); return; }
+      if (f.size > MAX_MB * 1024 * 1024) { say(MAX_MB + 'MB 이하 사진만 넣을 수 있어요.', 'bad'); return; }
+      var r = new FileReader();
+      r.onload = function () {
+        var item = { id: 'new' + Date.now() + Math.random(), name: f.name || 'paste.png', src: r.result, state: 'up' };
+        st.imgs.push(item); say('사진을 올리는 중… 끝나면 저장할 수 있어요.', 'warn');
+        /* 목업: 실제 구현은 POST /api/order/guide-image → 절대 프록시 URL */
+        setTimeout(function () {
+          item.state = 'ok';
+          say(st.imgs.some(function (x) { return x.state === 'up'; }) ? '사진을 올리는 중…' : '사진이 추가되었습니다.',
+              st.imgs.some(function (x) { return x.state === 'up'; }) ? 'warn' : 'ok');
+          setTimeout(function () { if (!st.imgs.some(function (x) { return x.state === 'up'; })) say(''); }, 1600);
+        }, 900);
+      };
+      r.readAsDataURL(f);
+    }
+
+    /* ① 파일 선택 */
+    fileIn.addEventListener('change', function () {
+      Array.prototype.forEach.call(fileIn.files || [], uploadFile);
+      fileIn.value = '';                                   /* 같은 파일 다시 고를 수 있게 */
+    });
+    /* 썸네일 클릭(크게 보기) · 삭제 · 추가 — 위임, 넘기는 것은 인덱스뿐 */
+    strip.addEventListener('click', function (e) {
+      var del = e.target.closest('[data-del]');
+      if (del) {
+        e.stopPropagation();
+        var di = +del.getAttribute('data-del');
+        if (confirm('이 사진을 유입가이드에서 뺄까요?')) { st.imgs.splice(di, 1); say('사진을 뺐습니다.', 'ok'); }
+        return;
+      }
+      if (e.target.closest('[data-add]')) { fileIn.click(); return; }
+      var th = e.target.closest('.ig-thumb');
+      if (th) {
+        var i = +th.getAttribute('data-i');
+        if (st.imgs[i] && st.imgs[i].state === 'bad') { say('이 사진은 업로드에 실패했어요 — ✕로 빼고 다시 넣어주세요.', 'bad'); return; }
+        var vis = st.imgs.filter(function (x) { return x.state !== 'bad'; });
+        lbOpen(st.imgs, vis.indexOf(st.imgs[i]));
+      }
+    });
+    /* ② Ctrl+V — 이미지일 때만 가로챈다(텍스트 붙여넣기는 기본 동작 유지) */
+    function onPaste(e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      var imgs = Array.prototype.filter.call(items, function (it) {
+        return it.kind === 'file' && /^image\//.test(it.type);
+      });
+      if (!imgs.length) return;
+      e.preventDefault();
+      imgs.forEach(function (it) { var f = it.getAsFile(); if (f) uploadFile(f); });
+    }
+    ta.addEventListener('paste', onPaste);
+    strip.addEventListener('paste', onPaste);
+    /* ③ 드래그앤드롭 — 파일 드래그일 때만 반응 */
+    function isFileDrag(e) {
+      return Array.prototype.indexOf.call((e.dataTransfer && e.dataTransfer.types) || [], 'Files') >= 0;
+    }
+    strip.addEventListener('dragover', function (e) { if (!isFileDrag(e)) return; e.preventDefault(); strip.classList.add('drag'); });
+    strip.addEventListener('dragleave', function (e) { if (e.target === strip) strip.classList.remove('drag'); });
+    strip.addEventListener('drop', function (e) {
+      if (!isFileDrag(e)) return;
+      e.preventDefault(); strip.classList.remove('drag');
+      Array.prototype.forEach.call((e.dataTransfer && e.dataTransfer.files) || [], uploadFile);
+    });
+
+    /* 상태 실험 */
+    function setState(kind) {
+      if (kind === 'zero') { st.imgs = []; say('첨부가 없을 때도 칸은 그대로 — 그 자리가 곧 넣는 자리입니다.', ''); }
+      else if (kind === 'two') { st.imgs = pick(2); say(''); }
+      else if (kind === 'many') { st.imgs = pick(6); say('스트립만 가로로 스크롤됩니다 — 줄 높이는 그대로.', ''); }
+      else if (kind === 'uploading') { st.imgs = pick(2).concat([{ id: 'u', name: '올리는 중.png', src: SAMPLES[3].src, state: 'up' }]); say('사진을 올리는 중… 끝나면 저장할 수 있어요.', 'warn'); }
+      else if (kind === 'failed') { st.imgs = pick(2).concat([{ id: 'e', name: '실패.png', src: SAMPLES[4].src, state: 'bad' }]); say('사진 1장을 올리지 못했어요 (네트워크 오류) — ✕로 빼고 다시 넣어주세요.', 'bad'); }
+      else if (kind === 'cap') { st.imgs = pick(8); say('사진은 최대 ' + MAX + '장까지 넣을 수 있어요.', 'warn'); }
+      paint();
+    }
+    setState(opts.init || 'two');
+    return { setState: setState };
+  }
+
+  /* 마운트 — 같은 렌더러, 배치만 다름 */
+  var wHero = makeWidget(document.getElementById('mountHero'), { init: 'two' });
+  var wA = document.getElementById('mountA') ? makeWidget(document.getElementById('mountA'), { init: 'two' }) : null;
+  var wB = document.getElementById('mountB') ? makeWidget(document.getElementById('mountB'), { stack: true, init: 'many' }) : null;
+
+  Array.prototype.forEach.call(document.querySelectorAll('.demo-bar'), function (bar) {
+    var w = bar.getAttribute('data-demo') === 'A' ? wA : wB;
+    bar.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-act]');
+      if (b && w) w.setState(b.getAttribute('data-act'));
+    });
+  });
+})();
+</script>
+</body></html>
