@@ -1194,9 +1194,12 @@ function _igLightboxEl() {
   if (el) return el;
   el = document.createElement("div");
   el.id = "igLightbox";
+  el.tabIndex = -1;                                     // ★ 열 때 여기로 포커스를 옮긴다(방향키 확보)
   el.innerHTML =
-    `<button type="button" class="iglb-close" title="닫기 (Esc)">✕</button>
-     <img id="igLbImg" alt="">
+    `<div class="iglb-wrap">
+       <img id="igLbImg" alt="">
+       <button type="button" class="iglb-close" title="닫기 (Esc)">✕</button>
+     </div>
      <div class="iglb-bar">
        <button type="button" class="iglb-btn" data-iglb="-1" title="이전 (←)">‹</button>
        <span id="igLbCnt">1 / 1</span>
@@ -1212,12 +1215,19 @@ function _igLightboxEl() {
   });
   return el;
 }
+let _igLbOpener = null;   // 닫을 때 포커스를 돌려줄 곳(원래 있던 자리)
 function _igLbOpen(field, i) {
   _igLbList = _igOk(field);
   if (!_igLbList.length) return;
   _igLbField = field;
   _igLbIdx = Math.max(0, Math.min(i, _igLbList.length - 1));
-  _igLightboxEl().classList.add("on");
+  const el = _igLightboxEl();
+  el.classList.add("on");
+  /* ★★ 포커스를 팝업으로 가져온다 — 글을 쓰다가 썸네일을 누른 경우 포커스가 textarea 에
+     남아 **방향키가 무시**됐다(실측: 텍스트칸 포커스 상태로 열면 ← → 가 안 먹음).
+     닫을 때는 원래 자리로 돌려준다(작성 흐름이 끊기지 않게). */
+  _igLbOpener = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (_) {} }
   _igLbPaint();
 }
 function _igLbPaint() {
@@ -1238,6 +1248,9 @@ function _igLbStep(d) {
 function _igLbClose() {
   const el = document.getElementById("igLightbox");
   if (el) { el.classList.remove("on"); const im = el.querySelector("#igLbImg"); if (im) im.removeAttribute("src"); }
+  // 포커스를 원래 자리로(없어졌으면 그냥 둔다 — 엉뚱한 곳으로 옮기지 않는다)
+  if (_igLbOpener && document.contains(_igLbOpener)) { try { _igLbOpener.focus({ preventScroll: true }); } catch (_) {} }
+  _igLbOpener = null;
 }
 
 /* ── 배선: 스트립 클릭·붙여넣기·드래그 · 키 리스너는 최상위 1회 ── */
@@ -1348,8 +1361,11 @@ if (typeof window !== "undefined" && !window._igKeyBound) {
   document.addEventListener("keydown", (e) => {
     const el = document.getElementById("igLightbox");
     if (!el || !el.classList.contains("on")) return;
-    const t = e.target, tag = ((t && t.tagName) || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || (t && t.isContentEditable)) return;
+    /* ★★ 팝업이 열려 있는 동안에는 **포커스가 어디에 있든** ← → Esc 를 받는다.
+       종전엔 input/textarea 포커스면 무시했는데, 글을 쓰다가 썸네일을 누르면 포커스가
+       그대로 남아 **방향키가 안 먹었다**(실측 재현). 화면 전체를 덮은 팝업이 열린 상태에서
+       타이핑 중일 수는 없다 — 그리드 방향키(입력 중 미가로채기) 규율과는 상황이 다르다.
+       브라우저 단축키(Ctrl/Alt/Cmd 조합)는 그대로 흘려보낸다. */
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === "Escape") { _igLbClose(); e.preventDefault(); }
     else if (e.key === "ArrowLeft") { _igLbStep(-1); e.preventDefault(); }
