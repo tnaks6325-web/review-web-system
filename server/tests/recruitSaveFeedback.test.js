@@ -284,8 +284,10 @@ ok('H9. ★ 제목 입력은 노트 div 만 갱신한다(입력칸 재렌더 = �
     return /addEventListener\("input"/.test(b) && /_rfRefreshLinkedTabNote/.test(b) &&
            !/innerHTML/.test(b);
   })());
-ok('H10. ★ 자동 선택하지 않는다 — 사람이 칩을 눌러야 연결된다',
-  !/_restoreLinkedTab\(s\.sheetId/.test(noteFn) &&
+/* ★ 약한 패턴(`!/_restoreLinkedTab\(s\.sheetId/`)은 `_restoreLinkedTab(_rfSugCache[0].sheetId,…)`
+   같은 다른 표기의 자동 선택을 통과시킨다(변이시험 실측) → **호출 자체가 없어야** 한다. */
+ok('H10. ★ 안내 렌더러는 절대 선택하지 않는다 — 사람이 칩을 눌러야 연결된다',
+  !/_restoreLinkedTab/.test(noteFn) &&
   /_restoreLinkedTab\(s\.sheetId, s\.tabName\)/.test(pick(recruit, 'rfPickSuggestedTab')));
 ok('H11. ★ 목록에 없는 탭은 여전히 선택하지 않는다(안내만 추가) — 잘못된 탭 연결이 빈칸보다 나쁘다',
   /if \(!_recruitTabList\.some\([\s\S]{0,90}?\) return _miss\(tabName\);/.test(pick(recruit, '_prefillLinkedTab')));
@@ -313,8 +315,13 @@ ok('H13. 정규화 — 대괄호/날짜/용량을 잡음으로 뺀다',
 ok('H14. 같은 상품 탭이 무관한 탭보다 높다',
   score('7/28 우레온_바디미스트') > score('7/30 노티드 두바이 쫀득쿠키') &&
   score('7/28 우레온_바디미스트') >= 0.6);
-ok('H15. ★ 너무 짧은 탭명(1차 등)은 0점 — 겹침계수의 오탐을 막는다',
-  score('1차') === 0 && score('7/28') === 0);
+/* ★ 겹침계수는 **짧을수록 100% 가 되기 쉽다** — 2자 탭명 '쿠키' 는 제목에 그 두 글자만 있어도
+   1.0 이 되어 엉뚱한 탭이 1순위로 추천된다. 그래서 3자 미만은 0점으로 접는다.
+   (정규화로 빈 문자열이 되는 '1차' 로는 이 가드가 실행되지 않는다 — 변이시험 실측) */
+const score2 = (t, tab) => sandbox._rfTabScore(sandbox._rfMatchNorm(t), sandbox._rfMatchNorm(tab));
+ok('H15. ★ 너무 짧은 탭명(2자)은 0점 — 겹침계수의 구조적 오탐을 막는다',
+  score2('노티드 두바이 쫀득쿠키', '쿠키') === 0 && score2('우레온 바디 미스트', '미스트') > 0 &&
+  score('1차') === 0);
 ok('H16. 무관한 탭은 임계값(0.45) 아래',
   score("7/30 노티드 두바이 쫀득쿠키") < SUG_MIN);
 ok('H17. 추천은 임계값 이상만·상한 3개·점수 내림차순',
