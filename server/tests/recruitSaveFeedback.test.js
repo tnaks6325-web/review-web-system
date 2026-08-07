@@ -93,6 +93,35 @@ ok('A13. ★ 확대 팝업(#igLightbox)은 모달 덮개보다 위에 뜬다',
 ok('A14. 확대 팝업은 body 직속이다(모달 스크롤 컨테이너 안이면 화면 흐름에 섞인다)',
   /document\.body\.appendChild\(el\)/.test(pick(recruit, '_igLightboxEl')));
 
+/* 확대 팝업 조작(사용자 확정 2026-08-07): 닫기는 **이미지 모서리**, 여러 장이면 방향키 이동 */
+ok('A15. ★ 닫기(✕)는 화면 모서리가 아니라 **이미지 모서리**에 붙는다',
+  (() => {
+    const el = pick(recruit, '_igLightboxEl');
+    const inWrap = /<div class="iglb-wrap">[\s\S]{0,240}?igLbImg[\s\S]{0,240}?iglb-close[\s\S]{0,120}?<\/div>/.test(el);
+    const wrapCss = /#igLightbox \.iglb-wrap\{position:relative/.test(modal);
+    const notViewport = !/#igLightbox \.iglb-close\{position:absolute;top:1?\dpx;right:2?\dpx/.test(modal);
+    return inWrap && wrapCss && notViewport;
+  })());
+{
+  const s = recruit.indexOf('window._igKeyBound = true;');
+  const e = recruit.indexOf('window.igPickFiles', s);
+  assert(s > 0 && e > s, '확대 팝업 키 핸들러 추출 실패');
+  const keyBlk = recruit.slice(s, e);
+  ok('A16. ★ 팝업이 열려 있으면 포커스가 어디에 있든 ← → Esc 를 받는다',
+    /ArrowLeft/.test(keyBlk) && /ArrowRight/.test(keyBlk) &&
+    !/tag === "input" \|\| tag === "textarea"/.test(keyBlk));
+  ok('A17. 브라우저 단축키(Ctrl/Alt/Cmd 조합)는 그대로 흘려보낸다',
+    /if \(e\.ctrlKey \|\| e\.altKey \|\| e\.metaKey\) return;/.test(keyBlk));
+  ok('A18. 키 리스너는 최상위 1회만 건다(팝업마다 걸면 한 번 눌러 여러 장 건너뛴다)',
+    /!window\._igKeyBound/.test(recruit) &&
+    (recruit.match(/document\.addEventListener\("keydown"/g) || []).length === 1);
+  ok('A19. 열 때 포커스를 팝업으로 옮기고, 닫을 때 원래 자리로 돌려준다',
+    /el\.focus\(\{ preventScroll: true \}\)/.test(pick(recruit, '_igLbOpen')) &&
+    /_igLbOpener[\s\S]{0,140}focus\(/.test(pick(recruit, '_igLbClose')));
+  ok('A20. 끝에서 순환하지 않는다(어디까지 봤는지 잃지 않게)',
+    /if \(n < 0 \|\| n >= _igLbList\.length\) return;/.test(pick(recruit, '_igLbStep')));
+}
+
 console.log('\n── B. 차단·실패는 모달 안쪽(토스트 금지) ──');
 const blk = pick(modal, 'recruitSaveBlock');
 ok('B1. recruitSaveBlock / recruitSaveBlockClear 전역 노출',

@@ -237,7 +237,13 @@ console.log('\n=== F. 배선·안전 규율 ===');
   ok('실패·업로드중 사진은 확대 대상이 아니다', /state === "ok"/.test(igBlock));
   ok('★ 키 리스너는 최상위 1회(window._igKeyBound 가드)',
     /!window\._igKeyBound/.test(recjs) && (recjs.match(/window\._igKeyBound = true/g) || []).length === 1);
-  ok('입력 중에는 방향키를 가로채지 않는다', /tag === "input" \|\| tag === "textarea"/.test(recjs));
+  /* ⚠ 패턴 갱신(2026-08-07 · 사용자 확정): 확대 팝업이 **열려 있는 동안**에는 포커스가
+     input/textarea 에 남아 있어도 ← → Esc 를 받는다 — 글을 쓰다가 썸네일을 누르면 포커스가
+     textarea 에 그대로 남아 **방향키가 죽었다**(브라우저로 재현). "타이핑 중 방향키를 뺏지
+     않는다"는 원래 의도는 **팝업이 닫혀 있으면 아무것도 하지 않는다**(.on 검사)로 유지된다. */
+  ok('팝업이 닫혀 있으면 방향키를 가로채지 않는다 + 브라우저 단축키는 흘려보낸다',
+    /if \(!el \|\| !el\.classList\.contains\("on"\)\) return;/.test(recjs) &&
+    /if \(e\.ctrlKey \|\| e\.altKey \|\| e\.metaKey\) return;/.test(recjs));
 
   // 저장 배선
   /* ⚠ 패턴 갱신(2026-08-07): 모달이 떠 있는 동안의 차단 사유는 토스트가 아니라 **모달 안 인라인**

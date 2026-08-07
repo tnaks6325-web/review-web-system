@@ -734,14 +734,22 @@
 #igLightbox{position:fixed;inset:0;z-index:5500;background:rgba(8,12,20,.84);display:none;
   align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:34px}
 #igLightbox.on{display:flex}
-#igLightbox img{max-width:min(980px,86vw);max-height:70vh;border-radius:10px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+#igLightbox:focus{outline:none}
+/* ★ 닫기(✕)는 **이미지 모서리**에 붙인다(화면 모서리 아님) — 그러려면 이미지를 감싼
+   래퍼가 이미지 크기 그대로여야 한다: inline-block + line-height:0(이미지 아래 여백 제거). */
+#igLightbox .iglb-wrap{position:relative;display:inline-block;max-width:min(980px,86vw);line-height:0}
+#igLightbox img{display:block;max-width:100%;max-height:70vh;border-radius:10px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.4)}
 #igLightbox .iglb-bar{display:flex;align-items:center;gap:13px;color:#E8EDF6;font-size:.78rem;font-weight:700}
 #igLightbox .iglb-btn{width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.28);
   background:rgba(255,255,255,.1);color:#fff;font-size:1.05rem;cursor:pointer;display:grid;place-items:center;padding:0;font-family:inherit}
 #igLightbox .iglb-btn:disabled{opacity:.26;cursor:default}
 #igLightbox .iglb-btn:not(:disabled):hover{background:rgba(255,255,255,.24)}
-#igLightbox .iglb-close{position:absolute;top:18px;right:22px;width:36px;height:36px;border-radius:50%;
-  border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:1.05rem;cursor:pointer;font-family:inherit}
+/* 이미지 우측상단 — 모서리에 반쯤 걸치게(사진을 가리지 않으면서 어디에 붙은 버튼인지 분명) */
+#igLightbox .iglb-close{position:absolute;top:-13px;right:-13px;width:34px;height:34px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.34);background:#1B2536;color:#fff;font-size:1rem;line-height:1;cursor:pointer;
+  font-family:inherit;box-shadow:0 4px 14px rgba(0,0,0,.45);z-index:1;display:flex;align-items:center;justify-content:center}
+#igLightbox .iglb-close:hover{background:#2A3750}
+#igLightbox .iglb-close:focus-visible{outline:3px solid rgba(147,180,245,.6);outline-offset:2px}
 #igLightbox .iglb-fld{font-size:.68rem;font-weight:800;color:#93B4F5;letter-spacing:.03em}
 #igLightbox .iglb-tip{font-size:.62rem;color:#7E8BA0}`;
   function injectCss() {
