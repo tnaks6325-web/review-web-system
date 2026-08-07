@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모집인원 조절 · 이월 · 차수 — 유저플로우 와이어프레임</title>
+<style>
+  /* 시안 문서는 라이트 고정 — 실물 재현 목업이 다크에서 뒤집히면 "실물과 같다"가 깨진다 */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background: #f1f5f9; color: #1e293b; line-height: 1.6; padding: 28px 16px 80px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 24px; margin-bottom: 6px; }
+  .sub { color: #64748b; font-size: 13px; margin-bottom: 18px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 26px; }
+  .badge { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #e0e7ff; color: #3730a3; }
+  .badge.green { background: #dcfce7; color: #166534; }
+  .badge.amber { background: #fef3c7; color: #92400e; }
+
+  section { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px 24px; margin-bottom: 22px; }
+  h2 { font-size: 18px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  h2 .no { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 8px; background: #1e293b; color: #fff; font-size: 13px; flex-shrink: 0; }
+  h3 { font-size: 15px; margin: 18px 0 8px; }
+  p { font-size: 14px; margin-bottom: 10px; }
+  ul, ol { font-size: 14px; padding-left: 20px; margin-bottom: 10px; }
+  li { margin-bottom: 5px; }
+  .note { background: #f8fafc; border-left: 4px solid #94a3b8; padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 13px; margin: 10px 0; }
+  .note.warn { border-color: #f59e0b; background: #fffbeb; }
+  .note.rule { border-color: #dc2626; background: #fef2f2; }
+  .note.ok { border-color: #16a34a; background: #f0fdf4; }
+  .kbd { font-family: inherit; font-weight: 700; background: #eef2ff; color: #3730a3; border-radius: 5px; padding: 1px 7px; font-size: 12.5px; white-space: nowrap; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0; }
+  th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f8fafc; font-size: 12.5px; }
+  td.c, th.c { text-align: center; }
+  .bad  { color: #dc2626; font-weight: 700; }
+  .good { color: #16a34a; font-weight: 700; }
+
+  /* ── 문제 사례 비교 그림 ── */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 12px 0; }
+  .cmp .box { border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 14px; }
+  .cmp .box.now  { border-color: #fca5a5; background: #fff7f7; }
+  .cmp .box.want { border-color: #86efac; background: #f7fef9; }
+  .cmp .cap { font-size: 12px; font-weight: 800; margin-bottom: 8px; }
+  .cmp .now  .cap { color: #b91c1c; }
+  .cmp .want .cap { color: #15803d; }
+  .dayrow { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12.5px; }
+  .dayrow .d { width: 66px; color: #64748b; flex-shrink: 0; }
+  .dbar { height: 16px; border-radius: 4px; background: #3b82f6; min-width: 2px; }
+  .dbar.extra { background: #f97316; }
+  .dbar.cut { background: #cbd5e1; }
+  .dayrow .v { font-weight: 700; font-size: 12px; }
+
+  /* ── 목업 공통 ── */
+  .mock { border: 2px dashed #c7d2fe; border-radius: 14px; padding: 16px; background: #fbfcff; margin: 12px 0; }
+  .mock-cap { font-size: 11.5px; font-weight: 800; color: #6366f1; letter-spacing: .04em; margin-bottom: 10px; }
+
+  /* 관리자 카드 목업 */
+  .pcard-mock { width: 300px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; overflow: hidden; box-shadow: 0 1px 4px rgba(15,23,42,.06); }
+  .pcard-mock .thumb { height: 84px; background: linear-gradient(135deg,#334155,#0f172a); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; letter-spacing: .1em; }
+  .pcard-mock .bd { padding: 12px 14px; }
+  .pcard-mock .tt { font-size: 13.5px; font-weight: 700; margin-bottom: 8px; }
+  .rgauge { position: relative; height: 18px; border-radius: 9px; background: #f1f5f9; overflow: hidden; margin-bottom: 4px; }
+  .rgauge .seg1 { position: absolute; left: 0; top: 0; bottom: 0; background: #3b82f6; }
+  .rgauge .seg2 { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg,#a5b4fc,#a5b4fc 5px,#c7d2fe 5px,#c7d2fe 10px); }
+  .rline { display: flex; justify-content: space-between; font-size: 11.5px; color: #475569; margin-bottom: 2px; }
+  .roundline { font-size: 11.5px; color: #334155; margin: 6px 0; display: flex; gap: 6px; flex-wrap: wrap; }
+  .rchip { background: #f1f5f9; border-radius: 999px; padding: 1px 8px; font-weight: 700; }
+  .rchip.done { background: #dcfce7; color: #166534; }
+  .cardbtns { display: flex; gap: 6px; margin-top: 10px; }
+  .cbtn { flex: 1; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; font-size: 12px; padding: 6px 0; text-align: center; color: #334155; }
+  .cbtn.hl { border-color: #6366f1; background: #eef2ff; color: #3730a3; font-weight: 800; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+
+  /* ── 조절 팝업 목업 (인터랙티브) ── */
+  .modal-mock { max-width: 640px; border: 1px solid #cbd5e1; border-radius: 14px; background: #fff; box-shadow: 0 8px 30px rgba(15,23,42,.12); overflow: hidden; }
+  .mm-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+  .mm-head b { font-size: 15px; }
+  .mm-head .x { color: #94a3b8; font-size: 18px; }
+  .mm-body { padding: 16px 18px; }
+  .planhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; gap: 6px; }
+  .planhead .l { font-size: 13px; font-weight: 800; }
+  .planhead .r { font-size: 12px; color: #475569; }
+  .planhead .r b { color: #1d4ed8; }
+
+  .prow { display: grid; grid-template-columns: 92px 1fr 118px; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px dashed #eef2f7; }
+  .prow.today { background: #f0f7ff; border-radius: 8px; }
+  .prow .pd { font-size: 12.5px; color: #334155; }
+  .prow .pd .tdy { display: inline-block; font-size: 10.5px; font-weight: 800; color: #1d4ed8; background: #dbeafe; border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+  .prow .pd .adj { display: inline-block; font-size: 10.5px; font-weight: 800; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+  .gwrap { position: relative; height: 26px; border-radius: 13px; background: #f1f5f9; cursor: ew-resize; user-select: none; touch-action: none; }
+  .gwrap .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 13px; background: linear-gradient(90deg,#60a5fa,#3b82f6); transition: width .05s linear; }
+  .gwrap .conf { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 13px 0 0 13px; background: #1d4ed8; opacity: .55; pointer-events: none; }
+  .gwrap .knob { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid #2563eb; box-shadow: 0 1px 4px rgba(15,23,42,.25); pointer-events: none; }
+  .gwrap .base { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #94a3b8; pointer-events: none; }
+  .gwrap.ro { cursor: default; opacity: .75; }
+  .pctl { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+  .pctl .num { width: 44px; text-align: center; font-weight: 800; font-size: 14px; color: #1e293b; }
+  .pctl .num small { display: block; font-weight: 400; font-size: 10px; color: #94a3b8; }
+  .stepb { width: 26px; height: 26px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; font-size: 15px; font-weight: 800; color: #334155; cursor: pointer; line-height: 1; }
+  .stepb:disabled { opacity: .35; cursor: default; }
+
+  .legend { display: flex; gap: 14px; font-size: 11.5px; color: #475569; margin: 8px 2px 2px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -2px; }
+
+  .endpreview { margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .endpreview b { color: #1d4ed8; }
+  .endpreview .chg { color: #b45309; font-weight: 700; font-size: 12px; }
+
+  .roundbox { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+  .roundbox .rh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .roundbox .rh b { font-size: 13px; }
+  .raddbtn { border: 1px solid #6366f1; color: #3730a3; background: #eef2ff; border-radius: 8px; font-size: 12px; font-weight: 800; padding: 5px 10px; cursor: pointer; }
+  .rrow { display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 5px 2px; }
+  .rrow .rno { font-weight: 800; background: #e0e7ff; color: #3730a3; border-radius: 6px; padding: 1px 7px; font-size: 11.5px; }
+  .rrow .rmeta { color: #64748b; }
+  .rrow .rprog { margin-left: auto; font-weight: 700; }
+
+  .mm-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid #e2e8f0; background: #f8fafc; }
+  .mm-foot .hint { font-size: 11.5px; color: #64748b; }
+  .btn { border: none; border-radius: 9px; padding: 9px 18px; font-size: 13.5px; font-weight: 800; cursor: pointer; }
+  .btn.pri { background: #2563eb; color: #fff; }
+  .btn.ghost { background: #fff; border: 1px solid #cbd5e1; color: #475569; }
+
+  /* 축소 시 선택 팝업 */
+  .choice { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .choice.on { display: flex; }
+  .chbox { width: 420px; max-width: 100%; background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 12px 40px rgba(15,23,42,.3); }
+  .chbox h4 { font-size: 15px; margin-bottom: 6px; }
+  .chbox .cd { font-size: 13px; color: #475569; margin-bottom: 14px; }
+  .chopt { display: block; width: 100%; text-align: left; border: 1.5px solid #cbd5e1; border-radius: 10px; background: #fff; padding: 11px 14px; margin-bottom: 8px; cursor: pointer; font-size: 13px; }
+  .chopt:hover { border-color: #2563eb; background: #f0f7ff; }
+  .chopt b { display: block; font-size: 13.5px; margin-bottom: 2px; }
+  .chopt small { color: #64748b; font-size: 12px; line-height: 1.45; display: block; }
+  .chcancel { display: block; margin: 6px auto 0; border: none; background: none; color: #94a3b8; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); background: #1e293b; color: #fff; font-size: 13px; padding: 10px 18px; border-radius: 999px; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 60; max-width: 92vw; text-align: center; }
+  .toast.on { opacity: .96; }
+
+  .histbox { margin-top: 12px; }
+  .histbox b { font-size: 12.5px; }
+  .hist { list-style: none; padding: 0; margin: 6px 0 0; font-size: 12px; color: #475569; }
+  .hist li { padding: 4px 8px; border-left: 3px solid #c7d2fe; margin-bottom: 4px; background: #f8fafc; border-radius: 0 6px 6px 0; }
+
+  /* 유저플로우 스텝 */
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 10px 0; }
+  .fstep { display: flex; gap: 12px; }
+  .fstep .fn { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+  .fstep .fn .dot { width: 26px; height: 26px; border-radius: 50%; background: #2563eb; color: #fff; font-size: 12.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+  .fstep .fn .ln { width: 2px; flex: 1; background: #cbd5e1; min-height: 12px; }
+  .fstep:last-child .fn .ln { display: none; }
+  .fstep .fb { padding-bottom: 16px; font-size: 13.5px; }
+  .fstep .fb b.t { display: block; font-size: 13.5px; margin-bottom: 2px; }
+  .fstep .fb .desc { color: #475569; font-size: 13px; }
+  .speech { display: inline-block; background: #fef9c3; border-radius: 10px; padding: 4px 12px; font-size: 12.5px; color: #713f12; font-weight: 700; margin: 2px 0; }
+
+  .ro-mock { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; background: #fafafa; font-size: 13px; }
+  .ro-mock .rr { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #e2e8f0; font-size: 12.5px; }
+  .ro-mock .rr:last-child { border-bottom: none; }
+
+  .devnote { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 16px; font-size: 12.5px; color: #475569; margin-top: 10px; }
+  .devnote b { color: #334155; }
+  code { background: #f1f5f9; border-radius: 4px; padding: 1px 5px; font-size: 12px; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+
+  @media (max-width: 720px) {
+    .cmp { grid-template-columns: 1fr; }
+    .prow { grid-template-columns: 76px 1fr 112px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>📅 모집인원 조절 · 이월 · 차수 — 구현계획 와이어프레임</h1>
+  <div class="sub">2026-08-07 · 리뷰웹시스템 모집공고 — 일반인용 유저플로우 시안 (아래 목업은 가짜 데이터로 실제로 움직입니다)</div>
+  <div class="badges">
+    <span class="badge green">확정 ① 축소 시 "종료일 연장 / 남은 날 분산" 선택지 제공</span>
+    <span class="badge green">확정 ② 차수 구분 표시 + 차수별 집계</span>
+    <span class="badge green">확정 ③ 1단계는 일건수 캠페인만 (시트 일정 캠페인은 읽기 전용)</span>
+  </div>
+
+  <!-- ══════════════ 1. 왜 필요한가 ══════════════ -->
+  <section>
+    <h2><span class="no">1</span>왜 필요한가 — 지금 생기는 문제 2가지</h2>
+    <p>지금 시스템은 <b>"매일 같은 인원(일건수)을 모집한다"는 계획이 바꿀 수 없게 고정</b>되어 있습니다.
+       실제로 모인 인원이 그 계획보다 적으면, 부족분을 <b>다음날 자동으로 얹습니다(이월)</b>.
+       자연스럽게 미달된 경우엔 이게 맞는 동작이지만, <b>업체 요청으로 일부러 줄인 날</b>까지 "미달"로 오해하는 게 문제입니다.</p>
+
+    <h3>사례 1 — 업체: "오늘은 20명만 모집해주세요"</h3>
+    <div class="cmp">
+      <div class="box now">
+        <div class="cap">❌ 지금 — 시스템이 "20명 부족"으로 오해</div>
+        <div class="dayrow"><span class="d">오늘</span><span class="dbar" style="width:60px"></span><span class="v">20명 모집</span></div>
+        <div class="dayrow"><span class="d">다음날</span><span class="dbar" style="width:120px"></span><span class="dbar extra" style="width:60px"></span><span class="v bad">60명!</span></div>
+        <p style="font-size:12.5px;color:#7f1d1d;margin:6px 0 0">일부러 줄인 20명분이 자동 이월되어 다음날 40+20=60명이 열림 → 업체 의도와 어긋남</p>
+      </div>
+      <div class="box want">
+        <div class="cap">✅ 개선 — "계획을 20명으로 바꾼 것"으로 인식</div>
+        <div class="dayrow"><span class="d">오늘</span><span class="dbar" style="width:60px"></span><span class="v">20명 모집</span></div>
+        <div class="dayrow"><span class="d">다음날</span><span class="dbar" style="width:120px"></span><span class="v good">40명 그대로</span></div>
+        <p style="font-size:12.5px;color:#14532d;margin:6px 0 0">빠진 20명은 관리자가 고른 방식(종료일 연장 / 남은 날 분산)으로 처리 — 총량 200은 그대로</p>
+      </div>
+    </div>
+
+    <h3>사례 2 — 업체: "오늘은 10명 더 모집해주세요"</h3>
+    <div class="cmp">
+      <div class="box now">
+        <div class="cap">❌ 지금 — "오늘만 50명"을 알릴 방법이 없음</div>
+        <p style="font-size:12.5px;color:#7f1d1d">일건수를 40→50으로 고치면 <b>매일</b> 50명이 되어버림. 오늘 하루만 늘릴 수단이 없음.</p>
+      </div>
+      <div class="box want">
+        <div class="cap">✅ 개선 — 오늘만 50명, 내일은 40명 그대로</div>
+        <div class="dayrow"><span class="d">오늘</span><span class="dbar" style="width:120px"></span><span class="dbar extra" style="width:30px"></span><span class="v">50명</span></div>
+        <div class="dayrow"><span class="d">다음날</span><span class="dbar" style="width:120px"></span><span class="v good">40명 그대로 (30으로 줄이지 않음)</span></div>
+        <p style="font-size:12.5px;color:#14532d;margin:6px 0 0">먼저 채운 만큼 마지막 날 인원이 자연히 줄어 총량 200에서 정확히 멈춤</p>
+      </div>
+    </div>
+
+    <h3>사례 3 — 같은 캠페인에 물량 추가 (차수)</h3>
+    <p>8/1 시작 200건 캠페인에 8/7 100건이 추가되면, 총량은 300이 되지만
+       <b>"1차 200건 / 2차 100건"이 구분되어 각각 얼마나 진행됐는지</b> 관리자 화면에서 보여야 합니다.
+       지금은 총모집 숫자 하나뿐이라 추가분이 섞여버립니다.</p>
+  </section>
+
+  <!-- ══════════════ 2. 핵심 원칙 ══════════════ -->
+  <section>
+    <h2><span class="no">2</span>절대 바뀌지 않는 원칙 (완화 금지)</h2>
+    <div class="note rule"><b>① 총량은 무슨 일이 있어도 지켜진다.</b><br>
+      하루 인원을 어떻게 조절해도 캠페인 전체 모집 수는 정해진 총량(차수 합계)을 넘을 수 없고,
+      총량에 도달할 때까지 모집이 계속됩니다. 총량을 늘리는 유일한 방법은 <b>차수 추가</b>뿐입니다.</div>
+    <ul>
+      <li><b>② 조절 = 계획 변경.</b> 관리자가 어떤 날의 인원을 바꾸면 그날의 "계획 자체"가 바뀐 것입니다. 계획대로 채워졌다면 부족분이 없으므로 <b>자동 이월도 없습니다.</b></li>
+      <li><b>③ 자연 미달만 자동 이월.</b> 조절하지 않았는데 실제 참여가 계획에 못 미친 경우에만, 지금처럼 부족분이 다음 진행일에 자동으로 얹힙니다. (버스트 상한도 지금 그대로)</li>
+      <li><b>④ 늘린 날이 다음날을 줄이지 않는다.</b> 오늘 +10명을 모집해도 내일은 기본 인원 그대로입니다. 대신 총량에 먼저 도달해 마지막 날이 자연히 줄어듭니다.</li>
+      <li><b>⑤ 이미 확정된 인원 아래로는 못 줄인다.</b> 오늘 25명이 이미 확정됐다면 오늘 인원을 25 미만으로 내릴 수 없습니다(참여 취소는 조절 기능의 일이 아님).</li>
+      <li><b>⑥ 시트 일정 캠페인은 1단계 제외.</b> 시트의 구매일자 컬럼으로 날짜별 정원이 자동 파생되는 캠페인은 <b>시트가 진실원본</b>이므로, 이 화면에서는 읽기 전용으로 보여주고 "조절은 시트에서(그날 행 수 변경)" 안내만 합니다.</li>
+      <li><b>⑦ 조절 이력은 전부 남는다.</b> 누가 언제 어느 날을 몇 명으로 바꿨고 빠진 인원을 어떻게 처리했는지 기록되어, "왜 오늘 20명이지?"에 화면이 답할 수 있습니다.</li>
+    </ul>
+  </section>
+
+  <!-- ══════════════ 3. 화면 구성 ══════════════ -->
+  <section>
+    <h2><span class="no">3</span>화면 구성 — 어디서 어떻게 조절하나</h2>
+
+    <h3>3-1. 진입점: 관리자 공고 카드의 [📅 인원조절] 버튼</h3>
+    <p>참여형 공고 카드의 버튼 줄(수정·보기·시트·관제…)에 <b>[📅 인원조절]</b>이 추가됩니다.
+       카드 게이지에는 차수별 진행이 함께 표시됩니다.</p>
+    <div class="mock">
+      <div class="mock-cap">MOCKUP — 관리자 공고 카드 (차수 구분 게이지)</div>
+      <div class="pcard-mock">
+        <div class="thumb">상품 썸네일</div>
+        <div class="bd">
+          <div class="tt">[공식몰] 위프 탈취제 WHIFF …</div>
+          <div class="rline"><span>오늘 모집</span><span><b style="color:#1d4ed8">12</b> / 20명 <span style="color:#b45309;font-weight:700">(조절됨·기본 40)</span></span></div>
+          <div class="rgauge"><div class="seg1" style="width:60%"></div></div>
+          <div class="roundline">
+            <span class="rchip done">1차 200/200 완료</span>
+            <span class="rchip">2차 12/100</span>
+            <span style="color:#64748b">총 212/300</span>
+          </div>
+          <div class="cardbtns">
+            <span class="cbtn">✏ 수정</span><span class="cbtn">👁 보기</span><span class="cbtn hl">📅 인원조절</span><span class="cbtn">📡 관제</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>3-2. 조절 팝업 — 직접 움직여 보세요</h3>
+    <p>아래 목업은 실제로 동작합니다. <b>게이지를 마우스로 좌우 드래그</b>하거나 <b>− / ＋ 버튼</b>으로 날짜별 인원을 바꿔보세요.
+       기본값(40명)보다 <b>줄이면</b> "빠진 인원을 어떻게 할까요?" 선택 팝업이 뜨고,
+       <b>늘리면</b> 내일 이후는 그대로라는 안내가 나옵니다. 미래 날짜도 같은 방법으로 미리 조절할 수 있습니다.</p>
+
+    <div class="mock">
+      <div class="mock-cap">MOCKUP — 모집인원 조절 팝업 (가짜 데이터 · 실제 동작 · 오늘 = 8/6 가정)</div>
+      <div class="modal-mock">
+        <div class="mm-head"><b>📅 모집인원 조절 — [공식몰] 위프 탈취제</b><span class="x">✕</span></div>
+        <div class="mm-body">
+          <div class="planhead">
+            <span class="l">날짜별 모집 계획</span>
+            <span class="r">기본 일건수 <b>40명</b> · 총량 <b id="mTotal">200명</b> · 확정 <b id="mConfirmed">92명</b></span>
+          </div>
+          <div id="planRows"></div>
+          <div class="legend">
+            <span><i style="background:#1d4ed8;opacity:.55"></i>이미 확정된 인원(못 줄임)</span>
+            <span><i style="background:#3b82f6"></i>모집 계획</span>
+            <span><i style="background:#94a3b8;width:2px;height:14px;border-radius:0"></i>기본 일건수(40) 위치</span>
+          </div>
+          <div class="endpreview">
+            <span>예상 종료일: <b id="endDate">—</b> <span class="chg" id="endChg"></span></span>
+            <button class="btn ghost" id="resetBtn" style="padding:6px 12px;font-size:12px">처음으로 되돌리기</button>
+          </div>
+
+          <div class="roundbox">
+            <div class="rh"><b>차수 (물량 추가 이력)</b><button class="raddbtn" id="addRoundBtn">＋ 차수 추가 (+100건 예시)</button></div>
+            <div id="roundRows"></div>
+            <div class="note" style="margin:8px 0 0;font-size:12px">차수를 추가하면 총량이 늘고, 카드·관제에 차수별 진행이 구분 표시됩니다. <b>총량을 늘리는 유일한 창구</b>입니다.</div>
+          </div>
+
+          <div class="histbox">
+            <b>조절 이력</b>
+            <ul class="hist" id="histList"><li>이력이 여기에 쌓입니다 — 게이지를 움직여 보세요.</li></ul>
+          </div>
+        </div>
+        <div class="mm-foot">
+          <span class="hint">조절은 [확정 저장]을 눌러야 실제 반영됩니다 (드래그만으로는 저장 안 됨)</span>
+          <div><button class="btn ghost">닫기</button> <button class="btn pri">확정 저장</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note warn"><b>드래그만으로 끝내지 않는 이유</b> — 마우스를 놓는 순간 저장되면 오조작 한 번이 곧 모집 정원 변경 사고가 됩니다.
+      그래서 ① 게이지/버튼으로 값을 바꾸고 → ② 줄인 경우 처리 방식을 고르고 → ③ 마지막에 <b>[확정 저장]</b>을 눌러야 서버에 반영됩니다.
+      숫자 −/＋ 버튼을 함께 두는 이유는 정확한 값 입력(드래그로 37↔38 맞추기 어려움)과 태블릿·노트북 터치패드 대응입니다.
+      또한 <b>질문(빠진 인원 처리)은 조절 한 묶음당 한 번만</b> — 버튼을 연타하거나 드래그하는 동안에는 묻지 않고, 조절을 잠깐 멈추면 그때 묻습니다(클릭마다 팝업이 뜨면 연속 조절이 불가능함).</div>
+
+    <h3>3-3. 시트 일정 캠페인은 이렇게 보입니다 (읽기 전용)</h3>
+    <div class="mock">
+      <div class="mock-cap">MOCKUP — 시트 일정 캠페인의 같은 팝업 (조절 불가)</div>
+      <div class="ro-mock">
+        <p style="font-weight:800;margin-bottom:8px">📄 이 캠페인의 날짜별 정원은 <span style="color:#1d4ed8">시트의 구매일자 컬럼</span>에서 자동으로 읽어옵니다.</p>
+        <div class="rr"><span>8/6 (오늘)</span><span>시트에 40행 → 40명</span></div>
+        <div class="rr"><span>8/7</span><span>시트에 40행 → 40명</span></div>
+        <div class="rr"><span>8/8</span><span>시트에 30행 → 30명</span></div>
+        <p style="margin-top:10px;font-size:12.5px;color:#92400e"><b>⚠ 여기서는 조절할 수 없습니다.</b> 인원을 바꾸려면 시트에서 그날 날짜가 적힌 행 수를 조절하세요 (최대 5분 뒤 자동 반영). 화면 조절 기능은 후속 단계에서 검토합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 4. 유저플로우 ══════════════ -->
+  <section>
+    <h2><span class="no">4</span>유저플로우 — 시나리오별 단계</h2>
+
+    <h3>시나리오 A. 업체 요청으로 오늘 인원 축소 (40 → 20)</h3>
+    <div class="flow">
+      <div class="fstep"><div class="fn"><div class="dot">1</div><div class="ln"></div></div><div class="fb"><b class="t">업체 연락</b><span class="speech">"오늘은 20명만 모집해주세요"</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">2</div><div class="ln"></div></div><div class="fb"><b class="t">공고 카드 → [📅 인원조절]</b><span class="desc">오늘 줄의 게이지를 20까지 내림 (이미 확정 12명 아래로는 안 내려감)</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">3</div><div class="ln"></div></div><div class="fb"><b class="t">선택 팝업: "빠진 20명을 어떻게 할까요?"</b><span class="desc">㉮ <b>종료일 연장</b> — 이후 날들은 40명 그대로, 마지막에 하루가 늘어남 / ㉯ <b>남은 날 분산</b> — 종료일 유지, 남은 진행일에 고르게 +10씩</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">4</div><div class="ln"></div></div><div class="fb"><b class="t">[확정 저장]</b><span class="desc">카드에 "오늘 12/20명 (조절됨·기본 40)" 표시 · 리뷰어 화면은 오늘 정원 20으로 동작 · 이력 기록</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">5</div></div><div class="fb"><b class="t">다음날</b><span class="desc good" style="color:#15803d;font-weight:700">자동 이월 없음 — 계획대로 40명(분산 선택 시 50명)만 열림. 총량 200은 그대로.</span></div></div>
+    </div>
+
+    <h3>시나리오 B. 업체 요청으로 오늘 인원 증가 (40 → 50)</h3>
+    <div class="flow">
+      <div class="fstep"><div class="fn"><div class="dot">1</div><div class="ln"></div></div><div class="fb"><b class="t">업체 연락</b><span class="speech">"오늘 10명 더 부탁드려요"</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">2</div><div class="ln"></div></div><div class="fb"><b class="t">[📅 인원조절] → 오늘 게이지를 50으로 올림</b><span class="desc">안내: "내일 이후는 그대로 40명입니다. 총량 200은 변하지 않아요." — 선택 팝업 없음(늘림은 고를 게 없음)</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">3</div></div><div class="fb"><b class="t">[확정 저장]</b><span class="desc">먼저 채운 10명만큼 마지막 날 인원이 자연히 줄어 총량에서 정확히 멈춤 (예상 종료일이 당겨질 수 있음을 미리보기로 표시)</span></div></div>
+    </div>
+
+    <h3>시나리오 C. 미래 날짜 미리 조절 (예: 다음주 월요일은 업체 휴무)</h3>
+    <div class="flow">
+      <div class="fstep"><div class="fn"><div class="dot">1</div><div class="ln"></div></div><div class="fb"><b class="t">[📅 인원조절] → 미래 날짜 줄에서 조절</b><span class="desc">오늘과 똑같은 게이지 조작 — 예: 8/11을 0명으로 (그날은 아예 열지 않음)</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">2</div><div class="ln"></div></div><div class="fb"><b class="t">빠진 인원 처리 선택 → [확정 저장]</b><span class="desc">그날이 되면 조절된 계획대로 동작 — 당일 아침에 손댈 필요 없음</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">3</div></div><div class="fb"><b class="t">언제든 다시 변경 가능</b><span class="desc">그날이 오기 전까지는 몇 번이든 다시 조절할 수 있고, 이력이 전부 남습니다</span></div></div>
+    </div>
+
+    <h3>시나리오 D. 물량 추가 = 차수 추가 (8/7에 +100건)</h3>
+    <div class="flow">
+      <div class="fstep"><div class="fn"><div class="dot">1</div><div class="ln"></div></div><div class="fb"><b class="t">업체 연락</b><span class="speech">"반응이 좋아서 100건 추가할게요"</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">2</div><div class="ln"></div></div><div class="fb"><b class="t">[📅 인원조절] → [＋ 차수 추가]</b><span class="desc">추가 건수(100)와 시작일(8/7) 입력 → 총량 200 → 300. <b>총모집 칸을 직접 고치는 게 아니라 차수로 추가</b>해야 구분이 남습니다.</span></div></div>
+      <div class="fstep"><div class="fn"><div class="dot">3</div></div><div class="fb"><b class="t">이후 화면</b><span class="desc">카드·관제에 <b>"1차 200/200 완료 · 2차 12/100"</b> 구분 표시. 집계는 확정 순서대로 1차부터 차오름. 리뷰어 화면은 지금처럼 합산(212/300)만 보임.</span></div></div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 5. 동작 규칙 표 ══════════════ -->
+  <section>
+    <h2><span class="no">5</span>경우별 동작 정리표</h2>
+    <table>
+      <tr><th style="width:30%">상황</th><th>시스템 동작</th><th style="width:26%">총량</th></tr>
+      <tr><td>조절 없이 자연 미달<br><small>(40명 계획, 32명만 참여)</small></td><td>지금과 동일 — 부족 8명이 다음 진행일에 자동 이월 (버스트 상한 그대로)</td><td class="c">불변</td></tr>
+      <tr><td><b>의도적으로 축소</b><br><small>(40 → 20 조절)</small></td><td>자동 이월 없음. 빠진 20명은 조절 시점에 <b>㉮ 종료일 연장 / ㉯ 남은 날 분산</b> 중 선택</td><td class="c">불변 (도달까지 계속)</td></tr>
+      <tr><td>축소한 날 또 미달<br><small>(20명 계획, 15명 참여)</small></td><td>조절된 계획(20) 기준으로 미달 5명만 자동 이월 — 원래 기본값(40) 기준으로 계산하지 않음</td><td class="c">불변</td></tr>
+      <tr><td><b>의도적으로 증가</b><br><small>(40 → 50 조절)</small></td><td>다음날은 기본값 그대로. 먼저 채운 만큼 마지막 날이 자연히 줄어 총량에서 멈춤</td><td class="c">불변</td></tr>
+      <tr><td>확정 인원보다 낮게 축소 시도<br><small>(25명 확정인데 20으로)</small></td><td>불가 — 게이지가 확정 인원(25)에서 멈추고 사유 안내</td><td class="c">불변</td></tr>
+      <tr><td><b>물량 추가</b></td><td>총모집 숫자 수정이 아니라 <b>[＋ 차수 추가]</b>로만 — 차수별 건수·시작일·진행이 구분 기록</td><td class="c good">차수 합계로 증가</td></tr>
+      <tr><td>시트 일정 캠페인</td><td>1단계 제외 — 날짜별 정원을 읽기 전용 표시 + "시트에서 조절" 안내</td><td class="c">시트 기준</td></tr>
+    </table>
+  </section>
+
+  <!-- ══════════════ 6. 구현 계획 ══════════════ -->
+  <section>
+    <h2><span class="no">6</span>구현 계획 (단계별)</h2>
+    <h3>M1 — 기반: 날짜별 계획표 + 차수 원장 (백엔드)</h3>
+    <ul>
+      <li>저장소 2개 신설: <b>날짜별 계획</b>(캠페인 × 날짜 → 그날 인원, 값 없는 날 = 기본 일건수) · <b>차수 원장</b>(차수 번호·건수·시작일·등록자, 초도분은 1차로 자동 기록). 조절·차수 변경은 전부 이력으로 남김.</li>
+      <li>정원 계산 변경: "기본 일건수 × 경과일수" 대신 <b>"날짜별 계획의 누적 합 − 누적 확정"</b>으로 이월을 계산 → 원칙 ②③④가 구조적으로 성립(조절한 날은 계획 자체가 바뀌므로 미달이 아니게 됨).</li>
+      <li>총량 = 차수 합계. 기존 총모집 값은 1차로 흡수 — <b>계획·차수를 하나도 안 만진 캠페인은 지금과 100% 동일하게 동작</b>(옵트인).</li>
+      <li>목록·상세·참여 게이트가 전부 같은 계획을 보도록 기존 집계 경로에 실어 보냄(화면마다 다른 정원을 보면 "카드는 열렸는데 참여는 거부"가 됨).</li>
+    </ul>
+    <h3>M2 — 조절 팝업 UI</h3>
+    <ul>
+      <li>공고 카드 [📅 인원조절] → 위 3-2 팝업: 게이지 드래그 + −/＋ 버튼, 축소 시 연장/분산 선택, 예상 종료일 미리보기, [확정 저장]에서만 반영.</li>
+      <li>카드에 "조절됨" 배지·차수 게이지, 관제 패널에 날짜별 계획 대비 실적 표시.</li>
+    </ul>
+    <h3>M3 — 차수 관리 UI</h3>
+    <ul>
+      <li>[＋ 차수 추가] 폼(건수·시작일·메모), 카드·관제 차수별 집계(1차 200/200 · 2차 12/100), 차수 이력 표시.</li>
+    </ul>
+    <div class="devnote">
+      <b>개발 메모(비개발자는 건너뛰어도 됩니다)</b> — 신규 테이블 <code>campaign_daily_plans</code>(UNIQUE(campaign_id, plan_date), 캠페인 FK는 TEXT — 42804 규율) · <code>campaign_rounds</code>.
+      <code>dailyQuota</code>(campaignState.service)의 <code>planned = dl × days</code>를 계획표 누적 합으로 치환하고, 축소-분산 선택은 저장 시점에 미래 날짜 계획 행들로 풀어 씀(런타임 분기 최소화).
+      불변식 ①("이월은 한도를 줄이지 않는다")은 <b>그날 계획값 기준</b>으로 재정의. 조절 API는 adminOrMaster + 공고 수정과 같은 편집 게이트, 스코프 토큰(<code>via:'reviewer_campaign'</code>) 미허용.
+      시트 일정 캠페인은 <code>_isScheduleDriven</code> 판정으로 조절 API를 거부(읽기 전용 응답). 킬스위치 1개(계획표 무시 = 전건 기존 동작).
+    </div>
+  </section>
+
+  <!-- ══════════════ 7. 한계·주의 ══════════════ -->
+  <section>
+    <h2><span class="no">7</span>한계 · 주의 (같이 알아둘 것)</h2>
+    <ul>
+      <li><b>이미 참여한 인원은 건드리지 않습니다.</b> 축소는 "앞으로 열 자리"만 줄입니다. 확정 취소가 필요하면 기존 주문취소 경로를 사용합니다.</li>
+      <li><b>분산 선택 시 하루 인원이 늘어난 날</b>은 시트 기입·검수 인력이 그만큼 필요합니다 — 미리보기에서 날짜별 인원을 보여주고 확정하게 하는 이유입니다.</li>
+      <li><b>진행 중인 홀드(자리 잡은 리뷰어)는 축소로 밀려나지 않습니다.</b> 축소 하한은 "확정 + 유효 홀드" 기준으로 잡습니다.</li>
+      <li><b>시트 일정 캠페인</b>(확정 ③)은 이번 단계에서 화면 조절이 불가하며, 후속 단계에서 "화면 조절이 시트보다 우선" 옵션을 별도 검토합니다.</li>
+      <li>차수 추가는 <b>총량을 늘리는 정식 창구</b>가 되므로, 공고 수정 모달의 총모집 칸은 차수가 있는 캠페인에서 읽기 전용(차수 합계 표시)으로 바뀝니다 — 두 창구가 남으면 값이 어긋납니다.</li>
+    </ul>
+  </section>
+
+</div>
+
+<!-- 축소 시 선택 팝업 -->
+<div class="choice" id="choiceOv">
+  <div class="chbox">
+    <h4 id="chTitle">빠진 20명을 어떻게 할까요?</h4>
+    <div class="cd" id="chDesc">총량 200명은 그대로 지켜집니다 — 빠진 인원을 언제 모집할지만 고릅니다.</div>
+    <button class="chopt" id="chExtend"><b>㉮ 종료일 연장 (계획 유지)</b><small id="chExtendDesc">이후 날들은 기본 인원 그대로 진행하고, 마지막에 진행일이 늘어납니다.</small></button>
+    <button class="chopt" id="chSpread"><b>㉯ 남은 날 분산 (종료일 유지)</b><small id="chSpreadDesc">빠진 인원을 남은 진행일에 고르게 나눠 얹습니다.</small></button>
+    <button class="chcancel" id="chCancel">취소 (원래 인원으로 되돌리기)</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  // ── 가짜 데이터 ──────────────────────────────────────────
+  // 오늘 = 8/6 가정. 8/4·8/5는 각 40명 확정 완료, 오늘은 12명 확정 진행 중.
+  var DEFAULT_DAILY = 40;
+  var SCALE_MAX = 80;              // 게이지 눈금 최대값
+  var days = [];                   // {label, planned, confirmed, isToday, adjusted}
+  var rounds = [];                 // {no, count, date, label}
+  var confirmedPast = 80;          // 8/4 + 8/5 확정 (오늘 이전)
+
+  function initData() {
+    days = [
+      { label: '8/6 (목)', planned: DEFAULT_DAILY, confirmed: 12, isToday: true,  adjusted: false },
+      { label: '8/7 (금)', planned: DEFAULT_DAILY, confirmed: 0,  isToday: false, adjusted: false },
+      { label: '8/8 (토)', planned: DEFAULT_DAILY, confirmed: 0,  isToday: false, adjusted: false },
+      { label: '8/9 (일)', planned: DEFAULT_DAILY, confirmed: 0,  isToday: false, adjusted: false },
+      { label: '8/10 (월)', planned: DEFAULT_DAILY, confirmed: 0, isToday: false, adjusted: false }
+    ];
+    rounds = [ { no: 1, count: 200, date: '8/1', label: '초도' } ];
+  }
+
+  function totalCap() { return rounds.reduce(function (s, r) { return s + r.count; }, 0); }
+  function confirmedAll() { return confirmedPast + days[0].confirmed; }
+
+  // 예상 종료일: 오늘부터 계획값대로 채운다고 가정, 목록 밖은 기본 일건수로 연장
+  var EXTRA_LABELS = ['8/11 (화)', '8/12 (수)', '8/13 (목)', '8/14 (금)', '8/15 (토)', '8/16 (일)', '8/17 (월)', '8/18 (화)'];
+  function endInfo() {
+    // idx = days 배열 안이면 그 인덱스, 목록 밖(연장)이면 -1
+    var remain = totalCap() - confirmedPast;
+    if (remain <= 0) return { label: days[0].label, idx: 0 };
+    for (var i = 0; i < days.length; i++) {
+      remain -= days[i].planned;
+      if (remain <= 0) return { label: days[i].label, idx: i };
+    }
+    for (var j = 0; j < EXTRA_LABELS.length; j++) {
+      remain -= DEFAULT_DAILY;
+      if (remain <= 0) return { label: EXTRA_LABELS[j], idx: -1 };
+    }
+    return { label: EXTRA_LABELS[EXTRA_LABELS.length - 1] + ' 이후', idx: -1 };
+  }
+  function endDateLabel() { return endInfo().label; }
+  var baseEnd = null;
+
+  // ── 렌더 ─────────────────────────────────────────────────
+  var $rows = document.getElementById('planRows');
+  var $end = document.getElementById('endDate');
+  var $endChg = document.getElementById('endChg');
+  var $total = document.getElementById('mTotal');
+  var $confirmed = document.getElementById('mConfirmed');
+  var $rounds = document.getElementById('roundRows');
+  var $hist = document.getElementById('histList');
+  var histCount = 0;
+
+  function render() {
+    var html = '';
+    days.forEach(function (d, i) {
+      var pw = Math.min(100, d.planned / SCALE_MAX * 100);
+      var cw = Math.min(100, d.confirmed / SCALE_MAX * 100);
+      var bw = DEFAULT_DAILY / SCALE_MAX * 100;
+      html += '<div class="prow' + (d.isToday ? ' today' : '') + '">'
+        + '<span class="pd">' + d.label
+        + (d.isToday ? '<span class="tdy">오늘</span>' : '')
+        + (d.adjusted ? '<span class="adj">조절됨</span>' : '') + '</span>'
+        + '<div class="gwrap" data-i="' + i + '">'
+        +   '<div class="fill" style="width:' + pw + '%"></div>'
+        +   (d.confirmed > 0 ? '<div class="conf" style="width:' + cw + '%"></div>' : '')
+        +   '<div class="base" style="left:' + bw + '%"></div>'
+        +   '<div class="knob" style="left:' + pw + '%"></div>'
+        + '</div>'
+        + '<div class="pctl">'
+        +   '<button class="stepb" data-i="' + i + '" data-d="-1">−</button>'
+        +   '<span class="num">' + d.planned + '<small>' + (d.confirmed > 0 ? '확정 ' + d.confirmed : '명') + '</small></span>'
+        +   '<button class="stepb" data-i="' + i + '" data-d="1">＋</button>'
+        + '</div></div>';
+    });
+    $rows.innerHTML = html;
+
+    $total.textContent = totalCap() + '명';
+    $confirmed.textContent = confirmedAll() + '명';
+    var e = endDateLabel();
+    $end.textContent = e;
+    if (baseEnd === null) baseEnd = e;
+    $endChg.textContent = (e === baseEnd) ? '' : '(원래 ' + baseEnd + ' → 변경됨)';
+
+    var rh = '';
+    rounds.forEach(function (r) {
+      var doneBefore = rounds.filter(function (x) { return x.no < r.no; }).reduce(function (s, x) { return s + x.count; }, 0);
+      var got = Math.max(0, Math.min(r.count, confirmedAll() - doneBefore));
+      rh += '<div class="rrow"><span class="rno">' + r.no + '차</span>'
+        + '<span>' + r.count + '건</span>'
+        + '<span class="rmeta">' + r.date + ' 시작 · ' + r.label + '</span>'
+        + '<span class="rprog" style="color:' + (got >= r.count ? '#16a34a' : '#1d4ed8') + '">' + got + '/' + r.count + (got >= r.count ? ' 완료' : '') + '</span></div>';
+    });
+    $rounds.innerHTML = rh;
+  }
+
+  function addHist(text) {
+    if (histCount === 0) $hist.innerHTML = '';
+    histCount++;
+    var li = document.createElement('li');
+    li.textContent = '8/6 14:2' + (histCount % 10) + ' · 관리자(목업) — ' + text;
+    $hist.insertBefore(li, $hist.firstChild);
+  }
+
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(t._tm);
+    t._tm = setTimeout(function () { t.classList.remove('on'); }, 2600);
+  }
+
+  // ── 값 변경 + 축소 선택 팝업 ─────────────────────────────
+  // ★ 조절 한 번(드래그 한 번·버튼 연타 한 묶음)당 질문은 한 번만 — 클릭마다 팝업이 뜨면
+  //   연속 조절이 불가능하다(브라우저 검증에서 실측). 조절을 멈추면(0.7초) 그때 묻는다.
+  var choiceCtx = null; // {i, prev, next, missing}
+  var sessions = {};    // i -> {start, timer} 조절 세션(디바운스)
+  var SETTLE_MS = 700;
+  var $ov = document.getElementById('choiceOv');
+
+  function minFor(i) {
+    // 오늘은 확정 인원 아래로 못 내림, 미래 날짜는 0까지
+    return days[i].isToday ? days[i].confirmed : 0;
+  }
+
+  function commitValue(i, next) {
+    var cur = days[i].planned;
+    next = Math.max(minFor(i), Math.min(SCALE_MAX, next));
+    if (next === cur) {
+      if (next === minFor(i) && days[i].isToday && minFor(i) > 0) {
+        toast('이미 확정된 ' + days[i].confirmed + '명 아래로는 줄일 수 없습니다');
+      }
+      if (sessions[i]) scheduleSettle(i);
+      return;
+    }
+    if (!sessions[i]) sessions[i] = { start: cur, timer: null };
+    days[i].planned = next;
+    days[i].adjusted = (next !== DEFAULT_DAILY);
+    render();
+    scheduleSettle(i);
+  }
+
+  function scheduleSettle(i) {
+    var s = sessions[i];
+    clearTimeout(s.timer);
+    s.timer = setTimeout(function () { settle(i); }, SETTLE_MS);
+  }
+
+  function settle(i) {
+    var s = sessions[i];
+    if (!s) return;
+    delete sessions[i];
+    var start = s.start, fin = days[i].planned;
+    if (fin === start) return;
+    if (fin < start && fin < DEFAULT_DAILY) {
+      // 축소 → 처리 방식 선택 (한 세션에 한 번만)
+      var missing = Math.max(0, Math.min(start, DEFAULT_DAILY) - fin);
+      // ★ "종료일 유지" 분산의 범위 = 축소 전 종료일까지의 남은 진행일 —
+      //   그 밖의 날까지 나누면 얹는 의미가 없어 종료일이 그대로 밀린다(브라우저 검증 실측).
+      var saved = days[i].planned;
+      days[i].planned = start;
+      var prevEnd = endInfo();
+      days[i].planned = saved;
+      var until = prevEnd.idx >= 0 ? prevEnd.idx : days.length - 1;
+      var futureCount = Math.max(0, until - i);
+      choiceCtx = { i: i, prev: start, next: fin, missing: missing, until: until };
+      document.getElementById('chTitle').textContent = days[i].label + ' 인원을 ' + fin + '명으로 줄였습니다 — 빠진 ' + missing + '명은 어떻게 할까요?';
+      var per = futureCount > 0 ? Math.ceil(missing / futureCount) : missing;
+      document.getElementById('chExtendDesc').textContent = '이후 날들은 기본 ' + DEFAULT_DAILY + '명 그대로 진행하고, 종료일이 뒤로 밀립니다.';
+      document.getElementById('chSpreadDesc').textContent = futureCount > 0
+        ? '종료일(' + prevEnd.label + ')까지 남은 ' + futureCount + '일에 약 +' + per + '명씩 얹어 종료일을 유지합니다.'
+        : '남은 진행일이 없어 이 선택지는 쓸 수 없습니다.';
+      $ov.classList.add('on');
+    } else if (fin > start && fin > DEFAULT_DAILY) {
+      toast('이 날만 ' + fin + '명으로 늘립니다 — 다른 날은 그대로 ' + DEFAULT_DAILY + '명, 총량 ' + totalCap() + '명은 변하지 않습니다');
+      addHist(days[i].label + ' 인원 ' + start + ' → ' + fin + ' (증가 — 다른 날 불변)');
+    } else {
+      addHist(days[i].label + ' 인원 ' + start + ' → ' + fin);
+    }
+  }
+
+  document.getElementById('chExtend').addEventListener('click', function () {
+    if (!choiceCtx) return;
+    var d = days[choiceCtx.i];
+    addHist(d.label + ' 인원 ' + choiceCtx.prev + ' → ' + choiceCtx.next + ' (빠진 ' + choiceCtx.missing + '명: 종료일 연장)');
+    toast('종료일 연장으로 처리 — 이후 날들은 ' + DEFAULT_DAILY + '명 그대로');
+    $ov.classList.remove('on'); choiceCtx = null; render();
+  });
+  document.getElementById('chSpread').addEventListener('click', function () {
+    if (!choiceCtx) return;
+    var i = choiceCtx.i;
+    var missing = choiceCtx.missing;
+    var future = Math.max(0, choiceCtx.until - i);
+    if (future <= 0) { toast('남은 진행일이 없어 분산할 수 없습니다'); return; }
+    var per = Math.floor(missing / future), extra = missing % future;
+    for (var k = i + 1; k <= choiceCtx.until; k++) {
+      var add = per + ((k - i) <= extra ? 1 : 0);
+      if (add > 0) { days[k].planned += add; days[k].adjusted = true; }
+    }
+    addHist(days[i].label + ' 인원 ' + choiceCtx.prev + ' → ' + choiceCtx.next + ' (빠진 ' + missing + '명: 남은 ' + future + '일에 분산)');
+    toast('남은 날에 분산 — 종료일 유지');
+    $ov.classList.remove('on'); choiceCtx = null; render();
+  });
+  document.getElementById('chCancel').addEventListener('click', function () {
+    if (choiceCtx) {
+      days[choiceCtx.i].planned = choiceCtx.prev;
+      days[choiceCtx.i].adjusted = (choiceCtx.prev !== DEFAULT_DAILY);
+    }
+    $ov.classList.remove('on'); choiceCtx = null; render();
+  });
+
+  // ── 게이지 드래그 (포인터 이벤트 위임) ────────────────────
+  var drag = null; // {i, el}
+  $rows.addEventListener('pointerdown', function (ev) {
+    var g = ev.target.closest('.gwrap');
+    if (!g) return;
+    drag = { i: Number(g.dataset.i), el: g, moved: false, start: days[Number(g.dataset.i)].planned };
+    g.setPointerCapture(ev.pointerId);
+    dragTo(ev);
+  });
+  $rows.addEventListener('pointermove', function (ev) { if (drag) { drag.moved = true; dragTo(ev); } });
+  $rows.addEventListener('pointerup', function (ev) {
+    if (!drag) return;
+    var i = drag.i, live = days[i].planned;
+    days[i].planned = drag.start;               // 확정은 commitValue가 담당(선택 팝업 트리거 포함)
+    drag = null;
+    commitValue(i, live);
+  });
+  $rows.addEventListener('pointercancel', function () {
+    if (drag) { days[drag.i].planned = drag.start; drag = null; render(); }
+  });
+  function dragTo(ev) {
+    var rect = drag.el.getBoundingClientRect();
+    var ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+    var v = Math.round(ratio * SCALE_MAX);
+    v = Math.max(minFor(drag.i), Math.min(SCALE_MAX, v));
+    if (v !== days[drag.i].planned) {
+      days[drag.i].planned = v;
+      // 드래그 중에는 그 줄만 가볍게 갱신
+      var fill = drag.el.querySelector('.fill'), knob = drag.el.querySelector('.knob');
+      var pw = Math.min(100, v / SCALE_MAX * 100);
+      fill.style.width = pw + '%'; knob.style.left = pw + '%';
+      var num = drag.el.parentElement.querySelector('.num');
+      if (num) num.firstChild.textContent = v;
+    }
+  }
+
+  // ── −/＋ 버튼 ────────────────────────────────────────────
+  $rows.addEventListener('click', function (ev) {
+    var b = ev.target.closest('.stepb');
+    if (!b) return;
+    var i = Number(b.dataset.i);
+    commitValue(i, days[i].planned + Number(b.dataset.d) * 5);
+  });
+
+  // ── 차수 추가 / 리셋 ─────────────────────────────────────
+  document.getElementById('addRoundBtn').addEventListener('click', function () {
+    var no = rounds.length + 1;
+    rounds.push({ no: no, count: 100, date: '8/7', label: '추가 물량' });
+    addHist(no + '차 추가 — +100건 (8/7 시작) · 총량 ' + totalCap() + '건');
+    toast('총량이 ' + totalCap() + '건으로 늘었습니다 — 카드에 ' + no + '차 진행이 구분 표시됩니다');
+    render();
+  });
+  document.getElementById('resetBtn').addEventListener('click', function () {
+    initData(); baseEnd = null; render();
+    addHist('목업 초기화');
+  });
+
+  initData();
+  render();
+})();
+</script>
+</body>
+</html>
