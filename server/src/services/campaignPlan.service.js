@@ -17,7 +17,8 @@
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, pendingCarry, fetchCampaignCounts } = require('./campaignState.service');
+const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, pendingCarry, fetchCampaignCounts,
+  computeCampaignState } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
@@ -99,7 +100,7 @@ async function getPlanOverview(campaignId) {
   const byDateSubmitted = {};
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
   // 이월 보류(098): 모드 + 잔량. ★ 잔량 계산 실패는 null — 화면이 "조회 실패"를 말한다(0 위장 금지).
-  let carryHeld = null, carryAppliedSum = 0, carryPending = null;
+  let carryHeld = null, carryAppliedSum = 0, carryPending = null, todayNaturalQuota = null;
   // ★ 시트 일정 판정이 'unknown'(실패)이면 잔량을 계산하지 않는다(fail-closed) — 시트 일정
   //   공고에는 보류가 적용되지 않으므로, 모르는 채 숫자를 띄우면 효과 없는 칩이 될 수 있다.
   if (schedule !== 'unknown') {
@@ -118,9 +119,18 @@ async function getPlanOverview(campaignId) {
         // 날짜에 배치하는 재료이고, 저장 전까지는 표시일 뿐 정원을 바꾸지 않는다.
         carryPending = pendingCarry(camp, counts, today, counts && counts.carry, sch);
       }
+      // ★★ "손대지 않으면 오늘 몇 명이 열리는가" — 화면의 저장 판정(바꾼 날만 저장) 기준값이다.
+      //   ★ 프론트가 `기본 + 이월` 로 다시 계산하면 안 된다: 066 의 이월 상한(CARRY_CAP_MULT 2배)·
+      //   킬스위치(CAMPAIGN_DAILY_CARRY=0)·095 계획·총량 clamp 를 프론트는 모르기 때문에
+      //   이월이 하루치를 넘는 흔한 경우부터 화면 숫자가 서버와 갈린다(코드리뷰). 그래서
+      //   **정원 판정의 단일 출처인 computeCampaignState 를 그대로 태워** 값을 실어 보낸다.
+      const stNow = computeCampaignState(camp, Object.assign({}, counts, {
+        plans: plansQ.rows.reduce((m, r) => { m[r.date] = Number(r.count) || 0; return m; }, {}),
+      }), new Date(), sch);
+      todayNaturalQuota = Number(stNow.dailyQuota) || 0;
     } catch (e) {
       logger.warn('[campaignPlan] 이월 계산 실패(fail-soft): ' + e.message);
-      carryHeld = null; carryPending = null;
+      carryHeld = null; carryPending = null; todayNaturalQuota = null;
     }
   }
 
@@ -152,6 +162,9 @@ async function getPlanOverview(campaignId) {
     carryPending,
     // 오늘 확정분 — 화면의 "배분해야 할 인원" = recruit_total − (전체 확정 − 오늘 확정)
     todaySubmitted: byDateSubmitted[today] || 0,
+    // 손대지 않았을 때 **오늘 실제로 열리는 정원**(computeCampaignState 판정 그대로).
+    //   null = 계산 불가 → 화면은 균형 모드를 켜지 않는다(잘못된 기준으로 저장 판정 금지).
+    todayNaturalQuota,
     // 시트 일정 캠페인 = 조절하지 않은 날의 기준선을 시트가 정함(조절 자체는 가능).
     //   null = 판정 실패 → 화면이 "기본 표시가 부정확할 수 있음"만 고지하고 잠그지는 않는다.
     scheduleDriven: schedule === 'unknown' ? null : !!schedule,

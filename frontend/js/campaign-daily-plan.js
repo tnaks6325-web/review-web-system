@@ -111,40 +111,24 @@
   }
   /** 배분해야 할 인원 = 총량 − 어제까지 확정 (오늘 줄부터 종료일까지의 합계 목표) */
   function targetTotal() { return Math.max(0, totalFor() - doneBefore()); }
-  /** 이미 앞으로의 날짜에 **저장해 둔** 추가분(기준선 초과분) 합계 — 이월을 이미 배치한 몫이다. */
-  function placedAhead() {
-    var from = S.data.today, sum = 0;
-    Object.keys(S.base).forEach(function (d) {
-      if (d >= from) sum += Math.max(0, S.base[d] - baseFor(d));
-    });
-    return sum;
-  }
-  /** 아직 **어느 날에도 얹지 않은** 이월 인원. null = 계산 불가(0 으로 꾸미지 않는다).
-   *  ★★ 저장해 둔 배치분을 빼지 않으면 모달을 열 때마다 같은 이월을 또 얹자고 제안하고
-   *    (저장 → 재열람 → 또 제안), 화면의 "이월 N명"이 실제로 남은 몫보다 커진다. */
+  /** 이월(미달) 인원 — 서버 계산값 그대로. null = 계산 불가(0 으로 꾸미지 않는다).
+   *  ★ 저장해 둔 앞 날짜 계획을 여기서 빼지 않는다 — "이월 배치"와 "무관한 상향 조절"을
+   *    구분할 수 없어, 무관한 +N 이 실제로 남아 있는 이월을 **0으로 숨겨** 배치 창구가
+   *    사라진다(코드리뷰). 재제안이 걱정될 자리는 아래 naturalFor 가 서버값이라 막혀 있다. */
   function carryAmt() {
     var v = S.data.carryPending;
-    if (v == null) return null;
-    return Math.max(0, (Number(v) || 0) - placedAhead());
-  }
-  /** ★ 자동 이월 공고(carry_mode!=='hold')는 서버(066)가 **오늘 정원에** 이월을 이미 얹는다 —
-   *  그래서 "다음날에 더하기"는 손 안 댄 상태 그 자체이고, 저장할 것이 없다.
-   *  보류(hold) 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다.
-   *  ★★ 여기서는 **서버가 실제로 얹는 값(raw carryPending)** 을 써야 한다 — 배치분을 뺀
-   *  `carryAmt()` 를 쓰면 "손 안 댔을 때의 값"이 서버 실제 정원과 어긋나, 이미 앞 날짜에
-   *  배치해 둔 몫만큼 오늘이 **이중으로 열리는데도** 화면은 손 안 댔다고 판정한다. */
-  function autoCarryOnToday() {
-    if (!S.data || S.data.carryMode === 'hold') return 0;
-    var v = S.data.carryPending;
-    return (v == null) ? 0 : Math.max(0, Number(v) || 0);
+    return (v == null) ? null : Math.max(0, Number(v) || 0);
   }
   /** 그날 **손대지 않았을 때의 값** — 이 값과 같으면 저장할 필요가 없다(불필요한 고정 방지).
    *  ★★ 구간 전체를 무조건 저장하면, 아무것도 안 건드리고 [확정 저장]만 눌러도 앞으로의 모든
-   *    날짜가 리뷰웹 값으로 굳어 **시트 일정 공고의 시트 우선권이 통째로 사라진다**(코드리뷰). */
+   *    날짜가 리뷰웹 값으로 굳어 **시트 일정 공고의 시트 우선권이 통째로 사라진다**(코드리뷰).
+   *  ★★ 오늘 값은 **서버가 준 `todayNaturalQuota`(computeCampaignState 판정)** 을 그대로 쓴다 —
+   *    `기본 + 이월` 로 다시 계산하면 066 의 이월 상한(2배)·킬스위치·총량 clamp 를 프론트가
+   *    몰라 이월이 하루치를 넘는 흔한 경우부터 화면 숫자가 서버와 갈린다. */
   function naturalFor(d) {
+    if (d === S.data.today && S.data.todayNaturalQuota != null) return Number(S.data.todayNaturalQuota) || 0;
     if (S.base[d] != null) return S.base[d];         // 이미 저장된 조절 = 그 값이 그날의 전부(095)
-    var b = baseFor(d);
-    return (d === S.data.today) ? b + autoCarryOnToday() : b;
+    return baseFor(d);
   }
   function balanceOn() { return !!(S && S.balance); }
   function sumPlan() {
@@ -183,6 +167,9 @@
     //   (총량 초과 확정·소진 직전 홀드에서 도달). 그대로 켜면 균형 바가 영원히 "초과 — 저장불가"
     //   이고 [자동 맞춤]은 하한에 막혀 아무 일도 안 하는 죽은 버튼이 된다 → 균형 모드를 끈다.
     if (minFor(baseDate()) > target) return null;
+    // ★ 저장 판정의 기준값(서버 판정 오늘 정원)이 없으면 균형 모드를 켜지 않는다 —
+    //   잘못된 기준으로 "손 안 댔다"를 판정하면 조용히 아무것도 저장하지 않는 화면이 된다.
+    if (S.data.todayNaturalQuota == null) return null;
     var wd = walkDays(target);
     if (!wd) return null;                               // 400일 안에 못 채움(계획이 전부 0 등)
     var carry = (mode === 'extend') ? 0 : (carryAmt() || 0);
@@ -283,15 +270,24 @@
     var ds = (S.horiz || []).filter(function (d) { return baseFor(d) > 0 || planFor(d) > 0; });
     var cap = maxFor(), guard = 0;
     if (S.carryMode === 'spread') {
-      while (need !== 0 && guard++ < 20000) {
-        var moved = false;
-        for (var i = 0; i < ds.length && need !== 0; i++) {
-          var d = ds[i], step = need > 0 ? 1 : -1, nv = planFor(d) + step;
-          if (nv < minFor(d) || nv > cap) continue;
-          S.plan[d] = nv; need -= step; moved = true;
+      // ★ 한 명씩 돌리는 루프(최악 240만 회)는 큰 부족분에서 화면을 얼린다 — 몫/나머지로 한 번에.
+      //   여력이 모자란 날이 있으면 남은 몫만 다시 돌린다(최대 몇 회).
+      var sign = need > 0 ? 1 : -1, left = Math.abs(need);
+      while (left > 0 && guard++ < 50) {
+        var room = ds.map(function (d) {
+          return sign > 0 ? Math.max(0, cap - planFor(d)) : Math.max(0, planFor(d) - minFor(d));
+        });
+        var avail = room.reduce(function (a, b2) { return a + b2; }, 0);
+        if (avail <= 0) break;
+        var take = Math.min(left, avail), per = Math.floor(take / ds.length), rem2 = take % ds.length, put0 = 0;
+        for (var i = 0; i < ds.length && put0 < take; i++) {
+          var want = Math.min(room[i], per + (i < rem2 ? 1 : 0), take - put0);
+          if (want > 0) { S.plan[ds[i]] = planFor(ds[i]) + sign * want; put0 += want; }
         }
-        if (!moved) break;
+        if (put0 <= 0) break;
+        left -= put0;
       }
+      need = sign * left;
     } else {
       // next = 이른 날부터 채우고 / extend = 늦은 날부터 채운다. 초과는 어느 방식이든 뒤에서 덜어낸다.
       var order = (need > 0 && S.carryMode === 'next') ? ds.slice() : ds.slice().reverse();
@@ -323,7 +319,8 @@
     if (diffPlan() !== 0) {
       toast(diffPlan() > 0
         ? '오늘 확정·진행 인원 아래로는 줄일 수 없어 ' + diffPlan() + '명이 남았습니다'
-        : '한 날 최대(' + maxFor() + '명)·구간 상한에 막혀 ' + (-diffPlan()) + '명을 다 채우지 못했습니다');
+        : (-diffPlan()) + '명을 더 열 자리가 없습니다 — 한 날 최대(' + maxFor() + '명)·저장 상한('
+          + MAX_ROWS + '일)·남은 진행일을 확인해주세요');
     }
   }
 
@@ -567,7 +564,9 @@
       cum += v;
       // ★ 마지막 부분일(총량에 맞춰 남은 만큼만 연 날)은 고정할 필요가 없다 — 서버도 같은
       //   총량 clamp 를 걸고, 고정하지 않으면 앞 날이 미달했을 때 그날이 온전히 열린다(더 안전).
-      if (v < nat && v === residual && S.base[d] == null) return;
+      // ★ **시스템이 깐 값 그대로일 때만** 건너뛴다 — 그냥 `v === residual` 로 두면 균형이 맞은
+      //   상태의 마지막 날은 항상 residual 이라 **사람이 의도적으로 줄인 마지막 날이 조용히 누락**된다.
+      if (v < nat && v === residual && S.base[d] == null && S.modePlan && v === S.modePlan[d]) return;
       if (v === nat) return;                                 // 손대지 않은 값 = 보낼 필요 없음
       // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀)
       if (S.base[d] != null && v === baseFor(d)) remove.push(d);
@@ -686,8 +685,7 @@
         : carry === null
           ? '<span class="cdp-cb un" title="기준선 조회 실패 등으로 이월 인원을 계산하지 못했습니다">↩ 이월 ?</span>'
           : (carry > 0
-            ? '<span class="cdp-cb" title="어제까지의 계획 대비 못 채운 인원 중 아직 어느 날에도 얹지 않은 몫입니다'
-              + (placedAhead() > 0 ? ' (이미 배치해 둔 ' + placedAhead() + '명은 제외)' : '') + '">↩ 이월 ' + carry + '명</span>'
+            ? '<span class="cdp-cb" title="어제까지의 계획 대비 못 채운 인원입니다">↩ 이월 ' + carry + '명</span>'
             : ''))
       + '</div>'
       + (tot > 0 ? '<div class="bar"><i style="width:' + Math.min(100, done / tot * 100).toFixed(1) + '%"></i></div>' : '')
@@ -1145,7 +1143,7 @@
       var g = ev.target.closest('.cdp-g');
       if (!g || !S || S.data.planEnabled === false) return;
       var d = dates[Number(g.dataset.i)];
-      drag = { d: d, el: g, start: planFor(d) };
+      drag = { d: d, el: g, start: planFor(d), scale: gaugeScale() };   // 눈금은 드래그 시작 시 1회만
       try { g.setPointerCapture(ev.pointerId); } catch (_) {}
       dragTo(ev);
     });
@@ -1194,11 +1192,12 @@
     if (!drag) return;
     var rect = drag.el.getBoundingClientRect();
     var ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
-    var v = Math.round(ratio * gaugeScale());
+    var sc = drag.scale || gaugeScale();
+    var v = Math.round(ratio * sc);
     v = Math.max(minFor(drag.d), Math.min(maxFor(), v));
     if (v !== planFor(drag.d)) {
       S.plan[drag.d] = v;   // 드래그 중에는 그 줄만 가볍게 갱신(전체 재렌더 금지 — 드래그 끊김)
-      var pw = Math.min(100, v / gaugeScale() * 100);
+      var pw = Math.min(100, v / sc * 100);
       drag.el.querySelector('.f').style.width = pw + '%';
       drag.el.querySelector('.k').style.left = pw + '%';
       var cy = drag.el.querySelector('.cy');
@@ -1233,11 +1232,12 @@
       ? lines.slice(0, 10).join('\n') + '\n… 외 ' + (lines.length - 10) + '건 (총 ' + lines.length + '일 · 합계 '
         + set.reduce(function (s, x) { return s + x.count; }, 0) + '명)'
       : lines.join('\n');
+    // ★ 저장 범위를 과장하지 않는다 — 실제로 보내는 것은 **손댄 날뿐**이고, 그 날들만
+    //   "그 값이 그날의 전부"가 되어 자동 이월이 얹히지 않는다. 나머지 날은 종전대로 열린다.
     var tail = balanceOn()
-      // ★ 구간을 저장하면 그 날짜들은 "그 값이 그날의 전부"가 되어 자동 이월이 더 얹지 않는다 —
-      //   화면에서 본 대로 열리게 하는 장치이지만, 동작이 바뀌므로 확인창이 말한다.
       ? '\n\n배분 합계 ' + sumPlan() + '명 = 남은 배분수 ' + targetTotal() + '명. 총량은 변하지 않습니다.'
-        + '\n저장한 구간은 이 인원으로 확정되어 자동 이월이 더 얹지 않습니다(못 채운 몫은 구간 이후로 넘어갑니다).'
+        + '\n고정되는 날은 위 ' + (set.length + remove.length) + '일뿐이고, 나머지 날은 종전대로 열립니다'
+        + (set.length ? '(고정한 날에는 자동 이월이 더 얹히지 않습니다).' : '.')
       : '\n\n총량은 변하지 않습니다.';
     if (!window.confirm('아래 조절을 저장할까요?\n\n' + body + tail)) return;
     // 098 보류 잔량 차감 — 균형 모드는 "지금 계획에 실제로 얹혀 있는 이월"이 곧 반영량이다
