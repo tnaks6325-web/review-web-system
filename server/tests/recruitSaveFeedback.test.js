@@ -80,6 +80,19 @@ ok('A11. 재호출 시 이전 안내·타이머를 정리한다(연속 저장에
 ok('A12. prefers-reduced-motion 이면 이동·그리기를 끄고 페이드만 남긴다',
   /@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?#campSaveFb/.test(modal));
 
+/* ★★ 실측 신고(2026-08-07): 작업내용 3칸 첨부 이미지의 확대 팝업이 **모달 뒤에서 열려**
+   수정 중에는 사진을 크게 볼 수 없었다. 원인 = `#igLightbox{z-index:3000}` 인데 모달은 5000
+   ("모달은 2000"이라는 잘못된 전제로 정한 값). 토스트가 덮개 아래 깔리던 것과 같은 계열.
+   ★ 숫자를 박아 고정하지 않는다 — **모달보다 위**라는 관계를 본다(값이 바뀌어도 살아남게). */
+ok('A13. ★ 확대 팝업(#igLightbox)은 모달 덮개보다 위에 뜬다',
+  (() => {
+    const lb = /#igLightbox\{[^}]*z-index:(\d+)/.exec(modal);
+    const mo = /#recruitModal\.modal-overlay\{[^}]*z-index:(\d+)/.exec(modal);
+    return lb && mo && Number(lb[1]) > Number(mo[1]);
+  })());
+ok('A14. 확대 팝업은 body 직속이다(모달 스크롤 컨테이너 안이면 화면 흐름에 섞인다)',
+  /document\.body\.appendChild\(el\)/.test(pick(recruit, '_igLightboxEl')));
+
 console.log('\n── B. 차단·실패는 모달 안쪽(토스트 금지) ──');
 const blk = pick(modal, 'recruitSaveBlock');
 ok('B1. recruitSaveBlock / recruitSaveBlockClear 전역 노출',

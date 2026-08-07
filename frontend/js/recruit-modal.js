@@ -726,8 +726,12 @@
   #recruitModal .ig-wrap{flex-direction:column}
   #recruitModal .ig-strip{width:100%}
 }
-/* 🔍 확대 팝업 — body 직속(모달 스크롤 컨테이너 밖). z-index 는 모달(2000)보다 위 */
-#igLightbox{position:fixed;inset:0;z-index:3000;background:rgba(8,12,20,.84);display:none;
+/* 🔍 확대 팝업 — body 직속(모달 스크롤 컨테이너 밖).
+   ★★ z-index 는 **이 모달(#recruitModal.modal-overlay = 5000)보다 위**여야 한다.
+      종전 3000 은 "모달은 2000"이라는 잘못된 전제로 정한 값이라 확대 화면이 **모달 뒤에서
+      열려** 수정 중에는 사진을 크게 볼 수 없었다(실측 신고). 저장 안내(#campSaveFb 6000)
+      보다는 아래 — 그 카드는 모달이 닫힌 뒤에 뜬다. */
+#igLightbox{position:fixed;inset:0;z-index:5500;background:rgba(8,12,20,.84);display:none;
   align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:34px}
 #igLightbox.on{display:flex}
 #igLightbox img{max-width:min(980px,86vw);max-height:70vh;border-radius:10px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.4)}
