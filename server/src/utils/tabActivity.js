@@ -18,8 +18,9 @@
 //      (`6 / 11 (목)` 처럼 연도가 없으면 추론이 되어 신호로 쓸 수 없다 → 무시)
 //   ④ 시트 등록일 `campaigns.created_at` — 시트 단위(같은 시트의 여러 탭이 같은 값)
 //
-// ★★ 판정값 = 신호들의 **최댓값**(가장 늦은 활동). 2025년에 등록됐어도 2026년에 주문이
-//   들어왔으면 현재 작업이다 — 최솟값이나 단일 신호로 판정하면 살아있는 작업을 숨긴다.
+// ★★ 판정 순서(사용자 확정): **구매일 컬럼의 마지막 날짜가 최우선**. 그 값이 있으면 그것으로
+//   끝낸다(다른 신호로 덮지 않는다) — 구매일이 곧 그 작업의 투입 시기다.
+//   구매일을 알 수 없을 때만 나머지 신호의 **최댓값**을 쓴다(2025년 등록 + 2026년 주문 = 현재 작업).
 // ★★ 신호가 하나도 없으면 **연도를 모르는 것**이지 과거가 아니다 → `unknown` 으로 분리해
 //   화면이 건수를 고지하고 버튼 한 번으로 볼 수 있게 한다(조용한 누락 금지).
 // ═══════════════════════════════════════════════════════════════════════════
@@ -77,12 +78,19 @@ function explicitYearDate(sampleStartDate) {
  * @returns {{activityAt: string|null, activitySource: string|null, yearUnknown: boolean}}
  */
 function resolveActivity(r = {}) {
+  // ★★ 사용자 확정: **구매일 컬럼의 마지막 날짜**가 기준이다 — 그 값이 있으면 그것만으로 판정하고
+  //    다른 신호(주문·공고·등록일)로 덮지 않는다. 구매일이 곧 그 작업의 투입 시기이기 때문이다.
+  //    (최댓값 합산으로 두면 "구매일은 2025년인데 시트 등록만 2026년"인 과거 작업이 살아남는다.)
+  //    ★ 우선순위 안에서는 [연도 확인]으로 시트에서 직접 읽은 값(probedAt)이 더 정확하다 —
+  //      DB 표본(sampleStartDate)은 마지막 **행**의 값이라 마지막 날짜가 아닐 수 있다.
+  const purchase = _iso(r.probedAt) || explicitYearDate(r.sampleStartDate);
+  if (purchase) return { activityAt: purchase, activitySource: r.probedAt ? 'sheet_probe' : 'sheet_date', yearUnknown: false };
+
   const cands = [
     ['order', _iso(r.lastOrderAt)],          // 리뷰어 실제 제출
     ['campaign', _iso(r.campCreatedAt)],     // 연결 공고 생성
-    ['sheet_date', explicitYearDate(r.sampleStartDate)],  // 구매일자(연도 명시분만)
     ['registered', _iso(r.registeredAt)],    // 시트 등록일(시트 단위)
-  ].filter(([, v]) => !!v);
+  ].filter(([, v]) => !!v);   // ★ 구매일 신호는 위에서 이미 최우선으로 처리됐다(여기 넣으면 이중 판정)
   if (!cands.length) return { activityAt: null, activitySource: null, yearUnknown: true };
   // 가장 늦은 활동이 그 작업의 시기 — 2025년 등록이어도 2026년 주문이 있으면 현재 작업이다.
   let best = cands[0];
