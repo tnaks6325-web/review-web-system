@@ -17,7 +17,7 @@
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, fetchCampaignCounts } = require('./campaignState.service');
+const { kstTodayStr, dateOnlyStr, isCarryHold, heldCarry, pendingCarry, fetchCampaignCounts } = require('./campaignState.service');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙임 방어)
@@ -99,20 +99,28 @@ async function getPlanOverview(campaignId) {
   const byDateSubmitted = {};
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
   // 이월 보류(098): 모드 + 잔량. ★ 잔량 계산 실패는 null — 화면이 "조회 실패"를 말한다(0 위장 금지).
-  let carryHeld = null, carryAppliedSum = 0;
+  let carryHeld = null, carryAppliedSum = 0, carryPending = null;
   // ★ 시트 일정 판정이 'unknown'(실패)이면 잔량을 계산하지 않는다(fail-closed) — 시트 일정
   //   공고에는 보류가 적용되지 않으므로, 모르는 채 숫자를 띄우면 효과 없는 칩이 될 수 있다.
-  if (isCarryHold(camp) && schedule !== 'unknown') {
+  if (schedule !== 'unknown') {
     try {
       const counts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
-      const sums = await fetchCarryAppliedSums(pool, [camp.id]);
-      if (sums !== null) {   // null = 반영 합계 모름 → 잔량도 모름(부풀린 숫자 금지 — 코드리뷰 M3)
-        carryAppliedSum = sums.get(camp.id) || 0;
-        carryHeld = heldCarry(camp, counts, today, carryAppliedSum, schedule);
+      const sch = schedule || null;
+      if (isCarryHold(camp)) {
+        const sums = await fetchCarryAppliedSums(pool, [camp.id]);
+        if (sums !== null) {   // null = 반영 합계 모름 → 잔량도 모름(부풀린 숫자 금지 — 코드리뷰 M3)
+          carryAppliedSum = sums.get(camp.id) || 0;
+          carryHeld = heldCarry(camp, counts, today, carryAppliedSum, sch);
+        }
+        carryPending = carryHeld;                       // 보류 공고의 "아직 배치 안 한 이월"
+      } else {
+        // 자동 이월 공고 — 어제까지 계획 대비 미달분(066 기준선 창). 화면이 이 인원을
+        // 날짜에 배치하는 재료이고, 저장 전까지는 표시일 뿐 정원을 바꾸지 않는다.
+        carryPending = pendingCarry(camp, counts, today, counts && counts.carry, sch);
       }
     } catch (e) {
-      logger.warn('[campaignPlan] 보류 잔량 계산 실패(fail-soft): ' + e.message);
-      carryHeld = null;
+      logger.warn('[campaignPlan] 이월 계산 실패(fail-soft): ' + e.message);
+      carryHeld = null; carryPending = null;
     }
   }
 
@@ -139,6 +147,11 @@ async function getPlanOverview(campaignId) {
     carryMode: isCarryHold(camp) ? 'hold' : 'auto',
     carryHeld,
     carryAppliedSum,
+    // 이월(미달) 인원 — 화면이 날짜에 배치하는 재료. null = 계산 불가(0 으로 꾸미지 않는다).
+    //   저장 전까지는 표시일 뿐 정원을 바꾸지 않는다(정원은 저장된 날짜별 계획이 정한다).
+    carryPending,
+    // 오늘 확정분 — 화면의 "배분해야 할 인원" = recruit_total − (전체 확정 − 오늘 확정)
+    todaySubmitted: byDateSubmitted[today] || 0,
     // 시트 일정 캠페인 = 조절하지 않은 날의 기준선을 시트가 정함(조절 자체는 가능).
     //   null = 판정 실패 → 화면이 "기본 표시가 부정확할 수 있음"만 고지하고 잠그지는 않는다.
     scheduleDriven: schedule === 'unknown' ? null : !!schedule,

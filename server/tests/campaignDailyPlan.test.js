@@ -10,7 +10,9 @@
  *   ② 명시 조절일 = 그 값이 그날의 전부(자연 이월을 얹지도 빼지도 않는다).
  *   ③ 총량 clamp 유지(조절로 총량 초과 불가) — 총량 변경은 차수 추가/제거로만.
  *   ④ 계획 조회 실패 = 계획 미적용(fail-open) — 목록/참여를 죽이면 안 된다.
- *   ⑤ 시트 일정 캠페인은 저장 거부(시트가 진실원본 — 확정 ③).
+ *   ⑤ 시트 일정 캠페인도 조절 저장 허용(사용자 확정 2026-08-07 — 종전 schedule_driven 거부 폐기).
+ *      규칙은 "조절한 날짜만 시스템이 이긴다" — 조절하지 않은 날은 계속 시트를 따른다.
+ *   ⑥ 균형 모드(요구 ①⑥)의 저장 게이트 = 배분 합계 ≡ 남은 배분수. 어긋나면 저장 잠금.
  *
  * 실행: node tests/campaignDailyPlan.test.js
  *   (PGTEST_URL=postgres://… 지정 시 진짜 PG로 마이그레이션·유니크·CASCADE까지 검증)
@@ -522,6 +524,226 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   } else {
     console.log('\n[6] PGTEST_URL 미지정 — 진짜 PG 검증 생략');
   }
+
+  /* ═══════════════════════════════════════════════════════════
+     7. 균형 모드 — 총량 안에서만 조절 + 이월 보충 투입 방식 (요구 ①②③④⑥)
+        시안 = frontend/docs/design-recruit-quota-balance.html (사용자 확정).
+        ★ grep 만으로는 산수를 못 본다 → 엔진 블록을 vm 으로 꺼내 **실제로 실행**한다.
+     ═══════════════════════════════════════════════════════════ */
+  console.log('\n[7] 균형 모드(요구 ①②③④⑥)');
+  const vm = require('vm');
+  const cdpSrc = readF('js/campaign-daily-plan.js');
+
+  // 소스에서 필요한 두 구간을 잘라 sandbox 에서 실행한다(테스트용 export 를 제품에 심지 않는다)
+  const slice = (from, to, label) => {
+    const a = cdpSrc.indexOf(from), b = cdpSrc.indexOf(to);
+    assert(a >= 0 && b > a, `${label} 구간 마커를 찾지 못했습니다(배선 변경 시 마커도 갱신할 것)`);
+    return cdpSrc.slice(a, b);
+  };
+  const partDate = slice('  var DOW =', '  /* ── 마운트(body 직속)', '날짜·기준선 유틸');
+  const partBal = slice('  var MAX_ROWS = 120;', '  /** 예상 종료일:', '균형 엔진');
+
+  const sandbox = { S: null, console, renders: 0 };
+  sandbox.render = () => { sandbox.renders++; };
+  vm.createContext(sandbox);
+  vm.runInContext(partDate + '\n' + partBal
+    // 엔진이 부르는 바깥 함수(행 하한) — 오늘은 확정·진행 인원 아래로 못 줄인다
+    + '\nfunction minFor(d){ return d === S.data.today ? (S.data.todayUsed || 0) : 0; }'
+    + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
+    + ' autoFit, maxFor, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor, CARRY_MODES, MAX_ROWS };',
+    sandbox);
+  const A = sandbox.api;
+
+  const mkS = (patch) => {
+    sandbox.S = {
+      data: Object.assign({
+        today: '2026-08-08', startDate: '2026-08-01', defaultDaily: 40, recruitTotal: 800,
+        scheduleDriven: false, scheduleDates: null, scheduleTotal: null,
+        submittedAll: 55, todaySubmitted: 5, byDateSubmitted: { '2026-08-08': 5 },
+        todayUsed: 5, carryPending: 30, carryMode: 'auto', planEnabled: true,
+      }, (patch && patch.data) || {}),
+      plan: {}, base: (patch && patch.base) || {}, notes: [], sessions: {},
+      balance: false, horiz: null, carryMap: null, openPlan: null, modePlan: null,
+    };
+    return sandbox.S;
+  };
+
+  // 7a. 배분해야 할 인원 = 총량 − 어제까지 확정(오늘 확정은 오늘 줄 안에 있다)
+  mkS();
+  eq('7a 어제까지 확정 = 전체 55 − 오늘 5', A.doneBefore(), 50);
+  eq('7a 남은 배분수 = 800 − 50', A.targetTotal(), 750);
+
+  // 7b. 기본 방식(다음날에 더하기) — 이월 전액이 첫 진행일, 합계는 정확히 목표
+  mkS();
+  ok('7b 기본 방식 펼치기 성공', A.applyCarryMode('next') === true);
+  eq('7b 구간 길이', sandbox.S.horiz.length, 18);
+  eq('7b 첫 진행일 = 기본 40 + 이월 30', sandbox.S.plan['2026-08-08'], 70);
+  eq('7b 첫 진행일 이월 배정', A.carryOn('2026-08-08'), 30);
+  eq('7b 배분 합계 ≡ 남은 배분수', A.sumPlan(), 750);
+  eq('7b 균형 = 0', A.diffPlan(), 0);
+  eq('7b 얹힌 이월 합계', A.carryPlaced(), 30);
+
+  // 7c. ★ 이월이 얹힌 총합은 어느 방식에서도 이월 인원과 같다(잘려서 29가 되면 안 된다 — 시안 실측)
+  mkS();
+  A.applyCarryMode('spread');
+  eq('7c 나눠 담기 — 얹힌 이월 합계', A.carryPlaced(), 30);
+  eq('7c 나눠 담기 — 배분 합계 유지', A.sumPlan(), 750);
+  ok('7c 나눠 담기는 여러 날에 걸친다', A.carryDays().length > 1);
+
+  // 7d. 종료일 뒤에 붙이기 = 어느 날에도 얹지 않고 구간이 하루 늘어난다
+  mkS();
+  A.applyCarryMode('extend');
+  eq('7d 연장 — 얹힌 이월 0', A.carryPlaced(), 0);
+  eq('7d 연장 — 구간 하루 증가', sandbox.S.horiz.length, 19);
+  eq('7d 연장 — 마지막 날은 남은 만큼만', sandbox.S.plan[sandbox.S.horiz[18]], 30);
+  eq('7d 연장 — 배분 합계 유지', A.sumPlan(), 750);
+
+  // 7e. ★★ 요구 ① — 한 날 최대 = 남은 배분수(총원 밖으로는 못 늘린다)
+  mkS();
+  A.applyCarryMode('next');
+  eq('7e 한 날 상한 = 남은 배분수', A.maxFor(), 750);
+
+  // 7f. ★★ 요구 ⑥ — 초과/부족을 만들고 [자동 맞춤]이 고른 방식대로 되돌린다
+  for (const mode of ['next', 'spread', 'extend']) {
+    mkS(); A.applyCarryMode(mode);
+    sandbox.S.plan['2026-08-09'] = sandbox.S.plan['2026-08-09'] + 6;
+    eq(`7f(${mode}) 늘리면 초과로 잡힌다`, A.diffPlan(), 6);
+    A.autoFit();
+    eq(`7f(${mode}) 자동 맞춤 후 균형`, A.diffPlan(), 0);
+    mkS(); A.applyCarryMode(mode);
+    sandbox.S.plan['2026-08-09'] = sandbox.S.plan['2026-08-09'] - 6;
+    eq(`7f(${mode}) 줄이면 부족으로 잡힌다`, A.diffPlan(), -6);
+    A.autoFit();
+    eq(`7f(${mode}) 자동 맞춤 후 균형`, A.diffPlan(), 0);
+  }
+  // ★★ 자동 맞춤은 "고른 방식대로" 메운다 — 균형만 맞으면 아무 날에나 넣어도 되는 게 아니다
+  {
+    mkS(); A.applyCarryMode('next');
+    const first = sandbox.S.horiz[0], last = sandbox.S.horiz[sandbox.S.horiz.length - 1];
+    const f0 = A.planFor(first), l0 = A.planFor(last);
+    sandbox.S.plan['2026-08-09'] -= 6;
+    A.autoFit();
+    eq('7f ★ 다음날에 더하기 = 부족분이 가장 이른 진행일로', A.planFor(first), f0 + 6);
+    eq('7f ★ 다음날에 더하기 = 마지막 날은 그대로', A.planFor(last), l0);
+  }
+  {
+    mkS(); A.applyCarryMode('spread');
+    const snap = Object.assign({}, sandbox.S.plan);
+    sandbox.S.plan['2026-08-09'] -= 6;
+    A.autoFit();
+    const moved = sandbox.S.horiz.filter((x) => x !== '2026-08-09' && A.planFor(x) !== snap[x]);
+    ok('7f ★ 나눠 담기 = 여러 날에 흩어 메운다(한 날에 몰지 않는다)', moved.length >= 2);
+  }
+
+  // 7g. ★★ "종료일 뒤에 붙이기"에서 줄인 몫은 **마지막 날에 쌓이지 않고 종료일이 밀린다**
+  //     (마지막 날에 쌓으면 고른 방식과 정반대가 된다 — 변이시험이 잡은 실제 버그)
+  mkS(); A.applyCarryMode('extend');
+  const daysBefore = sandbox.S.horiz.length;
+  const lastBefore = sandbox.S.horiz[daysBefore - 1];
+  const lastPlanBefore = A.planFor(lastBefore);
+  sandbox.S.plan['2026-08-08'] = 5;                     // 오늘을 하한까지 줄인다(−35)
+  eq('7g 줄이면 부족 −35', A.diffPlan(), -35);
+  A.autoFit();
+  eq('7g 자동 맞춤 후 균형(총량 보존)', A.diffPlan(), 0);
+  ok('7g ★ 종료일이 뒤로 밀렸다(새 진행일 추가)', sandbox.S.horiz.length > daysBefore);
+  ok('7g ★ 기존 마지막 날에 몰아주지 않았다',
+    A.planFor(lastBefore) <= Math.max(lastPlanBefore, A.effBase(lastBefore)));
+  ok('7g 추가된 날은 기준선을 넘지 않는다', A.planFor(sandbox.S.horiz[sandbox.S.horiz.length - 1]) <= 40);
+
+  // 7h. ★★ 오늘은 확정·진행 인원 아래로 잡히지 않는다 — 저장된 조절이 그 사이 늘어난 확정보다
+  //     작아도 마찬가지(그대로 보내면 서버가 below_used 로 거절해 막다른 길이 된다)
+  mkS({ base: { '2026-08-08': 2 } });                   // 저장된 조절 2 < 오늘 확정·진행 5
+  A.applyCarryMode('extend');
+  ok('7h ★ 오늘 하한(확정·진행 5) 유지', sandbox.S.plan['2026-08-08'] >= 5);
+  mkS(); A.applyCarryMode('next');
+  sandbox.S.plan['2026-08-08'] = 500;                   // 크게 초과시켜 자동 맞춤이 뒤에서 덜어내게 한다
+  A.autoFit();
+  ok('7h 자동 맞춤도 하한을 지킨다', sandbox.S.plan['2026-08-08'] >= 5);
+  eq('7h 자동 맞춤 후 균형', A.diffPlan(), 0);
+  ok('7h ★ 자동 맞춤은 minFor 를 하한으로 쓴다(0 까지 깎지 않는다)',
+    /var cut = Math\.min\(planFor\(d2\) - minFor\(d2\), -need\);/.test(cdpSrc));
+
+  // 7i. ★★ 저장된 조절은 모달을 열어도 덮이지 않는다(출발선 = effBase)
+  mkS({ base: { '2026-08-12': 5 } });
+  A.applyCarryMode('next');
+  eq('7i 저장된 조절이 출발선', A.planFor('2026-08-12'), 5);
+  eq('7i 저장된 조절은 effBase', A.effBase('2026-08-12'), 5);
+  eq('7i 합계는 여전히 목표', A.sumPlan(), 750);
+
+  // 7j. ★ 시트 일정 공고 — 휴무일(0명)은 구간에서 빠지고 총량은 시트 행 수
+  {
+    const dates = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(Date.UTC(2026, 7, 8 + i)).toISOString().slice(0, 10);
+      const wd = new Date(d + 'T00:00:00Z').getUTCDay();
+      dates.push({ date: d, slots: (wd === 0 || wd === 6) ? 0 : 20 });
+    }
+    mkS({ data: {
+      scheduleDriven: true, scheduleDates: dates, scheduleTotal: 160, recruitTotal: 160,
+      defaultDaily: 20, submittedAll: 25, todaySubmitted: 5, byDateSubmitted: { '2026-08-08': 5 },
+      todayUsed: 5, carryPending: 10,
+    } });
+    ok('7j 시트 일정 공고도 균형 모드', A.applyCarryMode('next') === true);
+    eq('7j 총량 = 시트 행 수 기준 남은 배분수', A.targetTotal(), 140);
+    eq('7j 배분 합계 ≡ 목표', A.sumPlan(), 140);
+    ok('7j 휴무일은 구간에서 제외', sandbox.S.horiz.every((d) => A.planFor(d) > 0));
+  }
+
+  // 7k. ★★ 균형 모드 불가 조건 = 조용히 반쪽으로 켜지 않고 **꺼진다**(종전 동작 유지)
+  mkS({ data: { recruitTotal: 0, scheduleTotal: null } });
+  ok('7k 무제한 총량 = 균형 모드 꺼짐', A.applyCarryMode('next') === false && sandbox.S.balance === false);
+  mkS({ data: { recruitTotal: 900000 } });
+  ok('7k 구간이 저장 상한(120일)을 넘으면 꺼짐', A.applyCarryMode('next') === false);
+  mkS({ data: { defaultDaily: 0 } });
+  ok('7k 하루 정원 0 = 채울 수 없어 꺼짐', A.applyCarryMode('next') === false);
+
+  // 7l. ★ 이월 계산 불가(null)는 0 으로 꾸미지 않는다 — 얹을 것이 없을 뿐 구간은 펼친다
+  mkS({ data: { carryPending: null } });
+  ok('7l 이월 null 이어도 구간은 펼친다', A.applyCarryMode('next') === true);
+  eq('7l 이월 null = 얹힌 이월 0', A.carryPlaced(), 0);
+  eq('7l 이월 null = 합계는 목표', A.sumPlan(), 750);
+
+  // 7m. 「변경 있음」 판정 — 열었을 때 대비(닫기 확인용). 방식 전환은 변경으로 센다
+  mkS(); A.applyCarryMode('next');
+  ok('7m 열자마자는 변경 없음', A.changedFromOpen() === false);
+  A.applyCarryMode('extend');
+  ok('7m 방식 전환 = 변경 있음', A.changedFromOpen() === true);
+
+  /* ── 배선(정적) — 사용자 확정 문구·규율이 코드에 그대로 있는가 ── */
+  const CDP = cdpSrc;
+  ok('7n 요구 ⑥ 문구(초과/부족/일치) — 사용자가 확정한 문장 그대로',
+    /총량 <span class="num">' \+ target \+ '<\/span>명과 딱 맞습니다\. — <b>저장가능<\/b>/.test(CDP)
+    && /총량이 <span class="num">' \+ target \+ '<\/span>명보다 <span class="num">' \+ Math\.abs\(diff\) \+ '<\/span>명 '/.test(CDP)
+    && /\(diff > 0 \? '초과' : '부족'\) \+ '입니다\. — <b>저장불가<\/b>'/.test(CDP));
+  ok('7o ★ 알림창 높이는 "일치" 기준 41px 고정(상태마다 표가 흔들리면 조절하던 줄을 놓친다)',
+    /\.cdp-bal\{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px/.test(CDP));
+  ok('7p ★ 종료일 연장 문구 — 사용자 확정 문장(숫자는 실제 마지막 진행일에서 읽는다)',
+    /이월 <b>' \+ carry \+ '명<\/b>을 <b>종료일 연장<\/b>으로 넘겼습니다 — 추가된 종료일 <b>/.test(CDP)
+    && /'<\/b>에 <b>' \+ \(lastD \? planFor\(lastD\) : 0\) \+ '명<\/b> 늘어납니다\./.test(CDP));
+  ok('7q ★ 기본 보충 방식 = 다음날에 더하기(사용자 확정) — 여는 순간 적용',
+    /applyCarryMode\('next'\);/.test(CDP) && /다음날에 더하기<span class="df">기본<\/span>/.test(CDP));
+  ok('7r ★ 저장 게이트 = 합계 일치 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
+    /save\.disabled = killOff \|\| S\.saving \|\| diff !== 0 \|\| !dirty \|\| over;/.test(CDP)
+    && /if \(balanceOn\(\) && \(diffPlan\(\) !== 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
+  ok('7s ★ 저장 상한은 서버 MAX_PLAN_ENTRIES 와 같은 값(넘으면 사유를 말하고 잠근다)',
+    A.MAX_ROWS === 120
+    && /const MAX_PLAN_ENTRIES = 120;/.test(readS('services/campaignPlan.service.js'))
+    && /한 번에 저장 가능한 ' \+ MAX_ROWS \+ '일을 넘었습니다/.test(CDP));
+  ok('7t ★ 방식 전환 onclick 은 고정 문자열만(외부 값 보간 금지 — XSS 규율)',
+    /onclick="CampaignDailyPlan\._mode\(\\'next\\'\)"/.test(CDP)
+    && !/onclick="CampaignDailyPlan\._mode\(\\'' \+/.test(CDP));
+  ok('7u ★ 균형 모드에서는 보류 블록을 그리지 않는다(반영 창구가 둘이면 이중 반영)',
+    /if \(bal\) \{\n\s*\/\/ 균형 모드에서는 위 "이월 보충 투입 방식"이 반영 창구다/.test(CDP));
+  ok('7v ★ 균형 모드에서는 「빠진 인원 처리」 팝업을 띄우지 않는다(판정 단일 출처 = 균형 바)',
+    /if \(balanceOn\(\)\) \{ S\.notes\.push\(fmtMD\(d\) \+ ' ' \+ start \+ '→' \+ fin\); render\(\); return; \}/.test(CDP));
+  ok('7w ★ 숫자 직접 입력은 change 에서만 반영(입력 중 재렌더 = 한글 IME 파괴)',
+    /wrap\.addEventListener\('change', function/.test(CDP) && !/addEventListener\('input'/.test(CDP));
+  ok('7x ★ 저장 확인창이 "구간 확정 = 자동 이월 안 얹힘"을 말한다(조용한 의미 변경 금지)',
+    /자동 이월이 더 얹지 않습니다\(못 채운 몫은 구간 이후로 넘어갑니다\)/.test(CDP));
+  ok('7y ★ 이월 계산 불가는 "?" 로 말한다(0 으로 꾸미지 않는다)',
+    /↩ 이월 \?/.test(CDP) && /carry === null/.test(CDP));
+  ok('7z ★ 요구 ②③ — 현재 모집인원/총건수·예상 종료일이 조절 화면 위에 있다',
+    /모집 현황 <em>' \+ done \+ '<\/em> \/ '/.test(CDP) && /예상 종료일 <b class="end">/.test(CDP));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

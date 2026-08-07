@@ -152,9 +152,10 @@ ok('admin/list 가 carryMode·carryHeld 를 내려준다(카드 ⏸ 칩 재료) 
 ok('★ admin/list 도 heldCarry 에 시트 일정을 넘긴다(시트 공고 = 효과 없는 칩 금지) — 같은 _sch 로 상태도 계산',
   /const _sch = schedMap \? scheduleFor\(schedMap, r\) : null;/.test(rt)
   && /heldCarry\(r, cnt, _todayStr, carrySumMap\.get\(r\.id\) \|\| 0, _sch\)/.test(rt));
-ok('★ getPlanOverview: 일정 판정 실패(unknown)면 잔량 계산 안 함(fail-closed)',
-  /isCarryHold\(camp\) && schedule !== 'unknown'/.test(cp)
-  && /heldCarry\(camp, counts, today, carryAppliedSum, schedule\)/.test(cp));
+ok('★ getPlanOverview: 일정 판정 실패(unknown)면 이월·잔량을 계산하지 않는다(fail-closed)',
+  /if \(schedule !== 'unknown'\) \{/.test(cp)
+  && /heldCarry\(camp, counts, today, carryAppliedSum, sch\)/.test(cp)
+  && /carryPending = pendingCarry\(camp, counts, today, counts && counts\.carry, sch\)/.test(cp));
 ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
   /carry_mode\s+-- ★ 098\(코드리뷰 B1\)/.test(rt));
 ok('★ 코드리뷰 M1: 생성(create) INSERT 에도 carry_mode — 발행 시 선택이 조용히 auto 로 떨어지지 않게',
@@ -193,8 +194,14 @@ ok('카드 ⏸ 칩 — carryHeld null 이면 미표시(0 위장 금지) + 모듈
 ok('[📅 인원] 보류 블록(오늘/내일/분산 스테이징) + 조회 실패 문구',
   /_heldApply/.test(cdp) && /cdp-heldblk/.test(cdp) && /조회 실패/.test(cdp)
   && /잔량을 계산하지 못했습니다/.test(cdp));
+// ⚠ 균형 모드(요구 ④ 이월 보충 투입 방식) 도입으로 배선 형태가 바뀌었다 — 검사 의미는 불변:
+//   ① carryApply 는 **저장 본문에 동봉**된다(별도 즉시 호출 금지) ② 보류 공고일 때만 보낸다
+//   ③ 값은 "실제로 계획에 얹은 이월"(균형 모드 = carryPlaced / 종전 = 스테이징 누계)이다.
 ok('반영도 [확정 저장] 규율(carryApply 는 저장 본문에 동봉)',
-  /carryApply: S\.carryStage/.test(cdp));
+  /\.\.\.\(apply > 0 \? \{ carryApply: apply \} : \{\}\)/.test(cdp)
+  && /var apply = balanceOn\(\)/.test(cdp)
+  && /S\.data\.carryMode === 'hold' \? carryPlaced\(\) : 0/.test(cdp)
+  && /: S\.carryStage;/.test(cdp));
 ok('원클릭 확인창 3택(오늘 반영/세부 선택/그대로 두기) + 즉시 저장 경로',
   /quickApplyHeld/.test(cdp) && /_quickDo/.test(cdp) && /그대로 두기/.test(cdp)
   && /carryApply: q\.held/.test(cdp));
