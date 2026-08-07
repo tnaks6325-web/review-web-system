@@ -175,14 +175,16 @@ async function projectActive({ limit = PROJECT_ACTIVE_DEFAULT_LIMIT, by = 'track
 //   _parityCore: readiness 제외 코어(A/B 로드+편집셋+classifyParity). parityReport·parityAll 공용.
 async function _parityCore(sheetId, tabName) {
   const db = getPool();
+  /* ★ 줄 번호(`row_index` ↔ `seq`)를 함께 읽는다 — 짝짓기 키는 여전히 phone8 이고,
+   *   줄 번호는 **한 번호에 여러 줄인 사람의 그룹 안에서만** 짝을 맞추는 데 쓴다(classifyParity 주석). */
   const { rows: aRows } = await db.query(
     `SELECT reviewer_name AS name, phone8, is_submitted AS submitted,
-            (is_submitted2 = 'PAID') AS paid, round
+            (is_submitted2 = 'PAID') AS paid, round, row_index AS row
        FROM review_index WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL`,
     [sheetId, tabName]);
   const { rows: bRows } = await db.query(
     `SELECT id, reviewer_name AS name, phone8, is_submitted AS submitted, is_paid AS paid, round, source, active,
-            order_submission_id, identity_key, recipient_name, option_text, row_json
+            order_submission_id, identity_key, recipient_name, option_text, row_json, seq AS row
        FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE`,
     [sheetId, tabName]);
   // 편집된 앵커의 phone8 집합 → classifyParity가 그 행의 A↔B 차이를 real 아닌 benign(BD-8)로 분류.
@@ -309,8 +311,37 @@ async function _readinessFor({ sheetId, tabName } = {}) {
  *   - A-only(B에 없음) → real(그림자 누락). (A=review_index=현행 소스라 A에 있으면 있어야 함)
  *   - 짝된 쌍 상태(submitted/paid/round) 불일치 → real(시차 BD-5는 상위 관측기간에서 흡수).
  */
+/**
+ * ★★ 한 번호에 여러 줄인 사람은 **줄 번호로 짝을 맞춘다** (2026-08-07 운영 실측 오탐 수정).
+ *
+ * 종전에는 phone8 로 묶은 뒤 **각 목록의 첫 줄(`arr[0]` vs `bl[0]`)** 만 맞대 봤다. 그런데
+ * 가족이 한 번호를 쓰거나 같은 사람이 차수를 나눠 여러 번 참여한 작업에서는 A(검색 명단)와
+ * B(작업보드 표)의 **줄 순서가 달라 서로 다른 줄끼리** 비교돼 "설명되지 않는 차이"가 났다 —
+ * 실측: 시트와 표를 줄 번호로 대조하면 2,300여 줄이 **한 칸도 다르지 않은데** 9개 작업이
+ * 이관에서 잠겨 있었다(위프 800건·장수산업 900건 등).
+ *
+ * ★ 짝짓기 **키는 여전히 phone8**(행번호 금지 원칙 불변) — 줄 번호는 그 그룹 **안에서만** 쓴다.
+ *   그래서 A_only/B_only(멤버십) 판정은 종전과 완전히 같다.
+ * ★ 번호로 못 맞춘 줄은 **종전대로 순서대로** 맞댄다(폴백) — 못 맞췄다고 통과시키지 않는다.
+ * ★ 그룹 안에서 한 쌍이라도 어긋나면 그 사람은 real (fail-closed 방향 불변).
+ */
+function _pairByRow(arr, bl) {
+  const bByRow = new Map();
+  for (const b of bl) { if (b.row != null) { const k = String(b.row); if (!bByRow.has(k)) bByRow.set(k, []); bByRow.get(k).push(b); } }
+  const used = new Set(), pairs = [], aRest = [];
+  for (const a of arr) {
+    const cand = a.row != null ? (bByRow.get(String(a.row)) || []) : [];
+    const b = cand.find(x => !used.has(x));
+    if (b) { used.add(b); pairs.push([a, b]); } else aRest.push(a);
+  }
+  const bRest = bl.filter(x => !used.has(x));
+  for (let i = 0; i < Math.min(aRest.length, bRest.length); i++) pairs.push([aRest[i], bRest[i]]);
+  return pairs;
+}
+const _sameState = (a, b) => a.submitted === b.submitted && a.paid === b.paid && a.round === b.round;
+
 function classifyParity(aRows, bRows, editedKeys = new Set()) {
-  const norm = r => ({ p8: _phone8(r.phone8), name: _norm(r.name), submitted: !!r.submitted, paid: !!r.paid, round: _norm(r.round), source: r.source });
+  const norm = r => ({ p8: _phone8(r.phone8), name: _norm(r.name), submitted: !!r.submitted, paid: !!r.paid, round: _norm(r.round), source: r.source, row: (r.row == null ? null : r.row) });
   const A = aRows.map(norm).filter(r => r.p8);
   const B = bRows.map(norm).filter(r => r.p8);
   const aByP = new Map(), bByP = new Map();
@@ -323,11 +354,17 @@ function classifyParity(aRows, bRows, editedKeys = new Set()) {
     const bl = bByP.get(p8);
     if (!bl || !bl.length) { buckets.real.push({ kind: 'A_only', phone8: _mask(p8), name: arr[0].name }); continue; }
     if (arr.length > 1 && bl.length === 1) buckets.benign.push({ bd: 'BD-3', kind: 'dup_collapsed', phone8: _mask(p8), aCount: arr.length });
-    // 상태 대조(대표 1쌍)
-    const a = arr[0], b = bl[0];
-    if (a.submitted === b.submitted && a.paid === b.paid && a.round === b.round) buckets.match++;
+    // 상태 대조 — 그 사람의 줄들을 **줄 번호로 짝지어** 전부 비교(한 쌍이라도 어긋나면 real).
+    const pairs = _pairByRow(arr, bl);
+    const bad = pairs.find(([a, b]) => !_sameState(a, b));
+    if (!bad) buckets.match++;
     else if (editedKeys.has(p8)) buckets.benign.push({ bd: 'BD-8/edited', kind: 'state_edit', phone8: _mask(p8) });   // 의도된 편집 = benign
-    else buckets.real.push({ kind: 'state_diff', phone8: _mask(p8), a: { s: a.submitted, p: a.paid, r: a.round }, b: { s: b.submitted, p: b.paid, r: b.round } });
+    else {
+      const [a, b] = bad;
+      // ★ 어느 줄이 다른지 함께 싣는다 — 화면·보고서가 "몇 행"인지 바로 말할 수 있어야 한다.
+      buckets.real.push({ kind: 'state_diff', phone8: _mask(p8), row: a.row != null ? a.row : b.row,
+        a: { s: a.submitted, p: a.paid, r: a.round }, b: { s: b.submitted, p: b.paid, r: b.round } });
+    }
   }
   // B-only
   for (const [p8, arr] of bByP) {
