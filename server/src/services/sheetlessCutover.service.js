@@ -84,23 +84,35 @@ async function _checkParity(tab) {
   }
 }
 
-/** ③ 시트에 아직 못 쓴 주문·대기 중인 쓰기가 0이어야 한다. */
+/**
+ * ③ 시트에 아직 못 쓴 주문 — **이관할 때 작업표로 옮긴다**(사용자 확정 2026-08-07 "B로 진행").
+ *
+ * ★★ 종전엔 미반영 주문이 1건이라도 있으면 무조건 잠갔다. 막으려던 위험은
+ *    "지금 끊으면 그 주문들이 **시트에도 표에도** 안 남는다" 였는데, 이제 이관이 그 주문들을
+ *    작업표로 인계하므로 **표에는 남는다** → 그 위험이 사라진다. 그래서 통과시키는 것은
+ *    완화가 아니라 **사실 반영**이다(fail-closed 는 여전히 아래 한 갈래에서 살아 있다).
+ * ★★ 다만 **배정된 줄이 없는 주문**은 옮길 자리가 없어 진짜로 사라진다 → 그건 계속 잠근다.
+ *    (그 줄은 복구 작업이 배정한다 — 잠시 뒤 다시 점검하면 인계 가능해진다.)
+ * ★ 쓰기 대기 큐는 잠금 사유에서 뺐다 — 이관 후 큐 실행부 백스톱이 사유와 함께 종결하고,
+ *   그 주문 자체는 위 집계에 잡혀 인계된다(같은 사실을 두 번 세면 영영 안 열린다).
+ */
 async function _checkPending(db, tab) {
   const label = '시트 반영 대기 0';
   try {
     const { rows } = await db.query(
-      `SELECT COUNT(*)::int AS n FROM order_submissions
+      `SELECT COUNT(*) FILTER (WHERE sheet_row IS NOT NULL)::int AS handoff,
+              COUNT(*) FILTER (WHERE sheet_row IS NULL)::int     AS blocked
+         FROM order_submissions
         WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
           AND COALESCE(mirror_status, 'pending') <> 'written'`, [tab.sheetId, tab.tabName]);
-    const orders = (rows[0] && rows[0].n) || 0;
-    const { rows: q } = await db.query(
-      `SELECT COUNT(*)::int AS n FROM sync_queue
-        WHERE status IN ('pending', 'processing')
-          AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2`, [tab.sheetId, tab.tabName]);
-    const queued = (q[0] && q[0].n) || 0;
-    if (orders || queued) {
-      return _chk('pending', label, 'fail', `미반영 주문 ${orders}건 · 쓰기 대기 ${queued}건`,
-        '먼저 반영을 끝내세요 — 지금 끊으면 그 주문들이 시트에도 표에도 안 남습니다.');
+    const handoff = (rows[0] && rows[0].handoff) || 0;
+    const blocked = (rows[0] && rows[0].blocked) || 0;
+    if (blocked) {
+      return _chk('pending', label, 'fail', `배정된 줄이 없는 미반영 주문 ${blocked}건`,
+        '옮길 자리가 없어 지금 끊으면 그 주문이 사라집니다 — 복구 작업이 줄을 배정할 때까지 기다렸다 다시 점검하세요.');
+    }
+    if (handoff) {
+      return _chk('pending', label, 'pass', `미반영 주문 ${handoff}건 — 이관할 때 표로 옮깁니다(시트에 쓰지 않습니다)`);
     }
     return _chk('pending', label, 'pass', '남은 것 없음');
   } catch (e) {
@@ -355,7 +367,11 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
     `UPDATE tab_configs SET sheetless = TRUE, sheetless_at = NOW(), sheetless_by = $3
       WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName, String(by || '').slice(0, 100)]);
 
-  // ── 부수효과 2종. 둘 다 실패해도 이관 자체는 유지하고 **사유를 응답에 실어** 화면이 말한다.
+  // ★★ 표식을 켠 **뒤에** 인계한다 — `writeOrderToWorktable` 이 부르는 장부 재생성이
+  //    시트 기반 탭을 `not_sheetless` 로 막기 때문(그 게이트를 풀지 않는다).
+  const handoff = await handoffPendingOrders({ sheetId, tabName, tabGid: tab.tabGid, by });
+
+  // ── 부수효과 3종. 전부 실패해도 이관 자체는 유지하고 **사유를 응답에 실어** 화면이 말한다.
   //    (되돌리면 크론이 다시 시트를 읽으므로, 부수효과 실패로 이관을 롤백할 이유가 없다.)
   let ledger = null;
   try {
@@ -377,7 +393,79 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
   }
 
   logger.info(`[cutover] 이관 완료 — ${tabName} (${sheetId}) by=${by}${force && !list.canCutover ? ' [UNVERIFIED]' : ''}`);
-  return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover), ledger, notice };
+  return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover),
+    handoff, ledger, notice };
+}
+
+/**
+ * 이관 시 **미반영 주문을 작업표로 인계**한다(사용자 확정 2026-08-07 "B로 진행").
+ *
+ * ★★ 왜 시트에 다시 쓰지 않는가 — 두 가지 이유가 결정적이다:
+ *    ① 곧 안 읽을 시트에 쓰는 것은 낭비이고, 쓰는 동안 시트가 또 바뀌면 ④가 다시 잠긴다.
+ *    ② **`stuck_manual` 은 시트 재기록으로 영영 안 풀린다**(reconcile 이 그 상태를 제외한다)
+ *       → 그런 주문이 하나라도 있는 작업은 "시트에 다 쓰고 나서 이관"이 **구조적으로 불가능**했다.
+ *    작업표로 옮기면 그 주문이 장부(검색 명단·리뷰내역·홈 통계)에 그대로 들어가 완결된다.
+ *
+ * ★★ **실행부는 `writeOrderToWorktable` 한 벌**(사본 0) — 이관 후 신규 주문이 타는 바로 그 경로다.
+ *    매핑(`mapOrderToSheetRow`)·옵션 blank-only·장부 재생성·완결 표시·신원 링크가 전부 거기 있다.
+ * ★ 원장 행 → orderData 변환도 `orderLedger._osRowToOrderData` 재사용(큐 실행부와 같은 함수).
+ * ★ **표식을 켠 뒤에 불러야 한다** — 그 함수가 부르는 장부 재생성이 시트 기반 탭을 막는다.
+ *
+ * ★ **절대 throw 하지 않는다** — 인계 실패로 이관을 되돌리면 "표식은 껐는데 시트 안내문은 붙은"
+ *   어중간한 상태가 된다. 사유를 응답에 실어 화면이 말하고, 남은 건은 아래 두 경로가 메운다:
+ *   ㉮ 2분 reconcile 의 무시트 분기(이제 이 탭이 무시트라 작업표로 재기록) ㉯ 재실행(멱등).
+ * ★ 그래서 상한을 넘길 때는 **`stuck_manual` 을 먼저** 처리한다 — 그것만이 ㉮로 안 풀린다.
+ *
+ * 킬스위치 `SHEETLESS_CUTOVER_HANDOFF=0`(인계 없이 이관 — 종전 동작).
+ */
+const HANDOFF_CAP = Math.max(1, parseInt(process.env.SHEETLESS_CUTOVER_HANDOFF_CAP || '200', 10) || 200);
+
+async function handoffPendingOrders({ sheetId, tabName, tabGid = '', by = '' } = {}) {
+  const base = { ok: true, written: 0, failed: 0, blocked: 0, total: 0, truncated: false };
+  if (String(process.env.SHEETLESS_CUTOVER_HANDOFF || '1') === '0') {
+    return { ...base, skipped: 'disabled' };
+  }
+  const db = _db();
+  let rows;
+  try {
+    const r = await db.query(
+      `SELECT * FROM order_submissions
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+          AND COALESCE(mirror_status, 'pending') <> 'written'
+        ORDER BY (COALESCE(mirror_status,'pending') <> 'stuck_manual'), submitted_at ASC
+        LIMIT $3`, [sheetId, tabName, HANDOFF_CAP + 1]);
+    rows = r.rows || [];
+  } catch (e) {
+    logger.warn(`[cutover] 미반영 주문 조회 실패(이관은 유지) — ${tabName}: ${e.message}`);
+    return { ...base, ok: false, reason: 'query_failed', message: e.message };
+  }
+  const truncated = rows.length > HANDOFF_CAP;
+  if (truncated) rows = rows.slice(0, HANDOFF_CAP);
+  if (!rows.length) return { ...base };
+
+  const { writeOrderToWorktable } = require('./sheetlessOrder.service');
+  const { _osRowToOrderData } = require('./orderLedger.service');
+  const out = { ...base, total: rows.length, truncated };
+  const reasons = [];
+  for (const os of rows) {
+    // ★ 배정된 줄이 없으면 옮길 자리가 없다 — 점검표 ③이 이미 잠그지만(force 우회 대비) 여기서도 센다.
+    if (!os.sheet_row) { out.blocked++; continue; }
+    try {
+      const w = await writeOrderToWorktable({
+        sheetId, tabName, tabGid: os.tab_gid || tabGid,
+        sheetRow: os.sheet_row, orderData: _osRowToOrderData(os),
+        orderSubmissionId: os.id, recovered: true,   // ★ 복구 표기 = reconcile 무시트 분기와 같은 호출 형태
+      });
+      if (w && w.ok) out.written++;
+      else { out.failed++; if (w && w.reason) reasons.push(w.reason); }
+    } catch (e) {
+      out.failed++; reasons.push(e.message || 'error');
+    }
+  }
+  if (reasons.length) out.reasons = Array.from(new Set(reasons)).slice(0, 5);
+  logger.info(`[cutover] 미반영 주문 인계 — ${tabName} 옮김 ${out.written} · 실패 ${out.failed} · ` +
+    `자리없음 ${out.blocked}${truncated ? ` · 상한 ${HANDOFF_CAP} 초과분은 복구 작업이 이어서 처리` : ''} by=${by}`);
+  return out;
 }
 
 /**
@@ -403,6 +491,7 @@ module.exports = {
   cutoverChecklist,
   listCutoverTabs,
   enableSheetless,
+  handoffPendingOrders,
   disableSheetless,
   CUTOVER_NOTICE,
   __setPoolForTest,
