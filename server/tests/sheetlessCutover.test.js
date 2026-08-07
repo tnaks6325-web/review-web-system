@@ -51,7 +51,8 @@ function makeStub(opts = {}) {
       log.push(String(sql));
       const s = String(sql);
       if (/FROM tab_configs tc/.test(s) && /LEFT JOIN LATERAL/.test(s)) return { rows: [o.tab] };
-      if (/UPDATE tab_configs SET sheetless = TRUE/.test(s)) return { rowCount: 1 };
+      // ★ 표식을 켜는 순간을 순서 기록에 남긴다 — "마지막 반영은 켜기 **전**" 계약을 실행으로 고정.
+      if (/UPDATE tab_configs SET sheetless = TRUE/.test(s)) { RECORD.order.push('flag'); return { rowCount: 1 }; }
       if (/UPDATE tab_configs SET sheetless = FALSE/.test(s)) return { rowCount: o.reconnectRows == null ? 1 : o.reconnectRows };
       if (/FROM order_submissions/.test(s)) {
         if (o.pendingThrows) throw new Error('os down');
@@ -72,8 +73,23 @@ function makeStub(opts = {}) {
 // _checkSheetRows / _checkParity / _checkMirror / _checkLedger 는 다른 모듈을 부른다 — 전부 스텁으로 갈아끼운다.
 // ★ ④ 는 구글 Drive 를 실제로 부르므로(사람이 [점검]을 누를 때만) 여기서도 반드시 막는다 —
 //   안 막으면 자격증명 없는 환경에서 전부 unknown 으로 떨어져 "왜 잠겼는지" 를 못 본다.
+/* 이관 절차의 호출 순서·인자 기록(마지막 반영 ↔ 표식 켜기 순서 계약). */
+const RECORD = { order: [], reflect: [] };
+
 function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = false, ledgerThrows = null,
-  ledgerIndexRows = 2, remoteModifiedAt = null, driveThrows = false } = {}) {
+  ledgerIndexRows = 2, remoteModifiedAt = null, driveThrows = false,
+  reflectOk = true, reflectThrows = false } = {}) {
+  RECORD.order = []; RECORD.reflect = [];
+  /* ★★ 이관 직전 **마지막 반영**(repairSheetSync = 미러→빌드→투영)도 반드시 막는다 —
+   *    안 막으면 테스트가 진짜 구글 시트를 읽으러 간다. */
+  const audit = require('../src/services/sheetSyncAudit.service');
+  const _rs = audit.repairSheetSync;
+  audit.repairSheetSync = async (a) => {
+    RECORD.order.push('reflect'); RECORD.reflect.push(a);
+    if (reflectThrows) throw new Error('repair down');
+    return { ok: reflectOk, steps: { mirror: { ok: true }, build: { ok: true },
+      project: reflectOk ? { ok: true } : { ok: false, error: 'proj down' } } };
+  };
   const slot = require('../src/services/sheetSlotSync.service');
   const _rp = slot.readPreparedRows;
   slot.readPreparedRows = async () => (readOk
@@ -98,7 +114,7 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
   };
   return () => {
     slot.readPreparedRows = _rp; trackB.parityReport = _pr; ledger.rebuildLedgers = _rl;
-    sheets.getSheetModifiedTime = _gm;
+    sheets.getSheetModifiedTime = _gm; audit.repairSheetSync = _rs;
   };
 }
 
@@ -237,11 +253,17 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       r.canCutover === true && r.checks.find(c => c.key === 'mirror').state === 'pass');
     restore();
 
-    // 그래도 시트 단위 값보다 새로운 수정이면 여전히 잠근다(완화 아님)
+    /* ★★ 시트 단위 값보다 새로운 수정이면 **여전히 fail 로 표시**하되 **잠그지는 않는다**
+     *    (사용자 확정 2026-08-07): "시트가 x분 전에 수정됐다"는 대개 리뷰어 제출이고 그 기록은
+     *    이미 서버에 있으며, 이관이 끊기 직전에 시트를 마지막으로 한 번 더 읽어 반영한다. */
     restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 5 * 60000).toISOString() });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
-    ok('★ 시트 단위 값보다 새로운 수정이면 여전히 잠근다',
-      r.canCutover === false && r.checks.find(c => c.key === 'mirror').state === 'fail');
+    const mc = r.checks.find(c => c.key === 'mirror');
+    ok('★★ 시트가 그 뒤로 바뀌었어도 이관을 막지 않는다(경고 전용)',
+      r.canCutover === true && mc.state === 'fail' && mc.advisory === true);
+    ok('★ 막힌 항목이 아니라 경고 목록에 들어간다',
+      !r.blocking.includes('mirror') && r.advisories.includes('mirror'));
+    ok('★ 사유가 "이관할 때 마지막으로 읽는다"를 말한다', /마지막으로 한 번 더 읽어 반영/.test(mc.hint));
     restore(); cutover.__setPoolForTest(null);
 
     const src = noLineComments(read('src/services/sheetlessCutover.service.js'));
@@ -261,26 +283,58 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     let restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 60 * 1000).toISOString() });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
     const mk = r.checks.find(c => c.key === 'mirror');
-    ok('★ 읽어 둔 뒤 시트가 수정됐으면 잠금', r.canCutover === false && mk.state === 'fail');
-    ok('막힌 사유가 다음 행동을 말한다(새로고침 후 이관)', /새로고침/.test(mk.hint));
+    ok('★ 읽어 둔 뒤 시트가 수정된 사실은 그대로 표시한다(숨기지 않는다)', mk.state === 'fail');
+    ok('★ 그래도 이관은 막지 않는다(사용자 확정)', r.canCutover === true && mk.advisory === true);
+    ok('그 자리에서 미리 확인할 길은 남긴다([시트 새로고침])', mk.fix === 'refresh');
     restore();
 
-    // 구글 조회 실패 = 모름 → fail-closed
+    // 구글 조회 실패도 이관을 막지 않는다 — 어차피 이관이 마지막 반영을 한 번 더 시도한다
     restore = stubDeps({ driveThrows: true });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
-    ok('★★ 시트 상태를 못 물어보면 잠금(fail-open 금지)',
-      r.canCutover === false && r.checks.find(c => c.key === 'mirror').state === 'unknown');
+    const uk = r.checks.find(c => c.key === 'mirror');
+    ok('★ 시트 상태를 못 물어봐도 이관은 막지 않는다(경고 전용)',
+      r.canCutover === true && uk.state === 'unknown' && uk.advisory === true);
     restore(); cutover.__setPoolForTest(null);
   }
   {
-    // 한 번도 안 읽어 온 탭
+    // 한 번도 안 읽어 온 탭 — 표시는 하되 막지 않는다(이관이 그때 읽어 온다)
     const { db } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
       sheetless: false, mirroredAt: null, boardRows: 3 } });
     cutover.__setPoolForTest(db);
     const restore = stubDeps({});
     const r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
-    ok('시트를 한 번도 읽어 온 기록이 없으면 잠금',
-      r.canCutover === false && r.checks.find(c => c.key === 'mirror').state === 'unknown');
+    const mk = r.checks.find(c => c.key === 'mirror');
+    ok('시트를 한 번도 읽어 온 기록이 없어도 경고까지만',
+      r.canCutover === true && mk.state === 'unknown' && mk.advisory === true);
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    /* ★★★ 경고 전용은 ④ **하나뿐**이다 — 여기에 항목이 늘면 이관이 조용히 헐거워진다.
+     *    ①·②·③·⑤ 는 이관으로 복구되지 않으므로 계속 잠가야 한다(변이시험 대상). */
+    const seen = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+    const { db } = makeStub({ pendingBlocked: 1, indexBefore: 20,
+      tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1', sheetless: false,
+        mirroredAt: seen, sheetModifiedAt: seen, sheetKnownAt: seen, boardRows: 3 } });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({ prepared: 10, parityReal: 2, ledgerIndexRows: 0,
+      remoteModifiedAt: new Date(Date.now() - 60000).toISOString() });   // ④ 도 fail 로 만든다
+    const r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★★★ 경고 전용 항목은 ④(mirror) 하나뿐',
+      r.checks.filter(c => c.advisory).map(c => c.key).join(',') === 'mirror');
+    ok('★ 나머지 네 항목은 그대로 잠근다',
+      r.canCutover === false
+      && ['sheet_rows', 'parity', 'pending', 'ledger'].every(k => r.blocking.includes(k)));
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    /* ⑤ 가 막혔을 때도 **그 자리에서** 조치를 준다 — 가장 흔한 원인(인덱스엔 있는데 표로
+     *   아직 투영 안 됨)은 [시트 새로고침](미러→빌드→투영) 한 번으로 풀린다. */
+    const { db } = makeStub({ indexBefore: 20 });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({ ledgerIndexRows: 0 });
+    const r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★ ⑤ 막힘은 [시트 새로고침] 을 그 자리에서 제안한다',
+      r.checks.find(c => c.key === 'ledger').fix === 'refresh');
     restore(); cutover.__setPoolForTest(null);
   }
   {
@@ -346,6 +400,50 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('★★ 작업명 입력 없이도 점검 통과면 이관된다', r.ok === true && !r.forced);
     ok('표식을 켜는 UPDATE 가 실제로 나간다',
       log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s) && /sheetless_at = NOW\(\)/.test(s)));
+    /* ★★ 마지막 반영 = 끊기 **직전**(표식을 켜기 전) — 켠 뒤에는 미러·빌드가 그 탭을 제외해
+     *    아무것도 읽어 오지 못한다. 순서를 실행으로 고정한다(존재 검사만으론 못 잡는다). */
+    ok('★★ 이관 직전에 그 시트를 마지막으로 한 번 더 읽는다', RECORD.reflect.length === 1
+      && RECORD.reflect[0].sheetId === 'S1' && RECORD.reflect[0].tabName === 'T1');
+    ok('★★ 반영이 표식 켜기보다 **먼저** 일어난다',
+      RECORD.order.indexOf('reflect') >= 0 && RECORD.order.indexOf('reflect') < RECORD.order.indexOf('flag'));
+    ok('★ 실행부는 기존 반영 도구 한 벌(repairSheetSync — 사본 0)', (() => {
+      const s = noLineComments(read('src/services/sheetlessCutover.service.js'));
+      // ★ 미러·빌드·투영을 **직접** 부르지 않는다(순서·락 규율이 그 함수 안에 있다).
+      return /sheetSyncAudit\.service'\)\s*\.repairSheetSync\(/.test(s)
+        && !/mirrorOneSheet\s*\(/.test(s) && !/buildOneSheet\s*\(/.test(s) && !/projectTab\s*\(/.test(s);
+    })());
+    ok('반영 결과를 응답에 실어 화면이 말한다', r.reflect && r.reflect.ok === true);
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    /* ★ 마지막 반영이 실패해도 **이관은 유지**하고 사유만 싣는다(부수효과 규율) —
+     *   되돌리면 "표식은 껐는데 안내문은 붙은" 어중간한 상태가 된다. */
+    const { db, log } = makeStub();
+    cutover.__setPoolForTest(db);
+    let restore = stubDeps({ reflectThrows: true });
+    let r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    ok('★ 마지막 반영이 예외로 죽어도 이관은 유지',
+      r.ok === true && r.reflect.ok === false && /repair down/.test(r.reflect.message || ''));
+    ok('그때도 표식은 켜진다', log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s)));
+    restore();
+
+    // 예외가 아니라 `{ok:false}` 로 돌아오는 갈래도 그대로 보고해야 한다(실패 경로가 둘이다)
+    restore = stubDeps({ reflectOk: false });
+    r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    ok('★ 단계 실패(ok:false)도 조용히 성공으로 접지 않는다',
+      r.ok === true && r.reflect.ok === false && r.reflect.steps.project.ok === false);
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    // 킬스위치 — 마지막 반영 없이 종전 동작
+    const { db } = makeStub();
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    process.env.SHEETLESS_CUTOVER_REFLECT = '0';
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    delete process.env.SHEETLESS_CUTOVER_REFLECT;
+    ok('★ 킬스위치 0 이면 반영을 건너뛴다(이관은 그대로)',
+      r.ok === true && r.reflect.skipped === 'disabled' && RECORD.reflect.length === 0);
     restore(); cutover.__setPoolForTest(null);
   }
   {
@@ -694,6 +792,15 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
         !/<input/.test(pass) && !/이름을 그대로 입력/.test(pass));
       ok('★ 통과 못 하면 [이관] 버튼 자체가 없다(눌러도 안 되는 버튼 금지)',
         !/_coCutover\(/.test(block) && /이관할 수 없습니다/.test(block));
+      /* ★★ 경고 전용(advisory) 항목은 **막는 항목과 다르게** 그린다 — 같은 ✕ 로 그리면
+       *    "빨간 게 있는데 왜 이관 버튼이 살아 있지?"가 된다(사용자 확정 2026-08-07). */
+      const advOut = sandbox.__f({ canCutover: true, advisories: ['mirror'],
+        checks: [{ key: 'mirror', state: 'fail', advisory: true, label: 'L', detail: 'D' }] }, 0);
+      ok('★★ 경고 전용 항목이 있어도 [이관] 버튼은 그려진다',
+        /_coCutover\(0\)/.test(advOut) && />이관</.test(advOut));
+      ok('★ 그 항목은 ✕(막힘)로 그리지 않는다', /⚠/.test(advOut) && !/✕/.test(advOut));
+      ok('★ 화면이 "막지 않는다"와 "마지막으로 한 번 더 읽는다"를 말한다',
+        /막지 않습니다/.test(advOut) && /마지막으로 한 번 더 읽어 반영/.test(advOut));
     }
     /* ★★ 막힌 항목은 그 자리에서 처리된다 — 종전 안내는 "시트 데이터 반영 점검 화면에서…" 라고만
      *    했는데 그 화면은 **nav 어디에도 없어**(링크 0곳) 주소를 직접 쳐야 열렸다(사용자 신고).
@@ -748,6 +855,13 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('★★ 이관 결과가 옮긴 건수를 말한다', /handoff[\s\S]{0,400}시스템 표로 옮겼습니다/.test(wd));
     ok('★ 인계 실패·자리없음·절단을 각각 고지한다(조용한 누락 금지)',
       /h\.failed/.test(wd) && /h\.blocked/.test(wd) && /h\.truncated/.test(wd));
+    /* ★★ 마지막 반영 실패는 특히 크게 말해야 한다 — 그 시트에만 있던 편집(직원 수기 줄)이
+     *    안 담겼을 수 있고, 조치([재연결] → [시트 새로고침] → 재이관)까지 알려야 한다. */
+    ok('★★ 마지막 반영 실패를 사용자에게 알리고 조치를 말한다',
+      /j\.reflect && j\.reflect\.ok===false/.test(wd) && /시트 마지막 반영 실패/.test(wd)
+      && /재연결/.test(wd) && /시트 새로고침/.test(wd));
+    ok('★ 이관도 오래 걸리는 조치라 진행 문구를 보여준다',
+      /_coCutover[\s\S]{0,1200}이관 중…/.test(wd));
     ok('★ 헤더 캡 = 본문 캡(같은 값 1120px)',
       /#cohead \.mh\{max-width:1120px\}/.test(wd) && /\.cowrap\{max-width:1120px/.test(wd));
     ok('CSS 는 co- 접두 신설', /\.cocard\{/.test(wd) && /\.cochk\{/.test(wd));
