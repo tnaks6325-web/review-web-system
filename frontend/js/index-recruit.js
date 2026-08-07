@@ -2734,6 +2734,8 @@ function _campSheetInfo(si) {
   if (s) {
     const why = {
       applied: null,
+      // ★ 기준이 시스템표(기본)일 때 — 시트에 날짜가 있어도 정원·마감은 시스템 값이 정한다
+      system_basis: "이 시스템은 <b>모집 인원 기준이 시스템표</b>입니다 — 시트에 진행 날짜가 있어도 그날 정원·마감일은 <b>일 모집인원 · 날짜별 조절 · 총모집(차수)</b>이 정합니다(아래 날짜는 시트 현황 참고용).",
       single_date: `시트 날짜가 <b>${esc(md(s.firstDate))} 하루</b>뿐이라 <b>시트 일정이 적용되지 않습니다</b>(날짜 2종 이상일 때만 인식). 마감은 발행폼의 총 모집인원으로 판정됩니다.`,
       no_parsable_date: "날짜 컬럼의 값을 해석하지 못해 시트 일정이 적용되지 않습니다.",
       low_parse_ratio: "날짜 컬럼에 해석 불가한 값이 많아 시트 일정이 적용되지 않습니다.",
@@ -2744,13 +2746,19 @@ function _campSheetInfo(si) {
     }[s.reason];
     if (s.applied) {
       parts.push(`<b>시트 일정</b> 적용 중 · ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · 날짜 ${s.distinctDates}종 / ${s.totalDated}행`);
+    } else if (s.reason === "system_basis") {
+      // ★ 이건 이상 상황이 아니라 **정상 기준**이다 — 경고(노란 박스)로 몰지 않는다
+      parts.push(`<b>모집 기준</b> 시스템표 · ${why}`
+        + (s.distinctDates ? `<div style="color:#6B7280;font-size:.7rem">시트 날짜: ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · ${s.distinctDates}종 / ${s.totalDated}행</div>` : ""));
     } else if (why) {
       parts.push(`<b>시트 일정</b> <span style="color:#B45309;font-weight:800">미적용</span> — ${why}`
         + (s.distinctDates ? `<div style="color:#6B7280;font-size:.7rem">인식된 날짜: ${s.dates.map(d => esc(md(d.date)) + "(" + d.rows + "행)").join(" · ")}</div>` : ""));
     }
   }
   if (!parts.length) return "";
-  const warn = (Number(si.diff) || 0) !== 0 || (s && !s.applied);
+  // ★ `system_basis`(모집 기준이 시스템표)는 정상 상태라 경고 색으로 칠하지 않는다 —
+  //   전 공고가 상시 노란 박스가 되면 진짜 불일치 신호가 묻힌다(늑대소년 방지).
+  const warn = (Number(si.diff) || 0) !== 0 || (s && !s.applied && s.reason !== "system_basis");
   return box(warn ? "#FFFBEB" : "#F0FDF4", warn ? "#FDE68A" : "#BBF7D0",
     `<div style="font-weight:800;color:${warn ? "#92400E" : "#065F46"};margin-bottom:4px">📋 시트 대조 — ${esc(si.tabName)}</div>` + parts.join('<div style="height:6px"></div>'));
 }
