@@ -96,13 +96,15 @@ async function getPlanOverview(campaignId) {
   for (const r of byDateQ.rows) byDateSubmitted[r.d] = Number(r.n) || 0;
   // 이월 보류(098): 모드 + 잔량. ★ 잔량 계산 실패는 null — 화면이 "조회 실패"를 말한다(0 위장 금지).
   let carryHeld = null, carryAppliedSum = 0;
-  if (isCarryHold(camp)) {
+  // ★ 시트 일정 판정이 'unknown'(실패)이면 잔량을 계산하지 않는다(fail-closed) — 시트 일정
+  //   공고에는 보류가 적용되지 않으므로, 모르는 채 숫자를 띄우면 효과 없는 칩이 될 수 있다.
+  if (isCarryHold(camp) && schedule !== 'unknown') {
     try {
       const counts = (await fetchCampaignCounts(pool, [camp.id])).get(camp.id);
       const sums = await fetchCarryAppliedSums(pool, [camp.id]);
       if (sums !== null) {   // null = 반영 합계 모름 → 잔량도 모름(부풀린 숫자 금지 — 코드리뷰 M3)
         carryAppliedSum = sums.get(camp.id) || 0;
-        carryHeld = heldCarry(camp, counts, today, carryAppliedSum);
+        carryHeld = heldCarry(camp, counts, today, carryAppliedSum, schedule);
       }
     } catch (e) {
       logger.warn('[campaignPlan] 보류 잔량 계산 실패(fail-soft): ' + e.message);
@@ -166,9 +168,13 @@ async function savePlans(campaignId, body, actor) {
 
   const camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 인원 조절을 지원합니다.'); e.code = 'not_participation'; throw e; }
-  // 확정 ③: 시트 일정 캠페인은 시트가 진실원본 — 저장 거부(적용도 안 되는 값이 쌓여 화면만 어긋남).
-  const schedule = await _scheduleFor(camp);   // 판정 실패는 schedule_unknown throw(fail-closed)
-  if (schedule) { const e = new Error('이 캠페인의 날짜별 정원은 시트에서 자동으로 읽어옵니다 — 조절은 시트에서(그날 행 수 변경) 해주세요.'); e.code = 'schedule_driven'; throw e; }
+  // ★★ 시트 일정 캠페인도 조절 가능(사용자 확정 2026-08-07 — 종전 `schedule_driven` 거부 해제):
+  //   저장한 날짜만 리뷰웹이 이기고(computeCampaignState 의 planOverrideFor), 저장하지 않은 날은
+  //   종전대로 시트가 정한다. 조절을 해제하면 그 날은 즉시 시트 값으로 복귀한다.
+  //   ★ 여기서는 아래 "오늘 하한" 비교값을 고르는 데만 쓰므로 판정 실패는 치명적이지 않다
+  //     (모르면 일건수 기준의 보수적 검사로 떨어진다 — 저장을 통째로 막지 않는다).
+  let schedule = null;
+  try { schedule = await _scheduleFor(camp); } catch (_) { schedule = null; }
 
   const today = kstTodayStr();
   const seen = new Set();
@@ -220,10 +226,16 @@ async function savePlans(campaignId, body, actor) {
       // 해제(remove)의 비교값은 기본 일건수 — 이월분을 계산에 안 넣어 보수적으로 거부될 수
       // 있으나(이월 포함 실정원 25 ≥ 사용 23 인데 dl 20 < 23 이라 거부) fail-closed 방향이고
       // 오류 문구가 사유(사용 수)를 말하므로 의도된 단순화다.
-      const effective = todaySet ? todaySet.count : (Number(camp.daily_limit) || 0);
-      if (effective < used) {
-        const e = new Error(`오늘은 이미 ${used}명이 확정·진행 중이라 ${effective}명으로 줄일 수 없습니다.`);
-        e.code = 'below_used'; e.floor = used; throw e;
+      // ★ 시트 일정 공고의 **해제(remove)** 는 이 검사를 건너뛴다: 해제하면 시트 계획값으로
+      //   복귀하는데 그 값은 여기서 알 수 없고, "시트 값 < 오늘 사용량"은 이 기능 없이도 원래
+      //   도달 가능한 상태(daily_done)라 막을 이유가 없다. 조절(set)은 종전대로 하한을 지킨다.
+      const skipRemoveOnly = todayRemove && !todaySet && !!schedule;
+      if (!skipRemoveOnly) {
+        const effective = todaySet ? todaySet.count : (Number(camp.daily_limit) || 0);
+        if (effective < used) {
+          const e = new Error(`오늘은 이미 ${used}명이 확정·진행 중이라 ${effective}명으로 줄일 수 없습니다.`);
+          e.code = 'below_used'; e.floor = used; throw e;
+        }
       }
     }
 

@@ -61,8 +61,22 @@
     return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + ' (' + DOW[d.getUTCDay()] + ')';
   }
 
+  /** 시트 일정 공고의 그날 시트 계획(구매일자 행 수) — 없는 날 = 0(그날은 진행일이 아님). */
+  function sheetFor(d) {
+    if (!S.data._schMap) {
+      var m = {};
+      (S.data.scheduleDates || []).forEach(function (x) { m[x.date] = Number(x.slots) || 0; });
+      S.data._schMap = m;   // applyOverview 가 S.data 를 통째로 갈아끼우므로 캐시는 자동 무효화
+    }
+    return S.data._schMap[d] || 0;
+  }
+  /** 그날 조절이 없을 때의 기본 정원 — 시트 일정 공고는 **시트가**, 아니면 기본 일건수가 정한다.
+   *  ★ 이 한 곳이 게이지·"기본 N" 표기·예상 종료일 계산의 공통 기준(사본을 두면 화면이 갈린다). */
+  function baseFor(d) {
+    return S.data.scheduleDriven === true ? sheetFor(d) : (S.data.defaultDaily || 0);
+  }
   function planFor(d) {
-    return (S.plan[d] != null) ? S.plan[d] : (S.data.defaultDaily || 0);
+    return (S.plan[d] != null) ? S.plan[d] : baseFor(d);
   }
   /** 조절·투영의 기준일 — 시작일이 미래면 그날부터(Codex P2: 오픈 전 날짜를 소진하는 것처럼
    *  계산하면 예상 종료일이 앞당겨 보이고, 분산이 오픈 전 날짜에 계획을 얹는다). */
@@ -142,9 +156,7 @@
     + '#cdpModal .cdp-hist li{padding:3px 8px;border-left:3px solid #c7d2fe;margin-bottom:3px;background:var(--bg2,#f8fafc);border-radius:0 6px 6px 0}'
     + '#cdpModal .cdp-ft{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 18px;border-top:1px solid var(--border,#e5e7eb);background:var(--bg2,#f8fafc)}'
     + '#cdpModal .cdp-hint{font-size:.64rem;color:var(--t3,#64748b)}'
-    + '#cdpModal .cdp-ro{border:1px solid var(--border,#e2e8f0);border-radius:10px;padding:10px 13px;background:var(--bg2,#fafafa);font-size:.75rem}'
-    + '#cdpModal .cdp-ro .rr2{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--border,#e2e8f0);font-size:.72rem}'
-    + '#cdpModal .cdp-ro .rr2:last-child{border-bottom:none}'
+    /* (구 읽기전용 블록 .cdp-ro 는 시트 일정 공고 조절 허용(2026-08-07)으로 제거됐다) */
     + '#cdpChoice{position:fixed;inset:0;z-index:10060;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:16px}'
     + '#cdpChoice .ch-box{width:440px;max-width:100%;background:var(--card,#fff);color:var(--t1,#1f2937);border-radius:14px;padding:18px;box-shadow:0 12px 40px rgba(15,23,42,.3)}'
     + '#cdpChoice h4{font-size:.84rem;margin:0 0 5px}'
@@ -254,26 +266,22 @@
     var save = document.getElementById('cdpSaveBtn');
     var hint = document.getElementById('cdpHint');
 
+    // ★★ 시트 일정 공고도 조절 가능(사용자 확정 2026-08-07 — 종전 읽기 전용 잠금 해제).
+    //   규칙은 "조절한 날짜만 시스템이 이긴다" — 그래서 잠그는 대신 **시트 계획을 기준선으로**
+    //   보여주고(baseFor/sheetFor), 조절하지 않은 날은 계속 시트를 따른다고 문장으로 말한다.
+    var schNote = '';
     if (j.scheduleDriven === true) {
-      // 확정 ③: 시트 일정 캠페인 = 읽기 전용(시트가 진실원본)
-      var lis = (j.scheduleDates || []).map(function (d) {
-        return '<div class="rr2"><span>' + _esc(fmtMD(d.date)) + (d.date === j.today ? ' <span class="cdp-tag tdy">오늘</span>' : '') + '</span><span>시트에 ' + d.slots + '행 → ' + d.slots + '명</span></div>';
-      }).join('');
-      bd.innerHTML = '<div class="cdp-ro"><p style="font-weight:800;margin:0 0 8px">📄 이 캠페인의 날짜별 정원은 <span style="color:#1b64da">시트의 구매일자 컬럼</span>에서 자동으로 읽어옵니다.</p>'
-        + lis
-        + '<p style="margin:10px 0 0;font-size:.7rem;color:#92400e"><b>⚠ 여기서는 조절할 수 없습니다.</b> 인원을 바꾸려면 시트에서 그날 날짜가 적힌 행 수를 조절하세요(최대 5분 뒤 자동 반영). 차수(총량)도 시트 행 수가 기준입니다.</p></div>'
-        + histHtml();
-      save.disabled = true;
-      hint.textContent = '시트 일정 캠페인 — 읽기 전용';
-      return;
-    }
-    if (j.scheduleDriven === null) {
-      // 판정 실패 = 잠금(fail-closed) — 시트 일정 캠페인에 조절을 쌓으면 화면만 어긋난다
-      bd.innerHTML = '<div class="cdp-note err">시트 일정 여부를 판정하지 못했습니다 — 조절을 잠갔습니다. 잠시 후 다시 시도해주세요.</div>'
-        + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan._retry()">다시 시도</button>';
-      save.disabled = true;
-      hint.textContent = '';
-      return;
+      var up = (j.scheduleDates || []).filter(function (x) { return x.date >= j.today; });
+      var head = up.slice(0, 6).map(function (x) { return _esc(fmtMD(x.date)) + ' ' + x.slots + '명'; }).join(' · ');
+      schNote = '<div class="cdp-note">📄 이 공고의 날짜별 <b>기본 정원은 시트의 구매일자 컬럼</b>에서 읽어옵니다'
+        + (head ? ' — 앞으로: ' + head + (up.length > 6 ? ' 외 ' + (up.length - 6) + '일' : '') : '')
+        + '. <b>여기서 조절한 날짜만 시스템 값이 우선</b>하고, 조절하지 않은 날은 계속 시트를 따릅니다'
+        + '([기본으로]를 누르면 그 날은 다시 시트 값으로 돌아갑니다).</div>';
+    } else if (j.scheduleDriven === null) {
+      // 판정 실패 = 잠그지 않는다(조절은 어느 쪽이든 저장한 날짜에 그대로 적용된다) — 다만
+      // 아래 "기본" 표시가 실제와 다를 수 있다는 사실을 말한다(조용한 오표시 금지).
+      schNote = '<div class="cdp-note warn">⚠ 시트 일정 여부를 판정하지 못했습니다 — 아래 <b>기본</b> 표시가 실제와 다를 수 있습니다. '
+        + '저장한 날짜의 인원은 그대로 적용됩니다.</div>';
     }
 
     var killOff = j.planEnabled === false;
@@ -298,7 +306,7 @@
         + '</div>'
         + '<div class="cdp-ctl">'
         + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="-1"' + (killOff ? ' disabled' : '') + '>−</button>'
-        + '<span class="cdp-num">' + v + '<small>' + (isToday && conf > 0 ? '확정·진행 ' + conf : (adjusted ? '<button type="button" class="cdp-reset" data-i="' + i + '">기본으로</button>' : '기본 ' + (j.defaultDaily || 0))) + '</small></span>'
+        + '<span class="cdp-num">' + v + '<small>' + (isToday && conf > 0 ? '확정·진행 ' + conf : (adjusted ? '<button type="button" class="cdp-reset" data-i="' + i + '">기본으로</button>' : '기본 ' + baseFor(d))) + '</small></span>'
         + '<button type="button" class="cdp-st" data-i="' + i + '" data-d="1"' + (killOff ? ' disabled' : '') + '>＋</button>'
         + '</div></div>';
     }).join('');
@@ -320,7 +328,13 @@
     // ★ 098 보류 이월 블록(보류 공고만) — 잔량 표시 + [오늘/내일/분산] 반영(계획 스테이징).
     //   잔량 null = "조회 실패"를 말하고 반영을 잠근다(숫자를 지어내지 않는다 — 시안 확정).
     let heldBlk = '';
-    if (S.data.carryMode === 'hold') {
+    if (S.data.carryMode === 'hold' && S.data.scheduleDriven === true) {
+      // ★ 시트 일정 공고에는 '이월 보류'가 적용되지 않는다(정원을 시트 계획이 정하므로 자동
+      //   이월 가산 자체가 없다). "조회 실패"로 뭉뚱그리면 담당자가 원인을 잘못 찾는다.
+      heldBlk = '<div class="cdp-heldblk"><div class="hh"><b>⏸ 보류된 이월</b><span class="hn">해당 없음</span></div>'
+        + '<div class="hs">시트 일정 공고는 날짜별 정원을 시트가 정하므로 <b>이월 보류 설정이 적용되지 않습니다</b> — '
+        + '인원 조절은 아래 날짜별 계획에서 바로 하세요.</div></div>';
+    } else if (S.data.carryMode === 'hold') {
       const heldRaw = S.data.carryHeld;
       const avail = heldRaw == null ? null : Math.max(0, Number(heldRaw) - S.carryStage);
       const dis = killOff || avail === null || avail <= 0;
@@ -342,6 +356,7 @@
 
     bd.innerHTML =
       (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
+      + schNote
       + heldBlk
       // ★ 코드리뷰 M1: 총원 충족 시 closed 가 영속되어 있어 차수를 추가해도 게시를 켜기 전에는
       //   모집이 재개되지 않는다(자동 재오픈은 수동 마감과 구분 불가라 하지 않음) — 화면이 말한다.
@@ -349,7 +364,8 @@
         ? '<div class="cdp-note warn">⚠ 현재 게시 상태가 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b>입니다 — 조절·차수는 저장되지만, <b>모집 재개는 공고 카드의 게시 토글을 켜야</b> 시작됩니다.</div>'
         : '')
       + '<div class="cdp-sub"><span>날짜별 모집 계획 — 게이지 드래그 또는 −/＋</span>'
-      + '<span>기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b> · 총량 <b>' + ((j.recruitTotal || 0) > 0 ? j.recruitTotal + '명' : '무제한') + '</b> · 확정 <b>' + (j.submittedAll || 0) + '명</b></span></div>'
+      + '<span>' + (j.scheduleDriven === true ? '기본 <b>시트 구매일자 기준</b>' : '기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b>')
+      + ' · 총량 <b>' + ((j.recruitTotal || 0) > 0 ? j.recruitTotal + '명' : '무제한') + '</b> · 확정 <b>' + (j.submittedAll || 0) + '명</b></span></div>'
       + '<div id="cdpRows">' + rows + '</div>'
       + '<div class="cdp-end"><span>예상 종료일: <b>' + _esc(endTxt) + '</b> '
       + (endTxt !== S.baseEnd ? '<span class="chg">(원래 ' + _esc(S.baseEnd) + ' → 변경됨)</span>' : '') + '</span>'
@@ -403,7 +419,8 @@
   /* ── 값 변경(세션 디바운스 — 질문은 조절 한 묶음당 한 번) ── */
   function gaugeScale() {
     var mx = (S.data.defaultDaily || 0) * 2;
-    rowDates().forEach(function (d) { mx = Math.max(mx, planFor(d)); });
+    // 시트 일정 공고는 기본 일건수가 무의미하므로 그날 시트 계획도 눈금 후보에 넣는다
+    rowDates().forEach(function (d) { mx = Math.max(mx, planFor(d), baseFor(d) * 2); });
     return Math.max(10, mx);
   }
   function minFor(d) { return d === S.data.today ? (S.data.todayUsed || 0) : 0; }
@@ -566,13 +583,15 @@
     try {
       var j = await _req('GET', EP + encodeURIComponent(String(campId)) + '/daily-plan');
       if (j.carryMode !== 'hold') { toast('이월 보류 공고가 아닙니다'); return; }
+      // ★ 시트 일정 공고는 보류가 적용되지 않는다(정원을 시트가 정한다) — "잔량 조회 실패"로
+      //   뭉뚱그리면 담당자가 원인을 잘못 찾는다. 사유를 정확히 말하고 갈 곳을 알려준다.
+      if (j.scheduleDriven === true) { toast('시트 일정 공고에는 이월 보류가 적용되지 않습니다 — [📅 인원]에서 날짜별로 조절하세요'); return; }
       if (j.carryHeld == null) { toast('보류 잔량을 계산하지 못했습니다 — [📅 인원]에서 확인해주세요'); return; }
       var held = Math.max(0, Number(j.carryHeld) || 0);
       if (held <= 0) { toast('반영할 보류 이월이 없습니다'); return; }
       if (j.planEnabled === false) { toast('킬스위치(CAMPAIGN_DAILY_PLAN=0)로 계획이 꺼져 있어 반영할 수 없습니다'); return; }
-      // 시트 일정 판정 3분기 — true=시트가 진실원본 / null=판정 실패(fail-closed, 모르면 열지 않는다) — 사유가 다르면 문구도 달라야 한다
-      if (j.scheduleDriven === true) { toast('시트 일정 캠페인은 시트에서 조절합니다'); return; }
-      if (j.scheduleDriven !== false) { toast('시트 일정 여부를 판정하지 못해 반영할 수 없습니다 — 잠시 후 다시 시도해주세요'); return; }
+      // ※ 시트 일정 true 는 위에서(사유 문구와 함께) 걸렀고, 판정 실패(null)는 서버가 잔량을
+      //   null 로 내려주므로 바로 위 carryHeld 검사에서 걸린다 — 여기서 다시 볼 필요가 없다.
       var todayPlan = (j.plans || []).reduce(function (v, p) { return p.date === j.today ? p.count : v; }, null);
       if (todayPlan == null) todayPlan = j.defaultDaily || 0;
       Q = { campId: String(campId), held: held, today: j.today, todayPlan: todayPlan, title: j.title || '' };

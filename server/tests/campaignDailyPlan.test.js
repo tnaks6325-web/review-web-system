@@ -141,14 +141,51 @@ const CNT = (over = {}) => ({
   eq('조절 20 다 차면 daily_done', st.state, 'daily_done');
 }
 {
-  // 시트 일정 캠페인(063) = 계획 무시(시트가 진실원본 — 확정 ③)
+  // ★★ 시트 일정 캠페인(063)도 조절 가능(사용자 확정 2026-08-07 — 종전 "계획 무시" 규칙 폐기).
+  //   규칙 = **조절한 날짜만** 리뷰웹이 이기고, 조절하지 않은 날은 종전대로 시트가 정한다.
+  //   되돌리면 휴무일·일정종료 공고의 이월을 어디서도 조절할 수 없던 상태로 회귀한다.
   const sch = {
     ok: true, dates: [{ date: today, slots: 5 }, { date: d(1), slots: 5 }],
-    byDate: { [today]: 5, [d(1)]: 5 }, totalSlots: 10,
+    byDate: { [today]: 5, [d(1)]: 5 }, totalSlots: 10, firstDate: today, lastDate: d(1),
   };
-  const st = S.computeCampaignState(CAMP, CNT({ submittedAll: 0, submittedBeforeToday: 0, plans: { [today]: 20 } }), new Date(), sch);
-  eq('★ 시트 일정 캠페인은 계획 무시(dailyQuota=시트 5)', st.dailyQuota, 5);
-  eq('시트 일정 캠페인 todayPlanned=null', st.todayPlanned, null);
+  const base = CNT({ submittedAll: 0, submittedBeforeToday: 0 });
+  eq('조절 없는 날은 종전대로 시트 값(5)',
+    S.computeCampaignState(CAMP, base, new Date(), sch).dailyQuota, 5);
+  const st = S.computeCampaignState(CAMP, CNT({ submittedAll: 0, submittedBeforeToday: 0, plans: { [today]: 8 } }), new Date(), sch);
+  eq('★ 시트 일정 공고도 조절값이 이긴다(시트 5 → 조절 8)', st.dailyQuota, 8);
+  eq('시트 일정 공고 todayPlanned', st.todayPlanned, 8);
+  eq('시트 일정 공고 planAdjusted', st.planAdjusted, true);
+  // ★ 총량 clamp 는 유지 — 시트 총건수(10)를 넘겨 열 수 없다(095 불변식 ②)
+  eq('★ 총량 clamp 유지(조절 20이어도 총 10 − 확정 0 = 10)',
+    S.computeCampaignState(CAMP, CNT({ submittedAll: 0, submittedBeforeToday: 0, plans: { [today]: 20 } }), new Date(), sch).dailyQuota, 10);
+  eq('★ 총량 clamp 유지(전일 확정 7 → 남은 3)',
+    S.computeCampaignState(CAMP, CNT({ submittedAll: 7, submittedBeforeToday: 7, plans: { [today]: 20 } }), new Date(), sch).dailyQuota, 3);
+}
+{
+  // ★★ 휴무일(시트에 오늘 행 0개)이어도 **명시 조절값(1명 이상)이 있으면 연다** —
+  //   "저장했는데 안 열린다"(조용한 no-op) 방지. 0명 조절은 '안 연다'는 뜻이라 휴무 유지.
+  const sch = {
+    ok: true, dates: [{ date: d(-1), slots: 5 }, { date: d(1), slots: 5 }],
+    byDate: { [d(-1)]: 5, [d(1)]: 5 }, totalSlots: 10, firstDate: d(-1), lastDate: d(1),
+  };
+  eq('휴무일 + 조절 없음 = 종전대로 rest_day',
+    S.computeCampaignState(CAMP, CNT({ submittedAll: 5, submittedBeforeToday: 5 }), new Date(), sch).stateReason, 'rest_day');
+  const st = S.computeCampaignState(CAMP, CNT({ submittedAll: 5, submittedBeforeToday: 5, plans: { [today]: 3 } }), new Date(), sch);
+  eq('★ 휴무일이어도 조절 3명이면 연다', st.state, 'open');
+  eq('휴무일 조절 정원', st.dailyQuota, 3);
+  eq('★ 0명 조절은 휴무 유지(안 연다는 뜻)',
+    S.computeCampaignState(CAMP, CNT({ submittedAll: 5, submittedBeforeToday: 5, plans: { [today]: 0 } }), new Date(), sch).stateReason, 'rest_day');
+}
+{
+  // ★ 일정 종료(마감일 경과)도 같은 규율 — 조절값이 있으면 그날은 다시 열린다
+  const sch = {
+    ok: true, dates: [{ date: d(-3), slots: 5 }, { date: d(-2), slots: 5 }],
+    byDate: { [d(-3)]: 5, [d(-2)]: 5 }, totalSlots: 10, firstDate: d(-3), lastDate: d(-2),
+  };
+  eq('일정 종료 + 조절 없음 = 종전대로 closed',
+    S.computeCampaignState(CAMP, CNT({ submittedAll: 0, submittedBeforeToday: 0 }), new Date(), sch).stateReason, 'schedule_ended');
+  eq('★ 일정 종료 + 조절 2명 = 다시 열림',
+    S.computeCampaignState(CAMP, CNT({ submittedAll: 0, submittedBeforeToday: 0, plans: { [today]: 2 } }), new Date(), sch).state, 'open');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -262,21 +299,23 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('이력(plan_save) 기록', CALLS.some(c => c.sql.includes('campaign_plan_events') && (c.params || [])[2] === 'plan_save'
     || (c.sql.includes('campaign_plan_events') && c.sql.includes('plan_save'))));
 
-  // 4e. ★ 확정 ③ — 시트 일정 캠페인 저장 거부 + 쓰기 0
+  // 4e. ★★ 시트 일정 캠페인도 저장 허용(사용자 확정 2026-08-07 — 종전 schedule_driven 거부 폐기).
+  //   되돌리면 휴무일·일정종료 공고의 이월을 어디서도 조절할 수 없던 상태로 회귀한다.
   schedMod.scheduleFor = () => ({
     ok: true, dates: [{ date: today, slots: 5 }, { date: d(1), slots: 5 }],
     byDate: { [today]: 5, [d(1)]: 5 }, totalSlots: 10,
   });
   STUB = baseStub();
   CALLS.length = 0;
-  await assert.rejects(P.savePlans('c1', { set: [{ date: d(1), count: 9 }] }, 't'), (e) => e.code === 'schedule_driven');
-  ok('★ 시트 일정 캠페인 저장 거부(schedule_driven)', true);
-  ok('★ 거부 시 계획 INSERT 0회', !CALLS.some(c => c.sql.includes('INSERT INTO campaign_daily_plans')));
-  // 4f. 일정 판정 실패 = 잠금(fail-closed — 모르면 조절을 열지 않는다)
+  const schSaved = await P.savePlans('c1', { set: [{ date: d(1), count: 9 }] }, 't');
+  eq('★ 시트 일정 캠페인 저장 허용', schSaved.applied, 1);
+  ok('★ 시트 일정 캠페인도 계획 INSERT 수행', CALLS.some(c => c.sql.includes('INSERT INTO campaign_daily_plans')));
+  // 4f. 일정 판정 실패도 저장을 막지 않는다 — 조절은 저장한 날짜에 그대로 적용되므로
+  //     잠그면 "조절할 방법이 없는" 막다른 길만 남는다(fail-closed 근거가 사라졌다).
   schedMod.deriveSchedules = async () => { throw new Error('boom'); };
   STUB = baseStub();
-  await assert.rejects(P.savePlans('c1', { set: [{ date: d(1), count: 9 }] }, 't'), (e) => e.code === 'schedule_unknown');
-  ok('★ 일정 판정 실패 = 저장 잠금(schedule_unknown)', true);
+  const unkSaved = await P.savePlans('c1', { set: [{ date: d(1), count: 9 }] }, 't');
+  eq('★ 일정 판정 실패해도 저장 가능', unkSaved.applied, 1);
   schedMod.deriveSchedules = async () => new Map();
   schedMod.scheduleFor = () => null;
 
@@ -373,6 +412,17 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /c\.participation_mode && typeof window !== 'undefined' && window\.CampaignDailyPlan/.test(cards)
     && /CampaignDailyPlan\.open\('\$\{id\}'\)/.test(cards));
   ok('카드 "조절" 칩(planAdjusted — 이월로 위장 금지)', /pg-plan/.test(cards) && /c\.planAdjusted === true/.test(cards));
+  // ★★ 오늘 정원 0인 카드도 칩(이월·조절·보류)을 그린다 — 종전엔 자리표시자가 통째로 덮어써
+  //   휴무일·일정종료 공고의 이월이 화면 어디에도 없었다(사용자 신고 2026-08-07).
+  ok('★ 칩은 게이지 분기 밖에서 만든다(정원 0 카드에서도 표시)',
+    /const chips = `\$\{holdTip\}\$\{planTip\}\$\{carryTip\}`;/.test(cards)
+    && (cards.match(/\$\{chips\}/g) || []).length >= 2);
+  ok('★ 정원 0 사유를 사실대로(게시된 공고를 "게시 전"으로 위장 금지)',
+    /function _zeroQuotaNote\(c, isPre, isDraft\)/.test(cards)
+    && /stateReason === 'rest_day'/.test(cards) && /오늘 휴무/.test(cards)
+    && /schedule_ended/.test(cards) && /soft_full/.test(cards));
+  ok('★ 오픈 전·게시 전은 칩 미표시(없는 숫자 표시 금지)',
+    /const showChips = !isPre && !isDraft;/.test(cards));
   ok('카드 차수 줄(_roundsLine — 2차 이상일 때만)', /_roundsLine/.test(cards) && /rs\.length < 2\) return ''/.test(cards));
   const modal = readF('js/campaign-daily-plan.js');
   ok('모달 경로 = /api/trackb/* 공용(재기준 불필요)', /'\/api\/trackb\/campaigns\/'/.test(modal));
@@ -381,7 +431,16 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('저장은 confirm 경유([확정 저장])', /window\.confirm\('아래 조절을 저장할까요/.test(modal));
   ok('마운트 body 직속', /document\.body\.appendChild/.test(modal));
   ok('★ onclick 에 서버 문자열 보간 없음(XSS 규율)', !/onclick="[^"]*\$\{/.test(modal));
-  ok('시트 일정 캠페인 읽기 전용 화면', /scheduleDriven === true/.test(modal) && /여기서는 조절할 수 없습니다/.test(modal));
+  // ★★ 시트 일정 공고도 조절 가능 — 읽기 전용 잠금이 되살아나면 실패한다(사용자 확정 2026-08-07)
+  ok('★ 시트 일정 공고 읽기 전용 잠금 부재(조절 허용)',
+    !/여기서는 조절할 수 없습니다/.test(modal) && !/시트 일정 캠페인 — 읽기 전용/.test(modal));
+  ok('★ 시트 계획을 기준선으로 표시(baseFor/sheetFor 단일 출처) + 규칙 안내',
+    /function sheetFor\(d\)/.test(modal) && /function baseFor\(d\)/.test(modal)
+    && /S\.data\.scheduleDriven === true \? sheetFor\(d\) :/.test(modal)
+    && /여기서 조절한 날짜만 시스템 값이 우선/.test(modal));
+  ok('★ 시트 일정 공고는 보류 미적용을 사유로 말한다(조회 실패로 뭉뚱그리지 않는다)',
+    /이월 보류 설정이 적용되지 않습니다/.test(modal)
+    && /시트 일정 공고에는 이월 보류가 적용되지 않습니다/.test(modal));
   ok('킬스위치 안내(저장 잠금)', /CAMPAIGN_DAILY_PLAN=0/.test(modal));
   ok('★ M1: 마감·임시저장 배너 + 차수 추가 토스트("게시를 켜야 모집이 재개")',
     /게시 토글을 켜야/.test(modal) && /게시를 켜야 모집이 재개됩니다/.test(modal));
