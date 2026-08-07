@@ -177,6 +177,10 @@
         background:#EEF2FF;color:#4338CA;font-size:.62rem;font-weight:800;vertical-align:1px}
       .pcard .pg-plan{display:inline-block;margin-right:5px;padding:1px 5px;border-radius:5px;
         background:#FEF3C7;color:#92400E;font-size:.62rem;font-weight:800;vertical-align:1px}
+      /* 098: 이월 보류 칩(보라 — 파란 이월·노란 조절과 색 구분) · 클릭 = 원클릭 반영 확인창 */
+      .pcard .pg-hold{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;cursor:pointer;
+        background:#EDE9FE;color:#6D28D9;border:1px solid #DDD6FE;font-size:.62rem;font-weight:800;vertical-align:1px}
+      .pcard .pg-hold:hover{background:#DDD6FE}
       /* 095: 차수 구분 줄(관리자 카드 전용) — 1차 200/200 완료 · 2차 12/100 · 총 212/300 */
       .pcard .prounds{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:.62rem;color:#6B7280}
       .pcard .prounds .rchip{background:#F1F5F9;border-radius:999px;padding:1px 7px;font-weight:800;color:#334155}
@@ -537,8 +541,16 @@
         const planTip = (c.planAdjusted === true)
           ? `<span class="pg-plan" title="오늘 모집 인원이 ${Number(c.todayPlanned) || 0}명으로 조절되어 있습니다(기본 ${Number(c.daily_limit) || 0}명) — [📅 인원]에서 변경">조절</span>`
           : '';
+        // ★ 098: 이월 보류 칩 — 누르면 원클릭 반영 확인창(모듈 있을 때만 클릭 가능).
+        //   carryHeld null = 계산 불가 → 칩 미표시(0으로 위장 금지 — 시안 확정).
+        const heldN = (c.carryMode === 'hold' && c.carryHeld != null) ? Number(c.carryHeld) : null;
+        const holdTip = (heldN !== null && heldN > 0)
+          ? ((typeof window !== 'undefined' && window.CampaignDailyPlan)
+            ? `<span class="pg-hold" onclick="event.stopPropagation();event.preventDefault();CampaignDailyPlan.quickApplyHeld('${_esc(c.id)}')" title="보류된 이월 ${heldN}명 — 누르면 오늘 정원에 반영할지 물어봅니다 (세부 선택은 [📅 인원])">⏸ 보류 ${heldN}</span>`
+            : `<span class="pg-hold" title="보류된 이월 ${heldN}명 — 반영은 관리자 화면 [📅 인원]에서">⏸ 보류 ${heldN}</span>`)
+          : '';
         gauge = `<div class="pgauge${isFull ? ' full' : ''}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${planTip}${carryTip}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${holdTip}${planTip}${carryTip}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
           <div class="pg-key"><span><i class="sub"></i>확정 <b>${subN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;
@@ -777,6 +789,15 @@
           <div><label class="cae-lb">하루 진행 인원</label><input id="cae_daily" class="cae-in" type="number" min="0"></div>
           <div><label class="cae-lb">총 모집(0=무제한)</label><input id="cae_total" class="cae-in" type="number" min="0"></div>
         </div>
+        <!-- ★ 098 이월 반영(자동/보류) — 허용명단 리뷰어(스코프 토큰)도 변경 가능(확정 ③).
+             반영(보류분 열기)은 관리자 전용 API 라 여기서는 설정만 바꾼다(안내 문구가 말한다). -->
+        <label class="cae-lb">이월 반영</label>
+        <input id="cae_carry_mode" type="hidden" value="auto">
+        <div style="display:inline-flex;border:1px solid #cbd5e1;border-radius:9px;overflow:hidden">
+          <button type="button" id="cae_carry_auto" onclick="CampCards._caeCarry('auto')" style="border:0;background:#2563EB;color:#fff;padding:6px 12px;font-size:.72rem;font-weight:700;cursor:pointer">자동 반영 (기본)</button>
+          <button type="button" id="cae_carry_hold" onclick="CampCards._caeCarry('hold')" style="border:0;background:#fff;color:#64748B;padding:6px 12px;font-size:.72rem;font-weight:700;cursor:pointer">보류 후 수동 반영</button>
+        </div>
+        <div id="cae_carry_note" class="cae-note" style="display:none;color:#5B21B6">⏸ 보류 = 미달분을 자동으로 얹지 않고 쌓아둡니다. 보류분 반영은 관리자 화면(카드 ⏸ 칩·[📅 인원])에서만 가능합니다 — 물량은 사라지지 않습니다(총량까지 계속 모집).</div>
         <label class="cae-lb">랜딩(상품) URL</label>
         <div style="display:flex;gap:6px">
           <input id="cae_landing" class="cae-in" type="text" style="flex:1;min-width:0" placeholder="https://">
@@ -943,11 +964,29 @@
     document.getElementById('cae_total').value = data.recruit_total != null ? data.recruit_total : '';
     document.getElementById('cae_landing').value = data.landing_url || '';
     document.getElementById('cae_thumb').value = data.thumbnail_url || '';
+    _caeCarry(data.carry_mode === 'hold' ? 'hold' : 'auto', { silent: true });   // 098 프리필
     _caeSyncPreview();
     _caeRenderWorkDetail(data);
     _caeToggleWindow();
   }
 
+
+  /* ⏸ 098 이월 반영 세그먼트(인라인 수정) — 보류를 직접 고른 순간에만 안내를 펼친다 */
+  function _caeCarry(mode, opts) {
+    const m = mode === 'hold' ? 'hold' : 'auto';
+    const hid = document.getElementById('cae_carry_mode');
+    if (hid) hid.value = m;
+    const a = document.getElementById('cae_carry_auto');
+    const h = document.getElementById('cae_carry_hold');
+    if (a && h) {
+      a.style.background = m === 'auto' ? '#2563EB' : '#fff';
+      a.style.color = m === 'auto' ? '#fff' : '#64748B';
+      h.style.background = m === 'hold' ? '#7C3AED' : '#fff';
+      h.style.color = m === 'hold' ? '#fff' : '#64748B';
+    }
+    const note = document.getElementById('cae_carry_note');
+    if (note) note.style.display = (m === 'hold' && !(opts && opts.silent)) ? '' : 'none';
+  }
 
   async function _caeSave() {
     if (!_caeLoaded) return;
@@ -970,6 +1009,8 @@
       window_end: auto ? null : (_caeV('cae_we') || null),
       daily_limit: _caeV('cae_daily') === '' ? null : Number(_caeV('cae_daily')) || 0,
       recruit_total: _caeV('cae_total') === '' ? null : Number(_caeV('cae_total')) || 0,
+      // ⏸ 098: 세그먼트 UI 가 있는 이 화면은 항상 명시 전송('auto'|'hold')
+      carry_mode: _caeV('cae_carry_mode') === 'hold' ? 'hold' : 'auto',
     };
     const btn = document.getElementById('caeSave');
     btn.disabled = true; btn.textContent = '저장 중...';
@@ -1080,5 +1121,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();

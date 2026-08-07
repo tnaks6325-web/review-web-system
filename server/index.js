@@ -40,6 +40,7 @@ const REQUIRED_SCHEMA = [
   ['tab_configs', 'sheetless'],                   // 096 — 크론 단속·장부 생성기·접수 업서트(없으면 무시트 경로 전면 42703)
   ['work_orders', 'skip_weekends'],               // 097 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'holidays'],                    // 097 — 위와 같은 문장에 들어가므로 함께 막아야 한다
+  ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
 ];
 
 async function _runOneMigration(pool, sql) {

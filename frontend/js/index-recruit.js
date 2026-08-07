@@ -978,6 +978,26 @@ async function openTestCampaignModal() {
 }
 if (typeof window !== "undefined") window.openTestCampaignModal = openTestCampaignModal;
 
+/* ⏸ 098 이월 반영 세그먼트(자동/보류) — 보류를 고르는 순간 무슨 일이 생기는지 문장으로 미리
+   말한다(조용한 전환 금지 — 시안 확정). 값은 hidden rf_carry_mode 하나가 진실(저장이 그걸 읽는다). */
+function rfCarrySet(mode, opts) {
+  const m = mode === "hold" ? "hold" : "auto";
+  const hid = document.getElementById("rf_carry_mode");
+  if (hid) hid.value = m;
+  const a = document.getElementById("rf_carry_auto");
+  const h = document.getElementById("rf_carry_hold");
+  if (a && h) {
+    a.style.background = m === "auto" ? "var(--p,#2563EB)" : "var(--card,#fff)";
+    a.style.color = m === "auto" ? "#fff" : "var(--t3,#64748B)";
+    h.style.background = m === "hold" ? "#7C3AED" : "var(--card,#fff)";
+    h.style.color = m === "hold" ? "#fff" : "var(--t3,#64748B)";
+  }
+  const note = document.getElementById("rf_carry_hold_note");
+  // 프리필·초기화(silent)에서는 고지문을 접어 둔다 — 사람이 보류를 "직접 고른" 순간에만 펼친다
+  if (note) note.style.display = (m === "hold" && !(opts && opts.silent)) ? "" : "none";
+}
+window.rfCarrySet = rfCarrySet;
+
 function onMultiAccountToggle(on) {
   const sec = document.getElementById("rf_multi_section");
   if (sec) sec.style.display = on ? "" : "none";
@@ -2065,6 +2085,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
+  /* ⏸ 098 이월 반영 초기화 — 신규 공고 기본 [자동](현행) */
+  if (typeof rfCarrySet === "function" && document.getElementById("rf_carry_mode")) rfCarrySet("auto", { silent: true });
   /* 👥 타계정 참여(063) 초기화 — 신규 공고 기본 [불가] */
   const _maEl = document.getElementById("rf_multi_account");
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
@@ -2166,6 +2188,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_landing_url", c.landing_url || "");
         setV("rf_hold_ttl", c.hold_ttl_min ?? 15);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
+        /* ⏸ 098 이월 반영 방식 복원 */
+        if (typeof rfCarrySet === "function") rfCarrySet(c.carry_mode === "hold" ? "hold" : "auto", { silent: true });
         /* 👥 타계정 참여(063) 복원 */
         {
           const _ma = document.getElementById("rf_multi_account");
@@ -3056,6 +3080,10 @@ async function saveRecruitPost() {
       payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
       payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
       payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
+      /* ⏸ 098 이월 반영 방식 — ★ 세그먼트 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 유지) */
+      if (document.getElementById("rf_carry_mode")) {
+        payload.carry_mode = document.getElementById("rf_carry_mode").value === "hold" ? "hold" : "auto";
+      }
       /* 👥 타계정 참여(063) — ★ 토글 UI 있는 페이지에서만 전송(없으면 미전송=서버 COALESCE 기존값 유지,
          옵션표·work_detail과 동일 원칙: 축약 화면 저장이 설정을 조용히 끄지 않게) */
       if (document.getElementById("rf_multi_account")) {

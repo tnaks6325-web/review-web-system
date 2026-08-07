@@ -160,7 +160,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   S.__resetCarryCacheForTest();
   S.__resetPlanCacheForTest();
   STUB = {
-    'app_settings': [{ value: d(-2) }],
+    'app_settings': [{ key: 'campaign_carry_start', value: d(-2) }],
     'FROM campaign_daily_plans': [{ campaign_id: 'c1', d: today, planned_count: 20 }],
     'FROM campaign_applications': [],
   };
@@ -174,7 +174,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   S.__resetPlanCacheForTest();
   const e42 = new Error('relation does not exist');
   e42.code = '42P01';
-  STUB = { 'app_settings': [{ value: d(-2) }], 'FROM campaign_daily_plans': e42, 'FROM campaign_applications': [] };
+  STUB = { 'app_settings': [{ key: 'campaign_carry_start', value: d(-2) }], 'FROM campaign_daily_plans': e42, 'FROM campaign_applications': [] };
   m = await S.fetchCampaignCounts(poolMod, ['c1']);
   ok('★ 테이블 부재 = plans null(목록·참여 무사)', m.get('c1').plans === null && m.get('c1').carry !== null);
   CALLS.length = 0;
@@ -185,7 +185,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
 
   // 3c. 일반 오류도 fail-open(카운트는 나간다)
   S.__resetCarryCacheForTest();
-  STUB = { 'app_settings': [{ value: d(-2) }], 'FROM campaign_daily_plans': new Error('boom'), 'FROM campaign_applications': [] };
+  STUB = { 'app_settings': [{ key: 'campaign_carry_start', value: d(-2) }], 'FROM campaign_daily_plans': new Error('boom'), 'FROM campaign_applications': [] };
   m = await S.fetchCampaignCounts(poolMod, ['c1']);
   ok('일반 오류도 plans null + 카운트 정상', m.get('c1') && m.get('c1').plans === null);
   S.__resetPlanCacheForTest();
@@ -197,7 +197,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     query: async (sql) => {
       txCalls.push(String(sql));
       if (String(sql).includes('campaign_daily_plans')) { const e = new Error('x'); e.code = '42P01'; throw e; }
-      if (String(sql).includes('app_settings')) return { rows: [{ value: d(-2) }] };
+      if (String(sql).includes('app_settings')) return { rows: [{ key: 'campaign_carry_start', value: d(-2) }] };
       return { rows: [] };
     },
   };
