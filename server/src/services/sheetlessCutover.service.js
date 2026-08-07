@@ -337,6 +337,57 @@ async function listCutoverTabs({ since = null, includeUnknown = false, limit = L
 }
 
 /**
+ * 준비 자리 일괄 점검 — **"우레온 같은 작업이 남아 있나"를 한 번에 답한다**(사용자 요청 2026-08-07).
+ *
+ * ★★ 왜 필요한가: 점검표 ①이 이미 같은 판정을 하지만 **탭 하나씩** 눌러야 나온다.
+ *    남은 작업이 85건이면 85번 눌러야 "있는지 없는지"를 아는데, 그게 이관 착수를 막고 있었다.
+ *    이 함수는 그 질문에만 답한다 — 부족한 작업만 추려서 돌려준다.
+ *
+ * ★★ 이것이 유일하게 "시트에만 있고 DB엔 없는" 것이다: 구매일자만 적힌 **아직 안 팔린 자리**.
+ *    파서가 이름 없는 행을 버려(`columnResolver`) 검색 명단에도 작업표에도 안 들어간다.
+ *    제출 데이터(구매양식·리뷰)는 전부 DB-first 라 시트를 볼 이유가 없다 — 그래서 여기만 본다.
+ *
+ * ★ 판정 재료는 점검표 ①과 **같은 함수**(`sheetSlotSync.readPreparedRows`) — 사본을 두면
+ *   "일괄 점검은 괜찮다는데 개별 점검은 막는다"가 된다.
+ * ★ **읽기 전용 · RAW 미러만 · 시트 API 0** — 85탭을 훑어도 구글 쿼터를 건드리지 않는다.
+ * ★ **판정 불가를 "부족 없음"으로 꾸미지 않는다**(gid 없음·미러 없음·구매일자 칸 없음) —
+ *   따로 세어 돌려준다. 모르는 것을 안전으로 접으면 이 점검의 의미가 사라진다.
+ */
+const SWEEP_CAP = 300;
+
+async function sweepPreparedRows({ since = null, includeUnknown = false, limit = SWEEP_CAP } = {}) {
+  const db = _db();
+  const list = await listCutoverTabs({ since, includeUnknown });
+  if (!list.ok) return list;
+  const targets = list.items.filter(t => !t.sheetless);
+  const lim = Math.min(Math.max(parseInt(limit, 10) || SWEEP_CAP, 1), SWEEP_CAP);
+  const scan = targets.slice(0, lim);
+
+  const short = [];    // 시트가 더 많은 작업(= 백필 필요)
+  const unknown = [];  // 판정 불가 — 조용히 통과시키지 않는다
+  let okCount = 0;
+  const slot = require('./sheetSlotSync.service');
+  for (const t of scan) {
+    if (!t.tabGid) { unknown.push({ ...t, reason: 'no_gid' }); continue; }
+    let read;
+    try { read = await slot.readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid }); }
+    catch (e) { unknown.push({ ...t, reason: 'error', message: e.message }); continue; }
+    if (!read || !read.ok) { unknown.push({ ...t, reason: (read && read.reason) || 'unknown' }); continue; }
+    const prepared = read.prepared.length;
+    const board = Number(t.boardRows) || 0;
+    if (prepared > board) short.push({ ...t, prepared, board, missing: prepared - board });
+    else okCount++;
+  }
+  short.sort((a, b) => b.missing - a.missing);
+  return {
+    ok: true, since: list.since,
+    scanned: scan.length, remaining: targets.length,
+    truncated: targets.length > scan.length,
+    okCount, short, unknown,
+  };
+}
+
+/**
  * 이관 — 무시트 표식을 켠다(= 그 작업의 시트 연결을 끊는다).
  * ★ 점검표 fail-closed · force 는 명시 요청일 때만.
  *
@@ -491,6 +542,7 @@ module.exports = {
   cutoverChecklist,
   listCutoverTabs,
   enableSheetless,
+  sweepPreparedRows,
   handoffPendingOrders,
   disableSheetless,
   CUTOVER_NOTICE,

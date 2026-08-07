@@ -1437,6 +1437,9 @@
 #cohead .mh{max-width:1120px}
 #cohead .ovnote{max-width:1120px}
 .cotools{max-width:1120px;display:flex;gap:6px;margin:0 0 10px}
+.cosweep{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.cosrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 8px;border:1px solid var(--border,#e5e7eb);border-radius:6px;background:var(--card,#fff)}
+.cosrow b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px}
 .cowrap{max-width:1120px;display:flex;flex-direction:column;gap:8px}
 .cocard{background:var(--card,#fff);border:1px solid var(--line,#e3e7ec);border-radius:10px;padding:12px 14px}
 .cocard.done{background:var(--card2,#f7f9fb)}
@@ -5925,8 +5928,10 @@ function _coRender(){
       <span class="sp" style="flex:1"></span>
       <input class="ovsearch" id="coq" placeholder="작업 검색" value="${esc(STATE.co.q||'')}"
         oninput="STATE.co.q=this.value;_coRows()">
+      <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
+    <div id="coSweep"></div>
     <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
       막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.
@@ -5982,6 +5987,39 @@ function _coFixBtn(c,i){
   return '';
 }
 function _coAudit(){ window.open('sheet-sync-audit.html','_blank','noopener'); }
+/* ★★ "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에 답한다.
+ *    점검표 ①과 같은 판정이지만 남은 작업 전체를 한 번에 훑는다 — 85건을 하나씩 누르던 것을 없앤다.
+ *    ★ 읽기 전용 · 시트 API 0(RAW 미러만)이라 몇 번을 눌러도 구글 쿼터에 영향이 없다. */
+async function _coSweep(){
+  const box = $('#coSweep'); if(!box) return;
+  box.innerHTML = `<div class="ovnote">준비 자리를 훑는 중… (남은 작업 수만큼 걸립니다)</div>`;
+  let j;
+  try{ j = await api('/api/trackb/sheetless/slot-sweep'); }
+  catch(e){ box.innerHTML = `<div class="ovnote bad">일괄 점검 실패: ${esc(e.message||'')}
+    <button class="btn" onclick="_coSweep()">다시 시도</button></div>`; return; }
+  if(!j || j.ok===false){ box.innerHTML = `<div class="ovnote bad">${esc((j&&(j.error||j.message))||'일괄 점검 실패')}
+    <button class="btn" onclick="_coSweep()">다시 시도</button></div>`; return; }
+  const short = j.short||[], unk = j.unknown||[];
+  // ★ 판정 불가를 "이상 없음"으로 꾸미지 않는다 — 따로 세어 그대로 말한다.
+  const head = short.length
+    ? `<b class="bad">표를 먼저 채워야 하는 작업 ${short.length}건</b> — 이 작업들만 보완하면 나머지는 바로 이관할 수 있습니다.`
+    : `<b class="good">시트가 더 많은 작업은 없습니다</b> — 남은 ${j.okCount}건은 준비 자리 문제 없이 이관할 수 있습니다.`;
+  box.innerHTML = `<div class="ovnote">${head}
+    <div class="comuted">훑은 작업 ${j.scanned}건 · 이상 없음 ${j.okCount}건${unk.length?` · <b>판정 불가 ${unk.length}건</b>`:''}${j.truncated?' · <b>일부만 훑었습니다</b>':''}</div>
+    ${short.length?`<div class="cosweep">${short.map((t,k)=>`<div class="cosrow">
+      <b>${esc(t.displayName||t.tabName)}</b>
+      <span class="bd bad">${t.missing}줄 부족</span>
+      <span class="comuted">시트 ${t.prepared}줄 · 시스템 표 ${t.board}줄</span>
+      <button class="btn" onclick="_coAudit()">↗ 반영 점검에서 채우기</button></div>`).join('')}</div>`:''}
+    ${unk.length?`<div class="cosweep">${unk.map(t=>`<div class="cosrow">
+      <b>${esc(t.displayName||t.tabName)}</b>
+      <span class="comuted">판정 불가 — ${esc(_coSweepReason(t.reason))}</span></div>`).join('')}</div>`:''}</div>`;
+}
+function _coSweepReason(r){
+  return ({ no_gid:'탭 번호(gid) 없음', no_mirror:'시트 사본을 아직 못 읽음',
+    header_unrecognizable:'열 이름 줄을 못 찾음', no_date_column:'구매일자 칸 없음',
+    no_tab:'탭 정보 없음', error:'조회 실패' })[r] || (r||'알 수 없음');
+}
 async function _coRefresh(i){
   const t = STATE.co.items[i]; if(!t) return;
   const k = t.sheetId+'\u0000'+t.tabName;
