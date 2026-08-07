@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>탈 구글시트 중간점검 · 남은 위험과 다음 선택지</title>
+<style>
+  :root{
+    color-scheme: light;
+    --ink:#1b1f24; --ink2:#41484f; --ink3:#6b7480;
+    --line:#dfe3e8; --line2:#eceff2;
+    --bg:#f6f7f9; --card:#fff;
+    --blue:#2563eb; --blueBg:#eef4ff; --blueLine:#c7dbff;
+    --green:#0f8a5f; --greenBg:#e9f8f1; --greenLine:#b7e6d2;
+    --amber:#a86a00; --amberBg:#fff6e5; --amberLine:#f2d9a8;
+    --red:#c0392b; --redBg:#fdeeec; --redLine:#f3c6c0;
+    --gray:#7a838d; --grayBg:#f1f3f5;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo",sans-serif;
+    line-height:1.7; font-size:15px;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:0 20px 80px}
+
+  .cover{background:linear-gradient(135deg,#20303f,#2f5468); color:#fff; padding:44px 0 38px; margin-bottom:28px}
+  .cover .wrap{padding-bottom:0}
+  .kicker{font-size:13px; letter-spacing:.12em; opacity:.72; margin-bottom:10px}
+  .cover h1{margin:0 0 14px; font-size:30px; line-height:1.35; letter-spacing:-.02em}
+  .cover .sub{font-size:15px; opacity:.9; max-width:780px; margin:0}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:20px}
+  .meta span{background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.22);
+    padding:5px 12px; border-radius:999px; font-size:12.5px}
+
+  h2{font-size:21px; margin:44px 0 6px; letter-spacing:-.01em; display:flex; align-items:center; gap:10px}
+  h2 .n{display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px;
+    border-radius:8px; background:var(--ink); color:#fff; font-size:14px; flex:0 0 auto}
+  h2 + .lead{color:var(--ink2); margin:0 0 18px; padding-left:38px; font-size:14.5px}
+  h3{font-size:16px; margin:26px 0 10px}
+  p{margin:0 0 12px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:14px}
+  .muted{color:var(--ink3); font-size:13.5px}
+
+  .callout{border-radius:12px; padding:16px 18px; margin:16px 0; border:1px solid}
+  .callout .t{font-weight:700; margin-bottom:6px; display:flex; align-items:center; gap:8px}
+  .c-blue{background:var(--blueBg); border-color:var(--blueLine)} .c-blue .t{color:var(--blue)}
+  .c-green{background:var(--greenBg); border-color:var(--greenLine)} .c-green .t{color:var(--green)}
+  .c-amber{background:var(--amberBg); border-color:var(--amberLine)} .c-amber .t{color:var(--amber)}
+  .c-red{background:var(--redBg); border-color:var(--redLine)} .c-red .t{color:var(--red)}
+
+  .wf{background:#fbfcfd; border:1.5px solid var(--line); border-radius:12px; padding:18px; margin:16px 0}
+  .wf-title{font-size:12px; letter-spacing:.08em; color:var(--ink3); margin-bottom:14px; font-weight:700}
+  .box{background:#fff; border:1.5px solid #cfd6dd; border-radius:9px; padding:13px 15px}
+  .box .bt{font-weight:700; font-size:14px; margin-bottom:4px}
+  .box .bd{font-size:13px; color:var(--ink2); line-height:1.55}
+  .box.on{border-color:var(--greenLine); background:var(--greenBg)}
+  .box.off{border-color:var(--line); background:var(--grayBg)}
+  .box.off .bt,.box.off .bd{color:var(--gray)}
+  .box.warn{border-color:var(--amberLine); background:var(--amberBg)}
+
+  .cols2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .cols3{display:grid; grid-template-columns:repeat(3,1fr); gap:12px}
+  @media(max-width:760px){.cols2,.cols3{grid-template-columns:1fr}}
+
+  /* 위험 곡선 */
+  .curve{display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin:16px 0; align-items:end}
+  .curve .b{text-align:center}
+  .curve .bar{border-radius:7px 7px 0 0; margin-bottom:8px}
+  .curve .nm{font-weight:700; font-size:13px}
+  .curve .ds{font-size:11.8px; color:var(--ink3); line-height:1.45}
+
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:13.8px; background:#fff}
+  th,td{border:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top}
+  th{background:#f2f4f7; font-weight:700; font-size:13px}
+  td.c{text-align:center; white-space:nowrap}
+
+  .badge{display:inline-block; padding:3px 9px; border-radius:6px; font-size:12px; font-weight:700; white-space:nowrap}
+  .b-ok{background:var(--greenBg); color:var(--green); border:1px solid var(--greenLine)}
+  .b-wait{background:var(--grayBg); color:var(--gray); border:1px solid var(--line)}
+  .b-warn{background:var(--amberBg); color:var(--amber); border:1px solid var(--amberLine)}
+  .b-red{background:var(--redBg); color:var(--red); border:1px solid var(--redLine)}
+  .b-blue{background:var(--blueBg); color:var(--blue); border:1px solid var(--blueLine)}
+
+  ul.clean{margin:8px 0 12px; padding-left:0; list-style:none}
+  ul.clean li{position:relative; padding-left:24px; margin-bottom:8px}
+  ul.clean li::before{content:"✓"; position:absolute; left:2px; top:0; color:var(--green); font-weight:700}
+  ul.clean li.x::before{content:"×"; color:var(--red)}
+  ul.clean li.dot::before{content:"•"; color:var(--ink3)}
+  ul.clean li.wait::before{content:"○"; color:var(--gray)}
+
+  /* 선택지 카드 */
+  .opts{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:18px 0}
+  .opt{background:#fff; border:2px solid var(--line); border-radius:12px; padding:18px; display:flex; flex-direction:column}
+  .opt.pick{border-color:var(--blue); box-shadow:0 0 0 4px var(--blueBg)}
+  .opt .tag{font-size:11.5px; letter-spacing:.06em; color:var(--ink3); font-weight:700; margin-bottom:6px}
+  .opt h4{margin:0 0 8px; font-size:16px}
+  .opt .why{font-size:13.2px; color:var(--ink2); line-height:1.6; flex:1}
+  .opt .foot2{margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--ink3)}
+  .opt .rec{display:inline-block; margin-bottom:8px; background:var(--blue); color:#fff;
+    padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:700}
+  @media(max-width:860px){.opts{grid-template-columns:1fr}}
+
+  .foot{margin-top:50px; padding-top:20px; border-top:1px solid var(--line); color:var(--ink3); font-size:12.5px}
+  .toc{background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 20px; margin-bottom:8px}
+  .toc ol{margin:6px 0 0; padding-left:20px; columns:2; column-gap:28px; font-size:13.8px}
+  @media(max-width:600px){.toc ol{columns:1}}
+  .toc a{color:var(--ink); text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="wrap">
+    <div class="kicker">중간점검 · 의사결정 문서</div>
+    <h1>"계속 오류를 발견해야 하나요?"</h1>
+    <p class="sub">네 — 그리고 <strong>지금이 가장 싼 시점</strong>입니다.<br>
+      왜 계속 나오는지, 얼마나 더 남았는지를 <strong>세어서</strong> 정리하고, 다음에 무엇을 할지 고르실 수 있게 만든 문서입니다.</p>
+    <div class="meta">
+      <span>작성일 2026-08-07</span>
+      <span>W1·W2·W3 완료 시점</span>
+      <span>현재 사용자 체감 변화 없음</span>
+      <span>결정 필요 1건</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<div class="toc">
+  <strong style="font-size:14px">목차</strong>
+  <ol>
+    <li><a href="#s1">질문에 대한 답</a></li>
+    <li><a href="#s2">지금까지 무엇이 나왔나</a></li>
+    <li><a href="#s3">왜 나오나 — 접점 지도</a></li>
+    <li><a href="#s4">얼마나 남았나 (실측)</a></li>
+    <li><a href="#s5">앞으로 위험이 어떻게 바뀌나</a></li>
+    <li><a href="#s6">다음 선택지 3가지</a></li>
+    <li><a href="#s7">지금 상태 한 장 요약</a></li>
+  </ol>
+</div>
+
+<!-- ══════════ 1 ══════════ -->
+<h2 id="s1"><span class="n">1</span>질문에 대한 답</h2>
+<p class="lead">"남은 구현을 하면서 계속 오류나 허점을 발견해야 하는 건가요?"</p>
+
+<div class="callout c-blue">
+  <div class="t">답</div>
+  <p style="margin:0 0 10px">
+    <strong>네. 다만 그건 공사가 잘못돼서가 아니라, 이런 종류의 공사가 원래 그렇습니다.</strong>
+    운영 중인 시스템의 밑바닥을 갈아 끼우는 일이라 <strong>새 길이 기존 시스템과 만나는 자리마다</strong>
+    "여긴 시트가 있다고 가정하고 짜여 있네"가 나옵니다.
+  </p>
+  <p style="margin:0">
+    중요한 건 <strong>언제 나오느냐</strong>입니다. <strong>켜기 전에 나오면 코드 몇 줄</strong>이고,
+    <strong>켠 뒤에 나오면 데이터 사고</strong>입니다. 지금은 전부 꺼져 있어서 여태 발견한 것들의
+    <strong>실제 피해가 0</strong>이었습니다.
+  </p>
+</div>
+
+<div class="wf">
+  <div class="wf-title">같은 결함, 발견 시점만 다를 때</div>
+  <div class="cols2">
+    <div>
+      <div class="muted" style="margin-bottom:8px; font-weight:700">지금 발견 (켜기 전)</div>
+      <div class="box on">
+        <div class="bt">예: 3주차에 찾은 기록 증발</div>
+        <div class="bd">코드 3곳 수정 · 점검 61항목 추가<br>영향받은 사용자 <strong>0명</strong></div>
+      </div>
+    </div>
+    <div>
+      <div class="muted" style="margin-bottom:8px; font-weight:700">켠 뒤 발견</div>
+      <div class="box warn">
+        <div class="bt">같은 결함이 운영 중에</div>
+        <div class="bd">입금 기록·리뷰 캡처가 사라진 뒤 발견<br>→ <strong>어디까지 사라졌는지 조사 + 수기 복구</strong></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="callout c-amber">
+  <div class="t">한 가지 더 — 점검 자체도 틀렸습니다</div>
+  <p style="margin:0">
+    매 단계 끝에 <strong>코드를 일부러 망가뜨려 점검이 잡는지</strong> 시험했는데(총 46종),
+    그중 <strong>9번은 점검이 못 잡았습니다</strong>. 전부 "점검이 코드를 그대로 따라가는" 형태였습니다
+    (예: 상한을 400 → 999999로 바꿨더니 기대값도 같이 바뀌어 통과).
+    <strong>"점검을 통과했다"가 곧 안전이 아니라는 뜻</strong>이고, 그래서 이 시험을 매번 돌립니다.
+  </p>
+</div>
+
+<!-- ══════════ 2 ══════════ -->
+<h2 id="s2"><span class="n">2</span>지금까지 무엇이 나왔나</h2>
+<p class="lead">3주 동안 찾아서 막은 것들입니다. 전부 켜기 전이라 실제 피해는 없었습니다.</p>
+
+<table>
+  <tr><th style="width:9%">단계</th><th style="width:34%">발견한 것</th><th>그대로 뒀다면</th><th class="c" style="width:12%">실제 피해</th></tr>
+  <tr>
+    <td>W1</td>
+    <td>구글시트를 읽어 오는 자동작업 <strong>4곳 중 1곳</strong>을 안 막음</td>
+    <td>시스템에서 고친 내용을 5분마다 <strong>옛 시트 값이 덮어씀</strong> → 기능 자체가 무의미</td>
+    <td class="c"><span class="badge b-ok">없음</span></td>
+  </tr>
+  <tr>
+    <td>W2</td>
+    <td>구매양식이 시트로 새는 경로가 <strong>여러 갈래</strong>(이관 전에 이미 줄 서 있던 건 포함)</td>
+    <td>이관한 작업의 주문이 <strong>엉뚱하게 옛 시트에 기록</strong></td>
+    <td class="c"><span class="badge b-ok">없음</span></td>
+  </tr>
+  <tr>
+    <td>W2</td>
+    <td>중간에 실패했는데 "완료"로 찍히는 순서</td>
+    <td>잘못된 연결이 남아 <strong>남의 참여 내역이 열림</strong></td>
+    <td class="c"><span class="badge b-ok">없음</span></td>
+  </tr>
+  <tr>
+    <td>W2</td>
+    <td>정원 기준을 옮기는 두 조각이 <strong>짝으로 나가야 함</strong></td>
+    <td>인원 조절 화면이 <strong>영영 잠김</strong>(조절할 시트도 없는데 창구도 막힘)</td>
+    <td class="c"><span class="badge b-ok">없음</span></td>
+  </tr>
+  <tr>
+    <td>W3</td>
+    <td><strong>기록 재생성이 시스템이 쓴 값을 지움</strong><br>(입금 완료 · 리뷰 제출 · 리뷰 캡처 대표 이미지)</td>
+    <td>주문 한 건만 더 들어와도 <strong>입금·제출 표시와 캡처가 전부 증발</strong></td>
+    <td class="c"><span class="badge b-ok">없음</span></td>
+  </tr>
+  <tr>
+    <td>W3</td>
+    <td>편집 반영이 <strong>영원히 수렴하지 않는</strong> 경로</td>
+    <td>화면엔 "반영 대기"로만 계속 보임(오류도 안 뜸)</td>
+    <td class="c"><span class="badge b-ok">없음</span></td>
+  </tr>
+</table>
+
+<p class="muted">
+  ※ 공통점이 보이실 겁니다 — <strong>전부 "조용히 잘못되는" 종류</strong>입니다.
+  화면에 오류가 뜨지 않고, 나중에 "왜 입금 표시가 없지?"로 발견되는 것들이라
+  <strong>미리 찾지 않으면 찾을 방법이 없습니다.</strong>
+</p>
+
+<!-- ══════════ 3 ══════════ -->
+<h2 id="s3"><span class="n">3</span>왜 나오나 — 접점 지도</h2>
+<p class="lead">무작위로 나오는 게 아니라, 나오는 자리가 정해져 있습니다.</p>
+
+<div class="wf">
+  <div class="wf-title">결함이 나오는 자리 = 새 길과 기존 시스템이 만나는 지점</div>
+  <div class="cols3">
+    <div class="box"><div class="bt">① 자동으로 도는 것</div><div class="bd">5분·10분마다 스스로 구글시트를 읽으러 가는 작업들</div></div>
+    <div class="box"><div class="bt">② 시트에 쓰는 것</div><div class="bd">주문·입금·상태 표시를 시트 칸에 적던 경로들</div></div>
+    <div class="box"><div class="bt">③ 시트에서 파생되던 값</div><div class="bd">정원·폴더 이름·통계처럼 시트를 재료로 만들던 값들</div></div>
+  </div>
+  <p class="muted" style="margin:14px 0 0">
+    이 세 종류는 <strong>셀 수 있습니다.</strong> 그래서 "언제까지 계속 나오나"에 답할 수 있습니다.
+  </p>
+</div>
+
+<!-- ══════════ 4 ══════════ -->
+<h2 id="s4"><span class="n">4</span>얼마나 남았나 (실측)</h2>
+<p class="lead">코드를 직접 훑어 세었습니다.</p>
+
+<div class="cols2">
+  <div class="card">
+    <h3 style="margin-top:0">① 자동으로 도는 경로 <span class="badge b-ok">사실상 마무리</span></h3>
+    <ul class="clean" style="margin-bottom:0">
+      <li>시트 읽기 자동작업 4종 (W1)</li>
+      <li>주문 기록 경로 4중 차단 (W2)</li>
+      <li>사후검증 · 반영 스케줄러 (W2)</li>
+      <li>정원 파생 (W2)</li>
+      <li>편집 반영 스윕 (W3)</li>
+      <li class="dot"><strong>폴더 자동 생성</strong> — 시스템 DB 값을 먼저 보게 되어 있어
+        구글 호출까지 가지 않음. <span class="badge b-warn">단, 명시적 차단은 아님</span></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">② 사람이 눌러야 도달하는 도구 <span class="badge b-warn">7곳 남음</span></h3>
+    <ul class="clean" style="margin-bottom:0">
+      <li class="wait">작업 아카이브 · 복구</li>
+      <li class="wait">중복 정리</li>
+      <li class="wait">폴더 현황 점검</li>
+      <li class="wait">탭 설정</li>
+      <li class="wait">인덱스 스캔 · 시트 공지문</li>
+      <li class="x"><strong>레거시 공고의 참여자 줄 추가</strong> — 이건 이관(5주차)에 반드시 필요</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout c-green">
+  <div class="t">✓ 남은 7곳의 성격</div>
+  <p style="margin:0">
+    <strong>실패해도 "안 됩니다" 메시지</strong>가 뜨는 관리자 도구입니다 —
+    조용히 데이터가 사라지는 종류가 아닙니다(그 종류는 자동 경로에 있었고, 그건 다 지나왔습니다).
+    <strong>예외는 마지막 한 줄</strong>(레거시 공고 줄 추가)이고, 그건 5주차 이관의 필수 항목으로 이미 잡혀 있습니다.
+  </p>
+</div>
+
+<!-- ══════════ 5 ══════════ -->
+<h2 id="s5"><span class="n">5</span>앞으로 위험이 어떻게 바뀌나</h2>
+<p class="lead">남은 단계는 지금까지와 성격이 다릅니다.</p>
+
+<div class="wf">
+  <div class="wf-title">단계별 위험 — 높이 = 잘못됐을 때의 피해</div>
+  <div class="curve">
+    <div class="b"><div class="bar" style="height:54px; background:#cfe3d8"></div>
+      <div class="nm">W1</div><div class="ds">완료<br>켜지 않음</div></div>
+    <div class="b"><div class="bar" style="height:70px; background:#cfe3d8"></div>
+      <div class="nm">W2</div><div class="ds">완료<br>켜지 않음</div></div>
+    <div class="b"><div class="bar" style="height:84px; background:#cfe3d8"></div>
+      <div class="nm">W3</div><div class="ds">완료<br>켜지 않음</div></div>
+    <div class="b"><div class="bar" style="height:42px; background:#c7dbff"></div>
+      <div class="nm">W4 전환화면</div><div class="ds">낮음<br>화면·점검표</div></div>
+    <div class="b"><div class="bar" style="height:150px; background:#f3c6c0"></div>
+      <div class="nm">W5 이관</div><div class="ds"><strong>높음</strong><br>운영 데이터를 옮김</div></div>
+  </div>
+  <p class="muted" style="margin:10px 0 0">
+    W1~W3은 <strong>새 길을 뚫는</strong> 일이라 결함이 많이 나왔지만 전부 꺼져 있어 피해가 0이었습니다.
+    W4는 화면이라 위험이 낮고, <strong>W5는 진짜로 돌아가는 작업을 옮기는 일</strong>이라
+    <strong>여기서 나오는 오류는 처음으로 실제 사용자에게 닿습니다.</strong>
+  </p>
+</div>
+
+<div class="callout c-red">
+  <div class="t">그래서 W5 전에 W4가 필요합니다</div>
+  <p style="margin:0">
+    W4(전환 관리 화면)의 핵심은 스위치가 아니라 <strong>켜기 전 자동 점검표</strong>입니다 —
+    인원 수가 맞는지, 반영 대기가 0인지, 대조가 통과했는지를 시스템이 확인하고
+    <strong>조건 미달이면 아예 못 켜게</strong> 막습니다. 사람의 판단만으로 켜면 W5의 위험이 그대로 실현됩니다.
+  </p>
+</div>
+
+<!-- ══════════ 6 ══════════ -->
+<h2 id="s6"><span class="n">6</span>다음 선택지 3가지</h2>
+<p class="lead">하나 골라 주시면 그대로 진행합니다.</p>
+
+<div class="opts">
+  <div class="opt pick">
+    <div class="rec">추천 · 먼저</div>
+    <div class="tag">선택지 A</div>
+    <h4>무시트 표시 · 업체 링크 정리</h4>
+    <p class="why">
+      화면이 <strong>"이 작업은 시트를 안 쓴다"</strong>고 말하게 합니다.
+      지금은 담당자가 어느 작업이 이관됐는지 화면만 봐서는 알 수 없습니다.
+      업체에 나가는 링크도 시트 공유 없이 전용 링크 하나로 정리합니다.
+    </p>
+    <div class="foot2">규모 작음 · 위험 낮음<br>W5 때 <strong>"내가 뭘 옮겼는지"</strong>를 보려면 필요</div>
+  </div>
+  <div class="opt">
+    <div class="tag">선택지 B</div>
+    <h4>입금 자동화 M2</h4>
+    <p class="why">
+      이체결과 파일을 올리면 <strong>성공한 건만 자동으로 입금 처리</strong>되고,
+      실패 건은 리뷰어에게 "계좌를 확인해 주세요"가 나갑니다.
+      지금은 이체 후 입금 완료를 사람이 눌러야 합니다.
+    </p>
+    <div class="foot2">규모 큼 · <strong>탈시트와는 별개 기능</strong><br>업무 시간을 가장 많이 줄이는 항목</div>
+  </div>
+  <div class="opt">
+    <div class="tag">선택지 C</div>
+    <h4>전환 관리 화면 (W4)</h4>
+    <p class="why">
+      작업 하나를 <strong>실제로 무시트로 켜는 화면</strong>과,
+      켜기 전 조건을 시스템이 확인해 <strong>미달이면 못 켜게</strong> 막는 점검표를 만듭니다.
+      여기까지 오면 테스트 작업 1건으로 <strong>실제 검증</strong>이 가능합니다.
+    </p>
+    <div class="foot2">규모 중간 · 위험 낮음<br><strong>W5(이관)의 전제 조건</strong></div>
+  </div>
+</div>
+
+<div class="callout c-blue">
+  <div class="t">따로 지시가 없으면 이렇게 하겠습니다</div>
+  <p style="margin:0">
+    <strong>A → C → (실제 작업 1건으로 검증) → B</strong> 순서입니다.
+    A는 작고 C의 재료가 되며, C까지 마치면 <strong>"켤 수 있는 상태"</strong>가 되어
+    실물 1건으로 확인한 뒤 이관으로 넘어갈 수 있습니다.
+    B(입금 자동화)는 탈시트와 독립이라 <strong>언제 끼워 넣어도 되고</strong>,
+    업무 시간 절감이 급하시면 지금 B를 먼저 해도 됩니다.
+  </p>
+</div>
+
+<!-- ══════════ 7 ══════════ -->
+<h2 id="s7"><span class="n">7</span>지금 상태 한 장 요약</h2>
+
+<table>
+  <tr><th style="width:30%">항목</th><th>현재</th></tr>
+  <tr><td>작업 한 바퀴(접수→검색→제출→캡처→정원)</td><td>구글 호출 0회로 <strong>완결 가능</strong> <span class="badge b-ok">완료</span></td></tr>
+  <tr><td>지금 켜져 있는 작업</td><td><strong>0건</strong> — 사용자 체감 변화 없음</td></tr>
+  <tr><td>자동으로 도는 경로</td><td>사실상 마무리(폴더 생성만 명시 차단이 아닌 <strong>순서 의존</strong>)</td></tr>
+  <tr><td>사람이 누르는 도구</td><td><strong>7곳</strong> 미대응 — 실패해도 메시지, 데이터 유실 아님</td></tr>
+  <tr><td>누적 자동 점검</td><td><strong>262항목</strong> · 전체 스위트 163파일 0실패</td></tr>
+  <tr><td>일부러 고장 내 보기</td><td><strong>46종 전부 검출</strong>(그 과정에서 점검 자체의 허점 9건 교정)</td></tr>
+  <tr><td>되돌리기</td><td>전부 <strong>추가</strong>라 새 표시·기능을 끄면 즉시 종전 상태</td></tr>
+  <tr><td>결정 필요</td><td><strong>다음 선택지 A / B / C</strong></td></tr>
+</table>
+
+<div class="callout c-green">
+  <div class="t">✓ 한 문장으로</div>
+  <p style="margin:0">
+    <strong>오류는 계속 나올 것이고, 그건 이 방식이 작동하고 있다는 신호입니다.</strong>
+    조용히 잘못되는 것들이 몰려 있던 자동 경로는 지나왔고,
+    남은 위험은 <strong>마지막 이관 단계에 몰려 있습니다</strong> — 그래서 그 전에 점검표를 만듭니다.
+  </p>
+</div>
+
+<div class="foot">
+  탈 구글시트 중간점검 · 남은 위험과 다음 선택지 · 2026-08-07 작성<br>
+  관련 문서 — 「W1+W2 적용 결과 보고서」 · 「W1 적용 결과 보고서」 · 「탈구글시트 최종점검·결정사안」 · 「탈구글시트 최종단계 계획」
+</div>
+
+</div>
+</body>
+</html>
