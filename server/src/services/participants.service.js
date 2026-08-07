@@ -319,6 +319,76 @@ async function deleteWorktableRows({ sheetId, tabName, confirmed = false, by = '
   return { ok: true, deleted: rowCount, hadFilled: withOrder.length };
 }
 
+/* 정리(은퇴) 대상 선정 조건 — 조회·삭제가 **같은 조건**을 써야 미리보기와 결과가 갈리지 않는다.
+   ★ 차수는 빈 값('(빈값)')도 고를 수 있어야 하므로 정규화해서 비교한다. */
+const _RETIRE_WHERE = `sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+   AND (COALESCE(NULLIF(btrim(round), ''), '') = ANY($3::text[]) OR seq = ANY($4::int[]))`;
+
+/**
+ * 표에서 고른 줄 내리기(소프트) — 차수 또는 seq 로 지정.
+ *
+ * ★ `campaign_participants` 쓰기는 이 모듈이 소유한다(쓰기 소유자 규율) — 호출부(무시트 장부)는
+ *   게이트·장부 재생성만 맡고 여기를 부른다.
+ * ★ 하드삭제 아님(`deleted_at`) — 되돌릴 수 있고 주문 원장·시트는 건드리지 않는다.
+ * ★ dryRun 은 **쓰기 0** — 같은 조건으로 세어 보기만 한다.
+ */
+async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = true, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('retireRows: sheetId, tabName 필수');
+  const db = getPool();
+  const rndList = (Array.isArray(rounds) ? rounds : []).map(r => String(r == null ? '' : r).trim()).slice(0, 200);
+  const seqList = (Array.isArray(seqs) ? seqs : [])
+    .map(n => parseInt(n, 10)).filter(n => Number.isFinite(n)).slice(0, 5000);
+  if (!rndList.length && !seqList.length) return { ok: false, reason: 'empty' };
+
+  const { rows: hit } = await db.query(
+    `SELECT seq, reviewer_name AS name, round, is_submitted AS submitted, is_paid AS paid,
+            order_submission_id IS NOT NULL AS "hasOrder"
+       FROM campaign_participants WHERE ${_RETIRE_WHERE} ORDER BY seq`,
+    [sheetId, tabName, rndList, seqList]);
+  const { rows: cur } = await db.query(
+    `SELECT COUNT(*)::int AS n FROM campaign_participants
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL`, [sheetId, tabName]);
+
+  const stat = {
+    ok: true, matched: hit.length,
+    named: hit.filter(r => String(r.name || '').trim()).length,
+    submitted: hit.filter(r => r.submitted).length,
+    paid: hit.filter(r => r.paid).length,
+    withOrder: hit.filter(r => r.hasOrder).length,
+    boardRows: cur[0].n, boardAfter: cur[0].n - hit.length,
+    sample: hit.slice(0, 20).map(r => ({ seq: r.seq, name: r.name || '', round: r.round || '' })),
+  };
+  if (dryRun) return { ...stat, dryRun: true };
+  if (!hit.length) return { ...stat, retired: 0 };
+
+  const { rowCount } = await db.query(
+    `UPDATE campaign_participants
+        SET deleted_at = NOW(), active = FALSE, updated_by = $5, updated_at = NOW()
+      WHERE ${_RETIRE_WHERE}`, [sheetId, tabName, rndList, seqList, String(by).slice(0, 100)]);
+  return { ...stat, retired: rowCount };
+}
+
+/**
+ * 시트에서 이미 사라진 줄 은퇴 — 이관(cutover) 직후 1회.
+ *
+ * 왜: 마지막 반영의 투영이 `_reconcileSeen` 으로 **시트에 더는 없는 import 줄**을 `active = FALSE` 로
+ * 내려놓는데, 뒤이은 장부 재생성은 `deleted_at` 만 보므로 그 줄들을 검색 명단으로 되살렸다
+ * (실측 2026-08-07 쿠팡(26년): 50명 → 216명). 이관은 "시트 실물을 그대로 승계"하는 것이므로
+ * 여기서 소프트 삭제로 승격시킨다.
+ * ★ `source='import'` 만 — 준비 자리(`worktable`)·수기 추가(`manual`)는 seen-set 대상이 아니라
+ *   비활성이 될 수 없고, 건드리면 빈 슬롯이 통째로 사라진다.
+ */
+async function retireInactiveImportRows({ sheetId, tabName, by = 'cutover' } = {}) {
+  if (!sheetId || !tabName) throw new Error('retireInactiveImportRows: sheetId, tabName 필수');
+  const { rowCount } = await getPool().query(
+    `UPDATE campaign_participants
+        SET deleted_at = NOW(), updated_by = $3, updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+        AND source = 'import' AND active = FALSE`,
+    [sheetId, tabName, String(by).slice(0, 100)]);
+  return { ok: true, rows: rowCount };
+}
+
 async function prepareRosterSlots({ sheetId, tabName, target, options = [], productName = null, by = 'system' } = {}) {
   if (!sheetId || !tabName) throw new Error('prepareRosterSlots: sheetId, tabName 필수');
   const tgt = Math.max(0, Math.min(parseInt(target, 10) || 0, 2000));   // 상한(폭주 방지)
@@ -412,7 +482,7 @@ async function listActiveTabs({ limit = 500 } = {}) {
 }
 
 module.exports = {
-  createWorktableSlots, createSlotsFromSheetRows, deleteWorktableRows,
+  createWorktableSlots, createSlotsFromSheetRows, deleteWorktableRows, retireRows, retireInactiveImportRows,
   importTabFromIndex,
   syncImportedTabs,
   listParticipants,
