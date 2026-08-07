@@ -140,8 +140,15 @@ async function _checkMirror(tab, now) {
     return _chk('mirror', label, 'unknown', '시트를 읽어 온 기록이 없습니다',
       '아래 [시트 새로고침] 을 누르면 지금 읽어 옵니다.', 'refresh');
   }
-  // 우리가 "그 시트의 이 버전까지 읽었다"고 기록해 둔 시각. 없으면 읽어 온 시각으로 대신한다.
-  const known = tab.sheetModifiedAt ? new Date(tab.sheetModifiedAt).getTime() : mirroredAt;
+  /* ★★★ 비교 대상은 **시트 단위 최댓값**이다 — 탭 자기 값을 쓰면 오탐이 구조적으로 난다(운영 실측 2026-08-07).
+   *    미러는 내용이 바뀐 탭만 `_upsertTabMeta` 하고 **checksum 같은 탭은 통째로 건너뛴다**
+   *    → 한 시트 안에서 다른 탭만 바뀌면 이 탭의 `sheet_modified_at`·`mirrored_at` 은 옛날에 머문다.
+   *    실측: 퓨비아 두 탭은 미러 갱신 552분 전 · 시트 수정 465분 전 → "안 읽어 왔습니다"로 잠겼지만,
+   *    실은 465분 전에 그 시트를 읽었고 이 탭들만 내용이 같아 건너뛴 것이었다(= 우리 사본이 최신).
+   * ★ 그래서 **미러가 자기 스킵 판정에 쓰는 값과 같은 것**을 본다(`MAX(sheet_modified_at)` per sheet,
+   *   `rawMirror._mirrorOneSheet` 의 `lastKnown`). 판정을 다르게 잡으면 또 갈라진다. */
+  const known = tab.sheetKnownAt ? new Date(tab.sheetKnownAt).getTime()
+    : (tab.sheetModifiedAt ? new Date(tab.sheetModifiedAt).getTime() : mirroredAt);
   let remote = null;
   try {
     const { getSheetModifiedTime } = require('./sheets.service');
@@ -218,8 +225,13 @@ async function _loadTab(db, sheetId, tabName) {
             COALESCE(tc.display_name, tc.tab_name) AS "displayName",
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             tc.sheetless_at AS "sheetlessAt", tc.sheetless_by AS "sheetlessBy",
-            rst."mirroredAt", rst."sheetModifiedAt", cp.cnt AS "boardRows"
+            rst."mirroredAt", rst."sheetModifiedAt", smax."sheetKnownAt", cp.cnt AS "boardRows"
        FROM tab_configs tc
+       LEFT JOIN LATERAL (
+         -- ★ 미러의 스킵 판정과 **같은 값**: 그 시트를 어느 버전까지 읽었는가(탭 단위 아님).
+         SELECT MAX(r2.sheet_modified_at) AS "sheetKnownAt"
+           FROM raw_sheet_tabs r2 WHERE r2.sheet_id = tc.sheet_id
+       ) smax ON TRUE
        LEFT JOIN LATERAL (
          SELECT r.mirrored_at AS "mirroredAt", r.sheet_modified_at AS "sheetModifiedAt", r.tab_gid AS "mirrorGid"
            FROM raw_sheet_tabs r
