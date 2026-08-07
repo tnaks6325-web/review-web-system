@@ -273,8 +273,18 @@ function _woProductLines(o) {
       const opt = t.replace(/^[-•]\s*/, "");              // "옵션 없음 / 결제금액 26,900원"
       const payM = opt.match(/결제금액\s*([\d,]+)\s*원/);
       const pay = payM ? payM[1] : "";
-      let optLabel = opt.split("/")[0].trim();
+      // ★★ 옵션 **없는** 상품의 줄은 인트라넷이 "- 결제금액 22,000원 / 5명 / 소계 …" 로 만든다 —
+      //   첫 '/'-조각이 곧 금액 표현이라 그대로 라벨로 쓰면
+      //   "상품명 결제금액 22,000원 - 결제금액 22,000원" 오염 문장이 나오고(2026-08-07 우레온 실측),
+      //   그 문장이 발행 표로 넘어가 **상품명 조각이 옵션명으로 승격**되는 사고의 재료가 된다.
+      //   → 금액·건수 표현을 걷어낸 뒤 남는 글자가 있을 때만 옵션명으로 인정한다.
+      let optLabel = opt.split("/")[0]
+        .replace(/결제금액\s*[\d,]+\s*원?/g, "")
+        .replace(/소계\s*[\d,]+\s*원?/g, "")
+        .replace(/^[\s\-–·|]+|[\s\-–·|]+$/g, "")
+        .trim();
       if (/^옵션\s*없음$/.test(optLabel)) optLabel = "";   // "옵션 없음" 생략
+      if (/^[\d,]+\s*[명건원]?$/.test(optLabel)) optLabel = "";  // 숫자만 남은 조각(건수·금액 잔여) = 옵션명 아님
       lines.push(`${curName}${optLabel ? " " + optLabel : ""}${pay ? " - 결제금액 " + pay + "원" : ""}`.trim());
       curHadOpt = true;
     }
@@ -492,7 +502,9 @@ function _woOptionRows(o) {
           //   상품명이 섞이면 리뷰형태(텍스트/포토리뷰) 칸이 상품명으로 덮이는 사고가 난다.
           optKey: isNone ? "" : lab,
           payAmount: Number(op.pay) || basePay,
-          recruitTotal: 0, dailyLimit: 0,
+          // ★ 옵션별 건수가 오면 옵션 정원으로 프리필(인트라넷 구조 신호) — 없으면 0(관리자 입력).
+          //   하루건수는 오더에 옵션 단위로 없어 종전대로 관리자가 정한다.
+          recruitTotal: Math.max(0, Number(op.count) || 0), dailyLimit: 0,
         });
       }
     } else if (name) {

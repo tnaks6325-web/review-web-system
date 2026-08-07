@@ -110,17 +110,30 @@
 
       <!-- ═══ 📦 진행상품 · 옵션 (참여형 전용 · 표가 정원의 진실원본) ═══ -->
       <div class="rf-card" data-sec="prod" data-part-only style="display:none">
-        <div class="rf-ch"><span class="rf-ct">📦 진행상품 · 옵션</span><span class="rf-cn">작업오더에서 자동 적용 · 옵션마다 한 줄 · 정원 자동 산출</span>
-          <button type="button" class="rchan-btn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 옵션 추가</button></div>
+        <div class="rf-ch"><span class="rf-ct">📦 진행상품</span><span class="rf-cn">작업 종류를 먼저 고르세요 · 정원은 표에서 자동 산출</span>
+          <button type="button" class="rchan-btn" id="rf_opt_addbtn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 상품 추가</button></div>
         <div class="rf-cb">
-        <div id="rf_opt_wrap">
-          <div class="rf-prod-head">
-            <span>상품명</span><span>옵션명</span><span style="text-align:right">결제금액</span>
+        <div id="rf_opt_wrap" class="rf-pm-none">
+          <!-- ★ 작업 종류(2026-08-07 우레온 건) — [옵션 없는 작업]에는 옵션명 칸 자체가 없다.
+               상품명 조각이 옵션명으로 승격되던 사고의 입구를 화면에서 제거한다. -->
+          <div id="rf_prod_mode_sw" class="rf-pmsw">
+            <button type="button" class="rf-pm-btn on" data-mode="none" onclick="setProdMode('none')">옵션 없는 작업</button>
+            <button type="button" class="rf-pm-btn" data-mode="opt" onclick="setProdMode('opt')">옵션 있는 작업</button>
+            <span class="rf-pm-note" id="rf_prod_mode_note"></span>
+            <input id="rf_prod_mode" type="hidden" value="none">
+          </div>
+          <div class="rf-prod-head" data-pm="none">
+            <span>상품명</span><span style="text-align:right">결제금액</span>
             <span style="text-align:right">총인원</span><span style="text-align:right">일건수</span><span></span>
+          </div>
+          <div class="rf-prod-head" data-pm="opt">
+            <span></span><span>옵션명</span><span style="text-align:right">결제금액</span>
+            <span style="text-align:right">옵션인원</span><span style="text-align:right">일건수</span><span></span>
           </div>
           <div id="rf_opt_rows"></div>
           <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3,#94A3B8);margin-top:4px"></div>
-          <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:2px">옵션이 하나뿐이면 옵션명을 비워도 됩니다 · 총인원/일건수 0 = 제한 없음 · 상품명은 첫 줄에서 따라옵니다</div>
+          <div class="rf-pm-help" data-pm="none" style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:2px">옵션 없이 진행하는 작업입니다 · 총인원/일건수 0 = 제한 없음 · 여러 상품이면 [상품 추가]</div>
+          <div class="rf-pm-help" data-pm="opt" style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:2px">리뷰어가 참여할 때 옵션을 고릅니다 · 상품 총인원은 옵션인원 합계(자동) · 마감 옵션은 흐리게 남습니다(↩ 재개 가능)</div>
           <!-- 표에서 자동 생성되는 저장용 값(작업내용 원문·캠페인 정원) — 화면엔 표만 보인다 -->
           <textarea id="rf_wd_product" style="display:none"></textarea>
           <input id="rf_daily_limit" type="hidden" value="">
@@ -555,13 +568,40 @@
   .rf-hrow,.rf-hrow.rf-hrow-top{grid-template-columns:1fr;gap:3px}
   .rf-hrow .rf-hl{text-align:left;padding-top:0}
 }
-/* 진행상품 표 — 상품명 · 옵션명 · 결제금액 · 총인원 · 일건수 */
+/* 진행상품 표 — 상품명 · 옵션명 · 결제금액 · 총인원 · 일건수
+   ★ 2모드(2026-08-07): [옵션 없는 작업]은 옵션명 칸 자체가 없고, [옵션 있는 작업]은
+     상품 그룹 머리(상품명 · 총인원 자동합계) 아래에 옵션 행이 들여쓰기로 붙는다.
+     행 DOM(.rf-opt-row + .rf-opt-prod/.rf-opt-name/…)은 **두 모드 공통**이라
+     저장 계약(readOptRows/_readProdRows)이 갈라지지 않는다 — 보이는 칸만 CSS로 바뀐다. */
 .rf-prod-head,.rf-opt-row{display:grid;grid-template-columns:1.6fr 1fr .85fr .62fr .62fr 26px;gap:6px;align-items:center}
 .rf-prod-head{font-size:.62rem;font-weight:800;color:var(--t3,#94A3B8);padding:0 2px 4px;border-bottom:1px solid var(--border,#E2E8F0);margin-bottom:5px}
 .rf-opt-row{margin-bottom:6px}
 .rf-opt-row .rform-input{font-size:.74rem;padding:6px 7px;margin:0}
 .rf-opt-row .rf-opt-pay,.rf-opt-row .rf-opt-rt,.rf-opt-row .rf-opt-dl{text-align:right}
 .rf-opt-row .rf-opt-prod.rf-dup{background:#FAFBFD;color:var(--t2,#475569)}
+/* 작업 종류 스위치 */
+#recruitModal .rf-pmsw{display:flex;align-items:center;gap:0;margin-bottom:9px;flex-wrap:wrap}
+#recruitModal .rf-pm-btn{border:1px solid var(--border,#E2E8F0);background:var(--card,#fff);color:var(--t2,#475569);
+  font-size:.73rem;font-weight:800;padding:6px 13px;cursor:pointer;margin:0}
+#recruitModal .rf-pm-btn:first-of-type{border-radius:9px 0 0 9px}
+#recruitModal .rf-pm-btn:nth-of-type(2){border-radius:0 9px 9px 0;border-left:0}
+#recruitModal .rf-pm-btn.on{background:var(--p,#3182F6);border-color:var(--p,#3182F6);color:#fff}
+#recruitModal .rf-pm-note{font-size:.66rem;color:var(--t3,#94A3B8);font-weight:700;margin-left:9px}
+/* 모드별 열 구성 — 숨긴 칸은 값이 남아 있어도 _readProdRows/readOptRows 가 모드를 보고 무시한다 */
+#recruitModal .rf-pm-none .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-prod-head[data-pm="none"],
+#recruitModal .rf-pm-none .rf-pm-help[data-pm="opt"],#recruitModal .rf-pm-opt .rf-pm-help[data-pm="none"]{display:none}
+#recruitModal .rf-pm-none .rf-prod-head[data-pm="none"],#recruitModal .rf-pm-none .rf-opt-row{grid-template-columns:1.6fr .85fr .62fr .62fr 26px}
+#recruitModal .rf-pm-none .rf-opt-name{display:none}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px}
+#recruitModal .rf-pm-opt .rf-opt-prod{display:none}
+#recruitModal .rf-pm-opt .rf-opt-row::before{content:'└';color:var(--t4,#CBD5E1);font-size:.72rem;text-align:center}
+/* 상품 그룹 머리(옵션 있는 작업 전용) */
+#recruitModal .rf-gp{border:1px solid var(--border,#E2E8F0);border-radius:10px;padding:9px 10px;margin-bottom:9px;background:#FCFDFF}
+#recruitModal .rf-gp-head{display:grid;grid-template-columns:1fr .62fr 26px;gap:6px;align-items:center;margin-bottom:7px}
+#recruitModal .rf-gp-head .rform-input{font-size:.76rem;font-weight:700;padding:6px 7px;margin:0}
+#recruitModal .rf-gp-total{font-size:.72rem;font-weight:800;text-align:right;color:var(--t2,#475569)}
+#recruitModal .rf-gp-add{border:1px dashed var(--border,#CBD5E1);background:transparent;color:var(--t2,#475569);
+  border-radius:8px;font-size:.7rem;font-weight:800;padding:5px 10px;cursor:pointer;margin-top:2px}
 /* 기간별 리뷰비(082) — 시작일 · 금액 · 메모 (종료일은 받지 않는다: 빈틈·겹침 원천 차단)
    v2: 녹색 강조 박스 → 카드 안의 점선 서브블록(통일 문법 — 켜고 끄는 것은 체크 하나) */
 #recruitModal .rf-fee-box{border:1.5px dashed var(--border,#E2E8F0);border-radius:10px;padding:9px 11px;background:#FAFCFF;margin-top:4px}

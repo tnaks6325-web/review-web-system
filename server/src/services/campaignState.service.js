@@ -416,11 +416,31 @@ function computeOptionView(opt, cnt, campState) {
   };
 }
 
+/**
+ * ★★ "이 공고는 옵션 공고인가" 판정의 **단일 출처** — 살아있는(마감 아닌) 옵션만 센다.
+ *
+ *  왜 필요한가(2026-08-07 우레온 건): 참여자가 붙은 옵션은 삭제 대신 `closed` 로 보존되는데
+ *  (참여 기록 보호 — 올바른 규칙), 종전 apply 게이트는 **closed 포함 전체 행 수**로 옵션 공고를
+ *  판정해 "관리자가 잘못 생긴 옵션을 정리(마감)하면 공고가 영구 잠기는" 상태를 만들었다.
+ *  옵션 구조를 정리한 공고는 **옵션 없는 공고**로 봐야 한다.
+ *
+ *  ★ 완화 금지: `soldout`(active 인데 자리 소진)·`today_done` 은 **살아있는 옵션**으로 남긴다 —
+ *    "전부 마감이어도 옵션 없이 우회 참여 금지" 원칙의 '마감'은 자리 소진(soldout)이고,
+ *    여기서 여는 것은 **관리자가 옵션 구조 자체를 정리한 경우**뿐이다.
+ *
+ *  @param rows `campaign_options` 원본 행 배열 **또는** `computeOptionView` 결과 배열
+ *              (둘 다 `status` 를 갖고, `'closed'` 는 오직 DB status='closed' 에서만 나온다)
+ */
+function liveOptions(rows) {
+  return (rows || []).filter(o => o && String(o.status || 'active') !== 'closed');
+}
+
 module.exports = {
   computeCampaignState,
   fetchCampaignCounts,
   fetchOptionCounts,
   computeOptionView,
+  liveOptions,
   dailyQuota,
   timeStrToMinutes,
   kstDayStartUtc,

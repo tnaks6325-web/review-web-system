@@ -892,10 +892,154 @@ function renderPartCheck() {
 
 /* ═══════════════════════════════════════
    🧩 상품 옵션표 (061 3단계) — 옵션별 금액·정원·하루건수
+
+   ★★ 작업 종류 2모드(2026-08-07 우레온 건): 'none' = 옵션 없는 작업(옵션명 칸 없음) /
+      'opt' = 옵션 있는 작업(상품 그룹 + 옵션 행). **모드가 옵션 유무의 단일 출처**라
+      `readOptRows`·`_readProdRows` 둘 다 모드를 보고 판단한다 — 숨은 칸에 값이 남아 있어도
+      옵션으로 새어 나가지 않는다(옵션 없는 작업에서 상품명 조각이 옵션이 되던 사고의 구조적 차단).
    ═══════════════════════════════════════ */
+/** 현재 진행상품 입력 모드 — 'none'(옵션 없는 작업) | 'opt'(옵션 있는 작업) */
+function _prodMode() {
+  const el = document.getElementById("rf_prod_mode");
+  return (el && el.value === "opt") ? "opt" : "none";
+}
+/** 모드 표시만 갱신(값 변환·재렌더 없음) */
+function _applyProdModeUi(m) {
+  const el = document.getElementById("rf_prod_mode"); if (el) el.value = m;
+  const wrap = document.getElementById("rf_opt_wrap");
+  if (wrap) { wrap.classList.toggle("rf-pm-opt", m === "opt"); wrap.classList.toggle("rf-pm-none", m !== "opt"); }
+  document.querySelectorAll("#rf_prod_mode_sw .rf-pm-btn").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  // 버튼은 두 모드 모두 "상품 추가" — none 이면 상품 한 줄, opt 이면 상품 그룹(옵션은 그룹 안에서 추가)
+  const add = document.getElementById("rf_opt_addbtn");
+  if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
+}
+/** 자동 판정 사유 문구(조용한 자동 선택 금지 — 왜 이 모드인지 화면이 말한다) */
+function _setProdModeNote(txt) {
+  const n = document.getElementById("rf_prod_mode_note");
+  if (n) n.textContent = txt || "";
+}
+/**
+ * 모드 전환(사람이 누름) — 값은 이월하고, 옵션을 없애는 방향일 때만 확인창.
+ * ★ 조용히 값이 사라지지 않게: 살아있는 옵션이 있으면 몇 종이 정리되는지 먼저 말한다.
+ */
+function setProdMode(mode, opts) {
+  const m = (mode === "opt") ? "opt" : "none";
+  if (_prodMode() === m) return;
+  const rows = _readProdRowsRaw();
+  if (m === "none" && !(opts && opts.silent)) {
+    const live = rows.filter(r => r.optKey && !r.closed);
+    if (live.length && !confirm(
+      "옵션 " + live.length + "종을 정리하고 '옵션 없는 작업'으로 바꿉니다.\n" +
+      "이미 참여한 리뷰어가 있는 옵션은 기록 보호를 위해 마감 상태로 남습니다.\n\n계속할까요?")) return;
+  }
+  _applyProdModeUi(m);
+  _setProdModeNote("");
+  _renderProdTable(_convertProdRows(rows, m));
+}
+/** 모드 전환 시 값 이월 — none↔opt 어느 쪽으로도 입력한 값이 사라지지 않게 */
+function _convertProdRows(rows, m) {
+  const list = rows || [];
+  if (!list.length) return [];
+  if (m === "opt") return list;                     // 옵션명 칸이 드러나며 그대로 이어 쓴다
+  // opt → none: 상품 단위로 접는다(금액=첫 옵션, 인원·건수=합계, 하나라도 0이면 0=무제한)
+  const out = [];
+  list.forEach(r => {
+    const key = r.productName || "";
+    const g = out.length && out[out.length - 1].productName === key ? out[out.length - 1] : null;
+    if (!g) { out.push({ productName: key, optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit, status: "active" }); return; }
+    g.recruitTotal = (g.recruitTotal > 0 && r.recruitTotal > 0) ? g.recruitTotal + r.recruitTotal : 0;
+    g.dailyLimit   = (g.dailyLimit   > 0 && r.dailyLimit   > 0) ? g.dailyLimit   + r.dailyLimit   : 0;
+    if (!g.payAmount) g.payAmount = r.payAmount;
+  });
+  return out;
+}
+/**
+ * 표 전체 렌더 — 모드에 맞는 모양으로 다시 그린다.
+ * ★ 행 DOM(.rf-opt-row + 다섯 입력칸)은 두 모드 공통 — 'opt' 모드는 상품 그룹으로 감싸기만 한다.
+ */
+function _renderProdTable(rows) {
+  const wrap = document.getElementById("rf_opt_rows");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const list = rows || [];
+  if (_prodMode() === "opt") {
+    const groups = [];
+    list.forEach(r => {
+      const key = r.productName || "";
+      const g = groups.length && groups[groups.length - 1].name === key ? groups[groups.length - 1] : null;
+      if (g) g.rows.push(r); else groups.push({ name: key, rows: [r] });
+    });
+    if (!groups.length) groups.push({ name: "", rows: [{}] });
+    groups.forEach(g => wrap.appendChild(_buildProdGroup(g)));
+  } else {
+    (list.length ? list : []).forEach(r => wrap.appendChild(_buildOptRowEl(r)));
+  }
+  _markDupProductNames();
+  _optSummary();
+  _syncPreviewFromOptRows();
+  _syncGroupTotals();
+}
+/** 상품 그룹(옵션 있는 작업) — 머리(상품명·총인원 자동합계) + 옵션 행 + [＋ 옵션 추가] */
+function _buildProdGroup(g) {
+  const box = document.createElement("div");
+  box.className = "rf-gp";
+  const head = document.createElement("div");
+  head.className = "rf-gp-head";
+  head.innerHTML =
+    '<input class="rform-input rf-gp-name" placeholder="상품명">' +
+    '<span class="rf-gp-total" title="옵션인원 합계(자동)">–</span>' +
+    '<button type="button" class="btn-icon-sm rf-gp-del" title="이 상품(옵션 전체) 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
+  const nameEl = head.querySelector(".rf-gp-name");
+  nameEl.value = g.name || "";
+  // 그룹 상품명 → 그 그룹의 모든 옵션 행 상품명(숨은 칸)에 반영 — 저장 원문·정원 파생이 따라온다
+  nameEl.addEventListener("input", () => {
+    box.querySelectorAll(".rf-opt-row .rf-opt-prod").forEach(i => { i.value = nameEl.value; });
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
+  });
+  head.querySelector(".rf-gp-del").onclick = () => {
+    box.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
+  };
+  box.appendChild(head);
+  const body = document.createElement("div");
+  body.className = "rf-gp-body";
+  (g.rows.length ? g.rows : [{}]).forEach(r => body.appendChild(_buildOptRowEl(Object.assign({}, r, { productName: g.name || "" }))));
+  box.appendChild(body);
+  const add = document.createElement("button");
+  add.type = "button"; add.className = "rf-gp-add"; add.textContent = "＋ 옵션 추가";
+  add.onclick = () => {
+    body.appendChild(_buildOptRowEl({ productName: nameEl.value }));
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
+  };
+  box.appendChild(add);
+  return box;
+}
+/** 상품 그룹 머리의 총인원(옵션인원 합계) 갱신 — 하나라도 0(무제한)이면 '무제한' */
+function _syncGroupTotals() {
+  document.querySelectorAll("#rf_opt_rows .rf-gp").forEach(box => {
+    const el = box.querySelector(".rf-gp-total"); if (!el) return;
+    const live = Array.from(box.querySelectorAll(".rf-opt-row")).filter(r => r.dataset.status !== "closed");
+    const vals = live.map(r => Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0));
+    el.textContent = !vals.length ? "–" : (vals.every(v => v > 0) ? vals.reduce((a, b) => a + b, 0) + "명" : "무제한");
+  });
+}
+
+/** [＋ 상품 추가] — 옵션 없는 작업이면 상품 한 줄, 옵션 있는 작업이면 상품 그룹 하나를 더한다 */
 function addOptRow(data) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
+  if (_prodMode() === "opt") {
+    wrap.appendChild(_buildProdGroup({ name: (data && (data.productName ?? data.product_name)) || "", rows: [data || {}] }));
+  } else {
+    wrap.appendChild(_buildOptRowEl(data));
+  }
+  _markDupProductNames();
+  _optSummary();
+  _syncPreviewFromOptRows();
+  _syncGroupTotals();
+}
+
+/** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
+function _buildOptRowEl(data) {
   const d = data || {};
   const status = (d.status === "closed") ? "closed" : "active";   // ★ 마감 상태 보존(리뷰 #1 — 저장 라운드트립에서 재활성화 방지)
   const row = document.createElement("div");
@@ -931,10 +1075,10 @@ function addOptRow(data) {
     row.querySelector(".rf-opt-name").title = "";
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   };
-  wrap.appendChild(row);
-  _markDupProductNames();
-  _optSummary();
-  _syncPreviewFromOptRows();
+  // 옵션인원이 바뀌면 상품 그룹 머리의 총인원(자동합계)도 따라온다
+  const rtEl = row.querySelector(".rf-opt-rt");
+  if (rtEl) rtEl.addEventListener("input", _syncGroupTotals);
+  return row;
 }
 
 /** 마지막 행의 상품명 — 옵션을 추가할 때 자동으로 따라오게(같은 상품의 다른 옵션이 대부분) */
@@ -951,13 +1095,32 @@ function _markDupProductNames() {
   });
 }
 
-function renderOptRows(options) {
+/**
+ * 표 프리필 — 모드를 **먼저 자동 판정**한 뒤 그 모드로 그린다.
+ * ★ 판정은 "살아있는 옵션이 있는가" 하나 — 서버 apply 게이트(`liveOptions`)와 같은 기준이라
+ *   "화면은 옵션 공고인데 참여는 옵션을 안 받는"(또는 그 반대) 불일치가 생기지 않는다.
+ * ★ 자동은 제안까지 — 사람이 스위치로 언제든 바꾼다.
+ */
+function renderOptRows(options, opts) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
-  wrap.innerHTML = "";
-  (options || []).forEach(o => addOptRow(o));
-  _optSummary();
-  _syncPreviewFromOptRows();
+  const list = options || [];
+  const live = list.filter(o => (o.optKey || o.opt_key) && (o.status || "active") !== "closed");
+  const forced = opts && opts.mode;
+  const m = forced || (live.length ? "opt" : "none");
+  _applyProdModeUi(m);
+  // 사유는 값이 있을 때만 — 빈 표(신규 공고)에 "자동 선택됨"이라 하면 정하지 않은 것을 정했다고 말하는 셈이다
+  _setProdModeNote((forced || !list.length) ? "" : (live.length
+    ? "옵션 " + live.length + "종이 확인되어 자동 선택됨"
+    : "옵션 정보가 없어 자동 선택됨"));
+  _renderProdTable(list.map(o => ({
+    productName: o.productName ?? o.product_name ?? "",
+    optKey:      o.optKey ?? o.opt_key ?? "",
+    payAmount:   o.payAmount ?? o.pay_amount ?? 0,
+    recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
+    dailyLimit:  o.dailyLimit ?? o.daily_limit ?? 0,
+    status:      o.status === "closed" ? "closed" : "active",
+  })));
 }
 
 /**
@@ -970,7 +1133,16 @@ function renderOptRowsWithProduct(options, productLines) {
   const byOpt = new Map();
   parsed.forEach(r => { if (r.optKey) byOpt.set(r.optKey, r); });
   const opts = options || [];
-  if (!opts.length) { renderOptRows(parsed.length ? parsed : []); return; }
+  if (!opts.length) {
+    // ★★ 옵션 원장이 비어 있으면 이 공고는 **확정적으로** 옵션 없는 공고다 —
+    //   원문 분해(parseProductLinesToRows)가 상품명 속 하이픈·빗금을 옵션으로 쪼갰더라도
+    //   그 추측을 옵션으로 승격시키지 않고 상품명으로 되붙인다(우레온 사고 경로 차단).
+    renderOptRows(parsed.map(r => ({
+      productName: [r.productName, r.optKey].filter(Boolean).join(" "),
+      optKey: "", payAmount: r.payAmount,
+    })), { mode: "none" });
+    return;
+  }
   const firstProd = parsed.length ? parsed[0].productName : "";
   renderOptRows(opts.map(o => {
     const key = o.optKey || o.opt_key || "";
@@ -979,9 +1151,12 @@ function renderOptRowsWithProduct(options, productLines) {
   }));
 }
 
-/** 옵션표 → 저장 payload 배열(빈 옵션명 제거, '|' 정규화, 마감상태 보존) */
+/** 옵션표 → 저장 payload 배열(빈 옵션명 제거, '|' 정규화, 마감상태 보존)
+ *  ★★ 모드가 옵션 유무의 단일 출처 — '옵션 없는 작업'이면 숨은 칸에 값이 남아 있어도 **무조건 빈 배열**.
+ *     (서버는 빈 배열을 "옵션 정리"로 받아 참여자 없는 옵션은 삭제·있는 옵션은 마감 보존한다) */
 function readOptRows() {
   const out = [];
+  if (_prodMode() !== "opt") return out;
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
     if (!optKey) return;                       // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
@@ -996,8 +1171,15 @@ function readOptRows() {
   return out;
 }
 
-/** 표의 모든 행(옵션명 없는 단일상품 포함) — 작업내용 원문·정원 합계 산출용 */
+/** 표의 모든 행(옵션명 없는 단일상품 포함) — 작업내용 원문·정원 합계 산출용
+ *  ★ '옵션 없는 작업' 모드에서는 optKey 를 읽지 않는다 — 숨은 칸의 잔여값이
+ *    작업내용 원문(`rf_wd_product`)에 "상품명 - 옵션명"으로 새어 나가는 것을 막는다. */
 function _readProdRows() {
+  const noOpt = _prodMode() !== "opt";
+  return _readProdRowsRaw().map(r => (noOpt ? Object.assign({}, r, { optKey: "" }) : r));
+}
+/** DOM 그대로 읽기(모드 무시) — 모드 전환 시 값 이월용. 저장·파생은 반드시 `_readProdRows` 를 쓴다. */
+function _readProdRowsRaw() {
   const out = [];
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const productName = String(r.querySelector(".rf-opt-prod").value || "").trim();
@@ -1035,6 +1217,7 @@ function _syncPreviewFromOptRows() {
   if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
   _markDupProductNames();
   _optSummary();     // 프로그램으로 표를 바꿔도(작업오더 자동 적용 등) 요약이 따라오게
+  _syncGroupTotals();
   if (typeof _renderPreview === "function") _renderPreview();
 }
 
@@ -1090,27 +1273,32 @@ function parseProductLinesToRows(text, fallbackProductName) {
   return rows;
 }
 
-/** 작업오더 상품정보를 표에 적용 — 옵션 배열이 있으면 그대로, 없으면 텍스트를 분해 */
+/** 작업오더 상품정보를 표에 적용 — 옵션 배열(구조 신호)이 있으면 그대로, 없으면 텍스트를 분해.
+ *  ★★ 옵션 배열이 없으면 그 오더는 **옵션 없는 작업**이다(구조 신호가 곧 사실) —
+ *    텍스트 분해가 상품명 속 하이픈·빗금을 옵션처럼 쪼개도 옵션으로 승격시키지 않는다.
+ *    (2026-08-07 우레온 건: 상품명 조각이 옵션명이 되어 공고가 잠겼다) */
 function applyProductRowsFromOrder(prefill) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   const p = prefill || {};
-  let rows = [];
   if (Array.isArray(p.options) && p.options.length) {
-    rows = p.options.map(o => ({
+    renderOptRows(p.options.map(o => ({
       productName: o.productName || p.product_name || "",
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
-    }));
-  } else if (p.wd_product) {
-    rows = parseProductLinesToRows(p.wd_product, p.product_name);
+    })), { mode: "opt" });
+    _setProdModeNote("작업오더의 옵션 정보로 자동 선택됨");
+    return;
   }
+  if (!p.wd_product) return;
+  const rows = parseProductLinesToRows(p.wd_product, p.product_name);
   if (!rows.length) return;
-  wrap.innerHTML = "";
-  rows.forEach(r => addOptRow(r));
-  _optSummary();
-  _syncPreviewFromOptRows();
+  renderOptRows(rows.map(r => ({
+    productName: [r.productName, r.optKey].filter(Boolean).join(" "),   // 쪼개진 조각은 상품명으로 되붙인다
+    optKey: "", payAmount: r.payAmount,
+  })), { mode: "none" });
+  _setProdModeNote("작업오더에 옵션이 없어 자동 선택됨");
 }
 
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
@@ -1122,7 +1310,12 @@ function _optSummary() {
   const dup = names.some((n, i) => names.indexOf(n) !== i);
   if (!el) return { dup, count: opts.length };
   if (!opts.length) {
-    el.textContent = "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출). 옵션 없는 단일상품이면 비워두세요.";
+    // 모드에 맞는 안내 — '옵션 없는 작업'에서 "옵션을 추가하면…"이라 말하면 없는 칸을 찾게 만든다
+    const prods = _readProdRows().filter(r => r.productName || r.payAmount).length;
+    el.textContent = (_prodMode() === "opt")
+      ? "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출)."
+      : (prods ? "옵션 없이 진행하는 작업 " + prods + "건 — 리뷰어는 옵션 선택 없이 바로 참여합니다."
+               : "상품을 추가하세요. 옵션별로 정원·금액을 나눠야 하면 [옵션 있는 작업]으로 바꾸세요.");
     el.style.color = "var(--t3)";
     return { dup, count: 0 };
   }
