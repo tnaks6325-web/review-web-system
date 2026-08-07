@@ -441,19 +441,21 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
  * ★ null = "계산 불가"(보류 아님·기준선 모름·일건수 0) — 화면은 0으로 꾸미지 않고 칩을 숨기거나
  *   "조회 실패"를 말한다. 잔량은 표시·반영 참고값일 뿐, 정원 자체는 dailyQuota(계획표)가 정한다.
  */
-function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
-  if (!isCarryHold(c)) return null;
-  // ★★ 시트 일정 캠페인(063)은 정원을 시트 계획(plannedThrough)이 정하므로 '자동 이월 가산 멈춤'
-  //   자체가 적용되지 않는다 = 잔량 개념이 없다. 여기서 숫자를 돌려주면 카드에 **효과 없는**
-  //   ⏸ 보류 칩이 떠서 눌러도 아무 일도 안 하는 막다른 길이 된다(조용한 거짓말 금지).
-  //   그 공고의 이월 조절은 [📅 인원]의 날짜별 조절이 담당한다.
+/**
+ * 이월(미달) 인원 — 기준선 이후 ~ **어제까지**의 계획 누적 − 실제 확정.
+ * `win` = 세는 창: `counts.carry`(066 자동 이월 기준선) 또는 `counts.hold`(098 보류 기준선).
+ * ★ 재료는 dailyQuota 와 같은 counts(plans 포함) — 계산이 갈리면 화면과 정원이 어긋난다.
+ * ★ null = 계산 불가(기준선 모름 · 일건수 0 · 시트 일정) — 화면은 0 으로 꾸미지 않는다.
+ */
+function pendingCarry(c, counts, todayStr, win, schedule = null) {
+  // ★★ 시트 일정 캠페인(063)은 정원을 시트 계획(plannedThrough)이 정하므로 자동 이월 자체가
+  //   없다 = 이월 개념이 없다. 숫자를 돌려주면 화면에 **효과 없는** 이월 표시가 떠 막다른 길이 된다.
   if (isUsableSchedule(schedule)) return null;
   const dl = Number(c.daily_limit) || 0;
-  const hold = counts && counts.hold;
-  if (!hold || !hold.startDate || !todayStr || dl <= 0) return null;
+  if (!win || !win.startDate || !todayStr || dl <= 0) return null;
   const sd = dateOnlyStr(c.start_date);
-  const anchor = (sd && sd > hold.startDate) ? sd : hold.startDate;
-  const daysBefore = _dayDiff(anchor, todayStr);   // 오늘 제외 경과일수(소급 없음 — 098 기준선)
+  const anchor = (sd && sd > win.startDate) ? sd : win.startDate;
+  const daysBefore = _dayDiff(anchor, todayStr);   // 오늘 제외 경과일수(소급 없음 — 기준선)
   if (daysBefore <= 0) return 0;
   // 어제까지의 계획 누적 = 기본 일건수 × 일수 + 조절 증감분(095 계획표 — dailyQuota 와 같은 재료)
   let planned = dl * daysBefore;
@@ -463,7 +465,18 @@ function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
       if (d >= anchor && d < todayStr) planned += Math.max(0, Number(plans[d]) || 0) - dl;
     }
   }
-  return Math.max(0, planned - (Number(hold.submittedSince) || 0) - Math.max(0, Number(appliedSum) || 0));
+  return Math.max(0, planned - (Number(win.submittedSince) || 0));
+}
+
+/**
+ * 보류 잔량(098) — 이월(pendingCarry, 보류 창) − 이미 반영한 합(appliedSum, 이력 원장).
+ * ★ 보류 공고가 아니면 null(잔량 개념 없음). 나머지 규율은 pendingCarry 와 같다.
+ */
+function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
+  if (!isCarryHold(c)) return null;
+  const base = pendingCarry(c, counts, todayStr, counts && counts.hold, schedule);
+  if (base === null) return null;
+  return Math.max(0, base - Math.max(0, Number(appliedSum) || 0));
 }
 
 /**
@@ -656,6 +669,7 @@ module.exports = {
   KST_OFFSET_MS,
   CARRY_CAP_MULT,
   isCarryHold,
+  pendingCarry,
   heldCarry,
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
