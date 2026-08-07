@@ -132,6 +132,17 @@
   .idc .cell .k{font-size:10px;color:var(--faint);font-weight:800;letter-spacing:.03em;display:block;margin-bottom:2px}
   .idc .cell b{font-size:13px}
   /* 브랜드 관리(094) — 대행사 셀프서비스. 클래스 brd· bas 접두 */
+  /* 브랜드 추가 인라인(2안 확정) — [+ 브랜드 추가] 버튼 자리가 그대로 입력창이 된다(시선 이동 0).
+     입력창은 240px 고정: 이름은 3~6글자라 폭을 늘리면 입력 끝↔[추가] 사이만 멀어진다. 색상 선택 없음. */
+  .bnslot{display:inline-flex;align-items:center;gap:6px}
+  .bnfield{display:flex;align-items:center;width:240px;background:var(--card);border:1.5px solid var(--accent);border-radius:8px;padding:5px 10px;box-shadow:0 0 0 3px var(--accent-soft)}
+  .bnfield.err{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+  .bnfield input{border:none;outline:none;flex:1;min-width:0;font-size:13px;font-family:inherit;background:transparent;color:var(--ink)}
+  .bnfield input::placeholder{color:var(--faint)}
+  .bnx{width:26px;height:26px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--muted);font-weight:800;font-size:12px;display:grid;place-items:center;cursor:pointer;flex:none}
+  .bnx:hover{color:var(--ink);border-color:var(--line)}
+  .bnerrwrap{max-width:1380px;text-align:right;margin:-2px 0 8px}
+  .bnerr{font-size:11px;color:var(--bad);background:var(--bad-soft);border-radius:7px;padding:4px 9px;display:inline-block}
   .brdlist{display:grid;gap:9px;max-width:1380px}
   .brdcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .brddot{width:12px;height:12px;border-radius:4px;flex:none}
@@ -2291,20 +2302,64 @@ function _renderAdvBrands(){
         <button class="btn xs" onclick="brandDelete('${esc(b.id)}')" style="color:var(--bad)">삭제</button>
       </span></div>`;
   };
+  // 2안(사용자 확정): [+ 브랜드 추가] 버튼 **그 자리**가 입력창으로 바뀐다 — 클릭 지점 = 입력 지점(시선 이동 0),
+  //   목록은 한 줄도 밀리지 않는다. 색상 선택 없음(추가 순서대로 자동 배정). 브라우저 prompt 미사용.
+  const nb=STATE.brandNew||{};
+  const slot = nb.open
+    ? `<span class="bnslot">
+        <span class="bnfield${nb.err?' err':''}"><input id="bnq" placeholder="브랜드 이름" value="${esc(nb.name||'')}"
+          oninput="brandNewInput(this.value)" onkeydown="brandNewKey(event)" autocomplete="off" maxlength="60"></span>
+        <button class="btn" id="bnadd" onclick="brandNewSubmit()"${(nb.name||'').trim()?'':' disabled'}>추가</button>
+        <button class="bnx" onclick="brandNewClose()" title="닫기 (ESC)">✕</button></span>`
+    : `<button class="btn" onclick="brandNewOpen()">+ 브랜드 추가</button>`;
   host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 브랜드 관리</h1>
-      <span class="bd a">업체 전용</span><span style="flex:1"></span><button class="btn" onclick="brandCreate()">+ 브랜드 추가</button></div>
+      <span class="bd a">업체 전용</span><span style="flex:1"></span>${slot}</div>
+    ${nb.err?`<div class="bnerrwrap"><span class="bnerr">${esc(nb.err)}</span></div>`:''}
     <p style="font-size:12px;color:var(--muted);margin:0 0 12px;max-width:860px">브랜드사별로 작업을 분류하고 <b>브랜드별 고유 링크</b>를 전달하세요. 브랜드사는 자기 브랜드에 배정된 작업만 볼 수 있고,
       <b>정산 정보(견적서·계산서·금액)와 자료 폴더는 기본 숨김</b> — 브랜드별 토글로 공개를 선택합니다. 브랜드사 화면에는 "운영: ${esc(STATE.name||'')}"가 표기됩니다.</p>
     <div class="brdlist">${brands.map(card).join('')||''}
-      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.'}</div>
+      <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">${brands.length?`미분류 작업 ${unassigned}건 — 브랜드에 배정하지 않은 작업은 이 화면(대행사)에서만 보입니다`:(nb.open?'이름을 입력하고 Enter 를 누르세요.':'아직 브랜드가 없습니다. "+ 브랜드 추가"로 시작하세요.')}</div>
     </div></div>`;
+  if(nb.open) _bnFocus();
 }
-async function brandCreate(){
-  const name=prompt('브랜드 이름(예: 메이커스)'); if(!name||!name.trim()) return;
-  const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name:name.trim()})}).catch(()=>null);
-  if(!r||!r.ok) return alert((r&&r.error)||'브랜드 추가에 실패했습니다.');
-  _brandsReload();
+// ── 브랜드 추가 인라인(2안) ── 상태는 STATE.brandNew{open,name,err,busy}. 렌더가 통째로 다시 그려지므로
+//   입력 포커스·커서 위치를 복원한다(안 하면 한 글자 칠 때마다 포커스가 날아간다).
+function _bnFocus(){
+  const el=$('#bnq'); if(!el) return;
+  const pos=(STATE.brandNew&&STATE.brandNew.name||'').length;
+  el.focus(); try{ el.setSelectionRange(pos,pos); }catch(_){ }
 }
+function brandNewOpen(){ STATE.brandNew={open:true,name:'',err:''}; _renderAdvBrands(); }
+function brandNewClose(){ STATE.brandNew=null; _renderAdvBrands(); }
+function brandNewInput(v){
+  const nb=STATE.brandNew||{open:true}; const had=!!nb.err;
+  nb.name=v; nb.err=''; STATE.brandNew=nb;
+  const add=$('#bnadd'); if(add) add.disabled=!String(v||'').trim();
+  if(had) _renderAdvBrands();   // 오류 줄이 떠 있었으면 지우면서 다시 그린다(그 외엔 재렌더 없음 = 타이핑 부드러움)
+}
+function brandNewKey(e){
+  if(e.key==='Enter'){ e.preventDefault(); brandNewSubmit(); }
+  else if(e.key==='Escape'){ e.preventDefault(); brandNewClose(); }
+}
+async function brandNewSubmit(){
+  const nb=STATE.brandNew||{}; const name=String(nb.name||'').trim();
+  if(!name||nb.busy) return;
+  const brands=(STATE.advWork&&STATE.advWork.brands)||[];
+  // 중복은 서버도 막지만(400), 화면에서 먼저 알려 왕복 없이 고치게 한다.
+  if(brands.some(b=>String(b.name||'').trim().toLowerCase()===name.toLowerCase())){
+    STATE.brandNew={open:true,name,err:`이미 "${name}" 브랜드가 있습니다`}; _renderAdvBrands(); return;
+  }
+  nb.busy=true;
+  const r=await api('/api/trackb/brands/create',{method:'POST',body:JSON.stringify({name,color:_bnColor(brands.length)})}).catch(()=>null);
+  nb.busy=false;
+  if(!r||!r.ok){ STATE.brandNew={open:true,name,err:(r&&r.error)||'브랜드 추가에 실패했습니다. 잠시 후 다시 시도해 주세요.'}; _renderAdvBrands(); return; }
+  STATE.brandNew={open:true,name:'',err:''};   // 입력칸 유지 = 연달아 등록
+  await _brandsReload();
+  toast(`브랜드 "${name}" 추가됨`);
+}
+// 색상 자동 배정(사용자 확정: 색 선택 UI 없음) — 추가 순서대로 순환해 목록·배정 화면에서 구분된다.
+const _BN_COLORS=['#2563eb','#0e7490','#16a34a','#b45309','#e11d74','#6d5ac9'];
+function _bnColor(i){ return _BN_COLORS[(+i||0)%_BN_COLORS.length]; }
 async function brandRename(id){
   const b=((STATE.advWork&&STATE.advWork.brands)||[]).find(x=>x.id===id); if(!b) return;
   const name=prompt('브랜드 이름',b.name); if(!name||!name.trim()||name.trim()===b.name) return;

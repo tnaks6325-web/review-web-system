@@ -1316,6 +1316,12 @@ async function brandsForAdvertiser({ advertiserId } = {}) {
 async function createBrand({ advertiserId, name, color } = {}) {
   const nm = String(name || '').trim().slice(0, 60);
   if (!advertiserId || !nm) return { ok: false, code: 400, error: '브랜드 이름을 입력하세요.' };
+  // 같은 대행사 안 이름 중복 거부 — 브랜드사 화면·링크 배포에서 어느 쪽인지 구분이 안 되면 오배포로 이어진다.
+  //   프론트도 먼저 막지만(왕복 절약) 판정은 서버가 한다(두 탭 동시 입력·새로고침 타이밍).
+  const dup = await getPool().query(
+    'SELECT 1 FROM trackb_brands WHERE advertiser_id=$1 AND deleted_at IS NULL AND LOWER(TRIM(name))=LOWER($2) LIMIT 1',
+    [advertiserId, nm]);
+  if (dup.rows.length) return { ok: false, code: 400, error: `이미 "${nm}" 브랜드가 있습니다` };
   const id = 'brd_' + require('crypto').randomBytes(6).toString('hex');
   const token = require('crypto').randomBytes(24).toString('base64url');
   const col = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : '#2563eb';
