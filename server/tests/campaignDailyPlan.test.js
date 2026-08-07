@@ -286,6 +286,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   const r1 = await P.addRound('c1', { count: 100, startDate: d(1), label: '추가' }, 'tester');
   eq('첫 추가는 2차', r1.roundNo, 2);
   eq('총량 200→300 동기화', r1.newTotal, 300);
+  eq('★ M1: 응답에 status 동봉(마감 영속 공고는 게시를 켜야 재개 — 화면 고지 재료)', r1.status, 'active');
   ok('초도(1차) 시드 INSERT', CALLS.some(c => c.sql.includes('INSERT INTO campaign_rounds') && c.sql.includes("'초도'")));
   ok('recruit_total UPDATE 실행', CALLS.some(c => c.sql.includes('SET recruit_total')));
   // 4h. 차수 제거 하한(확정 이하로 총량 못 내림)
@@ -352,6 +353,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   const rt = readS('routes/campaign.routes.js');
   ok('★ PUT 수정이 차수 공고의 recruit_total 을 무시(총량 보호)',
     (rt.match(/roundsLockRecruitTotal/g) || []).length >= 2 && /_rtEff = null/.test(rt));
+  ok('★ M2: 무시했음을 응답이 말한다(recruitTotalLocked — 조용한 누락 금지)',
+    /recruitTotalLocked: true/.test(rt) && /recruitTotalLocked/.test(readF('js/index-recruit.js')));
+  ok('★ m4: 조절값 판정 단일 출처(planOverrideFor — dailyQuota·표시 공용)',
+    /function planOverrideFor/.test(st) && /planOverrideFor\(counts\.plans \|\| null, todayStr\)/.test(st)
+    && /const ov = planOverrideFor\(plans, todayStr\)/.test(st));
   ok('admin/list 가 rounds·todayPlanned·planAdjusted 를 내려준다',
     /fetchRoundsSummary/.test(rt) && /todayPlanned: st\.todayPlanned/.test(rt) && /planAdjusted: st\.planAdjusted === true/.test(rt));
 
@@ -371,6 +377,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ onclick 에 서버 문자열 보간 없음(XSS 규율)', !/onclick="[^"]*\$\{/.test(modal));
   ok('시트 일정 캠페인 읽기 전용 화면', /scheduleDriven === true/.test(modal) && /여기서는 조절할 수 없습니다/.test(modal));
   ok('킬스위치 안내(저장 잠금)', /CAMPAIGN_DAILY_PLAN=0/.test(modal));
+  ok('★ M1: 마감·임시저장 배너 + 차수 추가 토스트("게시를 켜야 모집이 재개")',
+    /게시 토글을 켜야/.test(modal) && /게시를 켜야 모집이 재개됩니다/.test(modal));
+  ok('★ m1: 모달 닫은 뒤 디바운스 타이머 가드(if (!S || !S.data) return)',
+    /function settle\(d\) \{\s*\n\s*if \(!S \|\| !S\.data\) return;/.test(modal));
+  ok('★ m6: 분산 일수 상한(서버 120일 상한 선반영)', /untilN > 110/.test(modal));
   ok('admin.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('admin.html')));
   ok('workdesk.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('workdesk.html')));
 

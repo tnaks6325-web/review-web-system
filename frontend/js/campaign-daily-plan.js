@@ -302,6 +302,11 @@
 
     bd.innerHTML =
       (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
+      // ★ 코드리뷰 M1: 총원 충족 시 closed 가 영속되어 있어 차수를 추가해도 게시를 켜기 전에는
+      //   모집이 재개되지 않는다(자동 재오픈은 수동 마감과 구분 불가라 하지 않음) — 화면이 말한다.
+      + (j.status !== 'active'
+        ? '<div class="cdp-note warn">⚠ 현재 게시 상태가 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b>입니다 — 조절·차수는 저장되지만, <b>모집 재개는 공고 카드의 게시 토글을 켜야</b> 시작됩니다.</div>'
+        : '')
       + '<div class="cdp-sub"><span>날짜별 모집 계획 — 게이지 드래그 또는 −/＋</span>'
       + '<span>기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b> · 총량 <b>' + ((j.recruitTotal || 0) > 0 ? j.recruitTotal + '명' : '무제한') + '</b> · 확정 <b>' + (j.submittedAll || 0) + '명</b></span></div>'
       + '<div id="cdpRows">' + rows + '</div>'
@@ -388,8 +393,9 @@
     s.timer = setTimeout(function () { settle(d); }, SETTLE_MS);
   }
   function settle(d) {
+    if (!S || !S.data) return;   // 조절 직후 0.7초 안에 모달을 닫으면 타이머가 늦게 발화한다(코드리뷰 m1)
     var s = S.sessions[d];
-    if (!s || !S.data) return;
+    if (!s) return;
     delete S.sessions[d];
     var start = s.start, fin = planFor(d);
     var dl = S.data.defaultDaily || 0;
@@ -407,7 +413,11 @@
       document.getElementById('cdpChDesc').textContent = '총량 ' + ((S.data.recruitTotal || 0) > 0 ? S.data.recruitTotal + '명' : '') + '은 그대로 지켜집니다 — 빠진 인원을 언제 모집할지만 고릅니다.';
       document.getElementById('cdpChExtendDesc').textContent = '이후 날들은 계획 그대로(기본 ' + dl + '명) 진행하고, 종료일이 뒤로 밀립니다.';
       var sp = document.getElementById('cdpChSpread');
-      if (untilN > 0) {
+      if (untilN > 110) {
+        // 서버 저장 상한(한 번에 120일)을 분산이 넘기면 통째로 거부된다 — 미리 잠근다(코드리뷰 m6)
+        sp.disabled = true;
+        document.getElementById('cdpChSpreadDesc').textContent = '남은 진행일이 ' + untilN + '일로 너무 많아 분산할 수 없습니다 — 종료일 연장을 선택하거나 날짜별로 직접 조절해주세요.';
+      } else if (untilN > 0) {
         sp.disabled = false;
         document.getElementById('cdpChSpreadDesc').textContent = '종료일(' + fmtMD(prevEnd) + ')까지 남은 ' + untilN + '일에 약 +' + Math.ceil(missing / untilN) + '명씩 얹어 종료일을 유지합니다.';
       } else {
@@ -434,7 +444,7 @@
   function _chSpread() {
     if (!S || !S.choice) return;
     var c = S.choice;
-    if (!c.untilN) return;
+    if (!c.untilN || c.untilN > 110) return;
     var per = Math.floor(c.missing / c.untilN), extra = c.missing % c.untilN;
     for (var k = 1; k <= c.untilN; k++) {
       var d2 = addDays(c.date, k);
@@ -567,7 +577,9 @@
     try {
       var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/rounds', { count: count, startDate: startDate || undefined, label: label || undefined });
       applyOverview(j);
-      toast(j.roundNo + '차 +' + count + '건 — 총량 ' + j.newTotal + '건');
+      // ★ 코드리뷰 M1: 마감(영속)·임시저장 상태면 차수만으로는 모집이 재개되지 않는다 — 즉시 고지
+      toast(j.roundNo + '차 +' + count + '건 — 총량 ' + j.newTotal + '건'
+        + (j.status && j.status !== 'active' ? ' · ⚠ 게시를 켜야 모집이 재개됩니다' : ''));
       refreshHost();
     } catch (e) { toast('차수 추가 실패: ' + (e.message || e)); }
   }

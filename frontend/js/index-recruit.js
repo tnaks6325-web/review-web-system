@@ -2241,6 +2241,11 @@ async function saveRecruitPost() {
       try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
     }
     _woPrefillOrderId = null;
+    /* ★ 095(코드리뷰 M2): 차수 원장이 있는 공고는 총모집 전송값을 서버가 무시한다(차수 합계가
+       진실원본). 조용히 무시하면 "총모집을 고쳤는데 안 바뀐다"가 버그로 오해되므로 고지한다. */
+    if (saved && saved.recruitTotalLocked === true) {
+      showToast("총모집은 차수 원장이 관리해 이번 저장에서 바뀌지 않았습니다 — 총량 변경은 카드 [📅 인원]의 차수 추가/제거로 해주세요.", "error");
+    }
     showToast(_recruitEditId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
     closeRecruitModal();
     loadRecruitList();

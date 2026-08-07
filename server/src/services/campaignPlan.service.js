@@ -136,6 +136,8 @@ async function getPlanOverview(campaignId) {
  *   (런타임 분기 최소화 — 시안의 확정 저장 계약).
  */
 async function savePlans(campaignId, body, actor) {
+  // ※ 킬스위치(CAMPAIGN_DAILY_PLAN=0)는 **판정만** 끈다 — 저장 원장은 유지해 재활성 시
+  //   조절이 그대로 되살아난다(프론트가 planEnabled=false 로 저장을 잠가 실수 저장은 없다).
   const b = body || {};
   const rawSet = Array.isArray(b.set) ? b.set : [];
   const rawRemove = Array.isArray(b.remove) ? b.remove : [];
@@ -184,6 +186,9 @@ async function savePlans(campaignId, body, actor) {
     const todayRemove = remove.includes(today);
     if (todaySet || todayRemove) {
       const used = await _todayUsed(client, campaignId, kstDayStartUtc().toISOString());
+      // 해제(remove)의 비교값은 기본 일건수 — 이월분을 계산에 안 넣어 보수적으로 거부될 수
+      // 있으나(이월 포함 실정원 25 ≥ 사용 23 인데 dl 20 < 23 이라 거부) fail-closed 방향이고
+      // 오류 문구가 사유(사용 수)를 말하므로 의도된 단순화다.
       const effective = todaySet ? todaySet.count : (Number(camp.daily_limit) || 0);
       if (effective < used) {
         const e = new Error(`오늘은 이미 ${used}명이 확정·진행 중이라 ${effective}명으로 줄일 수 없습니다.`);
@@ -265,7 +270,10 @@ async function addRound(campaignId, body, actor) {
       [campaignId, actor || null, JSON.stringify({ roundNo, count, startDate: startDate || null, label: label || null, newTotal })]);
     await client.query('COMMIT');
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} ${roundNo}차 +${count}건 — 총량 ${newTotal}`);
-    return { roundNo, newTotal };
+    // ★ status 동봉(코드리뷰 M1): 총원이 차면 closed 가 **영속**되어 있어(maybePersistClosed)
+    //   차수를 추가해도 게시를 켜기 전에는 모집이 재개되지 않는다 — 자동 재오픈은 수동 마감
+    //   (관리자 의도)과 구분할 수 없어 하지 않고, 화면이 이 값으로 "게시를 켜야 한다"를 말한다.
+    return { roundNo, newTotal, status: camp.status };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;

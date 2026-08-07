@@ -103,6 +103,13 @@ const CARRY_ENABLED = process.env.CAMPAIGN_DAILY_CARRY !== '0';
 // 계획 행이 없는 캠페인/날짜 = 기본 일건수(daily_limit) — 옵트인이라 기존 동작 100% 불변.
 // 킬스위치: CAMPAIGN_DAILY_PLAN=0 이면 계획표 전체 무시(전건 기존 동작 즉시 복귀).
 const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
+
+/** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
+ *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
+function planOverrideFor(plans, dateStr) {
+  if (!PLAN_ENABLED || !plans || !dateStr || plans[dateStr] == null) return null;
+  return Math.max(0, Number(plans[dateStr]) || 0);
+}
 // ★ 상한 — 이월이 아무리 쌓여도 하루 한도의 이 배수를 넘지 않는다.
 //   상한이 없으면 오래 미달한 캠페인이 어느 날 갑자기 수십 건을 한꺼번에 열어
 //   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
@@ -137,8 +144,7 @@ function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
   //    전일까지의 자연 미달분은 사라지지 않고 다음 "조절 없는 날"의 plannedThrough 계산에 남는다.
   const plans = (PLAN_ENABLED && planCtx && planCtx.plans) || null;
   const todayStr = (planCtx && planCtx.today) || (carry && carry.today) || null;
-  const ov = (plans && todayStr && plans[todayStr] != null)
-    ? Math.max(0, Number(plans[todayStr]) || 0) : null;
+  const ov = planOverrideFor(plans, todayStr);
 
   let q;
   if (ov !== null) {
@@ -198,8 +204,8 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
         { today: todayStr, plans: counts.plans || null });
   // 오늘이 명시 조절일인지(관리자 표시용) — 시트 일정 캠페인·킬스위치 OFF면 항상 null.
-  const ovToday = (!sch && PLAN_ENABLED && counts.plans && counts.plans[todayStr] != null)
-    ? Math.max(0, Number(counts.plans[todayStr]) || 0) : null;
+  //   판정은 dailyQuota 와 같은 planOverrideFor 하나(사본 금지 — 정원과 표시가 갈리면 안 된다).
+  const ovToday = sch ? null : planOverrideFor(counts.plans || null, todayStr);
   const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
