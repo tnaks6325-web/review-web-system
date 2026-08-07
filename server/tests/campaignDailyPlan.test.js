@@ -855,6 +855,43 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('7A-7 set 에는 넣지 않는다', !pl.set.some((x) => x.date === '2026-08-12'), pl.set);
   }
 
+  // 7A-10 ★★ 균형 모드가 꺼지면 **왜인지**를 기록한다(조용한 기능 소실 금지 — 코드리뷰 🟡2)
+  mkS({ data: { recruitTotal: 0 } });          A.applyCarryMode('next'); eq('7A-10 무제한', sandbox.S.balanceOff, 'unlimited');
+  mkS({ data: { submittedAll: 800, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 } });
+  A.applyCarryMode('next'); eq('7A-10 총량 충족', sandbox.S.balanceOff, 'full');
+  mkS({ data: { submittedAll: 800, todaySubmitted: 2, byDateSubmitted: { '2026-08-08': 2 }, todayUsed: 40 } });
+  A.applyCarryMode('next'); eq('7A-10 오늘 확정이 남은 배분수 초과', sandbox.S.balanceOff, 'today_over');
+  mkS({ data: { todayNaturalQuota: null } });   A.applyCarryMode('next'); eq('7A-10 기준값 없음', sandbox.S.balanceOff, 'no_baseline');
+  {
+    // ★ 시트 일정 공고 + 과거 미달 = 앞으로의 시트 자리가 배분해야 할 인원보다 적다
+    //   (코드리뷰가 표로 보여준 케이스 — 이월 조절이 가장 필요한 상태인데 조용히 꺼졌다)
+    const dates = [];
+    for (let i = 0; i < 5; i++) dates.push({ date: new Date(Date.UTC(2026, 7, 8 + i)).toISOString().slice(0, 10), slots: 20 });
+    mkS({ data: {
+      scheduleDriven: true, scheduleDates: dates, scheduleTotal: 300, recruitTotal: 300, defaultDaily: 20,
+      submittedAll: 5, todaySubmitted: 5, byDateSubmitted: { '2026-08-08': 5 }, todayUsed: 5,
+      carryPending: null, todayNaturalQuota: 20,
+    } });
+    ok('7A-10 시트 자리 부족 = 균형 모드 꺼짐', A.applyCarryMode('next') === false);
+    eq('7A-10 사유는 "자리 부족"', sandbox.S.balanceOff, 'no_room');
+    eq('7A-10 얼마나 열 수 있는지도 기록(안내 문구 재료)', sandbox.S.capAhead, 100);
+  }
+  // ⚠ 실브라우저가 잡은 것: 안내 문구가 render() 아래에서 var 선언되는 `target` 을 참조해
+  //   **undefined명**으로 렌더됐다(호이스팅). 정적 검사로는 못 잡는다 → 함수 호출을 고정한다.
+  ok('7A-10 ★ 안내 문구는 아래에서 선언되는 var 가 아니라 함수를 부른다(undefined 렌더 방지)',
+    /배분해야 할 인원\(<b>' \+ targetTotal\(\) \+ '명<\/b>\)/.test(cdpSrc));
+  ok('7A-10 ★ 사유별 안내 문구가 다음 행동까지 말한다(시트 공고는 시트에 날짜 추가)',
+    /앞으로 열 수 있는 자리/.test(cdpSrc) && /시트에 진행 날짜를 더 넣거나/.test(cdpSrc)
+    && /오늘 이미 확정·진행 중인 인원이 남은 배분수보다 많아/.test(cdpSrc));
+
+  // 7A-11 ★★ 한 날에 평소 상한을 넘겨 여는 배치는 **경고한다**(막지는 않는다 — 사용자가 고른 방식)
+  ok('7A-11 066 하루 상한 초과 경고 + 대안 제시',
+    /자동 이월이었다면 오늘은 <b>' \+ Number\(j\.todayNaturalQuota \|\| 0\) \+ '명<\/b>까지만 열립니다/.test(cdpSrc)
+    && /\[남은 날에 나눠 담기\]<\/b>를 고르세요/.test(cdpSrc));
+  ok('7A-11 경고일 뿐 저장을 막지 않는다(하드블록 금지 — 저장 게이트 조건 불변)',
+    /save\.disabled = killOff \|\| S\.saving \|\| diff !== 0 \|\| !dirty \|\| over;/.test(cdpSrc)
+    && !/todayNaturalQuota[^\n]*save\.disabled/.test(cdpSrc));
+
   /* ── 배선(정적) — 사용자 확정 문구·규율이 코드에 그대로 있는가 ── */
   const CDP = cdpSrc;
   ok('7n 요구 ⑥ 문구(초과/부족/일치) — 사용자가 확정한 문장 그대로',

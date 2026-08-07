@@ -152,6 +152,7 @@
       if (b > 0) { var v = Math.min(b, target - sum); out.push({ date: d, base: b, v: v }); sum += v; }
       d = addDays(d, 1);
     }
+    S.capAhead = sum;                                 // 못 채웠을 때 "얼마나 모자란지"를 말하는 재료
     return (sum >= target) ? out : null;
   }
 
@@ -162,16 +163,19 @@
    */
   function buildHorizon(mode) {
     var target = targetTotal();
-    if (target <= 0) return null;                       // 무제한·이미 충족 = 균형 개념 없음
+    S.balanceOff = null;
+    // ★★ 균형 모드를 못 켜는 이유는 **반드시 기록**한다 — 조용히 종전 화면으로 떨어지면
+    //   담당자는 "요구했던 균형 표가 왜 없는지"를 알 수 없다(코드리뷰 🟡2).
+    if (target <= 0) { S.balanceOff = totalFor() <= 0 ? 'unlimited' : 'full'; return null; }
     // ★★ 오늘 하한(확정·진행 인원)이 배분해야 할 인원보다 크면 **어떤 배치도 합계를 맞출 수 없다**
     //   (총량 초과 확정·소진 직전 홀드에서 도달). 그대로 켜면 균형 바가 영원히 "초과 — 저장불가"
     //   이고 [자동 맞춤]은 하한에 막혀 아무 일도 안 하는 죽은 버튼이 된다 → 균형 모드를 끈다.
-    if (minFor(baseDate()) > target) return null;
+    if (minFor(baseDate()) > target) { S.balanceOff = 'today_over'; return null; }
     // ★ 저장 판정의 기준값(서버 판정 오늘 정원)이 없으면 균형 모드를 켜지 않는다 —
     //   잘못된 기준으로 "손 안 댔다"를 판정하면 조용히 아무것도 저장하지 않는 화면이 된다.
-    if (S.data.todayNaturalQuota == null) return null;
+    if (S.data.todayNaturalQuota == null) { S.balanceOff = 'no_baseline'; return null; }
     var wd = walkDays(target);
-    if (!wd) return null;                               // 400일 안에 못 채움(계획이 전부 0 등)
+    if (!wd) { S.balanceOff = 'no_room'; return null; }  // 앞으로 열 자리가 배분해야 할 인원보다 적다
     var carry = (mode === 'extend') ? 0 : (carryAmt() || 0);
     // ★ 나눌 대상 = 이월 없이도 **온전히** 채워지는 진행일(마지막 부분일 제외) — 부분일까지 세면
     //   그 몫이 총량 맞추기에서 잘려 "이월 30명인데 29명만 얹혔다"가 된다(시안 실측).
@@ -180,7 +184,7 @@
     var rem = (mode === 'spread') ? (carry % slots) : 0;
     var dates = [], plan = {}, cmap = {}, sum = 0, d = baseDate(), guard = 0, left = carry, si = 0;
     while (sum < target && guard++ < 400) {
-      if (dates.length >= MAX_ROWS) return null;        // 너무 길다 = 균형 모드 불가
+      if (dates.length >= MAX_ROWS) { S.balanceOff = 'too_long'; return null; }   // 너무 길다
       var base = effBase(d);
       if (base > 0) {
         var add = 0;
@@ -197,7 +201,7 @@
       }
       d = addDays(d, 1);
     }
-    if (sum < target) return null;
+    if (sum < target) { S.balanceOff = 'no_room'; return null; }
     return { dates: dates, plan: plan, carry: cmap };
   }
 
@@ -697,6 +701,20 @@
       + '</div></div>';
 
     /* ── ② 이월 보충 투입 방식(요구 ④) — 종료일 고정(얹기) vs 종료일 연장(안 얹기) ── */
+    // ★ 균형 모드가 꺼졌으면 **왜인지와 다음 행동**을 말한다(조용한 기능 소실 금지 — 코드리뷰 🟡2)
+    var offNote = '';
+    if (!bal && S.balanceOff && S.balanceOff !== 'unlimited' && S.balanceOff !== 'full') {
+      var offMsg = {
+        today_over: '오늘 이미 확정·진행 중인 인원이 남은 배분수보다 많아 배분 표를 만들 수 없습니다 — 총량(차수)을 늘리거나 오늘이 지난 뒤 다시 조절해주세요.',
+        no_baseline: '오늘 기준 정원을 서버에서 받지 못해 배분 표를 만들 수 없습니다 — 잠시 후 다시 열어주세요(아래 날짜별 조절은 그대로 씁니다).',
+        // ★ `target` 은 아래에서 var 선언되므로 여기서는 undefined 다(호이스팅) — 함수를 직접 부른다
+        no_room: '앞으로 열 수 있는 자리(<b>' + (S.capAhead || 0) + '명</b>)가 배분해야 할 인원(<b>' + targetTotal() + '명</b>)보다 적어 배분 표를 만들 수 없습니다'
+          + (j.scheduleDriven === true ? ' — <b>시트에 진행 날짜를 더 넣거나</b> 아래에서 어느 날의 인원을 늘려주세요.' : ' — 아래에서 어느 날의 인원을 늘려주세요.'),
+        too_long: '남은 기간이 ' + MAX_ROWS + '일을 넘어 배분 표를 만들 수 없습니다 — 아래에서 날짜별로 조절해주세요.',
+      }[S.balanceOff];
+      if (offMsg) offNote = '<div class="cdp-note warn">⚠ ' + offMsg + '</div>';
+    }
+
     var carryBlk = '';
     if (bal && carry !== null && carry > 0) {
       var placed = carryPlaced(), cds = carryDays(), where = '';
@@ -708,6 +726,15 @@
           + _esc(lastD ? fmtMD(lastD) : '-') + '</b>에 <b>' + (lastD ? planFor(lastD) : 0) + '명</b> 늘어납니다.';
       } else if (!cds.length) {
         where = '이월 <b>' + carry + '명</b>이 지금 어느 날에도 얹혀 있지 않습니다 — [자동 맞춤]으로 배치하세요.';
+      } else if (cds.length === 1 && cds[0] === j.today && planFor(cds[0]) > Number(j.todayNaturalQuota || 0)) {
+        // ★ 서버 자동 이월은 하루 상한(066 CARRY_CAP_MULT)에서 잘리는데, 명시 계획으로 저장하면
+        //   095 규율상 그 값이 그날의 전부라 **상한을 넘겨 열린다**. 막지는 않되(사용자가 고른
+        //   방식) 그 사실과 대안을 말한다 — 066 이 막으려던 것이 바로 이 하루 버스트다.
+        where = '이월 <b>' + placed + '명</b>이 <b>' + _esc(fmtMD(cds[0])) + '</b> 정원에 얹혀 있습니다 — 기본 '
+          + baseFor(cds[0]) + ' → <b>' + planFor(cds[0]) + '명</b>.'
+          + '<br>⚠ 자동 이월이었다면 오늘은 <b>' + Number(j.todayNaturalQuota || 0) + '명</b>까지만 열립니다 — '
+          + '이 방식은 그 상한을 넘겨 하루에 <b>' + planFor(cds[0]) + '명</b>을 엽니다. '
+          + '부담되면 <b>[남은 날에 나눠 담기]</b>를 고르세요.';
       } else if (cds.length === 1) {
         where = '이월 <b>' + placed + '명</b>이 <b>' + _esc(fmtMD(cds[0])) + '</b> 정원에 얹혀 있습니다 — 기본 '
           + baseFor(cds[0]) + ' → <b>' + planFor(cds[0]) + '명</b>.';
@@ -797,6 +824,7 @@
       (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
       + schNote
       + statBlk
+      + offNote
       + carryBlk
       + heldBlk
       // ★ 코드리뷰 M1: 총원 충족 시 closed 가 영속되어 있어 차수를 추가해도 게시를 켜기 전에는
