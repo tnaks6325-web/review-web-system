@@ -553,7 +553,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     + '\nfunction minFor(d){ return d === S.data.today ? (S.data.todayUsed || 0) : 0; }'
     + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
     + ' autoFit, maxFor, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
-    + ' payload, naturalFor, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY };',
+    + ' payload, naturalFor, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY,'
+    + ' holidayName, dayKind, fmtMD, FIXED_HOLIDAYS, LUNAR_HOLIDAYS };',
     sandbox);
   const A = sandbox.api;
 
@@ -784,8 +785,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   {
     const pl = A.payload();
     eq('★ 기본값과 같은 저장분도 해제하지 않는다', pl.remove.length, 0);
-    ok('★ 그 날은 set 으로 고정된다',
-      pl.set.some((x) => x.date === '2026-08-12' && x.count === 40), pl.set);
+    // ★ 이미 같은 값으로 고정돼 있으면 다시 보내지도 않는다 — 안 걸러내면 저장 직후에도
+    //   [확정 저장]이 계속 열려 있어 "저장이 안 됐나?"로 오독된다.
+    ok('★ 이미 같은 값으로 저장된 날은 다시 보내지 않는다',
+      !pl.set.some((x) => x.date === '2026-08-12'), pl.set);
+    ok('★ 아직 고정 안 된 날은 보낸다', pl.set.some((x) => x.date === '2026-08-13'), pl.set);
   }
   // 보류 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다(그리고 연장은 보낼 것이 없다)
   mkS({ data: { carryMode: 'hold', todayNaturalQuota: 40 } }); A.applyCarryMode('next');
@@ -983,6 +987,62 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /↩ 이월 \?/.test(CDP) && /carry === null/.test(CDP));
   ok('7z ★ 요구 ②③ — 현재 모집인원/총건수·예상 종료일이 조절 화면 위에 있다',
     /모집 현황 <em>' \+ done \+ '<\/em> \/ '/.test(CDP) && /예상 종료일 <b class="end">/.test(CDP));
+
+  /* ══ §8 표 머리 고정 + 목록만 스크롤 + 요일·공휴일 색 (사용자 확정 2026-08-07) ══ */
+  console.log('\n[8] 고정 헤더 · 목록 스크롤 · 요일/공휴일 색');
+  // ★ 위(안내·현황·이월 방식·균형 바·표 머리)는 고정, 스크롤은 날짜 목록부터
+  ok('8-1 본문은 스크롤하지 않고 내부에 고정/스크롤 두 영역을 둔다',
+    /\.cdp-bd\{[^}]*overflow:hidden[^}]*display:flex[^}]*flex-direction:column/.test(CDP)
+    && /\.cdp-fix\{/.test(CDP) && /\.cdp-sc\{[^}]*overflow-y:auto/.test(CDP));
+  ok('8-1 ★ flex 자식에 min-height:0 (없으면 스크롤이 안 생기고 내용만큼 늘어난다)',
+    /\.cdp-bd\{[^}]*min-height:0/.test(CDP) && /\.cdp-sc\{[^}]*min-height:0/.test(CDP));
+  ok('8-2 렌더가 두 영역을 실제로 만든다(표 머리는 고정 쪽, 목록부터 스크롤 쪽)', (() => {
+    const a = CDP.indexOf("'<div class=\"cdp-fix\">'");
+    const b = CDP.indexOf("'</div><div class=\"cdp-sc\">'");
+    const sub = CDP.indexOf('날짜별 모집 계획 — 게이지 드래그');
+    const rows = CDP.indexOf("'<div id=\"cdpRows\">'");
+    return a > 0 && b > a && sub > a && sub < b && rows > b;
+  })());
+  ok('8-3 ★ 조절해도 보던 자리를 지킨다(render 가 스크롤 컨테이너를 새로 만든다)',
+    /S\._scrollTop/.test(CDP) && /sc\.scrollTop = S\._scrollTop/.test(CDP)
+    && /sc\.addEventListener\('scroll'/.test(CDP));
+
+  // 요일·공휴일 — 순수함수 실행
+  eq('8-4 토요일 = 파랑', A.dayKind('2026-08-08'), 'sat');
+  eq('8-4 일요일 = 빨강', A.dayKind('2026-08-09'), 'hol');
+  eq('8-4 평일 = 색 없음', A.dayKind('2026-08-10'), '');
+  eq('8-4 ★ 공휴일(광복절)은 토요일이어도 빨강', A.dayKind('2026-08-15'), 'hol');
+  eq('8-4 공휴일 이름', A.holidayName('2026-08-15'), '광복절');
+  eq('8-4 ★ 음력 공휴일(추석)도 잡는다', A.holidayName('2026-09-25'), '추석');
+  eq('8-4 ★ 대체공휴일도 잡는다', A.holidayName('2026-03-02'), '삼일절 대체');
+  eq('8-4 잘못된 값은 조용히 빈 값', A.dayKind('not-a-date'), '');
+  // ★★ 표에 없는 연도는 **고정일만** — 음력 공휴일을 추측으로 칠하지 않는다(틀린 값 > 빈 값)
+  eq('8-5 ★ 표 밖 연도도 고정일은 잡는다', A.holidayName('2031-01-01'), '신정');
+  eq('8-5 ★★ 표 밖 연도의 음력 공휴일은 추측하지 않는다', A.holidayName('2031-02-11'), '');
+  ok('8-5 음력·대체는 연도별 확정값 표로만 둔다(계산식 금지)',
+    Object.keys(A.LUNAR_HOLIDAYS).every((k) => /^\d{4}-\d{2}-\d{2}$/.test(k))
+    && Object.keys(A.FIXED_HOLIDAYS).every((k) => /^\d{2}-\d{2}$/.test(k)));
+  ok('8-6 행 렌더가 날짜 칸에 색 클래스와 공휴일 이름을 붙인다',
+    /var dk = dayKind\(d\), hol = holidayName\(d\);/.test(CDP)
+    && /class="cdp-d' \+ \(dk \? ' ' \+ dk : ''\)/.test(CDP)
+    && /cdp-tag hol/.test(CDP));
+  ok('8-6 색은 리터럴(테마 없는 호스트에도 얹힌다)',
+    /\.cdp-d\.hol\{color:#dc2626/.test(CDP) && /\.cdp-d\.sat\{color:#2563eb/.test(CDP));
+
+  /* ══ §9 고른 이월 방식은 저장·재조회·재오픈에도 유지된다 (사용자 신고 2026-08-07) ══ */
+  console.log('\n[9] 이월 방식 유지 — 저장 후 게이지가 조절 전으로 되돌아가지 않는다');
+  // ★ applyOverview 는 저장 직후에도 다시 도는데 무조건 'next' 로 깔면 이월이 오늘에 다시 얹혀
+  //   **저장이 되돌아간 것처럼 보인다**(실제 저장값은 그대로 — 화면만 다른 방식으로 재제안).
+  ok('9-1 ★ 재조회 시 고른 방식을 그대로 쓴다(무조건 next 금지)',
+    /var want = S\.carryMode \|\| _loadMode\(\) \|\| 'next';/.test(CDP)
+    && /if \(!applyCarryMode\(want\) && want !== 'next'\) applyCarryMode\('next'\);/.test(CDP));
+  ok('9-1 옛 배선(무조건 next)이 남아 있지 않다', !/^\s*applyCarryMode\('next'\);$/m.test(CDP));
+  ok('9-2 방식을 고르면 기억한다(재오픈에도 유지)',
+    /_saveMode\(m\);/.test(CDP) && /MODE_KEY = 'cdp_carry_mode_'/.test(CDP));
+  ok('9-2 ★ 기억은 화면 상태일 뿐 — 실패해도 무시(사생활 보호 모드)',
+    /catch \(_\) \{ return null; \}/.test(CDP) && /catch \(_\) \{\}/.test(CDP));
+  ok('9-2 모르는 값은 쓰지 않는다(저장된 쓰레기 값 방어)',
+    /CARRY_MODES\.indexOf\(v\) >= 0 \? v : null/.test(CDP));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

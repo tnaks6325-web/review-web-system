@@ -61,6 +61,39 @@
     return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + ' (' + DOW[d.getUTCDay()] + ')';
   }
 
+  /* ── 법정공휴일(대한민국) ─────────────────────────────────────────
+     ★★ **양력 고정일만 계산으로 뽑고, 음력·대체공휴일은 표로 둔다** — 설·추석·부처님오신날은
+       음력이라 계산식으로 만들 수 없고, 대체공휴일은 해마다 정부가 확정한다. 추측으로 칠하면
+       "빨간 날이 아닌데 빨갛다"가 되어 배분 계획을 잘못 세우게 된다(틀린 값 > 빈 값).
+     ★ 표에 없는 연도는 **고정일만** 빨갛게 칠하고 음력 공휴일은 표시하지 않는다 —
+       "모르는 것을 아는 척하지 않는다"(연도가 넘어가면 아래 표에 한 줄 추가). */
+  var FIXED_HOLIDAYS = {                     // MM-DD → 이름 (매년 같은 날)
+    '01-01': '신정', '03-01': '삼일절', '05-05': '어린이날', '06-06': '현충일',
+    '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '성탄절',
+  };
+  var LUNAR_HOLIDAYS = {                     // 음력 기반 + 대체공휴일(연도별 확정값)
+    '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
+    '2026-03-02': '삼일절 대체', '2026-05-24': '부처님오신날', '2026-05-25': '부처님오신날 대체',
+    '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴',
+    '2027-02-05': '설날 연휴', '2027-02-06': '설날', '2027-02-07': '설날 연휴', '2027-02-08': '설날 대체',
+    '2027-05-13': '부처님오신날', '2027-06-07': '현충일 대체', '2027-08-16': '광복절 대체',
+    '2027-09-14': '추석 연휴', '2027-09-15': '추석', '2027-09-16': '추석 연휴',
+    '2027-10-04': '개천절 대체', '2027-10-11': '한글날 대체', '2027-12-27': '성탄절 대체',
+  };
+  /** 그날의 공휴일 이름 — 없으면 '' */
+  function holidayName(iso) {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+    return LUNAR_HOLIDAYS[iso] || FIXED_HOLIDAYS[iso.slice(5)] || '';
+  }
+  /** 날짜 색 구분 — 'hol'(공휴일·일요일 = 빨강) | 'sat'(토요일 = 파랑) | '' */
+  function dayKind(iso) {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+    var w = new Date(Date.parse(iso + 'T00:00:00Z')).getUTCDay();
+    if (w === 0 || holidayName(iso)) return 'hol';
+    if (w === 6) return 'sat';
+    return '';
+  }
+
   /** 시트 일정 공고의 그날 시트 계획(구매일자 행 수) — 없는 날 = 0(그날은 진행일이 아님). */
   function sheetFor(d) {
     if (!S.data._schMap) {
@@ -356,7 +389,14 @@
     + '#cdpModal .cdp-box{background:var(--card,#fff);color:var(--t1,#1f2937);width:min(680px,94vw);max-height:92vh;display:flex;flex-direction:column;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.28);overflow:hidden}'
     + '#cdpModal .cdp-hd{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--border,#e5e7eb);background:var(--bg2,#f9fafb);font-weight:800;font-size:.85rem}'
     + '#cdpModal .cdp-x{margin-left:auto;border:0;background:none;font-size:1.05rem;cursor:pointer;color:var(--t3,#9ca3af)}'
-    + '#cdpModal .cdp-bd{padding:14px 18px;overflow:auto;font-size:.8rem}'
+    /* ★★ 위(안내·현황·이월 방식·균형 바·표 머리)는 **고정**, 스크롤은 날짜 목록부터
+         (사용자 확정 2026-08-07 — "행고정하듯이"). 그래서 본문 자체는 스크롤하지 않고
+         내부에 고정 영역(.cdp-fix)과 스크롤 영역(.cdp-sc) 둘을 둔다.
+       ★ flex 자식은 기본 `min-height:auto` 라 **`min-height:0` 이 없으면 스크롤이 안 생기고**
+         내용만큼 늘어난다(업체관리 도구줄 sticky 가 죽었던 것과 같은 함정). */
+    + '#cdpModal .cdp-bd{padding:0;overflow:hidden;font-size:.8rem;flex:1;min-height:0;display:flex;flex-direction:column}'
+    + '#cdpModal .cdp-fix{padding:14px 18px 0;flex:0 0 auto}'
+    + '#cdpModal .cdp-sc{padding:0 18px 14px;overflow-y:auto;flex:1 1 auto;min-height:0}'
     + '#cdpModal .cdp-sub{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:8px;font-size:.72rem;color:var(--t3,#6b7280)}'
     + '#cdpModal .cdp-sub b{color:#1b64da}'
     + '#cdpModal .cdp-note{background:var(--bg2,#f9fafb);border:1px solid var(--border,#e5e7eb);border-left:4px solid #94a3b8;border-radius:8px;padding:8px 12px;font-size:.72rem;margin:8px 0;color:var(--t2,#475569)}'
@@ -410,6 +450,10 @@
     + '#cdpModal .cdp-tag.tdy{color:#1d4ed8;background:#dbeafe}'
     + '#cdpModal .cdp-tag.adj{color:#92400e;background:#fef3c7}'
     + '#cdpModal .cdp-tag.rst{color:#7c8698;background:#eef1f7}'
+    // 공휴일·일요일 = 빨강 / 토요일 = 파랑(달력 관용) — 색은 리터럴(테마 없는 호스트에도 얹힌다)
+    + '#cdpModal .cdp-d.hol{color:#dc2626;font-weight:800}'
+    + '#cdpModal .cdp-d.sat{color:#2563eb;font-weight:800}'
+    + '#cdpModal .cdp-tag.hol{color:#b91c1c;background:#fee2e2;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '#cdpModal .cdp-g{position:relative;height:24px;border-radius:12px;background:var(--bg2,#f1f5f9);cursor:ew-resize;user-select:none;touch-action:none}'
     + '#cdpModal .cdp-g .f{position:absolute;left:0;top:0;bottom:0;border-radius:12px;background:linear-gradient(90deg,#60a5fa,#3b82f6)}'
     // 이월분은 같은 막대 안에서 주황으로 이어 붙여 "여기에 이월이 얹혔다"를 눈으로 보여준다
@@ -527,6 +571,19 @@
     S = null;
   }
 
+  /* 고른 이월 방식 기억 — **화면 상태일 뿐**(서버 저장값은 날짜별 계획이다).
+     ★ 실패는 조용히 무시한다(사생활 보호 모드에서 sessionStorage 접근이 막힌다). */
+  var MODE_KEY = 'cdp_carry_mode_';
+  function _loadMode() {
+    try {
+      var v = window.sessionStorage.getItem(MODE_KEY + S.campId);
+      return CARRY_MODES.indexOf(v) >= 0 ? v : null;
+    } catch (_) { return null; }
+  }
+  function _saveMode(m) {
+    try { window.sessionStorage.setItem(MODE_KEY + S.campId, m); } catch (_) {}
+  }
+
   function applyOverview(j) {
     S.data = j;
     S.title = j.title || '';
@@ -540,7 +597,13 @@
     S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null; S.outside = null;
     // ★ 기본 보충 방식 = "다음날(첫 진행일) 정원에 더하기"(사용자 확정) — 펼치지 못하면(총량 무제한·
     //   구간이 저장 상한 초과 등) 균형 모드를 끄고 종전 동작(14일 성긴 표)으로 둔다.
-    applyCarryMode('next');
+    // ★★ **고른 방식은 저장·재조회·재오픈에도 유지한다**(사용자 신고 2026-08-07 — "종료일 뒤에
+    //   붙이기로 저장이 됐는데 게이지가 조절 전으로 되돌아간다"). 저장하면 이 함수가 다시 도는데
+    //   무조건 'next' 로 깔면 이월이 오늘에 다시 얹힌 배치가 그려져 **저장이 되돌아간 것처럼 보인다**
+    //   (실제 저장값은 그대로다 — 화면만 다른 방식으로 다시 제안한 것). 기억은 화면 상태일 뿐이라
+    //   sessionStorage 에 담고, 실패해도 무시한다(사생활 보호 모드 등).
+    var want = S.carryMode || _loadMode() || 'next';
+    if (!applyCarryMode(want) && want !== 'next') applyCarryMode('next');
     document.getElementById('cdpTitle').textContent = '모집인원 조절 — ' + (S.title || S.campId);
     render();
   }
@@ -588,6 +651,10 @@
       // ★ **시스템이 깐 값 그대로일 때만** 건너뛴다 — 그냥 `v === residual` 로 두면 균형이 맞은
       //   상태의 마지막 날은 항상 residual 이라 **사람이 의도적으로 줄인 마지막 날이 조용히 누락**된다.
       if (v < nat && v === residual && S.base[d] == null && S.modePlan && v === S.modePlan[d]) return;
+      // ★ 고정 모드라도 **이미 같은 값으로 저장돼 있는 날은 보내지 않는다** — 그 날은 이미 명시
+      //   계획이라 자동 이월이 얹히지 않는다. 안 걸러내면 저장 직후에도 [확정 저장]이 계속 열려
+      //   있어 "저장이 안 됐나?"로 오독된다.
+      if (pinAll && S.base[d] === v) return;
       if (!pinAll && v === nat) return;                      // 손대지 않은 값 = 보낼 필요 없음
       // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀).
       // ★ 단 pinAll(이월 억제)일 때는 해제하면 안 된다 — 해제 = 자동 이월 복귀 = 고른 방식 무효.
@@ -664,8 +731,12 @@
       }
       var rowLabel = parts.join(' ');
       var rowLabelPlain = rowLabel.replace(/<[^>]*>/g, '');
+      // ★ 공휴일·일요일 = 빨강 / 토요일 = 파랑 — 배분을 짤 때 쉬는 날이 한눈에 보여야 한다.
+      //   공휴일 이름은 title 로만(줄이 길어지면 게이지가 밀린다).
+      var dk = dayKind(d), hol = holidayName(d);
       return '<div class="cdp-row' + (isToday ? ' today' : '') + (cy > 0 ? ' hascarry' : '') + (rest ? ' zero' : '') + '">'
-        + '<span class="cdp-d">' + _esc(fmtMD(d))
+        + '<span class="cdp-d' + (dk ? ' ' + dk : '') + '"' + (hol ? ' title="' + _esc(hol) + '"' : '') + '>' + _esc(fmtMD(d))
+        + (hol ? '<span class="cdp-tag hol">' + _esc(hol) + '</span>' : '')
         + (isToday ? '<span class="cdp-tag tdy">오늘</span>' : '')
         + (rest ? '<span class="cdp-tag rst">휴무</span>' : '')
         + (adjusted ? '<span class="cdp-tag adj">조절</span>' : '') + '</span>'
@@ -847,8 +918,10 @@
         + '</div></div>';
     }
 
+    // ★ 고정 영역(.cdp-fix) = 안내·현황·이월 방식·균형 바·표 머리 / 스크롤(.cdp-sc) = 날짜 목록부터
     bd.innerHTML =
-      (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
+      '<div class="cdp-fix">'
+      + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
       + schNote
       + statBlk
       + offNote
@@ -870,6 +943,7 @@
       + (bal ? ' · 한 날 최대 <b>' + target + '명</b>' : ' · 총량 <b>' + (tot > 0 ? tot + '명' : '무제한') + '</b>'
         + (j.scheduleDriven === true ? '<small>(시트 행 수)</small>' : ''))
       + ' · 확정 <b>' + done + '명</b></span></div>'
+      + '</div><div class="cdp-sc">'
       + '<div id="cdpRows">' + rows + '</div>'
       + '<div class="cdp-end"><span>예상 종료일: <b>' + _esc(endTxt) + '</b> '
       + (endTxt !== S.baseEnd ? '<span class="chg">(원래 ' + _esc(S.baseEnd) + ' → 변경됨)</span>' : '') + '</span>'
@@ -893,7 +967,18 @@
       + '<button type="button" class="cdp-btn pri" onclick="CampaignDailyPlan._roundAdd()">추가</button></div>'
       + (j.roundsDrift ? '<div class="cdp-note warn">⚠ 총모집(' + (j.recruitTotal || 0) + ')이 차수 합계(' + (j.roundsTotal || 0) + ')와 다릅니다 — 다른 창구에서 총모집이 바뀐 흔적입니다. 차수를 추가/제거하면 합계로 다시 맞춰집니다.</div>' : '')
       + '</div>'
-      + histHtml();
+      + histHtml()
+      + '</div>';   // .cdp-sc 닫기
+
+    // ★★ 스크롤 위치 복원 — render 가 본문을 통째로 갈아치우므로 스크롤 컨테이너도 새로 만들어진다.
+    //   복원하지 않으면 −/＋ 한 번에 목록이 맨 위로 튀어 **조절하던 줄을 놓친다**(종전에는 본문
+    //   자체가 스크롤 컨테이너라 이 문제가 없었다).
+    var sc = bd.querySelector('.cdp-sc');
+    if (sc && S._scrollTop) sc.scrollTop = S._scrollTop;
+    if (sc && !sc._bound) {
+      sc._bound = true;
+      sc.addEventListener('scroll', function () { S._scrollTop = sc.scrollTop; });
+    }
 
     bindRowEvents();
     var dirty = dirtyDates().length;
@@ -1081,6 +1166,7 @@
     if (!S || !S.data || !balanceOn() || CARRY_MODES.indexOf(m) < 0) return;
     if (S.data.planEnabled === false || m === S.carryMode) return;
     if (!applyCarryMode(m)) { toast('이 방식으로는 구간을 펼치지 못했습니다'); return; }
+    _saveMode(m);        // 저장·재조회·재오픈에도 고른 방식이 유지되게(화면 상태만)
     var e = endDate();
     toast(m === 'next' ? '이월을 다음 진행일에 얹었습니다 — 종료일 ' + (e ? fmtMD(e) : '-')
       : m === 'spread' ? '이월을 진행일에 나눠 담았습니다 — 종료일 ' + (e ? fmtMD(e) : '-')
