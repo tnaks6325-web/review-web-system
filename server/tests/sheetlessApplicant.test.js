@@ -119,6 +119,13 @@ function stubDeps({ sheetless = true, scopeThrows = false, slotThrows = false, l
       applicant: { name: '홍길동', phone: '01012345678', inad: '길동이' } });
     ok('무시트 탭이면 handled=true', r.handled === true);
     ok('★ 다음 자리 = 표의 마지막 seq + 1(삭제된 줄도 세어 재사용 금지)', r.seq === 13);
+    /* ★ 스텁은 SQL 을 해석하지 않아 MAX(seq) ↔ COUNT(*) 를 구별 못 한다(변이시험이 잡았다)
+     *   → 쿼리 모양 자체를 고정한다. COUNT(*) 로 되돌리면 삭제된 줄이 빠져 seq 가 재사용되고
+     *     (sheet,tab,seq) 키가 옛 줄과 충돌한다. */
+    const seqQ = log.find(q => /FROM campaign_participants/.test(q.sql));
+    ok('★★ 다음 자리 쿼리는 MAX(seq) 기준 — COUNT(*) 금지',
+      /COALESCE\(MAX\(seq\)/.test(seqQ.sql) && !/COUNT\(\*\)/.test(seqQ.sql));
+    ok('★ deleted_at 필터 없음 — 지운 줄의 번호도 다시 쓰지 않는다', !/deleted_at/.test(seqQ.sql));
 
     const call = d.slotCalls[0];
     ok('★ 작업표 INSERT 는 createSlotsFromSheetRows 한 곳(쓰기 소유자)', d.slotCalls.length === 1);
