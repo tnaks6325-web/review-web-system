@@ -252,6 +252,8 @@ table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
         <tr><td class="k">3</td><td>순서 바꾸기</td><td class="ok">포함</td><td>썸네일 왼쪽 <b>⠿ 손잡이</b>를 잡고 드래그. 오른쪽에 놓으면 그 뒤로</td></tr>
         <tr><td class="k">4</td><td>장수 상한</td><td class="ok">칸당 4장</td><td>4장이 되면 [＋]가 사라진다. <b>이미 4장을 넘겨 들어온 공고는 자르지 않는다</b>(§5)</td></tr>
         <tr><td class="k">5</td><td>적용 칸</td><td class="ok">3칸 모두</td><td>유입가이드 · 리뷰가이드 · 특이사항. <b>리뷰어 화면 렌더러 변경이 함께 필요</b>(§4·§6)</td></tr>
+        <tr><td class="k">6</td><td>칸 높이</td><td class="ok">세 칸 모두 유입가이드와 동일</td>
+            <td>입력창 <b>82px(3줄)</b>로 통일 — 지금은 리뷰가이드·특이사항이 2줄(62px)이라 오른쪽 썸네일 크기가 줄마다 달랐다</td></tr>
       </tbody>
     </table>
   </section>
@@ -289,6 +291,8 @@ table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
     <div class="note cool" style="margin-top:12px">
       <div class="nt">이 화면이 지키는 규칙</div>
       <ul>
+        <li><b>세 칸의 높이가 같다</b> — 입력창·스트립 모두 <b>82px</b>. 그래서 썸네일 크기와 [＋] 위치가 세 줄에서 정확히 같은 자리에 온다
+            (칸마다 높이가 다르면 눈이 줄마다 자리를 다시 찾는다). 리뷰가이드·특이사항은 지금 2줄이라 <b>3줄로 맞춘다</b>.</li>
         <li><b>줄 높이 불변</b> — 첨부가 0장이든 4장이든 그 줄의 높이는 입력창 높이 그대로. 아래 칸이 밀리지 않는다.</li>
         <li><b>비어 있어도 칸을 숨기지 않는다</b> — 같은 자리가 곧 넣는 자리("끌어다 놓기 · Ctrl+V · 클릭").</li>
         <li><b>드래그 두 종류를 구분한다</b> — 바깥에서 온 <b>파일 드래그</b>만 업로드로 받고, 안에서 끄는 <b>순서 변경</b>은 업로드로 오인하지 않는다(드래그 데이터 종류로 판정).</li>
@@ -478,6 +482,7 @@ table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
       <tbody>
         <tr><td class="k">recruit-modal.js<br><span style="font-weight:400;color:var(--faint)">모달 마크업·CSS</span></td>
             <td>세 칸을 <code>.ig-wrap</code>(입력창 + 스트립)으로 감싼다.
+              <b>리뷰가이드·특이사항의 <code>rows="2"</code> → <code>rows="3"</code></b>(세 칸 높이 통일 — 확정 ⑥).
               CSS는 <code>#recruitModal</code>·<code>.rf-*</code> 스코프 유지 + <code>var()</code> 폴백(테마 없는 호스트에서도 같은 모양).
               <b><code>rf_wd_inflow</code>·<code>rf_wd_review</code>·<code>rf_wd_notes</code> id는 그대로</b> — 프리필·저장·🧹정리 도우미가 이 id에 묶여 있다.</td></tr>
         <tr><td class="k">index-recruit.js<br><span style="font-weight:400;color:var(--faint)">모달 동작</span></td>
@@ -669,11 +674,13 @@ table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
   function makeWidget(mount, field, opts) {
     opts = opts || {};
     var st = { imgs: [], msg: '', kind: '' };
-    var H = opts.rows === 2 ? 62 : 82;                 /* 스트립 높이 = 그 칸 입력창 높이 */
+    /* ★ 사용자 확정 2026-08-07: 세 칸(유입가이드·리뷰가이드·특이사항)의 높이를 유입가이드에 맞춰 통일.
+       입력창 높이 = 스트립 높이 = 82px(rows 3) — 칸마다 다르면 오른쪽 썸네일 크기가 줄마다 달라진다. */
+    var H = 82;
 
     mount.innerHTML =
       '<div class="ig-wrap">' +
-        '<div class="ig-ta"><textarea class="rfin" rows="' + (opts.rows || 3) + '" style="height:' + H + 'px;min-height:' + H + 'px"></textarea></div>' +
+        '<div class="ig-ta"><textarea class="rfin" rows="3" style="height:' + H + 'px;min-height:' + H + 'px"></textarea></div>' +
         '<div class="ig-strip" tabindex="0" style="height:' + H + 'px"></div>' +
       '</div>' +
       (opts.hint ? '<div class="rfhint">' + opts.hint + '</div>' : '') +
@@ -858,14 +865,14 @@ table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
   var mtI = document.getElementById('mtInflow');
   if (mtI) {
     makeWidget(mtI, 'inflow', {
-      rows: 3, init: 'two', text: '쿠팡 검색어 : 장수돌침대 전기매트',
+      init: 'two', text: '쿠팡 검색어 : 장수돌침대 전기매트',
       hint: '있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)'
     });
     makeWidget(document.getElementById('mtReview'), 'review', {
-      rows: 2, init: 'two', text: '전체 별점 5건\n- 배송이 빠르다'
+      init: 'two', text: '전체 별점 5건\n- 배송이 빠르다'
     });
     makeWidget(document.getElementById('mtNotes'), 'notes', {
-      rows: 2, init: 'two', text: '구매자 실수시 반품비 동의하시는 분만 진행\n택배받을 주소 폰번호 정확하게 입력해주세요!!'
+      init: 'two', text: '구매자 실수시 반품비 동의하시는 분만 진행\n택배받을 주소 폰번호 정확하게 입력해주세요!!'
     });
     Array.prototype.forEach.call(document.querySelectorAll('.demo-bar'), function (bar) {
       bar.addEventListener('click', function (e) {
