@@ -289,14 +289,17 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   eq('★ M1: 응답에 status 동봉(마감 영속 공고는 게시를 켜야 재개 — 화면 고지 재료)', r1.status, 'active');
   ok('초도(1차) 시드 INSERT', CALLS.some(c => c.sql.includes('INSERT INTO campaign_rounds') && c.sql.includes("'초도'")));
   ok('recruit_total UPDATE 실행', CALLS.some(c => c.sql.includes('SET recruit_total')));
-  // 4h. 차수 제거 하한(확정 이하로 총량 못 내림)
+  // 4h. 차수 제거 하한(확정+유효홀드 이하로 총량 못 내림 — Codex P1: 홀드는 정원 재검사 없이 확정된다)
   STUB = baseStub();
   STUB['FROM campaign_rounds'] = [
     { round_no: 1, slot_count: 200 }, { round_no: 2, slot_count: 100 },
   ];
-  STUB['FROM campaign_applications'] = [{ n: 250, today_submitted: 0, today_holds: 0 }];
+  STUB['FROM campaign_applications'] = [{ submitted: 250, holds: 0, today_submitted: 0, today_holds: 0 }];
   await assert.rejects(P.removeLastRound('c1', 't'), (e) => e.code === 'below_confirmed');
   ok('★ 확정(250) 아래로 차수 제거 거부(below_confirmed)', true);
+  STUB['FROM campaign_applications'] = [{ submitted: 150, holds: 60, today_submitted: 0, today_holds: 0 }];
+  await assert.rejects(P.removeLastRound('c1', 't'), (e) => e.code === 'below_confirmed');
+  ok('★ 유효 홀드 포함 하한(150+60 > 200) — 홀드는 confirmHoldInTx 가 정원 재검사 없이 확정', true);
   // 4i. 초도만 있으면 제거 불가
   STUB = baseStub();
   STUB['FROM campaign_rounds'] = [{ round_no: 1, slot_count: 200 }];
@@ -355,6 +358,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     (rt.match(/roundsLockRecruitTotal/g) || []).length >= 2 && /_rtEff = null/.test(rt));
   ok('★ M2: 무시했음을 응답이 말한다(recruitTotalLocked — 조용한 누락 금지)',
     /recruitTotalLocked: true/.test(rt) && /recruitTotalLocked/.test(readF('js/index-recruit.js')));
+  ok('★ Codex P1: 잠금 검사↔UPDATE 경합 자가치유(repair — PUT·스코프 편집 양쪽)',
+    (rt.match(/repairRecruitTotalFromRounds/g) || []).length >= 2
+    && /IS DISTINCT FROM s\.total/.test(readS('services/campaignPlan.service.js')));
   ok('★ m4: 조절값 판정 단일 출처(planOverrideFor — dailyQuota·표시 공용)',
     /function planOverrideFor/.test(st) && /planOverrideFor\(counts\.plans \|\| null, todayStr\)/.test(st)
     && /const ov = planOverrideFor\(plans, todayStr\)/.test(st));
@@ -382,6 +388,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ m1: 모달 닫은 뒤 디바운스 타이머 가드(if (!S || !S.data) return)',
     /function settle\(d\) \{\s*\n\s*if \(!S \|\| !S\.data\) return;/.test(modal));
   ok('★ m6: 분산 일수 상한(서버 120일 상한 선반영)', /untilN > 110/.test(modal));
+  ok('★ Codex P2: 투영·행 기준일 = max(오늘, 시작일) — 오픈 전 날짜 소진 오표시 차단',
+    /function baseDate\(\)/.test(modal) && /sd > S\.data\.today\) \? sd : S\.data\.today/.test(modal));
   ok('admin.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('admin.html')));
   ok('workdesk.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('workdesk.html')));
 

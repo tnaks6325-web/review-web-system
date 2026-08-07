@@ -297,11 +297,15 @@ async function removeLastRound(campaignId, actor) {
     if (rRows.length < 2) { const e = new Error('제거할 추가 차수가 없습니다(초도는 제거할 수 없습니다).'); e.code = 'no_round'; throw e; }
     const last = rRows[rRows.length - 1];
     const newTotal = rRows.slice(0, -1).reduce((s, r) => s + (Number(r.slot_count) || 0), 0);
+    // ★ 유효 홀드도 사용량이다(Codex P1): 홀드는 confirmHoldInTx 가 정원 재검사 없이 submitted 로
+    //   전환되므로, 확정만 세면 "제거 후 총량 < 확정+홀드"가 허용되어 총량 초과가 생긴다.
     const { rows: subQ } = await client.query(
-      `SELECT COUNT(*) AS n FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`, [campaignId]);
-    const confirmed = Number(subQ[0] && subQ[0].n) || 0;
-    if (newTotal < confirmed) {
-      const e = new Error(`이미 ${confirmed}명이 확정되어 ${last.round_no}차를 제거할 수 없습니다(제거 후 총량 ${newTotal}).`);
+      `SELECT COUNT(*) FILTER (WHERE status = 'submitted')                                  AS submitted,
+              COUNT(*) FILTER (WHERE status = 'applied' AND expires_at > NOW())              AS holds
+         FROM campaign_applications WHERE campaign_id = $1`, [campaignId]);
+    const used = (Number(subQ[0] && subQ[0].submitted) || 0) + (Number(subQ[0] && subQ[0].holds) || 0);
+    if (newTotal < used) {
+      const e = new Error(`이미 ${used}명이 확정·진행 중이라 ${last.round_no}차를 제거할 수 없습니다(제거 후 총량 ${newTotal}).`);
       e.code = 'below_confirmed'; throw e;
     }
     await client.query('DELETE FROM campaign_rounds WHERE campaign_id = $1 AND round_no = $2', [campaignId, last.round_no]);
@@ -329,6 +333,26 @@ async function roundsLockRecruitTotal(campaignId) {
     const { rows } = await pool.query('SELECT 1 FROM campaign_rounds WHERE campaign_id = $1 LIMIT 1', [campaignId]);
     return rows.length > 0;
   } catch (_) { return false; }
+}
+
+/**
+ * 총모집 자가치유(Codex P1 — 잠금 검사↔UPDATE 사이 경합 봉합): 수정 저장이 "차수 없음"을 보고
+ * recruit_total 을 썼는데 그 사이 첫 차수가 생겼으면, 차수 합계로 되돌린다. addRound 는 캠페인
+ * 행 FOR UPDATE 안에서 합계를 쓰므로 이 보정과 어느 순서로 겹쳐도 같은 값(합계)으로 수렴한다.
+ * ★ fail-soft: 실패 = 무보정(치유는 부가 방어 — 저장 자체를 죽이면 안 된다).
+ * @returns 보정했으면 새 총량, 아니면 null
+ */
+async function repairRecruitTotalFromRounds(campaignId) {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE recruit_campaigns c
+          SET recruit_total = s.total, updated_at = NOW()
+         FROM (SELECT COALESCE(SUM(slot_count), 0)::int AS total, COUNT(*) AS n
+                 FROM campaign_rounds WHERE campaign_id = $1) s
+        WHERE c.id = $1 AND s.n > 0 AND c.recruit_total IS DISTINCT FROM s.total
+        RETURNING s.total`, [campaignId]);
+    return rows.length ? Number(rows[0].total) : null;
+  } catch (_) { return null; }
 }
 
 /**

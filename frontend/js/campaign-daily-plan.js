@@ -64,14 +64,20 @@
   function planFor(d) {
     return (S.plan[d] != null) ? S.plan[d] : (S.data.defaultDaily || 0);
   }
-  /** 예상 종료일: 오늘부터 계획값대로 채운다고 가정(최대 400일 탐색). 무제한이면 null */
+  /** 조절·투영의 기준일 — 시작일이 미래면 그날부터(Codex P2: 오픈 전 날짜를 소진하는 것처럼
+   *  계산하면 예상 종료일이 앞당겨 보이고, 분산이 오픈 전 날짜에 계획을 얹는다). */
+  function baseDate() {
+    var sd = S.data.startDate;
+    return (sd && sd > S.data.today) ? sd : S.data.today;
+  }
+  /** 예상 종료일: 기준일부터 계획값대로 채운다고 가정(최대 400일 탐색). 무제한이면 null */
   function endDate() {
     var total = S.data.recruitTotal || 0;
     if (total <= 0) return null;
     var todaySub = S.data.byDateSubmitted[S.data.today] || 0;
     var remain = total - Math.max(0, (S.data.submittedAll || 0) - todaySub);
     if (remain <= 0) return S.data.today;
-    var d = S.data.today;
+    var d = baseDate();
     for (var i = 0; i < 400; i++) {
       remain -= planFor(d);
       if (remain <= 0) return d;
@@ -226,8 +232,9 @@
   /* ── 렌더 ───────────────────────────────────────────────── */
   function rowDates() {
     var ds = {};
-    for (var i = 0; i < ROW_DAYS; i++) ds[addDays(S.data.today, i)] = 1;
-    Object.keys(S.plan).forEach(function (d) { if (d >= S.data.today) ds[d] = 1; });
+    var base = baseDate();   // 오픈 전 캠페인은 시작일부터 — 오픈 전 날짜 조절은 무의미(런타임 preopen)
+    for (var i = 0; i < ROW_DAYS; i++) ds[addDays(base, i)] = 1;
+    Object.keys(S.plan).forEach(function (d) { if (d >= base) ds[d] = 1; });
     return Object.keys(ds).sort();
   }
 
