@@ -137,7 +137,7 @@ async function run() {
   ok('★ body.advm 상한(1680px)이 존재한다', iAdv > -1);
   ok('★ 선언 순서: data-vw 뒤(광고주 고정이 이김) · widemode 앞(전체화면은 해제)', iQhd > -1 && iWide > -1 && iQhd < iAdv && iAdv < iWide);
   ok('renderShell 이 광고주일 때 body.advm 을 붙인다', /classList\.toggle\('advm',\s*isAdv\)/.test(src));
-  ok('renderLogin 이 advm 잔재를 제거한다(로그아웃·만료 후 원복)', /renderLogin[\s\S]{0,300}classList\.remove\('advm'\)/.test(src));
+  ok('renderLogin 이 advm 잔재를 제거한다(로그아웃·만료 후 원복)', /renderLogin[\s\S]{0,300}classList\.remove\('advm'/.test(src));
   ok('★ FHD/QHD 토글은 광고주에게 안 그린다', /\$\{isAdv\?'':`<div class="vwsw"/.test(src));
 
   // ── 작업 선택 = 좌측 세로 목록(업체관리 차용) ──
@@ -150,13 +150,14 @@ async function run() {
 
   // ── 화면 A: 내 작업 목록 표 ──
   ok('화면 A 컬럼: 시작일·진행상황·견적서·계산서·총비용·입금액·입금일·남은 입금액',
-    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>참여·제출·입금<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
+    /<span>시작일<\/span><span>작업명<\/span><span>진행상황<\/span><span>참여·제출·입금<\/span><span>자료 폴더<\/span><span>견적서<\/span><span>계산서<\/span><span>총비용<\/span><span>입금액<\/span><span>입금일<\/span><span>남은 입금액<\/span>/.test(src));
   ok('남은 입금액 = 총비용 − 입금액 파생(0원 = 완납 표시)', /Math\.max\(tc-\(pa\|\|0\),0\)/.test(src) && src.includes("'0 ✓'"));
   ok('화면 A 컨테이너 폭 상한(1380px)', /#advHome\{max-width:1380px\}/.test(css));
 
   // ── 화면 B: 상세 캡 + 정산 카드 상시 펼침 + 내부 용어 미노출 ──
   ok('★ 헤더·요약 스트립·정산 카드가 본문 폭과 같은 값으로 캡(광고주 화면만)',
-    /body\.advm \.main \.mh,body\.advm \.stripA,body\.advm \.setldetail,body\.advm \.wobar,body\.advm \.wodetail\{max-width:1380px\}/.test(css));
+    // 상단 요약이 8칸 스트립(.stripA) → 3분할 카드(.tp3grid, 시안 B)로 바뀌며 캡 대상도 함께 옮겼다(검사 의미 불변)
+    /body\.advm \.main \.mh,body\.advm \.tp3grid,body\.advm \.setldetail,body\.advm \.wobar,body\.advm \.wodetail\{max-width:1380px\}/.test(css));
   ok('★ 원본(sot) 배지는 광고주에게 안 나간다(내부 용어)', /STATE\.role==='advertiser'\?'':sotBadge/.test(src));
   ok('정산 카드는 광고주에게 항상 펼침', /STATE\.settleOpen\|\|STATE\.role==='advertiser'\)\?'':' hidden'/.test(src));
   ok('요약 스트립 광고주 = 시작일 칸(담당자 표기 없음)', /\[\['상품',d\.productOption\|\|m\.campaignName\|\|'—'\],\['시작일'/.test(src));
@@ -164,7 +165,7 @@ async function run() {
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
   ok('정산 카드 6칸(_advSettleFields): 견적서/계산서/총비용/입금액/입금일/남은 입금액',
     /_advSettleFields\(d,q,inv,pay\)/.test(src)
-    && /<div class="k">견적서<\/div>/.test(src) && /<div class="k">계산서<\/div>/.test(src)
+    && /<div class="k">견적서 ⧉<\/div>/.test(src) && /<div class="k">계산서 ⧉<\/div>/.test(src)
     && /<div class="k">총비용/.test(src) && /<div class="k">입금액<\/div>/.test(src)
     && /<div class="k">입금일 \(최근\)<\/div>/.test(src) && /<div class="k">남은 입금액<\/div>/.test(src)
     && src.includes('완납 ✓'));
@@ -175,8 +176,8 @@ async function run() {
 
   /* ═══ 5. 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ═══ */
   ok('첫 화면 기본값 = 대시보드(STATE.advView:\'dash\')', /advView:'dash'/.test(src));
-  ok('_renderAdvHome 이 advView 로 대시보드/전체 작업을 분기한다',
-    /if\(\(STATE\.advView\|\|'dash'\)==='list'\) _renderAdvList\(\); else _renderAdvDash\(\);/.test(src));
+  ok('_renderAdvHome 이 advView 로 대시보드/전체 작업/브랜드 관리를 분기한다',
+    /if\(v==='list'\) _renderAdvList\(\); else if\(v==='brands'&&!STATE\.brandId\) _renderAdvBrands\(\); else _renderAdvDash\(\);/.test(src));
   ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
   ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
     /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));

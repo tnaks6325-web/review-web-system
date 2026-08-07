@@ -27,7 +27,10 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 ok('admin.html: 옵션표 UI(#rf_opt_rows + 옵션 추가)', /id="rf_opt_rows"/.test(adminHtml) && /onclick="addOptRow\(\)"/.test(adminHtml) && /id="rf_opt_summary"/.test(adminHtml));
 ok('index-recruit: 옵션표 CRUD(addOptRow/renderOptRows/readOptRows)', /function addOptRow\(/.test(recruit) && /function renderOptRows\(/.test(recruit) && /function readOptRows\(/.test(recruit));
 ok('index-recruit: 자동점검(_optSummary — 정원합/하루합/중복)', /function _optSummary\(/.test(recruit) && /옵션명 중복/.test(recruit) && /정원합/.test(recruit));
-ok('index-recruit: 저장 payload.options(옵션표 있을 때만) + 중복 하드블록', /if \(document\.getElementById\("rf_opt_rows"\)\) \{[\s\S]*?payload\.options = readOptRows\(\)/.test(recruit) && /_optChk\.dup\) \{ showToast\("옵션명이 중복/.test(recruit));
+ok('index-recruit: 저장 payload.options(옵션표 있을 때만) + 중복 하드블록', /if \(document\.getElementById\("rf_opt_rows"\)\) \{[\s\S]*?payload\.options = readOptRows\(\)/.test(recruit) // ★ 안내 수단은 토스트 → 모달 안 인라인(_rfSaveBlocked)으로 바뀌었다 — 리뷰웹시스템[3버전]의
+//   토스트(z-index 60)는 이 모달(5000+blur) 아래로 깔려 보이지 않는다.
+//   고정하는 것은 "중복이면 안내하고 저장을 중단한다"이지 어느 함수로 알리느냐가 아니다.
+&& /if \(_optChk\.dup\) \{[\s\S]{0,240}?옵션명이 중복[\s\S]{0,160}?return;/.test(recruit));
 ok('index-recruit: readOptRows 파이프 정규화·빈옵션 제거', /replace\(\/\\\|\/g, ""\)\.trim\(\)/.test(recruit) && /if \(!optKey\) return;/.test(recruit));
 ok('index-recruit: 마감(closed) 옵션 상태 보존(재활성화 방지, 리뷰 #1)', /row\.dataset\.status = status/.test(recruit) && /status:\s*r\.dataset\.status === "closed" \? "closed" : "active"/.test(recruit) && /rf-opt-reopen/.test(recruit));
 // v4: 캠페인 정원이 표에서 파생되므로 "총모집≠정원합" 비교 자체가 사라졌다(항상 일치).

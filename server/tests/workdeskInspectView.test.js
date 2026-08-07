@@ -35,8 +35,12 @@ const headFn = /function _riRenderHead\(sum\)\{[\s\S]*?\n\}/.exec(src);
 ok('_riRenderHead 를 찾았다', !!headFn);
 ok('★ _riRenderHead 가 isAdmin 을 자기 스코프에서 선언한다(다른 함수의 const 에 기대지 않는다)',
   /const isAdmin\s*=\s*STATE\.role===/.test(headFn[0]));
+/* ⚠ 2026-08-06: [↻ 과거분 검수]·[CSV] 버튼은 제거(사용자 확정 — 기능 불필요).
+     검사 의미 불변 = 관리자 전용 버튼은 여전히 isAdmin 으로 가린다. 대상만 남은 버튼으로 교체. */
 ok('_riRenderHead 는 여전히 관리자 전용 버튼을 isAdmin 으로 가린다(서버 adminOrMaster 와 1:1)',
-  /isAdmin\?[\s\S]{0,80}riOpenSamples\(\)/.test(headFn[0]) && /isAdmin\?[\s\S]{0,80}riRunSweep\(\)/.test(headFn[0]));
+  /isAdmin\?[\s\S]{0,80}riOpenSamples\(\)/.test(headFn[0]) && /isAdmin\?[\s\S]{0,200}riReinspectTab\(\)/.test(headFn[0]));
+ok('★ 제거된 버튼은 화면에서 완전히 사라졌다(누르면 죽는 탭 금지)',
+  !/riRunSweep|riExportCsv/.test(src));
 
 const loadFn = /async function _loadInspect\(\)\{[\s\S]*?\n\}\nfunction _riRenderHead/.exec(src);
 ok('_loadInspect 를 찾았다', !!loadFn);
@@ -119,8 +123,9 @@ const OKRES = { ok: true, items: ITEMS, summary: { pass: 1, suspect: 2, fail: 3,
     ok(`[${role}] ★ 정상 응답에 오류 문구가 뜨지 않는다(렌더가 실제로 완주했다)`, !/표시하지 못했습니다/.test(body));
     ok(`[${role}] 카드가 그려진다`, /class="ricard/.test(body));
     ok(`[${role}] 헤더가 그려진다`, /리뷰검수/.test(head));
-    const adminBtns = /riOpenSamples\(\)/.test(head) && /riRunSweep\(\)/.test(head);
-    if (role === 'staff') ok('[staff] 관리자 전용 버튼(판별 예시·과거분 검수)은 안 보인다(서버 게이트와 1:1)', !adminBtns);
+    // ⚠ 2026-08-06: [과거분 검수] 제거 → 대상 버튼을 [재검수]로 교체(검사 의미 불변)
+    const adminBtns = /riOpenSamples\(\)/.test(head) && /riReinspectTab\(\)/.test(head);
+    if (role === 'staff') ok('[staff] 관리자 전용 버튼(판별 예시·재검수)은 안 보인다(서버 게이트와 1:1)', !adminBtns);
     else ok(`[${role}] 관리자 전용 버튼이 보인다`, adminBtns);
   }
 

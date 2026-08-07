@@ -39,7 +39,13 @@ async function _ensureThreadScope(req, sheetId, tabName) {
   if (role === 'master' || role === 'admin') return { ok: true };
   if (role === 'staff' || role === 'advertiser') {
     const okc = await svc.canAccessTab({ role, staffName: (req.admin && req.admin.name) || null, advertiserId: (req.admin && req.admin.advertiser_id) || null, sheetId, tabName });
-    return okc ? { ok: true } : { ok: false, code: 403, error: '스코프 밖 탭(담당/소유 아님)' };
+    if (!okc) return { ok: false, code: 403, error: '스코프 밖 탭(담당/소유 아님)' };
+    // 094: 브랜드 링크 세션은 소유 탭 중에서도 **그 브랜드에 배정된 탭만**(타 브랜드 작업 도달 불가).
+    if (role === 'advertiser' && req.admin && req.admin.brand_id) {
+      const okb = await svc.brandTabAllowed({ brandId: req.admin.brand_id, advertiserId: req.admin.advertiser_id, sheetId, tabName });
+      if (!okb) return { ok: false, code: 403, error: '스코프 밖 탭(브랜드 미배정)' };
+    }
+    return { ok: true };
   }
   return { ok: false, code: 403, error: '권한이 없습니다.' };
 }
@@ -137,37 +143,77 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
 //   ★ fail-soft — 어떤 실패도 200 + 사유로 돌려준다(클릭 한 번에 500 을 보여줄 이유가 없다).
 //   찾은 URL 은 불변이라 길게(10분), 미발견은 짧게(60초 — 그 사이 첫 현영 캡처가 올 수 있다) 캐시.
 const _tabFolderCache = new Map();
+const _tabFolderInfoCache = new Map();
 router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) => {
   const sheetId = String(req.query.sheetId || '').trim();
   const tabName = String(req.query.tabName || '').trim();
   if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId·tabName이 필요합니다.' });
+  // kind=info = 작업보드 상단 폴더 버튼용 **가산 분기** — 그 탭의 세 폴더 재료를 한 번에 알려준다.
+  //   ★ 신규 엔드포인트 0(같은 라우트·같은 스코프 게이트) + Drive 무접촉(tab_configs 한 줄 조회).
+  //   ★ 홈처럼 stats=1(review_index 전체 GROUP BY)을 붙이지 않는다 — 작업 탭을 열 때마다 무거운
+  //     집계를 돌리는 것은 CLAUDE.md 가 못박은 금지선이다. 여기선 그 탭 한 줄만 읽는다.
+  const wantInfo = String(req.query.kind || '') === 'info';
   const key = `${sheetId}\t${tabName}`;
-  const hit = _tabFolderCache.get(key);
-  if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
-    return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
-  }
   try {
-    // staff(AE)는 담당 탭만 — 폴더 URL 도 담당 스코프 밖으로 새지 않는다(마감·스레드와 같은 규율).
+    // ★★ 스코프 게이트가 **캐시보다 먼저**다(코드리뷰가 잡은 실측 구멍): 캐시 히트를 위에서 반환하면
+    //   누군가 그 탭을 최근에 열어 둔 동안 **담당 밖 AE 가 Drive 링크를 그대로 받는다**(60초/10분 창).
+    //   "폴더 URL 도 담당 스코프 밖으로 새지 않는다"는 이 라우트의 불변식이 캐시 한 줄로 무력화됐다.
+    //   순서 고정 = 파싱 → **스코프** → 캐시 → 작업.
     if (_role(req) === 'staff') {
       const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
       if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
+    }
+    if (wantInfo) {
+      const ih = _tabFolderInfoCache.get(key);
+      if (ih && Date.now() - ih.at < 60000) return res.json({ ok: true, kind: 'info', ...ih.val });
+    } else {
+      const hit = _tabFolderCache.get(key);
+      if (hit && Date.now() - hit.at < (hit.url ? 600000 : 60000)) {
+        return res.json({ ok: !!hit.url, url: hit.url || null, error: hit.url ? undefined : hit.msg });
+      }
+    }
+    const { cashReceiptSlotInfo, CR_MISCONFIG_NOTE } = require('../utils/captureSlots');
+    if (wantInfo) {
+      const r = await pool.query(
+        `SELECT folder_url, capture_folder_url, capture_slots, income_type
+           FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+      const t = r.rows[0];
+      if (!t) return res.json({ ok: false, kind: 'info', error: '등록되지 않은 탭입니다.' });
+      const cri = cashReceiptSlotInfo(t.capture_slots, t.income_type);
+      const val = {
+        folderUrl: t.folder_url || null,
+        captureFolderUrl: t.capture_folder_url || null,
+        cashReceipt: !!cri.slot,
+        // 오설정(현영인데 슬롯 없음)일 때만 실린다 — 버튼 툴팁이 '대상 아님'으로 뭉개지 않게.
+        ...(!cri.slot && cri.incomeSaysCashReceipt ? { cashReceiptNote: CR_MISCONFIG_NOTE } : {}),
+      };
+      _tabFolderInfoCache.set(key, { at: Date.now(), val });
+      // ★ kind 를 되돌려준다 — 프론트가 **이 응답이 info 응답인지** 확인할 유일한 표식이다.
+      //   구버전 백엔드는 kind 를 모르고 현영(receipt) 분기로 답하는데, 표식이 없으면 프론트가 그
+      //   `{ok:true,url}` 을 info 로 오독해 "폴더 미생성"으로 위장한다(배포 스큐 실측 시나리오).
+      return res.json({ ok: true, kind: 'info', ...val });
     }
     const { rows } = await pool.query(
       `SELECT folder_url, capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`,
       [sheetId, tabName]);
     const tc = rows[0];
     if (!tc) return res.json({ ok: false, error: '등록되지 않은 탭입니다.' });
-    const { isCashReceiptIncome, slotLabel } = require('../utils/captureSlots');
-    // 관리자 명시 capture_slots 에 receipt 슬롯이 있는 탭도 허용(라벨은 그 설정을 따른다 — 업로드와 같은 규칙).
-    const hasReceipt = isCashReceiptIncome(tc.income_type)
-      || (Array.isArray(tc.capture_slots) && tc.capture_slots.some(s => s && s.key === 'receipt'));
-    if (!hasReceipt) return res.json({ ok: false, error: '현금영수증 발행 대상 작업이 아닙니다.' });
+    // ★ 현영 대상 판정은 captureSlots.cashReceiptSlotInfo 단일 규칙 — 버튼 활성(홈·업체관리·작업보드)과
+    //   이 허용 판정이 **같은 함수**여야 "눌리는데 거부"/"대상인데 안 눌림"이 생기지 않는다.
+    const cr = cashReceiptSlotInfo(tc.capture_slots, tc.income_type);
+    if (!cr.slot) {
+      // ★ 사유를 구분한다 — 진행방식이 현영인데 슬롯에서 못 찾은 것과, 애초에 대상이 아닌 것은 다른 일이다
+      //   ("대상 아님"으로 뭉개면 관리자가 무엇을 고쳐야 할지 알 수 없다).
+      return res.json({ ok: false, error: cr.incomeSaysCashReceipt ? CR_MISCONFIG_NOTE : '현금영수증 발행 대상 작업이 아닙니다.' });
+    }
     const driveService = require('../services/drive.service');   // 지연 require — 테스트가 이 라우터를 스텁 pool 로 실행할 때 Drive 스택 무부하
     const reviewFolderId = tc.folder_url ? driveService.extractFolderIdFromUrl(tc.folder_url) : null;
     if (!reviewFolderId) {
       return res.json({ ok: false, error: '리뷰 폴더가 아직 없습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다.' });
     }
-    const label = slotLabel(tc.capture_slots, tc.income_type, 'receipt', null) || '현금영수증';
+    // ★ 폴더 이름 = 그 슬롯의 **실제 라벨**(업로드가 그 라벨로 서브폴더를 만든다).
+    //   종전 `slotLabel(...,'receipt')` 은 수동 슬롯 탭(key=slot2)에서 문자열 'receipt' 를 뒤졌다.
+    const label = (cr.slot && cr.slot.label) || '현금영수증';
     const found = await driveService.findFolderByName(label, reviewFolderId);   // ★ find-only
     if (!found) {
       const msg = '현영 캡처가 아직 없어 폴더가 만들어지지 않았습니다.';
@@ -466,8 +512,31 @@ function internalMiddleware(req, res, next) {
 }
 
 router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }
-  catch (err) { next(err); }
+  try {
+    const items = await svc.listAdvertisersWithOwnership();
+    // ?overview=1 — 업체관리 첫 화면(업체 미선택) 개요 표 재료를 같은 응답에 얹는다(신규 엔드포인트 0).
+    //   ★ 로컬 DB만 집계(인트라넷 무접촉) · 실패 소스는 *Unavailable 플래그로 고지(0 으로 꾸미지 않는다).
+    if (req.query.overview === '1') {
+      const isAdmin = _role(req) === 'master' || _role(req) === 'admin';
+      const ov = await svc.advertiserOverview();
+      if (ov && ov.ok) {
+        for (const it of items) {
+          const a = ov.byAdvertiser[it.id];
+          if (a) { it.works = a.works; it.noMatch = a.noMatch; it.finishCand = a.finishCand; }
+          else { it.works = 0; it.noMatch = 0; it.finishCand = 0; }   // 소유 탭이 0건인 업체(집계 대상 없음)
+          // ★ 접속링크 상태(공개/로그인/폐기·마지막 접속)는 **admin/master 에만** 싣는다 —
+          //   링크를 다루는 다른 모든 라우트가 adminOrMaster 이고 프론트도 staff 에겐 안 그린다.
+          //   서버가 프론트보다 넓어지면 그게 곧 노출이다. null = 링크 미생성(여기서 만들지 않는다).
+          if (isAdmin) it.link = ov.link[it.id] || null;
+        }
+      }
+      return res.json({ ok: true, items, overview: ov ? {
+        ok: !!ov.ok, statsUnavailable: !!ov.statsUnavailable, finishedUnavailable: !!ov.finishedUnavailable,
+        contractsUnavailable: !!ov.contractsUnavailable, linksUnavailable: !!ov.linksUnavailable,
+      } : { ok: false } });
+    }
+    res.json({ ok: true, items });
+  } catch (err) { next(err); }
 });
 
 // ── Track B 업체(거래처) 생성 — 내부인. staff는 inad_pm=자기 로그인명 강제(서버 강제, 타 AE 명의 차단). ──
@@ -558,7 +627,25 @@ router.post('/advertisers/inad-pm', authMiddleware, adminOrMasterMiddleware, asy
 router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     if (!req.query.advertiserId) return res.status(400).json({ ok: false, error: 'advertiserId 필수' });
-    res.json({ ok: true, items: await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId }) });
+    // ★ 마감/통계 조회 실패는 **플래그로 고지**한다 — 조용히 빈 판정을 내려보내면 화면이 그것을
+    //   "마감자료 검수 대기 0건"으로 읽어 실제 대기 건이 통째로 사라진다(088 무신호 규율).
+    const own = await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId, annotate: true });
+    // ★★ staff(AE)는 담당 업체가 아니면 **폴더 URL 을 받지 않는다**(코드리뷰가 잡은 경계):
+    //   이 목록은 업체를 골라 보는 화면이라 AE 가 남의 업체도 열 수 있는데, 응답에 Drive 링크가
+    //   실려 있으면 [자료] 버튼이 곧 담당 밖 폴더 접근 수단이 된다(/tab-folders 는 서버가 막는데
+    //   여기는 열려 있어 같은 불변식이 한쪽만 지켜지던 상태). 담당 여부는 한 쿼리(inad_pm).
+    //   ★ 지우고 조용히 넘기지 않는다 — folderScoped:false 로 **사유를 화면이 말한다**.
+    let rows = own.rows;
+    let folderScoped = true;
+    if (_role(req) === 'staff') {
+      const mine = await svc.staffOwnsAdvertiser({ advertiserId: req.query.advertiserId, staffName: req.admin && req.admin.name });
+      if (!mine) {
+        folderScoped = false;
+        rows = rows.map(r => ({ ...r, folderUrl: null, captureFolderUrl: null, cashReceipt: false, cashReceiptNote: undefined }));
+      }
+    }
+    res.json({ ok: true, items: rows, statsUnavailable: own.statsUnavailable,
+      finishedUnavailable: own.finishedUnavailable, ...(folderScoped ? {} : { folderScoped: false }) });
   } catch (err) { next(err); }
 });
 
@@ -580,7 +667,51 @@ router.get('/my-work-summary', authMiddleware, async (req, res, next) => {
     if (_role(req) !== 'advertiser') return res.status(403).json({ ok: false, error: '광고주 전용 경로입니다.' });
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     if (!advertiserId) return res.status(403).json({ ok: false, error: '업체 연결이 없는 계정입니다.' });
-    res.json({ ok: true, ...(await svc.advertiserWorkSummary({ advertiserId })) });
+    // 094: 브랜드 링크 세션(brand_id 클레임)은 배정 탭만 + 브랜드 토글 렌즈. brandId 는 토큰에서만(IDOR 차단).
+    res.json({ ok: true, ...(await svc.advertiserWorkSummary({ advertiserId, brandId: (req.admin && req.admin.brand_id) || null })) });
+  } catch (err) { next(err); }
+});
+
+// ── 브랜드 분류·공유(094) — 광고주(대행사) 셀프서비스. 관리자 개입 0(사용자 확정). ──
+//   게이트: role=advertiser + advertiser_id + **브랜드 세션 아님**(브랜드 링크는 열람 전용 — CRUD 도달 불가).
+function _advSelf(req) {
+  const a = req.admin || {};
+  if (a.role !== 'advertiser' || !a.advertiser_id || a.brand_id) return null;
+  return a.advertiser_id;
+}
+router.get('/brands', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const o = await svc.brandsForAdvertiser({ advertiserId });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+router.post('/brands/create', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { name, color } = req.body || {};
+    const o = await svc.createBrand({ advertiserId, name, color });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+router.post('/brands/update', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { brandId, action, name, color, on } = req.body || {};
+    const o = await svc.updateBrand({ advertiserId, brandId, action, name, color, on });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
+router.post('/brands/assign', authMiddleware, async (req, res, next) => {
+  try {
+    const advertiserId = _advSelf(req);
+    if (!advertiserId) return res.status(403).json({ ok: false, error: '업체(대행사) 전용 경로입니다.' });
+    const { brandId, tabs } = req.body || {};
+    const o = await svc.assignBrandTabs({ advertiserId, brandId, tabs });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
   } catch (err) { next(err); }
 });
 
@@ -679,7 +810,27 @@ router.get('/workdesk/settlement', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부+광고주 소유 탭
-    const out = await svc.settlementForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    const out = await svc.settlementForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null, brandId: (req.admin && req.admin.brand_id) || null });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+// 견적서 문서(버전 이력) — /workdesk/settlement 와 동일 게이트(_ensureThreadScope + 서비스 광고주 렌즈).
+router.get('/workdesk/quote-doc', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.quoteDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null, brandId: (req.admin && req.admin.brand_id) || null });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+// 계산서(전자세금계산서) 발행 요약 — 게이트 동일.
+router.get('/workdesk/invoice-doc', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.invoiceDocForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null, brandId: (req.admin && req.admin.brand_id) || null });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
@@ -1018,6 +1169,62 @@ router.get('/campaigns/:id/preview', authMiddleware, internalMiddleware, (req, r
 router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.dismiss(req, res, next));
 
+// ── 날짜별 모집인원 조절 + 차수(095) ─────────────────────────
+//   경로는 재기준 없이 양쪽 호스트 공용(리뷰어 게이트와 같은 판단): admin_token(관리자 대시보드)도
+//   인트라넷 SSO admin 토큰(리뷰웹시스템[3버전])도 /api/trackb/* 에 그대로 닿는다.
+//   전부 adminOrMaster — 정원·총량 변경은 공고 관제 수동확정과 같은 급(AE 편집명단에 열지 않는다).
+//   스코프 토큰(via:'reviewer_campaign')은 authMiddleware 격리로 도달 자체가 불가.
+function _cdpNotReady(res, err) {
+  if (err && err.code === '42P01') {
+    res.json({ ok: false, code: 'not_ready', error: '모집인원 조절 준비 전입니다(migration 095 미적용) — 배포 완료 후 다시 시도해주세요.' });
+    return true;
+  }
+  return false;
+}
+function _cdpFail(res, err) {
+  // 서비스가 code 를 실은 검증/게이트 오류는 400대로 — errorHandler 마스킹(500 위장) 방지.
+  const codes = {
+    not_found: 404, not_participation: 400, schedule_driven: 409, schedule_unknown: 503,
+    empty: 400, too_many: 400, bad_date: 400, past_date: 400, bad_count: 400, dup_date: 400,
+    below_used: 422, no_round: 400, below_confirmed: 422,
+  };
+  if (err && err.code && codes[err.code]) {
+    res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
+    return true;
+  }
+  return false;
+}
+router.get('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { getPlanOverview } = require('../services/campaignPlan.service');
+    res.json({ ok: true, ...(await getPlanOverview(String(req.params.id))) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.post('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { savePlans, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await savePlans(campaignId, req.body, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.post('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await addRound(campaignId, req.body, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.delete('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await removeLastRound(campaignId, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+
 /* ══════════════════════════════════════════════════════════════
    리뷰이미지 교체요청 — 리뷰웹시스템[3버전] 전용 탭 + C/S 대화창 카드
 
@@ -1179,10 +1386,33 @@ router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res)
       for (const it of items) if (summary[it.status] !== undefined) summary[it.status] += 1;
       summary.open = summary.suspect + summary.fail;
     }
-    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped });
+    // ★ 이 작업의 리뷰타입을 **판정 근거값과 함께** 실어 보낸다 — 구매확정 작업인데
+    //   "리뷰 화면이 아님" 불량이 나오는 이유가 화면 어디에도 안 보이던 실사고(2026-08-06) 대응.
+    //   읽기 전용·fail-soft(실패 = 빈 배열 = 표시만 생략, 목록은 그대로 뜬다).
+    let reviewTypes = [];
+    try {
+      reviewTypes = await require('../services/reviewTypeContext.service')
+        .reviewTypeDetailsForTabs(items.map(it => ({ sheetId: it.sheet_id, tabName: it.tab_name })));
+    } catch (_) { /* 표시 보조 — 목록을 죽이지 않는다 */ }
+    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped, reviewTypes });
   } catch (err) {
     logger.warn(`[review-inspect] 목록 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: '검수 목록을 불러오지 못했습니다.' });
+  }
+});
+
+/* 반려 안내를 보낼 수 있는 건인지 미리 확인 — 팝업이 열릴 때 1회.
+   ★ 연락처(phone8)는 응답에 담지 않는다(가능 여부·사유만 — 화면에 PII 를 늘리지 않는다).
+   ★ fail-soft: 확인 자체가 실패해도 팝업은 열려야 하므로 200 + canNotify:null(모름). */
+router.get('/review-inspect/notify-check', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String(req.query.fileId || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const r = await _inspectSvc.resolveReviewerPhone8(fileId);
+    res.json({ ok: true, canNotify: !!r.phone8, via: r.via || null, reason: r.phone8 ? null : (r.error || null) });
+  } catch (err) {
+    res.json({ ok: true, canNotify: null });
   }
 });
 
@@ -1192,13 +1422,149 @@ router.post('/review-inspect/resolve', authMiddleware, _reInternal, async (req, 
     const g = await _riCanTouch(req, fileId);
     if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     // resolution: 'ok'(정상 = AI 오탐 — 학습 신호) | 'bad'(불량 맞음) | 미지정(옛 화면 호환)
-    const r = await _inspectSvc.resolveInspection({
-      fileId, by: (req.admin && req.admin.name) || '',
-      resolution: String((req.body || {}).resolution || ''),
-    });
-    res.json({ ok: true, ...r });
+    const by = (req.admin && req.admin.name) || '';
+    const resolution = String((req.body || {}).resolution || '');
+    const r = await _inspectSvc.resolveInspection({ fileId, by, resolution });
+    // 불량 확인 + 사유가 오면 리뷰어 1:1 문의 채팅에 반려 안내 자동 전송(실패해도 확인은 유지 —
+    // 결과를 notify 로 실어 화면이 "전송 실패"를 말하게 한다. 조용한 미전송 금지).
+    let notify = null;
+    const rejectMessage = String((req.body || {}).rejectMessage || '').trim();
+    if (resolution === 'bad' && rejectMessage) {
+      notify = await _inspectSvc.notifyInspectionReject({
+        fileId, message: rejectMessage, by,
+        card: (req.body || {}).card || { kind: 'reject' },   // 반려된 사진을 함께 보여준다
+      });
+    }
+    res.json({ ok: true, ...r, notify });
   } catch (err) {
     res.status(500).json({ ok: false, error: '확인 처리에 실패했습니다.' });
+  }
+});
+
+/* 수동 분류(이동) — "리뷰가 아니다 → 현금영수증/구매캡처로". 실행은 fileRoute.service
+   재사용(사본 0 — 자동 이동과 같은 상태·같은 되돌리기). 이동 성공 시 그 검수 건은
+   정상(오제출 = resolution 'ok')으로 자동 종결하고, 학습 결합으로 그 실물을 대상 판별
+   예시로 승격할 수 있는 슬롯이면 promote 제안을 동봉한다(등록은 사람이 확인 후). */
+router.post('/review-inspect/route-manual', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String((req.body || {}).fileId || '');
+    const target = String((req.body || {}).target || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const by = (req.admin && req.admin.name) || '';
+    const out = await require('../services/fileRoute.service').manualRoute({ fileId, target, by });
+    if (!out.ok) return res.status(400).json(out);
+    try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'ok' }); } catch (_) {}
+    // 이동 안내 — "옮겼다 + 리뷰 캡처가 아직 비어 있다"를 리뷰어가 알아야 다음 행동을 한다.
+    let notify = null;
+    const moveMessage = String((req.body || {}).rejectMessage || '').trim();
+    if (moveMessage) {
+      notify = await _inspectSvc.notifyInspectionReject({
+        fileId, message: moveMessage, by,
+        card: { kind: 'moved', to: target, ...(req.body || {}).card },
+      });
+    }
+    let promote = null;
+    try { promote = await _routePromoteSuggestion(out); } catch (_) {}
+    res.json({ ...out, promote, notify });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '이동에 실패했습니다.' });
+  }
+});
+
+/** 수동 분류한 실물의 예시 승격 제안 — 대상 슬롯이 판별 예시로 쓰이고 자리가 남을 때만.
+ *  ★ 제안까지만(자동 등록 없음) — 등록은 프론트 confirm 을 거쳐 기존 samples POST(mode:'add')로. */
+async function _routePromoteSuggestion({ to, sheetId, tabName } = {}) {
+  const cap = _inspectSvc.SAMPLE_SLOT_CAP;
+  if (to === 'order_capture') {
+    const s = (await _inspectSvc.routeSampleSettings()).find(x => x.key === 'order_capture');
+    if (s && (s.imageUrls || []).length < cap) return { kind: 'route', key: 'order_capture', label: s.label || '구매캡처(주문내역) 화면' };
+    return null;
+  }
+  if (to === 'receipt') {
+    const ch = (await _inspectSvc.loadTabExpectations({ sheetId, tabName })).expectedChannel;
+    if (!ch) return null;
+    const s = (await _inspectSvc.receiptSampleSettings()).find(x => x.key === ch);
+    if (s && (s.imageUrls || []).length < cap) return { kind: 'receipt', key: ch, label: '현금영수증 · ' + (s.label || ch) };
+    return null;
+  }
+  return null;   // review 대상은 PC/모바일 구분을 모른다 — 잘못된 슬롯 제안보다 무제안
+}
+
+/* 중복파일 수동 제거 — duplicate fail 근거가 있는 파일만(서버가 재검증), 나중 제출본을
+   휴지통으로 보내고 검수 건은 불량 맞음(중복 제출)으로 종결(#562 확정 기본값).
+   게이트 = 건별 확인과 동일(_riCanTouch — 내부인 + staff 담당 탭). */
+router.post('/review-inspect/dedup-manual', authMiddleware, _reInternal, async (req, res) => {
+  try {
+    const fileId = String((req.body || {}).fileId || '');
+    const g = await _riCanTouch(req, fileId);
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const by = (req.admin && req.admin.name) || '';
+    const out = await require('../services/fileRoute.service').dedupManual({ fileId, by });
+    if (!out.ok) return res.status(400).json(out);
+    try { await _inspectSvc.resolveInspection({ fileId, by, resolution: 'bad' }); } catch (_) {}
+    // 리뷰어 안내 — 문구는 설정(설정 › 리뷰어 안내문구)에서 관리하고 화면이 보내기 전 수정할 수 있다.
+    // ★ 제거는 이미 끝났다 — 전송 실패해도 되돌리지 않고 결과만 알린다(조용한 미전송 금지).
+    let notify = null;
+    const rejectMessage = String((req.body || {}).rejectMessage || '').trim();
+    if (rejectMessage) {
+      notify = await _inspectSvc.notifyInspectionReject({
+        fileId, message: rejectMessage, by,
+        card: { kind: 'duplicate', matchFileId: out.matchFileId || '', ...(req.body || {}).card },
+      });
+    }
+    res.json({ ...out, notify });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '중복파일 제거에 실패했습니다.' });
+  }
+});
+
+/* ── 리뷰어 안내문구(유형별) — 설정 화면에서 직접 편집 ─────────────────
+   ★ 문구·유형 목록의 단일 출처는 utils/inspectMessages.js — 화면은 서버가 준 표를 그대로 그린다
+     (프론트에 문구 사본을 두면 "설정에서 고쳤는데 나가는 문장은 그대로"가 된다).
+   ★ 조회는 내부인(팝업 프리필에 필요), 저장은 adminOrMaster(전사 설정). */
+router.get('/settings/inspect-messages', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const IM = require('../utils/inspectMessages');
+    let saved = {};
+    try {
+      const { rows } = await pool.query('SELECT value FROM app_settings WHERE key = $1 LIMIT 1', [IM.SETTING_KEY]);
+      if (rows[0] && rows[0].value) saved = JSON.parse(rows[0].value) || {};
+    } catch (_) { /* 미설정·파싱 실패 = 기본 문구 */ }
+    res.json({
+      ok: true,
+      kinds: IM.INSPECT_MSG_KINDS.map(k => ({ key: k.key, label: k.label, desc: k.desc, def: k.def })),
+      messages: IM.merge(saved),
+      maxLen: IM.MAX_LEN,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '안내문구를 불러오지 못했습니다.' });
+  }
+});
+
+router.post('/settings/inspect-messages', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const IM = require('../utils/inspectMessages');
+    // ★ 빈 값 = 그 유형만 기본 문구로 되돌리기(빈 메시지가 리뷰어에게 나가지 않는다).
+    const clean = IM.normalize((req.body || {}).messages || {});
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [IM.SETTING_KEY, JSON.stringify(clean)]
+    );
+    res.json({ ok: true, messages: IM.merge(clean) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '저장에 실패했습니다.' });
+  }
+});
+
+/* 자동분류 정확도 — 수동 분류(정답) vs AI 관측 계획 대조. 읽기 전용(설정탭 카드). */
+router.get('/review-inspect/route-stats', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  try {
+    const out = await require('../services/fileRoute.service').routeAccuracyStats({ days: req.query.days });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: '통계를 불러오지 못했습니다.' });
   }
 });
 
@@ -1290,18 +1656,20 @@ router.get('/review-inspect/samples', authMiddleware, _reInternal, async (req, r
 router.post('/review-inspect/samples', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
+    // mode: 'add'(누적) | 'remove'+index(개별 삭제) | 미지정(종전 = 교체/전체 제거)
+    const op = { imageUrl: b.imageUrl, mode: b.mode, index: b.index };
     if (String(b.kind || '') === 'receipt') {
       const channel = String(b.channel || b.key || '');
-      const url = await _inspectSvc.saveReceiptSample({ channel, imageUrl: b.imageUrl });
-      return res.json({ ok: true, kind: 'receipt', channel, imageUrl: url });
+      const urls = await _inspectSvc.saveReceiptSample({ channel, ...op });
+      return res.json({ ok: true, kind: 'receipt', channel, imageUrls: urls, imageUrl: urls[0] || '' });
     }
     if (String(b.kind || '') === 'route') {
       // 자동 분류 예시(구매캡처·구매확정) — 슬롯 화이트리스트는 utils/routeSampleKinds 단일 출처
-      const url = await _inspectSvc.saveRouteSample({ key: String(b.key || ''), imageUrl: b.imageUrl });
-      return res.json({ ok: true, kind: 'route', key: b.key, imageUrl: url });
+      const urls = await _inspectSvc.saveRouteSample({ key: String(b.key || ''), ...op });
+      return res.json({ ok: true, kind: 'route', key: b.key, imageUrls: urls, imageUrl: urls[0] || '' });
     }
-    const url = await _inspectSvc.saveSample({ key: String(b.key || ''), imageUrl: b.imageUrl });
-    res.json({ ok: true, key: b.key, imageUrl: url });
+    const urls = await _inspectSvc.saveSample({ key: String(b.key || ''), ...op });
+    res.json({ ok: true, key: b.key, imageUrls: urls, imageUrl: urls[0] || '' });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message || '저장에 실패했습니다.' });
   }
@@ -1344,7 +1712,10 @@ router.post('/review-inspect/reinspect', authMiddleware, adminOrMasterMiddleware
   try {
     const b = req.body || {};
     const out = await _inspectSvc.reinspectTab({
-      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''), limit: b.limit,
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+      // 유형별 일괄 재검수 — 화면이 고른 건들만(유형 판정은 화면 단일 출처)
+      fileIds: Array.isArray(b.fileIds) ? b.fileIds : null,
+      limit: b.limit,
     });
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) {

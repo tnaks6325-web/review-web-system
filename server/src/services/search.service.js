@@ -218,6 +218,7 @@ async function searchByName(query, phone8, opts = {}) {
     ri.submit_col        AS "submitCol",
     ri.is_submitted2     AS "isSubmitted2",
     ri.review_file_at    AS "reviewFileAt",
+    ri.review_file_id    AS "reviewFileId",
     tc.manager,
     tc.time_range        AS "timeRange",
     tc.review_type       AS "reviewType",
@@ -419,6 +420,9 @@ async function searchByName(query, phone8, opts = {}) {
       row:         row.isSubmitted ? {} : rowObj,
       submitCol:   row.isSubmitted ? null : row.submitCol,
       reviewFileAt: row.reviewFileAt || null, // 대표 리뷰 이미지 연결 시각 (제출완료 탭 표시용)
+      // ★ 제출 화면 "내 제출 현황"의 썸네일용 — 파일ID만(무인증 프록시 /api/drive/image/<id> 로 표시).
+      //   그 행의 대표 이미지라 **그 리뷰어 본인 것**이고, 이미 완료 카드가 보여주는 정보와 같은 범위다.
+      reviewFileId: row.reviewFileId || null,
       isPaid:      _isPaid(row.isSubmitted2, rowObj), // 입금완료 배지용 (row 비우기 전 판정)
       score:       row.score, // 유사도 점수 (1.0=정확매칭, <1.0=유사매칭)
       };
@@ -590,6 +594,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     row:         row.isSubmitted ? {} : rowObj,
     submitCol:   row.isSubmitted ? null : row.submitCol,
     reviewFileAt: row.reviewFileAt || null,
+    reviewFileId: row.reviewFileId || null,
     isPaid:      _isPaid(row.isSubmitted2, rowObj),
     };
   });

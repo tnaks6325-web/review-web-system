@@ -177,8 +177,63 @@ function precheckPolicy({ classified, expectedChannel, slotKey = 'review', revie
  *   첨부 즉시 판별의 응답성을 해친다.
  * ════════════════════════════════════════════════════════════════ */
 const SAMPLES_ENABLED = process.env.REVIEW_INSPECT_SAMPLES !== '0';
-const _sampleCache = new Map();                 // settingKey → { data, mimeType, ts }
+const _sampleCache = new Map();                 // `${settingKey}|${url}` → { data, mimeType, ts }
 const SAMPLE_TTL = Number(process.env.REVIEW_INSPECT_SAMPLE_TTL_MS || 30 * 60 * 1000);
+/* 누적 상한 — "많이"가 아니라 "다르게"가 정확도를 올린다(few-shot은 종류당 2~5장에서 포화).
+ * 슬롯당 저장 5장 / 한 판정 동봉 6장. 초과는 조용히 자르지 않고 화면·로그가 말한다. */
+const SAMPLE_SLOT_CAP = Math.max(1, Number(process.env.REVIEW_INSPECT_SAMPLE_SLOT_CAP || 5));
+const SAMPLE_ATTACH_CAP = Math.max(1, Number(process.env.REVIEW_INSPECT_SAMPLE_ATTACH_CAP || 6));
+
+/**
+ * 예시 슬롯 값 파싱 — ★ 하위호환이 핵심: 종전 값은 URL 문자열 1개였다.
+ * "문자열 = 1장짜리 배열"로 읽어 기존 등록분 유실 0(마이그레이션 0).
+ */
+function parseSampleUrls(value) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v) return [];
+  if (v.startsWith('[')) {
+    try {
+      const a = JSON.parse(v);
+      return (Array.isArray(a) ? a : []).map(s => String(s || '').trim())
+        .filter(u => /^https:\/\/\S+$/i.test(u)).slice(0, SAMPLE_SLOT_CAP);
+    } catch (_) { return []; }
+  }
+  return [v];
+}
+
+/**
+ * 예시 슬롯 편집 단일 지점 — 리뷰/현금영수증/자동분류 세 저장 창구가 전부 이걸 쓴다
+ * (사본을 두면 한쪽만 상한·중복 규칙이 달라진다).
+ * mode: 'add'(누적 — 기본 UI) | 'remove'+index(개별 삭제) | 미지정(종전 동작 = 교체/전체 제거)
+ */
+async function _mutateSampleList(settingKey, { imageUrl, mode, index } = {}) {
+  const url = String(imageUrl ?? '').trim();
+  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
+  const { rows } = await _db().query('SELECT value FROM app_settings WHERE key = $1 LIMIT 1', [settingKey]);
+  let list = parseSampleUrls(rows[0] && rows[0].value);
+  if (mode === 'add') {
+    if (!url) throw new Error('추가할 imageUrl이 필요합니다.');
+    if (!list.includes(url)) {
+      if (list.length >= SAMPLE_SLOT_CAP) {
+        throw new Error(`슬롯당 최대 ${SAMPLE_SLOT_CAP}장입니다 — 덜 닮은 기존 예시를 지우고 등록하세요.`);
+      }
+      list = list.concat([url]);
+    }
+  } else if (mode === 'remove') {
+    const i = Number(index);
+    if (!Number.isInteger(i) || i < 0 || i >= list.length) throw new Error('지울 예시를 찾지 못했습니다.');
+    list = list.filter((_, j) => j !== i);
+  } else {
+    list = url ? [url] : [];   // 종전 동작 100%: 단일 교체 / ''=전부 제거(옛 화면 호환)
+  }
+  await _db().query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [settingKey, list.length ? JSON.stringify(list) : '']
+  );
+  for (const k of _sampleCache.keys()) if (k.startsWith(settingKey + '|')) _sampleCache.delete(k);
+  return list;
+}
 
 /** Drive 프록시 URL → base64. 실패는 null(그 예시만 빠지고 판정은 계속). */
 async function _fetchSample(url) {
@@ -213,18 +268,50 @@ async function _loadSampleSlots(slots) {
   const now = Date.now();
   for (const s of slots) {
     const k = s.settingKey;
-    const url = urlOf[k];
-    if (!url) continue;
-    const hit = _sampleCache.get(k);
-    if (hit && hit.url === url && (now - hit.ts) < SAMPLE_TTL) {
-      out.push({ key: s.key, label: s.label, kind: s.kind, data: hit.data, mimeType: hit.mimeType });
-      continue;
+    // ★ 누적: 슬롯 하나 = 이미지 여러 장. key 에 **URL 해시 접미**(#xxxx)를 붙인다 —
+    //   gemini 의 캐시 지문(sampleSig)이 key 목록으로 만들어지므로, 장수·구성이 바뀌면
+    //   지문이 바뀌어 옛 캐시가 새 예시를 모른 채 히트하는 것을 막는다(classify 접두 상향과 같은 규율).
+    for (const url of parseSampleUrls(urlOf[k])) {
+      const imgId = crypto.createHash('sha1').update(url).digest('hex').slice(0, 8);
+      const sampleKey = s.key + '#' + imgId;
+      const ck = k + '|' + url;
+      const hit = _sampleCache.get(ck);
+      if (hit && (now - hit.ts) < SAMPLE_TTL) {
+        out.push({ key: sampleKey, label: s.label, kind: s.kind, data: hit.data, mimeType: hit.mimeType });
+        continue;
+      }
+      const f = await _fetchSample(url);
+      if (!f) continue;
+      _sampleCache.set(ck, { ...f, ts: now });
+      out.push({ key: sampleKey, label: s.label, kind: s.kind, data: f.data, mimeType: f.mimeType });
     }
-    const f = await _fetchSample(url);
-    if (!f) continue;
-    _sampleCache.set(k, { ...f, url, ts: now });
-    out.push({ key: s.key, label: s.label, kind: s.kind, data: f.data, mimeType: f.mimeType });
   }
+  return out;
+}
+
+/**
+ * 동봉 상한 트림 — 슬롯별 **최근 등록 우선 + 라운드로빈**으로 고르게 줄인다.
+ * ★ 라운드로빈이라 각 슬롯이 최소 1장은 살아남는다 — 특정 슬롯(예: 자동분류 예시)이
+ *   통째로 잘려 판별 재료가 사라지는 것 방지. 잘리면 로그로 말한다(조용한 절단 금지).
+ */
+function _trimSamples(samples, cap = SAMPLE_ATTACH_CAP) {
+  if (!Array.isArray(samples) || samples.length <= cap) return samples || [];
+  const groups = new Map();
+  for (const s of samples) {
+    const base = String(s.key || '').split('#')[0];
+    if (!groups.has(base)) groups.set(base, []);
+    groups.get(base).push(s);
+  }
+  for (const arr of groups.values()) arr.reverse();   // 뒤에 붙은 것 = 최근 등록 → 우선
+  const out = [];
+  let added = true;
+  while (out.length < cap && added) {
+    added = false;
+    for (const arr of groups.values()) {
+      if (arr.length && out.length < cap) { out.push(arr.shift()); added = true; }
+    }
+  }
+  logger.info(`[reviewInspect] 예시 ${samples.length}장 → ${out.length}장 동봉(판정당 상한 ${cap})`);
   return out;
 }
 
@@ -282,7 +369,7 @@ async function receiptSampleSettings() {
     );
     const m = {};
     for (const r of rows) m[r.key] = r.value || '';
-    for (const s of out) s.imageUrl = m[cashReceiptSampleSettingKey(s.key)] || '';
+    for (const s of out) { s.imageUrls = parseSampleUrls(m[cashReceiptSampleSettingKey(s.key)]); s.imageUrl = s.imageUrls[0] || ''; }
   } catch (e) {
     logger.warn(`[reviewInspect] 현금영수증 예시 조회 실패: ${e.message}`);
   }
@@ -290,20 +377,12 @@ async function receiptSampleSettings() {
 }
 
 /** 현금영수증 예시 저장(''=제거). 채널 화이트리스트는 utils/cashReceiptChannels 단일 출처. */
-async function saveReceiptSample({ channel, imageUrl } = {}) {
+async function saveReceiptSample({ channel, imageUrl, mode, index } = {}) {
   const { isCashReceiptChannelKey, cashReceiptSampleSettingKey } = require('../utils/cashReceiptChannels');
   const ch = String(channel || '');
   // ★ 화이트리스트 — 목록에 없는 키를 받으면 임의 app_settings 키가 생성된다.
   if (!isCashReceiptChannelKey(ch)) throw new Error('알 수 없는 채널입니다.');
-  const url = String(imageUrl ?? '').trim();
-  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
-  await _db().query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [cashReceiptSampleSettingKey(ch), url]
-  );
-  _sampleCache.delete(cashReceiptSampleSettingKey(ch));   // 교체 즉시 반영
-  return url;
+  return _mutateSampleList(cashReceiptSampleSettingKey(ch), { imageUrl, mode, index });
 }
 
 /* ── 자동 분류(파일 라우팅) 판별 예시 — 구매캡처·구매확정 (utils/routeSampleKinds 단일 출처) ──
@@ -334,7 +413,7 @@ async function routeSampleSettings() {
     );
     const m = {};
     for (const r of rows) m[r.key] = r.value || '';
-    for (const s of out) s.imageUrl = m[routeSampleSettingKey(s.key)] || '';
+    for (const s of out) { s.imageUrls = parseSampleUrls(m[routeSampleSettingKey(s.key)]); s.imageUrl = s.imageUrls[0] || ''; }
   } catch (e) {
     logger.warn(`[reviewInspect] 자동분류 예시 조회 실패: ${e.message}`);
   }
@@ -342,19 +421,11 @@ async function routeSampleSettings() {
 }
 
 /** 자동 분류 예시 저장(''=제거). 슬롯 화이트리스트는 utils/routeSampleKinds 단일 출처. */
-async function saveRouteSample({ key, imageUrl } = {}) {
+async function saveRouteSample({ key, imageUrl, mode, index } = {}) {
   const { isRouteSampleKey, routeSampleSettingKey } = require('../utils/routeSampleKinds');
   const k = String(key || '');
   if (!isRouteSampleKey(k)) throw new Error('알 수 없는 예시 슬롯입니다.');
-  const url = String(imageUrl ?? '').trim();
-  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
-  await _db().query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [routeSampleSettingKey(k), url]
-  );
-  _sampleCache.delete(routeSampleSettingKey(k));   // 교체 즉시 반영
-  return url;
+  return _mutateSampleList(routeSampleSettingKey(k), { imageUrl, mode, index });
 }
 
 /**
@@ -369,7 +440,8 @@ async function submissionSamples({ expectedChannel, slotKey = 'review' } = {}) {
     ? await loadReceiptSamplesFor(expectedChannel)
     : await loadSamplesFor(expectedChannel);
   const route = await loadRouteSamples();
-  return base.concat(route);
+  // ★ 판정당 동봉 상한 — 장수만큼 토큰·지연이 늘어 첨부 즉시 판별의 응답성을 해친다.
+  return _trimSamples(base.concat(route));
 }
 
 /** 관리자 화면용 — 슬롯별 등록 여부. */
@@ -382,7 +454,7 @@ async function sampleSettings() {
     );
     const m = {};
     for (const r of rows) m[r.key] = r.value || '';
-    for (const s of out) s.imageUrl = m[sampleSettingKey(s.key)] || '';
+    for (const s of out) { s.imageUrls = parseSampleUrls(m[sampleSettingKey(s.key)]); s.imageUrl = s.imageUrls[0] || ''; }
   } catch (e) {
     logger.warn(`[reviewInspect] 예시이미지 조회 실패: ${e.message}`);
   }
@@ -390,18 +462,10 @@ async function sampleSettings() {
 }
 
 /** 예시이미지 저장(''=제거). https 절대 URL만 — 관리자 화면에 <img src>로 나간다. */
-async function saveSample({ key, imageUrl } = {}) {
+async function saveSample({ key, imageUrl, mode, index } = {}) {
   const { isReviewSampleKey, sampleSettingKey } = require('../utils/reviewSampleChannels');
   if (!isReviewSampleKey(key)) throw new Error('알 수 없는 예시 슬롯입니다.');
-  const url = String(imageUrl ?? '').trim();
-  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
-  await _db().query(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-    [sampleSettingKey(key), url]
-  );
-  _sampleCache.delete(sampleSettingKey(key));   // 교체 즉시 반영
-  return url;
+  return _mutateSampleList(sampleSettingKey(key), { imageUrl, mode, index });
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -581,17 +645,21 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     // ★ LATERAL 최신 1행 — 서브쿼리를 둘로 나누면 채널과 커스텀값이 서로 **다른 공고**에서
     //   올 수 있다(같은 탭에 공고가 여러 개면 실제로 갈린다). 한 행에서 둘 다 가져온다.
     // ★ 087: 리뷰타입도 **같은 행에서** 가져온다 — 따로 조회하면 채널과 다른 공고의 값이 섞인다.
+    // ★★ 리뷰타입은 **별도 LATERAL**(`reviewTypeContext.CAMPAIGN_REVIEW_TYPE_LATERAL` 단일 출처)로
+    //   찾는다 — 채널 LATERAL 은 `channel`+`channel_custom` 이 **같은 행**에서 와야 하므로
+    //   그대로 두고, 리뷰타입만 리네임(gid 폴백)·차수 재발행(값 있는 최신 공고)에 강한 규칙을 쓴다.
+    //   두 규칙을 한 LATERAL 에 합치면 채널 짝이 깨진다.
     const { rows } = await _db().query(
       `SELECT c.inspect_product_names, c.inspect_product_aliases, c.review_type AS tab_review_type,
-              rc.channel, rc.channel_custom, rc.review_type AS camp_review_type
+              rc.channel, rc.channel_custom, rt.review_type AS camp_review_type
          FROM tab_configs c
          LEFT JOIN LATERAL (
-              SELECT channel, channel_custom, review_type
+              SELECT channel, channel_custom
                 FROM recruit_campaigns
                WHERE linked_sheet_id = c.sheet_id AND linked_tab_name = c.tab_name
                ORDER BY created_at DESC
                LIMIT 1
-         ) rc ON TRUE
+         ) rc ON TRUE${require('./reviewTypeContext.service').CAMPAIGN_REVIEW_TYPE_LATERAL}
         WHERE c.sheet_id = $1 AND c.tab_name = $2
         LIMIT 1`,
       [sheetId, tabName]
@@ -695,13 +763,114 @@ async function findDuplicate({ fileHash, fileId, sheetId, tabName, rowIndex, rev
     const m = rows[0];
     return {
       verdict: 'fail',
-      matchFileId: m.file_id, matchTab: m.tab_name,
+      matchFileId: m.file_id, matchTab: m.tab_name, matchSheetId: m.sheet_id,
       matchReviewer: m.reviewer_name || '', matchRow: m.row_index,
       matchAt: m.uploaded_at,
     };
   } catch (e) {
     logger.warn(`[reviewInspect] 중복 대조 실패(통과 처리): ${e.message}`);
     return { verdict: 'skip' };
+  }
+}
+
+/**
+ * ★★ "한 캡처에 여러 리뷰" 완화 — 같은 파일이라고 **다 중복이 아니다**(실사고 2026-08-06).
+ *
+ * 실제 신고: 리뷰어가 두 작업(노티드 두바이 쫀득쿠키 / 노티드 슈가베어 우유크림 폭탄떡)에
+ * 동시에 참여했고, 쿠팡 **리뷰관리 화면에는 두 리뷰가 한 화면에 나란히** 보였다. 그래서 캡처
+ * 한 장으로 두 건을 냈다 — **리뷰어가 맞게 행동한 것**인데 검수는 "중복파일"로 불량 처리했다.
+ *
+ * 그래서 같은 지문(hash)이라도 **세 갈래로 나눈다**:
+ *   ㉮ 같은 작업 안에서 재사용            → fail (분명한 중복 — 종전 그대로)
+ *   ㉯ **다른 리뷰어**가 같은 파일        → fail (도용 — 종전 그대로)
+ *   ㉰ **같은 리뷰어 + 다른 작업**        → warn (사람이 본다) — 자동 불량·자동 제거 대상 아님
+ *      └ 그 캡처에서 **두 작업의 기대 상품명이 모두** 읽히면 → pass (근거 있는 자동 통과)
+ *
+ * ★ 자동 통과는 **근거가 있을 때만** — 두 작업의 상품이 서로 다르고 둘 다 캡처에서 읽혀야 한다.
+ *   근거 없이 통과시키면 "다른 캠페인에 같은 캡처 돌려쓰기"(진짜 재사용)까지 열린다.
+ * ★ 근거를 못 찾아도 **fail 로는 되돌리지 않는다** — 정상 리뷰어를 불량으로 모는 쪽이,
+ *   사람이 한 번 더 보는 쪽보다 나쁘다(이 저장소의 fail-open 규율).
+ * ★ 조회 실패는 **판정을 바꾸지 않는다**(원래 verdict 유지) — 모르면 완화하지 않는다.
+ */
+const _normName = (s) => String(s == null ? '' : s).replace(/\s+/g, '');
+async function classifyDuplicateContext({ dup, cls, exp, sheetId, tabName, reviewerName } = {}) {
+  if (!dup || dup.verdict !== 'fail' || !dup.matchFileId) return dup;
+  const me = _normName(reviewerName), other = _normName(dup.matchReviewer);
+  const sameReviewer = !!me && me === other;
+  const otherWork = (dup.matchSheetId && dup.matchSheetId !== sheetId) || dup.matchTab !== tabName;
+  if (!sameReviewer || !otherWork) return dup;    // ㉮㉯ = 종전 그대로 불량
+
+  let hitHere = null, hitOther = null;
+  try {
+    const oexp = await loadTabExpectations({ sheetId: dup.matchSheetId || sheetId, tabName: dup.matchTab });
+    // 캡처에서 읽어낸 모든 문자열을 한 덩어리로 놓고 두 작업의 기대 상품명을 각각 찾는다.
+    const text = [cls && cls.productName, cls && cls.reviewText, ...(((cls && cls.signals) || []))]
+      .filter(Boolean).join(' \n ');
+    hitHere = _productHit(text, (exp && exp.productNames) || []);
+    hitOther = _productHit(text, (oexp && oexp.productNames) || []);
+  } catch (_) { /* 조회 실패 = 근거 없음(아래에서 warn) */ }
+
+  if (hitHere && hitOther && _normProduct(hitHere) !== _normProduct(hitOther)) {
+    return { ...dup, verdict: 'pass', multiReview: true, products: [hitHere, hitOther] };
+  }
+  return { ...dup, verdict: 'warn', sameReviewerOtherTab: true };
+}
+
+/** 기대 상품명 목록 중 그 캡처 텍스트에서 실제로 읽힌 것 하나(없으면 null). */
+function _productHit(text, names) {
+  const t = _normProduct(_cleanProductForMatch(text));
+  if (!t) return null;
+  for (const e of (names || [])) {
+    const n = _normProduct(_cleanProductForMatch(e));
+    if (n && n.length >= 3 && t.includes(n)) return e;
+  }
+  return null;
+}
+
+/**
+ * 첨부 즉시 중복 대조 — **그 리뷰어 본인이 앞서 낸 사진**과 같은 파일인지(사용자 확정 ②:
+ * 작업 무관 본인 전체). 사진이 저장되기 **전**에 알려주는 것이 이 함수의 존재 이유다.
+ *
+ * ★★ 같은 자리(같은 작업·같은 줄) 재첨부는 **중복이 아니다** — 잘못 올려 다시 올리는 정상
+ *    재제출이라, 이걸 잡으면 멀쩡한 리뷰어가 갇힌다(2차 검수 findDuplicate 와 같은 규율).
+ * ★ 본인 확인은 **이름 + (가능하면) 연락처 뒤 8자리** — 지문이 맞는 행만 대조하므로 비용이 없다.
+ *   동명이인 오탐이 나더라도 **경고일 뿐 차단이 아니라서**(사용자 확정 ①) 피해가 없다.
+ * ★ 반환하는 파일ID는 **본인 것뿐** — 남의 제출물은 어떤 경우에도 나가지 않는다.
+ * ★ 판정 불가·조회 실패는 전부 null(경고 없음) = 오늘과 동작 동일(fail-open).
+ */
+async function findOwnDuplicate({ fileHash, sheetId, tabName, rowIndex, reviewerName, phone8 } = {}) {
+  const name = String(reviewerName || '').trim();
+  if (!fileHash || !name) return null;
+  try {
+    const { rows } = await _db().query(
+      `SELECT s.file_id, s.sheet_id, s.tab_name, s.row_index, s.uploaded_at,
+              (SELECT r.phone8 FROM review_index r
+                WHERE r.sheet_id = s.sheet_id AND r.tab_name = s.tab_name
+                  AND r.row_index = s.row_index LIMIT 1) AS phone8
+         FROM review_submissions s
+        WHERE s.file_hash = $1
+          AND COALESCE(s.slot_key, 'review') <> 'trashed'
+          AND REPLACE(COALESCE(s.reviewer_name, ''), ' ', '') = REPLACE($2, ' ', '')
+          AND NOT (s.sheet_id = $3 AND s.tab_name = $4
+                   AND COALESCE(s.row_index, -1) = COALESCE($5::int, -1))
+        ORDER BY s.uploaded_at DESC NULLS LAST
+        LIMIT 5`,
+      [fileHash, name, sheetId || '', tabName || '', rowIndex ?? null]
+    );
+    if (!rows.length) return null;
+    // ★ 연락처를 알 수 있으면 **본인 행만** 남긴다(동명이인 오탐 축소). 모르면 이름만으로 진행.
+    const p8 = String(phone8 || '').replace(/\D/g, '');
+    const pick = (p8.length === 8 ? rows.filter(r => !r.phone8 || r.phone8 === p8) : rows)[0] || null;
+    if (!pick) return null;
+    return {
+      fileId: pick.file_id,
+      sameTab: !!(sheetId && tabName) && pick.sheet_id === sheetId && pick.tab_name === tabName,
+      rowIndex: pick.row_index,
+      uploadedAt: pick.uploaded_at,
+    };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 첨부 중복 대조 실패(경고 생략): ${e.message}`);
+    return null;
   }
 }
 
@@ -849,8 +1018,11 @@ async function inspectSubmission({
       : { verdict: 'skip' };
 
     // ③ 같은 파일 — 슬롯 무관(영수증 재탕도 잡을 값어치가 있다)
-    checks.duplicate = await findDuplicate({
-      fileHash: hash, fileId, sheetId, tabName, rowIndex, reviewerName,
+    // ★ 같은 리뷰어가 **다른 작업**에 낸 같은 캡처는 "한 화면에 여러 리뷰"일 수 있다 →
+    //   classifyDuplicateContext 가 warn/pass 로 완화한다(같은 작업 재사용·타인 도용은 그대로 fail).
+    checks.duplicate = await classifyDuplicateContext({
+      dup: await findDuplicate({ fileHash: hash, fileId, sheetId, tabName, rowIndex, reviewerName }),
+      cls, exp, sheetId, tabName, reviewerName,
     });
 
     // ④ 본문 겹침 (리뷰 슬롯만)
@@ -979,14 +1151,31 @@ async function _giveUpStale() {
  * ★ attempts 0 리셋 — 재시도 상한으로 unverifiable 종결된 건도 다시 본다.
  * ★ 스윕이 이미 도는 중이면 busy 로 알리고 초기화만 남긴다(10분 크론이 이어받는다).
  */
-async function reinspectTab({ sheetId, tabName, limit = 100 } = {}) {
-  if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName이 필요합니다.' };
-  const { rowCount } = await _db().query(
-    `UPDATE review_inspections
-        SET status = 'pending', attempts = 0, updated_at = NOW()
-      WHERE sheet_id = $1 AND tab_name = $2
-        AND status IN ('fail', 'suspect', 'unverifiable')`,
-    [sheetId, tabName]);
+async function reinspectTab({ sheetId, tabName, fileIds, limit = 100 } = {}) {
+  /* ★★ 대상 지정 두 가지 — **작업(탭) 전체** 또는 **화면이 고른 건들(fileIds)**.
+     후자는 "리뷰화면 아님만 일괄 재검수" 같은 **유형별 재검수**에 쓴다.
+     ★ 유형 판정은 화면(`_riIssueTypes`)이 단일 출처다 — 서버에 유형 조건을 다시 만들면
+       "칩 건수 ≠ 재검수 대상"으로 갈라진다. 그래서 서버는 **파일ID 목록만** 받는다.
+     ★ 상한 500 — 화면 목록 자체가 최대 500건이라 그보다 클 수 없다(초과분은 잘라 보고). */
+  const ids = Array.isArray(fileIds)
+    ? [...new Set(fileIds.map(v => String(v || '')).filter(Boolean))].slice(0, 500)
+    : null;
+  if (!ids || !ids.length) {
+    if (!sheetId || !tabName) return { ok: false, error: 'sheetId, tabName 또는 fileIds 가 필요합니다.' };
+  }
+  const { rowCount } = ids && ids.length
+    ? await _db().query(
+      `UPDATE review_inspections
+          SET status = 'pending', attempts = 0, updated_at = NOW()
+        WHERE file_id = ANY($1::text[])
+          AND status IN ('fail', 'suspect', 'unverifiable')`,
+      [ids])
+    : await _db().query(
+      `UPDATE review_inspections
+          SET status = 'pending', attempts = 0, updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND status IN ('fail', 'suspect', 'unverifiable')`,
+      [sheetId, tabName]);
   const cap = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 100);
   const { withJobLock } = require('../utils/jobLock');
   const sweep = await withJobLock('review_inspect_sweep',
@@ -1162,6 +1351,91 @@ async function resolveInspection({ fileId, by, resolution } = {}) {
 }
 
 /**
+ * 검수 건 → 리뷰어 연락처(phone8) 해석. **한 왕복**으로 4갈래를 함께 읽고 위에서부터 고른다.
+ *
+ * ★★ 왜 4갈래인가(실사고): 종전엔 ①만 봤는데, 검수 건의 `row_index` 는 **NULL 일 수 있고**
+ *   (업로드 시 이름↔행 매칭이 모호하면 `review_submissions.row_index` 가 비고 그대로 복제된다)
+ *   행이 있어도 **시트 연락처 칸이 비어 있으면** `review_index.phone8` 이 없다 → "연락처를 찾지 못함".
+ * ★★ 완화 금지: 아래 순서와 게이트는 **틀린 사람에게 반려 안내가 가지 않게** 하는 장치다.
+ *   ① 시트 현재값(그 줄의 연락처) — 소유권의 최종 진실(search.service 규율과 동일)
+ *   ② 업로드 원장이 **결정적으로** 연결한 인덱스 행(`review_submissions.review_index_id`)
+ *   ③ 확정 신원(`participation_links`) — ★ **이름이 같을 때만**(재배정된 행의 옛 주인 차단.
+ *      ①이 비었을 때만 보는 것도 search.service 의 stale-pl 규율 그대로)
+ *   ④ 같은 작업에서 **이름이 정확히 일치하는 리뷰어가 딱 한 명**일 때만(동명이인이면 포기)
+ * ★ 못 찾으면 **사유를 구분해** 돌려준다 — "왜 못 보냈는지"를 모르면 담당자가 손쓸 수가 없다.
+ */
+async function resolveReviewerPhone8(fileId) {
+  const { rows } = await _db().query(
+    `SELECT i.sheet_id, i.tab_name, i.row_index, i.reviewer_name,
+            (SELECT r.phone8 FROM review_index r
+              WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                AND r.row_index = i.row_index AND COALESCE(r.phone8,'') <> '' LIMIT 1) AS p_row,
+            (SELECT r.phone8 FROM review_submissions s
+                JOIN review_index r ON r.id = s.review_index_id
+              WHERE s.file_id = i.file_id AND COALESCE(r.phone8,'') <> '' LIMIT 1) AS p_link,
+            (SELECT pl.phone8 FROM participation_links pl
+              WHERE pl.sheet_id = i.sheet_id AND pl.tab_name = i.tab_name
+                AND pl.row_index = i.row_index AND COALESCE(pl.phone8,'') <> ''
+                AND REPLACE(COALESCE(pl.name,''),' ','') = REPLACE(COALESCE(i.reviewer_name,''),' ','')
+                AND COALESCE(i.reviewer_name,'') <> '' LIMIT 1) AS p_pl,
+            (SELECT MIN(r.phone8) FROM review_index r
+              WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                AND COALESCE(r.phone8,'') <> '' AND COALESCE(i.reviewer_name,'') <> ''
+                AND REPLACE(COALESCE(r.reviewer_name,''),' ','') = REPLACE(COALESCE(i.reviewer_name,''),' ','')
+              HAVING COUNT(DISTINCT r.phone8) = 1) AS p_name,
+            (SELECT COUNT(DISTINCT r.phone8) FROM review_index r
+              WHERE r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name
+                AND COALESCE(r.phone8,'') <> '' AND COALESCE(i.reviewer_name,'') <> ''
+                AND REPLACE(COALESCE(r.reviewer_name,''),' ','') = REPLACE(COALESCE(i.reviewer_name,''),' ','')) AS name_cnt
+       FROM review_inspections i WHERE i.file_id = $1 LIMIT 1`,
+    [fileId]);
+  const r = rows[0];
+  if (!r) return { row: null, error: '검수 건을 찾지 못했습니다.' };
+
+  const pick = [['row', r.p_row], ['link', r.p_link], ['participation', r.p_pl], ['name', r.p_name]]
+    .find(([, v]) => v);
+  if (pick) return { row: r, phone8: pick[1], via: pick[0] };
+
+  // ★ 사유 구분 — 담당자가 무엇을 고쳐야 하는지 알아야 한다.
+  const cnt = Number(r.name_cnt || 0);
+  let why;
+  if (cnt > 1) why = `같은 이름(${r.reviewer_name || ''})이 이 작업에 ${cnt}명이라 연락처를 특정할 수 없습니다`;
+  else if (r.row_index == null) why = '이 캡처가 시트 어느 줄인지 연결되어 있지 않습니다';
+  else why = `시트 ${r.row_index}행의 연락처 칸이 비어 있습니다`;
+  return { row: r, error: `리뷰어 연락처를 찾지 못해 메시지를 보내지 못했습니다 — ${why}. 1:1 문의로 직접 안내해 주세요.` };
+}
+
+/**
+ * [✕ 불량 맞음] → 리뷰어 1:1 문의 채팅에 반려 사유 자동 통지.
+ * ★ 확인(원장 기록)과 분리된 후처리 — 실패해도 불량 확인은 유지되고, 결과를 응답에 실어
+ *   관리자가 알게 한다(조용한 미전송 금지). 절대 throw 하지 않는다.
+ * ★ 연락처 해석은 `resolveReviewerPhone8` 단일 출처(위 4갈래 게이트).
+ */
+async function notifyInspectionReject({ fileId, message, by, card } = {}) {
+  const msg = String(message || '').trim();
+  if (!fileId || !msg) return { sent: false, error: '전송할 사유가 없습니다.' };
+  try {
+    const got = await resolveReviewerPhone8(fileId);
+    const r = got.row;
+    if (!r) return { sent: false, error: got.error || '검수 건을 찾지 못했습니다.' };
+    if (!got.phone8) return { sent: false, error: got.error };
+    r.phone8 = got.phone8;
+    const out = await require('./csBridge.service').postInspectionReject({
+      sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
+      reviewerName: r.reviewer_name, phone8: r.phone8, message: msg, by,
+      // ★ 사진 카드 재료 — "어떤 작업의 어떤 사진인지"를 채팅에서 바로 보게 한다.
+      //   ★ 리뷰어에게 나가는 값이라 **관리자 실명·시트 제목은 담지 않는다**(meta 는 응답에 그대로 실린다).
+      card: card ? { fileId, ...card, work: r.tab_name || '' } : null,
+    });
+    if (!out) return { sent: false, error: '메시지 전송에 실패했습니다 — 1:1 문의로 직접 안내해 주세요.' };
+    return { sent: true, threadId: out.threadId };
+  } catch (e) {
+    logger.warn(`[reviewInspect] 반려 통지 실패(${fileId}): ${e.message}`);
+    return { sent: false, error: '메시지 전송에 실패했습니다 — 1:1 문의로 직접 안내해 주세요.' };
+  }
+}
+
+/**
  * 일괄 확인 처리 — 그 탭의 미확인 의심·불량 전부를 한 번에 종결한다(1632건 백로그용).
  * ★ adminOrMaster 전용(라우트) — 대량 종결은 되돌리기 어렵다.
  * ★ resolution 'ok' 면 상품명 의심 건들의 캡처 표기를 별칭으로 **한 번에** 학습한다.
@@ -1225,10 +1499,14 @@ module.exports = {
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
   listInspections, inspectionSummary, resolveInspection, resolveInspectionsBulk, inspectionScope,
+  notifyInspectionReject,
+  resolveReviewerPhone8,
+  classifyDuplicateContext,
   hashBase64, matchProductName, computeStatus,
-  loadTabExpectations, findDuplicate, findSimilarText,
+  loadTabExpectations, findDuplicate, findOwnDuplicate, findSimilarText,
   inspectSubmission, saveFileHash,
   ENABLED, PRECHECK_ENABLED, PRECHECK_BLOCK,
   BLOCK_CONFIDENCE, SIM_THRESHOLD, MIN_TEXT, SIM_LEN_RATIO, BLOCK_EXEMPT_CHANNELS,
+  parseSampleUrls, SAMPLE_SLOT_CAP, SAMPLE_ATTACH_CAP, _trimSamples,
   __setPoolForTest,
 };

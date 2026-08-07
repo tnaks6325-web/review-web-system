@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>같은 사진을 두 번 내는 문제 — 원인과 해결 방법 (고르기)</title>
+<style>
+  /* 오프라인 열람 — 외부 리소스 0, 라이트 고정. */
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#F2F4F7; color:#1B2334; line-height:1.65; padding:28px 16px 110px; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin-bottom:4px; }
+  h2 { font-size:1.12rem; margin:44px 0 8px; padding-bottom:8px; border-bottom:2px solid #313B52; }
+  h3 { font-size:.96rem; margin:22px 0 8px; color:#334155; }
+  p, li, td, th { font-size:.88rem; }
+  .sub { color:#64748B; font-size:.86rem; margin-bottom:18px; }
+  .doc { background:#fff; border:1px solid #E4E7EE; border-radius:12px; padding:18px 20px; margin:12px 0; }
+  .lead { background:#fff; border:1px solid #E4E7EE; border-left:5px solid #1D4ED8; border-radius:12px; padding:16px 20px; margin:14px 0; }
+  .lead b { color:#1D4ED8; }
+  table { border-collapse:collapse; width:100%; background:#fff; margin:9px 0; }
+  th, td { border:1px solid #E4E7EE; padding:8px 11px; text-align:left; vertical-align:top; font-size:.84rem; }
+  th { background:#F8F9FB; font-size:.8rem; }
+  ul { padding-left:20px; margin:6px 0; }
+  li { margin:4px 0; }
+  .no { color:#B91C1C; font-weight:800; }
+  .yes { color:#15803D; font-weight:800; }
+  .note { background:#FFFBEB; border:1px solid #FDE68A; border-radius:10px; padding:12px 16px; font-size:.85rem; margin:12px 0; }
+
+  /* 흐름 */
+  .flow { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0; }
+  .fstep { flex:1; min-width:180px; background:#fff; border:1px solid #E4E7EE; border-radius:11px; padding:12px 14px; }
+  .fstep .n { font-size:.64rem; font-weight:800; letter-spacing:.08em; color:#94A3B8; }
+  .fstep .t { font-size:.88rem; font-weight:800; margin:2px 0 5px; }
+  .fstep .d { font-size:.78rem; color:#64748B; line-height:1.5; }
+  .fstep .gap { margin-top:9px; font-size:.76rem; background:#FEF3F2; border:1px solid #F3C8C4; color:#9F1D1D; border-radius:8px; padding:7px 9px; line-height:1.45; }
+  .fstep .fix { margin-top:9px; font-size:.76rem; background:#F1FBF4; border:1px solid #C4E8CE; color:#14672F; border-radius:8px; padding:7px 9px; line-height:1.45; }
+  .fstep.bad { border-color:#F3C8C4; } .fstep.good { border-color:#C4E8CE; }
+
+  /* 폰 목업 */
+  .phones { display:flex; gap:16px; flex-wrap:wrap; }
+  .ph { width:252px; background:#fff; border:1px solid #D8DEE8; border-radius:16px; overflow:hidden; box-shadow:0 2px 10px rgba(27,35,52,.08); }
+  .ph-top { background:#F6F8FB; border-bottom:1px solid #E4E7EE; padding:7px 12px; font-size:.7rem; color:#64748B; display:flex; justify-content:space-between; font-weight:700; }
+  .ph-b { padding:12px; }
+  .ph-t { font-size:.88rem; font-weight:800; margin-bottom:2px; }
+  .ph-s { font-size:.73rem; color:#64748B; margin-bottom:9px; }
+  .cap { display:grid; place-items:center; height:104px; border-radius:9px; background:linear-gradient(160deg,#E4E7EE,#CFD6E0); font-size:1.5rem; }
+  .cap.sm { height:66px; font-size:1.1rem; }
+  .btn { display:block; width:100%; text-align:center; border-radius:9px; padding:9px 0; font-size:.79rem; font-weight:800; margin-top:8px; border:1px solid transparent; }
+  .btn.pri { background:#1D4ED8; color:#fff; } .btn.gh { background:#fff; color:#3A445A; border-color:#D8DEE8; }
+  .warnbox { background:#FEF3F2; border:1px solid #F3C8C4; border-radius:10px; padding:10px 12px; margin-top:9px; }
+  .warnbox .h { font-size:.79rem; font-weight:800; color:#B91C1C; }
+  .warnbox .d { font-size:.73rem; color:#7F1D1D; margin-top:3px; line-height:1.45; }
+  .okbox { background:#F1FBF4; border:1px solid #C4E8CE; border-radius:10px; padding:10px 12px; margin-top:9px; }
+  .okbox .h { font-size:.79rem; font-weight:800; color:#15803D; }
+  .okbox .d { font-size:.73rem; color:#14532D; margin-top:3px; line-height:1.45; }
+  .rowlist { border:1px solid #E4E7EE; border-radius:10px; overflow:hidden; margin-top:8px; }
+  .rowlist .r { display:flex; align-items:center; gap:8px; padding:8px 9px; border-bottom:1px solid #EEF1F5; font-size:.75rem; }
+  .rowlist .r:last-child { border-bottom:none; }
+  .rowlist .th2 { width:30px; height:38px; border-radius:5px; background:linear-gradient(160deg,#E4E7EE,#CFD6E0); flex:none; display:grid; place-items:center; font-size:.8rem; }
+  .tag { font-size:.65rem; font-weight:800; border-radius:99px; padding:1px 8px; flex:none; }
+  .tag.done { background:#E5F3EE; color:#127A5E; } .tag.wait { background:#F1F3F7; color:#68717E; }
+  .tag.dup { background:#FEE2E2; color:#B91C1C; }
+  .lbl { font-size:.68rem; font-weight:800; color:#94A3B8; letter-spacing:.06em; margin:16px 0 6px; }
+
+  /* 고르기 */
+  .q { background:#fff; border:1px solid #E4E7EE; border-radius:12px; padding:16px 18px; margin:14px 0; }
+  .qh { font-size:.98rem; font-weight:800; margin-bottom:3px; }
+  .qs { font-size:.8rem; color:#64748B; margin-bottom:11px; }
+  .opts { display:flex; gap:11px; flex-wrap:wrap; }
+  .opt { flex:1; min-width:250px; border:2px solid #E4E7EE; border-radius:11px; padding:12px 14px; cursor:pointer; background:#fff; transition:.12s; position:relative; }
+  .opt:hover { border-color:#C7D2FE; }
+  .opt input { position:absolute; opacity:0; pointer-events:none; }
+  .opt.on { border-color:#1D4ED8; background:#F8FAFF; box-shadow:0 0 0 3px rgba(29,78,216,.09); }
+  .opt .ot { font-size:.88rem; font-weight:800; display:flex; align-items:center; gap:6px; }
+  .opt .rec { font-size:.62rem; font-weight:800; background:#E5F3EE; color:#127A5E; border-radius:99px; padding:1px 8px; }
+  .opt .od { font-size:.79rem; color:#475569; margin-top:6px; line-height:1.5; }
+  .opt .pro { font-size:.75rem; color:#15803D; margin-top:6px; }
+  .opt .con { font-size:.75rem; color:#B45309; margin-top:2px; }
+  .sumbar { position:sticky; bottom:0; background:#111827; color:#fff; border-radius:12px; padding:14px 18px; margin-top:20px; box-shadow:0 -6px 24px rgba(15,23,42,.18); }
+  .sumbar b { color:#FDE68A; }
+  .sumbar .t { font-size:.9rem; font-weight:800; margin-bottom:6px; }
+  .sumbar .l { font-size:.82rem; line-height:1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>같은 사진을 두 번 내는 문제 — 왜 생기고, 어떻게 막을까</h1>
+<p class="sub">리뷰검수에 쌓인 <b>‘같은 파일’ 28건</b>을 살펴본 결과와, 고르실 수 있는 해결 방법입니다. 아래에서 선택하시면 맨 아래에 정리됩니다.</p>
+
+<div class="lead">
+<b>한 줄로 말하면</b> — 리뷰어가 <b>자기가 앞서 무엇을 냈는지 볼 수 없고</b>, 시스템도 <b>사진을 고르는 순간에는 같은 사진인지 확인하지 않기 때문</b>입니다.
+그래서 잘못 낸 것을 되돌릴 수 있는 시점에는 아무도 눈치채지 못하고, <b>제출이 다 끝난 뒤에야</b> 관리자 검수에서 발견됩니다.
+</div>
+
+<h2>1. 실제로 어떤 일이 벌어졌나</h2>
+<div class="doc">
+<table>
+<tr><th style="width:27%">유형</th><th style="width:33%">실제 사례</th><th>무슨 상황인가</th></tr>
+<tr><td><b>같은 사람이 같은 작업의 다른 줄에</b><br><span class="no">가장 많음</span></td>
+    <td>김예진 394행 ↔ 388행<br>황보리 124행 ↔ 121행<br>이다현 79행 ↔ 76행</td>
+    <td>한 사람이 <b>같은 작업에 여러 건 참여</b>했는데, 각 건에 같은 사진을 올렸습니다. 대부분 <b>리뷰 글까지 100% 같습니다.</b></td></tr>
+<tr><td><b>같은 사람이 다른 작업에</b></td>
+    <td>백은미 — 두바이 쫀득쿠키 건에 <b>우유크림폭탄떡</b> 사진</td>
+    <td>지난 작업 사진을 다시 올렸습니다. 갤러리에서 <b>비슷한 최근 사진</b>을 잘못 고르는 경우입니다.</td></tr>
+</table>
+<div class="note"><b>참고</b> — 이 중에는 <b>단순 실수</b>(어느 건에 무엇을 냈는지 몰라 같은 사진을 다시 고름)와 <b>일부러 같은 리뷰를 재사용</b>한 경우가 섞여 있습니다. 아래 개선을 하면 <b>실수는 거의 사라지고</b>, 그래도 남는 건이 곧 <b>진짜 문제 건</b>이라 판단이 훨씬 쉬워집니다.</div>
+</div>
+
+<h2>2. 지금은 왜 못 막나 — 리뷰어가 겪는 순서</h2>
+<div class="flow">
+  <div class="fstep bad"><div class="n">1단계</div><div class="t">사진 고르기</div>
+    <div class="d">휴대폰 갤러리에서 캡처를 고릅니다. 최근 사진들이 서로 비슷하게 생겼습니다.</div>
+    <div class="gap">화면 어디에도 <b>“내가 이 작업에 이미 낸 사진”</b>이 보이지 않습니다.</div></div>
+  <div class="fstep bad"><div class="n">2단계</div><div class="t">사진을 붙이는 순간</div>
+    <div class="d">시스템이 <b>“리뷰 화면이 맞는지, 어느 쇼핑몰인지”</b>만 자동으로 확인합니다.</div>
+    <div class="gap">이때 <b>같은 사진인지는 전혀 보지 않습니다.</b> 그래서 그대로 통과합니다.</div></div>
+  <div class="fstep bad"><div class="n">3단계</div><div class="t">제출</div>
+    <div class="d">사진이 저장되고 시트에도 반영됩니다.</div>
+    <div class="gap">이때 확인하는 중복은 <b>“같은 줄에 같은 칸”</b>뿐입니다 — <b>다른 줄·다른 작업</b>은 그냥 통과합니다.</div></div>
+  <div class="fstep bad"><div class="n">4단계</div><div class="t">완료 화면</div>
+    <div class="d">“제출됐습니다.”</div>
+    <div class="gap">리뷰어는 <b>잘못 냈다는 걸 모른 채</b> 끝냅니다.</div></div>
+  <div class="fstep bad"><div class="n">5단계</div><div class="t">며칠 뒤 관리자 검수</div>
+    <div class="d">그제서야 같은 사진이라는 게 발견됩니다.</div>
+    <div class="gap">이미 저장·반영된 뒤라 <b>관리자가 지우고 다시 받아야</b> 합니다(지금 보고 계신 28건).</div></div>
+</div>
+
+<div class="doc">
+<h3>어느 시점에 무엇을 보고 있나</h3>
+<table>
+<tr><th style="width:32%">확인하는 시점</th><th>같은 줄에 다시 올림</th><th>같은 작업 <b>다른 줄</b></th><th>다른 작업</th></tr>
+<tr><td>① 사진을 붙이는 순간</td><td class="no">안 봄</td><td class="no">안 봄</td><td class="no">안 봄</td></tr>
+<tr><td>② 제출해서 저장될 때</td><td class="yes">봄(교체로 처리)</td><td class="no">안 봄</td><td class="no">안 봄</td></tr>
+<tr><td>③ 제출이 끝난 뒤 검수</td><td>대상 아님(정상 재제출)</td><td class="yes">봄 → <b>사후</b></td><td class="yes">봄 → <b>사후</b></td></tr>
+</table>
+<p style="margin-top:9px">→ <b>리뷰어가 스스로 고칠 수 있는 시점(사진 붙이기 전)에는 아무도 중복을 보지 않습니다.</b></p>
+</div>
+
+<h2>3. 이렇게 바꾸면 됩니다</h2>
+<div class="flow">
+  <div class="fstep good"><div class="n">1단계</div><div class="t">제출 화면에 들어가면</div>
+    <div class="d">그 작업에서 <b>내가 이미 낸 사진과 건별 제출 현황</b>을 먼저 보여줍니다.</div>
+    <div class="fix">‘무엇을 냈는지 모르는 상태’ 자체가 없어집니다. <b>(방법 B)</b></div></div>
+  <div class="fstep good"><div class="n">2단계</div><div class="t">사진을 붙이는 순간</div>
+    <div class="d">같은 사진이면 <b>그 자리에서</b> “이미 ○○에 낸 사진이에요”라고 알려줍니다.</div>
+    <div class="fix">아직 저장 전이라 <b>사진만 바꾸면 끝</b>입니다. <b>(방법 A · 핵심)</b></div></div>
+  <div class="fstep good"><div class="n">3단계</div><div class="t">그래도 제출하면</div>
+    <div class="d">관리자에게 <b>그날 바로</b> 알림이 갑니다.</div>
+    <div class="fix">며칠 뒤가 아니라 당일 처리됩니다. <b>(방법 D)</b></div></div>
+  <div class="fstep good"><div class="n">4단계</div><div class="t">제출 후 확인</div>
+    <div class="d">리뷰 내역에서 <b>낸 사진을 바로 보고</b> 교체 요청할 수 있습니다.</div>
+    <div class="fix">지금은 팝업 안쪽에 숨어 있는 기능을 앞으로 꺼냅니다. <b>(방법 C)</b></div></div>
+</div>
+
+<div class="lbl">리뷰어 휴대폰 화면 — 지금 / 바뀐 뒤</div>
+<div class="note" style="margin-top:0"><b>화면 표기 규칙</b> — 리뷰어에게는 <b>줄 번호(388행 같은 것)를 쓰지 않습니다.</b> 그건 관리용 번호라 리뷰어는 알지도, 알 필요도 없습니다.
+지금 제출 화면이 쓰는 방식 그대로 <b>①②③ 참여 순번 + 상품(옵션) + 제출한 날짜·시각</b>으로 가리킵니다.</div>
+<div class="phones">
+
+  <div class="ph">
+    <div class="ph-top"><span>지금</span><span>제출 화면</span></div>
+    <div class="ph-b">
+      <div class="ph-t">리뷰 캡처 첨부</div>
+      <div class="ph-s">친구사이 하절기 7차 — ③ 한경희 선풍기 (블랙)</div>
+      <div class="cap">🖼</div>
+      <div style="font-size:.74rem;color:#64748B;margin-top:7px">사진을 고르면 바로 첨부됩니다.</div>
+      <span class="btn pri">제출하기</span>
+      <div style="font-size:.7rem;color:#B91C1C;margin-top:9px;line-height:1.5">
+        앞서 낸 건에 <b>같은 사진</b>을 이미 냈지만 아무 표시가 없어 그대로 제출됩니다.</div>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="ph-top"><span>방법 A</span><span>사진 붙이는 순간</span></div>
+    <div class="ph-b">
+      <div class="ph-t">리뷰 캡처 첨부</div>
+      <div class="ph-s">친구사이 하절기 7차 — ③ 한경희 선풍기 (블랙)</div>
+      <div class="cap">🖼</div>
+      <div class="warnbox">
+        <div class="h">이미 제출한 사진이에요</div>
+        <div class="d">이 사진은 <b>7월 29일 오후 9:58</b>에 같은 작업 <b>①번 건</b>으로 이미 제출하셨어요.<br>이번 건은 <b>다른 리뷰 화면</b>을 캡처해 올려주세요.</div>
+        <div style="display:flex;gap:7px;margin-top:8px;align-items:center">
+          <div class="cap sm" style="width:44px">🖼</div>
+          <div style="font-size:.7rem;color:#7F1D1D;line-height:1.4">①번 건에 낸 사진<br>7/29 오후 9:58</div>
+        </div>
+      </div>
+      <span class="btn pri">다른 사진 고르기</span>
+      <span class="btn gh" style="font-size:.73rem">그래도 이 사진이 맞아요</span>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="ph-top"><span>방법 B</span><span>제출 화면 위쪽</span></div>
+    <div class="ph-b">
+      <div class="ph-t">내 제출 현황</div>
+      <div class="ph-s">친구사이 하절기 7차 — 내 참여 3건</div>
+      <div class="rowlist">
+        <div class="r"><div class="th2">🖼</div><div style="flex:1"><b>① 한경희 선풍기 (블랙)</b><br><span style="color:#64748B">7/29 오후 9:58 제출</span></div><span class="tag done">제출완료</span></div>
+        <div class="r"><div class="th2">🖼</div><div style="flex:1"><b>② 한경희 선풍기 (화이트)</b><br><span style="color:#64748B">7/30 오전 9:12 제출</span></div><span class="tag done">제출완료</span></div>
+        <div class="r"><div class="th2" style="background:#F1F3F7">＋</div><div style="flex:1"><b>③ 한경희 선풍기 (블랙)</b><br><span style="color:#64748B">지금 제출할 건</span></div><span class="tag wait">대기</span></div>
+      </div>
+      <div class="okbox"><div class="h">건마다 다른 리뷰가 필요해요</div>
+        <div class="d">이미 낸 사진·글과 <b>같은 것</b>을 다시 올리면 반려됩니다.</div></div>
+      <span class="btn pri">③번 건 캡처 첨부하기</span>
+    </div>
+  </div>
+
+  <div class="ph">
+    <div class="ph-top"><span>방법 C</span><span>리뷰 내역</span></div>
+    <div class="ph-b">
+      <div class="ph-t">제출완료</div>
+      <div class="ph-s">내가 낸 사진을 카드에서 바로 확인</div>
+      <div class="rowlist">
+        <div class="r"><div class="th2">🖼</div><div style="flex:1"><b>친구사이 하절기 7차</b><br><span style="color:#64748B">한경희 선풍기 (블랙) · 7/29 제출</span></div></div>
+        <div class="r" style="background:#FFFBFB"><div class="th2">🖼</div><div style="flex:1"><b>친구사이 하절기 7차</b><br><span style="color:#B91C1C">앞서 낸 사진과 같은 사진이에요</span></div><span class="tag dup">확인필요</span></div>
+      </div>
+      <span class="btn gh" style="font-size:.73rem">🖼 제출 사진 확인 · 교체 요청</span>
+      <div style="font-size:.7rem;color:#64748B;margin-top:8px;line-height:1.45">
+        지금은 이 버튼이 <b>팝업 안쪽</b>에 있고 한 건일 때만 보입니다.</div>
+    </div>
+  </div>
+
+</div>
+
+<h2>4. 골라주세요</h2>
+<p class="sub">아래 세 가지만 정해주시면 그대로 만들겠습니다. 고르면 맨 아래에 정리됩니다. 그냥 두시면 <b>추천</b>으로 진행합니다.</p>
+
+<div class="q">
+  <div class="qh">① 같은 사진을 붙였을 때, 어떻게 할까요?</div>
+  <div class="qs">사진을 고르는 순간 같은 사진이라는 걸 알려주는 것까지는 공통입니다. 그 다음이 다릅니다.</div>
+  <div class="opts">
+    <label class="opt on"><input type="radio" name="q1" value="알려주고 리뷰어가 선택(추천)" checked>
+      <div class="ot">알려만 주고 리뷰어가 선택 <span class="rec">추천</span></div>
+      <div class="od">“이미 낸 사진이에요”라고 알려주되, <b>[그래도 이 사진이 맞아요]</b>를 누르면 제출할 수 있습니다.</div>
+      <div class="pro">✓ 시스템이 잘못 알아본 경우에도 리뷰어가 막히지 않습니다</div>
+      <div class="con">△ 무시하고 제출하는 사람이 일부 남습니다(관리자에게 바로 알림은 갑니다)</div></label>
+    <label class="opt"><input type="radio" name="q1" value="아예 제출 못 하게 차단">
+      <div class="ot">아예 제출 못 하게 막기</div>
+      <div class="od">같은 사진이면 <b>다른 사진을 고를 때까지</b> 진행할 수 없습니다.</div>
+      <div class="pro">✓ 중복이 거의 0이 됩니다</div>
+      <div class="con">△ 시스템이 잘못 알아보면 <b>정상 리뷰어가 제출을 못 하게</b> 됩니다(문의·이탈 위험)</div></label>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh">② 어디까지 비교해서 “같은 사진”이라고 할까요?</div>
+  <div class="qs">비교 대상은 <b>그 리뷰어 본인이 과거에 낸 사진</b>입니다(남의 사진과 비교하는 게 아닙니다).</div>
+  <div class="opts">
+    <label class="opt on"><input type="radio" name="q2" value="본인이 낸 모든 작업의 사진(추천)" checked>
+      <div class="ot">본인이 낸 <b>모든 작업</b>의 사진 <span class="rec">추천</span></div>
+      <div class="od">지난달 다른 상품에 냈던 사진을 다시 올려도 잡아냅니다.</div>
+      <div class="pro">✓ 백은미 님 사례(다른 상품 사진 재사용)까지 막힙니다</div>
+      <div class="con">△ 없음(비교는 본인 것만이라 개인정보 문제도 없습니다)</div></label>
+    <label class="opt"><input type="radio" name="q2" value="같은 작업 안에서만">
+      <div class="ot">같은 작업 안에서만</div>
+      <div class="od">지금 참여 중인 그 작업의 다른 건들과만 비교합니다.</div>
+      <div class="pro">✓ 가장 보수적입니다</div>
+      <div class="con">△ 다른 상품 사진을 재사용하는 경우는 못 잡습니다</div></label>
+  </div>
+</div>
+
+<div class="q">
+  <div class="qh">③ 제출 화면 위에 “내 제출 현황”을 보여줄까요?</div>
+  <div class="qs">한 사람이 같은 작업에 여러 건 참여할 때, 어느 건에 무엇을 냈는지 보여주는 목록입니다.</div>
+  <div class="opts">
+    <label class="opt on"><input type="radio" name="q3" value="보여준다(추천)" checked>
+      <div class="ot">보여준다 <span class="rec">추천</span></div>
+      <div class="od">그 작업에서 <b>내가 참여한 건 전부</b>와 각 건의 제출 사진·제출일을 목록으로 보여줍니다.</div>
+      <div class="pro">✓ 헷갈려서 생기는 중복이 근본적으로 줄어듭니다</div>
+      <div class="con">△ 제출 화면이 조금 길어집니다</div></label>
+    <label class="opt"><input type="radio" name="q3" value="보여주지 않는다(경고만)">
+      <div class="ot">보여주지 않는다</div>
+      <div class="od">①의 경고만 두고 화면은 지금 그대로 둡니다.</div>
+      <div class="pro">✓ 화면이 단순합니다</div>
+      <div class="con">△ 리뷰어는 여전히 자기가 무엇을 냈는지 모릅니다</div></label>
+  </div>
+</div>
+
+<div class="sumbar">
+  <div class="t">고르신 내용</div>
+  <div class="l">① 같은 사진일 때 — <b id="s1">알려주고 리뷰어가 선택(추천)</b><br>
+                  ② 비교 범위 — <b id="s2">본인이 낸 모든 작업의 사진(추천)</b><br>
+                  ③ 내 제출 현황 표시 — <b id="s3">보여준다(추천)</b></div>
+</div>
+
+<h2>5. 참고 — 만들 때 지킬 것</h2>
+<div class="doc">
+<ul>
+  <li><b>같은 건에 다시 올리는 것은 막지 않습니다.</b> 사진을 잘못 올려 다시 올리는 것은 정상적인 재제출이라, 이것까지 막으면 멀쩡한 리뷰어가 갇힙니다.</li>
+  <li><b>화면 개선으로 없앨 수 있는 것은 ‘실수’까지입니다.</b> 일부러 같은 리뷰를 재사용하는 경우는 다른 사진으로 우회하므로, 관리자 알림과 ‘리뷰 글 겹침’ 검사는 계속 남깁니다.</li>
+  <li><b>추가 비용은 거의 없습니다.</b> 사진마다 구분 표식을 이미 저장해 두고 있어서, 붙이는 순간 확인하는 데 드는 시간은 눈에 띄지 않습니다.</li>
+  <li><b>업체 전달물은 그대로입니다.</b> 이 변경은 리뷰어 화면과 관리자 알림에서만 일어납니다.</li>
+</ul>
+</div>
+
+</div>
+<script>
+  /* 고른 값을 아래 요약에 반영 — 저장 없이 화면에서만(문서용) */
+  document.querySelectorAll('.opt').forEach(function (o) {
+    o.addEventListener('click', function () {
+      var input = o.querySelector('input');
+      document.querySelectorAll('input[name="' + input.name + '"]').forEach(function (i) {
+        i.closest('.opt').classList.remove('on');
+      });
+      o.classList.add('on');
+      input.checked = true;
+      document.getElementById('s' + input.name.slice(1)).textContent = input.value;
+    });
+  });
+</script>
+</body>
+</html>

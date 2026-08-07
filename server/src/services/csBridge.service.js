@@ -207,4 +207,87 @@ async function markReviewEditCancelled(r) {
   }
 }
 
-module.exports = { campaignKeyOf, postReviewEditRequest, postReviewEditDecision, markReviewEditCancelled };
+/**
+ * 리뷰검수 [✕ 불량 맞음] → 리뷰어 채팅에 **반려 사유 자동 통지**(교체요청 반려 통지와 같은 규율).
+ * ★ 절대 throw 하지 않는다 — 통지 실패가 불량 확인(원장 기록)을 되돌리면 안 된다.
+ * ★ 스레드가 없으면 만든다 — 단 관리자 발신이므로 admin_unread 는 올리지 않는다
+ *   (교체요청 카드 upsert 와 달리 "관리자가 확인할 도착물"이 아니다).
+ * ★ SSE 페이로드의 발신자 이름은 반드시 리뷰어용으로 치환(닉네임 fail-closed 규율).
+ */
+async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card } = {}) {
+  try {
+    if (!phone8 || !String(message || '').trim()) return null;
+    const campaignKey = campaignKeyOf(sheetId, tabName);
+    const name = _clip(reviewerName || '리뷰어', 100);
+    const text = _clip(String(message).trim(), 1000);
+    const preview = _clip(text.replace(/\n/g, ' '), 120);
+
+    let threadId;
+    const { rows: tRows } = await pool.query(
+      `SELECT id FROM cs_threads WHERE reviewer_phone8=$1 AND campaign_key=$2`,
+      [phone8, campaignKey]
+    );
+    if (tRows.length) threadId = tRows[0].id;
+    else {
+      // ★ 기존 스레드의 campaign_label·reviewer_name 은 덮어쓰지 않는다(위 규율 그대로) —
+      //   신규 생성 시 라벨은 탭 표시명(시트 제목 미노출 원칙).
+      const { rows } = await pool.query(`
+        INSERT INTO cs_threads
+          (reviewer_phone8, reviewer_name, campaign_key, campaign_label, campaign_source,
+           status, last_message_at, last_message_preview, admin_unread_count)
+        VALUES ($1,$2,$3,$4,'review_index','open',NOW(),$5,0)
+        ON CONFLICT (reviewer_phone8, campaign_key) DO UPDATE SET updated_at = NOW()
+        RETURNING id
+      `, [phone8, name, campaignKey, _clip(tabName || '문의', 200), preview]);
+      threadId = rows[0].id;
+    }
+
+    const senderName = _clip(by || '관리자', 100);   // DB 엔 로그인명(책임추적) — 표시 치환은 읽는 시점
+    /* ★ 사진 카드(선택) — 교체요청 카드와 같은 구조(meta + 파일ID, 프론트가 신뢰 베이스로 URL 재구성).
+       ★★ meta 는 리뷰어 응답에 **그대로 실린다** — 관리자 실명·시트 제목을 넣지 않는다(080 규율).
+       ★ 파일ID 형식이 아닌 값은 버린다(잘못된 값이 <img> 로 나가지 않게). */
+    const _fid = (v) => { const s = String(v || '').replace(/[^-\w]/g, ''); return s.length >= 10 ? s : ''; };
+    const meta = card ? {
+      kind: _clip(card.kind, 40),
+      fileId: _fid(card.fileId),
+      matchFileId: _fid(card.matchFileId),
+      work: _clip(card.work || tabName || '', 120),
+      product: _clip(card.product, 120),
+      ordinal: Number(card.ordinal) || 0,
+      submittedAt: card.submittedAt || null,
+      matchProduct: _clip(card.matchProduct, 120),
+      matchOrdinal: Number(card.matchOrdinal) || 0,
+      matchAt: card.matchAt || null,
+      to: _clip(card.to, 40),
+    } : null;
+    const { rows: mRows } = await pool.query(
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
+       VALUES ($1,'admin',$2,$3,$4,$5::jsonb) RETURNING id, created_at AS "createdAt"`,
+      [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null]
+    );
+    await pool.query(
+      `UPDATE cs_threads
+          SET reviewer_unread_count = reviewer_unread_count + 1,
+              status = 'open', last_message_at = NOW(), last_message_preview = $2, updated_at = NOW()
+        WHERE id = $1`,
+      [threadId, preview]
+    );
+    try {
+      const nickMap = await adminNickname.getNicknameMap().catch(() => null);
+      emitCsReplyToReviewer(phone8, {
+        id: mRows[0].id, threadId, senderRole: 'admin',
+        senderName: adminNickname.toReviewerName(senderName, nickMap),
+        content: text, imageUrls: [], createdAt: mRows[0].createdAt,
+        campaignLabel: tabName || '문의',
+        msgType: meta ? 'inspect_result' : 'text', meta: meta || null,   // 실시간 푸시에도 카드가 그려지게
+      });
+    } catch (_) {}
+    try { broadcast('cs_message', { threadId, senderRole: 'admin', reviewerPhone8: phone8 }); } catch (_) {}
+    return { threadId, messageId: mRows[0].id };
+  } catch (err) {
+    logger.warn(`[csBridge] 검수 반려 통지 실패(${sheetId}/${tabName}/${rowIndex}): ${err.message}`);
+    return null;
+  }
+}
+
+module.exports = { campaignKeyOf, postReviewEditRequest, postReviewEditDecision, markReviewEditCancelled, postInspectionReject };

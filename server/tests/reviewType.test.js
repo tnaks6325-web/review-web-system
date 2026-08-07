@@ -145,9 +145,14 @@ const DIAG = S('src/routes/diag.routes.js');
 const CAMP = S('src/routes/campaign.routes.js');
 const IDX = S('index.js');
 
-t('loadTabExpectations 가 리뷰타입을 같은 LATERAL 행에서 읽는다(다른 공고 값 섞임 방지)',
-  /rc\.review_type AS camp_review_type/.test(INSPECT_SRC)
-  && /c\.review_type AS tab_review_type/.test(INSPECT_SRC));
+/* ⚠ 2026-08-06: 리뷰타입만 **별도 LATERAL**(reviewTypeContext.CAMPAIGN_REVIEW_TYPE_LATERAL
+     단일 출처 — gid 폴백·값 있는 최신 공고)로 분리했다. 채널은 여전히 한 행에서 온다.
+     검사 의미 불변: 공고 값과 탭 값을 **한 쿼리에서 함께** 읽어 판정에 넘긴다. */
+t('loadTabExpectations 가 공고·탭 리뷰타입을 한 쿼리에서 읽는다(다른 공고 값 섞임 방지)',
+  /rt\.review_type AS camp_review_type/.test(INSPECT_SRC)
+  && /c\.review_type AS tab_review_type/.test(INSPECT_SRC)
+  && /CAMPAIGN_REVIEW_TYPE_LATERAL/.test(INSPECT_SRC)
+  && /SELECT channel, channel_custom\n/.test(INSPECT_SRC));   // 채널 짝 보존
 t('판정은 utils/reviewType 단일 출처 — 서비스가 정규식을 다시 만들지 않는다',
   /require\('\.\.\/utils\/reviewType'\)/.test(INSPECT_SRC)
   && !/구매\s*확정\|purchase/.test(INSPECT_SRC.replace(/require\([^)]*\)/g, '')));

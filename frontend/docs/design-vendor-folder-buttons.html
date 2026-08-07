@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 업체관리 구매캡처·리뷰 폴더 바로가기 배치 (3안)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   업체관리(리뷰웹시스템[3버전]) 연결탭에 [구매캡처]·[리뷰]·[현금영수증] 폴더
+   바로가기를 어디에 둘지 배치 시안. 외부 리소스 0(오프라인 열람) · color-scheme 고정.
+   목업은 가짜 데이터로 실제 동작한다(열 묶음 토글·hover·비활성 툴팁·필터).
+   ?v=A / ?v=B / ?v=C 로 한 안만 단독 열람.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#5d6b7f;--faint:#8b95a6;
+  --line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#15803d;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#c92a2e;--bad-soft:#fdf0f0;
+  --adv:#5f4bbd;--adv-soft:#efecfa;--adv-line:#ddd6f6;
+  --buy:#0b7285;--buy-soft:#e3f4f7;--buy-line:#bfe3ea;      /* 구매캡처 */
+  --rev:#7048b6;--rev-soft:#f0ebfa;--rev-line:#ddd0f2;      /* 리뷰 */
+  --rcp:#a1660a;--rcp-soft:#fdf3e2;--rcp-line:#eeddba;      /* 현금영수증 */
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+  --ease:cubic-bezier(.22,1,.36,1);
+  --sh1:0 1px 2px rgba(16,24,40,.05);--sh2:0 2px 10px rgba(16,24,40,.06);
+}
+*{box-sizing:border-box}
+html{scrollbar-color:var(--line2) transparent}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;caret-color:var(--accent)}
+::selection{background:#dbe6ff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
+svg{display:block}
+.i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.i.sm{width:12px;height:12px}
+
+/* 문서 골격 */
+.page{max-width:1620px;margin:0 auto;padding:30px 20px 110px}
+h1{font-size:23px;font-weight:800;letter-spacing:-.025em;margin:0 0 8px}
+.lead{color:var(--muted);font-size:13.5px;margin:0 0 8px;max-width:940px}
+.lead b{color:var(--ink)}
+.meta{font-size:12px;color:var(--faint);margin:0 0 26px}
+.sec{margin-top:44px}
+.sec>h2{font-size:16px;font-weight:800;letter-spacing:-.02em;margin:0 0 4px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sec>h2 .n{width:22px;height:22px;border-radius:7px;background:var(--adv-soft);color:var(--adv);border:1px solid var(--adv-line);
+  font-size:11px;font-weight:800;display:grid;place-items:center;flex:none}
+.sec>h2 .tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line)}
+.sec>h2 .tag.rec{color:var(--safe);background:var(--safe-soft);border-color:#cfe9d8}
+.sec>.sub{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:940px}
+.sec>.sub b{color:var(--ink)}
+.note{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 17px;font-size:13px;color:var(--muted);box-shadow:var(--sh1)}
+.note+.note{margin-top:10px}
+.note b{color:var(--ink)}
+.note>.nt{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.note ul{margin:7px 0 0;padding-left:19px}.note li{margin-bottom:6px}.note li:last-child{margin-bottom:0}
+.note.cool{background:var(--accent-soft);border-color:var(--accent-line);color:#274a8f}
+.note.cool b,.note.cool .nt{color:#1a3873}
+.note.warm{background:var(--warn-soft);border-color:#f0e0c4;color:#7a4c0d}
+.note.warm b,.note.warm .nt{color:#5f3a06}
+.note.good{background:var(--safe-soft);border-color:#cfe9d8;color:#14622f}
+.note.good b,.note.good .nt{color:#0f4a24}
+
+table.t{width:100%;max-width:1240px;border-collapse:separate;border-spacing:0;font-size:12.5px;background:var(--card);
+  border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:var(--sh1)}
+table.t th,table.t td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+table.t thead th{font-size:10.5px;font-weight:800;letter-spacing:.04em;color:var(--muted);background:var(--card2);white-space:nowrap}
+table.t tbody tr:last-child td{border-bottom:0}
+table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
+table.t .a{background:#fbfcff}
+.tscroll{overflow-x:auto}
+.yes{color:var(--safe);font-weight:750}.no{color:var(--bad);font-weight:750}.dimm{color:var(--faint)}
+
+/* 목업 프레임 */
+.mockcap{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);
+  margin:22px 0 9px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.mockcap .live{font-size:9.5px;letter-spacing:.03em;color:var(--safe);background:var(--safe-soft);
+  border:1px solid #cfe9d8;border-radius:999px;padding:2px 8px;text-transform:none}
+.mockcap .loc{font-size:10px;letter-spacing:0;text-transform:none;color:var(--muted);background:var(--card2);
+  border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-weight:700}
+.shell{border:1px solid var(--line2);border-radius:16px;background:var(--card);box-shadow:var(--sh2);overflow:hidden}
+.shell .bar{display:flex;align-items:center;gap:7px;padding:8px 13px;background:var(--card2);border-bottom:1px solid var(--line)}
+.shell .bar .dots{display:flex;gap:5px}.shell .bar .dots i{width:9px;height:9px;border-radius:50%;background:var(--line2);display:block}
+.shell .bar .url{flex:1;font-size:10.5px;color:var(--faint);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:3px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shell .bar .fw{font-size:10px;font-weight:700;color:var(--faint);white-space:nowrap}
+.scroller{overflow-x:auto;background:var(--paper)}
+
+/* ══ 목업 내부 ══ */
+.vm{width:1566px;font-size:13px;background:var(--paper)}
+.vm-top{display:flex;align-items:center;gap:8px;background:var(--card);border-bottom:1px solid var(--line);padding:8px 14px}
+.vm-logo{font-size:13px;font-weight:800;letter-spacing:-.02em}
+.vm-tag{font-size:9px;font-weight:800;letter-spacing:.05em;color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line);border-radius:999px;padding:2px 7px}
+.vm-nav{display:flex;gap:2px;margin-left:8px;flex:1;overflow:hidden}
+.vm-nav span{font-size:11.5px;font-weight:650;color:var(--muted);padding:4px 8px;border-radius:8px;white-space:nowrap}
+.vm-nav span.on{background:var(--adv-soft);color:var(--adv);font-weight:750}
+.vm-me{font-size:11px;font-weight:700;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;white-space:nowrap}
+.vm-body{display:flex;align-items:stretch;min-height:520px}
+.vm-side{width:214px;flex:none;border-right:1px solid var(--line);background:var(--card);display:flex;flex-direction:column}
+.vm-side .sh{padding:11px 11px 9px;border-bottom:1px solid var(--line)}
+.vm-side .sh .ttl{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+.vm-side .list{flex:1;padding:8px 7px;overflow:hidden}
+.vm-adv{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:9px;margin-bottom:2px;border:1px solid transparent}
+.vm-adv.on{background:var(--adv-soft);border-color:var(--adv-line)}
+.vm-adv .av{width:25px;height:25px;border-radius:8px;background:var(--card2);color:var(--muted);display:grid;place-items:center;font-weight:800;font-size:11px;flex:none}
+.vm-adv.on .av{background:var(--card);color:var(--adv)}
+.vm-adv .nm{flex:1;min-width:0}
+.vm-adv .nm b{display:block;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vm-adv .nm i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-top:1px}
+.vm-adv .ct{font-size:10px;font-weight:800;color:var(--muted);background:var(--card2);border-radius:999px;padding:1px 6px}
+.vm-adv.on .ct{background:var(--card);color:var(--adv)}
+.vm-main{flex:1;min-width:0;padding:16px 18px;overflow:hidden}
+.vm-hd{display:flex;align-items:center;gap:11px;padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:11px}
+.vm-hd .big{width:38px;height:38px;border-radius:11px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:15px;flex:none}
+.vm-hd h3{margin:0;font-size:17px;font-weight:800;letter-spacing:-.02em}
+.vm-hd .acc{font-size:11.5px;color:var(--muted)}
+.vm-hd .sp{flex:1}
+.st{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+.st .hint{font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);font-size:11px;margin-left:8px}
+
+.b{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;height:27px;padding:0 10px;border-radius:8px;
+  border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap;
+  transition:background .15s var(--ease),border-color .15s}
+.b:hover{background:var(--card2)}
+.b.xs{height:24px;padding:0 8px;font-size:11px;border-radius:7px}
+.grp{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.grp button{font:inherit;border:0;background:transparent;font-size:11px;font-weight:700;color:var(--muted);height:27px;padding:0 9px;cursor:pointer;border-right:1px solid var(--line)}
+.grp button:last-child{border-right:0}
+.grp button:hover{background:var(--card2);color:var(--ink)}
+.grp button.on{background:var(--accent-soft);color:var(--accent-deep)}
+.grp button.newc{box-shadow:inset 0 0 0 1px var(--adv-line)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted)}
+.chip.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.chip.warn{color:var(--warn);border-color:#eddcc0;background:var(--warn-soft)}
+.srch{display:inline-flex;align-items:center;gap:6px;height:29px;border:1px solid var(--line2);border-radius:8px;background:var(--card);padding:0 9px;min-width:280px;color:var(--faint);font-size:12px}
+
+/* ★ 폴더 버튼 — 홈 작업목록 [구매][리뷰][현영] 3분할과 같은 관용구 */
+/* ★ minmax(0,1fr) — 1fr 의 기본 min-width:auto 는 내용 폭을 최소값으로 삼아 **칸을 뚫고 나간다**
+   (실측: 108px 칸에서 트랙이 53/53/41px 로 벌어져 옆 열과 겹쳤다. scrollWidth 로는 안 잡힌다). */
+.fols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;min-width:0}
+.fol{font:inherit;font-size:10.5px;font-weight:750;height:22px;border-radius:6px;border:1px solid var(--line2);
+  background:var(--card);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:3px;
+  padding:0 2px;white-space:nowrap;transition:background .13s,border-color .13s,transform .13s var(--ease)}
+.fol.buy{color:var(--buy);border-color:var(--buy-line);background:var(--buy-soft)}
+.fol.rev{color:var(--rev);border-color:var(--rev-line);background:var(--rev-soft)}
+.fol.rcp{color:var(--rcp);border-color:var(--rcp-line);background:var(--rcp-soft)}
+.fol:hover{transform:translateY(-1px);filter:brightness(.97)}
+.fol.off{color:var(--faint);background:var(--card2);border-color:var(--line);cursor:not-allowed;opacity:.65}
+.fol.off:hover{transform:none;filter:none}
+.fol .up{font-size:9px;opacity:.75}
+.fol.big{height:27px;font-size:11.5px;padding:0 10px;border-radius:8px}
+
+/* 표 */
+.tw{overflow-x:auto;padding-bottom:2px}
+.th,.tr{display:grid;gap:9px;align-items:center}
+.th{font-size:9.5px;font-weight:800;letter-spacing:.045em;text-transform:uppercase;color:var(--muted);padding:0 12px 6px}
+.tr{padding:8px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:6px;box-shadow:var(--sh1);
+  transition:border-color .15s,box-shadow .15s,transform .15s var(--ease);cursor:pointer}
+.tr:hover{border-color:var(--accent-line);box-shadow:0 2px 10px rgba(37,99,235,.09);transform:translateY(-1px)}
+.c{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c.dim{color:var(--faint)}
+.nm b{font-size:12.5px;font-weight:750;display:flex;align-items:center;gap:6px;min-width:0}
+.nm b span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm i{display:block;font-style:normal;font-size:10.5px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm i .il{display:inline-flex;align-items:center;gap:3px;font-weight:750;padding:0 3px;border-radius:4px;cursor:pointer}
+.nm i .il.buy{color:var(--buy)}.nm i .il.rev{color:var(--rev)}.nm i .il.rcp{color:var(--rcp)}
+.nm i .il:hover{background:var(--card2);text-decoration:underline}
+.nm i .il.off{color:var(--faint);cursor:not-allowed;text-decoration:none}
+.gauge{width:38px;height:38px;flex:none}
+.cnt{font-size:11.5px;font-weight:750;white-space:nowrap}
+.cnt .s{color:var(--accent-deep)}.cnt .p{color:var(--safe)}.cnt .z{color:var(--faint)}
+.ctr{font-size:10.5px;font-weight:800;border-radius:7px;padding:3px 7px;border:1px dashed #e0c9a0;color:var(--warn);background:var(--warn-soft);display:inline-flex;gap:3px}
+.ctr.on{border:1px solid var(--line);color:var(--muted);background:var(--card2);font-weight:700}
+.money b{font-weight:800}.money .ok{color:var(--safe)}.money .part{color:var(--warn)}.money .zero{color:var(--faint)}
+.memo{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.memo.empty{color:var(--faint);font-style:italic;opacity:0}
+.tr:hover .memo.empty{opacity:1}
+.open{font-size:11px;font-weight:750;color:var(--accent-deep);display:inline-flex;align-items:center;gap:3px;opacity:.5}
+.tr:hover .open{opacity:1}
+.fin{font-size:10px;font-weight:800;border-radius:999px;padding:1px 6px;background:var(--card2);color:var(--muted);border:1px solid var(--line);flex:none}
+.fin.cand{background:var(--warn-soft);color:var(--warn);border-color:#eddcc0}
+
+/* B안 — hover 액션 */
+.hov{display:flex;gap:3px;justify-content:flex-end;opacity:.18;transition:opacity .15s}
+.tr:hover .hov{opacity:1}
+.hovnote{font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #eddcc0;border-radius:8px;padding:6px 10px;margin-bottom:9px;display:inline-block}
+
+/* 작업보드 상단 툴바(함께 제안) */
+.gbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);
+  border-radius:11px;padding:9px 11px;margin-bottom:9px}
+.gbar .lab{font-size:11.5px;font-weight:750;color:var(--muted)}
+.gbar .sel{font-size:11.5px;border:1px solid var(--line2);border-radius:7px;background:var(--card);padding:4px 9px;color:var(--muted)}
+.gbar .sp{flex:1}
+.gridstub{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:0;overflow:hidden}
+.gridstub .row{display:grid;grid-template-columns:44px 96px 96px 1fr 92px 88px;gap:0;font-size:11.5px;border-bottom:1px solid var(--line)}
+.gridstub .row:last-child{border-bottom:0}
+.gridstub .row.h{background:var(--card2);font-size:10px;font-weight:800;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
+.gridstub .row>span{padding:7px 9px;border-right:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gridstub .row>span:last-child{border-right:0}
+
+.cap{font-size:11.5px;color:var(--muted);margin:9px 2px 0;display:flex;gap:7px;align-items:flex-start;max-width:1100px}
+.cap .i{color:var(--faint);margin-top:2px}
+.cap b{color:var(--ink)}
+.decide{display:grid;gap:10px;margin-top:14px}
+.dq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 15px;box-shadow:var(--sh1)}
+.dq .qq{font-size:13px;font-weight:800;margin-bottom:7px;display:flex;gap:8px;align-items:flex-start}
+.dq .qq .n{width:19px;height:19px;border-radius:6px;background:var(--accent-soft);color:var(--accent-deep);font-size:10.5px;font-weight:800;display:grid;place-items:center;flex:none;margin-top:1px}
+.dq .opt{font-size:12.5px;color:var(--muted);padding-left:27px;margin-bottom:4px}
+.dq .opt b{color:var(--ink)}
+.dq .rec{padding-left:27px;font-size:12px;color:var(--safe);font-weight:700;margin-top:5px}
+.foot-n{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--faint)}
+.where{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-top:14px}
+@media(max-width:980px){.where{grid-template-columns:1fr}}
+.wcard{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 15px;box-shadow:var(--sh1)}
+.wcard .wt{font-size:13px;font-weight:800;margin-bottom:5px;display:flex;gap:7px;align-items:center}
+.wcard .wd{font-size:12.5px;color:var(--muted)}
+.wcard .wd b{color:var(--ink)}
+.wcard.no{background:#fcfcfd;border-style:dashed}
+.wcard .vd{font-size:10px;font-weight:800;letter-spacing:.03em;border-radius:999px;padding:2px 8px;margin-left:auto;flex:none}
+.wcard .vd.y{color:var(--safe);background:var(--safe-soft);border:1px solid #cfe9d8}
+.wcard .vd.n{color:var(--bad);background:var(--bad-soft);border:1px solid #f0cdcd}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-cart" viewBox="0 0 16 16"><path d="M2 2.6h1.7l1.9 7.1h6.3l1.5-5H4.4"/><circle cx="6.4" cy="12.6" r="1.1"/><circle cx="11.6" cy="12.6" r="1.1"/></symbol>
+<symbol id="i-img" viewBox="0 0 16 16"><rect x="2.4" y="3.2" width="11.2" height="9.6" rx="1.6"/><circle cx="6" cy="6.6" r="1.1"/><path d="M2.6 11.4 6 8.6l2.4 2 2-1.6 3 2.6"/></symbol>
+<symbol id="i-rcp" viewBox="0 0 16 16"><path d="M3.4 2.6h9.2v10.8l-1.5-1-1.5 1-1.6-1-1.6 1-1.5-1-1.5 1z"/><path d="M5.6 5.6h4.8M5.6 8h4.8"/></symbol>
+<symbol id="i-out" viewBox="0 0 16 16"><path d="M9.6 3.4h3v3"/><path d="M12.6 3.4 8 8"/><path d="M12 9.6v2.2a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 11.8V5.2A1.2 1.2 0 0 1 4.2 4h2.2"/></symbol>
+<symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.4"/><path d="M10.4 10.4 14 14"/></symbol>
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4"/></symbol>
+<symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.8 14 13H2z"/><path d="M8 6.6v3M8 11.2h.01"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path d="M3.4 8.6l3 3 6.2-7"/></symbol>
+<symbol id="i-fold" viewBox="0 0 16 16"><path d="M2.6 4.4A1.4 1.4 0 0 1 4 3h2.6l1.4 1.8h4A1.4 1.4 0 0 1 13.4 6.2v5.4A1.4 1.4 0 0 1 12 13H4a1.4 1.4 0 0 1-1.4-1.4z"/></symbol>
+</defs></svg>
+
+<div class="page">
+
+<h1>업체관리 — 구매캡처·리뷰 폴더 바로가기 배치 시안 (3안)</h1>
+<p class="lead">업체용 뷰어에는 이미 작업마다 폴더 바로가기가 있는데 <b>업체관리(내부 화면)에는 없습니다.</b> 같은 작업을 내부에서 볼 때는 작업보드를 열고 시트로 들어가야 폴더에 닿습니다. 이 문서는 <b>업체관리 연결탭에 어디에 버튼을 둘지</b> 3가지 배치안과, 함께 제안하는 <b>작업보드 상단</b> 배치를 목업으로 비교합니다.</p>
+<p class="meta">목업은 가짜 데이터로 <b>실제 동작</b>합니다 — 열 묶음 [자료]를 켜고 끄거나, 행에 마우스를 올리고, 미연결 버튼에 커서를 올려 안내를 확인하세요. · <code>?v=A</code> / <code>?v=B</code> / <code>?v=C</code> 로 한 안만 볼 수 있습니다.</p>
+
+<!-- ═══════ 1. 지금 어디에 있고 어디에 없나 ═══════ -->
+<div class="sec" id="now">
+<h2>지금 어디에 있고, 어디에 없나</h2>
+<p class="sub">폴더는 <b>작업(시트 탭) 단위</b>로 연결됩니다 — <code>tab_configs.capture_folder_url</code>(구매캡처) · <code>tab_configs.folder_url</code>(리뷰) · 현금영수증은 <b>[리뷰] 폴더 아래 서브폴더</b>라 URL이 저장돼 있지 않고 서버가 찾아 줍니다.</p>
+<div class="tscroll"><table class="t">
+<thead><tr><th style="width:210px">화면</th><th style="width:150px">폴더 버튼</th><th style="width:190px">모양</th><th>비고</th></tr></thead>
+<tbody>
+<tr><td class="k">업체용 뷰어(광고주)</td><td class="yes">있음</td><td><span class="fol buy" style="height:20px">🛒 구매</span> <span class="fol rev" style="height:20px">📸 리뷰</span></td>
+  <td>표에 <b>자료 폴더</b> 열 + 상세 헤더 큰 버튼. 브랜드사에게는 <b>폴더 공개 토글</b>이 켜졌을 때만.</td></tr>
+<tr><td class="k">홈 작업 목록(내부)</td><td class="yes">있음</td><td><span class="fol buy" style="height:20px">구매</span> <span class="fol rev" style="height:20px">리뷰</span> <span class="fol rcp" style="height:20px">현영</span></td>
+  <td><b>저장폴더</b> 열에 3분할. 현영은 서버가 <b>찾기만</b>(없으면 만들지 않음). 비해당·미연결은 옅은 비활성.</td></tr>
+<tr class="a"><td class="k">업체관리 연결탭</td><td class="no">없음 ← 이 문서</td><td class="dimm">—</td>
+  <td>데이터는 <b>이미 내려오고 있습니다</b>(연결탭 응답에 <code>folderUrl</code>·<code>captureFolderUrl</code> 포함). 화면에 안 그리고 있을 뿐.</td></tr>
+<tr><td class="k">작업보드(그리드) 상단</td><td class="no">없음</td><td class="dimm">—</td>
+  <td>작업을 열어 놓고도 폴더로 갈 길이 없습니다 — <b>함께 제안</b>(아래 5절).</td></tr>
+</tbody></table></div>
+</div>
+
+<!-- ═══════ 2. 둘 수 있는 자리 ═══════ -->
+<div class="sec" id="where">
+<h2>업체관리 안에서 버튼을 둘 수 있는 자리</h2>
+<p class="sub">후보를 전부 따져 <b>둘 곳</b>과 <b>두지 않을 곳</b>을 먼저 정리했습니다. 폴더가 작업 단위라는 사실이 대부분을 결정합니다.</p>
+<div class="where">
+  <div class="wcard"><div class="wt">① 연결탭 표의 행<span class="vd y">둔다</span></div>
+    <div class="wd">작업 = 표의 행이므로 <b>가장 정확한 자리</b>입니다. A·B·C 세 안이 모두 이 안에서 "행의 어디에"를 다룹니다.</div></div>
+  <div class="wcard"><div class="wt">② 작업보드 상단<span class="vd y">함께 둔다</span></div>
+    <div class="wd">업체관리에서 작업을 클릭하면 작업보드로 넘어갑니다. 거기서도 폴더로 갈 수 있어야 동선이 끊기지 않습니다(5절).</div></div>
+  <div class="wcard no"><div class="wt">③ 전체 개요 표<span class="vd n">두지 않음</span></div>
+    <div class="wd">개요는 <b>업체 한 줄</b>입니다. 폴더는 작업마다 다르므로 업체 행에 붙일 수 있는 폴더가 <b>존재하지 않습니다</b>.</div></div>
+  <div class="wcard no"><div class="wt">④ 우측 설정 패널<span class="vd n">두지 않음</span></div>
+    <div class="wd">패널은 업체 단위 설정(링크·계정·소유 시트)입니다. 작업 폴더를 여기 넣으면 316개를 패널에 늘어놓게 됩니다.</div></div>
+  <div class="wcard no"><div class="wt">⑤ 사이드바 업체 목록<span class="vd n">두지 않음</span></div>
+    <div class="wd">③과 같은 이유. 업체를 고르는 자리에 작업 폴더가 있을 수 없습니다.</div></div>
+  <div class="wcard no"><div class="wt">⑥ 업체 헤더(이름 줄)<span class="vd n">두지 않음</span></div>
+    <div class="wd">"이 업체의 폴더"라는 개념이 시스템에 없습니다. 시트 자체를 여는 버튼은 별개 요청이라 이 문서 범위 밖입니다.</div></div>
+</div>
+</div>
+
+<!-- ═══════ 3. A안 ═══════ -->
+<div class="sec" id="secA">
+<h2><span class="n">A</span>[자료] 열 신설 — 홈·업체뷰어와 같은 자리·같은 모양 <span class="tag rec">권장</span></h2>
+<p class="sub">연결탭 표에 <b>[자료] 열</b>을 하나 더 두고 <b>[구매][리뷰][현영]</b> 3분할 버튼을 넣습니다. 홈 작업 목록의 <b>저장폴더</b> 열과 <b>완전히 같은 관용구</b>(같은 순서·같은 색·비활성도 자리 유지)라 새로 배울 것이 없습니다. 열이 하나 늘어나므로 <b>열 묶음 토글에 [자료]를 추가</b>해 접을 수 있게 합니다.</p>
+
+<div class="mockcap">목업 A — 업체관리 › 어니스트캄 <span class="loc">[자료] 열 · 열 묶음 토글</span> <span class="live">실제 동작 · 토글·hover·비활성 안내</span></div>
+<div class="shell">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
+    <span class="fw">폭 1566px (FHD 기준 · 자료 열 포함)</span></div>
+  <div class="scroller"><div class="vm" id="A"></div></div>
+</div>
+<div class="cap"><svg class="i"><use href="#i-check"/></svg><span><b>비활성도 자리를 지킵니다</b> — 폴더가 연결되지 않았거나 현금영수증 대상이 아닌 작업도 버튼 칸을 비우지 않아, 줄마다 버튼 위치가 흔들리지 않습니다(홈에서 확정된 규칙). 커서를 올리면 왜 못 누르는지 말해 줍니다.</span></div>
+
+<div class="note" style="margin-top:16px"><div class="nt">A안의 값과 비용</div>
+<ul>
+<li><b>값</b>: 세 화면(홈·업체뷰어·업체관리)의 폴더 버튼이 같은 모양·같은 순서가 됩니다. 표를 위에서 아래로 훑으며 <b>"어느 작업에 폴더가 연결돼 있나"</b>를 한눈에 볼 수 있습니다(B·C안은 못 하는 일).</li>
+<li><b>비용</b>: 기본 열이 12 → 13칸(<b>+144px</b> — 3버튼이 글자까지 안 잘리는 실측 최소폭). 기본 상태에서도 가로 스크롤이 없도록 <b>[자료] 열은 접을 수 있게</b> 하고, 기본값을 켤지 끌지는 아래 6절에서 정합니다.</li>
+<li><b>현영</b>: 홈과 같이 <b>찾기만</b> 합니다 — 없으면 "아직 현영 캡처가 없어 폴더가 만들어지지 않았습니다"로 끝내고 폴더를 새로 만들지 않습니다.</li>
+</ul></div>
+</div>
+
+<!-- ═══════ 4. B안 · C안 ═══════ -->
+<div class="sec" id="secB">
+<h2><span class="n">B</span>행 hover 액션 — 열을 늘리지 않음</h2>
+<p class="sub">열을 추가하지 않고 <b>[열기 ›] 왼쪽 빈 자리</b>에 버튼을 두되, 평소에는 아주 옅게 두고 <b>행에 마우스를 올릴 때</b> 진해집니다. 표 폭이 한 픽셀도 늘지 않는 것이 유일한 장점입니다.</p>
+
+<div class="mockcap">목업 B — hover 시 나타나는 폴더 버튼 <span class="loc">열 추가 0</span> <span class="live">행에 마우스를 올려보세요</span></div>
+<div class="shell">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
+    <span class="fw">폭 1566px (FHD 기준 · 자료 열 포함)</span></div>
+  <div class="scroller"><div class="vm" id="B"></div></div>
+</div>
+<div class="cap"><svg class="i"><use href="#i-alert"/></svg><span><b>정직한 단점</b>: 마우스를 올리기 전에는 어느 작업에 폴더가 있는지 알 수 없고, 터치·키보드 사용자에게는 사실상 숨은 기능이 됩니다. 지금 표에 이미 있는 <b>[열기 ›]</b>와도 붙어 있어 오클릭이 생깁니다.</span></div>
+
+<div class="sec" id="secC" style="margin-top:34px">
+<h2><span class="n">C</span>작업명 아래 인라인 링크 — 열 추가 0 · 상시 노출</h2>
+<p class="sub">작업명 아래 서브라인(시트명 · 최초 관측일)에 <b>작은 링크</b>로 붙입니다. 열이 늘지 않으면서 항상 보이지만, 그 줄은 이미 시트명·날짜·<code>🏁 마감</code> 배지가 쓰고 있어 <b>붐빕니다</b>.</p>
+
+<div class="mockcap">목업 C — 서브라인 인라인 링크 <span class="loc">열 추가 0 · 상시 노출</span> <span class="live">실제 동작</span></div>
+<div class="shell">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">review-web-system.pages.dev/workdesk — 업체관리</div>
+    <span class="fw">폭 1566px (FHD 기준 · 자료 열 포함)</span></div>
+  <div class="scroller"><div class="vm" id="C"></div></div>
+</div>
+<div class="cap"><svg class="i"><use href="#i-alert"/></svg><span><b>정직한 단점</b>: 링크가 세로로 정렬되지 않아 훑기가 안 되고, 글자 링크라 클릭 표적이 작습니다. 시트명이 긴 작업에서는 말줄임에 밀려 <b>링크가 잘려 사라질 수</b> 있습니다(마감 배지에서 실제로 겪은 문제).</span></div>
+</div>
+
+<!-- ═══════ 5. 함께 제안 ═══════ -->
+<div class="sec" id="secD">
+<h2>함께 제안 — 작업보드 상단에도 같은 3버튼</h2>
+<p class="sub">업체관리에서 작업을 클릭하면 <b>작업보드</b>로 넘어갑니다. 그런데 거기에는 폴더로 갈 길이 없어, 다시 업체관리나 홈으로 돌아가야 합니다. 표 위 도구줄(<code>.gridbar</code>) 오른쪽에 <b>같은 3버튼</b>을 두면 동선이 끊기지 않습니다.</p>
+<div class="mockcap">목업 D — 작업보드 상단 도구줄 <span class="loc">업체관리에서 작업을 열었을 때</span></div>
+<div class="shell">
+  <div class="bar"><div class="dots"><i></i><i></i><i></i></div>
+    <div class="url">review-web-system.pages.dev/workdesk — 작업보드</div></div>
+  <div class="scroller"><div class="vm" id="D"></div></div>
+</div>
+<div class="cap"><svg class="i"><use href="#i-fold"/></svg><span>이 자리는 작업이 <b>하나로 특정된 화면</b>이라 큰 버튼(<span class="fol buy big" style="height:22px;font-size:10.5px">🛒 구매캡처 폴더 ↗</span>)을 쓸 수 있습니다 — 업체뷰어 상세 헤더와 같은 방식입니다.</span></div>
+</div>
+
+<!-- ═══════ 6. 비교 · 결정 ═══════ -->
+<div class="sec" id="cmp">
+<h2>세 안 비교</h2>
+<div class="tscroll"><table class="t">
+<thead><tr><th style="width:150px"></th><th class="a">A · [자료] 열</th><th>B · hover 액션</th><th>C · 서브라인 링크</th></tr></thead>
+<tbody>
+<tr><td class="k">표 폭</td><td class="a">+1열(144px, 접을 수 있음)</td><td class="yes">변화 없음</td><td class="yes">변화 없음</td></tr>
+<tr><td class="k">항상 보이나</td><td class="a yes">보임</td><td class="no">마우스를 올려야</td><td class="yes">보임(단, 잘릴 수 있음)</td></tr>
+<tr><td class="k">세로로 훑기</td><td class="a yes">가능(열 정렬)</td><td class="no">불가</td><td class="no">불가</td></tr>
+<tr><td class="k">터치·키보드</td><td class="a yes">문제 없음</td><td class="no">사실상 숨음</td><td>작은 표적</td></tr>
+<tr><td class="k">다른 화면과 일관성</td><td class="a yes">홈·업체뷰어와 동일</td><td>새 관용구</td><td>새 관용구</td></tr>
+<tr><td class="k">현영 버튼 자리</td><td class="a yes">3분할에 자연스럽게</td><td>가능</td><td>줄이 더 붐빔</td></tr>
+<tr><td class="k">잘림 위험</td><td class="a yes">없음(고정 폭 칸)</td><td>없음</td><td class="no">있음(말줄임에 밀림)</td></tr>
+</tbody></table></div>
+
+<div class="note good" style="margin-top:14px"><div class="nt"><svg class="i"><use href="#i-check"/></svg>권장: A안 + 작업보드 상단(5절)</div>
+세 화면이 같은 모양이 되고, "폴더 연결이 안 된 작업"을 표에서 바로 발견할 수 있습니다. 폭 부담은 <b>[자료] 열 접기</b>로 이미 있는 장치(열 묶음 토글)가 흡수합니다. B안은 훑기·접근성을 잃고, C안은 잘림 위험을 안는데 둘 다 얻는 것은 폭 144px뿐입니다.</div>
+</div>
+
+<div class="sec" id="fixed">
+<h2>2026-08-06 확정 · 구현 완료</h2>
+<div class="note good"><div class="nt"><svg class="i"><use href="#i-check"/></svg>사용자 확정 4건</div>
+<ul>
+<li><b>① 배치 = A안</b>(연결된 탭 표에 <b>[자료]</b> 열) <b>+ ④ 작업보드 상단도 같이</b>(5절 · 큰 버튼).</li>
+<li><b>② [자료] 열 기본 = 켬</b> — 끈 선택만 브라우저에 기억합니다(<code>wd_own_cols</code>의 <code>mat:false</code>).</li>
+<li><b>③ 3버튼</b>(구매 · 리뷰 · 현영) — 대상이 아닌 작업은 숨기지 않고 옅은 비활성 + 사유 툴팁.</li>
+<li><b>표 가로폭</b> — 열이 늘어난 만큼 넓혔습니다: 업체관리 표 영역 상한 <b>1400px → 1560px</b>(헤더 · 도구줄 · 표 세 곳 같은 값). FHD(1920)에서 가로 스크롤 없음·작업명 잘림 없음을 실브라우저로 확인했습니다.</li>
+</ul></div>
+<div class="note" style="margin-top:10px"><div class="nt">구현에서 달라진 것(정직하게)</div>
+<ul>
+<li><b>자료 열 폭은 136px</b>(시안의 144px 아님) — 실제 버튼 묶음이 <code>3×40px + gap 3px×2 = 126px</code> 고정 그리드라 136px 이 칸을 뚫지 않는 최소치 + 여유입니다.</li>
+<li><b>작업보드 재료는 <code>/api/trackb/tab-folders?kind=info</code> 가산 분기</b>로 가져옵니다(그 탭 <b>한 줄</b>만 읽는 가벼운 조회 · 신규 엔드포인트 0). 홈을 거쳐 온 경우에는 이미 받아 둔 값을 재사용해 <b>요청이 0건</b>입니다.</li>
+<li><b>현영 판정을 한 규칙으로 합쳤습니다</b>(<code>captureSlots.hasCashReceiptSlot</code>) — 종전에는 홈 버튼은 <code>income_type</code>만 보고 서버 폴더 해석은 <code>capture_slots</code>까지 봐서, 수동 슬롯 탭이 <b>"버튼은 비활성인데 서버는 허용"</b>으로 갈라져 있었습니다.</li>
+<li><b>코드리뷰로 잡아 고친 것 5건</b> — ① 폴더 정보 <b>캐시가 담당(AE) 확인보다 먼저</b> 응답해, 누군가 그 작업을 최근에 열어 둔 동안 담당 밖 담당자에게 폴더 링크가 나가던 문제(순서를 확인 → 캐시로 고정) ② 관리자가 캡처 슬롯을 직접 <b>[리뷰, 현금영수증]</b> 으로 설정한 현영 작업에서 현영 버튼이 "대상 아님"으로 죽던 문제(슬롯을 <b>라벨로도</b> 찾고, 폴더도 그 라벨로 찾음) ③ 프론트가 백엔드보다 먼저 배포된 순간 버튼이 "폴더 미생성"으로 잘못 말하던 문제(응답에 표식을 넣어 "서버 업데이트 대기"로) ④ 한 번의 일시 실패가 세션 내내 버튼을 죽이던 문제(작업을 다시 열면 재시도) ⑤ 업체관리에서 <b>담당하지 않은 업체</b>의 폴더 링크는 서버가 아예 내려주지 않음(사유 표시).</li>
+<li><b>노트북(≈1440) 폭에서는 가로 스크롤이 생깁니다</b> — 그 폭은 <b>[자료] 없이도(12칸)</b> 이미 스크롤이 나는 폭이고(필요 1222px vs 여유 1152px), [자료]를 끄면 종전 폭으로 되돌아갑니다.</li>
+</ul></div>
+</div>
+
+<div class="sec" id="decide">
+<h2>정해주셔야 하는 것</h2>
+<div class="decide">
+  <div class="dq"><div class="qq"><span class="n">1</span>세 안 중 무엇으로 갈까요?</div>
+    <div class="opt"><b>A</b> — [자료] 열 신설(권장). 홈·업체뷰어와 같은 자리·같은 모양.</div>
+    <div class="opt"><b>B</b> — hover 액션. 폭은 안 늘지만 훑기·터치·키보드를 잃습니다.</div>
+    <div class="opt"><b>C</b> — 서브라인 인라인 링크. 폭은 안 늘지만 정렬이 안 되고 잘릴 수 있습니다.</div>
+    <div class="rec">권장: <b>A안</b>.</div></div>
+
+  <div class="dq"><div class="qq"><span class="n">2</span>[자료] 열의 기본값은 켬일까요, 끔일까요?</div>
+    <div class="opt"><b>켬</b> — 들어가면 바로 보입니다. 기본 열이 13칸이 되어 <b>넓은 화면(FHD 이상)에서는 가로 스크롤이 없지만</b> 노트북에서는 스크롤이 생길 수 있습니다.</div>
+    <div class="opt"><b>끔</b> — 필요할 때 [자료]를 눌러 펼칩니다. 폭은 지금 그대로지만 <b>버튼이 있다는 사실을 모를</b> 수 있습니다.</div>
+    <div class="rec">권장: <b>켬</b> + 마지막 선택을 브라우저에 기억(지금 열 묶음과 같은 방식). 폴더 접근이 이 요청의 목적이므로 기본은 보이는 쪽.</div></div>
+
+  <div class="dq"><div class="qq"><span class="n">3</span>현금영수증 버튼도 함께 둘까요?</div>
+    <div class="opt"><b>3버튼</b>(구매·리뷰·현영) — 홈과 같습니다. 현영 대상이 아닌 작업은 옅은 비활성.</div>
+    <div class="opt"><b>2버튼</b>(구매·리뷰) — 업체뷰어와 같습니다. 칸이 좁아지고, 현영은 홈에서만 봅니다.</div>
+    <div class="rec">권장: <b>3버튼</b>. 업체관리는 내부 화면이고 현영 폴더는 내부 업무(발행 확인)라 여기서 함께 여는 게 자연스럽습니다.</div></div>
+
+  <div class="dq"><div class="qq"><span class="n">4</span>작업보드 상단(5절)도 같이 넣을까요?</div>
+    <div class="opt"><b>같이</b> — 업체관리 → 작업 클릭 후에도 폴더로 갈 수 있습니다(동선 완결).</div>
+    <div class="opt"><b>나중</b> — 업체관리만 먼저.</div>
+    <div class="rec">권장: <b>같이</b>. 버튼 렌더러를 한 벌로 만들면 추가 비용이 거의 없습니다.</div></div>
+</div>
+</div>
+
+<!-- ═══════ 7. 구현 노트 ═══════ -->
+<div class="sec" id="impl">
+<h2>구현 노트 (개발용)</h2>
+<div class="note"><div class="nt">필요한 변경</div>
+<ul>
+<li><b>서버 1줄</b> — 연결탭 응답에 <code>tab_configs.income_type</code>을 더해 <code>cashReceipt</code>(현영 대상 여부)를 파생합니다. <code>folderUrl</code>·<code>captureFolderUrl</code>은 <b>이미 내려오고 있어</b> 추가 조회가 없습니다. 현영 폴더 해석은 기존 <code>GET /api/trackb/tab-folders</code>(find-only·캐시·staff 담당 스코프) 그대로 재사용 → <b>신규 엔드포인트 0</b>.</li>
+<li>★ <b>버튼 렌더러는 한 벌</b> — 홈의 저장폴더 버튼(<code>_folBtnsHtml</code>/<code>openTabFolder</code>)을 업체관리·작업보드가 같이 씁니다. 사본을 두면 한쪽만 URL 검증이 풀리거나 현영 판정이 갈립니다.</li>
+<li>★ <b>URL 검증은 그대로</b> — <code>https://drive.google.com/</code>으로 시작하는 값만 엽니다(<code>_folUrlOk</code>). 시트발 임의 문자열을 새 창으로 열지 않습니다.</li>
+<li>★ <b>새 창은 await 전에 열어 둡니다</b> — 현영은 서버에 물어본 뒤 이동하므로, 비동기 응답 뒤에 <code>window.open</code>을 부르면 팝업 차단에 걸립니다(홈에서 확정된 순서).</li>
+<li>★ <b>행 클릭과 격리</b> — 표의 행 클릭은 "작업보드로 열기"입니다. 폴더 버튼은 <code>stopPropagation</code>으로 막아야 폴더를 누를 때 작업보드로 튀지 않습니다.</li>
+<li>★ <b>열 수 계약</b> — [자료] 열을 추가하면 헤더 칸·행 칸·grid 열 수가 함께 늘어야 합니다. 회귀가드가 8조합을 실행해 대조하므로 <b>세 곳을 같이 고치지 않으면 테스트가 잡습니다</b>.</li>
+<li><b>권한</b> — 폴더 URL은 담당 스코프 밖으로 새지 않습니다: staff(AE)는 담당 탭만(<code>tab-folders</code>가 이미 검증), 광고주는 업체관리에 도달하지 않습니다.</li>
+</ul></div>
+<div class="note warm" style="margin-top:10px"><div class="nt"><svg class="i"><use href="#i-alert"/></svg>정직한 한계</div>
+<ul>
+<li><b>폴더가 없는 작업은 버튼이 눌리지 않습니다</b> — 이 화면은 폴더를 <b>만들지 않습니다</b>(생성은 업로드·스마트빌드 경로 하나). 미연결은 "탭 설정에서 폴더를 연결하세요"로 안내합니다.</li>
+<li><b>현영은 캡처가 하나라도 올라온 뒤에</b> 폴더가 생깁니다. 그전에는 대상 작업이어도 열 폴더가 없어 안내 문구로 끝납니다.</li>
+<li>목업의 작업 목록은 <b>7건만</b> 그렸습니다(실제 어니스트캄은 316건).</li>
+</ul></div>
+</div>
+
+<div class="foot-n">업체관리 폴더 바로가기 배치 시안 · 리뷰웹시스템[3버전] · 외부 리소스 없이 열립니다(오프라인 열람 가능). <code>?v=A|B|C</code> 단독 보기.</div>
+</div>
+
+<script>
+"use strict";
+(function(){
+var $=function(s,r){return (r||document).querySelector(s)};
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]})}
+function won(n){return n==null?'—':Number(n).toLocaleString('ko-KR')}
+function ic(id,cls){return '<svg class="i '+(cls||'')+'"><use href="#i-'+id+'"/></svg>'}
+function gauge(p,label){
+  var r=15, c=2*Math.PI*r, off=c*(1-Math.min(p,100)/100);
+  var col=p>=100?'var(--safe)':'var(--accent)';
+  return '<svg class="gauge" viewBox="0 0 38 38"><circle cx="19" cy="19" r="'+r+'" fill="none" stroke="var(--card2)" stroke-width="4"/>'
+    +'<circle cx="19" cy="19" r="'+r+'" fill="none" stroke="'+col+'" stroke-width="4" stroke-linecap="round"'
+    +' stroke-dasharray="'+c.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 19 19)"/>'
+    +'<text x="19" y="22" text-anchor="middle" font-size="9.5" font-weight="800" fill="var(--muted)">'+esc(label)+'</text></svg>';
+}
+
+/* ── 가짜 데이터: 어니스트캄 연결탭 7건. fb/fr/fc = 구매·리뷰 폴더 URL 유무 / 현영 대상 ── */
+var SHEET='어니스트캄_업무시트 1';
+var W=[
+ {n:'3/16(메이커스)메디슬벨_알약패지',br:'메디슬벨',pr:'알약패지',ch:'메이커스',tg:'300건·발주',mg:'만두',
+  t:300,s:212,p:180,ctr:'C-2609-118',pa:8400000,tc:12600000,memo:'2차 잔금 4월 예정',seen:'2026-03-11',
+  fb:true,fr:true,fc:false,fin:''},
+ {n:'넛세린_유산균(쿠팡)200건',br:'넛세린',pr:'유산균',ch:'쿠팡',tg:'200건·발주',mg:'망고',
+  t:200,s:96,p:40,ctr:null,pa:null,tc:null,memo:'',seen:'2026-03-12',
+  fb:true,fr:true,fc:true,fin:''},
+ {n:'엘라비에_콜라겐앰플 2차',br:'엘라비에',pr:'콜라겐앰플',ch:'쿠팡',tg:'150건 · 2차',mg:'만두',
+  t:150,s:150,p:150,ctr:'C-2609-140',pa:0,tc:7500000,memo:'계산서 발행 요청함',seen:'2026-03-13',
+  fb:false,fr:true,fc:false,fin:'cand'},
+ {n:'아라새우_네이버x쿠팡',br:'아라새우',pr:'네이버x쿠팡',ch:'',tg:'120건',mg:'만두',
+  t:120,s:120,p:120,ctr:'C-2608-091',pa:6300000,tc:6300000,memo:'',seen:'2026-03-14',
+  fb:true,fr:true,fc:true,fin:'fin'},
+ {n:'디어써고_클렌징밤(네이버)',br:'디어써고',pr:'클렌징밤',ch:'네이버',tg:'80건',mg:'망고',
+  t:80,s:41,p:0,ctr:null,pa:null,tc:null,memo:'',seen:'2026-03-15',
+  fb:true,fr:false,fc:false,fin:''},
+ {n:'메디슬벨_수분크림 1차',br:'메디슬벨',pr:'수분크림',ch:'쿠팡',tg:'100건 · 1차',mg:'망고',
+  t:100,s:74,p:40,ctr:'C-2610-004',pa:0,tc:4800000,memo:'',seen:'2026-03-16',
+  fb:true,fr:true,fc:true,fin:''},
+ {n:'쿠팡트래픽',br:'',pr:'',ch:'',tg:'',mg:'',t:0,s:0,p:0,ctr:null,pa:null,tc:null,memo:'상시 운영 탭',seen:'2026-03-17',
+  fb:false,fr:false,fc:false,fin:''}
+];
+
+/* ── 폴더 버튼 3분할(홈 [구매][리뷰][현영] 과 같은 관용구) ── */
+function folBtns(w,big){
+  function b(kind,label,icon,okv,tip){
+    var cls=kind+(okv?'':' off')+(big?' big':'');
+    // ★ 미니 버튼은 홈 [구매][리뷰][현영] 과 같이 **화살표 없이** 글자만 — ↗ 는 칸을 9px 씩 넓혀
+    //   자료 열이 그만큼 커진다. 작업이 하나로 특정된 큰 버튼(작업보드 상단)에서만 ↗ 를 쓴다.
+    return '<button class="fol '+cls+'" title="'+esc(tip)+'" '+(okv?'':'disabled ')
+      +'onclick="event.stopPropagation();_fol(this,'+(okv?'1':'0')+',\''+esc(label)+'\')">'+icon+(big?' '+label+' 폴더':' '+label)
+      +((okv&&big)?' <span class="up">↗</span>':'')+'</button>';
+  }
+  var noFol='폴더가 연결되지 않았습니다 — 탭 설정에서 연결하세요';
+  return '<span class="fols">'
+    + b('buy','구매','🛒',w.fb, w.fb?'구매캡처 폴더 열기 (Google Drive)':noFol)
+    + b('rev','리뷰','📸',w.fr, w.fr?'리뷰 폴더 열기 (Google Drive)':noFol)
+    + b('rcp','현영','🧾',w.fc, w.fc?'현금영수증 폴더 열기 — 서버가 [리뷰]/현금영수증 서브폴더를 찾습니다':'현금영수증 발행 대상 작업이 아닙니다')
+    + '</span>';
+}
+/* 목업 클릭 피드백 — 실제로는 새 창으로 Drive 를 엽니다 */
+window._fol=function(el,okv,label){
+  if(!okv) return;
+  var old=el.innerHTML; el.innerHTML='열는 중…';
+  setTimeout(function(){ el.innerHTML=old; },700);
+};
+
+/* ── 공통 셸 ── */
+function nav(cur){
+  var items=['홈','작업오더','모집공고','작업보드','입금관리','C/S','업체관리','리뷰검수','로그','설정'];
+  return '<div class="vm-top"><span class="vm-logo">리뷰웹시스템[3버전]</span><span class="vm-tag">TRACK B</span>'
+    +'<nav class="vm-nav">'+items.map(function(x){return '<span'+(x===cur?' class="on"':'')+'>'+x+'</span>'}).join('')+'</nav>'
+    +'<span class="vm-me">admin · 김수만</span></div>';
+}
+function side(){
+  var advs=[['어니스트캄','황운하',7,true],['주식회사 포파코','미지정',0,false],['(주)오쎄','이만수',2,false]];
+  return '<aside class="vm-side"><div class="sh"><span class="ttl">업체 · 광고주</span></div><div class="list">'
+    + advs.map(function(a){ return '<div class="vm-adv'+(a[3]?' on':'')+'"><span class="av">'+esc(a[0].slice(0,1))+'</span>'
+      +'<span class="nm"><b>'+esc(a[0])+'</b><i>AE '+esc(a[1])+'</i></span><span class="ct">1</span></div>'; }).join('')
+    + '</div></aside>';
+}
+function header(){
+  return '<div class="vm-hd"><span class="big">어</span><div style="flex:1;min-width:0"><h3>어니스트캄</h3>'
+    +'<div class="acc">거래처 ID: adv_54aa7de96f3f · 소유 캠페인 1 · 연결된 탭 316</div></div>'
+    +'<button class="b">🔗 접속 링크</button><button class="b">👤 광고주 계정</button><button class="b">▦ 소유 시트</button></div>';
+}
+function tools(withMat, matOn){
+  return '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px">'
+    +'<span class="srch">'+ic('search','sm')+' 작업명 · 브랜드 · 상품 · 계약번호 · 비고 검색</span>'
+    +'<span style="font-size:11.5px;color:var(--muted);font-weight:650"><b style="color:var(--ink)">316</b>건</span>'
+    +'<span style="flex:1"></span>'
+    +'<span class="grp"><button class="on">작업정보</button><button class="on">진척</button>'
+    + (withMat?'<button id="matBtn" class="newc'+(matOn?' on':'')+'" onclick="_toggleMat()">자료</button>':'')
+    +'<button>정산상세</button></span></div>'
+    +'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<span class="chip on">전체 <b>316</b></span><span class="chip warn">계약 미매칭 <b>34</b></span>'
+    +'<span class="chip warn">마감자료 검수 <b>7</b></span><span class="chip warn">미입금 <b>12</b></span><span class="chip">마감 <b>21</b></span></div>';
+}
+function money(w){
+  if(!w.ctr) return '<span class="c dim">—</span>';
+  var cls=(w.pa&&w.tc&&w.pa>=w.tc)?'ok':((w.pa||0)>0?'part':'zero');
+  return '<span class="c money"><b class="'+cls+'">'+won(w.pa)+'</b> <span class="dim">/ '+won(w.tc)+'</span></span>';
+}
+function ctrCell(w){
+  return w.ctr?'<span class="ctr on">'+esc(w.ctr)+'</span>':'<span class="ctr">＋ 매칭</span>';
+}
+function finBadge(w){
+  return w.fin==='fin'?'<span class="fin">🏁 마감</span>':(w.fin==='cand'?'<span class="fin cand">마감자료 검수</span>':'');
+}
+
+/* ── A안: [자료] 열 ── */
+var MAT_ON=true;
+function gridA(){
+  var cols=['44px','minmax(200px,1.7fr)','80px','minmax(82px,1fr)','62px','96px','46px','92px'];
+  if(MAT_ON) cols.push('144px');   // 실측: 3버튼(글자 포함)이 넘치지 않는 최소폭
+  cols.push('92px','148px','minmax(84px,1fr)','40px');
+  return cols.join(' ');
+}
+function headA(){
+  var h='<span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span>';
+  if(MAT_ON) h+='<span style="color:var(--adv)">자료</span>';
+  h+='<span>계약</span><span>입금액/총비용</span><span>비고</span><span></span>';
+  return '<div class="th" style="grid-template-columns:'+gridA()+'">'+h+'</div>';
+}
+function rowA(w){
+  var pct=w.t?Math.round(w.s/w.t*100):0;
+  var c=[];
+  c.push(w.t?gauge(pct,pct+'%'):gauge(0,'—'));
+  // ★ 배지는 서브라인 **앞** — 뒤에 두면 시트명 말줄임에 잘려 사라진다(구현에서 실측·수정한 것과 동일).
+  c.push('<div class="nm"><b><span>'+esc(w.n)+'</span></b><i>'+finBadge(w)+(w.fin?' ':'')+esc(SHEET)+' · '+esc(w.seen)+'</i></div>');
+  c.push('<span class="c'+(w.br?'':' dim')+'">'+esc(w.br||'—')+'</span>');
+  c.push('<span class="c'+(w.pr?'':' dim')+'">'+esc(w.pr||'—')+'</span>');
+  c.push('<span class="c'+(w.ch?'':' dim')+'">'+esc(w.ch||'—')+'</span>');
+  c.push('<span class="c'+(w.tg?'':' dim')+'">'+esc(w.tg||'—')+'</span>');
+  c.push('<span class="c'+(w.mg?'':' dim')+'">'+esc(w.mg||'—')+'</span>');
+  c.push('<span class="cnt">'+(w.t?('<b>'+w.t+'</b> · <b class="s">'+w.s+'</b> · <b class="'+(w.p?'p':'z')+'">'+w.p+'</b>'):'<span class="c dim">—</span>')+'</span>');
+  if(MAT_ON) c.push(folBtns(w,false));
+  c.push('<span>'+ctrCell(w)+'</span>');
+  c.push(money(w));
+  c.push('<span class="memo'+(w.memo?'':' empty')+'">'+(w.memo?esc(w.memo):'비고…')+'</span>');
+  c.push('<span class="open">열기'+ic('chev','sm')+'</span>');
+  return '<div class="tr" style="grid-template-columns:'+gridA()+'">'+c.join('')+'</div>';
+}
+function renderA(){
+  var el=$('#A'); if(!el) return;
+  el.innerHTML=nav('업체관리')+'<div class="vm-body">'+side()
+    +'<div class="vm-main">'+header()
+    +'<div class="st">연결된 탭 316 <span class="hint">최신순 — 클릭하면 작업보드로 열기</span></div>'
+    +tools(true,MAT_ON)
+    +'<div class="tw">'+headA()+W.map(rowA).join('')+'</div>'
+    +'<div style="font-size:11px;color:var(--faint);text-align:center;padding:8px 0 2px">이 목업은 7건만 그렸습니다 — 실제로는 316건이 이어집니다</div>'
+    +'</div></div>';
+}
+window._toggleMat=function(){ MAT_ON=!MAT_ON; renderA();
+  var b=$('#matBtn'); if(b) b.focus(); };
+
+/* ── B안: hover 액션 ── */
+function gridB(){ return '44px minmax(200px,1.7fr) 80px minmax(82px,1fr) 62px 96px 46px 92px 92px 148px minmax(84px,1fr) 118px'; }
+function rowB(w){
+  var pct=w.t?Math.round(w.s/w.t*100):0;
+  var c=[];
+  c.push(w.t?gauge(pct,pct+'%'):gauge(0,'—'));
+  // ★ 배지는 서브라인 **앞** — 뒤에 두면 시트명 말줄임에 잘려 사라진다(구현에서 실측·수정한 것과 동일).
+  c.push('<div class="nm"><b><span>'+esc(w.n)+'</span></b><i>'+finBadge(w)+(w.fin?' ':'')+esc(SHEET)+' · '+esc(w.seen)+'</i></div>');
+  c.push('<span class="c'+(w.br?'':' dim')+'">'+esc(w.br||'—')+'</span>');
+  c.push('<span class="c'+(w.pr?'':' dim')+'">'+esc(w.pr||'—')+'</span>');
+  c.push('<span class="c'+(w.ch?'':' dim')+'">'+esc(w.ch||'—')+'</span>');
+  c.push('<span class="c'+(w.tg?'':' dim')+'">'+esc(w.tg||'—')+'</span>');
+  c.push('<span class="c'+(w.mg?'':' dim')+'">'+esc(w.mg||'—')+'</span>');
+  c.push('<span class="cnt">'+(w.t?('<b>'+w.t+'</b> · <b class="s">'+w.s+'</b> · <b class="'+(w.p?'p':'z')+'">'+w.p+'</b>'):'<span class="c dim">—</span>')+'</span>');
+  c.push('<span>'+ctrCell(w)+'</span>');
+  c.push(money(w));
+  c.push('<span class="memo'+(w.memo?'':' empty')+'">'+(w.memo?esc(w.memo):'비고…')+'</span>');
+  c.push('<span class="hov">'+folBtns(w,false)+'<span class="open">열기'+ic('chev','sm')+'</span></span>');
+  return '<div class="tr" style="grid-template-columns:'+gridB()+'">'+c.join('')+'</div>';
+}
+function renderB(){
+  var el=$('#B'); if(!el) return;
+  var head='<div class="th" style="grid-template-columns:'+gridB()+'">'
+    +'<span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span>'
+    +'<span>참여·제출·입금</span><span>계약</span><span>입금액/총비용</span><span>비고</span><span style="text-align:right">hover 시 폴더</span></div>';
+  el.innerHTML=nav('업체관리')+'<div class="vm-body">'+side()
+    +'<div class="vm-main">'+header()
+    +'<div class="st">연결된 탭 316 <span class="hint">최신순 — 클릭하면 작업보드로 열기</span></div>'
+    +tools(false,false)
+    +'<div class="hovnote">⚠ 마우스를 올린 행에만 폴더 버튼이 진해집니다 — 올리기 전에는 어느 작업에 폴더가 있는지 알 수 없습니다.</div>'
+    +'<div class="tw">'+head+W.map(rowB).join('')+'</div></div></div>';
+}
+
+/* ── C안: 서브라인 인라인 링크 ── */
+function rowC(w){
+  var pct=w.t?Math.round(w.s/w.t*100):0;
+  function il(kind,label,icon,okv,tip){
+    return '<span class="il '+kind+(okv?'':' off')+'" title="'+esc(tip)+'" onclick="event.stopPropagation();_fol(this,'+(okv?'1':'0')+',\''+esc(label)+'\')">'+icon+' '+label+'</span>';
+  }
+  var links=' · '+il('buy','구매','🛒',w.fb,w.fb?'구매캡처 폴더 열기':'폴더 미연결')
+    +' · '+il('rev','리뷰','📸',w.fr,w.fr?'리뷰 폴더 열기':'폴더 미연결')
+    +(w.fc?(' · '+il('rcp','현영','🧾',true,'현금영수증 폴더 열기')):'');
+  var c=[];
+  c.push(w.t?gauge(pct,pct+'%'):gauge(0,'—'));
+  c.push('<div class="nm"><b><span>'+esc(w.n)+'</span></b><i>'+esc(SHEET)+' · '+esc(w.seen)+' '+finBadge(w)+links+'</i></div>');
+  c.push('<span class="c'+(w.br?'':' dim')+'">'+esc(w.br||'—')+'</span>');
+  c.push('<span class="c'+(w.pr?'':' dim')+'">'+esc(w.pr||'—')+'</span>');
+  c.push('<span class="c'+(w.ch?'':' dim')+'">'+esc(w.ch||'—')+'</span>');
+  c.push('<span class="c'+(w.tg?'':' dim')+'">'+esc(w.tg||'—')+'</span>');
+  c.push('<span class="c'+(w.mg?'':' dim')+'">'+esc(w.mg||'—')+'</span>');
+  c.push('<span class="cnt">'+(w.t?('<b>'+w.t+'</b> · <b class="s">'+w.s+'</b> · <b class="'+(w.p?'p':'z')+'">'+w.p+'</b>'):'<span class="c dim">—</span>')+'</span>');
+  c.push('<span>'+ctrCell(w)+'</span>');
+  c.push(money(w));
+  c.push('<span class="memo'+(w.memo?'':' empty')+'">'+(w.memo?esc(w.memo):'비고…')+'</span>');
+  c.push('<span class="open">열기'+ic('chev','sm')+'</span>');
+  return '<div class="tr" style="grid-template-columns:'+gridB().replace('118px','40px')+'">'+c.join('')+'</div>';
+}
+function renderC(){
+  var el=$('#C'); if(!el) return;
+  var g=gridB().replace('118px','40px');
+  var head='<div class="th" style="grid-template-columns:'+g+'">'
+    +'<span>진행</span><span>캠페인 탭 <span style="color:var(--adv)">+ 폴더 링크</span></span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span>'
+    +'<span>참여·제출·입금</span><span>계약</span><span>입금액/총비용</span><span>비고</span><span></span></div>';
+  el.innerHTML=nav('업체관리')+'<div class="vm-body">'+side()
+    +'<div class="vm-main">'+header()
+    +'<div class="st">연결된 탭 316 <span class="hint">최신순 — 클릭하면 작업보드로 열기</span></div>'
+    +tools(false,false)
+    +'<div class="tw">'+head+W.map(rowC).join('')+'</div></div></div>';
+}
+
+/* ── D: 작업보드 상단 도구줄 ── */
+function renderD(){
+  var el=$('#D'); if(!el) return;
+  var w=W[0];
+  el.innerHTML=nav('작업보드')
+    +'<div style="padding:14px 18px;background:var(--paper)">'
+    +'<div style="display:flex;align-items:center;gap:9px;margin-bottom:11px;flex-wrap:wrap">'
+      +'<b style="font-size:15px;letter-spacing:-.02em">'+esc(w.n)+'</b>'
+      +'<span style="font-size:11.5px;color:var(--muted)">'+esc(SHEET)+'</span>'
+      +'<span class="chip">어니스트캄</span></div>'
+    +'<div class="gbar">'
+      +'<span class="lab">상태</span><span class="sel">전체 ▾</span>'
+      +'<span class="lab">보기</span><span class="sel">기본 ▾</span>'
+      +'<span class="srch" style="min-width:210px;height:27px">'+ic('search','sm')+' 표 검색</span>'
+      +'<span class="sp"></span>'
+      +'<span style="font-size:10px;font-weight:800;color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line);border-radius:999px;padding:2px 8px">NEW</span>'
+      + folBtns(w,true)
+    +'</div>'
+    +'<div class="gridstub">'
+      +'<div class="row h"><span>#</span><span>참여자</span><span>연락처</span><span>주소</span><span>결제금액</span><span>리뷰제출</span></div>'
+      +'<div class="row"><span>1</span><span>김○○</span><span>1234</span><span>서울 ○○구 …</span><span>28,900</span><span>O</span></div>'
+      +'<div class="row"><span>2</span><span>이○○</span><span>5678</span><span>부산 ○○구 …</span><span>28,900</span><span>O</span></div>'
+      +'<div class="row"><span>3</span><span>박○○</span><span>9012</span><span>대구 ○○구 …</span><span>28,900</span><span></span></div>'
+    +'</div></div>';
+}
+
+renderA(); renderB(); renderC(); renderD();
+
+/* ?v=A|B|C 단독 보기 */
+(function(){
+  var m=(location.search||'').match(/[?&]v=([ABC])/i); if(!m) return;
+  var keep={A:'secA',B:'secB',C:'secC'}[m[1].toUpperCase()];
+  document.querySelectorAll('.page > *').forEach(function(el){ if(el.id!==keep) el.style.display='none'; });
+  var s=document.getElementById(keep);
+  if(s){ s.style.marginTop='0'; s.querySelectorAll('.note,.cap,.sub').forEach(function(e){e.style.display='none'}); }
+  document.querySelector('.page').style.padding='16px 12px 30px';
+})();
+})();
+</script>
+</body></html>

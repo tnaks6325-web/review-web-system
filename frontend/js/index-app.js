@@ -2171,6 +2171,14 @@ function _onReviewerAlertSSE() {
   try { _raCheckAlerts(); } catch (_) {}
 }
 
+/* [작업오더 열기] — 공고 모달의 "연결 탭을 못 찾았어요" 안내에서 부른다.
+   훅을 등록하지 않은 화면에서는 그 버튼이 아예 그려지지 않는다(눌러도 아무 일 없는 버튼 금지).
+   ★ 공고 모달을 먼저 닫는다 — 상세 팝업이 모달 덮개(z-index 5000) 뒤에 열리면 안 뜬 것처럼 보인다. */
+window.RECRUIT_OPEN_WORK_ORDER = function (id) {
+  try { if (typeof closeRecruitModal === "function") closeRecruitModal(); } catch (_) {}
+  try { openWoDetailModal(id); } catch (_) {}
+};
+
 // ── 작업오더 상세 팝업 (알림 카드/OS 알림 클릭 → 내용 전체 표기) ──
 async function openWoDetailModal(id) {
   let o = (_woCache || []).find(x => x.id === id) || (_dashWoCache || []).find(x => x.id === id);

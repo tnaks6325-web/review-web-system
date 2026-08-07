@@ -280,6 +280,7 @@ async function toggleRecruitPublish(id, checked, inputEl) {
 function _recruitTabsApi() {
   return (typeof window !== "undefined" && window.RECRUIT_TABS_API) || "/api/tab/dashboard";
 }
+let _rfTabsErr = null;   // 탭 목록 로드 실패 사유(성공 = null) — "0건"과 "못 불러옴"을 구분해 말하려고 남긴다
 async function loadRecruitTabOptions() {
   try {
     /* ── API에서 직접 탭 목록을 가져옴 (DOM 의존 제거) ── */
@@ -328,9 +329,11 @@ async function loadRecruitTabOptions() {
       _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key });
     });
 
+    _rfTabsErr = null;
     _populateCampaignSelect();
   } catch(e) {
     console.warn("[recruit] 탭 옵션 로드 실패:", e);
+    _rfTabsErr = (e && e.message) || "불러오기 실패";
     /* API 실패 시 DOM fallback */
     const rows = document.querySelectorAll("[data-tabkey]");
     const seen = new Set();
@@ -355,8 +358,11 @@ async function loadRecruitTabOptions() {
       const display = nameEl ? nameEl.textContent.trim() : tab;
       _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key });
     });
+    // DOM 폴백이 실제로 건졌으면 실패로 취급하지 않는다(관리자 대시보드 경로)
+    if (_recruitTabList.length) _rfTabsErr = null;
     _populateCampaignSelect();
   }
+  try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 목록 상태가 바뀌면 안내도 다시 판단
 }
 
 /* 1단계: 캠페인(시트) 선택 드롭다운 구성 */
@@ -414,11 +420,15 @@ function onLinkedCampaignChange(camSel) {
   if (tabs.length === 0) {
     tabSel.innerHTML = `<option value="">해당 캠페인에 탭 없음</option>`;
   }
+  try { _rfRefreshLinkedTabNote(); } catch (_) {}   // 시트를 바꾸면 탭이 비므로 안내를 다시 판단
 }
 
 /* 탭 선택 시 → 연결 정보 표시 */
 function onLinkedTabChange(sel) {
   if (typeof renderPartCheck === "function") renderPartCheck(); // 참여형 자동점검 즉시 갱신(N6)
+  // 탭을 고르면 안내가 사라지고, 지우면 다시 뜬다(사람이 고른 값이 최우선)
+  if (sel && sel.value) _rfLinkedMiss = null;
+  try { _rfRefreshLinkedTabNote(); } catch (_) {}
   const info = document.getElementById("rf_linked_tab_info");
   const txt  = document.getElementById("rf_linked_tab_text");
   if (sel.value) {
@@ -561,6 +571,159 @@ function _rfPickBtn(group, val) {
   return true;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   🔗 연결 탭 — "왜 비었는가" 안내 + 공고 제목 ↔ 탭명 유사도 추천
+   ───────────────────────────────────────────────────────────────
+   ★ 배경: 프리필은 그 탭이 **탭 목록에 있을 때만** 연결하고 없으면 일부러 빈칸으로
+     둔다(잘못된 탭에 리뷰어 주문이 기록되는 것이 빈칸보다 나쁘다). 그런데 화면은
+     그 사실을 말하지 않아 "작업오더에 시트가 있는데 왜 비어 있지?"가 됐다.
+   ★ 추천은 **제안까지만, 확정은 사람이**(자동 선택 금지 — 계약 매칭·작업표 학습과 같은 규율).
+     비슷한 게 없으면 **아무것도 추천하지 않는다**(빈 추천 > 틀린 추천).
+   ★ 유사도는 프론트에서 계산한다 — 탭 목록·공고 제목이 모두 화면에 이미 있어
+     서버 왕복이 필요 없다. 서버 `utils/contractMatch.js` 는 계약(업체·브랜드·금액)을
+     재료로 쓰는 **다른 판정**이라 재사용 대상이 아니다(사본이 아니라 별개 규칙).
+   ═══════════════════════════════════════════════════════════════ */
+let _rfLinkedMiss = null;     // {source:'order'|'campaign', tabName, orderId?} — 못 찾은 탭
+let _rfSugCache   = [];       // 추천 목록(onclick 은 인덱스만 넘긴다 — 탭명은 시트발 외부 문자열)
+let _rfSugTimer   = null;
+const _RF_SUG_MIN   = 0.45;   // 이 아래면 추천하지 않는다
+const _RF_SUG_LIMIT = 3;
+
+/** 매칭용 정규화 — 대괄호/괄호 안, 날짜(7/28·26.7.28), 용량·수량(150ml·300g·1개)은 잡음이라 뺀다 */
+function _rfMatchNorm(s) {
+  return String(s || "").toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
+    .replace(/\d{1,4}\s*[/.]\s*\d{1,2}(\s*[/.]\s*\d{1,4})?/g, " ")
+    .replace(/\d+\s*(ml|l|g|kg|개|매|세트|포|정|장|박스|차)/g, " ")
+    .replace(/[^0-9a-z가-힣]+/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+function _rfBigrams(s) {
+  const t = String(s || "").replace(/\s+/g, "");
+  const set = new Set();
+  for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2));
+  return set;
+}
+/** 0~1 점수. ★ 겹침계수(overlap)를 쓴다 — 탭명은 짧고 제목은 길어 Dice 는 늘 낮게 나온다. */
+function _rfTabScore(titleNorm, tabNorm) {
+  if (!titleNorm || !tabNorm) return 0;
+  if (tabNorm.replace(/\s+/g, "").length < 3) return 0;   // 너무 짧은 탭명은 오탐만 만든다
+  const A = _rfBigrams(tabNorm), B = _rfBigrams(titleNorm);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  A.forEach(g => { if (B.has(g)) inter++; });
+  const overlap = inter / Math.min(A.size, B.size);
+  const toks = tabNorm.split(" ").filter(t => t.length >= 2);
+  const flat = titleNorm.replace(/\s+/g, "");
+  const cover = toks.length ? toks.filter(t => flat.indexOf(t) > -1).length / toks.length : 0;
+  return Math.max(overlap, cover);
+}
+/** 제목과 비슷한 탭 상위 N개(임계값 미만 제외, 동점은 목록 순서 유지) */
+function _rfSuggestTabs(title, limit) {
+  const tn = _rfMatchNorm(title);
+  if (!tn) return [];
+  return _recruitTabList
+    .map((t, i) => ({ t, i, score: _rfTabScore(tn, _rfMatchNorm(t.tabName)) }))
+    .filter(x => x.score >= _RF_SUG_MIN)
+    .sort((a, b) => (b.score - a.score) || (a.i - b.i))
+    .slice(0, limit || _RF_SUG_LIMIT)
+    .map(x => ({ key: x.t.key, sheetId: x.t.sheetId, tabName: x.t.tabName,
+                 sheetName: x.t.sheetName, score: x.score }));
+}
+
+/** 안내 박스 갱신 — 탭이 선택돼 있으면 숨긴다. ★ 이 함수는 노트 div 만 건드린다(입력칸 무접촉). */
+function _rfRefreshLinkedTabNote() {
+  const box = document.getElementById("rf_linked_tab_note");
+  if (!box) return;
+  const sel = document.getElementById("rf_linked_tab");
+  if (sel && sel.value) { box.style.display = "none"; box.innerHTML = ""; _rfSugCache = []; return; }
+
+  const title = (document.getElementById("rf_title")?.value || "").trim();
+  _rfSugCache = _rfSuggestTabs(title, _RF_SUG_LIMIT);
+  const miss = _rfLinkedMiss;
+  const noTabs = !_recruitTabList.length;
+  if (!miss && !noTabs && !_rfSugCache.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+
+  let html = "";
+  /* ★★ 목록이 통째로 비면 "비슷한 탭이 없다"가 아니라 **고를 수가 없는 상태**다 —
+     시트명부터 고르라고 하면 따를 수 없는 지시가 된다(실측 신고).
+     못 불러온 것과 진짜 0건을 구분해 말하고, 다시 시도할 길을 준다. */
+  if (noTabs) {
+    html += _rfTabsErr
+      ? `⚠ 시트·탭 목록을 <b>불러오지 못했어요</b> — 네트워크·권한 문제일 수 있어요.`
+      : `⚠ 고를 수 있는 <b>작업 탭이 없어요</b> — 작업오더를 접수하면 목록에 나타납니다(접수 후 5분쯤).`;
+    if (miss) html += `<br>이 공고에 저장된 탭: <span class="rf-ltwant">${escHtml(miss.tabName || "(이름 없음)")}</span>`;
+    html += `<div class="rf-ltrow"><button type="button" class="rf-ltwo" onclick="rfReloadTabs(this)">↻ 다시 불러오기</button>`;
+    if (miss && miss.orderId && typeof window.RECRUIT_OPEN_WORK_ORDER === "function") {
+      html += `<button type="button" class="rf-ltwo" onclick="rfOpenLinkedWorkOrder()">작업오더 열기 →</button>`;
+    }
+    html += `</div>`;
+    box.className = "rf-ltnote";
+    box.innerHTML = html;
+    box.style.display = "";
+    return;
+  }
+  if (miss) {
+    const where = miss.source === "order" ? "작업오더의" : "이 공고에 저장된";
+    const why = miss.source === "order"
+      ? "작업오더를 <b>아직 접수하지 않았거나</b>, 접수 직후라 아직 목록에 올라오지 않았을 수 있어요(접수 후 5분쯤)."
+      : "탭 이름이 바뀌었거나 목록에서 빠졌을 수 있어요.";
+    html += `⚠ ${where} 시트 탭 <span class="rf-ltwant">${escHtml(miss.tabName || "(이름 없음)")}</span> 을(를) 탭 목록에서 찾지 못했어요.<br>${why}`;
+    if (miss.orderId && typeof window.RECRUIT_OPEN_WORK_ORDER === "function") {
+      html += `<div class="rf-ltrow"><button type="button" class="rf-ltwo" onclick="rfOpenLinkedWorkOrder()">작업오더 열기 →</button></div>`;
+    }
+  } else {
+    html += `공고 제목과 비슷한 탭을 찾았어요 — 맞는 탭을 골라주세요.`;
+  }
+
+  if (_rfSugCache.length) {
+    html += `<div class="rf-ltrow"><span class="rf-ltcap">제목과 비슷한 탭</span>`;
+    _rfSugCache.forEach((s, i) => {
+      html += `<button type="button" class="rf-ltsug" onclick="rfPickSuggestedTab(${i})" title="${escHtml(s.sheetName + " > " + s.tabName)}">` +
+              `<span class="nm">${escHtml(s.tabName)}</span>` +
+              `<span class="pc">${Math.round(s.score * 100)}%</span>` +
+              `<span class="sh">${escHtml(s.sheetName || "")}</span></button>`;
+    });
+    html += `</div>`;
+  } else if (miss) {
+    html += `<div class="rf-ltrow"><span class="rf-ltcap">제목과 비슷한 탭도 찾지 못했어요 — 위 ① 시트명부터 직접 골라주세요.</span></div>`;
+  }
+  box.className = "rf-ltnote" + (miss ? "" : " plain");
+  box.innerHTML = html;
+  box.style.display = "";
+}
+
+/** 추천 칩 클릭 — ★ 인덱스만 받는다(탭명을 onclick 문자열에 넣지 않는다) */
+function rfPickSuggestedTab(i) {
+  const s = _rfSugCache[i];
+  if (!s) return;
+  if (_restoreLinkedTab(s.sheetId, s.tabName)) _rfLinkedMiss = null;   // 사람이 골랐으면 사유 안내는 끝
+  _rfRefreshLinkedTabNote();
+}
+/** [↻ 다시 불러오기] — 탭 목록을 다시 받고, 성공하면 저장돼 있던 탭을 자동으로 되살린다 */
+async function rfReloadTabs(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "불러오는 중…"; }
+  try { await loadRecruitTabOptions(); } catch (_) {}
+  const m = _rfLinkedMiss;
+  if (m && m.sheetId && m.tabName && _restoreLinkedTab(m.sheetId, m.tabName)) _rfLinkedMiss = null;
+  _rfRefreshLinkedTabNote();   // 여전히 비면 사유가 그대로 남는다(조용히 성공한 척하지 않는다)
+}
+/** [작업오더 열기] — 호스트가 훅을 등록한 화면에서만 버튼이 뜬다 */
+function rfOpenLinkedWorkOrder() {
+  const id = _rfLinkedMiss && _rfLinkedMiss.orderId;
+  if (id && typeof window.RECRUIT_OPEN_WORK_ORDER === "function") window.RECRUIT_OPEN_WORK_ORDER(id);
+}
+/** 제목을 고치면 추천을 다시 계산한다 — ★ 노트 div 만 갱신(입력칸 재렌더 금지 = IME 보호) */
+function _rfBindTitleSuggest() {
+  const el = document.getElementById("rf_title");
+  if (!el || el.dataset.ltBound === "1") return;
+  el.dataset.ltBound = "1";
+  el.addEventListener("input", () => {
+    clearTimeout(_rfSugTimer);
+    _rfSugTimer = setTimeout(_rfRefreshLinkedTabNote, 220);
+  });
+}
+
 /* 작업오더가 넘겨준 연결 탭을 드롭다운에서 고른다.
    ★ gid 우선 — 탭 이름은 운영 중 바뀌지만 gid 는 그대로다(이름만 보면 리네임된 탭을 못 찾는다). */
 function _prefillLinkedTab(prefill) {
@@ -573,20 +736,29 @@ function _prefillLinkedTab(prefill) {
     const gm = /[#?&]gid=(\d+)/.exec(prefill.work_sheet_url);
     if (sm && gm) { sid = sm[1]; gidFromUrl = gm[1]; }
   }
-  if (!sid) return false;
+  /* ★ 못 찾았으면 **왜 비었는지**를 화면이 말하게 한다(조용한 빈칸 금지).
+     기록만 하고 선택은 여전히 안 한다 — 잘못된 탭 연결이 빈칸보다 나쁘다는 규칙은 그대로. */
+  const _miss = (name) => {
+    _rfLinkedMiss = { source: "order", tabName: name || prefill.linked_tab_name || "",
+                      sheetId: sid || prefill.linked_sheet_id || "", orderId: _woPrefillOrderId || null };
+    return false;
+  };
+  if (!sid) return prefill.work_sheet_url || prefill.linked_tab_name ? _miss("") : false;
   const gid = String(prefill.linked_tab_gid || gidFromUrl || "");
   const byGid = gid && _recruitTabList.find(t => t.sheetId === sid && String(t.tabGid || "") === gid);
   const tabName = (byGid && byGid.tabName) || prefill.linked_tab_name || "";
-  if (!tabName) return false;
+  if (!tabName) return _miss("");
   // 목록에 없는 탭(아카이브·미등록)이면 선택하지 않는다 — 잘못된 탭이 걸리는 것보다 낫다
-  if (!_recruitTabList.some(t => t.sheetId === sid && t.tabName === tabName)) return false;
-  _restoreLinkedTab(sid, tabName);
+  if (!_recruitTabList.some(t => t.sheetId === sid && t.tabName === tabName)) return _miss(tabName);
+  if (!_restoreLinkedTab(sid, tabName)) return _miss(tabName);
+  _rfLinkedMiss = null;
   return true;
 }
 
 /* 수정 모달 열 때: 저장된 연결 탭 복원 */
+/** @returns {boolean} 실제로 선택됐는지 — 목록에 없는 시트/탭이면 select 가 조용히 빈 값으로 남는다 */
 function _restoreLinkedTab(linkedSheetId, linkedTabName) {
-  if (!linkedSheetId || !linkedTabName) return;
+  if (!linkedSheetId || !linkedTabName) return false;
   _populateCampaignSelect(linkedSheetId);
   const camSel = document.getElementById("rf_linked_campaign");
   if (camSel) {
@@ -598,7 +770,9 @@ function _restoreLinkedTab(linkedSheetId, linkedTabName) {
   if (tabSel) {
     tabSel.value = key;
     onLinkedTabChange(tabSel);
+    return tabSel.value === key;
   }
+  return false;
 }
 
 /* ═══════════════════════════════════════
@@ -824,16 +998,381 @@ function _parsePurchaseTime(text) {
   return { start: `${pad(h1)}:${pad(m1)}`, end: `${pad(h2 === 24 ? 24 : h2)}:${pad(m2)}` };
 }
 
-/** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용) */
+/** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용)
+ *  ★ 사진은 오른쪽 썸네일 스트립이 보여주므로 본문에 [이미지] 자리표시자·"※ 이미지 N장" 꼬리표를
+ *    남기지 않는다(그 글자가 그대로 편집 대상이 되어 저장본에 섞이던 자리). */
 function _htmlToPlainPreview(html) {
-  const imgCount = (String(html).match(/<img/gi) || []).length;
-  const txt = String(html)
+  return String(html)
     .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n")
-    .replace(/<img[^>]*>/gi, "[이미지]")
+    .replace(/<img[^>]*>/gi, "")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
     .replace(/\n{3,}/g, "\n\n").trim();
-  return txt + (imgCount ? `\n\n※ 이미지 ${imgCount}장 포함 — 수정하지 않으면 원본 서식(이미지 포함) 그대로 게시됩니다.` : "");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   🖼 작업내용 첨부 이미지 (유입가이드 · 리뷰가이드 · 특이사항)
+   시안 = frontend/docs/design-workdetail-images.html (사용자 확정 2026-08-07)
+   ─────────────────────────────────────────────────────────────────────
+   ★ 세 칸이 **이 위젯 한 벌**을 쓴다 — 칸마다 사본을 두면 한쪽만 장수·용량 제한이
+     풀리거나 한쪽만 붙여넣기가 안 되는 드리프트가 난다(1:1문의 첨부와 같은 규율).
+   ★ 넣는 길 3가지(파일선택 · Ctrl+V · 드래그앤드롭)가 전부 `_igUpload` 한 함수로 수렴.
+   ★ 저장 형태는 칸마다 다르다 —
+       유입가이드 = inflowGuideHtml **안의 <img>**(기존 저장분 호환)
+       리뷰가이드·특이사항 = **새 배열**(reviewGuideImages / specialNotesImages)
+     평문 칸을 HTML로 승격하지 않는다(기존 저장분의 '<옵션>' 같은 꺾쇠가 태그로 오인돼 삭제된다).
+   ★ 확대 팝업은 **body 직속**, onclick 에는 **인덱스만**(주소 문자열 보간 금지).
+   ═══════════════════════════════════════════════════════════════════════ */
+const _IG_MAX = 4;                 // 칸당 장수(사용자 확정) — 서버도 다시 센다
+const _IG_MAX_MB = 5;              // 장당 용량(썸네일 업로드와 같은 값)
+const _IG_FIELDS = { inflow: "유입가이드", review: "리뷰가이드", notes: "특이사항" };
+const _IG_TA = { inflow: "rf_wd_inflow", review: "rf_wd_review", notes: "rf_wd_notes" };
+// 우리 서버의 guide-image 프록시 주소만 — 서버 sanitizeGuideImages 와 같은 규칙
+const _IG_URL_RE = /^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/;
+
+/** 칸별 이미지 목록. item = {url, tok, src, state:'ok'|'up'|'bad', name} */
+window._igState = { inflow: [], review: [], notes: [] };
+
+const _igTok = u => { const m = String(u || "").match(/\/api\/order\/guide-image\/([-\w]{20,})$/); return m ? m[1] : ""; };
+const _igOk = f => (window._igState[f] || []).filter(x => x.state === "ok");
+const _igUrls = f => _igOk(f).map(x => x.url);
+const _igBusy = () => Object.keys(_IG_FIELDS).some(f => (window._igState[f] || []).some(x => x.state === "up"));
+const _igImgTags = f => _igOk(f).map(x => `<img src="${escHtml(x.url)}">`).join("");
+
+/** 서버에서 받은 배열 → 위젯 상태(우리 프록시 주소만·중복 제거). ★ 상한 초과분은 자르지 않는다
+ *  (조용히 자르면 관리자가 모르는 사이 사진이 사라진다 — 무엇을 뺄지는 사람이 고른다). */
+function _igSetList(field, urls) {
+  const seen = new Set(), out = [];
+  (Array.isArray(urls) ? urls : []).forEach(u => {
+    const s = String(u || "").trim();
+    if (!_IG_URL_RE.test(s)) return;
+    const tok = _igTok(s);
+    if (!tok || seen.has(tok)) return;
+    seen.add(tok);
+    out.push({ url: s, tok, src: s, state: "ok", name: "" });
+  });
+  window._igState[field] = out;
+}
+
+/** 유입가이드 HTML → { textHtml(사진 뺀 나머지), urls(등장 순서) } */
+function _igSplitInflow(html) {
+  const urls = [];
+  const textHtml = String(html || "").replace(/<img\b[^>]*>/gi, (tag) => {
+    const m = tag.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (m && _IG_URL_RE.test(m[1].trim())) urls.push(m[1].trim());
+    return "";
+  });
+  return { textHtml, urls };
+}
+
+/** 유입가이드 저장값 조립 — 글을 안 고쳤고 사진 구성도 그대로면 **원본 그대로**(바이트 동일) */
+function _igComposeInflow() {
+  const ta = document.getElementById("rf_wd_inflow");
+  const useRaw = !!(ta && ta.dataset.rawHtml === "1" && window._wdInflowRawHtml);
+  const toks = _igOk("inflow").map(x => x.tok).join(",");
+  if (useRaw && toks === String(window._wdInflowOrigTokens || "")) return window._wdInflowRawHtml;
+  const escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let text;
+  if (useRaw) {
+    text = String(window._wdInflowTextHtml || "");
+  } else {
+    // 미리보기 아티팩트(옛 저장분에 굳어 있을 수 있는 [이미지]·꼬리표)를 걷어낸 평문
+    const plain = String(ta ? ta.value : "")
+      .replace(/\n*※ 이미지 \d+장 포함[^\n]*$/m, "").replace(/\[이미지\]/g, "")
+      .replace(/\n{3,}/g, "\n\n").trim();
+    text = escT(plain).replace(/\n/g, "<br>");
+  }
+  return text + _igImgTags("inflow");
+}
+
+/** 원본 유입가이드 HTML을 위젯에 싣는다(편집 프리필·작업오더 프리필 공통) */
+function _igLoadInflowHtml(rawHtml) {
+  const { textHtml, urls } = _igSplitInflow(rawHtml);
+  _igSetList("inflow", urls);
+  window._wdInflowTextHtml = textHtml;
+  window._wdInflowOrigTokens = _igOk("inflow").map(x => x.tok).join(",");
+  return textHtml;
+}
+
+/** 세 칸 초기화(모달 열 때)
+ *  ★ 배선도 여기서 한 번 더 시도한다(멱등) — 리뷰웹시스템[3버전]은 모달을 **뷰를 열 때** 마운트하므로
+ *    스크립트 로드 시점 배선만 두면 그 화면에서는 스트립이 통째로 죽는다. */
+function _igResetAll() {
+  window._igState = { inflow: [], review: [], notes: [] };
+  window._wdInflowTextHtml = "";
+  window._wdInflowOrigTokens = "";
+  Object.keys(_IG_FIELDS).forEach(_igBind);
+  _igRenderAll();
+}
+function _igRenderAll() { Object.keys(_IG_FIELDS).forEach(_igRender); }
+
+let _igMsgTimer = {};
+function _igSay(field, msg, kind) {
+  const el = document.getElementById("rf_igm_" + field);
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = "ig-msg " + (kind || "");
+  clearTimeout(_igMsgTimer[field]);
+  // 성공 안내는 잠시 뒤 지운다(경고·오류는 남긴다 — 사람이 조치해야 하는 상태다)
+  if (kind === "ok") _igMsgTimer[field] = setTimeout(() => { if (el.textContent === msg) _igSay(field, ""); }, 2500);
+}
+
+function _igRender(field) {
+  const strip = document.getElementById("rf_ig_" + field);
+  if (!strip) return;
+  const list = window._igState[field] || [];
+  let h = "";
+  if (!list.length) {
+    h = `<button type="button" class="ig-empty" data-igadd="1">
+           <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V · 클릭</span></button>`;
+  } else {
+    list.forEach((im, i) => {
+      const cls = "ig-thumb" + (im.state === "up" ? " up" : im.state === "bad" ? " bad" : "");
+      // ★ onclick 없음(위임) · 넘기는 값은 인덱스뿐 — 주소·파일명을 속성에 보간하지 않는다
+      h += `<button type="button" class="${cls}" data-igi="${i}" draggable="false" title="클릭하면 크게 보기">
+              <img src="${escHtml(im.src || im.url)}" alt="">
+              <span class="ig-g" data-iggrip="1" title="끌어서 순서 바꾸기">⠿</span>
+              <span class="ig-n">${i + 1}</span>
+              <span class="ig-x" data-igdel="${i}" title="이 사진 빼기">✕</span>
+            </button>`;
+    });
+    if (list.length < _IG_MAX) {
+      h += `<button type="button" class="ig-add" data-igadd="1" title="사진 추가">
+              <span class="plus">＋</span><span>추가</span></button>`;
+    }
+  }
+  strip.innerHTML = h;
+  strip.classList.toggle("err", list.some(x => x.state === "bad"));
+  if (list.length > _IG_MAX) {
+    _igSay(field, `${_IG_MAX}장을 넘겼어요 — ${list.length - _IG_MAX}장을 빼주세요. (자동으로 지우지 않습니다)`, "warn");
+  }
+}
+
+/** ★ 넣는 길 3가지가 전부 지나는 단 하나의 함수 */
+async function _igUpload(field, file) {
+  const list = window._igState[field] || (window._igState[field] = []);
+  if (list.length >= _IG_MAX) { _igSay(field, `사진은 칸마다 최대 ${_IG_MAX}장까지 넣을 수 있어요 — 먼저 빼주세요.`, "warn"); return; }
+  if (!/^image\//.test(file.type || "")) { _igSay(field, "사진 파일만 넣을 수 있어요.", "bad"); return; }
+  if (file.size > _IG_MAX_MB * 1024 * 1024) { _igSay(field, `${_IG_MAX_MB}MB 이하 사진만 넣을 수 있어요.`, "bad"); return; }
+
+  const dataUrl = await new Promise((res, rej) => {
+    const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(file);
+  });
+  const item = { url: "", tok: "", src: dataUrl, state: "up", name: file.name || "paste.png" };
+  list.push(item);
+  _igRender(field);
+  _igSay(field, "사진을 올리는 중… 끝나면 저장할 수 있어요.", "warn");
+  try {
+    const resp = await fetch(API_BASE_URL + "/api/order/guide-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ imageBase64: dataUrl.split(",")[1], mimeType: file.type || "image/png",
+                             fileName: `wd_${field}_${Date.now()}` }),
+    });
+    const j = await resp.json();
+    if (!resp.ok || !j.ok || !j.url || !_IG_URL_RE.test(String(j.url))) throw new Error(j.error || "업로드 실패");
+    item.url = String(j.url); item.tok = _igTok(item.url); item.state = "ok";
+    _igSay(field, _igBusy() ? "사진을 올리는 중…" : "사진이 추가되었습니다.", _igBusy() ? "warn" : "ok");
+  } catch (e) {
+    item.state = "bad";
+    _igSay(field, "사진을 올리지 못했어요 (" + e.message + ") — ✕로 빼고 다시 넣어주세요.", "bad");
+  }
+  _igRender(field);
+  _onPreviewInput();
+}
+
+function igPickFiles(field, input) {
+  const files = [...(input.files || [])];
+  input.value = "";                                    // 같은 파일을 다시 고를 수 있게
+  (async () => { for (const f of files) await _igUpload(field, f); })();
+}
+
+/* ── 확대 팝업 — body 직속 · 그 칸의 사진 안에서만 이동 · 끝에서 순환하지 않는다 ── */
+let _igLbList = [], _igLbIdx = 0, _igLbField = "";
+function _igLightboxEl() {
+  let el = document.getElementById("igLightbox");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "igLightbox";
+  el.tabIndex = -1;                                     // ★ 열 때 여기로 포커스를 옮긴다(방향키 확보)
+  el.innerHTML =
+    `<div class="iglb-wrap">
+       <img id="igLbImg" alt="">
+       <button type="button" class="iglb-close" title="닫기 (Esc)">✕</button>
+     </div>
+     <div class="iglb-bar">
+       <button type="button" class="iglb-btn" data-iglb="-1" title="이전 (←)">‹</button>
+       <span id="igLbCnt">1 / 1</span>
+       <button type="button" class="iglb-btn" data-iglb="1" title="다음 (→)">›</button>
+     </div>
+     <div class="iglb-fld" id="igLbFld"></div>
+     <div class="iglb-tip">← → 이동 · Esc 닫기 · 바깥을 눌러도 닫혀요</div>`;
+  document.body.appendChild(el);                        // ★ body 직속(모달 스크롤 컨테이너 밖)
+  el.addEventListener("click", (e) => {
+    const step = e.target.closest("[data-iglb]");
+    if (step) { _igLbStep(Number(step.getAttribute("data-iglb"))); return; }
+    if (e.target === el || e.target.closest(".iglb-close")) _igLbClose();
+  });
+  return el;
+}
+let _igLbOpener = null;   // 닫을 때 포커스를 돌려줄 곳(원래 있던 자리)
+function _igLbOpen(field, i) {
+  _igLbList = _igOk(field);
+  if (!_igLbList.length) return;
+  _igLbField = field;
+  _igLbIdx = Math.max(0, Math.min(i, _igLbList.length - 1));
+  const el = _igLightboxEl();
+  el.classList.add("on");
+  /* ★★ 포커스를 팝업으로 가져온다 — 글을 쓰다가 썸네일을 누른 경우 포커스가 textarea 에
+     남아 **방향키가 무시**됐다(실측: 텍스트칸 포커스 상태로 열면 ← → 가 안 먹음).
+     닫을 때는 원래 자리로 돌려준다(작성 흐름이 끊기지 않게). */
+  _igLbOpener = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (_) {} }
+  _igLbPaint();
+}
+function _igLbPaint() {
+  const it = _igLbList[_igLbIdx]; if (!it) return;
+  const el = _igLightboxEl();
+  el.querySelector("#igLbImg").src = it.url || it.src;
+  el.querySelector("#igLbCnt").textContent = `${_igLbIdx + 1} / ${_igLbList.length}`;
+  el.querySelector("#igLbFld").textContent = _IG_FIELDS[_igLbField] || "";
+  el.querySelectorAll("[data-iglb]").forEach(b => {
+    b.disabled = Number(b.getAttribute("data-iglb")) < 0 ? _igLbIdx === 0 : _igLbIdx === _igLbList.length - 1;
+  });
+}
+function _igLbStep(d) {
+  const n = _igLbIdx + d;
+  if (n < 0 || n >= _igLbList.length) return;          // 끝에서 순환하지 않는다
+  _igLbIdx = n; _igLbPaint();
+}
+function _igLbClose() {
+  const el = document.getElementById("igLightbox");
+  if (el) { el.classList.remove("on"); const im = el.querySelector("#igLbImg"); if (im) im.removeAttribute("src"); }
+  // 포커스를 원래 자리로(없어졌으면 그냥 둔다 — 엉뚱한 곳으로 옮기지 않는다)
+  if (_igLbOpener && document.contains(_igLbOpener)) { try { _igLbOpener.focus({ preventScroll: true }); } catch (_) {} }
+  _igLbOpener = null;
+}
+
+/* ── 배선: 스트립 클릭·붙여넣기·드래그 · 키 리스너는 최상위 1회 ── */
+let _igDrag = { field: "", i: -1 };
+function _igBind(field) {
+  const strip = document.getElementById("rf_ig_" + field);
+  const ta = document.getElementById(_IG_TA[field]);
+  if (!strip || strip.dataset.igBound === "1") return;
+  strip.dataset.igBound = "1";
+
+  strip.addEventListener("click", (e) => {
+    const del = e.target.closest("[data-igdel]");
+    if (del) {
+      e.stopPropagation();
+      const i = Number(del.getAttribute("data-igdel"));
+      if (confirm(`이 사진을 ${_IG_FIELDS[field]}에서 뺄까요?`)) {
+        (window._igState[field] || []).splice(i, 1);
+        _igRender(field); _igSay(field, "사진을 뺐습니다.", "ok"); _onPreviewInput();
+      }
+      return;
+    }
+    if (e.target.closest("[data-igadd]")) { document.getElementById("rf_igf_" + field)?.click(); return; }
+    const th = e.target.closest("[data-igi]");
+    if (!th) return;
+    const i = Number(th.getAttribute("data-igi"));
+    const im = (window._igState[field] || [])[i];
+    if (!im) return;
+    if (im.state === "bad") { _igSay(field, "이 사진은 업로드에 실패했어요 — ✕로 빼고 다시 넣어주세요.", "bad"); return; }
+    if (im.state === "up") { _igSay(field, "아직 올리는 중이에요.", "warn"); return; }
+    _igLbOpen(field, _igOk(field).indexOf(im));
+  });
+
+  // Ctrl+V — 이미지일 때만 가로챈다(텍스트 붙여넣기는 기본 동작 유지)
+  const onPaste = (e) => {
+    const items = [...((e.clipboardData && e.clipboardData.items) || [])]
+      .filter(it => it.kind === "file" && /^image\//.test(it.type));
+    if (!items.length) return;
+    e.preventDefault();
+    (async () => { for (const it of items) { const f = it.getAsFile(); if (f) await _igUpload(field, f); } })();
+  };
+  strip.addEventListener("paste", onPaste);
+  if (ta) ta.addEventListener("paste", onPaste);
+
+  // 바깥에서 온 파일 드래그 = 업로드 / 안에서 끄는 것 = 순서 변경 (dataTransfer 종류로 구분)
+  const isFileDrag = e => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+  strip.addEventListener("dragover", (e) => {
+    if (isFileDrag(e)) { e.preventDefault(); strip.classList.add("drag"); return; }
+    if (_igDrag.field === field) { e.preventDefault(); _igMarkDrop(strip, e); }
+  });
+  strip.addEventListener("dragleave", (e) => { if (e.target === strip) { strip.classList.remove("drag"); _igClearMarks(strip); } });
+  strip.addEventListener("drop", (e) => {
+    if (isFileDrag(e)) {
+      e.preventDefault(); strip.classList.remove("drag");
+      const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+      (async () => { for (const f of files) await _igUpload(field, f); })();
+      return;
+    }
+    if (_igDrag.field !== field) return;
+    e.preventDefault();
+    const t = _igDropTarget(e);
+    _igClearMarks(strip);
+    if (!t) return;
+    const list = window._igState[field] || [];
+    let to = t.i + (t.after ? 1 : 0);
+    const from = _igDrag.i;
+    if (to > from) to--;
+    if (to === from || from < 0) return;
+    list.splice(to, 0, list.splice(from, 1)[0]);
+    _igRender(field); _igSay(field, "순서를 바꿨습니다 — 리뷰어에게 이 순서로 보입니다.", "ok"); _onPreviewInput();
+  });
+
+  // ⠿ 손잡이를 누른 동안에만 draggable(입력 텍스트 선택·클릭 확대와 무충돌)
+  strip.addEventListener("mousedown", (e) => {
+    const th = e.target.closest("[data-igi]");
+    if (th) th.setAttribute("draggable", e.target.closest("[data-iggrip]") ? "true" : "false");
+  });
+  strip.addEventListener("dragstart", (e) => {
+    const th = e.target.closest("[data-igi]");
+    if (!th || th.getAttribute("draggable") !== "true") { e.preventDefault(); return; }
+    _igDrag = { field, i: Number(th.getAttribute("data-igi")) };
+    th.classList.add("dragging");
+    // 'Files'가 아닌 커스텀 종류만 담는다 → 업로드 경로가 이 드래그에 반응하지 않는다
+    try { e.dataTransfer.setData("application/x-ig-reorder", String(_igDrag.i)); } catch (_) {}
+    e.dataTransfer.effectAllowed = "move";
+  });
+  strip.addEventListener("dragend", () => { _igDrag = { field: "", i: -1 }; _igClearMarks(strip); _igRender(field); });
+}
+function _igDropTarget(e) {
+  const th = e.target.closest ? e.target.closest("[data-igi]") : null;
+  if (!th) return null;
+  const r = th.getBoundingClientRect();
+  // 오른쪽 절반에 놓으면 그 뒤 — 항상 앞이면 끝자리로 옮길 수가 없다
+  return { i: Number(th.getAttribute("data-igi")), after: (e.clientX - r.left) > r.width / 2 };
+}
+function _igMarkDrop(strip, e) {
+  _igClearMarks(strip);
+  const t = _igDropTarget(e); if (!t) return;
+  const th = strip.querySelector(`[data-igi="${t.i}"]`);
+  if (th) th.classList.add(t.after ? "dropR" : "dropL");
+}
+function _igClearMarks(strip) {
+  strip.querySelectorAll("[data-igi]").forEach(n => n.classList.remove("dropL", "dropR", "dragging"));
+}
+
+/* 키 리스너는 최상위 1회 — 팝업을 열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 장 건너뛴다 */
+if (typeof window !== "undefined" && !window._igKeyBound) {
+  window._igKeyBound = true;
+  document.addEventListener("keydown", (e) => {
+    const el = document.getElementById("igLightbox");
+    if (!el || !el.classList.contains("on")) return;
+    /* ★★ 팝업이 열려 있는 동안에는 **포커스가 어디에 있든** ← → Esc 를 받는다.
+       종전엔 input/textarea 포커스면 무시했는데, 글을 쓰다가 썸네일을 누르면 포커스가
+       그대로 남아 **방향키가 안 먹었다**(실측 재현). 화면 전체를 덮은 팝업이 열린 상태에서
+       타이핑 중일 수는 없다 — 그리드 방향키(입력 중 미가로채기) 규율과는 상황이 다르다.
+       브라우저 단축키(Ctrl/Alt/Cmd 조합)는 그대로 흘려보낸다. */
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === "Escape") { _igLbClose(); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { _igLbStep(-1); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { _igLbStep(1); e.preventDefault(); }
+  });
+  window.igPickFiles = igPickFiles;
+  Object.keys(_IG_FIELDS).forEach(_igBind);
 }
 
 /** 게시 전 자동 점검 — 서버 활성화 게이트와 동일 3항목(빠지면 active 저장이 서버에서 거부됨) */
@@ -1478,6 +2017,21 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _recruitBadges = [];
   window._recruitEditLoadFailed = false;
   window._recruitEditLoaded = null;   // ★ 064: 이전 편집의 로드값(sort_order 등)이 새 공고에 새는 것 방지
+  window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
+  window._recruitEditLoadedFees = null;
+  if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
+  _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
+  /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
+  { const _sb = document.getElementById("recruitSaveBtn");
+    if (_sb) { _sb.disabled = false; _sb.classList.remove("busy", "done"); _sb.innerHTML = '<i class="fas fa-save"></i> 저장'; } }
+
+  /* ★★ 연결 탭 드롭다운은 `_recruitTabList` 에 의존한다 — 호스트가 채워 주지 않는 진입점이
+     있으면 **시트 선택 자체가 불가능**하다(실측: 리뷰웹시스템[3버전] 모집공고 카드 [✏️ 수정]은
+     campaign-cards.js 가 openRecruitModal 을 직접 불러 목록이 통째로 비어 있었다 →
+     gid 연결이 구조적으로 불가능했고, 자동점검만 "gid 가 필요해요"라고 했다).
+     진입점마다 호스트를 고치면 **새 진입점이 생길 때 또 빠진다** → 모달이 자기 의존을 보장한다.
+     이미 채워져 있으면 재요청하지 않으므로 기존 경로의 동작·요청 수는 그대로. */
+  if (!_recruitTabList.length) { try { await loadRecruitTabOptions(); } catch (_) {} }
 
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
@@ -1499,6 +2053,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
   _refreshBadgeWrap();
   document.getElementById("rf_linked_tab_info").style.display = "none";
+  /* 🔗 연결 탭 안내·추천 초기화 — 지난번 공고의 사유가 새 모달에 남지 않게 */
+  _rfLinkedMiss = null; _rfSugCache = [];
+  { const _n = document.getElementById("rf_linked_tab_note"); if (_n) { _n.style.display = "none"; _n.innerHTML = ""; } }
   _populateCampaignSelect();   /* 1단계 캠페인 드롭다운 초기화 */
 
   /* ⚡ 참여형(M2) 필드 초기화 */
@@ -1521,6 +2078,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   if (typeof renderFeeRows === "function") renderFeeRows([]);   // 📅 기간별 리뷰비 초기화(082) — 신규 공고는 항상 꺼짐
   window._wdInflowRawHtml = null;
   const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
+  _igResetAll();                 // 🖼 작업내용 첨부 이미지 3칸 초기화
+  ["inflow", "review", "notes"].forEach(f => _igSay(f, ""));
   const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
   const _tfi = document.getElementById("rf_thumb_file"); if (_tfi) _tfi.value = "";
   /* 💸 086 이체 설정 초기화 — 신규 공고 기본 [자동](작업오더 물건비 판정을 계속 따라간다) */
@@ -1545,6 +2104,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const json = await res.json();
       const c = json.data || json;
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
+      window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
+      window._recruitEditLoadedFees = json.feeSchedules || [];
       document.getElementById("rf_title").value        = c.title || "";
       document.getElementById("rf_time_range").value   = c.time_range || "";
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
@@ -1585,7 +2146,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
       _refreshBadgeWrap();
 
       /* 연결 탭 복원 */
-      _restoreLinkedTab(c.linked_sheet_id, c.linked_tab_name);
+      /* ★ 저장된 탭이 목록에 없으면(리네임·아카이브·미등록) select 가 조용히 비어 자동점검만
+         "gid 가 필요해요"라고 한다 → 사유를 남겨 안내 박스가 설명하게 한다. */
+      if (c.linked_tab_name && !_restoreLinkedTab(c.linked_sheet_id, c.linked_tab_name)) {
+        _rfLinkedMiss = { source: "campaign", tabName: c.linked_tab_name,
+                          sheetId: c.linked_sheet_id || "", orderId: null };
+      }
 
       /* ⚡ 참여형(M2) 필드 복원 */
       if (c.participation_mode) {
@@ -1630,17 +2196,24 @@ async function openRecruitModal(id, prefill, woOrderId) {
         {
           const _rawInflow = String(wd.inflowGuideHtml || "");
           const _inflowTa2 = document.getElementById("rf_wd_inflow");
-          if (_inflowTa2 && /<(?!br\s*\/?>)[a-z][^>]*>/i.test(_rawInflow)) {
+          // 🖼 사진은 본문에서 떼어 오른쪽 썸네일로 — 남는 글만 textarea 로 들어간다
+          const _inflowText = _igLoadInflowHtml(_rawInflow);
+          if (_inflowTa2 && /<(?!br\s*\/?>)[a-z][^>]*>/i.test(_inflowText)) {
             window._wdInflowRawHtml = _rawInflow;
-            _inflowTa2.value = _htmlToPlainPreview(_rawInflow);
+            _inflowTa2.value = _htmlToPlainPreview(_inflowText);
             _inflowTa2.dataset.rawHtml = "1";
             _inflowTa2.addEventListener("input", () => { _inflowTa2.dataset.rawHtml = ""; }, { once: true });
           } else {
-            setV("rf_wd_inflow", _fromHtml(_rawInflow));
+            // 서식 없는 글 = 평문 편집(사진은 배열로 이미 분리돼 있어 그대로 보존된다)
+            window._wdInflowRawHtml = _rawInflow;
+            setV("rf_wd_inflow", _fromHtml(_inflowText));
           }
         }
         setV("rf_wd_review", wd.reviewGuide || "");
         setV("rf_wd_notes", wd.specialNotes || "");
+        _igSetList("review", wd.reviewGuideImages);     // 🖼 리뷰가이드·특이사항 첨부(배열)
+        _igSetList("notes", wd.specialNotesImages);
+        _igRenderAll();
         setV("rf_thumbnail", c.thumbnail_url || "");
         if (c.thumbnail_url) {
           const pv = document.getElementById("rf_thumb_preview");
@@ -1715,12 +2288,14 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_wd_notes", prefill.wd_notes);
         const ta = document.getElementById("rf_wd_inflow");
         if (prefill.wd_inflow_html && ta) {
-          /* 유입가이드 원본 HTML(이미지 포함) 보존: textarea엔 미리보기 텍스트만, 저장 시 미수정이면 원본 그대로
-             (textarea 경유 escape가 이미지·서식을 파괴하는 것 방지 — 수정하는 순간 평문 모드로 전환) */
+          /* 유입가이드 원본 HTML(서식) 보존: textarea엔 미리보기 텍스트만, 저장 시 미수정이면 원본 그대로
+             (textarea 경유 escape가 서식을 파괴하는 것 방지 — 수정하는 순간 평문 모드로 전환).
+             🖼 사진은 본문에서 떼어 오른쪽 썸네일로 옮기므로 글을 고쳐도 유지된다. */
           window._wdInflowRawHtml = prefill.wd_inflow_html;
-          ta.value = _htmlToPlainPreview(prefill.wd_inflow_html);
+          ta.value = _htmlToPlainPreview(_igLoadInflowHtml(prefill.wd_inflow_html));
           ta.dataset.rawHtml = "1";
           ta.addEventListener("input", () => { ta.dataset.rawHtml = ""; }, { once: true });
+          _igRenderAll();
         } else if (prefill.wd_inflow_text) {
           setV("rf_wd_inflow", prefill.wd_inflow_text);
         }
@@ -1743,6 +2318,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   /* 🧹 4칸 정리 도우미(개선 ③·④) — 신규 프리필·기발행 스냅샷 모두 열리는 순간 같은 감지가 돈다 */
   try { renderRecruitFieldCleanup(); } catch (_) { /* 감지 실패가 모달을 막으면 안 된다 */ }
+
+  /* 🔗 연결 탭이 비어 있으면 사유 + 제목 유사도 추천을 띄운다(선택돼 있으면 아무것도 안 뜬다) */
+  try { _rfBindTitleSuggest(); _rfRefreshLinkedTabNote(); } catch (_) { /* 안내 실패가 모달을 막으면 안 된다 */ }
 }
 
 // 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
@@ -2266,16 +2844,154 @@ async function campDismiss(campId, appId) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   저장 후 안내 카드의 "바뀐 항목" 목록 재료
+   ───────────────────────────────────────────────────────────────
+   ★ 표시 보조일 뿐 **저장 여부를 가르지 않는다** — 여기서 무엇이 나오든
+     저장은 그대로 진행된다(빈 목록이어도 카드는 뜬다).
+   ★ 확실히 비교되는 필드만 센다. 모르는 필드는 목록에서 뺀다 —
+     틀린 목록은 빈 목록보다 나쁘다(그래서 목록이 비면 카드가 항목을
+     그리지 않고 중립 문구를 쓴다. "바뀐 내용 없음"이라고 단정하지 않는다).
+   ★ 비교 대상은 **저장 직전 payload ↔ 모달을 열 때 서버에서 받은 값**.
+     payload 에 없는 키(축약 화면이 미전송한 필드)는 애초에 비교하지 않는다.
+═══════════════════════════════════════════════════════════════ */
+const _RF_DIFF_FIELDS = [
+  ["title",             "공고 제목"],
+  ["manager",           "담당자"],
+  ["channel",           "구매채널"],
+  ["channel_custom",    "구매채널"],
+  ["time_range",        "구매시간대"],
+  ["delivery_type",     "배송유형"],
+  ["review_fee",        "리뷰비"],
+  ["notes",             "유의사항"],
+  ["chat_url",          "카톡 팀채팅방"],
+  ["linked_tab_name",   "연결 탭"],
+  ["linked_sheet_id",   "연결 탭"],
+  ["max_slots",         "모집인원"],
+  ["status",            "상태"],
+  ["deadline",          "종료일"],
+  ["review_type",       "리뷰타입"],
+  ["start_date",        "시작일"],
+  ["window_start",      "구매시간"],
+  ["window_end",        "구매시간"],
+  ["daily_limit",       "하루 진행 인원"],
+  ["recruit_total",     "총 모집인원"],
+  ["hold_ttl_min",      "자리 유효시간"],
+  ["close_buffer_min",  "마감 버퍼"],
+  ["multi_account_mode","타계정 참여"],
+  ["multi_daily_limit", "타계정 하루한도"],
+  ["sub_hold_ttl_min",  "타계정 자리 유효시간"],
+  ["reviewer_hidden",   "리뷰어에게 숨김"],
+  ["transfer_bank",     "이체은행"],
+  ["transfer_memo",     "통장표시"],
+  ["landing_url",       "상품 URL"],
+  ["thumbnail_url",     "썸네일"],
+  ["badges",            "배지"],
+];
+const _RF_DIFF_WORKDETAIL = [
+  ["productLines",    "상품 정보"],
+  ["inflowGuideHtml", "유입가이드"],
+  ["reviewGuide",     "리뷰가이드"],
+  ["specialNotes",    "특이사항"],
+];
+
+/** 값 정규화 — 서버가 준 형식(타임스탬프·'10:00:00'·숫자 문자열)과 폼 값의 표기 차이를 흡수 */
+function _rfNormVal(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "boolean") return v ? "1" : "0";
+  if (typeof v === "number")  return String(v);
+  if (Array.isArray(v))       return v.map(_rfNormVal).join("|");
+  if (typeof v === "object")  { try { return JSON.stringify(v); } catch(_) { return ""; } }
+  let s = String(v).trim();
+  const dm = s.match(/^(\d{4}-\d{2}-\d{2})[T ]/);   if (dm) return dm[1];   // 타임스탬프 → 날짜
+  const tm = s.match(/^(\d{2}:\d{2}):\d{2}$/);      if (tm) return tm[1];   // '10:00:00' → '10:00'
+  if (/^-?\d+\.0+$/.test(s)) s = s.replace(/\.0+$/, "");                    // numeric '1000.00' → '1000'
+  return s;
+}
+/** ★ 빈 값과 0 은 같은 상태로 본다(실측 오탐) — 서버가 NULL 로 준 숫자 칸을 폼이 0 으로
+ *  채워 되보내므로, 그대로 비교하면 **아무것도 안 고쳐도** "모집인원 바뀜"이 뜬다.
+ *  0 ↔ 비움은 서버가 어차피 같은 값(0)으로 저장하므로 표시하지 않아도 거짓이 아니다. */
+function _rfSame(a, b) {
+  const x = _rfNormVal(a), y = _rfNormVal(b);
+  if (x === y) return true;
+  const blankish = v => v === "" || v === "0";
+  return blankish(x) && blankish(y);
+}
+/** 옵션표/구간표는 서버(snake_case)와 폼(camelCase) 키가 달라 양쪽을 다 읽는다 */
+function _rfNormOptRows(list) {
+  return (Array.isArray(list) ? list : []).map(o => [
+    String(o.optKey ?? o.opt_key ?? "").trim(),
+    _rfNormVal(o.payAmount    ?? o.pay_amount    ?? 0),
+    _rfNormVal(o.recruitTotal ?? o.recruit_total ?? 0),
+    _rfNormVal(o.dailyLimit   ?? o.daily_limit   ?? 0),
+  ].join("~")).sort().join("|");
+}
+function _rfNormFeeRows(list) {
+  return (Array.isArray(list) ? list : []).map(r => [
+    _rfNormVal(r.effectiveFrom ?? r.effective_from ?? ""),
+    _rfNormVal(r.reviewFee     ?? r.review_fee     ?? 0),
+  ].join("~")).sort().join("|");
+}
+
+/** 저장 직전 payload ↔ 로드값 대조 → 바뀐 항목 라벨(중복 제거, 화면 순서 유지) */
+function _rfChangedLabels(payload) {
+  const loaded = window._recruitEditLoaded;
+  if (!loaded || window._recruitEditLoadFailed) return [];   // 모르면 목록을 만들지 않는다
+  const out = [];
+  const push = l => { if (l && out.indexOf(l) === -1) out.push(l); };
+
+  _RF_DIFF_FIELDS.forEach(([k, label]) => {
+    if (!(k in payload)) return;                              // 미전송 필드는 비교 대상 아님
+    if (!_rfSame(payload[k], loaded[k])) push(label);
+  });
+
+  if (payload.work_detail && typeof payload.work_detail === "object") {
+    const wd = loaded.work_detail || {};
+    _RF_DIFF_WORKDETAIL.forEach(([k, label]) => {
+      if (!_rfSame(payload.work_detail[k], wd[k])) push(label);
+    });
+  }
+  if (Array.isArray(payload.options) && Array.isArray(window._recruitEditLoadedOpts)) {
+    if (_rfNormOptRows(payload.options) !== _rfNormOptRows(window._recruitEditLoadedOpts)) push("진행상품·옵션");
+  }
+  if (Array.isArray(payload.fee_schedules) && Array.isArray(window._recruitEditLoadedFees)) {
+    if (_rfNormFeeRows(payload.fee_schedules) !== _rfNormFeeRows(window._recruitEditLoadedFees)) push("기간별 리뷰비");
+  }
+  return out;
+}
+
+/** 저장 차단·실패 안내 — 모달 안쪽(토스트 금지: 덮개 아래로 깔려 안 보인다) */
+function _rfSaveBlocked(msg, opts) {
+  if (typeof recruitSaveBlock === "function") {
+    recruitSaveBlock(msg, (opts && opts.go) || undefined);
+  } else {
+    showToast(msg, "error");   // 구버전 모듈 폴백
+  }
+}
+/** [점검 항목 보기 ↑] — 자동 점검 블록으로 스크롤 + 깜빡임 */
+function _rfGoToCheck() {
+  const body = document.querySelector("#recruitModal .modal-body");
+  const target = document.getElementById("rf_part_check") || document.getElementById("rf_status");
+  if (!target) return;
+  try { target.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  catch (_) { if (body) body.scrollTop = body.scrollHeight; }
+  target.classList.remove("rf-chk-blink");
+  void target.offsetWidth;
+  target.classList.add("rf-chk-blink");
+  setTimeout(() => target.classList.remove("rf-chk-blink"), 2400);
+}
+
 /* ═══════════════════════════════════════
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
 async function saveRecruitPost() {
+  if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();   // 지난 사유 지우고 시작
   const title    = document.getElementById("rf_title").value.trim();
   const channel  = document.getElementById("rf_channel").value.trim();
   const manager  = document.getElementById("rf_manager").value.trim();
   const chatUrl  = document.getElementById("rf_chat_url").value.trim();
-  if (!title)   { showToast("공고 제목을 입력해주세요.", "error"); return; }
-  if (!channel) { showToast("구매채널을 선택해주세요.", "error"); return; }
+  if (!title)   { _rfSaveBlocked("공고 제목을 입력해주세요."); document.getElementById("rf_title").focus(); return; }
+  if (!channel) { _rfSaveBlocked("구매채널을 선택해주세요."); return; }
 
   const tabKey      = document.getElementById("rf_linked_tab").value || "";
   const [sid, tab]  = tabKey ? tabKey.split("||") : ["", ""];
@@ -2326,7 +3042,11 @@ async function saveRecruitPost() {
     if (isPart) {
       if (payload.status === "active") {
         const errs = participationCheckErrors();
-        if (errs.length) { showToast("참여형 게시 불가: " + errs[0], "error"); renderPartCheck(); return; }
+        if (errs.length) {
+          renderPartCheck();
+          _rfSaveBlocked("게시할 수 없습니다 — " + errs[0], { go: _rfGoToCheck });
+          return;
+        }
       }
       /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
@@ -2357,30 +3077,38 @@ async function saveRecruitPost() {
       payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
       payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
+      /* 🖼 업로드가 끝나기 전에 저장하면 그 사진이 조용히 빠진다 — 끝날 때까지 막는다 */
+      // ★ 모달이 떠 있는 동안의 차단 사유는 토스트로 내보내지 않는다 —
+      //   리뷰웹시스템[3버전]의 토스트(z-index 60)는 이 모달(5000+blur) 아래로 깔려 안 보인다.
+      if (_igBusy()) { _rfSaveBlocked("사진 업로드가 끝나면 저장할 수 있어요."); return; }
       // 평문 입력 → HTML 저장: escape 후 개행만 <br> (S3 — sanitize가 '<옵션>' 같은 텍스트를 태그로 오인해 삭제하는 것 방지)
-      // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(이미지 보존 — 서버가 sanitize)
-      const _escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(서식 보존 — 서버가 sanitize)
+      // ★ 사진은 위젯(_igState)이 진실원본 — 글을 고쳐도 유지되고, 조립은 _igComposeInflow 한 곳.
       const _inflowTa = document.getElementById("rf_wd_inflow");
       const _useRawInflow = _inflowTa && _inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
-      // ★ M3 리뷰 #3: escape 모드로 전환된 경우 미리보기 아티팩트("※ 이미지 …", [이미지]) 정리 + 이미지 소실 경고
-      let _inflowPlain = _inflowTa.value.replace(/\n*※ 이미지 \d+장 포함[^\n]*$/m, "").trim();
-      if (!_useRawInflow && window._wdInflowRawHtml && /<img/i.test(window._wdInflowRawHtml)) {
-        if (!confirm("유입가이드를 수정하셨어요 — 원본에 있던 이미지가 빠진 평문으로 게시됩니다. 계속할까요?")) return;
-        _inflowPlain = _inflowPlain.replace(/\[이미지\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      // 원본이 리치 서식(줄바꿈 외 태그)이었는데 평문 모드로 전환됐다면 "서식이 사라진다"만 경고한다.
+      // (종전 문구는 "이미지가 빠진다"였는데, 이제 사진은 보존되므로 사실이 아니다.)
+      if (!_useRawInflow && /<(?!br\s*\/?>|img\b)[a-z][^>]*>/i.test(String(window._wdInflowTextHtml || ""))) {
+        const _n = _igOk("inflow").length;
+        if (!confirm(`유입가이드 글을 고치셨어요 — ${_n ? `사진 ${_n}장은 그대로 유지되고 ` : ""}글자만 다시 게시됩니다.\n원본에 있던 줄 서식·링크는 사라지고 사진은 글 아래로 모입니다. 계속할까요?`)) return;
       }
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
-        inflowGuideHtml: _useRawInflow ? window._wdInflowRawHtml
-                                       : _escT(_inflowPlain).replace(/\n/g, "<br>"),
+        inflowGuideHtml: _igComposeInflow(),
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
+        /* 🖼 리뷰가이드·특이사항 첨부(평문 칸이라 배열로 따로) — 위젯 상태를 그대로 전송한다.
+           스트립이 없는 화면에서도 프리필로 실린 값이 그대로 되돌아가 사진이 지워지지 않는다.
+           (work_detail 은 통째 교체 저장이라 "미전송=유지"가 성립하지 않는다.) */
+        reviewGuideImages: _igUrls("review"),
+        specialNotesImages: _igUrls("notes"),
       };
       // 🧩 상품 옵션(061): 옵션표 전체를 교체 배열로 전송(빈 배열=옵션 없음). 중복 옵션명은 하드블록(서버 유니크).
       //   ★ 옵션표 UI가 있는 페이지에서만 전송 — 옵션표 없는 페이지(admin-siand 등)는 미전송(undefined)→
       //     서버가 기존 옵션 유지(옵션 소실 방지, work_detail 가드와 동일 원칙). (이 지점은 저장 버튼 비활성화 전)
       if (document.getElementById("rf_opt_rows")) {
         const _optChk = (typeof _optSummary === "function") ? _optSummary() : { dup: false };
-        if (_optChk.dup) { showToast("옵션명이 중복됐어요. 옵션명을 다르게 하거나 삭제해주세요.", "error"); renderPartCheck(); return; }
+        if (_optChk.dup) { renderPartCheck(); _rfSaveBlocked("옵션명이 중복됐어요 — 옵션명을 다르게 하거나 삭제해주세요.", { go: _rfGoToCheck }); return; }
         payload.options = readOptRows();
       }
     }
@@ -2391,13 +3119,18 @@ async function saveRecruitPost() {
      스위치를 끄면 빈 배열을 보내 구간을 제거한다(= 기본 리뷰비 한 값으로 복귀). */
   if (document.getElementById("rf_fee_rows")) {
     const _feeChk = renderFeeSchedule();
-    if (_feeChk.dup) { showToast("리뷰비 구간의 시작일이 중복됐어요. 날짜를 다르게 하거나 삭제해주세요.", "error"); return; }
+    if (_feeChk.dup) { _rfSaveBlocked("리뷰비 구간의 시작일이 중복됐어요 — 날짜를 다르게 하거나 삭제해주세요."); return; }
     payload.fee_schedules = document.getElementById("rf_fee_sched_on")?.checked ? readFeeRows() : [];
   }
 
+  /* 저장 직전에 "무엇이 바뀌었나"를 계산해 둔다 — 모달을 닫은 뒤엔 폼 값을 읽을 수 없다 */
+  const _changed = _recruitEditId ? _rfChangedLabels(payload) : [];
+
   const btn = document.getElementById("recruitSaveBtn");
   btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 저장 중...';
+  btn.classList.add("busy");
+  btn.innerHTML = '<span class="rf-spin"></span> 저장 중…';
+  let _ok = false;   // 성공하면 버튼을 원복하지 않는다(✓ 저장됨 → 모달 닫힘으로 이어진다)
 
   try {
     let res;
@@ -2434,17 +3167,42 @@ async function saveRecruitPost() {
       try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
     }
     _woPrefillOrderId = null;
-    showToast(_recruitEditId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
+    /* ★ 095(코드리뷰 M2): 차수 원장이 있는 공고는 총모집 전송값을 서버가 무시한다(차수 합계가
+       진실원본). 조용히 무시하면 "총모집을 고쳤는데 안 바뀐다"가 버그로 오해되므로 고지한다 —
+       토스트가 아니라 가운데 안내(campSaveFeedback)의 목록 첫 줄로(#604 토스트 예산 규율). */
+    if (saved && saved.recruitTotalLocked === true) {
+      _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
+    }
+
+    /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.
+       안내 렌더러는 recruit-modal.js 한 벌 — 없으면(구버전 모듈) 종전 토스트로 폴백. */
+    _ok = true;
+    const _wasEdit = !!_recruitEditId;
+    btn.disabled = true;
+    btn.classList.remove("busy");
+    btn.classList.add("done");
+    btn.innerHTML = "✓ 저장됨";
+    await new Promise(r => setTimeout(r, 400));
     closeRecruitModal();
+    if (typeof campSaveFeedback === "function") {
+      campSaveFeedback({ title: payload.title, changes: _changed, mode: _wasEdit ? "edit" : "create" });
+    } else {
+      showToast(_wasEdit ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
+    }
     loadRecruitList();
     /* ★ 목록 밖에서 열린 모달(홈 작업목록 팝업)이 자기 화면을 갱신할 수 있게 알린다.
        훅 미설정 = 관리자 대시보드 동작 불변(레포의 CS_ON_BADGE 와 같은 방식). */
     try { if (typeof window.CAMP_ON_SAVED === "function") window.CAMP_ON_SAVED(); } catch(_) {}
   } catch(e) {
-    showToast("저장 오류: " + e.message, "error");
+    /* ★ 실패는 자동으로 사라지지 않는다 — 모달을 열어 둔 채 사유를 남긴다.
+       (토스트로 내보내면 모달 덮개 아래로 깔려 "아무 반응 없음"이 된다) */
+    _rfSaveBlocked("저장하지 못했습니다 — " + (e && e.message ? e.message : "잠시 후 다시 시도해주세요"));
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-save"></i> 저장';
+    if (!_ok) {
+      btn.disabled = false;
+      btn.classList.remove("busy", "done");
+      btn.innerHTML = '<i class="fas fa-save"></i> 저장';
+    }
   }
 }
 
@@ -2579,12 +3337,8 @@ function _renderPreview() {
      따로 만든 모형 카드는 실물과 계속 달라져서 제거했다. */
   const _v = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ""; };
 
-  // 유입가이드: 원본 HTML(이미지 포함)을 보존 중이면 그것을, 아니면 textarea 평문을 escape해서.
-  const inflowTa = document.getElementById("rf_wd_inflow");
-  const useRaw = inflowTa && inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
-  const inflowHtml = useRaw
-    ? window._wdInflowRawHtml
-    : escHtml(_v("rf_wd_inflow")).replace(/\n/g, "<br>");
+  // 유입가이드: 저장할 값과 **같은 조립 함수**를 쓴다 — 미리보기와 실제 저장본이 갈라질 수 없다.
+  const inflowHtml = _igComposeInflow();
 
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");
@@ -2599,6 +3353,8 @@ function _renderPreview() {
       inflowGuideHtml: inflowHtml,
       reviewGuide:     _v("rf_wd_review"),
       specialNotes:    _v("rf_wd_notes"),
+      reviewGuideImages: _igUrls("review"),     // 🖼 첨부는 그 카드 안에(리뷰어 화면과 같은 렌더러)
+      specialNotesImages: _igUrls("notes"),
     },
     landingUrl: _v("rf_landing_url"),
     inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)

@@ -226,5 +226,52 @@
     setTimeout(show, _PAIR_WAIT_MS);   // 네트워크가 막혀도 화면이 검은 채로 남지 않게
   }
 
-  window.CsReviewEditCard = { html: html, zoom: zoom, zoomPair: zoomPair, imgUrl: imgUrl, STATUS: STATUS };
+  /**
+   * 검수 결과 카드(msg_type='inspect_result') — "어떤 작업의 어떤 사진인지"를 채팅에서 바로 보여준다.
+   * ★ 교체요청 카드와 **같은 썸네일·확대 경로**를 쓴다(사본 금지 — 클릭 동작이 갈리지 않게).
+   * ★ meta 에는 관리자 실명·시트 제목이 담기지 않는다(서버가 담지 않는다) — 여기서는 그리기만 한다.
+   * ★ 줄 번호는 쓰지 않는다 — 참여 순번(①②③)·상품·제출시각으로 가리킨다.
+   * @param {object} meta  { kind, fileId, matchFileId, work, product, ordinal, submittedAt, matchProduct, matchOrdinal, matchAt, to }
+   */
+  function inspectHtml(meta) {
+    var m = meta || {};
+    var isDup = String(m.kind || '') === 'duplicate' && m.matchFileId;
+    var isMoved = String(m.kind || '') === 'moved';
+    var when = function (v) {
+      if (!v) return '';
+      var d = new Date(v);
+      if (isNaN(d)) return '';
+      var h = d.getHours();
+      return (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + (h < 12 ? '오전 ' : '오후 ') + ((h % 12) || 12) + ':' + ('0' + d.getMinutes()).slice(-2);
+    };
+    var sub = function (ord, product, at) {
+      var a = [];
+      if (when(at)) a.push(when(at) + ' 제출');
+      var b = (ord ? ord + '. ' : '') + (product || '');
+      if (b.trim()) a.push(b.trim());
+      return a.join('<br>');
+    };
+    var pair = { oldFileId: m.matchFileId || m.fileId, newFileId: m.fileId, focus: 'new' };
+    var cap = isDup ? '✕ 반려된 사진' : isMoved ? '↪ 옮긴 사진' : '✕ 반려된 사진';
+    var body = isDup
+      ? '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        + '<div>' + _thumb(m.fileId, cap, '#B91C1C', pair)
+        + '<div style="font-size:.64rem;color:#6B7280;text-align:center;margin-top:2px;line-height:1.4">' + sub(m.ordinal, m.product, m.submittedAt) + '</div></div>'
+        + '<div>' + _thumb(m.matchFileId, '✓ 이미 제출된 사진', '#15803D', { oldFileId: pair.oldFileId, newFileId: pair.newFileId, focus: 'old' })
+        + '<div style="font-size:.64rem;color:#6B7280;text-align:center;margin-top:2px;line-height:1.4">' + sub(m.matchOrdinal, m.matchProduct, m.matchAt) + '</div></div>'
+        + '</div>'
+      : '<div style="display:flex;gap:10px">'
+        + '<div>' + _thumb(m.fileId, cap, isMoved ? '#B45309' : '#B91C1C', pair)
+        + '<div style="font-size:.64rem;color:#6B7280;text-align:center;margin-top:2px;line-height:1.4">'
+        + sub(m.ordinal, m.product, m.submittedAt) + (isMoved && m.to ? '<br>→ ' + _esc(m.to) + ' 칸' : '') + '</div></div>'
+        + '</div>';
+    return '<div style="border:1px solid #E5E7EB;border-radius:10px;padding:10px;background:#FBFCFE;margin-top:8px">'
+      + '<div style="font-size:.68rem;font-weight:800;color:#6B7280;margin-bottom:7px">'
+      + (isDup ? '어떤 사진이 중복이었는지' : isMoved ? '옮긴 사진' : '반려된 사진') + '</div>'
+      + body
+      + (m.work ? '<div style="font-size:.68rem;color:#3182f6;font-weight:700;margin-top:8px">📋 ' + _esc(m.work) + '</div>' : '')
+      + '</div>';
+  }
+
+  window.CsReviewEditCard = { html: html, inspectHtml: inspectHtml, zoom: zoom, zoomPair: zoomPair, imgUrl: imgUrl, STATUS: STATUS };
 })();

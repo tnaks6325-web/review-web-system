@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리뷰검수 — 전용 확인 팝업 + 중복파일 제거 (디자인 시안)</title>
+<style>
+  /* 오프라인 열람 가능해야 한다 — 외부 리소스 0. 화면 재현 목업은 라이트 고정. */
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif; background:#f1f5f9; color:#1e293b; line-height:1.6; padding:32px 16px 100px; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin-bottom:4px; }
+  h2 { font-size:1.1rem; margin:40px 0 12px; padding-bottom:8px; border-bottom:2px solid #334155; }
+  p, li { font-size:.87rem; }
+  .sub { color:#64748b; font-size:.84rem; margin-bottom:20px; }
+  .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:18px 20px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; margin:8px 0; font-size:.83rem; background:#fff; }
+  th, td { border:1px solid #e2e8f0; padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:#f8fafc; font-size:.79rem; }
+  code { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:4px; padding:1px 5px; font-size:.79rem; font-family:Consolas,monospace; }
+  ul { padding-left:20px; margin:6px 0; }
+  .star { color:#dc2626; font-weight:800; }
+  .note { background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:11px 15px; font-size:.83rem; margin:10px 0; }
+  .try { display:inline-block; background:#1d4ed8; color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:.82rem; font-weight:700; cursor:pointer; }
+  .mock { background:#eef2f7; border:2px dashed #94a3b8; border-radius:14px; padding:20px; margin:14px 0; }
+  .mock-title { font-size:.74rem; font-weight:800; color:#64748b; letter-spacing:.05em; margin-bottom:12px; }
+
+  /* ── 검수 카드 재현 ── */
+  .ricard { width:300px; background:#fff; border:1px solid #e2e8f0; border-left:4px solid #ef4444; border-radius:12px; padding:12px 14px; }
+  .rthumb { width:74px; height:120px; border-radius:8px; background:linear-gradient(160deg,#e2e8f0,#cbd5e1); display:flex; align-items:center; justify-content:center; font-size:1.4rem; flex:none; }
+  .rbadge { background:#fee2e2; color:#b91c1c; font-size:.66rem; font-weight:800; border-radius:99px; padding:1px 8px; }
+  .rmeta { font-size:.73rem; color:#2563eb; text-decoration:underline; }
+  .rreason { font-size:.73rem; color:#475569; margin-top:3px; }
+  .rbtn { display:inline-flex; align-items:center; gap:3px; border:1px solid #cbd5e1; background:#fff; border-radius:8px; padding:4px 10px; font-size:.73rem; font-weight:700; color:#334155; cursor:pointer; }
+  .rbtn.grn { border-color:#86efac; color:#15803d; }
+  .rbtn.red { border-color:#fca5a5; color:#b91c1c; }
+  .rbtn.amber { border-color:#fcd9a0; color:#92400e; }
+  .rbtn.blue { border-color:#bfdbfe; color:#1d4ed8; }
+  .rbtn.trash { border-color:#f87171; background:#fef2f2; color:#b91c1c; }
+
+  /* ══ 전용 확인 팝업 컴포넌트 (구현 기준 = 이 CSS 그대로) ══ */
+  .rcov { position:fixed; inset:0; z-index:10000; background:rgba(15,23,42,.55); display:none; align-items:center; justify-content:center; padding:20px; }
+  .rcov.on { display:flex; }
+  .rcbox { background:#fff; border-radius:16px; width:100%; max-width:460px; max-height:88vh; overflow:auto; box-shadow:0 24px 64px rgba(15,23,42,.35); animation:rcPop .16s ease-out; }
+  @keyframes rcPop { from { transform:scale(.96); opacity:0; } to { transform:scale(1); opacity:1; } }
+  .rch { display:flex; align-items:center; gap:10px; padding:16px 20px 0; }
+  .rcic { width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:1.25rem; flex:none; }
+  .rcic.blue { background:#eff6ff; } .rcic.red { background:#fef2f2; }
+  .rct { font-size:1rem; font-weight:800; }
+  .rcs { font-size:.74rem; color:#64748b; margin-top:1px; }
+  .rcbody { padding:14px 20px 0; }
+  .rcwho { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:9px 13px; font-size:.82rem; margin-bottom:12px; }
+  .rcwho b { font-size:.86rem; }
+  .rcwho .tab { color:#2563eb; font-size:.75rem; }
+  .rcdo { margin:0 0 12px; padding:0; list-style:none; }
+  .rcdo li { display:flex; gap:8px; font-size:.82rem; padding:4px 0; align-items:flex-start; }
+  .rcdo li::before { content:''; width:6px; height:6px; border-radius:99px; background:#2563eb; margin-top:8px; flex:none; }
+  .rcdo.danger li::before { background:#dc2626; }
+  .rcundo { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:8px 13px; font-size:.76rem; color:#166534; margin-bottom:4px; }
+  .rcundo.warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+  .rcft { display:flex; gap:8px; justify-content:flex-end; padding:14px 20px 18px; }
+  .rcbtn { border:1px solid #cbd5e1; background:#fff; color:#334155; border-radius:10px; padding:9px 18px; font-size:.85rem; font-weight:700; cursor:pointer; }
+  .rcbtn.pri { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+  .rcbtn.danger { background:#dc2626; border-color:#dc2626; color:#fff; }
+  /* 중복 비교(두 장) */
+  .rcpair { display:flex; gap:10px; margin-bottom:12px; }
+  .rcpair > div { flex:1; border-radius:10px; padding:8px; border:1px solid #e2e8f0; }
+  .rcpair .del { border:2px solid #fca5a5; background:#fff5f5; }
+  .rcpair .keep { border:2px solid #86efac; background:#f7fef9; }
+  .rcpair .cap { font-size:.7rem; font-weight:800; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
+  .rcpair .del .cap { color:#b91c1c; } .rcpair .keep .cap { color:#15803d; }
+  .rcpair .ph { height:120px; border-radius:8px; background:linear-gradient(160deg,#e2e8f0,#cbd5e1); display:flex; align-items:center; justify-content:center; font-size:1.6rem; }
+  .rcpair .who { font-size:.7rem; color:#475569; margin-top:5px; line-height:1.45; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>리뷰검수 — 전용 확인 팝업 + 중복파일 제거 (디자인 시안)</h1>
+<p class="sub">사용자 피드백 2건 반영: ① 같은 파일 중복 제출 카드에 <b>[중복파일 제거]</b> 선택지 ② 시스템 <code>confirm()</code> → <b>화면 중앙 전용 팝업 UI</b>. 아래 [열어보기] 버튼으로 실물 팝업이 그대로 뜹니다(가짜 데이터). | 2026-08-06</p>
+
+<h2>0. 설계 요약</h2>
+<div class="card">
+<table>
+<tr><th style="width:30%">항목</th><th>내용</th></tr>
+<tr><td><b>전용 팝업 1종(`rcConfirm`)</b></td><td>이동·중복 제거·일괄 정상 등 <b>검수 화면의 모든 확인창을 한 컴포넌트</b>로 통일(사본을 두면 문구·버튼이 화면마다 어긋난다). 구성 = 아이콘+제목 / <b>대상 줄</b>(리뷰어·행·탭 — 어긋난 클릭을 알아챌 유일한 장치) / <b>무슨 일이 일어나는지 목록</b> / <b>되돌리기 안내</b> / [취소]·[실행]. 위험 동작(빨강)과 일반 동작(파랑) 2변형.</td></tr>
+<tr><td><b>중복파일 제거</b></td><td>같은 파일(duplicate fail) 유형 카드·상세에 <b>[🗑 중복파일 제거]</b> — <b>지금 제출본(나중 파일)을 휴지통</b>으로 보내고 이전 제출본은 보존. 팝업에서 <b>두 장을 나란히</b> 보여 무엇이 지워지고 무엇이 남는지 명시. 실행부는 자동분류 중복 처리(sweep dup)와 같은 경로 재사용 — 휴지통(30일 복구창)·원장 <code>slot_key='trashed'</code>. 검수 건은 <b>[불량 맞음(중복)]으로 종결</b>(resolution 'bad' — 중복 제출은 오탐이 아니다).</td></tr>
+<tr><td><span class="star">★</span> 완화 금지</td><td>제거는 <b>휴지통만</b>(영구삭제 API 금지 — 기존 규율 그대로) · 팝업 없이 즉시 삭제하는 경로를 만들지 않는다 · Esc/바깥 클릭 = 취소.</td></tr>
+</table>
+</div>
+
+<h2>1. 카드 — 중복 유형에만 [🗑 중복파일 제거] 추가</h2>
+<div class="mock">
+<div class="mock-title">목업 1 · 같은 파일(중복) 카드 — 이동 버튼 줄 아래 제거 버튼 줄</div>
+<div class="ricard">
+  <div style="display:flex;gap:10px">
+    <div class="rthumb">📱</div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:.85rem">신명기 · 48행</b><span class="rbadge">불량</span></div>
+      <div class="rmeta">6/26레노버라방_리뷰</div>
+      <div class="rreason">같은 파일이 이미 제출됨 — 6/26레노버라방_지출증빙 현금영수증 신명기 48행</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:5px;margin-top:10px;flex-wrap:wrap">
+    <span class="rbtn">상세</span><span class="rbtn grn">✓ 정상</span><span class="rbtn red">✕ 불량</span>
+  </div>
+  <div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap">
+    <span class="rbtn amber">🧾 현금영수증으로 이동</span><span class="rbtn blue">🛒 구매캡처로 이동</span>
+  </div>
+  <div style="display:flex;gap:5px;margin-top:5px">
+    <button class="rbtn trash" onclick="openDup()">🗑 중복파일 제거</button>
+  </div>
+</div>
+<div style="font-size:.72rem;color:#64748b;margin-top:10px">· [🗑 중복파일 제거]는 <b>같은 파일(duplicate fail) 유형에만</b> 그린다(다른 유형엔 지울 대상이 없다 — 눌러도 아무 일 없는 버튼 금지 규율)<br>· 상세 팝업 푸터에도 같은 버튼(같은 팝업으로 수렴)</div>
+</div>
+
+<h2>2. 전용 팝업 — 실물 (버튼으로 열어보세요)</h2>
+<div class="card">
+  <p style="margin-bottom:10px">시스템 <code>confirm()</code>(브라우저 좌상단·주소 노출·줄바꿈 빈약)을 아래 전용 팝업으로 교체합니다. 두 변형 모두 실물로 떠 있습니다:</p>
+  <button class="try" onclick="openMove()">🧾 이동 확인 팝업 열어보기 (일반·파랑)</button>
+  <button class="try" style="background:#dc2626" onclick="openDup()">🗑 중복파일 제거 팝업 열어보기 (위험·빨강)</button>
+  <ul style="margin-top:12px">
+    <li><b>대상 줄이 항상 맨 위</b> — 리뷰어 이름·행·탭이 굵게. 잘못 누른 카드를 여기서 알아챈다(복귀 confirm 에 작업 이름을 넣는 기존 규율과 같은 이유).</li>
+    <li><b>"무슨 일이 일어나는지"를 목록으로</b> — 한 문단 줄글 대신 동작 1줄씩(이동·종결·학습).</li>
+    <li><b>되돌리기 안내를 색 박스로 분리</b> — 초록(되돌릴 수 있음) / 노랑(복구 조건 있음).</li>
+    <li>Esc·바깥 클릭 = 취소. 실행 버튼은 오른쪽 끝(파랑/빨강), 위험 동작은 아이콘·헤더까지 빨강.</li>
+  </ul>
+</div>
+
+<h2>3. 구현 메모 (다음 PR)</h2>
+<div class="card">
+<table>
+<tr><th style="width:34%">변경</th><th>내용</th></tr>
+<tr><td>프론트 <code>rcConfirm(opts)</code></td><td>workdesk 리뷰검수에 팝업 컴포넌트 1벌(Promise 반환) — <code>riRouteManual</code>·<code>riResolveAllTab</code>·신규 <code>riDedup</code>의 <code>confirm()</code>을 이것으로 교체. body 직속 마운트(뷰 스크롤 컨테이너 금지 규율).</td></tr>
+<tr><td>서버 <code>POST /review-inspect/dedup-manual</code></td><td>{fileId} — 검수 원장의 duplicate fail 근거(matchFileId 존재) 확인 후: 휴지통(trashFiles) + 원장 <code>routed_from_slot=slot_key, slot_key='trashed', routed_by='dedup:&lt;이름&gt;'</code> + 대표 이미지 재계산 + 검수 건 resolution 'bad' 종결. 게이트 = 건별 확인과 동일(<code>_riCanTouch</code>). <span class="star">★</span> duplicate 근거 없는 파일은 거부(제거 버튼이 안 보이는 유형을 API 직접 호출로 지우는 것 차단).</td></tr>
+<tr><td>되돌리기</td><td>Drive 휴지통 30일 복구창(자동 반려와 동일). 팝업 안내 문구에 명시.</td></tr>
+</table>
+<div class="note"><b>확인 필요 결정</b> — ① 제거 후 검수 건 종결값: <b>불량 맞음(중복)</b>이 기본(중복 제출은 오탐이 아님). 정상 종결을 원하면 알려주세요. ② 제거 대상: <b>항상 나중 제출본(지금 카드의 파일)</b> — 이전 제출본을 지우는 선택지는 두지 않았습니다(정본 보존). 답이 없으면 이 기본값으로 구현합니다.</div>
+</div>
+
+</div>
+
+<!-- ══ 실물 팝업: 이동 확인 (일반·파랑) ══ -->
+<div class="rcov" id="pvMove" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="rcbox">
+    <div class="rch">
+      <div class="rcic blue">🧾</div>
+      <div>
+        <div class="rct">현금영수증으로 이동할까요?</div>
+        <div class="rcs">파일을 옮기고 이 검수 건을 종결합니다</div>
+      </div>
+    </div>
+    <div class="rcbody">
+      <div class="rcwho"><b>권아람</b> · 65행 <span class="tab">— 6/26레노버라방_지출증빙 현금영수증</span></div>
+      <ul class="rcdo">
+        <li>이 파일을 <b>[현금영수증]</b> 폴더로 옮깁니다</li>
+        <li>이 검수 건을 <b>정상(오제출)</b>으로 종결합니다</li>
+        <li>이동 후, 이 실물을 판별 예시로 등록할지 한 번 더 묻습니다</li>
+      </ul>
+      <div class="rcundo">↩ 로그 탭의 [원위치]로 언제든 되돌릴 수 있습니다</div>
+    </div>
+    <div class="rcft">
+      <button class="rcbtn" onclick="document.getElementById('pvMove').classList.remove('on')">취소</button>
+      <button class="rcbtn pri" onclick="document.getElementById('pvMove').classList.remove('on')">🧾 이동하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 실물 팝업: 중복파일 제거 (위험·빨강) ══ -->
+<div class="rcov" id="pvDup" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="rcbox">
+    <div class="rch">
+      <div class="rcic red">🗑</div>
+      <div>
+        <div class="rct">중복파일을 제거할까요?</div>
+        <div class="rcs">같은 파일이 두 곳에 제출되어 있습니다 — 나중 제출본을 제거합니다</div>
+      </div>
+    </div>
+    <div class="rcbody">
+      <div class="rcwho"><b>신명기</b> · 48행 <span class="tab">— 6/26레노버라방_리뷰</span></div>
+      <div class="rcpair">
+        <div class="del">
+          <div class="cap"><span>🗑 제거 (지금 제출)</span><span>7/7 22:04</span></div>
+          <div class="ph">📱</div>
+          <div class="who">6/26레노버라방_<b>리뷰</b> 칸<br>신명기 · 48행</div>
+        </div>
+        <div class="keep">
+          <div class="cap"><span>✓ 보존 (이전 제출)</span><span>7/7 21:58</span></div>
+          <div class="ph">📱</div>
+          <div class="who">6/26레노버라방_<b>지출증빙 현금영수증</b> 칸<br>신명기 · 48행</div>
+        </div>
+      </div>
+      <ul class="rcdo danger">
+        <li>지금 제출본(왼쪽)을 <b>휴지통</b>으로 보냅니다 — 이전 제출본은 그대로 남습니다</li>
+        <li>이 검수 건을 <b>불량 맞음(중복 제출)</b>으로 종결합니다</li>
+      </ul>
+      <div class="rcundo warn">🗑 영구삭제가 아닙니다 — Drive 휴지통에서 <b>30일간 복구</b>할 수 있습니다</div>
+    </div>
+    <div class="rcft">
+      <button class="rcbtn" onclick="document.getElementById('pvDup').classList.remove('on')">취소</button>
+      <button class="rcbtn danger" onclick="document.getElementById('pvDup').classList.remove('on')">🗑 중복파일 제거</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openMove(){ document.getElementById('pvMove').classList.add('on'); }
+  function openDup(){ document.getElementById('pvDup').classList.add('on'); }
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Escape'){ document.querySelectorAll('.rcov.on').forEach(function(el){ el.classList.remove('on'); }); }
+  });
+</script>
+</body>
+</html>

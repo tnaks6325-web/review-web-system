@@ -199,14 +199,16 @@ const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
   const body = stripComments(raw);
   ok(`★ ${name} 중괄호 균형 — 하나만 어긋나도 뒤 규칙이 통째로 무시된다`,
     (body.match(/\{/g) || []).length === (body.match(/\}/g) || []).length);
-  ok(`★ ${name} 은 남의 규칙을 품지 않는다(#recruitModal · .rf-* · @media/@keyframes 만)`, (() => {
+  ok(`★ ${name} 은 남의 규칙을 품지 않는다(#recruitModal · .rf-* · #igLightbox · @media/@keyframes 만)`, (() => {
     // 최상위(중첩깊이 0)에서 여는 `{` 앞의 선택자만 본다
+    // ★ #igLightbox = 이 모듈이 만드는 첨부 이미지 확대 팝업. **body 직속**이라야 하므로
+    //   (#recruitModal 안에 두면 모달 스크롤 컨테이너에 섞인다) 스코프 접두를 붙일 수 없다.
     let depth = 0, sel = '', bad = [];
     for (const ch of body) {
       if (ch === '{') {
         if (depth === 0) {
           const s = sel.trim();
-          if (s && !/^(#recruitModal|\.rf-|@media|@keyframes|from|to)/.test(s)) bad.push(s);
+          if (s && !/^(#recruitModal|\.rf-|#igLightbox|@media|@keyframes|from|to)/.test(s)) bad.push(s);
         }
         depth++; sel = '';
       } else if (ch === '}') { depth = Math.max(0, depth - 1); sel = ''; }

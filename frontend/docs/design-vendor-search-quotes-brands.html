@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 업체뷰어 검색·견적서/계산서 뷰어·브랜드 분류공유 (3기능 설계)</title>
+<style>
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --adv:#6d5ac9;--adv-soft:#efecfa;
+  --brand:#0e7490;--brand-soft:#e6f7fb;
+  --new:#e11d74;--new-soft:#fdeef5;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.page{max-width:1240px;margin:0 auto;padding:26px 20px 90px}
+h1{font-size:21px;font-weight:800;margin:0 0 6px}
+.lead{color:var(--muted);font-size:13px;margin:0 0 10px;max-width:940px}
+.lead b{color:var(--ink)}
+.note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--muted);margin-bottom:14px}
+.note b{color:var(--ink)}
+.note ul{margin:6px 0 0;padding-left:18px} .note li{margin-bottom:5px}
+
+/* 목차 */
+.toc{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0 8px}
+@media(max-width:820px){.toc{grid-template-columns:1fr}}
+.toc a{display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;text-decoration:none;color:var(--ink);box-shadow:0 1px 5px rgba(16,24,40,.04)}
+.toc a:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+.toc .tn{font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--accent-deep);margin-bottom:3px}
+.toc .tt{font-size:13.5px;font-weight:800}
+.toc .td{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+/* 섹션 */
+.sec{margin-top:52px}
+.sec>h2{font-size:17px;font-weight:800;margin:0 0 4px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sec>h2 .n{min-width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--accent-deep);font-size:13px;font-weight:800;display:grid;place-items:center;padding:0 8px}
+.sec .sum{color:var(--muted);font-size:12.5px;margin:0 0 14px;max-width:940px}
+.sec .sum b{color:var(--ink)}
+
+/* 유저플로우(단계 카드) */
+.flow{display:flex;gap:0;align-items:stretch;flex-wrap:wrap;margin:14px 0 6px}
+.flow .st{flex:1;min-width:170px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;position:relative;margin-right:26px;margin-bottom:10px}
+.flow .st:last-child{margin-right:0}
+.flow .st:not(:last-child):after{content:"→";position:absolute;right:-21px;top:50%;transform:translateY(-50%);color:var(--faint);font-weight:800}
+.flow .who{font-size:9.5px;font-weight:800;letter-spacing:.05em;border-radius:999px;padding:1px 8px;display:inline-block;margin-bottom:6px}
+.flow .who.adv{color:var(--adv);background:var(--adv-soft)}
+.flow .who.brd{color:var(--brand);background:var(--brand-soft)}
+.flow .who.sys{color:var(--muted);background:var(--card2)}
+.flow .who.adm{color:var(--warn);background:var(--warn-soft)}
+.flow .stt{font-size:12.5px;font-weight:800;margin-bottom:3px}
+.flow .std{font-size:11.5px;color:var(--muted)}
+
+/* 와이어프레임 프레임 */
+.mockcap{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin:20px 0 8px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.mockcap .loc{font-size:9.5px;color:var(--accent-deep);background:var(--accent-soft);border-radius:999px;padding:1px 8px;letter-spacing:0}
+.frame{background:var(--paper);border:1px solid var(--line2);border-radius:13px;overflow:hidden;box-shadow:0 2px 10px rgba(16,24,40,.05);padding:13px 14px}
+.frame .fh{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.frame .fh h3{font-size:14px;margin:0;font-weight:800;letter-spacing:-.02em}
+.bd{font-size:9.5px;font-weight:750;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);background:var(--card);white-space:nowrap}
+.bd.a{color:var(--adv);border-color:color-mix(in srgb,var(--adv) 28%,var(--line));background:var(--adv-soft)}
+.bd.b{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 28%,var(--line));background:var(--brand-soft)}
+.bd.g{color:var(--safe);border-color:color-mix(in srgb,var(--safe) 28%,var(--line));background:var(--safe-soft)}
+
+/* NEW 하이라이트 */
+.hl{position:relative;outline:2px solid color-mix(in srgb,var(--new) 55%,transparent);outline-offset:1px;border-radius:8px}
+.newtag{position:absolute;top:-9px;right:-6px;z-index:3;font-size:8.5px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--new);border-radius:999px;padding:1px 6px;box-shadow:0 1px 4px rgba(225,29,116,.35)}
+
+/* 작업 목록 테이블 목업 */
+.wl{background:var(--card);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.wl .whead{display:grid;grid-template-columns:52px 1fr 74px 110px 70px 70px 60px;gap:8px;padding:8px 12px;font-size:10px;font-weight:800;color:var(--faint);letter-spacing:.03em;border-bottom:1px solid var(--line);background:var(--card2)}
+.wl .wrow{display:grid;grid-template-columns:52px 1fr 74px 110px 70px 70px 60px;gap:8px;padding:10px 12px;font-size:12px;border-bottom:1px solid var(--line);align-items:center}
+.wl .wrow:last-child{border-bottom:none}
+.wl .wname{font-weight:750}
+.wl .wname .sub{display:block;font-size:10.5px;color:var(--faint);font-weight:500}
+.wl mark{background:#fff3bf;border-radius:3px;padding:0 1px}
+.chip{font-size:10px;font-weight:800;border-radius:999px;padding:2px 9px;display:inline-block;text-align:center}
+.chip.run{color:var(--accent-deep);background:var(--accent-soft)}
+.chip.done{color:var(--safe);background:var(--safe-soft)}
+.doclink{font-size:11px;font-weight:750;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:7px;padding:3px 8px;cursor:pointer;text-align:center}
+.doclink.off{color:var(--faint);background:var(--card2);border-color:var(--line);cursor:default}
+.openlink{font-size:11px;color:var(--accent-deep);font-weight:750;text-align:right}
+
+/* 검색창 */
+.searchbar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.sbox{flex:1;min-width:220px;display:flex;align-items:center;gap:8px;background:var(--card);border:1.5px solid var(--line2);border-radius:10px;padding:8px 12px}
+.sbox:focus-within{border-color:var(--accent)}
+.sbox .ic{color:var(--faint)}
+.sbox input{border:none;outline:none;flex:1;font-size:13px;font-family:inherit;background:transparent;color:var(--ink)}
+.sbox .clr{font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:1px 6px;cursor:pointer;background:var(--card2)}
+.scount{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.scount b{color:var(--accent-deep)}
+.fchip{font-size:11px;font-weight:750;border:1px solid var(--line);border-radius:999px;padding:4px 12px;background:var(--card);color:var(--muted);cursor:pointer}
+.fchip.on{color:#fff;background:var(--accent);border-color:var(--accent)}
+
+/* 팝업(모달) 목업 */
+.modalwrap{background:rgba(16,24,40,.45);border-radius:12px;padding:26px 18px;display:grid;place-items:center}
+.modal{background:var(--card);border-radius:14px;box-shadow:0 12px 40px rgba(16,24,40,.28);max-width:660px;width:100%;overflow:hidden}
+.modal .mh{display:flex;align-items:center;gap:9px;padding:13px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.modal .mh .tt{font-size:14px;font-weight:800;flex:1;min-width:150px}
+.modal .mh .x{width:26px;height:26px;border-radius:8px;background:var(--card2);display:grid;place-items:center;color:var(--muted);font-weight:800;cursor:pointer}
+.modal .mb{padding:16px 18px}
+.vtabs{display:flex;gap:6px;padding:10px 18px 0;border-bottom:1px solid var(--line);background:var(--card2)}
+.vtab{font-size:11.5px;font-weight:750;padding:7px 13px;border-radius:9px 9px 0 0;border:1px solid var(--line);border-bottom:none;background:var(--card2);color:var(--muted);cursor:pointer}
+.vtab.on{background:var(--card);color:var(--accent-deep);font-weight:800;position:relative;top:1px}
+.vtab .vtag{font-size:9px;border-radius:999px;padding:0 6px;margin-left:5px;font-weight:800}
+.vtab .vtag.d{color:var(--warn);background:var(--warn-soft)}
+.vtab .vtag.f{color:var(--safe);background:var(--safe-soft)}
+
+/* 견적서 문서 렌더링 */
+.qdoc{border:1px solid var(--line2);border-radius:10px;padding:18px 20px;background:#fff}
+.qdoc .qtitle{text-align:center;font-size:17px;font-weight:800;letter-spacing:.35em;margin-bottom:4px;color:#1a3a8f}
+.qdoc .qno{text-align:center;font-size:10.5px;color:var(--faint);margin-bottom:14px}
+.qdoc .qmeta{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;font-size:11.5px;margin-bottom:13px}
+.qdoc .qmeta .k{color:var(--faint);display:inline-block;min-width:52px}
+.qdoc table{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:11px}
+.qdoc th{background:#eef3fd;color:#1a3a8f;font-weight:800;padding:6px 8px;border:1px solid var(--line2);font-size:10.5px}
+.qdoc td{padding:6px 8px;border:1px solid var(--line);text-align:right}
+.qdoc td:first-child{text-align:left}
+.qdoc .qsum{display:flex;justify-content:flex-end;gap:22px;font-size:12px;padding:9px 8px;background:#eef3fd;border-radius:8px}
+.qdoc .qsum b{font-size:13.5px;color:#1a3a8f}
+.mfoot{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line);background:var(--card2);flex-wrap:wrap}
+.btn{font-size:12px;font-weight:750;border-radius:9px;padding:8px 15px;cursor:pointer;border:1px solid var(--line2);background:var(--card);color:var(--ink)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{font-size:11px;padding:5px 11px}
+
+/* 계산서 요약 카드 */
+.invcard{border:1px solid var(--line2);border-radius:10px;overflow:hidden}
+.invcard .ih{background:#eef8f1;color:#15803d;font-size:12.5px;font-weight:800;padding:10px 15px;display:flex;align-items:center;gap:8px}
+.invcard .ig{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.invcard .cell{padding:11px 15px;border-top:1px solid var(--line);font-size:12px}
+.invcard .cell .k{font-size:10px;color:var(--faint);font-weight:800;letter-spacing:.03em;display:block;margin-bottom:2px}
+.invcard .cell b{font-size:13px}
+
+/* 브랜드 관리 목업 */
+.brdlist{display:grid;gap:9px}
+.brdcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px 14px;display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.brddot{width:12px;height:12px;border-radius:4px;flex:none}
+.brdname{font-size:13px;font-weight:800;min-width:110px}
+.brdmeta{font-size:11px;color:var(--muted);flex:1;min-width:130px}
+.brdacts{display:flex;gap:6px;flex-wrap:wrap}
+.tgl{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.tgl .sw{width:30px;height:17px;border-radius:999px;background:var(--line2);position:relative;flex:none}
+.tgl .sw:after{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#fff;top:2px;left:2px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tgl.on .sw{background:var(--safe)} .tgl.on .sw:after{left:15px}
+.tgl.on{color:var(--safe);font-weight:750}
+.asgrow{display:flex;align-items:center;gap:9px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.asgrow:last-child{border-bottom:none}
+.cbx{width:15px;height:15px;border:1.5px solid var(--line2);border-radius:4px;flex:none;display:grid;place-items:center;font-size:10px;color:#fff}
+.cbx.on{background:var(--accent);border-color:var(--accent)}
+.selbrand{font-size:11px;font-weight:750;border:1px solid var(--line);border-radius:7px;padding:3px 9px;background:var(--card2);color:var(--muted)}
+.selbrand.set{color:var(--brand);background:var(--brand-soft);border-color:color-mix(in srgb,var(--brand) 30%,var(--line))}
+
+/* 링크 공유 박스 */
+.linkbox{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px dashed var(--line2);border-radius:9px;padding:9px 12px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+.linkbox code{font-size:11px;color:var(--accent-deep);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 8px;word-break:break-all}
+
+/* 장단점/구현노트 */
+.proscons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+@media(max-width:760px){.proscons{grid-template-columns:1fr}}
+.proscons .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:12px;color:var(--muted)}
+.proscons .lbl{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.proscons .pro .lbl{color:var(--safe)} .proscons .con .lbl{color:var(--warn)}
+.proscons ul{margin:0;padding-left:16px} .proscons li{margin-bottom:4px}
+.devnote{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:11px 14px;font-size:12px;color:var(--muted);margin-top:14px}
+.devnote b{color:var(--ink)}
+.devnote ul{margin:5px 0 0;padding-left:17px} .devnote li{margin-bottom:4px}
+
+/* 로드맵 */
+.road{display:grid;gap:10px;margin-top:14px}
+.rstep{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 16px;display:flex;gap:13px;align-items:flex-start}
+.rstep .rn{min-width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent-deep);font-size:13px;font-weight:800;display:grid;place-items:center;flex:none}
+.rstep .rt{font-size:13px;font-weight:800;margin-bottom:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rstep .rd{font-size:12px;color:var(--muted)}
+.eff{font-size:9.5px;font-weight:800;border-radius:999px;padding:1px 8px}
+.eff.s{color:var(--safe);background:var(--safe-soft)}
+.eff.m{color:var(--warn);background:var(--warn-soft)}
+.eff.l{color:var(--bad);background:var(--bad-soft)}
+</style></head><body><div class="page">
+
+<h1>업체뷰어 확장 3기능 — 구현설계·유저플로우·와이어프레임</h1>
+<p class="lead">업체 전용 뷰어(리뷰웹시스템[3버전])에 추가할 <b>① 작업 검색</b>, <b>② 견적서·계산서 팝업 뷰어(버전 이력 포함)</b>, <b>③ 브랜드사 분류·화면 공유</b>의 설계 문서입니다. 비개발자도 흐름을 따라갈 수 있도록 각 기능을 <b>유저플로우 → 화면 와이어프레임 → 구현 노트</b> 순서로 정리했습니다.</p>
+
+<div class="note"><b>사전 협의로 확정된 설계 원칙</b>
+<ul>
+<li><b>견적서·계산서 문서</b>: 파일 업로드가 아니라 <b>인트라넷(인애드 업무시스템) 데이터 연동</b>으로 문서를 화면에 그려서 보여줍니다. 인트라넷 견적서에는 품목·단가·수량·금액이 모두 있어 실제 견적서와 동일한 양식으로 렌더링됩니다.</li>
+<li><b>브랜드 분류</b>: 관리자 손을 거치지 않고 <b>광고주(대행사)가 자기 화면에서 직접</b> 브랜드를 만들고 작업을 배정합니다(셀프서비스).</li>
+<li><b>브랜드사 공유</b>: 브랜드마다 <b>고유 링크</b>를 만들어 전달합니다(현재 광고주 링크와 같은 방식).</li>
+<li><b>브랜드사에게 보이는 정보 범위</b>: 기본은 금액 숨김이며, <b>대행사가 브랜드별로 "정산 정보 공개" 토글</b>을 켜고 끕니다.</li>
+</ul></div>
+
+<div class="toc">
+<a href="#f1"><div class="tn">기능 1</div><div class="tt">🔍 작업 목록 검색</div><div class="td">작업명 실시간 검색 · 사이드바·본문 동시 필터</div></a>
+<a href="#f2"><div class="tn">기능 2</div><div class="tt">📄 견적서·계산서 팝업 뷰어</div><div class="td">클릭하면 문서가 열림 · 초안→최종 버전 이력 보존</div></a>
+<a href="#f3"><div class="tn">기능 3</div><div class="tt">🏷️ 브랜드 분류·화면 공유</div><div class="td">대행사 셀프 분류 · 브랜드별 고유 링크 · 정보범위 토글</div></a>
+</div>
+
+<!-- ═══════════════════ 기능 1 ═══════════════════ -->
+<div class="sec" id="f1">
+<h2><span class="n">1</span>작업 목록 검색 <span class="bd a">업체 전용 뷰어</span></h2>
+<p class="sum">전체 작업이 316건이라 스크롤로 찾기 어렵습니다. <b>"넛세린"을 입력하면 작업명에 넛세린이 들어간 작업만 남도록</b> 실시간으로 걸러줍니다. 왼쪽 사이드바(진행 중/완료 목록)와 오른쪽 본문 테이블이 <b>동시에</b> 걸러지고, 일치한 글자는 노랗게 표시됩니다.</p>
+
+<div class="flow">
+<div class="st"><span class="who adv">광고주</span><div class="stt">검색창에 입력</div><div class="std">"전체 작업" 화면 상단 검색창에 <b>넛세린</b> 입력 (한 글자 칠 때마다 즉시 반영)</div></div>
+<div class="st"><span class="who sys">시스템</span><div class="stt">실시간 필터</div><div class="std">작업명에 검색어가 포함된 작업만 표시. 대소문자·띄어쓰기 무시. 일치 글자 하이라이트</div></div>
+<div class="st"><span class="who adv">광고주</span><div class="stt">결과 확인·열람</div><div class="std">"3건 / 전체 316건" 카운트 확인 후 원하는 작업 <b>열람</b> 클릭</div></div>
+<div class="st"><span class="who adv">광고주</span><div class="stt">검색 해제</div><div class="std">✕ 버튼 또는 ESC로 전체 목록 복귀</div></div>
+</div>
+
+<div class="mockcap">와이어프레임 A — 검색창 위치와 검색 결과 <span class="loc">전체 작업 화면</span></div>
+<div class="frame">
+<div class="fh"><h3>어니스트캄 — 전체 작업</h3><span class="bd">작업 316건</span><span class="bd a">업체 전용 열람</span></div>
+<div class="searchbar hl"><span class="newtag">NEW</span>
+  <div class="sbox"><span class="ic">🔍</span><input id="demoq" placeholder="작업명 검색 — 예: 넛세린, 쿠팡, 메이커스…" value="넛세린"><span class="clr">✕ 지우기 (ESC)</span></div>
+  <span class="fchip on">전체</span><span class="fchip">진행 중</span><span class="fchip">완료</span>
+  <span class="scount"><b>2건</b> 일치 / 전체 316건</span>
+</div>
+<div class="wl">
+<div class="whead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>견적서</span><span>계산서</span><span></span></div>
+<div class="wrow"><span>6/30</span><span class="wname">6/30<mark>넛세린</mark>_선스틱 100건<span class="sub">어니스트캄_업무시트 1</span></span><span><span class="chip run">진행</span></span><span>84 · 79 · 79</span><span><span class="doclink">Q-0630-012</span></span><span><span class="doclink off">—</span></span><span class="openlink">열람 ›</span></div>
+<div class="wrow"><span>4/12</span><span class="wname">4/12<mark>넛세린</mark>_크림 200건<span class="sub">어니스트캄_업무시트 1</span></span><span><span class="chip done">완료</span></span><span>200 · 200 · 200</span><span><span class="doclink">Q-0412-003</span></span><span><span class="doclink">발행됨</span></span><span class="openlink">열람 ›</span></div>
+</div>
+</div>
+
+<div class="mockcap">와이어프레임 B — 결과 없음 상태</div>
+<div class="frame">
+<div class="searchbar"><div class="sbox"><span class="ic">🔍</span><input value="넛세린크림골드" readonly><span class="clr">✕</span></div><span class="scount"><b>0건</b> 일치 / 전체 316건</span></div>
+<div style="text-align:center;padding:28px 10px;color:var(--faint);font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:11px">
+"<b style="color:var(--ink)">넛세린크림골드</b>" 와 일치하는 작업이 없습니다.<br>검색어를 줄여보세요 — 예: <span class="doclink" style="display:inline-block;margin-top:6px">넛세린</span>
+</div>
+</div>
+
+<div class="devnote"><b>구현 노트 (개발 관점)</b>
+<ul>
+<li>프론트(workdesk.html)만 수정 — 이미 전체 작업 목록이 메모리에 있으므로 <b>서버 호출 없이</b> 즉시 필터링. 검색 기준은 작업명(tabName) + 시트명, 공백·대소문자 무시(normalize 후 includes).</li>
+<li>사이드바 진행 중/완료 목록도 같은 검색어로 동시 필터(카운트 뱃지도 갱신). 상태 칩(전체/진행 중/완료)은 검색과 AND 조건.</li>
+<li>검색어는 URL 해시(<code>#q=넛세린</code>)에 반영해 새로고침·공유 시에도 유지.</li>
+</ul></div>
+</div>
+
+<!-- ═══════════════════ 기능 2 ═══════════════════ -->
+<div class="sec" id="f2">
+<h2><span class="n">2</span>견적서·계산서 팝업 뷰어 <span class="bd a">업체 전용 뷰어</span><span class="bd">인트라넷 연동</span></h2>
+<p class="sum">전체 작업 목록의 <b>견적서·계산서 칸을 클릭하면 그 작업에 매칭된 문서가 팝업으로 열립니다.</b> 견적서는 인트라넷 견적 데이터(품목·단가·수량·금액)를 그대로 견적서 양식으로 그려서 보여주고, <b>수정(초안→최종)이 있어도 이전 버전이 사라지지 않도록</b> 버전 탭으로 모두 열람할 수 있습니다. 계산서는 전자세금계산서 발행 정보를 요약 카드로 보여줍니다.</p>
+
+<div class="flow">
+<div class="st"><span class="who adv">광고주</span><div class="stt">견적서 번호 클릭</div><div class="std">전체 작업 목록에서 <b>Q-0630-012</b> 같은 견적번호 클릭</div></div>
+<div class="st"><span class="who sys">시스템</span><div class="stt">문서 데이터 조회</div><div class="std">이 작업에 매칭된 계약(C-번호)의 견적 데이터를 인트라넷에서 가져옴</div></div>
+<div class="st"><span class="who sys">시스템</span><div class="stt">팝업 렌더링</div><div class="std">견적서 양식으로 화면에 그려서 팝업으로 표시. <b>버전 탭</b>(v1 초안 / v2 최종) 제공</div></div>
+<div class="st"><span class="who adv">광고주</span><div class="stt">버전 비교·인쇄</div><div class="std">탭을 눌러 초안↔최종 비교. 필요하면 <b>인쇄/PDF 저장</b></div></div>
+</div>
+
+<div class="mockcap">와이어프레임 A — 견적서 팝업 (최종 버전 열람 중) <span class="loc">견적서 번호 클릭 시</span></div>
+<div class="frame">
+<div class="modalwrap"><div class="modal">
+  <div class="mh"><span class="tt">📄 견적서 — 6/30넛세린_선스틱 100건</span><span class="bd">계약 C-20250630-004</span><span class="x">✕</span></div>
+  <div class="vtabs hl"><span class="newtag">버전 이력</span>
+    <span class="vtab">v1 <span class="vtag d">초안</span> 6/28</span>
+    <span class="vtab on">v2 <span class="vtag f">최종</span> 7/02 · 수락됨</span>
+  </div>
+  <div class="mb">
+  <div class="qdoc">
+    <div class="qtitle">견 적 서</div>
+    <div class="qno">No. Q-20250630-012 · 견적일자 2025-07-02 · 유효기간: 견적일로부터 7일</div>
+    <div class="qmeta">
+      <div><span class="k">수신</span><b>어니스트캄 귀하</b></div>
+      <div><span class="k">작업명</span>넛세린 선스틱 리뷰 캠페인</div>
+      <div><span class="k">담당자</span>김○○ (010-****-1234)</div>
+      <div><span class="k">발신</span>인애드 온라인마케팅</div>
+    </div>
+    <table>
+      <tr><th>품목</th><th>단가</th><th>수량</th><th>공급가액</th><th>세액</th></tr>
+      <tr><td>쿠팡 구매평 리뷰 (포토)</td><td>15,000</td><td>100</td><td>1,500,000</td><td>150,000</td></tr>
+      <tr><td>상위노출 트래픽 부스팅</td><td>300,000</td><td>1</td><td>300,000</td><td>30,000</td></tr>
+    </table>
+    <div class="qsum"><span>공급가액 1,800,000</span><span>부가세 180,000</span><span>합계 <b>₩ 1,980,000</b></span></div>
+  </div>
+  </div>
+  <div class="mfoot"><span style="font-size:11px;color:var(--faint)">v1 초안(6/28)과 비교: 트래픽 부스팅 1건 추가, 합계 +330,000</span><span><span class="btn sm">🖨 인쇄 / PDF 저장</span></span></div>
+</div></div>
+</div>
+
+<div class="mockcap">와이어프레임 B — 계산서 팝업 (발행 요약) <span class="loc">계산서 칸 클릭 시</span></div>
+<div class="frame">
+<div class="modalwrap"><div class="modal" style="max-width:480px">
+  <div class="mh"><span class="tt">🧾 세금계산서 — 6/30넛세린_선스틱 100건</span><span class="x">✕</span></div>
+  <div class="mb">
+  <div class="invcard">
+    <div class="ih">✓ 전자세금계산서 발행 완료</div>
+    <div class="ig">
+      <div class="cell"><span class="k">발행일</span><b>2025-07-31</b></div>
+      <div class="cell"><span class="k">공급자</span><b>인애드</b></div>
+      <div class="cell"><span class="k">공급가액</span><b>1,800,000원</b></div>
+      <div class="cell"><span class="k">세액</span><b>180,000원</b></div>
+      <div class="cell"><span class="k">합계</span><b style="color:var(--accent-deep)">1,980,000원</b></div>
+      <div class="cell"><span class="k">국세청 승인번호</span><b>2025073…-411</b></div>
+    </div>
+  </div>
+  <p style="font-size:11px;color:var(--faint);margin:10px 2px 0">※ 세금계산서 원본은 국세청 홈택스·수신 이메일에서 확인할 수 있습니다. 이 카드에는 발행 이력 요약이 표시됩니다.</p>
+  </div>
+</div></div>
+</div>
+
+<div class="mockcap">와이어프레임 C — 아직 문서가 없는 경우 (미연결/미발행)</div>
+<div class="frame">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+<div style="background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px;text-align:center;font-size:12px;color:var(--muted)">견적서 칸이 <span class="doclink off" style="display:inline-block">—</span> 인 작업<br><span style="font-size:11px;color:var(--faint)">클릭 불가 · 마우스 올리면 "매칭된 견적서가 아직 없습니다" 안내</span></div>
+<div style="background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px;text-align:center;font-size:12px;color:var(--muted)">계산서 <span class="doclink" style="display:inline-block;color:var(--warn);background:var(--warn-soft);border-color:var(--warn-soft)">발행 대기</span> 인 작업<br><span style="font-size:11px;color:var(--faint)">클릭하면 "발행 준비 중" 상태 카드 표시</span></div>
+</div>
+</div>
+
+<div class="proscons">
+<div class="box pro"><div class="lbl">이 방식의 장점</div><ul><li>파일 업로드 작업이 전혀 필요 없음 — 인트라넷에서 견적을 쓰면 광고주 화면에 자동 반영</li><li>견적 데이터가 원본이므로 금액 칸(총비용)과 문서가 항상 일치</li><li>버전 스냅샷으로 "초안 → 최종" 변경 이력이 자동 보존</li></ul></div>
+<div class="box con"><div class="lbl">주의할 점</div><ul><li>버전 이력은 <b>기능 오픈 시점부터</b> 쌓임 — 과거에 이미 덮어써진 초안은 복원 불가</li><li>세금계산서는 원본(국세청) 문서가 아닌 발행 요약만 표시</li><li>인트라넷 점검 중에는 "잠시 후 다시 시도" 안내 필요(현재 정산 칸과 동일한 fail-soft)</li></ul></div>
+</div>
+
+<div class="devnote"><b>구현 노트 (개발 관점)</b>
+<ul>
+<li><b>인트라넷 프록시 확장</b>: 현재 <code>_quoteForSales()</code>는 번호·상태·합계만 가져옴 → 품목(items JSON)·수신자·담당자·견적유형까지 내려주는 상세 프록시 추가. 계산서는 sales의 invoice 상태 + tax_invoices 발행 이력 요약.</li>
+<li><b>버전 스냅샷</b>: 리뷰웹 서버에 <code>trackb_quote_snapshots</code>(sales_id, version, content_hash, payload JSON, captured_at) 테이블 신설. 견적 조회 시 내용 해시가 바뀌었으면 새 버전으로 자동 저장 — 인트라넷 쪽 수정 없이 이력 보존.</li>
+<li><b>보안</b>: 광고주는 자기 작업에 링크된 계약의 견적만 열람 가능(기존 settlementForTab의 링크 검증 재사용). settlement_visible=FALSE 인 업체는 문서 뷰어도 비노출.</li>
+<li>팝업 인쇄는 브라우저 인쇄(@media print)로 처리 — 별도 PDF 서버 불필요.</li>
+</ul></div>
+</div>
+
+<!-- ═══════════════════ 기능 3 ═══════════════════ -->
+<div class="sec" id="f3">
+<h2><span class="n">3</span>브랜드사 분류·화면 공유 <span class="bd a">대행사(광고주) 셀프서비스</span><span class="bd b">브랜드사 열람</span></h2>
+<p class="sum">대행사형 광고주(예: 어니스트캄)가 하부 브랜드사를 여럿 관리하는 경우를 위한 기능입니다. <b>대행사가 자기 화면에서 직접</b> 브랜드를 만들고 작업을 분류한 뒤, <b>브랜드별 고유 링크</b>를 브랜드사에 전달합니다. 브랜드사는 자기 브랜드 작업만 보이는 화면을 열람하며, <b>금액(견적서·계산서·정산) 노출 여부는 대행사가 브랜드별 토글로 결정</b>합니다(기본: 숨김 — 대행사 마진 보호).</p>
+
+<div class="flow">
+<div class="st"><span class="who adv">대행사</span><div class="stt">① 브랜드 만들기</div><div class="std">사이드바 새 메뉴 <b>브랜드 관리</b>에서 "+ 브랜드 추가" — 이름·색상만 입력</div></div>
+<div class="st"><span class="who adv">대행사</span><div class="stt">② 작업 배정</div><div class="std">작업 목록에서 체크박스로 여러 개 선택 → "브랜드 지정" 일괄 배정</div></div>
+<div class="st"><span class="who adv">대행사</span><div class="stt">③ 링크 발급·정보범위 설정</div><div class="std">브랜드별 <b>고유 링크 만들기</b> + "정산 정보 공개" 토글(기본 꺼짐)</div></div>
+<div class="st"><span class="who adv">대행사</span><div class="stt">④ 링크 전달</div><div class="std">카톡·메일로 브랜드사에 링크 전달</div></div>
+<div class="st"><span class="who brd">브랜드사</span><div class="stt">⑤ 열람</div><div class="std">링크 열면 <b>자기 브랜드 작업만</b> 보임. 토글 꺼짐이면 금액 칸 자체가 없음</div></div>
+</div>
+
+<div class="mockcap">와이어프레임 A — 브랜드 관리 화면 <span class="loc">대행사 뷰어 · 사이드바 새 메뉴</span></div>
+<div class="frame">
+<div class="fh"><h3>브랜드 관리</h3><span class="bd a">업체 전용 열람</span><span class="bd">어니스트캄</span><span style="flex:1"></span><span class="btn sm pri hl"><span class="newtag">NEW</span>+ 브랜드 추가</span></div>
+<div class="brdlist">
+  <div class="brdcard">
+    <span class="brddot" style="background:#2563eb"></span><span class="brdname">메이커스</span>
+    <span class="brdmeta">작업 41건 배정 · 링크 발급됨 · 마지막 열람 8/5</span>
+    <span class="tgl on"><span class="sw"></span>정산 정보 공개</span>
+    <span class="brdacts"><span class="btn sm">🔗 링크 복사</span><span class="btn sm">작업 배정</span><span class="btn sm">브랜드 화면 미리보기</span></span>
+  </div>
+  <div class="brdcard">
+    <span class="brddot" style="background:#0e7490"></span><span class="brdname">쿠팡브랜드A</span>
+    <span class="brdmeta">작업 18건 배정 · 링크 발급됨</span>
+    <span class="tgl"><span class="sw"></span>정산 정보 공개 <b style="font-size:10px;color:var(--faint)">(꺼짐 = 금액 숨김)</b></span>
+    <span class="brdacts"><span class="btn sm">🔗 링크 복사</span><span class="btn sm">작업 배정</span><span class="btn sm">브랜드 화면 미리보기</span></span>
+  </div>
+  <div class="brdcard" style="border-style:dashed;color:var(--faint);font-size:12px;justify-content:center">미분류 작업 257건 — 브랜드에 배정하지 않은 작업은 대행사 화면에서만 보입니다</div>
+</div>
+</div>
+
+<div class="mockcap">와이어프레임 B — 작업 일괄 배정 <span class="loc">전체 작업 목록에서 체크 선택 시</span></div>
+<div class="frame">
+<div style="display:flex;align-items:center;gap:9px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:10px;padding:9px 13px;margin-bottom:9px;font-size:12px;flex-wrap:wrap" class="hl"><span class="newtag">NEW</span>
+  <b>3건 선택됨</b><span style="color:var(--muted)">→ 브랜드 지정:</span>
+  <span class="btn sm" style="border-color:#2563eb;color:#2563eb">메이커스</span>
+  <span class="btn sm" style="border-color:#0e7490;color:#0e7490">쿠팡브랜드A</span>
+  <span class="btn sm">배정 해제</span><span style="flex:1"></span><span style="font-size:11px;color:var(--faint)">✕ 선택 취소</span>
+</div>
+<div class="wl">
+<div class="asgrow"><span class="cbx on">✓</span><span style="flex:1;font-weight:750">6/30넛세린_선스틱 100건</span><span class="selbrand">미분류</span><span class="chip run">진행</span></div>
+<div class="asgrow"><span class="cbx on">✓</span><span style="flex:1;font-weight:750">5/6(메이커스)메디슨벨_알약패치 200건</span><span class="selbrand set">메이커스</span><span class="chip run">진행</span></div>
+<div class="asgrow"><span class="cbx on">✓</span><span style="flex:1;font-weight:750">4/21(쿠팡)엘라_비타세럼</span><span class="selbrand">미분류</span><span class="chip run">진행</span></div>
+<div class="asgrow"><span class="cbx"></span><span style="flex:1;font-weight:750;color:var(--muted)">3/29블랑루스(쿠팡3종 동시구매)</span><span class="selbrand set" style="color:#2563eb;background:#eff4ff">메이커스</span><span class="chip done">완료</span></div>
+</div>
+<p style="font-size:11px;color:var(--faint);margin:8px 2px 0">각 작업 행의 브랜드 칩을 클릭해 한 건씩 바꿀 수도 있습니다. 작업명에 브랜드 이름이 들어 있으면(예: "(메이커스)") 배정 후보로 추천 표시됩니다.</p>
+</div>
+
+<div class="mockcap">와이어프레임 C — 링크 발급 모달 <span class="loc">"🔗 링크 복사" 클릭 시</span></div>
+<div class="frame">
+<div class="modalwrap"><div class="modal" style="max-width:520px">
+  <div class="mh"><span class="tt">🔗 메이커스 — 브랜드 열람 링크</span><span class="x">✕</span></div>
+  <div class="mb">
+    <div class="linkbox"><code>https://리뷰웹주소/workdesk.html?bt=mk7f…3a9</code><span class="btn sm pri">복사</span></div>
+    <div style="display:grid;gap:9px;margin-top:13px;font-size:12px">
+      <label class="tgl on" style="font-size:12px"><span class="sw"></span><b>정산 정보 공개</b> — 켜면 브랜드사도 견적서·계산서·금액 칸을 봅니다 (기본: 꺼짐)</label>
+      <label class="tgl" style="font-size:12px"><span class="sw"></span><b>로그인 잠금</b> — 켜면 링크를 열 때 계정 로그인을 요구합니다 (기본: 링크만으로 입장)</label>
+      <label class="tgl" style="font-size:12px"><span class="sw"></span><b>링크 정지</b> — 전달을 취소하고 싶을 때 즉시 차단 (새 링크 재발급 가능)</label>
+    </div>
+  </div>
+  <div class="mfoot"><span style="font-size:11px;color:var(--faint)">이 링크로는 메이커스에 배정된 작업만 보입니다</span><span class="btn sm">저장</span></div>
+</div></div>
+</div>
+
+<div class="mockcap">와이어프레임 D — 브랜드사가 보는 화면 (정산 공개 꺼짐 상태) <span class="loc">브랜드 링크로 접속</span></div>
+<div class="frame">
+<div class="fh"><h3>메이커스 — 작업 현황</h3><span class="bd b">브랜드 열람 · by 어니스트캄</span><span class="bd">작업 41건</span></div>
+<div class="searchbar"><div class="sbox"><span class="ic">🔍</span><input placeholder="작업명 검색" readonly></div><span class="scount">검색은 브랜드 화면에도 동일 제공</span></div>
+<div class="wl">
+<div class="whead" style="grid-template-columns:52px 1fr 74px 110px 60px"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출</span><span></span></div>
+<div class="wrow" style="grid-template-columns:52px 1fr 74px 110px 60px"><span>5/6</span><span class="wname">5/6(메이커스)메디슨벨_알약패치 200건</span><span><span class="chip run">진행</span></span><span>168 · 168 <b style="color:var(--accent-deep)">84%</b></span><span class="openlink">열람 ›</span></div>
+<div class="wrow" style="grid-template-columns:52px 1fr 74px 110px 60px"><span>3/29</span><span class="wname">3/29블랑루스(쿠팡3종 동시구매)</span><span><span class="chip done">완료</span></span><span>100 · 100</span><span class="openlink">열람 ›</span></div>
+</div>
+<p style="font-size:11px;color:var(--faint);margin:8px 2px 0">※ 정산 공개가 꺼져 있으면 견적서·계산서·총비용·입금 칸이 <b>열 자체가 렌더링되지 않습니다</b>(숨김이 아니라 미전송 — 개발자도구로도 볼 수 없음). 켜면 대행사 화면과 같은 정산 칸이 나타납니다.</p>
+</div>
+
+<div class="proscons">
+<div class="box pro"><div class="lbl">이 방식의 장점</div><ul><li>관리자(인애드) 개입 0 — 대행사가 브랜드 생성·배정·링크 발급까지 전부 셀프</li><li>기존 광고주 링크 구조(고유 토큰·로그인 잠금)를 그대로 재사용 → 구현 리스크 낮음</li><li>금액 정보는 서버에서부터 미전송이라 마진 노출 사고가 원천 차단</li></ul></div>
+<div class="box con"><div class="lbl">주의할 점</div><ul><li>대행사가 작업을 엉뚱한 브랜드에 배정하면 그 브랜드사에 다른 브랜드 작업이 보임 — 배정 시 확인 문구·미리보기 버튼으로 보완</li><li>링크가 외부로 새면 누구나 열람 가능(현 광고주 링크와 동일한 특성) — 링크 정지·재발급과 로그인 잠금 옵션으로 대응</li><li>브랜드사에는 자료 폴더(구매·리뷰 캡쳐) 접근을 줄지 별도 결정 필요(아래 미결 사항)</li></ul></div>
+</div>
+
+<div class="devnote"><b>구현 노트 (개발 관점)</b>
+<ul>
+<li><b>DB</b>: <code>trackb_brands</code>(advertiser_id, name, color) + <code>trackb_brand_tab_map</code>(brand_id, sheet_id, tab_name) 신설. 브랜드 링크는 <code>trackb_advertiser_links</code>에 brand_id 칼럼을 추가해 재사용(로그인 잠금 login_required 플래그 그대로 상속).</li>
+<li><b>API</b>: 광고주 세션 전용 브랜드 CRUD·배정 엔드포인트(자기 advertiser_id 소유 탭만 배정 가능하도록 서버 검증). 브랜드 토큰 접속 시 workSummary를 brand_id로 필터.</li>
+<li><b>정보 범위</b>: 브랜드 링크별 settlement_visible 플래그 — 서버 응답에서 정산 필드를 아예 제외(프론트 숨김 아님).</li>
+<li><b>뷰어</b>: workdesk.html의 광고주 렌더 경로 재사용, role='brand' 렌즈만 추가(헤더 표기·칼럼 축소·브랜드 필터).</li>
+</ul></div>
+</div>
+
+<!-- ═══════════════════ 로드맵 ═══════════════════ -->
+<div class="sec" id="road">
+<h2><span class="n">📅</span>구현 로드맵 (권장 순서)</h2>
+<p class="sum">서로 독립적인 기능이라 순서 조정이 가능하지만, <b>난이도가 낮고 즉시 체감되는 것부터</b> 여는 순서를 권장합니다.</p>
+<div class="road">
+<div class="rstep"><span class="rn">1</span><div><div class="rt">작업 검색 <span class="eff s">작음 · 프론트만</span></div><div class="rd">서버 변경 없음. 배포 즉시 사용 가능. 브랜드 화면(3단계)에도 그대로 재사용됩니다.</div></div></div>
+<div class="rstep"><span class="rn">2</span><div><div class="rt">견적서·계산서 뷰어 <span class="eff m">중간 · 프록시 확장 + 스냅샷 테이블</span></div><div class="rd">인트라넷 상세 프록시 → 팝업 렌더링 → 버전 스냅샷 순으로 나눠 배포 가능. 스냅샷은 빨리 열수록 이력이 많이 쌓이므로 <b>먼저 켜두는 것을 권장</b>.</div></div></div>
+<div class="rstep"><span class="rn">3</span><div><div class="rt">브랜드 분류·공유 <span class="eff l">큼 · DB 2테이블 + 셀프관리 UI + 브랜드 렌즈</span></div><div class="rd">③-a 브랜드 관리·배정(대행사 내부용) → ③-b 브랜드 링크·정보범위 토글(외부 공유) 2단계로 분리 배포하면 리스크가 낮습니다.</div></div></div>
+</div>
+</div>
+
+<!-- ═══════════════════ 미결 사항 ═══════════════════ -->
+<div class="sec" id="open">
+<h2><span class="n">✅</span>확정된 사항 (협의 완료)</h2>
+<div class="note" style="margin-top:10px"><ul>
+<li><b>브랜드사 자료 폴더(구매캡쳐·리뷰캡쳐) 접근</b> — 확정: <b>기본 비노출 + 브랜드별 토글</b>.</li>
+<li><b>견적서 버전 라벨</b> — 확정: 인트라넷 견적 상태(draft/sent/accepted)로 <b>자동 표기</b>(draft=초안, accepted=최종·수락됨).</li>
+<li><b>계산서</b> — 확정: <b>인트라넷 전자세금계산서(tax_invoices, 팝빌 발행)와 동기화</b>하여 발행 정보를 그대로 표시. 파일 업로드 불필요.</li>
+<li><b>브랜드사 화면 상단 브랜딩</b> — 확정: <b>A안 — 운영사 표기 유지</b>("운영: 어니스트캄" + 하단 문의 안내). 비교시안: <a href="design-brand-header-branding.html">design-brand-header-branding.html</a></li>
+</ul></div>
+</div>
+
+</div>
+<script>
+// 데모: 검색창 타이핑 시 하이라이트 갱신(문서 열람용 가벼운 인터랙션)
+(function(){
+  var q=document.getElementById('demoq'); if(!q) return;
+  q.addEventListener('input',function(){ /* 정적 시안 — 실제 필터는 구현 단계에서 */ });
+})();
+</script>
+</body></html>

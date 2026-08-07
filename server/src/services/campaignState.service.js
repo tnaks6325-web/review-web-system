@@ -98,6 +98,18 @@ function isUsableSchedule(s) {
 // 어제 5명 부족하면 오늘 한도를 그만큼 올리고, 다 채우면 내일 원래 한도로 돌아온다
 // (관리자가 손으로 20↔25를 오가던 작업의 자동화).
 const CARRY_ENABLED = process.env.CAMPAIGN_DAILY_CARRY !== '0';
+// ── 날짜별 모집 계획(095) ──
+// 관리자가 특정 날짜의 모집 인원을 조절하면(campaign_daily_plans) 그 값이 그날의 계획이 된다.
+// 계획 행이 없는 캠페인/날짜 = 기본 일건수(daily_limit) — 옵트인이라 기존 동작 100% 불변.
+// 킬스위치: CAMPAIGN_DAILY_PLAN=0 이면 계획표 전체 무시(전건 기존 동작 즉시 복귀).
+const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
+
+/** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
+ *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
+function planOverrideFor(plans, dateStr) {
+  if (!PLAN_ENABLED || !plans || !dateStr || plans[dateStr] == null) return null;
+  return Math.max(0, Number(plans[dateStr]) || 0);
+}
 // ★ 상한 — 이월이 아무리 쌓여도 하루 한도의 이 배수를 넘지 않는다.
 //   상한이 없으면 오래 미달한 캠페인이 어느 날 갑자기 수십 건을 한꺼번에 열어
 //   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
@@ -121,21 +133,42 @@ function _dayDiff(a, b) {
  *   ② **총 모집인원은 그대로** — 마지막 clamp(rt - submittedBeforeToday)가 유지되므로
  *      이월이 총원을 넘겨 모집하는 일은 구조적으로 불가능하다.
  */
-function dailyQuota(c, submittedBeforeToday, carry) {
+function dailyQuota(c, submittedBeforeToday, carry, planCtx) {
   const dl = Number(c.daily_limit) || 0;
   const rt = Number(c.recruit_total) || 0;
   const before = Number(submittedBeforeToday) || 0;
 
-  let q = dl;
-  if (CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
-    const sd = dateOnlyStr(c.start_date);
-    const anchor = (sd && sd > carry.startDate) ? sd : carry.startDate;   // 늦게 시작한 캠페인은 자기 시작일부터
-    const days = _dayDiff(anchor, carry.today) + 1;                        // 오늘 포함 경과일수
-    if (days > 1) {
-      const planned = dl * days;
-      const done = Number(carry.submittedSince) || 0;
-      q = Math.min(planned - done, dl * CARRY_CAP_MULT);
-      if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 한도를 줄이지 않는다
+  // ── 날짜별 계획(095): planCtx = { today, plans:{'YYYY-MM-DD': n} } ──
+  // ★★ 명시 조절일 = 그 값이 그날의 전부. "오늘은 20명만"의 의미는 이월분을 포함한 총 오픈이
+  //    20이라는 것이므로, 조절일에는 자연 이월을 얹지도(축소 무력화) 빼지도(추가 축소) 않는다.
+  //    전일까지의 자연 미달분은 사라지지 않고 다음 "조절 없는 날"의 plannedThrough 계산에 남는다.
+  const plans = (PLAN_ENABLED && planCtx && planCtx.plans) || null;
+  const todayStr = (planCtx && planCtx.today) || (carry && carry.today) || null;
+  const ov = planOverrideFor(plans, todayStr);
+
+  let q;
+  if (ov !== null) {
+    q = ov;
+  } else {
+    q = dl;
+    if (CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
+      const sd = dateOnlyStr(c.start_date);
+      const anchor = (sd && sd > carry.startDate) ? sd : carry.startDate;   // 늦게 시작한 캠페인은 자기 시작일부터
+      const days = _dayDiff(anchor, carry.today) + 1;                        // 오늘 포함 경과일수
+      if (days > 1) {
+        // 계획 누적 = 기본 일건수 × 경과일수 + (조절된 날들의 증감분). 계획 없으면 종전 식 그대로.
+        // ★ 조절 = 계획 변경이므로, 축소한 날의 미달분은 여기서 애초에 "계획"에 안 잡힌다
+        //   (사례 1: 40→20 조절 후 20명 참여 = 미달 0 → 다음날 40 그대로).
+        let planned = dl * days;
+        if (plans) {
+          for (const d of Object.keys(plans)) {
+            if (d >= anchor && d <= carry.today) planned += Math.max(0, Number(plans[d]) || 0) - dl;
+          }
+        }
+        const done = Number(carry.submittedSince) || 0;
+        q = Math.min(planned - done, dl * CARRY_CAP_MULT);
+        if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 그날 계획(기본 일건수)을 줄이지 않는다
+      }
     }
   }
 
@@ -164,10 +197,15 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const todayStr = kstTodayStr(now);
   const submittedBefore = Number(counts.submittedBeforeToday) || 0;
 
-  // 시트 일정이 있으면 그 일정이 이월까지 계산한다(063). 없으면 daily_limit 경로가 이월(066).
+  // 시트 일정이 있으면 그 일정이 이월까지 계산한다(063). 없으면 daily_limit 경로가 이월(066)
+  // + 날짜별 계획 조절(095 — counts.plans, 시트 일정 캠페인에는 미적용).
   const quota = sch
     ? Math.max(0, Math.min(plannedThrough(sch, todayStr), sch.totalSlots) - submittedBefore)
-    : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr });
+    : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
+        { today: todayStr, plans: counts.plans || null });
+  // 오늘이 명시 조절일인지(관리자 표시용) — 시트 일정 캠페인·킬스위치 OFF면 항상 null.
+  //   판정은 dailyQuota 와 같은 planOverrideFor 하나(사본 금지 — 정원과 표시가 갈리면 안 된다).
+  const ovToday = sch ? null : planOverrideFor(counts.plans || null, todayStr);
   const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
@@ -179,7 +217,11 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     dailyQuota: quota,
     // 이월로 오늘 얼마나 더 열렸는지(관리자 표시용) — 0이면 평소와 같음.
     // 이 값이 없으면 "일건수를 20으로 설정했는데 25로 보인다"가 버그로 오해된다.
-    carryAdded: Math.max(0, quota - (Number(c.daily_limit) || 0)),
+    // ★ 095: 명시 조절일은 이월이 아니라 "계획 자체"라 carryAdded=0 — 대신 todayPlanned로 말한다
+    //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
+    carryAdded: ovToday !== null ? 0 : Math.max(0, quota - (Number(c.daily_limit) || 0)),
+    todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
+    planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
     opensAt: opensAt ? opensAt.toISOString() : null,
     closesAt: closesAt ? closesAt.toISOString() : null,
     cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
@@ -286,6 +328,7 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
   const blank = () => ({
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
     carry: carryStart ? { startDate: carryStart, submittedSince: 0 } : null,
+    plans: null,
   });
   for (const id of ids) out.set(id, blank());
   if (!ids.length) return out;
@@ -317,10 +360,62 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       carry: carryStart
         ? { startDate: carryStart, submittedSince: Number(r.submitted_since_carry) || 0 }
         : null,
+      plans: null,
     });
+  }
+  // 날짜별 계획(095) — 실패 시 null=계획 미적용(기존 동작). 이 단일 깔때기에 실어야
+  // 목록/상세/apply 게이트가 전부 같은 계획을 본다(화면마다 다른 정원 = "카드는 열렸는데 참여 거부").
+  // ★ 카운트 쿼리 뒤에 둔다 — 쿼리 순서를 보는 기존 회귀가드(066)의 계약을 흔들지 않는다.
+  const planMaps = await _loadPlanMaps(pool, ids);
+  if (planMaps) {
+    for (const id of ids) {
+      const o = out.get(id);
+      if (o) o.plans = planMaps.get(id) || null;
+    }
   }
   return out;
 }
+
+/**
+ * 날짜별 모집 계획 일괄 로드(095) → Map(campaignId → { 'YYYY-MM-DD': planned_count }).
+ * ★ fail-open: 테이블 부재(42P01)·조회 실패 = null(계획 미적용 = 기존 동작) — 막는 기능의
+ *   오류가 목록/참여를 죽이면 안 된다. 42P01은 5분 네거티브 캐시(마이그레이션 전 배포 로그 도배 방지).
+ * ★★ apply/change-option은 잠금 트랜잭션의 client로 이 함수를 부른다 — tx 안에서는 실패한 쿼리
+ *   하나가 tx 전체를 abort(25P02)시키므로(082 실증) SAVEPOINT로 격리한다. 커넥션이 pool이면
+ *   (release 함수 없음) SAVEPOINT 없이 plain 쿼리(pool은 문장마다 다른 커넥션이라 SAVEPOINT 무의미).
+ */
+let _planTableMissingAt = 0;
+const _PLAN_MISSING_TTL_MS = 5 * 60 * 1000;
+async function _loadPlanMaps(db, ids) {
+  if (!PLAN_ENABLED || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  if (Date.now() - _planTableMissingAt < _PLAN_MISSING_TTL_MS) return null;
+  const inClient = typeof db.release === 'function';   // 체크아웃된 클라이언트 = 잠금 tx 가능성
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT cdp_plans'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    const { rows } = await db.query(
+      `SELECT campaign_id, to_char(plan_date, 'YYYY-MM-DD') AS d, planned_count
+         FROM campaign_daily_plans
+        WHERE campaign_id = ANY($1)`,
+      [ids]
+    );
+    if (sp) { try { await db.query('RELEASE SAVEPOINT cdp_plans'); } catch (_) {} }
+    const m = new Map();
+    for (const r of rows) {
+      let o = m.get(r.campaign_id);
+      if (!o) { o = {}; m.set(r.campaign_id, o); }
+      o[r.d] = Math.max(0, Number(r.planned_count) || 0);
+    }
+    return m;
+  } catch (e) {
+    if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT cdp_plans'); } catch (_) {} }
+    if (e && e.code === '42P01') _planTableMissingAt = Date.now();
+    return null;
+  }
+}
+function __resetPlanCacheForTest() { _planTableMissingAt = 0; }
 
 /**
  * 이월 기준선(app_settings.campaign_carry_start, 066) — 프로세스 캐시.
@@ -455,4 +550,5 @@ module.exports = {
   KST_OFFSET_MS,
   CARRY_CAP_MULT,
   __resetCarryCacheForTest,
+  __resetPlanCacheForTest,
 };

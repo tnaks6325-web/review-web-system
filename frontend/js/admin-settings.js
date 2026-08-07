@@ -394,6 +394,10 @@ function _aisamplesHtml() {
           <div id="asSmpRoute" class="as-slots"><div class="as-smpload">불러오는 중…</div></div>
         </div>
         <div class="as-sub">
+          <div class="as-subt">🎯 오제출 자동분류 정확도 <span>— 리뷰검수에서 사람이 수동 분류한 결과(정답)와 AI의 관측 판단을 대조합니다. 일치율이 충분히 오르면 자동 이동(auto) 전환을 검토하세요</span></div>
+          <div id="asRtStats" style="font-size:.78rem;color:#6B7280;margin-top:6px;line-height:1.6">불러오는 중…</div>
+        </div>
+        <div class="as-sub">
           <div class="as-subt">🧹 오제출 소급 정리 <span>— 과거 제출분에서 잘못 들어간 캡처(리뷰 칸의 영수증 등)를 찾아 올바른 폴더로 이동합니다. <b>미리보기 → 실행</b> 2단계(자동으로 옮기지 않습니다)</span></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 0">
             <select id="asRtTab" style="flex:1;min-width:220px;max-width:420px;padding:7px 9px;border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none">
@@ -409,30 +413,134 @@ function _aisamplesHtml() {
 /** 슬롯 1줄. kind = 'receipt' | 'review' (저장 창구가 갈리는 유일한 값)
     ★ 발행방법 슬롯과 **같은 목록형**(as-slot) — 두 곳이 다른 모양이면 "같은 일인데 화면이 다르다"가 된다.
     ★ id(asSmpFile_*)·onchange 는 불변. 파일 입력은 숨기고 label 로 누른다. */
+var AS_SMP_CAP = 5;   // 표시용 — 상한의 진실원본은 서버(SAMPLE_SLOT_CAP)
+/** 슬롯 값 — 신백엔드 imageUrls 배열, 구백엔드 imageUrl 단일(하위호환). */
+function _smpUrls(s) { return (s && s.imageUrls) || (s && s.imageUrl ? [s.imageUrl] : []); }
+
 function _smpCardHtml(kind, s) {
   var id = kind + '_' + s.key;
-  var url = s.imageUrl || '';
+  var urls = _smpUrls(s);
+  var full = urls.length >= AS_SMP_CAP;
+  /* ★ 누적: 슬롯 하나 = 여러 장. 장별 ✕(개별 삭제)이고 [＋ 추가]는 지우지 않고 쌓는다.
+     ★ 썸네일 클릭 = 크게 보기(_smpZoom) — 40px 썸네일로는 "무엇을 기준으로 등록했는지"를
+       확인할 수 없어 등록만 하고 검증이 안 되던 문제(실사용 신고). onclick 은 인덱스만 넘긴다. */
+  var thumbs = urls.length
+    ? urls.map(function (u, i) {
+        return '<span class="as-smpth">' +
+          '<img src="' + escHtml(u) + '" alt="" loading="lazy" title="클릭하면 크게 봅니다" ' +
+            'onclick="_smpZoom(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\',' + i + ')">' +
+          '<button title="이 장만 제거" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\',' + i + ')" ' +
+            'class="as-smpx">✕</button>' +
+          '</span>';
+      }).join('')
+    : '<span class="as-slotnone">없음</span>';
   return '<div class="as-slot">' +
-    '<div class="as-slotth">' +
-      (url ? '<img src="' + escHtml(url) + '" alt="">' : '<span class="as-slotnone">없음</span>') +
-    '</div>' +
+    '<div class="as-slotth" style="width:auto;min-width:44px;display:flex;align-items:center">' + thumbs + '</div>' +
     /* ★ 부가설명 줄은 두지 않는다 — 슬롯이 13개라 같은 문장이 13번 반복되면
          그 자체가 소음이 된다(상태칩이 이미 등록/없음을 말한다). */
     '<div class="as-slotbody">' +
       '<div class="as-slotnm">' + escHtml((s.emoji || '') + ' ' + (s.label || s.key)) + '</div>' +
     '</div>' +
-    '<span class="as-stat ' + (url ? 'on' : 'off') + '">' + (url ? '등록됨' : '없음') + '</span>' +
+    '<span class="as-stat ' + (urls.length ? 'on' : 'off') + '">' + (urls.length ? urls.length + ' / ' + AS_SMP_CAP : '없음') + '</span>' +
     '<input type="file" accept="image/*" class="as-file" id="asSmpFile_' + escHtml(id) + '" ' +
       'onchange="uploadAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\', this)">' +
-    '<label class="as-btn" for="asSmpFile_' + escHtml(id) + '">' + (url ? '바꾸기' : '＋ 등록') + '</label>' +
-    (url ? '<button class="as-btn del" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\')">제거</button>' : '') +
+    (full
+      ? '<span class="as-btn" style="opacity:.45;cursor:default" title="슬롯당 최대 ' + AS_SMP_CAP + '장 — 덜 닮은 장을 지우고 추가하세요">가득참</span>'
+      : '<label class="as-btn" for="asSmpFile_' + escHtml(id) + '">＋ 추가</label>') +
     '</div>';
 }
+
+/* ── 크게 보기(라이트박스) ───────────────────────────────────────────
+ * ★ 등록해 둔 예시가 "정말 그 화면인지" 확인할 수 있어야 한다 — 40px 썸네일로는 불가능했다.
+ * ★ 슬롯 목록은 서버 응답이 유일 출처(_smpLast) — 프론트가 URL 사본을 따로 들지 않는다.
+ * ★ body 직속 마운트(패널은 스크롤 컨테이너 안이라 오버레이가 화면 흐름에 섞인다).
+ * ★ 색·크기는 리터럴 고정(호스트 테마 없는 리뷰웹시스템[3버전]에서도 같은 모양). */
+var _smpLast = null;      // 마지막으로 받은 samples 응답(슬롯 → 이미지 목록)
+var _smpZoomCtx = null;   // {urls, idx, label}
+
+function _smpSlotOf(kind, key) {
+  if (!_smpLast) return null;
+  var list = kind === 'receipt' ? (_smpLast.receiptSamples || [])
+    : kind === 'route' ? (_smpLast.routeSamples || []) : (_smpLast.samples || []);
+  for (var i = 0; i < list.length; i++) if (String(list[i].key) === String(key)) return list[i];
+  return null;
+}
+
+function _smpZoom(kind, key, idx) {
+  var s = _smpSlotOf(kind, key);
+  if (!s) { showToast('목록을 다시 불러온 뒤 열어주세요.', true); return; }
+  var urls = _smpUrls(s);
+  if (!urls.length) return;
+  _smpZoomCtx = { urls: urls, idx: Math.max(0, Math.min(urls.length - 1, Number(idx) || 0)),
+                  label: (s.emoji || '') + ' ' + (s.label || s.key), kind: kind, key: key };
+  _smpZoomRender();
+}
+
+function _smpZoomRender() {
+  var c = _smpZoomCtx;
+  if (!c) return;
+  var el = document.getElementById('asSmpZoom');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'asSmpZoom';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) { if (e.target === el) _smpZoomClose(); });
+  }
+  var multi = c.urls.length > 1;
+  el.className = 'as-zoom';
+  el.innerHTML =
+    '<div class="as-zoombox">' +
+      '<div class="as-zoomh">' +
+        '<b>' + escHtml(c.label) + '</b>' +
+        '<span class="as-zoomn">' + (c.idx + 1) + ' / ' + c.urls.length + '장</span>' +
+        '<span style="flex:1"></span>' +
+        (multi ? '<button class="as-btn" onclick="_smpZoomStep(-1)" title="이전 (←)"' + (c.idx <= 0 ? ' disabled' : '') + '>‹</button>' +
+                 '<button class="as-btn" onclick="_smpZoomStep(1)" title="다음 (→)"' + (c.idx >= c.urls.length - 1 ? ' disabled' : '') + '>›</button>' : '') +
+        '<button class="as-btn" onclick="_smpZoomClose()">닫기</button>' +
+      '</div>' +
+      '<div class="as-zoomimg"><img src="' + escHtml(c.urls[c.idx]) + '" alt=""></div>' +
+      '<div class="as-zoomft">이 이미지는 <b>AI 판정의 기준</b>으로만 쓰이며 리뷰어 화면에는 나가지 않습니다.' +
+        '<button class="as-btn del" style="margin-left:auto" onclick="_smpZoomDel()">이 장 제거</button></div>' +
+    '</div>';
+}
+
+function _smpZoomStep(d) {
+  var c = _smpZoomCtx;
+  if (!c) return;
+  var n = c.idx + d;
+  if (n < 0 || n >= c.urls.length) return;   // ★ 끝에서 순환하지 않는다(어디까지 봤는지 잃지 않게)
+  c.idx = n;
+  _smpZoomRender();
+}
+function _smpZoomClose() {
+  var el = document.getElementById('asSmpZoom');
+  if (el) el.remove();
+  _smpZoomCtx = null;
+}
+async function _smpZoomDel() {
+  var c = _smpZoomCtx;
+  if (!c) return;
+  var kind = c.kind, key = c.key, idx = c.idx;
+  _smpZoomClose();
+  await clearAiSample(kind, key, idx);
+}
+/* ★ 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓여 한 번에 여러 장 건너뛴다.
+   ★ 입력 중(input/textarea)에는 가로채지 않는다(다른 설정 칸 조작 보존). */
+document.addEventListener('keydown', function (e) {
+  if (!_smpZoomCtx) return;
+  var t = e.target || {};
+  var tag = String(t.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.key === 'Escape') { _smpZoomClose(); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { _smpZoomStep(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { _smpZoomStep(1); e.preventDefault(); }
+});
 
 /** 목차 배지 — 등록된 예시 / 전체 슬롯. 슬롯 목록은 서버 응답이 유일 출처라 여기서도 세기만 한다. */
 function _smpBadge(j) {
   var all = (j.receiptSamples || []).concat(j.samples || []).concat(j.routeSamples || []);
-  var filled = all.filter(function (s) { return !!s.imageUrl; }).length;
+  var filled = all.filter(function (s) { return _smpUrls(s).length > 0; }).length;
   _setNavBadge('aisamples', filled + ' / ' + all.length, filled ? '' : 'warn');
 }
 
@@ -449,6 +557,7 @@ async function loadAiSamples() {
   if (!rc) return;
   try {
     var j = await _smpFetch(null);
+    _smpLast = j;   // ★ 크게 보기의 URL 출처 = 서버 응답 그대로(프론트 사본 금지)
     _smpRender('asSmpReceipt', 'receipt', j.receiptSamples || []);
     _smpRender('asSmpReview', 'review', j.samples || []);
     // 자동 분류 예시 — 구백엔드(routeSamples 미반환)면 안내만(배포 스큐 허위 표시 방지)
@@ -459,6 +568,7 @@ async function loadAiSamples() {
     }
     _smpBadge(j);
     _rtLoadTabs();   // 소급 정리 탭 목록(지연·fail-soft)
+    _rtLoadStats();  // 자동분류 정확도(지연·fail-soft — 구백엔드면 안내만)
   } catch (e) {
     var msg = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
     rc.innerHTML = msg;
@@ -468,6 +578,125 @@ async function loadAiSamples() {
 }
 
 /** 예시 업로드 — guide-image Drive+프록시 인프라 재사용(발행방법 이미지와 같은 경로). */
+/* ══ 리뷰어 안내문구(검수 결과) ═════════════════════════════════════
+ * 유형별로 리뷰어에게 나갈 문장을 직접 쓴다. ★ 유형 목록·기본 문구는 **서버가 준 표**를 그대로
+ * 그린다(프론트 사본 금지 — 설정과 실제 전송이 갈리면 "고쳤는데 그대로"가 된다).
+ * ★ 빈칸 저장 = 그 유형만 기본 문구로 되돌리기(빈 메시지가 리뷰어에게 나가지 않는다).
+ */
+var IMSG_EP = '/api/trackb/settings/inspect-messages';
+var _imsgKinds = [];
+
+function _inspectmsgHtml() {
+  return `
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-comment-dots" style="color:#2563A8;margin-right:6px"></i>리뷰어 안내문구 (검수 결과)
+          </span>
+          <button onclick="loadInspectMessages()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
+          리뷰검수에서 <b>[✕ 불량] · [🗑 중복파일 제거] · [이동]</b>을 눌렀을 때 리뷰어의 <b>1:1 문의</b>로 나가는 문장입니다.
+          처리 팝업에 이 문장이 미리 채워지고, <b>보내기 전에 그때그때 고칠 수도</b> 있습니다.
+          <b style="color:#B91C1C">전송 여부는 항상 관리자가 선택</b>합니다.
+        </p>
+        <div style="font-size:.75rem;color:var(--t3);background:#F8FAFC;border:1px solid #E5E7EB;border-radius:9px;padding:9px 12px;margin-bottom:12px;line-height:1.6">
+          쓸 수 있는 치환어 — <code>{reason}</code> 판정 근거 문장 · <code>{work}</code> 작업명 · <code>{to}</code> 옮긴 칸 이름<br>
+          <span style="color:#9CA3AF">비워두고 저장하면 그 유형만 기본 문구로 돌아갑니다.</span>
+        </div>
+        <div id="asImsgList"><div class="as-smpload">불러오는 중…</div></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+          <button onclick="saveInspectMessages()" style="padding:8px 16px;background:#2563A8;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer">저장</button>
+          <span id="asImsgMsg" style="font-size:.76rem;color:#6B7280"></span>
+        </div>`;
+}
+
+async function loadInspectMessages() {
+  var box = document.getElementById('asImsgList');
+  if (!box) return;
+  try {
+    var r = await fetch(_apiBase() + IMSG_EP, { headers: _headers() });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+    _imsgKinds = j.kinds || [];
+    box.innerHTML = _imsgKinds.map(function (k) {
+      var v = (j.messages || {})[k.key] || '';
+      return '<div style="border:1px solid #E5E7EB;border-radius:10px;padding:11px 13px;margin-bottom:9px;background:#fff">'
+        + '<div style="font-size:.84rem;font-weight:750">' + escHtml(k.label) + '</div>'
+        + '<div style="font-size:.72rem;color:#9CA3AF;margin:1px 0 7px">' + escHtml(k.desc || '') + '</div>'
+        + '<textarea id="asImsg_' + escHtml(k.key) + '" rows="5" style="width:100%;border:1px solid #D1D5DB;border-radius:8px;'
+        + 'padding:8px 10px;font-size:.78rem;font-family:inherit;line-height:1.55;resize:vertical"></textarea>'
+        + '<button onclick="_imsgReset(\'' + escHtml(k.key) + '\')" style="margin-top:5px;padding:3px 9px;background:#F3F4F6;color:#374151;border:none;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer">기본 문구로</button>'
+        + '</div>';
+    }).join('');
+    // ★ 값은 value 로 넣는다(HTML 보간 금지 — 저장된 문장에 무엇이 있든 안전하게)
+    _imsgKinds.forEach(function (k) {
+      var t = document.getElementById('asImsg_' + k.key);
+      if (t) t.value = (j.messages || {})[k.key] || '';
+    });
+    _setNavBadge('inspectmsg', _imsgKinds.length + '종', '');
+  } catch (e) {
+    box.innerHTML = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _imsgReset(key) {
+  var k = _imsgKinds.find(function (x) { return x.key === key; });
+  var t = document.getElementById('asImsg_' + key);
+  if (k && t) t.value = k.def || '';
+}
+
+async function saveInspectMessages() {
+  var msg = document.getElementById('asImsgMsg');
+  var payload = {};
+  _imsgKinds.forEach(function (k) {
+    var t = document.getElementById('asImsg_' + k.key);
+    payload[k.key] = t ? String(t.value || '').trim() : '';
+  });
+  try {
+    var r = await fetch(_apiBase() + IMSG_EP, {
+      method: 'POST', headers: _headers(), body: JSON.stringify({ messages: payload }),
+    });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+    // 저장 결과(빈칸은 기본 문구로 되돌아간 값)를 화면에 반영 — "저장했는데 화면은 빈칸" 방지
+    _imsgKinds.forEach(function (k) {
+      var t = document.getElementById('asImsg_' + k.key);
+      if (t) t.value = (j.messages || {})[k.key] || '';
+    });
+    if (msg) { msg.textContent = '✅ 저장했습니다.'; setTimeout(function () { msg.textContent = ''; }, 2500); }
+    showToast('✅ 안내문구를 저장했습니다.');
+  } catch (e) {
+    if (msg) msg.textContent = '❌ 저장 실패: ' + e.message;
+    showToast('❌ 저장 실패: ' + e.message, true);
+  }
+}
+
+/** 자동분류 정확도 — 사람 수동 분류(정답) vs AI 관측 계획 대조(읽기 전용, 저장 없음).
+ *  ★ fail-soft: 통계가 죽어도 예시 등록 화면은 살아야 한다. 구백엔드(404) = 배포 대기 안내. */
+async function _rtLoadStats() {
+  var el = document.getElementById('asRtStats');
+  if (!el) return;
+  try {
+    var r = await fetch(_apiBase() + '/api/trackb/review-inspect/route-stats', { headers: _headers() });
+    var j = await r.json().catch(function () { return null; });
+    if (!j || j.ok !== true) { el.textContent = '아직 통계를 지원하지 않습니다(배포 대기).'; return; }
+    if (!j.total) {
+      el.innerHTML = '최근 ' + j.days + '일간 수동 분류 기록이 없습니다 — 리뷰검수의 [🧾 현금영수증으로 이동]·[🛒 구매캡처로 이동]으로 분류하면 여기 정확도가 쌓입니다.';
+      return;
+    }
+    var pct = Math.round((j.match / j.total) * 100);
+    el.innerHTML =
+      '최근 ' + j.days + '일 · 수동 분류 <b>' + j.total + '건</b> 기준 — ' +
+      '<b style="color:' + (pct >= 95 ? '#15803D' : '#B45309') + '">AI 판단 일치 ' + j.match + '건 (' + pct + '%)</b>' +
+      ' · AI 미탐 ' + j.miss + '건 · AI 상이 <b style="color:#B91C1C">' + j.differ + '건</b><br>' +
+      (pct >= 95
+        ? '일치율이 95% 이상입니다 — Railway 에서 <code>AUTO_FILE_ROUTE=auto</code> 전환을 검토할 수 있습니다(전환은 사람이 결정).'
+        : '미탐·상이 건의 실물을 위 판별 예시에 추가하면 일치율이 올라갑니다(수동 분류 완료 팝업의 등록 제안 이용).');
+  } catch (e) {
+    el.textContent = '통계를 불러오지 못했습니다: ' + e.message;
+  }
+}
+
 async function uploadAiSample(kind, key, input) {
   var file = input.files && input.files[0];
   if (!file) return;
@@ -486,26 +715,28 @@ async function uploadAiSample(kind, key, input) {
     });
     if (!uj.ok || !uj.url) throw new Error(uj.error || '업로드 실패');
     // ★ kind 로 저장 창구를 가른다 — receipt 는 channel, route 는 kind+key, review 는 슬롯 key.
+    //   mode:'add' = 누적(기존 예시를 지우지 않는다) — 상한 초과는 서버가 사유와 함께 거부.
     await _smpFetch(kind === 'receipt'
-      ? { kind: 'receipt', channel: key, imageUrl: uj.url }
+      ? { kind: 'receipt', channel: key, imageUrl: uj.url, mode: 'add' }
       : kind === 'route'
-        ? { kind: 'route', key: key, imageUrl: uj.url }
-        : { key: key, imageUrl: uj.url });
-    showToast('✅ 예시이미지가 등록되었습니다.');
+        ? { kind: 'route', key: key, imageUrl: uj.url, mode: 'add' }
+        : { key: key, imageUrl: uj.url, mode: 'add' });
+    showToast('✅ 예시이미지가 추가되었습니다.');
     loadAiSamples();
   } catch (e) {
     showToast('❌ 등록 실패: ' + e.message, true);
   } finally { input.value = ''; }
 }
 
-async function clearAiSample(kind, key) {
-  if (!confirm('이 예시이미지를 제거할까요?\nAI 판정은 계속 동작하며, 그 채널의 판별 정확도만 낮아집니다.')) return;
+async function clearAiSample(kind, key, idx) {
+  if (!confirm('이 예시이미지 한 장을 제거할까요?\nAI 판정은 계속 동작하며, 그 슬롯의 판별 정확도만 낮아질 수 있습니다.')) return;
   try {
+    // ★ 개별 삭제(mode:'remove'+index) — 슬롯 전체가 아니라 고른 한 장만 지운다.
     await _smpFetch(kind === 'receipt'
-      ? { kind: 'receipt', channel: key, imageUrl: '' }
+      ? { kind: 'receipt', channel: key, mode: 'remove', index: idx }
       : kind === 'route'
-        ? { kind: 'route', key: key, imageUrl: '' }
-        : { key: key, imageUrl: '' });
+        ? { kind: 'route', key: key, mode: 'remove', index: idx }
+        : { key: key, mode: 'remove', index: idx });
     showToast('제거했습니다.');
     loadAiSamples();
   } catch (e) {
@@ -1938,14 +2169,15 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
     nickname:  { ic: '👤', nm: '내 닉네임' },
     business:  { ic: '🏢', nm: '제공정보' },
     aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
+    inspectmsg: { ic: '💬', nm: '리뷰어 안내문구' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
     reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
     gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
@@ -2046,6 +2278,24 @@ async function saveGateCriteria() {
       '@media (max-width:640px){.as-slot{flex-wrap:wrap}.as-slotbody{flex:1 1 100%;order:3}}' +
       /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
       '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
+      /* 등록 예시 썸네일 — 클릭하면 크게 본다(40px 로는 내용 확인이 불가능했다) */
+      '.as-smpth{position:relative;display:inline-block;margin-right:7px}' +
+      '.as-smpth img{width:54px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #E5E7EB;display:block;cursor:zoom-in}' +
+      '.as-smpth img:hover{border-color:#2563A8;box-shadow:0 0 0 2px rgba(37,99,168,.15)}' +
+      '.as-smpx{position:absolute;top:-6px;right:-3px;width:16px;height:16px;border-radius:999px;background:#EF4444;' +
+        'color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0}' +
+      /* 크게 보기 오버레이 — body 직속, 리터럴 색 */
+      '.as-zoom{position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.62);display:flex;' +
+        'align-items:center;justify-content:center;padding:24px}' +
+      '.as-zoombox{background:#fff;border-radius:14px;max-width:880px;width:100%;max-height:92vh;' +
+        'display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(15,23,42,.35)}' +
+      '.as-zoomh{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #E5E7EB;font-size:.86rem}' +
+      '.as-zoomn{font-size:.72rem;color:#6B7280;font-weight:700}' +
+      '.as-zoomimg{flex:1;min-height:0;overflow:auto;background:#F3F4F6;display:grid;place-items:center;padding:12px}' +
+      '.as-zoomimg img{max-width:100%;max-height:74vh;border-radius:8px;border:1px solid #E5E7EB;background:#fff}' +
+      '.as-zoomft{display:flex;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid #E5E7EB;' +
+        'font-size:.72rem;color:#6B7280}' +
+      '.as-zoomft b{color:#B91C1C}' +
       /* 작업표 표준 열 — ★ 색은 리터럴 고정(호스트 테마 변수에 의존하지 않는다).
          admin.html·리뷰웹시스템[3버전] 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
       '.as-wtlist{display:flex;flex-direction:column;gap:6px}' +
@@ -2302,8 +2552,16 @@ async function saveGateCriteria() {
   window.clearCashReceiptGuide = clearCashReceiptGuide;
   window.CR_GUIDE_CHANNELS = CR_GUIDE_CHANNELS;
   window.loadAiSamples = loadAiSamples;
+  window.loadInspectMessages = loadInspectMessages;
+  window.saveInspectMessages = saveInspectMessages;
+  window._imsgReset = _imsgReset;
   window.uploadAiSample = uploadAiSample;
   window.clearAiSample = clearAiSample;
+  /* ★ onclick 에서 부르는 함수는 window 노출 필수 — 빠지면 클릭이 조용히 ReferenceError */
+  window._smpZoom = _smpZoom;
+  window._smpZoomStep = _smpZoomStep;
+  window._smpZoomClose = _smpZoomClose;
+  window._smpZoomDel = _smpZoomDel;
   window.previewRouteSweep = previewRouteSweep;   // 오제출 소급 정리(미리보기)
   window.runRouteSweep = runRouteSweep;           // 오제출 소급 정리(실행)
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;

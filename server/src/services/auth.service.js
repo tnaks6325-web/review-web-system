@@ -227,7 +227,7 @@ async function loginByLinkToken(linkToken, _pool = pool) {
     `SELECT l.advertiser_id, l.login_required, a.name AS advertiser_name, a.status AS advertiser_status
        FROM trackb_advertiser_links l JOIN advertisers a ON a.id = l.advertiser_id
       WHERE l.token = $1 AND l.active = TRUE LIMIT 1`, [tok]);
-  if (rows.length === 0) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
+  if (rows.length === 0) return loginByBrandToken(tok, _pool);   // 094: 광고주 링크가 아니면 브랜드 링크 폴백
   if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
   // ★ 로그인 게이트 = **명시 플래그**(083 `login_required`). 관리자가 업체관리에서 "광고주 계정 사용"을
   //   켠 업체만 로그인 화면을 거친다. 계정을 발급해도 켜지 않으면 링크는 그대로 공개(=계정은 선택적 보안).
@@ -243,6 +243,31 @@ async function loginByLinkToken(linkToken, _pool = pool) {
     { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
   );
   return { success: true, name: rows[0].advertiser_name, role: 'advertiser', advertiserId: rows[0].advertiser_id, advertiserName: rows[0].advertiser_name, token };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 브랜드 열람 링크 교환(094) — loginByLinkToken 의 폴백. 같은 #adv= 프래그먼트 경로를 재사용한다.
+//   권한 = advertiser 렌즈에 brand_id 스코프를 얹은 것: 소유 탭 중 **브랜드 배정 탭만**(라우트 가드),
+//   정산·폴더는 브랜드 토글이 추가 AND(서비스 가드). A안(사용자 확정): 운영사(대행사) 이름을 함께 싣는다.
+//   ★ 브랜드 세션은 브랜드 관리 CRUD 에 접근 불가(라우트가 brand_id 있으면 거부 — 열람 전용).
+// ═══════════════════════════════════════════════════════════
+async function loginByBrandToken(linkToken, _pool = pool) {
+  const tok = String(linkToken || '').trim();
+  if (!tok) return { success: false, error: '유효하지 않은 링크입니다.' };
+  const { rows } = await _pool.query(
+    `SELECT b.id, b.name, b.advertiser_id, a.name AS advertiser_name, a.status AS advertiser_status
+       FROM trackb_brands b JOIN advertisers a ON a.id = b.advertiser_id
+      WHERE b.link_token = $1 AND b.link_active = TRUE AND b.deleted_at IS NULL LIMIT 1`, [tok]);
+  if (rows.length === 0) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
+  if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
+  const token = jwt.sign(
+    { name: rows[0].name, role: 'advertiser', advertiser_id: rows[0].advertiser_id,
+      brand_id: rows[0].id, adv_name: rows[0].advertiser_name, via: 'brand-link' },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+  );
+  return { success: true, name: rows[0].name, role: 'advertiser', advertiserId: rows[0].advertiser_id,
+    brandId: rows[0].id, brandName: rows[0].name, advertiserName: rows[0].advertiser_name, token };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -500,6 +525,7 @@ module.exports = {
   loginIntranet,
   loginAdvertiser,
   loginByLinkToken,
+  loginByBrandToken,
   addAdvertiserUser,
   editAdvertiserUser,
   deleteAdvertiserUser,
