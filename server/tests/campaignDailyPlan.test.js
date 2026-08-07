@@ -777,6 +777,16 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★ 이월이 없으면 고정할 이유도 없다(불필요한 굳힘 금지)
   mkS({ data: { carryPending: 0, todayNaturalQuota: 40 } }); A.applyCarryMode('extend');
   eq('★ 이월 0 + 연장 = 보낼 것 없음', A.payload().set.length, 0);
+  // ★★ 고정 중에 저장된 조절이 기본값과 같아도 **해제(remove)로 내보내지 않는다** —
+  //   해제하면 그 날은 다시 자동 이월 대상이 되어 고른 방식이 무효가 된다.
+  mkS({ base: { '2026-08-12': 40 }, data: { todayNaturalQuota: 70 } });
+  A.applyCarryMode('extend');
+  {
+    const pl = A.payload();
+    eq('★ 기본값과 같은 저장분도 해제하지 않는다', pl.remove.length, 0);
+    ok('★ 그 날은 set 으로 고정된다',
+      pl.set.some((x) => x.date === '2026-08-12' && x.count === 40), pl.set);
+  }
   // 보류 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다(그리고 연장은 보낼 것이 없다)
   mkS({ data: { carryMode: 'hold', todayNaturalQuota: 40 } }); A.applyCarryMode('next');
   eq('7A-3 보류+다음날 = 오늘 한 줄', A.payload().set.length, 1);
