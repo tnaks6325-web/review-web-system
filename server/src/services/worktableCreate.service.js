@@ -33,7 +33,8 @@ const MAX_SCAN_ROWS = 60;   // 헤더 탐지용 상단 스캔(공지문·메타 
 async function _loadWorkOrder(id) {
   const { rows } = await pool.query(
     `SELECT id, title, start_date, recruit_count, daily_count, product_url,
-            product_option, product_options_json, work_sheet_url, status
+            product_option, product_options_json, work_sheet_url, status,
+            skip_weekends, holidays
        FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
   return rows[0] || null;
 }

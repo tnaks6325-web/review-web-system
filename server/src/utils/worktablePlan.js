@@ -284,11 +284,24 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   const rawStart = o.startDate != null ? o.startDate : (wo.start_date || '');
   const parsedStart = parseYmd(rawStart);
   const startDate = parsedStart ? ymdStr(parsedStart) : '';
-  const skipWeekends = o.skipWeekends !== false;   // 기본 주말 제외
+  /* 주말 제외 — 우선순위 = ① 미리보기 조정값 ② **작업오더 신호**(097) ③ 기본 제외.
+     ★ ②는 `false` 와 "안 보냄"(NULL)을 구분해야 한다 — 구버전 인트라넷의 미전송을 `false` 로
+       접으면 주말 제외가 조용히 꺼져 토·일에도 구매일이 잡힌다. */
+  const skipWeekends = (o.skipWeekends !== undefined && o.skipWeekends !== null)
+    ? o.skipWeekends !== false
+    : (wo.skip_weekends === false || wo.skip_weekends === 'false' ? false : true);
 
-  /* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 미리보기에서 지정한다.
+  /* 제외 날짜(공휴일·업체 휴무) — ① 미리보기에서 담당자가 지정 ② 없으면 **작업오더 신호**(097).
      ★ 형식이 맞는 값만 받는다(잘못된 값은 조용히 무시 — 날짜 분배가 통째로 깨지는 것보다 낫다). */
-  const holidays = [...new Set((Array.isArray(o.holidays) ? o.holidays : [])
+  let _rawHolidays = Array.isArray(o.holidays) ? o.holidays : null;
+  if (!_rawHolidays) {
+    try {
+      const parsedWo = Array.isArray(wo.holidays) ? wo.holidays
+        : (typeof wo.holidays === 'string' && wo.holidays.trim() ? JSON.parse(wo.holidays) : []);
+      _rawHolidays = Array.isArray(parsedWo) ? parsedWo : [];
+    } catch (_) { _rawHolidays = []; }
+  }
+  const holidays = [...new Set(_rawHolidays
     .map(h => String(h == null ? '' : h).trim())
     .filter(h => !!parseYmd(h))
     .map(h => ymdStr(parseYmd(h))))].sort();
