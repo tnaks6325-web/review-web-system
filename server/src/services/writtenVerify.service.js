@@ -136,6 +136,14 @@ async function verifyWrittenOrders({ limit = 400, maxTabs = 20 } = {}) {
       WHERE os.mirror_status = 'written' AND os.deleted_at IS NULL
         AND os.sheet_row IS NOT NULL AND os.sheet_written_at IS NOT NULL
         AND os.sheet_written_at > NOW() - ($1 || ' days')::interval
+        -- ★★ 무시트 탭 제외(탈 구글시트 W2): 이 검증은 "시트에 적힌 값과 대조"다.
+        --   무시트 작업의 장부는 작업표에서 **우리가 만든** 것이라 대조 대상이 아니고,
+        --   재생성 타이밍에 따라 정상 주문을 '소실'로 오판해 강등 → reconcile → 구글 쓰기 시도로
+        --   번질 수 있다(오탐 0 우선 원칙).
+        AND NOT EXISTS (
+          SELECT 1 FROM tab_configs tc
+           WHERE tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+             AND COALESCE(tc.sheetless, FALSE) = TRUE)
         AND NOT EXISTS (
           SELECT 1 FROM sync_queue sq
            WHERE sq.status IN ('pending','processing')

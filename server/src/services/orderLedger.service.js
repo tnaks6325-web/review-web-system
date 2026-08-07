@@ -1007,9 +1007,15 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     params
   );
 
-  const result = { scanned: rows.length, requeued: 0, skippedNoMeta: 0, noCandidates: 0, stillStuck: 0, byTab: [], dryRun };
+  const result = { scanned: rows.length, requeued: 0, skippedNoMeta: 0, noCandidates: 0, stillStuck: 0, sheetlessWritten: 0, byTab: [], dryRun };
   const tabCount = new Map();
   const tabCursors = new Map(); // tabKey → 마지막 배정 append 행(순차 커서, 20행 한계 제거)
+
+  /* ★★ 무시트 탭(탈 구글시트 W2)은 **큐로 복구하지 않는다** — 큐는 구글시트에 쓴다.
+     대신 같은 자리에서 작업표 기록을 다시 시도한다(그게 무시트의 "반영"이다).
+     ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 반드시 대체 경로를 준다. */
+  const _slKeys = await require('../utils/sheetlessScope').sheetlessTabKeys(db);
+  const { isSheetlessTab } = require('../utils/sheetlessScope');
 
   for (const row of rows) {
     const tabKey = `${row.sheet_id}||${row.tab_name}`;
@@ -1030,6 +1036,20 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     //   하단에 다시 적히므로, 큐가 비고란에 [시스템 재기록 · 확인요망]으로 남겨 사람이 확인하게 한다.
     //   (일반 복구는 [시스템 재기록].) sheet_error 는 배정 성공 시 NULL 로 지워지므로 여기서 읽어 전달.
     const recoverReason = /^ghost written/.test(String(row.sheet_error || '')) ? 'lost' : '';
+
+    // ── 무시트 탭: 큐 대신 작업표 재기록 ──────────────────────────────
+    if (isSheetlessTab(_slKeys, row.sheet_id, row.tab_name, gid)) {
+      if (dryRun) { result.sheetlessWritten++; continue; }
+      if (!row.sheet_row) { result.noCandidates++; continue; }   // 행 배정은 아래 공통 경로가 아니라 다음 사이클에
+      try {
+        const w = await require('./sheetlessOrder.service').writeOrderToWorktable({
+          sheetId: row.sheet_id, tabName: row.tab_name, tabGid: gid,
+          sheetRow: row.sheet_row, orderData, orderSubmissionId: row.id, recovered: true,
+        });
+        if (w.ok) result.sheetlessWritten++; else result.stillStuck++;
+      } catch (_) { result.stillStuck++; }
+      continue;
+    }
 
     // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
     if (row.sheet_row) {

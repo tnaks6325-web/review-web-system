@@ -55,6 +55,12 @@ async function _selectTabs() {
       WHERE deleted_at IS NULL
         AND mirror_status IN ('pending','pending_no_row','queued','failed')
         AND sheet_id IS NOT NULL AND tab_name IS NOT NULL AND tab_name <> ''
+        -- ★ 무시트 탭 제외(탈 구글시트 W2): 이 스케줄러는 **시트에 쓰는** 배치다.
+        --   무시트 미반영 건은 reconcile 이 작업표 재기록으로 복구한다(대체 경로 있음).
+        AND NOT EXISTS (
+          SELECT 1 FROM tab_configs tc
+           WHERE tc.sheet_id = order_submissions.sheet_id AND tc.tab_name = order_submissions.tab_name
+             AND COALESCE(tc.sheetless, FALSE) = TRUE)
       GROUP BY sheet_id, tab_name
       ORDER BY sort_key ASC`
   );

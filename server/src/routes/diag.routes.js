@@ -1622,7 +1622,12 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     // STEP 2: 자동 생성 (3단계: 시트제목 → 탭명 → [리뷰])
     if (!targetFolderId) {
       let sheetTitle = campaignName || tabRows[0]?.campaign_name || tabName;
-      if (sheetId) {
+      /* ★ 무시트 작업(D2-a): 폴더 1단 = **업체명**. 시트 파일이 없어 아래 getSpreadsheetMeta 는
+         404 다. 시트 기반 탭이면 null 이라 아래 기존 로직이 그대로 돈다(무회귀). */
+      let _slTitle = null;
+      try { _slTitle = await require('../services/folderTitle.service').resolveSheetlessFolderTitle(sheetId, tabName); } catch (_) {}
+      if (_slTitle) sheetTitle = _slTitle;
+      if (sheetId && !_slTitle) {
         try {
           const { rows: campRows } = await pool.query(
             `SELECT DISTINCT campaign_name FROM tab_configs WHERE sheet_id = $1 AND campaign_name IS NOT NULL AND campaign_name <> '' LIMIT 1`,

@@ -161,6 +161,12 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   try {
     await client.query('BEGIN');
 
+    /* ★★ 탭 단위 직렬화 — 주문이 몰리면 같은 탭의 장부 재생성이 동시에 돌 수 있는데,
+       이 함수는 `review_index` 를 **지우고 다시 넣는다**. 겹치면 한쪽이 지운 사이의 순간에
+       다른 쪽이 읽어 **검색 명단이 잠깐 비는** 창이 생긴다(리뷰어에겐 "내 참여가 사라짐").
+       트랜잭션 스코프 락이라 COMMIT/ROLLBACK 에 자동 해제된다(누수 불가). */
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`sheetless_ledger:${sheetId}:${tabName}`]);
+
     // ① 시트 사본(raw) — 행배정(claimRow)이 읽는 재료. 빈 슬롯도 그대로 실어야 배정할 자리가 생긴다.
     await client.query(
       `INSERT INTO raw_sheet_tabs

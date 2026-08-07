@@ -24,7 +24,15 @@ function getRootFolderId() {
 }
 
 // 시트 제목(폴더 1단계) 해석: tab_configs → campaigns → Sheets API → fallback
-async function _resolveSheetTitle(sheetId, fallback) {
+async function _resolveSheetTitle(sheetId, fallback, tabName) {
+  /* ★ 무시트 작업(D2-a): 폴더 1단은 **업체명**이다 — 시트 파일이 없으므로 아래 구글 조회는
+     404 로 죽는다. 시트 기반 탭이면 null 이 와서 기존 로직이 그대로 이어진다(무회귀). */
+  if (tabName) {
+    try {
+      const t = await require('./folderTitle.service').resolveSheetlessFolderTitle(sheetId, tabName);
+      if (t) return t;
+    } catch (_) { /* 판정 실패 = 기존 로직 */ }
+  }
   try {
     const { rows } = await pool.query(
       `SELECT DISTINCT campaign_name FROM tab_configs
@@ -88,7 +96,7 @@ async function ensureReviewFoldersForActiveTabs(opts = {}) {
 
     let sheetTitle = null;
     try {
-      sheetTitle = await _resolveSheetTitle(tab.sheet_id, tab.campaign_name || tab.tab_name);
+      sheetTitle = await _resolveSheetTitle(tab.sheet_id, tab.campaign_name || tab.tab_name, tab.tab_name);
     } catch (e) {
       out.errors++;
       out.details.push({ tab: tab.tab_name, error: `시트제목 해석 실패: ${e.message}` });

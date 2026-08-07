@@ -356,6 +356,23 @@ async function _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk = f
 async function _executeBatch(items, sheetId, tabName) {
   let succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false;
   const deferredIds = [];   // 버그1(R3): 같은 드레인콜서 재클레임 제외할 defer 항목(스핀/throttle 낭비 차단)
+
+  /* ★★ 무시트 백스톱(탈 구글시트 W2 · fail-closed) — **쓰기 직전 마지막 방어**.
+     제출·수동제출·복구 경로가 이미 큐를 안 태우지만, ① 이관 **전에** 쌓여 있던 큐 항목
+     ② 앞으로 생길 새 호출부 ③ 판정 실패(fail-open)로 새어 들어온 건이 남아 있다.
+     여기서 막지 않으면 **이관해 놓은 작업의 옛 시트에 주문이 다시 쓰인다**(장부와 갈라짐).
+     ★ 큐 항목은 버리지 않고 `done` + 사유 — 주문 자체는 무시트 기록 경로가 완결시킨다. */
+  try {
+    const { isSheetless } = require('../utils/sheetlessScope');
+    if (await isSheetless(pool, sheetId, tabName)) {
+      await pool.query(
+        `UPDATE sync_queue SET status='done', error_msg='sheetless tab — 시트 쓰기 생략(작업표 기록 경로가 담당)',
+                processed_at=NOW() WHERE id = ANY($1::int[])`, [items.map(it => it.id)]);
+      logger.warn(`[syncQueue] 무시트 탭 시트쓰기 차단 tab=${tabName} items=${items.length}`);
+      return { processed: items.length, succeeded: 0, failed: 0, deferred: items.length, quotaExceeded: false, deferredIds: [] };
+    }
+  } catch (_) { /* 판정 실패는 종전 경로(fail-open) — 제출 시점 게이트가 1차 방어 */ }
+
   // 실행 직전 attempts +1 (원본 시맨틱 — 클레임이 아니라 실행 단위)
   await pool.query(`UPDATE sync_queue SET attempts=attempts+1 WHERE id = ANY($1::int[])`, [items.map(it => it.id)]);
 
