@@ -35,7 +35,8 @@ const HDRS = ['번호', '담당자', '구매일자', '빈박/실배', '인애드
 async function setup() {
   await pool.query(`
     DROP TABLE IF EXISTS campaign_participants, review_index, raw_sheet_rows, raw_sheet_tabs,
-                         index_master, index_master_archive, tab_configs, campaigns CASCADE;
+                         index_master, index_master_archive, tab_configs, campaigns,
+                         order_submissions, recruit_campaigns CASCADE;
     CREATE TABLE campaigns (id SERIAL PRIMARY KEY, sheet_id TEXT, campaign_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE tab_configs (id SERIAL PRIMARY KEY, sheet_id TEXT NOT NULL, tab_name TEXT NOT NULL,
       tab_gid TEXT, display_name TEXT, campaign_name TEXT, is_closed BOOLEAN DEFAULT FALSE,
@@ -48,9 +49,14 @@ async function setup() {
       status TEXT DEFAULT 'active', built_at TIMESTAMPTZ, error_msg TEXT, skip_reason TEXT);
     CREATE TABLE index_master_archive (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT,
       tab_gid TEXT, campaign_name TEXT, row_count INTEGER, archived_at TIMESTAMPTZ DEFAULT NOW());
-    CREATE TABLE review_index (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, row_index INTEGER);
+    CREATE TABLE review_index (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, row_index INTEGER,
+      start_date TEXT);
     CREATE TABLE campaign_participants (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, seq INTEGER,
-      deleted_at TIMESTAMPTZ);`);
+      deleted_at TIMESTAMPTZ);
+    CREATE TABLE order_submissions (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT,
+      submitted_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE recruit_campaigns (id TEXT PRIMARY KEY, title TEXT, created_at TIMESTAMPTZ DEFAULT NOW(),
+      linked_sheet_id TEXT DEFAULT '', linked_tab_name TEXT DEFAULT '', linked_tab_gid TEXT DEFAULT '');`);
 
   await pool.query(`INSERT INTO campaigns (sheet_id, campaign_name, created_at) VALUES ($1,$2,'2026-06-10')`, [SHEET, TAB]);
   await pool.query(`INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, display_name) VALUES ($1,$2,$3,$2)`, [SHEET, TAB, GID]);
@@ -194,6 +200,57 @@ async function setup() {
     assert.ok(it, '아카이브 전용 탭이 목록에 없다 — 복구할 방법이 없어진다');
     assert.strictEqual(it.archivedOnly, true);
     assert.strictEqual(it.tabUrl, `https://docs.google.com/spreadsheets/d/${SHEET}/edit#gid=777`);
+  });
+
+  console.log('\n7) 연도 기준(2026~) — 활동 신호 LATERAL 실제 실행');
+  await ta('★ 2025년 등록 + 주문 없음 = 목록에서 빠지고 filteredOld 로 고지', async () => {
+    await pool.query(`UPDATE campaigns SET created_at='2025-06-10' WHERE sheet_id=$1`, [SHEET]);
+    const out = await svc.auditSheetSync({});
+    assert.ok(!out.items.some(i => i.tabName === TAB), '2025년 작업이 목록에 남았다');
+    assert.strictEqual(out.filteredOld, 1, '제외 건수를 고지하지 않는다');
+    assert.strictEqual(out.since, '2026-01-01');
+  });
+  await ta('★★ 같은 작업에 2026년 주문이 하나라도 있으면 되살아난다(최댓값 판정)', async () => {
+    await pool.query(`INSERT INTO order_submissions (sheet_id, tab_name, submitted_at) VALUES ($1,$2,'2026-08-05')`, [SHEET, TAB]);
+    const out = await svc.auditSheetSync({});
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.ok(it, '2026년 주문이 있는데 과거로 숨겼다 — 살아있는 작업이 사라진다');
+    assert.strictEqual(it.activitySource, 'order');
+    assert.strictEqual(it.activityAt, '2026-08-05');
+    assert.strictEqual(out.filteredOld, 0);
+    await pool.query(`DELETE FROM order_submissions`);
+  });
+  await ta('★ 연결 공고 생성일도 신호로 잡힌다', async () => {
+    await pool.query(`INSERT INTO recruit_campaigns (id, title, created_at, linked_sheet_id, linked_tab_name)
+                      VALUES ('c-2026','공고','2026-03-01',$1,$2)`, [SHEET, TAB]);
+    const out = await svc.auditSheetSync({});
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.ok(it, '연결 공고가 2026년인데 숨겼다');
+    assert.strictEqual(it.activitySource, 'campaign');
+    await pool.query(`DELETE FROM recruit_campaigns`);
+  });
+  await ta('★ 신호가 하나도 없으면 yearUnknown 으로 분리 · includeUnknown 으로 열람', async () => {
+    await pool.query(`DELETE FROM campaigns WHERE sheet_id=$1`, [SHEET]);
+    await pool.query(`UPDATE review_index SET start_date=NULL WHERE sheet_id=$1`, [SHEET]);
+    const off = await svc.auditSheetSync({});
+    assert.ok(!off.items.some(i => i.tabName === TAB));
+    assert.strictEqual(off.yearUnknown, 1, '연도 미상 건수를 고지하지 않는다');
+    const on = await svc.auditSheetSync({ includeUnknown: true });
+    const it = on.items.find(i => i.tabName === TAB);
+    assert.ok(it, '[보기]로도 안 열린다');
+    assert.strictEqual(it.yearUnknown, true);
+  });
+  await ta('★ 구매일자에 연도가 명시되면(26.8.24) 그것으로 살아난다', async () => {
+    await pool.query(`UPDATE review_index SET start_date='26.8.24(월)' WHERE sheet_id=$1`, [SHEET]);
+    const out = await svc.auditSheetSync({});
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.ok(it, '연도 명시 구매일자를 신호로 못 썼다');
+    assert.strictEqual(it.activitySource, 'sheet_date');
+    // 연도 없는 표기는 신호가 아니다 → 다시 미상으로
+    await pool.query(`UPDATE review_index SET start_date='6 / 11 (목)' WHERE sheet_id=$1`, [SHEET]);
+    const back = await svc.auditSheetSync({});
+    assert.ok(!back.items.some(i => i.tabName === TAB), '연도 없는 표기로 연도를 추론했다');
+    assert.strictEqual(back.yearUnknown, 1);
   });
 
   svc.__setPoolForTest(null);

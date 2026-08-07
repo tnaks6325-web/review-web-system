@@ -37,7 +37,13 @@ const HEADER_ROW = 18;
 
 async function schema() {
   await pool.query(`
-    DROP TABLE IF EXISTS campaign_options, campaign_participants, raw_sheet_rows, raw_sheet_tabs, tab_configs, recruit_campaigns CASCADE;
+    DROP TABLE IF EXISTS campaign_options, campaign_participants, raw_sheet_rows, raw_sheet_tabs, tab_configs,
+                         recruit_campaigns, campaigns, order_submissions, review_index CASCADE;
+    -- 연도 기준(tabActivity) 신호 테이블 — 점검 쿼리가 함께 읽는다
+    CREATE TABLE campaigns (id SERIAL PRIMARY KEY, sheet_id TEXT, campaign_name TEXT, created_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE order_submissions (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT,
+      submitted_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE review_index (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, row_index INTEGER, start_date TEXT);
     CREATE TABLE tab_configs (
       id SERIAL PRIMARY KEY, sheet_id TEXT NOT NULL, tab_name TEXT NOT NULL, tab_gid TEXT,
       display_name TEXT, campaign_name TEXT, is_closed BOOLEAN DEFAULT FALSE, UNIQUE(sheet_id, tab_name));
@@ -58,7 +64,7 @@ async function schema() {
       id TEXT PRIMARY KEY, title TEXT NOT NULL, status TEXT DEFAULT 'active',
       participation_mode BOOLEAN DEFAULT TRUE, recruit_total INTEGER DEFAULT 0, daily_limit INTEGER DEFAULT 0,
       linked_sheet_id TEXT DEFAULT '', linked_tab_name TEXT DEFAULT '', linked_tab_gid TEXT DEFAULT '',
-      updated_at TIMESTAMPTZ DEFAULT NOW());
+      created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
     CREATE TABLE campaign_options (
       id SERIAL PRIMARY KEY, campaign_id TEXT REFERENCES recruit_campaigns(id) ON DELETE CASCADE,
       opt_key TEXT NOT NULL, pay_amount INTEGER DEFAULT 0, recruit_total INTEGER DEFAULT 0,
@@ -69,6 +75,8 @@ async function schema() {
 async function seed() {
   await pool.query(`INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, display_name, campaign_name)
                     VALUES ($1,$2,$3,$2,'우레온')`, [SHEET, TAB, GID]);
+  // 연도 신호(2026 등록) — 없으면 연도 미상으로 분류돼 점검 대상에서 빠진다
+  await pool.query(`INSERT INTO campaigns (sheet_id, campaign_name, created_at) VALUES ($1,$2,'2026-08-01')`, [SHEET, TAB]);
   await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name, row_count) VALUES ($1,$2,$3,118)`,
     [SHEET, GID, TAB]);
   // 상단 메타 + 헤더 줄
