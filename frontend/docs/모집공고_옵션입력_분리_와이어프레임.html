@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모집공고 옵션 입력 분리 — 옵션 없는 작업이 "옵션 공고"가 되는 사고의 원인과 해결</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --faint:#8A93A3; --line:#E2E6EC;
+    --done:#0F7B4F;  --done-bg:#EAF7F0;  --done-edge:#A9DCC3;   /* 해결·안전 */
+    --part:#9A6414;  --part-bg:#FBF3E3;  --part-edge:#E8D3A6;   /* 주의·확인 */
+    --next:#4F46E5;  --next-bg:#EEEDFC;  --next-edge:#C7C3F2;   /* 이번에 만드는 것 */
+    --bad:#B4232A;   --bad-bg:#FCEDEE;   --bad-edge:#F0C2C5;    /* 문제·사고 */
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1216; --card:#161A20; --ink:#E8ECF2; --muted:#98A2B0; --faint:#727C8B; --line:#262C35;
+      --done:#5FC896;  --done-bg:#122A20;  --done-edge:#245040;
+      --part:#E2B673;  --part-bg:#2C2315;  --part-edge:#4E3D1E;
+      --next:#A7A2F5;  --next-bg:#1E1B3A;  --next-edge:#3B357A;
+      --bad:#F08A90;   --bad-bg:#33181A;   --bad-edge:#5C2A2E;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased;
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif}
+  .wrap{max-width:1180px; margin:0 auto; padding:44px 20px 80px; display:flex; flex-direction:column; gap:42px}
+  .eyebrow{margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--next)}
+  h1{margin:0 0 12px; font-size:clamp(25px,4vw,36px); font-weight:800; letter-spacing:-.026em; line-height:1.22}
+  .lede{margin:0; max-width:76ch; color:var(--muted); font-size:15.5px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+  section{display:flex; flex-direction:column; gap:15px}
+  h2{margin:0; font-size:19.5px; font-weight:750; letter-spacing:-.015em; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .num{flex:none; width:26px; height:26px; border-radius:7px; display:grid; place-items:center; background:var(--ink); color:var(--paper); font-size:13px; font-weight:800}
+  .rule{margin:0; color:var(--muted); font-size:14px; max-width:80ch}
+  .rule strong{color:var(--ink); font-weight:700}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 22px; box-shadow:var(--shadow)}
+  .card h3{margin:0 0 8px; font-size:15.5px; font-weight:750}
+  .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px}
+  .tag{display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:750; border:1px solid}
+  .tag.bad{color:var(--bad); background:var(--bad-bg); border-color:var(--bad-edge)}
+  .tag.done{color:var(--done); background:var(--done-bg); border-color:var(--done-edge)}
+  .tag.next{color:var(--next); background:var(--next-bg); border-color:var(--next-edge)}
+  .tag.part{color:var(--part); background:var(--part-bg); border-color:var(--part-edge)}
+  .callout{border-radius:12px; border:1px solid; padding:13px 16px; font-size:13.5px}
+  .callout.bad{background:var(--bad-bg); border-color:var(--bad-edge)}
+  .callout.done{background:var(--done-bg); border-color:var(--done-edge)}
+  .callout.part{background:var(--part-bg); border-color:var(--part-edge)}
+  .callout.next{background:var(--next-bg); border-color:var(--next-edge)}
+  .callout b{font-weight:750}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{padding:9px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top}
+  th{font-size:12px; color:var(--muted); font-weight:750; background:color-mix(in srgb, var(--line) 30%, transparent)}
+  .tscroll{overflow-x:auto}
+  .mono{font-family:var(--mono); font-size:12px}
+  ol.flow{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px; font-size:13.5px}
+  ol.flow b{font-weight:750}
+  ul.tight{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:6px; font-size:13.5px}
+
+  /* ── 타임라인 ── */
+  .tl{display:flex; flex-direction:column; gap:0}
+  .tl .step{display:grid; grid-template-columns:30px 1fr; gap:12px}
+  .tl .dot{width:12px; height:12px; border-radius:50%; margin:6px auto 0; background:var(--faint)}
+  .tl .dot.bad{background:var(--bad)}
+  .tl .bar{width:2px; flex:1; margin:2px auto; background:var(--line)}
+  .tl .col{display:flex; flex-direction:column; align-items:center}
+  .tl .body{padding-bottom:18px}
+  .tl .t{font-size:12px; color:var(--faint); font-weight:700}
+  .tl .h{font-size:14.5px; font-weight:750; margin:2px 0 4px}
+  .tl .d{font-size:13.5px; color:var(--muted); max-width:76ch}
+
+  /* ── 모달 목업 ── */
+  .mock{border:1px solid var(--line); border-radius:12px; background:var(--card); overflow:hidden; box-shadow:var(--shadow)}
+  .mock .mh{padding:10px 14px; font-size:12.5px; font-weight:750; background:color-mix(in srgb, var(--line) 35%, transparent); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .mock .mb{padding:14px}
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; font-size:12.5px; font-weight:750}
+  .seg span{padding:6px 14px; color:var(--muted); background:var(--card)}
+  .seg span.on{background:var(--next); color:#fff}
+  .rowhead{display:grid; gap:6px; font-size:11px; color:var(--faint); font-weight:750; padding:0 2px 4px}
+  .rowline{display:grid; gap:6px; margin-bottom:6px}
+  .cell{border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:12.5px; background:var(--paper); min-height:34px; display:flex; align-items:center; gap:6px}
+  .cell.ro{background:color-mix(in srgb, var(--line) 30%, transparent); color:var(--muted)}
+  .cell.ghost{color:var(--faint); font-style:italic}
+  .cols-none{grid-template-columns:minmax(200px,2.2fr) 110px 84px 84px}
+  .cols-prod{grid-template-columns:minmax(200px,2.6fr) 110px 34px}
+  .cols-opt{grid-template-columns:24px minmax(160px,1.9fr) 110px 84px 84px 34px}
+  .mini{font-size:11.5px; color:var(--faint)}
+  .btn{display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); background:var(--card); border-radius:8px; padding:5px 11px; font-size:12px; font-weight:750; color:var(--ink)}
+  .btn.pri{background:var(--next); border-color:var(--next); color:#fff}
+  .btn.warn{color:var(--part); border-color:var(--part-edge); background:var(--part-bg)}
+  .strike{color:var(--faint); text-decoration:line-through}
+  .arrow{display:flex; justify-content:center; color:var(--faint); font-size:20px; margin:2px 0}
+  .kbd{font-family:var(--mono); font-size:11.5px; border:1px solid var(--line); border-bottom-width:2px; border-radius:5px; padding:1px 6px; background:var(--card)}
+  .qa{border-left:3px solid var(--part-edge); padding:2px 0 2px 12px; font-size:13px; color:var(--muted)}
+  .qa b{color:var(--ink)}
+  footer{color:var(--faint); font-size:12px; border-top:1px solid var(--line); padding-top:18px}
+  @media (max-width:640px){
+    .cols-none,.cols-opt{grid-template-columns:1fr 1fr}
+    .cols-prod{grid-template-columns:1fr 1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head">
+  <p class="eyebrow">Review-Web · 모집공고 개선 계획 · 2026-08-07</p>
+  <h1>옵션 입력 분리 — "옵션 없는 작업"이 옵션 공고가 되어 참여가 잠기는 사고의 원인과 해결</h1>
+  <p class="lede">
+    우레온 바디미스트 작업오더에는 <b>옵션이 없었는데</b>, 발행된 모집공고에는 <b>옵션 1종</b>이 생겼고,
+    그 옵션이 마감되자 <b>공고 전체가 "전체 마감"</b>이 되어 오늘 5명 중 3명에서 참여가 멈췄습니다.
+    이 문서는 ① 왜 이런 일이 생기는지(원인 3겹) ② 인트라넷과 리뷰웹이 "옵션 있음/없음"을 각각 어떻게 판단해 어디가 어긋나는지
+    ③ 옵션 입력칸을 <b>옵션 없는 작업 / 옵션 있는 작업</b> 두 모드로 분리하는 새 화면 설계 ④ 지금 바로 우레온을 여는 조치 경로를 담습니다.
+  </p>
+</header>
+
+<!-- ═══════════ 0. 요약 ═══════════ -->
+<section>
+  <h2><span class="num">0</span>한눈에 보기</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3><span class="tag bad">문제</span> 왜 옵션이 "생겼고", 왜 "안 지워지나"</h3>
+      <ul class="tight">
+        <li>인트라넷 리뷰오더는 옵션 유무를 <b>신호가 아니라 문장</b>(상품/옵션/금액 요약 텍스트)으로만 보낸다.</li>
+        <li>리뷰웹은 그 문장을 <b>쪼개서 추측</b>한다 — 옵션 없는 작업의 상품명·금액 조각이 옵션명 칸으로 올라탈 수 있는 구조.</li>
+        <li>한 번 생긴 옵션은 참여자가 붙는 순간 <b>화면에서 지울 수 없다</b>(마감 처리만 가능) — 그리고 <b>마감 옵션만 남은 공고는 참여가 전면 차단</b>된다.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="tag next">해결</span> 4가지 (이 순서대로 구현)</h3>
+      <ul class="tight">
+        <li><b>㉮ 옵션 유무를 신호로 전달</b> — 인트라넷 오더가 상품·옵션 구조를 그대로 실어 보낸다(문장 추측 제거, 옵션별 건수 → 옵션인원 자동).</li>
+        <li><b>㉯ 요약 문장 오염 수리</b> — 옵션 없는 줄의 결제금액이 옵션명처럼 읽혀 "결제금액 22,000원 - 결제금액 22,000원"으로 불어나던 것 차단.</li>
+        <li><b>㉰ 입력칸 2모드 분리</b> — [옵션 없는 작업]에는 옵션명 칸 자체가 없다(사고 입구 구조적 제거).</li>
+        <li><b>㉱ 잠금 해제 규칙</b> — 마감 옵션만 남은 공고 = 옵션 없는 공고로 참여 허용(정원 소진 마감과는 구분 — 아래 6절).</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout done">
+    <b>🚑 우레온 지금 바로(코드 배포 없이):</b> 모집공고 수정 → 진행상품/옵션 표의 흐린 "우레온 모이스처 바디" 행 오른쪽 <b>[↩ 재개]</b> → 옵션인원 <b>0(무제한)</b> · 일건수 <b>0</b> → 저장.
+    약 5초 뒤 리뷰어 화면 새로고침이면 참여가 다시 열립니다(오늘 정원 5명 중 남은 2명). 자세한 단계는 <b>7절</b>.
+  </div>
+</section>
+
+<!-- ═══════════ 1. 타임라인 ═══════════ -->
+<section>
+  <h2><span class="num">1</span>무슨 일이 있었나 — 우레온 바디미스트 타임라인</h2>
+  <div class="card">
+    <div class="tl">
+      <div class="step">
+        <div class="col"><div class="dot"></div><div class="bar"></div></div>
+        <div class="body">
+          <div class="t">① 인트라넷 — 리뷰오더 등록</div>
+          <div class="h">옵션 없이 등록 (결제금액 22,000원 × 인원)</div>
+          <div class="d">AE는 옵션추가 버튼을 누르지 않았다 = 옵션 없는 작업. 그런데 리뷰웹으로 보낼 때 이 사실은
+          "옵션 없음"이라는 <b>신호가 아니라</b>, 상품/옵션/금액을 요약한 <b>문장</b>에만 담긴다.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="col"><div class="dot bad"></div><div class="bar"></div></div>
+        <div class="body">
+          <div class="t">② 리뷰웹 — 작업오더 수신 → 공고 발행 (8/3 이전 화면)</div>
+          <div class="h">문장을 쪼개다 상품명 조각이 옵션명 칸으로 <span class="tag bad">사고 발생 지점</span></div>
+          <div class="d">발행 화면은 그 문장을 구분 기호(하이픈·빗금 등)로 잘라 표를 채우는데, 옵션 없는 작업의 줄에는
+          옵션명이 없어서 <b>상품명 조각("우레온 모이스처 바디")이 옵션명 자리</b>로 들어갔다.
+          이렇게 옵션 1종짜리 공고가 발행됐다. <span class="mini">(8/3에 같은 유형 사고로 추측 규칙을 한 차례 보강했지만, "문장을 추측한다"는 구조 자체는 그대로다 — 3절)</span></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="col"><div class="dot"></div><div class="bar"></div></div>
+        <div class="body">
+          <div class="t">③ 운영 — 리뷰어 참여 진행</div>
+          <div class="h">리뷰어들이 그 옵션으로 참여 (참여자 발생)</div>
+          <div class="d">옵션이 1종뿐이라 리뷰어 화면에서는 자동 선택되어 위화감 없이 참여가 이어졌다.
+          이 순간부터 이 옵션은 <b>참여 기록이 붙어 삭제 불가</b>(마감 처리만 가능) 상태가 된다.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="col"><div class="dot bad"></div><div class="bar"></div></div>
+        <div class="body">
+          <div class="t">④ 8/7 — 옵션 정원 소진 → 조치 시도</div>
+          <div class="h">옵션 마감 → 공고 "전체 마감" → 옵션명을 비워 저장해도 안 풀림 <span class="tag bad">잠금</span></div>
+          <div class="d">옵션의 모집 정원이 차자 공고가 전체 마감으로 표시됐다. 관리자가 <b>옵션명을 비우고 저장</b>했지만 —
+          옵션명이 빈 행은 애초에 서버로 전송되지 않고, 서버는 "새 목록에 없는 옵션 중 참여자가 있는 것"을 <b>마감 상태로 남겨 보존</b>한다.
+          그리고 참여 게이트는 <b>마감 옵션만 남은 공고도 "옵션 공고"로 간주해 참여를 전면 거부</b>한다. 결과: 오늘 5명 중 3명에서 정지, 2명이 못 들어옴.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="col"><div class="dot"></div></div>
+        <div class="body">
+          <div class="t">확인된 부수 증상</div>
+          <div class="h">"…체취개선 결제금액 22,000원 - 결제금액 22,000원"</div>
+          <div class="d">작업오더/공고의 진행상품 칸에 결제금액이 두 번 붙은 이상한 문장이 보였는데, 이것도 같은 뿌리다 —
+          옵션 없는 줄의 "결제금액 22,000원"을 <b>옵션명으로 오독</b>해 상품명 뒤에 붙이고, 그 뒤에 결제금액을 또 붙여 재조립한 결과(재현 확인됨). 3절 원인 ②.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 2. 원인 3겹 ═══════════ -->
+<section>
+  <h2><span class="num">2</span>원인 — 세 겹이 겹쳐야 사고가 완성된다</h2>
+  <p class="rule">하나만 고치면 다음 작업에서 또 다른 겹이 터진다. 셋 다 막는 것이 이번 계획이다.</p>
+  <div class="grid2">
+    <div class="card">
+      <h3><span class="tag bad">원인 ①</span> 옵션 유무가 "신호"가 아니라 "문장"으로 온다</h3>
+      <p class="rule" style="font-size:13.5px">
+        인트라넷 리뷰오더 화면에는 옵션 입력이 <b>구조적으로</b> 존재한다(옵션추가/이중옵션 버튼, 옵션별 결제금액·건수).
+        그런데 리뷰웹으로 보낼 때는 그 구조를 버리고 <b>사람이 읽는 요약 문장 한 덩어리</b>로 합쳐 보낸다.
+        "옵션 있음/없음"을 기계가 확실히 알 수 있는 칸은 <b>전송 항목에 없다</b>.
+      </p>
+      <div class="callout bad" style="margin-top:8px">
+        받은 쪽(리뷰웹)은 문장을 다시 쪼개 <b>추측</b>할 수밖에 없고, 추측은 상품명에 하이픈(-)·빗금(/)·가운뎃점(·)이
+        들어있는 흔한 경우마다 어긋난다. <b>추측이 존재하는 한 이 사고는 반복된다.</b>
+      </div>
+    </div>
+    <div class="card">
+      <h3><span class="tag bad">원인 ②</span> 옵션 없는 줄이 옵션 있는 줄과 같은 모양</h3>
+      <p class="rule" style="font-size:13.5px">
+        요약 문장에서 옵션 있는 상품은 <span class="mono">- 블랙 / 결제금액 10,000원 / 20명…</span>,
+        옵션 없는 상품은 <span class="mono">- 결제금액 22,000원 / 5명…</span> 로 줄이 시작된다.
+        리뷰웹은 "줄 첫 조각 = 옵션명"으로 읽기 때문에, 옵션 없는 줄에서는 <b>"결제금액 22,000원"이 옵션명 취급</b>된다.
+      </p>
+      <div class="callout bad" style="margin-top:8px">
+        그 결과가 실제로 관측된 오염 문장: <span class="mono">상품명 결제금액 22,000원 - 결제금액 22,000원</span> (재현 검증 완료).
+        이 문장이 다시 표 채우기 재료가 되면서 오염이 다음 화면으로 전파된다.
+      </div>
+    </div>
+    <div class="card">
+      <h3><span class="tag bad">원인 ③</span> 한 번 생긴 옵션은 지울 수 없고, 남으면 공고를 잠근다</h3>
+      <ul class="tight">
+        <li>발행/수정 화면에서 <b>옵션명이 빈 행은 저장 대상에서 제외</b>된다 — "옵션명을 비워 지운다"는 조치가 서버에 전달되지 않는다.</li>
+        <li>서버는 새 목록에 없는 옵션 중 <b>참여자가 있는 것은 삭제 대신 마감으로 보존</b>한다(참여 기록 보호 — 이 자체는 올바른 규칙).</li>
+        <li>그런데 참여 게이트는 <b>마감 옵션만 남은 공고도 "옵션 공고"</b>로 간주해 "선택 가능한 옵션이 없음"으로 참여를 전면 거부한다.</li>
+      </ul>
+      <div class="callout bad" style="margin-top:8px">
+        = 잘못 생긴 옵션을 <b>없앨 방법이 화면에 없다</b>. 유일한 우회는 그 옵션을 "재개"해 다시 살리는 것(7절) —
+        원치 않는 옵션을 계속 안고 가야 한다.
+      </div>
+    </div>
+    <div class="card">
+      <h3><span class="tag part">참고</span> 8/3 보강으로 이미 막힌 것 / 아직 열린 것</h3>
+      <ul class="tight">
+        <li><span class="tag done">막힘</span> 옵션명이 상품명과 <b>완전히 같거나 상품명으로 시작</b>하면 옵션으로 승격하지 않음.</li>
+        <li><span class="tag done">막힘</span> "옵션 없음·단일·해당없음" 같은 서술은 옵션명이 아님.</li>
+        <li><span class="tag bad">열림</span> 자동수집 상품명과 문장 속 상품명이 <b>서로 다른 표기</b>면(짧은 이름 vs 긴 이름) 여전히 조각이 옵션명이 된다.</li>
+        <li><span class="tag bad">열림</span> 상품명 안의 하이픈·빗금·가운뎃점 뒤쪽이 옵션명으로 잘려 나간다.</li>
+        <li><span class="tag bad">열림</span> 원인 ②(결제금액 오독)와 원인 ③(잠금)은 보강 대상이 아니었다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 3. 인트라넷↔리뷰웹 대조 ═══════════ -->
+<section>
+  <h2><span class="num">3</span>인트라넷 ↔ 리뷰웹 — "옵션 유무"를 각자 어떻게 판단하나</h2>
+  <div class="card tscroll">
+    <table>
+      <thead><tr><th style="min-width:130px">단계</th><th>옵션 유무를 아는 방법</th><th>판정 결과의 쓰임</th><th style="min-width:150px">모호한 점</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>인트라넷 · 오더 작성</b></td>
+          <td><span class="tag done">확실</span> 옵션추가 버튼을 눌렀는가 — 화면 구조가 곧 사실</td>
+          <td>모집인원·총구입비 자동 계산(옵션 있으면 옵션별 건수 합, 없으면 상품 건수)</td>
+          <td>없음 — 여기가 유일하게 확실한 지점</td>
+        </tr>
+        <tr>
+          <td><b>인트라넷 → 리뷰웹 전송</b></td>
+          <td><span class="tag bad">소실</span> 구조를 버리고 요약 문장으로 합침</td>
+          <td>문장이 작업오더의 "상품·옵션" 칸이 됨</td>
+          <td>㉠ 옵션 유무 신호 자체가 없음<br>㉡ 옵션 없는 줄과 있는 줄의 모양이 같음</td>
+        </tr>
+        <tr>
+          <td><b>리뷰웹 · 작업오더 표시</b></td>
+          <td><span class="tag part">추측</span> 문장을 줄 단위로 재조립</td>
+          <td>상세 화면·공고 프리필의 진행상품 문장</td>
+          <td>㉢ 옵션 없는 줄의 결제금액을 옵션명으로 오독 → 오염 문장 생성(원인 ②)</td>
+        </tr>
+        <tr>
+          <td><b>리뷰웹 · 공고 발행/수정 표</b></td>
+          <td><span class="tag part">추측</span> 문장을 구분 기호로 쪼개 행 생성 — "옵션명 칸이 채워졌는가"가 곧 옵션 유무</td>
+          <td>옵션표 → 저장 시 옵션 원장</td>
+          <td>㉣ 상품명 조각이 옵션명 칸으로 승격(원인 ①·8/3 부분 보강)<br>㉤ 옵션명 빈 행은 전송 안 됨 = 지우기 불가(원인 ③)</td>
+        </tr>
+        <tr>
+          <td><b>리뷰웹 · 참여 게이트</b></td>
+          <td><span class="tag bad">과잉</span> 옵션 행이 1개라도 있으면(마감 포함) "옵션 공고"</td>
+          <td>마감 옵션만 남으면 참여 전면 거부</td>
+          <td>㉥ "관리자가 내린 마감"과 "정원이 차서 마감"을 구분하지 않음(원인 ③)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="rule">모호점 ㉠~㉥ 여섯 개가 이번 수정의 대상 전부다. ㉠㉡은 인트라넷에서, ㉢㉣㉤은 리뷰웹 화면에서, ㉥은 참여 규칙에서 고친다.</p>
+</section>
+
+<!-- ═══════════ 4. 해결 ㉮ 신호 전달 ═══════════ -->
+<section>
+  <h2><span class="num">4</span>해결 ㉮ — 옵션 유무를 "신호"로 보낸다 <span class="tag next">인트라넷 수정</span></h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>지금 <span class="tag bad">문장만</span></h3>
+      <div class="mock"><div class="mb mono" style="font-size:12px; line-height:1.8">
+        [상품/옵션/금액]<br>
+        1. 우레온 모이스처 바디 리셋 미스트 150ml … (URL)<br>
+        - 결제금액 22,000원 / 5명 / 소계 110,000원<br>
+        [합계] 최종모집인원 5명 / 총 상품구입비 110,000원
+      </div></div>
+      <p class="mini" style="margin:8px 0 0">사람이 읽기엔 좋지만, 기계는 "옵션이 없다"는 사실을 이 문장에서 <b>추측</b>해야 한다.</p>
+    </div>
+    <div class="card">
+      <h3>앞으로 <span class="tag done">문장 + 구조</span></h3>
+      <div class="mock"><div class="mb" style="font-size:13px; line-height:1.8">
+        📄 요약 문장 — <b>그대로 유지</b> (사람이 읽는 용도·구버전 호환)<br>
+        🧩 <b>상품·옵션 구조를 함께 전송</b> — 오더 화면에 입력된 그대로:<br>
+        <span class="mini">· 상품명 / 상품 URL / 결제금액</span><br>
+        <span class="mini">· 옵션이 있으면: 옵션명 · 옵션별 결제금액 · <b>옵션별 건수</b></span><br>
+        <span class="mini">· 옵션이 없으면: 옵션 목록이 비어 있음 = 그 자체가 "옵션 없음" 신호</span>
+      </div></div>
+      <p class="mini" style="margin:8px 0 0">리뷰웹 작업오더에는 이미 이 구조를 받는 칸이 준비되어 있다(지금까지 항상 비어 있었을 뿐) — 받는 쪽 추가 공사가 거의 없다.</p>
+    </div>
+  </div>
+  <div class="callout done">
+    <b>덤으로 좋아지는 것:</b> 옵션별 <b>건수</b>가 구조로 오므로, 공고 발행 표의 <b>옵션인원 칸이 자동으로 채워진다</b>
+    (지금은 옵션 정원을 관리자가 매번 손으로 입력). 옵션 유무·옵션명·금액·인원 전부에서 추측이 사라진다.
+  </div>
+  <div class="callout part">
+    <b>배포 순서 안전:</b> 인트라넷이 먼저 배포되면 리뷰웹 구버전은 구조를 무시하고 종전 문장 경로로 동작(무해),
+    리뷰웹이 먼저 배포되면 구조가 없으니 종전 그대로 — <b>서로 기다릴 필요 없는 가산적 변경</b>이다.
+  </div>
+</section>
+
+<!-- ═══════════ 5. 해결 ㉰ 입력칸 분리 ═══════════ -->
+<section>
+  <h2><span class="num">5</span>해결 ㉰ — 진행상품 입력칸을 두 모드로 분리 <span class="tag next">리뷰웹 화면 수정 · 핵심</span></h2>
+  <p class="rule">
+    지금은 한 가지 표(상품명/옵션명/결제금액/총인원/일건수)뿐이라 <b>옵션 없는 작업에도 옵션명 칸이 항상 보인다</b> —
+    자동 추측이든 사람 실수든 그 칸에 무언가 들어가는 순간 옵션 공고가 된다.
+    바꾼다: 맨 위에서 <b>작업 종류를 먼저 고르고</b>, 고른 종류에 맞는 칸만 보여준다.
+  </p>
+
+  <!-- 모드 1 -->
+  <div class="card">
+    <h3>모드 1 · 옵션 없는 작업 <span class="mini">(기본 — 대부분의 작업)</span></h3>
+    <div class="mock">
+      <div class="mh">진행상품
+        <span class="seg"><span class="on">옵션 없는 작업</span><span>옵션 있는 작업</span></span>
+        <span class="mini">작업오더에 옵션이 없어 자동 선택됨</span>
+      </div>
+      <div class="mb">
+        <div class="rowhead cols-none"><span>상품명</span><span>결제금액</span><span>총인원</span><span>일건수</span></div>
+        <div class="rowline cols-none">
+          <div class="cell">우레온 모이스처 바디 리셋 미스트 150ml …</div>
+          <div class="cell">22,000</div>
+          <div class="cell">5</div>
+          <div class="cell">5</div>
+        </div>
+        <div class="mini">＋ 상품 추가 (여러 상품을 한 공고로 진행할 때)</div>
+      </div>
+    </div>
+    <ul class="tight" style="margin-top:10px">
+      <li><b>옵션명 칸이 아예 없다</b> — 상품명이 옵션으로 승격될 입구가 화면에서 사라진다.</li>
+      <li>총인원·일건수는 여기 입력값이 공고 정원이 된다(시트 일정이 인식되는 작업은 종전대로 시트가 우선).</li>
+      <li>저장하면 옵션 원장은 <b>비어 있는 상태</b>로 확정 — 리뷰어는 옵션 선택 없이 바로 참여(종전의 "옵션 미등록 공고"와 동일 동작).</li>
+    </ul>
+  </div>
+
+  <div class="arrow">⇅ 전환 시 입력값은 서로 이월된다 (아래 표)</div>
+
+  <!-- 모드 2 -->
+  <div class="card">
+    <h3>모드 2 · 옵션 있는 작업 <span class="mini">(옵션별 정원·금액 관리)</span></h3>
+    <div class="mock">
+      <div class="mh">진행상품
+        <span class="seg"><span>옵션 없는 작업</span><span class="on">옵션 있는 작업</span></span>
+        <span class="mini">작업오더에 옵션 2종 — 자동 선택됨</span>
+      </div>
+      <div class="mb">
+        <div class="rowhead cols-prod"><span>상품명</span><span>총인원 (자동 합계)</span><span></span></div>
+        <div class="rowline cols-prod">
+          <div class="cell">힙스 골라담기 세트</div>
+          <div class="cell ro">40 <span class="mini">= 옵션인원 합</span></div>
+          <div class="cell ro" style="justify-content:center">✕</div>
+        </div>
+        <div class="rowhead cols-opt"><span></span><span>옵션명</span><span>결제금액</span><span>옵션인원</span><span>일건수</span><span></span></div>
+        <div class="rowline cols-opt">
+          <div class="cell ro" style="justify-content:center">└</div>
+          <div class="cell">콰이어트</div>
+          <div class="cell">31,400</div>
+          <div class="cell">20</div>
+          <div class="cell">10</div>
+          <div class="cell ro" style="justify-content:center">✕</div>
+        </div>
+        <div class="rowline cols-opt">
+          <div class="cell ro" style="justify-content:center">└</div>
+          <div class="cell">어나더</div>
+          <div class="cell">31,400</div>
+          <div class="cell">20</div>
+          <div class="cell">10</div>
+          <div class="cell ro" style="justify-content:center">✕</div>
+        </div>
+        <div style="margin:4px 0 10px"><span class="btn">＋ 옵션 추가</span></div>
+        <div class="rowline cols-opt" style="opacity:.62">
+          <div class="cell ro" style="justify-content:center">└</div>
+          <div class="cell ghost strike">우레온 모이스처 바디 (마감 · 참여 3명)</div>
+          <div class="cell ro">22,000</div>
+          <div class="cell ro">3</div>
+          <div class="cell ro">–</div>
+          <div class="cell ro" style="justify-content:center"><span class="btn warn" style="padding:2px 8px">↩ 재개</span></div>
+        </div>
+        <div class="mini">마감된 옵션은 흐리게 표시 — 참여 기록이 있어 삭제되지 않고 이력으로 남습니다. [↩ 재개]로 다시 열 수 있습니다.</div>
+      </div>
+    </div>
+    <ul class="tight" style="margin-top:10px">
+      <li><b>상품 행과 옵션 행이 시각적으로 분리</b>된다(들여쓰기 └) — "이 줄이 상품인지 옵션인지"를 눈이 판단할 필요가 없다.</li>
+      <li>상품 행의 총인원은 <b>옵션인원의 자동 합계</b>(읽기 전용) — 옵션 하나라도 0(무제한)이면 합계도 무제한.</li>
+      <li>옵션 없는 작업에서 넘어오면: 기존 상품명·결제금액이 첫 옵션 행으로 이월된다(옵션명만 입력하면 됨).</li>
+      <li>옵션 있는 작업에서 "옵션 없는 작업"으로 바꾸면: <b>"옵션 N종을 정리합니다(참여 기록은 보존)"</b> 확인창을 거친 뒤 전환 —
+        조용히 사라지는 값이 없다.</li>
+    </ul>
+  </div>
+
+  <!-- 자동 판정 -->
+  <div class="card">
+    <h3>모드는 시스템이 먼저 제안하고, 확정은 사람이 한다</h3>
+    <div class="tscroll"><table>
+      <thead><tr><th>상황</th><th>자동 선택되는 모드</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>작업오더에서 발행 (옵션 구조 없음/1종)</td><td>옵션 없는 작업</td><td>오더의 옵션 신호(해결 ㉮) — 옵션 1종은 선택지가 아니므로 옵션 아님(종전 규칙 유지)</td></tr>
+        <tr><td>작업오더에서 발행 (옵션 2종 이상)</td><td>옵션 있는 작업 + 옵션행·옵션인원 자동 채움</td><td>오더의 옵션 신호 + 옵션별 건수</td></tr>
+        <tr><td>기존 공고 수정 (살아있는 옵션 있음)</td><td>옵션 있는 작업</td><td>옵션 원장</td></tr>
+        <tr><td>기존 공고 수정 (옵션 없음 / 마감 옵션만)</td><td>옵션 없는 작업 (마감 옵션은 하단 이력으로 표시)</td><td>옵션 원장 — 마감만 남음 = 옵션 구조가 정리된 공고</td></tr>
+        <tr><td>새 공고 직접 작성</td><td>옵션 없는 작업</td><td>기본값 — 필요할 때만 사람이 전환</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout part" style="margin-top:10px">
+      전환 버튼은 항상 살아 있다 — 자동 판정이 틀렸을 때 사람이 한 번의 클릭으로 바로잡는다(자동이 최종 결정을 하지 않는다).
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 6. 해결 ㉱ 잠금 해제 ═══════════ -->
+<section>
+  <h2><span class="num">6</span>해결 ㉱ — "마감 옵션만 남은 공고"는 옵션 없는 공고다 <span class="tag next">참여 규칙 수정</span></h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>지금의 규칙 <span class="tag bad">과잉 차단</span></h3>
+      <ul class="tight">
+        <li>옵션 행이 1개라도 있으면(마감 포함) = "옵션 공고" → 옵션 선택 필수.</li>
+        <li>살아있는 옵션이 0이면 = "모두 마감" → <b>참여 전면 거부</b>.</li>
+        <li>그래서 잘못 생긴 옵션을 마감으로 정리해도 공고는 영영 잠긴다(우레온 상태).</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>바꾸는 규칙 <span class="tag done">두 가지 마감을 구분</span></h3>
+      <ul class="tight">
+        <li><b>관리자가 내린 마감(정리된 옵션)</b>만 남은 공고 = 옵션 구조가 없는 공고 → <b>옵션 선택 없이 참여 허용</b>. 공고 카드의 "옵션 N종" 표시도 사라진다.</li>
+        <li><b>정원이 차서 매진된 옵션</b>(살아있는 옵션인데 자리가 없음)은 지금과 똑같이 참여 차단 — <b>느슨해지는 것이 아니다</b>.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout done">
+    <b>안전 근거:</b> "전부 매진이어도 옵션 없이 참여하는 우회는 금지"라는 기존 원칙은 그대로 지켜진다 —
+    매진(자리 소진)은 살아있는 옵션의 상태라 계속 차단되고, 여기서 여는 것은 <b>관리자가 옵션 구조 자체를 정리한 공고</b>뿐이다.
+    참여 정원은 종전대로 공고의 총인원·일건수·시트 일정이 관리한다.
+  </div>
+  <div class="qa"><b>이 규칙이 있으면 우레온 같은 사고는 ↩ 재개 없이도 풀린다</b> — 옵션명을 비워 저장(=옵션 정리)하는 자연스러운 조치가 그대로 해결이 된다. 4절·5절이 사고 발생을 막고, 이 규칙이 이미 난 사고의 출구를 만든다.</div>
+</section>
+
+<!-- ═══════════ 7. 우레온 즉시 조치 ═══════════ -->
+<section>
+  <h2><span class="num">7</span>우레온 바디미스트 — 지금 바로 여는 방법 (배포 전 · 클릭 4번)</h2>
+  <div class="card">
+    <ol class="flow">
+      <li><b>모집공고 수정 열기</b> — 리뷰웹시스템[3버전] 모집공고 탭(또는 홈 작업 목록의 [● 공고] 버튼)에서 우레온 바디미스트 공고를 연다.</li>
+      <li><b>진행상품/옵션 표에서 흐리게 표시된 "우레온 모이스처 바디" 행</b>을 찾는다 — 지난 조치(옵션명 비우고 저장)로 마감 상태가 된 그 옵션이다.</li>
+      <li>행 오른쪽 <b>[↩] (재개)</b> 버튼을 누른다 → 행이 다시 살아난다.</li>
+      <li>그 행의 <b>옵션인원을 0(무제한), 일건수를 0</b>으로 둔다 — 정원은 공고 총인원(5명)과 시트 일정이 이미 관리하므로 옵션 단에서 또 조이지 않는 것이 안전하다. <b>[저장]</b>.</li>
+    </ol>
+    <div class="callout done" style="margin-top:12px">
+      저장 약 5초 뒤(목록 캐시)부터 참여가 다시 열린다. 옵션이 1종뿐이라 리뷰어 화면에서는 <b>자동 선택</b>되어 별도 선택 화면 없이 종전처럼 참여된다.
+      오늘 확정 3명 + 남은 2명이 채워지면 정상 마감된다.
+    </div>
+    <div class="callout part" style="margin-top:8px">
+      한계: 이 방법은 원치 않는 옵션을 "다시 살려서" 여는 우회다. 옵션 이름("우레온 모이스처 바디")이 참여 기록·관제 화면에 계속 따라다닌다 —
+      구조적 해결(4~6절) 배포 후에는 옵션을 정리(마감)해도 공고가 잠기지 않으므로 이 우회가 필요 없어진다.
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 8. 구현 순서 ═══════════ -->
+<section>
+  <h2><span class="num">8</span>구현 순서와 안전장치</h2>
+  <div class="card tscroll">
+    <table>
+      <thead><tr><th style="min-width:56px">순서</th><th>작업</th><th>고치는 곳</th><th>막는 모호점</th><th>위험도</th></tr></thead>
+      <tbody>
+        <tr><td><b>1</b></td><td>요약 문장 오독 수리 — 옵션 없는 줄의 결제금액을 옵션명으로 읽지 않게</td><td>리뷰웹 (작업오더 표시·프리필)</td><td>㉢</td><td><span class="tag done">낮음</span> 표시·프리필만, 저장물 무접촉</td></tr>
+        <tr><td><b>2</b></td><td>참여 규칙 — 마감 옵션만 남은 공고 = 옵션 없는 공고 (매진과 구분)</td><td>리뷰웹 (참여 게이트 + 카드 옵션 표시)</td><td>㉥</td><td><span class="tag part">중간</span> 참여 경로 — 회귀가드 + 매진 차단 유지 검증 필수</td></tr>
+        <tr><td><b>3</b></td><td>입력칸 2모드 분리 (5절 화면)</td><td>리뷰웹 (발행/수정 모달 — 관리자 대시보드·리뷰웹시스템[3버전] 공용 모듈 한 벌)</td><td>㉣ ㉤</td><td><span class="tag part">중간</span> 저장 항목·프리필 계약은 유지(겉모양·입구만 변경)</td></tr>
+        <tr><td><b>4</b></td><td>옵션 구조 신호 전송 (+옵션별 건수 → 옵션인원 자동)</td><td>인트라넷 (리뷰오더 전송) + 리뷰웹 (신호 우선 사용)</td><td>㉠ ㉡</td><td><span class="tag done">낮음</span> 양방향 가산적 — 배포 순서 무관</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>지키는 것 (기존 규칙 무회귀)</h3>
+      <ul class="tight">
+        <li>옵션표가 없는 화면의 저장은 옵션을 건드리지 않는다(미전송 = 유지) — 종전 원칙 그대로.</li>
+        <li>참여자 있는 옵션은 삭제하지 않고 마감으로 보존(참여 기록 보호) — 그대로.</li>
+        <li>매진 옵션 우회 참여 금지 — 그대로(6절에서 구분만 정교해짐).</li>
+        <li>기존에 정상 발행된 옵션 공고들의 동작·화면 변화 없음(모드는 자동 판정이 기존 상태를 그대로 읽는다).</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>확인하고 진행할 것</h3>
+      <ul class="tight">
+        <li><b>6절 참여 규칙 변경</b>은 참여 게이트를 건드리는 정책 변경이다 — 이 문서의 구분 기준(관리자 마감 vs 매진)대로 진행하되, 다른 해석을 원하면 알려달라.</li>
+        <li>5절 화면의 세부 배치(칸 순서·문구)는 구현 중 실물 렌더로 다듬는다 — 구조(2모드·칸 구성)는 이 문서가 기준.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  리뷰웹시스템 · 모집공고 옵션 입력 분리 계획 — 2026-08-07 · 사례: 8/3(네이버) 우레온_바디미스트 ·
+  관련 문서: 「모집공고 4칸 정리 개선」 「탈구글시트 시트우위동기화」
+</footer>
+
+</div>
+</body>
+</html>
