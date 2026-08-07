@@ -22,10 +22,13 @@ const HEADER_SCAN_ROWS = 60;
 // 일정으로 인정하는 최소 조건 — 날짜 2종 이상 + 값 있는 칸의 과반이 파싱돼야 신뢰
 const MIN_DISTINCT_DATES = 2;
 const MIN_PARSE_RATIO = 0.6;
-// ★ 킬스위치 — 시트 일정으로 정원·마감일을 정하는 동작을 끈다(끄면 발행폼 값으로만 운영).
-//   `cells->>$3` 캐스트 누락으로 이 기능이 오래 무음 상태였다가 되살아나는 배포라,
-//   예기치 못한 정원 변동이 보이면 즉시 되돌릴 수단이 필요하다.
-const SHEET_SCHEDULE_ENABLED = process.env.CAMPAIGN_SHEET_SCHEDULE !== '0';
+// ★★ 모집 정원·마감일의 **기준은 시스템표**다(사용자 확정 2026-08-07 — "기준을 구글시트에서
+//   시스템표로 변경했어"). 그래서 이 스위치의 기본값은 **꺼짐**이고, 시트 구매일자 컬럼은
+//   그날 정원·마감일 판정에 쓰이지 않는다 — 정원 = 일 모집인원 + 날짜별 조절(095) + 이월(066),
+//   총량 = 차수 합계(recruit_total). 시트는 여전히 읽지만(주문·검색·행배정) **정원은 안 정한다**.
+// ★ 되돌리기 = `CAMPAIGN_SHEET_SCHEDULE=1`(Railway 환경변수) — 켜면 종전처럼 시트 구매일자가
+//   그날 정원·마감일을 정한다. 값이 없거나 '1' 이 아니면 시스템표 기준.
+const SHEET_SCHEDULE_ENABLED = process.env.CAMPAIGN_SHEET_SCHEDULE === '1';
 
 const _cache = new Map();               // key → { at, value }
 const CACHE_TTL_MS = 60 * 1000;         // RAW 미러가 5분 주기라 1분 캐시로 충분
@@ -78,7 +81,7 @@ function summarizeDates(isoDates, nonEmptyCount) {
  */
 async function deriveSchedules(db, tabs, now = new Date()) {
   const out = new Map();
-  if (!SHEET_SCHEDULE_ENABLED) return out;   // 킬스위치 — 빈 맵 = 전부 미적용(발행폼 값으로 운영)
+  if (!SHEET_SCHEDULE_ENABLED) return out;   // 기본값 = 시스템표 기준(빈 맵 = 시트 일정 전부 미적용)
   const wanted = [];
   const seen = new Set();
   for (const t of tabs || []) {
@@ -239,8 +242,13 @@ async function describeTabDates(db, sheetId, tabGid, now = new Date()) {
     const dates = Object.keys(byDate).sort().map(d => ({ date: d, rows: byDate[d] }));
 
     const ratioOk = !(nonEmpty > 0 && totalDated / nonEmpty < MIN_PARSE_RATIO);
-    const applied = dates.length >= MIN_DISTINCT_DATES && ratioOk;
+    // ★★ 기준이 시스템표면 **날짜를 읽어 보여주되 "적용 중"이라고 말하지 않는다** — 관제가
+    //   "시트 일정 적용 중"이라고 하는데 정원 엔진은 무시하는 상태가 가장 나쁜 거짓 표시다.
+    //   진단(날짜 목록·행 수)은 그대로 남겨 시트 현황 대조에는 계속 쓴다.
+    const detected = dates.length >= MIN_DISTINCT_DATES && ratioOk;
+    const applied = detected && SHEET_SCHEDULE_ENABLED;
     const reason = applied ? 'applied'
+      : detected ? 'system_basis'                            // 시트에 날짜는 있으나 기준이 시스템표
       : dates.length === 0 ? 'no_parsable_date'
       : dates.length < MIN_DISTINCT_DATES ? 'single_date'   // 하루 완결 캠페인 — 일정 미적용
       : 'low_parse_ratio';

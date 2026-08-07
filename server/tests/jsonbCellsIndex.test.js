@@ -31,8 +31,10 @@ ok('★★ 모든 cells 인덱싱에 ::int 캐스트가 있다(빠지면 전 행
   uses.every(u => u.endsWith('::int')));
 ok('왜 필요한지 코드에 남아 있다(다음 사람이 지우지 않도록)',
   /jsonb ->> text.*객체 키 조회|객체 키 조회\)로 해석/.test(src) && /모든 행이 NULL|전 행 NULL/.test(src));
-ok('킬스위치(CAMPAIGN_SHEET_SCHEDULE=0) — 되살아난 기능을 즉시 되돌릴 수단',
-  /process\.env\.CAMPAIGN_SHEET_SCHEDULE !== '0'/.test(src)
+// ⚠ 2026-08-07 사용자 확정으로 **기본값이 뒤집혔다** — 모집 정원 기준은 시스템표이고,
+//   시트 일정 엔진은 `CAMPAIGN_SHEET_SCHEDULE=1` 일 때만 켜진다(스위치 자체는 그대로 존재).
+ok('스위치(CAMPAIGN_SHEET_SCHEDULE=1) — 시트 일정 엔진을 되살릴 수단',
+  /process\.env\.CAMPAIGN_SHEET_SCHEDULE === '1'/.test(src)
   && /if \(!SHEET_SCHEDULE_ENABLED\) return out;/.test(src));
 
 /* ═══ 파서는 실제 시트 표기를 처리한다(사고 당시 형식) ═══ */

@@ -10,6 +10,9 @@
  *  E. 계획 계산 우선순위 — 미리보기 조정값 > 작업오더 신호 > 기본값
  *  F. 마이그레이션·프리플라이트 등록(없으면 인트라넷 오더 접수 전면 42703)
  */
+// ★ 모집 정원 기준의 기본값은 **시스템표**(2026-08-07 사용자 확정)라 시트 일정 엔진 자체를
+//   검증하는 이 파일은 그 엔진을 켜고 돌린다(env 는 require 시점에 읽힌다 — 위에 둘 것).
+process.env.CAMPAIGN_SHEET_SCHEDULE = '1';
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
