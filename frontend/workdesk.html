@@ -9090,6 +9090,21 @@ boot();
   if (typeof W.loadWorkOrders !== 'function') {
     W.loadWorkOrders = function () { try { if (STATE.view === 'orders') _loadOrders(); } catch (_) {} };
   }
+  /* [작업오더 열기] — 공고 모달의 "연결 탭을 못 찾았어요" 안내에서 부른다(훅 없는 화면은 버튼 미표시).
+     ★ 모달을 먼저 닫는다 — 오더 화면이 모달 덮개(z-index 5000) 뒤에 열리면 아무것도 안 한 것처럼 보인다. */
+  W.RECRUIT_OPEN_WORK_ORDER = async function (id) {
+    try {
+      if (typeof closeRecruitModal === 'function') closeRecruitModal();
+      if (STATE.view !== 'orders') switchView('orders');
+      if (!(STATE.wo || []).length) { try { await _loadOrders(); } catch (_) {} }
+      const i = (STATE.wo || []).findIndex(function (o) { return String(o.id) === String(id); });
+      if (i < 0) { _toast('그 작업오더를 목록에서 찾지 못했습니다 — 상태 필터를 확인하세요.'); return; }
+      const d = document.getElementById('woldetail-' + i);
+      if (d && d.style.display === 'none') _woToggle(i);
+      const row = document.getElementById('wolrow-' + i);
+      if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (e) { try { _toast('작업오더 열기 실패'); } catch (_) {} }
+  };
   // 카드 렌더 후 머리말(건수·새 공고 버튼) 갱신 — index-recruit.js 는 목록만 그린다
   var _origRender = W._renderRecruitCards;
   if (typeof _origRender === 'function') {
