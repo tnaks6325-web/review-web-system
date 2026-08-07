@@ -1592,6 +1592,14 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
 .wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
 .wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
+/* 🧹 줄 정리 표 — 마감 확인창(.wbl-*)의 껍데기를 그대로 쓰고 표만 더한다 */
+.wbl-wrt{width:100%;border-collapse:collapse;margin-top:9px;font-size:12px}
+.wbl-wrt th,.wbl-wrt td{padding:5px 7px;border-bottom:1px solid var(--border,#e5e7eb);text-align:right;white-space:nowrap}
+.wbl-wrt th:nth-child(-n+2),.wbl-wrt td:nth-child(-n+2){text-align:left}
+.wbl-wrt th{font-size:11px;color:var(--faint,#94a3b8);font-weight:600}
+.wbl-wrt tbody tr{cursor:pointer}
+.wbl-wrt tbody tr:hover{background:var(--hover,#f8fafc)}
+.wbl-wrt tbody tr.on{background:#eff6ff}
 /* 작업보드 본문 헤더의 마감 표시는 전폭 띠(.wbl-finbar)를 폐기하고 제목 행 조각(.tp3fin)으로 옮겼다 —
    시안 B(docs/design-workboard-top-3section.html · 사용자 확정). 상태 칩(.wbl-s)·버튼(.wbl-b)은 그대로 쓴다. */
 
@@ -2782,6 +2790,97 @@ function openFinishModal(i){ const t=(STATE.tabs||[])[i]; if(t) _finOpen(t); }
 function openFinishCur(){ if(STATE.cur) _finOpen(STATE.cur); }
 function doReopen(i){ const t=(STATE.tabs||[])[i]; if(t) _finReopen(t); }
 function doReopenCur(){ if(STATE.cur) _finReopen(STATE.cur); }
+
+/* ── 🧹 줄 정리 (무시트 작업 전용) ─────────────────────────────────────────────
+   왜: 이관 전 검색 명단이 5·6차 50명이던 작업이 이관 후 216명이 됐다(옛 차수가 되살아남).
+   그 줄을 다시 내릴 창구가 어디에도 없었다.
+   ★ 재료는 **이미 받아 둔 표**(`STATE.wd.roster`)에서 차수별로 센다 — 신규 조회 0.
+   ★ 보낸 것은 **차수(사람의 의도)** 이고 대상은 **서버가 다시 고른다**(행 목록 불신 규율).
+   ★ 미리보기 → 실행 2단계. onclick 은 인덱스만(차수 문자열은 시트발이라 보간 금지). */
+let _WR = null;
+function _wrCanRetire(){
+  return !!(STATE.cur && STATE.cur.sheetless === true && (STATE.role === 'master' || STATE.role === 'admin'));
+}
+function closeRetireModal(){ const o = document.getElementById('wrOv'); if (o) o.remove(); _WR = null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if (!window._wrKeyBound) {
+  window._wrKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('wrOv')) closeRetireModal(); });
+}
+function openRetireModal(){
+  if (!_wrCanRetire()) return;
+  const t = STATE.cur, roster = (STATE.wd && STATE.wd.roster) || [];
+  const g = new Map();
+  roster.forEach(r => {
+    const k = String(r.round == null ? '' : r.round).trim();
+    const o = g.get(k) || { k, n: 0, sub: 0, paid: 0, named: 0 };
+    o.n++; if (r.submitted) o.sub++; if (r.paid) o.paid++; if (String(r.name || '').trim()) o.named++;
+    g.set(k, o);
+  });
+  _WR = { sheetId: t.sheetId, tabName: t.tabName, total: roster.length, picked: new Set(), prev: null, busy: false,
+    groups: [...g.values()].sort((a, b) => String(a.k).localeCompare(String(b.k), 'ko')) };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'wrOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🧹 표에서 내릴 줄 고르기</div>
+    <div class="wbl-db" id="wrBody"></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="closeRetireModal()">닫기</button>
+      <button class="wbl-b" id="wrPrev" onclick="wrPreview()">미리보기</button>
+      <button class="wbl-b dark" id="wrGo" disabled onclick="wrRun()">🧹 정리 실행</button></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(고른 것이 실수로 날아가지 않게)
+  _wrRender();
+}
+function wrToggle(i){
+  if (!_WR) return;
+  const k = (_WR.groups[i] || {}).k; if (k === undefined) return;
+  if (_WR.picked.has(k)) _WR.picked.delete(k); else _WR.picked.add(k);
+  _WR.prev = null; _wrRender();
+}
+function _wrRender(){
+  const b = document.getElementById('wrBody'); if (!b || !_WR) return;
+  const pickN = _WR.groups.filter(g => _WR.picked.has(g.k)).reduce((s, g) => s + g.n, 0);
+  b.innerHTML = `<b>${esc(_WR.tabName)}</b>
+    <div class="wbl-facts">고른 줄은 <b>작업보드 표와 리뷰어 검색 명단에서 함께 빠집니다</b>.
+      구글시트·주문 기록은 건드리지 않으며, 되돌릴 수 있습니다(줄은 지워지지 않고 내려갑니다).</div>
+    <table class="wbl-wrt"><thead><tr><th></th><th>차수</th><th>줄</th><th>이름</th><th>제출</th><th>입금</th></tr></thead><tbody>
+    ${_WR.groups.map((g, i) => `<tr class="${_WR.picked.has(g.k) ? 'on' : ''}" onclick="wrToggle(${i})">
+        <td><input type="checkbox" ${_WR.picked.has(g.k) ? 'checked' : ''} onclick="event.stopPropagation();wrToggle(${i})"></td>
+        <td>${g.k ? esc(g.k) : '<span style="color:var(--faint,#94a3b8)">(빈값)</span>'}</td>
+        <td>${g.n}</td><td>${g.named}</td><td>${g.sub}</td><td>${g.paid}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="wbl-facts">선택 <b>${pickN}줄</b> · 표 ${_WR.total}줄 → <b>${_WR.total - pickN}줄</b></div>
+    ${_WR.prev ? `<div class="wbl-warn">미리보기 — 정리 대상 <b>${_WR.prev.matched}줄</b>(이름 있는 줄 ${_WR.prev.named} · 제출 ${_WR.prev.submitted} · 입금 ${_WR.prev.paid}${_WR.prev.withOrder ? ` · 주문 연결 ${_WR.prev.withOrder}` : ''})<br>
+        표 ${_WR.prev.boardRows}줄 → <b>${_WR.prev.boardAfter}줄</b>. 아래 [정리 실행]을 누르면 반영됩니다.</div>` : ''}
+    ${_WR.err ? `<div class="wbl-warn">${esc(_WR.err)}</div>` : ''}`;
+  const go = document.getElementById('wrGo'); if (go) go.disabled = !(_WR.prev && _WR.prev.matched > 0);
+}
+async function wrPreview(){
+  if (!_WR || _WR.busy) return;
+  if (!_WR.picked.size) { _WR.err = '정리할 차수를 하나 이상 고르세요.'; _wrRender(); return; }
+  _WR.busy = true; _WR.err = null;
+  try {
+    const j = await api('/api/trackb/worktable/retire-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: _WR.sheetId, tabName: _WR.tabName, rounds: [..._WR.picked], dryRun: true }) });
+    if (!j || j.ok === false) { _WR.prev = null; _WR.err = (j && (j.error || j.message)) || '미리보기 실패'; }
+    else _WR.prev = j;
+  } catch (e) { _WR.prev = null; _WR.err = '미리보기 실패: ' + (e.message || ''); }
+  _WR.busy = false; _wrRender();
+}
+async function wrRun(){
+  if (!_WR || _WR.busy || !_WR.prev) return;
+  if (!confirm(`「${_WR.tabName}」 표에서 ${_WR.prev.matched}줄을 내립니다.\n\n` +
+    `그 줄들은 리뷰어 검색 명단에서도 빠집니다(제출 ${_WR.prev.submitted}건 · 입금 ${_WR.prev.paid}건 포함).\n` +
+    `구글시트·주문 기록은 건드리지 않고, 되돌릴 수 있습니다.\n\n계속할까요?`)) return;
+  _WR.busy = true; _wrRender();
+  try {
+    const j = await api('/api/trackb/worktable/retire-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: _WR.sheetId, tabName: _WR.tabName, rounds: [..._WR.picked], dryRun: false }) });
+    if (!j || j.ok === false) { _WR.busy = false; _WR.err = (j && (j.error || j.message)) || '정리 실패'; _wrRender(); return; }
+    const idx = STATE.tabs.indexOf(STATE.cur);
+    closeRetireModal();
+    toast(`${j.retired}줄 정리${j.indexRows != null ? ` · 검색 명단 ${j.indexRows}명` : ''}`);
+    if (j.ledgerError) alert('줄은 내려갔지만 검색 명단 재생성에 실패했습니다: ' + j.ledgerError + '\n잠시 후 다시 실행해 주세요.');
+    if (idx >= 0) selTab(idx);
+  } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
+}
 async function _finOpen(tab){
   if(!_finCanEdit()||!tab) return;
   const sheetId=tab.sheetId, tabName=tab.tabName;
@@ -3538,7 +3637,7 @@ function renderWorkdesk(wd){
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     <span class="sp" style="flex:1"></span>
     ${_finBarHtml()}
-    ${isMaster?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구(진실원천 전환 · write-back 시뮬 · 그림자 투영)" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button></span></span>`:''}</div>
+    ${(isMaster||_wrCanRetire())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}</span></span>`:''}</div>
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
@@ -5893,14 +5992,18 @@ function _gdRender(){
    ★ onclick 에는 **인덱스만** 넘긴다(시트에서 온 작업명 보간 금지 — 실측 XSS 선례).
    ★ 권한은 nav 노출과 서버 게이트(adminOrMaster)가 1:1. */
 function renderCutoverView(){
-  STATE.co = STATE.co || { items: [], q: '', filter: 'todo', checks: {}, busy: '' };
+  STATE.co = STATE.co || { items: [], q: '', filter: 'todo', checks: {}, busy: '', inclUnknown: false };
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="cohead"></div><div id="cobody">
     <div class="empty">불러오는 중…</div></div></div>`;
   _coLoad();
 }
+/* ★★ 연도 미상(구매일 연도 미확정) 작업은 기본 목록에서 빠진다 — 서버가 `yearUnknown` 으로 건수를
+   알려주는데 화면이 그리지 않으면 "남음 0"이 "전부 끝"으로 읽힌다(실측: 86건 이관 후 남은 358건이
+   화면 어디에도 안 보였다). 사용자 확정 = **이관 대상 아님(과거 자료)** 이지만 존재는 말해야 한다. */
+function _coToggleUnknown(){ STATE.co.inclUnknown = !STATE.co.inclUnknown; _coLoad(); }
 async function _coLoad(){
   try{
-    const j = await api('/api/trackb/sheetless/list');
+    const j = await api('/api/trackb/sheetless/list' + (STATE.co.inclUnknown ? '?includeUnknown=1' : ''));
     if(j && j.code==='not_ready'){ _coFailed(j.error||'준비 전입니다'); return; }
     if(!j || j.ok===false){ _coFailed((j&&j.error)||'목록을 불러오지 못했습니다'); return; }
     STATE.co.items = j.items||[]; STATE.co.meta = j;
@@ -5936,6 +6039,11 @@ function _coRender(){
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
       막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.
       ${m.filteredOld?`<br>지난 연도 작업 ${m.filteredOld}건은 목록에서 제외했습니다.`:''}
+      ${STATE.co.inclUnknown
+        ? `<br>구매일 연도가 확정되지 않은 작업까지 <b>함께 보고 있습니다</b> — 과거 자료라 이관 대상이 아닙니다.
+           <button class="btn" style="padding:1px 7px;font-size:11px;margin-left:4px" onclick="_coToggleUnknown()">숨기기</button>`
+        : (m.yearUnknown?`<br>구매일 연도가 확정되지 않은 <b>${m.yearUnknown}건</b>은 <b>과거 자료로 보고 목록에서 제외</b>했습니다 — 이관 대상이 아닙니다.
+           <button class="btn" style="padding:1px 7px;font-size:11px;margin-left:4px" onclick="_coToggleUnknown()">보기</button>`:'')}
       ${m.truncated?'<br><b>목록이 잘렸습니다</b> — 검색으로 좁혀 보세요.':''}</div>
     <div class="cotools">${chip('todo','남음',m.remaining||0)}${chip('done','이관됨',m.done||0)}${chip('all','전체',all.length)}</div>`;
   _coRows();

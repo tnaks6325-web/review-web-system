@@ -466,6 +466,24 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
   //    시트 기반 탭을 `not_sheetless` 로 막기 때문(그 게이트를 풀지 않는다).
   const handoff = await handoffPendingOrders({ sheetId, tabName, tabGid: tab.tabGid, by });
 
+  /* ★★ 시트에서 이미 사라진 줄은 이관과 함께 은퇴시킨다 (운영 실측 2026-08-07 · 쿠팡(26년)).
+     방금 돌린 마지막 반영의 투영이 `_reconcileSeen` 으로 **시트에 더는 없는 import 줄**을
+     `active = FALSE` 로 내려놓는데, 뒤이은 장부 재생성은 `deleted_at` 만 보므로 그 줄들을
+     **검색 명단으로 되살렸다**(50명 → 216명). 이관은 "시트 실물을 그대로 승계"하는 것이므로
+     여기서 소프트 삭제로 승격시킨다.
+     ★ `source='import'` 만 — 준비 자리(`worktable`)·수기 추가(`manual`)는 애초에
+       seen-set 대상이 아니라 비활성이 될 수 없고, 건드리면 빈 슬롯이 통째로 사라진다.
+     ★ fail-soft — 실패해도 이관은 유지하고 사유를 응답에 싣는다. */
+  let retired = null;
+  try {
+    retired = await require('./participants.service')
+      .retireInactiveImportRows({ sheetId, tabName, by: `cutover:${String(by || '').slice(0, 90)}` });
+    if (retired.rows) logger.info(`[cutover] 시트에서 사라진 줄 ${retired.rows}개 은퇴 — ${tabName}`);
+  } catch (e) {
+    retired = { ok: false, message: e.message };
+    logger.warn(`[cutover] 사라진 줄 은퇴 실패(이관은 유지) — ${tabName}: ${e.message}`);
+  }
+
   // ── 부수효과 3종. 전부 실패해도 이관 자체는 유지하고 **사유를 응답에 실어** 화면이 말한다.
   //    (되돌리면 크론이 다시 시트를 읽으므로, 부수효과 실패로 이관을 롤백할 이유가 없다.)
   let ledger = null;
@@ -489,7 +507,7 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
 
   logger.info(`[cutover] 이관 완료 — ${tabName} (${sheetId}) by=${by}${force && !list.canCutover ? ' [UNVERIFIED]' : ''}`);
   return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover),
-    reflect, handoff, ledger, notice };
+    reflect, handoff, retired, ledger, notice };
 }
 
 /**
