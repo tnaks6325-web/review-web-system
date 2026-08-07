@@ -54,6 +54,27 @@
     return `${+m[2]}/${+m[3]}(${['일','월','화','수','목','금','토'][d.getUTCDay()]})`;
   }
 
+  /**
+   * 오늘 정원이 0인 관리자 카드의 사유 문구(라벨 + 설명).
+   * ★★ "게시 전"으로 뭉뚱그리지 않는다 — 게시돼 운영 중인 공고를 미게시로 오해하게 만들고,
+   *   담당자가 [📅 인원]으로 조절해야 할 상황(휴무일·0명 조절)을 놓치게 된다(사용자 신고).
+   *   판정 재료는 전부 서버 상태엔진이 실어 준 값(state·stateReason) — 화면이 새로 세지 않는다.
+   */
+  function _zeroQuotaNote(c, isPre, isDraft) {
+    if (isPre) return { label: '오픈 전', desc: '오픈하면 집계가 시작됩니다' };
+    if (isDraft) return { label: '게시 전', desc: '게시하면 집계가 시작됩니다' };
+    if (c.stateReason === 'rest_day') {
+      const nx = _fmtMD(c.nextWorkDate);
+      return { label: '오늘 휴무', desc: nx ? `오늘은 진행일이 아닙니다 · 다음 진행일 ${nx}` : '오늘은 진행일이 아닙니다' };
+    }
+    if (c.stateReason === 'schedule_ended') return { label: '일정 종료', desc: '시트 일정의 마지막 날짜가 지났습니다 — [📅 인원]에서 오늘 인원을 정하면 다시 열립니다' };
+    if (c.state === 'soft_full') return { label: '총원 충족', desc: '총 모집 인원을 모두 채웠습니다' };
+    if (c.state === 'closed') return { label: '모집 종료', desc: '마감된 공고입니다' };
+    // ★ 조절 칩(pg-plan)이 같은 줄에서 이미 "조절"을 말하므로 라벨은 결과만 짧게 말한다
+    if (c.planAdjusted === true) return { label: '오늘 0명', desc: '오늘은 모집하지 않도록 조절되어 있습니다 — [📅 인원]에서 변경' };
+    return { label: '오늘 정원 0', desc: '오늘 배정된 인원이 없습니다 — [📅 인원]에서 조절' };
+  }
+
   /** 오픈 안내 라벨: 오픈 시각이 오늘(KST·서버시간 보정)이면 "매일 HH:MM 오픈",
    *  미래 날짜(시작일 전 게시)면 "M/D(요일) 오픈"(자정 오픈은 시각 생략) */
   function _fmtOpenLabel(iso) {
@@ -526,40 +547,51 @@
       // 관리자 게이지 = 같은 자리에 확정/진행중을 나눠 담는다(리뷰어는 단색 1구간).
       //   진행중 = 유효 홀드 = 지금 15분 타이머를 안고 구매 중인 사람 → 가장 시간에 민감한 값.
       const holdNow = (c.ops && Number(c.ops.holdNow)) || 0;
+      // ★★ 칩(이월·조절·보류)은 게이지 유무와 **무관하게 먼저** 만든다 — 종전엔 오늘 정원이 0인
+      //   카드(휴무일·일정 종료·총원 충족·0명 조절)가 자리표시자로 통째로 대체되면서 이 칩들이
+      //   함께 사라져, 그 공고의 이월·보류가 화면 어디에도 안 보였다(사용자 신고 2026-08-07).
+      // ★ 오픈 전·게시 전은 오늘 집계 자체가 없으므로 칩을 만들지 않는다(없는 숫자 표시 금지).
+      const showChips = !isPre && !isDraft;
+      // ★ 066: 전일 미달분 이월로 오늘 한도가 늘어난 경우 그 사실을 표시한다.
+      //   안 보이면 "일건수를 20으로 저장했는데 25로 뜬다"가 버그로 오해된다.
+      const carry = showChips ? (Number(c.carryAdded) || 0) : 0;
+      const carryTip = carry > 0
+        ? `<span class="pg-carry" title="전일까지 못 채운 ${carry}명이 오늘로 이월됐습니다. 오늘 다 채우면 내일은 원래 한도로 돌아갑니다.">+${carry} 이월</span>`
+        : '';
+      // ★ 095: 오늘이 명시 조절일이면 "이월"이 아니라 "조절"로 말한다 — 안 보이면
+      //   "일건수 40인데 왜 20으로 뜨지"가 버그로 오해된다(서버가 조절일엔 carryAdded=0).
+      // ★ "기본"은 그 공고의 평소 그날 인원 — 시트 일정 공고는 시트 행 수(todayBaseline)이지
+      //   daily_limit 이 아니다(둘은 무관해서 툴팁이 거짓말이 된다).
+      const baseN = (c.todayBaseline != null) ? Number(c.todayBaseline) : (Number(c.daily_limit) || 0);
+      const planTip = (showChips && c.planAdjusted === true)
+        ? `<span class="pg-plan" title="오늘 모집 인원이 ${Number(c.todayPlanned) || 0}명으로 조절되어 있습니다(기본 ${baseN}명) — [📅 인원]에서 변경">조절</span>`
+        : '';
+      // ★ 098: 이월 보류 칩 — 누르면 원클릭 반영 확인창(모듈 있을 때만 클릭 가능).
+      //   carryHeld null = 계산 불가 → 칩 미표시(0으로 위장 금지 — 시안 확정).
+      const heldN = (showChips && c.carryMode === 'hold' && c.carryHeld != null) ? Number(c.carryHeld) : null;
+      const holdTip = (heldN !== null && heldN > 0)
+        ? ((typeof window !== 'undefined' && window.CampaignDailyPlan)
+          ? `<span class="pg-hold" onclick="event.stopPropagation();event.preventDefault();CampaignDailyPlan.quickApplyHeld('${_esc(c.id)}')" title="보류된 이월 ${heldN}명 — 누르면 오늘 정원에 반영할지 물어봅니다 (세부 선택은 [📅 인원])">⏸ 보류 ${heldN}</span>`
+          : `<span class="pg-hold" title="보류된 이월 ${heldN}명 — 반영은 관리자 화면 [📅 인원]에서">⏸ 보류 ${heldN}</span>`)
+        : '';
+      const chips = `${holdTip}${planTip}${carryTip}`;
       if (quota > 0 && !isPre) {
         const subN = Math.max(0, today - holdNow);          // todayCount = 제출 + 유효홀드
         const subPct = Math.min(100, Math.round((subN / quota) * 100));
         const holdPct = Math.min(100 - subPct, Math.round((holdNow / quota) * 100));
-        // ★ 066: 전일 미달분 이월로 오늘 한도가 늘어난 경우 그 사실을 표시한다.
-        //   안 보이면 "일건수를 20으로 저장했는데 25로 뜬다"가 버그로 오해된다.
-        const carry = Number(c.carryAdded) || 0;
-        const carryTip = carry > 0
-          ? `<span class="pg-carry" title="전일까지 못 채운 ${carry}명이 오늘로 이월됐습니다. 오늘 다 채우면 내일은 원래 한도로 돌아갑니다.">+${carry} 이월</span>`
-          : '';
-        // ★ 095: 오늘이 명시 조절일이면 "이월"이 아니라 "조절"로 말한다 — 안 보이면
-        //   "일건수 40인데 왜 20으로 뜨지"가 버그로 오해된다(서버가 조절일엔 carryAdded=0).
-        const planTip = (c.planAdjusted === true)
-          ? `<span class="pg-plan" title="오늘 모집 인원이 ${Number(c.todayPlanned) || 0}명으로 조절되어 있습니다(기본 ${Number(c.daily_limit) || 0}명) — [📅 인원]에서 변경">조절</span>`
-          : '';
-        // ★ 098: 이월 보류 칩 — 누르면 원클릭 반영 확인창(모듈 있을 때만 클릭 가능).
-        //   carryHeld null = 계산 불가 → 칩 미표시(0으로 위장 금지 — 시안 확정).
-        const heldN = (c.carryMode === 'hold' && c.carryHeld != null) ? Number(c.carryHeld) : null;
-        const holdTip = (heldN !== null && heldN > 0)
-          ? ((typeof window !== 'undefined' && window.CampaignDailyPlan)
-            ? `<span class="pg-hold" onclick="event.stopPropagation();event.preventDefault();CampaignDailyPlan.quickApplyHeld('${_esc(c.id)}')" title="보류된 이월 ${heldN}명 — 누르면 오늘 정원에 반영할지 물어봅니다 (세부 선택은 [📅 인원])">⏸ 보류 ${heldN}</span>`
-            : `<span class="pg-hold" title="보류된 이월 ${heldN}명 — 반영은 관리자 화면 [📅 인원]에서">⏸ 보류 ${heldN}</span>`)
-          : '';
         gauge = `<div class="pgauge${isFull ? ' full' : ''}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${holdTip}${planTip}${carryTip}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${chips}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
           <div class="pg-key"><span><i class="sub"></i>확정 <b>${subN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;
       } else {
-        // 게시 전·오픈 전이라 오늘 집계가 없는 공고도 **자리는 지킨다**(카드 높이 일관).
+        // 오늘 집계가 없는 공고도 **자리는 지킨다**(카드 높이 일관) + **왜 없는지 사실대로 말한다**
+        //   — 종전엔 게시된 공고에도 "게시 전"이라고 적어 미게시로 오해됐다.
+        const z = _zeroQuotaNote(c, isPre, isDraft);
         gauge = `<div class="pgauge">
-          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-vl" style="color:#B6BDC9">${isPre ? '오픈 전' : '게시 전'}</span></div>
+          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-vl">${chips}<span style="color:#B6BDC9">${z.label}</span></span></div>
           <div class="pg-track"></div>
-          <div class="pg-key"><span style="color:#B6BDC9">${isPre ? '오픈하면 집계가 시작됩니다' : '게시하면 집계가 시작됩니다'}</span></div>
+          <div class="pg-key"><span style="color:#B6BDC9">${z.desc}</span></div>
         </div>`;
       }
     }
@@ -797,7 +829,7 @@
           <button type="button" id="cae_carry_auto" onclick="CampCards._caeCarry('auto')" style="border:0;background:#2563EB;color:#fff;padding:6px 12px;font-size:.72rem;font-weight:700;cursor:pointer">자동 반영 (기본)</button>
           <button type="button" id="cae_carry_hold" onclick="CampCards._caeCarry('hold')" style="border:0;background:#fff;color:#64748B;padding:6px 12px;font-size:.72rem;font-weight:700;cursor:pointer">보류 후 수동 반영</button>
         </div>
-        <div id="cae_carry_note" class="cae-note" style="display:none;color:#5B21B6">⏸ 보류 = 미달분을 자동으로 얹지 않고 쌓아둡니다. 보류분 반영은 관리자 화면(카드 ⏸ 칩·[📅 인원])에서만 가능합니다 — 물량은 사라지지 않습니다(총량까지 계속 모집).</div>
+        <div id="cae_carry_note" class="cae-note" style="display:none;color:#5B21B6">⏸ 보류 = 미달분을 자동으로 얹지 않고 쌓아둡니다. 보류분 반영은 관리자 화면(카드 ⏸ 칩·[📅 인원])에서만 가능합니다 — 물량은 사라지지 않습니다(총량까지 계속 모집). ※ 시트 일정 공고는 정원을 시트가 정해 이 설정이 적용되지 않습니다.</div>
         <label class="cae-lb">랜딩(상품) URL</label>
         <div style="display:flex;gap:6px">
           <input id="cae_landing" class="cae-in" type="text" style="flex:1;min-width:0" placeholder="https://">
