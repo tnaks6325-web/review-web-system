@@ -97,6 +97,18 @@ eq('반영 누적 차감: 잔량 5 − 반영 3 = 2', S.heldCarry(HOLD, CNT(), t
 eq('과반영도 음수 없음(잔량 5 − 반영 10 = 0)', S.heldCarry(HOLD, CNT(), today, 10), 0);
 eq('시작일이 기준선보다 늦으면 시작일부터(어제 시작 → 40−35=5)',
   S.heldCarry({ ...HOLD, start_date: d(-1) }, CNT({ hold: { startDate: d(-9), submittedSince: 35 } }), today), 5);
+// ★★ 시트 일정 공고(063)는 정원을 시트 계획이 정하므로 '자동 이월 가산 멈춤' 자체가 없다
+//   = 잔량 개념도 없다. 숫자를 돌려주면 카드에 **효과 없는** ⏸ 보류 칩이 떠 막다른 길이 된다.
+{
+  const sch = {
+    ok: true, dates: [{ date: d(-1), slots: 5 }, { date: today, slots: 5 }],
+    byDate: { [d(-1)]: 5, [today]: 5 }, totalSlots: 10,
+  };
+  eq('★ 시트 일정 공고는 잔량 null(효과 없는 보류 칩 금지)', S.heldCarry(HOLD, CNT(), today, 0, sch), null);
+  eq('일정 인자 없으면 종전대로 계산(무회귀)', S.heldCarry(HOLD, CNT(), today, 0), 5);
+  eq('일정이 있어도 쓸 수 없는 값(날짜 1종)이면 종전대로',
+    S.heldCarry(HOLD, CNT(), today, 0, { ok: true, dates: [{ date: today, slots: 5 }], byDate: { [today]: 5 } }), 5);
+}
 
 /* ═══ 3. 배선·정적 가드 ═══ */
 console.log('\n[3] 서버 배선');
@@ -137,6 +149,12 @@ ok('admin/list 가 carryMode·carryHeld 를 내려준다(카드 ⏸ 칩 재료) 
   /carryMode: isCarryHold\(r\)/.test(rt)
   && /carryHeld: carrySumMap === null \? null : heldCarry\(r, cnt, _todayStr/.test(rt)
   && /fetchCarryAppliedSums\(pool, partIds\)/.test(rt));
+ok('★ admin/list 도 heldCarry 에 시트 일정을 넘긴다(시트 공고 = 효과 없는 칩 금지) — 같은 _sch 로 상태도 계산',
+  /const _sch = schedMap \? scheduleFor\(schedMap, r\) : null;/.test(rt)
+  && /heldCarry\(r, cnt, _todayStr, carrySumMap\.get\(r\.id\) \|\| 0, _sch\)/.test(rt));
+ok('★ getPlanOverview: 일정 판정 실패(unknown)면 잔량 계산 안 함(fail-closed)',
+  /isCarryHold\(camp\) && schedule !== 'unknown'/.test(cp)
+  && /heldCarry\(camp, counts, today, carryAppliedSum, schedule\)/.test(cp));
 ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
   /carry_mode\s+-- ★ 098\(코드리뷰 B1\)/.test(rt));
 ok('★ 코드리뷰 M1: 생성(create) INSERT 에도 carry_mode — 발행 시 선택이 조용히 auto 로 떨어지지 않게',

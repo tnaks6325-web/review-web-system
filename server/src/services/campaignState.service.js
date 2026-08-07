@@ -110,6 +110,26 @@ function planOverrideFor(plans, dateStr) {
   if (!PLAN_ENABLED || !plans || !dateStr || plans[dateStr] == null) return null;
   return Math.max(0, Number(plans[dateStr]) || 0);
 }
+
+/**
+ * 시트 일정(063) 경로의 **조절 증감분 누적** — 오늘까지의 조절일들이 시트 계획과 얼마나 달랐는지의 합.
+ * ★★ 이 항이 없으면 095 의 핵심 불변식이 깨진다(코드리뷰가 잡은 실측 회귀): `plannedThrough` 는
+ *   시트 값 그대로 누적되는데 확정만 적으니, "오늘은 5명만"으로 줄인 15명이 **다음 날 자동 이월**
+ *   되어(시트 20 → 35) 축소가 통째로 무력화된다. 반대로 늘린 날은 다음 날에서 그만큼 빼앗는다.
+ *   일건수 경로의 `planned += ov − dl`(dailyQuota)과 같은 항을 **시트 계획을 기준선으로** 계산한 것.
+ * ★ 미래 조절(d > 오늘)은 오늘 정원에 영향을 주지 않는다(일건수 경로와 같은 규칙).
+ */
+function planDeltaThrough(sch, plans, todayStr) {
+  if (!PLAN_ENABLED || !sch || !plans || !todayStr) return 0;
+  let delta = 0;
+  for (const d of Object.keys(plans)) {
+    if (d > todayStr) continue;
+    const ov = planOverrideFor(plans, d);
+    if (ov === null) continue;
+    delta += ov - (Number(sch.byDate && sch.byDate[d]) || 0);
+  }
+  return delta;
+}
 // ── 이월 보류(098) ──
 // carry_mode='hold' 공고는 자동 이월 가산을 멈추고(기본 일건수 + 날짜별 계획만),
 // 미달분은 "보류 잔량"으로 표시되어 관리자가 골라 반영한다(반영 = 날짜별 계획에 얹기).
@@ -209,14 +229,25 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const submittedBefore = Number(counts.submittedBeforeToday) || 0;
 
   // 시트 일정이 있으면 그 일정이 이월까지 계산한다(063). 없으면 daily_limit 경로가 이월(066)
-  // + 날짜별 계획 조절(095 — counts.plans, 시트 일정 캠페인에는 미적용).
+  // + 날짜별 계획 조절(095 — counts.plans). ★ 2026-08-07부터 **시트 일정 캠페인에도 적용**된다
+  //   (조절한 날짜만 — 아래 ovToday 주석 참조).
+  // 오늘이 명시 조절일인지 — 판정은 dailyQuota 와 같은 planOverrideFor 하나(사본 금지: 정원과
+  //   표시가 갈리면 "카드는 20인데 참여는 40" 이 된다).
+  // ★★ 시트 일정 캠페인도 포함한다(사용자 확정 2026-08-07): **조절한 날짜만** 리뷰웹이 이기고
+  //   조절하지 않은 날은 종전대로 시트가 정한다 — 진실원본이 통째로 넘어오지 않아, 시트를 계속
+  //   고쳐 쓰는 운영과 공존한다. 조절을 해제하면 그 날은 즉시 시트 값으로 복귀한다.
+  const ovToday = planOverrideFor(counts.plans || null, todayStr);
   const quota = sch
-    ? Math.max(0, Math.min(plannedThrough(sch, todayStr), sch.totalSlots) - submittedBefore)
+    ? (ovToday !== null
+        // 명시 조절일 = 그 값이 그날의 전부(095 규율 — 이월을 얹지도 빼지도 않는다).
+        //   ★ 총량 clamp 는 유지: 시트 총건수를 넘겨 열 수는 없다(095 불변식 ②).
+        ? Math.max(0, Math.min(ovToday, (Number(sch.totalSlots) || 0) - submittedBefore))
+        // ★★ 조절 증감분(planDeltaThrough)을 계획 누적에 반영해야 "오늘은 5명만"의 축소분이
+        //   다음 날 자동 이월되지 않는다(095 불변식 — 없으면 시트 20인 다음 날이 35로 열린다).
+        : Math.max(0, Math.min(plannedThrough(sch, todayStr) + planDeltaThrough(sch, counts.plans || null, todayStr),
+            sch.totalSlots) - submittedBefore))
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
         { today: todayStr, plans: counts.plans || null });
-  // 오늘이 명시 조절일인지(관리자 표시용) — 시트 일정 캠페인·킬스위치 OFF면 항상 null.
-  //   판정은 dailyQuota 와 같은 planOverrideFor 하나(사본 금지 — 정원과 표시가 갈리면 안 된다).
-  const ovToday = sch ? null : planOverrideFor(counts.plans || null, todayStr);
   const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
@@ -230,9 +261,14 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     // 이 값이 없으면 "일건수를 20으로 설정했는데 25로 보인다"가 버그로 오해된다.
     // ★ 095: 명시 조절일은 이월이 아니라 "계획 자체"라 carryAdded=0 — 대신 todayPlanned로 말한다
     //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
-    carryAdded: ovToday !== null ? 0 : Math.max(0, quota - (Number(c.daily_limit) || 0)),
+    // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
+    //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
+    carryAdded: ovToday !== null ? 0
+      : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : (Number(c.daily_limit) || 0))),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
+    // 카드가 "기본 N" 을 시트 기준으로 말할 수 있게 그날 시트 계획을 함께 싣는다(시트 공고만).
+    todayBaseline: sch ? (Number(sch.byDate[todayStr]) || 0) : (Number(c.daily_limit) || 0),
     opensAt: opensAt ? opensAt.toISOString() : null,
     closesAt: closesAt ? closesAt.toISOString() : null,
     cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
@@ -269,7 +305,10 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     return { ...payload, state: 'preopen', opensAt: openUtc.toISOString() };
   }
   // 마감일 경과 = 종료. ★ status에 영속하지 않는다 — 시트에 날짜가 추가되면 자동 재개.
-  if (sch && todayStr > sch.lastDate) {
+  // ★★ 오늘 명시 조절값(1명 이상)이 있으면 그것이 우선한다 — 사람이 그날 인원을 정했는데
+  //   화면이 조용히 무시하면 "저장했는데 안 열린다"(조용한 no-op)가 된다. 0명 조절은 '안 연다'는
+  //   뜻이므로 그대로 종료 표기를 유지한다.
+  if (sch && todayStr > sch.lastDate && !(ovToday > 0)) {
     return { ...payload, state: 'closed', stateReason: 'schedule_ended' };
   }
 
@@ -287,7 +326,9 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
 
   // 휴무일(시트에 그 날짜 행이 0개) = 그날은 열지 않음. 못 채운 물량은 사라지지 않고
   // 다음 진행일 정원에 합산된다(plannedThrough가 휴무일엔 증가하지 않기 때문).
-  if (sch && !sch.byDate[todayStr]) {
+  // ★ 위 종료 판정과 같은 규율 — 오늘 명시 조절값(1명 이상)이 있으면 휴무일이어도 연다
+  //   ("오늘은 진행일이 아니지만 10명만 더 받자"가 [📅 인원]의 정상 사용례).
+  if (sch && !sch.byDate[todayStr] && !(ovToday > 0)) {
     const nw = nextWorkDate(sch, todayStr);
     // 다음 진행일까지 카운트다운을 줄 수 있게 opensAt을 그날 오픈 시각으로 —
     // 주말 하루 공백이든, 종료 후 새 블록이 붙은 긴 공백이든 같은 표기로 "다시 열림"이 보인다.
@@ -400,8 +441,13 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
  * ★ null = "계산 불가"(보류 아님·기준선 모름·일건수 0) — 화면은 0으로 꾸미지 않고 칩을 숨기거나
  *   "조회 실패"를 말한다. 잔량은 표시·반영 참고값일 뿐, 정원 자체는 dailyQuota(계획표)가 정한다.
  */
-function heldCarry(c, counts, todayStr, appliedSum = 0) {
+function heldCarry(c, counts, todayStr, appliedSum = 0, schedule = null) {
   if (!isCarryHold(c)) return null;
+  // ★★ 시트 일정 캠페인(063)은 정원을 시트 계획(plannedThrough)이 정하므로 '자동 이월 가산 멈춤'
+  //   자체가 적용되지 않는다 = 잔량 개념이 없다. 여기서 숫자를 돌려주면 카드에 **효과 없는**
+  //   ⏸ 보류 칩이 떠서 눌러도 아무 일도 안 하는 막다른 길이 된다(조용한 거짓말 금지).
+  //   그 공고의 이월 조절은 [📅 인원]의 날짜별 조절이 담당한다.
+  if (isUsableSchedule(schedule)) return null;
   const dl = Number(c.daily_limit) || 0;
   const hold = counts && counts.hold;
   if (!hold || !hold.startDate || !todayStr || dl <= 0) return null;
