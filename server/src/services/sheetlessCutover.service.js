@@ -33,7 +33,8 @@ const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었�
 //  state: 'pass' | 'fail' | 'unknown'  — pass 가 아니면 전부 잠금(fail-closed)
 /**
  * @param {string} [fix] 그 자리에서 누를 수 있는 조치 —
- *   `'refresh'` = 시트 새로고침(repair) · `'audit'` = 반영 점검 화면 열기.
+ *   `'refresh'` = 시트 새로고침(repair) · `'backfill'` = 표에 준비 자리 채우기(slot-backfill)
+ *   · `'audit'` = 반영 점검 화면 열기(그 자리에서 못 고치는 것만).
  *   ★★ 막힌 항목이 **다른 화면 이름만 말하고 끝나면 안 된다**(실측: 안내가 가리킨
  *      "시트 데이터 반영 점검 화면"은 nav 어디에도 없어 주소를 직접 쳐야 열렸다).
  *      무엇을 누를지는 **서버가 말하고** 화면은 그대로 그린다(프론트 재판정 0 규율).
@@ -62,8 +63,14 @@ async function _checkSheetRows(db, tab) {
   const prepared = read.prepared.length;
   const board = Number(tab.boardRows) || 0;
   if (prepared > board) {
+    /* ★★ 조치는 **그 자리에서** 끝나야 한다(운영 실측 2026-08-07): 종전 안내는 "반영 점검 화면의
+     *    시트 우위 점검에서" 였는데, 그 화면엔 비슷한 이름의 처리가 둘이라(위쪽 [반영]=repair /
+     *    아래쪽 [자리 추가]=slot-backfill) 담당자가 17건 전부 **위쪽을 눌러** 아무것도 안 채워졌다.
+     *    repair 는 `review_index` 에 있는 행만 옮기는데, 여기서 부족한 것은 **이름 없는 준비 자리**라
+     *    파서가 버려 애초에 `review_index` 에 없다 → repair 로는 구조적으로 못 채운다. */
     return _chk('sheet_rows', label, 'fail', `시트 ${prepared}줄 · 시스템 표 ${board}줄 (${prepared - board}줄 부족)`,
-      '[반영 점검 열기] 의 시트 우위 점검에서 표를 먼저 채우세요 — 지금 끊으면 그 줄들이 사라집니다.', 'audit');
+      '아래 [표에 자리 채우기] 를 누르면 그 줄들을 표에 만들고 다시 점검합니다 — 지금 끊으면 그 줄들이 사라집니다.',
+      'backfill');
   }
   return _chk('sheet_rows', label, 'pass', `시트 ${prepared}줄 · 시스템 표 ${board}줄`);
 }

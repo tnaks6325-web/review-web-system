@@ -5983,6 +5983,8 @@ function _coFixBtn(c,i){
   if(c.state==='pass' || !c.fix) return '';
   if(c.fix==='refresh') return `<div class="cofix"><button class="btn" onclick="_coRefresh(${i})">↻ 시트 새로고침</button>
     <span class="comuted">지금 구글시트를 다시 읽어 온 뒤 자동으로 재점검합니다.</span></div>`;
+  if(c.fix==='backfill') return `<div class="cofix"><button class="btn" onclick="_coBackfill(${i})">➕ 표에 자리 채우기</button>
+    <span class="comuted">시트에 준비된 줄을 시스템 표에 만듭니다 — 시트는 건드리지 않습니다.</span></div>`;
   if(c.fix==='audit')   return `<div class="cofix"><button class="btn" onclick="_coAudit()">↗ 반영 점검 열기</button></div>`;
   return '';
 }
@@ -6030,6 +6032,27 @@ async function _coRefresh(i){
     if(!j || j.ok===false){ STATE.co.checks[k] = { error:(j&&(j.error||j.message))||'새로고침 실패' }; _coRows(); return; }
   }catch(e){ STATE.co.checks[k] = { error:'새로고침 실패: '+(e.message||'') }; _coRows(); return; }
   await _coCheck(i);   // ★ 새로고침만 하고 끝내지 않는다 — 바로 다시 점검해 결과를 보여준다
+}
+/* ★★ 준비 자리 채우기 — **그 자리에서** 끝낸다(실측 사고 2026-08-07).
+ *    종전엔 "반영 점검 화면의 시트 우위 점검에서" 라고만 안내했는데, 그 화면엔 비슷한 이름의
+ *    처리가 둘이라(위쪽 [반영]=repair / 아래쪽 [자리 추가]=slot-backfill) 담당자가 17건 전부
+ *    위쪽을 눌러 **아무것도 안 채워졌다**. 여기서는 고를 여지 없이 맞는 것 하나만 부른다.
+ *  ★ 기존 도구 재사용(신규 엔드포인트 0) · 시트 무접촉 · 중복 실행 안전(ON CONFLICT DO NOTHING). */
+async function _coBackfill(i){
+  const t = STATE.co.items[i]; if(!t) return;
+  const k = t.sheetId+'\u0000'+t.tabName;
+  const ck = STATE.co.checks[k] || {};
+  const sr = (ck.checks||[]).find(c=>c.key==='sheet_rows');
+  // 점검 결과 문장이 곧 미리보기다 — 몇 줄이 생기는지 보여주고 확인받는다(조용한 대량 생성 금지).
+  if(!confirm(`「${t.displayName||t.tabName}」\n\n${sr&&sr.detail?sr.detail+'\n\n':''}시트에 준비된 줄을 시스템 표에 만듭니다.\n구글시트는 건드리지 않고, 여러 번 눌러도 중복 생성되지 않습니다.\n\n진행할까요?`)) return;
+  STATE.co.checks[k] = { loading:true, note:'표에 자리를 만드는 중…' }; _coRows();
+  try{
+    const j = await api('/api/trackb/sheet-sync/slot-backfill',{method:'POST',
+      body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName, dryRun:false })});
+    if(!j || j.ok===false){ STATE.co.checks[k] = { error:(j&&(j.error||j.message))||'자리 채우기 실패' }; _coRows(); return; }
+    if(typeof j.boardRowsAfter==='number') t.boardRows = j.boardRowsAfter;
+  }catch(e){ STATE.co.checks[k] = { error:'자리 채우기 실패: '+(e.message||'') }; _coRows(); return; }
+  await _coCheck(i);   // ★ 채우기만 하고 끝내지 않는다
 }
 async function _coCheck(i){
   const t = STATE.co.items[i]; if(!t) return;

@@ -139,9 +139,14 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     restore = stubDeps({ prepared: 10 });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
     ok('시트 준비 줄이 표보다 많으면 잠금', r.canCutover === false && r.blocking.includes('sheet_rows'));
-    ok('막힌 사유에 다음 행동 + 그 자리 조치를 적는다',
-      /표를 먼저 채우세요/.test(r.checks.find(c => c.key === 'sheet_rows').hint)
-      && r.checks.find(c => c.key === 'sheet_rows').fix === 'audit');
+    /* ★★ 실측 사고(2026-08-07): 종전 안내는 "반영 점검 화면의 시트 우위 점검에서" 였는데
+     *    그 화면엔 비슷한 이름의 처리가 둘이라(위쪽 [반영]=repair / 아래쪽 [자리 추가]=slot-backfill)
+     *    담당자가 17건 전부 위쪽을 눌러 **아무것도 안 채워졌다**(repair 는 review_index 에 있는 행만
+     *    옮기는데 여기서 부족한 것은 이름 없는 준비 자리라 애초에 거기 없다).
+     *    → 조치는 **그 자리에서** 끝난다: fix 는 'audit' 이 아니라 'backfill'. */
+    ok('★★ 준비 자리 부족은 그 자리에서 채운다(다른 화면으로 떠넘기지 않는다)',
+      r.checks.find(c => c.key === 'sheet_rows').fix === 'backfill'
+      && /표에 자리 채우기/.test(r.checks.find(c => c.key === 'sheet_rows').hint));
     restore();
 
     // ★★ unknown 도 통과가 아니다 — 이 가드를 풀면 "모르면 열림"이 된다
@@ -705,12 +710,27 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       ok('★★ 새로고침이 필요한 항목엔 [시트 새로고침] 버튼이 붙는다(인덱스만 전달)',
         /_coRefresh\(3\)/.test(ref) && /시트 새로고침/.test(ref));
       ok('★ 다른 화면이 필요한 항목엔 [반영 점검 열기] 버튼', /_coAudit\(\)/.test(aud));
+      const bf = sandbox.__f({ state: 'fail', fix: 'backfill' }, 3);
+      ok('★★ 준비 자리 부족은 [표에 자리 채우기] 버튼이 그 자리에 붙는다(인덱스만 전달)',
+        /_coBackfill\(3\)/.test(bf) && /표에 자리 채우기/.test(bf));
+      ok('★ 그 버튼이 무엇을 하는지 화면이 말한다(시트 무접촉)', /시트는 건드리지 않습니다/.test(bf));
       ok('★ 통과한 항목·조치 없는 항목엔 버튼을 만들지 않는다(눌러도 안 되는 버튼 금지)',
         sandbox.__f({ state: 'pass', fix: 'refresh' }, 3) === ''
         && sandbox.__f({ state: 'fail', fix: null }, 3) === '');
     }
     ok('★★ 새로고침은 기존 반영 도구를 그대로 쓴다(신규 엔드포인트 0) + 끝나면 자동 재점검',
       /_coRefresh[\s\S]{0,700}sheet-sync\/repair/.test(wd) && /_coRefresh[\s\S]{0,900}_coCheck\(i\)/.test(wd));
+    /* ★★ 백필은 **맞는 도구 하나만** 부른다 — 두 도구가 헷갈려 난 사고의 재발 차단.
+     *    repair(=위쪽 [반영])는 review_index 에 있는 행만 옮기므로 이름 없는 준비 자리를 못 채운다. */
+    const bfFn = wd.slice(wd.indexOf('async function _coBackfill'), wd.indexOf('async function _coCheck'));
+    ok('★★ 자리 채우기는 slot-backfill 을 실제 실행한다(dryRun 아님)',
+      /sheet-sync\/slot-backfill/.test(bfFn) && /dryRun:\s*false/.test(bfFn));
+    ok('★★ repair 를 부르지 않는다(그 도구로는 준비 자리를 못 채운다)', !/sheet-sync\/repair/.test(bfFn));
+    ok('★ 몇 줄이 생기는지 보여주고 확인받는다(조용한 대량 생성 금지)',
+      /confirm\(/.test(bfFn) && /sr&&sr\.detail/.test(bfFn));
+    ok('★ 채우고 끝내지 않고 바로 재점검한다', /await _coCheck\(i\)/.test(bfFn));
+    ok('★ 실패 두 경로 모두 사유로 화면을 종결시킨다',
+      (bfFn.match(/자리 채우기 실패/g) || []).length === 2);
     ok('★ 반영 점검 화면으로 가는 길이 화면에 있다(주소 직접 입력 불필요)',
       /_coAudit[\s\S]{0,120}sheet-sync-audit\.html/.test(wd) && /onclick="_coAudit\(\)">↗ 반영 점검</.test(wd));
     ok('★ 안내문이 없는 화면 이름을 가리키지 않는다',
