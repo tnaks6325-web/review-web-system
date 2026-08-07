@@ -204,7 +204,7 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     {
       // 장부 재생성 실패 = 완결로 찍지 않는다(표엔 있는데 검색은 안 되는 상태 차단)
       ledgerMod.rebuildLedgers = async () => { throw new Error('boom'); };
-      const before = calls.written;
+      const before = calls.written, beforeIdent = calls.ident;
       const { db } = makeStub({ exists: true });
       slOrder.__setPoolForTest(db);
       const r = await slOrder.writeOrderToWorktable({
@@ -212,6 +212,9 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       });
       ok('장부 재생성 실패 = 미완결 반환', r.ok === false && r.reason === 'ledger_failed');
       ok('장부 재생성 실패 시 완결 표시하지 않는다', calls.written === before);
+      // ★★ 신원 링크(시트행↔phone8)는 **끝까지 성공했을 때만** — 중간 실패에 남기면 재배정 후
+      //   그 행이 옛 주인에게도 열리는 교차노출이 된다(레포가 이미 겪은 사고).
+      ok('장부 재생성 실패 시 신원 링크도 남기지 않는다', calls.ident === beforeIdent);
     }
     {
       // 열 구성을 모르면 아무 칸에도 못 쓴다 — 조용히 완결시키지 않는다
@@ -278,9 +281,13 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
   {
     const or = srv('src/routes/order.routes.js');
     const orN = noLineComments(or);
-    ok('무시트 접수는 body.sheetless 로 명시(자동 추측 금지)', /req\.body \|\| \{\}\)\.sheetless === true/.test(orN));
+    // ★ 판정식 자체를 고정한다 — 위치만 보면 `false &&` 를 끼워 넣어 무시트 경로를 통째로
+    //   죽여도 통과한다(변이시험 실측). 요청 본문에서만 켜지고 상수로 꺼지지 않아야 한다.
+    ok('무시트 접수는 body.sheetless 로만 켜진다(자동 추측·상수 무력화 금지)',
+      /const wantSheetless = \(\(req\.body \|\| \{\}\)\.sheetless === true \|\| \(req\.body \|\| \{\}\)\.sheetless === 'true'\);/.test(orN));
     ok('무시트 경로는 구글 메타를 조회하지 않는다',
-      orN.indexOf('createSheetlessWorktable') < orN.indexOf('await getSpreadsheetMeta'));
+      orN.indexOf('createSheetlessWorktable') < orN.indexOf('await getSpreadsheetMeta') &&
+      /if \(wantSheetless\) \{/.test(orN));
     // ★★ 사본 0 — campaigns/tab_configs 업서트와 상태 전이는 한 번만 존재해야 한다
     ok('campaigns 업서트는 한 곳뿐', (orN.match(/INSERT INTO campaigns \(sheet_id, campaign_name, sheet_url\)/g) || []).length === 1);
     ok('tab_configs 업서트도 한 곳뿐', (orN.match(/INSERT INTO tab_configs/g) || []).length === 1);
