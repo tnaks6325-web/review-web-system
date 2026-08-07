@@ -135,7 +135,11 @@ ok('C10. ★ 차단·오류 사유는 토스트로 나가지 않는다(모달 �
     const s = stripLine(save);
     const toasts = s.match(/showToast\([\s\S]{0,90}?\)/g) || [];
     const banned = /저장 오류|게시 불가|중복됐어요|입력해주세요|선택해주세요|저장하지 못했습니다/;
-    return toasts.length <= 3 && toasts.every(t => !banned.test(t));
+    // 상한 4 = 정당한 안내 토스트 4개(사진 업로드 대기(#600)·작업오더 연결 실패 2·폴백 성공).
+    //   #600 머지로 3→4가 되어 이 가드가 main 에서 이미 빨간 상태였다(095 병합 중 발견·갱신).
+    //   검사 의미는 불변 — 본질은 "차단·오류 사유 문구가 토스트로 나가지 않는다"(banned)이고
+    //   개수 상한은 토스트 남발 방지 백스톱이다.
+    return toasts.length <= 4 && toasts.every(t => !banned.test(t));
   })());
 
 console.log('\n── D. 바뀐 항목 비교기 ──');
