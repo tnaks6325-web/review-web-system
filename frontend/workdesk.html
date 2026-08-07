@@ -6007,15 +6007,28 @@ async function _coCutover(i){
   const t = STATE.co.items[i]; if(!t) return;
   // ★ 타이핑 확정은 없앴다(사용자 확정) — 대신 확인창이 **작업 이름을 문장에 넣어** 보여준다.
   //   옆 줄을 잘못 눌렀다면 여기서 알아챈다. 되돌리기는 [재연결]로 언제든 가능.
-  if(!confirm(`「${t.displayName||t.tabName}」 의 구글시트 연결을 끊습니다.\n\n이후 이 작업은 시트를 읽지도 쓰지도 않습니다.\n되돌리려면 [재연결]을 누르면 됩니다.\n\n진행할까요?`)) return;
+  // ★ 아직 시트에 못 쓴 주문이 있으면 **그것을 어떻게 하는지** 확인창이 먼저 말한다
+  //   (시트에 쓰는 게 아니라 시스템 표로 옮긴다 — 사용자 확정 "B로 진행").
+  const pend = (STATE.co.checks[t.sheetId+'\u0000'+t.tabName]||{}).checks || [];
+  const pd = pend.find(c => c.key==='pending' && /미반영 주문/.test(c.detail||''));
+  const pline = pd ? `\n${pd.detail} — 시트가 아니라 시스템 표로 옮깁니다.\n` : '';
+  if(!confirm(`「${t.displayName||t.tabName}」 의 구글시트 연결을 끊습니다.\n${pline}\n이후 이 작업은 시트를 읽지도 쓰지도 않습니다.\n되돌리려면 [재연결]을 누르면 됩니다.\n\n진행할까요?`)) return;
   try{
     const j = await api('/api/trackb/sheetless/cutover',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName })});
     if(!j || j.ok===false){ alert((j&&(j.error||j.message))||'이관하지 못했습니다.'); await _coCheck(i); return; }
     // ★ 부수효과(장부 재생성·시트 안내문) 실패는 조용히 넘기지 않는다 — 이관은 됐지만 알려야 한다.
     const warn = [];
+    const h = j.handoff;
+    // ★ 인계 결과는 성공도 말한다 — "몇 건을 어디로 옮겼는지" 모르면 담당자가 시트를 다시 확인하러 간다.
+    let done = '이관했습니다.';
+    if(h && h.written) done += `\n미반영 주문 ${h.written}건을 시스템 표로 옮겼습니다.`;
+    if(h && h.ok===false) warn.push('미반영 주문 인계 확인 실패: '+(h.message||h.reason||''));
+    if(h && h.failed) warn.push(`미반영 주문 ${h.failed}건을 옮기지 못했습니다${h.reasons?(' ('+h.reasons.join(', ')+')'):''} — 잠시 뒤 복구 작업이 다시 시도합니다.`);
+    if(h && h.blocked) warn.push(`미반영 주문 ${h.blocked}건은 배정된 줄이 없어 옮기지 못했습니다.`);
+    if(h && h.truncated) warn.push('미반영 주문이 많아 일부만 옮겼습니다 — 나머지는 복구 작업이 이어서 처리합니다.');
     if(j.ledger && j.ledger.ok===false) warn.push('장부 재생성 실패: '+(j.ledger.message||j.ledger.reason));
     if(j.notice && j.notice.ok===false) warn.push('시트 안내문 기입 실패: '+(j.notice.message||j.notice.skipped||''));
-    alert('이관했습니다.' + (warn.length?('\n\n'+warn.join('\n')):''));
+    alert(done + (warn.length?('\n\n'+warn.join('\n')):''));
     delete STATE.co.checks[t.sheetId+'\u0000'+t.tabName];
     await _coLoad();
   }catch(e){ alert('이관 실패: '+(e.message||'')); }
