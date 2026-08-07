@@ -626,7 +626,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 ### 시트 데이터 반영 점검(sheet-sync audit) — 등록 작업 전수 반영사슬 진단·수리
 - **목적**: 등록된 작업의 베이스 시트 값이 "시트 → 검색인덱스(review_index) → 작업보드(campaign_participants)" 사슬 끝까지 반영됐는지 전수 진단(예: 7/20 이전 등록 작업 미반영 조사). 페이지 = `frontend/sheet-sync-audit.html`(관리자 로그인, 기준일 필터·[반영] 버튼).
 - **API**: `GET /api/trackb/sheet-sync/audit?before=YYYY-MM-DD`(adminOrMaster, 읽기 전용·시트 API 무접촉) + `POST /api/trackb/sheet-sync/repair {sheetId,tabName}`. ★ **분모는 `tab_configs`(등록 작업 전체)** — `listActiveTabs`는 raw∩index에서 시작해 사슬이 끊긴 탭이 분모에서 빠진다(projectionCoverage와 같은 눈속임 구조). 등록일 = `campaigns.created_at` 시트 최솟값, **등록일 미상은 컷오프에서 제외하지 않고 `regUnknown`으로 동봉**(조용한 누락 금지).
-- ★ **수리는 신규 쓰기 경로 0** — 기존 반영 함수 3개만 `mirrorOneSheet(force) → buildOneSheet → projectTab` 순서로 재사용(사본 금지). 한 단계 실패·빌드 락이 다음 단계를 죽이지 않고 단계별 결과를 그대로 보고. ★ `boardRows > indexRows`(수동/작업표 스켈레톤 행)는 플래그가 아니라 `boardExtra` 정보만(오탐 금지). 회귀가드 `tests/sheetSyncAudit.test.js`(26케이스).
+- ★ **수리는 신규 쓰기 경로 0** — 기존 반영 함수 3개만 `mirrorOneSheet(force) → buildOneSheet → projectTab` 순서로 재사용(사본 금지). 한 단계 실패·빌드 락이 다음 단계를 죽이지 않고 단계별 결과를 그대로 보고. ★ `boardRows > indexRows`(수동/작업표 스켈레톤 행)는 플래그가 아니라 `boardExtra` 정보만(오탐 금지).
+- ★★ **건수는 `dataRows`(헤더 아래 값 있는 행) — `raw_sheet_tabs.row_count` 를 화면 숫자로 쓰지 말 것**: 그 값은 상단 캠페인 정보(9행 남짓)·빈 줄·헤더까지 세서 **15건 작업이 33행**으로 보인다(실측 오해 신고). 헤더 탐지는 `utils/sheetHeader` 단일 출처, 세는 SQL 은 `jsonb_array_elements_text(cells)` + `btrim`. **문제 탭만** 계산(`_DETAIL_CAP`, 초과는 `detailCapped` 고지) · gid 없으면 계산하지 않고 null(숫자를 지어내지 않는다).
+- ★★ **"검색인덱스에 없음"은 어디에 없는지까지 말한다** — 등록부 = `index_master`. 여기 없으면 ① 리뷰어 검색·구매양식 제출이 막히고 ② `listActiveTabs` 가 이 등록부를 게이트로 쓰므로 **리뷰웹시스템[3버전] 작업목록에서도 빠진다**. 원인 4분기: `index_archived`(아카이브) > `index_renamed`(시트 실제 탭명 ≠ 등록 탭명) > `index_sheet_never_built`(그 시트가 등록부에 한 줄도 없음) > `index_missing`(+같은 시트의 등록 탭 예시).
+- ★★ **리네임 신호는 RAW 미러의 현재 탭 이름으로 판정**(index_master 에서 같은 gid 찾기 금지) — 본 쿼리가 `tab_name = … OR tab_gid = …` 로 **gid 우선 재매칭**을 하므로, 인덱스에 같은 gid 행이 있으면 애초에 `idxStatus` 가 채워져 미등록 분기에 오지 않는다. **진짜 PG 검증이 그 분기가 도달 불가임을 잡아냈다**(되살리지 말 것 — 회귀가드가 고정).
+- ★★ **소스에 리터럴 NUL 금지(이 작업에서 또 밟음)**: Map 복합키 구분자를 문자 그대로 넣으면 git 이 파일을 **바이너리로 취급**해 grep·grep 기반 가드가 그 파일에서 통째로 무력화된다 → `'\u0000'` **이스케이프 표기**로 쓸 것.
+- 회귀가드 `tests/sheetSyncAudit.test.js`(35케이스) + `tests/sheetSyncAuditPg.test.js`(**진짜 PG16** 7케이스 — 미러 33행에서 작업 15건 판독 · gid 재매칭으로 미등록 분기 도달 불가 증명 · 리네임/아카이브 분기 · 컷오프 날짜 비교).
 
 ### ★★ 시트 우위 동기화 1차 (점검 → 슬롯 백필 → 공고 정원 교정) — `sheetSlotSync.service.js`
 - **사고(2026-08-07 우레온 100건)**: 시트엔 100행이 준비돼 있는데 리뷰웹 표는 **20행**에서 끝나고 공고는 "옵션 1종 · 전체 마감". 원인 = **검색인덱스 파서가 이름 없는 행을 버린다**(`columnResolver` `if (!name) return null`) → 구매일자·리뷰옵션만 적힌 준비 행 80개는 표에 **자리조차 생기지 않는다**(063 이 RAW 미러에서 일정을 읽는 이유와 같은 구조). 정원 잠금은 별개 층 = `campaign_options.recruit_total` 소진.

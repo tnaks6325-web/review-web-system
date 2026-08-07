@@ -186,7 +186,7 @@ async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP
           logger.warn(`[sheetSlotSync] 기존 자리 조회 실패: ${e.message}`);
           return { rows: [] };
         });
-    for (const r of sq) seqMap.set(r.sheetId + ' ' + r.tabName, new Set((r.seqs || []).map(Number)));
+    for (const r of sq) seqMap.set(r.sheetId + '\u0000' + r.tabName, new Set((r.seqs || []).map(Number)));
   }
 
   const quotaMap = await _loadCampaignQuota(db, scan);
@@ -194,7 +194,7 @@ async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP
   const items = [];
   for (const t of scan) {
     const read = await readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid, now });
-    const key = t.sheetId + ' ' + t.tabName;
+    const key = t.sheetId + '\u0000' + t.tabName;
     const have = seqMap.get(key) || new Set();
     const missing = read.ok ? read.prepared.filter(p => !have.has(Number(p.seq))) : [];
     const camp = quotaMap.get(key) || null;
@@ -255,7 +255,7 @@ async function _loadCampaignQuota(db, tabs) {
       const hit = rows.find(r => r.sheetId === t.sheetId
         && ((r.tabGid && String(r.tabGid) === String(t.tabGid)) || r.tabName === t.tabName));
       if (hit) {
-        out.set(t.sheetId + ' ' + t.tabName, {
+        out.set(t.sheetId + '\u0000' + t.tabName, {
           id: hit.id, title: hit.title, status: hit.status,
           participationMode: !!hit.participationMode,
           recruitTotal: Number(hit.recruitTotal) || 0, dailyLimit: Number(hit.dailyLimit) || 0,
@@ -374,7 +374,7 @@ async function applyQuotaFix({ sheetId, tabName, campaignId, by = 'sheet-slot-sy
   if (!target) return { ok: false, error: 'empty_board' };
 
   const quotaMap = await _loadCampaignQuota(db, [{ sheetId, tabName, tabGid: null }]);
-  let camp = quotaMap.get(sheetId + ' ' + tabName) || null;
+  let camp = quotaMap.get(sheetId + '\u0000' + tabName) || null;
   if (!camp) {
     // gid 로만 연결된 공고 — 탭의 gid 를 구해 한 번 더 찾는다.
     const { rows: g } = await db.query(
@@ -382,7 +382,7 @@ async function applyQuotaFix({ sheetId, tabName, campaignId, by = 'sheet-slot-sy
       [sheetId, tabName]);
     if (g.length && g[0].gid) {
       const m2 = await _loadCampaignQuota(db, [{ sheetId, tabName, tabGid: g[0].gid }]);
-      camp = m2.get(sheetId + ' ' + tabName) || null;
+      camp = m2.get(sheetId + '\u0000' + tabName) || null;
     }
   }
   if (!camp) return { ok: false, error: 'campaign_not_linked' };

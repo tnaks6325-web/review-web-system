@@ -70,7 +70,9 @@
     <table>
       <thead><tr>
         <th>상태</th><th>작업명</th><th>등록일</th>
-        <th class="num">시트(RAW)행</th><th class="num">인덱스행</th><th class="num">작업보드행</th>
+        <th class="num" title="시트 헤더 아래에서 값이 있는 행 = 실제 작업 건수(상단 캠페인 정보·헤더 줄 제외)">시트 작업건수</th>
+        <th class="num" title="리뷰어 검색·구매양식 제출의 재료(review_index)">검색인덱스</th>
+        <th class="num" title="리뷰웹시스템[3버전] 작업보드 표의 행">작업보드</th>
         <th>진단</th><th>처리</th>
       </tr></thead>
       <tbody id="tbody"><tr><td colspan="8" style="color:var(--t2)">위에서 [점검 실행]을 눌러주세요.</td></tr></tbody>
@@ -167,7 +169,12 @@
     document.getElementById('summary').innerHTML =
       '점검 대상 <b>' + ITEMS.length + '</b>개 작업 중 문제 <b style="color:' + (flagged.length ? 'var(--err)' : 'var(--ok)') + '">' + flagged.length + '</b>개'
       + (meta.before ? ' · 기준: <b>' + esc(meta.before) + '</b> 이전 등록(등록일 미상 포함)' : ' · 전체 작업')
-      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다(상한 초과)</b>' : '');
+      + (meta.detailCapped ? ' · <b style="color:var(--warn)">⚠ 문제 탭이 많아 일부만 정밀 진단됨</b>' : '')
+      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다(상한 초과)</b>' : '')
+      + '<div style="margin-top:6px; color:var(--t2); font-size:12px">'
+      + '‘검색인덱스’ = 리뷰어가 이름·전화로 자기 작업을 찾고 구매양식을 내는 재료입니다. '
+      + '리뷰웹시스템[3버전]의 작업목록도 이 등록부를 기준으로 만들어지므로, 여기 없으면 <b>리뷰어 검색·제출과 3버전 작업목록에서 동시에 빠집니다.</b>'
+      + '</div>';
     document.getElementById('btnRepairAll').style.display = flagged.length ? 'inline-block' : 'none';
 
     const tb = document.getElementById('tbody');
@@ -177,7 +184,10 @@
       + '<td>' + sevTag(it.severity) + '</td>'
       + '<td><b>' + esc(it.displayName || it.tabName) + '</b><div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div></td>'
       + '<td>' + (it.regUnknown ? '<span style="color:var(--warn)">알 수 없음</span>' : esc(fmtDate(it.registeredAt))) + '</td>'
-      + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">없음</span>' : it.rawRows) + '</td>'
+      // 시트 작업건수 = 헤더 아래 값이 있는 행(실제 작업). 미러 행 수(상단 정보·헤더 포함)는 참고로만.
+      + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">미러 없음</span>'
+          : (it.dataRows != null ? '<b>' + it.dataRows + '</b><div class="mono">미러 ' + it.rawRows + '행</div>'
+                                 : '<span style="color:var(--t2)">미러 ' + it.rawRows + '행</span>')) + '</td>'
       + '<td class="num">' + it.indexRows + (it.idxStatus && it.idxStatus !== 'active' ? '<div class="mono">' + esc(it.idxStatus) + '</div>' : '') + '</td>'
       + '<td class="num">' + it.boardRows + (it.boardExtra ? '<div class="mono">(+' + it.boardExtra + ' 수동/작업표)</div>' : '') + '</td>'
       + '<td class="reason">' + esc(it.reasonKo) + '<div class="stepres" id="res' + i + '"></div></td>'
