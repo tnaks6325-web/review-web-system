@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>모집공고 [저장] 반응 시안 — 리뷰웹시스템[3버전]</title>
+<style>
+  /* 실물 재현 목업이라 라이트 고정 — 다크에서 색이 뒤집히면 "실제 화면과 같다"가 깨진다. */
+  :root{ color-scheme:light;
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --p:#3182F6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e9edf6;color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;
+       font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+       font-variant-numeric:tabular-nums}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 18px 120px}
+
+  header.doc{padding:40px 0 4px}
+  .eyebrow{font-size:.72rem;font-weight:800;letter-spacing:.13em;color:var(--accent)}
+  h1{font-size:clamp(1.4rem,3.2vw,1.95rem);font-weight:800;letter-spacing:-.02em;margin:7px 0}
+  p.lead{color:var(--muted);font-size:.9rem;max-width:860px}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+  .chip{font-size:.7rem;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+  .chip b{color:var(--ink)}
+
+  section{margin-top:46px}
+  .sec-label{font-size:.7rem;font-weight:800;letter-spacing:.12em;color:var(--accent);margin-bottom:3px}
+  h2{font-size:1.16rem;font-weight:800;letter-spacing:-.015em}
+  h3{font-size:.95rem;font-weight:800;margin:22px 0 8px}
+  p.desc{color:var(--muted);font-size:.83rem;margin-top:7px;max-width:920px}
+  p.desc b{color:var(--ink)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78em;background:#eef2f8;border:1px solid var(--line);
+       border-radius:5px;padding:1px 5px;color:#334155}
+
+  .callout{margin-top:14px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+           border-radius:11px;padding:12px 15px;font-size:.82rem;color:var(--muted)}
+  .callout b{color:var(--ink)}
+  .callout.warn{border-left-color:#f59e0b;background:#fffdf7}
+  .callout.bad{border-left-color:var(--bad);background:#fdf5f5}
+  .callout.ok{border-left-color:var(--safe);background:#f7fdf9}
+
+  /* ══ 브라우저 프레임 ══ */
+  .browser{margin-top:16px;border-radius:14px;overflow:hidden;background:var(--paper);
+           box-shadow:0 18px 44px rgba(16,24,40,.16);border:1px solid #d8dfe9}
+  .bbar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:#e7ecf3;border-bottom:1px solid #d8dfe9}
+  .bdot{width:10px;height:10px;border-radius:50%;background:#cfd6e0}
+  .burl{flex:1;margin-left:8px;background:#fff;border:1px solid #dbe2ec;border-radius:7px;padding:3px 10px;
+        font-size:.68rem;color:var(--faint)}
+  .bview{position:relative;height:430px;overflow:hidden;background:var(--paper)}
+
+  /* 뒤 배경(모집공고 카드 목록 축약) */
+  .bgtop{display:flex;align-items:center;gap:10px;padding:9px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+  .bglogo{font-size:12.5px;font-weight:800}
+  .bglogo .tag{font-size:9.5px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);
+               padding:2px 8px;border-radius:999px;margin-left:7px}
+  .bgnav{display:flex;gap:2px;margin-left:6px;background:var(--card2);border-radius:9px;padding:3px}
+  .bgnb{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:7px;color:var(--muted)}
+  .bgnb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .bggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 16px}
+  .bgcard{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .bgthumb{height:64px;background:linear-gradient(135deg,#e8eef8,#dbe4f2)}
+  .bgcard .t{font-size:10.5px;font-weight:700;padding:7px 9px;color:#475569;line-height:1.35;
+             display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;height:36px}
+  .bgcard .g{height:5px;margin:0 9px 9px;border-radius:3px;background:#e8edf5;position:relative;overflow:hidden}
+  .bgcard .g i{position:absolute;inset:0 auto 0 0;width:62%;background:var(--p)}
+  .bgcard.hi{outline:2px solid var(--p);outline-offset:-2px;box-shadow:0 0 0 4px rgba(49,130,246,.14)}
+  .bgcard.hi .g i{width:78%;transition:width .5s ease}
+
+  /* ══ 모달 재현 (recruit-modal.js 껍데기 규칙 그대로) ══ */
+  .ovl{position:absolute;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;
+       padding:16px;z-index:5000;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  .ovl.xray{background:rgba(15,23,42,.16);backdrop-filter:none;-webkit-backdrop-filter:none}
+  .ovl.gone{display:none}
+  .mbox{background:#fff;border-radius:18px;width:100%;max-width:520px;max-height:100%;box-shadow:0 8px 48px rgba(15,23,42,.22);
+        overflow:hidden;display:flex;flex-direction:column}
+  .ovl.xray .mbox{opacity:.35}
+  .mhead{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid #E2E8F0;
+         background:linear-gradient(135deg,#f8faff,#f0f4ff)}
+  .mhead h3{font-size:.9rem;font-weight:800}
+  .mx{width:28px;height:28px;border-radius:50%;background:rgba(15,23,42,.06);border:1px solid #E2E8F0;color:#475569;
+      font-size:.8rem;line-height:1;cursor:pointer}
+  .mbody{padding:14px 18px;overflow-y:auto;flex:1;min-height:0}
+  .fgroup{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+  .flabel{font-size:.74rem;font-weight:700;color:#475569}
+  .finput{padding:7px 10px;border:1.5px solid #E2E8F0;border-radius:8px;font-size:.78rem;color:#0F172A;font-family:inherit;width:100%}
+  .finput:focus{outline:none;border-color:var(--p)}
+  .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .chkbox{margin-top:4px;border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fbfcfe}
+  .chkbox .h{font-size:.72rem;font-weight:800;color:#334155;margin-bottom:6px}
+  .chk{font-size:.71rem;font-weight:700;border-radius:7px;padding:5px 9px;margin-top:4px}
+  .chk.ok{background:#ecfdf3;color:#12703a;border:1px solid #b6ecc8}
+  .chk.err{background:#fdf0f0;color:#b42318;border:1px solid #f4c3c3}
+  .chk.warn{background:#fdf6ec;color:#93540a;border:1px solid #f2ddb6}
+  .chk.err.blink{animation:chkBlink 1.1s ease 2}
+  @keyframes chkBlink{0%,100%{box-shadow:0 0 0 0 rgba(229,72,77,0)}45%{box-shadow:0 0 0 4px rgba(229,72,77,.28)}}
+  .mfoot{padding:11px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #E2E8F0;background:#fff;position:relative}
+  .mfoot.shake{animation:shk .38s ease}
+  @keyframes shk{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+
+  /* 버튼 */
+  .btn{padding:8px 18px;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;
+       gap:6px;font-family:inherit;border:1.5px solid #E2E8F0;background:#fff;color:#475569;transition:all .13s}
+  .btn:hover{background:#f6f8fb}
+  .btn.pri{background:var(--p);border-color:var(--p);color:#fff;box-shadow:0 1px 2px rgba(49,130,246,.35)}
+  .btn.pri:hover{background:#1b6fe0;border-color:#1b6fe0;box-shadow:0 3px 10px rgba(49,130,246,.34);transform:translateY(-1px)}
+  .btn.pri:active{transform:translateY(0);background:#1560c8;box-shadow:0 1px 2px rgba(49,130,246,.3)}
+  .btn.pri:focus-visible{outline:3px solid rgba(49,130,246,.35);outline-offset:2px}
+  .btn[disabled]{cursor:default;opacity:.85;transform:none!important;box-shadow:none!important}
+  .btn.pri.busy{background:#7fb0f6;border-color:#7fb0f6}
+  .btn.pri.done{background:var(--safe);border-color:var(--safe)}
+  .spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;
+        display:inline-block;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* 모달 안 인라인 차단 사유 (토스트 의존 제거) */
+  .blockbar{position:absolute;left:18px;right:18px;bottom:calc(100% + 6px);background:#fdf0f0;border:1px solid #f4c3c3;
+            border-left:4px solid var(--bad);border-radius:9px;padding:8px 11px;font-size:.74rem;font-weight:700;color:#b42318;
+            display:flex;align-items:center;gap:7px;box-shadow:0 4px 14px rgba(180,35,24,.12)}
+  .blockbar .go{margin-left:auto;font-size:.7rem;font-weight:800;color:#b42318;background:#fff;border:1px solid #f4c3c3;
+                border-radius:6px;padding:3px 8px;cursor:pointer}
+
+  /* 옛 토스트(.wdtoast) — 모달 뒤에 깔리는 그 물건 */
+  .wdtoast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);z-index:60;background:#101828;color:#fff;
+           font-size:.75rem;font-weight:700;padding:8px 16px;border-radius:9px;opacity:0;transition:opacity .25s;pointer-events:none}
+  .wdtoast.show{opacity:1}
+  .zlabel{position:absolute;left:50%;bottom:52px;transform:translateX(-50%);z-index:60;font-size:.66rem;font-weight:800;
+          color:#b42318;background:#fff;border:1px solid #f4c3c3;border-radius:6px;padding:2px 7px;opacity:0;transition:opacity .25s}
+  .wdtoast.show + .zlabel{opacity:1}
+
+  /* ══ 저장 완료 오버레이 (A·B·C) ══ */
+  .sv{position:absolute;inset:0;z-index:6000;display:flex;justify-content:center;pointer-events:none}
+  .sv.a,.sv.c{align-items:center}
+  .sv.b{align-items:flex-start;padding-top:56px}
+  .svbox{background:#fff;border-radius:16px;box-shadow:0 12px 40px rgba(16,24,40,.20),0 2px 8px rgba(16,24,40,.10);
+         border:1px solid #e6eaf0;display:flex;flex-direction:column;align-items:center;gap:9px;padding:20px 26px;
+         text-align:center;max-width:330px;animation:svIn .22s cubic-bezier(.2,.85,.3,1)}
+  .sv.b .svbox{flex-direction:row;gap:10px;padding:10px 18px;border-radius:999px;max-width:none;text-align:left}
+  .svmsg{font-size:.88rem;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+  .sv.b .svmsg{font-size:.8rem}
+  .svsub{font-size:.72rem;color:var(--muted);font-weight:600}
+  .svlist{margin-top:2px;display:flex;flex-direction:column;gap:3px;width:100%}
+  .svli{display:flex;align-items:center;gap:6px;font-size:.72rem;font-weight:700;color:#334155;background:#f5f8fc;
+        border:1px solid var(--line);border-radius:7px;padding:4px 9px}
+  .svli i{width:5px;height:5px;border-radius:50%;background:var(--p);flex:none}
+  .sv.out{animation:svOut .42s ease forwards}
+  @keyframes svIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+  @keyframes svOut{to{opacity:0;transform:translateY(-6px) scale(.985)}}
+
+  .ring{width:46px;height:46px;flex:none}
+  .sv.b .ring{width:22px;height:22px}
+  .ring circle{fill:none;stroke:var(--safe);stroke-width:4;stroke-linecap:round}
+  .ring .bg{stroke:#d9f2e2}
+  .ring .fg{stroke-dasharray:151;stroke-dashoffset:151;transform:rotate(-90deg);transform-origin:50% 50%;
+            animation:ringDraw .5s cubic-bezier(.3,.9,.3,1) forwards}
+  .ring path{fill:none;stroke:var(--safe);stroke-width:4.5;stroke-linecap:round;stroke-linejoin:round;
+             stroke-dasharray:34;stroke-dashoffset:34;animation:tick .32s .24s ease forwards}
+  @keyframes ringDraw{to{stroke-dashoffset:0}}
+  @keyframes tick{to{stroke-dashoffset:0}}
+
+  @media (prefers-reduced-motion: reduce){
+    .svbox,.sv.out{animation:none}
+    .ring .fg,.ring path{animation:none;stroke-dashoffset:0}
+    .btn.pri:hover{transform:none}
+    .mfoot.shake{animation:none}
+    .chk.err.blink{animation:none}
+  }
+
+  /* ══ 데모 조작 바 ══ */
+  .ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;background:var(--card);border:1px solid var(--line);
+       border-radius:11px;padding:10px 13px}
+  .ctl .lb{font-size:.72rem;font-weight:800;color:var(--muted)}
+  .seg{display:inline-flex;background:var(--card2);border-radius:9px;padding:3px;gap:2px}
+  .seg button{font-size:.73rem;font-weight:700;border:none;background:none;color:var(--muted);padding:5px 11px;border-radius:7px;
+              cursor:pointer;font-family:inherit}
+  .seg button.on{background:#fff;color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .tinybtn{font-size:.73rem;font-weight:700;border:1px solid var(--line2);background:#fff;color:#334155;border-radius:8px;
+           padding:6px 12px;cursor:pointer;font-family:inherit}
+  .tinybtn:hover{background:#f6f8fb}
+  .tinybtn.run{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff}
+
+  /* ══ 비교 카드 / 표 ══ */
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+  .vcard{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 16px}
+  .vcard .vk{font-size:.68rem;font-weight:800;letter-spacing:.1em;color:var(--accent)}
+  .vcard h4{font-size:.92rem;font-weight:800;margin:4px 0 6px}
+  .vcard p{font-size:.79rem;color:var(--muted)}
+  .vcard ul{margin:9px 0 0 0;padding-left:16px;font-size:.77rem;color:var(--muted)}
+  .vcard li{margin-top:4px}
+  .vcard .pick{margin-top:11px;font-size:.7rem;font-weight:800;border-radius:7px;padding:4px 9px;display:inline-block}
+  .pick.rec{background:var(--safe-soft);color:#12703a;border:1px solid #b6ecc8}
+  .pick.alt{background:var(--card2);color:var(--muted);border:1px solid var(--line)}
+
+  table.t{width:100%;border-collapse:separate;border-spacing:0;margin-top:14px;background:var(--card);border:1px solid var(--line);
+          border-radius:12px;overflow:hidden;font-size:.79rem}
+  table.t th{background:#f5f8fc;text-align:left;font-weight:800;color:#334155;padding:9px 12px;border-bottom:1px solid var(--line);font-size:.74rem}
+  table.t td{padding:9px 12px;border-bottom:1px solid #f0f3f8;color:var(--muted);vertical-align:top}
+  table.t tr:last-child td{border-bottom:none}
+  table.t td b{color:var(--ink)}
+  .st{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;font-weight:800;border-radius:6px;padding:3px 8px}
+  .st.a{background:var(--accent-soft);color:var(--accent-deep)}
+  .st.g{background:var(--safe-soft);color:#12703a}
+  .st.r{background:var(--bad-soft);color:#b42318}
+  .st.n{background:var(--card2);color:var(--muted)}
+
+  .btnrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px;background:var(--card);border:1px solid var(--line);
+          border-radius:12px;padding:16px}
+  .btnspec{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .btnspec .cap{font-size:.68rem;font-weight:800;color:var(--faint)}
+
+  footer.doc{margin-top:60px;padding-top:18px;border-top:1px solid var(--line2);font-size:.75rem;color:var(--faint)}
+
+  /* ?v=A|B|C 단독 보기 */
+  body.solo .wrap > *:not(#soloHost){display:none}
+  body.solo #soloHost{display:block}
+  #soloHost{display:none;padding-top:34px}
+  .soloback{display:inline-block;margin-bottom:12px;font-size:.74rem;font-weight:800;color:var(--accent-deep);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <div class="eyebrow">디자인 시안 · 모집공고 수정</div>
+    <h1>[저장]을 눌렀을 때 무슨 일이 일어나는지 보이게 하기</h1>
+    <p class="lead">
+      리뷰웹시스템[3버전]에서 모집공고를 수정하고 [저장]을 눌러도 화면에 아무 변화가 없다는 신고입니다.
+      원인을 코드에서 확인한 뒤, ① 저장 버튼 자체의 인터랙션 ② 저장 성공 시 화면 가운데 안내 후 페이드아웃 두 가지를 시안으로 만들었습니다.
+      아래 데모는 <b>가짜 데이터로 실제 동작</b>합니다.
+    </p>
+    <div class="meta">
+      <span class="chip">대상 <b>모집공고 발행·수정 모달</b></span>
+      <span class="chip">화면 <b>workdesk.html · admin.html 공용</b></span>
+      <span class="chip">모듈 <b>js/recruit-modal.js · js/index-recruit.js</b></span>
+      <span class="chip">단독 보기 <b>?v=A</b> · <b>?v=B</b> · <b>?v=C</b></span>
+      <span class="chip">서버 변경 <b>없음</b></span>
+    </div>
+  </header>
+
+  <!-- ══════════ 1. 원인 ══════════ -->
+  <section>
+    <div class="sec-label">01 — 진단</div>
+    <h2>“아무 반응 없음”의 정체 — 안내가 모달 <u>뒤</u>에 깔린다</h2>
+    <p class="desc">
+      저장 로직은 안내를 <b>보내고 있습니다</b>. 다만 리뷰웹시스템[3버전]의 토스트(<code>.wdtoast</code>)는
+      <code>z-index:60</code>인데 공고 모달은 <code>z-index:5000</code> + <code>backdrop-filter:blur</code>라,
+      모달이 열려 있는 동안 토스트는 <b>덮개 아래에 그려지고 블러까지 먹어 보이지 않습니다</b>.
+      게다가 게시 전 자동 점검에 걸리면 저장은 <b>전송 전에 중단</b>되므로 모달도 닫히지 않습니다 → 사용자 눈에는 정확히 “아무 일도 안 일어남”.
+    </p>
+    <div class="callout bad">
+      <b>스크린샷의 상태가 바로 그 경우입니다.</b> 상태 <b>모집중</b> + 참여형인데 자동 점검이
+      <b>✕ 시트 탭 연결됨 (gid)</b> 로 빨간 상태 → 저장이 차단되고, 차단 사유는 보이지 않는 토스트로만 나갑니다.
+      (<code>index-recruit.js</code> 저장 함수: 점검 실패 시 토스트 후 <code>return</code>)
+    </div>
+    <div class="callout ok">
+      <b>그래서 이 시안은 두 가지를 같이 고칩니다.</b>
+      ① <b>성공</b> — 모달을 닫고 화면 가운데에서 알린다(요청 사항).
+      ② <b>차단·실패</b> — 토스트에 기대지 않고 <b>모달 안쪽</b>에 사유를 붙인다. 덮개 위/아래 문제가 구조적으로 사라진다.
+    </div>
+
+    <h3>지금 동작 재현 — [저장]을 눌러보세요</h3>
+    <div class="ctl">
+      <span class="lb">현재 버전</span>
+      <button class="tinybtn run" onclick="dNow.save()">[저장] 누르기</button>
+      <button class="tinybtn" id="xrayBtn" onclick="dNow.xray()">🔍 엑스레이: 덮개 투명하게</button>
+      <span class="lb" style="margin-left:auto">엑스레이를 켜면 모달 뒤에 깔린 안내가 드러납니다</span>
+    </div>
+    <div class="browser">
+      <div class="bbar"><span class="bdot"></span><span class="bdot"></span><span class="bdot"></span>
+        <span class="burl">review-web-system.pages.dev/workdesk.html — 리뷰웹시스템[3버전] · 모집공고</span></div>
+      <div class="bview" id="viewNow"></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 2. 3안 ══════════ -->
+  <section>
+    <div class="sec-label">02 — 개선안</div>
+    <h2>성공 안내 3안</h2>
+    <p class="desc">셋 다 <b>저장 버튼 인터랙션(호버·눌림·저장 중·완료)</b>은 동일하고, 다른 것은 <b>모달이 닫힌 뒤 가운데에 무엇을 얼마나 보여주는가</b>입니다.</p>
+
+    <div class="grid3">
+      <div class="vcard">
+        <div class="vk">A 안</div>
+        <h4>가운데 카드 (기본)</h4>
+        <p>화면 정중앙에 흰 카드 + 초록 체크가 그려지고 1.4초 뒤 위로 살짝 뜨며 사라집니다.</p>
+        <ul>
+          <li>요청하신 동작 그대로</li>
+          <li>딤(어두운 배경) 없음 — 뒤 목록에서 카드가 갱신되는 게 보인다</li>
+          <li><code>pointer-events:none</code> — 클릭을 막지 않는다</li>
+        </ul>
+        <span class="pick rec">추천</span>
+      </div>
+      <div class="vcard">
+        <div class="vk">B 안</div>
+        <h4>상단 가운데 알약</h4>
+        <p>화면 위쪽 가운데에 알약 모양 배너가 잠깐 떴다 사라집니다. 가장 가볍고 시야를 덜 가립니다.</p>
+        <ul>
+          <li>연속으로 여러 건 수정할 때 방해가 적다</li>
+          <li>대신 존재감이 약해 놓칠 수 있다</li>
+        </ul>
+        <span class="pick alt">대안</span>
+      </div>
+      <div class="vcard">
+        <div class="vk">C 안</div>
+        <h4>가운데 카드 + 바뀐 항목</h4>
+        <p>A안에 <b>무엇이 바뀌었는지</b> 항목 이름을 최대 3줄까지 함께 보여줍니다.</p>
+        <ul>
+          <li>“3건”이 무슨 3건인지 화면이 스스로 설명</li>
+          <li>표시 시간이 2.2초로 조금 길다</li>
+        </ul>
+        <span class="pick alt">대안</span>
+      </div>
+    </div>
+
+    <div class="ctl">
+      <span class="lb">안</span>
+      <span class="seg" id="segV">
+        <button class="on" onclick="dNew.setVariant('A',this)">A · 가운데 카드</button>
+        <button onclick="dNew.setVariant('B',this)">B · 상단 알약</button>
+        <button onclick="dNew.setVariant('C',this)">C · 항목 표시</button>
+      </span>
+      <span class="lb" style="margin-left:12px">문구</span>
+      <span class="seg" id="segC">
+        <button class="on" onclick="dNew.setCopy(0,this)">3건 수정</button>
+        <button onclick="dNew.setCopy(1,this)">공고 이름</button>
+        <button onclick="dNew.setCopy(2,this)">단순</button>
+      </span>
+      <span class="lb" style="margin-left:12px">상황</span>
+      <span class="seg" id="segS">
+        <button class="on" onclick="dNew.setCase('ok',this)">정상 저장</button>
+        <button onclick="dNew.setCase('block',this)">점검 미통과</button>
+        <button onclick="dNew.setCase('err',this)">서버 오류</button>
+      </span>
+      <button class="tinybtn run" style="margin-left:auto" onclick="dNew.save()">[저장] 누르기</button>
+      <button class="tinybtn" onclick="dNew.reset()">↺ 모달 다시 열기</button>
+    </div>
+    <div class="browser">
+      <div class="bbar"><span class="bdot"></span><span class="bdot"></span><span class="bdot"></span>
+        <span class="burl">review-web-system.pages.dev/workdesk.html — 개선안 미리보기</span></div>
+      <div class="bview" id="viewNew"></div>
+    </div>
+
+    <div class="callout warn">
+      <b>실패는 자동으로 사라지지 않습니다.</b> 성공 안내만 페이드아웃하고,
+      <b>점검 미통과·서버 오류는 모달을 열어 둔 채</b> 저장 버튼 위에 빨간 줄로 남깁니다 —
+      사라지면 원인을 다시 읽을 방법이 없습니다. [보러가기]를 누르면 그 점검 항목까지 스크롤됩니다.
+    </div>
+  </section>
+
+  <!-- ══════════ 3. 버튼 ══════════ -->
+  <section>
+    <div class="sec-label">03 — 저장 버튼</div>
+    <h2>버튼 상태 5종</h2>
+    <p class="desc">지금은 기본/저장 중 두 가지뿐이라 “눌렸는지” 자체가 애매합니다. 마우스를 올려보고 눌러보세요(실제로 동작합니다).</p>
+    <div class="btnrow">
+      <div class="btnspec"><button class="btn pri">💾 저장</button><span class="cap">기본 · 호버 · 눌림</span></div>
+      <div class="btnspec"><button class="btn pri busy" disabled><span class="spin"></span> 저장 중…</button><span class="cap">전송 중(비활성)</span></div>
+      <div class="btnspec"><button class="btn pri done" disabled>✓ 저장됨</button><span class="cap">성공 0.4초</span></div>
+      <div class="btnspec"><button class="btn pri" disabled>💾 저장</button><span class="cap">변경 없음(선택)</span></div>
+      <div class="btnspec"><button class="btn">취소</button><span class="cap">보조</span></div>
+    </div>
+    <table class="t">
+      <tr><th style="width:130px">상태</th><th style="width:210px">보이는 것</th><th>규칙</th></tr>
+      <tr><td><span class="st a">기본</span></td><td>파란 채움 + 그림자</td><td>호버 시 <b>1px 떠오름 + 짙어짐</b>, 누르는 순간 <b>제자리로 내려앉음</b> — 클릭이 먹었다는 즉각 신호.</td></tr>
+      <tr><td><span class="st n">전송 중</span></td><td>연한 파랑 + 회전 + “저장 중…”</td><td><b>비활성</b>이라 두 번 눌러 두 번 저장되는 일이 없다(지금 로직에 이미 있음 — 유지).</td></tr>
+      <tr><td><span class="st g">성공</span></td><td>초록 + ✓ 저장됨</td><td>0.4초만 보여준 뒤 모달을 닫고 가운데 안내로 이어붙인다. 버튼 → 화면 가운데로 <b>시선이 연결</b>된다.</td></tr>
+      <tr><td><span class="st r">차단·오류</span></td><td>버튼 원복 + 빨간 줄 + 좌우 흔들림</td><td>흔들림은 0.38초 1회. <b>모달 안</b>에 그리므로 덮개 z-index와 무관하다.</td></tr>
+      <tr><td><span class="st n">변경 없음</span></td><td>흐린 파랑(비활성)</td><td><b>선택 사항</b> — 고친 게 없으면 아예 못 누르게 할지는 확인이 필요합니다(아래 4번).</td></tr>
+    </table>
+    <div class="callout">
+      <b>키보드·접근성</b> — 포커스 링(파란 외곽선) 유지, 안내 카드는 <code>role="status"</code> <code>aria-live="polite"</code>로 읽히게 하고,
+      <code>prefers-reduced-motion</code>이면 이동·회전을 끄고 <b>페이드만</b> 남깁니다.
+    </div>
+  </section>
+
+  <!-- ══════════ 4. 확인 필요 ══════════ -->
+  <section>
+    <div class="sec-label">04 — 확인 필요</div>
+    <h2>정해 주셔야 하는 것</h2>
+    <table class="t">
+      <tr><th style="width:150px">항목</th><th>선택지</th></tr>
+      <tr>
+        <td><b>“XXX건”의 뜻</b></td>
+        <td>
+          ① <b>바꾼 칸 수</b> — “3건 수정이 반영되었습니다” <span class="st n">위 데모 기본값</span><br>
+          ② <b>공고 이름</b> — “「위프 탈취제 WHIFF…」 공고 수정이 반영되었습니다”<br>
+          ③ <b>세지 않음</b> — “공고 수정이 반영되었습니다”<br>
+          <span style="color:var(--faint)">①은 저장 직전 값 비교로 셀 수 있습니다(서버 변경 없음). 옵션표·구간표처럼 표로 된 칸은 “1건”으로 셉니다.</span>
+        </td>
+      </tr>
+      <tr><td><b>표시 시간</b></td><td>A·B <b>1.4초</b> / C <b>2.2초</b> 뒤 페이드아웃(0.45초). 더 길게·짧게 원하시면 알려주세요.</td></tr>
+      <tr><td><b>신규 발행</b></td><td>수정과 같은 자리에서 “공고가 발행되었습니다”로 문구만 다르게. <span class="st g">기본</span></td></tr>
+      <tr><td><b>변경 없음일 때</b></td><td>㉮ 그냥 저장(현행) / ㉯ 버튼 비활성 / ㉰ 저장하되 “바뀐 내용이 없습니다”로 안내</td></tr>
+    </table>
+  </section>
+
+  <!-- ══════════ 5. 구현 메모 ══════════ -->
+  <section>
+    <div class="sec-label">05 — 구현 메모</div>
+    <h2>어디에 무엇을 넣는가</h2>
+    <table class="t">
+      <tr><th style="width:210px">위치</th><th>내용</th></tr>
+      <tr><td><code>js/recruit-modal.js</code></td><td><b>안내 렌더러 한 벌</b>을 여기 둔다 — 모달 마크업·CSS가 이미 여기 있고 admin.html·workdesk.html이 같은 모듈을 쓴다. <b>사본을 만들지 않는다</b>(두면 한쪽 화면만 안내가 안 뜬다).</td></tr>
+      <tr><td>마운트</td><td><b>body 직속</b> + <code>z-index</code>는 모달(5000)보다 위. 뷰 스크롤 컨테이너 안에 넣으면 오버레이가 화면 흐름에 섞인다(레포에서 이미 밟은 함정).</td></tr>
+      <tr><td><code>js/index-recruit.js</code></td><td>저장 성공 → 버튼 ✓ 0.4초 → <code>closeRecruitModal()</code> → 안내 호출 → 목록 갱신. 차단·오류는 <b>토스트 대신 모달 안 빨간 줄</b>.</td></tr>
+      <tr><td>토스트 의존 제거</td><td>모달이 떠 있는 동안 나가는 안내는 전부 모달 안으로. 모달이 닫힌 뒤의 안내만 가운데 오버레이가 맡는다.</td></tr>
+      <tr><td>영향 범위</td><td>서버·API·저장 페이로드 <b>무변경</b>. admin.html은 지금도 토스트가 보이므로 <b>동작이 나빠지지 않고</b> 안내만 또렷해진다.</td></tr>
+    </table>
+    <div class="callout">
+      <b>참고 — 스크린샷의 공고는 이 개선 후에도 저장되지 않습니다.</b> 자동 점검의 <b>시트 탭 연결(gid)</b>이 비어 있어 서버가 게시를 거부하기 때문입니다.
+      바뀌는 것은 <b>“왜 저장이 안 되는지 화면이 말해 준다”</b>는 점입니다. 실제 저장하려면 연결 탭을 고르거나 상태를 <b>임시저장</b>으로 두면 됩니다.
+    </div>
+  </section>
+
+  <footer class="doc">
+    가짜 데이터로 동작하는 목업입니다 · 외부 리소스 없음(오프라인 열람 가능) · 단독 보기: <code>?v=A</code> <code>?v=B</code> <code>?v=C</code>
+  </footer>
+
+  <div id="soloHost"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var TITLE = "[공식몰] 위프 탈취제 WHIFF 화장실 담배 새집증후군 홀애비 교실 초강력 냄새 제거 부아누아 블랙, 300g, 1개";
+
+  function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function el(html){ var d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstElementChild; }
+
+  /* 뒤 배경(모집공고 목록) — 저장되면 강조 카드가 갱신되는 느낌을 준다 */
+  function bgHtml(){
+    var cards="";
+    for(var i=0;i<8;i++){
+      cards += '<div class="bgcard'+(i===1?' hi':'')+'"><div class="bgthumb"></div>'+
+               '<div class="t">'+(i===1?esc(TITLE):'모집공고 샘플 '+(i+1)+' — 리뷰 캠페인')+'</div>'+
+               '<div class="g"><i></i></div></div>';
+    }
+    return '<div class="bgtop"><span class="bglogo">리뷰웹시스템<span class="tag">3버전</span></span>'+
+      '<span class="bgnav"><span class="bgnb">홈</span><span class="bgnb">작업보드</span>'+
+      '<span class="bgnb on">모집공고</span><span class="bgnb">작업오더</span></span></div>'+
+      '<div class="bggrid">'+cards+'</div>';
+  }
+
+  /* 모달(축약 재현) — 자동 점검 블록까지 포함 */
+  function modalHtml(id){
+    return ''+
+    '<div class="ovl" id="'+id+'_ovl">'+
+      '<div class="mbox">'+
+        '<div class="mhead"><h3>✏️ 모집공고 수정</h3><button class="mx">✕</button></div>'+
+        '<div class="mbody" id="'+id+'_body">'+
+          '<div class="fgroup"><span class="flabel">공고 제목 <span style="color:#EF4444">*</span></span>'+
+            '<input class="finput" value="'+esc(TITLE)+'"/></div>'+
+          '<div class="fgroup"><span class="flabel">리뷰가이드</span>'+
+            '<textarea class="finput" rows="2">체험단 티 나지 않는 자연스러운 리뷰 작성\n포토 리뷰 600건 / 텍스트리뷰 200건</textarea></div>'+
+          '<div class="frow">'+
+            '<div class="fgroup"><span class="flabel">상태</span>'+
+              '<select class="finput"><option>모집중</option><option>임시저장</option><option>마감</option></select></div>'+
+            '<div class="fgroup"><span class="flabel">모집인원</span><input class="finput" value="800"/></div>'+
+          '</div>'+
+          '<div class="chkbox">'+
+            '<div class="h">📋 게시 전 자동 점검</div>'+
+            '<div class="chk err" id="'+id+'_chk1">✕ 시트 탭 연결됨 (gid)</div>'+
+            '<div class="chk ok">✓ 구매시간 입력됨 (시작 &lt; 종료)</div>'+
+            '<div class="chk ok">✓ 하루 진행 인원 입력됨</div>'+
+            '<div class="chk warn">⚠ 타계정 참여: 가능 — 하루한도 무제한</div>'+
+          '</div>'+
+          '<div style="height:34px"></div>'+
+        '</div>'+
+        '<div class="mfoot" id="'+id+'_foot">'+
+          '<button class="btn">취소</button>'+
+          '<button class="btn pri" id="'+id+'_save">💾 저장</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  var RING = '<svg class="ring" viewBox="0 0 56 56" aria-hidden="true">'+
+      '<circle class="bg" cx="28" cy="28" r="24"></circle>'+
+      '<circle class="fg" cx="28" cy="28" r="24"></circle>'+
+      '<path d="M17.5 28.8 L24.6 35.6 L38.5 21.2"></path></svg>';
+
+  /* ── 데모 엔진 ─────────────────────────────────────────── */
+  function Demo(hostId, opts){
+    var host = document.getElementById(hostId);
+    if(!host) return null;
+    var self = this;
+    this.id = hostId;
+    this.legacy = !!opts.legacy;        // true = 현재 버전(토스트가 모달 뒤)
+    this.variant = opts.variant || "A";
+    this.copy = 0;
+    this.kase = "ok";
+    this.timers = [];
+
+    host.innerHTML = bgHtml() + modalHtml(hostId) +
+      '<div class="wdtoast" id="'+hostId+'_toast"></div>'+
+      '<div class="zlabel">↑ 이 안내가 모달(z-index 5000) 뒤(z-index 60)에 그려집니다</div>';
+
+    this.ovl  = document.getElementById(hostId+"_ovl");
+    this.foot = document.getElementById(hostId+"_foot");
+    this.btn  = document.getElementById(hostId+"_save");
+    this.toast= document.getElementById(hostId+"_toast");
+    this.chk1 = document.getElementById(hostId+"_chk1");
+    this.body = document.getElementById(hostId+"_body");
+    this.host = host;
+
+    this.btn.addEventListener("click", function(){ self.save(); });
+    host.querySelector(".mx").addEventListener("click", function(){ self.reset(); });
+    return this;
+  }
+
+  Demo.prototype.clear = function(){
+    this.timers.forEach(clearTimeout); this.timers = [];
+  };
+  Demo.prototype.later = function(fn, ms){ this.timers.push(setTimeout(fn, ms)); };
+
+  Demo.prototype.reset = function(){
+    this.clear();
+    this.ovl.classList.remove("gone");
+    this.foot.classList.remove("shake");
+    this.chk1.classList.remove("blink");
+    var b = this.host.querySelector(".blockbar"); if(b) b.remove();
+    var s = this.host.querySelector(".sv"); if(s) s.remove();
+    this.toast.classList.remove("show");
+    this.btnIdle();
+  };
+
+  Demo.prototype.btnIdle = function(){ this.btn.disabled=false; this.btn.className="btn pri"; this.btn.innerHTML="💾 저장"; };
+  Demo.prototype.btnBusy = function(){ this.btn.disabled=true;  this.btn.className="btn pri busy"; this.btn.innerHTML='<span class="spin"></span> 저장 중…'; };
+  Demo.prototype.btnDone = function(){ this.btn.disabled=true;  this.btn.className="btn pri done"; this.btn.innerHTML="✓ 저장됨"; };
+
+  Demo.prototype.setVariant = function(v, b){ this.variant=v; seg(b); this.reset(); };
+  Demo.prototype.setCopy    = function(i, b){ this.copy=i;    seg(b); this.reset(); };
+  Demo.prototype.setCase    = function(k, b){ this.kase=k;    seg(b); this.reset(); };
+  function seg(b){ if(!b) return; var p=b.parentElement; Array.prototype.forEach.call(p.children,function(x){x.classList.remove("on");}); b.classList.add("on"); }
+
+  Demo.prototype.msg = function(){
+    if(this.copy===1) return "「위프 탈취제 WHIFF…」 공고 수정이 반영되었습니다";
+    if(this.copy===2) return "공고 수정이 반영되었습니다";
+    return "3건 수정이 반영되었습니다";
+  };
+
+  /* ① 현재 버전 — 점검 미통과 → 보이지 않는 토스트만 나가고 끝 */
+  Demo.prototype.saveLegacy = function(){
+    var self=this;
+    this.clear();
+    this.btnBusy();
+    this.later(function(){
+      self.btnIdle();                       // finally 로 버튼만 원복
+      self.toast.textContent = "참여형 게시 불가: 시트 탭이 연결되지 않았습니다";
+      self.toast.classList.add("show");     // z-index 60 → 모달 뒤
+      self.later(function(){ self.toast.classList.remove("show"); }, 5200);
+    }, 620);
+  };
+
+  Demo.prototype.xray = function(){
+    this.ovl.classList.toggle("xray");
+    var b=document.getElementById("xrayBtn");
+    if(b) b.textContent = this.ovl.classList.contains("xray") ? "🔍 엑스레이 끄기" : "🔍 엑스레이: 덮개 투명하게";
+  };
+
+  /* ② 개선안 */
+  Demo.prototype.saveNew = function(){
+    var self=this;
+    this.clear();
+    var old = this.host.querySelector(".blockbar"); if(old) old.remove();
+    this.foot.classList.remove("shake");
+    this.chk1.classList.remove("blink");
+
+    /* 점검 미통과 = 전송조차 안 함 → 즉시 모달 안에서 알린다 */
+    if(this.kase==="block"){
+      this.foot.classList.add("shake");
+      this.chk1.classList.add("blink");
+      this.blockBar("게시할 수 없습니다 — 시트 탭이 연결되지 않았습니다", true);
+      this.later(function(){ self.foot.classList.remove("shake"); }, 420);
+      return;
+    }
+
+    this.btnBusy();
+    this.later(function(){
+      if(self.kase==="err"){
+        self.btnIdle();
+        self.foot.classList.add("shake");
+        self.blockBar("저장하지 못했습니다 — 잠시 후 다시 시도해주세요 (서버 오류)", false);
+        self.later(function(){ self.foot.classList.remove("shake"); }, 420);
+        return;
+      }
+      self.btnDone();
+      self.later(function(){
+        self.ovl.classList.add("gone");     // 모달 닫힘
+        self.success();
+      }, 400);
+    }, 820);
+  };
+
+  Demo.prototype.blockBar = function(text, withGo){
+    var bar = el('<div class="blockbar" role="alert"><span>⚠</span><span>'+esc(text)+'</span>'+
+                 (withGo?'<button class="go">점검 항목 보기 ↑</button>':'')+'</div>');
+    this.foot.appendChild(bar);
+    var self=this;
+    var go = bar.querySelector(".go");
+    if(go) go.addEventListener("click", function(){
+      self.body.scrollTop = self.body.scrollHeight;
+      self.chk1.classList.remove("blink");
+      void self.chk1.offsetWidth;
+      self.chk1.classList.add("blink");
+    });
+  };
+
+  Demo.prototype.success = function(){
+    var self = this;
+    var v = this.variant;
+    var inner;
+    if(v==="B"){
+      inner = RING + '<span class="svmsg">'+esc(this.msg())+'</span>';
+    }else if(v==="C"){
+      inner = RING + '<span class="svmsg">'+esc(this.msg())+'</span>'+
+        '<div class="svlist">'+
+          '<div class="svli"><i></i>리뷰가이드</div>'+
+          '<div class="svli"><i></i>특이사항</div>'+
+          '<div class="svli"><i></i>모집인원 800 → 820</div>'+
+        '</div>';
+    }else{
+      inner = RING + '<span class="svmsg">'+esc(this.msg())+'</span>'+
+              '<span class="svsub">목록에 바로 반영했어요</span>';
+    }
+    var sv = el('<div class="sv '+v.toLowerCase()+'" role="status" aria-live="polite"><div class="svbox">'+inner+'</div></div>');
+    this.host.appendChild(sv);
+
+    var hold = (v==="C") ? 2200 : 1400;
+    this.later(function(){
+      sv.classList.add("out");
+      self.later(function(){ if(sv.parentNode) sv.remove(); self.reopenSoon(); }, 440);
+    }, hold);
+  };
+
+  /* 데모 편의: 안내가 사라지면 다시 눌러볼 수 있게 모달을 되돌려 놓는다(실제 화면엔 없는 동작) */
+  Demo.prototype.reopenSoon = function(){
+    var self=this;
+    this.later(function(){ self.reset(); }, 900);
+  };
+
+  Demo.prototype.save = function(){ this.legacy ? this.saveLegacy() : this.saveNew(); };
+
+  /* ── 부팅 ─────────────────────────────────────────────── */
+  var params = new URLSearchParams(location.search);
+  var solo = (params.get("v")||"").toUpperCase();
+
+  if(solo==="A"||solo==="B"||solo==="C"){
+    document.body.classList.add("solo");
+    var hostWrap = document.getElementById("soloHost");
+    hostWrap.innerHTML =
+      '<a class="soloback" href="?">← 전체 시안으로</a>'+
+      '<h1>'+solo+'안 단독 보기</h1>'+
+      '<p class="lead">저장 → 모달 닫힘 → 가운데 안내 → 페이드아웃. 아래 [저장]을 눌러보세요.</p>'+
+      '<div class="ctl"><span class="lb">상황</span>'+
+        '<span class="seg" id="segS2">'+
+          '<button class="on" data-k="ok">정상 저장</button>'+
+          '<button data-k="block">점검 미통과</button>'+
+          '<button data-k="err">서버 오류</button>'+
+        '</span>'+
+        '<button class="tinybtn run" id="soloSave" style="margin-left:auto">[저장] 누르기</button>'+
+        '<button class="tinybtn" id="soloReset">↺ 다시</button>'+
+      '</div>'+
+      '<div class="browser"><div class="bbar"><span class="bdot"></span><span class="bdot"></span><span class="bdot"></span>'+
+      '<span class="burl">workdesk.html — '+solo+'안</span></div><div class="bview" id="viewSolo"></div></div>';
+
+    var d = new Demo("viewSolo", {variant: solo});
+    document.getElementById("soloSave").addEventListener("click", function(){ d.save(); });
+    document.getElementById("soloReset").addEventListener("click", function(){ d.reset(); });
+    Array.prototype.forEach.call(document.querySelectorAll("#segS2 button"), function(b){
+      b.addEventListener("click", function(){ d.setCase(b.getAttribute("data-k"), b); });
+    });
+    return;
+  }
+
+  window.dNow = new Demo("viewNow", {legacy:true});
+  window.dNew = new Demo("viewNew", {variant:"A"});
+})();
+</script>
+</body>
+</html>
