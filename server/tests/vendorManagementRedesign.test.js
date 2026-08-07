@@ -353,7 +353,7 @@ async function run() {
   {
     const sb = { STATE: { ownSettle: { 'S\tT1': { totalCost: 100, paidAmount: 40 }, 'S\tT2': { totalCost: 100, paidAmount: 100 } } },
       parseTabMeta: () => ({}) };
-    vm.createContext(sb); vm.runInContext(grab('_ovmRowMatch'), sb);
+    vm.createContext(sb); vm.runInContext(grab('_ownBrand'), sb); vm.runInContext(grab('_ovmRowMatch'), sb);
     const m = (t2, f) => vm.runInContext('_ovmRowMatch', sb)(t2, f, '');
     t('미매칭 필터', m({ sheetId: 'S', tabName: 'T1', salesId: null }, 'nomatch') === true
       && m({ sheetId: 'S', tabName: 'T1', salesId: 'X' }, 'nomatch') === false);
@@ -371,6 +371,10 @@ async function run() {
       vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린_유산균', salesId: 'X' }, 'all', '유산균') === true
       && vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린', contractNumber: 'C-1' }, 'all', 'c-1') === true
       && vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린' }, 'all', '없는말') === false);
+    // 094 동기화: 광고주가 지정한 브랜드명으로도 검색된다(작업명에 그 이름이 없어도)
+    t('★ 검색은 광고주 지정 브랜드명도 본다',
+      vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린_선스틱', brandName: '메이커스' }, 'all', '메이커스') === true
+      && vm.runInContext('_ovmRowMatch', sb)({ sheetId: 'S', tabName: '넛세린_선스틱' }, 'all', '메이커스') === false);
   }
 
   // ★ 서버 finishCandidate ↔ 프론트 isFinishCandidate 등가 — 한쪽만 손대는 드리프트 차단

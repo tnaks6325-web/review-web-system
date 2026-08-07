@@ -722,6 +722,19 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
   //   광고주 경로(advertiserWorkSummary → /my-work-summary, 무로그인 공개 링크로도 도달)와
   //   정산 요약·브랜드 배정은 주석을 쓰지 않으므로 켜지 않는다. 켜는 곳은 /ownership/tabs 하나.
   if (!annotate) return { rows, statsUnavailable: false, finishedUnavailable: false };
+  // 브랜드 배정 동기화(094) — 광고주가 자기 화면에서 지정한 브랜드를 **내부 업체관리 표에도 그대로** 싣는다.
+  //   내부 표의 기존 '브랜드' 열은 작업명에서 추정 파싱한 값이라 광고주 분류와 갈릴 수 있었다.
+  //   지정값이 있으면 그것이 정답(brandName/brandColor), 없으면 종전 추정 파싱 폴백(프론트 _ownBrand 가 담당).
+  //   ★ 조회 실패해도 표는 뜬다(fail-soft) — 브랜드 주석만 빠진다.
+  let brandByTab = new Map();
+  try {
+    const { rows: bm } = await db.query(
+      `SELECT m.sheet_id AS "sheetId", m.tab_name AS "tabName", b.id, b.name, b.color
+         FROM trackb_brand_tab_map m
+         JOIN trackb_brands b ON b.id = m.brand_id AND b.deleted_at IS NULL
+        WHERE m.advertiser_id = $1`, [advertiserId]);
+    brandByTab = new Map(bm.map(x => [x.sheetId + '\t' + x.tabName, x]));
+  } catch (e) { logger.warn(`[trackB] 브랜드 배정 주석 생략: ${e.message}`); }
   const st = await tabStatsMap();
   const fin = await finishedTabsMap();
   for (const r of rows) {
@@ -729,6 +742,8 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
     const g = String(r.tabGid == null ? '' : r.tabGid).trim();
     r.finished = !!(fin.map[k] || (g && fin.map[_FIN_GKEY(r.sheetId, g)]));
     r.finishCand = !r.finished && finishCandidate(st.map[k]);
+    const b = brandByTab.get(r.sheetId + '\t' + r.tabName);
+    if (b) { r.brandId = b.id; r.brandName = b.name; r.brandColor = b.color; }
   }
   return { rows, statsUnavailable: !st.ok, finishedUnavailable: !fin.ok };
 }
