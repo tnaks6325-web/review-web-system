@@ -1,0 +1,413 @@
+<meta charset="utf-8">
+<title>시안 — 모집공고 카드 버튼 정리 (6개로 늘어 UI 깨짐)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* 시안 문서 규율: 외부 리소스 0 · 다크에서 색이 뒤집히지 않게 라이트 고정 */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef1f6; color: #1f2430; font-size: 15px; line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif; }
+  .page { max-width: 1460px; margin: 0 auto; padding: 22px 18px 90px; }
+  h1 { font-size: 1.32rem; margin: 0 0 6px; letter-spacing: -.5px; }
+  .lede { color: #5a6478; font-size: .84rem; margin: 0 0 16px; }
+  .lede b { color: #1f2430; }
+
+  /* ── 문제 진단 ─────────────────────────────────────── */
+  .diag { background: #fff; border: 1px solid #dde3ee; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  .diag h2 { font-size: .92rem; margin: 0 0 8px; }
+  .diag .nums { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .num { background: #f6f8fc; border: 1px solid #e4e9f2; border-radius: 9px; padding: 8px 12px; min-width: 116px; }
+  .num b { display: block; font-size: 1.12rem; letter-spacing: -.5px; }
+  .num span { font-size: .68rem; color: #6b7487; }
+  .num.bad b { color: #c02626; }
+  .num.good b { color: #17803d; }
+  .diag p { font-size: .8rem; color: #4d5768; margin: 8px 0 0; }
+
+  /* ── 시안 전환 ─────────────────────────────────────── */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tabs button { border: 1.5px solid #d7dce6; background: #fff; color: #2b3241; border-radius: 999px;
+    padding: 8px 16px; font-size: .8rem; font-weight: 800; cursor: pointer; font-family: inherit; }
+  .tabs button.on { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  .tabs button.now.on { background: #c02626; border-color: #c02626; }
+  .opts { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: .76rem; color: #4d5768; margin-bottom: 14px; }
+  .opts label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
+
+  /* ── 시안 설명 ─────────────────────────────────────── */
+  .desc { background: #fff; border: 1px solid #dde3ee; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .desc h2 { font-size: 1rem; margin: 0 0 4px; }
+  .desc .one { font-size: .84rem; color: #2b3241; margin-bottom: 10px; }
+  .pros { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 720px) { .pros { grid-template-columns: 1fr; } }
+  .pros div { border-radius: 9px; padding: 9px 12px; font-size: .78rem; line-height: 1.65; }
+  .pros .p { background: #ecfdf3; border: 1px solid #b7ebcd; color: #14653a; }
+  .pros .c { background: #fff7ed; border: 1px solid #fcd9a8; color: #8a4b09; }
+  .pros b { display: block; margin-bottom: 3px; font-size: .74rem; }
+  .fit { margin-top: 10px; font-size: .76rem; color: #4d5768; background: #f6f8fc;
+    border: 1px solid #e4e9f2; border-radius: 8px; padding: 8px 11px; }
+  .fit b { color: #1f2430; }
+
+  /* ══ 카드 (실제 화면 재현 — 폭 266px / 컨테이너 1380px = 5장/줄) ══ */
+  .stage { background: #f4f6fa; border: 1px solid #dde3ee; border-radius: 12px; padding: 14px; overflow-x: auto; }
+  .stagehead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    font-size: .72rem; color: #6b7487; margin-bottom: 9px; flex-wrap: wrap; }
+  .stagehead b { color: #2b3241; }
+  #wrap { max-width: 1380px; }
+  #wrap.narrow { max-width: 1120px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 12px; align-items: stretch; }
+
+  .pcard { background: #fff; border: 1px solid #E5E9F0; border-radius: 13px; padding: 10px;
+    display: flex; flex-direction: column; height: 100%; position: relative; }
+  .pthumb { position: relative; aspect-ratio: 1/1; border-radius: 9px; background: #eef1f7; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; color: #aeb7c6; font-size: .7rem; font-weight: 800; }
+  .pthumb .badges { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
+  .pt-badge { background: rgba(17,24,39,.72); color: #fff; font-size: .56rem; font-weight: 800;
+    border-radius: 6px; padding: 2px 6px; }
+  .pt-star { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 7px;
+    background: rgba(255,255,255,.9); border: 1px solid #e4e9f2; font-size: .72rem; line-height: 20px; text-align: center; }
+  .ptitle { font-size: .78rem; font-weight: 800; line-height: 1.3; min-height: 2.6em; margin: 8px 0 5px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pmeta { display: flex; align-items: center; gap: 6px; font-size: .64rem; color: #6b7487; margin-bottom: 7px; }
+  .pmeta .go { background: #e7f0ff; color: #1b46a8; border-radius: 5px; padding: 1px 6px; font-weight: 800; }
+  .pgrow { display: flex; justify-content: space-between; font-size: .66rem; color: #6b7487; margin-bottom: 3px; }
+  .pgrow b { color: #1f2430; }
+  .pgauge { height: 7px; border-radius: 4px; background: #eef1f7; margin-bottom: 6px; }
+  .psub { font-size: .62rem; color: #8a93a5; margin-bottom: 7px; }
+  .pspec { display: flex; gap: 4px; flex-wrap: wrap; font-size: .58rem; margin-bottom: 4px; }
+  .pspec span { background: #f1f4fa; border-radius: 5px; padding: 2px 6px; color: #5a6478; font-weight: 700; }
+  .plink { font-size: .6rem; color: #8a93a5; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 액션 바 공통 */
+  .pact { display: flex; align-items: center; gap: 4px; border-top: 1px solid #F1F4FA; padding-top: 8px; margin-top: auto; }
+  .uic { position: relative; flex: 1; min-width: 0; background: #F5F7FB; border: 1px solid #E8ECF4; border-radius: 8px;
+    padding: 6px 3px; font-size: .62rem; font-weight: 800; color: #4B5563; cursor: pointer;
+    font-family: inherit; text-align: center; white-space: nowrap; }
+  .uic:hover { background: #EEF3FD; color: #1b64da; border-color: #CFE0FB; }
+  .uic.ctrl { background: #F3F0FE; border-color: #DED5FB; color: #6D28D9; }
+  .bdg { position: absolute; top: -7px; right: -6px; min-width: 17px; height: 17px; border-radius: 99px;
+    background: #EF4444; color: #fff; font-size: .58rem; font-weight: 900; line-height: 17px; padding: 0 4px;
+    box-shadow: 0 1px 4px rgba(220,38,38,.45); }
+  .ppub { display: flex; align-items: center; gap: 5px; font-size: .61rem; font-weight: 800; color: #6B7280;
+    white-space: nowrap; padding-left: 2px; }
+  .psw { width: 30px; height: 17px; border-radius: 99px; background: #12b886; position: relative; flex-shrink: 0; cursor: pointer; }
+  .psw::after { content: ""; position: absolute; top: 2px; left: 15px; width: 13px; height: 13px;
+    border-radius: 50%; background: #fff; transition: left .15s; }
+  .psw.off { background: #CBD5E1; }
+  .psw.off::after { left: 2px; }
+
+  /* ★ 넘침을 눈에 보이게 — 지금 화면이 깨진 이유를 그대로 재현한다 */
+  .uic .lbl { display: block; white-space: nowrap; }
+  .uic.spill .lbl { color: #c02626; }
+  /* 넘친 버튼에 빨간 점선 — "여기가 안 맞는다"를 눈으로 보여준다 */
+  .uic.spill { border-color: #f4a9a9; background: #fff5f5; }
+
+  /* ── A안: 2줄(주 행동 / 관리 도구) ── */
+  .v-A .pact { flex-wrap: wrap; row-gap: 5px; }
+  .v-A .row1, .v-A .row2 { display: flex; align-items: center; gap: 4px; width: 100%; }
+  .v-A .row2 .uic { background: #FBFCFF; border-color: #EDF0F6; color: #6B7280; }
+  .v-A .row2 .uic.ctrl { background: #F8F6FF; border-color: #E7E0FB; color: #7C4DEC; }
+
+  /* ── B안: 아이콘만 한 줄 ── */
+  .v-B .uic { flex: 1 1 0; min-width: 0; height: 28px; padding: 0; font-size: .78rem; line-height: 26px; }
+  .v-B .pact { gap: 3px; }
+  /* 아이콘만 남긴 줄이라 「게시」 글자도 스위치로 통일한다 — 글자 하나만 남으면 오히려 눈에 튄다 */
+  .v-B .ppub { font-size: 0; gap: 0; padding-left: 3px; }
+  /* hover 시 이름을 말한다(아이콘만으로는 못 외운다) */
+  .v-B .uic::after { content: attr(data-name); position: absolute; bottom: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%); background: #22293a; color: #fff; font-size: .6rem; font-weight: 700;
+    padding: 3px 7px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transition: .12s; z-index: 5; }
+  .v-B .uic:hover::after { opacity: 1; }
+
+  /* ── C안: 주 행동 3 + [⋯] 더보기 ── */
+  .v-C .more { flex: 0 0 auto; width: 27px; padding: 6px 0; }
+  .pop { position: absolute; right: 8px; bottom: 42px; background: #fff; border: 1px solid #dde3ee;
+    border-radius: 10px; box-shadow: 0 10px 28px rgba(15,23,42,.18); padding: 5px; z-index: 20; min-width: 138px; display: none; }
+  .pop.on { display: block; }
+  .pop button { display: block; width: 100%; text-align: left; border: 0; background: none; font-family: inherit;
+    font-size: .72rem; font-weight: 700; color: #2b3241; padding: 7px 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+  .pop button:hover { background: #f2f5fb; color: #1b64da; }
+  .pop .sep { height: 1px; background: #eef1f7; margin: 3px 0; }
+
+  /* ── 판정 체크리스트 ─────────────────────────────── */
+  .check { background: #fff; border: 1px solid #dde3ee; border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
+  .check h2 { font-size: .92rem; margin: 0 0 8px; }
+  .check label { display: flex; gap: 8px; align-items: flex-start; font-size: .8rem; padding: 5px 0; cursor: pointer; }
+  .check input { margin-top: 4px; }
+  .check .k { display: inline-block; background: #eef2ff; color: #3730a3; font-size: .62rem; font-weight: 800;
+    border-radius: 5px; padding: 1px 6px; margin-right: 5px; }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(14px);
+    background: #22293a; color: #fff; padding: 10px 16px; border-radius: 9px; font-size: .76rem;
+    opacity: 0; pointer-events: none; transition: .18s; z-index: 60; }
+  .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+
+<div class="page">
+  <h1>시안 — 모집공고 카드 버튼 정리</h1>
+  <p class="lede">버튼이 <b>6개</b>로 늘면서 카드 아래가 깨졌습니다. 아래 <b>[현재]</b>가 지금 화면이고,
+     <b>A·B·C</b>가 정리안입니다. 가짜 데이터로 <b>실제 눌러볼 수 있습니다</b> — 버튼·[⋯] 메뉴·게시 토글 전부 동작합니다.</p>
+
+  <!-- ── 왜 깨졌나 ── -->
+  <div class="diag">
+    <h2>왜 깨졌나 (실제 화면에서 잰 값)</h2>
+    <div class="nums">
+      <div class="num"><b>266px</b><span>카드 한 장 폭</span></div>
+      <div class="num"><b>244px</b><span>버튼이 쓸 수 있는 폭</span></div>
+      <div class="num"><b>−57px</b><span>「게시」 토글이 먼저 차지</span></div>
+      <div class="num"><b>163px</b><span>버튼 6개가 나눠 쓸 폭</span></div>
+      <div class="num bad"><b>27px</b><span>버튼 하나에 돌아간 폭</span></div>
+      <div class="num good"><b>35~48px</b><span>글자가 실제로 필요한 폭</span></div>
+    </div>
+    <p>버튼마다 <b>8~21px씩 모자랍니다.</b> 글자를 줄바꿈하지 않도록 되어 있어서, 모자란 만큼 옆으로 삐져나와
+       「게시」 토글과 겹칩니다(<b>🚫 리뷰N</b> 처럼 잘려 보이는 이유). 버튼을 더 늘리면 같은 일이 또 생기므로,
+       <b>한 줄에 6개를 다 넣는 것 자체를 바꿔야</b> 합니다.</p>
+  </div>
+
+  <!-- ── 시안 전환 ── -->
+  <div class="tabs">
+    <button type="button" class="now" data-v="now">현재 (깨진 상태)</button>
+    <button type="button" data-v="A">A안 · 두 줄로 나누기</button>
+    <button type="button" data-v="B">B안 · 아이콘만</button>
+    <button type="button" data-v="C">C안 · 주 버튼 3개 + ⋯</button>
+  </div>
+  <div class="opts">
+    <label><input type="checkbox" id="optNarrow"> 좁은 화면으로 보기 <span style="color:#8a93a5">(노트북 · 4장/줄)</span></label>
+    <label><input type="checkbox" id="optLate" checked> 관제에 빨간 알림 표시</label>
+    <span style="color:#8a93a5">※ 카드 크기·간격은 실제 화면과 같은 값입니다</span>
+  </div>
+
+  <div class="desc" id="desc"></div>
+
+  <div class="stage">
+    <div class="stagehead">
+      <span>관리자 모집공고 목록 — <b id="perRow">5</b>장/줄</span>
+      <span id="fitNote"></span>
+    </div>
+    <div id="wrap"><div class="grid" id="grid"></div></div>
+  </div>
+
+  <!-- ── 고를 때 볼 것 ── -->
+  <div class="check">
+    <h2>고를 때 볼 것</h2>
+    <label><input type="checkbox"><span><span class="k">1</span> 버튼 글자가 <b>잘리지 않고</b> 「게시」 토글과 겹치지 않는다.</span></label>
+    <label><input type="checkbox"><span><span class="k">2</span> 좁은 화면(노트북)으로 바꿔도 안 깨진다.</span></label>
+    <label><input type="checkbox"><span><span class="k">3</span> 자주 쓰는 <b>수정·관제</b>가 한 번에 눌린다.</span></label>
+    <label><input type="checkbox"><span><span class="k">4</span> 관제의 <b>빨간 알림 숫자</b>가 목록에서 바로 보인다(지각 접수 = 수동확정 필요).</span></label>
+    <label><input type="checkbox"><span><span class="k">5</span> 나중에 버튼이 <b>하나 더 늘어도</b> 같은 문제가 안 생긴다.</span></label>
+    <label><input type="checkbox"><span><span class="k">6</span> 카드가 세로로 길어져 <b>한 화면에 보이는 공고 수</b>가 줄지 않는다.</span></label>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────
+   가짜 데이터 — 실제 목록과 같은 모양(제목 길이·연결 탭·알림까지)
+   ───────────────────────────────────────────────────────────── */
+var CARDS = [
+  { t: '올리브영 블랑카우 바디워시', ch: '올리브영', dv: '실배송', q: 10, tot: '10/100', late: 0, on: true,  star: true,  tab: '0807(올리브영)블랑카우 바디워시 100건' },
+  { t: '올리브영 블랑카우 바디로션', ch: '올리브영', dv: '실배송', q: 10, tot: '10/100', late: 0, on: true,  star: true,  tab: '0807(올리브영)블랑카우 바디로션 100건' },
+  { t: '[공식몰] 위프 탈취제 WHIFF 화장실 담배 새집 증후군 홀애비 교실 초강력 냄새 제거', ch: '쿠팡', dv: '실배송', q: 40, tot: '40/800', late: 2, on: true, star: false, tab: '8/3(쿠팡)위프_블랙 탈취제 800건' },
+  { t: '우레온 모이스처 바디 리셋 미스트 150ml 등드름 가드름 모공각화증 여드름기능성', ch: '네이버', dv: '실배송', q: 5,  tot: '25/100', late: 0, on: true,  star: false, tab: '8/3(네이버)우레온_바디미스트 100건' },
+  { t: '메디슨벨 파라다이스 그레인 미토 버닝 15g 체지방관리 컷팅제 60정', ch: '네이버', dv: '실배송', q: 3, tot: '52', late: 3, on: true, star: false, tab: '7/24(네이버)메디슨벨_파라다이스 그레인 200건' }
+];
+
+var VIEWS = {
+  now: {
+    name: '현재 (깨진 상태)',
+    one: '버튼 6개를 한 줄에 억지로 넣고 있습니다. 글자가 들어갈 자리가 없어 옆으로 삐져나옵니다.',
+    pros: [], cons: ['버튼 6개 전부 글자가 잘려 무슨 버튼인지 알 수 없습니다.', '「게시」 토글 위로 글자가 겹칩니다.', '버튼이 하나 더 늘면 더 심해집니다.'],
+    fit: '<b>버튼 하나당 27px</b> · 필요한 폭 35~48px → <b style="color:#c02626">6개 모두 넘침</b>'
+  },
+  A: {
+    name: 'A안 · 두 줄로 나누기',
+    one: '자주 쓰는 것(수정·보기·시트)을 윗줄에, 관리 도구(관제·인원·리뷰어)를 아랫줄에 둡니다.',
+    pros: ['버튼 이름이 전부 그대로 보입니다 — 외울 것이 없습니다.', '한 번 눌러 바로 실행됩니다(숨는 버튼 없음).', '버튼이 하나 더 늘어도 아랫줄에 넣으면 됩니다.'],
+    cons: ['카드가 세로로 <b>약 32px</b> 길어집니다 — 한 화면에 보이는 공고가 조금 줄어듭니다.'],
+    fit: '윗줄 <b>60px</b> / 아랫줄 <b>79px</b> 씩 (필요 38~48px) → <b style="color:#17803d">여유 있음</b>'
+  },
+  B: {
+    name: 'B안 · 아이콘만',
+    one: '글자를 빼고 아이콘만 한 줄에 둡니다. 마우스를 올리면 이름이 뜹니다.',
+    pros: ['카드 높이가 지금과 <b>똑같습니다</b> — 보이는 공고 수가 안 줄어듭니다.', '한 줄에 6개가 넉넉히 들어갑니다.'],
+    cons: ['아이콘만으로 무슨 버튼인지 <b>기억해야</b> 합니다(📄 시트 / 📅 인원 / 🚫 리뷰어는 헷갈리기 쉽습니다).', '마우스를 못 쓰는 환경(터치)에서는 이름을 볼 방법이 없습니다.'],
+    fit: '아이콘 <b>27×27px</b> 6개 + 토글 = <b>233px</b> (쓸 수 있는 폭 244px) → <b style="color:#17803d">여유 11px</b>'
+  },
+  C: {
+    name: 'C안 · 주 버튼 3개 + ⋯',
+    one: '매일 쓰는 3개(수정·보기·관제)만 남기고, 나머지는 [⋯]를 눌러 펼칩니다. 작업보드 상단에서 이미 쓰는 방식입니다.',
+    pros: ['카드 높이가 지금과 <b>똑같습니다</b>.', '남은 버튼은 이름이 <b>온전히</b> 보입니다(메뉴 안이라 넓습니다).', '버튼이 늘어도 메뉴에 넣으면 되므로 <b>다시 안 깨집니다</b>.'],
+    cons: ['시트·인원·리뷰어는 <b>두 번 클릭</b>해야 합니다.', '가려진 버튼이 있다는 걸 처음엔 모를 수 있습니다.'],
+    fit: '주 버튼 <b>48px</b> 씩 (필요 38px) + ⋯ 27px + 토글 → <b style="color:#17803d">여유 있음</b>'
+  }
+};
+
+var view = 'now';
+var grid = document.getElementById('grid');
+var toastEl = document.getElementById('toast'), toastTm = null;
+function toast(m) { toastEl.textContent = m; toastEl.classList.add('on');
+  clearTimeout(toastTm); toastTm = setTimeout(function () { toastEl.classList.remove('on'); }, 1800); }
+
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+/* 버튼 정의 — 어느 시안에서든 같은 목록을 쓴다(시안마다 버튼이 달라지면 비교가 안 된다) */
+function actions(c, i) {
+  var late = document.getElementById('optLate').checked ? c.late : 0;
+  var bdg = late > 0 ? '<span class="bdg">' + late + '</span>' : '';
+  return {
+    edit:  { ic: '✏️', nm: '수정',   cls: '' },
+    view:  { ic: '👁',  nm: '보기',   cls: '' },
+    sheet: { ic: '📄', nm: '시트',   cls: '' },
+    ctrl:  { ic: '📡', nm: '관제',   cls: 'ctrl', bdg: bdg },
+    plan:  { ic: '📅', nm: '인원',   cls: '' },
+    gate:  { ic: '🚫', nm: '리뷰어', cls: '' }
+  };
+}
+/* ★ 라벨을 span 으로 감싼다 — 넘침 판정은 **글자만** 봐야 한다.
+   관제의 빨간 배지는 일부러 버튼 모서리 밖으로 나가는 디자인이라, 버튼 전체로 재면
+   멀쩡한 버튼도 "넘쳤다"고 잡힌다(측정기가 만든 가짜 경보). */
+function btn(a, i, key) {
+  return '<button type="button" class="uic ' + a.cls + '" data-i="' + i + '" data-k="' + key + '">'
+    + '<span class="lbl">' + a.ic + ' ' + a.nm + '</span>' + (a.bdg || '') + '</button>';
+}
+function iconBtn(a, i, key) {
+  return '<button type="button" class="uic ' + a.cls + '" data-i="' + i + '" data-k="' + key + '"'
+    + ' data-name="' + a.nm + '" title="' + a.nm + '"><span class="lbl">' + a.ic + '</span>' + (a.bdg || '') + '</button>';
+}
+function pub(c, i) {
+  return '<span class="ppub">게시<span class="psw' + (c.on ? '' : ' off') + '" data-i="' + i + '" data-k="pub"></span></span>';
+}
+
+function actBar(c, i) {
+  var A = actions(c, i);
+  if (view === 'now') {
+    return '<div class="pact">'
+      + btn(A.edit, i, 'edit') + btn(A.view, i, 'view') + btn(A.sheet, i, 'sheet')
+      + btn(A.ctrl, i, 'ctrl') + btn(A.plan, i, 'plan') + btn(A.gate, i, 'gate')
+      + pub(c, i) + '</div>';
+  }
+  if (view === 'A') {
+    return '<div class="pact">'
+      + '<div class="row1">' + btn(A.edit, i, 'edit') + btn(A.view, i, 'view') + btn(A.sheet, i, 'sheet') + pub(c, i) + '</div>'
+      + '<div class="row2">' + btn(A.ctrl, i, 'ctrl') + btn(A.plan, i, 'plan') + btn(A.gate, i, 'gate') + '</div>'
+      + '</div>';
+  }
+  if (view === 'B') {
+    return '<div class="pact">'
+      + iconBtn(A.edit, i, 'edit') + iconBtn(A.view, i, 'view') + iconBtn(A.sheet, i, 'sheet')
+      + iconBtn(A.ctrl, i, 'ctrl') + iconBtn(A.plan, i, 'plan') + iconBtn(A.gate, i, 'gate')
+      + pub(c, i) + '</div>';
+  }
+  /* C안 */
+  return '<div class="pact">'
+    + btn(A.edit, i, 'edit') + btn(A.view, i, 'view') + btn(A.ctrl, i, 'ctrl')
+    + '<button type="button" class="uic more" data-i="' + i + '" data-k="more" title="더보기">⋯</button>'
+    + pub(c, i) + '</div>'
+    + '<div class="pop" data-pop="' + i + '">'
+    +   '<button type="button" data-i="' + i + '" data-k="sheet">📄 연결된 시트 열기</button>'
+    +   '<button type="button" data-i="' + i + '" data-k="plan">📅 날짜별 인원 조절</button>'
+    +   '<div class="sep"></div>'
+    +   '<button type="button" data-i="' + i + '" data-k="gate">🚫 참여 리뷰어 관리</button>'
+    + '</div>';
+}
+
+function cardHtml(c, i) {
+  return '<div class="pcard">'
+    + '<div class="pthumb">상품 이미지'
+    +   (c.star ? '<span class="pt-star">⭐</span>' : '')
+    +   '<span class="badges"><span class="pt-badge">' + esc(c.ch) + '</span><span class="pt-badge">' + esc(c.dv) + '</span></span>'
+    + '</div>'
+    + '<div class="ptitle">' + esc(c.t) + '</div>'
+    + '<div class="pmeta">⏱ 자율 <span class="go">바로참여</span></div>'
+    + '<div class="pgrow"><span>오늘 모집</span><span><b>0</b> / ' + c.q + '명</span></div>'
+    + '<div class="pgauge"></div>'
+    + '<div class="psub">■ 확정 0 · ■ 진행중 0</div>'
+    + '<div class="pspec"><span>가이드유입</span><span>일반결제</span><span>총 ' + esc(c.tot) + '명</span></div>'
+    + '<div class="plink">🔗 ' + esc(c.tab) + '</div>'
+    + actBar(c, i)
+    + '</div>';
+}
+
+function render() {
+  document.body.className = 'v-' + view;
+  var d = VIEWS[view];
+  document.getElementById('desc').innerHTML =
+    '<h2>' + d.name + '</h2><div class="one">' + d.one + '</div>'
+    + '<div class="pros">'
+    +   '<div class="p"><b>좋은 점</b>' + (d.pros.length ? '· ' + d.pros.join('<br>· ') : '—') + '</div>'
+    +   '<div class="c"><b>감수할 점</b>' + (d.cons.length ? '· ' + d.cons.join('<br>· ') : '—') + '</div>'
+    + '</div>'
+    + '<div class="fit">폭 계산 — ' + d.fit + '</div>';
+  document.getElementById('fitNote').innerHTML = d.fit;
+
+  grid.innerHTML = CARDS.map(cardHtml).join('');
+  [].forEach.call(document.querySelectorAll('.tabs button'), function (b) {
+    b.classList.toggle('on', b.dataset.v === view);
+  });
+  measure();
+}
+
+/* 실제로 넘치는 버튼에 빨간 표시 — "깨졌다"를 눈으로 확인시킨다 */
+function measure() {
+  var over = 0, per = 0;
+  [].forEach.call(grid.querySelectorAll('.uic'), function (b) {
+    var l = b.querySelector('.lbl');
+    var spill = !!l && l.scrollWidth > b.clientWidth + 1;   // 글자만 본다(배지 제외)
+    b.classList.toggle('spill', spill);
+    if (spill) over++;
+  });
+  var first = grid.querySelector('.pcard');
+  if (first) {
+    var top = first.getBoundingClientRect().top;
+    [].forEach.call(grid.querySelectorAll('.pcard'), function (c) {
+      if (Math.abs(c.getBoundingClientRect().top - top) < 2) per++;
+    });
+  }
+  document.getElementById('perRow').textContent = per;
+}
+
+/* ── 조작 ─────────────────────────────────────────── */
+document.querySelector('.tabs').addEventListener('click', function (e) {
+  var b = e.target.closest('button[data-v]');
+  if (!b) return;
+  view = b.dataset.v;
+  closePops();
+  render();
+  try { history.replaceState(null, '', location.pathname + (view === 'now' ? '' : '?v=' + view)); } catch (_) {}
+});
+document.getElementById('optNarrow').addEventListener('change', function () {
+  document.getElementById('wrap').classList.toggle('narrow', this.checked);
+  measure();
+});
+document.getElementById('optLate').addEventListener('change', render);
+
+function closePops() { [].forEach.call(document.querySelectorAll('.pop'), function (p) { p.classList.remove('on'); }); }
+
+var NAMES = { edit: '공고 수정', view: '리뷰어 화면 보기', sheet: '연결된 시트 열기',
+  ctrl: '관제 패널', plan: '날짜별 인원 조절', gate: '참여 리뷰어 관리' };
+
+grid.addEventListener('click', function (e) {
+  var sw = e.target.closest('.psw');
+  if (sw) { sw.classList.toggle('off'); toast(sw.classList.contains('off') ? '게시를 껐습니다' : '게시를 켰습니다'); return; }
+  var b = e.target.closest('button[data-k]');
+  if (!b) return;
+  var k = b.dataset.k, i = b.dataset.i;
+  if (k === 'more') {
+    var p = grid.querySelector('.pop[data-pop="' + i + '"]');
+    var wasOn = p.classList.contains('on');
+    closePops();
+    if (!wasOn) p.classList.add('on');
+    return;
+  }
+  closePops();
+  toast('[' + NAMES[k] + '] 열기 — 시안이라 실제로는 안 열립니다');
+});
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('.pop') && !e.target.closest('[data-k="more"]')) closePops();
+});
+window.addEventListener('resize', measure);
+
+/* ?v=A|B|C 로 단독 보기 */
+var m = (location.search.match(/[?&]v=([A-Za-z]+)/) || [])[1];
+if (m && VIEWS[m]) view = m;
+render();
+</script>
