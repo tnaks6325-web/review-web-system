@@ -824,16 +824,365 @@ function _parsePurchaseTime(text) {
   return { start: `${pad(h1)}:${pad(m1)}`, end: `${pad(h2 === 24 ? 24 : h2)}:${pad(m2)}` };
 }
 
-/** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용) */
+/** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용)
+ *  ★ 사진은 오른쪽 썸네일 스트립이 보여주므로 본문에 [이미지] 자리표시자·"※ 이미지 N장" 꼬리표를
+ *    남기지 않는다(그 글자가 그대로 편집 대상이 되어 저장본에 섞이던 자리). */
 function _htmlToPlainPreview(html) {
-  const imgCount = (String(html).match(/<img/gi) || []).length;
-  const txt = String(html)
+  return String(html)
     .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n")
-    .replace(/<img[^>]*>/gi, "[이미지]")
+    .replace(/<img[^>]*>/gi, "")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
     .replace(/\n{3,}/g, "\n\n").trim();
-  return txt + (imgCount ? `\n\n※ 이미지 ${imgCount}장 포함 — 수정하지 않으면 원본 서식(이미지 포함) 그대로 게시됩니다.` : "");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   🖼 작업내용 첨부 이미지 (유입가이드 · 리뷰가이드 · 특이사항)
+   시안 = frontend/docs/design-workdetail-images.html (사용자 확정 2026-08-07)
+   ─────────────────────────────────────────────────────────────────────
+   ★ 세 칸이 **이 위젯 한 벌**을 쓴다 — 칸마다 사본을 두면 한쪽만 장수·용량 제한이
+     풀리거나 한쪽만 붙여넣기가 안 되는 드리프트가 난다(1:1문의 첨부와 같은 규율).
+   ★ 넣는 길 3가지(파일선택 · Ctrl+V · 드래그앤드롭)가 전부 `_igUpload` 한 함수로 수렴.
+   ★ 저장 형태는 칸마다 다르다 —
+       유입가이드 = inflowGuideHtml **안의 <img>**(기존 저장분 호환)
+       리뷰가이드·특이사항 = **새 배열**(reviewGuideImages / specialNotesImages)
+     평문 칸을 HTML로 승격하지 않는다(기존 저장분의 '<옵션>' 같은 꺾쇠가 태그로 오인돼 삭제된다).
+   ★ 확대 팝업은 **body 직속**, onclick 에는 **인덱스만**(주소 문자열 보간 금지).
+   ═══════════════════════════════════════════════════════════════════════ */
+const _IG_MAX = 4;                 // 칸당 장수(사용자 확정) — 서버도 다시 센다
+const _IG_MAX_MB = 5;              // 장당 용량(썸네일 업로드와 같은 값)
+const _IG_FIELDS = { inflow: "유입가이드", review: "리뷰가이드", notes: "특이사항" };
+const _IG_TA = { inflow: "rf_wd_inflow", review: "rf_wd_review", notes: "rf_wd_notes" };
+// 우리 서버의 guide-image 프록시 주소만 — 서버 sanitizeGuideImages 와 같은 규칙
+const _IG_URL_RE = /^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/;
+
+/** 칸별 이미지 목록. item = {url, tok, src, state:'ok'|'up'|'bad', name} */
+window._igState = { inflow: [], review: [], notes: [] };
+
+const _igTok = u => { const m = String(u || "").match(/\/api\/order\/guide-image\/([-\w]{20,})$/); return m ? m[1] : ""; };
+const _igOk = f => (window._igState[f] || []).filter(x => x.state === "ok");
+const _igUrls = f => _igOk(f).map(x => x.url);
+const _igBusy = () => Object.keys(_IG_FIELDS).some(f => (window._igState[f] || []).some(x => x.state === "up"));
+const _igImgTags = f => _igOk(f).map(x => `<img src="${escHtml(x.url)}">`).join("");
+
+/** 서버에서 받은 배열 → 위젯 상태(우리 프록시 주소만·중복 제거). ★ 상한 초과분은 자르지 않는다
+ *  (조용히 자르면 관리자가 모르는 사이 사진이 사라진다 — 무엇을 뺄지는 사람이 고른다). */
+function _igSetList(field, urls) {
+  const seen = new Set(), out = [];
+  (Array.isArray(urls) ? urls : []).forEach(u => {
+    const s = String(u || "").trim();
+    if (!_IG_URL_RE.test(s)) return;
+    const tok = _igTok(s);
+    if (!tok || seen.has(tok)) return;
+    seen.add(tok);
+    out.push({ url: s, tok, src: s, state: "ok", name: "" });
+  });
+  window._igState[field] = out;
+}
+
+/** 유입가이드 HTML → { textHtml(사진 뺀 나머지), urls(등장 순서) } */
+function _igSplitInflow(html) {
+  const urls = [];
+  const textHtml = String(html || "").replace(/<img\b[^>]*>/gi, (tag) => {
+    const m = tag.match(/src\s*=\s*["']([^"']+)["']/i);
+    if (m && _IG_URL_RE.test(m[1].trim())) urls.push(m[1].trim());
+    return "";
+  });
+  return { textHtml, urls };
+}
+
+/** 유입가이드 저장값 조립 — 글을 안 고쳤고 사진 구성도 그대로면 **원본 그대로**(바이트 동일) */
+function _igComposeInflow() {
+  const ta = document.getElementById("rf_wd_inflow");
+  const useRaw = !!(ta && ta.dataset.rawHtml === "1" && window._wdInflowRawHtml);
+  const toks = _igOk("inflow").map(x => x.tok).join(",");
+  if (useRaw && toks === String(window._wdInflowOrigTokens || "")) return window._wdInflowRawHtml;
+  const escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let text;
+  if (useRaw) {
+    text = String(window._wdInflowTextHtml || "");
+  } else {
+    // 미리보기 아티팩트(옛 저장분에 굳어 있을 수 있는 [이미지]·꼬리표)를 걷어낸 평문
+    const plain = String(ta ? ta.value : "")
+      .replace(/\n*※ 이미지 \d+장 포함[^\n]*$/m, "").replace(/\[이미지\]/g, "")
+      .replace(/\n{3,}/g, "\n\n").trim();
+    text = escT(plain).replace(/\n/g, "<br>");
+  }
+  return text + _igImgTags("inflow");
+}
+
+/** 원본 유입가이드 HTML을 위젯에 싣는다(편집 프리필·작업오더 프리필 공통) */
+function _igLoadInflowHtml(rawHtml) {
+  const { textHtml, urls } = _igSplitInflow(rawHtml);
+  _igSetList("inflow", urls);
+  window._wdInflowTextHtml = textHtml;
+  window._wdInflowOrigTokens = _igOk("inflow").map(x => x.tok).join(",");
+  return textHtml;
+}
+
+/** 세 칸 초기화(모달 열 때)
+ *  ★ 배선도 여기서 한 번 더 시도한다(멱등) — 리뷰웹시스템[3버전]은 모달을 **뷰를 열 때** 마운트하므로
+ *    스크립트 로드 시점 배선만 두면 그 화면에서는 스트립이 통째로 죽는다. */
+function _igResetAll() {
+  window._igState = { inflow: [], review: [], notes: [] };
+  window._wdInflowTextHtml = "";
+  window._wdInflowOrigTokens = "";
+  Object.keys(_IG_FIELDS).forEach(_igBind);
+  _igRenderAll();
+}
+function _igRenderAll() { Object.keys(_IG_FIELDS).forEach(_igRender); }
+
+let _igMsgTimer = {};
+function _igSay(field, msg, kind) {
+  const el = document.getElementById("rf_igm_" + field);
+  if (!el) return;
+  el.textContent = msg || "";
+  el.className = "ig-msg " + (kind || "");
+  clearTimeout(_igMsgTimer[field]);
+  // 성공 안내는 잠시 뒤 지운다(경고·오류는 남긴다 — 사람이 조치해야 하는 상태다)
+  if (kind === "ok") _igMsgTimer[field] = setTimeout(() => { if (el.textContent === msg) _igSay(field, ""); }, 2500);
+}
+
+function _igRender(field) {
+  const strip = document.getElementById("rf_ig_" + field);
+  if (!strip) return;
+  const list = window._igState[field] || [];
+  let h = "";
+  if (!list.length) {
+    h = `<button type="button" class="ig-empty" data-igadd="1">
+           <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V · 클릭</span></button>`;
+  } else {
+    list.forEach((im, i) => {
+      const cls = "ig-thumb" + (im.state === "up" ? " up" : im.state === "bad" ? " bad" : "");
+      // ★ onclick 없음(위임) · 넘기는 값은 인덱스뿐 — 주소·파일명을 속성에 보간하지 않는다
+      h += `<button type="button" class="${cls}" data-igi="${i}" draggable="false" title="클릭하면 크게 보기">
+              <img src="${escHtml(im.src || im.url)}" alt="">
+              <span class="ig-g" data-iggrip="1" title="끌어서 순서 바꾸기">⠿</span>
+              <span class="ig-n">${i + 1}</span>
+              <span class="ig-x" data-igdel="${i}" title="이 사진 빼기">✕</span>
+            </button>`;
+    });
+    if (list.length < _IG_MAX) {
+      h += `<button type="button" class="ig-add" data-igadd="1" title="사진 추가">
+              <span class="plus">＋</span><span>추가</span></button>`;
+    }
+  }
+  strip.innerHTML = h;
+  strip.classList.toggle("err", list.some(x => x.state === "bad"));
+  if (list.length > _IG_MAX) {
+    _igSay(field, `${_IG_MAX}장을 넘겼어요 — ${list.length - _IG_MAX}장을 빼주세요. (자동으로 지우지 않습니다)`, "warn");
+  }
+}
+
+/** ★ 넣는 길 3가지가 전부 지나는 단 하나의 함수 */
+async function _igUpload(field, file) {
+  const list = window._igState[field] || (window._igState[field] = []);
+  if (list.length >= _IG_MAX) { _igSay(field, `사진은 칸마다 최대 ${_IG_MAX}장까지 넣을 수 있어요 — 먼저 빼주세요.`, "warn"); return; }
+  if (!/^image\//.test(file.type || "")) { _igSay(field, "사진 파일만 넣을 수 있어요.", "bad"); return; }
+  if (file.size > _IG_MAX_MB * 1024 * 1024) { _igSay(field, `${_IG_MAX_MB}MB 이하 사진만 넣을 수 있어요.`, "bad"); return; }
+
+  const dataUrl = await new Promise((res, rej) => {
+    const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(file);
+  });
+  const item = { url: "", tok: "", src: dataUrl, state: "up", name: file.name || "paste.png" };
+  list.push(item);
+  _igRender(field);
+  _igSay(field, "사진을 올리는 중… 끝나면 저장할 수 있어요.", "warn");
+  try {
+    const resp = await fetch(API_BASE_URL + "/api/order/guide-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ imageBase64: dataUrl.split(",")[1], mimeType: file.type || "image/png",
+                             fileName: `wd_${field}_${Date.now()}` }),
+    });
+    const j = await resp.json();
+    if (!resp.ok || !j.ok || !j.url || !_IG_URL_RE.test(String(j.url))) throw new Error(j.error || "업로드 실패");
+    item.url = String(j.url); item.tok = _igTok(item.url); item.state = "ok";
+    _igSay(field, _igBusy() ? "사진을 올리는 중…" : "사진이 추가되었습니다.", _igBusy() ? "warn" : "ok");
+  } catch (e) {
+    item.state = "bad";
+    _igSay(field, "사진을 올리지 못했어요 (" + e.message + ") — ✕로 빼고 다시 넣어주세요.", "bad");
+  }
+  _igRender(field);
+  _onPreviewInput();
+}
+
+function igPickFiles(field, input) {
+  const files = [...(input.files || [])];
+  input.value = "";                                    // 같은 파일을 다시 고를 수 있게
+  (async () => { for (const f of files) await _igUpload(field, f); })();
+}
+
+/* ── 확대 팝업 — body 직속 · 그 칸의 사진 안에서만 이동 · 끝에서 순환하지 않는다 ── */
+let _igLbList = [], _igLbIdx = 0, _igLbField = "";
+function _igLightboxEl() {
+  let el = document.getElementById("igLightbox");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "igLightbox";
+  el.innerHTML =
+    `<button type="button" class="iglb-close" title="닫기 (Esc)">✕</button>
+     <img id="igLbImg" alt="">
+     <div class="iglb-bar">
+       <button type="button" class="iglb-btn" data-iglb="-1" title="이전 (←)">‹</button>
+       <span id="igLbCnt">1 / 1</span>
+       <button type="button" class="iglb-btn" data-iglb="1" title="다음 (→)">›</button>
+     </div>
+     <div class="iglb-fld" id="igLbFld"></div>
+     <div class="iglb-tip">← → 이동 · Esc 닫기 · 바깥을 눌러도 닫혀요</div>`;
+  document.body.appendChild(el);                        // ★ body 직속(모달 스크롤 컨테이너 밖)
+  el.addEventListener("click", (e) => {
+    const step = e.target.closest("[data-iglb]");
+    if (step) { _igLbStep(Number(step.getAttribute("data-iglb"))); return; }
+    if (e.target === el || e.target.closest(".iglb-close")) _igLbClose();
+  });
+  return el;
+}
+function _igLbOpen(field, i) {
+  _igLbList = _igOk(field);
+  if (!_igLbList.length) return;
+  _igLbField = field;
+  _igLbIdx = Math.max(0, Math.min(i, _igLbList.length - 1));
+  _igLightboxEl().classList.add("on");
+  _igLbPaint();
+}
+function _igLbPaint() {
+  const it = _igLbList[_igLbIdx]; if (!it) return;
+  const el = _igLightboxEl();
+  el.querySelector("#igLbImg").src = it.url || it.src;
+  el.querySelector("#igLbCnt").textContent = `${_igLbIdx + 1} / ${_igLbList.length}`;
+  el.querySelector("#igLbFld").textContent = _IG_FIELDS[_igLbField] || "";
+  el.querySelectorAll("[data-iglb]").forEach(b => {
+    b.disabled = Number(b.getAttribute("data-iglb")) < 0 ? _igLbIdx === 0 : _igLbIdx === _igLbList.length - 1;
+  });
+}
+function _igLbStep(d) {
+  const n = _igLbIdx + d;
+  if (n < 0 || n >= _igLbList.length) return;          // 끝에서 순환하지 않는다
+  _igLbIdx = n; _igLbPaint();
+}
+function _igLbClose() {
+  const el = document.getElementById("igLightbox");
+  if (el) { el.classList.remove("on"); const im = el.querySelector("#igLbImg"); if (im) im.removeAttribute("src"); }
+}
+
+/* ── 배선: 스트립 클릭·붙여넣기·드래그 · 키 리스너는 최상위 1회 ── */
+let _igDrag = { field: "", i: -1 };
+function _igBind(field) {
+  const strip = document.getElementById("rf_ig_" + field);
+  const ta = document.getElementById(_IG_TA[field]);
+  if (!strip || strip.dataset.igBound === "1") return;
+  strip.dataset.igBound = "1";
+
+  strip.addEventListener("click", (e) => {
+    const del = e.target.closest("[data-igdel]");
+    if (del) {
+      e.stopPropagation();
+      const i = Number(del.getAttribute("data-igdel"));
+      if (confirm(`이 사진을 ${_IG_FIELDS[field]}에서 뺄까요?`)) {
+        (window._igState[field] || []).splice(i, 1);
+        _igRender(field); _igSay(field, "사진을 뺐습니다.", "ok"); _onPreviewInput();
+      }
+      return;
+    }
+    if (e.target.closest("[data-igadd]")) { document.getElementById("rf_igf_" + field)?.click(); return; }
+    const th = e.target.closest("[data-igi]");
+    if (!th) return;
+    const i = Number(th.getAttribute("data-igi"));
+    const im = (window._igState[field] || [])[i];
+    if (!im) return;
+    if (im.state === "bad") { _igSay(field, "이 사진은 업로드에 실패했어요 — ✕로 빼고 다시 넣어주세요.", "bad"); return; }
+    if (im.state === "up") { _igSay(field, "아직 올리는 중이에요.", "warn"); return; }
+    _igLbOpen(field, _igOk(field).indexOf(im));
+  });
+
+  // Ctrl+V — 이미지일 때만 가로챈다(텍스트 붙여넣기는 기본 동작 유지)
+  const onPaste = (e) => {
+    const items = [...((e.clipboardData && e.clipboardData.items) || [])]
+      .filter(it => it.kind === "file" && /^image\//.test(it.type));
+    if (!items.length) return;
+    e.preventDefault();
+    (async () => { for (const it of items) { const f = it.getAsFile(); if (f) await _igUpload(field, f); } })();
+  };
+  strip.addEventListener("paste", onPaste);
+  if (ta) ta.addEventListener("paste", onPaste);
+
+  // 바깥에서 온 파일 드래그 = 업로드 / 안에서 끄는 것 = 순서 변경 (dataTransfer 종류로 구분)
+  const isFileDrag = e => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+  strip.addEventListener("dragover", (e) => {
+    if (isFileDrag(e)) { e.preventDefault(); strip.classList.add("drag"); return; }
+    if (_igDrag.field === field) { e.preventDefault(); _igMarkDrop(strip, e); }
+  });
+  strip.addEventListener("dragleave", (e) => { if (e.target === strip) { strip.classList.remove("drag"); _igClearMarks(strip); } });
+  strip.addEventListener("drop", (e) => {
+    if (isFileDrag(e)) {
+      e.preventDefault(); strip.classList.remove("drag");
+      const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+      (async () => { for (const f of files) await _igUpload(field, f); })();
+      return;
+    }
+    if (_igDrag.field !== field) return;
+    e.preventDefault();
+    const t = _igDropTarget(e);
+    _igClearMarks(strip);
+    if (!t) return;
+    const list = window._igState[field] || [];
+    let to = t.i + (t.after ? 1 : 0);
+    const from = _igDrag.i;
+    if (to > from) to--;
+    if (to === from || from < 0) return;
+    list.splice(to, 0, list.splice(from, 1)[0]);
+    _igRender(field); _igSay(field, "순서를 바꿨습니다 — 리뷰어에게 이 순서로 보입니다.", "ok"); _onPreviewInput();
+  });
+
+  // ⠿ 손잡이를 누른 동안에만 draggable(입력 텍스트 선택·클릭 확대와 무충돌)
+  strip.addEventListener("mousedown", (e) => {
+    const th = e.target.closest("[data-igi]");
+    if (th) th.setAttribute("draggable", e.target.closest("[data-iggrip]") ? "true" : "false");
+  });
+  strip.addEventListener("dragstart", (e) => {
+    const th = e.target.closest("[data-igi]");
+    if (!th || th.getAttribute("draggable") !== "true") { e.preventDefault(); return; }
+    _igDrag = { field, i: Number(th.getAttribute("data-igi")) };
+    th.classList.add("dragging");
+    // 'Files'가 아닌 커스텀 종류만 담는다 → 업로드 경로가 이 드래그에 반응하지 않는다
+    try { e.dataTransfer.setData("application/x-ig-reorder", String(_igDrag.i)); } catch (_) {}
+    e.dataTransfer.effectAllowed = "move";
+  });
+  strip.addEventListener("dragend", () => { _igDrag = { field: "", i: -1 }; _igClearMarks(strip); _igRender(field); });
+}
+function _igDropTarget(e) {
+  const th = e.target.closest ? e.target.closest("[data-igi]") : null;
+  if (!th) return null;
+  const r = th.getBoundingClientRect();
+  // 오른쪽 절반에 놓으면 그 뒤 — 항상 앞이면 끝자리로 옮길 수가 없다
+  return { i: Number(th.getAttribute("data-igi")), after: (e.clientX - r.left) > r.width / 2 };
+}
+function _igMarkDrop(strip, e) {
+  _igClearMarks(strip);
+  const t = _igDropTarget(e); if (!t) return;
+  const th = strip.querySelector(`[data-igi="${t.i}"]`);
+  if (th) th.classList.add(t.after ? "dropR" : "dropL");
+}
+function _igClearMarks(strip) {
+  strip.querySelectorAll("[data-igi]").forEach(n => n.classList.remove("dropL", "dropR", "dragging"));
+}
+
+/* 키 리스너는 최상위 1회 — 팝업을 열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 장 건너뛴다 */
+if (typeof window !== "undefined" && !window._igKeyBound) {
+  window._igKeyBound = true;
+  document.addEventListener("keydown", (e) => {
+    const el = document.getElementById("igLightbox");
+    if (!el || !el.classList.contains("on")) return;
+    const t = e.target, tag = ((t && t.tagName) || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || (t && t.isContentEditable)) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === "Escape") { _igLbClose(); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { _igLbStep(-1); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { _igLbStep(1); e.preventDefault(); }
+  });
+  window.igPickFiles = igPickFiles;
+  Object.keys(_IG_FIELDS).forEach(_igBind);
 }
 
 /** 게시 전 자동 점검 — 서버 활성화 게이트와 동일 3항목(빠지면 active 저장이 서버에서 거부됨) */
@@ -1328,6 +1677,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   if (typeof renderFeeRows === "function") renderFeeRows([]);   // 📅 기간별 리뷰비 초기화(082) — 신규 공고는 항상 꺼짐
   window._wdInflowRawHtml = null;
   const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
+  _igResetAll();                 // 🖼 작업내용 첨부 이미지 3칸 초기화
+  ["inflow", "review", "notes"].forEach(f => _igSay(f, ""));
   const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
   const _tfi = document.getElementById("rf_thumb_file"); if (_tfi) _tfi.value = "";
   /* 💸 086 이체 설정 초기화 — 신규 공고 기본 [자동](작업오더 물건비 판정을 계속 따라간다) */
@@ -1437,17 +1788,24 @@ async function openRecruitModal(id, prefill, woOrderId) {
         {
           const _rawInflow = String(wd.inflowGuideHtml || "");
           const _inflowTa2 = document.getElementById("rf_wd_inflow");
-          if (_inflowTa2 && /<(?!br\s*\/?>)[a-z][^>]*>/i.test(_rawInflow)) {
+          // 🖼 사진은 본문에서 떼어 오른쪽 썸네일로 — 남는 글만 textarea 로 들어간다
+          const _inflowText = _igLoadInflowHtml(_rawInflow);
+          if (_inflowTa2 && /<(?!br\s*\/?>)[a-z][^>]*>/i.test(_inflowText)) {
             window._wdInflowRawHtml = _rawInflow;
-            _inflowTa2.value = _htmlToPlainPreview(_rawInflow);
+            _inflowTa2.value = _htmlToPlainPreview(_inflowText);
             _inflowTa2.dataset.rawHtml = "1";
             _inflowTa2.addEventListener("input", () => { _inflowTa2.dataset.rawHtml = ""; }, { once: true });
           } else {
-            setV("rf_wd_inflow", _fromHtml(_rawInflow));
+            // 서식 없는 글 = 평문 편집(사진은 배열로 이미 분리돼 있어 그대로 보존된다)
+            window._wdInflowRawHtml = _rawInflow;
+            setV("rf_wd_inflow", _fromHtml(_inflowText));
           }
         }
         setV("rf_wd_review", wd.reviewGuide || "");
         setV("rf_wd_notes", wd.specialNotes || "");
+        _igSetList("review", wd.reviewGuideImages);     // 🖼 리뷰가이드·특이사항 첨부(배열)
+        _igSetList("notes", wd.specialNotesImages);
+        _igRenderAll();
         setV("rf_thumbnail", c.thumbnail_url || "");
         if (c.thumbnail_url) {
           const pv = document.getElementById("rf_thumb_preview");
@@ -1522,12 +1880,14 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_wd_notes", prefill.wd_notes);
         const ta = document.getElementById("rf_wd_inflow");
         if (prefill.wd_inflow_html && ta) {
-          /* 유입가이드 원본 HTML(이미지 포함) 보존: textarea엔 미리보기 텍스트만, 저장 시 미수정이면 원본 그대로
-             (textarea 경유 escape가 이미지·서식을 파괴하는 것 방지 — 수정하는 순간 평문 모드로 전환) */
+          /* 유입가이드 원본 HTML(서식) 보존: textarea엔 미리보기 텍스트만, 저장 시 미수정이면 원본 그대로
+             (textarea 경유 escape가 서식을 파괴하는 것 방지 — 수정하는 순간 평문 모드로 전환).
+             🖼 사진은 본문에서 떼어 오른쪽 썸네일로 옮기므로 글을 고쳐도 유지된다. */
           window._wdInflowRawHtml = prefill.wd_inflow_html;
-          ta.value = _htmlToPlainPreview(prefill.wd_inflow_html);
+          ta.value = _htmlToPlainPreview(_igLoadInflowHtml(prefill.wd_inflow_html));
           ta.dataset.rawHtml = "1";
           ta.addEventListener("input", () => { ta.dataset.rawHtml = ""; }, { once: true });
+          _igRenderAll();
         } else if (prefill.wd_inflow_text) {
           setV("rf_wd_inflow", prefill.wd_inflow_text);
         }
@@ -2164,23 +2524,29 @@ async function saveRecruitPost() {
       payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
       payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
+      /* 🖼 업로드가 끝나기 전에 저장하면 그 사진이 조용히 빠진다 — 끝날 때까지 막는다 */
+      if (_igBusy()) { showToast("사진 업로드가 끝나면 저장할 수 있어요.", "error"); return; }
       // 평문 입력 → HTML 저장: escape 후 개행만 <br> (S3 — sanitize가 '<옵션>' 같은 텍스트를 태그로 오인해 삭제하는 것 방지)
-      // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(이미지 보존 — 서버가 sanitize)
-      const _escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(서식 보존 — 서버가 sanitize)
+      // ★ 사진은 위젯(_igState)이 진실원본 — 글을 고쳐도 유지되고, 조립은 _igComposeInflow 한 곳.
       const _inflowTa = document.getElementById("rf_wd_inflow");
       const _useRawInflow = _inflowTa && _inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
-      // ★ M3 리뷰 #3: escape 모드로 전환된 경우 미리보기 아티팩트("※ 이미지 …", [이미지]) 정리 + 이미지 소실 경고
-      let _inflowPlain = _inflowTa.value.replace(/\n*※ 이미지 \d+장 포함[^\n]*$/m, "").trim();
-      if (!_useRawInflow && window._wdInflowRawHtml && /<img/i.test(window._wdInflowRawHtml)) {
-        if (!confirm("유입가이드를 수정하셨어요 — 원본에 있던 이미지가 빠진 평문으로 게시됩니다. 계속할까요?")) return;
-        _inflowPlain = _inflowPlain.replace(/\[이미지\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      // 원본이 리치 서식(줄바꿈 외 태그)이었는데 평문 모드로 전환됐다면 "서식이 사라진다"만 경고한다.
+      // (종전 문구는 "이미지가 빠진다"였는데, 이제 사진은 보존되므로 사실이 아니다.)
+      if (!_useRawInflow && /<(?!br\s*\/?>|img\b)[a-z][^>]*>/i.test(String(window._wdInflowTextHtml || ""))) {
+        const _n = _igOk("inflow").length;
+        if (!confirm(`유입가이드 글을 고치셨어요 — ${_n ? `사진 ${_n}장은 그대로 유지되고 ` : ""}글자만 다시 게시됩니다.\n원본에 있던 줄 서식·링크는 사라지고 사진은 글 아래로 모입니다. 계속할까요?`)) return;
       }
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
-        inflowGuideHtml: _useRawInflow ? window._wdInflowRawHtml
-                                       : _escT(_inflowPlain).replace(/\n/g, "<br>"),
+        inflowGuideHtml: _igComposeInflow(),
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
+        /* 🖼 리뷰가이드·특이사항 첨부(평문 칸이라 배열로 따로) — 위젯 상태를 그대로 전송한다.
+           스트립이 없는 화면에서도 프리필로 실린 값이 그대로 되돌아가 사진이 지워지지 않는다.
+           (work_detail 은 통째 교체 저장이라 "미전송=유지"가 성립하지 않는다.) */
+        reviewGuideImages: _igUrls("review"),
+        specialNotesImages: _igUrls("notes"),
       };
       // 🧩 상품 옵션(061): 옵션표 전체를 교체 배열로 전송(빈 배열=옵션 없음). 중복 옵션명은 하드블록(서버 유니크).
       //   ★ 옵션표 UI가 있는 페이지에서만 전송 — 옵션표 없는 페이지(admin-siand 등)는 미전송(undefined)→
@@ -2386,12 +2752,8 @@ function _renderPreview() {
      따로 만든 모형 카드는 실물과 계속 달라져서 제거했다. */
   const _v = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ""; };
 
-  // 유입가이드: 원본 HTML(이미지 포함)을 보존 중이면 그것을, 아니면 textarea 평문을 escape해서.
-  const inflowTa = document.getElementById("rf_wd_inflow");
-  const useRaw = inflowTa && inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
-  const inflowHtml = useRaw
-    ? window._wdInflowRawHtml
-    : escHtml(_v("rf_wd_inflow")).replace(/\n/g, "<br>");
+  // 유입가이드: 저장할 값과 **같은 조립 함수**를 쓴다 — 미리보기와 실제 저장본이 갈라질 수 없다.
+  const inflowHtml = _igComposeInflow();
 
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");
@@ -2406,6 +2768,8 @@ function _renderPreview() {
       inflowGuideHtml: inflowHtml,
       reviewGuide:     _v("rf_wd_review"),
       specialNotes:    _v("rf_wd_notes"),
+      reviewGuideImages: _igUrls("review"),     // 🖼 첨부는 그 카드 안에(리뷰어 화면과 같은 렌더러)
+      specialNotesImages: _igUrls("notes"),
     },
     landingUrl: _v("rf_landing_url"),
     inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
