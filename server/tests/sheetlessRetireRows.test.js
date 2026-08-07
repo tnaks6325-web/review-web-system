@@ -63,8 +63,14 @@ console.log('\n[A] 쓰기 소유자 — campaign_participants 쓰기는 particip
 console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부');
 {
   ok('retireRows 를 내보낸다', typeof L.retireRows === 'function' && typeof P.retireRows === 'function');
+  /* ★ 파일 전체를 보면 다른 라우트(slot-backfill 등)의 같은 표현이 대신 통과시킨다 —
+     retire-rows 라우트 본문으로 스코프해서 본다. 경계는 `});` 가 아니라 다음 `router.`. */
+  const _rt = read('src/routes/trackB.routes.js');
+  const _i0 = _rt.indexOf("router.post('/worktable/retire-rows'");
+  const _body = _i0 > 0 ? _rt.slice(_i0, _rt.indexOf('\nrouter.', _i0 + 10)) : '';
+  ok('retire-rows 라우트 본문을 찾았다', !!_body);
   ok('★ 라우트가 dryRun 기본(!== false) — 값이 빠진 요청이 곧바로 실행되지 않는다',
-    /dryRun: b\.dryRun !== false/.test(read('src/routes/trackB.routes.js')));
+    /dryRun: b\.dryRun !== false/.test(_body));
 }
 
 (async () => {
@@ -166,6 +172,9 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     const i1 = cut.indexOf('retireInactiveImportRows(');
     const i2 = cut.indexOf('rebuildLedgers({', i1);
     ok('★★ 이관에서도 은퇴가 장부 재생성보다 앞(그래야 되살아나지 않는다)', i1 > 0 && i2 > i1);
+    /* ★ 순서만 보면  같은 죽은 호출도 통과한다 — 결과를 받아 쓰는 형태를 고정한다. */
+    ok('★ 은퇴 결과를 실제로 받아 응답에 싣는다(죽은 호출 금지)',
+      /retired = await require\('\.\/participants\.service'\)\s*\n?\s*\.retireInactiveImportRows\(/.test(cut));
     ok('★ 실패해도 이관은 유지하고 사유를 응답에 싣는다(retired)',
       /retired = \{ ok: false/.test(cut) && /reflect, handoff, retired, ledger, notice/.test(cut));
     ok('★ 표식을 켠 뒤에 은퇴한다(무시트 게이트 통과 순서)',
