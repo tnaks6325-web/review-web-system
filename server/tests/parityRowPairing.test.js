@@ -67,6 +67,15 @@ console.log('\n[B] 진짜 차이는 그대로 잡는다 (완화 아님)');
   ok('★ 뒤 4자리만 노출(마스킹 유지)', /^•+\d{4}$/.test(r.realSample[0].phone8));
 }
 {
+  /* ★★ 비교 항목 3종(제출·입금·차수)이 전부 살아 있어야 한다 — 하나라도 빠지면 그 종류의
+   *    불일치가 조용히 통과한다(변이시험 M4 가 실제로 빠져나갔다). */
+  const base = { phone8: '99998888', submitted: true, paid: true, round: '1-3차', row: 73 };
+  const only = (k, v) => classifyParity([base], [{ ...base, [k]: v, source: 'import' }]).buckets.real;
+  ok('★★ 제출만 달라도 real', only('submitted', false) === 1);
+  ok('★★ 입금만 달라도 real', only('paid', false) === 1);
+  ok('★★ 차수만 달라도 real (유일기획 실측 유형)', only('round', '1-4차') === 1);
+}
+{
   // 편집(BD-8)은 종전대로 benign — 의도된 차이
   const b2 = B.map(x => (x.row === 23 ? { ...x, submitted: false, paid: false } : x));
   const r = classifyParity(A, b2, new Set(['51470135']));
@@ -104,8 +113,14 @@ console.log('\n[D] 줄 번호가 없으면 종전 폴백 (순서대로)');
 console.log('\n[E] 재료 배선 — 줄 번호를 실제로 읽어 온다');
 {
   const src = noLineComments(read('src/services/trackB.service.js'));
-  ok('★ A 는 review_index.row_index 를 읽는다', /row_index AS "?row"?/.test(src));
-  ok('★ B 는 campaign_participants.seq 를 읽는다', /seq AS "?row"?/.test(src));
+  /* ★ 단언은 **_parityCore 본문 안**을 지목한다 — 파일 전체를 보면 다른 쿼리의 같은 표현이
+   *   이 검사를 대신 통과시킨다(변이시험 M7 이 실제로 그렇게 새어 나갔다). */
+  const i0 = src.indexOf('async function _parityCore(');
+  const i1 = src.indexOf('\nasync function ', i0 + 10);
+  const core = i0 > 0 ? src.slice(i0, i1 > 0 ? i1 : undefined) : '';
+  ok('_parityCore 본문을 찾았다', !!core);
+  ok('★ A 는 review_index.row_index 를 읽는다', /row_index AS "?row"?/.test(core));
+  ok('★ B 는 campaign_participants.seq 를 읽는다', /seq AS "?row"?/.test(core));
   ok('★ 짝짓기 함수가 줄 번호로 맞춘다', /function _pairByRow\(/.test(src) && /bByRow\.get\(String\(a\.row\)\)/.test(src));
   ok('★★ 대표 1쌍 비교(arr[0] vs bl[0])는 부활하지 않았다',
     !/const a = arr\[0\], b = bl\[0\]/.test(src));
