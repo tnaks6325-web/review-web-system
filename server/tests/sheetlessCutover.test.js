@@ -16,6 +16,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const readFe = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
@@ -205,8 +206,16 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
   console.log('\n[D] force — 명시 true 일 때만 (라우트가 좁힌다)');
   {
     const src = noLineComments(read('src/routes/trackB.routes.js'));
+    // ★ 단언은 **cutover 라우트 본문 안**을 지목한다 — 파일 전체를 보면 다른 라우트(year-probe)의
+    //   같은 표현이 이 검사를 대신 통과시킨다(변이시험 M10 이 실제로 그렇게 새어 나갔다).
+    // ⚠ 경계는 다음 `router.` 까지 — `});` 로 자르면 안쪽의 `res.status(400).json({…});` 에서
+    //    먼저 끊겨 정작 검사할 줄이 빠진다(실측).
+    const i0 = src.indexOf(`router.post('/sheetless/cutover'`);
+    const i1 = src.indexOf('\nrouter.', i0 + 10);
+    const body = i0 > 0 ? src.slice(i0, i1 > 0 ? i1 : undefined) : '';
+    ok('cutover 라우트 본문을 찾았다', !!body);
     ok('★ 라우트가 force === true 로만 넘긴다(문자열·1 로 안 열림)',
-      /force:\s*force\s*===\s*true/.test(src));
+      /force:\s*force\s*===\s*true/.test(body));
     const { db } = makeStub();
     cutover.__setPoolForTest(db);
     const restore = stubDeps({ prepared: 10 });
@@ -297,8 +306,26 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('switchView 분기에 연결', /v==='cutover'\)\s*renderCutoverView\(\)/.test(wd));
     ok('★ onclick 은 인덱스만 넘긴다(시트발 작업명 보간 금지)',
       /_coCheck\(\$\{i\}\)/.test(wd) && /_coCutover\(\$\{i\}\)/.test(wd) && /_coReconnect\(\$\{i\}\)/.test(wd));
-    ok('★ 자리표시자를 깐 함수가 어떤 예외에도 화면을 끝낸다([다시 시도])',
-      /_coFailed\(/.test(wd) && /onclick="_coLoad\(\)">다시 시도/.test(wd));
+    // ★★ "호출문이 있나"로는 못 잡는다 — 정의를 지워도 호출은 남아 grep 이 통과한다(변이시험 M15 실측).
+    //    실제로 실행해 **자리표시자가 끝나는지**를 본다.
+    {
+      const blocks = ['function renderCutoverView(', 'async function _coLoad(', 'function _coFailed(']
+        .map(sig => { const i = wd.indexOf(sig); assert(i > 0, sig + ' 미발견'); return wd.slice(i, wd.indexOf('\n}', i) + 2); });
+      const mount = { html: '' };
+      const sandbox = {
+        STATE: {}, assert,
+        api: async () => { throw new Error('네트워크 끊김'); },
+        $: () => ({ set innerHTML(v) { mount.html = v; }, get innerHTML() { return mount.html; } }),
+        esc: (s) => String(s == null ? '' : s),
+      };
+      sandbox.globalThis = sandbox;
+      vm.createContext(sandbox);
+      vm.runInContext(blocks.join('\n') + '\n;this.__run = renderCutoverView;', sandbox);
+      sandbox.__run();
+      await new Promise(r => setTimeout(r, 30));
+      ok('★★ 조회가 실패해도 "불러오는 중…"에 매달리지 않고 사유 + [다시 시도]로 끝낸다',
+        !/불러오는 중/.test(mount.html) && /다시 시도/.test(mount.html) && /네트워크 끊김/.test(mount.html));
+    }
     ok('★ not_ready(096 미적용)를 화면이 말한다', /j\.code==='not_ready'/.test(wd));
     ok('★ 점검표는 서버 판정을 그대로 그린다(프론트 재판정 0) — canCutover 로만 분기',
       /ck\.canCutover/.test(wd) && !/canCutover\s*=\s*[^=]/.test(wd));
