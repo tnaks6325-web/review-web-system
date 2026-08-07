@@ -836,6 +836,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /wrap\.addEventListener\('change', function/.test(CDP) && !/addEventListener\('input'/.test(CDP));
   ok('7x ★ 저장 확인창이 "구간 확정 = 자동 이월 안 얹힘"을 말한다(조용한 의미 변경 금지)',
     /자동 이월이 더 얹지 않습니다\(못 채운 몫은 구간 이후로 넘어갑니다\)/.test(CDP));
+  ok('7x-2 ★ 자동+다음날의 "저장할 것 없음"은 "이미 반영 중"이라고 말한다(미반영 오독 금지)',
+    /이월 ' \+ carry \+ '명은 이미 오늘 정원에 반영되어 있습니다/.test(CDP)
+    && /carry > 0 && S\.carryMode === 'next' && j\.carryMode !== 'hold'/.test(CDP));
   ok('7y ★ 이월 계산 불가는 "?" 로 말한다(0 으로 꾸미지 않는다)',
     /↩ 이월 \?/.test(CDP) && /carry === null/.test(CDP));
   ok('7z ★ 요구 ②③ — 현재 모집인원/총건수·예상 종료일이 조절 화면 위에 있다',
