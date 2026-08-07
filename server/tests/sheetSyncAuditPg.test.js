@@ -286,6 +286,38 @@ async function setup() {
     assert.ok(back.items.some(i => i.tabName === TAB), '되돌리기가 안 된다');
   });
 
+  console.log('\n9) [실측 신고] 구매일 연도 미확정 → 등록일 폴백으로 과거 작업이 남던 것');
+  await ta('★★ 표기에 연도가 없으면(7 / 12 (금)) 등록일(2026)로 임시 판정되어 목록에 남는다 + 미확정으로 고지', async () => {
+    await pool.query(`DELETE FROM app_settings`);
+    await pool.query(`DELETE FROM campaigns WHERE sheet_id=$1`, [SHEET]);
+    await pool.query(`INSERT INTO campaigns (sheet_id, campaign_name, created_at) VALUES ($1,$2,'2026-03-01')`, [SHEET, TAB]);
+    await pool.query(`UPDATE review_index SET start_date='7 / 12 (금)' WHERE sheet_id=$1`, [SHEET]);
+    const out = await svc.auditSheetSync({});
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.ok(it, '이 상태에서는 남는 것이 현재 동작(등록일 폴백)');
+    assert.strictEqual(it.activitySource, 'registered');
+    assert.strictEqual(out.purchaseUnconfirmed, 1, '구매일 미확정을 고지하지 않으면 사용자가 원인을 모른다');
+  });
+  await ta('★★ [연도 확인] 결과가 2024면 등록일을 이기고 목록에서 빠진다', async () => {
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ('tab_year_probe', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify({ [SHEET + '\t' + TAB]: '2024-07-12' })]);
+    const out = await svc.auditSheetSync({});
+    assert.ok(!out.items.some(i => i.tabName === TAB), '확인된 구매일 2024 인데 목록에 남았다');
+    assert.strictEqual(out.filteredOld, 1);
+    assert.strictEqual(out.purchaseUnconfirmed, 0, '확인했는데 미확정으로 센다');
+  });
+  await ta("★ 'none'(글자로 친 날짜)은 신호가 아니다 — 등록일 판정으로 되돌아가고 미확정으로 센다", async () => {
+    await pool.query(`UPDATE app_settings SET value=$1 WHERE key='tab_year_probe'`,
+      [JSON.stringify({ [SHEET + '\t' + TAB]: 'none' })]);
+    const out = await svc.auditSheetSync({});
+    const it = out.items.find(i => i.tabName === TAB);
+    assert.ok(it, "'none' 을 날짜로 오독해 1970년으로 판정했다");
+    assert.strictEqual(it.activitySource, 'registered');
+    assert.strictEqual(out.purchaseUnconfirmed, 1);
+  });
+
   svc.__setPoolForTest(null);
   await pool.end();
   console.log('\n✅ 진짜 PG 검증 전체 통과: ' + pass + '케이스');
