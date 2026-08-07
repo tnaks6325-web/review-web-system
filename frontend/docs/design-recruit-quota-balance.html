@@ -79,11 +79,15 @@
   .carry .cmp b { color: #7c3d09; }
 
   /* ── ③ 배분 균형 바(요구 ⑥) — 항상 보이게 sticky ────── */
-  .bal { position: sticky; top: 0; z-index: 5; border-radius: 11px; padding: 11px 13px; margin-bottom: 12px;
-    border: 1.5px solid; display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
-  .bal .ico { font-size: 1.05rem; line-height: 1; }
-  .bal .txt { flex: 1; min-width: 190px; }
-  .bal .l1 { font-size: .8rem; font-weight: 800; letter-spacing: -.2px; }
+  /* ★ 높이는 "일치(초록)" 상태 기준 41px 로 고정한다 — 상태가 바뀔 때마다 바가 커졌다 작아지면
+     아래 표가 위아래로 흔들려 조절하던 줄을 놓친다. [자동 맞춤] 버튼(27px)이 그 안에 들어간다. */
+  .bal { position: sticky; top: 0; z-index: 5; border-radius: 11px; height: 41px; padding: 0 13px; margin-bottom: 12px;
+    border: 1.5px solid; display: flex; align-items: center; gap: 11px; flex-wrap: nowrap; overflow: hidden; }
+  .bal .ico { font-size: 1.05rem; line-height: 1; flex: 0 0 auto; }
+  .bal .txt { flex: 1; min-width: 0; }
+  .bal .btn { flex: 0 0 auto; }
+  .bal .l1 { font-size: .8rem; font-weight: 800; letter-spacing: -.2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bal .l2 { font-size: .69rem; margin-top: 2px; line-height: 1.5; }
   .bal.ok  { background: #ecfdf3; border-color: #86dfae; color: #14653a; }
   .bal.over{ background: #fef2f2; border-color: #f4a9a9; color: #a81f1f; }
@@ -145,6 +149,9 @@
   .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   @media (max-width: 560px) {
+    /* 좁은 화면에서는 고정 높이를 풀어 메시지가 잘리지 않게 한다 — 문장을 자르느니 한 줄 늘린다 */
+    .bal { height: auto; min-height: 41px; padding: 9px 12px; flex-wrap: wrap; }
+    .bal .l1 { white-space: normal; }
     .r .d { width: 78px; font-size: .69rem; }
     .ctl .n { width: 84px; }
     .seg { grid-template-columns: 1fr; }
@@ -291,7 +298,9 @@
         add = Math.min(add, left); left -= add;
       }
       var v = Math.min(base + add, TARGET - sum);
-      out.push({ date: d, base: base, plan: v });
+      // ★ 그 줄에 배정된 이월분을 기록해 둔다 — plan−base 로 되계산하면 **사람이 손으로 올린 인원**
+      //   까지 "이월"로 부르게 된다(실측: 40→46 으로 올린 줄에 "＋이월 6"이 붙었다).
+      out.push({ date: d, base: base, plan: v, carry: Math.max(0, Math.min(add, v - base)) });
       sum += v;
       d = addDays(d, 1);
     }
@@ -300,7 +309,7 @@
 
   var mode = 'next';                 // ★ 기본 = 다음날 정원에 더하기
   var rows = buildPlan(mode);
-  var INIT = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
+  var INIT = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan, carry: r.carry }; });
   var baseEndTxt = null;
 
   /* ── 계산 ───────────────────────────────────────────── */
@@ -315,7 +324,9 @@
   function minFor(i) { return i === 0 ? TODAY_USED : 0; }   // 오늘은 확정·진행분 아래로 못 내림
   function maxFor() { return TARGET; }                      // 요구 ①: 남은 배분수를 넘길 수 없다
   function scale() { var mx = 100; rows.forEach(function (r) { if (r.plan > mx) mx = r.plan; }); return mx; }
-  function carryOn(r) { return Math.max(0, r.plan - r.base); }   // 그 날에 얹힌 이월분
+  /** 그 날에 **아직 얹혀 있는 이월분** — 배정된 이월(r.carry)을 넘지 않는다.
+   *  줄이면 그만큼 줄고(막대·라벨 일치), 손으로 더 올린 인원은 이월이 아니라 그냥 계획분이다. */
+  function carryOn(r) { return Math.max(0, Math.min(Number(r.carry) || 0, r.plan - r.base)); }
   function carryPlaced() { return rows.reduce(function (s, r) { return s + carryOn(r); }, 0); }
 
   /* ── 그리기 ─────────────────────────────────────────── */
@@ -331,9 +342,11 @@
     elRows.innerHTML = rows.map(function (r, i) {
       var init = INIT[i];
       var adjusted = !init || r.plan !== init.plan;
+      // 파랑 = 이월이 아닌 인원(기본 + 손으로 올린 분) / 주황 = 그 줄에 얹힌 이월분
+      //   ★ 주황 폭을 plan−base 로 그리면 손으로 올린 인원까지 이월처럼 보인다(라벨과도 어긋난다)
       var c = carryOn(r);
-      var basePw = Math.min(100, Math.min(r.plan, r.base) / sc * 100);   // 파랑 = 기본분
-      var pw = Math.min(100, r.plan / sc * 100);                          // 전체
+      var basePw = Math.min(100, (r.plan - c) / sc * 100);
+      var pw = Math.min(100, r.plan / sc * 100);
       var bw = Math.min(100, r.base / sc * 100);
       var tags = (i === 0 ? '<span class="tag t">오늘</span>' : '')
                + (isRest(r.date) && r.plan === 0 ? '<span class="tag rs">휴무</span>' : '')
@@ -479,9 +492,9 @@
     if (s > TARGET) { shrinkFromTail(s - TARGET); return; }
     while (s < TARGET && g++ < 900) {
       var d = addDays(rows.length ? rows[rows.length - 1].date : START, 1);
-      while (isRest(d)) { rows.push({ date: d, base: 0, plan: 0 }); d = addDays(d, 1); }
+      while (isRest(d)) { rows.push({ date: d, base: 0, plan: 0, carry: 0 }); d = addDays(d, 1); }
       var v = Math.min(DEFAULT_DAILY, TARGET - s);
-      rows.push({ date: d, base: DEFAULT_DAILY, plan: v });
+      rows.push({ date: d, base: DEFAULT_DAILY, plan: v, carry: 0 });
       s += v;
     }
   }
@@ -512,7 +525,8 @@
     setVal(drag.i, Math.max(0, Math.min(1, (ev.clientX - b.left) / b.width)) * scale());
     // 드래그 중에는 그 줄만 갱신(전체 재렌더는 잡고 있는 손을 놓치게 한다)
     var r = rows[drag.i], sc = scale(), pw = Math.min(100, r.plan / sc * 100);
-    var basePw = Math.min(100, Math.min(r.plan, r.base) / sc * 100);
+    var cOn = carryOn(r);
+    var basePw = Math.min(100, (r.plan - cOn) / sc * 100);
     drag.el.querySelector('.f').style.width = basePw + '%';
     var c = drag.el.querySelector('.c');
     if (c) { c.style.left = basePw + '%'; c.style.width = Math.max(0, pw - basePw) + '%'; }
@@ -546,7 +560,7 @@
     document.getElementById('mSpread').classList.toggle('on', m === 'spread');
     document.getElementById('mExtend').classList.toggle('on', m === 'extend');
     rows = buildPlan(m);
-    INIT = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
+    INIT = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan, carry: r.carry }; });
     render();
     if (!quiet) {
       var e = endDate();
