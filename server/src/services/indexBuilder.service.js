@@ -13,6 +13,7 @@ const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = 
 const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
 const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
 const { allowAutoRegister } = require('../utils/tabRegistration');
+const { fullySheetlessSheetIds, sheetlessTabKeys, isSheetlessTab } = require('../utils/sheetlessScope');
 
 const DEFAULT_SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
 const DEFAULT_DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
@@ -239,9 +240,12 @@ async function buildIndexSmart(forceFullRebuild = false) {
     const { rows: campaignRows } = await pool.query(
       'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
     );
+    // ★★ 무시트 작업 제외(탈 구글시트 W1, `sheetlessScope` 단일 출처) — 등록 탭이 전부 무시트인
+    //   시트는 구글에 없거나 더는 읽을 이유가 없다. 안 걸러내면 매 사이클 404 반복.
+    const _slSheets = await fullySheetlessSheetIds(pool);
     const sheetIds = [...new Set(
       campaignRows.map(r => r.sheet_id)
-    )].filter(Boolean);
+    )].filter(Boolean).filter(id => !_slSheets.has(id));
 
     logger.info(`[buildIndex] 시작: ${sheetIds.length}개 시트 (DB 기반), forceFullRebuild=${forceFullRebuild}`);
 
@@ -272,6 +276,8 @@ async function buildIndexSmart(forceFullRebuild = false) {
     );
     const tcMap = {};
     tcRows.forEach(r => { tcMap[`${r.sheet_id}||${r.tab_name}`] = r; });
+    // ★ 무시트 탭(탈 구글시트 W1) — 탭 단위 게이트 재료(이름 + gid 키)
+    const _slTabs = await sheetlessTabKeys(pool);
 
     // ── 2.5단계: 아카이브된 탭 목록 로드 ──
     // 아카이브된 탭은 인덱스 빌드에서 완전히 제외
@@ -299,6 +305,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
         tcMap,
         archivedSet,
         gidToNameMap,
+        sheetlessKeys: _slTabs,
         startTime,
       }),
       3 // 동시 3개 시트 처리
@@ -477,6 +484,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
 
 async function _processOneSheet(sheetId, opts) {
   const { forceFullRebuild, checksumMap, sheetModifiedMap, tcMap, archivedSet, gidToNameMap, startTime } = opts;
+  const sheetlessKeys = opts.sheetlessKeys || new Set();
   const sheetStart = Date.now();
   let rebuilt = 0, skipped = 0, errors = 0;
 
@@ -527,6 +535,7 @@ async function _processOneSheet(sheetId, opts) {
     }
   }
   let skippedUnregistered = 0;
+  let skippedSheetless = 0;
 
   // is_closed/아카이브 탭 필터링
   const activeTabs = validTabs.filter(t => {
@@ -541,12 +550,24 @@ async function _processOneSheet(sheetId, opts) {
       skippedUnregistered++;
       return false;
     }
+    // ★★ 무시트로 이관된 탭(탈 구글시트 W1·W5)은 **시트에서 빌드하지 않는다**.
+    //   장부(review_index/index_master)는 작업표에서 생성되므로(sheetlessLedger),
+    //   여기서 시트 값으로 덮으면 **이관 후 시스템에서 편집한 내용이 옛 시트 값으로 되돌아간다**.
+    //   ★ 시트 단위가 아니라 탭 단위인 이유 = 이관은 한 시트 안에서 탭별로 진행된다(W5).
+    //   ★ 판정은 `sheetlessScope` 한 곳(이름 → gid 폴백 = 리네임 대비, 조회 실패는 빈 집합 = 종전 동작).
+    if (isSheetlessTab(sheetlessKeys, sheetId, t.properties.title, String(t.properties.sheetId))) {
+      skippedSheetless++;
+      return false;
+    }
     if (tc && tc.is_closed) {
       skipped++;
       return false;
     }
     return true;
   });
+  if (skippedSheetless > 0) {
+    logger.info(`[buildIndex] 무시트 탭 ${skippedSheetless}개 제외 (${sheetId.substring(0, 15)}…) — 장부는 작업표에서 생성`);
+  }
   if (skippedUnregistered > 0) {
     logger.info(`[buildIndex] 미등록 탭 ${skippedUnregistered}개 제외 (${sheetId.substring(0, 15)}…) — 신규 등록은 작업오더 접수로만`);
   }
@@ -1077,7 +1098,7 @@ async function _resolveRecognizedTab(sheetId, tabName, tabGid) {
   } catch (_) {}
 }
 
-module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet };
+module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet, loadKeywordsFromDB: _loadKeywordsFromDB };
 
 // ═══════════════════════════════════════════════════════════
 // ★ Phase 4: 경량 변경 감지 (Drive API만 사용, 인덱스 빌드 없음)
@@ -1090,9 +1111,11 @@ async function checkDirtySheets() {
   const { rows: campaignRows } = await pool.query(
     'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
   );
+  // ★ 변경감지도 같은 게이트 — 무시트 시트를 Drive 로 물으면 404(W1)
+  const _slSheets = await fullySheetlessSheetIds(pool);
   const sheetIds = [...new Set(
     campaignRows.map(r => r.sheet_id)
-  )].filter(Boolean);
+  )].filter(Boolean).filter(id => !_slSheets.has(id));
 
   // ★ 최적화: 사전에 모든 시트의 수정시각·캠페인명을 1회 쿼리로 로드
   //    기존: 시트별 2회 pool.query (MAX + campaign_name) → 55시트 = 110회 쿼리
@@ -1208,6 +1231,7 @@ async function buildOneSheet(sheetId) {
       tcMap,
       archivedSet,
       gidToNameMap,
+      sheetlessKeys: await sheetlessTabKeys(pool),
       startTime,
     });
 

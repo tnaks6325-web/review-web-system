@@ -22,6 +22,7 @@ const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { throttledCall, driveThrottledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { allowAutoRegister } = require('../utils/tabRegistration');
+const { fullySheetlessSheetIds, sheetlessTabKeys, isSheetlessTab } = require('../utils/sheetlessScope');
 
 // ═══════════════════════════════════════════════════════════
 // 상수 및 상태
@@ -498,6 +499,7 @@ async function runSmartBuild({ noYield = false } = {}) {
     tabsUpdated: 0,
     tabsSkipped: 0,
     tabsSkippedUnregistered: 0,
+    tabsSkippedSheetless: 0,
     errors: 0,
     errorDetails: [],
     elapsed: 0,
@@ -531,7 +533,12 @@ async function runSmartBuild({ noYield = false } = {}) {
     const { rows: campaignRows } = await pool.query(
       'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
     );
-    const sheetIds = [...new Set(campaignRows.map(r => r.sheet_id))].filter(Boolean);
+    // ★★ 무시트 작업 제외(탈 구글시트 W1, 판정 단일 출처 `sheetlessScope`)
+    //   등록 탭이 **전부** 무시트인 시트는 구글에 없거나 더는 읽을 이유가 없다 —
+    //   안 걸러내면 매 사이클 Drive 404 가 반복된다. 한 탭이라도 시트 기반이면 그 시트는 계속 읽는다.
+    const _slSheets = await fullySheetlessSheetIds(pool);
+    const sheetIds = [...new Set(campaignRows.map(r => r.sheet_id))]
+      .filter(Boolean).filter(id => !_slSheets.has(id));
     result.sheetsChecked = sheetIds.length;
 
     // 기존 체크섬 로드 (첫 실행 시)
@@ -555,6 +562,13 @@ async function runSmartBuild({ noYield = false } = {}) {
     const registeredGidSet = new Set(
       tcAllRows.filter(r => r.tab_gid).map(r => `${r.sheet_id}||gid:${r.tab_gid}`)
     );
+
+    // ★★ 무시트로 이관된 탭(탈 구글시트 W1·W5)은 **시트에서 빌드하지 않는다**.
+    //   장부(review_index/index_master)는 작업표에서 생성되므로(sheetlessLedger),
+    //   여기서 시트 값으로 덮으면 **이관 후 시스템에서 편집한 내용이 옛 시트 값으로 되돌아간다**.
+    //   ★ 시트 단위가 아니라 탭 단위 = 이관은 한 시트 안에서 탭별로 진행된다(W5).
+    //   판정은 `sheetlessScope` 한 곳(이름 → gid 폴백 = 리네임 대비 · 조회 실패는 빈 집합 = 종전 동작).
+    const sheetlessKeys = await sheetlessTabKeys(pool);
 
     // ★ 아카이브된 탭 목록 로드 — 스마트빌드에서 완전히 제외
     const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM index_master_archive');
@@ -664,6 +678,11 @@ async function runSmartBuild({ noYield = false } = {}) {
           // ★ 등록 단일경로 게이트: 미등록 탭(이름·gid 모두 불일치)은 빌드/등록하지 않음
           if (!allowAutoRegister() && !registeredSet.has(key) && !registeredGidSet.has(gidKey)) {
             result.tabsSkippedUnregistered++;
+            return false;
+          }
+          // ★ 무시트 탭 제외(위 주석 참조)
+          if (isSheetlessTab(sheetlessKeys, sheetId, t.properties.title, gidStr)) {
+            result.tabsSkippedSheetless++;
             return false;
           }
           return !closedSet.has(key);
@@ -799,7 +818,7 @@ async function runSmartBuild({ noYield = false } = {}) {
     }
 
     result.elapsed = Date.now() - startTime;
-    logger.info(`[smartBuild] #${runNum} 완료: 변경 ${result.sheetsChanged}시트(연기 ${result.sheetsDeferred}), 스캔 ${result.tabsScanned}탭, 갱신 ${result.tabsUpdated}탭, 스킵 ${result.tabsSkipped}, 오류 ${result.errors}, ${result.elapsed}ms${result.tabsSkippedUnregistered ? ` (미등록 ${result.tabsSkippedUnregistered}탭 제외 — 작업오더 접수로만 등록)` : ''}`);
+    logger.info(`[smartBuild] #${runNum} 완료: 변경 ${result.sheetsChanged}시트(연기 ${result.sheetsDeferred}), 스캔 ${result.tabsScanned}탭, 갱신 ${result.tabsUpdated}탭, 스킵 ${result.tabsSkipped}, 오류 ${result.errors}, ${result.elapsed}ms${result.tabsSkippedUnregistered ? ` (미등록 ${result.tabsSkippedUnregistered}탭 제외 — 작업오더 접수로만 등록)` : ''}${result.tabsSkippedSheetless ? ` (무시트 ${result.tabsSkippedSheetless}탭 제외 — 장부는 작업표에서 생성)` : ''}`);
 
     // ★ modifiedTime 캐시 스냅샷 저장 — 다음 재배포의 콜드스타트 전체 스윕 제거(best-effort)
     await _persistModifiedCache(sheetIds);
