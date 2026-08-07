@@ -183,7 +183,9 @@ const PARTS = [
       /isSheetlessTab\(sheetlessKeys, sheetId, t\.properties\.title/.test(sb) && /tabsSkippedSheetless/.test(sb));
     ok('탭 게이트 재료를 실제로 읽는다(sheetlessTabKeys 조회 — 두 빌더 호출부 모두)',
       (im.match(/sheetlessTabKeys\(pool\)/g) || []).length === 2 && /sheetlessTabKeys\(pool\)/.test(sb));
-    ok('스마트빌드 요약에 무시트 제외 건수 고지(조용한 누락 금지)', /무시트 \$\{result\.tabsSkippedSheetless\}탭 제외/.test(sb));
+    ok('스마트빌드 요약에 무시트 제외 건수 고지(조용한 누락 금지)',
+      /무시트 \$\{result\.tabsSkippedSheetless\}탭 제외/.test(sb)
+      && /result\.tabsSkippedSheetless\+\+;/.test(sb));   // ★ 증가까지 — 문구만 보면 카운터 제거를 통과시킨다
   }
   {
     // 판정 유틸 실행 — fail-open(조회 실패는 빈 집합 = 종전 동작)
@@ -192,6 +194,16 @@ const PARTS = [
       (await scope.fullySheetlessSheetIds(boom)).size === 0 &&
       (await scope.sheetlessTabKeys(boom)).size === 0 &&
       (await scope.isSheetless(boom, 'S', 'T')) === false);
+    // ★ 손으로 만든 Set 이 아니라 **실제 조회 결과**로 검증한다 —
+    //   빈 gid 가 키를 만드는 회귀는 손수 만든 Set 으로는 절대 안 잡힌다(변이시험 실측).
+    const dbKeys = { query: () => Promise.resolve({ rows: [
+      { sheet_id: 'S1', tab_name: 'T1', tab_gid: '77' },
+      { sheet_id: 'S1', tab_name: 'T9', tab_gid: '' },     // gid 없는 탭
+    ] }) };
+    const built = await scope.sheetlessTabKeys(dbKeys);
+    ok('빈 gid 는 키를 만들지 않는다(조회 결과 실측 — 이름 2 + gid 1 = 3키)', built.size === 3);
+    ok('빈 gid 탭도 이름으로는 잡힌다', scope.isSheetlessTab(built, 'S1', 'T9'));
+    ok('빈 gid 로 만든 키가 남의 탭을 잡지 않는다', !scope.isSheetlessTab(built, 'S1', '남의탭', ''));
     const keys = new Set([scope.tabKey('S1', 'T1'), scope.tabKey('S1', 'gid:77')]);
     ok('탭 판정: 이름 → gid 순', scope.isSheetlessTab(keys, 'S1', 'T1') && scope.isSheetlessTab(keys, 'S1', '다른이름', '77'));
     ok('빈 gid 로는 매칭되지 않는다(전부 매칭 사고 차단)', !scope.isSheetlessTab(keys, 'S1', '다른이름', ''));
