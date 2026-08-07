@@ -795,6 +795,21 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   eq('7A-6 시작일 이전에 저장된 계획이 살아 있다', A.planFor('2026-08-10'), 7);
   eq('7A-6 그 계획이 remove 로 나가지 않는다', A.payload().remove.length, 0);
 
+  // 7A-8 ★★ 구간 밖(종료일 이후·시작일 이전)에 저장된 계획은 합계에 넣지도, 지우지도 않는다
+  //   — 넣으면 모달을 열자마자 사람이 만들지 않은 "초과"가 뜨고 [자동 맞춤]이 그 계획을 0으로 깎는다
+  mkS({ base: { '2026-09-30': 50 } });
+  A.applyCarryMode('next');
+  eq('7A-8 구간 밖 계획은 표에 넣지 않는다', sandbox.S.horiz.indexOf('2026-09-30'), -1);
+  eq('7A-8 열자마자 초과가 뜨지 않는다', A.diffPlan(), 0);
+  eq('7A-8 값은 그대로 살아 있다', A.planFor('2026-09-30'), 50);
+  {
+    const pl = A.payload();
+    ok('7A-8 지우지 않는다(remove 없음)', pl.remove.indexOf('2026-09-30') < 0, pl.remove);
+    ok('7A-8 다시 저장하지도 않는다(set 없음)', !pl.set.some((x) => x.date === '2026-09-30'), pl.set);
+  }
+  ok('7A-8 존재 사실을 화면이 말한다(조용히 숨기지 않는다)',
+    /이 구간 밖\(시작일 이전·예상 종료일 이후\)에 저장해 둔 계획이/.test(cdpSrc));
+
   // 7A-7 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(우선권 복귀)
   mkS({ base: { '2026-08-12': 5 } });
   A.applyCarryMode('next');

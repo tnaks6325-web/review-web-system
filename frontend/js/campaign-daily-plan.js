@@ -227,10 +227,17 @@
     //   화면에서 지우면 저장 시 remove 로 나가 사람이 정해 둔 계획이 조용히 사라진다.
     // ★ 기준은 baseDate 가 아니라 **오늘** — 시작일이 미래인 공고에서 baseDate 로 자르면
     //   today ≤ d < 시작일 구간의 저장된 계획이 화면에서 빠져 저장 시 remove 로 삭제된다(코드리뷰).
-    var from = S.data.today;
-    Object.keys(S.base).forEach(function (d) { if (d >= from && plan[d] == null) plan[d] = S.base[d]; });
+    var from = S.data.today, outside = [];
+    Object.keys(S.base).forEach(function (d) {
+      if (d >= from && plan[d] == null) { plan[d] = S.base[d]; outside.push(d); }
+    });
     S.carryMode = mode;
-    S.horiz = Object.keys(plan).sort();
+    // ★★ 구간 밖(시작일 이전·예상 종료일 이후)에 저장된 계획은 **합계에 넣지 않는다** — 넣으면
+    //   모달을 열자마자 사람이 만들지도 않은 "초과 N명"이 뜨고 [자동 맞춤]이 그 계획을 0으로
+    //   깎아 버린다. 총량 clamp 때문에 종료일 이후 계획은 어차피 열리지 않는(무해한) 값이다.
+    //   S.plan 에는 남겨 두므로 저장 시 remove 로 나가지도 않는다(그대로 유지).
+    S.outside = outside.sort();
+    S.horiz = h.dates.slice();
     S.carryMap = h.carry;
     S.plan = plan;
     // 열었을 때 값(닫기 확인·변경 판정 기준)은 **처음 한 번만** 잡는다 — 방식 전환마다 다시 잡으면
@@ -519,7 +526,7 @@
       if (p.date >= j.today) { S.plan[p.date] = p.count; S.base[p.date] = p.count; }
     });
     S.baseEnd = null;
-    S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null;
+    S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null; S.outside = null;
     // ★ 기본 보충 방식 = "다음날(첫 진행일) 정원에 더하기"(사용자 확정) — 펼치지 못하면(총량 무제한·
     //   구간이 저장 상한 초과 등) 균형 모드를 끄고 종전 동작(14일 성긴 표)으로 둔다.
     applyCarryMode('next');
@@ -796,6 +803,11 @@
         ? '<div class="cdp-note warn">⚠ 현재 게시 상태가 <b>' + (j.status === 'closed' ? '마감' : '임시저장') + '</b>입니다 — 조절·차수는 저장되지만, <b>모집 재개는 공고 카드의 게시 토글을 켜야</b> 시작됩니다.</div>'
         : '')
       + balBlk
+      + (bal && S.outside && S.outside.length
+        ? '<div class="cdp-note">이 구간 밖(시작일 이전·예상 종료일 이후)에 저장해 둔 계획이 <b>'
+          + S.outside.length + '일</b> 있습니다 — 아래 표에는 안 나오지만 <b>그대로 유지</b>되고, '
+          + '총량에 도달하면 열리지 않습니다.</div>'
+        : '')
       + '<div class="cdp-sub"><span>날짜별 모집 계획 — 게이지 드래그 또는 −/＋' + (bal ? ' · 숫자 직접 입력' : '') + '</span>'
       + '<span>' + (j.scheduleDriven === true ? '기본 <b>시트 구매일자 기준</b>' : '기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b>')
       + (bal ? ' · 한 날 최대 <b>' + target + '명</b>' : ' · 총량 <b>' + (tot > 0 ? tot + '명' : '무제한') + '</b>'
