@@ -571,6 +571,19 @@
     S = null;
   }
 
+  /* 고른 이월 방식 기억 — **화면 상태일 뿐**(서버 저장값은 날짜별 계획이다).
+     ★ 실패는 조용히 무시한다(사생활 보호 모드에서 sessionStorage 접근이 막힌다). */
+  var MODE_KEY = 'cdp_carry_mode_';
+  function _loadMode() {
+    try {
+      var v = window.sessionStorage.getItem(MODE_KEY + S.campId);
+      return CARRY_MODES.indexOf(v) >= 0 ? v : null;
+    } catch (_) { return null; }
+  }
+  function _saveMode(m) {
+    try { window.sessionStorage.setItem(MODE_KEY + S.campId, m); } catch (_) {}
+  }
+
   function applyOverview(j) {
     S.data = j;
     S.title = j.title || '';
@@ -584,7 +597,13 @@
     S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null; S.outside = null;
     // ★ 기본 보충 방식 = "다음날(첫 진행일) 정원에 더하기"(사용자 확정) — 펼치지 못하면(총량 무제한·
     //   구간이 저장 상한 초과 등) 균형 모드를 끄고 종전 동작(14일 성긴 표)으로 둔다.
-    applyCarryMode('next');
+    // ★★ **고른 방식은 저장·재조회·재오픈에도 유지한다**(사용자 신고 2026-08-07 — "종료일 뒤에
+    //   붙이기로 저장이 됐는데 게이지가 조절 전으로 되돌아간다"). 저장하면 이 함수가 다시 도는데
+    //   무조건 'next' 로 깔면 이월이 오늘에 다시 얹힌 배치가 그려져 **저장이 되돌아간 것처럼 보인다**
+    //   (실제 저장값은 그대로다 — 화면만 다른 방식으로 다시 제안한 것). 기억은 화면 상태일 뿐이라
+    //   sessionStorage 에 담고, 실패해도 무시한다(사생활 보호 모드 등).
+    var want = S.carryMode || _loadMode() || 'next';
+    if (!applyCarryMode(want) && want !== 'next') applyCarryMode('next');
     document.getElementById('cdpTitle').textContent = '모집인원 조절 — ' + (S.title || S.campId);
     render();
   }
@@ -632,6 +651,10 @@
       // ★ **시스템이 깐 값 그대로일 때만** 건너뛴다 — 그냥 `v === residual` 로 두면 균형이 맞은
       //   상태의 마지막 날은 항상 residual 이라 **사람이 의도적으로 줄인 마지막 날이 조용히 누락**된다.
       if (v < nat && v === residual && S.base[d] == null && S.modePlan && v === S.modePlan[d]) return;
+      // ★ 고정 모드라도 **이미 같은 값으로 저장돼 있는 날은 보내지 않는다** — 그 날은 이미 명시
+      //   계획이라 자동 이월이 얹히지 않는다. 안 걸러내면 저장 직후에도 [확정 저장]이 계속 열려
+      //   있어 "저장이 안 됐나?"로 오독된다.
+      if (pinAll && S.base[d] === v) return;
       if (!pinAll && v === nat) return;                      // 손대지 않은 값 = 보낼 필요 없음
       // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀).
       // ★ 단 pinAll(이월 억제)일 때는 해제하면 안 된다 — 해제 = 자동 이월 복귀 = 고른 방식 무효.
@@ -1143,6 +1166,7 @@
     if (!S || !S.data || !balanceOn() || CARRY_MODES.indexOf(m) < 0) return;
     if (S.data.planEnabled === false || m === S.carryMode) return;
     if (!applyCarryMode(m)) { toast('이 방식으로는 구간을 펼치지 못했습니다'); return; }
+    _saveMode(m);        // 저장·재조회·재오픈에도 고른 방식이 유지되게(화면 상태만)
     var e = endDate();
     toast(m === 'next' ? '이월을 다음 진행일에 얹었습니다 — 종료일 ' + (e ? fmtMD(e) : '-')
       : m === 'spread' ? '이월을 진행일에 나눠 담았습니다 — 종료일 ' + (e ? fmtMD(e) : '-')

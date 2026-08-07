@@ -785,8 +785,11 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   {
     const pl = A.payload();
     eq('★ 기본값과 같은 저장분도 해제하지 않는다', pl.remove.length, 0);
-    ok('★ 그 날은 set 으로 고정된다',
-      pl.set.some((x) => x.date === '2026-08-12' && x.count === 40), pl.set);
+    // ★ 이미 같은 값으로 고정돼 있으면 다시 보내지도 않는다 — 안 걸러내면 저장 직후에도
+    //   [확정 저장]이 계속 열려 있어 "저장이 안 됐나?"로 오독된다.
+    ok('★ 이미 같은 값으로 저장된 날은 다시 보내지 않는다',
+      !pl.set.some((x) => x.date === '2026-08-12'), pl.set);
+    ok('★ 아직 고정 안 된 날은 보낸다', pl.set.some((x) => x.date === '2026-08-13'), pl.set);
   }
   // 보류 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다(그리고 연장은 보낼 것이 없다)
   mkS({ data: { carryMode: 'hold', todayNaturalQuota: 40 } }); A.applyCarryMode('next');
@@ -1025,6 +1028,21 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /cdp-tag hol/.test(CDP));
   ok('8-6 색은 리터럴(테마 없는 호스트에도 얹힌다)',
     /\.cdp-d\.hol\{color:#dc2626/.test(CDP) && /\.cdp-d\.sat\{color:#2563eb/.test(CDP));
+
+  /* ══ §9 고른 이월 방식은 저장·재조회·재오픈에도 유지된다 (사용자 신고 2026-08-07) ══ */
+  console.log('\n[9] 이월 방식 유지 — 저장 후 게이지가 조절 전으로 되돌아가지 않는다');
+  // ★ applyOverview 는 저장 직후에도 다시 도는데 무조건 'next' 로 깔면 이월이 오늘에 다시 얹혀
+  //   **저장이 되돌아간 것처럼 보인다**(실제 저장값은 그대로 — 화면만 다른 방식으로 재제안).
+  ok('9-1 ★ 재조회 시 고른 방식을 그대로 쓴다(무조건 next 금지)',
+    /var want = S\.carryMode \|\| _loadMode\(\) \|\| 'next';/.test(CDP)
+    && /if \(!applyCarryMode\(want\) && want !== 'next'\) applyCarryMode\('next'\);/.test(CDP));
+  ok('9-1 옛 배선(무조건 next)이 남아 있지 않다', !/^\s*applyCarryMode\('next'\);$/m.test(CDP));
+  ok('9-2 방식을 고르면 기억한다(재오픈에도 유지)',
+    /_saveMode\(m\);/.test(CDP) && /MODE_KEY = 'cdp_carry_mode_'/.test(CDP));
+  ok('9-2 ★ 기억은 화면 상태일 뿐 — 실패해도 무시(사생활 보호 모드)',
+    /catch \(_\) \{ return null; \}/.test(CDP) && /catch \(_\) \{\}/.test(CDP));
+  ok('9-2 모르는 값은 쓰지 않는다(저장된 쓰레기 값 방어)',
+    /CARRY_MODES\.indexOf\(v\) >= 0 \? v : null/.test(CDP));
 
   console.log(`\n✅ campaignDailyPlan: ${n}개 통과`);
   process.exit(0);   // trackB.routes require 가 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)
