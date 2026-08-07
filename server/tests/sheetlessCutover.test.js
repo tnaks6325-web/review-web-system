@@ -455,6 +455,20 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('★ 자리 없는 건은 write 를 부르지 않는다', w.calls.length === 1);
   }
   {
+    /* ★★ 실패 경로가 둘이다 — **예외**와 **{ok:false} 반환**. 변이시험이 실측으로 잡았다:
+     *    예외만 검사하면 `out.failed++` 를 `+= 0` 으로 바꿔도 통과한다. 둘 다 세고, **값까지** 단언한다. */
+    const { db } = makeStub({ pendingHandoff: 2, handoffRows: [{ id: 'o1', sheet_row: 5 }, { id: 'o2', sheet_row: 6 }] });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const w = stubWrite(() => ({ ok: false, reason: 'no_headers' }));
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    w.restore(); restore(); cutover.__setPoolForTest(null);
+    ok('★★ 예외가 아니라 {ok:false} 로 실패해도 건수를 그대로 센다',
+      r.handoff.failed === 2 && r.handoff.written === 0);
+    ok('★ 실패 사유를 응답에 실어 화면이 말한다',
+      Array.isArray(r.handoff.reasons) && r.handoff.reasons.includes('no_headers'));
+  }
+  {
     // 조회 실패도 이관을 막지 않는다
     const { db } = makeStub({ pendingHandoff: 0 });
     db.query = (sql, p) => (/SELECT \* FROM order_submissions/.test(String(sql))
