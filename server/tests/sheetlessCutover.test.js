@@ -275,6 +275,20 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     restore(); cutover.__setPoolForTest(null);
   }
   {
+    // ★ 이미 이관된 탭을 또 이관하지 않는다 — 다시 쓰면 sheetless_at/by(유일한 이관 이력)가
+    //   오늘 날짜로 덮여 "언제 누가 이관했나"를 잃는다.
+    const { db, log } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
+      sheetless: true, sheetlessAt: '2026-08-01T00:00:00Z', sheetlessBy: '만두',
+      mirroredAt: new Date().toISOString(), boardRows: 3 } });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const r = await cutover.enableSheetless({ sheetId: 'S1', tabName: 'T1', by: 'q' });
+    ok('★ 이미 이관된 탭은 already 로 끝낸다', r.ok === true && r.already === true);
+    ok('★ 그때 쓰기 쿼리 0(이관 이력 안 덮음)',
+      !log.some(s => /UPDATE tab_configs SET sheetless = TRUE/.test(s)));
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
     // ★ 서버·라우트·화면 어디에도 타이핑 확정이 남아 있지 않아야 한다 — 한쪽만 되살리면
     //   화면이 값을 못 보내 전면 잠금(서버만) 또는 죽은 입력칸(화면만)이 된다.
     const svc = noLineComments(read('src/services/sheetlessCutover.service.js'));
