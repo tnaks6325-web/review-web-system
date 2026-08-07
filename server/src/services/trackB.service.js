@@ -2910,7 +2910,75 @@ async function executeWriteback({ sheetId, tabName } = {}) {
   if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
   if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
   if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
+
+  /* ★★ 무시트 탭은 **밀어넣을 시트가 없다**(탈 구글시트 W3).
+     그대로 엔진에 넣으면 행마다 `readSheet` 가 404 로 떨어져 `deferred` 만 쌓이고
+     **영원히 수렴하지 않는다**(조용한 무한 연기 — 화면엔 "반영 대기"로만 보인다).
+     무시트에서 그 자리를 대신하는 것은 **작업표**이므로, 상태 토글은 작업표 칸에 기록한다
+     (`sheetlessStatus.markStatusCell` = 리뷰 제출·입금 완료와 **같은 단일 경로**).
+     ★ 토글 외 필드 편집은 `held`(수동 대상)로 남긴다 — 어느 칸에 쓸지는 사람이 정한다. */
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(getPool(), sheetId, tabName); }
+  catch (_) { sheetless = false; }   // 판정 실패 = 모른다 → 종전 엔진(시트 경로)
+  if (sheetless) return _writebackSheetless({ sheetId, tabName });
+
   return _writebackEngine({ sheetId, tabName, tier: 'base' });
+}
+
+/**
+ * 무시트 탭의 상태 토글 반영 — 시트 대신 작업표 칸에 기록한다.
+ * ★ 판정·기록 사본 0: `sheetlessStatus.markStatusCell` 한 경로만 쓴다.
+ * ★ 해제(false)는 지원하지 않는다 — blank-only 규율상 시트 경로도 값을 지우지 못하고,
+ *   무시트에서만 지우기를 열면 두 경로의 의미가 갈린다(`held` 로 남겨 사람이 처리).
+ */
+async function _writebackSheetless({ sheetId, tabName }) {
+  const db = getPool();
+  const markStatus = async (id, st) => {
+    try {
+      await db.query(
+        `UPDATE participant_edits SET writeback_status=$2, writeback_at=NOW() WHERE id=$1`, [id, st]);
+    } catch (_) { /* 표시 실패는 다음 주기 재픽업 */ }
+  };
+  const { rows } = await db.query(
+    `SELECT pe.id, pe.field, pe.value_bool, cp.seq AS row_index
+       FROM participant_edits pe
+       LEFT JOIN campaign_participants cp
+              ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
+             AND cp.deleted_at IS NULL
+             AND ( (pe.anchor_type = 'order'    AND cp.order_submission_id::text = pe.anchor_value)
+                OR (pe.anchor_type = 'manual'   AND cp.id::text                  = pe.anchor_value)
+                OR (pe.anchor_type = 'identity' AND cp.identity_key              = pe.anchor_value) )
+      WHERE pe.sheet_id=$1 AND pe.tab_name=$2 AND pe.reverted_at IS NULL
+        AND pe.field IN ('is_submitted','is_paid')
+        AND (pe.writeback_status IS NULL
+             OR (pe.writeback_status='blocked' AND (pe.writeback_at IS NULL OR pe.writeback_at < NOW() - INTERVAL '30 minutes')))
+      LIMIT 200`, [sheetId, tabName]);
+
+  /* ★ identity 앵커는 한 편집이 여러 행에 걸릴 수 있다(동명이인). 상류 게이트가 모호한 identity 를
+     거르지만 여기서도 fail-closed — **어느 줄인지 모르면 쓰지 않는다**(엉뚱한 줄에 입금 표시가 남는다). */
+  const seen = new Map();
+  for (const r of rows) {
+    const cur = seen.get(r.id);
+    if (!cur) seen.set(r.id, { ...r, _n: 1 });
+    else { cur._n++; if (String(cur.row_index) !== String(r.row_index)) cur.row_index = null; }
+  }
+
+  let written = 0, held = 0, blocked = 0;
+  const st = require('./sheetlessStatus.service');
+  for (const e of seen.values()) {
+    if (e.value_bool !== true) { await markStatus(e.id, 'held'); held++; continue; }   // 해제는 사람이
+    if (!e.row_index) { await markStatus(e.id, 'blocked'); blocked++; continue; }      // 행 앵커 없음 = 자가치유 재시도
+    let r = null;
+    try {
+      r = await st.markStatusCell({
+        sheetId, tabName, rowIndex: e.row_index,
+        kind: e.field === 'is_submitted' ? 'submit' : 'paid', by: 'writeback',
+      });
+    } catch (_) { r = null; }
+    if (r && r.handled && r.ok) { await markStatus(e.id, 'written'); written++; }
+    else { await markStatus(e.id, 'blocked'); blocked++; }
+  }
+  return { tabName, sheetless: true, written, held, blocked, deferred: 0 };
 }
 
 // cron/수동 진입점: cutover(source_of_truth='db') 탭 중 미반영 토글이 있는 탭만 순회(050 부분인덱스).

@@ -512,6 +512,20 @@ router.post('/review', async (req, res, next) => {
         );
         dbUpdated = result.rowCount > 0;
 
+        /* ★★ 무시트 탭은 위 UPDATE 가 **다음 장부 재생성에 지워진다**(주문 한 건만 들어와도).
+           시트 기반 탭은 같은 값이 시트 칸에도 써져 살아남지만 무시트는 시트 쓰기가 막혀 있다.
+           → 작업표의 리뷰제출 칸에 기록해 **재생성이 그것을 다시 읽게** 한다(진실원본 일원화).
+           ★ 시트 기반 탭이면 handled:false = 종전 동작 그대로. 실패해도 제출은 성공(fail-soft). */
+        try {
+          const st = await require('../services/sheetlessStatus.service')
+            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', by: 'review-submit' });
+          if (st.handled && !st.ok) {
+            logger.warn(`[submit] 무시트 리뷰제출 표시 기록 실패 tab=${tabName} row=${rowIndex} reason=${st.reason}`);
+          }
+        } catch (e) {
+          logger.warn(`[submit] 무시트 리뷰제출 표시 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
+        }
+
         // index_master 카운트: FALSE→TRUE 전이일 때만 증가 (보완 제출 중복 방지)
         if (dbUpdated && !wasSubmitted) {
           try {

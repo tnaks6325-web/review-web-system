@@ -158,6 +158,8 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
 
   const client = await db.connect();
   let mirrorRows = 0;
+  let filesKept = 0;          // 보존한 대표 리뷰 이미지 수(조용한 소실 감지용)
+  let filesSeen = 0;          // 보존 대상이었던 행 수 — seen>kept 면 그만큼 행이 사라진 것
   try {
     await client.query('BEGIN');
 
@@ -194,6 +196,24 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
       mirrorRows++;
     }
 
+    /* ★★ ②-0 시스템 전용 값 스냅샷 — **시트에 칸이 없어 작업표에서 되만들 수 없는 값**.
+       `review_index` 를 지우고 다시 넣으므로, 파서가 만들지 않는 컬럼은 여기서 보존하지 않으면
+       **주문 한 건만 더 들어와도 통째로 증발**한다(대표 리뷰 이미지 = 리뷰어 "제출완료" 카드 썸네일·
+       제출일, 업체 뷰어 미리보기, 리뷰 캡처 백필 결과가 전부 사라진다).
+       ★ 제출·입금 표시(is_submitted/is_submitted2)는 **여기서 보존하지 않는다** — 시트에도 칸이 있는
+         값이라 작업표 칸이 진실원본이어야 한다(보존하면 작업표에서 지워도 장부만 남아 갈라진다).
+         그 값들을 켜는 경로는 `sheetlessStatus.service` 가 작업표 칸에 기록한다.
+       ★ 앵커는 row_index 하나뿐(= 작업표 seq = 시트 실제 행 번호). */
+    const { rows: keepRows } = await client.query(
+      `SELECT row_index, review_file_id, review_file_url, review_file_name,
+              review_file_count, review_file_at
+         FROM review_index
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
+      [sheetId, tabName]);
+
+    filesSeen = keepRows.length;
+
     // ② 검색 명단(review_index) — 그 탭만 갈아끼운다(시트 빌더와 같은 방식)
     await client.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [sheetId, tabName]);
     for (const r of parsed) {
@@ -207,6 +227,19 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
          !!r.isSubmitted, r.isSubmitted2 || 'NONE', r.productUrl || null, r.productName || null,
          r.submitCol || null, r.submitCol2 || null, JSON.stringify(r.rowJson || {}),
          r.startDate || null, r.endDate || null, r.round || null, r.phone8 || null]);
+    }
+
+    /* ②-1 스냅샷 복원 — 파서가 만들지 않는 컬럼이라 덮어쓸 값이 없다(충돌 없는 순수 복원).
+       ★ 재생성 결과에 없는 행(작업표에서 사라진 줄)은 WHERE 가 0행이라 자동으로 버려진다. */
+    for (const k of keepRows) {
+      const r = await client.query(
+        `UPDATE review_index
+            SET review_file_id = $3, review_file_url = $4, review_file_name = $5,
+                review_file_count = $6, review_file_at = $7
+          WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $8`,
+        [sheetId, tabName, k.review_file_id, k.review_file_url, k.review_file_name,
+         k.review_file_count, k.review_file_at, k.row_index]);
+      filesKept += r.rowCount;
     }
 
     // ③ 작업 등록부(index_master) — 작업 목록 노출 게이트. 없으면 접수해도 어디에도 안 뜬다.
@@ -234,6 +267,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   return {
     ok: true, sheetId, tabName, tabGid, headerSource,
     headers, headerRow, mirrorRows, indexRows: parsed.length, submittedCount,
+    filesKept, filesSeen,
   };
 }
 
