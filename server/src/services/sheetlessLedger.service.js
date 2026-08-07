@@ -128,10 +128,16 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
       ORDER BY seq`, [sheetId, tabName]);
 
   // ── 헤더 ──
+  /* ★★ `detected_headers` 를 먼저 본다(2026-08 실측 사고): 시트 미러가 `headers` 에 넣는 값은
+     **시트 A1 행 그대로**(대개 캠페인 정보 1~2칸)이고 진짜 열 이름 줄은 `detected_headers` 에 있다.
+     무시트 탭은 이 함수가 둘 다 같은 값으로 써 넣으므로 **동작이 한 글자도 안 바뀌고**,
+     시트 기반 탭을 preflight 로 볼 때만 달라진다 — 종전엔 A1 2칸이 잡혀
+     "열 2개 · 검색 명단 0명"인데 점검이 통과하는 false-green 이었다. */
   const { rows: prevTab } = await db.query(
-    `SELECT headers FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2 LIMIT 1`, [sheetId, tabGid]);
+    `SELECT detected_headers, headers FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2 LIMIT 1`,
+    [sheetId, tabGid]);
   const { headers, source: headerSource } = resolveHeaders({
-    storedHeaders: prevTab[0] && prevTab[0].headers, columns, rows: parts,
+    storedHeaders: prevTab[0] && (prevTab[0].detected_headers || prevTab[0].headers), columns, rows: parts,
   });
   if (!headers.length) {
     throw new LedgerError('no_headers',

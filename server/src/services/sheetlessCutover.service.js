@@ -25,9 +25,6 @@ function _db() { if (!_pool) _pool = require('../db/pool'); return _pool; }
 function __setPoolForTest(p) { _pool = p || null; }
 
 const LIST_CAP = 800;
-// 미러 신선도 — 끊기 전에 시트의 마지막 상태가 우리 쪽에 들어와 있어야 한다.
-//   RAW 미러 크론이 5분 주기라 30분이면 평상시엔 늘 통과하고, 오래 멈춰 있었다면 잡힌다.
-const MIRROR_FRESH_MIN = Number(process.env.SHEETLESS_MIRROR_FRESH_MIN || 30);
 
 /** 이관 후 시트에 남길 안내. ★ 헤더 탐지 키워드를 2개 이상 넣지 말 것(sheetNotice.validateNoticeText 가 차단). */
 const CUTOVER_NOTICE = '⛔ 이 작업은 리뷰웹시스템으로 이관되었습니다 · 이 문서는 더 이상 반영되지 않으니 리뷰웹시스템에서 작업해 주세요';
@@ -104,30 +101,64 @@ async function _checkPending(db, tab) {
   }
 }
 
-/** ④ 시트 사본이 최근 것이어야 한다(끊기 직전의 시트 상태가 우리 쪽에 있어야). */
+/**
+ * ④ 시트의 **최신 상태를 우리가 갖고 있어야** 한다.
+ *
+ * ★★ 종전엔 `mirrored_at` 의 경과 시간(30분)으로 봤는데 **틀린 판정이었다**(2026-08 실측):
+ *    미러는 **내용이 바뀐 탭만** 다시 읽고 `mirrored_at` 을 갱신한다(변경 없으면 시트 단위로
+ *    통째 skip). 즉 조용한 작업일수록 그 값이 낡아져 **이관하기 가장 좋은 작업(끝나서 조용한
+ *    작업)이 영구히 막혔다** — 실제로 등록 작업 86건이 전부 이 항목에서 잠겼다.
+ * ★ 그래서 "얼마나 오래됐나"가 아니라 **"그 뒤로 시트가 바뀌었나"** 를 본다.
+ *   Drive 최종수정 시각을 그 자리에서 1콜 조회해 우리가 읽어 둔 시점과 대조한다.
+ * ★ 이 화면에서 **외부 API 를 쓰는 유일한 경로** — 사람이 [점검]을 누를 때만, 탭당 1콜,
+ *   그리고 **시트 lane 이 아니라 drive lane**(주문 쓰기 슬롯을 건드리지 않는다).
+ * ★ 조회 실패는 `unknown` = 잠금(fail-closed) — 모르면 열지 않는다.
+ */
 async function _checkMirror(tab, now) {
-  const label = '시트 사본 최신';
-  const at = tab.mirroredAt ? new Date(tab.mirroredAt) : null;
-  if (!at || Number.isNaN(at.getTime())) {
+  const label = '시트 최신 상태 확보';
+  const mirroredAt = tab.mirroredAt ? new Date(tab.mirroredAt).getTime() : 0;
+  if (!mirroredAt) {
     return _chk('mirror', label, 'unknown', '시트를 읽어 온 기록이 없습니다',
       '시트 데이터 반영 점검 화면에서 그 시트를 한 번 새로고침하세요.');
   }
-  const min = Math.floor((now.getTime() - at.getTime()) / 60000);
-  if (min > MIRROR_FRESH_MIN) {
-    return _chk('mirror', label, 'fail', `마지막으로 읽어 온 지 ${min}분 지남(기준 ${MIRROR_FRESH_MIN}분)`,
-      '시트를 한 번 새로고침해 최신 상태를 받아 온 뒤 이관하세요.');
+  // 우리가 "그 시트의 이 버전까지 읽었다"고 기록해 둔 시각. 없으면 읽어 온 시각으로 대신한다.
+  const known = tab.sheetModifiedAt ? new Date(tab.sheetModifiedAt).getTime() : mirroredAt;
+  let remote = null;
+  try {
+    const { getSheetModifiedTime } = require('./sheets.service');
+    const { driveThrottledCall } = require('../utils/sheetsThrottle');
+    const t = await driveThrottledCall(() => getSheetModifiedTime(tab.sheetId));
+    remote = t ? new Date(t).getTime() : null;
+  } catch (e) {
+    return _chk('mirror', label, 'unknown', '구글에서 시트 상태를 확인하지 못했습니다: ' + e.message,
+      '잠시 뒤 다시 점검하세요.');
   }
-  return _chk('mirror', label, 'pass', `${min}분 전에 읽어 옴`);
+  if (!remote || Number.isNaN(remote)) {
+    return _chk('mirror', label, 'unknown', '시트의 최종 수정 시각을 알 수 없습니다',
+      '시트 접근 권한을 확인한 뒤 다시 점검하세요.');
+  }
+  const ago = Math.max(0, Math.floor((now.getTime() - remote) / 60000));
+  if (remote > known) {
+    return _chk('mirror', label, 'fail', `시트가 ${ago}분 전에 수정됐는데 아직 읽어 오지 않았습니다`,
+      '시트 데이터 반영 점검 화면에서 그 시트를 새로고침한 뒤 이관하세요 — 지금 끊으면 그 편집이 사라집니다.');
+  }
+  return _chk('mirror', label, 'pass', `시트 최종 수정 ${ago}분 전 · 그 이후로 바뀐 것 없음(읽어 둔 상태가 최신)`);
 }
 
-/** ⑤ 열 구성을 알아볼 수 있어야 한다 — 못 하면 끊는 순간 검색·행배정이 통째로 죽는다. */
-async function _checkLedger(tab) {
-  const label = '열 구성 인식';
+/**
+ * ⑤ 이관 후에도 **검색 명단이 그대로 서야** 한다 — 못 하면 끊는 순간 리뷰어 검색이 죽는다.
+ *
+ * ★★ 종전엔 "예외가 안 났나"만 봤다 — 그래서 `열 2개 · 표 500줄 → 검색 명단 0명` 인 탭도
+ *    초록으로 통과했다(실측). fail-closed 라 해놓고 가장 위험한 항목이 아무것도 막지 못했다.
+ * ★ 지금은 **지금 명단 수와 이관 후 명단 수를 대조**한다 — 줄어들면 그만큼이 검색에서 사라진다.
+ */
+async function _checkLedger(db, tab) {
+  const label = '이관 후 검색 명단 유지';
+  let r;
   try {
-    const r = await require('./sheetlessLedger.service').rebuildLedgers({
+    r = await require('./sheetlessLedger.service').rebuildLedgers({
       sheetId: tab.sheetId, tabName: tab.tabName, dryRun: true, preflight: true,
     });
-    return _chk('ledger', label, 'pass', `열 ${(r.headers || []).length}개 · 표 ${r.mirrorRows}줄 → 검색 명단 ${r.indexRows}명`);
   } catch (e) {
     const code = e && e.code ? e.code : '';
     if (code === 'no_headers') {
@@ -139,6 +170,25 @@ async function _checkLedger(tab) {
     }
     return _chk('ledger', label, 'unknown', '확인 실패: ' + e.message, '잠시 뒤 다시 확인하세요.');
   }
+  const after = Number(r.indexRows) || 0;
+  let before = null;
+  try {
+    const { rows } = await db.query(
+      `SELECT COUNT(*)::int AS n FROM review_index
+        WHERE sheet_id = $1 AND tab_name = $2 AND row_index IS NOT NULL`, [tab.sheetId, tab.tabName]);
+    before = (rows[0] && rows[0].n) || 0;
+  } catch (e) {
+    return _chk('ledger', label, 'unknown', '지금 검색 명단 수를 확인하지 못했습니다: ' + e.message,
+      '잠시 뒤 다시 점검하세요.');
+  }
+  const cols = (r.headers || []).length;
+  if (after < before) {
+    return _chk('ledger', label, 'fail',
+      `지금 ${before}명인데 이관 후 ${after}명 (열 ${cols}개 · 표 ${r.mirrorRows}줄)`,
+      '이관하면 그 차이만큼 리뷰어 검색에서 사라집니다 — 작업표의 열 이름 줄과 줄 채우기를 먼저 확인하세요.');
+  }
+  return _chk('ledger', label, 'pass',
+    `열 ${cols}개 · 표 ${r.mirrorRows}줄 → 검색 명단 ${after}명(지금 ${before}명)`);
 }
 
 /** 한 탭의 기본 정보(점검·이관 공통 재료). */
@@ -149,10 +199,10 @@ async function _loadTab(db, sheetId, tabName) {
             COALESCE(tc.display_name, tc.tab_name) AS "displayName",
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             tc.sheetless_at AS "sheetlessAt", tc.sheetless_by AS "sheetlessBy",
-            rst."mirroredAt", cp.cnt AS "boardRows"
+            rst."mirroredAt", rst."sheetModifiedAt", cp.cnt AS "boardRows"
        FROM tab_configs tc
        LEFT JOIN LATERAL (
-         SELECT r.mirrored_at AS "mirroredAt", r.tab_gid AS "mirrorGid"
+         SELECT r.mirrored_at AS "mirroredAt", r.sheet_modified_at AS "sheetModifiedAt", r.tab_gid AS "mirrorGid"
            FROM raw_sheet_tabs r
           WHERE r.sheet_id = tc.sheet_id
             AND (r.tab_name = tc.tab_name
@@ -188,7 +238,7 @@ async function cutoverChecklist({ sheetId, tabName, now = new Date() } = {}) {
     await _checkParity(tab),
     await _checkPending(db, tab),
     await _checkMirror(tab, now),
-    await _checkLedger(tab),
+    await _checkLedger(db, tab),
   ];
   // ★★ fail-closed — pass 가 아닌 항목이 하나라도 있으면 잠근다('unknown' 포함).
   const blocking = checks.filter(c => c.state !== 'pass');
@@ -347,6 +397,5 @@ module.exports = {
   enableSheetless,
   disableSheetless,
   CUTOVER_NOTICE,
-  MIRROR_FRESH_MIN,
   __setPoolForTest,
 };
