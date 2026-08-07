@@ -213,11 +213,15 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
   const ignoreMap = await _loadIgnoreMap();
 
   const items = [];
-  let filteredOld = 0, yearUnknown = 0, ignoredCount = 0;
+  let filteredOld = 0, yearUnknown = 0, ignoredCount = 0, purchaseUnconfirmed = 0;
   for (const r of rows) {
     const regUnknown = !r.registeredAt;
     // ── 연도 하한: 과거 작업은 빼고, 연도를 모르는 작업은 따로 센다(조용한 누락 금지) ──
-    const act = activity.resolveActivity({ ...r, probedAt: probeMap[r.sheetId + '\t' + r.tabName] || null });
+    // ★ 'none' = 확인했지만 연도를 알 수 없는 탭(글자로 친 날짜) — 신호가 아니다.
+    const probed = probeMap[r.sheetId + '\t' + r.tabName];
+    const probedAt = (probed && probed !== 'none') ? probed : null;
+    const act = activity.resolveActivity({ ...r, probedAt });
+    if (activity.purchaseUnconfirmed({ ...r, probedAt })) purchaseUnconfirmed++;
     const verdict = activity.activityVerdict(act, sinceDay, includeUnknown);
     if (verdict === 'old') { filteredOld++; continue; }
     if (verdict === 'unknown') { yearUnknown++; continue; }
@@ -294,7 +298,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
     flagged: items.filter(i => i.severity !== 'ok').length,
     includeArchived: !!includeArchived,
     since: sinceDay, filteredOld, yearUnknown, includeUnknown: !!includeUnknown,
-    ignoredCount, includeIgnored: !!includeIgnored,
+    ignoredCount, includeIgnored: !!includeIgnored, purchaseUnconfirmed,
     detailCapped,
     truncated: rows.length >= lim,
     items,
@@ -523,7 +527,7 @@ async function _loadProbeMap() {
     const o = JSON.parse(rows[0].value);
     return (o && typeof o === 'object') ? o : {};
   } catch (e) {
-    logger.warn(`[sheetSync] 연도 확인 캐시 조회 실패: ${e.message}`);
+    logger.warn(`[sheetSync] 연도 확인 캐시 조회 실패: ${e.message}`);   // eslint-disable-line
     return {};   // fail-soft — 캐시가 없으면 그냥 미상으로 보일 뿐이다
   }
 }
@@ -535,7 +539,7 @@ function _colLetter(idx) {
   return out;
 }
 
-async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync' } = {}) {
+async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync', force = false } = {}) {
   const { throttledCall } = require('../utils/sheetsThrottle');
   const { readSheet } = require('./sheets.service');
   const { findDateColumnIndex } = require('./campaignSchedule.service');
@@ -564,8 +568,11 @@ async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync' } = {})
   const cached = await _loadProbeMap();
   const targets = rows.filter(r => {
     if (!r.tabGid) return false;                                   // gid 없이는 그 탭을 읽을 수 없다
-    if (cached[r.sheetId + '\t' + r.tabName]) return false;        // 이미 확인함(시트 재읽기 0)
-    return activity.resolveActivity(r).yearUnknown;
+    if (!force && cached[r.sheetId + '\t' + r.tabName]) return false;   // 이미 확인함(시트 재읽기 0)
+    // ★★ 대상은 "**구매일 연도 미확정**" 탭이다 — `yearUnknown` 만 보면 안 된다.
+    //   표기에 연도가 없으면 판정이 시트 등록일로 폴백해 `yearUnknown=false` 가 되는데,
+    //   그 등록일이 2026 이면 **2024·2025 작업이 목록에 남는다**(실측 신고). 그런 탭이야말로 확인 대상.
+    return activity.purchaseUnconfirmed({ ...r, probedAt: cached[r.sheetId + '\t' + r.tabName] });
   });
   const pick = targets.slice(0, cap);
   const capped = targets.length > pick.length;
@@ -598,7 +605,12 @@ async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync' } = {})
         if (!best || iso > best) best = iso;      // 그 탭의 마지막 진행일
       }
       if (best) found[t.sheetId + '\t' + t.tabName] = best;
-      else failed.push({ ...t, reason: 'no_dated_cell' });
+      else {
+        // ★ 글자로 친 날짜(일련번호 아님) — 확인해도 연도를 알 수 없다. `none` 으로 남겨
+        //   같은 탭을 매번 다시 읽지 않는다(쿼터 보호). force 로만 재시도.
+        found[t.sheetId + '\t' + t.tabName] = 'none';
+        failed.push({ ...t, reason: 'no_dated_cell' });
+      }
     } catch (e) {
       logger.warn(`[sheetSync] 연도 확인 실패(${t.sheetId}/${t.tabName}): ${e.message}`);
       failed.push({ sheetId: t.sheetId, tabName: t.tabName, reason: 'read_error' });
@@ -615,7 +627,8 @@ async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync' } = {})
   }
   return {
     ok: true, unknownTabs: targets.length, probed: pick.length, capped,
-    resolved: Object.keys(found).length,
+    remaining: Math.max(0, targets.length - pick.length),
+    resolved: Object.values(found).filter(v => v !== 'none').length,
     failed: failed.slice(0, 30).map(f => ({ tabName: f.tabName, reason: f.reason })),
     failedCount: failed.length,
     sample: Object.entries(found).slice(0, 10).map(([k, v]) => ({ tabName: k.split('\t')[1], date: v })),

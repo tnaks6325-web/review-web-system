@@ -290,8 +290,8 @@ router.post('/sheet-sync/ignore', authMiddleware, adminOrMasterMiddleware, async
 //     탭당 1콜(날짜 컬럼 한 열), throttle 을 탄다. 결과는 캐시되어 재조회 0.
 router.post('/sheet-sync/year-probe', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { limit } = req.body || {};
-    res.json(await sheetSync.probeUnknownYears({ limit, by: _by(req) }));
+    const { limit, force } = req.body || {};
+    res.json(await sheetSync.probeUnknownYears({ limit, force: force === true, by: _by(req) }));
   } catch (err) { next(err); }
 });
 // tab_configs.tab_gid 백필 — 시트만 열리던 링크를 "그 탭이 열리는 링크"로. 기본은 미리보기.

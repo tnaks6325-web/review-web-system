@@ -98,6 +98,19 @@ function resolveActivity(r = {}) {
   return { activityAt: best[1], activitySource: best[0], yearUnknown: false };
 }
 
+/**
+ * 구매일 연도가 아직 확정되지 않았는가(순수함수).
+ *
+ * ★★ 이걸 따로 두는 이유(실측 사고): 시트 표기가 `7 / 12 (금)` 처럼 **연도가 없으면** 구매일 신호가
+ *   null 이 되어 판정이 `시트 등록일`로 폴백한다. 그런데 등록일은 DB 행이 만들어진 시각이라
+ *   **과거 작업도 2026 으로 찍힐 수 있다** → 2024·2025 작업이 목록에 그대로 남았다.
+ *   게다가 그런 탭은 `yearUnknown` 이 아니라서 [연도 확인] 대상에서도 빠져 영영 교정되지 않았다.
+ * ★ 그래서 "구매일 연도 미확정"을 **별도 신호**로 세어 화면이 드러내고, 연도 확인이 그 탭들을 대상으로 삼는다.
+ */
+function purchaseUnconfirmed(r = {}) {
+  return !(_iso(r.probedAt) || explicitYearDate(r.sampleStartDate));
+}
+
 /** 'YYYY-MM-DD' 형식만 인정 — 아니면 기본값(형식 오류로 필터가 통째로 꺼지는 것 방지) */
 function normalizeSince(since) {
   return (typeof since === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(since)) ? since : ACTIVITY_SINCE_DEFAULT;
@@ -118,6 +131,7 @@ module.exports = {
   ACTIVITY_SELECT_SQL,
   resolveActivity,
   explicitYearDate,
+  purchaseUnconfirmed,
   normalizeSince,
   activityVerdict,
 };
