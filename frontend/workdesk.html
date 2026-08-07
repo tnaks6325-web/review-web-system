@@ -1432,6 +1432,23 @@
 .gdcard:hover .gdgo{color:var(--acc,#2563A8)}
 #gdhead .mh{max-width:1120px}
 
+/* 탈시트 전환 화면 (W4 · C) — 전부 co- 접두 신설(기존 클래스와 이름 충돌 금지).
+   ★ 헤더 캡 = 본문 캡과 **같은 값**(1120px) — 다르면 버튼이 데이터 오른쪽 끝에서 어긋난다. */
+#cohead .mh{max-width:1120px}
+#cohead .ovnote{max-width:1120px}
+.cotools{max-width:1120px;display:flex;gap:6px;margin:0 0 10px}
+.cowrap{max-width:1120px;display:flex;flex-direction:column;gap:8px}
+.cocard{background:var(--card,#fff);border:1px solid var(--line,#e3e7ec);border-radius:10px;padding:12px 14px}
+.cocard.done{background:var(--card2,#f7f9fb)}
+.cotop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.comuted{font-size:12.5px;color:var(--muted,#7a838d)}
+.cochk{margin-top:10px;border-top:1px dashed var(--line,#e3e7ec);padding-top:10px}
+.corow{display:flex;gap:9px;align-items:flex-start;padding:4px 0;font-size:13.5px}
+.cok{color:var(--safe,#0f8a5f);font-weight:800}
+.cbad{color:var(--danger,#c0392b);font-weight:800}
+.cunk{color:var(--warn,#a86a00);font-weight:800}
+.coact{margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
 /* 무시트 배지 — 작업명 옆 작은 알약. 홈 목록·작업보드 상단·업체관리 표 **공용**(ns- 접두 신설).
    ★ 홈 전용이 아니므로 홈 CSS 블록 밖에 둔다(홈 스코프 가드의 의미를 흐리지 않게). */
 .ns-b{display:inline-block;border-radius:999px;padding:1px 7px;margin-left:5px;font-size:10px;font-weight:750;
@@ -1768,6 +1785,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
         <button class="navb" data-v="guides" onclick="switchView('guides')">업무가이드</button>
+        <button class="navb" data-v="cutover" onclick="switchView('cutover')">탈시트 전환</button>
         <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="home" onclick="switchView('home')">🏠 홈</button>
@@ -1847,7 +1865,7 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업보드 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업보드 뷰에만
-  if(v==='home') renderHomeView(); else if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
+  if(v==='home') renderHomeView(); else if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='payment') renderPaymentView(); else if(v==='guides') renderGuidesView(); else if(v==='cutover') renderCutoverView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업보드를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
   // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
   //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
@@ -5860,6 +5878,134 @@ function _gdRender(){
             <div class="gdgo">↗</div></a>`).join('')
         }</div></div>`;
       }).join('');
+}
+
+/* ══ 탈시트 전환 (W4 · C) — 무시트 표식을 켜는 유일한 화면 ══════════════════
+   ★★ 이 화면이 하는 일은 **점검하고 켜는 것**까지다(사용자 확정). 백필·미러 같은 준비는
+      시트 데이터 반영 점검 화면이 이미 담당하므로, 여기서 한 버튼으로 묶지 않는다 —
+      묶으면 중간 실패 시 어디까지 됐는지 사람이 알 수 없다.
+   ★★ 점검표는 **서버가 판정한 것을 그대로 그린다**(프론트 재판정 0) — 화면이 초록인데
+      서버가 거부하는 상태가 구조적으로 생기지 않는다.
+   ★ onclick 에는 **인덱스만** 넘긴다(시트에서 온 작업명 보간 금지 — 실측 XSS 선례).
+   ★ 권한은 nav 노출과 서버 게이트(adminOrMaster)가 1:1. */
+function renderCutoverView(){
+  STATE.co = STATE.co || { items: [], q: '', filter: 'todo', checks: {}, busy: '' };
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="cohead"></div><div id="cobody">
+    <div class="empty">불러오는 중…</div></div></div>`;
+  _coLoad();
+}
+async function _coLoad(){
+  try{
+    const j = await api('/api/trackb/sheetless/list');
+    if(j && j.code==='not_ready'){ _coFailed(j.error||'준비 전입니다'); return; }
+    if(!j || j.ok===false){ _coFailed((j&&j.error)||'목록을 불러오지 못했습니다'); return; }
+    STATE.co.items = j.items||[]; STATE.co.meta = j;
+    _coRender();
+  }catch(e){ _coFailed(e.message||'네트워크 오류'); }   // ★ 자리표시자를 깐 함수는 어떤 예외에도 화면을 끝낸다
+}
+function _coFailed(msg){
+  $('#cohead').innerHTML=`<div class="mh"><h1>탈시트 전환</h1><span class="sp" style="flex:1"></span></div>`;
+  $('#cobody').innerHTML=`<div class="empty">${esc(msg)}<div style="margin-top:10px">
+    <button class="btn" onclick="_coLoad()">다시 시도</button></div></div>`;
+}
+function _coMatch(t){
+  const f = STATE.co.filter, q = String(STATE.co.q||'').trim().toLowerCase();
+  if(f==='todo' && t.sheetless) return false;
+  if(f==='done' && !t.sheetless) return false;
+  if(q && !((t.displayName||'')+' '+(t.tabName||'')).toLowerCase().includes(q)) return false;
+  return true;
+}
+function _coRender(){
+  const all = STATE.co.items||[], m = STATE.co.meta||{};
+  const list = all.filter(_coMatch);
+  const chip=(k,l,n)=>`<button class="btn${STATE.co.filter===k?' on':''}" onclick="STATE.co.filter='${k}';_coRender()">${l} ${n}</button>`;
+  $('#cohead').innerHTML=`<div class="mh"><h1>탈시트 전환</h1>
+      <span class="bd g">이관됨 ${m.done||0}</span><span class="bd">남음 ${m.remaining||0}</span>
+      <span class="sp" style="flex:1"></span>
+      <input class="ovsearch" id="coq" placeholder="작업 검색" value="${esc(STATE.co.q||'')}"
+        oninput="STATE.co.q=this.value;_coRows()">
+      <button class="btn" onclick="_coLoad()">새로고침</button></div>
+    <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
+      점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
+      준비 작업(줄 채우기·시트 새로고침)은 <b>시트 데이터 반영 점검</b> 화면에서 먼저 하세요.
+      ${m.filteredOld?`<br>지난 연도 작업 ${m.filteredOld}건은 목록에서 제외했습니다.`:''}
+      ${m.truncated?'<br><b>목록이 잘렸습니다</b> — 검색으로 좁혀 보세요.':''}</div>
+    <div class="cotools">${chip('todo','남음',m.remaining||0)}${chip('done','이관됨',m.done||0)}${chip('all','전체',all.length)}</div>`;
+  _coRows();
+}
+function _coRows(){
+  const list = (STATE.co.items||[]).filter(_coMatch);
+  $('#cobody').innerHTML = !list.length
+    ? `<div class="empty">조건에 맞는 작업이 없습니다.</div>`
+    : `<div class="cowrap">${list.map(t=>{
+        const i = STATE.co.items.indexOf(t);
+        const ck = STATE.co.checks[t.sheetId+'\u0000'+t.tabName];
+        return `<div class="cocard${t.sheetless?' done':''}">
+          <div class="cotop">
+            <b>${esc(t.displayName||t.tabName)}</b>
+            ${t.sheetless?'<span class="ns-b">무시트</span>':''}
+            <span class="sp" style="flex:1"></span>
+            <span class="comuted">표 ${t.boardRows}줄${t.pendingOrders?` · <b style="color:var(--warn)">미반영 ${t.pendingOrders}</b>`:''}</span>
+            ${t.sheetless
+              ? `<button class="btn" onclick="_coReconnect(${i})">↩ 재연결</button>`
+              : `<button class="btn" onclick="_coCheck(${i})">점검</button>`}
+          </div>
+          ${t.sheetless && t.sheetlessAt
+            ? `<div class="comuted">${esc(String(t.sheetlessAt).slice(0,10))} 이관${t.sheetlessBy?' · '+esc(t.sheetlessBy):''}</div>`:''}
+          ${ck?_coChecklistHtml(ck,i):''}
+        </div>`;
+      }).join('')}</div>`;
+}
+function _coChecklistHtml(ck,i){
+  if(ck.loading) return `<div class="comuted" style="margin-top:8px">점검 중…</div>`;
+  if(ck.error)   return `<div class="comuted" style="margin-top:8px;color:var(--danger)">${esc(ck.error)}</div>`;
+  const ic = s => s==='pass'?'<span class="cok">✓</span>' : (s==='fail'?'<span class="cbad">✕</span>':'<span class="cunk">?</span>');
+  return `<div class="cochk">
+    ${(ck.checks||[]).map(c=>`<div class="corow">${ic(c.state)}
+      <div><b>${esc(c.label)}</b><div class="comuted">${esc(c.detail)}${c.state!=='pass'&&c.hint?' — '+esc(c.hint):''}</div></div></div>`).join('')}
+    <div class="coact">${ck.canCutover
+      ? `<span class="comuted">이관하려면 작업 이름을 그대로 입력하세요:</span>
+         <input class="ovsearch" id="cocf${i}" placeholder="${esc(STATE.co.items[i].tabName)}" style="max-width:280px">
+         <button class="btn dark" onclick="_coCutover(${i})">이관</button>`
+      : `<span class="comuted">통과하지 못한 항목이 있어 이관할 수 없습니다. <b>?</b> 는 "확인 불가" — 통과가 아닙니다.</span>`}
+    </div></div>`;
+}
+async function _coCheck(i){
+  const t = STATE.co.items[i]; if(!t) return;
+  const k = t.sheetId+'\u0000'+t.tabName;
+  STATE.co.checks[k] = { loading:true }; _coRows();
+  try{
+    const j = await api('/api/trackb/sheetless/checklist?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+    STATE.co.checks[k] = (j && j.ok) ? j : { error:(j&&(j.error||j.message))||'점검 실패' };
+  }catch(e){ STATE.co.checks[k] = { error: e.message||'네트워크 오류' }; }
+  _coRows();
+}
+async function _coCutover(i){
+  const t = STATE.co.items[i]; if(!t) return;
+  const el = document.getElementById('cocf'+i);
+  const confirmName = el ? el.value : '';
+  if(String(confirmName).trim() !== String(t.tabName).trim()){ alert('작업 이름을 정확히 입력해야 이관됩니다.'); return; }
+  if(!confirm(`「${t.displayName||t.tabName}」 의 구글시트 연결을 끊습니다.\n\n이후 이 작업은 시트를 읽지도 쓰지도 않습니다.\n되돌리려면 [재연결]을 누르면 됩니다.\n\n진행할까요?`)) return;
+  try{
+    const j = await api('/api/trackb/sheetless/cutover',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName, confirmName })});
+    if(!j || j.ok===false){ alert((j&&(j.error||j.message))||'이관하지 못했습니다.'); await _coCheck(i); return; }
+    // ★ 부수효과(장부 재생성·시트 안내문) 실패는 조용히 넘기지 않는다 — 이관은 됐지만 알려야 한다.
+    const warn = [];
+    if(j.ledger && j.ledger.ok===false) warn.push('장부 재생성 실패: '+(j.ledger.message||j.ledger.reason));
+    if(j.notice && j.notice.ok===false) warn.push('시트 안내문 기입 실패: '+(j.notice.message||j.notice.skipped||''));
+    alert('이관했습니다.' + (warn.length?('\n\n'+warn.join('\n')):''));
+    delete STATE.co.checks[t.sheetId+'\u0000'+t.tabName];
+    await _coLoad();
+  }catch(e){ alert('이관 실패: '+(e.message||'')); }
+}
+async function _coReconnect(i){
+  const t = STATE.co.items[i]; if(!t) return;
+  if(!confirm(`「${t.displayName||t.tabName}」 를 시트에 다시 연결합니다.\n\n다음 갱신부터 시트 값이 시스템 표 대신 반영됩니다.\n시스템에서 편집한 내용이 시트 값으로 덮일 수 있습니다.\n\n진행할까요?`)) return;
+  try{
+    const j = await api('/api/trackb/sheetless/reconnect',{method:'POST',body:JSON.stringify({ sheetId:t.sheetId, tabName:t.tabName })});
+    alert((j&&j.message)||'처리했습니다.');
+    await _coLoad();
+  }catch(e){ alert('재연결 실패: '+(e.message||'')); }
 }
 
 async function renderSettingsView(){

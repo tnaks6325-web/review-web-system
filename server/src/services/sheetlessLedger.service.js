@@ -99,7 +99,13 @@ function buildValues({ headers, rows }) {
  * @param {string}  [o.by='system']
  * @returns {Promise<object>} 요약
  */
-async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false, by = 'system' } = {}) {
+/**
+ * @param {boolean} preflight  이관 **전** 점검용(전환 관리 화면 ⑤ 항목). `dryRun` 과 **함께일 때만** 유효하며
+ *   시트 기반 탭에서도 "열 구성을 알아볼 수 있는가"를 계산해 본다. 쓰기 경로는 그대로 잠겨 있다
+ *   — 게이트가 막으려는 것은 **시트 값 덮어쓰기**인데 dry-run 은 한 줄도 쓰지 않기 때문.
+ *   ★ preflight 만 주고 dryRun 을 빼면 종전대로 `not_sheetless` 로 거부한다(완화 금지).
+ */
+async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false, by = 'system', preflight = false } = {}) {
   if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
   const db = getPool();
 
@@ -108,7 +114,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     `SELECT tab_gid, campaign_name, COALESCE(sheetless, FALSE) AS sheetless
        FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
   if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다(접수 후 이용).');
-  if (!tcRows[0].sheetless) {
+  if (!tcRows[0].sheetless && !(dryRun && preflight)) {
     throw new LedgerError('not_sheetless',
       '시트 기반 탭입니다 — 장부는 시트에서 만들어집니다. 이 탭을 무시트로 이관한 뒤 실행하세요.');
   }
