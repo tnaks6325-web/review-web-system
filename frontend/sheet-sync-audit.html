@@ -70,10 +70,39 @@
     <table>
       <thead><tr>
         <th>상태</th><th>작업명</th><th>등록일</th>
-        <th class="num">시트(RAW)행</th><th class="num">인덱스행</th><th class="num">작업보드행</th>
+        <th class="num" title="시트 헤더 아래에서 값이 있는 행 = 실제 작업 건수(상단 캠페인 정보·헤더 줄 제외)">시트 작업건수</th>
+        <th class="num" title="리뷰어 검색·구매양식 제출의 재료(review_index)">검색인덱스</th>
+        <th class="num" title="리뷰웹시스템[3버전] 작업보드 표의 행">작업보드</th>
         <th>진단</th><th>처리</th>
       </tr></thead>
       <tbody id="tbody"><tr><td colspan="8" style="color:var(--t2)">위에서 [점검 실행]을 눌러주세요.</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- ══════════ 시트 우위 점검 (탈 구글시트 1차) ══════════ -->
+  <h1 style="margin-top:28px">➕ 시트 우위 점검 — 시트에 더 준비된 인원을 표로</h1>
+  <div class="sub">
+    시트에는 구매일자가 준비돼 있는데 <b>시스템 표에는 자리조차 없는 행</b>을 찾습니다(이름이 비어 있는 준비 행은
+    검색인덱스에서 걸러져 표에 들어오지 못합니다).<br/>
+    [표 동기화]를 누르면 그만큼 <b>빈 자리를 추가</b>하고(기존 행은 건드리지 않음), 공고 정원이 표보다 작으면 [정원 교정]으로 맞춥니다.
+  </div>
+
+  <div class="card" id="ssCtrl" style="display:none">
+    <div class="bar">
+      <button class="btn" id="btnSlot" onclick="runSlotAudit()">시트 우위 점검 실행</button>
+      <span style="color:var(--t2); font-size:12.5px">읽기 전용입니다. 구글시트를 새로 읽지 않습니다(5분 주기 사본을 봅니다).</span>
+    </div>
+    <div id="ssSummary"></div>
+  </div>
+
+  <div class="card" style="overflow:auto; max-height:72vh">
+    <table>
+      <thead><tr>
+        <th>상태</th><th>작업명</th>
+        <th class="num">시트 준비</th><th class="num">시스템 표</th><th class="num">부족</th>
+        <th>투입 기간</th><th>연결 공고 · 정원</th><th>처리</th>
+      </tr></thead>
+      <tbody id="ssBody"><tr><td colspan="8" style="color:var(--t2)">위에서 [시트 우위 점검 실행]을 눌러주세요.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -96,6 +125,7 @@
     const has = !!tok();
     document.getElementById('loginBox').style.display = has ? 'none' : 'block';
     document.getElementById('ctrlBox').style.display = has ? 'block' : 'none';
+    document.getElementById('ssCtrl').style.display = has ? 'block' : 'none';
   }
   async function doLogin() {
     try {
@@ -139,7 +169,12 @@
     document.getElementById('summary').innerHTML =
       '점검 대상 <b>' + ITEMS.length + '</b>개 작업 중 문제 <b style="color:' + (flagged.length ? 'var(--err)' : 'var(--ok)') + '">' + flagged.length + '</b>개'
       + (meta.before ? ' · 기준: <b>' + esc(meta.before) + '</b> 이전 등록(등록일 미상 포함)' : ' · 전체 작업')
-      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다(상한 초과)</b>' : '');
+      + (meta.detailCapped ? ' · <b style="color:var(--warn)">⚠ 문제 탭이 많아 일부만 정밀 진단됨</b>' : '')
+      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다(상한 초과)</b>' : '')
+      + '<div style="margin-top:6px; color:var(--t2); font-size:12px">'
+      + '‘검색인덱스’ = 리뷰어가 이름·전화로 자기 작업을 찾고 구매양식을 내는 재료입니다. '
+      + '리뷰웹시스템[3버전]의 작업목록도 이 등록부를 기준으로 만들어지므로, 여기 없으면 <b>리뷰어 검색·제출과 3버전 작업목록에서 동시에 빠집니다.</b>'
+      + '</div>';
     document.getElementById('btnRepairAll').style.display = flagged.length ? 'inline-block' : 'none';
 
     const tb = document.getElementById('tbody');
@@ -149,7 +184,10 @@
       + '<td>' + sevTag(it.severity) + '</td>'
       + '<td><b>' + esc(it.displayName || it.tabName) + '</b><div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div></td>'
       + '<td>' + (it.regUnknown ? '<span style="color:var(--warn)">알 수 없음</span>' : esc(fmtDate(it.registeredAt))) + '</td>'
-      + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">없음</span>' : it.rawRows) + '</td>'
+      // 시트 작업건수 = 헤더 아래 값이 있는 행(실제 작업). 미러 행 수(상단 정보·헤더 포함)는 참고로만.
+      + '<td class="num">' + (it.rawRows == null ? '<span style="color:var(--err)">미러 없음</span>'
+          : (it.dataRows != null ? '<b>' + it.dataRows + '</b><div class="mono">미러 ' + it.rawRows + '행</div>'
+                                 : '<span style="color:var(--t2)">미러 ' + it.rawRows + '행</span>')) + '</td>'
       + '<td class="num">' + it.indexRows + (it.idxStatus && it.idxStatus !== 'active' ? '<div class="mono">' + esc(it.idxStatus) + '</div>' : '') + '</td>'
       + '<td class="num">' + it.boardRows + (it.boardExtra ? '<div class="mono">(+' + it.boardExtra + ' 수동/작업표)</div>' : '') + '</td>'
       + '<td class="reason">' + esc(it.reasonKo) + '<div class="stepres" id="res' + i + '"></div></td>'
@@ -197,6 +235,137 @@
     _busy = false;
     btn.textContent = '⚠ 문제 작업 전체 반영';
     toast('전체 반영이 끝났습니다. [점검 실행]으로 결과를 다시 확인해주세요.');
+  }
+
+  /* ══════════ 시트 우위 점검 ══════════ */
+  let SS = [];   // 점검 결과 — 버튼은 인덱스로만 참조(시트발 문자열 보간 금지)
+
+  async function runSlotAudit() {
+    const tb = document.getElementById('ssBody');
+    const btn = document.getElementById('btnSlot');
+    tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">점검 중… (작업 수에 따라 수십 초 걸릴 수 있습니다)</td></tr>';
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/slot-audit', { headers: hdrs() });
+      if (r.status === 401 || r.status === 403) { toast('권한이 없습니다. 관리자 계정으로 로그인해주세요.', true); boot(); return; }
+      const j = await r.json();
+      if (!j || j.ok === false) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--err)">점검 실패: ' + esc((j && j.error) || '서버 오류') + ' <button class="btn ghost" onclick="runSlotAudit()">다시 시도</button></td></tr>'; return; }
+      SS = j.items || [];
+      renderSlot(j);
+    } catch (e) {
+      tb.innerHTML = '<tr><td colspan="8" style="color:var(--err)">점검 실패: ' + esc(e.message) + ' <button class="btn ghost" onclick="runSlotAudit()">다시 시도</button></td></tr>';
+    } finally { if (btn) btn.disabled = false; }
+  }
+
+  const SS_REASON = {
+    no_mirror: '시트 사본 없음(미러 대기)', no_date_column: '구매일자 열을 찾지 못함',
+    header_unrecognizable: '헤더 줄 인식 실패', no_tab: '탭 정보 없음', error: '조회 오류',
+  };
+  const QUOTA_SKIP = {
+    unlimited: '무제한(0)이라 손대지 않음', already_enough: '이미 충분', no_option: '옵션 없음',
+    multi_option_manual: '옵션 2개 이상 — 공고 수정에서 직접 배분',
+  };
+
+  function renderSlot(meta) {
+    const flagged = SS.filter(i => i.severity === 'sheet_ahead');
+    document.getElementById('ssSummary').innerHTML =
+      '등록 작업 <b>' + meta.total + '</b>개 · 정밀 점검 <b>' + meta.scanned + '</b>개 · '
+      + '시트가 더 많은 작업 <b style="color:' + (flagged.length ? 'var(--err)' : 'var(--ok)') + '">' + flagged.length + '</b>개'
+      + (meta.scanCapped ? ' · <b style="color:var(--warn)">⚠ 후보 ' + meta.candidates + '개 중 일부만 점검됨(다시 실행하면 이어서 확인)</b>' : '')
+      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다</b>' : '');
+
+    const tb = document.getElementById('ssBody');
+    if (!SS.length) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">점검 대상 작업이 없습니다(시트 사본 행 수가 표보다 많은 작업만 정밀 점검합니다).</td></tr>'; return; }
+    tb.innerHTML = SS.map((it, i) => {
+      const tag = it.severity === 'sheet_ahead' ? '<span class="tag broken">시트 우위</span>'
+                : it.severity === 'ok' ? '<span class="tag ok">일치</span>'
+                : '<span class="tag behind">확인 불가</span>';
+      const q = it.quota, c = it.campaign;
+      let qcell = '<span style="color:var(--t2)">연결 공고 없음</span>';
+      if (c) {
+        qcell = '<b>' + esc(c.title || '(제목 없음)') + '</b><div class="mono">총모집 ' + c.recruitTotal
+          + (c.options && c.options.length ? ' · 옵션 ' + c.options.map(o => esc(o.optKey) + ' ' + o.recruitTotal + (String(o.status) === 'closed' ? '(마감)' : '')).join(', ') : '')
+          + '</div>';
+        if (q && q.needsFix) qcell += '<div style="color:var(--warn); font-size:11.5px">⚠ 표(' + q.target + ')보다 정원이 작습니다</div>';
+        else if (q && q.skips && q.skips.length) qcell += '<div class="mono">' + esc(q.skips.map(s => (s.kind === 'campaign' ? '총모집: ' : '옵션: ') + (QUOTA_SKIP[s.reason] || s.reason)).join(' / ')) + '</div>';
+      }
+      const acts = [];
+      if (it.missingSlots > 0) acts.push('<button class="btn" id="sfix' + i + '" onclick="slotBackfill(' + i + ')">➕ 표 동기화</button>');
+      if (c && q && q.needsFix) acts.push('<button class="btn ghost" id="qfix' + i + '" onclick="quotaFix(' + i + ')">정원 교정</button>');
+      return '<tr>'
+        + '<td>' + tag + '</td>'
+        + '<td><b>' + esc(it.displayName || it.tabName) + '</b><div class="mono">' + esc(it.sheetId) + ' / ' + esc(it.tabName) + '</div>'
+        + (!it.readOk ? '<div style="color:var(--warn); font-size:11.5px">' + esc(SS_REASON[it.readReason] || it.readReason) + '</div>' : '')
+        + (it.datelessFilled ? '<div class="mono">날짜로 못 읽은 칸 ' + it.datelessFilled + '개(제외됨)</div>' : '') + '</td>'
+        + '<td class="num">' + (it.preparedRows == null ? '?' : it.preparedRows) + (it.dateColumn ? '<div class="mono">' + esc(it.dateColumn) + '</div>' : '') + '</td>'
+        + '<td class="num">' + it.boardRows + '</td>'
+        + '<td class="num">' + (it.missingSlots > 0 ? '<b style="color:var(--err)">+' + it.missingSlots + '</b>' : '—') + '</td>'
+        + '<td class="mono">' + esc(it.firstDate || '') + (it.lastDate && it.lastDate !== it.firstDate ? ' ~ ' + esc(it.lastDate) : '') + '</td>'
+        + '<td>' + qcell + '</td>'
+        + '<td>' + (acts.join(' ') || '') + '<div class="stepres" id="sres' + i + '"></div></td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  async function slotBackfill(i) {
+    const it = SS[i]; if (!it) return;
+    const btn = document.getElementById('sfix' + i), res = document.getElementById('sres' + i);
+    if (btn) { btn.disabled = true; btn.textContent = '확인 중…'; }
+    try {
+      // 1단계: 미리보기(dryRun) — 몇 개를 어디에 만들지 먼저 보여준다
+      const pre = await postJson('/api/trackb/sheet-sync/slot-backfill', { sheetId: it.sheetId, tabName: it.tabName, dryRun: true });
+      if (!pre || pre.ok === false) { if (res) res.textContent = '미리보기 실패: ' + ((pre && pre.error) || '오류'); return; }
+      if (!pre.missing) { if (res) res.textContent = '추가할 자리가 없습니다(이미 동기화됨).'; return; }
+      const sample = (pre.sample || []).map(s => s.seq + '행 ' + (s.date || '') + (s.option ? ' / ' + s.option : '')).join('\n  ');
+      const okGo = confirm(
+        (it.displayName || it.tabName) + '\n\n'
+        + '시트에 준비된 행 ' + pre.preparedRows + '개 중 표에 없는 ' + pre.missing + '개를 빈 자리로 추가합니다.\n'
+        + '· 이미 있는 ' + pre.existingRows + '행은 건드리지 않습니다(추가만)\n'
+        + '· 자리 번호 = 시트 행 번호 그대로\n'
+        + (pre.optionColumn ? '· ' + pre.optionColumn + ' 값도 함께 가져옵니다\n' : '')
+        + (pre.capped ? '· ⚠ 이번엔 ' + 2000 + '개까지만 만듭니다(나머지는 다시 실행)\n' : '')
+        + '\n예시:\n  ' + sample + '\n\n진행할까요?');
+      if (!okGo) { if (res) res.textContent = ''; return; }
+      if (btn) btn.textContent = '동기화 중…';
+      const out = await postJson('/api/trackb/sheet-sync/slot-backfill', { sheetId: it.sheetId, tabName: it.tabName, dryRun: false });
+      if (!out || out.ok === false) { if (res) res.textContent = '동기화 실패: ' + ((out && out.error) || '오류'); if (btn) { btn.disabled = false; btn.textContent = '➕ 표 동기화'; } return; }
+      if (res) res.textContent = '✓ ' + out.created + '자리 추가됨 · 표 ' + (out.boardRowsAfter != null ? out.boardRowsAfter + '행' : '') + ' — [시트 우위 점검 실행]으로 다시 확인하세요';
+      if (btn) btn.textContent = '완료';
+      toast(out.created + '개 자리를 표에 추가했습니다');
+    } catch (e) {
+      if (res) res.textContent = '동기화 실패: ' + e.message;
+      if (btn) { btn.disabled = false; btn.textContent = '➕ 표 동기화'; }
+    }
+  }
+
+  async function quotaFix(i) {
+    const it = SS[i]; if (!it || !it.campaign) return;
+    const btn = document.getElementById('qfix' + i), res = document.getElementById('sres' + i);
+    const q = it.quota || {};
+    const what = (q.fixes || []).map(f => f.kind === 'campaign' ? ('총모집 ' + f.from + ' → ' + f.to) : ('옵션 "' + f.optKey + '" 정원 ' + f.from + ' → ' + f.to)).join('\n  ');
+    if (!confirm((it.campaign.title || it.tabName) + '\n\n공고 정원을 표 인원에 맞춥니다.\n  ' + what + '\n\n※ 정원을 줄이지는 않습니다. 진행할까요?')) return;
+    if (btn) { btn.disabled = true; btn.textContent = '교정 중…'; }
+    try {
+      const out = await postJson('/api/trackb/sheet-sync/quota-fix', { sheetId: it.sheetId, tabName: it.tabName, campaignId: it.campaign.id });
+      if (!out || out.ok === false) {
+        if (res) res.textContent = '정원 교정 실패: ' + ((out && out.error) || '오류');
+        if (btn) { btn.disabled = false; btn.textContent = '정원 교정'; }
+        return;
+      }
+      const n = (out.applied || []).length;
+      if (res) res.textContent = n ? ('✓ 정원 교정 완료(' + n + '건, 기준 ' + out.target + '명)') : '변경할 것이 없었습니다(이미 충분하거나 무제한)';
+      if (btn) btn.textContent = '완료';
+      toast(n ? '공고 정원을 ' + out.target + '명 기준으로 맞췄습니다' : '변경할 정원이 없습니다');
+    } catch (e) {
+      if (res) res.textContent = '정원 교정 실패: ' + e.message;
+      if (btn) { btn.disabled = false; btn.textContent = '정원 교정'; }
+    }
+  }
+
+  async function postJson(path, body) {
+    const r = await fetch(API_BASE_URL + path, { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
+    if (r.status === 401 || r.status === 403) { toast('권한이 없습니다.', true); boot(); return null; }
+    return await r.json();
   }
 
   boot();

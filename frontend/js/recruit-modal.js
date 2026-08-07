@@ -315,19 +315,38 @@
       <div class="rf-card" data-sec="work" id="rf_work_section" style="display:none">
         <div class="rf-ch"><span class="rf-ct">📝 작업내용</span><span class="rf-cn">참여한 리뷰어에게만 공개</span></div>
         <div class="rf-cb">
+          <!-- ★ 세 칸 모두 같은 구조: [입력창][첨부 이미지 스트립] (rows=3 통일 — 칸마다 높이가 다르면
+               오른쪽 썸네일 크기·[＋] 위치가 줄마다 달라진다). 스트립 동작은 index-recruit.js 의 _ig* 함수. -->
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유입가이드</span>
             <div>
-              <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
+              <div class="ig-wrap">
+                <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
+                <div class="ig-strip" id="rf_ig_inflow" tabindex="0" data-igf="inflow"></div>
+                <input type="file" id="rf_igf_inflow" accept="image/*" multiple class="ig-file" onchange="igPickFiles('inflow',this)">
+              </div>
               <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div>
+              <div class="ig-msg" id="rf_igm_inflow"></div>
               <div id="rf_clean_inflow"></div>
             </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">리뷰가이드</span>
             <div>
-              <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
+              <div class="ig-wrap">
+                <textarea id="rf_wd_review" class="rform-input" rows="3" placeholder="별점/포토 비율 등"></textarea>
+                <div class="ig-strip" id="rf_ig_review" tabindex="0" data-igf="review"></div>
+                <input type="file" id="rf_igf_review" accept="image/*" multiple class="ig-file" onchange="igPickFiles('review',this)">
+              </div>
+              <div class="ig-msg" id="rf_igm_review"></div>
               <div id="rf_clean_review"></div>
             </div></div>
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">특이사항</span>
-            <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택 — 참여한 리뷰어에게만 공개"></textarea></div>
+            <div>
+              <div class="ig-wrap">
+                <textarea id="rf_wd_notes" class="rform-input" rows="3" placeholder="선택 — 참여한 리뷰어에게만 공개"></textarea>
+                <div class="ig-strip" id="rf_ig_notes" tabindex="0" data-igf="notes"></div>
+                <input type="file" id="rf_igf_notes" accept="image/*" multiple class="ig-file" onchange="igPickFiles('notes',this)">
+              </div>
+              <div class="ig-msg" id="rf_igm_notes"></div>
+            </div></div>
         </div>
       </div>
 
@@ -425,8 +444,7 @@
     <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border,#E2E8F0)">
       <button onclick="closeRecruitModal()"
         style="padding:8px 18px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;background:#fff;color:var(--t2,#475569);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
-      <button id="recruitSaveBtn" onclick="saveRecruitPost()"
-        style="padding:8px 18px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
+      <button id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost()">
         <i class="fas fa-save"></i> 저장
       </button>
     </div>
@@ -468,7 +486,43 @@
 /* 폰트어썸이 없는 화면에서도 아이콘 자리가 레이아웃을 밀지 않게 */
 #recruitModal .fas:not([class*="fa-"]){display:none}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}`;
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+/* ── [저장] 버튼 인터랙션 ────────────────────────────────────────
+   ★ 인라인 style 을 클래스로 옮겼다 — 인라인은 :hover/:active 의 background 를
+     이길 수 없어(특이성 아님, 인라인 우선) "눌렸는지 모르겠다"가 고쳐지지 않는다. */
+#recruitModal .rf-savebtn{padding:8px 18px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;
+  font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;font-family:inherit;
+  box-shadow:0 1px 2px rgba(49,130,246,.35);transition:background .13s,box-shadow .13s,transform .13s}
+#recruitModal .rf-savebtn:hover:not(:disabled){background:#1B6FE0;box-shadow:0 3px 10px rgba(49,130,246,.34);transform:translateY(-1px)}
+#recruitModal .rf-savebtn:active:not(:disabled){background:#1560C8;box-shadow:0 1px 2px rgba(49,130,246,.30);transform:translateY(0)}
+#recruitModal .rf-savebtn:focus-visible{outline:3px solid rgba(49,130,246,.35);outline-offset:2px}
+#recruitModal .rf-savebtn:disabled{cursor:default;transform:none;box-shadow:none}
+#recruitModal .rf-savebtn.busy{background:#7FB0F6}
+#recruitModal .rf-savebtn.done{background:#16A34A}
+#recruitModal .rf-spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;
+  display:inline-block;animation:rfSpin .7s linear infinite}
+@keyframes rfSpin{to{transform:rotate(360deg)}}
+/* ── 저장 차단·실패 안내 = 모달 **안쪽** ────────────────────────
+   ★ 토스트로 내보내면 안 된다 — 리뷰웹시스템[3버전]의 토스트는 z-index 60 이고
+     이 모달은 5000 + backdrop-filter 라 **덮개 아래에 깔려 보이지 않는다**(실측).
+     그래서 모달이 떠 있는 동안의 안내는 전부 여기서 그린다. */
+#recruitModal .modal-footer{position:relative}
+#recruitModal .rf-blockbar{position:absolute;left:18px;right:18px;bottom:calc(100% + 6px);background:#FDF0F0;
+  border:1px solid #F4C3C3;border-left:4px solid #E5484D;border-radius:9px;padding:8px 11px;font-size:.74rem;
+  font-weight:700;color:#B42318;display:flex;align-items:center;gap:7px;box-shadow:0 4px 14px rgba(180,35,24,.12);
+  z-index:2;animation:fadeIn .16s ease}
+#recruitModal .rf-blockbar .rf-bb-go{margin-left:auto;flex:none;font-size:.7rem;font-weight:800;color:#B42318;background:#fff;
+  border:1px solid #F4C3C3;border-radius:6px;padding:3px 8px;cursor:pointer;font-family:inherit}
+#recruitModal .modal-footer.rf-shake{animation:rfShake .38s ease}
+@keyframes rfShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(5px)}
+  60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+#recruitModal .rf-chk-blink{animation:rfBlink 1.1s ease 2}
+@keyframes rfBlink{0%,100%{box-shadow:0 0 0 0 rgba(229,72,77,0)}45%{box-shadow:0 0 0 4px rgba(229,72,77,.28)}}
+@media (prefers-reduced-motion: reduce){
+  #recruitModal .rf-savebtn:hover:not(:disabled){transform:none}
+  #recruitModal .modal-footer.rf-shake{animation:none}
+  #recruitModal .rf-chk-blink{animation:none}
+}`;
 
   /* 폰트어썸이 없는 호스트(리뷰웹시스템[3버전])에서는 아이콘이 **빈 자리**로 뜬다 —
      닫기(×)가 보이지 않으면 모달을 못 닫는다. CSS만으로는 폰트 유무를 알 수 없어
@@ -598,7 +652,74 @@
 .rf-clean-pv pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;margin:4px 0;line-height:1.65}
 .rf-clean-pv .cut{background:#FEE2E2;text-decoration:line-through;border-radius:3px;padding:0 2px}
 .rf-clean-pv .keep{background:#DCFCE7;border-radius:3px;padding:0 2px}
-.rf-clean-pv .rf-cpv-btns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}`;
+.rf-clean-pv .rf-cpv-btns{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}
+/* 🖼 작업내용 첨부 이미지 — 입력창 오른쪽, 같은 높이 썸네일(시안 A · docs/design-workdetail-images.html)
+   ★ 세 칸(유입가이드·리뷰가이드·특이사항)이 같은 마크업·같은 위젯을 쓴다(사본 금지). */
+/* ★ box-sizing 을 호스트 리셋에 기대지 않는다 — content-box 인 화면에서는 스트립이 padding·border
+   만큼 더 높아져 입력창과 높이가 어긋난다(테마 없는 호스트에서 실측). */
+#recruitModal .ig-wrap,#recruitModal .ig-wrap *{box-sizing:border-box}
+#recruitModal .ig-wrap{display:flex;gap:8px;align-items:stretch}
+#recruitModal .ig-wrap>textarea.rform-input{flex:1;min-width:0;height:82px;min-height:82px;resize:vertical}
+#recruitModal .ig-strip{flex:none;width:326px;display:flex;gap:5px;align-items:stretch;height:82px;padding:4px;
+  border:1px dashed var(--border,#E2E8F0);border-radius:9px;background:var(--bg2,#F8FAFC);overflow:hidden;
+  transition:border-color .15s,background .15s}
+#recruitModal .ig-strip.drag{border-style:solid;border-color:var(--p,#3182F6);background:#EEF3FD}
+#recruitModal .ig-strip.err{border-color:#FCA5A5;background:#FEF2F2}
+#recruitModal .ig-file{display:none}
+#recruitModal .ig-thumb{position:relative;flex:none;width:74px;height:100%;border-radius:7px;overflow:hidden;padding:0;
+  border:1px solid var(--border,#E2E8F0);background:#EEF1F6;cursor:zoom-in}
+#recruitModal .ig-thumb img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+#recruitModal .ig-thumb .ig-x{position:absolute;top:3px;right:3px;width:17px;height:17px;border:none;border-radius:50%;
+  background:rgba(16,24,40,.62);color:#fff;font-size:.6rem;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+#recruitModal .ig-thumb .ig-x:hover{background:rgba(220,38,38,.92)}
+#recruitModal .ig-thumb .ig-n{position:absolute;left:3px;bottom:3px;font-size:.55rem;font-weight:800;color:#fff;
+  background:rgba(16,24,40,.55);border-radius:4px;padding:1px 4px;line-height:1.35}
+#recruitModal .ig-thumb .ig-g{position:absolute;left:0;top:0;bottom:0;width:13px;cursor:grab;display:grid;place-items:center;
+  background:linear-gradient(90deg,rgba(16,24,40,.5),rgba(16,24,40,0));color:#fff;font-size:.55rem;line-height:1}
+#recruitModal .ig-thumb.dragging{opacity:.4}
+#recruitModal .ig-thumb.dropL{box-shadow:inset 3px 0 0 var(--p,#3182F6)}
+#recruitModal .ig-thumb.dropR{box-shadow:inset -3px 0 0 var(--p,#3182F6)}
+#recruitModal .ig-thumb.up img{opacity:.35;filter:grayscale(.4)}
+#recruitModal .ig-thumb.up::after{content:"올리는 중";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:.55rem;font-weight:800;color:var(--p,#3182F6)}
+#recruitModal .ig-thumb.bad{border-color:#FCA5A5}
+#recruitModal .ig-thumb.bad img{opacity:.3}
+#recruitModal .ig-thumb.bad::after{content:"실패";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:.6rem;font-weight:800;color:#DC2626}
+#recruitModal .ig-add{flex:none;width:74px;height:100%;padding:0;border:1px dashed var(--border,#E2E8F0);border-radius:7px;
+  background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+  font-size:.6rem;font-weight:700;color:var(--t3,#94A3B8);font-family:inherit}
+#recruitModal .ig-add:hover{border-color:var(--p,#3182F6);color:var(--p,#3182F6);background:#F5F9FF}
+#recruitModal .ig-add .plus{font-size:.95rem;line-height:1;font-weight:400}
+#recruitModal .ig-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  cursor:pointer;border-radius:7px;text-align:center;padding:0 8px;border:none;background:transparent;font-family:inherit}
+#recruitModal .ig-empty:hover{background:#F5F9FF}
+#recruitModal .ig-empty .t1{font-size:.68rem;font-weight:800;color:var(--t3,#94A3B8)}
+#recruitModal .ig-empty .t2{font-size:.6rem;color:var(--t4,#94A3B8)}
+#recruitModal .ig-empty:hover .t1{color:var(--p,#3182F6)}
+#recruitModal .ig-msg{font-size:.64rem;font-weight:700;margin-top:3px;color:var(--t3,#94A3B8)}
+#recruitModal .ig-msg.warn{color:#B45309}
+#recruitModal .ig-msg.bad{color:#DC2626}
+#recruitModal .ig-msg.ok{color:#15803D}
+/* 좁은 화면: 스트립이 입력창 아래로(렌더러는 한 벌 — CSS만 바뀐다) */
+@media (max-width:1100px){
+  #recruitModal .ig-wrap{flex-direction:column}
+  #recruitModal .ig-strip{width:100%}
+}
+/* 🔍 확대 팝업 — body 직속(모달 스크롤 컨테이너 밖). z-index 는 모달(2000)보다 위 */
+#igLightbox{position:fixed;inset:0;z-index:3000;background:rgba(8,12,20,.84);display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:34px}
+#igLightbox.on{display:flex}
+#igLightbox img{max-width:min(980px,86vw);max-height:70vh;border-radius:10px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+#igLightbox .iglb-bar{display:flex;align-items:center;gap:13px;color:#E8EDF6;font-size:.78rem;font-weight:700}
+#igLightbox .iglb-btn{width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.28);
+  background:rgba(255,255,255,.1);color:#fff;font-size:1.05rem;cursor:pointer;display:grid;place-items:center;padding:0;font-family:inherit}
+#igLightbox .iglb-btn:disabled{opacity:.26;cursor:default}
+#igLightbox .iglb-btn:not(:disabled):hover{background:rgba(255,255,255,.24)}
+#igLightbox .iglb-close{position:absolute;top:18px;right:22px;width:36px;height:36px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:1.05rem;cursor:pointer;font-family:inherit}
+#igLightbox .iglb-fld{font-size:.68rem;font-weight:800;color:#93B4F5;letter-spacing:.03em}
+#igLightbox .iglb-tip{font-size:.62rem;color:#7E8BA0}`;
   function injectCss() {
     if (document.getElementById('recruit-modal-css')) return;
     var st = document.createElement('style');
@@ -818,6 +939,162 @@
     pe.checked = true;
     if (typeof window.onParticipationToggle === 'function') window.onParticipationToggle(true);
   };
+
+  /* ═══════════════════════════════════════════════════════════════
+     저장 결과 안내 — 화면 가운데 카드 + 페이드아웃 (시안 C 확정)
+     ───────────────────────────────────────────────────────────────
+     ★★ 렌더러는 **여기 한 벌**이다(사본 금지) — 모달 마크업·CSS 가 이 모듈에
+        있고 admin.html · workdesk.html 이 같은 모듈을 쓴다. 사본을 두면
+        한쪽 화면에서만 안내가 안 뜬다(레포에서 이미 밟은 함정).
+     ★★ 마운트는 **body 직속** + z-index 는 모달(5000)보다 위. 뷰 스크롤
+        컨테이너 안에 넣으면 오버레이가 화면 흐름에 섞인다.
+     ★  성공 안내만 자동으로 사라진다. 차단·실패는 rf-blockbar 로 모달 안에
+        남긴다 — 사라지면 원인을 다시 읽을 방법이 없다.
+     ═══════════════════════════════════════════════════════════════ */
+  /* ★ box-sizing 을 스스로 정한다 — 이 오버레이는 body 직속이라 호스트 리셋(admin.html 은
+     `*{box-sizing:border-box}`, 없는 화면도 있다)에 따라 카드 폭이 340px ↔ 392px 로 갈린다(실측). */
+  var FB_CSS = `#campSaveFb,#campSaveFb *{box-sizing:border-box}
+#campSaveFb{position:fixed;inset:0;z-index:6000;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;padding:20px}
+#campSaveFb .csfb-box{background:#fff;border-radius:16px;border:1px solid #E6EAF0;padding:20px 26px;max-width:340px;line-height:1.5;
+  display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;
+  box-shadow:0 12px 40px rgba(16,24,40,.20),0 2px 8px rgba(16,24,40,.10);
+  font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR",system-ui,sans-serif;color:#101828;
+  animation:csfbIn .22s cubic-bezier(.2,.85,.3,1)}
+/* word-break:keep-all — 없으면 '공고'가 '공 / 고'로 갈린다(실측) */
+#campSaveFb .csfb-msg{font-size:.88rem;font-weight:800;letter-spacing:-.01em;line-height:1.45;word-break:keep-all}
+#campSaveFb .csfb-sub{font-size:.72rem;font-weight:600;color:#667085}
+#campSaveFb .csfb-list{margin-top:2px;display:flex;flex-direction:column;gap:3px;width:100%}
+#campSaveFb .csfb-li{display:flex;align-items:center;gap:6px;font-size:.72rem;font-weight:700;color:#334155;
+  background:#F5F8FC;border:1px solid #E6EAF0;border-radius:7px;padding:4px 9px;text-align:left}
+#campSaveFb .csfb-li i{width:5px;height:5px;border-radius:50%;background:#3182F6;flex:none}
+#campSaveFb .csfb-more{font-size:.7rem;font-weight:700;color:#98A2B3}
+#campSaveFb.out{animation:csfbOut .44s ease forwards}
+#campSaveFb .csfb-ring{width:46px;height:46px;flex:none}
+#campSaveFb .csfb-ring circle{fill:none;stroke:#16A34A;stroke-width:4;stroke-linecap:round}
+#campSaveFb .csfb-ring .bg{stroke:#D9F2E2}
+#campSaveFb .csfb-ring .fg{stroke-dasharray:151;stroke-dashoffset:151;transform:rotate(-90deg);transform-origin:50% 50%;
+  animation:csfbRing .5s cubic-bezier(.3,.9,.3,1) forwards}
+#campSaveFb .csfb-ring path{fill:none;stroke:#16A34A;stroke-width:4.5;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:34;stroke-dashoffset:34;animation:csfbTick .32s .24s ease forwards}
+@keyframes csfbIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes csfbOut{to{opacity:0;transform:translateY(-6px) scale(.985)}}
+@keyframes csfbRing{to{stroke-dashoffset:0}}
+@keyframes csfbTick{to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion: reduce){
+  #campSaveFb .csfb-box{animation:none}
+  #campSaveFb .csfb-ring .fg,#campSaveFb .csfb-ring path{animation:none;stroke-dashoffset:0}
+  #campSaveFb.out{animation:csfbFade .44s ease forwards}
+  @keyframes csfbFade{to{opacity:0}}
+}`;
+
+  var FB_HOLD_MS = 2200;   // 항목 표시(시안 C) 기준 — 목록을 읽을 시간
+  var FB_OUT_MS  = 440;
+  var _fbTimers  = [];
+
+  function fbEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  /* 공고 제목은 매우 길 수 있다(실측 60자+) — 카드가 화면을 덮지 않게 줄인다 */
+  function fbClip(s, n) {
+    s = String(s == null ? '' : s).trim().replace(/\s+/g, ' ');
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+  function injectFbCss() {
+    if (document.getElementById('camp-save-fb-css')) return;
+    var st = document.createElement('style');
+    st.id = 'camp-save-fb-css';
+    st.textContent = FB_CSS;
+    document.head.appendChild(st);
+  }
+
+  /**
+   * 저장 성공 안내(모달이 닫힌 뒤 화면 가운데).
+   * @param {{title?:string, changes?:string[], mode?:'edit'|'create'}} opts
+   *   changes = 바뀐 항목 이름들. **비어 있으면 목록을 그리지 않는다** —
+   *   비교하지 못한 필드가 있을 수 있어 "바뀐 내용 없음"이라고 단정하지 않는다.
+   */
+  function campSaveFeedback(opts) {
+    opts = opts || {};
+    injectFbCss();
+    if (!document.body) return;
+
+    _fbTimers.forEach(clearTimeout); _fbTimers = [];
+    var old = document.getElementById('campSaveFb');
+    if (old) old.remove();
+
+    var isCreate = opts.mode === 'create';
+    var title = fbClip(opts.title, 22);
+    var msg = title
+      ? '「' + fbEsc(title) + '」 공고' + (isCreate ? '가 발행되었습니다' : ' 수정이 반영되었습니다')
+      : (isCreate ? '공고가 발행되었습니다' : '공고 수정이 반영되었습니다');
+
+    var changes = (Array.isArray(opts.changes) ? opts.changes : []).filter(Boolean);
+    var body = '';
+    if (changes.length) {
+      body = '<div class="csfb-list">';
+      changes.slice(0, 3).forEach(function (c) {
+        body += '<div class="csfb-li"><i></i>' + fbEsc(c) + '</div>';
+      });
+      body += '</div>';
+      if (changes.length > 3) body += '<div class="csfb-more">외 ' + (changes.length - 3) + '건</div>';
+    } else {
+      body = '<div class="csfb-sub">목록에 바로 반영했어요</div>';
+    }
+
+    var box = document.createElement('div');
+    box.id = 'campSaveFb';
+    box.setAttribute('role', 'status');
+    box.setAttribute('aria-live', 'polite');
+    box.innerHTML =
+      '<div class="csfb-box">' +
+        '<svg class="csfb-ring" viewBox="0 0 56 56" aria-hidden="true">' +
+          '<circle class="bg" cx="28" cy="28" r="24"></circle>' +
+          '<circle class="fg" cx="28" cy="28" r="24"></circle>' +
+          '<path d="M17.5 28.8 L24.6 35.6 L38.5 21.2"></path>' +
+        '</svg>' +
+        '<div class="csfb-msg">' + msg + '</div>' +
+        body +
+      '</div>';
+    document.body.appendChild(box);
+
+    _fbTimers.push(setTimeout(function () {
+      box.classList.add('out');
+      _fbTimers.push(setTimeout(function () { if (box.parentNode) box.remove(); }, FB_OUT_MS));
+    }, FB_HOLD_MS));
+  }
+
+  /* 모달 안 차단·실패 줄. onGo 가 있으면 [점검 항목 보기 ↑] 버튼이 붙는다. */
+  function recruitSaveBlock(text, onGo) {
+    var foot = document.querySelector('#recruitModal .modal-footer');
+    if (!foot) return;
+    recruitSaveBlockClear();
+    var bar = document.createElement('div');
+    bar.className = 'rf-blockbar';
+    bar.setAttribute('role', 'alert');
+    bar.innerHTML = '<span aria-hidden="true">⚠</span><span>' + fbEsc(text) + '</span>' +
+      (typeof onGo === 'function' ? '<button type="button" class="rf-bb-go">점검 항목 보기 ↑</button>' : '');
+    foot.appendChild(bar);
+    if (typeof onGo === 'function') {
+      var go = bar.querySelector('.rf-bb-go');
+      if (go) go.addEventListener('click', onGo);
+    }
+    // 흔들림 1회 — "눌렀는데 아무 일도 없다"를 없애는 즉각 신호
+    foot.classList.remove('rf-shake');
+    void foot.offsetWidth;
+    foot.classList.add('rf-shake');
+    setTimeout(function () { foot.classList.remove('rf-shake'); }, 420);
+  }
+  function recruitSaveBlockClear() {
+    var old = document.querySelector('#recruitModal .rf-blockbar');
+    if (old) old.remove();
+  }
+
+  window.campSaveFeedback      = campSaveFeedback;
+  window.recruitSaveBlock      = recruitSaveBlock;
+  window.recruitSaveBlockClear = recruitSaveBlockClear;
 
   function mount(id) {
     injectCss();
