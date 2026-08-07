@@ -117,8 +117,11 @@ ok('보류 기준선 시드(ON CONFLICT DO NOTHING = 소급 차단·멱등)',
 const cp = readS('services/campaignPlan.service.js');
 ok('savePlans carryApply → carry_apply 이력(잔량 차감 원장)',
   /carry_not_hold/.test(cp) && /'carry_apply'/.test(cp) && /bad_carry/.test(cp));
-ok('반영 합계 조회 fail-soft + 숫자 형태만 합산(손상 행 방어)',
-  /fetchCarryAppliedSums/.test(cp) && /~ '\^\[0-9\]\+\$'/.test(cp));
+ok('반영 합계 조회 — 숫자 형태만 합산(손상 행 방어) + ★ 실패 = null(코드리뷰 M3 — 빈 Map 이면 반영분 0으로 세어 잔량이 부풀고 이중 반영을 유도한다)',
+  /fetchCarryAppliedSums/.test(cp) && /~ '\^\[0-9\]\+\$'/.test(cp) && /잔량 계산 불가/.test(cp));
+ok('★ 코드리뷰 M2: 잔량 재검증(잠금 tx 안 SAVEPOINT) — carry_stale·carry_unknown(fail-closed)',
+  /SAVEPOINT cap_check/.test(cp) && /carry_stale/.test(cp) && /carry_unknown/.test(cp)
+  && /carryApply > held/.test(cp));
 ok('개요에 carryMode·carryHeld 동봉(null=조회 실패 — 0 위장 금지)',
   /carryMode: isCarryHold\(camp\)/.test(cp) && /carryHeld,/.test(cp));
 ok('★ 병합 유실 복구: repairRecruitTotalFromRounds export 생존(미export = 경합 자가치유 무력화)',
@@ -130,11 +133,20 @@ ok('PUT: carry_mode COALESCE 센티널($40) + auto/hold 만 인정',
   && /\['auto', 'hold'\]\.includes\(carry_mode\) \? carry_mode : null/.test(rt));
 ok('★ 확정 ③: 스코프 편집(홈 인라인)도 carry_mode 변경 가능 + 프리필 뷰 포함',
   /\['auto', 'hold'\]\.includes\(b\.carry_mode\)/.test(rt) && /carry_mode: row\.carry_mode \|\| 'auto'/.test(rt));
-ok('admin/list 가 carryMode·carryHeld 를 내려준다(카드 ⏸ 칩 재료)',
-  /carryMode: isCarryHold\(r\)/.test(rt) && /carryHeld: heldCarry\(r, cnt, _todayStr/.test(rt)
+ok('admin/list 가 carryMode·carryHeld 를 내려준다(카드 ⏸ 칩 재료) + ★ M3: 합계 null 이면 잔량도 null(부풀린 칩 금지)',
+  /carryMode: isCarryHold\(r\)/.test(rt)
+  && /carryHeld: carrySumMap === null \? null : heldCarry\(r, cnt, _todayStr/.test(rt)
   && /fetchCarryAppliedSums\(pool, partIds\)/.test(rt));
+ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
+  /carry_mode\s+-- ★ 098\(코드리뷰 B1\)/.test(rt));
+ok('★ 코드리뷰 M1: 생성(create) INSERT 에도 carry_mode — 발행 시 선택이 조용히 auto 로 떨어지지 않게',
+  /review_type, carry_mode\)/.test(rt) && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
+const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+ok("★ 코드리뷰 M4: REQUIRED_SCHEMA 등록(['recruit_campaigns','carry_mode']) — 마이그레이션 미적용이면 부팅 거부(공고 발행·수정 전면 42703 차단)",
+  /\['recruit_campaigns', 'carry_mode'\]/.test(idx));
 const rtB = readS('routes/trackB.routes.js');
-ok('trackB 오류코드 매핑(bad_carry·carry_not_hold = 400)', /bad_carry: 400, carry_not_hold: 400/.test(rtB));
+ok('trackB 오류코드 매핑(bad_carry·carry_not_hold=400 · carry_stale=409 · carry_unknown=503)',
+  /bad_carry: 400, carry_not_hold: 400/.test(rtB) && /carry_stale: 409/.test(rtB) && /carry_unknown: 503/.test(rtB));
 
 /* ═══ 4. 프론트 배선 ═══ */
 console.log('\n[4] 프론트 배선');
@@ -219,12 +231,50 @@ console.log('\n[5] savePlans carryApply 실행');
   ok('carryApply 미전송 = carry_apply 이력 0(기존 경로 불변)',
     !CALLS.some(c => c.sql.includes("'carry_apply'")));
 
-  // 5e. fetchCarryAppliedSums — 정상 합산 + fail-soft
+  // 5e. fetchCarryAppliedSums — 정상 합산 + ★ 실패 = null(코드리뷰 M3 — 빈 Map 로 접으면
+  //     반영분이 0으로 계산돼 잔량이 부풀고, 칩·원클릭이 이중 반영을 유도한다)
   STUB = { 'carry_apply': [{ campaign_id: 'c1', s: '7' }] };
   eq('반영 합계 조회', (await P.fetchCarryAppliedSums(poolMod, ['c1'])).get('c1'), 7);
   STUB = { 'carry_apply': new Error('down') };
-  ok('★ 합계 조회 실패 = 빈 Map(잔량 null 수렴 — fail-soft)',
-    (await P.fetchCarryAppliedSums(poolMod, ['c1'])).size === 0);
+  eq('★ 합계 조회 실패 = null(빈 Map 금지 — 잔량 null 수렴)',
+    await P.fetchCarryAppliedSums(poolMod, ['c1']), null);
+
+  // 5f. ★ 코드리뷰 M2: 잠금 tx 안 잔량 재검증 — 낡은 잔량으로 과반영하면 carry_stale
+  //     (계획 80 − 확정 75 = 잔량 5 인데 carryApply 6 → 거부 + e.held=5)
+  STUB = {
+    ...baseStub('hold'),
+    'FROM campaign_applications': [{
+      campaign_id: 'c1', active_holds: 0, today_active_holds: 0, submitted_all: 75,
+      today_submitted: 0, submitted_before_today: 75, submitted_since_carry: 75, submitted_since_hold: 75,
+      today_holds: 0, submitted: 75, holds: 0, n: 75,
+    }],
+  };
+  await assert.rejects(P.savePlans('c1', { set: [{ date: today, count: 46 }], carryApply: 6 }, 't'),
+    (e) => e.code === 'carry_stale' && e.held === 5);
+  ok('★ 과반영 거부(carry_stale + e.held=잔량) — 동시 원클릭 이중 반영 차단', true);
+  CALLS.length = 0;
+  await P.savePlans('c1', { set: [{ date: today, count: 45 }], carryApply: 5 }, 't');
+  ok('잔량 한도 내 반영(5 ≤ 5)은 통과 + carry_apply 이력', CALLS.some(c =>
+    c.sql.includes('campaign_plan_events') && c.sql.includes('carry_apply')
+    && String((c.params || [])[2] || '').includes('"amount":5')));
+
+  // 5g. ★ 재계산 실패 = carry_unknown(fail-closed — 모르는 채 원장에 기록하지 않는다)
+  //     ※ carryApply 단독(set/remove 0건)은 'empty' 로 거부되는 게 맞다 — 정원을 안 늘리고
+  //       반영 이력만 남기면 그 인원이 어디에도 안 열려 물량이 소실된다(원클릭은 항상 set 동반).
+  //     (아래 스텁은 잔량 재계산 쿼리(submitted_since_hold)만 죽인다 — 오늘 사용분(below_used)
+  //      조회는 살아 있어야 재검증 블록까지 도달한다)
+  STUB = {
+    ...baseStub('hold'),
+    'FROM campaign_applications': (sql) => {
+      if (String(sql).includes('submitted_since_hold')) throw new Error('db down');
+      return { rows: [{ today_submitted: 0, today_holds: 0, submitted: 0, holds: 0, n: 0 }] };
+    },
+  };
+  await assert.rejects(P.savePlans('c1', { set: [{ date: today, count: 43 }], carryApply: 3 }, 't'),
+    (e) => e.code === 'carry_unknown');
+  ok('★ 잔량 재계산 실패 → carry_unknown 거부(fail-closed)', true);
+  await assert.rejects(P.savePlans('c1', { carryApply: 3 }, 't'), (e) => e.code === 'empty');
+  ok('★ carryApply 단독(계획 미동반) = empty 거부 — 반영 이력만 남아 물량 소실되는 경로 차단', true);
 
   /* ═══ 6. 진짜 PG (PGTEST_URL 있을 때만) ═══ */
   if (process.env.PGTEST_URL) {

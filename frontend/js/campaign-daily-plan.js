@@ -570,12 +570,16 @@
       var held = Math.max(0, Number(j.carryHeld) || 0);
       if (held <= 0) { toast('반영할 보류 이월이 없습니다'); return; }
       if (j.planEnabled === false) { toast('킬스위치(CAMPAIGN_DAILY_PLAN=0)로 계획이 꺼져 있어 반영할 수 없습니다'); return; }
-      if (j.scheduleDriven !== false) { toast('시트 일정 캠페인은 시트에서 조절합니다'); return; }
+      // 시트 일정 판정 3분기 — true=시트가 진실원본 / null=판정 실패(fail-closed, 모르면 열지 않는다) — 사유가 다르면 문구도 달라야 한다
+      if (j.scheduleDriven === true) { toast('시트 일정 캠페인은 시트에서 조절합니다'); return; }
+      if (j.scheduleDriven !== false) { toast('시트 일정 여부를 판정하지 못해 반영할 수 없습니다 — 잠시 후 다시 시도해주세요'); return; }
       var todayPlan = (j.plans || []).reduce(function (v, p) { return p.date === j.today ? p.count : v; }, null);
       if (todayPlan == null) todayPlan = j.defaultDaily || 0;
       Q = { campId: String(campId), held: held, today: j.today, todayPlan: todayPlan, title: j.title || '' };
       document.getElementById('cdpQTitle').textContent = '보류된 이월 ' + held + '명을 오늘 반영할까요?';
-      document.getElementById('cdpQDesc').textContent = (Q.title ? '「' + Q.title + '」 — ' : '') + '오늘 정원 ' + todayPlan + '명 → ' + (todayPlan + held) + '명. 총량은 변하지 않습니다.';
+      // 게시 꺼짐(closed 영속 포함) 고지 — 반영해도 게시 토글을 켜기 전엔 모집이 재개되지 않는다(차수 추가 M1 과 같은 규율)
+      var statusNote = (j.status && j.status !== 'active') ? ' ⚠ 공고가 게시 상태가 아니라 반영 후 게시 토글을 켜야 모집이 재개됩니다.' : '';
+      document.getElementById('cdpQDesc').textContent = (Q.title ? '「' + Q.title + '」 — ' : '') + '오늘 정원 ' + todayPlan + '명 → ' + (todayPlan + held) + '명. 총량은 변하지 않습니다.' + statusNote;
       document.getElementById('cdpQGoTx').textContent = '오늘 정원에 +' + held + ' 반영';
       document.getElementById('cdpQuick').style.display = 'flex';
     } catch (e) {
