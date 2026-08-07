@@ -259,6 +259,20 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('④ 복구(reconcile)도 큐 대신 작업표 재기록', /isSheetlessTab\(_slKeys/.test(ol) && /writeOrderToWorktable\(/.test(ol));
     // ★ 목록에서 통째로 빼면 그 주문은 영영 복구되지 않는다 → 대체 경로가 있어야 한다
     ok('④ 복구 결과를 요약에 싣는다(sheetlessWritten)', /sheetlessWritten/.test(ol));
+
+    /* ★★ ⑤ 리뷰제출 표시(POST /api/submit/review)의 백그라운드 시트 쓰기.
+       프로덕션 E2E 로 실측한 구멍 — 큐 백스톱(③)이 시트 쓰기 자체는 막지만, 그 **앞의**
+       `getCachedHeaders` 가 가상 시트로 구글을 불러 404 + warn 오류로그 + 무의미한 큐 항목이
+       제출 1건마다 쌓였다. 게이트는 `setImmediate` 본문 **맨 앞**이라야 한다(읽기 전에 막는다).
+       ★ 부분 제출(complete=false)은 markStatusCell 을 안 타므로 `st.handled` 재활용은 불가 —
+         별도 판정이어야 그 갈래도 막힌다. */
+    const bg = sub.slice(sub.indexOf("[submit/review:bg]") - 3000);
+    const gateAt = bg.indexOf('무시트 탭 — 시트 쓰기 생략');
+    ok('⑤ 리뷰제출 표시 백그라운드도 무시트면 시트 쓰기 생략', gateAt >= 0);
+    ok('⑤ 그 게이트는 헤더 읽기·writeSheet **앞**(구글 호출 0)',
+      gateAt >= 0 && gateAt < bg.indexOf('getCachedHeaders(') && gateAt < bg.indexOf('writeSheet('));
+    ok('⑤ 판정 실패는 fail-open(시트 기반 탭이 절대 다수)',
+      /isSheetless\(pool, sheetId, tabName\)[\s\S]{0,400}catch \(_\) \{ \/\* fail-open \*\/ \}/.test(sub));
   }
 
   /* ══════════════ E. 시트 대조 경로 제외 ══════════════ */

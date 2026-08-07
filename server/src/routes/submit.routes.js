@@ -576,6 +576,20 @@ router.post('/review', async (req, res, next) => {
     const SHEETS_TIMEOUT_MS = 15000;
 
     setImmediate(async () => {
+      /* ★★ 무시트 탭은 쓸 시트가 없다 — 표시는 위 Step 1 의 `markStatusCell` 이 **작업표 칸**에 이미 기록했다.
+         이 게이트가 없으면 리뷰제출 표시 1건마다 ① 구글 호출 1회 → 404 ② `logAbnormal(warn)` 오류로그
+         ③ 무의미한 `review_submit` 큐 항목이 쌓인다(프로덕션 E2E 로 실측 — 큐 백스톱이 시트 쓰기 자체는
+         막지만 그 앞의 낭비·소음은 남았다). payment.routes 의 `if (st.handled) continue` 와 같은 규율.
+         ★ 부분 제출(complete=false)은 markStatusCell 을 타지 않으므로 **여기서 따로 판정**한다.
+         ★ 판정 실패는 종전 경로(fail-open) — 시트 기반 탭이 절대 다수다. */
+      try {
+        const { isSheetless } = require('../utils/sheetlessScope');
+        if (await isSheetless(pool, sheetId, tabName)) {
+          logger.info(`[submit/review:bg] 무시트 탭 — 시트 쓰기 생략 (tab=${tabName}, row=${rowIndex})`);
+          return;
+        }
+      } catch (_) { /* fail-open */ }
+
       try {
         const sheetsPromise = (async () => {
           const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
