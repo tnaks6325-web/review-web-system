@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시트 우위 동기화 → 구글시트 연결 끊기 — 구현 계획 와이어프레임</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --faint:#8A93A3; --line:#E2E6EC;
+    --done:#0F7B4F;  --done-bg:#EAF7F0;  --done-edge:#A9DCC3;   /* 완료·안전 */
+    --part:#9A6414;  --part-bg:#FBF3E3;  --part-edge:#E8D3A6;   /* 주의·확인 */
+    --next:#4F46E5;  --next-bg:#EEEDFC;  --next-edge:#C7C3F2;   /* 이번에 만드는 것 */
+    --sheet:#B4232A; --sheet-bg:#FCEDEE; --sheet-edge:#F0C2C5;  /* 시트 의존·문제 */
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1216; --card:#161A20; --ink:#E8ECF2; --muted:#98A2B0; --faint:#727C8B; --line:#262C35;
+      --done:#5FC896;  --done-bg:#122A20;  --done-edge:#245040;
+      --part:#E2B673;  --part-bg:#2C2315;  --part-edge:#4E3D1E;
+      --next:#A7A2F5;  --next-bg:#1E1B3A;  --next-edge:#3B357A;
+      --sheet:#F08A90; --sheet-bg:#33181A; --sheet-edge:#5C2A2E;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); line-height:1.65; -webkit-font-smoothing:antialiased;
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif}
+  .wrap{max-width:1180px; margin:0 auto; padding:44px 20px 80px; display:flex; flex-direction:column; gap:42px}
+  .eyebrow{margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--next)}
+  h1{margin:0 0 12px; font-size:clamp(25px,4vw,36px); font-weight:800; letter-spacing:-.026em; line-height:1.22}
+  .lede{margin:0; max-width:76ch; color:var(--muted); font-size:15.5px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+  section{display:flex; flex-direction:column; gap:15px}
+  h2{margin:0; font-size:19.5px; font-weight:750; letter-spacing:-.015em; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .num{flex:none; width:26px; height:26px; border-radius:7px; display:grid; place-items:center; background:var(--ink); color:var(--paper); font-size:13px; font-weight:800}
+  .rule{margin:0; color:var(--muted); font-size:14px; max-width:80ch}
+  .rule strong{color:var(--ink); font-weight:700}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 22px; box-shadow:var(--shadow)}
+
+  .b{display:inline-block; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:750; white-space:nowrap}
+  .b-done{background:var(--done-bg); color:var(--done); border:1px solid var(--done-edge)}
+  .b-part{background:var(--part-bg); color:var(--part); border:1px solid var(--part-edge)}
+  .b-next{background:var(--next-bg); color:var(--next); border:1px solid var(--next-edge)}
+  .b-sheet{background:var(--sheet-bg); color:var(--sheet); border:1px solid var(--sheet-edge)}
+
+  .tbl{width:100%; border-collapse:collapse; font-size:13px}
+  .tbl th{color:var(--faint); font-size:11.5px; font-weight:750; letter-spacing:.06em; text-align:left; padding:8px 10px; border-bottom:1.5px solid var(--line); white-space:nowrap}
+  .tbl td{padding:11px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+  .tbl td b{font-weight:750}
+  .tbl .sm{color:var(--muted); font-size:12.5px}
+  .tblwrap{overflow-x:auto}
+
+  /* 진단 그림(우레온) */
+  .diag{display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:stretch}
+  @media (max-width:860px){ .diag{grid-template-columns:1fr} .diag .mid{transform:rotate(90deg); justify-self:center} }
+  .pane{border:1.5px solid var(--line); border-radius:12px; background:var(--card); padding:14px 16px}
+  .pane .pt{font-size:12px; font-weight:800; letter-spacing:.06em; margin-bottom:8px}
+  .pane.sheetp{border-color:var(--sheet-edge)} .pane.sheetp .pt{color:var(--sheet)}
+  .pane.dbp{border-color:var(--next-edge)} .pane.dbp .pt{color:var(--next)}
+  .mid{align-self:center; color:var(--faint); font-size:20px; font-weight:800}
+  .rows{display:flex; flex-direction:column; gap:3px; font-size:11.5px; font-family:var(--mono)}
+  .rw{border:1px solid var(--line); border-radius:6px; padding:3px 8px; background:var(--paper); color:var(--muted); display:flex; gap:8px}
+  .rw b{color:var(--ink); font-weight:700; font-family:inherit}
+  .rw.ghost{border-style:dashed; color:var(--faint)}
+  .rw.miss{border-color:var(--sheet-edge); background:var(--sheet-bg); color:var(--sheet)}
+
+  /* 파이프라인 */
+  .flow{display:grid; grid-template-columns:repeat(4,1fr); gap:10px}
+  @media (max-width:860px){ .flow{grid-template-columns:1fr 1fr} }
+  .fstep{background:var(--card); border:1.5px solid var(--next-edge); border-radius:12px; padding:14px 15px; display:flex; flex-direction:column; gap:6px; position:relative}
+  .fstep .fn{position:absolute; top:-9px; left:13px; background:var(--paper); padding:0 6px; font-size:10.5px; font-weight:800; color:var(--next); letter-spacing:.1em}
+  .fstep .ft{font-size:13.5px; font-weight:750}
+  .fstep .fd{font-size:12px; color:var(--muted); line-height:1.55}
+
+  /* 단계 카드 */
+  .step{border-left:4px solid var(--next); border-radius:14px; background:var(--card); border-top:1px solid var(--line); border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:20px 22px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:14px}
+  .step .sh{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap}
+  .step .sn{font-size:12px; font-weight:800; letter-spacing:.1em; color:var(--next)}
+  .step .st{font-size:17px; font-weight:800; letter-spacing:-.01em}
+  .step .sd{color:var(--muted); font-size:13.5px; max-width:82ch; margin:0}
+  .step ul{margin:0; padding-left:20px; font-size:13.5px; color:var(--muted); display:flex; flex-direction:column; gap:5px}
+  .step ul b{color:var(--ink); font-weight:700}
+
+  /* 목업 */
+  .wf{border:1.5px dashed var(--line); border-radius:12px; background:var(--paper); padding:14px; font-size:12.5px}
+  .wf .wt{font-size:11px; font-weight:800; letter-spacing:.1em; color:var(--faint); margin-bottom:10px; text-transform:uppercase}
+  .ui{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:8px}
+  .ui .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .ui .btn{display:inline-block; border-radius:8px; padding:7px 14px; font-size:12px; font-weight:750; background:var(--next); color:#fff}
+  .ui .btn.danger{background:var(--sheet)}
+  .ui .btn.ghost{background:transparent; color:var(--muted); border:1px solid var(--line)}
+  .ui .btn.dis{opacity:.45}
+  .ui .note{font-size:11.5px; color:var(--muted); background:var(--next-bg); border:1px solid var(--next-edge); border-radius:8px; padding:8px 10px; line-height:1.55}
+  .ui .note.ok{background:var(--done-bg); border-color:var(--done-edge)}
+  .ui .note.warn{background:var(--part-bg); border-color:var(--part-edge)}
+  .mini{width:100%; border-collapse:collapse; font-size:11.5px}
+  .mini th{background:var(--paper); border:1px solid var(--line); padding:5px 8px; font-weight:700; color:var(--muted); white-space:nowrap}
+  .mini td{border:1px solid var(--line); padding:5px 8px; white-space:nowrap; color:var(--muted)}
+  .mini .hot{color:var(--sheet); font-weight:750}
+  .mini .good{color:var(--done); font-weight:750}
+
+  .callout{border-radius:12px; padding:14px 16px; font-size:13.5px; border:1px solid}
+  .callout.warn{background:var(--part-bg); border-color:var(--part-edge)}
+  .callout.safe{background:var(--done-bg); border-color:var(--done-edge)}
+  .callout b{font-weight:750}
+  code{font-family:var(--mono); font-size:.92em; background:var(--paper); border:1px solid var(--line); border-radius:5px; padding:1px 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">탈 구글시트 · 마지막 트리거 (2026-08-07)</p>
+    <h1>시트에 더 준비된 만큼 표를 늘리고, 그다음 시트를 끊는다</h1>
+    <p class="lede">
+      <b>원칙: 기준(원본)은 리뷰웹시스템입니다.</b> 다만 지금은 시트에 준비된 인원·일정(예: 우레온 100명분)이
+      시스템 표보다 많은 작업들이 있습니다. 그래서 순서는 하나뿐입니다 —
+      ① 시트에 더 준비된 만큼 <b>시스템 표를 먼저 채우고(동기화)</b>,
+      ② 숫자가 맞는지 <b>검증</b>한 뒤, ③ 그 작업의 <b>구글시트 연결을 완전히 끊습니다.</b>
+      이 문서는 그 세 단계를 실행하는 화면과 규칙의 구현 계획입니다. 진행 중 작업에 대한 탈 구글시트의 마지막 트리거입니다.
+    </p>
+  </header>
+
+  <!-- ═══ 1. 이번 사례 진단 ═══ -->
+  <section>
+    <h2><span class="num">1</span>이번 사례가 보여준 것 — 8/3(네이버)우레온_바디미스트 100건</h2>
+    <p class="rule">
+      코드 확인 결과, 증상의 원인은 구조입니다: 시스템 표는 검색인덱스를 거쳐 만들어지는데,
+      검색인덱스는 <strong>참여자 이름이 없는 행을 버립니다</strong>. 시트에 구매일자·리뷰옵션만 채워 둔
+      "준비 행" 80개는 그래서 시스템 표에 <strong>아예 들어오지 못했고</strong>, 표는 참여자가 채워진 20행에서 멈췄습니다.
+      모집공고가 "전체 마감"으로 잠긴 것은 공고에 저장된 정원 값이 시트 준비 인원(100)이 아니라
+      낮은 값으로 소진됐기 때문입니다 — 점검 화면(2번)이 이 숫자를 작업마다 나란히 보여줍니다.
+    </p>
+    <div class="card">
+      <div class="diag">
+        <div class="pane sheetp">
+          <div class="pt">📄 구글시트 (준비 완료)</div>
+          <div class="rows">
+            <div class="rw"><b>1~20</b> 참여자 채워짐 · 8/3~8/6</div>
+            <div class="rw miss"><b>21~100</b> 구매일자 8/7~8/31 · 리뷰옵션 준비됨 · <u>이름 비어 있음</u></div>
+          </div>
+        </div>
+        <div class="mid">→</div>
+        <div class="pane dbp">
+          <div class="pt">🖥 리뷰웹시스템[3버전] 표 (지금)</div>
+          <div class="rows">
+            <div class="rw"><b>1~20</b> 그대로 들어옴</div>
+            <div class="rw ghost"><b>21~100</b> 이름이 없어 인덱스에서 탈락 → 표에 없음 → 모집할 자리도 없음</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout safe">
+      ✅ 참고: 지난 배포로 열린 <b>「시트 데이터 반영 점검」</b> 도구는 "시트에 있는 것이 시스템까지 왔는가"(반영 사슬)를 봅니다.
+      이번 건은 그 반대 방향 — <b>"시트에 준비만 되어 있고 시스템 표에는 자리조차 없는 행"</b> — 이라 새 감지 규칙(시트 우위)이 필요하고,
+      이 계획이 그 규칙과 후속 처리(동기화 → 연결 끊기)를 같은 점검 화면에 추가합니다.
+    </div>
+  </section>
+
+  <!-- ═══ 2. 전체 흐름 ═══ -->
+  <section>
+    <h2><span class="num">2</span>전체 흐름 — 점검 → 동기화 → 검증 → 연결 끊기</h2>
+    <p class="rule">한 작업이 시트에서 완전히 독립하는 4단계입니다. <strong>각 단계는 사람이 버튼으로 확정</strong>하고
+      (자동으로 조용히 진행하지 않음), 어느 단계에서든 멈추거나 되돌릴 수 있습니다.</p>
+    <div class="flow">
+      <div class="fstep"><span class="fn">STEP A</span><div class="ft">🔎 시트 우위 점검</div><div class="fd">연결된 전 작업에서 "시트 준비 인원 &gt; 시스템 표 인원"인 작업을 자동으로 찾아 목록으로.</div></div>
+      <div class="fstep"><span class="fn">STEP B</span><div class="ft">➕ 슬롯 동기화</div><div class="fd">부족한 만큼 시스템 표에 빈 자리(구매일자·리뷰옵션 포함)를 만든다. 추가만 — 기존 행은 안 건드림.</div></div>
+      <div class="fstep"><span class="fn">STEP C</span><div class="ft">✅ 검증 + 정원 교정</div><div class="fd">표 인원=시트 준비 인원 확인. 공고 정원이 다르면 화면이 보여주고 클릭 한 번으로 교정.</div></div>
+      <div class="fstep"><span class="fn">STEP D</span><div class="ft">✂ 연결 끊기</div><div class="fd">그 작업은 이후 시트를 읽지도 쓰지도 않는다. 검색·모집·제출·진행표시 전부 시스템 표 기준.</div></div>
+    </div>
+  </section>
+
+  <!-- ═══ 3. STEP A ═══ -->
+  <section>
+    <h2><span class="num">3</span>단계별 상세</h2>
+
+    <div class="step">
+      <div class="sh"><span class="sn">STEP A</span><span class="st">시트 우위 점검 — "시트가 더 많은 작업" 전수 목록</span></div>
+      <p class="sd">
+        기존 「시트 데이터 반영 점검」 화면에 <b>시트 우위</b> 감지를 추가합니다. 시트 사본(RAW 미러)에서
+        구매일자 등이 준비된 행 수를 세어, 시스템 표(빈 슬롯 포함) 행 수·모집공고 정원과 나란히 비교합니다.
+        읽기 전용이라 실행해도 아무것도 바뀌지 않습니다.
+      </p>
+      <div class="wf">
+        <div class="wt">점검 화면 · 시트 우위 목록 (목업)</div>
+        <div class="ui">
+          <table class="mini">
+            <thead><tr><th>작업</th><th>시트 준비</th><th>시스템 표</th><th>공고 정원</th><th>판정</th><th>처리</th></tr></thead>
+            <tbody>
+              <tr><td>8/3(네이버)우레온_바디미스트</td><td class="hot">100행 (8/3~8/31)</td><td class="hot">20행</td><td class="hot">옵션 20 · 마감</td><td>시트 우위 −80</td><td>[➕ 표 동기화]</td></tr>
+              <tr><td>7/30(쿠팡)체크오_마시는비타민</td><td class="hot">300행</td><td class="hot">180행</td><td>300</td><td>시트 우위 −120</td><td>[➕ 표 동기화]</td></tr>
+              <tr><td>7/22(네이버)모키위키_모기기피제</td><td>100행</td><td class="good">100행</td><td class="good">100</td><td class="good">일치 ✓</td><td>[✂ 연결 끊기 가능]</td></tr>
+            </tbody>
+          </table>
+          <div class="note">판정 기준(기본값): <b>시트에서 구매일자가 채워진 준비 행 전부</b>를 그 작업의 계획 인원으로 봅니다.
+            발주서 건수와 시트가 다르면 <b>시트가 우선</b>입니다(시트가 실제 작업 준비의 결과물이므로). 다르게 정하고 싶으면 알려주세요.</div>
+        </div>
+      </div>
+      <ul>
+        <li><b>감지 재료</b>: 이미 5분마다 떠 두는 시트 사본(RAW 미러) — 시트를 새로 읽지 않아 구글 읽기 한도 소모 0.</li>
+        <li><b>비교 3열</b>: 시트 준비 행 / 시스템 표 행(빈 슬롯 포함) / 공고 정원(총모집·옵션 정원) — 이번 우레온 건처럼 "표는 20인데 공고 정원도 어긋난" 복합 사례가 한 줄에 다 보입니다.</li>
+      </ul>
+    </div>
+
+    <!-- STEP B -->
+    <div class="step">
+      <div class="sh"><span class="sn">STEP B</span><span class="st">슬롯 동기화 — 시트의 준비 행을 시스템 표의 자리로</span></div>
+      <p class="sd">
+        [➕ 표 동기화]를 누르면 시트에만 있던 준비 행(이름 없는 행)이 시스템 표의 <b>빈 자리(슬롯)</b>로 들어옵니다.
+        구매일자·리뷰옵션 값을 그대로 담아 오므로, 동기화 직후부터 "8/24는 5명" 같은 <b>일정·정원 계산 재료가 표 안에</b> 생깁니다.
+        작업표 생성 기능이 이미 쓰는 검증된 슬롯 방식을 그대로 재사용합니다.
+      </p>
+      <div class="wf">
+        <div class="wt">동기화 확인창 (목업)</div>
+        <div class="ui">
+          <div class="row"><b>8/3(네이버)우레온_바디미스트 100건</b></div>
+          <div class="note">시트의 준비 행 <b>80개</b>(21~100번, 8/7~8/31)를 시스템 표의 빈 자리로 가져옵니다.<br>
+            · 이미 있는 20행은 <b>건드리지 않습니다</b> (추가만 · 두 번 눌러도 중복 생성 없음)<br>
+            · 자리 번호 = 시트 행 번호 그대로 → 이후 주문이 정확히 제자리에 들어갑니다<br>
+            · 구매일자 · 리뷰옵션(포토/텍스트) 값을 그대로 담아 옵니다</div>
+          <div class="row"><span class="btn">가져오기 실행</span><span class="btn ghost">취소</span></div>
+        </div>
+      </div>
+      <ul>
+        <li><b>비파괴 · 멱등</b>: 추가만 하고, 같은 자리에 이미 행이 있으면 그대로 둡니다(중복 불가). 잘못 실행해도 데이터가 지워지는 경우가 없습니다.</li>
+        <li><b>참여자가 채워지면</b>: 리뷰어 주문이 들어올 때 그 자리 행이 채워집니다 — 지금 작업표 생성으로 만든 작업과 완전히 같은 동작.</li>
+      </ul>
+    </div>
+
+    <!-- STEP C -->
+    <div class="step">
+      <div class="sh"><span class="sn">STEP C</span><span class="st">검증 + 공고 정원 교정 — "전체 마감" 잠금 해제</span></div>
+      <p class="sd">
+        동기화가 끝나면 화면이 다시 세 숫자를 대조합니다: 시트 준비 100 = 시스템 표 100 ✓.
+        이때 모집공고의 정원(총모집·옵션 정원)이 다른 값이면 — 우레온 건의 "전체 마감" 원인 — 화면이 그 차이를 보여주고,
+        담당자가 클릭 한 번으로 표 기준(100)에 맞춥니다. <b>자동으로 바꾸지 않습니다</b>(정원은 모집을 여닫는 값이라 사람이 확정).
+      </p>
+      <div class="wf">
+        <div class="wt">정원 교정 (목업)</div>
+        <div class="ui">
+          <div class="row"><span class="b b-part">⚠ 공고 정원 불일치</span><span>표 100명분 · 공고 총모집 100 · <b style="color:var(--sheet)">옵션 정원 20 (소진 → 전체 마감)</b></span></div>
+          <div class="row"><span class="btn">옵션 정원을 100으로 교정</span><span class="btn ghost">공고 수정 화면에서 직접</span></div>
+          <div class="note ok">교정하면 즉시 모집이 다시 열립니다 — 오늘 정원은 표의 구매일자 분배(하루 5명)를 그대로 따릅니다.</div>
+        </div>
+      </div>
+      <ul>
+        <li><b>우레온 건 즉시 조치</b>: STEP A~C까지만으로 "모집할 인원이 없다" 문제가 풀립니다 — 연결 끊기(D)를 기다릴 필요 없이 이 단계 배포 즉시 적용 가능합니다.</li>
+      </ul>
+    </div>
+
+    <!-- STEP D -->
+    <div class="step">
+      <div class="sh"><span class="sn">STEP D</span><span class="st">연결 끊기 — 그 작업은 이제 시트를 모른다 (완전 분리)</span></div>
+      <p class="sd">
+        숫자가 일치하는 작업에서 [✂ 연결 끊기]를 누르면, 그 작업은 이후 <b>시트를 읽지도 쓰지도 않습니다.</b>
+        시트 파일은 지우지 않고 그대로 두되(과거 기록 열람용), 시스템은 더 이상 그 시트를 참조하지 않습니다.
+        끊기 전에 시스템이 마지막으로 시트를 한 번 읽어 최종 값을 맞추고(마지막 스냅샷), 그 뒤부터는 모든 것이 표 기준입니다.
+      </p>
+      <div class="card tblwrap">
+        <table class="tbl">
+          <thead><tr><th>기능</th><th>끊기 전 (지금)</th><th>끊은 후</th></tr></thead>
+          <tbody>
+            <tr><td><b>리뷰어 검색·구매양식</b></td><td class="sm">시트를 5분마다 읽어 만든 인덱스에서 검색</td><td><span class="b b-next">시스템 표에서 직접</span> <span class="sm">— 5분 지연 소멸</span></td></tr>
+            <tr><td><b>주문 행 배정</b></td><td class="sm">시트 사본에서 빈 줄을 찾아 시트에 기록</td><td><span class="b b-next">표의 빈 슬롯에 배정</span> <span class="sm">— 시트 기록 없음</span></td></tr>
+            <tr><td><b>모집 일정·정원</b></td><td class="sm">시트의 구매일자 열에서 파생</td><td><span class="b b-next">표의 구매일자에서 파생</span> <span class="sm">— 같은 규칙, 재료만 표로</span></td></tr>
+            <tr><td><b>리뷰제출·입금 표시</b></td><td class="sm">작업보드 + 시트 칸 되쓰기(write-back)</td><td><span class="b b-next">작업보드만</span> <span class="sm">— 되쓰기 자체가 불필요</span></td></tr>
+            <tr><td><b>시트 읽기(미러·인덱스 빌드)</b></td><td class="sm">5분 주기</td><td><span class="b b-done">중단</span> <span class="sm">— 구글 읽기 한도 여유 증가</span></td></tr>
+            <tr><td><b>직원이 시트를 고치면?</b></td><td class="sm">반영 사슬로 시스템에 유입</td><td><span class="b b-sheet">반영 안 됨</span> <span class="sm">— 편집은 작업보드에서(화면이 안내)</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="wf">
+        <div class="wt">연결 끊기 확인창 (목업)</div>
+        <div class="ui">
+          <div class="row"><b>✂ 8/3(네이버)우레온_바디미스트 100건 — 시트 연결을 끊습니다</b></div>
+          <div class="note warn">확인 사항 (전부 충족해야 버튼이 켜집니다 — 하나라도 어긋나면 끊지 않습니다)<br>
+            ✓ 시트 준비 100 = 시스템 표 100 (동기화 완료)<br>
+            ✓ 마지막 스냅샷 완료 · 데이터 대조(parity) 진짜 불일치 0<br>
+            ✓ 시트에 반영 대기 중인 주문 0건</div>
+          <div class="note">끊은 뒤 이 시트에 직접 적는 내용은 시스템에 반영되지 않습니다. 되돌리려면 [재연결]을 누르면 됩니다
+            (단, 분리 기간에 시트에 적힌 내용은 가져오지 않습니다 — 그래서 끊은 뒤엔 작업보드에서만 편집).</div>
+          <div class="row"><span class="btn danger">작업명을 입력해 확정: [________________]</span><span class="btn ghost">취소</span></div>
+        </div>
+      </div>
+      <ul>
+        <li><b>게이트는 기존 검증을 재사용</b>: 원본 전환(cutover)에 이미 있는 "진짜 불일치 0" 게이트와 같은 규율 — 통과 못 하면 사유를 보여주고 끊지 않습니다.</li>
+        <li><b>작업명 타이핑 확정</b>: 되돌리기 어려운 방향의 전환이라, 실수 클릭으로 끊기지 않게 기존 원본 전환과 같은 마찰을 둡니다.</li>
+        <li><b>재연결(비상구)</b>: 끊은 직후 문제가 보이면 [재연결]로 종전 동작(시트 병행)에 복귀 — 다만 분리 기간의 시트 수기 내용은 무시된다는 것을 화면이 분명히 말합니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ═══ 4. 만들어야 하는 것 ═══ -->
+  <section>
+    <h2><span class="num">4</span>만들어야 하는 것 (개발 관점 요약)</h2>
+    <div class="card tblwrap">
+      <table class="tbl">
+        <thead><tr><th>부품</th><th>내용</th><th>새로 만드나?</th></tr></thead>
+        <tbody>
+          <tr><td><b>① 시트 우위 감지</b></td><td class="sm">RAW 미러에서 날짜 준비 행 수를 세어 표 행 수·공고 정원과 대조 — 기존 반영 점검 화면에 열 추가</td><td><span class="b b-part">확장</span> <span class="sm">기존 점검 도구에 합류</span></td></tr>
+          <tr><td><b>② 슬롯 백필</b></td><td class="sm">이름 없는 준비 행 → 표의 빈 슬롯(구매일자·리뷰옵션 포함, 시트 행번호=자리 번호)</td><td><span class="b b-part">확장</span> <span class="sm">작업표 생성의 슬롯 방식 재사용</span></td></tr>
+          <tr><td><b>③ 정원 교정 버튼</b></td><td class="sm">공고 총모집·옵션 정원을 표 기준으로 맞추는 1클릭(사람 확정)</td><td><span class="b b-next">신규(소형)</span></td></tr>
+          <tr><td><b>④ 무시트 검색·행배정</b></td><td class="sm">끊긴 작업은 검색·행배정·일정 계산의 재료를 시트 사본 → 표로 전환 (탈 구글시트 계획의 F2와 동일 — 신규 무시트 작업과 공용)</td><td><span class="b b-next">신규(핵심)</span></td></tr>
+          <tr><td><b>⑤ 연결 끊기 스위치</b></td><td class="sm">작업별 분리 플래그: 시트 읽기(미러·빌드)·쓰기(주문 기록·write-back) 중단 + 게이트 + 재연결</td><td><span class="b b-next">신규</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">
+      ⚠ <b>순서 약속</b>: ④(무시트 검색·행배정)가 준비되기 전에 ⑤(연결 끊기)를 열지 않습니다 —
+      먼저 끊으면 "표는 100명분인데 리뷰어가 검색하면 안 나오는" 작업이 됩니다.
+      반대로 ①~③은 ④ 없이도 안전하므로 <b>먼저 배포해서 우레온 건부터 풉니다.</b>
+    </div>
+  </section>
+
+  <!-- ═══ 5. 가정(기본값) ═══ -->
+  <section>
+    <h2><span class="num">5</span>이 계획이 채택한 기본값 — 다르면 알려주세요</h2>
+    <p class="rule">질문드렸던 4가지에 답을 받지 못해, 운영 규율에 맞는 안전한 쪽을 기본값으로 채택했습니다. 바꾸셔도 계획 구조는 그대로입니다.</p>
+    <div class="card tblwrap">
+      <table class="tbl">
+        <thead><tr><th>결정</th><th>채택한 기본값</th><th>이유</th></tr></thead>
+        <tbody>
+          <tr><td><b>동기화 기준</b></td><td>시트에서 <b>구매일자가 준비된 행 전부</b> (발주 건수와 다르면 시트 우선)</td><td class="sm">시트가 실제 작업 준비의 결과물 — 우레온 = 100명분</td></tr>
+          <tr><td><b>끊기 강도</b></td><td><b>완전 분리</b> (읽기·쓰기 모두 중단, 시트는 열람용 보관)</td><td class="sm">"연결을 끊어낸다"의 문자 그대로 — 반쪽 유지는 탈 시트를 미룸</td></tr>
+          <tr><td><b>실행 방식</b></td><td>동기화·끊기 모두 <b>작업별 사람 확정</b> (일괄 자동 없음)</td><td class="sm">되돌리기 어려운 전환은 사람이 — 기존 원본 전환과 같은 규율</td></tr>
+          <tr><td><b>공고 정원</b></td><td>불일치를 화면이 보여주고 <b>클릭 한 번 교정</b> (자동 변경 없음)</td><td class="sm">정원은 모집을 여닫는 값 — 조용한 자동수정 금지</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══ 6. 일정 ═══ -->
+  <section>
+    <h2><span class="num">6</span>일정 제안</h2>
+    <div class="card tblwrap">
+      <table class="tbl">
+        <thead><tr><th>순서</th><th>하는 일</th><th>효과</th></tr></thead>
+        <tbody>
+          <tr><td><b>1차 (즉시)</b></td><td>① 시트 우위 감지 + ② 슬롯 백필 + ③ 정원 교정 — 점검 화면에 통합 배포</td><td class="sm"><b>우레온 100명분 복구 · 모집 재개.</b> 같은 유형 전 작업 전수 목록 확보</td></tr>
+          <tr><td><b>2차</b></td><td>④ 무시트 검색·행배정·일정 계산 (신규 무시트 작업 F2와 공용 개발) — 내부 테스트 공고로 참여→제출 전 과정 검증</td><td class="sm">끊긴 작업이 리뷰어에게 정상 동작하는 전제 완성</td></tr>
+          <tr><td><b>3차</b></td><td>⑤ 연결 끊기 스위치 + 게이트 + 재연결 — 숫자 일치 작업 1건으로 실전 검증 후 확대</td><td class="sm">진행 중 작업의 시트 독립 시작 — <b>탈 구글시트 마지막 트리거 가동</b></td></tr>
+          <tr><td><b>이후</b></td><td>전 작업 순차 분리 · 신규 작업은 무시트로 시작(기존 F1) — "연결된 시트 0개" 지표 관찰</td><td class="sm">구글시트 완전 졸업</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout safe">
+      ✅ 이 계획은 기존 「탈 구글시트 최종단계(F1~F5)」 문서의 <b>F5(기존 작업)와 F2(검색·행배정)를 구체화</b>한 것입니다 —
+      신규 작업의 무시트화(F1)와 부품을 공유하므로 두 갈래가 서로를 앞당깁니다.
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
