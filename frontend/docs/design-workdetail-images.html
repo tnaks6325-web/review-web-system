@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>최종 시안 — 작업내용 3칸 이미지 첨부 (관리자 화면 · 확대 팝업 · 리뷰어 실제 화면)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   모집공고 발행·수정 모달 [작업내용]의 세 칸(유입가이드·리뷰가이드·특이사항)에
+   ① 입력창 높이에 맞춘 썸네일 미리보기 ② 클릭 → 확대 팝업
+   ③ 첨부가 없으면 그 자리에서 넣기(파일선택·Ctrl+V·드래그앤드롭)
+   ④ 드래그로 순서 바꾸기 ⑤ 칸당 최대 4장
+   을 붙이는 최종 시안. 사용자 확정(2026-08-07) 반영.
+
+   외부 리소스 0(오프라인 열람) · color-scheme 고정 · 가짜 데이터로 실제 동작.
+   리뷰어 화면 목업은 campaign-workdetail.js 의 실제 CSS 를 그대로 복사해 쓴다
+   (모형과 실물이 어긋나지 않게).
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#5d6b7f;--faint:#8b95a6;
+  --line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#15803d;--safe-soft:#e9f7ee;--safe-line:#cfe9d8;
+  --warn:#b45309;--warn-soft:#fdf6ec;--warn-line:#f0e0c4;
+  --bad:#c92a2e;--bad-soft:#fdf0f0;--bad-line:#f3d4d4;
+  --adv:#5f4bbd;--adv-soft:#efecfa;--adv-line:#ddd6f6;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sh1:0 1px 2px rgba(16,24,40,.05);--sh2:0 2px 10px rgba(16,24,40,.06);--sh3:0 12px 40px rgba(16,24,40,.16);
+}
+*{box-sizing:border-box}
+html{scrollbar-color:var(--line2) transparent}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+::selection{background:#dbe6ff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-thumb{background:var(--line2);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
+code{font-family:var(--mono);font-size:.88em;background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+
+.page{max-width:1240px;margin:0 auto;padding:30px 20px 120px}
+h1{font-size:23px;font-weight:800;letter-spacing:-.025em;margin:0 0 8px}
+.lead{color:var(--muted);font-size:13.5px;margin:0 0 8px;max-width:900px}
+.lead b{color:var(--ink)}
+.meta{font-size:12px;color:var(--faint);margin:0 0 10px}
+.vswitch{display:flex;gap:6px;margin:14px 0 0;flex-wrap:wrap}
+.vswitch a{font-size:11.5px;font-weight:700;text-decoration:none;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--line2);color:var(--muted);background:var(--card)}
+.vswitch a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+.sec{margin-top:46px}
+.sec>h2{font-size:16.5px;font-weight:800;letter-spacing:-.02em;margin:0 0 5px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sec>h2 .n{width:22px;height:22px;border-radius:7px;background:var(--adv-soft);color:var(--adv);border:1px solid var(--adv-line);
+  font-size:11px;font-weight:800;display:grid;place-items:center;flex:none}
+.tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;color:var(--adv);background:var(--adv-soft);border:1px solid var(--adv-line)}
+.tag.rec{color:var(--safe);background:var(--safe-soft);border-color:var(--safe-line)}
+.tag.warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
+.tag.new{color:var(--accent-deep);background:var(--accent-soft);border-color:var(--accent-line)}
+.sec>.sub{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:900px}
+.sec>.sub b{color:var(--ink)}
+
+.note{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 17px;font-size:13px;color:var(--muted);box-shadow:var(--sh1)}
+.note+.note{margin-top:10px}
+.note b{color:var(--ink)}
+.note>.nt{font-size:13px;font-weight:800;color:var(--ink);margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.note ul{margin:7px 0 0;padding-left:19px}.note li{margin-bottom:6px}.note li:last-child{margin-bottom:0}
+.note.cool{background:var(--accent-soft);border-color:var(--accent-line);color:#274a8f}
+.note.cool b,.note.cool .nt{color:#1a3873}
+.note.warm{background:var(--warn-soft);border-color:var(--warn-line);color:#7a4c0d}
+.note.warm b,.note.warm .nt{color:#5f3a06}
+.note.good{background:var(--safe-soft);border-color:var(--safe-line);color:#14622f}
+.note.good b,.note.good .nt{color:#0f4a24}
+.note.bad{background:var(--bad-soft);border-color:var(--bad-line);color:#8f2226}
+.note.bad b,.note.bad .nt{color:#7a1c20}
+
+table.t{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;background:var(--card);
+  border:1px solid var(--line);border-radius:13px;overflow:hidden;box-shadow:var(--sh1)}
+table.t th,table.t td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+table.t thead th{font-size:10.5px;font-weight:800;letter-spacing:.04em;color:var(--muted);background:var(--card2);white-space:nowrap}
+table.t tbody tr:last-child td{border-bottom:0}
+table.t .k{font-weight:700;color:var(--ink);white-space:nowrap}
+.ok{color:var(--safe);font-weight:700}.no{color:var(--bad);font-weight:700}.mid{color:var(--warn);font-weight:700}
+
+/* ── 모달 재현 ── */
+.mock{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh2);overflow:hidden;margin-top:14px}
+.mock-hd{display:flex;align-items:center;gap:9px;padding:10px 15px;background:var(--card2);border-bottom:1px solid var(--line);
+  font-size:11.5px;font-weight:800;color:var(--muted);letter-spacing:.03em}
+.mock-hd .dot{width:8px;height:8px;border-radius:50%;background:var(--line2)}
+.mock-hd .sp{flex:1}
+.mock-hd .hint{font-weight:700;color:var(--faint);letter-spacing:0}
+.mock-bd{padding:18px}
+
+.rfcard{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card)}
+.rfch{display:flex;align-items:center;gap:8px;padding:9px 13px;background:#f7f9fc;border-bottom:1px solid var(--line)}
+.rfct{font-size:12.5px;font-weight:800;color:var(--ink)}
+.rfcn{font-size:10.5px;color:var(--faint);font-weight:700}
+.rfcb{padding:14px 15px;display:flex;flex-direction:column;gap:14px}
+.rfrow{display:flex;gap:11px;align-items:flex-start}
+.rfhl{width:82px;flex:none;text-align:right;font-size:12px;font-weight:700;color:var(--muted);padding-top:8px}
+.rfrow>.rfv{flex:1;min-width:0}
+.rfin{width:100%;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:12.5px;
+  color:var(--ink);background:#fff;resize:vertical;line-height:1.5}
+.rfin:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.rfhint{font-size:10.5px;color:var(--faint);margin-top:4px}
+
+/* ── 이미지 스트립 ── */
+.ig-wrap{display:flex;gap:9px;align-items:stretch}
+.ig-ta{flex:1;min-width:0;display:flex;flex-direction:column}
+.ig-strip{flex:none;display:flex;gap:6px;align-items:stretch;
+  padding:4px;border:1px dashed var(--line2);border-radius:9px;background:#fbfcfe;
+  width:326px;overflow:hidden;transition:border-color .15s,background .15s}
+.ig-strip.drag{border-color:var(--accent);background:var(--accent-soft);border-style:solid}
+.ig-strip.err{border-color:var(--bad-line);background:var(--bad-soft)}
+@media(max-width:1080px){.ig-wrap{flex-direction:column}.ig-strip{width:100%}}
+
+.ig-thumb{position:relative;flex:none;width:74px;height:100%;border-radius:7px;overflow:hidden;
+  border:1px solid var(--line);background:#eef1f6;cursor:zoom-in;padding:0}
+.ig-thumb img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.ig-thumb .ig-x{position:absolute;top:3px;right:3px;width:17px;height:17px;border:none;border-radius:50%;
+  background:rgba(16,24,40,.62);color:#fff;font-size:10px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0}
+.ig-thumb .ig-x:hover{background:rgba(201,42,46,.92)}
+.ig-thumb .ig-n{position:absolute;left:3px;bottom:3px;font-size:9px;font-weight:800;color:#fff;
+  background:rgba(16,24,40,.55);border-radius:4px;padding:1px 4px;line-height:1.35}
+.ig-thumb .ig-g{position:absolute;left:0;top:0;bottom:0;width:13px;cursor:grab;
+  background:linear-gradient(90deg,rgba(16,24,40,.5),rgba(16,24,40,0));display:grid;place-items:center;
+  color:#fff;font-size:9px;letter-spacing:-1px;line-height:1}
+.ig-thumb.dragging{opacity:.4}
+.ig-thumb.dropL{box-shadow:inset 3px 0 0 var(--accent)}
+.ig-thumb.dropR{box-shadow:inset -3px 0 0 var(--accent)}
+.ig-thumb.up img{opacity:.35;filter:grayscale(.4)}
+.ig-thumb.up::after{content:"올리는 중";position:absolute;inset:0;display:grid;place-items:center;
+  font-size:9.5px;font-weight:800;color:var(--accent-deep)}
+.ig-thumb.bad{border-color:var(--bad-line)}
+.ig-thumb.bad img{opacity:.3}
+.ig-thumb.bad::after{content:"실패";position:absolute;inset:0;display:grid;place-items:center;font-size:10px;font-weight:800;color:var(--bad)}
+
+.ig-add{flex:none;width:74px;height:100%;border:1px dashed var(--line2);border-radius:7px;background:#fff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
+  font-size:10px;font-weight:700;color:var(--muted);padding:0}
+.ig-add:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
+.ig-add .plus{font-size:16px;line-height:1;font-weight:400}
+.ig-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  cursor:pointer;border-radius:7px;text-align:center;padding:0 10px}
+.ig-empty:hover{background:var(--accent-soft)}
+.ig-empty .t1{font-size:11.5px;font-weight:800;color:var(--muted)}
+.ig-empty .t2{font-size:10px;color:var(--faint)}
+.ig-empty:hover .t1{color:var(--accent-deep)}
+.ig-msg{font-size:10.5px;margin-top:4px;font-weight:700;min-height:14px}
+.ig-msg.warn{color:var(--warn)}.ig-msg.bad{color:var(--bad)}.ig-msg.ok{color:var(--safe)}
+.ig-hidden{display:none}
+
+/* ── 확대 팝업 ── */
+.lb{position:fixed;inset:0;z-index:9999;background:rgba(8,12,20,.84);display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:13px;padding:34px}
+.lb.on{display:flex}
+.lb-stage{position:relative;display:flex;align-items:center;justify-content:center;gap:14px}
+.lb img{max-width:min(980px,86vw);max-height:70vh;border-radius:10px;box-shadow:var(--sh3);background:#fff}
+.lb-bar{display:flex;align-items:center;gap:13px;color:#e8edf6;font-size:12.5px;font-weight:700}
+.lb-btn{width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);
+  color:#fff;font-size:17px;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
+.lb-btn:disabled{opacity:.26;cursor:default}
+.lb-btn:not(:disabled):hover{background:rgba(255,255,255,.24)}
+.lb-close{position:absolute;top:18px;right:22px;width:36px;height:36px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:17px;cursor:pointer}
+.lb-cap{display:flex;flex-direction:column;align-items:center;gap:3px}
+.lb-fld{font-size:11px;font-weight:800;color:#93b4f5;letter-spacing:.03em}
+.lb-name{font-family:var(--mono);font-size:11px;color:#aebbd0;max-width:70vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lb-tip{font-size:10.5px;color:#7e8ba0}
+
+/* 팝업 정지 화면(문서 안에 그려 두는 설명용) */
+.lbshot{position:relative;background:#0d1119;border-radius:14px;padding:26px 22px 20px;box-shadow:var(--sh2);
+  display:flex;flex-direction:column;align-items:center;gap:12px;overflow:hidden}
+.lbshot .fakeclose{position:absolute;top:12px;right:14px;width:30px;height:30px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.1);color:#fff;font-size:14px;display:grid;place-items:center}
+.lbshot img{max-height:270px;border-radius:9px;box-shadow:var(--sh3)}
+.lbshot .row{display:flex;align-items:center;gap:12px;color:#e8edf6;font-size:12px;font-weight:700}
+.lbshot .rb{width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.26);
+  background:rgba(255,255,255,.1);color:#fff;display:grid;place-items:center;font-size:15px}
+.lbshot .rb.off{opacity:.26}
+.lbshot .cap{font-family:var(--mono);font-size:10.5px;color:#aebbd0}
+.lbshot .fld{font-size:10.5px;font-weight:800;color:#93b4f5}
+.callout{position:absolute;font-size:10.5px;font-weight:800;color:#0d1119;background:#ffd84d;
+  border-radius:6px;padding:2px 7px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+
+/* ── 리뷰어 화면 목업 (실제 CSS 재현) ── */
+.phones{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;margin-top:14px}
+.phone{width:390px;flex:none;background:#F2F4F6;border:1px solid var(--line2);border-radius:22px;overflow:hidden;box-shadow:var(--sh2)}
+.phone .ptop{background:#fff;border-bottom:1px solid #E5E7EB;padding:11px 14px;display:flex;align-items:center;gap:8px}
+.phone .ptop .bk{font-size:15px;color:#6B7280}
+.phone .ptop .tt{font-size:.86rem;font-weight:800;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phone .pbody{padding:12px;max-height:760px;overflow-y:auto}
+.holdbar{background:#FFFBEB;border:1px solid #FCD34D;border-radius:12px;padding:11px 13px;display:flex;
+  align-items:center;justify-content:space-between;margin-bottom:12px}
+.holdbar .l{font-size:.8rem;font-weight:800;color:#92400E}
+.holdbar .r{font-size:1.02rem;font-weight:800;color:#B45309;font-variant-numeric:tabular-nums}
+/* ↓ campaign-workdetail.js 의 실제 CSS 그대로 (모형과 실물이 어긋나지 않게) */
+.cwd-box{background:#FFFFFF;border:1px solid #E5E7EB;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 12px rgba(0,0,0,.05)}
+.cwd-tt{font-size:.78rem;font-weight:800;color:#9CA3AF;margin-bottom:8px}
+.cwd-body{font-size:.88rem;color:#111827;white-space:pre-wrap;word-break:break-word;line-height:1.65}
+.cwd-body img{max-width:100%;border-radius:10px;margin:6px 0;display:block}
+.cwd-muted{font-size:.76rem;color:#9CA3AF}
+.cwd-btn{display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#EEF1F7;color:#4B5563;
+  font-size:.84rem;font-weight:800;border-radius:11px;padding:11px;font-family:inherit;margin-top:10px}
+.cwd-box.hi{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.14)}
+.rvtag{display:inline-block;font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:6px;
+  background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line);vertical-align:middle}
+.phone-cap{font-size:11.5px;color:var(--faint);margin-top:8px;max-width:390px}
+.phone-cap b{color:var(--ink)}
+
+.demo-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.demo-bar button{font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);
+  background:var(--card);color:var(--muted);cursor:pointer}
+.demo-bar button:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-soft)}
+.demo-cap{font-size:11px;color:var(--faint);margin-top:8px}
+
+.kv{display:grid;grid-template-columns:170px 1fr;gap:6px 12px;font-size:12.5px;margin-top:10px}
+.kv .kk{font-weight:700;color:var(--muted)}
+.kv .vv{color:var(--ink)}
+.flow{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;margin-top:12px}
+.fbox{flex:1;min-width:170px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 13px;box-shadow:var(--sh1)}
+.fbox .ft{font-size:11px;font-weight:800;color:var(--adv);margin-bottom:4px}
+.fbox .fd{font-size:11.5px;color:var(--muted);line-height:1.5}
+.fbox .fd b{color:var(--ink)}
+.farr{align-self:center;color:var(--line2);font-size:17px;font-weight:700;flex:none}
+@media(max-width:880px){.farr{display:none}}
+</style></head>
+<body>
+<div class="page">
+
+  <h1>최종 시안 — 작업내용 3칸 이미지 첨부</h1>
+  <p class="lead">모집공고 발행·수정 모달의 <b>유입가이드 · 리뷰가이드 · 특이사항</b> 세 칸에
+     <b>입력창 높이에 맞춘 썸네일</b>을 붙이고, 클릭하면 <b>확대 팝업</b>으로 크게 보고,
+     첨부가 없으면 <b>그 자리에서 사진을 넣는다</b>(파일선택 · Ctrl+V · 드래그앤드롭).
+     <b>드래그로 순서를 바꾸고</b>, 칸당 <b>최대 4장</b>.</p>
+  <p class="meta">사용자 확정 2026-08-07 · 관리자 대시보드와 리뷰웹시스템[3버전]이 같은 모듈을 쓰므로 <b>양쪽 동시 적용</b> ·
+     아래 목업은 <b>가짜 데이터로 실제 동작</b>합니다(썸네일 클릭 · 드래그 정렬 · 드롭 · Ctrl+V)</p>
+
+  <div class="vswitch" id="vsw">
+    <a href="?" data-v="">전체 보기</a>
+    <a href="?v=ADMIN" data-v="ADMIN">관리자 화면만</a>
+    <a href="?v=POPUP" data-v="POPUP">확대 팝업만</a>
+    <a href="?v=REVIEWER" data-v="REVIEWER">리뷰어 화면만</a>
+  </div>
+
+  <!-- ═══════════════ 확정 사항 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">0</span> 확정 사항</h2>
+    <table class="t">
+      <thead><tr><th style="width:44px">#</th><th style="width:230px">항목</th><th style="width:150px">확정</th><th>이 시안에 반영된 모습</th></tr></thead>
+      <tbody>
+        <tr><td class="k">1</td><td>배치</td><td class="ok">A — 입력창 오른쪽</td><td>입력창과 <b>같은 높이</b>의 썸네일이 오른쪽에 붙는다. 첨부 유무와 무관하게 줄 높이 고정</td></tr>
+        <tr><td class="k">2</td><td>삭제</td><td class="ok">허용</td><td>썸네일 우상단 <b>✕</b> + 확인창 1번</td></tr>
+        <tr><td class="k">3</td><td>순서 바꾸기</td><td class="ok">포함</td><td>썸네일 왼쪽 <b>⠿ 손잡이</b>를 잡고 드래그. 오른쪽에 놓으면 그 뒤로</td></tr>
+        <tr><td class="k">4</td><td>장수 상한</td><td class="ok">칸당 4장</td><td>4장이 되면 [＋]가 사라진다. <b>이미 4장을 넘겨 들어온 공고는 자르지 않는다</b>(§5)</td></tr>
+        <tr><td class="k">5</td><td>적용 칸</td><td class="ok">3칸 모두</td><td>유입가이드 · 리뷰가이드 · 특이사항. <b>리뷰어 화면 렌더러 변경이 함께 필요</b>(§4·§6)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 1. 관리자 화면 ═══════════════ -->
+  <section class="sec" data-v="ADMIN">
+    <h2><span class="n">1</span> 관리자 화면 — 모집공고 수정 · 작업내용</h2>
+    <p class="sub">세 칸이 <b>같은 위젯 한 벌</b>을 쓴다. 칸마다 사본을 두면 한쪽만 장수 제한이 풀리거나
+       한쪽만 붙여넣기가 안 되는 드리프트가 난다(관리자 1:1문의 첨부에서 이미 겪은 함정).</p>
+
+    <div class="mock">
+      <div class="mock-hd"><span class="dot"></span>모집공고 수정 › 📝 작업내용<span class="sp"></span>
+        <span class="hint">썸네일 클릭 = 확대 · ⠿ 잡고 끌면 순서 변경 · 스트립에 사진 드롭 · 입력창에서 Ctrl+V</span></div>
+      <div class="mock-bd">
+        <div class="rfcard">
+          <div class="rfch"><span class="rfct">📝 작업내용</span><span class="rfcn">참여한 리뷰어에게만 공개</span></div>
+          <div class="rfcb">
+            <div class="rfrow"><span class="rfhl">유입가이드</span><div class="rfv" id="mtInflow"></div></div>
+            <div class="rfrow"><span class="rfhl">리뷰가이드</span><div class="rfv" id="mtReview"></div></div>
+            <div class="rfrow"><span class="rfhl">특이사항</span><div class="rfv" id="mtNotes"></div></div>
+          </div>
+        </div>
+        <div class="demo-bar" data-demo="inflow">
+          <button data-act="two">유입 2장</button>
+          <button data-act="zero">유입 0장</button>
+          <button data-act="cap">유입 4장(상한)</button>
+          <button data-act="over">유입 6장(넘겨받음)</button>
+          <button data-act="uploading">업로드 중</button>
+          <button data-act="failed">업로드 실패</button>
+        </div>
+        <p class="demo-cap">↑ 유입가이드 칸의 상태를 바꿔 보세요. 어떤 상태에서도 <b>줄 높이와 다른 칸의 위치가 변하지 않습니다</b>.</p>
+      </div>
+    </div>
+
+    <div class="note cool" style="margin-top:12px">
+      <div class="nt">이 화면이 지키는 규칙</div>
+      <ul>
+        <li><b>줄 높이 불변</b> — 첨부가 0장이든 4장이든 그 줄의 높이는 입력창 높이 그대로. 아래 칸이 밀리지 않는다.</li>
+        <li><b>비어 있어도 칸을 숨기지 않는다</b> — 같은 자리가 곧 넣는 자리("끌어다 놓기 · Ctrl+V · 클릭").</li>
+        <li><b>드래그 두 종류를 구분한다</b> — 바깥에서 온 <b>파일 드래그</b>만 업로드로 받고, 안에서 끄는 <b>순서 변경</b>은 업로드로 오인하지 않는다(드래그 데이터 종류로 판정).</li>
+        <li><b>좁은 화면(≤1080px)에서는 스트립이 입력창 아래로 내려간다</b> — 렌더러는 한 벌, <b>CSS만</b> 바뀐다.</li>
+      </ul>
+    </div>
+
+    <table class="t" style="margin-top:14px">
+      <thead><tr><th style="width:200px">상태</th><th style="width:300px">화면</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr><td class="k">첨부 있음</td><td>썸네일 N칸(번호 표기) + 맨 뒤 <b>[＋]</b></td><td>번호 = 리뷰어 화면에 나오는 순서</td></tr>
+        <tr><td class="k">첨부 없음</td><td>점선 드롭존</td><td>“사진을 끌어다 놓거나 붙여넣기(Ctrl+V)”</td></tr>
+        <tr><td class="k">업로드 중</td><td>회색 썸네일 + “올리는 중”</td><td><b>저장 버튼 잠금</b> — 인플라이트 첨부가 조용히 빠지지 않게</td></tr>
+        <tr><td class="k">업로드 실패</td><td>빨간 “실패” 칸 + 사유 한 줄</td><td>자동으로 지우지 않는다 — 사람이 ✕</td></tr>
+        <tr><td class="k">4장 참음</td><td>[＋] 숨김 + “최대 4장”</td><td>더 넣으려면 먼저 뺀다</td></tr>
+        <tr><td class="k">4장 초과로 들어옴</td><td>전부 보여주고 <b>[＋]만</b> 숨김</td><td class="mid">자동으로 자르지 않는다(§5)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 2. 확대 팝업 ═══════════════ -->
+  <section class="sec" data-v="POPUP">
+    <h2><span class="n">2</span> 확대 팝업 — 썸네일을 눌렀을 때</h2>
+    <p class="sub">모달 <b>위에</b> 어두운 오버레이가 덮이고 원본이 크게 뜬다. 위 목업의 썸네일을 실제로 눌러 확인할 수 있다.</p>
+
+    <div style="display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start">
+      <div>
+        <div class="lbshot">
+          <div class="fakeclose">✕</div>
+          <img id="shotImg" alt="확대 팝업 예시">
+          <div class="row">
+            <div class="rb off">‹</div><span>1 / 3</span><div class="rb">›</div>
+          </div>
+          <div class="fld">유입가이드</div>
+          <div class="cap">검색어_진입경로.png</div>
+          <div style="font-size:10.5px;color:#7e8ba0">← → 이동 · Esc 닫기 · 바깥을 눌러도 닫혀요</div>
+          <div class="callout" style="top:16px;left:16px">어느 칸의 사진인지 표시</div>
+        </div>
+        <p class="demo-cap">위 그림은 설명용 정지 화면입니다 — <b>실제 동작은 §1 목업의 썸네일을 클릭</b>해 보세요.</p>
+      </div>
+
+      <table class="t">
+        <thead><tr><th style="width:104px">동작</th><th>규칙</th></tr></thead>
+        <tbody>
+          <tr><td class="k">여는 법</td><td>썸네일 클릭(커서 <code>zoom-in</code>)</td></tr>
+          <tr><td class="k">이동</td><td><b>← →</b> 키 · 좌우 버튼<br><b>끝에서 순환하지 않는다</b>(어디까지 봤는지 잃지 않게) — 경계에서 버튼 비활성</td></tr>
+          <tr><td class="k">묶는 단위</td><td><b>그 칸의 사진들만</b>. 유입가이드에서 열면 유입가이드 3장 안에서만 이동한다(칸이 섞이면 지금 무엇을 보는지 잃는다) — 그래서 팝업에 <b>칸 이름</b>을 함께 적는다</td></tr>
+          <tr><td class="k">닫기</td><td><b>Esc</b> · 바깥 클릭 · 우상단 ✕ — 닫는 길은 항상 남긴다</td></tr>
+          <tr><td class="k">마운트</td><td><b>body 직속</b> — 모달(스크롤 컨테이너) 안에 두면 오버레이가 화면 흐름에 섞인다(실측된 함정)</td></tr>
+          <tr><td class="k">키 리스너</td><td>최상위에 <b>1회만</b> · 입력 중(input/textarea)엔 미가로챔 — 열 때마다 걸면 겹쳐 쌓여 한 번 눌러 여러 장 건너뛴다</td></tr>
+          <tr><td class="k">주소 전달</td><td>onclick에 URL을 넣지 않고 <b>칸 이름 + 인덱스</b>만 — 문자열 보간은 따옴표 하나로 탈출된다(이 레포에서 실제로 재현된 적 있다)</td></tr>
+          <tr><td class="k">실패한 사진</td><td>확대 대상에서 제외(열리지 않고 안내만)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 3. 리뷰어 실제 화면 ═══════════════ -->
+  <section class="sec" data-v="REVIEWER">
+    <h2><span class="n">3</span> 리뷰어가 보게 될 실제 화면</h2>
+    <p class="sub">참여(자리 확보) 직후 <b>작업내용</b>에서 보는 화면. 아래 목업은 <b><code>campaign-workdetail.js</code>의 실제 CSS를 그대로 복사</b>해
+       그렸다 — 카드 모양·글자 크기·이미지 여백이 실물과 같다. 이 렌더러는 리뷰어 페이지와 관리자 미리보기가
+       <b>같이 쓰는 한 벌</b>이라, 모달 오른쪽 미리보기에도 자동으로 같은 모습이 나온다.</p>
+
+    <div class="phones">
+      <div>
+        <div class="phone">
+          <div class="ptop"><span class="bk">‹</span><span class="tt">쿠 빈 장수돌침대 전기매트 립비1천</span></div>
+          <div class="pbody" id="rvBody"></div>
+        </div>
+        <p class="phone-cap"><b>지금(변경 전)</b>과 비교 → 리뷰가이드·특이사항 카드에는 <b>글자만</b> 나왔고,
+           리뷰가이드에 딸려 온 사진은 <b>유입가이드 카드 아래</b>에 붙었습니다(§4).</p>
+      </div>
+
+      <div style="flex:1;min-width:320px">
+        <table class="t">
+          <thead><tr><th style="width:120px">카드</th><th>지금</th><th>이 시안</th></tr></thead>
+          <tbody>
+            <tr><td class="k">🧭 유입가이드</td><td>텍스트 + 이미지</td><td class="ok">그대로 (변화 없음)</td></tr>
+            <tr><td class="k">📝 리뷰 가이드</td><td class="no">글자만 — 사진은 유입가이드 카드로 밀려 나감</td><td class="ok">그 카드 안에 사진</td></tr>
+            <tr><td class="k">📌 특이사항</td><td class="no">글자만 — 사진을 넣을 방법 자체가 없음</td><td class="ok">그 카드 안에 사진</td></tr>
+          </tbody>
+        </table>
+
+        <div class="note" style="margin-top:12px">
+          <div class="nt">리뷰어 화면에서 지키는 것</div>
+          <ul>
+            <li><b>사진은 그 카드 안에</b> — 리뷰가이드에 붙인 사진이 유입가이드 밑에 나오면, 리뷰어는 "구매 경로 안내"로 읽는다.</li>
+            <li><b>글자 아래에 세로로</b> 나열 · 폭은 화면에 맞춤(<code>max-width:100%</code>) — 지금 유입가이드 이미지와 같은 규칙.</li>
+            <li><b>같은 사진은 한 번만</b> — 파일ID 기준으로 중복을 접는다(주소의 호스트가 달라도 같은 장으로 본다).</li>
+            <li><b>글이 비고 사진만 있어도 카드가 뜬다</b> — 지금은 글이 없으면 카드 자체가 안 나와, 넣은 사진이 통째로 사라진다.</li>
+          </ul>
+        </div>
+
+        <div class="note warm" style="margin-top:10px">
+          <div class="nt">이번 범위 밖(제안)</div>
+          리뷰어 화면에서 <b>사진을 눌러 크게 보기</b>는 지금도 없고 이번에도 넣지 않았습니다.
+          가이드 사진은 글씨가 작아 확대가 필요할 수 있으니, 필요하시면 다음 건으로 올리겠습니다.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 4. 값은 어디에 담기나 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">4</span> 값은 어디에 담기나 <span class="tag warn">가장 중요한 부분</span></h2>
+    <p class="sub">세 칸의 성질이 서로 다르다. <b>유입가이드는 지금도 HTML</b>이고, <b>리뷰가이드·특이사항은 평문</b>이다.
+       이 차이를 무시하고 셋 다 HTML로 바꾸면 기존 저장분이 깨진다.</p>
+
+    <table class="t">
+      <thead><tr><th style="width:130px">칸</th><th style="width:210px">지금 저장 형태</th><th>사진을 어디에 담나</th></tr></thead>
+      <tbody>
+        <tr><td class="k">유입가이드</td><td><code>work_detail.inflowGuideHtml</code><br>— HTML(이미 <code>&lt;img&gt;</code> 포함)</td>
+            <td class="ok"><b>그 HTML 안에 그대로</b> — 기존 데이터와 호환. 새 칸을 만들면 옛 공고의 사진을 못 읽는다</td></tr>
+        <tr><td class="k">리뷰가이드</td><td><code>work_detail.reviewGuide</code><br>— <b>평문</b>(화면에서 escape)</td>
+            <td><b>새 배열</b> <code>reviewGuideImages: []</code></td></tr>
+        <tr><td class="k">특이사항</td><td><code>work_detail.specialNotes</code><br>— <b>평문</b>(화면에서 escape)</td>
+            <td><b>새 배열</b> <code>specialNotesImages: []</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="note bad" style="margin-top:12px">
+      <div class="nt">🚫 하지 않는 것 — 평문 칸을 HTML로 승격</div>
+      리뷰가이드·특이사항을 HTML 필드로 바꾸면, 기존 저장분에 들어 있는 <code>&lt;옵션&gt;</code> 같은 <b>꺾쇠 글자가 태그로 오인되어 통째로 삭제</b>된다.
+      이 레포가 이미 겪어서 “평문은 escape 후 개행만 <code>&lt;br&gt;</code>”로 굳혀 둔 자리다. 그래서 <b>텍스트 칸은 건드리지 않고 사진만 배열로 옆에</b> 둔다.
+    </div>
+
+    <div class="note good" style="margin-top:10px">
+      <div class="nt">유입가이드 — 저장할 때 최소 개입</div>
+      <ul>
+        <li><b>글을 안 고쳤으면</b> 원본 HTML 그대로(단락·링크·사진 위치 보존 = 지금 동작).</li>
+        <li><b>사진을 뺐으면</b> 그 파일ID의 <code>&lt;img&gt;</code> <b>하나만</b> 제거 · <b>더했으면</b> 끝에 붙임 · <b>순서를 바꿨으면</b> <code>&lt;img&gt;</code>들만 그 순서로 다시 씀.</li>
+        <li><b>글을 고쳤으면</b> 고친 평문 + <b>사진을 다시 붙임</b> → <span class="ok">지금처럼 사진이 사라지지 않는다</span>.</li>
+      </ul>
+      <div style="margin-top:9px;background:#fff;border:1px solid var(--safe-line);border-radius:9px;padding:11px 13px;font-size:12.5px;color:var(--ink)">
+        확인창 문구도 사실에 맞게 바꾼다 →
+        “유입가이드 글을 고치셨어요 — <b>사진 2장은 그대로 유지</b>되고 글자만 다시 게시됩니다.
+        원본에 있던 <b>줄 서식·링크는 사라지고</b> 사진은 글 아래로 모입니다. 계속할까요?”
+        <div style="margin-top:6px;color:var(--muted)">(지금 문구 = “원본에 있던 <b>이미지가 빠진</b> 평문으로 게시됩니다” — 실제로 사진이 사라졌다.)</div>
+      </div>
+    </div>
+
+    <div class="note warm" style="margin-top:10px">
+      <div class="nt">⚠ 새 배열은 서버가 검증해야 한다 — 이번 건의 유일한 서버 변경</div>
+      <code>work_detail</code>은 통째로 저장되는 JSON이라, 배열을 넣으면 <b>검증 없이 리뷰어 화면의 <code>&lt;img src&gt;</code>로 나간다</b>.
+      그래서 저장 시 <b>우리 서버의 첨부 주소만</b> 통과시킨다 —
+      <code>https://…/api/order/guide-image/&lt;파일ID&gt;</code> 형식 정확일치, 그 외에는 버린다.
+      이미 리뷰어 1:1문의 첨부·현금영수증 발행방법 이미지가 쓰는 <b>같은 규칙을 그대로 재사용</b>한다.
+      <div style="margin-top:7px">칸당 <b>4장</b>도 서버가 다시 센다(화면만 믿지 않는다).</div>
+    </div>
+
+    <div class="flow">
+      <div class="fbox"><div class="ft">① 넣기</div><div class="fd">파일선택 · Ctrl+V · 드래그<br>→ <b>한 함수</b>로 수렴</div></div>
+      <div class="farr">→</div>
+      <div class="fbox"><div class="ft">② 업로드</div><div class="fd">기존 <code>POST /api/order/guide-image</code><br>Drive 저장 → 무인증 프록시 주소</div></div>
+      <div class="farr">→</div>
+      <div class="fbox"><div class="ft">③ 저장</div><div class="fd">유입 = HTML 안 <code>&lt;img&gt;</code><br>리뷰·특이 = <b>배열</b> (서버가 주소·장수 검증)</div></div>
+      <div class="farr">→</div>
+      <div class="fbox" style="border-color:var(--safe-line);background:var(--safe-soft)">
+        <div class="ft" style="color:var(--safe)">④ 리뷰어 화면</div>
+        <div class="fd">각 카드 <b>글자 아래</b>에 사진<br>(공용 렌더러라 관리자 미리보기도 동일)</div></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 5. 4장 상한 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">5</span> 4장 상한 — 이미 더 들어와 있는 공고는 어떻게 하나</h2>
+    <p class="sub">작업오더에서 넘어오는 첨부는 지금 <b>최대 8장</b>이다. 상한을 4장으로 두면 <b>5장 이상 온 공고</b>가 생긴다.</p>
+    <table class="t">
+      <thead><tr><th style="width:230px">상황</th><th>동작</th><th style="width:300px">왜</th></tr></thead>
+      <tbody>
+        <tr><td class="k">관리자가 새로 넣을 때</td><td>4장에서 <b>[＋] 사라짐</b> + “최대 4장”</td><td>확정된 상한</td></tr>
+        <tr><td class="k">이미 6장이 들어와 있는 공고</td><td class="ok"><b>6장 전부 보여준다</b> · [＋]만 숨김 · “4장을 넘겼어요 — 2장을 빼주세요” 안내</td>
+            <td>조용히 자르면 <b>관리자가 모르는 사이 사진이 사라진다</b>. 무엇을 뺄지는 사람이 고른다</td></tr>
+        <tr><td class="k">그 상태로 저장</td><td class="mid">막지 않는다(경고만)</td><td>다른 칸만 고치러 들어온 사람의 저장을 막으면, 상관없는 작업이 멈춘다(자동점검이 하드블록을 안 쓰는 것과 같은 판단)</td></tr>
+        <tr><td class="k">작업오더 → 발행 프리필</td><td>넘어온 그대로 담고 위와 같이 안내</td><td>인트라넷 쪽 8장 상한은 이번에 건드리지 않는다</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ═══════════════ 6. 구현 계획 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">6</span> 구현 계획</h2>
+    <p class="sub"><b>프론트 3파일 · 서버 1파일 · DB 변경 0.</b> 새 테이블·새 컬럼·새 엔드포인트가 없다.</p>
+    <table class="t">
+      <thead><tr><th style="width:250px">파일</th><th>바뀌는 것</th></tr></thead>
+      <tbody>
+        <tr><td class="k">recruit-modal.js<br><span style="font-weight:400;color:var(--faint)">모달 마크업·CSS</span></td>
+            <td>세 칸을 <code>.ig-wrap</code>(입력창 + 스트립)으로 감싼다.
+              CSS는 <code>#recruitModal</code>·<code>.rf-*</code> 스코프 유지 + <code>var()</code> 폴백(테마 없는 호스트에서도 같은 모양).
+              <b><code>rf_wd_inflow</code>·<code>rf_wd_review</code>·<code>rf_wd_notes</code> id는 그대로</b> — 프리필·저장·🧹정리 도우미가 이 id에 묶여 있다.</td></tr>
+        <tr><td class="k">index-recruit.js<br><span style="font-weight:400;color:var(--faint)">모달 동작</span></td>
+            <td>이미지 위젯 한 벌(<code>_igMount(field)</code>) — 렌더 · 업로드(3경로 수렴) · 삭제 · <b>드래그 정렬</b> · 확대 팝업 ·
+              저장 시 칸별 어댑터(유입=HTML 재조립 / 리뷰·특이=배열) · 인플라이트 저장 차단 ·
+              <code>[이미지]</code>·“※ 이미지 N장” 꼬리표 제거 · 확인창 문구 교체</td></tr>
+        <tr><td class="k">campaign-workdetail.js<br><span style="font-weight:400;color:var(--faint)">리뷰어 화면(공용 렌더러)</span></td>
+            <td>리뷰가이드·특이사항 카드에 <b>그 칸의 사진</b>을 글자 아래로 그린다.
+              사진만 있고 글이 비어도 카드를 낸다. <b>중복 접기</b> — 새 배열의 파일ID를 기존 이미지 추출의 “이미 있음” 목록에 넣어
+              유입가이드 카드와 이중 노출되지 않게 한다.</td></tr>
+        <tr><td class="k">sanitizeGuideHtml.js<br><span style="font-weight:400;color:var(--faint)">서버 정화</span></td>
+            <td>새 배열 2개를 <b>주소 화이트리스트</b>로 검증(우리 프록시 주소만) + <b>칸당 4장</b> 재확인.
+              기존 <code>inflowGuideHtml</code> 정화는 무변경.</td></tr>
+        <tr><td class="k">업로드 엔드포인트</td><td class="ok">변경 없음 — <code>POST /api/order/guide-image</code> 그대로(권한도 그대로)</td></tr>
+        <tr><td class="k">DB</td><td class="ok">변경 없음 — <code>work_detail</code> JSON 안에서만 늘어난다</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note" style="margin-top:12px">
+      <div class="nt">회귀가드 (신규 <code>server/tests/workDetailImages.test.js</code>)</div>
+      <ul>
+        <li><b>유입가이드 왕복이 값을 잃지 않는다</b> — 실측 원문을 분해→재조립해 <b>바이트 동일</b>(미수정 시)함을 실행으로 확인.</li>
+        <li><b>글을 고쳐도 사진 토큰이 전부 살아남는다</b> · <b>순서를 바꾸면 그 순서로 저장된다</b> — 이 변경의 존재 이유라 실행으로 고정.</li>
+        <li><b>서버가 남의 주소를 버린다</b> — 우리 프록시 형식이 아닌 주소·5장째를 넣어 실제로 저장 핸들러를 호출해 확인.</li>
+        <li><b>리뷰어 화면에 같은 사진이 두 번 나오지 않는다</b>(리뷰가이드 배열 ↔ 유입가이드 카드 추출 중복).</li>
+        <li><b>업로드 3경로가 같은 함수를 지난다</b>(사본이 생기면 실패) · <b>onclick에 주소 문자열이 없다</b> ·
+            팝업은 <b>body 직속</b> · 키 리스너 <b>1회</b> · <b>인플라이트 중 저장 차단</b>.</li>
+        <li><b>평문 칸이 HTML로 승격되지 않았다</b> — <code>reviewGuide</code>·<code>specialNotes</code>가 여전히 escape 경로임을 고정(가장 위험한 회귀).</li>
+        <li>기존 가드 동반 갱신 — <code>recruitModalLayout</code>(칸 구조·CSS 토큰 균형) · <code>campWorkDetailShared</code>(카드 렌더) ·
+            <code>campaignM3Guards</code>·<code>woCampaignMapDoc</code>(rawHtml 배선 형태) · <code>campaignFieldCleanupUI</code>(정리 도우미 보호).</li>
+      </ul>
+    </div>
+
+    <div class="note warm" style="margin-top:10px">
+      <div class="nt">되돌리기</div>
+      네 파일을 되돌리면 끝난다(DB 무접촉). <b>이미 저장된 사진은 남는다</b> —
+      유입가이드는 지금과 같은 형태이고, 리뷰·특이 배열은 옛 화면이 <b>무시</b>할 뿐 지우지 않는다.
+    </div>
+  </section>
+
+  <!-- ═══════════════ 7. 남는 한계 ═══════════════ -->
+  <section class="sec" data-all>
+    <h2><span class="n">7</span> 남는 한계 (문서화)</h2>
+    <table class="t">
+      <thead><tr><th style="width:270px">한계</th><th>내용</th></tr></thead>
+      <tbody>
+        <tr><td class="k">유입가이드 글을 고치면 서식은 잃는다</td>
+            <td>사진은 유지되지만 본문 중간에 있던 사진은 <b>글 아래로 모이고</b> 링크·굵기는 평문이 된다. 그래서 확인창을 남긴다(§4).</td></tr>
+        <tr><td class="k">순서 바꾸기는 마우스 전용</td>
+            <td>키보드만으로는 순서를 못 바꾼다(4장이라 실무 영향은 작다). 필요하면 ✕ 후 다시 넣기로 우회.</td></tr>
+        <tr><td class="k">리뷰어 화면 확대 없음</td>
+            <td>리뷰어는 사진을 눌러 크게 볼 수 없다(지금과 같음). 필요하면 다음 건.</td></tr>
+        <tr><td class="k">작업오더 쪽 8장은 그대로</td>
+            <td>인트라넷에서 5장 이상 오면 관리자가 화면에서 빼야 한다(자동으로 자르지 않는다).</td></tr>
+        <tr><td class="k">리뷰가이드 섹션 규칙은 유지</td>
+            <td>리뷰가이드 <b>글</b>은 지금처럼 <code>[리뷰등록 가이드]</code> 섹션만 리뷰어에게 나간다. <b>사진은 섹션과 무관하게</b> 그 카드에 나온다.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<!-- 확대 팝업 — body 직속 -->
+<div class="lb" id="lb">
+  <button class="lb-close" id="lbClose" title="닫기 (Esc)">✕</button>
+  <div class="lb-stage"><img id="lbImg" alt=""></div>
+  <div class="lb-bar">
+    <button class="lb-btn" id="lbPrev" title="이전 (←)">‹</button>
+    <span id="lbCnt">1 / 2</span>
+    <button class="lb-btn" id="lbNext" title="다음 (→)">›</button>
+  </div>
+  <div class="lb-cap">
+    <div class="lb-fld" id="lbFld">유입가이드</div>
+    <div class="lb-name" id="lbName"></div>
+    <div class="lb-tip">← → 이동 · Esc 닫기 · 바깥을 눌러도 닫혀요</div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   목업 동작 — 실제 구현의 형태를 그대로 흉내낸다.
+   · 세 칸이 같은 위젯 한 벌(makeWidget) — 칸마다 사본 없음
+   · onclick 대신 위임 + data-i(인덱스만) — 주소 문자열 보간 금지
+   · 확대 팝업은 body 직속 / 키 리스너 최상위 1회
+   · 파일 드래그(업로드)와 내부 드래그(순서)는 dataTransfer 종류로 구분
+   ══════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var V = (new URLSearchParams(location.search).get('v') || '').toUpperCase();
+  Array.prototype.forEach.call(document.querySelectorAll('#vsw a'), function (a) {
+    if ((a.getAttribute('data-v') || '') === V) a.classList.add('on');
+  });
+  if (V) {
+    Array.prototype.forEach.call(document.querySelectorAll('.sec[data-v]'), function (s) {
+      if (s.getAttribute('data-v') !== V) s.style.display = 'none';
+    });
+  }
+
+  /* ── 가짜 이미지(데이터 URI — 외부 리소스 0) ── */
+  function fake(label, sub, c1, c2) {
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="440">' +
+      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+      '<stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient></defs>' +
+      '<rect width="640" height="440" fill="url(#g)"/>' +
+      '<rect x="30" y="30" width="580" height="380" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="3" rx="14"/>' +
+      '<text x="320" y="212" font-family="sans-serif" font-size="40" font-weight="700" fill="#fff" text-anchor="middle">' + label + '</text>' +
+      '<text x="320" y="262" font-family="sans-serif" font-size="20" fill="#fff" fill-opacity=".8" text-anchor="middle">' + sub + '</text>' +
+      '</svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+  var POOL = {
+    inflow: [
+      { name: '검색어_진입경로.png', src: fake('검색 진입', '쿠팡 검색어 화면', '#2563eb', '#7c3aed') },
+      { name: '상품선택_화면.png',   src: fake('상품 선택', '목록에서 찾는 위치', '#0891b2', '#0d9488') },
+      { name: '옵션선택_안내.png',   src: fake('옵션 선택', '어떤 옵션을 고르나', '#b45309', '#d97706') },
+      { name: '장바구니_확인.png',   src: fake('장바구니', '결제 직전 확인', '#be123c', '#e11d48') },
+      { name: '결제화면_안내.png',   src: fake('결제 화면', '현금영수증 위치', '#4338ca', '#6d28d9') },
+      { name: '추가안내.png',        src: fake('추가 안내', '유의사항', '#334155', '#64748b') }
+    ],
+    review: [
+      { name: '리뷰작성_위치.png', src: fake('리뷰 작성', '어디서 쓰나', '#15803d', '#65a30d') },
+      { name: '별점_예시.png',     src: fake('별점 예시', '5점 · 사진 1장', '#0f766e', '#14b8a6') }
+    ],
+    notes: [
+      { name: '반품비_안내.png', src: fake('반품비 안내', '실수 시 동의 필요', '#9a3412', '#c2410c') }
+    ]
+  };
+  function pick(field, n, state) {
+    var src = POOL[field], out = [];
+    for (var i = 0; i < n; i++) {                 /* 풀보다 많이 요청하면 돌려 쓴다 */
+      var s = src[i % src.length];
+      out.push({ id: field + i, name: s.name, src: s.src, state: state || 'ok' });
+    }
+    return out;
+  }
+  function poolAt(field, i) { var s = POOL[field]; return s[i % s.length]; }
+
+  var MAX = 4;              /* 사용자 확정: 칸당 4장 */
+  var MAX_MB = 5;
+  var LABEL = { inflow: '유입가이드', review: '리뷰가이드', notes: '특이사항' };
+
+  /* ── 확대 팝업 (한 벌, body 직속) ── */
+  var lb = document.getElementById('lb'), lbImg = document.getElementById('lbImg'),
+      lbCnt = document.getElementById('lbCnt'), lbName = document.getElementById('lbName'),
+      lbFld = document.getElementById('lbFld'),
+      lbPrev = document.getElementById('lbPrev'), lbNext = document.getElementById('lbNext');
+  var LB = { list: [], i: 0, field: '' };
+  function lbOpen(field, list, i) {
+    LB.list = list.filter(function (x) { return x.state === 'ok'; });   /* 실패·업로드중 제외 */
+    if (!LB.list.length) return;
+    LB.field = field;
+    LB.i = Math.max(0, Math.min(i, LB.list.length - 1));
+    lbPaint(); lb.classList.add('on');
+  }
+  function lbPaint() {
+    var it = LB.list[LB.i]; if (!it) return;
+    lbImg.src = it.src; lbImg.alt = it.name;
+    lbCnt.textContent = (LB.i + 1) + ' / ' + LB.list.length;
+    lbName.textContent = it.name;
+    lbFld.textContent = LABEL[LB.field] || '';
+    lbPrev.disabled = LB.i === 0;                      /* 끝에서 순환하지 않는다 */
+    lbNext.disabled = LB.i === LB.list.length - 1;
+  }
+  function lbStep(d) { var n = LB.i + d; if (n < 0 || n >= LB.list.length) return; LB.i = n; lbPaint(); }
+  function lbClose() { lb.classList.remove('on'); lbImg.removeAttribute('src'); }
+  lbPrev.addEventListener('click', function () { lbStep(-1); });
+  lbNext.addEventListener('click', function () { lbStep(1); });
+  document.getElementById('lbClose').addEventListener('click', lbClose);
+  lb.addEventListener('click', function (e) { if (e.target === lb || e.target.classList.contains('lb-stage')) lbClose(); });
+  /* 키 리스너는 최상위 1회 — 열 때마다 걸면 겹쳐 쌓인다 */
+  document.addEventListener('keydown', function (e) {
+    if (!lb.classList.contains('on')) return;
+    var t = e.target, tag = (t && t.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || (t && t.isContentEditable)) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === 'Escape') { lbClose(); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { lbStep(-1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { lbStep(1); e.preventDefault(); }
+  });
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /* ── 위젯 한 벌 — 세 칸이 같은 것을 쓴다 ── */
+  var WIDGETS = {};
+  function makeWidget(mount, field, opts) {
+    opts = opts || {};
+    var st = { imgs: [], msg: '', kind: '' };
+    var H = opts.rows === 2 ? 62 : 82;                 /* 스트립 높이 = 그 칸 입력창 높이 */
+
+    mount.innerHTML =
+      '<div class="ig-wrap">' +
+        '<div class="ig-ta"><textarea class="rfin" rows="' + (opts.rows || 3) + '" style="height:' + H + 'px;min-height:' + H + 'px"></textarea></div>' +
+        '<div class="ig-strip" tabindex="0" style="height:' + H + 'px"></div>' +
+      '</div>' +
+      (opts.hint ? '<div class="rfhint">' + opts.hint + '</div>' : '') +
+      '<div class="ig-msg"></div>' +
+      '<input type="file" accept="image/*" multiple class="ig-hidden">';
+
+    var ta = mount.querySelector('textarea'),
+        strip = mount.querySelector('.ig-strip'),
+        msgEl = mount.querySelector('.ig-msg'),
+        fileIn = mount.querySelector('input[type=file]');
+    ta.value = opts.text || '';
+    ta.addEventListener('input', function () { syncReviewer(); });
+
+    function say(m, kind) { st.msg = m || ''; st.kind = kind || ''; paint(); }
+
+    function paint() {
+      var h = '';
+      if (!st.imgs.length) {
+        h = '<div class="ig-empty" data-add="1">' +
+              '<div class="t1">＋ 사진 넣기</div><div class="t2">끌어다 놓기 · Ctrl+V · 클릭</div></div>';
+      } else {
+        st.imgs.forEach(function (im, i) {
+          var cls = 'ig-thumb' + (im.state === 'up' ? ' up' : im.state === 'bad' ? ' bad' : '');
+          h += '<button type="button" class="' + cls + '" data-i="' + i + '" draggable="false"' +
+               ' title="' + esc(im.name) + ' — 클릭하면 크게 보기">' +
+                 '<img src="' + esc(im.src) + '" alt="">' +
+                 '<span class="ig-g" data-grip="' + i + '" title="끌어서 순서 바꾸기">⠿</span>' +
+                 '<span class="ig-n">' + (i + 1) + '</span>' +
+                 '<span class="ig-x" data-del="' + i + '" title="이 사진 빼기">✕</span>' +
+               '</button>';
+        });
+        if (st.imgs.length < MAX) {
+          h += '<button type="button" class="ig-add" data-add="1" title="사진 추가"><span class="plus">＋</span><span>추가</span></button>';
+        }
+      }
+      strip.innerHTML = h;
+      strip.classList.toggle('err', st.imgs.some(function (x) { return x.state === 'bad'; }));
+      msgEl.textContent = st.msg;
+      msgEl.className = 'ig-msg ' + st.kind;
+      syncReviewer();
+    }
+
+    /* 3경로가 지나는 단 하나의 함수 */
+    function uploadFile(f) {
+      if (st.imgs.length >= MAX) { say('사진은 칸마다 최대 ' + MAX + '장까지 넣을 수 있어요 — 먼저 빼주세요.', 'warn'); return; }
+      if (!/^image\//.test(f.type)) { say('사진 파일만 넣을 수 있어요.', 'bad'); return; }
+      if (f.size > MAX_MB * 1024 * 1024) { say(MAX_MB + 'MB 이하 사진만 넣을 수 있어요.', 'bad'); return; }
+      var r = new FileReader();
+      r.onload = function () {
+        var item = { id: 'n' + Date.now() + Math.random(), name: f.name || 'paste.png', src: r.result, state: 'up' };
+        st.imgs.push(item);
+        say('사진을 올리는 중… 끝나면 저장할 수 있어요.', 'warn');
+        /* 목업: 실제 구현은 POST /api/order/guide-image → 절대 프록시 주소 */
+        setTimeout(function () {
+          item.state = 'ok';
+          var busy = st.imgs.some(function (x) { return x.state === 'up'; });
+          say(busy ? '사진을 올리는 중…' : '사진이 추가되었습니다.', busy ? 'warn' : 'ok');
+          if (!busy) setTimeout(function () { if (!st.imgs.some(function (x) { return x.state === 'up'; })) say(''); }, 1500);
+        }, 850);
+      };
+      r.readAsDataURL(f);
+    }
+
+    fileIn.addEventListener('change', function () {
+      Array.prototype.forEach.call(fileIn.files || [], uploadFile);
+      fileIn.value = '';                                  /* 같은 파일 다시 고를 수 있게 */
+    });
+
+    /* 클릭 — 확대 / 삭제 / 추가. 넘기는 것은 인덱스뿐 */
+    strip.addEventListener('click', function (e) {
+      var del = e.target.closest('[data-del]');
+      if (del) {
+        e.stopPropagation();
+        var di = +del.getAttribute('data-del');
+        if (confirm('이 사진을 ' + LABEL[field] + '에서 뺄까요?')) { st.imgs.splice(di, 1); say('사진을 뺐습니다.', 'ok'); }
+        return;
+      }
+      if (e.target.closest('[data-add]')) { fileIn.click(); return; }
+      var th = e.target.closest('.ig-thumb');
+      if (!th) return;
+      var i = +th.getAttribute('data-i'), im = st.imgs[i];
+      if (im && im.state === 'bad') { say('이 사진은 업로드에 실패했어요 — ✕로 빼고 다시 넣어주세요.', 'bad'); return; }
+      if (im && im.state === 'up') { say('아직 올리는 중이에요.', 'warn'); return; }
+      var vis = st.imgs.filter(function (x) { return x.state === 'ok'; });
+      lbOpen(field, st.imgs, vis.indexOf(im));
+    });
+
+    /* ② Ctrl+V — 이미지일 때만 가로챈다(텍스트 붙여넣기는 기본 동작 유지) */
+    function onPaste(e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      var imgs = Array.prototype.filter.call(items, function (it) {
+        return it.kind === 'file' && /^image\//.test(it.type);
+      });
+      if (!imgs.length) return;
+      e.preventDefault();
+      imgs.forEach(function (it) { var f = it.getAsFile(); if (f) uploadFile(f); });
+    }
+    ta.addEventListener('paste', onPaste);
+    strip.addEventListener('paste', onPaste);
+
+    /* ③ 바깥에서 온 파일 드래그 = 업로드 (내부 순서 드래그와 구분: 'Files' 종류 유무) */
+    function isFileDrag(e) {
+      return Array.prototype.indexOf.call((e.dataTransfer && e.dataTransfer.types) || [], 'Files') >= 0;
+    }
+    strip.addEventListener('dragover', function (e) {
+      if (isFileDrag(e)) { e.preventDefault(); strip.classList.add('drag'); return; }
+      if (DRAG.field === field) { e.preventDefault(); markDrop(e); }
+    });
+    strip.addEventListener('dragleave', function (e) { if (e.target === strip) { strip.classList.remove('drag'); clearMarks(); } });
+    strip.addEventListener('drop', function (e) {
+      if (isFileDrag(e)) {
+        e.preventDefault(); strip.classList.remove('drag');
+        Array.prototype.forEach.call((e.dataTransfer && e.dataTransfer.files) || [], uploadFile);
+        return;
+      }
+      if (DRAG.field !== field) return;
+      e.preventDefault();
+      var t = dropTarget(e);
+      clearMarks();
+      if (!t) return;
+      var from = DRAG.i, to = t.i + (t.after ? 1 : 0);
+      if (to > from) to--;
+      if (to === from) return;
+      var moved = st.imgs.splice(from, 1)[0];
+      st.imgs.splice(to, 0, moved);
+      say('순서를 바꿨습니다 — 리뷰어에게 이 순서로 보입니다.', 'ok');
+    });
+
+    /* ④ 순서 바꾸기 — ⠿ 손잡이를 누른 동안에만 draggable */
+    var DRAG = window._IGDRAG = window._IGDRAG || { field: '', i: -1 };
+    strip.addEventListener('mousedown', function (e) {
+      var g = e.target.closest('[data-grip]');
+      var th = e.target.closest('.ig-thumb');
+      if (th) th.setAttribute('draggable', g ? 'true' : 'false');
+    });
+    strip.addEventListener('dragstart', function (e) {
+      var th = e.target.closest('.ig-thumb');
+      if (!th || th.getAttribute('draggable') !== 'true') { e.preventDefault(); return; }
+      DRAG.field = field; DRAG.i = +th.getAttribute('data-i');
+      th.classList.add('dragging');
+      /* 커스텀 종류만 담는다 — 'Files'가 아니라서 업로드 경로가 반응하지 않는다 */
+      try { e.dataTransfer.setData('application/x-ig-reorder', String(DRAG.i)); } catch (_) {}
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    strip.addEventListener('dragend', function () { DRAG.field = ''; DRAG.i = -1; clearMarks(); paint(); });
+    function dropTarget(e) {
+      var th = e.target.closest ? e.target.closest('.ig-thumb') : null;
+      if (!th) return null;
+      var r = th.getBoundingClientRect();
+      /* 오른쪽 절반에 놓으면 그 뒤 — 항상 앞이면 끝자리로 옮길 수가 없다 */
+      return { i: +th.getAttribute('data-i'), after: (e.clientX - r.left) > r.width / 2 };
+    }
+    function markDrop(e) {
+      clearMarks();
+      var t = dropTarget(e); if (!t) return;
+      var th = strip.querySelector('.ig-thumb[data-i="' + t.i + '"]');
+      if (th) th.classList.add(t.after ? 'dropR' : 'dropL');
+    }
+    function clearMarks() {
+      Array.prototype.forEach.call(strip.querySelectorAll('.ig-thumb'), function (n) {
+        n.classList.remove('dropL', 'dropR', 'dragging');
+      });
+    }
+
+    function setState(kind) {
+      if (kind === 'zero') { st.imgs = []; say('첨부가 없을 때도 칸은 그대로 — 그 자리가 곧 넣는 자리입니다.', ''); }
+      else if (kind === 'two') { st.imgs = pick(field, 2); say(''); }
+      else if (kind === 'cap') { st.imgs = pick(field, 4); say('사진은 칸마다 최대 ' + MAX + '장까지 넣을 수 있어요.', 'warn'); }
+      else if (kind === 'over') { st.imgs = pick(field, 6); say('4장을 넘겼어요 — 2장을 빼주세요. (자동으로 지우지 않습니다)', 'warn'); }
+      else if (kind === 'uploading') { st.imgs = pick(field, 2).concat([{ id: 'u', name: '올리는 중.png', src: poolAt(field, 2).src, state: 'up' }]); say('사진을 올리는 중… 끝나면 저장할 수 있어요.', 'warn'); }
+      else if (kind === 'failed') { st.imgs = pick(field, 2).concat([{ id: 'e', name: '실패.png', src: poolAt(field, 3).src, state: 'bad' }]); say('사진 1장을 올리지 못했어요 (네트워크 오류) — ✕로 빼고 다시 넣어주세요.', 'bad'); }
+      paint();
+    }
+
+    var api = { setState: setState, get text() { return ta.value; }, get imgs() { return st.imgs; } };
+    WIDGETS[field] = api;
+    setState(opts.init || 'two');
+    return api;
+  }
+
+  /* ── 마운트 (관리자 화면) ── */
+  var mtI = document.getElementById('mtInflow');
+  if (mtI) {
+    makeWidget(mtI, 'inflow', {
+      rows: 3, init: 'two', text: '쿠팡 검색어 : 장수돌침대 전기매트',
+      hint: '있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)'
+    });
+    makeWidget(document.getElementById('mtReview'), 'review', {
+      rows: 2, init: 'two', text: '전체 별점 5건\n- 배송이 빠르다'
+    });
+    makeWidget(document.getElementById('mtNotes'), 'notes', {
+      rows: 2, init: 'two', text: '구매자 실수시 반품비 동의하시는 분만 진행\n택배받을 주소 폰번호 정확하게 입력해주세요!!'
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.demo-bar'), function (bar) {
+      bar.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-act]');
+        var w = WIDGETS[bar.getAttribute('data-demo')];
+        if (b && w) w.setState(b.getAttribute('data-act'));
+      });
+    });
+  }
+
+  /* ── 리뷰어 실제 화면 — 관리자 입력을 그대로 반영 ── */
+  var rvBody = document.getElementById('rvBody');
+  function syncReviewer() {
+    if (!rvBody) return;
+    var g = function (f) { return WIDGETS[f]; };
+    var okImgs = function (f) {
+      var w = g(f); if (!w) return [];
+      return w.imgs.filter(function (x) { return x.state === 'ok'; });
+    };
+    var imgHtml = function (f) {
+      return okImgs(f).map(function (im) { return '<img src="' + esc(im.src) + '" alt="">'; }).join('');
+    };
+    var txt = function (f, dflt) { var w = g(f); return w ? (w.text || '') : (dflt || ''); };
+
+    var h = '';
+    h += '<div class="holdbar"><span class="l">⏳ 구매양식 제출까지</span><span class="r">14:52</span></div>';
+
+    /* 📦 상품 — 변화 없음 */
+    h += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div><div class="cwd-body">'
+       + '장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 워셔블 전기매트\n결제금액 78,000원</div></div>';
+
+    /* 🧭 유입가이드 — 지금도 이미지가 나오는 카드 */
+    var inflowTxt = txt('inflow'), inflowImg = imgHtml('inflow');
+    h += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div><div class="cwd-body">'
+       + (inflowTxt || inflowImg ? esc(inflowTxt) + inflowImg : '<span class="cwd-muted">등록된 유입가이드가 없어요.</span>')
+       + '</div></div>';
+
+    /* 📝 리뷰 가이드 — 이번에 사진이 들어오는 카드 */
+    var revTxt = txt('review'), revImg = imgHtml('review');
+    if (revTxt || revImg) {
+      h += '<div class="cwd-box' + (revImg ? ' hi' : '') + '"><div class="cwd-tt">📝 리뷰 가이드'
+         + (revImg ? '<span class="rvtag">이번에 추가</span>' : '') + '</div>'
+         + '<div class="cwd-body">' + esc(revTxt) + revImg + '</div></div>';
+    }
+
+    /* 📌 특이사항 — 이번에 사진이 들어오는 카드 */
+    var ntTxt = txt('notes'), ntImg = imgHtml('notes');
+    if (ntTxt || ntImg) {
+      h += '<div class="cwd-box' + (ntImg ? ' hi' : '') + '"><div class="cwd-tt">📌 특이사항'
+         + (ntImg ? '<span class="rvtag">이번에 추가</span>' : '') + '</div>'
+         + '<div class="cwd-body">' + esc(ntTxt) + ntImg + '</div></div>';
+    }
+
+    h += '<div class="cwd-box"><div class="cwd-tt">🧾 구매양식</div>'
+       + '<div class="cwd-body cwd-muted">구매를 마치신 뒤 아래 양식을 작성해 주세요.</div>'
+       + '<button type="button" class="cwd-btn">구매양식 작성하기</button></div>';
+
+    rvBody.innerHTML = h;
+  }
+  syncReviewer();
+
+  /* 설명용 정지 화면의 이미지 */
+  var shot = document.getElementById('shotImg');
+  if (shot) shot.src = POOL.inflow[0].src;
+})();
+</script>
+</body></html>
