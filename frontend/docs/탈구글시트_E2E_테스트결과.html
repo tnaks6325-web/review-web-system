@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>탈 구글시트 E2E 테스트 결과 보고서</title>
+<style>
+  :root{ color-scheme: light; --ink:#111827; --sub:#6b7280; --line:#e5e7eb; --bg:#f8fafc;
+         --ok:#059669; --okbg:#ecfdf5; --bad:#dc2626; --badbg:#fef2f2; --warn:#d97706; --blue:#2563eb; }
+  *{ box-sizing:border-box }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+        font:14px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  .wrap{ max-width:1000px; margin:0 auto; padding:28px 18px 80px }
+  code{ background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:.92em;
+        font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all }
+
+  .hero{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:26px 26px 22px; margin-bottom:20px }
+  .hero h1{ margin:0 0 6px; font-size:25px; letter-spacing:-.4px }
+  .hero .meta{ color:var(--sub); font-size:13px; margin-bottom:18px }
+  .kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px }
+  .kpi{ border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:#fcfdff }
+  .kpi b{ display:block; font-size:24px; line-height:1.25 }
+  .kpi span{ color:var(--sub); font-size:12px }
+  .kpi.g b{ color:var(--ok) } .kpi.r b{ color:var(--bad) } .kpi.b b{ color:var(--blue) }
+
+  .verdict{ margin-top:18px; padding:14px 16px; border-radius:10px; background:var(--okbg);
+            border:1px solid #a7f3d0; font-size:14px }
+  .verdict b{ color:var(--ok) }
+
+  h2{ font-size:18px; margin:34px 0 12px; padding-bottom:8px; border-bottom:2px solid var(--ink) }
+  h2 em{ font-style:normal; color:var(--sub); font-size:13px; font-weight:400; margin-left:8px }
+
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px 20px }
+
+  .fl{ display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px dashed var(--line) }
+  .fl:last-child{ border-bottom:0 }
+  .fl .n{ width:26px; height:26px; flex:0 0 26px; border-radius:50%; background:var(--ink); color:#fff;
+          display:flex; align-items:center; justify-content:center; font-size:12px }
+  .fl div{ flex:1; min-width:0 }
+  .fl b{ display:block; font-size:14px }
+  .fl span{ color:var(--sub); font-size:12.5px }
+  .fl .ref{ flex:0 0 auto; font-size:11px; color:var(--sub); border:1px solid var(--line);
+            border-radius:20px; padding:2px 9px; background:#fafafa }
+
+  .find{ background:#fff; border:1px solid #fcd9d9; border-left:5px solid var(--bad);
+         border-radius:12px; padding:18px 20px; margin-bottom:14px }
+  .find header{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px }
+  .find h3{ margin:0; font-size:16px; flex:1; min-width:220px }
+  .sev{ font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; color:#fff }
+  .sev.hi{ background:var(--bad) } .sev.mid{ background:var(--warn) }
+  .pr{ font-size:11.5px; color:var(--ok); background:var(--okbg); border:1px solid #a7f3d0;
+       border-radius:20px; padding:2px 9px }
+  .find dl{ margin:0; display:grid; grid-template-columns:112px 1fr; gap:7px 14px; font-size:13.4px }
+  .find dt{ color:var(--sub); font-weight:600 }
+  .find dd{ margin:0 }
+  .find dd.ok{ color:var(--ok) }
+
+  .sec{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:12px }
+  .sec h3{ margin:0 0 10px; font-size:15px; display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+  .sec h3 em{ font-style:normal; font-weight:400; color:var(--sub); font-size:12.5px; flex:1; min-width:180px }
+  .sec h3 .cnt{ font-size:11.5px; color:var(--sub) }
+  .tag{ background:var(--ink); color:#fff; border-radius:6px; padding:1px 8px; font-size:12px }
+  .red{ color:var(--bad) }
+
+  table.t{ width:100%; border-collapse:collapse; font-size:12.8px }
+  table.t th{ text-align:left; color:var(--sub); font-weight:600; font-size:11.5px;
+              border-bottom:1px solid var(--line); padding:5px 8px }
+  table.t td{ padding:6px 8px; border-bottom:1px solid #f1f5f9; vertical-align:top }
+  table.t tr:last-child td{ border-bottom:0 }
+  table.t tr.bad{ background:var(--badbg) }
+  .c-id{ width:38px; color:var(--sub); font-family:ui-monospace,monospace }
+  .c-st{ width:46px }
+  .c-ti{ width:41% }
+  .c-de{ color:var(--sub); word-break:break-all }
+  .o{ color:var(--ok); font-weight:700; font-size:11.5px }
+  .x{ color:var(--bad); font-weight:700; font-size:11.5px }
+
+  ul.plain{ margin:8px 0 0; padding-left:20px } ul.plain li{ margin:4px 0 }
+  .note{ background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:13px 16px; font-size:13.3px }
+  .foot{ margin-top:34px; color:var(--sub); font-size:12px; text-align:center }
+  @media print{ body{ background:#fff } .wrap{ max-width:none } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>탈 구글시트 — 전 구간 실전 테스트 결과</h1>
+    <div class="meta">
+      프로덕션 실계정 · 실서버 대상 · 2026-08-08 05:46 ~ 2026-08-08 06:08 (KST)<br>
+      대상: <code>https://sublime-magic-production-790b.up.railway.app</code> · 인트라넷 <code>inadd-system.pages.dev</code>
+    </div>
+    <div class="kpis">
+      <div class="kpi g"><b>68</b><span>통과 항목</span></div>
+      <div class="kpi r"><b>2</b><span>발견한 문제</span></div>
+      <div class="kpi b"><b>2</b><span>수정·재검증 완료</span></div>
+      <div class="kpi"><b>69</b><span>전체 확인 항목</span></div>
+      <div class="kpi"><b>2</b><span>완주한 테스트 작업</span></div>
+    </div>
+    <div class="verdict">
+      <b>결론 — 탈 구글시트는 전 구간이 실제로 동작합니다.</b>
+      작업오더 접수부터 무시트 접수 · 리뷰어 검색 · 구매양식 제출 · 리뷰제출 표시 · 입금까지
+      <b>구글 시트를 한 번도 쓰지 않고</b> 완주했습니다.
+      다만 검사 중 <b>문제 2건</b>을 발견했고 둘 다 그 자리에서 고쳐 배포한 뒤 <b>같은 시나리오로 다시 확인</b>했습니다.
+      그중 하나(달력 프리필)는 <b>지금까지 한 번도 동작한 적이 없던 기능</b>이라 이 테스트가 아니었으면 계속 몰랐을 것입니다.
+    </div>
+  </div>
+
+  <h2>1. 무엇을 어떤 순서로 확인했나 <em>실제 업무 흐름 그대로</em></h2>
+  <div class="card">
+  <div class="fl">
+    <span class="n">①</span>
+    <div><b>인트라넷 리뷰오더</b><span>작업시트 URL 칸 없이 전송</span></div>
+    <span class="ref">B</span>
+  </div>
+  <div class="fl">
+    <span class="n">②</span>
+    <div><b>리뷰웹 작업오더 접수</b><span>work_sheet_url 빈 값으로 저장</span></div>
+    <span class="ref">B</span>
+  </div>
+  <div class="fl">
+    <span class="n">③</span>
+    <div><b>무시트 접수</b><span>가상 탭 발급 + 작업표 6줄 + 장부 3권 (구글 호출 0)</span></div>
+    <span class="ref">D</span>
+  </div>
+  <div class="fl">
+    <span class="n">④</span>
+    <div><b>작업보드·목록</b><span>무시트 배지 · 주문 0건이어도 6줄 표시</span></div>
+    <span class="ref">E·L</span>
+  </div>
+  <div class="fl">
+    <span class="n">⑤</span>
+    <div><b>모집공고 발행</b><span>작업표 날짜 분배 → 달력(campaign_daily_plans)</span></div>
+    <span class="ref">O·P</span>
+  </div>
+  <div class="fl">
+    <span class="n">⑥</span>
+    <div><b>리뷰어 검색</b><span>작업표 → 장부 재생성 → 검색 명단</span></div>
+    <span class="ref">G</span>
+  </div>
+  <div class="fl">
+    <span class="n">⑦</span>
+    <div><b>구매양식 제출</b><span>큐 미경유 · 562ms 만에 완결 · 시트 쓰기 0</span></div>
+    <span class="ref">F</span>
+  </div>
+  <div class="fl">
+    <span class="n">⑧</span>
+    <div><b>리뷰제출 표시</b><span>작업표 「리뷰」 칸에 O</span></div>
+    <span class="ref">H</span>
+  </div>
+  <div class="fl">
+    <span class="n">⑨</span>
+    <div><b>입금 완료</b><span>작업표 「입금」 칸에 이체시각</span></div>
+    <span class="ref">K</span>
+  </div>
+  <div class="fl">
+    <span class="n">⑩</span>
+    <div><b>장부 재생성 후</b><span>⑧⑨ 표시가 전부 살아 있다</span></div>
+    <span class="ref">I·K</span>
+  </div></div>
+
+  <h2>2. 발견한 문제 2건 <em>모두 수정 → 배포 → 재검증 완료</em></h2>
+  
+  <article class="find">
+    <header>
+      <span class="sev mid">중간</span>
+      <h3>F-1. 리뷰제출 표시가 무시트 탭에도 구글 시트 쓰기를 시도</h3>
+      <span class="pr">수정 #650 · 재검증 완료</span>
+    </header>
+    <dl>
+      <dt>어디서</dt><dd><code>server/src/routes/submit.routes.js — POST /api/submit/review (Step 3 백그라운드)</code></dd>
+      <dt>어떻게 드러났나</dt><dd>무시트 탭에서 리뷰제출 표시를 하자 시스템 오류로그에 404 가 즉시 쌓였다 (flow=review_submit · step=sheet_write · &quot;Requested entity was not found.&quot; · context.sheetId=wt_…)</dd>
+      <dt>원인</dt><dd>그 라우트의 백그라운드 시트 쓰기가 무시트 판정을 거치지 않는다. W2-a 의 &quot;시트 쓰기 차단 4중&quot;은 구매양식 제출(/submit/order) 경로를 덮었고 리뷰제출 표시는 별도 라우트라 빠져 있었다.</dd>
+      <dt>실제 피해</dt><dd>데이터 오염 없음 — 큐 실행부 백스톱이 실제 시트 쓰기는 막았고 작업표의 리뷰·입금 값은 정상 유지됐다. 남는 피해는 ① 제출 1건마다 낭비되는 구글 호출 1회 ② warn 오류로그 소음(진짜 신호가 묻힘) ③ 무의미한 큐 항목.</dd>
+      <dt>수정</dt><dd>setImmediate 본문 맨 앞에 isSheetless 게이트(헤더 읽기 전 = 구글 호출 0). markStatusCell 결과를 재활용하지 않고 따로 판정 — 그 호출은 if(complete) 안에만 있어 부분 제출 갈래가 안 덮인다. 판정 실패는 fail-open.</dd>
+      <dt>회귀가드</dt><dd>tests/sheetlessOrderAccept.test.js ⑤ 3케이스 (변이시험 2종 검출 확인 — 게이트 제거 / 게이트를 헤더 읽기 뒤로 이동)</dd>
+      <dt>재검증</dt><dd class="ok">N4 · N5 — 수정 배포 후 재실행: 새 404 로그 0건, 표시 기능은 정상</dd>
+    </dl>
+  </article>
+  <article class="find">
+    <header>
+      <span class="sev hi">높음</span>
+      <h3>F-2. 무시트 공고의 달력 프리필(D3-a)이 한 번도 동작하지 않았다</h3>
+      <span class="pr">수정 #651 · 재검증 완료</span>
+    </header>
+    <dl>
+      <dt>어디서</dt><dd><code>server/src/services/sheetlessDailyPlan.service.js — readWorktableDates</code></dd>
+      <dt>어떻게 드러났나</dt><dd>무시트 작업으로 모집공고를 발행하니 planPrefill={ok:false, reason:&quot;unparsable&quot;} 이고 [📅 인원] 모달의 달력이 비어 있었다(plans: []).</dd>
+      <dt>원인</dt><dd>작업표 구매일자는 planToSheetValues 가 전부 &quot;M / D (요일)&quot; 로 쓰므로 그 열에 연도가 한 칸도 없다. parseDateColumn 은 열 안에서 연도 확정 값을 앵커로 찾고, 하나도 없으면 opts.fallbackAnchor 로 넘어가는데 이 호출부만 그것을 넘기지 않았다(063 시트 일정 2곳·시트 우위 점검 1곳은 이미 넘긴다) → 전 행 null.</dd>
+      <dt>실제 피해</dt><dd>&quot;날짜 분배를 달력으로 일원화&quot;(사용자 확정 D3-a)가 무시트 공고에서 성립하지 않았다. 공고는 daily_limit 로 정상 동작하므로 눈에 띄지 않았고(fail-soft), 발행 응답의 planPrefill 을 봐야만 보였다.</dd>
+      <dt>수정</dt><dd>readWorktableDates 가 다른 소비처와 같은 앵커(KST 오늘)를 넘긴다. 공유 파서(koreanDate)는 무수정 — 063 등 기존 동작 무영향.</dd>
+      <dt>회귀가드</dt><dd>tests/sheetlessDailyPlan.test.js §B (변이시험 2종 — 앵커 제거 시 검출 / 픽스처를 옛 ISO 로 되돌리면 통과 = 옛 픽스처가 왜 못 잡았는지 실증)</dd>
+      <dt>재검증</dt><dd class="ok">O2·O3·O4 및 P4·P5 — 수정 배포 후 접수 직후 발행에서 달력에 8/10 3명 · 8/11 3명 정확히 기록</dd>
+    </dl>
+  </article>
+  <div class="note">
+    <b>두 문제의 공통점</b> — 둘 다 <b>조용히 실패</b>하고 있었습니다. 화면은 정상으로 보이고,
+    데이터도 망가지지 않고, 기능은 다른 경로로 돌아가서 아무도 몰랐습니다.
+    F-1 은 오류로그를 들여다봐야, F-2 는 발행 응답의 <code>planPrefill</code> 을 봐야 보였습니다.
+    <b>실제로 한 바퀴 돌려 보지 않았으면 둘 다 못 찾았습니다.</b>
+  </div>
+
+  <h2>3. 항목별 결과 <em>69항목 · 실측값 그대로</em></h2>
+  
+    <section class="sec">
+      <h3><span class="tag">A</span> 배포·스키마
+        <em>프로덕션에 무시트 코드와 마이그레이션(096·097)이 실제로 올라가 있는가</em>
+        <span class="cnt">3항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">A1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">프로덕션 서버 기동</td>
+        <td class="c-de">env=production db=connected v=2.26.0-throttle-monitor</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">A2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">무시트 스키마(096/097) 적용 — 부팅 프리플라이트 통과</td>
+        <td class="c-de">REQUIRED_SCHEMA 에 tab_configs.sheetless · work_orders.skip_weekends/holidays 등록 → 컬럼 없으면 process.exit(1)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">A3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">탈시트 전환 화면 API 동작</td>
+        <td class="c-de">이관됨=86 · 남음=0 · 연도미상=358</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">B</span> 작업오더 접수 (D4-b)
+        <em>인트라넷이 시트 URL 을 더 이상 보내지 않는 모양 그대로 접수되는가</em>
+        <span class="cnt">3항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">B1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">작업시트 URL 없이 작업오더 접수(D4-b 수신측)</td>
+        <td class="c-de">id=wo_bd46176f4861 status=submitted work_sheet_url=&quot;&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">B2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">work_sheet_url 이 문자열 &quot;undefined&quot; 로 저장되지 않음</td>
+        <td class="c-de">저장값=&quot;&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">B3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">인트라넷 일정 신호 2칸(097) 저장</td>
+        <td class="c-de">skip_weekends=true holidays=null</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">C</span> 작업표 계획
+        <em>구글 호출 없이 열 구성·행 수·날짜 분배가 계산되는가</em>
+        <span class="cnt">5항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">C1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">작업표 계획 산출(구글 호출 0)</td>
+        <td class="c-de">열 14칸 · 행 6줄 · blockers=[]</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">C2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 주말 제외(097 skip_weekends)가 날짜 분배에 실제 반영</td>
+        <td class="c-de">시작일 2026-08-08(토) → 첫 진행일 2026-08-10(8 / 10 (월))</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">C3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 구매일자 표기 = &quot;M / D (요일)&quot; (063 시트 일정 인식이 읽는 형식)</td>
+        <td class="c-de">예: 8 / 10 (월)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">C4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">상품 URL 호스트로 구매채널 판정</td>
+        <td class="c-de">channel=coupang(쿠팡)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">C5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">일건수만큼 날짜 분배(총 6건 · 일 3건)</td>
+        <td class="c-de">{&quot;8 / 10 (월)&quot;:3,&quot;8 / 11 (화)&quot;:3}</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">D</span> 무시트 접수 (F1)
+        <em>시트 없이 가상 탭 + 작업표 + 장부 3권이 만들어지는가</em>
+        <span class="cnt">5항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">D1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 무시트 접수 성공 (POST /api/order/admin/accept {sheetless:true})</td>
+        <td class="c-de">tabName=[테스트] 탈시트검증 08072045 sheetless=true err=</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">D2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 가상 시트ID 발급 — 구글 ID 형식 검증에 안 걸리는 wt_ 접두 23자 + 숫자 gid</td>
+        <td class="c-de">sheetId=wt_8ed24b2343ec7eff2c23(23자) gid=470798061</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">D3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">작업표 행 생성 = 작업오더 요구 건수(6건)</td>
+        <td class="c-de">rows=6</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">D4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 검색 명단(review_index)은 이름 있는 행만 — 접수 직후 0줄</td>
+        <td class="c-de">indexRows=0 · 빈 슬롯이 리뷰어 검색에 뜨지 않는다</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">D5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">작업오더 상태 전이 submitted → reviewing(접수완료)</td>
+        <td class="c-de">status=reviewing</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">E</span> 등록·작업보드
+        <em>만든 작업이 작업목록·작업보드 표에 제대로 뜨는가</em>
+        <span class="cnt">7항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">E1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 무시트 작업이 작업보드 목록에 뜬다 (최종점검 문서 걸림돌 ② 해소)</td>
+        <td class="c-de">tabName=[테스트] 탈시트검증 08072045</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">E2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 서버가 sheetless 플래그를 실어 보낸다(배지 재료 — ID 모양 추측 금지)</td>
+        <td class="c-de">sheetless=true</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">E3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">작업보드 표에 6줄이 보인다(주문 0건이어도 자리가 미리 잡힌다)</td>
+        <td class="c-de">roster=6 counts.total=6</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">E4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 시스템이 채운 칸 = 번호·구매일자 뿐 (나머지는 구매양식 제출이 채운다)</td>
+        <td class="c-de">번호=1 구매일자=&quot;8 / 10 (월)&quot; 수취인=&quot;&quot; 연락처=&quot;&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">E5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ seq = 작업표 실제 행 번호(헤더 1행 → 데이터 2행부터) — 주문 유입 시 제자리 갱신의 키</td>
+        <td class="c-de">seq=2,3,4,5,6,7</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">E6</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ source='worktable' — 'manual' 이면 리뷰제출·입금 표시가 영영 안 켜진다</td>
+        <td class="c-de">source=worktable</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">E7</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">구매일자 분배가 작업표에 그대로 기록(주말 제외 반영)</td>
+        <td class="c-de">8 / 10 (월) · 8 / 10 (월) · 8 / 10 (월) · 8 / 11 (화) · 8 / 11 (화) · 8 / 11 (화)</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">F</span> 구매양식 제출
+        <em>리뷰어 제출이 큐·시트를 거치지 않고 같은 요청에서 완결되는가</em>
+        <span class="cnt">9항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">F1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 무시트 탭에 구매양식 제출 성공</td>
+        <td class="c-de">dbSaved=true mirrorStatus=written queued=false sheetsWritten=false row=2 (562ms)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 큐를 타지 않고 같은 요청 안에서 완결(mirror_status=written)</td>
+        <td class="c-de">mirrorStatus=written queued=false — order_append 큐 미경유</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 구글 시트 쓰기 0 (sheetsWritten=false)</td>
+        <td class="c-de">sheetsWritten=false</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 주문이 작업표 첫 빈 줄(seq 2)에 제자리 기록 — 표가 두 겹이 되지 않는다</td>
+        <td class="c-de">줄 수=6(그대로) · seq2 수취인=&quot;테스트리뷰어일&quot; 연락처=&quot;010-0000-0001&quot; 주문번호=&quot;TEST00000001&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">작업표 표에 참여자 신원이 붙는다(name/phone8)</td>
+        <td class="c-de">name=테스트리뷰어일 phone8=00000001 hasOrder=false</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F6</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">2번째 제출도 다음 빈 줄(seq 3)에 즉시 완결</td>
+        <td class="c-de">row=3 mirrorStatus=written</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F7</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 실제 리뷰어 화면 payload(dateStr 포함)면 구매일자가 오늘 날짜로 기록된다</td>
+        <td class="c-de">구매일자=&quot;8 / 7 (금)&quot; (기대 &quot;8 / 7 (금)&quot;)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F8</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">⚠ 관찰: dateStr 를 안 보내면 그 칸이 비워진다 — 시트 경로와 동일한 공유매퍼 동작</td>
+        <td class="c-de">seq2(dateStr 미전송) 구매일자=&quot;&quot; · seq3(전송) &quot;8 / 7 (금)&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">F9</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">줄 수는 여전히 6 — 제출 2건이 표를 두 겹으로 만들지 않는다</td>
+        <td class="c-de">roster=6</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">G</span> 리뷰어 검색
+        <em>작업표 → 장부 재생성 → 검색 명단까지 이어지는가</em>
+        <span class="cnt">2항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">G1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 리뷰어 검색에 무시트 작업이 뜬다 (작업표 → 장부 재생성 → review_index)</td>
+        <td class="c-de">작업=&quot;[테스트] 탈시트검증 08072045&quot; 행=3</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">G2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 검색 결과는 이름 있는 줄만(빈 슬롯 4줄은 안 뜬다)</td>
+        <td class="c-de">이 작업 결과 1건 / 작업표 6줄 중 이름 2줄</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">H</span> 리뷰제출 표시
+        <em>제출 완료 표시가 작업표 칸에 기록되는가 (W3-a ㉮)</em>
+        <span class="cnt">2항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">H1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">리뷰 제출 표시 요청 성공</td>
+        <td class="c-de">dbUpdated=true complete=true err=</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">H2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 무시트 탭은 리뷰제출 표시를 **작업표 칸**에 쓴다(W3-a ㉮)</td>
+        <td class="c-de">작업표 '리뷰' 칸=&quot;O&quot; · roster.submitted=false</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">I</span> 장부 재생성 생존
+        <em>주문이 더 들어와 장부를 다시 만들어도 그 표시가 살아남는가</em>
+        <span class="cnt">4항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">I1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">3번째 제출로 장부 재생성 유발</td>
+        <td class="c-de">row=4</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">I2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★★ 장부 재생성(3번째 제출) 후에도 리뷰제출 표시가 살아 있다 — W3-a 회귀 없음</td>
+        <td class="c-de">작업표 '리뷰' 칸=&quot;O&quot; (재생성 전후 동일)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">I3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 제출완료 건은 기본 검색(제출대기)에서 빠진다 = review_index.is_submitted 반영</td>
+        <td class="c-de">기본 검색 결과 0건 (제출 전에는 1건이었다)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">I4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ includeSubmitted=1 로는 제출완료로 조회된다</td>
+        <td class="c-de">isSubmitted=true submitVal=&quot;&quot;</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">J</span> 그림자 투영
+        <em>작업보드 집계(10분 크론)에 반영되는가</em>
+        <span class="cnt">2항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">J1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">그림자 투영(작업표 → 작업보드 집계) 실행</td>
+        <td class="c-de">{&quot;ok&quot;:true,&quot;imported&quot;:3,&quot;inserted&quot;:0,&quot;updated&quot;:3,&quot;enriched&quot;:6,&quot;orderLinked&quot;:3,&quot;deactivated&quot;:0}</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">J2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">투영 후 작업보드 집계에 제출 1건 반영(집계는 10분 크론 주기 = 즉시 아님)</td>
+        <td class="c-de">counts={&quot;total&quot;:6,&quot;submitted&quot;:1,&quot;paid&quot;:0,&quot;edited&quot;:0,&quot;ambiguous&quot;:0,&quot;hidden&quot;:0} · seq3.submitted=true</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">K</span> 입금 표시
+        <em>입금 완료도 작업표 칸에 남고 재생성 후 생존하는가</em>
+        <span class="cnt">5항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">K1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">입금 완료 처리(POST /api/payment/mark-done) 성공</td>
+        <td class="c-de">updated=1 paidAt=2026.8.8 05:53</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">K2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 무시트 탭은 입금 표시도 **작업표 칸**에 쓴다(W3-a ㉮ · 시트 쓰기·deposit_mark 큐 미경유)</td>
+        <td class="c-de">작업표 '입금' 칸=&quot;2026.8.8 05:53&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">K3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">제출을 한 건 더 넣어 장부 재생성 유발</td>
+        <td class="c-de">row=6</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">K4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★★ 재생성 후에도 제출·입금 표시가 함께 살아 있다 (W3-a 핵심 회귀)</td>
+        <td class="c-de">리뷰=&quot;O&quot; 입금=&quot;2026.8.8 05:53&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">K5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 리뷰어 화면 &quot;입금완료&quot; 배지 재료(isPaid)도 재생성 후 유지</td>
+        <td class="c-de">isPaid=true isSubmitted=true</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">L</span> 화면 표시
+        <em>무시트 배지·죽은 시트링크 없음·전환 화면 집계</em>
+        <span class="cnt">3항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">L1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">반영 점검 목록에 무시트 작업이 뜬다</td>
+        <td class="c-de">작업=&quot;[테스트] 탈시트검증 08072045&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">L2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 죽은 구글 링크를 만들지 않는다 (tabUrl=null + sheetless 사유)</td>
+        <td class="c-de">tabUrl=null sheetless=true</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">L3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">탈시트 전환 화면에 &quot;이관됨&quot;으로 집계된다</td>
+        <td class="c-de">sheetless=true · 전체 이관됨=87건</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">M</span> Drive 폴더
+        <em>리뷰·구매캡처 폴더가 무시트 탭에도 생성·연결되는가 (D2-a)</em>
+        <span class="cnt">2항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">M1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">폴더 조회가 구글 404 로 죽지 않는다(find-only · fail-soft)</td>
+        <td class="c-de">status=200 {&quot;ok&quot;:true,&quot;kind&quot;:&quot;info&quot;,&quot;folderUrl&quot;:&quot;https://drive.google.com/drive/folders/1XpLiQT_bFZFPERdPjwV3i9tp9wpDarBU&quot;,&quot;captureFolderUrl&quot;:&quot;https://drive.google.com/drive/folders/1aneDGy_H7w0Qa3yZGRM_tmAD_XVfSVb4&quot;,&quot;cashReceipt&quot;:</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">M2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">리뷰·구매캡처 폴더가 자동 생성·연결된다(무시트 탭도 동일)</td>
+        <td class="c-de">리뷰=O 구매캡처=O</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">N</span> 크론 단속 · 수정 재검증
+        <em>가상 시트로 구글을 부르지 않는가 / 발견한 문제의 수정 확인</em>
+        <span class="cnt">5항목 · <b class="red">발견 1</b></span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">N1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ 큐 백스톱 — 무시트 탭 항목은 시트로 나가지 않고 사유와 함께 종결(done)</td>
+        <td class="c-de">대기 2 → 2 (syncQueue._executeBatch 의 isSheetless fail-closed 게이트)</td>
+      </tr>
+      <tr class="bad">
+        <td class="c-id">N2</td>
+        <td class="c-st"><span class="x">발견</span></td>
+        <td class="c-ti">⚠ 발견: 리뷰제출 표시 경로가 무시트 탭에도 시트 쓰기를 시도한다</td>
+        <td class="c-de">가상 시트ID 404 오류로그 1건 — flow=review_submit step=sheet_write code=404 &quot;Requested entity was not found.&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">N3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 그 시도는 실패해도 데이터에 영향 없음 — 표시는 작업표 칸에 이미 기록돼 있다</td>
+        <td class="c-de">리뷰=&quot;O&quot; 입금=&quot;2026.8.8 05:53&quot;</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">N4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ [수정 후 재검증] 리뷰제출 표시가 더 이상 구글을 부르지 않는다 — 새 404 로그 0건</td>
+        <td class="c-de">수정 전 1건 → 수정 후 1건(증가 없음)</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">N5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ 그래도 표시는 작업표 칸에 정상 기록된다(기능 무회귀)</td>
+        <td class="c-de">seq4 '리뷰' 칸=&quot;O&quot;</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">O</span> 달력 프리필 (D3-a)
+        <em>작업표 날짜 분배가 모집공고 달력으로 옮겨지는가</em>
+        <span class="cnt">4항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">O1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">무시트 탭으로 모집공고 발행(리뷰어 미노출 테스트 공고)</td>
+        <td class="c-de">id=camp_aa671cc7d970 planPrefill={&quot;ok&quot;:false,&quot;reason&quot;:&quot;unparsable&quot;,&quot;dateHeader&quot;:&quot;구매일자&quot;}</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">O2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★ [수정 후 재검증] D3-a — 작업표 날짜 분배가 달력으로 자동 프리필</td>
+        <td class="c-de">planPrefill={&quot;ok&quot;:true,&quot;inserted&quot;:1,&quot;skipped&quot;:1,&quot;days&quot;:2,&quot;dateHeader&quot;:&quot;구매일자&quot;}</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">O3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★ [📅 인원] 조절 모달이 그 달력을 그대로 읽는다(그날 정원의 진실원본)</td>
+        <td class="c-de">plans=[{&quot;date&quot;:&quot;2026-08-11&quot;,&quot;count&quot;:1,&quot;updatedBy&quot;:&quot;작업표:master&quot;,&quot;updatedAt&quot;:&quot;2026-08-07T21:06:45.160Z&quot;}]</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">O4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">무시트 공고는 시트 일정(063) 경로를 타지 않는다(달력이 유일 기준)</td>
+        <td class="c-de">scheduleDriven=false</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">P</span> 2회차 완주
+        <em>실제 운영 순서(접수 → 곧바로 발행)로 처음부터 다시</em>
+        <span class="cnt">6항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">P1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">2번째 테스트 작업오더 접수(시트 URL 없이)</td>
+        <td class="c-de">id=wo_ed73aff80c7e</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">P2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">무시트 접수 — 작업표 6줄</td>
+        <td class="c-de">sheetId=wt_0265311336ebe6abfe6e rows=6</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">P3</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">구매채널 = 네이버(상품 URL 호스트 판정)</td>
+        <td class="c-de">smartstore.naver.com → 네이버</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">P4</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★★ 접수 직후 발행 → 작업표 날짜 분배가 달력에 그대로 옮겨진다(D3-a 완성)</td>
+        <td class="c-de">planPrefill={&quot;ok&quot;:true,&quot;inserted&quot;:2,&quot;skipped&quot;:0,&quot;days&quot;:2,&quot;dateHeader&quot;:&quot;구매일자&quot;}</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">P5</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">★★★ 달력 = 8/10 3명 · 8/11 3명 (작업표 분배와 정확히 일치 · 주말 제외 반영)</td>
+        <td class="c-de">{&quot;2026-08-10&quot;:3,&quot;2026-08-11&quot;:3}</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">P6</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">그날 정원 판정도 달력 기준(시트 일정 미참조)</td>
+        <td class="c-de">scheduleDriven=false planEnabled=true todayNaturalQuota=3</td>
+      </tr></tbody>
+      </table>
+    </section>
+    <section class="sec">
+      <h3><span class="tag">Z</span> 정리 후 상태
+        <em>테스트 데이터 정리 결과</em>
+        <span class="cnt">2항목 · 전부 통과</span>
+      </h3>
+      <table class="t">
+        <thead><tr><th>#</th><th>결과</th><th>확인한 것</th><th>실측값</th></tr></thead>
+        <tbody>
+      <tr class="">
+        <td class="c-id">Z1</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">정리 후 남는 것 = 빈 테스트 탭 2개(등록부 tab_configs) — 데이터·명단 0</td>
+        <td class="c-de">남은 탭 2개: [테스트] 탈시트검증 08072045 · [테스트] 탈시트검증B 08072107</td>
+      </tr>
+      <tr class="">
+        <td class="c-id">Z2</td>
+        <td class="c-st"><span class="o">통과</span></td>
+        <td class="c-ti">탈시트 전환 화면 최종 상태</td>
+        <td class="c-de">이관됨 88 · 남음 0 · 연도미상 358</td>
+      </tr></tbody>
+      </table>
+    </section>
+
+  <h2>4. 테스트로 만든 데이터와 정리 내역</h2>
+  <div class="card">
+    <p style="margin-top:0">전부 <code>[테스트]</code> 로 이름을 달았고, 끝난 뒤 정리했습니다.</p>
+    <ul class="plain"><li><b>작업표 줄 정리 · [테스트] 탈시트검증 08072045</b> — 미리보기 6줄 → 정리 6줄 · 남은 명단 0</li><li><b>작업표 줄 정리 · [테스트] 탈시트검증B 08072107</b> — 미리보기 6줄 → 정리 6줄 · 남은 명단 0</li><li><b>테스트 공고 삭제 camp_44615c3acf67</b> — status=200</li><li><b>테스트 공고 삭제 camp_91b24f31d3af</b> — status=200</li><li><b>테스트 작업오더 삭제 wo_bd46176f4861</b> — status=200 {&quot;ok&quot;:true,&quot;id&quot;:&quot;wo_bd46176f4861&quot;,&quot;intranetDeleted&quot;:true,&quot;deliverError&quot;:null}</li><li><b>테스트 작업오더 삭제 wo_ed73aff80c7e</b> — status=200 {&quot;ok&quot;:true,&quot;id&quot;:&quot;wo_ed73aff80c7e&quot;,&quot;intranetDeleted&quot;:true,&quot;deliverError&quot;:null}</li></ul>
+    <p style="margin-bottom:0">
+      <b>남은 것</b> — 빈 테스트 탭 2개([테스트] 탈시트검증 08072045 · [테스트] 탈시트검증B 08072107).
+      명단·주문·표 줄은 전부 0이고 리뷰어 검색에도 안 잡힙니다(정리 직후 확인: 3명 전부 0건).
+      작업목록에서 완전히 지우려면 그 두 탭의 <code>tab_configs</code> 등록을 지우면 됩니다
+      (화면 창구가 없어 임의로 건드리지 않았습니다).
+    </p>
+  </div>
+
+  <h2>5. 이번 테스트로 확인되지 않은 것 <em>정직한 한계</em></h2>
+  <div class="card">
+    <ul class="plain">
+      <li><b>인트라넷 리뷰오더 폼에서 사람이 직접 제출</b>하는 화면 조작 — 인트라넷 로그인 자격이 없어
+        ① <b>배포된</b> 화면 스크립트에 시트 URL 입력칸·검증·전송이 <b>0개</b>임을 확인하고
+        ② 리뷰웹 수신측에 <b>시트 URL 없이</b> 오더를 넣어 접수되는 것을 확인하는 방식으로 대체했습니다.</li>
+      <li><b>리뷰 캡처 이미지 업로드</b>(Drive 실파일 생성) — 폴더 생성·연결은 확인했으나
+        실제 이미지 1장을 올려 <code>[리뷰]</code> 폴더에 들어가는 것까지는 하지 않았습니다(운영 Drive 에 파일을 남기지 않기 위해).</li>
+      <li><b>Drive 폴더 1단 이름 = 업체명</b>(D2-a) — 테스트 탭에 업체(광고주) 매핑이 없어
+        폴백(캠페인 이름) 경로만 탔습니다. 업체가 지정된 실작업으로는 미확인.</li>
+      <li><b>기존 이관 작업 88건</b>의 개별 동작 — 이번엔 <b>새로 만든 무시트 작업 2건</b>으로만 완주했습니다.</li>
+      <li><b>동시 부하</b> — 제출 5건을 순차로 넣었을 뿐, 동시 다발 주문은 재현하지 않았습니다.</li>
+    </ul>
+  </div>
+
+  <h2>6. 관찰된 동작 <em>버그는 아니지만 알아둘 것</em></h2>
+  <div class="card">
+    <ul class="plain">
+      <li><b>구매양식을 제출하면 그 줄의 구매일자가 「오늘」로 덮인다.</b>
+        리뷰어 화면은 항상 오늘 날짜(<code>M / D (요일)</code>)를 함께 보내고, 공유 매퍼가 그 칸에 씁니다
+        — 시트 경로와 완전히 같은 동작입니다. 무시트에서는 그날 정원을 <b>달력</b>이 정하므로 무해하지만,
+        <b>모집공고 발행은 접수 직후</b>(제출이 들어오기 전)에 하는 것이 달력 프리필이 계획대로 들어갑니다.</li>
+      <li><b>날짜 값을 안 보내면 그 칸이 비워진다</b>(F8) — 빈 값은 "안 씀"이 아니라 "지움"이라는
+        기존 공유 매퍼 규율 그대로입니다. 실제 리뷰어 화면은 항상 보내므로 정상 흐름에서는 발생하지 않습니다.</li>
+      <li><b>작업보드 집계(제출 N건)는 10분 크론 뒤에 반영됩니다</b>(J2) — 표의 값 자체는 즉시 기록되고,
+        상단 집계 숫자만 투영 주기를 따릅니다.</li>
+      <li><b>접수 직후 검색 명단은 0명입니다</b>(D4) — 이름 없는 빈 자리는 검색에 뜨지 않는 것이 맞습니다.
+        첫 제출이 들어오는 순간 1명이 됩니다.</li>
+    </ul>
+  </div>
+
+  <h2>7. 권고</h2>
+  <div class="card">
+    <ul class="plain">
+      <li><b>모집공고는 접수 직후에 발행하세요.</b> 달력 프리필이 작업표의 계획 날짜를 그대로 가져갑니다
+        (제출이 들어온 뒤 발행하면 이미 덮인 날짜가 들어갑니다).</li>
+      <li><b>이관된 작업 88건 중 1건으로 실전 완주</b>를 한 번 더 권합니다 — 이번 테스트는 새로 만든 작업 기준입니다.
+        기존 이관 작업은 열 이름·헤더가 시트에서 온 값이라 표준 열과 다를 수 있습니다.</li>
+      <li>남은 <b>미이관 358건</b>은 사용자 확정대로 <b>이관하지 않습니다</b>(과거 자료). 전환 화면이 건수를 고지합니다.</li>
+      <li><b>업체가 지정된 무시트 작업</b>으로 Drive 폴더 1단 이름(업체명)을 한 번 눈으로 확인해 주세요.</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    자동 생성 보고서 · 확인 항목 69개는 프로덕션 API 응답을 그대로 기록한 것입니다.<br>
+    관련 PR — 리뷰웹 #650(F-1) · #651(F-2)
+  </div>
+</div>
+</body>
+</html>
