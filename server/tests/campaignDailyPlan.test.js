@@ -763,7 +763,29 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     const pl = A.payload();
     ok('7A-3 자동+연장 = 오늘을 기본값으로 고정(자동 이월 억제)',
       pl.set.some((x) => x.date === '2026-08-08' && x.count === 40), pl.set);
-    ok('7A-3 자동+연장도 구간 전체를 굳히지 않는다', pl.set.length <= 2, pl.set.length);
+    // ★★ 2026-08-07 사용자 신고("종료일 뒤에 붙이기 선택하였는데 저장이안됨")로 규칙 보강:
+    //   오늘만 고정하면 **내일 자동 이월(066)이 다시 얹혀** 고른 방식이 하루 만에 무너진다
+    //   (naturalFor 는 오늘만 서버 판정을 알고 앞날은 기본 일건수로 본다). 이월을 얹지 않는
+    //   방식은 구간을 명시 고정해야 성립한다 — 095 규율(명시 조절일 = 그 값이 그날의 전부).
+    // ★ 마지막 부분일(총량에 맞춰 남은 만큼만 연 날)만 예외 — 서버도 같은 총량 clamp 를 걸고,
+    //   고정하지 않아야 앞 날이 미달했을 때 그날이 온전히 열린다(종전 규칙 유지).
+    ok('★ 자동+연장 = 구간을 고정한다(내일 자동 이월이 다시 얹히는 것을 막는다)',
+      pl.set.length >= sandbox.S.horiz.length - 1 && pl.set.length > 2, [pl.set.length, sandbox.S.horiz.length]);
+    ok('★ 고정값은 그 방식이 깐 값 그대로', pl.set.every((x) => x.count === sandbox.S.plan[x.date]));
+    ok('★ 해제(remove)로 나가지 않는다 — 해제 = 자동 이월 복귀 = 고른 방식 무효', pl.remove.length === 0, pl.remove);
+  }
+  // ★ 이월이 없으면 고정할 이유도 없다(불필요한 굳힘 금지)
+  mkS({ data: { carryPending: 0, todayNaturalQuota: 40 } }); A.applyCarryMode('extend');
+  eq('★ 이월 0 + 연장 = 보낼 것 없음', A.payload().set.length, 0);
+  // ★★ 고정 중에 저장된 조절이 기본값과 같아도 **해제(remove)로 내보내지 않는다** —
+  //   해제하면 그 날은 다시 자동 이월 대상이 되어 고른 방식이 무효가 된다.
+  mkS({ base: { '2026-08-12': 40 }, data: { todayNaturalQuota: 70 } });
+  A.applyCarryMode('extend');
+  {
+    const pl = A.payload();
+    eq('★ 기본값과 같은 저장분도 해제하지 않는다', pl.remove.length, 0);
+    ok('★ 그 날은 set 으로 고정된다',
+      pl.set.some((x) => x.date === '2026-08-12' && x.count === 40), pl.set);
   }
   // 보류 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다(그리고 연장은 보낼 것이 없다)
   mkS({ data: { carryMode: 'hold', todayNaturalQuota: 40 } }); A.applyCarryMode('next');

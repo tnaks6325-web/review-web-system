@@ -565,6 +565,17 @@
    *  이미 얹고 있는 오늘 이월까지 명시 계획으로 박아 이월이 영영 정산되지 않는다(코드리뷰). */
   function payload() {
     var set = [], remove = [], ds = {}, from = S.data.today, target = targetTotal(), cum = 0;
+    // ★★★ **이월을 얹지 않는 방식(extend·spread)은 "저장하지 않으면 성립하지 않는다"**
+    //   (사용자 신고 2026-08-07 — "종료일 뒤에 붙이기 선택하였는데 저장이안됨").
+    //   `naturalFor` 는 **오늘**만 서버 판정값을 알고 앞날은 기본 일건수로 본다. 그런데 서버의
+    //   자동 이월(066)은 **내일도 모레도** 그날 정원에 미달분을 얹으므로, 앞날을 명시 계획으로
+    //   고정하지 않으면 사람이 고른 "각 날 인원은 그대로"가 다음 날 그대로 무너진다
+    //   (095 규율 = 명시 조절일은 그 값이 그날의 전부 → 자동 가산이 얹히지 않는다).
+    //   그래서 **이월이 있고 next 가 아닌 방식**일 때만 구간을 고정한다 — next 는 서버가 이미
+    //   같은 일을 하므로 종전대로 보낼 것이 없고(유령 이월 방지), 이월이 없으면 고정할 이유도 없다.
+    //   ★ 보류(carry_mode='hold') 공고는 서버가 애초에 얹지 않으므로 억제할 것이 없다 → 고정 안 함.
+    var pinAll = !!(S.carryMode && S.carryMode !== 'next' && (carryAmt() || 0) > 0
+      && S.data.carryMode !== 'hold');
     Object.keys(S.plan).forEach(function (d) { if (d >= from) ds[d] = 1; });
     Object.keys(S.base).forEach(function (d) { if (d >= from) ds[d] = 1; });
     Object.keys(ds).sort().forEach(function (d) {
@@ -577,9 +588,10 @@
       // ★ **시스템이 깐 값 그대로일 때만** 건너뛴다 — 그냥 `v === residual` 로 두면 균형이 맞은
       //   상태의 마지막 날은 항상 residual 이라 **사람이 의도적으로 줄인 마지막 날이 조용히 누락**된다.
       if (v < nat && v === residual && S.base[d] == null && S.modePlan && v === S.modePlan[d]) return;
-      if (v === nat) return;                                 // 손대지 않은 값 = 보낼 필요 없음
-      // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀)
-      if (S.base[d] != null && v === baseFor(d)) remove.push(d);
+      if (!pinAll && v === nat) return;                      // 손대지 않은 값 = 보낼 필요 없음
+      // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀).
+      // ★ 단 pinAll(이월 억제)일 때는 해제하면 안 된다 — 해제 = 자동 이월 복귀 = 고른 방식 무효.
+      if (!pinAll && S.base[d] != null && v === baseFor(d)) remove.push(d);
       else set.push({ date: d, count: v });
       return;
     });
@@ -899,6 +911,10 @@
         //   "반영이 안 된 것"으로 오독된다 — 이미 그렇게 돌고 있다는 사실을 말한다.
         : (carry > 0 && S.carryMode === 'next' && j.carryMode !== 'hold')
           ? '이월 ' + carry + '명은 이미 오늘 정원에 반영되어 있습니다 — 바꾸려면 위에서 다른 방식을 고르세요'
+        // ★ 이월이 없으면 방식을 바꿔도 배치가 달라지지 않는다 — "저장이 안 된다"로 오독되지 않게
+        //   그 사실을 말한다(사용자 신고: 방식을 골랐는데 저장 버튼이 잠겨 있다).
+        : (!carry && S.carryMode && S.carryMode !== 'next')
+          ? '지금은 이월 인원이 없어 방식별로 달라지는 것이 없습니다 — 저장할 변경이 없습니다'
           : '총량과 딱 맞습니다 — 저장할 변경이 없습니다';
     } else {
       save.disabled = killOff || S.saving || !dirty;
