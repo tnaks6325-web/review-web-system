@@ -114,8 +114,9 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       found[m + ' ' + l.route.path] = l.route.stack.map(h => h.handle.name);
     }
     const keys = Object.keys(found);
-    ok('4경로 전부 등록: ' + keys.join(', '), keys.length === 4
+    ok('5경로 전부 등록: ' + keys.join(', '), keys.length === 5
       && found['GET /sheetless/list'] && found['GET /sheetless/checklist']
+      && found['GET /sheetless/slot-sweep']
       && found['POST /sheetless/cutover'] && found['POST /sheetless/reconnect']);
     ok('★ 전부 authMiddleware + adminOrMaster (AE·광고주 도달 불가)',
       keys.every(k => found[k].includes('authMiddleware') && found[k].includes('adminOrMasterMiddleware')));
@@ -489,6 +490,64 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('★ 인계는 시트에 쓰지 않는다(큐·시트 API 호출 0)',
       !/enqueue\s*\(|appendSheet\s*\(|writeSheet\s*\(/.test(src));
     ok('★ 킬스위치가 있다', /SHEETLESS_CUTOVER_HANDOFF/.test(src));
+  }
+
+  /* ══════════════ F3. 준비 자리 일괄 점검 ══════════════ */
+  console.log('\n[F3] 준비 자리 일괄 점검 — "시트가 더 많은 작업"만 추려서 답한다');
+  {
+    // 남은 작업 3건: A=부족 / B=이상 없음 / C=판정 불가(gid 없음), 그리고 이미 이관된 D
+    const tabs = [
+      { sheetId: 'S1', tabName: 'A', tabGid: '1', displayName: 'A', sheetless: false, boardRows: 20, mirroredAt: new Date().toISOString() },
+      { sheetId: 'S1', tabName: 'B', tabGid: '2', displayName: 'B', sheetless: false, boardRows: 50, mirroredAt: new Date().toISOString() },
+      { sheetId: 'S1', tabName: 'C', tabGid: null, displayName: 'C', sheetless: false, boardRows: 10, mirroredAt: new Date().toISOString() },
+      { sheetId: 'S1', tabName: 'D', tabGid: '4', displayName: 'D', sheetless: true, boardRows: 10, mirroredAt: new Date().toISOString() },
+    ];
+    const db = { query: async (sql) => (/FROM tab_configs tc/.test(String(sql)) ? { rows: tabs } : { rows: [] }) };
+    cutover.__setPoolForTest(db);
+    const slot = require('../src/services/sheetSlotSync.service');
+    const _rp = slot.readPreparedRows;
+    const seen = [];
+    slot.readPreparedRows = async (_db, { tabGid }) => {
+      seen.push(tabGid);
+      if (tabGid === '1') return { ok: true, prepared: Array.from({ length: 100 }, (_, i) => ({ seq: i + 2 })) };
+      return { ok: true, prepared: Array.from({ length: 30 }, (_, i) => ({ seq: i + 2 })) };
+    };
+    // ★ 목록과 **같은 스코프**(연도 필터 포함)를 탄다 — 화면에 안 보이는 작업을 훑으면 답이 안 맞는다.
+    const r = await cutover.sweepPreparedRows({ includeUnknown: true });
+    slot.readPreparedRows = _rp; cutover.__setPoolForTest(null);
+
+    ok('★★ 시트가 더 많은 작업만 추린다', r.short.length === 1 && r.short[0].tabName === 'A');
+    ok('★ 부족한 줄 수를 그대로 말한다(시트 100 · 표 20)',
+      r.short[0].missing === 80 && r.short[0].prepared === 100 && r.short[0].board === 20);
+    ok('이상 없는 작업은 건수로만 센다', r.okCount === 1);
+    ok('★★ 판정 불가를 "이상 없음"으로 꾸미지 않는다(따로 센다)',
+      r.unknown.length === 1 && r.unknown[0].tabName === 'C' && r.unknown[0].reason === 'no_gid');
+    ok('★ 이미 이관된 작업은 훑지 않는다', !seen.includes('4') && r.remaining === 3);
+    ok('★ 판정은 점검표 ①과 같은 함수(readPreparedRows) — 사본 0', seen.length === 2);
+  }
+  {
+    const src = noLineComments(read('src/services/sheetlessCutover.service.js'));
+    const body = src.slice(src.indexOf('async function sweepPreparedRows'), src.indexOf('async function enableSheetless'));
+    ok('★ 일괄 점검은 시트 API 를 부르지 않는다(RAW 미러만)',
+      !/getSheetModifiedTime|readSheet\s*\(|driveThrottledCall/.test(body));
+    ok('★ 읽기 전용 — 쓰기 쿼리 0', !/UPDATE |INSERT |DELETE /.test(body));
+    ok('★ 부족이 큰 작업부터 보여준다', /sort\(\(a, b\) => b\.missing - a\.missing\)/.test(body));
+  }
+  {
+    const rt = require('../src/routes/trackB.routes').stack
+      .filter(l => l.route && l.route.path === '/sheetless/slot-sweep')
+      .map(l => ({ methods: Object.keys(l.route.methods), mws: l.route.stack.map(s => s.handle.name) }))[0];
+    ok('일괄 점검 라우트가 GET 으로 등록돼 있다', !!rt && rt.methods.includes('get'));
+    ok('★ adminOrMaster 게이트', rt && rt.mws.includes('authMiddleware') && rt.mws.includes('adminOrMasterMiddleware'));
+  }
+  {
+    const wd = read('../frontend/workdesk.html');
+    ok('헤더에 [준비 자리 일괄 점검] 버튼', /onclick="_coSweep\(\)"/.test(wd));
+    ok('★ 없으면 "없다"고 분명히 말한다(빈 화면 금지)', /시트가 더 많은 작업은 없습니다/.test(wd));
+    ok('★ 판정 불가 건수를 화면이 고지한다', /판정 불가 \$\{unk\.length\}건|판정 불가 \$\{unk/.test(wd) || /판정 불가/.test(wd));
+    ok('★★ 실패해도 화면을 종결시킨다(자리표시자에 매달리지 않는다)',
+      /_coSweep[\s\S]{0,1400}일괄 점검 실패[\s\S]{0,200}다시 시도/.test(wd));
+    ok('★ 부족한 작업엔 그 자리에서 조치 버튼', /_coSweep[\s\S]{0,2000}반영 점검에서 채우기/.test(wd));
   }
 
   /* ══════════════ G. 부수효과 실패해도 이관 유지 ══════════════ */

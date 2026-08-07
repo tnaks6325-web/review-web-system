@@ -417,6 +417,16 @@ router.get('/sheetless/list', authMiddleware, adminOrMasterMiddleware, async (re
     }));
   } catch (err) { _cutoverErr(err, res, next); }
 });
+/* 준비 자리 일괄 점검 — "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에.
+   ★ 읽기 전용 · RAW 미러만(시트 API 0) — 점검표 ①과 같은 함수로 판정한다(사본 0). */
+router.get('/sheetless/slot-sweep', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { since, includeUnknown, limit } = req.query;
+    res.json(await cutover.sweepPreparedRows({
+      since, limit, includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
+    }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
 router.get('/sheetless/checklist', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
