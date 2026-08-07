@@ -25,7 +25,24 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 
 // ── apply 옵션 게이트 ──
 ok('apply: 옵션 등록 캠페인은 선택 필수(allOpts.length 분기)', /const \{ rows: allOpts \}[\s\S]*?WHERE campaign_id = \$1 ORDER BY \(status='closed'\)/.test(routes));
-ok('apply: 전부 마감 시 option_unavailable(NULL 우회 금지)', /reason: 'option_unavailable'/.test(routes) && /!activeOpts\.length/.test(routes));
+// ★ 2026-08-07 우레온 건으로 규칙 정정: 옵션 공고 판정은 **살아있는 옵션 기준**(liveOptions).
+//   관리자가 정리(마감)한 옵션만 남은 공고는 옵션 없는 공고로 참여 허용 —
+//   종전 `option_unavailable` 전면 거부는 잘못 생긴 옵션을 정리하면 공고가 영구 잠기는 원인이었다.
+ok('apply: 옵션 공고 판정 = 살아있는 옵션(liveOptions) — closed-only 는 옵션 없는 공고', /const activeOpts = liveOptions\(allOpts\)/.test(routes) && /if \(activeOpts\.length\) \{/.test(routes));
+ok('apply: closed-only 전면거부(option_unavailable) 부활 금지', (() => {
+  // 주석 제외 후 판정 — 사고 경위 주석에 남은 이름이 가드를 통과/실패시키지 않게
+  const code = routes.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  return !/option_unavailable/.test(code) && !/!activeOpts\.length/.test(code);
+})());
+// ★★ 완화 금지 — soldout/today_done 은 '살아있는 옵션'이라 여전히 차단된다(우회 참여 금지 원칙 유지)
+ok('liveOptions: closed 만 제외(soldout·today_done 은 살아있는 옵션)', (() => {
+  const { liveOptions } = require('../src/services/campaignState.service');
+  const rows = [{ status: 'closed' }, { status: 'active' }];
+  const views = [{ status: 'closed' }, { status: 'soldout' }, { status: 'today_done' }];
+  return liveOptions(rows).length === 1 && liveOptions(views).length === 2
+      && liveOptions([{ status: 'closed' }]).length === 0 && liveOptions(null).length === 0
+      && liveOptions([{}]).length === 1;   // status 미지정 = active
+})());
 ok('apply: 미선택 option_required / 잘못된 옵션 option_invalid', /reason: 'option_required'/.test(routes) && /reason: 'option_invalid'/.test(routes));
 ok('apply: 소진 사유코드 option_soldout/option_today_done', /option_soldout/.test(routes) && /option_today_done/.test(routes));
 ok('apply: 옵션게이트는 캠페인 행 FOR UPDATE 안에서 카운트 재집계', /FOR UPDATE', \[id\]\)[\s\S]*?fetchOptionCounts\(client, id, now\)/.test(routes));
