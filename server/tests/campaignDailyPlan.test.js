@@ -162,6 +162,26 @@ const CNT = (over = {}) => ({
     S.computeCampaignState(CAMP, CNT({ submittedAll: 7, submittedBeforeToday: 7, plans: { [today]: 20 } }), new Date(), sch).dailyQuota, 3);
 }
 {
+  // ★★★ 코드리뷰 Blocker — 조절한 **다음 날**: 축소분이 자동 이월되면 095 가 존재하는 이유가 무너진다.
+  //   (수정 전 실측: 오늘 20→5 축소 + 5명 참여 → 다음날이 시트 20이 아니라 **35** 로 열렸다)
+  //   판정은 어제 조절값을 계획 누적에 반영하는 planDeltaThrough 가 담당한다.
+  const sch = {
+    ok: true, dates: [{ date: d(-1), slots: 20 }, { date: today, slots: 20 }, { date: d(1), slots: 20 }],
+    byDate: { [d(-1)]: 20, [today]: 20, [d(1)]: 20 }, totalSlots: 100, firstDate: d(-1), lastDate: d(1),
+  };
+  const q = (o) => S.computeCampaignState(CAMP, CNT(o), new Date(), sch).dailyQuota;
+  eq('★★ 축소한 다음 날 = 시트 값 그대로(축소분 자동 이월 금지: 어제 5로 줄이고 5명 참여 → 오늘 20)',
+    q({ submittedAll: 5, submittedBeforeToday: 5, plans: { [d(-1)]: 5 } }), 20);
+  eq('★★ 증가한 다음 날도 시트 값 그대로(어제 30으로 늘려 30명 참여 → 오늘 20, 다음날에서 뺏지 않는다)',
+    q({ submittedAll: 30, submittedBeforeToday: 30, plans: { [d(-1)]: 30 } }), 20);
+  eq('★ 조절일의 자연 미달은 살아남는다(어제 5로 줄였는데 3명만 → 오늘 20+2=22)',
+    q({ submittedAll: 3, submittedBeforeToday: 3, plans: { [d(-1)]: 5 } }), 22);
+  eq('조절 없는 흐름은 종전대로 이월(어제 20 중 15명 → 오늘 25)',
+    q({ submittedAll: 15, submittedBeforeToday: 15 }), 25);
+  eq('미래 조절은 오늘 정원에 영향 없음',
+    q({ submittedAll: 20, submittedBeforeToday: 20, plans: { [d(1)]: 99 } }), 20);
+}
+{
   // ★★ 휴무일(시트에 오늘 행 0개)이어도 **명시 조절값(1명 이상)이 있으면 연다** —
   //   "저장했는데 안 열린다"(조용한 no-op) 방지. 0명 조절은 '안 연다'는 뜻이라 휴무 유지.
   const sch = {
@@ -441,6 +461,24 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ 시트 일정 공고는 보류 미적용을 사유로 말한다(조회 실패로 뭉뚱그리지 않는다)',
     /이월 보류 설정이 적용되지 않습니다/.test(modal)
     && /시트 일정 공고에는 이월 보류가 적용되지 않습니다/.test(modal));
+  // ★★ 코드리뷰 #3 — "기본" 판정이 baseFor 단일 출처를 지켜야 한다. defaultDaily 로 비교하면
+  //   ① 시트 15인 날을 20(=daily_limit)으로 올릴 때 조절이 조용히 삭제되고(setPlan)
+  //   ② 시트 30인 날을 22로 줄여도 축소 질문이 안 뜬다(settle).
+  ok('★ setPlan/settle/기본으로/저장확인/눈금선이 baseFor 를 쓴다(defaultDaily 사본 금지)',
+    /if \(v === baseFor\(d\) && S\.base\[d\] == null\) delete S\.plan\[d\];/.test(modal)
+    && /var dl = baseFor\(d\);/.test(modal)
+    && /commitValue\(d2, baseFor\(d2\)\)/.test(modal)
+    && /x\.count === baseFor\(x\.date\)/.test(modal)
+    && /baseFor\(d\) \/ scale \* 100/.test(modal));
+  ok('★ 코드리뷰 #4: 총량·예상 종료일이 시트 총량(scheduleTotal)을 본다',
+    /function totalFor\(\)/.test(modal) && /S\.data\.scheduleTotal/.test(modal)
+    && /var total = totalFor\(\);/.test(modal)
+    && /scheduleTotal:/.test(readS('services/campaignPlan.service.js')));
+  ok('★ 코드리뷰 #5: 카드 "기본" 툴팁이 todayBaseline(시트 공고 = 시트 행 수)을 쓴다',
+    /c\.todayBaseline != null\) \? Number\(c\.todayBaseline\)/.test(cards)
+    && /todayBaseline: st\.todayBaseline/.test(readS('routes/campaign.routes.js')));
+  ok('★ 코드리뷰 #2: savePlans 잔량 재검증도 heldCarry 에 schedule 을 넘긴다(판정 단일 출처)',
+    /heldCarry\(camp, counts, today, sums\.get\(campaignId\) \|\| 0, schedule\)/.test(readS('services/campaignPlan.service.js')));
   ok('킬스위치 안내(저장 잠금)', /CAMPAIGN_DAILY_PLAN=0/.test(modal));
   ok('★ M1: 마감·임시저장 배너 + 차수 추가 토스트("게시를 켜야 모집이 재개")',
     /게시 토글을 켜야/.test(modal) && /게시를 켜야 모집이 재개됩니다/.test(modal));

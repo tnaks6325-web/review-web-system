@@ -8,7 +8,8 @@
  * 시안 = frontend/docs/모집인원조절_이월차수_와이어프레임.html (사용자 확정 3건).
  *
  * ★ 판정(정원 계산) 단일 출처는 campaignState.service 의 dailyQuota — 여기는 조회·저장만.
- * ★ 시트 일정 캠페인(063 파생)은 시트가 진실원본이라 저장을 거부한다(읽기 전용, 확정 ③).
+ * ★ 시트 일정 캠페인(063 파생)도 조절 가능(2026-08-07 사용자 확정 — 종전 읽기 전용 폐기):
+ *   **조절한 날짜만** 시스템 값이 이기고, 조절하지 않은 날은 계속 시트가 정한다.
  * ★ 총량 불변식: 차수가 있는 공고의 recruit_total 은 차수 합계로만 바뀐다(campaign.routes 의
  *   PUT/스코프 편집이 rowsLockRecruitTotal 로 직접 수정을 무시).
  * ★ 쓰기 표면 = campaign_daily_plans / campaign_rounds / campaign_plan_events /
@@ -23,7 +24,12 @@ const MAX_PLAN_ENTRIES = 120;   // 한 번에 저장 가능한 날짜 수(오붙
 const MAX_DAY_COUNT = 9999;     // 하루 인원 상식 상한
 const MAX_ROUND_COUNT = 100000; // 차수 건수 상식 상한
 
-/** 시트 일정(063)이 이 캠페인의 정원을 이끄는지 — 이끌면 화면 조절은 읽기 전용(확정 ③). */
+/**
+ * 시트 일정(063)이 이 캠페인의 **기본 정원**을 이끄는지(조절하지 않은 날의 기준선).
+ * 소비처 = ① 화면 기준선·총량 표시 ② 오늘 하한 검사의 remove 예외 ③ 보류 잔량 미적용 판정.
+ * ★ 판정 실패는 `schedule_unknown` 을 던지되 **호출부가 삼켜 '모름'으로 다룬다** — 조절은 저장한
+ *   날짜에 그대로 적용되므로 잠글 근거가 없다(잠그면 조절할 방법이 없는 막다른 길만 남는다).
+ */
 async function _scheduleFor(camp) {
   try {
     const { deriveSchedules, scheduleFor, tabsOfCampaigns } = require('./campaignSchedule.service');
@@ -32,8 +38,6 @@ async function _scheduleFor(camp) {
     const { isUsableSchedule } = require('./campaignState.service');
     return isUsableSchedule(sch) ? sch : null;
   } catch (e) {
-    // 일정 판정 실패 = 일정 없음으로 취급하지 않고 "모름"을 올린다 — 모르면 조절을 열지 않는
-    // 쪽이 안전(시트 일정 캠페인에 조절을 저장하면 적용도 안 되는 값이 쌓여 화면만 어긋난다).
     logger.warn('[campaignPlan] 시트 일정 판정 실패: ' + e.message);
     const err = new Error('시트 일정 판정에 실패했습니다 — 잠시 후 다시 시도해주세요.');
     err.code = 'schedule_unknown';
@@ -124,6 +128,10 @@ async function getPlanOverview(campaignId) {
     status: camp.status,
     defaultDaily: Number(camp.daily_limit) || 0,
     recruitTotal: Number(camp.recruit_total) || 0,
+    // ★ 시트 일정 공고의 **실제 총량은 시트 행 수**(computeCampaignState 가 sch.totalSlots 로 판정) —
+    //   화면이 recruit_total 을 총량으로 쓰면 서버 판정과 다른 숫자를 보여주고 예상 종료일도 어긋난다.
+    scheduleTotal: (schedule && schedule !== 'unknown') ? (Number(schedule.totalSlots) || 0) : null,
+    scheduleLastDate: (schedule && schedule !== 'unknown') ? (schedule.lastDate || null) : null,
     startDate: dateOnlyStr(camp.start_date),
     today,
     planEnabled: process.env.CAMPAIGN_DAILY_PLAN !== '0',
@@ -131,7 +139,8 @@ async function getPlanOverview(campaignId) {
     carryMode: isCarryHold(camp) ? 'hold' : 'auto',
     carryHeld,
     carryAppliedSum,
-    // 시트 일정 캠페인 = 읽기 전용(확정 ③). 'unknown' = 판정 실패(조절 잠금 + 사유 표시).
+    // 시트 일정 캠페인 = 조절하지 않은 날의 기준선을 시트가 정함(조절 자체는 가능).
+    //   null = 판정 실패 → 화면이 "기본 표시가 부정확할 수 있음"만 고지하고 잠그지는 않는다.
     scheduleDriven: schedule === 'unknown' ? null : !!schedule,
     scheduleDates: (schedule && schedule !== 'unknown')
       ? schedule.dates.map(d => ({ date: d.date, slots: d.slots })) : null,
@@ -250,7 +259,10 @@ async function savePlans(campaignId, body, actor) {
       try {
         const counts = (await fetchCampaignCounts(client, [campaignId])).get(campaignId);
         const sums = await fetchCarryAppliedSums(client, [campaignId]);
-        if (sums !== null) held = heldCarry(camp, counts, today, sums.get(campaignId) || 0);
+        // ★ 판정 단일 출처 — 표시(getPlanOverview)·목록 칩과 **같은 인자**로 부른다.
+        //   일정을 안 넘기면 시트 일정 공고에서 표시는 null 인데 게이트는 양수를 봐, 개념이 없는
+        //   공고에 carry_apply 원장 행이 영구히 남는다(나중에 일건수 경로로 떨어지면 잔량이 조용히 깎인다).
+        if (sums !== null) held = heldCarry(camp, counts, today, sums.get(campaignId) || 0, schedule);
         if (sp) await client.query('RELEASE SAVEPOINT cap_check');
       } catch (_) {
         if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT cap_check'); } catch (_) {} }

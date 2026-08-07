@@ -84,9 +84,15 @@
     var sd = S.data.startDate;
     return (sd && sd > S.data.today) ? sd : S.data.today;
   }
+  /** 이 공고의 총량 — 시트 일정 공고는 **시트 행 수**가 실제 총량이다(서버 판정과 같은 값).
+   *  recruit_total 을 쓰면 화면 숫자가 서버와 갈리고 예상 종료일도 어긋난다(코드리뷰 #4). */
+  function totalFor() {
+    if (S.data.scheduleDriven === true && S.data.scheduleTotal != null) return Number(S.data.scheduleTotal) || 0;
+    return Number(S.data.recruitTotal) || 0;
+  }
   /** 예상 종료일: 기준일부터 계획값대로 채운다고 가정(최대 400일 탐색). 무제한이면 null */
   function endDate() {
-    var total = S.data.recruitTotal || 0;
+    var total = totalFor();
     if (total <= 0) return null;
     var todaySub = S.data.byDateSubmitted[S.data.today] || 0;
     var remain = total - Math.max(0, (S.data.submittedAll || 0) - todaySub);
@@ -276,7 +282,8 @@
       schNote = '<div class="cdp-note">📄 이 공고의 날짜별 <b>기본 정원은 시트의 구매일자 컬럼</b>에서 읽어옵니다'
         + (head ? ' — 앞으로: ' + head + (up.length > 6 ? ' 외 ' + (up.length - 6) + '일' : '') : '')
         + '. <b>여기서 조절한 날짜만 시스템 값이 우선</b>하고, 조절하지 않은 날은 계속 시트를 따릅니다'
-        + '([기본으로]를 누르면 그 날은 다시 시트 값으로 돌아갑니다).</div>';
+        + '([기본으로]를 누르면 그 날은 다시 시트 값으로 돌아갑니다). '
+        + '<b>총량(차수)은 시트 행 수가 기준</b>이라 아래 차수 등록은 이 공고의 정원에 영향을 주지 않습니다.</div>';
     } else if (j.scheduleDriven === null) {
       // 판정 실패 = 잠그지 않는다(조절은 어느 쪽이든 저장한 날짜에 그대로 적용된다) — 다만
       // 아래 "기본" 표시가 실제와 다를 수 있다는 사실을 말한다(조용한 오표시 금지).
@@ -293,7 +300,7 @@
       var conf = isToday ? (j.todayUsed || 0) : 0;
       var pw = Math.min(100, scale ? (v / scale * 100) : 0);
       var cw = Math.min(100, scale ? (conf / scale * 100) : 0);
-      var bw = Math.min(100, scale ? ((j.defaultDaily || 0) / scale * 100) : 0);
+      var bw = Math.min(100, scale ? (baseFor(d) / scale * 100) : 0);   // "기본" 눈금선도 그날 기준선
       return '<div class="cdp-row' + (isToday ? ' today' : '') + '">'
         + '<span class="cdp-d">' + _esc(fmtMD(d))
         + (isToday ? '<span class="cdp-tag tdy">오늘</span>' : '')
@@ -312,7 +319,7 @@
     }).join('');
 
     var e = endDate();
-    var endTxt = (j.recruitTotal || 0) <= 0 ? '무제한(총모집 미설정)' : (e ? fmtMD(e) : '계산 불가');
+    var endTxt = totalFor() <= 0 ? '무제한(총모집 미설정)' : (e ? fmtMD(e) : '계산 불가');
     if (S.baseEnd === null) S.baseEnd = endTxt;
 
     var roundsHtml = (j.rounds || []).map(function (r, i) {
@@ -365,7 +372,9 @@
         : '')
       + '<div class="cdp-sub"><span>날짜별 모집 계획 — 게이지 드래그 또는 −/＋</span>'
       + '<span>' + (j.scheduleDriven === true ? '기본 <b>시트 구매일자 기준</b>' : '기본 일건수 <b>' + (j.defaultDaily || 0) + '명</b>')
-      + ' · 총량 <b>' + ((j.recruitTotal || 0) > 0 ? j.recruitTotal + '명' : '무제한') + '</b> · 확정 <b>' + (j.submittedAll || 0) + '명</b></span></div>'
+      + ' · 총량 <b>' + (totalFor() > 0 ? totalFor() + '명' : '무제한') + '</b>'
+      + (j.scheduleDriven === true ? '<small>(시트 행 수)</small>' : '')
+      + ' · 확정 <b>' + (j.submittedAll || 0) + '명</b></span></div>'
       + '<div id="cdpRows">' + rows + '</div>'
       + '<div class="cdp-end"><span>예상 종료일: <b>' + _esc(endTxt) + '</b> '
       + (endTxt !== S.baseEnd ? '<span class="chg">(원래 ' + _esc(S.baseEnd) + ' → 변경됨)</span>' : '') + '</span>'
@@ -442,7 +451,10 @@
     scheduleSettle(d);
   }
   function setPlan(d, v) {
-    if (v === (S.data.defaultDaily || 0) && S.base[d] == null) delete S.plan[d];  // 기본값 복귀 = 조절 없음
+    // ★ "기본값 복귀 = 조절 없음" 판정도 baseFor 단일 출처를 써야 한다 — defaultDaily 로 비교하면
+    //   시트 15명인 날을 의도적으로 20(= daily_limit)으로 올렸을 때 **조절이 조용히 삭제**되어
+    //   드래그가 되돌아가고 저장해도 아무 일이 안 일어난다(코드리뷰 #3).
+    if (v === baseFor(d) && S.base[d] == null) delete S.plan[d];
     else S.plan[d] = v;
   }
   function scheduleSettle(d) {
@@ -456,7 +468,9 @@
     if (!s) return;
     delete S.sessions[d];
     var start = s.start, fin = planFor(d);
-    var dl = S.data.defaultDaily || 0;
+    // ★ 그날의 "평소 인원" — 시트 일정 공고는 시트 행 수가 기준이다(defaultDaily 로 비교하면
+    //   시트 30인 날을 22로 줄여도 22 < 20 이 거짓이라 「빠진 인원 처리」 질문이 아예 안 뜬다).
+    var dl = baseFor(d);
     if (fin === start) return;
     if (fin < start && fin < dl) {
       // 축소 → 처리 방식 선택(한 묶음당 한 번). 분산 범위 = 축소 전 종료일까지(시안 실측 규칙).
@@ -468,8 +482,8 @@
       var untilN = prevEnd ? Math.max(0, Math.round((Date.parse(prevEnd) - Date.parse(d)) / 86400000)) : 0;
       S.choice = { date: d, prev: start, next: fin, missing: missing, until: prevEnd, untilN: untilN };
       document.getElementById('cdpChTitle').textContent = fmtMD(d) + ' 인원을 ' + fin + '명으로 줄였습니다 — 빠진 ' + missing + '명은 어떻게 할까요?';
-      document.getElementById('cdpChDesc').textContent = '총량 ' + ((S.data.recruitTotal || 0) > 0 ? S.data.recruitTotal + '명' : '') + '은 그대로 지켜집니다 — 빠진 인원을 언제 모집할지만 고릅니다.';
-      document.getElementById('cdpChExtendDesc').textContent = '이후 날들은 계획 그대로(기본 ' + dl + '명) 진행하고, 종료일이 뒤로 밀립니다.';
+      document.getElementById('cdpChDesc').textContent = '총량 ' + (totalFor() > 0 ? totalFor() + '명' : '') + '은 그대로 지켜집니다 — 빠진 인원을 언제 모집할지만 고릅니다.';
+      document.getElementById('cdpChExtendDesc').textContent = '이후 날들은 계획 그대로(그날 기본 인원) 진행하고, 종료일이 뒤로 밀립니다.';
       var sp = document.getElementById('cdpChSpread');
       if (untilN > 110) {
         // 서버 저장 상한(한 번에 120일)을 분산이 넘기면 통째로 거부된다 — 미리 잠근다(코드리뷰 m6)
@@ -668,9 +682,9 @@
       var rs = ev.target.closest('.cdp-reset');
       if (rs) {
         var d2 = dates[Number(rs.dataset.i)];
-        commitValue(d2, S.data.defaultDaily || 0);
+        commitValue(d2, baseFor(d2));   // 그날 기준선(시트 공고 = 시트 행 수)으로 되돌린다
         // "기본으로" = 조절 해제 의도 — 값이 기본과 같아도 base 에 있으면 remove 로 저장된다
-        if (S.plan[d2] === (S.data.defaultDaily || 0) && S.base[d2] != null) { delete S.plan[d2]; render(); }
+        if (S.plan[d2] === baseFor(d2) && S.base[d2] != null) { delete S.plan[d2]; render(); }
       }
     });
   }
@@ -693,15 +707,15 @@
   /* ── 저장 ───────────────────────────────────────────────── */
   async function _save() {
     if (!S || !S.data || S.saving) return;
-    var dl = S.data.defaultDaily || 0;
     var set = [], remove = [];
     dirtyDates().forEach(function (d) {
       if (S.plan[d] != null) set.push({ date: d, count: S.plan[d] });
       else remove.push(d);
     });
     if (!set.length && !remove.length) return;
-    var lines = set.map(function (x) { return '· ' + fmtMD(x.date) + ' → ' + x.count + '명' + (x.count === dl ? ' (기본과 동일)' : ''); })
-      .concat(remove.map(function (d) { return '· ' + fmtMD(d) + ' → 기본(' + dl + '명)으로 해제'; }));
+    // ★ "기본"은 날짜마다 다를 수 있다(시트 일정 공고 = 그날 시트 행 수) — 한 값으로 적으면 거짓말
+    var lines = set.map(function (x) { return '· ' + fmtMD(x.date) + ' → ' + x.count + '명' + (x.count === baseFor(x.date) ? ' (기본과 동일)' : ''); })
+      .concat(remove.map(function (d) { return '· ' + fmtMD(d) + ' → 기본(' + baseFor(d) + '명)으로 해제'; }));
     if (!window.confirm('아래 조절을 저장할까요?\n\n' + lines.join('\n') + '\n\n총량은 변하지 않습니다.')) return;
     S.saving = true;
     document.getElementById('cdpSaveBtn').disabled = true;

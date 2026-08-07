@@ -110,6 +110,26 @@ function planOverrideFor(plans, dateStr) {
   if (!PLAN_ENABLED || !plans || !dateStr || plans[dateStr] == null) return null;
   return Math.max(0, Number(plans[dateStr]) || 0);
 }
+
+/**
+ * 시트 일정(063) 경로의 **조절 증감분 누적** — 오늘까지의 조절일들이 시트 계획과 얼마나 달랐는지의 합.
+ * ★★ 이 항이 없으면 095 의 핵심 불변식이 깨진다(코드리뷰가 잡은 실측 회귀): `plannedThrough` 는
+ *   시트 값 그대로 누적되는데 확정만 적으니, "오늘은 5명만"으로 줄인 15명이 **다음 날 자동 이월**
+ *   되어(시트 20 → 35) 축소가 통째로 무력화된다. 반대로 늘린 날은 다음 날에서 그만큼 빼앗는다.
+ *   일건수 경로의 `planned += ov − dl`(dailyQuota)과 같은 항을 **시트 계획을 기준선으로** 계산한 것.
+ * ★ 미래 조절(d > 오늘)은 오늘 정원에 영향을 주지 않는다(일건수 경로와 같은 규칙).
+ */
+function planDeltaThrough(sch, plans, todayStr) {
+  if (!PLAN_ENABLED || !sch || !plans || !todayStr) return 0;
+  let delta = 0;
+  for (const d of Object.keys(plans)) {
+    if (d > todayStr) continue;
+    const ov = planOverrideFor(plans, d);
+    if (ov === null) continue;
+    delta += ov - (Number(sch.byDate && sch.byDate[d]) || 0);
+  }
+  return delta;
+}
 // ── 이월 보류(098) ──
 // carry_mode='hold' 공고는 자동 이월 가산을 멈추고(기본 일건수 + 날짜별 계획만),
 // 미달분은 "보류 잔량"으로 표시되어 관리자가 골라 반영한다(반영 = 날짜별 계획에 얹기).
@@ -222,7 +242,10 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
         // 명시 조절일 = 그 값이 그날의 전부(095 규율 — 이월을 얹지도 빼지도 않는다).
         //   ★ 총량 clamp 는 유지: 시트 총건수를 넘겨 열 수는 없다(095 불변식 ②).
         ? Math.max(0, Math.min(ovToday, (Number(sch.totalSlots) || 0) - submittedBefore))
-        : Math.max(0, Math.min(plannedThrough(sch, todayStr), sch.totalSlots) - submittedBefore))
+        // ★★ 조절 증감분(planDeltaThrough)을 계획 누적에 반영해야 "오늘은 5명만"의 축소분이
+        //   다음 날 자동 이월되지 않는다(095 불변식 — 없으면 시트 20인 다음 날이 35로 열린다).
+        : Math.max(0, Math.min(plannedThrough(sch, todayStr) + planDeltaThrough(sch, counts.plans || null, todayStr),
+            sch.totalSlots) - submittedBefore))
     : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr },
         { today: todayStr, plans: counts.plans || null });
   const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
@@ -238,9 +261,14 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     // 이 값이 없으면 "일건수를 20으로 설정했는데 25로 보인다"가 버그로 오해된다.
     // ★ 095: 명시 조절일은 이월이 아니라 "계획 자체"라 carryAdded=0 — 대신 todayPlanned로 말한다
     //   (조절 50을 "+10 이월"로 표기하면 관리자가 이월 사고로 오해).
-    carryAdded: ovToday !== null ? 0 : Math.max(0, quota - (Number(c.daily_limit) || 0)),
+    // ★ 기준선은 그 공고의 "평소 그날 인원" — 시트 일정 공고는 **시트의 그날 행 수**이지
+    //   daily_limit 이 아니다(둘은 아무 관계가 없어 근거 없는 "+15 이월" 칩이 뜬다).
+    carryAdded: ovToday !== null ? 0
+      : Math.max(0, quota - (sch ? (Number(sch.byDate[todayStr]) || 0) : (Number(c.daily_limit) || 0))),
     todayPlanned: ovToday,                 // 오늘의 명시 조절값(없으면 null)
     planAdjusted: ovToday !== null,        // 카드 "조절됨" 표시 재료(관리자 전용 소비)
+    // 카드가 "기본 N" 을 시트 기준으로 말할 수 있게 그날 시트 계획을 함께 싣는다(시트 공고만).
+    todayBaseline: sch ? (Number(sch.byDate[todayStr]) || 0) : (Number(c.daily_limit) || 0),
     opensAt: opensAt ? opensAt.toISOString() : null,
     closesAt: closesAt ? closesAt.toISOString() : null,
     cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,

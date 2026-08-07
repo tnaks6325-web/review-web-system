@@ -183,7 +183,7 @@
                 <button type="button" id="rf_carry_hold" onclick="rfCarrySet('hold')" style="border:0;background:var(--card,#fff);color:var(--t3,#64748B);padding:6px 13px;font-size:.72rem;font-weight:700;cursor:pointer">보류 후 수동 반영</button>
               </div>
               <div style="font-size:.64rem;color:var(--t3,#94A3B8);margin-top:4px">자동 = 미달분이 다음날 정원에 자동으로 얹힙니다 · 보류 = 쌓아두고 카드 ⏸ 칩·[📅 인원]에서 골라 반영</div>
-              <div id="rf_carry_hold_note" style="display:none;margin-top:5px;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:7px 10px;font-size:.68rem;color:#5B21B6">⏸ 보류로 저장하면 자동 이월이 멈추고, 이미 자동 이월로 늘어나 있던 오늘 정원은 기본 일건수로 돌아가며 그만큼 보류로 이동합니다. 반영하지 않아도 물량은 사라지지 않습니다(총량까지 계속 모집 · 종료일만 뒤로).</div>
+              <div id="rf_carry_hold_note" style="display:none;margin-top:5px;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:7px 10px;font-size:.68rem;color:#5B21B6">⏸ 보류로 저장하면 자동 이월이 멈추고, 이미 자동 이월로 늘어나 있던 오늘 정원은 기본 일건수로 돌아가며 그만큼 보류로 이동합니다. 반영하지 않아도 물량은 사라지지 않습니다(총량까지 계속 모집 · 종료일만 뒤로).<br>※ 연결 탭의 구매일자로 일정이 잡히는 공고(시트 일정)는 정원을 시트가 정하므로 이 설정이 적용되지 않습니다 — 그때는 [📅 인원]에서 날짜별로 조절하세요.</div>
             </div>
           </div>
           <!-- 타계정 허용 / 현금영수증 — 색 박스 대신 같은 문법의 필드행(v2 통일) -->

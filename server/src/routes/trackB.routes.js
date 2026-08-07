@@ -1184,6 +1184,8 @@ function _cdpNotReady(res, err) {
 function _cdpFail(res, err) {
   // 서비스가 code 를 실은 검증/게이트 오류는 400대로 — errorHandler 마스킹(500 위장) 방지.
   const codes = {
+    // schedule_driven·schedule_unknown 은 시트 일정 공고 조절 허용(2026-08-07) 이후 savePlans 에서
+    // 던지지 않는다 — 매핑만 남겨 둔다(다른 경로가 되살릴 때 500 위장되지 않게).
     not_found: 404, not_participation: 400, schedule_driven: 409, schedule_unknown: 503,
     empty: 400, too_many: 400, bad_date: 400, past_date: 400, bad_count: 400, dup_date: 400,
     below_used: 422, no_round: 400, below_confirmed: 422,

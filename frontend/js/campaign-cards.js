@@ -66,7 +66,8 @@
     if (c.stateReason === 'schedule_ended') return { label: '일정 종료', desc: '시트 일정의 마지막 날짜가 지났습니다 — [📅 인원]에서 오늘 인원을 정하면 다시 열립니다' };
     if (c.state === 'soft_full') return { label: '총원 충족', desc: '총 모집 인원을 모두 채웠습니다' };
     if (c.state === 'closed') return { label: '모집 종료', desc: '마감된 공고입니다' };
-    if (c.planAdjusted === true) return { label: '오늘 0명', desc: '오늘 인원이 0명으로 조절되어 있습니다 — [📅 인원]에서 변경' };
+    // ★ 조절 칩(pg-plan)이 같은 줄에서 이미 "조절"을 말하므로 라벨은 결과만 짧게 말한다
+    if (c.planAdjusted === true) return { label: '오늘 0명', desc: '오늘은 모집하지 않도록 조절되어 있습니다 — [📅 인원]에서 변경' };
     return { label: '오늘 정원 0', desc: '오늘 배정된 인원이 없습니다 — [📅 인원]에서 조절' };
   }
 
@@ -551,8 +552,11 @@
         : '';
       // ★ 095: 오늘이 명시 조절일이면 "이월"이 아니라 "조절"로 말한다 — 안 보이면
       //   "일건수 40인데 왜 20으로 뜨지"가 버그로 오해된다(서버가 조절일엔 carryAdded=0).
+      // ★ "기본"은 그 공고의 평소 그날 인원 — 시트 일정 공고는 시트 행 수(todayBaseline)이지
+      //   daily_limit 이 아니다(둘은 무관해서 툴팁이 거짓말이 된다).
+      const baseN = (c.todayBaseline != null) ? Number(c.todayBaseline) : (Number(c.daily_limit) || 0);
       const planTip = (showChips && c.planAdjusted === true)
-        ? `<span class="pg-plan" title="오늘 모집 인원이 ${Number(c.todayPlanned) || 0}명으로 조절되어 있습니다(기본 ${Number(c.daily_limit) || 0}명) — [📅 인원]에서 변경">조절</span>`
+        ? `<span class="pg-plan" title="오늘 모집 인원이 ${Number(c.todayPlanned) || 0}명으로 조절되어 있습니다(기본 ${baseN}명) — [📅 인원]에서 변경">조절</span>`
         : '';
       // ★ 098: 이월 보류 칩 — 누르면 원클릭 반영 확인창(모듈 있을 때만 클릭 가능).
       //   carryHeld null = 계산 불가 → 칩 미표시(0으로 위장 금지 — 시안 확정).
@@ -817,7 +821,7 @@
           <button type="button" id="cae_carry_auto" onclick="CampCards._caeCarry('auto')" style="border:0;background:#2563EB;color:#fff;padding:6px 12px;font-size:.72rem;font-weight:700;cursor:pointer">자동 반영 (기본)</button>
           <button type="button" id="cae_carry_hold" onclick="CampCards._caeCarry('hold')" style="border:0;background:#fff;color:#64748B;padding:6px 12px;font-size:.72rem;font-weight:700;cursor:pointer">보류 후 수동 반영</button>
         </div>
-        <div id="cae_carry_note" class="cae-note" style="display:none;color:#5B21B6">⏸ 보류 = 미달분을 자동으로 얹지 않고 쌓아둡니다. 보류분 반영은 관리자 화면(카드 ⏸ 칩·[📅 인원])에서만 가능합니다 — 물량은 사라지지 않습니다(총량까지 계속 모집).</div>
+        <div id="cae_carry_note" class="cae-note" style="display:none;color:#5B21B6">⏸ 보류 = 미달분을 자동으로 얹지 않고 쌓아둡니다. 보류분 반영은 관리자 화면(카드 ⏸ 칩·[📅 인원])에서만 가능합니다 — 물량은 사라지지 않습니다(총량까지 계속 모집). ※ 시트 일정 공고는 정원을 시트가 정해 이 설정이 적용되지 않습니다.</div>
         <label class="cae-lb">랜딩(상품) URL</label>
         <div style="display:flex;gap:6px">
           <input id="cae_landing" class="cae-in" type="text" style="flex:1;min-width:0" placeholder="https://">
