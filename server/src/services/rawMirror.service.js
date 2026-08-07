@@ -22,6 +22,7 @@ const { computeChecksum } = require('../utils/checksum');
 const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
+const { fullySheetlessSheetIds } = require('../utils/sheetlessScope');
 
 // 시스템 탭 키워드 — 제외하지 않고 is_system_tab 플래그만 부여
 const SYSTEM_TAB_KEYWORDS = [
@@ -81,6 +82,17 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
   );
   let sheetIds = [...new Set(idRows.map(r => r.sheet_id))].filter(Boolean);
   const totalRegistered = sheetIds.length;
+
+  // ★★ 무시트 작업 제외(탈 구글시트 W1) — 등록 탭이 전부 무시트인 시트는 구글에 존재하지 않거나
+  //   더는 읽을 이유가 없다. 안 걸러내면 **매 사이클 404 반복**(오류 로그·재시도 낭비).
+  //   판정은 `sheetlessScope` 단일 출처이고 조회 실패는 빈 집합(fail-open = 종전 동작).
+  const _slSheets = await fullySheetlessSheetIds(pool);
+  let sheetlessSkipped = 0;
+  if (_slSheets.size) {
+    const before = sheetIds.length;
+    sheetIds = sheetIds.filter(id => !_slSheets.has(id));
+    sheetlessSkipped = before - sheetIds.length;
+  }
 
   // ── (A) 비활성 시트 완화: relax 사이클에는 "최근 주문 있는 활성 시트"만 미러. ──
   const cycle = ++_mirrorCycleCount;
@@ -156,6 +168,7 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
     totalRegistered,
     deferredInactive,           // (A) 이번 사이클에 비활성으로 건너뛴 시트 수(다음 INACTIVE_EVERY 사이클에 미러)
     relaxCycle: relaxThisCycle,
+    sheetlessSkipped,           // 무시트 작업으로 제외한 시트 수(W1) — 0 이면 종전과 동일
     sheetsSkipped,
     sheetsDeferred,
     tabsMirrored,
