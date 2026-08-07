@@ -118,7 +118,10 @@
   let _busy = false;
   let _incUnknown = false;   // 연도 미상 작업 포함 여부(버튼으로 토글 — 기본은 숨김)
 
+  let _incIgnored = false;   // 제외한 작업 포함 여부(버튼 토글)
+
   function toggleUnknown() { _incUnknown = !_incUnknown; runAudit(); }
+  function toggleIgnored() { _incIgnored = !_incIgnored; runAudit(); }
 
   function tok() { return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || ''; }
   function hdrs() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok() }; }
@@ -159,6 +162,7 @@
       const since = document.getElementById('sinceDate').value;
       if (since) qs.push('since=' + encodeURIComponent(since));
       if (_incUnknown) qs.push('includeUnknown=1');
+      if (_incIgnored) qs.push('includeIgnored=1');
       if (document.getElementById('incArchived').checked) qs.push('includeArchived=1');
       const q = qs.length ? ('?' + qs.join('&')) : '';
       const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/audit' + q, { headers: hdrs() });
@@ -191,9 +195,16 @@
       + (meta.filteredOld ? '<span style="color:var(--t2)">' + esc(meta.since || '') + ' 이전 활동 <b>' + meta.filteredOld + '</b>건 숨김</span>' : '')
       + (meta.yearUnknown ? (meta.filteredOld ? ' · ' : '')
           + '<span style="color:var(--warn)">연도 미상 <b>' + meta.yearUnknown + '</b>건</span>'
-          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">보기</button>' : '')
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">보기</button>'
+          + ' <button class="btn ghost" style="padding:3px 9px" id="btnProbe" onclick="yearProbe()"'
+          + ' title="시트 셀에 실제로 들어 있는 날짜값(화면엔 7/12로만 보여도 안에는 2024.7.12)을 읽어 연도를 확정합니다">📅 시트에서 연도 확인</button>' : '')
       + (meta.includeUnknown ? '<span style="color:var(--warn)">연도 미상 작업 포함해서 보는 중</span>'
           + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">숨기기</button>' : '')
+      + (meta.ignoredCount ? ((meta.filteredOld || meta.yearUnknown) ? ' · ' : '')
+          + '<span style="color:var(--t2)">제외한 작업 <b>' + meta.ignoredCount + '</b>건</span>'
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleIgnored()">제외된 작업 보기</button>' : '')
+      + (meta.includeIgnored ? '<span style="color:var(--t2)">제외한 작업 포함해서 보는 중(데이터는 그대로입니다)</span>'
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleIgnored()">숨기기</button>' : '')
       + '</div>'
       + '<div style="margin-top:6px; color:var(--t2); font-size:12px">'
       + '‘검색인덱스’ = 리뷰어가 이름·전화로 자기 작업을 찾고 구매양식을 내는 재료입니다. '
@@ -204,7 +215,7 @@
     const tb = document.getElementById('tbody');
     if (!ITEMS.length) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">해당 조건의 작업이 없습니다.</td></tr>'; return; }
     tb.innerHTML = ITEMS.map((it, i) =>
-      '<tr id="row' + i + '">'
+      '<tr id="row' + i + '"' + (it.ignored ? ' style="opacity:.5"' : '') + '>'
       + '<td>' + sevTag(it.severity) + '</td>'
       // 작업명 = 그 탭이 바로 열리는 구글시트 링크(gid 확보 시). gid 없으면 시트만 열리고 그 사실을 밝힌다.
       + '<td>' + tabLink(it)
@@ -237,13 +248,40 @@
 
   function rowActions(it, i) {
     const btns = [];
+    if (it.ignored) {
+      btns.push('<button class="btn ghost" id="ign' + i + '" onclick="toggleIgnore(' + i + ')">↩ 목록 복원</button>');
+      return btns.join(' ');
+    }
     if (it.flags && it.flags.indexOf('index_archived') >= 0) {
       btns.push('<button class="btn warn" id="unarc' + i + '" onclick="unarchiveOne(' + i + ')">📦 복구+반영</button>');
     }
     if (it.severity !== 'ok') {
       btns.push('<button class="btn" id="fix' + i + '" onclick="repairOne(' + i + ')">반영</button>');
     }
+    // 복구할 필요 없는 작업 치우기 — 데이터는 지우지 않고 목록에서만 감춘다(되돌리기 가능)
+    btns.push('<button class="btn ghost" id="ign' + i + '" onclick="toggleIgnore(' + i + ')"'
+      + ' title="이 작업을 목록에서 제외합니다(데이터는 지워지지 않고, 언제든 되돌릴 수 있습니다)">✕ 제외</button>');
     return btns.join(' ');
+  }
+
+  // 목록에서 제외/복원 — ★ 데이터 삭제가 아니다(화면 목록에서만 감춘다)
+  async function toggleIgnore(i) {
+    const it = ITEMS[i]; if (!it) return;
+    const btn = document.getElementById('ign' + i);
+    if (!it.ignored && !confirm((it.displayName || it.tabName) + '\n\n이 작업을 점검 목록에서 제외합니다.\n'
+      + '· 시트·검색인덱스·작업보드 데이터는 **지워지지 않습니다**\n'
+      + '· 언제든 [제외된 작업 보기]에서 되돌릴 수 있습니다\n\n진행할까요?')) return;
+    if (btn) { btn.disabled = true; btn.textContent = '처리 중…'; }
+    try {
+      const out = await postJson('/api/trackb/sheet-sync/ignore',
+        { sheetId: it.sheetId, tabName: it.tabName, ignored: !it.ignored });
+      if (!out || out.ok === false) { toast('처리 실패: ' + ((out && out.error) || '오류'), true); if (btn) btn.disabled = false; return; }
+      toast(it.ignored ? '목록에 복원했습니다' : '목록에서 제외했습니다(데이터는 그대로)');
+      await runAudit();
+    } catch (e) {
+      toast('처리 실패: ' + e.message, true);
+      if (btn) { btn.disabled = false; btn.textContent = it.ignored ? '↩ 목록 복원' : '✕ 제외'; }
+    }
   }
 
   // 아카이브 복구 → 곧바로 반영까지(=작업보드에 다시 나타나는 상태로 끝낸다)
@@ -274,6 +312,31 @@
       if (res) res.textContent = '복구 실패: ' + e.message;
       if (btn) { btn.disabled = false; btn.textContent = '📦 복구+반영'; }
     }
+  }
+
+  // 시트 셀의 실제 날짜값을 읽어 연도를 확정 — 시트 API 를 쓰므로 사람이 누를 때만 돈다.
+  const PROBE_REASON = {
+    no_mirror: '시트 사본 없음', header_unrecognizable: '헤더 줄 인식 실패',
+    no_date_column: '구매일자 열 없음', no_dated_cell: '날짜값이 아니라 글자로 입력됨(연도 확인 불가)',
+    read_error: '시트 읽기 실패',
+  };
+  async function yearProbe() {
+    const btn = document.getElementById('btnProbe');
+    if (btn) { btn.disabled = true; btn.textContent = '시트 읽는 중…'; }
+    try {
+      const out = await postJson('/api/trackb/sheet-sync/year-probe', {});
+      if (!out || out.ok === false) { toast('연도 확인 실패', true); return; }
+      const why = {};
+      (out.failed || []).forEach(f => { why[f.reason] = (why[f.reason] || 0) + 1; });
+      const whyTxt = Object.keys(why).map(k => (PROBE_REASON[k] || k) + ' ' + why[k] + '건').join(' · ');
+      toast('연도 확인: ' + out.resolved + '개 확정'
+        + (out.failedCount ? ' · ' + out.failedCount + '개 확인 불가' : '')
+        + (out.capped ? ' · 남은 탭은 다시 눌러주세요' : ''));
+      if (whyTxt) console.info('[연도 확인] 확인 불가 사유 — ' + whyTxt);
+      await runAudit();
+    } catch (e) {
+      toast('연도 확인 실패: ' + e.message, true);
+    } finally { if (btn) { btn.disabled = false; btn.textContent = '📅 시트에서 연도 확인'; } }
   }
 
   async function gidBackfill() {

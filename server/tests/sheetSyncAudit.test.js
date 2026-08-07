@@ -191,11 +191,17 @@ t('★ 수리는 신규 쓰기 경로 0 — repairSheetSync 안에 직접 SQL �
   ['mirrorOneSheet', 'buildOneSheet', 'projectTab', 'compareWithIndex'].forEach(fn =>
     assert.ok(src.includes(fn), fn + ' 호출이 없다'));
 });
-t('★★ 이 서비스의 쓰기 표면은 `tab_configs.tab_gid` 한 칸뿐 · 비어 있을 때만', () => {
+t('★★ 이 서비스의 쓰기 표면은 둘뿐 — `tab_configs.tab_gid`(빈 칸만) · `app_settings` 캐시 키', () => {
   const src = R('src/services/sheetSyncAudit.service.js');
   const writes = src.match(/\b(INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET[^\n]*|DELETE\s+FROM\s+\w+)/gi) || [];
-  assert.strictEqual(writes.length, 1, '쓰기 SQL 이 늘었다: ' + JSON.stringify(writes));
+  assert.strictEqual(writes.length, 3, '쓰기 SQL 이 늘었다: ' + JSON.stringify(writes));
   assert.ok(/UPDATE tab_configs SET tab_gid/i.test(writes[0]), '예상 밖 쓰기: ' + writes[0]);
+  // 나머지 둘은 app_settings 키(연도 확인 캐시 · 목록 제외) — 설정·캐시 저장소지 운영 테이블이 아니다.
+  assert.ok(writes.slice(1).every(w => /INSERT INTO app_settings/i.test(w)),
+    '예상 밖 쓰기: ' + JSON.stringify(writes.slice(1)));
+  ['review_index', 'campaign_participants', 'order_submissions', 'index_master', 'raw_sheet_rows']
+    .forEach(tb => assert.ok(!new RegExp(`(INSERT INTO|UPDATE|DELETE FROM)\\s+${tb}\\b`, 'i').test(src),
+      '운영 테이블에 쓰고 있다: ' + tb));
   const i = src.indexOf('async function backfillTabGids(');
   const body = src.slice(i, src.indexOf('\n}\n', i));
   assert.ok(/NULLIF\(tab_gid, ''\) IS NULL/.test(body),
@@ -514,6 +520,104 @@ t('★ 제외한 건수를 반드시 돌려준다(조용한 누락 금지) + 프
   assert.ok(/includeUnknown=1/.test(HTML), 'includeUnknown 배선이 없다');
   assert.ok(/id="sinceDate"/.test(HTML) && /value="2026-01-01"/.test(HTML), '기준 연도 입력 기본값이 없다');
 });
+/* ── 연도 확인(시트 실제 날짜값 읽기) ─────────────────────── */
+t('★★ 미러는 표시 문자열만 갖는다 — 시트의 실제 날짜값은 UNFORMATTED 로만 읽힌다', () => {
+  const mirror = R('src/services/rawMirror.service.js');
+  assert.ok(/FORMATTED_VALUE/.test(mirror), '미러 읽기 옵션이 바뀌었다');
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function probeUnknownYears(');
+  const body = src.slice(i, src.indexOf('\n}\n', i));
+  assert.ok(/UNFORMATTED_VALUE/.test(body), '연도 확인이 표시 문자열을 읽는다 — 연도를 못 되찾는다');
+  assert.ok(/parseDateToken/.test(body), '일련번호 해석에 기존 파서를 안 쓴다(사본 금지)');
+  assert.ok(/throttledCall/.test(body), '시트 API 호출이 throttle 을 안 탄다');
+  assert.ok(/gid: String\(t\.tabGid\)/.test(body), 'gid 없이 읽는다 — 리네임에 취약');
+});
+t('★★ 미러 읽기 옵션을 바꾸지 않는다(주문 행배정·가드가 표시 문자열 비교에 의존)', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  assert.ok(!/rawMirror|mirrorAllSheets/.test(src.slice(src.indexOf('async function probeUnknownYears('))),
+    '연도 확인이 미러 경로를 건드린다');
+  const led = R('src/services/orderLedger.service.js');
+  assert.ok(/FORMATTED_VALUE/.test(led), '주문원장 라이브 폴백이 미러와 다른 옵션을 쓴다(비교가 깨진다)');
+});
+t('★ 연도 확인은 미상 탭만 · 캐시된 탭은 다시 읽지 않는다 · 상한 초과는 고지', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function probeUnknownYears(');
+  const body = src.slice(i, src.indexOf('\n}\n', i));
+  assert.ok(/yearUnknown/.test(body), '미상 탭만 고르지 않는다 — 아는 탭까지 시트를 읽는다');
+  assert.ok(/if \(cached\[/.test(body), '이미 확인한 탭을 또 읽는다');
+  assert.ok(/capped/.test(body), '상한 초과를 고지하지 않는다');
+  assert.ok(/tok\.y == null\) continue/.test(body),
+    '연도 없는 값(글자로 친 날짜)을 신호로 썼다 — 추측 금지');
+});
+t('★ 확인된 연도는 활동 신호에 합류(sheet_probe)', () => {
+  const act2 = require('../src/utils/tabActivity');
+  const r = act2.resolveActivity({ registeredAt: '2025-01-01', probedAt: '2026-07-12' });
+  assert.strictEqual(r.activityAt, '2026-07-12');
+  assert.strictEqual(r.activitySource, 'sheet_probe');
+});
+t('★ 라우트: year-probe 는 adminOrMaster · 프론트 버튼은 미상 있을 때만', () => {
+  const pr = layers.find(l => l.path === '/sheet-sync/year-probe');
+  assert.ok(pr && pr.mw.includes('authMiddleware') && pr.mw.includes('adminOrMasterMiddleware'), '게이트 부족');
+  assert.ok(/id="btnProbe"/.test(HTML) && /yearProbe\(\)/.test(HTML), '연도 확인 버튼 배선이 없다');
+  assert.ok(HTML.includes('/api/trackb/sheet-sync/year-probe'), '엔드포인트 호출이 없다');
+  assert.ok(/no_dated_cell/.test(HTML), '확인 불가 사유(글자로 친 날짜)를 화면이 설명하지 않는다');
+});
+
+/* ── 구매일 우선 판정 · 목록 제외 ─────────────────────────── */
+t('★★ 구매일 컬럼의 마지막 날짜가 최우선 — 다른 신호로 덮지 않는다(사용자 확정)', () => {
+  const a2 = require('../src/utils/tabActivity');
+  // 구매일 2025 + 시트 등록 2026 → 과거 작업(등록일로 되살리면 안 된다)
+  const r = a2.resolveActivity({ registeredAt: '2026-03-01', probedAt: '2025-07-12' });
+  assert.strictEqual(r.activityAt, '2025-07-12');
+  assert.strictEqual(a2.activityVerdict(r, '2026-01-01'), 'old', '구매일이 2025인데 목록에 남겼다');
+  // 구매일이 없을 때만 나머지 신호의 최댓값
+  const r2 = a2.resolveActivity({ registeredAt: '2026-03-01', lastOrderAt: '2026-08-01' });
+  assert.strictEqual(r2.activitySource, 'order');
+});
+t('★ 구매일은 [연도 확인] 값(probedAt) > DB 표본(sampleStartDate) 순', () => {
+  const a2 = require('../src/utils/tabActivity');
+  const r = a2.resolveActivity({ probedAt: '2026-07-12', sampleStartDate: '26.1.2(금)' });
+  assert.strictEqual(r.activitySource, 'sheet_probe');
+  assert.strictEqual(r.activityAt, '2026-07-12');
+});
+await ta('★★ 목록 제외는 **데이터를 지우지 않는다** — 감추기만 하고 되돌릴 수 있다', async () => {
+  let saved = null;
+  const store = { rows: [] };
+  svc.__setPoolForTest({
+    query: async (sql, params) => {
+      const q = String(sql);
+      if (/SELECT value FROM app_settings/.test(q)) return store;
+      if (/INSERT INTO app_settings/.test(q)) { saved = params; return { rows: [] }; }
+      return { rows: [] };
+    },
+  });
+  const out = await svc.setIgnored({ sheetId: 'S', tabName: 'T' });
+  assert.strictEqual(out.ignored, true);
+  assert.strictEqual(saved[0], 'sheet_sync_ignored', '제외 목록을 엉뚱한 곳에 저장한다');
+  assert.ok(JSON.parse(saved[1])['S\tT'], '제외 기록이 없다');
+  // 되돌리기
+  store.rows = [{ value: saved[1] }];
+  await svc.setIgnored({ sheetId: 'S', tabName: 'T', ignored: false });
+  assert.strictEqual(Object.keys(JSON.parse(saved[1])).length, 0, '되돌리기가 안 된다');
+  svc.__setPoolForTest(null);
+});
+t('★ 제외는 운영 데이터를 건드리지 않는다(삭제 SQL 0) + 건수 고지 + 복원 버튼', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function setIgnored(');
+  const body = src.slice(i, src.indexOf('\n}\n', i));
+  assert.ok(!/DELETE FROM (?!.*app_settings)/i.test(body), '제외가 데이터를 지운다');
+  assert.ok(/app_settings/.test(body), '제외 기록이 app_settings 가 아니다');
+  assert.ok(/ignoredCount/.test(src), '제외 건수를 세지 않는다(조용한 누락)');
+  assert.ok(/meta\.ignoredCount/.test(HTML), '제외 건수를 화면이 말하지 않는다');
+  assert.ok(/toggleIgnore\(' \+ i \+ '\)/.test(HTML), '제외 버튼이 인덱스 방식이 아니다');
+  assert.ok(/includeIgnored=1/.test(HTML) && /toggleIgnored\(\)/.test(HTML), '제외된 작업 열람 경로가 없다');
+  assert.ok(/지워지지 않습니다/.test(HTML), '데이터가 지워지지 않는다는 안내가 없다');
+});
+t('★ 라우트: ignore 는 adminOrMaster · 기본은 제외(ignored !== false)', () => {
+  const ig = layers.find(l => l.path === '/sheet-sync/ignore');
+  assert.ok(ig && ig.mw.includes('authMiddleware') && ig.mw.includes('adminOrMasterMiddleware'), '게이트 부족');
+});
+
 t('★ 시트 우위 점검도 같은 기준 입력(sinceDate)을 쓴다 — 두 화면이 다른 범위를 보면 안 된다', () => {
   const i = HTML.indexOf('async function runSlotAudit(');
   const body = HTML.slice(i, HTML.indexOf('const SS_REASON', i));

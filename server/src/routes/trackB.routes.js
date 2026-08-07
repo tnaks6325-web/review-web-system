@@ -268,12 +268,30 @@ router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit, includeArchived, since, includeUnknown } = req.query;
+    const { before, limit, includeArchived, since, includeUnknown, includeIgnored } = req.query;
     res.json({ ok: true, ...(await sheetSync.auditSheetSync({
       before, limit, since,
       includeArchived: includeArchived === '1' || includeArchived === 'true',
       includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
+      includeIgnored: includeIgnored === '1' || includeIgnored === 'true',
     })) });
+  } catch (err) { next(err); }
+});
+// 목록에서 제외/복원 — ★ **데이터는 지우지 않는다**(이 점검 화면 목록에서만 감춘다, 되돌리기 가능).
+router.post('/sheet-sync/ignore', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, ignored } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json(await sheetSync.setIgnored({ sheetId, tabName, ignored: ignored !== false, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+// 연도 확인 — 시트의 **실제 날짜값**(일련번호)을 읽어 미러가 잃어버린 연도를 되찾는다.
+//   ★ 이 도구에서 **시트 API 를 쓰는 유일한 경로** — 사람이 버튼을 누를 때만 돌고, 연도 미상 탭만,
+//     탭당 1콜(날짜 컬럼 한 열), throttle 을 탄다. 결과는 캐시되어 재조회 0.
+router.post('/sheet-sync/year-probe', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { limit } = req.body || {};
+    res.json(await sheetSync.probeUnknownYears({ limit, by: _by(req) }));
   } catch (err) { next(err); }
 });
 // tab_configs.tab_gid 백필 — 시트만 열리던 링크를 "그 탭이 열리는 링크"로. 기본은 미리보기.
