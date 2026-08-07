@@ -160,10 +160,15 @@ api._more('c1', btn1);
 const menu = dom.body.children[0];
 ok('실행: [⋯] 로 메뉴가 열린다', menu && menu.style.display === 'block' && menu.dataset.for === 'c1');
 ok('실행: 메뉴는 body 직속 1개', dom.body.children.length === 1 && menu.className === 'pcmenu');
-ok('실행: 위가 좁으면 아래로 편다(화면 밖 금지)', (() => {
+ok('실행: 기본은 버튼 위로 편다', parseInt(menu.style.top, 10) === 400 - menu.offsetHeight - 6, menu.style.top);
+// ★ 위가 좁은 버튼(화면 상단)에서는 아래로 뒤집어야 한다 — 안 그러면 메뉴가 화면 밖으로 나간다
+const btnTop = { className: 'uic more', parent: null, getBoundingClientRect: () => ({ top: 20, bottom: 44, right: 300, left: 274 }), closest(s) { return (s.indexOf('more') >= 0) ? this : null; } };
+api._closeMenu(); api._more('c1', btnTop);
+ok('★ 실행: 위가 좁으면 아래로 편다(화면 밖 금지)', (() => {
   const top = parseInt(menu.style.top, 10);
   return top >= 8 && top + menu.offsetHeight <= dom.win.innerHeight;
 })(), menu.style.top);
+api._closeMenu(); api._more('c1', btn1);
 
 api._more('c1', btn1);
 ok('실행: 같은 버튼 다시 = 닫힘(토글)', menu.style.display === 'none' && menu.dataset.for === undefined);
@@ -186,15 +191,18 @@ api._more('c1', btn1);
 dom.key('Escape');
 ok('실행: Esc = 닫힘', menu.style.display === 'none');
 
-/* ③ 리스너 1회만 */
+/* ③ 리스너 1회만 — 메뉴 요소가 다시 만들어져도(호스트가 body 를 갈아엎는 화면) 겹치지 않아야 한다 */
 const before = { d: dom.listeners.document.length, w: dom.listeners.window.length };
-api._ensureMenu(); api._ensureMenu(); api._more('c1', btn1); api._closeMenu();
+dom.body.children.length = 0;          // 메뉴 요소가 사라진 상황 재현 → _ensureMenu 가 다시 만든다
+api._ensureMenu();
+dom.body.children.length = 0;
+api._ensureMenu(); api._more('c1', btn1); api._closeMenu();
 ok('★ 리스너는 최상위에 한 번만(열 때마다 겹쳐 쌓이지 않는다)',
   dom.listeners.document.length === before.d && dom.listeners.window.length === before.w,
   { before, after: { d: dom.listeners.document.length, w: dom.listeners.window.length } });
 
 /* 항목이 없으면 빈 메뉴를 띄우지 않는다 */
 api._more('없는id', btn1);
-ok('항목이 없으면 빈 메뉴를 열지 않는다', menu.style.display === 'none');
+ok('항목이 없으면 빈 메뉴를 열지 않는다', dom.body.children[dom.body.children.length - 1].style.display === 'none');
 
 console.log(`\n✅ campaignCardActions: ${n}개 통과`);

@@ -816,6 +816,15 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **서버**: `GET /api/campaign/admin/list`가 원본 행 + **리뷰어 목록과 동일한 상태 계산**(`computeCampaignState`, 두 화면이 다른 계산을 쓰면 "카드는 모집중인데 참여는 거부" 불일치 발생) + `ops{holdNow, todayHold, todaySubmitted, totalConfirmed, late}` 반환. 집계 실패는 fail-soft(목록은 뜬다).
 - ★ **`cardHtml`이 `_injectStyles()`를 호출**한다 — HTML만 쓰는 호출부(관리자 목록)에서 CSS 없이 폭을 재면 칩 넘침 판정이 어긋난다(실측 버그). 회귀가드 `tests/adminCardSync.test.js`(30케이스).
 
+### ★ 카드 액션 줄 = 주 버튼 3개 + [⋯] 더보기 (시안 C · 사용자 확정 2026-08-07)
+- **사고**: 액션 버튼이 6개로 늘자 라벨이 잘리고 마지막 버튼이 「게시」 토글과 겹쳤다(사용자 신고). 실측 = 카드 266px → 액션 줄 244px → **토글 57px 고정** → 버튼 하나에 **27px** 인데 라벨은 35~48px 필요. 시안 = `frontend/docs/design-campaign-card-actions.html`(현재/A/B/C, `?v=A|B|C` 단독 보기, 가짜 데이터로 실제 동작).
+- **주 줄 = `✏️ 수정 · 👁 보기 · 📡 관제 · [⋯]`**, 나머지 3종(`📄 연결된 시트 열기` · `📅 날짜별 인원 조절` · `🚫 참여 리뷰어 관리`)은 `_ACT_MORE[c.id]` 로 모아 더보기 메뉴에. ★★ **버튼이 더 늘어도 [⋯] 안으로 들어간다** — 주 줄에 직접 추가하면 같은 방식으로 다시 깨진다(회귀가드가 주 줄 버튼 수를 고정). ★ 좁은 칸이 아니라 메뉴라 **이름을 온전히** 쓴다(줄임말이 필요 없어졌다).
+- ★ **관제의 빨간 배지(지각 = 수동확정 필요)는 주 줄에 남긴다** — 목록을 훑다가 바로 보여야 하는 유일한 신호다. 라벨은 `<span class="lbl">` 로 감싸 말줄임·넘침 측정을 한 지점으로 모으고(`.bdg` 는 버튼 밖이라 측정에서 빠진다), `[⋯]` 는 `flex:0 0 auto;width:26px` 로 글자 폭을 안 먹는다.
+- ★★ **메뉴는 body 직속**(`.pcmenu`) — `.pcard{overflow:hidden}` 안에 그리면 **통째로 잘린다**(오버레이를 스크롤 컨테이너 밖에 두는 레포 규율과 같은 이유). 색은 **리터럴**(테마 없는 화면에도 얹힌다), onclick 은 **id 만**(`CampCards._more('${id}',this)`).
+- ★★ **항목을 고르면 닫는 리스너는 메뉴 자신에게 캡처 단계로** 건다 — 항목 onclick 이 `stopPropagation`(카드 클릭 차단)을 하므로 **document 리스너까지 못 간다**(정적으로는 "닫는 코드가 있다"로 보이지만 실제로는 안 닫힌다 — 실브라우저가 잡았다). 닫기는 `setTimeout 0` 으로 미뤄 항목 동작이 먼저 끝나게 한다.
+- ★ **리스너는 최상위 1회만**(`_menuBound` — 열 때마다 걸면 겹쳐 쌓인다) · 스크롤·리사이즈는 닫는다(body 직속이라 카드를 안 따라간다) · **`renderInto` 가 `_closeMenu()`**(목록을 다시 그리면 가리키던 카드가 사라진다) · 위가 좁으면 **아래로 뒤집는다**(화면 밖 금지).
+- 회귀가드 `tests/campaignCardActions.test.js`(28케이스 — 정적 배선 + **가짜 DOM 에 메뉴 기계장치를 vm 으로 올려 캡처/버블을 실제로 구분해 실행**, 변이시험 12종 검출 확인) + 실 http 오리진 브라우저 19시나리오(넘침 0·토글 겹침 0·body 직속·토글/바깥/Esc/다른 카드·좁은 화면). ⚠ 이 변경으로 `adminCardSync` 의 시트 버튼 패턴을 함께 갱신했다(검사 의미 불변).
+
 ### 관리자 "리뷰어 화면 미리보기" (마감 공고 포함 · 읽기 전용)
 - 관리자가 **마감·오픈전 공고를 포함한 어떤 참여형 공고든** 리뷰어가 실제 보는 진행 화면(참여 전 → 작업가이드 → 제출 완료)을 확인. 진입 = 모집공고 카드 [👁 리뷰어 화면] + 수정 모달 미리보기의 [전체 화면으로 보기](`index-recruit.js` `openReviewerPreview`) → `campaign.html?id=&preview=1#tok=<admin_token>`.
 - **격리(핵심)**: 무인증 리뷰어 게이트 `GET /:id/work-detail`은 **일절 미변경**(관리자 분기 없음). 대신 관리자 전용 `GET /api/campaign/admin/:id/preview`(authMiddleware+adminOrMaster)가 같은 shape을 **합성**해 반환 — `application`은 미저장 가짜 객체(`id:'preview'`), `canChangeOption:false`, `chatUrl`은 관리자라 그대로. **DB write 0**(campaign_applications INSERT/UPDATE 없음 = 홀드·정원·일일한도 카운터 무오염). 리뷰어앱 스코프 토큰(`via:'reviewer_campaign'`)은 `PUT /api/campaign/admin/:id` 끝앵커+PUT 한정이라 이 GET 경로에 도달 불가.
