@@ -99,7 +99,13 @@ function buildValues({ headers, rows }) {
  * @param {string}  [o.by='system']
  * @returns {Promise<object>} 요약
  */
-async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false, by = 'system' } = {}) {
+/**
+ * @param {boolean} preflight  이관 **전** 점검용(전환 관리 화면 ⑤ 항목). `dryRun` 과 **함께일 때만** 유효하며
+ *   시트 기반 탭에서도 "열 구성을 알아볼 수 있는가"를 계산해 본다. 쓰기 경로는 그대로 잠겨 있다
+ *   — 게이트가 막으려는 것은 **시트 값 덮어쓰기**인데 dry-run 은 한 줄도 쓰지 않기 때문.
+ *   ★ preflight 만 주고 dryRun 을 빼면 종전대로 `not_sheetless` 로 거부한다(완화 금지).
+ */
+async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false, by = 'system', preflight = false } = {}) {
   if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
   const db = getPool();
 
@@ -108,7 +114,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
     `SELECT tab_gid, campaign_name, COALESCE(sheetless, FALSE) AS sheetless
        FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
   if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다(접수 후 이용).');
-  if (!tcRows[0].sheetless) {
+  if (!tcRows[0].sheetless && !(dryRun && preflight)) {
     throw new LedgerError('not_sheetless',
       '시트 기반 탭입니다 — 장부는 시트에서 만들어집니다. 이 탭을 무시트로 이관한 뒤 실행하세요.');
   }
@@ -122,10 +128,16 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
       ORDER BY seq`, [sheetId, tabName]);
 
   // ── 헤더 ──
+  /* ★★ `detected_headers` 를 먼저 본다(2026-08 실측 사고): 시트 미러가 `headers` 에 넣는 값은
+     **시트 A1 행 그대로**(대개 캠페인 정보 1~2칸)이고 진짜 열 이름 줄은 `detected_headers` 에 있다.
+     무시트 탭은 이 함수가 둘 다 같은 값으로 써 넣으므로 **동작이 한 글자도 안 바뀌고**,
+     시트 기반 탭을 preflight 로 볼 때만 달라진다 — 종전엔 A1 2칸이 잡혀
+     "열 2개 · 검색 명단 0명"인데 점검이 통과하는 false-green 이었다. */
   const { rows: prevTab } = await db.query(
-    `SELECT headers FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2 LIMIT 1`, [sheetId, tabGid]);
+    `SELECT detected_headers, headers FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2 LIMIT 1`,
+    [sheetId, tabGid]);
   const { headers, source: headerSource } = resolveHeaders({
-    storedHeaders: prevTab[0] && prevTab[0].headers, columns, rows: parts,
+    storedHeaders: prevTab[0] && (prevTab[0].detected_headers || prevTab[0].headers), columns, rows: parts,
   });
   if (!headers.length) {
     throw new LedgerError('no_headers',

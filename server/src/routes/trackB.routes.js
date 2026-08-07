@@ -397,6 +397,52 @@ router.post('/sheet-sync/quota-fix', authMiddleware, adminOrMasterMiddleware, as
   } catch (err) { next(err); }
 });
 
+/* ══════════════ 탈 구글시트 전환 관리 (W4 · C) ══════════════
+   무시트 표식을 켜는 **유일한 창구**. 권한 = adminOrMaster(사용자 확정) — 실무 담당자가
+   직접 이관하고, 실수 방어는 **점검표 fail-closed + 작업명 타이핑 확정**이 맡는다.
+   ★ 42P01(096 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 마스킹 대상이라 원인이 안 보인다. */
+const cutover = require('../services/sheetlessCutover.service');
+function _cutoverErr(err, res, next) {
+  if (err && err.code === '42P01') {
+    return res.json({ ok: false, code: 'not_ready',
+      error: '탈시트 전환 준비 전입니다(migration 096 미적용) — 배포 완료 후 다시 시도해주세요.' });
+  }
+  return next(err);
+}
+router.get('/sheetless/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { since, includeUnknown, limit } = req.query;
+    res.json(await cutover.listCutoverTabs({
+      since, limit, includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
+    }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
+router.get('/sheetless/checklist', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json(await cutover.cutoverChecklist({ sheetId, tabName }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
+router.post('/sheetless/cutover', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, force } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    // ★ force 는 **명시적으로 true 일 때만** — 값이 빠지거나 문자열이면 점검표를 그대로 건다.
+    const out = await cutover.enableSheetless({
+      sheetId, tabName, by: _by(req), force: force === true,
+    });
+    res.status(out.ok ? 200 : 409).json(out);
+  } catch (err) { _cutoverErr(err, res, next); }
+});
+router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json(await cutover.disableSheetless({ sheetId, tabName, by: _by(req) }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
+
 // ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
 router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await svc.parityAll({ store: true, source: 'manual' })) }); }

@@ -670,6 +670,7 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
             tc.manager, tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl",
             tc.capture_slots AS "captureSlots", tc.income_type AS "incomeType",
+            COALESCE(tc.sheetless, FALSE) AS "sheetless",
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
             wo.recruit_count AS "woRecruit", wo.start_date::text AS "woStartDate",
             sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
