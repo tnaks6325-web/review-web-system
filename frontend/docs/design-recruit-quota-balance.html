@@ -166,7 +166,7 @@
     <label><input type="checkbox"><span><span class="k">②</span> 조절하는 지금 시점의 <b>모집 현황(확정 55 / 총 800명)</b>이 맨 위에 늘 보인다.</span></label>
     <label><input type="checkbox"><span><span class="k">③</span> <b>예상 종료일</b>이 항상 계산되고, 방식을 바꾸거나 조절하면 그 자리에서 바뀐다(세 방식의 종료일을 나란히 비교해 준다).</span></label>
     <label><input type="checkbox"><span><span class="k">④</span> 방식 3종 — <b>다음날에 더하기</b> / <b>남은 날에 나눠 담기</b> / <b>종료일 뒤에 붙이기</b>. 고른 방식대로 이월이 재배치되고 <b>[자동 맞춤]</b>도 그 방식으로 동작한다.</span></label>
-    <label><input type="checkbox"><span><span class="k">⑥</span> 배분 합계가 <b>초과 = 빨강(+N 줄이세요)</b> / <b>부족 = 파랑(−N 늘리세요)</b> / <b>일치 = 초록</b>이고, 초록일 때만 <b>[확정 저장]</b>이 눌린다.</span></label>
+    <label><input type="checkbox"><span><span class="k">⑥</span> 배분 합계가 <b>초과 = 빨강</b> / <b>부족 = 파랑</b> / <b>일치 = 초록</b>으로 한 줄로 뜨고(<b>“총량이 750명보다 6명 초과입니다. — 저장불가”</b>), 초록일 때만 <b>[확정 저장]</b>이 눌린다.</span></label>
   </div>
 </div>
 
@@ -378,27 +378,27 @@
     var auto = document.getElementById('autoBtn'), save = document.getElementById('saveBtn');
     var hint = document.getElementById('footHint');
 
+    // ★ 문구는 한 줄로(사용자 확정) — 상태·숫자·저장 가능 여부만 말한다.
+    //   설명을 덧붙이면 매번 읽어야 해서 오히려 상태가 안 읽힌다.
     bal.classList.remove('ok', 'over', 'under');
+    l2.style.display = 'none';
     if (d === 0) {
       bal.classList.add('ok'); ico.textContent = '✓';
-      l1.innerHTML = '배분 합계 <span class="num">' + s + '</span> / 배분해야 할 <span class="num">' + TARGET + '</span>명 — 딱 맞습니다';
-      l2.innerHTML = '이월 ' + CARRY + '명 포함해 남김없이 배분됐습니다. [확정 저장]을 누르면 반영됩니다.';
+      l1.innerHTML = '총량 <span class="num">' + TARGET + '</span>명과 딱 맞습니다. — <b>저장가능</b>';
       auto.style.display = 'none'; save.disabled = false;
       hint.textContent = '총량과 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다';
     } else if (d > 0) {
       bal.classList.add('over'); ico.textContent = '▲';
-      l1.innerHTML = '<span class="num">+' + d + '</span>명 초과 — <b>' + d + '명을 줄여주세요</b>';
-      l2.innerHTML = '배분 합계 <span class="num">' + s + '</span>명이 배분해야 할 <span class="num">' + TARGET + '</span>명보다 많습니다. 총량(' + TOTAL + '건)을 넘길 수 없어 저장되지 않습니다.';
+      l1.innerHTML = '총량이 <span class="num">' + TARGET + '</span>명보다 <span class="num">' + d + '</span>명 초과입니다. — <b>저장불가</b>';
       auto.style.display = ''; auto.textContent = '자동으로 ' + d + '명 줄이기';
       save.disabled = true;
-      hint.textContent = '초과 ' + d + '명 — 줄여야 저장할 수 있습니다';
+      hint.textContent = '초과 ' + d + '명 — 저장불가';
     } else {
       bal.classList.add('under'); ico.textContent = '▼';
-      l1.innerHTML = '<span class="num">' + d + '</span>명 부족 — <b>' + (-d) + '명을 더 배분해주세요</b>';
-      l2.innerHTML = '배분 합계 <span class="num">' + s + '</span>명이 배분해야 할 <span class="num">' + TARGET + '</span>명보다 적습니다. 남은 ' + (-d) + '명이 어디에도 열리지 않아 저장되지 않습니다.';
+      l1.innerHTML = '총량이 <span class="num">' + TARGET + '</span>명보다 <span class="num">' + (-d) + '</span>명 부족입니다. — <b>저장불가</b>';
       auto.style.display = ''; auto.textContent = '자동으로 ' + (-d) + '명 채우기';
       save.disabled = true;
-      hint.textContent = '부족 ' + (-d) + '명 — 채워야 저장할 수 있습니다';
+      hint.textContent = '부족 ' + (-d) + '명 — 저장불가';
     }
     paintCarry();
   }
