@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>시안 — 모집인원 조절 (총량 균형 · 이월 처리 토글)</title>
+<title>시안 — 모집인원 조절 (이월 30명 · 총량 균형)</title>
 <style>
   /* 시안은 실제 화면과 같아야 하므로 라이트 모드로 고정한다(다크에서 색이 뒤집히면 대조가 깨진다) */
   :root { color-scheme: light; }
@@ -23,7 +23,7 @@
   /* ★ 자식 선택자로 좁힌다 — .checks b 로 두면 라벨 문장 속 <b> 까지 block 이 되어 한 문장이
      여러 줄로 쪼개진다(실측). */
   .checks > b { font-size: .8rem; display: block; margin-bottom: 8px; }
-  .checks label { display: flex; gap: 9px; align-items: flex-start; font-size: .78rem; line-height: 1.55;
+  .checks label { display: flex; gap: 9px; align-items: flex-start; font-size: .78rem; line-height: 1.6;
     padding: 5px 0; color: #333c4d; cursor: pointer; }
   .checks input { margin-top: 3px; flex: 0 0 auto; width: 14px; height: 14px; accent-color: #2f6fed; }
   .checks .k { color: #2f6fed; font-weight: 700; }
@@ -47,31 +47,38 @@
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   .btn.sm { padding: 5px 10px; font-size: .69rem; }
 
-  /* ── ① 진행 현황(요구 2·3) ──────────────────────────── */
+  /* ── ① 진행 현황(요구 ②·③ + 이월) ──────────────────── */
   .stat { border: 1px solid #dde3ee; border-radius: 11px; padding: 12px 14px; margin-bottom: 11px; background: #fbfcff; }
-  .stat .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .stat .row1 { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
   .stat .big { font-size: 1.02rem; font-weight: 800; letter-spacing: -.4px; }
   .stat .big em { font-style: normal; color: #2f6fed; }
+  .cbadge { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; font-size: .72rem;
+    font-weight: 800; padding: 3px 9px; border-radius: 999px; }
   .stat .bar { height: 8px; border-radius: 5px; background: #e6ebf4; margin: 9px 0 8px; overflow: hidden; }
   .stat .bar i { display: block; height: 100%; background: linear-gradient(90deg, #4b87f5, #2f6fed); border-radius: 5px; }
   .stat .kv { display: flex; gap: 16px; flex-wrap: wrap; font-size: .73rem; color: #4d5768; }
   .stat .kv b { color: #1f2430; }
   .stat .kv .end { color: #b45309; }
 
-  /* ── ② 이월 처리 토글(요구 4) ───────────────────────── */
-  .carry { border: 1px solid #dde3ee; border-radius: 11px; padding: 12px 14px; margin-bottom: 11px; }
-  .carry .t { font-size: .76rem; font-weight: 800; margin-bottom: 3px; }
-  .carry .d { font-size: .69rem; color: #737d90; line-height: 1.55; margin-bottom: 9px; }
-  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 0; background: #eef1f7; border-radius: 9px; padding: 3px; }
-  .seg button { border: 0; background: none; padding: 8px 6px; border-radius: 7px; cursor: pointer;
-    font-family: inherit; font-size: .73rem; font-weight: 700; color: #5c6678; line-height: 1.4; transition: .12s; }
-  .seg button.on { background: #fff; color: #1b3fa0; box-shadow: 0 1px 4px rgba(20,30,60,.13); }
-  .seg button small { display: block; font-weight: 600; font-size: .63rem; color: #8a93a4; margin-top: 2px; }
-  .seg button.on small { color: #4f6ba8; }
-  .carry .prev { margin-top: 9px; font-size: .69rem; line-height: 1.6; color: #35507f;
-    background: #eff4ff; border: 1px solid #d6e2fb; border-radius: 8px; padding: 7px 10px; }
+  /* ── ② 이월 보충 투입 방식(요구 ④) ──────────────────── */
+  .carry { border: 1px solid #fcd9a8; background: #fffdf8; border-radius: 11px; padding: 12px 14px; margin-bottom: 11px; }
+  .carry .t { font-size: .78rem; font-weight: 800; margin-bottom: 3px; }
+  .carry .t b { color: #b45309; }
+  .carry .d { font-size: .69rem; color: #7b6a52; line-height: 1.55; margin-bottom: 9px; }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; background: #f3ede3; border-radius: 9px; padding: 3px; }
+  .seg button { border: 0; background: none; padding: 8px 5px; border-radius: 7px; cursor: pointer;
+    font-family: inherit; font-size: .72rem; font-weight: 700; color: #6b6152; line-height: 1.35; transition: .12s; }
+  .seg button.on { background: #fff; color: #92400e; box-shadow: 0 1px 4px rgba(60,40,10,.16); }
+  .seg button small { display: block; font-weight: 600; font-size: .61rem; color: #a1937f; margin-top: 2px; }
+  .seg button.on small { color: #b06d29; }
+  .seg button .df { display: inline-block; font-size: .55rem; background: #fde68a; color: #78350f;
+    border-radius: 4px; padding: 0 4px; margin-left: 3px; vertical-align: 1px; }
+  .carry .where { margin-top: 9px; font-size: .71rem; line-height: 1.6; color: #7c3d09;
+    background: #fff3e2; border: 1px solid #f8d5aa; border-radius: 8px; padding: 8px 11px; }
+  .carry .cmp { margin-top: 7px; font-size: .67rem; color: #8a7a63; display: flex; gap: 12px; flex-wrap: wrap; }
+  .carry .cmp b { color: #7c3d09; }
 
-  /* ── ③ 배분 균형 바(요구 6) — 항상 보이게 sticky ────── */
+  /* ── ③ 배분 균형 바(요구 ⑥) — 항상 보이게 sticky ────── */
   .bal { position: sticky; top: 0; z-index: 5; border-radius: 11px; padding: 11px 13px; margin-bottom: 12px;
     border: 1.5px solid; display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
   .bal .ico { font-size: 1.05rem; line-height: 1; }
@@ -90,8 +97,9 @@
   .rows { display: flex; flex-direction: column; gap: 5px; }
   .r { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 9px; }
   .r.today { background: #f4f8ff; }
-  .r.rest { opacity: .82; }
-  .r .d { width: 86px; flex: 0 0 auto; font-size: .74rem; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+  .r.zero { opacity: .82; }
+  .r.hascarry { background: #fffaf2; }
+  .r .d { width: 92px; flex: 0 0 auto; font-size: .74rem; font-weight: 700; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   .r .d .tag { font-size: .58rem; font-weight: 800; padding: 1px 5px; border-radius: 5px; }
   .r .d .tag.t { background: #dbeafe; color: #1b46a8; }
   .r .d .tag.a { background: #fef3c7; color: #92400e; }
@@ -101,9 +109,12 @@
     cursor: ew-resize; touch-action: none; }
   .g .f { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 11px;
     background: linear-gradient(90deg, #6ea2f8, #2f6fed); }
+  /* 이월분은 같은 막대 안에서 주황으로 이어 붙여 "여기에 이월이 얹혔다"를 눈으로 보여준다 */
+  .g .c { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  .g .c.end { border-radius: 0 11px 11px 0; }
   .g .k { position: absolute; top: 50%; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px;
-    background: #fff; border: 2.5px solid #2f6fed; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
-  .g .base { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #b6c0d2; border-radius: 1px; }
+    background: #fff; border: 2.5px solid #2f6fed; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.18); z-index: 2; }
+  .g .base { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #b6c0d2; border-radius: 1px; z-index: 1; }
   /* ★ 초과/부족은 **줄이 아니라 합계의 성질**이라 행을 빨갛게 칠하지 않는다 —
      "어느 줄이 초과인지"는 정할 수 없어 오해를 부른다. 신호는 위 균형 바 하나(판정 단일 출처). */
 
@@ -112,12 +123,14 @@
     font-size: .9rem; line-height: 1; cursor: pointer; color: #40495a; font-family: inherit; }
   .ctl button:hover { background: #f2f5fa; }
   .ctl button:disabled { opacity: .35; cursor: not-allowed; }
-  .ctl .n { width: 56px; text-align: right; }
+  .ctl .n { width: 96px; text-align: right; }
   .ctl .n input { width: 100%; border: 1px solid transparent; background: none; text-align: right;
     font-family: inherit; font-size: .84rem; font-weight: 800; color: #1f2430; padding: 1px 3px;
     border-radius: 5px; font-variant-numeric: tabular-nums; }
   .ctl .n input:focus { border-color: #2f6fed; background: #fff; outline: none; }
-  .ctl .n small { display: block; font-size: .6rem; color: #98a1b2; margin-top: 1px; }
+  .ctl .n small { display: block; font-size: .59rem; color: #98a1b2; margin-top: 1px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .ctl .n small em { font-style: normal; color: #b45309; font-weight: 800; }
 
   .note { border: 1px solid #e3e8f1; background: #f8fafd; border-radius: 9px; padding: 9px 12px;
     font-size: .68rem; color: #5a6478; line-height: 1.6; margin: 12px 0; }
@@ -132,8 +145,8 @@
   .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   @media (max-width: 560px) {
-    .r .d { width: 72px; font-size: .69rem; }
-    .ctl .n { width: 48px; }
+    .r .d { width: 78px; font-size: .69rem; }
+    .ctl .n { width: 84px; }
     .seg { grid-template-columns: 1fr; }
   }
 </style>
@@ -141,15 +154,18 @@
 <body>
 
 <div class="guide">
-  <h1>시안 — 모집인원 조절 (총량 균형 · 이월 처리 토글)</h1>
-  <p>가짜 데이터로 <b>실제로 조작</b>됩니다. 게이지를 끌거나 −/＋를 누르고, 숫자를 직접 입력해 보세요.
-     지금 화면에서 <b>“예상 종료일: 계산 불가”</b>로 뜨던 것과 <b>총량 대비 배분이 맞는지 알 수 없던 것</b>을 함께 고쳤습니다.</p>
+  <h1>시안 — 모집인원 조절 (이월 30명 · 총량 균형)</h1>
+  <p>가짜 데이터로 <b>실제로 조작</b>됩니다. 이 공고는 <b>어제까지 이월 30명</b>이 쌓인 상태이고,
+     기본 보충 방식인 <b>“다음날 정원에 더하기”</b>가 적용돼 오늘(8/8) 정원이 <b>40 → 70명</b>으로 잡혀 있습니다.
+     위쪽 세 가지 방식을 바꿔가며 이월 30명이 어디로 옮겨가는지, 종료일이 어떻게 달라지는지 보세요.</p>
   <div class="checks">
-    <b>확인할 것 (요청하신 6가지)</b>
-    <label><input type="checkbox"><span><span class="k">①</span> 한 날의 인원을 <b>남은 모집수(760명)</b>보다 크게 올릴 수 없다 — 넘기면 그 값에서 멈추고 안내가 뜬다.</span></label>
-    <label><input type="checkbox"><span><span class="k">②</span> 조절하는 지금 시점의 <b>모집 현황(확정 45 / 총 800명)</b>이 맨 위에 늘 보인다.</span></label>
-    <label><input type="checkbox"><span><span class="k">③</span> <b>예상 종료일</b>이 항상 계산되어 표시되고, 조절하면 그 자리에서 바뀐다.</span></label>
-    <label><input type="checkbox"><span><span class="k">④</span> <b>이월 처리 방식 토글</b> — [종료일 고정·남은 날 분산] ↔ [일일 인원 유지·종료일 연장]. 고른 방식대로 <b>[자동 맞춤]</b>이 동작한다.</span></label>
+    <b>확인할 것</b>
+    <label><input type="checkbox"><span><span class="k">이월</span> <b>이월 30명</b>이 맨 위 배지·보충 방식 블록·해당 날짜 줄(주황 막대와 <b>＋이월 30</b>) 세 곳에서 보인다.</span></label>
+    <label><input type="checkbox"><span><span class="k">기본</span> 보충 방식 기본값이 <b>[다음날 정원에 더하기]</b>이고, 오늘 줄이 <b>기본 40 ＋이월 30 = 70명</b>이다.</span></label>
+    <label><input type="checkbox"><span><span class="k">①</span> 한 날을 <b>남은 배분수(750명)</b>보다 크게 올릴 수 없다 — 넘기면 그 값에서 멈추고 안내가 뜬다.</span></label>
+    <label><input type="checkbox"><span><span class="k">②</span> 조절하는 지금 시점의 <b>모집 현황(확정 55 / 총 800명)</b>이 맨 위에 늘 보인다.</span></label>
+    <label><input type="checkbox"><span><span class="k">③</span> <b>예상 종료일</b>이 항상 계산되고, 방식을 바꾸거나 조절하면 그 자리에서 바뀐다(세 방식의 종료일을 나란히 비교해 준다).</span></label>
+    <label><input type="checkbox"><span><span class="k">④</span> 방식 3종 — <b>다음날에 더하기</b> / <b>남은 날에 나눠 담기</b> / <b>종료일 뒤에 붙이기</b>. 고른 방식대로 이월이 재배치되고 <b>[자동 맞춤]</b>도 그 방식으로 동작한다.</span></label>
     <label><input type="checkbox"><span><span class="k">⑥</span> 배분 합계가 <b>초과 = 빨강(+N 줄이세요)</b> / <b>부족 = 파랑(−N 늘리세요)</b> / <b>일치 = 초록</b>이고, 초록일 때만 <b>[확정 저장]</b>이 눌린다.</span></label>
   </div>
 </div>
@@ -163,62 +179,65 @@
 
   <div class="mbody">
 
-    <!-- ① 진행 현황 (요구 2·3) -->
+    <!-- ① 진행 현황 + 이월 -->
     <div class="stat">
       <div class="row1">
-        <span class="big">모집 현황 <em id="sDone">45</em> / <span id="sTotal">800</span>명</span>
+        <span class="big">모집 현황 <em id="sDone">55</em> / <span id="sTotal">800</span>명</span>
+        <span class="cbadge" id="sCarry" title="어제까지 계획 80명 중 50명만 채워져 30명이 이월됐습니다">↩ 이월 30명</span>
       </div>
-      <div class="bar"><i id="sBar" style="width:5.6%"></i></div>
+      <div class="bar"><i id="sBar"></i></div>
       <div class="kv">
-        <span>남은 모집 <b id="sRemain">755</b>명</span>
-        <span>예상 종료일 <b class="end" id="sEnd">8/29 (토)</b></span>
-        <span>남은 진행일 <b id="sDays">19</b>일</span>
+        <span>남은 모집 <b id="sRemain">745</b>명</span>
+        <span>예상 종료일 <b class="end" id="sEnd">—</b></span>
+        <span>남은 진행일 <b id="sDays">—</b>일</span>
         <span>총량 기준 <b>시트 행 수 800건</b></span>
       </div>
     </div>
 
-    <!-- ② 이월 처리 토글 (요구 4) -->
+    <!-- ② 이월 보충 투입 방식 -->
     <div class="carry">
-      <div class="t">이월(빠진 인원) 처리 방식</div>
-      <div class="d">어떤 날의 인원을 줄이면 그만큼이 <b>이월</b>됩니다. 그 인원을 어떻게 되돌릴지 미리 정해 두세요 — 아래 [자동 맞춤]이 이 방식대로 동작합니다.</div>
+      <div class="t">이월 <b>30명</b> 보충 투입 방식</div>
+      <div class="d">어제까지 못 채운 <b>30명</b>을 어느 날에 얹을지 정합니다. 앞으로 어떤 날을 줄여 새로 이월이 생겨도 같은 방식으로 처리됩니다.</div>
       <div class="seg">
-        <button type="button" id="mFix" class="on">종료일 고정<small>남은 날에 나눠 담기</small></button>
-        <button type="button" id="mKeep">일일 인원 유지<small>종료일을 뒤로 연장</small></button>
+        <button type="button" id="mNext" class="on">다음날에 더하기<span class="df">기본</span><small>바로 다음 진행일에 몰아서</small></button>
+        <button type="button" id="mSpread">남은 날에 나눠 담기<small>진행일에 고르게</small></button>
+        <button type="button" id="mExtend">종료일 뒤에 붙이기<small>각 날 인원은 그대로</small></button>
       </div>
-      <div class="prev" id="carryPrev">종료일 <b>8/29 (토)</b>을 지키고, 빠진 인원을 남은 진행일에 나눠 담습니다.</div>
+      <div class="where" id="carryWhere">—</div>
+      <div class="cmp" id="carryCmp"></div>
     </div>
 
-    <!-- ③ 배분 균형 (요구 6) -->
+    <!-- ③ 배분 균형 -->
     <div class="bal ok" id="bal">
       <div class="ico" id="balIco">✓</div>
       <div class="txt">
-        <div class="l1" id="balL1">배분 합계 760 / 배분해야 할 760명 — 딱 맞습니다</div>
-        <div class="l2" id="balL2">이대로 [확정 저장]을 누르면 반영됩니다.</div>
+        <div class="l1" id="balL1">—</div>
+        <div class="l2" id="balL2">—</div>
       </div>
       <button class="btn sm" type="button" id="autoBtn" style="display:none">자동 맞춤</button>
     </div>
 
     <div class="sec">
       <span>날짜별 모집 계획 — 게이지를 끌거나 −/＋ · 숫자 직접 입력</span>
-      <span>기본 <b>시트 구매일자 기준</b> · 한 날 최대 <b id="sCap">760</b>명</span>
+      <span>기본 <b>시트 구매일자 기준</b> · 한 날 최대 <b id="sCap">750</b>명</span>
     </div>
 
     <div class="rows" id="rows"></div>
 
     <div class="endline">
-      <span>예상 종료일: <b id="endTxt">8/29 (토)</b> <span class="chg" id="endChg"></span></span>
-      <button class="btn sm" type="button" id="resetBtn">조절 전으로 되돌리기</button>
+      <span>예상 종료일: <b id="endTxt">—</b> <span class="chg" id="endChg"></span></span>
+      <button class="btn sm" type="button" id="resetBtn">이 방식의 기본 배치로 되돌리기</button>
     </div>
 
     <div class="note">
-      줄이면 그만큼이 <b>이월</b>되고, 위에서 고른 방식대로 [자동 맞춤]이 되돌립니다.
+      주황 막대가 <b>이월분</b>입니다. 어떤 날을 줄이면 그만큼이 새 이월이 되고, 위에서 고른 방식대로 [자동 맞춤]이 되돌립니다.
       <b>총량(800건)은 어떤 조절로도 변하지 않습니다</b> — 총량을 늘리려면 [＋ 차수 추가]를 쓰세요.
-      배분 합계가 남은 모집수와 <b>정확히 같을 때만</b> 저장됩니다.
+      배분 합계가 남은 배분수와 <b>정확히 같을 때만</b> 저장됩니다.
     </div>
   </div>
 
   <div class="mfoot">
-    <span class="hint" id="footHint">조절은 [확정 저장]을 눌러야 반영됩니다</span>
+    <span class="hint" id="footHint">—</span>
     <button class="btn" type="button">닫기</button>
     <button class="btn pri" type="button" id="saveBtn">확정 저장</button>
   </div>
@@ -230,35 +249,48 @@
 (function () {
   'use strict';
 
-  /* ── 가짜 데이터(실제 화면 값 재현) ───────────────────── */
-  var TOTAL        = 800;   // 총량 = 시트 행 수
-  var DONE_BEFORE  = 40;    // 어제까지 확정
-  var TODAY_USED   = 5;     // 오늘 이미 확정·진행 중(오늘 행의 최소값)
-  var DEFAULT_DAILY= 40;    // 그날 기본(시트 구매일자 행 수)
-  var START        = '2026-08-08';
-  var REST         = { '2026-08-15': 1, '2026-08-16': 1, '2026-08-17': 1 };  // 시트에 날짜가 없는 날
+  /* ── 가짜 데이터 ──────────────────────────────────────
+     총량 800건 · 어제까지 계획 80명인데 확정 50명 → 이월 30명
+     오늘(8/8) 확정·진행 5명 → 현재 모집 인원 55명
+     오늘부터 종료일까지 배분해야 할 합계 = 800 − 50 = 750명            */
+  var TOTAL         = 800;
+  var PLANNED_BEFORE= 80;
+  var DONE_BEFORE   = 50;
+  var CARRY         = PLANNED_BEFORE - DONE_BEFORE;   // 30 — 이월 인원
+  var TODAY_USED    = 5;
+  var DEFAULT_DAILY = 40;
+  var START         = '2026-08-08';
+  var REST          = { '2026-08-15': 1, '2026-08-16': 1, '2026-08-17': 1 };  // 시트에 날짜가 없는 날
 
-  // 오늘 행부터 종료일까지 합계가 되어야 하는 값(= 총량 − 어제까지 확정)
-  var TARGET = TOTAL - DONE_BEFORE;          // 760
-  var DONE   = DONE_BEFORE + TODAY_USED;     // 45 (요구 ②: 현재 모집인원)
+  var DONE   = DONE_BEFORE + TODAY_USED;   // 55 (요구 ②)
+  var TARGET = TOTAL - DONE_BEFORE;        // 750 (오늘~종료일 합계 목표 · 이월 30 포함)
 
   var YO = ['일','월','화','수','목','금','토'];
-  function addDays(iso, n) {
-    var t = Date.parse(iso + 'T00:00:00Z') + n * 86400000;
-    return new Date(t).toISOString().slice(0, 10);
-  }
+  function addDays(iso, n) { return new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
   function fmt(iso) {
     var d = new Date(Date.parse(iso + 'T00:00:00Z'));
     return (d.getUTCMonth() + 1) + '/' + d.getUTCDate() + ' (' + YO[d.getUTCDay()] + ')';
   }
   function isRest(iso) { return !!REST[iso]; }
+  function baseOf(iso) { return isRest(iso) ? 0 : DEFAULT_DAILY; }
 
-  /* 초기 계획: 기본 40명씩, 휴무일은 0 — 합계가 정확히 TARGET(760)이 되는 날까지 */
-  function buildInitial() {
+  /* ── 방식별 기본 배치 ─────────────────────────────────
+     next   : 첫 진행일에 이월 전액을 얹는다(기본)
+     spread : 진행일에 고르게 나눠 얹는다
+     extend : 어느 날에도 안 얹는다 → 뒤에 날짜가 더 필요해져 종료일이 밀린다   */
+  function buildPlan(mode) {
     var out = [], sum = 0, d = START, guard = 0;
+    var left = (mode === 'extend') ? 0 : CARRY;
+    var slots = Math.max(1, Math.ceil(TARGET / DEFAULT_DAILY));   // 대략의 진행일 수
+    var per = Math.floor(CARRY / slots), rem = CARRY % slots;
     while (sum < TARGET && guard++ < 400) {
-      var base = isRest(d) ? 0 : DEFAULT_DAILY;
-      var v = Math.min(base, TARGET - sum);
+      var base = baseOf(d), add = 0;
+      if (base > 0 && left > 0) {
+        if (mode === 'next') { add = left; }
+        else if (mode === 'spread') { add = per + (rem > 0 ? 1 : 0); if (rem > 0) rem--; }
+        add = Math.min(add, left); left -= add;
+      }
+      var v = Math.min(base + add, TARGET - sum);
       out.push({ date: d, base: base, plan: v });
       sum += v;
       d = addDays(d, 1);
@@ -266,55 +298,58 @@
     return out;
   }
 
-  var INIT = buildInitial();
-  var rows = INIT.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
-  var mode = 'fix';   // 'fix' = 종료일 고정 / 'keep' = 일일 인원 유지
+  var mode = 'next';                 // ★ 기본 = 다음날 정원에 더하기
+  var rows = buildPlan(mode);
+  var INIT = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
   var baseEndTxt = null;
 
   /* ── 계산 ───────────────────────────────────────────── */
   function sum() { return rows.reduce(function (s, r) { return s + r.plan; }, 0); }
-  function diff() { return sum() - TARGET; }                 // +초과 / −부족 / 0 일치
-  function endDate() {
-    for (var i = rows.length - 1; i >= 0; i--) if (rows[i].plan > 0) return rows[i].date;
+  function diff() { return sum() - TARGET; }
+  function endOf(arr) {
+    for (var i = arr.length - 1; i >= 0; i--) if (arr[i].plan > 0) return arr[i].date;
     return null;
   }
+  function endDate() { return endOf(rows); }
   function workDays() { return rows.filter(function (r) { return r.plan > 0; }).length; }
-  function minFor(i) { return i === 0 ? TODAY_USED : 0; }    // 오늘은 확정·진행분 아래로 못 내림
-  function maxFor() { return TARGET; }                       // 요구 ①: 남은 모집수를 넘길 수 없다
-  function scale() {
-    var mx = 100;
-    rows.forEach(function (r) { if (r.plan > mx) mx = r.plan; });
-    return mx;
-  }
+  function minFor(i) { return i === 0 ? TODAY_USED : 0; }   // 오늘은 확정·진행분 아래로 못 내림
+  function maxFor() { return TARGET; }                      // 요구 ①: 남은 배분수를 넘길 수 없다
+  function scale() { var mx = 100; rows.forEach(function (r) { if (r.plan > mx) mx = r.plan; }); return mx; }
+  function carryOn(r) { return Math.max(0, r.plan - r.base); }   // 그 날에 얹힌 이월분
+  function carryPlaced() { return rows.reduce(function (s, r) { return s + carryOn(r); }, 0); }
 
   /* ── 그리기 ─────────────────────────────────────────── */
   var elRows = document.getElementById('rows');
   var toastEl = document.getElementById('toast'), toastTimer = null;
   function toast(msg) {
     toastEl.textContent = msg; toastEl.classList.add('on');
-    clearTimeout(toastTimer); toastTimer = setTimeout(function () { toastEl.classList.remove('on'); }, 2300);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { toastEl.classList.remove('on'); }, 2400);
   }
 
   function render() {
     var sc = scale();
     elRows.innerHTML = rows.map(function (r, i) {
-      var adjusted = r.plan !== (INIT[i] ? INIT[i].plan : null) || !INIT[i];
-      var pw = Math.min(100, r.plan / sc * 100);
+      var init = INIT[i];
+      var adjusted = !init || r.plan !== init.plan;
+      var c = carryOn(r);
+      var basePw = Math.min(100, Math.min(r.plan, r.base) / sc * 100);   // 파랑 = 기본분
+      var pw = Math.min(100, r.plan / sc * 100);                          // 전체
       var bw = Math.min(100, r.base / sc * 100);
       var tags = (i === 0 ? '<span class="tag t">오늘</span>' : '')
                + (isRest(r.date) && r.plan === 0 ? '<span class="tag rs">휴무</span>' : '')
                + (adjusted ? '<span class="tag a">조절</span>' : '');
-      return '<div class="r' + (i === 0 ? ' today' : '') + (r.plan === 0 ? ' rest' : '') + '" data-i="' + i + '">'
+      return '<div class="r' + (i === 0 ? ' today' : '') + (r.plan === 0 ? ' zero' : '') + (c > 0 ? ' hascarry' : '') + '" data-i="' + i + '">'
         + '<span class="d">' + fmt(r.date) + tags + '</span>'
         + '<div class="g" data-i="' + i + '">'
-        +   '<div class="f" style="width:' + pw + '%"></div>'
+        +   '<div class="f" style="width:' + basePw + '%"></div>'
+        +   (c > 0 ? '<div class="c end" style="left:' + basePw + '%;width:' + (pw - basePw) + '%"></div>' : '')
         +   '<div class="base" style="left:' + bw + '%"></div>'
         +   '<div class="k" style="left:' + pw + '%"></div>'
         + '</div>'
         + '<div class="ctl">'
         +   '<button type="button" data-i="' + i + '" data-s="-1"' + (r.plan <= minFor(i) ? ' disabled' : '') + '>−</button>'
         +   '<span class="n"><input type="text" inputmode="numeric" data-i="' + i + '" value="' + r.plan + '">'
-        +     '<small>기본 ' + r.base + '</small></span>'
+        +     '<small>기본 ' + r.base + (c > 0 ? ' <em>＋이월 ' + c + '</em>' : '') + '</small></span>'
         +   '<button type="button" data-i="' + i + '" data-s="1"' + (r.plan >= maxFor() ? ' disabled' : '') + '>＋</button>'
         + '</div></div>';
     }).join('');
@@ -326,7 +361,6 @@
     var endTxt = e ? fmt(e) : '계산 불가';
     if (baseEndTxt === null) baseEndTxt = endTxt;
 
-    /* ① 진행 현황(요구 ②·③) */
     document.getElementById('sDone').textContent = DONE;
     document.getElementById('sTotal').textContent = TOTAL;
     document.getElementById('sRemain').textContent = TOTAL - DONE;
@@ -334,24 +368,22 @@
     document.getElementById('sEnd').textContent = endTxt;
     document.getElementById('sDays').textContent = workDays();
     document.getElementById('sCap').textContent = TARGET;
+    document.getElementById('sCarry').textContent = '↩ 이월 ' + CARRY + '명';
     document.getElementById('endTxt').textContent = endTxt;
-    document.getElementById('endChg').textContent = (endTxt !== baseEndTxt) ? '(원래 ' + baseEndTxt + ' → 변경됨)' : '';
+    document.getElementById('endChg').textContent = (endTxt !== baseEndTxt) ? '(처음 ' + baseEndTxt + ' → 변경됨)' : '';
 
-    /* ③ 배분 균형(요구 ⑥) */
-    var bal = document.getElementById('bal');
-    var ico = document.getElementById('balIco');
+    /* 배분 균형(요구 ⑥) */
+    var bal = document.getElementById('bal'), ico = document.getElementById('balIco');
     var l1 = document.getElementById('balL1'), l2 = document.getElementById('balL2');
-    var auto = document.getElementById('autoBtn');
-    var save = document.getElementById('saveBtn');
+    var auto = document.getElementById('autoBtn'), save = document.getElementById('saveBtn');
     var hint = document.getElementById('footHint');
 
     bal.classList.remove('ok', 'over', 'under');
     if (d === 0) {
       bal.classList.add('ok'); ico.textContent = '✓';
       l1.innerHTML = '배분 합계 <span class="num">' + s + '</span> / 배분해야 할 <span class="num">' + TARGET + '</span>명 — 딱 맞습니다';
-      l2.textContent = '이대로 [확정 저장]을 누르면 반영됩니다.';
-      auto.style.display = 'none';
-      save.disabled = false;
+      l2.innerHTML = '이월 ' + CARRY + '명 포함해 남김없이 배분됐습니다. [확정 저장]을 누르면 반영됩니다.';
+      auto.style.display = 'none'; save.disabled = false;
       hint.textContent = '총량과 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다';
     } else if (d > 0) {
       bal.classList.add('over'); ico.textContent = '▲';
@@ -363,96 +395,102 @@
     } else {
       bal.classList.add('under'); ico.textContent = '▼';
       l1.innerHTML = '<span class="num">' + d + '</span>명 부족 — <b>' + (-d) + '명을 더 배분해주세요</b>';
-      l2.innerHTML = '배분 합계 <span class="num">' + s + '</span>명이 배분해야 할 <span class="num">' + TARGET + '</span>명보다 적습니다. 남은 물량이 어디에도 열리지 않아 저장되지 않습니다.';
+      l2.innerHTML = '배분 합계 <span class="num">' + s + '</span>명이 배분해야 할 <span class="num">' + TARGET + '</span>명보다 적습니다. 남은 ' + (-d) + '명이 어디에도 열리지 않아 저장되지 않습니다.';
       auto.style.display = ''; auto.textContent = '자동으로 ' + (-d) + '명 채우기';
       save.disabled = true;
       hint.textContent = '부족 ' + (-d) + '명 — 채워야 저장할 수 있습니다';
     }
-    paintCarryPreview();
+    paintCarry();
   }
 
-  /* ② 이월 처리 방식 미리보기(요구 ④) */
-  function paintCarryPreview() {
-    var d = diff(), e = endDate(), el = document.getElementById('carryPrev');
-    if (mode === 'fix') {
-      if (d === 0) {
-        el.innerHTML = '종료일 <b>' + (e ? fmt(e) : '-') + '</b>을 지키고, 빠진 인원을 남은 진행일에 나눠 담습니다.';
-      } else {
-        var days = spreadTargets().length;
-        var per = Math.ceil(Math.abs(d) / Math.max(1, days));
-        el.innerHTML = '지금 [자동 맞춤]을 누르면 <b>' + (e ? fmt(e) : '-') + ' 종료일을 그대로 두고</b> 남은 '
-          + days + '일' + (d > 0 ? '에서 약 ' + per + '명씩 덜어냅니다.' : '에 약 ' + per + '명씩 나눠 담습니다.');
+  /* 이월이 지금 어디에 얹혀 있는지 + 방식별 종료일 비교(요구 ③·④) */
+  function paintCarry() {
+    var placed = carryPlaced();
+    var days = rows.filter(function (r) { return carryOn(r) > 0; });
+    var el = document.getElementById('carryWhere');
+    if (mode === 'extend') {
+      el.innerHTML = '이월 <b>' + CARRY + '명</b>을 <b>어느 날에도 얹지 않고</b> 종료일 뒤로 넘겼습니다 — 각 날은 기본 '
+        + DEFAULT_DAILY + '명 그대로이고 마지막 날이 늘어납니다.';
+    } else if (!days.length) {
+      el.innerHTML = '이월 <b>' + CARRY + '명</b>이 지금 어느 날에도 얹혀 있지 않습니다 — [자동 맞춤]으로 배치하세요.';
+    } else if (days.length === 1) {
+      el.innerHTML = '이월 <b>' + placed + '명</b>이 <b>' + fmt(days[0].date) + '</b> 정원에 얹혀 있습니다 — 기본 '
+        + days[0].base + ' → <b>' + days[0].plan + '명</b>.';
+    } else {
+      el.innerHTML = '이월 <b>' + placed + '명</b>이 <b>' + days.length + '일</b>에 나뉘어 얹혀 있습니다 — '
+        + fmt(days[0].date) + ' ~ ' + fmt(days[days.length - 1].date) + ' (하루 +'
+        + Math.min.apply(null, days.map(carryOn)) + '~' + Math.max.apply(null, days.map(carryOn)) + '명).';
+    }
+    // 방식별 종료일 비교 — 어느 방식을 고를지 숫자로 보여준다
+    var cmp = document.getElementById('carryCmp');
+    var e1 = endOf(buildPlan('next')), e2 = endOf(buildPlan('spread')), e3 = endOf(buildPlan('extend'));
+    cmp.innerHTML = '방식별 종료일 — 다음날에 <b>' + fmt(e1) + '</b> · 나눠 담기 <b>' + fmt(e2)
+      + '</b> · 뒤에 붙이기 <b>' + fmt(e3) + '</b>';
+  }
+
+  /* ── 자동 맞춤(고른 방식대로) ───────────────────────── */
+  function fillTargets() { return rows.map(function (r, i) { return { r: r, i: i }; }).filter(function (x) { return !isRest(x.r.date); }); }
+  function autoFit() {
+    var need = -diff();     // +면 채워야 함, −면 줄여야 함
+    if (need === 0) return;
+    if (mode === 'next') {
+      // 가장 이른 진행일에 몰아서(부족) / 뒤에서부터 덜어냄(초과)
+      var t = fillTargets();
+      if (need > 0) {
+        for (var a = 0; a < t.length && need > 0; a++) {
+          var room = maxFor() - t[a].r.plan;
+          var put = Math.min(room, need);
+          t[a].r.plan += put; need -= put;
+        }
+      } else { need = shrinkFromTail(-need) * -1; }
+    } else if (mode === 'spread') {
+      var t2 = fillTargets(), guard = 0;
+      while (need !== 0 && guard++ < 6000) {
+        var moved = false;
+        for (var k = 0; k < t2.length && need !== 0; k++) {
+          var x = t2[k], step = need > 0 ? 1 : -1, nv = x.r.plan + step;
+          if (nv < minFor(x.i) || nv > maxFor()) continue;
+          x.r.plan = nv; need -= step; moved = true;
+        }
+        if (!moved) break;
       }
     } else {
-      if (d === 0) {
-        el.innerHTML = '각 날의 인원은 그대로 두고, 빠진 인원만큼 <b>종료일을 뒤로 연장</b>합니다.';
-      } else {
-        var sim = simulateKeep();
-        el.innerHTML = '지금 [자동 맞춤]을 누르면 <b>각 날 인원은 그대로 두고</b> 종료일이 <b>'
-          + (e ? fmt(e) : '-') + ' → ' + (sim ? fmt(sim) : '-') + '</b>로 ' + (d > 0 ? '당겨집니다' : '연장됩니다') + '.';
-      }
-    }
-  }
-
-  /* ── 자동 맞춤 ──────────────────────────────────────── */
-  // 종료일 고정: 지금 열려 있는 날(휴무 제외)에 골고루 나눠 담는다 — 마지막 날짜 불변
-  function spreadTargets() {
-    return rows.map(function (r, i) { return { r: r, i: i }; })
-      .filter(function (x) { return !isRest(x.r.date); });
-  }
-  function autoFix() {
-    var need = -diff();                 // +면 채워야 함, −면 줄여야 함
-    var t = spreadTargets();
-    if (!t.length) { toast('나눠 담을 진행일이 없습니다'); return; }
-    var guard = 0;
-    while (need !== 0 && guard++ < 5000) {
-      var moved = false;
-      for (var k = 0; k < t.length && need !== 0; k++) {
-        var x = t[k], step = need > 0 ? 1 : -1;
-        var nv = x.r.plan + step;
-        if (nv < minFor(x.i) || nv > maxFor()) continue;
-        x.r.plan = nv; need -= step; moved = true;
-      }
-      if (!moved) break;
+      applyExtend(); need = 0;
     }
     if (need !== 0) toast('여기까지가 한계입니다 — ' + Math.abs(need) + '명은 날짜를 직접 조절해주세요');
     render();
   }
-  // 일일 인원 유지: 각 날 인원은 그대로, 뒤에 날짜를 붙이거나 떼어 종료일을 옮긴다
-  function simulateKeep() {
-    var copy = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
-    applyKeep(copy);
-    for (var i = copy.length - 1; i >= 0; i--) if (copy[i].plan > 0) return copy[i].date;
-    return null;
-  }
-  function applyKeep(arr) {
-    var s = arr.reduce(function (a, r) { return a + r.plan; }, 0);
-    var guard = 0;
-    while (s > TARGET && guard++ < 900) {          // 초과 → 뒤에서부터 덜어낸다
+  function shrinkFromTail(amount) {
+    var g = 0;
+    while (amount > 0 && g++ < 900) {
       var last = -1;
-      for (var i = arr.length - 1; i >= 0; i--) if (arr[i].plan > 0) { last = i; break; }
+      for (var i = rows.length - 1; i >= 0; i--) if (rows[i].plan > 0) { last = i; break; }
       if (last < 0) break;
-      var cut = Math.min(arr[last].plan - minFor(last), s - TARGET);
-      if (cut <= 0) { if (last === 0) break; arr.splice(last, 1); continue; }
-      arr[last].plan -= cut; s -= cut;
-      if (arr[last].plan === 0 && last === arr.length - 1) arr.pop();
+      var cut = Math.min(rows[last].plan - minFor(last), amount);
+      if (cut <= 0) { if (last === 0) break; rows.splice(last, 1); continue; }
+      rows[last].plan -= cut; amount -= cut;
+      if (rows[last].plan === 0 && last === rows.length - 1) rows.pop();
     }
-    while (s < TARGET && guard++ < 900) {          // 부족 → 뒤에 진행일을 붙인다
-      var d = addDays(arr.length ? arr[arr.length - 1].date : START, 1);
-      while (isRest(d)) { arr.push({ date: d, base: 0, plan: 0 }); d = addDays(d, 1); }
+    return amount;
+  }
+  // 각 날 인원은 그대로 두고 뒤에 날짜를 붙이거나 떼어 균형을 맞춘다
+  function applyExtend() {
+    var s = sum(), g = 0;
+    if (s > TARGET) { shrinkFromTail(s - TARGET); return; }
+    while (s < TARGET && g++ < 900) {
+      var d = addDays(rows.length ? rows[rows.length - 1].date : START, 1);
+      while (isRest(d)) { rows.push({ date: d, base: 0, plan: 0 }); d = addDays(d, 1); }
       var v = Math.min(DEFAULT_DAILY, TARGET - s);
-      arr.push({ date: d, base: DEFAULT_DAILY, plan: v });
+      rows.push({ date: d, base: DEFAULT_DAILY, plan: v });
       s += v;
     }
-    return arr;
   }
-  function autoKeep() { rows = applyKeep(rows); render(); }
 
   /* ── 값 변경 ────────────────────────────────────────── */
   function setVal(i, v) {
     var r = rows[i]; if (!r) return;
     v = Math.round(v);
-    if (v > maxFor()) { v = maxFor(); toast('한 날에 남은 모집수(' + TARGET + '명)보다 많이 넣을 수는 없습니다'); }
+    if (v > maxFor()) { v = maxFor(); toast('한 날에 남은 배분수(' + TARGET + '명)보다 많이 넣을 수는 없습니다'); }
     if (v < minFor(i)) {
       v = minFor(i);
       if (i === 0 && TODAY_USED > 0) toast('오늘은 이미 ' + TODAY_USED + '명이 확정·진행 중이라 그 아래로는 줄일 수 없습니다');
@@ -460,7 +498,6 @@
     r.plan = v;
   }
 
-  /* 게이지 드래그 */
   var drag = null;
   elRows.addEventListener('pointerdown', function (ev) {
     var g = ev.target.closest('.g'); if (!g) return;
@@ -472,18 +509,19 @@
   window.addEventListener('pointerup', function () { if (drag) { drag = null; render(); } });
   function dragTo(ev) {
     var b = drag.el.getBoundingClientRect();
-    var ratio = Math.max(0, Math.min(1, (ev.clientX - b.left) / b.width));
-    setVal(drag.i, ratio * scale());
+    setVal(drag.i, Math.max(0, Math.min(1, (ev.clientX - b.left) / b.width)) * scale());
     // 드래그 중에는 그 줄만 갱신(전체 재렌더는 잡고 있는 손을 놓치게 한다)
     var r = rows[drag.i], sc = scale(), pw = Math.min(100, r.plan / sc * 100);
-    drag.el.querySelector('.f').style.width = pw + '%';
+    var basePw = Math.min(100, Math.min(r.plan, r.base) / sc * 100);
+    drag.el.querySelector('.f').style.width = basePw + '%';
+    var c = drag.el.querySelector('.c');
+    if (c) { c.style.left = basePw + '%'; c.style.width = Math.max(0, pw - basePw) + '%'; }
     drag.el.querySelector('.k').style.left = pw + '%';
     var inp = drag.el.parentElement.querySelector('input');
     if (inp) inp.value = r.plan;
     paintTop();
   }
 
-  /* −/＋ · 직접 입력 */
   elRows.addEventListener('click', function (ev) {
     var b = ev.target.closest('.ctl button'); if (!b) return;
     var i = Number(b.dataset.i);
@@ -498,30 +536,42 @@
     render();
   });
   elRows.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.target.blur(); }
+    if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') ev.target.blur();
   });
 
-  /* 토글 · 버튼 */
-  function setMode(m) {
+  /* ── 방식 전환 = 이월을 그 방식대로 재배치 ──────────── */
+  function setMode(m, quiet) {
     mode = m;
-    document.getElementById('mFix').classList.toggle('on', m === 'fix');
-    document.getElementById('mKeep').classList.toggle('on', m === 'keep');
-    paintTop();
+    document.getElementById('mNext').classList.toggle('on', m === 'next');
+    document.getElementById('mSpread').classList.toggle('on', m === 'spread');
+    document.getElementById('mExtend').classList.toggle('on', m === 'extend');
+    rows = buildPlan(m);
+    INIT = rows.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
+    render();
+    if (!quiet) {
+      var e = endDate();
+      toast(m === 'next' ? '이월 ' + CARRY + '명을 다음 진행일에 얹었습니다 — 종료일 ' + fmt(e)
+          : m === 'spread' ? '이월 ' + CARRY + '명을 진행일에 나눠 담았습니다 — 종료일 ' + fmt(e)
+          : '이월 ' + CARRY + '명을 종료일 뒤로 넘겼습니다 — 종료일 ' + fmt(e));
+    }
   }
-  document.getElementById('mFix').addEventListener('click', function () { setMode('fix'); });
-  document.getElementById('mKeep').addEventListener('click', function () { setMode('keep'); });
+  document.getElementById('mNext').addEventListener('click', function () { setMode('next'); });
+  document.getElementById('mSpread').addEventListener('click', function () { setMode('spread'); });
+  document.getElementById('mExtend').addEventListener('click', function () { setMode('extend'); });
+
   document.getElementById('autoBtn').addEventListener('click', function () {
-    if (mode === 'fix') autoFix(); else autoKeep();
-    toast(mode === 'fix' ? '종료일을 지키고 남은 날에 나눠 담았습니다' : '각 날 인원을 지키고 종료일을 옮겼습니다');
+    autoFit();
+    toast(mode === 'next' ? '가장 이른 진행일에 몰아서 맞췄습니다'
+        : mode === 'spread' ? '진행일에 고르게 나눠 맞췄습니다'
+        : '각 날 인원을 지키고 종료일을 옮겨 맞췄습니다');
   });
   document.getElementById('resetBtn').addEventListener('click', function () {
-    rows = INIT.map(function (r) { return { date: r.date, base: r.base, plan: r.plan }; });
-    render(); toast('조절 전으로 되돌렸습니다');
+    setMode(mode, true); toast('이 방식의 기본 배치로 되돌렸습니다');
   });
   document.getElementById('saveBtn').addEventListener('click', function () {
     if (diff() !== 0) return;
     var e = endDate();
-    toast('저장했습니다 — 배분 ' + sum() + '명 · 종료일 ' + (e ? fmt(e) : '-') + ' (시안이라 실제 저장은 없습니다)');
+    toast('저장했습니다 — 배분 ' + sum() + '명(이월 ' + CARRY + ' 포함) · 종료일 ' + (e ? fmt(e) : '-') + ' (시안이라 실제 저장은 없습니다)');
   });
 
   render();
