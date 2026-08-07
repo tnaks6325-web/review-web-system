@@ -30,10 +30,13 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
   sched._clearCache();
   {
     // tab_configs 조회에서 무시트로 나오면 → 그 키는 null(미적용)이고 raw 조회로 내려가지 않는다
+    // ★★ 스텁은 SQL 을 해석하지 않으므로 "행이 돌아왔다"만 보면 조건이 반전돼도(= FALSE) 통과한다
+    //    → 실제로 나간 SQL 의 술어까지 붙잡는다(변이시험 M1 이 잡은 약한 단언).
     let rawQueries = 0;
+    let tcSql = '';
     const db = {
       query: async (sql) => {
-        if (/FROM tab_configs/.test(sql)) return { rows: [{ sheet_id: 'wt_a', tab_gid: '11' }] };
+        if (/FROM tab_configs/.test(sql)) { tcSql = String(sql); return { rows: [{ sheet_id: 'wt_a', tab_gid: '11' }] }; }
         rawQueries++;
         return { rows: [] };
       },
@@ -41,6 +44,8 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     const m = await sched.deriveSchedules(db, [{ sheetId: 'wt_a', tabGid: '11' }]);
     ok('무시트 탭은 일정 null(= 미적용 → 조절 모달이 잠기지 않는다)', m.get('wt_a::11') === null);
     ok('무시트 탭은 raw 미러를 읽지도 않는다(불필요한 조회 0)', rawQueries === 0);
+    ok('제외 대상은 sheetless=TRUE 인 탭이다(조건 반전 차단)',
+      /COALESCE\(sheetless,\s*FALSE\)\s*=\s*TRUE/.test(tcSql));
   }
   sched._clearCache();
   {
@@ -141,6 +146,32 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     });
     const r = await dailyPlan.prefillFromWorktable({ campaignId: 'c1', sheetId: 'a', tabName: 'b', today: '2026-08-05' });
     ok('달력 저장 실패는 사유를 올린다(095 미적용 등)', r.ok === false && r.reason === 'insert_failed');
+  }
+  {
+    // ★ 상한 — 비정상 데이터(수년치 날짜)로 달력이 폭발하지 않는다.
+    //   MAX_PLAN_DAYS 를 무력화하면 여기서 잡힌다(변이시험 M6).
+    // ★ 상한 값을 구현에서 읽어 오면 상한을 무력화해도 기대값이 함께 움직여 통과한다
+    //   (동어반복 단언 — 변이시험 M6 이 실제로 통과시켰다) → 값을 여기에 못 박는다.
+    const CAP = 400;
+    ok('상한 값은 400일로 고정', dailyPlan.MAX_PLAN_DAYS === CAP);
+    const many = [];
+    const d0 = Date.UTC(2026, 7, 10);                       // 전부 미래 날짜
+    for (let i = 0; i < CAP + 25; i++) {
+      const d = new Date(d0 + i * 86400000).toISOString().slice(0, 10);
+      many.push({ row_json: { '구매일자': d } });
+    }
+    let insertCount = 0;
+    dailyPlan.__setPoolForTest({
+      query: async (sql) => {
+        if (/FROM campaign_participants/.test(sql)) return { rows: many };
+        insertCount++;
+        return { rowCount: 1 };
+      },
+    });
+    const r = await dailyPlan.prefillFromWorktable({
+      campaignId: 'c1', sheetId: 'wt_a', tabName: 'T1', today: '2026-08-01' });
+    ok('상한을 넘는 날짜는 INSERT 하지 않는다', insertCount === CAP);
+    ok('상한 초과분은 조용히 사라지지 않고 skipped 에 잡힌다', r.ok === true && r.skipped >= 25);
   }
 
   /* ══════════════ C. 공고 발행 배선 ══════════════ */
