@@ -213,8 +213,47 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       r.canCutover === true && r.checks.find(c => c.key === 'mirror').state === 'pass');
     restore();
 
-    // 우리가 읽은 뒤에 시트가 수정됨 → 그 편집이 사라지므로 잠금
-    restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 60 * 1000).toISOString() });
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    /* ★★★ 운영 실측 오탐(2026-08-07) — **탭 자기 타임스탬프로 비교하면 안 된다**.
+     *   미러는 내용이 바뀐 탭만 갱신하고 checksum 같은 탭은 통째로 건너뛰므로, 한 시트에서
+     *   다른 탭만 바뀌면 이 탭의 값은 옛날에 머문다. 실측: 퓨비아 두 탭 = 미러 갱신 552분 전 ·
+     *   시트 수정 465분 전 → "안 읽어 왔습니다"로 잠겼지만 실은 그때 읽고 같아서 건너뛴 것.
+     *   → 비교 대상은 **시트 단위 MAX(sheet_modified_at)**(미러의 스킵 판정과 같은 값). */
+    const old = new Date(Date.now() - 552 * 60000).toISOString();   // 이 탭이 마지막으로 바뀐 시각
+    const sheetKnown = new Date(Date.now() - 465 * 60000).toISOString(); // 그 시트를 읽어 둔 버전
+    const { db } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
+      sheetless: false, mirroredAt: old, sheetModifiedAt: old, sheetKnownAt: sheetKnown, boardRows: 3 } });
+    cutover.__setPoolForTest(db);
+    let restore = stubDeps({ remoteModifiedAt: sheetKnown });
+    let r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★★★ 같은 시트의 다른 탭만 바뀐 경우를 "안 읽음"으로 오판하지 않는다(운영 실측 오탐)',
+      r.canCutover === true && r.checks.find(c => c.key === 'mirror').state === 'pass');
+    restore();
+
+    // 그래도 시트 단위 값보다 새로운 수정이면 여전히 잠근다(완화 아님)
+    restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 5 * 60000).toISOString() });
+    r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★ 시트 단위 값보다 새로운 수정이면 여전히 잠근다',
+      r.canCutover === false && r.checks.find(c => c.key === 'mirror').state === 'fail');
+    restore(); cutover.__setPoolForTest(null);
+
+    const src = noLineComments(read('src/services/sheetlessCutover.service.js'));
+    ok('★ 시트 단위 최댓값을 실제로 조회한다', /MAX\(r2\.sheet_modified_at\) AS "sheetKnownAt"/.test(src)
+      && /FROM raw_sheet_tabs r2 WHERE r2\.sheet_id = tc\.sheet_id/.test(src));
+    ok('★★ 미러도 같은 값으로 스킵을 판정한다(판정 사본 0)', (() => {
+      const m = noLineComments(read('src/services/rawMirror.service.js'));
+      return /sheetModifiedMap\[sheetId\]/.test(m) && /remote <= lastKnown/.test(m);
+    })());
+  }
+  {
+    // 읽어 둔 시점(5시간 전) 이후에 시트가 수정됨(1분 전) → 그 편집이 사라지므로 잠금
+    const seen = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
+    const { db } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
+      sheetless: false, mirroredAt: seen, sheetModifiedAt: seen, sheetKnownAt: seen, boardRows: 3 } });
+    cutover.__setPoolForTest(db);
+    let restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 60 * 1000).toISOString() });
     r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
     const mk = r.checks.find(c => c.key === 'mirror');
     ok('★ 읽어 둔 뒤 시트가 수정됐으면 잠금', r.canCutover === false && mk.state === 'fail');
