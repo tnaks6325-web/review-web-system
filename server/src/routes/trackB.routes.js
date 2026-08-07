@@ -426,11 +426,11 @@ router.get('/sheetless/checklist', authMiddleware, adminOrMasterMiddleware, asyn
 });
 router.post('/sheetless/cutover', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, confirmName, force } = req.body || {};
+    const { sheetId, tabName, force } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     // ★ force 는 **명시적으로 true 일 때만** — 값이 빠지거나 문자열이면 점검표를 그대로 건다.
     const out = await cutover.enableSheetless({
-      sheetId, tabName, confirmName, by: _by(req), force: force === true,
+      sheetId, tabName, by: _by(req), force: force === true,
     });
     res.status(out.ok ? 200 : 409).json(out);
   } catch (err) { _cutoverErr(err, res, next); }

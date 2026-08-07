@@ -319,19 +319,20 @@ async function listCutoverTabs({ since = null, includeUnknown = false, limit = L
 
 /**
  * 이관 — 무시트 표식을 켠다(= 그 작업의 시트 연결을 끊는다).
- * ★ 작업명 타이핑 확정 필수(오클릭 방지) · 점검표 fail-closed · force 는 명시 요청일 때만.
+ * ★ 점검표 fail-closed · force 는 명시 요청일 때만.
+ *
+ * ★★ 작업명 타이핑 확정은 **제거했다**(사용자 확정 2026-08-07). 오클릭 방어는 두 겹으로 남는다:
+ *    ① 화면 확인창이 **그 작업 이름을 문장에 넣어** 보여준다(다른 줄이면 거기서 알아챈다)
+ *    ② 점검표 fail-closed — 확신이 없는 작업은 애초에 [이관] 버튼이 열리지 않는다.
+ *    그리고 되돌리기(재연결)가 점검표 없이 언제든 가능하다(파괴적 조작이 아니다).
+ *    ⚠ 되살릴 거면 화면·서버·가드 세 곳을 같이 되돌릴 것 — 서버만 켜면 화면이 못 보내 전면 잠금이 된다.
  */
-async function enableSheetless({ sheetId, tabName, confirmName, by = '', force = false, now = new Date() } = {}) {
+async function enableSheetless({ sheetId, tabName, by = '', force = false, now = new Date() } = {}) {
   if (!sheetId || !tabName) throw new Error('enableSheetless: sheetId, tabName 필수');
   const db = _db();
   const tab = await _loadTab(db, sheetId, tabName);
   if (!tab) return { ok: false, reason: 'tab_not_found', message: '등록되지 않은 작업입니다.' };
   if (tab.sheetless) return { ok: true, already: true, message: '이미 이관된 작업입니다.' };
-
-  // ★ 타이핑 확정 — 목록에서 옆 줄을 눌렀을 때 그대로 실행되지 않게(관측 뷰 force 마찰과 같은 장치).
-  if (String(confirmName || '').trim() !== String(tabName).trim()) {
-    return { ok: false, reason: 'confirm_mismatch', message: '작업 이름을 정확히 입력해야 이관됩니다.' };
-  }
 
   const list = await cutoverChecklist({ sheetId, tabName, now });
   if (!list.ok) return list;
