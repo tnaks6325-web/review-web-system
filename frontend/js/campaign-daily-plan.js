@@ -111,10 +111,36 @@
   }
   /** 배분해야 할 인원 = 총량 − 어제까지 확정 (오늘 줄부터 종료일까지의 합계 목표) */
   function targetTotal() { return Math.max(0, totalFor() - doneBefore()); }
-  /** 이월(미달) 인원 — 서버 계산값. null = 계산 불가(0 으로 꾸미지 않는다) */
+  /** 이미 앞으로의 날짜에 **저장해 둔** 추가분(기준선 초과분) 합계 — 이월을 이미 배치한 몫이다. */
+  function placedAhead() {
+    var from = S.data.today, sum = 0;
+    Object.keys(S.base).forEach(function (d) {
+      if (d >= from) sum += Math.max(0, S.base[d] - baseFor(d));
+    });
+    return sum;
+  }
+  /** 아직 **어느 날에도 얹지 않은** 이월 인원. null = 계산 불가(0 으로 꾸미지 않는다).
+   *  ★★ 저장해 둔 배치분을 빼지 않으면 모달을 열 때마다 같은 이월을 또 얹자고 제안하고
+   *    (저장 → 재열람 → 또 제안), 화면의 "이월 N명"이 실제로 남은 몫보다 커진다. */
   function carryAmt() {
     var v = S.data.carryPending;
-    return (v == null) ? null : Math.max(0, Number(v) || 0);
+    if (v == null) return null;
+    return Math.max(0, (Number(v) || 0) - placedAhead());
+  }
+  /** ★ 자동 이월 공고(carry_mode!=='hold')는 서버(066)가 **오늘 정원에** 이월을 이미 얹는다 —
+   *  그래서 "다음날에 더하기"는 손 안 댄 상태 그 자체이고, 저장할 것이 없다.
+   *  보류(hold) 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다. */
+  function autoCarryOnToday() {
+    if (!S.data || S.data.carryMode === 'hold') return 0;
+    return carryAmt() || 0;
+  }
+  /** 그날 **손대지 않았을 때의 값** — 이 값과 같으면 저장할 필요가 없다(불필요한 고정 방지).
+   *  ★★ 구간 전체를 무조건 저장하면, 아무것도 안 건드리고 [확정 저장]만 눌러도 앞으로의 모든
+   *    날짜가 리뷰웹 값으로 굳어 **시트 일정 공고의 시트 우선권이 통째로 사라진다**(코드리뷰). */
+  function naturalFor(d) {
+    if (S.base[d] != null) return S.base[d];         // 이미 저장된 조절 = 그 값이 그날의 전부(095)
+    var b = baseFor(d);
+    return (d === S.data.today) ? b + autoCarryOnToday() : b;
   }
   function balanceOn() { return !!(S && S.balance); }
   function sumPlan() {
@@ -149,6 +175,10 @@
   function buildHorizon(mode) {
     var target = targetTotal();
     if (target <= 0) return null;                       // 무제한·이미 충족 = 균형 개념 없음
+    // ★★ 오늘 하한(확정·진행 인원)이 배분해야 할 인원보다 크면 **어떤 배치도 합계를 맞출 수 없다**
+    //   (총량 초과 확정·소진 직전 홀드에서 도달). 그대로 켜면 균형 바가 영원히 "초과 — 저장불가"
+    //   이고 [자동 맞춤]은 하한에 막혀 아무 일도 안 하는 죽은 버튼이 된다 → 균형 모드를 끈다.
+    if (minFor(baseDate()) > target) return null;
     var wd = walkDays(target);
     if (!wd) return null;                               // 400일 안에 못 채움(계획이 전부 0 등)
     var carry = (mode === 'extend') ? 0 : (carryAmt() || 0);
@@ -170,7 +200,7 @@
         si++;
         // ★ 오늘은 이미 확정·진행 중인 인원 아래로 잡히면 안 된다 — 저장된 조절이 그 사이 늘어난
         //   확정 인원보다 작을 수 있고, 그대로 보내면 서버가 below_used 로 거절한다(막다른 길).
-        var v = Math.max(minFor(d), Math.min(base + add, target - sum));
+        var v = Math.max(minFor(d), Math.min(base + add, target - sum, MAX_DAY));
         dates.push(d); plan[d] = v; cmap[d] = Math.max(0, Math.min(add, v - base));
         sum += v;
       }
@@ -195,8 +225,10 @@
     h.dates.forEach(function (d) { plan[d] = h.plan[d]; });
     // ★ 이미 저장돼 있는 계획일이 구간 밖(휴무일·종료일 이후)이면 **그대로 살려** 합계에 넣는다 —
     //   화면에서 지우면 저장 시 remove 로 나가 사람이 정해 둔 계획이 조용히 사라진다.
-    var bd = baseDate();
-    Object.keys(S.base).forEach(function (d) { if (d >= bd && plan[d] == null) plan[d] = S.base[d]; });
+    // ★ 기준은 baseDate 가 아니라 **오늘** — 시작일이 미래인 공고에서 baseDate 로 자르면
+    //   today ≤ d < 시작일 구간의 저장된 계획이 화면에서 빠져 저장 시 remove 로 삭제된다(코드리뷰).
+    var from = S.data.today;
+    Object.keys(S.base).forEach(function (d) { if (d >= from && plan[d] == null) plan[d] = S.base[d]; });
     S.carryMode = mode;
     S.horiz = Object.keys(plan).sort();
     S.carryMap = h.carry;
@@ -226,7 +258,10 @@
     return (S.horiz || []).filter(function (d) { return carryOn(d) > 0; });
   }
   /** 한 날에 넣을 수 있는 최대 = 배분해야 할 인원(요구 ① — 총원까지 남은 건수 안에서만) */
-  function maxFor() { return balanceOn() ? Math.max(1, targetTotal()) : 9999; }
+  /** 한 날에 넣을 수 있는 최대 = 배분해야 할 인원(요구 ① — 총원까지 남은 건수 안에서만).
+   *  ★ 서버 MAX_DAY_COUNT(9999)를 넘기면 savePlans 가 bad_count 로 **저장 전체를 거부**한다. */
+  var MAX_DAY = 9999;
+  function maxFor() { return balanceOn() ? Math.min(MAX_DAY, Math.max(1, targetTotal())) : MAX_DAY; }
 
   /* 자동 맞춤 — 부족/초과분만 고른 방식대로 메운다(전체 재배치가 아니라 **차이만** 손댄다).
      ★ 남는 부족분은 종료일 뒤에 새 진행일을 붙여 흡수한다 — 총량은 어떤 조절로도 변하지 않는다. */
@@ -273,6 +308,12 @@
       }
     }
     render();
+    // 하한·상한에 막혀 다 못 메웠으면 **말한다** — 눌러도 아무 일 없는 버튼을 두지 않는다
+    if (diffPlan() !== 0) {
+      toast(diffPlan() > 0
+        ? '오늘 확정·진행 인원 아래로는 줄일 수 없어 ' + diffPlan() + '명이 남았습니다'
+        : '한 날 최대(' + maxFor() + '명)·구간 상한에 막혀 ' + (-diffPlan()) + '명을 다 채우지 못했습니다');
+    }
   }
 
   /** 예상 종료일: 기준일부터 계획값대로 채운다고 가정(최대 400일 탐색). 무제한이면 null */
@@ -488,6 +529,7 @@
 
   function dirtyDates() {
     if (!S || !S.data) return [];
+    if (balanceOn()) { var pl = payload(); return pl.set.map(function (x) { return x.date; }).concat(pl.remove).sort(); }
     var out = [];
     var ds = {};
     Object.keys(S.plan).forEach(function (d) { ds[d] = 1; });
@@ -497,6 +539,31 @@
       if ((a == null) !== (b == null) || (a != null && a !== b)) out.push(d);
     });
     return out.sort();
+  }
+
+  /** 균형 모드의 저장 payload — ★★ **손대지 않은 날은 보내지 않는다**.
+   *  구간 전체를 무조건 저장하면 ① 아무것도 안 건드리고 [확정 저장]만 눌러도 앞으로의 전 날짜가
+   *  리뷰웹 값으로 굳어 **시트 일정 공고의 시트 우선권이 사라지고** ② 자동 이월 공고에서는 서버가
+   *  이미 얹고 있는 오늘 이월까지 명시 계획으로 박아 이월이 영영 정산되지 않는다(코드리뷰). */
+  function payload() {
+    var set = [], remove = [], ds = {}, from = S.data.today, target = targetTotal(), cum = 0;
+    Object.keys(S.plan).forEach(function (d) { if (d >= from) ds[d] = 1; });
+    Object.keys(S.base).forEach(function (d) { if (d >= from) ds[d] = 1; });
+    Object.keys(ds).sort().forEach(function (d) {
+      var v = S.plan[d];
+      if (v == null) { if (S.base[d] != null) remove.push(d); return; }
+      var nat = naturalFor(d), residual = Math.max(0, target - cum);
+      cum += v;
+      // ★ 마지막 부분일(총량에 맞춰 남은 만큼만 연 날)은 고정할 필요가 없다 — 서버도 같은
+      //   총량 clamp 를 걸고, 고정하지 않으면 앞 날이 미달했을 때 그날이 온전히 열린다(더 안전).
+      if (v < nat && v === residual && S.base[d] == null) return;
+      if (v === nat) return;                                 // 손대지 않은 값 = 보낼 필요 없음
+      // 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(시트/일건수 우선권 복귀)
+      if (S.base[d] != null && v === baseFor(d)) remove.push(d);
+      else set.push({ date: d, count: v });
+      return;
+    });
+    return { set: set, remove: remove };
   }
 
   /* ── 렌더 ───────────────────────────────────────────────── */
@@ -602,9 +669,15 @@
     var workLeft = (S.horiz || []).filter(function (d) { return planFor(d) > 0; }).length;
     var statBlk = '<div class="cdp-stat"><div class="r1">'
       + '<span class="big">모집 현황 <em>' + done + '</em> / ' + (tot > 0 ? tot : '무제한') + (tot > 0 ? '명' : '') + '</span>'
-      + (carry === null
-        ? '<span class="cdp-cb un" title="기준선 조회 실패 등으로 이월 인원을 계산하지 못했습니다">↩ 이월 ?</span>'
-        : (carry > 0 ? '<span class="cdp-cb" title="어제까지의 계획 대비 못 채운 인원입니다">↩ 이월 ' + carry + '명</span>' : ''))
+      // ★ 시트 일정 공고는 그날 정원을 시트가 정해 **이월 개념이 적용되지 않는다** — 여기서 "?"를
+      //   띄우면 담당자가 "조회 실패"로 오독해 원인을 엉뚱한 데서 찾는다(heldBlk '해당 없음'과 같은 규율).
+      + (j.scheduleDriven === true ? ''
+        : carry === null
+          ? '<span class="cdp-cb un" title="기준선 조회 실패 등으로 이월 인원을 계산하지 못했습니다">↩ 이월 ?</span>'
+          : (carry > 0
+            ? '<span class="cdp-cb" title="어제까지의 계획 대비 못 채운 인원 중 아직 어느 날에도 얹지 않은 몫입니다'
+              + (placedAhead() > 0 ? ' (이미 배치해 둔 ' + placedAhead() + '명은 제외)' : '') + '">↩ 이월 ' + carry + '명</span>'
+            : ''))
       + '</div>'
       + (tot > 0 ? '<div class="bar"><i style="width:' + Math.min(100, done / tot * 100).toFixed(1) + '%"></i></div>' : '')
       + '<div class="kv">'
@@ -1119,11 +1192,15 @@
   /* ── 저장 ───────────────────────────────────────────────── */
   async function _save() {
     if (!S || !S.data || S.saving) return;
-    var set = [], remove = [];
-    dirtyDates().forEach(function (d) {
-      if (S.plan[d] != null) set.push({ date: d, count: S.plan[d] });
-      else remove.push(d);
-    });
+    var set, remove;
+    if (balanceOn()) { var pl = payload(); set = pl.set; remove = pl.remove; }   // 게이트와 같은 판정
+    else {
+      set = []; remove = [];
+      dirtyDates().forEach(function (d) {
+        if (S.plan[d] != null) set.push({ date: d, count: S.plan[d] });
+        else remove.push(d);
+      });
+    }
     if (!set.length && !remove.length) return;
     // 균형 모드 저장 게이트(버튼 우회 방어) — 합계 불일치·저장 상한 초과는 보내지 않는다
     if (balanceOn() && (diffPlan() !== 0 || set.length + remove.length > MAX_ROWS)) return;

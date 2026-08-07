@@ -542,15 +542,18 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   };
   const partDate = slice('  var DOW =', '  /* ── 마운트(body 직속)', '날짜·기준선 유틸');
   const partBal = slice('  var MAX_ROWS = 120;', '  /** 예상 종료일:', '균형 엔진');
+  // payload() 는 렌더 근처에 있어 따로 잘라 붙인다(저장 게이트와 저장 본문의 단일 출처)
+  const partPay = slice('  /** 균형 모드의 저장 payload', '  /* ── 렌더 ─', '저장 payload');
 
   const sandbox = { S: null, console, renders: 0 };
   sandbox.render = () => { sandbox.renders++; };
   vm.createContext(sandbox);
-  vm.runInContext(partDate + '\n' + partBal
+  vm.runInContext(partDate + '\n' + partBal + '\n' + partPay
     // 엔진이 부르는 바깥 함수(행 하한) — 오늘은 확정·진행 인원 아래로 못 줄인다
     + '\nfunction minFor(d){ return d === S.data.today ? (S.data.todayUsed || 0) : 0; }'
     + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
-    + ' autoFit, maxFor, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor, CARRY_MODES, MAX_ROWS };',
+    + ' autoFit, maxFor, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
+    + ' payload, naturalFor, placedAhead, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY };',
     sandbox);
   const A = sandbox.api;
 
@@ -719,6 +722,88 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('7m 열자마자는 변경 없음', A.changedFromOpen() === false);
   A.applyCarryMode('extend');
   ok('7m 방식 전환 = 변경 있음', A.changedFromOpen() === true);
+
+  /* ── 7A. 코드리뷰 반영 6종(완화 금지) ─────────────────────────────── */
+  console.log('\n[7A] 코드리뷰 반영 — 막다른 길·불필요한 고정·유령 이월 차단');
+
+  // 7A-1 ★★ 오늘 하한 > 배분 목표 = 균형 모드를 켜지 않는다
+  //   (켜면 균형 바가 영원히 "초과 — 저장불가"이고 [자동 맞춤]은 하한에 막혀 죽은 버튼이 된다)
+  mkS({ data: { submittedAll: 800, todaySubmitted: 2, byDateSubmitted: { '2026-08-08': 2 }, todayUsed: 40 } });
+  ok('7A-1 오늘 하한 > 배분 목표 = 균형 모드 꺼짐(막다른 길 방지)',
+    A.targetTotal() < 40 && A.applyCarryMode('next') === false, A.targetTotal());
+
+  // 7A-2 ★★ 손대지 않은 날은 저장하지 않는다 — 시트 일정 공고의 시트 우선권이 사라지면 안 된다
+  {
+    const dates = [];
+    for (let i = 0; i < 14; i++) dates.push({ date: new Date(Date.UTC(2026, 7, 8 + i)).toISOString().slice(0, 10), slots: 20 });
+    mkS({ data: {
+      scheduleDriven: true, scheduleDates: dates, scheduleTotal: 280, recruitTotal: 280, defaultDaily: 20,
+      submittedAll: 25, todaySubmitted: 5, byDateSubmitted: { '2026-08-08': 5 }, todayUsed: 5, carryPending: null,
+    } });
+    A.applyCarryMode('next');
+    const pl = A.payload();
+    eq('7A-2 시트 일정 공고를 손대지 않으면 set 0(시트 우선권 유지)', pl.set.length, 0);
+    eq('7A-2 remove 도 0(저장된 조절 미삭제)', pl.remove.length, 0);
+    sandbox.S.plan['2026-08-11'] = 30;
+    const pl2 = A.payload();
+    eq('7A-2 손댄 날만 보낸다', pl2.set.length, 1);
+    eq('7A-2 보낸 날짜', pl2.set[0].date, '2026-08-11');
+  }
+
+  // 7A-3 ★★ 자동 이월 공고의 "다음날에 더하기" = 서버가 이미 하는 일 → 보낼 것 없음.
+  //   반대로 "종료일 뒤에 붙이기"는 그 자동 가산을 억제해야 하므로 오늘을 기본값으로 고정한다.
+  mkS(); A.applyCarryMode('next');
+  eq('7A-3 자동+다음날 = 오늘의 자연값(기본+이월)', A.naturalFor('2026-08-08'), 70);
+  eq('7A-3 자동+다음날 = 보낼 것 없음', A.payload().set.length, 0);
+  mkS(); A.applyCarryMode('extend');
+  {
+    const pl = A.payload();
+    ok('7A-3 자동+연장 = 오늘을 기본값으로 고정(자동 이월 억제)',
+      pl.set.some((x) => x.date === '2026-08-08' && x.count === 40), pl.set);
+    ok('7A-3 자동+연장도 구간 전체를 굳히지 않는다', pl.set.length <= 2, pl.set.length);
+  }
+  // 보류 공고는 서버가 얹지 않으므로 얹으려면 명시 계획이 필요하다(그리고 연장은 보낼 것이 없다)
+  mkS({ data: { carryMode: 'hold' } }); A.applyCarryMode('next');
+  eq('7A-3 보류+다음날 = 오늘 한 줄', A.payload().set.length, 1);
+  eq('7A-3 보류+다음날 = 기본 40 + 이월 30', A.payload().set[0].count, 70);
+  mkS({ data: { carryMode: 'hold' } }); A.applyCarryMode('extend');
+  eq('7A-3 보류+연장 = 보낼 것 없음', A.payload().set.length, 0);
+
+  // 7A-4 ★★ 이미 앞 날짜에 배치해 둔 이월은 다시 제안하지 않는다(재열람 이중 제안 차단)
+  mkS({ base: { '2026-08-09': 70 } });
+  eq('7A-4 배치해 둔 30명은 이월에서 뺀다', A.carryAmt(), 0);
+  eq('7A-4 배치 합계', A.placedAhead(), 30);
+  mkS({ base: { '2026-08-09': 50 } });
+  eq('7A-4 일부만 배치했으면 나머지만', A.carryAmt(), 20);
+  mkS({ data: { carryPending: null }, base: { '2026-08-09': 70 } });
+  eq('7A-4 계산 불가는 그대로 null(0 으로 꾸미지 않는다)', A.carryAmt(), null);
+
+  // 7A-5 ★ 서버 MAX_DAY_COUNT(9999) 를 넘기지 않는다(넘기면 savePlans 가 저장 전체를 거부)
+  mkS({ data: { recruitTotal: 500000, defaultDaily: 9000, carryPending: 0, submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 } });
+  ok('7A-5 큰 총량 공고도 균형 모드로 열린다', A.applyCarryMode('next') === true);
+  ok('7A-5 배분 목표는 9999 보다 크다(상한이 실제로 물리는 조건)', A.targetTotal() > 9999, A.targetTotal());
+  eq('7A-5 한 날 상한은 9999 를 넘지 않는다', A.maxFor(), 9999);
+  mkS({ data: { defaultDaily: 9000, carryPending: 5000, recruitTotal: 100000, submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 } });
+  A.applyCarryMode('next');
+  ok('7A-5 이월 전액을 얹어도 9999 를 넘지 않는다',
+    sandbox.S.horiz.every((x) => A.planFor(x) <= 9999), sandbox.S.horiz.map(A.planFor).slice(0, 3));
+
+  // 7A-6 ★ 시작일이 미래여도 오늘 이후의 저장된 계획은 삭제되지 않는다
+  mkS({ data: { startDate: '2026-08-20', submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 },
+        base: { '2026-08-10': 7 } });
+  A.applyCarryMode('next');
+  eq('7A-6 시작일 이전에 저장된 계획이 살아 있다', A.planFor('2026-08-10'), 7);
+  eq('7A-6 그 계획이 remove 로 나가지 않는다', A.payload().remove.length, 0);
+
+  // 7A-7 기본값으로 되돌린 저장분은 "고정"이 아니라 **해제**로 보낸다(우선권 복귀)
+  mkS({ base: { '2026-08-12': 5 } });
+  A.applyCarryMode('next');
+  sandbox.S.plan['2026-08-12'] = 40;                 // 기본값으로 되돌림
+  {
+    const pl = A.payload();
+    ok('7A-7 기본값 복귀 = remove', pl.remove.indexOf('2026-08-12') >= 0, pl);
+    ok('7A-7 set 에는 넣지 않는다', !pl.set.some((x) => x.date === '2026-08-12'), pl.set);
+  }
 
   /* ── 배선(정적) — 사용자 확정 문구·규율이 코드에 그대로 있는가 ── */
   const CDP = cdpSrc;
