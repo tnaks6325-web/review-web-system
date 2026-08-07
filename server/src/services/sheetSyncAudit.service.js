@@ -25,6 +25,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
+const activity = require('../utils/tabActivity');
 
 const _HEADER_SCAN_ROWS = 60;   // 상단 캠페인 정보 블록을 넘기기 충분(campaignSchedule 과 같은 범위)
 const _DETAIL_CAP = 120;        // 정밀 보강(작업 행 수·인덱스 진단)을 돌릴 문제 탭 상한 — 초과는 고지
@@ -143,10 +144,13 @@ function classifySyncRow(r = {}) {
 
 // ── 감사: 등록 작업 전수(또는 컷오프 이전) 반영 상태 ─────────────────────────
 const _AUDIT_TAB_CAP = 1500;
-async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeArchived = false } = {}) {
+async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeArchived = false,
+                                since = null, includeUnknown = false } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || _AUDIT_TAB_CAP, 1), _AUDIT_TAB_CAP);
   // 컷오프는 KST 날짜 문자열(YYYY-MM-DD)만 받는다 — 형식이 아니면 무시(전수 감사).
   const cutoff = (typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before)) ? before : null;
+  // 연도 하한 — 과거 자료(기본 2026-01-01 이전)는 목록에서 빼되 **건수는 고지**한다.
+  const sinceDay = activity.normalizeSince(since);
 
   const { rows } = await _db().query(
     `SELECT tc.sheet_id  AS "sheetId",
@@ -160,7 +164,8 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
             im.status    AS "idxStatus", im.built_at AS "idxBuiltAt", im."idxGid",
             im.error_msg AS "idxErrorMsg", im.skip_reason AS "idxSkipReason",
             ri.cnt       AS "indexRows",
-            cp.cnt       AS "boardRows"
+            cp.cnt       AS "boardRows",
+            ${activity.ACTIVITY_SELECT_SQL}
        FROM tab_configs tc
        LEFT JOIN LATERAL (
          SELECT MIN(c.created_at) AS reg_at FROM campaigns c WHERE c.sheet_id = tc.sheet_id
@@ -195,6 +200,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
          SELECT COUNT(*)::int AS cnt FROM campaign_participants p
           WHERE p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name AND p.deleted_at IS NULL
        ) cp ON TRUE
+       ${activity.ACTIVITY_LATERAL_SQL}
       WHERE (COALESCE(tc.is_closed, FALSE) = FALSE OR $2::boolean)
       ORDER BY reg.reg_at ASC NULLS FIRST, tc.sheet_id, tc.tab_name
       LIMIT $1`,
@@ -202,8 +208,14 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
   );
 
   const items = [];
+  let filteredOld = 0, yearUnknown = 0;
   for (const r of rows) {
     const regUnknown = !r.registeredAt;
+    // ── 연도 하한: 과거 작업은 빼고, 연도를 모르는 작업은 따로 센다(조용한 누락 금지) ──
+    const act = activity.resolveActivity(r);
+    const verdict = activity.activityVerdict(act, sinceDay, includeUnknown);
+    if (verdict === 'old') { filteredOld++; continue; }
+    if (verdict === 'unknown') { yearUnknown++; continue; }
     // 컷오프가 있으면: 이전 등록 + 등록일 미상(놓치면 안 되는 쪽)만 남긴다.
     if (cutoff && !regUnknown) {
       const regDay = new Date(r.registeredAt).toISOString().slice(0, 10);
@@ -218,6 +230,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
       sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid || null,
       displayName: r.displayName, campaignName: r.campaignName || null,
       registeredAt: r.registeredAt, regUnknown,
+      activityAt: act.activityAt, activitySource: act.activitySource, yearUnknown: act.yearUnknown,
       rawRows: r.rawRows == null ? null : Number(r.rawRows),
       mirroredAt: r.mirroredAt || null, mirrorTabName: r.mirrorTabName || null,
       ...resolveTabGid(r),
@@ -269,6 +282,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
     total: items.length,
     flagged: items.filter(i => i.severity !== 'ok').length,
     includeArchived: !!includeArchived,
+    since: sinceDay, filteredOld, yearUnknown, includeUnknown: !!includeUnknown,
     detailCapped,
     truncated: rows.length >= lim,
     items,

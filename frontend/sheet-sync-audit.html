@@ -56,10 +56,12 @@
 
   <div class="card" id="ctrlBox" style="display:none">
     <div class="bar">
-      <label>등록 기준일(이 날짜 <b>이전</b> 등록 작업만):</label>
-      <input type="date" id="beforeDate" value="2026-07-20" />
+      <label title="주문 제출·공고 생성·구매일자·시트 등록 중 가장 늦은 활동이 이 날짜 이후인 작업만 봅니다">기준 연도(이 날짜 <b>이후</b> 활동만):</label>
+      <input type="date" id="sinceDate" value="2026-01-01" />
+      <label>등록 기준일(이 날짜 <b>이전</b> 등록):</label>
+      <input type="date" id="beforeDate" value="" />
       <button class="btn" id="btnAudit" onclick="runAudit()">점검 실행</button>
-      <button class="btn ghost" onclick="document.getElementById('beforeDate').value=''; runAudit()">전체 작업 점검</button>
+      <button class="btn ghost" onclick="document.getElementById('beforeDate').value=''; runAudit()">등록일 조건 해제</button>
       <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer">
         <input type="checkbox" id="incArchived" onchange="runAudit()" /> 아카이브된 작업도 보기
       </label>
@@ -114,6 +116,9 @@
 <script>
   let ITEMS = [];            // 감사 결과(반영 버튼은 인덱스로만 참조 — 문자열 보간 금지)
   let _busy = false;
+  let _incUnknown = false;   // 연도 미상 작업 포함 여부(버튼으로 토글 — 기본은 숨김)
+
+  function toggleUnknown() { _incUnknown = !_incUnknown; runAudit(); }
 
   function tok() { return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || ''; }
   function hdrs() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok() }; }
@@ -151,6 +156,9 @@
     try {
       const qs = [];
       if (before) qs.push('before=' + encodeURIComponent(before));
+      const since = document.getElementById('sinceDate').value;
+      if (since) qs.push('since=' + encodeURIComponent(since));
+      if (_incUnknown) qs.push('includeUnknown=1');
       if (document.getElementById('incArchived').checked) qs.push('includeArchived=1');
       const q = qs.length ? ('?' + qs.join('&')) : '';
       const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/audit' + q, { headers: hdrs() });
@@ -178,6 +186,15 @@
       + (meta.before ? ' · 기준: <b>' + esc(meta.before) + '</b> 이전 등록(등록일 미상 포함)' : ' · 전체 작업')
       + (meta.detailCapped ? ' · <b style="color:var(--warn)">⚠ 문제 탭이 많아 일부만 정밀 진단됨</b>' : '')
       + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다(상한 초과)</b>' : '')
+      // ★ 걸러낸 것을 조용히 숨기지 않는다 — 건수를 고지하고, 미상은 버튼으로 열어 볼 수 있게.
+      + '<div style="margin-top:6px; font-size:12.5px">'
+      + (meta.filteredOld ? '<span style="color:var(--t2)">' + esc(meta.since || '') + ' 이전 활동 <b>' + meta.filteredOld + '</b>건 숨김</span>' : '')
+      + (meta.yearUnknown ? (meta.filteredOld ? ' · ' : '')
+          + '<span style="color:var(--warn)">연도 미상 <b>' + meta.yearUnknown + '</b>건</span>'
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">보기</button>' : '')
+      + (meta.includeUnknown ? '<span style="color:var(--warn)">연도 미상 작업 포함해서 보는 중</span>'
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">숨기기</button>' : '')
+      + '</div>'
       + '<div style="margin-top:6px; color:var(--t2); font-size:12px">'
       + '‘검색인덱스’ = 리뷰어가 이름·전화로 자기 작업을 찾고 구매양식을 내는 재료입니다. '
       + '리뷰웹시스템[3버전]의 작업목록도 이 등록부를 기준으로 만들어지므로, 여기 없으면 <b>리뷰어 검색·제출과 3버전 작업목록에서 동시에 빠집니다.</b>'
@@ -336,7 +353,12 @@
     tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">점검 중… (작업 수에 따라 수십 초 걸릴 수 있습니다)</td></tr>';
     if (btn) btn.disabled = true;
     try {
-      const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/slot-audit', { headers: hdrs() });
+      // 연도 기준은 위 점검과 **같은 입력**을 쓴다 — 두 화면이 다른 범위를 보면 안 된다.
+      const sq = [];
+      const since = document.getElementById('sinceDate').value;
+      if (since) sq.push('since=' + encodeURIComponent(since));
+      if (_incUnknown) sq.push('includeUnknown=1');
+      const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/slot-audit' + (sq.length ? '?' + sq.join('&') : ''), { headers: hdrs() });
       if (r.status === 401 || r.status === 403) { toast('권한이 없습니다. 관리자 계정으로 로그인해주세요.', true); boot(); return; }
       const j = await r.json();
       if (!j || j.ok === false) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--err)">점검 실패: ' + esc((j && j.error) || '서버 오류') + ' <button class="btn ghost" onclick="runSlotAudit()">다시 시도</button></td></tr>'; return; }
@@ -362,7 +384,10 @@
       '등록 작업 <b>' + meta.total + '</b>개 · 정밀 점검 <b>' + meta.scanned + '</b>개 · '
       + '시트가 더 많은 작업 <b style="color:' + (flagged.length ? 'var(--err)' : 'var(--ok)') + '">' + flagged.length + '</b>개'
       + (meta.scanCapped ? ' · <b style="color:var(--warn)">⚠ 후보 ' + meta.candidates + '개 중 일부만 점검됨(다시 실행하면 이어서 확인)</b>' : '')
-      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다</b>' : '');
+      + (meta.truncated ? ' · <b style="color:var(--warn)">⚠ 목록이 잘렸습니다</b>' : '')
+      + (meta.filteredOld ? '<div style="margin-top:4px; color:var(--t2); font-size:12.5px">'
+          + esc(meta.since || '') + ' 이전 활동 <b>' + meta.filteredOld + '</b>건 제외'
+          + (meta.yearUnknown ? ' · 연도 미상 <b>' + meta.yearUnknown + '</b>건 제외(위 [보기]로 함께 확인)' : '') + '</div>' : '');
 
     const tb = document.getElementById('ssBody');
     if (!SS.length) { tb.innerHTML = '<tr><td colspan="8" style="color:var(--t2)">점검 대상 작업이 없습니다(시트 사본 행 수가 표보다 많은 작업만 정밀 점검합니다).</td></tr>'; return; }

@@ -94,15 +94,22 @@ svc.__setPoolForTest({
   },
 });
 
-await ta('컷오프(2026-07-20): 이전 등록 + 등록일 미상만 남고 이후 등록은 제외', async () => {
+await ta('컷오프(2026-07-20): 이전 등록만 남고 이후 등록은 제외', async () => {
   const out = await svc.auditSheetSync({ before: '2026-07-20' });
   const names = out.items.map(i => i.tabName);
   assert.ok(names.includes('old-ok') && names.includes('old-broken'), '이전 등록 누락');
-  assert.ok(names.includes('unknown-date'), '등록일 미상이 조용히 빠졌다 — 누락 금지');
   assert.ok(!names.includes('new-tab'), '컷오프 이후 등록이 섞였다');
   assert.strictEqual(out.before, '2026-07-20');
-  const unk = out.items.find(i => i.tabName === 'unknown-date');
-  assert.strictEqual(unk.regUnknown, true);
+});
+await ta('★ 연도 신호가 하나도 없는 작업은 목록에서 빼되 **건수를 고지**한다(조용한 누락 금지)', async () => {
+  // 사용자 확정: 연도 미상은 숨기되 상단에 건수 + [보기] 버튼. 종전엔 무조건 포함했다.
+  const out = await svc.auditSheetSync({ before: '2026-07-20' });
+  assert.ok(!out.items.some(i => i.tabName === 'unknown-date'), '연도 미상이 그대로 섞였다');
+  assert.ok(out.yearUnknown >= 1, '연도 미상 건수를 고지하지 않는다 — 조용히 사라지면 안 된다');
+  const on = await svc.auditSheetSync({ before: '2026-07-20', includeUnknown: true });
+  const unk = on.items.find(i => i.tabName === 'unknown-date');
+  assert.ok(unk, '[보기](includeUnknown)로도 안 보인다 — 열람 경로가 없다');
+  assert.strictEqual(unk.yearUnknown, true);
 });
 await ta('문제 탭(broken)이 목록 앞에 온다 + flagged 집계', async () => {
   const out = await svc.auditSheetSync({ before: '2026-07-20' });
@@ -112,7 +119,13 @@ await ta('문제 탭(broken)이 목록 앞에 온다 + flagged 집계', async ()
 await ta('잘못된 before 형식은 무시(전수 감사) — 예외로 죽지 않는다', async () => {
   const out = await svc.auditSheetSync({ before: '7/20' });
   assert.strictEqual(out.before, null);
-  assert.strictEqual(out.items.length, 4);
+  // 등록일 컷오프는 해제되지만 **연도 하한은 그대로** — 연도 미상 1건은 빠지고 건수로 고지된다.
+  assert.strictEqual(out.items.length, 3);
+  assert.strictEqual(out.yearUnknown, 1);
+});
+await ta('★ 잘못된 since 형식은 기본값(2026-01-01)으로 접지 — 형식 오류로 필터가 통째로 꺼지지 않는다', async () => {
+  const out = await svc.auditSheetSync({ since: '2026년' });
+  assert.strictEqual(out.since, '2026-01-01');
 });
 t('★ 감사는 읽기 전용 — 쓰기 SQL 0', () => {
   assert.ok(captured.length > 0);
@@ -450,6 +463,61 @@ t('★ 프론트: 탭 링크·아카이브 복구·gid 채우기 배선 + onclic
   const i = HTML.indexOf('async function unarchiveOne(');
   const body = HTML.slice(i, HTML.indexOf('async function gidBackfill(', i));
   assert.ok(/repairOne\(i, \{ keepRes: true \}\)/.test(body), '복구 후 반영으로 이어지지 않는다');
+});
+
+/* ══ 8) 연도 기준(2026~) ═══════════════════════════════════ */
+console.log('\n8) 연도 기준 — 과거 자료 제외 · 미상은 고지');
+const act = require('../src/utils/tabActivity');
+
+t('★★ 활동 시각 = 신호들의 **최댓값** — 2025년 등록이어도 2026년 주문이 있으면 현재 작업', () => {
+  const r = act.resolveActivity({ registeredAt: '2025-06-01T00:00:00Z', lastOrderAt: '2026-08-01T00:00:00Z' });
+  assert.strictEqual(r.activityAt, '2026-08-01');
+  assert.strictEqual(r.activitySource, 'order');
+  assert.strictEqual(act.activityVerdict(r, '2026-01-01'), 'keep', '살아있는 작업을 과거로 숨겼다');
+});
+t('2025년 신호만 있으면 old · 신호 0이면 unknown(과거로 단정하지 않는다)', () => {
+  assert.strictEqual(act.activityVerdict(act.resolveActivity({ registeredAt: '2025-06-01' }), '2026-01-01'), 'old');
+  const u = act.resolveActivity({});
+  assert.strictEqual(u.yearUnknown, true);
+  assert.strictEqual(act.activityVerdict(u, '2026-01-01'), 'unknown');
+  assert.strictEqual(act.activityVerdict(u, '2026-01-01', true), 'keep', '[보기]로도 안 열린다');
+});
+t('★★ 구매일자는 **연도가 명시된 표기만** 신호로 쓴다(추론 금지)', () => {
+  assert.strictEqual(act.explicitYearDate('26.8.24(월)'), '2026-08-24');
+  assert.strictEqual(act.explicitYearDate('6 / 11 (목)'), null,
+    '연도 없는 표기로 연도를 추론했다 — 2025/2026 을 찍는 셈이 된다');
+  assert.strictEqual(act.explicitYearDate(''), null);
+});
+t('★★ mirrored_at · built_at 은 신호로 쓰지 않는다(매 주기 NOW() 로 갱신 → 전부 최신으로 보임)', () => {
+  const src = R('src/utils/tabActivity.js');
+  const sql = src.slice(src.indexOf('ACTIVITY_LATERAL_SQL'), src.indexOf('ACTIVITY_SELECT_SQL'));
+  assert.ok(!/mirrored_at|built_at/.test(sql),
+    '갱신되는 시각을 활동 신호로 썼다 — 2025년 작업도 최신으로 보여 필터가 무력화된다');
+  ['order_submissions', 'recruit_campaigns', 'review_index'].forEach(tb =>
+    assert.ok(sql.includes(tb), tb + ' 신호가 없다'));
+});
+t('★ 두 점검이 같은 신호를 본다(SQL 조각 단일 출처 — 사본 금지)', () => {
+  ['src/services/sheetSyncAudit.service.js', 'src/services/sheetSlotSync.service.js'].forEach(f => {
+    const src = R(f);
+    assert.ok(/require\('\.\.\/utils\/tabActivity'\)/.test(src), f + ': tabActivity 미사용');
+    assert.ok(/ACTIVITY_LATERAL_SQL/.test(src), f + ': 공용 LATERAL 조각을 안 쓴다');
+    assert.ok(!/MAX\(os\.submitted_at\)/.test(src), f + ': 활동 신호 SQL 사본이 들어왔다');
+  });
+});
+t('★ 제외한 건수를 반드시 돌려준다(조용한 누락 금지) + 프론트가 고지·열람 버튼을 그린다', () => {
+  ['src/services/sheetSyncAudit.service.js', 'src/services/sheetSlotSync.service.js'].forEach(f => {
+    const src = R(f);
+    assert.ok(/filteredOld/.test(src) && /yearUnknown/.test(src), f + ': 제외 건수를 안 센다');
+  });
+  assert.ok(/meta\.filteredOld/.test(HTML), '과거 제외 건수를 화면이 말하지 않는다');
+  assert.ok(/meta\.yearUnknown/.test(HTML) && /toggleUnknown\(\)/.test(HTML), '연도 미상 [보기] 버튼이 없다');
+  assert.ok(/includeUnknown=1/.test(HTML), 'includeUnknown 배선이 없다');
+  assert.ok(/id="sinceDate"/.test(HTML) && /value="2026-01-01"/.test(HTML), '기준 연도 입력 기본값이 없다');
+});
+t('★ 시트 우위 점검도 같은 기준 입력(sinceDate)을 쓴다 — 두 화면이 다른 범위를 보면 안 된다', () => {
+  const i = HTML.indexOf('async function runSlotAudit(');
+  const body = HTML.slice(i, HTML.indexOf('const SS_REASON', i));
+  assert.ok(/getElementById\('sinceDate'\)/.test(body), '시트 우위 점검이 별도 기준을 쓴다');
 });
 
 console.log('\n✅ 전체 통과: ' + pass + '케이스');

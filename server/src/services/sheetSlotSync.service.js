@@ -24,6 +24,7 @@ const { parseDateColumn } = require('../utils/koreanDate');
 const { findDateColumnIndex } = require('./campaignSchedule.service');
 const { optionWriteColumns } = require('./orderLedger.service');
 const participants = require('./participants.service');
+const activity = require('../utils/tabActivity');
 const { logger } = require('../utils/logger');
 
 let _pool = null;
@@ -140,16 +141,21 @@ function _rowJson(headers, cells) {
  * ★ 값싼 1차 거르기(미러 행 수 vs 표 행 수) 뒤에만 정밀 스캔(탭당 쿼리 1개)을 돌린다.
  *   스캔 상한에 걸리면 `scanCapped` 로 **고지**한다(조용한 절단 금지).
  */
-async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP, now = new Date() } = {}) {
+async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP,
+                                       since = null, includeUnknown = false, now = new Date() } = {}) {
   const db = _db();
   const lim = Math.min(Math.max(parseInt(limit, 10) || AUDIT_TAB_CAP, 1), AUDIT_TAB_CAP);
   const cap = Math.min(Math.max(parseInt(scanCap, 10) || SCAN_CAP, 1), 300);
+  // 연도 하한 — 과거 작업에 정밀 스캔 예산(탭당 쿼리)을 쓰지 않는다.
+  const sinceDay = activity.normalizeSince(since);
 
   const { rows: tabs } = await db.query(
     `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
             COALESCE(NULLIF(tc.tab_gid,''), rst."mirrorGid") AS "tabGid",
             COALESCE(tc.display_name, tc.tab_name) AS "displayName",
-            rst."rawRows", rst."mirroredAt", cp.cnt AS "boardRows"
+            rst."rawRows", rst."mirroredAt", cp.cnt AS "boardRows",
+            reg.reg_at AS "registeredAt",
+            ${activity.ACTIVITY_SELECT_SQL}
        FROM tab_configs tc
        LEFT JOIN LATERAL (
          SELECT r.row_count AS "rawRows", r.mirrored_at AS "mirroredAt", r.tab_gid AS "mirrorGid"
@@ -163,13 +169,25 @@ async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP
          SELECT COUNT(*)::int AS cnt FROM campaign_participants p
           WHERE p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name AND p.deleted_at IS NULL
        ) cp ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT MIN(c.created_at) AS reg_at FROM campaigns c WHERE c.sheet_id = tc.sheet_id
+       ) reg ON TRUE
+       ${activity.ACTIVITY_LATERAL_SQL}
       WHERE COALESCE(tc.is_closed, FALSE) = FALSE
       ORDER BY tc.sheet_id, tc.tab_name
       LIMIT $1`, [lim]);
 
   // 1차 거르기: gid 가 있고, 미러 행 수가 표 행 수보다 눈에 띄게 많은 탭만 정밀 스캔.
   //   (미러 행 수에는 상단 캠페인 정보·헤더 줄이 섞여 있어 정확한 수치가 아니다 — 후보 선별용.)
-  const candidates = tabs.filter(t => t.tabGid && Number(t.rawRows) > (Number(t.boardRows) || 0) + 2);
+  // ── 연도 하한 먼저 — 과거 작업이 스캔 상한(SCAN_CAP)을 잡아먹지 않게 ──
+  let filteredOld = 0, yearUnknown = 0;
+  const current = tabs.filter(t => {
+    const v = activity.activityVerdict(activity.resolveActivity(t), sinceDay, includeUnknown);
+    if (v === 'old') { filteredOld++; return false; }
+    if (v === 'unknown') { yearUnknown++; return false; }
+    return true;
+  });
+  const candidates = current.filter(t => t.tabGid && Number(t.rawRows) > (Number(t.boardRows) || 0) + 2);
   const scan = candidates.slice(0, cap);
   const scanCapped = candidates.length > scan.length;
 
@@ -219,6 +237,7 @@ async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP
   items.sort((a, b) => (b.missingSlots || 0) - (a.missingSlots || 0));
   return {
     total: tabs.length,
+    since: sinceDay, filteredOld, yearUnknown, includeUnknown: !!includeUnknown,
     candidates: candidates.length,
     scanned: scan.length,
     scanCapped,

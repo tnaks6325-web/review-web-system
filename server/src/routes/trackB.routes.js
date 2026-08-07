@@ -268,9 +268,11 @@ router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit, includeArchived } = req.query;
+    const { before, limit, includeArchived, since, includeUnknown } = req.query;
     res.json({ ok: true, ...(await sheetSync.auditSheetSync({
-      before, limit, includeArchived: includeArchived === '1' || includeArchived === 'true',
+      before, limit, since,
+      includeArchived: includeArchived === '1' || includeArchived === 'true',
+      includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
     })) });
   } catch (err) { next(err); }
 });
@@ -306,8 +308,11 @@ router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async
 const slotSync = require('../services/sheetSlotSync.service');
 router.get('/sheet-sync/slot-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { limit, scanCap } = req.query;
-    res.json({ ok: true, ...(await slotSync.auditSheetSuperiority({ limit, scanCap })) });
+    const { limit, scanCap, since, includeUnknown } = req.query;
+    res.json({ ok: true, ...(await slotSync.auditSheetSuperiority({
+      limit, scanCap, since,
+      includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
+    })) });
   } catch (err) { next(err); }
 });
 router.post('/sheet-sync/slot-backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
