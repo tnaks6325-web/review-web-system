@@ -425,8 +425,7 @@
     <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border,#E2E8F0)">
       <button onclick="closeRecruitModal()"
         style="padding:8px 18px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;background:#fff;color:var(--t2,#475569);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
-      <button id="recruitSaveBtn" onclick="saveRecruitPost()"
-        style="padding:8px 18px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
+      <button id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost()">
         <i class="fas fa-save"></i> 저장
       </button>
     </div>
@@ -468,7 +467,43 @@
 /* 폰트어썸이 없는 화면에서도 아이콘 자리가 레이아웃을 밀지 않게 */
 #recruitModal .fas:not([class*="fa-"]){display:none}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}`;
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+/* ── [저장] 버튼 인터랙션 ────────────────────────────────────────
+   ★ 인라인 style 을 클래스로 옮겼다 — 인라인은 :hover/:active 의 background 를
+     이길 수 없어(특이성 아님, 인라인 우선) "눌렸는지 모르겠다"가 고쳐지지 않는다. */
+#recruitModal .rf-savebtn{padding:8px 18px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;
+  font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;font-family:inherit;
+  box-shadow:0 1px 2px rgba(49,130,246,.35);transition:background .13s,box-shadow .13s,transform .13s}
+#recruitModal .rf-savebtn:hover:not(:disabled){background:#1B6FE0;box-shadow:0 3px 10px rgba(49,130,246,.34);transform:translateY(-1px)}
+#recruitModal .rf-savebtn:active:not(:disabled){background:#1560C8;box-shadow:0 1px 2px rgba(49,130,246,.30);transform:translateY(0)}
+#recruitModal .rf-savebtn:focus-visible{outline:3px solid rgba(49,130,246,.35);outline-offset:2px}
+#recruitModal .rf-savebtn:disabled{cursor:default;transform:none;box-shadow:none}
+#recruitModal .rf-savebtn.busy{background:#7FB0F6}
+#recruitModal .rf-savebtn.done{background:#16A34A}
+#recruitModal .rf-spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;
+  display:inline-block;animation:rfSpin .7s linear infinite}
+@keyframes rfSpin{to{transform:rotate(360deg)}}
+/* ── 저장 차단·실패 안내 = 모달 **안쪽** ────────────────────────
+   ★ 토스트로 내보내면 안 된다 — 리뷰웹시스템[3버전]의 토스트는 z-index 60 이고
+     이 모달은 5000 + backdrop-filter 라 **덮개 아래에 깔려 보이지 않는다**(실측).
+     그래서 모달이 떠 있는 동안의 안내는 전부 여기서 그린다. */
+#recruitModal .modal-footer{position:relative}
+#recruitModal .rf-blockbar{position:absolute;left:18px;right:18px;bottom:calc(100% + 6px);background:#FDF0F0;
+  border:1px solid #F4C3C3;border-left:4px solid #E5484D;border-radius:9px;padding:8px 11px;font-size:.74rem;
+  font-weight:700;color:#B42318;display:flex;align-items:center;gap:7px;box-shadow:0 4px 14px rgba(180,35,24,.12);
+  z-index:2;animation:fadeIn .16s ease}
+#recruitModal .rf-blockbar .rf-bb-go{margin-left:auto;flex:none;font-size:.7rem;font-weight:800;color:#B42318;background:#fff;
+  border:1px solid #F4C3C3;border-radius:6px;padding:3px 8px;cursor:pointer;font-family:inherit}
+#recruitModal .modal-footer.rf-shake{animation:rfShake .38s ease}
+@keyframes rfShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(5px)}
+  60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+#recruitModal .rf-chk-blink{animation:rfBlink 1.1s ease 2}
+@keyframes rfBlink{0%,100%{box-shadow:0 0 0 0 rgba(229,72,77,0)}45%{box-shadow:0 0 0 4px rgba(229,72,77,.28)}}
+@media (prefers-reduced-motion: reduce){
+  #recruitModal .rf-savebtn:hover:not(:disabled){transform:none}
+  #recruitModal .modal-footer.rf-shake{animation:none}
+  #recruitModal .rf-chk-blink{animation:none}
+}`;
 
   /* 폰트어썸이 없는 호스트(리뷰웹시스템[3버전])에서는 아이콘이 **빈 자리**로 뜬다 —
      닫기(×)가 보이지 않으면 모달을 못 닫는다. CSS만으로는 폰트 유무를 알 수 없어
@@ -818,6 +853,162 @@
     pe.checked = true;
     if (typeof window.onParticipationToggle === 'function') window.onParticipationToggle(true);
   };
+
+  /* ═══════════════════════════════════════════════════════════════
+     저장 결과 안내 — 화면 가운데 카드 + 페이드아웃 (시안 C 확정)
+     ───────────────────────────────────────────────────────────────
+     ★★ 렌더러는 **여기 한 벌**이다(사본 금지) — 모달 마크업·CSS 가 이 모듈에
+        있고 admin.html · workdesk.html 이 같은 모듈을 쓴다. 사본을 두면
+        한쪽 화면에서만 안내가 안 뜬다(레포에서 이미 밟은 함정).
+     ★★ 마운트는 **body 직속** + z-index 는 모달(5000)보다 위. 뷰 스크롤
+        컨테이너 안에 넣으면 오버레이가 화면 흐름에 섞인다.
+     ★  성공 안내만 자동으로 사라진다. 차단·실패는 rf-blockbar 로 모달 안에
+        남긴다 — 사라지면 원인을 다시 읽을 방법이 없다.
+     ═══════════════════════════════════════════════════════════════ */
+  /* ★ box-sizing 을 스스로 정한다 — 이 오버레이는 body 직속이라 호스트 리셋(admin.html 은
+     `*{box-sizing:border-box}`, 없는 화면도 있다)에 따라 카드 폭이 340px ↔ 392px 로 갈린다(실측). */
+  var FB_CSS = `#campSaveFb,#campSaveFb *{box-sizing:border-box}
+#campSaveFb{position:fixed;inset:0;z-index:6000;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;padding:20px}
+#campSaveFb .csfb-box{background:#fff;border-radius:16px;border:1px solid #E6EAF0;padding:20px 26px;max-width:340px;line-height:1.5;
+  display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;
+  box-shadow:0 12px 40px rgba(16,24,40,.20),0 2px 8px rgba(16,24,40,.10);
+  font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR",system-ui,sans-serif;color:#101828;
+  animation:csfbIn .22s cubic-bezier(.2,.85,.3,1)}
+/* word-break:keep-all — 없으면 '공고'가 '공 / 고'로 갈린다(실측) */
+#campSaveFb .csfb-msg{font-size:.88rem;font-weight:800;letter-spacing:-.01em;line-height:1.45;word-break:keep-all}
+#campSaveFb .csfb-sub{font-size:.72rem;font-weight:600;color:#667085}
+#campSaveFb .csfb-list{margin-top:2px;display:flex;flex-direction:column;gap:3px;width:100%}
+#campSaveFb .csfb-li{display:flex;align-items:center;gap:6px;font-size:.72rem;font-weight:700;color:#334155;
+  background:#F5F8FC;border:1px solid #E6EAF0;border-radius:7px;padding:4px 9px;text-align:left}
+#campSaveFb .csfb-li i{width:5px;height:5px;border-radius:50%;background:#3182F6;flex:none}
+#campSaveFb .csfb-more{font-size:.7rem;font-weight:700;color:#98A2B3}
+#campSaveFb.out{animation:csfbOut .44s ease forwards}
+#campSaveFb .csfb-ring{width:46px;height:46px;flex:none}
+#campSaveFb .csfb-ring circle{fill:none;stroke:#16A34A;stroke-width:4;stroke-linecap:round}
+#campSaveFb .csfb-ring .bg{stroke:#D9F2E2}
+#campSaveFb .csfb-ring .fg{stroke-dasharray:151;stroke-dashoffset:151;transform:rotate(-90deg);transform-origin:50% 50%;
+  animation:csfbRing .5s cubic-bezier(.3,.9,.3,1) forwards}
+#campSaveFb .csfb-ring path{fill:none;stroke:#16A34A;stroke-width:4.5;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:34;stroke-dashoffset:34;animation:csfbTick .32s .24s ease forwards}
+@keyframes csfbIn{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes csfbOut{to{opacity:0;transform:translateY(-6px) scale(.985)}}
+@keyframes csfbRing{to{stroke-dashoffset:0}}
+@keyframes csfbTick{to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion: reduce){
+  #campSaveFb .csfb-box{animation:none}
+  #campSaveFb .csfb-ring .fg,#campSaveFb .csfb-ring path{animation:none;stroke-dashoffset:0}
+  #campSaveFb.out{animation:csfbFade .44s ease forwards}
+  @keyframes csfbFade{to{opacity:0}}
+}`;
+
+  var FB_HOLD_MS = 2200;   // 항목 표시(시안 C) 기준 — 목록을 읽을 시간
+  var FB_OUT_MS  = 440;
+  var _fbTimers  = [];
+
+  function fbEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  /* 공고 제목은 매우 길 수 있다(실측 60자+) — 카드가 화면을 덮지 않게 줄인다 */
+  function fbClip(s, n) {
+    s = String(s == null ? '' : s).trim().replace(/\s+/g, ' ');
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  }
+  function injectFbCss() {
+    if (document.getElementById('camp-save-fb-css')) return;
+    var st = document.createElement('style');
+    st.id = 'camp-save-fb-css';
+    st.textContent = FB_CSS;
+    document.head.appendChild(st);
+  }
+
+  /**
+   * 저장 성공 안내(모달이 닫힌 뒤 화면 가운데).
+   * @param {{title?:string, changes?:string[], mode?:'edit'|'create'}} opts
+   *   changes = 바뀐 항목 이름들. **비어 있으면 목록을 그리지 않는다** —
+   *   비교하지 못한 필드가 있을 수 있어 "바뀐 내용 없음"이라고 단정하지 않는다.
+   */
+  function campSaveFeedback(opts) {
+    opts = opts || {};
+    injectFbCss();
+    if (!document.body) return;
+
+    _fbTimers.forEach(clearTimeout); _fbTimers = [];
+    var old = document.getElementById('campSaveFb');
+    if (old) old.remove();
+
+    var isCreate = opts.mode === 'create';
+    var title = fbClip(opts.title, 22);
+    var msg = title
+      ? '「' + fbEsc(title) + '」 공고' + (isCreate ? '가 발행되었습니다' : ' 수정이 반영되었습니다')
+      : (isCreate ? '공고가 발행되었습니다' : '공고 수정이 반영되었습니다');
+
+    var changes = (Array.isArray(opts.changes) ? opts.changes : []).filter(Boolean);
+    var body = '';
+    if (changes.length) {
+      body = '<div class="csfb-list">';
+      changes.slice(0, 3).forEach(function (c) {
+        body += '<div class="csfb-li"><i></i>' + fbEsc(c) + '</div>';
+      });
+      body += '</div>';
+      if (changes.length > 3) body += '<div class="csfb-more">외 ' + (changes.length - 3) + '건</div>';
+    } else {
+      body = '<div class="csfb-sub">목록에 바로 반영했어요</div>';
+    }
+
+    var box = document.createElement('div');
+    box.id = 'campSaveFb';
+    box.setAttribute('role', 'status');
+    box.setAttribute('aria-live', 'polite');
+    box.innerHTML =
+      '<div class="csfb-box">' +
+        '<svg class="csfb-ring" viewBox="0 0 56 56" aria-hidden="true">' +
+          '<circle class="bg" cx="28" cy="28" r="24"></circle>' +
+          '<circle class="fg" cx="28" cy="28" r="24"></circle>' +
+          '<path d="M17.5 28.8 L24.6 35.6 L38.5 21.2"></path>' +
+        '</svg>' +
+        '<div class="csfb-msg">' + msg + '</div>' +
+        body +
+      '</div>';
+    document.body.appendChild(box);
+
+    _fbTimers.push(setTimeout(function () {
+      box.classList.add('out');
+      _fbTimers.push(setTimeout(function () { if (box.parentNode) box.remove(); }, FB_OUT_MS));
+    }, FB_HOLD_MS));
+  }
+
+  /* 모달 안 차단·실패 줄. onGo 가 있으면 [점검 항목 보기 ↑] 버튼이 붙는다. */
+  function recruitSaveBlock(text, onGo) {
+    var foot = document.querySelector('#recruitModal .modal-footer');
+    if (!foot) return;
+    recruitSaveBlockClear();
+    var bar = document.createElement('div');
+    bar.className = 'rf-blockbar';
+    bar.setAttribute('role', 'alert');
+    bar.innerHTML = '<span aria-hidden="true">⚠</span><span>' + fbEsc(text) + '</span>' +
+      (typeof onGo === 'function' ? '<button type="button" class="rf-bb-go">점검 항목 보기 ↑</button>' : '');
+    foot.appendChild(bar);
+    if (typeof onGo === 'function') {
+      var go = bar.querySelector('.rf-bb-go');
+      if (go) go.addEventListener('click', onGo);
+    }
+    // 흔들림 1회 — "눌렀는데 아무 일도 없다"를 없애는 즉각 신호
+    foot.classList.remove('rf-shake');
+    void foot.offsetWidth;
+    foot.classList.add('rf-shake');
+    setTimeout(function () { foot.classList.remove('rf-shake'); }, 420);
+  }
+  function recruitSaveBlockClear() {
+    var old = document.querySelector('#recruitModal .rf-blockbar');
+    if (old) old.remove();
+  }
+
+  window.campSaveFeedback      = campSaveFeedback;
+  window.recruitSaveBlock      = recruitSaveBlock;
+  window.recruitSaveBlockClear = recruitSaveBlockClear;
 
   function mount(id) {
     injectCss();
