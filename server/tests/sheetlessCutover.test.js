@@ -39,6 +39,8 @@ function makeStub(opts = {}) {
     pendingOrders: 0, queued: 0,
     parityReal: 0, parityThrows: false,
     ledgerThrows: null,   // { code, message }
+    indexBefore: 2,       // 지금 review_index 명단 수(⑤ 대조 기준)
+    indexThrows: false,
   }, opts);
   const log = [];
   const db = {
@@ -50,13 +52,20 @@ function makeStub(opts = {}) {
       if (/UPDATE tab_configs SET sheetless = FALSE/.test(s)) return { rowCount: o.reconnectRows == null ? 1 : o.reconnectRows };
       if (/FROM order_submissions/.test(s)) return { rows: [{ n: o.pendingOrders }] };
       if (/FROM sync_queue/.test(s)) return { rows: [{ n: o.queued }] };
+      if (/FROM review_index/.test(s)) {
+        if (o.indexThrows) throw new Error('index down');
+        return { rows: [{ n: o.indexBefore }] };
+      }
       return { rows: [] };
     },
   };
   return { db, log, o };
 }
-// _checkSheetRows / _checkParity / _checkLedger 는 다른 모듈을 부른다 — 그 모듈들을 스텁으로 갈아끼운다.
-function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = false, ledgerThrows = null }) {
+// _checkSheetRows / _checkParity / _checkMirror / _checkLedger 는 다른 모듈을 부른다 — 전부 스텁으로 갈아끼운다.
+// ★ ④ 는 구글 Drive 를 실제로 부르므로(사람이 [점검]을 누를 때만) 여기서도 반드시 막는다 —
+//   안 막으면 자격증명 없는 환경에서 전부 unknown 으로 떨어져 "왜 잠겼는지" 를 못 본다.
+function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = false, ledgerThrows = null,
+  ledgerIndexRows = 2, remoteModifiedAt = null, driveThrows = false } = {}) {
   const slot = require('../src/services/sheetSlotSync.service');
   const _rp = slot.readPreparedRows;
   slot.readPreparedRows = async () => (readOk
@@ -70,9 +79,19 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
   const _rl = ledger.rebuildLedgers;
   ledger.rebuildLedgers = async () => {
     if (ledgerThrows) { const e = new Error(ledgerThrows.message || 'x'); e.code = ledgerThrows.code; throw e; }
-    return { headers: ['a', 'b'], mirrorRows: 3, indexRows: 2 };
+    return { headers: ['a', 'b'], mirrorRows: 3, indexRows: ledgerIndexRows };
   };
-  return () => { slot.readPreparedRows = _rp; trackB.parityReport = _pr; ledger.rebuildLedgers = _rl; };
+  const sheets = require('../src/services/sheets.service');
+  const _gm = sheets.getSheetModifiedTime;
+  sheets.getSheetModifiedTime = async () => {
+    if (driveThrows) throw new Error('drive 403');
+    // 기본값 = 우리가 읽어 둔 시점보다 과거 = "그 뒤로 안 바뀜"
+    return remoteModifiedAt || new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+  };
+  return () => {
+    slot.readPreparedRows = _rp; trackB.parityReport = _pr; ledger.rebuildLedgers = _rl;
+    sheets.getSheetModifiedTime = _gm;
+  };
 }
 
 (async () => {
@@ -150,14 +169,74 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     restore(); cutover.__setPoolForTest(null);
   }
   {
+    /* ★★ ④ 는 "얼마나 오래됐나"가 아니라 "그 뒤로 시트가 바뀌었나" 다 (2026-08 실측 사고).
+     *    미러는 내용이 바뀐 탭만 다시 읽어 `mirrored_at` 을 갱신하므로, 경과시간 기준으로 두면
+     *    **끝나서 조용한 작업(= 이관 최적)** 이 영구히 잠긴다(등록 작업 86건 전부 잠김). */
     const old = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
     const { db } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
-      sheetless: false, mirroredAt: old, boardRows: 3 } });
+      sheetless: false, mirroredAt: old, sheetModifiedAt: old, boardRows: 3 } });
+    cutover.__setPoolForTest(db);
+    // 원격 최종수정이 우리가 읽어 둔 시점보다 과거 = 그 뒤로 안 바뀜 → 오래됐어도 통과해야 한다
+    let restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 9 * 3600 * 1000).toISOString() });
+    let r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★★ 오래 조용한 시트는 잠그지 않는다(경과시간 기준 부활 차단)',
+      r.canCutover === true && r.checks.find(c => c.key === 'mirror').state === 'pass');
+    restore();
+
+    // 우리가 읽은 뒤에 시트가 수정됨 → 그 편집이 사라지므로 잠금
+    restore = stubDeps({ remoteModifiedAt: new Date(Date.now() - 60 * 1000).toISOString() });
+    r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    const mk = r.checks.find(c => c.key === 'mirror');
+    ok('★ 읽어 둔 뒤 시트가 수정됐으면 잠금', r.canCutover === false && mk.state === 'fail');
+    ok('막힌 사유가 다음 행동을 말한다(새로고침 후 이관)', /새로고침/.test(mk.hint));
+    restore();
+
+    // 구글 조회 실패 = 모름 → fail-closed
+    restore = stubDeps({ driveThrows: true });
+    r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★★ 시트 상태를 못 물어보면 잠금(fail-open 금지)',
+      r.canCutover === false && r.checks.find(c => c.key === 'mirror').state === 'unknown');
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    // 한 번도 안 읽어 온 탭
+    const { db } = makeStub({ tab: { sheetId: 'S1', tabName: 'T1', tabGid: '11', displayName: 'T1',
+      sheetless: false, mirroredAt: null, boardRows: 3 } });
     cutover.__setPoolForTest(db);
     const restore = stubDeps({});
     const r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
-    ok('시트 사본이 오래됐으면 잠금(끊기 전 최신 상태 필요)',
-      r.canCutover === false && r.blocking.includes('mirror'));
+    ok('시트를 한 번도 읽어 온 기록이 없으면 잠금',
+      r.canCutover === false && r.checks.find(c => c.key === 'mirror').state === 'unknown');
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    /* ★★ ⑤ 는 "예외가 안 났나"가 아니라 "명단이 줄지 않나" 다 (실측 오탐: `열 2개 · 검색 명단 0명`
+     *    인 탭이 초록으로 통과했다 — fail-closed 라 해놓고 가장 위험한 항목이 아무것도 안 막았다). */
+    const { db } = makeStub({ indexBefore: 20 });
+    cutover.__setPoolForTest(db);
+    let restore = stubDeps({ ledgerIndexRows: 0 });
+    let r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    const lk = r.checks.find(c => c.key === 'ledger');
+    ok('★★ 이관 후 검색 명단이 줄면 잠금(0명 통과 재발 차단)',
+      r.canCutover === false && lk.state === 'fail');
+    ok('줄어드는 인원을 숫자로 말한다', /20/.test(lk.detail) && /0/.test(lk.detail));
+    restore();
+
+    // 같거나 늘어나면 통과
+    restore = stubDeps({ ledgerIndexRows: 20 });
+    r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('명단이 유지되면 통과', r.canCutover === true
+      && r.checks.find(c => c.key === 'ledger').state === 'pass');
+    restore(); cutover.__setPoolForTest(null);
+  }
+  {
+    // 지금 명단 수를 못 세면 대조 자체가 불가 → 잠금
+    const { db } = makeStub({ indexThrows: true });
+    cutover.__setPoolForTest(db);
+    const restore = stubDeps({});
+    const r = await cutover.cutoverChecklist({ sheetId: 'S1', tabName: 'T1' });
+    ok('★ 지금 명단 수를 못 세면 잠금(대조 불가 = 모름)',
+      r.canCutover === false && r.checks.find(c => c.key === 'ledger').state === 'unknown');
     restore(); cutover.__setPoolForTest(null);
   }
   {

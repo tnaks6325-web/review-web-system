@@ -60,7 +60,8 @@ console.log('\n[A] 헤더 결정 · 2차원 배열 조립');
 
 /* ══════════════ B·C·E. 서비스 실행(스텁 pool) ══════════════ */
 console.log('\n[B·C·E] 게이트 · 파서 재사용 · 두 장부의 행 수');
-function makeStub({ sheetless = true, parts = [], storedHeaders = null, registered = true }) {
+function makeStub({ sheetless = true, parts = [], storedHeaders = null, registered = true,
+  detectedHeaders = undefined }) {
   const log = { sql: [], client: [], released: 0 };
   const client = {
     query(sql, params) {
@@ -77,7 +78,12 @@ function makeStub({ sheetless = true, parts = [], storedHeaders = null, register
         return Promise.resolve({ rows: registered ? [{ tab_gid: '77', campaign_name: '테스트업체', sheetless }] : [] });
       }
       if (/FROM campaign_participants/.test(q)) return Promise.resolve({ rows: parts });
-      if (/FROM raw_sheet_tabs/.test(q)) return Promise.resolve({ rows: storedHeaders ? [{ headers: storedHeaders }] : [] });
+      if (/FROM raw_sheet_tabs/.test(q)) {
+        // ★★ 두 칸은 다른 것이다: headers = 시트 A1 행(대개 캠페인 정보 한두 칸)
+        //    detected_headers = 진짜 열 이름 줄. 섞으면 "열 2개 · 검색 명단 0명" 이 된다(실측).
+        const det = detectedHeaders === undefined ? storedHeaders : detectedHeaders;
+        return Promise.resolve({ rows: (storedHeaders || det) ? [{ detected_headers: det, headers: storedHeaders }] : [] });
+      }
       return Promise.resolve({ rows: [] });
     },
     connect() { return Promise.resolve(client); },
@@ -128,6 +134,24 @@ const PARTS = [
     ok('raw 미러 = 빈 슬롯 포함 전 행(3행)', r.mirrorRows === 3);
     ok('검색 명단 = 이름 있는 행만(2행) — 파서 규칙 그대로', r.indexRows === 2);
     ok('제출 판정도 파서가 한다(1건)', r.submittedCount === 1);
+  }
+  {
+    /* ★★ 저장된 장부 헤더는 `detected_headers`(진짜 열 이름 줄)를 봐야 한다 — `headers` 는
+     *    시트 A1 행(캠페인 정보 한두 칸)이라 그걸 쓰면 열이 2개로 접히고 **검색 명단이 0명**이
+     *    된다(실측 사고: 이관 점검 ⑤ 가 `열 2개 · 표 500줄 → 0명` 을 초록으로 통과시켰다). */
+    const { db } = makeStub({ parts: PARTS, storedHeaders: ['캠페인명', ''], detectedHeaders: HEADERS });
+    ledger.__setPoolForTest(db);
+    const r = await ledger.rebuildLedgers({ sheetId: 'S1', tabName: 'T1', dryRun: true });
+    ok('★★ 저장 헤더는 detected_headers 우선(시트 A1 행 아님)',
+      (r.headers || []).join() === HEADERS.join());
+    ok('★ 그래서 검색 명단이 살아 있다(A1 행을 쓰면 0명이 된다)', r.indexRows === 2);
+  }
+  {
+    // detected_headers 가 비어 있으면 headers 로 폴백(옛 미러 호환)
+    const { db } = makeStub({ parts: PARTS, storedHeaders: HEADERS, detectedHeaders: null });
+    ledger.__setPoolForTest(db);
+    const r = await ledger.rebuildLedgers({ sheetId: 'S1', tabName: 'T1', dryRun: true });
+    ok('detected_headers 없으면 headers 폴백', (r.headers || []).join() === HEADERS.join());
   }
 
   // C. 실제 쓰기 — 장부 3권 모두에 기록되는지
