@@ -302,9 +302,10 @@ ok('라우트가 holidays 쿼리를 받는다',
   /if \(q\.holidays\) opt\.holidays = String\(q\.holidays\)\.split\(','\)/.test(routes));
 ok('열 이름·옵션명은 esc() 통과(시트·사용자 자유 문자열)',
   /esc\(c\.name\)/.test(wdesk) && /esc\(b\.key\)/.test(wdesk) && /esc\(d\.label\)/.test(wdesk));
-ok('★ 생성 버튼은 잠긴 계획에서 비활성 + 사유를 화면이 말한다',
-  /id="wtpCreateBtn"[\s\S]{0,120}p\.canCreate\?''\:'disabled/.test(wdesk)
-  && /지금 구성으로는 만들 수 없습니다\(위 빨간 사유\)/.test(wdesk));
+ok('★ 접수 버튼은 잠긴 계획·이미 접수된 오더에서 비활성 + 사유를 화면이 말한다',
+  /id="wtpCreateBtn"[\s\S]{0,160}\(p\.canCreate&&_wtpAcceptable\(\)\)\?''\:'disabled/.test(wdesk)
+  && /지금 구성으로는 만들 수 없습니다\(위 빨간 사유\)/.test(wdesk)
+  && /이미 접수된 작업오더입니다/.test(wdesk));
 ok('표준 열 미설정이면 어디서 정하는지 안내한다',
   /설정 › 작업표 표준 열<\/b>에서 먼저 정하세요/.test(wdesk));
 
@@ -418,19 +419,25 @@ ok('설정 화면에 템플릿 시트 입력칸이 있고 저장에 실린다',
     const set = readF('js/admin-settings.js');
     return /id="wtTplSheet"/.test(set) && /templateSheetId: tplEl \? tplEl\.value/.test(set);
   })());
-ok('★ 템플릿 없이 만들면 화면이 그 사실을 말한다(조용한 서식 누락 금지)',
-  /템플릿 미설정 — 서식 없이 만들었습니다/.test(wdesk));
-ok('프론트: 생성 버튼·대상 시트·탭 이름이 붙어 있다',
-  /onclick="wtpCreate\(\)"/.test(wdesk) && /id="wtpSheet"/.test(wdesk) && /id="wtpTabName"/.test(wdesk));
-ok('★ 생성 후 접수는 사람이 누른다고 화면이 말한다(등록 관문 유지)',
-  /접수는 확인 후 직접<\/b> 눌러 주세요/.test(wdesk));
-ok('★ 대상 시트 목록은 기존 /tabs 재사용(신규 엔드포인트 0) · 1회만 로드',
-  /api\('\/api\/trackb\/tabs'\)/.test(wdesk) && /_WTP\.sheetsLoaded/.test(wdesk));
-// ★ 라우트가 응답 객체를 변수로 조립하게 바뀌었어도(마감 주석·잘림 고지 추가, migration 088) 검사 의미는
-//   불변 = "목록 키는 tabs 다". 키 이름만 확인하고 리터럴 형태에는 결합하지 않는다.
-ok('★★ /tabs 응답의 목록 키는 `tabs` — `items` 로 읽으면 드롭다운이 항상 비어 새 파일밖에 못 고른다',
-  /\(\(r&&\(r\.tabs\|\|r\.items\)\)\|\|\[\]\)\.forEach/.test(wdesk)
-  && /const out = \{ ok: true, count: tabs\.length, tabs[,\s}]/.test(readS('routes/trackB.routes.js')));
+// ⚠ 이 문구가 있던 화면 창구(시트 생성)는 제거됐다 — 서버는 여전히 서식 유무를 응답으로 알린다.
+ok('★ 템플릿 없이 만들면 서버가 그 사실을 응답으로 알린다(조용한 서식 누락 금지)',
+  /usedTemplate = false;/.test(createSrc) && /usedTemplate, mirrored/.test(createSrc));
+// ★★ 탈 구글시트(사용자 확정 2026-08-10): 미리보기에 **구글시트 생성·삭제 창구가 없다**.
+//   남겨 두면 그 오더에 work_sheet_url 이 붙어 다시 시트 기반으로 접수되는 역행이 된다.
+ok('★★ 프론트에 시트 생성·삭제 창구가 없다(창구 하나 = 접수)',
+  !/wtpCreate\(\)/.test(wdesk) && !/wtpDelete\(\)/.test(wdesk) && !/wtpDeleteTab\(\)/.test(wdesk)
+  && !/id="wtpSheet"/.test(wdesk) && !/id="wtpMode"/.test(wdesk));
+ok('★ 미리보기의 유일한 실행 버튼 = 접수(같은 `_woAccept` 로 수렴 — 사본 0)',
+  /onclick="wtpAccept\(\)"/.test(wdesk) && /id="wtpTabName"/.test(wdesk)
+  && /await _woAccept\(_WTP\.id, null, \{ tabName, planOptions:\{/.test(wdesk));
+ok('★ 조정한 구성이 그대로 접수에 실린다(서버가 같은 계획으로 작업표를 만든다)',
+  /if\(opts&&opts\.tabName\) body\.tabName=opts\.tabName;/.test(wdesk)
+  && /if\(opts&&opts\.planOptions\) body\.planOptions=opts\.planOptions;/.test(wdesk));
+ok('★ 시트탭URL 이 있는 오더는 그 구성이 미적용임을 화면이 말한다(조용한 불일치 금지)',
+  /접수 시 그 시트 탭이 등록됩니다\(아래 구성은 미적용\)/.test(wdesk));
+// ⚠ '대상 시트 드롭다운'은 시트 생성 창구와 함께 제거됐다(탈 구글시트) — 목록 키 계약만 서버 쪽에 남긴다.
+ok('★★ /tabs 응답의 목록 키는 `tabs` (다른 소비처가 그대로 읽는다)',
+  /const out = \{ ok: true, count: tabs\.length, tabs[,\s}]/.test(readS('routes/trackB.routes.js')));
 
 /* ══════════════════════════════════════════════════════════
    J. 작업대 표 스켈레톤(M2b-2) — 줄 번호 정합·상태 추종·되돌리기
@@ -494,10 +501,9 @@ ok('★ 미러 실패가 생성을 되돌리지 않는다(시트·표는 이미 
   /mirrored = \{ error: e\.message \}/.test(createSrc));
 ok('킬스위치 WORKTABLE_DB_ROWS=0 이면 시트만 만든다',
   /process\.env\.WORKTABLE_DB_ROWS !== '0'/.test(createSrc));
-ok('프론트: 되돌리기 버튼 + "시트는 안 지워진다"를 화면이 말한다',
-  /onclick="wtpDelete\(\)"/.test(wdesk)
-  && /구글시트 탭은 지워지지 않습니다/.test(wdesk)
-  && /내부에서 진행한 테스트건이 맞습니까/.test(wdesk));
+// ⚠ 되돌리기·시트 탭 삭제의 **화면 창구는 제거**(위 참조) — 서버 라우트는 되살리기 쉽게 남겨 둔다.
+ok('서버 되돌리기 라우트는 남아 있다(화면만 제거)',
+  !!layers.find(x => x.route.path === '/worktable/delete' && x.route.methods.post));
 
 /* ══════════════════════════════════════════════════════════
    K. 시트 탭 삭제 — 아무도 안 쓴 탭만
@@ -523,8 +529,8 @@ ok('마지막 남은 탭은 미리 막는다(구글이 거부하는 동작)',
   /sheetCount <= 1/.test(createSrc));
 ok('탭 삭제 후 표의 줄도 함께 내린다',
   /deleteWorktableRows\(\{ sheetId, tabName, confirmed: true/.test(createSrc));
-ok('프론트: 되돌릴 수 없음을 한 번 더 묻는다',
-  /onclick="wtpDeleteTab\(\)"/.test(wdesk) && /되돌릴 수 없습니다/.test(wdesk));
+ok('서버 탭 삭제 라우트는 남아 있다(화면 창구는 제거)',
+  !!layers.find(x => x.route.path === '/worktable/delete-tab' && x.route.methods.post));
 
 console.log(`\n✅ worktablePlan: ${n}개 통과`);
 process.exit(0);   // trackB.routes 가 DB 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

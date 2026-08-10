@@ -197,7 +197,8 @@ t('열람 전용 계정에 이유를 알려준다(버튼만 사라지면 고장�
   assert.ok(/열람 전용/.test(HTML));
 });
 t('접수는 되돌리기 어려우니 확인을 받는다', () => {
-  assert.ok(/confirm\('이 작업오더를 접수할까요\?/.test(HTML));
+  // ★ 확인 문구는 무시트/시트 두 갈래로 갈리지만(탈 구글시트 2026-08-10) confirm 게이트 자체는 유지된다.
+  assert.ok(/이 작업오더를 접수할까요\?/.test(HTML) && /if\(!pickGid && !confirm\(msg\)\) return false;/.test(HTML));
 });
 
 t('명단 관리 UI — 관리자에게만, 인트라넷 자동완성 재사용', () => {

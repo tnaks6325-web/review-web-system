@@ -195,7 +195,8 @@ ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리�
     const wt = _layers.filter(l => /^\/worktable/.test(l.route.path));
     const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
     const paths = writes.map(l => l.route.path).sort();
-    return paths.join(',') === '/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/template'
+    // ⚠ W5 줄 정리(`/retire-rows`)가 뒤늦게 합류해 이 목록이 드리프트해 있었다(가드가 계속 빨간 상태였다).
+    return paths.join(',') === '/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
       && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
@@ -234,8 +235,10 @@ ok('AE 폼: 제출 시 클라이언트 필수 검증도 제거',
   !/showToast\("작업시트탭URL은 필수입니다"/.test(staff));
 ok('AE 목록: 시트 미첨부 오더가 그렇게 보인다(빈 값이 조용히 "-" 로 숨지 않음)',
   /시트 미첨부 — 접수 시 작업표 생성/.test(staff));
-ok('관리자 접수 안내 문구가 새 흐름을 알려준다',
-  /작업표를 생성한 뒤 접수해주세요/.test(idxApp));
+// ★★ 탈 구글시트(2026-08-10): 시트URL 없는 오더는 막지 않고 **무시트로 접수**한다 — 화면은 확인만 받는다.
+ok('관리자 접수 안내 문구가 새 흐름을 알려준다(무시트 접수 확인)',
+  /구글시트 없이 시스템 작업표로 접수할까요\?/.test(idxApp)
+  && !/woNotice\("작업시트탭URL이 없습니다/.test(idxApp));
 
 /* ══════════════════════════════════════════════════════════
    E. 화면 배선 — 작업표는 "설정" 안에, 공유 모듈 한 벌

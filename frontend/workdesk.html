@@ -5812,7 +5812,6 @@ async function _wtpLoad(){
     if(sg.length) return _wtpLoad();
   }
   _wtpRender();
-  if(!_WTP.sheetsLoaded){ _WTP.sheetsLoaded=1; _wtpFillSheets(); }   // 대상 시트 목록은 1회만
 }
 function _wtpOnEdit(){ _wtpSyncForm(); _wtpLoad(); }   // 값 읽기는 _wtpSyncForm 한 벌(사본 금지)
 /* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 여기서 지정한다.
@@ -5848,100 +5847,10 @@ function _wtpSyncForm(){
   if(f.holidays==null) f.holidays=((_WTP.plan&&_WTP.plan.holidays)||[]).slice();
 }
 
-/* 대상 시트 목록 — 이미 등록된 시트(작업 탭이 있는 파일)에서 고른다.
-   ★ 목록은 기존 `/api/trackb/tabs` 재사용(신규 엔드포인트 0). 실패해도 '새 시트 파일'로 만들 수 있다. */
-async function _wtpFillSheets(){
-  const sel=document.getElementById('wtpSheet'); if(!sel) return;
-  sel.innerHTML='<option value="">불러오는 중…</option>';
-  try{
-    const r=await api('/api/trackb/tabs');
-    const seen={}, opts=[];
-    // ★ 이 API 의 목록 키는 `tabs` 다(`items` 아님) — 실제로 붙여 보고 잡은 버그.
-    //   잘못 읽으면 드롭다운이 **항상 비어** '새 시트 파일'밖에 못 고른다.
-    ((r&&(r.tabs||r.items))||[]).forEach(t=>{ const id=t.sheetId||t.sheet_id; if(!id||seen[id])return; seen[id]=1;
-      opts.push(`<option value="${esc(id)}">${esc(t.spreadsheetTitle||t.spreadsheet_title||id)}</option>`); });
-    sel.innerHTML=opts.length?opts.join(''):'<option value="">(등록된 시트 없음 — 새 시트 파일로 만드세요)</option>';
-  }catch(_){ sel.innerHTML='<option value="">(목록을 불러오지 못했습니다)</option>'; }
-}
-function _wtpModeChange(){
-  const m=document.getElementById('wtpMode').value;
-  const w=document.getElementById('wtpSheetWrap');
-  if(w) w.style.display=(m==='new')?'none':'';
-}
-async function wtpCreate(){
-  const btn=document.getElementById('wtpCreateBtn'), msg=document.getElementById('wtpCreateMsg');
-  if(!btn||btn.disabled) return;
-  const mode=document.getElementById('wtpMode').value;
-  const sheetId=(document.getElementById('wtpSheet')||{}).value||'';
-  const tabName=(document.getElementById('wtpTabName')||{}).value||'';
-  if(mode==='existing'&&!sheetId){ _toast('대상 시트를 고르세요'); return; }
-  const p=_WTP.plan;
-  if(!confirm(`작업표를 만듭니다.\n\n· 탭 이름: ${tabName}\n· ${p.totals.rows}행 (${p.columns.length}열)\n· 날짜 ${p.totals.days}일\n\n계속할까요?`)) return;
-  btn.disabled=true; const old=btn.textContent; btn.textContent='만드는 중…';
-  if(msg) msg.textContent='시트를 만들고 있습니다. 잠시 기다려 주세요…';
-  _wtpSyncForm();
-  const f=_WTP.form||{};
-  // ★ 템플릿 시트는 전사 설정(서버)이 우선이고, 없으면 이 브라우저에 저장된 값을 보낸다
-  //   (기존 '새 시트생성' 이 쓰던 localStorage 키 재사용 — 설정 전에도 바로 동작).
-  //   둘 다 없으면 서버가 빈 탭으로 만든다(서식만 없고 열·행은 동일).
-  let _tpl=''; try{ _tpl=localStorage.getItem('rapp_template_sheet_id')||''; }catch(_){}
-  const r=await api('/api/trackb/worktable/create',{method:'POST',body:JSON.stringify({
-    workOrderId:_WTP.id, mode, sheetId, tabName, templateSheetId:_tpl,
-    planOptions:{ total:f.total, daily:f.daily, startDate:f.startDate,
-                  skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[],
-                  channel:f.channel||'', workTypes:f.workTypes||[] },
-  })});
-  if(r&&r.ok){
-    _WTP.made={sheetId:r.sheetId,tabName:r.tabName};
-    const slotNote=(r.slots&&r.slots.error)
-      ? ` <b style="color:#B45309">작업대 표에는 반영하지 못했습니다(${esc(r.slots.error)}) — 시트는 정상입니다.</b>`
-      : (r.slots?` 작업대 표에도 ${r.slots.created}줄이 준비됐습니다.`:'');
-    if(msg) msg.innerHTML=`✅ <b>${esc(r.tabName)}</b> 탭을 만들었습니다 (${r.rowsWritten}행). `
-      +`<a href="${esc(r.tabUrl)}" target="_blank" rel="noopener" style="color:#1D4ED8">시트 열기 ↗</a>`
-      +(r.usedTemplate===false?' <b style="color:#B45309">(템플릿 미설정 — 서식 없이 만들었습니다)</b>':'')
-      +` · 작업오더에 URL을 연결했습니다.${slotNote} <b>접수는 확인 후 직접</b> 눌러 주세요.`
-      +` <button class="btn xs" onclick="wtpDelete()" style="margin-left:6px">작업표 삭제</button>`;
-    btn.textContent='만들어짐'; _toast('작업표를 만들었습니다');
-    try{ _loadOrders(); }catch(_){}
-  }else{
-    btn.disabled=false; btn.textContent=old;
-    const why=(r&&r.blockers&&r.blockers.length)?r.blockers.map(b=>b.message).join(' / '):((r&&r.error)||'오류');
-    if(msg) msg.innerHTML=`<b style="color:#B91C1C">만들지 못했습니다: ${esc(why)}</b>`;
-  }
-}
-
-/* 작업표 되돌리기 — **작업대 표의 줄만** 내린다(시트 탭·주문 기록은 그대로).
-   ★ 주문이 들어온 줄이 있으면 그 목록을 보여주고 "내부 테스트건" 확인을 받은 뒤에만 최종 삭제.
-   ★ 시트 탭은 시스템이 지우지 않는다 — 되돌리기 어려운 파괴는 사람 손에 남긴다. */
-async function wtpDelete(){
-  const m=_WTP&&_WTP.made; if(!m){ _toast('삭제할 작업표 정보가 없습니다'); return; }
-  const send=async(confirmed)=>api('/api/trackb/worktable/delete',{method:'POST',
-    body:JSON.stringify({sheetId:m.sheetId,tabName:m.tabName,confirmed:!!confirmed})});
-  if(!confirm(`"${m.tabName}" 작업표를 작업대 표에서 내립니다.\n\n· 구글시트 탭은 지워지지 않습니다(필요하면 직접 삭제).\n· 주문 기록도 지워지지 않습니다.\n\n계속할까요?`)) return;
-  let r=await send(false);
-  if(r&&r.needsConfirm){
-    const list=(r.filled||[]).slice(0,10)
-      .map(f=>`  · ${f.seq}번 줄 ${f.recipient||'(이름 없음)'}${f.hasOrder?' — 주문 있음':''}`).join('\n');
-    if(!confirm(`⚠ 이미 사람이 들어온 줄이 ${r.filledCount}건 있습니다.\n\n${list}${r.filledCount>10?'\n  …':''}\n\n`
-      +`내부에서 진행한 테스트건이 맞습니까?\n확인을 누르면 이 줄들도 함께 표에서 내려갑니다(주문 기록 자체는 남습니다).`)) return;
-    r=await send(true);
-  }
-  if(r&&r.ok){ _toast(`작업표를 내렸습니다 (${r.deleted}줄)`); const msg=document.getElementById('wtpCreateMsg');
-    if(msg) msg.innerHTML=`작업대 표에서 <b>${r.deleted}줄</b>을 내렸습니다.`
-      +` <button class="btn xs" onclick="wtpDeleteTab()">구글시트 탭도 삭제</button>`; }
-  else _toast('⚠ 삭제 실패'+(r&&r.error?': '+r.error:''));
-}
-/* 구글시트 탭 삭제 — ★ 아무도 안 쓴 탭만(주문·참여자 0건일 때 서버가 허용).
-   되돌리기가 어려운 동작이라 한 번 더 묻고, 서버가 gid 를 이름으로 재조회해 지운다. */
-async function wtpDeleteTab(){
-  const m=_WTP&&_WTP.made; if(!m){ _toast('삭제할 작업표 정보가 없습니다'); return; }
-  if(!confirm(`구글시트에서 "${m.tabName}" 탭을 삭제합니다.\n\n· 되돌릴 수 없습니다.\n· 주문·참여자가 한 명이라도 있으면 서버가 거부합니다.\n\n계속할까요?`)) return;
-  const r=await api('/api/trackb/worktable/delete-tab',{method:'POST',
-    body:JSON.stringify({sheetId:m.sheetId,tabName:m.tabName})});
-  const msg=document.getElementById('wtpCreateMsg');
-  if(r&&r.ok){ _toast('시트 탭을 삭제했습니다'); if(msg) msg.innerHTML=`✅ <b>${esc(m.tabName)}</b> 탭을 시트에서 삭제했습니다.`; }
-  else { _toast('⚠ '+((r&&r.error)||'삭제 실패')); if(msg) msg.innerHTML=`<b style="color:#B91C1C">${esc((r&&r.error)||'삭제 실패')}</b>`; }
-}
+/* ★★ 탈 구글시트(사용자 확정 2026-08-10) — 이 미리보기에는 **구글시트 생성 창구가 없다**.
+   접수(`wtpAccept` → `_woAccept`)가 시스템 작업표를 만들므로 시트 탭 생성·삭제 버튼을 두면
+   그 오더에 `work_sheet_url` 이 붙어 **다시 시트 기반으로 접수되는 역행**이 된다.
+   서버 라우트(`/worktable/create`·`/delete`·`/delete-tab`)는 되살리기 쉽게 그대로 남겨 두었다. */
 
 function _wtpRender(){
   const p=_WTP.plan, wo=_WTP.workOrder;
@@ -6034,29 +5943,54 @@ function _wtpRender(){
 
       <div style="border-top:1px solid #E5E7EB;padding-top:12px;display:flex;flex-direction:column;gap:9px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <label style="font-size:12px;color:#6B7280">만들 위치<br>
-            <select id="wtpMode" onchange="_wtpModeChange()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px">
-              <option value="existing">기존 시트에 탭 추가</option>
-              <option value="new">새 시트 파일</option>
-            </select></label>
-          <label id="wtpSheetWrap" style="font-size:12px;color:#6B7280;flex:1;min-width:220px">대상 시트<br>
-            <select id="wtpSheet" style="width:100%;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></select></label>
-          <label style="font-size:12px;color:#6B7280;flex:1;min-width:200px">탭 이름<br>
+          <label style="font-size:12px;color:#6B7280;flex:1;min-width:200px">작업 이름<br>
             <input id="wtpTabName" maxlength="90" value="${esc(wo.title||'')}" style="width:100%;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <button class="btn" onclick="closeWtPlan()">닫기</button>
-          <button class="btn pri" id="wtpCreateBtn" onclick="wtpCreate()" ${p.canCreate?'':'disabled style="opacity:.5;cursor:default"'}>이 구성으로 만들기</button>
-          <span id="wtpCreateMsg" style="font-size:12px;color:#6B7280">${p.canCreate
-            ? '시트 탭이 만들어지고 작업오더에 URL이 자동으로 연결됩니다. <b>접수는 확인 후 직접</b> 눌러 주세요.'
-            : '<b style="color:#B91C1C">지금 구성으로는 만들 수 없습니다(위 빨간 사유).</b>'}</span>
+          <button class="btn pri" id="wtpCreateBtn" onclick="wtpAccept()" ${(p.canCreate&&_wtpAcceptable())?'':'disabled style="opacity:.5;cursor:default"'}>✅ 이 구성으로 접수하기</button>
+          <span id="wtpCreateMsg" style="font-size:12px;color:#6B7280">${
+            !p.canCreate ? '<b style="color:#B91C1C">지금 구성으로는 만들 수 없습니다(위 빨간 사유).</b>'
+            : !_wtpAcceptable() ? '<b>이미 접수된 작업오더입니다.</b> 구성만 확인할 수 있습니다.'
+            : _wtpSheetBound()
+              ? '<b style="color:#B45309">이 오더에는 작업시트탭URL이 있어</b> 접수 시 그 시트 탭이 등록됩니다(아래 구성은 미적용).'
+              : '구글시트 없이 <b>시스템 작업표</b>가 이 구성 그대로 만들어지고 접수됩니다.'}</span>
         </div>
       </div>
     </div>`;
 }
+/* 이 오더를 지금 접수할 수 있는가 / 시트에 묶여 있는가 — 판정 사본 없이 공유 모듈을 그대로 쓴다. */
+function _wtpAcceptable(){
+  const wo=_WTP&&_WTP.workOrder; if(!wo) return false;
+  return (typeof _woAcceptable==='function') ? _woAcceptable(wo) : true;
+}
+function _wtpSheetBound(){
+  const wo=_WTP&&_WTP.workOrder; if(!wo) return false;
+  return (typeof _woAcceptSheetless==='function') ? !_woAcceptSheetless(wo) : !!String(wo.work_sheet_url||'').trim();
+}
+/* ★★ 탈 구글시트 — 미리보기에서 바로 **접수**한다(시트 생성 창구 없음).
+   조정한 값(총건수·일건수·시작일·주말제외·휴무일·채널·작업유형)과 작업 이름을 그대로 접수에 실어
+   서버가 **같은 계획으로** 작업표를 만든다(계획 재계산은 여전히 서버 — 화면 행 목록 불신).
+   ★ 접수는 등록 단일 관문이라 이 버튼도 결국 같은 `_woAccept` 를 탄다(사본 0). */
+async function wtpAccept(){
+  const btn=document.getElementById('wtpCreateBtn'), msg=document.getElementById('wtpCreateMsg');
+  if(!btn||btn.disabled) return;
+  _wtpSyncForm();
+  const f=_WTP.form||{};
+  const tabName=((document.getElementById('wtpTabName')||{}).value||'').trim();
+  btn.disabled=true; const old=btn.textContent; btn.textContent='접수 중…';
+  if(msg) msg.textContent='작업표를 만들고 등록하는 중입니다…';
+  const okDone = await _woAccept(_WTP.id, null, { tabName, planOptions:{
+    total:f.total, daily:f.daily, startDate:f.startDate,
+    skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[],
+    channel:f.channel||'', workTypes:f.workTypes||[] } });
+  if(okDone){ closeWtPlan(); }
+  else { btn.disabled=false; btn.textContent=old; if(msg) msg.innerHTML='<b style="color:#B91C1C">접수하지 못했습니다 — 위 안내를 확인하세요.</b>'; }
+}
 
-async function _woAccept(id, pickGid){
+async function _woAccept(id, pickGid, opts){
   // pickGid = 탭 교정 재접수(gid 미발견 404 팝업에서 고른 탭) — 그때는 confirm 을 이미 팝업이 받았다.
+  // opts   = 작업표 미리보기에서 조정한 구성(tabName·planOptions) — 무시트 접수에만 쓰인다.
   //  ★ 구글시트탭URL 이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성) — 확인창이 그 사실을 말한다.
   //    판정은 공유 모듈 `_woAcceptSheetless`(표시용) 하나이고 최종 판정은 서버가 한다.
   const o=(STATE.wo||[]).find(x=>x.id===id);
@@ -6064,8 +5998,10 @@ async function _woAccept(id, pickGid){
   const msg = ns
     ? '이 작업오더를 접수할까요?\n\n· 구글시트 없이 시스템 작업표(모집인원만큼의 줄)를 만들어 등록합니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.'
     : '이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.';
-  if(!pickGid && !confirm(msg)) return;
+  if(!pickGid && !confirm(msg)) return false;
   const body = pickGid ? {id, gid:pickGid} : {id};
+  if(opts&&opts.tabName) body.tabName=opts.tabName;
+  if(opts&&opts.planOptions) body.planOptions=opts.planOptions;
   const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify(body)});
   if(r&&r.ok){
     const wt = r.worktable && r.worktable.rows ? ' · 작업표 '+r.worktable.rows+'줄' : '';
@@ -6073,6 +6009,7 @@ async function _woAccept(id, pickGid){
       :((r.gidCorrected?'🔧 URL 교정 후 ':'')+'접수 완료'+(r.tabName?' — '+r.tabName:'')+(r.sheetless?' (무시트)'+wt:'')));
     if(r.worktable&&r.worktable.error) _toast('⚠ 작업표 장부 생성 실패: '+r.worktable.error);
     _loadOrders();
+    return true;
   }
   // ★ URL 의 gid 가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서 사람이 골라
   //   재접수. 팝업은 관리자 대시보드와 공용(work-order-detail.js woAcceptTabPicker).
@@ -6084,6 +6021,7 @@ async function _woAccept(id, pickGid){
     _toast('⚠ 작업표를 만들 수 없습니다: '+r.blockers.map(b=>b&&b.message||'').filter(Boolean).join(' / '));
   }
   else _toast('⚠ 접수 실패'+(r&&r.error?': '+r.error:''));
+  return false;
 }
 /* ══════════════════════════════════════════════════════════════
    상태 변경 — **고를 수 있는 상태만 한국어 버튼으로** 보여준다.
