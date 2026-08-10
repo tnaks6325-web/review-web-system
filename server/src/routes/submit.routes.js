@@ -546,7 +546,7 @@ router.post('/review', async (req, res, next) => {
            ★ 시트 기반 탭이면 handled:false = 종전 동작 그대로. 실패해도 제출은 성공(fail-soft). */
         try {
           const st = await require('../services/sheetlessStatus.service')
-            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', by: 'review-submit' });
+            .markStatusCell({ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue, by: 'review-submit' });
           if (st.handled && !st.ok) {
             logger.warn(`[submit] 무시트 리뷰제출 표시 기록 실패 tab=${tabName} row=${rowIndex} reason=${st.reason}`);
           }

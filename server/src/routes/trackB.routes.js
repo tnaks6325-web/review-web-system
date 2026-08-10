@@ -13,6 +13,7 @@ const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
+const sheetlessStatus = require('../services/sheetlessStatus.service');
 // ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
 const { logger } = require('../utils/logger');
@@ -461,6 +462,19 @@ router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, asy
    ★★ **adminOrMaster 전용** — 이 경로는 접수에 이은 두 번째 등록 창구다(복원 성격 예외).
      AE 담당자에게 열면 담당 범위 밖의 시트를 시스템 작업으로 만들 수 있게 된다.
    ★ 이 경로는 재기준하지 않는다 — `/api/trackb/*` 라 관리자 토큰·인트라넷 SSO 양쪽이 그대로 닿는다. */
+// 최근 5일간 리뷰 파일 원장이 있고, 현재 작업표에 과거 표기('O')가 남은 무시트 행만
+// 업로드 시각으로 바꾼다. 기본은 dry-run이며 master가 확인 문구를 명시해야만 실제 변경한다.
+router.post('/sheetless/review-submit-time-backfill', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const dryRun = req.body?.dryRun !== false;
+    if (!dryRun && req.body?.confirm !== 'replace-o-with-submission-time') {
+      return res.status(400).json({ ok: false, error: '실제 반영에는 confirm: replace-o-with-submission-time 이 필요합니다.' });
+    }
+    const out = await sheetlessStatus.backfillReviewSubmitTimes({ dryRun, by: _by(req) });
+    res.json(out);
+  } catch (err) { _cutoverErr(err, res, next); }
+});
+
 const sheetImport = require('../services/sheetImport.service');
 function _importErr(err, res, next) {
   if (err instanceof sheetImport.ImportError) {

@@ -145,6 +145,8 @@ console.log('\n[B] 대표 리뷰 이미지는 재생성에도 살아남는다');
 console.log('\n[C] 두 기록 경로가 무시트 분기를 탄다');
 {
   const sub = noLineComments(srv('src/routes/submit.routes.js'));
+  ok('sheetless reviewer submission passes its timestamp to the worktable',
+    /markStatusCell\(\{ sheetId, tabName, rowIndex, kind: 'submit', value: submitValue/.test(sub));
   ok('리뷰 제출 완료에서 상태 기록 호출', /sheetlessStatus\.service'\)\s*\n?\s*\.markStatusCell\(\{ sheetId, tabName, rowIndex, kind: 'submit'/.test(sub));
   ok('제출 성공을 막지 않는다(fail-soft)',
     /markStatusCell[\s\S]{0,600}?catch \(e\) \{[\s\S]{0,200}?logger\.warn/.test(sub));
@@ -161,6 +163,51 @@ console.log('\n[C] 두 기록 경로가 무시트 분기를 탄다');
   // 시트 경로는 그대로 살아 있어야 한다(무회귀)
   ok('시트 기반 경로(writeSheet)는 그대로', /await writeSheet\(item\.sheetId, range/.test(pay));
   ok("시트 실패 시 deposit_mark 큐도 그대로", /enqueue\('deposit_mark'/.test(pay));
+}
+
+/* ══════════════ F. Existing O → submission-time backfill ══════════════ */
+console.log('\n[F] recent uploaded reviews with O are backfilled safely');
+{
+  const stSrc = noLineComments(srv('src/services/sheetlessStatus.service.js'));
+  const tbRoutes = noLineComments(srv('src/routes/trackB.routes.js'));
+
+  ok('backfill limits candidates to sheetless tabs', /COALESCE\(tc\.sheetless, FALSE\) = TRUE/.test(stSrc));
+  ok('backfill limits candidates to cells currently equal to O', /COALESCE\(cp\.row_json ->> ri\.submit_col, ''\) = 'O'/.test(stSrc));
+  ok('backfill uses the latest recorded review-upload timestamp', /MAX\(COALESCE\(rs\.uploaded_at, rs\.created_at\)\)/.test(stSrc));
+  ok('backfill formats the timestamp in Korea time', /AT TIME ZONE 'Asia\/Seoul'/.test(stSrc) && /FMMM\/FMDD HH24:MI/.test(stSrc));
+  ok('backfill rechecks O immediately before update', /AND COALESCE\(cp\.row_json ->> c\.submit_col, ''\) = 'O'/.test(stSrc));
+  ok('backfill rebuilds ledgers only for changed tabs', /rebuildLedgers\(\{ sheetId: tab\.sheetId, tabName: tab\.tabName/.test(stSrc));
+  ok('backfill endpoint is master-only and dry-run by default',
+    /review-submit-time-backfill', authMiddleware, masterOnlyMiddleware/.test(tbRoutes)
+    && /const dryRun = req\.body\?\.dryRun !== false/.test(tbRoutes));
+  ok('backfill requires an explicit confirmation to apply', /confirm !== 'replace-o-with-submission-time'/.test(tbRoutes));
+}
+{
+  const calls = [];
+  const candidate = {
+    sheetId: 'sheetless-1', tabName: 'campaign', rowIndex: 12, reviewerName: 'reviewer',
+    submitCol: '리뷰제출', sourceAt: '2026-08-10T09:13:00.000Z', submitValue: '8/10 18:13',
+  };
+  status.__setPoolForTest({ query: async (sql, params) => {
+    calls.push({ sql, params });
+    if (/MAX\(COALESCE\(rs\.uploaded_at, rs\.created_at\)\)/.test(sql)) return { rows: [candidate] };
+    if (/jsonb_to_recordset/.test(sql)) return { rows: [{ sheetId: 'sheetless-1', tabName: 'campaign', rowIndex: 12 }] };
+    return { rows: [] };
+  } });
+  const preview = await status.backfillReviewSubmitTimes({ dryRun: true });
+  ok('backfill preview reports candidates without writing', preview.dryRun === true && preview.candidateCount === 1 && calls.length === 1);
+
+  const realRebuild = ledger.rebuildLedgers;
+  const rebuilt = [];
+  ledger.rebuildLedgers = async (arg) => { rebuilt.push(arg); return { ok: true }; };
+  const applied = await status.backfillReviewSubmitTimes({ dryRun: false, by: 'master' });
+  ledger.rebuildLedgers = realRebuild;
+  status.__setPoolForTest(null);
+  const update = calls.find(x => /jsonb_to_recordset/.test(x.sql));
+  const plan = update ? JSON.parse(update.params[0]) : [];
+  ok('backfill apply writes only the previewed row and timestamp',
+    applied.updated === 1 && plan.length === 1 && plan[0].submit_value === '8/10 18:13' && plan[0].submit_col === '리뷰제출');
+  ok('backfill rebuilds the one changed tab after writing', rebuilt.length === 1 && rebuilt[0].sheetId === 'sheetless-1' && rebuilt[0].tabName === 'campaign');
 }
 
 /* ══════════════ D. Track B write-back 무시트 분기 ══════════════ */
