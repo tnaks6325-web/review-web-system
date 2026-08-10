@@ -1709,13 +1709,13 @@ async function woAccept(id, pickGid) {
   const url = ((o && o.work_sheet_url) || "").trim();
 
   // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
-  // ★ 시트탭URL은 AE 제출 단계에서 선택 항목 — 미첨부 오더는 접수 전에 시트를 마련해야 한다.
-  //   (접수 = 그 탭을 tab_configs·campaigns 에 등록하는 관문이라 등록할 탭이 있어야 성립)
+  // ★★ 시트탭URL이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성 — 사용자 확정 2026-08-10).
+  //   종전엔 여기서 막아 인트라넷 리뷰오더(시트URL 칸 없음)를 접수할 방법이 없었다.
+  //   판정·생성은 서버(`sheetlessAccept.resolveAcceptMode`)가 하고 화면은 확인만 받는다.
   if (!url) {
-    woNotice("작업시트탭URL이 없습니다.\n시트탭 주소(…/edit#gid=숫자)를 입력하거나 작업표를 생성한 뒤 접수해주세요.");
-    return;
+    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.")) return;
   }
-  if (!/[#?&]gid=\d+/.test(url) && !pickGid) {
+  if (url && !/[#?&]gid=\d+/.test(url) && !pickGid) {
     woNotice("작업시트탭URL에 gid가 없습니다.\n특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.\n\n현재 URL:\n" + url);
     return;
   }
@@ -1734,7 +1734,10 @@ async function woAccept(id, pickGid) {
         woAcceptTabPicker(r, g => woAccept(id, g));
         return;
       }
-      showToast((r && r.error) || "접수 실패", true);
+      // ★ 무시트 접수가 막힌 경우는 사유(건수 0·표준 열 미설정 등)를 그대로 보여준다.
+      const _bk = (r && r.sheetless && Array.isArray(r.blockers))
+        ? r.blockers.map(b => (b && b.message) || "").filter(Boolean).join(" / ") : "";
+      showToast(_bk ? "작업표를 만들 수 없습니다: " + _bk : ((r && r.error) || "접수 실패"), true);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
       return;
     }
@@ -1742,10 +1745,15 @@ async function woAccept(id, pickGid) {
 
     // 3) 결과 안내 (신규 등록 vs 기존 탭 연결 = 차수 추가)
     const tabName = r.tabName || "";
+    const wtNote = r.sheetless
+      ? ` (무시트${r.worktable && r.worktable.rows ? ` · 작업표 ${r.worktable.rows}줄` : ""})` : "";
     if (r.alreadyRegistered) {
-      showToast(`✅ 접수 완료 — 기존 탭에 연결됨: ${tabName} (차수 구분은 시트 기준 자동)`);
+      showToast(`✅ 접수 완료 — 기존 탭에 연결됨: ${tabName}${wtNote}`);
     } else {
-      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${tabName}`);
+      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${tabName}${wtNote}`);
+    }
+    if (r.worktable && r.worktable.error) {
+      showToast("작업표 장부 생성 실패: " + r.worktable.error, true);
     }
     if (r.indexBuilt === false) {
       showToast("탭은 등록됐지만 인덱스 빌드는 실패했습니다. 잠시 후 자동 갱신됩니다.", true);

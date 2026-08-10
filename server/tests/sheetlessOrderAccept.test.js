@@ -295,10 +295,33 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
   {
     const or = srv('src/routes/order.routes.js');
     const orN = noLineComments(or);
-    // ★ 판정식 자체를 고정한다 — 위치만 보면 `false &&` 를 끼워 넣어 무시트 경로를 통째로
-    //   죽여도 통과한다(변이시험 실측). 요청 본문에서만 켜지고 상수로 꺼지지 않아야 한다.
-    ok('무시트 접수는 body.sheetless 로만 켜진다(자동 추측·상수 무력화 금지)',
-      /const wantSheetless = \(\(req\.body \|\| \{\}\)\.sheetless === true \|\| \(req\.body \|\| \{\}\)\.sheetless === 'true'\);/.test(orN));
+    // ★★ 판정은 서비스 단일 출처(`resolveAcceptMode`) — 라우트에 인라인 판정식 사본이 없어야 한다.
+    //   (사본을 두면 "화면·서버가 서로 다른 경로로 접수"가 조용히 생긴다)
+    ok('라우트는 판정 단일 출처를 호출한다(인라인 판정 사본 0)',
+      /const acceptMode = resolveAcceptMode\(\{ workOrder: o, body: req\.body \}\);/.test(orN) &&
+      /const wantSheetless = acceptMode\.sheetless;/.test(orN) &&
+      !/\(req\.body \|\| \{\}\)\.sheetless === true/.test(orN));
+    // ★★ 판정 실행 — "시트URL 없으면 무시트"(사용자 확정 2026-08-10)가 실제로 그렇게 도는지.
+    {
+      const prev = process.env.SHEETLESS_ACCEPT_DEFAULT;
+      delete process.env.SHEETLESS_ACCEPT_DEFAULT;
+      const m = (wo, body) => slAccept.resolveAcceptMode({ workOrder: wo, body });
+      ok('시트URL 없음 = 무시트 접수(막다른 길 제거)',
+        m({}, {}).sheetless === true && m({}, {}).reason === 'no_sheet_url');
+      ok('시트URL 있음 = 종전 시트 경로',
+        m({ work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }, {}).sheetless === false);
+      ok('body.sheetless=true 는 URL 이 있어도 무시트(작업 단위 예외)',
+        m({ work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }, { sheetless: true }).sheetless === true);
+      // ★ 이관 되돌림 금지 — 이미 무시트 작업표가 있는 오더는 URL 이 붙어도 시트 경로로 안 간다
+      ok('이미 무시트인 오더는 되돌아가지 않는다',
+        m({ linked_tab_sheet_id: slAccept.VIRTUAL_SHEET_PREFIX + 'deadbeef', work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }, {}).sheetless === true);
+      ok('공백뿐인 URL 은 없는 것으로 본다', m({ work_sheet_url: '   ' }, {}).sheetless === true);
+      process.env.SHEETLESS_ACCEPT_DEFAULT = '0';
+      ok('킬스위치 0 = 종전 동작(시트 필수 400 안내로 떨어진다)',
+        m({}, {}).sheetless === false && m({}, {}).reason === 'killswitch');
+      ok('킬스위치 중에도 명시 요청은 무시트', m({}, { sheetless: 'true' }).sheetless === true);
+      if (prev === undefined) delete process.env.SHEETLESS_ACCEPT_DEFAULT; else process.env.SHEETLESS_ACCEPT_DEFAULT = prev;
+    }
     ok('무시트 경로는 구글 메타를 조회하지 않는다',
       orN.indexOf('createSheetlessWorktable') < orN.indexOf('await getSpreadsheetMeta') &&
       /if \(wantSheetless\) \{/.test(orN));
