@@ -22,7 +22,10 @@
  *   · 은행이 실패로 답한 건만 `failed` → 부분유니크에서 빠져 **다음 회차에 다시 담긴다**(재이체 경로).
  */
 
-const pool = require('../db/pool');
+/* ★ 테스트에서 실제 실행이 가능하도록 pool 을 지연 해석한다(레포 관용구 `__setPoolForTest`). */
+let _pool;
+function _db() { if (!_pool) _pool = require('../db/pool'); return _pool; }
+function __setPoolForTest(p) { _pool = p || null; }
 const { logger } = require('../utils/logger');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly } = require('../utils/paymentResultParse');
@@ -80,7 +83,7 @@ async function _analyze(batchId, fileName, base64) {
   if (!base64) throw new ResultError('bad_request', '파일이 비어 있습니다.');
   if (String(base64).length > MAX_BASE64) throw new ResultError('too_large', '파일이 너무 큽니다(12MB 초과).');
 
-  const { rows: [b] } = await pool.query(`SELECT * FROM payment_batches WHERE id = $1`, [batchId]);
+  const { rows: [b] } = await _db().query(`SELECT * FROM payment_batches WHERE id = $1`, [batchId]);
   if (!b) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
   if (b.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차입니다.');
 
@@ -94,7 +97,7 @@ async function _analyze(batchId, fileName, base64) {
   const parse = parseResultAoa(loaded.aoa, { expectBank: b.bank });
   if (!parse.ok) throw new ResultError('parse_failed', parse.error);
 
-  const { rows: itemRows } = await pool.query(
+  const { rows: itemRows } = await _db().query(
     `SELECT * FROM payment_batch_items WHERE batch_id = $1 ORDER BY created_at, id`, [batchId]);
   const items = itemRows.map(_itemView);
 
@@ -164,7 +167,7 @@ async function _notifyFailures(items, by) {
         message: FAIL_NOTICE, by: by || '관리자',
       });
       if (!out) continue;
-      await pool.query(`UPDATE payment_batch_items SET notified_at = NOW() WHERE id = $1`, [it.id]);
+      await _db().query(`UPDATE payment_batch_items SET notified_at = NOW() WHERE id = $1`, [it.id]);
       n++;
     } catch (e) {
       logger.warn(`[paymentResult] 실패 안내 전송 실패(${it.tabName}/${it.rowIndex}): ${e.message}`);
@@ -189,7 +192,7 @@ async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) 
 
   const paidItems = [];     // 배경 입금칸 기록 대상(성공 건)
   const failedItems = [];   // 실패 안내(1:1문의) 대상 — 아직 안내를 보내지 않은 건만
-  const client = await pool.connect();
+  const client = await _db().connect();
   try {
     await client.query('BEGIN');
 
@@ -318,4 +321,4 @@ async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) 
   };
 }
 
-module.exports = { previewResultFile, applyResultFile, ResultError, MAX_BASE64, FAIL_NOTICE };
+module.exports = { previewResultFile, applyResultFile, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
