@@ -98,8 +98,8 @@
     </p>
     <div class="chips">
       <span class="chip a">master · admin 전용</span>
-      <span class="chip">1단계(M1) — 대상 추출 · 다운로드</span>
-      <span class="chip">2026-08-04</span>
+      <span class="chip">대상 추출 · 다운로드 · 이체결과 반영</span>
+      <span class="chip">2026-08-10</span>
     </div>
   </header>
 
@@ -121,7 +121,11 @@
         <div class="d">지금 하시던 것과 똑같습니다. 파일을 열어 고칠 필요 없습니다.</div></div></div>
       <div class="step"><div class="n">5</div><div class="b">
         <div class="t">이체 후 — 아래 [이체 회차] 표에서 기록 확인</div>
-        <div class="d">누가·언제·몇 건을 받았는지 남습니다. (은행 결과 파일을 올려 입금일을 자동 기록하는 기능은 <b>다음 단계(2단계)</b>입니다. 지금은 시트 입금칸을 종전대로 적어주세요.)</div></div></div>
+        <div class="d">누가·언제·몇 건을 받았는지 남습니다.</div></div></div>
+      <div class="step"><div class="n">6</div><div class="b">
+        <div class="t">은행에서 <b>이체결과 파일</b>을 받아 <span class="btn p">⬆ 결과 업로드</span></div>
+        <div class="d">회차 줄의 버튼입니다. 파일을 고르면 <b>확인 화면</b>이 뜨고, 거기서 [이대로 반영]을 눌러야 기록됩니다.
+          입금완료 건은 <b>결과 파일에 적힌 실제 이체시각</b>으로 입금 표시가 찍힙니다 — 시트 입금칸을 손으로 적지 않아도 됩니다.</div></div></div>
     </div>
     <div class="callout">
       <b>대상은 어떻게 뽑히나요?</b> ① 리뷰를 제출했고 ② 아직 입금 안 됐고 ③ <b>한 번도 다운로드에 담긴 적 없는</b> 건만 나옵니다.
@@ -189,9 +193,47 @@
     </div>
   </section>
 
+
   <!-- 06 -->
   <section>
-    <div class="shead"><span class="snum">06</span><h2>알아두실 것</h2></div>
+    <div class="shead"><span class="snum">06</span><h2>이체결과 파일 올리기 — 입금 표시 자동 기록</h2></div>
+    <p class="sdesc">은행에서 이체를 끝내고 받은 <b>결과 파일</b>을 그대로 올리면, 성공한 건만 골라 입금 표시가 찍힙니다.
+      하나은행·케이뱅크 파일 모두 그대로 올리시면 됩니다(.xls / .xlsx / csv).</p>
+    <div class="card">
+      <div class="step"><div class="n">1</div><div class="b">
+        <div class="t">[이체 회차] 표에서 그 회차의 <span class="btn">⬆ 결과 업로드</span></div>
+        <div class="d">파일을 고르면 <b>바로 반영되지 않고</b> 확인 화면이 먼저 뜹니다.</div></div></div>
+      <div class="step"><div class="n">2</div><div class="b">
+        <div class="t">확인 화면에서 건별 결과를 봅니다</div>
+        <div class="d"><b>입금완료 / 이체실패 / 결과없음 / 이미 입금</b> 네 가지로 나뉩니다. 위쪽 숫자와 아래 표가 같은 내용입니다.</div></div></div>
+      <div class="step"><div class="n">3</div><div class="b">
+        <div class="t"><span class="btn p">이대로 반영</span></div>
+        <div class="d">입금완료 건만 기록됩니다. 시트(또는 작업표) 입금칸에 <b>결과 파일의 실제 이체시각</b>이 찍히고,
+          리뷰어 화면에도 "리뷰비 입금 완료 · 입금자명"이 표시됩니다.</div></div></div>
+    </div>
+    <div class="callout">
+      <b>이체실패로 나온 건은?</b> 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>. 계좌를 고칠 필요 없이 다음 이체 때 자동으로 다시 나갑니다.
+      아래쪽 <b>[계좌 확인 안내 보내기]</b> 체크(기본 켬)를 두면 그 리뷰어에게 1:1문의로
+      "등록한 계좌 정보를 확인해 주세요" 안내가 자동으로 갑니다.
+    </div>
+    <div class="callout">
+      <b>"결과없음"으로 나온 건은?</b> 결과 파일에 그 줄이 없다는 뜻입니다. <b>대기 상태 그대로 둡니다</b>(실패로 내리지 않습니다).
+      실제로는 이체가 됐는데 파일만 일부일 수 있어, 잘못 풀면 <b>두 번 입금</b>될 수 있기 때문입니다.
+      은행에서 전체 결과 파일을 다시 받아 <b>같은 회차에 한 번 더 올리면</b> 그때 기록됩니다.
+    </div>
+    <div class="callout bad">
+      <b>같은 계좌·같은 금액이 여러 건일 때</b>는 어느 결과가 어느 건인지 파일만으로 정할 수 없어
+      <b>시스템이 순서대로 배정</b>합니다(확인 화면이 그 사실을 알려줍니다). 같은 사람·같은 금액이라 입금 결과는 같지만,
+      기록상 어느 줄에 붙었는지는 임의입니다.
+    </div>
+    <div class="callout">
+      <b>같은 파일을 두 번 올려도 안전합니다.</b> 이미 입금으로 기록된 건은 다시 처리하지 않습니다.
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section>
+    <div class="shead"><span class="snum">07</span><h2>알아두실 것</h2></div>
     <div class="card">
       <ul>
         <li><b>같은 사람이 여러 작업에 참여했으면 작업별로 따로 이체됩니다</b>(합치지 않습니다). 통장에도 여러 줄로 들어가고, 작업별 통장표시가 그대로 보입니다.</li>
@@ -203,7 +245,7 @@
   </section>
 
   <footer>
-    입금관리 사용 안내 v1.0 · 2026-08-04 · 전체 기능 설계는 「리뷰비 입금 자동화 PRD」 문서를 참고하세요.
+    입금관리 사용 안내 v2.0 · 2026-08-10 · 전체 기능 설계는 「리뷰비 입금 자동화 PRD」 문서를 참고하세요.
   </footer>
 </div>
 </body>

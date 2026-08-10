@@ -2484,4 +2484,46 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
   } catch (err) { _payFix(res, err, next); }
 });
 
+/* ── M2: 이체결과 파일 반영 ─────────────────────────────────
+   ★ 미리보기(result-preview)는 **쓰기 0** — 사람이 확인 화면을 본 뒤에만 반영한다.
+   ★ 반영(result-apply)은 서버가 **파일을 다시 해석·재매칭**한다(화면이 보낸 목록 불신).
+   ★ 42P01(migration 100 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
+const paymentResultSvc = require('../services/paymentResult.service');
+
+function _resultErr(err, res, next) {
+  if (err && err.code === '42P01') {
+    return res.status(503).json({ ok: false, code: 'not_ready',
+      error: '이체결과 반영 저장소가 아직 준비되지 않았습니다(마이그레이션 100 적용 후 다시 시도하세요).' });
+  }
+  if (err instanceof paymentResultSvc.ResultError) {
+    const code = err.code === 'not_found' ? 404 : err.code === 'too_large' ? 413 : 400;
+    return res.status(code).json({ ok: false, code: err.code, error: err.message });
+  }
+  return next(err);
+}
+
+router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentResultSvc.previewResultFile({
+      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
+router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    // ★ 사람이 확인 화면에서 누른 것만 반영한다(빠뜨리면 업로드 즉시 입금 기록이 되어 되돌릴 수 없다).
+    if (b.confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '확인 화면에서 [이대로 반영]을 눌러 주세요.' });
+    }
+    res.json(await paymentResultSvc.applyResultFile({
+      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
+      // ★ 기본은 보냄 — 화면에서 명시적으로 끈 경우(`false`)만 안 보낸다(검수 반려 팝업과 같은 규율).
+      notifyFailed: b.notifyFailed !== false,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 module.exports = router;

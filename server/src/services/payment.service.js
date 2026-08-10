@@ -25,6 +25,8 @@ const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { resolveBank, bankNameByCode, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
+// 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
+const { isVirtualSheetId } = require('./sheetlessAccept.service');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행' };
 
@@ -209,6 +211,11 @@ async function listPaymentTargets(opts = {}) {
       bankAccount: account,
       accountHolder: acct ? (acct.accountHolder || '') : '',
       isSub: acct ? !!acct.isSub : false,
+      // ★ 계좌 **명의**(누구 이름으로 등록된 계좌인가) — 시트의 이름 칸(`reviewerName`)은
+      //   탭마다 주문자/수취인 중 무엇이 잡혔는지 달라 명의 판별에 쓸 수 없다.
+      //   타계정이면 `accountOwner` 가 그 명의를 등록한 소유자(본계정) 이름.
+      accountName: acct ? (acct.name || '') : '',
+      accountOwner: acct ? (acct.ownerName || '') : '',
       // 계좌를 고칠 대상 지목 — ★ phone8 은 GENERATED·비유니크라 키로 쓰지 않는다(같은 뒤8자리 타인 행 오염).
       //   본계정은 reviewers.id, 타계정은 소유자 id + 그 명의 phone8.
       accountRef: acct && acct.reviewerId
@@ -329,6 +336,7 @@ async function _loadAccounts(phone8s) {
     `SELECT RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) AS "phone8",
             r.id                                                             AS "reviewerId",
             COALESCE(NULLIF(btrim(s->>'name'),''), '')                       AS "name",
+            COALESCE(r.name, '')                                             AS "ownerName",
             COALESCE(NULLIF(btrim(s->>'bankName'),''),   r.bank_name)        AS "bankName",
             COALESCE(NULLIF(btrim(s->>'bankAccount'),''), r.bank_account)    AS "bankAccount",
             COALESCE(NULLIF(btrim(s->>'accountHolder'),''), r.account_holder) AS "accountHolder"
@@ -339,16 +347,21 @@ async function _loadAccounts(phone8s) {
   );
   for (const s of subs) {
     if (s.phone8 && !map[s.phone8]) {
-      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '', isSub: true };
+      // ★ 명의 이름(sub_accounts[].name)과 소유자 이름을 함께 싣는다 —
+      //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
+      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
+                        isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
     }
   }
   const { rows: own } = await pool.query(
-    `SELECT id AS "reviewerId", phone8, bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder"
+    `SELECT id AS "reviewerId", phone8, COALESCE(name,'') AS "name",
+            bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder"
        FROM reviewers WHERE phone8 = ANY($1)`,
     [phone8s]
   );
   for (const r of own) {
-    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '', isSub: false };
+    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
+                      isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
   return map;
 }
@@ -384,7 +397,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
         label: t.label, transferBank: t.transferBank || '', depositName: t.depositName || '',
         goodsCostType: t.goodsCostType || '',
         sheetless: t.sheetless === true,
-        sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid, sheetless: t.sheetless }),
+        sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
       };
     }
   } catch (e) { logger.warn('[payment] 탭 메타 조회 실패(탭명 사용): ' + e.message); }
@@ -394,17 +407,19 @@ async function _loadTabMeta(sheetIds, tabNames) {
 /**
  * 그 탭을 여는 구글시트 링크(없으면 빈 문자열).
  *
- * ★★ **무시트 작업(096)은 링크를 만들지 않는다** — 가상 시트ID(`wt_…`)로 조립하면
- *   **죽은 구글 링크**가 되어 담당자가 "왜 안 열리지"를 겪는다(반영 점검 `_gidOut` 과 같은 규율:
- *   빈 링크 > 죽은 링크). 화면은 사유를 말하고 버튼을 비활성으로 둔다.
- * ★ 판정은 **서버 플래그 `tab_configs.sheetless`** — ID 모양(`wt_`)으로 추측하지 않는다
- *   (이관된 기존 작업은 **진짜 시트 ID 를 그대로 쓰면서** 무시트가 되므로 모양으로는 못 잡는다).
+ * ★★ **이관된 작업(sheetless)도 링크를 만든다 (사용자 확정 2026-08-10)** — 초도 보완에는
+ *   아직 구글시트를 봐야 하는 값(결제금액 칸 등)이 있다. 시스템 표가 진실원본이라는 사실은
+ *   **링크를 막는 근거가 아니라 경고문의 근거**다 → 화면이 "편집하지 말고 참고만" 팝업을
+ *   띄운 뒤 연다(`sheetless` 플래그는 그 경고 조건으로만 쓴다).
+ * ★★ **열 시트가 애초에 없는 경우만 빈 값** = 시스템이 만든 가상 시트ID(`wt_…`).
+ *   구글 URL 로 조립하면 **죽은 링크**가 된다(반영 점검 `_gidOut` 과 같은 규율: 빈 링크 > 죽은 링크).
+ *   판정은 `sheetlessAccept.isVirtualSheetId` 단일 출처(사본 금지) — 이 접두는 스코프 게이트가
+ *   아니라 **표시용 판정**이라 여기 쓰는 것이 맞다(게이트는 여전히 `tab_configs.sheetless`).
  * ★ gid 를 알면 그 탭까지 열고, 모르면 시트만 연다("열리는데 엉뚱한 탭"보다 정직하다).
  */
-function tabSheetUrl({ sheetId, tabGid, sheetless }) {
-  if (sheetless === true) return '';
+function tabSheetUrl({ sheetId, tabGid }) {
   const id = String(sheetId == null ? '' : sheetId).trim();
-  if (!id) return '';
+  if (!id || isVirtualSheetId(id)) return '';
   const base = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
   const gid = String(tabGid == null ? '' : tabGid).trim();
   return gid ? `${base}#gid=${encodeURIComponent(gid)}` : base;
@@ -583,7 +598,9 @@ async function buildWorkbook(bank, items) {
       const code = String(it.bank_code || it.bankCode || '');
       ws.addRow([
         bankNameByCode(code) || code,
-        String(it.bank_account || it.bankAccount || ''),
+        // ★ 계좌는 마지막까지 `normalizeAccount` 단일 출처로 숫자만 남긴다 —
+        //   옛 원장 스냅샷에 '-' 가 섞여 있어도 은행 서식에는 절대 나가지 않게(업로드 거부 방지).
+        normalizeAccount(it.bank_account || it.bankAccount || ''),
         _int(it.amount),
         it.transfer_memo || it.transferMemo || '',
         it.account_holder || it.accountHolder || '',
@@ -596,7 +613,7 @@ async function buildWorkbook(bank, items) {
     for (const it of items) {
       ws.addRow([
         String(it.bank_code || it.bankCode || ''),     // ★ 문자열 — '045'의 앞 0이 사라지면 안 됨
-        String(it.bank_account || it.bankAccount || ''),
+        normalizeAccount(it.bank_account || it.bankAccount || ''),   // ★ 위와 같은 이유(숫자만 · 앞 0 보존)
         _int(it.amount),
         it.account_holder || it.accountHolder || '',
         '',
@@ -606,7 +623,10 @@ async function buildWorkbook(bank, items) {
     }
     ws.columns = [{ width: 14 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }, { width: 20 }, { width: 16 }];
   }
-  // 계좌·코드가 숫자로 해석돼 앞 0이 날아가거나 지수표기 되는 것 방지
+  // ★★ 계좌·은행코드는 **문자열 셀 + 텍스트 서식(`@`)** 으로 나간다 —
+  //    숫자로 해석되면 `0123…` 의 앞 0 이 날아가거나 긴 계좌가 지수표기(1.23E+12)로 바뀌어
+  //    은행 업로드가 통째로 거부된다(담당자가 매번 `'0123` 처럼 손으로 고치던 지점).
+  //    금액만 숫자 그대로 둔다(은행 양식이 수치를 요구).
   wb.worksheets[0].eachRow((row, i) => {
     if (i === 1) return;
     row.eachCell(cell => { if (typeof cell.value === 'string') cell.numFmt = '@'; });

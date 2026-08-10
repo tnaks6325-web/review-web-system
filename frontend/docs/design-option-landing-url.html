@@ -1,0 +1,594 @@
+<meta charset="utf-8">
+<title>시안 — 옵션별 유입링크 (인트라넷 리뷰오더 · 리뷰웹 진행상품 · 리뷰어 화면)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* 시안 문서 규율: 외부 리소스 0(오프라인 열람) · 다크에서 색이 뒤집히지 않게 라이트 고정 */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#eef1f6; color:#1f2430; font-size:15px; line-height:1.62;
+    font-family:-apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif; }
+  .page { max-width:1180px; margin:0 auto; padding:22px 18px 90px; }
+  h1 { font-size:1.3rem; margin:0 0 5px; letter-spacing:-.5px; }
+  .lede { color:#5a6478; font-size:.83rem; margin:0 0 14px; }
+  .lede b { color:#1f2430; }
+
+  /* ── 화면 전환 ─────────────────────────── */
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .tabs button { border:1.5px solid #d7dce6; background:#fff; color:#2b3241; border-radius:999px;
+    padding:8px 15px; font-size:.79rem; font-weight:800; cursor:pointer; font-family:inherit; }
+  .tabs button.on { background:#2f6fed; border-color:#2f6fed; color:#fff; }
+
+  /* ── 공통 상황 설정 ────────────────────── */
+  .ctl { background:#fff; border:1px solid #dde3ee; border-radius:11px; padding:11px 14px; margin-bottom:12px;
+    display:flex; gap:18px; flex-wrap:wrap; align-items:center; font-size:.77rem; color:#4d5768; }
+  .ctl .g { display:flex; gap:6px; align-items:center; }
+  .ctl .g > span { font-weight:800; color:#2b3241; margin-right:2px; }
+  .seg { display:inline-flex; border:1.5px solid #d7dce6; border-radius:8px; overflow:hidden; }
+  .seg button { border:0; background:#fff; color:#5a6478; padding:5px 12px; font-size:.75rem; font-weight:800;
+    cursor:pointer; font-family:inherit; }
+  .seg button.on { background:#2f6fed; color:#fff; }
+  .ctl .note { font-size:.71rem; color:#8a93a6; }
+
+  .desc { background:#fff; border:1px solid #dde3ee; border-radius:12px; padding:13px 16px; margin-bottom:12px; }
+  .desc h2 { font-size:.98rem; margin:0 0 4px; }
+  .desc p { font-size:.81rem; color:#4d5768; margin:5px 0; }
+  .desc b { color:#1f2430; }
+  code { background:#f2f5fa; border:1px solid #e2e8f2; border-radius:5px; padding:1px 5px;
+    font-size:.76rem; font-family:ui-monospace, Menlo, Consolas, monospace; color:#28405e; }
+  .newtag { background:#17803d; color:#fff; font-size:.6rem; font-weight:800; border-radius:5px; padding:1px 6px;
+    vertical-align:2px; margin-left:5px; letter-spacing:.3px; }
+
+  .stage { background:#f4f6fa; border:1px solid #dde3ee; border-radius:12px; padding:15px; }
+  .stagehead { font-size:.71rem; color:#6b7487; margin-bottom:10px; }
+  .stagehead b { color:#2b3241; }
+
+  /* ══ 인트라넷 리뷰오더 재현 ══ */
+  .ia { background:#fff; border:1px solid #e5e7eb; border-radius:9px; padding:13px; max-width:820px; }
+  .ia-h { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:9px; flex-wrap:wrap; }
+  .ia-h h3 { font-size:.82rem; font-weight:800; margin:0; color:#111827; }
+  .ia-h p { font-size:.66rem; color:#6b7280; margin:2px 0 0; }
+  .ia-btn { padding:5px 10px; border-radius:6px; font-size:.7rem; font-weight:800; border:1px solid #ede9fe;
+    background:#f5f3ff; color:#6d28d9; cursor:default; }
+  .ia-btn.plain { background:#fff; color:#374151; border-color:#e5e7eb; }
+  .ia-prod { border:1px solid #e5e7eb; background:#f9fafb; border-radius:7px; padding:9px; margin-bottom:9px; }
+  .ia-prod-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .ia-prod-h b { font-size:.7rem; color:#374151; }
+  .ia-del { font-size:.63rem; color:#ef4444; border:1px solid #e5e7eb; background:#fff; border-radius:5px; padding:3px 7px; }
+  .ia-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+  .ia-base { display:grid; grid-template-columns:96px 80px 1fr; gap:6px; align-items:end; margin-bottom:8px; }
+  .ia-lb { display:block; font-size:.67rem; font-weight:800; color:#4b5563; margin-bottom:2px; }
+  .ia-in { width:100%; padding:5px 8px; border-radius:6px; border:1px solid #e5e7eb; background:#fff;
+    font-size:.72rem; font-family:inherit; color:#111827; }
+  .ia-in::placeholder { color:#b6bcc7; }
+  .ia-in:disabled { background:#f3f4f6; color:#9ca3af; cursor:not-allowed; }
+  .ia-in.need { border-color:#ef4444; background:#fef2f2; }
+  .ia-hint { font-size:.63rem; color:#6b7280; padding-bottom:4px; }
+  .ia-opt { display:grid; gap:6px; align-items:end; border:1px solid #e5e7eb; background:#fff;
+    border-radius:6px; padding:7px; margin-bottom:6px; }
+  .ia-opt.single { grid-template-columns:1fr 1.5fr 86px 72px 30px; }
+  .ia-opt.double { grid-template-columns:1fr 1fr 1.5fr 86px 72px 30px; border-color:#ede9fe; }
+  .ia-opt .x { height:29px; border-radius:6px; background:#fef2f2; color:#ef4444; border:0; font-size:.72rem; }
+  .ia-addrow { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+  .ia-sum { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:11px; }
+  .ia-card { border:1px solid #e5e7eb; border-radius:7px; padding:8px 10px; background:#fff; }
+  .ia-card span { display:block; font-size:.63rem; color:#6b7280; }
+  .ia-card b { font-size:.92rem; color:#111827; }
+  .urlcol { position:relative; }
+  .urlcol.hi > .ia-lb { color:#15803d; }
+  .urlcol.hi .ia-in { border-color:#86efac; background:#f0fdf4; }
+  .urlcol.hi .ia-in.need { border-color:#ef4444; background:#fef2f2; }
+  .offnote { grid-column:1/-1; font-size:.65rem; color:#9ca3af; margin-top:-2px; }
+
+  /* ══ 리뷰웹 발행 모달 재현 (rf-* 계열) ══ */
+  .rf { background:#fff; border:1px solid #E5E9F0; border-radius:12px; max-width:900px; }
+  .rf-ch { display:flex; align-items:center; gap:9px; background:#F7F9FC; border-bottom:1px solid #E5E9F0;
+    padding:9px 13px; border-radius:12px 12px 0 0; flex-wrap:wrap; }
+  .rf-ct { font-size:.8rem; font-weight:800; }
+  .rf-cn { font-size:.68rem; color:#94A3B8; flex:1; }
+  .rf-cb { padding:12px 13px; }
+  .rf-pmsw { display:flex; gap:5px; align-items:center; margin-bottom:9px; flex-wrap:wrap; }
+  .rf-pm-btn { border:1.5px solid #CBD5E1; background:#fff; color:#64748B; border-radius:8px;
+    padding:5px 12px; font-size:.73rem; font-weight:800; cursor:pointer; font-family:inherit; }
+  .rf-pm-btn.on { background:#3182F6; border-color:#3182F6; color:#fff; }
+  .rf-pm-note { font-size:.67rem; color:#94A3B8; }
+  .rf-head, .rf-row { display:grid; gap:6px; align-items:center; }
+  .rf-head { font-size:.66rem; font-weight:800; color:#64748B; padding:0 2px 5px; }
+  .rf-row { margin-bottom:6px; }
+  .rf-in { width:100%; padding:6px 7px; border-radius:7px; border:1px solid #E2E8F0; background:#fff;
+    font-size:.74rem; font-family:inherit; color:#1f2430; }
+  .rf-in::placeholder { color:#c3cad6; }
+  .rf-in:disabled { background:#F1F5F9; color:#94A3B8; cursor:not-allowed; }
+  .rf-in.need { border-color:#EF4444; background:#FEF2F2; }
+  .rf-in.ro { background:#F8FAFC; color:#64748B; }
+  .rf-r { text-align:right; }
+  .rf-x { border:0; background:transparent; color:#EF4444; font-size:.85rem; cursor:pointer; }
+  .rf-gp { border:1px solid #E2E8F0; border-radius:9px; padding:8px; margin-bottom:8px; background:#FBFCFE; }
+  .rf-gp-head { display:grid; grid-template-columns:1fr 84px 26px; gap:6px; align-items:center; margin-bottom:7px; }
+  .rf-gp-total { font-size:.7rem; color:#64748B; text-align:right; font-weight:800; }
+  .rf-gp-add { border:1px dashed #CBD5E1; background:#fff; color:#3182F6; border-radius:7px;
+    padding:5px 9px; font-size:.7rem; font-weight:800; cursor:pointer; font-family:inherit; }
+  .rf-row.opt::before { content:'└'; color:#CBD5E1; font-size:.72rem; text-align:center; }
+  .rf-sum { font-size:.67rem; color:#94A3B8; margin-top:5px; }
+  .rf-hrow { display:flex; gap:9px; align-items:center; margin-top:11px; padding-top:10px; border-top:1px dashed #E2E8F0; }
+  .rf-hl { width:82px; text-align:right; font-size:.72rem; font-weight:800; color:#475569; flex:0 0 82px; }
+  .rf-help { font-size:.66rem; color:#94A3B8; margin-top:4px; }
+  .rf-urlwrap.hi .rf-in:not(:disabled) { border-color:#86efac; background:#f0fdf4; }
+  .rf-urlwrap.hi .rf-in.need { border-color:#EF4444; background:#FEF2F2; }
+
+  /* ══ 리뷰어 화면 재현 ══ */
+  .rv-wrap { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:860px) { .rv-wrap { grid-template-columns:1fr; } }
+  .rv-col > .cap { font-size:.72rem; font-weight:800; margin-bottom:6px; padding:4px 9px; border-radius:7px; display:inline-block; }
+  .rv-col.now > .cap { background:#fef2f2; color:#b91c1c; border:1px solid #f6c9c9; }
+  .rv-col.next > .cap { background:#ecfdf3; color:#14653a; border:1px solid #b7ebcd; }
+  .phone { background:#fff; border:1px solid #E5E9F0; border-radius:14px; padding:11px; max-width:392px; }
+  .cwd-box { border:1px solid #E9EDF3; border-radius:10px; padding:10px; margin-bottom:8px; background:#fff; }
+  .cwd-tt { font-size:.76rem; font-weight:800; margin-bottom:5px; color:#1f2430; }
+  .cwd-body { font-size:.74rem; color:#4d5768; line-height:1.7; }
+  .cwd-btn { display:block; width:100%; margin-top:8px; border:1px solid #3182F6; background:#EFF6FF; color:#1D4ED8;
+    border-radius:8px; padding:8px; font-size:.76rem; font-weight:800; cursor:pointer; font-family:inherit; text-align:center; }
+  .cwd-pick { font-size:.71rem; color:#15803d; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:7px;
+    padding:5px 8px; margin-top:8px; font-weight:700; }
+  .cwd-url { font-size:.67rem; color:#8a93a6; margin-top:5px; word-break:break-all; }
+  .optchips { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:9px; }
+  .optchip { border:1.5px solid #E2E8F0; background:#fff; color:#475569; border-radius:999px; padding:5px 12px;
+    font-size:.73rem; font-weight:800; cursor:pointer; font-family:inherit; }
+  .optchip.on { border-color:#3182F6; background:#EFF6FF; color:#1D4ED8; }
+  .badalert { background:#fef2f2; border:1px solid #f6c9c9; color:#8f1d1d; border-radius:8px; padding:7px 10px;
+    font-size:.71rem; margin-top:8px; line-height:1.65; }
+
+  /* ══ 자동점검(게이트) ══ */
+  .gate { background:#fff; border:1px solid #dde3ee; border-radius:11px; padding:12px 14px; margin-bottom:10px; max-width:820px; }
+  .gate h4 { font-size:.8rem; margin:0 0 7px; }
+  .gline { display:flex; gap:8px; align-items:flex-start; font-size:.77rem; padding:5px 0; border-top:1px dashed #eef1f6; }
+  .gline:first-of-type { border-top:0; }
+  .gline .ico { flex:0 0 18px; font-weight:900; }
+  .gline.ok .ico { color:#17803d; }
+  .gline.warn .ico { color:#b45309; }
+  .gline.stop .ico { color:#c02626; }
+  .gline .tx { color:#3b4354; }
+  .gline .tx b { color:#1f2430; }
+  .gbtns { display:flex; gap:7px; margin-top:10px; padding-top:9px; border-top:1px solid #eef1f6; }
+  .gbtn { border-radius:8px; padding:7px 15px; font-size:.77rem; font-weight:800; font-family:inherit; border:1.5px solid #CBD5E1;
+    background:#fff; color:#475569; cursor:pointer; }
+  .gbtn.pri { background:#3182F6; border-color:#3182F6; color:#fff; }
+  .gbtn:disabled { background:#F1F5F9; border-color:#E2E8F0; color:#B6BCC7; cursor:not-allowed; }
+  .gnote { font-size:.71rem; color:#8a93a6; margin-top:6px; }
+
+  .callout { border-radius:9px; padding:9px 12px; font-size:.79rem; margin:10px 0; line-height:1.68; }
+  .callout.bad  { background:#fef2f2; border:1px solid #f6c9c9; color:#8f1d1d; }
+  .callout.good { background:#ecfdf3; border:1px solid #b7ebcd; color:#14653a; }
+  .callout.warn { background:#fff7ed; border:1px solid #fcd9a8; color:#8a4b09; }
+  .callout.info { background:#eef4ff; border:1px solid #cadcff; color:#1c3f86; }
+  .linkbar { margin-top:16px; }
+  .linkbar a { background:#2f6fed; color:#fff; text-decoration:none; border-radius:8px; padding:8px 14px;
+    font-size:.78rem; font-weight:800; }
+</style>
+
+<div class="page">
+<h1>시안 — 옵션별 유입링크</h1>
+<p class="lede">
+  옵션이 여러 개인 <b>링크유입</b> 작업에서 리뷰어가 <b>자기가 고른 옵션의 상품 페이지</b>로 들어가게 만드는 화면 시안입니다.
+  아래 <b>상황 설정</b>을 바꾸면 네 화면이 실제로 그렇게 동작합니다(가짜 데이터). ·
+  설계 근거와 결정 사안은 <a href="prd-option-landing-url.html">PRD</a>에 있습니다.
+</p>
+
+<div class="tabs" id="tabs">
+  <button data-v="intra" class="on">① 인트라넷 리뷰오더</button>
+  <button data-v="web">② 리뷰웹 진행상품</button>
+  <button data-v="reviewer">③ 리뷰어 화면 (지금 vs 바뀐 뒤)</button>
+  <button data-v="gate">④ 게시 전 자동점검</button>
+</div>
+
+<div class="ctl">
+  <div class="g"><span>유입방식</span>
+    <div class="seg" id="segInflow">
+      <button data-v="link" class="on">링크유입</button>
+      <button data-v="guide">유입가이드</button>
+    </div>
+  </div>
+  <div class="g"><span>작업 종류</span>
+    <div class="seg" id="segMode">
+      <button data-v="opt" class="on">옵션 있는 작업</button>
+      <button data-v="none">옵션 없는 작업</button>
+    </div>
+  </div>
+  <div class="g"><span>URL 입력</span>
+    <div class="seg" id="segFill">
+      <button data-v="full" class="on">다 채움</button>
+      <button data-v="partial">일부 비움</button>
+      <button data-v="empty">전부 비움</button>
+    </div>
+  </div>
+  <span class="note">※ 세 값이 네 화면에 함께 반영됩니다.</span>
+</div>
+
+<div id="view"></div>
+
+<div class="linkbar"><a href="prd-option-landing-url.html">📄 PRD · 결정 사안 D1~D6 보기</a></div>
+</div>
+
+<script>
+(function () {
+  // ── 가짜 데이터 (실제 운영 형태를 그대로 흉내) ────────────────
+  var DATA = {
+    product: '이노크아든 수분크림',
+    productUrl: 'https://www.coupang.com/vp/products/8891112223',
+    options: [
+      { label: '화이트 50ml', pay: 28900, count: 40, daily: 10,
+        url: 'https://www.coupang.com/vp/products/8891112223?itemId=2551',
+        urlPartial: 'https://www.coupang.com/vp/products/8891112223?itemId=2551' },
+      { label: '베이지 50ml', pay: 28900, count: 40, daily: 10,
+        url: 'https://www.coupang.com/vp/products/8891112223?itemId=2552',
+        urlPartial: '' },
+      { label: '대용량 100ml', pay: 41500, count: 20, daily: 5,
+        url: 'https://www.coupang.com/vp/products/8891119991',
+        urlPartial: '' }
+    ]
+  };
+
+  var S = { view: 'intra', inflow: 'link', mode: 'opt', fill: 'full', pick: 0 };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function money(n) { return Number(n || 0).toLocaleString(); }
+  /** 그 옵션에 지금 들어 있는 URL (상황 설정 반영) */
+  function optUrl(i) {
+    if (S.inflow !== 'link') return '';           // 가이드유입 = 링크를 쓰지 않는다
+    if (S.fill === 'empty') return '';
+    if (S.fill === 'partial') return DATA.options[i].urlPartial;
+    return DATA.options[i].url;
+  }
+  function prodUrl() { return S.inflow === 'link' ? DATA.productUrl : ''; }
+  /** 판정 단일 출처와 같은 순서: 옵션 URL → 공고 랜딩 URL → 빈 값 */
+  function resolveLanding(i) { return optUrl(i) || prodUrl() || ''; }
+  function missingCount() {
+    if (S.inflow !== 'link' || S.mode !== 'opt') return 0;
+    return DATA.options.filter(function (_, i) { return !optUrl(i); }).length;
+  }
+  var GUIDE_OFF = '가이드유입은 링크를 쓰지 않습니다 — 저장·전송하지 않습니다.';
+
+  // ══════════ ① 인트라넷 리뷰오더 ══════════
+  function viewIntra() {
+    var linkMode = S.inflow === 'link';
+    var showOpts = S.mode === 'opt';
+    var rows = showOpts ? DATA.options.map(function (o, i) {
+      var v = optUrl(i);
+      var need = linkMode && !v;
+      return '' +
+      '<div class="ia-opt single">' +
+        '<label><span class="ia-lb">옵션1</span><input class="ia-in" value="' + esc(o.label) + '" readonly></label>' +
+        '<label class="urlcol ' + (linkMode ? 'hi' : '') + '"><span class="ia-lb">상품 URL' + (linkMode ? ' *' : '') + '</span>' +
+          '<input class="ia-in ' + (need ? 'need' : '') + '" ' + (linkMode ? '' : 'disabled') +
+          ' value="' + esc(v) + '" placeholder="' + (linkMode ? 'https://…  (이 옵션의 상품 페이지)' : '가이드유입 — 사용 안 함') + '"></label>' +
+        '<label><span class="ia-lb">결제금액</span><input class="ia-in" value="' + money(o.pay) + '" readonly></label>' +
+        '<label><span class="ia-lb">건수</span><input class="ia-in" value="' + o.count + '" readonly></label>' +
+        '<button class="x">✕</button>' +
+      '</div>';
+    }).join('') : '';
+
+    var totalRecruit = showOpts ? DATA.options.reduce(function (a, o) { return a + o.count; }, 0) : 100;
+    var totalCost = showOpts ? DATA.options.reduce(function (a, o) { return a + o.pay * o.count; }, 0) : 28900 * 100;
+
+    return '' +
+    '<div class="desc"><h2>① 인트라넷 리뷰오더 — 상품/옵션/금액 블록</h2>' +
+      '<p><b>바뀌는 것은 옵션 행에 [상품 URL] 칸 한 개가 붙는 것뿐</b>입니다<span class="newtag">신규</span>. ' +
+      '상품 단위 URL 칸은 그대로 두고 라벨만 <b>"옵션 없을 때 사용"</b>으로 역할을 밝힙니다.</p>' +
+      '<p>' + (linkMode
+        ? '지금은 <b>링크유입</b> — 옵션 URL이 <b>필수</b>이고 빈 칸은 빨갛게 표시됩니다.'
+        : '지금은 <b>유입가이드</b> — 옵션 URL 칸이 <b>비활성(회색)</b>이고 값은 전송되지 않습니다. ' +
+          '<b>칸을 숨기지 않는 이유</b>: 사라지면 유입방식을 바꿨을 때 왜 칸이 생겼는지 알 수 없습니다.') + '</p>' +
+    '</div>' +
+    '<div class="stage"><div class="stagehead">실제 화면 재현 — <b>리뷰오더 등록 › 상품/옵션/금액</b></div>' +
+      '<div class="ia">' +
+        '<div class="ia-h">' +
+          '<div><h3>상품/옵션/금액</h3><p>상품별 옵션, 결제금액, 건수를 입력하면 모집인원과 구입비가 자동 계산됩니다.</p></div>' +
+          '<div style="display:flex;gap:5px"><span class="ia-btn plain">시트참조</span><span class="ia-btn">＋ 상품추가</span></div>' +
+        '</div>' +
+        '<div class="ia-prod">' +
+          '<div class="ia-prod-h"><b>상품 1</b><span class="ia-del">🗑 삭제</span></div>' +
+          '<div class="ia-grid2">' +
+            '<label><span class="ia-lb">상품명</span><input class="ia-in" value="' + esc(DATA.product) + '" readonly></label>' +
+            '<label class="urlcol ' + (linkMode && !showOpts ? 'hi' : '') + '"><span class="ia-lb">상품 URL ' +
+              (showOpts ? '<span style="font-weight:600;color:#9ca3af">(옵션 없을 때 사용)</span>' : (linkMode ? '*' : '')) + '</span>' +
+              '<input class="ia-in ' + (linkMode && !showOpts && !prodUrl() ? 'need' : '') + '" ' + (linkMode ? '' : 'disabled') +
+              ' value="' + esc(prodUrl()) + '" placeholder="' + (linkMode ? 'https://…' : '가이드유입 — 사용 안 함') + '"></label>' +
+          '</div>' +
+          (showOpts ? '' :
+            '<div class="ia-base">' +
+              '<label><span class="ia-lb">결제금액</span><input class="ia-in" value="28,900" readonly></label>' +
+              '<label><span class="ia-lb">건수</span><input class="ia-in" value="100" readonly></label>' +
+              '<div class="ia-hint">옵션이 없으면 이 금액과 건수로 계산됩니다.</div>' +
+            '</div>') +
+          rows +
+          (showOpts && !linkMode ? '<div class="offnote">※ ' + GUIDE_OFF + '</div>' : '') +
+          '<div class="ia-addrow"><span class="ia-btn plain">＋ 옵션추가</span><span class="ia-btn">⧉ 이중옵션 추가</span>' +
+            '<span style="font-size:.63rem;color:#6b7280">블랙컬러의 라지사이즈 등 1건의 구매에 이중옵션을 선택해야 하는 경우 사용</span></div>' +
+        '</div>' +
+        '<div class="ia-sum">' +
+          '<div class="ia-card"><span>최종 모집인원</span><b>' + money(totalRecruit) + '명</b></div>' +
+          '<div class="ia-card"><span>총 상품구입비</span><b>' + money(totalCost) + '원</b></div>' +
+          '<div class="ia-card"><span>옵션 수</span><b>' + (showOpts ? DATA.options.length : 0) + '개</b></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    (linkMode && showOpts && missingCount()
+      ? '<div class="callout bad">🚫 <b>옵션 ' + missingCount() + '개의 상품 URL이 비어 있습니다.</b> ' +
+        '링크유입 오더는 이 칸이 채워져야 제출됩니다 — 폼에서 막고, 서버(<code>POST /api/review-order</code>)도 같은 조건으로 다시 확인합니다.</div>'
+      : '') +
+    '<div class="callout info">📦 <b>전송 계약</b> — <code>product_options_json</code> 의 옵션 항목에 <code>url</code> 한 칸이 늘어납니다: ' +
+      '<code>options:[{ label, pay, count, url }]</code>. 가산적이라 <b>리뷰웹·인트라넷 배포 순서와 무관</b>합니다.</div>' +
+    '<div class="callout warn">⚠ <b>시트참조 모드는 적용 제외</b> — 옵션 구조 자체를 만들지 않는 흐름이라 옵션별 링크를 담을 자리가 없습니다(담당자가 시트로 관리).</div>';
+  }
+
+  // ══════════ ② 리뷰웹 진행상품 ══════════
+  function viewWeb() {
+    var linkMode = S.inflow === 'link';
+    var isOpt = S.mode === 'opt';
+    var body, headCols, derived;
+
+    if (isOpt) {
+      var optRows = DATA.options.map(function (o, i) {
+        var v = optUrl(i);
+        var need = linkMode && !v;
+        return '' +
+        '<div class="rf-row opt" style="grid-template-columns:18px 1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
+          '<input class="rf-in" value="' + esc(o.label) + '" readonly>' +
+          '<span class="rf-urlwrap ' + (linkMode ? 'hi' : '') + '"><input class="rf-in ' + (need ? 'need' : '') + '" ' +
+            (linkMode ? '' : 'disabled') + ' value="' + esc(v) + '" placeholder="' +
+            (linkMode ? 'https://… 이 옵션의 상품 페이지' : '가이드유입 — 사용 안 함') + '"></span>' +
+          '<input class="rf-in rf-r" value="' + money(o.pay) + '" readonly>' +
+          '<input class="rf-in rf-r" value="' + o.count + '" readonly>' +
+          '<input class="rf-in rf-r" value="' + o.daily + '" readonly>' +
+          '<button class="rf-x">✕</button>' +
+        '</div>';
+      }).join('');
+      headCols = '<div class="rf-head" style="grid-template-columns:18px 1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
+        '<span></span><span>옵션명</span><span>상품 URL<span class="newtag">신규</span></span>' +
+        '<span class="rf-r">결제금액</span><span class="rf-r">옵션인원</span><span class="rf-r">일건수</span><span></span></div>';
+      body = '<div class="rf-gp">' +
+          '<div class="rf-gp-head">' +
+            '<input class="rf-in" value="' + esc(DATA.product) + '" readonly>' +
+            '<span class="rf-gp-total" title="옵션인원 합계(자동)">100명</span>' +
+            '<button class="rf-x">✕</button>' +
+          '</div>' + headCols + optRows +
+          '<button class="rf-gp-add">＋ 옵션 추가</button>' +
+        '</div>';
+      derived = '옵션별 URL 사용 — 리뷰어가 고른 옵션의 링크가 열립니다';
+    } else {
+      var pv = prodUrl();
+      headCols = '<div class="rf-head" style="grid-template-columns:1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
+        '<span>상품명</span><span>상품 URL<span class="newtag">신규</span></span>' +
+        '<span class="rf-r">결제금액</span><span class="rf-r">총인원</span><span class="rf-r">일건수</span><span></span></div>';
+      body = headCols +
+        '<div class="rf-row" style="grid-template-columns:1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
+          '<input class="rf-in" value="' + esc(DATA.product) + '" readonly>' +
+          '<span class="rf-urlwrap ' + (linkMode ? 'hi' : '') + '"><input class="rf-in ' + (linkMode && !pv ? 'need' : '') + '" ' +
+            (linkMode ? '' : 'disabled') + ' value="' + esc(pv) + '" placeholder="' +
+            (linkMode ? 'https://…' : '가이드유입 — 사용 안 함') + '"></span>' +
+          '<input class="rf-in rf-r" value="28900" readonly>' +
+          '<input class="rf-in rf-r" value="100" readonly>' +
+          '<input class="rf-in rf-r" value="20" readonly>' +
+          '<button class="rf-x">✕</button>' +
+        '</div>';
+      derived = '상품 행의 URL이 그대로 공고 랜딩 URL이 됩니다';
+    }
+
+    var landing = isOpt ? (optUrl(0) || prodUrl()) : prodUrl();
+
+    return '' +
+    '<div class="desc"><h2>② 리뷰웹 발행·수정 모달 — 📦 진행상품</h2>' +
+      '<p>표에 <b>[상품 URL] 칸</b>이 붙습니다<span class="newtag">신규</span> — ' +
+      '<b>옵션 없는 작업은 상품 행에</b>, <b>옵션 있는 작업은 옵션 행에</b>. 인트라넷 상품/옵션/금액 블록과 같은 자리입니다.</p>' +
+      '<p><b>표가 진실원본</b>이라는 기존 규율 그대로입니다 — 지금 정원·작업내용 상품 원문이 이 표에서 파생되듯, ' +
+      '아래 [랜딩 URL]도 <b>표에서 자동 파생되는 읽기전용</b>이 됩니다(PRD의 D3 권장안). ' +
+      '<span style="color:#8a4b09">D3에서 다른 안을 고르시면 이 부분이 달라집니다.</span></p>' +
+    '</div>' +
+    '<div class="stage"><div class="stagehead">실제 화면 재현 — <b>모집공고 발행 › 진행상품</b></div>' +
+      '<div class="rf">' +
+        '<div class="rf-ch"><span class="rf-ct">📦 진행상품</span><span class="rf-cn">작업 종류를 먼저 고르세요 · 정원은 표에서 자동 산출</span>' +
+          '<span class="rf-pm-btn" style="cursor:default">＋ 상품 추가</span></div>' +
+        '<div class="rf-cb">' +
+          '<div class="rf-pmsw">' +
+            '<button class="rf-pm-btn ' + (!isOpt ? 'on' : '') + '" data-mode="none">옵션 없는 작업</button>' +
+            '<button class="rf-pm-btn ' + (isOpt ? 'on' : '') + '" data-mode="opt">옵션 있는 작업</button>' +
+            '<span class="rf-pm-note">' + (isOpt ? '작업오더에 옵션 3종이 확인되어 자동 선택됨' : '작업오더에 옵션 정보가 없어 자동 선택됨') + '</span>' +
+          '</div>' +
+          body +
+          '<div class="rf-sum">정원합 100명 · 일건수합 ' + (isOpt ? '25' : '20') + '명 · ' + derived + '</div>' +
+          '<div class="rf-hrow"><span class="rf-hl">랜딩 URL</span>' +
+            '<div style="flex:1">' +
+              '<input class="rf-in ro" value="' + esc(landing) + '" readonly placeholder="진행상품 표에서 자동으로 채워집니다">' +
+              '<div class="rf-help">📌 표에서 자동 파생 — 직접 입력하지 않습니다(같은 값을 두 곳에서 관리하지 않기 위해).' +
+              (isOpt ? ' 옵션마다 링크가 다르면 <b>리뷰어는 자기 옵션의 링크</b>를 봅니다.' : '') + '</div>' +
+            '</div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    (linkMode && isOpt && missingCount()
+      ? '<div class="callout bad">🚫 <b>옵션 ' + missingCount() + '개의 상품 URL이 비어 있습니다.</b> ' +
+        '④ 게시 전 자동점검 화면에서 어떻게 막히는지 보실 수 있습니다.</div>'
+      : linkMode
+        ? '<div class="callout good">✅ 링크유입 · 옵션 URL이 모두 채워졌습니다 — 게시 가능.</div>'
+        : '<div class="callout info">ℹ 가이드유입이라 URL 칸이 비활성입니다. ' +
+          '<b>URL 칸이 없는 축약 편집 화면(리뷰어앱 인라인 수정)에서 저장해도 기존 URL은 지워지지 않습니다</b> — ' +
+          '옵션표·리뷰타입과 같은 "UI 있는 화면에서만 전송" 원칙.</div>');
+  }
+
+  // ══════════ ③ 리뷰어 화면 ══════════
+  function viewReviewer() {
+    var linkMode = S.inflow === 'link';
+    var isOpt = S.mode === 'opt';
+    var picked = DATA.options[S.pick] || DATA.options[0];
+
+    var chips = isOpt ? '<div class="optchips">' + DATA.options.map(function (o, i) {
+      return '<button class="optchip ' + (i === S.pick ? 'on' : '') + '" data-pick="' + i + '">' + esc(o.label) + '</button>';
+    }).join('') + '</div>' : '';
+
+    function guideCard(mode) {
+      // mode: 'now' = 지금(공고 링크 1개) / 'next' = 바뀐 뒤(옵션별 링크)
+      if (!linkMode) {
+        return '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>' +
+          '<div class="cwd-body">쿠팡 앱에서 <b>"이노크아든 수분크림"</b> 검색 → 3번째 상품 → 옵션 선택 후 구매</div></div>' +
+          '<div class="callout info" style="margin:0">가이드유입이라 <b>[상품 페이지 열기] 버튼 자체가 없습니다</b> — 지금도 바뀐 뒤에도 같습니다.</div>';
+      }
+      var url = (mode === 'now') ? DATA.productUrl : (isOpt ? (optUrl(S.pick) || DATA.productUrl) : (prodUrl() || DATA.productUrl));
+      var fellBack = mode === 'next' && isOpt && !optUrl(S.pick);
+      var label = (mode === 'now' || !isOpt) ? '🔗 상품 페이지 열기 (새 탭)' : '🔗 ' + esc(picked.label) + ' 상품 페이지 열기';
+      return '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>' +
+        '<div class="cwd-body">아래 버튼으로 상품 페이지에 들어가 구매해 주세요.</div>' +
+        ((mode === 'next' && isOpt) ? '<div class="cwd-pick">내가 고른 옵션 : ' + esc(picked.label) + '</div>' : '') +
+        '<button class="cwd-btn">' + label + '</button>' +
+        '<div class="cwd-url">' + esc(url) + '</div>' +
+        (mode === 'now' && isOpt
+          ? '<div class="badalert">⚠ 어느 옵션을 골랐든 <b>같은 주소</b>가 열립니다 — ' +
+            '「' + esc(picked.label) + '」를 고른 리뷰어도 여기로 들어갑니다.</div>' : '') +
+        (fellBack
+          ? '<div class="badalert" style="background:#fff7ed;border-color:#fcd9a8;color:#8a4b09">' +
+            '⚠ 이 옵션에 링크가 없어 <b>공고 랜딩 URL로 폴백</b>했습니다(= 지금과 같은 동작). ' +
+            '기존에 발행된 공고는 전부 이 상태이며 <b>화면이 깨지지 않습니다</b>.</div>' : '') +
+        '</div>';
+    }
+
+    return '' +
+    '<div class="desc"><h2>③ 리뷰어 화면 — 참여 후 작업내용</h2>' +
+      '<p>왼쪽이 <b>지금</b>, 오른쪽이 <b>바뀐 뒤</b>입니다. ' +
+      (isOpt ? '아래 옵션 칩을 눌러 <b>고른 옵션에 따라 링크가 바뀌는지</b> 확인해 보세요.'
+             : '옵션 없는 작업은 지금도 바뀐 뒤도 <b>링크 1개</b>로 같습니다.') + '</p>' +
+      '<p><b>옵션 변경(다른 옵션으로 갈아타기) 시에도 자동으로 따라옵니다</b> — 옵션을 바꾸면 화면이 작업내용을 다시 불러오므로 추가 배선이 없습니다.</p>' +
+    '</div>' +
+    chips +
+    '<div class="rv-wrap">' +
+      '<div class="rv-col now"><span class="cap">지금 (링크 1개)</span><div class="phone">' +
+        '<div class="cwd-box"><div class="cwd-tt">🛍 상품 · 옵션 · 결제금액</div><div class="cwd-body">' +
+          esc(DATA.product) + (isOpt ? ' — ' + esc(picked.label) : '') + '<br>결제금액 ' + money(isOpt ? picked.pay : 28900) + '원</div></div>' +
+        guideCard('now') + '</div></div>' +
+      '<div class="rv-col next"><span class="cap">바뀐 뒤 (옵션별 링크)</span><div class="phone">' +
+        '<div class="cwd-box"><div class="cwd-tt">🛍 상품 · 옵션 · 결제금액</div><div class="cwd-body">' +
+          esc(DATA.product) + (isOpt ? ' — ' + esc(picked.label) : '') + '<br>결제금액 ' + money(isOpt ? picked.pay : 28900) + '원</div></div>' +
+        guideCard('next') + '</div></div>' +
+    '</div>' +
+    '<div class="callout warn">🔒 <b>참여 전에는 링크를 보여주지 않습니다.</b> 지금도 옵션 금액은 "참여 후 공개"이고, ' +
+      '링크도 같은 성질입니다 — 참여(자리 확보) 전에 공개하면 <b>자리를 잡지 않고 구매부터 하는 지각 건</b>을 시스템이 스스로 유도하게 됩니다. ' +
+      '공개 목록·상세 응답에는 URL을 싣지 않습니다.</div>' +
+    '<div class="callout info">👁 <b>관리자 미리보기도 같은 판정을 씁니다</b> — 미리보기와 실제 리뷰어 화면이 갈라질 수 없게 ' +
+      '판정 함수 한 벌(<code>resolveLandingUrl</code>)을 양쪽이 그대로 태웁니다.</div>';
+  }
+
+  // ══════════ ④ 게시 전 자동점검 ══════════
+  function viewGate() {
+    var linkMode = S.inflow === 'link';
+    var isOpt = S.mode === 'opt';
+    var miss = missingCount();
+    var blocked = linkMode && isOpt && miss > 0;
+
+    function gline(kind, txt) {
+      var ico = kind === 'ok' ? '✓' : (kind === 'warn' ? '⚠' : '✕');
+      return '<div class="gline ' + kind + '"><span class="ico">' + ico + '</span><span class="tx">' + txt + '</span></div>';
+    }
+
+    var lines = '' +
+      gline('ok', '연결 탭 · 일 모집인원 — <b>설정됨</b>') +
+      gline('ok', '구매 시간대 — <b>자율주문</b>') +
+      (linkMode
+        ? (isOpt
+            ? (miss
+                ? gline('stop', '옵션별 상품 URL — <b>' + miss + '개 비어 있음</b> (' +
+                    DATA.options.filter(function (_, i) { return !optUrl(i); }).map(function (o) { return esc(o.label); }).join(' · ') + ')')
+                : gline('ok', '옵션별 상품 URL — <b>' + DATA.options.length + '개 모두 입력됨</b>'))
+            : (prodUrl() ? gline('ok', '상품 URL — <b>입력됨</b>') : gline('stop', '상품 URL — <b>비어 있음</b>')))
+        : gline('ok', '유입방식 <b>유입가이드</b> — 링크 항목은 검사하지 않습니다')) +
+      (linkMode && isOpt && !miss ? gline('warn', '옵션 3종의 링크가 서로 다릅니다 — 의도한 것인지 확인해 주세요(경고만)') : '');
+
+    var d2 = '' +
+      '<div class="gate"><h4>D2 선택에 따라 이렇게 달라집니다</h4>' +
+        '<div class="gline ' + (blocked ? 'stop' : 'ok') + '"><span class="ico">' + (blocked ? '✕' : '✓') + '</span><span class="tx">' +
+          '<b>게시(active) 저장만 차단 <span style="color:#17803d">(권장)</span></b> — ' +
+          (blocked ? '지금 상태에서는 <b>[게시 상태로 저장]만</b> 잠기고, 임시저장은 됩니다.'
+                   : '통과 — 게시 가능합니다.') + '</span></div>' +
+        '<div class="gline ' + (blocked ? 'stop' : 'ok') + '"><span class="ico">' + (blocked ? '✕' : '✓') + '</span><span class="tx">' +
+          '<b>저장 자체를 하드블록</b> — ' +
+          (blocked ? '<b>저장 버튼 전체가 잠깁니다</b>. 옛 공고의 리뷰비·정원 긴급 정정도 함께 막힙니다.'
+                   : '통과.') + '</span></div>' +
+        '<div class="gline ' + (blocked ? 'warn' : 'ok') + '"><span class="ico">' + (blocked ? '⚠' : '✓') + '</span><span class="tx">' +
+          '<b>경고만 (게시 허용)</b> — ' +
+          (blocked ? '빨간 경고만 뜨고 <b>그대로 게시됩니다</b>. 누락이 리뷰어에게 그대로 나갑니다.' : '통과.') + '</span></div>' +
+      '</div>';
+
+    return '' +
+    '<div class="desc"><h2>④ 게시 전 자동점검</h2>' +
+      '<p>발행 모달 맨 아래 자동점검 블록에 <b>옵션별 상품 URL 항목이 한 줄 추가</b>됩니다<span class="newtag">신규</span>. ' +
+      '가이드유입이면 이 항목을 <b>아예 검사하지 않습니다</b>(정상 상태를 경고로 칠하지 않는다는 레포 규율).</p>' +
+      '<p>상단 <b>상황 설정</b>의 [URL 입력]을 <b>일부 비움 / 전부 비움</b>으로 바꿔 보세요.</p>' +
+    '</div>' +
+    '<div class="stage"><div class="stagehead">실제 화면 재현 — <b>모집공고 발행 › 게시 전 자동점검</b></div>' +
+      '<div class="gate"><h4>게시 전 자동점검</h4>' + lines +
+        '<div class="gbtns">' +
+          '<button class="gbtn">임시저장</button>' +
+          '<button class="gbtn pri" ' + (blocked ? 'disabled' : '') + '>게시 상태로 저장</button>' +
+        '</div>' +
+        (blocked
+          ? '<div class="gnote" style="color:#c02626">🚫 옵션별 상품 URL을 채워야 게시할 수 있습니다 — 임시저장은 가능합니다.</div>'
+          : '<div class="gnote">모든 항목 통과 — 게시할 수 있습니다.</div>') +
+      '</div>' + d2 +
+    '</div>' +
+    '<div class="callout info">🛡 <b>서버도 같은 조건으로 다시 확인합니다</b> — 화면만 믿지 않습니다(참여형 활성화 게이트와 같은 자리). ' +
+      '마이그레이션이 안 붙은 상태로 배포되면 <b>부팅에서 막습니다</b>(<code>REQUIRED_SCHEMA</code>).</div>' +
+    '<div class="callout good">↩ <b>되돌리기</b> — 킬스위치 <code>CAMPAIGN_OPTION_LANDING=0</code> 하나로 ' +
+      '판정이 항상 공고 랜딩 URL을 돌려주어 <b>코드 변경 없이 종전 동작</b>으로 복귀합니다.</div>';
+  }
+
+  // ── 렌더 ────────────────────────────────
+  function render() {
+    var el = document.getElementById('view');
+    el.innerHTML = S.view === 'intra' ? viewIntra()
+                 : S.view === 'web' ? viewWeb()
+                 : S.view === 'reviewer' ? viewReviewer()
+                 : viewGate();
+
+    // 화면 안 인터랙션(옵션 칩 · 작업종류 버튼)
+    el.querySelectorAll('[data-pick]').forEach(function (b) {
+      b.addEventListener('click', function () { S.pick = Number(b.getAttribute('data-pick')) || 0; render(); });
+    });
+    el.querySelectorAll('[data-mode]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        S.mode = b.getAttribute('data-mode'); S.pick = 0; syncSeg('segMode', S.mode); render();
+      });
+    });
+  }
+  function syncSeg(id, v) {
+    document.querySelectorAll('#' + id + ' button').forEach(function (b) {
+      b.classList.toggle('on', b.getAttribute('data-v') === v);
+    });
+  }
+  function bindSeg(id, key) {
+    document.querySelectorAll('#' + id + ' button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        S[key] = b.getAttribute('data-v');
+        if (key === 'mode') S.pick = 0;
+        syncSeg(id, S[key]); render();
+      });
+    });
+  }
+  document.querySelectorAll('#tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      S.view = b.getAttribute('data-v');
+      document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      render();
+    });
+  });
+  bindSeg('segInflow', 'inflow');
+  bindSeg('segMode', 'mode');
+  bindSeg('segFill', 'fill');
+
+  // ?v=intra|web|reviewer|gate 로 단독 열람
+  var q = (location.search.match(/[?&]v=([a-z]+)/i) || [])[1];
+  if (q && ['intra', 'web', 'reviewer', 'gate'].indexOf(q) >= 0) {
+    S.view = q;
+    document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-v') === q); });
+  }
+  render();
+})();
+</script>
