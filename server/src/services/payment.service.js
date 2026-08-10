@@ -194,6 +194,10 @@ async function listPaymentTargets(opts = {}) {
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
       tabLabel: (tab && tab.label) || r.tabName,
+      // 시트 바로가기 — 아직 구글시트를 직접 열어 확인해야 하는 데이터가 있다(결제금액 칸 등).
+      // ★ 무시트/미등록이면 빈 값 = 화면이 버튼을 비활성으로 두고 **사유를 말한다**(죽은 링크 금지).
+      sheetUrl: tab ? tab.sheetUrl : '',
+      sheetless: !!(tab && tab.sheetless),
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
@@ -364,6 +368,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
               COALESCE(NULLIF(btrim(tc.display_name),''), tc.tab_name) AS "label",
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
+              tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
               wo.goods_cost_type AS "goodsCostType"
          FROM tab_configs tc
          LEFT JOIN LATERAL (
@@ -378,10 +383,31 @@ async function _loadTabMeta(sheetIds, tabNames) {
       map[t.sheetId + '||' + t.tabName] = {
         label: t.label, transferBank: t.transferBank || '', depositName: t.depositName || '',
         goodsCostType: t.goodsCostType || '',
+        sheetless: t.sheetless === true,
+        sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid, sheetless: t.sheetless }),
       };
     }
   } catch (e) { logger.warn('[payment] 탭 메타 조회 실패(탭명 사용): ' + e.message); }
   return map;
+}
+
+/**
+ * 그 탭을 여는 구글시트 링크(없으면 빈 문자열).
+ *
+ * ★★ **무시트 작업(096)은 링크를 만들지 않는다** — 가상 시트ID(`wt_…`)로 조립하면
+ *   **죽은 구글 링크**가 되어 담당자가 "왜 안 열리지"를 겪는다(반영 점검 `_gidOut` 과 같은 규율:
+ *   빈 링크 > 죽은 링크). 화면은 사유를 말하고 버튼을 비활성으로 둔다.
+ * ★ 판정은 **서버 플래그 `tab_configs.sheetless`** — ID 모양(`wt_`)으로 추측하지 않는다
+ *   (이관된 기존 작업은 **진짜 시트 ID 를 그대로 쓰면서** 무시트가 되므로 모양으로는 못 잡는다).
+ * ★ gid 를 알면 그 탭까지 열고, 모르면 시트만 연다("열리는데 엉뚱한 탭"보다 정직하다).
+ */
+function tabSheetUrl({ sheetId, tabGid, sheetless }) {
+  if (sheetless === true) return '';
+  const id = String(sheetId == null ? '' : sheetId).trim();
+  if (!id) return '';
+  const base = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
+  const gid = String(tabGid == null ? '' : tabGid).trim();
+  return gid ? `${base}#gid=${encodeURIComponent(gid)}` : base;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -724,7 +750,7 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
 }
 
 module.exports = {
-  BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel,
+  BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName,
   saveTransferSetting, saveReviewerAccount, PaymentFixError,

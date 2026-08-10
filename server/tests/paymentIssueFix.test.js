@@ -494,13 +494,13 @@ function withStubPool(handler, run) {
   });
 
   t('6f 고칠 수 없는 사유는 버튼이 아니라 문장으로 안내한다', () => {
-    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmFixWork'));
-    assert.ok(/등록된 리뷰어가 없어/.test(blk), '리뷰어 미등록 안내 없음');
-    assert.ok(/시트 결제금액 칸에도/.test(blk), '결제금액 없음 안내 없음');
-    // 그 카드에는 보완 버튼이 없어야 한다
-    const infoCards = blk.match(/pmfixcard info[\s\S]*?<\/div>`/g) || [];
-    assert.ok(infoCards.length >= 2, '안내 카드 2종이 있어야 한다');
-    for (const c of infoCards) assert.ok(!/_pmFix(Work|Acct)\(/.test(c), '고칠 수 없는 사유에 버튼이 붙었다');
+    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('/* ── 작업 단위 보완 팝업'));
+    assert.ok(/리뷰어 미등록/.test(blk) && /등록리뷰어DB/.test(blk), '리뷰어 미등록 안내 없음');
+    assert.ok(/결제금액 없음/.test(blk) && /시트 결제금액 칸/.test(blk), '결제금액 없음 안내 없음');
+    // 그 줄에는 보완 버튼이 없어야 한다(눌러도 아무 일 없는 버튼 금지)
+    const infoRows = blk.match(/pmfixrow info[\s\S]*?<\/div>`\)/g) || [];
+    assert.ok(infoRows.length >= 2, '안내 줄 2종이 있어야 한다');
+    for (const c of infoRows) assert.ok(!/_pmFix(Work|Acct)\(/.test(c), '고칠 수 없는 사유에 버튼이 붙었다');
   });
 
   t('6h ★ 저장 성공 뒤 순서 = 닫기 → 안내 → 재조회(후처리 실패가 성공을 실패처럼 보이게 하면 안 된다)', () => {
@@ -543,7 +543,12 @@ function withStubPool(handler, run) {
       const j = HTML.indexOf('\nfunction ', i + 1);
       return HTML.slice(i, j > 0 ? j : i + 6000);
     };
-    const src = [pick('_pmBuildFix'), pick('_pmFixBlock')].join('\n');
+    // ★ 상한 상수도 **소스에서 그대로** 가져온다(테스트에 사본을 두면 값이 조용히 갈린다)
+    const capLine = (HTML.match(/const _PM_FIX_CARD_CAP\s*=\s*\d+;/) || [])[0];
+    assert.ok(capLine, '_PM_FIX_CARD_CAP 선언을 찾지 못했다');
+    // vm 최상위 `const` 는 전역 객체에 안 붙는다 → 값을 밖에서도 읽도록 `var` 로만 바꿔 주입(값은 소스 그대로)
+    const src = [capLine.replace(/^const/, 'var'), pick('_pmSheetOk'), pick('_pmSheetBtn'),
+      pick('_pmBuildFix'), pick('_pmFixBlock')].join('\n');
     const sandbox = {
       esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
       _pmKey: it => it.sheetId + '||' + it.tabName + '||' + it.rowIndex,
@@ -560,6 +565,7 @@ function withStubPool(handler, run) {
     sheetId: 'S1', tabName: 'T1', rowIndex: 1, tabLabel: '(완)5/8_쟈니베어', reviewerName: '차세희',
     campaignId: null, campaignTitle: '', bank: '', bankSource: null, transferMemo: '', memoSource: null,
     isSub: false, bankName: '', bankAccount: '', accountHolder: '', accountRef: null,
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/SHEET1/edit#gid=7', sheetless: false,
     issues: [], warnings: [],
   }, o);
 
@@ -620,11 +626,19 @@ function withStubPool(handler, run) {
     assert.strictEqual(f.noReviewer, 1, '같은 행을 두 번 세면 안 된다');
   });
 
-  t('7g 결제금액 없음은 별도 안내(서버 시트 폴백 뒤에도 남은 건)', () => {
+  t('7g 결제금액 없음은 그 작업 카드 안에 **안내로만** 실린다(고칠 버튼 없음)', () => {
     const S = loadFixFns();
-    const f = S._pmBuildFix([mkItem({ issues: ['no_price', 'zero_amount'] })]);
+    S.STATE.pmFix = S._pmBuildFix([mkItem({ issues: ['no_price', 'zero_amount'] })]);
+    const f = S.STATE.pmFix;
     assert.strictEqual(f.noPrice, 1);
-    assert.strictEqual(f.works.length, 0);
+    // ★ 작업 단위로 묶이므로 카드는 생기되(어느 작업인지 알아야 시트를 연다) 보완 버튼은 없다
+    assert.strictEqual(f.works.length, 1, '작업 카드로 묶여야 한다');
+    assert.strictEqual(f.works[0].noPrice, 1);
+    assert.strictEqual(f.works[0].needBank, false);
+    const html = S._pmFixBlock();
+    assert.ok(/결제금액 없음 1건/.test(html), '건수 안내가 없다');
+    assert.ok(!/_pmFixWork\(/.test(html) && !/_pmFixAcct\(/.test(html),
+      '★ 고칠 수 없는 사유뿐인데 보완 버튼이 생겼다(죽은 버튼)');
   });
 
   t('7h 보류가 하나도 없으면 묶음 블록을 아예 그리지 않는다', () => {
@@ -644,7 +658,7 @@ function withStubPool(handler, run) {
     assert.ok(!/<script>/.test(html.replace(/&lt;script&gt;/g, '')), '리뷰어명이 이스케이프되지 않았다');
     assert.ok(/_pmFixWork\(0\)/.test(html), '작업 버튼이 인덱스를 넘겨야 한다');
     assert.ok(/_pmFixAcct\(0\)/.test(html), '리뷰어 버튼이 인덱스를 넘겨야 한다');
-    assert.ok(/이체은행 미지정/.test(html) && /계좌 정보 보완/.test(html));
+    assert.ok(/이체은행 미지정/.test(html) && /계좌 —/.test(html));
   });
 
   t('7j 묶음 인덱스 = STATE.pmFix 배열 인덱스(팝업이 엉뚱한 작업을 열지 않게)', () => {
@@ -655,11 +669,149 @@ function withStubPool(handler, run) {
       mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 3, issues: ['no_bank'] }),
     ]);
     const html = S._pmFixBlock();
-    // 은행 카드의 버튼 인덱스는 works 배열에서 T2 의 위치여야 한다(필터된 배열 위치가 아니라)
-    const bankCard = html.slice(html.indexOf('이체은행 미지정'), html.indexOf('통장표시 없음'));
-    const idx = parseInt(bankCard.match(/_pmFixWork\((\d+)\)/)[1], 10);
+    // 은행 줄의 버튼 인덱스는 works 배열에서 T2 의 위치여야 한다(카드 표시 순서가 아니라)
+    const idx = parseInt(html.slice(html.indexOf('이체은행 미지정')).match(/_pmFixWork\((\d+)\)/)[1], 10);
     assert.strictEqual(S.STATE.pmFix.works[idx].tabName, 'T2',
-      '★ 필터한 배열의 인덱스를 넘기면 다른 작업이 열린다');
+      '★ 표시 순서를 인덱스로 넘기면 다른 작업이 열린다');
+  });
+
+  t('7k ★ 사유가 여럿이어도 그 작업은 카드 하나(사유별로 흩어 놓지 않는다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', issues: ['no_bank'], warnings: ['no_memo'] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: ['no_account'],
+        accountRef: { reviewerId: 'r-1', subPhone8: null }, warnings: [] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 3, issues: ['no_price'], warnings: [] }),
+    ]);
+    const f = S.STATE.pmFix;
+    assert.strictEqual(f.works.length, 1, '한 작업이 여러 카드로 쪼개졌다');
+    const w = f.works[0];
+    assert.strictEqual(w.rows, 3);
+    assert.ok(w.needBank && w.needMemo && w.accts.length === 1 && w.noPrice === 1,
+      '한 카드가 그 작업의 할 일을 전부 담아야 한다');
+    const html = S._pmFixBlock();
+    assert.strictEqual((html.match(/pmfixcard/g) || []).length, 1, '카드가 하나여야 한다');
+  });
+
+  t('7m ★ 계좌 버튼 인덱스는 accts 배열 위치(카드 안 순번이면 남의 계좌 창이 열린다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 1, issues: ['no_account'], reviewerName: '가',
+        accountRef: { reviewerId: 'r-1', subPhone8: null }, warnings: [] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: ['no_account'], reviewerName: '가',
+        accountRef: { reviewerId: 'r-1', subPhone8: null }, warnings: [] }),
+      mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 3, issues: ['no_account'], reviewerName: '나',
+        accountRef: { reviewerId: 'r-2', subPhone8: null }, warnings: [] }),
+    ]);
+    const f = S.STATE.pmFix;
+    assert.strictEqual(f.accts.length, 2);
+    // 각 카드가 넘기는 인덱스가 그 카드에 적힌 리뷰어를 가리켜야 한다
+    for (const card of S._pmFixBlock().split('pmfixcard').slice(1)) {
+      const m = card.match(/_pmFixAcct\((\d+)\)/); assert.ok(m, '계좌 버튼이 없다');
+      const nm = card.match(/계좌 — ([^<]+)</)[1];
+      assert.strictEqual(f.accts[+m[1]].name, nm, '★ 버튼이 다른 리뷰어의 계좌 창을 연다');
+    }
+  });
+
+  t('7l 카드 수 상한을 넘으면 남은 작업 수를 고지한다(조용히 자르지 않는다)', () => {
+    const S = loadFixFns();
+    const many = [];
+    for (let i = 0; i < S._PM_FIX_CARD_CAP + 3; i++) many.push(mkItem({ tabName: 'T' + i, tabLabel: 'W' + i, issues: ['no_bank'] }));
+    S.STATE.pmFix = S._pmBuildFix(many);
+    const html = S._pmFixBlock();
+    assert.strictEqual((html.match(/pmfixcard/g) || []).length, S._PM_FIX_CARD_CAP, '상한만큼만 카드로 편다');
+    assert.ok(/외 3개 작업/.test(html), '남은 작업 수 고지가 없다');
+  });
+
+  /* ══════════════════════════════════════════════════════════
+     §8 작업별 시트 바로가기 — 아직 구글시트를 직접 봐야 하는 값이 있다
+       ★ 죽은 링크(무시트 작업의 가상 ID)를 만들지 않는다 = 빈 링크 + 사유
+     ══════════════════════════════════════════════════════════ */
+  console.log('\n§8 작업별 시트 바로가기');
+
+  t('8a tabSheetUrl — gid 를 알면 그 탭까지, 모르면 시트만', () => {
+    const svc = require(SRC('services/payment.service'));
+    assert.strictEqual(svc.tabSheetUrl({ sheetId: 'ABC', tabGid: '123' }),
+      'https://docs.google.com/spreadsheets/d/ABC/edit#gid=123');
+    assert.strictEqual(svc.tabSheetUrl({ sheetId: 'ABC', tabGid: '' }),
+      'https://docs.google.com/spreadsheets/d/ABC/edit');
+  });
+
+  t('8b ★★ 무시트 작업은 링크를 만들지 않는다(가상 ID = 죽은 링크)', () => {
+    const svc = require(SRC('services/payment.service'));
+    assert.strictEqual(svc.tabSheetUrl({ sheetId: 'wt_abc', tabGid: '1', sheetless: true }), '');
+    // ★ 판정은 플래그 하나 — ID 모양으로 추측하면 이관된 기존 작업(진짜 시트ID 유지)을 놓친다
+    assert.strictEqual(svc.tabSheetUrl({ sheetId: '1AbCrealSheetId', tabGid: '9', sheetless: true }), '');
+    assert.strictEqual(svc.tabSheetUrl({ sheetId: '', tabGid: '9' }), '');
+  });
+
+  await ta('8c 대상 목록에 sheetUrl·sheetless 가 실린다(화면이 재조립하지 않게)', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M',
+        goodsCostType: '', tabGid: '77', sheetless: false }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.sheetUrl, 'https://docs.google.com/spreadsheets/d/S1/edit#gid=77');
+      assert.strictEqual(it.sheetless, false);
+    });
+  });
+
+  await ta('8d 무시트 작업은 빈 링크 + sheetless 신호', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M',
+        goodsCostType: '', tabGid: '77', sheetless: true }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.sheetUrl, '');
+      assert.strictEqual(it.sheetless, true);
+    });
+  });
+
+  t('8d2 ★ 탭 메타 SELECT 가 판정 재료를 실제로 읽는다(스텁은 SQL 을 해석하지 않는다)', () => {
+    const src = noLineComments(read('services/payment.service.js'));
+    const q = src.slice(src.indexOf('async function _loadTabMeta'), src.indexOf('function tabSheetUrl'));
+    assert.ok(/tc\.sheetless AS "sheetless"/.test(q), '★ sheetless 를 안 읽으면 무시트 작업에 죽은 링크가 생긴다');
+    assert.ok(/tc\.tab_gid AS "tabGid"/.test(q), 'gid 를 안 읽으면 시트만 열려 엉뚱한 탭을 본다');
+  });
+
+  t('8e 프론트 링크 검증 — docs.google.com 만 연다(응답에 임의 URL 이 실려도)', () => {
+    const S = loadFixFns();
+    assert.strictEqual(S._pmSheetOk('https://docs.google.com/spreadsheets/d/A/edit'), true);
+    for (const bad of ['javascript:alert(1)', 'http://docs.google.com/x', 'https://evil.com/docs.google.com/',
+      'https://docs.google.com.evil.kr/x', '']) {
+      assert.strictEqual(S._pmSheetOk(bad), false, '열면 안 되는 주소를 통과시켰다: ' + bad);
+    }
+  });
+
+  t('8f 시트 버튼 — 열 수 있으면 인덱스만 넘기고, 못 열면 사유를 말한다', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', issues: ['no_bank'] }),
+      mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 2, issues: ['no_bank'], sheetUrl: '', sheetless: true }),
+      mkItem({ tabName: 'T3', tabLabel: 'C', rowIndex: 3, issues: ['no_bank'], sheetUrl: '', sheetless: false }),
+    ]);
+    const html = S._pmFixBlock();
+    assert.ok(/_pmOpenSheet\(0\)/.test(html), '열 수 있는 작업에 시트 버튼이 없다(인덱스 전달)');
+    assert.ok(!/onclick="_pmOpenSheet\([^)]*'/.test(html), '★ onclick 에 문자열을 보간했다');
+    assert.ok(!/docs\.google\.com/.test(html), '★ URL 을 onclick·href 로 화면에 심지 않는다(인덱스 참조)');
+    assert.strictEqual((html.match(/disabled title="[^"]*무시트/g) || []).length, 1, '무시트 사유 안내가 없다');
+    assert.strictEqual((html.match(/disabled title="[^"]*시트 링크를 알 수 없습니다/g) || []).length, 1,
+      '★ "링크 없음"을 "무시트"로 뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾는다');
+  });
+
+  t('8g 작업 보완 팝업에도 시트 바로가기가 있다(고치다가 시트를 확인한다)', () => {
+    const work = HTML.slice(HTML.indexOf('function _pmFixWork'), HTML.indexOf('function _pmPickBank'));
+    assert.ok(/_pmSheetBtn\(i\)/.test(work), '팝업에 시트 버튼이 없다');
+  });
+
+  t('8h 새 창은 noopener 로 연다', () => {
+    const fn = HTML.slice(HTML.indexOf('function _pmOpenSheet'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
+    assert.ok(/_pmSheetOk\(w\.sheetUrl\)/.test(fn), '열기 직전 재검증이 없다');
+    assert.ok(/window\.open\(w\.sheetUrl,\s*'_blank',\s*'noopener'\)/.test(fn), 'noopener 가 없다');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
