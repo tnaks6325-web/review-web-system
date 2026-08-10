@@ -3449,12 +3449,17 @@ async function tabTodayProgress(db, { sheetId, tabName } = {}) {
   const now = new Date();
   const { computeCampaignState, fetchCampaignCounts, kstTodayStr } = require('./campaignState.service');
   const dateStr = kstTodayStr(now);
-  const base = { ok: true, dateStr, quota: null, done: 0, holds: 0, campaignCount: 0, state: null, stateReason: null, reason: null };
+  const base = { ok: true, dateStr, quota: null, done: 0, holds: 0, sheetFilled: null, campaignCount: 0, state: null, stateReason: null, reason: null };
   try {
     const { rows: tc } = await db.query(
       `SELECT COALESCE(tab_gid, '') AS gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
       [sheetId, tabName]);
     const gid = String((tc[0] && tc[0].gid) || '').trim();
+    // ★ 표 기준 참여현황(사용자 확정 B안)은 **공고 유무와 무관하게** 셀 수 있다 —
+    //   공고를 못 찾는 경우(no_campaign)에도 "오늘 표에 몇 줄 찼는가"는 사실이므로 먼저 구한다.
+    //   카드와 **같은 함수**를 쓴다(사본을 두면 또 갈린다).
+    const { todayFilledForTab } = require('./tabFilled.service');
+    base.sheetFilled = await todayFilledForTab(db, sheetId, tabName, now);
     const { rows } = await db.query(
       `SELECT * FROM recruit_campaigns
         WHERE linked_sheet_id = $1
@@ -3480,6 +3485,8 @@ async function tabTodayProgress(db, { sheetId, tabName } = {}) {
       // 여럿이면 "가장 열려 있는" 상태를 대표로 — 하나라도 열려 있으면 아직 받는 중이다.
       if (state === null || (state !== 'open' && st.state === 'open')) { state = st.state; stateReason = st.stateReason || null; }
     }
+    // ★ `done`(공고를 거쳐 오늘 확정된 수)의 의미는 **그대로 둔다** — 화면은 `sheetFilled` 를
+    //   우선 표시하되 툴팁에서 둘의 차이를 말한다(지각 미확정·수기 입력이 조용히 숨지 않게).
     return { ...base, quota, done, holds, campaignCount: live.length, state, stateReason };
   } catch (err) {
     // fail-soft: "모른다"로 돌려주고 화면이 그렇게 말한다(0/0 으로 위장하면 "오늘 할 일 없음"으로 읽힌다).

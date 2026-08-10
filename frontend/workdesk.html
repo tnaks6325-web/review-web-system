@@ -4568,7 +4568,14 @@ function _toast(msg){
 function _tpHtml(tp){
   if(!tp || typeof tp!=='object') return '';
   const d = esc(_fmtKDate(String(tp.dateStr||'')));             // '2026-08-10' → '8/10 (월)' (표기 단일 출처)
-  const done = Number(tp.done)||0, holds = Number(tp.holds)||0;
+  // ★★ 표기 기준 = **표(작업표)** (사용자 확정 2026-08-10, B안) — 아래 표에 오늘 채워진 줄 수를 그대로 쓴다.
+  //   종전 기준(공고를 거쳐 오늘 확정된 수)은 지각 참여·시트 수기 입력·외부모집분을 못 세어
+  //   같은 화면의 표와 자주 어긋났다(진단: docs/design-participation-count-mismatch.html).
+  //   ★ 서버가 못 세면(연결 탭 없음·조회 실패) **종전 값으로 폴백하고 그 사실을 툴팁에 적는다**
+  //     — 조용히 다른 기준으로 바꾸면 "숫자가 왜 줄었지"가 된다.
+  const confirmed = Number(tp.done)||0, holds = Number(tp.holds)||0;
+  const sheetOk = tp.sheetFilled != null;
+  const done = sheetOk ? (Number(tp.sheetFilled)||0) : confirmed;
   const q = (tp.quota==null) ? null : (Number(tp.quota)||0);
   const wrap = (cls,pct,num,sfx,tip)=>`<span class="tprog ${cls}" style="--p:${pct}" title="${esc(tip)}">`
     + `<span class="ring"></span><b class="d">${d}</b><span class="lbl">참여현황</span>`
@@ -4578,7 +4585,13 @@ function _tpHtml(tp){
   // ② 기준을 모름(연결 공고 없음/게시 전) — 구매한 인원은 사실이므로 그대로 두고 분모만 ?.
   if(q===null) return wrap('unk',0,`<b>${done}</b><i> / ?명</i>`,'모집 기준 없음',
     (tp.reason==='no_live_campaign'?'연결된 모집공고가 게시 전이라':'연결된 모집공고가 없어')+' 오늘 모집인원을 정할 수 없습니다. 오늘 구매 '+done+'명.');
-  const tipBase = `오늘 모집 ${q}명 · 구매 완료 ${done}명`+(holds?` · 진행 중 ${holds}명(결제 중)`:'')
+  // 툴팁은 "무엇을 센 숫자인지"와 "공고 기준과 얼마나 다른지"를 말한다 — 차이가 곧 지각 미확정·
+  //   수기 입력 신호라, 표기를 표 기준으로 바꿔도 그 신호를 잃지 않게 한다.
+  const tipBase = `오늘 모집 ${q}명 · `
+    + (sheetOk ? `표에 채워진 줄 ${done}명` : `구매 완료 ${done}명`)
+    + (sheetOk && done!==confirmed ? ` (공고를 거쳐 확정된 건 ${confirmed}명 — 차이 ${Math.abs(done-confirmed)}명은 지각 참여 확정 대기 또는 수기 입력일 수 있습니다)` : '')
+    + (!sheetOk ? ' · 표 기준으로 세지 못해 공고 확정 수로 표시합니다' : '')
+    + (holds?` · 진행 중 ${holds}명(결제 중)`:'')
     + (tp.campaignCount>1?` · 공고 ${tp.campaignCount}개 합산`:'');
   // ③ 오늘은 열지 않는 날(휴무·모집 종료·총원 충족·0명 조절) — "없다"는 사실이므로 회색으로 말한다.
   if(q<=0) return wrap('zero',0,`<b>${done}</b><i>/0명</i>`,'오늘 모집 없음',
