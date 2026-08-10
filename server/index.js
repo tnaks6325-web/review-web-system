@@ -238,6 +238,24 @@ async function runMigrations() {
         }
       })();
     }
+
+    // ★ 블로그체험단 M3 — (주)바를참스킨 0804 작업 1회 동기화 (전용 화면·엔드포인트 없음, 사용자 확정).
+    //   이미 무시트 이관된 탭이라 시스템이 시트를 더 안 읽고 내부 시트 사본도 작업표 기준으로
+    //   재생성돼 빈 행 기록이 없다 → 시트를 **한 번만** 다시 읽어 1~50 자리를 표에 만든다.
+    //   추가만·시트 쓰기 0·멱등. 실패하면 가드를 안 남겨 다음 부팅에 재시도한다(부팅은 계속).
+    if (process.env.NODE_ENV === 'production') {
+      (async () => {
+        try {
+          const { runBlog0804Backfill } = require('./src/services/blog0804Backfill.service');
+          const r = await runBlog0804Backfill();
+          if (r && r.reason === 'already_done') return;              // 조용히(평상시 로그 소음 0)
+          if (r && r.ok) logger.info(`[boot] 블로그 0804 1회 동기화: ${JSON.stringify(r)}`);
+          else logger.warn(`[boot] 블로그 0804 1회 동기화 미수행(다음 부팅에 재시도): ${JSON.stringify(r)}`);
+        } catch (err) {
+          logger.error(`[boot] 블로그 0804 1회 동기화 실패(무시, 다음 부팅에 재시도): ${err.message}`);
+        }
+      })();
+    }
   });
 
   // ── Graceful Shutdown (Railway / Docker 대응) ──
