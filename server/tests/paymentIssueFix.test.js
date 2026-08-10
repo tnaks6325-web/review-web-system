@@ -101,11 +101,16 @@ function withStubPool(handler, run) {
     assert.strictEqual(svc0.normalizeBankChoice('하나은행'), 'hana');
     assert.strictEqual(svc0.normalizeBankChoice(' 하나 '), 'hana');
   });
-  t('2b ★ 모르는 값은 null — 추측하면 남의 계좌로 송금된다', () => {
-    assert.strictEqual(svc0.normalizeBankChoice('하나증권'), null);
-    assert.strictEqual(svc0.normalizeBankChoice('국민은행'), null, '이체은행은 우리 통장 2개뿐');
+  t('2b ★ 모르는 값은 null — 추측하면 남의 계좌로 송금된다(정확일치만)', () => {
+    // ★ 부분일치로 완화하면 아래가 조용히 통과한다 — 두 은행 **양쪽** 다 막는다
+    //   (한쪽만 검사하면 반대쪽 완화를 가드가 놓친다 — 변이시험으로 실측)
+    for (const bad of ['하나증권', '하나증권주식회사', '케이뱅크증권', '케이뱅크저축은행',
+                       '구 하나은행', '하나은행(구)', '국민은행', '카카오뱅크', '토스뱅크', '  ']) {
+      assert.strictEqual(svc0.normalizeBankChoice(bad), null, `'${bad}' 을 해석하면 안 된다`);
+    }
     assert.strictEqual(svc0.normalizeBankChoice(''), null);
     assert.strictEqual(svc0.normalizeBankChoice(null), null);
+    assert.strictEqual(svc0.normalizeBankChoice(undefined), null);
   });
   t('2c 탭 설정에 되쓰는 표기는 **한글 라벨**(관리자 대시보드가 문자열 비교로 배지를 그린다)', () => {
     assert.strictEqual(svc0.tabBankLabel('kbank'), '케이뱅크');
