@@ -13,6 +13,7 @@ const { logger } = require('../utils/logger');
 const { fetchThumbFromUrl } = require('../utils/thumbFetch');
 const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
 const { LEGACY_DELIVERY_VALUES } = require('../utils/reviewType');
+const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -55,6 +56,8 @@ const INTAKE_EDITABLE_FIELDS = [
   // ★ 097(탈 구글시트 W2-b): 진행 일정 신호 — 시트 구매일자를 손으로 적던 규칙을 오더가 말해준다.
   //   미전송(구버전 인트라넷) = NULL = 종전 동작(계획 계산 기본값 + 미리보기에서 지정).
   'skip_weekends', 'holidays',
+  // ★ 099: 체험단 종류(리뷰/블로그). 미전송·빈 값 = 리뷰체험단(기존 동작).
+  'work_kind',
 ];
 const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
 
@@ -116,6 +119,8 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_gid       TEXT DEFAULT ''`);
     // 065: 작업담당(박세희/박은비/랜덤) — 리뷰웹 담당자(만두/망고) 자동 선택의 원천
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_manager         TEXT DEFAULT ''`);
+    // 099: 체험단 종류(리뷰/블로그) — 빈 값 = 리뷰체험단(기존 동작). 마이그레이션 안전망.
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_kind            TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -187,8 +192,8 @@ async function _insertWorkOrder(b, createdBy) {
        purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
-       sales_id, contract_number, quote_id, skip_weekends, holidays, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$29,$30,'submitted',$28)
+       sales_id, contract_number, quote_id, skip_weekends, holidays, status, created_by, work_kind)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$29,$30,'submitted',$28,$31)
      RETURNING *`,
     [
       _genOrderId(),
@@ -227,6 +232,10 @@ async function _insertWorkOrder(b, createdBy) {
       //   `false` 와 "안 보냄"을 구분해야 구버전 인트라넷이 주말 제외를 조용히 끄지 않는다.
       _boolOrNull(b.skip_weekends),
       _holidaysJson(b.holidays),
+      // ★ 099: 체험단 종류. **미전송은 빈 값으로 둔다**(`'review'` 로 굳히지 않는다) —
+      //   "한 번도 정하지 않음"과 "리뷰로 정함"이 구분돼야 접수의 blank-only 전파가 성립한다.
+      //   판정에서는 어차피 빈 값 = 리뷰라 동작은 같고 원장만 정직해진다.
+      workKindForStore(b.work_kind),
     ]
   );
   return rows[0];
@@ -306,7 +315,7 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
-              inflow_type, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo, created_at, updated_at
+              inflow_type, work_kind, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo, created_at, updated_at
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
@@ -458,6 +467,10 @@ async function _intakeUpdateHandler(req, res, next) {
       else if (f === 'guide_images') vals.push(_guideImagesJson(b[f]));   // 배열 → 정규화 JSON(090)
       else if (f === 'skip_weekends') vals.push(_boolOrNull(b[f]));       // 097 — 안 보냄/끔 구분
       else if (f === 'holidays') vals.push(_holidaysJson(b[f]));          // 097 — 배열 → 정규화 JSON
+      // ★ 099: 저장 시점에 표준 key 로 정규화한다 — 인트라넷은 라벨('블로그체험단')을 보낼 수도,
+      //   코드값을 보낼 수도 있는데 원장에 두 표기가 섞이면 SQL 로 거르는 곳(준비 행 판정 등)이
+      //   둘 다 알아야 한다. 판정 함수는 어차피 둘 다 읽지만 **원장은 한 표기로 굳힌다**.
+      else if (f === 'work_kind') vals.push(workKindForStore(b[f]));
       else if (INTAKE_INT_FIELDS.has(f)) vals.push(_intOrZero(b[f]));
       else vals.push(b[f]);
       touched++;
@@ -985,8 +998,8 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     await pool.query(
       `INSERT INTO tab_configs
          (sheet_id, tab_name, tab_gid, sheet_url, campaign_name, display_name,
-          manager, time_range, review_type, delivery_type, taekhap, sheetless, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$13, NOW())
+          manager, time_range, review_type, delivery_type, taekhap, sheetless, work_kind, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$13,$14, NOW())
        ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
          -- ★★ 이관(무시트)은 **되돌리지 않는다**(OR) — 시트 URL 로 재접수했다고 조용히 시트
          --   기반으로 되돌리면 크론이 옛 시트 값으로 장부를 덮어써 편집분이 사라진다(fail-closed).
@@ -1011,6 +1024,9 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
                                   NULLIF(CASE WHEN tab_configs.review_type = ANY($12::text[])
                                               THEN tab_configs.review_type ELSE '' END, ''),
                                   EXCLUDED.delivery_type),
+         -- ★ 099 체험단 종류 — **blank-only**(관리자가 탭에서 고쳐 둔 값을 2차 접수가 덮지 않는다).
+         --   빈 값 = 리뷰체험단이라 미전송 오더는 종전 동작 그대로.
+         work_kind     = COALESCE(NULLIF(tab_configs.work_kind,''),      EXCLUDED.work_kind),
          updated_at    = NOW()`,
       [
         sheetId, tabName, gid, tabSheetUrl, spreadsheetTitle,
@@ -1021,6 +1037,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         (o.review_type || ''), (o.delivery_type || ''), courierProxy,
         LEGACY_DELIVERY_VALUES,   // $12 — 어휘 단일 출처(utils/reviewType). 사본을 SQL 에 박지 않는다.
         wantSheetless,            // $13 — 무시트 표식(096). 시트 경로는 FALSE 라 기존 동작 불변.
+        workKindForStore(o.work_kind),  // $14 — 체험단 종류(099). 빈 값 = 리뷰 = 종전 동작.
       ]
     );
 

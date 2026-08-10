@@ -159,8 +159,11 @@ t('판정은 utils/reviewType 단일 출처 — 서비스가 정규식을 다시
 t('review-precheck 라우트가 reviewType 을 실제로 넘긴다(안 넘기면 핀이 죽은 코드)',
   /reviewType = exp\.reviewType/.test(DIAG) && /precheckPolicy\(\{[^}]*reviewType[^}]*\}\)/.test(DIAG));
 
+// ⚠ 닫는 괄호에 앵커를 걸어 두면 컬럼이 꼬리에 붙을 때마다 깨진다(098 carry_mode 에서 이미
+//   빨갛게 됐고 099 work_kind 로 또 밀렸다) — 검사 의미(INSERT 컬럼 목록에 review_type 이 있고
+//   값은 normalizeReviewType 을 거친다)는 그대로 두고 앵커만 느슨하게 한다.
 t('공고 create INSERT 에 review_type 이 있다',
-  /transfer_bank, transfer_memo, review_type\)/.test(CAMP)
+  /transfer_bank, transfer_memo, review_type[,)]/.test(CAMP)
   && /normalizeReviewType\(review_type\)/.test(CAMP));
 t('★ 공고 update 는 CASE 센티널 — null=유지 / \'\'=해제(조용한 해제 차단)',
   /review_type = CASE WHEN \$39::text IS NULL THEN review_type[\s\S]{0,120}WHEN \$39::text = '' THEN NULL/.test(CAMP));
@@ -215,8 +218,11 @@ t('편집 프리필·작업오더 프리필 양쪽에서 버튼을 고른다',
   && /_rfPickBtn\("review_type", _rfReviewTypeKey\(prefill\.review_type\)\)/.test(REC));
 t('★ 저장은 버튼군 UI 있는 화면에서만 전송(미전송=유지)',
   /if \(document\.getElementById\("rf_review_type_btns"\)\) \{[\s\S]{0,160}payload\.review_type/.test(REC));
+// ⚠ 099(체험단 종류)에서 **블로그 오더만** 리뷰타입 프리필을 비우도록 바뀌었다(별도 축 — 블로그엔
+//   리뷰타입이 없다). 리뷰 오더는 종전대로 넘긴다는 검사 의미는 불변이고, 블로그 갈래의 부재는
+//   blogWorkKind 가드가 따로 고정한다.
 t('작업오더 프리필이 review_type 을 넘긴다(공유 모듈 1벌)',
-  /review_type:\s+o\.review_type \|\| ""/.test(WOD));
+  /review_type:\s+_woIsBlogKind\(o\.work_kind\) \? "" : \(o\.review_type \|\| ""\)/.test(WOD));
 
 t('★★ 프론트 프리필 표의 라벨이 서버 REVIEW_TYPES 와 일치(사본 드리프트 차단)', (() => {
   const m = REC.match(/const RF_REVIEW_TYPE_LABELS = \[([\s\S]*?)\];/);

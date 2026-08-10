@@ -41,6 +41,11 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'skip_weekends'],               // 097 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'holidays'],                    // 097 — 위와 같은 문장에 들어가므로 함께 막아야 한다
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
+  // 099 — 체험단 종류(리뷰/블로그) 축. 셋 다 INSERT·SET 목록에 들어가므로 하나라도 없으면
+  //   ① 인트라넷 오더 접수 ② 작업오더 접수(tab_configs 업서트) ③ 공고 발행·수정이 전면 42703.
+  ['work_orders', 'work_kind'],
+  ['tab_configs', 'work_kind'],
+  ['recruit_campaigns', 'work_kind'],
 ];
 
 async function _runOneMigration(pool, sql) {
