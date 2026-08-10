@@ -131,6 +131,9 @@ const R = (startDate, n, tab = 'T1') => ({ sheetId: 'S1', tabName: tab, startDat
     && /const todayFilled = \(!_seeFilled \|\| c\.todayFilled == null\) \? null :/.test(CC));
   t('비관리자 게이지도 같은 값을 쓴다(관리자 계정으로 홈을 볼 때 카드=작업보드)',
     /const pubN = \(todayFilled != null\) \? todayFilled : today;/.test(CC));
+  t('★ 홈 카드도 완료 판정·채움을 표시 숫자에 맞춘다(39/42 인데 "완료"로 칠해지지 않게)',
+    /const pubFull = quota > 0 && pubN >= quota;/.test(CC) && /pubN \/ quota/.test(CC)
+    && /class="pgauge\$\{pubFull \? ' full' : ''\}"/.test(CC));
   t('★ 공개 목록 API 가 재료를 싣는다(홈 카드의 유일한 출처)',
     /view\.todayFilled = filledMap\.map\.get\(_k\)/.test(ROUTES) && /_listCache = \{ at: now\.getTime\(\)[^}]*filledMap \}/.test(ROUTES));
   t('★ 목록 캐시(5초) 안에서 계산한다(요청마다 돌지 않게)',
