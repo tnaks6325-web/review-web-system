@@ -1,0 +1,446 @@
+<meta charset="utf-8">
+<title>구글시트 주소로 작업 가져오기 — 기획서</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{color-scheme:light}
+  *{box-sizing:border-box}
+  body{margin:0;background:#f4f5f7;color:#1f2430;
+       font:15px/1.75 -apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px 120px}
+
+  /* 머리말 */
+  .hero{background:linear-gradient(135deg,#1f2a44,#2f4468);color:#fff;padding:44px 0 40px;margin-bottom:28px}
+  .hero .wrap{padding-bottom:0}
+  .hero .tag{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);
+             border-radius:999px;padding:4px 12px;font-size:12.5px;letter-spacing:.02em;margin-bottom:14px}
+  .hero h1{margin:0 0 12px;font-size:31px;line-height:1.35;letter-spacing:-.02em}
+  .hero p{margin:0;font-size:16px;color:#d7e0f0;max-width:660px}
+  .hero .meta{margin-top:18px;font-size:13px;color:#9fb0cd}
+
+  h2{margin:44px 0 14px;font-size:20px;letter-spacing:-.01em;padding-bottom:9px;border-bottom:2px solid #dfe3ea}
+  h2 .num{display:inline-block;min-width:26px;height:26px;line-height:26px;text-align:center;background:#2f4468;
+          color:#fff;border-radius:7px;font-size:13px;margin-right:9px;vertical-align:2px}
+  h3{margin:26px 0 8px;font-size:16px}
+  p{margin:0 0 12px}
+  ul,ol{margin:0 0 12px;padding-left:22px}
+  li{margin:5px 0}
+  b{font-weight:700}
+  .card{background:#fff;border:1px solid #e3e6ec;border-radius:12px;padding:20px 22px;margin:14px 0;
+        box-shadow:0 1px 2px rgba(20,30,60,.04)}
+  .card.tint{background:#f8faff;border-color:#d6e0f5}
+  .lead{font-size:16.5px;color:#37405a;background:#fff;border-left:4px solid #2f4468;
+        border-radius:0 10px 10px 0;padding:16px 20px;margin:14px 0}
+
+  .warn{background:#fff8f0;border:1px solid #f4d9b4;border-left:4px solid #e08a1e;border-radius:0 10px 10px 0;padding:14px 18px;margin:14px 0}
+  .good{background:#f2fbf5;border:1px solid #bfe6cd;border-left:4px solid #2e9e57;border-radius:0 10px 10px 0;padding:14px 18px;margin:14px 0}
+  .stop{background:#fff5f5;border:1px solid #f2c9c9;border-left:4px solid #d64545;border-radius:0 10px 10px 0;padding:14px 18px;margin:14px 0}
+  /* 첫 줄(제목)만 블록 — 안쪽 강조까지 블록이 되면 문장이 토막난다(실측) */
+  .warn>b:first-child,.good>b:first-child,.stop>b:first-child{display:block;margin-bottom:4px}
+
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;background:#fff}
+  th,td{border:1px solid #e3e6ec;padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:#f2f4f8;font-weight:700;font-size:13px;color:#4a5268}
+  td.c,th.c{text-align:center}
+  .tw{overflow-x:auto}
+
+  .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700;white-space:nowrap}
+  .p-key{background:#e6f0ff;color:#1d4ed8}
+  .p-st{background:#fdf0e3;color:#b45309}
+  .p-keep{background:#eef0f3;color:#5a6172}
+  .p-auto{background:#eaf7ef;color:#1c7a45}
+
+  .flow{display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;margin:16px 0}
+  .flow .st{flex:1 1 150px;min-width:150px;background:#fff;border:1px solid #e3e6ec;border-radius:11px;padding:14px 14px 15px}
+  .flow .st .n{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:6px;
+               background:#2f4468;color:#fff;font-size:12px;font-weight:700;margin-bottom:8px}
+  .flow .st h4{margin:0 0 5px;font-size:14.5px}
+  .flow .st p{margin:0;font-size:13px;color:#5a6172;line-height:1.6}
+
+  .ba{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0}
+  .ba>div{flex:1 1 300px;border-radius:11px;padding:16px 18px;border:1px solid}
+  .ba .b4{background:#fbf6f6;border-color:#eccfcf}
+  .ba .af{background:#f4faf6;border-color:#c7e6d3}
+  .ba h4{margin:0 0 8px;font-size:14px;letter-spacing:.01em}
+  .ba ul{margin:0;padding-left:18px;font-size:13.5px;color:#4a5268}
+
+  /* 결정사안 */
+  .dec{background:#fff;border:1px solid #e3e6ec;border-radius:12px;margin:16px 0;overflow:hidden}
+  .dec>.h{background:#f5f7fb;border-bottom:1px solid #e3e6ec;padding:13px 18px;font-weight:700;font-size:15px}
+  .dec>.h .id{display:inline-block;background:#2f4468;color:#fff;border-radius:6px;padding:1px 8px;font-size:12px;margin-right:8px}
+  .dec>.b{padding:16px 18px}
+  .opts{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .opt{flex:1 1 240px;border:1.5px solid #dfe3ea;border-radius:10px;padding:12px 14px;background:#fdfdfe}
+  .opt.rec{border-color:#2e9e57;background:#f4fbf6}
+  .opt .t{font-weight:700;font-size:14px;margin-bottom:4px}
+  .opt .t .rb{background:#2e9e57;color:#fff;border-radius:999px;font-size:11px;padding:1px 8px;margin-left:6px;vertical-align:1px}
+  .opt p{margin:0;font-size:13px;color:#5a6172;line-height:1.6}
+
+  .kv{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+  .kv>div{flex:1 1 210px;background:#fff;border:1px solid #e3e6ec;border-radius:10px;padding:12px 14px}
+  .kv .k{font-size:12px;color:#77808f;margin-bottom:3px}
+  .kv .v{font-size:19px;font-weight:700;letter-spacing:-.01em}
+
+  details{background:#fff;border:1px solid #e3e6ec;border-radius:11px;padding:0;margin:14px 0}
+  summary{cursor:pointer;padding:14px 18px;font-weight:700;font-size:14.5px;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";color:#8a93a3}
+  details[open] summary::before{content:"▾ "}
+  details .dbody{padding:0 18px 18px;border-top:1px solid #eef0f4;margin-top:-1px}
+  code{background:#f0f2f6;border-radius:4px;padding:1px 5px;font-size:13px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .foot{margin-top:56px;padding-top:18px;border-top:1px solid #dfe3ea;color:#77808f;font-size:13px}
+  @media (max-width:640px){.hero h1{font-size:24px}.wrap{padding:0 14px 80px}}
+</style>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="tag">기획서 · 탈 구글시트 잔재 처리</div>
+    <h1>구글시트 주소를 붙여넣으면<br>업체 작업으로 만들어 주는 기능</h1>
+    <p>시스템 어디에도 없는 채로 구글시트에만 남아 있는 과거 작업을, 주소 한 줄로 읽어 들여
+       업체에 등록된 작업으로 바꿉니다.</p>
+    <div class="meta">2026-08-10 · 대상 화면: 리뷰웹시스템[3버전] › 업체관리</div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<div class="lead">
+  <b>한 줄 요약</b> — 업체관리에서 <b>구글시트 탭 주소를 붙여넣고 업체를 고르면</b>,
+  시스템이 그 시트를 한 번 읽어 <b>리뷰어 명단·진행 내역을 시스템 표로 옮기고</b>,
+  그 작업을 <b>그 업체의 작업으로 등록</b>한 뒤 <b>구글시트 연결을 끊습니다</b>.
+  지금까지 손이 닿지 않던 시트들을 한 건씩 정리하는 창구입니다.
+</div>
+
+<h2><span class="num">1</span>왜 필요한가</h2>
+
+<p>탈 구글시트 작업으로 <b>86건</b>을 시스템으로 옮겼고, 남은 <b>358건</b>은 "지난 자료"로 판단해
+   옮기지 않기로 했습니다. 그런데 그 358건은 <b>목록에서 숨겨져 있을 뿐 사라진 것이 아닙니다.</b>
+   담당자가 예전 시트를 열어야 할 일이 생기면 그 시트를 찾을 방법이 시스템 안에 없습니다.</p>
+
+<div class="card tint">
+  <h3 style="margin-top:0">실제로 확인한 사례</h3>
+  <p>이번에 확인해 달라고 주신 시트 <b>「0720수진코리아 맛있는 고양이캔 4종」</b>은 상태가 이렇습니다.</p>
+  <div class="kv">
+    <div><div class="k">시트에 적힌 리뷰어</div><div class="v">108명</div></div>
+    <div><div class="k">시스템 표</div><div class="v" style="color:#d64545">0명</div></div>
+    <div><div class="k">업체 연결</div><div class="v" style="color:#d64545">없음</div></div>
+    <div><div class="k">시트 상단 안내</div><div class="v" style="color:#b45309">이관 완료</div></div>
+  </div>
+  <div class="warn">
+    <b>가장 나쁜 조합입니다</b>
+    시트 맨 윗줄에는 이미 <b>"이 작업은 리뷰웹시스템으로 이관되었습니다 · 이 문서는 더 이상 반영되지 않습니다"</b>라고
+    적혀 있는데, 정작 리뷰웹시스템에는 이 작업이 <b>없습니다</b>.
+    시트를 본 사람은 "시스템에 가면 있겠지" 하고 시스템에 오지만 아무것도 못 찾고,
+    시트로 돌아가도 "여기 보지 마세요"라고 적혀 있습니다. <b>어느 쪽에서도 일할 수 없는 상태</b>입니다.
+  </div>
+  <p style="margin-bottom:0">같은 상태의 시트가 몇 건인지는 아직 셀 수 없습니다.
+     <b>시스템이 모르는 시트는 시스템이 셀 수도 없기 때문</b>입니다.
+     그래서 이 기능의 출발점은 "목록에서 고르기"가 아니라 <b>"사람이 주소를 가져오기"</b>입니다.</p>
+</div>
+
+<h3>지금 왜 안 보이는가 — 원인 세 가지</h3>
+<div class="tw"><table>
+<tr><th style="width:150px">원인</th><th>무슨 뜻인가</th><th style="width:190px">이 기능이 하는 일</th></tr>
+<tr>
+  <td><b>등록이 안 됨</b></td>
+  <td>시스템이 작업으로 인정하는 절차(작업오더 접수)를 거치지 않은 시트. 시스템 입장에서는 존재하지 않는 시트입니다.</td>
+  <td>주소를 받아 작업으로 등록</td></tr>
+<tr>
+  <td><b>업체가 안 붙음</b></td>
+  <td>등록은 됐어도 어느 업체 것인지 지정되지 않으면 업체관리 표에 나오지 않습니다.</td>
+  <td>등록과 동시에 업체 지정</td></tr>
+<tr>
+  <td><b>내용이 안 옮겨짐</b></td>
+  <td>작업 이름만 있고 리뷰어 명단이 비어 있으면 표가 빈 채로 열립니다.</td>
+  <td>시트 내용을 시스템 표로 변환</td></tr>
+</table></div>
+
+<h2><span class="num">2</span>이 기능이 하는 일</h2>
+
+<div class="ba">
+  <div class="b4">
+    <h4>지금 (기능 없음)</h4>
+    <ul>
+      <li>시스템에 없는 시트는 <b>찾을 방법이 없음</b></li>
+      <li>업체관리의 "업체 미지정 시트" 목록에도 <b>안 뜸</b> — 시스템이 아는 시트만 나오기 때문</li>
+      <li>내용을 옮기려면 사람이 한 줄씩 옮겨 적어야 함 (108줄)</li>
+      <li>시트에는 "보지 마세요" 안내만 남음</li>
+    </ul>
+  </div>
+  <div class="af">
+    <h4>이후 (기능 있음)</h4>
+    <ul>
+      <li>업체관리에서 <b>주소 붙여넣기 → 업체 고르기 → 확인</b></li>
+      <li>리뷰어 명단·구매일자·금액·리뷰제출·입금이 <b>그대로</b> 시스템 표로</li>
+      <li>업체관리 표와 작업보드에 <b>바로 나타남</b></li>
+      <li>리뷰어가 자기 참여 내역을 검색하면 <b>다시 찾을 수 있음</b></li>
+    </ul>
+  </div>
+</div>
+
+<h3>네 단계로 진행합니다</h3>
+<div class="flow">
+  <div class="st"><span class="n">1</span><h4>주소 붙여넣기</h4>
+    <p>구글시트 탭 주소를 그대로 붙여넣습니다. 탭이 지정되지 않은 주소면 시트 안의 탭 목록에서 고릅니다.</p></div>
+  <div class="st"><span class="n">2</span><h4>읽어서 보여주기</h4>
+    <p>시스템이 시트를 한 번 읽어 <b>무엇을 가져올지 미리 보여줍니다.</b> 이 단계에서는 아무것도 저장하지 않습니다.</p></div>
+  <div class="st"><span class="n">3</span><h4>업체 고르고 확인</h4>
+    <p>어느 업체의 작업인지 고르고, 가져올 줄을 확인합니다. 이상한 줄은 체크를 풀어 뺄 수 있습니다.</p></div>
+  <div class="st"><span class="n">4</span><h4>가져오기 실행</h4>
+    <p>시스템 표를 만들고 업체에 등록한 뒤, 그 시트와의 연결을 끊습니다. 결과를 숫자로 보고합니다.</p></div>
+</div>
+
+<div class="good">
+  <b>2단계에서 멈출 수 있습니다</b>
+  읽어서 보여주는 단계까지는 <b>어떤 것도 바뀌지 않습니다.</b> 화면을 닫으면 그만입니다.
+  실제로 무언가가 만들어지는 것은 4단계에서 사람이 [가져오기]를 누른 뒤뿐입니다.
+</div>
+
+<h2><span class="num">3</span>데이터가 어떻게 바뀌나</h2>
+
+<p>시트의 열 이름을 <b>그대로 유지</b>합니다. 열 이름을 우리가 고쳐 부르면
+   나중에 그 표를 읽는 화면들이 값을 못 찾습니다. 다만 시스템이 특별히 다루는 칸이 몇 개 있어서,
+   그 칸을 <b>어떻게 알아봤는지 미리 보여주고 사람이 확인</b>합니다.</p>
+
+<h3>예시 — 실제 시트의 열 대응</h3>
+<div class="tw"><table>
+<tr><th style="width:130px">시트 열 이름</th><th style="width:150px">시스템이 알아본 역할</th><th>왜 중요한가</th></tr>
+<tr><td>번호</td><td><span class="pill p-auto">줄 번호</span></td><td>줄 순서를 그대로 지킵니다. 시트에서 몇 번째 줄이었는지가 나중에 대조 기준이 됩니다.</td></tr>
+<tr><td>구매일자</td><td><span class="pill p-key">진행 날짜</span></td><td><code>7 / 20 (월)</code>처럼 연도가 없는 표기도 읽습니다. 언제 진행한 작업인지의 근거입니다.</td></tr>
+<tr><td>수취인</td><td><span class="pill p-key">리뷰어 이름</span></td><td>명단에 표시되는 이름입니다.</td></tr>
+<tr><td>연락처</td><td><span class="pill p-key">리뷰어 찾기 키</span></td><td><b>가장 중요한 칸.</b> 리뷰어가 자기 참여 내역을 찾을 때 쓰는 유일한 열쇠입니다.</td></tr>
+<tr><td>리뷰제출</td><td><span class="pill p-st">진행 상태</span></td><td>제출 완료 여부. 작업보드의 제출 숫자가 이 칸에서 나옵니다.</td></tr>
+<tr><td>입금</td><td><span class="pill p-st">진행 상태</span></td><td>입금 완료 여부. 정산 화면·입금관리가 이 칸을 봅니다.</td></tr>
+<tr><td>주문자제출 · 쿠팡id · 주소 · 은행 · 계좌번호 · 예금주 · 결제금액 · 주문번호 · 차수 · 옵션 · 담당자 · 인애드명단 · 비고</td>
+    <td><span class="pill p-keep">그대로 보관</span></td>
+    <td>역할을 따로 부여하지 않고 <b>적힌 그대로</b> 옮깁니다. 표에서 똑같이 보이고 똑같이 고칠 수 있습니다.</td></tr>
+</table></div>
+
+<div class="warn">
+  <b>연락처를 못 알아보면 가져오지 않습니다</b>
+  연락처 칸을 찾지 못하면 그 명단은 <b>리뷰어가 영영 자기 참여 내역을 못 찾는 명단</b>이 됩니다.
+  숫자만 채워 놓고 "옮겼다"고 말하는 것이 더 나쁘기 때문에, 이런 시트는 <b>가져오기를 잠그고 이유를 알려줍니다.</b>
+</div>
+
+<h3>시트 맨 위의 안내 줄도 함께 읽습니다</h3>
+<p>이 시트들은 위쪽에 <b>캠페인명 · 구매시간대 · 배송유형 · 상품링크</b> 같은 안내가 적혀 있습니다.
+   이 값을 읽어 작업 이름과 상품 주소를 자동으로 채워 넣고, <b>사람이 고칠 수 있게</b> 보여줍니다.
+   예시 시트에서는 작업 이름이 <b>「0720수진코리아 맛있는 고양이캔 4종」</b>으로 채워집니다.</p>
+
+<h3>어떤 줄을 가져오나</h3>
+<div class="tw"><table>
+<tr><th style="width:180px">줄의 상태</th><th style="width:110px" class="c">기본값</th><th>이유</th></tr>
+<tr><td>이름·연락처가 있는 줄</td><td class="c"><b style="color:#2e9e57">가져옴</b></td><td>실제 참여자입니다. 예시 시트에서 107줄.</td></tr>
+<tr><td>번호는 없지만 내용이 있는 줄</td><td class="c"><b style="color:#2e9e57">가져옴</b></td>
+    <td>예시 시트 아래쪽 8줄이 여기 해당합니다. 번호를 안 매겼을 뿐 <b>실제 진행 건</b>입니다. 번호 없다고 버리면 사람이 사라집니다.</td></tr>
+<tr><td>이름이 <code>ㅇ</code>처럼 한 글자거나 금액이 비정상인 줄</td><td class="c"><b style="color:#b45309">체크 해제</b></td>
+    <td>연습·테스트로 보이는 줄입니다. <b>숨기지 않고 체크만 풀어서 보여줍니다</b> — 진짜 참여자를 시스템이 마음대로 지우면 안 됩니다.</td></tr>
+<tr><td>완전히 빈 줄</td><td class="c">가져옴 (빈 자리)</td>
+    <td>표의 줄 번호를 맞추기 위해 자리만 만듭니다. 명단에는 나오지 않습니다.</td></tr>
+</table></div>
+
+<h2><span class="num">4</span>어디에서 시작하나</h2>
+
+<p>업체관리 화면에 진입점을 <b>두 곳</b> 둡니다. 둘 다 <b>같은 창</b>을 엽니다 —
+   창구가 둘이면서 동작이 다르면 곧 서로 어긋납니다.</p>
+
+<div class="card">
+  <h3 style="margin-top:0">① 업체를 이미 아는 경우 — 업체 화면의 [＋ 시트에서 가져오기]</h3>
+  <p style="margin-bottom:0">업체를 고른 상태에서 누르면 <b>그 업체가 미리 선택된 채</b>로 창이 열립니다.
+     "이 업체 작업인데 시스템에 없다"를 발견했을 때의 자연스러운 흐름입니다.</p>
+</div>
+<div class="card">
+  <h3 style="margin-top:0">② 업체를 모르는 경우 — 사이드바 아래 [＋ 시트에서 가져오기]</h3>
+  <p style="margin-bottom:0">주소부터 넣고 시트 내용을 본 뒤에 업체를 고릅니다.
+     업체가 아직 시스템에 없으면 <b>그 자리에서 거래처 등록</b>까지 이어집니다(기존 등록 절차 그대로).</p>
+</div>
+
+<div class="stop">
+  <b>누가 쓸 수 있나</b>
+  <b>관리자·마스터만</b> 사용합니다. 이 기능은 "이 시트를 시스템의 작업으로 인정한다"는 선언이고,
+  한 번 실행하면 업체 소유·정산·리뷰어 검색까지 함께 열립니다.
+  AE 담당자에게는 <b>버튼 자체가 보이지 않습니다.</b>
+</div>
+
+<h2><span class="num">5</span>정해야 할 것</h2>
+
+<p>구현 전에 확정이 필요한 항목입니다. <b>초록 표시가 추천안</b>이고, 다른 선택을 하셔도 됩니다.</p>
+
+<div class="dec">
+  <div class="h"><span class="id">D1</span>가져온 뒤 구글시트와의 관계</div>
+  <div class="b">
+    <p>시트를 계속 읽을지, 끊을지입니다. 계속 읽으면 시트 수정이 시스템에 반영되지만,
+       <b>시스템에서 고친 값이 시트 값으로 되돌아가는 사고</b>가 생깁니다.</p>
+    <div class="opts">
+      <div class="opt rec"><div class="t">즉시 끊기<span class="rb">추천</span></div>
+        <p>가져온 순간부터 <b>시스템 표가 유일한 기준</b>입니다. 시트는 참고용으로만 남고 안내문이 갱신됩니다.
+           이미 이관 안내가 붙어 있는 시트들이라 사람의 기대와도 일치합니다.</p></div>
+      <div class="opt"><div class="t">당분간 시트도 읽기</div>
+        <p>양쪽을 잠시 병행합니다. 안전해 보이지만 <b>어느 쪽이 맞는 값인지 사람이 매번 판단</b>해야 하고,
+           지금까지 이 구조에서 사고가 났습니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dec">
+  <div class="h"><span class="id">D2</span>이 작업으로 리뷰어를 새로 모집할 수 있게 할지</div>
+  <div class="b">
+    <p>가져온 작업에 모집공고를 만들어 줄지입니다.</p>
+    <div class="opts">
+      <div class="opt rec"><div class="t">만들지 않음<span class="rb">추천</span></div>
+        <p>이미 끝난 과거 작업을 되살리는 기능입니다. 공고가 자동으로 생기면
+           <b>끝난 작업이 리뷰어 화면에 다시 뜨는</b> 사고가 납니다. 필요하면 나중에 사람이 발행합니다.</p></div>
+      <div class="opt"><div class="t">선택하면 만듦</div>
+        <p>가져오기 창에서 체크하면 공고까지 생성. 진행 중인 작업을 가져오는 경우에 편하지만,
+           지금 대상은 대부분 끝난 작업입니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dec">
+  <div class="h"><span class="id">D3</span>업체 지정을 필수로 할지</div>
+  <div class="b">
+    <div class="opts">
+      <div class="opt rec"><div class="t">필수<span class="rb">추천</span></div>
+        <p>업체를 고르지 않으면 <b>가져와도 업체관리 표에 안 보입니다</b> — 지금 문제가 그대로 반복됩니다.
+           "업체 등록용으로 만든다"는 이 기능의 목적과도 맞습니다.</p></div>
+      <div class="opt"><div class="t">나중에 지정</div>
+        <p>일단 가져오고 업체는 나중에. 빨리 여러 건을 처리할 수 있지만
+           <b>업체 미지정 작업이 쌓이는</b> 새로운 잔재가 생깁니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dec">
+  <div class="h"><span class="id">D4</span>리뷰제출·입금 표시를 그대로 가져올지</div>
+  <div class="b">
+    <div class="opts">
+      <div class="opt rec"><div class="t">그대로 가져옴<span class="rb">추천</span></div>
+        <p>시트에 <code>7/23 17:30</code>, <code>7/27</code>로 적힌 값을 그대로 옮깁니다.
+           <b>정산이 끝난 작업인지 아닌지</b>를 알 수 있는 유일한 근거입니다.</p></div>
+      <div class="opt"><div class="t">비우고 시작</div>
+        <p>명단만 가져오고 상태는 비웁니다. 다 끝난 작업이 <b>전부 미제출·미입금으로 보여</b>
+           입금관리에 잘못 잡힐 수 있습니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dec">
+  <div class="h"><span class="id">D5</span>이미 시스템에 있는 탭 주소를 넣었을 때</div>
+  <div class="b">
+    <p>실수로 이미 등록된 작업의 주소를 넣는 경우입니다.</p>
+    <div class="opts">
+      <div class="opt rec"><div class="t">막고 그 작업으로 안내<span class="rb">추천</span></div>
+        <p>"이 작업은 이미 있습니다"라며 <b>그 작업을 여는 링크</b>를 보여줍니다.
+           덮어쓰면 이미 들어온 주문·수정 내역이 지워질 수 있습니다.</p></div>
+      <div class="opt"><div class="t">빠진 줄만 채우기</div>
+        <p>없는 줄만 추가합니다. 편리하지만 <b>어떤 줄이 왜 늘었는지</b> 설명하기 어려워집니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="dec">
+  <div class="h"><span class="id">D6</span>되돌리기를 어디까지 허용할지</div>
+  <div class="b">
+    <div class="opts">
+      <div class="opt rec"><div class="t">가져온 직후 되돌리기<span class="rb">추천</span></div>
+        <p>결과 화면의 [되돌리기]로 <b>방금 만든 명단과 업체 연결을 내립니다.</b>
+           주문이 이미 들어온 뒤에는 확인을 한 번 더 받습니다(기존 작업표 정리와 같은 방식).</p></div>
+      <div class="opt"><div class="t">되돌리기 없음</div>
+        <p>실수하면 손으로 정리. 108줄짜리를 손으로 지우는 일은 현실적이지 않습니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<h2><span class="num">6</span>안전장치</h2>
+
+<div class="card">
+  <h3 style="margin-top:0">하지 않는 일</h3>
+  <ul style="margin-bottom:0">
+    <li><b>구글시트에 값을 쓰지 않습니다.</b> 유일한 예외는 맨 윗줄 안내문 갱신이고, 이것도 D1을 "즉시 끊기"로 정할 때만 합니다.</li>
+    <li><b>시트 탭을 지우지 않습니다.</b> 원본은 그대로 남습니다.</li>
+    <li><b>리뷰어 계정을 자동으로 연결하지 않습니다.</b> 이름이 같다는 이유로 남의 참여 내역이 열리는 사고를 막기 위해,
+        연결은 시트에 적힌 연락처로만 판단합니다.</li>
+    <li><b>모집·주문 흐름을 건드리지 않습니다.</b> 이 기능이 없어도 시스템은 지금 그대로 돌아갑니다.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">잠그는 경우 — 이럴 땐 가져오기 버튼이 눌리지 않습니다</h3>
+  <div class="tw"><table>
+    <tr><th style="width:220px">상황</th><th>화면이 하는 말</th></tr>
+    <tr><td>열 이름 줄을 못 찾음</td><td>"이 탭에서 표의 머리글을 찾지 못했습니다" — 억지로 가져오면 <b>전 줄이 어긋납니다</b>.</td></tr>
+    <tr><td>연락처 칸이 없음</td><td>"연락처 칸을 찾지 못했습니다" — 리뷰어가 찾을 수 없는 명단이 됩니다.</td></tr>
+    <tr><td>업체를 안 골랐음 (D3=필수일 때)</td><td>"업체를 골라 주세요"</td></tr>
+    <tr><td>이미 등록된 작업</td><td>"이미 시스템에 있는 작업입니다" + 그 작업 열기</td></tr>
+    <tr><td>시트를 못 읽음(권한·삭제)</td><td>실패 이유를 그대로 보여줍니다 — 잘못된 값을 채우고 성공했다고 하지 않습니다.</td></tr>
+  </table></div>
+</div>
+
+<h2><span class="num">7</span>남는 한계</h2>
+<ul>
+  <li><b>여전히 사람이 주소를 가져와야 합니다.</b> 시스템이 모르는 시트는 시스템이 목록으로 만들 수 없습니다.
+      드라이브 폴더 전체를 훑는 방식은 별건으로 검토합니다.</li>
+  <li><b>리뷰 캡처 이미지는 함께 오지 않습니다.</b> 명단·금액·상태만 옮깁니다.
+      이미지가 저장된 폴더가 있으면 기존 [리뷰 캡처 정리] 기능으로 따로 연결합니다.</li>
+  <li><b>계약·정산은 자동으로 붙지 않습니다.</b> 가져온 뒤 업체관리 표에서 [계약 매칭]을 한 번 해야 합니다.</li>
+  <li><b>한 번에 한 탭</b>입니다. 한 시트에 탭이 여러 개면 탭마다 반복합니다
+      (탭 목록에서 여러 개를 고르는 방식은 2단계에서 검토).</li>
+</ul>
+
+<h2><span class="num">8</span>만드는 순서</h2>
+<div class="tw"><table>
+<tr><th style="width:70px" class="c">단계</th><th style="width:230px">내용</th><th>이 단계만으로 되는 일</th></tr>
+<tr><td class="c"><b>1</b></td><td>주소 붙여넣기 + 읽어서 보여주기</td>
+    <td>저장하는 것이 없어 <b>지금 당장 안전하게</b> 넣을 수 있습니다. "이 시트에 뭐가 들었나"를 확인하는 도구로 먼저 쓸 수 있습니다.</td></tr>
+<tr><td class="c"><b>2</b></td><td>가져오기 실행 + 업체 등록 + 시트 끊기</td>
+    <td>기능 완성. 한 건씩 정리 시작.</td></tr>
+<tr><td class="c"><b>3</b></td><td>되돌리기 · 결과 보고 다듬기</td>
+    <td>실수해도 복구 가능. 여기까지 하고 나면 담당자에게 열어 줄 수 있습니다.</td></tr>
+</table></div>
+
+<details>
+  <summary>개발자용 부록 — 재사용할 부품과 지켜야 할 규칙</summary>
+  <div class="dbody">
+    <h3>재사용(사본 0)</h3>
+    <ul>
+      <li>시트 읽기 = <code>rawMirror.mirrorOneSheet(sheetId,{force:true})</code> → <code>raw_sheet_rows</code>.
+          시트 API 직접 호출을 새로 만들지 않는다(throttle lane·캐시 규율 상속).</li>
+      <li>헤더 탐지 = <code>utils/sheetHeader.detectSheetHeader</code> · 날짜열 = <code>campaignSchedule.findDateColumnIndex</code> ·
+          옵션열 = <code>orderLedger.optionWriteColumns</code> · 열 역할 = <code>utils/worktableTemplate.classifyHeaders</code>.</li>
+      <li>줄 생성 = <code>participants.createSlotsFromSheetRows</code>(<code>source='worktable'</code>,
+          <b><code>seq</code>=시트 실제 행번호</b> — 어긋나면 주문 유입 시 표가 두 겹).</li>
+      <li>장부 3권 = <code>sheetlessLedger.rebuildLedgers</code>(파서 <code>indexBuilder.parseTabRows</code>를 그대로 통과 →
+          이름열·제출/입금 판정·phone8 추출·<code>submit_col</code> 감지에 사본 0).</li>
+      <li>등록 업서트 = 접수 경로와 같은 <code>campaigns</code>/<code>tab_configs</code> 업서트를 재사용.
+          <code>sheetless=TRUE</code>로 켜고 <code>sheet_url</code>은 <b>실제 구글 URL</b>을 남긴다(가상 시트가 아니므로 링크가 살아 있다).</li>
+      <li>업체 소유 = <code>advertiser_campaigns</code>(<code>tab_gid</code> 지정) · 시트 안내문 = <code>sheetNotice.applySheetNotice(force:true)</code>
+          (<code>validateNoticeText</code> 통과 필수 — 헤더 키워드 2개 이상이면 그 탭 파싱이 깨진다).</li>
+    </ul>
+    <h3>새 관문이 하나 는다 — 명시적으로 인정할 것</h3>
+    <p><code>TAB_REGISTRATION_MODE='order'</code> 규율상 신규 탭 등록 창구는 접수 하나였다.
+       이 기능은 <b>두 번째 등록 창구</b>가 된다. 그래서 ① adminOrMaster 전용 ② 업체 지정 필수(D3)
+       ③ 등록 사유·수행자를 로그로 남김 ④ 자동 발견·일괄 실행 없음(사람이 주소를 하나씩) 을 조건으로 둔다.
+       <code>allowManualRegister()</code>를 완화하지 말고 <b>이 경로에만</b> 예외를 둔다(복원 성격 — 아카이브 복구와 같은 분류).</p>
+    <h3>쓰기 표면</h3>
+    <p><code>campaigns</code> · <code>tab_configs</code> · <code>advertiser_campaigns</code> · <code>campaign_participants</code> ·
+       장부 3권(<code>raw_sheet_*</code>/<code>index_master</code>/<code>review_index</code>) · 시트 안내문 1줄.
+       주문 원장·<code>participation_links</code>·큐·모집공고는 <b>무접촉</b>.</p>
+    <h3>회귀가드에서 고정할 것</h3>
+    <ul>
+      <li>미리보기 단계의 <b>쓰기 쿼리 0</b> · 실행 단계의 <b>시트 쓰기는 안내문뿐</b></li>
+      <li><code>seq</code> = 시트 행번호 · <code>source='worktable'</code>(<code>'manual'</code>이면 제출·입금 표시가 영영 안 켜진다)</li>
+      <li>연락처 열 미검출 시 <b>fail-closed</b>(가져오기 거부) · 이미 등록된 탭 재실행 시 <b>덮어쓰기 0</b>(D5)</li>
+      <li>판정 사본 부재(헤더·날짜·옵션 판정을 이 서비스가 새로 구현하지 않았는지)</li>
+      <li>진짜 PG16으로: 108줄 흡수 → <code>listActiveTabs</code>에 실제로 뜨는지 · 재실행 멱등 · 업체관리 표 노출</li>
+    </ul>
+  </div>
+</details>
+
+<div class="foot">
+  리뷰웹시스템 · 구글시트 주소로 작업 가져오기 기획서 · 2026-08-10<br>
+  화면 시안: <b>design-sheet-import-wizard.html</b>
+</div>
+
+</div>
