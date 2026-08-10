@@ -1431,10 +1431,19 @@
   table.sheetgrid thead th.gsel{background:var(--accent-soft)!important;box-shadow:inset 0 0 0 2px var(--accent)}
   .gdragbadge{position:fixed;z-index:220;display:none;background:var(--accent);color:#fff;font-size:11px;font-weight:750;padding:3px 10px;border-radius:999px;box-shadow:0 4px 12px rgba(16,24,40,.22);pointer-events:none;white-space:nowrap}
   .gselact{display:inline-flex;align-items:center;gap:7px;padding:3px 5px 3px 11px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent-line)} .gselact b{font-size:12px;color:var(--accent-deep);font-weight:800}
-  /* ── 셀 범위 드래그 선택 + 배경색 팔레트(엑셀식) ── */
-  table.sheetgrid td.gselrange{box-shadow:inset 0 0 0 2px var(--accent);background-color:color-mix(in srgb,var(--accent) 14%,transparent)!important}
-  .gcolorpop{position:fixed;z-index:230;display:none;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line2);border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.2);padding:6px}
-  .gcolorpop.show{display:flex}
+  /* ── 셀 범위 드래그 선택(엑셀식) + 우클릭 메뉴(편집·복사·배경색) ── */
+  table.sheetgrid td.gselrange{box-shadow:inset 0 0 0 1px var(--accent);background-color:color-mix(in srgb,var(--accent) 14%,transparent)!important}
+  table.sheetgrid td.gselanchor{box-shadow:inset 0 0 0 2px var(--accent-deep,var(--accent))}
+  .gcellmenu{position:fixed;z-index:230;display:none;min-width:196px;background:var(--card);border:1px solid var(--line2);border-radius:10px;box-shadow:0 10px 28px rgba(16,24,40,.22);padding:5px}
+  .gcellmenu.show{display:block}
+  .gcmrow{display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border:0;background:none;border-radius:7px;font-size:12.5px;color:var(--t1);cursor:pointer;text-align:left;font-family:inherit}
+  .gcmrow:hover{background:var(--card2)}
+  .gcmrow.dim{opacity:.4;cursor:not-allowed} .gcmrow.dim:hover{background:none}
+  .gcmrow .i{width:16px;text-align:center}
+  .gcmdiv{height:1px;background:var(--line);margin:5px 4px}
+  .gcmsw{display:flex;align-items:center;gap:5px;padding:3px 7px 5px}
+  .gcmhint{font-size:10.5px;color:var(--muted);padding:2px 10px 4px;line-height:1.35}
+  .gcmhint:empty{display:none}
   .gcswatch{width:22px;height:22px;border-radius:6px;cursor:pointer;border:1px solid rgba(16,24,40,.15)}
   .gcswatch:hover{transform:scale(1.12)}
   .gcswatch.gcclear{background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);font-weight:800}
@@ -4649,7 +4658,10 @@ function _tpHtml(tp){
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
-  _ensureCellColorUI();  // 셀 범위 드래그 → 배경색 팔레트(1회 바인딩, 위임)
+  _ensureCellRangeUI();  // 셀 범위 드래그(복사·붙여넣기·배경색) + 우클릭 편집(1회 바인딩, 위임)
+  // ★ 표를 다시 그리면 선택 범위(행/열 인덱스)는 가리키던 셀을 잃는다 — 남겨 두면 복사·붙여넣기가
+  //   **엉뚱한 칸**에 적용된다(필터·정렬·탭 전환 후 인덱스 의미가 바뀐다). 여기서 한 번에 비운다.
+  STATE.gSelRange=null;
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
   // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
@@ -4700,7 +4712,7 @@ function buildGrid(wd){
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
     const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
-      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}" onclick="beginEditCell(this)">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     let tds='';
     vcols.forEach((c,i)=>{ const h=c.key;
@@ -4777,7 +4789,7 @@ function buildGrid(wd){
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
       ${_folBarHtml()}
-      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소) · <b>셀 드래그</b>=범위 선택 → 배경색`:` · <b>열람 전용</b>`}</span></div>
+      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 우클릭</b>=그 셀 편집·복사·배경색 · <b>셀 드래그</b>=범위 선택(Ctrl+C 복사 · Ctrl+V 붙여넣기)`:` · <b>열람 전용</b> · 셀 드래그+Ctrl+C=복사`}</span></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
     <div id="addbox"></div>
     ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
@@ -5240,57 +5252,230 @@ function deleteCustomColumnPrompt(colKey){
       } else toast(resp&&resp.error?('삭제 실패: '+resp.error):'삭제 실패');
     }).catch(()=>toast('삭제 실패 — 네트워크'));
 }
-// ── 셀 배경색: 드래그로 셀 범위(직사각형)를 잡아 색상 팔레트로 칠한다(migration 080, 탭 공용 저장). ──
-//   단순 클릭(이동 없음)은 기존 셀 편집(onclick=beginEditCell)이 그대로 처리 — 여기선 아무것도 하지 않는다.
+/* ── 셀 범위 선택 = 복사/붙여넣기·배경색 · 편집은 우클릭으로만 (사용자 확정 2026-08-10) ────────
+   ★★ **왼쪽 클릭은 더 이상 편집을 시작하지 않는다**(종전 `onclick="beginEditCell(this)"` 제거) —
+      표를 훑다 스친 클릭 한 번이 곧 편집 시작이라 값이 실수로 바뀌었고, 그 상태로는 드래그·복사도
+      매번 편집창을 열며 어긋났다. 지금은 **클릭=선택 · 드래그=범위 선택 · 우클릭=그 셀만 편집**.
+   ★★ 선택은 **직사각형**이다 — 세로로만 끌면 그 열만 잡히고 오른쪽 열(수취인·연락처·주소…)은
+      선택도 복사도 되지 않는다(열 경계를 넘는 복사 사고 차단).
+   ★ 그리기(`.gselrange`)와 논리 범위(`STATE.gSelRange`)는 **한 곳**에서만 만든다 —
+      복사·붙여넣기·배경색이 각자 범위를 다시 세면 "칠한 칸과 복사한 칸이 다른" 상태가 된다.
+   ★ 붙여넣기는 **편집 가능한 셀(.gedit)에만** 들어간다 — 참여자·연락처(신원)·# 는 잠금이라
+      건너뛰고 그 건수를 말한다(조용한 누락 금지). 저장은 기존 `commitCellEdit` 한 경로. */
 const _CELL_COLORS=['#ffe9a8','#ffd0d0','#ffdcb0','#c9f2c0','#c7e3ff','#e6d3ff','#d9d9d9'];
-function _ensureCellColorUI(){
+const _PASTE_MAX=500;   // 한 번에 붙여넣을 수 있는 셀 수(셀당 저장 왕복 1회 — 폭주 차단)
+function _ensureCellRangeUI(){
   if(STATE._gColorInit) return; STATE._gColorInit=true;
-  if(!$('#gcolorpop')){ const p=document.createElement('div'); p.className='gcolorpop'; p.id='gcolorpop'; document.body.appendChild(p); }
-  let drag=null;   // { r0,c0,r1,c1,moved }
-  const clearVis=()=>document.querySelectorAll('#gbody td.gselrange').forEach(td=>td.classList.remove('gselrange'));
+  if(!$('#gcellmenu')){ const p=document.createElement('div'); p.className='gcellmenu'; p.id='gcellmenu'; document.body.appendChild(p); }
+  let drag=null;   // { r0,c0,r1,c1 }
   const posOf=(td)=>{ const tr=td.closest('tr'); const tbody=td.closest('tbody'); if(!tr||!tbody) return null;
     return { ri:[...tbody.children].indexOf(tr), ci:[...tr.children].indexOf(td) }; };
-  const paint=()=>{ if(!drag) return; clearVis();
-    const tbody=$('#gbody'); if(!tbody) return; const trs=[...tbody.children];
-    const rlo=Math.min(drag.r0,drag.r1), rhi=Math.max(drag.r0,drag.r1);
-    const clo=Math.min(drag.c0,drag.c1), chi=Math.max(drag.c0,drag.c1);
-    for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
-      const tds=[...tr.children]; for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) td.classList.add('gselrange'); } }
-  };
   document.addEventListener('mousedown',e=>{
-    if(e.button!==0 || !STATE.canEdit) return;
-    const td=e.target.closest('#gbody td'); if(!td || td.querySelector('input') || td.closest('tr.grouphd')) return;
+    if(e.button!==0) return;
+    if(e.target.closest('#gcellmenu')) return;
+    _closeCellMenu();
+    const td=e.target.closest('#gbody td');
+    // 표 밖을 누르면 선택 해제 — 남겨 두면 Ctrl+C 가 계속 표 범위를 가로챈다.
+    if(!e.target.closest('.sheetgrid')) { _clearCellSel(); return; }
+    if(!td || td.querySelector('input') || td.closest('tr.grouphd')) return;
+    if(e.target.closest('.revb')||e.target.closest('.rmx')) return;   // ↩ 되돌리기·× 제거 버튼은 자기 동작 유지
     const pos=posOf(td); if(!pos) return;
-    drag={ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci, moved:false };
+    drag={ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci };
+    _setCellSel(drag);
+    // 열려 있는 편집 입력이 있으면 기본 동작(blur=커밋)을 막지 않는다. 그 외에는 텍스트 선택만 억제.
+    if(!document.querySelector('#gbody input.einp')) e.preventDefault();
   });
   document.addEventListener('mousemove',e=>{
     if(!drag) return; const td=e.target.closest('#gbody td'); if(!td) return;
     const pos=posOf(td); if(!pos) return;
-    if(pos.ri!==drag.r1 || pos.ci!==drag.c1){ drag.r1=pos.ri; drag.c1=pos.ci; drag.moved=true; paint(); }
+    if(pos.ri!==drag.r1 || pos.ci!==drag.c1){ drag.r1=pos.ri; drag.c1=pos.ci; _setCellSel(drag); }
   });
-  document.addEventListener('mouseup',e=>{
-    if(!drag) return; const d=drag; drag=null;
-    if(!d.moved){ clearVis(); return; }   // 이동 없음(단순 클릭)=기존 셀 편집 그대로, 범위선택 UI는 관여하지 않음
-    _openColorPopover(e.clientX, e.clientY);
+  document.addEventListener('mouseup',()=>{ drag=null; });   // 선택은 유지 — 복사·붙여넣기·우클릭 메뉴의 대상
+  // 우클릭 = 그 셀(또는 이미 잡아 둔 범위)에 대한 메뉴 — **편집 진입은 여기 하나뿐**
+  document.addEventListener('contextmenu',e=>{
+    const td=e.target.closest('#gbody td'); if(!td || td.closest('tr.grouphd')) return;
+    if(td.querySelector('input')) return;                 // 편집 중인 셀은 브라우저 기본 메뉴(붙여넣기 등)를 살린다
+    e.preventDefault();
+    const pos=posOf(td); if(!pos) return;
+    const s=STATE.gSelRange;
+    const inSel = s && pos.ri>=Math.min(s.r0,s.r1) && pos.ri<=Math.max(s.r0,s.r1)
+                    && pos.ci>=Math.min(s.c0,s.c1) && pos.ci<=Math.max(s.c0,s.c1);
+    if(!inSel) _setCellSel({ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci });
+    _openCellMenu(e.clientX, e.clientY, td);
   });
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#gcolorpop').classList.contains('show')){ clearVis(); _closeColorPopover(); } });
-  document.addEventListener('click',e=>{ if(!e.target.closest('#gcolorpop')) _closeColorPopover(); });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){ _closeCellMenu(); _clearCellSel(); return; }
+    const tag=(e.target&&e.target.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||tag==='select'||(e.target&&e.target.isContentEditable)) return;
+    if(!STATE.gSelRange) return;
+    if(e.key==='F2'||e.key==='Enter'){ const td=_selAnchorTd(); if(td&&td.classList.contains('gedit')){ e.preventDefault(); _closeCellMenu(); beginEditCell(td); } }
+  });
+  // 복사(Ctrl/Cmd+C) — 선택 범위를 TSV 로. 브라우저 기본 복사(텍스트 선택)는 선택 범위가 있을 때만 가로챈다.
+  document.addEventListener('copy',e=>{
+    if(!STATE.gSelRange) return;
+    const tag=(e.target&&e.target.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||(e.target&&e.target.isContentEditable)) return;
+    // 페이지 어딘가의 텍스트를 직접 드래그해 복사하는 중이면 그쪽을 존중한다(가로채기 금지).
+    try{ if(String(window.getSelection?window.getSelection():'').trim()) return; }catch(_){ }
+    const tsv=_selectionTsv(); if(tsv==null) return;
+    e.preventDefault(); e.clipboardData.setData('text/plain', tsv);
+    toast('선택 범위를 복사했습니다');
+  });
+  // 붙여넣기(Ctrl/Cmd+V) — 선택 범위 왼쪽 위부터 채운다(편집 권한·편집 가능 셀에만)
+  document.addEventListener('paste',e=>{
+    if(!STATE.canEdit || !STATE.gSelRange) return;
+    const tag=(e.target&&e.target.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||(e.target&&e.target.isContentEditable)) return;
+    const text=(e.clipboardData&&e.clipboardData.getData('text/plain'))||'';
+    if(!text) return;
+    e.preventDefault(); _pasteIntoSelection(text);
+  });
+  document.addEventListener('click',e=>{ if(!e.target.closest('#gcellmenu')) _closeCellMenu(); });
 }
-function _openColorPopover(x,y){
-  const p=$('#gcolorpop'); if(!p) return;
-  p.innerHTML=_CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
-    + `<span class="gcswatch gcclear" onclick="_applyRangeColor('')" title="배경색 지우기">✕</span>`;
-  p.style.left=Math.max(8,Math.min(x, window.innerWidth-8-(_CELL_COLORS.length+1)*30))+'px';
-  p.style.top=Math.max(8,Math.min(y+8, window.innerHeight-46))+'px';
-  p.classList.add('show');
+// 범위 그리기 + 논리 범위 기록(단일 출처) — 셀 하나여도 같은 경로를 탄다.
+function _setCellSel(rng){
+  const tbody=$('#gbody'); if(!tbody||!rng) return;
+  document.querySelectorAll('#gbody td.gselrange,#gbody td.gselanchor').forEach(td=>td.classList.remove('gselrange','gselanchor'));
+  const trs=[...tbody.children];
+  const rlo=Math.min(rng.r0,rng.r1), rhi=Math.max(rng.r0,rng.r1);
+  const clo=Math.min(rng.c0,rng.c1), chi=Math.max(rng.c0,rng.c1);
+  for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
+    const tds=[...tr.children]; for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) td.classList.add('gselrange'); } }
+  STATE.gSelRange={ r0:rng.r0, c0:rng.c0, r1:rng.r1, c1:rng.c1 };
+  const a=_selAnchorTd(); if(a) a.classList.add('gselanchor');
 }
-function _closeColorPopover(){
-  const p=$('#gcolorpop'); if(p) p.classList.remove('show');
-  document.querySelectorAll('#gbody td.gselrange').forEach(td=>td.classList.remove('gselrange'));
+function _clearCellSel(){
+  STATE.gSelRange=null;
+  document.querySelectorAll('#gbody td.gselrange,#gbody td.gselanchor').forEach(td=>td.classList.remove('gselrange','gselanchor'));
+}
+// 앵커 = 범위의 왼쪽 위 셀(편집·붙여넣기 시작점)
+function _selAnchorTd(){
+  const s=STATE.gSelRange, tbody=$('#gbody'); if(!s||!tbody) return null;
+  const tr=[...tbody.children][Math.min(s.r0,s.r1)]; if(!tr) return null;
+  return [...tr.children][Math.min(s.c0,s.c1)]||null;
+}
+// 선택 범위의 td 를 행×열 격자로(그룹 머리행 제외) — 복사·붙여넣기·배경색이 함께 쓰는 재료
+function _selectionGrid(){
+  const s=STATE.gSelRange, tbody=$('#gbody'); if(!s||!tbody) return [];
+  const trs=[...tbody.children];
+  const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
+  const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
+  const out=[];
+  for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
+    const tds=[...tr.children], line=[];
+    for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) line.push(td); }
+    if(line.length) out.push(line); }
+  return out;
+}
+// 셀의 복사값 — 편집 셀은 편집 원값(data-val), 그 외는 표시 텍스트(배지·버튼 제외).
+function _cellCopyText(td){
+  if(!td) return '';
+  const dv=td.getAttribute('data-val');
+  if(dv!=null) return dv;
+  const c=td.cloneNode(true);
+  c.querySelectorAll('.revb,.rmx,.src,.lock').forEach(x=>x.remove());
+  const s=(c.textContent||'').trim();
+  return s==='—'?'':s;
+}
+function _selectionTsv(){
+  const g=_selectionGrid(); if(!g.length) return null;
+  return g.map(line=>line.map(_cellCopyText).join('\t')).join('\n');
+}
+function copyCellSelection(){
+  const tsv=_selectionTsv(); _closeCellMenu();
+  if(tsv==null){ toast('복사할 범위가 없습니다'); return; }
+  const done=()=>toast('선택 범위를 복사했습니다');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(tsv).then(done).catch(()=>_copyFallback(tsv,done));
+  } else _copyFallback(tsv,done);
+}
+function _copyFallback(text, done){
+  try{ const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.cssText='position:fixed;left:-9999px;top:0'; document.body.appendChild(ta); ta.select();
+    const ok=document.execCommand('copy'); ta.remove(); if(ok){ done(); return; }
+  }catch(_){ }
+  toast('복사 실패 — Ctrl+C 를 눌러주세요');
+}
+function pasteCellSelection(){
+  _closeCellMenu();
+  if(!STATE.canEdit){ toast('열람 전용 계정입니다'); return; }
+  if(navigator.clipboard&&navigator.clipboard.readText){
+    navigator.clipboard.readText().then(t=>{ if(t) _pasteIntoSelection(t); else toast('붙여넣을 내용이 없습니다'); })
+      .catch(()=>toast('브라우저가 붙여넣기를 막았습니다 — 표에서 Ctrl+V 를 눌러주세요'));
+  } else toast('표에서 Ctrl+V 를 눌러주세요');
+}
+/* 붙여넣기: 선택 범위 왼쪽 위부터 오른쪽·아래로 채운다.
+   ★ 한 칸만 복사해 여러 칸을 선택했으면 그 값으로 **채운다**(엑셀과 같은 동작).
+   ★ 편집 잠금 셀(참여자·연락처·#)·값이 같은 셀은 건너뛰고 건수를 보고한다. */
+function _pasteIntoSelection(text){
+  const s=STATE.gSelRange, tbody=$('#gbody'); if(!s||!tbody) return;
+  const mat=String(text).replace(/\r/g,'').replace(/\n+$/,'').split('\n').map(l=>l.split('\t'));
+  if(!mat.length) return;
+  const single = mat.length===1 && mat[0].length===1;
+  const trs=[...tbody.children];
+  const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
+  const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
+  // 대상 행 = 선택 시작 행부터(그룹 머리행 제외). 붙여넣을 값이 선택 범위보다 크면 아래·오른쪽으로 넓힌다(표 끝까지만).
+  const bodyRows=[]; for(let ri=rlo; ri<trs.length; ri++){ const tr=trs[ri]; if(tr&&!tr.classList.contains('grouphd')) bodyRows.push(tr); }
+  const nRows = single ? (function(){ let n=0; for(let ri=rlo;ri<=rhi;ri++){ const tr=trs[ri]; if(tr&&!tr.classList.contains('grouphd')) n++; } return n; })()
+                       : Math.min(mat.length, bodyRows.length);
+  const nCols = single ? (chi-clo+1) : Math.max(...mat.map(l=>l.length));
+  const jobs=[]; let locked=0;
+  for(let i=0;i<nRows;i++){
+    const tr=bodyRows[i]; if(!tr) break;
+    const tds=[...tr.children];
+    for(let j=0;j<nCols;j++){
+      const td=tds[clo+j]; if(!td) break;
+      const line = single ? mat[0] : (mat[i]||[]);
+      const val = single ? mat[0][0] : (line[j]!=null?line[j]:'');
+      if(!td.classList.contains('gedit')){ locked++; continue; }
+      const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field');
+      if(!rowId||!field) { locked++; continue; }
+      if((td.getAttribute('data-val')||'')===val) continue;   // 같은 값 = 저장 왕복 낭비
+      jobs.push({rowId, field, val, td});
+    }
+  }
+  if(!jobs.length){ toast(locked?`붙여넣을 수 있는 칸이 없습니다 — 잠긴 칸 ${locked}개(참여자·연락처는 수정 불가)`:'바뀌는 값이 없습니다'); return; }
+  if(jobs.length>_PASTE_MAX){ toast(`한 번에 ${_PASTE_MAX}칸까지 붙여넣을 수 있습니다 (선택 ${jobs.length}칸) — 범위를 나눠 주세요`); return; }
+  if(jobs.length>20 && !confirm(`${jobs.length}개 칸의 값을 붙여넣습니다. 진행할까요?`)) return;
+  jobs.forEach(j=>commitCellEdit(j.rowId, j.field, j.val, j.td));
+  toast(`${jobs.length}개 칸 붙여넣음${locked?` · 잠긴 칸 ${locked}개 건너뜀`:''}`);
+}
+/* 우클릭 메뉴 — 편집·복사·붙여넣기·되돌리기·배경색을 한 곳에서.
+   ★ **body 직속**(표는 가로 스크롤 컨테이너 안이라 그 안에 그리면 잘린다) · onclick 에 시트 문자열 보간 없음. */
+function _openCellMenu(x,y,td){
+  const m=$('#gcellmenu'); if(!m) return;
+  const g=_selectionGrid(); const nCells=g.reduce((n,l)=>n+l.length,0);
+  const one = nCells===1;
+  const canE = STATE.canEdit;
+  const editable = canE && td && td.classList.contains('gedit');
+  const hasEdited = canE && g.some(l=>l.some(c=>c.classList.contains('edited')));
+  const row=(icon,label,fn,dim)=>`<button class="gcmrow${dim?' dim':''}"${dim?' disabled':''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
+  m.innerHTML=
+      (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable):'')
+    + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
+    + (canE?row('📥','붙여넣기','pasteCellSelection()'):'')
+    + (hasEdited?row('↩','편집 되돌리기','_revertSelection()'):'')
+    + (canE?`<div class="gcmdiv"></div><div class="gcmsw">${
+        _CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
+      }<span class="gcswatch gcclear" onclick="_applyRangeColor('')" title="배경색 지우기">✕</span></div>`:'')
+    + `<div class="gcmhint">${one?'':'세로/가로로 끌어 잡은 <b>직사각형 범위</b>만 복사됩니다'}</div>`;
+  m.classList.add('show');
+  const w=m.offsetWidth||210, h=m.offsetHeight||160;
+  m.style.left=Math.max(8,Math.min(x, window.innerWidth-w-10))+'px';
+  m.style.top =Math.max(8,Math.min(y, window.innerHeight-h-10))+'px';
+}
+function _closeCellMenu(){ const m=$('#gcellmenu'); if(m) m.classList.remove('show'); }
+function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.classList.contains('gedit')) beginEditCell(td); }
+function _revertSelection(){
+  const g=_selectionGrid(); _closeCellMenu();
+  const tds=[].concat(...g).filter(td=>td.classList.contains('edited'));
+  if(!tds.length) return;
+  tds.forEach(td=>{ const b=td.querySelector('.revb'); if(b) revertCell(null,b); });
 }
 function _applyRangeColor(color){
-  const t=STATE.cur; const tds=[...document.querySelectorAll('#gbody td.gselrange')];
-  _closeColorPopover();
+  const t=STATE.cur; const tds=[].concat(..._selectionGrid());
+  _closeCellMenu(); _clearCellSel();
   if(!t || !tds.length) return;
   const cells=[]; const byId={}; ((STATE.wd&&STATE.wd.roster)||[]).forEach(r=>{ byId[String(r.id)]=r; });
   for(const td of tds){
