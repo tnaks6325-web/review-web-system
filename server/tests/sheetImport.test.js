@@ -432,6 +432,17 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     const fh = readFront('workdesk.html');
     ok('업체 패널에 진입점(관리자 전용)', /isAdmin\?`<button[^`]*openSheetImport\('\$\{esc\(a\.id\)\}'\)/.test(fh));
     ok('사이드바에도 진입점 — 업체를 모를 때 주소부터 넣는 경로', /openSheetImport\(''\)/.test(fh));
+    /* ★★ 거래처 등록 드로어에도 안내 — 그 시트 드롭다운에는 **시스템이 아는 시트만** 나오므로,
+       미등록 시트를 찾으러 온 사람이 여기서 막다른 길에 빠진다(실사용 신고 2026-08-10). */
+    /* ★ 경계는 **실재하는 다음 함수**여야 한다 — 없는 이름을 쓰면 indexOf 가 -1 이라 파일 끝까지
+       잘리고, 사이드바의 같은 호출이 대신 통과시킨다(이 가드를 쓰다가 실제로 밟았다). */
+    const addStart = fh.indexOf('function _ovmAddAdvHtml(');
+    const addEnd = fh.indexOf('function _ovmAfterAddMount(');
+    ok('가드 경계가 실재한다(슬라이스가 파일 끝까지 번지지 않는다)', addStart > 0 && addEnd > addStart);
+    const addBlk = fh.slice(addStart, addEnd);
+    ok('★★ 거래처 등록 창에 "찾는 시트가 목록에 없나요?" 안내 + 진입점',
+      /찾는 시트가 목록에 없나요/.test(addBlk) && /openSheetImport\(''\)/.test(addBlk));
+    ok('★ 그 안내도 관리자에게만(서버 게이트와 1:1)', /isAdmin\?`<div class="sect">[\s\S]{0,400}openSheetImport/.test(addBlk));
     ok('★ 4단계 함수가 모두 있다',
       ['openSheetImport', '_siPreview', '_siRun', '_siRevert', '_siClose'].every(f => fh.indexOf('function ' + f) >= 0));
     ok('★ 팝업은 body 직속', /id='siPop'[\s\S]{0,200}document\.body\.appendChild/.test(fh) ||
