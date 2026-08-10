@@ -90,6 +90,10 @@ const R = (startDate, n, tab = 'T1') => ({ sheetId: 'S1', tabName: tab, startDat
   t('오늘 판정은 campaignState.kstTodayStr 재사용(날짜 규칙 사본 금지)', /kstTodayStr/.test(SVC));
   t('쓰기 쿼리 0 · 시트 무접촉', !/\b(INSERT|UPDATE|DELETE)\b/i.test(SVC) && !/sheets|readSheet|writeSheet/i.test(SVC));
   t('날짜 값별로 접어서 받는다(900행 작업에서도 전송량 일정)', /GROUP BY 1, 2, 3/.test(SVC));
+  // ★ 스텁은 SQL 을 해석하지 않는다 → WHERE 절은 **쿼리문으로** 고정한다.
+  //   구매일자가 빈 행까지 끌어오면 날짜 해석 대상이 통째로 늘어 오탐·전송량이 함께 커진다.
+  t("★ 구매일자가 빈 행은 애초에 안 가져온다(COALESCE(start_date,'') <> '')",
+    /WHERE COALESCE\(ri\.start_date, ''\) <> ''/.test(SVC));
 
   /* ══ 3) 두 소비처가 같은 함수를 쓴다 ═════════════════════════════════════ */
   console.log('\n3) 카드 ↔ 툴바 동기화(같은 함수)');
@@ -100,9 +104,13 @@ const R = (startDate, n, tab = 'T1') => ({ sheetId: 'S1', tabName: tab, startDat
   t('★ 카드 집계 실패는 목록을 죽이지 않고 null 로 폴백', /표 기준 집계 실패/.test(ROUTES));
   t('★ 연결 탭이 없는 공고는 null(0 으로 꾸미지 않는다)',
     /_filled && r\.linked_sheet_id && r\.linked_tab_name/.test(ROUTES));
-  t('툴바 응답에 sheetFilled 가 실린다', /sheetFilled/.test(TB));
+  // ★★ `/sheetFilled/` 만 보면 안 된다 — base 객체 리터럴의 `sheetFilled: null` 이 대신 통과시킨다.
+  //   **값을 채우는 호출**을 지목한다(변이시험이 실제로 뚫었다).
+  const _tbCall = TB.indexOf('base.sheetFilled = await todayFilledForTab');
+  t('툴바 응답에 sheetFilled 를 실제로 채운다', _tbCall >= 0);
+  // ★★ 그리고 `-1 < n` 은 언제나 참이다 — 존재 확인을 먼저 하지 않으면 순서 단언이 공짜로 통과한다.
   t('★ 공고를 못 찾아도(no_campaign) 표 기준 값은 구한다(사실이므로)',
-    TB.indexOf('base.sheetFilled = await todayFilledForTab') < TB.indexOf("reason: rows.length ? 'no_live_campaign'"));
+    _tbCall >= 0 && _tbCall < TB.indexOf("reason: rows.length ? 'no_live_campaign'"));
 
   /* ══ 4) 화면 규칙 ════════════════════════════════════════════════════════ */
   console.log('\n4) 화면 규칙');
