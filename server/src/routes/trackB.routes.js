@@ -2395,6 +2395,32 @@ router.post('/worktable/retire-rows', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+/* 블로거 사전등록(M5-2) — 공고 밖에서 섭외한 블로거를 그 작업의 표에 한 줄로 넣는다.
+   ★ 게이트 = `_ensureEditScope`(master/admin 전체 · staff 담당 탭 · 광고주 차단) — 그리드 셀 편집과 같은 범위.
+     명단 한 줄 추가는 정원·총량을 바꾸지 않는다(정원 조작은 adminOrMaster 유지).
+   ★ 검증 실패는 400대로 매핑 — errorHandler 500 마스킹이면 담당자가 무엇을 고칠지 모른다. */
+router.post('/worktable/add-blogger', authMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || ''), tabName = String(b.tabName || '');
+    const scope = await _ensureEditScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code).json({ ok: false, error: scope.error });
+    const { registerBlogger, BlogRegisterError } = require('../services/blogRegister.service');
+    try {
+      res.json(await registerBlogger({
+        sheetId, tabName, name: b.name, phone: b.phone, blogUrl: b.blogUrl,
+        dryRun: b.dryRun === true, by: _by(req),
+      }));
+    } catch (e) {
+      if (e instanceof BlogRegisterError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(503).json({ ok: false, code: 'not_ready', error: '마이그레이션 적용 대기 중입니다(101).' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { saveTemplate } = require('../services/worktable.service');

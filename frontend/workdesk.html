@@ -1821,6 +1821,9 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-wrt tbody tr{cursor:pointer}
 .wbl-wrt tbody tr:hover{background:var(--hover,#f8fafc)}
 .wbl-wrt tbody tr.on{background:#eff6ff}
+/* ＋ 블로거 추가 입력칸(M5-2) — box-sizing 을 호스트 리셋에 기대지 않는다 */
+.wbl-brl{display:block;margin-top:10px;font-size:12px;font-weight:700;color:var(--t2,#475569)}
+.wbl-bri{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:9px 10px;border:1.5px solid var(--border,#e5e7eb);border-radius:8px;font-size:13px;font-family:inherit}
 /* 작업보드 본문 헤더의 마감 표시는 전폭 띠(.wbl-finbar)를 폐기하고 제목 행 조각(.tp3fin)으로 옮겼다 —
    시안 B(docs/design-workboard-top-3section.html · 사용자 확정). 상태 칩(.wbl-s)·버튼(.wbl-b)은 그대로 쓴다. */
 
@@ -3107,6 +3110,75 @@ async function wrRun(){
     if (idx >= 0) selTab(idx);
   } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
 }
+/* ── ＋ 블로거 추가 (블로그체험단 M5-2) ────────────────────────────────────────
+   왜: 블로그체험단은 공고 밖(카톡·직접 섭외)으로 데려오는 블로거가 있는데, 그 사람은
+   홀드를 잡지 않으므로 명단에 들어올 길이 없었다. 표를 눈으로 채워도 **연락처가 없으면**
+   그 블로거가 자기 참여 내역·리뷰 제출 화면을 영영 못 찾는다.
+   ★ 서버가 최종 판정(무시트 · 블로그 종류 · 넣을 칸 존재 · 중복) — 화면은 재판정하지 않고
+     사유를 **그대로** 보여준다(화면은 초록인데 서버가 거부하는 상태가 생기지 않게).
+   ★ 종류 힌트는 탭 값(`workKind`)뿐이라 **'review' 로 명시된 작업만 숨긴다**(빈 값 = 미지정 =
+     공고가 블로그일 수 있다 → 열어 두고 서버가 판정). */
+let _BR = null;
+function _brCanAdd(){
+  const t = STATE.cur;
+  if (!t || t.sheetless !== true) return false;                 // 시트 기반은 서버가 거부한다(막다른 길 금지)
+  if (String(t.workKind || '') === 'review') return false;      // 리뷰체험단으로 **명시된** 작업만 숨김
+  return STATE.role === 'master' || STATE.role === 'admin' || STATE.role === 'staff';
+}
+function closeBloggerModal(){ const o = document.getElementById('brOv'); if (o) o.remove(); _BR = null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if (!window._brKeyBound) {
+  window._brKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('brOv')) closeBloggerModal(); });
+}
+function openBloggerModal(){
+  if (!_brCanAdd()) return;
+  const t = STATE.cur;
+  _BR = { sheetId: t.sheetId, tabName: t.tabName, busy: false, err: null, done: null };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'brOv';
+  ov.innerHTML = '<div class="wbl-dlg"><div class="wbl-dh">＋ 블로거 추가</div>' +
+    '<div class="wbl-db" id="brBody"></div>' +
+    '<div class="wbl-df"><button class="wbl-b" onclick="closeBloggerModal()">닫기</button>' +
+    '<button class="wbl-b dark" id="brGo" onclick="brSubmit()">표에 추가</button></div></div>';
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(입력한 값이 실수로 날아가지 않게)
+  _brRender();
+  setTimeout(() => { const i = document.getElementById('brName'); if (i) i.focus(); }, 50);
+}
+function _brRender(){
+  const b = document.getElementById('brBody'); if (!b || !_BR) return;
+  const v = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const keep = { n: v('brName'), p: v('brPhone'), u: v('brUrl') };   // 재렌더로 입력값을 잃지 않게
+  b.innerHTML = '<b>' + esc(_BR.tabName) + '</b>' +
+    '<div class="wbl-facts">공고 밖에서 섭외한 블로거를 이 작업의 표에 <b>한 줄</b>로 넣습니다. ' +
+    '구매양식(주소·계좌·결제금액)은 <b>블로거가 직접</b> 제출합니다 — 여기서는 명단과 블로그 주소까지만 등록합니다.</div>' +
+    '<label class="wbl-brl">이름<input id="brName" class="wbl-bri" type="text" placeholder="홍길동"></label>' +
+    '<label class="wbl-brl">연락처<input id="brPhone" class="wbl-bri" type="tel" inputmode="numeric" placeholder="01012345678"></label>' +
+    '<label class="wbl-brl">블로그 주소<input id="brUrl" class="wbl-bri" type="url" inputmode="url" placeholder="https://blog.naver.com/아이디"></label>' +
+    '<div class="wbl-facts">연락처는 <b>필수</b>입니다 — 없으면 그 블로거가 자기 참여 내역·리뷰 제출 화면을 찾을 수 없습니다.</div>' +
+    (_BR.err ? '<div class="wbl-warn">' + esc(_BR.err) + '</div>' : '') +
+    (_BR.done ? '<div class="wbl-facts"><b>' + _BR.done + '번 줄</b>로 추가했습니다.</div>' : '');
+  const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+  set('brName', keep.n); set('brPhone', keep.p); set('brUrl', keep.u);
+  const go = document.getElementById('brGo'); if (go) go.disabled = !!_BR.busy;
+}
+async function brSubmit(){
+  if (!_BR || _BR.busy) return;
+  const g = id => String((document.getElementById(id) || {}).value || '').trim();
+  const name = g('brName'), phone = g('brPhone'), blogUrl = g('brUrl');
+  if (!name) { _BR.err = '이름을 입력해주세요.'; return _brRender(); }
+  if (String(phone).replace(/\D/g, '').length < 8) { _BR.err = '연락처를 정확히 입력해주세요.'; return _brRender(); }
+  if (!blogUrl) { _BR.err = '블로그 주소를 입력해주세요.'; return _brRender(); }
+  _BR.busy = true; _BR.err = null; _brRender();
+  try {
+    const j = await api('/api/trackb/worktable/add-blogger', { method: 'POST', body: JSON.stringify({
+      sheetId: _BR.sheetId, tabName: _BR.tabName, name, phone, blogUrl }) });
+    if (!j || j.ok === false) { _BR.busy = false; _BR.err = (j && (j.error || j.message)) || '추가 실패'; return _brRender(); }
+    const idx = STATE.tabs.indexOf(STATE.cur);
+    closeBloggerModal();
+    toast(name + ' 님을 ' + j.seq + '번 줄에 추가했습니다');
+    if (idx >= 0) selTab(idx);                                   // 표·검색 명단 갱신
+  } catch (e) { _BR.busy = false; _BR.err = '추가 실패: ' + (e.message || ''); _brRender(); }
+}
 async function _finOpen(tab){
   if(!_finCanEdit()||!tab) return;
   const sheetId=tab.sheetId, tabName=tab.tabName;
@@ -3912,7 +3984,7 @@ function renderWorkdesk(wd){
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     <span class="sp" style="flex:1"></span>
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}</span></span>`:''}</div>
+    ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}

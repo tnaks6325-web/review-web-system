@@ -350,6 +350,22 @@ function optionWriteColumns(headers) {
   return out;
 }
 
+/**
+ * ★★ "매퍼가 실제로 블로그 주소를 기입하는 열" — 옵션 칸과 **같은 기법**으로 매퍼에서 파생한다(101/M5-2).
+ *   헤더 문자열로 따로 찾으면(`includes('블로그')` 사본) **쓰는 칸 ≠ 보여주는(넣는) 칸** 으로 갈린다 —
+ *   관리자 사전등록이 매퍼가 안 쓰는 칸에 주소를 넣어 리뷰어 제출 때 다른 칸이 채워지는 사고.
+ *   ★ 센티널에 공백·NUL 금지(매퍼가 trim, NUL은 git이 바이너리 취급 — 실측으로 밟은 함정).
+ */
+const _BLOG_SENTINEL = '__BLOGURL_SENTINEL__';
+function blogUrlWriteColumns(headers) {
+  const n = (headers || []).length;
+  if (!n) return [];
+  const mapped = mapOrderToSheetRow(headers, { blogUrl: _BLOG_SENTINEL });
+  const out = [];
+  mapped.forEach((v, i) => { if (v === _BLOG_SENTINEL) out.push(i); });
+  return out;
+}
+
 /** "'탭'!C12" → {col:2(0-based), row:12}. 실패 시 {col:-1,row:-1}. */
 function _colIdxFromRange(range) {
   const m = /!([A-Z]+)(\d+)$/.exec(String(range || ''));
@@ -1748,6 +1764,7 @@ module.exports = {
   optionColIndexes,
   existingOptionKeyAt,
   optionWriteColumns,
+  blogUrlWriteColumns,
   filterOptionWritesBlankOnly,
   _colIdxFromRange,
   buildBatchUpdateData,
