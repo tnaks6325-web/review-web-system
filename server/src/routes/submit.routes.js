@@ -29,6 +29,7 @@ const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 const { pickMemoColumnIndex } = require('../utils/memoColumn');
 const { workKindForTab } = require('../services/workKindContext.service');
 const { isBlogKind } = require('../utils/workKind');
+const { isPostUrl, POST_URL_HINT } = require('../utils/blogPostUrl');
 
 // ═══════════════════════════════════════════════════════════
 // 한국 실명 판별 유틸리티
@@ -474,6 +475,15 @@ router.post('/review', async (req, res, next) => {
     let _isBlog = false;
     try { _isBlog = isBlogKind(await workKindForTab({ sheetId, tabName })); } catch (_) { _isBlog = false; }
 
+    /* ★★ 블로그체험단의 결과물은 포스팅URL 하나다(사용자 확정: "URL 제출 = 리뷰제출 완료").
+       그 값이 곧 제출물이므로 **서버가 최종 방어**한다 — 화면만 막으면 낡은 화면·직접 호출로
+       결과물 없는 제출이 완료로 찍히고, 그 행은 리뷰어에겐 "제출완료"인데 실제로는 아무것도 없다.
+       ★ 리뷰체험단(기본·판정 불가 포함)은 memo 가 **종전대로 선택** — 여기서 필수화하면
+         기존 제출이 전부 막힌다(무회귀 선). 판정은 `utils/blogPostUrl` 단일 출처. */
+    if (_isBlog && !isPostUrl(memo)) {
+      return res.json({ error: POST_URL_HINT, code: 'post_url_required' });
+    }
+
     // ── Step 1: 완료 판정 + DB 업데이트 ──
     //   다중 캡처 슬롯 탭(예: 리뷰+현금영수증)은 "필요 슬롯 전부 제출"되어야 완료.
     //   업로드(/api/image/review-upload)가 submitReview보다 먼저 실행되어 원장
@@ -505,7 +515,11 @@ router.post('/review', async (req, res, next) => {
       const _effSlots = effectiveCaptureSlots(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type, _rt);
       const isMultiSlot = Array.isArray(_effSlots) && _effSlots.length > 1;
 
-      if (isMultiSlot) {
+      /* ★★ 블로그체험단은 슬롯 대조를 하지 않는다 — 완료 조건이 위에서 검증한 포스팅URL 이다.
+         현영을 겸한 blog 탭은 화면 슬롯이 2개가 되는데(리뷰+현금영수증), 그대로 두면
+         `required=['review']` 를 원장에서 못 찾아 **영영 미완료**가 된다(블로그는 리뷰 캡처가 없다).
+         ★ 이 완화는 blog 탭에만 — 리뷰체험단의 "필수 슬롯 ⊆ 제출 슬롯" 대조는 그대로다. */
+      if (isMultiSlot && !_isBlog) {
         // 원장에서 이 행의 제출된 distinct 슬롯 조회
         const { rows: slotRows } = await pool.query(
           `SELECT DISTINCT slot_key FROM review_submissions

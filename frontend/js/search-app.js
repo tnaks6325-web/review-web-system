@@ -2043,6 +2043,47 @@ function _buildInfoFallback(item) {
 }
 
 /** STEP2: 다건 이미지 슬롯 동적 생성 */
+/* ═══ 블로그체험단(099 · M4-2) — 결과물은 포스팅URL 하나 ═══
+   사용자 확정: "포스팅URL 제출 = 리뷰제출 완료" · 사진은 선택.
+   ★ 판정은 서버가 실어 준 `item.workKind` 하나만 본다 — 탭명·상품명으로 추측하지 않는다
+     (추측하면 리뷰체험단이 블로그로 오인돼 사진 없이 제출이 완료로 찍힌다).
+   ★ 필드가 없으면(구버전 백엔드) false = 종전 동작 그대로. */
+const _BLOG_POST_URL_HINT = '포스팅URL을 입력해주세요 (http:// 또는 https:// 로 시작하는 주소)';
+const _BLOG_MEMO_PLACEHOLDER = '포스팅URL (필수) — https:// 로 시작하는 주소';
+
+function _isBlogItem(item) { return !!(item && item.workKind === 'blog'); }
+
+/* ★ 서버 `utils/blogPostUrl.isPostUrl` 의 최소 사본 — 입력 즉시 안내하려면 화면에도 규칙이 필요하다.
+   **최종 판정은 언제나 서버**이고, 회귀가드가 두 구현의 일치를 고정한다(workManager 사본 규율). */
+function _isPostUrl(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return false;
+  if (/[\s"'<>]/.test(t)) return false;
+  if (!/^https?:\/\//i.test(t)) return false;
+  const host = t.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
+  return host.includes('.') && host.length > 3;
+}
+
+/* memo 입력칸을 그 작업 종류에 맞게 바꾼다 — 단건·다건·슬롯 **세 렌더 지점이 같은 함수**를 쓴다.
+   사본을 두면 한쪽만 "비고" 문구로 남아 블로거가 무엇을 넣어야 하는지 모른 채 제출한다. */
+function _applyBlogMemoUi(el, item) {
+  if (!el) return;
+  if (el.dataset.memoPh == null) el.dataset.memoPh = el.placeholder || '';
+  const blog = _isBlogItem(item);
+  const hintId = el.id + '_blogHint';
+  const old = document.getElementById(hintId);
+  if (old) old.remove();
+  el.placeholder = blog ? _BLOG_MEMO_PLACEHOLDER : el.dataset.memoPh;
+  if (!blog) { el.removeAttribute('inputmode'); return; }   // 리뷰체험단은 종전 문구 그대로
+  el.setAttribute('inputmode', 'url');
+  if (!el.parentNode) return;
+  const h = document.createElement('div');
+  h.id = hintId;
+  h.style.cssText = 'font-size:.74rem;color:#1D4ED8;margin:6px 2px 0;line-height:1.5';
+  h.textContent = '📝 블로그체험단이에요 — 포스팅URL만 넣으면 제출이 완료됩니다(사진은 선택).';
+  el.parentNode.insertBefore(h, el.nextSibling);
+}
+
 function _renderMultiImageSlots(items) {
   const step2Pane = document.getElementById("step2");
   const paneCard  = step2Pane.querySelector(".pane-card");
@@ -2070,6 +2111,8 @@ function _renderMultiImageSlots(items) {
     if (singleDrop) singleDrop.style.display = "";
     if (singleMemo) singleMemo.style.display = "";
     if (progressWrap) progressWrap.classList.remove("show");
+    // ★ blog 탭이면 비고 칸을 포스팅URL 전용으로(리뷰체험단은 문구 불변 = 무회귀)
+    _applyBlogMemoUi(document.getElementById("memoTxt"), items[0]);
     return;
   }
 
@@ -2110,6 +2153,8 @@ function _renderMultiImageSlots(items) {
       <textarea class="mr-slot-memo" id="mrMemo_${idx}" rows="1"
                 placeholder="비고 - 블로그체험단인 경우 포스팅URL (선택)" style="margin-top:8px"></textarea>`;
     slotsWrap.appendChild(slot);
+    // ★ 다건은 행마다 작업이 다를 수 있다 — 그 행의 종류로 각각 판정한다(일괄 적용 금지)
+    _applyBlogMemoUi(slot.querySelector(`#mrMemo_${idx}`), item);
   });
 
   // step-nav 앞에 삽입
@@ -2180,6 +2225,7 @@ function _renderCaptureSlots(item, slots, paneCard) {
   memoEl.placeholder = "비고 - 블로그체험단인 경우 포스팅URL (선택)";
   memoEl.style.marginTop = "4px";
   wrap.appendChild(memoEl);
+  _applyBlogMemoUi(memoEl, item);
 
   const stepNav = paneCard.querySelector(".step-nav");
   paneCard.insertBefore(wrap, stepNav);
@@ -2883,7 +2929,16 @@ async function _submitReviewSlots(item) {
 
   // 이번에 업로드할 슬롯 = 파일이 첨부된 슬롯
   const slotsToUpload = slots.filter(s => (S.filesBySlot[s.key] || []).length > 0);
-  if (slotsToUpload.length === 0) {
+
+  /* ★★ 블로그체험단(099)은 결과물이 포스팅URL 이라 캡처 0장으로도 제출된다(사용자 확정).
+     현영을 겸한 blog 탭이 슬롯 모드로 뜨는데, 여기서 막으면 **제출할 방법 자체가 없다**.
+     ★ 대신 URL 은 그 자리에서 검증한다(서버 `/submit/review` 가 최종 방어). */
+  const _blogSlot = _isBlogItem(item);
+  if (_blogSlot && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
+    showToast(_BLOG_POST_URL_HINT, "warning");
+    return;
+  }
+  if (slotsToUpload.length === 0 && !_blogSlot) {
     showToast("제출할 캡처 이미지를 1장 이상 첨부해주세요.", "warning");
     return;
   }
@@ -2991,7 +3046,9 @@ async function _submitReviewSlots(item) {
       }
     }
 
-    if (uploadErrors.length === slotsToUpload.length) {
+    // ★ `slotsToUpload` 가 0건(blog 의 URL-only 제출)이면 0===0 이 참이 되어
+    //   **아무 오류도 없는데 "업로드 실패"로 돌아간다** — 올린 게 있을 때만 판정한다.
+    if (slotsToUpload.length > 0 && uploadErrors.length === slotsToUpload.length) {
       hideLoading();
       showToast("업로드 실패: " + uploadErrors.join(" / "), "error");
       return;
@@ -3088,16 +3145,34 @@ async function submitReview() {
 
   const isMulti = items.length > 1;
 
-  // ── 파일 유효성 검사 ──
+  /* ── 파일 유효성 검사 ──
+     ★★ 블로그체험단(099)은 **결과물이 포스팅URL** 이라 사진 0장으로도 제출된다(사용자 확정).
+       대신 URL 이 비었거나 형식이 아니면 그 자리에서 막는다 — 서버가 최종 방어하지만,
+       거기까지 갔다 돌아오면 리뷰어는 "왜 실패했는지"를 토스트 한 줄로만 알게 된다.
+     ★ 판정은 행마다(다건은 서로 다른 작업일 수 있다). 리뷰체험단 규칙은 종전 그대로. */
   if (isMulti) {
-    // 다건: 각 슬롯별로 1장 이상
-    const emptySlots = items.map((_, idx) => (S.filesByIdx[idx] || []).length === 0 ? idx + 1 : null).filter(n => n !== null);
-    if (emptySlots.length === items.length) {
+    const badUrl = [];
+    const emptySlots = [];
+    items.forEach((it, idx) => {
+      if (_isBlogItem(it)) {
+        const m = document.getElementById("mrMemo_" + idx)?.value.trim() || "";
+        if (!_isPostUrl(m)) badUrl.push(idx + 1);
+        return;                                   // 사진은 선택 — 빈 슬롯으로 세지 않는다
+      }
+      if ((S.filesByIdx[idx] || []).length === 0) emptySlots.push(idx + 1);
+    });
+    if (badUrl.length) {
+      showToast(`${badUrl.join(", ")}번: ${_BLOG_POST_URL_HINT}`, "warning"); return;
+    }
+    if (emptySlots.length && emptySlots.length === items.length) {
       showToast("각 리뷰마다 이미지를 1장 이상 첨부해주세요.", "warning"); return;
     }
     if (emptySlots.length > 0) {
       showToast(`${emptySlots.length}개 항목에 이미지가 없습니다. (${emptySlots.join(", ")}번)`, "warning"); return;
     }
+  } else if (_isBlogItem(items[0])) {
+    const m = document.getElementById("memoTxt")?.value.trim() || "";
+    if (!_isPostUrl(m)) { showToast(_BLOG_POST_URL_HINT, "warning"); return; }
   } else {
     if (S.files.length === 0) { showToast("이미지를 1장 이상 첨부해주세요.", "warning"); return; }
   }
@@ -3131,66 +3206,75 @@ async function submitReview() {
       }
 
       try {
-        // ★ 파일 크기 검사 (이미 b64로 저장된 객체 기준)
-        const totalBytes = files.reduce((s, fo) => s + (fo.size || 0), 0);
-        if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
-          throw new Error(`이미지 총 용량이 ${MAX_TOTAL_MB}MB를 초과합니다.`);
-        }
-
-        // ★ 이미 선택 시점에 Base64 변환 완료 → 별도 변환 불필요
-        const fileData = files.map(fo => fo.b64);
-        if (fileData.some(b => !b)) {
-          throw new Error("이미지 데이터가 없습니다. 이미지를 다시 선택해주세요.");
-        }
-
-        showLoading(isMulti ? `(${idx+1}/${items.length}) 업로드 중...` : "업로드 중... (잠시 기다려주세요)");
-
         // ★ 파일명에 사용할 이름: 수취인명 우선, 없으면 reviewer_name fallback
+        //   (업로드를 건너뛰는 blog 건도 Step 2 제출 기록에 쓴다 → 블록 밖에 둔다)
         const reviewerName = item.recipientName || item.displayName || "이름없음";
-        const { options: rowOpts } = extractProductOption(item.row || {});
-        const optionFolderName = rowOpts.map(o => o.value).filter(Boolean).join(" ").trim();
 
-        // ── Step 1: 이미지를 구글 드라이브에 업로드 ──
-        // ★ 모바일 네트워크에서 Base64 이미지 업로드는 시간이 오래 걸림 → 타임아웃 180초
-        const uploadResult = await gasPostUpload({
-          action:           "uploadReviewImage",
-          sheetId:          item.sheetId,
-          tabName:          item.tabName,
-          gid:              item.gid,
-          rowIndex:         item.rowIndex,
-          reviewerName,
-          submitCol:        item.submitCol,
-          campaignName:     item.campaignName,
-          optionFolderName,
-          memo,
-          files: fileData.map((b64, fi) => ({
-            name:     reviewerName + "_" + (fi + 1),
-            mimeType: files[fi].type || "image/jpeg",
-            data:     b64,
-          }))
-        }, 180000);
+        /* ★★ 블로그체험단은 사진 없이 제출될 수 있다 — 업로드 호출 자체를 건너뛴다.
+           빈 files 로 gasPostUpload 를 부르면 Drive 에 빈 폴더·빈 요청이 생기고,
+           `_rtStayed` 판정(라우팅 결과 확인)이 "남은 파일 0"으로 읽혀 정상 제출을 막는다. */
+        if (files.length === 0) {
+          showLoading(isMulti ? `(${idx+1}/${items.length}) 제출 중...` : "제출 중...");
+        } else {
+          // ★ 파일 크기 검사 (이미 b64로 저장된 객체 기준)
+          const totalBytes = files.reduce((s, fo) => s + (fo.size || 0), 0);
+          if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
+            throw new Error(`이미지 총 용량이 ${MAX_TOTAL_MB}MB를 초과합니다.`);
+          }
 
-        if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
-          throw new Error(uploadResult?.error || "이미지 업로드 실패");
-        }
+          // ★ 이미 선택 시점에 Base64 변환 완료 → 별도 변환 불필요
+          const fileData = files.map(fo => fo.b64);
+          if (fileData.some(b => !b)) {
+            throw new Error("이미지 데이터가 없습니다. 이미지를 다시 선택해주세요.");
+          }
 
-        // ── 자동 분류(파일 라우팅) 결과 반영: 리뷰 칸에 남은 파일이 없으면 제출을 기록하지 않는다 ──
-        //   (전부 다른 폴더로 이동/중복 반려됐는데 제출 완료로 찍히면 "리뷰 캡처 0장에 완료"가 된다)
-        const _rtFiles = uploadResult.files || [];
-        const _rtStayed = _rtFiles.some(r => r && r.fileId && !r.routed);
-        if (!_rtStayed && _rtFiles.length) {
-          const _rj = _rtFiles.find(r => r && r.rejected);
-          const _mv = _rtFiles.find(r => r && r.routed);
-          throw new Error(_rj ? (_rj.message || "이미 제출된 파일과 같아 등록되지 않았어요.")
-            : _mv ? ((_mv.routed && _mv.routed.message) || "첨부한 이미지가 리뷰 캡처가 아닌 것으로 확인되어 옮겨졌어요. 리뷰 캡처를 다시 첨부해주세요.")
-            : "이미지 업로드 실패");
+          showLoading(isMulti ? `(${idx+1}/${items.length}) 업로드 중...` : "업로드 중... (잠시 기다려주세요)");
+
+          const { options: rowOpts } = extractProductOption(item.row || {});
+          const optionFolderName = rowOpts.map(o => o.value).filter(Boolean).join(" ").trim();
+
+          // ── Step 1: 이미지를 구글 드라이브에 업로드 ──
+          // ★ 모바일 네트워크에서 Base64 이미지 업로드는 시간이 오래 걸림 → 타임아웃 180초
+          const uploadResult = await gasPostUpload({
+            action:           "uploadReviewImage",
+            sheetId:          item.sheetId,
+            tabName:          item.tabName,
+            gid:              item.gid,
+            rowIndex:         item.rowIndex,
+            reviewerName,
+            submitCol:        item.submitCol,
+            campaignName:     item.campaignName,
+            optionFolderName,
+            memo,
+            files: fileData.map((b64, fi) => ({
+              name:     reviewerName + "_" + (fi + 1),
+              mimeType: files[fi].type || "image/jpeg",
+              data:     b64,
+            }))
+          }, 180000);
+
+          if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
+            throw new Error(uploadResult?.error || "이미지 업로드 실패");
+          }
+
+          // ── 자동 분류(파일 라우팅) 결과 반영: 리뷰 칸에 남은 파일이 없으면 제출을 기록하지 않는다 ──
+          //   (전부 다른 폴더로 이동/중복 반려됐는데 제출 완료로 찍히면 "리뷰 캡처 0장에 완료"가 된다)
+          const _rtFiles = uploadResult.files || [];
+          const _rtStayed = _rtFiles.some(r => r && r.fileId && !r.routed);
+          if (!_rtStayed && _rtFiles.length) {
+            const _rj = _rtFiles.find(r => r && r.rejected);
+            const _mv = _rtFiles.find(r => r && r.routed);
+            throw new Error(_rj ? (_rj.message || "이미 제출된 파일과 같아 등록되지 않았어요.")
+              : _mv ? ((_mv.routed && _mv.routed.message) || "첨부한 이미지가 리뷰 캡처가 아닌 것으로 확인되어 옮겨졌어요. 리뷰 캡처를 다시 첨부해주세요.")
+              : "이미지 업로드 실패");
+          }
+          const _rtMoved = _rtFiles.filter(r => r && r.routed).length;
+          const _rtRejected = _rtFiles.filter(r => r && r.rejected).length;
+          if (_rtMoved || _rtRejected) {
+            showToast((_rtMoved ? `${_rtMoved}장은 다른 종류의 캡처로 확인되어 해당 폴더로 옮겼어요. ` : "")
+              + (_rtRejected ? `${_rtRejected}장은 이미 제출된 파일과 같아 등록되지 않았어요.` : ""), "warning", 6000);
         }
-        const _rtMoved = _rtFiles.filter(r => r && r.routed).length;
-        const _rtRejected = _rtFiles.filter(r => r && r.rejected).length;
-        if (_rtMoved || _rtRejected) {
-          showToast((_rtMoved ? `${_rtMoved}장은 다른 종류의 캡처로 확인되어 해당 폴더로 옮겼어요. ` : "")
-            + (_rtRejected ? `${_rtRejected}장은 이미 제출된 파일과 같아 등록되지 않았어요.` : ""), "warning", 6000);
-        }
+        }   // ── 업로드 블록 끝(files.length > 0) ──
 
         // ── Step 2: 시트에 제출 시점 기록 ──
         const now = new Date();

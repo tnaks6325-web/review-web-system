@@ -1529,11 +1529,13 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
     //   같은 samples 를 써야 AI 캐시가 공유된다(첨부 판정이 제출 때 히트).
     let expectedChannel = null;
     let reviewType = null;
+    let workKind = null;
     let samples = [];
     try {
       const exp = await inspect.loadTabExpectations({ sheetId, tabName });
       expectedChannel = exp.expectedChannel;
       reviewType = exp.reviewType;        // ★ 087: 구매확정 작업이면 1차 필터를 돌리지 않는다(안전핀)
+      workKind = exp.workKind;            // ★ 099: 블로그체험단도 같은 안전핀(결과물이 포스팅URL)
       // ★★ 조립은 submissionSamples 한 곳 — 업로드 검수·2차 검수와 같은 배열이어야
       //   캐시 지문(sampleSig)이 일치해 첨부 판정이 제출 때 히트한다(AI 콜 순증 0).
       samples = await inspect.submissionSamples({ expectedChannel, slotKey: 'review' });
@@ -1545,7 +1547,7 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
       classified = await classifySubmissionImage(base64, mimeType || 'image/jpeg', { samples });
     } catch (_) { classified = null; }   // AI 장애 = 무판정 통과
 
-    const v = inspect.precheckPolicy({ classified, expectedChannel, slotKey: slotKey || 'review', reviewType });
+    const v = inspect.precheckPolicy({ classified, expectedChannel, slotKey: slotKey || 'review', reviewType, workKind });
     res.json({
       ok: true,
       verdict: v.verdict,          // pass | warn | block | skip
