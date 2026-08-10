@@ -558,13 +558,16 @@ function withStubPool(handler, run) {
     assert.ok(capLine, '_PM_FIX_CARD_CAP 선언을 찾지 못했다');
     // vm 최상위 `const` 는 전역 객체에 안 붙는다 → 값을 밖에서도 읽도록 `var` 로만 바꿔 주입(값은 소스 그대로)
     const src = [capLine.replace(/^const/, 'var'), pick('_pmSheetOk'), pick('_pmSheetBtn'),
-      pick('_pmBuildFix'), pick('_pmFixBlock')].join('\n');
+      pick('_pmBuildFix'), pick('_pmAcctName'), pick('_pmAcctTail'), pick('_pmAcctLabel'),
+      pick('_pmAcctPlain'), pick('_pmFixBlock'), pick('_pmFixAcct')].join('\n');
     const sandbox = {
       esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
       _pmKey: it => it.sheetId + '||' + it.tabName + '||' + it.rowIndex,
       PAY_ACCT_ISSUES: ['bank_unknown', 'no_account', 'no_holder'],
       PAY_ISSUE_LABEL: { no_account: '계좌 미등록', bank_unknown: '은행명 인식불가', no_holder: '예금주 미등록' },
       STATE: {},
+      _dlg: null,
+      _pmDialog(o) { sandbox._dlg = o; },       // 팝업은 열지 않고 인자만 잡아 둔다
     };
     vm.createContext(sandbox);
     new vm.Script(src).runInContext(sandbox);
@@ -718,7 +721,8 @@ function withStubPool(handler, run) {
     // 각 카드가 넘기는 인덱스가 그 카드에 적힌 리뷰어를 가리켜야 한다
     for (const card of S._pmFixBlock().split('pmfixcard').slice(1)) {
       const m = card.match(/_pmFixAcct\((\d+)\)/); assert.ok(m, '계좌 버튼이 없다');
-      const nm = card.match(/계좌 — ([^<]+)</)[1];
+      // 보이는 라벨(💳 뒤)에서 읽는다 — title 속성에도 같은 문구가 있어 앞에서 자르면 태그를 문다
+      const nm = card.match(/💳 계좌 — ([^<]+)/)[1].trim();
       assert.strictEqual(f.accts[+m[1]].name, nm, '★ 버튼이 다른 리뷰어의 계좌 창을 연다');
     }
   });
@@ -731,6 +735,113 @@ function withStubPool(handler, run) {
     const html = S._pmFixBlock();
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, S._PM_FIX_CARD_CAP, '상한만큼만 카드로 편다');
     assert.ok(/외 3개 작업/.test(html), '남은 작업 수 고지가 없다');
+  });
+
+  /* ══════════════════════════════════════════════════════════
+     §7C 계좌 **명의** 구분 — 한 소유자가 본인 명의 + 타계정 명의로 참여하면
+       이름만으로는 어느 계좌를 고치라는 건지 알 수 없다(실사고 2026-08-10 정라희/정석진)
+     ══════════════════════════════════════════════════════════ */
+  console.log('\n§7C 계좌 명의 구분(본인 ↔ 타계정)');
+
+  const RID = '33333333-3333-3333-3333-333333333333';
+  /** 실사고 재현: 같은 소유자(정라희)가 본인 명의 1건 + 타계정(정석진) 명의 1건 */
+  const twoIdentities = () => [
+    mkItem({ rowIndex: 32, reviewerName: '정라희', phone8: '73052121', isSub: false,
+      accountName: '정라희', accountOwner: '정라희', bankName: '신한', bankAccount: '',
+      issues: ['no_account'], accountRef: { reviewerId: RID, subPhone8: null } }),
+    mkItem({ rowIndex: 275, reviewerName: '정라희', phone8: '53690101', isSub: true,
+      accountName: '정석진', accountOwner: '정라희', bankName: '토스뱅크', bankAccount: '',
+      issues: ['no_account'], accountRef: { reviewerId: RID, subPhone8: '53690101' } }),
+  ];
+
+  t('7C-a ★★ 본인 명의와 타계정 명의가 **별개 항목**으로 갈린다', () => {
+    const S = loadFixFns();
+    const f = S._pmBuildFix(twoIdentities());
+    assert.strictEqual(f.accts.length, 2, '두 명의가 한 항목으로 뭉치면 어느 계좌인지 알 수 없다');
+    // vm 배열은 프로토타입이 달라 deepStrictEqual 이 참조 비교에서 걸린다 — 값으로 본다
+    const names = [...f.accts].map(a => a.name).sort().join(',');
+    assert.strictEqual(names, '정라희,정석진', '명의 이름이 계좌 원장 값이어야 한다: ' + names);
+  });
+
+  t('7C-b ★ 명의 이름은 시트 이름 칸이 아니라 계좌 원장(accountName)을 쓴다', () => {
+    const S = loadFixFns();
+    const f = S._pmBuildFix(twoIdentities());
+    const sub = f.accts.find(a => a.isSub);
+    assert.strictEqual(sub.name, '정석진',
+      '시트 이름 칸(reviewerName=정라희)을 쓰면 타계정 카드가 소유자 이름으로 뜬다');
+    assert.strictEqual(sub.owner, '정라희', '소유자 이름이 있어야 "누구의 타계정"을 말할 수 있다');
+  });
+
+  t('7C-c ★ 카드 줄이 두 명의를 눈으로 구분시킨다(이름 + 연락처 뒤4 + 타계정 표기)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix(twoIdentities());
+    const html = S._pmFixBlock();
+    assert.ok(/정라희[\s\S]*?·2121/.test(html), '본인 명의 줄에 연락처 뒤4자리가 없다');
+    assert.ok(/정석진[\s\S]*?·0101/.test(html), '타계정 명의 줄에 연락처 뒤4자리가 없다');
+    assert.ok(/정라희의 타계정/.test(html), '"누구의 타계정"인지 카드가 말하지 않는다');
+    // 두 줄의 [보완] 버튼이 서로 다른 항목을 가리켜야 한다
+    const idxs = [...html.matchAll(/_pmFixAcct\((\d+)\)/g)].map(m => m[1]);
+    assert.strictEqual(new Set(idxs).size, 2, '두 명의가 같은 항목을 가리킨다: ' + idxs.join(','));
+  });
+
+  t('7C-d ★★ 팝업이 "누구 명의 계좌인가"를 맨 위에서 못박는다', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix(twoIdentities());
+    const i = S.STATE.pmFix.accts.findIndex(a => a.isSub);
+    S._pmFixAcct(i);
+    const d = S._dlg;
+    assert.ok(d, '팝업이 열리지 않았다');
+    assert.ok(/정석진/.test(d.title) && /정라희의 타계정/.test(d.title), '제목이 명의를 말하지 않는다: ' + d.title);
+    assert.ok(/pmwho/.test(d.body), '명의 확인 블록이 없다');
+    assert.ok(/정석진<\/b> 명의 계좌/.test(d.body), '본문이 명의를 못박지 않는다');
+    assert.ok(/·0101/.test(d.body), '연락처 뒤4자리가 없다(동명이인 구분 단서)');
+  });
+
+  t('7C-e ★ 같은 소유자의 다른 명의를 목록으로 보여주고 바로 건너뛴다(인덱스만 전달)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix(twoIdentities());
+    const self = S.STATE.pmFix.accts.findIndex(a => !a.isSub);
+    const other = S.STATE.pmFix.accts.findIndex(a => a.isSub);
+    S._pmFixAcct(self);
+    const d = S._dlg;
+    assert.ok(/같은 소유자의 다른 명의/.test(d.body), '형제 명의 안내가 없다');
+    assert.ok(new RegExp('_pmFixAcct\\(' + other + '\\)').test(d.body),
+      '다른 명의로 건너뛰는 버튼이 그 항목을 가리키지 않는다');
+    assert.ok(!/_pmFixAcct\('/.test(d.body), 'onclick 에 문자열을 보간했다(인덱스만 넘긴다)');
+  });
+
+  t('7C-f 명의가 하나뿐이면 형제 안내를 띄우지 않는다(없는 혼동을 만들지 않는다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([twoIdentities()[0]]);
+    S._pmFixAcct(0);
+    assert.ok(!/같은 소유자의 다른 명의/.test(S._dlg.body), '형제가 없는데 안내가 떴다');
+  });
+
+  t('7C-g 팝업이 그 명의가 걸린 작업을 말한다(어느 건인지 확인 근거)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix(twoIdentities());
+    S._pmFixAcct(0);
+    assert.ok(/작업: /.test(S._dlg.sub), '작업 목록이 없다: ' + S._dlg.sub);
+    assert.ok(/이 명의로 참여한/.test(S._dlg.sub), '"이 리뷰어" 가 아니라 "이 명의" 라고 말해야 한다');
+  });
+
+  t('7C-h ★ 명의 표기는 한 벌(_pmAcctLabel) — 카드·팝업이 사본을 두지 않는다', () => {
+    const blk = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmFixWork'));
+    const acct = HTML.slice(HTML.indexOf('function _pmFixAcct'), HTML.indexOf('/** 저장 성공 뒤 공통 마무리'));
+    assert.ok(/_pmAcctLabel\(/.test(blk), '카드 줄이 공용 표기 함수를 쓰지 않는다');
+    assert.ok(/_pmAcctPlain\(/.test(acct) && /_pmAcctName\(/.test(acct), '팝업이 공용 표기 함수를 쓰지 않는다');
+    for (const [n, s] of [['카드', blk], ['팝업', acct]]) {
+      assert.ok(!/esc\(a\.name\)/.test(s), n + ' 에 명의 표기 사본이 남아 있다(a.name 직접 렌더)');
+    }
+  });
+
+  t('7C-i ★ 서버가 계좌 명의·소유자 이름을 실어 준다(화면이 추측하지 않게)', () => {
+    const src = read('services/payment.service.js');
+    const load = src.slice(src.indexOf('async function _loadAccounts'), src.indexOf('async function _loadTabMeta'));
+    assert.ok(/AS "ownerName"/.test(load), '소유자 이름을 안 읽으면 "누구의 타계정"을 말할 수 없다');
+    assert.ok(/name: s\.name/.test(load) && /ownerName: s\.ownerName/.test(load), '타계정 맵에 명의·소유자 이름이 없다');
+    assert.ok(/name: r\.name/.test(load), '본계정 맵에 이름이 없다');
+    assert.ok(/accountName:/.test(src) && /accountOwner:/.test(src), '항목에 명의 필드가 실리지 않는다');
   });
 
   /* ══════════════════════════════════════════════════════════

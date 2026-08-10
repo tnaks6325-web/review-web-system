@@ -1498,6 +1498,14 @@
 .pmpick button{padding:7px 12px;font-size:12.5px;border:1px solid var(--line,#D8DDE5);border-radius:8px;background:var(--card,#fff);color:var(--t1,#1B1F24);cursor:pointer}
 .pmpick button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C;font-weight:750}
 .pmscope{font-size:12px;background:#E5F3EE;color:#0F6A52;border-radius:8px;padding:8px 11px;line-height:1.55}
+/* 계좌 명의 확인 블록 — "누구 명의 계좌인가"를 팝업 맨 위에서 못박는다 */
+.pmwho{background:#F3F6FB;border:1px solid #D9E3F2;border-radius:8px;padding:9px 11px;margin-bottom:11px}
+.pmwho .t{font-size:13.5px;color:var(--t1,#1B1F24)}
+.pmwho .d{font-size:11.5px;color:var(--t2,#5A6473);line-height:1.6;margin-top:3px}
+.pmtail{font-size:11.5px;color:var(--t3,#8B94A1);font-weight:600}
+.pmsib{margin:2px 4px 0 0;padding:2px 8px;font-size:11.5px;border:1px solid var(--line,#D8DDE5);
+  border-radius:999px;background:var(--card,#fff);color:var(--t1,#1B1F24);cursor:pointer}
+.pmsib:hover{border-color:#1B4F9C;color:#1B4F9C}
 .btn.sm{padding:3px 9px;font-size:11.5px}
 .btn.danger{color:#B3382E;border-color:#EAB6B0}
 
@@ -6072,10 +6080,20 @@ function _pmBuildFix(items){
       if(it.accountRef && it.accountRef.reviewerId){
         const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
         let a=accts.get(k);
-        if(!a) accts.set(k, a={ key:k, ref:it.accountRef, name:it.reviewerName||'', isSub:!!it.isSub,
+        /* ★★ 카드·팝업이 가리키는 것은 "리뷰어"가 아니라 **계좌 명의**다 —
+             한 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 이름만으로는
+             어느 계좌를 고치라는 건지 구분되지 않는다(실사고 2026-08-10 정라희/정석진).
+           ★ 명의 이름은 **계좌 원장 값**(`accountName`)을 쓴다 — 시트 이름 칸(`reviewerName`)은
+             탭마다 주문자/수취인 중 무엇이 잡혔는지 달라 명의로 신뢰할 수 없다(폴백으로만). */
+        if(!a) accts.set(k, a={ key:k, ref:it.accountRef,
+          name:it.accountName||it.reviewerName||'', owner:it.accountOwner||'',
+          phone8:it.phone8||'', isSub:!!it.isSub,
           bankName:it.bankName||'', bankAccount:it.bankAccount||'', accountHolder:it.accountHolder||'',
-          issues:[], rows:0 });
+          issues:[], rows:0, works:[] });
         a.rows++;
+        let aw=a.works.find(x=>x.key===w.key);
+        if(!aw) a.works.push(aw={ key:w.key, label:w.tabLabel, rows:0 });
+        aw.rows++;
         for(const x of iss) if(PAY_ACCT_ISSUES.includes(x) && a.issues.indexOf(x)<0) a.issues.push(x);
         let e=w.accts.find(x=>x.key===k);
         if(!e) w.accts.push(e={ key:k, rows:0 });
@@ -6089,12 +6107,20 @@ function _pmBuildFix(items){
   const byRows=(a,b)=>b.rows-a.rows;
   const acctList=[...accts.values()].sort(byRows);
   const acctIdx={}; acctList.forEach((a,i)=>{ acctIdx[a.key]=i; });
+  /* ★ 같은 소유자의 다른 명의를 서로 가리켜 준다 — "정라희 계좌를 고치라는데 어느 정라희?"
+       를 화면에서 끝내기 위한 유일한 단서(팝업이 목록으로 보여주고 바로 건너뛴다). */
+  const byOwner=new Map();
+  acctList.forEach((a,i)=>{ const o=(a.ref&&a.ref.reviewerId)||''; if(!byOwner.has(o)) byOwner.set(o,[]); byOwner.get(o).push(i); });
+  acctList.forEach((a,i)=>{
+    const sib=(byOwner.get((a.ref&&a.ref.reviewerId)||'')||[]).filter(x=>x!==i);
+    a.siblings = sib.map(x=>({ idx:x, name:acctList[x].name, phone8:acctList[x].phone8, isSub:acctList[x].isSub, rows:acctList[x].rows }));
+  });
   const workList=[...works.values()].sort(byRows);
   for(const w of workList){
     w.noReviewer=w._nr.size; w.noPrice=w._np.size; delete w._nr; delete w._np;
     w.accts = w.accts.map(e=>{
       const i=acctIdx[e.key], a=acctList[i]||null;
-      return a ? { key:e.key, idx:i, rows:e.rows, name:a.name, isSub:a.isSub } : null;
+      return a ? { key:e.key, idx:i, rows:e.rows, name:a.name, owner:a.owner, phone8:a.phone8, isSub:a.isSub } : null;
     }).filter(Boolean).sort(byRows);
   }
   return { works:workList, accts:acctList,
@@ -6143,14 +6169,34 @@ function _pmOpenSheet(i){
 
 const _PM_FIX_CARD_CAP = 8;   // 카드로 펼치는 작업 수 상한(나머지는 아래 표의 [보완]으로)
 
+/* ── 계좌 명의 표기 — 카드 줄·팝업 제목·형제 목록이 **같은 함수**를 쓴다 ──
+   ★ 사본을 두면 "카드는 정라희인데 팝업은 정석진" 처럼 화면마다 다른 명의를 말하게 된다.
+   ★ 뒤 4자리는 그 명의의 연락처 — 이름이 같아도(동명이인·본인/타계정) 구분되는 유일한 값. */
+function _pmAcctName(a){ return (a&&a.name)||'(이름 없음)'; }
+function _pmAcctTail(a){ const p=String((a&&a.phone8)||''); return p.length>=4?p.slice(-4):''; }
+/** 한 줄 표기: `정석진 ·0101  정라희의 타계정` / `정라희 ·2121` */
+function _pmAcctLabel(a){
+  const tail=_pmAcctTail(a);
+  let s=esc(_pmAcctName(a)) + (tail?` <span class="pmtail">·${esc(tail)}</span>`:'');
+  if(a&&a.isSub) s+=`<span class="pmauto">${a.owner?esc(a.owner)+'의 ':''}타계정</span>`;
+  return s;
+}
+/** 팝업 제목용 평문(마크업 없이) */
+function _pmAcctPlain(a){
+  const tail=_pmAcctTail(a);
+  let s=_pmAcctName(a) + (tail?' ·'+tail:'');
+  if(a&&a.isSub) s+= a.owner?` (${a.owner}의 타계정)`:' (타계정)';
+  return s;
+}
+
 function _pmFixBlock(){
   const f=STATE.pmFix||{works:[],accts:[],noReviewer:0,noPrice:0};
   if(!f.works.length) return '';
   const shown=f.works.slice(0, _PM_FIX_CARD_CAP);
   const rest=f.works.length-shown.length;
 
-  const line=(icon,label,n,btn,cls)=>`<div class="pmfixrow${cls?' '+cls:''}">
-    <span class="nm">${icon} ${label}</span><span class="n">${n}건</span>${btn||''}</div>`;
+  const line=(icon,label,n,btn,cls,title)=>`<div class="pmfixrow${cls?' '+cls:''}">
+    <span class="nm"${title?` title="${esc(title)}"`:''}>${icon} ${label}</span><span class="n">${n}건</span>${btn||''}</div>`;
 
   const cards=shown.map(w=>{
     const i=f.works.indexOf(w);
@@ -6158,9 +6204,10 @@ function _pmFixBlock(){
     const lines=[];
     if(w.needBank) lines.push(line('🏦','이체은행 미지정', w.bankRows, fixWork));
     if(w.needMemo) lines.push(line('🏷','통장표시 없음', w.memoRows, fixWork));
+    // ★ 줄이 좁아 말줄임되어도 **누구 명의인지**는 title 로 남는다(이름만으로 구분 안 되는 케이스)
     for(const a of w.accts) lines.push(line('💳',
-      `계좌 — ${esc(a.name)||'(이름 없음)'}${a.isSub?'<span class="pmauto">타계정</span>':''}`,
-      a.rows, `<button class="btn sm" onclick="_pmFixAcct(${a.idx})">보완</button>`));
+      `계좌 — ${_pmAcctLabel(a)}`,
+      a.rows, `<button class="btn sm" onclick="_pmFixAcct(${a.idx})">보완</button>`, '', '계좌 — '+_pmAcctPlain(a)));
     // ★ 화면에서 못 고치는 사유는 **버튼 대신 조치 문장**(눌러도 아무 일 없는 버튼 금지)
     if(w.noReviewer) lines.push(`<div class="pmfixrow info">
       <span class="nm">👤 리뷰어 미등록 ${w.noReviewer}건 — 등록리뷰어DB에서 먼저 등록해야 계좌를 지목할 수 있습니다</span></div>`);
@@ -6231,10 +6278,24 @@ function _pmPickBank(el){
 function _pmFixAcct(i){
   const a=(STATE.pmFix&&STATE.pmFix.accts||[])[i]; if(!a) return;
   const why=a.issues.map(x=>PAY_ISSUE_LABEL[x]||x).join(', ');
+  const tail=_pmAcctTail(a);
+  const works=(a.works||[]).slice(0,4).map(x=>`${esc(x.label)} ${x.rows}건`).join(' · ')
+    + ((a.works||[]).length>4?` 외 ${(a.works||[]).length-4}개 작업`:'');
+  /* ★★ "누구 명의 계좌인가"를 팝업 맨 위에서 못박는다 — 같은 소유자가 본인 명의와
+       타계정 명의로 여러 건 참여하면 이름만으로는 어느 계좌인지 알 수 없다(실사고).
+     ★ 같은 소유자의 다른 명의는 **목록으로 보여주고 바로 건너뛴다**(인덱스만 전달). */
+  const sib=(a.siblings||[]).map(s=>`<button type="button" class="pmsib" onclick="_pmFixAcct(${s.idx})">${_pmAcctLabel(s)} · ${s.rows}건</button>`).join('');
+  const who=`<div class="pmwho">
+    <div class="t"><b>${esc(_pmAcctName(a))}</b> 명의 계좌${tail?` <span class="pmtail">·${esc(tail)}</span>`:''}</div>
+    <div class="d">${a.isSub
+      ? `${a.owner?esc(a.owner)+' 님이 ':''}등록한 <b>타계정</b>입니다 — 본인 명의 계좌와 <b>별도</b>로 저장됩니다.`
+      : `<b>본인 명의</b> 계좌입니다 — 이 리뷰어의 타계정 건은 별도 항목으로 나옵니다.`}</div>
+    ${sib?`<div class="d">같은 소유자의 다른 명의: ${sib}</div>`:''}</div>`;
   _pmDialog({
-    title:`계좌 보완 — ${esc(a.name)||'(이름 없음)'}${a.isSub?' (타계정)':''}`,
-    sub:`${esc(why)} · 이 리뷰어의 <b>${a.rows}건</b>이 함께 처리됩니다.`,
+    title:`계좌 보완 — ${esc(_pmAcctPlain(a))}`,
+    sub:`${esc(why)} · 이 명의로 참여한 <b>${a.rows}건</b>이 함께 처리됩니다.${works?`<br>작업: ${works}`:''}`,
     body:`
+      ${who}
       <div class="pmf"><label>은행명</label>
         <input id="pmBankNameIn" value="${esc(a.bankName||'')}" placeholder="예) 국민은행 · 카카오뱅크">
         <div class="hint">이체 서식의 은행코드로 바뀌는 값이라 <b>정식 은행명</b>이어야 합니다. 인식 못 하면 저장 시 알려드립니다.</div></div>
@@ -6244,7 +6305,7 @@ function _pmFixAcct(i){
       <div class="pmf"><label>예금주</label>
         <input id="pmHolderIn" value="${esc(a.accountHolder||'')}" placeholder="예금주명"></div>
       <div class="pmscope">${a.isSub
-        ? '이 리뷰어의 <b>타계정 전용 계좌</b>로 저장됩니다(소유자 공통계좌는 그대로 둡니다).'
+        ? `<b>${esc(_pmAcctName(a))}</b> 명의(타계정) 전용 계좌로 저장됩니다 — 소유자 공통계좌는 그대로 둡니다.`
         : '등록리뷰어DB의 계좌 정보로 저장됩니다 — 비워 둔 칸은 <b>덮어쓰지 않습니다</b>.'}</div>`,
     okLabel:'저장',
     onOk: async ()=>{
