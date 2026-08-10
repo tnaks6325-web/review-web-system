@@ -1,0 +1,462 @@
+<meta charset="utf-8">
+<title>결정 사안 — 옵션별 유입링크 (D1~D6)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* 문서 규율: 외부 리소스 0(오프라인 열람) · 다크에서 색이 뒤집히지 않게 라이트 고정 */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#eef1f6; color:#1f2430; font-size:15px; line-height:1.7;
+    font-family:-apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif; }
+  .page { max-width:1060px; margin:0 auto; padding:24px 18px 170px; }
+
+  h1 { font-size:1.36rem; margin:0 0 6px; letter-spacing:-.6px; }
+  .lede { color:#5a6478; font-size:.86rem; margin:0 0 6px; }
+  .lede b { color:#1f2430; }
+  .meta { font-size:.72rem; color:#8a93a6; margin:0 0 16px; }
+
+  .callout { border-radius:10px; padding:11px 14px; font-size:.82rem; margin:11px 0; line-height:1.72; }
+  .callout.good { background:#ecfdf3; border:1px solid #b7ebcd; color:#14653a; }
+  .callout.info { background:#eef4ff; border:1px solid #cadcff; color:#1c3f86; }
+  .callout.warn { background:#fff7ed; border:1px solid #fcd9a8; color:#8a4b09; }
+  .callout b { color:inherit; }
+  code { background:#f2f5fa; border:1px solid #e2e8f2; border-radius:5px; padding:1px 5px;
+    font-size:.77rem; font-family:ui-monospace, Menlo, Consolas, monospace; color:#28405e; }
+
+  /* ── 진행 상태 ───────────────────────────── */
+  .prog { background:#fff; border:1px solid #dde3ee; border-radius:12px; padding:11px 14px; margin-bottom:14px;
+    display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .prog .dots { display:flex; gap:5px; }
+  .prog .dot { width:26px; height:26px; border-radius:8px; border:1.5px solid #d7dce6; background:#fff;
+    color:#94a0b3; font-size:.68rem; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .prog .dot.on { background:#17803d; border-color:#17803d; color:#fff; }
+  .prog .txt { font-size:.79rem; color:#4d5768; font-weight:700; }
+  .prog .sp { flex:1; }
+  .btn { border:1.5px solid #d7dce6; background:#fff; color:#2b3241; border-radius:9px;
+    padding:7px 13px; font-size:.76rem; font-weight:800; cursor:pointer; font-family:inherit; }
+  .btn:hover { border-color:#9fb2d4; }
+  .btn.pri { background:#2f6fed; border-color:#2f6fed; color:#fff; }
+  .btn.pri:hover { background:#255ed3; }
+  .btn:disabled { background:#f1f5f9; border-color:#e2e8f0; color:#b6bcc7; cursor:not-allowed; }
+
+  /* ── 결정 카드 ───────────────────────────── */
+  .dgroup { border:1.5px solid #e2c98f; background:#fffdf5; border-radius:13px; padding:15px 17px; margin:13px 0; }
+  .dgroup.done { border-color:#b7ebcd; background:#fbfffd; }
+  .dhead { display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; margin-bottom:3px; }
+  .dtag { background:#7a5406; color:#fff; font-size:.64rem; font-weight:800; border-radius:6px;
+    padding:2px 8px; letter-spacing:.4px; }
+  .dgroup.done .dtag { background:#17803d; }
+  .dgroup h3 { font-size:.94rem; margin:0; color:#7a5406; letter-spacing:-.2px; }
+  .dgroup.done h3 { color:#14653a; }
+  .dgroup h3 u { text-underline-offset:3px; }
+  p.q { font-size:.82rem; color:#5a4a20; margin:6px 0 4px; }
+  .dgroup.done p.q { color:#3f5c4c; }
+  .nowline { font-size:.75rem; color:#8a7a4e; margin:0 0 10px; }
+  .dgroup.done .nowline { color:#6b8577; }
+  .nowline b { color:#5a4a20; }
+
+  .dopts { display:grid; grid-template-columns:repeat(auto-fit, minmax(268px,1fr)); gap:9px; }
+  .dopt { background:#fff; border:1.5px solid #e6dcc2; border-radius:11px; padding:11px 13px; cursor:pointer;
+    transition:border-color .12s, box-shadow .12s, background .12s; display:flex; flex-direction:column; }
+  .dopt:hover { border-color:#c9a955; }
+  .dopt.on { border-color:#2f6fed; box-shadow:0 0 0 3px #dbe7ff; background:#f8fbff; }
+  .dopt .t { font-size:.82rem; font-weight:800; color:#1f2430; margin-bottom:4px;
+    display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .dopt .rec { background:#17803d; color:#fff; font-size:.6rem; font-weight:800; border-radius:5px; padding:1px 6px; }
+  .dopt .chk { margin-left:auto; color:#2f6fed; font-size:.78rem; font-weight:900; visibility:hidden; }
+  .dopt.on .chk { visibility:visible; }
+  .dopt .d { font-size:.75rem; color:#5a6478; line-height:1.66; flex:1; }
+  .dopt .d b { color:#1f2430; }
+  .imp { display:flex; gap:5px; flex-wrap:wrap; margin-top:8px; padding-top:7px; border-top:1px dashed #eee3cd; }
+  .dopt.on .imp { border-top-color:#d9e6ff; }
+  .chip { font-size:.65rem; font-weight:800; border-radius:999px; padding:2px 8px; border:1px solid transparent; }
+  .chip.scope { background:#f2f5fa; color:#4d5768; border-color:#e2e8f2; }
+  .chip.risk  { background:#fef2f2; color:#a52121; border-color:#f6c9c9; }
+  .chip.safe  { background:#ecfdf3; color:#14653a; border-color:#b7ebcd; }
+
+  .dpick { margin-top:10px; font-size:.77rem; color:#7a5406; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .dgroup.done .dpick { color:#14653a; }
+  .dpick .pickv { font-weight:800; }
+  .dpick .clr { border:0; background:transparent; color:#a6aebd; font-size:.72rem; font-weight:800;
+    cursor:pointer; font-family:inherit; text-decoration:underline; }
+
+  /* ── 요약 띠 ─────────────────────────────── */
+  .sum { position:fixed; left:0; right:0; bottom:0; background:#1f2430; color:#fff;
+    box-shadow:0 -8px 24px rgba(31,36,48,.22); z-index:5; }
+  .sumin { max-width:1060px; margin:0 auto; padding:11px 18px 13px; }
+  .sumhead { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:5px; }
+  .sumhead h3 { color:#fff; margin:0; font-size:.86rem; }
+  .sumhead .sp { flex:1; }
+  .sumhead .btn { background:#333a49; border-color:#454d5f; color:#e8ecf4; }
+  .sumhead .btn:hover { border-color:#6f7a92; }
+  .sumhead .btn.pri { background:#2f6fed; border-color:#2f6fed; color:#fff; }
+  .sumhead .btn:disabled { background:#2a3140; border-color:#39414f; color:#6b7487; }
+  .sumrows { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:2px 16px; }
+  .sumrow { font-size:.75rem; color:#cfd6e4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sumrow .k { color:#8fc7ff; font-weight:800; margin-right:5px; }
+  .sumrow .none { color:#7d879c; }
+  .sumnote { font-size:.68rem; color:#8a93a6; margin-top:6px; }
+
+  /* ── 복사 결과 ───────────────────────────── */
+  .copybox { display:none; margin-top:9px; }
+  .copybox.on { display:block; }
+  .copybox textarea { width:100%; height:132px; border-radius:9px; border:1px solid #454d5f; background:#151a24;
+    color:#dfe6f2; font-size:.72rem; padding:9px 11px; font-family:ui-monospace, Menlo, Consolas, monospace;
+    line-height:1.6; resize:vertical; }
+  .copymsg { font-size:.7rem; color:#8fc7ff; margin-top:4px; min-height:15px; }
+
+  .linkbar { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 0; }
+  .linkbar a { background:#2f6fed; color:#fff; text-decoration:none; border-radius:9px; padding:8px 14px;
+    font-size:.78rem; font-weight:800; }
+  .linkbar a.ghost { background:#fff; color:#2f6fed; border:1.5px solid #2f6fed; }
+
+  @media (max-width:640px) {
+    .dopts { grid-template-columns:1fr; }
+    /* 좁은 화면에서는 요약 6줄이 세로로 쌓여 띠가 화면을 다 먹는다 — 높이를 묶고 안에서 스크롤 */
+    .sumrows { grid-template-columns:1fr; max-height:96px; overflow-y:auto; }
+    .page { padding-bottom:250px; }
+  }
+</style>
+
+<div class="page">
+
+<h1>결정 사안 — 옵션별 유입링크 (D1~D6)</h1>
+<p class="lede">
+  옵션이 여러 개인 <b>링크유입</b> 작업에서 <b>옵션마다 다른 상품 URL</b>을 넣게 하는 기능입니다.
+  아래 <b>여섯 가지</b>만 골라 주시면 그 값으로 바로 구현에 들어갑니다.
+</p>
+<p class="meta">
+  결정 문서 v1.0 · 대상 = review-web-system + inadd-webapp · 2026-08-10 ·
+  각 항목에 <b>권장안</b>이 표시돼 있고, 카드를 누르면 맨 아래 띠에 모입니다(선택은 이 브라우저에 저장됩니다).
+</p>
+
+<div class="callout good">
+  <b>★ 이미 확정된 전제 (고르지 않으셔도 됩니다)</b><br>
+  <b>상품(메인) URL은 유입방식·옵션 유무와 무관하게 항상 필수</b>입니다 —
+  ① 어떤 상품인지 확인(채널 판정·썸네일 수집) ② 링크유입 + 옵션 없는 작업의 유입 링크 그 자체
+  ③ 옵션 URL이 빈 옵션의 폴백, 세 가지로 쓰이기 때문입니다.
+  그래서 가이드유입일 때 비활성되는 것은 <b>옵션별 유입 링크 칸뿐</b>입니다.
+</div>
+
+<div class="callout info">
+  📄 배경과 설계 근거는 <a href="prd-option-landing-url.html">구현계획 PRD</a>,
+  화면 모양은 <a href="design-option-landing-url.html">와이어프레임 시안</a>에서 실제로 눌러 보실 수 있습니다.
+  이 문서는 <b>고르는 일</b>만 합니다.
+</div>
+
+<div class="prog">
+  <div class="dots" id="dots"></div>
+  <div class="txt" id="progTxt">0 / 6 결정</div>
+  <span class="sp"></span>
+  <button class="btn" id="btnRec">✨ 권장안으로 전부 채우기</button>
+  <button class="btn" id="btnClear">선택 비우기</button>
+</div>
+
+<div id="cards"></div>
+
+<div class="linkbar">
+  <a href="prd-option-landing-url.html">구현계획 PRD 열기</a>
+  <a class="ghost" href="design-option-landing-url.html">와이어프레임 시안 열기</a>
+</div>
+
+</div><!-- /page -->
+
+<div class="sum">
+  <div class="sumin">
+    <div class="sumhead">
+      <h3>고른 결과</h3>
+      <span class="sp"></span>
+      <button class="btn pri" id="btnCopy" disabled>📋 결과 복사</button>
+      <button class="btn" id="btnToggle">펼쳐 보기</button>
+    </div>
+    <div class="sumrows" id="sumRows"></div>
+    <div class="sumnote" id="sumNote">여섯 가지를 모두 고르면 복사 버튼이 켜집니다 — 복사한 내용을 그대로 붙여 주세요.</div>
+    <div class="copybox" id="copyBox">
+      <textarea id="copyTa" readonly></textarea>
+      <div class="copymsg" id="copyMsg"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── 결정 정의 (PRD 08 과 같은 내용 · 여기서만 고른다) ──────────────
+  var DEC = [
+    {
+      id: 'D1',
+      title: '"링크유입이니까 옵션 URL 필수"를 <u>무엇으로 판정</u>할까요?',
+      q: '지금 공고에는 유입방식 칸이 없고, 작업오더 없이 만든 공고는 유입방식이 <b>영영 불명</b>입니다.',
+      now: '지금은 — 연결된 작업오더의 <code>inflow_type</code> 을 역조회해서만 알 수 있습니다.',
+      opts: [
+        { v: '공고에 [유입방식] 칸 신설', rec: true,
+          d: '<code>recruit_campaigns.inflow_type</code> 추가 + 발행 모달에 [유입가이드 / 링크유입] 버튼. ' +
+             '작업오더에서 자동 프리필하되 <b>사람이 바꿀 수 있고, 작업오더 없이 만든 공고도 판정</b>됩니다. ' +
+             '리뷰어 버튼 판정도 이 값이 우선(없으면 지금처럼 작업오더 역조회).',
+          chips: [['scope','마이그레이션 +1칸'],['safe','수동 생성 공고도 판정'],['safe','사람이 교정 가능']] },
+        { v: '작업오더 역조회만 유지',
+          d: '컬럼을 만들지 않고 지금처럼 연결 작업오더만 봅니다. 변경 범위는 가장 작지만 ' +
+             '<b>수동 생성 공고는 필수 강제도 비활성도 걸리지 않습니다</b>(불명 = 아무 일 없음).',
+          chips: [['scope','변경 최소'],['risk','수동 공고 판정 불가']] },
+        { v: 'URL이 있으면 링크유입으로 간주',
+          d: '별도 칸 없이 "옵션 URL을 채웠다 = 링크유입"으로 추정합니다. 칸은 안 늘지만 ' +
+             '<b>가이드유입인데 참고용으로 URL을 넣은 경우를 링크유입으로 오판</b>합니다.',
+          chips: [['scope','칸 추가 0'],['risk','가이드유입 오판']] }
+      ]
+    },
+    {
+      id: 'D2',
+      title: '링크유입 + 옵션 있는 작업인데 <u>옵션 URL이 비면</u> 어떻게 할까요?',
+      q: '이미 발행된 옛 공고는 옵션 URL이 <b>전부 비어</b> 있습니다(그 공고를 열어 다른 값만 고치는 흐름을 막으면 안 됩니다).',
+      now: '지금은 — 옵션 URL 개념 자체가 없어 아무 검사도 하지 않습니다. <b>상품(메인) URL 검사는 이 결정과 무관하게 항상 켜집니다.</b>',
+      opts: [
+        { v: '게시(active) 저장만 차단', rec: true,
+          d: '임시저장·비게시 상태는 경고만 하고 저장 허용, <b>[게시] 상태로 저장할 때만</b> 차단합니다. ' +
+             '리뷰어에게 노출되는 공고는 반드시 URL을 갖고, <b>옛 공고 수정은 막히지 않습니다</b>. ' +
+             '서버도 참여형 활성화 게이트(<code>_participationActivationErrors</code>)와 같은 자리에서 재검증합니다.',
+          chips: [['safe','옛 공고 정정 가능'],['safe','노출 공고는 100% 보유']] },
+        { v: '저장 자체를 하드블록',
+          d: '상태와 무관하게 저장 버튼이 잠깁니다. 가장 강하지만 ' +
+             '<b>옛 공고의 긴급 정정(리뷰비·정원)까지 통째로 막힙니다.</b>',
+          chips: [['safe','가장 강한 강제'],['risk','긴급 정정 봉쇄']] },
+        { v: '경고만 (게시 허용)',
+          d: '빨간 경고만 띄우고 막지 않습니다(레포의 옵션 칸 자동점검·정리 도우미와 같은 방식). ' +
+             '오탐으로 정상 발행이 막히는 일은 없지만 <b>누락이 그대로 리뷰어에게 나갑니다.</b>',
+          chips: [['safe','오탐 피해 0'],['risk','누락이 리뷰어에게 노출']] }
+      ]
+    },
+    {
+      id: 'D3',
+      title: '상품 URL 칸을 <u>어디에</u> 두고, 기존 [랜딩 URL] 칸은 어떻게 할까요?',
+      q: '진행상품 표에 URL 칸을 만들면 [모집 조건]의 랜딩 URL 칸과 <b>같은 값을 두 곳에서 관리</b>하게 됩니다.',
+      now: '★ 어느 안을 고르셔도 <b>상품(메인) URL을 받는다는 사실 자체는 확정</b>입니다 — D3이 정하는 것은 <b>그 칸의 위치</b>뿐입니다.',
+      opts: [
+        { v: '진행상품 표가 진실원본 (랜딩 URL은 읽기전용 파생)', rec: true,
+          d: '표에 URL 칸을 두고(옵션 없는 작업 = 상품 행 / 옵션 있는 작업 = 옵션 행), ' +
+             '[랜딩 URL] 칸은 <b>표에서 자동 파생되는 읽기전용</b>이 됩니다. ' +
+             '지금 정원·작업내용 원문이 표에서 파생되는 규율과 같아 <b>어긋날 수가 없습니다.</b>',
+          chips: [['safe','값 어긋남 구조적 차단'],['scope','랜딩 URL 칸 읽기전용 전환']] },
+        { v: '옵션 있는 작업만 표에 URL',
+          d: '옵션 없는 작업은 지금처럼 [랜딩 URL] 칸을 쓰고, 옵션 있는 작업만 옵션 행에 URL을 둡니다. ' +
+             '변경 범위는 최소지만 <b>URL 입력 위치가 작업 종류에 따라 두 곳으로 갈립니다.</b>',
+          chips: [['scope','변경 최소'],['risk','입력 위치가 두 곳']] },
+        { v: '둘 다 두고 옵션 URL 우선',
+          d: '[랜딩 URL]을 편집 가능한 채로 남기고 옵션 URL이 있으면 그것이 이깁니다. ' +
+             '<b>같은 값을 두 곳에서 관리하게 되어 나중에 어긋납니다.</b>',
+          chips: [['risk','이중 관리 → 드리프트']] }
+      ]
+    },
+    {
+      id: 'D4',
+      title: '인트라넷 옵션행과 리뷰웹 옵션행의 칸을 <u>어디까지</u> 똑같이 맞출까요?',
+      q: '지금 다른 것: <b>이중옵션</b>(인트라넷만) · <b>일건수</b>(리뷰웹만) · <b>시트참조</b>(인트라넷만).',
+      now: '요구사항 ③ "두 블록의 입력 조건을 일치시켜야 함"의 범위를 정하는 항목입니다.',
+      opts: [
+        { v: 'URL만 맞추고 나머지는 현행 유지', rec: true,
+          d: '양쪽 옵션 행에 URL 칸을 넣는 것까지만 통일합니다. 이중옵션은 인트라넷에서 입력하고 ' +
+             '리뷰웹으로는 <b>「블랙 + 라지」 합친 라벨 하나</b>로 넘어오는 지금 계약을 유지하고, ' +
+             '일건수는 <b>모집 운영값</b>이라 리뷰웹 전용으로 둡니다.',
+          chips: [['safe','기존 발행분 표기 불변'],['scope','양쪽 URL 칸 1개씩']] },
+        { v: '리뷰웹에도 이중옵션 2칸 도입',
+          d: '리뷰웹 옵션 행도 옵션1/옵션2로 나눕니다. 다만 시트 옵션열 기입값(<code>opt_key</code>)은 결국 한 문자열이라 ' +
+             '저장 시 다시 합쳐야 하고, <b>기존 발행분과 표기가 갈릴 수 있습니다.</b>',
+          chips: [['scope','리뷰웹 표 구조 변경'],['risk','기존 opt_key 표기 드리프트']] },
+        { v: '인트라넷에도 옵션별 일건수 추가',
+          d: '인트라넷 옵션 행에 일건수를 넣어 완전히 같은 칸 구성으로 맞춥니다. ' +
+             '지금 인트라넷은 <b>작업 전체 일건수 1칸</b>만 받고 있어 개념이 바뀝니다(발주 담당자 입력 부담 증가).',
+          chips: [['scope','인트라넷 폼 개념 변경'],['risk','발주 입력 부담 증가']] }
+      ]
+    },
+    {
+      id: 'D5',
+      title: '옵션은 없는데 <u>상품이 2개 이상</u>인 작업은 어느 URL을 쓸까요?',
+      q: '진행상품 표는 옵션 없는 작업에서도 [상품 추가]로 여러 줄을 만들 수 있는데, ' +
+         '그 경우 <b>리뷰어에게는 고를 선택지가 없습니다</b>(옵션 원장이 비어 있음).',
+      now: '지금은 — 공고 랜딩 URL 1개만 있어 어느 상품으로 보내는지 화면이 말하지 않습니다.',
+      opts: [
+        { v: '첫 상품 URL 사용 + 2개 이상이면 경고', rec: true,
+          d: '첫 줄의 URL을 공고 랜딩 URL로 쓰되, 상품이 2줄 이상이고 URL이 서로 다르면 ' +
+             '<b>"리뷰어는 하나만 보게 됩니다 — 옵션으로 나누시겠어요?"</b> 경고를 띄웁니다(막지는 않음).',
+          chips: [['safe','기존 운영 유지'],['safe','오유입을 화면이 알림']] },
+        { v: '상품 2개 이상이면 옵션 있는 작업으로 전환 유도',
+          d: 'URL이 서로 다른 다상품은 사실상 옵션 작업이므로 <b>[옵션 있는 작업]으로 바꾸라</b>고 안내하고 ' +
+             '그 전에는 저장을 막습니다. 데이터는 깔끔해지지만 <b>기존 다상품 공고 운영이 막힙니다.</b>',
+          chips: [['safe','데이터 정합'],['risk','기존 다상품 운영 봉쇄']] },
+        { v: '지금처럼 랜딩 URL 1칸만 (경고 없음)',
+          d: '옵션 없는 작업은 URL 1개라는 현행을 그대로 둡니다. 가장 단순하지만 ' +
+             '<b>다상품 링크유입의 오유입은 그대로 남습니다.</b>',
+          chips: [['scope','변경 0'],['risk','오유입 방치']] }
+      ]
+    },
+    {
+      id: 'D6',
+      title: '리뷰어 화면에 <u>"내가 고른 옵션"</u>을 링크 버튼 옆에 표시할까요?',
+      q: '옵션마다 링크가 다르면 <b>내가 맞는 상품 페이지로 가는지</b>를 리뷰어가 확인할 방법이 필요합니다.',
+      now: '지금은 — 버튼 문구가 [🔗 상품 페이지 열기] 하나뿐이라 어느 상품인지 알 수 없습니다.',
+      opts: [
+        { v: '버튼 위에 옵션명 한 줄 표시', rec: true,
+          d: '<b>"내가 고른 옵션: 화이트"</b> + [🔗 화이트 상품 페이지 열기]. 잘못 고른 것을 여기서 알아챌 수 있습니다. ' +
+             '작업내용 카드에 이미 상품·옵션 정보가 있어 <b>중복이지만 클릭 직전 위치</b>라 의미가 다릅니다.',
+          chips: [['safe','오구매 예방'],['scope','한 줄 추가']] },
+        { v: '버튼 라벨에만 옵션명',
+          d: '줄을 늘리지 않고 <b>[🔗 화이트 상품 페이지 열기]</b> 로만 표시합니다. 옵션명이 길면 버튼이 잘립니다.',
+          chips: [['scope','줄 추가 0'],['risk','긴 옵션명 잘림']] },
+        { v: '지금 그대로 (표시 없음)',
+          d: '버튼 문구를 바꾸지 않습니다. 화면 변경 0이지만 <b>리뷰어는 링크가 자기 옵션 것인지 알 수 없습니다.</b>',
+          chips: [['scope','변경 0'],['risk','리뷰어가 확인 불가']] }
+      ]
+    }
+  ];
+
+  var KEY = 'opt_landing_decision_v1';
+  var picks = {};
+
+  // ── 저장 (사생활 보호 모드 등에서 실패해도 무시 — 화면 상태일 뿐) ──
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return;
+      var o = JSON.parse(raw);
+      DEC.forEach(function (d) {
+        var v = o && o[d.id];
+        // 모르는 값은 쓰지 않는다(선택지 목록이 바뀌었을 수 있음)
+        if (v && d.opts.some(function (x) { return x.v === v; })) picks[d.id] = v;
+      });
+    } catch (e) { /* 무시 */ }
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(picks)); } catch (e) { /* 무시 */ } }
+
+  // ── 렌더 ──────────────────────────────────
+  function cardHtml(d, di) {
+    var done = !!picks[d.id];
+    var opts = d.opts.map(function (o, oi) {
+      var on = picks[d.id] === o.v;
+      var chips = (o.chips || []).map(function (c) {
+        return '<span class="chip ' + c[0] + '">' + c[1] + '</span>';
+      }).join('');
+      return '' +
+        '<div class="dopt' + (on ? ' on' : '') + '" data-d="' + di + '" data-o="' + oi + '" role="button" tabindex="0">' +
+          '<div class="t">' + o.v + (o.rec ? '<span class="rec">권장</span>' : '') + '<span class="chk">✓</span></div>' +
+          '<div class="d">' + o.d + '</div>' +
+          (chips ? '<div class="imp">' + chips + '</div>' : '') +
+        '</div>';
+    }).join('');
+
+    return '' +
+      '<div class="dgroup' + (done ? ' done' : '') + '">' +
+        '<div class="dhead"><span class="dtag">' + d.id + '</span><h3>' + d.title + '</h3></div>' +
+        '<p class="q">' + d.q + '</p>' +
+        '<p class="nowline">' + d.now + '</p>' +
+        '<div class="dopts">' + opts + '</div>' +
+        '<div class="dpick">고른 값: <b class="pickv">' + (done ? picks[d.id] : '— 미선택 —') + '</b>' +
+          (done ? '<button class="clr" data-clr="' + di + '">선택 취소</button>' : '') +
+        '</div>' +
+      '</div>';
+  }
+
+  function render() {
+    document.getElementById('cards').innerHTML = DEC.map(cardHtml).join('');
+
+    var n = DEC.filter(function (d) { return picks[d.id]; }).length;
+    document.getElementById('dots').innerHTML = DEC.map(function (d) {
+      return '<div class="dot' + (picks[d.id] ? ' on' : '') + '">' + d.id + '</div>';
+    }).join('');
+    document.getElementById('progTxt').textContent = n + ' / ' + DEC.length + ' 결정' +
+      (n === DEC.length ? ' — 다 고르셨습니다' : '');
+
+    document.getElementById('sumRows').innerHTML = DEC.map(function (d) {
+      var v = picks[d.id];
+      return '<div class="sumrow"><span class="k">' + d.id + '</span>' +
+        (v ? v : '<span class="none">— 미선택 —</span>') + '</div>';
+    }).join('');
+
+    var full = n === DEC.length;
+    document.getElementById('btnCopy').disabled = !full;
+    document.getElementById('sumNote').textContent = full
+      ? '아래 [결과 복사]를 누르고 그대로 붙여 주시면 그 값으로 구현에 들어갑니다.'
+      : '여섯 가지를 모두 고르면 복사 버튼이 켜집니다 — 복사한 내용을 그대로 붙여 주세요.';
+    document.getElementById('copyTa').value = plainText();
+  }
+
+  function plainText() {
+    var lines = ['옵션별 유입링크 — 결정 결과 (D1~D6)', ''];
+    DEC.forEach(function (d) {
+      var t = d.title.replace(/<[^>]+>/g, '');
+      lines.push(d.id + ' = ' + (picks[d.id] || '— 미선택 —'));
+      lines.push('     (' + t + ')');
+    });
+    lines.push('');
+    lines.push('전제(확정) : 상품(메인) URL은 유입방식·옵션 유무와 무관하게 항상 필수');
+    return lines.join('\n');
+  }
+
+  // ── 조작 ──────────────────────────────────
+  function pick(di, oi) {
+    var d = DEC[di]; if (!d) return;
+    var o = d.opts[oi]; if (!o) return;
+    picks[d.id] = o.v;
+    save(); render();
+  }
+
+  document.getElementById('cards').addEventListener('click', function (e) {
+    var clr = e.target.closest('[data-clr]');
+    if (clr) {
+      delete picks[DEC[+clr.getAttribute('data-clr')].id];
+      save(); render(); return;
+    }
+    var el = e.target.closest('.dopt');
+    if (el) pick(+el.getAttribute('data-d'), +el.getAttribute('data-o'));
+  });
+  document.getElementById('cards').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var el = e.target.closest && e.target.closest('.dopt');
+    if (!el) return;
+    e.preventDefault();
+    pick(+el.getAttribute('data-d'), +el.getAttribute('data-o'));
+  });
+
+  document.getElementById('btnRec').addEventListener('click', function () {
+    DEC.forEach(function (d) {
+      var r = d.opts.filter(function (o) { return o.rec; })[0];
+      if (r) picks[d.id] = r.v;
+    });
+    save(); render();
+  });
+  document.getElementById('btnClear').addEventListener('click', function () {
+    if (!Object.keys(picks).length) return;
+    if (!confirm('고른 값 ' + Object.keys(picks).length + '건을 모두 비웁니다. 계속할까요?')) return;
+    picks = {}; save(); render();
+  });
+
+  var box = document.getElementById('copyBox');
+  document.getElementById('btnToggle').addEventListener('click', function () {
+    box.classList.toggle('on');
+    this.textContent = box.classList.contains('on') ? '접기' : '펼쳐 보기';
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', function () {
+    var ta = document.getElementById('copyTa');
+    var msg = document.getElementById('copyMsg');
+    box.classList.add('on');
+    document.getElementById('btnToggle').textContent = '접기';
+    ta.value = plainText();
+    ta.focus(); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    if (ok) {
+      msg.textContent = '✓ 복사했습니다 — 채팅에 그대로 붙여 주세요.';
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(function () {
+        msg.textContent = '✓ 복사했습니다 — 채팅에 그대로 붙여 주세요.';
+      }).catch(function () {
+        msg.textContent = '자동 복사가 막혀 있습니다 — 위 상자의 내용을 직접 선택해 복사해 주세요.';
+      });
+    } else {
+      msg.textContent = '자동 복사가 막혀 있습니다 — 위 상자의 내용을 직접 선택해 복사해 주세요.';
+    }
+  });
+
+  load();
+  render();
+})();
+</script>

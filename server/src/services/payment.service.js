@@ -24,6 +24,7 @@ const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { log
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { resolveBank, bankNameByCode, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
+const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
@@ -80,6 +81,9 @@ function _int(v) {
  * @returns {{items:Array, summary:object}}
  */
 async function listPaymentTargets(opts = {}) {
+  // ★ 은행 표기 오버레이(화면에서 고친 정식명·자동인식 표기)를 판정 **전에** 적용한다.
+  //   실패해도 throw 하지 않고 기본 표로 진행한다(fail-open — 조회 하나 때문에 입금대상이 통째로 죽지 않게).
+  await _bankOv.ensureBankOverrides();
   const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
   // $1 = 입금열 키워드(미입금 판정) · $2 = 결제금액 정확일치 후보(상품비 폴백 필터)
   // ★ 선택 필터(sheetId·tabName)는 뒤에 push 되어 $3·$4 가 된다 — 자리표시자는 params.length 로 뽑으므로
@@ -585,6 +589,9 @@ function _batchView(b) {
  *   임의로 바꾸면 은행 사이트가 파일을 거부한다.
  */
 async function buildWorkbook(bank, items) {
+  // ★ 서식에 찍히는 **정식 명칭**(`bankNameByCode`)이 오버레이 값이어야 한다 —
+  //   화면에서 이름을 고쳐 놓고 파일엔 옛 이름이 나가면 은행이 거부한다.
+  await _bankOv.ensureBankOverrides();
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'review-web-system';
@@ -729,6 +736,9 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo })
  * ★ 빈 값은 **덮지 않는다**(부분 보완 허용) — 지우려면 화면이 아니라 등록리뷰어DB에서.
  */
 async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder }) {
+  // ★ 아래 `resolveBank` 검증이 화면에서 방금 등록한 표기를 알아야 한다(안 그러면
+  //   표기를 넣어 두고도 계좌 저장이 '인식불가'로 거부되는 막다른 길).
+  await _bankOv.ensureBankOverrides();
   const id = String(reviewerId || '').trim();
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new PaymentFixError('bad_reviewer', '리뷰어를 지목할 수 없습니다.');
 
