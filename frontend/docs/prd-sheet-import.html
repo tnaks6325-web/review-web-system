@@ -413,8 +413,18 @@
           <b><code>seq</code>=시트 실제 행번호</b> — 어긋나면 주문 유입 시 표가 두 겹).</li>
       <li>장부 3권 = <code>sheetlessLedger.rebuildLedgers</code>(파서 <code>indexBuilder.parseTabRows</code>를 그대로 통과 →
           이름열·제출/입금 판정·phone8 추출·<code>submit_col</code> 감지에 사본 0).</li>
-      <li>등록 업서트 = 접수 경로와 같은 <code>campaigns</code>/<code>tab_configs</code> 업서트를 재사용.
-          <code>sheetless=TRUE</code>로 켜고 <code>sheet_url</code>은 <b>실제 구글 URL</b>을 남긴다(가상 시트가 아니므로 링크가 살아 있다).</li>
+      <li>등록 업서트는 <b>재사용할 수 없다</b> — 접수(<code>order.routes</code>)의 <code>tab_configs</code> 업서트는
+          작업오더 행(<code>review_type</code>·<code>delivery_type</code>·<code>work_manager</code>…)에 강하게 결속돼 있어
+          작업오더 없는 이 경로에서 그대로 호출할 수 없다. 그래서 컬럼을 <b>최소로</b> 쓰는 자체 업서트를 두되,
+          두 불변식을 회귀가드가 고정한다: ① <code>sheetless</code>는 <b>OR</b>(이관을 되돌리지 않는다)
+          ② 메타는 <b>blank-only</b>(<code>COALESCE(NULLIF(...))</code>). <code>sheet_url</code>은 <b>실제 구글 URL</b>을
+          남긴다(가상 시트가 아니므로 링크가 살아 있다).</li>
+      <li>미리보기는 <b>미러를 거치지 않고 시트를 직접 1회 읽는다</b>(<code>batchReadSheet</code> + <code>FORMATTED_VALUE</code>,
+          시트 lane throttle 경유) — <code>mirrorOneSheet</code>는 그 시트의 <b>모든 탭</b>을 DB에 저장하므로
+          "미리보기는 쓰기 0" 약속과 어긋난다. 실행 단계에서도 미러는 부르지 않는다
+          (<code>rebuildLedgers</code>가 <code>raw_sheet_*</code>를 작업표에서 직접 만든다).</li>
+      <li>미리보기의 "검색 명단이 될 줄" 수는 <b>파서에게 묻는다</b>(<code>parseTabRows</code>를 같은 입력으로 실행) —
+          여기서 세면 사본이 되어 "미리보기 107명인데 가져오니 92명"이 된다.</li>
       <li>업체 소유 = <code>advertiser_campaigns</code>(<code>tab_gid</code> 지정) · 시트 안내문 = <code>sheetNotice.applySheetNotice(force:true)</code>
           (<code>validateNoticeText</code> 통과 필수 — 헤더 키워드 2개 이상이면 그 탭 파싱이 깨진다).</li>
     </ul>
