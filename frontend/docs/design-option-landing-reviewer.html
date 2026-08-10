@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M4 시안 — 리뷰어 화면: 내가 고른 옵션 링크</title>
+<!-- ★ 외부 리소스 0 · 오프라인 열람 가능 · 가짜 데이터로 실제 동작 (레포 시안 규율)
+     ?v=A|B|C 로 한 안만 단독 보기 -->
+<style>
+  :root{
+    --bg:#F4F6FA; --card:#fff; --line:#E5E7EB; --t1:#111827; --t2:#4B5563; --t3:#9CA3AF;
+    --p:#3182F6; --pd:#1B64DA; --ok:#0CA678; --warn:#B45309; --warnbg:#FFFBF2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--t1);
+       font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+       -webkit-font-smoothing:antialiased;color-scheme:light}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 18px 70px}
+  h1{font-size:1.32rem;margin:0 0 6px}
+  .sub{font-size:.84rem;color:var(--t2);line-height:1.7;margin:0 0 18px}
+  .sub b{color:var(--t1)}
+  .note{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+        font-size:.8rem;color:var(--t2);line-height:1.75;margin:0 0 20px}
+  .note code{background:#F1F5F9;border-radius:5px;padding:1px 5px;font-size:.76rem}
+
+  h2{font-size:1.02rem;margin:30px 0 4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tag{font-size:.66rem;font-weight:800;border-radius:999px;padding:3px 9px;letter-spacing:.2px}
+  .tag.rec{background:#E7F5EC;color:#0B7A45}
+  .tag.alt{background:#EEF2F7;color:#475569}
+  h2 + .desc{font-size:.82rem;color:var(--t2);margin:0 0 14px;line-height:1.7}
+
+  /* ── 상태별 목업 격자 ── */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:16px;align-items:start}
+  .case{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .case > .ch{background:#F8FAFC;border-bottom:1px solid var(--line);padding:9px 12px;
+              font-size:.72rem;font-weight:800;color:var(--t2)}
+  .case > .ch em{font-style:normal;color:var(--t3);font-weight:700}
+  .phone{padding:12px;background:#F4F6FA}
+
+  /* ── 실제 리뷰어 화면(campaign-workdetail.js) 클래스 재현 ── */
+  .cwd-box{background:#fff;border:1px solid #E5E7EB;border-radius:14px;padding:14px;margin-bottom:12px;
+           box-shadow:0 2px 12px rgba(0,0,0,.05)}
+  .cwd-box:last-child{margin-bottom:0}
+  .cwd-tt{font-size:.78rem;font-weight:800;color:#9CA3AF;margin-bottom:8px}
+  .cwd-body{font-size:.88rem;color:#111827;white-space:pre-wrap;word-break:break-word;line-height:1.65}
+  .cwd-muted{font-size:.76rem;color:#9CA3AF}
+  .cwd-btn{display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#EEF1F7;color:#4B5563;
+           font-size:.84rem;font-weight:800;border-radius:11px;padding:11px;font-family:inherit;margin-top:10px}
+  .cwd-btn:active{transform:translateY(1px)}
+  .cwd-opt{display:flex;align-items:center;gap:10px}
+  .cwd-opt .nm{font-size:.9rem;font-weight:800;color:#111827}
+  .cwd-opt .sub2{font-size:.76rem;color:#6B7280;margin-top:2px}
+
+  /* ── A안: 버튼 위 한 줄 ── */
+  .lnd-a{font-size:.74rem;font-weight:700;color:#1B64DA;background:#EEF4FF;border:1px solid #D6E4FF;
+         border-radius:9px;padding:7px 9px;margin-top:10px;line-height:1.5}
+  .lnd-a .k{color:#4B5563;font-weight:800}
+  .lnd-a.gray{color:#4B5563;background:#F3F4F6;border-color:#E5E7EB}
+  .lnd-a + .cwd-btn{margin-top:6px}
+
+  /* ── B안: 버튼 라벨에 옵션명 ── */
+  .cwd-btn.b{background:#EEF4FF;color:#1B64DA}
+
+  /* ── C안: 칩 + 출처 배지 ── */
+  .lnd-c{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chip{font-size:.72rem;font-weight:800;border-radius:999px;padding:4px 10px;background:#EEF4FF;color:#1B64DA}
+  .bdg{font-size:.66rem;font-weight:800;border-radius:999px;padding:3px 8px;background:#E7F5EC;color:#0B7A45}
+  .bdg.common{background:#F3F4F6;color:#6B7280}
+  .lnd-c + .cwd-btn{margin-top:6px}
+
+  /* ── 결정사안 ── */
+  .qwrap{margin-top:34px}
+  .q{background:#fff;border:1px solid var(--line);border-radius:14px;padding:15px 16px;margin-bottom:12px}
+  .q h3{margin:0 0 4px;font-size:.92rem}
+  .q p{margin:0 0 11px;font-size:.8rem;color:var(--t2);line-height:1.7}
+  .opts{display:flex;gap:9px;flex-wrap:wrap}
+  .opt{flex:1 1 210px;min-width:210px;text-align:left;border:1.5px solid var(--line);background:#fff;border-radius:11px;
+       padding:11px 12px;cursor:pointer;font-family:inherit}
+  .opt:hover{border-color:#C7D2FE}
+  .opt.on{border-color:var(--p);background:#F5F9FF;box-shadow:0 0 0 3px rgba(49,130,246,.12)}
+  .opt .t{font-size:.84rem;font-weight:800;margin-bottom:3px}
+  .opt .d{font-size:.74rem;color:var(--t2);line-height:1.6}
+  .opt .rec{font-size:.66rem;font-weight:800;color:#0B7A45;background:#E7F5EC;border-radius:999px;padding:2px 7px;margin-left:5px}
+
+  .sum{background:#0F172A;color:#E2E8F0;border-radius:14px;padding:16px 18px;margin-top:20px}
+  .sum h3{margin:0 0 9px;font-size:.92rem;color:#fff}
+  .sum ul{margin:0;padding-left:18px;font-size:.82rem;line-height:1.9}
+  .sum .none{color:#94A3B8;font-size:.8rem}
+  .cpbtn{margin-top:13px;border:none;background:#3182F6;color:#fff;font-weight:800;font-size:.82rem;
+         border-radius:10px;padding:10px 16px;cursor:pointer;font-family:inherit}
+
+  .limit{background:#FFFBF2;border:1px solid #FDE68A;border-radius:12px;padding:12px 14px;
+         font-size:.8rem;color:#92400E;line-height:1.75;margin-top:22px}
+  .limit b{color:#7C2D12}
+  @media (max-width:640px){ .wrap{padding:18px 12px 60px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>M4 시안 — 리뷰어 화면: 내가 고른 옵션으로 상품 페이지 열기</h1>
+  <p class="sub">
+    옵션이 여러 개인 링크유입 작업에서 <b>리뷰어가 고른 옵션의 상품 주소</b>로 보내는 단계입니다.
+    서버는 이미 <b>고른 옵션 URL → (없으면) 공고 랜딩 URL</b> 순으로 주소를 정해서 내려주고 있고(M2 완료),
+    이번에 정하는 것은 <b>그 사실을 리뷰어에게 어떻게 보여줄지</b>입니다.
+    확정사항 D6 = “버튼 위에 옵션명 한 줄”.
+  </p>
+
+  <div class="note">
+    아래 목업은 실제 리뷰어 화면(참여 후 <b>작업내용</b> 카드)을 그대로 재현한 것입니다 —
+    같은 카드 모양·같은 버튼을 씁니다. 버튼을 눌러 보면 어느 주소로 가는지 알려줍니다(실제 이동은 안 함).
+    <br>주소창에 <code>?v=A</code> / <code>?v=B</code> / <code>?v=C</code> 를 붙이면 그 안만 볼 수 있어요.
+  </div>
+
+  <!-- ══════════ A안 ══════════ -->
+  <section data-v="A">
+    <h2>A안 — 버튼 위에 파란 한 줄 <span class="tag rec">추천</span></h2>
+    <p class="desc">
+      버튼 바로 위에 <b>“내가 고른 옵션: 화이트 — 이 옵션의 상품 페이지로 갑니다”</b> 한 줄을 둡니다.
+      버튼 글자는 지금과 똑같이 두어, 이미 익숙한 버튼 모양이 바뀌지 않습니다.
+    </p>
+    <div class="grid" id="gA"></div>
+  </section>
+
+  <!-- ══════════ B안 ══════════ -->
+  <section data-v="B">
+    <h2>B안 — 버튼 글자에 옵션명 넣기 <span class="tag alt">대안</span></h2>
+    <p class="desc">
+      줄을 늘리지 않고 <b>버튼 자체를 “🔗 화이트 상품 페이지 열기”</b> 로 바꿉니다.
+      화면이 가장 짧아지지만, 옵션명이 길면 버튼 글자가 줄바꿈되거나 잘립니다.
+    </p>
+    <div class="grid" id="gB"></div>
+  </section>
+
+  <!-- ══════════ C안 ══════════ -->
+  <section data-v="C">
+    <h2>C안 — 옵션 칩 + 주소 출처 배지 <span class="tag alt">대안</span></h2>
+    <p class="desc">
+      옵션명을 칩으로 보이고, 옆에 <b>“옵션 전용 주소” / “공통 주소”</b> 배지를 붙여
+      <b>지금 열리는 주소가 옵션 전용인지</b>까지 말해 줍니다. 정보가 가장 많지만 그만큼 시끄럽습니다.
+    </p>
+    <div class="grid" id="gC"></div>
+  </section>
+
+  <!-- ══════════ 결정사안 ══════════ -->
+  <div class="qwrap">
+    <h2>결정해 주실 것</h2>
+    <p class="desc">항목을 클릭해 고르면 아래에 요약이 만들어집니다. 그대로 복사해서 답장해 주세요.</p>
+
+    <div class="q" data-q="배치">
+      <h3>① 어떤 안으로 할까요?</h3>
+      <p>세 안 모두 여는 주소는 똑같습니다 — 다른 것은 “어느 옵션으로 가는지”를 보여주는 방식뿐입니다.</p>
+      <div class="opts">
+        <button class="opt" data-a="A안 — 버튼 위 한 줄"><div class="t">A안 — 버튼 위 한 줄<span class="rec">추천</span></div>
+          <div class="d">버튼 모양은 그대로. 옵션명이 길어도 안 깨지고, 문장으로 설명할 자리가 있습니다.</div></button>
+        <button class="opt" data-a="B안 — 버튼 글자에 옵션명"><div class="t">B안 — 버튼 글자에 옵션명</div>
+          <div class="d">가장 짧습니다. 다만 “힙스 골라담기 3종세트” 같은 긴 옵션명은 버튼에서 잘립니다.</div></button>
+        <button class="opt" data-a="C안 — 칩 + 출처 배지"><div class="t">C안 — 칩 + 출처 배지</div>
+          <div class="d">옵션 전용 주소인지까지 보여줍니다. 리뷰어에게는 필요 없는 내부 사정일 수 있습니다.</div></button>
+      </div>
+    </div>
+
+    <div class="q" data-q="옵션 주소가 없을 때">
+      <h3>② 그 옵션에 주소가 안 적혀 있으면?</h3>
+      <p>
+        관리자가 옵션 링크를 비워 두면 <b>공고 상품 URL(공통 주소)</b> 로 갑니다. 이때도 옵션명 한 줄을 보여줄지 정합니다.
+        <br>※ 기존 공고는 전부 여기에 해당합니다(옵션 링크를 백필하지 않기로 확정).
+      </p>
+      <div class="opts">
+        <button class="opt" data-a="옵션이 있으면 항상 한 줄 표시 (문구만 '공통 상품 페이지')"><div class="t">항상 보여주기<span class="rec">추천</span></div>
+          <div class="d">문구만 바꿉니다 — “내가 고른 옵션: 화이트 · 공통 상품 페이지로 갑니다”.
+            줄이 생겼다 없어졌다 하지 않아 화면이 안 흔들립니다.</div></button>
+        <button class="opt" data-a="옵션 전용 주소가 있을 때만 한 줄 표시"><div class="t">있을 때만 보여주기</div>
+          <div class="d">옵션 전용 주소일 때만 줄이 생깁니다. 화면은 더 조용하지만, 공고마다 줄이 있다 없다 합니다.</div></button>
+      </div>
+    </div>
+
+    <div class="q" data-q="옵션 없는 공고">
+      <h3>③ 옵션이 아예 없는 작업은?</h3>
+      <p>단일 상품 공고입니다. 지금은 버튼만 있고 아무 설명이 없습니다.</p>
+      <div class="opts">
+        <button class="opt" data-a="옵션 없는 공고는 지금 그대로(줄 없음)"><div class="t">지금 그대로<span class="rec">추천</span></div>
+          <div class="d">보여줄 옵션이 없으니 줄도 없습니다 — 기존 공고 화면이 한 픽셀도 안 바뀝니다.</div></button>
+        <button class="opt" data-a="옵션 없는 공고에도 '상품 페이지로 갑니다' 안내 줄 추가"><div class="t">안내 줄 추가</div>
+          <div class="d">모든 공고에서 버튼 위 설명이 통일됩니다. 다만 새 정보는 없는 줄이 하나 늘어납니다.</div></button>
+      </div>
+    </div>
+
+    <div class="q" data-q="관리자 미리보기">
+      <h3>④ 관리자 미리보기에도 똑같이?</h3>
+      <p>
+        관리자 [👁 리뷰어 화면]은 <b>실제 화면과 같은 코드</b>로 그려집니다(그래서 “미리보기 ≠ 실제”가 구조적으로 불가능).
+        미리보기에서는 대표 옵션 하나를 예시로 씁니다.
+      </p>
+      <div class="opts">
+        <button class="opt" data-a="미리보기 = 실제와 동일 + '예시 옵션' 표시"><div class="t">동일 + 예시 표시<span class="rec">추천</span></div>
+          <div class="d">같은 줄을 보여주되 “(예시 옵션)”을 덧붙입니다 — 실제 리뷰어가 고른 값이 아님을 관리자가 압니다.</div></button>
+        <button class="opt" data-a="미리보기도 완전히 동일(예시 표시 없음)"><div class="t">완전히 동일</div>
+          <div class="d">리뷰어가 볼 화면 그대로. 대신 관리자가 “이 옵션으로 고정된 건가?”로 오해할 수 있습니다.</div></button>
+      </div>
+    </div>
+
+    <div class="sum" id="sum">
+      <h3>선택 요약</h3>
+      <div class="none" id="sumNone">아직 고른 항목이 없습니다.</div>
+      <ul id="sumList" style="display:none"></ul>
+      <button class="cpbtn" id="cpbtn" style="display:none">요약 복사</button>
+    </div>
+  </div>
+
+  <div class="limit">
+    <b>이번 단계에서 바뀌지 않는 것</b><br>
+    · 여는 주소를 정하는 규칙은 <b>이미 만들어져 있고 바뀌지 않습니다</b>(고른 옵션 주소 → 없으면 공고 주소).
+      이번에는 <b>보여주는 방식만</b> 정합니다.<br>
+    · <b>유입가이드 작업에는 버튼이 없습니다</b> — 리뷰어가 상품 페이지로 바로 들어가면 검색어·경유 경로 안내가 무의미해지기 때문입니다(기존 규칙 유지).<br>
+    · 옵션을 바꾸면 화면이 다시 불러와져 <b>버튼 주소도 함께 바뀝니다</b>(기존 동작).<br>
+    · 기존 공고는 옵션 링크가 비어 있어 <b>지금과 똑같이 공고 상품 주소</b>로 갑니다.
+  </div>
+</div>
+
+<script>
+/* ═══════════ 가짜 데이터 = 실제 서버 응답 모양 ═══════════ */
+var CASES = [
+  { key:'opt-url',  title:'옵션 전용 주소가 있는 경우', memo:'가장 흔해질 모습',
+    opt:'화이트', pay:28900, url:'https://www.coupang.com/vp/products/1111?itemId=화이트', own:true, guide:false },
+  { key:'opt-none', title:'옵션은 있는데 링크는 비어 있음', memo:'기존 공고 전부가 여기',
+    opt:'베이지', pay:28900, url:'https://www.coupang.com/vp/products/1111', own:false, guide:false },
+  { key:'no-opt',   title:'옵션이 없는 단일 상품', memo:'지금과 동일해야 함',
+    opt:'', pay:0, url:'https://www.coupang.com/vp/products/2222', own:false, guide:false },
+  { key:'guide',    title:'유입가이드 작업', memo:'버튼 자체가 없음(기존 규칙)',
+    opt:'화이트', pay:28900, url:'', own:false, guide:true }
+];
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+  return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+
+/** 위쪽 "내가 참여한 옵션" 카드 + 상품 카드 (세 안 공통 — 이 부분은 안 바뀝니다) */
+function commonTop(c){
+  var h = '';
+  if (c.opt) {
+    h += '<div class="cwd-box" style="border-color:#3182f6">'
+       + '<div class="cwd-tt" style="color:#1b64da">✅ 내가 참여한 옵션</div>'
+       + '<div class="cwd-opt"><div><div class="nm">' + esc(c.opt) + '</div>'
+       + '<div class="sub2">결제금액 ' + c.pay.toLocaleString() + '원</div></div></div></div>';
+  }
+  h += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
+     + '<div class="cwd-body">데일리 코튼 티셔츠' + (c.opt ? ' - ' + esc(c.opt) : '')
+     + (c.pay ? ' - 결제금액 ' + c.pay.toLocaleString() + '원' : '') + '</div></div>';
+  return h;
+}
+
+/** 유입가이드 카드 = 안(A/B/C)마다 달라지는 유일한 자리 */
+function guideCard(c, v){
+  var body = c.guide
+    ? '① 쿠팡 앱에서 <b>“데일리 코튼 티셔츠”</b> 로 검색\n② 광고가 아닌 상품을 눌러 주세요\n③ 30초 이상 머문 뒤 구매'
+    : '<span class="cwd-muted">등록된 유입가이드가 없어요.</span>';
+  var h = '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div><div class="cwd-body">' + body + '</div>';
+
+  if (c.guide) { return h + '</div>'; }          // ★ 가이드유입 = 버튼 없음(기존 규칙)
+
+  var goes = c.own ? '이 옵션의 상품 페이지로 갑니다' : '공통 상품 페이지로 갑니다';
+  if (v === 'A') {
+    if (c.opt) {
+      h += '<div class="lnd-a' + (c.own ? '' : ' gray') + '">'
+         + '<span class="k">내가 고른 옵션</span> · ' + esc(c.opt) + ' — ' + goes + '</div>';
+    }
+    h += '<button type="button" class="cwd-btn" data-url="' + esc(c.url) + '">🔗 상품 페이지 열기 (새 탭)</button>';
+  } else if (v === 'B') {
+    h += '<button type="button" class="cwd-btn b" data-url="' + esc(c.url) + '">🔗 '
+       + (c.opt ? esc(c.opt) + ' ' : '') + '상품 페이지 열기 (새 탭)</button>';
+  } else {
+    if (c.opt) {
+      h += '<div class="lnd-c"><span class="chip">' + esc(c.opt) + '</span>'
+         + '<span class="bdg' + (c.own ? '' : ' common') + '">'
+         + (c.own ? '옵션 전용 주소' : '공통 주소') + '</span></div>';
+    }
+    h += '<button type="button" class="cwd-btn" data-url="' + esc(c.url) + '">🔗 상품 페이지 열기 (새 탭)</button>';
+  }
+  return h + '</div>';
+}
+
+function render(){
+  ['A','B','C'].forEach(function(v){
+    var g = document.getElementById('g' + v);
+    if (!g) return;
+    g.innerHTML = CASES.map(function(c){
+      return '<div class="case"><div class="ch">' + esc(c.title) + ' <em>· ' + esc(c.memo) + '</em></div>'
+           + '<div class="phone">' + commonTop(c) + guideCard(c, v) + '</div></div>';
+    }).join('');
+  });
+  // 버튼: 실제 이동 대신 "어디로 가는지" 알려준다
+  document.querySelectorAll('.cwd-btn[data-url]').forEach(function(b){
+    b.addEventListener('click', function(){
+      alert('이 버튼이 여는 주소\n\n' + (b.dataset.url || '(주소 없음)'));
+    });
+  });
+}
+render();
+
+/* ?v=A|B|C — 한 안만 단독 보기 */
+(function(){
+  var v = (new URLSearchParams(location.search).get('v') || '').toUpperCase();
+  if (!/^[ABC]$/.test(v)) return;
+  document.querySelectorAll('section[data-v]').forEach(function(s){
+    if (s.dataset.v !== v) s.style.display = 'none';
+  });
+})();
+
+/* ═══════════ 결정사안 선택 ═══════════ */
+var picked = {};
+document.querySelectorAll('.q').forEach(function(q){
+  q.querySelectorAll('.opt').forEach(function(b){
+    b.addEventListener('click', function(){
+      q.querySelectorAll('.opt').forEach(function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      picked[q.dataset.q] = b.dataset.a;
+      paint();
+    });
+  });
+});
+function paint(){
+  var keys = Object.keys(picked);
+  var none = document.getElementById('sumNone');
+  var list = document.getElementById('sumList');
+  var btn = document.getElementById('cpbtn');
+  if (!keys.length) { none.style.display = ''; list.style.display = 'none'; btn.style.display = 'none'; return; }
+  none.style.display = 'none';
+  list.style.display = '';
+  btn.style.display = '';
+  list.innerHTML = keys.map(function(k){ return '<li>' + esc(k) + ' = ' + esc(picked[k]) + '</li>'; }).join('');
+}
+document.getElementById('cpbtn').addEventListener('click', function(){
+  var txt = Object.keys(picked).map(function(k){ return '· ' + k + ' = ' + picked[k]; }).join('\n');
+  var ta = document.createElement('textarea');
+  ta.value = txt; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); alert('복사했습니다 — 그대로 답장에 붙여넣어 주세요.\n\n' + txt); }
+  catch (e) { alert(txt); }
+  ta.remove();
+});
+</script>
+</body>
+</html>
