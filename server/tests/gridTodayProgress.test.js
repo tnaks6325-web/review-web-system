@@ -113,9 +113,12 @@ const CNT = (id, o) => Object.assign({
     /linked_tab_gid/.test(campSql.q));
   t('★ gid 는 tab_configs 에서 읽는다(클라이언트 값 미신뢰)',
     SQL.some(x => /FROM tab_configs/.test(x.q) && /tab_gid/.test(x.q)));
+  // ★ **선언부만** 본다 — 호출부(`tabTodayProgress(db, { sheetId, tabName })`)까지 허용하면
+  //   선언에 tabGid 를 되살려도 호출부 문자열이 대신 통과시킨다(변이시험이 실제로 뚫었다).
+  const TP_DECL = /async function tabTodayProgress\(db, \{([^}]*)\}/.exec(SVC_SRC);
+  t('선언부를 찾았다', !!TP_DECL, SVC_SRC.slice(SVC_SRC.indexOf('async function tabTodayProgress'), SVC_SRC.indexOf('async function tabTodayProgress') + 90));
   t('★ 시그니처가 tabGid 를 받지 않는다(받으면 낡은 화면이 남의 탭 정원을 띄운다)',
-    /async function tabTodayProgress\(db, \{ sheetId, tabName \} = \{\} \)?/.test(SVC_SRC.replace(/\s+/g, ' ')) ||
-    /tabTodayProgress\(db, \{ sheetId, tabName \}/.test(SVC_SRC));
+    !/tabGid/.test(TP_DECL[1]), TP_DECL[1]);
   // ★ 빈 gid 는 조건을 만들지 않는다 — 만들면 gid 없는 공고가 전부 이 탭에 매칭된다.
   //   (스텁은 SQL 을 해석하지 않으므로 쿼리문·바인딩으로 고정한다.)
   t("★ 빈 gid 는 gid 절을 켜지 않는다($3 <> '' 가드)", /\$3 <> ''/.test(campSql.q), campSql.q);
@@ -207,6 +210,9 @@ const CNT = (id, o) => Object.assign({
   t('★ 프론트에 정원 재계산 사본이 없다(daily_limit·이월을 다시 더하지 않는다)',
     !/todayProgress[\s\S]{0,400}(carryAdded|daily_limit|dailyLimit)/.test(WD));
   t('클릭 동작 없음 = 읽기 전용 표기', !/tprog[^>]*onclick/.test(WD));
+  // 지금 tip 은 숫자·고정문구뿐이라 escape 를 빼도 당장은 안 터진다 — 그래서 **규칙 자체를 고정**한다.
+  // (나중에 공고 제목 같은 외부 문자열을 툴팁에 넣는 순간 속성 탈출이 된다.)
+  t('★ title 속성도 escape 를 거친다(외부 문자열이 들어와도 안전하게)', /title="\$\{esc\(tip\)\}"/.test(WD));
 
   console.log(`\n✅ 통과 ${pass}건\n`);
   process.exit(0);
