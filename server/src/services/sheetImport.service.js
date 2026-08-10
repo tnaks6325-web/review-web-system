@@ -595,9 +595,14 @@ async function revertImport({ sheetId = '', tabName = '', by = 'admin' } = {}) {
       await client.query('DELETE FROM raw_sheet_rows WHERE sheet_id = $1 AND tab_gid = $2', [sheetId, tabGid]);
       await client.query('DELETE FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2', [sheetId, tabGid]);
     }
-    await client.query(
-      `UPDATE advertiser_campaigns SET deleted_at = NOW()
-        WHERE sheet_id = $1 AND tab_gid = $2 AND deleted_at IS NULL`, [sheetId, tabGid || null]);
+    /* ★★ **탭 지정 소유만** 해제한다 — 이 기능이 거는 소유는 항상 `tab_gid` 지정이다.
+       gid 를 모르면 우리가 만든 소유가 아니므로 **아무것도 건드리지 않는다**(빈 값을 NULL 로 넘기면
+       `tab_gid IS NULL` = **시트 전체 소유**가 걸려 같은 시트의 다른 탭까지 업체에서 떨어진다). */
+    if (tabGid) {
+      await client.query(
+        `UPDATE advertiser_campaigns SET deleted_at = NOW()
+          WHERE sheet_id = $1 AND tab_gid = $2 AND deleted_at IS NULL`, [sheetId, tabGid]);
+    }
     await client.query('DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2', [sheetId, tabName]);
 
     await client.query('COMMIT');

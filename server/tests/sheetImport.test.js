@@ -382,6 +382,20 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     ok('★ 장부 3권도 함께 지운다', /DELETE FROM review_index/i.test(sqls) &&
       /DELETE FROM index_master/i.test(sqls) && /DELETE FROM raw_sheet_rows/i.test(sqls));
     ok('★ 업체 소유는 소프트 해제(이력 보존)', /UPDATE advertiser_campaigns SET deleted_at/i.test(sqls));
+    ok('★★ 소유 해제는 **탭 지정만** — 시트 전체 소유를 건드리면 같은 시트의 다른 탭까지 업체에서 떨어진다',
+      /UPDATE advertiser_campaigns[\s\S]*?tab_gid = \$2/i.test(sqls) &&
+      !/advertiser_campaigns[\s\S]*?tab_gid IS NULL/i.test(sqls));
+
+    /* gid 를 모르는 탭(우리가 만든 소유가 아니다) — 소유 해제 쿼리를 아예 내보내지 않는다 */
+    const poolNoGid = makePool([
+      [/FROM tab_configs/i, { rows: [{ tab_gid: '', sheetless: true }] }],
+      [/FILTER \(WHERE order_submission_id/i, { rows: [{ with_order: '0', other_source: '0', total: '2' }] }],
+      [/DELETE FROM campaign_participants/i, { rowCount: 2 }],
+    ]);
+    S.__setPoolForTest(poolNoGid);
+    await S.revertImport({ sheetId: 'S', tabName: 'T' });
+    ok('★★ gid 를 모르면 소유를 건드리지 않는다(빈 값이 시트 전체 소유로 번지지 않게)',
+      !poolNoGid.calls.some(c => /UPDATE advertiser_campaigns/i.test(c.sql)));
     ok('★★ campaigns 는 남긴다(같은 시트의 다른 탭이 공유한다)', !/DELETE FROM campaigns/i.test(sqls));
     ok('★ 장부 재생성과 같은 탭 락을 잡는다(반쯤 만들어진 장부가 남지 않게)',
       /pg_advisory_xact_lock/i.test(sqls));
