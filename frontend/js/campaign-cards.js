@@ -543,6 +543,18 @@
     const isDaily = c.state === 'daily_done';
     const quota = Number(c.dailyQuota) || 0;
     const today = Number(c.todayCount) || 0;
+    // ★★ 표 기준 오늘 참여(사용자 확정 2026-08-10, B안) — **관리자 카드에서만** 이 값을 쓴다.
+    //   ㉮ 관리자는 작업표와 같은 숫자를 봐야 한다(지각 참여·수기 입력·외부모집분이 표엔 있는데
+    //      공고엔 없어 종전 표기가 표와 어긋났다 — docs/design-participation-count-mismatch.html).
+    //   ㉯ ★ **리뷰어 카드는 종전(공고 기준) 그대로** — 리뷰어에게 보이는 잔여는 실제 참여 가능
+    //      자리와 같아야 한다. 표 기준으로 바꾸면 "게이지는 찼는데 참여는 되는" 상태가 생긴다
+    //      (참여 허용 판정은 여전히 공고 기준이다).
+    //   ★ null = 셀 수 없음(연결 탭 없음·조회 실패·구버전 백엔드) → 종전 값으로 폴백하고 툴팁이 말한다.
+    // ★★ **보는 사람이 관리자일 때만** 표 기준을 쓴다 — 관리자 모집공고 탭(admin:true)과
+    //   리뷰어 홈·공고 목록을 **관리자 계정으로 볼 때**(_realAdminTok) 가 대상이다.
+    //   일반 리뷰어에게는 종전(공고 기준) 그대로 = 카드의 잔여가 실제 참여 가능 자리와 일치한다.
+    const _seeFilled = admin || _realAdminTok();
+    const todayFilled = (!_seeFilled || c.todayFilled == null) ? null : (Number(c.todayFilled) || 0);
     const isFull = quota > 0 && today >= quota;
     const pct = quota > 0 ? Math.max(3, Math.min(100, Math.round((today / quota) * 100))) : 0;
 
@@ -610,8 +622,13 @@
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
     const timeIcon = (c.opensAt && c.closesAt) ? '🕑' : '⏱';
 
+    // 비관리자 게이지 — 관리자 계정으로 보는 중이면 표 기준 숫자로 그린다(작업보드 툴바와 동기화).
+    //   ★ todayFilled 는 위에서 이미 관리자 게이트를 통과한 값이라, 일반 리뷰어에겐 항상 null = 종전 동작.
+    const pubN = (todayFilled != null) ? todayFilled : today;
+    const pubFull = quota > 0 && pubN >= quota;
+    const pubPct = quota > 0 ? Math.max(3, Math.min(100, Math.round((pubN / quota) * 100))) : 0;
     let gauge = (!isPre && !isClosed && quota > 0)
-      ? `<div class="pgauge${isFull ? ' full' : ''}"><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${today}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pct}%"></div></div></div>`
+      ? `<div class="pgauge${pubFull ? ' full' : ''}"${todayFilled != null ? ` title="작업표에 오늘 채워진 줄 ${pubN}명 / 오늘 정원 ${quota}명 · 공고를 거쳐 확정된 건 ${today}명"` : ''}><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${pubN}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pubPct}%"></div></div></div>`
       : '';
     if (admin) {
       // 관리자 게이지 = 같은 자리에 확정/진행중을 나눠 담는다(리뷰어는 단색 1구간).
@@ -646,13 +663,22 @@
         : '';
       const chips = `${holdTip}${planTip}${carryTip}`;
       if (quota > 0 && !isPre) {
-        const subN = Math.max(0, today - holdNow);          // todayCount = 제출 + 유효홀드
-        const subPct = Math.min(100, Math.round((subN / quota) * 100));
+        const confirmedN = Math.max(0, today - holdNow);     // todayCount = 제출확정 + 유효홀드
+        // 표기 숫자 = 표 기준(있으면). 게이지 채움·완료 판정도 같은 값을 따라간다(숫자와 색이 어긋나지 않게).
+        const shownN = (todayFilled != null) ? todayFilled : confirmedN + holdNow;
+        const shownFull = quota > 0 && shownN >= quota;
+        const subPct = Math.min(100, Math.round((shownN / quota) * 100));
         const holdPct = Math.min(100 - subPct, Math.round((holdNow / quota) * 100));
-        gauge = `<div class="pgauge${isFull ? ' full' : ''}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${chips}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
+        // ★ 차이(표 ≠ 공고 확정)는 지각 참여 확정 대기·수기 입력 신호다 — 표기를 표 기준으로 바꿔도
+        //   그 신호를 잃지 않게 툴팁으로 남긴다(칩을 하나 더 만들면 좁은 카드가 넘친다).
+        const gapTip = (todayFilled != null)
+          ? `작업표에 오늘 채워진 줄 ${shownN}명 / 오늘 정원 ${quota}명`
+            + (shownN !== confirmedN ? ` · 공고를 거쳐 확정된 건 ${confirmedN}명 — 차이 ${Math.abs(shownN - confirmedN)}명은 지각 참여 확정 대기 또는 수기 입력일 수 있습니다` : '')
+          : `공고 기준(표 기준으로 세지 못했습니다) — 확정 ${confirmedN}명 · 진행중 ${holdNow}명`;
+        gauge = `<div class="pgauge${shownFull ? ' full' : ''}" title="${_esc(gapTip)}">
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${chips}<b>${shownN}</b> / ${quota}명${shownFull ? ' 완료' : ''}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
-          <div class="pg-key"><span><i class="sub"></i>확정 <b>${subN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
+          <div class="pg-key"><span><i class="sub"></i>${todayFilled != null ? '표' : '확정'} <b>${shownN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;
       } else {
         // 오늘 집계가 없는 공고도 **자리는 지킨다**(카드 높이 일관) + **왜 없는지 사실대로 말한다**

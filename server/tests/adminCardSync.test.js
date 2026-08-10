@@ -65,8 +65,10 @@ ok('제출확정 시 dismissed_at 해제(confirm↔dismiss 정합)',
 
 /* ── 게이지 분해 ── */
 ok('관리자 게이지는 확정 + 진행중 2구간', /pg-seg sub/.test(cc) && /pg-seg hold/.test(cc));
-ok('진행중 = 유효 홀드(todayCount − holdNow = 확정)',
-  /const subN = Math\.max\(0, today - holdNow\)/.test(cc));
+// ★ 검사 의미 불변: "공고 확정 = todayCount − holdNow". 변수명만 subN → confirmedN 으로 바뀌었다
+//   (2026-08-10 표 기준 표기 도입 — 표시 숫자는 shownN, 공고 확정은 confirmedN 으로 나뉘었다).
+ok('진행중 = 유효 홀드(todayCount − holdNow = 공고 확정)',
+  /const confirmedN = Math\.max\(0, today - holdNow\)/.test(cc));
 ok('서버가 진행중 홀드를 내려준다', /holdNow: cnt\.activeHolds/.test(routes));
 
 /* ── 스펙 줄 ── */

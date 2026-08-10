@@ -370,6 +370,10 @@
   .wtab .tstar.on{opacity:1;color:#f5b301}
   /* 터치 기기는 hover가 없어 별이 '보이지 않는 탭 영역'이 된다 → 항상 옅게 노출해 오탭을 막는다 */
   @media(hover:none){.wtab .tstar{opacity:.35}}
+  /* 정렬 등급 점(작업바 정렬 = 모집중 먼저 · 사용자 확정 2026-08-10) — 왜 이 순서인지 눈으로 읽히게.
+     ★ 등급 2(전건 제출·공고 없음)는 점을 그리지 않는다 = 신호가 아닌 것에 색을 쓰지 않는다. */
+  .wtab .tdot{flex:none;width:6px;height:6px;border-radius:50%;display:inline-block}
+  .wtab .tdot.rec{background:var(--safe)} .wtab .tdot.pend{background:#e08a1e}
   .tb2 .b2empty{color:var(--faint);font-size:12px;display:flex;align-items:center;padding:0 8px}
   .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .advsug.show{display:block}
@@ -2267,6 +2271,11 @@ async function loadTabs(){
     if(r.dailyUnavailable && _prevTd[k]) t.todayDone=true; });
   _wtPruneFinished();        // 마감분 정리(목록이 막 도착한 지점)
   _renderTabList();          // 계정별 캐시로 즉시 렌더
+  // ★ 작업바 정렬(모집중 먼저)의 재료 = campaigns·stats 인데 이 응답엔 없다 → **뒤따라 한 번** 받아
+  //   도착하면 다시 그린다. 60초 클라 캐시 + 30초 서버 캐시라 **탭 전환마다 다시 나가지 않는다**
+  //   (작업바 로드에 stats=1 을 직접 붙이지 않는다는 규율은 그대로 — 여기서는 비차단 후속 호출).
+  //   ★ 실패해도 아무 일도 일어나지 않는다 — 정렬만 종전(즐겨찾기 → 가나다)으로 남는다.
+  _finEnsureStats().then(()=>{ _renderTabList(); if(document.getElementById('wblMount')) _finRenderList(); }).catch(()=>{});
   // ★ 홈 목록이 떠 있는 채로 이 응답이 도착하면 배열이 교체돼 **목록 DOM 의 인덱스가 stale** 이 된다
   //   → 옆 작업을 마감/복귀할 수 있다. 같은 배열로 즉시 다시 그려 인덱스를 맞춘다.
   if(document.getElementById('wblMount')) _finRenderList();
@@ -3605,22 +3614,69 @@ function openTaskFromHome(i){
   STATE.pendingTab={sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'', spreadsheetTitle:t.spreadsheetTitle||''};
   switchView('workdesk');
 }
+/* ══ 작업바 정렬 — 모집중 먼저, 그다음 리뷰 대기 (사용자 확정 2026-08-10) ═══════════════════
+   업체(1단) = 모집중인 작업이 많은 업체가 왼쪽 / 작업(2단) = 모집중 → 리뷰 대기 → 나머지.
+   ★★ **판정 사본 0** — 공고 상태는 `_campRank`(홈 [금일 진행] 필터와 같은 함수)를 그대로 쓴다.
+      여기서 state 문자열 표를 새로 만들면 홈 필터와 작업바가 서로 다른 "모집중"을 갖게 된다.
+   ★ 다만 `soft_full`(총원 충족)만 따로 뺀다 — `_campRank` 는 그것을 1등급(아직 살아있음)으로 보지만,
+      사용자 기준에서 **총원이 다 찬 건 "모집 종료"** 이고 그게 곧 2순위(리뷰 대기)의 정의다.
+   ★ 재료(campaigns·stats)는 `?stats=1` 응답에만 실린다 → 없으면 전부 같은 등급이 되어
+      **종전 정렬(즐겨찾기 → 가나다)로 자연히 폴백**한다(조용한 오정렬 없음). */
+function _wRecruiting(c){ return _campRank(c) <= 1 && (c && c.state) !== 'soft_full'; }
+// 그 작업이 "아직 사람을 받는 중"인가 — 살아있는 공고가 하나라도 있으면 모집중.
+function _wTabRecruiting(t){ const cs=Array.isArray(t&&t.campaigns)?t.campaigns:[]; return cs.some(_wRecruiting); }
+// 아직 리뷰가 안 들어온 건수. 모르면(통계 미도착·집계 실패) 0 — **모르는 것을 앞으로 끌어올리지 않는다**.
+function _wTabPending(t){
+  const s=t&&t.stats; if(!s||s.total==null||s.submitted==null) return 0;
+  return Math.max(0, (+s.total||0)-(+s.submitted||0));
+}
+// 0 = 모집중 · 1 = 모집 종료 + 리뷰 대기 · 2 = 그 외(전건 제출·공고 없음)
+function _wTabRank(t){ return _wTabRecruiting(t) ? 0 : (_wTabPending(t) > 0 ? 1 : 2); }
 function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '' (미지정)
   const favIdx=[], groups=new Map();
   // ★ 마감 작업은 상단 작업바(1·2단)에서 제외 = "작업보드에는 진행 중만"(업체 칩 개수도 자동으로 진행 중 기준).
   //   인덱스는 STATE.tabs 원본 그대로 유지 → selTab(i) 계약 불변(건너뛰기만 한다).
   STATE.tabs.forEach((t,i)=>{ if(isFinished(t)) return; if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
-  // 정렬: 미지정은 항상 마지막 → 즐겨찾기한 업체가 앞 → 나머지 가나다순
+  // 작업(2단) 정렬: 모집중 → 리뷰 대기 → 나머지. 같은 등급이면 남은 건수가 많은 순,
+  //   그래도 같으면 **원래 순서(인덱스)** 로 = 안정 정렬(재렌더마다 칩이 뒤바뀌지 않는다).
+  const sortIdxs = a => a.sort((x,y)=>{
+    const tx=STATE.tabs[x], ty=STATE.tabs[y];
+    const rx=_wTabRank(tx), ry=_wTabRank(ty); if(rx!==ry) return rx-ry;
+    const px=_wTabPending(tx), py=_wTabPending(ty); if(px!==py) return py-px;
+    return x-y;
+  });
+  sortIdxs(favIdx); groups.forEach(sortIdxs);
+  // 업체(1단) 정렬: 미지정은 항상 마지막 → **업체 즐겨찾기(사람이 명시한 결정)가 자동 정렬보다 우선**
+  //   → 모집중 작업 수 많은 순 → 리뷰 대기 작업 수 많은 순 → 가나다순.
+  const stat={};
+  groups.forEach((idxs,k)=>{ let rec=0, pend=0, pendRows=0;
+    idxs.forEach(i=>{ const t=STATE.tabs[i], r=_wTabRank(t);
+      if(r===0) rec++; else if(r===1){ pend++; pendRows+=_wTabPending(t); } });
+    stat[k]={rec,pend,pendRows}; });
   const gkeys=[...groups.keys()].sort((a,b)=>{
     if(!a) return 1; if(!b) return -1;
     const fa=isAdvFav(a), fb=isAdvFav(b);
     if(fa!==fb) return fa?-1:1;
+    if(stat[a].rec!==stat[b].rec) return stat[b].rec-stat[a].rec;
+    if(stat[a].pend!==stat[b].pend) return stat[b].pend-stat[a].pend;
+    // 리뷰 대기 **작업 수**가 같으면 남은 **인원**이 많은 쪽이 앞 — 1건 남은 업체와 90건 남은 업체가
+    // 이름순으로 갈리면 정렬이 하려던 일을 못 한다.
+    if(stat[a].pendRows!==stat[b].pendRows) return stat[b].pendRows-stat[a].pendRows;
     return a.localeCompare(b,'ko');
   });
   const out=[];
-  if(favIdx.length) out.push({key:W_FAV, label:'즐겨찾기', idxs:favIdx});
-  gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k)}));
+  if(favIdx.length) out.push({key:W_FAV, label:'즐겨찾기', idxs:favIdx, stat:null});
+  gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k), stat:stat[k]}));
   return out;
+}
+// 업체 칩 툴팁 — 왜 이 순서인지 말한다(숫자를 지어내지 않고, 모르면 그 사실을 말한다).
+function _wSegTip(g){
+  if(!g.stat) return '즐겨찾기한 작업';
+  if(STATE.campsUnavailable && STATE.statsUnavailable) return '모집 상태를 불러오지 못해 이름순으로 표시합니다';
+  const p=[]; p.push(`모집중 ${g.stat.rec}`); p.push(`리뷰 대기 ${g.stat.pend}`);
+  if(STATE.campsUnavailable) p.push('공고 상태 조회 실패');
+  else if(STATE.statsUnavailable) p.push('제출 집계 조회 실패');
+  return p.join(' · ');
 }
 function _wUnseen(i){ const t=STATE.tabs[i]; return t?(STATE.unseen&&STATE.unseen[`${t.sheetId}\t${t.tabName}`]||0):0; }
 // 활성 세그먼트 결정: 사용자가 고른 것 우선 → 없거나 사라졌으면 현재 탭이 속한 그룹 → 첫 그룹
@@ -3657,7 +3713,7 @@ function _renderTabList(){
     // 별표는 업체 칩에만. 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 안 깨짐
     const star=(isFavSeg||g.key==='')?'' :
       `<span class="segstar${af?' on':''}" title="${af?'업체 즐겨찾기 해제':'업체 즐겨찾기 — 왼쪽 우선 정렬'}" onclick="toggleAdvFav(event,this)">${af?'★':'☆'}</span>`;
-    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
+    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" title="${esc(_wSegTip(g))}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
   }).join('');
   // 2단: 선택 그룹의 탭
   const g=gs.find(x=>x.key===seg);
@@ -3666,7 +3722,9 @@ function _renderTabList(){
     const t=STATE.tabs[i], on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName, f=isFav(t), n=_wUnseen(i);
     // 시트제목은 탭마다 붙이지 않는다(줄이 길어져 탭이 몇 개만 보임) — 선택 시 본문 헤더에 표기.
     //   여기선 호버 툴팁으로만 확인 가능.
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+    // 정렬 등급을 점으로 — 왜 이 순서인지 눈으로 읽히게(초록=모집중 · 앰버=리뷰 대기 · 등급 2는 점 없음).
+    const rk=_wTabRank(t), dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`;
   // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
   seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
@@ -4554,7 +4612,14 @@ function _toast(msg){
 function _tpHtml(tp){
   if(!tp || typeof tp!=='object') return '';
   const d = esc(_fmtKDate(String(tp.dateStr||'')));             // '2026-08-10' → '8/10 (월)' (표기 단일 출처)
-  const done = Number(tp.done)||0, holds = Number(tp.holds)||0;
+  // ★★ 표기 기준 = **표(작업표)** (사용자 확정 2026-08-10, B안) — 아래 표에 오늘 채워진 줄 수를 그대로 쓴다.
+  //   종전 기준(공고를 거쳐 오늘 확정된 수)은 지각 참여·시트 수기 입력·외부모집분을 못 세어
+  //   같은 화면의 표와 자주 어긋났다(진단: docs/design-participation-count-mismatch.html).
+  //   ★ 서버가 못 세면(연결 탭 없음·조회 실패) **종전 값으로 폴백하고 그 사실을 툴팁에 적는다**
+  //     — 조용히 다른 기준으로 바꾸면 "숫자가 왜 줄었지"가 된다.
+  const confirmed = Number(tp.done)||0, holds = Number(tp.holds)||0;
+  const sheetOk = tp.sheetFilled != null;
+  const done = sheetOk ? (Number(tp.sheetFilled)||0) : confirmed;
   const q = (tp.quota==null) ? null : (Number(tp.quota)||0);
   const wrap = (cls,pct,num,sfx,tip)=>`<span class="tprog ${cls}" style="--p:${pct}" title="${esc(tip)}">`
     + `<span class="ring"></span><b class="d">${d}</b><span class="lbl">참여현황</span>`
@@ -4564,7 +4629,13 @@ function _tpHtml(tp){
   // ② 기준을 모름(연결 공고 없음/게시 전) — 구매한 인원은 사실이므로 그대로 두고 분모만 ?.
   if(q===null) return wrap('unk',0,`<b>${done}</b><i> / ?명</i>`,'모집 기준 없음',
     (tp.reason==='no_live_campaign'?'연결된 모집공고가 게시 전이라':'연결된 모집공고가 없어')+' 오늘 모집인원을 정할 수 없습니다. 오늘 구매 '+done+'명.');
-  const tipBase = `오늘 모집 ${q}명 · 구매 완료 ${done}명`+(holds?` · 진행 중 ${holds}명(결제 중)`:'')
+  // 툴팁은 "무엇을 센 숫자인지"와 "공고 기준과 얼마나 다른지"를 말한다 — 차이가 곧 지각 미확정·
+  //   수기 입력 신호라, 표기를 표 기준으로 바꿔도 그 신호를 잃지 않게 한다.
+  const tipBase = `오늘 모집 ${q}명 · `
+    + (sheetOk ? `표에 채워진 줄 ${done}명` : `구매 완료 ${done}명`)
+    + (sheetOk && done!==confirmed ? ` (공고를 거쳐 확정된 건 ${confirmed}명 — 차이 ${Math.abs(done-confirmed)}명은 지각 참여 확정 대기 또는 수기 입력일 수 있습니다)` : '')
+    + (!sheetOk ? ' · 표 기준으로 세지 못해 공고 확정 수로 표시합니다' : '')
+    + (holds?` · 진행 중 ${holds}명(결제 중)`:'')
     + (tp.campaignCount>1?` · 공고 ${tp.campaignCount}개 합산`:'');
   // ③ 오늘은 열지 않는 날(휴무·모집 종료·총원 충족·0명 조절) — "없다"는 사실이므로 회색으로 말한다.
   if(q<=0) return wrap('zero',0,`<b>${done}</b><i>/0명</i>`,'오늘 모집 없음',
