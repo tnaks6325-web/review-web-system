@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>은행 이름 설정 화면 — 시안</title>
+<style>
+/* 외부 리소스 0 — 인터넷 없이도 열립니다 */
+:root{
+  --t1:#1B1F24; --t2:#5A6473; --t3:#8B94A1;
+  --line:#EEF1F5; --line2:#D8DDE5; --card:#fff; --bg:#F5F7FA;
+  --blue:#1B4F9C; --blue-bg:#E0EDFF; --red:#B3382E; --red-bg:#FDECEA;
+  --amber:#8A5A00; --amber-bg:#FFF6E0; --green:#0F6A52; --green-bg:#E5F3EE;
+  color-scheme: light;   /* 다크에서 색이 뒤집혀 "실물과 다르게" 보이지 않도록 고정 */
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--t1);
+  font:14px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+.wrap{max-width:1120px;margin:0 auto;padding:26px 18px 90px}
+
+/* ── 문서 머리 ── */
+.doc-hd{background:linear-gradient(135deg,#1B4F9C,#2E6FD1);color:#fff;border-radius:14px;padding:24px 26px}
+.doc-hd .tag{display:inline-block;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);
+  border-radius:999px;padding:3px 11px;font-size:12px;font-weight:700;margin-bottom:10px}
+.doc-hd h1{margin:0 0 8px;font-size:25px;letter-spacing:-.4px}
+.doc-hd p{margin:0;font-size:13.5px;opacity:.94;line-height:1.7}
+
+h2{margin:34px 0 12px;font-size:19px;letter-spacing:-.3px;display:flex;align-items:center;gap:9px}
+h2 .num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex:0 0 auto;
+  background:var(--blue);color:#fff;border-radius:8px;font-size:13px;font-weight:800}
+h3{margin:20px 0 8px;font-size:15px}
+p{margin:0 0 10px}
+.lead{color:var(--t2);font-size:13.5px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:14px}
+.muted{color:var(--t3)}
+b.hl{background:#FFF2A8;padding:0 3px;border-radius:3px}
+code{background:#F1F3F7;border-radius:4px;padding:1px 5px;font-size:12.5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+/* ── 문제 상황 ── */
+.before{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.before{grid-template-columns:1fr}}
+.bx{border-radius:11px;padding:15px 17px;font-size:13px;line-height:1.7}
+.bx.bad{background:var(--red-bg);border:1px solid #F0C4BE}
+.bx.good{background:var(--green-bg);border:1px solid #BFE0D5}
+.bx h4{margin:0 0 8px;font-size:14px}
+.bx.bad h4{color:var(--red)} .bx.good h4{color:var(--green)}
+.bx ul{margin:6px 0 0;padding-left:19px} .bx li{margin:3px 0}
+
+/* ══════════ 목업(실제 화면 흉내) ══════════ */
+.mock{border:1px solid var(--line2);border-radius:13px;overflow:hidden;background:var(--card);
+  box-shadow:0 4px 20px rgba(20,30,55,.08)}
+.mock-bar{background:#2B3442;color:#fff;padding:7px 14px;font-size:11.5px;display:flex;gap:8px;align-items:center}
+.mock-bar .dot{width:9px;height:9px;border-radius:50%;background:#5A6473}
+.mock-bar .t{opacity:.85}
+.mock-bar .live{margin-left:auto;background:#3D8B5F;border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:700}
+
+.subtabs{display:flex;gap:4px;padding:10px 16px 0;border-bottom:1px solid var(--line);background:#FAFBFD}
+.subtab{padding:8px 15px;font-size:13px;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;
+  cursor:pointer;color:var(--t2);background:none}
+.subtab.on{background:var(--card);border-color:var(--line2);color:var(--blue);font-weight:750;
+  box-shadow:0 2px 0 0 var(--card)}
+.pane{padding:18px 18px 22px}
+.pane.hide{display:none}
+.placeholder{padding:46px 20px;text-align:center;color:var(--t3);font-size:13px;background:#FAFBFD;
+  border:1px dashed var(--line2);border-radius:10px}
+
+/* 요약 바 */
+.sum{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:15px}
+.stat{background:#F5F7FA;border:1px solid var(--line);border-radius:9px;padding:7px 13px;font-size:12.5px}
+.stat b{font-size:16px;margin-right:4px}
+.stat.warn{background:var(--amber-bg);border-color:#F0DDAE;color:var(--amber)}
+.stat.warn b{color:#C97A00}
+
+/* 미인식 큐 */
+.queue{border:1px solid #F0DDAE;background:var(--amber-bg);border-radius:11px;padding:14px 16px;margin-bottom:18px}
+.queue h4{margin:0 0 4px;font-size:14px;color:var(--amber)}
+.queue .qd{font-size:12px;color:#8A6A2A;margin-bottom:10px;line-height:1.6}
+.qrow{display:flex;flex-wrap:wrap;align-items:center;gap:9px;background:#fff;border:1px solid #EFE3C6;
+  border-radius:9px;padding:9px 12px;margin-top:7px}
+.qrow .word{font-weight:800;font-size:14px}
+.qrow .who{font-size:12px;color:var(--t3);flex:1;min-width:120px}
+.qrow .cnt{font-size:11.5px;background:#FFE9B8;color:#8A5A00;border-radius:999px;padding:1px 9px;font-weight:700}
+.qempty{background:#fff;border:1px dashed #EFE3C6;border-radius:9px;padding:16px;text-align:center;
+  color:var(--t3);font-size:12.5px}
+
+/* 도구줄 */
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:11px}
+.search{flex:1;min-width:190px;position:relative}
+.search input{width:100%;padding:8px 11px 8px 30px;border:1px solid var(--line2);border-radius:9px;font-size:13px}
+.search span{position:absolute;left:10px;top:8px;color:var(--t3);font-size:13px}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{padding:6px 12px;border:1px solid var(--line2);border-radius:999px;background:#fff;font-size:12.5px;
+  cursor:pointer;color:var(--t2)}
+.chip.on{background:var(--blue-bg);border-color:var(--blue);color:var(--blue);font-weight:750}
+.chip .n{opacity:.65;margin-left:4px;font-size:11.5px}
+
+/* 표 */
+.tw{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+thead th{background:#F5F7FA;text-align:left;padding:9px 12px;font-size:12px;color:var(--t2);font-weight:700;
+  border-bottom:1px solid var(--line);position:sticky;top:0}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#FAFBFD}
+tbody tr.conflict{background:#FDF3F2}
+tbody tr.justAdded{animation:flash 1.4s ease-out}
+@keyframes flash{from{background:#FFF6D9}to{background:transparent}}
+.codecell{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;font-size:13px;
+  letter-spacing:.5px;white-space:nowrap}
+.namecell{min-width:150px}
+.nm{cursor:text;border-radius:6px;padding:2px 5px;margin:-2px -5px;display:inline-block}
+.nm:hover{background:#F1F3F7;outline:1px dashed var(--line2)}
+.nm .pen{opacity:0;font-size:11px;color:var(--t3);margin-left:5px}
+.nm:hover .pen{opacity:1}
+.namecell input,.qrow select,.addbox input{border:1px solid var(--blue);border-radius:7px;padding:5px 8px;font-size:13px;
+  font-family:inherit}
+.qrow select{border-color:var(--line2);background:#fff;max-width:230px}
+
+/* 키워드 칩 */
+.kw{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.kwchip{display:inline-flex;align-items:center;gap:5px;background:#F1F5FB;border:1px solid #DCE6F5;
+  border-radius:999px;padding:2px 5px 2px 10px;font-size:12.5px;color:#274F86}
+.kwchip.dup{background:var(--red-bg);border-color:#F0C4BE;color:var(--red);font-weight:700}
+.kwchip .x{cursor:pointer;border:0;background:none;color:inherit;opacity:.5;font-size:13px;line-height:1;padding:0 2px}
+.kwchip .x:hover{opacity:1}
+.kwadd{border:1px dashed var(--line2);background:#fff;color:var(--t3);border-radius:999px;padding:2px 10px;
+  font-size:12.5px;cursor:pointer}
+.kwadd:hover{border-color:var(--blue);color:var(--blue)}
+.kwin{border:1px solid var(--blue);border-radius:999px;padding:2px 10px;font-size:12.5px;width:110px;font-family:inherit}
+.usecell{white-space:nowrap;color:var(--t3);font-size:12px}
+.none{color:var(--t3);font-size:12px;font-style:italic}
+
+/* 버튼 */
+.btn{border:1px solid var(--line2);background:#fff;border-radius:8px;padding:6px 12px;font-size:12.5px;
+  cursor:pointer;color:var(--t1);font-family:inherit}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:700}
+.btn.primary:hover{filter:brightness(1.08);color:#fff}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* 저장 바 */
+.savebar{position:sticky;bottom:0;margin-top:14px;background:#20304A;color:#fff;border-radius:10px;
+  padding:11px 15px;display:flex;align-items:center;gap:11px;font-size:13px}
+.savebar.hide{display:none}
+.savebar .s{flex:1}
+.savebar .warn{background:#8A2F26;border-radius:7px;padding:3px 9px;font-size:12px;font-weight:700}
+
+/* 추가 박스 */
+.addbox{display:none;gap:8px;align-items:center;background:#F5F7FA;border:1px solid var(--line2);
+  border-radius:10px;padding:11px 13px;margin-bottom:11px;flex-wrap:wrap}
+.addbox.on{display:flex}
+.addbox label{font-size:12px;color:var(--t2)}
+
+/* 토스트 */
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:#20304A;color:#fff;border-radius:10px;padding:10px 18px;font-size:13px;transition:.22s;
+  pointer-events:none;z-index:50;max-width:88vw;text-align:center}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* 설명용 표 */
+.dt{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.dt th,.dt td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+.dt th{background:#F5F7FA;font-size:12px;color:var(--t2);white-space:nowrap}
+.dt td.c{white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
+.pill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:700}
+.pill.a{background:var(--amber-bg);color:var(--amber)}
+.pill.r{background:var(--red-bg);color:var(--red)}
+.pill.g{background:var(--green-bg);color:var(--green)}
+.pill.b{background:var(--blue-bg);color:var(--blue)}
+
+.steps{counter-reset:s;padding:0;margin:8px 0 0;list-style:none}
+.steps li{counter-increment:s;position:relative;padding:8px 0 8px 38px;border-top:1px solid var(--line)}
+.steps li:first-child{border-top:0}
+.steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:24px;height:24px;
+  background:var(--blue-bg);color:var(--blue);border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:12px;font-weight:800}
+.rule{border-left:4px solid var(--red);background:var(--red-bg);border-radius:0 9px 9px 0;padding:12px 15px;
+  margin:10px 0;font-size:13px;line-height:1.7}
+.rule b{color:var(--red)}
+.note{border-left:4px solid var(--blue);background:#F1F5FB;border-radius:0 9px 9px 0;padding:12px 15px;
+  margin:10px 0;font-size:13px;line-height:1.7}
+.foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);color:var(--t3);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="doc-hd">
+  <span class="tag">시안 · 아직 만들어지지 않은 화면입니다</span>
+  <h1>🏦 은행 이름 설정 — 입금관리 새 탭</h1>
+  <p>리뷰어가 적어 낸 은행 표기(<b>대구아이엠뱅크</b>, <b>카뱅</b> …)를 은행코드로 바꾸는 <b>변환표</b>를
+     담당자가 화면에서 직접 관리하는 안입니다.<br>
+     아래 화면은 <b>가짜 데이터로 실제로 눌러 볼 수 있는 목업</b>입니다 — 눌러도 실제 시스템은 바뀌지 않습니다.</p>
+</div>
+
+<!-- ══════════════ 1 ══════════════ -->
+<h2><span class="num">1</span>왜 필요한가</h2>
+<p class="lead">입금관리의 계좌 보완 창에서 <b class="hl">“은행명 인식불가”</b>가 뜨는 이유입니다.</p>
+
+<div class="card" style="padding:16px 18px">
+  <div style="font-size:13px;color:var(--t2);margin-bottom:10px">실제로 담당자가 만난 화면 (2026-08-10)</div>
+  <div style="border:1px solid var(--line2);border-radius:10px;padding:13px 15px;background:#FAFBFD;font-size:13px">
+    <div style="font-weight:800;margin-bottom:3px">계좌 보완 — 유정화 ·6752</div>
+    <div style="color:var(--t3);font-size:12px;margin-bottom:11px">은행명 인식불가 · 이 명의로 참여한 1건이 함께 처리됩니다.</div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:3px">은행명</div>
+    <div style="border:1px solid var(--line2);border-radius:8px;padding:7px 11px;background:#fff">대구아이엠뱅크</div>
+    <div style="color:var(--red);font-size:12px;margin-top:7px">
+      ⚠ “이체 서식의 은행코드로 바뀌는 값이라 정식 은행명이어야 합니다” → 저장이 막힘</div>
+  </div>
+</div>
+
+<div class="before">
+  <div class="bx bad">
+    <h4>지금 (변환표가 코드 안에 있음)</h4>
+    <ul>
+      <li>시스템이 아는 표기는 <b>미리 적어 둔 목록</b>뿐입니다.</li>
+      <li>대구은행은 <code>대구</code>·<code>iM뱅크</code>는 알지만
+          <b>대구아이엠뱅크</b>는 모릅니다.</li>
+      <li>모르는 표기가 하나 나올 때마다 <b>개발자가 코드를 고쳐 배포</b>해야 합니다.</li>
+      <li>그동안 그 건은 <b>입금 보류</b>로 남습니다.</li>
+    </ul>
+  </div>
+  <div class="bx good">
+    <h4>제안 (담당자가 화면에서 바로)</h4>
+    <ul>
+      <li>막힌 표기가 <b>화면 맨 위에 모여</b> 뜹니다.</li>
+      <li>드롭다운에서 은행을 고르고 [연결] → <b>그 자리에서 보류가 풀립니다</b>.</li>
+      <li>다음부터 같은 표기는 <b>자동으로</b> 인식됩니다.</li>
+      <li>배포·개발자 요청이 필요 없습니다.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════ 2 ══════════════ -->
+<h2><span class="num">2</span>제안 화면 (눌러 보세요)</h2>
+<p class="lead">입금관리 안에 <b>세 번째 탭</b>으로 들어갑니다. 아래는 실제 크기·실제 배치의 목업입니다.</p>
+<div class="note" style="margin-bottom:14px">
+  <b>목업에 담긴 데이터</b> — 지금 시스템이 실제로 쓰고 있는 은행 <b>72개</b>와 그 자동인식 표기,
+  그리고 보내주신 엑셀 두 번째 시트를 합쳐 넣었습니다.<br>
+  그래서 <b>겹침 1건이 일부러 빨갛게</b> 떠 있습니다 — 엑셀의 <code>271 IBK투자증권</code>이
+  시스템의 <code>225 IBK투자증권</code>과 부딪히는 실제 항목입니다(아래 5-ⓑ 참조).
+  <b>겹침</b> 칩을 눌러 확인하고, 빨간 칩의 <b>×</b>로 지우면 저장 버튼이 살아납니다.
+</div>
+
+<div class="mock">
+  <div class="mock-bar"><span class="dot"></span><span class="t">리뷰웹시스템[3버전] › 입금관리</span>
+    <span class="live">목업 — 눌러서 확인해 보세요</span></div>
+
+  <div class="subtabs">
+    <button class="subtab" data-pane="p1">입금 대상</button>
+    <button class="subtab" data-pane="p2">회차</button>
+    <button class="subtab on" data-pane="p3">🏦 은행 이름 설정</button>
+  </div>
+
+  <div class="pane hide" id="p1">
+    <div class="placeholder">지금 쓰고 있는 <b>입금 대상</b> 화면입니다 — 이 시안에서는 바뀌지 않습니다.</div>
+  </div>
+  <div class="pane hide" id="p2">
+    <div class="placeholder">지금 쓰고 있는 <b>회차</b> 화면입니다 — 이 시안에서는 바뀌지 않습니다.</div>
+  </div>
+
+  <div class="pane" id="p3">
+    <!-- 요약 -->
+    <div class="sum">
+      <div class="stat"><b id="sBank">0</b>개 은행</div>
+      <div class="stat"><b id="sKw">0</b>개 자동인식 표기</div>
+      <div class="stat warn" id="sPendWrap"><b id="sPend">0</b>건 인식 못 한 표기</div>
+      <div class="stat" style="background:#FDF3F2;border-color:#F0C4BE;color:#B3382E" id="sConfWrap">
+        <b id="sConf">0</b>건 겹침</div>
+    </div>
+
+    <!-- 미인식 큐 -->
+    <div class="queue">
+      <h4>⚠ 지금 막혀 있는 표기</h4>
+      <div class="qd">리뷰어가 적어 낸 값 중 <b>어느 은행인지 몰라 입금이 보류된</b> 표기입니다.
+        은행을 골라 연결하면 그 건의 보류가 풀리고, 다음부터는 자동으로 인식됩니다.</div>
+      <div id="queue"></div>
+    </div>
+
+    <!-- 도구줄 -->
+    <div class="tools">
+      <div class="search"><span>🔎</span>
+        <input id="q" placeholder="은행명 · 코드 · 자동인식 표기로 찾기 (예: 대구, 031, 카뱅)"></div>
+      <div class="chips" id="filters"></div>
+      <button class="btn" id="addBtn">＋ 은행 추가</button>
+    </div>
+
+    <div class="addbox" id="addBox">
+      <label>은행코드(3자리)</label><input id="newCode" maxlength="3" style="width:70px" placeholder="031">
+      <label>정식 명칭</label><input id="newName" style="width:170px" placeholder="예) 대구은행">
+      <button class="btn primary sm" id="newOk">추가</button>
+      <button class="btn sm" id="newCancel">취소</button>
+      <span class="muted" style="font-size:12px">※ 은행 목록에 없는 새 금융기관이 생겼을 때만 씁니다.</span>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th style="width:78px">은행코드</th>
+          <th style="width:180px">이체 서식에 나가는 정식 명칭</th>
+          <th>자동인식 표기 <span class="muted" style="font-weight:400">— 리뷰어가 이렇게 적어도 이 은행으로 봅니다</span></th>
+          <th style="width:74px">사용</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="empty" class="placeholder" style="display:none;margin-top:10px">찾는 은행이 없습니다.</div>
+
+    <div class="savebar hide" id="savebar">
+      <span class="s" id="saveMsg">바뀐 내용이 있습니다.</span>
+      <button class="btn sm" id="undo" style="background:none;color:#cfd8e6;border-color:#44546E">되돌리기</button>
+      <button class="btn primary sm" id="save">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ 3 ══════════════ -->
+<h2><span class="num">3</span>이 화면에서 하는 일 4가지</h2>
+
+<div class="card">
+  <h3>① 막힌 표기를 연결한다 <span class="pill b">가장 자주 씀</span></h3>
+  <ol class="steps">
+    <li>화면 맨 위 노란 상자에 <b>“대구아이엠뱅크 · 1건”</b>이 떠 있습니다.</li>
+    <li>옆 드롭다운에서 <b>031 대구은행</b>을 고릅니다.</li>
+    <li>[연결하고 풀기]를 누르면 그 표기가 대구은행의 자동인식 표기로 들어갑니다.</li>
+    <li>그 리뷰어의 입금 보류가 풀리고, <b>다음부터 같은 표기는 자동</b>으로 인식됩니다.</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h3>② 이체 서식에 나갈 정식 명칭을 고친다</h3>
+  <p class="muted" style="font-size:13px;margin:0 0 6px">
+    은행에 올리는 이체 파일에는 <b>은행이 인정하는 정식 명칭</b>이 들어가야 거부되지 않습니다.
+    표의 이름을 클릭하면 그 자리에서 고칠 수 있습니다.</p>
+  <div class="note">예: 리뷰어가 <b>“신한”</b>이라고 적어도, 이체 파일에는 <b>“신한은행”</b>이 찍힙니다.
+    리뷰어가 적은 말은 <b>자동인식 표기</b> 칸에, 은행에 보낼 이름은 <b>정식 명칭</b> 칸에 있습니다.</div>
+</div>
+
+<div class="card">
+  <h3>③ 자동인식 표기를 늘리거나 지운다</h3>
+  <p class="muted" style="font-size:13px;margin:0 0 6px">
+    표기 칸의 <b>＋</b>를 눌러 새 말을 추가하고, 칩의 <b>×</b>로 지웁니다.
+    자주 쓰이는 줄임말(<b>카뱅·케뱅·토스</b>)이나 옛 이름(<b>미래에셋대우</b>)을 넣어 두면 보류가 줄어듭니다.</p>
+</div>
+
+<div class="card">
+  <h3>④ 겹침을 잡아낸다 <span class="pill r">저장 막힘</span></h3>
+  <p class="muted" style="font-size:13px;margin:0 0 6px">
+    같은 말이 두 은행에 등록되면 <b>어느 은행인지 정할 수 없어</b> 빨갛게 표시되고 저장이 막힙니다.
+    (목업에서 <b>“국민”</b>을 다른 은행에도 추가해 보면 바로 확인됩니다.)</p>
+</div>
+
+<!-- ══════════════ 4 ══════════════ -->
+<h2><span class="num">4</span>꼭 지켜야 하는 안전 규칙</h2>
+<p class="lead">돈이 나가는 화면이라, 편해지는 것보다 <b>틀리지 않는 것</b>이 먼저입니다.</p>
+
+<div class="rule">
+  <b>규칙 1 — 비슷한 말로 대충 맞추지 않습니다(정확히 같을 때만).</b><br>
+  “하나”라는 말이 들어갔다고 다 하나은행으로 보면 <b>하나증권</b>이 걸립니다.
+  그러면 <b>남의 계좌로 돈이 갑니다.</b> 그래서 등록된 표기와 <b>글자가 정확히 같을 때만</b> 인식합니다
+  (띄어쓰기·대소문자·괄호는 무시).
+</div>
+<div class="rule">
+  <b>규칙 2 — 애매하면 인식하지 않고 담당자에게 넘깁니다.</b><br>
+  모르는 표기를 시스템이 추측해서 넣으면 잘못된 은행으로 이체됩니다.
+  <b>틀린 값보다 빈 값</b>이 낫습니다 — 그래서 “인식불가”로 남겨 사람이 확인하게 합니다.
+</div>
+<div class="rule">
+  <b>규칙 3 — 같은 말을 두 은행에 넣을 수 없습니다.</b><br>
+  “우리”가 두 코드에 걸려 있으면 어느 쪽인지 정할 방법이 없습니다. 겹치면 저장이 막힙니다.
+</div>
+<div class="note">
+  <b>바꾸어도 이미 만든 이체 파일은 바뀌지 않습니다.</b>
+  회차를 만들 때의 은행·계좌·금액은 그 시점 값으로 박제되므로, 이 화면을 고쳐도 과거 회차는 그대로입니다.
+  <b>다음 회차부터</b> 새 설정이 적용됩니다.
+</div>
+
+<!-- ══════════════ 5 ══════════════ -->
+<h2><span class="num">5</span>보내주신 엑셀에서 확인한 것</h2>
+<p class="lead">두 번째 시트의 <b>104줄</b>을 시스템의 현재 표(72개 은행)와 하나씩 대조했습니다.</p>
+
+<h3>ⓐ 넣으면 바로 쓸모 있는 표기 <span class="pill g">권장</span></h3>
+<p class="muted" style="font-size:13px;margin:0 0 4px">엑셀에만 있고 시스템에는 없던 표기입니다 — <b>위 목업에는 이미 넣어 두었습니다</b>(파란 칩으로 보입니다). 실제로 넣으면 그만큼 보류가 줄어듭니다.</p>
+<table class="dt">
+  <tr><th>코드</th><th>정식 명칭</th><th>추가할 표기</th></tr>
+  <tr><td class="c">027</td><td>한국씨티은행</td><td>한국씨티</td></tr>
+  <tr><td class="c">054</td><td>HSBC은행</td><td>HSBC</td></tr>
+  <tr><td class="c">055</td><td>도이치은행</td><td>도이치</td></tr>
+  <tr><td class="c">060</td><td>BOA은행</td><td>BOA</td></tr>
+  <tr><td class="c">061</td><td>비엔피파리바은행</td><td>BNP파리바</td></tr>
+  <tr><td class="c">238</td><td>미래에셋증권</td><td>미래에셋 · 미래에셋대우<span class="muted">(옛 이름)</span></td></tr>
+  <tr><td class="c">263</td><td>현대차증권</td><td>에이치엠씨투자증권<span class="muted">(옛 이름)</span></td></tr>
+  <tr><td class="c">266</td><td>SK증권</td><td>에스케이증권</td></tr>
+  <tr><td class="c">269</td><td>한화투자증권</td><td>한화증권</td></tr>
+  <tr><td class="c">279</td><td>DB금융투자</td><td>동부증권<span class="muted">(옛 이름)</span></td></tr>
+  <tr><td class="c">287</td><td>메리츠증권</td><td>메리츠종금<span class="muted">(옛 이름)</span></td></tr>
+  <tr><td class="c">292</td><td>케이프투자증권</td><td>LIG투자증권<span class="muted">(옛 이름)</span></td></tr>
+  <tr><td class="c">294</td><td>한국포스증권</td><td>펀드온라인코리아<span class="muted">(옛 이름)</span></td></tr>
+</table>
+
+<h3 style="margin-top:22px">ⓑ 같은 말이 두 코드에 있어 <u>그대로는 못 넣는 것</u> <span class="pill r">결정 필요</span></h3>
+<p class="muted" style="font-size:13px;margin:0 0 4px">
+  둘 다 넣으면 어느 은행인지 정할 수 없습니다. <b>어느 쪽을 쓸지 정해 주셔야</b> 합니다.</p>
+<table class="dt">
+  <tr><th>표기</th><th>엑셀에 있는 두 코드</th><th>지금 시스템</th><th>보이는 사실</th></tr>
+  <tr><td>우리</td><td class="c">020 / 022</td><td class="c">020 우리은행</td><td>022는 옛 상업은행 코드로 보입니다</td></tr>
+  <tr><td>국민</td><td class="c">004 / 019</td><td class="c">004 국민은행</td><td>019는 옛 주택은행 계열 코드</td></tr>
+  <tr><td>씨티</td><td class="c">027 / 053</td><td class="c">027 한국씨티은행</td><td>053은 옛 외국계 코드</td></tr>
+  <tr><td>NH투자증권</td><td class="c">247 / 289</td><td class="c">247 NH투자증권</td><td>289는 옛 우리투자증권 코드</td></tr>
+  <tr><td>IBK투자증권</td><td class="c">271</td><td class="c">225 IBK투자증권<br>271 토스증권</td>
+      <td><b>엑셀의 271이 잘못</b>인 것으로 보입니다(같은 271에 토스증권도 적혀 있음)</td></tr>
+</table>
+
+<h3 style="margin-top:22px">ⓒ 시스템 표에 없는 코드 <span class="pill a">확인 필요</span></h3>
+<p class="muted" style="font-size:13px;margin:0 0 4px">
+  대부분 <b>지금은 없어졌거나 다른 은행에 합쳐진</b> 옛 코드입니다.
+  이체 파일에 이 코드를 쓰면 은행이 거부할 수 있어, <b>기본은 “쓰지 않음”</b>을 제안합니다.</p>
+<table class="dt">
+  <tr><th>코드</th><th>엑셀의 이름</th><th>제안</th></tr>
+  <tr><td class="c">005</td><td>외환</td><td>“외환”을 <b>081 하나은행</b>의 표기로 넣기(이미 그렇게 동작 중)</td></tr>
+  <tr><td class="c">006 / 019</td><td>주택 / 국민</td><td><b>004 국민은행</b>으로 흡수</td></tr>
+  <tr><td class="c">021 / 026</td><td>구조흥 / 구신한</td><td><b>088 신한은행</b>으로 흡수</td></tr>
+  <tr><td class="c">022</td><td>우리</td><td><b>020 우리은행</b>으로 흡수</td></tr>
+  <tr><td class="c">025</td><td>서울</td><td>없어진 은행 — 쓰지 않음</td></tr>
+  <tr><td class="c">050 / 053 / 056 / 083 / 289</td>
+      <td>저축 · 씨티 · 암로 · 평화 · NH투자증권</td><td>옛 코드 — 쓰지 않음(필요하면 표기만 흡수)</td></tr>
+</table>
+
+<h3 style="margin-top:22px">ⓓ 그밖에 정해 주셔야 하는 것</h3>
+<table class="dt">
+  <tr><th style="width:150px">항목</th><th>선택지</th><th>제안</th></tr>
+  <tr><td>누가 고칠 수 있나</td><td>관리자만 / 관리자+AE담당자</td>
+      <td><b>관리자만</b> — 잘못 넣으면 돈이 다른 은행으로 갑니다</td></tr>
+  <tr><td>탭 위치</td><td>입금관리 안의 탭 / 설정 화면 안</td>
+      <td><b>입금관리 안</b> — 막힌 건을 보다가 그 자리에서 고치는 흐름</td></tr>
+  <tr><td>엑셀 한 번에 넣기</td><td>필요 / 불필요</td>
+      <td><b>처음 한 번만</b> 위 ⓐ 목록을 넣어 두면 이후엔 화면에서 한 건씩</td></tr>
+  <tr><td>고친 이력</td><td>남김 / 안 남김</td>
+      <td><b>남김</b> — 누가 언제 어떤 표기를 어느 은행에 붙였는지</td></tr>
+</table>
+
+<div class="foot">
+  이 문서는 <b>시안(제안)</b>입니다 — 화면은 아직 만들어지지 않았고, 위 목업의 조작은 실제 시스템에 반영되지 않습니다.<br>
+  목업 데이터: 시스템의 현재 은행 표(72개) + 보내주신 엑셀 두 번째 시트(104줄)를 합쳐 만들었습니다.
+</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═══ 목업 데이터 (시스템 현재 표 + 보내주신 엑셀을 합친 값) ═══ */
+var BANKS = [{"code":"089","name":"케이뱅크","kw":["케이","케이뱅크은행","k뱅크","케뱅","kbank"],"use":2},{"code":"002","name":"산업은행","kw":["kdb","kdb산업","산업"],"use":0},{"code":"003","name":"기업은행","kw":["ibk","ibk기업","ibk기업은행","기업"],"use":2},{"code":"004","name":"국민은행","kw":["kb","kb국민","kb국민은행","국민"],"use":12},{"code":"007","name":"수협은행","kw":["수협"],"use":0},{"code":"008","name":"수출입은행","kw":[],"use":0},{"code":"011","name":"NH농협은행","kw":["nh","nh농협","농협","농협은행","단위농협","지역농협"],"use":5},{"code":"012","name":"지역농축협","kw":[],"use":0},{"code":"020","name":"우리은행","kw":["우리"],"use":4},{"code":"023","name":"SC제일은행","kw":["sc","sc제일","제일","제일은행"],"use":0},{"code":"027","name":"한국씨티은행","kw":["씨티","시티","시티은행","씨티은행","한국씨티"],"use":0},{"code":"031","name":"대구은행","kw":["대구","im뱅크","im","imbank"],"use":3},{"code":"032","name":"부산은행","kw":["부산"],"use":0},{"code":"034","name":"광주은행","kw":["광주"],"use":0},{"code":"035","name":"제주은행","kw":["제주"],"use":0},{"code":"037","name":"전북은행","kw":["전북"],"use":0},{"code":"039","name":"경남은행","kw":["경남"],"use":0},{"code":"041","name":"우리카드","kw":[],"use":0},{"code":"045","name":"새마을금고","kw":["새마을","mg새마을금고","mg"],"use":1},{"code":"048","name":"신협","kw":["신협중앙회"],"use":0},{"code":"052","name":"모건스탠리은행","kw":[],"use":0},{"code":"054","name":"HSBC은행","kw":["HSBC"],"use":0},{"code":"055","name":"도이치은행","kw":["도이치"],"use":0},{"code":"057","name":"제이피모간체이스은행","kw":[],"use":0},{"code":"058","name":"미즈호은행","kw":[],"use":0},{"code":"059","name":"엠유에프지은행","kw":[],"use":0},{"code":"060","name":"BOA은행","kw":["BOA"],"use":0},{"code":"061","name":"비엔피파리바은행","kw":["BNP파리바"],"use":0},{"code":"062","name":"중국공상은행","kw":[],"use":0},{"code":"063","name":"중국은행","kw":[],"use":0},{"code":"064","name":"산림조합중앙회","kw":["산림조합"],"use":0},{"code":"065","name":"대화은행","kw":[],"use":0},{"code":"066","name":"교통은행","kw":[],"use":0},{"code":"067","name":"중국건설은행","kw":[],"use":0},{"code":"071","name":"우체국","kw":["우체국예금보험","우체국은행"],"use":0},{"code":"081","name":"하나은행","kw":["하나","keb하나","keb","keb하나은행","외환","외환은행"],"use":6},{"code":"088","name":"신한은행","kw":["신한"],"use":9},{"code":"090","name":"카카오뱅크","kw":["카카오","카뱅","카카오뱅크은행","kakaobank"],"use":21},{"code":"092","name":"토스뱅크","kw":["토스","토스뱅크은행","toss"],"use":7},{"code":"209","name":"유안타증권","kw":[],"use":0},{"code":"218","name":"KB증권","kw":[],"use":0},{"code":"221","name":"상상인증권","kw":[],"use":0},{"code":"222","name":"한양증권","kw":[],"use":0},{"code":"223","name":"리딩투자증권","kw":[],"use":0},{"code":"224","name":"BNK투자증권","kw":[],"use":0},{"code":"225","name":"IBK투자증권","kw":[],"use":0},{"code":"227","name":"다올투자증권","kw":[],"use":0},{"code":"238","name":"미래에셋증권","kw":["미래에셋","미래에셋대우"],"use":0},{"code":"240","name":"삼성증권","kw":[],"use":0},{"code":"243","name":"한국투자증권","kw":[],"use":0},{"code":"247","name":"NH투자증권","kw":[],"use":0},{"code":"261","name":"교보증권","kw":[],"use":0},{"code":"262","name":"하이투자증권","kw":[],"use":0},{"code":"263","name":"현대차증권","kw":["에이치엠씨투자증권"],"use":0},{"code":"264","name":"키움증권","kw":[],"use":0},{"code":"265","name":"이베스트투자증권","kw":[],"use":0},{"code":"266","name":"SK증권","kw":["에스케이증권"],"use":0},{"code":"267","name":"대신증권","kw":[],"use":0},{"code":"269","name":"한화투자증권","kw":["한화증권"],"use":0},{"code":"270","name":"하나증권","kw":[],"use":0},{"code":"271","name":"토스증권","kw":["IBK투자증권"],"use":0},{"code":"272","name":"NH선물","kw":[],"use":0},{"code":"278","name":"신한투자증권","kw":[],"use":0},{"code":"279","name":"DB금융투자","kw":["동부증권"],"use":0},{"code":"280","name":"유진투자증권","kw":[],"use":0},{"code":"287","name":"메리츠증권","kw":["메리츠종금"],"use":0},{"code":"288","name":"카카오페이증권","kw":[],"use":0},{"code":"290","name":"부국증권","kw":[],"use":0},{"code":"291","name":"신영증권","kw":[],"use":0},{"code":"292","name":"케이프투자증권","kw":["LIG투자증권"],"use":0},{"code":"293","name":"한국증권금융","kw":[],"use":0},{"code":"294","name":"한국포스증권","kw":["펀드온라인코리아"],"use":0}];
+
+/* 아직 어느 은행인지 모르는 표기 — 실제 화면에서는 입금 보류 건에서 자동으로 모입니다 */
+var PENDING = [
+  { word:'대구아이엠뱅크', cnt:1, who:'유정화 ·6752' },
+  { word:'카뱅',          cnt:2, who:'김선민 ·5940 외 1명' },
+  { word:'농협중앙회',     cnt:1, who:'전일지 ·9280' }
+];
+
+/* ═══ 화면 상태 ═══ */
+var STATE = { q:'', filter:'all', dirty:0, adding:null, editing:null, added:{} };
+var ORIGINAL = JSON.stringify(BANKS);
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function norm(s){ return String(s||'').replace(/[\s\-_.·,()]/g,'').toLowerCase(); }
+function toast(m){ var t=$('toast'); t.textContent=m; t.classList.add('on');
+  clearTimeout(toast._t); toast._t=setTimeout(function(){ t.classList.remove('on'); },2300); }
+
+/* 겹침(같은 표기가 두 은행에) 찾기 — 저장을 막는 유일한 사유 */
+function dupMap(){
+  var seen={}, dup={};
+  BANKS.forEach(function(b){
+    b.kw.forEach(function(k){
+      var n=norm(k);
+      if(seen[n] && seen[n]!==b.code) dup[n]=true;
+      seen[n]=b.code;
+    });
+    // 정식 명칭끼리도 겹치면 안 된다
+    var n2=norm(b.name);
+    if(seen[n2] && seen[n2]!==b.code) dup[n2]=true;
+    seen[n2]=b.code;
+  });
+  return dup;
+}
+
+/* 필터 정의 — 화면의 칩과 표가 **같은 판정**을 쓴다(숫자와 목록이 갈리지 않게) */
+var FILTERS = [
+  { k:'all',  label:'전체',        fn:function(){ return true; } },
+  { k:'bank', label:'은행',        fn:function(b){ return b.code<'200'; } },
+  { k:'sec',  label:'증권·기타',    fn:function(b){ return b.code>='200'; } },
+  { k:'nokw', label:'표기 없음',    fn:function(b){ return !b.kw.length; } },
+  { k:'dup',  label:'겹침',        fn:function(b,d){ return b.kw.concat([b.name]).some(function(k){ return d[norm(k)]; }); } }
+];
+
+function visible(){
+  var d=dupMap(), q=norm(STATE.q);
+  var f=FILTERS.filter(function(x){ return x.k===STATE.filter; })[0]||FILTERS[0];
+  return BANKS.filter(function(b){
+    if(!f.fn(b,d)) return false;
+    if(!q) return true;
+    return norm(b.code).indexOf(q)>=0 || norm(b.name).indexOf(q)>=0
+        || b.kw.some(function(k){ return norm(k).indexOf(q)>=0; });
+  });
+}
+
+function render(){
+  var d=dupMap();
+  /* 요약 */
+  $('sBank').textContent = BANKS.length;
+  $('sKw').textContent = BANKS.reduce(function(a,b){ return a+b.kw.length; },0);
+  $('sPend').textContent = PENDING.length;
+  $('sPendWrap').style.display = PENDING.length ? '' : 'none';
+  var nConf = Object.keys(d).length;
+  $('sConf').textContent = nConf;
+  $('sConfWrap').style.display = nConf ? '' : 'none';
+
+  /* 필터 칩 */
+  $('filters').innerHTML = FILTERS.map(function(f){
+    var n = BANKS.filter(function(b){ return f.fn(b,d); }).length;
+    return '<button class="chip'+(STATE.filter===f.k?' on':'')+'" data-f="'+f.k+'">'
+      + esc(f.label) + '<span class="n">'+n+'</span></button>';
+  }).join('');
+
+  /* 미인식 큐 */
+  $('queue').innerHTML = PENDING.length ? PENDING.map(function(p,i){
+    var opts = BANKS.map(function(b){
+      return '<option value="'+b.code+'">'+esc(b.code+'  '+b.name)+'</option>'; }).join('');
+    return '<div class="qrow">'
+      + '<span class="word">“'+esc(p.word)+'”</span>'
+      + '<span class="cnt">'+p.cnt+'건</span>'
+      + '<span class="who">'+esc(p.who)+'</span>'
+      + '<select data-pi="'+i+'"><option value="">— 어느 은행인지 고르세요 —</option>'+opts+'</select>'
+      + '<button class="btn primary sm" data-link="'+i+'">연결하고 풀기</button>'
+      + '</div>';
+  }).join('') : '<div class="qempty">막혀 있는 표기가 없습니다 — 모든 은행명이 인식되고 있습니다.</div>';
+
+  /* 표 */
+  var list = visible();
+  $('empty').style.display = list.length ? 'none' : '';
+  $('rows').innerHTML = list.map(function(b){
+    var conf = b.kw.concat([b.name]).some(function(k){ return d[norm(k)]; });
+    var kw = b.kw.map(function(k,ki){
+      return '<span class="kwchip'+(d[norm(k)]?' dup':'')+'">'+esc(k)
+        + '<button class="x" data-del="'+b.code+'" data-ki="'+ki+'" title="지우기">×</button></span>';
+    }).join('');
+    var add = (STATE.adding===b.code)
+      ? '<input class="kwin" id="kwin" placeholder="표기 입력 후 Enter">'
+      : '<button class="kwadd" data-add="'+b.code+'">＋</button>';
+    var name = (STATE.editing===b.code)
+      ? '<input id="nmin" value="'+esc(b.name)+'" style="width:100%">'
+      : '<span class="nm" data-edit="'+b.code+'">'+esc(b.name)+'<span class="pen">✎</span></span>';
+    return '<tr class="'+(conf?'conflict ':'')+(STATE.added[b.code]?'justAdded':'')+'">'
+      + '<td class="codecell">'+esc(b.code)+'</td>'
+      + '<td class="namecell">'+name+'</td>'
+      + '<td><div class="kw">'+(kw||'<span class="none">등록된 표기 없음 — 정식 명칭 그대로 적어야만 인식됩니다</span>')+add+'</div></td>'
+      + '<td class="usecell">'+(b.use?b.use+'건':'–')+'</td></tr>';
+  }).join('');
+
+  /* 저장 바 */
+  var bar=$('savebar');
+  if(STATE.dirty){
+    bar.classList.remove('hide');
+    $('saveMsg').innerHTML = nConf
+      ? '<span class="warn">겹치는 표기 '+nConf+'건</span> &nbsp;어느 은행인지 정할 수 없어 저장할 수 없습니다.'
+      : '바뀐 내용 '+STATE.dirty+'건 — 저장하면 <b>다음 회차부터</b> 적용됩니다.';
+    $('save').disabled = !!nConf;
+  } else bar.classList.add('hide');
+
+  var f1=$('kwin'); if(f1) f1.focus();
+  var f2=$('nmin'); if(f2){ f2.focus(); f2.select(); }
+}
+
+/* ═══ 조작 ═══ */
+function find(code){ return BANKS.filter(function(b){ return b.code===code; })[0]; }
+function touch(){ STATE.dirty++; }
+
+document.addEventListener('click', function(e){
+  var t=e.target;
+
+  var st=t.closest && t.closest('.subtab');
+  if(st){ document.querySelectorAll('.subtab').forEach(function(x){ x.classList.remove('on'); });
+    document.querySelectorAll('.pane').forEach(function(x){ x.classList.add('hide'); });
+    st.classList.add('on'); $(st.dataset.pane).classList.remove('hide'); return; }
+
+  if(t.dataset && t.dataset.f){ STATE.filter=t.dataset.f; render(); return; }
+
+  if(t.dataset && t.dataset.link!==undefined){
+    var i=+t.dataset.link;
+    var sel=document.querySelector('select[data-pi="'+i+'"]');
+    if(!sel || !sel.value){ toast('먼저 어느 은행인지 골라 주세요'); return; }
+    var b=find(sel.value), p=PENDING[i];
+    if(b.kw.some(function(k){ return norm(k)===norm(p.word); })){ toast('이미 등록된 표기입니다'); return; }
+    b.kw.push(p.word); b.use=(b.use||0)+p.cnt;
+    PENDING.splice(i,1); touch(); STATE.added[b.code]=1;
+    toast('“'+p.word+'” → '+b.code+' '+b.name+' 에 연결했습니다 · 보류 '+p.cnt+'건이 풀립니다');
+    render(); setTimeout(function(){ delete STATE.added[b.code]; },1500); return;
+  }
+
+  if(t.dataset && t.dataset.del){
+    var bb=find(t.dataset.del); bb.kw.splice(+t.dataset.ki,1); touch(); render(); return; }
+
+  if(t.dataset && t.dataset.add){ STATE.adding=t.dataset.add; STATE.editing=null; render(); return; }
+  if(t.dataset && t.dataset.edit){ STATE.editing=t.dataset.edit; STATE.adding=null; render(); return; }
+
+  if(t.id==='addBtn'){ $('addBox').classList.toggle('on'); $('newCode').focus(); return; }
+  if(t.id==='newCancel'){ $('addBox').classList.remove('on'); return; }
+  if(t.id==='newOk'){
+    var c=$('newCode').value.replace(/[^0-9]/g,''), n=$('newName').value.trim();
+    if(c.length<2||!n){ toast('은행코드와 정식 명칭을 모두 적어 주세요'); return; }
+    c=('00'+c).slice(-3);
+    if(find(c)){ toast('이미 있는 코드입니다 — 표에서 찾아 고쳐 주세요'); return; }
+    BANKS.push({ code:c, name:n, kw:[], use:0 });
+    BANKS.sort(function(a,b){ return a.code<b.code?-1:1; });
+    STATE.added[c]=1; touch(); $('newCode').value=''; $('newName').value='';
+    $('addBox').classList.remove('on'); toast(c+' '+n+' 을(를) 추가했습니다'); render();
+    setTimeout(function(){ delete STATE.added[c]; },1500); return;
+  }
+
+  if(t.id==='save'){
+    toast('저장했습니다 — 다음 회차부터 적용됩니다 (목업이라 실제로 저장되지는 않습니다)');
+    STATE.dirty=0; render(); return; }
+  if(t.id==='undo'){
+    BANKS = JSON.parse(ORIGINAL); STATE.dirty=0; STATE.adding=null; STATE.editing=null;
+    PENDING = [
+      { word:'대구아이엠뱅크', cnt:1, who:'유정화 ·6752' },
+      { word:'카뱅',          cnt:2, who:'김선민 ·5940 외 1명' },
+      { word:'농협중앙회',     cnt:1, who:'전일지 ·9280' }];
+    toast('되돌렸습니다'); render(); return; }
+
+  /* 입력칸 밖을 누르면 편집 종료 */
+  if(t.id!=='kwin' && STATE.adding){ commitKw(); }
+  if(t.id!=='nmin' && STATE.editing){ commitName(); }
+});
+
+function commitKw(){
+  var el=$('kwin'); if(!el){ STATE.adding=null; return; }
+  var v=el.value.trim(), b=find(STATE.adding); STATE.adding=null;
+  if(v && b && !b.kw.some(function(k){ return norm(k)===norm(v); })){ b.kw.push(v); touch(); }
+  render();
+}
+function commitName(){
+  var el=$('nmin'); if(!el){ STATE.editing=null; return; }
+  var v=el.value.trim(), b=find(STATE.editing); STATE.editing=null;
+  if(v && b && v!==b.name){ b.name=v; touch(); }
+  render();
+}
+
+document.addEventListener('keydown', function(e){
+  if(e.target.id==='kwin'){ if(e.key==='Enter') commitKw(); if(e.key==='Escape'){ STATE.adding=null; render(); } }
+  if(e.target.id==='nmin'){ if(e.key==='Enter') commitName(); if(e.key==='Escape'){ STATE.editing=null; render(); } }
+  if(e.target.id==='newCode'||e.target.id==='newName'){ if(e.key==='Enter') $('newOk').click(); }
+});
+$('q').addEventListener('input', function(e){ STATE.q=e.target.value; render(); });
+
+render();
+</script>
+</body>
+</html>
