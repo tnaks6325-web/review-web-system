@@ -452,6 +452,61 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     if (savedN) require.cache[notePath] = savedN; else delete require.cache[notePath];
     if (savedC) require.cache[cutPath] = savedC; else delete require.cache[cutPath];
 
+    /* ── [G-2] 수리 — "등록은 됐는데 안 보이는" 작업 되살리기 ── */
+    console.log('\n[G-2] 수리(repair) — 가져오기가 막힌 작업의 유일한 복구 경로');
+    {
+      const dupRow2 = (o) => [[/FROM tab_configs/i, { rows: [Object.assign({
+        tab_name: '체험단시트양식1', tab_gid: '1405976532', sheetless: true, advertiser_name: null,
+        board_rows: '109', with_order: '109', index_rows: '109', in_master: true, in_mirror: false,
+      }, o)] }], [/FROM advertisers/i, { rows: [{ id: 'adv_1', name: '수진코리아', status: 'active' }] }]];
+
+      // ① 장부 재생성
+      const seenLed = [];
+      require.cache[ledPath] = { id: ledPath, filename: ledPath, loaded: true, exports: {
+        rebuildLedgers: async (a) => { seenLed.push(a); return { ok: true, mirrorRows: 118, indexRows: 109, submittedCount: 104 }; },
+      } };
+      S.__setPoolForTest(makePool(dupRow2({})));
+      const rp = await S.repairRegistered({ sheetId: 'SID', tabName: '체험단시트양식1', action: 'rebuild', by: '만두' });
+      ok('★★ 장부 재생성으로 되살린다(가져오기=덮어쓰기가 아니다)',
+        rp.ok === true && rp.done.action === 'rebuild' && rp.done.indexRows === 109);
+      ok('★ 실행부는 기존 rebuildLedgers 위임(사본 0)', seenLed.length === 1 && seenLed[0].tabName === '체험단시트양식1');
+      ok('★ 고친 뒤 **갱신된 진단**을 함께 돌려준다(고쳐졌는지 숫자로 보인다)',
+        !!rp.tab && !!rp.judge && typeof rp.judge.blocked === 'boolean');
+
+      // ② 시트 기반이면 거부(시트가 진실원본 — 반영 점검이 맞는 도구)
+      S.__setPoolForTest(makePool(dupRow2({ sheetless: false })));
+      let e1 = null;
+      try { await S.repairRegistered({ sheetId: 'SID', tabName: '체험단시트양식1', action: 'rebuild' }); } catch (e) { e1 = e; }
+      ok('★★ 시트 기반 작업은 거부하고 맞는 도구를 안내한다', e1 && e1.code === 'not_sheetless' && /반영 점검/.test(e1.message));
+
+      // ③ 업체 지정 — gid 는 서버가 등록부에서 다시 구한 값
+      const seenOwn = [];
+      require.cache[tbPath] = { id: tbPath, filename: tbPath, loaded: true, exports: {
+        setOwnership: async (a) => { seenOwn.push(a); return { ok: true }; },
+      } };
+      S.__setPoolForTest(makePool(dupRow2({})));
+      const rp2 = await S.repairRegistered({ sheetId: 'SID', tabName: '체험단시트양식1', action: 'assign', advertiserId: 'adv_1' });
+      ok('업체 지정으로 업체관리 표에 나타나게 한다', rp2.ok === true && rp2.done.advertiserName === '수진코리아');
+      ok('★★ gid 는 **등록부에서 다시 구한 값**을 쓴다(화면이 보낸 gid 를 믿지 않는다)',
+        seenOwn.length === 1 && seenOwn[0].tabGid === '1405976532');
+
+      // ④ gid 없으면 거부 — 빈 값이면 시트 전체 소유가 된다
+      S.__setPoolForTest(makePool(dupRow2({ tab_gid: '' })));
+      let e2 = null;
+      try { await S.repairRegistered({ sheetId: 'SID', tabName: 'T', action: 'assign', advertiserId: 'adv_1' }); } catch (e) { e2 = e; }
+      ok('★★ gid 없으면 거부(빈 값이면 시트 전체 소유가 걸려 다른 탭까지 묶인다)', e2 && e2.code === 'no_gid');
+
+      // ⑤ 미등록·잘못된 action
+      S.__setPoolForTest(makePool([[/FROM tab_configs/i, { rows: [] }]]));
+      let e3 = null;
+      try { await S.repairRegistered({ sheetId: 'SID', tabName: 'T', action: 'rebuild' }); } catch (e) { e3 = e; }
+      ok('★ 등록되지 않은 작업은 수리 대상이 아니다', e3 && e3.code === 'not_registered');
+      S.__setPoolForTest(makePool(dupRow2({})));
+      let e4 = null;
+      try { await S.repairRegistered({ sheetId: 'SID', tabName: 'T', action: '' }); } catch (e) { e4 = e; }
+      ok('★ 무엇을 고칠지 안 정하면 거부(조용히 아무것도 안 하지 않는다)', e4 && e4.code === 'bad_action');
+    }
+
     /* ── [H] 라우트·화면 ── */
     console.log('\n[H] 라우트 · 화면 배선');
     const router = require('../src/routes/trackB.routes');
@@ -461,7 +516,7 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
       mw: (l.route.stack || []).map(s => s.handle.name),
     }));
     const find = (p) => stack.find(r => r.path === p);
-    ['/sheet-import/preview', '/sheet-import/run', '/sheet-import/revert'].forEach(p => {
+    ['/sheet-import/preview', '/sheet-import/run', '/sheet-import/revert', '/sheet-import/repair'].forEach(p => {
       const r = find(p);
       ok(`라우트 존재 — ${p}`, !!r && r.methods.includes('post'));
       ok(`★★ ${p} 는 adminOrMaster (두 번째 등록 창구라 AE 에게 열지 않는다)`,
@@ -500,12 +555,15 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     ok('★ 실행은 confirm 을 거친다(되돌리기 있어도 파괴적 조작)', /_siRun\(\)[\s\S]{0,900}confirm\(/.test(fh));
     ok('★ 주소 입력 중 재렌더하지 않는다(IME 조합 보호) — 값은 상태로만 받는다',
       /oninput="_siS\.url=this\.value"/.test(fh));
-    /* ★★ 화면은 **서버가 준 blockers 를 그리기만** 한다 — 여기서 사유 코드를 보고 다시 판정하면
-       "화면은 초록인데 서버가 거부"가 구조적으로 가능해진다. 사유 코드 문자열이 화면에 없어야 한다.
-       (탭 고르기로 이어지는 gid_* 두 코드만 예외 — 그건 판정이 아니라 다음 행동 분기다.) */
-    ok('★★ 판정 사본 0 — 화면에 서버 사유 코드가 없다(gid 분기 제외)',
-      /p\.blockers\s*\|\|\s*\[\]/.test(fh) &&
-      !/'no_phone_column'|'already_registered'|'header_unrecognizable'|'no_rows'/.test(fh));
+    /* ★★ 화면은 **서버가 준 blockers 로만 잠근다** — 사유 코드를 보고 스스로 "막을지"를 다시
+       판정하면 "화면은 초록인데 서버가 거부"가 구조적으로 가능해진다.
+       ★ 구분: 코드로 **조치를 고르는 것**(gid → 탭 고르기, not_in_list → 장부 재생성 버튼)은
+         재판정이 아니라 매핑이라 허용한다. 서버가 그 사유를 안 주면 버튼도 안 그려진다.
+         반면 **막을지 말지를 정하는 판정 코드**는 화면에 있으면 안 된다. */
+    ok('★★ 잠금은 서버 blockers 존재로만 판정한다',
+      /const blocked=\(p\.blockers\|\|\[\]\)\.length>0/.test(fh));
+    ok('★★ 판정 사본 0 — 막을지 말지를 정하는 사유 코드가 화면에 없다',
+      !/'no_phone_column'|'header_unrecognizable'|'no_rows'|'registered_empty'/.test(fh));
     ok('★ 서버가 준 blockers 로 [다음] 을 잠근다',
       /blocked\?'disabled':''/.test(fh));
     /* ★★ 막을 때 사유·현재 상태를 그린다 — 이유 없이 막으면 "어디에도 못 찾겠다"가 된다(실사용 신고). */
@@ -518,6 +576,19 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
        (변이시험이 실제로 뚫었다: blocker 쪽 `_siDupTail(b.tab)` 을 지워도 초록이었다). */
     ok('★★ 막을 때도 상태 숫자를 붙인다', /_siDupTail\(b\.tab\)/.test(fh));
     ok('★ 경고에도 같은 사유·상태를 붙인다', /w\.reasons\|\|\[\]/.test(fh) && /_siDupTail\(w\.tab\)/.test(fh));
+    /* ★★ 수리 버튼 — "왜 안 보이는지는 알았는데 고칠 데가 없는" 두 번째 막다른 길 방지 */
+    /* ★ 호출 검사에서 **정의부를 먼저 지운다** — `function _siFixHtml(b)` 가 `_siFixHtml(b)` 에
+       그대로 매칭되어, 호출을 지워도 정의부가 대신 통과시킨다(변이시험이 실제로 뚫었다). */
+    const fhNoDef = fh.replace(/function\s+_siFixHtml\([^)]*\)/g, '');
+    ok('★★ 진단에 수리 버튼을 잇는다',
+      /_siFixHtml\(b\)/.test(fhNoDef) && /function _siFixHtml\(/.test(fh));
+    ok('★ 장부 재생성은 **무시트 작업에만** 버튼을 그린다(시트 기반은 사유만)',
+      /t\.sheetless[\s\S]{0,200}_siFix\('rebuild'\)/.test(fh) && /반영 점검/.test(fh));
+    ok('★ 업체 지정은 업체를 고른 뒤에만 보낸다(빈 값으로 요청하지 않는다)',
+      /if\(!advId\)\{ toast\('업체를 고르세요\.'\); return; \}/.test(fh));
+    ok('★★ 수리 대상은 **등록명**(리네임으로 시트 탭명과 다를 수 있다)',
+      /b\.tab&&b\.tab\.tabName\)\|\|p\.tabName/.test(fh));
+    ok('★ 고친 뒤 상태를 다시 읽어 화면에 반영한다', /_siFix[\s\S]{0,1200}await _siPreview\(\)/.test(fh));
     ok('CSS 는 si- 접두로 스코프', /\.si-ov\{/.test(fh) && /\.si-mo\{/.test(fh));
 
     /* ★★ 헤더 칸 수 ≡ 행 칸 수 — 열을 끼워 넣을 때 가장 흔히 깨지는 자리(업체관리 표와 같은 계약). */

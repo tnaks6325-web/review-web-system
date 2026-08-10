@@ -1296,6 +1296,11 @@
   .si-lock>b:first-child{display:block;margin-bottom:2px}
   .si-why{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line2);font-size:12px;color:var(--muted);line-height:1.6}
   .si-dupst{margin-top:5px;font-size:11.5px;color:var(--faint)}
+  .si-fix{margin-top:9px;padding-top:9px;border-top:1px dashed var(--line2);display:flex;flex-direction:column;gap:7px;align-items:flex-start}
+  .si-fixnote{font-size:11.5px;color:var(--muted);line-height:1.55}
+  .si-fixrow{display:flex;gap:7px;align-items:center;width:100%;flex-wrap:wrap}
+  .si-fixrow .si-tf{flex:1;min-width:170px;width:auto}
+  .si-fix .btn.xs{padding:5px 11px;font-size:12px}
   .si-kpis{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   .si-kpis>div{flex:1 1 110px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 10px;text-align:center}
   .si-kpis .k{font-size:10.5px;color:var(--faint)}
@@ -11192,9 +11197,10 @@ function _siStep2(){
   }).join('');
   return `<div class="si-b">
     ${blocked?`<div class="si-lock"><b>가져올 수 없습니다</b>${(p.blockers||[]).map(b=>
-        /* ★ "왜 안 보이는지"를 서버가 준 사유 그대로 잇는다 — 이유 없이 막으면 막다른 길이다. */
+        /* ★ "왜 안 보이는지"를 서버가 준 사유 그대로 잇고, **고칠 수 있는 것은 그 자리에서** 고친다.
+           ★ 가져오기(덮어쓰기)는 여전히 막힌 채다 — 수리는 없는 것만 다시 만드는 별개 경로. */
         esc(b.message)+((b.reasons||[]).length?'<div class="si-why">'+(b.reasons||[]).map(r=>'· '+esc(r.message)).join('<br>')+
-          (_siDupTail(b.tab))+'</div>':'')).join('<br>')}</div>`
+          (_siDupTail(b.tab))+_siFixHtml(b)+'</div>':'')).join('<br>')}</div>`
       :`<div class="si-box ok"><b>✓ 읽었습니다</b><br>${esc(p.sheetTitle||'')} › 탭 <b>${esc(p.tabName||'')}</b> · 머리글은 ${p.headerRow}번째 줄</div>`}
     <div class="si-kpis">
       <div><div class="k">시트에 적힌 줄</div><div class="v">${c.total==null?'?':c.total}</div></div>
@@ -11224,6 +11230,50 @@ function _siDupTail(t){
   return `<div class="si-dupst">표 ${n(t.boardRows)}줄 · 검색 명단 ${n(t.indexRows)}명 · 주문 ${n(t.withOrder)}건`+
     ` · 작업 등록부 ${t.inMaster?'있음':'없음'} · 시트 사본 ${t.inMirror?'있음':'없음'}`+
     ` · 업체 ${t.advertiserName?esc(t.advertiserName):'미지정'}${t.sheetless?' · 무시트':''}</div>`;
+}
+/* ★★ 진단이 짚은 원인을 **그 자리에서** 고치는 버튼 — 없으면 "왜 안 보이는지는 알았는데
+   고칠 데가 없는" 또 다른 막다른 길이 된다. 버튼은 **고칠 수 있는 사유에만** 붙인다
+   (눌러도 아무 일 없는 버튼을 두지 않는다). */
+function _siFixHtml(b){
+  const t=b&&b.tab; if(!t) return '';
+  const codes=(b.reasons||[]).map(r=>r.code);
+  let h='';
+  if(codes.indexOf('not_in_list')>=0){
+    h += t.sheetless
+      ? `<button class="btn pri xs" onclick="_siFix('rebuild')">🔧 장부 다시 만들기</button>
+         <span class="si-fixnote">표 ${t.boardRows==null?'?':t.boardRows}줄에서 검색 명단·작업 등록부·시트 사본을 다시 만듭니다(내용은 그대로).</span>`
+      : `<span class="si-fixnote">시트 기반 작업이라 여기서 만들지 않습니다 — [반영 점검] 화면의 [↻ 시트 새로고침]을 이용하세요.</span>`;
+  }
+  if(codes.indexOf('no_advertiser')>=0){
+    const opts=(STATE.advs||[]).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+    h += `<div class="si-fixrow"><select id="siFixAdv" class="si-tf"><option value="">— 업체를 고르세요 —</option>${opts}</select>
+      <button class="btn pri xs" onclick="_siFix('assign')">🔗 이 업체로 지정</button></div>`;
+  }
+  return h?`<div class="si-fix">${h}</div>`:'';
+}
+async function _siFix(action){
+  const S=_siS, p=S&&S.pv; if(!p||S.busy) return;
+  let advId='';
+  if(action==='assign'){
+    const el=document.getElementById('siFixAdv'); advId=(el&&el.value)||'';
+    if(!advId){ toast('업체를 고르세요.'); return; }
+  }
+  /* ★ 대상은 **서버가 등록부에서 다시 찾은 그 탭** — 등록명이 시트 탭명과 다를 수 있어
+     (리네임) 화면의 탭명이 아니라 blocker 가 알려 준 등록명을 보낸다. */
+  const b=(p.blockers||[]).find(x=>x.code==='already_registered');
+  const tabName=(b&&b.tab&&b.tab.tabName)||p.tabName;
+  S.busy=true; _siRender();
+  const r=await api('/api/trackb/sheet-import/repair',{method:'POST',
+    body:JSON.stringify({ sheetId:p.sheetId, tabName, action, advertiserId:advId })}).catch(()=>null);
+  S.busy=false;
+  if(!r||!r.ok){ toast((r&&r.error)||'고치지 못했습니다.'); _siRender(); return; }
+  const d=r.done||{};
+  toast(action==='rebuild'
+    ? `장부를 다시 만들었습니다 — 검색 명단 ${d.indexRows}명 · 시트 사본 ${d.mirrorRows}행`
+    : `${d.advertiserName} 업체로 지정했습니다`);
+  /* 상태를 다시 읽어 화면에 반영(고쳐졌는지 숫자로 보인다) + 업체 목록·개요도 갱신 */
+  await _siPreview();
+  try{ await refreshAdvCounts(); }catch(_){}
 }
 function _siBack(n){ const S=_siS; if(!S) return; if(n===1){ S.pv=null; S.tabs=null; S.gid=''; } S.step=n; S.err=''; _siRender(); }
 function _siNext3(){ const S=_siS; const el=document.getElementById('siName'); if(el) S.name=el.value; S.step=3; _siRender(); }

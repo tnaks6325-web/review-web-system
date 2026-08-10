@@ -492,6 +492,14 @@ router.post('/sheet-import/run', authMiddleware, adminOrMasterMiddleware, async 
     }));
   } catch (err) { _importErr(err, res, next); }
 });
+/* 수리 — "등록은 됐는데 어디에도 안 보이는" 작업을 되살린다(가져오기=덮어쓰기가 **아니다**).
+   ★ 주문이 붙어 있어 가져오기가 막힌 작업의 **유일한 복구 경로**라 같은 권한(adminOrMaster)으로 연다. */
+router.post('/sheet-import/repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, action, advertiserId } = req.body || {};
+    res.json(await sheetImport.repairRegistered({ sheetId, tabName, action, advertiserId, by: _by(req) }));
+  } catch (err) { _importErr(err, res, next); }
+});
 router.post('/sheet-import/revert', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body || {};
