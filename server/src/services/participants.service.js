@@ -487,7 +487,11 @@ async function listActiveTabs({ limit = 500 } = {}) {
        ★ tab_configs 는 이미 등록 게이트라 LEFT JOIN 이 행을 늘리지 않는다(탭당 1행 PK). */
     `SELECT rst.sheet_id AS "sheetId", rst.spreadsheet_title AS "spreadsheetTitle",
             rst.tab_gid AS "tabGid", rst.tab_name AS "tabName", rst.row_count AS "rowCount",
-            COALESCE(tc.sheetless, FALSE) AS "sheetless"
+            COALESCE(tc.sheetless, FALSE) AS "sheetless",
+            /* ★ workKind — [＋ 블로거 추가] 버튼을 어느 작업에 보일지(M5-2). tab_configs 는 이미
+               조인돼 있어 **쿼리 순증 0**. 판정 최종 권한은 서버(공고 > 탭)이고 이 값은 표시용 힌트다 —
+               그래서 화면은 'review' 로 **명시된** 작업만 숨기고 빈 값(미지정)은 열어 둔다(모르는 것을 단정하지 않는다). */
+            COALESCE(tc.work_kind, '') AS "workKind"
        FROM raw_sheet_tabs rst
        LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
       WHERE rst.is_system_tab = FALSE

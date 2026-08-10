@@ -165,7 +165,10 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
   /* ══════════════ F. 업체 링크 일원화 ══════════════ */
   console.log('\n[F] 리뷰웹시스템[3버전] 화면에는 구글시트 링크가 없다 (업체 링크 일원화)');
   {
-    const wd = noLineComments(readFe('workdesk.html'));
+    // ★ placeholder 는 링크가 아니라 **붙여넣을 자리 안내**다(작업 가져오기 마법사의 시트 주소 입력칸) —
+    //   그것까지 세면 "사람이 주소를 가져오는" 정상 창구가 이 가드에 걸린다. 링크 조립만 센다.
+    const wd = noLineComments(readFe('workdesk.html'))
+      .replace(/placeholder="[^"]*"/g, '').replace(/placeholder='[^']*'/g, '');
     const hits = (wd.match(/https:\/\/docs\.google\.com/g) || []).length;
     ok('★ workdesk.html 에 구글시트 직링크 0 — 광고주·내부 모두 리뷰웹 화면에서 끝낸다', hits === 0);
   }
