@@ -189,6 +189,23 @@ await ta('★★ 시트 기반 탭이면 handled:false = 호출부 종전 경로
   assert.strictEqual(res.handled, false);
   assert.ok(!db.queries.some(x => /UPDATE campaign_participants/.test(x.sql)), '시트 탭인데 작업표를 건드렸다');
 });
+await ta('★★ 무시트 판정 예외도 handled:false = 호출부 종전 경로(fail-open)', async () => {
+  // 판정 자체가 던지는 경우 — handled:true 로 접으면 시트 기반 탭의 memo 가 조용히 사라진다
+  const db = stubDb();
+  sheetlessStatus.__setPoolForTest(db);
+  const scopePath = require.resolve('../src/utils/sheetlessScope');
+  const oldScope = require.cache[scopePath];
+  require.cache[scopePath] = { exports: { isSheetless: async () => { throw new Error('down'); } } };
+  try {
+    const res = await sheetlessStatus.markSheetlessMemo({
+      sheetId: 'S', tabName: 'T', rowIndex: 7, memo: 'x', blog: true });
+    assert.strictEqual(res.handled, false, '판정 실패인데 handled:true — 시트 경로가 막힌다');
+    assert.strictEqual(db.queries.length, 0);
+  } finally {
+    sheetlessStatus.__setPoolForTest(null);
+    if (oldScope) require.cache[scopePath] = oldScope; else delete require.cache[scopePath];
+  }
+});
 await ta('★ 빈 memo 는 관여하지 않는다(빈 값으로 칸을 덮지 않는다)', async () => {
   for (const m of ['', '   ', null, undefined]) {
     const { res, db } = await callMemo({}, { memo: m, blog: true });
@@ -233,6 +250,11 @@ t('★ 무시트 memo 기록을 제출 완료 분기에서 호출', () => {
   const i1 = submitSrc.indexOf("kind: 'submit'");
   const i2 = submitSrc.indexOf('markSheetlessMemo');
   assert.ok(i1 > 0 && i2 > i1 && (i2 - i1) < 1200, '완료 분기 밖이거나 미호출');
+});
+t('★★ 무시트 기록에도 같은 blog 판정을 넘긴다(시트 경로와 칸이 갈리면 안 된다)', () => {
+  const i = submitSrc.indexOf('markSheetlessMemo');
+  const block = submitSrc.slice(i, i + 300);
+  assert.ok(/blog: _isBlog/.test(block), '무시트 기록에 고정값을 넘겼다 — 시트 경로와 다른 칸에 쓴다');
 });
 t('★ memo 기록 실패가 제출을 죽이지 않는다(fail-soft)', () => {
   const i = submitSrc.indexOf('markSheetlessMemo');
