@@ -123,13 +123,23 @@ const R = (startDate, n, tab = 'T1') => ({ sheetId: 'S1', tabName: tab, startDat
   t('게이지 채움·완료 판정도 같은 값을 따라간다(숫자와 색이 어긋나지 않게)',
     /shownN \/ quota/.test(admBlock) && /const shownFull = quota > 0 && shownN >= quota/.test(admBlock));
   t('★ 차이를 카드 툴팁으로 남긴다', /지각 참여 확정 대기 또는 수기 입력/.test(admBlock));
-  t('★★ 리뷰어 카드는 종전(공고 기준) 그대로 — 참여 허용 판정과 어긋나면 안 된다', (() => {
-    // 비관리자 게이지는 `admin` 분기 **밖**에서 today(=todayCount) 로 그려진다.
-    const pre = CC.slice(CC.indexOf('let gauge = (!isPre && !isClosed && quota > 0)'), CC.indexOf('if (admin) {'));
-    return /<b>\$\{today\}<\/b> \/ \$\{quota\}명/.test(pre) && !/todayFilled/.test(pre);
-  })());
+  // ★★ 홈 모집공고 카드도 같은 숫자를 쓴다(사용자 확정 2026-08-10) — 단 **보는 사람이 관리자일 때만**.
+  //   일반 리뷰어에게는 종전(공고 기준) 그대로여야 한다: 참여 허용 판정이 공고 기준이라
+  //   리뷰어 화면까지 표 기준으로 바꾸면 "게이지는 찼는데 참여는 되는" 상태가 생긴다.
+  t('★★ 표 기준은 관리자 게이트 뒤에만(일반 리뷰어는 종전 동작)',
+    /const _seeFilled = admin \|\| _realAdminTok\(\);/.test(CC)
+    && /const todayFilled = \(!_seeFilled \|\| c\.todayFilled == null\) \? null :/.test(CC));
+  t('비관리자 게이지도 같은 값을 쓴다(관리자 계정으로 홈을 볼 때 카드=작업보드)',
+    /const pubN = \(todayFilled != null\) \? todayFilled : today;/.test(CC));
+  t('★ 홈 카드도 완료 판정·채움을 표시 숫자에 맞춘다(39/42 인데 "완료"로 칠해지지 않게)',
+    /const pubFull = quota > 0 && pubN >= quota;/.test(CC) && /pubN \/ quota/.test(CC)
+    && /class="pgauge\$\{pubFull \? ' full' : ''\}"/.test(CC));
+  t('★ 공개 목록 API 가 재료를 싣는다(홈 카드의 유일한 출처)',
+    /view\.todayFilled = filledMap\.map\.get\(_k\)/.test(ROUTES) && /_listCache = \{ at: now\.getTime\(\)[^}]*filledMap \}/.test(ROUTES));
+  t('★ 목록 캐시(5초) 안에서 계산한다(요청마다 돌지 않게)',
+    ROUTES.indexOf('const { todayFilledMap, KEY: _fKey }') > ROUTES.indexOf("router.get('/list'"));
   t('★ 구버전 백엔드(필드 부재)는 종전 동작 — null 로 접어 폴백',
-    /const todayFilled = \(c\.todayFilled == null\) \? null :/.test(CC));
+    /c\.todayFilled == null\) \? null : \(Number\(c\.todayFilled\) \|\| 0\)/.test(CC));
 
   console.log(`\n✅ 통과 ${pass}건\n`);
   process.exit(0);
