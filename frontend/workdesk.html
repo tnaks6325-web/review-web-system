@@ -1124,6 +1124,10 @@
   .ovm-chip[disabled]{opacity:.5;cursor:not-allowed}
   .ovm-chip .n{font-weight:800}
   .ovm-advs{flex:1;overflow:auto;padding:8px 7px}
+  /* 거래처 등록 드로어의 "시트가 목록에 없나요?" 안내 — 그 목록엔 시스템이 아는 시트만 나온다 */
+  .ovm-impbox{border:1px dashed var(--accent);border-radius:11px;padding:12px 14px;background:var(--accent-soft);
+    font-size:12px;line-height:1.65;color:var(--ink);display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+  .ovm-impbox .btn{align-self:stretch;text-align:center}
   .ovm-foot{flex:none;border-top:1px solid var(--line);padding:9px 10px}
   .ovm-unm{display:flex;align-items:center;gap:7px;width:100%;font:inherit;font-size:11.5px;font-weight:700;color:var(--warn);text-align:left;
     background:var(--warn-soft);border:1px solid color-mix(in srgb,var(--warn) 28%,transparent);border-radius:9px;padding:7px 9px;cursor:pointer}
@@ -10200,7 +10204,14 @@ function _ovmAddAdvHtml(){
         <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
         <button id="advCreateBtn" class="btn pri assignbtn" disabled onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
       </div>
-    </div>`;
+    </div>
+    ${isAdmin?`<div class="sect"><div class="st">찾는 시트가 목록에 없나요?</div>
+      <div class="ovm-impbox">
+        <div>위 목록에는 <b>시스템이 이미 아는 시트</b>만 나옵니다. 접수를 거치지 않아
+          <b>업체관리·작업보드 어디에도 없는 시트</b>는 여기에 뜨지 않습니다.<br>
+          그런 시트는 <b>구글시트 탭 주소</b>를 붙여넣어 가져올 수 있습니다.</div>
+        <button class="btn pri" onclick="openSheetImport('')">＋ 시트에서 가져오기</button>
+      </div></div>`:''}`;
 }
 // 거래처 등록 폼 마운트 후 — AE 자동완성 목록 로드(종전 showAddAdvertiser 말미와 동일).
 function _ovmAfterAddMount(){
