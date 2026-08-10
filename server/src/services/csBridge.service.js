@@ -290,4 +290,9 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
   }
 }
 
-module.exports = { campaignKeyOf, postReviewEditRequest, postReviewEditDecision, markReviewEditCancelled, postInspectionReject };
+/* ★ 관리자 → 리뷰어 단문 안내는 위 함수가 하는 일 그대로다(스레드 없으면 생성 · admin_unread 0 ·
+     닉네임 치환 · SSE 푸시 · 절대 throw 안 함). 사본을 만들면 그 방어가 한쪽에서만 풀리므로
+     **이름만 하나 더 열어** 다른 용도(입금 실패 안내 등)가 같은 실행부를 쓰게 한다. */
+const postAdminNotice = postInspectionReject;
+
+module.exports = { campaignKeyOf, postReviewEditRequest, postReviewEditDecision, markReviewEditCancelled, postInspectionReject, postAdminNotice };

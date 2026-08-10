@@ -286,9 +286,39 @@ router.get('/participation-brief', async (req, res) => {
         LIMIT 1`,
       [sheetId, ownGid, tabName]
     );
+    /* ★ M2: 이 행의 **입금 결과**(리뷰비 이체). 리뷰어가 "언제 · 어떤 이름으로" 들어왔는지를
+       확인할 곳이 지금까지 없었다(입금완료 배지뿐).
+       ★★ 리뷰어에게 나가는 값이라 **계좌번호·관리자 실명·은행 응답 원문은 싣지 않는다** —
+         통장표시(입금명)는 리뷰어 통장에 실제로 찍히는 이름이라 노출해도 되는 값이다.
+       ★ 실패 건은 사유를 자세히 적지 않고 "계좌 정보를 확인해 주세요"로 통일(사용자 확정 ⑤).
+       ★ 읽기 전용·fail-soft — 실패해도 나머지 brief 는 그대로 나간다. */
+    let payment = null;
+    try {
+      const { rows: pay } = await pool.query(
+        `SELECT status, paid_at, amount, transfer_memo
+           FROM payment_batch_items
+          WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+            AND status IN ('paid','failed')
+          ORDER BY (status = 'paid') DESC, created_at DESC
+          LIMIT 1`,
+        [sheetId, tabName, rowIndex]
+      );
+      if (pay.length) {
+        payment = pay[0].status === 'paid'
+          ? { status: 'paid', paidAt: pay[0].paid_at, amount: Number(pay[0].amount || 0), memo: pay[0].transfer_memo || '' }
+          : { status: 'failed' };
+      }
+    } catch (_) { /* 표시용 — fail-soft */ }
+
     // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만). ★ D: 그래도 작업 옵션은 알려준다
     //   — 리뷰 형태는 공고가 아니라 **그 행**에 적힌 지시라 공고 유무와 무관하다.
-    if (!camps.length) return res.json({ ok: true, brief: workOptions.length ? { workOptions } : null });
+    //   ★ 입금 결과도 공고와 무관하므로 같은 규율로 함께 내려준다.
+    if (!camps.length) {
+      const only = {};
+      if (workOptions.length) only.workOptions = workOptions;
+      if (payment) only.payment = payment;
+      return res.json({ ok: true, brief: Object.keys(only).length ? only : null });
+    }
     const c = camps[0];
 
     // 상품 URL: 연결 작업오더 product_url → 공고 landing_url 폴백 (읽기만 · fail-soft)
@@ -321,6 +351,7 @@ router.get('/participation-brief', async (req, res) => {
         productLines,
         reviewGuide,
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
+        payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'failed'} | null
       },
     });
   } catch (err) {
