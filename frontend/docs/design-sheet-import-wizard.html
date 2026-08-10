@@ -1,0 +1,523 @@
+<meta charset="utf-8">
+<title>시트에서 가져오기 — 화면 시안</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{
+    color-scheme:light;
+    --bg:#f4f5f7; --card:#fff; --bd:#e3e6ec; --tx:#1f2430; --mut:#77808f;
+    --pri:#2f4468; --blue:#2563eb; --grn:#2e9e57; --amb:#b45309; --red:#d64545;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font:14px/1.65 -apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .page{max-width:1180px;margin:0 auto;padding:0 18px 90px}
+
+  .top{background:linear-gradient(135deg,#1f2a44,#2f4468);color:#fff;padding:34px 0 30px;margin-bottom:22px}
+  .top .page{padding-bottom:0}
+  .top .tag{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);
+            border-radius:999px;padding:3px 11px;font-size:12px;margin-bottom:11px}
+  .top h1{margin:0 0 8px;font-size:26px;letter-spacing:-.02em}
+  .top p{margin:0;color:#d7e0f0;font-size:14.5px}
+
+  .note{background:#fff;border:1px solid var(--bd);border-left:4px solid var(--blue);
+        border-radius:0 10px 10px 0;padding:13px 17px;margin:14px 0;font-size:13.5px;color:#3b4359}
+  .note b{color:var(--tx)}
+
+  h2{margin:34px 0 12px;font-size:17px;padding-bottom:8px;border-bottom:2px solid #dfe3ea}
+  h2 small{font-weight:400;color:var(--mut);font-size:13px;margin-left:8px}
+
+  /* ── 업체관리 화면 축소 재현 ── */
+  .mock{background:var(--card);border:1px solid var(--bd);border-radius:12px;overflow:hidden;
+        box-shadow:0 1px 3px rgba(20,30,60,.06)}
+  .mock .mtop{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--bd);background:#fafbfd}
+  .mock .mtop .dot{width:9px;height:9px;border-radius:50%;background:#dfe3ea}
+  .mock .mtop .ttl{font-weight:700;font-size:13px;color:#4a5268;margin-left:4px}
+  .own{display:flex;min-height:330px}
+  .side{width:210px;border-right:1px solid var(--bd);padding:12px 10px;background:#fbfcfe;flex:0 0 210px}
+  .side .sh{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--mut);
+            font-weight:700;margin:0 4px 8px}
+  .advit{padding:7px 9px;border-radius:7px;font-size:13px;cursor:pointer;margin-bottom:2px}
+  .advit:hover{background:#eef2f9}
+  .advit.on{background:#e6eefb;font-weight:700;color:#1d4ed8}
+  .advit .sub{display:block;font-size:11.5px;color:var(--mut);font-weight:400}
+  .side .imp{margin-top:12px;padding-top:10px;border-top:1px dashed #dfe3ea}
+  .body{flex:1;padding:14px 16px;min-width:0}
+  .bhead{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .bhead h3{margin:0;font-size:16px}
+  .bhead .sp{flex:1}
+
+  table.g{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.g th,table.g td{border:1px solid var(--bd);padding:6px 8px;text-align:left;white-space:nowrap}
+  table.g th{background:#f2f4f8;font-size:11.5px;color:#4a5268;font-weight:700}
+  table.g td.c{text-align:center}
+  .empty{border:1.5px dashed #d6dbe4;border-radius:10px;padding:26px 18px;text-align:center;color:var(--mut);font-size:13px}
+
+  /* 버튼 */
+  .btn{border:1px solid var(--bd);background:#fff;border-radius:8px;padding:6px 12px;font-size:13px;
+       cursor:pointer;font-family:inherit;color:var(--tx);white-space:nowrap}
+  .btn:hover{background:#f5f7fb}
+  .btn.pri{background:var(--pri);border-color:var(--pri);color:#fff;font-weight:700}
+  .btn.pri:hover{filter:brightness(1.1)}
+  .btn.go{background:var(--grn);border-color:var(--grn);color:#fff;font-weight:700}
+  .btn.go:hover{filter:brightness(1.07)}
+  .btn.imp{background:#eef4ff;border-color:#c3d5f5;color:#1d4ed8;font-weight:700;width:100%;text-align:left}
+  .btn.imp:hover{background:#e2ecfd}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.sm{padding:4px 9px;font-size:12px}
+
+  /* ── 모달 ── */
+  .ov{position:fixed;inset:0;background:rgba(18,24,38,.55);display:none;align-items:flex-start;
+      justify-content:center;padding:34px 16px;z-index:50;overflow:auto}
+  .ov.on{display:flex}
+  .mo{background:#fff;border-radius:14px;width:100%;max-width:840px;box-shadow:0 22px 60px rgba(10,18,40,.34);overflow:hidden}
+  .mo .mh{display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--bd);background:#fafbfd}
+  .mo .mh h3{margin:0;font-size:16.5px}
+  .mo .mh .sp{flex:1}
+  .mo .mh .x{border:0;background:0;font-size:21px;line-height:1;color:#8a93a3;cursor:pointer;padding:2px 6px}
+  .mo .mb{padding:20px 22px}
+  .mo .mf{display:flex;gap:8px;align-items:center;padding:14px 20px;border-top:1px solid var(--bd);background:#fafbfd}
+  .mo .mf .sp{flex:1}
+  .mo .mf .hint{font-size:12.5px;color:var(--mut)}
+
+  /* 단계 표시 */
+  .steps{display:flex;gap:6px;padding:12px 20px;background:#f5f7fb;border-bottom:1px solid var(--bd)}
+  .steps .s{flex:1;text-align:center;font-size:12px;color:#98a0ae;padding:5px 4px;border-radius:7px;position:relative}
+  .steps .s .n{display:inline-block;width:19px;height:19px;line-height:19px;border-radius:50%;
+               background:#e1e5ec;color:#8a93a3;font-size:11px;font-weight:700;margin-right:5px}
+  .steps .s.on{color:var(--pri);font-weight:700;background:#e6eefb}
+  .steps .s.on .n{background:var(--pri);color:#fff}
+  .steps .s.dn{color:var(--grn)}
+  .steps .s.dn .n{background:var(--grn);color:#fff}
+
+  label.fl{display:block;font-size:12.5px;font-weight:700;color:#4a5268;margin:0 0 5px}
+  input.tf,select.tf{width:100%;border:1px solid #d6dbe4;border-radius:8px;padding:9px 11px;font-size:13.5px;
+                     font-family:inherit;color:var(--tx);background:#fff}
+  input.tf:focus,select.tf:focus{outline:2px solid #bcd0f5;outline-offset:-1px;border-color:#93b4ea}
+  .fh{font-size:12.5px;color:var(--mut);margin-top:6px}
+
+  .box{border:1px solid var(--bd);border-radius:10px;padding:14px 16px;margin:12px 0;background:#fff}
+  .box.tint{background:#f8faff;border-color:#d6e0f5}
+  .box.warnb{background:#fff8f0;border-color:#f4d9b4}
+  .box.okb{background:#f2fbf5;border-color:#bfe6cd}
+  .box.redb{background:#fff5f5;border-color:#f2c9c9}
+  .box h4{margin:0 0 8px;font-size:13.5px}
+
+  .kpis{display:flex;gap:9px;flex-wrap:wrap;margin:4px 0 2px}
+  .kpis>div{flex:1 1 120px;background:#fff;border:1px solid var(--bd);border-radius:9px;padding:9px 11px;text-align:center}
+  .kpis .k{font-size:11.5px;color:var(--mut)}
+  .kpis .v{font-size:20px;font-weight:700;letter-spacing:-.02em;margin-top:1px}
+
+  .maplist{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .mp{border:1px solid var(--bd);border-radius:7px;padding:4px 9px;font-size:12.5px;background:#fff}
+  .mp b{font-weight:700}
+  .mp .r{font-size:11px;border-radius:999px;padding:1px 7px;margin-left:5px}
+  .r-key{background:#e6f0ff;color:#1d4ed8}
+  .r-st{background:#fdf0e3;color:#b45309}
+  .r-keep{background:#eef0f3;color:#5a6172}
+  .r-auto{background:#eaf7ef;color:#1c7a45}
+
+  .rows{max-height:230px;overflow:auto;border:1px solid var(--bd);border-radius:9px;margin-top:8px}
+  .rows table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .rows th{position:sticky;top:0;background:#f2f4f8;font-size:11.5px;padding:6px 8px;text-align:left;
+           border-bottom:1px solid var(--bd);z-index:1;font-weight:700;color:#4a5268}
+  .rows td{padding:5px 8px;border-bottom:1px solid #f0f2f6;white-space:nowrap}
+  .rows tr.off td{opacity:.5;background:#fbfbfc}
+  .rows tr.off td .why{color:var(--amb);font-size:11.5px}
+  .rows td.c{text-align:center}
+
+  .bar{height:8px;border-radius:999px;background:#e6e9ef;overflow:hidden;margin:9px 0 4px}
+  .bar>i{display:block;height:100%;background:var(--blue);width:0;transition:width .5s ease}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid #d6dbe4;border-top-color:var(--blue);
+        border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .lg{list-style:none;padding:0;margin:8px 0 0;font-size:13px}
+  .lg li{padding:5px 0;border-bottom:1px dashed #eef0f4;color:#4a5268}
+  .lg li:last-child{border-bottom:0}
+  .lg li .ic{display:inline-block;width:17px}
+  .lg li.pend{color:#a3aab7}
+
+  .chk{display:flex;align-items:flex-start;gap:8px;font-size:13px;margin:9px 0;cursor:pointer}
+  .chk input{margin-top:3px}
+  .chk .d{font-size:12.5px;color:var(--mut);display:block}
+
+  .lock{background:#fff5f5;border:1px solid #f2c9c9;border-left:4px solid var(--red);
+        border-radius:0 9px 9px 0;padding:11px 14px;font-size:13px;margin:10px 0}
+  .lock>b:first-child{display:block;margin-bottom:2px}
+
+  .caption{font-size:12.5px;color:var(--mut);margin:6px 0 0}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--mut);margin:8px 0 0}
+  .foot{margin-top:52px;padding-top:16px;border-top:1px solid #dfe3ea;color:var(--mut);font-size:12.5px}
+  @media (max-width:760px){.own{display:block}.side{width:auto;flex:none;border-right:0;border-bottom:1px solid var(--bd)}}
+</style>
+
+<div class="top">
+  <div class="page">
+    <div class="tag">화면 시안 · 실제로 눌러 볼 수 있는 목업</div>
+    <h1>시트에서 가져오기</h1>
+    <p>업체관리 › 구글시트 주소로 과거 작업 가져오기 — 아래 화면의 파란 버튼을 눌러 보세요.</p>
+  </div>
+</div>
+
+<div class="page">
+
+<div class="note">
+  <b>이 문서는 가짜 데이터로 실제 동작하는 목업입니다.</b>
+  버튼·입력·체크·단계 이동이 전부 동작합니다. 서버에 연결되지 않으므로 무엇도 저장되지 않습니다.
+  실제 예시로 「0720수진코리아 맛있는 고양이캔 4종」 시트를 재현했습니다(개인정보는 가명으로 대체).
+</div>
+
+<h2>1. 어디에서 시작하나 <small>업체관리 화면 · 진입점 두 곳</small></h2>
+
+<div class="mock">
+  <div class="mtop"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    <span class="ttl">리뷰웹시스템[3버전] › 업체관리</span></div>
+  <div class="own">
+    <div class="side">
+      <div class="sh"><span>거래처</span><button class="btn sm" onclick="alert('(목업) 거래처 등록 폼')">＋ 업체</button></div>
+      <div class="advit on" onclick="pickAdv(this,'수진코리아')">수진코리아<span class="sub">작업 3 · 담당 만두</span></div>
+      <div class="advit" onclick="pickAdv(this,'파미고')">파미고<span class="sub">작업 7 · 담당 망고</span></div>
+      <div class="advit" onclick="pickAdv(this,'이노크아든')">이노크아든<span class="sub">작업 2 · 담당 만두</span></div>
+      <div class="advit" onclick="pickAdv(this,'위프코리아')">주식회사 위프코리아<span class="sub">작업 5 · 담당 만두</span></div>
+      <div class="imp">
+        <button class="btn imp" onclick="openImp('')">＋ 시트에서 가져오기<br>
+          <span style="font-weight:400;font-size:11.5px;color:#5f6b85">시스템에 없는 시트 주소로</span></button>
+        <div class="caption" style="margin-top:7px">② 업체를 아직 모를 때 — 주소부터 넣고 나중에 업체를 고릅니다.</div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="bhead">
+        <h3>수진코리아</h3>
+        <span class="sp"></span>
+        <button class="btn" onclick="alert('(목업) 설정 패널')">설정</button>
+        <button class="btn pri" onclick="openImp('수진코리아')">＋ 시트에서 가져오기</button>
+      </div>
+      <table class="g">
+        <tr><th>작업명</th><th>진행</th><th>참여/제출/입금</th><th>계약</th><th>자료</th></tr>
+        <tr><td>0728수진코리아 고양이간식 스틱</td><td>진행 중</td><td>60 / 58 / 55</td><td>C-24011</td><td>구매 리뷰</td></tr>
+        <tr><td>0805수진코리아 강아지껌</td><td>진행 중</td><td>40 / 12 / 0</td><td>C-24188</td><td>구매 리뷰</td></tr>
+        <tr><td>0812수진코리아 고양이모래</td><td>모집 전</td><td>0 / 0 / 0</td><td class="c">미매칭</td><td>구매 리뷰</td></tr>
+      </table>
+      <div class="empty" style="margin-top:12px">
+        <b>「0720 고양이캔 4종」이 여기 없습니다.</b><br>
+        시트에는 108명이 적혀 있지만 시스템은 그 시트를 모릅니다 —
+        <b style="color:#1d4ed8">[＋ 시트에서 가져오기]</b>로 주소를 넣으면 이 표에 나타납니다.
+      </div>
+      <div class="caption">① 업체를 아는 경우 — 이 버튼을 누르면 <b>수진코리아가 미리 선택된 채</b>로 창이 열립니다.</div>
+    </div>
+  </div>
+</div>
+
+<h2>2. 가져오기 창 <small>4단계 · 위 버튼을 누르면 열립니다</small></h2>
+<div class="note">
+  아래는 창을 그대로 펼쳐 놓은 것입니다. <b>[예시 주소 넣기]</b>를 눌러 처음부터 따라가 볼 수 있습니다.
+</div>
+<div id="inline"></div>
+
+<h2>3. 잠기는 경우 <small>가져오면 안 되는 시트는 이렇게 막습니다</small></h2>
+<div class="box redb">
+  <h4 style="color:#d64545">① 연락처 칸을 못 찾은 경우</h4>
+  <div class="lock">
+    <b>가져올 수 없습니다 — 연락처 칸이 없습니다</b>
+    이 표에는 리뷰어 연락처로 보이는 칸이 없습니다. 연락처가 없으면 리뷰어가 자기 참여 내역을
+    <b>영영 찾을 수 없는 명단</b>이 됩니다. 시트에서 연락처 열의 이름을 <b>연락처</b>로 맞춘 뒤 다시 시도해 주세요.
+  </div>
+  <div style="display:flex;gap:8px"><button class="btn" disabled>가져오기</button>
+    <button class="btn" onclick="alert('(목업) 시트 열기')">📄 시트 열어 확인하기</button></div>
+</div>
+<div class="box warnb" style="margin-top:12px">
+  <h4 style="color:#b45309">② 이미 시스템에 있는 작업인 경우</h4>
+  <p style="margin:0 0 10px;font-size:13.5px">이 탭은 <b>이노크아든 › 0801 면마스크</b>로 이미 등록되어 있습니다.
+     다시 가져오면 그동안 들어온 주문과 수정 내역이 지워질 수 있어 <b>가져오기를 막습니다.</b></p>
+  <div style="display:flex;gap:8px"><button class="btn" disabled>가져오기</button>
+    <button class="btn pri" onclick="alert('(목업) 그 작업 열기')">→ 그 작업 열기</button></div>
+</div>
+
+<div class="foot">
+  리뷰웹시스템 · 시트에서 가져오기 화면 시안 · 2026-08-10 · 기획서: <b>prd-sheet-import.html</b>
+</div>
+</div>
+
+<!-- ── 모달 ── -->
+<div class="ov" id="ov" onclick="if(event.target===this)closeImp()">
+  <div class="mo" id="mo"></div>
+</div>
+
+<script>
+/* ===== 가짜 데이터 — 실제 시트(0720수진코리아 고양이캔 4종)를 재현. 이름·연락처는 가명 ===== */
+var SHEET_URL = 'https://docs.google.com/spreadsheets/d/1yhRDfnxc3xbL-QuhxF7vPOPzfXk9rGze2tdCuNU9h-M/edit?gid=1405976532#gid=1405976532';
+var META = {
+  sheetTitle:'수진코리아 진행시트',
+  tabName:'0720고양이캔4종',
+  campaign:'0720수진코리아 맛있는 고양이캔 4종',
+  buyTime:'자유',
+  productUrl:'https://www.coupang.com/vp/products/9624495419',
+  headerRow:9, total:108, named:107, skipped:1, blank:0,
+  firstDate:'7월 20일', lastDate:'7월 28일'
+};
+var COLS = [
+  ['번호','줄 번호','auto'],['담당자','그대로 보관','keep'],['구매일자','진행 날짜','key'],
+  ['차수','그대로 보관','keep'],['옵션','그대로 보관','keep'],['인애드명단','그대로 보관','keep'],
+  ['주문자제출','그대로 보관','keep'],['수취인','리뷰어 이름','key'],['쿠팡id','그대로 보관','keep'],
+  ['연락처','리뷰어 찾기 키','key'],['주소','그대로 보관','keep'],['은행','그대로 보관','keep'],
+  ['계좌번호','그대로 보관','keep'],['예금주','그대로 보관','keep'],['결제금액','그대로 보관','keep'],
+  ['리뷰제출','진행 상태','st'],['입금','진행 상태','st'],['주문번호','그대로 보관','keep'],
+  ['비고(닉네임 등 자유)','그대로 보관','keep']
+];
+var ROWS = [
+  {n:'1',  d:'7 / 20 (월)', name:'김○설', ph:'010-8745-****', pay:'15,740', rv:'7/23 17:30', dp:'7/27', on:true},
+  {n:'2',  d:'7 / 20 (월)', name:'박○희', ph:'010-6405-****', pay:'15,740', rv:'7/25 15:20', dp:'7/27', on:true},
+  {n:'3',  d:'7 / 20 (월)', name:'라○정', ph:'010-2579-****', pay:'15,740', rv:'7/28 14:58', dp:'7/31', on:true},
+  {n:'45', d:'7 / 21 (화)', name:'백○설', ph:'010-6621-****', pay:'15,740', rv:'', dp:'', on:true},
+  {n:'72', d:'26.7.23(목)', name:'고○화', ph:'010-8817-****', pay:'15,740', rv:'7/24 22:56', dp:'7/27', on:true},
+  {n:'100',d:'7 / 24 (금)', name:'김○경', ph:'010-9902-****', pay:'15,740', rv:'7/26 17:07', dp:'7/27', on:true},
+  {n:'—',  d:'7 / 27 (월)', name:'노○송', ph:'010-2356-****', pay:'15,740', rv:'7/30 11:34', dp:'8/7', on:true, tag:'번호 없음'},
+  {n:'—',  d:'7 / 25 (토)', name:'김○미', ph:'010-3902-****', pay:'22,000', rv:'8/3 20:48',  dp:'8/7', on:true, tag:'번호 없음'},
+  {n:'—',  d:'7 / 28 (화)', name:'함○진', ph:'010-4563-****', pay:'15,740', rv:'7/28 15:13', dp:'8/7', on:true, tag:'번호 없음'},
+  {n:'—',  d:'7 / 20 (월)', name:'ㅇ',    ph:'010-5134-****', pay:'4',      rv:'', dp:'', on:false, why:'연습 줄로 보임 (이름 한 글자 · 금액 4원)'}
+];
+var ADVS = ['수진코리아','파미고','이노크아든','주식회사 위프코리아'];
+
+/* ===== 상태 ===== */
+var S = {step:1, url:'', adv:'', rows:null, cutSheet:true, notice:true, opened:false};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+function pickAdv(el,name){
+  var ps=el.parentNode.querySelectorAll('.advit');
+  for(var i=0;i<ps.length;i++)ps[i].classList.remove('on');
+  el.classList.add('on');
+  var h=document.querySelector('.bhead h3'); if(h)h.textContent=name;
+}
+
+function openImp(adv){
+  S={step:1,url:'',adv:adv||'',rows:null,cutSheet:true,notice:true,opened:true};
+  document.getElementById('ov').classList.add('on');
+  render();
+}
+function closeImp(){
+  /* 창에서 닫으면 문서 안 미리보기로 되돌아온다. 미리보기에서 [닫기]면 처음 단계로 리셋. */
+  if(!S.opened){ S={step:1,url:SHEET_URL,adv:'',rows:null,cutSheet:true,notice:true,opened:false}; }
+  S.opened=false;
+  document.getElementById('ov').classList.remove('on');
+  render();
+}
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&S.opened)closeImp(); });
+
+function stepsHtml(){
+  var names=['주소 넣기','읽어서 보기','업체 고르기','가져오기'];
+  var h='<div class="steps">';
+  for(var i=0;i<4;i++){
+    var cl = S.step===i+1?'on':(S.step>i+1?'dn':'');
+    h+='<div class="s '+cl+'"><span class="n">'+(S.step>i+1?'✓':(i+1))+'</span>'+names[i]+'</div>';
+  }
+  return h+'</div>';
+}
+
+/* ── 1단계 ── */
+function step1(){
+  return '<div class="mb">'+
+    '<div class="box tint" style="margin-top:0"><h4>구글시트에서 주소를 복사해 오세요</h4>'+
+    '<div style="font-size:13px;color:#5a6172">가져올 <b>탭을 연 상태</b>에서 브라우저 주소창을 통째로 복사하면 됩니다. '+
+    '주소 끝의 <b>#gid=…</b> 부분이 "어느 탭인지"를 알려 줍니다.</div></div>'+
+    '<label class="fl">구글시트 탭 주소</label>'+
+    '<input class="tf" id="urlIn" placeholder="https://docs.google.com/spreadsheets/d/... #gid=..." '+
+    'value="'+esc(S.url)+'" oninput="S.url=this.value;syncGo()">'+
+    '<div class="fh">탭 주소가 아니어도 괜찮습니다 — 시트 안의 탭 목록을 보여드립니다.</div>'+
+    '<div style="margin-top:10px"><button class="btn sm" onclick="fillEx()">예시 주소 넣기</button></div>'+
+    '<div class="box" style="margin-top:16px"><h4>이 창에서 할 수 있는 일</h4>'+
+    '<ul style="margin:0;padding-left:19px;font-size:13px;color:#4a5268">'+
+    '<li>시트를 <b>한 번 읽어</b> 무엇이 들었는지 보여드립니다 (이 단계까지는 아무것도 저장되지 않습니다)</li>'+
+    '<li>리뷰어 명단·구매일자·금액·리뷰제출·입금을 <b>시스템 표</b>로 옮깁니다</li>'+
+    '<li>그 작업을 <b>업체의 작업으로 등록</b>합니다 — 업체관리 표와 작업보드에 바로 나타납니다</li></ul></div>'+
+  '</div>'+
+  '<div class="mf"><span class="hint">시트는 읽기만 합니다.</span><span class="sp"></span>'+
+  '<button class="btn" onclick="closeImp()">닫기</button>'+
+  '<button class="btn pri" id="goBtn" '+(S.url?'':'disabled')+' onclick="go2()">시트 읽기 →</button></div>';
+}
+function fillEx(){ S.url=SHEET_URL; render(); }
+function syncGo(){ var b=document.getElementById('goBtn'); if(b)b.disabled=!S.url.trim(); }
+
+/* ── 2단계: 읽는 중 → 결과 ── */
+function go2(){ S.step=2; S.reading=true; render();
+  var pct=0, bar=null;
+  var t=setInterval(function(){
+    pct+=18; bar=document.getElementById('pbar');
+    if(bar)bar.style.width=Math.min(pct,100)+'%';
+    var lis=document.querySelectorAll('#rdlog li');
+    var k=Math.min(Math.floor(pct/25),3);
+    for(var i=0;i<=k&&i<lis.length;i++){lis[i].classList.remove('pend');lis[i].querySelector('.ic').textContent='✓';}
+    if(pct>=100){clearInterval(t); S.reading=false; S.rows=ROWS.map(function(r){return Object.assign({},r);}); render();}
+  },420);
+}
+function step2(){
+  if(S.reading){
+    return '<div class="mb"><div class="box" style="margin-top:0"><h4><span class="spin"></span>시트를 읽는 중입니다</h4>'+
+      '<div class="bar"><i id="pbar"></i></div>'+
+      '<ul class="lg" id="rdlog">'+
+      '<li class="pend"><span class="ic">·</span> 주소에서 시트와 탭 확인</li>'+
+      '<li class="pend"><span class="ic">·</span> 시트 사본 가져오기</li>'+
+      '<li class="pend"><span class="ic">·</span> 표의 머리글 줄 찾기</li>'+
+      '<li class="pend"><span class="ic">·</span> 칸 역할 알아보기</li></ul></div>'+
+      '<div class="caption">보통 5~15초 걸립니다. 시트가 크면 조금 더 걸립니다.</div></div>'+
+      '<div class="mf"><span class="sp"></span><button class="btn" onclick="closeImp()">취소</button></div>';
+  }
+  var m=META, mp='';
+  for(var i=0;i<COLS.length;i++){
+    var c=COLS[i];
+    mp+='<span class="mp"><b>'+esc(c[0])+'</b><span class="r r-'+c[2]+'">'+esc(c[1])+'</span></span>';
+  }
+  return '<div class="mb">'+
+    '<div class="box okb" style="margin-top:0"><h4>✓ 읽었습니다 — 아래 내용을 가져옵니다</h4>'+
+    '<div style="font-size:13.5px"><b>'+esc(m.sheetTitle)+'</b> › 탭 <b>'+esc(m.tabName)+'</b> · '+
+    '표의 머리글은 '+m.headerRow+'번째 줄</div></div>'+
+    '<div class="kpis">'+
+      '<div><div class="k">시트에 적힌 줄</div><div class="v">'+m.total+'</div></div>'+
+      '<div><div class="k">가져올 리뷰어</div><div class="v" style="color:#2e9e57">'+m.named+'</div></div>'+
+      '<div><div class="k">뺄 줄</div><div class="v" style="color:#b45309">'+m.skipped+'</div></div>'+
+      '<div><div class="k">진행 기간</div><div class="v" style="font-size:15px">'+esc(m.firstDate)+' ~ '+esc(m.lastDate)+'</div></div>'+
+    '</div>'+
+    '<div class="box"><h4>시트 위쪽 안내에서 자동으로 채웠습니다 <span style="font-weight:400;color:#77808f;font-size:12px">— 고칠 수 있습니다</span></h4>'+
+      '<label class="fl">작업 이름</label><input class="tf" value="'+esc(m.campaign)+'">'+
+      '<div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">'+
+        '<div style="flex:1 1 150px"><label class="fl">구매 시간대</label><input class="tf" value="'+esc(m.buyTime)+'"></div>'+
+        '<div style="flex:2 1 260px"><label class="fl">상품 주소</label><input class="tf" value="'+esc(m.productUrl)+'"></div>'+
+      '</div></div>'+
+    '<div class="box"><h4>칸을 이렇게 알아봤습니다</h4>'+
+      '<div class="maplist">'+mp+'</div>'+
+      '<div class="legend"><span><span class="r r-key" style="padding:1px 7px;border-radius:999px">중요</span> 시스템이 쓰는 칸</span>'+
+      '<span><span class="r r-st" style="padding:1px 7px;border-radius:999px">상태</span> 제출·입금 표시</span>'+
+      '<span><span class="r r-keep" style="padding:1px 7px;border-radius:999px">보관</span> 적힌 그대로 옮김</span></div>'+
+      '<div class="caption" style="margin-top:8px">열 이름은 <b>바꾸지 않고</b> 그대로 옮깁니다. 표에서 지금과 똑같이 보입니다.</div></div>'+
+  '</div>'+
+  '<div class="mf"><span class="hint">아직 아무것도 저장되지 않았습니다.</span><span class="sp"></span>'+
+  '<button class="btn" onclick="S.step=1;render()">← 뒤로</button>'+
+  '<button class="btn pri" onclick="S.step=3;render()">다음 →</button></div>';
+}
+
+/* ── 3단계: 업체 + 줄 고르기 ── */
+function step3(){
+  var opts='<option value="">— 업체를 고르세요 —</option>';
+  for(var i=0;i<ADVS.length;i++)
+    opts+='<option'+(ADVS[i]===S.adv?' selected':'')+'>'+esc(ADVS[i])+'</option>';
+  var tr='';
+  for(var j=0;j<S.rows.length;j++){
+    var r=S.rows[j];
+    tr+='<tr class="'+(r.on?'':'off')+'">'+
+      '<td class="c"><input type="checkbox" '+(r.on?'checked':'')+' onchange="S.rows['+j+'].on=this.checked;render()"></td>'+
+      '<td class="c">'+esc(r.n)+'</td><td>'+esc(r.d)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.ph)+'</td>'+
+      '<td>'+esc(r.pay)+'</td><td>'+esc(r.rv||'—')+'</td><td>'+esc(r.dp||'—')+'</td>'+
+      '<td>'+(r.why?'<span class="why">'+esc(r.why)+'</span>':(r.tag?'<span style="color:#77808f;font-size:11.5px">'+esc(r.tag)+'</span>':''))+'</td></tr>';
+  }
+  var on=S.rows.filter(function(r){return r.on;}).length;
+  var hidden=META.total-S.rows.length;
+  return '<div class="mb">'+
+    '<label class="fl">어느 업체의 작업인가요? <span style="color:#d64545">*</span></label>'+
+    '<select class="tf" onchange="S.adv=this.value;render()">'+opts+'</select>'+
+    '<div class="fh">'+(S.adv
+      ? '가져오면 <b>'+esc(S.adv)+'</b> 업체관리 표에 바로 나타납니다.'
+      : '업체를 골라야 가져올 수 있습니다 — 업체가 없으면 표에 나오지 않아 지금 문제가 그대로 반복됩니다.')+
+      ' 목록에 없으면 <a href="#" onclick="alert(\'(목업) 거래처 등록 폼\');return false">거래처를 먼저 등록</a>하세요.</div>'+
+
+    '<div class="box" style="margin-top:14px"><h4>가져올 줄 <span style="font-weight:400;color:#77808f;font-size:12px">— '+
+      on+'줄 선택됨 (전체 '+META.total+'줄 중 대표 '+S.rows.length+'줄 표시)</span></h4>'+
+      '<div class="rows"><table>'+
+      '<tr><th style="width:34px"></th><th>번호</th><th>구매일자</th><th>수취인</th><th>연락처</th><th>결제금액</th><th>리뷰제출</th><th>입금</th><th>메모</th></tr>'+
+      tr+'</table></div>'+
+      (hidden>0?'<div class="caption">나머지 '+hidden+'줄은 모두 정상으로 판단되어 선택되어 있습니다.</div>':'')+
+      '<div class="caption"><b>번호가 없는 줄도 가져옵니다</b> — 번호를 안 매겼을 뿐 실제 진행 건입니다. '+
+      '연습으로 보이는 줄만 체크를 풀어 두었고, <b>지우지 않고 보여만 줍니다.</b></div></div>'+
+
+    '<div class="box"><h4>가져온 뒤 구글시트</h4>'+
+      '<label class="chk"><input type="checkbox" '+(S.cutSheet?'checked':'')+' onchange="S.cutSheet=this.checked;render()">'+
+      '<span><b>이 시트를 더 이상 읽지 않습니다</b>'+
+      '<span class="d">지금부터 <b>시스템 표가 유일한 기준</b>이 됩니다. 시트를 고쳐도 시스템에 반영되지 않습니다. '+
+      '(권장 — 시트에는 이미 이관 안내가 붙어 있습니다)</span></span></label>'+
+      '<label class="chk"><input type="checkbox" '+(S.notice?'checked':'')+' onchange="S.notice=this.checked;render()">'+
+      '<span><b>시트 맨 윗줄 안내문을 갱신합니다</b>'+
+      '<span class="d">"리뷰웹시스템으로 이관되었습니다 · 여기서 편집하지 마세요"를 다시 씁니다. '+
+      '시트에 값을 쓰는 것은 <b>이 한 줄뿐</b>입니다.</span></span></label></div>'+
+  '</div>'+
+  '<div class="mf"><span class="hint">'+(S.adv?'준비되었습니다.':'업체를 골라 주세요.')+'</span><span class="sp"></span>'+
+  '<button class="btn" onclick="S.step=2;render()">← 뒤로</button>'+
+  '<button class="btn go" '+(S.adv?'':'disabled')+' onclick="go4()">'+on+'줄 가져오기</button></div>';
+}
+
+/* ── 4단계: 실행 → 결과 ── */
+function go4(){
+  var on=S.rows.filter(function(r){return r.on;}).length;
+  if(!confirm('「'+META.campaign+'」을 '+S.adv+' 작업으로 가져옵니다.\n\n'+
+    '· 리뷰어 명단 '+(META.named-(S.rows.length-on))+'명을 시스템 표로 옮깁니다\n'+
+    (S.cutSheet?'· 이 구글시트는 더 이상 읽지 않습니다\n':'')+
+    (S.notice?'· 시트 맨 윗줄에 이관 안내를 씁니다\n':'')+
+    '\n가져온 뒤 되돌릴 수 있습니다.')) return;
+  S.step=4; S.running=true; render();
+  var pct=0;
+  var t=setInterval(function(){
+    pct+=16; var b=document.getElementById('pbar2'); if(b)b.style.width=Math.min(pct,100)+'%';
+    var lis=document.querySelectorAll('#rnlog li');
+    var k=Math.min(Math.floor(pct/17),5);
+    for(var i=0;i<=k&&i<lis.length;i++){lis[i].classList.remove('pend');lis[i].querySelector('.ic').textContent='✓';}
+    if(pct>=100){clearInterval(t);S.running=false;render();}
+  },400);
+}
+function step4(){
+  if(S.running){
+    return '<div class="mb"><div class="box" style="margin-top:0"><h4><span class="spin"></span>가져오는 중입니다</h4>'+
+      '<div class="bar"><i id="pbar2"></i></div>'+
+      '<ul class="lg" id="rnlog">'+
+      '<li class="pend"><span class="ic">·</span> 작업 등록</li>'+
+      '<li class="pend"><span class="ic">·</span> '+esc(S.adv)+' 업체에 연결</li>'+
+      '<li class="pend"><span class="ic">·</span> 리뷰어 명단 옮기기</li>'+
+      '<li class="pend"><span class="ic">·</span> 검색 명단 만들기</li>'+
+      '<li class="pend"><span class="ic">·</span> 제출·입금 표시 반영</li>'+
+      '<li class="pend"><span class="ic">·</span> 시트 연결 끊기</li></ul></div>'+
+      '<div class="caption">중간에 창을 닫아도 진행은 계속됩니다.</div></div>'+
+      '<div class="mf"><span class="sp"></span><button class="btn" disabled>진행 중…</button></div>';
+  }
+  var on=S.rows.filter(function(r){return r.on;}).length;
+  var moved=META.named-(S.rows.length-on);
+  return '<div class="mb">'+
+    '<div class="box okb" style="margin-top:0"><h4 style="font-size:15px">✓ 가져왔습니다</h4>'+
+    '<div style="font-size:13.5px"><b>'+esc(META.campaign)+'</b> 이(가) <b>'+esc(S.adv)+'</b> 작업으로 등록되었습니다.</div></div>'+
+    '<div class="kpis">'+
+      '<div><div class="k">옮긴 리뷰어</div><div class="v" style="color:#2e9e57">'+moved+'</div></div>'+
+      '<div><div class="k">뺀 줄</div><div class="v">'+(META.total-moved)+'</div></div>'+
+      '<div><div class="k">제출 완료</div><div class="v">102</div></div>'+
+      '<div><div class="k">입금 완료</div><div class="v">99</div></div>'+
+    '</div>'+
+    '<div class="box"><h4>이제 이렇게 됩니다</h4><ul class="lg">'+
+      '<li><span class="ic">✓</span> <b>업체관리 › '+esc(S.adv)+'</b> 표에 이 작업이 나타납니다</li>'+
+      '<li><span class="ic">✓</span> <b>작업보드</b>에서 열어 표를 보고 고칠 수 있습니다</li>'+
+      '<li><span class="ic">✓</span> <b>리뷰어</b>가 자기 참여 내역에서 이 작업을 다시 찾을 수 있습니다</li>'+
+      (S.cutSheet?'<li><span class="ic">🗒</span> 이 작업에는 <b>무시트</b> 표시가 붙습니다 — 구글시트는 참고용입니다</li>':'')+
+    '</ul></div>'+
+    '<div class="box warnb"><h4 style="color:#b45309">아직 남은 일</h4>'+
+      '<div style="font-size:13px;color:#4a5268">· <b>계약 매칭</b>은 자동으로 붙지 않습니다 — 업체관리 표의 [계약] 칸에서 한 번 연결해 주세요.<br>'+
+      '· <b>리뷰 캡처 이미지</b>는 함께 오지 않습니다 — 필요하면 [리뷰 캡처 정리]로 연결합니다.</div></div>'+
+  '</div>'+
+  '<div class="mf"><button class="btn" onclick="if(confirm(\'방금 가져온 명단 '+moved+'줄과 업체 연결을 되돌립니다.\\n구글시트는 그대로 남습니다.\'))alert(\'(목업) 되돌렸습니다\')">되돌리기</button>'+
+  '<span class="sp"></span><button class="btn" onclick="closeImp()">닫기</button>'+
+  '<button class="btn pri" onclick="alert(\'(목업) 작업보드에서 열기\')">작업 열어 보기 →</button></div>';
+}
+
+/* ★ 창(모달)과 문서 안 미리보기는 **둘 중 한 곳에만** 그린다.
+   같은 화면을 두 벌 그리면 입력칸·진행바의 id 가 겹쳐 한쪽이 조용히 안 움직인다. */
+function render(){
+  var body = S.step===1?step1():S.step===2?step2():S.step===3?step3():step4();
+  var html='<div class="mh"><h3>시트에서 가져오기</h3><span class="sp"></span>'+
+    '<button class="x" onclick="closeImp()" title="닫기">×</button></div>'+stepsHtml()+body;
+  var mo=document.getElementById('mo'), inl=document.getElementById('inline');
+  if(S.opened){
+    mo.innerHTML=html;
+    inl.innerHTML='<div class="empty">위쪽에 열린 창에서 진행 중입니다 — 창을 닫으면 여기에서 이어서 볼 수 있습니다.</div>';
+  }else{
+    mo.innerHTML='';
+    /* ★ 래퍼에 `mo` 를 그대로 준다 — 모달 안쪽 스타일(`.mo .mh/.mb/.mf`)이 그 클래스에 걸려 있어서,
+       빼면 문서 안 미리보기만 머리글·바닥 여백이 사라진 다른 화면이 된다(실측). */
+    inl.innerHTML='<div class="mo" style="max-width:840px;border:1px solid var(--bd);box-shadow:0 1px 3px rgba(20,30,60,.06)">'+html+'</div>';
+  }
+}
+S.step=1; S.url=SHEET_URL; render();
+</script>
