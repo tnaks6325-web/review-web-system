@@ -222,6 +222,19 @@ console.log('\n[A] 미리보기 — 쓰기 0');
       ok('★ 화면에서 끄면 안내를 보내지 않는다', notices.length === 0 && r3.notified === 0 && r3.failed === 1);
     }
 
+    /* ── 이미 안내한 건에는 다시 보내지 않는다(notified_at) ──
+       ★ 스텁만으로는 이 갈래에 닿지 않으므로(안내한 건은 이미 failed 라 pending 이 아니다)
+         **pending 인데 notified_at 이 있는 상태**를 직접 만들어 확인한다 — 변이시험이 잡은 구멍. */
+    {
+      const its3 = [{ ...itemRow(0, BADROWS[0]), notified_at: new Date('2026-06-09T00:00:00Z') }];
+      const pool3 = makePool(its3);
+      RES.__setPoolForTest(pool3);
+      notices.length = 0;
+      const r5 = await RES.applyResultFile({ batchId: 'B1', fileName: 'r.xlsx', base64: FILE_B64, by: 'A' });
+      ok('★ pending 이어도 이미 안내한 건이면 다시 보내지 않는다',
+        r5.failed === 1 && notices.length === 0 && r5.notified === 0, JSON.stringify(r5));
+    }
+
     csb.postAdminNotice = origNotice;
     APPLY.markDepositCells = origMark;
     RES.__setPoolForTest(null);
@@ -235,6 +248,13 @@ console.log('\n[A] 미리보기 — 쓰기 0');
     const resSrc = noLineComments(read('src/services/paymentResult.service.js'));
     ok('★ 반영 서비스는 review_index·payment_records 에 직접 쓰지 않는다(사본 금지)',
       !/UPDATE review_index/i.test(resSrc) && !/INSERT INTO payment_records/i.test(resSrc));
+    /* ★★ 스텁 DB 는 SQL 을 해석하지 않으므로 "조건이 SQL 에 있는가"는 **문장으로 고정**한다 —
+         이 조건이 빠지면 이미 paid 인 건이 다시 paid 로 덮여 이중입금 경로가 열린다(변이시험이 잡은 구멍). */
+    ok('★★ 두 UPDATE 모두 `AND status = \'pending\'` 조건을 건다', (() => {
+      const ups = resSrc.match(/UPDATE payment_batch_items[\s\S]*?`/g) || [];
+      const gated = ups.filter(u => /WHERE id = \$1 AND status = 'pending'/.test(u));
+      return gated.length === 2;
+    })());
     ok('★ recordDeposits / markDepositCells 를 재사용한다',
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)
       && /recordDeposits\(client,/.test(resSrc) && /markDepositCells\(/.test(resSrc));
