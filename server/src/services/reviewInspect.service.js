@@ -15,6 +15,7 @@
  *      리뷰어가 어느 쪽을 캡처할지 통제할 수 없다. 피드형 오판이 곧 정상 제출 차단이다.
  */
 const crypto = require('crypto');
+const { workOrderForTabSql } = require('../utils/workOrderLink');
 const { logger } = require('../utils/logger');
 // ★ 087: 리뷰타입 판정은 utils/reviewType 단일 출처(여기서 규칙을 다시 만들면 화면과 갈라진다)
 const { resolveReviewType } = require('../utils/reviewType');
@@ -611,23 +612,10 @@ function productNamesFromWorkOrder(wo) {
  */
 async function _workOrderForTab({ sheetId, tabName } = {}) {
   try {
-    // ★★ 우선순위를 ORDER BY 로 **명시**한다 — 두 조건을 OR 로만 묶으면 Track B 링크가
-    //   있어도 `created_at` 이 더 최근인 폴백 오더가 이긴다(실측으로 잡힘).
-    //   0 = Track B 링크(명시적 지정) / 1 = work_orders.linked_tab_* 폴백.
+    // ★★ 우선순위(ORDER BY link_rank)는 utils/workOrderLink 가 소유한다 — 준비 행 판정(블로그 총원)도
+    //   같은 링크를 봐야 해서, 사본을 두면 한쪽만 폴백 오더에 속는다(실측으로 잡힌 버그).
     const { rows } = await _db().query(
-      `SELECT w.title, w.product_option, w.product_options_json,
-              CASE WHEN EXISTS (SELECT 1 FROM trackb_work_order_links l
-                                 WHERE l.work_order_id = w.id AND l.deleted_at IS NULL
-                                   AND l.sheet_id = $1 AND l.tab_name = $2)
-                   THEN 0 ELSE 1 END AS link_rank
-         FROM work_orders w
-        WHERE w.deleted_at IS NULL
-          AND ( EXISTS (SELECT 1 FROM trackb_work_order_links l
-                         WHERE l.work_order_id = w.id AND l.deleted_at IS NULL
-                           AND l.sheet_id = $1 AND l.tab_name = $2)
-                OR (w.linked_tab_sheet_id = $1 AND w.linked_tab_name = $2) )
-        ORDER BY link_rank, w.created_at DESC
-        LIMIT 1`,
+      workOrderForTabSql(['title', 'product_option', 'product_options_json']),
       [sheetId, tabName]
     );
     return rows[0] || null;
