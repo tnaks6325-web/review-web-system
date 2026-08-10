@@ -233,21 +233,24 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function money(n) { return Number(n || 0).toLocaleString(); }
-  /** 그 옵션에 지금 들어 있는 URL (상황 설정 반영) */
+  /** 옵션별 유입 URL (상황 설정 반영) — 링크유입일 때만 쓰인다 */
   function optUrl(i) {
-    if (S.inflow !== 'link') return '';           // 가이드유입 = 링크를 쓰지 않는다
+    if (S.inflow !== 'link') return '';           // 가이드유입 = 옵션별 유입 링크를 쓰지 않는다
     if (S.fill === 'empty') return '';
     if (S.fill === 'partial') return DATA.options[i].urlPartial;
     return DATA.options[i].url;
   }
-  function prodUrl() { return S.inflow === 'link' ? DATA.productUrl : ''; }
-  /** 판정 단일 출처와 같은 순서: 옵션 URL → 공고 랜딩 URL → 빈 값 */
-  function resolveLanding(i) { return optUrl(i) || prodUrl() || ''; }
+  /** ★ 상품(메인) URL — 유입방식·옵션 유무와 무관하게 **항상 필수**(사용자 확정 2026-08-10).
+   *  상품 확인용 값이라 가이드유입이어도 비워 둘 수 없다. [전부 비움]일 때만 빈 칸을 흉내낸다. */
+  function mainUrl() { return S.fill === 'empty' ? '' : DATA.productUrl; }
+  /** 판정 단일 출처와 같은 순서: 옵션 URL → 상품(메인) URL → 빈 값 */
+  function resolveLanding(i) { return optUrl(i) || mainUrl() || ''; }
   function missingCount() {
     if (S.inflow !== 'link' || S.mode !== 'opt') return 0;
     return DATA.options.filter(function (_, i) { return !optUrl(i); }).length;
   }
-  var GUIDE_OFF = '가이드유입은 링크를 쓰지 않습니다 — 저장·전송하지 않습니다.';
+  function mainMissing() { return !mainUrl(); }
+  var GUIDE_OFF = '가이드유입이라 <b>옵션별 유입 링크</b>는 비활성입니다 — 상품(메인) URL은 그대로 필수입니다.';
 
   // ══════════ ① 인트라넷 리뷰오더 ══════════
   function viewIntra() {
@@ -259,7 +262,7 @@
       return '' +
       '<div class="ia-opt single">' +
         '<label><span class="ia-lb">옵션1</span><input class="ia-in" value="' + esc(o.label) + '" readonly></label>' +
-        '<label class="urlcol ' + (linkMode ? 'hi' : '') + '"><span class="ia-lb">상품 URL' + (linkMode ? ' *' : '') + '</span>' +
+        '<label class="urlcol ' + (linkMode ? 'hi' : '') + '"><span class="ia-lb">유입 링크' + (linkMode ? ' *' : '') + '</span>' +
           '<input class="ia-in ' + (need ? 'need' : '') + '" ' + (linkMode ? '' : 'disabled') +
           ' value="' + esc(v) + '" placeholder="' + (linkMode ? 'https://…  (이 옵션의 상품 페이지)' : '가이드유입 — 사용 안 함') + '"></label>' +
         '<label><span class="ia-lb">결제금액</span><input class="ia-in" value="' + money(o.pay) + '" readonly></label>' +
@@ -273,12 +276,13 @@
 
     return '' +
     '<div class="desc"><h2>① 인트라넷 리뷰오더 — 상품/옵션/금액 블록</h2>' +
-      '<p><b>바뀌는 것은 옵션 행에 [상품 URL] 칸 한 개가 붙는 것뿐</b>입니다<span class="newtag">신규</span>. ' +
-      '상품 단위 URL 칸은 그대로 두고 라벨만 <b>"옵션 없을 때 사용"</b>으로 역할을 밝힙니다.</p>' +
+      '<p><b>바뀌는 것은 옵션 행에 [유입 링크] 칸 한 개가 붙는 것뿐</b>입니다<span class="newtag">신규</span>. ' +
+      '상품 카드의 <b>상품(메인) URL 칸은 지금처럼 항상 필수</b>이고, 라벨만 역할을 밝히도록 바뀝니다.</p>' +
       '<p>' + (linkMode
-        ? '지금은 <b>링크유입</b> — 옵션 URL이 <b>필수</b>이고 빈 칸은 빨갛게 표시됩니다.'
-        : '지금은 <b>유입가이드</b> — 옵션 URL 칸이 <b>비활성(회색)</b>이고 값은 전송되지 않습니다. ' +
-          '<b>칸을 숨기지 않는 이유</b>: 사라지면 유입방식을 바꿨을 때 왜 칸이 생겼는지 알 수 없습니다.') + '</p>' +
+        ? '지금은 <b>링크유입</b> — 상품 URL과 <b>옵션별 URL이 모두 필수</b>이고 빈 칸은 빨갛게 표시됩니다.'
+        : '지금은 <b>유입가이드</b> — <b>옵션별 URL만</b> 비활성(회색)이고 전송되지 않습니다. ' +
+          '<b>상품(메인) URL은 그대로 필수</b>입니다(상품 확인용 값이라 유입방식과 무관). ' +
+          '<b>옵션 칸을 숨기지 않는 이유</b>: 사라지면 유입방식을 바꿨을 때 왜 칸이 생겼는지 알 수 없습니다.') + '</p>' +
     '</div>' +
     '<div class="stage"><div class="stagehead">실제 화면 재현 — <b>리뷰오더 등록 › 상품/옵션/금액</b></div>' +
       '<div class="ia">' +
@@ -290,10 +294,10 @@
           '<div class="ia-prod-h"><b>상품 1</b><span class="ia-del">🗑 삭제</span></div>' +
           '<div class="ia-grid2">' +
             '<label><span class="ia-lb">상품명</span><input class="ia-in" value="' + esc(DATA.product) + '" readonly></label>' +
-            '<label class="urlcol ' + (linkMode && !showOpts ? 'hi' : '') + '"><span class="ia-lb">상품 URL ' +
-              (showOpts ? '<span style="font-weight:600;color:#9ca3af">(옵션 없을 때 사용)</span>' : (linkMode ? '*' : '')) + '</span>' +
-              '<input class="ia-in ' + (linkMode && !showOpts && !prodUrl() ? 'need' : '') + '" ' + (linkMode ? '' : 'disabled') +
-              ' value="' + esc(prodUrl()) + '" placeholder="' + (linkMode ? 'https://…' : '가이드유입 — 사용 안 함') + '"></label>' +
+            '<label class="urlcol hi"><span class="ia-lb">상품 URL * ' +
+              '<span style="font-weight:600;color:#9ca3af">(상품 확인용 · 항상 필수)</span></span>' +
+              '<input class="ia-in ' + (mainMissing() ? 'need' : '') + '"' +
+              ' value="' + esc(mainUrl()) + '" placeholder="https://…  (상품확인용 URL)"></label>' +
           '</div>' +
           (showOpts ? '' :
             '<div class="ia-base">' +
@@ -313,8 +317,12 @@
         '</div>' +
       '</div>' +
     '</div>' +
+    (mainMissing()
+      ? '<div class="callout bad">🚫 <b>상품(메인) URL이 비어 있습니다.</b> ' +
+        '유입방식·옵션 유무와 <b>무관하게 항상 필수</b>입니다(상품 확인용 값).</div>'
+      : '') +
     (linkMode && showOpts && missingCount()
-      ? '<div class="callout bad">🚫 <b>옵션 ' + missingCount() + '개의 상품 URL이 비어 있습니다.</b> ' +
+      ? '<div class="callout bad">🚫 <b>옵션 ' + missingCount() + '개의 유입 링크가 비어 있습니다.</b> ' +
         '링크유입 오더는 이 칸이 채워져야 제출됩니다 — 폼에서 막고, 서버(<code>POST /api/review-order</code>)도 같은 조건으로 다시 확인합니다.</div>'
       : '') +
     '<div class="callout info">📦 <b>전송 계약</b> — <code>product_options_json</code> 의 옵션 항목에 <code>url</code> 한 칸이 늘어납니다: ' +
@@ -345,42 +353,50 @@
         '</div>';
       }).join('');
       headCols = '<div class="rf-head" style="grid-template-columns:18px 1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
-        '<span></span><span>옵션명</span><span>상품 URL<span class="newtag">신규</span></span>' +
+        '<span></span><span>옵션명</span><span>유입 링크<span class="newtag">신규</span></span>' +
         '<span class="rf-r">결제금액</span><span class="rf-r">옵션인원</span><span class="rf-r">일건수</span><span></span></div>';
       body = '<div class="rf-gp">' +
-          '<div class="rf-gp-head">' +
+          '<div class="rf-head" style="grid-template-columns:1fr 1.5fr 84px 26px">' +
+            '<span>상품명</span><span>상품 URL <span style="color:#c02626">*</span> ' +
+            '<span style="font-weight:600;color:#94A3B8">항상 필수</span></span>' +
+            '<span class="rf-r">총인원</span><span></span></div>' +
+          '<div class="rf-gp-head" style="grid-template-columns:1fr 1.5fr 84px 26px">' +
             '<input class="rf-in" value="' + esc(DATA.product) + '" readonly>' +
+            '<span class="rf-urlwrap hi"><input class="rf-in ' + (mainMissing() ? 'need' : '') + '" value="' +
+              esc(mainUrl()) + '" placeholder="https://…  (상품확인용)"></span>' +
             '<span class="rf-gp-total" title="옵션인원 합계(자동)">100명</span>' +
             '<button class="rf-x">✕</button>' +
           '</div>' + headCols + optRows +
           '<button class="rf-gp-add">＋ 옵션 추가</button>' +
         '</div>';
-      derived = '옵션별 URL 사용 — 리뷰어가 고른 옵션의 링크가 열립니다';
+      derived = '옵션별 유입 링크 사용 — 리뷰어가 고른 옵션의 링크가 열립니다';
     } else {
-      var pv = prodUrl();
       headCols = '<div class="rf-head" style="grid-template-columns:1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
-        '<span>상품명</span><span>상품 URL<span class="newtag">신규</span></span>' +
+        '<span>상품명</span><span>상품 URL <span style="color:#c02626">*</span> ' +
+        '<span style="font-weight:600;color:#94A3B8">항상 필수</span></span>' +
         '<span class="rf-r">결제금액</span><span class="rf-r">총인원</span><span class="rf-r">일건수</span><span></span></div>';
       body = headCols +
         '<div class="rf-row" style="grid-template-columns:1.15fr 1.5fr .8fr .6fr .6fr 24px">' +
           '<input class="rf-in" value="' + esc(DATA.product) + '" readonly>' +
-          '<span class="rf-urlwrap ' + (linkMode ? 'hi' : '') + '"><input class="rf-in ' + (linkMode && !pv ? 'need' : '') + '" ' +
-            (linkMode ? '' : 'disabled') + ' value="' + esc(pv) + '" placeholder="' +
-            (linkMode ? 'https://…' : '가이드유입 — 사용 안 함') + '"></span>' +
+          '<span class="rf-urlwrap hi"><input class="rf-in ' + (mainMissing() ? 'need' : '') + '" value="' +
+            esc(mainUrl()) + '" placeholder="https://…  (상품확인용)"></span>' +
           '<input class="rf-in rf-r" value="28900" readonly>' +
           '<input class="rf-in rf-r" value="100" readonly>' +
           '<input class="rf-in rf-r" value="20" readonly>' +
           '<button class="rf-x">✕</button>' +
         '</div>';
-      derived = '상품 행의 URL이 그대로 공고 랜딩 URL이 됩니다';
+      derived = linkMode
+        ? '상품 URL이 그대로 유입 링크로 쓰입니다'
+        : '가이드유입 — 상품 URL은 저장되지만 리뷰어에게 링크 버튼은 나가지 않습니다';
     }
 
-    var landing = isOpt ? (optUrl(0) || prodUrl()) : prodUrl();
+    var landing = isOpt ? (optUrl(0) || mainUrl()) : mainUrl();
 
     return '' +
     '<div class="desc"><h2>② 리뷰웹 발행·수정 모달 — 📦 진행상품</h2>' +
-      '<p>표에 <b>[상품 URL] 칸</b>이 붙습니다<span class="newtag">신규</span> — ' +
-      '<b>옵션 없는 작업은 상품 행에</b>, <b>옵션 있는 작업은 옵션 행에</b>. 인트라넷 상품/옵션/금액 블록과 같은 자리입니다.</p>' +
+      '<p>칸이 <b>두 가지</b> 붙습니다<span class="newtag">신규</span> — ' +
+      '<b>① 상품 URL</b>(상품명 옆 · <b>유입방식·옵션 유무와 무관하게 항상 필수</b>) · ' +
+      '<b>② 유입 링크</b>(옵션 행 · 링크유입일 때만). 인트라넷 상품/옵션/금액 블록과 같은 자리입니다.</p>' +
       '<p><b>표가 진실원본</b>이라는 기존 규율 그대로입니다 — 지금 정원·작업내용 상품 원문이 이 표에서 파생되듯, ' +
       '아래 [랜딩 URL]도 <b>표에서 자동 파생되는 읽기전용</b>이 됩니다(PRD의 D3 권장안). ' +
       '<span style="color:#8a4b09">D3에서 다른 안을 고르시면 이 부분이 달라집니다.</span></p>' +
@@ -406,14 +422,20 @@
         '</div>' +
       '</div>' +
     '</div>' +
+    (mainMissing()
+      ? '<div class="callout bad">🚫 <b>상품 URL이 비어 있습니다.</b> 가이드유입·옵션 없는 작업이어도 <b>항상 필수</b>입니다.</div>'
+      : '') +
     (linkMode && isOpt && missingCount()
-      ? '<div class="callout bad">🚫 <b>옵션 ' + missingCount() + '개의 상품 URL이 비어 있습니다.</b> ' +
+      ? '<div class="callout bad">🚫 <b>옵션 ' + missingCount() + '개의 유입 링크가 비어 있습니다.</b> ' +
         '④ 게시 전 자동점검 화면에서 어떻게 막히는지 보실 수 있습니다.</div>'
-      : linkMode
-        ? '<div class="callout good">✅ 링크유입 · 옵션 URL이 모두 채워졌습니다 — 게시 가능.</div>'
-        : '<div class="callout info">ℹ 가이드유입이라 URL 칸이 비활성입니다. ' +
-          '<b>URL 칸이 없는 축약 편집 화면(리뷰어앱 인라인 수정)에서 저장해도 기존 URL은 지워지지 않습니다</b> — ' +
-          '옵션표·리뷰타입과 같은 "UI 있는 화면에서만 전송" 원칙.</div>');
+      : linkMode && !mainMissing()
+        ? '<div class="callout good">✅ 링크유입 · 상품 URL' + (isOpt ? '과 옵션별 유입 링크가 모두' : '이') + ' 채워졌습니다 — 게시 가능.</div>'
+        : !linkMode && !mainMissing()
+          ? '<div class="callout info">ℹ 가이드유입이라 ' + (isOpt ? '<b>옵션별 유입 링크 칸만</b> 비활성이고 ' : '옵션 행이 없어 유입 링크 칸도 없고 ') +
+            '<b>상품 URL은 채워져 있어야 합니다</b>. ' +
+            '<b>URL 칸이 없는 축약 편집 화면(리뷰어앱 인라인 수정)에서 저장해도 기존 값은 지워지지 않습니다</b> — ' +
+            '옵션표·리뷰타입과 같은 "UI 있는 화면에서만 전송" 원칙.</div>'
+          : '');
   }
 
   // ══════════ ③ 리뷰어 화면 ══════════
@@ -481,7 +503,9 @@
     var linkMode = S.inflow === 'link';
     var isOpt = S.mode === 'opt';
     var miss = missingCount();
-    var blocked = linkMode && isOpt && miss > 0;
+    var mainBad = mainMissing();
+    var optBlocked = linkMode && isOpt && miss > 0;
+    var blocked = mainBad || optBlocked;
 
     function gline(kind, txt) {
       var ico = kind === 'ok' ? '✓' : (kind === 'warn' ? '⚠' : '✕');
@@ -491,35 +515,43 @@
     var lines = '' +
       gline('ok', '연결 탭 · 일 모집인원 — <b>설정됨</b>') +
       gline('ok', '구매 시간대 — <b>자율주문</b>') +
+      // ★ 상품(메인) URL — 유입방식·옵션 유무와 무관하게 항상 검사(사용자 확정 2026-08-10)
+      (mainBad
+        ? gline('stop', '상품 URL — <b>비어 있음</b> · 유입방식·옵션 유무와 무관하게 <b>항상 필수</b>입니다')
+        : gline('ok', '상품 URL — <b>입력됨</b> <span style="color:#8a93a6">(항상 필수)</span>')) +
       (linkMode
         ? (isOpt
             ? (miss
-                ? gline('stop', '옵션별 상품 URL — <b>' + miss + '개 비어 있음</b> (' +
+                ? gline('stop', '옵션별 유입 링크 — <b>' + miss + '개 비어 있음</b> (' +
                     DATA.options.filter(function (_, i) { return !optUrl(i); }).map(function (o) { return esc(o.label); }).join(' · ') + ')')
-                : gline('ok', '옵션별 상품 URL — <b>' + DATA.options.length + '개 모두 입력됨</b>'))
-            : (prodUrl() ? gline('ok', '상품 URL — <b>입력됨</b>') : gline('stop', '상품 URL — <b>비어 있음</b>')))
-        : gline('ok', '유입방식 <b>유입가이드</b> — 링크 항목은 검사하지 않습니다')) +
+                : gline('ok', '옵션별 유입 링크 — <b>' + DATA.options.length + '개 모두 입력됨</b>'))
+            : gline('ok', '유입 링크 — <b>상품 URL을 그대로 사용</b>'))
+        : gline('ok', '유입방식 <b>유입가이드</b> — <b>옵션별 유입 링크</b>는 검사하지 않습니다')) +
       (linkMode && isOpt && !miss ? gline('warn', '옵션 3종의 링크가 서로 다릅니다 — 의도한 것인지 확인해 주세요(경고만)') : '');
 
     var d2 = '' +
       '<div class="gate"><h4>D2 선택에 따라 이렇게 달라집니다</h4>' +
-        '<div class="gline ' + (blocked ? 'stop' : 'ok') + '"><span class="ico">' + (blocked ? '✕' : '✓') + '</span><span class="tx">' +
+        '<div class="gline ' + (optBlocked ? 'stop' : 'ok') + '"><span class="ico">' + (optBlocked ? '✕' : '✓') + '</span><span class="tx">' +
           '<b>게시(active) 저장만 차단 <span style="color:#17803d">(권장)</span></b> — ' +
-          (blocked ? '지금 상태에서는 <b>[게시 상태로 저장]만</b> 잠기고, 임시저장은 됩니다.'
-                   : '통과 — 게시 가능합니다.') + '</span></div>' +
-        '<div class="gline ' + (blocked ? 'stop' : 'ok') + '"><span class="ico">' + (blocked ? '✕' : '✓') + '</span><span class="tx">' +
+          (optBlocked ? '지금 상태에서는 <b>[게시 상태로 저장]만</b> 잠기고, 임시저장은 됩니다.'
+                      : '통과 — 게시 가능합니다.') + '</span></div>' +
+        '<div class="gline ' + (optBlocked ? 'stop' : 'ok') + '"><span class="ico">' + (optBlocked ? '✕' : '✓') + '</span><span class="tx">' +
           '<b>저장 자체를 하드블록</b> — ' +
-          (blocked ? '<b>저장 버튼 전체가 잠깁니다</b>. 옛 공고의 리뷰비·정원 긴급 정정도 함께 막힙니다.'
-                   : '통과.') + '</span></div>' +
-        '<div class="gline ' + (blocked ? 'warn' : 'ok') + '"><span class="ico">' + (blocked ? '⚠' : '✓') + '</span><span class="tx">' +
+          (optBlocked ? '<b>저장 버튼 전체가 잠깁니다</b>. 옛 공고의 리뷰비·정원 긴급 정정도 함께 막힙니다.'
+                      : '통과.') + '</span></div>' +
+        '<div class="gline ' + (optBlocked ? 'warn' : 'ok') + '"><span class="ico">' + (optBlocked ? '⚠' : '✓') + '</span><span class="tx">' +
           '<b>경고만 (게시 허용)</b> — ' +
-          (blocked ? '빨간 경고만 뜨고 <b>그대로 게시됩니다</b>. 누락이 리뷰어에게 그대로 나갑니다.' : '통과.') + '</span></div>' +
+          (optBlocked ? '빨간 경고만 뜨고 <b>그대로 게시됩니다</b>. 누락이 리뷰어에게 그대로 나갑니다.' : '통과.') + '</span></div>' +
+        '<div class="gnote">※ D2는 <b>옵션별 유입 링크</b>의 강제 수준만 정합니다 — ' +
+          '<b>상품(메인) URL은 어느 선택지에서도 항상 필수</b>입니다.</div>' +
       '</div>';
 
     return '' +
     '<div class="desc"><h2>④ 게시 전 자동점검</h2>' +
-      '<p>발행 모달 맨 아래 자동점검 블록에 <b>옵션별 상품 URL 항목이 한 줄 추가</b>됩니다<span class="newtag">신규</span>. ' +
-      '가이드유입이면 이 항목을 <b>아예 검사하지 않습니다</b>(정상 상태를 경고로 칠하지 않는다는 레포 규율).</p>' +
+      '<p>발행 모달 맨 아래 자동점검 블록은 <b>상품(메인) URL을 항상 검사</b>하고, 그 아래에 ' +
+      '<b>옵션별 유입 링크 항목이 한 줄 추가</b>됩니다<span class="newtag">신규</span>. ' +
+      '가이드유입이면 <b>옵션별 링크 항목만</b> 검사하지 않습니다(정상 상태를 경고로 칠하지 않는다는 레포 규율) — ' +
+      '<b>상품 URL 검사는 그대로 남습니다</b>.</p>' +
       '<p>상단 <b>상황 설정</b>의 [URL 입력]을 <b>일부 비움 / 전부 비움</b>으로 바꿔 보세요.</p>' +
     '</div>' +
     '<div class="stage"><div class="stagehead">실제 화면 재현 — <b>모집공고 발행 › 게시 전 자동점검</b></div>' +
@@ -529,7 +561,13 @@
           '<button class="gbtn pri" ' + (blocked ? 'disabled' : '') + '>게시 상태로 저장</button>' +
         '</div>' +
         (blocked
-          ? '<div class="gnote" style="color:#c02626">🚫 옵션별 상품 URL을 채워야 게시할 수 있습니다 — 임시저장은 가능합니다.</div>'
+          ? '<div class="gnote" style="color:#c02626">🚫 ' +
+              (mainBad && optBlocked ? '<b>상품 URL</b>과 <b>옵션별 유입 링크</b>를'
+                : mainBad ? '<b>상품 URL</b>을'
+                : '<b>옵션별 유입 링크</b>를') +
+              ' 채워야 게시할 수 있습니다 — 임시저장은 가능합니다.' +
+              (mainBad ? '<br><span style="color:#8a93a6">상품 URL은 유입방식·옵션 유무와 무관하게 항상 필수입니다.</span>' : '') +
+            '</div>'
           : '<div class="gnote">모든 항목 통과 — 게시할 수 있습니다.</div>') +
       '</div>' + d2 +
     '</div>' +
