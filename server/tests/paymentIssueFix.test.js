@@ -693,6 +693,26 @@ function withStubPool(handler, run) {
     assert.strictEqual((html.match(/pmfixcard/g) || []).length, 1, '카드가 하나여야 한다');
   });
 
+  t('7m ★ 계좌 버튼 인덱스는 accts 배열 위치(카드 안 순번이면 남의 계좌 창이 열린다)', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 1, issues: ['no_account'], reviewerName: '가',
+        accountRef: { reviewerId: 'r-1', subPhone8: null }, warnings: [] }),
+      mkItem({ tabName: 'T1', tabLabel: 'A', rowIndex: 2, issues: ['no_account'], reviewerName: '가',
+        accountRef: { reviewerId: 'r-1', subPhone8: null }, warnings: [] }),
+      mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 3, issues: ['no_account'], reviewerName: '나',
+        accountRef: { reviewerId: 'r-2', subPhone8: null }, warnings: [] }),
+    ]);
+    const f = S.STATE.pmFix;
+    assert.strictEqual(f.accts.length, 2);
+    // 각 카드가 넘기는 인덱스가 그 카드에 적힌 리뷰어를 가리켜야 한다
+    for (const card of S._pmFixBlock().split('pmfixcard').slice(1)) {
+      const m = card.match(/_pmFixAcct\((\d+)\)/); assert.ok(m, '계좌 버튼이 없다');
+      const nm = card.match(/계좌 — ([^<]+)</)[1];
+      assert.strictEqual(f.accts[+m[1]].name, nm, '★ 버튼이 다른 리뷰어의 계좌 창을 연다');
+    }
+  });
+
   t('7l 카드 수 상한을 넘으면 남은 작업 수를 고지한다(조용히 자르지 않는다)', () => {
     const S = loadFixFns();
     const many = [];
@@ -749,6 +769,13 @@ function withStubPool(handler, run) {
       assert.strictEqual(it.sheetUrl, '');
       assert.strictEqual(it.sheetless, true);
     });
+  });
+
+  t('8d2 ★ 탭 메타 SELECT 가 판정 재료를 실제로 읽는다(스텁은 SQL 을 해석하지 않는다)', () => {
+    const src = noLineComments(read('services/payment.service.js'));
+    const q = src.slice(src.indexOf('async function _loadTabMeta'), src.indexOf('function tabSheetUrl'));
+    assert.ok(/tc\.sheetless AS "sheetless"/.test(q), '★ sheetless 를 안 읽으면 무시트 작업에 죽은 링크가 생긴다');
+    assert.ok(/tc\.tab_gid AS "tabGid"/.test(q), 'gid 를 안 읽으면 시트만 열려 엉뚱한 탭을 본다');
   });
 
   t('8e 프론트 링크 검증 — docs.google.com 만 연다(응답에 임의 URL 이 실려도)', () => {
