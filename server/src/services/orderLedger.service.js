@@ -246,6 +246,15 @@ function mapOrderToSheetRow(headers, orderData = {}) {
     const key = String(h || '').toLowerCase().trim();
     if (_ID_EXACT_ADMIN.includes(key)) return null;
     if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return null;
+    /* ★★ 101 블로그URL(블로그 주소) — **주소·URL 규칙보다 먼저** 본다.
+         `블로그주소` 는 아래 `key.includes('주소')` 에 걸려 **배송 주소가 그 칸에 찍히고**,
+         `블로그URL` 은 어느 규칙에도 안 걸려 영영 안 채워진다. 순서가 곧 정확성이다.
+       ★★ 값이 없으면 `''` 가 아니라 **`null`(=안 씀)** — `buildBatchUpdateData` 는 null 만 걸러내므로
+         빈 문자열은 **그 칸을 지우는 쓰기**가 된다(7/31 옵션 칸 사고와 같은 메커니즘).
+         관리자가 사전등록해 둔 주소를 리뷰어의 다음 제출이 지우면 안 된다.
+       ★ 포스팅URL(쓴 글 주소)은 여기가 아니라 memo 열이 담당한다(M4-1 `utils/memoColumn`) —
+         '포스팅' 은 이 규칙에 걸리지 않으므로 두 칸이 섞이지 않는다. */
+    if (key.includes('블로그') || key.includes('blog')) return orderData.blogUrl || null;
     if (key.includes('주문자') || key.includes('orderer')) return orderData.orderer || '';
     if (key.includes('수취인') || key.includes('받는분') || key.includes('이름') || key.includes('recipient')) return orderData.recipient || '';
     if (colIdx === idCol) return orderData.userId || '';   // ★ 옛 규칙(includes '아이디' / ==='id') 대체 — '쿠팡id' 인식
@@ -727,9 +736,9 @@ async function createOrderLedgerEntry(input) {
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
-       order_num, date_str, selected_opt_key, bank, account, depositor, price, memo,
+       order_num, date_str, selected_opt_key, bank, account, depositor, price, memo, blog_url,
        dedup_key, mirror_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NULL,'pending')
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULL,'pending')
      RETURNING id`;
   const orderInsertParams = [
     sheetId,
@@ -749,6 +758,7 @@ async function createOrderLedgerEntry(input) {
     orderData.depositor || '',
     orderData.price || '',
     orderData.memo || '',
+    orderData.blogUrl || null,   // ★ 101 — 없으면 NULL(빈 문자열로 굳히지 않는다: 나중 전파/사전등록이 COALESCE 로 채운다)
   ];
 
   let orderSubmissionId;
@@ -1186,6 +1196,8 @@ function _osRowToOrderData(os) {
     orderer: os.orderer, recipient: os.recipient, userId: os.user_id, phone: os.phone, address: os.address,
     bank: os.bank, account: os.account, depositor: os.depositor, price: os.price, orderNum: os.order_num,
     memo: os.memo, dateStr: os.date_str, selectedOptKey: os.selected_opt_key,
+    // ★ 101: 큐 재시도·reconcile 재기록도 같은 값을 쓴다(제출 시점과 시트 기입이 갈리지 않게).
+    blogUrl: os.blog_url,
   };
 }
 
