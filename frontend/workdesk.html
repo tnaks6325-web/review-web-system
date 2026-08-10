@@ -5397,7 +5397,8 @@ function _renderWoHead(){
       onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
     <button class="btn" onclick="_loadOrders()">새로고침</button>
     ${(STATE.role==='master'||STATE.role==='admin')?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
-    <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 시트·탭이 시스템에 등록되고 인덱스가 만들어집니다 —
+    <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 작업이 시스템에 등록되고 인덱스가 만들어집니다
+      (구글시트탭URL이 없는 오더는 <b>시스템 작업표</b>가 자동 생성됩니다) —
       신규 탭이 등록되는 유일한 경로라 <b>편집 허용명단</b>에 있는 담당자만 누를 수 있습니다.
       ${STATE.canEdit?'':'<b style="color:var(--muted)">(현재 계정은 열람 전용)</b>'}</div>`;
 }
@@ -5435,7 +5436,7 @@ function _woEditActions(o){
   const id=esc(o.id);
   const wt=` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${id}')" title="작업표 생성 미리보기">📋 작업표</button>`;
   const acc = (typeof _woAcceptable==='function' ? _woAcceptable(o) : ['submitted','revision','rejected'].includes(o.status))
-    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다">접수하기</button>`
+    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="${(typeof _woAcceptSheetless==='function'&&_woAcceptSheetless(o))?'구글시트 없이 시스템 작업표를 만들어 등록합니다':'작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다'}">접수하기</button>`
     : `<button class="btn xs wodone" disabled title="${esc(o.linked_tab_name?('등록된 탭 — '+o.linked_tab_name):'이미 접수된 작업오더입니다')}">✓ 접수완료</button>`;
   const camp = o.linked_campaign_id
     ? ` <button class="btn xs wolink" onclick="event.stopPropagation();_woCampaign('${id}')" title="연결된 모집공고를 열어 리뷰어 화면을 바로 확인합니다">👁 모집공고</button>`
@@ -5782,17 +5783,31 @@ function _wtpRender(){
 
 async function _woAccept(id, pickGid){
   // pickGid = 탭 교정 재접수(gid 미발견 404 팝업에서 고른 탭) — 그때는 confirm 을 이미 팝업이 받았다.
-  if(!pickGid && !confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
+  //  ★ 구글시트탭URL 이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성) — 확인창이 그 사실을 말한다.
+  //    판정은 공유 모듈 `_woAcceptSheetless`(표시용) 하나이고 최종 판정은 서버가 한다.
+  const o=(STATE.wo||[]).find(x=>x.id===id);
+  const ns = (typeof _woAcceptSheetless==='function') ? _woAcceptSheetless(o) : !String((o&&o.work_sheet_url)||'').trim();
+  const msg = ns
+    ? '이 작업오더를 접수할까요?\n\n· 구글시트 없이 시스템 작업표(모집인원만큼의 줄)를 만들어 등록합니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.'
+    : '이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.';
+  if(!pickGid && !confirm(msg)) return;
   const body = pickGid ? {id, gid:pickGid} : {id};
   const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify(body)});
   if(r&&r.ok){
-    _toast(r.skipped?'이미 등록된 오더입니다.':((r.gidCorrected?'🔧 URL 교정 후 ':'')+'접수 완료'+(r.tabName?' — '+r.tabName:'')));
+    const wt = r.worktable && r.worktable.rows ? ' · 작업표 '+r.worktable.rows+'줄' : '';
+    _toast(r.skipped?'이미 등록된 오더입니다.'
+      :((r.gidCorrected?'🔧 URL 교정 후 ':'')+'접수 완료'+(r.tabName?' — '+r.tabName:'')+(r.sheetless?' (무시트)'+wt:'')));
+    if(r.worktable&&r.worktable.error) _toast('⚠ 작업표 장부 생성 실패: '+r.worktable.error);
     _loadOrders();
   }
   // ★ URL 의 gid 가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서 사람이 골라
   //   재접수. 팝업은 관리자 대시보드와 공용(work-order-detail.js woAcceptTabPicker).
   else if(r&&r.gidNotFound&&typeof woAcceptTabPicker==='function'){
     woAcceptTabPicker(r, g=>_woAccept(id, g));
+  }
+  // ★ 무시트 접수가 막힌 경우는 **왜 못 만드는지**(건수 0·표준 열 미설정 등)를 그대로 보여준다.
+  else if(r&&r.sheetless&&r.blockers&&r.blockers.length){
+    _toast('⚠ 작업표를 만들 수 없습니다: '+r.blockers.map(b=>b&&b.message||'').filter(Boolean).join(' / '));
   }
   else _toast('⚠ 접수 실패'+(r&&r.error?': '+r.error:''));
 }

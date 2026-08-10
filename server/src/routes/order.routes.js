@@ -854,7 +854,12 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     //  ㉮ 시트 경로(기존)   : work_sheet_url(gid) → 구글 메타 조회 → 그 탭
     //  ㉯ 무시트 경로(W2·F1): 작업표를 그 자리에서 만들고 가상 탭을 발급 (구글 호출 0)
     // ════════════════════════════════════════════════════════════════════
-    const wantSheetless = ((req.body || {}).sheetless === true || (req.body || {}).sheetless === 'true');
+    //  ★★ 판정은 `sheetlessAccept.resolveAcceptMode` **단일 출처** — 지금부터 들어오는 작업은
+    //     무시트가 기본이라 **work_sheet_url 이 비어 있으면 무시트로 접수**한다(사용자 확정 2026-08-10).
+    //     되돌리기 = 킬스위치 `SHEETLESS_ACCEPT_DEFAULT=0`(그때는 아래 2-㉮ 의 400 안내로 떨어진다).
+    const { resolveAcceptMode } = require('../services/sheetlessAccept.service');
+    const acceptMode = resolveAcceptMode({ workOrder: o, body: req.body });
+    const wantSheetless = acceptMode.sheetless;
     let sheetId, gid, tabName, spreadsheetTitle, tabSheetUrl;
     let gidCorrected = false;
     let sheetlessPlan = null;      // 무시트일 때만 채워짐(작업표 행·열 구성)
@@ -882,10 +887,9 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
         sheetlessPlan = made;
       }
     } else {
-    // 2-㉮) work_sheet_url 검증 (URL + gid 필수) — ★ 제출은 선택이지만 **접수는 여전히 탭이 있어야 성립**한다.
-    //   접수는 그 탭을 tab_configs·campaigns 에 등록하는 단일 관문이라, 등록할 탭이 없으면 할 일이 없다.
-    //   시트 미첨부 오더는 ① 시트탭URL을 채워 넣거나 ② 작업표를 생성(→ 시트 자동 생성)하거나
-    //   ③ **무시트로 접수**(body.sheetless=true — 시트 없이 작업표만 만든다)한다.
+    // 2-㉮) work_sheet_url 검증 (URL + gid 필수) — 시트 경로일 때만 온다.
+    //   ★ 여기 URL 없음 400 은 **킬스위치(`SHEETLESS_ACCEPT_DEFAULT=0`) 또는 body.sheetless=false**
+    //     일 때만 도달한다. 평시에는 URL 이 비면 위 판정이 무시트로 보내므로 막다른 길이 아니다.
     const url = (o.work_sheet_url || '').trim();
     if (!url) {
       return res.status(400).json({
