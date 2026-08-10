@@ -1512,6 +1512,50 @@
 .pmsib:hover{border-color:#1B4F9C;color:#1B4F9C}
 .btn.sm{padding:3px 9px;font-size:11.5px}
 .btn.danger{color:#B3382E;border-color:#EAB6B0}
+/* ── 🏦 은행 이름 설정(서브탭) ── 정식명 · 자동인식 표기 인라인 편집 ── */
+.pmtabs{display:flex;gap:6px;margin:0 0 12px}
+.pmtabs button{padding:7px 14px;font-size:13px;font-weight:700;border:1px solid var(--line,#D8DDE5);
+  border-radius:9px;background:var(--card,#fff);color:var(--t2,#5A6473);cursor:pointer}
+.pmtabs button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C}
+.bntools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.bntools input.q{flex:1 1 220px;min-width:180px;padding:8px 11px;font-size:13px;box-sizing:border-box;
+  border:1px solid var(--line,#D8DDE5);border-radius:9px;background:var(--card,#fff);color:var(--t1,#1B1F24)}
+.bnchips{display:flex;gap:5px;flex-wrap:wrap}
+.bnchip{padding:5px 11px;font-size:12px;border:1px solid var(--line,#D8DDE5);border-radius:999px;
+  background:var(--card,#fff);color:var(--t2,#5A6473);cursor:pointer}
+.bnchip.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C;font-weight:700}
+.bntable td{vertical-align:top}
+.bntable td.code{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap;width:74px}
+.bnnm{cursor:pointer;border-bottom:1px dashed var(--line,#C9D1DC)}
+.bnnm:hover{color:#1B4F9C;border-color:#1B4F9C}
+.bnnm .pen{font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
+.bnbase{font-size:11px;color:var(--t3,#8B94A1);display:block;margin-top:2px}
+.bnkw{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.bnkwchip{display:inline-flex;align-items:center;gap:4px;padding:3px 5px 3px 9px;font-size:12px;border-radius:999px;
+  border:1px solid var(--line,#D8DDE5);background:#F7F8FA;color:var(--t1,#1B1F24)}
+.bnkwchip.new{border-color:#9FC0E8;background:#E9F1FC;color:#1B4F9C}
+.bnkwchip.dup{border-color:#EAB6B0;background:#FAE9E7;color:#B3382E;font-weight:700}
+.bnkwchip .x{border:0;background:none;color:inherit;cursor:pointer;font-size:13px;line-height:1;padding:0 2px;opacity:.6}
+.bnkwchip .x:hover{opacity:1}
+.bnkwadd{border:1px dashed var(--line,#C9D1DC);background:none;color:var(--t3,#8B94A1);border-radius:999px;
+  padding:3px 9px;font-size:12px;cursor:pointer}
+.bnkwadd:hover{border-color:#1B4F9C;color:#1B4F9C}
+.bnq{border:1px solid #E7D2A3;background:#FDF8EE;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.bnq>h3{font-size:13.5px;font-weight:800;color:#7a5a12;margin:0 0 3px}
+.bnq .sub{font-size:12px;color:#8a6d2f;margin-bottom:9px;line-height:1.55}
+.bnqrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;padding:6px 0;border-top:1px solid #EFE2C6}
+.bnqrow:first-of-type{border-top:0}
+.bnqrow .v{font-weight:750;flex:0 0 auto}
+.bnqrow .n{font-size:11px;color:#8a6d2f;flex:1 1 auto}
+.bnqrow select{padding:5px 8px;font-size:12.5px;border:1px solid var(--line,#D8DDE5);border-radius:8px;
+  background:var(--card,#fff);color:var(--t1,#1B1F24);max-width:230px}
+.bnbar{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;gap:9px;margin-top:12px;
+  padding:11px 14px;border:1px solid var(--line,#E1E5EB);border-radius:12px;background:var(--card,#fff);
+  box-shadow:0 -6px 18px rgba(0,0,0,.06)}
+.bnbar .msg{flex:1;font-size:12.5px;color:var(--t2,#5A6473)}
+.bnbar .msg.bad{color:#B3382E;font-weight:700}
+.bnlog{margin-top:16px;font-size:12px;color:var(--t3,#8B94A1);line-height:1.7}
+.bnlog b{color:var(--t2,#5A6473)}
 
 /* ── 💸 이체결과 반영 확인 팝업(M2) ──
    ★ body 직속 오버레이(뷰 스크롤 컨테이너 안에 두면 화면 흐름에 섞인다).
@@ -5989,14 +6033,25 @@ const PAY_ACCT_ISSUES = ['bank_unknown','no_account','no_holder'];
 async function renderPaymentView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="pmhead"></div><div id="pmbody"><div class="empty">불러오는 중…</div></div></div>`;
   STATE.pmExcluded = STATE.pmExcluded || {};   // {key:true} = 이번 회차에서 뺀 건
+  STATE.pmSub = STATE.pmSub || 'targets';      // 서브탭 — 입금 대상·회차 / 🏦 은행 이름
   await _pmLoad();
 }
+
+/* 서브탭 — 기존 화면(입금 대상 + 회차)은 **한 벌 그대로** 두고 은행 이름 설정만 옆에 붙인다.
+   ★ 시안의 3탭(대상/회차/은행이름) 중 앞 두 개를 쪼개지 않은 이유 = 그 둘은 한 화면에서
+     "담고 → 내려받고 → 회차 확인"이 이어지는 흐름이라, 나누면 오늘 하던 일이 늘어난다. */
+function _pmTabsHtml(){
+  const t=(k,l)=>`<button class="${STATE.pmSub===k?'on':''}" onclick="_pmSwitch('${k}')">${l}</button>`;
+  return `<div class="pmtabs">${t('targets','입금 대상 · 회차')}${t('banks','🏦 은행 이름')}</div>`;
+}
+function _pmSwitch(k){ if(STATE.pmSub===k) return; STATE.pmSub=k; _pmPaint(); }
+function _pmPaint(){ if(STATE.pmSub==='banks') _bnOpen(); else _pmRender(); }
 
 async function _pmLoad(){
   const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
   if(!t || !t.ok){ $('#pmbody').innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}</div>`; return; }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
-  _pmRender();
+  _pmPaint();
 }
 
 const _pmKey = it => it.sheetId+'||'+it.tabName+'||'+it.rowIndex;
@@ -6023,6 +6078,7 @@ function _pmRender(){
 
   $('#pmbody').innerHTML = `
     <div class="lgwrap" style="max-width:1400px">
+      ${_pmTabsHtml()}
       <div class="pmstats">
         ${stat('오늘 입금대상', items.filter(_pmOn).length+'건')}
         ${stat('합계 금액', _pmNum(items.filter(_pmOn).reduce((a,c)=>a+c.amount,0))+'원')}
@@ -6624,6 +6680,312 @@ async function _pmCancel(id, seq){
   await _pmLoad();
 }
 
+
+/* ══════════════════════════════════════════════════════════════
+   🏦 은행 이름 설정 — 정식 명칭 · 자동인식 표기 인라인 관리
+   ★★ **판정은 서버 `utils/bankCodes.resolveBank` 단일 출처** — 이 화면이 바꾸는 것은
+      그 표의 내용뿐이고, 저장 검증(겹침·형식)도 서버가 최종 판정한다.
+   ★★ 겹침(같은 말이 두 은행)은 **저장을 막는 유일한 하드블록** — 어느 코드로 이체할지
+      정할 수 없고, 그건 곧 남의 계좌로 돈이 가는 경로다.
+   ★ 미인식 큐의 재료는 이미 받아 둔 입금대상(`STATE.pmItems`)이라 **신규 엔드포인트 0**.
+   ══════════════════════════════════════════════════════════════ */
+
+/* 겹침 **표시 전용** 정규화 — 서버 `utils/bankCodes._norm` 과 규칙이 같아야 한다
+   (회귀가드가 두 정규식을 문자 그대로 대조한다). 최종 판정은 언제나 서버가 한다. */
+function _bnNorm(s){
+  return String(s==null?'':s).replace(/\(주\)|주식회사|㈜/g,'').replace(/[\s\-_.·,()]/g,'').toLowerCase().trim();
+}
+
+async function _bnOpen(){
+  $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
+    <span class="bd">🏦 은행 이름 설정</span>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn" onclick="_bnLoad(true)">새로고침</button></div>`;
+  if(STATE.bn && STATE.bn.loaded){ _bnRender(); return; }
+  $('#pmbody').innerHTML=`<div class="lgwrap" style="max-width:1400px">${_pmTabsHtml()}<div class="empty">불러오는 중…</div></div>`;
+  await _bnLoad();
+}
+
+/* ★ 자리표시자를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다(사유 + [다시 시도]) —
+   조용히 '불러오는 중…' 에 매달리는 화면 금지(리뷰검수 무한로딩과 같은 자리). */
+async function _bnLoad(force){
+  const fail=(why)=>{ $('#pmbody').innerHTML=`<div class="lgwrap" style="max-width:1400px">${_pmTabsHtml()}
+    <div class="empty">은행 목록을 불러오지 못했습니다.${why?' ('+esc(why)+')':''}<br>
+    <button class="btn" style="margin-top:9px" onclick="_bnLoad(true)">다시 시도</button></div></div>`; };
+  try{
+    const r = await api('/api/trackb/payment/bank-names');
+    if(!r || !r.ok){ fail(r && r.error); return; }
+    STATE.bn = {
+      rows: (r.banks||[]).map(b=>({ ...b, aliases:(b.aliases||[]).map(a=>({...a})) })),
+      rev: r.rev||null, log: r.log||[], updatedBy: r.updatedBy||'',
+      q:'', filter:'all', loaded:true, dirty:false, msg:'',
+    };
+    _bnRender();
+  }catch(err){ fail(err && err.message); }
+}
+
+/* 저장 페이로드 = 서버가 준 값과의 차이만. `del` 은 "기본 표기인데 지금 목록에 없는 것" —
+   서버가 준 문자열끼리 그대로 비교하므로 프론트에 정규화 사본이 끼어들 자리가 없다. */
+function _bnPayload(){
+  const banks={}, extra=[];
+  for(const r of (STATE.bn.rows||[])){
+    const ent={};
+    if(r.custom){ extra.push({ code:r.code, name:r.name }); }
+    else if((r.name||'') !== (r.baseName||'')) ent.name = r.name;
+    const add = r.aliases.filter(a=>!a.base).map(a=>a.v);
+    if(add.length) ent.add = add;
+    const del = (r.baseAliases||[]).filter(b=>!r.aliases.some(a=>a.base && a.v===b));
+    if(del.length) ent.del = del;
+    if(ent.name || ent.add || ent.del) banks[r.code]=ent;
+  }
+  return { banks, extra };
+}
+
+/* 겹침 판정 — 정식명 + 표기 전부를 한 표에 모아 두 코드를 가리키는 말을 찾는다. */
+function _bnConflicts(){
+  const map=new Map();
+  const put=(v,code)=>{ const n=_bnNorm(v); if(!n) return; if(!map.has(n)) map.set(n,new Set()); map.get(n).add(code); };
+  for(const r of (STATE.bn.rows||[])){ put(r.name,r.code); for(const a of r.aliases) put(a.v,r.code); }
+  const bad=new Set();
+  for(const [n,set] of map) if(set.size>1) bad.add(n);
+  return bad;
+}
+
+/* 미인식 큐 — 입금대상 중 '은행명 인식불가'로 막힌 표기를 원문 그대로 모은다.
+   ★ 목록을 못 받았으면 **0건으로 꾸미지 않고** 아무것도 그리지 않는다. */
+function _bnQueue(){
+  const items = STATE.pmItems;
+  if(!Array.isArray(items)) return null;
+  const m=new Map();
+  for(const it of items){
+    if(!(it.issues||[]).includes('bank_unknown')) continue;
+    const v=String(it.bankName||'').trim();
+    if(!v) continue;
+    const k=_bnNorm(v);
+    if(!m.has(k)) m.set(k,{ v, n:0 });
+    m.get(k).n++;
+  }
+  return [...m.values()].sort((a,b)=>b.n-a.n);
+}
+
+function _bnUseCount(code){
+  const items = STATE.pmItems;
+  if(!Array.isArray(items)) return null;
+  return items.filter(it=>it.bankCode===code).length;
+}
+
+function _bnRender(){
+  const S=STATE.bn; if(!S) return;
+  const dup=_bnConflicts();
+  const q=_bnNorm(S.q);
+  const kwCount=S.rows.reduce((a,r)=>a+r.aliases.length,0);
+  const queue=_bnQueue();
+
+  const FILTERS=[
+    ['all','전체',()=>true],
+    ['bank','은행',r=>Number(r.code)<200],
+    ['sec','증권·기타',r=>Number(r.code)>=200],
+    ['nokw','표기 없음',r=>!r.aliases.length],
+    ['dup','겹침',r=>[r.name,...r.aliases.map(a=>a.v)].some(v=>dup.has(_bnNorm(v)))],
+  ];
+  const fn=(FILTERS.find(f=>f[0]===S.filter)||FILTERS[0])[2];
+  const view=S.rows.map((r,i)=>({r,i})).filter(({r})=>
+    fn(r) && (!q || _bnNorm(r.code+r.name+r.baseName+r.aliases.map(a=>a.v).join('')).includes(q)));
+
+  const stat=(k,v,cls)=>`<div class="pmstat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const chips=FILTERS.map(f=>`<button class="bnchip ${S.filter===f[0]?'on':''}" onclick="_bnFilter('${f[0]}')">${f[1]} ${S.rows.filter(f[2]).length}</button>`).join('');
+
+  const qBlock = (queue && queue.length) ? `
+    <div class="bnq">
+      <h3>⚠ 지금 막혀 있는 표기 ${queue.length}종</h3>
+      <div class="sub">리뷰어가 적어 낸 값 중 어느 은행인지 몰라 <b>입금이 보류된</b> 표기입니다.
+        은행을 골라 연결하면 그 건의 보류가 풀리고, 다음부터는 자동으로 인식됩니다.</div>
+      ${queue.map((x,qi)=>`<div class="bnqrow">
+        <span class="v">${esc(x.v)}</span><span class="n">· ${x.n}건 보류</span>
+        <select id="bnq${qi}">${['<option value="">은행 선택…</option>'].concat(
+          S.rows.map(r=>`<option value="${esc(r.code)}">${esc(r.code)} ${esc(r.name)}</option>`)).join('')}</select>
+        <button class="btn sm primary" onclick="_bnLink(${qi})">연결하고 풀기</button>
+      </div>`).join('')}
+    </div>` : (queue ? '' : `<div class="pmnote">입금대상을 아직 불러오지 못해 <b>막힌 표기 목록을 표시할 수 없습니다</b> — [입금 대상] 탭에서 새로고침해 주세요.</div>`);
+
+  const rows = view.map(({r,i})=>{
+    const kw = r.aliases.map((a,ki)=>{
+      const bad=dup.has(_bnNorm(a.v));
+      return `<span class="bnkwchip ${bad?'dup':(a.base?'':'new')}" ${bad?'title="다른 은행에도 같은 표기가 있습니다"':''}>${esc(a.v)}<button class="x" onclick="_bnDelKw(${i},${ki})" title="지우기">×</button></span>`;
+    }).join('');
+    const nameBad = dup.has(_bnNorm(r.name));
+    const use=_bnUseCount(r.code);
+    return `<tr>
+      <td class="code">${esc(r.code)}${r.custom?'<span class="pmauto man">추가</span>':''}</td>
+      <td><span class="bnnm ${nameBad?'pmwarn':''}" onclick="_bnEditName(${i})">${esc(r.name)}<span class="pen">✎</span></span>
+        ${r.renamed?`<span class="bnbase">기본: ${esc(r.baseName)}</span>`:''}</td>
+      <td><div class="bnkw" id="bnkw${i}">${kw}<button class="bnkwadd" onclick="_bnAddKw(${i})">＋</button></div></td>
+      <td class="num">${use==null?'<span class="pmauto">-</span>':(use?use+'건':'<span class="pmauto">0</span>')}</td>
+    </tr>`;
+  }).join('');
+
+  const conflictN=[...dup].length;
+  const bar = S.dirty ? `<div class="bnbar">
+      <span class="msg ${conflictN?'bad':''}">${conflictN
+        ? `같은 표기가 두 은행에 있습니다 (${conflictN}건) — 빨간 표기를 지워야 저장할 수 있습니다.`
+        : (S.msg?esc(S.msg):'바뀐 내용이 있습니다.')}</span>
+      <button class="btn" onclick="_bnLoad(true)">되돌리기</button>
+      <button class="btn primary" ${conflictN?'disabled':''} onclick="_bnSave()">저장</button>
+    </div>` : (S.msg?`<div class="bnbar"><span class="msg">${esc(S.msg)}</span></div>`:'');
+
+  const log = (S.log||[]).length ? `<div class="bnlog"><b>최근 변경</b><br>${
+    S.log.slice(0,8).map(l=>`${esc(String(l.at||'').slice(0,16).replace('T',' '))} · ${esc(l.by||'')} — ${esc(_bnLogText(l))}`).join('<br>')}</div>` : '';
+
+  $('#pmbody').innerHTML=`<div class="lgwrap" style="max-width:1400px">
+    ${_pmTabsHtml()}
+    <div class="pmstats">
+      ${stat('은행',S.rows.length+'개')}
+      ${stat('자동인식 표기',kwCount+'개')}
+      ${queue?stat('인식 못 한 표기',(queue.length||0)+'종',queue.length?'warn':''):stat('인식 못 한 표기','?')}
+      ${conflictN?stat('⚠ 겹침',conflictN+'건','warn'):''}
+    </div>
+    ${qBlock}
+    <div class="bntools">
+      <input class="q" id="bnq" placeholder="🔎 은행명·코드·표기로 찾기" value="${esc(S.q)}" oninput="_bnSearch(this.value)">
+      <div class="bnchips">${chips}</div>
+      <button class="btn sm" onclick="_bnAddBank()">＋ 은행 추가</button>
+    </div>
+    ${S.adding?`<div class="pmfixcard" style="margin-bottom:10px;max-width:520px">
+      <div class="ttl">＋ 은행 추가</div>
+      <div class="cnt">은행 목록에 없는 새 금융기관이 생겼을 때만 씁니다.</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+        <input id="bnNewCode" placeholder="은행코드(3자리)" style="width:130px;padding:7px 9px;font-size:13px;border:1px solid var(--line,#D8DDE5);border-radius:8px">
+        <input id="bnNewName" placeholder="정식 명칭" style="flex:1;min-width:150px;padding:7px 9px;font-size:13px;border:1px solid var(--line,#D8DDE5);border-radius:8px">
+        <button class="btn sm primary" onclick="_bnAddBankOk()">추가</button>
+        <button class="btn sm" onclick="_bnAddBank()">취소</button>
+      </div></div>`:''}
+    <table class="lgtable bntable">
+      <thead><tr><th>코드</th><th>이체 서식에 나가는 정식 명칭</th>
+        <th>자동인식 표기 — 리뷰어가 이렇게 적어도 이 은행으로 봅니다</th><th class="num">사용</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" style="text-align:center;padding:22px;color:var(--t3,#8B94A1)">찾는 은행이 없습니다.</td></tr>`}</tbody>
+    </table>
+    ${bar}
+    ${log}
+  </div>`;
+}
+
+function _bnLogText(l){
+  const t={ alias_add:'표기 추가', alias_remove:'표기 삭제', base_off:'기본 표기 끔', base_on:'기본 표기 되살림',
+            rename:'정식명 변경', bank_add:'은행 추가', bank_remove:'은행 삭제' }[l.act] || l.act;
+  return `${l.code} ${l.name||''} · ${t}: ${l.val||''}`;
+}
+
+/* ★ 검색은 **입력칸을 다시 그리지 않는다** — 표만 갈아 끼운다(재렌더하면 한글 IME 조합이
+   파괴된다: 홈 목록 검색 `ㅁ며면면` 실측 계열). */
+function _bnSearch(v){
+  STATE.bn.q=v;
+  const el=document.getElementById('bnq');
+  const at=el?el.selectionStart:null;
+  _bnRender();
+  const el2=document.getElementById('bnq');
+  if(el2){ el2.focus(); if(at!=null){ try{ el2.setSelectionRange(at,at); }catch(_){} } }
+}
+function _bnFilter(k){ STATE.bn.filter=k; _bnRender(); }
+
+/* 이름 편집 — 그 칸만 입력칸으로 바꾼다(표 전체 재렌더 금지: IME 보호) */
+function _bnEditName(i){
+  const S=STATE.bn, r=S.rows[i];
+  const span=document.querySelector(`.bntable [onclick="_bnEditName(${i})"]`);
+  if(!span) return;
+  const inp=document.createElement('input');
+  inp.value=r.name; inp.style.cssText='width:100%;box-sizing:border-box;padding:5px 8px;font-size:13px;border:1px solid #1B4F9C;border-radius:7px';
+  span.replaceWith(inp); inp.focus(); inp.select();
+  let done=false;
+  const commit=()=>{ if(done) return; done=true;
+    const v=inp.value.trim();
+    if(v && v!==r.name){ r.name=v; S.dirty=true; S.msg=''; }
+    _bnRender();
+  };
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); commit(); }
+    else if(e.key==='Escape'){ done=true; _bnRender(); } });
+  inp.addEventListener('blur',commit);
+}
+
+/* 표기 추가 — [＋] 자리에 입력칸(같은 이유로 그 칸만 바꾼다) */
+function _bnAddKw(i){
+  const S=STATE.bn, r=S.rows[i];
+  const box=document.getElementById('bnkw'+i); if(!box) return;
+  const btn=box.querySelector('.bnkwadd'); if(!btn) return;
+  const inp=document.createElement('input');
+  inp.placeholder='리뷰어가 적는 말';
+  inp.style.cssText='width:150px;padding:3px 9px;font-size:12px;border:1px solid #1B4F9C;border-radius:999px';
+  btn.replaceWith(inp); inp.focus();
+  let done=false;
+  const commit=()=>{ if(done) return; done=true;
+    const v=inp.value.trim();
+    if(v && !r.aliases.some(a=>_bnNorm(a.v)===_bnNorm(v))){ r.aliases.push({ v, base:false }); S.dirty=true; S.msg=''; }
+    _bnRender();
+  };
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); commit(); }
+    else if(e.key==='Escape'){ done=true; _bnRender(); } });
+  inp.addEventListener('blur',commit);
+}
+
+function _bnDelKw(i,ki){
+  const S=STATE.bn; const r=S.rows[i]; if(!r||!r.aliases[ki]) return;
+  r.aliases.splice(ki,1); S.dirty=true; S.msg=''; _bnRender();
+}
+
+/* 표에 없는 새 금융기관 — 인라인 입력줄로 받는다.
+   ★ 브라우저 `prompt` 를 쓰지 않는다(레포 규율: 작업유형 만들기와 같은 자리) —
+     두 칸을 한 화면에서 보고 넣어야 코드/이름이 어긋나지 않는다. */
+function _bnAddBank(){ STATE.bn.adding=!STATE.bn.adding; _bnRender();
+  if(STATE.bn.adding){ const el=document.getElementById('bnNewCode'); if(el) el.focus(); } }
+function _bnAddBankOk(){
+  const S=STATE.bn;
+  const code=(document.getElementById('bnNewCode')||{}).value||'';
+  const name=((document.getElementById('bnNewName')||{}).value||'').trim();
+  const c=code.trim();
+  if(!/^[0-9]{3}$/.test(c)){ toast('은행코드는 숫자 3자리입니다'); return; }
+  if(S.rows.some(r=>r.code===c)){ toast('이미 목록에 있는 코드입니다'); return; }
+  if(!name){ toast('이체 서식에 나갈 정식 명칭을 적어주세요'); return; }
+  S.rows.push({ code:c, name, baseName:'', renamed:false, custom:true, aliases:[], baseAliases:[] });
+  S.rows.sort((a,b)=>a.code.localeCompare(b.code));
+  S.adding=false; S.dirty=true; S.msg=''; _bnRender();
+}
+
+/* 막힌 표기 → 은행 연결. 한 번의 클릭으로 등록·저장까지 끝낸다(그게 이 화면의 주 목적). */
+async function _bnLink(qi){
+  const queue=_bnQueue(); const x=queue&&queue[qi]; if(!x) return;
+  const sel=document.getElementById('bnq'+qi);
+  const code=sel?sel.value:'';
+  if(!code){ toast('연결할 은행을 골라주세요'); return; }
+  const r=STATE.bn.rows.find(b=>b.code===code); if(!r) return;
+  if(!confirm(`'${x.v}' 를 ${code} ${r.name} 의 자동인식 표기로 등록할까요?\n\n보류 ${x.n}건이 풀리고, 다음부터 같은 표기는 자동으로 인식됩니다.`)) return;
+  if(!r.aliases.some(a=>_bnNorm(a.v)===_bnNorm(x.v))) r.aliases.push({ v:x.v, base:false });
+  STATE.bn.dirty=true;
+  await _bnSave();
+}
+
+async function _bnSave(){
+  const S=STATE.bn;
+  const payload=_bnPayload();
+  const r = await api('/api/trackb/payment/bank-names', { method:'POST',
+    body: JSON.stringify({ ...payload, rev: S.rev }) });
+  if(!r || !r.ok){
+    S.msg=(r&&r.error)||'저장에 실패했습니다.';
+    if(r && r.code==='stale'){ toast(S.msg); _bnRender(); return; }
+    toast(S.msg); _bnRender(); return;
+  }
+  toast(`저장했습니다 — 변경 ${r.changed}건`);
+  // 저장 즉시 판정 표가 바뀌므로 입금대상도 다시 읽어 **보류가 실제로 풀렸는지** 화면에 반영한다.
+  // ★ 여기서 화면을 갈아타지 않는다(사용자는 은행 이름 탭에 그대로 머문다).
+  try{
+    const t = await api('/api/trackb/payment/targets');
+    if(t && t.ok){ STATE.pmItems=t.items||[]; STATE.pmSum=t.summary||{}; }
+  }catch(_){}
+  STATE.bn = {
+    rows:(r.banks||[]).map(b=>({ ...b, aliases:(b.aliases||[]).map(a=>({...a})) })),
+    rev:r.rev||null, log:r.log||[], updatedBy:r.updatedBy||'',
+    q:S.q, filter:S.filter, loaded:true, dirty:false, msg:'',
+  };
+  _bnRender();
+}
 
 /* ══════════════════════════════════════════════════════════════
    📘 업무가이드 — 직원용 안내서 모음

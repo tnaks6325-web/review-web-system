@@ -2371,6 +2371,7 @@ router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, asyn
    설계 문서: frontend/docs/prd-payment-transfer.html
    ══════════════════════════════════════════════════════════════ */
 const paymentSvc = require('../services/payment.service');
+const _bankNames = require('../services/bankNameOverride.service');
 
 // 오늘 입금해야 할 건 + 은행별 집계
 router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
@@ -2457,6 +2458,28 @@ function _payFix(res, err, next) {
   }
   return next(err);
 }
+
+/* ── 🏦 은행 이름 설정 — 정식 명칭 · 자동인식 표기 인라인 관리 ────────────────
+   ★ 판정 단일 출처는 `utils/bankCodes.resolveBank` 그대로 — 여기서 바꾸는 것은
+     그 표의 **내용**뿐이다(정확일치·모르면 null 규칙 불변).
+   ★ adminOrMaster — 잘못 넣으면 **남의 계좌로 돈이 간다**(입금관리 화면과 같은 게이트).
+   ★ 겹침(같은 표기가 두 은행)은 서버가 저장 자체를 막는다(유일한 하드블록). */
+router.get('/payment/bank-names', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _bankNames.bankNamesView()); }
+  catch (err) { _payFix(res, err, next); }
+});
+
+router.post('/payment/bank-names', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await _bankNames.saveBankOverrides({
+      payload: { banks: b.banks, extra: b.extra }, by: _by(req), rev: b.rev,
+    });
+    if (!out.ok) return res.status(out.code === 'stale' ? 409 : 400).json(out);
+    logger.info(`[payment] 은행 표기 저장 by ${_by(req)} — 변경 ${out.changed}건`);
+    res.json(out);
+  } catch (err) { _payFix(res, err, next); }
+});
 
 // 작업 단위 — 이체은행 · 통장표시(저장하면 그 작업의 모든 행이 함께 풀린다)
 router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
