@@ -81,9 +81,10 @@ function buildFakeGrid() {
   const rows = names.map((nm, i) => mkRow([
     mkCell({ cls: ['gnum'], text: String(i + 1), attr: { 'data-rid': 'r' + i, 'data-cfield': 'seq' } }),
     mkCell({ cls: ['gnm', 'gidlock'], text: nm, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idname' } }),
-    mkCell({ cls: ['gcell', 'gidlock'], text: '010-0000-000' + i, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idphone' } }),
+    mkCell({ cls: ['gcell', 'gidlock'], text: '010-1111-000' + i, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idphone' } }),
     mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:주문자제출', 'data-val': nm } }),
     mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:수취인', 'data-val': nm } }),
+    mkCell({ cls: ['gcell', 'gedit'], text: '서울 ' + i, attr: { 'data-id': 'r' + i, 'data-field': 'col:주소', 'data-val': '서울 ' + i } }),
   ]));
   const body = { children: rows, id: 'gbody' };
   rows.forEach(r => { r.parentBody = body; });
@@ -111,7 +112,7 @@ function makeCtx(fake) {
     console,
   };
   vm.createContext(sandbox);
-  ['_setCellSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_pasteIntoSelection'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_pasteIntoSelection'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
   return { sandbox, commits, toasts };
@@ -189,6 +190,60 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
   ok('열람 전용도 복사는 된다(선택은 유효)', vm.runInContext('_selectionTsv()', sandbox) === '이진우');
   eq('열람 전용 계정에는 붙여넣기 이벤트가 애초에 걸리지 않는다(배선)', /if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
   void commits; void toasts;
+}
+
+/* ── 4. Ctrl(⌘) = 떨어진 범위 추가 (사용자 확정 2026-08-10) ──────────────────
+   실제 작업: 사이에 낀 id 열을 빼고 **수취인 + 연락처 + 주소** 만 복사한다.
+   가짜 표의 열: 0=# · 1=참여자 · 2=연락처 · 3=주문자제출 · 4=수취인 · 5=주소 */
+console.log('\n[4] Ctrl+드래그 = 떨어진 범위 추가');
+ok('Ctrl(⌘) 로 선택을 더한다(배선)', /_setCellSel\(drag, ?e\.ctrlKey\|\|e\.metaKey\)/.test(HTML));
+ok('드래그 중에는 활성 범위만 갱신(앞서 더한 범위 보존)', /_updateActiveSel\(drag\)/.test(HTML));
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  // 일부러 **화면 순서와 반대로** 고른다: 주소(5) → 수취인(4) → 연락처(2)
+  vm.runInContext('_setCellSel({r0:0,c0:5,r1:1,c1:5},false)', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:4,r1:1,c1:4},true)', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:1,c1:2},true)', sandbox);
+  eq('범위 3개가 유지된다', vm.runInContext('_selRanges().length', sandbox), 3);
+  eq('복사본은 화면 열 순서(연락처→수취인→주소)', vm.runInContext('_selectionTsv()', sandbox),
+     '010-1111-0000\t이진우\t서울 0\n010-1111-0001\t조수빈\t서울 1');
+  ok('사이에 낀 열(주문자제출)은 포함되지 않는다', !/이진우\t이진우/.test(vm.runInContext('_selectionTsv()', sandbox)));
+  eq('선택 칸 수 = 3열 × 2행', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 6);
+  eq('칠하기도 합집합', vm.runInContext('document.querySelectorAll(".gselrange").length', sandbox), 6);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:3},false)', sandbox);   // 주문자제출
+  vm.runInContext('_setCellSel({r0:0,c0:5,r1:1,c1:5},true)', sandbox);    // 주소
+  vm.runInContext('_clearCellSel()', sandbox);
+  eq('해제하면 범위 목록도 비운다', vm.runInContext('_selRanges().length', sandbox), 0);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:3},false)', sandbox);   // 주문자제출 2칸
+  vm.runInContext('_setCellSel({r0:0,c0:5,r1:1,c1:5},true)', sandbox);    // 주소 2칸
+  vm.runInContext('_pasteIntoSelection("가\\t나\\n다\\t라")', sandbox);
+  eq('떨어진 범위 붙여넣기 = 선택한 칸에만', commits.length, 4);
+  eq('행 안에서는 화면 열 순서대로', commits.map(c => c.field).join(','),
+     'col:주문자제출,col:주소,col:주문자제출,col:주소');
+  ok('선택 밖으로 넓히지 않는다', commits.every(c => /주문자제출|주소/.test(c.field)));
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:4},false)', sandbox);   // 2×2 선택
+  vm.runInContext('_pasteIntoSelection("가")', sandbox);                   // 한 칸만 복사 → 채우기
+  eq('한 칸 복사 → 여러 범위/칸 채우기', commits.length, 4);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:2,c1:4},false)', sandbox);   // 3행 선택
+  vm.runInContext('_pasteIntoSelection("가\\t나")', sandbox);              // 1행짜리 복사본
+  eq('복사본에 없는 행은 건드리지 않는다(빈 값으로 지우지 않음)', commits.length, 2);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} pass ${pass} · fail ${fail}`);
