@@ -130,7 +130,7 @@
     <tr><th style="width:26%">칸</th><th style="width:37%">인트라넷 리뷰오더</th><th style="width:37%">리뷰웹 진행상품</th></tr>
     <tr><td>입력 모드</td><td>상세입력 / <b>시트참조</b> 2종</td><td>옵션 없는 작업 / 옵션 있는 작업 2종</td></tr>
     <tr><td>상품명</td><td class="c"><span class="yes">있음</span></td><td class="c"><span class="yes">있음</span></td></tr>
-    <tr><td><b>상품 URL</b></td><td class="c"><span class="yes">있음</span> (상품 단위 1칸)</td><td class="c"><span class="no">없음</span> — [모집 조건]의 랜딩 URL 1칸</td></tr>
+    <tr><td><b>상품 URL</b><br><span class="dash">(항상 필수)</span></td><td class="c"><span class="yes">있음</span> (상품 단위 1칸)</td><td class="c"><span class="no">없음</span> — [모집 조건]의 랜딩 URL 1칸</td></tr>
     <tr><td>결제금액</td><td class="c"><span class="yes">있음</span> (옵션 있으면 상품 칸 자동 숨김)</td><td class="c"><span class="yes">있음</span></td></tr>
     <tr><td>건수 / 인원</td><td class="c">건수 (옵션별 · 상품별)</td><td class="c">총인원 / 옵션인원 <span class="dash">(같은 개념)</span></td></tr>
     <tr><td><b>일건수</b></td><td class="c"><span class="no">옵션에 없음</span> — 작업 전체 1칸(daily_count)</td><td class="c"><span class="yes">옵션마다 있음</span></td></tr>
@@ -162,7 +162,8 @@
       <td class="c">②</td>
       <td>리뷰웹 진행상품 블록에 <b>옵션별 상품 URL</b> 입력 — 가이드유입이면 비활성, 링크유입이면 필수</td>
       <td>진행상품 표에 URL 칸 추가(위치는 <b>D3</b>). 유입방식에 따라 칸 활성/비활성(판정 근거는 <b>D1</b>),
-          미입력 시 처리 수준은 <b>D2</b>.</td>
+          미입력 시 처리 수준은 <b>D2</b>.
+          <span class="star">★</span> 비활성 대상은 <b>옵션별 링크 칸만</b> — <b>상품(메인) URL 칸은 항상 활성·항상 필수</b>입니다.</td>
     </tr>
     <tr>
       <td class="c">③</td>
@@ -176,6 +177,16 @@
           폼 검증 + <code>POST /api/review-order</code> 서버 재검증(수준은 <b>D2</b>).</td>
     </tr>
   </table>
+
+  <div class="callout good">
+    <b>★ 확정 — 상품(메인) URL은 항상 필수입니다</b> <span class="dash">(사용자 확정 2026-08-10)</span><br>
+    <b>유입방식(링크/가이드)·옵션 유무와 무관하게</b> 상품의 메인 URL은 언제나 입력받습니다. 쓰임이 셋이기 때문입니다 —
+    ① <b>어떤 상품인지 확인</b>(가이드유입이라도 담당자·시스템이 상품을 특정해야 채널 판정·썸네일 수집이 됩니다)
+    ② <b>링크유입 + 옵션 없는 작업</b>의 유입 링크 그 자체
+    ③ <b>옵션 URL이 빈 옵션</b>의 폴백.<br>
+    그래서 <b>가이드유입일 때 비활성되는 것은 「옵션별 유입 링크」 칸뿐</b>이고, 상품 URL 칸은 그대로 열려 있습니다.
+    자동점검도 상품 URL은 <b>항상</b> 검사하고, <b>D2</b>(필수 강제 수준)가 정하는 것은 <b>옵션별 링크</b>에 한합니다.
+  </div>
 
   <h3>값이 흐르는 길 (한 줄)</h3>
   <div class="flow">
@@ -263,8 +274,10 @@
     <li>옵션 행 끝에 <b>[상품 URL]</b> 칸 추가(단일옵션 4칸 → 5칸 / 이중옵션 5칸 → 6칸).</li>
     <li><b>유입방식이 가이드유입이면</b> 옵션 URL 칸을 <b>회색 비활성 + "가이드유입은 링크를 쓰지 않습니다"</b> 안내.
         <span class="star">★</span> 숨기지 않고 <b>비활성으로 남깁니다</b> — 칸이 사라지면 유입방식을 바꿨을 때 왜 칸이 생겼는지 알 수 없습니다(레포의 폴더 버튼 규율과 동일).</li>
-    <li>비활성 상태의 값은 <b>전송하지 않습니다</b>(가이드유입 오더에 링크가 딸려가 리뷰웹에서 링크유입으로 오독되는 것 차단).</li>
-    <li>상품 단위 URL 칸은 그대로 — 라벨을 <b>"상품 URL (옵션 없을 때 사용)"</b> 로 바꿔 역할을 화면이 말합니다.</li>
+    <li>비활성 상태의 <b>옵션 링크</b> 값은 <b>전송하지 않습니다</b>(가이드유입 오더에 링크가 딸려가 리뷰웹에서 링크유입으로 오독되는 것 차단).</li>
+    <li><span class="star">★</span> <b>상품 단위 URL 칸은 어느 유입방식에서도 활성 · 항상 필수</b>입니다(확정 2026-08-10) —
+        가이드유입이라고 비활성시키지 않습니다. 라벨은 <b>"상품 URL * (상품 확인용 · 항상 필수)"</b>,
+        옵션 행 칸의 이름은 <b>"유입 링크"</b>로 나눠 두 칸의 역할이 화면에서 구분되게 합니다.</li>
     <li><b>시트참조 모드는 적용 제외</b> — 옵션 구조 자체를 만들지 않는 흐름입니다(<code>reviewOrderOptionsPayload</code> 가 <code>undefined</code> 반환).</li>
   </ul>
 
@@ -273,7 +286,8 @@
     <li>표에 URL 칸 추가(위치는 <b>D3</b>). 표가 진실원본이라는 기존 규율은 그대로 —
         <code>_syncPreviewFromOptRows</code> 가 이미 작업내용 원문·정원을 표에서 파생하듯, 랜딩 URL도 같은 함수에서 파생합니다.</li>
     <li>작업오더에서 발행하면 옵션별 URL이 <b>자동 프리필</b>(<code>_woOptionRows</code> 확장) — 담당자는 확인만.</li>
-    <li>가이드유입이면 URL 칸 비활성 + 안내. 링크유입이면 빈칸에 빨간 테두리 + 자동점검 항목 추가.</li>
+    <li>가이드유입이면 <b>옵션 행의 유입 링크 칸만</b> 비활성 + 안내. 링크유입이면 빈칸에 빨간 테두리 + 자동점검 항목 추가.
+        <span class="star">★</span> <b>상품(메인) URL 칸은 두 모드·두 유입방식 모두에서 활성이며 비면 자동점검이 잡습니다.</b></li>
     <li><span class="star">★</span> <b>URL 칸이 없는 화면에서 저장해도 기존 URL이 지워지지 않습니다</b> —
         옵션표·리뷰타입과 같은 <b>"UI 있는 화면에서만 전송"</b> 원칙(리뷰어앱 인라인 수정 모달 등 축약 화면 보호).</li>
   </ul>
@@ -294,7 +308,8 @@
   <table>
     <tr><th style="width:30%">상황</th><th>동작</th></tr>
     <tr><td>옵션 URL을 한 번도 안 넣은 기존 공고</td><td class="c"><span class="yes">지금과 동일</span> — 공고 랜딩 URL로 폴백</td></tr>
-    <tr><td>가이드유입 공고</td><td class="c"><span class="yes">지금과 동일</span> — 버튼 자체가 안 뜸(기존 판정 무변경)</td></tr>
+    <tr><td>가이드유입 공고</td><td class="c"><span class="yes">지금과 동일</span> — 버튼 자체가 안 뜸(기존 판정 무변경). <b>옵션별 링크 칸만</b> 비활성</td></tr>
+    <tr><td><b>상품(메인) URL</b></td><td class="c"><span class="yes">항상 필수</span> — 유입방식·옵션 유무와 무관(확정 2026-08-10)</td></tr>
     <tr><td>옵션 없는 작업</td><td class="c"><span class="yes">지금과 동일</span> — 공고 랜딩 URL 1개</td></tr>
     <tr><td>인트라넷 시트참조 모드</td><td class="c"><span class="yes">적용 제외</span> — 옵션 구조 미전송</td></tr>
     <tr><td>URL 칸이 없는 축약 편집 화면(리뷰어앱 인라인 수정)</td><td class="c"><span class="yes">미전송 = 기존 값 유지</span></td></tr>
@@ -363,7 +378,9 @@
 
   <div class="dgroup" data-d="D3">
     <h3>D3 — 옵션 <u>없는</u> 작업의 상품 URL은 어디에 두고, 기존 [랜딩 URL] 칸은 어떻게 할까요?</h3>
-    <p class="q">진행상품 표에 URL 칸을 만들면 [모집 조건]의 랜딩 URL 칸과 <b>같은 값을 두 곳에서 관리</b>하게 됩니다.</p>
+    <p class="q">진행상품 표에 URL 칸을 만들면 [모집 조건]의 랜딩 URL 칸과 <b>같은 값을 두 곳에서 관리</b>하게 됩니다.
+      <span class="star">★</span> 어느 안을 고르든 <b>상품(메인) URL을 받는다는 사실 자체는 확정</b>이고(가이드유입·옵션 없는 작업 포함),
+      D3이 정하는 것은 <b>그 칸을 어디에 두느냐</b>뿐입니다.</p>
     <div class="dopts">
       <div class="dopt" data-v="진행상품 표가 진실원본 (랜딩 URL은 읽기전용 파생)">
         <div class="t">진행상품 표가 진실원본 <span class="rec">권장</span></div>
