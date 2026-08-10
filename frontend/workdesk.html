@@ -554,6 +554,37 @@
   .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
   .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
 
+  /* ══ 오늘 참여현황(툴바 맨 앞 = 표 왼쪽 위) — 시안 C+B 믹스 · docs/design-grid-today-progress.html ══
+     `◔ 8/10 (월) 참여현황 12/20명` — 오늘 채워야 할 인원 대비 지금까지 구매(제출 확정)한 인원.
+     ★ 높이 28px = 툴바의 다른 컨트롤과 같다 → **툴바가 한 줄 그대로**(표가 아래로 안 밀린다, 실측 31px 불변).
+     ★ 색은 상태를 말한다: 진행중 파랑 / 달성 초록 / 초과 주황 / 오늘 모집 없음 회색 / 모름 점선.
+       "없다(정원 0)"와 "모른다(공고 없음·조회 실패)"를 절대 같은 모양으로 그리지 않는다. */
+  .tprog{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px 0 6px;border-radius:999px;
+    background:var(--card);border:1px solid var(--line2);white-space:nowrap;flex:none;cursor:default}
+  /* 도넛은 conic-gradient 한 겹 + 가운데를 카드색으로 덮어 링을 만든다(SVG·이미지 0). --p = 달성률(0~100). */
+  .tprog .ring{width:22px;height:22px;border-radius:50%;flex:none;position:relative;
+    background:conic-gradient(var(--accent) calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog .ring::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--card)}
+  .tprog .d{font-size:11.5px;font-weight:800;color:var(--accent-deep);letter-spacing:-.01em}
+  .tprog .lbl{font-size:11px;color:var(--faint);font-weight:650}
+  .tprog .num{font-size:12.5px;font-weight:800;color:var(--accent-deep);letter-spacing:-.02em}
+  .tprog .num b{font-size:14.5px} .tprog .num i{font-style:normal;color:var(--muted);font-weight:700}
+  .tprog .sfx{font-size:10.5px;font-weight:750;padding:1px 7px;border-radius:999px;background:var(--card2);
+    border:1px solid var(--line);color:var(--muted)}
+  .tprog.done .ring{background:conic-gradient(var(--safe) calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog.done .d,.tprog.done .num{color:#15803d}
+  .tprog.done .sfx{color:#15803d;border-color:#cdeed8;background:var(--safe-soft)}
+  .tprog.over .ring{background:conic-gradient(#e08a1e calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog.over .d,.tprog.over .num{color:#a2530a}
+  .tprog.over .sfx{color:#a2530a;border-color:#f0dcc0;background:var(--warn-soft)}
+  .tprog.zero .ring{background:conic-gradient(var(--line2) calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog.zero .d,.tprog.zero .num{color:var(--muted)}
+  .tprog.unk{border-style:dashed}
+  .tprog.unk .ring{background:#e3e9f1}
+  .tprog.unk .d{color:var(--muted)} .tprog.unk .num{color:var(--faint)}
+  /* 좁은 화면: 라벨만 접고 **숫자는 어떤 폭에서도 남긴다**(이 표기의 존재 이유가 숫자다). */
+  @media(max-width:720px){.tprog .lbl{display:none}.tprog{gap:6px;padding-right:9px}}
+
   /* ══ 표 검색(툴바 왼쪽 인라인 + 스크롤 위치 눈금) — 시안 C · docs/design-grid-search.html ══
      치는 즉시 표 안의 값을 찾아 노란색으로 칠하고, 그 자리로 화면(세로+가로)이 이동한다. */
   .gsearch{position:relative;display:flex;align-items:center;flex:none}
@@ -4442,6 +4473,35 @@ function _toast(msg){
     clearTimeout(_toast._t); _toast._t=setTimeout(()=>{ el.classList.remove('show'); }, 5200);
   }catch(_){ }
 }
+/* ══ 오늘 참여현황 칩 — 툴바 맨 앞(표 왼쪽 위) · 시안 docs/design-grid-today-progress.html ═══════
+   재료는 **서버가 준 `wd.todayProgress` 하나**(오늘 정원 = `computeCampaignState.dailyQuota`).
+   ★★ 여기서 "일건수 + 이월" 로 되계산하지 말 것 — 066 이월 상한·095 날짜별 조절·098 이월 보류·
+      총량 clamp 를 모르는 두 번째 기준이 생겨 **툴바와 모집공고 카드의 숫자가 갈린다**
+      (`todayNaturalQuota` 를 서버가 실어 보내는 것과 같은 이유).
+   ★ 필드 자체가 없으면(광고주 응답·구버전 백엔드) **아무것도 그리지 않는다** — 모르는 것을 0으로 꾸미지 않는다. */
+function _tpHtml(tp){
+  if(!tp || typeof tp!=='object') return '';
+  const d = esc(_fmtKDate(String(tp.dateStr||'')));             // '2026-08-10' → '8/10 (월)' (표기 단일 출처)
+  const done = Number(tp.done)||0, holds = Number(tp.holds)||0;
+  const q = (tp.quota==null) ? null : (Number(tp.quota)||0);
+  const wrap = (cls,pct,num,sfx,tip)=>`<span class="tprog ${cls}" style="--p:${pct}" title="${esc(tip)}">`
+    + `<span class="ring"></span><b class="d">${d}</b><span class="lbl">참여현황</span>`
+    + `<span class="num">${num}</span>${sfx?`<span class="sfx">${esc(sfx)}</span>`:''}</span>`;
+  // ① 조회 실패 — 0/0 으로 위장하면 "오늘 할 일 없음"으로 읽힌다.
+  if(tp.ok===false) return wrap('unk',0,'<i>? / ?명</i>','불러오지 못함','오늘 참여현황을 불러오지 못했습니다 — 작업을 다시 열어보세요.');
+  // ② 기준을 모름(연결 공고 없음/게시 전) — 구매한 인원은 사실이므로 그대로 두고 분모만 ?.
+  if(q===null) return wrap('unk',0,`<b>${done}</b><i>/ ?명</i>`,'모집 기준 없음',
+    (tp.reason==='no_live_campaign'?'연결된 모집공고가 게시 전이라':'연결된 모집공고가 없어')+' 오늘 모집인원을 정할 수 없습니다. 오늘 구매 '+done+'명.');
+  const tipBase = `오늘 모집 ${q}명 · 구매 완료 ${done}명`+(holds?` · 진행 중 ${holds}명(결제 중)`:'')
+    + (tp.campaignCount>1?` · 공고 ${tp.campaignCount}개 합산`:'');
+  // ③ 오늘은 열지 않는 날(휴무·모집 종료·총원 충족·0명 조절) — "없다"는 사실이므로 회색으로 말한다.
+  if(q<=0) return wrap('zero',0,`<b>${done}</b><i>/0명</i>`,'오늘 모집 없음',
+    tipBase+' · '+(({rest_day:'오늘은 휴무일입니다',schedule_ended:'일정이 끝났습니다',soft_full:'총원이 모두 찼습니다'})[tp.stateReason||tp.state]||'오늘 열린 자리가 없습니다'));
+  const pct = Math.max(0, Math.min(100, Math.round(done/q*100)));
+  if(done>q)  return wrap('over',100,`<b>${done}</b><i>/${q}명</i>`,`+${done-q}`,tipBase+` · 정원보다 ${done-q}명 많습니다`);
+  if(done===q) return wrap('done',100,`<b>${done}</b><i>/${q}명</i>`,'달성',tipBase+' · 오늘 목표를 채웠습니다');
+  return wrap('',pct,`<b>${done}</b><i>/${q}명</i>`,'',tipBase+` · ${q-done}명 남았습니다`);
+}
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
 function buildGrid(wd){
@@ -4557,6 +4617,7 @@ function buildGrid(wd){
   //   필터·정렬·숨김으로 툴바가 다시 그려져도 치던 검색어가 날아가지 않게.
   const gsVal=esc(STATE.gSearch||'');
   return `<div class="gridbar">
+      ${_tpHtml(wd.todayProgress)}
       <div class="gsearch"><span class="ic">🔍</span>
         <input id="gsInput" type="text" placeholder="표 안에서 찾기…" autocomplete="off" value="${gsVal}"
                oninput="_gsInput(this.value)" onkeydown="_gsKey(event)">
