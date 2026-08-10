@@ -334,6 +334,37 @@ t('★ 읽기 전용 — 준비 행 판독 경로에 쓰기 SQL 0', () => {
   });
 });
 
+/* ══ 8) 진짜 PG — 스텁이 해석하지 않는 SQL 의미 ═════════════ */
+// ★★ `filled` 판정은 jsonb 함수라 **스텁 DB 로는 절대 검증되지 않는다**(스텁은 SQL 을 해석하지
+//   않는다 — 063 이 무음으로 꺼져 있던 것도 같은 이유). PGTEST_URL 이 있으면 실제로 돌린다.
+if (process.env.PGTEST_URL) {
+  console.log('\n8) [PG] 준비 행 판정 SQL — 빈 줄·공백만 줄 제외');
+  const { Client } = require('pg');
+  const c = new Client({ connectionString: process.env.PGTEST_URL });
+  await c.connect();
+  await c.query(`CREATE TEMP TABLE raw_sheet_rows(sheet_id TEXT, tab_gid TEXT, row_index INT, cells JSONB)`);
+  const seed = [[3, ['번호', '구매일자', '블로그URL', '수취인']]];
+  for (let i = 1; i <= SOLID_ROWS; i++) seed.push([3 + i, [String(i), '', '', '']]);
+  seed.push([3 + SOLID_ROWS + 1, ['', '', '', '']]);        // 완전 빈 줄
+  seed.push([3 + SOLID_ROWS + 2, ['   ', '', '', '']]);     // 공백만 — 빈 줄로 봐야 한다
+  for (const [ri, cells] of seed) {
+    await c.query(`INSERT INTO raw_sheet_rows VALUES ('S','77',$1,$2::jsonb)`, [ri, JSON.stringify(cells)]);
+  }
+  // 서비스가 쓰는 것과 **같은 식**(사본이 아니라 소스에서 뽑아 쓴다 — 갈라지면 이 검증이 무의미해진다)
+  const m = SLOT.match(/const filledSql = `([^`]+)`/);
+  assert.ok(m, 'filledSql 을 소스에서 못 찾았다');
+  const { rows } = await c.query(
+    `SELECT row_index, ${m[1]} AS filled FROM raw_sheet_rows
+      WHERE sheet_id=$1 AND tab_gid=$2 AND row_index > $3 ORDER BY row_index`, ['S', '77', 3]);
+  await ta('[PG] 값 있는 행만 준비 행 — 빈 줄·공백만 줄 제외', async () => {
+    assert.strictEqual(rows.filter(r => r.filled).length, SOLID_ROWS,
+      '빈 줄/공백만 줄이 준비 행으로 샜다(btrim 누락)');
+  });
+  await c.end();
+} else {
+  console.log('\n8) [PG] 건너뜀 — PGTEST_URL 미설정 (SQL 의미 검증은 진짜 PG 로만 가능)');
+}
+
 console.log(`\n✅ 블로그체험단 M2 회귀가드 통과 — ${pass}건`);
 process.exit(0);
 })();
