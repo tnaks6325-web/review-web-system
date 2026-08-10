@@ -135,8 +135,14 @@ ok(/blogUrl:\s*os\.blog_url/.test(LEDGER), '큐 재실행 경로(_osRowToOrderDa
 }
 
 console.log('\n=== §6 공개 응답 ===');
-ok(/PUBLIC_FIELDS_PARTICIPATION[\s\S]{0,2000}'work_kind'/.test(CAMP),
-  "★ 참여형 공개 화이트리스트에 work_kind — 없으면 리뷰어 화면이 블로그 공고를 알 수 없다");
+{
+  // ★ 주석 처리해도 문자열은 남는다(변이시험 실측) — 줄 주석을 걷어낸 뒤 배열 안에서 찾는다.
+  const live = CAMP.split('\n').filter(l => !/^\s*\/\//.test(l.trim() ? l : ' ')).join('\n');
+  const i = live.indexOf('PUBLIC_FIELDS_PARTICIPATION');
+  const arr = live.slice(i, live.indexOf('];', i));
+  ok(i > 0 && /(^|[\s,[])'work_kind'/m.test(arr),
+    "★ 참여형 공개 화이트리스트에 work_kind — 없으면 리뷰어 화면이 블로그 공고를 알 수 없다");
+}
 
 console.log('\n=== §7 프론트 규칙 일치 · 배선 ===');
 const sandbox = { };
