@@ -165,7 +165,20 @@ const CNT = (id, o) => Object.assign({
 
   t('필드 자체가 없으면 아무것도 그리지 않는다(광고주·구버전 백엔드)', tp(undefined) === '' && tp(null) === '');
 
-  let h = tp({ ok: true, dateStr: TODAY, quota: 20, done: 12, holds: 2, campaignCount: 1 });
+  /* ── B안(사용자 확정 2026-08-10): 표기 기준 = 작업표 ─────────────────────── */
+  let h = tp({ ok: true, dateStr: TODAY, quota: 42, done: 8, holds: 0, sheetFilled: 27, campaignCount: 1 });
+  t('★ 표 기준으로 표기한다(27/42) — 공고 확정(8)이 아니라', />27</.test(h) && /\/42명/.test(h) && !/>8</.test(h), h);
+  t('★ 차이는 숨기지 않고 툴팁이 말한다(지각 확정 대기·수기 입력 신호)',
+    /공고를 거쳐 확정된 건 8명/.test(h) && /차이 19명/.test(h), h);
+  t('도넛도 표 기준 비율', /--p:64/.test(h), h);
+  h = tp({ ok: true, dateStr: TODAY, quota: 42, done: 8, holds: 0, sheetFilled: null, campaignCount: 1 });
+  t('★ 표 기준을 못 세면 종전(공고 확정)으로 폴백', />8</.test(h) && /\/42명/.test(h));
+  t('★ 폴백했다는 사실을 말한다(조용히 다른 기준으로 바꾸지 않는다)',
+    /표 기준으로 세지 못해/.test(h), h);
+  h = tp({ ok: true, dateStr: TODAY, quota: 42, done: 8, holds: 0, sheetFilled: 8, campaignCount: 1 });
+  t('표와 공고가 같으면 차이 문구를 붙이지 않는다', !/차이/.test(h), h);
+
+  h = tp({ ok: true, dateStr: TODAY, quota: 20, done: 12, holds: 2, campaignCount: 1 });
   t('진행 중 — 날짜·라벨·숫자', /8\/10 \(월\)/.test(h) && /참여현황/.test(h) && />12</.test(h) && /\/20명/.test(h), h);
   t('달성률이 도넛 각도로 들어간다', /--p:60/.test(h), h);
   t('진행 중은 상태 클래스 없음(파랑 기본)', /class="tprog "/.test(h), h);
