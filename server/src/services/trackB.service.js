@@ -415,6 +415,58 @@ async function removeOwnership({ advertiserId, sheetId, tabGid = null } = {}) {
     [advertiserId, sheetId, tabGid]);
   return { removed: rowCount };
 }
+// ══ 작업(소유) 이관 — 시트 전체 또는 특정 탭의 소유를 다른 거래처로 옮긴다 (2026-08-10 위프코리아 건). ══
+//   ★★ 한 트랜잭션(해제+지정) — 중간 실패로 "주인 없는 작업"이 남지 않는다.
+//   ★ 탭 이관은 **시트전체 소유를 건드리지 않는다**(나머지 탭은 종전 업체 유지) — 판정은 기존 우선순위
+//     "탭지정 > 시트전체"(advertiserForTab·scopedActiveTabs)가 정하고, 업체관리 표·개요도 같은 배제를 적용한다.
+//   ★ 시트 전체 이관은 시트전체(tab_gid NULL) 행만 옮기고 **타 업체의 탭지정 세분 소유는 보존**해
+//     `keptTabOverrides` 로 보고한다(조용한 삭제 금지 — 세분 소유는 사람이 명시한 더 강한 결정이다).
+//   ★ 대상 검증 fail-closed: 업체 미존재·종료(ended) 거래처로는 이관하지 않는다.
+async function transferOwnership({ sheetId, tabGid = null, toAdvertiserId, by = 'admin' } = {}) {
+  const sid = String(sheetId || '').trim();
+  const gid = String(tabGid == null ? '' : tabGid).trim() || null;
+  const to = String(toAdvertiserId || '').trim();
+  if (!sid || !to) return { ok: false, code: 400, error: 'sheetId, toAdvertiserId 필수' };
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: adv } = await client.query('SELECT id, name, status FROM advertisers WHERE id = $1', [to]);
+    if (!adv.length) { await client.query('ROLLBACK'); return { ok: false, code: 404, error: '이관 대상 업체를 찾을 수 없습니다.' }; }
+    if (String(adv[0].status || '') === 'ended') { await client.query('ROLLBACK'); return { ok: false, code: 400, error: '종료(삭제)된 거래처로는 이관할 수 없습니다.' }; }
+    // ① 같은 범위(시트전체 또는 그 탭)의 타 업체 소유만 소프트 해제 — 다른 범위 행은 무접촉.
+    const { rows: removed } = await client.query(
+      `UPDATE advertiser_campaigns ac SET deleted_at = NOW()
+         FROM advertisers a
+        WHERE a.id = ac.advertiser_id AND ac.deleted_at IS NULL AND ac.sheet_id = $1
+          AND COALESCE(ac.tab_gid, '') = COALESCE($2, '') AND ac.advertiser_id <> $3
+        RETURNING ac.advertiser_id AS "advertiserId", a.name AS "advertiserName"`, [sid, gid, to]);
+    // ② 새 소유 업서트(소프트 삭제됐던 행 재활성 포함) — setOwnership 과 같은 upsert 모양(사본 아님: 잠금 tx 안이라 client 로 실행).
+    await client.query(
+      `INSERT INTO advertiser_campaigns (advertiser_id, sheet_id, tab_gid, assigned_by)
+         VALUES ($1,$2,$3,$4)
+       ON CONFLICT (advertiser_id, sheet_id, COALESCE(tab_gid,'')) DO UPDATE
+         SET deleted_at = NULL, assigned_by = EXCLUDED.assigned_by`, [to, sid, gid, String(by).slice(0, 100)]);
+    // ③ 보고 재료 — 탭 이관이면 "나머지 탭을 계속 소유하는 시트전체 업체", 시트 이관이면 "보존된 탭지정 세분 소유".
+    const { rows: kept } = await client.query(
+      gid
+        ? `SELECT a.name AS "advertiserName", NULL AS "tabGid" FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+            WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND ac.tab_gid IS NULL AND ac.advertiser_id <> $2`
+        : `SELECT a.name AS "advertiserName", ac.tab_gid AS "tabGid" FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+            WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1 AND ac.tab_gid IS NOT NULL AND ac.advertiser_id <> $2`,
+      [sid, to]);
+    await client.query('COMMIT');
+    return {
+      ok: true, toAdvertiserId: to, toAdvertiserName: adv[0].name,
+      scope: gid ? 'tab' : 'sheet', tabGid: gid,
+      removed: removed.map(r => r.advertiserName),
+      ...(gid ? { keptSheetOwners: kept.map(r => r.advertiserName) } : { keptTabOverrides: kept.map(r => ({ advertiserName: r.advertiserName, tabGid: r.tabGid })) }),
+    };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally { client.release(); }
+}
 async function listOwnership({ advertiserId, sheetId } = {}) {
   const db = getPool();
   const where = ['deleted_at IS NULL']; const vals = [];
@@ -476,9 +528,19 @@ async function advertiserOverview() {
           WHERE rst.is_system_tab = FALSE
           ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC
        )
-       SELECT o.advertiser_id AS "advertiserId", t.sheet_id AS "sheetId",
+       -- ★★ DISTINCT 필수(진짜 PG16 실측): 한 업체가 같은 시트의 **시트전체 + 탭지정을 동시에** 가지면
+       --   그 탭이 두 own 행에 모두 매칭돼 작업 수가 이중 계수된다(이관을 탭→시트 순으로 두 번 하면 즉시 도달).
+       --   연결탭 표(ownedTabsForAdvertiser)는 tabs CTE 의 DISTINCT ON 이 접어 주므로, 여기만 두면 두 화면이 갈린다.
+       SELECT DISTINCT o.advertiser_id AS "advertiserId", t.sheet_id AS "sheetId",
               t.tab_gid AS "tabGid", t.tab_name AS "tabName"
-         FROM tabs t JOIN own o ON o.sheet_id = t.sheet_id AND (o.tab_gid IS NULL OR o.tab_gid = t.tab_gid)`);
+         FROM tabs t JOIN own o ON o.sheet_id = t.sheet_id AND (
+              o.tab_gid = t.tab_gid
+              -- ★ 탭지정>시트전체 배제(ownedTabsForAdvertiser 와 같은 규칙) — 없으면 이관된 탭이
+              --   두 업체의 작업 수에 **이중 계수**된다(개요 표 숫자 ≠ 연결탭 표 숫자).
+              OR (o.tab_gid IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM advertiser_campaigns x
+                     WHERE x.deleted_at IS NULL AND x.sheet_id = t.sheet_id
+                       AND x.tab_gid = t.tab_gid AND x.advertiser_id <> o.advertiser_id)))`);
     ownRows = rows;
   } catch (err) {
     logger.warn(`[trackB] advertiserOverview 소유탭 조회 실패: ${err.message}`);
@@ -698,7 +760,15 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
        SELECT DISTINCT ON (rst.sheet_id, rst.tab_gid)
               rst.sheet_id, rst.spreadsheet_title, rst.tab_gid, rst.tab_name, rst.row_count, rst.mirrored_at
          FROM raw_sheet_tabs rst
-         JOIN own o ON o.sheet_id = rst.sheet_id AND (o.tab_gid IS NULL OR o.tab_gid = rst.tab_gid)
+         JOIN own o ON o.sheet_id = rst.sheet_id AND (
+              o.tab_gid = rst.tab_gid
+              -- ★ 시트전체 소유의 전개는 "타 업체가 탭지정으로 가져간 탭"을 제외한다(이관 정합) —
+              --   판정 우선순위(탭지정>시트전체, advertiserForTab·scopedActiveTabs)와 같은 규칙.
+              --   빼면 이관된 작업이 옛 업체 표에도 계속 남아 "이관했는데 그대로"로 보인다.
+              OR (o.tab_gid IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM advertiser_campaigns x
+                     WHERE x.deleted_at IS NULL AND x.sheet_id = rst.sheet_id
+                       AND x.tab_gid = rst.tab_gid AND x.advertiser_id <> $1)))
         WHERE rst.is_system_tab = FALSE
         ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC
      )
@@ -3439,6 +3509,7 @@ module.exports = {
   parityTrend,
   setOwnership,
   removeOwnership,
+  transferOwnership,
   listOwnership,
   listAdvertisersWithOwnership,
   ownedTabsForAdvertiser,

@@ -1219,6 +1219,19 @@
   .scope{font-size:10px;font-weight:750;padding:2px 8px;border-radius:6px;white-space:nowrap} .scope.all{background:var(--safe-soft);color:var(--safe)} .scope.tab{background:var(--warn-soft);color:var(--warn)}
   .rm{width:26px;height:26px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;flex:none;font-size:14px}
   .rm:hover{color:var(--adv);border-color:color-mix(in srgb,var(--adv) 40%,transparent)}
+  /* ── 작업(소유) 이관 — [이관] 버튼 + 팝업. ★ 팝업은 body 직속(드로어 스크롤 컨테이너 안에 두면 흐름에 섞인다). */
+  .own .trb{height:26px;padding:0 9px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--accent);cursor:pointer;flex:none;font-size:11px;font-weight:700;white-space:nowrap}
+  .own .trb:hover{background:var(--accent-soft)}
+  .owntr-ov{position:fixed;inset:0;z-index:1200;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:20px}
+  .owntr{width:min(460px,94vw);max-height:88vh;overflow-y:auto;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.22);padding:16px 18px}
+  .owntr h3{margin:0 0 4px;font-size:14.5px}
+  .owntr .src{font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5}
+  .owntr label{font-size:11px;color:var(--faint);font-weight:650;display:block;margin:11px 0 4px}
+  .owntr select,.owntr input{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink)}
+  .owntr .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;max-height:180px;overflow-y:auto}
+  .owntr .note{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.55;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .owntr .chk{font-size:11.5px;margin-top:5px;min-height:15px}
+  .owntr .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
   .add{border:1px dashed var(--line2);border-radius:11px;padding:15px;background:var(--card2)}
   .add label{font-size:11px;color:var(--faint);font-weight:650;display:block;margin-bottom:4px}
   .add select,.add input{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink)}
@@ -8812,12 +8825,14 @@ function _ovmDrawerHtml(tab,a){
 // 소유 캠페인 목록(해제 버튼 포함) — 종전 renderOwnPanel 인라인 마크업을 그대로 옮긴 것.
 function _ovmOwnsHtml(a){
   const items=STATE.ownItems||[];
-  const owns = items.map(o=>{
+  const isAdmin=STATE.role==='master'||STATE.role==='admin';   // ★ 이관 = admin 소관(staff 재배치 금지 — 서버 게이트와 1:1)
+  const owns = items.map((o,i)=>{
     const whole = !o.tabGid;
     const label = whole ? sheetTitle(o.sheetId) : (STATE.tabIndex[o.sheetId+'::'+o.tabGid] || ('탭 '+o.tabGid));
     const sub = whole ? '시트 전체 · 모든 탭 자동 포함' : ('시트: '+sheetTitle(o.sheetId));
     return `<div class="own"><span class="ic">${whole?'▦':'▤'}</span><div class="info"><b>${esc(label)}</b><span>${esc(sub)}</span></div>
       <span class="scope ${whole?'all':'tab'}">${whole?'시트 전체':'특정 탭'}</span>
+      ${isAdmin?`<button class="trb" title="다른 거래처로 이관" onclick="ownTransfer(${i})">이관</button>`:''}
       <button class="rm" title="소유 해제" onclick="rmOwn('${esc(o.sheetId)}','${esc(o.tabGid||'')}')">×</button></div>`;
   }).join('') || `<div class="empty" style="padding:16px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
   return `<div class="sect"><div class="st">소유 캠페인 ${items.length}</div>${owns}</div>`;
@@ -9539,6 +9554,139 @@ async function rmOwn(sheetId, tabGid){ const a=STATE.advCur; if(!a) return;
   await api('/api/trackb/ownership',{method:'DELETE',body:JSON.stringify({advertiserId:a.id, sheetId, tabGid:tabGid||null})});
   toast('소유 해제'); refreshAdvCounts(); selAdv(STATE.advs.indexOf(a));
 }
+
+/* ── 작업(소유) 이관 팝업 — master/admin 전용(서버 POST /ownership/transfer 도 adminOrMaster).
+     ★ 팝업은 body 직속 + Esc/[취소]로만 닫힘(바깥 클릭으로 닫지 않는다 — 고른 값 보호).
+     ★ onclick 은 인덱스만(탭명·업체명은 시트/외부발 문자열 — 문자열 보간 금지 규율).
+     ★ 대상 = 기존 업체 선택 또는 "새 거래처 등록"(인트라넷 광고주DB 정확일치 검증 = 등록 게이트 동일,
+       서버 createAdvertiserScoped 가 최종 방어). 새 거래처는 시트 없이 업체만 만들고 곧바로 이관으로
+       연결한다 — 거래처 등록 폼이 "미지정 시트 필수"라 이미 소유된 시트의 일부 탭을 가진 새 업체를
+       만들 수 없던 막다른 길(2026-08-10 위프코리아 건)의 해소.
+     ★ 새 거래처명 입력 중에는 팝업을 재렌더하지 않는다(제안 목록·검증 문구만 갱신 — IME 조합 보호). */
+let _trS=null, _trSugTimer=null, _trItems=[];
+function ownTransfer(i){
+  const a=STATE.advCur, o=(STATE.ownItems||[])[i]; if(!a||!o) return;
+  const allTabs=((STATE.sheetMap[o.sheetId]||{}).tabs||[]);
+  const tabs=allTabs.filter(t=>t.tabGid!=null&&String(t.tabGid).trim()!=='');
+  _trS={ own:o, from:a, tabs, gidless:allTabs.length-tabs.length, mode:o.tabGid?'tab':'all', picks:{}, target:'', newName:'', newOk:false, newPm:'' };
+  let ov=document.getElementById('ownTrPop');
+  if(!ov){ ov=document.createElement('div'); ov.id='ownTrPop'; ov.className='owntr-ov'; document.body.appendChild(ov); }
+  ov.style.display='flex';
+  _trRender();
+}
+function _trClose(){ const ov=document.getElementById('ownTrPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _trS=null; _trItems=[]; }
+function _trRender(){
+  const S=_trS; if(!S) return; const ov=document.getElementById('ownTrPop'); if(!ov) return;
+  const whole=!S.own.tabGid;
+  const srcLabel = whole ? (sheetTitle(S.own.sheetId)+' — 시트 전체 소유')
+    : ((STATE.tabIndex[S.own.sheetId+'::'+S.own.tabGid]||('탭 '+S.own.tabGid))+' · '+sheetTitle(S.own.sheetId));
+  const advOpts=(STATE.advs||[]).filter(x=>x.id!==S.from.id)
+    .map(x=>`<option value="${esc(x.id)}" ${S.target===x.id?'selected':''}>${esc(x.name)}</option>`).join('');
+  const scopeUi = whole ? `
+    <label>이관 범위</label>
+    <div class="radios">
+      <div class="radio ${S.mode==='all'?'on':''}" onclick="_trMode('all')"><span class="d"></span>시트 전체(모든 탭)</div>
+      <div class="radio ${S.mode==='tab'?'on':''}" onclick="_trMode('tab')"><span class="d"></span>특정 탭(작업)만</div>
+    </div>
+    ${S.mode==='tab'?`<div class="tabs">${S.tabs.map((t,ti)=>`<div class="tchip ${S.picks[ti]?'on':''}" onclick="_trPick(${ti})"><span class="cb">${S.picks[ti]?'✓':''}</span>${esc(t.tabName)}</div>`).join('')||'<span style="font-size:12px;color:var(--faint)">이 시트에 활성 탭 없음</span>'}</div>
+    ${S.gidless>0?`<div class="chk" style="color:var(--faint)">gid 없는 탭 ${S.gidless}개는 개별 이관이 불가합니다(시트 전체 이관만 가능).</div>`:''}
+    <div class="note">특정 탭만 이관하면 <b>나머지 탭은 ${esc(S.from.name)} 소유로 남습니다</b>(탭 지정이 시트 전체보다 우선).</div>`:''}` : '';
+  ov.innerHTML=`<div class="owntr">
+    <h3>작업 이관</h3>
+    <div class="src"><b>${esc(srcLabel)}</b><br>현재 소유: ${esc(S.from.name)}</div>
+    ${scopeUi}
+    <label>이관할 거래처</label>
+    <select id="trTarget" onchange="_trTargetSel()">
+      <option value="">— 업체 선택 —</option>
+      ${advOpts}
+      <option value="__new__" ${S.target==='__new__'?'selected':''}>＋ 새 거래처 등록 (인트라넷 광고주DB 검색)</option>
+    </select>
+    ${S.target==='__new__'?`
+      <label>새 거래처명 <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 자동완성 — 목록에서 선택)</span></label>
+      <div style="position:relative">
+        <input id="trNewName" placeholder="예: 주식회사 위프코리아" autocomplete="off" value="${esc(S.newName)}" oninput="_trSuggest(this.value)">
+        <div id="trSug" class="advsug"></div>
+      </div>
+      <div id="trNewChk" class="chk"></div>`:''}
+    <div class="note">이관하면 이 범위의 기존 소유는 해제되고, 작업보드 그룹·업체관리 표·계약 매칭 후보가 새 거래처 기준으로 바뀝니다. 이미 매칭된 계약·정산 링크는 그대로 유지됩니다(필요 시 별도 재매칭).</div>
+    <div class="ft"><button class="btn" onclick="_trClose()">취소</button>
+      <button class="btn pri" id="trGoBtn" onclick="ownTransferGo()">이관하기</button></div>
+  </div>`;
+  if(S.target==='__new__'){ _trChk(); const el=document.getElementById('trNewName'); if(el&&!S.newName) setTimeout(()=>el.focus(),30); }
+}
+function _trMode(m){ const S=_trS; if(!S) return; S.mode=m; _trRender(); }
+function _trPick(ti){ const S=_trS; if(!S) return; S.picks[ti]=!S.picks[ti]; _trRender(); }
+function _trTargetSel(){ const S=_trS; if(!S) return; const el=document.getElementById('trTarget'); S.target=(el&&el.value)||'';
+  if(S.target!=='__new__'){ S.newName=''; S.newOk=false; S.newPm=''; _trItems=[]; } _trRender(); }
+function _trSuggest(q){
+  const S=_trS; if(!S) return; S.newName=(q||'').trim();
+  clearTimeout(_trSugTimer); _trChk();
+  const box=document.getElementById('trSug'); if(!box) return;
+  if(!S.newName){ box.classList.remove('show'); box.innerHTML=''; return; }
+  _trSugTimer=setTimeout(async()=>{
+    const r=await api('/api/trackb/intranet/advertisers?q='+encodeURIComponent(S.newName)).catch(()=>null);
+    _trItems=(r&&r.ok&&r.items)||[];
+    _trChk();
+    const b=document.getElementById('trSug'); if(!b) return;
+    if(!_trItems.length){ b.classList.remove('show'); b.innerHTML=''; return; }
+    b.innerHTML=_trItems.map((it,ti)=>{
+      const meta=[it.ceo?('대표 '+esc(it.ceo)):'', it.bizNo?('사업자 '+esc(it.bizNo)):''].filter(Boolean).join(' · ');
+      return `<div class="sugitem" onclick="_trPickIntra(${ti})"><span class="sugl"><span class="sugn">${esc(it.name)}</span>${meta?`<span class="sugmeta">${meta}</span>`:''}</span>${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`;
+    }).join('');
+    b.classList.add('show');
+  },120);
+}
+function _trPickIntra(ti){ const it=_trItems[ti], S=_trS; if(!it||!S) return;
+  S.newName=String(it.name||'').trim(); S.newPm=String(it.manager||'').trim();
+  const el=document.getElementById('trNewName'); if(el) el.value=S.newName;
+  const b=document.getElementById('trSug'); if(b){ b.classList.remove('show'); b.innerHTML=''; }
+  _trChk(); }
+function _trChk(){ const S=_trS; if(!S) return; const chk=document.getElementById('trNewChk');
+  const val=(S.newName||'').toLowerCase();
+  S.newOk=!!val && _trItems.some(it=>String(it.name||'').trim().toLowerCase()===val);
+  if(chk){ if(!val){ chk.textContent=''; chk.style.color=''; }
+    else if(S.newOk){ chk.textContent='✓ 인트라넷 광고주DB 등록 확인됨'+(S.newPm?(' · 담당AE '+S.newPm+' 자동 지정(업체 패널에서 수정 가능)'):''); chk.style.color='var(--safe)'; }
+    else { chk.textContent='⚠ 거래처정보에 등록되지 않은 광고주입니다 — 목록에서 선택하세요'; chk.style.color='var(--bad)'; } } }
+async function ownTransferGo(){
+  const S=_trS; if(!S) return;
+  let targetId=S.target, targetName='';
+  if(!targetId){ toast('이관할 거래처를 선택하세요'); return; }
+  let posts=[];
+  if(S.own.tabGid) posts=[{tabGid:String(S.own.tabGid)}];
+  else if(S.mode==='all') posts=[{tabGid:null}];
+  else { const idxs=Object.keys(S.picks).filter(k=>S.picks[k]); if(!idxs.length){ toast('이관할 탭을 선택하세요'); return; }
+    posts=idxs.map(k=>({tabGid:String((S.tabs[k]||{}).tabGid||'')})).filter(p=>p.tabGid); }
+  if(targetId==='__new__'){
+    if(!S.newOk){ toast('거래처정보(인트라넷 광고주DB)에 등록된 이름을 목록에서 선택하세요'); return; }
+    const dup=(STATE.advs||[]).find(x=>String(x.name||'').trim()===S.newName.trim());
+    if(dup){ targetId=dup.id; targetName=dup.name; }   // 이미 등록된 이름이면 그 업체로 이관(중복 등록 409 예방)
+  } else { const t=(STATE.advs||[]).find(x=>x.id===targetId); targetName=(t&&t.name)||''; }
+  const scopeTxt=S.own.tabGid?'이 작업(탭) 1개':(S.mode==='all'?'시트 전체':('선택한 작업(탭) '+posts.length+'개'));
+  const nm=targetId==='__new__'?S.newName:targetName;
+  if(!confirm(scopeTxt+'를\n\''+S.from.name+'\' → \''+nm+'\' 거래처로 이관할까요?\n\n이 범위의 기존 소유는 해제됩니다.')) return;
+  const btn=document.getElementById('trGoBtn'); if(btn){ btn.disabled=true; btn.textContent='이관 중…'; }
+  try{
+    if(targetId==='__new__'){
+      const r=await api('/api/trackb/advertisers',{method:'POST',body:JSON.stringify({name:S.newName, inad_pm:S.newPm||''})});
+      if(!(r&&r.ok&&r.data&&r.data.id)){ toast('거래처 등록 실패'+((r&&r.error)?': '+r.error:'')); return; }
+      targetId=r.data.id; targetName=S.newName;
+    }
+    let okCnt=0, fail=null;
+    for(const p of posts){
+      const r=await api('/api/trackb/ownership/transfer',{method:'POST',body:JSON.stringify({sheetId:S.own.sheetId, tabGid:p.tabGid, toAdvertiserId:targetId})}).catch(()=>null);
+      if(r&&r.ok) okCnt++; else fail=(r&&r.error)||'이관 실패';
+    }
+    // ★ 부분 실패를 "완료"로 꾸미지 않는다 — 몇 건이 옮겨졌는지 사실대로 말한다.
+    if(!okCnt){ toast('이관 실패'+(fail?(': '+fail):'')); return; }
+    toast(fail?('일부만 이관됨 ('+okCnt+'/'+posts.length+') — '+fail):('이관 완료 → '+targetName+' ('+okCnt+'건)'));
+    const fromId=S.from.id; _trClose();
+    await refreshAdvCounts();
+    const idx=(STATE.advs||[]).findIndex(x=>x.id===fromId); if(idx>=0) selAdv(idx);
+  } finally { const b=document.getElementById('trGoBtn'); if(b){ b.disabled=false; b.textContent='이관하기'; } }
+}
+// ★ Esc = 이관 팝업 먼저 닫기 — 드로어 ESC 리스너보다 먼저 등록돼(파일 순서) stopImmediatePropagation 으로
+//   "팝업과 드로어가 한 번에 같이 닫히는" 것을 막는다. 리스너는 최상위 1회(규율).
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_trS){ e.stopImmediatePropagation(); _trClose(); } });
 async function refreshAdvCounts(){
   // ★ 소유가 바뀌면 '업체 미지정 시트 N' 도 함께 바뀐다 — 사이드바에 상시 노출되므로 같이 갱신한다.
   const os=await api('/api/trackb/owned-sheets').catch(()=>null);

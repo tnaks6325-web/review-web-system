@@ -810,6 +810,15 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
+// ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ adminOrMaster 전용:
+//    업체 간 재배치는 staff 초기매핑 게이트("재배치는 관리자에게 요청")와 같은 규율로 admin 소관이다. ──
+router.post('/ownership/transfer', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabGid, toAdvertiserId } = req.body || {};
+    const o = await svc.transferOwnership({ sheetId, tabGid: tabGid || null, toAdvertiserId, by: _by(req) });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
 
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
