@@ -126,9 +126,17 @@ const R = (startDate, n, tab = 'T1') => ({ sheetId: 'S1', tabName: tab, startDat
   // ★★ 홈 모집공고 카드도 같은 숫자를 쓴다(사용자 확정 2026-08-10) — 단 **보는 사람이 관리자일 때만**.
   //   일반 리뷰어에게는 종전(공고 기준) 그대로여야 한다: 참여 허용 판정이 공고 기준이라
   //   리뷰어 화면까지 표 기준으로 바꾸면 "게이지는 찼는데 참여는 되는" 상태가 생긴다.
-  t('★★ 표 기준은 관리자 게이트 뒤에만(일반 리뷰어는 종전 동작)',
-    /const _seeFilled = admin \|\| _realAdminTok\(\);/.test(CC)
+  // ★ 게이트 범위 = `✏️ 관리자 수정` 칩과 **같다**(`_adminTok` = 진짜 admin_token 또는 공고수정
+  //   허용명단 스코프 토큰). `_realAdminTok`(진짜 토큰만)으로 좁히면 스코프 토큰으로 홈을 보는
+  //   담당자에게 카드만 옛 숫자로 남는다(실측 신고 2026-08-10).
+  t('★★ 표 기준은 운영자 게이트 뒤에만(일반 리뷰어는 종전 동작)',
+    /const _seeFilled = admin \|\| _adminTok\(\);/.test(CC)
     && /const todayFilled = \(!_seeFilled \|\| c\.todayFilled == null\) \? null :/.test(CC));
+  t('★ 그 게이트는 `관리자 수정` 칩과 같은 범위(스코프 토큰 포함)', (() => {
+    const edit = /const editChip = \(!admin && (_\w+)\(\)\)/.exec(CC);
+    const seen = /const _seeFilled = admin \|\| (_\w+)\(\);/.exec(CC);
+    return edit && seen && edit[1] === seen[1];
+  })());
   t('비관리자 게이지도 같은 값을 쓴다(관리자 계정으로 홈을 볼 때 카드=작업보드)',
     /const pubN = \(todayFilled != null\) \? todayFilled : today;/.test(CC));
   t('★ 홈 카드도 완료 판정·채움을 표시 숫자에 맞춘다(39/42 인데 "완료"로 칠해지지 않게)',
