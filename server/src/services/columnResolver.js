@@ -171,8 +171,20 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   const productFromDb = productColIdx >= 0;
   if (productColIdx < 0) productColIdx = headers.findIndex(h => productKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
+  // ★★ 블로그체험단 전용 열(블로그URL·포스팅URL)이 상품URL 을 하이재킹하지 않게 제외한다(099/M2).
+  //   urlKeywords 는 'url'·'링크' **부분일치** + findIndex(**첫 매칭 승**)라, 그 열이 상품URL보다
+  //   왼쪽에 있으면 `review_index.product_url` 이 통째로 블로그·포스팅 주소가 된다 —
+  //   리뷰어 화면의 '상품 페이지'가 남의 블로그로 나가고 검수 대조도 어긋난다.
+  // ★ 확실한 두 낱말만 막는다 — 넓히면 멀쩡한 상품열까지 빈 값이 된다(오탐이 더 나쁘다).
+  // ★ 전부 걸리면 urlColIdx = -1 → productUrl 빈 값(소비처가 이미 `>= 0` 으로 방어). 포스팅 주소를
+  //   상품 주소로 내보내느니 빈 값이 맞다.
+  const URL_EXCLUDE_PATTERNS = ['블로그', '포스팅'];
   const urlKeywords = ['상품url', '제품url', '상품링크', 'url', '링크'];
-  const urlColIdx = headers.findIndex(h => urlKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
+  const urlColIdx = headers.findIndex(h => {
+    const hl = h.toLowerCase();
+    if (URL_EXCLUDE_PATTERNS.some(p => hl.includes(p))) return false;
+    return urlKeywords.some(k => hl.includes(k.toLowerCase()));
+  });
 
   const phoneKeywords = ['연락처', '전화번호', '핸드폰', '휴대폰', 'phone'];
   let phoneColIdx = _dbCol(dbColMap, 'phone', headers, drift);

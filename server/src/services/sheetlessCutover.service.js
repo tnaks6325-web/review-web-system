@@ -55,7 +55,7 @@ async function _checkSheetRows(db, tab) {
   }
   let read;
   try {
-    read = await require('./sheetSlotSync.service').readPreparedRows(db, { sheetId: tab.sheetId, tabGid: tab.tabGid });
+    read = await require('./sheetSlotSync.service').readPreparedRows(db, { sheetId: tab.sheetId, tabGid: tab.tabGid, tabName: tab.tabName });
   } catch (e) {
     return _chk('sheet_rows', label, 'unknown', '시트 사본 읽기 실패: ' + e.message, '잠시 뒤 다시 확인하세요.');
   }
@@ -411,7 +411,7 @@ async function sweepPreparedRows({ since = null, includeUnknown = false, limit =
   for (const t of scan) {
     if (!t.tabGid) { unknown.push({ ...t, reason: 'no_gid' }); continue; }
     let read;
-    try { read = await slot.readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid }); }
+    try { read = await slot.readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName }); }
     catch (e) { unknown.push({ ...t, reason: 'error', message: e.message }); continue; }
     if (!read || !read.ok) { unknown.push({ ...t, reason: (read && read.reason) || 'unknown' }); continue; }
     const prepared = read.prepared.length;

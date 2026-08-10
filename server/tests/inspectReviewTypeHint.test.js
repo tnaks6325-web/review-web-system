@@ -94,10 +94,15 @@ const CTX = require('../src/services/reviewTypeContext.service');
   console.log('\nB2) 공고 매칭 — 리네임·차수 재발행에서도 설정이 풀리지 않는다');
   {
     const src = read('src/services/reviewTypeContext.service.js');
-    assert.ok(/const CAMPAIGN_REVIEW_TYPE_LATERAL = `/.test(src), 'SQL 단일 출처 상수');
-    assert.ok(/COALESCE\(c\.tab_gid, ''\) <> '' AND linked_tab_gid = c\.tab_gid/.test(src),
+    // ⚠ 099/M2 에서 조각 자체가 utils/campaignTabLateral 로 옮겨졌다(체험단 종류도 같은 규칙을 써야
+    //   해서 — 사본을 두면 "리뷰타입은 찾는데 종류는 못 찾는" 탭이 생긴다). 그래서 소스 문자열이
+    //   아니라 **실제로 만들어지는 SQL** 을 본다(검사 의미 동일 · 더 강하다).
+    assert.ok(/const CAMPAIGN_REVIEW_TYPE_LATERAL = campaignColLateral\('review_type'/.test(src),
+      'SQL 단일 출처 상수');
+    const LAT_SQL = CTX.CAMPAIGN_REVIEW_TYPE_LATERAL;
+    assert.ok(/COALESCE\(c\.tab_gid, ''\) <> ''\s*AND linked_tab_gid = c\.tab_gid/.test(LAT_SQL),
       '★ gid 폴백 — 탭 리네임으로 설정이 조용히 풀리지 않게. ★ **빈 gid 는 키를 만들지 않는다**');
-    assert.ok(/AND COALESCE\(review_type, ''\) <> ''/.test(src),
+    assert.ok(/AND COALESCE\(review_type, ''\) <> ''/.test(LAT_SQL),
       "★★ 값이 있는 최신 공고 — 최신 공고의 '미지정'이 옛 공고의 '구매확정'을 가리지 않는다");
     // 소비처 3곳이 **같은 상수**를 끼워 쓴다(사본 금지)
     const ri = read('src/services/reviewInspect.service.js');

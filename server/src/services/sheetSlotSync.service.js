@@ -23,6 +23,7 @@ const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
 const { parseDateColumn } = require('../utils/koreanDate');
 const { findDateColumnIndex } = require('./campaignSchedule.service');
 const { optionWriteColumns } = require('./orderLedger.service');
+const { workOrderForTabSql } = require('../utils/workOrderLink');
 const participants = require('./participants.service');
 const activity = require('../utils/tabActivity');
 const { logger } = require('../utils/logger');
@@ -39,15 +40,23 @@ const BACKFILL_CAP = 2000;        // 한 번에 만들 슬롯 상한
 /**
  * 한 탭의 "시트 준비 행"을 읽는다. (읽기 전용)
  *
- * 준비 행 = **구매일자 칸이 채워져 날짜로 해석되는 행**. 날짜를 기준으로 삼는 이유는
+ * 리뷰체험단 준비 행 = **구매일자 칸이 채워져 날짜로 해석되는 행**. 날짜를 기준으로 삼는 이유는
  * 그것이 곧 투입 일정이고, 063 이 그날 정원을 세는 재료와 **같은 칸**이기 때문이다
  * (다른 기준을 쓰면 "표는 늘렸는데 일정은 그대로"가 된다).
  *
  * ★ 날짜가 없는데 다른 칸만 채워진 행은 `datelessFilled` 로 **세어서 보고만** 한다 —
  *   일정을 모르는 행을 슬롯으로 만들면 그날 정원 계산이 어긋난다(조용히 버리지도 않는다).
- * @returns {{ok, reason, headerRow, headers, dateColumn, optionColumn, prepared:[{seq,dateRaw,dateIso,optionText,cells?}], datelessFilled, rowsScanned}}
+ *
+ * ★★ **블로그체험단(work_kind='blog')은 기준이 다르다** — 구매일자를 미리 정할 수 없어서
+ *   (모집되는 대로 그때그때 입력) 날짜 기준으로 세면 **준비 행이 통째로 0이 되고 무음 누락**된다
+ *   ((주)바를참스킨 0804 건이 정확히 이것). 그래서 블로그는 **값이 하나라도 있는 행**을 준비 행으로
+ *   보고, **총원(연결 작업오더 recruit_count)** 이 있으면 앞에서부터 그 수까지만 센다.
+ * ★ 분기는 **이 함수 한 곳** — 점검표 ①·전수 점검·백필이 전부 여기를 지나므로 기준이 갈릴 수 없다.
+ *
+ * @returns {{ok, reason, headerRow, headers, dateColumn, optionColumn, prepared:[{seq,dateRaw,dateIso,optionText,cells?}], datelessFilled, rowsScanned,
+ *            blogMode?, recruitTotal?, totalSource?, solidRows?, shortOfTotal?, beyondTotal?, dateEmpty?}}
  */
-async function readPreparedRows(db, { sheetId, tabGid, includeCells = false, now = new Date() } = {}) {
+async function readPreparedRows(db, { sheetId, tabGid, tabName = '', includeCells = false, now = new Date() } = {}) {
   const fail = (reason) => ({ ok: false, reason, prepared: [], datelessFilled: 0, rowsScanned: 0 });
   if (!db || !sheetId || !tabGid) return fail('no_tab');
   try {
@@ -60,8 +69,13 @@ async function readPreparedRows(db, { sheetId, tabGid, includeCells = false, now
     const det = detectSheetHeader(head.rows.map(r => (Array.isArray(r.cells) ? r.cells : [])));
     const headers = det.headers || [];
     if (!headers.length || det.headerRowIndex == null) return fail('header_unrecognizable');
+    // ★★ 블로그체험단은 구매일자를 미리 정할 수 없다(모집되는 대로 그때그때 입력) — 날짜 칸이
+    //   없어도 준비 행이 존재한다. 그래서 종류를 **먼저** 판정하고 날짜 칸 필수 검사를 건너뛴다.
+    const blogCtx = await _blogContext(db, { sheetId, tabName });
+    const blog = blogCtx.blog;
+
     const dateIdx = findDateColumnIndex(headers);
-    if (dateIdx < 0) return fail('no_date_column');
+    if (dateIdx < 0 && !blog) return fail('no_date_column');
     const headerRow = head.rows[det.headerRowIndex - 1].row_index;   // 배열 인덱스(1-based) → 시트 실제 행 번호
     const optIdx = (optionWriteColumns(headers) || [])[0];
     const optCol = Number.isInteger(optIdx) ? optIdx : -1;
@@ -69,12 +83,25 @@ async function readPreparedRows(db, { sheetId, tabGid, includeCells = false, now
     // ★★ `cells->>$n::int` 의 `::int` 를 절대 빼지 말 것 — cells 는 JSONB **배열**이라
     //   캐스트가 없으면 `jsonb ->> text`(객체 키 조회)로 해석되어 **에러 없이 전 행 NULL** 이 된다
     //   (063 이 배포 이래 무음으로 꺼져 있던 원인). 로컬 PG16 재현·검증된 함정.
+    // ★ 블로그는 "값이 하나라도 있는 행"이 준비 행이라 그 판정을 SQL 에서 함께 읽는다
+    //   (`filled`). 날짜 기준 경로에는 붙이지 않는다 — 필요 없는 비용을 늘리지 않는다.
+    const filledSql = `EXISTS (SELECT 1 FROM jsonb_array_elements_text(cells) v WHERE btrim(v) <> '')`;
     let body;
     if (includeCells) {
       body = await db.query(
         `SELECT row_index, cells FROM raw_sheet_rows
           WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $3 ORDER BY row_index`,
         [sheetId, String(tabGid), headerRow]);
+    } else if (blog) {
+      // 날짜 칸이 아예 없을 수도 있어(dateIdx < 0) 날짜는 있을 때만 읽는다.
+      const dSel = dateIdx >= 0 ? `cells->>$4::int AS d` : `NULL AS d`;
+      const params = dateIdx >= 0
+        ? [sheetId, String(tabGid), headerRow, String(dateIdx)]
+        : [sheetId, String(tabGid), headerRow];
+      body = await db.query(
+        `SELECT row_index, ${dSel}, ${filledSql} AS filled FROM raw_sheet_rows
+          WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $3 ORDER BY row_index`,
+        params);
     } else if (optCol >= 0) {
       body = await db.query(
         `SELECT row_index, cells->>$3::int AS d, cells->>$4::int AS o FROM raw_sheet_rows
@@ -89,10 +116,13 @@ async function readPreparedRows(db, { sheetId, tabGid, includeCells = false, now
 
     const rows = body.rows.map(r => {
       const cells = includeCells ? (Array.isArray(r.cells) ? normalizeCells(r.cells) : []) : null;
-      const d = includeCells ? (cells[dateIdx] || '') : (r.d == null ? '' : String(r.d));
+      const d = includeCells ? (dateIdx >= 0 ? (cells[dateIdx] || '') : '') : (r.d == null ? '' : String(r.d));
       const o = includeCells ? (optCol >= 0 ? (cells[optCol] || '') : '')
                              : (r.o == null ? '' : String(r.o));
-      return { seq: r.row_index, dateRaw: String(d).trim(), optionText: String(o).trim(), cells };
+      const filled = includeCells
+        ? (cells || []).some(c => String(c == null ? '' : c).trim() !== '')
+        : r.filled === true;
+      return { seq: r.row_index, dateRaw: String(d).trim(), optionText: String(o).trim(), filled, cells };
     });
 
     const kst = new Date(now.getTime() + 9 * 3600 * 1000);
@@ -100,24 +130,84 @@ async function readPreparedRows(db, { sheetId, tabGid, includeCells = false, now
       fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 },
     });
 
+    const mk = (r, i) => {
+      const item = { seq: r.seq, dateRaw: r.dateRaw, dateIso: iso[i] || null, optionText: r.optionText };
+      if (includeCells) item.rowJson = _rowJson(headers, r.cells);
+      return item;
+    };
+
     const prepared = [];
     let datelessFilled = 0;
-    rows.forEach((r, i) => {
-      if (iso[i]) {
-        const item = { seq: r.seq, dateRaw: r.dateRaw, dateIso: iso[i], optionText: r.optionText };
-        if (includeCells) item.rowJson = _rowJson(headers, r.cells);
-        prepared.push(item);
-      } else if (r.dateRaw) datelessFilled++;   // 칸에 값은 있는데 날짜로 해석되지 않음(두 모드 같은 기준)
-    });
+    const blogInfo = {};
+    if (blog) {
+      // ★★ 블로그 준비 행 = **값이 하나라도 있는 행**(빈 줄 제외) — 구매일자는 안 본다.
+      //   총원(연결 작업오더 recruit_count)을 알면 **앞에서부터 그 수까지만** 센다(사용자 확정:
+      //   "앞으로의 블로그 작업은 리뷰오더 총원이 준비 행의 기준").
+      // ★ 총원이 시트 실체 행보다 많아도 **자리를 지어내지 않는다** — seq 는 시트 실제 행 번호여야
+      //   하고(어긋나면 주문 유입 시 표가 두 겹이 된다), 없는 줄의 번호는 알 수 없다. 대신 고지한다.
+      const solid = [];
+      rows.forEach((r, i) => { if (r.filled) solid.push(mk(r, i)); });
+      const total = blogCtx.recruitTotal > 0 ? blogCtx.recruitTotal : null;
+      const take = total == null ? solid : solid.slice(0, total);
+      take.forEach(p => prepared.push(p));
+      Object.assign(blogInfo, {
+        blogMode: true,
+        recruitTotal: total,                                  // null = 총원 모름(오더 미연결·0)
+        totalSource: blogCtx.totalSource,
+        solidRows: solid.length,
+        shortOfTotal: total == null ? 0 : Math.max(0, total - solid.length),
+        beyondTotal: total == null ? 0 : Math.max(0, solid.length - total),
+        dateEmpty: rows.filter(r => r.filled && !r.dateRaw).length,   // 블로그에선 정상(경고 아님)
+      });
+    } else {
+      rows.forEach((r, i) => {
+        if (iso[i]) prepared.push(mk(r, i));
+        else if (r.dateRaw) datelessFilled++;   // 칸에 값은 있는데 날짜로 해석되지 않음(두 모드 같은 기준)
+      });
+    }
 
     return {
       ok: true, reason: 'ok', headerRow, headers,
-      dateColumn: headers[dateIdx] || '', optionColumn: optCol >= 0 ? (headers[optCol] || '') : null,
-      prepared, datelessFilled, rowsScanned: rows.length,
+      dateColumn: dateIdx >= 0 ? (headers[dateIdx] || '') : '',
+      optionColumn: optCol >= 0 ? (headers[optCol] || '') : null,
+      prepared, datelessFilled, rowsScanned: rows.length, ...blogInfo,
     };
   } catch (e) {
     logger.warn(`[sheetSlotSync] 준비 행 읽기 실패(${sheetId}/${tabGid}): ${e.message}`);
     return fail('error');
+  }
+}
+
+/**
+ * 그 탭이 블로그체험단인지 + 총원은 몇인지. (읽기 전용 · fail-soft)
+ *
+ * ★★ 종류 판정은 `workKindContext`(= utils/workKind 의 공고 > 탭 규칙) 단일 출처 —
+ *   여기서 tab_configs 를 직접 읽어 판정하면 화면·검수와 갈라진다.
+ * ★★ 총원은 `utils/workOrderLink` 의 링크 우선순위 SQL 로 읽는다(Track B 링크 > 폴백) —
+ *   OR 로만 묶으면 최신 폴백 오더의 총원을 집어 엉뚱한 수로 자른다(실측으로 잡힌 함정).
+ * ★ 판정 실패는 `blog:false` = **종전 동작**(날짜 기준). 모른다고 블로그로 단정하면
+ *   리뷰 작업의 준비 행 기준이 통째로 바뀐다 — 오탐이 훨씬 비싸다.
+ * ★ `tabName` 이 없으면 판정 자체를 못 한다(호출부가 반드시 넘긴다 — 회귀가드가 고정).
+ */
+async function _blogContext(db, { sheetId, tabName } = {}) {
+  const off = { blog: false, recruitTotal: 0, totalSource: null };
+  if (!tabName) return off;
+  try {
+    const kind = await require('./workKindContext.service').workKindForTab({ sheetId, tabName, client: db });
+    if (kind !== 'blog') return off;
+    let recruitTotal = 0, totalSource = null;
+    try {
+      const { rows } = await db.query(workOrderForTabSql(['recruit_count']), [sheetId, tabName]);
+      const n = rows[0] ? parseInt(rows[0].recruit_count, 10) : 0;
+      if (Number.isFinite(n) && n > 0) { recruitTotal = n; totalSource = 'work_order'; }
+    } catch (e) {
+      // 총원을 모르면 시트 실체 행 전부를 준비 행으로 본다(고지 대상 — 조용히 자르지 않는다).
+      logger.warn(`[sheetSlotSync] 블로그 총원 조회 실패(${sheetId}/${tabName}): ${e.message}`);
+    }
+    return { blog: true, recruitTotal, totalSource };
+  } catch (e) {
+    logger.warn(`[sheetSlotSync] 체험단 종류 조회 실패(종전 동작 · ${sheetId}/${tabName}): ${e.message}`);
+    return off;
   }
 }
 
@@ -211,7 +301,7 @@ async function auditSheetSuperiority({ limit = AUDIT_TAB_CAP, scanCap = SCAN_CAP
 
   const items = [];
   for (const t of scan) {
-    const read = await readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid, now });
+    const read = await readPreparedRows(db, { sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, now });
     const key = t.sheetId + '\u0000' + t.tabName;
     const have = seqMap.get(key) || new Set();
     const missing = read.ok ? read.prepared.filter(p => !have.has(Number(p.seq))) : [];
@@ -342,7 +432,7 @@ async function backfillSlots({ sheetId, tabName, dryRun = true, by = 'sheet-slot
   const tabGid = tc[0].tabGid;
   if (!tabGid) return { ok: false, error: 'no_tab_gid' };
 
-  const read = await readPreparedRows(db, { sheetId, tabGid, includeCells: true, now });
+  const read = await readPreparedRows(db, { sheetId, tabGid, tabName, includeCells: true, now });
   if (!read.ok) return { ok: false, error: read.reason };
 
   const { rows: ex } = await db.query(
