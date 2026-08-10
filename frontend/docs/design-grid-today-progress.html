@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>작업보드 표 — 오늘 참여현황 표기 (시안 A/B/C)</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════════════
+   작업보드 시스템표 툴바 — 검색창 왼쪽에 "오늘 참여현황" 표기
+   ─────────────────────────────────────────────────────────────────────────────
+   · 이 문서는 시안(목업)입니다. 제품 코드가 아니며 가짜 데이터로 실제처럼 동작합니다.
+   · 외부 리소스 0 (오프라인 열람 가능) · 라이트 고정(color-scheme:light)
+   · 단독 보기: 주소 뒤에 ?v=A / ?v=B / ?v=C
+   ══════════════════════════════════════════════════════════════════════════════ */
+:root{
+  --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:light}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+
+/* ── 문서 골격 ── */
+.doc{max-width:1360px;margin:0 auto;padding:28px 20px 90px}
+.dhead{background:linear-gradient(135deg,#1e2a44,#2a3f6b);color:#fff;border-radius:16px;padding:24px 26px;margin-bottom:22px}
+.dhead h1{margin:0 0 6px;font-size:21px;letter-spacing:-.02em}
+.dhead p{margin:0;font-size:13px;opacity:.86;line-height:1.7}
+.dhead .mockchip{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.06em;background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.28);padding:3px 10px;border-radius:999px;margin-bottom:10px}
+h2.sec{font-size:16px;margin:34px 0 12px;padding-left:11px;border-left:4px solid var(--accent);letter-spacing:-.01em}
+h3.sub{font-size:13.5px;margin:22px 0 9px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px 20px;margin-bottom:16px;
+      box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.04)}
+.card > .ct{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+.card > .ct .tag{font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;background:var(--accent-soft);
+  border:1px solid var(--accent-line);color:var(--accent-deep)}
+.card > .ct .tag.rec{background:var(--safe-soft);border-color:#bfe6cd;color:#15803d}
+.card > .ct h3{margin:0;font-size:15px;letter-spacing:-.01em}
+.card > .cd{font-size:12.5px;color:var(--muted);margin:0 0 14px;line-height:1.7}
+.note{font-size:12px;color:var(--muted);line-height:1.75;background:var(--card2);border-radius:10px;padding:11px 13px;margin-top:12px}
+.note b{color:var(--ink)}
+.note.warn{background:var(--warn-soft);border:1px solid #f0dcc0;color:#7c4a12}
+.note.warn b{color:#7c4a12}
+.pros{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+@media(max-width:720px){.pros{grid-template-columns:1fr}}
+.pros div{font-size:12px;line-height:1.7;border-radius:10px;padding:10px 12px}
+.pros .good{background:var(--safe-soft);border:1px solid #cdeed8}
+.pros .bad{background:var(--bad-soft);border:1px solid #f6d5d6}
+.pros b{display:block;margin-bottom:3px;font-size:11.5px;letter-spacing:.02em}
+ul.li{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted);line-height:1.85}
+ul.li b{color:var(--ink)}
+.vswitch{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
+.vswitch a{font-size:12px;font-weight:700;text-decoration:none;color:var(--muted);background:var(--card);
+  border:1px solid var(--line);border-radius:9px;padding:6px 14px}
+.vswitch a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* ══ 실제 화면 재현(작업보드 툴바 + 표 일부) ══ */
+.repro{background:var(--card);border:1px solid var(--line2);border-radius:12px;padding:14px;overflow:hidden}
+.gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.gridbar label{font-size:12px;color:var(--muted);font-weight:650}
+.gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;
+  background:var(--card);color:var(--ink)}
+.btn{font:inherit;font-size:12px;font-weight:700;padding:0 13px;height:32px;display:inline-flex;align-items:center;gap:6px;
+  border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn.xs{font-size:11px;padding:3px 9px;height:auto}
+.btn:hover{border-color:var(--accent-line);background:var(--card2)}
+.gsearch{position:relative;display:flex;align-items:center;flex:none}
+.gsearch .ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:12px;pointer-events:none}
+.gsearch input{font:inherit;font-size:12.5px;padding:5px 76px 5px 27px;border:1px solid var(--line2);border-radius:7px;
+  background:var(--card);color:var(--ink);outline:none;width:230px}
+.gsearch .nav2{position:absolute;right:5px;display:flex;gap:1px}
+.gsearch .nb2{width:17px;height:19px;border:none;background:none;color:var(--faint);font-size:10px;border-radius:4px;line-height:1;padding:0}
+.gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+table.sheetgrid{border-collapse:separate;border-spacing:0;width:100%;font-size:12.5px}
+table.sheetgrid th{background:var(--card2);border-bottom:1px solid var(--line2);border-right:1px solid var(--line);
+  padding:7px 9px;text-align:left;font-size:11.5px;color:var(--muted);font-weight:750;white-space:nowrap}
+table.sheetgrid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:7px 9px;white-space:nowrap}
+table.sheetgrid td.gnum{color:var(--faint);font-size:11px}
+table.sheetgrid td.gempty{color:var(--line2)}
+table.sheetgrid td.gok{color:var(--safe);font-weight:600}
+.tblwrap{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+
+/* ══ ★ 여기가 시안 대상: 오늘 참여현황 표기 ══════════════════════════════════ */
+
+/* ── 공통 색 상태(세 안이 같은 규칙을 쓴다 = 판정 단일 출처) ── */
+/* 진행중=파랑 / 달성=초록 / 초과=주황 / 열지 않는 날·정원0=회색 / 모름=회색 물음표 */
+
+/* A안 — 인라인 알약(툴바 높이 불변) */
+.tpa{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 11px 0 9px;border-radius:999px;
+  background:var(--card2);border:1px solid var(--line);white-space:nowrap;cursor:default}
+.tpa .d{font-size:11.5px;font-weight:800;color:var(--muted);letter-spacing:-.01em}
+.tpa .lbl{font-size:11px;color:var(--faint);font-weight:650}
+.tpa .num{font-size:12.5px;font-weight:800;letter-spacing:-.02em;color:var(--accent-deep)}
+.tpa .num b{font-size:14.5px}
+.tpa .num i{font-style:normal;color:var(--muted);font-weight:700}
+.tpa .bar{width:54px;height:6px;border-radius:999px;background:#dfe6ef;overflow:hidden;flex:none}
+.tpa .bar i{display:block;height:100%;border-radius:999px;background:var(--accent);transition:width .3s cubic-bezier(.22,1,.36,1)}
+.tpa.done{background:var(--safe-soft);border-color:#cdeed8}
+.tpa.done .num{color:#15803d} .tpa.done .bar i{background:var(--safe)}
+.tpa.over{background:var(--warn-soft);border-color:#f0dcc0}
+.tpa.over .num{color:#a2530a} .tpa.over .bar i{background:#e08a1e}
+.tpa.zero{background:var(--card2);border-color:var(--line)}
+.tpa.zero .num{color:var(--muted)} .tpa.zero .bar i{background:var(--line2)}
+.tpa.unk{background:var(--card2);border-style:dashed;border-color:var(--line2)}
+.tpa.unk .num{color:var(--faint)} .tpa.unk .bar{display:none}
+.tpa .sfx{font-size:10.5px;font-weight:750;padding:1px 7px;border-radius:999px;background:#fff;border:1px solid var(--line)}
+.tpa.done .sfx{background:#fff;border-color:#cdeed8;color:#15803d}
+.tpa.over .sfx{background:#fff;border-color:#f0dcc0;color:#a2530a}
+
+/* B안 — 강조 카드(숫자 크게, 툴바가 한 줄 높아짐) */
+.tpb{display:inline-flex;align-items:center;gap:11px;padding:6px 13px 6px 11px;border-radius:11px;
+  background:var(--accent-soft);border:1px solid var(--accent-line);white-space:nowrap;cursor:default}
+.tpb .lt{display:flex;flex-direction:column;line-height:1.15}
+.tpb .lt .d{font-size:11px;font-weight:800;color:var(--accent-deep)}
+.tpb .lt .lbl{font-size:10.5px;color:var(--muted);font-weight:650}
+.tpb .rt{display:flex;flex-direction:column;gap:4px}
+.tpb .num{font-size:17px;font-weight:850;letter-spacing:-.03em;color:var(--accent-deep);line-height:1}
+.tpb .num i{font-style:normal;font-size:12.5px;color:var(--muted);font-weight:750}
+.tpb .bar{width:96px;height:5px;border-radius:999px;background:#d3e0fa;overflow:hidden}
+.tpb .bar i{display:block;height:100%;border-radius:999px;background:var(--accent)}
+.tpb.done{background:var(--safe-soft);border-color:#cdeed8}
+.tpb.done .lt .d,.tpb.done .num{color:#15803d}
+.tpb.done .bar{background:#cdeed8} .tpb.done .bar i{background:var(--safe)}
+.tpb.over{background:var(--warn-soft);border-color:#f0dcc0}
+.tpb.over .lt .d,.tpb.over .num{color:#a2530a}
+.tpb.over .bar{background:#f0e2cc} .tpb.over .bar i{background:#e08a1e}
+.tpb.zero,.tpb.unk{background:var(--card2);border-color:var(--line)}
+.tpb.zero .lt .d,.tpb.zero .num,.tpb.unk .lt .d,.tpb.unk .num{color:var(--muted)}
+.tpb.zero .bar{background:#dfe6ef}.tpb.zero .bar i{background:var(--line2)}
+.tpb.unk .bar{display:none}
+
+/* C안 — 미니 도넛 + 한 줄 텍스트 */
+.tpc{display:inline-flex;align-items:center;gap:9px;height:28px;padding:0 12px 0 6px;border-radius:999px;
+  background:var(--card);border:1px solid var(--line2);white-space:nowrap;cursor:default}
+.tpc .ring{width:22px;height:22px;border-radius:50%;flex:none;position:relative;
+  background:conic-gradient(var(--accent) calc(var(--p) * 1%),#e3e9f1 0)}
+.tpc .ring::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--card)}
+.tpc .d{font-size:11.5px;font-weight:800;color:var(--muted)}
+.tpc .lbl{font-size:11px;color:var(--faint);font-weight:650}
+.tpc .num{font-size:12.5px;font-weight:800;color:var(--accent-deep);letter-spacing:-.02em}
+.tpc .num b{font-size:14.5px} .tpc .num i{font-style:normal;color:var(--muted);font-weight:700}
+.tpc.done .ring{background:conic-gradient(var(--safe) calc(var(--p) * 1%),#e3e9f1 0)}
+.tpc.done .num{color:#15803d}
+.tpc.over .ring{background:conic-gradient(#e08a1e calc(var(--p) * 1%),#e3e9f1 0)}
+.tpc.over .num{color:#a2530a}
+.tpc.zero .ring{background:conic-gradient(var(--line2) calc(var(--p) * 1%),#e3e9f1 0)}
+.tpc.zero .num{color:var(--muted)}
+.tpc.unk{border-style:dashed}
+.tpc.unk .ring{background:#e3e9f1}
+.tpc.unk .num{color:var(--faint)}
+
+/* 상태 갤러리 */
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;margin-top:6px}
+.galc{border:1px solid var(--line);border-radius:11px;padding:13px;background:var(--card)}
+.galc .gt{font-size:11.5px;font-weight:800;color:var(--muted);margin-bottom:9px}
+.galc .gd{font-size:11.5px;color:var(--faint);line-height:1.65;margin-top:9px}
+.demo{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+
+/* 결정사안 표 */
+table.q{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+table.q th{background:var(--card2);border:1px solid var(--line);padding:9px 11px;text-align:left;font-size:11.5px;color:var(--muted)}
+table.q td{border:1px solid var(--line);padding:10px 11px;vertical-align:top;line-height:1.7}
+table.q td b{color:var(--accent-deep)}
+.pill{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;
+  background:var(--warn-soft);border:1px solid #f0dcc0;color:#7c4a12}
+.pill.a{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+
+.slider{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:14px}
+.slider input[type=range]{width:220px}
+.slider b{color:var(--ink);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="dhead">
+    <div class="mockchip">시안 · 목업 (제품 코드 아님)</div>
+    <h1>작업보드 시스템표 — 오늘 참여현황 표기</h1>
+    <p>
+      표 툴바 <b>검색창 왼쪽</b>에 오늘 날짜와 “모집해야 할 인원 대비 지금까지 구매(참여)한 인원”을 항상 보이게 한다.<br>
+      예) 오늘 모집 20명 · 현재 구매 12명 → <b>8/10 (월) 참여현황 12/20명</b><br>
+      배치 3안(A·B·C) + 상태별 표시 + 확인이 필요한 결정사안을 담았습니다.
+    </p>
+  </div>
+
+  <div class="vswitch" id="vsw">
+    <a href="?" data-v="">전체 보기</a>
+    <a href="?v=A" data-v="A">A안만</a>
+    <a href="?v=B" data-v="B">B안만</a>
+    <a href="?v=C" data-v="C">C안만</a>
+  </div>
+
+  <!-- ══════════ 지금 화면 ══════════ -->
+  <section data-only="all">
+    <h2 class="sec">지금 (표기 없음)</h2>
+    <div class="card">
+      <p class="cd">툴바 맨 앞이 곧바로 검색창입니다. 오늘 몇 명을 채워야 하는지, 지금 몇 명이 들어왔는지는
+        표를 눈으로 세거나 다른 화면으로 나가야 알 수 있습니다.</p>
+      <div class="repro">
+        <div class="gridbar">
+          <div class="gsearch"><span class="ic">🔍</span>
+            <input type="text" placeholder="표 안에서 찾기…" readonly>
+            <span class="nav2"><button class="nb2">▲</button><button class="nb2">▼</button></span>
+          </div>
+          <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+          <label>행 그룹</label><select><option>그룹 없음</option></select>
+          <button class="btn xs">숨긴 열 0</button>
+          <button class="btn xs">편집 이력</button>
+          <button class="btn xs">＋ 열 추가</button>
+        </div>
+        <div class="tblwrap" id="tbl0"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ A안 ══════════ -->
+  <section data-only="A">
+    <h2 class="sec">시안 A — 인라인 알약 <span style="font-size:12px;color:var(--safe);font-weight:800">(권장)</span></h2>
+    <div class="card">
+      <div class="ct"><span class="tag rec">권장</span><h3>날짜 · 참여현황 · 숫자 · 미니 막대를 한 줄 알약으로</h3></div>
+      <p class="cd">툴바의 다른 컨트롤과 같은 높이(28px)라 <b>툴바가 한 줄 그대로</b>입니다. 표가 위로 밀리지 않습니다.</p>
+      <div class="repro">
+        <div class="gridbar">
+          <span class="tpa" id="A_chip">
+            <b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+            <span class="num"><b>12</b><i>/20명</i></span>
+            <span class="bar"><i style="width:60%"></i></span>
+          </span>
+          <div class="gsearch"><span class="ic">🔍</span>
+            <input type="text" placeholder="표 안에서 찾기…" readonly>
+            <span class="nav2"><button class="nb2">▲</button><button class="nb2">▼</button></span>
+          </div>
+          <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+          <label>행 그룹</label><select><option>그룹 없음</option></select>
+          <button class="btn xs">숨긴 열 0</button>
+          <button class="btn xs">편집 이력</button>
+          <button class="btn xs">＋ 열 추가</button>
+        </div>
+        <div class="tblwrap" id="tblA"></div>
+      </div>
+
+      <div class="slider">
+        <span>구매 인원</span>
+        <input type="range" id="rgA" min="0" max="24" value="12">
+        <b id="rgAv">12 / 20명</b>
+        <span style="color:var(--faint)">— 끌어서 달성·초과 상태를 확인하세요</span>
+      </div>
+
+      <div class="pros">
+        <div class="good"><b>좋은 점</b>툴바 높이 불변(표 세로 공간 안 뺏김) · 검색창 바로 왼쪽이라 시선 이동 최소 · 좁은 화면에서 줄바꿈돼도 안 깨짐</div>
+        <div class="bad"><b>아쉬운 점</b>숫자가 작아 멀리서는 덜 띈다 · 정보가 한 줄에 몰려 있음</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ B안 ══════════ -->
+  <section data-only="B">
+    <h2 class="sec">시안 B — 강조 카드</h2>
+    <div class="card">
+      <div class="ct"><span class="tag">대안</span><h3>숫자를 크게, 진행 막대를 길게</h3></div>
+      <p class="cd">숫자가 가장 잘 보입니다. 다만 알약보다 높아서 <b>툴바 줄 높이가 9px 늘어납니다</b>(31px → 40px, 실측 — 표가 그만큼 아래로 내려감).</p>
+      <div class="repro">
+        <div class="gridbar">
+          <span class="tpb" id="B_chip">
+            <span class="lt"><span class="d">8/10 (월)</span><span class="lbl">참여현황</span></span>
+            <span class="rt">
+              <span class="num">12<i>/20명</i></span>
+              <span class="bar"><i style="width:60%"></i></span>
+            </span>
+          </span>
+          <div class="gsearch"><span class="ic">🔍</span>
+            <input type="text" placeholder="표 안에서 찾기…" readonly>
+            <span class="nav2"><button class="nb2">▲</button><button class="nb2">▼</button></span>
+          </div>
+          <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+          <label>행 그룹</label><select><option>그룹 없음</option></select>
+          <button class="btn xs">숨긴 열 0</button>
+          <button class="btn xs">편집 이력</button>
+        </div>
+        <div class="tblwrap" id="tblB"></div>
+      </div>
+      <div class="slider">
+        <span>구매 인원</span>
+        <input type="range" id="rgB" min="0" max="24" value="12">
+        <b id="rgBv">12 / 20명</b>
+      </div>
+      <div class="pros">
+        <div class="good"><b>좋은 점</b>가장 눈에 띔 · 진행 막대가 길어 남은 물량 감이 좋음</div>
+        <div class="bad"><b>아쉬운 점</b>툴바가 높아져 표가 내려감 · 파란 카드가 [필터 초기화] 같은 경고색 버튼과 시선을 다툼</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ C안 ══════════ -->
+  <section data-only="C">
+    <h2 class="sec">시안 C — 미니 도넛</h2>
+    <div class="card">
+      <div class="ct"><span class="tag">대안</span><h3>원형 게이지 + 한 줄 텍스트</h3></div>
+      <p class="cd">달성률이 원으로 한눈에 들어옵니다. 폭이 A안보다 조금 좁습니다.</p>
+      <div class="repro">
+        <div class="gridbar">
+          <span class="tpc" id="C_chip" style="--p:60">
+            <span class="ring"></span>
+            <b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+            <span class="num"><b>12</b><i>/20명</i></span>
+          </span>
+          <div class="gsearch"><span class="ic">🔍</span>
+            <input type="text" placeholder="표 안에서 찾기…" readonly>
+            <span class="nav2"><button class="nb2">▲</button><button class="nb2">▼</button></span>
+          </div>
+          <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+          <label>행 그룹</label><select><option>그룹 없음</option></select>
+          <button class="btn xs">숨긴 열 0</button>
+          <button class="btn xs">편집 이력</button>
+          <button class="btn xs">＋ 열 추가</button>
+        </div>
+        <div class="tblwrap" id="tblC"></div>
+      </div>
+      <div class="slider">
+        <span>구매 인원</span>
+        <input type="range" id="rgC" min="0" max="24" value="12">
+        <b id="rgCv">12 / 20명</b>
+      </div>
+      <div class="pros">
+        <div class="good"><b>좋은 점</b>달성률이 직관적 · 폭이 좁아 툴바 여유</div>
+        <div class="bad"><b>아쉬운 점</b>작은 원은 60%와 70%가 잘 구분되지 않음 · 초과(20/20 넘김)를 원으로 표현하기 애매</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 상태 갤러리 ══════════ -->
+  <section data-only="all">
+    <h2 class="sec">상태별 표시 (A안 기준)</h2>
+    <div class="card">
+      <p class="cd">숫자만 두면 “0/0”이 정상인지 고장인지 알 수 없습니다.
+        <b>“없다”와 “모른다”를 반드시 다르게</b> 표시합니다.</p>
+      <div class="gal">
+        <div class="galc">
+          <div class="gt">① 진행 중</div>
+          <div class="demo">
+            <span class="tpa"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+              <span class="num"><b>12</b><i>/20명</i></span><span class="bar"><i style="width:60%"></i></span></span>
+          </div>
+          <div class="gd">파랑. 오늘 채워야 할 20명 중 12명이 구매를 마쳤습니다.</div>
+        </div>
+        <div class="galc">
+          <div class="gt">② 오늘 목표 달성</div>
+          <div class="demo">
+            <span class="tpa done"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+              <span class="num"><b>20</b><i>/20명</i></span><span class="bar"><i style="width:100%"></i></span>
+              <span class="sfx">달성</span></span>
+          </div>
+          <div class="gd">초록 + [달성] 배지. 더 볼 것이 없다는 신호.</div>
+        </div>
+        <div class="galc">
+          <div class="gt">③ 초과 접수</div>
+          <div class="demo">
+            <span class="tpa over"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+              <span class="num"><b>23</b><i>/20명</i></span><span class="bar"><i style="width:100%"></i></span>
+              <span class="sfx">+3</span></span>
+          </div>
+          <div class="gd">주황 + 초과분. 정원보다 많이 들어온 날(외부모집 수동제출·지각 확정 등)을 조용히 감추지 않습니다.</div>
+        </div>
+        <div class="galc">
+          <div class="gt">④ 오늘은 열지 않는 날 (정원 0)</div>
+          <div class="demo">
+            <span class="tpa zero"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+              <span class="num"><b>0</b><i>/0명</i></span><span class="sfx">오늘 모집 없음</span></span>
+          </div>
+          <div class="gd">회색. 휴무일·모집 종료·오늘 0명 조절 등 <b>의도적으로 0인 상태</b>. 사유는 툴팁으로.</div>
+        </div>
+        <div class="galc">
+          <div class="gt">⑤ 기준을 모름</div>
+          <div class="demo">
+            <span class="tpa unk"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+              <span class="num"><b>12</b><i>/ ?명</i></span><span class="sfx">모집 기준 없음</span></span>
+          </div>
+          <div class="gd">점선 테두리. 연결된 모집공고가 없어 <b>오늘 몇 명인지 정할 수 없는</b> 작업.
+            구매한 12명은 사실이므로 그대로 보여주고, 분모만 <b>?</b>로 둡니다(0으로 꾸미지 않음).</div>
+        </div>
+        <div class="galc">
+          <div class="gt">⑥ 조회 실패</div>
+          <div class="demo">
+            <span class="tpa unk"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+              <span class="num"><i>? / ?명</i></span><span class="sfx">불러오지 못함</span></span>
+          </div>
+          <div class="gd">서버 응답 실패·구버전 백엔드. <b>0/0으로 위장하지 않습니다</b>
+            (0으로 두면 “오늘 할 일 없음”으로 잘못 읽힘).</div>
+        </div>
+      </div>
+      <div class="note warn">
+        <b>왜 이렇게까지 나누나</b> — 이 표기는 “오늘 더 받아야 하나?”를 결정하는 데 쓰입니다.
+        틀린 숫자 하나가 모집을 조기에 멈추거나 정원을 넘겨 받게 만듭니다.
+        그래서 <b>모르면 모른다고 적고</b>, 초과는 감추지 않습니다.
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 좁은 화면 ══════════ -->
+  <section data-only="all">
+    <h2 class="sec">좁은 화면 (노트북 · 창 절반)</h2>
+    <div class="card">
+      <p class="cd">툴바는 <code>flex-wrap</code>이라 자리가 부족하면 뒤 버튼부터 다음 줄로 넘어갑니다.
+        표기는 <b>맨 앞</b>이라 항상 첫 줄에 남습니다.</p>
+      <div class="repro" style="max-width:560px">
+        <div class="gridbar">
+          <span class="tpa"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+            <span class="num"><b>12</b><i>/20명</i></span><span class="bar"><i style="width:60%"></i></span></span>
+          <div class="gsearch"><span class="ic">🔍</span>
+            <input type="text" placeholder="표 안에서 찾기…" readonly>
+            <span class="nav2"><button class="nb2">▲</button><button class="nb2">▼</button></span>
+          </div>
+          <label>고정 열</label><select><option>기본(연락처까지)</option></select>
+          <button class="btn xs">숨긴 열 0</button>
+          <button class="btn xs">편집 이력</button>
+        </div>
+      </div>
+      <div class="note">더 좁아지면(≤560px) “참여현황” 글자와 미니 막대를 접고
+        <b>8/10 (월) 12/20명</b>만 남깁니다 — 숫자는 어떤 폭에서도 사라지지 않습니다.</div>
+    </div>
+  </section>
+
+  <!-- ══════════ 결정사안 ══════════ -->
+  <section data-only="all">
+    <h2 class="sec">확인이 필요한 결정사안</h2>
+    <div class="card">
+      <p class="cd">아래 3가지는 고르는 답에 따라 화면에 뜨는 숫자가 달라집니다. 답을 주시면 그대로 구현하겠습니다.</p>
+      <table class="q">
+        <tr><th style="width:112px">항목</th><th>선택지</th><th style="width:260px">차이</th></tr>
+        <tr>
+          <td><b>① 분모</b><br><span style="color:var(--muted);font-size:11.5px">오늘 모집해야 할 인원</span></td>
+          <td>
+            <span class="pill a">가안(권장)</span> <b>시스템 정원</b> — 일 모집인원 + 날짜별 인원 조절 + 이월을 반영한
+            그 공고의 “오늘 정원”.<br>
+            <span class="pill">나안</span> <b>표의 구매일자</b> — 시스템표에서 구매일자가 오늘인 줄의 개수.
+          </td>
+          <td>정원 기준은 2026-08-07 확정(“정원 기준 = 시스템표”)과 같은 값이라
+            카드·[📅 인원] 팝업과 <b>숫자가 갈리지 않습니다</b>.<br>
+            표 기준은 공고가 없어도 세지지만, 시스템이 정한 정원과 어긋날 수 있습니다.</td>
+        </tr>
+        <tr>
+          <td><b>② 분자</b><br><span style="color:var(--muted);font-size:11.5px">현재 구매한 인원</span></td>
+          <td>
+            <span class="pill a">가안(권장)</span> <b>오늘 제출 확정</b> — 구매양식 제출이 확정된 건.<br>
+            <span class="pill">나안</span> <b>+ 진행 중 포함</b> — 자리를 잡고 결제 중인 건(홀드)까지 합산.
+          </td>
+          <td>진행 중까지 세면 숫자가 먼저 차올랐다가 만료로 <b>줄어들 수 있습니다</b>.<br>
+            필요하면 <b>12<span style="color:var(--faint)">(+2 진행)</span>/20명</b>처럼 따로 붙여 표기 가능합니다.</td>
+        </tr>
+        <tr>
+          <td><b>③ 대상</b></td>
+          <td>
+            <span class="pill a">가안(권장)</span> 공고가 연결된 작업만 숫자를 보여주고, 없으면 <b>“모집 기준 없음”</b>.<br>
+            <span class="pill">나안</span> 공고가 없으면 표의 구매일자로 대신 계산.
+          </td>
+          <td>가안은 틀린 숫자를 만들지 않습니다.<br>나안은 항상 숫자가 뜨지만 기준이 화면마다 달라질 수 있습니다.</td>
+        </tr>
+      </table>
+      <div class="note">
+        <b>이미 있는 재료만 씁니다</b> — 오늘 정원과 오늘 확정 수는 모집공고 카드·[📅 인원] 팝업이 쓰는 값과 같은 것을
+        그대로 받아옵니다. 새 계산식을 만들지 않으므로 <b>카드와 표의 숫자가 어긋날 수 없습니다</b>.
+        표기는 <b>읽기 전용</b>이고 클릭 동작·저장은 없습니다.
+      </div>
+    </div>
+  </section>
+
+  <section data-only="all">
+    <h2 class="sec">한눈에 비교</h2>
+    <div class="card">
+      <div class="demo" style="gap:16px">
+        <span class="tpa"><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>
+          <span class="num"><b>12</b><i>/20명</i></span><span class="bar"><i style="width:60%"></i></span></span>
+        <span class="tpb"><span class="lt"><span class="d">8/10 (월)</span><span class="lbl">참여현황</span></span>
+          <span class="rt"><span class="num">12<i>/20명</i></span><span class="bar"><i style="width:60%"></i></span></span></span>
+        <span class="tpc" style="--p:60"><span class="ring"></span><b class="d">8/10 (월)</b>
+          <span class="lbl">참여현황</span><span class="num"><b>12</b><i>/20명</i></span></span>
+      </div>
+      <ul class="li">
+        <li><b>A안</b> — 툴바 높이 그대로(31px, 지금과 동일 · 실측). 표를 최대한 넓게 쓰는 이 화면의 성격에 가장 잘 맞습니다.</li>
+        <li><b>B안</b> — 숫자를 가장 크게 보고 싶을 때. 툴바가 40px로 늘어 표가 9px 내려갑니다.</li>
+        <li><b>C안</b> — 달성률 감이 좋지만 작은 원은 비슷한 비율끼리 구분이 어렵습니다.</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<script>
+/* ── 가짜 표 데이터(스크린샷과 같은 구성) ─────────────────────────────────── */
+var ROWS = [
+  ['439','만두','8/10 (월)','—','한은숙','김하준','cosmos0…','010-8771-3307','O'],
+  ['440','만두','8/10 (월)','—','김상미','김상미','slom74…','010-7588-0709','O'],
+  ['441','만두','8/10 (월)','—','고다경','고다경','seunggi1…','010-3078-1518','O'],
+  ['442','만두','8/10 (월)','—','황은지','정진영','ghkddm…','010-6595-0309','O'],
+  ['443','만두','8/10 (월)','—','박지영','박지영','jyjerry@…','010-3006-0668',''],
+  ['444','만두','8/10 (월)','—','한경애','한경애','kyunglov…','010-4752-0668','']
+];
+function tblHtml(){
+  var h = ['#','번호','담당자','구매일자','인애드명단','주문자제출','수취인','쿠팡id','연락처','리뷰제출'];
+  var s = '<table class="sheetgrid"><thead><tr>' + h.map(function(x){return '<th>'+x+'</th>';}).join('') + '</tr></thead><tbody>';
+  ROWS.forEach(function(r,i){
+    s += '<tr><td class="gnum">'+(4+i)+'…</td>';
+    r.forEach(function(c,j){
+      var cls = (c==='—' ? ' class="gempty"' : (j===8 && c==='O' ? ' class="gok"' : (c===''? ' class="gempty"':'')));
+      s += '<td'+cls+'>'+(c===''?'—':c)+'</td>';
+    });
+    s += '</tr>';
+  });
+  return s + '</tbody></table>';
+}
+['tbl0','tblA','tblB','tblC'].forEach(function(id){
+  var el = document.getElementById(id); if(el) el.innerHTML = tblHtml();
+});
+
+/* ── 슬라이더로 상태 변화 시연 ────────────────────────────────────────────── */
+var TARGET = 20;
+function stateOf(n){ return n >= TARGET ? (n > TARGET ? 'over' : 'done') : ''; }
+function pct(n){ return Math.max(0, Math.min(100, Math.round(n / TARGET * 100))); }
+
+function paintA(n){
+  var el = document.getElementById('A_chip'); if(!el) return;
+  el.className = 'tpa ' + stateOf(n);
+  var sfx = n > TARGET ? '<span class="sfx">+'+(n-TARGET)+'</span>' : (n === TARGET ? '<span class="sfx">달성</span>' : '');
+  el.innerHTML = '<b class="d">8/10 (월)</b><span class="lbl">참여현황</span>'
+    + '<span class="num"><b>'+n+'</b><i>/'+TARGET+'명</i></span>'
+    + '<span class="bar"><i style="width:'+pct(n)+'%"></i></span>' + sfx;
+  document.getElementById('rgAv').textContent = n + ' / ' + TARGET + '명';
+}
+function paintB(n){
+  var el = document.getElementById('B_chip'); if(!el) return;
+  el.className = 'tpb ' + stateOf(n);
+  el.innerHTML = '<span class="lt"><span class="d">8/10 (월)</span><span class="lbl">참여현황</span></span>'
+    + '<span class="rt"><span class="num">'+n+'<i>/'+TARGET+'명</i></span>'
+    + '<span class="bar"><i style="width:'+pct(n)+'%"></i></span></span>';
+  document.getElementById('rgBv').textContent = n + ' / ' + TARGET + '명';
+}
+function paintC(n){
+  var el = document.getElementById('C_chip'); if(!el) return;
+  el.className = 'tpc ' + stateOf(n);
+  el.style.setProperty('--p', pct(n));
+  el.innerHTML = '<span class="ring"></span><b class="d">8/10 (월)</b><span class="lbl">참여현황</span>'
+    + '<span class="num"><b>'+n+'</b><i>/'+TARGET+'명</i></span>';
+  document.getElementById('rgCv').textContent = n + ' / ' + TARGET + '명';
+}
+[['rgA',paintA],['rgB',paintB],['rgC',paintC]].forEach(function(p){
+  var r = document.getElementById(p[0]); if(!r) return;
+  r.addEventListener('input', function(){ p[1](Number(r.value)); });
+  p[1](Number(r.value));
+});
+
+/* ── ?v=A|B|C 단독 보기 ───────────────────────────────────────────────────── */
+(function(){
+  var m = /[?&]v=([ABC])/.exec(location.search);
+  var v = m ? m[1] : '';
+  Array.prototype.forEach.call(document.querySelectorAll('#vsw a'), function(a){
+    if(a.getAttribute('data-v') === v) a.className = 'on';
+  });
+  if(!v) return;
+  Array.prototype.forEach.call(document.querySelectorAll('section[data-only]'), function(s){
+    var only = s.getAttribute('data-only');
+    if(only !== v) s.style.display = 'none';
+  });
+})();
+</script>
+</body>
+</html>

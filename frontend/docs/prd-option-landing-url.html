@@ -1,0 +1,546 @@
+<meta charset="utf-8">
+<title>PRD — 옵션별 유입링크 (링크유입 작업의 옵션마다 다른 상품 URL)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  /* 문서 규율: 외부 리소스 0(오프라인 열람) · 다크에서 색이 뒤집히지 않게 라이트 고정 */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#eef1f6; color:#1f2430; font-size:15px; line-height:1.72;
+    font-family:-apple-system, BlinkMacSystemFont, "Malgun Gothic", "맑은 고딕", sans-serif; }
+  .page { max-width:1080px; margin:0 auto; padding:24px 18px 100px; }
+
+  h1 { font-size:1.42rem; margin:0 0 6px; letter-spacing:-.6px; }
+  .lede { color:#5a6478; font-size:.86rem; margin:0 0 6px; }
+  .meta { font-size:.72rem; color:#8a93a6; margin:0 0 18px; }
+
+  section { background:#fff; border:1px solid #dde3ee; border-radius:13px; padding:16px 18px; margin-bottom:14px; }
+  h2 { font-size:1.02rem; margin:0 0 4px; letter-spacing:-.3px; }
+  h2 .no { display:inline-block; background:#2f6fed; color:#fff; font-size:.66rem; font-weight:800;
+    border-radius:6px; padding:2px 7px; margin-right:7px; vertical-align:2px; letter-spacing:.4px; }
+  h3 { font-size:.88rem; margin:16px 0 6px; color:#2b3241; }
+  h3:first-of-type { margin-top:10px; }
+  p { margin:6px 0; font-size:.85rem; color:#3b4354; }
+  ul, ol { margin:6px 0; padding-left:20px; font-size:.85rem; color:#3b4354; }
+  li { margin:3px 0; }
+  b { color:#1f2430; }
+  code { background:#f2f5fa; border:1px solid #e2e8f2; border-radius:5px; padding:1px 5px;
+    font-size:.78rem; font-family:ui-monospace, Menlo, Consolas, monospace; color:#28405e; }
+
+  .star { color:#c02626; font-weight:900; }
+  .callout { border-radius:9px; padding:10px 13px; font-size:.82rem; margin:10px 0; line-height:1.7; }
+  .callout.bad  { background:#fef2f2; border:1px solid #f6c9c9; color:#8f1d1d; }
+  .callout.good { background:#ecfdf3; border:1px solid #b7ebcd; color:#14653a; }
+  .callout.warn { background:#fff7ed; border:1px solid #fcd9a8; color:#8a4b09; }
+  .callout.info { background:#eef4ff; border:1px solid #cadcff; color:#1c3f86; }
+  .callout b { color:inherit; }
+
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:.79rem; }
+  th, td { border:1px solid #e2e8f2; padding:7px 9px; text-align:left; vertical-align:top; }
+  th { background:#f6f8fc; font-size:.74rem; color:#4d5768; font-weight:800; white-space:nowrap; }
+  td.c { text-align:center; white-space:nowrap; }
+  .yes { color:#17803d; font-weight:800; }
+  .no  { color:#c02626; font-weight:800; }
+  .dash { color:#a6aebd; }
+
+  /* 결정 카드 */
+  .dgroup { border:1.5px solid #e2c98f; background:#fffdf5; border-radius:12px; padding:14px 16px; margin:12px 0; }
+  .dgroup > h3 { margin:0 0 3px; font-size:.92rem; color:#7a5406; }
+  .dgroup > p.q { font-size:.82rem; color:#5a4a20; margin:0 0 10px; }
+  .dopts { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px,1fr)); gap:9px; }
+  .dopt { background:#fff; border:1.5px solid #e6dcc2; border-radius:10px; padding:10px 12px; cursor:pointer;
+    transition:border-color .12s, box-shadow .12s; }
+  .dopt:hover { border-color:#c9a955; }
+  .dopt.on { border-color:#2f6fed; box-shadow:0 0 0 3px #dbe7ff; background:#f8fbff; }
+  .dopt .t { font-size:.82rem; font-weight:800; color:#1f2430; margin-bottom:3px; display:flex; gap:5px; align-items:center; }
+  .dopt .rec { background:#17803d; color:#fff; font-size:.6rem; font-weight:800; border-radius:5px; padding:1px 5px; }
+  .dopt .d { font-size:.74rem; color:#5a6478; line-height:1.62; }
+  .dpick { margin-top:9px; font-size:.76rem; color:#7a5406; }
+  .dpick b { color:#7a5406; }
+
+  .sum { position:sticky; bottom:0; background:#1f2430; color:#fff; border-radius:12px; padding:13px 16px; margin-top:16px;
+    box-shadow:0 -6px 20px rgba(31,36,48,.18); }
+  .sum h3 { color:#fff; margin:0 0 6px; font-size:.9rem; }
+  .sum .row { font-size:.78rem; color:#cfd6e4; line-height:1.9; }
+  .sum .row b { color:#8fc7ff; }
+  .sum .none { color:#8a93a6; }
+
+  .flow { display:flex; gap:8px; flex-wrap:wrap; align-items:stretch; margin:12px 0; }
+  .fbox { flex:1 1 168px; background:#f6f8fc; border:1px solid #e2e8f2; border-radius:10px; padding:9px 11px; font-size:.75rem; }
+  .fbox b { display:block; font-size:.72rem; color:#2f6fed; margin-bottom:3px; letter-spacing:.2px; }
+  .fbox span { color:#4d5768; }
+  .farrow { align-self:center; color:#a6aebd; font-weight:900; }
+
+  .stepno { display:inline-block; background:#2b3241; color:#fff; border-radius:50%; width:19px; height:19px;
+    text-align:center; line-height:19px; font-size:.68rem; font-weight:800; margin-right:6px; }
+  .linkbar { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 0; }
+  .linkbar a { background:#2f6fed; color:#fff; text-decoration:none; border-radius:8px; padding:8px 14px;
+    font-size:.78rem; font-weight:800; }
+  .linkbar a.ghost { background:#fff; color:#2f6fed; border:1.5px solid #2f6fed; }
+</style>
+
+<div class="page">
+
+<h1>옵션별 유입링크 — 링크유입 작업은 옵션마다 상품 URL이 다르다</h1>
+<p class="lede">
+  모집공고에 <b>옵션이 여러 개인데 유입 링크가 1개</b>여서, 리뷰어가 자기가 고른 옵션과 다른 상품 페이지로 들어가는 구조를 고칩니다.
+  더불어 <b>리뷰웹 진행상품 블록</b>과 <b>인트라넷 리뷰오더 상품/옵션/금액 블록</b>의 입력 조건을 맞춥니다.
+</p>
+<p class="meta">PRD v0.9 (착수 전 · 결정 대기) · 대상 저장소 = review-web-system + inadd-webapp · 작성 2026-08-10</p>
+
+<div class="callout warn">
+  ⚠ <b>이 문서는 아직 확정본이 아닙니다.</b> §08의 <b>결정 사안 D1~D6</b>을 골라 주셔야 구현에 들어갈 수 있습니다.
+  각 항목에 <b>권장안</b>을 표시해 두었고, 카드를 클릭하면 맨 아래에 고른 결과가 모입니다.
+  화면 모양은 <a href="design-option-landing-url.html">와이어프레임 시안</a>에서 실제로 눌러 보실 수 있습니다.
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">01</span>지금 무엇이 잘못되어 있나</h2>
+
+  <p>리뷰어가 옵션을 고르고 참여하면 작업내용 카드에 <b>[🔗 상품 페이지 열기]</b> 버튼이 뜹니다.
+     그런데 그 버튼이 여는 주소는 <b>공고 전체에 하나뿐인 값</b>(<code>recruit_campaigns.landing_url</code>)입니다.</p>
+
+  <div class="callout bad">
+    <b>결과</b> — 옵션이 「블랙 / 화이트 / 베이지」 3종인 링크유입 작업에서, 화이트를 고른 리뷰어도 베이지를 고른 리뷰어도
+    <b>전부 같은 한 개의 상품 페이지</b>로 들어갑니다. 옵션마다 상품 페이지(또는 딥링크)가 다른 채널에서는
+    <b>리뷰어가 다른 상품을 구매</b>하거나, 링크를 벗어나 직접 검색해 들어가 <b>유입 성과가 깨집니다</b>.
+  </div>
+
+  <h3>왜 지금까지 이런 구조였나 (실측)</h3>
+  <ul>
+    <li><b>인트라넷 리뷰오더</b>는 상품 URL을 <b>상품 단위로 한 칸</b>만 받습니다(<code>review-order-product-url-*</code>).
+        옵션 행에는 옵션1/옵션2/결제금액/건수만 있고 <b>URL 칸이 없습니다</b>.
+        링크유입 안내문도 <i>"상품 URL에 입력한 링크를 그대로 사용합니다"</i> 한 줄뿐입니다.</li>
+    <li>인트라넷이 리뷰웹으로 보내는 구조 신호 <code>product_options_json</code> 의 계약이
+        <code>[{ name, url, base:{pay,count}, options:[{label,pay,count}] }]</code> — <b>옵션 항목에 url 이 없습니다.</b></li>
+    <li><b>리뷰웹 진행상품 표</b>에는 URL 칸이 아예 없고, 랜딩 URL은 [모집 조건] 카드의 <code>rf_landing_url</code> 한 칸입니다.</li>
+    <li>옵션 원장 <code>campaign_options</code> 에도 URL 컬럼이 없습니다(opt_key·금액·정원·일건수·상태뿐).</li>
+  </ul>
+
+  <p>즉 <b>어느 층에도 "옵션별 링크"를 담을 자리가 없습니다.</b> 데이터 모델부터 화면까지 한 줄로 이어서 뚫어야 합니다.</p>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">02</span>두 화면의 입력 칸 대조 (지금)</h2>
+
+  <p>요구사항 ③ "리뷰웹 진행상품 블록의 입력 조건을 인트라넷 리뷰오더 상품/옵션/금액 블록에 일치시켜야 함"의 근거가 되는 실측 대조표입니다.</p>
+
+  <table>
+    <tr><th style="width:26%">칸</th><th style="width:37%">인트라넷 리뷰오더</th><th style="width:37%">리뷰웹 진행상품</th></tr>
+    <tr><td>입력 모드</td><td>상세입력 / <b>시트참조</b> 2종</td><td>옵션 없는 작업 / 옵션 있는 작업 2종</td></tr>
+    <tr><td>상품명</td><td class="c"><span class="yes">있음</span></td><td class="c"><span class="yes">있음</span></td></tr>
+    <tr><td><b>상품 URL</b></td><td class="c"><span class="yes">있음</span> (상품 단위 1칸)</td><td class="c"><span class="no">없음</span> — [모집 조건]의 랜딩 URL 1칸</td></tr>
+    <tr><td>결제금액</td><td class="c"><span class="yes">있음</span> (옵션 있으면 상품 칸 자동 숨김)</td><td class="c"><span class="yes">있음</span></td></tr>
+    <tr><td>건수 / 인원</td><td class="c">건수 (옵션별 · 상품별)</td><td class="c">총인원 / 옵션인원 <span class="dash">(같은 개념)</span></td></tr>
+    <tr><td><b>일건수</b></td><td class="c"><span class="no">옵션에 없음</span> — 작업 전체 1칸(daily_count)</td><td class="c"><span class="yes">옵션마다 있음</span></td></tr>
+    <tr><td><b>이중옵션</b>(옵션1+옵션2)</td><td class="c"><span class="yes">있음</span></td><td class="c"><span class="no">없음</span> — 한 문자열(opt_key)</td></tr>
+    <tr><td><b>옵션별 URL</b></td><td class="c"><span class="no">없음</span></td><td class="c"><span class="no">없음</span></td></tr>
+    <tr><td>합계 표시</td><td class="c">모집인원 / 상품구입비 / 옵션 수</td><td class="c">정원합·일건수합 요약 + 상품 총인원 자동합계</td></tr>
+  </table>
+
+  <div class="callout info">
+    <b>맞춰야 하는 것 = 옵션별 URL 하나뿐입니다.</b> 나머지 차이(이중옵션·일건수·시트참조)는 <b>두 시스템의 역할이 달라서 생긴 정상 차이</b>입니다 —
+    인트라넷은 <b>발주 내용</b>(무엇을 얼마에 몇 건)을, 리뷰웹은 <b>모집 운영</b>(하루에 몇 명씩 열지)을 다룹니다.
+    그래서 §08 <b>D4</b>에서 "어디까지 통일할지"를 정해 주셔야 합니다.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">03</span>바꿀 것 — 요구 4건을 설계로</h2>
+
+  <table>
+    <tr><th style="width:5%">#</th><th style="width:40%">요구</th><th>설계</th></tr>
+    <tr>
+      <td class="c">①</td>
+      <td>옵션이 있으면서 링크유입인 작업은 <b>옵션별로 유입시킬 링크</b>를 넣을 수 있어야 한다</td>
+      <td><code>campaign_options.landing_url</code> 컬럼 신설(migration 101). 리뷰어 화면의 [상품 페이지 열기]가
+          <b>그 리뷰어가 고른 옵션의 URL</b>을 연다.</td>
+    </tr>
+    <tr>
+      <td class="c">②</td>
+      <td>리뷰웹 진행상품 블록에 <b>옵션별 상품 URL</b> 입력 — 가이드유입이면 비활성, 링크유입이면 필수</td>
+      <td>진행상품 표에 URL 칸 추가(위치는 <b>D3</b>). 유입방식에 따라 칸 활성/비활성(판정 근거는 <b>D1</b>),
+          미입력 시 처리 수준은 <b>D2</b>.</td>
+    </tr>
+    <tr>
+      <td class="c">③</td>
+      <td>리뷰웹 진행상품 블록의 입력 조건을 <b>인트라넷 상품/옵션/금액 블록과 일치</b></td>
+      <td>URL 칸을 양쪽 옵션 행에 추가해 1:1로 맞춘다. 나머지 칸(이중옵션·일건수)의 통일 범위는 <b>D4</b>.</td>
+    </tr>
+    <tr>
+      <td class="c">④</td>
+      <td>인트라넷 리뷰오더에서 옵션 있는 링크유입이면 <b>옵션별 링크 필수 입력</b>(가이드유입이면 비활성)</td>
+      <td>옵션 행에 URL 칸 추가 + <code>product_options_json</code> 의 option 항목에 <code>url</code> 동봉.
+          폼 검증 + <code>POST /api/review-order</code> 서버 재검증(수준은 <b>D2</b>).</td>
+    </tr>
+  </table>
+
+  <h3>값이 흐르는 길 (한 줄)</h3>
+  <div class="flow">
+    <div class="fbox"><b>① 인트라넷 리뷰오더</b><span>옵션 행마다 상품 URL 입력</span></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><b>② 작업오더</b><span><code>product_options_json</code> 의 <code>options[].url</code></span></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><b>③ 리뷰웹 발행 모달</b><span>진행상품 표 옵션 행에 자동 프리필 · 수정 가능</span></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><b>④ 옵션 원장</b><span><code>campaign_options.landing_url</code></span></div>
+    <div class="farrow">→</div>
+    <div class="fbox"><b>⑤ 리뷰어 화면</b><span>고른 옵션의 [상품 페이지 열기]</span></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">04</span>데이터 모델</h2>
+
+  <h3>리뷰웹 — migration 101</h3>
+  <ul>
+    <li><code>campaign_options.landing_url TEXT DEFAULT ''</code> — <b>컬럼 추가만 · 백필 0 · DB CHECK 없음</b>
+        (087 리뷰타입 · 099 work_kind 와 같은 규율). <b>빈 값 = 지금 동작 100% 불변</b>(옵트인).</li>
+    <li>(D1에서 "공고에 유입방식 칸" 채택 시) <code>recruit_campaigns.inflow_type TEXT DEFAULT ''</code> 동반.</li>
+    <li><span class="star">★</span> FK 없음 — 이 테이블은 이미 <code>campaign_id TEXT REFERENCES recruit_campaigns(id)</code>를 갖고 있고,
+        082의 <b>42804(FK 타입 불일치로 파일 전체 롤백)</b> 사고를 재현하지 않기 위해 새 FK를 만들지 않습니다.</li>
+    <li><span class="star">★</span> <b><code>REQUIRED_SCHEMA</code> 등록</b> — 옵션 저장 INSERT 목록에 들어가므로 컬럼이 없으면
+        <b>공고 발행·수정이 전면 42703</b>이 됩니다. 부팅 프리플라이트에서 막습니다(082·085 규율).</li>
+  </ul>
+
+  <h3>인트라넷 — 스키마 변경 0</h3>
+  <ul>
+    <li><code>product_options_json</code> 계약 확장: <code>options:[{ label, pay, count, <b>url</b> }]</code>.</li>
+    <li><span class="star">★</span> <b>양방향 가산적 · 배포 순서 무관</b>(088 계약건 · 099 work_kind 와 같은 성질) —
+        리뷰웹만 먼저 배포되면 <code>url</code>이 안 실려 와 종전 동작, 인트라넷만 먼저면 리뷰웹이 그 필드를 버립니다.</li>
+    <li>상품 단위 URL(<code>url</code>)은 <b>그대로 둡니다</b> — 옵션 없는 상품의 링크이고, 옵션 URL이 비면 폴백입니다.</li>
+  </ul>
+
+  <h3>저장하지 않는 것</h3>
+  <div class="callout warn">
+    <span class="star">★★</span> <b>공개 응답(<code>_publicOptionView</code>)에는 URL을 싣지 않습니다.</b>
+    지금도 옵션 금액은 <b>"참여 후 공개"</b> 원칙으로 참여 전 목록·상세에서 빠집니다. 상품 링크도 같은 성질입니다 —
+    참여(홀드) 전에 공개하면 <b>자리를 잡지 않고 구매부터 하는 지각(late) 건</b>을 시스템이 스스로 유도하게 됩니다.
+    URL은 <b>work-detail 게이트(phone8 + holdToken) 뒤에서만</b> 나갑니다.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">05</span>판정 단일 출처 (사본 금지)</h2>
+
+  <p>이 레포의 반복된 사고 원인은 <b>같은 판정을 화면마다 다시 만든 것</b>이었습니다. 이번 기능에서 새로 생기는 판정은 두 가지뿐이고, 각각 한 곳에만 둡니다.</p>
+
+  <table>
+    <tr><th style="width:24%">판정</th><th style="width:30%">단일 출처</th><th>규칙 / 소비처</th></tr>
+    <tr>
+      <td><b>어떤 URL을 열 것인가</b></td>
+      <td><code>utils/optionLanding.js</code><br><code>resolveLandingUrl()</code></td>
+      <td>순서 = <b>그 리뷰어가 고른 옵션의 URL → 공고 랜딩 URL → 빈 값</b>.<br>
+          소비처 = ① work-detail 응답 ② 관리자 미리보기(<code>/admin/:id/preview</code>) ③ 발행 모달 미리보기.<br>
+          <span class="star">★</span> ②를 빠뜨리면 <b>"미리보기 ≠ 실제 화면"</b>이 되어 이 레포가 공용 렌더러로 없앤 문제가 되살아납니다.</td>
+    </tr>
+    <tr>
+      <td><b>링크유입인가</b></td>
+      <td><code>utils/inflowType.js</code><br><code>resolveInflowType()</code></td>
+      <td>D1 결정에 따라 <b>공고 값 → 작업오더 역조회 → 빈 값(불명)</b>.<br>
+          소비처 = 발행 모달 게이트 · work-detail 응답 · 리뷰어 화면 버튼 노출 판정.<br>
+          <span class="star">★</span> 지금 <code>campaign-workdetail.js</code> 의 <b>"불명 + 가이드 내용 있음 = 가이드유입"</b> 폴백은 <b>그대로 유지</b>합니다(무회귀).</td>
+    </tr>
+  </table>
+
+  <div class="callout good">
+    <b>URL 위생</b> — 리뷰어 화면은 이미 <code>/^https?:\/\//i</code> 를 통과한 주소만 새 탭으로 엽니다.
+    저장 시점에도 같은 검증을 걸어 <b>https 로 시작하지 않는 값은 저장하지 않습니다</b>(<code>javascript:</code> 류 차단 · 오타 조기 발견).
+    잘못된 값은 <b>조용히 버리지 않고</b> 그 칸에 사유를 표시합니다.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">06</span>화면</h2>
+
+  <h3>① 인트라넷 리뷰오더 — 상품/옵션/금액</h3>
+  <ul>
+    <li>옵션 행 끝에 <b>[상품 URL]</b> 칸 추가(단일옵션 4칸 → 5칸 / 이중옵션 5칸 → 6칸).</li>
+    <li><b>유입방식이 가이드유입이면</b> 옵션 URL 칸을 <b>회색 비활성 + "가이드유입은 링크를 쓰지 않습니다"</b> 안내.
+        <span class="star">★</span> 숨기지 않고 <b>비활성으로 남깁니다</b> — 칸이 사라지면 유입방식을 바꿨을 때 왜 칸이 생겼는지 알 수 없습니다(레포의 폴더 버튼 규율과 동일).</li>
+    <li>비활성 상태의 값은 <b>전송하지 않습니다</b>(가이드유입 오더에 링크가 딸려가 리뷰웹에서 링크유입으로 오독되는 것 차단).</li>
+    <li>상품 단위 URL 칸은 그대로 — 라벨을 <b>"상품 URL (옵션 없을 때 사용)"</b> 로 바꿔 역할을 화면이 말합니다.</li>
+    <li><b>시트참조 모드는 적용 제외</b> — 옵션 구조 자체를 만들지 않는 흐름입니다(<code>reviewOrderOptionsPayload</code> 가 <code>undefined</code> 반환).</li>
+  </ul>
+
+  <h3>② 리뷰웹 발행·수정 모달 — 진행상품</h3>
+  <ul>
+    <li>표에 URL 칸 추가(위치는 <b>D3</b>). 표가 진실원본이라는 기존 규율은 그대로 —
+        <code>_syncPreviewFromOptRows</code> 가 이미 작업내용 원문·정원을 표에서 파생하듯, 랜딩 URL도 같은 함수에서 파생합니다.</li>
+    <li>작업오더에서 발행하면 옵션별 URL이 <b>자동 프리필</b>(<code>_woOptionRows</code> 확장) — 담당자는 확인만.</li>
+    <li>가이드유입이면 URL 칸 비활성 + 안내. 링크유입이면 빈칸에 빨간 테두리 + 자동점검 항목 추가.</li>
+    <li><span class="star">★</span> <b>URL 칸이 없는 화면에서 저장해도 기존 URL이 지워지지 않습니다</b> —
+        옵션표·리뷰타입과 같은 <b>"UI 있는 화면에서만 전송"</b> 원칙(리뷰어앱 인라인 수정 모달 등 축약 화면 보호).</li>
+  </ul>
+
+  <h3>③ 리뷰어 화면</h3>
+  <ul>
+    <li>참여 후 작업내용 <b>🧭 유입가이드</b> 카드의 [🔗 상품 페이지 열기]가 <b>고른 옵션의 URL</b>을 엽니다.</li>
+    <li>버튼 위에 <b>"내가 고른 옵션: 화이트"</b> 한 줄을 붙여 <b>어느 상품으로 가는지</b>를 말합니다
+        (옵션이 여러 개인 작업에서 링크 하나만 있으면 리뷰어가 확인할 방법이 없습니다).</li>
+    <li>옵션 변경(change-option) 시 <code>enterJoined()</code> 재조회로 URL도 함께 바뀝니다 — <b>추가 배선 없음</b>.</li>
+    <li><span class="star">★</span> 옵션 URL이 비면 <b>공고 랜딩 URL로 폴백</b> — 이미 발행된 공고는 <b>지금과 똑같이</b> 동작합니다.</li>
+  </ul>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">07</span>무회귀 · 안전 규율</h2>
+  <table>
+    <tr><th style="width:30%">상황</th><th>동작</th></tr>
+    <tr><td>옵션 URL을 한 번도 안 넣은 기존 공고</td><td class="c"><span class="yes">지금과 동일</span> — 공고 랜딩 URL로 폴백</td></tr>
+    <tr><td>가이드유입 공고</td><td class="c"><span class="yes">지금과 동일</span> — 버튼 자체가 안 뜸(기존 판정 무변경)</td></tr>
+    <tr><td>옵션 없는 작업</td><td class="c"><span class="yes">지금과 동일</span> — 공고 랜딩 URL 1개</td></tr>
+    <tr><td>인트라넷 시트참조 모드</td><td class="c"><span class="yes">적용 제외</span> — 옵션 구조 미전송</td></tr>
+    <tr><td>URL 칸이 없는 축약 편집 화면(리뷰어앱 인라인 수정)</td><td class="c"><span class="yes">미전송 = 기존 값 유지</span></td></tr>
+    <tr><td>리뷰웹만 먼저 배포 / 인트라넷만 먼저 배포</td><td class="c"><span class="yes">양쪽 다 안전</span> — 가산적 계약</td></tr>
+    <tr><td>마이그레이션 미적용</td><td class="c"><span class="no">부팅 거부</span> — <code>REQUIRED_SCHEMA</code> 가 직전 배포를 유지</td></tr>
+  </table>
+
+  <div class="callout info">
+    <b>킬스위치</b> <code>CAMPAIGN_OPTION_LANDING=0</code> — 판정을 통째로 끄면 <code>resolveLandingUrl</code> 이 항상 공고 랜딩 URL을 돌려주어
+    <b>코드 변경 없이 즉시 종전 동작</b>으로 복귀합니다(082·095 규율).
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">08</span>★ 결정 사안 — 답을 주셔야 착수합니다</h2>
+  <p>아래 카드를 눌러 고르시면 맨 아래 요약 띠에 모입니다. 그대로 알려 주시면 됩니다.</p>
+
+  <div class="dgroup" data-d="D1">
+    <h3>D1 — "링크유입이니까 옵션 URL 필수"를 <u>무엇으로 판정</u>할까요?</h3>
+    <p class="q">지금 공고에는 유입방식 칸이 없고, 작업오더 없이 만든 공고는 유입방식이 <b>영영 불명</b>입니다.</p>
+    <div class="dopts">
+      <div class="dopt" data-v="공고에 [유입방식] 칸 신설">
+        <div class="t">공고에 [유입방식] 칸 신설 <span class="rec">권장</span></div>
+        <div class="d"><code>recruit_campaigns.inflow_type</code> 추가 + 발행 모달에 [유입가이드/링크유입] 버튼.
+          작업오더에서 자동 프리필하되 사람이 바꿀 수 있고, <b>작업오더 없이 만든 공고도 판정</b>됩니다.
+          리뷰어 버튼 판정도 이 값이 우선(없으면 지금처럼 작업오더 역조회).</div>
+      </div>
+      <div class="dopt" data-v="작업오더 역조회만 유지">
+        <div class="t">작업오더 역조회만 유지</div>
+        <div class="d">컬럼을 만들지 않고 지금처럼 연결 작업오더만 봅니다. 변경 범위는 가장 작지만
+          <b>수동 생성 공고는 필수 강제도 비활성도 걸리지 않습니다</b>(불명 = 아무 일 없음).</div>
+      </div>
+      <div class="dopt" data-v="URL이 있으면 링크유입으로 간주">
+        <div class="t">URL이 있으면 링크유입으로 간주</div>
+        <div class="d">별도 칸 없이 "옵션 URL을 채웠다 = 링크유입"으로 추정합니다. 칸은 안 늘지만
+          <b>가이드유입인데 참고용으로 URL을 넣은 경우를 링크유입으로 오판</b>합니다.</div>
+      </div>
+    </div>
+    <div class="dpick">고른 값: <b class="pickv">— 미선택 —</b></div>
+  </div>
+
+  <div class="dgroup" data-d="D2">
+    <h3>D2 — 링크유입 + 옵션 있는 작업인데 <u>URL이 비면</u> 어떻게 할까요?</h3>
+    <p class="q">이미 발행된 옛 공고는 옵션 URL이 <b>전부 비어</b> 있습니다(그 공고를 열어 다른 값만 고치는 흐름을 막으면 안 됩니다).</p>
+    <div class="dopts">
+      <div class="dopt" data-v="게시(active) 저장만 차단">
+        <div class="t">게시(active) 저장만 차단 <span class="rec">권장</span></div>
+        <div class="d">임시저장·비게시 상태는 경고만 하고 저장 허용, <b>[게시] 상태로 저장할 때만</b> 차단합니다.
+          리뷰어에게 노출되는 공고는 반드시 URL을 갖고, 옛 공고 수정은 막히지 않습니다.
+          서버도 참여형 활성화 게이트(<code>_participationActivationErrors</code>)와 같은 자리에서 재검증합니다.</div>
+      </div>
+      <div class="dopt" data-v="저장 자체를 하드블록">
+        <div class="t">저장 자체를 하드블록</div>
+        <div class="d">상태와 무관하게 저장 버튼이 잠깁니다. 가장 강하지만
+          <b>옛 공고의 긴급 정정(리뷰비·정원)까지 통째로 막힙니다.</b></div>
+      </div>
+      <div class="dopt" data-v="경고만 (게시 허용)">
+        <div class="t">경고만 (게시 허용)</div>
+        <div class="d">빨간 경고만 띄우고 막지 않습니다(레포의 옵션 칸 자동점검·정리 도우미와 같은 방식).
+          오탐으로 정상 발행이 막히는 일은 없지만 <b>누락이 그대로 리뷰어에게 나갑니다.</b></div>
+      </div>
+    </div>
+    <div class="dpick">고른 값: <b class="pickv">— 미선택 —</b></div>
+  </div>
+
+  <div class="dgroup" data-d="D3">
+    <h3>D3 — 옵션 <u>없는</u> 작업의 상품 URL은 어디에 두고, 기존 [랜딩 URL] 칸은 어떻게 할까요?</h3>
+    <p class="q">진행상품 표에 URL 칸을 만들면 [모집 조건]의 랜딩 URL 칸과 <b>같은 값을 두 곳에서 관리</b>하게 됩니다.</p>
+    <div class="dopts">
+      <div class="dopt" data-v="진행상품 표가 진실원본 (랜딩 URL은 읽기전용 파생)">
+        <div class="t">진행상품 표가 진실원본 <span class="rec">권장</span></div>
+        <div class="d">표에 URL 칸을 두고(옵션 없는 작업 = 상품 행 / 옵션 있는 작업 = 옵션 행),
+          [랜딩 URL] 칸은 <b>표에서 자동 파생되는 읽기전용</b>으로 바뀝니다.
+          지금 정원·작업내용 원문이 표에서 파생되는 규율과 같아 <b>어긋날 수가 없습니다.</b></div>
+      </div>
+      <div class="dopt" data-v="옵션 있는 작업만 표에 URL">
+        <div class="t">옵션 있는 작업만 표에 URL</div>
+        <div class="d">옵션 없는 작업은 지금처럼 [랜딩 URL] 칸을 그대로 쓰고, 옵션 있는 작업만 옵션 행에 URL을 둡니다.
+          변경 범위는 최소지만 <b>URL 입력 위치가 작업 종류에 따라 두 곳으로 갈립니다.</b></div>
+      </div>
+      <div class="dopt" data-v="둘 다 두고 옵션 URL 우선">
+        <div class="t">둘 다 두고 옵션 URL 우선</div>
+        <div class="d">[랜딩 URL]을 편집 가능한 채로 남기고 옵션 URL이 있으면 그것이 이깁니다.
+          <b>같은 값을 두 곳에서 관리하게 되어 나중에 어긋납니다.</b></div>
+      </div>
+    </div>
+    <div class="dpick">고른 값: <b class="pickv">— 미선택 —</b></div>
+  </div>
+
+  <div class="dgroup" data-d="D4">
+    <h3>D4 — 인트라넷 옵션행과 리뷰웹 옵션행의 칸을 <u>어디까지</u> 똑같이 맞출까요?</h3>
+    <p class="q">지금 다른 것: <b>이중옵션</b>(인트라넷만) · <b>일건수</b>(리뷰웹만) · <b>시트참조</b>(인트라넷만).</p>
+    <div class="dopts">
+      <div class="dopt" data-v="URL만 맞추고 나머지는 현행 유지">
+        <div class="t">URL만 맞추고 나머지 현행 유지 <span class="rec">권장</span></div>
+        <div class="d">양쪽 옵션 행에 URL 칸을 넣는 것까지만 통일합니다. 이중옵션은 인트라넷에서 입력하고
+          리뷰웹으로는 <b>「블랙 + 라지」 합친 라벨 하나</b>로 넘어오는 지금 계약을 유지하고,
+          일건수는 <b>모집 운영값</b>이라 리뷰웹 전용으로 둡니다.</div>
+      </div>
+      <div class="dopt" data-v="리뷰웹에도 이중옵션 2칸 도입">
+        <div class="t">리뷰웹에도 이중옵션 2칸 도입</div>
+        <div class="d">리뷰웹 옵션 행도 옵션1/옵션2로 나눕니다. 다만 시트 옵션열 기입값(<code>opt_key</code>)은 결국 한 문자열이라
+          저장 시 다시 합쳐야 하고, <b>기존 발행분과 표기가 갈릴 수 있습니다.</b></div>
+      </div>
+      <div class="dopt" data-v="인트라넷에도 옵션별 일건수 추가">
+        <div class="t">인트라넷에도 옵션별 일건수 추가</div>
+        <div class="d">인트라넷 옵션 행에 일건수를 넣어 리뷰웹과 완전히 같은 칸 구성으로 맞춥니다.
+          지금 인트라넷은 <b>작업 전체 일건수 1칸</b>만 받고 있어 개념이 바뀝니다(발주 담당자 입력 부담 증가).</div>
+      </div>
+    </div>
+    <div class="dpick">고른 값: <b class="pickv">— 미선택 —</b></div>
+  </div>
+
+  <div class="dgroup" data-d="D5">
+    <h3>D5 — 옵션은 없는데 <u>상품이 2개 이상</u>인 작업은 어느 URL을 쓸까요?</h3>
+    <p class="q">리뷰웹 진행상품 표는 옵션 없는 작업에서도 [상품 추가]로 여러 줄을 만들 수 있는데,
+       그 경우 <b>리뷰어에게는 고를 선택지가 없습니다</b>(옵션 원장이 비어 있음).</p>
+    <div class="dopts">
+      <div class="dopt" data-v="첫 상품 URL 사용 + 2개 이상이면 경고">
+        <div class="t">첫 상품 URL 사용 + 경고 <span class="rec">권장</span></div>
+        <div class="d">첫 줄의 URL을 공고 랜딩 URL로 쓰되, 상품이 2줄 이상이고 URL이 서로 다르면
+          <b>"리뷰어는 하나만 보게 됩니다 — 옵션으로 나누시겠어요?"</b> 경고를 띄웁니다.</div>
+      </div>
+      <div class="dopt" data-v="상품 2개 이상이면 옵션 있는 작업으로 전환 유도">
+        <div class="t">옵션 있는 작업으로 전환 유도</div>
+        <div class="d">URL이 서로 다른 다상품은 사실상 옵션 작업이므로 <b>[옵션 있는 작업]으로 바꾸라</b>고 안내하고
+          그 전에는 저장을 막습니다. 데이터는 깔끔해지지만 <b>기존 다상품 공고 운영이 막힙니다.</b></div>
+      </div>
+      <div class="dopt" data-v="지금처럼 랜딩 URL 1칸만 (경고 없음)">
+        <div class="t">지금처럼 1칸만 · 경고 없음</div>
+        <div class="d">옵션 없는 작업은 URL 1개라는 현행을 그대로 둡니다. 가장 단순하지만
+          <b>다상품 링크유입의 오유입은 그대로 남습니다.</b></div>
+      </div>
+    </div>
+    <div class="dpick">고른 값: <b class="pickv">— 미선택 —</b></div>
+  </div>
+
+  <div class="dgroup" data-d="D6">
+    <h3>D6 — 리뷰어 화면에 <u>"내가 고른 옵션"</u>을 링크 버튼 옆에 표시할까요?</h3>
+    <p class="q">옵션마다 링크가 다르면 <b>내가 맞는 상품 페이지로 가는지</b>를 리뷰어가 확인할 방법이 필요합니다.</p>
+    <div class="dopts">
+      <div class="dopt" data-v="버튼 위에 옵션명 한 줄 표시">
+        <div class="t">버튼 위에 옵션명 한 줄 <span class="rec">권장</span></div>
+        <div class="d"><b>"내가 고른 옵션: 화이트"</b> + [🔗 화이트 상품 페이지 열기]. 잘못 고른 것을 여기서 알아챌 수 있습니다.
+          작업내용 카드에 이미 상품·옵션 정보가 있어 <b>중복이지만 클릭 직전 위치</b>라 의미가 다릅니다.</div>
+      </div>
+      <div class="dopt" data-v="버튼 라벨에만 옵션명">
+        <div class="t">버튼 라벨에만 옵션명</div>
+        <div class="d">줄을 늘리지 않고 <b>[🔗 화이트 상품 페이지 열기]</b> 로만 표시합니다. 옵션명이 길면 버튼이 잘립니다.</div>
+      </div>
+      <div class="dopt" data-v="지금 그대로 (표시 없음)">
+        <div class="t">지금 그대로 (표시 없음)</div>
+        <div class="d">버튼 문구를 바꾸지 않습니다. 화면 변경 0이지만 <b>리뷰어는 링크가 자기 옵션 것인지 알 수 없습니다.</b></div>
+      </div>
+    </div>
+    <div class="dpick">고른 값: <b class="pickv">— 미선택 —</b></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">09</span>단계 · 순서</h2>
+  <p>앞 단계가 뒤 단계의 전제입니다(스키마 → 저장 → 화면 → 연동 순).</p>
+  <ol style="list-style:none; padding-left:0">
+    <li style="margin:9px 0"><span class="stepno">1</span><b>M1 — 그릇</b> ·
+      migration 101(<code>campaign_options.landing_url</code> + D1 채택 시 <code>inflow_type</code>) ·
+      <code>REQUIRED_SCHEMA</code> 등록 · <code>utils/optionLanding.js</code> 판정 함수.
+      <span class="dash">이 단계만으로는 화면 변화 0.</span></li>
+    <li style="margin:9px 0"><span class="stepno">2</span><b>M2 — 리뷰웹 입력·저장</b> ·
+      진행상품 표 URL 칸 · <code>readOptRows</code>/<code>_saveCampaignOptions</code> 확장 ·
+      유입방식 연동 비활성 · 자동점검 항목(D2 수준) · 발행 모달 미리보기 반영.</li>
+    <li style="margin:9px 0"><span class="stepno">3</span><b>M3 — 리뷰어 화면</b> ·
+      work-detail 응답에 옵션별 URL 반영 · 관리자 미리보기 동일 적용 ·
+      [상품 페이지 열기] 옵션 표기(D6).</li>
+    <li style="margin:9px 0"><span class="stepno">4</span><b>M4 — 인트라넷</b> ·
+      옵션 행 URL 칸 · <code>product_options_json</code> 에 <code>url</code> 동봉 · 폼/서버 검증 ·
+      리뷰웹 <code>_woOptionRows</code> 프리필 확장.
+      <span class="dash">M4는 M2와 독립 — 어느 쪽이 먼저 배포돼도 안전.</span></li>
+  </ol>
+
+  <h3>회귀가드 (신설 <code>tests/optionLandingUrl.test.js</code>)</h3>
+  <ul>
+    <li><b>판정 순수함수 실행</b> — 옵션 URL → 공고 URL → 빈 값 순서 · 킬스위치 · 잘못된 스킴 거부.</li>
+    <li><b>스텁 pool 로 저장·조회 실제 실행</b> — INSERT 컬럼 수 ≡ 자리표시자 수 ≡ 파라미터 수 계수
+      (099에서 실제로 깨졌던 자리) · 미전송 시 기존 값 보존.</li>
+    <li><b>공개 응답에 URL 부재</b> 고정 — <code>_publicOptionView</code> 가 URL을 싣지 않음.</li>
+    <li><b>미리보기 = 실제 화면</b> — 두 경로가 같은 resolver를 태우는지 실행으로 대조.</li>
+    <li><b>인트라넷 조립 실행</b> — 가이드유입이면 <code>url</code> 미전송 · 시트참조 모드 미전송.</li>
+    <li><b>변이시험</b>으로 각 단언이 실제로 잡는지 확인(레포 관행).</li>
+  </ul>
+</section>
+
+<!-- ══════════════════════════════════════════ -->
+<section>
+  <h2><span class="no">10</span>미리 밝혀 두는 한계</h2>
+  <ul>
+    <li><b>이미 참여한 리뷰어</b>는 참여 시점의 옵션으로 잠겨 있고, 나중에 관리자가 그 옵션의 URL을 고치면
+      <b>다음에 열 때부터 새 URL</b>이 열립니다(리뷰비처럼 참여 시점 스냅샷을 뜨지 않습니다 —
+      링크는 "지금 어디로 가야 하는가"라 최신값이 맞습니다).</li>
+    <li><b>구매양식(시트 기입)에는 URL이 들어가지 않습니다</b> — 이번 범위는 유입 안내까지입니다.</li>
+    <li><b>이중옵션</b>은 D4 결정 전까지 리뷰웹에서 합친 라벨 하나로 다뤄집니다.</li>
+    <li><b>인트라넷 시트참조 모드</b>는 옵션 구조 자체가 없어 옵션별 링크를 담을 수 없습니다(담당자가 시트로 관리).</li>
+  </ul>
+
+  <div class="linkbar">
+    <a href="design-option-landing-url.html">🖼 와이어프레임 시안 열기</a>
+    <a class="ghost" href="prd-campaign-options.html">참고 — 상품옵션 PRD</a>
+    <a class="ghost" href="design-recruit-modal-v2.html">참고 — 발행 모달 시안</a>
+  </div>
+</section>
+
+<div class="sum" id="sum">
+  <h3>고른 결정 (그대로 알려 주시면 착수합니다)</h3>
+  <div class="row" id="sumrow"><span class="none">아직 고른 항목이 없습니다 — 위 §08의 카드를 눌러 주세요.</span></div>
+</div>
+
+</div>
+
+<script>
+(function () {
+  var picked = {};
+  var LABEL = {
+    D1: '유입방식 판정', D2: '필수 강제 수준', D3: 'URL 칸 위치',
+    D4: '칸 통일 범위', D5: '다상품(옵션없음)', D6: '리뷰어 표기'
+  };
+  function render() {
+    var keys = Object.keys(LABEL).filter(function (k) { return picked[k]; });
+    var el = document.getElementById('sumrow');
+    if (!keys.length) { el.innerHTML = '<span class="none">아직 고른 항목이 없습니다 — 위 §08의 카드를 눌러 주세요.</span>'; return; }
+    el.innerHTML = keys.map(function (k) {
+      return '<div><b>' + k + ' ' + LABEL[k] + '</b> → ' + picked[k] + '</div>';
+    }).join('');
+  }
+  document.querySelectorAll('.dgroup').forEach(function (g) {
+    var key = g.getAttribute('data-d');
+    g.querySelectorAll('.dopt').forEach(function (o) {
+      o.addEventListener('click', function () {
+        g.querySelectorAll('.dopt').forEach(function (x) { x.classList.remove('on'); });
+        o.classList.add('on');
+        picked[key] = o.getAttribute('data-v');
+        g.querySelector('.pickv').textContent = picked[key];
+        render();
+      });
+    });
+  });
+  render();
+})();
+</script>
