@@ -550,10 +550,13 @@
     //      자리와 같아야 한다. 표 기준으로 바꾸면 "게이지는 찼는데 참여는 되는" 상태가 생긴다
     //      (참여 허용 판정은 여전히 공고 기준이다).
     //   ★ null = 셀 수 없음(연결 탭 없음·조회 실패·구버전 백엔드) → 종전 값으로 폴백하고 툴팁이 말한다.
-    // ★★ **보는 사람이 관리자일 때만** 표 기준을 쓴다 — 관리자 모집공고 탭(admin:true)과
-    //   리뷰어 홈·공고 목록을 **관리자 계정으로 볼 때**(_realAdminTok) 가 대상이다.
-    //   일반 리뷰어에게는 종전(공고 기준) 그대로 = 카드의 잔여가 실제 참여 가능 자리와 일치한다.
-    const _seeFilled = admin || _realAdminTok();
+    // ★★ **보는 사람이 운영자일 때만** 표 기준을 쓴다 — 관리자 모집공고 탭(admin:true) +
+    //   리뷰어 홈·공고 목록을 **운영 권한으로 볼 때**. 판정은 `_adminTok()`(진짜 admin_token
+    //   **또는** 마스터가 지정한 공고수정 허용명단의 스코프 토큰) — `✏️ 관리자 수정` 칩이
+    //   뜨는 사람과 **같은 범위**다. 종전엔 `_realAdminTok()`(진짜 토큰만)이라, 스코프 토큰으로
+    //   홈을 보는 담당자에게는 표 기준이 적용되지 않아 카드만 옛 숫자로 남았다(실측 신고).
+    //   ★ 일반 리뷰어(토큰 없음)에게는 종전(공고 기준) 그대로 = 카드의 잔여가 실제 참여 가능 자리와 일치.
+    const _seeFilled = admin || _adminTok();
     const todayFilled = (!_seeFilled || c.todayFilled == null) ? null : (Number(c.todayFilled) || 0);
     const isFull = quota > 0 && today >= quota;
     const pct = quota > 0 ? Math.max(3, Math.min(100, Math.round((today / quota) * 100))) : 0;
