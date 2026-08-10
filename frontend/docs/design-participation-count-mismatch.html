@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>참여현황 8/42 ↔ 표 27명 — 차이의 원인과 맞추는 방법</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════════════
+   0721)장수돌침대_쿠팡_탄소매트 900건 — 참여현황 숫자 불일치 진단·개선안 (와이어프레임)
+   · 목업 문서입니다(제품 코드 아님) · 외부 리소스 0(오프라인 열람) · 라이트 고정
+   ══════════════════════════════════════════════════════════════════════════════ */
+:root{
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:light}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.6;
+     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.doc{max-width:1180px;margin:0 auto;padding:26px 20px 90px}
+.dhead{background:linear-gradient(135deg,#3b1e2e,#6b2a3f);color:#fff;border-radius:16px;padding:24px 26px;margin-bottom:20px}
+.dhead .chip{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.06em;background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.28);padding:3px 10px;border-radius:999px;margin-bottom:10px}
+.dhead h1{margin:0 0 8px;font-size:21px;letter-spacing:-.02em}
+.dhead p{margin:0;font-size:13px;opacity:.9;line-height:1.75}
+h2.sec{font-size:16.5px;margin:34px 0 12px;padding-left:11px;border-left:4px solid var(--accent);letter-spacing:-.01em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px;
+      box-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.04)}
+.card h3{margin:0 0 8px;font-size:15px;letter-spacing:-.01em}
+.card p{margin:0 0 10px;font-size:13px;color:var(--muted)}
+.card p:last-child{margin-bottom:0}
+.big{font-size:15px;font-weight:800;color:var(--ink);background:var(--warn-soft);border:1px solid #f0dcc0;
+  border-radius:11px;padding:14px 16px;line-height:1.75}
+.big b{color:#a2530a}
+
+/* 두 숫자 비교 */
+.two{display:grid;grid-template-columns:1fr 54px 1fr;gap:12px;align-items:stretch;margin:14px 0 6px}
+@media(max-width:760px){.two{grid-template-columns:1fr}.two .vs{display:none}}
+.box{border:1px solid var(--line2);border-radius:12px;padding:14px;background:var(--card)}
+.box.blue{border-color:var(--accent-line);background:var(--accent-soft)}
+.box.amber{border-color:#f0dcc0;background:var(--warn-soft)}
+.box .t{font-size:11.5px;font-weight:800;color:var(--muted);margin-bottom:6px}
+.box .n{font-size:30px;font-weight:850;letter-spacing:-.03em;line-height:1.1}
+.box.blue .n{color:var(--accent-deep)} .box.amber .n{color:#a2530a}
+.box .d{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.7}
+.box .d b{color:var(--ink)}
+.vs{display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:var(--faint)}
+
+/* 원인 카드 */
+.causes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:820px){.causes{grid-template-columns:1fr}}
+.cause{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card)}
+.cause .h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cause .no{width:22px;height:22px;border-radius:50%;background:var(--ink);color:#fff;font-size:11.5px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.cause .h b{font-size:13.5px}
+.cause .tag{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;margin-left:auto}
+.tag.hi{background:var(--bad-soft);border:1px solid #f6d5d6;color:#b3282c}
+.tag.mid{background:var(--warn-soft);border:1px solid #f0dcc0;color:#7c4a12}
+.tag.low{background:var(--card2);border:1px solid var(--line);color:var(--muted)}
+.cause p{font-size:12.5px;color:var(--muted);margin:0 0 8px;line-height:1.75}
+.cause .chk{font-size:12px;background:var(--card2);border-radius:9px;padding:9px 11px;line-height:1.7}
+.cause .chk b{color:var(--ink)}
+
+/* 진단 순서 */
+.steps{counter-reset:s}
+.step{display:flex;gap:12px;padding:13px 0;border-bottom:1px dashed var(--line)}
+.step:last-child{border-bottom:none}
+.step .n{counter-increment:s;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;
+  font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center;flex:none}
+.step .n::before{content:counter(s)}
+.step .b{flex:1}
+/* ★ 직계 자식만 — 안쪽 설명문(span) 속 <b> 까지 block 이 되면 문장이 토막토막 줄바꿈된다(실측). */
+.step .b > b{display:block;font-size:13.5px;margin-bottom:3px}
+.step .b span{font-size:12.5px;color:var(--muted);line-height:1.75}
+.step .b span b{color:var(--ink)}
+.kbd{display:inline-block;font-size:11.5px;font-weight:750;background:var(--card2);border:1px solid var(--line2);
+  border-radius:6px;padding:1px 7px;margin:0 1px}
+
+/* 화면 목업 */
+.mock{background:var(--card);border:1px solid var(--line2);border-radius:12px;padding:13px;margin-top:10px}
+.mocklabel{font-size:11px;font-weight:800;color:var(--faint);margin-bottom:7px}
+.bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tprog{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px 0 6px;border-radius:999px;
+  background:var(--card);border:1px solid var(--line2);white-space:nowrap}
+.tprog .ring{width:22px;height:22px;border-radius:50%;flex:none;position:relative;
+  background:conic-gradient(var(--accent) calc(var(--p,0)*1%),#e3e9f1 0)}
+.tprog .ring::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--card)}
+.tprog .d{font-size:11.5px;font-weight:800;color:var(--accent-deep)}
+.tprog .lbl{font-size:11px;color:var(--faint);font-weight:650}
+.tprog .num{font-size:12.5px;font-weight:800;color:var(--accent-deep)}
+.tprog .num b{font-size:14.5px} .tprog .num i{font-style:normal;color:var(--muted);font-weight:700}
+.tprog .sfx{font-size:10.5px;font-weight:750;padding:1px 7px;border-radius:999px;background:var(--card2);
+  border:1px solid var(--line);color:var(--muted)}
+.tprog.warn{border-color:#f0dcc0;background:var(--warn-soft)}
+.tprog.warn .sfx{background:#fff;border-color:#f0dcc0;color:#a2530a;cursor:pointer}
+.tprog .sheetn{font-size:11.5px;font-weight:800;color:#a2530a}
+.fakein{font-size:12.5px;padding:5px 9px 5px 27px;border:1px solid var(--line2);border-radius:7px;width:210px;
+  color:var(--faint);background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>') no-repeat}
+.fakebtn{font-size:11px;font-weight:700;padding:3px 9px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink)}
+.fakesel{font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card)}
+
+/* 관제 패널 목업 */
+.ops{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:9px}
+@media(max-width:700px){.ops{grid-template-columns:1fr 1fr}}
+.opc{border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center;background:var(--card)}
+.opc .k{font-size:11px;color:var(--muted);font-weight:700}
+.opc .v{font-size:20px;font-weight:850;letter-spacing:-.02em;margin-top:2px}
+.opc.hit{border-color:#f6d5d6;background:var(--bad-soft)} .opc.hit .v{color:#b3282c}
+
+/* 안 비교표 */
+table.q{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+table.q th{background:var(--card2);border:1px solid var(--line);padding:9px 11px;text-align:left;font-size:11.5px;color:var(--muted)}
+table.q td{border:1px solid var(--line);padding:10px 11px;vertical-align:top;line-height:1.7}
+.pros{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px}
+@media(max-width:720px){.pros{grid-template-columns:1fr}}
+.pros div{font-size:12px;line-height:1.7;border-radius:10px;padding:10px 12px}
+.pros .good{background:var(--safe-soft);border:1px solid #cdeed8}
+.pros .bad{background:var(--bad-soft);border:1px solid #f6d5d6}
+.pros b{display:block;margin-bottom:3px;font-size:11.5px}
+.rec{display:inline-block;font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;
+  background:var(--safe-soft);border:1px solid #bfe6cd;color:#15803d;margin-left:8px}
+.note{font-size:12.5px;color:var(--muted);line-height:1.75;background:var(--card2);border-radius:10px;padding:11px 13px;margin-top:11px}
+.note b{color:var(--ink)}
+ul.li{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted);line-height:1.85}
+ul.li b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="dhead">
+    <div class="chip">진단 · 개선안 (목업 — 제품 코드 아님)</div>
+    <h1>참여현황 <b>8/42명</b> ↔ 시스템표 <b>27명</b> — 왜 다르고, 어떻게 맞추나</h1>
+    <p>대상: <b>0721)장수돌침대_쿠팡_탄소매트 900건</b> · 표 439~466번 = 27줄이 채워진 상태<br>
+       홈 모집공고 카드와 작업보드 툴바가 <b>둘 다 8/42</b>로 같은 이유 = 두 화면은 원래 같은 값을 봅니다.
+       다른 것은 <b>표의 27</b>이고, 그건 애초에 <b>다른 것을 세는 숫자</b>입니다.</p>
+  </div>
+
+  <!-- ══════════ 결론 ══════════ -->
+  <h2 class="sec">한 줄 결론</h2>
+  <div class="card">
+    <div class="big">
+      <b>8</b>은 “<b>오늘</b>, <b>모집공고를 거쳐</b>, <b>참여가 확정된</b> 사람 수”이고<br>
+      <b>27</b>은 “<b>표에 이름이 채워진 줄 수</b>(날짜·경로 무관)”입니다. 둘은 같은 것을 세지 않습니다.
+    </div>
+    <p style="margin-top:12px">따라서 <b>둘이 다른 것 자체는 고장이 아닙니다.</b> 다만 <b>19명의 차이</b>는
+      “왜 공고를 안 거쳤나”를 말해 주는 신호이고, 그중 일부는 <b>지금 조치가 필요한 상태</b>일 수 있습니다.</p>
+  </div>
+
+  <!-- ══════════ 두 숫자 ══════════ -->
+  <h2 class="sec">두 숫자가 세는 대상</h2>
+  <div class="card">
+    <div class="two">
+      <div class="box blue">
+        <div class="t">참여현황 (카드 · 툴바)</div>
+        <div class="n">8 <span style="font-size:15px;color:var(--muted)">/ 42명</span></div>
+        <div class="d">
+          <b>오늘</b> 00:00(한국시간) 이후,<br>
+          <b>모집공고에서 [참여하기]</b>를 눌러 자리를 받고,<br>
+          <b>구매양식 제출까지 확정</b>된 사람만.<br>
+          <span style="color:var(--faint)">※ 분모 42 = 오늘 열린 자리(일 모집인원 + 이월/조절 반영)</span>
+        </div>
+      </div>
+      <div class="vs">≠</div>
+      <div class="box amber">
+        <div class="t">시스템표 (작업표 그리드)</div>
+        <div class="n">27 <span style="font-size:15px;color:var(--muted)">줄</span></div>
+        <div class="d">
+          <b>날짜 무관</b> — 어제 들어온 줄도 그대로 있고,<br>
+          <b>경로 무관</b> — 공고를 안 거친 줄도 채워집니다.<br>
+          439~466번이 <b>오늘 구간이라는 보장도 없습니다</b>.
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>왜 이렇게 만들었나</b> — 참여현황은 “<b>오늘 더 받아야 하나</b>”를 묻는 숫자입니다.
+      누적으로 세면 900건 작업에서 항상 “한참 남음”만 뜨고 오늘 판단에 못 씁니다.
+      반대로 표는 작업의 <b>기록 원본</b>이라 지난 줄을 지우지 않습니다.
+    </div>
+  </div>
+
+  <!-- ══════════ 원인 ══════════ -->
+  <h2 class="sec">19명은 어디서 왔나 — 가능한 원인 4가지</h2>
+  <div class="causes">
+
+    <div class="cause">
+      <div class="h"><span class="no">1</span><b>어제(그 이전) 참여분</b><span class="tag mid">가능성 높음</span></div>
+      <p>439~466번 구간이 오늘 하루치가 아니라 <b>며칠에 걸쳐</b> 채워졌다면, 오늘분만 8명인 것이 정상입니다.
+        900건짜리 장기 작업에서 가장 흔한 경우입니다.</p>
+      <div class="chk"><b>확인</b> — 표의 <b>구매일자</b> 칸을 봅니다. 439~466 중 오늘 날짜가 몇 줄인지 세면 끝납니다.
+        오늘 날짜가 8줄이면 <b>차이 없음(정상)</b>입니다.</div>
+    </div>
+
+    <div class="cause">
+      <div class="h"><span class="no">2</span><b>지각 참여 — 확정 처리 안 됨</b><span class="tag hi">조치 필요</span></div>
+      <p>리뷰어가 자리를 잡고 <b>제한 시간(15분) 안에 결제를 못 끝낸</b> 경우입니다.
+        결제는 실제로 됐고 <b>표에도 줄이 채워지지만</b>, 자리는 이미 만료돼
+        시스템은 그 사람을 “참여 확정”으로 세지 않습니다.</p>
+      <div class="chk"><b>확인</b> — 모집공고 카드의 <b>📡 관제</b> 버튼에 <b>빨간 숫자</b>가 붙어 있으면 그 수만큼입니다.
+        <b>조치</b> = 관제 패널에서 그 사람을 <b>[수동확정]</b> 하면 즉시 숫자에 반영됩니다.</div>
+    </div>
+
+    <div class="cause">
+      <div class="h"><span class="no">3</span><b>공고를 안 거친 입력</b><span class="tag mid">가능성 높음</span></div>
+      <p>카톡으로 모아 <b>관리자가 직접 넣은 건</b>, 또는 직원이 <b>시트에 손으로 적은 줄</b>.
+        표에는 있지만 모집공고 쪽에는 참여 기록이 없어 영원히 안 세어집니다.
+        900건 대형 작업에서 자주 병행되는 방식입니다.</p>
+      <div class="chk"><b>확인</b> — 관제 패널의 <b>시트 대조</b> 줄이 “표 줄 수 vs 확정 수”의 차이를 알려줍니다.
+        <b>조치</b> = 앞으로는 <b>외부모집 구매양식 수동제출</b>(🧾)로 넣으면 참여로 기록됩니다.</div>
+    </div>
+
+    <div class="cause">
+      <div class="h"><span class="no">4</span><b>옛 차수 공고에 달린 인원</b><span class="tag low">가능성 낮음</span></div>
+      <p>한 작업에 공고가 여러 개(차수 재발행)인데 옛 공고가 <b>게시 꺼짐/마감</b> 상태라면,
+        그 공고로 들어온 사람은 오늘 숫자에 합산되지 않습니다.</p>
+      <div class="chk"><b>확인</b> — 홈 작업목록에서 그 작업의 <b>[공고]</b> 버튼에 <b>공고 2</b>처럼 숫자가 붙는지 봅니다.
+        하나뿐이면 이 경우가 아닙니다.</div>
+    </div>
+
+  </div>
+
+  <!-- ══════════ 진단 순서 ══════════ -->
+  <h2 class="sec">1분 진단 — 이 순서로 보면 원인이 나옵니다</h2>
+  <div class="card steps">
+    <div class="step"><div class="n"></div><div class="b">
+      <b>표의 구매일자 칸에서 “오늘” 줄을 센다</b>
+      <span>439~466 중 오늘 날짜가 <b>8줄</b>이면 → <b>원인 1(정상)</b>. 끝입니다.
+        오늘 날짜가 27줄인데 참여현황이 8이면 → 다음 단계로.</span>
+    </div></div>
+    <div class="step"><div class="n"></div><div class="b">
+      <b>모집공고 카드의 <span class="kbd">📡 관제</span> 를 연다</b>
+      <span>빨간 숫자(지각)가 있으면 <b>원인 2</b>. 그 인원만큼 <b>[수동확정]</b> 하면 참여현황이 바로 올라갑니다.</span>
+    </div></div>
+    <div class="step"><div class="n"></div><div class="b">
+      <b>관제 패널의 “시트 대조” 줄을 본다</b>
+      <span>표 줄 수와 확정 수의 차이가 지각 수보다 크면, 남는 만큼이 <b>원인 3</b>(공고를 안 거친 입력)입니다.</span>
+    </div></div>
+    <div class="step"><div class="n"></div><div class="b">
+      <b>그래도 안 맞으면 공고 개수를 확인</b>
+      <span>홈 작업목록에서 그 작업의 <span class="kbd">공고</span> 버튼에 숫자가 2 이상이면 <b>원인 4</b>입니다.</span>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <h3>관제 패널에서 읽는 숫자 (지금도 있는 화면)</h3>
+    <p>모집공고 카드 → <b>📡 관제</b>. 아래 네 숫자만 보면 됩니다.</p>
+    <div class="ops">
+      <div class="opc"><div class="k">오늘 진행중</div><div class="v">2</div></div>
+      <div class="opc"><div class="k">오늘 확정</div><div class="v">8</div></div>
+      <div class="opc hit"><div class="k">지각 (수동확정 필요)</div><div class="v">11</div></div>
+      <div class="opc"><div class="k">누적 확정</div><div class="v">431</div></div>
+    </div>
+    <div class="note" style="margin-top:12px">
+      예시처럼 <b>지각 11</b>이 있다면 8 + 11 = 19명이 설명되고, 남는 8명이 <b>어제분 또는 수기 입력</b>입니다.
+      <b>지각 11명을 수동확정하면 참여현황이 19/42로 바뀝니다.</b>
+    </div>
+  </div>
+
+  <!-- ══════════ 개선안 ══════════ -->
+  <h2 class="sec">앞으로 헷갈리지 않게 — 표기 개선안</h2>
+
+  <div class="card">
+    <h3>A안 — 표 줄 수를 나란히 보여주고, 차이가 나면 그 사실을 말한다 <span class="rec">권장</span></h3>
+    <p>참여현황 옆에 <b>표에 채워진 오늘 줄 수</b>를 함께 적습니다. 두 숫자가 다르면 주황으로 바뀌고
+      <b>[확인]</b>을 누르면 관제 패널이 열립니다.</p>
+    <div class="mock">
+      <div class="mocklabel">차이가 없을 때 — 지금과 같은 모습</div>
+      <div class="bar">
+        <span class="tprog" style="--p:64"><span class="ring"></span><b class="d">8/10 (월)</b>
+          <span class="lbl">참여현황</span><span class="num"><b>27</b><i>/42명</i></span></span>
+        <input class="fakein" value="표 안에서 찾기…" readonly>
+        <span class="fakesel">기본(연락처까지)</span><span class="fakebtn">숨긴 열 0</span>
+      </div>
+      <div class="mocklabel" style="margin-top:14px">차이가 있을 때 — 표 줄 수 병기 + 확인 유도</div>
+      <div class="bar">
+        <span class="tprog warn" style="--p:19"><span class="ring"></span><b class="d">8/10 (월)</b>
+          <span class="lbl">참여현황</span><span class="num"><b>8</b><i>/42명</i></span>
+          <span class="sheetn">· 표 27줄</span><span class="sfx">차이 19 · 확인 ›</span></span>
+        <input class="fakein" value="표 안에서 찾기…" readonly>
+        <span class="fakesel">기본(연락처까지)</span>
+      </div>
+    </div>
+    <div class="pros">
+      <div class="good"><b>좋은 점</b>어느 숫자도 거짓말하지 않는다 · <b>차이 자체가 신호</b>가 되어 지각 미확정·수기 입력을 그날 발견한다 · 카드와 툴바가 계속 같은 값을 본다</div>
+      <div class="bad"><b>아쉬운 점</b>칩에 숫자가 하나 늘어 폭이 커진다 · 평소(차이 없을 때)는 표기가 하나 더 붙는 셈</div>
+    </div>
+    <div class="note"><b>이렇게 하면</b> 위 4가지 원인 중 <b>2·3번(조치가 필요한 것)</b>이 매일 아침 눈에 띕니다.
+      1번(어제분)은 “오늘 줄 수”로 세므로 애초에 차이로 잡히지 않습니다.</div>
+  </div>
+
+  <div class="card">
+    <h3>B안 — 참여현황을 아예 “표 기준”으로 바꾼다</h3>
+    <p>툴바 숫자를 <b>오늘 표에 채워진 줄 수 / 오늘 정원</b>으로 바꿉니다. 표와 항상 100% 일치합니다.</p>
+    <div class="mock">
+      <div class="mocklabel">표 기준</div>
+      <div class="bar">
+        <span class="tprog" style="--p:64"><span class="ring"></span><b class="d">8/10 (월)</b>
+          <span class="lbl">표 기준 참여</span><span class="num"><b>27</b><i>/42명</i></span></span>
+        <input class="fakein" value="표 안에서 찾기…" readonly>
+      </div>
+    </div>
+    <div class="pros">
+      <div class="good"><b>좋은 점</b>표와 절대 안 갈린다 · 설명이 필요 없다</div>
+      <div class="bad"><b>아쉬운 점</b><b>홈 모집공고 카드(8/42)와 갈린다</b> — 같은 작업이 화면마다 다른 숫자가 되어 이번과 똑같은 질문이 반대 방향으로 생긴다 · 지각·수기 입력이 <b>영원히 안 보이게</b> 된다(문제가 숨는다)</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>C안 — 표기는 그대로 두고, 운영에서 원인을 없앤다</h3>
+    <p>매일 관제에서 <b>지각 건을 수동확정</b>하고, 외부모집 건은 <b>구매양식 수동제출</b>로 넣습니다.
+      그러면 두 숫자가 자연히 같아집니다.</p>
+    <div class="pros">
+      <div class="good"><b>좋은 점</b>화면 변경 0 · 근본 해결(정산·리뷰 관리도 함께 정확해진다)</div>
+      <div class="bad"><b>아쉬운 점</b>사람이 매일 챙겨야 한다 · <b>챙길 대상이 화면에 안 보인다</b>(그래서 A안과 함께 해야 실효)</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>정리</h3>
+    <table class="q">
+      <tr><th style="width:70px">안</th><th>내용</th><th style="width:300px">결과</th></tr>
+      <tr><td><b>A</b> <span class="rec">권장</span></td><td>표 줄 수 병기 + 차이 나면 주황 + [확인]→관제</td>
+        <td>숫자는 그대로 두고 <b>차이를 신호로</b> 쓴다. 조치가 필요한 건이 매일 보인다.</td></tr>
+      <tr><td><b>B</b></td><td>툴바를 표 기준으로 교체</td>
+        <td>표와는 일치하지만 <b>카드와 갈린다</b>. 지각·수기 입력이 숨는다.</td></tr>
+      <tr><td><b>C</b></td><td>운영으로 원인 제거</td>
+        <td>근본 해결. 다만 A 없이는 <b>무엇을 처리해야 하는지</b>가 안 보인다.</td></tr>
+    </table>
+    <div class="note"><b>추천 = A + C</b> — 화면이 차이를 드러내고(A), 드러난 건을 관제에서 처리(C)합니다.
+      B는 문제를 가리는 방향이라 권하지 않습니다.</div>
+  </div>
+
+  <!-- ══════════ 결정 요청 ══════════ -->
+  <h2 class="sec">결정해 주실 것</h2>
+  <div class="card">
+    <ul class="li">
+      <li><b>어느 안으로 갈지</b> (A 권장 / B / C만)</li>
+      <li>A안이라면 <b>“표 줄 수”의 기준</b> — ㉮ 오늘 구매일자 줄만(권장) / ㉯ 그 작업 전체 줄</li>
+      <li>차이가 몇 명 이상일 때 <b>주황으로 경고</b>할지 — ㉮ 1명부터(권장) / ㉯ 3명 이상 등</li>
+    </ul>
+    <div class="note" style="margin-top:12px">
+      ★ 먼저 <b>위 “1분 진단”</b>을 한 번 돌려 보시면, 이번 19명이 어느 원인인지 바로 나옵니다.
+      그 결과를 알려주시면 그에 맞춰 구현 범위를 좁힐 수 있습니다.
+      (예: 전부 “어제분”이면 화면 변경 없이 <b>표기 문구만</b> “오늘 참여”로 분명히 하는 것으로 끝납니다.)
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
