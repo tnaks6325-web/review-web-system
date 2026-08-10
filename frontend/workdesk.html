@@ -370,6 +370,10 @@
   .wtab .tstar.on{opacity:1;color:#f5b301}
   /* 터치 기기는 hover가 없어 별이 '보이지 않는 탭 영역'이 된다 → 항상 옅게 노출해 오탭을 막는다 */
   @media(hover:none){.wtab .tstar{opacity:.35}}
+  /* 정렬 등급 점(작업바 정렬 = 모집중 먼저 · 사용자 확정 2026-08-10) — 왜 이 순서인지 눈으로 읽히게.
+     ★ 등급 2(전건 제출·공고 없음)는 점을 그리지 않는다 = 신호가 아닌 것에 색을 쓰지 않는다. */
+  .wtab .tdot{flex:none;width:6px;height:6px;border-radius:50%;display:inline-block}
+  .wtab .tdot.rec{background:var(--safe)} .wtab .tdot.pend{background:#e08a1e}
   .tb2 .b2empty{color:var(--faint);font-size:12px;display:flex;align-items:center;padding:0 8px}
   .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .advsug.show{display:block}
@@ -553,6 +557,37 @@
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
   .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
   .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+
+  /* ══ 오늘 참여현황(툴바 맨 앞 = 표 왼쪽 위) — 시안 C+B 믹스 · docs/design-grid-today-progress.html ══
+     `◔ 8/10 (월) 참여현황 12/20명` — 오늘 채워야 할 인원 대비 지금까지 구매(제출 확정)한 인원.
+     ★ 높이 28px = 툴바의 다른 컨트롤과 같다 → **툴바가 한 줄 그대로**(표가 아래로 안 밀린다, 실측 31px 불변).
+     ★ 색은 상태를 말한다: 진행중 파랑 / 달성 초록 / 초과 주황 / 오늘 모집 없음 회색 / 모름 점선.
+       "없다(정원 0)"와 "모른다(공고 없음·조회 실패)"를 절대 같은 모양으로 그리지 않는다. */
+  .tprog{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px 0 6px;border-radius:999px;
+    background:var(--card);border:1px solid var(--line2);white-space:nowrap;flex:none;cursor:default}
+  /* 도넛은 conic-gradient 한 겹 + 가운데를 카드색으로 덮어 링을 만든다(SVG·이미지 0). --p = 달성률(0~100). */
+  .tprog .ring{width:22px;height:22px;border-radius:50%;flex:none;position:relative;
+    background:conic-gradient(var(--accent) calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog .ring::after{content:'';position:absolute;inset:4px;border-radius:50%;background:var(--card)}
+  .tprog .d{font-size:11.5px;font-weight:800;color:var(--accent-deep);letter-spacing:-.01em}
+  .tprog .lbl{font-size:11px;color:var(--faint);font-weight:650}
+  .tprog .num{font-size:12.5px;font-weight:800;color:var(--accent-deep);letter-spacing:-.02em}
+  .tprog .num b{font-size:14.5px} .tprog .num i{font-style:normal;color:var(--muted);font-weight:700}
+  .tprog .sfx{font-size:10.5px;font-weight:750;padding:1px 7px;border-radius:999px;background:var(--card2);
+    border:1px solid var(--line);color:var(--muted)}
+  .tprog.done .ring{background:conic-gradient(var(--safe) calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog.done .d,.tprog.done .num{color:#15803d}
+  .tprog.done .sfx{color:#15803d;border-color:#cdeed8;background:var(--safe-soft)}
+  .tprog.over .ring{background:conic-gradient(#e08a1e calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog.over .d,.tprog.over .num{color:#a2530a}
+  .tprog.over .sfx{color:#a2530a;border-color:#f0dcc0;background:var(--warn-soft)}
+  .tprog.zero .ring{background:conic-gradient(var(--line2) calc(var(--p,0) * 1%),#e3e9f1 0)}
+  .tprog.zero .d,.tprog.zero .num{color:var(--muted)}
+  .tprog.unk{border-style:dashed}
+  .tprog.unk .ring{background:#e3e9f1}
+  .tprog.unk .d{color:var(--muted)} .tprog.unk .num{color:var(--faint)}
+  /* 좁은 화면: 라벨만 접고 **숫자는 어떤 폭에서도 남긴다**(이 표기의 존재 이유가 숫자다). */
+  @media(max-width:720px){.tprog .lbl{display:none}.tprog{gap:6px;padding-right:9px}}
 
   /* ══ 표 검색(툴바 왼쪽 인라인 + 스크롤 위치 눈금) — 시안 C · docs/design-grid-search.html ══
      치는 즉시 표 안의 값을 찾아 노란색으로 칠하고, 그 자리로 화면(세로+가로)이 이동한다. */
@@ -1448,6 +1483,8 @@
 .pmfixcard .wh .btn{flex:0 0 auto}
 /* 화면에서 못 고치는 사유 줄 — 버튼 없이 조치 문장만(줄바꿈 허용) */
 .pmfixrow.info .nm{white-space:normal;font-size:11.5px;color:var(--t3,#8B94A1);line-height:1.5}
+/* 이관된 작업 시트 열기 경고 — 편집하면 시스템에 안 반영된다는 사실을 먼저 읽게 한다 */
+.pmsheetwarn{font-size:13px;line-height:1.7;color:#7a5a12;background:#FDF8EE;border:1px solid #E7D2A3;border-radius:10px;padding:12px 14px}
 /* 팝업 — ★ body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다)
    ★ 바깥클릭으로 닫지 않는다(입력해 둔 계좌·통장표시가 실수 클릭 한 번에 날아가지 않게) */
 .pmov{position:fixed;inset:0;background:rgba(17,20,25,.44);z-index:9600;display:flex;align-items:center;justify-content:center;padding:18px}
@@ -1465,6 +1502,14 @@
 .pmpick button{padding:7px 12px;font-size:12.5px;border:1px solid var(--line,#D8DDE5);border-radius:8px;background:var(--card,#fff);color:var(--t1,#1B1F24);cursor:pointer}
 .pmpick button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C;font-weight:750}
 .pmscope{font-size:12px;background:#E5F3EE;color:#0F6A52;border-radius:8px;padding:8px 11px;line-height:1.55}
+/* 계좌 명의 확인 블록 — "누구 명의 계좌인가"를 팝업 맨 위에서 못박는다 */
+.pmwho{background:#F3F6FB;border:1px solid #D9E3F2;border-radius:8px;padding:9px 11px;margin-bottom:11px}
+.pmwho .t{font-size:13.5px;color:var(--t1,#1B1F24)}
+.pmwho .d{font-size:11.5px;color:var(--t2,#5A6473);line-height:1.6;margin-top:3px}
+.pmtail{font-size:11.5px;color:var(--t3,#8B94A1);font-weight:600}
+.pmsib{margin:2px 4px 0 0;padding:2px 8px;font-size:11.5px;border:1px solid var(--line,#D8DDE5);
+  border-radius:999px;background:var(--card,#fff);color:var(--t1,#1B1F24);cursor:pointer}
+.pmsib:hover{border-color:#1B4F9C;color:#1B4F9C}
 .btn.sm{padding:3px 9px;font-size:11.5px}
 .btn.danger{color:#B3382E;border-color:#EAB6B0}
 
@@ -2182,6 +2227,11 @@ async function loadTabs(){
     if(r.dailyUnavailable && _prevTd[k]) t.todayDone=true; });
   _wtPruneFinished();        // 마감분 정리(목록이 막 도착한 지점)
   _renderTabList();          // 계정별 캐시로 즉시 렌더
+  // ★ 작업바 정렬(모집중 먼저)의 재료 = campaigns·stats 인데 이 응답엔 없다 → **뒤따라 한 번** 받아
+  //   도착하면 다시 그린다. 60초 클라 캐시 + 30초 서버 캐시라 **탭 전환마다 다시 나가지 않는다**
+  //   (작업바 로드에 stats=1 을 직접 붙이지 않는다는 규율은 그대로 — 여기서는 비차단 후속 호출).
+  //   ★ 실패해도 아무 일도 일어나지 않는다 — 정렬만 종전(즐겨찾기 → 가나다)으로 남는다.
+  _finEnsureStats().then(()=>{ _renderTabList(); if(document.getElementById('wblMount')) _finRenderList(); }).catch(()=>{});
   // ★ 홈 목록이 떠 있는 채로 이 응답이 도착하면 배열이 교체돼 **목록 DOM 의 인덱스가 stale** 이 된다
   //   → 옆 작업을 마감/복귀할 수 있다. 같은 배열로 즉시 다시 그려 인덱스를 맞춘다.
   if(document.getElementById('wblMount')) _finRenderList();
@@ -3520,22 +3570,69 @@ function openTaskFromHome(i){
   STATE.pendingTab={sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'', spreadsheetTitle:t.spreadsheetTitle||''};
   switchView('workdesk');
 }
+/* ══ 작업바 정렬 — 모집중 먼저, 그다음 리뷰 대기 (사용자 확정 2026-08-10) ═══════════════════
+   업체(1단) = 모집중인 작업이 많은 업체가 왼쪽 / 작업(2단) = 모집중 → 리뷰 대기 → 나머지.
+   ★★ **판정 사본 0** — 공고 상태는 `_campRank`(홈 [금일 진행] 필터와 같은 함수)를 그대로 쓴다.
+      여기서 state 문자열 표를 새로 만들면 홈 필터와 작업바가 서로 다른 "모집중"을 갖게 된다.
+   ★ 다만 `soft_full`(총원 충족)만 따로 뺀다 — `_campRank` 는 그것을 1등급(아직 살아있음)으로 보지만,
+      사용자 기준에서 **총원이 다 찬 건 "모집 종료"** 이고 그게 곧 2순위(리뷰 대기)의 정의다.
+   ★ 재료(campaigns·stats)는 `?stats=1` 응답에만 실린다 → 없으면 전부 같은 등급이 되어
+      **종전 정렬(즐겨찾기 → 가나다)로 자연히 폴백**한다(조용한 오정렬 없음). */
+function _wRecruiting(c){ return _campRank(c) <= 1 && (c && c.state) !== 'soft_full'; }
+// 그 작업이 "아직 사람을 받는 중"인가 — 살아있는 공고가 하나라도 있으면 모집중.
+function _wTabRecruiting(t){ const cs=Array.isArray(t&&t.campaigns)?t.campaigns:[]; return cs.some(_wRecruiting); }
+// 아직 리뷰가 안 들어온 건수. 모르면(통계 미도착·집계 실패) 0 — **모르는 것을 앞으로 끌어올리지 않는다**.
+function _wTabPending(t){
+  const s=t&&t.stats; if(!s||s.total==null||s.submitted==null) return 0;
+  return Math.max(0, (+s.total||0)-(+s.submitted||0));
+}
+// 0 = 모집중 · 1 = 모집 종료 + 리뷰 대기 · 2 = 그 외(전건 제출·공고 없음)
+function _wTabRank(t){ return _wTabRecruiting(t) ? 0 : (_wTabPending(t) > 0 ? 1 : 2); }
 function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '' (미지정)
   const favIdx=[], groups=new Map();
   // ★ 마감 작업은 상단 작업바(1·2단)에서 제외 = "작업보드에는 진행 중만"(업체 칩 개수도 자동으로 진행 중 기준).
   //   인덱스는 STATE.tabs 원본 그대로 유지 → selTab(i) 계약 불변(건너뛰기만 한다).
   STATE.tabs.forEach((t,i)=>{ if(isFinished(t)) return; if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
-  // 정렬: 미지정은 항상 마지막 → 즐겨찾기한 업체가 앞 → 나머지 가나다순
+  // 작업(2단) 정렬: 모집중 → 리뷰 대기 → 나머지. 같은 등급이면 남은 건수가 많은 순,
+  //   그래도 같으면 **원래 순서(인덱스)** 로 = 안정 정렬(재렌더마다 칩이 뒤바뀌지 않는다).
+  const sortIdxs = a => a.sort((x,y)=>{
+    const tx=STATE.tabs[x], ty=STATE.tabs[y];
+    const rx=_wTabRank(tx), ry=_wTabRank(ty); if(rx!==ry) return rx-ry;
+    const px=_wTabPending(tx), py=_wTabPending(ty); if(px!==py) return py-px;
+    return x-y;
+  });
+  sortIdxs(favIdx); groups.forEach(sortIdxs);
+  // 업체(1단) 정렬: 미지정은 항상 마지막 → **업체 즐겨찾기(사람이 명시한 결정)가 자동 정렬보다 우선**
+  //   → 모집중 작업 수 많은 순 → 리뷰 대기 작업 수 많은 순 → 가나다순.
+  const stat={};
+  groups.forEach((idxs,k)=>{ let rec=0, pend=0, pendRows=0;
+    idxs.forEach(i=>{ const t=STATE.tabs[i], r=_wTabRank(t);
+      if(r===0) rec++; else if(r===1){ pend++; pendRows+=_wTabPending(t); } });
+    stat[k]={rec,pend,pendRows}; });
   const gkeys=[...groups.keys()].sort((a,b)=>{
     if(!a) return 1; if(!b) return -1;
     const fa=isAdvFav(a), fb=isAdvFav(b);
     if(fa!==fb) return fa?-1:1;
+    if(stat[a].rec!==stat[b].rec) return stat[b].rec-stat[a].rec;
+    if(stat[a].pend!==stat[b].pend) return stat[b].pend-stat[a].pend;
+    // 리뷰 대기 **작업 수**가 같으면 남은 **인원**이 많은 쪽이 앞 — 1건 남은 업체와 90건 남은 업체가
+    // 이름순으로 갈리면 정렬이 하려던 일을 못 한다.
+    if(stat[a].pendRows!==stat[b].pendRows) return stat[b].pendRows-stat[a].pendRows;
     return a.localeCompare(b,'ko');
   });
   const out=[];
-  if(favIdx.length) out.push({key:W_FAV, label:'즐겨찾기', idxs:favIdx});
-  gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k)}));
+  if(favIdx.length) out.push({key:W_FAV, label:'즐겨찾기', idxs:favIdx, stat:null});
+  gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k), stat:stat[k]}));
   return out;
+}
+// 업체 칩 툴팁 — 왜 이 순서인지 말한다(숫자를 지어내지 않고, 모르면 그 사실을 말한다).
+function _wSegTip(g){
+  if(!g.stat) return '즐겨찾기한 작업';
+  if(STATE.campsUnavailable && STATE.statsUnavailable) return '모집 상태를 불러오지 못해 이름순으로 표시합니다';
+  const p=[]; p.push(`모집중 ${g.stat.rec}`); p.push(`리뷰 대기 ${g.stat.pend}`);
+  if(STATE.campsUnavailable) p.push('공고 상태 조회 실패');
+  else if(STATE.statsUnavailable) p.push('제출 집계 조회 실패');
+  return p.join(' · ');
 }
 function _wUnseen(i){ const t=STATE.tabs[i]; return t?(STATE.unseen&&STATE.unseen[`${t.sheetId}\t${t.tabName}`]||0):0; }
 // 활성 세그먼트 결정: 사용자가 고른 것 우선 → 없거나 사라졌으면 현재 탭이 속한 그룹 → 첫 그룹
@@ -3572,7 +3669,7 @@ function _renderTabList(){
     // 별표는 업체 칩에만. 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 안 깨짐
     const star=(isFavSeg||g.key==='')?'' :
       `<span class="segstar${af?' on':''}" title="${af?'업체 즐겨찾기 해제':'업체 즐겨찾기 — 왼쪽 우선 정렬'}" onclick="toggleAdvFav(event,this)">${af?'★':'☆'}</span>`;
-    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
+    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" title="${esc(_wSegTip(g))}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
   }).join('');
   // 2단: 선택 그룹의 탭
   const g=gs.find(x=>x.key===seg);
@@ -3581,7 +3678,9 @@ function _renderTabList(){
     const t=STATE.tabs[i], on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName, f=isFav(t), n=_wUnseen(i);
     // 시트제목은 탭마다 붙이지 않는다(줄이 길어져 탭이 몇 개만 보임) — 선택 시 본문 헤더에 표기.
     //   여기선 호버 툴팁으로만 확인 가능.
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+    // 정렬 등급을 점으로 — 왜 이 순서인지 눈으로 읽히게(초록=모집중 · 앰버=리뷰 대기 · 등급 2는 점 없음).
+    const rk=_wTabRank(t), dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`;
   // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
   seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
@@ -4460,6 +4559,48 @@ function _toast(msg){
     clearTimeout(_toast._t); _toast._t=setTimeout(()=>{ el.classList.remove('show'); }, 5200);
   }catch(_){ }
 }
+/* ══ 오늘 참여현황 칩 — 툴바 맨 앞(표 왼쪽 위) · 시안 docs/design-grid-today-progress.html ═══════
+   재료는 **서버가 준 `wd.todayProgress` 하나**(오늘 정원 = `computeCampaignState.dailyQuota`).
+   ★★ 여기서 "일건수 + 이월" 로 되계산하지 말 것 — 066 이월 상한·095 날짜별 조절·098 이월 보류·
+      총량 clamp 를 모르는 두 번째 기준이 생겨 **툴바와 모집공고 카드의 숫자가 갈린다**
+      (`todayNaturalQuota` 를 서버가 실어 보내는 것과 같은 이유).
+   ★ 필드 자체가 없으면(광고주 응답·구버전 백엔드) **아무것도 그리지 않는다** — 모르는 것을 0으로 꾸미지 않는다. */
+function _tpHtml(tp){
+  if(!tp || typeof tp!=='object') return '';
+  const d = esc(_fmtKDate(String(tp.dateStr||'')));             // '2026-08-10' → '8/10 (월)' (표기 단일 출처)
+  // ★★ 표기 기준 = **표(작업표)** (사용자 확정 2026-08-10, B안) — 아래 표에 오늘 채워진 줄 수를 그대로 쓴다.
+  //   종전 기준(공고를 거쳐 오늘 확정된 수)은 지각 참여·시트 수기 입력·외부모집분을 못 세어
+  //   같은 화면의 표와 자주 어긋났다(진단: docs/design-participation-count-mismatch.html).
+  //   ★ 서버가 못 세면(연결 탭 없음·조회 실패) **종전 값으로 폴백하고 그 사실을 툴팁에 적는다**
+  //     — 조용히 다른 기준으로 바꾸면 "숫자가 왜 줄었지"가 된다.
+  const confirmed = Number(tp.done)||0, holds = Number(tp.holds)||0;
+  const sheetOk = tp.sheetFilled != null;
+  const done = sheetOk ? (Number(tp.sheetFilled)||0) : confirmed;
+  const q = (tp.quota==null) ? null : (Number(tp.quota)||0);
+  const wrap = (cls,pct,num,sfx,tip)=>`<span class="tprog ${cls}" style="--p:${pct}" title="${esc(tip)}">`
+    + `<span class="ring"></span><b class="d">${d}</b><span class="lbl">참여현황</span>`
+    + `<span class="num">${num}</span>${sfx?`<span class="sfx">${esc(sfx)}</span>`:''}</span>`;
+  // ① 조회 실패 — 0/0 으로 위장하면 "오늘 할 일 없음"으로 읽힌다.
+  if(tp.ok===false) return wrap('unk',0,'<i>? / ?명</i>','불러오지 못함','오늘 참여현황을 불러오지 못했습니다 — 작업을 다시 열어보세요.');
+  // ② 기준을 모름(연결 공고 없음/게시 전) — 구매한 인원은 사실이므로 그대로 두고 분모만 ?.
+  if(q===null) return wrap('unk',0,`<b>${done}</b><i> / ?명</i>`,'모집 기준 없음',
+    (tp.reason==='no_live_campaign'?'연결된 모집공고가 게시 전이라':'연결된 모집공고가 없어')+' 오늘 모집인원을 정할 수 없습니다. 오늘 구매 '+done+'명.');
+  // 툴팁은 "무엇을 센 숫자인지"와 "공고 기준과 얼마나 다른지"를 말한다 — 차이가 곧 지각 미확정·
+  //   수기 입력 신호라, 표기를 표 기준으로 바꿔도 그 신호를 잃지 않게 한다.
+  const tipBase = `오늘 모집 ${q}명 · `
+    + (sheetOk ? `표에 채워진 줄 ${done}명` : `구매 완료 ${done}명`)
+    + (sheetOk && done!==confirmed ? ` (공고를 거쳐 확정된 건 ${confirmed}명 — 차이 ${Math.abs(done-confirmed)}명은 지각 참여 확정 대기 또는 수기 입력일 수 있습니다)` : '')
+    + (!sheetOk ? ' · 표 기준으로 세지 못해 공고 확정 수로 표시합니다' : '')
+    + (holds?` · 진행 중 ${holds}명(결제 중)`:'')
+    + (tp.campaignCount>1?` · 공고 ${tp.campaignCount}개 합산`:'');
+  // ③ 오늘은 열지 않는 날(휴무·모집 종료·총원 충족·0명 조절) — "없다"는 사실이므로 회색으로 말한다.
+  if(q<=0) return wrap('zero',0,`<b>${done}</b><i>/0명</i>`,'오늘 모집 없음',
+    tipBase+' · '+(({rest_day:'오늘은 휴무일입니다',schedule_ended:'일정이 끝났습니다',soft_full:'총원이 모두 찼습니다'})[tp.stateReason||tp.state]||'오늘 열린 자리가 없습니다'));
+  const pct = Math.max(0, Math.min(100, Math.round(done/q*100)));
+  if(done>q)  return wrap('over',100,`<b>${done}</b><i>/${q}명</i>`,`+${done-q}`,tipBase+` · 정원보다 ${done-q}명 많습니다`);
+  if(done===q) return wrap('done',100,`<b>${done}</b><i>/${q}명</i>`,'달성',tipBase+' · 오늘 목표를 채웠습니다');
+  return wrap('',pct,`<b>${done}</b><i>/${q}명</i>`,'',tipBase+` · ${q-done}명 남았습니다`);
+}
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
 function buildGrid(wd){
@@ -4575,6 +4716,7 @@ function buildGrid(wd){
   //   필터·정렬·숨김으로 툴바가 다시 그려져도 치던 검색어가 날아가지 않게.
   const gsVal=esc(STATE.gSearch||'');
   return `<div class="gridbar">
+      ${_tpHtml(wd.todayProgress)}
       <div class="gsearch"><span class="ic">🔍</span>
         <input id="gsInput" type="text" placeholder="표 안에서 찾기…" autocomplete="off" value="${gsVal}"
                oninput="_gsInput(this.value)" onkeydown="_gsKey(event)">
@@ -6009,10 +6151,20 @@ function _pmBuildFix(items){
       if(it.accountRef && it.accountRef.reviewerId){
         const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
         let a=accts.get(k);
-        if(!a) accts.set(k, a={ key:k, ref:it.accountRef, name:it.reviewerName||'', isSub:!!it.isSub,
+        /* ★★ 카드·팝업이 가리키는 것은 "리뷰어"가 아니라 **계좌 명의**다 —
+             한 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 이름만으로는
+             어느 계좌를 고치라는 건지 구분되지 않는다(실사고 2026-08-10 정라희/정석진).
+           ★ 명의 이름은 **계좌 원장 값**(`accountName`)을 쓴다 — 시트 이름 칸(`reviewerName`)은
+             탭마다 주문자/수취인 중 무엇이 잡혔는지 달라 명의로 신뢰할 수 없다(폴백으로만). */
+        if(!a) accts.set(k, a={ key:k, ref:it.accountRef,
+          name:it.accountName||it.reviewerName||'', owner:it.accountOwner||'',
+          phone8:it.phone8||'', isSub:!!it.isSub,
           bankName:it.bankName||'', bankAccount:it.bankAccount||'', accountHolder:it.accountHolder||'',
-          issues:[], rows:0 });
+          issues:[], rows:0, works:[] });
         a.rows++;
+        let aw=a.works.find(x=>x.key===w.key);
+        if(!aw) a.works.push(aw={ key:w.key, label:w.tabLabel, rows:0 });
+        aw.rows++;
         for(const x of iss) if(PAY_ACCT_ISSUES.includes(x) && a.issues.indexOf(x)<0) a.issues.push(x);
         let e=w.accts.find(x=>x.key===k);
         if(!e) w.accts.push(e={ key:k, rows:0 });
@@ -6026,12 +6178,20 @@ function _pmBuildFix(items){
   const byRows=(a,b)=>b.rows-a.rows;
   const acctList=[...accts.values()].sort(byRows);
   const acctIdx={}; acctList.forEach((a,i)=>{ acctIdx[a.key]=i; });
+  /* ★ 같은 소유자의 다른 명의를 서로 가리켜 준다 — "정라희 계좌를 고치라는데 어느 정라희?"
+       를 화면에서 끝내기 위한 유일한 단서(팝업이 목록으로 보여주고 바로 건너뛴다). */
+  const byOwner=new Map();
+  acctList.forEach((a,i)=>{ const o=(a.ref&&a.ref.reviewerId)||''; if(!byOwner.has(o)) byOwner.set(o,[]); byOwner.get(o).push(i); });
+  acctList.forEach((a,i)=>{
+    const sib=(byOwner.get((a.ref&&a.ref.reviewerId)||'')||[]).filter(x=>x!==i);
+    a.siblings = sib.map(x=>({ idx:x, name:acctList[x].name, phone8:acctList[x].phone8, isSub:acctList[x].isSub, rows:acctList[x].rows }));
+  });
   const workList=[...works.values()].sort(byRows);
   for(const w of workList){
     w.noReviewer=w._nr.size; w.noPrice=w._np.size; delete w._nr; delete w._np;
     w.accts = w.accts.map(e=>{
       const i=acctIdx[e.key], a=acctList[i]||null;
-      return a ? { key:e.key, idx:i, rows:e.rows, name:a.name, isSub:a.isSub } : null;
+      return a ? { key:e.key, idx:i, rows:e.rows, name:a.name, owner:a.owner, phone8:a.phone8, isSub:a.isSub } : null;
     }).filter(Boolean).sort(byRows);
   }
   return { works:workList, accts:acctList,
@@ -6042,23 +6202,63 @@ function _pmBuildFix(items){
 function _pmSheetOk(u){ return /^https:\/\/docs\.google\.com\//.test(String(u||'')); }
 
 /** 작업별 [📄 시트] 버튼 — ★ 못 여는 이유를 **말한다**(링크가 없다고 조용히 숨기지 않는다).
+ *  ★★ **이관된 작업(sheetless)도 연다**(사용자 확정 2026-08-10) — 초도 보완에는 아직 시트를
+ *     봐야 하는 값이 있다. "시스템 표가 진실원본"은 링크를 막는 근거가 아니라 **경고문의 근거**라
+ *     클릭 시 "편집하지 말고 참고만" 팝업을 거친다(`_pmOpenSheet`).
  *  ★ 인자는 works 배열 인덱스(외부 문자열 보간 금지 — 탭명·URL 은 시트/DB 발 문자열) */
 function _pmSheetBtn(i){
   const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return '';
-  if(_pmSheetOk(w.sheetUrl))
-    return `<button class="btn sm" title="구글시트에서 이 작업 탭 열기" onclick="_pmOpenSheet(${i})">📄 시트</button>`;
+  if(_pmSheetOk(w.sheetUrl)){
+    const ttl = w.sheetless
+      ? '이관된 작업 — 참고용으로만 여세요(시트 편집은 시스템에 반영되지 않습니다)'
+      : '구글시트에서 이 작업 탭 열기';
+    return `<button class="btn sm" title="${esc(ttl)}" onclick="_pmOpenSheet(${i})">📄 시트${w.sheetless?'<span class="pmauto">참고</span>':''}</button>`;
+  }
+  // 링크가 없는 경우는 딱 둘 — 사유를 **구분해서** 말한다(뭉뚱그리면 원인을 엉뚱한 데서 찾는다)
   const why = w.sheetless
-    ? '무시트 작업입니다 — 구글시트가 없고 시스템 표가 진실원본입니다'
+    ? '시스템에서 만든 무시트 작업이라 열 수 있는 구글시트가 없습니다'
     : '시트 링크를 알 수 없습니다 — 작업 탭이 등록되지 않았거나 조회에 실패했습니다';
   return `<button class="btn sm" disabled title="${esc(why)}">📄 시트</button>`;
 }
+
+/** 시트 열기 — ★ 이관된 작업은 **경고를 읽고 확인한 뒤에만** 이동한다.
+ *  ★ `window.open` 은 클릭 핸들러 **동기 구간**에서 불러야 팝업 차단에 안 걸린다(onOk 는 async 아님). */
 function _pmOpenSheet(i){
   const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return;
   if(!_pmSheetOk(w.sheetUrl)){ toast('이 작업은 열 수 있는 구글시트가 없습니다'); return; }
-  window.open(w.sheetUrl, '_blank', 'noopener');
+  if(!w.sheetless){ window.open(w.sheetUrl, '_blank', 'noopener'); return; }
+  _pmDialog({
+    title:`⚠ 참고용 시트 — ${esc(w.tabLabel)}`,
+    body:`<div class="pmsheetwarn">
+      <b>탈구글시트를 진행했습니다.</b><br>
+      구글시트에 입력한 내용은 <b>시스템에 반영되지 않으므로</b><br>
+      시트를 편집하지 마시고 <b>참고용으로만</b> 사용하세요.</div>`,
+    okLabel:'확인하고 시트로 이동하기',
+    onOk: ()=>{ window.open(w.sheetUrl, '_blank', 'noopener'); return true; }
+  });
 }
 
 const _PM_FIX_CARD_CAP = 8;   // 카드로 펼치는 작업 수 상한(나머지는 아래 표의 [보완]으로)
+
+/* ── 계좌 명의 표기 — 카드 줄·팝업 제목·형제 목록이 **같은 함수**를 쓴다 ──
+   ★ 사본을 두면 "카드는 정라희인데 팝업은 정석진" 처럼 화면마다 다른 명의를 말하게 된다.
+   ★ 뒤 4자리는 그 명의의 연락처 — 이름이 같아도(동명이인·본인/타계정) 구분되는 유일한 값. */
+function _pmAcctName(a){ return (a&&a.name)||'(이름 없음)'; }
+function _pmAcctTail(a){ const p=String((a&&a.phone8)||''); return p.length>=4?p.slice(-4):''; }
+/** 한 줄 표기: `정석진 ·0101  정라희의 타계정` / `정라희 ·2121` */
+function _pmAcctLabel(a){
+  const tail=_pmAcctTail(a);
+  let s=esc(_pmAcctName(a)) + (tail?` <span class="pmtail">·${esc(tail)}</span>`:'');
+  if(a&&a.isSub) s+=`<span class="pmauto">${a.owner?esc(a.owner)+'의 ':''}타계정</span>`;
+  return s;
+}
+/** 팝업 제목용 평문(마크업 없이) */
+function _pmAcctPlain(a){
+  const tail=_pmAcctTail(a);
+  let s=_pmAcctName(a) + (tail?' ·'+tail:'');
+  if(a&&a.isSub) s+= a.owner?` (${a.owner}의 타계정)`:' (타계정)';
+  return s;
+}
 
 function _pmFixBlock(){
   const f=STATE.pmFix||{works:[],accts:[],noReviewer:0,noPrice:0};
@@ -6066,8 +6266,8 @@ function _pmFixBlock(){
   const shown=f.works.slice(0, _PM_FIX_CARD_CAP);
   const rest=f.works.length-shown.length;
 
-  const line=(icon,label,n,btn,cls)=>`<div class="pmfixrow${cls?' '+cls:''}">
-    <span class="nm">${icon} ${label}</span><span class="n">${n}건</span>${btn||''}</div>`;
+  const line=(icon,label,n,btn,cls,title)=>`<div class="pmfixrow${cls?' '+cls:''}">
+    <span class="nm"${title?` title="${esc(title)}"`:''}>${icon} ${label}</span><span class="n">${n}건</span>${btn||''}</div>`;
 
   const cards=shown.map(w=>{
     const i=f.works.indexOf(w);
@@ -6075,9 +6275,10 @@ function _pmFixBlock(){
     const lines=[];
     if(w.needBank) lines.push(line('🏦','이체은행 미지정', w.bankRows, fixWork));
     if(w.needMemo) lines.push(line('🏷','통장표시 없음', w.memoRows, fixWork));
+    // ★ 줄이 좁아 말줄임되어도 **누구 명의인지**는 title 로 남는다(이름만으로 구분 안 되는 케이스)
     for(const a of w.accts) lines.push(line('💳',
-      `계좌 — ${esc(a.name)||'(이름 없음)'}${a.isSub?'<span class="pmauto">타계정</span>':''}`,
-      a.rows, `<button class="btn sm" onclick="_pmFixAcct(${a.idx})">보완</button>`));
+      `계좌 — ${_pmAcctLabel(a)}`,
+      a.rows, `<button class="btn sm" onclick="_pmFixAcct(${a.idx})">보완</button>`, '', '계좌 — '+_pmAcctPlain(a)));
     // ★ 화면에서 못 고치는 사유는 **버튼 대신 조치 문장**(눌러도 아무 일 없는 버튼 금지)
     if(w.noReviewer) lines.push(`<div class="pmfixrow info">
       <span class="nm">👤 리뷰어 미등록 ${w.noReviewer}건 — 등록리뷰어DB에서 먼저 등록해야 계좌를 지목할 수 있습니다</span></div>`);
@@ -6148,19 +6349,34 @@ function _pmPickBank(el){
 function _pmFixAcct(i){
   const a=(STATE.pmFix&&STATE.pmFix.accts||[])[i]; if(!a) return;
   const why=a.issues.map(x=>PAY_ISSUE_LABEL[x]||x).join(', ');
+  const tail=_pmAcctTail(a);
+  const works=(a.works||[]).slice(0,4).map(x=>`${esc(x.label)} ${x.rows}건`).join(' · ')
+    + ((a.works||[]).length>4?` 외 ${(a.works||[]).length-4}개 작업`:'');
+  /* ★★ "누구 명의 계좌인가"를 팝업 맨 위에서 못박는다 — 같은 소유자가 본인 명의와
+       타계정 명의로 여러 건 참여하면 이름만으로는 어느 계좌인지 알 수 없다(실사고).
+     ★ 같은 소유자의 다른 명의는 **목록으로 보여주고 바로 건너뛴다**(인덱스만 전달). */
+  const sib=(a.siblings||[]).map(s=>`<button type="button" class="pmsib" onclick="_pmFixAcct(${s.idx})">${_pmAcctLabel(s)} · ${s.rows}건</button>`).join('');
+  const who=`<div class="pmwho">
+    <div class="t"><b>${esc(_pmAcctName(a))}</b> 명의 계좌${tail?` <span class="pmtail">·${esc(tail)}</span>`:''}</div>
+    <div class="d">${a.isSub
+      ? `${a.owner?esc(a.owner)+' 님이 ':''}등록한 <b>타계정</b>입니다 — 본인 명의 계좌와 <b>별도</b>로 저장됩니다.`
+      : `<b>본인 명의</b> 계좌입니다 — 이 리뷰어의 타계정 건은 별도 항목으로 나옵니다.`}</div>
+    ${sib?`<div class="d">같은 소유자의 다른 명의: ${sib}</div>`:''}</div>`;
   _pmDialog({
-    title:`계좌 보완 — ${esc(a.name)||'(이름 없음)'}${a.isSub?' (타계정)':''}`,
-    sub:`${esc(why)} · 이 리뷰어의 <b>${a.rows}건</b>이 함께 처리됩니다.`,
+    title:`계좌 보완 — ${esc(_pmAcctPlain(a))}`,
+    sub:`${esc(why)} · 이 명의로 참여한 <b>${a.rows}건</b>이 함께 처리됩니다.${works?`<br>작업: ${works}`:''}`,
     body:`
+      ${who}
       <div class="pmf"><label>은행명</label>
         <input id="pmBankNameIn" value="${esc(a.bankName||'')}" placeholder="예) 국민은행 · 카카오뱅크">
         <div class="hint">이체 서식의 은행코드로 바뀌는 값이라 <b>정식 은행명</b>이어야 합니다. 인식 못 하면 저장 시 알려드립니다.</div></div>
       <div class="pmf"><label>계좌번호</label>
-        <input id="pmAcctIn" value="${esc(a.bankAccount||'')}" placeholder="숫자만 입력"></div>
+        <input id="pmAcctIn" value="${esc(a.bankAccount||'')}">
+        <div class="hint"><b>-</b> 를 넣어도 자동으로 빠지고 숫자만 저장됩니다. 앞자리 <b>0</b> 은 그대로 유지됩니다.</div></div>
       <div class="pmf"><label>예금주</label>
         <input id="pmHolderIn" value="${esc(a.accountHolder||'')}" placeholder="예금주명"></div>
       <div class="pmscope">${a.isSub
-        ? '이 리뷰어의 <b>타계정 전용 계좌</b>로 저장됩니다(소유자 공통계좌는 그대로 둡니다).'
+        ? `<b>${esc(_pmAcctName(a))}</b> 명의(타계정) 전용 계좌로 저장됩니다 — 소유자 공통계좌는 그대로 둡니다.`
         : '등록리뷰어DB의 계좌 정보로 저장됩니다 — 비워 둔 칸은 <b>덮어쓰지 않습니다</b>.'}</div>`,
     okLabel:'저장',
     onOk: async ()=>{

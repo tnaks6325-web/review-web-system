@@ -2445,7 +2445,13 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
-  if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; res.headers = headers || []; res.customColumns = customCols; }
+  if (showEdits) {
+    res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
+    res.headers = headers || []; res.customColumns = customCols;
+    // 오늘 참여현황(표 툴바 표기) — **내부인만**. 광고주 응답엔 넣지 않는다(정원·모집 기준은 내부 운영값).
+    //   fail-soft: 실패해도 작업보드는 그대로 뜨고, 화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
+    res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });
+  }
   else if (role === 'advertiser') { res.headers = headers || []; }   // 광고주: 화이트리스트 헤더(그리드 렌더용)
   return res;
 }
@@ -3419,6 +3425,76 @@ async function tabCampaignsMap({ force = false } = {}) {
   }
 }
 
+/** 오늘 참여현황 — 작업보드 표 툴바의 `8/10 (월) 참여현황 12/20명` 재료.
+ *  시안 = frontend/docs/design-grid-today-progress.html (C안 도넛 + B안 파란 날짜).
+ *
+ *  ★★ **판정 사본 0** — 오늘 정원은 `computeCampaignState` 가 정한 값(`dailyQuota`)을 그대로 쓴다.
+ *    여기서 "일건수 + 이월" 같은 식을 다시 세우면 066 이월 상한·095 날짜별 조절·098 이월 보류·
+ *    총량 clamp 를 모르는 두 번째 기준이 생겨 **툴바는 20명인데 카드·[📅 인원] 은 25명**으로 갈린다
+ *    (레포가 반복해서 밟은 함정 — `todayNaturalQuota` 를 서버가 실어 보내는 것과 같은 이유).
+ *  ★ 재료 3종(counts · 시트 일정 · now)도 `tabCampaignsMap`/`/campaign/admin/list` 와 같은 것을 모은다.
+ *  ★★ 분자 = **오늘 제출 확정(`todaySubmitted`)** — 진행 중(결제 중 홀드)은 `holds` 로 따로 싣는다.
+ *    확정+홀드를 한 숫자로 합치면 홀드 만료 때 **숫자가 줄어들어** "12명이었는데 10명이 됐다"가 된다.
+ *  ★ 키는 마감·공고 주석과 같은 규칙 — **이름 + gid 폴백**(리네임으로 연결이 조용히 풀리면
+ *    멀쩡한 공고를 두고 "모집 기준 없음"이 뜬다). ★★ 그 gid 는 **서버가 `tab_configs` 에서 다시 구한다**
+ *    — 클라이언트가 보낸 gid 를 믿으면 낡은 화면이 **같은 시트 다른 탭의 공고 정원**을 이 표에 띄운다
+ *    (스코프 판정이 tabGid 를 안 믿는 것과 같은 규율).
+ *  ★ 살아있는 공고가 여럿이면(차수 재발행 등) **합산하고 그 사실을 `campaignCount` 로 말한다**
+ *    — 하나만 골라 쓰면 나머지 공고 물량이 조용히 빠진다.
+ *  ★ 연결 공고 0개 = `reason:'no_campaign'`(정원을 정할 수 없음) — **0/0 으로 꾸미지 않는다**.
+ *  ★ 읽기 전용 · 시트 무접촉 · 어떤 실패도 throw 하지 않는다(작업보드 로딩을 죽이지 않는다).
+ *  @returns {{ok:boolean, dateStr:string, quota:number|null, done:number, holds:number,
+ *             campaignCount:number, state:string|null, stateReason:string|null, reason:string|null}} */
+async function tabTodayProgress(db, { sheetId, tabName } = {}) {
+  const now = new Date();
+  const { computeCampaignState, fetchCampaignCounts, kstTodayStr } = require('./campaignState.service');
+  const dateStr = kstTodayStr(now);
+  const base = { ok: true, dateStr, quota: null, done: 0, holds: 0, sheetFilled: null, campaignCount: 0, state: null, stateReason: null, reason: null };
+  try {
+    const { rows: tc } = await db.query(
+      `SELECT COALESCE(tab_gid, '') AS gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+      [sheetId, tabName]);
+    const gid = String((tc[0] && tc[0].gid) || '').trim();
+    // ★ 표 기준 참여현황(사용자 확정 B안)은 **공고 유무와 무관하게** 셀 수 있다 —
+    //   공고를 못 찾는 경우(no_campaign)에도 "오늘 표에 몇 줄 찼는가"는 사실이므로 먼저 구한다.
+    //   카드와 **같은 함수**를 쓴다(사본을 두면 또 갈린다).
+    const { todayFilledForTab } = require('./tabFilled.service');
+    base.sheetFilled = await todayFilledForTab(db, sheetId, tabName, now);
+    const { rows } = await db.query(
+      `SELECT * FROM recruit_campaigns
+        WHERE linked_sheet_id = $1
+          AND (linked_tab_name = $2 OR ($3 <> '' AND COALESCE(linked_tab_gid, '') = $3))
+        ORDER BY created_at DESC`, [sheetId, tabName, gid]);
+    // 참여형 + 게시(active) 공고만 = 오늘 사람을 받는 공고. 레거시(카톡 신청)는 정원 개념이 없다.
+    const live = rows.filter(r => r.participation_mode && r.status === 'active');
+    if (!live.length) return { ...base, reason: rows.length ? 'no_live_campaign' : 'no_campaign' };
+
+    const { deriveSchedules, scheduleFor, tabsOfCampaigns } = require('./campaignSchedule.service');
+    const [countsMap, schedMap] = await Promise.all([
+      fetchCampaignCounts(db, live.map(r => r.id), now),
+      deriveSchedules(db, tabsOfCampaigns(live), now).catch(() => null),
+    ]);
+
+    let quota = 0, done = 0, holds = 0, state = null, stateReason = null;
+    for (const r of live) {
+      const counts = countsMap.get(r.id) || { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 };
+      const st = computeCampaignState(r, counts, now, schedMap ? scheduleFor(schedMap, r) : null);
+      quota += Number(st.dailyQuota) || 0;
+      done += Number(counts.todaySubmitted) || 0;
+      holds += Number(counts.todayActiveHolds) || 0;
+      // 여럿이면 "가장 열려 있는" 상태를 대표로 — 하나라도 열려 있으면 아직 받는 중이다.
+      if (state === null || (state !== 'open' && st.state === 'open')) { state = st.state; stateReason = st.stateReason || null; }
+    }
+    // ★ `done`(공고를 거쳐 오늘 확정된 수)의 의미는 **그대로 둔다** — 화면은 `sheetFilled` 를
+    //   우선 표시하되 툴팁에서 둘의 차이를 말한다(지각 미확정·수기 입력이 조용히 숨지 않게).
+    return { ...base, quota, done, holds, campaignCount: live.length, state, stateReason };
+  } catch (err) {
+    // fail-soft: "모른다"로 돌려주고 화면이 그렇게 말한다(0/0 으로 위장하면 "오늘 할 일 없음"으로 읽힌다).
+    logger.warn(`[trackB] tabTodayProgress 실패(참여현황 표기 없이 계속): ${err.message}`);
+    return { ...base, ok: false };
+  }
+}
+
 // ══ M2: 열린 작업 줄(개인별) + 오늘 완료(전사 공통) — migration 089 ═══════════════════════
 //   PRD: frontend/docs/prd-workboard-worktabs.html §1(두 상태 비교). 마감(088)과 **다른 것**이다.
 
@@ -3526,6 +3602,7 @@ module.exports = {
   setTabFinished,
   tabStatsMap,
   tabCampaignsMap,
+  tabTodayProgress,
   identityKey,
   classifyParity,
   projectTab,
