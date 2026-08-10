@@ -4490,7 +4490,7 @@ function _tpHtml(tp){
   // ① 조회 실패 — 0/0 으로 위장하면 "오늘 할 일 없음"으로 읽힌다.
   if(tp.ok===false) return wrap('unk',0,'<i>? / ?명</i>','불러오지 못함','오늘 참여현황을 불러오지 못했습니다 — 작업을 다시 열어보세요.');
   // ② 기준을 모름(연결 공고 없음/게시 전) — 구매한 인원은 사실이므로 그대로 두고 분모만 ?.
-  if(q===null) return wrap('unk',0,`<b>${done}</b><i>/ ?명</i>`,'모집 기준 없음',
+  if(q===null) return wrap('unk',0,`<b>${done}</b><i> / ?명</i>`,'모집 기준 없음',
     (tp.reason==='no_live_campaign'?'연결된 모집공고가 게시 전이라':'연결된 모집공고가 없어')+' 오늘 모집인원을 정할 수 없습니다. 오늘 구매 '+done+'명.');
   const tipBase = `오늘 모집 ${q}명 · 구매 완료 ${done}명`+(holds?` · 진행 중 ${holds}명(결제 중)`:'')
     + (tp.campaignCount>1?` · 공고 ${tp.campaignCount}개 합산`:'');
