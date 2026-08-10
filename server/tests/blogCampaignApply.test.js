@@ -34,8 +34,16 @@ const UTIL = read(path.join(ROOT, 'src', 'utils', 'blogPostUrl.js'));
 const HTML = read(path.join(FRONT, 'campaign.html'));
 
 console.log('\n=== §1 마이그레이션 101 · 프리플라이트 ===');
-ok(/campaign_applications[\s\S]*ADD COLUMN IF NOT EXISTS\s+blog_url\s+TEXT/i.test(MIG), '101: campaign_applications.blog_url TEXT');
-ok(/order_submissions[\s\S]*ADD COLUMN IF NOT EXISTS\s+blog_url\s+TEXT/i.test(MIG), '101: order_submissions.blog_url TEXT');
+{
+  // ★ `[\s\S]*` 로 두 문장을 가로질러 재면 **한 쪽을 주석 처리해도 통과**한다(변이시험 실측).
+  //   줄 주석을 걷어낸 뒤 문장 단위로 본다.
+  const live = MIG.split('\n').filter(l => !/^\s*--/.test(l)).join('\n');
+  const stmts = live.split(';').map(x => x.trim()).filter(Boolean);
+  const has = (tbl) => stmts.some(x =>
+    new RegExp('ALTER\\s+TABLE\\s+' + tbl + '[\\s\\S]*ADD COLUMN IF NOT EXISTS\\s+blog_url\\s+TEXT', 'i').test(x));
+  ok(has('campaign_applications'), '101: campaign_applications.blog_url TEXT');
+  ok(has('order_submissions'), '101: order_submissions.blog_url TEXT');
+}
 ok(!/\bUPDATE\b/i.test(MIG), '101: 백필(UPDATE) 0 — 기존 행 무접촉');
 ok(!/\bCHECK\s*\(/i.test(MIG), '101: DB CHECK 없음(087 규율 — 어휘 확장이 저장을 깨지 않게)');
 ok(!/REFERENCES/i.test(MIG), '101: FK 없음(082 의 42804 계열 회피)');
@@ -163,7 +171,9 @@ ok(!/isBlogCampaign[\s\S]{0,200}includes\(/.test(HTML), 'isBlogCampaign 이 문�
   ok(iG > 0 && iF > 0 && iG < iF, '★ 화면도 요청 전에 받는다(서버 왕복 낭비·자리 점유 0)');
   ok(/body\.blogUrl\s*=\s*_blogUrl/.test(body), '검증된 값을 blogUrl 로 전송');
 }
-ok(/j\.reason === 'blog_url_required'/.test(HTML), '★ 서버 거부(403)를 화면이 받아 다시 입력받는다');
+// ★ 문자열 존재만 보면 `if(false && …)` 를 통과시킨다(변이시험 실측) — 분기 형태를 통째로 고정한다.
+ok(/if\(\s*j\.reason === 'blog_url_required'\s*\)\{[^}]*openBlogSheet\(/.test(HTML),
+  '★ 서버 거부(403)를 화면이 받아 다시 입력받는다(막다른 길 금지)');
 ok(/id="blogSheet"/.test(HTML) && /id="blogUrlIn"/.test(HTML), '입력 시트 마크업');
 
 console.log('\n=== §8 소스 위생 ===');
