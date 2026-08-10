@@ -46,6 +46,10 @@ const REQUIRED_SCHEMA = [
   ['work_orders', 'work_kind'],
   ['tab_configs', 'work_kind'],
   ['recruit_campaigns', 'work_kind'],
+  // 101 — 블로그URL(블로그 주소). 둘 다 INSERT 목록에 들어가므로 하나라도 없으면
+  //   ① 블로그 공고 참여(apply) ② 구매양식 제출(주문 원장 INSERT)이 전면 42703.
+  ['campaign_applications', 'blog_url'],
+  ['order_submissions', 'blog_url'],
   ['payment_batch_items', 'result_status'],       // 100 — 이체결과 반영 UPDATE SET 목록(없으면 반영이 통째로 42703)
   ['payment_batches', 'applied_at'],              // 100 — 위와 같은 트랜잭션에 들어가므로 함께 막아야 한다
 ];

@@ -779,7 +779,7 @@ async function _authoritativeHold(ctx) {
   if (!ctx || !ctx.applicationId || !ctx.holdToken) return ctx;
   try {
     const { rows } = await pool.query(
-      `SELECT ca.phone8, ca.option_key, ca.status,
+      `SELECT ca.phone8, ca.option_key, ca.blog_url, ca.status,
               ca.order_submission_id, ca.late_order_id,
               (so.id IS NOT NULL) AS sub_alive,
               (lo.id IS NOT NULL) AS late_alive
@@ -799,6 +799,9 @@ async function _authoritativeHold(ctx) {
       ctx.phone8 = srv;
     }
     ctx.optionKey = rows[0].option_key || null;
+    // ★ 101: 블로그 주소도 **서버가 홀드에서 읽는다**(클라 전달 금지 — 옵션 서버권위와 같은 규율).
+    //   같은 왕복이라 순증 0. 이 값이 주문 원장 INSERT 와 시트 '블로그URL' 칸으로 그대로 간다.
+    ctx.blogUrl = rows[0].blog_url || null;
     // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
     //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
     //   confirmHoldInTx 의 late UPDATE 는 `late_order_id IS NULL` 조건이라 2회차 재제출은
@@ -981,7 +984,10 @@ router.post('/order', async (req, res, next) => {
     let effectiveOptKey = selectedOptKey;
     if (holdCtx && holdCtx.optionKey) effectiveOptKey = holdCtx.optionKey;
 
-    const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey: effectiveOptKey };
+    // ★ 101: 블로그 주소는 **홀드에서 읽은 서버값만** 싣는다(요청 본문 미신뢰 — 옵션과 같은 규율).
+    //   홀드가 없거나(레거시·관리자 경유) 리뷰체험단이면 undefined = 시트 '블로그URL' 칸 무접촉.
+    const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
+                        selectedOptKey: effectiveOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '' };
     const ledger = await createOrderLedgerEntry({
       sheetId, tabName, gid,
       orderData,

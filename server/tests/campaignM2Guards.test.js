@@ -25,7 +25,8 @@ ok('apply: profile_missing 403 + missing 목록 반환', /reason: 'profile_missi
 //   ★ 위치를 못 찾으면(-1) 통과로 새지 않게 존재부터 단언한다(약한 단언은 잘못된 이유로 통과한다).
 {
   const _iGate = routes.indexOf("reason: 'profile_missing'");
-  const _iIns = routes.indexOf("VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9)");
+  // ★ 파라미터는 컬럼이 늘 때마다 뒤에 붙는다 — 꼬리를 고정하지 않는다(101 blog_url 에서 실제로 드리프트)
+  const _iIns = routes.search(/VALUES \(\$1,\$2,\$3,\$4,\$5,'applied',\$6,\$7,\$8(,\$\d+)*\)/);
   ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞 (063 owner_phone8 · 082 리뷰비 스냅샷 포함)',
     _iGate > 0 && _iIns > 0 && _iGate < _iIns);
 }

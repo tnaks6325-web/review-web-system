@@ -43,7 +43,7 @@ ok('apply: 타계정 하루한도는 상태 무관(applied_at 기준, status 필
   /owner_phone8 = \$2 AND phone8 <> owner_phone8 AND applied_at >= \$3/.test(applyBody));
 // ★ 082 에서 review_fee_snapshot(참여 시점 리뷰비)이 뒤에 추가됐다 — 검사 의미는 그대로
 //   (앞쪽 컬럼 순서·owner_phone8 존재·명의 phone8 위치). 뒤에 컬럼이 붙는 것은 허용한다.
-ok('apply INSERT: owner_phone8 포함 + 명의 phone8($4)', /\(campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key(, review_fee_snapshot)?\)/.test(applyBody));
+ok('apply INSERT: owner_phone8 포함 + 명의 phone8($4)', /\(campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key(, \w+)*\)/.test(applyBody));
 ok('apply 응답: phone8 = 명의(holdP8) 계약', /phone8: holdP8,/.test(applyBody));
 ok('apply: 타계정 TTL = sub_hold_ttl_min(기본 10)', /isSubApply \? \(Number\(camp\.sub_hold_ttl_min\) \|\| 10\)/.test(applyBody));
 ok('apply: 명의 검증은 findSubAccount(identity.service 공유 정규화)', /findSubAccount/.test(applyBody));

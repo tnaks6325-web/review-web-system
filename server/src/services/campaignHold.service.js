@@ -95,7 +95,10 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
   await client.query(
     `UPDATE order_submissions os
         SET campaign_application_id = ca.id,
-            review_fee_snapshot = COALESCE(os.review_fee_snapshot, ca.review_fee_snapshot)
+            review_fee_snapshot = COALESCE(os.review_fee_snapshot, ca.review_fee_snapshot),
+            -- ★ 101: 블로그 주소도 같은 자리에서 전파(시트/작업표 '블로그URL' 칸의 출처).
+            --   COALESCE = **이미 있는 값은 안 덮는다** — 관리자가 사전등록해 둔 주소가 있으면 그것이 이긴다.
+            blog_url = COALESCE(NULLIF(os.blog_url, ''), ca.blog_url)
        FROM campaign_applications ca
       WHERE os.id = $1 AND os.campaign_application_id IS NULL
         AND ca.id = $2 AND ca.campaign_id = $3 AND ca.phone8 = $4

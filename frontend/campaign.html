@@ -214,6 +214,19 @@
   </div>
 </div>
 
+<!-- 📝 블로그체험단: 블로그 주소 입력 (M5) -->
+<div class="sheet-ovl" id="blogSheet">
+  <div class="sheet">
+    <h3>블로그 주소를 알려주세요</h3>
+    <p>블로그체험단이에요. <b>리뷰를 올릴 블로그 주소</b>를 입력해주세요.</p>
+    <input id="blogUrlIn" type="url" inputmode="url" placeholder="https://blog.naver.com/아이디"
+           style="width:100%;box-sizing:border-box;padding:11px 12px;border:1.5px solid var(--border,#e5e7eb);border-radius:10px;font-size:.92rem;font-family:inherit">
+    <div class="optnote" id="blogSheetNote">http:// 또는 https:// 로 시작하는 주소를 넣어주세요. 작성한 글 주소(포스팅URL)는 나중에 리뷰 제출할 때 넣습니다.</div>
+    <button class="btn" id="blogSheetGo" style="margin-top:12px" onclick="onBlogSheetConfirm()">이 주소로 참여</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="hideBlogSheet()">취소</button>
+  </div>
+</div>
+
 <!-- 👥 타계정 추가참여: 명의 선택 (063 2단계) -->
 <div class="sheet-ovl" id="acctSheet">
   <div class="sheet" style="max-height:84vh;overflow-y:auto">
@@ -840,6 +853,47 @@ async function switchAcct(p8){
   await enterJoined();
 }
 
+/* ═══ 📝 블로그체험단: 블로그 주소 (M5) ═══
+   ★ 판정 규칙은 서버 `utils/blogPostUrl.isPostUrl` 과 **글자 그대로 같은 형식 규칙**(회귀가드가 대조).
+     도메인 화이트리스트 금지 — 어느 플랫폼에 쓸지는 우리가 정하지 않는다.
+   ★ 최종 방어는 서버(apply 403 `blog_url_required`) — 여기 검사는 왕복을 아끼는 안내일 뿐이다. */
+const _BLOG_URL_HINT = 'http:// 또는 https:// 로 시작하는 블로그 주소';
+const _BLOG_URL_LS   = 'blog_url_v1';   // 사람의 블로그 주소는 잘 안 바뀐다 — 다음 공고에서 프리필
+function _isBlogUrl(v){
+  const s = String(v == null ? '' : v).trim();
+  if(!s) return false;
+  if(/[\s"'<>]/.test(s)) return false;
+  if(!/^https?:\/\//i.test(s)) return false;
+  const host = s.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
+  return host.includes('.') && host.length > 3;
+}
+/** 이 공고가 블로그체험단인가 — 서버가 준 값 정확 일치(탭명·상품명 추측 금지) */
+function isBlogCampaign(){ return !!(_camp && _camp.work_kind === 'blog'); }
+let _blogUrl     = '';     // 이번 참여에 쓸 값(확인된 뒤에만 채운다)
+let _blogPending = null;   // 시트 확인 후 이어서 실행할 apply 인자 {optionKey, sub}
+function openBlogSheet(optionKey, sub, msg){
+  _blogPending = { optionKey: optionKey || null, sub: sub || null };
+  const inp = $('blogUrlIn');
+  if(inp && !inp.value){
+    let saved = ''; try{ saved = localStorage.getItem(_BLOG_URL_LS) || ''; }catch(_){}
+    inp.value = _blogUrl || saved;
+  }
+  const note = $('blogSheetNote');
+  if(note) note.textContent = msg || (_BLOG_URL_HINT + ' 를 넣어주세요. 작성한 글 주소(포스팅URL)는 나중에 리뷰 제출할 때 넣습니다.');
+  $('blogSheet').style.display = 'flex';
+  setTimeout(()=>{ try{ inp && inp.focus(); }catch(_){} }, 50);
+}
+function hideBlogSheet(){ $('blogSheet').style.display = 'none'; }
+function onBlogSheetConfirm(){
+  const v = String(($('blogUrlIn') || {}).value || '').trim();
+  if(!_isBlogUrl(v)) return toast('블로그 주소를 확인해주세요 (' + _BLOG_URL_HINT + ')');
+  _blogUrl = v;
+  try{ localStorage.setItem(_BLOG_URL_LS, v); }catch(_){}
+  hideBlogSheet();
+  const p = _blogPending || {}; _blogPending = null;
+  _doApply(p.optionKey, p.sub);
+}
+
 /* ═══ 참여하기 ═══ */
 async function onJoin(){
   if(PREVIEW) return _pvBlock('참여하기');   // ★ 미리보기: 홀드 생성 요청 자체를 보내지 않음
@@ -870,10 +924,13 @@ async function _doApply(optionKey, sub){
   const s = getSession();
   if(!s) return needLogin(onJoin);
   hideOptSheet();
+  // ★ 블로그체험단은 블로그 주소가 필수 — **홀드 생성 요청 전에** 받는다(자리 미점유 = 그날 참여권 미소각)
+  if(isBlogCampaign() && !_isBlogUrl(_blogUrl)){ hideAcctSheet(); return openBlogSheet(optionKey, sub); }
   const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '확인 중…'; }
   try{
     const body = { name: s.name, phone: s.phone8, phone8: s.phone8 };
     if(optionKey) body.optionKey = optionKey;
+    if(isBlogCampaign() && _blogUrl) body.blogUrl = _blogUrl;
     if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
@@ -895,6 +952,8 @@ async function _doApply(optionKey, sub){
       return;
     }
     if(j.reason === 'profile_missing'){ renderMissing(j.missing || []); return; }
+    // ★ 서버가 최종 판정 — 화면 검사를 통과해도 서버가 거부하면 그 사유를 그대로 보이고 다시 받는다
+    if(j.reason === 'blog_url_required'){ _blogUrl = ''; openBlogSheet(optionKey, sub, j.error || ('블로그 주소를 확인해주세요 — ' + _BLOG_URL_HINT)); return; }
     // ★ 공고별 참여 리뷰어 게이트(091) — 자리 미점유 상태에서 차단 안내(마감 위장/사유 고지)
     if(j.reason === 'reviewer_blocked'){ _renderGateBlocked(j); return; }
     // ★ 064: 인기상품 선행조건 미충족 → 일반 모집 목록 모달(테이블+참여 CTA)

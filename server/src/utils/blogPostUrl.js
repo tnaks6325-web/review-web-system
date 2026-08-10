@@ -16,6 +16,14 @@
 const POST_URL_HINT = '포스팅URL을 입력해주세요 (http:// 또는 https:// 로 시작하는 주소)';
 
 /**
+ * 블로그URL(= 그 사람의 **블로그 주소**) 안내문.
+ * ★ 형식 규칙은 포스팅URL과 **같은 `isPostUrl` 하나**를 쓴다(둘 다 사람이 붙여넣는 주소).
+ *   가리키는 대상만 다르다 — 블로그URL = 블로그 주소(모집·선정 시점) / 포스팅URL = 쓴 글 주소(작업 완료 시점).
+ *   규칙을 둘로 나누면 "블로그 주소는 되는데 포스팅 주소는 거부"처럼 조용히 갈라진다.
+ */
+const BLOG_URL_HINT = 'http:// 또는 https:// 로 시작하는 블로그 주소';
+
+/**
  * @param {*} v 입력값(사람이 붙여넣은 문자열)
  * @returns {boolean} 포스팅URL 로 인정할 수 있는가
  */
@@ -33,4 +41,4 @@ function normalizePostUrl(v) {
   return String(v == null ? '' : v).trim();
 }
 
-module.exports = { isPostUrl, normalizePostUrl, POST_URL_HINT };
+module.exports = { isPostUrl, normalizePostUrl, POST_URL_HINT, BLOG_URL_HINT };
