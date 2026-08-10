@@ -159,4 +159,117 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
   return { handled: true, ok: true, column: header, value };
 }
 
-module.exports = { markStatusCell, markSheetlessMemo, SUBMIT_MARK, __setPoolForTest };
+/*
+ * 기존 버그로 남은 작업표의 `O`를 원장상 실제 리뷰 파일 업로드 시각으로 교체한다.
+ *
+ * 범위는 의도적으로 매우 좁다.
+ * - 시트리스 탭만 (시트 기반 작업은 절대 건드리지 않음)
+ * - 작업표 값이 지금도 정확히 `O`인 행만
+ * - review_index가 제출 완료이고 최근 5일에 리뷰 파일 원장이 있는 행만
+ *
+ * 여러 캡처 슬롯이 있을 수 있으므로 마지막 파일 업로드 시각을 사용한다. 이는
+ * 최종 제출 버튼 시각 자체는 아니지만, 과거 O 값에서 복원 가능한 가장 가까운
+ * 제출 근거다.
+ */
+const REVIEW_SUBMIT_TIME_BACKFILL_DAYS = 5;
+const REVIEW_SUBMIT_TIME_BACKFILL_LIMIT = 5000;
+
+async function _reviewSubmitTimeBackfillCandidates(db, { days = REVIEW_SUBMIT_TIME_BACKFILL_DAYS, limit = REVIEW_SUBMIT_TIME_BACKFILL_LIMIT } = {}) {
+  const safeDays = Math.min(Math.max(Number(days) || REVIEW_SUBMIT_TIME_BACKFILL_DAYS, 1), REVIEW_SUBMIT_TIME_BACKFILL_DAYS);
+  const safeLimit = Math.min(Math.max(Number(limit) || REVIEW_SUBMIT_TIME_BACKFILL_LIMIT, 1), REVIEW_SUBMIT_TIME_BACKFILL_LIMIT);
+  const { rows } = await db.query(
+    `SELECT cp.sheet_id AS "sheetId", cp.tab_name AS "tabName", cp.seq AS "rowIndex",
+            cp.reviewer_name AS "reviewerName", ri.submit_col AS "submitCol",
+            MAX(COALESCE(rs.uploaded_at, rs.created_at)) AS "sourceAt",
+            to_char(MAX(COALESCE(rs.uploaded_at, rs.created_at)) AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI') AS "submitValue"
+       FROM campaign_participants cp
+       JOIN tab_configs tc
+         ON tc.sheet_id = cp.sheet_id AND tc.tab_name = cp.tab_name
+       JOIN review_index ri
+         ON ri.sheet_id = cp.sheet_id AND ri.tab_name = cp.tab_name AND ri.row_index = cp.seq
+       JOIN review_submissions rs
+         ON rs.sheet_id = cp.sheet_id AND rs.tab_name = cp.tab_name AND rs.row_index = cp.seq
+      WHERE cp.deleted_at IS NULL
+        AND cp.active = TRUE
+        AND COALESCE(tc.sheetless, FALSE) = TRUE
+        AND ri.is_submitted = TRUE
+        AND COALESCE(ri.submit_col, '') <> ''
+        AND COALESCE(cp.row_json ->> ri.submit_col, '') = 'O'
+        AND COALESCE(rs.uploaded_at, rs.created_at) >= (
+          (NOW() AT TIME ZONE 'Asia/Seoul') - make_interval(days => $1::int)
+        ) AT TIME ZONE 'Asia/Seoul'
+      GROUP BY cp.sheet_id, cp.tab_name, cp.seq, cp.reviewer_name, ri.submit_col
+      ORDER BY MAX(COALESCE(rs.uploaded_at, rs.created_at)) DESC, cp.sheet_id, cp.tab_name, cp.seq
+      LIMIT $2`,
+    [safeDays, safeLimit]
+  );
+  return rows;
+}
+
+/**
+ * @param {{dryRun?:boolean, by?:string}} o
+ * @returns {Promise<{ok:boolean,dryRun:boolean,windowDays:number,candidates?:object[],updated?:number,rebuiltTabs?:number,deferredTabs?:object[]}>}
+ */
+async function backfillReviewSubmitTimes({ dryRun = true, by = 'system' } = {}) {
+  const db = getPool();
+  const candidates = await _reviewSubmitTimeBackfillCandidates(db);
+  const base = {
+    ok: true,
+    dryRun: dryRun !== false,
+    windowDays: REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
+    candidates,
+    candidateCount: candidates.length,
+  };
+  if (dryRun !== false || !candidates.length) return base;
+
+  // 계획값을 파라미터로만 다시 넘긴다. 헤더명·표시값을 SQL 문자열로 조립하지 않아
+  // 열 이름/문자열에 의한 SQL 주입이나 다른 열 갱신이 일어나지 않는다.
+  const plan = candidates.map(c => ({
+    sheet_id: c.sheetId,
+    tab_name: c.tabName,
+    row_index: c.rowIndex,
+    submit_col: c.submitCol,
+    submit_value: c.submitValue,
+  }));
+  const { rows: changed } = await db.query(
+    `UPDATE campaign_participants cp
+        SET row_json = COALESCE(cp.row_json, '{}'::jsonb)
+                      || jsonb_build_object(c.submit_col, c.submit_value),
+            updated_at = NOW(), updated_by = $2
+       FROM jsonb_to_recordset($1::jsonb) AS c(
+         sheet_id text, tab_name text, row_index integer, submit_col text, submit_value text
+       )
+      WHERE cp.sheet_id = c.sheet_id
+        AND cp.tab_name = c.tab_name
+        AND cp.seq = c.row_index
+        AND cp.deleted_at IS NULL
+        AND cp.active = TRUE
+        AND COALESCE(cp.row_json ->> c.submit_col, '') = 'O'
+      RETURNING cp.sheet_id AS "sheetId", cp.tab_name AS "tabName", cp.seq AS "rowIndex"`,
+    [JSON.stringify(plan), String(by || 'system').slice(0, 100)]
+  );
+
+  const tabs = new Map();
+  for (const row of changed) tabs.set(`${row.sheetId}\t${row.tabName}`, row);
+  let rebuiltTabs = 0;
+  const deferredTabs = [];
+  for (const tab of tabs.values()) {
+    try {
+      await require('./sheetlessLedger.service').rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by });
+      rebuiltTabs++;
+    } catch (e) {
+      deferredTabs.push({ sheetId: tab.sheetId, tabName: tab.tabName, reason: e.message });
+      logger.warn(`[sheetlessStatus] review submit time backfill ledger deferred tab=${tab.tabName}: ${e.message}`);
+    }
+  }
+  return Object.assign(base, { updated: changed.length, rebuiltTabs, deferredTabs });
+}
+
+module.exports = {
+  markStatusCell,
+  markSheetlessMemo,
+  backfillReviewSubmitTimes,
+  REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
+  SUBMIT_MARK,
+  __setPoolForTest,
+};
