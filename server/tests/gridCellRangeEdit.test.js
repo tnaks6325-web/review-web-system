@@ -1,0 +1,195 @@
+/* 작업보드 표 — 우클릭 편집 + 범위 선택 복사/붙여넣기 회귀가드 (2026-08-10 사용자 확정)
+ *
+ *   ① 왼쪽 클릭은 더 이상 편집을 시작하지 않는다(onclick="beginEditCell" 부활 차단)
+ *   ② 편집 진입은 우클릭 메뉴(또는 F2) 하나 — contextmenu 배선이 있어야 한다
+ *   ③ 선택은 **직사각형**: 세로로만 끌면 그 열만 잡히고 오른쪽 열은 복사되지 않는다
+ *      (사용자 확정 예: 참여자 열만 세로 드래그 → 수취인·연락처·주소는 복사 대상 아님)
+ *   ④ 붙여넣기는 편집 가능한 셀(.gedit)에만 들어가고, 잠긴 칸은 건너뛰며 건수를 보고한다
+ *
+ *   ★ 문자열 grep 으로는 ③④를 못 잡는다 → 가짜 DOM 위에서 **실제 실행**해 대조한다.
+ *   실행: node tests/gridCellRangeEdit.test.js
+ */
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const HTML = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
+let pass = 0, fail = 0;
+const ok = (name, cond, extra) => { if (cond) { pass++; console.log('  ✓', name); } else { fail++; console.log('  ✗', name, extra != null ? '→ ' + extra : ''); } };
+const eq = (name, a, b) => ok(name, a === b, `got ${JSON.stringify(a)} want ${JSON.stringify(b)}`);
+
+// ── 1. 정적 배선 ────────────────────────────────────────────────
+console.log('\n[1] 배선');
+{ // ★ 렌더러(eCell) 본문에서 검사 — 주석의 설명 문구가 대신 통과시키지 않게 한다.
+  const i = HTML.indexOf('const eCell=(field, disp, edited');
+  const body = i > 0 ? HTML.slice(i, i + 1600) : '';
+  ok('셀 렌더러에 onclick=beginEditCell 부활 없음 (왼쪽 클릭=편집 금지)', !!body && !/beginEditCell/.test(body), body ? '' : 'eCell 렌더러를 찾지 못함');
+}
+ok('우클릭(contextmenu) 로 편집 메뉴를 연다', /addEventListener\('contextmenu'/.test(HTML) && /_openCellMenu\(/.test(HTML));
+ok('우클릭 메뉴에 [이 셀 편집] → beginEditCell', /_menuEditCell\(\)\s*\{[\s\S]{0,200}beginEditCell\(td\)/.test(HTML));
+ok('copy 이벤트로 선택 범위를 TSV 복사', /addEventListener\('copy'/.test(HTML) && /_selectionTsv\(\)/.test(HTML));
+ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste'/.test(HTML) && /_pasteIntoSelection\(/.test(HTML));
+ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.forEach\(j=>commitCellEdit\(/.test(HTML));
+ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
+ok('툴바 안내가 우클릭 편집을 말한다', /셀 우클릭<\/b>=그 셀 편집/.test(HTML));
+ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
+
+// ── 2. 가짜 DOM 위에서 실제 실행 ────────────────────────────────
+function grab(name) {
+  const i = HTML.indexOf('function ' + name + '(');
+  if (i < 0) throw new Error('함수를 찾지 못함: ' + name);
+  let d = 0, started = false;
+  for (let j = i; j < HTML.length; j++) {
+    const c = HTML[j];
+    if (c === '{') { d++; started = true; }
+    else if (c === '}') { d--; if (started && d === 0) return HTML.slice(i, j + 1); }
+  }
+  throw new Error('본문 끝을 찾지 못함: ' + name);
+}
+
+// 최소 DOM: classList / getAttribute / closest / cloneNode / children
+function mkCell(opts) {
+  const cell = {
+    tagName: 'TD', _cls: new Set(opts.cls || []), _attr: Object.assign({}, opts.attr || {}), textContent: opts.text != null ? opts.text : '',
+    children: [], style: {}, parentRow: null,
+    classList: {
+      add(...c) { c.forEach(x => cell._cls.add(x)); }, remove(...c) { c.forEach(x => cell._cls.delete(x)); },
+      contains(c) { return cell._cls.has(c); },
+    },
+    getAttribute(k) { return k in cell._attr ? cell._attr[k] : null; },
+    setAttribute(k, v) { cell._attr[k] = v; },
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    cloneNode() { return { querySelectorAll: () => [], textContent: cell.textContent }; },
+    closest(sel) {
+      if (sel === 'tr' || sel === 'tr.grouphd') return sel === 'tr' ? cell.parentRow : (cell.parentRow && cell.parentRow.classList.contains('grouphd') ? cell.parentRow : null);
+      if (sel === 'tbody') return cell.parentRow && cell.parentRow.parentBody;
+      return null;
+    },
+  };
+  return cell;
+}
+function mkRow(cells, grouphd) {
+  const set = new Set(grouphd ? ['grouphd'] : []);
+  const row = { tagName: 'TR', children: cells, parentBody: null, classList: { contains: c => set.has(c), add: c => set.add(c), remove: c => set.delete(c) } };
+  cells.forEach(c => { c.parentRow = row; });
+  return row;
+}
+
+/* 실측 화면과 같은 모양: [#(잠금) · 참여자(잠금) · 연락처(잠금) · 주문자제출(편집) · 수취인(편집)] */
+function buildFakeGrid() {
+  const names = ['이진우', '조수빈', '고덕하', '윤지혜'];
+  const rows = names.map((nm, i) => mkRow([
+    mkCell({ cls: ['gnum'], text: String(i + 1), attr: { 'data-rid': 'r' + i, 'data-cfield': 'seq' } }),
+    mkCell({ cls: ['gnm', 'gidlock'], text: nm, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idname' } }),
+    mkCell({ cls: ['gcell', 'gidlock'], text: '010-0000-000' + i, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idphone' } }),
+    mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:주문자제출', 'data-val': nm } }),
+    mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:수취인', 'data-val': nm } }),
+  ]));
+  const body = { children: rows, id: 'gbody' };
+  rows.forEach(r => { r.parentBody = body; });
+  return { body, rows };
+}
+
+function makeCtx(fake) {
+  const commits = [], toasts = [];
+  const sandbox = {
+    STATE: { canEdit: true, gSelRange: null, cur: { sheetId: 's', tabName: 't' } },
+    $: sel => (sel === '#gbody' ? fake.body : null),
+    document: {
+      querySelectorAll(sel) {
+        if (!/gselrange|gselanchor/.test(sel)) return [];
+        const out = [];
+        fake.rows.forEach(r => r.children.forEach(c => { if (c.classList.contains('gselrange') || c.classList.contains('gselanchor')) out.push(c); }));
+        return out;
+      },
+      querySelector() { return null; },
+    },
+    toast: m => toasts.push(String(m)),
+    confirm: () => true,
+    commitCellEdit: (rowId, field, val) => commits.push({ rowId, field, val }),
+    _PASTE_MAX: 500,
+    console,
+  };
+  vm.createContext(sandbox);
+  ['_setCellSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_pasteIntoSelection'].forEach(n => {
+    vm.runInContext(grab(n), sandbox);
+  });
+  return { sandbox, commits, toasts };
+}
+
+console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)');
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  // 참여자 열(ci=1)을 이진우(0) → 윤지혜(3) 로 세로 드래그
+  vm.runInContext('_setCellSel({r0:0,c0:1,r1:3,c1:1})', sandbox);
+  const tsv = vm.runInContext('_selectionTsv()', sandbox);
+  eq('세로 드래그 = 그 열만 복사', tsv, '이진우\n조수빈\n고덕하\n윤지혜');
+  ok('오른쪽 열(수취인·연락처·주소) 미포함', !/010-|\t/.test(tsv));
+  const n = vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox);
+  eq('선택 칸 수 = 4', n, 4);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  // 역방향(아래→위, 오른쪽→왼쪽) 드래그도 같은 직사각형
+  vm.runInContext('_setCellSel({r0:2,c0:4,r1:1,c1:3})', sandbox);
+  eq('4방향 자유 드래그 = 같은 직사각형(TSV 2×2)', vm.runInContext('_selectionTsv()', sandbox), '조수빈\t조수빈\n고덕하\t고덕하');
+  eq('앵커 = 범위의 왼쪽 위', vm.runInContext('_selAnchorTd().getAttribute("data-field")', sandbox), 'col:주문자제출');
+}
+{
+  const fake = buildFakeGrid();
+  fake.rows.splice(2, 0, (() => { const r = mkRow([mkCell({ text: '그룹' })], true); r.parentBody = fake.body; return r; })());
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:1,r1:4,c1:1})', sandbox);
+  ok('그룹 머리행은 복사에서 제외', !/그룹/.test(vm.runInContext('_selectionTsv()', sandbox)));
+}
+
+console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits, toasts } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:0,c1:3})', sandbox);
+  vm.runInContext('_pasteIntoSelection("가\\t나\\n다\\t라")', sandbox);
+  eq('2×2 붙여넣기 = 4칸 저장', commits.length, 4);
+  eq('첫 칸은 선택 시작 칸', commits[0].field, 'col:주문자제출');
+  eq('오른쪽으로 이어짐', commits[1].field, 'col:수취인');
+  eq('아래 행으로 이어짐', commits[2].rowId, 'r1');
+  ok('건수를 보고한다', toasts.some(t => /4개 칸 붙여넣음/.test(t)), toasts.join('|'));
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits, toasts } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:1,r1:1,c1:1})', sandbox);   // 참여자(신원 잠금) 열
+  vm.runInContext('_pasteIntoSelection("홍길동\\n임꺽정")', sandbox);
+  eq('잠긴 신원 칸에는 쓰지 않는다', commits.length, 0);
+  ok('잠긴 칸을 조용히 넘기지 않고 말한다', toasts.some(t => /잠긴 칸 2개/.test(t)), toasts.join('|'));
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:2,c1:3})', sandbox);
+  vm.runInContext('_pasteIntoSelection("공통값")', sandbox);
+  eq('한 칸 복사 → 선택 범위 채우기(엑셀식)', commits.length, 3);
+  ok('모두 같은 값', commits.every(c => c.val === '공통값'));
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:0,c1:3})', sandbox);
+  vm.runInContext('_pasteIntoSelection("이진우")', sandbox);   // 이미 같은 값
+  eq('같은 값은 저장 왕복을 만들지 않는다', commits.length, 0);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox, commits, toasts } = makeCtx(fake);
+  sandbox.STATE.canEdit = false;
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:0,c1:3})', sandbox);
+  vm.runInContext('_selectionTsv()', sandbox);
+  ok('열람 전용도 복사는 된다(선택은 유효)', vm.runInContext('_selectionTsv()', sandbox) === '이진우');
+  eq('열람 전용 계정에는 붙여넣기 이벤트가 애초에 걸리지 않는다(배선)', /if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
+  void commits; void toasts;
+}
+
+console.log(`\n${fail ? '❌' : '✅'} pass ${pass} · fail ${fail}`);
+process.exit(fail ? 1 : 0);
