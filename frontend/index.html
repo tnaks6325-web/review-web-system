@@ -705,7 +705,12 @@
         <p id="greetingSub">로그인하여 리뷰 내역을 확인하세요</p>
       </div>
       <div class="home-header-actions">
-        <a href="/admin"><i class="fas fa-lock"></i> 관리자</a>
+        <!-- ★ [관리자] = 인트라넷 SSO 브릿지(inadd-system `/review-sso`) — 인트라넷 세션이 살아 있으면
+             바로 리뷰웹시스템[3버전]으로, 아니면 인트라넷 로그인 화면으로 보낸다.
+             크로스오리진이라 여기서 세션을 읽을 수 없어 인트라넷 도메인을 한 번 거친다(토큰은 #sso= 프래그먼트 핸드오프).
+             ★ 자체 관리자 계정(master/admin) 경로는 그대로 살아 있다 — 로그인 화면 하단의 "관리자 페이지 →"(/admin)와
+               브릿지 안내 화면의 [리뷰웹 계정으로 로그인]. 이 링크를 /admin 으로 되돌리면 인트라넷 자동 진입이 사라진다. -->
+        <a href="https://inadd-system.pages.dev/review-sso"><i class="fas fa-lock"></i> 관리자</a>
         <button onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> 로그아웃</button>
       </div>
     </div>
