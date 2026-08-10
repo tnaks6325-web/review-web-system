@@ -22,6 +22,15 @@ const { requiredSlotKeys, effectiveCaptureSlots } = require('../utils/captureSlo
 const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 
 // ═══════════════════════════════════════════════════════════
+// 블로그체험단(099) — memo 가 들어갈 열은 종류에 따라 우선순위가 다르다.
+// 열 고르기는 `utils/memoColumn` 단일 출처(이 경로·큐 재시도·무시트 작업표 기록 공용).
+// ★ 판정 실패·리뷰체험단은 종전 순서 그대로 = 무회귀.
+// ═══════════════════════════════════════════════════════════
+const { pickMemoColumnIndex } = require('../utils/memoColumn');
+const { workKindForTab } = require('../services/workKindContext.service');
+const { isBlogKind } = require('../utils/workKind');
+
+// ═══════════════════════════════════════════════════════════
 // 한국 실명 판별 유틸리티
 // ═══════════════════════════════════════════════════════════
 const KOREAN_SURNAMES = new Set([
@@ -460,6 +469,11 @@ router.post('/review', async (req, res, next) => {
     const submitValue = value || '제출';
     const sheetOpts = gid ? { gid } : {};
 
+    // ★ 체험단 종류 — memo 열 우선순위와 무시트 기록 대상이 갈린다.
+    //   조회 실패·미등록 탭은 null → `isBlogKind(null)=false` = 리뷰체험단 경로(종전 동작).
+    let _isBlog = false;
+    try { _isBlog = isBlogKind(await workKindForTab({ sheetId, tabName })); } catch (_) { _isBlog = false; }
+
     // ── Step 1: 완료 판정 + DB 업데이트 ──
     //   다중 캡처 슬롯 탭(예: 리뷰+현금영수증)은 "필요 슬롯 전부 제출"되어야 완료.
     //   업로드(/api/image/review-upload)가 submitReview보다 먼저 실행되어 원장
@@ -524,6 +538,19 @@ router.post('/review', async (req, res, next) => {
           }
         } catch (e) {
           logger.warn(`[submit] 무시트 리뷰제출 표시 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
+        }
+
+        /* ★ memo(비고 / 블로그는 포스팅URL)도 무시트 탭에서는 시트 쓰기가 막혀 있어 사라진다.
+           같은 이유·같은 방식으로 작업표 칸에 남긴다(열 고르기는 memoColumn 단일 출처).
+           ★ 시트 기반 탭이면 handled:false = 아래 Step 3 배경 시트 쓰기가 종전대로 처리. */
+        try {
+          const mm = await require('../services/sheetlessStatus.service')
+            .markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog: _isBlog, by: 'review-submit' });
+          if (mm.handled && !mm.ok) {
+            logger.warn(`[submit] 무시트 memo 기록 실패 tab=${tabName} row=${rowIndex} reason=${mm.reason}`);
+          }
+        } catch (e) {
+          logger.warn(`[submit] 무시트 memo 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
         }
 
         // index_master 카운트: FALSE→TRUE 전이일 때만 증가 (보완 제출 중복 방지)
@@ -605,12 +632,11 @@ router.post('/review', async (req, res, next) => {
           logger.info(`[submit/review:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${rowIndex})`);
 
           // ── 비고/포스팅 컬럼 쓰기 ──
+          //   ★ 열 고르기는 `utils/memoColumn` 단일 출처 — 이 경로와 큐 재시도, 무시트 작업표 기록이
+          //     같은 규칙을 써야 "처음 제출은 포스팅 칸, 재시도는 비고 칸"으로 값이 흩어지지 않는다.
+          //   ★ 블로그체험단은 결과물이 포스팅URL 이라 우선순위가 뒤집힌다(리뷰체험단은 종전 그대로).
           if (memo && memo.trim()) {
-            // 우선순위: "비고" 정확히 포함 > "포스팅" 포함
-            let memoColIdx = headers.findIndex(h => /비고/.test((h || '').trim()));
-            if (memoColIdx < 0) {
-              memoColIdx = headers.findIndex(h => /포스팅/.test((h || '').trim()));
-            }
+            const memoColIdx = pickMemoColumnIndex(headers, { blog: _isBlog });
             if (memoColIdx >= 0) {
               const memoColLetter = getColLetter(memoColIdx);
               const memoRange = `'${tabName}'!${memoColLetter}${rowIndex}`;
@@ -641,6 +667,7 @@ router.post('/review', async (req, res, next) => {
             submitCol,
             value: submitValue,
             memo: memo || '',
+            blog: _isBlog,          // ★ 재시도도 같은 열 우선순위를 써야 값이 흩어지지 않는다
           });
         } catch (queueErr) {
           logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);

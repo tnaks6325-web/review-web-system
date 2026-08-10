@@ -91,14 +91,57 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   //   담당자가 열을 추가해야 표시가 남는다(모르면 "왜 입금 표시가 안 뜨지"가 된다).
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
-  // ── 작업표 칸에 기록 ──
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by });
+}
+
+/**
+ * 무시트 탭의 **memo(비고 / 포스팅URL) 칸** 기록 — 블로그체험단 결과물이 여기 남는다(099 · M4).
+ *
+ * ★★ 왜 별도 경로인가: 시트 기반 탭은 `submit.routes` 배경 작업이 시트 칸에 memo 를 쓰지만,
+ *   무시트 탭은 그 쓰기가 막혀 있어(W2-a) **어디에도 안 남는다**. 리뷰제출 표시와 같은 이유.
+ * ★★ 열 고르기는 `utils/memoColumn` 단일 출처(시트 경로·큐 재시도와 같은 규칙) — 사본을 두면
+ *   "시트 탭은 포스팅 칸, 무시트 탭은 비고 칸"으로 갈린다.
+ * ★ 헤더 출처는 `detected_headers || headers` — `rebuildLedgers` 가 읽는 그 값(A1 행이 아니다).
+ * ★ 시트 기반 탭이면 `{handled:false}` = 호출부 종전 경로. 판정 실패도 같다(fail-open).
+ */
+async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = false, by = 'system' } = {}) {
+  if (!sheetId || !tabName || !rowIndex) return { handled: false };
+  const text = String(memo == null ? '' : memo).trim();
+  if (!text) return { handled: false };                       // 쓸 값이 없으면 관여하지 않는다
+
+  const db = getPool();
+  let sheetless = false;
+  try {
+    sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
+  } catch (_) { return { handled: false }; }
+  if (!sheetless) return { handled: false };
+
+  let headers = [];
+  try {
+    const { rows } = await db.query(
+      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
+      [sheetId, tabName]);
+    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
+  } catch (e) {
+    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
+  }
+  const header = require('../utils/memoColumn').pickMemoColumnName(headers, { blog });
+  // ★ 조용히 성공으로 접지 않는다 — 그 작업표에 비고/포스팅 열이 없다는 뜻이다.
+  if (!header) return { handled: true, ok: false, reason: 'no_memo_column' };
+
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
+}
+
+/** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
+async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by }) {
   try {
     const r = await db.query(
       `UPDATE campaign_participants
           SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
               updated_at = NOW()
         WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
-      [sheetId, tabName, rowIndex, header, mark]);
+      [sheetId, tabName, rowIndex, header, value]);
     if (!r.rowCount) return { handled: true, ok: false, reason: 'row_not_found', column: header };
   } catch (e) {
     return { handled: true, ok: false, reason: 'write_failed', message: e.message, column: header };
@@ -113,7 +156,7 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
     return { handled: true, ok: true, deferred: true, reason: 'ledger_deferred', column: header };
   }
 
-  return { handled: true, ok: true, column: header, value: mark };
+  return { handled: true, ok: true, column: header, value };
 }
 
-module.exports = { markStatusCell, SUBMIT_MARK, __setPoolForTest };
+module.exports = { markStatusCell, markSheetlessMemo, SUBMIT_MARK, __setPoolForTest };

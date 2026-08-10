@@ -153,7 +153,9 @@ console.log('\n[C] 두 기록 경로가 무시트 분기를 탄다');
   const i2 = sub.indexOf("kind: 'submit'");
   ok('완료 분기 안에서 호출(미제출 행 오표시 방지)', i1 > 0 && i2 > i1 && (i2 - i1) < 1400);
 
-  const pay = noLineComments(srv('src/routes/payment.routes.js'));
+  /* ⚠ 입금 기록은 입금 M2(이체결과 반영)에서 `paymentApply.service` 로 **단일 출처 이관**됐다
+     (수동 처리·자동 반영이 같은 순서를 타게). 검사 의미는 그대로 — 읽는 파일만 따라간다. */
+  const pay = noLineComments(srv('src/services/paymentApply.service.js'));
   ok('입금 완료에서 상태 기록 호출', /markStatusCell\(\{[\s\S]{0,200}?kind: 'paid', value: stamp/.test(pay));
   ok('★ 무시트면 시트 쓰기·deposit_mark 큐로 내려가지 않는다', /if \(st\.handled\) \{[\s\S]{0,400}?continue;/.test(pay));
   // 시트 경로는 그대로 살아 있어야 한다(무회귀)

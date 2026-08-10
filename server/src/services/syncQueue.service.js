@@ -35,6 +35,8 @@ const {
 } = require('./orderLedger.service');
 const { logger } = require('../utils/logger');
 const { logAbnormal } = require('./errorLog.service');
+// 비고/포스팅 열 고르기 — 제출 경로(submit.routes)·무시트 기록과 **같은 규칙**(사본 금지)
+const { pickMemoColumnIndex } = require('../utils/memoColumn');
 
 // ── 큐에 작업 추가 ──
 async function enqueue(type, payload, maxRetry = 3) {
@@ -569,7 +571,11 @@ async function _executeItem(item) {
 
     case 'review_submit': {
       // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (캐시된 헤더 사용 안 함)
-      const { sheetId, tabName, rowIndex, submitCol, value } = payload;
+      /* ★★ `memo` 를 반드시 함께 소비한다(2026-08 수리): 종전엔 payload 에 실려 오는 memo 를
+         읽지도 쓰지도 않아 **시트 쓰기가 한 번 실패해 큐로 내려가면 비고/포스팅URL 이 영구 유실**됐다
+         (제출열만 다시 써지고 memo 는 사라진다). 블로그체험단은 그 값이 곧 결과물이라 치명적이지만,
+         리뷰체험단에서도 현행 버그였다. 열 고르기는 `utils/memoColumn` 단일 출처(제출 경로와 같은 규칙). */
+      const { sheetId, tabName, rowIndex, submitCol, value, memo, blog } = payload;
       if (!sheetId || !tabName || !rowIndex) throw new Error('payload 누락');
 
       // 헤더 행을 최대 50행까지 읽어서 실제 헤더 위치 찾기
@@ -590,6 +596,21 @@ async function _executeItem(item) {
           await throttledCall(() => writeSheet(sheetId, range, [[value || '제출']]));
         } else {
           throw new Error(`submitCol '${submitCol}' 을 헤더에서 찾을 수 없음 (헤더: ${headers.slice(0, 10).join(',')})`);
+        }
+
+        // ── 비고/포스팅 컬럼 재기록(유실 방지) ──
+        //   ★ 제출열 쓰기가 성공한 뒤에만 시도한다 — memo 실패로 항목이 재시도되면
+        //     제출열은 멱등이라 안전하고, memo 만 다시 쓰인다.
+        const memoText = String(memo == null ? '' : memo).trim();
+        if (memoText) {
+          const memoIdx = pickMemoColumnIndex(headers, { blog: blog === true });
+          if (memoIdx >= 0) {
+            const memoRange = `'${tabName}'!${_getColLetter(memoIdx)}${rowIndex}`;
+            await throttledCall(() => writeSheet(sheetId, memoRange, [[memoText]]));
+          } else {
+            // 조용히 넘기지 않는다 — 그 탭에 비고/포스팅 열이 없다는 신호(담당자 조치 대상).
+            logger.warn(`[queue:review_submit] 비고/포스팅 열 없음 tab=${tabName} row=${rowIndex}`);
+          }
         }
       } else {
         throw new Error('헤더 행을 읽을 수 없음');
