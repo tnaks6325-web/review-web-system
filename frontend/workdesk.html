@@ -1293,7 +1293,9 @@
   .si-box.ok{background:var(--safe-soft,#f2fbf5);border-color:var(--safe)}
   .si-warn{font-size:12px;background:#fff8f0;border:1px solid #f4d9b4;border-left:3px solid var(--warn,#e08a1e);border-radius:0 8px 8px 0;padding:8px 11px;margin:8px 0;line-height:1.55;color:var(--ink)}
   .si-err,.si-lock{font-size:12.5px;background:#fff5f5;border:1px solid #f2c9c9;border-left:3px solid var(--bad);border-radius:0 8px 8px 0;padding:9px 12px;margin:9px 0;line-height:1.6;color:var(--ink)}
-  .si-lock b{display:block;margin-bottom:2px}
+  .si-lock>b:first-child{display:block;margin-bottom:2px}
+  .si-why{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line2);font-size:12px;color:var(--muted);line-height:1.6}
+  .si-dupst{margin-top:5px;font-size:11.5px;color:var(--faint)}
   .si-kpis{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   .si-kpis>div{flex:1 1 110px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 10px;text-align:center}
   .si-kpis .k{font-size:10.5px;color:var(--faint)}
@@ -11117,7 +11119,10 @@ function _siStep2(){
     return `<span class="si-mp">${esc(x.header)}<span class="si-r ${cls}">${esc(lab)}</span></span>`;
   }).join('');
   return `<div class="si-b">
-    ${blocked?`<div class="si-lock"><b>가져올 수 없습니다</b>${(p.blockers||[]).map(b=>esc(b.message)).join('<br>')}</div>`
+    ${blocked?`<div class="si-lock"><b>가져올 수 없습니다</b>${(p.blockers||[]).map(b=>
+        /* ★ "왜 안 보이는지"를 서버가 준 사유 그대로 잇는다 — 이유 없이 막으면 막다른 길이다. */
+        esc(b.message)+((b.reasons||[]).length?'<div class="si-why">'+(b.reasons||[]).map(r=>'· '+esc(r.message)).join('<br>')+
+          (_siDupTail(b.tab))+'</div>':'')).join('<br>')}</div>`
       :`<div class="si-box ok"><b>✓ 읽었습니다</b><br>${esc(p.sheetTitle||'')} › 탭 <b>${esc(p.tabName||'')}</b> · 머리글은 ${p.headerRow}번째 줄</div>`}
     <div class="si-kpis">
       <div><div class="k">시트에 적힌 줄</div><div class="v">${c.total==null?'?':c.total}</div></div>
@@ -11125,7 +11130,9 @@ function _siStep2(){
       <div><div class="k">제출 완료</div><div class="v">${c.submitted==null?'?':c.submitted}</div></div>
       <div><div class="k">확인 필요</div><div class="v ${c.suspect?'warn':''}">${c.suspect||0}</div></div>
     </div>
-    ${(p.warnings||[]).map(w=>`<div class="si-warn">${esc(w.message)}</div>`).join('')}
+    ${(p.warnings||[]).map(w=>`<div class="si-warn">${esc(w.message)}${
+        (w.reasons||[]).length?'<div class="si-why">'+(w.reasons||[]).map(r=>'· '+esc(r.message)).join('<br>')+_siDupTail(w.tab)+'</div>':''
+      }</div>`).join('')}
     <label class="si-l">작업 이름 <span class="si-hint">시트 위쪽 안내에서 자동으로 채웠습니다 — 고칠 수 있습니다</span></label>
     <input id="siName" class="si-tf" value="${esc((p.meta&&p.meta.campaignName)||p.tabName||'')}">
     <div class="si-box"><b>칸을 이렇게 알아봤습니다</b><div class="si-maplist">${cols}</div>
@@ -11136,6 +11143,15 @@ function _siStep2(){
   <div class="si-f"><span class="si-hint">아직 아무것도 저장되지 않았습니다.</span><span style="flex:1"></span>
     <button class="btn" onclick="_siBack(1)">← 뒤로</button>
     <button class="btn pri" ${blocked?'disabled':''} onclick="_siNext3()">다음 →</button></div>`;
+}
+/* 이미 등록된 탭의 **현재 상태를 숫자로** 붙인다 — "어디에도 없다"는 신고에 답하려면
+   담당자가 무엇이 있고 무엇이 없는지를 봐야 한다. 값이 없으면(구버전 백엔드) 아무것도 안 그린다. */
+function _siDupTail(t){
+  if(!t) return '';
+  const n=(v)=>(v==null?'?':v);
+  return `<div class="si-dupst">표 ${n(t.boardRows)}줄 · 검색 명단 ${n(t.indexRows)}명 · 주문 ${n(t.withOrder)}건`+
+    ` · 작업 등록부 ${t.inMaster?'있음':'없음'} · 시트 사본 ${t.inMirror?'있음':'없음'}`+
+    ` · 업체 ${t.advertiserName?esc(t.advertiserName):'미지정'}${t.sheetless?' · 무시트':''}</div>`;
 }
 function _siBack(n){ const S=_siS; if(!S) return; if(n===1){ S.pv=null; S.tabs=null; S.gid=''; } S.step=n; S.err=''; _siRender(); }
 function _siNext3(){ const S=_siS; const el=document.getElementById('siName'); if(el) S.name=el.value; S.step=3; _siRender(); }

@@ -291,13 +291,18 @@ async function previewSheetImport({ url = '', sheetId: sidIn = '', gid: gidIn = 
       message: `연습으로 보이는 ${cls.counts.suspect}줄은 체크를 풀어 두었습니다 — 필요하면 다시 체크하세요.` });
   }
 
-  /* ★★ D5 — 이미 등록된 탭이면 막고 그 작업으로 안내한다.
-     덮어쓰면 그동안 들어온 주문·수정 내역이 지워질 수 있다. */
+  /* ★★ D5 — 이미 등록된 탭. 단 **빈 껍데기면 통과**시키고(되살릴 길이 없어지면 안 된다),
+     막을 때는 **어디에 있는지·왜 안 보이는지**를 함께 말한다(막다른 길 금지). */
   const dup = await _findRegistered(sheetId, read.tabName, read.gid);
-  if (dup) {
+  const dupJudge = classifyRegistered(dup);
+  if (dup && dupJudge.blocked) {
     blockers.push({ code: 'already_registered',
       message: `이미 시스템에 있는 작업입니다 — ${dup.advertiserName ? dup.advertiserName + ' › ' : ''}${dup.tabName}`,
-      tab: dup });
+      reasons: dupJudge.reasons, tab: dup });
+  } else if (dup && dupJudge.empty) {
+    warnings.push({ code: 'registered_empty',
+      message: `이 작업은 등록만 되어 있고 내용이 비어 있습니다(표 0줄) — 가져오면 그 등록을 그대로 채웁니다.`,
+      reasons: dupJudge.reasons, tab: dup });
   }
 
   return {
@@ -367,25 +372,81 @@ function _sampleRows(rows, idx) {
   }));
 }
 
-/** 이미 등록된 탭인가 — 이름 또는 gid 로 찾는다(리네임으로 연결이 조용히 풀리는 것 방지) */
+/**
+ * 이미 등록된 탭인가 — 이름 또는 gid 로 찾는다(리네임으로 연결이 조용히 풀리는 것 방지).
+ *
+ * ★★ **"있다/없다"만으로는 막다른 길이 된다**(실사용 신고 2026-08-10): 등록은 돼 있는데
+ *   업체관리·작업보드 어디에서도 못 찾는 상태가 실재한다. 그래서 **왜 안 보이는지**의 재료를
+ *   함께 읽는다 — 작업 목록 노출 조건은 `tab_configs` 가 아니라
+ *   **`raw_sheet_tabs`(미러) + `index_master`(등록부 active)** 이고(`listActiveTabs`),
+ *   업체관리 표는 거기에 **업체 소유**까지 필요하다.
+ * ★ 쿼리 1회(스칼라 서브쿼리) — 미리보기의 "읽기만" 성격을 유지한다.
+ */
 async function _findRegistered(sheetId, tabName, gid) {
+  const g = String(gid || '');
   const { rows } = await _db().query(
     `SELECT tc.tab_name, tc.tab_gid, COALESCE(tc.sheetless, FALSE) AS sheetless,
             (SELECT a.name FROM advertiser_campaigns ac
                JOIN advertisers a ON a.id = ac.advertiser_id
               WHERE ac.sheet_id = tc.sheet_id AND ac.deleted_at IS NULL
                 AND (ac.tab_gid IS NULL OR ac.tab_gid = tc.tab_gid)
-              ORDER BY ac.tab_gid NULLS LAST LIMIT 1) AS advertiser_name
+              ORDER BY ac.tab_gid NULLS LAST LIMIT 1) AS advertiser_name,
+            (SELECT COUNT(*) FROM campaign_participants cp
+              WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name AND cp.deleted_at IS NULL) AS board_rows,
+            (SELECT COUNT(*) FROM campaign_participants cp
+              WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name AND cp.deleted_at IS NULL
+                AND cp.order_submission_id IS NOT NULL) AS with_order,
+            (SELECT COUNT(*) FROM review_index ri
+              WHERE ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name) AS index_rows,
+            EXISTS (SELECT 1 FROM index_master im
+                     WHERE im.sheet_id = tc.sheet_id AND im.status = 'active'
+                       AND (im.tab_name = tc.tab_name OR (COALESCE(tc.tab_gid,'') <> '' AND im.tab_gid = tc.tab_gid))) AS in_master,
+            EXISTS (SELECT 1 FROM raw_sheet_tabs rst
+                     WHERE rst.sheet_id = tc.sheet_id AND rst.is_system_tab = FALSE
+                       AND (rst.tab_name = tc.tab_name OR (COALESCE(tc.tab_gid,'') <> '' AND rst.tab_gid = tc.tab_gid))) AS in_mirror
        FROM tab_configs tc
       WHERE tc.sheet_id = $1
         AND (tc.tab_name = $2 OR ($3 <> '' AND tc.tab_gid = $3))
       LIMIT 1`,
-    [sheetId, tabName, String(gid || '')]);
+    [sheetId, tabName, g]);
   if (!rows.length) return null;
+  const r = rows[0];
   return {
-    tabName: rows[0].tab_name, tabGid: rows[0].tab_gid,
-    sheetless: rows[0].sheetless, advertiserName: rows[0].advertiser_name || null,
+    tabName: r.tab_name, tabGid: r.tab_gid, sheetless: r.sheetless,
+    advertiserName: r.advertiser_name || null,
+    boardRows: Number(r.board_rows) || 0,
+    withOrder: Number(r.with_order) || 0,
+    indexRows: Number(r.index_rows) || 0,
+    inMaster: !!r.in_master, inMirror: !!r.in_mirror,
   };
+}
+
+/**
+ * ★★ 등록돼 있을 때 **막을지 / 통과시킬지**를 정하고, 막는다면 **왜 안 보이는지**를 말한다.
+ *   판정 단일 출처 — 미리보기와 실행이 같은 함수를 쓴다(갈리면 "화면은 되는데 서버가 거부").
+ *
+ * · **빈 껍데기**(표 0줄 · 주문 0 · 명단 0) = 등록만 있고 내용이 없다 → **가져오기를 허용**한다.
+ *   D5 가 막으려던 것은 "그동안 들어온 주문·수정 내역이 지워지는 것"인데, 지울 것이 없으면
+ *   막을 이유가 없다. 오히려 막으면 **되살릴 방법이 어디에도 없는 작업**이 된다(실사용 신고).
+ * · 내용이 있으면 계속 막되, 어디를 봐야 하는지·왜 안 보이는지를 문장으로 돌려준다.
+ */
+function classifyRegistered(d) {
+  if (!d) return { blocked: false, empty: false, reasons: [] };
+  const empty = d.boardRows === 0 && d.withOrder === 0 && d.indexRows === 0;
+  const reasons = [];
+  if (!d.inMirror || !d.inMaster) {
+    reasons.push({ code: 'not_in_list',
+      message: '작업 목록에 뜨지 않는 상태입니다 — 검색 명단·작업 등록부가 만들어지지 않았습니다.' });
+  }
+  if (!d.advertiserName) {
+    reasons.push({ code: 'no_advertiser',
+      message: '업체가 지정되지 않아 업체관리 표에는 나오지 않습니다(작업보드에서는 "미지정" 그룹).' });
+  }
+  if (!reasons.length) {
+    reasons.push({ code: 'visible',
+      message: `${d.advertiserName ? d.advertiserName + ' 소유로 ' : ''}이미 정상 등록된 작업입니다.` });
+  }
+  return { blocked: !empty, empty, reasons };
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -439,8 +500,12 @@ async function importSheet({
     throw new ImportError('no_phone_column', '연락처 칸을 찾지 못했습니다 — 리뷰어가 찾을 수 없는 명단이 됩니다.');
   }
 
+  /* ★ 미리보기와 **같은 판정**(사본 0) — 빈 껍데기는 통과시켜 그 등록을 채운다. */
   const dup = await _findRegistered(sheetId, read.tabName, read.gid);
-  if (dup) throw new ImportError('already_registered', '이미 시스템에 있는 작업입니다.');
+  if (dup && classifyRegistered(dup).blocked) {
+    throw new ImportError('already_registered',
+      `이미 시스템에 있는 작업입니다 — ${dup.advertiserName ? dup.advertiserName + ' › ' : ''}${dup.tabName}`);
+  }
 
   const cls = classifyImportRows({ headers, values: read.values, headerRow: det.headerRowIndex, nameIdx, phoneIdx });
   if (cls.rows.length > MAX_ROWS) {
@@ -624,6 +689,7 @@ module.exports = {
   parseSheetUrl,
   readTopMeta,
   classifyImportRows,
+  classifyRegistered,
   previewSheetImport,
   importSheet,
   revertImport,
