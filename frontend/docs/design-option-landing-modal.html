@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>옵션별 유입링크 — 발행·수정 모달 와이어프레임 (M3 시안)</title>
+<!--
+  옵션별 유입링크 · 발행/수정 모달 UI 시안 (M3 착수 전 목업)
+  PRD = frontend/docs/prd-option-landing-url.html (v1.0 확정)
+
+  ★ 이 문서의 규율(레포 관용구)
+    · 외부 리소스 0 — 오프라인에서 그대로 열린다(폰트·아이콘·스크립트 전부 인라인).
+    · 가짜 데이터로 **실제 동작**한다 — 위 컨트롤(유입방식·채널·작업종류)을 바꾸면
+      칸이 실제로 잠기고 자동점검 문구가 실시간으로 바뀐다. 그림이 아니라 만져 보는 시안.
+    · ?v=A | ?v=B | ?v=C 로 한 안만 단독으로 볼 수 있다.
+    · color-scheme:light 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다.
+-->
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:#F1F5F9;color:#0F172A;
+  font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif;
+  font-size:14px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 18px 80px}
+h1{font-size:1.32rem;margin:0 0 6px}
+h2{font-size:1.02rem;margin:34px 0 10px;padding-top:14px;border-top:2px solid #E2E8F0}
+h3{font-size:.9rem;margin:18px 0 8px}
+p{margin:6px 0}
+.sub{color:#64748B;font-size:.82rem}
+code{background:#EEF2F7;border-radius:4px;padding:1px 5px;font-size:.82em}
+.box{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:14px 16px;margin:10px 0}
+.note{background:#F0F9FF;border:1px solid #BAE6FD;border-radius:10px;padding:10px 13px;font-size:.8rem;color:#075985;margin:9px 0}
+.warnbox{background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:10px 13px;font-size:.8rem;color:#92400E;margin:9px 0}
+.badbox{background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 13px;font-size:.8rem;color:#991B1B;margin:9px 0}
+.okbox{background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:10px 13px;font-size:.8rem;color:#14532D;margin:9px 0}
+table.cmp{width:100%;border-collapse:collapse;font-size:.78rem;background:#fff;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden}
+table.cmp th,table.cmp td{border:1px solid #E8EDF3;padding:7px 9px;text-align:left;vertical-align:top}
+table.cmp th{background:#F8FAFC;font-weight:800;color:#334155}
+.tag{display:inline-block;border-radius:999px;padding:1px 8px;font-size:.68rem;font-weight:800;white-space:nowrap}
+.t-fix{background:#DCFCE7;color:#166534}
+.t-ask{background:#FEF3C7;color:#92400E}
+.t-rec{background:#DBEAFE;color:#1D4ED8}
+
+/* ── 조작 바 ───────────────────────────────────────────────── */
+.ctl{position:sticky;top:0;z-index:9;background:#fff;border:1px solid #E2E8F0;border-radius:12px;
+  padding:10px 12px;margin:14px 0 6px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  box-shadow:0 2px 10px rgba(15,23,42,.05)}
+.ctl .g{display:flex;align-items:center;gap:6px}
+.ctl .gl{font-size:.7rem;font-weight:800;color:#64748B}
+.seg{display:inline-flex;border:1px solid #CBD5E1;border-radius:9px;overflow:hidden}
+.seg button{border:0;background:#fff;color:#64748B;padding:5px 11px;font-size:.72rem;font-weight:700;cursor:pointer}
+.seg button.on{background:#2563EB;color:#fff}
+.seg button+button{border-left:1px solid #E2E8F0}
+
+/* ── 모달 카드 재현 (recruit-modal.js .rf-* 근사) ───────────── */
+.modal{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:14px;padding:14px;margin:12px 0 4px}
+.modal .mh{font-size:.74rem;font-weight:800;color:#94A3B8;margin:0 0 8px;letter-spacing:.02em}
+.rf-card{background:#fff;border:1px solid #E2E8F0;border-radius:12px;margin-bottom:11px;overflow:hidden}
+.rf-ch{display:flex;align-items:center;gap:8px;background:#F8FAFC;border-bottom:1px solid #EDF2F7;padding:8px 12px}
+.rf-ct{font-size:.82rem;font-weight:800}
+.rf-cn{flex:1;font-size:.68rem;color:#94A3B8}
+.rf-cb{padding:11px 12px}
+.rchan-btn{border:1px solid #CBD5E1;background:#fff;border-radius:8px;padding:4px 9px;font-size:.7rem;font-weight:700;color:#475569;cursor:pointer}
+.rform-input{width:100%;border:1px solid #CBD5E1;border-radius:7px;padding:6px 7px;font-size:.74rem;font-family:inherit;background:#fff;color:#0F172A}
+.rform-input[readonly]{background:#F8FAFC;color:#64748B}
+.rform-input:disabled{background:#F1F5F9;color:#94A3B8;cursor:not-allowed}
+.rform-label{display:block;font-size:.7rem;font-weight:800;color:#475569;margin-bottom:3px}
+.rf-hrow{display:grid;grid-template-columns:82px 1fr;gap:8px;align-items:start;margin:8px 0}
+.rf-hl{font-size:.72rem;font-weight:800;color:#475569;text-align:right;padding-top:7px}
+.rf-pmsw{display:flex;align-items:center;gap:6px;margin-bottom:9px}
+.rf-pm-btn{border:1px solid #CBD5E1;background:#fff;color:#64748B;border-radius:8px;padding:5px 11px;font-size:.72rem;font-weight:700;cursor:pointer}
+.rf-pm-btn.on{background:#2563EB;border-color:#2563EB;color:#fff}
+.rf-pm-note{font-size:.66rem;color:#94A3B8}
+.headrow,.optrow{display:grid;gap:6px;align-items:center}
+.headrow{font-size:.68rem;font-weight:800;color:#64748B;margin-bottom:5px}
+.optrow{margin-bottom:6px}
+.optrow .ra{text-align:right}
+.delx{border:0;background:transparent;color:#EF4444;cursor:pointer;font-size:.8rem;font-weight:800}
+.gp{border:1px solid #E2E8F0;border-radius:10px;padding:9px 10px;margin-bottom:9px;background:#FCFDFF}
+.gp-head{display:grid;gap:6px;align-items:center;margin-bottom:7px}
+.gp-total{font-size:.72rem;font-weight:800;text-align:right;color:#475569}
+.gp-add{border:1px dashed #CBD5E1;background:transparent;color:#475569;border-radius:8px;padding:4px 0;width:100%;font-size:.7rem;font-weight:700;cursor:pointer;margin-top:2px}
+.sumline{font-size:.68rem;color:#94A3B8;margin-top:4px}
+.helpline{font-size:.64rem;color:#94A3B8;margin-top:2px}
+
+/* 링크 줄(B안) */
+.lnk{display:grid;grid-template-columns:18px 1fr;gap:6px;align-items:center;margin:-2px 0 8px;padding-left:0}
+.lnk .ic{font-size:.72rem;color:#94A3B8;text-align:center}
+.lnk input{font-size:.72rem}
+.lnk.off input{background:#F1F5F9;color:#94A3B8}
+.lnkmsg{grid-column:2;font-size:.63rem;color:#94A3B8;margin-top:2px}
+
+/* 링크 패널(C안) */
+.lpanel{border:1px solid #E2E8F0;border-radius:10px;background:#FCFDFF;padding:10px;margin-top:10px}
+.lpanel h4{margin:0 0 7px;font-size:.75rem;font-weight:800;color:#334155}
+.lp-row{display:grid;grid-template-columns:150px 1fr;gap:7px;align-items:center;margin-bottom:6px}
+.lp-name{font-size:.72rem;font-weight:700;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lp-name .dim{color:#94A3B8;font-weight:600}
+
+/* 자동점검 */
+.chk{margin-top:9px;display:flex;flex-direction:column;gap:5px}
+.chk div{font-size:.7rem;font-weight:700;border-radius:8px;padding:6px 9px}
+.chk .w{background:#FFFBEB;border:1px solid #FDE68A;color:#92400E}
+.chk .i{background:#F1F5F9;border:1px solid #E2E8F0;color:#475569}
+.chk .g{background:#F0FDF4;border:1px solid #BBF7D0;color:#166534}
+
+/* 리뷰어 화면 미리보기(D6, M4 예고) */
+.rv{max-width:330px;border:1px solid #E2E8F0;border-radius:12px;background:#fff;padding:12px;margin-top:8px}
+.rv .ttl{font-size:.78rem;font-weight:800;margin-bottom:8px}
+.rv .kv{font-size:.72rem;color:#475569;margin:3px 0}
+.rv .optline{font-size:.7rem;font-weight:800;color:#1D4ED8;margin:10px 0 4px}
+.rv .btn{display:block;text-align:center;background:#2563EB;color:#fff;border-radius:9px;padding:9px;font-size:.78rem;font-weight:800}
+.rv .btn.off{background:#E2E8F0;color:#94A3B8}
+
+/* 결정 카드 */
+.dgroup{background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:13px 15px;margin:12px 0}
+.dq{font-size:.9rem;font-weight:800;margin-bottom:3px}
+.dwhy{font-size:.76rem;color:#64748B;margin-bottom:9px}
+.opts{display:grid;gap:8px}
+.opt{border:1.5px solid #E2E8F0;border-radius:10px;padding:9px 11px;cursor:pointer;background:#fff}
+.opt:hover{border-color:#93C5FD;background:#F8FBFF}
+.opt.sel{border-color:#2563EB;background:#EFF6FF;box-shadow:0 0 0 1px #2563EB inset}
+.opt .ol{font-size:.8rem;font-weight:800}
+.opt .od{font-size:.73rem;color:#64748B;margin-top:2px}
+#sumbox{background:#0F172A;color:#E2E8F0;border-radius:12px;padding:14px 16px;font-size:.8rem;white-space:pre-wrap;line-height:1.7}
+.copybtn{border:0;background:#2563EB;color:#fff;border-radius:9px;padding:8px 15px;font-size:.8rem;font-weight:800;cursor:pointer;margin-top:9px}
+.only{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>옵션별 유입링크 — 발행·수정 모달 와이어프레임</h1>
+  <p class="sub">M3(리뷰웹 화면) 착수 전 목업 · PRD <code>prd-option-landing-url.html</code> v1.0 확정본 기준 ·
+     <b>위 컨트롤을 바꾸면 실제로 칸이 잠기고 점검 문구가 바뀝니다</b> ·
+     한 안만 보려면 <code>?v=A</code> · <code>?v=B</code> · <code>?v=C</code></p>
+
+  <div class="okbox">
+    <b>이미 확정된 것(이 시안에서 다시 묻지 않습니다)</b><br>
+    D1 공고에 <b>[유입방식] 칸 신설</b> · D2 미입력은 <b>경고만</b>(게시 허용) · D3 <b>진행상품 표가 진실원본</b>(랜딩 URL은 읽기전용 파생) ·
+    D4 인트라넷에도 옵션별 일건수 · D5 <b>첫 상품 URL 사용 + 2개 이상 상이하면 경고</b> · D6 버튼 위 옵션명 한 줄<br>
+    전제 — <b>상품(메인) URL은 유입방식·옵션 유무와 무관하게 항상 입력</b> ·
+    보충 ㉮ <b>네이버는 옵션별 주소가 없어 옵션 링크 칸 비활성</b> · 보충 ㉯ <b>상품 URL [＋] 추가 가능</b>
+  </div>
+
+  <!-- ═══ 조작 바 ═══ -->
+  <div class="ctl">
+    <div class="g"><span class="gl">유입방식</span>
+      <span class="seg" id="segInflow">
+        <button data-v="link" class="on">링크유입</button>
+        <button data-v="guide">유입가이드</button>
+        <button data-v="">미지정</button>
+      </span></div>
+    <div class="g"><span class="gl">구매채널</span>
+      <span class="seg" id="segChan">
+        <button data-v="coupang" class="on">쿠팡</button>
+        <button data-v="naver">네이버</button>
+        <button data-v="oliveyoung">올리브영</button>
+        <button data-v="">미상</button>
+      </span></div>
+    <div class="g"><span class="gl">작업 종류</span>
+      <span class="seg" id="segMode">
+        <button data-v="opt" class="on">옵션 있는 작업</button>
+        <button data-v="none">옵션 없는 작업</button>
+      </span></div>
+    <div class="g"><span class="gl">상품 수</span>
+      <span class="seg" id="segProd">
+        <button data-v="1" class="on">1개</button>
+        <button data-v="2">2개</button>
+      </span></div>
+  </div>
+  <p class="sub" style="margin:0 0 18px">※ 위 4개는 <b>시안 조작용</b>입니다. 실제 화면에서 유입방식은 모달 안 버튼군이고, 채널은 이미 있는 <code>rf_channel</code> 값을 그대로 읽습니다.</p>
+
+  <!-- ═══ 지금 화면 ═══ -->
+  <h2>01. 지금 화면 — 링크를 담을 칸이 없다</h2>
+  <div class="box">
+    <p style="margin:0 0 8px;font-size:.82rem">진행상품 표는 <b>상품명 · 옵션명 · 결제금액 · 총인원 · 일건수</b> 5열이고, 주소를 적는 칸은
+      모집 조건 카드의 <b>랜딩 URL 한 칸</b>뿐입니다. 옵션이 3개여도 리뷰어는 전부 같은 페이지로 들어갑니다.</p>
+    <div class="modal" style="margin:0">
+      <div class="rf-card" style="margin:0">
+        <div class="rf-ch"><span class="rf-ct">📦 진행상품</span><span class="rf-cn">현재</span></div>
+        <div class="rf-cb">
+          <div class="headrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">
+            <span></span><span>옵션명</span><span class="ra">결제금액</span><span class="ra">옵션인원</span><span class="ra">일건수</span><span></span></div>
+          <div class="gp">
+            <div class="gp-head" style="grid-template-columns:1fr .62fr 26px">
+              <input class="rform-input" value="힙스 골라담기" readonly style="font-weight:700"><span class="gp-total">40명</span><span></span></div>
+            <div class="optrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">
+              <span style="color:#CBD5E1;text-align:center">└</span><input class="rform-input" value="화이트" readonly>
+              <input class="rform-input ra" value="28900" readonly><input class="rform-input ra" value="20" readonly><input class="rform-input ra" value="5" readonly><span></span></div>
+            <div class="optrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">
+              <span style="color:#CBD5E1;text-align:center">└</span><input class="rform-input" value="베이지" readonly>
+              <input class="rform-input ra" value="28900" readonly><input class="rform-input ra" value="20" readonly><input class="rform-input ra" value="5" readonly><span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="rf-card" style="margin:0">
+        <div class="rf-ch"><span class="rf-ct">📅 모집 조건</span><span class="rf-cn">현재</span></div>
+        <div class="rf-cb"><div class="rf-hrow" style="margin:0"><span class="rf-hl">랜딩 URL</span>
+          <input class="rform-input" value="https://www.coupang.com/vp/products/1234567" readonly></div></div>
+      </div>
+    </div>
+    <div class="badbox" style="margin:10px 0 0">
+      <b>결과</b> — 화이트를 고른 리뷰어도 베이지를 고른 리뷰어도 같은 주소. 다른 옵션을 사거나, 옵션을 찾다 이탈합니다.
+    </div>
+  </div>
+
+  <!-- ═══ 시안 ═══ -->
+  <h2>02. 시안 — URL 칸을 어디에 둘 것인가</h2>
+  <p class="sub">세 안 모두 <b>저장 계약·필드 id·모드 분기는 동일</b>합니다. 다른 것은 <b>URL 칸의 자리</b>뿐이라 언제든 갈아탈 수 있습니다.</p>
+
+  <!-- A -->
+  <section class="vsec" data-v="A">
+    <h3>시안 A — 표에 열 하나 추가 <span class="tag t-ask">한눈에 보임 / 칸이 좁음</span></h3>
+    <div class="modal"><div class="mh">모집공고 발행 · 수정</div><div id="mA"></div></div>
+    <table class="cmp"><tr><th style="width:90px">장점</th><td>표 한 장에 다 보인다 · 옵션 수가 적을 때 가장 빠르다 · 열이 늘어도 저장 로직은 그대로</td></tr>
+      <tr><th>단점</th><td><b>URL은 길다</b> — 좁은 칸에 잘려 보여 붙여넣은 주소가 맞는지 눈으로 확인이 어렵다 ·
+        모달 폭(1280px) 안에서 결제금액·인원 칸이 함께 좁아진다</td></tr></table>
+  </section>
+
+  <!-- B -->
+  <section class="vsec" data-v="B">
+    <h3>시안 B — 행 아래 링크 줄 <span class="tag t-rec">추천</span></h3>
+    <div class="modal"><div class="mh">모집공고 발행 · 수정</div><div id="mB"></div></div>
+    <table class="cmp"><tr><th style="width:90px">장점</th><td><b>URL이 전폭</b>이라 주소 전체가 보인다 · 기존 5열 표가 한 글자도 안 좁아진다 ·
+        링크가 필요 없을 때(가이드유입·네이버) <b>줄이 회색으로 잠기고 이유가 그 자리에 적힌다</b></td></tr>
+      <tr><th>단점</th><td>옵션 수만큼 세로가 길어진다(옵션 4개 = 8줄) — 카드 스크롤이 늘어난다</td></tr></table>
+  </section>
+
+  <!-- C -->
+  <section class="vsec" data-v="C">
+    <h3>시안 C — 표 아래 링크 전용 묶음 <span class="tag t-ask">붙여넣기 편함 / 두 곳을 오감</span></h3>
+    <div class="modal"><div class="mh">모집공고 발행 · 수정</div><div id="mC"></div></div>
+    <table class="cmp"><tr><th style="width:90px">장점</th><td>표는 <b>한 픽셀도 안 바뀐다</b> · 링크만 위아래로 모여 있어 여러 개를 연달아 붙여넣기 좋다</td></tr>
+      <tr><th>단점</th><td>옵션명을 표와 묶음 <b>두 곳에서 대조</b>해야 한다 · 옵션을 지우면 묶음도 따라 바뀌어야 해 시선이 두 번 움직인다</td></tr></table>
+  </section>
+
+  <!-- ═══ 랜딩 URL 파생 ═══ -->
+  <h2>03. 모집 조건의 [랜딩 URL] — 읽기전용 파생 (D3)</h2>
+  <div class="box">
+    <p style="margin:0 0 8px;font-size:.82rem">표가 진실원본이므로 이 칸은 <b>직접 입력하지 않고 첫 상품 URL을 그대로 비춥니다</b>.
+      값이 두 곳에 있으면 어느 쪽이 리뷰어에게 나가는지 아무도 확신할 수 없습니다.</p>
+    <div class="modal" style="margin:0"><div class="rf-card" style="margin:0">
+      <div class="rf-ch"><span class="rf-ct">📅 모집 조건</span><span class="rf-cn">진행상품 표에서 자동</span></div>
+      <div class="rf-cb"><div class="rf-hrow" style="margin:0"><span class="rf-hl">랜딩 URL</span>
+        <div><input class="rform-input" id="landingRO" readonly>
+          <div class="helpline" id="landingNote"></div></div></div></div>
+    </div></div>
+  </div>
+
+  <!-- ═══ 상태표 ═══ -->
+  <h2>04. 어떤 때 무엇이 잠기는가</h2>
+  <table class="cmp">
+    <tr><th style="width:130px">상황</th><th style="width:150px">상품(메인) URL</th><th style="width:170px">옵션별 유입 링크</th><th>화면이 하는 말</th></tr>
+    <tr><td>링크유입 · 쿠팡</td><td>입력(항상)</td><td><b>입력</b></td><td>옵션마다 다른 주소를 넣습니다. 비우면 그 옵션은 상품 URL로 들어갑니다.</td></tr>
+    <tr><td>링크유입 · <b>네이버</b></td><td>입력(항상)</td><td><b>잠김</b>(보충 ㉮)</td><td>네이버는 옵션별 주소가 없어 상품 URL 하나로 안내합니다.</td></tr>
+    <tr><td><b>유입가이드</b> · 모든 채널</td><td>입력(항상)</td><td><b>잠김</b></td><td>유입가이드 작업이라 옵션 링크는 쓰지 않습니다. 상품 URL은 계속 입력합니다.</td></tr>
+    <tr><td>유입방식 <b>미지정</b></td><td>입력(항상)</td><td>입력(잠그지 않음)</td><td>유입방식이 정해지지 않았습니다 — 정하면 화면이 그에 맞게 잠깁니다. <span class="sub">(모르면 잠그지 않는다 = fail-open)</span></td></tr>
+    <tr><td>채널 <b>미상</b></td><td>입력(항상)</td><td>입력(잠그지 않음)</td><td>추정으로 칸을 잠그면 쿠팡 작업의 링크를 못 넣게 됩니다.</td></tr>
+    <tr><td>옵션 없는 작업</td><td>입력(항상)</td><td>칸 자체가 없음</td><td>옵션이 없으므로 상품 URL 하나가 전부입니다.</td></tr>
+  </table>
+  <div class="note"><b>왜 “잠금”이지 “숨김”이 아닌가</b> — 칸이 사라지면 담당자는 “이 화면엔 원래 없나 보다”로 읽습니다.
+    회색으로 남기고 <b>이유를 그 자리에 적어야</b> 유입방식을 바꾸면 열린다는 걸 알 수 있습니다.</div>
+
+  <!-- ═══ 자동점검 ═══ -->
+  <h2>05. 자동점검 — 전부 경고, 게시는 막지 않는다 (D2)</h2>
+  <div class="box">
+    <p style="margin:0 0 8px;font-size:.82rem">위 컨트롤과 아래 입력칸을 바꾸면 이 목록이 실시간으로 바뀝니다(현재 보고 있는 안의 값 기준).</p>
+    <div class="chk" id="chkLive"></div>
+    <div class="warnbox" style="margin-top:10px">
+      <b>하드블록을 두지 않는 이유</b> — 링크가 아직 안 나온 상태에서 공고부터 올려야 하는 경우가 실제로 있습니다.
+      막으면 담당자는 아무 주소나 넣어 통과시키고, 그건 빈칸보다 나쁩니다.
+      다만 <b>상품(메인) URL은 “필수”라고 확정</b>돼 있어 이것까지 경고로 둘지는 아래 결정사안 ②에서 정합니다.
+    </div>
+  </div>
+
+  <!-- ═══ 리뷰어 화면 ═══ -->
+  <h2>06. 리뷰어가 보는 결과 (D6 · M4 범위)</h2>
+  <div class="box" style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <p style="margin:0 0 4px;font-size:.8rem;font-weight:800">참여 후 작업내용 — 유입가이드 카드</p>
+      <div class="rv">
+        <div class="ttl">🔗 유입 가이드</div>
+        <div class="kv">상품 페이지에서 아래 옵션으로 구매해 주세요.</div>
+        <div class="optline" id="rvOpt">내가 고른 옵션 : 화이트</div>
+        <div class="btn" id="rvBtn">🔗 상품 페이지 열기</div>
+        <div class="helpline" id="rvNote" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:260px">
+      <p style="font-size:.8rem;margin-top:0"><b>버튼 위 한 줄이 하는 일</b> — 열리는 주소가 옵션마다 다르므로,
+        “지금 열리는 게 내가 고른 옵션 맞나”를 리뷰어가 확인할 근거가 필요합니다.
+        주소는 화면에 보이지 않으니(참여 전 비공개) 옵션명이 그 역할을 합니다.</p>
+      <p style="font-size:.8rem"><b>옵션 링크가 비어 있으면</b> 버튼은 그대로 뜨고 상품 URL이 열립니다 —
+        리뷰어에게는 아무 일도 일어나지 않습니다(경고는 관리자 화면에만).</p>
+      <p style="font-size:.8rem"><b>유입가이드 작업이면</b> 이 버튼 자체가 안 나옵니다(기존 규칙 그대로 —
+        버튼이 뜨면 검색·경유 유입 지시가 통째로 무의미해집니다).</p>
+    </div>
+  </div>
+
+  <!-- ═══ 결정 ═══ -->
+  <h2>07. 결정사안 — 눌러서 고르면 아래에 정리됩니다</h2>
+
+  <div class="dgroup" data-k="배치">
+    <div class="dq">① URL 칸을 어디에 둘까요</div>
+    <div class="dwhy">저장 계약은 셋 다 같습니다. 나중에 바꿔도 데이터는 그대로입니다.</div>
+    <div class="opts">
+      <div class="opt" data-v="B안 — 행 아래 링크 줄 (추천)"><div class="ol">B안 — 행 아래 링크 줄 <span class="tag t-rec">추천</span></div>
+        <div class="od">주소가 전폭으로 보이고, 필요 없을 때 회색으로 잠기며 이유가 그 자리에 적힌다. 대신 세로가 길어진다.</div></div>
+      <div class="opt" data-v="A안 — 표에 열 추가"><div class="ol">A안 — 표에 열 추가</div>
+        <div class="od">한눈에 보이지만 URL이 좁은 칸에 잘려 확인이 어렵다.</div></div>
+      <div class="opt" data-v="C안 — 표 아래 링크 전용 묶음"><div class="ol">C안 — 표 아래 링크 전용 묶음</div>
+        <div class="od">표는 그대로 두고 링크만 모아 붙여넣기 좋다. 대신 표와 묶음을 대조해야 한다.</div></div>
+    </div>
+  </div>
+
+  <div class="dgroup" data-k="상품URL 미입력">
+    <div class="dq">② 상품(메인) URL이 비어 있을 때 — 게시를 막을까요</div>
+    <div class="dwhy">“항상 필수”로 확정됐지만, D2(경고만)와 부딪히는 유일한 지점입니다.</div>
+    <div class="opts">
+      <div class="opt" data-v="경고만 (게시 허용) — D2와 통일 (추천)"><div class="ol">경고만 (게시 허용) <span class="tag t-rec">추천</span></div>
+        <div class="od">화면 전체가 “경고는 하되 막지 않는다”로 일관된다. 링크 확정 전에도 공고를 올릴 수 있다.</div></div>
+      <div class="opt" data-v="저장 차단 (하드블록)"><div class="ol">저장 차단 (하드블록)</div>
+        <div class="od">빠뜨린 채 게시되는 일이 없다. 대신 주소가 아직 없는 작업은 아무 값이나 넣어 통과시키게 된다.</div></div>
+    </div>
+  </div>
+
+  <div class="dgroup" data-k="옵션 링크 채우기">
+    <div class="dq">③ 옵션 링크를 한 번에 채우는 보조 기능이 필요할까요</div>
+    <div class="dwhy">옵션이 5~8개인 작업에서 한 칸씩 붙여넣는 일이 반복됩니다.</div>
+    <div class="opts">
+      <div class="opt" data-v="1차엔 없음 — 칸만 제공 (추천)"><div class="ol">1차엔 없음 — 칸만 제공 <span class="tag t-rec">추천</span></div>
+        <div class="od">쓰면서 실제 불편이 확인된 뒤에 붙인다. 잘못 만든 보조 기능은 틀린 주소를 빠르게 퍼뜨린다.</div></div>
+      <div class="opt" data-v="여러 줄 붙여넣기 — 옵션 순서대로 배정"><div class="ol">여러 줄 붙여넣기 → 옵션 순서대로 배정</div>
+        <div class="od">주소 목록을 한 번에 붙이면 위에서부터 채운다. <b>순서가 어긋나면 남의 옵션 주소가 들어간다</b>(사람이 대조해야 함).</div></div>
+      <div class="opt" data-v="상품 URL을 전 옵션에 복사"><div class="ol">[전 옵션에 상품 URL 복사] 버튼</div>
+        <div class="od">옵션 주소가 사실상 같은 작업에서 편하다. 다만 “옵션별로 다르게”라는 이 기능의 목적과 반대 방향이다.</div></div>
+    </div>
+  </div>
+
+  <div class="dgroup" data-k="기발행 공고">
+    <div class="dq">④ 이미 발행된 공고의 유입방식은 어떻게 채울까요</div>
+    <div class="dwhy">신설 칸이라 기존 공고는 전부 비어 있습니다(<code>inflow_type=''</code>).</div>
+    <div class="opts">
+      <div class="opt" data-v="비워 둔다 — 종전처럼 작업오더에서 자동 판정 (추천)"><div class="ol">비워 둔다 — 종전처럼 작업오더에서 자동 판정 <span class="tag t-rec">추천</span></div>
+        <div class="od">지금도 그렇게 돌아가고 있어 화면·동작이 하나도 안 바뀐다. 수정 모달을 열면 그때 고르면 된다.</div></div>
+      <div class="opt" data-v="수정 모달을 열면 자동 판정값을 미리 채워 보여준다"><div class="ol">수정 모달에 자동 판정값을 미리 채워 보여준다</div>
+        <div class="od">담당자가 확인만 하면 된다. 대신 저장하는 순간 <b>추정값이 확정값으로 굳는다</b>.</div></div>
+    </div>
+  </div>
+
+  <h3>고른 내용</h3>
+  <div id="sumbox">아직 고르지 않았습니다.</div>
+  <button class="copybtn" id="copyBtn">📋 복사하기</button>
+  <p class="sub">복사해서 채팅에 붙여 주시면 그대로 구현합니다.</p>
+
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────────
+   가짜 데이터로 실제 동작하는 목업.
+   ★ 판정 규칙은 서버 utils(optionLanding/inflowType/optionUrlChannels)와 같은 모양으로만
+     흉내낸다 — 이 파일은 시안이므로 제품 코드가 이걸 참조하지 않는다.
+   ───────────────────────────────────────────────────────────── */
+var S = { inflow:'link', chan:'coupang', mode:'opt', prods:1, v:null };
+
+/* 상품/옵션 가짜 데이터 (URL은 입력하면 여기 저장돼 점검 문구에 즉시 반영된다) */
+var DATA = [
+  { name:'힙스 골라담기', url:'https://www.coupang.com/vp/products/1234567',
+    opts:[ {k:'화이트', pay:28900, rt:20, dl:5, url:'https://www.coupang.com/vp/products/1234567?itemId=111'},
+           {k:'베이지', pay:28900, rt:20, dl:5, url:''},
+           {k:'블랙',  pay:31400, rt:10, dl:3, url:''} ] },
+  { name:'콰이어트 베이직', url:'',
+    opts:[ {k:'라이트', pay:19900, rt:15, dl:5, url:''} ] }
+];
+function prods(){ return DATA.slice(0, S.prods); }
+
+/* ── 판정(서버 규칙 흉내) ────────────────────────────────── */
+var CHAN_LABEL = { coupang:'쿠팡', naver:'네이버', oliveyoung:'올리브영', kakao:'카카오메이커스' };
+function supportsOptionUrl(ch){ if(!ch) return true; return ch !== 'naver'; }   /* 채널 미상 = fail-open */
+function optLinkState(){
+  if (S.mode === 'none') return { on:false, why:'' };                            /* 칸 자체가 없음 */
+  if (S.inflow === 'guide') return { on:false, why:'유입가이드 작업이라 옵션 링크는 사용하지 않습니다.' };
+  if (!supportsOptionUrl(S.chan)) return { on:false, why:(CHAN_LABEL[S.chan]||'이 채널')+'는 옵션별 주소가 없어 상품 URL 하나로 안내합니다.' };
+  return { on:true, why:'' };
+}
+
+/* ── 표 렌더 ─────────────────────────────────────────────── */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+function head(){
+  return '<div class="rf-ch"><span class="rf-ct">📦 진행상품</span>'
+    + '<span class="rf-cn">작업 종류를 먼저 고르세요 · 정원은 표에서 자동 산출</span>'
+    + '<button class="rchan-btn">＋ 상품 추가</button></div>';
+}
+function modeSw(){
+  return '<div class="rf-pmsw">'
+    + '<button class="rf-pm-btn'+(S.mode==='none'?' on':'')+'" data-m="none">옵션 없는 작업</button>'
+    + '<button class="rf-pm-btn'+(S.mode==='opt'?' on':'')+'" data-m="opt">옵션 있는 작업</button>'
+    + '<span class="rf-pm-note">'+(S.mode==='opt'?'연결 작업오더에 옵션이 2가지라 자동 선택했습니다':'연결 작업오더에 옵션 정보가 없습니다')+'</span></div>';
+}
+function inflowSw(){
+  var b = function(v,label){ return '<button class="rf-pm-btn'+(S.inflow===v?' on':'')+'" data-if="'+v+'">'+label+'</button>'; };
+  var note = S.inflow==='link' ? '옵션마다 다른 주소로 보냅니다'
+           : S.inflow==='guide' ? '검색·경유 경로로 보냅니다 — 상품 페이지 버튼은 리뷰어에게 안 나갑니다'
+           : '정하지 않으면 연결 작업오더에서 자동 판정합니다';
+  return '<div class="rf-hrow" style="margin:0 0 10px"><span class="rf-hl">유입방식</span><div>'
+    + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+    + b('link','링크유입') + b('guide','유입가이드') + b('','미지정')
+    + '</div><div class="helpline">'+note+'</div></div></div>';
+}
+
+/* A안 — 표에 URL 열 추가 */
+function tableA(){
+  var st = optLinkState(), h = '';
+  if (S.mode === 'none'){
+    h += '<div class="headrow" style="grid-template-columns:1.15fr 1.5fr .75fr .5fr .5fr 26px">'
+       + '<span>상품명</span><span>상품 URL</span><span class="ra">결제금액</span><span class="ra">총인원</span><span class="ra">일건수</span><span></span></div>';
+    prods().forEach(function(p,i){
+      h += '<div class="optrow" style="grid-template-columns:1.15fr 1.5fr .75fr .5fr .5fr 26px">'
+         + '<input class="rform-input" value="'+esc(p.name)+'">'
+         + '<input class="rform-input js-purl" data-p="'+i+'" placeholder="https://" value="'+esc(p.url)+'">'
+         + '<input class="rform-input ra" value="'+p.opts[0].pay+'"><input class="rform-input ra" value="'+p.opts[0].rt+'">'
+         + '<input class="rform-input ra" value="'+p.opts[0].dl+'"><button class="delx">✕</button></div>';
+    });
+    return h;
+  }
+  h += '<div class="headrow" style="grid-template-columns:18px 1fr 1.35fr .7fr .5fr .5fr 26px">'
+     + '<span></span><span>옵션명</span><span>유입 링크</span><span class="ra">결제금액</span><span class="ra">옵션인원</span><span class="ra">일건수</span><span></span></div>';
+  prods().forEach(function(p,pi){
+    var tot = p.opts.reduce(function(a,o){return a+o.rt;},0);
+    h += '<div class="gp"><div class="gp-head" style="grid-template-columns:1fr 1.35fr .62fr 26px">'
+       + '<input class="rform-input" value="'+esc(p.name)+'" style="font-weight:700">'
+       + '<input class="rform-input js-purl" data-p="'+pi+'" placeholder="상품 URL — https://" value="'+esc(p.url)+'">'
+       + '<span class="gp-total">'+tot+'명</span><button class="delx">✕</button></div>';
+    p.opts.forEach(function(o,oi){
+      h += '<div class="optrow" style="grid-template-columns:18px 1fr 1.35fr .7fr .5fr .5fr 26px">'
+         + '<span style="color:#CBD5E1;text-align:center">└</span>'
+         + '<input class="rform-input" value="'+esc(o.k)+'">'
+         + '<input class="rform-input js-ourl" data-p="'+pi+'" data-o="'+oi+'" placeholder="'+(st.on?'https://':'—')+'" value="'+esc(o.url)+'"'+(st.on?'':' disabled')+'>'
+         + '<input class="rform-input ra" value="'+o.pay+'"><input class="rform-input ra" value="'+o.rt+'">'
+         + '<input class="rform-input ra" value="'+o.dl+'"><button class="delx">✕</button></div>';
+    });
+    if (!st.on && st.why) h += '<div class="helpline" style="color:#92400E">🔒 '+esc(st.why)+'</div>';
+    h += '<button class="gp-add">＋ 옵션 추가</button></div>';
+  });
+  return h;
+}
+
+/* B안 — 행 아래 링크 줄 */
+function tableB(){
+  var st = optLinkState(), h = '';
+  if (S.mode === 'none'){
+    h += '<div class="headrow" style="grid-template-columns:1.6fr .85fr .62fr .62fr 26px">'
+       + '<span>상품명</span><span class="ra">결제금액</span><span class="ra">총인원</span><span class="ra">일건수</span><span></span></div>';
+    prods().forEach(function(p,i){
+      h += '<div class="optrow" style="grid-template-columns:1.6fr .85fr .62fr .62fr 26px">'
+         + '<input class="rform-input" value="'+esc(p.name)+'">'
+         + '<input class="rform-input ra" value="'+p.opts[0].pay+'"><input class="rform-input ra" value="'+p.opts[0].rt+'">'
+         + '<input class="rform-input ra" value="'+p.opts[0].dl+'"><button class="delx">✕</button></div>'
+         + '<div class="lnk"><span class="ic">🔗</span>'
+         + '<input class="rform-input js-purl" data-p="'+i+'" placeholder="상품 URL — https:// (필수)" value="'+esc(p.url)+'"></div>';
+    });
+    return h;
+  }
+  h += '<div class="headrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">'
+     + '<span></span><span>옵션명</span><span class="ra">결제금액</span><span class="ra">옵션인원</span><span class="ra">일건수</span><span></span></div>';
+  prods().forEach(function(p,pi){
+    var tot = p.opts.reduce(function(a,o){return a+o.rt;},0);
+    h += '<div class="gp"><div class="gp-head" style="grid-template-columns:1fr .62fr 26px">'
+       + '<input class="rform-input" value="'+esc(p.name)+'" style="font-weight:700">'
+       + '<span class="gp-total">'+tot+'명</span><button class="delx">✕</button></div>'
+       + '<div class="lnk"><span class="ic">🔗</span>'
+       + '<input class="rform-input js-purl" data-p="'+pi+'" placeholder="상품 URL — https:// (필수)" value="'+esc(p.url)+'"></div>';
+    p.opts.forEach(function(o,oi){
+      h += '<div class="optrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">'
+         + '<span style="color:#CBD5E1;text-align:center">└</span>'
+         + '<input class="rform-input" value="'+esc(o.k)+'">'
+         + '<input class="rform-input ra" value="'+o.pay+'"><input class="rform-input ra" value="'+o.rt+'">'
+         + '<input class="rform-input ra" value="'+o.dl+'"><button class="delx">✕</button></div>'
+         + '<div class="lnk'+(st.on?'':' off')+'" style="padding-left:24px"><span class="ic">↳</span>'
+         + '<input class="rform-input js-ourl" data-p="'+pi+'" data-o="'+oi+'" placeholder="'
+         + (st.on ? '이 옵션의 유입 링크 — 비우면 상품 URL로 들어갑니다' : '사용하지 않음')
+         + '" value="'+esc(o.url)+'"'+(st.on?'':' disabled')+'>'
+         + (st.on ? '' : '<div class="lnkmsg">🔒 '+esc(st.why)+'</div>')
+         + '</div>';
+    });
+    h += '<button class="gp-add">＋ 옵션 추가</button></div>';
+  });
+  return h;
+}
+
+/* C안 — 표는 그대로 + 아래 링크 묶음 */
+function tableC(){
+  var st = optLinkState(), h = '';
+  if (S.mode === 'none'){
+    h += '<div class="headrow" style="grid-template-columns:1.6fr .85fr .62fr .62fr 26px">'
+       + '<span>상품명</span><span class="ra">결제금액</span><span class="ra">총인원</span><span class="ra">일건수</span><span></span></div>';
+    prods().forEach(function(p){
+      h += '<div class="optrow" style="grid-template-columns:1.6fr .85fr .62fr .62fr 26px">'
+         + '<input class="rform-input" value="'+esc(p.name)+'">'
+         + '<input class="rform-input ra" value="'+p.opts[0].pay+'"><input class="rform-input ra" value="'+p.opts[0].rt+'">'
+         + '<input class="rform-input ra" value="'+p.opts[0].dl+'"><button class="delx">✕</button></div>';
+    });
+  } else {
+    h += '<div class="headrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">'
+       + '<span></span><span>옵션명</span><span class="ra">결제금액</span><span class="ra">옵션인원</span><span class="ra">일건수</span><span></span></div>';
+    prods().forEach(function(p){
+      var tot = p.opts.reduce(function(a,o){return a+o.rt;},0);
+      h += '<div class="gp"><div class="gp-head" style="grid-template-columns:1fr .62fr 26px">'
+         + '<input class="rform-input" value="'+esc(p.name)+'" style="font-weight:700">'
+         + '<span class="gp-total">'+tot+'명</span><button class="delx">✕</button></div>';
+      p.opts.forEach(function(o){
+        h += '<div class="optrow" style="grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px">'
+           + '<span style="color:#CBD5E1;text-align:center">└</span>'
+           + '<input class="rform-input" value="'+esc(o.k)+'">'
+           + '<input class="rform-input ra" value="'+o.pay+'"><input class="rform-input ra" value="'+o.rt+'">'
+           + '<input class="rform-input ra" value="'+o.dl+'"><button class="delx">✕</button></div>';
+      });
+      h += '<button class="gp-add">＋ 옵션 추가</button></div>';
+    });
+  }
+  /* 링크 묶음 */
+  h += '<div class="lpanel"><h4>🔗 유입 링크</h4>';
+  prods().forEach(function(p,pi){
+    h += '<div class="lp-row"><div class="lp-name">'+esc(p.name)+' <span class="dim">· 상품</span></div>'
+       + '<input class="rform-input js-purl" data-p="'+pi+'" placeholder="상품 URL — https:// (필수)" value="'+esc(p.url)+'"></div>';
+    if (S.mode === 'opt') p.opts.forEach(function(o,oi){
+      h += '<div class="lp-row"><div class="lp-name" style="padding-left:14px">↳ '+esc(o.k)+'</div>'
+         + '<input class="rform-input js-ourl" data-p="'+pi+'" data-o="'+oi+'" placeholder="'
+         + (st.on ? 'https:// — 비우면 상품 URL' : '사용하지 않음') + '" value="'+esc(o.url)+'"'+(st.on?'':' disabled')+'></div>';
+    });
+  });
+  if (S.mode === 'opt' && !st.on && st.why) h += '<div class="helpline" style="color:#92400E">🔒 '+esc(st.why)+'</div>';
+  h += '</div>';
+  return h;
+}
+
+function card(inner){
+  return '<div class="rf-card">' + head() + '<div class="rf-cb">'
+    + inflowSw() + modeSw() + inner
+    + '<div class="sumline">정원 합계 — 총 '+prods().reduce(function(a,p){return a+p.opts.reduce(function(b,o){return b+o.rt;},0);},0)+'명 · 하루 '
+    + prods().reduce(function(a,p){return a+p.opts.reduce(function(b,o){return b+o.dl;},0);},0)+'명 (표에서 자동 산출)</div>'
+    + '<div class="chk js-chk"></div>'
+    + '</div></div>';
+}
+
+/* ── 자동점검(전부 경고) ─────────────────────────────────── */
+function checks(){
+  var out = [], st = optLinkState(), ps = prods();
+  var noUrl = ps.filter(function(p){ return !p.url.trim(); });
+  if (noUrl.length) out.push(['w','⚠ 상품 URL이 비어 있습니다('+noUrl.length+'개) — 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다.']);
+  var urls = ps.map(function(p){ return p.url.trim(); }).filter(Boolean);
+  var uniq = urls.filter(function(u,i){ return urls.indexOf(u) === i; });
+  if (uniq.length > 1) out.push(['w','⚠ 상품이 '+ps.length+'개이고 주소가 서로 다릅니다 — 리뷰어에게는 첫 상품 URL 하나만 열립니다.']);
+  if (S.mode === 'opt' && st.on){
+    var all = [], empty = [];
+    ps.forEach(function(p){ p.opts.forEach(function(o){ all.push(o); if(!o.url.trim()) empty.push(o.k); }); });
+    if (empty.length) out.push(['w','⚠ 옵션 '+all.length+'개 중 '+empty.length+'개에 유입 링크가 없습니다('+empty.join(', ')+') — 그 옵션 참여자는 상품 URL로 들어갑니다.']);
+  }
+  if (S.mode === 'opt' && !st.on && st.why) out.push(['i','ℹ '+st.why]);
+  if (!S.inflow) out.push(['i','ℹ 유입방식이 미지정입니다 — 연결 작업오더 값으로 판정합니다.']);
+  if (!out.length) out.push(['g','✓ 유입 링크 점검 통과 — 상품·옵션 주소가 모두 채워졌습니다.']);
+  return out;
+}
+function chkHtml(){ return checks().map(function(c){ return '<div class="'+c[0]+'">'+esc(c[1])+'</div>'; }).join(''); }
+
+/* ── 랜딩 URL 파생 + 리뷰어 미리보기 ─────────────────────── */
+function paintDerived(){
+  var ps = prods(), first = (ps[0] && ps[0].url.trim()) || '';
+  var urls = ps.map(function(p){ return p.url.trim(); }).filter(Boolean);
+  var uniq = urls.filter(function(u,i){ return urls.indexOf(u) === i; });
+  var ro = document.getElementById('landingRO');
+  ro.value = first || '(진행상품 표에 상품 URL을 넣으면 자동으로 채워집니다)';
+  var n = document.getElementById('landingNote');
+  n.style.color = uniq.length > 1 ? '#92400E' : '#94A3B8';
+  n.textContent = uniq.length > 1
+    ? '⚠ 상품 주소가 서로 다릅니다 — 리뷰어에게는 첫 상품 URL 하나만 열립니다.'
+    : '진행상품 표의 첫 상품 URL에서 자동으로 채워집니다 · 여기서는 고칠 수 없습니다.';
+
+  var st = optLinkState(), o = DATA[0].opts[0];
+  var box = document.getElementById('rvOpt'), btn = document.getElementById('rvBtn'), note = document.getElementById('rvNote');
+  if (S.mode === 'none'){ box.style.display = 'none'; } else { box.style.display = ''; box.textContent = '내가 고른 옵션 : ' + o.k; }
+  if (S.inflow === 'guide'){
+    btn.className = 'btn off'; btn.textContent = '🔗 상품 페이지 열기 (안 나감)';
+    note.textContent = '유입가이드 작업이라 이 버튼은 리뷰어 화면에 아예 나오지 않습니다.';
+  } else {
+    btn.className = 'btn'; btn.textContent = '🔗 상품 페이지 열기';
+    var opened = (S.mode === 'opt' && st.on && o.url.trim()) ? '고른 옵션 주소' : '상품 URL';
+    note.textContent = '지금 열리는 주소 : ' + opened + (opened === '상품 URL' && S.mode === 'opt' ? ' (이 옵션의 링크가 비어 폴백)' : '');
+  }
+}
+
+/* ── 렌더 ────────────────────────────────────────────────── */
+function render(){
+  var A = document.getElementById('mA'), B = document.getElementById('mB'), C = document.getElementById('mC');
+  if (A) A.innerHTML = card(tableA());
+  if (B) B.innerHTML = card(tableB());
+  if (C) C.innerHTML = card(tableC());
+  var h = chkHtml();
+  Array.prototype.forEach.call(document.querySelectorAll('.js-chk'), function(e){ e.innerHTML = h; });
+  document.getElementById('chkLive').innerHTML = h;
+  paintDerived();
+  Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function(b){
+    var p = b.parentNode.id;
+    var cur = p === 'segInflow' ? S.inflow : p === 'segChan' ? S.chan : p === 'segMode' ? S.mode : String(S.prods);
+    b.className = (b.dataset.v === cur) ? 'on' : '';
+  });
+}
+
+/* 입력은 데이터에 반영하되 **표를 다시 그리지 않는다**
+   — 입력 중 재렌더하면 커서가 튀고 한글 조합이 깨진다(레포에서 실제로 겪은 자리). */
+document.addEventListener('input', function(e){
+  var t = e.target;
+  if (t.classList.contains('js-purl')) DATA[+t.dataset.p].url = t.value;
+  else if (t.classList.contains('js-ourl')) DATA[+t.dataset.p].opts[+t.dataset.o].url = t.value;
+  else return;
+  var h = chkHtml();
+  Array.prototype.forEach.call(document.querySelectorAll('.js-chk'), function(el){ el.innerHTML = h; });
+  document.getElementById('chkLive').innerHTML = h;
+  paintDerived();
+});
+
+document.addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  if (b.parentNode && b.parentNode.classList.contains('seg')){
+    var p = b.parentNode.id;
+    if (p === 'segInflow') S.inflow = b.dataset.v;
+    else if (p === 'segChan') S.chan = b.dataset.v;
+    else if (p === 'segMode') S.mode = b.dataset.v;
+    else S.prods = +b.dataset.v;
+    render(); return;
+  }
+  if (b.dataset.m){ S.mode = b.dataset.m; render(); return; }
+  if (b.dataset.if !== undefined){ S.inflow = b.dataset.if; render(); return; }
+});
+
+/* ── 결정 카드 ───────────────────────────────────────────── */
+var PICK = {};
+document.addEventListener('click', function(e){
+  var o = e.target.closest('.opt'); if (!o) return;
+  var g = o.closest('.dgroup');
+  Array.prototype.forEach.call(g.querySelectorAll('.opt'), function(x){ x.classList.remove('sel'); });
+  o.classList.add('sel');
+  PICK[g.dataset.k] = o.dataset.v;
+  var keys = Object.keys(PICK);
+  document.getElementById('sumbox').textContent = keys.length
+    ? keys.map(function(k){ return '· ' + k + ' = ' + PICK[k]; }).join('\n')
+    : '아직 고르지 않았습니다.';
+});
+document.getElementById('copyBtn').addEventListener('click', function(){
+  var txt = document.getElementById('sumbox').textContent;
+  if (navigator.clipboard) navigator.clipboard.writeText(txt);
+  this.textContent = '✅ 복사됨'; var self = this;
+  setTimeout(function(){ self.textContent = '📋 복사하기'; }, 1400);
+});
+
+/* ── ?v=A|B|C 단독 보기 ──────────────────────────────────── */
+(function(){
+  var m = /[?&]v=([ABC])/i.exec(location.search);
+  if (!m) { render(); return; }
+  var v = m[1].toUpperCase();
+  Array.prototype.forEach.call(document.querySelectorAll('.vsec'), function(s){
+    if (s.dataset.v !== v) s.style.display = 'none';
+  });
+  render();
+})();
+</script>
+</body>
+</html>
