@@ -685,8 +685,68 @@ async function revertImport({ sheetId = '', tabName = '', by = 'admin' } = {}) {
   };
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   ⑦ 수리 — "등록은 됐는데 어디에도 안 보이는" 작업 되살리기
+   ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * 진단이 짚어 준 원인을 **그 자리에서** 고친다. 가져오기(덮어쓰기)가 아니다.
+ *
+ * ★★ 실측(2026-08-10 · 0720수진코리아): 표 109줄·명단 109명·**주문 109건**이 멀쩡히 있는데
+ *   `raw_sheet_tabs`(시트 사본)만 없어 `listActiveTabs`(미러 + 등록부) 조건을 못 넘겨
+ *   작업 목록에서 사라져 있었다. 여기서 "가져오기"를 하면 **주문 109건 위에 덮어쓴다** —
+ *   그래서 차단은 그대로 두고, **없는 것만 다시 만드는** 경로를 따로 연다.
+ *
+ * · `rebuild` = 장부 재생성(`sheetlessLedger.rebuildLedgers`) — 작업표에서 미러·명단·등록부를 다시 만든다.
+ *   ★ **무시트 탭에서만**(그 함수의 fail-closed 그대로). 시트 기반이면 시트가 진실원본이라
+ *     [반영 점검]의 시트 새로고침이 맞는 도구다 — 사유를 말하고 거부한다.
+ * · `assign` = 업체 소유 지정(`trackB.setOwnership`) — 업체관리 표에 나타난다.
+ *
+ * ★ 실행부는 전부 기존 함수(사본 0). 이 함수는 **어느 것을 부를지와 게이트**만 정한다.
+ * ★ 끝나면 **갱신된 진단을 함께 돌려준다** — 화면이 "고쳐졌는지"를 숫자로 바로 보여준다.
+ */
+async function repairRegistered({ sheetId = '', tabName = '', action = '', advertiserId = '', by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new ImportError('bad_request', 'sheetId, tabName 필수');
+
+  const cur = await _findRegistered(sheetId, tabName, '');
+  if (!cur) throw new ImportError('not_registered', '등록된 작업이 아닙니다 — 먼저 가져오기를 하세요.');
+
+  let done = null;
+  if (action === 'rebuild') {
+    if (!cur.sheetless) {
+      throw new ImportError('not_sheetless',
+        '시트 기반 작업입니다 — 시트가 진실원본이라 여기서 만들지 않습니다. [반영 점검] 화면의 [↻ 시트 새로고침]을 이용하세요.');
+    }
+    const led = await require('./sheetlessLedger.service')
+      .rebuildLedgers({ sheetId, tabName, by: `sheet-import-repair:${by}` });
+    done = { action, mirrorRows: led.mirrorRows, indexRows: led.indexRows, submittedCount: led.submittedCount };
+    logger.info(`[sheetImport] 수리(장부 재생성) — ${tabName} (${sheetId}) 미러 ${led.mirrorRows}행 · 명단 ${led.indexRows}명 by=${by}`);
+  } else if (action === 'assign') {
+    if (!advertiserId) throw new ImportError('advertiser_required', '업체를 골라 주세요.');
+    const { rows: adv } = await _db().query(
+      `SELECT id, name, status FROM advertisers WHERE id = $1 LIMIT 1`, [advertiserId]);
+    if (!adv.length) throw new ImportError('advertiser_not_found', '그 업체를 찾지 못했습니다.');
+    if (String(adv[0].status || '') === 'ended') throw new ImportError('advertiser_ended', '종료된 거래처입니다.');
+    /* ★ gid 는 **등록부에서 다시 구한 값**(cur.tabGid)을 쓴다 — 화면이 보낸 gid 를 믿으면
+       낡은 화면이 같은 시트의 다른 탭에 소유를 건다. gid 가 없으면 시트 전체 소유가 되므로 거부. */
+    if (!cur.tabGid) {
+      throw new ImportError('no_gid',
+        '이 작업에 탭 번호(gid)가 없어 탭 단위로 업체를 지정할 수 없습니다 — 업체관리의 [소유 시트]에서 지정하세요.');
+    }
+    await require('./trackB.service').setOwnership({ advertiserId, sheetId, tabGid: cur.tabGid, by });
+    done = { action, advertiserName: adv[0].name };
+    logger.info(`[sheetImport] 수리(업체 지정) — ${tabName} (${sheetId}) → ${adv[0].name} by=${by}`);
+  } else {
+    throw new ImportError('bad_action', '무엇을 고칠지 정하지 않았습니다.');
+  }
+
+  const after = await _findRegistered(sheetId, tabName, '');
+  return { ok: true, done, tab: after, judge: classifyRegistered(after) };
+}
+
 module.exports = {
   parseSheetUrl,
+  repairRegistered,
   readTopMeta,
   classifyImportRows,
   classifyRegistered,
