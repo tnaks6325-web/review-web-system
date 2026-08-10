@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>블로그체험단 지원 — PRD·구현계획 v1.0</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"D2Coding",monospace;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+      --line:#252B33; --line-soft:#1E232A;
+      --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+      --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+      --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+      --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.62; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1140px; margin:0 auto; padding:40px 20px 90px; display:flex; flex-direction:column; gap:42px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px; display:flex; flex-direction:column; gap:14px}
+  .eyebrow{margin:0; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--acc)}
+  h1{margin:0; font-size:clamp(26px,4vw,36px); font-weight:800; letter-spacing:-.028em; line-height:1.16}
+  .lede{margin:0; max-width:70ch; color:var(--muted); font-size:15.5px}
+  .lede b{color:var(--ink)}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-family:var(--mono); font-size:11.5px; font-weight:550; padding:4px 10px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--muted)}
+  .chip.a{border-color:var(--acc-edge); background:var(--acc-bg); color:var(--acc)}
+  section{display:flex; flex-direction:column; gap:16px}
+  .shead{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .snum{font-family:var(--mono); font-size:12px; font-weight:650; color:var(--acc); letter-spacing:.08em; border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:6px; padding:2px 8px; flex:none}
+  h2{margin:0; font-size:20px; font-weight:760; letter-spacing:-.018em}
+  h3{margin:0; font-size:15.5px; font-weight:720}
+  .sdesc{margin:0; color:var(--muted); font-size:14px; max-width:80ch}
+  .sdesc b, .card b, li b{color:var(--ink); font-weight:700}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:18px 20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px}
+  .card.warn{border-color:var(--susp-edge); background:var(--susp-bg)}
+  .card.bad{border-color:var(--fail-edge); background:var(--fail-bg)}
+  .card.good{border-color:var(--pass-edge); background:var(--pass-bg)}
+  ul.list{margin:0; padding-left:19px; display:flex; flex-direction:column; gap:7px; font-size:13.8px}
+  ul.list li{color:var(--muted)}
+  ul.list li .why{display:block; font-size:12.5px; color:var(--faint)}
+  .flow{display:flex; align-items:stretch; gap:8px; flex-wrap:wrap}
+  .fstep{flex:1 1 150px; min-width:140px; border:1px solid var(--line); border-radius:11px; padding:11px 13px; background:var(--paper); font-size:13px}
+  .fstep .t{font-weight:700; font-size:13px; margin-bottom:3px}
+  .fstep .d{color:var(--muted); font-size:12px; line-height:1.5}
+  .fstep.bad{border-color:var(--fail-edge); background:var(--fail-bg)}
+  .fstep.bad .t{color:var(--fail)}
+  .fstep.good{border-color:var(--pass-edge); background:var(--pass-bg)}
+  .fstep.good .t{color:var(--pass)}
+  .farrow{align-self:center; color:var(--faint); font-weight:700; flex:none}
+  .tbl{width:100%; border-collapse:collapse; font-size:13px}
+  .tbl th{background:var(--line-soft); border:1px solid var(--line); padding:7px 10px; text-align:left; font-size:12.3px; white-space:nowrap}
+  .tbl td{border:1px solid var(--line); padding:7px 10px; color:var(--muted); vertical-align:top}
+  .tbl td b{color:var(--ink)}
+  .tblwrap{overflow-x:auto}
+  code{font-family:var(--mono); font-size:12px; background:var(--line-soft); border:1px solid var(--line); border-radius:5px; padding:1px 5px; color:var(--ink); word-break:break-all}
+  .tag{display:inline-block; font-family:var(--mono); font-size:11px; font-weight:650; padding:2px 8px; border-radius:6px; margin-right:4px}
+  .tag.m{background:var(--acc-bg); border:1px solid var(--acc-edge); color:var(--acc)}
+  .tag.ok{background:var(--pass-bg); border:1px solid var(--pass-edge); color:var(--pass)}
+  .tag.wn{background:var(--susp-bg); border:1px solid var(--susp-edge); color:var(--susp)}
+  .tag.no{background:var(--fail-bg); border:1px solid var(--fail-edge); color:var(--fail)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="head">
+  <p class="eyebrow">PRD · Implementation Plan</p>
+  <h1>블로그체험단 지원 — 구현계획 v1.0</h1>
+  <p class="lede">리뷰체험단과 별도 축의 <b>작업유형(work_kind)</b>을 도입해 인트라넷 리뷰오더 → 리뷰웹 접수 → 모집·배정 → <b>포스팅URL 제출</b>까지 블로그체험단 한 바퀴를 지원한다. 발단 = <b>(주)바를참스킨 「0804)비타민,글루타치온_블로그 50건」</b>이 무시트 이관에서 <b>구매일자 빈 행 전부 무음 누락</b>된 사고.</p>
+  <div class="chips">
+    <span class="chip a">2026-08-10 사용자 확정 반영</span>
+    <span class="chip">migration 099 예정</span>
+    <span class="chip">인트라넷(inadd-webapp) 연동 — 양방향 가산적</span>
+    <span class="chip">단계 M1~M5</span>
+  </div>
+</header>
+
+<!-- ══════════════ 01 배경 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">01</span><h2>배경 — 왜 블로그 작업 행이 사라졌나</h2></div>
+  <p class="sdesc">블로그체험단은 <b>구매일자를 미리 정할 수 없다</b>(체험단이 모집되면 그때그때 실제 구매일자를 입력하는 운영). 그런데 무시트 이관·슬롯 백필의 "준비 행" 판정이 <b>구매일자가 날짜로 해석되는 행</b>만 인정한다.</p>
+  <div class="card bad">
+    <h3>누락 메커니즘 (실측 확정)</h3>
+    <ul class="list">
+      <li><b><code>sheetSlotSync.service.js</code> <code>readPreparedRows</code></b>(L98–111): 구매일자 파싱 성공 행만 <code>prepared</code>. 값은 있는데 파싱 실패면 <code>datelessFilled</code>로 세지만, <b>칸 자체가 빈 행은 어느 카운터에도 안 잡힌다 = 완전 무음 누락</b>.</li>
+      <li>이관 점검표 ①(<code>sheetlessCutover.service.js</code> <code>_checkSheetRows</code>)도 같은 판정을 쓰므로 <b>점검표가 초록인 채로 이관</b>됐다 — 바를참스킨 0804는 구매일자·이름이 있는 행만 시스템표(<code>campaign_participants</code>)로 넘어가고 2~10번 등 빈 행은 통째로 빠졌다.</li>
+      <li>보조 요인: 검색인덱스 파서(<code>columnResolver.js:235</code> <code>if (!name) return null</code>)는 이름 없는 행을 버리므로, 준비 행은 원래부터 시스템표 백필(slot-backfill)로만 들어올 수 있었다.</li>
+    </ul>
+  </div>
+  <div class="flow">
+    <div class="fstep bad"><div class="t">시트 1~50행 준비</div><div class="d">구매일자 빈 칸 (블로그 운영 방식)</div></div>
+    <span class="farrow">→</span>
+    <div class="fstep bad"><div class="t">준비 행 판정 탈락</div><div class="d">날짜 파싱 실패 = 카운터 밖(무음)</div></div>
+    <span class="farrow">→</span>
+    <div class="fstep bad"><div class="t">점검표 ① 초록</div><div class="d">prepared &gt; board 가 거짓</div></div>
+    <span class="farrow">→</span>
+    <div class="fstep bad"><div class="t">이관 완료</div><div class="d">시스템표에 채워진 행만 남음</div></div>
+  </div>
+</section>
+
+<!-- ══════════════ 02 확정 사항 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">02</span><h2>사용자 확정 사항 · 가정</h2></div>
+  <div class="tblwrap"><table class="tbl">
+    <tr><th>항목</th><th>확정 내용</th><th>상태</th></tr>
+    <tr><td><b>분류 체계</b></td><td>리뷰체험단/블로그체험단은 <b>별도 축(작업유형 <code>work_kind</code>)</b>. 기존 리뷰타입(포토·텍스트·구매확정·별점·혼합)은 <b>리뷰체험단 안에서만 쓰는 하위 값</b>으로 유지 — 블로그 작업엔 리뷰타입 없음.</td><td><span class="tag ok">확정</span></td></tr>
+    <tr><td><b>구매 흐름</b></td><td>블로거도 상품을 직접 구매하고 <b>구매양식을 제출</b>한다(간소화). 다른 점 = 결과물이 리뷰캡처 대신 포스팅URL.</td><td><span class="tag ok">확정</span></td></tr>
+    <tr><td><b>모집·배정</b></td><td>관리자 수기 배정뿐 아니라 <b>리뷰웹 참여형 모집공고로도 모집</b>(블로거 직접 참여)까지 이번 범위에 포함.</td><td><span class="tag ok">확정</span></td></tr>
+    <tr><td><b>결과물 제출</b></td><td><b>포스팅URL만 제출</b> — 리뷰캡처 첨부 없음. URL 제출 = 리뷰제출 완료 처리.</td><td><span class="tag ok">확정</span></td></tr>
+    <tr><td><b>준비 행 기준</b></td><td>바를참스킨 0804 = <b>번호 1~50</b>. 앞으로의 블로그 작업 = <b>리뷰오더에서 입력한 총원(recruit_count)이 준비 행 수의 기준</b>(구매일자 무관).</td><td><span class="tag ok">확정</span></td></tr>
+    <tr><td><b>바를참스킨 1회 동기화</b></td><td><b>별도 전용기능(범용 도구·화면) 구현 없이</b>, 그 작업 하나만 1회 동기화한다.</td><td><span class="tag ok">확정</span></td></tr>
+    <tr><td>구매양식 간소화 범위</td><td>가정: <b>1차는 리뷰체험단과 동일 칸 구성</b>(+블로그URL 자동 기록). 칸 축소(예: 아이디 제외)는 운영해 보며 후속 결정.</td><td><span class="tag wn">가정</span></td></tr>
+    <tr><td>블로그URL 입력 주체</td><td>가정: <b>공고 참여 시 블로거가 필수 입력</b>(홀드에 저장 → 구매양식 제출 시 시트/작업표 블로그URL 열에 자동 기록). 관리자 수기 배정 시엔 관리자가 작업보드 그리드에서 직접 입력.</td><td><span class="tag wn">가정</span></td></tr>
+  </table></div>
+  <p class="sdesc">⚠ <b>가정 2건은 구현 착수 전 확인이 필요하면 그 단계(M4·M5) 시작 시점에 재질문</b>한다. 가정이 뒤집혀도 모델(work_kind 축·전파 경로)은 불변.</p>
+</section>
+
+<!-- ══════════════ 03 모델 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">03</span><h2>모델 — 작업유형 축 <code>work_kind</code> (migration 099)</h2></div>
+  <div class="card">
+    <ul class="list">
+      <li><b>컬럼 3곳</b>: <code>work_orders.work_kind</code> · <code>tab_configs.work_kind</code> · <code>recruit_campaigns.work_kind</code> — 전부 <b>TEXT · 백필 0 · DB CHECK 없음</b>(migration 087 리뷰타입 규율 그대로: 판정을 코드+DB에 이중화하면 어휘 확장 때 저장이 실패한다). <b>빈 값 = 리뷰체험단</b>(기존 데이터 전부 = 현행 불변, opt-in).</li>
+      <li><b>판정 단일 출처 = <code>utils/workKind.js</code> 신설</b>: <code>normalizeWorkKind</code>('블로그체험단'·'블로그'·'blog' → <code>'blog'</code>, 그 외 전부 <code>'review'</code>) / <code>resolveWorkKind</code>(우선순위 = <b>공고 &gt; 탭</b> — <code>utils/reviewType.js</code>의 <code>resolveReviewType</code>과 같은 모양). 화면·라우트에 판정 사본 금지.</li>
+      <li><b><code>REQUIRED_SCHEMA</code> 등록</b>(<code>server/index.js:24–44</code>): 세 컬럼 모두 INSERT/SET 목록에 들어가므로 미적용 배포 = 접수·발행 전면 42703 — 부팅 프리플라이트로 차단(082/083 규율).</li>
+      <li><b>리뷰타입과의 관계</b>: <code>work_kind='blog'</code>면 리뷰타입은 <b>항상 미지정(null)</b>으로 취급 — 검수·캡처 슬롯 파생(<code>reviewTypeForTab</code> 소비처)이 블로그 작업에 개입하지 않는다.</li>
+      <li>작업표 표준 열의 기존 "작업유형"(<code>WORK_TYPE_TRIGGERS</code> — 열 구성용)과는 <b>별개 개념</b>. 이름 혼동을 피하기 위해 화면 표기는 <b>「체험단 종류」</b>로 통일한다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ 04 M1 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">04</span><h2>M1 — 인트라넷 선택지 + 리뷰웹 수신·전파·표시</h2></div>
+  <h3>인트라넷 (inadd-webapp) — 리뷰오더 폼 최상단 선택지</h3>
+  <div class="card">
+    <ul class="list">
+      <li>폼 첫 블록(계약건 카드 <code>review-orders.js:134</code> 바로 위)에 <code>reviewOrderChoiceGroup('review-order-work-kind','체험단 종류',['리뷰체험단','블로그체험단'],'리뷰체험단','reviewOrderToggleWorkKind()')</code> — 기존 선택형 필드 패턴(:604–623) 그대로.</li>
+      <li><b>블로그 선택 시 리뷰유형 섹션(:233) 비활성</b>(<code>reviewOrderSetFieldEnabled</code> 패턴, :695) — 별도 축이므로 블로그 오더에 리뷰유형이 실리면 안 된다.</li>
+      <li>payload(:1458)에 <code>work_kind: 'review'|'blog'</code> 코드값(<code>reviewOrderInflowTypeCode</code>(:1027) 선례의 코드 변환 함수). <code>reviewOrderCompactPayload</code>(:87)가 빈 값을 걷어내므로 <b>항상 코드값을 채워 보낸다</b>.</li>
+      <li><code>REVIEW_ORDER_FIELDS</code>(<code>src/routes/api.ts:1886</code>)에 <code>'work_kind'</code> 추가 — POST(:2571)/PUT(:2970) 자동 반영. <b>D1 스키마 변경 0</b>(캐시는 payload_json 통째 저장).</li>
+      <li>상세(:1879)·공유텍스트(:1905)·수정 모달(:2266/:2327)에 「체험단 종류」 표기. 회귀가드 <code>test/review-order-mapping.test.ts</code> 갱신.</li>
+    </ul>
+  </div>
+  <h3>리뷰웹 — 수신·저장·전파</h3>
+  <div class="card">
+    <ul class="list">
+      <li><code>order.routes.js</code> 5곳: <code>INTAKE_EDITABLE_FIELDS</code>(:46) · <code>_insertWorkOrder</code>(:185 — <b>컬럼/VALUES/파라미터 3곳 개수 일치</b>, 회귀가드가 센다) · <code>_ensureTables</code> ALTER 안전망(:102) · <code>/intake/list</code> SELECT 명시(:307 — 빠지면 인트라넷 보낸오더 카드에 안 실림) · 관리자 수정 화이트리스트는 <b>1차 제외</b>(유형 변경 = 준비 행 기준이 바뀌는 구조 변경이라 편집 불가 3종과 같은 판단).</li>
+      <li><b>접수(accept) 시 탭 전파</b>: <code>tab_configs</code> 업서트(:985–1025)에 <code>work_kind</code> 합류 — <b>blank-only</b>(<code>COALESCE(NULLIF(tab_configs.work_kind,''), EXCLUDED.work_kind)</code>, 기존 값 보존 규칙 그대로).</li>
+      <li><b>공고 발행 프리필</b>: 작업오더 → 발행 모달 프리필(<code>_woCampaignPrefill</code>, work-order-detail.js 공유 모듈)에 work_kind 동봉 → <code>recruit_campaigns.work_kind</code> 저장(create INSERT + update CASE 센티널 — 087 선례). 블로그 공고 모달은 리뷰타입 버튼군 숨김.</li>
+      <li><b>표시</b>: 작업오더 상세(<code>_woDetailHtml</code>) 「체험단 종류」 줄(값 없으면 줄 미출력 = 과거 오더 화면 불변) + 작업오더 목록·홈 작업목록·작업보드 상단·공고 카드에 <b>「블로그」 배지</b> — 판정은 <b>서버가 실어 준 <code>work_kind</code> 플래그 하나</b>(무시트 배지 <code>_nsBadge</code> 규율: 필드 부재(구버전)면 아무것도 안 그린다), 렌더러는 한 벌.</li>
+      <li><b>배포 순서 무관(양방향 가산적)</b>: 리뷰웹만 먼저 = 필드가 안 실려 와 전부 리뷰체험단(현행) / 인트라넷만 먼저 = 리뷰웹이 work_kind를 버려 분류만 안 됨.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ 05 M2 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">05</span><h2>M2 — 블로그 작업의 준비 행 = 리뷰오더 총원 (판정 보정)</h2></div>
+  <p class="sdesc">리뷰체험단의 "준비 행 = 구매일자 날짜 행" 판정은 <b>그대로 두고</b>, <code>work_kind='blog'</code>인 탭만 <b>총원(recruit_count) 기준</b>으로 갈라탄다. 사용자 확정: "앞으로의 블로그작업은 리뷰오더에서 총원 입력 시 총원이 준비 행의 기준".</p>
+  <div class="card">
+    <ul class="list">
+      <li><b>신규 작업(무시트 접수 F1·작업표 생성)</b>: 이미 <code>recruit_count</code>만큼 행을 만드는 구조(<code>buildWorktablePlan</code> → <code>createSlotsFromSheetRows</code>)라 행 수는 문제 없음. 블로그면 <b>구매일자 분배를 하지 않는다</b> — 구매일자 칸은 빈 칸으로 생성(모집되면 그때 기입), 달력 프리필(<code>sheetlessDailyPlan.prefillFromWorktable</code>)은 스킵(날짜가 없으므로 <code>unparsable</code>로 조용히 죽는 대신 <b>블로그 사유로 명시 스킵</b>). 공고 정원은 발행폼 <code>daily_limit</code>/<code>recruit_total</code> 경로.</li>
+      <li><b>시트 기반 블로그 탭의 슬롯 백필·점검표 ①</b>: <code>readPreparedRows</code>에 blog 분기 — 준비 행 = <b>헤더 아래 1행부터 총원 N행까지</b>(연결 작업오더의 <code>recruit_count</code>, 시트에 값이 있는 행은 <code>rowJson</code> 동반). <code>sheetlessCutover._checkSheetRows</code>(점검표 ①)·<code>slot-audit</code>·<code>slot-backfill</code>·<code>sweepPreparedRows</code>는 전부 <code>readPreparedRows</code> 한 곳을 쓰므로 <b>분기 지점은 한 곳</b>(사본 0). 총원을 모르면(오더 미연결·0) <b>판정 불가로 정직하게 보고</b>(0으로 꾸미지 않는다).</li>
+      <li><b>구매일자 빈 행 무음 누락 자체도 고친다</b>: <code>readPreparedRows</code>가 리뷰 작업에서도 "구매일자 빈 행 N건"을 <code>dateEmpty</code>로 세어 화면에 고지(지금은 <code>datelessFilled</code>만 보임) — 판정은 불변, <b>보고만 추가</b>(조용한 누락 금지 규율).</li>
+      <li><b>URL 열 하이재킹 방지(즉시 위험 수리)</b>: <code>columnResolver.js:174</code> <code>urlKeywords</code>가 <code>'url'</code> 부분일치·첫 매칭 승이라 <b>「블로그URL」·「포스팅URL」 열이 상품URL보다 왼쪽이면 <code>review_index.product_url</code>이 참여자 블로그 주소로 덮인다</b>(리뷰어 화면 상품 링크로 노출). → URL 열 판정에서 <b>'블로그'·'포스팅' 포함 헤더 제외</b>. 블로그 열 도입 전 선행 필수.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ 06 M3 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">06</span><h2>M3 — 바를참스킨 0804 조치 (1회 동기화 · 전용기능 없음)</h2></div>
+  <p class="sdesc">대상 = 시트 <code>1kLjLprT55A60Npz6gLtx6BeF8KrddsMEin-9jFt_tp8</code> · gid <code>545717806</code> · 「0804)비타민,글루타치온_블로그 50건」. 이미 무시트 이관된 탭이라 시스템이 시트를 더 안 읽고, 내부 시트 사본(RAW 미러)도 작업표 기준으로 재생성돼 빈 행 기록이 없다 → <b>시트를 한 번은 다시 읽어야 한다</b>.</p>
+  <div class="card good">
+    <h3>방식 = app_settings 가드 1회성 부팅 잡 (migration 057 백필 선례)</h3>
+    <ul class="list">
+      <li>범용 화면·엔드포인트를 만들지 않는다(사용자 확정 "별도 전용기능 구현 필요없이"). 부팅 시 1회 실행 → <code>app_settings</code> 가드 키(<code>blog_0804_slot_backfill_done</code>) 기록 → 재배포에도 재실행 없음. <b>fail-soft</b>(실패 시 가드 미기록 = 다음 부팅에 재시도, 부팅은 계속).</li>
+      <li><b>절차</b>: ① 라이브 시트 1회 읽기(<code>readSheet</code>, throttle 저우선 lane — 무시트 크론 게이트(<code>sheetlessScope</code>)는 주기 작업용이라 이 명시 1회 읽기와 무관) ② 헤더 탐지(<code>utils/sheetHeader</code>) ③ <b>번호 1~50 행</b> 중 <code>campaign_participants</code>에 없는 seq를 <code>participants.createSlotsFromSheetRows</code>로 생성(<b>seq = 시트 실제 행번호 · source='worktable' · rowJson = 시트 값 · ON CONFLICT DO NOTHING</b> = 기존 행 무손상·멱등) ④ <code>rebuildLedgers</code>(장부 3권 재생성 → 작업보드·검색 반영) ⑤ 그 탭 <code>tab_configs.work_kind='blog'</code> + 연결 <code>work_orders.work_kind='blog'</code> 분류 ⑥ 가드 기록.</li>
+      <li><b>결과</b>: 작업보드 표에 1~50번 전부 표시(모집·배정 전 인원 = 빈 슬롯), 이후 모집공고 참여(M5) 또는 관리자 수기 입력(그리드 편집)으로 채워진다. 새 참여의 실제 구매일자는 구매양식 제출이 그 행 구매일자 칸에 기록(기존 경로).</li>
+      <li>⚠ 이 잡은 <b>추가만</b> 한다 — 기존 행·제출·입금 표시를 건드리지 않고, 시트에도 쓰지 않는다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ 07 M4 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">07</span><h2>M4 — 포스팅URL 전용 제출 (리뷰캡처 대체)</h2></div>
+  <div class="card">
+    <h3>열 2종의 위치 (요구 3)</h3>
+    <ul class="list">
+      <li><b>블로그URL</b> = 참여자 신원 열(이 블로그의 주인이 참여). 구매양식 제출 매퍼(<code>mapOrderToSheetRow</code>)에 '블로그' 포함 헤더 규칙 추가 — <b>값이 있을 때만 쓰고(null 반환 = 안 씀·안 지움), 라이브 셀이 비어 있을 때만</b>(blank-only — 관리자 선기입 보존, 옵션 칸 규율과 동일). 현재 매퍼는 이 헤더를 어느 규칙에도 안 태워 null이므로 <b>기존 주문 경로 무회귀</b>.</li>
+      <li><b>포스팅URL</b> = 결과물 열. 기존엔 「비고(닉네임)」 열을 대용해 왔다 — <b>제출 경로는 이미 존재</b>: <code>POST /api/submit/review</code>가 memo를 <code>/비고/</code> 우선 → <code>/포스팅/</code> 폴백으로 시트에 쓴다(<code>submit.routes.js:607–622</code>). 블로그 탭은 이 우선순위를 <b>뒤집는다</b>(<code>/포스팅/</code> 우선 → 없으면 <code>/비고/</code> 폴백 = 바를참스킨 기존 시트 호환). 신규 블로그 작업표 표준 열에는 「블로그URL」·「포스팅URL」 열을 기본 포함.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>URL만으로 제출 완료 (요구 3-2)</h3>
+    <ul class="list">
+      <li><b>리뷰어 화면(<code>search-app.js</code>)</b>: blog 탭(<code>/api/search</code> 응답에 <code>workKind</code> 동봉)이면 리뷰캡처 드롭존 대신 <b>「포스팅URL」 전용 입력창</b>을 그린다. 이미지 1장 이상 필수 게이트(:3102)는 blog에서 URL 존재로 대체. 다건·슬롯 경로 포함 첨부 경로 전부 같은 분기(사본 금지 규율 — 기존 csMemo/mrMemo 입력칸을 URL 입력으로 승격, placeholder의 "블로그체험단인 경우 포스팅URL (선택)"이 blog 탭에서는 "포스팅URL (필수)").</li>
+      <li><b>서버(<code>POST /api/submit/review</code>)</b>: blog 탭이면 <code>memo</code>(=포스팅URL) <b>필수 + http(s) URL 형식 검증</b>, 파일 0건 허용. 완료 판정 = URL 존재 → <code>review_index.is_submitted=TRUE</code> + <code>submit_col</code> 시각 기입(기존 Step1·Step3 경로 재사용). <b>무시트 탭</b>은 <code>sheetlessStatus.markStatusCell</code>을 <b>포스팅 칸(row_json 병합)까지 확장</b>(submit_col 기록과 같은 패턴 — 장부 재생성에도 보존되는 W3-a 규율).</li>
+      <li><b>기존 버그 동시 수리</b>: 큐 재시도(<code>syncQueue.service.js:570–598</code> <code>review_submit</code> 핸들러)가 payload의 <code>memo</code>를 안 읽어 <b>재시도 시 포스팅URL이 유실</b>된다 — 핸들러가 memo를 소비하도록 수정(블로그 무관하게도 현행 버그).</li>
+      <li><b>검수·AI 격리</b>: blog 작업은 캡처가 없으므로 1차 필터(precheck)·2차 검수(reviewInspect)·캡처 슬롯 파생·리뷰 이미지 미리보기 대상에서 <b>제외</b>(work_kind='blog' skip — 판정 실패는 현행 경로 = fail-open). 포스팅URL의 내용 검수(포스팅 실존·본문 검사)는 <b>범위 밖</b>(후속).</li>
+      <li><b>리뷰어 홈</b>: 완료 카드는 기존 <code>isSubmitted</code> 흐름 그대로(제출일 = <code>submit_col</code> 기입 시각). 완료 카드에 포스팅URL 링크 표시는 후속(완료 행은 <code>row:{}</code>로 비워 반환되므로 별도 필드 필요).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ 08 M5 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">08</span><h2>M5 — 블로그 모집공고 (블로거 직접 참여)</h2></div>
+  <div class="card">
+    <ul class="list">
+      <li><b>공고</b>: <code>recruit_campaigns.work_kind='blog'</code>(발행 프리필 = 작업오더 work_kind). 카드에 「블로그」 배지, 공고 모달은 리뷰타입 카드 숨김 + <b>버튼군 UI 있는 화면에서만 전송</b>(축약 화면이 저장해도 설정이 안 풀리는 기존 원칙). 정원·홀드·리뷰비·기간별리뷰비 등 참여형 인프라는 <b>전부 그대로 재사용</b>(분기 최소).</li>
+      <li><b>참여(apply) 시 블로그URL 필수 입력</b>(가정 A2): <code>campaign_applications.blog_url</code>(migration 099) — blog 공고에서 미입력이면 403 <code>blog_url_required</code>(자리 미점유, 내정보 게이트와 같은 위치). <code>campaign.html</code>에 입력 시트(옵션 바텀시트 패턴 재사용). URL은 http(s) 형식 검증 + 길이 상한.</li>
+      <li><b>구매양식 → 시트 기록</b>: 제출 시 홀드 서버권위(<code>_authoritativeHold</code>)가 <code>blog_url</code>을 함께 읽어 <code>orderData.blogUrl</code>로 전달 → 매퍼의 '블로그' 헤더 규칙(M4)이 그 행 블로그URL 칸에 기입(blank-only). 홀드 없는 제출(레거시·수기)은 값이 없어 <b>안 쓴다</b>(지움 사고 0).</li>
+      <li><b>관리자 수기 배정</b>: 작업보드 그리드 편집(오버레이)으로 블로그URL·구매일자를 직접 입력 — 기존 <code>participant_edits</code> 경로 그대로, 신규 코드 0.</li>
+      <li>블로거 신원·검색 매칭은 <b>기존 phone8 체계 그대로</b>(블로그URL은 표시·기록용 열이지 매칭 키가 아니다 — 매칭 키를 늘리면 무인증 검색 보안 게이트가 흔들린다).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ 09 단계·검증 ══════════════ -->
+<section>
+  <div class="shead"><span class="snum">09</span><h2>구현 순서 · 검증 · 잔여</h2></div>
+  <div class="tblwrap"><table class="tbl">
+    <tr><th>단계</th><th>내용</th><th>리포</th><th>비고</th></tr>
+    <tr><td><span class="tag m">M1</span></td><td>work_kind 축(099) + 인트라넷 선택지 + 수신·전파·배지</td><td>리뷰웹 + 인트라넷</td><td>배포 순서 무관(가산적)</td></tr>
+    <tr><td><span class="tag m">M2</span></td><td>블로그 준비 행 = 총원 기준(판정 분기 1곳) + URL 열 하이재킹 방지 + 빈 구매일자 고지</td><td>리뷰웹</td><td>M1의 work_kind 필요</td></tr>
+    <tr><td><span class="tag m">M3</span></td><td>바를참스킨 0804 1회 동기화(부팅 잡 + 가드) — 1~50 시스템표 반영 + blog 분류</td><td>리뷰웹</td><td>M1과 같은 PR 가능</td></tr>
+    <tr><td><span class="tag m">M4</span></td><td>포스팅URL 전용 제출(URL-only 완료·무시트 기입·큐 memo 유실 수리·검수 격리)</td><td>리뷰웹</td><td>바를참스킨 즉시 수혜</td></tr>
+    <tr><td><span class="tag m">M5</span></td><td>블로그 공고(참여 시 블로그URL 입력·시트 자동 기입·카드 배지)</td><td>리뷰웹</td><td>가정 A2 확인 후 착수</td></tr>
+  </table></div>
+  <div class="card">
+    <h3>검증 계획</h3>
+    <ul class="list">
+      <li>회귀가드 신설 <code>tests/blogWorkKind.test.js</code>(가칭): 판정 순수함수 실행 + INSERT 컬럼/자리표시자/파라미터 계수 + 준비 행 blog 분기 스텁 실행 + URL 열 제외 + 매퍼 '블로그' 규칙(값 없음 = null) + 배선. <code>PGTEST_URL</code>로 진짜 PG 실행(백필 멱등·기존 행 보존).</li>
+      <li>기존 가드 갱신 예상: <code>sheetSlotSync</code>·<code>sheetlessCutover</code>(준비 행 분기), <code>workOrderAutoFill</code>(INSERT 컬럼 수), 인트라넷 <code>review-order-mapping.test.ts</code>. 검사 의미 불변을 유지하며 패턴만 갱신.</li>
+      <li>실브라우저: 인트라넷 폼 선택지·블로그 오더 payload / 리뷰웹 blog 탭 제출 화면(URL 입력창·이미지 게이트 우회) / 작업보드 1~50행 표시.</li>
+      <li>바를참스킨 실물 확인: 배포 후 작업보드에서 1~50 전부 표시 + 리뷰어 검색(이름 있는 행) + 포스팅URL 제출 1건 완주.</li>
+    </ul>
+  </div>
+  <div class="card warn">
+    <h3>잔여·한계 (문서화)</h3>
+    <ul class="list">
+      <li>포스팅URL의 <b>내용 검증 없음</b>(실존 여부·본문 검사·중복 URL 대조는 후속) — 형식(http/s)만 본다.</li>
+      <li>블로그 작업의 공고 정원은 <code>daily_limit</code>/<code>recruit_total</code> 경로만(시트 일정 063 미적용 — 구매일자가 없으므로 구조상 당연).</li>
+      <li>리뷰어 홈 완료 카드의 포스팅URL 링크 표시, 구매양식 칸 간소화(아이디 제외 등)는 후속 결정.</li>
+      <li>기존 리뷰체험단 동작은 <b>전 구간 불변</b>(work_kind 빈 값 = 현행 경로, 모든 분기는 blog일 때만).</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+</body>
+</html>

@@ -1022,6 +1022,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 
 - **계획 문서** = `frontend/docs/탈구글시트_최종단계_와이어프레임.html`(비개발자용, F1~F5). 요지: 접수 단일 관문은 유지하되 등록 대상을 시트 탭 → **시스템 작업표(무시트)**로(F1), 무시트 작업은 검색·행배정을 작업표 직접 조회로(F2 — **F2가 F1보다 먼저** 준비되어야 함: 작업표만 만들고 검색이 안 되면 접수했는데 리뷰어가 못 찾는다), 입금 M2·화면 단일화(F3·F4), **기존 작업 강제 이관 없음**(F5 — 새 작업만 무시트, 진행 중은 시트 병행 유지 후 마감 소멸).
 
+### 블로그체험단 지원 계획 (PRD 확정 · 구현 착수 전)
+- **PRD = `frontend/docs/prd-blog-campaign.html`**(v1.0, 2026-08-10 사용자 확정 반영). 발단 = (주)바를참스킨 「0804)비타민,글루타치온_블로그 50건」이 무시트 이관에서 **구매일자 빈 행 전부 무음 누락**(`readPreparedRows`가 날짜 파싱 성공만 준비 행으로 인정 — 빈 칸은 `datelessFilled`에도 안 잡힘, 점검표 ①도 같은 판정이라 초록인 채 이관).
+- **사용자 확정**: ① 분류 = **별도 축 `work_kind`**(review 기본 | blog — 리뷰타입은 리뷰체험단 하위 값, 블로그엔 리뷰타입 없음) ② 블로거도 구매양식 제출(간소화 — 1차는 동일 칸) ③ 모집공고로도 모집(이번 범위) ④ 결과물 = **포스팅URL만 제출 = 리뷰제출 완료** ⑤ 준비 행 기준: 바를참스킨 = 번호 1~50, **앞으로의 블로그 작업 = 리뷰오더 총원(recruit_count)** ⑥ 바를참스킨 1회 동기화 = **전용기능 없이 그 작업만**(app_settings 가드 1회성 부팅 잡, migration 057 패턴).
+- **단계 M1~M5**(PRD §09): M1 work_kind 축(migration 099 예정 — work_orders/tab_configs/recruit_campaigns TEXT·백필0·CHECK없음, 판정 단일 출처 `utils/workKind.js` 신설, REQUIRED_SCHEMA 등록) + 인트라넷 폼 최상단 「체험단 종류」 선택지 / M2 blog 준비 행 = 총원 분기(`readPreparedRows` 한 곳) + **`columnResolver` urlKeywords의 '블로그'·'포스팅' 헤더 제외**(블로그URL이 product_url 하이재킹하는 즉시 위험) / M3 바를참스킨 1회 동기화 / M4 포스팅URL 제출(blog 탭 = `/포스팅/` 우선 기입·URL-only 완료·**큐 `review_submit` 핸들러 memo 유실 기존 버그 수리**·검수 격리) / M5 blog 공고(apply 시 `campaign_applications.blog_url` 필수).
+- ⚠ 미확정 가정 2건(PRD §02): 구매양식 간소화 범위(1차 동일) · 블로그URL 입력 주체(공고 참여 시 — 추천안). M4·M5 착수 시 재확인.
+
 ### 컬럼감지 SoT (컬럼 판정 DB화 1단계) — 매핑 우선 · 키워드는 부트스트랩/폴백
 - 리뷰 인덱스의 컬럼 감지(`columnResolver.parseTabRows`, 두 빌더 공용)는 **DB매핑(`tab_column_mappings`) 우선 → 키워드 폴백**. DB 오버라이드 6필드 = recipient/review_submit/product/phone/round/payment. **name은 PII 가드로 영구 키워드 전용**(테스트 케이스 9). 매핑은 재앵커(저장 헤더==현재 헤더)·범위가드 통과 시만 신뢰.
 - **자동기록(detection snapshot)**: `COLUMN_MAPPING_AUTO_RECORD=1`이면 빌더가 매핑 없는 탭에서 "방금 키워드가 고른 컬럼"을 `recordDetectedMappings`로 기록(원자 `WHERE NOT EXISTS`+`ON CONFLICT DO NOTHING` = **수동 매핑 절대 미덮어씀**, `updated_by='auto:detect'`, **checksum 무효화 없음** — 기록≡키워드 결과라 재파싱 불필요). 전 탭 백필 = 플래그 켜고 `smart-build/run {force:true}` 1회(또는 04:00 전체 리빌드 대기). ★ `autoGuessField`(매핑 UI 추측) 기반 백필 금지 — resolver와 시맨틱 불일치(예: '입금자명').
