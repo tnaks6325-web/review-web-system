@@ -2448,11 +2448,17 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
-    // 오늘 참여현황(표 툴바 표기) — **내부인만**. 광고주 응답엔 넣지 않는다(정원·모집 기준은 내부 운영값).
-    //   fail-soft: 실패해도 작업보드는 그대로 뜨고, 화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
+    // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
+    //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });
   }
-  else if (role === 'advertiser') { res.headers = headers || []; }   // 광고주: 화이트리스트 헤더(그리드 렌더용)
+  else if (role === 'advertiser') {
+    res.headers = headers || [];   // 광고주: 화이트리스트 헤더(그리드 렌더용)
+    // ★ 업체 뷰어에도 **같은 자리에 같은 표기**(사용자 확정 2026-08-10) — 단 **렌즈를 거친다**.
+    //   업체가 볼 것 = 오늘 몇 명이 채워졌나 / 오늘 몇 명 예정인가. 그 외(공고를 거친 확정 수·
+    //   결제 중 홀드·합산 공고 수)는 **내부 운영 수치라 응답에서 폐기**한다 — 광고주 렌즈 규율.
+    res.todayProgress = _tpAdvertiserLens(await tabTodayProgress(db, { sheetId, tabName }));
+  }
   return res;
 }
 
@@ -3445,6 +3451,23 @@ async function tabCampaignsMap({ force = false } = {}) {
  *  ★ 읽기 전용 · 시트 무접촉 · 어떤 실패도 throw 하지 않는다(작업보드 로딩을 죽이지 않는다).
  *  @returns {{ok:boolean, dateStr:string, quota:number|null, done:number, holds:number,
  *             campaignCount:number, state:string|null, stateReason:string|null, reason:string|null}} */
+/** 업체(광고주) 렌즈 — `tabTodayProgress` 결과에서 **내부 운영 수치를 폐기**하고 표시용만 남긴다.
+ *  ★★ 화이트리스트 재구성(스프레드 금지) — `{...tp}` 로 두면 나중에 필드가 늘 때 조용히 새 나간다.
+ *  ★ `done` 은 화면이 폴백에 쓰는 값이라 **형태는 유지하되 표 기준과 같은 값**으로 둔다 →
+ *    "공고를 거쳐 확정된 건 N명 · 차이 M명" 같은 **내부 문구가 애초에 만들어지지 않는다**.
+ *  ★ `holds`(결제 중) · `campaignCount`(합산 공고 수)는 0/1 로 눕힌다(운영 정보). */
+function _tpAdvertiserLens(tp) {
+  if (!tp || typeof tp !== 'object') return tp;
+  const filled = (tp.sheetFilled == null) ? null : (Number(tp.sheetFilled) || 0);
+  return {
+    ok: tp.ok, dateStr: tp.dateStr, quota: tp.quota,
+    sheetFilled: filled,
+    done: filled == null ? (Number(tp.done) || 0) : filled,
+    holds: 0, campaignCount: 1,
+    state: tp.state, stateReason: tp.stateReason, reason: tp.reason,
+  };
+}
+
 async function tabTodayProgress(db, { sheetId, tabName } = {}) {
   const now = new Date();
   const { computeCampaignState, fetchCampaignCounts, kstTodayStr } = require('./campaignState.service');
@@ -3603,6 +3626,7 @@ module.exports = {
   tabStatsMap,
   tabCampaignsMap,
   tabTodayProgress,
+  _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
   identityKey,
   classifyParity,
   projectTab,

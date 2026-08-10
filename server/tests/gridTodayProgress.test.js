@@ -136,9 +136,26 @@ const CNT = (id, o) => Object.assign({
   console.log('\n2) workdeskTab 배선 · 노출 범위');
   const wdBlock = SVC_SRC.slice(SVC_SRC.indexOf('async function workdeskTab('), SVC_SRC.indexOf('function tabTodayProgress') > 0 ? SVC_SRC.length : undefined);
   const showEditsBlock = SVC_SRC.slice(SVC_SRC.indexOf('if (showEdits) {\n    res.hiddenRows'), SVC_SRC.indexOf('else if (role === \'advertiser\')'));
-  t('★ todayProgress 는 showEdits(내부인) 분기 안에서만 실린다 — 광고주 응답 미동봉',
-    /res\.todayProgress = await tabTodayProgress\(/.test(showEditsBlock));
-  t('광고주 분기에는 없다', !/todayProgress/.test(SVC_SRC.slice(SVC_SRC.indexOf("else if (role === 'advertiser') { res.headers"), SVC_SRC.indexOf("else if (role === 'advertiser') { res.headers") + 220)));
+  t('★ 내부인은 원본 그대로 받는다', /res\.todayProgress = await tabTodayProgress\(/.test(showEditsBlock));
+  // ★★ 업체 뷰어에도 같은 표기를 넣되(사용자 확정 2026-08-10) **렌즈를 반드시 거친다** —
+  //   원본을 그대로 실으면 공고 확정 수·결제 중 홀드·합산 공고 수가 외부로 샌다.
+  const advBlock = SVC_SRC.slice(SVC_SRC.indexOf("else if (role === 'advertiser') {"),
+    SVC_SRC.indexOf("else if (role === 'advertiser') {") + 700);
+  t('★★ 광고주는 렌즈를 거쳐서만 받는다(원본 직결 금지)',
+    /res\.todayProgress = _tpAdvertiserLens\(await tabTodayProgress\(/.test(advBlock)
+    && !/res\.todayProgress = await tabTodayProgress\(/.test(advBlock));
+  // 렌즈를 실제로 실행해 필드 누수를 본다(문자열 검사만으로는 스프레드 부활을 못 잡는다).
+  const lens = svc._tpAdvertiserLens({
+    ok: true, dateStr: '2026-08-10', quota: 42, done: 13, holds: 4, sheetFilled: 40,
+    campaignCount: 2, state: 'open', stateReason: null, reason: null, secret: 'x',
+  });
+  t('★ 공고 확정 수를 그대로 내보내지 않는다(표 기준과 같은 값으로 눕힌다)', lens.done === 40);
+  t('★ 결제 중 홀드·합산 공고 수는 폐기', lens.holds === 0 && lens.campaignCount === 1);
+  t('★ 화이트리스트 재구성 — 모르는 필드는 통과하지 못한다(스프레드 금지)',
+    lens.secret === undefined, JSON.stringify(lens));
+  t('표시에 필요한 값은 남는다', lens.quota === 42 && lens.sheetFilled === 40 && lens.dateStr === '2026-08-10');
+  const lensNull = svc._tpAdvertiserLens({ ok: true, dateStr: '2026-08-10', quota: 42, done: 13, holds: 4, sheetFilled: null, campaignCount: 1 });
+  t('표 기준을 못 세면 종전 값으로 폴백(업체도 숫자는 본다)', lensNull.done === 13 && lensNull.sheetFilled === null);
   t('export 되어 있다(가드·호출부가 쓴다)', typeof svc.tabTodayProgress === 'function');
   // ★ 함수 본문을 그 함수 범위로 잘라서 본다 — 고정 길이 슬라이스는 함수가 자라면 조용히 빗나간다.
   const TP_BODY = SVC_SRC.slice(SVC_SRC.indexOf('async function tabTodayProgress('),
