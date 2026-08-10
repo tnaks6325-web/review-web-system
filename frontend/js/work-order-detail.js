@@ -674,6 +674,14 @@ const WO_ACCEPT_ELIGIBLE = ['submitted', 'revision', 'rejected'];
 function _woAcceptable(o) { return WO_ACCEPT_ELIGIBLE.indexOf(String((o && o.status) || 'submitted')) >= 0; }
 function _woAccepted(o) { return !_woAcceptable(o); }
 
+/* ★★ 이 오더를 접수하면 **구글시트 없이 시스템 작업표로 등록되는가**(표시용 판정).
+   지금부터 들어오는 작업은 무시트가 기본이라(사용자 확정 2026-08-10) 시트탭URL이 비어 있으면
+   서버가 무시트로 접수한다 — 화면은 그 사실을 확인창 문구로만 가른다.
+   ★ 최종 판정은 서버 `sheetlessAccept.resolveAcceptMode` 하나다(화면은 값을 보내지 않는다). */
+function _woAcceptSheetless(o) {
+  return !String((o && o.work_sheet_url) || '').trim();
+}
+
 
 /* ══════════════════════════════════════════════════════════════
    작업오더 → 모집공고 발행폼 프리필 조립 (단일 출처)
@@ -1032,6 +1040,7 @@ function woAcceptTabPicker(resp, onPick) {
     WO_LABELS: WO_LABELS, WO_STATUS_HINTS: WO_STATUS_HINTS, WO_COLORS: WO_COLORS,
     WO_TRANSITIONS: WO_TRANSITIONS, WO_ACCEPT_ELIGIBLE: WO_ACCEPT_ELIGIBLE,
     _woAcceptable: _woAcceptable, _woAccepted: _woAccepted,
+    _woAcceptSheetless: _woAcceptSheetless,
     WO_DELIVERY_MAP: WO_DELIVERY_MAP, WO_CHANNEL_HOSTS: WO_CHANNEL_HOSTS,
     _woChannelFromUrl: _woChannelFromUrl, _woChannel: _woChannel,
     _woPlainGuideToHtml: _woPlainGuideToHtml, _woReviewImgHtml: _woReviewImgHtml,

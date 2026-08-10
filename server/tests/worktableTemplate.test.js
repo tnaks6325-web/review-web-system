@@ -215,12 +215,18 @@ ok('★ 인트라넷 intake 에도 시트URL 필수 검증이 없다',
   !/work_sheet_url[\s\S]{0,80}필수입니다/.test(order));
 ok('★ 빈값으로 되돌리기(시트 미첨부 전환)도 막지 않는다',
   !/작업시트탭URL은 비울 수 없습니다/.test(order));
-ok('★★ 접수(accept) 게이트는 유지 — URL+gid 없으면 접수 불가',
+// ★★ 2026-08-10 사용자 확정: 지금부터 들어오는 작업은 무시트가 기본이라 **URL 이 없으면 무시트로 접수**한다.
+//   시트 경로를 탈 때의 URL·gid 검증은 그대로 남아 있고(그 400 은 킬스위치·명시 요청에서만 도달),
+//   판정은 서비스 단일 출처(`resolveAcceptMode`)가 한다.
+ok('★★ 시트 경로의 URL+gid 검증 문구는 그대로 남아 있다(킬스위치 복귀 시 안내)',
   /작업시트탭URL이 없습니다/.test(order)
   && /needsSheet: true/.test(order)
   && /gid가 없습니다/.test(order));
-ok('★★ 그래서 "접수된 오더 = linked_tab_* 보유" 불변식이 살아 있다(모집공고 프리필 전제)',
-  /const gidMatch = url\.match\(\/\[#\?&\]gid=\(\\d\+\)\/\)/.test(order));
+ok('★★ URL 없는 접수는 막다른 길이 아니라 무시트로 간다(판정 단일 출처 호출)',
+  /const acceptMode = resolveAcceptMode\(\{ workOrder: o, body: req\.body \}\);/.test(order));
+ok('★★ 그래도 "접수된 오더 = linked_tab_* 보유" 불변식은 유지(무시트도 가상 탭을 등록한다)',
+  /const gidMatch = url\.match\(\/\[#\?&\]gid=\(\\d\+\)\/\)/.test(order)
+  && /linked_tab_sheet_id = \$3/.test(order));
 ok('AE 폼: 시트URL 이 선택 항목으로 표시된다',
   !/작업시트탭URL <span class="req">\*<\/span>/.test(staff)
   && /비워두셔도 됩니다/.test(staff));
