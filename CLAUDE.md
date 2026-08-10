@@ -433,6 +433,16 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ⚠ **이관해도 따라오지 않는 것(문서화)**: 계약·정산 링크(`trackb_settlement_links`)는 탭에 매달려 있어 **그대로 유지**된다 — 계약이 옛 업체 것이면 [계약 매칭]에서 다시 매칭해야 한다(팝업이 문장으로 고지). 브랜드 배정·광고주 접속 링크도 업체별 원장이라 별개.
 - 회귀가드 `tests/ownershipTransfer.test.js`(40케이스 — 서비스 스텁 실행·라우터 스택 실검사·**`ownTransferGo` vm 실행**(범위별 전송 · 부분 실패 고지 · 미검증 새 거래처 차단 · 중복 이름 재사용)) + `tests/ownershipTransferPg.test.js`(**진짜 PG16 15케이스** — ★ 쿼리 사본이 아니라 **서비스를 그대로 호출**한다: 사본을 검증하면 서비스 SQL 을 망가뜨려도 통과한다(변이시험이 실제로 잡아 이렇게 바꿨다) · 이중 계수 · 멱등 · 세분 소유 보존), **변이시험 10종 검출 확인** + 실 http 오리진 브라우저 18항목(팝업 body 직속·클릭 가능·역할별 버튼·탭 칩·자동완성·Esc).
 
+### ★ 담당 AE 후보에서 퇴사자 제외 (2026-08-10 · 스키마 변경 0)
+- **문제**: 담당AE 자동완성(`GET /api/trackb/intranet/users`)이 인트라넷 users 를 그대로 내려줘 **퇴사자가 계속 후보로 떴다**.
+- ★★ **판정 기준은 인트라넷 자신의 규칙 그대로** — `is_active === 0 || resigned_at`(`inadd-webapp/src/routes/api.ts` 220·2064·2275 과 동일, **빈 문자열 `resigned_at` 은 재직**). 리뷰웹에서 새 규칙을 만들면 인트라넷 인사 화면과 갈린다. 두 값은 범용 테이블 API 응답에 실려 온다(`redactSensitive` 가 지우는 건 `password` 뿐)라 **인트라넷 변경 0**.
+- ★★ **필드가 아예 없으면(구버전 인트라넷 배포) 판정 불가 = 포함(fail-open)** — 모른다고 전 직원을 지우면 **담당AE 지정이 통째로 막히는 막다른 길**이 된다. `is_active` 가 `null`/`undefined` 인 것도 "모름"이라 제외하지 않는다(`!v` 로 접으면 fail-closed 회귀).
+- ★ **거르는 곳은 서비스 한 곳**(`intranetStaffUsers`) — 소비처 3곳(업체추가 폼 `#aelist2` · 업체 [변경] 박스 `#aelist` · 편집 허용명단 후보 `_edSuggest`)이 전부 이 프록시를 타므로 **프론트 판정 사본 0**이고 명단 후보에서도 자동으로 빠진다.
+- ★★ **빼기만 하고 침묵하지 않는다** — 이미 퇴사자가 지정돼 있던 업체는 목록에서 빠지는 순간 `직접 입력값 (인트라넷 AE 목록에 없음)` 으로 보여 **재지정 신호가 사라진다**. 그래서 응답에 `resignedNames`(그 스코프의 퇴사자 이름, 상한 200)를 함께 실어 화면이 **⚠ 퇴사한 직원**으로 사유를 구분해 말한다. **저장은 막지 않는다**(자유입력 허용 계약 유지 — 경고 전용).
+- ★ **응답 shape 은 3필드(`name`/`username`/`department`) 그대로** — `resigned` 는 내부 캐시 판정용이라 내보내지 않는다(items 는 어차피 재직자만이라 항상 false + 데이터 최소화 계약 유지, 기존 `trackBAeMatch` 가드의 shape 단언 불변).
+- ★ 프론트 수신은 **단일 지점 `_aeApply(r)`**(`_aeItems`·`_aeResigned` 를 한 곳에서 세팅 — 사본을 두면 한쪽 화면만 퇴사자를 계속 그린다) + `_aeIsResigned` 판정 한 벌. **`resignedNames` 미동봉(구버전 백엔드)이면 빈 배열 = 종전 문구 그대로**(모르는 것을 퇴사자로 단정하지 않는다). [변경] 박스는 **입력 중·목록 도착 후 양쪽에서 재판정**(이미 지정된 퇴사자는 목록이 와야 알 수 있다).
+- 회귀가드 `tests/aeResignedFilter.test.js`(판정 3갈래·fail-open·shape 불변·dept 스코프가 `resignedNames` 에도 적용·q 검색이 퇴사자를 되살리지 않음·프론트 배선 vm 실행, **변이시험 11종 검출 확인**) + 실 http 오리진 브라우저로 세 상태(확인됨/퇴사자/미등록) 문구 실측.
+
 ### 리뷰웹시스템[3버전] 첫 진입 홈 (시안 B 타일 런처형 · ① nav 상시 유지)
 - 내부인(master/admin/AE) 첫 진입 기본 뷰 = **홈**(`renderHomeView`) — 그라데이션 히어로(인사 + 오늘 요약 4칸: 진행 중 작업·모집중 공고·오늘 참여 확정·확인 필요) + **메뉴 타일 그리드**(nav 의 카드화, 역할별 접힘 = nav 정책 1:1) + 우측 "오늘의 브리핑" 레일. 시안 = `frontend/docs/design-workdesk-home.html`(B안 + B-2 ①). nav 맨 앞 **🏠 홈** 버튼(admin·staff 두 nav — 타일=학습용 큰 입구, nav=빠른 입구 역할 분담), **광고주는 홈 미도달**(nav 자체가 없음 · 전용 대시보드 유지). `STATE.view` 초기값 `''` — 기본 뷰 결정은 renderShell 의 `isAdv?'workdesk':'home'` 한 곳, 딥링크(`#go=`·`#view=`)는 boot 이 view 를 먼저 세팅해 종전대로 직행. logout 리셋에 `view:''` 포함(재로그인 = 홈).
 - ★★ **홈은 읽기 전용 + 이동만** — 타일·브리핑 줄 클릭 = `switchView` 뿐, 처리 로직 사본 0(교체요청 승인·오더 접수는 각 탭의 기존 코드로 이동만 한다).
@@ -1059,7 +1069,16 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 ### 블로그체험단 지원 계획 (PRD 확정 · 구현 착수 전)
 - **PRD = `frontend/docs/prd-blog-campaign.html`**(v1.0, 2026-08-10 사용자 확정 반영). 발단 = (주)바를참스킨 「0804)비타민,글루타치온_블로그 50건」이 무시트 이관에서 **구매일자 빈 행 전부 무음 누락**(`readPreparedRows`가 날짜 파싱 성공만 준비 행으로 인정 — 빈 칸은 `datelessFilled`에도 안 잡힘, 점검표 ①도 같은 판정이라 초록인 채 이관).
 - **사용자 확정**: ① 분류 = **별도 축 `work_kind`**(review 기본 | blog — 리뷰타입은 리뷰체험단 하위 값, 블로그엔 리뷰타입 없음) ② 블로거도 구매양식 제출(간소화 — 1차는 동일 칸) ③ 모집공고로도 모집(이번 범위) ④ 결과물 = **포스팅URL만 제출 = 리뷰제출 완료** ⑤ 준비 행 기준: 바를참스킨 = 번호 1~50, **앞으로의 블로그 작업 = 리뷰오더 총원(recruit_count)** ⑥ 바를참스킨 1회 동기화 = **전용기능 없이 그 작업만**(app_settings 가드 1회성 부팅 잡, migration 057 패턴).
-- **단계 M1~M5**(PRD §09): M1 work_kind 축(migration 099 예정 — work_orders/tab_configs/recruit_campaigns TEXT·백필0·CHECK없음, 판정 단일 출처 `utils/workKind.js` 신설, REQUIRED_SCHEMA 등록) + 인트라넷 폼 최상단 「체험단 종류」 선택지 / M2 blog 준비 행 = 총원 분기(`readPreparedRows` 한 곳) + **`columnResolver` urlKeywords의 '블로그'·'포스팅' 헤더 제외**(블로그URL이 product_url 하이재킹하는 즉시 위험) / M3 바를참스킨 1회 동기화 / M4 포스팅URL 제출(blog 탭 = `/포스팅/` 우선 기입·URL-only 완료·**큐 `review_submit` 핸들러 memo 유실 기존 버그 수리**·검수 격리) / M5 blog 공고(apply 시 `campaign_applications.blog_url` 필수).
+- **단계 M1~M5**(PRD §09): M1 work_kind 축 / M2 blog 준비 행 = 총원 분기(`readPreparedRows` 한 곳) + **`columnResolver` urlKeywords의 '블로그'·'포스팅' 헤더 제외**(블로그URL이 product_url 하이재킹하는 즉시 위험) / M3 바를참스킨 1회 동기화 / M4 포스팅URL 제출(blog 탭 = `/포스팅/` 우선 기입·URL-only 완료·**큐 `review_submit` 핸들러 memo 유실 기존 버그 수리**·검수 격리) / M5 blog 공고(apply 시 `campaign_applications.blog_url` 필수).
+- **M1 완료 (migration 099)**: `work_orders`·`tab_configs`·`recruit_campaigns` 에 `work_kind TEXT DEFAULT ''` — **컬럼 추가만·백필 0·DB CHECK 없음**(087 리뷰타입 규율, 082 의 42804 FK 사고 회피). **빈 값 = review = 오늘 동작 100% 불변**(opt-in).
+  - ★★ **판정 단일 출처 = `utils/workKind.js`**(`normalizeWorkKind`·`isBlogKind`·`resolveWorkKind`(공고 > 탭)·`workKindForStore`). 라우트·화면에 규칙 사본 0, 프론트는 라벨 최소 사본(`WO_KIND_LABELS`)만 두고 **회귀가드가 서버 `WORK_KINDS` 와의 일치를 고정**(workManager 사본 규율).
+  - ★★ **`workKindForStore` 는 `''` 를 `''` 로 남긴다** — `normalizeWorkKind` 처럼 `review` 로 접으면 **"안 보냈다"와 "리뷰로 정했다"가 같아져** 접수 업서트의 blank-only(`COALESCE(NULLIF(tab_configs.work_kind,''), EXCLUDED.work_kind)`)가 무력화되고 관리자가 탭에서 고친 값을 2차 접수가 덮는다.
+  - **전파**: 인트라넷 `REVIEW_ORDER_FIELDS` → `INTAKE_EDITABLE_FIELDS`·`_insertWorkOrder`·`/intake/list` SELECT → **접수 업서트가 `tab_configs` 로 blank-only 전파** → 공고 create INSERT·update **CASE 센티널**(null=유지 / `''`=해제). ★ `_scopedCampaignEdit`·`ADMIN_EDIT_FIELDS` **미포함**(유형 변경 = 준비 행 기준이 바뀌는 구조 변경이라 스코프 토큰·수동 수정 화이트리스트에 열지 않는다).
+  - **인트라넷 폼**: 계약건 카드 **위**에 「체험단 종류」 선택(리뷰/블로그) — 블로그를 고르면 **리뷰타입 카드를 숨기고 `review_type` 을 미전송**(별도 축 = 블로그엔 리뷰타입이 없다). `REVIEW_ORDER_FIELDS` 에 `work_kind` 를 **배열 끝**에 넣었다(순서는 런타임 의미 없음 — 머리에 넣으면 기존 가드의 200자 창에서 `work_sheet_url` 이 밀려 나간다, 실측).
+  - ★ **표시**: 작업오더 상세 `체험단 종류` 줄은 값이 있을 때만 렌더 → **과거 오더 화면 불변**. 발행 프리필도 블로그면 `review_type: ""`.
+  - ★ `REQUIRED_SCHEMA` 3종 등록(컬럼 없으면 접수·발행이 전면 42703 이 되는 것을 부팅에서 막는다).
+  - ★ **양방향 가산적 · 배포 순서 무관**(088 계약건과 같은 성질) — 리뷰웹만 먼저면 값이 안 실려 오고, 인트라넷만 먼저면 리뷰웹이 필드를 버린다.
+  - 회귀가드 `tests/blogWorkKind.test.js`(48케이스 — 순수함수 실행 · 마이그레이션 모양(TEXT·CHECK 0·백필 0) · **INSERT 컬럼 수 ≡ 자리표시자 연속성 ≡ 파라미터 수 계수** · blank-only · CASE 센티널 · 권한 경계 · 프론트 라벨 사본 일치 · NUL 위생). ⚠ 이 변경으로 컬럼 목록 꼬리가 밀려 기존 가드 4종의 패턴을 함께 갱신했다(검사 의미 불변) — `workOrderAutoFill`·`sheetlessOrderAccept`·`reviewType`·`campaignCarryHold`. ★★ **INSERT 컬럼 검사에 닫는 괄호 앵커(`…, x\)`)를 쓰지 말 것** — 컬럼이 꼬리에 붙을 때마다 조용히 빨개진다(`reviewType` 은 098 부터, 이번에 `[,)]` 로 교정). ⚠ 착수 시점에 이미 빨간 가드 3종(`woCampaignMapDoc`·`paymentBatch`·`worktableTemplate`)은 이 변경과 무관(전자는 2026-08-07 정원 기준 전환 여파).
 - ⚠ 미확정 가정 2건(PRD §02): 구매양식 간소화 범위(1차 동일) · 블로그URL 입력 주체(공고 참여 시 — 추천안). M4·M5 착수 시 재확인.
 
 ### 컬럼감지 SoT (컬럼 판정 DB화 1단계) — 매핑 우선 · 키워드는 부트스트랩/폴백

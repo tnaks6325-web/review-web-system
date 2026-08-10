@@ -9242,8 +9242,8 @@ function _ovmAddAdvHtml(){
 // 거래처 등록 폼 마운트 후 — AE 자동완성 목록 로드(종전 showAddAdvertiser 말미와 동일).
 function _ovmAfterAddMount(){
   if(STATE.role==='master'||STATE.role==='admin'){
-    api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist2');   // 담당AE 후보 = AE 부서 직원만
-      _aeItems=(r&&r.ok&&r.items)||[];
+    api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist2');   // 담당AE 후보 = AE 부서 재직 직원만(퇴사자 서버 제외)
+      _aeApply(r);
       if(dl&&_aeItems.length) dl.innerHTML=_aeItems.map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
       _advPmCheck();   // 거래처 선택 시 manager 자동채움 됐을 수 있으니 목록 도착 후 재판정
     }).catch(()=>{});
@@ -9270,7 +9270,7 @@ async function deleteAdv(i){
 //   ★ 리디자인(시안 A): 본문을 차지하던 폼을 **우측 패널**로 옮겼다 — 기본 화면은 전체 개요이고
 //     이 폼은 [＋ 업체]·미지정 시트에서 필요할 때만 열린다. 필드 id·검증 로직은 그대로다.
 function showAddAdvertiser(){
-  STATE.advNameOk=false; _intraItems=[]; _aeItems=[];
+  STATE.advNameOk=false; _intraItems=[]; _aeItems=[]; _aeResigned=[];
   if(STATE.advCur) _ovmRenderOverview();   // 업체 패널을 보고 있었으면 개요로 돌아간 뒤 폼을 띄운다
   _ovmOpenDrawer('add');
 }
@@ -9286,7 +9286,19 @@ function onAdvSheet(){
 // 인트라넷 광고주DB 실시간 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시.
 //   ★ 등록 게이트: 거래처정보(인트라넷 광고주DB)에 정확히 존재하는 이름만 등록 허용 → 목록에서 선택(또는 정확 입력)해야
 //     [＋등록] 버튼이 활성화된다(미등록/오타 광고주 유입 차단). 서버(createAdvertiserScoped)도 동일 검증(최종 방어).
-let _sugTimer=null, _intraItems=[], _aeItems=[];
+let _sugTimer=null, _intraItems=[], _aeItems=[], _aeResigned=[];
+// 담당AE 후보 응답 수신 단일 지점 — 후보(items)와 퇴사자 이름(resignedNames)을 한 곳에서 세팅한다.
+//   ★ 사본을 두면 한쪽 화면만 퇴사자를 계속 후보로 그린다. 서버가 이미 퇴사자를 items 에서 제외하므로
+//     여기서 다시 거르지 않는다(판정 사본 0). resignedNames 는 "왜 목록에 없는지" 안내 재료.
+function _aeApply(r){
+  _aeItems=(r&&r.ok&&r.items)||[];
+  _aeResigned=(r&&r.ok&&Array.isArray(r.resignedNames))?r.resignedNames:[];
+}
+// 입력값이 퇴사자인가 — 구버전 백엔드(resignedNames 미동봉)면 항상 false = 종전 안내 문구 그대로.
+function _aeIsResigned(v){
+  const s=String(v||'').trim().toLowerCase(); if(!s) return false;
+  return _aeResigned.some(n=>String(n||'').trim().toLowerCase()===s);
+}
 function intraSuggest(q){
   clearTimeout(_sugTimer); const box=$('#advSug'); const val=(q||'').trim();
   _advNameCheck();   // 즉시(직전 후보 기준) 상태 갱신 — 타이핑 중 반응성
@@ -9330,6 +9342,8 @@ function _advPmCheck(){
   if(!val){ chk.textContent=''; chk.style.color=''; return; }
   const ok=_aeItems.some(u=>String(u.name||'').trim().toLowerCase()===val);
   if(ok){ chk.textContent='✓ 인트라넷 등록 AE 확인됨'; chk.style.color='var(--safe)'; }
+  // ★ 퇴사자는 목록에서 빠지므로 그냥 두면 "직접 입력값"으로 보인다 — 사유를 구분해 말한다(재지정 신호).
+  else if(_aeIsResigned(val)){ chk.textContent='⚠ 퇴사한 직원입니다 — 다른 담당자를 지정하세요'; chk.style.color='var(--warn)'; }
   else { chk.textContent='직접 입력값 (인트라넷 AE 목록에 없음)'; chk.style.color='var(--faint)'; }
 }
 async function createAdvertiser(){
@@ -9569,12 +9583,21 @@ function _aeChipHtml(a){
 }
 function editAe(){ const a=STATE.advCur; if(!a) return; const box=$('#aebox'); if(!box||box.querySelector('input')) return;
   box.innerHTML=`담당 AE: <input id="aein" list="aelist" placeholder="인트라넷 사용자명" autocomplete="off" style="width:130px"
-      onkeydown="if(event.key==='Enter')saveAe(); else if(event.key==='Escape')cancelAe()"><datalist id="aelist"></datalist>
-    <button class="btn xs pri" onclick="saveAe()">저장</button> <button class="btn xs" onclick="cancelAe()">취소</button>`;
+      oninput="_aeWarnCheck()" onkeydown="if(event.key==='Enter')saveAe(); else if(event.key==='Escape')cancelAe()"><datalist id="aelist"></datalist>
+    <button class="btn xs pri" onclick="saveAe()">저장</button> <button class="btn xs" onclick="cancelAe()">취소</button>
+    <span id="aeWarn" style="margin-left:6px;font-size:11px"></span>`;
   const inp=$('#aein'); inp.value=a.inadPm||''; inp.focus(); inp.select();
-  api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist');   // 담당AE 후보 = AE 부서 직원만
-    if(dl&&r&&r.ok) dl.innerHTML=(r.items||[]).map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
+  api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist');   // 담당AE 후보 = AE 부서 재직 직원만(퇴사자 서버 제외)
+    _aeApply(r);
+    if(dl&&r&&r.ok) dl.innerHTML=_aeItems.map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
+    _aeWarnCheck();   // 이미 지정돼 있던 담당자가 퇴사자면 목록 도착 후에야 알 수 있다
   }).catch(()=>{});
+}
+// 지정하려는(또는 이미 지정된) 담당자가 퇴사자면 그 사실을 말한다 — 저장은 막지 않는다(자유입력 허용 계약 유지).
+function _aeWarnCheck(){
+  const el=$('#aein'), w=$('#aeWarn'); if(!el||!w) return;
+  if(_aeIsResigned(el.value)){ w.textContent='⚠ 퇴사한 직원'; w.style.color='var(--warn)'; }
+  else { w.textContent=''; w.style.color=''; }
 }
 function cancelAe(){ const a=STATE.advCur, box=$('#aebox'); if(box&&a) box.innerHTML=_aeChipHtml(a); }
 async function saveAe(){ const a=STATE.advCur; if(!a) return;
