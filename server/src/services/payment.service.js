@@ -25,6 +25,8 @@ const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { resolveBank, bankNameByCode, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
+// 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
+const { isVirtualSheetId } = require('./sheetlessAccept.service');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행' };
 
@@ -384,7 +386,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
         label: t.label, transferBank: t.transferBank || '', depositName: t.depositName || '',
         goodsCostType: t.goodsCostType || '',
         sheetless: t.sheetless === true,
-        sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid, sheetless: t.sheetless }),
+        sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
       };
     }
   } catch (e) { logger.warn('[payment] 탭 메타 조회 실패(탭명 사용): ' + e.message); }
@@ -394,17 +396,19 @@ async function _loadTabMeta(sheetIds, tabNames) {
 /**
  * 그 탭을 여는 구글시트 링크(없으면 빈 문자열).
  *
- * ★★ **무시트 작업(096)은 링크를 만들지 않는다** — 가상 시트ID(`wt_…`)로 조립하면
- *   **죽은 구글 링크**가 되어 담당자가 "왜 안 열리지"를 겪는다(반영 점검 `_gidOut` 과 같은 규율:
- *   빈 링크 > 죽은 링크). 화면은 사유를 말하고 버튼을 비활성으로 둔다.
- * ★ 판정은 **서버 플래그 `tab_configs.sheetless`** — ID 모양(`wt_`)으로 추측하지 않는다
- *   (이관된 기존 작업은 **진짜 시트 ID 를 그대로 쓰면서** 무시트가 되므로 모양으로는 못 잡는다).
+ * ★★ **이관된 작업(sheetless)도 링크를 만든다 (사용자 확정 2026-08-10)** — 초도 보완에는
+ *   아직 구글시트를 봐야 하는 값(결제금액 칸 등)이 있다. 시스템 표가 진실원본이라는 사실은
+ *   **링크를 막는 근거가 아니라 경고문의 근거**다 → 화면이 "편집하지 말고 참고만" 팝업을
+ *   띄운 뒤 연다(`sheetless` 플래그는 그 경고 조건으로만 쓴다).
+ * ★★ **열 시트가 애초에 없는 경우만 빈 값** = 시스템이 만든 가상 시트ID(`wt_…`).
+ *   구글 URL 로 조립하면 **죽은 링크**가 된다(반영 점검 `_gidOut` 과 같은 규율: 빈 링크 > 죽은 링크).
+ *   판정은 `sheetlessAccept.isVirtualSheetId` 단일 출처(사본 금지) — 이 접두는 스코프 게이트가
+ *   아니라 **표시용 판정**이라 여기 쓰는 것이 맞다(게이트는 여전히 `tab_configs.sheetless`).
  * ★ gid 를 알면 그 탭까지 열고, 모르면 시트만 연다("열리는데 엉뚱한 탭"보다 정직하다).
  */
-function tabSheetUrl({ sheetId, tabGid, sheetless }) {
-  if (sheetless === true) return '';
+function tabSheetUrl({ sheetId, tabGid }) {
   const id = String(sheetId == null ? '' : sheetId).trim();
-  if (!id) return '';
+  if (!id || isVirtualSheetId(id)) return '';
   const base = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
   const gid = String(tabGid == null ? '' : tabGid).trim();
   return gid ? `${base}#gid=${encodeURIComponent(gid)}` : base;

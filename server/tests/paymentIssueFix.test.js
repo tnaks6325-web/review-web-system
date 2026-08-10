@@ -128,6 +128,7 @@ function withStubPool(handler, run) {
   function targetsHandler(opts) {
     return (sql) => {
       if (/FROM review_index ri/.test(sql)) {
+        if (opts.rows) return { rows: opts.rows.map(r => Object.assign({ amountCells: opts.amountCells || null }, r)) };
         return { rows: [{
           sheetId: 'S1', tabName: 'T1', rowIndex: 10, reviewerName: '홍길동', phone8: '12345678',
           startDate: '5 / 8 (목)', productName: '욕실화',
@@ -737,12 +738,24 @@ function withStubPool(handler, run) {
       'https://docs.google.com/spreadsheets/d/ABC/edit');
   });
 
-  t('8b ★★ 무시트 작업은 링크를 만들지 않는다(가상 ID = 죽은 링크)', () => {
+  t('8b ★★ 이관된 작업(sheetless)도 링크를 만든다 — 막는 것은 "시트가 없는 경우"뿐', () => {
     const svc = require(SRC('services/payment.service'));
+    // 사용자 확정: 초도 보완에 시트 참고가 필요하다 → sheetless 여도 진짜 시트ID면 연다(경고는 화면이)
+    assert.strictEqual(svc.tabSheetUrl({ sheetId: '1AbCrealSheetId', tabGid: '9', sheetless: true }),
+      'https://docs.google.com/spreadsheets/d/1AbCrealSheetId/edit#gid=9');
+    // 시스템이 만든 가상 시트ID = 애초에 열 시트가 없다 → 죽은 링크 금지
     assert.strictEqual(svc.tabSheetUrl({ sheetId: 'wt_abc', tabGid: '1', sheetless: true }), '');
-    // ★ 판정은 플래그 하나 — ID 모양으로 추측하면 이관된 기존 작업(진짜 시트ID 유지)을 놓친다
-    assert.strictEqual(svc.tabSheetUrl({ sheetId: '1AbCrealSheetId', tabGid: '9', sheetless: true }), '');
     assert.strictEqual(svc.tabSheetUrl({ sheetId: '', tabGid: '9' }), '');
+  });
+
+  t('8b2 가상 시트ID 판정은 sheetlessAccept 단일 출처(접두 사본 금지)', () => {
+    const src = noLineComments(read('services/payment.service.js'));
+    assert.ok(/isVirtualSheetId/.test(src), '판정 함수를 쓰지 않는다');
+    assert.ok(!/['"`]wt_['"`]/.test(src), '★ 접두 문자열 사본이 생겼다(한쪽만 바뀌면 죽은 링크가 되살아난다)');
+    // 실제로 그 함수의 판정을 따르는지 실행으로 확인
+    const { VIRTUAL_SHEET_PREFIX } = require(SRC('services/sheetlessAccept.service'));
+    assert.strictEqual(require(SRC('services/payment.service'))
+      .tabSheetUrl({ sheetId: VIRTUAL_SHEET_PREFIX + 'deadbeef', tabGid: '1' }), '');
   });
 
   await ta('8c 대상 목록에 sheetUrl·sheetless 가 실린다(화면이 재조립하지 않게)', async () => {
@@ -758,10 +771,24 @@ function withStubPool(handler, run) {
     });
   });
 
-  await ta('8d 무시트 작업은 빈 링크 + sheetless 신호', async () => {
+  await ta('8d ★ 이관된 작업 = 링크 + sheetless 신호(화면이 경고 팝업을 띄울 근거)', async () => {
     await withStubPool(targetsHandler({
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M',
         goodsCostType: '', tabGid: '77', sheetless: true }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.sheetUrl, 'https://docs.google.com/spreadsheets/d/S1/edit#gid=77');
+      assert.strictEqual(it.sheetless, true);
+    });
+  });
+
+  await ta('8d1 시스템이 만든 무시트 작업(가상 ID)은 빈 링크', async () => {
+    await withStubPool(targetsHandler({
+      rows: [{ sheetId: 'wt_0123456789abcdef', tabName: 'T1', rowIndex: 1, reviewerName: '차', phone8: '12345678' }],
+      tabRows: [{ sheetId: 'wt_0123456789abcdef', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M',
+        goodsCostType: '', tabGid: '100000001', sheetless: true }],
       ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
       amountCells: { '결제금액': '1000' },
     }), async (svc) => {
@@ -791,16 +818,37 @@ function withStubPool(handler, run) {
     const S = loadFixFns();
     S.STATE.pmFix = S._pmBuildFix([
       mkItem({ tabName: 'T1', tabLabel: 'A', issues: ['no_bank'] }),
-      mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 2, issues: ['no_bank'], sheetUrl: '', sheetless: true }),
-      mkItem({ tabName: 'T3', tabLabel: 'C', rowIndex: 3, issues: ['no_bank'], sheetUrl: '', sheetless: false }),
+      // ★ 이관된 작업 = 링크 있음 → **활성**(경고는 클릭 후 팝업)
+      mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 2, issues: ['no_bank'], sheetless: true }),
+      // 시스템이 만든 무시트(가상 ID) = 링크 없음 → 비활성 + 사유
+      mkItem({ tabName: 'T3', tabLabel: 'C', rowIndex: 3, issues: ['no_bank'], sheetUrl: '', sheetless: true }),
+      mkItem({ tabName: 'T4', tabLabel: 'D', rowIndex: 4, issues: ['no_bank'], sheetUrl: '', sheetless: false }),
     ]);
     const html = S._pmFixBlock();
-    assert.ok(/_pmOpenSheet\(0\)/.test(html), '열 수 있는 작업에 시트 버튼이 없다(인덱스 전달)');
+    assert.strictEqual((html.match(/onclick="_pmOpenSheet\(\d+\)"/g) || []).length, 2,
+      '★ 링크가 있는 작업(이관 포함)은 눌러서 열 수 있어야 한다');
     assert.ok(!/onclick="_pmOpenSheet\([^)]*'/.test(html), '★ onclick 에 문자열을 보간했다');
     assert.ok(!/docs\.google\.com/.test(html), '★ URL 을 onclick·href 로 화면에 심지 않는다(인덱스 참조)');
-    assert.strictEqual((html.match(/disabled title="[^"]*무시트/g) || []).length, 1, '무시트 사유 안내가 없다');
+    assert.ok(/title="[^"]*참고용으로만[^"]*"[^>]*onclick="_pmOpenSheet/.test(html),
+      '이관 작업 버튼이 "참고용" 임을 말하지 않는다');
+    assert.strictEqual((html.match(/disabled title="[^"]*열 수 있는 구글시트가 없습니다/g) || []).length, 1,
+      '가상 시트 작업의 사유 안내가 없다');
     assert.strictEqual((html.match(/disabled title="[^"]*시트 링크를 알 수 없습니다/g) || []).length, 1,
-      '★ "링크 없음"을 "무시트"로 뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾는다');
+      '★ "링크 없음"을 "시트 없음"으로 뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾는다');
+  });
+
+  t('8f2 ★★ 이관된 작업은 경고 팝업을 거쳐서만 열린다(사용자 확정 문구)', () => {
+    const src = HTML.slice(HTML.indexOf('function _pmOpenSheet'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
+    // 이관 아님 = 곧바로 열고, 이관 = 팝업
+    assert.ok(/if\(!w\.sheetless\)\{ window\.open\(/.test(src), '일반 작업은 곧바로 열려야 한다(불필요한 마찰 금지)');
+    assert.ok(/_pmDialog\(/.test(src), '이관 작업 경고 팝업이 없다');
+    for (const phrase of ['탈구글시트를 진행했습니다', '시스템에 반영되지 않으므로',
+      '시트를 편집하지 마시고', '참고용으로만', '확인하고 시트로 이동하기']) {
+      assert.ok(src.indexOf(phrase) > 0, '확정 문구 누락: ' + phrase);
+    }
+    // ★ window.open 은 onOk 동기 구간에서 — async 로 만들면 팝업 차단에 걸린다
+    assert.ok(/onOk:\s*\(\)=>\{ window\.open\(/.test(src),
+      '★ onOk 가 async 이거나 await 뒤에서 열면 브라우저가 팝업을 막는다');
   });
 
   t('8g 작업 보완 팝업에도 시트 바로가기가 있다(고치다가 시트를 확인한다)', () => {
