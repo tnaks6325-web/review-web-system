@@ -810,6 +810,15 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
+// ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ adminOrMaster 전용:
+//    업체 간 재배치는 staff 초기매핑 게이트("재배치는 관리자에게 요청")와 같은 규율로 admin 소관이다. ──
+router.post('/ownership/transfer', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabGid, toAdvertiserId } = req.body || {};
+    const o = await svc.transferOwnership({ sheetId, tabGid: tabGid || null, toAdvertiserId, by: _by(req) });
+    res.status(o.ok ? 200 : (o.code || 400)).json(o);
+  } catch (err) { next(err); }
+});
 
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
@@ -2429,16 +2438,62 @@ router.post('/payment/batch/:id/cancel', authMiddleware, adminOrMasterMiddleware
   } catch (err) { next(err); }
 });
 
+/* ── 보류 사유 보완 ─────────────────────────────────────────
+   ★ 권한은 입금관리 화면과 같은 adminOrMaster — 계좌번호가 그대로 보이는 화면이고,
+     이체은행은 "어느 통장에서 나가는가"라 되돌리기 쉬운 값이 아니다.
+   ★ 검증 실패(PaymentFixError)는 **400대**로 내린다 — errorHandler 가 500 으로 마스킹하면
+     화면이 사유를 못 보여주고 담당자가 무엇을 고쳐야 할지 알 수 없다. */
+const _PAY_FIX_STATUS = {
+  bad_target: 400, empty: 400, bad_bank: 400, bad_bank_name: 400, bad_reviewer: 400,
+  campaign_mismatch: 409, tab_not_found: 404, reviewer_not_found: 404, sub_not_found: 404,
+};
+function _payFix(res, err, next) {
+  if (err && err.code && _PAY_FIX_STATUS[err.code]) {
+    return res.status(_PAY_FIX_STATUS[err.code]).json({ ok: false, code: err.code, error: err.message });
+  }
+  // 42P01/42703 = 스키마 미적용 — /api/trackb/* 는 마스킹 대상이라 사유를 직접 실어 준다
+  if (err && (err.code === '42P01' || err.code === '42703')) {
+    return res.status(503).json({ ok: false, code: 'not_ready', error: '입금 설정 컬럼이 아직 준비되지 않았습니다(배포 직후일 수 있습니다).' });
+  }
+  return next(err);
+}
+
+// 작업 단위 — 이체은행 · 통장표시(저장하면 그 작업의 모든 행이 함께 풀린다)
+router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await paymentSvc.saveTransferSetting({
+      sheetId: b.sheetId, tabName: b.tabName, campaignId: b.campaignId || null,
+      bank: b.bank, memo: b.memo,
+    });
+    logger.info(`[payment] 이체설정 저장 by ${_by(req)} — ${b.tabName} → ${out.target}/${out.bank || '자동'}`);
+    res.json(out);
+  } catch (err) { _payFix(res, err, next); }
+});
+
+// 리뷰어 단위 — 은행명 · 계좌번호 · 예금주(그 리뷰어의 모든 행이 함께 풀린다)
+router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await paymentSvc.saveReviewerAccount({
+      reviewerId: b.reviewerId, subPhone8: b.subPhone8,
+      bankName: b.bankName, bankAccount: b.bankAccount, accountHolder: b.accountHolder,
+    });
+    logger.info(`[payment] 리뷰어 계좌 보완 by ${_by(req)} — ${out.target}`);
+    res.json(out);
+  } catch (err) { _payFix(res, err, next); }
+});
+
 /* ── M2: 이체결과 파일 반영 ─────────────────────────────────
    ★ 미리보기(result-preview)는 **쓰기 0** — 사람이 확인 화면을 본 뒤에만 반영한다.
    ★ 반영(result-apply)은 서버가 **파일을 다시 해석·재매칭**한다(화면이 보낸 목록 불신).
-   ★ 42P01(migration 099 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
+   ★ 42P01(migration 100 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
 const paymentResultSvc = require('../services/paymentResult.service');
 
 function _resultErr(err, res, next) {
   if (err && err.code === '42P01') {
     return res.status(503).json({ ok: false, code: 'not_ready',
-      error: '이체결과 반영 저장소가 아직 준비되지 않았습니다(마이그레이션 099 적용 후 다시 시도하세요).' });
+      error: '이체결과 반영 저장소가 아직 준비되지 않았습니다(마이그레이션 100 적용 후 다시 시도하세요).' });
   }
   if (err instanceof paymentResultSvc.ResultError) {
     const code = err.code === 'not_found' ? 404 : err.code === 'too_large' ? 413 : 400;

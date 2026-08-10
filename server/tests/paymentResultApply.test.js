@@ -10,7 +10,7 @@
  *  E. 입금 시각 = **결과 파일의 실제 이체시점**(지금이 아니다)
  *  F. 입금 기록 단일 출처 — paymentApply.service 재사용(사본 금지)
  *  G. 실패 안내 = 기본 켬 · 재전송 안 함(notified_at) · 은행 응답 원문 미노출
- *  H. 마이그레이션 099 · REQUIRED_SCHEMA · 라우트 · 화면 배선
+ *  H. 마이그레이션 100 · REQUIRED_SCHEMA · 라우트 · 화면 배선
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -294,16 +294,16 @@ console.log('\n[A] 미리보기 — 쓰기 0');
      ══════════════════════════════════════════════════════════ */
   console.log('\n[H] 마이그레이션 · 프리플라이트 · 라우트 · 화면');
   {
-    const mig = read('migrations/099_payment_result_apply.sql');
+    const mig = read('migrations/100_payment_result_apply.sql');
     for (const c of ['applied_at', 'applied_by', 'result_status', 'result_seq', 'notified_at']) {
-      ok(`099 가 ${c} 를 추가한다`, new RegExp('ADD COLUMN IF NOT EXISTS ' + c).test(mig));
+      ok(`100 이 ${c} 를 추가한다`, new RegExp('ADD COLUMN IF NOT EXISTS ' + c).test(mig));
     }
-    ok('★ 099 는 컬럼 추가·신규 테이블만(기존 데이터 백필 0)',
+    ok('★ 100 은 컬럼 추가·신규 테이블만(기존 데이터 백필 0)',
       !/\bUPDATE\s+payment_/i.test(mig) && !/\bDELETE\s+FROM/i.test(mig));
     ok('감사 이력 테이블을 만든다', /CREATE TABLE IF NOT EXISTS payment_result_uploads/.test(mig));
 
     const idx = read('index.js');
-    ok('★ REQUIRED_SCHEMA 에 099 컬럼 등록(없으면 반영이 통째로 42703)',
+    ok('★ REQUIRED_SCHEMA 에 100 컬럼 등록(없으면 반영이 통째로 42703)',
       /\['payment_batch_items', 'result_status'\]/.test(idx) && /\['payment_batches', 'applied_at'\]/.test(idx));
 
     const tb = noLineComments(read('src/routes/trackB.routes.js'));

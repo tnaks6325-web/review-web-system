@@ -307,9 +307,11 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('tab_configs 업서트도 한 곳뿐', (orN.match(/INSERT INTO tab_configs/g) || []).length === 1);
     ok('접수의 상태 전이·탭 링크 기록도 한 곳뿐',
       (orN.match(/UPDATE work_orders SET\s*\n\s*status = \$2,\s*\n\s*linked_tab_sheet_id = \$3/g) || []).length === 1);
+    // ⚠ 099(체험단 종류)에서 업서트 컬럼 목록에 work_kind($14)가 합류해 패턴이 드리프트했다 —
+    //   검사 의미는 불변(무시트 표식이 컬럼·자리표시자·파라미터에 맞물려 실린다).
     ok('무시트 표식을 등록 컬럼에 싣는다(열·자리·파라미터가 맞물린다)',
-      /taekhap, sheetless, updated_at\)/.test(orN) &&
-      /VALUES \(\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,\$10,\$11,\$13, NOW\(\)\)/.test(orN) &&
+      /taekhap, sheetless, work_kind, updated_at\)/.test(orN) &&
+      /VALUES \(\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,\$10,\$11,\$13,\$14, NOW\(\)\)/.test(orN) &&
       /wantSheetless,/.test(orN));
     // ★★ 이관은 되돌리지 않는다 — 시트 URL 재접수로 조용히 시트 기반이 되면 크론이 장부를 덮는다
     ok('이관 되돌림 금지(OR 병합)', /sheetless\s*=\s*COALESCE\(tab_configs\.sheetless, FALSE\) OR EXCLUDED\.sheetless/.test(orN));

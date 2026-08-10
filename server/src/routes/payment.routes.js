@@ -9,20 +9,9 @@ const pool = require('../db/pool');
 const { nowStamp, recordDeposits, markDepositCells } = require('../services/paymentApply.service');
 
 // ── 헬퍼: row_json에서 결제금액 추출 ──
-function _extractAmount(rowJson) {
-  if (!rowJson || typeof rowJson !== 'object') return '';
-  const entries = Object.entries(rowJson);
-  const norm = k => String(k || '').replace(/\s/g, '');
-  const hasVal = v => v != null && String(v).trim() !== '';
-  const exact = ['결제금액', '결제금', '금액', '결제'];
-  for (const c of exact) {
-    const hit = entries.find(([k]) => norm(k) === c);
-    if (hit && hasVal(hit[1])) return String(hit[1]).trim();
-  }
-  const partial = entries.find(([k]) => norm(k).includes('금액'));
-  if (partial && hasVal(partial[1])) return String(partial[1]).trim();
-  return '';
-}
+// ★ 규칙 본체는 utils/paymentAmount.js 단일 출처(입금관리 M1 의 상품비 폴백과 공용).
+//   여기 사본을 되살리면 "레거시 화면과 입금관리의 금액이 갈리는" 드리프트가 난다.
+const { extractAmountText: _extractAmount } = require('../utils/paymentAmount');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/payment/targets — 입금 대상 목록 (GAS: getPaymentTargets)
