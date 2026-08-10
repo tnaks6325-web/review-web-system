@@ -211,6 +211,11 @@ async function listPaymentTargets(opts = {}) {
       bankAccount: account,
       accountHolder: acct ? (acct.accountHolder || '') : '',
       isSub: acct ? !!acct.isSub : false,
+      // ★ 계좌 **명의**(누구 이름으로 등록된 계좌인가) — 시트의 이름 칸(`reviewerName`)은
+      //   탭마다 주문자/수취인 중 무엇이 잡혔는지 달라 명의 판별에 쓸 수 없다.
+      //   타계정이면 `accountOwner` 가 그 명의를 등록한 소유자(본계정) 이름.
+      accountName: acct ? (acct.name || '') : '',
+      accountOwner: acct ? (acct.ownerName || '') : '',
       // 계좌를 고칠 대상 지목 — ★ phone8 은 GENERATED·비유니크라 키로 쓰지 않는다(같은 뒤8자리 타인 행 오염).
       //   본계정은 reviewers.id, 타계정은 소유자 id + 그 명의 phone8.
       accountRef: acct && acct.reviewerId
@@ -331,6 +336,7 @@ async function _loadAccounts(phone8s) {
     `SELECT RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) AS "phone8",
             r.id                                                             AS "reviewerId",
             COALESCE(NULLIF(btrim(s->>'name'),''), '')                       AS "name",
+            COALESCE(r.name, '')                                             AS "ownerName",
             COALESCE(NULLIF(btrim(s->>'bankName'),''),   r.bank_name)        AS "bankName",
             COALESCE(NULLIF(btrim(s->>'bankAccount'),''), r.bank_account)    AS "bankAccount",
             COALESCE(NULLIF(btrim(s->>'accountHolder'),''), r.account_holder) AS "accountHolder"
@@ -341,16 +347,21 @@ async function _loadAccounts(phone8s) {
   );
   for (const s of subs) {
     if (s.phone8 && !map[s.phone8]) {
-      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '', isSub: true };
+      // ★ 명의 이름(sub_accounts[].name)과 소유자 이름을 함께 싣는다 —
+      //   같은 소유자가 본인 명의 + 타계정 명의로 여러 건 참여하면 화면이 "누구 계좌인지" 말할 수 없다(실사고).
+      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '',
+                        isSub: true, name: s.name || '', ownerName: s.ownerName || '' };
     }
   }
   const { rows: own } = await pool.query(
-    `SELECT id AS "reviewerId", phone8, bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder"
+    `SELECT id AS "reviewerId", phone8, COALESCE(name,'') AS "name",
+            bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder"
        FROM reviewers WHERE phone8 = ANY($1)`,
     [phone8s]
   );
   for (const r of own) {
-    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '', isSub: false };
+    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '',
+                      isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
   return map;
 }
