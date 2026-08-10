@@ -53,4 +53,23 @@ async function workKindForTab({ sheetId, tabName, client } = {}) {
   return v;
 }
 
-module.exports = { workKindForTab, __setPoolForTest, CAMPAIGN_WORK_KIND_LATERAL };
+/**
+ * 여러 탭을 한 번에 — 검색 결과처럼 탭이 섞인 목록용(행마다 조회하면 왕복이 폭증한다).
+ * ★ `reviewTypesForTabs` 와 같은 모양: 중복 제거 후 탭당 1회(그마저도 60초 캐시가 흡수).
+ * @returns {Promise<Map<string, 'review'|'blog'|null>>} 키 = `${sheetId} ${tabName}`
+ */
+async function workKindsForTabs(pairs) {
+  const out = new Map();
+  const uniq = [];
+  for (const p of pairs || []) {
+    if (!p || !p.sheetId || !p.tabName) continue;
+    const k = `${p.sheetId} ${p.tabName}`;
+    if (!out.has(k)) { out.set(k, null); uniq.push(p); }
+  }
+  for (const p of uniq) {
+    out.set(`${p.sheetId} ${p.tabName}`, await workKindForTab(p));
+  }
+  return out;
+}
+
+module.exports = { workKindForTab, workKindsForTabs, __setPoolForTest, CAMPAIGN_WORK_KIND_LATERAL };

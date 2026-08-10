@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
+const { workKindsForTabs } = require('./workKindContext.service');
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -380,6 +381,14 @@ async function searchByName(query, phone8, opts = {}) {
         filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
     } catch (_) { _rtMap = new Map(); }
 
+    /* ★ 체험단 종류(099) — 블로그 작업은 결과물이 포스팅URL 이라 제출 화면이 달라진다.
+       리뷰타입과 **같은 배치·같은 fail-soft**(조회 실패 = null = 종전 화면). */
+    let _wkMap = new Map();
+    try {
+      _wkMap = await workKindsForTabs(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+    } catch (_) { _wkMap = new Map(); }
+
     // GAS 호환 결과 변환
     const results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
@@ -415,6 +424,7 @@ async function searchByName(query, phone8, opts = {}) {
       // ★ 087 2차: 구매확정 + 현영이면 리뷰 자리가 구매확정으로 치환된다(단독은 종전 단일 화면).
       captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType, _rtMap.get(`${row.sheetId} ${row.tabName}`) || null),
       reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 리뷰어 안내문용
+      workKind:    _wkMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 'blog' = 포스팅URL 제출
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
       // ★ 제출완료 행은 행 전체 JSON을 반환하지 않는다(데이터 최소화 — 완료 탭 표시에 불필요)
       row:         row.isSubmitted ? {} : rowObj,
