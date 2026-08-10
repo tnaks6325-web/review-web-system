@@ -320,6 +320,9 @@ function _woDetailHtml(o) {
     // 계약건(088) — 인트라넷 리뷰오더 등록에서 고른 계약. 접수하면 이 계약이 정산에 자동 연결된다.
     //   ★ 값이 없는 과거 오더는 줄 자체가 안 나온다(_woKv 가 빈 값을 버림) = 종전 화면 그대로.
     _woKv("계약건", o.contract_number),
+    // 체험단 종류(099) — 리뷰/블로그. ★ 빈 값(=리뷰, 기존 오더 전부)이면 줄 자체가 안 나온다
+    //   = 종전 화면 그대로. 블로그 오더에서만 새 줄이 보인다.
+    _woKv("체험단 종류", _woWorkKindLabel(o.work_kind)),
     _woSection("상품·옵션", prodText, txtR),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
@@ -367,6 +370,27 @@ function _woManagerLabel(raw) {
   if (_woManagerUndecided(v)) return v + " (직접결정)";
   const nick = _woManagerNick(v);
   return nick ? v + " (" + nick + ")" : v;
+}
+
+/* ── 체험단 종류(099) ───────────────────────────────────────────────
+   서버 `utils/workKind.js` 의 최소 사본 — **회귀가드가 두 표의 일치를 고정**한다
+   (workManager 사본 규율과 같다). 여기 라벨을 고치면 서버도 함께 고쳐야 한다.
+   ★ 빈 값 = 리뷰체험단(기존 동작)이고, 상세 화면에서는 **줄 자체를 안 그린다** —
+     기존 오더 전부에 "리뷰체험단" 이라는 새 줄이 갑자기 생기면 화면이 달라진다. */
+const WO_KIND_LABELS = { review: '리뷰체험단', blog: '블로그체험단' };
+
+/** 이 오더가 블로그체험단인가 — 판정 한 곳(배지·프리필·리뷰타입 숨김이 같은 답을 본다). */
+function _woIsBlogKind(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return false;                       // 빈 값 = 리뷰(기존 동작)
+  return v === 'blog' || /블로그|blog/i.test(v);
+}
+
+/** 표시용 라벨. 빈 값이면 빈 문자열(= `_woKv` 가 줄을 버린다). */
+function _woWorkKindLabel(raw) {
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return "";
+  return _woIsBlogKind(v) ? WO_KIND_LABELS.blog : WO_KIND_LABELS.review;
 }
 
 // 상품·옵션 요약에서 아래 개별 필드와 중복되는 값 제거:
@@ -671,7 +695,11 @@ function _woCampaignPrefill(o) {
     // ★ 087: 리뷰타입 — 인트라넷 발주 폼의 값이 그대로 온다(`포토` · `구매확정` ·
     //   `혼합(포토 10건, 텍스트 20건, …)`). 표준 key 변환은 발행 폼이 하고 저장 시 서버가 다시 정규화한다.
     //   ★ 여기서 미리 변환하지 않는 이유 = 이 모듈은 상세 표시도 겸해 **원문**을 그대로 보여줘야 한다.
-    review_type:   o.review_type || "",
+    //   ★ 099: 블로그체험단에는 리뷰타입이 없다(별도 축) — 프리필하지 않는다.
+    //     여기서 값을 흘리면 발행 폼이 블로그 공고에 리뷰타입을 저장해 캡처 검수가 개입한다.
+    review_type:   _woIsBlogKind(o.work_kind) ? "" : (o.review_type || ""),
+    // ★ 099: 체험단 종류 — 발행 폼이 그대로 저장한다(빈 값 = 리뷰 = 기존 동작).
+    work_kind:     String(o.work_kind || "").trim(),
     product_url:   o.product_url || "",
     // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
     product_name:  _pi.name || "",
@@ -995,6 +1023,8 @@ function woAcceptTabPicker(resp, onPick) {
     _woProductLines: _woProductLines, _woDetailHtml: _woDetailHtml,
     _woManagerNick: _woManagerNick, _woManagerUndecided: _woManagerUndecided,
     _woManagerLabel: _woManagerLabel,
+    // 체험단 종류(099) — 배지·프리필·목록이 같은 판정을 쓴다(사본 금지)
+    WO_KIND_LABELS: WO_KIND_LABELS, _woIsBlogKind: _woIsBlogKind, _woWorkKindLabel: _woWorkKindLabel,
     _woCleanProductOption: _woCleanProductOption, _woGuideUrls: _woGuideUrls, _woNormName: _woNormName,
     _INFLOW_LABEL: _INFLOW_LABEL, WO_MANAGER_MAP: WO_MANAGER_MAP,
     WO_MANAGER_UNDECIDED: WO_MANAGER_UNDECIDED,

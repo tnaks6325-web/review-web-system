@@ -158,8 +158,10 @@ ok('★ getPlanOverview: 일정 판정 실패(unknown)면 이월·잔량을 계�
   && /carryPending = pendingCarry\(camp, counts, today, counts && counts\.carry, sch\)/.test(cp));
 ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
   /carry_mode\s+-- ★ 098\(코드리뷰 B1\)/.test(rt));
+// ⚠ 닫는 괄호에 앵커를 걸면 컬럼이 꼬리에 붙을 때마다 깨진다(099 work_kind 에서 실측) —
+//   검사 의미(create INSERT 컬럼 목록에 carry_mode 가 있고 값이 hold/auto 로 정규화된다)는 불변.
 ok('★ 코드리뷰 M1: 생성(create) INSERT 에도 carry_mode — 발행 시 선택이 조용히 auto 로 떨어지지 않게',
-  /review_type, carry_mode\)/.test(rt) && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
+  /review_type, carry_mode[,)]/.test(rt) && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
 ok("★ 코드리뷰 M4: REQUIRED_SCHEMA 등록(['recruit_campaigns','carry_mode']) — 마이그레이션 미적용이면 부팅 거부(공고 발행·수정 전면 42703 차단)",
   /\['recruit_campaigns', 'carry_mode'\]/.test(idx));
