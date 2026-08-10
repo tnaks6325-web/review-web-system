@@ -2044,6 +2044,26 @@ async function _partInfoLoadBrief(it, done){
         escHtml(o.label) + ' · <span style="color:#111827">' + escHtml(o.value) + '</span></div>').join('') +
       '<div style="font-size:.66rem;color:#6B7280;margin-top:2px">이 형태로 리뷰를 작성해 주세요</div>' +
       '</div></div>');
+    /* ★ M2: 리뷰비 입금 결과 — "언제 · 어떤 이름으로 들어왔는지"를 확인할 곳이 없었다(배지뿐).
+       ★ 서버가 준 값만 그린다(계좌·은행 응답 원문은 애초에 안 내려온다).
+       ★ 실패는 사유를 늘어놓지 않고 **다음 행동**(계좌 확인)만 말한다. */
+    const pay = brief.payment;
+    if (pay && pay.status === 'paid') rows.push(
+      '<div style="display:flex;gap:7px;align-items:flex-start;background:#ECFDF5;border:1px solid #A7F3D0;border-radius:9px;padding:8px 10px;margin-bottom:8px">' +
+      '<span style="flex:none;font-size:.78rem">💰</span><div style="min-width:0">' +
+      '<div style="font-size:.76rem;color:#047857;font-weight:800;line-height:1.5">리뷰비 입금 완료' +
+      (pay.amount ? ' · ' + Number(pay.amount).toLocaleString() + '원' : '') + '</div>' +
+      '<div style="font-size:.7rem;color:#374151;margin-top:2px">' +
+      (pay.paidAt ? escHtml(_partInfoPaidAt(pay.paidAt)) : '') +
+      (pay.memo ? ' · 입금자명 <b>' + escHtml(pay.memo) + '</b>' : '') + '</div>' +
+      '</div></div>');
+    else if (pay && pay.status === 'failed') rows.push(
+      '<div style="display:flex;gap:7px;align-items:flex-start;background:#FEF2F2;border:1px solid #FECACA;border-radius:9px;padding:8px 10px;margin-bottom:8px">' +
+      '<span style="flex:none;font-size:.78rem">⚠️</span><div style="min-width:0">' +
+      '<div style="font-size:.76rem;color:#B91C1C;font-weight:800;line-height:1.5">리뷰비 이체가 처리되지 않았어요</div>' +
+      '<div style="font-size:.7rem;color:#374151;margin-top:2px">등록하신 계좌 정보(은행 · 계좌번호 · 예금주)를 확인해 주세요. 수정하시면 다음 이체 때 다시 시도됩니다.</div>' +
+      '<button onclick="_partInfoGoAccount()" style="margin-top:6px;border:1.5px solid #FECACA;background:#fff;color:#B91C1C;font-size:.72rem;font-weight:800;border-radius:9px;padding:6px 11px;cursor:pointer">내 계좌 정보 수정하기</button>' +
+      '</div></div>');
     if (brief.productLines) rows.push(_partInfoRow('상품', escHtml(brief.productLines).replace(/\n/g,'<br>')));
     // 📝 리뷰 가이드 (연결 공고 work_detail.reviewGuide) — 길면 스크롤, 줄바꿈 보존
     const rg = String(brief.reviewGuide || '').trim();
@@ -2058,6 +2078,22 @@ async function _partInfoLoadBrief(it, done){
     else hide();
     _partInfoRenderBtns(done, brief.chatUrl || '', _partInfoProductUrl);
   }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
+}
+/* 입금 시각 표기 — 서버가 준 ISO 를 사람이 읽는 형태로. ★ 값이 이상하면 그리지 않는다(빈 문자열). */
+function _partInfoPaidAt(v){
+  const d = new Date(v); if (isNaN(d)) return '';
+  const k = new Date(d.getTime() + 9*3600*1000);   // KST
+  const s = k.toISOString();
+  return s.slice(0,4) + '.' + s.slice(5,7) + '.' + s.slice(8,10) + ' ' + s.slice(11,16) + ' 입금';
+}
+/* 실패 안내 → 내정보(계좌) 화면으로. ★ 팝업을 닫고 이동한다(팝업 뒤에 가려 안 보이는 이동 금지). */
+function _partInfoGoAccount(){
+  closePartInfo();
+  try { switchTab('my'); } catch (_) {}
+  try {
+    const el = document.getElementById('sectionProfile');
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior:'smooth', block:'start' });
+  } catch (_) {}
 }
 function _partInfoRow(k, vHtml){
   return '<div style="display:flex;gap:8px;margin:3px 0"><span style="color:#9CA3AF;flex:none;width:52px">' + escHtml(k) + '</span><span style="color:#374151;min-width:0">' + vHtml + '</span></div>';

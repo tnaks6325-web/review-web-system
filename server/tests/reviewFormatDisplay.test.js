@@ -72,8 +72,14 @@ ok('★ 새 엔드포인트를 만들지 않았다(기존 brief 확장)',
 ok('★ 읽기 전용 · fail-soft(추출 실패해도 나머지 brief 는 나간다)',
   /SELECT row_json FROM review_index/.test(routes)
   && /catch \(_\) \{ \/\* 표시용 — 실패해도 나머지 brief 는 그대로 나간다 \*\/ \}/.test(R('src/routes/reviewEdit.routes.js')));
-ok('★ 공고 미연결 탭에서도 리뷰 형태는 알려준다(공고가 아니라 그 행의 지시)',
-  /return res\.json\(\{ ok: true, brief: workOptions\.length \? \{ workOptions \} : null \}\)/.test(routes));
+ok('★ 공고 미연결 탭에서도 리뷰 형태는 알려준다(공고가 아니라 그 행의 지시)', (() => {
+  // ★ M2 로 같은 분기에 입금 결과(payment)가 합류했다 — 검사 의미는 그대로("공고가 없어도 workOptions 는 나간다").
+  const i = routes.indexOf('if (!camps.length)');
+  if (i < 0) return false;
+  const blk = routes.slice(i, i + 500);
+  return /only\.workOptions = workOptions/.test(blk)
+      && /brief: Object\.keys\(only\)\.length \? only : null/.test(blk);
+})());
 
 /* ═══ 프론트 표시 ═══ */
 ok('참여상품 정보 팝업이 workOptions 를 읽는다', /brief\.workOptions/.test(home));

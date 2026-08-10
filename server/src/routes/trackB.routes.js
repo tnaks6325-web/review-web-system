@@ -2465,6 +2465,8 @@ router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMidd
     }
     res.json(await paymentResultSvc.applyResultFile({
       batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
+      // ★ 기본은 보냄 — 화면에서 명시적으로 끈 경우(`false`)만 안 보낸다(검수 반려 팝업과 같은 규율).
+      notifyFailed: b.notifyFailed !== false,
     }));
   } catch (err) { _resultErr(err, res, next); }
 });

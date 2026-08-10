@@ -143,10 +143,41 @@ async function previewResultFile({ batchId, fileName, base64 }) {
   };
 }
 
+/* ★★ 실패 안내 문구는 **여기 한 곳**(사용자 확정 ⑤ "등록한 계좌 정보를 확인해 주세요").
+     ★ 은행 응답 원문(`result_status`)을 리뷰어에게 그대로 보내지 않는다 — 내부 표기이고,
+       "예금주불일치" 같은 문구가 그대로 나가면 리뷰어가 무엇을 고쳐야 하는지 오히려 헷갈린다. */
+const FAIL_NOTICE =
+  '리뷰비 이체가 처리되지 않았습니다.\n' +
+  '등록하신 계좌 정보(은행 · 계좌번호 · 예금주)를 다시 확인해 주세요.\n' +
+  '내정보에서 계좌를 수정하시면 다음 이체 때 자동으로 다시 시도됩니다.';
+
+/** 실패 건에 1:1문의 안내 전송 + `notified_at` 기록. ★ 절대 throw 하지 않는다(반영은 이미 커밋됐다). */
+async function _notifyFailures(items, by) {
+  const csBridge = require('./csBridge.service');
+  let n = 0;
+  for (const it of items) {
+    if (!it.phone8) continue;   // 연락처를 모르면 보낼 곳이 없다(조용히 건너뛰고 건수로 드러난다)
+    try {
+      const out = await csBridge.postAdminNotice({
+        sheetId: it.sheetId, tabName: it.tabName, rowIndex: it.rowIndex,
+        reviewerName: it.reviewerName, phone8: it.phone8,
+        message: FAIL_NOTICE, by: by || '관리자',
+      });
+      if (!out) continue;
+      await pool.query(`UPDATE payment_batch_items SET notified_at = NOW() WHERE id = $1`, [it.id]);
+      n++;
+    } catch (e) {
+      logger.warn(`[paymentResult] 실패 안내 전송 실패(${it.tabName}/${it.rowIndex}): ${e.message}`);
+    }
+  }
+  return n;
+}
+
 /**
  * 반영 — 성공 건만 입금 기록. **서버가 파일을 다시 해석한다.**
+ * @param {boolean} [notifyFailed] false 면 실패 안내(1:1문의)를 보내지 않는다(기본 = 보냄).
  */
-async function applyResultFile({ batchId, fileName, base64, by }) {
+async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) {
   const a = await _analyze(batchId, fileName, base64);
   const stampNow = nowStamp();
 
@@ -156,7 +187,8 @@ async function applyResultFile({ batchId, fileName, base64, by }) {
     throw new ResultError('empty', '이 회차에 반영할 결과가 없습니다(결과 파일과 짝지어진 건이 0건입니다).');
   }
 
-  const paidItems = [];   // 배경 입금칸 기록 대상(성공 건)
+  const paidItems = [];     // 배경 입금칸 기록 대상(성공 건)
+  const failedItems = [];   // 실패 안내(1:1문의) 대상 — 아직 안내를 보내지 않은 건만
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -190,12 +222,15 @@ async function applyResultFile({ batchId, fileName, base64, by }) {
 
     for (const p of failed) {
       const it = p.item;
-      await client.query(
+      const r = await client.query(
         `UPDATE payment_batch_items
             SET status = 'failed', result_status = $2, result_seq = $3, fail_reason = $4
-          WHERE id = $1 AND status = 'pending'`,
+          WHERE id = $1 AND status = 'pending'
+        RETURNING notified_at`,
         [it.id, p.result.statusRaw || '', p.result.seq,
          `이체 실패 — 은행 처리상태: ${p.result.statusRaw || '(빈 값)'}`]);
+      // ★ 이미 안내를 보낸 건은 다시 보내지 않는다(재반영 시 도배 방지)
+      if (r.rowCount && !r.rows[0].notified_at) failedItems.push(it);
     }
 
     /* ★ 입금 기록(review_index PAID + payment_records)은 같은 트랜잭션 안에서 —
@@ -260,8 +295,19 @@ async function applyResultFile({ batchId, fileName, base64, by }) {
   setImmediate(() => markDepositCells(paidItems, { stamp: stampNow, by: by || 'payment' })
     .catch(e => logger.warn(`[paymentResult] 입금칸 기록 예외: ${e.message}`)));
 
+  // 실패 안내(1:1문의) — 기본 켬(사용자 확정 ⑤). 커밋 뒤에 보낸다(전송 실패가 반영을 되돌리지 않게).
+  let notified = 0;
+  if (notifyFailed !== false && failedItems.length) {
+    notified = await _notifyFailures(failedItems, by).catch(e => {
+      logger.warn(`[paymentResult] 실패 안내 전송 예외: ${e.message}`);
+      return 0;
+    });
+  }
+
   return {
     ok: true,
+    notified,
+    notifyTargets: failedItems.length,
     applied: paidItems.length,
     failed: failed.length,
     notInFile: a.summary.notInFile,
@@ -272,4 +318,4 @@ async function applyResultFile({ batchId, fileName, base64, by }) {
   };
 }
 
-module.exports = { previewResultFile, applyResultFile, ResultError, MAX_BASE64 };
+module.exports = { previewResultFile, applyResultFile, ResultError, MAX_BASE64, FAIL_NOTICE };

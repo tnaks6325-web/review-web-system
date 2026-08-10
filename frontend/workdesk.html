@@ -1415,6 +1415,24 @@
 .btn.sm{padding:3px 9px;font-size:11.5px}
 .btn.danger{color:#B3382E;border-color:#EAB6B0}
 
+/* ── 💸 이체결과 반영 확인 팝업(M2) ──
+   ★ body 직속 오버레이(뷰 스크롤 컨테이너 안에 두면 화면 흐름에 섞인다).
+   ★ 바깥 클릭으로 닫지 않는다 — 실수 클릭 한 번에 확인하던 목록이 사라지지 않게(리뷰검수와 같은 규율). */
+.pmrov{position:fixed;inset:0;background:rgba(18,21,26,.42);z-index:9200;display:flex;align-items:center;justify-content:center;padding:20px}
+.pmrbox{background:var(--card,#fff);border-radius:14px;width:min(1080px,100%);max-height:92vh;display:flex;flex-direction:column;
+  box-shadow:0 18px 48px rgba(18,21,26,.28);overflow:hidden}
+.pmrhd{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line,#E1E5EB)}
+.pmrhd h3{margin:0;font-size:15.5px;font-weight:800}
+.pmrbd{padding:14px 18px;overflow:auto;flex:1;min-height:0}
+.pmrft{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line,#E1E5EB);background:var(--bg,#F7F8FA)}
+.pmrsum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.pmrs{border:1px solid var(--line,#E1E5EB);border-radius:9px;padding:8px 12px;min-width:104px;background:var(--card,#fff)}
+.pmrs .k{font-size:11px;color:var(--t3,#8B94A1)} .pmrs .v{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.pmrs.ok .v{color:#127A5E} .pmrs.bad .v{color:#B3382E} .pmrs.wait .v{color:#9A6414}
+.pmoc{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;white-space:nowrap}
+.pmoc.success{background:#E5F3EE;color:#127A5E} .pmoc.failed{background:#FAE9E7;color:#B3382E}
+.pmoc.not_in_file{background:#FBF2E1;color:#9A6414} .pmoc.already_paid{background:#EEF1F5;color:#59626F}
+
 /* ── 📘 업무가이드 ── */
 .gdsec{max-width:1120px;margin:0 0 26px}
 .gdh{font-size:14px;font-weight:750;color:var(--t2,#59626F);margin:0 0 10px;letter-spacing:-.01em}
@@ -5853,7 +5871,7 @@ function _pmBatchTable(list){
   return `<div class="lgwrap"><table class="lgtable pmtable">
     <thead><tr><th>회차</th><th>만든 시각</th><th>은행</th><th class="num">건수</th><th class="num">금액</th>
       <th>담당</th><th>다운로드</th><th>상태</th><th></th></tr></thead><tbody>
-    ${list.map(b=>`<tr>
+    ${list.map((b,i)=>`<tr>
       <td class="mono">#${b.seq}</td>
       <td class="mono">${esc(_pmDate(b.createdAt))}</td>
       <td>${esc(b.bankLabel)}</td>
@@ -5863,6 +5881,7 @@ function _pmBatchTable(list){
       <td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
       <td>${st(b)}</td>
       <td>${b.status==='downloaded'?`<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
+           <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 업로드</button>
            <button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`:''}</td>
     </tr>`).join('')}</tbody></table></div>`;
 }
@@ -5897,6 +5916,139 @@ async function _pmRefile(id){
     const blob=await res.blob(); const a=document.createElement('a');
     a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
   }catch(e){ toast('다운로드 실패: '+e.message); }
+}
+
+/* ── 이체결과 파일 업로드 → 확인 화면 → 반영 (M2) ───────────────
+   ★ 순서가 계약: **미리보기(쓰기 0) → 사람이 [이대로 반영]** — 업로드만으로 입금 기록이 되면 되돌릴 수 없다.
+   ★ 반영 요청은 파일을 **다시 보낸다**(서버가 재해석·재매칭한다 — 화면 목록을 서버가 믿지 않는다).
+   ★ 회차는 **인덱스로 넘긴다**(onclick 에 은행·파일명 같은 외부 문자열 보간 금지). */
+function _pmPickResult(i){
+  const b = (STATE.pmBatches||[])[i];
+  if(!b) return;
+  const inp = document.createElement('input');
+  inp.type='file';
+  inp.accept='.xls,.xlsx,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if(!f) return;
+    if(f.size > 12*1024*1024){ toast('파일이 너무 큽니다(12MB 초과)'); return; }
+    toast('결과 파일을 읽는 중…');
+    let base64;
+    try { base64 = await _pmFileB64(f); }
+    catch(e){ toast('파일을 읽지 못했습니다: '+e.message); return; }
+    const r = await api('/api/trackb/payment/batch/'+b.id+'/result-preview',
+      { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
+    if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다'); return; }
+    STATE.pmResult = { batch:b, file:{ name:f.name, base64 }, preview:r };
+    _pmResultModal();
+  };
+  inp.click();
+}
+
+function _pmFileB64(file){
+  return new Promise((res,rej)=>{
+    const fr = new FileReader();
+    fr.onerror = () => rej(new Error('read error'));
+    fr.onload = () => { const s=String(fr.result||''); const i=s.indexOf(','); res(i>=0?s.slice(i+1):s); };
+    fr.readAsDataURL(file);
+  });
+}
+
+const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:'결과없음', already_paid:'이미 입금' };
+
+function _pmResultModal(){
+  const R = STATE.pmResult; if(!R) return;
+  const p = R.preview, s = p.summary || {};
+  const rows = (p.items||[]).map(it=>`<tr>
+    <td><span class="pmoc ${it.outcome}">${PM_OUTCOME[it.outcome]||it.outcome}</span></td>
+    <td>${esc(it.tabName)}</td>
+    <td>${esc(it.reviewerName)}</td>
+    <td class="num">${_pmNum(it.amount)}</td>
+    <td class="mono">…${esc(it.accountTail||'')}</td>
+    <td>${esc(it.holder||'')}</td>
+    <td class="mono">${esc(it.transferredAt||'-')}</td>
+    <td>${esc(it.resultStatus||'')}</td></tr>`).join('');
+
+  const warn = (p.warnings||[]).map(w=>`<div class="pmnote">⚠ ${esc(w.message||w.code)}</div>`).join('');
+  /* ★ 순서 배정은 **반드시 고지한다** — 같은 계좌·같은 금액이 여러 건이면 어느 결과가 어느 건인지
+       파일만으로는 정할 수 없어 시스템이 순서대로 붙였다(사용자 확정). 사람이 알아야 한다. */
+  const oa = (p.orderAssigned||[]).length
+    ? `<div class="pmnote">⚠ <b>같은 계좌·같은 금액이 여러 건</b>인 그룹 ${p.orderAssigned.length}개가 있어
+        <b>결과를 순서대로 배정</b>했습니다(${p.orderAssigned.map(g=>esc(g.reviewerName)+' '+_pmNum(g.amount)+'원 '+g.count+'건').join(' · ')}).
+        같은 사람·같은 금액이라 입금 결과는 같지만, <b>어느 줄에 붙었는지는 임의</b>입니다.</div>`
+    : '';
+  const nf = s.notInFile
+    ? `<div class="pmnote">⚠ <b>결과 파일에 없는 건 ${s.notInFile}건</b>은 <b>그대로 대기 상태로 둡니다</b>(실패로 내리지 않습니다 — 실제로는 이체됐는데 파일만 부분적일 수 있어 이중입금이 됩니다). 은행에서 전체 결과 파일을 다시 받아 한 번 더 올려 주세요.</div>`
+    : '';
+  const ur = p.unmatchedResults && p.unmatchedResults.length
+    ? `<div class="pmnote">⚠ <b>이 회차에 없는 결과 줄 ${p.unmatchedResults.length}건</b>이 파일에 있습니다 — 다른 회차 파일이 섞였는지 확인하세요(반영에서 제외됩니다).</div>`
+    : '';
+
+  const el = document.createElement('div');
+  el.className='pmrov'; el.id='pmResultOv';
+  el.innerHTML = `<div class="pmrbox">
+    <div class="pmrhd"><h3>#${R.batch.seq} ${esc(R.batch.bankLabel)} 이체결과 확인</h3>
+      <span class="sp" style="flex:1"></span>
+      <span class="pmauto">${esc(R.file.name)} · 파일 ${p.fileRows}줄</span></div>
+    <div class="pmrbd">
+      <div class="pmrsum">
+        <div class="pmrs ok"><div class="k">입금완료로 기록</div><div class="v">${s.success||0}건</div></div>
+        <div class="pmrs bad"><div class="k">이체실패</div><div class="v">${s.failed||0}건</div></div>
+        <div class="pmrs wait"><div class="k">결과없음</div><div class="v">${s.notInFile||0}건</div></div>
+        <div class="pmrs"><div class="k">이미 입금</div><div class="v">${s.alreadyPaid||0}건</div></div>
+      </div>
+      ${warn}${oa}${nf}${ur}
+      <div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C">
+        반영하면 <b>입금완료 건만</b> 기록됩니다 — 시스템 입금 표시 + 작업표(또는 시트) 입금칸에
+        <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패 건은 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>.
+      </div>
+      <div class="lgwrap"><table class="lgtable pmtable">
+        <thead><tr><th>결과</th><th>작업</th><th>리뷰어</th><th class="num">금액</th><th>계좌</th><th>예금주</th><th>이체시각</th><th>은행 응답</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>
+    <div class="pmrft">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2,#59626F);cursor:pointer">
+        <input type="checkbox" id="pmNotifyFail" ${(s.failed||0)?'checked':''} ${(s.failed||0)?'':'disabled'}>
+        이체실패 ${s.failed||0}건에 <b>계좌 확인 안내</b> 보내기(1:1문의)</label>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn" onclick="_pmResultClose()">취소</button>
+      <button class="btn primary" id="pmApplyBtn" onclick="_pmResultApply()"
+        ${(s.success||0)+(s.failed||0) ? '' : 'disabled'}>이대로 반영</button></div>
+  </div>`;
+  document.body.appendChild(el);   // ★ body 직속
+  if(!window._pmResultKeyBound){   // ★ 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
+    window._pmResultKeyBound = true;
+    document.addEventListener('keydown', e => { if(e.key==='Escape' && document.getElementById('pmResultOv')) _pmResultClose(); });
+  }
+}
+
+function _pmResultClose(){
+  const el = document.getElementById('pmResultOv'); if(el) el.remove();
+  STATE.pmResult = null;
+}
+
+async function _pmResultApply(){
+  const R = STATE.pmResult; if(!R) return;
+  const s = R.preview.summary || {};
+  if(!confirm(`#${R.batch.seq} 회차에 이체결과를 반영합니다.\n\n· 입금완료 기록 ${s.success||0}건\n· 이체실패 처리 ${s.failed||0}건 (다음 회차에 다시 담깁니다)\n· 결과없음 ${s.notInFile||0}건은 그대로 대기\n\n입금완료로 기록된 건은 되돌릴 수 없습니다.`)) return;
+  const nf = document.getElementById('pmNotifyFail');
+  const notifyFailed = !!(nf && nf.checked);
+  const btn = document.getElementById('pmApplyBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '반영 중…'; }
+  const r = await api('/api/trackb/payment/batch/'+R.batch.id+'/result-apply',
+    { method:'POST', body: JSON.stringify({ confirm:true, notifyFailed, fileName:R.file.name, base64:R.file.base64 }) });
+  if(!r || !r.ok){
+    toast((r&&r.error)||'반영 실패');
+    if(btn){ btn.disabled = false; btn.textContent = '이대로 반영'; }
+    return;
+  }
+  _pmResultClose();
+  /* ★ 안내 전송 결과도 말한다 — 보냈다고 했는데 조용히 0건이면 담당자가 알 방법이 없다. */
+  const notice = r.notifyTargets
+    ? ` · 안내 ${r.notified||0}/${r.notifyTargets}건`
+    : '';
+  toast(`반영 완료 — 입금 ${r.applied}건 · 실패 ${r.failed}건${r.notInFile?` · 결과없음 ${r.notInFile}건(대기 유지)`:''}${notice}`);
+  await _pmLoad();
 }
 
 async function _pmCancel(id, seq){
