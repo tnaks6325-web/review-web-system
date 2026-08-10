@@ -85,12 +85,19 @@ function expectedChannelKey(channel) {
  * @returns {{verdict:'pass'|'warn'|'block'|'skip', code:string, message:string,
  *            channel:string, confidence:number, blockable:boolean}}
  */
-function precheckPolicy({ classified, expectedChannel, slotKey = 'review', reviewType = null } = {}) {
+function precheckPolicy({ classified, expectedChannel, slotKey = 'review', reviewType = null, workKind = null } = {}) {
   const skip = (code) => ({ verdict: 'skip', code, message: '', channel: '', confidence: 0, blockable: false });
 
   if (!PRECHECK_ENABLED) return skip('disabled');
   // 1차는 리뷰 슬롯만 — 영수증 슬롯은 기존 제출 시점 검수(captureVerify)가 그대로 담당한다.
   if (String(slotKey || 'review') !== 'review') return skip('not_review_slot');
+
+  /* ★★ 블로그체험단 안전핀 (099·M4-2, 087 구매확정 안전핀과 같은 규율 · 완화 금지)
+     blog 작업의 결과물은 **포스팅URL** 이고 이미지는 선택이다. 리뷰어가 무엇을 첨부하든
+     (블로그 글 화면·상품 사진·아무것도 없음) "리뷰 화면인가"로 판정할 근거가 없다 →
+     그대로 두면 `kind='other'` 확신 0.9 에서 **첨부가 잠겨 정상 제출이 막힌다**(참여 소각).
+     ★ `workKind` 가 null(미지정·조회 실패)이면 여기 안 걸린다 = 오늘 동작 그대로. */
+  if (workKind === 'blog') return skip('blog_tab');
 
   /* ★★ 087 안전핀 (완화 금지) — 구매확정 작업은 **어떤 경우에도 잠그지 않는다**.
      구매확정건의 리뷰어는 리뷰 화면이 아니라 '구매확정 완료 화면'을 올린다. 2차에서 AI 에
@@ -627,7 +634,7 @@ async function _workOrderForTab({ sheetId, tabName } = {}) {
 
 /** 탭 설정에서 기대 채널·기대 상품명·리뷰타입을 읽는다. 실패는 빈 값(대조 생략). */
 async function loadTabExpectations({ sheetId, tabName } = {}) {
-  const out = { expectedChannel: null, productNames: [], reviewType: null };
+  const out = { expectedChannel: null, productNames: [], reviewType: null, workKind: null };
   if (!sheetId || !tabName) return out;
   try {
     // ★ LATERAL 최신 1행 — 서브쿼리를 둘로 나누면 채널과 커스텀값이 서로 **다른 공고**에서
@@ -639,7 +646,9 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     //   두 규칙을 한 LATERAL 에 합치면 채널 짝이 깨진다.
     const { rows } = await _db().query(
       `SELECT c.inspect_product_names, c.inspect_product_aliases, c.review_type AS tab_review_type,
-              rc.channel, rc.channel_custom, rt.review_type AS camp_review_type
+              c.work_kind AS tab_work_kind,
+              rc.channel, rc.channel_custom, rt.review_type AS camp_review_type,
+              wk.work_kind AS camp_work_kind
          FROM tab_configs c
          LEFT JOIN LATERAL (
               SELECT channel, channel_custom
@@ -647,7 +656,7 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
                WHERE linked_sheet_id = c.sheet_id AND linked_tab_name = c.tab_name
                ORDER BY created_at DESC
                LIMIT 1
-         ) rc ON TRUE${require('./reviewTypeContext.service').CAMPAIGN_REVIEW_TYPE_LATERAL}
+         ) rc ON TRUE${require('./reviewTypeContext.service').CAMPAIGN_REVIEW_TYPE_LATERAL}${require('./workKindContext.service').CAMPAIGN_WORK_KIND_LATERAL}
         WHERE c.sheet_id = $1 AND c.tab_name = $2
         LIMIT 1`,
       [sheetId, tabName]
@@ -660,6 +669,12 @@ async function loadTabExpectations({ sheetId, tabName } = {}) {
     //   행 값까지 더한 최종 판정은 호출부가 resolveReviewType 으로 합친다(단일 출처).
     out.reviewType = resolveReviewType({
       campaignType: r.camp_review_type, tabReviewType: r.tab_review_type,
+    });
+    /* ★ 체험단 종류(099)도 **같은 행**에서 — 따로 조회하면 왕복이 늘고 다른 공고 값이 섞인다.
+       판정 규칙은 `utils/workKind`(공고 > 탭) 단일 출처, 여기서는 값만 실어 나른다.
+       blog = 결과물이 포스팅URL 이라 리뷰 캡처 전제 판정(형식·상품명·본문겹침)이 성립하지 않는다. */
+    out.workKind = require('../utils/workKind').resolveWorkKind({
+      campaignKind: r.camp_work_kind, tabKind: r.tab_work_kind,
     });
     // ★ 별칭(=[정상] 확인에서 학습된 인정 표기)은 어느 소스든 **가산만** 한다 —
     //   manual/work_order 우선순위 규칙(manual 있으면 파생 안 봄)을 절대 바꾸지 않는다.
@@ -987,8 +1002,16 @@ async function inspectSubmission({
     //   구매확정 탭의 정상 제출 전건이 "리뷰 화면이 아닌 것으로 판정됨" 불량이 된다(실측 신고).
     //   리뷰 화면도 불량으로 몰지 않는다(잡는 범위를 좁히는 fail-open 방향만).
     //   공고를 뒤늦게 구매확정으로 바꾼 탭은 리뷰검수 [♻ 재검수]로 소급 재판정한다(reinspectTab).
+    /* ★★ 블로그체험단(099)은 결과물이 포스팅URL 이라 **리뷰 캡처를 전제한 판정 셋**
+       (형식·상품명·본문 겹침)이 성립하지 않는다 — 첨부는 선택이고 무엇이 올지 정해져 있지 않다.
+       그대로 두면 blog 탭의 정상 제출이 전건 "리뷰 화면이 아님" 불량이 된다(087 실측 사고와 같은 모양).
+       ★ 같은 파일(duplicate)은 **그대로 검사한다** — 슬롯 무관이고 캡처 재탕은 blog 에서도 신호다.
+       ★ workKind 가 null(미지정·조회 실패)이면 종전 경로 그대로. */
+    const _isBlogTab = exp.workKind === 'blog';
     const _okKinds = exp.reviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review'];
-    if (!cls) {
+    if (_isBlogTab) {
+      checks.format = { verdict: 'skip', reason: 'blog_tab', kind: (cls && cls.kind) || '' };
+    } else if (!cls) {
       checks.format = { verdict: 'skip', reason: 'no_ai' };
     } else if (isReview && !_okKinds.includes(cls.kind) && cls.confidence >= BLOCK_CONFIDENCE) {
       checks.format = { verdict: 'fail', kind: cls.kind, confidence: cls.confidence };
@@ -1000,8 +1023,8 @@ async function inspectSubmission({
       };
     }
 
-    // ② 상품명 (리뷰 슬롯만)
-    checks.product = isReview
+    // ② 상품명 (리뷰 슬롯만 · blog 탭 제외 — 위 주석 참조)
+    checks.product = (isReview && !_isBlogTab)
       ? matchProductName(cls && cls.productName, exp.productNames)
       : { verdict: 'skip' };
 
@@ -1013,8 +1036,8 @@ async function inspectSubmission({
       cls, exp, sheetId, tabName, reviewerName,
     });
 
-    // ④ 본문 겹침 (리뷰 슬롯만)
-    checks.similarity = isReview
+    // ④ 본문 겹침 (리뷰 슬롯만 · blog 탭 제외 — 리뷰 본문 OCR 전제라 성립하지 않는다)
+    checks.similarity = (isReview && !_isBlogTab)
       ? await findSimilarText({ text: cls && cls.reviewText, fileId, sheetId, tabName })
       : { verdict: 'skip' };
 
