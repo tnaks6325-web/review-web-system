@@ -285,7 +285,9 @@ t('req.body 구조분해에 두 필드가 있다(#361 재발 방지)', () => {
 t('★ 리뷰어앱 스코프 토큰은 이체 설정을 못 바꾼다', () => {
   const i = campSrc.indexOf('async function _scopedCampaignEdit');
   assert.ok(i > 0, '_scopedCampaignEdit 없음');
-  const body = campSrc.slice(i, i + 3000);
+  // ★ 슬라이스 폭은 넉넉히 — 함수가 자라면(098 carry_mode 추가로 실제 발생) UPDATE 문이 잘려
+  //   "찾지 못했다"로 빨갛게 죽는다. 빨간 가드는 새 변경도 못 지킨다.
+  const body = campSrc.slice(i, i + 8000);
   const set = body.match(/UPDATE recruit_campaigns SET([\s\S]*?)WHERE id=\$1/);
   assert.ok(set, 'scoped UPDATE 를 찾지 못했다');
   assert.ok(!/transfer_bank|transfer_memo/.test(set[1]),
