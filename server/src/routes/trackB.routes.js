@@ -2438,4 +2438,50 @@ router.post('/payment/batch/:id/cancel', authMiddleware, adminOrMasterMiddleware
   } catch (err) { next(err); }
 });
 
+/* ── 보류 사유 보완 ─────────────────────────────────────────
+   ★ 권한은 입금관리 화면과 같은 adminOrMaster — 계좌번호가 그대로 보이는 화면이고,
+     이체은행은 "어느 통장에서 나가는가"라 되돌리기 쉬운 값이 아니다.
+   ★ 검증 실패(PaymentFixError)는 **400대**로 내린다 — errorHandler 가 500 으로 마스킹하면
+     화면이 사유를 못 보여주고 담당자가 무엇을 고쳐야 할지 알 수 없다. */
+const _PAY_FIX_STATUS = {
+  bad_target: 400, empty: 400, bad_bank: 400, bad_bank_name: 400, bad_reviewer: 400,
+  campaign_mismatch: 409, tab_not_found: 404, reviewer_not_found: 404, sub_not_found: 404,
+};
+function _payFix(res, err, next) {
+  if (err && err.code && _PAY_FIX_STATUS[err.code]) {
+    return res.status(_PAY_FIX_STATUS[err.code]).json({ ok: false, code: err.code, error: err.message });
+  }
+  // 42P01/42703 = 스키마 미적용 — /api/trackb/* 는 마스킹 대상이라 사유를 직접 실어 준다
+  if (err && (err.code === '42P01' || err.code === '42703')) {
+    return res.status(503).json({ ok: false, code: 'not_ready', error: '입금 설정 컬럼이 아직 준비되지 않았습니다(배포 직후일 수 있습니다).' });
+  }
+  return next(err);
+}
+
+// 작업 단위 — 이체은행 · 통장표시(저장하면 그 작업의 모든 행이 함께 풀린다)
+router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await paymentSvc.saveTransferSetting({
+      sheetId: b.sheetId, tabName: b.tabName, campaignId: b.campaignId || null,
+      bank: b.bank, memo: b.memo,
+    });
+    logger.info(`[payment] 이체설정 저장 by ${_by(req)} — ${b.tabName} → ${out.target}/${out.bank || '자동'}`);
+    res.json(out);
+  } catch (err) { _payFix(res, err, next); }
+});
+
+// 리뷰어 단위 — 은행명 · 계좌번호 · 예금주(그 리뷰어의 모든 행이 함께 풀린다)
+router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await paymentSvc.saveReviewerAccount({
+      reviewerId: b.reviewerId, subPhone8: b.subPhone8,
+      bankName: b.bankName, bankAccount: b.bankAccount, accountHolder: b.accountHolder,
+    });
+    logger.info(`[payment] 리뷰어 계좌 보완 by ${_by(req)} — ${out.target}`);
+    res.json(out);
+  } catch (err) { _payFix(res, err, next); }
+});
+
 module.exports = router;

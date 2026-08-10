@@ -24,6 +24,7 @@ const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { log
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { resolveBank, bankNameByCode, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
+const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행' };
 
@@ -36,6 +37,31 @@ function bankFromGoodsCostType(v) {
   if (/계산서|세금|수수료/.test(s)) return 'kbank';
   return null;
 }
+
+/**
+ * 어떤 표기로 저장돼 있든 `kbank` | `hana` 로 해석 — **판정 단일 출처**.
+ *
+ * ★★ 저장소가 둘이고 표기가 다르다:
+ *    · `recruit_campaigns.transfer_bank` = 코드값(`kbank`/`hana`, 086 이 그렇게 저장)
+ *    · `tab_configs.transfer_bank`       = **한글 라벨**(`케이뱅크`/`하나은행`) —
+ *      관리자 대시보드 탭설정 팝오버가 예전부터 그 형식으로 저장해 왔고,
+ *      그 화면이 `t.transferBank === '케이뱅크'` 로 **문자열을 그대로 비교**하므로
+ *      형식을 바꾸면 남의 화면 배지가 조용히 죽는다(index-app.js).
+ *
+ * ★ 확실히 해석되는 값만 인정하고 **모르는 값은 null**(추측 금지) — 옛 자유입력이
+ *   엉뚱한 은행으로 해석돼 남의 계좌로 송금되는 것보다 "미지정"이 낫다.
+ */
+function normalizeBankChoice(v) {
+  const s = String(v == null ? '' : v).replace(/\s/g, '');
+  if (!s) return null;
+  if (s === 'kbank' || s === 'hana') return s;
+  if (/^케이뱅크$|^케뱅$|^kbank$/i.test(s)) return 'kbank';
+  if (/^하나은행$|^하나$|^KEB하나은행$|^KEB하나$|^hana$/i.test(s)) return 'hana';
+  return null;
+}
+
+/** `tab_configs.transfer_bank` 에 **되돌려 쓸 때** 의 표기(= 기존 화면이 읽는 한글 라벨) */
+function tabBankLabel(bank) { return BANK_LABEL[bank] || ''; }
 
 function _int(v) {
   const n = parseInt(String(v == null ? '' : v).replace(/[^0-9-]/g, ''), 10);
@@ -53,7 +79,10 @@ function _int(v) {
  */
 async function listPaymentTargets(opts = {}) {
   const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
-  const params = [payPatterns];
+  // $1 = 입금열 키워드(미입금 판정) · $2 = 결제금액 정확일치 후보(상품비 폴백 필터)
+  // ★ 선택 필터(sheetId·tabName)는 뒤에 push 되어 $3·$4 가 된다 — 자리표시자는 params.length 로 뽑으므로
+  //   여기 순서만 지키면 어긋나지 않는다.
+  const params = [payPatterns, AMOUNT_EXACT_KEYS];
   const where = [
     'ri.is_submitted = TRUE',
     'ri.row_index IS NOT NULL',
@@ -74,7 +103,14 @@ async function listPaymentTargets(opts = {}) {
   const { rows } = await pool.query(
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName", ri.row_index AS "rowIndex",
             ri.reviewer_name AS "reviewerName", ri.phone8 AS "phone8",
-            ri.start_date AS "startDate", ri.product_name AS "productName"
+            ri.start_date AS "startDate", ri.product_name AS "productName",
+            -- 상품비 폴백 재료(주문 원장에 없는 행용). ★ row_json 을 통째로 끌어오지 않는다 —
+            --   '금액' 이 든 칸만 남긴 작은 객체를 만들고 **최종 판정은 extractAmountNumber** 가 한다
+            --   (SQL 에 판정 사본을 두면 레거시 화면과 금액이 갈린다).
+            (SELECT jsonb_object_agg(kv.key, kv.value)
+               FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
+              WHERE replace(kv.key, ' ', '') LIKE '%금액%'
+                 OR replace(kv.key, ' ', '') = ANY($2)) AS "amountCells"
        FROM review_index ri
       WHERE ${where.join(' AND ')}
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
@@ -91,17 +127,24 @@ async function listPaymentTargets(opts = {}) {
     _loadCampaigns(sheetIds, tabNames),
     _loadOrderPrices(sheetIds, tabNames),
     _loadAccounts(phone8s),
-    _loadTabLabels(sheetIds, tabNames),
+    _loadTabMeta(sheetIds, tabNames),
   ]);
 
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
     const camp = campMap[key] || null;
+    const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
     const acct = acctMap[r.phone8] || null;
 
-    // 상품비 = 그 행의 실제 제출 결제금액(주문 원장). 매칭 실패 시 0 + 사유.
-    const productPrice = ord ? _int(ord.price) : 0;
+    // 상품비 = 그 행의 실제 제출 결제금액(주문 원장).
+    // ★ 주문 원장에 없는 행(옛 작업·직원 수기 입력)은 **시트 결제금액 칸**으로 폴백한다 —
+    //   그 칸이 그 행의 실제 결제금액이고, 폴백이 없으면 그런 행은 영영 0원 보류로 남는다.
+    //   출처(priceSource)를 함께 실어 화면이 "시트에서 읽음"을 드러낸다(조용한 추정 금지).
+    const orderPrice = ord ? _int(ord.price) : 0;
+    const sheetPrice = orderPrice ? 0 : extractAmountNumber(r.amountCells);
+    const productPrice = orderPrice || sheetPrice;
+    const priceSource = orderPrice ? 'order' : (sheetPrice ? 'sheet' : null);
 
     // 리뷰비 = 082 단일 출처(스냅샷 → 주문일 → 시트 구매일자 → 오늘 → 폴백)
     const fee = camp
@@ -114,13 +157,23 @@ async function listPaymentTargets(opts = {}) {
         }).fee
       : 0;
 
-    // 은행: 공고에 지정된 값이 항상 우선 → 없으면 작업오더 물건비에서 파생
-    const bank = (camp && camp.transferBank) || (camp && bankFromGoodsCostType(camp.goodsCostType)) || null;
-    const bankAuto = !(camp && camp.transferBank);
+    // 은행 우선순위 = 공고(사람이 정한 값) → **탭 설정** → 작업오더 물건비 자동판정.
+    // ★ 탭 설정(`tab_configs.transfer_bank`)은 관리자 대시보드 탭설정에서 예전부터 채워 온 칸인데
+    //   M1 이 그것을 안 봐서, 공고가 없는 옛 작업이 전부 '이체은행 미지정' 으로 잠겨 있었다.
+    const campBank = normalizeBankChoice(camp && camp.transferBank);
+    const tabBank = normalizeBankChoice(tab && tab.transferBank);
+    const autoBank = bankFromGoodsCostType((camp && camp.goodsCostType) || (tab && tab.goodsCostType));
+    const bank = campBank || tabBank || autoBank || null;
+    const bankSource = campBank ? 'campaign' : tabBank ? 'tab' : bank ? 'auto' : null;
+    const bankAuto = bankSource === 'auto';
 
     const resolved = acct ? resolveBank(acct.bankName) : null;
     const account = acct ? normalizeAccount(acct.bankAccount) : '';
-    const memo = normalizeMemo((camp && camp.transferMemo) || '');
+    // 통장표시도 같은 순서(공고 → 탭 `deposit_name`)
+    const campMemo = normalizeMemo((camp && camp.transferMemo) || '');
+    const tabMemo = normalizeMemo((tab && tab.depositName) || '');
+    const memo = campMemo || tabMemo;
+    const memoSource = campMemo ? 'campaign' : tabMemo ? 'tab' : null;
     const amount = productPrice + fee;
 
     const issues = [];      // 있으면 다운로드에서 제외(막는 사유)
@@ -140,20 +193,25 @@ async function listPaymentTargets(opts = {}) {
 
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
-      tabLabel: tabMap[key] || r.tabName,
+      tabLabel: (tab && tab.label) || r.tabName,
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
       campaignTitle: camp ? camp.title : '',
-      bank, bankAuto, bankLabel: bank ? BANK_LABEL[bank] : '',
+      bank, bankAuto, bankSource, bankLabel: bank ? BANK_LABEL[bank] : '',
       bankName: acct ? (acct.bankName || '') : '',
       bankCode: resolved ? resolved.code : '',
       bankOfficial: resolved ? resolved.name : '',
       bankAccount: account,
       accountHolder: acct ? (acct.accountHolder || '') : '',
       isSub: acct ? !!acct.isSub : false,
-      productPrice, reviewFee: fee, amount,
-      transferMemo: memo,
+      // 계좌를 고칠 대상 지목 — ★ phone8 은 GENERATED·비유니크라 키로 쓰지 않는다(같은 뒤8자리 타인 행 오염).
+      //   본계정은 reviewers.id, 타계정은 소유자 id + 그 명의 phone8.
+      accountRef: acct && acct.reviewerId
+        ? { reviewerId: acct.reviewerId, subPhone8: acct.isSub ? r.phone8 : null }
+        : null,
+      productPrice, reviewFee: fee, amount, priceSource,
+      transferMemo: memo, memoSource,
       issues, warnings,
       payable: issues.length === 0,
     };
@@ -265,6 +323,7 @@ async function _loadAccounts(phone8s) {
   if (!phone8s.length) return map;
   const { rows: subs } = await pool.query(
     `SELECT RIGHT(regexp_replace(COALESCE(s->>'phone',''), '[^0-9]', '', 'g'), 8) AS "phone8",
+            r.id                                                             AS "reviewerId",
             COALESCE(NULLIF(btrim(s->>'name'),''), '')                       AS "name",
             COALESCE(NULLIF(btrim(s->>'bankName'),''),   r.bank_name)        AS "bankName",
             COALESCE(NULLIF(btrim(s->>'bankAccount'),''), r.bank_account)    AS "bankAccount",
@@ -276,31 +335,52 @@ async function _loadAccounts(phone8s) {
   );
   for (const s of subs) {
     if (s.phone8 && !map[s.phone8]) {
-      map[s.phone8] = { bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '', isSub: true };
+      map[s.phone8] = { reviewerId: s.reviewerId, bankName: s.bankName || '', bankAccount: s.bankAccount || '', accountHolder: s.accountHolder || '', isSub: true };
     }
   }
   const { rows: own } = await pool.query(
-    `SELECT phone8, bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder"
+    `SELECT id AS "reviewerId", phone8, bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder"
        FROM reviewers WHERE phone8 = ANY($1)`,
     [phone8s]
   );
   for (const r of own) {
-    map[r.phone8] = { bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '', isSub: false };
+    map[r.phone8] = { reviewerId: r.reviewerId, bankName: r.bankName || '', bankAccount: r.bankAccount || '', accountHolder: r.accountHolder || '', isSub: false };
   }
   return map;
 }
 
-/** 탭 표시명(리뷰어에게 노출하는 이름 규칙과 동일 — 시트제목은 쓰지 않는다) */
-async function _loadTabLabels(sheetIds, tabNames) {
+/**
+ * 탭 메타 — 표시명(리뷰어 노출 규칙과 동일, 시트제목 미사용) + **탭 단위 이체설정** + 작업오더 물건비.
+ *
+ * ★ 이체설정(`transfer_bank`·`deposit_name`)은 **이미 있는 컬럼**이다(001 스키마, 관리자 대시보드
+ *   탭설정 팝오버가 채운다) — 마이그레이션 없이 그대로 읽는다.
+ * ★ 작업오더 물건비를 **탭 기준**으로도 읽는 이유: `_loadCampaigns` 의 LATERAL 은 공고를 거치므로
+ *   공고가 없는 작업은 자동판정까지 통째로 죽는다. 같은 조인이라 쿼리 순증은 0.
+ */
+async function _loadTabMeta(sheetIds, tabNames) {
   const map = {};
   try {
     const { rows } = await pool.query(
-      `SELECT sheet_id AS "sheetId", tab_name AS "tabName",
-              COALESCE(NULLIF(btrim(display_name),''), tab_name) AS "label"
-         FROM tab_configs WHERE sheet_id = ANY($1) AND tab_name = ANY($2)`,
+      `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+              COALESCE(NULLIF(btrim(tc.display_name),''), tc.tab_name) AS "label",
+              tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
+              wo.goods_cost_type AS "goodsCostType"
+         FROM tab_configs tc
+         LEFT JOIN LATERAL (
+              SELECT w.goods_cost_type FROM work_orders w
+               WHERE w.deleted_at IS NULL
+                 AND w.linked_tab_sheet_id = tc.sheet_id
+                 AND w.linked_tab_name = tc.tab_name
+               ORDER BY w.created_at DESC LIMIT 1) wo ON TRUE
+        WHERE tc.sheet_id = ANY($1) AND tc.tab_name = ANY($2)`,
       [sheetIds, tabNames]);
-    for (const t of rows) map[t.sheetId + '||' + t.tabName] = t.label;
-  } catch (e) { logger.warn('[payment] 탭 표시명 조회 실패(탭명 사용): ' + e.message); }
+    for (const t of rows) {
+      map[t.sheetId + '||' + t.tabName] = {
+        label: t.label, transferBank: t.transferBank || '', depositName: t.depositName || '',
+        goodsCostType: t.goodsCostType || '',
+      };
+    }
+  } catch (e) { logger.warn('[payment] 탭 메타 조회 실패(탭명 사용): ' + e.message); }
   return map;
 }
 
@@ -516,8 +596,136 @@ function batchFileName(batch) {
   return `${BANK_LABEL[batch.bank] || batch.bank}_다건이체_${ymd}_${batch.seq}.xlsx`;
 }
 
+/* ══════════════════════════════════════════════════════════
+   4) 보류 사유 보완 (화면에서 그 자리에서 고치기)
+   ──────────────────────────────────────────────────────────
+   ★ 쓰기 표면은 딱 세 곳 — `recruit_campaigns`(이체설정 2칸) ·
+     `tab_configs`(이체설정 2칸) · `reviewers`(계좌 3칸/타계정 배열).
+     주문 원장·시트·회차 테이블은 여기서 건드리지 않는다.
+   ══════════════════════════════════════════════════════════ */
+
+class PaymentFixError extends Error {
+  constructor(code, message) { super(message || code); this.code = code; }
+}
+
+/**
+ * 작업 단위 이체설정 저장 → **그 작업의 보류가 한 번에 풀린다**.
+ *
+ * 저장처(사용자 확정): 연결 공고가 있으면 공고, 없으면 **탭 설정**.
+ * ★ 공고 값이 탭 값을 이기므로(판정 순서와 같다) 공고가 있는데 탭에 쓰면 화면이 안 바뀐다 —
+ *   그래서 대상 선택을 서버가 정한다(화면이 고른 저장처를 믿지 않는다).
+ * ★ `campaignId` 는 **그 탭에 연결된 공고인지 재검증**한다 — 낡은 화면이 남의 공고 이체설정을
+ *   덮는 것을 막는다(계약 오링크와 같은 규율).
+ *
+ * @param {{sheetId:string, tabName:string, campaignId?:string|null,
+ *          bank?:string|null, memo?:string|null}} p
+ *        bank/memo 는 **undefined = 변경 없음**, `''` = 지움(자동으로 되돌림).
+ * @returns {{ok:true, target:'campaign'|'tab', bank:string|null, memo:string}}
+ */
+async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo }) {
+  const sid = String(sheetId || '').trim();
+  const tab = String(tabName || '').trim();
+  if (!sid || !tab) throw new PaymentFixError('bad_target', '작업(시트·탭)이 지정되지 않았습니다.');
+
+  const touchBank = bank !== undefined;
+  const touchMemo = memo !== undefined;
+  if (!touchBank && !touchMemo) throw new PaymentFixError('empty', '변경할 값이 없습니다.');
+
+  // 빈 값 = 지움(자동 판정으로 되돌림) / 모르는 표기는 거부(추측 저장 금지)
+  let bankCode = null;
+  if (touchBank && String(bank || '').trim() !== '') {
+    bankCode = normalizeBankChoice(bank);
+    if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크 또는 하나은행만 지정할 수 있습니다.');
+  }
+  const memoText = touchMemo ? normalizeMemo(String(memo || '')) : null;
+
+  // 공고 대상 검증 — 그 탭에 연결된 공고만 인정
+  let campId = null;
+  if (campaignId) {
+    const { rows } = await pool.query(
+      `SELECT id FROM recruit_campaigns
+        WHERE id = $1 AND linked_sheet_id = $2 AND linked_tab_name = $3 LIMIT 1`,
+      [String(campaignId), sid, tab]);
+    if (!rows.length) throw new PaymentFixError('campaign_mismatch', '그 작업에 연결된 공고가 아닙니다. 화면을 새로고침해 주세요.');
+    campId = rows[0].id;
+  }
+
+  if (campId) {
+    // ★ 이 두 칸만 UPDATE — 공고의 다른 설정은 절대 건드리지 않는다(축약 폼 클로버 금지).
+    await pool.query(
+      `UPDATE recruit_campaigns
+          SET transfer_bank = CASE WHEN $2::bool THEN $3::text ELSE transfer_bank END,
+              transfer_memo = CASE WHEN $4::bool THEN $5::text ELSE transfer_memo END
+        WHERE id = $1`,
+      [campId, touchBank, bankCode, touchMemo, memoText]);
+    return { ok: true, target: 'campaign', bank: bankCode, memo: memoText || '' };
+  }
+
+  // 탭 설정 — ★ 표기는 **한글 라벨**(관리자 대시보드 탭설정이 그 형식을 그대로 비교해 배지를 그린다)
+  const { rowCount } = await pool.query(
+    `UPDATE tab_configs
+        SET transfer_bank = CASE WHEN $3::bool THEN $4::text ELSE transfer_bank END,
+            deposit_name  = CASE WHEN $5::bool THEN $6::text ELSE deposit_name END,
+            updated_at    = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2`,
+    [sid, tab, touchBank, bankCode ? tabBankLabel(bankCode) : '', touchMemo, memoText]);
+  if (!rowCount) throw new PaymentFixError('tab_not_found', '탭 설정이 없어 저장하지 못했습니다(작업오더 접수 전 탭일 수 있습니다).');
+  return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '' };
+}
+
+/**
+ * 리뷰어 계좌 저장 → **그 리뷰어의 보류가 한 번에 풀린다**.
+ *
+ * ★ 대상은 `reviewers.id`(UNIQUE) — phone8 은 GENERATED·비유니크라 키로 쓰면
+ *   같은 뒤8자리 타인 계좌를 덮는다(외부모집 수동제출에서 이미 밟은 함정).
+ * ★ 타계정(`subPhone8`)이면 소유자 행의 `sub_accounts` 배열에서 **그 명의 항목만** 갱신한다 —
+ *   소유자 공통계좌를 덮지 않는다(타계정 전용계좌 규약 유지).
+ * ★ 빈 값은 **덮지 않는다**(부분 보완 허용) — 지우려면 화면이 아니라 등록리뷰어DB에서.
+ */
+async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder }) {
+  const id = String(reviewerId || '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new PaymentFixError('bad_reviewer', '리뷰어를 지목할 수 없습니다.');
+
+  const bn = String(bankName == null ? '' : bankName).trim();
+  const ba = normalizeAccount(bankAccount == null ? '' : bankAccount);
+  const ah = String(accountHolder == null ? '' : accountHolder).trim();
+  if (!bn && !ba && !ah) throw new PaymentFixError('empty', '입력한 값이 없습니다.');
+  // 은행명은 이체 서식의 은행코드로 해석돼야 한다 — 못 읽는 이름이면 저장 시점에 막는다
+  // (저장은 됐는데 다음 회차에도 '은행명 인식불가'로 남는 막다른 길 방지).
+  if (bn && !resolveBank(bn)) throw new PaymentFixError('bad_bank_name', `'${bn}' 은행명을 인식할 수 없습니다. 정식 은행명으로 입력해 주세요(예: 국민은행 · 카카오뱅크).`);
+
+  const sub = String(subPhone8 || '').replace(/[^0-9]/g, '');
+  if (sub) {
+    // 타계정 — 소유자 행의 배열에서 그 명의 항목만 병합
+    const { rows } = await pool.query(`SELECT sub_accounts FROM reviewers WHERE id = $1`, [id]);
+    if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+    const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
+    let hit = false;
+    const next = arr.map(s => {
+      const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
+      if (p8 !== sub || hit) return s;
+      hit = true;
+      return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
+    });
+    if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+    await pool.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
+    return { ok: true, target: 'sub' };
+  }
+
+  const { rowCount } = await pool.query(
+    `UPDATE reviewers
+        SET bank_name      = CASE WHEN $2::text <> '' THEN $2::text ELSE bank_name END,
+            bank_account   = CASE WHEN $3::text <> '' THEN $3::text ELSE bank_account END,
+            account_holder = CASE WHEN $4::text <> '' THEN $4::text ELSE account_holder END
+      WHERE id = $1`,
+    [id, bn, ba, ah]);
+  if (!rowCount) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+  return { ok: true, target: 'self' };
+}
+
 module.exports = {
-  BANK_LABEL, bankFromGoodsCostType,
+  BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName,
+  saveTransferSetting, saveReviewerAccount, PaymentFixError,
 };

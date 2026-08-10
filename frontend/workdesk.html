@@ -1425,6 +1425,39 @@
 .pmauto{display:inline-block;font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
 .pmauto.man{color:#1B4F9C;font-weight:700}
 .pmwarn{color:#B3382E;font-size:11.5px}
+/* ── 보류 사유 보완 ── 상단 묶음 목록 + 행별 [보완] 버튼 + 전용 팝업 ── */
+.pmfix{border:1px solid #E7D2A3;background:#FDF8EE;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.pmfix>h3{font-size:13.5px;font-weight:800;color:#7a5a12;margin:0 0 3px}
+.pmfix .sub{font-size:12px;color:#8a6d2f;margin-bottom:9px}
+.pmfixgrid{display:flex;gap:9px;flex-wrap:wrap}
+.pmfixcard{flex:1 1 250px;min-width:230px;background:var(--card,#fff);border:1px solid var(--line,#E1E5EB);border-radius:10px;padding:10px 12px}
+.pmfixcard .ttl{font-size:12.5px;font-weight:750;margin-bottom:2px}
+.pmfixcard .cnt{font-size:11.5px;color:var(--t3,#8B94A1);margin-bottom:7px}
+.pmfixlist{display:flex;flex-direction:column;gap:4px;max-height:190px;overflow:auto}
+.pmfixrow{display:flex;align-items:center;gap:7px;font-size:12px;padding:3px 0;border-top:1px solid var(--line,#EEF1F5)}
+.pmfixrow:first-child{border-top:0}
+.pmfixrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pmfixrow .n{font-size:11px;color:var(--t3,#8B94A1);flex:0 0 auto}
+.pmfixmore{font-size:11.5px;color:var(--t3,#8B94A1);padding-top:5px}
+.pmfixcard.info{background:#F7F8FA}
+.pmfixcard .why{font-size:11.5px;color:var(--t3,#8B94A1);line-height:1.5}
+/* 팝업 — ★ body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다)
+   ★ 바깥클릭으로 닫지 않는다(입력해 둔 계좌·통장표시가 실수 클릭 한 번에 날아가지 않게) */
+.pmov{position:fixed;inset:0;background:rgba(17,20,25,.44);z-index:9600;display:flex;align-items:center;justify-content:center;padding:18px}
+.pmdlg{background:var(--card,#fff);color:var(--t1,#1B1F24);border-radius:14px;width:min(460px,100%);max-height:88vh;overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.28)}
+.pmdlg .hd{padding:14px 17px 10px;border-bottom:1px solid var(--line,#E1E5EB)}
+.pmdlg .hd h3{margin:0;font-size:15px;font-weight:800}
+.pmdlg .hd .s{font-size:12px;color:var(--t3,#8B94A1);margin-top:3px;line-height:1.5}
+.pmdlg .bd{padding:14px 17px}
+.pmdlg .ft{padding:11px 17px 14px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line,#E1E5EB)}
+.pmf{margin-bottom:12px}
+.pmf>label{display:block;font-size:12px;font-weight:700;margin-bottom:5px}
+.pmf input{width:100%;box-sizing:border-box;padding:8px 10px;font-size:13px;border:1px solid var(--line,#D8DDE5);border-radius:8px;background:var(--card,#fff);color:var(--t1,#1B1F24)}
+.pmf .hint{font-size:11.5px;color:var(--t3,#8B94A1);margin-top:4px;line-height:1.5}
+.pmpick{display:flex;gap:6px;flex-wrap:wrap}
+.pmpick button{padding:7px 12px;font-size:12.5px;border:1px solid var(--line,#D8DDE5);border-radius:8px;background:var(--card,#fff);color:var(--t1,#1B1F24);cursor:pointer}
+.pmpick button.on{border-color:#1B4F9C;background:#E0EDFF;color:#1B4F9C;font-weight:750}
+.pmscope{font-size:12px;background:#E5F3EE;color:#0F6A52;border-radius:8px;padding:8px 11px;line-height:1.55}
 .btn.sm{padding:3px 9px;font-size:11.5px}
 .btn.danger{color:#B3382E;border-color:#EAB6B0}
 
@@ -5777,6 +5810,14 @@ const PAY_ISSUE_LABEL = {
   no_account:'계좌 미등록', no_holder:'예금주 미등록', no_price:'결제금액 조회안됨', zero_amount:'금액 0원',
 };
 const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
+/* 보완 창구 분류 — ★ 사유마다 "고치는 곳"이 다르다.
+     work    = 작업(연결 공고 또는 탭 설정) 단위 → 저장하면 그 작업의 모든 행이 함께 풀린다
+     account = 리뷰어 단위 → 저장하면 그 리뷰어의 모든 행이 함께 풀린다
+     (그 외) = 화면에서 고칠 수 없는 사유 → 무엇을 해야 하는지 문장으로만 안내(가짜 버튼 금지) */
+const PAY_FIX_KIND = {
+  no_bank:'work', bank_unknown:'account', no_account:'account', no_holder:'account',
+};
+const PAY_ACCT_ISSUES = ['bank_unknown','no_account','no_holder'];
 
 async function renderPaymentView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="pmhead"></div><div id="pmbody"><div class="empty">불러오는 중…</div></div></div>`;
@@ -5801,6 +5842,7 @@ function _pmRender(){
   const kb = picked('kbank'), hn = picked('hana');
   const blocked = items.filter(it=>!it.payable);
   const noMemo  = items.filter(it=>_pmOn(it) && (it.warnings||[]).includes('no_memo'));
+  STATE.pmFix = _pmBuildFix(items);   // 보완 창구(작업·리뷰어) — 표의 [보완] 버튼도 이 묶음을 쓴다
 
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
     <span class="bd g">${items.filter(_pmOn).length}건 대상</span>
@@ -5823,8 +5865,9 @@ function _pmRender(){
         ${noMemo.length?stat('⚠ 통장표시 없음', noMemo.length+'건','warn'):''}
       </div>
       <div class="pmrow">${dlBtn('kbank','케이뱅크',kb)} ${dlBtn('hana','하나은행',hn)}</div>
-      ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래 표에서 사유를 확인하세요. (계좌 등록·공고 이체은행 지정 후 다음 회차에 자동 포함)</div>`:''}
-      ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다. 모집공고 수정 → [통장표시]에서 지정하세요.</div>`:''}
+      ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
+      ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
+      ${_pmFixBlock()}
       ${_pmTargetTable(items)}
       <h2 class="pmh2">이체 회차</h2>
       ${_pmBatchTable(STATE.pmBatches||[])}
@@ -5833,14 +5876,23 @@ function _pmRender(){
 
 function _pmTargetTable(items){
   if(!items.length) return `<div class="empty">입금할 건이 없습니다.</div>`;
-  const rows = items.map(it=>{
-    const k=_pmKey(it), on=_pmOn(it);
+  // ★ onclick 에는 **배열 인덱스만** 넘긴다 — 탭명·리뷰어명은 시트에서 온 외부 문자열이라
+  //   문자열로 보간하면 따옴표 하나로 탈출된다(HTML 속성은 엔티티 디코드 후 JS 로 파싱되므로
+  //   `&#39;` 치환으로는 못 막는다 — 레포에서 실측된 XSS 와 같은 자리).
+  const rows = items.map((it,idx)=>{
+    const on=_pmOn(it);
     const badge = it.payable
       ? `<span class="pmb ${it.bank==='kbank'?'kb':'hn'}">${esc(it.bankLabel)}</span>${it.bankAuto?'<span class="pmauto">자동</span>':'<span class="pmauto man">수동</span>'}`
       : `<span class="pmb no">보류</span>`;
     const why = it.payable ? '' : (it.issues||[]).map(i=>PAY_ISSUE_LABEL[i]||i).join(', ');
+    // 그 행의 사유 중 화면에서 고칠 수 있는 것이 하나라도 있을 때만 버튼을 만든다
+    // (눌러도 아무 일 없는 버튼 금지 — 못 고치는 사유는 상단 안내 카드가 설명한다)
+    const fixable = (it.issues||[]).some(i => PAY_FIX_KIND[i] === 'work'
+      || (PAY_FIX_KIND[i] === 'account' && it.accountRef && it.accountRef.reviewerId));
+    const memoFixable = !it.transferMemo;
+    const fixBtn = fixable ? `<button class="btn sm" onclick="_pmRowFix(${idx})">보완</button>` : '';
     return `<tr class="${on?'':'off'}">
-      <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle('${esc(k).replace(/'/g,"&#39;")}',this.checked)">`:'—'}</td>
+      <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
       <td>${esc(it.tabLabel)}</td>
       <td>${badge}</td>
       <td>${esc(it.reviewerName)}${it.isSub?'<span class="pmauto">타계정</span>':''}</td>
@@ -5848,9 +5900,10 @@ function _pmTargetTable(items){
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
-      <td class="num dim">${_pmNum(it.productPrice)}+${_pmNum(it.reviewFee)}</td>
-      <td>${esc(it.transferMemo||'')||'<span class="pmwarn">미설정</span>'}</td>
-      <td class="pmwarn">${esc(why)}</td></tr>`;
+      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${_pmNum(it.reviewFee)}</td>
+      <td>${esc(it.transferMemo||'') || (memoFixable
+        ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>')}</td>
+      <td class="pmwarn">${esc(why)} ${fixBtn}</td></tr>`;
   }).join('');
   return `<div class="lgwrap"><table class="lgtable pmtable">
     <thead><tr><th>☑</th><th>작업</th><th>이체은행</th><th>리뷰어</th><th>구매일</th><th>은행/계좌</th><th>예금주</th>
@@ -5882,7 +5935,243 @@ function _pmBatchTable(list){
 function _pmDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return '-';
   const k=new Date(d.getTime()+9*3600*1000); return k.toISOString().slice(5,16).replace('T',' '); }
 
-function _pmToggle(key, on){ if(on) delete STATE.pmExcluded[key]; else STATE.pmExcluded[key]=true; _pmRender(); }
+/** 회차에서 빼기/담기 — ★ 인자는 표의 배열 인덱스(외부 문자열 보간 금지) */
+function _pmToggle(idx, on){
+  const it=(STATE.pmItems||[])[idx]; if(!it) return;
+  const key=_pmKey(it);
+  if(on) delete STATE.pmExcluded[key]; else STATE.pmExcluded[key]=true;
+  _pmRender();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   보류 사유 보완 — 묶어서 한 번에 고치기
+   ★ 판정 사본을 만들지 않는다: 무엇이 보류인지는 **서버가 준 issues/warnings** 그대로 쓰고,
+     화면은 그것을 "고치는 곳"(작업/리뷰어)으로 **묶기만** 한다.
+   ★ 그래서 이체은행 하나를 저장하면 그 작업의 N건이 함께 풀린다(사용자 확정 예시).
+   ══════════════════════════════════════════════════════════════ */
+function _pmBuildFix(items){
+  const works=new Map(), accts=new Map();
+  const noReviewer=new Set(), noPrice=new Set();
+  for(const it of items){
+    const iss=it.issues||[], warn=it.warnings||[];
+    // ── 작업 단위(이체은행 미지정 · 통장표시 없음)
+    if(iss.includes('no_bank') || warn.includes('no_memo')){
+      const k=it.sheetId+'||'+it.tabName;
+      let w=works.get(k);
+      if(!w) works.set(k, w={ key:k, sheetId:it.sheetId, tabName:it.tabName, tabLabel:it.tabLabel,
+        campaignId:it.campaignId||null, campaignTitle:it.campaignTitle||'',
+        bank:it.bank||'', bankSource:it.bankSource||null,
+        memo:it.transferMemo||'', memoSource:it.memoSource||null,
+        needBank:false, needMemo:false, rows:0 });
+      w.rows++;
+      if(iss.includes('no_bank')) w.needBank=true;
+      if(warn.includes('no_memo')) w.needMemo=true;
+    }
+    // ── 리뷰어 단위(은행명·계좌·예금주)
+    if(iss.some(x=>PAY_ACCT_ISSUES.includes(x))){
+      if(it.accountRef && it.accountRef.reviewerId){
+        const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
+        let a=accts.get(k);
+        if(!a) accts.set(k, a={ key:k, ref:it.accountRef, name:it.reviewerName||'', isSub:!!it.isSub,
+          bankName:it.bankName||'', bankAccount:it.bankAccount||'', accountHolder:it.accountHolder||'',
+          issues:[], rows:0 });
+        a.rows++;
+        for(const x of iss) if(PAY_ACCT_ISSUES.includes(x) && a.issues.indexOf(x)<0) a.issues.push(x);
+      } else noReviewer.add(_pmKey(it));   // 지목할 리뷰어 행이 없다 = 화면에서 못 고침
+    }
+    if(iss.includes('no_reviewer')) noReviewer.add(_pmKey(it));
+    // ★ 시트 결제금액 칸으로도 못 채운 행만 남는다(서버가 이미 폴백을 시도한 뒤다)
+    if(iss.includes('no_price')) noPrice.add(_pmKey(it));
+  }
+  const byRows=(a,b)=>b.rows-a.rows;
+  return { works:[...works.values()].sort(byRows), accts:[...accts.values()].sort(byRows),
+           noReviewer:noReviewer.size, noPrice:noPrice.size };
+}
+
+function _pmFixBlock(){
+  const f=STATE.pmFix||{works:[],accts:[],noReviewer:0,noPrice:0};
+  const bankWorks=f.works.filter(w=>w.needBank), memoWorks=f.works.filter(w=>w.needMemo);
+  if(!bankWorks.length && !memoWorks.length && !f.accts.length && !f.noReviewer && !f.noPrice) return '';
+
+  const list=(arr,fn,cap)=>{
+    const head=arr.slice(0,cap||6).map(fn).join('');
+    return `<div class="pmfixlist">${head}</div>` + (arr.length>(cap||6)
+      ? `<div class="pmfixmore">외 ${arr.length-(cap||6)}건 — 아래 표의 [보완] 버튼으로도 고칠 수 있습니다</div>`:'');
+  };
+  const workRow=(w)=>{
+    const i=f.works.indexOf(w);
+    return `<div class="pmfixrow"><span class="nm" title="${esc(w.tabLabel)}">${esc(w.tabLabel)}</span>
+      <span class="n">${w.rows}건</span>
+      <button class="btn sm" onclick="_pmFixWork(${i})">보완</button></div>`;
+  };
+  const acctRow=(a)=>{
+    const i=f.accts.indexOf(a);
+    return `<div class="pmfixrow"><span class="nm">${esc(a.name)||'(이름 없음)'}${a.isSub?'<span class="pmauto">타계정</span>':''}</span>
+      <span class="n">${a.rows}건</span>
+      <button class="btn sm" onclick="_pmFixAcct(${i})">보완</button></div>`;
+  };
+
+  const cards=[];
+  if(bankWorks.length) cards.push(`<div class="pmfixcard">
+    <div class="ttl">🏦 이체은행 미지정</div>
+    <div class="cnt">${bankWorks.length}개 작업 · ${bankWorks.reduce((a,c)=>a+c.rows,0)}건</div>
+    ${list(bankWorks, workRow)}</div>`);
+  if(memoWorks.length) cards.push(`<div class="pmfixcard">
+    <div class="ttl">🏷 통장표시 없음</div>
+    <div class="cnt">${memoWorks.length}개 작업 · ${memoWorks.reduce((a,c)=>a+c.rows,0)}건 (이체는 되지만 통장에 이름이 안 찍힙니다)</div>
+    ${list(memoWorks, workRow)}</div>`);
+  if(f.accts.length) cards.push(`<div class="pmfixcard">
+    <div class="ttl">💳 계좌 정보 보완</div>
+    <div class="cnt">${f.accts.length}명 · ${f.accts.reduce((a,c)=>a+c.rows,0)}건</div>
+    ${list(f.accts, acctRow)}</div>`);
+  if(f.noReviewer) cards.push(`<div class="pmfixcard info">
+    <div class="ttl">👤 리뷰어 정보 없음 — ${f.noReviewer}건</div>
+    <div class="why">그 연락처로 <b>등록된 리뷰어가 없어</b> 이 화면에서는 계좌를 지목할 수 없습니다.
+      등록리뷰어DB에서 먼저 등록한 뒤 다시 확인해 주세요.</div></div>`);
+  if(f.noPrice) cards.push(`<div class="pmfixcard info">
+    <div class="ttl">💰 결제금액 없음 — ${f.noPrice}건</div>
+    <div class="why">주문 원장에도, <b>시트 결제금액 칸에도</b> 금액이 없어 이체금액을 만들 수 없습니다.
+      시트의 결제금액을 채우면 다음 조회에서 자동으로 풀립니다.</div></div>`);
+
+  return `<div class="pmfix">
+    <h3>보완하면 풀리는 보류</h3>
+    <div class="sub">아래에서 고치면 <b>그 작업·그 리뷰어의 보류가 한 번에</b> 풀리고, 다음 회차부터 파일에 포함됩니다.</div>
+    <div class="pmfixgrid">${cards.join('')}</div></div>`;
+}
+
+/* ── 작업 단위 보완 팝업(이체은행 · 통장표시) ────────────────── */
+function _pmFixWork(i){
+  const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return;
+  const scope = w.campaignId
+    ? `연결된 <b>모집공고</b>에 저장됩니다 — 공고 수정 화면의 [이체은행]·[통장표시]와 같은 값입니다.`
+    : `이 작업엔 연결된 모집공고가 없어 <b>탭 설정</b>에 저장됩니다 — 관리자 대시보드 탭설정의 [이체은행]·[입금명]과 같은 칸입니다.`;
+  const cur = w.bank||'';
+  const btn=(v,l)=>`<button type="button" data-v="${v}" class="${cur===v?'on':''}" onclick="_pmPickBank(this)">${l}</button>`;
+  _pmDialog({
+    title:`보류 보완 — ${esc(w.tabLabel)}`,
+    sub:`이 작업의 <b>${w.rows}건</b>이 함께 처리됩니다.`,
+    body:`
+      <div class="pmf"><label>이체은행</label>
+        <div class="pmpick" id="pmBankPick">${btn('','🔄 자동(작업오더 물건비)')}${btn('hana','🟩 하나은행')}${btn('kbank','🟦 케이뱅크')}</div>
+        <div class="hint">${w.bankSource==='auto'?'지금은 작업오더 물건비에서 자동 판정된 값입니다. ':''}자동으로 두면 작업오더의 물건비 수취방식(현금→하나 · 계산서/수수료→케이뱅크)을 따릅니다.</div></div>
+      <div class="pmf"><label>통장표시 (받는분 통장에 찍히는 이름 · 8자)</label>
+        <input id="pmMemoIn" maxlength="8" value="${esc(w.memo||'')}" placeholder="예) 파우더망고">
+        <div class="hint">비워 두면 리뷰어 통장에 무슨 돈인지 안 찍힙니다(이체 자체는 됩니다).</div></div>
+      <div class="pmscope">${scope}</div>`,
+    okLabel:'저장',
+    onOk: async ()=>{
+      const pick=document.querySelector('#pmBankPick button.on');
+      const bank=pick?(pick.dataset.v||''):'';
+      const memo=(document.querySelector('#pmMemoIn')||{}).value||'';
+      const r=await api('/api/trackb/payment/transfer-setting',{ method:'POST', body: JSON.stringify({
+        sheetId:w.sheetId, tabName:w.tabName, campaignId:w.campaignId||null, bank, memo }) });
+      if(!r||!r.ok){ toast((r&&r.error)||'저장하지 못했습니다'); return false; }
+      // ★ 저장이 끝나면 **먼저 닫는다** — 뒤이은 안내·재조회가 실패해도 팝업이 남아
+      //   "저장이 안 됐나?"로 오해되지 않게(성공을 실패처럼 보이게 하지 않는다).
+      _pmAfterFix(`저장했습니다 — ${w.rows}건에 적용 (${r.target==='campaign'?'공고':'탭 설정'})`);
+      return true;
+    }
+  });
+}
+function _pmPickBank(el){
+  const wrap=el.parentNode; [...wrap.querySelectorAll('button')].forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+}
+
+/* ── 리뷰어 단위 보완 팝업(은행명 · 계좌번호 · 예금주) ────────── */
+function _pmFixAcct(i){
+  const a=(STATE.pmFix&&STATE.pmFix.accts||[])[i]; if(!a) return;
+  const why=a.issues.map(x=>PAY_ISSUE_LABEL[x]||x).join(', ');
+  _pmDialog({
+    title:`계좌 보완 — ${esc(a.name)||'(이름 없음)'}${a.isSub?' (타계정)':''}`,
+    sub:`${esc(why)} · 이 리뷰어의 <b>${a.rows}건</b>이 함께 처리됩니다.`,
+    body:`
+      <div class="pmf"><label>은행명</label>
+        <input id="pmBankNameIn" value="${esc(a.bankName||'')}" placeholder="예) 국민은행 · 카카오뱅크">
+        <div class="hint">이체 서식의 은행코드로 바뀌는 값이라 <b>정식 은행명</b>이어야 합니다. 인식 못 하면 저장 시 알려드립니다.</div></div>
+      <div class="pmf"><label>계좌번호</label>
+        <input id="pmAcctIn" value="${esc(a.bankAccount||'')}" placeholder="숫자만 입력"></div>
+      <div class="pmf"><label>예금주</label>
+        <input id="pmHolderIn" value="${esc(a.accountHolder||'')}" placeholder="예금주명"></div>
+      <div class="pmscope">${a.isSub
+        ? '이 리뷰어의 <b>타계정 전용 계좌</b>로 저장됩니다(소유자 공통계좌는 그대로 둡니다).'
+        : '등록리뷰어DB의 계좌 정보로 저장됩니다 — 비워 둔 칸은 <b>덮어쓰지 않습니다</b>.'}</div>`,
+    okLabel:'저장',
+    onOk: async ()=>{
+      const g=id=>((document.querySelector('#'+id)||{}).value||'').trim();
+      const r=await api('/api/trackb/payment/reviewer-account',{ method:'POST', body: JSON.stringify({
+        reviewerId:a.ref.reviewerId, subPhone8:a.ref.subPhone8||null,
+        bankName:g('pmBankNameIn'), bankAccount:g('pmAcctIn'), accountHolder:g('pmHolderIn') }) });
+      if(!r||!r.ok){ toast((r&&r.error)||'저장하지 못했습니다'); return false; }
+      _pmAfterFix(`저장했습니다 — ${a.rows}건에 적용`);
+      return true;
+    }
+  });
+}
+
+/** 저장 성공 뒤 공통 마무리 — 닫기 → 안내 → 재조회.
+ *  ★ 순서가 계약: **닫기가 먼저**다. 안내·재조회가 실패해도 저장된 사실이 화면에서 뒤집히면 안 된다. */
+function _pmAfterFix(msg){
+  _pmCloseDialog();
+  try{ toast(msg); }catch(_){}
+  _pmLoad();   // 목록 갱신 실패는 [새로고침]으로 회복 가능 — 저장 결과를 붙잡지 않는다
+}
+
+/* ── 공용 팝업 골격 ──────────────────────────────────────────
+   ★ body 직속 마운트 · Esc/[취소]로만 닫힘(바깥클릭 금지 — 입력값 보호)
+   ★ 리스너는 이 팝업에만 걸고 닫을 때 떼어낸다(겹쳐 쌓이지 않게) */
+function _pmDialog({title, sub, body, okLabel, onOk}){
+  _pmCloseDialog();
+  const ov=document.createElement('div'); ov.className='pmov'; ov.id='pmFixOverlay';
+  ov.innerHTML=`<div class="pmdlg" role="dialog" aria-modal="true">
+    <div class="hd"><h3>${title}</h3>${sub?`<div class="s">${sub}</div>`:''}</div>
+    <div class="bd">${body}</div>
+    <div class="ft"><button class="btn" id="pmFixCancel">취소</button>
+      <button class="btn primary" id="pmFixOk">${esc(okLabel||'저장')}</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#pmFixCancel').onclick=_pmCloseDialog;
+  const ok=ov.querySelector('#pmFixOk');
+  ok.onclick=async()=>{
+    ok.disabled=true; const prev=ok.textContent; ok.textContent='저장 중…';
+    // ★ 예외를 삼키지 않고 사유를 말한다 — 조용히 버튼만 되살아나면 담당자가 원인을 모른다.
+    try{ if(await onOk()) _pmCloseDialog(); }
+    catch(e){ try{ toast('처리 중 오류: ' + (e && e.message || e)); }catch(_){} }
+    finally{ if(document.body.contains(ov)){ ok.disabled=false; ok.textContent=prev; } }
+  };
+  ov._esc=e=>{ if(e.key==='Escape'){ e.preventDefault(); _pmCloseDialog(); } };
+  document.addEventListener('keydown', ov._esc);
+  const first=ov.querySelector('input'); if(first) setTimeout(()=>first.focus(),0);
+}
+function _pmCloseDialog(){
+  const ov=document.getElementById('pmFixOverlay'); if(!ov) return;
+  if(ov._esc) document.removeEventListener('keydown', ov._esc);
+  ov.remove();
+}
+
+/** 표 행의 [보완] — 그 행 사유에 맞는 팝업으로 보낸다(고칠 수 없으면 버튼 자체가 없다)
+ *  ★ 인자는 배열 인덱스(외부 문자열 보간 금지) */
+function _pmRowFix(idx){
+  const f=STATE.pmFix||{works:[],accts:[]};
+  const it=(STATE.pmItems||[])[idx]; if(!it) return;
+  const iss=it.issues||[];
+  if(iss.includes('no_bank')){
+    const i=f.works.findIndex(w=>w.sheetId===it.sheetId&&w.tabName===it.tabName);
+    if(i>=0) return _pmFixWork(i);
+  }
+  if(iss.some(x=>PAY_ACCT_ISSUES.includes(x)) && it.accountRef && it.accountRef.reviewerId){
+    const k=it.accountRef.reviewerId+'||'+(it.accountRef.subPhone8||'');
+    const i=f.accts.findIndex(a=>a.key===k);
+    if(i>=0) return _pmFixAcct(i);
+  }
+}
+
+/** 통장표시 [미설정] 클릭 — 같은 작업 팝업을 연다(이체은행과 한 칸에서 정한다) */
+function _pmRowMemo(idx){
+  const it=(STATE.pmItems||[])[idx]; if(!it) return;
+  const f=STATE.pmFix||{works:[]};
+  const i=f.works.findIndex(w=>w.sheetId===it.sheetId&&w.tabName===it.tabName);
+  if(i>=0) return _pmFixWork(i);
+}
 
 async function _pmDownload(bank){
   const rows = (STATE.pmItems||[]).filter(it=>it.bank===bank && _pmOn(it))

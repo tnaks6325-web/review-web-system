@@ -159,11 +159,26 @@ console.log('\n[4] payment.service — 쓰기 표면·잠금');
 const svcSrc = R('src/services/payment.service.js');
 const noComment = svcSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-t('★ 쓰기(INSERT/UPDATE/DELETE)는 payment_* 테이블에만 한다', () => {
-  const writes = [...noComment.matchAll(/(INSERT INTO|UPDATE|DELETE FROM)\s+([a-z_]+)/gi)]
-    .map(m => m[2].toLowerCase());
-  const bad = writes.filter(t2 => !t2.startsWith('payment_'));
+/* ★ 쓰기 표면 — 두 구역으로 나뉜다(계약이 다르다).
+     ① 대상 추출·회차(M1 본체) = payment_* 에만 쓴다. review_index·order_submissions·시트는 읽기만.
+     ② 보류 사유 보완(PaymentFixError 아래) = 사용자 확정으로 열린 구역이라
+        **정확히 세 테이블**(공고 이체설정·탭 이체설정·리뷰어 계좌)에만 쓴다.
+     구역을 합쳐서 검사하면 ①이 조용히 넓어져도 통과하므로 경계를 지켜 따로 센다. */
+const _fixMark = 'class PaymentFixError';
+const _m1Src = noComment.split(_fixMark)[0];
+const _fixSrc = noComment.includes(_fixMark) ? noComment.slice(noComment.indexOf(_fixMark)) : '';
+const _writesIn = s => [...s.matchAll(/(INSERT INTO|UPDATE|DELETE FROM)\s+([a-z_]+)/gi)].map(m => m[2].toLowerCase());
+
+t('★ M1 본체(대상 추출·회차)의 쓰기는 payment_* 테이블에만 한다', () => {
+  const bad = _writesIn(_m1Src).filter(t2 => !t2.startsWith('payment_'));
   assert.deepStrictEqual(bad, [], '운영 테이블에 쓰고 있다: ' + bad.join(', '));
+});
+
+t('★ 보완 경로의 쓰기는 이체설정·리뷰어 계좌 3곳뿐(주문 원장·회차·검색인덱스 무접촉)', () => {
+  assert.ok(_fixSrc, '보완 경로(PaymentFixError)를 찾지 못했다 — 경계 표식이 바뀌었다면 가드를 갱신할 것');
+  const tables = [...new Set(_writesIn(_fixSrc))].sort();
+  assert.deepStrictEqual(tables, ['recruit_campaigns', 'reviewers', 'tab_configs'],
+    '보완 경로가 다른 테이블을 건드린다: ' + tables.join(', '));
 });
 
 t('★ 시트 API 무접촉 (M1 은 DB 전용)', () => {
@@ -285,7 +300,11 @@ t('req.body 구조분해에 두 필드가 있다(#361 재발 방지)', () => {
 t('★ 리뷰어앱 스코프 토큰은 이체 설정을 못 바꾼다', () => {
   const i = campSrc.indexOf('async function _scopedCampaignEdit');
   assert.ok(i > 0, '_scopedCampaignEdit 없음');
-  const body = campSrc.slice(i, i + 3000);
+  // ★ 고정 길이(i+3000)로 자르면 함수가 자라는 순간 UPDATE 뒷부분이 잘려 나가 가드가 조용히 빨개진다
+  //   (실제로 그랬다) — **함수 끝까지** 본다: 다음 최상위 선언 직전.
+  const rest = campSrc.slice(i + 1);
+  const nx = rest.search(/\n(?:async function |function |router\.|const |module\.exports)/);
+  const body = campSrc.slice(i, nx > 0 ? i + 1 + nx : campSrc.length);
   const set = body.match(/UPDATE recruit_campaigns SET([\s\S]*?)WHERE id=\$1/);
   assert.ok(set, 'scoped UPDATE 를 찾지 못했다');
   assert.ok(!/transfer_bank|transfer_memo/.test(set[1]),
