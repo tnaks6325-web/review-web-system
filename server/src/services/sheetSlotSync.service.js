@@ -119,9 +119,7 @@ async function readPreparedRows(db, { sheetId, tabGid, tabName = '', includeCell
       const d = includeCells ? (dateIdx >= 0 ? (cells[dateIdx] || '') : '') : (r.d == null ? '' : String(r.d));
       const o = includeCells ? (optCol >= 0 ? (cells[optCol] || '') : '')
                              : (r.o == null ? '' : String(r.o));
-      const filled = includeCells
-        ? (cells || []).some(c => String(c == null ? '' : c).trim() !== '')
-        : r.filled === true;
+      const filled = includeCells ? rowHasValue(cells) : r.filled === true;
       return { seq: r.row_index, dateRaw: String(d).trim(), optionText: String(o).trim(), filled, cells };
     });
 
@@ -145,18 +143,18 @@ async function readPreparedRows(db, { sheetId, tabGid, tabName = '', includeCell
       //   "앞으로의 블로그 작업은 리뷰오더 총원이 준비 행의 기준").
       // ★ 총원이 시트 실체 행보다 많아도 **자리를 지어내지 않는다** — seq 는 시트 실제 행 번호여야
       //   하고(어긋나면 주문 유입 시 표가 두 겹이 된다), 없는 줄의 번호는 알 수 없다. 대신 고지한다.
-      const solid = [];
-      rows.forEach((r, i) => { if (r.filled) solid.push(mk(r, i)); });
-      const total = blogCtx.recruitTotal > 0 ? blogCtx.recruitTotal : null;
-      const take = total == null ? solid : solid.slice(0, total);
-      take.forEach(p => prepared.push(p));
+      // ★★ 고르는 규칙 자체는 `pickBlogPrepared` 한 곳 — 라이브 시트를 읽는 1회성 잡(M3)도
+      //   같은 함수를 쓴다(사본을 두면 "점검이 세는 행 ≠ 만들어지는 자리"로 갈린다).
+      const pick = pickBlogPrepared(rows.map((r, i) => ({ filled: r.filled, item: mk(r, i) })),
+                                    blogCtx.recruitTotal);
+      pick.prepared.forEach(p => prepared.push(p));
       Object.assign(blogInfo, {
         blogMode: true,
-        recruitTotal: total,                                  // null = 총원 모름(오더 미연결·0)
+        recruitTotal: pick.recruitTotal,                      // null = 총원 모름(오더 미연결·0)
         totalSource: blogCtx.totalSource,
-        solidRows: solid.length,
-        shortOfTotal: total == null ? 0 : Math.max(0, total - solid.length),
-        beyondTotal: total == null ? 0 : Math.max(0, solid.length - total),
+        solidRows: pick.solidRows,
+        shortOfTotal: pick.shortOfTotal,
+        beyondTotal: pick.beyondTotal,
         dateEmpty: rows.filter(r => r.filled && !r.dateRaw).length,   // 블로그에선 정상(경고 아님)
       });
     } else {
@@ -209,6 +207,34 @@ async function _blogContext(db, { sheetId, tabName } = {}) {
     logger.warn(`[sheetSlotSync] 체험단 종류 조회 실패(종전 동작 · ${sheetId}/${tabName}): ${e.message}`);
     return off;
   }
+}
+
+/** 값이 하나라도 있는 행인가(블로그 준비 행 판정의 밑바탕) — SQL 쪽 `btrim(v) <> ''` 와 같은 뜻. */
+function rowHasValue(cells) {
+  return (cells || []).some(c => String(c == null ? '' : c).trim() !== '');
+}
+
+/**
+ * 블로그 준비 행 고르기 — **판정 단일 출처**.
+ *
+ * 값이 있는 행만 세고, 총원을 알면 **앞에서부터 그 수까지만** 자른다(사용자 확정:
+ * "앞으로의 블로그 작업은 리뷰오더 총원이 준비 행의 기준").
+ * ★ 총원이 실체 행보다 많아도 **자리를 지어내지 않는다** — 없는 줄의 시트 행 번호는 알 수 없다.
+ *   부족·초과는 숫자로 돌려주고 호출부가 고지한다(조용히 자르지 않는다).
+ *
+ * @param {{filled:boolean,item:any}[]} list 시트 행 순서 그대로
+ * @param {number|null} recruitTotal 0·null = 총원 모름(자르지 않음)
+ */
+function pickBlogPrepared(list, recruitTotal) {
+  const solid = (Array.isArray(list) ? list : []).filter(x => x && x.filled).map(x => x.item);
+  const total = Number(recruitTotal) > 0 ? Number(recruitTotal) : null;
+  return {
+    prepared: total == null ? solid : solid.slice(0, total),
+    recruitTotal: total,
+    solidRows: solid.length,
+    shortOfTotal: total == null ? 0 : Math.max(0, total - solid.length),
+    beyondTotal: total == null ? 0 : Math.max(0, solid.length - total),
+  };
 }
 
 /** 시트 헤더명 → 값 맵(review_index.row_json 과 같은 모양 — 그리드가 그대로 그린다) */
@@ -528,6 +554,8 @@ module.exports = {
   backfillSlots,
   applyQuotaFix,
   evaluateQuota,
+  // 판정·조립 단일 출처(라이브 시트를 읽는 1회성 잡이 같은 규칙을 쓴다 — 사본 금지)
+  pickBlogPrepared, rowHasValue, rowJsonFromHeaders: _rowJson,
   __setPoolForTest,
   SCAN_CAP, BACKFILL_CAP,
 };
