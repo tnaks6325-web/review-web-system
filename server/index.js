@@ -48,6 +48,12 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'work_kind'],
   ['payment_batch_items', 'result_status'],       // 100 — 이체결과 반영 UPDATE SET 목록(없으면 반영이 통째로 42703)
   ['payment_batches', 'applied_at'],              // 100 — 위와 같은 트랜잭션에 들어가므로 함께 막아야 한다
+  // 101 — 옵션별 유입링크 + 공고 유입방식.
+  //   landing_url 은 _saveCampaignOptions 의 INSERT·ON CONFLICT SET 목록에,
+  //   inflow_type 은 공고 create INSERT·update SET 목록에 들어가므로 하나라도 없으면
+  //   **공고 발행·수정·옵션 저장이 전면 42703**(082·085·098 과 같은 규율).
+  ['campaign_options', 'landing_url'],
+  ['recruit_campaigns', 'inflow_type'],
 ];
 
 async function _runOneMigration(pool, sql) {
