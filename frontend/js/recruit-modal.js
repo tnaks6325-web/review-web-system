@@ -117,6 +117,19 @@
           <button type="button" class="rchan-btn" id="rf_opt_addbtn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 상품 추가</button></div>
         <div class="rf-cb">
         <div id="rf_opt_wrap" class="rf-pm-none">
+          <!-- ★★ 유입방식(101 · D1 확정) — 이 칸이 옵션별 유입 링크 칸의 잠금을 정한다.
+               종전에는 공고에 칸이 없어 연결 작업오더 역조회로만 알 수 있었고, 오더 없이
+               만든 공고는 영영 불명이었다. 빈 값 = 미지정(종전대로 작업오더 값으로 판정). -->
+          <div class="rf-hrow" style="margin:0 0 9px"><span class="rf-hl">유입방식</span>
+            <div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_inflow_type_btns">
+                <button class="rchan-btn" data-group="inflow_type" data-val="" onclick="selectRfBtn('inflow_type',this)">미지정</button>
+                <button class="rchan-btn" data-group="inflow_type" data-val="link" onclick="selectRfBtn('inflow_type',this)">🔗 링크유입</button>
+                <button class="rchan-btn" data-group="inflow_type" data-val="guide" onclick="selectRfBtn('inflow_type',this)">🧭 유입가이드</button>
+              </div>
+              <input id="rf_inflow_type" type="hidden" value="">
+              <div id="rf_inflow_note" style="font-size:.66rem;color:var(--t3,#94A3B8);font-weight:700;margin-top:4px"></div>
+            </div></div>
           <!-- ★ 작업 종류(2026-08-07 우레온 건) — [옵션 없는 작업]에는 옵션명 칸 자체가 없다.
                상품명 조각이 옵션명으로 승격되던 사고의 입구를 화면에서 제거한다. -->
           <div id="rf_prod_mode_sw" class="rf-pmsw">
@@ -126,11 +139,11 @@
             <input id="rf_prod_mode" type="hidden" value="none">
           </div>
           <div class="rf-prod-head" data-pm="none">
-            <span>상품명</span><span style="text-align:right">결제금액</span>
+            <span>상품명</span><span>상품 URL</span><span style="text-align:right">결제금액</span>
             <span style="text-align:right">총인원</span><span style="text-align:right">일건수</span><span></span>
           </div>
           <div class="rf-prod-head" data-pm="opt">
-            <span></span><span>옵션명</span><span style="text-align:right">결제금액</span>
+            <span></span><span>옵션명</span><span>유입 링크</span><span style="text-align:right">결제금액</span>
             <span style="text-align:right">옵션인원</span><span style="text-align:right">일건수</span><span></span>
           </div>
           <div id="rf_opt_rows"></div>
@@ -171,8 +184,15 @@
                 <input id="rf_time_range" type="text" class="rform-input" placeholder="예) 두시 ~ 네시 · 자율" maxlength="30" oninput="onRecruitTimeRangeInput()">
                 <div id="rf_autoorder_note" style="display:none;font-size:.66rem;color:#0ca678;font-weight:700;margin-top:3px">⏱ 자율주문 — 구매시간이 자동으로 비워집니다.</div>
               </div></div>
+            <!-- ★★ 101 D3: 진행상품 표가 진실원본 — 이 칸은 **첫 상품 URL에서 자동으로 파생**되는
+                 읽기 전용 표시다. 여기서 고칠 수 있게 두면 표와 갈라져 "표에는 A인데 리뷰어는 B로 간다". -->
             <div class="rf-hrow" style="margin:0"><span class="rf-hl">랜딩 URL</span>
-              <input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 링크유입일 때 [상품 페이지 열기]로 노출"></div>
+              <div>
+                <input id="rf_landing_url" type="text" class="rform-input" readonly tabindex="-1"
+                  placeholder="(진행상품 표에 상품 URL을 넣으면 자동으로 채워집니다)"
+                  style="background:#F8FAFC;color:var(--t2,#475569);cursor:default">
+                <div id="rf_landing_note" style="font-size:.66rem;color:var(--t3,#94A3B8);font-weight:700;margin-top:3px">진행상품 표의 첫 상품 URL에서 자동으로 채워집니다 · 여기서는 고칠 수 없습니다.</div>
+              </div></div>
           </div>
           <!-- ★ 098 이월 반영: 자동(기본=현행) / 보류 후 수동 반영 — 시안 frontend/docs/이월보류_수동반영_와이어프레임.html -->
           <div class="rf-hrow" style="margin:8px 0 0"><span class="rf-hl">이월 반영</span>
@@ -642,7 +662,7 @@
      상품 그룹 머리(상품명 · 총인원 자동합계) 아래에 옵션 행이 들여쓰기로 붙는다.
      행 DOM(.rf-opt-row + .rf-opt-prod/.rf-opt-name/…)은 **두 모드 공통**이라
      저장 계약(readOptRows/_readProdRows)이 갈라지지 않는다 — 보이는 칸만 CSS로 바뀐다. */
-.rf-prod-head,.rf-opt-row{display:grid;grid-template-columns:1.6fr 1fr .85fr .62fr .62fr 26px;gap:6px;align-items:center}
+.rf-prod-head,.rf-opt-row{display:grid;grid-template-columns:1.15fr 1.5fr .75fr .5fr .5fr 26px;gap:6px;align-items:center}
 .rf-prod-head{font-size:.62rem;font-weight:800;color:var(--t3,#94A3B8);padding:0 2px 4px;border-bottom:1px solid var(--border,#E2E8F0);margin-bottom:5px}
 .rf-opt-row{margin-bottom:6px}
 .rf-opt-row .rform-input{font-size:.74rem;padding:6px 7px;margin:0}
@@ -659,14 +679,24 @@
 /* 모드별 열 구성 — 숨긴 칸은 값이 남아 있어도 _readProdRows/readOptRows 가 모드를 보고 무시한다 */
 #recruitModal .rf-pm-none .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-prod-head[data-pm="none"],
 #recruitModal .rf-pm-none .rf-pm-help[data-pm="opt"],#recruitModal .rf-pm-opt .rf-pm-help[data-pm="none"]{display:none}
-#recruitModal .rf-pm-none .rf-prod-head[data-pm="none"],#recruitModal .rf-pm-none .rf-opt-row{grid-template-columns:1.6fr .85fr .62fr .62fr 26px}
-#recruitModal .rf-pm-none .rf-opt-name{display:none}
-#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px}
-#recruitModal .rf-pm-opt .rf-opt-prod{display:none}
+/* ★★ 101(A안): 열 = [상품명·상품URL·금액·총·일] / [└·옵션명·유입링크·금액·옵션인원·일].
+   상품 URL 은 'none' 모드에서는 행 위에, 'opt' 모드에서는 **상품 그룹 머리**에 있고
+   그룹 머리 값이 그 그룹의 숨은 '.rf-opt-purl' 로 내려온다(상품명과 똑같은 규율) —
+   ★ 이 CSS 블록은 JS 템플릿 문자열 안이라 **주석에도 백틱을 쓰면 문자열이 조기 종료**돼
+     모듈 전체가 ReferenceError 로 죽는다(실측 — node --check 는 통과하고 브라우저에서만 드러난다).
+   그래서 행 하나가 여전히 데이터의 단일 운반체이고 모드 전환 시 값이 사라지지 않는다. */
+#recruitModal .rf-pm-none .rf-prod-head[data-pm="none"],#recruitModal .rf-pm-none .rf-opt-row{grid-template-columns:1.15fr 1.5fr .75fr .5fr .5fr 26px}
+#recruitModal .rf-pm-none .rf-opt-name,#recruitModal .rf-pm-none .rf-opt-ourl{display:none}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px 1fr 1.35fr .7fr .5fr .5fr 26px}
+#recruitModal .rf-pm-opt .rf-opt-prod,#recruitModal .rf-pm-opt .rf-opt-purl{display:none}
+/* 잠긴 유입 링크 칸(가이드유입 · 옵션별 주소가 없는 채널) — 숨기지 않고 사유를 보여준다 */
+#recruitModal .rf-opt-row .rf-opt-ourl:disabled,#recruitModal .rf-gp-head .rf-gp-purl:disabled{background:#F8FAFC;color:var(--t4,#94A3B8);cursor:not-allowed}
+#recruitModal .rf-opt-lock{font-size:.64rem;font-weight:700;color:#92400E;margin:-2px 0 7px 24px}
 #recruitModal .rf-pm-opt .rf-opt-row::before{content:'└';color:var(--t4,#CBD5E1);font-size:.72rem;text-align:center}
 /* 상품 그룹 머리(옵션 있는 작업 전용) */
 #recruitModal .rf-gp{border:1px solid var(--border,#E2E8F0);border-radius:10px;padding:9px 10px;margin-bottom:9px;background:#FCFDFF}
-#recruitModal .rf-gp-head{display:grid;grid-template-columns:1fr .62fr 26px;gap:6px;align-items:center;margin-bottom:7px}
+#recruitModal .rf-gp-head{display:grid;grid-template-columns:1fr 1.35fr .62fr 26px;gap:6px;align-items:center;margin-bottom:7px}
+#recruitModal .rf-gp-head .rf-gp-purl{font-weight:400}
 #recruitModal .rf-gp-head .rform-input{font-size:.76rem;font-weight:700;padding:6px 7px;margin:0}
 #recruitModal .rf-gp-total{font-size:.72rem;font-weight:800;text-align:right;color:var(--t2,#475569)}
 #recruitModal .rf-gp-add{border:1px dashed var(--border,#CBD5E1);background:transparent;color:var(--t2,#475569);

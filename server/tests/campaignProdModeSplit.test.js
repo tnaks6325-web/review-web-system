@@ -127,6 +127,8 @@ function makeTable(opts) {
   dom.add('rf_recruit_total', 'input');
   dom.add('rf_daily_limit', 'input');
   dom.add('rf_prod_mode_note', 'span');
+  ['rf_inflow_type', 'rf_channel', 'rf_channel_custom', 'rf_landing_url'].forEach(id => dom.add(id, 'input'));
+  ['rf_inflow_note', 'rf_landing_note'].forEach(id => dom.add(id));
   const wrap = dom.add('rf_opt_wrap');
   wrap.classList.add('rf-pm-none');
   const mode = dom.add('rf_prod_mode', 'input'); mode.value = 'none';
@@ -143,11 +145,15 @@ function makeTable(opts) {
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
+  vm.runInContext(/const RF_OPTION_URL_SUPPORT\s*=\s*\{[^}]*\};/.exec(recruitSrc)[0], sandbox);
   [
     '_prodMode', '_applyProdModeUi', '_setProdModeNote', 'setProdMode', '_convertProdRows',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows', 'renderOptRowsWithProduct',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
+    // ★ 101(M3): 표가 랜딩 URL·옵션 링크 잠금까지 파생하므로 그 의존도 함께 올린다
+    //   (스텁을 두면 "표가 진실원본"이라는 이 파일의 검사가 거기서만 딴판이 된다)
+    '_rfChannelKey', '_optUrlState', '_optUrlEnabled', '_syncOptUrlState', '_syncLandingFromProdRows',
     'parseProductLinesToRows', 'applyProductRowsFromOrder',
   ].forEach(fn => vm.runInContext(grab(recruitSrc, fn), sandbox));
   return { dom, sandbox, run: (code) => vm.runInContext(code, sandbox) };
@@ -267,8 +273,9 @@ ok('모달: 작업 종류 스위치 + 모드 hidden + 모드별 헤더/도움말
   && /id="rf_prod_mode"[^>]*value="none"/.test(modalSrc)
   && /onclick="setProdMode\('none'\)"/.test(modalSrc) && /onclick="setProdMode\('opt'\)"/.test(modalSrc)
   && /rf-prod-head" data-pm="none"/.test(modalSrc) && /rf-prod-head" data-pm="opt"/.test(modalSrc));
-ok('모달 CSS: 모드별 열 구성(none=옵션명 숨김 / opt=상품명 숨김+그룹)', /\.rf-pm-none \.rf-opt-name\{display:none\}/.test(modalSrc)
-  && /\.rf-pm-opt \.rf-opt-prod\{display:none\}/.test(modalSrc) && /\.rf-gp-head\{display:grid/.test(modalSrc));
+// ★ 101(M3): 숨김 목록에 URL 칸(.rf-opt-ourl / .rf-opt-purl)이 합류했다(검사 의미 불변 — 모드별 열 구성)
+ok('모달 CSS: 모드별 열 구성(none=옵션명 숨김 / opt=상품명 숨김+그룹)', /\.rf-pm-none \.rf-opt-name[^{]*\{display:none\}/.test(modalSrc)
+  && /\.rf-pm-opt \.rf-opt-prod[^{]*\{display:none\}/.test(modalSrc) && /\.rf-gp-head\{display:grid/.test(modalSrc));
 ok('모달: 옵션표 저장 계약 필드 생존(rf_opt_rows·rf_wd_product·정원 hidden)', /id="rf_opt_rows"/.test(modalSrc)
   && /id="rf_wd_product"/.test(modalSrc) && /id="rf_recruit_total"/.test(modalSrc) && /id="rf_daily_limit"/.test(modalSrc));
 ok('index-recruit: 모드 단일 출처(readOptRows·_readProdRows 가 _prodMode 를 본다)',

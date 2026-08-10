@@ -1440,6 +1440,8 @@ function renderPartCheck() {
   }
   // 🔎 연결 탭 옵션 칸 대조(경고 전용 — 게시는 막지 않는다)
   try { (_optColumnCheckItems() || []).forEach(i => items.push(i)); } catch (_) { /* fail-soft */ }
+  // 🔗 101 유입 링크 점검 — ★ 전부 경고(D2 확정), 상품 URL 미입력도 게시를 막지 않는다
+  try { (_optUrlCheckItems() || []).forEach(i => items.push(i)); } catch (_) { /* fail-soft */ }
   // ★ 3색: 실패(빨강, 게시 차단) / 경고(호박, 게시는 가능하나 운영 주의) / 통과(초록)
   box.innerHTML = items.map(i =>
     `<div style="display:flex;align-items:center;gap:7px;font-size:.74rem;font-weight:700;border-radius:8px;padding:6px 10px;
@@ -1501,11 +1503,13 @@ function _convertProdRows(rows, m) {
   if (!list.length) return [];
   if (m === "opt") return list;                     // 옵션명 칸이 드러나며 그대로 이어 쓴다
   // opt → none: 상품 단위로 접는다(금액=첫 옵션, 인원·건수=합계, 하나라도 0이면 0=무제한)
+  // ★ 상품 URL 은 상품 단위 값이라 그대로 따라온다. 옵션별 유입 링크는 옵션이 사라지므로 버린다.
   const out = [];
   list.forEach(r => {
     const key = r.productName || "";
     const g = out.length && out[out.length - 1].productName === key ? out[out.length - 1] : null;
-    if (!g) { out.push({ productName: key, optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit, status: "active" }); return; }
+    if (!g) { out.push({ productName: key, productUrl: r.productUrl || "", optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit, status: "active" }); return; }
+    if (!g.productUrl && r.productUrl) g.productUrl = r.productUrl;
     g.recruitTotal = (g.recruitTotal > 0 && r.recruitTotal > 0) ? g.recruitTotal + r.recruitTotal : 0;
     g.dailyLimit   = (g.dailyLimit   > 0 && r.dailyLimit   > 0) ? g.dailyLimit   + r.dailyLimit   : 0;
     if (!g.payAmount) g.payAmount = r.payAmount;
@@ -1526,9 +1530,11 @@ function _renderProdTable(rows) {
     list.forEach(r => {
       const key = r.productName || "";
       const g = groups.length && groups[groups.length - 1].name === key ? groups[groups.length - 1] : null;
-      if (g) g.rows.push(r); else groups.push({ name: key, rows: [r] });
+      // ★ 그룹 상품 URL = 그 그룹에서 **처음 발견된 값**(빈 칸이 값을 덮어쓰지 않게)
+      if (g) { g.rows.push(r); if (!g.url && r.productUrl) g.url = r.productUrl; }
+      else groups.push({ name: key, url: r.productUrl || "", rows: [r] });
     });
-    if (!groups.length) groups.push({ name: "", rows: [{}] });
+    if (!groups.length) groups.push({ name: "", url: "", rows: [{}] });
     groups.forEach(g => wrap.appendChild(_buildProdGroup(g)));
   } else {
     (list.length ? list : []).forEach(r => wrap.appendChild(_buildOptRowEl(r)));
@@ -1537,8 +1543,9 @@ function _renderProdTable(rows) {
   _optSummary();
   _syncPreviewFromOptRows();
   _syncGroupTotals();
+  _syncOptUrlState();
 }
-/** 상품 그룹(옵션 있는 작업) — 머리(상품명·총인원 자동합계) + 옵션 행 + [＋ 옵션 추가] */
+/** 상품 그룹(옵션 있는 작업) — 머리(상품명·상품 URL·총인원 자동합계) + 옵션 행 + [＋ 옵션 추가] */
 function _buildProdGroup(g) {
   const box = document.createElement("div");
   box.className = "rf-gp";
@@ -1546,6 +1553,7 @@ function _buildProdGroup(g) {
   head.className = "rf-gp-head";
   head.innerHTML =
     '<input class="rform-input rf-gp-name" placeholder="상품명">' +
+    '<input class="rform-input rf-gp-purl" placeholder="상품 URL — https://">' +
     '<span class="rf-gp-total" title="옵션인원 합계(자동)">–</span>' +
     '<button type="button" class="btn-icon-sm rf-gp-del" title="이 상품(옵션 전체) 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
   const nameEl = head.querySelector(".rf-gp-name");
@@ -1555,19 +1563,28 @@ function _buildProdGroup(g) {
     box.querySelectorAll(".rf-opt-row .rf-opt-prod").forEach(i => { i.value = nameEl.value; });
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   });
+  /* ★ 101: 그룹 상품 URL → 그 그룹의 숨은 `.rf-opt-purl` 로 내려보낸다(상품명과 같은 규율).
+     행이 데이터의 단일 운반체라 `_readProdRowsRaw` 하나만 읽으면 되고, 모드 전환도 그대로 이월된다. */
+  const purlEl = head.querySelector(".rf-gp-purl");
+  purlEl.value = g.url || "";
+  purlEl.addEventListener("input", () => {
+    box.querySelectorAll(".rf-opt-row .rf-opt-purl").forEach(i => { i.value = purlEl.value; });
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
+  });
   head.querySelector(".rf-gp-del").onclick = () => {
     box.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
   };
   box.appendChild(head);
   const body = document.createElement("div");
   body.className = "rf-gp-body";
-  (g.rows.length ? g.rows : [{}]).forEach(r => body.appendChild(_buildOptRowEl(Object.assign({}, r, { productName: g.name || "" }))));
+  (g.rows.length ? g.rows : [{}]).forEach(r => body.appendChild(
+    _buildOptRowEl(Object.assign({}, r, { productName: g.name || "", productUrl: g.url || "" }))));
   box.appendChild(body);
   const add = document.createElement("button");
   add.type = "button"; add.className = "rf-gp-add"; add.textContent = "＋ 옵션 추가";
   add.onclick = () => {
-    body.appendChild(_buildOptRowEl({ productName: nameEl.value }));
-    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
+    body.appendChild(_buildOptRowEl({ productName: nameEl.value, productUrl: purlEl.value }));
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals(); _syncOptUrlState();
   };
   box.appendChild(add);
   return box;
@@ -1595,6 +1612,7 @@ function addOptRow(data) {
   _optSummary();
   _syncPreviewFromOptRows();
   _syncGroupTotals();
+  _syncOptUrlState();
 }
 
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
@@ -1610,7 +1628,9 @@ function _buildOptRowEl(data) {
     : '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
   row.innerHTML =
     '<input class="rform-input rf-opt-prod" placeholder="상품명">' +
+    '<input class="rform-input rf-opt-purl" placeholder="상품 URL — https://">' +
     '<input class="rform-input rf-opt-name" placeholder="옵션명(없으면 비움)">' +
+    '<input class="rform-input rf-opt-ourl" placeholder="이 옵션의 유입 링크 — 비우면 상품 URL">' +
     '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액">' +
     '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="총">' +
     '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="일">' +
@@ -1619,6 +1639,10 @@ function _buildOptRowEl(data) {
   // 상품명은 옵션 테이블에 없던 값 — 넘겨받지 않았으면 바로 위 행에서 따라온다(반복 입력 제거)
   row.querySelector(".rf-opt-prod").value = d.productName ?? d.product_name ?? _lastOptProductName();
   row.querySelector(".rf-opt-name").value = d.optKey ?? d.opt_key ?? "";
+  /* ★ 101: 상품 URL 은 'opt' 모드에서 그룹 머리가 내려주고, 'none' 모드에서는 이 칸이 곧 입력칸이다.
+     유입 링크(옵션별)는 언제나 행이 들고 있다 — 모드를 바꿔도 값이 사라지지 않는다. */
+  row.querySelector(".rf-opt-purl").value = d.productUrl ?? d.product_url ?? "";
+  row.querySelector(".rf-opt-ourl").value = d.landingUrl ?? d.landing_url ?? "";
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
   row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
@@ -1674,6 +1698,8 @@ function renderOptRows(options, opts) {
     : "옵션 정보가 없어 자동 선택됨"));
   _renderProdTable(list.map(o => ({
     productName: o.productName ?? o.product_name ?? "",
+    productUrl:  o.productUrl ?? o.product_url ?? "",
+    landingUrl:  o.landingUrl ?? o.landing_url ?? "",
     optKey:      o.optKey ?? o.opt_key ?? "",
     payAmount:   o.payAmount ?? o.pay_amount ?? 0,
     recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
@@ -1687,8 +1713,12 @@ function renderOptRows(options, opts) {
  * 그래서 작업내용 원문(productLines)을 분해해 옵션명으로 상품명을 되찾아 표를 채운다.
  * 옵션이 없는 단일상품 공고는 원문만으로 행을 만든다(표가 비어 보이지 않게).
  */
-function renderOptRowsWithProduct(options, productLines) {
+function renderOptRowsWithProduct(options, productLines, campaignLandingUrl) {
   const parsed = parseProductLinesToRows(productLines);
+  /* ★ 101: 상품 URL 은 **공고에 한 칸(landing_url)** 뿐이라 첫 상품에만 되돌린다.
+     상품이 여러 개인 공고를 다시 저장하면 첫 상품 URL 이 그대로 랜딩 URL 로 파생된다(무회귀).
+     옵션별 유입 링크는 옵션 원장(campaign_options.landing_url)에 있어 온전히 복원된다. */
+  const _cUrl = String(campaignLandingUrl || "").trim();
   const byOpt = new Map();
   parsed.forEach(r => { if (r.optKey) byOpt.set(r.optKey, r); });
   const opts = options || [];
@@ -1696,17 +1726,22 @@ function renderOptRowsWithProduct(options, productLines) {
     // ★★ 옵션 원장이 비어 있으면 이 공고는 **확정적으로** 옵션 없는 공고다 —
     //   원문 분해(parseProductLinesToRows)가 상품명 속 하이픈·빗금을 옵션으로 쪼갰더라도
     //   그 추측을 옵션으로 승격시키지 않고 상품명으로 되붙인다(우레온 사고 경로 차단).
-    renderOptRows(parsed.map(r => ({
+    renderOptRows(parsed.map((r, i) => ({
       productName: [r.productName, r.optKey].filter(Boolean).join(" "),
+      productUrl: i === 0 ? _cUrl : "",
       optKey: "", payAmount: r.payAmount,
     })), { mode: "none" });
     return;
   }
   const firstProd = parsed.length ? parsed[0].productName : "";
+  let _firstUsed = false;
   renderOptRows(opts.map(o => {
     const key = o.optKey || o.opt_key || "";
     const hit = byOpt.get(key);
-    return { ...o, productName: (hit && hit.productName) || firstProd || "" };
+    const name = (hit && hit.productName) || firstProd || "";
+    // 첫 상품(그룹)에만 공고 랜딩 URL — 그룹 머리가 그 값을 들고 아래 옵션 행으로 내려보낸다
+    const url = _firstUsed ? "" : (_firstUsed = true, _cUrl);
+    return { ...o, productName: name, productUrl: url };
   }));
 }
 
@@ -1716,18 +1751,84 @@ function renderOptRowsWithProduct(options, productLines) {
 function readOptRows() {
   const out = [];
   if (_prodMode() !== "opt") return out;
+  /* ★★ 101: 옵션별 유입 링크(landingUrl)는 **칸이 열려 있을 때만** 전송한다.
+     가이드유입·네이버처럼 칸이 잠긴 상태에서 키를 실어 보내면 비활성 칸의 빈 값이
+     서버 CASE 센티널에서 '해제'로 해석돼 **이미 저장된 주소가 조용히 지워진다**.
+     키 자체를 빼면 서버가 COALESCE 로 기존 값을 유지한다("미전송 = 유지"). */
+  const sendUrl = _optUrlEnabled();
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
     if (!optKey) return;                       // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
-    out.push({
+    const row = {
       optKey,
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
       recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
       dailyLimit:    Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0),
       status:        r.dataset.status === "closed" ? "closed" : "active",   // ★ 마감상태 보존(리뷰 #1)
-    });
+    };
+    if (sendUrl) row.landingUrl = String(r.querySelector(".rf-opt-ourl")?.value || "").trim();
+    out.push(row);
   });
   return out;
+}
+
+/* ═══════════════════════════════════════
+   🔗 101 옵션별 유입 링크 — 칸을 열지 말지 정하는 곳(한 벌)
+
+   ★★ 판정 규칙은 서버 `utils/inflowType.js` · `utils/optionUrlChannels.js` 와 같아야 한다.
+      화면에서만 열어 두면 저장은 되는데 리뷰어 화면은 안 바뀌고, 화면에서만 잠그면
+      쿠팡 작업의 옵션 링크를 넣을 방법이 없어진다. 회귀가드가 두 표의 일치를 고정한다.
+   ★ **채널 미상은 열어 둔다(fail-open)** — 추정으로 입력을 잠그지 않는다(서버와 같은 규율).
+   ═══════════════════════════════════════ */
+/** 서버 `OPTION_URL_SUPPORT` 최소 사본 — 회귀가드가 서버 표와의 일치를 고정한다 */
+const RF_OPTION_URL_SUPPORT = { coupang: true, naver: false, oliveyoung: true, kakao: true };
+/** 채널 문자열 → key (서버 `cashReceiptChannelKey` 와 같은 4채널) */
+function _rfChannelKey(v) {
+  const s = String(v || "");
+  if (/쿠팡|coupang/i.test(s)) return "coupang";
+  if (/네이버|naver|스마트스토어/i.test(s)) return "naver";
+  if (/올리브영|oliveyoung/i.test(s)) return "oliveyoung";
+  if (/카카오|kakao/i.test(s)) return "kakao";
+  return "";
+}
+/** 지금 이 공고에서 옵션별 주소를 입력받을 수 있는가 + 못 받으면 그 사유 */
+function _optUrlState() {
+  const inflow = String(document.getElementById("rf_inflow_type")?.value || "").trim();
+  if (inflow === "guide") return { on: false, why: "유입가이드 작업이라 옵션 링크는 사용하지 않습니다." };
+  const chanEl = document.getElementById("rf_channel");
+  const raw = (chanEl?.value === "직접입력")
+    ? (document.getElementById("rf_channel_custom")?.value || "")
+    : (chanEl?.value || "");
+  const key = _rfChannelKey(raw);
+  if (key && RF_OPTION_URL_SUPPORT[key] === false) {
+    return { on: false, why: (raw || "이 채널") + "는 옵션별 주소가 없어 상품 URL 하나로 안내합니다." };
+  }
+  return { on: true, why: "" };
+}
+function _optUrlEnabled() { return _optUrlState().on; }
+/** 옵션별 유입 링크 칸의 잠금·사유 표시를 지금 설정에 맞춘다(값은 건드리지 않는다) */
+function _syncOptUrlState() {
+  const st = _optUrlState();
+  const optMode = _prodMode() === "opt";
+  document.querySelectorAll("#rf_opt_rows .rf-opt-row .rf-opt-ourl").forEach(el => {
+    el.disabled = !st.on;
+    el.placeholder = st.on ? "이 옵션의 유입 링크 — 비우면 상품 URL" : "사용하지 않음";
+  });
+  // 사유는 상품 그룹마다 한 줄(옵션 행마다 반복하면 표가 사유로 뒤덮인다)
+  document.querySelectorAll("#rf_opt_rows .rf-gp").forEach(box => {
+    let note = box.querySelector(".rf-opt-lock");
+    if (st.on || !optMode) { if (note) note.remove(); return; }
+    if (!note) { note = document.createElement("div"); note.className = "rf-opt-lock"; box.appendChild(note); }
+    note.textContent = "🔒 " + st.why;
+  });
+  if (typeof _renderPreview === "function") _renderPreview();   // 랜딩 버튼 노출이 유입방식을 따라간다
+  const n = document.getElementById("rf_inflow_note");
+  if (n) {
+    const inflow = String(document.getElementById("rf_inflow_type")?.value || "").trim();
+    n.textContent = inflow === "link" ? "링크유입 — 리뷰어 화면에 [상품 페이지 열기]가 나옵니다."
+      : inflow === "guide" ? "유입가이드 — [상품 페이지 열기]는 나오지 않습니다(유입가이드를 따라 들어갑니다)."
+      : "미지정 — 연결된 작업오더의 유입방식으로 판정합니다.";
+  }
 }
 
 /** 표의 모든 행(옵션명 없는 단일상품 포함) — 작업내용 원문·정원 합계 산출용
@@ -1735,7 +1836,9 @@ function readOptRows() {
  *    작업내용 원문(`rf_wd_product`)에 "상품명 - 옵션명"으로 새어 나가는 것을 막는다. */
 function _readProdRows() {
   const noOpt = _prodMode() !== "opt";
-  return _readProdRowsRaw().map(r => (noOpt ? Object.assign({}, r, { optKey: "" }) : r));
+  // ★ 101: 옵션 없는 작업이면 **옵션별 유입 링크도 함께 읽지 않는다** — 숨은 칸의 잔여값이
+  //   옵션 원장으로 새어 나가면 "옵션이 없는데 옵션 주소가 저장된" 상태가 된다.
+  return _readProdRowsRaw().map(r => (noOpt ? Object.assign({}, r, { optKey: "", landingUrl: "" }) : r));
 }
 /** DOM 그대로 읽기(모드 무시) — 모드 전환 시 값 이월용. 저장·파생은 반드시 `_readProdRows` 를 쓴다. */
 function _readProdRowsRaw() {
@@ -1743,11 +1846,13 @@ function _readProdRowsRaw() {
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const productName = String(r.querySelector(".rf-opt-prod").value || "").trim();
     const optKey      = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
+    const productUrl  = String(r.querySelector(".rf-opt-purl")?.value || "").trim();
+    const landingUrl  = String(r.querySelector(".rf-opt-ourl")?.value || "").trim();
     const payAmount   = Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0);
     const recruitTotal = Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0);
     const dailyLimit   = Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0);
-    if (!productName && !optKey && !payAmount) return;   // 완전 빈 행 제외
-    out.push({ productName, optKey, payAmount, recruitTotal, dailyLimit,
+    if (!productName && !optKey && !payAmount && !productUrl) return;   // 완전 빈 행 제외
+    out.push({ productName, optKey, productUrl, landingUrl, payAmount, recruitTotal, dailyLimit,
                closed: r.dataset.status === "closed" });
   });
   return out;
@@ -1774,10 +1879,62 @@ function _syncPreviewFromOptRows() {
   // 하나라도 0(무제한)이면 합계도 0(무제한) — 부분합이 상한처럼 보이면 조기 마감 사고가 난다
   if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
   if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
+  _syncLandingFromProdRows(rows);
   _markDupProductNames();
   _optSummary();     // 프로그램으로 표를 바꿔도(작업오더 자동 적용 등) 요약이 따라오게
   _syncGroupTotals();
   if (typeof _renderPreview === "function") _renderPreview();
+}
+
+/**
+ * 표 → 공고 랜딩 URL(rf_landing_url) 파생 — **첫 상품의 URL 하나**(D3·D5 확정).
+ * ★ 서버 `optionLanding.deriveCampaignLandingUrl` 과 같은 규칙 — 두 곳이 갈리면
+ *   "화면에 보이는 주소"와 "리뷰어가 실제로 열게 되는 주소"가 달라진다.
+ * ★ 상품이 2개 이상이고 주소가 서로 다르면 **경고만**(막지 않는다) — 리뷰어에게는
+ *   어차피 하나만 열린다는 사실을 말해 주는 것이 목적이다.
+ */
+function _syncLandingFromProdRows(rows) {
+  const el = document.getElementById("rf_landing_url");
+  if (!el) return;
+  const urls = (rows || []).map(r => String(r.productUrl || "").trim()).filter(Boolean);
+  const distinct = Array.from(new Set(urls));
+  el.value = urls[0] || "";
+  const n = document.getElementById("rf_landing_note");
+  if (n) {
+    const multi = distinct.length > 1;
+    n.style.color = multi ? "#92400E" : "var(--t3,#94A3B8)";
+    n.textContent = multi
+      ? "⚠ 상품 주소가 서로 다릅니다 — 리뷰어에게는 첫 상품 URL 하나만 열립니다."
+      : "진행상품 표의 첫 상품 URL에서 자동으로 채워집니다 · 여기서는 고칠 수 없습니다.";
+  }
+}
+
+/** 게시 전 자동점검의 유입 링크 항목 — ★ 전부 경고(D2 확정) · 게시는 절대 막지 않는다 */
+function _optUrlCheckItems() {
+  const items = [];
+  const rows = _readProdRows();
+  if (!rows.length) return items;
+  const noUrl = rows.filter(r => !String(r.productUrl || "").trim());
+  // 상품 URL 은 옵션 없는 작업이면 행마다, 옵션 있는 작업이면 상품(그룹)마다 하나다
+  const prods = [];
+  rows.forEach(r => { if (!prods.length || prods[prods.length - 1].name !== r.productName) prods.push({ name: r.productName, url: r.productUrl }); });
+  if (noUrl.length) items.push({ label: "상품 URL이 비어 있어요 — 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다", warn: true });
+  const distinct = Array.from(new Set(prods.map(p => String(p.url || "").trim()).filter(Boolean)));
+  if (distinct.length > 1) items.push({ label: "상품 주소가 " + distinct.length + "종이라 리뷰어에게는 첫 상품 URL 하나만 열립니다", warn: true });
+  const st = _optUrlState();
+  if (_prodMode() === "opt" && st.on) {
+    const opts = rows.filter(r => r.optKey && !r.closed);
+    const empty = opts.filter(r => !String(r.landingUrl || "").trim());
+    if (opts.length && empty.length) {
+      items.push({ label: "옵션 " + opts.length + "개 중 " + empty.length + "개에 유입 링크가 없어요(" +
+        empty.slice(0, 3).map(r => r.optKey).join(", ") + (empty.length > 3 ? " 외" : "") +
+        ") — 그 옵션 참여자는 상품 URL로 들어갑니다", warn: true });
+    }
+    const bad = rows.filter(r => r.landingUrl && !/^https?:\/\//i.test(r.landingUrl));
+    if (bad.length) items.push({ label: "유입 링크 " + bad.length + "개가 https:// 로 시작하지 않아 저장되지 않습니다", warn: true });
+  }
+  if (_prodMode() === "opt" && !st.on) items.push({ label: st.why, warn: false });
+  return items;
 }
 
 /**
@@ -1840,9 +1997,13 @@ function applyProductRowsFromOrder(prefill) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   const p = prefill || {};
+  /* ★ 101: 작업오더 링크유입 첫 URL 은 **첫 상품 행의 상품 URL**로 들어간다 —
+     랜딩 URL 칸은 이제 그 표에서 파생되는 읽기 전용이라 직접 넣으면 다음 동기화에 덮인다. */
+  const _pUrl = String(p.landing_url || "").trim();
   if (Array.isArray(p.options) && p.options.length) {
-    renderOptRows(p.options.map(o => ({
+    renderOptRows(p.options.map((o, i) => ({
       productName: o.productName || p.product_name || "",
+      productUrl: i === 0 ? _pUrl : "",
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
@@ -1853,8 +2014,9 @@ function applyProductRowsFromOrder(prefill) {
   if (!p.wd_product) return;
   const rows = parseProductLinesToRows(p.wd_product, p.product_name);
   if (!rows.length) return;
-  renderOptRows(rows.map(r => ({
+  renderOptRows(rows.map((r, i) => ({
     productName: [r.productName, r.optKey].filter(Boolean).join(" "),   // 쪼개진 조각은 상품명으로 되붙인다
+    productUrl: i === 0 ? _pUrl : "",
     optKey: "", payAmount: r.payAmount,
   })), { mode: "none" });
   _setProdModeNote("작업오더에 옵션이 없어 자동 선택됨");
@@ -2104,6 +2266,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   ["inflow", "review", "notes"].forEach(f => _igSay(f, ""));
   const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
   const _tfi = document.getElementById("rf_thumb_file"); if (_tfi) _tfi.value = "";
+  /* 🔗 101 유입방식 초기화 — 신규 공고 기본 [미지정](작업오더 값으로 판정) */
+  _rfPickBtn("inflow_type", "");
   /* 💸 086 이체 설정 초기화 — 신규 공고 기본 [자동](작업오더 물건비 판정을 계속 따라간다) */
   _rfPickTransferBank("");
   { const _tm = document.getElementById("rf_transfer_memo"); if (_tm) _tm.value = ""; }
@@ -2204,6 +2368,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         /* ✅ 087 리뷰타입 복원 — 저장값(표준 key)이 없으면 [미지정]이 선택된다 */
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
+        /* 🔗 101 유입방식 복원 — 저장값이 없으면 [미지정](작업오더 값으로 판정) */
+        _rfPickBtn("inflow_type", String(c.inflow_type || ""));
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
@@ -2243,7 +2409,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const pv = document.getElementById("rf_thumb_preview");
           if (pv) { pv.src = c.thumbnail_url; pv.style.display = ""; }
         }
-        renderOptRowsWithProduct(json.options || [], wd.productLines);   // 🧩 옵션표 + 상품명 복원
+        renderOptRowsWithProduct(json.options || [], wd.productLines, c.landing_url);   // 🧩 옵션표 + 상품명 + 상품 URL 복원
         renderPartCheck();
       } else {
         /* ★ v2: 레거시(일반) 공고 — 참여형 기본에서 유일하게 꺼지는 경로.
@@ -2306,7 +2472,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_recruit_total", prefill.recruit_total);
         const t = _parsePurchaseTime(prefill.purchase_time || prefill.time_range || "");
         if (t) { setV("rf_window_start", t.start); setV("rf_window_end", t.end); }
-        setV("rf_landing_url", prefill.landing_url);
+        /* ★ 101: 랜딩 URL 은 진행상품 표에서 파생된다 — 여기서 직접 넣으면 곧 덮인다.
+           작업오더의 링크유입 첫 URL 은 applyProductRowsFromOrder 가 첫 상품 행에 넣는다. */
+        if (prefill.inflow_type) _rfPickBtn("inflow_type", String(prefill.inflow_type));
         setV("rf_wd_product", prefill.wd_product);
         setV("rf_wd_review", prefill.wd_review);
         setV("rf_wd_notes", prefill.wd_notes);
@@ -2410,7 +2578,7 @@ function closeRecruitModal() {
 ═══════════════════════════════════════ */
 function selectRfBtn(group, btn) {
   /* 같은 그룹 버튼만 비활성화 */
-  const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns, #rf_review_type_btns');
+  const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns, #rf_review_type_btns, #rf_inflow_type_btns');
   if (container) {
     container.querySelectorAll('.rchan-btn').forEach(b => b.classList.remove('active'));
   } else {
@@ -2425,6 +2593,13 @@ function selectRfBtn(group, btn) {
     const customInput = document.getElementById('rf_channel_custom');
     customInput.style.display = val === '직접입력' ? '' : 'none';
     if (val !== '직접입력') customInput.value = '';
+    /* ★ 101: 채널이 바뀌면 옵션별 유입 링크 칸의 잠금이 달라진다(네이버 = 옵션별 주소 없음) */
+    if (typeof _syncOptUrlState === 'function') _syncOptUrlState();
+  } else if (group === 'inflow_type') {
+    /* ★ 101: 빈 값 = 미지정(연결 작업오더 값으로 판정). 서버에서 ''는 해제(CASE 센티널). */
+    const el = document.getElementById('rf_inflow_type');
+    if (el) el.value = val || '';
+    if (typeof _syncOptUrlState === 'function') _syncOptUrlState();
   } else if (group === 'manager') {
     document.getElementById('rf_manager').value = val;
   } else if (group === 'transfer_bank') {
@@ -2917,6 +3092,7 @@ const _RF_DIFF_FIELDS = [
   ["transfer_bank",     "이체은행"],
   ["transfer_memo",     "통장표시"],
   ["landing_url",       "상품 URL"],
+  ["inflow_type",       "유입방식"],
   ["thumbnail_url",     "썸네일"],
   ["badges",            "배지"],
 ];
@@ -3112,6 +3288,11 @@ async function saveRecruitPost() {
       const _cbRaw = document.getElementById("rf_close_buffer").value;
       payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
+      /* 🔗 101 유입방식 — ★ 버튼군 UI 있는 화면에서만 전송(옵션표·이체설정과 같은 원칙).
+         빈 문자열은 서버에서 '미지정으로 해제'(CASE 센티널) = 작업오더 값으로 판정 복귀. */
+      if (document.getElementById("rf_inflow_type_btns")) {
+        payload.inflow_type = document.getElementById("rf_inflow_type")?.value || "";
+      }
       payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
       /* 🖼 업로드가 끝나기 전에 저장하면 그 사진이 조용히 빠진다 — 끝날 때까지 막는다 */
       // ★ 모달이 떠 있는 동안의 차단 사유는 토스트로 내보내지 않는다 —
@@ -3393,7 +3574,8 @@ function _renderPreview() {
       specialNotesImages: _igUrls("notes"),
     },
     landingUrl: _v("rf_landing_url"),
-    inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
+    // ★ 101: 공고에 유입방식 칸이 생겼다 — 미리보기도 그 값을 그대로 쓴다(빈 값 = 불명 = 종전 동작)
+    inflowType: _v("rf_inflow_type"),
   }, { showOption: false, apiBase: (typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "") });
 
   /* 전체 흐름(참여 전 → 작업가이드 → 제출완료)은 실제 리뷰어 페이지를 새 탭으로 —
