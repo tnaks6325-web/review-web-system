@@ -6178,7 +6178,8 @@ function _pmFixAcct(i){
         <input id="pmBankNameIn" value="${esc(a.bankName||'')}" placeholder="예) 국민은행 · 카카오뱅크">
         <div class="hint">이체 서식의 은행코드로 바뀌는 값이라 <b>정식 은행명</b>이어야 합니다. 인식 못 하면 저장 시 알려드립니다.</div></div>
       <div class="pmf"><label>계좌번호</label>
-        <input id="pmAcctIn" value="${esc(a.bankAccount||'')}" placeholder="숫자만 입력"></div>
+        <input id="pmAcctIn" value="${esc(a.bankAccount||'')}">
+        <div class="hint"><b>-</b> 를 넣어도 자동으로 빠지고 숫자만 저장됩니다. 앞자리 <b>0</b> 은 그대로 유지됩니다.</div></div>
       <div class="pmf"><label>예금주</label>
         <input id="pmHolderIn" value="${esc(a.accountHolder||'')}" placeholder="예금주명"></div>
       <div class="pmscope">${a.isSub
