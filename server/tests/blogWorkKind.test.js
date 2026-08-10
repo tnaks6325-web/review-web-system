@@ -156,7 +156,8 @@ const camp = SNUL('src/routes/campaign.routes.js');
 
 const mCIns = camp.match(/INSERT INTO recruit_campaigns[\s\S]*?VALUES \(([\s\S]*?)\)\s*RETURNING/);
 t('공고 INSERT 를 찾았다', !!mCIns);
-t('★ create INSERT 컬럼에 work_kind', /transfer_bank, transfer_memo, review_type, carry_mode, work_kind\)/.test(camp));
+// ★ 닫는 괄호로 앵커하지 않는다 — 컬럼이 꼬리에 붙을 때마다 가드가 조용히 빨개진다(101 에서 실측).
+t('★ create INSERT 컬럼에 work_kind', /transfer_bank, transfer_memo, review_type, carry_mode, work_kind[,)]/.test(camp));
 
 const cPh = new Set((mCIns[1].match(/\$\d+/g) || []));
 const cMax = Math.max(...[...cPh].map(p => Number(p.slice(1))));
