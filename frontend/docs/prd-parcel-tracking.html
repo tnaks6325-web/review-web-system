@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>택배발송대행 송장번호 자동반영 — PRD (구현계획)</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background: #f1f5f9; color: #1e293b; line-height: 1.65; padding: 28px 16px 90px; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 25px; margin-bottom: 6px; letter-spacing: -0.02em; }
+  .sub { color: #64748b; font-size: 13px; margin-bottom: 16px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 26px; }
+  .badge { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: #dcfce7; color: #166534; }
+  .badge.b2 { background: #dbeafe; color: #1d4ed8; }
+  .badge.b3 { background: #fef3c7; color: #92400e; }
+  .badge.b4 { background: #f3e8ff; color: #6b21a8; }
+
+  section { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px 24px; margin-bottom: 20px; }
+  h2 { font-size: 18px; margin-bottom: 14px; display: flex; align-items: center; gap: 9px; letter-spacing: -0.01em; }
+  h2 .no { display: inline-flex; align-items: center; justify-content: center; width: 27px; height: 27px; border-radius: 8px; background: #1e293b; color: #fff; font-size: 12.5px; flex-shrink: 0; font-weight: 700; }
+  h3 { font-size: 15px; margin: 20px 0 8px; color: #0f172a; }
+  h3:first-of-type { margin-top: 6px; }
+  h4 { font-size: 13.5px; margin: 14px 0 6px; color: #334155; }
+  p { font-size: 14px; margin-bottom: 10px; }
+  ul, ol { font-size: 14px; padding-left: 20px; margin-bottom: 10px; }
+  li { margin-bottom: 6px; }
+  code { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 1px 5px; font-size: 12.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  b.k { color: #0f172a; }
+
+  .note { background: #f8fafc; border-left: 4px solid #94a3b8; padding: 11px 14px; border-radius: 0 8px 8px 0; font-size: 13px; margin: 12px 0; }
+  .note.warn { border-color: #f59e0b; background: #fffbeb; }
+  .note.rule { border-color: #dc2626; background: #fef2f2; }
+  .note.ok { border-color: #16a34a; background: #f0fdf4; }
+  .note .tt { font-weight: 800; display: block; margin-bottom: 3px; font-size: 12.5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f8fafc; font-size: 12.5px; font-weight: 700; }
+  td.c { text-align: center; }
+  td.mono, th.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .bad { color: #dc2626; font-weight: 700; } .good { color: #16a34a; font-weight: 700; } .warnc { color: #b45309; font-weight: 700; }
+  tr.hl td { background: #fffbeb; }
+
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+  .cmp .box { border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 14px; }
+  .cmp .box.now { border-color: #fca5a5; background: #fff7f7; }
+  .cmp .box.want { border-color: #86efac; background: #f7fef9; }
+  .cmp .cap { font-size: 12px; font-weight: 800; margin-bottom: 8px; }
+  .cmp .now .cap { color: #b91c1c; } .cmp .want .cap { color: #15803d; }
+  .cmp ul { font-size: 12.5px; margin-bottom: 0; }
+
+  .flow { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+  .fstep { flex: 1; min-width: 150px; border: 1.5px solid #cbd5e1; border-radius: 11px; padding: 11px 12px; background: #fbfdff; position: relative; }
+  .fstep .fn { font-size: 10.5px; font-weight: 800; color: #6366f1; letter-spacing: .05em; margin-bottom: 4px; }
+  .fstep .ft { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .fstep .fd { font-size: 11.5px; color: #64748b; line-height: 1.5; }
+  .fstep.man { border-color: #fbbf24; background: #fffdf5; }
+  .fstep.man .fn { color: #b45309; }
+
+  .kv { display: grid; grid-template-columns: 132px 1fr; gap: 4px 12px; font-size: 13px; margin: 10px 0; }
+  .kv dt { color: #64748b; font-weight: 600; }
+  .kv dd { color: #0f172a; }
+
+  pre.sql { background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 14px 16px; font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; line-height: 1.6; margin: 10px 0; }
+  pre.sql .c { color: #64748b; }
+  pre.sql .s { color: #7dd3fc; }
+  pre.sql .r { color: #fca5a5; }
+
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 800; padding: 2px 7px; border-radius: 5px; vertical-align: 1px; }
+  .tag.auto { background: #dcfce7; color: #166534; }
+  .tag.check { background: #fef3c7; color: #92400e; }
+  .tag.none { background: #f1f5f9; color: #475569; }
+  .tag.extra { background: #ede9fe; color: #6d28d9; }
+  .tag.new { background: #dbeafe; color: #1d4ed8; }
+
+  .m { display: flex; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+  .mcard { flex: 1; min-width: 210px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 13px 15px; background: #fbfdff; }
+  .mcard .mt { font-size: 13px; font-weight: 800; margin-bottom: 6px; }
+  .mcard .ms { font-size: 12px; color: #64748b; line-height: 1.55; }
+  .mcard.m1 { border-color: #93c5fd; } .mcard.m2 { border-color: #c4b5fd; } .mcard.m3 { border-color: #cbd5e1; }
+
+  .toc { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 22px; margin-bottom: 20px; }
+  .toc ol { columns: 2; column-gap: 30px; font-size: 13px; margin: 0; padding-left: 18px; }
+  .toc a { color: #1d4ed8; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  .ex { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #f8fafc;
+    border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 12px; margin: 8px 0; overflow-x: auto; white-space: pre; }
+  hr { border: 0; border-top: 1px dashed #e2e8f0; margin: 18px 0; }
+  .foot { text-align: center; color: #94a3b8; font-size: 12px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>택배발송대행 송장번호 자동반영 — 구현계획 (PRD)</h1>
+<div class="sub">리뷰웹시스템[3버전] · 2026-08-10 · 입금관리 자동화(migration 086 / 100)와 같은 구조 · 사용자 확정 12건 반영</div>
+<div class="badges">
+  <span class="badge">신규 화면 1개 (택배관리)</span>
+  <span class="badge b2">migration 101 신설 3테이블</span>
+  <span class="badge b3">라이브 핫패스 무접촉</span>
+  <span class="badge b4">신규 알림 채널 0</span>
+  <span class="badge b2">실측 파일 2종 기준</span>
+</div>
+
+<div class="toc">
+  <ol>
+    <li><a href="#s1">배경 — 지금은 무엇이 없나</a></li>
+    <li><a href="#s2">★ 입금 자동화와 결정적으로 다른 점</a></li>
+    <li><a href="#s3">사용자 확정 사항 12건</a></li>
+    <li><a href="#s4">전체 흐름</a></li>
+    <li><a href="#s5">데이터 모델 (migration 101)</a></li>
+    <li><a href="#s6">오늘 발송 대상 추출</a></li>
+    <li><a href="#s7">등록 파일 만들기 (A타입)</a></li>
+    <li><a href="#s8">★ 결과 파일 짝맞추기 규칙</a></li>
+    <li><a href="#s9">송장번호 기록 (두 칸)</a></li>
+    <li><a href="#s10">작업표 표준 열 · 작업유형</a></li>
+    <li><a href="#s11">광고주 제공 3종</a></li>
+    <li><a href="#s12">권한 경계</a></li>
+    <li><a href="#s13">회귀가드</a></li>
+    <li><a href="#s14">단계 M1~M3</a></li>
+    <li><a href="#s15">잔여 위험 · 미결</a></li>
+  </ol>
+</div>
+
+<!-- ============ 01 ============ -->
+<section id="s1">
+<h2><span class="no">01</span> 배경 — 지금은 무엇이 없나</h2>
+
+<p>택배발송대행 작업은 <b class="k">그날의 송장번호를 그날 광고주에게 넘겨야</b> 출고가 밀리지 않는다. 지금은 등록 파일도 손으로 만들고, 택배사가 준 결과 파일의 송장번호도 사람이 한 줄씩 옮겨 적는다.</p>
+
+<p>코드를 전수 조사한 결과, <b class="k">송장번호를 담을 칸이 시스템 어디에도 없다</b>는 것이 확인됐다.</p>
+
+<table>
+  <tr><th style="width:180px">찾아본 곳</th><th>결과</th></tr>
+  <tr><td><code>work_orders</code> (migration 019)</td><td><code>courier_proxy BOOLEAN</code> — 택배대행 <b>여부</b>만 있고 송장 컬럼 없음</td></tr>
+  <tr><td>전 마이그레이션</td><td>송장/운송장 컬럼·테이블 <span class="bad">0건</span></td></tr>
+  <tr><td>작업표 표준 열 <code>ROLE_META</code></td><td>역할 16종에 송장 없음 → 열을 만들어도 "매칭되지 않습니다"로 분류</td></tr>
+  <tr><td>컬럼 감지 <code>columnResolver</code></td><td>송장 키워드 0건 → <code>row_json</code>에 원문으로만 담김(검색·집계 대상 아님)</td></tr>
+  <tr><td>작업유형 트리거</td><td><span class="good">이미 있음</span> — <code>WORK_TYPE_TRIGGERS</code>의 <code>courier_proxy</code> ("택배대행이 '예'일 때")</td></tr>
+</table>
+
+<div class="note ok"><span class="tt">반면 내보낼 재료는 이미 다 있다</span>
+등록 양식이 요구하는 <b>받는사람 · 전화번호 · 주소</b>는 <code>order_submissions</code>에 <b>전용 컬럼</b>(<code>recipient</code> / <code>phone</code> / <code>address</code>)으로 이미 저장돼 있다. 시트 <code>row_json</code>을 파싱할 필요가 없다. 즉 이 기능은 <b>"내보내는 재료는 있고, 받아 적을 칸을 새로 만드는"</b> 작업이다.</div>
+
+<p>그리고 <b class="k">똑같은 모양의 흐름이 이미 완성돼 있다</b> — 입금관리(migration 086 M1 / 100 M2): <span class="tag none">대상 추출</span> → <span class="tag none">회차 다운로드</span> → <span class="tag none">결과 업로드</span> → <span class="tag none">자동 반영</span>. 이 PRD는 그 뼈대를 그대로 본뜨되, 아래 §02의 <b>결정적 차이 하나</b>를 다르게 설계한다.</p>
+</section>
+
+<!-- ============ 02 ============ -->
+<section id="s2">
+<h2><span class="no">02</span> ★ 입금 자동화와 결정적으로 다른 점 — 매칭 키가 없다</h2>
+
+<p>업로드해주신 실측 파일 2종을 열어 대조한 결과다.</p>
+
+<h3>등록용 양식 (A타입) — 6열, 35건</h3>
+<div class="ex">수량(A 타입) | 우편번호 | 상품명1 | 받는사람 | 전화번호1 | 주소
+             |          | 장수돌만두 | 서규환   | 010-8258-4882 | 경기도 하남시 신장로205번길 30, kcc스위첸 101동 203호</div>
+<p style="font-size:13px">수량·우편번호는 전 행이 비어 있었다(선택 항목). <b class="k">우리 고유번호를 실을 칸이 없다.</b></p>
+
+<h3>결과 파일 — 48열, 35건</h3>
+<div class="ex">NO | 작업구분 | … | 운송장번호   | … | 주문번호 | … | 관리번호   | … | 수하인명 | 수하인기본주소   | … | 집하일자
+1  | 출고     | … | 261676940733 | … | (빈칸)   | … | 7989707275 | … | 서규환   | 경기 하남시 덕풍동 | … | 20260807</div>
+
+<h3>두 파일을 짝지을 수 있는 것</h3>
+<table>
+  <tr><th style="width:130px">후보 키</th><th style="width:70px">쓸 수 있나</th><th>실측 근거</th></tr>
+  <tr><td>전화번호</td><td class="c bad">없음</td><td>결과 파일 48열에 전화번호 열 자체가 없다</td></tr>
+  <tr><td>주소</td><td class="c bad">불가</td><td>상세주소가 <b>법정동으로 축약</b>된다. <code>경기도 하남시 신장로205번길 30, kcc스위첸 101동 203호</code> → <code>경기 하남시 덕풍동</code> — "덕풍동"은 원본 주소에 아예 없는 글자다</td></tr>
+  <tr><td>주문번호</td><td class="c warnc">비어 있음</td><td>결과 파일에 열은 <b>있으나</b> 이번 파일은 전 행 공란(A타입 양식에 그 칸이 없어 못 실어 보냄)</td></tr>
+  <tr><td>관리번호</td><td class="c bad">불가</td><td><code>7989707275</code> — 택배사가 접수 시점에 부여. 우리가 미리 정할 수 없다</td></tr>
+  <tr class="hl"><td><b>수하인명</b></td><td class="c good">가능</td><td>35건 전부 일치, 이번 배치엔 동명이인 없음. 다만 <b>동명이인은 언제든 생길 수 있다</b></td></tr>
+  <tr class="hl"><td><b>행 순서</b></td><td class="c good">가능</td><td>업로드 1~35행 ↔ 결과 NO 1~35가 <b>35/35 완전 일치</b></td></tr>
+</table>
+
+<div class="cmp">
+  <div class="box now"><div class="cap">입금 자동화(M2)의 짝맞추기</div>
+    <ul>
+      <li>키 = <b>(계좌 숫자, 금액)</b></li>
+      <li>둘 다 결과 파일에 그대로 들어 있다</li>
+      <li>순서가 뒤바뀌어도 정확히 찾는다</li>
+      <li>같은 키가 여럿이면 순서로 가르고 고지 — 실측상 <b>같은 사람·같은 작업</b>이라 손해가 없다</li>
+    </ul>
+  </div>
+  <div class="box want" style="border-color:#fca5a5;background:#fff7f7"><div class="cap" style="color:#b91c1c">택배의 짝맞추기</div>
+    <ul>
+      <li>키 = <b>이름 + 다운로드 당시 행 순서</b></li>
+      <li>이름은 <b>중복 가능</b>, 순서는 <b>택배사가 바꿀 수 있다</b></li>
+      <li>어긋나면 <b>남의 집 송장번호가 내 줄에 적힌다</b></li>
+      <li>그건 배송 사고이자 개인정보 사고이고, <b>화면상으로는 정상으로 보인다</b></li>
+    </ul>
+  </div>
+</div>
+
+<div class="note rule"><span class="tt">★★ 그래서 이 기능의 최상위 규칙 (완화 금지)</span>
+<b>이름과 순서가 둘 다 맞을 때만 자동으로 기록한다.</b> 하나라도 어긋나면 <b>그 줄부터 자동 배정을 멈추고</b> 확인 화면에 모아 사람이 짝을 고른다.<br>
+<b>순서만 믿고 밀어 넣지 않는다.</b> 택배사가 한 건을 빼거나 정렬을 바꾸면 그 아래 전원이 한 칸씩 밀린다. 34건이 조용히 잘못 기록되는 쪽이, 35건을 사람이 5분 확인하는 쪽보다 훨씬 비싸다.</div>
+
+<div class="note warn"><span class="tt">주소는 자동 배정을 막는 근거로 쓰지 않는다 (경고 전용)</span>
+법정동 축약 때문에 정확 대조가 불가능한 데다, 실측 파일에 <code>전남광주시 남구 회재로…</code>(리뷰어가 시/도를 잘못 적은 행)가 실제로 있었다. 결과의 <code>광주 남구 주월동</code>과 시/도가 어긋나지만 <b>같은 사람이 맞다</b>. 주소로 잠그면 멀쩡한 건이 무더기로 막힌다.<br>
+→ 비교는 <b>시군구 토큰 하나만</b>(위 예시는 "남구"로 일치) 하고, 어긋나도 <b>경고 표시</b>까지만 한다.</div>
+
+<div class="note"><span class="tt">미래 대비 — 고유번호가 생기면 그것이 최우선</span>
+결과 파일에 <code>주문번호</code> 열이 이미 존재하므로, 나중에 그 칸이 있는 양식(B/C타입 등)을 쓸 수 있게 되면 <b>우리 회차 항목 번호를 실어 보내고 그대로 되받아</b> 100% 정확 매칭이 된다. 판정 함수의 <b>1순위 규칙</b>으로 미리 넣어 두되, 값이 비어 있으면 발동하지 않으므로 지금 동작에는 아무 영향이 없다.</div>
+</section>
+
+<!-- ============ 03 ============ -->
+<section id="s3">
+<h2><span class="no">03</span> 사용자 확정 사항 12건</h2>
+<table>
+  <tr><th style="width:30px">#</th><th style="width:200px">항목</th><th>확정 내용</th></tr>
+  <tr><td class="c">1</td><td>등록 양식</td><td>지금 <b>A타입 그대로</b> 사용 → 이름 + 순서 매칭, 안전 우선 설계</td></tr>
+  <tr><td class="c">2</td><td>대상 추출 기준</td><td>택배대행 작업 중 <b>구매일자가 오늘</b>인 행</td></tr>
+  <tr><td class="c">3</td><td>발송 단위</td><td>리뷰어 1명 = 1박스</td></tr>
+  <tr><td class="c">4</td><td>상품명</td><td><b>옵션까지 반영</b> (예: <code>장수돌만두 - 고기만두</code>)</td></tr>
+  <tr><td class="c">5</td><td>택배사</td><td>지금은 한 곳, <b>늘어날 예정</b> → 택배사별 형식 표 구조로 만들어 둠</td></tr>
+  <tr><td class="c">6</td><td>기록 칸</td><td><b>둘 다</b> — 기존 '택배' 칸 자동 인식 + 작업표 표준 열에 '송장번호' 정식 추가</td></tr>
+  <tr><td class="c">7</td><td>광고주 제공</td><td><b>3종 전부</b> — 뷰어 표 노출 + 광고주가 직접 엑셀 다운로드 + 업로드 즉시 알림</td></tr>
+  <tr><td class="c">8</td><td>재다운로드</td><td>다운로드한 행은 <b>잠근다</b>. 송장이 안 들어오면 풀 수 있다</td></tr>
+  <tr><td class="c">9</td><td>불일치 처리</td><td><b>자동 배정을 멈추고</b> 사람이 확인</td></tr>
+  <tr><td class="c">10</td><td>권한</td><td><b>AE도 자기 담당 작업만</b> 처리 가능</td></tr>
+  <tr><td class="c">11</td><td>결과 없는 건</td><td>그대로 두고, 사람이 <b>[다시 대상으로]</b>를 누를 때만 잠금 해제</td></tr>
+  <tr><td class="c">12</td><td>재발송</td><td>칸을 <b>두 개</b>로 — <code>송장번호</code> / <code>재발송송장</code></td></tr>
+  <tr><td class="c">13</td><td>취합 시점</td><td>담당자가 필요할 때 버튼을 누른다 (자동 실행·마감 시각 없음)</td></tr>
+</table>
+</section>
+
+<!-- ============ 04 ============ -->
+<section id="s4">
+<h2><span class="no">04</span> 전체 흐름</h2>
+<div class="flow">
+  <div class="fstep"><div class="fn">STEP 1 · 시스템</div><div class="ft">오늘 대상 추출</div><div class="fd">택배대행 작업 × 구매일자 오늘 × 주소 있음 × 송장 없음 × 살아있는 회차 없음</div></div>
+  <div class="fstep man"><div class="fn">STEP 2 · 사람</div><div class="ft">📦 등록파일 받기</div><div class="fd">회차 생성 + A타입 xlsx 다운로드. 이 순간 대상 행이 <b>잠긴다</b></div></div>
+  <div class="fstep man"><div class="fn">STEP 3 · 사람</div><div class="ft">택배사 시스템에 업로드</div><div class="fd">시스템 밖. 접수 후 결과 파일을 내려받는다</div></div>
+  <div class="fstep man"><div class="fn">STEP 4 · 사람</div><div class="ft">⬆ 결과파일 올리기</div><div class="fd">확인 화면에서 자동/확인필요/결과없음을 보고 [이대로 반영]</div></div>
+  <div class="fstep"><div class="fn">STEP 5 · 시스템</div><div class="ft">송장 기록 + 알림</div><div class="fd">작업표 송장 칸 기록 → 광고주 뷰어 즉시 반영 + 탭 알림</div></div>
+</div>
+<div class="note"><span class="tt">시스템 밖 구간(STEP 3)이 있다는 것이 설계의 전제</span>
+택배사 시스템과 API 연동이 아니라 <b>사람이 파일을 나르는</b> 구조다. 그 사이에 파일이 편집되거나, 일부만 접수되거나, 순서가 바뀔 수 있다. §08의 짝맞추기 규칙은 전부 이 전제 위에서 설계됐다.</div>
+</section>
+
+<!-- ============ 05 ============ -->
+<section id="s5">
+<h2><span class="no">05</span> 데이터 모델 (migration 101)</h2>
+<p>입금관리(086)와 <b>같은 모양</b>이다. 신규 3테이블 + 컬럼 추가 0. 라이브 테이블은 <b>읽기만</b> 한다.</p>
+
+<pre class="sql"><span class="c">-- 회차 (한 번의 다운로드 = 한 회차)</span>
+CREATE TABLE parcel_batches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq            BIGSERIAL,                 <span class="c">-- 화면 표기용 회차번호</span>
+  courier        TEXT NOT NULL,             <span class="c">-- 택배사 키 (지금은 1종, 늘어날 예정)</span>
+  status         TEXT NOT NULL DEFAULT 'downloaded'
+                 CHECK (status IN ('downloaded','cancelled','applied')),
+  item_count     INT  NOT NULL DEFAULT 0,
+  created_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(),
+  download_count INT DEFAULT 1, last_downloaded_at TIMESTAMPTZ, last_downloaded_by TEXT,
+  cancelled_at TIMESTAMPTZ, cancelled_by TEXT,
+  applied_at   TIMESTAMPTZ, applied_by   TEXT
+);
+
+<span class="c">-- 회차 항목 = 파일 한 줄. 보낸 값과 파일 순번을 그대로 박제한다</span>
+CREATE TABLE parcel_batch_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id   UUID REFERENCES parcel_batches(id) ON DELETE CASCADE,
+  sheet_id   TEXT NOT NULL, tab_name TEXT NOT NULL, row_index INT NOT NULL,
+  campaign_id <span class="r">TEXT</span> REFERENCES recruit_campaigns(id) ON DELETE SET NULL,  <span class="c">-- ★ TEXT (082 규율)</span>
+  <span class="s">seq_in_file</span> INT NOT NULL,        <span class="c">-- ★★ 파일 몇 번째 줄로 나갔는가 = 결과 매칭 앵커</span>
+  reviewer_name TEXT, recipient TEXT, phone TEXT, address TEXT,
+  product_name  TEXT, qty INT DEFAULT 1,
+  <span class="s">tracking_no</span>   TEXT,                <span class="c">-- 결과 반영 시 기록</span>
+  is_resend     BOOLEAN DEFAULT FALSE,  <span class="c">-- 재발송송장 칸으로 갔는가</span>
+  matched_by    TEXT,                   <span class="c">-- order_no | name_seq | manual</span>
+  result_seq    INT,                    <span class="c">-- 결과 파일 몇 번째 줄과 짝지었나</span>
+  status TEXT NOT NULL DEFAULT 'pending'
+         CHECK (status IN ('pending','shipped','released','cancelled')),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+<span class="c">-- ★★ 중복 접수 최종 방어선: 살아있는 항목은 한 행에 하나뿐</span>
+CREATE UNIQUE INDEX <span class="s">uq_parcel_items_active</span>
+  ON parcel_batch_items (sheet_id, tab_name, row_index)
+  WHERE status IN ('pending','shipped');
+
+<span class="c">-- 업로드 감사 원장 (파일 자체는 저장하지 않는다)</span>
+CREATE TABLE parcel_result_uploads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id UUID REFERENCES parcel_batches(id) ON DELETE CASCADE,
+  courier TEXT, file_name TEXT, file_format TEXT,
+  row_count INT, auto_matched INT, needs_check INT, no_result INT,
+  applied BOOLEAN DEFAULT FALSE, summary JSONB,
+  uploaded_by TEXT, uploaded_at TIMESTAMPTZ DEFAULT NOW()
+);</pre>
+
+<div class="note rule"><span class="tt">★ 되풀이하면 안 되는 실측 사고 3종을 미리 막는다</span>
+<b>① FK 타입</b> — <code>recruit_campaigns.id</code>는 <b>TEXT</b>다. UUID로 선언하면 PG가 42804로 FK를 거부하고 <b>그 마이그레이션 파일 전체가 롤백</b>되며, 그 오류코드는 "적용됨" 기록 대상이 아니라 배포마다 같은 자리에서 실패한다(082 실사고).<br>
+<b>② 부팅 프리플라이트</b> — <code>REQUIRED_SCHEMA</code>에 <code>parcel_batch_items.tracking_no</code>를 등록한다. 없으면 화면이 통째로 42703으로 죽는데 서버는 정상 부팅해 <b>무신호 전면 장애</b>가 된다.<br>
+<b>③ 상태값 <code>released</code></b> — 확정 11번(결과 없는 건은 사람이 [다시 대상으로]를 눌러야 풀림)을 위해 <b>부분유니크 밖의 종결 상태</b>를 따로 둔다. <code>cancelled</code>와 구분해야 "회차 취소"와 "송장 미발급"이 이력에서 갈린다.</div>
+</section>
+
+<!-- ============ 06 ============ -->
+<section id="s6">
+<h2><span class="no">06</span> 오늘 발송 대상 추출</h2>
+<p>판정 단일 출처 = <code>utils/parcelTarget.js</code>. 화면·다운로드·결과반영이 <b>같은 함수</b>를 쓴다(화면엔 뜨는데 다운로드에선 빠지는 불일치를 구조적으로 차단).</p>
+
+<h3>대상 조건 (전부 AND)</h3>
+<table>
+  <tr><th style="width:34px">#</th><th style="width:170px">조건</th><th>판정 재료</th></tr>
+  <tr><td class="c">①</td><td>택배대행 작업</td><td>연결된 작업오더 <code>work_orders.courier_proxy = true</code> (접수 시 <code>tab_configs</code>로 전파된 값 사용)</td></tr>
+  <tr><td class="c">②</td><td>구매일자 = 오늘(KST)</td><td>작업표 날짜 칸 → <code>utils/koreanDate.parseDateColumn</code></td></tr>
+  <tr><td class="c">③</td><td>수취인·연락처·주소 있음</td><td><code>order_submissions.recipient / phone / address</code> → 없으면 <code>row_json</code> 폴백</td></tr>
+  <tr><td class="c">④</td><td>송장 칸이 비어 있음</td><td><code>utils/parcelColumn.js</code>가 해석한 칸의 현재 값</td></tr>
+  <tr><td class="c">⑤</td><td>살아있는 회차 항목 없음</td><td><code>NOT EXISTS (… status IN ('pending','shipped'))</code> — 확정 8번</td></tr>
+</table>
+
+<div class="note rule"><span class="tt">★★ <code>parseDateColumn</code>에 <code>fallbackAnchor</code>를 반드시 넘긴다</span>
+작업표의 구매일자는 <code>8 / 10 (월)</code>처럼 <b>연도가 없다</b>. 앵커를 안 넘기면 전 행이 <code>null</code>이 되어 <b>"오늘 대상 0건"으로 조용히 죽는다</b>. 이 레포에서 이미 두 번(063 시트 일정, 작업보드 오늘 참여현황) 밟은 자리다. 회귀가드는 <b>실제 표기 <code>M / D (요일)</code> 픽스처</b>로 고정한다 — ISO 문자열로 검증하면 앵커를 빼도 통과해 버린다.</div>
+
+<h3>보류 사유 (issues) — 대상에서 빠지되 화면에 사유를 적는다</h3>
+<table>
+  <tr><th style="width:150px">사유</th><th>화면 표시</th><th style="width:230px">고치는 곳</th></tr>
+  <tr><td><code>no_recipient</code></td><td>수취인 없음</td><td>작업보드에서 직접 보완</td></tr>
+  <tr><td><code>no_phone</code> / <code>no_address</code></td><td>연락처/주소 없음</td><td>작업보드에서 직접 보완</td></tr>
+  <tr><td><code>no_column</code></td><td>이 작업에 송장 칸이 없습니다</td><td>[작업표 열 구성]에서 '송장번호' 열 추가 <span class="tag new">버튼 제공</span></td></tr>
+  <tr><td><code>already_tracked</code></td><td>이미 송장이 있습니다</td><td>재발송이면 [재발송으로 접수] 선택</td></tr>
+  <tr><td><code>in_batch</code></td><td>N회차에 담겨 있습니다</td><td>회차 표에서 확인 / 취소</td></tr>
+</table>
+<div class="note"><span class="tt">고칠 수 없는 사유에는 버튼을 두지 않는다</span>
+누르면 아무 일도 안 일어나는 버튼 대신 <b>조치 문장</b>을 적는다(입금관리 보완 블록과 같은 규율).</div>
+</section>
+
+<!-- ============ 07 ============ -->
+<section id="s7">
+<h2><span class="no">07</span> 등록 파일 만들기 (A타입 6열)</h2>
+
+<table>
+  <tr><th style="width:120px">열</th><th style="width:200px">채우는 값</th><th>규칙</th></tr>
+  <tr><td>수량(A 타입)</td><td class="c">비움</td><td>확정 3번(1명 = 1박스). 실측 파일도 전 행 공란</td></tr>
+  <tr><td>우편번호</td><td class="c">비움</td><td>리뷰어 입력에 우편번호가 없고 주소로 역산하지 않는다(추측 금지). 실측 파일도 공란</td></tr>
+  <tr><td>상품명1</td><td>상품명 + 옵션</td><td>확정 4번. 옵션이 없으면 상품명만. 값이 없으면 그 건은 <code>no_product</code> 보류</td></tr>
+  <tr><td>받는사람</td><td><code>recipient</code></td><td>공백 제거 없이 원문 그대로 내보낸다(결과 대조 키라 변형 금지)</td></tr>
+  <tr><td>전화번호1</td><td><code>phone</code></td><td>원문 그대로</td></tr>
+  <tr><td>주소</td><td><code>address</code></td><td>원문 그대로</td></tr>
+</table>
+
+<div class="note rule"><span class="tt">★ 전 셀을 문자열 + 텍스트 서식(<code>@</code>)으로 쓴다</span>
+숫자로 해석되면 <code>01012345678</code> 같은 표기에서 <b>앞자리 0이 사라지고</b>, 긴 값은 지수표기(<code>1.02E+10</code>)가 되어 택배사 업로드가 통째로 거부된다. 입금 M1에서 계좌번호로 이미 밟은 자리이고, 회귀가드는 <b>실제 xlsx를 만들어 되읽어</b> 값·타입·<code>numFmt='@'</code>를 대조한다("버퍼가 비지 않았다"만 보는 가드는 이 회귀를 통과시킨다).</div>
+
+<div class="note ok"><span class="tt">★★ 파일 순번(<code>seq_in_file</code>)을 항목에 박제한다</span>
+이것이 결과 매칭의 <b>유일한 순서 앵커</b>다. 화면 정렬이 바뀌든 나중에 회차를 다시 받든, "그때 몇 번째 줄로 나갔는가"는 <b>회차 항목에 저장된 값</b>이 진실이다. 다시 받기(재다운로드)는 <b>같은 순번으로 같은 파일</b>을 만든다.</div>
+
+<p>파일명: <code>택배접수_{작업명}_YYYYMMDD_{회차번호}.xlsx</code></p>
+</section>
+
+<!-- ============ 08 ============ -->
+<section id="s8">
+<h2><span class="no">08</span> ★ 결과 파일 짝맞추기 규칙</h2>
+<p>판정 단일 출처 = <code>utils/parcelResultParse.js</code> (순수함수 — DB·네트워크·<code>Date.now()</code> 미접근). 미리보기와 실제 반영이 <b>같은 함수</b>를 쓰고, 반영 시 서버가 파일을 <b>다시 해석</b>한다(화면이 보낸 결과 목록을 믿지 않는다).</p>
+
+<h3>8-1. 파일 읽기</h3>
+<ul>
+  <li>형식 판정은 <b>확장자를 믿지 않고</b> 매직 바이트로 한다 — 기존 <code>utils/spreadsheetLoad.sniffFormat</code> 재사용(입금에서 "확장자만 .xls인데 내용은 .xlsx"인 은행 파일을 실제로 만났다).</li>
+  <li>헤더 줄 위치를 하드코딩하지 않고 <b>앞 30줄에서 지문으로 찾는다</b>(<code>운송장번호</code> + <code>수하인명</code> 동시 존재).</li>
+  <li>택배사별 형식 표 <code>COURIER_SPECS</code> — 확정 5번(늘어날 예정). 지금은 1종이고, 지문이 안 맞으면 <b>명시적으로 거절</b>한다(모르는 파일을 추측해 읽지 않는다).</li>
+</ul>
+
+<h3>8-2. 짝맞추기 4단계</h3>
+<table>
+  <tr><th style="width:38px">순위</th><th style="width:180px">규칙</th><th style="width:80px">결과</th><th>설명</th></tr>
+  <tr><td class="c">1</td><td>결과 <code>주문번호</code>에 우리 회차 항목 번호가 있음</td><td class="c"><span class="tag auto">자동</span></td><td>지금은 그 칸이 비어 있어 <b>발동하지 않는다</b>. 양식이 바뀌면 즉시 최우선으로 동작(§02 참조)</td></tr>
+  <tr class="hl"><td class="c">2</td><td><b>이름 일치 AND 순서 일치</b></td><td class="c"><span class="tag auto">자동</span></td><td>회차의 <code>seq_in_file</code> = i 인 항목과 결과의 i 번째 줄이 같은 이름 → 자동 기록</td></tr>
+  <tr><td class="c">3</td><td>이름은 회차·결과 양쪽에서 유일한데 <b>순서가 다름</b></td><td class="c"><span class="tag check">확인</span></td><td>택배사가 정렬을 바꿨을 가능성. 짝 후보를 제시하고 사람이 [이 짝이 맞음]을 누른다</td></tr>
+  <tr><td class="c">4</td><td>이름 중복 / 이름 없음 / 그 외</td><td class="c"><span class="tag check">확인</span></td><td>후보 목록 + 주소 힌트를 함께 보여준다</td></tr>
+</table>
+
+<h3>8-3. 결과 분류 6종</h3>
+<table>
+  <tr><th style="width:150px">분류</th><th style="width:70px">동작</th><th>설명</th></tr>
+  <tr><td><span class="tag auto">자동 기록</span></td><td class="c good">기록</td><td>2순위 통과. 반영 시 송장 칸에 쓴다</td></tr>
+  <tr><td><span class="tag check">순서 다름</span></td><td class="c">보류</td><td>이름은 맞는데 줄 위치가 다르다</td></tr>
+  <tr><td><span class="tag check">동명이인</span></td><td class="c">보류</td><td>같은 이름이 둘 이상 — 순서 후보를 제시하되 <b>자동 확정하지 않는다</b></td></tr>
+  <tr><td><span class="tag check">주소 경고</span></td><td class="c warnc">기록<sup>*</sup></td><td>시군구 토큰이 어긋남. <sup>*</sup>2순위를 통과했으면 <b>기록하되 표시</b>한다(§02 경고 전용 규칙)</td></tr>
+  <tr><td><span class="tag none">결과 없음</span></td><td class="c">유지</td><td>회차엔 있는데 파일에 없다 → <b>손대지 않는다</b>. 확정 11번: 사람이 [다시 대상으로]를 눌러야 잠금이 풀린다</td></tr>
+  <tr><td><span class="tag extra">회차 밖</span></td><td class="c">무시</td><td>파일엔 있는데 이 회차에 없다 → 기록하지 않고 건수만 고지</td></tr>
+</table>
+
+<div class="note rule"><span class="tt">★★ 처리 대상은 <code>pending</code>인 항목뿐 = 멱등 · 이중 기록 0</span>
+이미 <code>shipped</code>인 건은 어떤 파일을 다시 올려도 건드리지 않는다. 그래서 <b>전체 결과 파일을 다시 올려도 안전</b>하고, 택배사가 결과를 나눠 줄 때 두 번 올려 메우는 것이 정상 경로가 된다. UPDATE에는 <code>WHERE id=$1 AND status='pending'</code> 조건을 건다 — 스텁 DB는 SQL을 해석하지 않으므로 <b>회귀가드가 그 조건문을 문장으로 고정</b>한다.</div>
+
+<div class="note warn"><span class="tt">건수가 다르면 밀어 넣지 않는다</span>
+35건 회차에 34건 결과가 오면, 위에서부터 순서를 당겨 재정렬하지 <b>않는다</b>. i번째끼리만 비교하고 이름이 어긋나는 순간 그 건은 <span class="tag check">확인</span>으로 보낸다. 화면이 <b>"건수 불일치 · 자동 배정을 중단했습니다"</b>를 먼저 말한다.</div>
+</section>
+
+<!-- ============ 09 ============ -->
+<section id="s9">
+<h2><span class="no">09</span> 송장번호 기록 (두 칸)</h2>
+<p>기록 단일 출처 = <code>parcelApply.service.markTrackingCell()</code>. 결과 반영·수동 입력·되돌리기가 전부 이 함수를 쓴다(입금의 <code>markDepositCells</code>와 대칭).</p>
+
+<h3>9-1. 어느 칸인가 — <code>utils/parcelColumn.js</code></h3>
+<table>
+  <tr><th style="width:110px">용도</th><th>인식하는 헤더 (정확일치 우선 → 부분일치)</th></tr>
+  <tr><td>송장번호</td><td><code>송장번호</code> · <code>운송장번호</code> · <code>택배송장번호</code> · <code>택배번호</code> · <code>운송장</code> · <code>택배</code></td></tr>
+  <tr><td>재발송송장</td><td><code>재발송송장</code> · <code>재발송</code> · <code>반품송장</code></td></tr>
+</table>
+<div class="note rule"><span class="tt">★ <code>택배사</code> · <code>택배비</code> · <code>택배요청사항</code>은 제외한다</span>
+"택배"가 들어간 헤더를 통째로 잡으면 <b>택배비(금액) 칸에 송장번호를 적는다</b>. 옵션 칸 보존에서 <code>옵션금액</code>·<code>비고(옵션확인)</code>을 오분류했던 것과 같은 사고이고, 막으려던 것보다 손실이 크다.</div>
+
+<h3>9-2. 두 칸을 쓰는 순서 (확정 12번)</h3>
+<div class="ex">송장번호 칸이 비어 있음        →  송장번호 칸에 기록
+송장번호 칸에 값이 있음        →  재발송송장 칸에 기록  (재발송 접수)
+둘 다 값이 있음                →  기록하지 않고 <b>확인 필요</b>로 보고</div>
+<div class="note"><span class="tt">빈 칸에만 쓴다 (blank-only)</span>
+사람이 손으로 적어 둔 송장을 시스템이 덮지 않는다. 옵션 칸 보존(<code>ORDER_OPTION_BLANK_ONLY</code>)과 같은 규율이며, <b>확인 불가 = 쓰지 않음</b>(fail-closed)이다.</div>
+
+<h3>9-3. 쓰는 경로 (탭 종류별)</h3>
+<table>
+  <tr><th style="width:130px">탭 종류</th><th>경로</th></tr>
+  <tr><td>무시트(sheetless)</td><td><code>sheetlessStatus.markStatusCell</code>의 <code>kind</code>에 <code>parcel</code> / <code>parcel_re</code> 추가 → <code>campaign_participants.row_json</code> 기록 → <code>rebuildLedgers()</code></td></tr>
+  <tr><td>시트 기반</td><td>새 큐 <code>parcel_mark</code> — blank-only + 다중컬럼 가드 + <code>rowIdentityMatches</code>(행 이동 재검증)</td></tr>
+</table>
+
+<div class="note rule"><span class="tt">★★ <code>mapOrderToSheetRow</code>(구매양식 매퍼)는 한 글자도 건드리지 않는다</span>
+매퍼에 송장 역할을 추가하면 <b>리뷰어가 구매양식을 제출할 때마다 송장 칸이 덮인다</b>(빈 값이 그 칸을 지우는 쓰기가 되는 것은 7/31 포토리뷰 사고에서 이미 확인됐다). 작업표 '번호(seq)' 열을 매퍼에 넣지 않는 것과 같은 이유다.<br>
+덤으로 <b>송장 열이 매퍼 매핑칸과 겹치지 않는다</b>는 사실이 <code>order_append</code> 큐와의 컬럼 disjoint를 보장한다 — Track B write-back이 상태 칸 2개만 쓰는 것과 같은 안전장치다.</div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="s10">
+<h2><span class="no">10</span> 작업표 표준 열 · 작업유형 (확정 6번)</h2>
+<p>작업표 열 구성(설정 › 작업표 표준 열)에 <b>작업유형 '택배발송대행'</b>을 시드로 제안한다.</p>
+<div class="kv">
+  <dt>유형 키</dt><dd><code>courier</code> · 라벨 <b>택배발송대행</b></dd>
+  <dt>자동 선택 조건</dt><dd><code>courier_proxy</code> — <span class="good">이미 존재하는 트리거</span>("택배대행이 '예'일 때")</dd>
+  <dt>열</dt><dd><code>송장번호</code>, <code>재발송송장</code></dd>
+  <dt>위치</dt><dd><code>position: 'back'</code> — 기록용 칸은 뒤쪽(<code>worktablePlan.js</code> 주석의 기존 규칙)</dd>
+</div>
+<ul>
+  <li><b>기존 작업</b>은 <code>parcelColumn</code>이 지금 쓰는 '택배' 칸을 찾아 쓴다. 못 찾으면 <code>no_column</code> 사유로 보류하고 <b>"이 작업에 송장 칸이 없습니다"</b>라고 말한다(조용히 건너뛰지 않는다).</li>
+  <li><b>앞으로 만드는</b> 택배대행 작업표는 작업오더의 택배대행 = 예 신호를 보고 두 칸이 자동으로 붙는다.</li>
+  <li><code>ROLE_META</code>에는 <b>추가하지 않는다</b> — 그 표는 "구매양식 제출이 채우는 칸"의 매핑이고, 송장은 제출이 채우지 않는다. 대신 열 상세의 설명 문구를 <b>"시스템이 택배 결과 파일로 채웁니다"</b>로 보강한다(지금은 "매칭되지 않습니다"로만 떠서 오해를 부른다).</li>
+</ul>
+</section>
+
+<!-- ============ 11 ============ -->
+<section id="s11">
+<h2><span class="no">11</span> 광고주 제공 3종 (확정 7번)</h2>
+<table>
+  <tr><th style="width:170px">경로</th><th>구현</th></tr>
+  <tr><td>① 업체용 뷰어 표</td><td><code>trackB.service._advertiserColumns</code> 화이트리스트에 송장 2칸 추가. 그 함수는 <b>화이트리스트 재구성</b>이라 추가하지 않으면 광고주 화면에 <b>영원히 안 보인다</b></td></tr>
+  <tr><td>② 광고주 엑셀 다운로드</td><td><code>GET /api/trackb/parcel/tracking.xlsx?sheetId&amp;tabName</code> — 내부인 + <b>소유 광고주</b>. 열 = 수취인 · 주소 · 상품명 · 송장번호 · 재발송송장 · 등록일</td></tr>
+  <tr><td>③ 업로드 즉시 알림</td><td>기존 <b>탭 스레드</b>(<code>trackb_tab_threads</code>, <code>internal_only=false</code>)에 시스템 코멘트 1건 → 광고주 화면 💬 미확인 배지가 이미 그것을 띄운다. <b>신규 알림 채널 0</b></td></tr>
+</table>
+<div class="note"><span class="tt">알림 문구에 개인정보를 싣지 않는다</span>
+<code>오늘 택배 송장 32건이 등록되었습니다. 작업 표에서 확인하세요.</code> — 수취인명·주소·연락처는 넣지 않는다(스레드 본문은 저장·전파되는 텍스트다).</div>
+<div class="note warn"><span class="tt">한 번만 울린다</span>
+같은 회차를 다시 반영해도 알림을 또 보내지 않는다(<code>parcel_result_uploads.applied</code> 기준). 도배는 늑대소년이 된다.</div>
+</section>
+
+<!-- ============ 12 ============ -->
+<section id="s12">
+<h2><span class="no">12</span> 권한 경계 (확정 10번)</h2>
+<table>
+  <tr><th style="width:150px">동작</th><th style="width:110px">master/admin</th><th style="width:130px">AE(staff)</th><th style="width:110px">광고주</th></tr>
+  <tr><td>대상 조회 · 회차 조회</td><td class="c good">전체</td><td class="c good">담당 작업만</td><td class="c bad">차단</td></tr>
+  <tr><td>등록파일 다운로드</td><td class="c good">전체</td><td class="c good">담당 작업만</td><td class="c bad">차단</td></tr>
+  <tr><td>결과파일 업로드 · 반영</td><td class="c good">전체</td><td class="c good">담당 작업만</td><td class="c bad">차단</td></tr>
+  <tr><td>회차 취소 · [다시 대상으로]</td><td class="c good">전체</td><td class="c good">담당 작업만</td><td class="c bad">차단</td></tr>
+  <tr><td>송장 엑셀 다운로드</td><td class="c good">전체</td><td class="c good">담당 작업만</td><td class="c good">소유 작업만</td></tr>
+</table>
+<ul>
+  <li>스코프 판정은 기존 <code>_ensureEditScope</code> / <code>canAccessTab</code> <b>그대로</b> 쓴다(이미지 교체요청·리뷰검수와 같은 게이트). 새 판정을 만들지 않는다.</li>
+  <li>★ 스코프 검사는 <b>클라이언트가 보낸 <code>tabGid</code>를 믿지 않고</b> <code>(sheetId, tabName)</code>으로 서버가 다시 해석한다.</li>
+  <li>★ <b>캐시가 있어도 스코프 게이트가 먼저다</b> — 순서는 <b>파싱 → 스코프 → 캐시 → 작업</b>. 폴더 바로가기에서 캐시 히트가 게이트를 앞질러 담당 밖 링크가 새어 나간 실사고가 있었다.</li>
+</ul>
+</section>
+
+<!-- ============ 13 ============ -->
+<section id="s13">
+<h2><span class="no">13</span> 회귀가드</h2>
+<table>
+  <tr><th style="width:230px">파일</th><th>고정하는 것</th></tr>
+  <tr><td><code>tests/parcelResultParse.test.js</code></td><td>실측 파일 2종을 마스킹한 <b>진짜 픽스처</b>로 파싱 · 4단계 짝맞추기 · <b>순서 한 칸 밀림</b> · 건수 불일치 · 동명이인 · 주소 경고가 자동을 막지 않음</td></tr>
+  <tr><td><code>tests/parcelTarget.test.js</code></td><td>대상 5조건 · 보류 사유 · <b><code>M / D (요일)</code> 픽스처로 날짜 앵커</b> · 스텁 pool로 서비스 실제 실행</td></tr>
+  <tr><td><code>tests/parcelBatch.test.js</code></td><td><b>실제 xlsx를 만들어 되읽어</b> 문자열·<code>numFmt='@'</code>·6열 순서 · <code>seq_in_file</code> 박제 · 다시받기 동일성</td></tr>
+  <tr><td><code>tests/parcelApply.test.js</code></td><td><b><code>WHERE … status='pending'</code> 조건문 고정</b> · blank-only · 두 칸 순서 · <code>mapOrderToSheetRow</code> 무접촉 · 매퍼에 송장 역할 부재</td></tr>
+  <tr><td><code>tests/parcelColumn.test.js</code></td><td><code>택배사</code>·<code>택배비</code> 오분류 <b>부재</b>(변이시험으로 검출 확인)</td></tr>
+  <tr><td>진짜 PG16 (<code>PGTEST_URL</code>)</td><td>부분유니크가 실제로 중복 접수를 막는지 · <code>released</code> 후 재담기 · 마이그레이션 idempotent · <b>FK 타입 정합</b></td></tr>
+</table>
+<div class="note warn"><span class="tt">이 레포에서 실제로 가드를 뚫었던 함정 3종을 미리 적어 둔다</span>
+① <b>픽스처가 제품이 쓰지 않는 모양이면 그 버그를 통과시킨다</b> — 날짜를 ISO로 검증하면 앵커 누락을 못 잡는다.<br>
+② <b>파일 전체를 보는 단언은 다른 함수의 같은 표현이 대신 통과시킨다</b> — 라우트 본문·함수 본문으로 스코프할 것.<br>
+③ <b>"호출문이 있나"는 정의를 지워도 통과한다</b> — 실행해서 볼 것. 그리고 <b>변이시험은 커밋 후에</b>(되돌리기의 <code>git checkout</code>이 미커밋 변경을 통째로 날린다).</div>
+</section>
+
+<!-- ============ 14 ============ -->
+<section id="s14">
+<h2><span class="no">14</span> 단계 M1~M3</h2>
+<div class="m">
+  <div class="mcard m1"><div class="mt">M1 — 대상 + 등록파일</div><div class="ms">
+    migration 101 · <code>parcelColumn</code> / <code>parcelTarget</code> · 회차 생성 + A타입 xlsx 다운로드 · 택배관리 화면(대상·회차 표·보완 블록) · 작업표 표준 열 시드.<br>
+    <b>이 단계만으로도 손으로 파일 만드는 일이 없어진다.</b></div></div>
+  <div class="mcard m2"><div class="mt">M2 — 결과 반영</div><div class="ms">
+    <code>parcelResultParse</code> · 미리보기/반영 라우트 · 확인 팝업(4분류 + 짝 고르기) · <code>parcelApply.markTrackingCell</code>(무시트·시트 양쪽) · [다시 대상으로].</div></div>
+  <div class="mcard m3"><div class="mt">M3 — 광고주</div><div class="ms">
+    <code>_advertiserColumns</code> 송장 2칸 · 광고주 엑셀 다운로드 · 탭 스레드 알림 · 직원 안내서(<code>frontend/docs/택배관리_사용안내.html</code>).</div></div>
+</div>
+<p style="font-size:13px;color:#64748b">M1과 M2 사이에 배포 간격이 있어도 안전하다 — M1만 배포되면 파일만 받고 송장은 종전대로 손으로 적는다(가산적).</p>
+</section>
+
+<!-- ============ 15 ============ -->
+<section id="s15">
+<h2><span class="no">15</span> 잔여 위험 · 미결</h2>
+<table>
+  <tr><th style="width:36px">#</th><th style="width:190px">항목</th><th>내용과 대응</th></tr>
+  <tr><td class="c">1</td><td class="bad">매칭 키가 근본적으로 약하다</td><td>이름+순서는 <b>택배사가 파일을 편집하면 깨진다</b>. 이 PRD는 깨졌을 때 <b>자동을 멈추는</b> 것까지만 한다. 근본 해결은 등록 양식에 주문번호 칸을 쓰는 것이며 <b>택배사 확인이 필요한 미결 사항</b>이다</td></tr>
+  <tr><td class="c">2</td><td>우편번호를 못 채운다</td><td>리뷰어 입력에 없다. 택배사가 주소로 자동 판정하는 현재 방식에 의존한다(실측 파일도 공란). 택배사가 우편번호를 요구하기 시작하면 리뷰어 입력 항목 추가가 필요하다</td></tr>
+  <tr><td class="c">3</td><td>합포장 미지원</td><td>확정 3번(1명 = 1박스)에 따라 <code>합포장여부</code>·<code>합포장키</code>는 쓰지 않는다. 한 사람이 여러 건을 받는 작업이 생기면 별건</td></tr>
+  <tr><td class="c">4</td><td>택배사 1종</td><td>형식 표(<code>COURIER_SPECS</code>) 구조는 만들어 두되 실제 항목은 1개. 두 번째 택배사는 <b>실물 파일을 받아 픽스처로 추가</b>해야 한다(추측으로 열 이름을 넣지 않는다)</td></tr>
+  <tr><td class="c">5</td><td>반품·재발송 3회차 이상</td><td>칸이 2개라 세 번째 송장은 담을 곳이 없다. 그때는 <b>기존 값을 확인 필요로 보고</b>하고 사람이 정리한다</td></tr>
+  <tr><td class="c">6</td><td>배송 상태 추적 없음</td><td>이 기능은 <b>송장번호를 넘기는 것</b>까지다. 배송완료 여부·반송 조회는 택배사 API가 필요한 별건</td></tr>
+</table>
+</section>
+
+<div class="foot">리뷰웹시스템[3버전] · 택배발송대행 송장번호 자동반영 PRD v1.0 · 구현 착수 전 검토용</div>
+</div>
+</body>
+</html>
