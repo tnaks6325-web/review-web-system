@@ -906,6 +906,23 @@ async function isRegisteredIntranetAdvertiser(name) {
 // ══ 인트라넷 사용자(AE) 자동완성 프록시 ══ 담당AE(inad_pm) 매칭용. 스코프 키인 display_name +
 //   username·부서만 추려 반환 — 인트라넷 users 의 비밀번호·생일 등 민감필드는 매핑에서 즉시 폐기(미노출).
 //   60초 캐시·5초 타임아웃·fail-soft(stale 캐시 유지). 소비 라우트는 adminOrMaster 로 제한할 것.
+// ★★ 퇴사·비활성 직원은 후보에서 제외한다 — 판정 기준은 인트라넷 자신의 규칙 그대로
+//   (`src/routes/api.ts`: `is_active === 0 || resigned_at`). 두 값 모두 범용 테이블 API 응답에 실려 온다
+//   (`redactSensitive` 가 지우는 것은 password 뿐).
+// ★ 필드가 아예 없으면(구버전 인트라넷 배포) **판정 불가 = 포함**(fail-open) — 모른다고 전 직원을 지우면
+//   담당AE 지정이 통째로 막히는 막다른 길이 된다. 값이 있을 때만 판정한다.
+const _RESIGNED_NAME_CAP = 200;
+function _isResignedUser(r) {
+  if (!r || typeof r !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(r, 'resigned_at')) {
+    if (String(r.resigned_at == null ? '' : r.resigned_at).trim()) return true;   // 빈 문자열도 재직(인트라넷과 동일)
+  }
+  if (Object.prototype.hasOwnProperty.call(r, 'is_active')) {
+    const v = r.is_active;
+    if (v === 0 || v === '0' || v === false) return true;   // ★ null/undefined 는 "모름"이라 제외하지 않는다
+  }
+  return false;
+}
 let _intraUserCache = { at: 0, rows: null };
 async function intranetStaffUsers({ q = '', limit = 20, dept = '' } = {}) {
   const now = Date.now();
@@ -916,6 +933,7 @@ async function intranetStaffUsers({ q = '', limit = 20, dept = '' } = {}) {
         name: String(r.display_name || '').trim(),
         username: String(r.username || '').trim(),
         department: String(r.department || '').trim() || null,
+        resigned: _isResignedUser(r),
       })).filter(r => r.name) };
     } catch (e) {
       logger.warn(`[trackB] 인트라넷 사용자(AE) 조회 실패: ${e.message}`);
@@ -925,11 +943,19 @@ async function intranetStaffUsers({ q = '', limit = 20, dept = '' } = {}) {
   const needle = String(q || '').trim().toLowerCase();
   const deptF = String(dept || '').trim().toLowerCase();   // 부서 정확일치 필터(예: 'AE') — 담당AE 후보를 해당 부서로 제한
   const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
-  const items = (_intraUserCache.rows || [])
-    .filter(r => !deptF || String(r.department || '').trim().toLowerCase() === deptF)
+  const scoped = (_intraUserCache.rows || [])
+    .filter(r => !deptF || String(r.department || '').trim().toLowerCase() === deptF);
+  const items = scoped
+    .filter(r => !r.resigned)
     .filter(r => !needle || r.name.toLowerCase().includes(needle) || r.username.toLowerCase().includes(needle))
-    .slice(0, lim);
-  return { ok: true, items };
+    .slice(0, lim)
+    // ★ 응답 shape 은 종전 3필드 그대로 — `resigned` 는 내부 캐시 판정용이라 내보내지 않는다
+    //   (items 는 어차피 재직자만이라 항상 false = 무의미한 필드, 데이터 최소화 계약도 유지).
+    .map(r => ({ name: r.name, username: r.username, department: r.department }));
+  // 퇴사자 이름은 "목록에 없음"과 "퇴사자"를 화면이 구분해 안내하기 위한 재료(이미 지정돼 있던 담당 AE 판정).
+  //   빼기만 하고 침묵하면 퇴사자가 지정된 업체가 "직접 입력값"으로 보여 재지정 신호가 사라진다.
+  const resignedNames = scoped.filter(r => r.resigned).map(r => r.name).slice(0, _RESIGNED_NAME_CAP);
+  return { ok: true, items, resignedNames };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3540,6 +3566,8 @@ module.exports = {
   // 회귀가드 전용 — tabStatsMap 의 30초 프로세스 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   //   운영 코드에서 부르지 말 것: 캐시는 "모든 내부 사용자의 홈 진입 경로"에 붙은 비용 절감 장치다.
   __resetTabStatsCacheForTest() { _tabStatsCache = { at: 0, map: null }; },
+  // 회귀가드 전용 — 인트라넷 사용자(AE) 60초 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
+  __resetIntraUserCacheForTest() { _intraUserCache = { at: 0, rows: null }; },
   settlementVisibleFor,
   generateCloseout,
   latestCloseout,
