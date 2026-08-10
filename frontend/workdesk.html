@@ -1267,6 +1267,54 @@
   .owntr .note{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.55;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .owntr .chk{font-size:11.5px;margin-top:5px;min-height:15px}
   .owntr .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  /* ── 시트에서 가져오기(4단계) — 전부 si- 접두로 스코프. body 직속 오버레이라 남의 화면과 안 겹친다 ── */
+  .si-ov{position:fixed;inset:0;z-index:1200;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:26px 16px;overflow:auto}
+  .si-mo{width:min(760px,96vw);background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.24);overflow:hidden}
+  .si-h{display:flex;align-items:center;gap:8px;padding:13px 18px;border-bottom:1px solid var(--line);background:var(--card2)}
+  .si-h h3{margin:0;font-size:14.5px}
+  .si-x{border:0;background:0;font-size:20px;line-height:1;color:var(--faint);cursor:pointer;padding:2px 6px}
+  .si-steps{display:flex;gap:5px;padding:10px 18px;background:var(--card2);border-bottom:1px solid var(--line)}
+  .si-steps .s{flex:1;text-align:center;font-size:11.5px;color:var(--faint);padding:5px 4px;border-radius:7px}
+  .si-steps .s .n{display:inline-block;width:18px;height:18px;line-height:18px;border-radius:50%;background:var(--line2);color:var(--card);font-size:10.5px;font-weight:700;margin-right:5px}
+  .si-steps .s.on{color:var(--accent);font-weight:700;background:var(--accent-soft)}
+  .si-steps .s.on .n{background:var(--accent);color:#fff}
+  .si-steps .s.dn{color:var(--safe)} .si-steps .s.dn .n{background:var(--safe);color:#fff}
+  .si-b{padding:16px 18px;max-height:64vh;overflow-y:auto}
+  .si-f{display:flex;gap:8px;align-items:center;padding:12px 18px;border-top:1px solid var(--line);background:var(--card2)}
+  .si-l{display:block;font-size:11px;color:var(--faint);font-weight:650;margin:12px 0 4px}
+  .si-tf{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink);box-sizing:border-box}
+  .si-hint{font-size:11.5px;color:var(--muted);line-height:1.55;font-weight:400}
+  .si-box{font-size:12.5px;color:var(--ink);background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:10px 0;line-height:1.6}
+  .si-box.tint{background:var(--accent-soft);border-color:var(--accent)}
+  .si-box.ok{background:var(--safe-soft,#f2fbf5);border-color:var(--safe)}
+  .si-warn{font-size:12px;background:#fff8f0;border:1px solid #f4d9b4;border-left:3px solid var(--warn,#e08a1e);border-radius:0 8px 8px 0;padding:8px 11px;margin:8px 0;line-height:1.55;color:var(--ink)}
+  .si-err,.si-lock{font-size:12.5px;background:#fff5f5;border:1px solid #f2c9c9;border-left:3px solid var(--bad);border-radius:0 8px 8px 0;padding:9px 12px;margin:9px 0;line-height:1.6;color:var(--ink)}
+  .si-lock b{display:block;margin-bottom:2px}
+  .si-kpis{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .si-kpis>div{flex:1 1 110px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 10px;text-align:center}
+  .si-kpis .k{font-size:10.5px;color:var(--faint)}
+  .si-kpis .v{font-size:19px;font-weight:750;letter-spacing:-.02em}
+  .si-kpis .v.ok{color:var(--safe)} .si-kpis .v.warn{color:var(--warn,#b45309)}
+  .si-maplist{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+  .si-mp{border:1px solid var(--line2);border-radius:7px;padding:3px 8px;font-size:11.5px;background:var(--card)}
+  .si-r{font-size:10.5px;border-radius:999px;padding:1px 7px;margin-left:5px}
+  .si-r.key{background:var(--accent-soft);color:var(--accent)}
+  .si-r.st{background:#fdf0e3;color:#b45309}
+  .si-r.auto{background:var(--safe-soft,#eaf7ef);color:var(--safe)}
+  .si-r.keep{background:var(--card2);color:var(--muted)}
+  .si-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .si-tab{font-size:11.5px;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;font-family:inherit}
+  .si-tab:hover{border-color:var(--accent);color:var(--accent)}
+  .si-rows{max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:7px}
+  .si-rows table{width:100%;border-collapse:collapse;font-size:12px}
+  .si-rows th{position:sticky;top:0;background:var(--card2);font-size:11px;padding:6px 8px;text-align:left;border-bottom:1px solid var(--line);z-index:1;color:var(--faint)}
+  .si-rows td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .si-rows td.c,.si-rows th.c{text-align:center}
+  .si-rows tr.off td{opacity:.5}
+  .si-rows tr.off td .why{color:var(--warn,#b45309);font-size:11px}
+  .si-chk{display:flex;align-items:flex-start;gap:7px;font-size:12.5px;margin:8px 0 0;cursor:pointer;line-height:1.5}
+  .si-chk input{margin-top:3px}
+  .ovm-unm.imp{margin-top:6px;color:var(--accent);border-color:var(--accent)}
   .add{border:1px dashed var(--line2);border-radius:11px;padding:15px;background:var(--card2)}
   .add label{font-size:11px;color:var(--faint);font-weight:650;display:block;margin-bottom:4px}
   .add select,.add input{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink)}
@@ -4661,7 +4709,7 @@ function buildGrid(wd){
   _ensureCellRangeUI();  // 셀 범위 드래그(복사·붙여넣기·배경색) + 우클릭 편집(1회 바인딩, 위임)
   // ★ 표를 다시 그리면 선택 범위(행/열 인덱스)는 가리키던 셀을 잃는다 — 남겨 두면 복사·붙여넣기가
   //   **엉뚱한 칸**에 적용된다(필터·정렬·탭 전환 후 인덱스 의미가 바뀐다). 여기서 한 번에 비운다.
-  STATE.gSelRange=null;
+  STATE.gSelRange=null; STATE.gSelRanges=null;
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
   // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
@@ -4789,7 +4837,7 @@ function buildGrid(wd){
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
       ${_folBarHtml()}
-      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 우클릭</b>=그 셀 편집·복사·배경색 · <b>셀 드래그</b>=범위 선택(Ctrl+C 복사 · Ctrl+V 붙여넣기)`:` · <b>열람 전용</b> · 셀 드래그+Ctrl+C=복사`}</span></div>
+      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 우클릭</b>=그 셀 편집·복사·배경색 · <b>셀 드래그</b>=범위 선택(<b>Ctrl+드래그</b>=떨어진 범위 추가 · Ctrl+C 복사 · Ctrl+V 붙여넣기)`:` · <b>열람 전용</b> · 셀 드래그(Ctrl+드래그=범위 추가)+Ctrl+C=복사`}</span></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
     <div id="addbox"></div>
     ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
@@ -5258,7 +5306,10 @@ function deleteCustomColumnPrompt(colKey){
       매번 편집창을 열며 어긋났다. 지금은 **클릭=선택 · 드래그=범위 선택 · 우클릭=그 셀만 편집**.
    ★★ 선택은 **직사각형**이다 — 세로로만 끌면 그 열만 잡히고 오른쪽 열(수취인·연락처·주소…)은
       선택도 복사도 되지 않는다(열 경계를 넘는 복사 사고 차단).
-   ★ 그리기(`.gselrange`)와 논리 범위(`STATE.gSelRange`)는 **한 곳**에서만 만든다 —
+   ★★ **Ctrl(⌘)+클릭·드래그 = 떨어진 범위 추가**(사용자 확정 2026-08-10) — 사이에 낀 열(예 id)을
+      빼고 `수취인 + 연락처 + 주소` 만 복사해야 하는 실제 작업이 있다. 복사본은 **화면 열 순서대로**
+      한 줄에 이어 붙는다(누른 순서가 아니라 — 붙여넣는 쪽 열 순서와 어긋나면 안 된다).
+   ★ 그리기(`.gselrange`)와 논리 범위(`STATE.gSelRanges`)는 **한 곳**에서만 만든다 —
       복사·붙여넣기·배경색이 각자 범위를 다시 세면 "칠한 칸과 복사한 칸이 다른" 상태가 된다.
    ★ 붙여넣기는 **편집 가능한 셀(.gedit)에만** 들어간다 — 참여자·연락처(신원)·# 는 잠금이라
       건너뛰고 그 건수를 말한다(조용한 누락 금지). 저장은 기존 `commitCellEdit` 한 경로. */
@@ -5281,14 +5332,14 @@ function _ensureCellRangeUI(){
     if(e.target.closest('.revb')||e.target.closest('.rmx')) return;   // ↩ 되돌리기·× 제거 버튼은 자기 동작 유지
     const pos=posOf(td); if(!pos) return;
     drag={ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci };
-    _setCellSel(drag);
+    _setCellSel(drag, e.ctrlKey||e.metaKey);   // Ctrl(⌘) = 기존 선택에 **더한다**(떨어진 범위)
     // 열려 있는 편집 입력이 있으면 기본 동작(blur=커밋)을 막지 않는다. 그 외에는 텍스트 선택만 억제.
     if(!document.querySelector('#gbody input.einp')) e.preventDefault();
   });
   document.addEventListener('mousemove',e=>{
     if(!drag) return; const td=e.target.closest('#gbody td'); if(!td) return;
     const pos=posOf(td); if(!pos) return;
-    if(pos.ri!==drag.r1 || pos.ci!==drag.c1){ drag.r1=pos.ri; drag.c1=pos.ci; _setCellSel(drag); }
+    if(pos.ri!==drag.r1 || pos.ci!==drag.c1){ drag.r1=pos.ri; drag.c1=pos.ci; _updateActiveSel(drag); }
   });
   document.addEventListener('mouseup',()=>{ drag=null; });   // 선택은 유지 — 복사·붙여넣기·우클릭 메뉴의 대상
   // 우클릭 = 그 셀(또는 이미 잡아 둔 범위)에 대한 메뉴 — **편집 진입은 여기 하나뿐**
@@ -5297,9 +5348,8 @@ function _ensureCellRangeUI(){
     if(td.querySelector('input')) return;                 // 편집 중인 셀은 브라우저 기본 메뉴(붙여넣기 등)를 살린다
     e.preventDefault();
     const pos=posOf(td); if(!pos) return;
-    const s=STATE.gSelRange;
-    const inSel = s && pos.ri>=Math.min(s.r0,s.r1) && pos.ri<=Math.max(s.r0,s.r1)
-                    && pos.ci>=Math.min(s.c0,s.c1) && pos.ci<=Math.max(s.c0,s.c1);
+    const inSel = _selRanges().some(s=> pos.ri>=Math.min(s.r0,s.r1) && pos.ri<=Math.max(s.r0,s.r1)
+                                     && pos.ci>=Math.min(s.c0,s.c1) && pos.ci<=Math.max(s.c0,s.c1));
     if(!inSel) _setCellSel({ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci });
     _openCellMenu(e.clientX, e.clientY, td);
   });
@@ -5332,39 +5382,69 @@ function _ensureCellRangeUI(){
   });
   document.addEventListener('click',e=>{ if(!e.target.closest('#gcellmenu')) _closeCellMenu(); });
 }
-// 범위 그리기 + 논리 범위 기록(단일 출처) — 셀 하나여도 같은 경로를 탄다.
-function _setCellSel(rng){
-  const tbody=$('#gbody'); if(!tbody||!rng) return;
+/* 선택 = **직사각형 목록**(`STATE.gSelRanges`) — Ctrl(⌘) 로 떨어진 범위를 더한다.
+   `STATE.gSelRange` 는 그중 **활성(마지막) 범위** = 앵커·F2 편집·단일 범위 붙여넣기의 기준. */
+function _selRanges(){
+  if(Array.isArray(STATE.gSelRanges) && STATE.gSelRanges.length) return STATE.gSelRanges;
+  return STATE.gSelRange ? [STATE.gSelRange] : [];
+}
+function _setCellSel(rng, additive){
+  if(!rng) return;
+  const cur = (additive && Array.isArray(STATE.gSelRanges)) ? STATE.gSelRanges.slice() : [];
+  cur.push(rng);
+  STATE.gSelRanges=cur; STATE.gSelRange=rng;
+  _paintSel();
+}
+// 드래그 중 = 활성(마지막) 범위만 갱신 — 앞서 Ctrl 로 더해 둔 범위는 그대로 둔다.
+function _updateActiveSel(rng){
+  if(!rng) return;
+  if(!Array.isArray(STATE.gSelRanges)||!STATE.gSelRanges.length) return _setCellSel(rng,false);
+  STATE.gSelRanges[STATE.gSelRanges.length-1]=rng; STATE.gSelRange=rng;
+  _paintSel();
+}
+// 그리기(단일 출처) — 모든 범위의 합집합을 칠하고 활성 범위의 왼쪽 위를 앵커로 표시.
+function _paintSel(){
+  const tbody=$('#gbody'); if(!tbody) return;
   document.querySelectorAll('#gbody td.gselrange,#gbody td.gselanchor').forEach(td=>td.classList.remove('gselrange','gselanchor'));
   const trs=[...tbody.children];
-  const rlo=Math.min(rng.r0,rng.r1), rhi=Math.max(rng.r0,rng.r1);
-  const clo=Math.min(rng.c0,rng.c1), chi=Math.max(rng.c0,rng.c1);
-  for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
-    const tds=[...tr.children]; for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) td.classList.add('gselrange'); } }
-  STATE.gSelRange={ r0:rng.r0, c0:rng.c0, r1:rng.r1, c1:rng.c1 };
+  _selRanges().forEach(s=>{
+    const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
+    const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
+    for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
+      const tds=[...tr.children]; for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) td.classList.add('gselrange'); } }
+  });
   const a=_selAnchorTd(); if(a) a.classList.add('gselanchor');
 }
 function _clearCellSel(){
-  STATE.gSelRange=null;
+  STATE.gSelRange=null; STATE.gSelRanges=null;
   document.querySelectorAll('#gbody td.gselrange,#gbody td.gselanchor').forEach(td=>td.classList.remove('gselrange','gselanchor'));
 }
-// 앵커 = 범위의 왼쪽 위 셀(편집·붙여넣기 시작점)
+// 앵커 = 활성 범위의 왼쪽 위 셀(편집·붙여넣기 시작점)
 function _selAnchorTd(){
   const s=STATE.gSelRange, tbody=$('#gbody'); if(!s||!tbody) return null;
   const tr=[...tbody.children][Math.min(s.r0,s.r1)]; if(!tr) return null;
   return [...tr.children][Math.min(s.c0,s.c1)]||null;
 }
-// 선택 범위의 td 를 행×열 격자로(그룹 머리행 제외) — 복사·붙여넣기·배경색이 함께 쓰는 재료
+/* 선택 범위의 td 를 행×열 격자로(그룹 머리행 제외) — 복사·붙여넣기·배경색이 함께 쓰는 재료.
+   ★★ 여러 범위는 **행 번호 오름차순 · 그 행 안에서 열 번호 오름차순**으로 합친다(중복 열 1회).
+      그래서 `수취인 + 연락처 + 주소` 를 어느 순서로 골라도 복사본은 **화면 열 순서**로 나온다. */
 function _selectionGrid(){
-  const s=STATE.gSelRange, tbody=$('#gbody'); if(!s||!tbody) return [];
+  const rs=_selRanges(), tbody=$('#gbody'); if(!rs.length||!tbody) return [];
   const trs=[...tbody.children];
-  const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
-  const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
+  const rows=new Map();   // ri → Set(ci)
+  rs.forEach(s=>{
+    const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
+    const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
+    for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
+      let set=rows.get(ri); if(!set){ set=new Set(); rows.set(ri,set); }
+      for(let ci=clo; ci<=chi; ci++) set.add(ci); }
+  });
   const out=[];
-  for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
-    const tds=[...tr.children], line=[];
-    for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) line.push(td); }
-    if(line.length) out.push(line); }
+  [...rows.keys()].sort((a,b)=>a-b).forEach(ri=>{
+    const tds=[...trs[ri].children], line=[];
+    [...rows.get(ri)].sort((a,b)=>a-b).forEach(ci=>{ const td=tds[ci]; if(td) line.push(td); });
+    if(line.length) out.push(line);
+  });
   return out;
 }
 // 셀의 복사값 — 편집 셀은 편집 원값(data-val), 그 외는 표시 텍스트(배지·버튼 제외).
@@ -5408,33 +5488,39 @@ function pasteCellSelection(){
    ★ 한 칸만 복사해 여러 칸을 선택했으면 그 값으로 **채운다**(엑셀과 같은 동작).
    ★ 편집 잠금 셀(참여자·연락처·#)·값이 같은 셀은 건너뛰고 건수를 보고한다. */
 function _pasteIntoSelection(text){
-  const s=STATE.gSelRange, tbody=$('#gbody'); if(!s||!tbody) return;
+  const rs=_selRanges(), tbody=$('#gbody'); if(!rs.length||!tbody) return;
   const mat=String(text).replace(/\r/g,'').replace(/\n+$/,'').split('\n').map(l=>l.split('\t'));
   if(!mat.length) return;
   const single = mat.length===1 && mat[0].length===1;
   const trs=[...tbody.children];
-  const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
-  const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
-  // 대상 행 = 선택 시작 행부터(그룹 머리행 제외). 붙여넣을 값이 선택 범위보다 크면 아래·오른쪽으로 넓힌다(표 끝까지만).
-  const bodyRows=[]; for(let ri=rlo; ri<trs.length; ri++){ const tr=trs[ri]; if(tr&&!tr.classList.contains('grouphd')) bodyRows.push(tr); }
-  const nRows = single ? (function(){ let n=0; for(let ri=rlo;ri<=rhi;ri++){ const tr=trs[ri]; if(tr&&!tr.classList.contains('grouphd')) n++; } return n; })()
-                       : Math.min(mat.length, bodyRows.length);
-  const nCols = single ? (chi-clo+1) : Math.max(...mat.map(l=>l.length));
-  const jobs=[]; let locked=0;
-  for(let i=0;i<nRows;i++){
-    const tr=bodyRows[i]; if(!tr) break;
-    const tds=[...tr.children];
-    for(let j=0;j<nCols;j++){
-      const td=tds[clo+j]; if(!td) break;
-      const line = single ? mat[0] : (mat[i]||[]);
-      const val = single ? mat[0][0] : (line[j]!=null?line[j]:'');
-      if(!td.classList.contains('gedit')){ locked++; continue; }
-      const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field');
-      if(!rowId||!field) { locked++; continue; }
-      if((td.getAttribute('data-val')||'')===val) continue;   // 같은 값 = 저장 왕복 낭비
-      jobs.push({rowId, field, val, td});
-    }
+  // 대상 칸(행×열). ★ 떨어진 범위를 여럿 잡았으면 **그 칸들에만** 넣는다(밖으로 넓히지 않는다 —
+  //   어디까지가 대상인지 사람이 눈으로 정한 상태라 임의 확장은 사고다).
+  let targets=[];
+  if(rs.length>1){ targets=_selectionGrid(); }
+  else {
+    const s=rs[0];
+    const rlo=Math.min(s.r0,s.r1), rhi=Math.max(s.r0,s.r1);
+    const clo=Math.min(s.c0,s.c1), chi=Math.max(s.c0,s.c1);
+    // 단일 범위는 선택 시작 칸부터 오른쪽·아래로 — 붙여넣을 값이 더 크면 표 끝까지 넓힌다.
+    const bodyRows=[]; for(let ri=rlo; ri<trs.length; ri++){ const tr=trs[ri]; if(tr&&!tr.classList.contains('grouphd')) bodyRows.push(tr); }
+    const selRowN=(function(){ let n=0; for(let ri=rlo;ri<=rhi;ri++){ const tr=trs[ri]; if(tr&&!tr.classList.contains('grouphd')) n++; } return n; })();
+    const nRows = single ? selRowN : Math.min(mat.length, bodyRows.length);
+    const nCols = single ? (chi-clo+1) : Math.max(...mat.map(l=>l.length));
+    for(let i=0;i<nRows;i++){ const tr=bodyRows[i]; if(!tr) break;
+      const tds=[...tr.children], line=[];
+      for(let j=0;j<nCols;j++){ const td=tds[clo+j]; if(!td) break; line.push(td); }
+      if(line.length) targets.push(line); }
   }
+  const jobs=[]; let locked=0;
+  targets.forEach((line,i)=>line.forEach((td,j)=>{
+    const val = single ? mat[0][0] : ((mat[i]&&mat[i][j]!=null) ? mat[i][j] : null);
+    if(val===null) return;                       // 복사본에 그 칸이 없음 = 건드리지 않는다(빈 값으로 지우지 않는다)
+    if(!td.classList.contains('gedit')){ locked++; return; }
+    const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field');
+    if(!rowId||!field){ locked++; return; }
+    if((td.getAttribute('data-val')||'')===val) return;   // 같은 값 = 저장 왕복 낭비
+    jobs.push({rowId, field, val, td});
+  }));
   if(!jobs.length){ toast(locked?`붙여넣을 수 있는 칸이 없습니다 — 잠긴 칸 ${locked}개(참여자·연락처는 수정 불가)`:'바뀌는 값이 없습니다'); return; }
   if(jobs.length>_PASTE_MAX){ toast(`한 번에 ${_PASTE_MAX}칸까지 붙여넣을 수 있습니다 (선택 ${jobs.length}칸) — 범위를 나눠 주세요`); return; }
   if(jobs.length>20 && !confirm(`${jobs.length}개 칸의 값을 붙여넣습니다. 진행할까요?`)) return;
@@ -5459,7 +5545,10 @@ function _openCellMenu(x,y,td){
     + (canE?`<div class="gcmdiv"></div><div class="gcmsw">${
         _CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
       }<span class="gcswatch gcclear" onclick="_applyRangeColor('')" title="배경색 지우기">✕</span></div>`:'')
-    + `<div class="gcmhint">${one?'':'세로/가로로 끌어 잡은 <b>직사각형 범위</b>만 복사됩니다'}</div>`;
+    + `<div class="gcmhint">${
+        _selRanges().length>1 ? `떨어진 <b>${_selRanges().length}개 범위</b>를 화면 열 순서대로 이어 복사합니다`
+        : (one ? 'Ctrl(⌘)+드래그로 떨어진 범위를 더할 수 있습니다'
+               : '끌어 잡은 <b>직사각형 범위</b>만 복사됩니다 · Ctrl(⌘)+드래그=범위 추가')}</div>`;
   m.classList.add('show');
   const w=m.offsetWidth||210, h=m.offsetHeight||160;
   m.style.left=Math.max(8,Math.min(x, window.innerWidth-w-10))+'px';
@@ -9985,9 +10074,15 @@ function _ovmRenderFoot(){
   const owned=STATE.ownedSheetIds||new Set();
   const total=Object.keys(STATE.sheetMap||{}).length;
   const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid));
-  el.innerHTML = free.length
+  /* ★ 이 목록(미지정 시트)에는 **시스템이 아는 시트만** 뜬다 — 등록조차 안 된 시트는 여기에도
+     안 나오므로, 주소로 직접 가져오는 창구를 바로 아래 상시 노출한다(admin/master 만). */
+  const imp = isAdmin
+    ? `<button class="ovm-unm imp" onclick="openSheetImport('')"
+         title="업체관리·작업보드 어디에도 없는 시트를 주소로 가져옵니다">＋ 시트에서 가져오기</button>`
+    : '';
+  el.innerHTML = (free.length
     ? `<button class="ovm-unm" onclick="_ovmOpenDrawer('unm')" title="업체를 지정하면 계약·정산이 붙습니다">⚠ 업체 미지정 시트<span class="n">${free.length}</span></button>`
-    : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 시트가 지정됨<span class="n">${total}</span></button>`;
+    : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 시트가 지정됨<span class="n">${total}</span></button>`) + imp;
 }
 
 /* ── 전체 개요(업체 미선택) — 빈 폼 대신 "어느 업체를 봐야 하는가"를 먼저 보여준다 ──
@@ -10497,6 +10592,8 @@ function renderOwnPanel(a, items){
       ${isAdmin?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('link')">🔗 접속 링크 ${lkb}</button>
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('acct')">👤 광고주 계정 ${accts?`<span class="ovm-fin">${accts}개</span>`:'<span class="ovm-fin cand">없음</span>'}</button>`:''}
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('own')">▦ 소유 시트 <span class="ovm-fin">${items.length}</span></button>
+      ${isAdmin?`<button class="btn ovm-setbtn" onclick="openSheetImport('${esc(a.id)}')"
+        title="시스템에 없는 구글시트 탭 주소로 과거 작업을 가져옵니다">＋ 시트에서 가져오기</button>`:''}
       <span style="flex:1"></span>
       <button class="btn xs" onclick="_ovmRenderOverview()">← 전체 개요</button>
       ${isAdmin?`<button class="btn xs" onclick="deleteAdv(${(STATE.advs||[]).findIndex(x=>x.id===a.id)})">업체 삭제</button>`:''}
@@ -10976,6 +11073,221 @@ async function ownTransferGo(){
 // ★ Esc = 이관 팝업 먼저 닫기 — 드로어 ESC 리스너보다 먼저 등록돼(파일 순서) stopImmediatePropagation 으로
 //   "팝업과 드로어가 한 번에 같이 닫히는" 것을 막는다. 리스너는 최상위 1회(규율).
 document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_trS){ e.stopImmediatePropagation(); _trClose(); } });
+
+/* ══════════════════════════════════════════════════════════════════
+   시트에서 가져오기 — 시스템에 없는 구글시트 탭을 주소로 흡수 (4단계)
+
+   ★★ 판정은 **전부 서버**가 한다 — 화면은 서버가 준 blockers/warnings/counts 를 그리기만 한다.
+      여기서 다시 판정하면 "화면은 초록인데 서버가 거부"가 구조적으로 가능해진다.
+   ★ 팝업은 **body 직속**(뷰 스크롤 컨테이너 안에 두면 오버레이가 화면 흐름에 섞인다).
+   ★ **바깥 클릭으로 닫지 않는다** — 붙여넣은 주소·고른 줄이 실수 클릭 한 번에 날아가지 않게.
+     대신 닫는 길([취소]·×·Esc)은 반드시 남긴다.
+   ★ onclick 은 **인덱스만** — 탭명·업체명은 시트/외부에서 온 문자열이다(문자열 보간 금지).
+   ★ 주소 입력 중에는 팝업을 재렌더하지 않는다(IME 조합 보호 — 값은 이벤트에서 상태로만 받는다).
+   ══════════════════════════════════════════════════════════════════ */
+let _siS=null;
+function openSheetImport(advId){
+  _siS={ step:1, url:'', adv:advId||'', pv:null, skip:{}, notice:true, busy:false, err:'', tabs:null, result:null };
+  let ov=document.getElementById('siPop');
+  if(!ov){ ov=document.createElement('div'); ov.id='siPop'; ov.className='si-ov'; document.body.appendChild(ov); }
+  ov.style.display='flex';
+  _siRender();
+}
+function _siClose(){ const ov=document.getElementById('siPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _siS=null; }
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_siS&&!_siS.busy){ e.stopImmediatePropagation(); _siClose(); } });
+
+function _siSteps(n){
+  const names=['주소 넣기','읽어서 보기','업체 고르기','가져오기'];
+  return `<div class="si-steps">${names.map((t,i)=>{
+    const cl = n===i+1?'on':(n>i+1?'dn':'');
+    return `<div class="s ${cl}"><span class="n">${n>i+1?'✓':(i+1)}</span>${t}</div>`;
+  }).join('')}</div>`;
+}
+
+function _siRender(){
+  const S=_siS; if(!S) return; const ov=document.getElementById('siPop'); if(!ov) return;
+  let body='';
+  if(S.step===1) body=_siStep1();
+  else if(S.step===2) body=_siStep2();
+  else if(S.step===3) body=_siStep3();
+  else body=_siStep4();
+  ov.innerHTML=`<div class="si-mo">
+    <div class="si-h"><h3>시트에서 가져오기</h3><span style="flex:1"></span>
+      <button class="si-x" onclick="_siClose()" title="닫기">×</button></div>
+    ${_siSteps(S.step)}${body}</div>`;
+  if(S.step===1){ const el=document.getElementById('siUrl'); if(el) setTimeout(()=>el.focus(),30); }
+}
+
+function _siStep1(){
+  const S=_siS;
+  return `<div class="si-b">
+    <div class="si-box tint">가져올 <b>탭을 연 상태</b>에서 브라우저 주소창을 통째로 복사해 붙여넣으세요.
+      주소 끝의 <b>#gid=…</b> 가 "어느 탭인지"를 알려 줍니다.</div>
+    <label class="si-l">구글시트 탭 주소</label>
+    <input id="siUrl" class="si-tf" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/d/... #gid=..."
+      value="${esc(S.url)}" oninput="_siS.url=this.value">
+    <div class="si-hint">탭 주소가 아니어도 됩니다 — 시트 안의 탭 목록에서 고를 수 있습니다.</div>
+    ${S.err?`<div class="si-err">${esc(S.err)}</div>`:''}
+    ${S.tabs?`<div class="si-box"><b>이 시트의 탭</b>
+      <div class="si-tabs">${S.tabs.map((t,i)=>`<button class="si-tab" onclick="_siPickTab(${i})">${esc(t.tabName)}</button>`).join('')}</div></div>`:''}
+    <div class="si-box">이 단계에서는 <b>아무것도 저장되지 않습니다</b> — 시트를 한 번 읽어 무엇이 들었는지만 보여줍니다.</div>
+  </div>
+  <div class="si-f"><span class="si-hint">시트는 읽기만 합니다.</span><span style="flex:1"></span>
+    <button class="btn" onclick="_siClose()">닫기</button>
+    <button class="btn pri" id="siGo" onclick="_siPreview()">시트 읽기 →</button></div>`;
+}
+function _siPickTab(i){ const S=_siS; const t=(S.tabs||[])[i]; if(!t) return; S.gid=t.gid; S.tabs=null; S.err=''; _siRender(); _siPreview(); }
+
+async function _siPreview(){
+  const S=_siS; if(!S||S.busy) return;
+  const el=document.getElementById('siUrl'); if(el) S.url=el.value;   // ★ 재렌더 없이 입력값만 회수(IME 보호)
+  if(!String(S.url||'').trim() && !S.gid){ S.err='주소를 넣어 주세요.'; _siRender(); return; }
+  S.busy=true; S.err=''; _siRender();
+  const btn=document.getElementById('siGo'); if(btn){ btn.disabled=true; btn.textContent='읽는 중…'; }
+  const r=await api('/api/trackb/sheet-import/preview',{method:'POST',
+    body:JSON.stringify({ url:S.url, gid:S.gid||'' })}).catch(()=>null);
+  S.busy=false;
+  if(!r){ S.err='시트를 읽지 못했습니다 — 잠시 후 다시 시도해 주세요.'; _siRender(); return; }
+  /* ★ 탭을 못 정한 경우는 오류가 아니라 **다음 행동**이다 — 목록을 그려 고르게 한다. */
+  if(r.availableTabs && (r.code==='gid_required'||r.code==='gid_not_found')){
+    S.tabs=r.availableTabs; S.err=r.error||''; _siRender(); return;
+  }
+  if(r.code||r.error){ S.err=r.error||'읽지 못했습니다.'; _siRender(); return; }
+  S.pv=r; S.skip={};
+  (r.rows||[]).forEach(row=>{ if(!row.include) S.skip[row.seq]=true; });   // 서버가 권한 제외를 그대로 반영
+  S.step=2; _siRender();
+}
+
+function _siStep2(){
+  const S=_siS, p=S.pv||{};
+  const c=p.counts||{};
+  const blocked=(p.blockers||[]).length>0;
+  const cols=(p.columns||[]).map(x=>{
+    const cls = x.isPhone||x.isName ? 'key' : (x.role==='submit'||x.role==='paid' ? 'st' : (x.role?'auto':'keep'));
+    const lab = x.isPhone ? '리뷰어 찾기 키' : x.isName ? '리뷰어 이름' : (x.label||'그대로 보관');
+    return `<span class="si-mp">${esc(x.header)}<span class="si-r ${cls}">${esc(lab)}</span></span>`;
+  }).join('');
+  return `<div class="si-b">
+    ${blocked?`<div class="si-lock"><b>가져올 수 없습니다</b>${(p.blockers||[]).map(b=>esc(b.message)).join('<br>')}</div>`
+      :`<div class="si-box ok"><b>✓ 읽었습니다</b><br>${esc(p.sheetTitle||'')} › 탭 <b>${esc(p.tabName||'')}</b> · 머리글은 ${p.headerRow}번째 줄</div>`}
+    <div class="si-kpis">
+      <div><div class="k">시트에 적힌 줄</div><div class="v">${c.total==null?'?':c.total}</div></div>
+      <div><div class="k">검색 명단이 될 줄</div><div class="v ok">${c.index==null?'?':c.index}</div></div>
+      <div><div class="k">제출 완료</div><div class="v">${c.submitted==null?'?':c.submitted}</div></div>
+      <div><div class="k">확인 필요</div><div class="v ${c.suspect?'warn':''}">${c.suspect||0}</div></div>
+    </div>
+    ${(p.warnings||[]).map(w=>`<div class="si-warn">${esc(w.message)}</div>`).join('')}
+    <label class="si-l">작업 이름 <span class="si-hint">시트 위쪽 안내에서 자동으로 채웠습니다 — 고칠 수 있습니다</span></label>
+    <input id="siName" class="si-tf" value="${esc((p.meta&&p.meta.campaignName)||p.tabName||'')}">
+    <div class="si-box"><b>칸을 이렇게 알아봤습니다</b><div class="si-maplist">${cols}</div>
+      ${(p.statusCols&&(p.statusCols.submit||p.statusCols.paid))?`<div class="si-hint" style="margin-top:6px">
+        진행 상태 칸: ${esc(p.statusCols.submit||'—')} · ${esc(p.statusCols.paid||'—')}</div>`:''}
+      <div class="si-hint" style="margin-top:6px">열 이름은 <b>바꾸지 않고</b> 그대로 옮깁니다.</div></div>
+  </div>
+  <div class="si-f"><span class="si-hint">아직 아무것도 저장되지 않았습니다.</span><span style="flex:1"></span>
+    <button class="btn" onclick="_siBack(1)">← 뒤로</button>
+    <button class="btn pri" ${blocked?'disabled':''} onclick="_siNext3()">다음 →</button></div>`;
+}
+function _siBack(n){ const S=_siS; if(!S) return; if(n===1){ S.pv=null; S.tabs=null; S.gid=''; } S.step=n; S.err=''; _siRender(); }
+function _siNext3(){ const S=_siS; const el=document.getElementById('siName'); if(el) S.name=el.value; S.step=3; _siRender(); }
+
+function _siStep3(){
+  const S=_siS, p=S.pv||{};
+  const advOpts=(STATE.advs||[]).map(a=>`<option value="${esc(a.id)}" ${S.adv===a.id?'selected':''}>${esc(a.name)}</option>`).join('');
+  const rows=(p.rows||[]).map((r,i)=>{
+    const on=!S.skip[r.seq];
+    /* ★ 어느 칸이 구매일자·금액·제출·입금인지는 **서버가 골라 실어 준다** — 화면이 열 이름으로
+       꺼내면 이름이 다른 탭에서 통째로 빈 칸이 된다. */
+    return `<tr class="${on?'':'off'}">
+      <td class="c"><input type="checkbox" ${on?'checked':''} onchange="_siToggle(${i})"></td>
+      <td class="c">${r.seq}</td><td>${esc(r.date||'')}</td><td>${esc(r.name||'')}</td><td>${esc(r.phone||'')}</td>
+      <td>${esc(r.price||'')}</td><td>${esc(r.submit||'')}</td><td>${esc(r.paid||'')}</td>
+      <td>${r.why?`<span class="why">${esc(r.why)}</span>`:''}</td></tr>`;
+  }).join('');
+  const off=Object.keys(S.skip).filter(k=>S.skip[k]).length;
+  const take=(p.counts&&p.counts.total!=null)?(p.counts.total-off):null;
+  const shown=(p.rows||[]).length, total=(p.counts&&p.counts.total)||0;
+  return `<div class="si-b">
+    <label class="si-l">어느 업체의 작업인가요? <span style="color:var(--bad)">*</span></label>
+    <select class="si-tf" onchange="_siAdv(this.value)">
+      <option value="">— 업체를 고르세요 —</option>${advOpts}</select>
+    <div class="si-hint">${S.adv
+      ? '가져오면 그 업체 업체관리 표에 바로 나타납니다.'
+      : '업체를 골라야 가져올 수 있습니다 — 업체가 없으면 표에 나오지 않아 지금 문제가 그대로 반복됩니다.'}</div>
+    <div class="si-box"><b>가져올 줄</b> <span class="si-hint">${take==null?'':take+'줄 선택됨 · '}전체 ${total}줄 중 ${shown}줄 표시</span>
+      <div class="si-rows"><table>
+        <tr><th style="width:34px"></th><th>줄</th><th>구매일자</th><th>이름</th><th>연락처</th>
+          <th>결제금액</th><th>리뷰제출</th><th>입금</th><th>메모</th></tr>${rows}</table></div>
+      <div class="si-hint" style="margin-top:6px">번호가 없는 줄도 가져옵니다 — 번호를 안 매겼을 뿐 실제 진행 건입니다.
+        연습으로 보이는 줄만 체크를 풀어 두었고, <b>지우지 않고 보여만 줍니다.</b></div></div>
+    <div class="si-box"><b>가져온 뒤 구글시트</b>
+      <div class="si-hint" style="margin-top:4px">이 작업은 <b>더 이상 시트를 읽지 않습니다</b> — 지금부터 시스템 표가 유일한 기준이 됩니다.</div>
+      <label class="si-chk"><input type="checkbox" ${S.notice?'checked':''} onchange="_siS.notice=this.checked">
+        <span>시트 맨 윗줄 안내문을 갱신합니다 <span class="si-hint">— 시트에 값을 쓰는 것은 이 한 줄뿐입니다.</span></span></label></div>
+    ${S.err?`<div class="si-err">${esc(S.err)}</div>`:''}
+  </div>
+  <div class="si-f"><span class="si-hint">${S.adv?'준비되었습니다.':'업체를 골라 주세요.'}</span><span style="flex:1"></span>
+    <button class="btn" onclick="_siBack(2)">← 뒤로</button>
+    <button class="btn pri" id="siRun" ${S.adv?'':'disabled'} onclick="_siRun()">${take==null?'':take+'줄 '}가져오기</button></div>`;
+}
+function _siAdv(v){ const S=_siS; if(!S) return; S.adv=v||''; _siRender(); }
+function _siToggle(i){ const S=_siS; const r=(S.pv.rows||[])[i]; if(!r) return; S.skip[r.seq]=!S.skip[r.seq]; _siRender(); }
+
+async function _siRun(){
+  const S=_siS; if(!S||S.busy) return;
+  const p=S.pv||{};
+  const off=Object.keys(S.skip).filter(k=>S.skip[k]).map(n=>parseInt(n,10));
+  const advName=((STATE.advs||[]).find(a=>a.id===S.adv)||{}).name||'';
+  if(!confirm(`「${S.name||p.tabName}」을 ${advName} 작업으로 가져옵니다.\n\n`+
+    `· 시트에 적힌 줄을 시스템 표로 옮깁니다\n· 이 구글시트는 더 이상 읽지 않습니다\n`+
+    (S.notice?'· 시트 맨 윗줄에 이관 안내를 씁니다\n':'')+
+    '\n가져온 직후에는 되돌릴 수 있습니다.')) return;
+  S.busy=true; S.err=''; const btn=document.getElementById('siRun');
+  if(btn){ btn.disabled=true; btn.textContent='가져오는 중…'; }
+  const r=await api('/api/trackb/sheet-import/run',{method:'POST',body:JSON.stringify({
+    sheetId:p.sheetId, gid:p.gid, advertiserId:S.adv, displayName:S.name||'', skipSeqs:off, notice:!!S.notice,
+  })}).catch(()=>null);
+  S.busy=false;
+  if(!r||!r.ok){ S.err=(r&&r.error)||'가져오지 못했습니다.'; _siRender(); return; }
+  S.result=r; S.step=4; _siRender();
+  await refreshAdvCounts();
+  const idx=(STATE.advs||[]).findIndex(x=>x.id===S.adv); if(idx>=0) selAdv(idx);
+}
+
+function _siStep4(){
+  const S=_siS, r=S.result||{};
+  return `<div class="si-b">
+    <div class="si-box ok"><b>✓ 가져왔습니다</b><br>
+      <b>${esc(r.displayName||r.tabName||'')}</b> 이(가) <b>${esc(r.advertiserName||'')}</b> 작업으로 등록되었습니다.</div>
+    <div class="si-kpis">
+      <div><div class="k">만든 줄</div><div class="v ok">${r.created==null?'?':r.created}</div></div>
+      <div><div class="k">검색 명단</div><div class="v">${r.indexRows==null?'?':r.indexRows}</div></div>
+      <div><div class="k">제출 완료</div><div class="v">${r.submittedCount==null?'?':r.submittedCount}</div></div>
+      <div><div class="k">뺀 줄</div><div class="v">${r.skipped||0}</div></div>
+    </div>
+    ${r.ledgerError?`<div class="si-warn">검색 명단을 만들지 못했습니다(${esc(r.ledgerError)}) — 담당자에게 알려 주세요.</div>`:''}
+    ${(r.notice&&r.notice.ok===false)?`<div class="si-warn">시트 안내문은 갱신하지 못했습니다(${esc(r.notice.skipped||r.notice.error||'')}) — 가져오기 자체는 완료되었습니다.</div>`:''}
+    <div class="si-box"><b>아직 남은 일</b>
+      <div class="si-hint" style="margin-top:4px">· <b>계약 매칭</b>은 자동으로 붙지 않습니다 — 업체관리 표의 [계약] 칸에서 연결해 주세요.<br>
+        · <b>리뷰 캡처 이미지</b>는 함께 오지 않습니다.</div></div>
+  </div>
+  <div class="si-f"><button class="btn" onclick="_siRevert()">되돌리기</button>
+    <span style="flex:1"></span><button class="btn pri" onclick="_siClose()">닫기</button></div>`;
+}
+
+async function _siRevert(){
+  const S=_siS, r=S.result||{}; if(!r.tabName) return;
+  if(!confirm(`방금 가져온 「${r.displayName||r.tabName}」의 표 줄과 업체 연결을 되돌립니다.\n구글시트는 그대로 남습니다.`)) return;
+  const out=await api('/api/trackb/sheet-import/revert',{method:'POST',
+    body:JSON.stringify({ sheetId:r.sheetId, tabName:r.tabName })}).catch(()=>null);
+  if(!out){ toast('되돌리지 못했습니다.'); return; }
+  /* ★ 주문이 들어온 뒤라 거부된 경우는 사유를 그대로 보여준다(조용히 실패로 뭉뚱그리지 않는다). */
+  if(!out.ok){ toast(out.message||'되돌릴 수 없습니다.'); return; }
+  toast(out.message||'되돌렸습니다.');
+  _siClose();
+  await refreshAdvCounts();
+  _ovmRenderOverview();
+}
 async function refreshAdvCounts(){
   // ★ 소유가 바뀌면 '업체 미지정 시트 N' 도 함께 바뀐다 — 사이드바에 상시 노출되므로 같이 갱신한다.
   const os=await api('/api/trackb/owned-sheets').catch(()=>null);
