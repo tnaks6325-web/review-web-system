@@ -128,6 +128,34 @@ console.log('\n[B-2] 시트 위쪽 안내 읽기');
   ok('★ 못 찾으면 빈 값 — 추측하지 않는다', S.readTopMeta([[], []], 3).campaignName === '');
 }
 
+console.log('\n[B-3] 이미 등록된 탭 — 막을지 / 통과시킬지 + 왜 안 보이는지');
+{
+  const c = S.classifyRegistered;
+  const base = { tabName: 'T', boardRows: 0, withOrder: 0, indexRows: 0, inMaster: false, inMirror: false, advertiserName: null };
+  ok('미등록이면 판정할 것이 없다', c(null).blocked === false && c(null).empty === false);
+
+  /* ★★ 실사용 신고(2026-08-10): "이미 등록되었다는데 어디에서도 못 찾겠다".
+     등록만 있고 내용이 0 이면 **막을 것이 없다** — 막으면 되살릴 길이 어디에도 없어진다. */
+  const empty = c(base);
+  ok('★★ 빈 껍데기(표 0·주문 0·명단 0)는 **통과**시킨다 — 지울 것이 없으면 막을 이유가 없다',
+    empty.blocked === false && empty.empty === true);
+
+  const busy = c({ ...base, boardRows: 108, indexRows: 107 });
+  ok('★ 내용이 있으면 막는다', busy.blocked === true && busy.empty === false);
+  ok('★★ 막을 때는 **왜 안 보이는지**를 말한다 — 등록부·미러 없음',
+    busy.reasons.some(r => r.code === 'not_in_list'));
+  ok('★★ 업체 미지정도 따로 말한다(업체관리 표에만 안 보이는 흔한 원인)',
+    busy.reasons.some(r => r.code === 'no_advertiser'));
+
+  const fine = c({ ...base, boardRows: 108, indexRows: 107, inMaster: true, inMirror: true, advertiserName: '수진코리아' });
+  ok('★ 정상 등록이면 그 업체를 알려준다', fine.blocked === true &&
+    fine.reasons.length === 1 && fine.reasons[0].code === 'visible' && /수진코리아/.test(fine.reasons[0].message));
+
+  /* 주문만 있고 표가 비어 보이는 경우도 "비었다"고 하지 않는다(주문이 근거) */
+  ok('★ 주문이 있으면 껍데기가 아니다', c({ ...base, withOrder: 1 }).blocked === true);
+  ok('★ 명단만 있어도 껍데기가 아니다', c({ ...base, indexRows: 5 }).blocked === true);
+}
+
 console.log('\n[C] 판정 사본 0 — 남의 판정을 여기서 다시 만들지 않았다');
 {
   const src = stripBlock(noLineComments(read('src/services/sheetImport.service.js')));
@@ -247,12 +275,27 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     ok('★★ 연락처 칸이 없으면 막는다(리뷰어가 영영 못 찾는 명단이 된다)',
       pv2.ok === false && (pv2.blockers || []).some(b => b.code === 'no_phone_column'));
 
-    // 이미 등록된 탭 → D5 차단
+    // 이미 등록 + 내용 있음 → D5 차단 + 사유
     install(VALUES, '0720고양이캔4종');
-    S.__setPoolForTest(makePool([[/FROM tab_configs/i, { rows: [{ tab_name: '0720고양이캔4종', tab_gid: '1405976532', sheetless: true, advertiser_name: '수진코리아' }] }]]));
+    const dupRow = (o) => [[/FROM tab_configs/i, { rows: [Object.assign({
+      tab_name: '0720고양이캔4종', tab_gid: '1405976532', sheetless: true, advertiser_name: null,
+      board_rows: '0', with_order: '0', index_rows: '0', in_master: false, in_mirror: false,
+    }, o)] }]];
+    S.__setPoolForTest(makePool(dupRow({ advertiser_name: '수진코리아', board_rows: '108', index_rows: '107', in_master: true, in_mirror: true })));
     const pv3 = await S.previewSheetImport({ url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1405976532' });
-    ok('★★ D5 — 이미 등록된 탭은 막고 그 작업을 알려준다(덮어쓰면 주문·수정 내역이 지워진다)',
-      pv3.ok === false && (pv3.blockers || []).some(b => b.code === 'already_registered'));
+    const b3 = (pv3.blockers || []).find(b => b.code === 'already_registered');
+    ok('★★ D5 — 내용이 있는 등록 탭은 막고 그 작업을 알려준다', pv3.ok === false && !!b3);
+    ok('★★ 막을 때 **현재 상태를 함께 싣는다**(어디에도 못 찾겠다는 신고에 답하려면 숫자가 필요하다)',
+      b3 && b3.tab && b3.tab.boardRows === 108 && b3.tab.indexRows === 107 && b3.tab.inMaster === true);
+    ok('★ 사유도 함께 싣는다', b3 && Array.isArray(b3.reasons) && b3.reasons.length > 0);
+
+    // 이미 등록 + 빈 껍데기 → 통과(경고만)
+    install(VALUES, '0720고양이캔4종');
+    S.__setPoolForTest(makePool(dupRow({})));
+    const pv4 = await S.previewSheetImport({ url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1405976532' });
+    ok('★★ 빈 껍데기 등록은 **막지 않고** 경고로 알린다(되살릴 길이 없어지면 안 된다)',
+      pv4.ok === true && !(pv4.blockers || []).some(b => b.code === 'already_registered') &&
+      (pv4.warnings || []).some(w => w.code === 'registered_empty'));
 
     /* ── [E][F] 실행 ── */
     install(VALUES, '0720고양이캔4종');
@@ -339,7 +382,9 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
        바로 호출할 수 있으므로, 미리보기의 blocker 만으로는 방어가 되지 않는다(변이시험이 잡았다). */
     S.__setPoolForTest(makePool([
       [/FROM advertisers/i, { rows: [{ id: 'adv_1', name: '수진코리아', status: 'active' }] }],
-      [/FROM tab_configs/i, { rows: [{ tab_name: '0720고양이캔4종', tab_gid: '1405976532', sheetless: true, advertiser_name: '수진코리아' }] }],
+      [/FROM tab_configs/i, { rows: [{ tab_name: '0720고양이캔4종', tab_gid: '1405976532', sheetless: true,
+        advertiser_name: '수진코리아', board_rows: '108', with_order: '3', index_rows: '107',
+        in_master: true, in_mirror: true }] }],
     ]));
     threw = null;
     try {
@@ -463,6 +508,16 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
       !/'no_phone_column'|'already_registered'|'header_unrecognizable'|'no_rows'/.test(fh));
     ok('★ 서버가 준 blockers 로 [다음] 을 잠근다',
       /blocked\?'disabled':''/.test(fh));
+    /* ★★ 막을 때 사유·현재 상태를 그린다 — 이유 없이 막으면 "어디에도 못 찾겠다"가 된다(실사용 신고). */
+    ok('★★ 화면이 blocker 의 사유(reasons)를 그린다', /b\.reasons\|\|\[\]/.test(fh));
+    ok('★★ 등록 탭의 현재 상태를 숫자로 보여준다(_siDupTail)',
+      /function _siDupTail\(/.test(fh) && /표 \$\{n\(t\.boardRows\)\}줄/.test(fh) &&
+      /작업 등록부 \$\{t\.inMaster\?'있음':'없음'\}/.test(fh));
+    ok('★ 값이 없으면(구버전 백엔드) 아무것도 그리지 않는다', /if\(!t\) return '';/.test(fh));
+    /* ★ 호출은 **막는 쪽·알리는 쪽 둘 다** 확인한다 — 한쪽만 보면 다른 쪽 제거를 통과시킨다
+       (변이시험이 실제로 뚫었다: blocker 쪽 `_siDupTail(b.tab)` 을 지워도 초록이었다). */
+    ok('★★ 막을 때도 상태 숫자를 붙인다', /_siDupTail\(b\.tab\)/.test(fh));
+    ok('★ 경고에도 같은 사유·상태를 붙인다', /w\.reasons\|\|\[\]/.test(fh) && /_siDupTail\(w\.tab\)/.test(fh));
     ok('CSS 는 si- 접두로 스코프', /\.si-ov\{/.test(fh) && /\.si-mo\{/.test(fh));
 
     /* ★★ 헤더 칸 수 ≡ 행 칸 수 — 열을 끼워 넣을 때 가장 흔히 깨지는 자리(업체관리 표와 같은 계약). */
