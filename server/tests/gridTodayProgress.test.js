@@ -212,7 +212,10 @@ const CNT = (id, o) => Object.assign({
   t('클릭 동작 없음 = 읽기 전용 표기', !/tprog[^>]*onclick/.test(WD));
   // 지금 tip 은 숫자·고정문구뿐이라 escape 를 빼도 당장은 안 터진다 — 그래서 **규칙 자체를 고정**한다.
   // (나중에 공고 제목 같은 외부 문자열을 툴팁에 넣는 순간 속성 탈출이 된다.)
-  t('★ title 속성도 escape 를 거친다(외부 문자열이 들어와도 안전하게)', /title="\$\{esc\(tip\)\}"/.test(WD));
+  // ★★ 반드시 _tpHtml **본문 안에서** 볼 것 — `title="${esc(tip)}"` 는 이 파일의 다른 기능에도
+  //   4곳 더 있어서, 파일 전체를 보면 여기서 esc 를 빼도 남의 것이 대신 통과시킨다(변이시험 실측).
+  const TP_FN = cut('function _tpHtml(tp){', '// 시트형 그리드:');
+  t('★ title 속성도 escape 를 거친다(외부 문자열이 들어와도 안전하게)', /title="\$\{esc\(tip\)\}"/.test(TP_FN));
 
   console.log(`\n✅ 통과 ${pass}건\n`);
   process.exit(0);
