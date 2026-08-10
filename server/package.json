@@ -19,6 +19,7 @@
     "health": "curl -s http://localhost:${PORT:-3000}/health | node -e \"process.stdin.on('data',d=>{const j=JSON.parse(d);console.log(j);process.exit(j.ok?0:1)})\""
   },
   "dependencies": {
+    "@e965/xlsx": "^0.20.3",
     "@google/generative-ai": "^0.24.1",
     "@sentry/node": "^10.49.0",
     "bcryptjs": "^2.4.3",
