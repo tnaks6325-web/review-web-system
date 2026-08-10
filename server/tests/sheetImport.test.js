@@ -145,6 +145,25 @@ console.log('\n[C] 판정 사본 0 — 남의 판정을 여기서 다시 만들�
     !/INSERT INTO review_index/i.test(src));
 }
 
+console.log('\n[C-2] 되돌리기 삭제는 주문 붙은 줄을 남긴다 — 실제 함수 실행');
+{
+  /* ★★ 이 검사는 **실제 participants 함수**를 돌린다. 호출부 테스트는 스텁이 대신 응답하므로
+     "SQL 에서 조건이 사라진" 회귀를 통과시킨다(변이시험이 실제로 잡았다). */
+  const P = require('../src/services/participants.service');
+  const seen = [];
+  const client = { query: async (sql, params) => { seen.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params }); return { rowCount: 7 }; } };
+  (async () => {
+    const n = await P.purgeImportedRows(client, { sheetId: 'S', tabName: 'T' });
+    ok('삭제한 줄 수를 그대로 돌려준다', n === 7);
+    ok('★★ 주문이 붙은 줄(order_submission_id)은 절대 지우지 않는다 — 마지막 방어',
+      /order_submission_id IS NULL/i.test(seen[0].sql), seen[0].sql);
+    ok('★ 그 탭에만 건다(시트·탭 조건)', /sheet_id = \$1 AND tab_name = \$2/i.test(seen[0].sql));
+    let bad = null;
+    try { await P.purgeImportedRows(null, { sheetId: 'S', tabName: 'T' }); } catch (e) { bad = e; }
+    ok('★ client 없이 부르면 거부(별도 트랜잭션으로 새 나가지 않게)', !!bad);
+  })().catch(e => { console.error(e); process.exit(1); });
+}
+
 console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
 {
   const stubRead = (values, tabName) => ({
@@ -315,6 +334,20 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     await S.importSheet({ url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1405976532',
       advertiserId: 'adv_1', notice: false });
     ok('★ 안내문을 끄면 시트에 **아무것도 쓰지 않는다**', seen.notice === null);
+
+    /* ★★ D5 는 **실행 단계에도** 걸려 있어야 한다 — 낡은 화면이 미리보기를 건너뛰고 run 을
+       바로 호출할 수 있으므로, 미리보기의 blocker 만으로는 방어가 되지 않는다(변이시험이 잡았다). */
+    S.__setPoolForTest(makePool([
+      [/FROM advertisers/i, { rows: [{ id: 'adv_1', name: '수진코리아', status: 'active' }] }],
+      [/FROM tab_configs/i, { rows: [{ tab_name: '0720고양이캔4종', tab_gid: '1405976532', sheetless: true, advertiser_name: '수진코리아' }] }],
+    ]));
+    threw = null;
+    try {
+      await S.importSheet({ url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1405976532',
+        advertiserId: 'adv_1' });
+    } catch (e) { threw = e; }
+    ok('★★ D5 — 실행 단계도 이미 등록된 탭을 거부한다(덮어쓰면 주문·수정 내역이 지워진다)',
+      threw && threw.code === 'already_registered');
 
     // 종료된 거래처 거부
     S.__setPoolForTest(makePool([[/FROM advertisers/i, { rows: [{ id: 'adv_2', name: '끝난곳', status: 'ended' }] }],
