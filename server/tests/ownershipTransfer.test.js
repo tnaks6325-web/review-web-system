@@ -18,6 +18,17 @@ const SVC = fs.readFileSync(path.join(__dirname, '../src/services/trackB.service
 
 let pass = 0;
 const t = (name, cond, extra) => { assert.ok(cond, name + (extra ? ` — ${extra}` : '')); console.log('  ✓ ' + name); pass++; };
+/** workdesk.html 에서 함수 블록을 중괄호 균형으로 뽑아온다(vm 실행용 — 레포 관용구). */
+function grab(name, src = HTML) {
+  let i = src.indexOf(`function ${name}(`);
+  assert.ok(i > 0, `블록 추출: function ${name} 존재`);
+  if (src.slice(i - 6, i) === 'async ') i -= 6;   // async 를 빠뜨리면 vm 이 "await is only valid…"로 죽는다
+  let d = 0;
+  for (let k = src.indexOf('{', i); k < src.length; k++) {
+    if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (!d) return src.slice(i, k + 1); }
+  }
+  throw new Error(`${name} 블록 추출 실패`);
+}
 
 /** 스텁 pool — SQL 패턴별 응답. connect() 도 같은 query 를 쓴다(tx 경로 그대로 실행). */
 function pool(routes) {
@@ -113,9 +124,71 @@ async function run() {
   t('★ 이관 팝업 Esc 가 드로어보다 먼저(중복 닫힘 방지)',
     HTML.indexOf("&&_trS){ e.stopImmediatePropagation()") < HTML.indexOf('&&_ovmDrawer) _ovmCloseDrawer()'));
   t('실행 전 confirm(되돌리기 마찰)', /if\(!confirm\(scopeTxt/.test(HTML));
-  t('★ 부분 실패를 완료로 꾸미지 않는다', /일부만 이관됨/.test(HTML));
   t('새 거래처 등록 경로도 인트라넷 등록 검증(등록 게이트 동일)', /_trChk\(\)/.test(HTML) && /S\.newOk/.test(HTML));
   t('이관 후 목록·배지 갱신', /await refreshAdvCounts\(\);/.test(HTML.slice(HTML.indexOf('async function ownTransferGo'))));
+
+  /* ═══ 5. ownTransferGo 실제 실행 — "문구가 소스에 있다"가 아니라 **무엇을 말하는지** 고정 ═══ */
+  console.log('\n5) ownTransferGo 실행(가짜 DOM · 스텁 api)');
+  const vm = require('vm');
+  /** 팝업 상태·스텁을 올린 sandbox 에서 ownTransferGo 를 실행하고 (요청, 토스트)를 돌려준다. */
+  async function runGo({ own, mode = 'all', picks = {}, target = 'adv_wc', results = () => ({ ok: true }), newName = '', newOk = false }) {
+    const posts = [], toasts = [];
+    const sb = {
+      console, JSON, Object, Array, String, Number, setTimeout, clearTimeout,
+      confirm: () => true,
+      toast: (m) => toasts.push(String(m)),
+      api: async (url, opt) => {
+        const body = opt && opt.body ? JSON.parse(opt.body) : null;
+        if (/\/ownership\/transfer/.test(url)) { posts.push(body); return results(body); }
+        if (/\/advertisers$/.test(url) && opt && opt.method === 'POST') return { ok: true, data: { id: 'adv_new' } };
+        return { ok: true };
+      },
+      document: { getElementById: () => null },
+      STATE: { advs: [{ id: 'adv_wc', name: '주식회사 위프코리아' }, { id: 'adv_wf', name: '(주)위드프렌즈' }], ownItems: [] },
+      refreshAdvCounts: async () => {}, selAdv: () => {},
+      _trS: { own, from: { id: 'adv_wf', name: '(주)위드프렌즈' },
+        tabs: [{ tabGid: '100', tabName: '위프 작업' }, { tabGid: '200', tabName: '다른 작업' }],
+        gidless: 0, mode, picks, target, newName, newOk, newPm: '' },
+      _trItems: [], _trClose() { this._trS = null; },
+    };
+    sb.window = sb; vm.createContext(sb);
+    vm.runInContext(grab('ownTransferGo') + '\n_trClose=function(){_trS=null};', sb);
+    await sb.ownTransferGo();
+    return { posts, toasts };
+  }
+  const SHEET_OWN = { sheetId: 'S1', tabGid: null };
+  let go = await runGo({ own: SHEET_OWN, mode: 'all' });
+  t('시트 전체 = tabGid null 1건 전송', go.posts.length === 1 && go.posts[0].tabGid === null && go.posts[0].sheetId === 'S1');
+  t('대상 업체 id 전송', go.posts[0].toAdvertiserId === 'adv_wc');
+  t('성공 토스트에 대상 업체명', /이관 완료 → 주식회사 위프코리아/.test(go.toasts.join('|')), go.toasts.join('|'));
+
+  go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: { 0: true, 1: true } });
+  t('특정 탭 = 고른 gid 만큼 전송', go.posts.length === 2 && go.posts.map(p => p.tabGid).join(',') === '100,200');
+
+  go = await runGo({ own: { sheetId: 'S1', tabGid: '100' }, mode: 'all' });
+  t('★ 탭 소유 줄은 범위 선택 무관 그 탭만(시트 전체로 번지지 않는다)',
+    go.posts.length === 1 && go.posts[0].tabGid === '100');
+
+  // ★★ 부분 실패 — 두 건 중 하나만 성공하면 "완료"가 아니라 몇 건인지 말해야 한다.
+  let n = 0;
+  go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: { 0: true, 1: true },
+    results: () => (++n === 1 ? { ok: true } : { ok: false, error: '권한 없음' }) });
+  const msg = go.toasts.join('|');
+  t('★★ 부분 실패를 "완료"로 꾸미지 않는다(건수·사유 고지)',
+    /일부만 이관됨 \(1\/2\)/.test(msg) && /권한 없음/.test(msg) && !/이관 완료/.test(msg), msg);
+  go = await runGo({ own: SHEET_OWN, mode: 'all', results: () => ({ ok: false, error: '대상 업체를 찾을 수 없습니다.' }) });
+  t('★ 전부 실패는 실패로 말한다', /이관 실패: 대상 업체/.test(go.toasts.join('|')), go.toasts.join('|'));
+
+  go = await runGo({ own: SHEET_OWN, mode: 'tab', picks: {} });
+  t('탭 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 탭을 선택/.test(go.toasts.join('|')));
+  go = await runGo({ own: SHEET_OWN, target: '' });
+  t('대상 미선택이면 전송 0 + 안내', go.posts.length === 0 && /이관할 거래처를 선택/.test(go.toasts.join('|')));
+  go = await runGo({ own: SHEET_OWN, target: '__new__', newName: '미등록업체', newOk: false });
+  t('★ 미검증 새 거래처는 전송 0(등록 게이트 = 서버와 같은 규칙)',
+    go.posts.length === 0 && /광고주DB\)에 등록된 이름/.test(go.toasts.join('|')), go.toasts.join('|'));
+  go = await runGo({ own: SHEET_OWN, target: '__new__', newName: '주식회사 위프코리아', newOk: true });
+  t('★ 이미 등록된 이름이면 새로 만들지 않고 그 업체로 이관(409 예방)',
+    go.posts.length === 1 && go.posts[0].toAdvertiserId === 'adv_wc');
 
   svc.__setPoolForTest(null);
   console.log(`\n✅ ownershipTransfer: ${pass}개 통과`);

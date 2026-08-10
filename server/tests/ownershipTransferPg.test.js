@@ -33,8 +33,12 @@ const S = 'S_TRANSFER';
 const WF = 'adv_wf', WC = 'adv_wc', OTHER = 'adv_x';
 
 async function schema() {
+  // ★★ 스키마는 **서비스가 실제로 조회하는 테이블**을 전부 만든다 — 여기서 SQL 사본을 검증하면
+  //   서비스 쿼리를 망가뜨려도 테스트가 통과한다(변이시험이 실제로 잡아 이렇게 바꿨다).
   await pool.query(`
-    DROP TABLE IF EXISTS advertiser_campaigns, advertisers, raw_sheet_tabs CASCADE;
+    DROP TABLE IF EXISTS advertiser_campaigns, advertisers, raw_sheet_tabs, campaign_participants, tab_configs,
+      trackb_work_order_links, work_orders, trackb_settlement_links, trackb_tab_closeouts, trackb_tab_memos,
+      trackb_advertiser_links, index_master CASCADE;
     CREATE TABLE advertisers (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT DEFAULT 'active',
       inad_pm TEXT, contact TEXT, memo TEXT, sort_order INT DEFAULT 0);
     CREATE TABLE advertiser_campaigns (id SERIAL PRIMARY KEY, advertiser_id TEXT REFERENCES advertisers(id),
@@ -42,6 +46,22 @@ async function schema() {
     CREATE UNIQUE INDEX uq_adv_camp ON advertiser_campaigns (advertiser_id, sheet_id, COALESCE(tab_gid,''));
     CREATE TABLE raw_sheet_tabs (sheet_id TEXT, spreadsheet_title TEXT, tab_gid TEXT, tab_name TEXT,
       row_count INT, mirrored_at TIMESTAMPTZ DEFAULT NOW(), is_system_tab BOOLEAN DEFAULT FALSE);
+    CREATE TABLE campaign_participants (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, tab_gid TEXT,
+      seq INT, active BOOLEAN DEFAULT TRUE, deleted_at TIMESTAMPTZ, is_submitted BOOLEAN DEFAULT FALSE,
+      is_paid BOOLEAN DEFAULT FALSE, first_seen_at TIMESTAMPTZ DEFAULT NOW());
+    CREATE TABLE tab_configs (sheet_id TEXT, tab_name TEXT, manager TEXT, folder_url TEXT, capture_folder_url TEXT,
+      capture_slots JSONB, income_type TEXT, sheetless BOOLEAN DEFAULT FALSE);
+    CREATE TABLE work_orders (id SERIAL PRIMARY KEY, recruit_count INT, start_date DATE);
+    CREATE TABLE trackb_work_order_links (id SERIAL PRIMARY KEY, work_order_id INT, sheet_id TEXT, tab_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE trackb_settlement_links (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, sales_id TEXT,
+      contract_number TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE trackb_tab_closeouts (id SERIAL PRIMARY KEY, sheet_id TEXT, tab_name TEXT, closed_date DATE,
+      row_count INT, sub_count INT, created_at TIMESTAMPTZ DEFAULT NOW(), deleted_at TIMESTAMPTZ);
+    CREATE TABLE trackb_tab_memos (sheet_id TEXT, tab_name TEXT, memo TEXT);
+    CREATE TABLE trackb_advertiser_links (advertiser_id TEXT, token TEXT, active BOOLEAN DEFAULT TRUE,
+      login_required BOOLEAN DEFAULT FALSE, last_used_at TIMESTAMPTZ);
+    CREATE TABLE index_master (id SERIAL PRIMARY KEY, status TEXT DEFAULT 'active', sheet_id TEXT, tab_gid TEXT, tab_name TEXT);
   `);
 }
 async function seed() {
@@ -51,34 +71,17 @@ async function seed() {
   await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id,spreadsheet_title,tab_gid,tab_name,row_count) VALUES
      ($1,'위드시트','100','위프 작업',31), ($1,'위드시트','200','다른 작업',10)`, [S]);
 }
-/** 그 업체의 소유로 전개되는 탭 이름 — ownedTabsForAdvertiser 의 own/tabs 조인 조건과 같은 규칙. */
+/** 그 업체의 소유로 전개되는 탭 이름 — ★ **서비스를 그대로 호출**한다(쿼리 사본 금지: 사본을 검증하면
+ *  서비스 SQL 을 망가뜨려도 통과한다 — 변이시험이 실제로 잡았다). */
 async function expand(advId) {
-  const { rows } = await pool.query(
-    `WITH own AS (SELECT sheet_id, tab_gid FROM advertiser_campaigns WHERE advertiser_id=$1 AND deleted_at IS NULL)
-     SELECT DISTINCT rst.tab_name FROM raw_sheet_tabs rst
-       JOIN own o ON o.sheet_id = rst.sheet_id AND (
-            o.tab_gid = rst.tab_gid
-            OR (o.tab_gid IS NULL AND NOT EXISTS (
-                  SELECT 1 FROM advertiser_campaigns x WHERE x.deleted_at IS NULL AND x.sheet_id = rst.sheet_id
-                    AND x.tab_gid = rst.tab_gid AND x.advertiser_id <> $1)))
-      WHERE rst.is_system_tab = FALSE ORDER BY 1`, [advId]);
-  return rows.map(r => r.tab_name);
+  const r = await svc.ownedTabsForAdvertiser({ advertiserId: advId });
+  return r.rows.map(x => x.tabName).sort();
 }
-/** 개요 작업 수 — advertiserOverview 의 조인부. distinct=false 면 수정 전(이중 계수) 재현. */
-async function overviewCounts(distinct = true) {
-  const { rows } = await pool.query(
-    `WITH own AS (SELECT advertiser_id, sheet_id, tab_gid FROM advertiser_campaigns WHERE deleted_at IS NULL),
-     tabs AS (SELECT DISTINCT ON (rst.sheet_id, rst.tab_gid) rst.sheet_id, rst.tab_gid, rst.tab_name
-                FROM raw_sheet_tabs rst WHERE rst.is_system_tab = FALSE
-               ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC)
-     SELECT ${distinct ? 'DISTINCT' : ''} o.advertiser_id AS "advertiserId", t.sheet_id, t.tab_gid, t.tab_name
-       FROM tabs t JOIN own o ON o.sheet_id = t.sheet_id AND (
-            o.tab_gid = t.tab_gid
-            OR (o.tab_gid IS NULL AND NOT EXISTS (
-                  SELECT 1 FROM advertiser_campaigns x WHERE x.deleted_at IS NULL AND x.sheet_id = t.sheet_id
-                    AND x.tab_gid = t.tab_gid AND x.advertiser_id <> o.advertiser_id)))`);
+/** 개요 작업 수 — ★ 서비스 advertiserOverview 실행값(byAdvertiser[*].works). */
+async function overviewCounts() {
+  const o = await svc.advertiserOverview();
   const out = {};
-  for (const r of rows) out[r.advertiserId] = (out[r.advertiserId] || 0) + 1;
+  for (const [id, v] of Object.entries(o.byAdvertiser || {})) out[id] = v.works;
   return out;
 }
 
@@ -130,15 +133,18 @@ async function run() {
     const { rows } = await pool.query(`SELECT 1 FROM advertiser_campaigns WHERE advertiser_id=$1 AND sheet_id=$2 AND tab_gid='200' AND deleted_at IS NULL`, [OTHER, S]);
     assert.strictEqual(rows.length, 1);
   });
-  await ta('★★ DISTINCT 없으면 위프코리아 작업 수가 부풀어 오른다(회귀 재현)', async () => {
-    const bad = await overviewCounts(false);
-    assert.strictEqual(bad[WC], 2, JSON.stringify(bad));
+  // 이 시점 상태: 위프코리아 = 시트전체 + 탭지정('100') 동시 보유 / 타업체 = 탭지정('200')
+  //   → DISTINCT 없으면 탭 100 이 두 own 행에 매칭돼 위프코리아 작업 수가 2로 부풀어 오른다.
+  await ta('★★ 개요 작업 수 ≡ 실제 소유 탭 수(이중 계수 없음)', async () => {
+    const good = await overviewCounts();
+    assert.strictEqual(good[WC], 1, '위프코리아 works=' + JSON.stringify(good));
+    assert.strictEqual(good[OTHER], 1, '타업체 works=' + JSON.stringify(good));
   });
-  await ta('★★ 수정본(DISTINCT)은 실제 소유 탭 수와 일치', async () => {
-    const good = await overviewCounts(true);
-    assert.strictEqual(good[WC], 1, JSON.stringify(good));
-    assert.strictEqual(good[OTHER], 1, JSON.stringify(good));
-    assert.deepStrictEqual(await expand(WC), ['위프 작업']);   // 개요 숫자 ≡ 연결탭 표
+  await ta('★★ 개요 숫자 ≡ 연결탭 표(두 화면이 갈리지 않는다)', async () => {
+    const good = await overviewCounts();
+    assert.deepStrictEqual(await expand(WC), ['위프 작업']);
+    assert.strictEqual(good[WC], (await expand(WC)).length);
+    assert.strictEqual(good[OTHER], (await expand(OTHER)).length);
   });
 
   console.log('\n4) fail-closed');
