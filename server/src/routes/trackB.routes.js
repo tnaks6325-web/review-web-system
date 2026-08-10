@@ -453,6 +453,54 @@ router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, asy
   } catch (err) { _cutoverErr(err, res, next); }
 });
 
+/* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
+   preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
+   run     : 등록 + 업체 소유 + 작업표 + 장부 + 무시트 표식 + 시트 안내문
+   revert  : 가져오기 직후 되돌리기(주문이 들어왔으면 거부)
+
+   ★★ **adminOrMaster 전용** — 이 경로는 접수에 이은 두 번째 등록 창구다(복원 성격 예외).
+     AE 담당자에게 열면 담당 범위 밖의 시트를 시스템 작업으로 만들 수 있게 된다.
+   ★ 이 경로는 재기준하지 않는다 — `/api/trackb/*` 라 관리자 토큰·인트라넷 SSO 양쪽이 그대로 닿는다. */
+const sheetImport = require('../services/sheetImport.service');
+function _importErr(err, res, next) {
+  if (err instanceof sheetImport.ImportError) {
+    // ★ 화면이 사유별로 다르게 안내해야 하므로 코드를 그대로 넘긴다(errorHandler 500 마스킹 방지).
+    return res.status(400).json({
+      ok: false, code: err.code, error: err.message,
+      ...(err.availableTabs ? { availableTabs: err.availableTabs } : {}),
+    });
+  }
+  if (err && err.code === '42P01') {
+    return res.json({ ok: false, code: 'not_ready', error: '준비 전입니다 — 배포 완료 후 다시 시도해주세요.' });
+  }
+  return next(err);
+}
+router.post('/sheet-import/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { url, sheetId, gid } = req.body || {};
+    res.json(await sheetImport.previewSheetImport({ url, sheetId, gid }));
+  } catch (err) { _importErr(err, res, next); }
+});
+router.post('/sheet-import/run', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { url, sheetId, gid, advertiserId, displayName, skipSeqs, notice } = req.body || {};
+    res.json(await sheetImport.importSheet({
+      url, sheetId, gid, advertiserId, displayName, skipSeqs,
+      // ★ 안내문은 **명시적으로 false 일 때만** 끈다(값이 빠진 요청은 기본 동작 = 갱신).
+      notice: notice !== false,
+      by: _by(req),
+    }));
+  } catch (err) { _importErr(err, res, next); }
+});
+router.post('/sheet-import/revert', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const out = await sheetImport.revertImport({ sheetId, tabName, by: _by(req) });
+    res.status(out.ok ? 200 : 409).json(out);
+  } catch (err) { _importErr(err, res, next); }
+});
+
 // ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
 router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await svc.parityAll({ store: true, source: 'manual' })) }); }
