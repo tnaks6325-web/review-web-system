@@ -368,12 +368,73 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
   assert.ok(/confirm\(/.test(fn[0]) && /이중입금/.test(fn[0]), '취소 경고가 부족하다');
 });
 
-/* ═══ 8. 진짜 PG 검증 (PGTEST_URL 있을 때만) ═════════════════ */
+/* ═══ 8. 은행 서식 파일 — 계좌 앞 0 보존 · 하이픈 제거 (DB 불필요) ═
+   ★ 종전 가드는 "버퍼가 비지 않았고 PK 로 시작한다"만 봐서, 계좌를 숫자 셀로
+     바꿔 앞 0 이 날아가도 그대로 통과했다. 실제로 파일을 만들어 **되읽어**
+     값·타입·서식을 확인한다(담당자가 `'0123` 을 손으로 붙이던 사고 지점). */
 (async () => {
+  console.log('\n[8] 은행 서식 파일 — 계좌 앞 0 보존 · 하이픈 제거');
+  const ExcelJS = require('exceljs');
+  const ACCT_COL = { kbank: 2, hana: 2 };      // 두 양식 모두 2열이 계좌
+  const AMT_COL  = { kbank: 3, hana: 3 };
+
+  const readBack = async buf => {
+    const w = new ExcelJS.Workbook();
+    await w.xlsx.load(buf);
+    return w.worksheets[0];
+  };
+
+  await ta('★ 계좌 앞자리 0 이 그대로 살아 있다(문자열 셀 + 텍스트 서식)', async () => {
+    const items = [{ bank_code: '004', bank_account: '0123456789012', amount: 26900,
+      transfer_memo: '파우더망고', account_holder: '김리뷰' }];
+    for (const bank of ['kbank', 'hana']) {
+      const ws = await readBack(await paySvc.buildWorkbook(bank, items));
+      const cell = ws.getRow(2).getCell(ACCT_COL[bank]);
+      assert.strictEqual(typeof cell.value, 'string', `${bank}: 계좌가 문자열 셀이 아니다(숫자면 앞 0 소실)`);
+      assert.strictEqual(cell.value, '0123456789012', `${bank}: 계좌 값이 바뀌었다 — ${cell.value}`);
+      assert.strictEqual(cell.numFmt, '@', `${bank}: 계좌 셀에 텍스트 서식(@)이 없다`);
+    }
+  });
+
+  await ta('★ 하이픈이 섞인 계좌도 서식에는 숫자만 나간다', async () => {
+    const items = [{ bank_code: '088', bank_account: '110-123-456789', amount: 1000,
+      transfer_memo: '망고', account_holder: '김리뷰' }];
+    for (const bank of ['kbank', 'hana']) {
+      const ws = await readBack(await paySvc.buildWorkbook(bank, items));
+      assert.strictEqual(ws.getRow(2).getCell(ACCT_COL[bank]).value, '110123456789',
+        `${bank}: 계좌에 '-' 가 그대로 나갔다(은행 업로드 거부)`);
+    }
+  });
+
+  await ta('하나 서식의 은행코드도 앞 0 을 지킨다(045 ≠ 45)', async () => {
+    const ws = await readBack(await paySvc.buildWorkbook('hana',
+      [{ bank_code: '045', bank_account: '9002176640741', amount: 500, account_holder: '김리뷰' }]));
+    const cell = ws.getRow(2).getCell(1);
+    assert.strictEqual(cell.value, '045', `은행코드가 ${cell.value} 로 나갔다`);
+    assert.strictEqual(cell.numFmt, '@', '은행코드 셀에 텍스트 서식이 없다');
+  });
+
+  await ta('금액은 숫자 셀로 나간다(은행 양식이 수치를 요구)', async () => {
+    for (const bank of ['kbank', 'hana']) {
+      const ws = await readBack(await paySvc.buildWorkbook(bank,
+        [{ bank_code: '004', bank_account: '0123', amount: 26900, account_holder: '김리뷰' }]));
+      assert.strictEqual(ws.getRow(2).getCell(AMT_COL[bank]).value, 26900, `${bank}: 금액이 숫자가 아니다`);
+    }
+  });
+
+  await ta('계좌 정규화는 사본 없이 bankCodes 단일 출처를 쓴다', async () => {
+    const fn = svcSrc.match(/async function buildWorkbook[\s\S]*?\n}\n/);
+    assert.ok(fn, 'buildWorkbook 을 못 찾았다');
+    const n = (fn[0].match(/normalizeAccount\(/g) || []).length;
+    assert.strictEqual(n, 2, `buildWorkbook 이 normalizeAccount 를 ${n}회 쓴다(두 양식 = 2회)`);
+    assert.ok(!/replace\(\s*\/\[\^0-9\]/.test(fn[0]), 'buildWorkbook 안에 정규화 사본이 생겼다');
+  });
+
+  /* ═══ 9. 진짜 PG 검증 (PGTEST_URL 있을 때만) ═════════════════ */
   if (!process.env.PGTEST_URL) {
-    console.log('\n[8] PG 검증 — PGTEST_URL 미설정으로 건너뜀 (권장: 로컬 PG16 으로 실행)');
+    console.log('\n[9] PG 검증 — PGTEST_URL 미설정으로 건너뜀 (권장: 로컬 PG16 으로 실행)');
   } else {
-    console.log('\n[8] 진짜 PG 검증 — 잠금·취소·서식');
+    console.log('\n[9] 진짜 PG 검증 — 잠금·취소·서식');
     const pool = require('../src/db/pool');
     const svc = require('../src/services/payment.service');
 

@@ -518,6 +518,15 @@ function withStubPool(handler, run) {
     }
   });
 
+  t('6i-2 계좌 칸은 "숫자만 입력" 대신 자동 정규화를 안내한다(서버가 이미 - 를 뺀다)', () => {
+    const acct = HTML.slice(HTML.indexOf('function _pmFixAcct'), HTML.indexOf('/** 저장 성공 뒤 공통 마무리'));
+    const line = (acct.match(/id="pmAcctIn"[^\n]*/) || [''])[0];
+    assert.ok(line, 'pmAcctIn 입력칸을 못 찾았다');
+    assert.ok(!/숫자만 입력/.test(line), '★ 지시대로 제거한 placeholder 가 되살아났다');
+    assert.ok(/자동으로 빠지고/.test(acct) && /앞자리/.test(acct),
+      '- 자동 제거 · 앞 0 유지 안내가 없다(사용자가 손으로 지우게 된다)');
+  });
+
   t('6i onOk 예외를 삼키지 않고 사유를 말한다(조용히 버튼만 되살아나면 원인을 모른다)', () => {
     const dlg = HTML.slice(HTML.indexOf('function _pmDialog'), HTML.indexOf('function _pmCloseDialog'));
     assert.ok(/catch\(e\)\{[\s\S]*?toast\(/.test(dlg), 'onOk 예외 안내가 없다');

@@ -587,7 +587,9 @@ async function buildWorkbook(bank, items) {
       const code = String(it.bank_code || it.bankCode || '');
       ws.addRow([
         bankNameByCode(code) || code,
-        String(it.bank_account || it.bankAccount || ''),
+        // ★ 계좌는 마지막까지 `normalizeAccount` 단일 출처로 숫자만 남긴다 —
+        //   옛 원장 스냅샷에 '-' 가 섞여 있어도 은행 서식에는 절대 나가지 않게(업로드 거부 방지).
+        normalizeAccount(it.bank_account || it.bankAccount || ''),
         _int(it.amount),
         it.transfer_memo || it.transferMemo || '',
         it.account_holder || it.accountHolder || '',
@@ -600,7 +602,7 @@ async function buildWorkbook(bank, items) {
     for (const it of items) {
       ws.addRow([
         String(it.bank_code || it.bankCode || ''),     // ★ 문자열 — '045'의 앞 0이 사라지면 안 됨
-        String(it.bank_account || it.bankAccount || ''),
+        normalizeAccount(it.bank_account || it.bankAccount || ''),   // ★ 위와 같은 이유(숫자만 · 앞 0 보존)
         _int(it.amount),
         it.account_holder || it.accountHolder || '',
         '',
@@ -610,7 +612,10 @@ async function buildWorkbook(bank, items) {
     }
     ws.columns = [{ width: 14 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }, { width: 20 }, { width: 16 }];
   }
-  // 계좌·코드가 숫자로 해석돼 앞 0이 날아가거나 지수표기 되는 것 방지
+  // ★★ 계좌·은행코드는 **문자열 셀 + 텍스트 서식(`@`)** 으로 나간다 —
+  //    숫자로 해석되면 `0123…` 의 앞 0 이 날아가거나 긴 계좌가 지수표기(1.23E+12)로 바뀌어
+  //    은행 업로드가 통째로 거부된다(담당자가 매번 `'0123` 처럼 손으로 고치던 지점).
+  //    금액만 숫자 그대로 둔다(은행 양식이 수치를 요구).
   wb.worksheets[0].eachRow((row, i) => {
     if (i === 1) return;
     row.eachCell(cell => { if (typeof cell.value === 'string') cell.numFmt = '@'; });
