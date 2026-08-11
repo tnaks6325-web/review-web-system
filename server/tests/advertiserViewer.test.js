@@ -218,6 +218,7 @@ async function run() {
   /* ═══ 6. 리뷰제출 컬럼 선점(_advertiserColumns) ═══ */
   const advCols = svc.__advertiserColumnsForTest;
   const advHeaderCandidates = svc.__advertiserHeaderCandidatesForTest;
+  const advColumnValue = svc.__advertiserColumnValueForTest;
   ok('_advertiserColumns 가 테스트로 노출돼 있다', typeof advCols === 'function');
   ok('광고주 헤더 후보 보완기가 테스트로 노출돼 있다', typeof advHeaderCandidates === 'function');
   {
@@ -250,10 +251,27 @@ async function run() {
       !advCols(['수취인', '은행', '계좌번호', '예금주'], { submitCol: '계좌번호' }).includes('은행'));
   }
   ok('workdeskTab 이 보완된 헤더 후보와 roster 의 submit_col/submit_col2 를 광고주 헤더 산출에 넘긴다',
-    /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster\), \{[\s\S]*submitCol: sc\.submit_col,[\s\S]*submitCol2: sc2\.submit_col2,[\s\S]*\}\)/.test(
+    /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster, advEditedHeaders\), \{[\s\S]*submitCol: sc\.submit_col,[\s\S]*submitCol2: sc2\.submit_col2,[\s\S]*\}\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
   /* ═══ 7. 리뷰 이미지 미리보기(행별) ═══ */
+  {
+    ok('\uAD11\uACE0\uC8FC \uCEEC\uB7FC \uAC12 \uD22C\uC601\uAE30\uAC00 \uD14C\uC2A4\uD2B8\uB85C \uB178\uCD9C\uB3FC \uC788\uB2E4', typeof advColumnValue === 'function');
+    const trackedValue = typeof advColumnValue === 'function'
+      ? advColumnValue({}, { 'col:\uD0DD\uBC30\uC1A1\uC7A5': '2616771000000' }, '\uD0DD\uBC30\uC1A1\uC7A5')
+      : null;
+    ok('\uD5C8\uC6A9\uB41C \uD0DD\uBC30\uC1A1\uC7A5\uC740 \uD589\uC758 \uC140 \uD3B8\uC9D1 \uAC12\uC744 \uC6D0\uBCF8 \uD589 \uAC12\uBCF4\uB2E4 \uC6B0\uC120\uD574 \uBC18\uD658\uD55C\uB2E4', trackedValue === '2616771000000');
+    const fromCellEdit = advHeaderCandidates(
+      ['\uBC88\uD638', '\uC218\uCDE8\uC778', '\uCFE0\uD321id', '\uC5F0\uB77D\uCC98', '\uC8FC\uC18C'],
+      [],
+      ['\uD0DD\uBC30\uC1A1\uC7A5', '\uC740\uD589']
+    );
+    ok('\uC6D0\uBCF8 \uD589\uC5D0 \uC5C6\uB294 \uD0DD\uBC30\uC1A1\uC7A5 \uC140 \uD3B8\uC9D1 \uC624\uBC84\uB808\uC774\uB3C4 \uC5C5\uCCB4 \uD5E4\uB354\uB85C \uBCF4\uC644\uD55C\uB2E4',
+      advCols(fromCellEdit).includes('\uD0DD\uBC30\uC1A1\uC7A5'));
+    ok('\uC140 \uD3B8\uC9D1 \uC624\uBC84\uB808\uC774\uC5D0 \uC788\uB354\uB77C\uB3C4 \uD5C8\uC6A9 \uBC16 \uC740\uD589 \uCEEC\uB7FC\uC740 \uB178\uCD9C\uD558\uC9C0 \uC54A\uB294\uB2E4',
+      !advCols(fromCellEdit).includes('\uC740\uD589'));
+  }
+
   const rvLayer = layers.find(l => l.path === '/workdesk/review-images');
   ok('GET /workdesk/review-images 라우트가 authMiddleware 뒤에 있다',
     rvLayer && rvLayer.methods.includes('get') && rvLayer.mw.includes('authMiddleware'));
