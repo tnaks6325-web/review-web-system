@@ -2269,6 +2269,26 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
   return Object.fromEntries(out);
 }
 
+// Keeps relational tab_name stable; only the workboard-facing display name changes.
+async function setWorkdeskTitle({ sheetId, tabName, displayName } = {}) {
+  const sid = String(sheetId || '').trim();
+  const tab = String(tabName || '').trim();
+  const name = String(displayName == null ? '' : displayName).trim();
+  if (!sid || !tab) throw new Error('sheetId, tabName 필수');
+  if (!name) throw new Error('작업명을 입력해 주세요.');
+  if (name.length > 120) throw new Error('작업명은 120자 이하로 입력해 주세요.');
+  const { rows } = await getPool().query(
+    `INSERT INTO tab_configs (sheet_id, tab_name, display_name, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       updated_at = NOW()
+     RETURNING display_name AS "displayName"`,
+    [sid, tab, name]
+  );
+  return { ok: true, displayName: (rows[0] && rows[0].displayName) || name };
+}
+
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
 //   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
 //     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단).
@@ -2286,7 +2306,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const maskPII = role === 'advertiser';       // 광고주(외부)만 마스킹 · AE(내부)는 전체
   const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
   const { rows: meta } = await db.query(
-    `SELECT tc.campaign_name AS "campaignName", tc.manager, tc.review_type AS "reviewType",
+    `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
             tc.source_of_truth AS "sourceOfTruth"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
@@ -3731,6 +3751,7 @@ module.exports = {
   _computeWritebackPlan,
   _writebackEngine,
   workdeskTab,
+  setWorkdeskTitle,
   editWorkdeskRow,
   revertWorkdeskEdit,
   hideWorkdeskRow,
