@@ -1,14 +1,16 @@
 #pmbody .pmselect{margin:0 0 12px;border:1px solid #D9E1EC;border-radius:8px;background:#FBFCFE;overflow:hidden}
-#pmbody .pmselecthead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px 8px;color:#172033}
-#pmbody .pmselecthead strong,#pmbody .pmworkhead strong{font-size:12px;font-weight:850}
+#pmbody .pmselecthead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;color:#172033}
+#pmbody .pmselecthead strong,#pmbody .pmworkhead strong,#pmbody .pmsummarytitle{font-size:12px;font-weight:850}
 #pmbody .pmselecthead span{font-size:10.5px;font-weight:750;color:#60718D;font-variant-numeric:tabular-nums}
-#pmbody .pmmanagers{display:flex;gap:6px;flex-wrap:wrap;padding:0 12px 10px}
+#pmbody .pmselectionlayout{display:grid;grid-template-columns:minmax(0,1fr) 274px;border-top:1px solid #E7ECF3}
+#pmbody .pmselectionleft{min-width:0;padding:11px 12px 12px}
+#pmbody .pmmanagers{display:flex;gap:6px;flex-wrap:wrap;padding:0 0 11px}
 #pmbody .pmmgr{border:1px solid #D9E1EC;border-radius:6px;background:#fff;color:#60718D;padding:6px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;transition:background .16s,border-color .16s,color .16s}
 #pmbody .pmmgr:hover{border-color:#9FB9E3;color:#2865D5}
 #pmbody .pmmgr.on{background:#E7F0FF;border-color:#8FB2EC;color:#1F5BC6}
-#pmbody .pmworkhead{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #E7ECF3;padding:9px 12px 7px}
+#pmbody .pmworkhead{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #E7ECF3;padding:9px 0 7px}
 #pmbody .pmworkhead span{font-size:10.5px;color:#75839A}
-#pmbody .pmworklist{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto;padding:0 12px 12px}
+#pmbody .pmworklist{display:flex;flex-direction:column;gap:6px;max-height:310px;overflow:auto}
 #pmbody .pmworkpick{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;border:1px solid #D9E1EC;border-radius:7px;background:#fff;color:#172033;padding:9px 10px;text-align:left;font:inherit;cursor:pointer;transition:background .16s,border-color .16s,box-shadow .16s}
 #pmbody .pmworkpick:hover{border-color:#AABFE0;background:#F7FAFF}
 #pmbody .pmworkpick.on{border-color:#8FB2EC;background:#EAF3FF;box-shadow:0 5px 13px rgba(46,102,186,.08)}
@@ -17,10 +19,25 @@
 #pmbody .pmworkcheck{width:19px;height:19px;display:none;place-items:center;border-radius:50%;background:#2865D5;color:#fff}
 #pmbody .pmworkpick.on .pmworkcheck{display:grid}
 #pmbody .pmworkcheck svg{width:13px;height:13px}
-#pmbody .pmmgr:focus-visible,#pmbody .pmworkpick:focus-visible{outline:3px solid rgba(47,112,232,.28);outline-offset:2px}
+#pmbody .pmsummary{display:flex;flex-direction:column;gap:11px;padding:14px;border-left:1px solid #E7ECF3;background:#F7F9FC}
+#pmbody .pmsummarycopy{font-size:10.5px;line-height:1.55;color:#75839A;margin:3px 0 0}
+#pmbody .pmresultgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+#pmbody .pmresult{padding:10px;border:1px solid #D9E1EC;border-radius:7px;background:#fff}
+#pmbody .pmresult.total{background:#FFF8E8;border-color:#EBCF84}
+#pmbody .pmresult span{display:block;color:#75839A;font-size:10px;font-weight:800}
+#pmbody .pmresult.total span{color:#8B631D}
+#pmbody .pmresult strong{display:block;margin-top:3px;color:#172033;font-size:17px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+#pmbody .pmresult.total strong{color:#8A5700}
+#pmbody .pmdownloadtitle{margin-top:1px;color:#60718D;font-size:10px;font-weight:850}
+#pmbody .pmdownloads{display:grid;gap:6px}
+#pmbody .pmdownload{width:100%;justify-content:center;border-radius:6px;font:inherit;font-size:11px;font-weight:850;padding:8px 9px}
+#pmbody .pmdownloadnote{margin:0;color:#75839A;font-size:10px;line-height:1.45}
+#pmbody .pmmgr:focus-visible,#pmbody .pmworkpick:focus-visible,#pmbody .pmdownload:focus-visible{outline:3px solid rgba(47,112,232,.28);outline-offset:2px}
 
 @media(max-width:720px){
   #pmbody .pmselecthead{align-items:flex-start;flex-direction:column;gap:4px}
+  #pmbody .pmselectionlayout{grid-template-columns:1fr}
+  #pmbody .pmsummary{border-left:0;border-top:1px solid #E7ECF3}
   #pmbody .pmworkhead{align-items:flex-start;flex-direction:column;gap:3px}
   #pmbody .pmworkpick{gap:7px;padding:9px}
   #pmbody .pmworkmeta{font-size:10px}
