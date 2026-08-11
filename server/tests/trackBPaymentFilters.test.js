@@ -32,7 +32,7 @@ test('payment target metadata includes the work manager', () => {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmToggleWorkKeys'), sandbox);
+vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmToggleWorkKeys'), sandbox);
 
 test('legacy manager name is normalized to mango', () => {
   assert.strictEqual(sandbox._pmManagerName('\uBC15\uC740\uBE44'), '\uB9DD\uACE0');
@@ -54,6 +54,10 @@ test('download total excludes unchecked rows within the active filters', () => {
   assert.strictEqual(sandbox._pmSelectedPaymentTotal(rows, { manager: '\uB9CC\uB450', workKeys: ['S1||A', 'S2||A'] }), 1000);
 });
 
+test('selected recipient count uses the same work and checked-item conditions as the download', () => {
+  assert.strictEqual(sandbox._pmSelectedRecipientCount(rows, { manager: '\uB9CC\uB450', workKeys: ['S1||A', 'S2||A'] }, it => it.payable && !it.excluded), 1);
+});
+
 test('an empty selected-work list produces no download candidates', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmFilterItems(rows, { manager: '\uB9CC\uB450', workKeys: [] }))), []);
 });
@@ -61,4 +65,10 @@ test('an empty selected-work list produces no download candidates', () => {
 test('toggling work rows preserves every other selected work', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmToggleWorkKeys(['S1||A', 'S3||C'], ['S1||A', 'S2||A', 'S3||C'], 'S2||A'))), ['S1||A', 'S2||A', 'S3||C']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmToggleWorkKeys(['S1||A', 'S2||A'], ['S1||A', 'S2||A'], 'S1||A'))), ['S2||A']);
+});
+
+test('payment UI keeps the work list and selected-result panel side by side', () => {
+  assert.match(workdesk, /class="pmselectionlayout"/);
+  assert.match(workdesk, /입금 대상자 수/);
+  assert.match(workdesk, /선택 항목 서식 다운로드/);
 });
