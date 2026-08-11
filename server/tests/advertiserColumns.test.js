@@ -35,6 +35,12 @@ function run() {
   assert.deepEqual(advCols(null), [], '3: null → []');
   console.log('  3. 부분/빈 입력 안전 ✓');
 
+  // 배송 대행 탭의 송장 번호는 광고주가 배송 상태를 확인하는 데 필요한 업무 데이터다.
+  const tracking = advCols(['번호', '주문번호', '택배송장', '비고']);
+  assert.deepEqual(tracking, ['번호', '주문번호', '택배송장'],
+    '3a: 택배송장 열을 광고주 뷰어에 포함한다');
+  console.log('  3a. 택배송장 열 노출 ✓');
+
   // 3b) ★유출 방지: '입금'이지만 계좌/은행/입금자명/자유텍스트 컬럼은 입금일로 오매칭 안 함(계좌·이름·정보 유출 차단)
   assert.deepEqual(advCols(['입금일','입금계좌','입금은행','입금자명']), ['입금일'], '3b: 입금일만 · 입금계좌/입금은행/입금자명 제외');
   assert.deepEqual(advCols(['입금']), ['입금'], '3b: 단독 입금(시트 관행=입금일) 매칭');

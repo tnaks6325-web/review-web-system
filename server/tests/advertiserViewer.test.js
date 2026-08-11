@@ -131,6 +131,8 @@ async function run() {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(src)[1];
   const css = style.replace(/\/\*[\s\S]*?\*\//g, '');
+  ok('택배송장 열은 전체 번호가 보이도록 광고주 그리드에서 150px 폭을 쓴다',
+    /'택배송장':150/.test(src));
 
   // ── 폭 상한: 선언 순서가 규칙(같은 특이성 → 뒤가 이김) ──
   const iQhd = css.indexOf('body[data-vw="qhd"]'), iAdv = css.indexOf('body.advm{--app-max:1680px}'), iWide = css.indexOf('body.widemode{--app-max:100vw}');
