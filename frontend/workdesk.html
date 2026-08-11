@@ -267,23 +267,23 @@
   .adtodo .tgo{font-size:10.5px;color:var(--accent);font-weight:700;flex:none}
   .adtodo.none{cursor:default;justify-content:center;color:var(--muted);font-size:12px;background:var(--card2)}
   .adtodo.none:hover{border-color:var(--line);background:var(--card2)}
-  /* ── 업체 뷰어: 표 위 3열 정보 조합의 리뷰 이미지 미리보기 ──
-     작업 조건/발주, 진행 현황/정산과 나란히 두고 표는 그 아래 전체 폭을 쓴다.
+  /* ── 업체 뷰어: 표 위 2열 정보 조합의 리뷰 이미지 미리보기 ──
+     왼쪽은 작업 조건·진행 현황·정산 현황을 순서대로 두고, 기존 진행 현황 자리는 리뷰가 쓴다.
+     리뷰 이미지는 고정 높이의 스크롤 영역에서만 움직여 상단 조합 높이를 밀어내지 않는다.
      행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
-  .advtop{display:grid;grid-template-columns:minmax(220px,.9fr) minmax(260px,1fr) minmax(248px,280px);grid-template-areas:"condition progress preview" "order settlement preview";gap:12px;align-items:start;max-width:1380px}
-  .advcondition{grid-area:condition}.advprogress{grid-area:progress}.advorder{grid-area:order}.advsettle{grid-area:settlement}
-  .advtop .tp3col{height:100%}.advorder .wobar{margin-bottom:8px}.advorder .wodetail{margin-bottom:0}.advsettle.setldetail{margin-bottom:0}
+  .advtop{display:grid;grid-template-columns:minmax(280px,1fr) minmax(248px,320px);grid-template-areas:"condition preview" "progress preview" "settlement preview";gap:12px;align-items:stretch;max-width:1040px}
+  .advcondition{grid-area:condition}.advprogress{grid-area:progress}.advsettle{grid-area:settlement}
+  .advtop .tp3col{height:100%}.advsettle.setldetail{margin-bottom:0}.advsettle .sect{margin-top:0!important}
   .advgw{margin-top:12px}.advgw>#gridhost{min-width:0}
-  .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px;overflow:auto}
-  .advtop .rvpane{grid-area:preview;position:sticky;top:12px;min-height:520px;max-height:calc(100vh - var(--toph) - var(--tbh) - 24px)}
-  @media(max-width:1180px){.advtop{grid-template-columns:1fr 1fr;grid-template-areas:"condition progress" "order settlement" "preview preview"}.advtop .rvpane{position:static;min-height:430px;max-height:none}}
-  @media(max-width:760px){.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "order" "progress" "settlement" "preview"}.advtop .rvpane{min-height:380px}}
+  .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px}
+  .advtop .rvpane{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain}
+  @media(max-width:760px){.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement" "preview"}.advtop .rvpane{position:static;align-self:auto;height:420px;min-height:420px}}
   .rvpane .rvhd{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);
                 display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px}
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
   .rvwho{font-size:12.5px;font-weight:750;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rvwho span{font-weight:600;color:var(--faint);font-size:11px;margin-left:5px}
-  .rvimg{display:block;width:100%;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:zoom-in;background:var(--card2)}
+  .rvimg{display:block;width:100%;height:180px;object-fit:contain;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:zoom-in;background:var(--card2)}
   .rvimg:last-child{margin-bottom:0}
   .rvslot{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px}
   .rvnone{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
@@ -4177,7 +4177,7 @@ function renderWorkdesk(wd){
     ${_finBarHtml()}
     ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
-      ? `<section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advorder">${renderWorkOrderSection(wd)}</div><div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><aside class="rvpane" id="rvPane"></aside></section><div class="advgw"><div id="gridhost">${tableSection}</div></div>`
+      ? `<section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><aside class="rvpane" id="rvPane"></aside></section><div class="advgw"><div id="gridhost">${tableSection}</div></div>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
@@ -4280,7 +4280,7 @@ function _rvRender(){
    시안 = frontend/docs/design-workboard-top-3section.html (사용자 확정 2026-08-06).
    ★ 값 계산(target·pT/pS/pP·광고주 렌즈 분기)은 종전 그대로 — 바뀐 것은 배치와 표시뿐이다.
    ★ 발주 '미연결' 배너는 ① 작업 조건 카드 안쪽 줄로 흡수한다(전폭 배너 제거).
-     연결된 경우의 작업세부 펼침(.wodetail)은 renderWorkOrderSection 이 종전대로 아래에 그린다. */
+     업체 화면은 작업세부 펼침을 렌더하지 않고, 내부 화면만 renderWorkOrderSection 을 종전대로 아래에 그린다. */
 function summaryStrip(wd,d,m,c){
   const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
   const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;

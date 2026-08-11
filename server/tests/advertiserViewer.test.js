@@ -302,12 +302,12 @@ async function run() {
     ok('슬롯 라벨(현금영수증 등) 동봉', rv['3'].some(f => f.slot === 'cash_receipt'));
   }
   ok('프론트: 그리드 행에 data-rid(선택 키)가 실린다', /<tr data-rid="\$\{esc\(r\.id\)\}"/.test(src));
-  ok('프론트: 광고주 상세은 조건·진행·리뷰을 표 위의 시안 A 조합으로 렌더한다',
-    /<section class="advtop">\$\{summaryStrip\(wd,d,m,c\)\}[\s\S]*\$\{renderWorkOrderSection\(wd\)\}[\s\S]*id="settlementsec"[\s\S]*<aside class="rvpane" id="rvPane"[\s\S]*<div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div>/.test(src));
-  ok('시안 A: 작업 조건 아래 발주 · 진행 현황 아래 정산 · 좁은 화면에서는 한 열로 전환한다',
-    /\.advtop\{display:grid;grid-template-columns:minmax\(220px,\.9fr\) minmax\(260px,1fr\) minmax\(248px,280px\);grid-template-areas:"condition progress preview" "order settlement preview"/.test(css)
-    && /\.advcondition\{grid-area:condition\}\.advprogress\{grid-area:progress\}\.advorder\{grid-area:order\}\.advsettle\{grid-area:settlement\}/.test(css)
-    && /@media\(max-width:1180px\)\{\.advtop\{grid-template-columns:1fr 1fr;grid-template-areas:"condition progress" "order settlement" "preview preview"/.test(css));
+  ok('프론트: 광고주 상세은 조건·진행·정산과 리뷰를 표 위의 2열 조합으로 렌더한다',
+    /<section class="advtop">\$\{summaryStrip\(wd,d,m,c\)\}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div><aside class="rvpane" id="rvPane"><\/aside><\/section><div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div>/.test(src));
+  ok('시안 A 조정: 왼쪽은 작업조건 → 진행현황 → 정산현황, 오른쪽은 기존 진행현황 자리에 리뷰를 둔다',
+    /\.advtop\{display:grid;grid-template-columns:minmax\(280px,1fr\) minmax\(248px,320px\);grid-template-areas:"condition preview" "progress preview" "settlement preview"/.test(css)
+    && /\.advcondition\{grid-area:condition\}\.advprogress\{grid-area:progress\}\.advsettle\{grid-area:settlement\}/.test(css)
+    && !/\.advorder\{grid-area:order\}/.test(css));
   ok('★ 이미지 URL 은 bare API_BASE 로 만든다(window.API_BASE_URL 은 최상위 const 라 항상 undefined)', (() => {
     const i = src.indexOf('function _rvUrl(');
     const body = src.slice(i, i + 260);
@@ -322,8 +322,9 @@ async function run() {
   ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 이미지 미등록/.test(src));
   // 표 검색(_gsReapply) 도입으로 뒤에 호출이 하나 더 붙었다 — 검사 의미(재렌더 끝에 선택 복원 배선)는 불변.
   ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\);/.test(src));
-  ok('미리보기 패널 CSS(표 위 · 세로 520px · 미제출 안내 박스)',
-    /\.advtop \.rvpane\{grid-area:preview;position:sticky;top:12px;min-height:520px/.test(css)
+  ok('미리보기 패널 CSS(왼쪽 높이에 맞춤 · 고정 이미지 영역 스크롤 · 미제출 안내 박스)',
+    /\.advtop \.rvpane\{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain/.test(css)
+    && /\.rvimg\{display:block;width:100%;height:180px;object-fit:contain/.test(css)
     && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
 
   console.log(`\n✅ advertiserViewer: ${n} cases passed`);
