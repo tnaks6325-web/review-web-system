@@ -15,10 +15,16 @@ assert.match(workdeskView, /class="taskbar wb-topbar" id="taskbar"/, '연속 필
 const companyTier = workdeskView.indexOf('class="tb1 wb-tier wb-company"');
 const taskTier = workdeskView.indexOf('class="tb2 wb-tier wb-task"');
 const openedTier = workdeskView.indexOf('class="tb0 wb-tier wb-open"');
+assert.match(workdeskView, /class="tb1 wb-tier wb-company">[\s\S]*?<\/div>\s*<span class="wb-tier-label">&#50629;&#52404;&#47785;&#47197;<\/span>/,
+  'company tier needs the company-list label after search');
+assert.match(workdeskView, /class="tb2 wb-tier wb-task" id="tb2"><span class="wb-tier-label">&#51089;&#50629;&#47785;&#47197;<\/span>/,
+  'task tier needs the task-list label on the left');
+assert.match(workdeskView, /class="tb0 wb-tier wb-open" id="tb0"><span class="wb-tier-label">&#50676;&#47536;&#53493;<\/span>/,
+  'opened tier needs the opened-tab label on the left');
+assert.match(HTML, /\.wb-tier-label\{[^}]*font-size:12px[^}]*font-weight:800/,
+  'tier labels must be larger and visually stronger than 11px tabs');
 assert.ok(companyTier >= 0 && taskTier > companyTier && openedTier > taskTier,
   '상단 순서는 업체 → 업체 작업 → 열린 작업이어야 함');
-assert.match(workdeskView, /id="tb0"><span class="wb-open-label" aria-hidden="true">열린탭<\/span>/,
-  '3단 왼쪽에 열린탭 레이블이 있어야 함');
 assert.match(HTML, /--wb-scroll-progress/, '세 행 스크롤 진행률 CSS 변수가 필요함');
 assert.match(HTML, /wb-open::after\{[^}]*pointer-events:none/, '진행 바는 클릭·드래그 조작을 받지 않아야 함');
 assert.ok(/\.wb-task\{[^}]*gap:3px/.test(HTML)
