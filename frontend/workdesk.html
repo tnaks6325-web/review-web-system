@@ -267,14 +267,17 @@
   .adtodo .tgo{font-size:10.5px;color:var(--accent);font-weight:700;flex:none}
   .adtodo.none{cursor:default;justify-content:center;color:var(--muted);font-size:12px;background:var(--card2)}
   .adtodo.none:hover{border-color:var(--line);background:var(--card2)}
-  /* ── 업체 뷰어: 시트 그리드 우측 리뷰 이미지 미리보기 패널 ──
-     그리드는 열 고정폭 합이라 넓은 화면에서 오른쪽이 비는데, 그 자리를 미리보기로 쓴다.
+  /* ── 업체 뷰어: 표 위 3열 정보 조합의 리뷰 이미지 미리보기 ──
+     작업 조건/발주, 진행 현황/정산과 나란히 두고 표는 그 아래 전체 폭을 쓴다.
      행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
-  .advgw{display:flex;gap:12px;align-items:flex-start}
-  .advgw>#gridhost{flex:1 1 auto;min-width:0}
-  .rvpane{flex:0 0 340px;border:1px solid var(--line);border-radius:12px;background:var(--card);
-          padding:11px 12px;position:sticky;top:12px;max-height:calc(100vh - 300px - var(--tbh));overflow:auto}
-  @media(max-width:1100px){.advgw{flex-direction:column}.rvpane{position:static;flex:none;width:100%;max-height:none}}
+  .advtop{display:grid;grid-template-columns:minmax(220px,.9fr) minmax(260px,1fr) minmax(248px,280px);grid-template-areas:"condition progress preview" "order settlement preview";gap:12px;align-items:start;max-width:1380px}
+  .advcondition{grid-area:condition}.advprogress{grid-area:progress}.advorder{grid-area:order}.advsettle{grid-area:settlement}
+  .advtop .tp3col{height:100%}.advorder .wobar{margin-bottom:8px}.advorder .wodetail{margin-bottom:0}.advsettle.setldetail{margin-bottom:0}
+  .advgw{margin-top:12px}.advgw>#gridhost{min-width:0}
+  .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px;overflow:auto}
+  .advtop .rvpane{grid-area:preview;position:sticky;top:12px;min-height:520px;max-height:calc(100vh - var(--toph) - var(--tbh) - 24px)}
+  @media(max-width:1180px){.advtop{grid-template-columns:1fr 1fr;grid-template-areas:"condition progress" "order settlement" "preview preview"}.advtop .rvpane{position:static;min-height:430px;max-height:none}}
+  @media(max-width:760px){.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "order" "progress" "settlement" "preview"}.advtop .rvpane{min-height:380px}}
   .rvpane .rvhd{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);
                 display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px}
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
@@ -4167,12 +4170,9 @@ function renderWorkdesk(wd){
     <span class="sp" style="flex:1"></span>
     ${_finBarHtml()}
     ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
-    ${summaryStrip(wd,d,m,c)}
-    <div class="setldetail" id="setldetail"${(STATE.settleOpen||STATE.role==='advertiser')?'':' hidden'}><div id="settlementsec"></div></div>
-    ${renderWorkOrderSection(wd)}
     ${STATE.role==='advertiser'
-      ? `<div class="advgw"><div id="gridhost">${tableSection}</div><aside class="rvpane" id="rvPane"></aside></div>`
-      : `<div id="gridhost">${tableSection}</div>`}`;
+      ? `<section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advorder">${renderWorkOrderSection(wd)}</div><div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><aside class="rvpane" id="rvPane"></aside></section><div class="advgw"><div id="gridhost">${tableSection}</div></div>`
+      : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
   //   남은 청크가 없을 때(작은 표)는 여기서 바로 '못 찾음'까지 확정한다.
@@ -4188,7 +4188,7 @@ function renderWorkdesk(wd){
   if(STATE.role==='advertiser') _rvBoot(STATE.cur);   // 업체: 리뷰 이미지 미리보기 패널
 }
 
-// ══ 업체 뷰어 — 리뷰 이미지 미리보기(그리드 우측 패널) ═══════════════════════════
+// ══ 업체 뷰어 — 리뷰 이미지 미리보기(표 위 정보 조합 패널) ═══════════════════════════
 //   행 클릭 또는 ↑↓ 키로 선택이 이동하고 그 행의 리뷰 캡처를 즉시 보여준다.
 //   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
@@ -4297,7 +4297,8 @@ function summaryStrip(wd,d,m,c){
   //   교체 후에만 단계 막대가 폭을 쓰는(=로드 전엔 flex 행에 갇히는) 어긋남이 생긴다(실브라우저로 잡았다).
   const setl=isAdv?'':`<div class="tp3col setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
-  return `<div class="tp3grid${isAdv?' n2':''}">${cond}${prog}${setl}</div>`;
+  if(isAdv) return `<div class="advcondition">${cond}</div><div class="advprogress">${prog}</div>`;
+  return `<div class="tp3grid">${cond}${prog}${setl}</div>`;
 }
 // 발주 미연결 줄 — 작업 조건 카드 안쪽(admin/master 만, 광고주·AE 에겐 종전대로 미노출)
 function _woUnlinkedRow(wd){
