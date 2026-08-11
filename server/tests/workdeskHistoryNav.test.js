@@ -45,6 +45,8 @@ ok('loadTabs 가 pendingTab.__nav 를 selTab 으로 전달한다(복원 중 재�
 ok('renderOwnershipView 가 pendingAdv 를 소비해 보던 업체 패널을 복원한다',
   /if\(STATE\.pendingAdv\)\{[\s\S]{0,240}selAdv\(ix,\{nav:!!pa\.__nav\}\); return;/.test(src));
 ok('STATE 에 pendingAdv 초기값이 있다', /pendingTab:null, pendingAdv:null/.test(src));
+ok('부팅은 딥링크보다 낮은 우선순위로 같은 계정의 이력을 복원한다',
+  /if\(!_GO && _VIEW!=='logs' && _navCanRestore\(history\.state\)\) _navRestoreState\(history\.state\);/.test(src));
 
 /* ── B. 히스토리 항목 ↔ 실제 화면 일치(어긋나면 뒤로/앞으로가 없던 화면을 되살린다) ── */
 ok('★ renderWorkdeskView: 열 작업 예약이 없으면 STATE.cur 를 비운다(본문이 "작업 선택" 안내로 뜨므로)',
@@ -113,6 +115,18 @@ ok('★ renderOwnershipView: 복원 진입이 아니면 STATE.advCur 를 비운�
   sandbox._navApply({ __wd: 1, view: 'workdesk' });
   ok('★ 탭 없는 작업보드로 복원하면 열린 작업도 비운다(없던 작업이 열려 보이는 것 방지)',
     S.pendingTab === null && S.cur === null);
+
+  // 새로고침은 현재 history.state를 다시 읽어야 한다. 다른 계정의 이력은 절대 복원하면 안 된다.
+  S.role = 'staff'; S.name = 'Kim'; S.view = 'home'; S.cur = null; S.pendingTab = null;
+  const refreshState = { __wd: 1, actor: 'staff:Kim', view: 'workdesk', tab: { sheetId: 'S2', tabName: '새로고침 유지', tabGid: '2' } };
+  ok('같은 계정의 새로고침 이력만 복원할 수 있다',
+    typeof sandbox._navCanRestore === 'function' && typeof sandbox._navRestoreState === 'function'
+    && sandbox._navCanRestore(refreshState) === true);
+  if (typeof sandbox._navRestoreState === 'function') sandbox._navRestoreState(refreshState);
+  ok('새로고침 복원은 작업보드와 열어 둔 작업을 예약한다',
+    S.view === 'workdesk' && S.pendingTab && S.pendingTab.tabName === '새로고침 유지' && S.pendingTab.__nav === true);
+  ok('다른 계정의 이력은 복원하지 않는다',
+    typeof sandbox._navCanRestore === 'function' && sandbox._navCanRestore({ ...refreshState, actor: 'admin:Other' }) === false);
 
   // lock 이 복원 뒤 반드시 풀려야 한다(안 풀리면 이후 클릭이 영영 안 쌓인다)
   S.view = 'overview'; S.cur = null; S.advCur = null; sandbox._navPush();

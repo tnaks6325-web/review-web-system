@@ -2044,6 +2044,8 @@ async function boot(){
   if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
     return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "리뷰웹시스템[3버전]" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
+  // 새로고침은 현재 브라우저 항목을 다시 읽되, 다른 계정이 남긴 이력은 복원하지 않는다.
+  if(!_GO && _VIEW!=='logs' && _navCanRestore(history.state)) _navRestoreState(history.state);
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업보드 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
   // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
@@ -2217,8 +2219,20 @@ function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
 //   초기화되는 클라이언트 상태라 복원 대상이 아니다(selTab 의 기존 계약 유지).
 let _navLock=false;      // popstate 복원 중 = 재푸시 금지(무한 적재 차단)
 let _navBooted=false;    // 첫 항목은 push 가 아니라 replace — 브라우저 최초 항목(state:null)을 낭비하지 않는다
+function _navActor(){ return String(STATE.role||'')+':'+String(STATE.name||''); }
+function _navCanRestore(st){ return !!(st&&st.__wd&&st.actor&&st.actor===_navActor()); }
+function _navRestoreState(st){
+  const v=st.view||'workdesk';
+  STATE.view=v;
+  if(v==='workdesk'){
+    STATE.pendingTab = st.tab ? Object.assign({__nav:true}, st.tab) : null;
+    if(!st.tab) STATE.cur=null;
+    if(st.advView) STATE.advView=st.advView;
+  }
+  if(v==='ownership') STATE.pendingAdv = st.advId ? {id:st.advId,__nav:true} : null;
+}
 function _navEntry(){
-  const e={ __wd:1, view:STATE.view||'workdesk' };
+  const e={ __wd:1, actor:_navActor(), view:STATE.view||'workdesk' };
   if(e.view==='workdesk' && STATE.cur) e.tab={ sheetId:STATE.cur.sheetId, tabName:STATE.cur.tabName, tabGid:STATE.cur.tabGid||'', spreadsheetTitle:STATE.cur.spreadsheetTitle||'' };
   // 업체 첫 화면은 대시보드/전체 작업 두 상태라 어느 쪽이었는지도 항목에 남긴다(뒤로가기가 되짚어야 할 화면 전환).
   if(e.view==='workdesk' && !STATE.cur && STATE.role==='advertiser') e.advView=STATE.advView||'dash';
@@ -2246,12 +2260,8 @@ function _navPush(){
 function _navApply(st){
   _navLock=true;
   try{
-    const v=st.view||'workdesk';
-    if(v==='workdesk'){ STATE.pendingTab = st.tab ? Object.assign({__nav:true}, st.tab) : null;
-      if(!st.tab) STATE.cur=null;          // "탭 없는 작업보드"로 되돌아간 상태 — 열린 작업도 함께 비운다
-      if(st.advView) STATE.advView=st.advView; }   // 업체 첫 화면(대시보드/전체 작업) 복원
-    if(v==='ownership') STATE.pendingAdv = st.advId ? {id:st.advId,__nav:true} : null;
-    switchView(v);
+    _navRestoreState(st);
+    switchView(STATE.view);
   }finally{ _navLock=false; }
 }
 window.addEventListener('popstate', e=>{
