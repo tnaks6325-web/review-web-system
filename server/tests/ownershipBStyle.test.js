@@ -43,6 +43,12 @@ test('keeps rows safe and selectable through the existing company selector', () 
   assert.match(source, /document\.querySelectorAll\('\.advitem'\)/);
 });
 
+test('renders the ownership footer without relying on another function scope for admin access', () => {
+  const footer = source.match(/function _ovmRenderFoot\(\)\{[\s\S]*?\n\}/);
+  assert.ok(footer, 'ownership footer should be extractable');
+  assert.match(footer[0], /const isAdmin\s*=\s*STATE\.role==='master'\s*\|\|\s*STATE\.role==='admin';/);
+});
+
 test('ends the loading state when the mapping-tab request rejects', () => {
   const view = source.match(/async function renderOwnershipView\(\)\{[\s\S]{0,4200}?catch\(err\)\{ _ovmLoadFailed\(err&&err\.message\); return; \}/);
   assert.ok(view, 'ownership view should have a terminating error handler');

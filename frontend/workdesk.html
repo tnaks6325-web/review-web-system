@@ -10403,6 +10403,7 @@ function _ovmRenderAdvs(){
 // 사이드바 하단 — 업체 미지정 시트(지정 전에는 계약·정산이 붙지 않는다). 상시 노출(종전엔 추가 폼 안에만 있었다).
 function _ovmRenderFoot(){
   const el=$('#ovmFoot'); if(!el) return;
+  const isAdmin=STATE.role==='master'||STATE.role==='admin';
   const owned=STATE.ownedSheetIds||new Set();
   const total=Object.keys(STATE.sheetMap||{}).length;
   const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid));
