@@ -192,6 +192,12 @@ const IM = require('../src/utils/inspectMessages');
       '2열 편집은 좁은 화면에서 한 열로 안전하게 전환');
     ok('D1a: 리뷰어 안내문구 = 데스크톱 2열 · 모바일 1열 편집');
 
+    assert.ok(/class="as-imsg-input"[\s\S]{0,90}rows="3"/.test(as)
+      && /\.as-imsg-meta\{padding:9px 12px/.test(as)
+      && /\.as-imsg-input\{[\s\S]{0,90}min-height:66px/.test(as),
+      '안내문구 행 기본 높이는 기존 2열 UI보다 약 30% 낮게 유지');
+    ok('D1b: 리뷰어 안내문구 행 높이 30% 축소');
+
     const wd = readFront('workdesk.html');
     assert.ok(/_riMsgAll\(\)[\s\S]{0,400}\/api\/trackb\/settings\/inspect-messages/.test(wd),
       '팝업 프리필도 같은 설정 표에서 읽는다');
