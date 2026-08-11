@@ -437,6 +437,10 @@
   .mhsheet{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);
     border-radius:7px;padding:3px 9px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
+  .mh-title{display:flex;align-items:center;gap:4px;min-width:0;flex:0 1 auto}
+  .mh-title h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mh-title-edit{width:25px;height:25px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;flex:none}
+  .mh-title-edit:hover{background:var(--card2);color:var(--blue)}
   /* ══ 작업보드 제목 행(.mh.mh-wb) — 마감 안내 문구 + [🏁 마감] 이 작업명과 **같은 행** ══════════
      ★★ nowrap 이 없으면 안 된다: flex 는 **줄바꿈을 먼저 하고 축소는 그다음**이라(줄나눔 판정은 축소 전
         max-content 기준) min-width:0 만 주면 좁은 폭에서 [마감]이 아랫줄로 떨어진다 — 시안 검증에서 실측.
@@ -3941,6 +3945,26 @@ function _curSheetLabel(){
   if(!s || s===c.sheetId) return '';   // 제목을 모르면(시트ID뿐) 표기 생략 — 의미 없는 문자열 노출 방지
   return `<span class="mhsheet" title="이 작업이 소속한 시트">📄 ${esc(s)}</span>`;
 }
+async function editWorkdeskTitle(){
+  if(!STATE.cur || STATE.role==='advertiser') return;
+  const m=(STATE.wd&&STATE.wd.meta)||{};
+  const current=m.displayName||STATE.cur.displayName||STATE.cur.tabName;
+  const displayName=(prompt('작업명을 입력하세요',current)||'').trim();
+  if(!displayName) return toast('작업명을 입력해 주세요.');
+  if(displayName.length>120) return toast('작업명은 120자 이하로 입력해 주세요.');
+  const j=await api('/api/trackb/workdesk/title',{method:'POST',body:JSON.stringify({
+    sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,displayName
+  })}).catch(()=>null);
+  if(!j||!j.ok) return toast((j&&j.error)||'작업명 저장에 실패했습니다.');
+  const saved=j.displayName||displayName;
+  STATE.cur.displayName=saved;
+  const tab=(STATE.tabs||[]).find(t=>t.sheetId===STATE.cur.sheetId&&t.tabName===STATE.cur.tabName);
+  if(tab) tab.displayName=saved;
+  if(STATE.wd&&STATE.wd.meta) STATE.wd.meta.displayName=saved;
+  renderWorkdesk(STATE.wd);
+  _renderTabList();
+  toast('작업명을 저장했습니다.');
+}
 function _tcell(r, field, val){   // 편집 가능 텍스트 셀
   const v = val==null?'':val;
   if(!STATE.canEdit) return `<td>${esc(v||'')}</td>`;
@@ -3985,7 +4009,8 @@ function renderWorkdesk(wd){
   // ★ 제목 행 = [작업명 · 시트 · 배지] ―― 남는 폭 ―― [마감 안내 + 🏁 마감] [⋯ 도구](master)
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
-  $('#main').innerHTML=`<div class="mh mh-wb"><h1 title="${esc(STATE.cur.tabName)}">${esc(STATE.cur.tabName)}</h1>
+  const workdeskTitle=m.displayName||STATE.cur.displayName||STATE.cur.tabName;
+  $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
     ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}

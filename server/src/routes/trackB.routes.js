@@ -912,6 +912,19 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Workboard label only: keep tab_name as the relational identity key.
+router.post('/workdesk/title', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, displayName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const title = String(displayName == null ? '' : displayName).trim();
+    if (!title || title.length > 120) return res.status(400).json({ ok: false, error: '작업명은 1~120자로 입력해 주세요.' });
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.setWorkdeskTitle({ sheetId, tabName, displayName: title });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 // ══ P2 정산 파이프라인 — 탭 ↔ 인트라넷 계약/견적 링크 + 프록시 스텝퍼 + 광고주 노출 토글. ══
 //   ★ 인트라넷 D1 무접촉(HTTP GET 프록시만). 링크는 trackb_settlement_links 만 write.
 router.get('/settlement/sales-search', authMiddleware, internalMiddleware, async (req, res, next) => {
