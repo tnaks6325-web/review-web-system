@@ -2143,13 +2143,13 @@ async function openRequestCounts({ sheetId, tabName, role = 'master' } = {}) {
   return (rows[0] && rows[0].n) || 0;
 }
 
-// 역할 스코프 적용된 활성 탭 목록: staff/advertiser 는 담당/소유 탭만, master/admin 은 전체.
-async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false } = {}) {
+// 역할 스코프 적용된 활성 탭 목록: advertiser는 소유 탭만, staff는 호출처가 allStaff를 명시한 경우에만 전체.
+async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false, allStaff = false } = {}) {
   const all = await participants.listActiveTabs({ limit });
-  // forMapping(소유지정 초기매핑용): staff(AE)에 한해 전체 탭명 목록 개방 — 아직 소유가 없는 시트를
-  //   매핑하려면 전체가 보여야 함(스코프만 적용하면 catch-22). 명단 PII 없는 탭명·행수만이라 내부인에 안전.
+  // forMapping(소유지정 초기매핑)·allStaff(작업보드): staff에 한해 전체 탭을 명시적으로 연다.
+  //   그 밖의 호출은 담당 작업 스코프를 유지한다.
   //   advertiser(외부)는 forMapping 무시(항상 소유 스코프) — 교차 열람 차단 유지.
-  const scope = (forMapping && role === 'staff') ? null : await _scopeFor({ role, staffName, advertiserId });
+  const scope = ((forMapping || allStaff) && role === 'staff') ? null : await _scopeFor({ role, staffName, advertiserId });
   const tabs = scope ? all.filter(t => _scopeOwns(scope, t.sheetId, t.tabGid)) : all;
   // 소유 업체 주석(작업목록 업체별 그룹핑용, 읽기 전용 추가 필드): 탭지정 소유 > 시트전체 소유 우선.
   //   advertiser_campaigns 미적용/빈 환경은 주석 없이 통과(graceful) — 기존 응답 필드 불변.
@@ -2249,15 +2249,15 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
 
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
 //   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
-//     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단). staff는 라우트가 이미 차단.
-async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null } = {}) {
+//     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단).
+async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null, allowAllStaff = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
-  // 스코프 강제: advertiser=소유업체, staff(AE)=담당업체(inad_pm). 스코프 밖 탭은 거부(교차 접근 차단).
+  // 스코프 강제: advertiser=소유업체, staff는 작업보드 호출이 allowAllStaff를 명시하지 않으면 담당업체만.
   //   ★ 판정은 클라이언트가 보낸 tabGid를 신뢰하지 않고 (sheetId, tabName)으로 gid를 재해석(canAccessTab).
   //     명단·PII·주문원장은 전부 tabName으로 조회되므로, 스코프도 반드시 tabName 기준이어야 read/edit
   //     비대칭이 사라진다(과거: 소유 gid를 쿼리스트링에 실어 타 탭 tabName의 명단을 긁는 교차 열람이 뚫렸음).
-  if (role === 'advertiser' || role === 'staff') {
+  if (role === 'advertiser' || (role === 'staff' && !allowAllStaff)) {
     const okc = await canAccessTab({ role, staffName, advertiserId, sheetId, tabName });
     if (!okc) return { scoped: true, denied: true };
   }

@@ -33,6 +33,14 @@ async function _ensureEditScope(req, sheetId, tabName) {
   return { ok: false, code: 403, error: '편집 권한이 없습니다.' };
 }
 
+// 작업표 셀 값 편집/붙여넣기는 내부 직원 모두에게 허용한다.
+// 마감·정산처럼 작업의 상태나 금액을 바꾸는 기능은 위의 담당 작업 스코프를 계속 사용한다.
+async function _ensureWorkdeskCellEditScope(req) {
+  const role = _role(req);
+  if (role === 'master' || role === 'admin' || role === 'staff') return { ok: true };
+  return { ok: false, code: 403, error: '편집 권한이 없습니다.' };
+}
+
 // 스레드 스코프 가드: master/admin=전체 · staff=담당 탭 · advertiser=소유 탭(양방향 협업이라 read/write 동일) · reviewer 차단.
 //   ★ (sheetId, tabName) 기준 canAccessTab(gid 신뢰 금지). 광고주 내부글 제외는 서비스(internal_only 필터)가 담당.
 async function _ensureThreadScope(req, sheetId, tabName) {
@@ -81,9 +89,8 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
   try {
     const role = _role(req);
     if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
-    // 역할 스코프: master/admin=전체 · staff=담당(inad_pm) · advertiser=소유 탭만.
-    //   forMapping=1(소유지정 초기매핑): staff에 한해 전체 탭명 목록(서비스에서 advertiser는 무시 — 스코프 유지).
-    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1' });
+    // 작업보드에서는 내부 직원이 모든 작업표를 보고 편집한다. 광고주는 소유 탭만 유지한다.
+    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1', allStaff: role === 'staff' });
     // ── 마감(전사 공통) 주석 + 작업목록 통계(?stats=1) ── migration 088 · PRD prd-workboard-worktabs.html
     //   ★ 스코프 단일 출처는 위 scopedActiveTabs 하나 — 여기서는 그 결과에 **주석만** 얹는다.
     //     서버가 마감 탭을 거르지 않는 이유 = 홈 "마감 보관함"이 같은 응답에서 마감분을 골라 그린다.
@@ -893,13 +900,13 @@ router.post('/ownership/transfer', authMiddleware, adminOrMasterMiddleware, asyn
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
   try {
-    // 역할 렌즈: master/admin(전체) · staff(AE, 담당 탭+전체 PII) · advertiser(소유 탭+마스킹). reviewer 차단.
+    // 역할 렌즈: 내부 직원 전체 작업표 · advertiser(소유 탭+마스킹). reviewer 차단.
     const role = _role(req);
     if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '작업보드 열람 권한이 없습니다.' });
     const { sheetId, tabName, tabGid } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
-    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null });
+    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff' });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
@@ -1066,13 +1073,13 @@ router.post('/workdesk/unseen', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── 리뷰웹시스템[3버전] 편집(오버레이) — master/admin 전체 · staff(AE) 담당 탭만 · advertiser 차단(_ensureEditScope). ──
+// ── 리뷰웹시스템[3버전] 셀 편집(오버레이) — 내부 직원 전체 · advertiser 차단. ──
 //   rowId ∈ (sheetId,tabName) 재검증·앵커 산출·거부조건은 서비스가 수행.
 router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, field, value } = req.body || {};
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value, by: _by(req) });
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
@@ -1081,7 +1088,7 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, field } = req.body || {};
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
-    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
 });
