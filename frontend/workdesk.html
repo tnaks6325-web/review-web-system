@@ -660,6 +660,36 @@
      줄여 탭·스크롤바가 상한에서 정확히 잘린다. 배경은 부모 .taskbar 가 같은 var(--card)라 여백 띠 없음.
      (.top/.tb1 은 스스로 스크롤하지 않아 padding 방식 유지 — tb1 의 스크롤러는 자식 .segwrap 이라 안전) */
   .tb2    {margin-inline:max(12px, calc((100% - var(--app-max)) / 2))}
+  /* 작업보드 상단 3단 · 시안 1(연속 필드): 기존 tb0/tb1/tb2 렌더 계약은 그대로 두고,
+     업체 → 업체 작업 → 열린 작업이 한 조작 영역으로 읽히도록 표현만 통일한다. */
+  .taskbar.wb-topbar{background:var(--card);border-bottom:1px solid var(--line)}
+  .taskbar.wb-topbar .wb-tier{display:flex;align-items:center;gap:7px;min-height:40px;border-bottom:1px solid var(--line);box-sizing:border-box}
+  .taskbar.wb-topbar .wb-company{background:var(--card);padding-block:3px}
+  .taskbar.wb-topbar .wb-task{align-items:center;gap:5px;min-height:40px;background:#f9fbfe;margin-inline:max(14px, calc((100% - var(--app-max)) / 2));padding:5px 0;overflow-x:auto}
+  .taskbar.wb-topbar .wb-open{align-items:center;gap:5px;min-height:40px;background:var(--card);margin-inline:max(14px, calc((100% - var(--app-max)) / 2));padding:5px 0;overflow-x:auto}
+  .taskbar.wb-topbar .wb-open:empty{display:none}
+  .taskbar.wb-topbar .wsearch{width:176px}
+  .taskbar.wb-topbar .wsearch input{height:34px;border-color:#dfe5ed;border-radius:8px;font-size:11px;font-weight:700;padding:7px 10px 7px 30px;transition:none}
+  .taskbar.wb-topbar .wsearch input:focus{border-color:#dfe5ed;box-shadow:none}
+  .taskbar.wb-topbar .wsearch .ic{left:9px;color:#315f9f;font-size:12px}
+  .taskbar.wb-topbar .segdiv{align-self:center;height:20px;margin:0;background:var(--line)}
+  .taskbar.wb-topbar .segwrap{gap:5px;padding-bottom:0}
+  .taskbar.wb-topbar .seg{gap:5px;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:700;letter-spacing:-.018em}
+  .taskbar.wb-topbar .seg.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+  .taskbar.wb-topbar .seg.on .cnt{background:#d8e8ff;color:var(--accent-deep)}
+  .taskbar.wb-topbar .seg.favseg.on{background:#fff7dc;border-color:#efd696;color:#8a6200}
+  .taskbar.wb-topbar .seg.favseg.on .fs{color:#b97900}
+  .taskbar.wb-topbar .wtab{height:28px;gap:5px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-family:"Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;font-size:11px;font-weight:700;letter-spacing:-.018em;line-height:15px}
+  .taskbar.wb-topbar .wtab:hover{background:#f6f9ff;border-color:#9fbee9;color:var(--accent-deep);transform:translateY(-1px)}
+  .taskbar.wb-topbar .wtab.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+  .taskbar.wb-topbar .wtab .tn{max-width:270px}
+  .taskbar.wb-topbar .wt0{max-width:270px;gap:5px;border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:var(--card);font-family:"Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;font-size:11px;font-weight:700;letter-spacing:-.018em;color:var(--muted)}
+  .taskbar.wb-topbar .wt0:hover{background:#f6f9ff;border-color:#9fbee9;color:var(--accent-deep);transform:translateY(-1px)}
+  .taskbar.wb-topbar .wt0.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+  .taskbar.wb-topbar .wt0.td,.taskbar.wb-topbar .wt0.td.on{background:var(--card2);border-color:var(--line);color:var(--faint)}
+  .taskbar.wb-topbar .wt0add{align-self:center;margin:0;border-style:solid;border-radius:7px;padding:5px 8px}
+  .taskbar.wb-topbar .wt0note{align-self:center;margin:0}
+  @media(max-width:860px){.taskbar.wb-topbar .wb-company{gap:6px}.taskbar.wb-topbar .wsearch{width:142px}.taskbar.wb-topbar .segdiv{display:none}.taskbar.wb-topbar .segwrap{width:auto}.taskbar.wb-topbar .wb-task,.taskbar.wb-topbar .wb-open{margin-inline:12px}}
   .wrap   {padding-inline:max( 0px, calc((100% - var(--app-max)) / 2))}
   .ovwrap {padding-inline:max(22px, calc((100% - var(--app-max)) / 2))}
   body[data-vw="fhd"]{--app-max:1920px}   /* :root 기본값과 같은 값을 body 에도 명시 — 상한이 :root 한 줄에만 매달리지 않게 */
@@ -2380,9 +2410,8 @@ function renderWorkdeskView(){
     return;
   }
   const isMaster = STATE.role==='master';
-  $('#viewroot').innerHTML = `<div class="taskbar" id="taskbar">
-      <div class="tb0" id="tb0"></div>
-      <div class="tb1">
+  $('#viewroot').innerHTML = `<div class="taskbar wb-topbar" id="taskbar">
+      <div class="tb1 wb-tier wb-company">
         <div class="wsearch"><span class="ic">🔍</span>
           <input id="wq" type="text" placeholder="작업·업체·시트 통합검색…" autocomplete="off"
                  oninput="wSearch(this.value)" onfocus="wSearch(this.value)" onkeydown="wSearchKey(event)">
@@ -2390,7 +2419,8 @@ function renderWorkdeskView(){
         <div class="segdiv"></div>
         <div class="segwrap" id="segwrap"></div>
       </div>
-      <div class="tb2" id="tb2"><span class="b2empty">불러오는 중…</span></div>
+      <div class="tb2 wb-tier wb-task" id="tb2"><span class="b2empty">불러오는 중…</span></div>
+      <div class="tb0 wb-tier wb-open" id="tb0"></div>
     </div>
     <div class="wrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
     <div class="main" id="main"><div class="empty">위에서 작업을 선택하세요.</div></div>

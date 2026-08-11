@@ -8,6 +8,16 @@ const HTML = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'
 const script = (HTML.match(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/i) || [])[1];
 assert.ok(script, 'inline script block not found');
 
+// 화면 계약: 작업보드 상단은 시안 1의 연속 필드 구조를 쓰되, 기존 렌더러가 의존하는
+// tb0/tb1/tb2 ID는 유지한다. DOM 순서는 업체 → 업체 작업 → 열린 작업이다.
+const workdeskView = HTML.slice(HTML.indexOf('function renderWorkdeskView()'), HTML.indexOf('async function loadTabs()'));
+assert.match(workdeskView, /class="taskbar wb-topbar" id="taskbar"/, '연속 필드 작업바 클래스 누락');
+const companyTier = workdeskView.indexOf('class="tb1 wb-tier wb-company"');
+const taskTier = workdeskView.indexOf('class="tb2 wb-tier wb-task"');
+const openedTier = workdeskView.indexOf('class="tb0 wb-tier wb-open"');
+assert.ok(companyTier >= 0 && taskTier > companyTier && openedTier > taskTier,
+  '상단 순서는 업체 → 업체 작업 → 열린 작업이어야 함');
+
 // ── 최소 DOM 스텁 ──────────────────────────────────────────────
 function mkEl(id) {
   const el = {
