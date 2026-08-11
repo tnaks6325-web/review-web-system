@@ -6420,6 +6420,10 @@ function _pmSelectedPaymentTotal(items, filters, isSelected){
   return _pmFilterItems(items,filters).filter(selected)
     .reduce((sum,it)=>sum+(Number(it.amount)||0),0);
 }
+function _pmSelectedRecipientCount(items, filters, isSelected){
+  const selected=isSelected || (it => it.payable && !it.excluded);
+  return _pmFilterItems(items,filters).filter(selected).length;
+}
 function _pmFilterState(){
   const filter=STATE.pmFilter || {};
   if(!Array.isArray(filter.workKeys)) filter.workKeys=filter.workKey ? [filter.workKey] : null;
@@ -6458,6 +6462,9 @@ function _pmFilterBar(allItems){
     .sort((a,b)=>a.localeCompare(b,'ko'));
   const works=_pmWorkEntries(allItems,filter.manager);
   const selectedKeys=new Set(filter.workKeys===null ? works.map(([key])=>key) : filter.workKeys);
+  const selectedItems=_pmFilterItems(allItems,filter).filter(_pmOn);
+  const selectedTotal=_pmSelectedPaymentTotal(allItems,filter,_pmOn);
+  const recipientCount=_pmSelectedRecipientCount(allItems,filter,_pmOn);
   const managerButton=(value,label)=>`<button type="button" class="pmmgr ${filter.manager===value?'on':''}" aria-pressed="${filter.manager===value}" onclick="_pmSelectManager(${esc(JSON.stringify(value))})">${esc(label)}</button>`;
   const workRows=works.map(([key,it])=>{
     const selected=selectedKeys.has(key);
@@ -6465,13 +6472,18 @@ function _pmFilterBar(allItems){
     const label=it.tabLabel||it.tabName||key;
     return `<button type="button" class="pmworkpick ${selected?'on':''}" aria-pressed="${selected}" onclick="_pmToggleWork(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
   }).join('');
-  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · ${selectedKeys.size}/${works.length}개 작업 선택</span></div><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span>행 전체를 눌러 여러 작업을 선택합니다.</span></div><div class="pmworklist">${workRows||'<div class="empty">선택할 작업이 없습니다.</div>'}</div></section>`;
+  const downloadButton=(bank,label)=>{
+    const bankItems=selectedItems.filter(it=>it.bank===bank);
+    return bankItems.length
+      ? `<button class="btn primary pmdownload" onclick="_pmDownload('${bank}')">${label} 서식 다운로드 · ${bankItems.length}건</button>`
+      : `<button class="btn pmdownload" disabled>${label} 대상 없음</button>`;
+  };
+  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · ${selectedKeys.size}/${works.length}개 작업 선택</span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span>행 전체를 눌러 여러 작업을 선택합니다.</span></div><div class="pmworklist">${workRows||'<div class="empty">선택할 작업이 없습니다.</div>'}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
 }
 
 function _pmRender(){
   const allItems = STATE.pmItems||[];
   const items = _pmVisibleItems();
-  const selectedTotal = _pmSelectedPaymentTotal(allItems, STATE.pmFilter, _pmOn);
   const picked = b => items.filter(it=>it.bank===b && _pmOn(it));
   const kb = picked('kbank'), hn = picked('hana');
   const blocked = items.filter(it=>!it.payable);
@@ -6484,24 +6496,16 @@ function _pmRender(){
     <button class="btn" onclick="_pmLoad()">새로고침</button></div>`;
 
   const stat=(k,v,cls)=>`<div class="pmstat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
-  const dlBtn=(bank,label,list)=>list.length
-    ? `<button class="btn primary" onclick="_pmDownload('${bank}')">⬇ ${label} 서식 다운로드 (${list.length}건 · ${_pmNum(list.reduce((a,c)=>a+c.amount,0))}원)</button>`
-    : `<button class="btn" disabled>⬇ ${label} 대상 없음</button>`;
-
   $('#pmbody').innerHTML = `
     <div class="lgwrap" style="max-width:1400px">
       ${_pmTabsHtml()}
       ${_pmFilterBar(allItems)}
       <div class="pmstats">
-        ${stat('선택 조건 금액', _pmNum(selectedTotal)+'원')}
-        ${stat('오늘 입금대상', items.filter(_pmOn).length+'건')}
-        ${stat('합계 금액', _pmNum(items.filter(_pmOn).reduce((a,c)=>a+c.amount,0))+'원')}
         ${stat('케이뱅크', kb.length+'건')}
         ${stat('하나은행', hn.length+'건')}
         ${blocked.length?stat('⚠ 보류(계좌·은행)', blocked.length+'건','warn'):''}
         ${noMemo.length?stat('⚠ 통장표시 없음', noMemo.length+'건','warn'):''}
       </div>
-      <div class="pmrow">${dlBtn('kbank','케이뱅크',kb)} ${dlBtn('hana','하나은행',hn)}</div>
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
       ${_pmFixBlock()}
