@@ -10239,15 +10239,15 @@ async function renderOwnershipView(){
     <div class="own-panel" id="ownPanel"><div class="empty">불러오는 중…</div></div></div>
     <div class="ovm-scrim" id="ovmScrim" onclick="_ovmCloseDrawer()"></div>
     <div class="ovm-drawer" id="ovmDrawer" role="dialog" aria-modal="true" aria-label="업체 설정"></div>`;
-  // 탭 인덱스(시트명/탭명 조회용): 매핑용 전체 목록(forMapping=1 — staff도 전체 탭명 수신, 미소유 시트 매핑 가능).
-  //   작업보드 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
-  if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
-  buildTabIndex(STATE.mapTabs);
-  const isAdminRole = STATE.role==='master'||STATE.role==='admin';
-  // ★★ 자리표시자('불러오는 중…')를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다 — 네트워크 오류로
-  //   여기서 reject 되면 사이드바·패널 두 칸이 영원히 '불러오는 중…'에 매달린다(리뷰검수 무한로딩 사고와 같은 자리).
+  // ★★ 자리표시자('불러오는 중…')를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다 — 매핑용 탭 조회도
+  //   같은 경계 안에 둬야 네트워크 오류가 B안의 숨은 목록 뒤에 남지 않는다.
   let r=null, os=null, ac=null;
   try{
+    // 탭 인덱스(시트명/탭명 조회용): 매핑용 전체 목록(forMapping=1 — staff도 전체 탭명 수신, 미소유 시트 매핑 가능).
+    // 작업보드 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
+    if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
+    buildTabIndex(STATE.mapTabs);
+    const isAdminRole = STATE.role==='master'||STATE.role==='admin';
     [r, os, ac]=await Promise.all([
       // ?overview=1 — 업체별 작업수·계약 미매칭·마감자료 검수 대기·접속링크 상태를 같은 응답에 받는다
       //   (신규 엔드포인트 0 · 로컬 DB 집계라 인트라넷 무접촉). 실패 소스는 overview 플래그로 온다.
