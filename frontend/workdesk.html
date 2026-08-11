@@ -1196,6 +1196,31 @@
   @media (prefers-reduced-motion:reduce){.ovm-sk{animation:none}}
   .ovm-fin{font-size:10px;font-weight:800;border-radius:999px;padding:1px 6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)}
   .ovm-fin.cand{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 25%,transparent)}
+  /* ── 업체관리 B스타일: 사이드바 없는 명령형 대시보드 + 업체 원장 ── */
+  .own-wrap.ovm-bwrap{display:block;height:auto;min-height:calc(100vh - var(--toph) - var(--tbh));background:#EEF2F7;font-family:"SUIT Variable","SUIT","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-variant-numeric:tabular-nums}
+  .own-wrap.ovm-bwrap .ovm-side{display:none}
+  .own-wrap.ovm-bwrap .own-panel{max-width:1520px;margin:0 auto;padding:22px 24px 48px;overflow:visible}
+  .own-wrap.ovm-bwrap .own-panel > *{max-width:none;margin-left:0;margin-right:0}
+  .ovm-bpage{color:#172033}
+  .ovm-bhead{display:flex;align-items:flex-end;gap:12px;margin:0 0 14px}
+  .ovm-bhead h2{margin:0;font-size:25px;line-height:1.15;letter-spacing:-.04em}
+  .ovm-bhead p{margin:4px 0 0;color:#71809A;font-size:12px}
+  .ovm-bsp{flex:1}
+  .ovm-bhead .btn{height:30px;border-radius:6px;border-color:#D9E1EC;background:#fff;color:#172033;font-size:11px;font-weight:800}
+  .ovm-bhead .btn.pri{background:#2F70E8;border-color:#2F70E8;color:#fff;box-shadow:none}
+  .ovm-bmetrics{display:grid;grid-template-columns:1.45fr repeat(3,1fr);margin-bottom:12px;border:1px solid #D9E1EC;border-radius:10px;background:#fff;overflow:hidden}
+  .ovm-bmetric{min-height:82px;padding:13px 16px;border-right:1px solid #D9E1EC}
+  .ovm-bmetric:last-child{border-right:0}.ovm-bmetric .k{display:block;color:#71809A;font-size:10px;font-weight:850}.ovm-bmetric .v{display:block;margin:2px 0;font-size:24px;font-weight:850;letter-spacing:-.04em}.ovm-bmetric .s{display:block;color:#71809A;font-size:10px}
+  .ovm-bmetric .loads{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;color:#53647C;font-size:10px;font-weight:800}.ovm-bmetric.good .v{color:#14734B}.ovm-bmetric.warn{background:#FFF2DF}.ovm-bmetric.warn .v{color:#AE5900}
+  .ovm-bupdates{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  .ovm-bupdate{background:#fff;border:1px solid #D9E1EC;border-radius:10px;overflow:hidden}
+  .ovm-bupdate h3{margin:0;padding:10px 14px;border-bottom:1px solid #D9E1EC;font-size:12px;letter-spacing:-.02em}.ovm-bupdate .urow{display:grid;grid-template-columns:1fr auto;gap:10px;padding:9px 14px;border-top:1px solid #EDF1F6}.ovm-bupdate .urow:first-of-type{border-top:0}.ovm-bupdate b{display:block;font-size:11px}.ovm-bupdate small{display:block;margin-top:2px;color:#71809A;font-size:10px}.ovm-bupdate .n{align-self:center;color:#172033;font-size:12px;font-weight:850}.ovm-bupdate .n.warn{color:#AE5900}
+  .ovm-bledger{max-width:none;background:#fff;border:1px solid #D9E1EC;border-radius:10px;overflow:auto}
+  .ovm-bledger .ovm-ovh{padding:12px 14px 0}.ovm-bledger .ovm-ovh h2{font-size:14px}.ovm-bledger .ovm-lead{padding:0 14px;margin:3px 0 11px;font-size:11px}
+  .ovm-bledger .ovm-cta{margin:0 14px 11px;border-color:#F0D4A8;border-radius:7px;background:#FFF8ED;padding:9px 10px}.ovm-bledger .ovm-cta .ct b{font-size:11px;color:#80500F}.ovm-bledger .ovm-cta .ct span{font-size:10px}.ovm-bledger .ovm-cta .btn{border-radius:6px;font-size:10.5px}
+  .ovm-bsearch{display:flex;align-items:center;gap:7px;margin:0 14px 11px;padding:0 9px;height:30px;max-width:280px;border:1px solid #D9E1EC;border-radius:6px;background:#fff}.ovm-bsearch input{width:100%;min-width:0;border:0;outline:0;color:#172033;font:inherit;font-size:11px}.ovm-bsearch input::placeholder{color:#71809A}.ovm-bsearch:focus-within{border-color:#2F70E8;box-shadow:0 0 0 3px rgba(47,112,232,.12)}
+  .ovm-bledger .ovm-ovt{grid-template-columns:minmax(190px,1.5fr) 88px 64px 92px 108px 96px 74px;gap:10px;min-width:860px}.ovm-bledger .ovm-ovt.h{padding:8px 14px;background:#F7F9FC;color:#8B98AB;font-size:9.5px}.ovm-bledger .ovm-ovt.r{margin:0;border:0;border-top:1px solid #EDF1F6;border-radius:0;padding:10px 14px;transition:background .12s}.ovm-bledger .ovm-ovt.r:hover{background:#F8FBFF;transform:none}.ovm-bledger .ovm-ovt.r:focus-visible{outline:2px solid #2F70E8;outline-offset:-2px}.ovm-bledger .ovm-fin{border-radius:5px}.ovm-bledger .ovm-num.hot{color:#AE5900}
+  @media(max-width:900px){.own-wrap.ovm-bwrap .own-panel{padding:18px 14px 32px}.ovm-bhead{align-items:flex-start;flex-wrap:wrap}.ovm-bhead h2{font-size:22px}.ovm-bmetrics{grid-template-columns:1fr 1fr}.ovm-bmetric:nth-child(2){border-right:0}.ovm-bmetric:nth-child(-n+2){border-bottom:1px solid #D9E1EC}.ovm-bupdates{grid-template-columns:1fr}.ovm-bledger{border-radius:8px}}
   /* 전체 개요 표(업체 미선택) */
   .ovm-ov{max-width:1060px}
   .ovm-ovh{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:2px}
@@ -10198,7 +10223,7 @@ async function renderOwnershipView(){
   //   ★ 첫 await 전이라 switchView 의 _navPush 가 이 값을 보고, 히스토리 항목이 실제 화면과 어긋나지 않는다.
   if(!STATE.pendingAdv) STATE.advCur=null;
   _ovmAdvQ=''; _ovmAdvF='all'; _ovmQ=''; _ovmF='all'; _ovmCloseDrawer(true);
-  $('#viewroot').innerHTML = `<div class="own-wrap">
+  $('#viewroot').innerHTML = `<div class="own-wrap ovm-bwrap">
     <div class="advlist ovm-side">
       <div class="ovm-sh">
         <div class="ovm-shrow"><span class="ttl">업체 · 광고주</span>
@@ -10294,6 +10319,44 @@ function _ovmCandWhy(){ const m=STATE.ovMeta;
 function _ovmMatchKnown(){ const m=STATE.ovMeta; return !!(m && m.ok && !m.contractsUnavailable); }
 function _ovmLinkKnown(){ const m=STATE.ovMeta; return !!(m && m.ok && !m.linksUnavailable); }
 
+// B스타일 업체 원장 상단: 서버가 이미 내려준 업체별 집계만 재배치한다.
+// 활동 시각/금액처럼 없는 사실은 만들지 않고, 집계가 불명확하면 '?'로 남긴다.
+function _ovmbSummaryHtml(advs, works, total, free, bad, matchKnown, candKnown){
+  const list=advs||[];
+  const loads={};
+  list.forEach(a=>{ const pm=String(a.inadPm||'미지정').trim()||'미지정'; const x=loads[pm]||(loads[pm]={companies:0,works:0}); x.companies++; x.works+=Number(a.works)||0; });
+  const preferred=['만두','망고'].filter(pm=>loads[pm]);
+  const managers=(preferred.length?preferred:Object.keys(loads).sort((a,b)=>loads[b].works-loads[a].works).slice(0,2));
+  const loadText=managers.map(pm=>`${esc(pm)} ${loads[pm].companies}개 업체 · ${bad?'?':loads[pm].works.toLocaleString('ko-KR')}건`).join('  /  ') || '담당 AE 배정 필요';
+  const noAe=list.filter(a=>!String(a.inadPm||'').trim()).length;
+  const noMatch=matchKnown ? list.reduce((n,a)=>n+(Number(a.noMatch)||0),0) : null;
+  const finish=candKnown ? list.reduce((n,a)=>n+(Number(a.finishCand)||0),0) : null;
+  const v=x=>x==null?'?':Number(x).toLocaleString('ko-KR');
+  return `<section class="ovm-bmetrics">
+    <article class="ovm-bmetric"><span class="k">관리 업체</span><strong class="v">${list.length.toLocaleString('ko-KR')}</strong><span class="s">진행 작업 보유 ${bad?'?':list.filter(a=>(Number(a.works)||0)>0).length}개 업체</span><span class="loads">${loadText}</span></article>
+    <article class="ovm-bmetric"><span class="k">진행 작업</span><strong class="v">${bad?'?':Number(works||0).toLocaleString('ko-KR')}</strong><span class="s">현재 업체 집계 기준</span></article>
+    <article class="ovm-bmetric good"><span class="k">연결된 소유 시트</span><strong class="v">${Math.max(0,(total||0)-(free||0)).toLocaleString('ko-KR')}</strong><span class="s">관리 대상 시트 ${Number(total||0).toLocaleString('ko-KR')}개</span></article>
+    <article class="ovm-bmetric warn"><span class="k">확인 필요</span><strong class="v">${v(noMatch==null?finish:noMatch)}</strong><span class="s">${noMatch==null?'마감자료 점검': '계약 매칭 확인'}</span></article>
+  </section>
+  <section class="ovm-bupdates">
+    <article class="ovm-bupdate"><h3>최근 업데이트</h3>
+      <div class="urow"><span><b>담당 AE 미지정 업체</b><small>담당자 배정이 필요한 현재 목록입니다.</small></span><span class="n${noAe?' warn':''}">${noAe}곳</span></div>
+      <div class="urow"><span><b>마감자료 검수 대기</b><small>통계·마감 정보를 못 받으면 물음표로 표시합니다.</small></span><span class="n${finish?' warn':''}">${v(finish)}건</span></div>
+    </article>
+    <article class="ovm-bupdate"><h3>이번 주 관계 업데이트</h3>
+      <div class="urow"><span><b>소유 시트 연결 현황</b><small>업체에 지정되어 관리 중인 시트 기준입니다.</small></span><span class="n">${Math.max(0,(total||0)-(free||0))}/${Number(total||0)}</span></div>
+      <div class="urow"><span><b>계약 매칭 확인</b><small>매칭 정보가 없으면 업무 원장에서 바로 확인합니다.</small></span><span class="n${noMatch?' warn':''}">${v(noMatch)}건</span></div>
+    </article>
+  </section>`;
+}
+
+function _ovmbFilterRows(v){
+  const q=String(v||'').trim().toLowerCase();
+  let count=0;
+  document.querySelectorAll('#ovmbRows .ovm-ovt.r').forEach(row=>{ const show=!q || String(row.dataset.ovmbSearch||'').includes(q); row.hidden=!show; if(show) count++; });
+  const out=$('#ovmbCnt'); if(out) out.textContent=count+'개 업체';
+}
+
 /* ── 사이드바: 업체 목록(검색·필터) ── ★ 목록 컨테이너만 교체한다(입력칸을 다시 그리면 한글 IME
    조합이 깨져 'ㅁ며면면'이 된다 — 홈 작업목록 검색에서 실측한 사고와 같은 자리). */
 function _ovmAdvSearch(v){ _ovmAdvQ=String(v||''); _ovmRenderAdvs(); }
@@ -10386,7 +10449,7 @@ function _ovmRenderOverview(opt){
       : lk.loginRequired ? '<span class="ovm-fin" style="background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent-line)">로그인</span>'
       : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
     const acct=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
-    return `<div class="ovm-ovt r" data-i="${i}" onclick="selAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selAdv(${i});}" role="button" tabindex="0">`
+    return `<div class="ovm-ovt r" data-i="${i}" data-ovmb-search="${esc(String(a.name||'')+' '+String(a.inadPm||''))}" onclick="selAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selAdv(${i});}" role="button" tabindex="0">`
       +`<span class="an"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><b>${esc(a.name)}</b></span>`
       +`<span class="c${a.inadPm?'':' dim'}" style="${a.inadPm?'':'color:var(--warn)'}">${a.inadPm?esc(a.inadPm):'미지정'}</span>`
       +`<span class="ovm-num${(+a.works)?'':' z'}">${bad?'?':(+a.works||0)}</span>`
@@ -10395,8 +10458,12 @@ function _ovmRenderOverview(opt){
       +`<span>${STATE.role==='master'||STATE.role==='admin'?lkb:'<span class="ovm-fin">—</span>'}</span>`
       +`<span class="c${acct?'':' dim'}">${STATE.role==='master'||STATE.role==='admin'?(acct?acct+'개':'없음'):'—'}</span>`
       +`</div>`;
-  }).join('') || '<div class="ovm-empty"><b>등록된 업체가 없습니다</b>왼쪽 [＋ 업체]로 거래처를 등록하고 시트를 지정하세요.</div>';
-  p.innerHTML=`<div class="ovm-ov">
+  }).join('') || '<div class="ovm-empty"><b>등록된 업체가 없습니다</b>업체 등록 후 소유 시트를 지정하세요.</div>';
+  p.innerHTML=`<div class="ovm-bpage">
+    <header class="ovm-bhead"><div><h2>업체 관리</h2><p>관계 상태를 한 화면에서 확인하고, 업체 원장에서 바로 상세 업무로 이동합니다.</p></div>
+      <span class="ovm-bsp"></span><button class="btn" onclick="renderOwnershipView()">새로고침</button><button class="btn pri" onclick="showAddAdvertiser()">업체 등록</button></header>
+    ${_ovmbSummaryHtml(advs,works,total,free,bad,matchKnown,candKnown)}
+    <section class="ovm-ov ovm-bledger">
     <div class="ovm-ovh"><h2>업체 ${advs.length}곳 · 작업 ${bad?'?':works.toLocaleString('ko-KR')}건</h2>
       <span class="s">캠페인 시트 ${total}개 중 ${total-free}개가 업체에 지정됨</span></div>
     <p class="ovm-lead">업체를 고르면 그 업체의 작업·정산·접속설정으로 들어갑니다. <b>마감자료 검수</b>가 있는 업체부터 보세요.
@@ -10404,9 +10471,12 @@ function _ovmRenderOverview(opt){
     ${free?`<div class="ovm-cta"><span class="ct"><b>⚠ 업체가 지정되지 않은 시트 ${free}개</b>
         <span>지정 전에는 계약·정산이 붙지 않습니다.</span></span>
       <button class="btn pri" onclick="showAddAdvertiser()">＋ 거래처 등록 · 매칭</button></div>`:''}
+    <label class="ovm-bsearch"><span>검색</span><input id="ovmbQ" placeholder="업체명 · 담당 AE 검색" autocomplete="off" oninput="_ovmbFilterRows(this.value)"></label>
     <div class="ovm-ovt h"><span>업체</span><span>담당 AE</span><span>작업</span><span>계약 미매칭</span><span>마감자료 검수</span><span>접속링크</span><span>계정</span></div>
-    ${rows}
+    <div id="ovmbRows">${rows}</div>
+    <p class="ovm-lead" id="ovmbCnt">${advs.length}개 업체</p>
     <p class="ovm-lead" style="margin-top:12px">미입금 현황은 업체를 고르면 표의 <b>미입금</b> 필터로 확인합니다(입금액은 인트라넷 계약에서 가져오므로 이 개요에서는 세지 않습니다).</p>
+    </section>
   </div>`;
 }
 
