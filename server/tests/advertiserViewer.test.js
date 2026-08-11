@@ -135,6 +135,9 @@ async function run() {
     /'택배송장':150/.test(src));
 
   // ── 폭 상한: 선언 순서가 규칙(같은 특이성 → 뒤가 이김) ──
+  ok('advertiser grid values wrap instead of showing an ellipsis',
+    /table\.sheetgrid\.advsnug td\{[^}]*white-space:normal[^}]*overflow:visible[^}]*text-overflow:clip[^}]*overflow-wrap:anywhere/.test(css));
+
   const iQhd = css.indexOf('body[data-vw="qhd"]'), iAdv = css.indexOf('body.advm{--app-max:1680px}'), iWide = css.indexOf('body.widemode{--app-max:100vw}');
   ok('★ body.advm 상한(1680px)이 존재한다', iAdv > -1);
   ok('★ 선언 순서: data-vw 뒤(광고주 고정이 이김) · widemode 앞(전체화면은 해제)', iQhd > -1 && iWide > -1 && iQhd < iAdv && iAdv < iWide);
