@@ -665,6 +665,37 @@ function clearAdminSession() {
   sessionStorage.removeItem('rapp_staff_session');
 }
 
+/* GLOBAL_UNDO_SHORTCUT_START */
+// Text-entry controls retain the browser's own undo stack. Outside those
+// controls, Ctrl/Cmd+Z first gives the workdesk a chance to undo saved cells
+// and otherwise behaves like Back.
+(function initGlobalUndoShortcut() {
+  function isNativeUndoTarget(target) {
+    const el = target && (target.nodeType === 1 || target.tagName) ? target : target && target.parentElement;
+    if (!el) return false;
+    const tag = String(el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el.isContentEditable
+      || !!(el.closest && el.closest('[contenteditable="true"]'));
+  }
+
+  document.addEventListener('keydown', function onGlobalUndoShortcut(event) {
+    const key = String(event.key || '').toLowerCase();
+    if (key !== 'z' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+    if (isNativeUndoTarget(event.target)) return;
+
+    try {
+      if (typeof window.WorkdeskUndo === 'function' && window.WorkdeskUndo()) {
+        event.preventDefault();
+        return;
+      }
+    } catch (_) { /* a page-specific handler must never block browser back */ }
+
+    event.preventDefault();
+    history.back();
+  });
+})();
+/* GLOBAL_UNDO_SHORTCUT_END */
+
 // ═══════════════════════════════════════════════════════════
 // Phase 6: 프론트엔드 에러 자동 캡처 & 서버 전송
 // window.onerror, unhandledrejection → POST /api/diag/client-error

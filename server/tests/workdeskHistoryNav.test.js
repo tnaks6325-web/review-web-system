@@ -54,7 +54,7 @@ ok('★ renderOwnershipView: 복원 진입이 아니면 STATE.advCur 를 비운�
 
 /* ── C. URL 불변(프래그먼트 계약 보호) ── */
 {
-  const navBlock = /let _navLock=false;[\s\S]*?\n\}\);\n/.exec(src);
+  const navBlock = /let _navLock=false;[\s\S]*?\r?\n\}\);\r?\n/.exec(src);
   ok('나브 블록을 찾았다', !!navBlock);
   const blk = navBlock[1] !== undefined ? navBlock[0] : navBlock[0];
   ok('★ push/replace 는 pathname+search 만 쓴다 — location.hash 를 URL 에 실지 않는다',

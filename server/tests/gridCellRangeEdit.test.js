@@ -29,7 +29,7 @@ ok('우클릭(contextmenu) 로 편집 메뉴를 연다', /addEventListener\('con
 ok('우클릭 메뉴에 [이 셀 편집] → beginEditCell', /_menuEditCell\(\)\s*\{[\s\S]{0,200}beginEditCell\(td\)/.test(HTML));
 ok('copy 이벤트로 선택 범위를 TSV 복사', /addEventListener\('copy'/.test(HTML) && /_selectionTsv\(\)/.test(HTML));
 ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste'/.test(HTML) && /_pasteIntoSelection\(/.test(HTML));
-ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.forEach\(j=>commitCellEdit\(/.test(HTML));
+ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.map\(j=>commitCellEdit\(/.test(HTML));
 ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
 ok('툴바 안내가 우클릭 편집을 말한다', /셀 우클릭<\/b>=그 셀 편집/.test(HTML));
 ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
@@ -108,6 +108,8 @@ function makeCtx(fake) {
     toast: m => toasts.push(String(m)),
     confirm: () => true,
     commitCellEdit: (rowId, field, val) => commits.push({ rowId, field, val }),
+    _beginCellUndoGroup: kind => ({ kind, entries: [], pending: 0 }),
+    _finishCellUndoGroup: () => {},
     _PASTE_MAX: 500,
     console,
   };

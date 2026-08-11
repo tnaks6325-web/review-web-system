@@ -3920,7 +3920,7 @@ function wSearchKey(e){
 function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.classList.toggle('kb',+el.dataset.ord===STATE.wKb));
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
-async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t;
+async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t; _clearCellUndoHistory();
   // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
   if(!(opt&&opt.nav)) _navPush();
   // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
@@ -5303,6 +5303,58 @@ function _paintGridCell(r, field, td){
   td.setAttribute('title', disp||'');   // 축약된 전체값 = 호버 툴팁
   td.innerHTML=`${esc(disp||'—')}${ed?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}`;
 }
+const _CELL_UNDO_MAX=100;
+const _cellUndoStack=[];
+let _cellUndoBusy=false;
+function _beginCellUndoGroup(kind){
+  const group={kind:kind||'edit',entries:[],pending:0};
+  _cellUndoStack.push(group);
+  if(_cellUndoStack.length>_CELL_UNDO_MAX) _cellUndoStack.shift();
+  return group;
+}
+function _finishCellUndoGroup(group){
+  if(!group) return;
+  if(!group.pending&&!group.entries.length){ const i=_cellUndoStack.lastIndexOf(group); if(i>=0) _cellUndoStack.splice(i,1); }
+}
+function _recordCellUndo(entry, group){
+  if(!entry||entry.field.indexOf('col:')!==0) return;
+  if(group) group.entries.push(entry);
+}
+function _clearCellUndoHistory(){ _cellUndoStack.length=0; _cellUndoBusy=false; }
+function _undoLatestCellGroup(){
+  if(_cellUndoBusy) return true;
+  let group=_cellUndoStack[_cellUndoStack.length-1];
+  while(group&&!group.pending&&!group.entries.length){ _cellUndoStack.pop(); group=_cellUndoStack[_cellUndoStack.length-1]; }
+  if(!group) return false;
+  if(group.pending){ toast('셀 저장이 끝난 뒤 실행취소할 수 있습니다'); return true; }
+  const t=STATE.cur; if(!t) return false;
+  _cellUndoBusy=true;
+  (async()=>{
+  try{
+    while(group.entries.length){
+      const entry=group.entries[group.entries.length-1], r=_gridRowById(entry.rowId);
+      if(!r||!r.cellEdits||r.cellEdits[entry.field.slice(4)]!==entry.value){ toast('현재 셀 값이 바뀌어 실행취소할 수 없습니다'); return true; }
+      let resp;
+      if(entry.had){
+        resp=await api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:entry.rowId,field:entry.field,value:entry.prev})});
+        if(!(resp&&resp.ok)){ toast(resp&&resp.error?('실행취소 실패: '+resp.error):'실행취소 실패'); return true; }
+        r.cellEdits[entry.field.slice(4)]=entry.prev;
+      }else{
+        resp=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:entry.rowId,field:entry.field})});
+        if(!(resp&&resp.ok&&resp.reverted)){ toast(resp&&resp.error?('실행취소 실패: '+resp.error):'실행취소 실패'); return true; }
+        delete r.cellEdits[entry.field.slice(4)];
+      }
+      _paintGridCell(r,entry.field,entry.td);
+      group.entries.pop();
+    }
+    _cellUndoStack.pop();
+    toast(group.kind==='paste'?'붙여넣기를 되돌렸습니다':'셀 편집을 되돌렸습니다');
+  }catch(_){ toast('실행취소 실패 - 네트워크를 확인하세요'); }
+  finally{ _cellUndoBusy=false; }
+  })();
+  return true;
+}
+window.WorkdeskUndo=_undoLatestCellGroup;
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
@@ -5324,7 +5376,7 @@ function beginEditCell(td){
   });
 }
 // 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
-function commitCellEdit(rowId, field, value, td){
+function commitCellEdit(rowId, field, value, td, opt){
   const r=_gridRowById(rowId); if(!r||!field) return;
   const t=STATE.cur; if(!t) return;
   if(field.indexOf('ccol:')===0){   // 커스텀 열(자유메모) — 전용 엔드포인트(시트 무접촉)
@@ -5344,16 +5396,25 @@ function commitCellEdit(rowId, field, value, td){
   if(field.indexOf('col:')!==0) return;
   const h=field.slice(4); r.cellEdits=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
   const had=(h in r.cellEdits), prev=r.cellEdits[h];
+  const undoGroup=(opt&&opt.undoGroup)||_beginCellUndoGroup('edit');
+  undoGroup.pending++;
   r.cellEdits[h]=value; _paintGridCell(r, field, td);
   const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
-  api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
+  return api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
     .then(resp=>{
-      if(resp&&resp.ok){ if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); } return; }
+      if(resp&&resp.ok){
+        _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
+        if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
+        undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
+        return true;
+      }
       rollback();
+      undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
       if(resp&&resp.error==='concurrent_edit_conflict'){ toast('동시 편집 감지 — 최신 상태로 새로고침'); reloadWorkdesk(); }
       else toast(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패');
+      return false;
     })
-    .catch(()=>{ rollback(); toast('편집 실패 — 네트워크'); });
+    .catch(()=>{ rollback(); undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup); toast('편집 실패 — 네트워크'); return false; });
 }
 // 커밋 후 이동(Enter=아래·Tab=오른쪽·Shift+Tab=왼쪽) — 다음 편집 가능한 셀로 이어 편집.
 function _navFromCell(td, dir){
@@ -5634,7 +5695,9 @@ function _pasteIntoSelection(text){
   if(!jobs.length){ toast(locked?`붙여넣을 수 있는 칸이 없습니다 — 잠긴 칸 ${locked}개(참여자·연락처는 수정 불가)`:'바뀌는 값이 없습니다'); return; }
   if(jobs.length>_PASTE_MAX){ toast(`한 번에 ${_PASTE_MAX}칸까지 붙여넣을 수 있습니다 (선택 ${jobs.length}칸) — 범위를 나눠 주세요`); return; }
   if(jobs.length>20 && !confirm(`${jobs.length}개 칸의 값을 붙여넣습니다. 진행할까요?`)) return;
-  jobs.forEach(j=>commitCellEdit(j.rowId, j.field, j.val, j.td));
+  const undoGroup=_beginCellUndoGroup('paste');
+  Promise.all(jobs.map(j=>commitCellEdit(j.rowId, j.field, j.val, j.td, {undoGroup})))
+    .then(()=>_finishCellUndoGroup(undoGroup));
   toast(`${jobs.length}개 칸 붙여넣음${locked?` · 잠긴 칸 ${locked}개 건너뜀`:''}`);
 }
 /* 우클릭 메뉴 — 편집·복사·붙여넣기·되돌리기·배경색을 한 곳에서.
@@ -9900,7 +9963,7 @@ async function submitAdd(){ const t=STATE.cur; if(!t)return;
   const r=await api('/api/trackb/workdesk/add',{method:'POST',body:JSON.stringify(body)});
   toast(r&&r.ok?'추가됨':'실패'); $('#addbox').innerHTML=''; reloadWorkdesk();
 }
-async function reloadWorkdesk(){ const t=STATE.cur; if(!t)return;
+async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(!t)return;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
   renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t);
 }
