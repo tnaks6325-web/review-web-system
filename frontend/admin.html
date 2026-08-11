@@ -1265,8 +1265,14 @@ body{ letter-spacing:-.01em; }
 
         <!-- 필터 -->
         <div class="payment-filter-bar">
+          <label>&#45812;&#45817;&#51088;</label>
+          <select class="payment-campaign-select" id="payFilterManager" onchange="applyPaymentFilters()">
+            <option value="">&#51204;&#52404; &#45812;&#45817;&#51088;</option>
+            <option value="&#47564;&#46160;">&#47564;&#46160;</option>
+            <option value="&#47581;&#44256;">&#47581;&#44256;</option>
+          </select>
           <label>캠페인 필터</label>
-          <select class="payment-campaign-select" id="payFilterCampaign">
+          <select class="payment-campaign-select" id="payFilterCampaign" onchange="applyPaymentFilters()">
             <option value="">전체 캠페인</option>
           </select>
           <button class="payment-load-btn" id="payLoadBtn" onclick="loadPaymentTargets()">
@@ -1319,6 +1325,7 @@ body{ letter-spacing:-.01em; }
         <!-- 액션 버튼 -->
         <div class="payment-action-bar" id="payActionBar" style="display:none">
           <span class="payment-sel-count" id="paySelCount">0건 선택</span>
+          <span class="payment-sel-count" id="paySelAmount" style="color:#065F46">&#49440;&#53469; &#44552;&#50529; 0&#50896;</span>
           <button class="payment-dl-btn" id="payDlBtn" onclick="downloadPaymentExcel()">
             <i class="fas fa-file-excel"></i> 이체파일 다운로드
           </button>

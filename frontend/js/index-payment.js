@@ -48,8 +48,36 @@ let _payFiltered    = [];          // 현재 표시 중인 행 (캠페인 필터
 let _payMissingTabs = [];          // 입금명 없는 탭 목록
 let _payPanelInited = false;       // 패널 초기화 여부
 
+function paymentWorkKey(row) {
+  return String(row && row.sheetId || "") + "||" + String(row && row.tabName || "");
+}
+
+function sumPaymentAmounts(rows) {
+  return (rows || []).reduce((total, row) => total + (Number(String(row && row.amount || "").replace(/[^0-9.]/g, "")) || 0), 0);
+}
+
+function filterPaymentTargets(targets, filters) {
+  const manager = String(filters && filters.manager || "").trim();
+  const workKey = String(filters && filters.workKey || "");
+  return (targets || []).filter(row =>
+    (!manager || String(row.manager || "").trim() === manager) &&
+    (!workKey || paymentWorkKey(row) === workKey)
+  );
+}
+
+function _getPaymentFilters() {
+  return {
+    manager: document.getElementById("payFilterManager")?.value || "",
+    workKey: document.getElementById("payFilterCampaign")?.value || "",
+  };
+}
+
 /* 패널 초기화 (탭 전환 시 1회 실행) */
 function initPaymentPanel() {
+  const workSelect = document.getElementById("payFilterCampaign");
+  if (workSelect && workSelect.previousElementSibling?.tagName === "LABEL") {
+    workSelect.previousElementSibling.textContent = "\uC791\uC5C5";
+  }
   if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다.", "warning"); return; }
   if (!_payPanelInited) {
     _payPanelInited = true;
@@ -75,6 +103,51 @@ function _populatePayCampaignFilter() {
     opt.textContent = c.campaign || c.c || c.sheetId || "미분류";
     sel.appendChild(opt);
   });
+}
+
+function _populatePayWorkFilter() {
+  const sel = document.getElementById("payFilterCampaign");
+  if (!sel) return;
+  const previous = sel.value;
+  const manager = document.getElementById("payFilterManager")?.value || "";
+  const works = new Map();
+  (_payTargets || []).forEach(row => {
+    if (manager && String(row.manager || "").trim() !== manager) return;
+    const key = paymentWorkKey(row);
+    if (key !== "||" && !works.has(key)) works.set(key, row);
+  });
+  sel.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "\uC804\uCCB4 \uC791\uC5C5";
+  sel.appendChild(all);
+  [...works.entries()].sort(([, a], [, b]) => String(a.displayName || a.tabName || "").localeCompare(String(b.displayName || b.tabName || ""), "ko"))
+    .forEach(([key, row]) => {
+      const option = document.createElement("option");
+      option.value = key;
+      option.textContent = row.displayName || row.tabName || row.campaignName || "\uBBF8\uBD84\uB958 \uC791\uC5C5";
+      sel.appendChild(option);
+    });
+  sel.value = works.has(previous) ? previous : "";
+}
+
+function applyPaymentFilters() {
+  _populatePayWorkFilter();
+  _payFiltered = filterPaymentTargets(_payTargets, _getPaymentFilters());
+  const emptyEl = document.getElementById("payEmptyState");
+  const previewWrap = document.getElementById("payPreviewWrap");
+  const actionBar = document.getElementById("payActionBar");
+  if (!_payFiltered.length) {
+    if (previewWrap) previewWrap.style.display = "none";
+    if (actionBar) actionBar.style.display = "none";
+    _buildPaymentSummary([]);
+    if (emptyEl) emptyEl.style.display = "block";
+    const msgEl = document.getElementById("payEmptyMsg");
+    if (msgEl) msgEl.textContent = "\uC120\uD0DD\uD55C \uC870\uAC74\uC758 \uC785\uAE08 \uB300\uC0C1\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
+    return;
+  }
+  _renderPayPreview(_payFiltered);
+  if (emptyEl) emptyEl.style.display = "none";
 }
 
 /* 이체 은행 선택 */
@@ -105,10 +178,7 @@ async function loadPaymentTargets() {
   if (msgEl) msgEl.textContent = "조회 중...";
 
   try {
-    const filterSel = document.getElementById("payFilterCampaign");
-    const filterSheetId = filterSel ? filterSel.value : "";
     const payload = { action: "getPaymentTargets" };
-    if (filterSheetId) payload.sheetIds = [filterSheetId];
 
     let json;
     try { json = await gasPost(payload); } catch(e) { json = await gasGet(payload); }
@@ -116,7 +186,8 @@ async function loadPaymentTargets() {
     if (json.error) throw new Error(json.error);
 
     _payTargets  = json.targets || [];
-    _payFiltered = _payTargets;
+    _populatePayWorkFilter();
+    _payFiltered = filterPaymentTargets(_payTargets, _getPaymentFilters());
 
     if (!_payFiltered.length) {
       if (msgEl) msgEl.textContent = "입금 대상이 없습니다. (리뷰 완료 + 입금 미완료)";
@@ -288,9 +359,12 @@ function togglePaySelectAll(masterCb) {
 
 /* 선택 카운트 업데이트 */
 function _updatePaySelCount() {
-  const checked = document.querySelectorAll(".pay-row-check:checked").length;
+  const selected = _getSelectedTargets();
+  const checked = selected.length;
   const countEl = document.getElementById("paySelCount");
   if (countEl) countEl.textContent = checked + "건 선택";
+  const amountEl = document.getElementById("paySelAmount");
+  if (amountEl) amountEl.textContent = "\uC120\uD0DD \uAE08\uC561 " + sumPaymentAmounts(selected).toLocaleString() + "\uC6D0";
   const dlBtn   = document.getElementById("payDlBtn");
   const doneBtn = document.getElementById("payDoneBtn");
   if (dlBtn)   dlBtn.disabled   = checked === 0;
