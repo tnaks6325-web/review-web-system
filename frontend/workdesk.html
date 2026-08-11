@@ -271,13 +271,14 @@
      왼쪽은 작업 조건·진행 현황·정산 현황을 순서대로 두고, 기존 진행 현황 자리는 리뷰가 쓴다.
      리뷰 이미지는 고정 높이의 스크롤 영역에서만 움직여 상단 조합 높이를 밀어내지 않는다.
      행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
-  .advtop{display:grid;grid-template-columns:minmax(280px,1fr) minmax(248px,320px);grid-template-areas:"condition preview" "progress preview" "settlement preview";gap:12px;align-items:stretch;max-width:1040px}
+  .advwork{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(420px,1fr);grid-template-areas:"top preview" "tools preview" "grid grid";gap:12px;align-items:stretch;max-width:1380px}
+  .advtop{grid-area:top;display:grid;grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement";gap:12px}
   .advcondition{grid-area:condition}.advprogress{grid-area:progress}.advsettle{grid-area:settlement}
   .advtop .tp3col{height:100%}.advsettle.setldetail{margin-bottom:0}.advsettle .sect{margin-top:0!important}
-  .advgw{margin-top:12px}.advgw>#gridhost{min-width:0}
   .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px}
-  .advtop .rvpane{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain}
-  @media(max-width:760px){.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement" "preview"}.advtop .rvpane{position:static;align-self:auto;height:420px;min-height:420px}}
+  .advwork .rvpane{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain}
+  .advwork .advgw,.advwork #gridhost{display:contents}#gridhost>.gridbar{grid-area:tools}#gridhost>.gswrap{grid-area:grid}#gridhost>table{grid-area:grid}
+  @media(max-width:760px){.advwork{display:block}.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement"}.advwork .rvpane{position:static;align-self:auto;height:420px;min-height:420px;margin-top:12px}.advwork .advgw,.advwork #gridhost{display:block}.advgw{margin-top:12px}}
   .rvpane .rvhd{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);
                 display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px}
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
@@ -4177,7 +4178,7 @@ function renderWorkdesk(wd){
     ${_finBarHtml()}
     ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
-      ? `<section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><aside class="rvpane" id="rvPane"></aside></section><div class="advgw"><div id="gridhost">${tableSection}</div></div>`
+      ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
