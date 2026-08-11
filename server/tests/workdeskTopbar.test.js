@@ -17,6 +17,10 @@ const taskTier = workdeskView.indexOf('class="tb2 wb-tier wb-task"');
 const openedTier = workdeskView.indexOf('class="tb0 wb-tier wb-open"');
 assert.ok(companyTier >= 0 && taskTier > companyTier && openedTier > taskTier,
   '상단 순서는 업체 → 업체 작업 → 열린 작업이어야 함');
+assert.match(workdeskView, /id="tb0"><span class="wb-open-label" aria-hidden="true">열린탭<\/span>/,
+  '3단 왼쪽에 열린탭 레이블이 있어야 함');
+assert.match(HTML, /--wb-scroll-progress/, '세 행 스크롤 진행률 CSS 변수가 필요함');
+assert.match(HTML, /wb-open::after\{[^}]*pointer-events:none/, '진행 바는 클릭·드래그 조작을 받지 않아야 함');
 assert.ok(/\.wb-task\{[^}]*gap:3px/.test(HTML)
   && /\.wb-open\{[^}]*gap:3px/.test(HTML)
   && /\.segwrap\{gap:3px/.test(HTML),
@@ -65,7 +69,7 @@ assert.ok(!/^[\w가-힣]/.test(W_FAV), 'W_FAV가 평범한 문자로 시작하�
 //   이 파일의 그룹핑 검증과 같은 코드로 확인되게(스텁을 두면 구현이 바뀌어도 테스트가 통과한다).
 // ★ 작업바 정렬(모집중 먼저, 2026-08-10)로 _wGroups/_renderTabList 이 갖게 된 의존 —
 //   구현이 아니라 **실제 함수**를 함께 뜯어 온다(스텁을 두면 정렬 규칙이 여기서만 딴판이 된다).
-const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_bindWheelScroll','isFinished','_campRank','_wRecruiting','_wTabRecruiting','_wTabPending','_wTabRank','_wSegTip'];
+const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_syncWbScrollMeter','_bindWheelScroll','isFinished','_campRank','_wRecruiting','_wTabRecruiting','_wTabPending','_wTabRank','_wSegTip'];
 const bodies = WANT.map(name => {
   const re = new RegExp('\\n(?:async )?function ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
   const m = re.exec(script);
@@ -482,7 +486,7 @@ t('36. _curSheetLabel: 시트제목 XSS 이스케이프', () => {
 
 // ── 9) 휠 → 좌우 스크롤 ───────────────────────────────────────
 function wheelSetup(){
-  WHEEL.segwrap = mkScroller(); WHEEL.tb2 = mkScroller();
+  WHEEL.segwrap = mkScroller(); WHEEL.tb2 = mkScroller(); WHEEL.tb0 = mkScroller();
   F._bindWheelScroll();
   return WHEEL.segwrap;
 }
@@ -493,10 +497,11 @@ function fire(el, patch){
   return prevented;
 }
 
-t('37. 휠: 1·2단 모두에 바인딩되고 passive:false(preventDefault 가능)', () => {
+t('37. 휠: 1·2·3단 모두에 바인딩되고 passive:false(preventDefault 가능)', () => {
   wheelSetup();
   assert.ok(typeof WHEEL.segwrap._h === 'function', '1단 미바인딩');
   assert.ok(typeof WHEEL.tb2._h === 'function', '2단 미바인딩');
+  assert.ok(typeof WHEEL.tb0._h === 'function', '3단 미바인딩');
   assert.strictEqual(WHEEL.segwrap._opt && WHEEL.segwrap._opt.passive, false,
     'passive:true면 preventDefault가 무시돼 페이지가 같이 스크롤된다');
 });
@@ -510,12 +515,12 @@ t('38. 휠 아래 → 오른쪽, 위 → 왼쪽 이동', () => {
   assert.strictEqual(el.scrollLeft, 200, '위로 굴리면 왼쪽으로 가야 함');
 });
 
-t('39. 휠: 양 끝에서는 가로 이동을 멈추고 페이지 스크롤에 양보(가둠 방지)', () => {
+t('39. 휠: 양 끝에서도 이벤트를 소비해 페이지 세로 스크롤로 전파하지 않음', () => {
   const el = wheelSetup();
   el.scrollLeft = 600;                       // scrollWidth 1000 - clientWidth 400 = 최대 600
-  assert.strictEqual(fire(el, { deltaY: 100 }), 0, '오른쪽 끝인데 기본동작을 막으면 페이지가 안 내려감');
+  assert.strictEqual(fire(el, { deltaY: 100 }), 1, '오른쪽 끝에서도 페이지 세로 스크롤로 전파하면 안 됨');
   el.scrollLeft = 0;
-  assert.strictEqual(fire(el, { deltaY: -100 }), 0, '왼쪽 끝인데 기본동작을 막으면 페이지가 안 올라감');
+  assert.strictEqual(fire(el, { deltaY: -100 }), 1, '왼쪽 끝에서도 페이지 세로 스크롤로 전파하면 안 됨');
 });
 
 t('40. 휠: 넘칠 게 없으면 양보 · ctrl(확대) · 트랙패드 가로 제스처는 네이티브', () => {

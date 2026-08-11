@@ -668,6 +668,13 @@
   .taskbar.wb-topbar .wb-task{align-items:center;gap:3px;min-height:40px;background:#f9fbfe;margin-inline:max(14px, calc((100% - var(--app-max)) / 2));padding:5px 0;overflow-x:auto}
   .taskbar.wb-topbar .wb-open{align-items:center;gap:3px;min-height:40px;background:var(--card);margin-inline:max(14px, calc((100% - var(--app-max)) / 2));padding:5px 0;overflow-x:auto}
   .taskbar.wb-topbar .wb-open:empty{display:none}
+  /* 세 행의 가로 이동 상태는 같은 비드래그 0–100% 바로 읽힌다. 실제 스크롤바는 숨기고,
+     휠/트랙패드 이동값으로만 채움 비율을 갱신한다. */
+  .taskbar.wb-topbar .segwrap,.taskbar.wb-topbar .wb-task,.taskbar.wb-topbar .wb-open{overscroll-behavior-x:contain;scrollbar-width:none}
+  .taskbar.wb-topbar .segwrap::-webkit-scrollbar,.taskbar.wb-topbar .wb-task::-webkit-scrollbar,.taskbar.wb-topbar .wb-open::-webkit-scrollbar{display:none;width:0;height:0}
+  .taskbar.wb-topbar .segwrap::after,.taskbar.wb-topbar .wb-task::after,.taskbar.wb-topbar .wb-open::after{content:"";position:sticky;right:0;z-index:2;align-self:flex-end;flex:0 0 52px;width:52px;height:3px;margin:-1px 0 2px -52px;pointer-events:none;border-radius:999px;background:linear-gradient(90deg,#2865b2 0 var(--wb-scroll-progress,0%),#d9e2ee var(--wb-scroll-progress,0%) 100%);opacity:0;transition:opacity .12s ease}
+  .taskbar.wb-topbar .segwrap.wb-scrollable::after,.taskbar.wb-topbar .wb-task.wb-scrollable::after,.taskbar.wb-topbar .wb-open.wb-scrollable::after{opacity:1}
+  .taskbar.wb-topbar .wb-open-label{flex:none;padding-right:3px;color:#315f9f;font-size:10px;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
   .taskbar.wb-topbar .wsearch{width:176px}
   .taskbar.wb-topbar .wsearch input{height:34px;border-color:#dfe5ed;border-radius:8px;font-size:11px;font-weight:700;padding:7px 10px 7px 30px;transition:none}
   .taskbar.wb-topbar .wsearch input:focus{border-color:#dfe5ed;box-shadow:none}
@@ -2301,14 +2308,24 @@ window.addEventListener('popstate', e=>{
   _navApply(st);
 });
 
-// ── 상단 작업바 1·2단: 마우스 휠로 좌우 이동 ──
+// ── 상단 작업바 1·2·3단: 마우스 휠로 좌우 이동 ──
 //   가로 스크롤 영역이라 세로 휠은 원래 아무 일도 안 한다(트랙패드만 가로 제스처 가능) → 휠 아래=오른쪽, 위=왼쪽으로 변환.
-//   ★ 양 끝에 닿았거나 넘칠 게 없으면 preventDefault 하지 않는다 — 그래야 페이지 세로 스크롤이 이 줄에 갇히지 않는다.
+//   ★ 넘치는 행에서는 양 끝에서도 preventDefault 한다 — 가로 이동을 다 한 뒤 페이지 세로 스크롤로 넘어가지 않는다.
+function _syncWbScrollMeter(el){
+  if(!el) return;
+  const max=Math.max(0,(el.scrollWidth||0)-(el.clientWidth||0));
+  const pos=Math.max(0,Math.min(max,el.scrollLeft||0));
+  const progress=max>1?Math.round(pos/max*100):0;
+  if(el.style&&el.style.setProperty) el.style.setProperty('--wb-scroll-progress',progress+'%');
+  if(el.classList&&el.classList.toggle) el.classList.toggle('wb-scrollable',max>1);
+}
 function _bindWheelScroll(){
-  ['segwrap','tb2'].forEach(id=>{
+  ['segwrap','tb2','tb0'].forEach(id=>{
     const el=document.getElementById(id);
     if(!el || el._wheelBound) return;   // 컨테이너는 재렌더로 새로 생기므로 엘리먼트 자체에 표시
     el._wheelBound=true;
+    _syncWbScrollMeter(el);
+    el.addEventListener('scroll', ()=>_syncWbScrollMeter(el), {passive:true});
     el.addEventListener('wheel', e=>{
       if(e.ctrlKey) return;                                   // 확대/축소 제스처는 브라우저에 양보
       if(Math.abs(e.deltaX)>Math.abs(e.deltaY)) return;       // 트랙패드 가로 스크롤은 네이티브가 처리
@@ -2317,8 +2334,9 @@ function _bindWheelScroll(){
       const unit=(e.deltaMode===1)?16:((e.deltaMode===2)?el.clientWidth:1);   // 줄/페이지 단위 휠 보정
       const before=el.scrollLeft;
       const next=Math.max(0, Math.min(max, before + e.deltaY*unit));
-      if(next===before) return;                               // 이미 끝 → 페이지 스크롤 양보(가둠 방지)
-      el.scrollLeft=next; e.preventDefault();
+      if(next!==before) el.scrollLeft=next;
+      _syncWbScrollMeter(el);
+      e.preventDefault();
     }, {passive:false});
   });
 }
@@ -2420,7 +2438,7 @@ function renderWorkdeskView(){
         <div class="segwrap" id="segwrap"></div>
       </div>
       <div class="tb2 wb-tier wb-task" id="tb2"><span class="b2empty">불러오는 중…</span></div>
-      <div class="tb0 wb-tier wb-open" id="tb0"></div>
+      <div class="tb0 wb-tier wb-open" id="tb0"><span class="wb-open-label" aria-hidden="true">열린탭</span></div>
     </div>
     <div class="wrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
     <div class="main" id="main"><div class="empty">위에서 작업을 선택하세요.</div></div>
@@ -3859,11 +3877,12 @@ function _renderWorktabs(){
   const host=document.getElementById('tb0'); if(!host) return;   // 작업보드 뷰가 아닐 때
   if(STATE.role==='advertiser'){ host.innerHTML=''; return; }
   const cur=STATE.cur, now=_wtList();
-  if(!now.length){ host.innerHTML=`<button class="wt0add" onclick="switchView('home')" title="홈 작업 목록에서 작업을 고르세요">＋ 작업 열기</button>`; return; }
+  const label='<span class="wb-open-label" aria-hidden="true">열린탭</span>';
+  if(!now.length){ host.innerHTML=label+`<button class="wt0add" onclick="switchView('home')" title="홈 작업 목록에서 작업을 고르세요">＋ 작업 열기</button>`; _syncWbScrollMeter(host); return; }
   // 오늘 완료한 탭은 **뒤로** 민다(시트에서 탭을 손으로 뒤로 끌던 그 동작을 시스템이 대신한다).
   const known=now.map(k=>({k,t:_wtTabFor(k)}));
   const ordered=[...known.filter(x=>!isTodayDone(x.t)), ...known.filter(x=>isTodayDone(x.t))];
-  host.innerHTML = ordered.map(({k,t})=>{
+  host.innerHTML = label + ordered.map(({k,t})=>{
     const on=!!(cur&&t&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName), td=isTodayDone(t);
     const nm=t?t.tabName:k.split('␟')[1]||k;
     // ★ onclick 에 시트에서 온 이름을 넣지 않는다 — data 속성으로 넘긴다(M1 에서 실측한 따옴표 탈출 사고).
@@ -3877,6 +3896,7 @@ function _renderWorktabs(){
   }).join('')
    + `<button class="wt0add" onclick="switchView('home')" title="홈 작업 목록에서 작업을 고르세요">＋</button>`
    + (now.length>=WT_CAP?`<span class="wt0note" title="자동으로 닫지 않습니다">열린 작업이 많아요 — 오래 안 본 탭을 닫아 주세요</span>`:'');
+  _syncWbScrollMeter(host);
 }
 
 // 홈 목록 → 작업 열기: 기존 pendingTab 계약 그대로(히스토리 "중간 항목 금지" 규칙과 자동 정합).
@@ -3965,11 +3985,11 @@ function _renderTabList(){
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
   const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업보드 뷰가 아닐 때
   const gs=_wGroups();
-  if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; return; }
+  if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; _syncWbScrollMeter(seghost); _syncWbScrollMeter(tabhost); return; }
   // ★ 탭은 있는데 전부 마감이면 그룹이 0개다 — 위 분기(STATE.tabs.length)를 못 타므로 여기서 따로 말한다.
   //   안 그러면 "이 그룹에 작업이 없습니다"가 뜨는데 그룹 자체가 없어서 문구가 어긋난다.
   if(!gs.length){ seghost.innerHTML='';
-    tabhost.innerHTML=`<span class="b2empty">진행 중인 작업이 없습니다 — 마감한 작업은 🏠 홈 › 작업 목록 › 마감 보관함에 있습니다.</span>`; return; }
+    tabhost.innerHTML=`<span class="b2empty">진행 중인 작업이 없습니다 — 마감한 작업은 🏠 홈 › 작업 목록 › 마감 보관함에 있습니다.</span>`; _syncWbScrollMeter(seghost); _syncWbScrollMeter(tabhost); return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
   // innerHTML 교체는 가로 스크롤 위치를 0으로 되감는다 → 업체가 많으면 방금 고른 칩이 화면 밖으로 사라짐.
   //   교체 전 위치를 저장했다가 복원하고, "선택이 실제로 바뀐 경우에만" 활성 항목을 시야로 끌어온다
@@ -3999,6 +4019,7 @@ function _renderTabList(){
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`;
   // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
   seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
+  _syncWbScrollMeter(seghost); _syncWbScrollMeter(tabhost);
   if(_selChanged){
     const a=seghost.querySelector('.seg.on'); if(a&&a.scrollIntoView) a.scrollIntoView({inline:'nearest',block:'nearest'});
     const b=tabhost.querySelector('.wtab.on'); if(b&&b.scrollIntoView) b.scrollIntoView({inline:'nearest',block:'nearest'});
