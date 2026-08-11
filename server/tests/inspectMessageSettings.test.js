@@ -184,6 +184,14 @@ const IM = require('../src/utils/inspectMessages');
       '★★ 설정 화면도 문구 사본을 두지 않는다(서버 표를 그대로 그린다)');
     ok('D1: ★ 설정 패널 등록 + 문구 사본 0(서버 표를 그린다)');
 
+    assert.ok(/class="as-imsg-grid"/.test(as) && /class="as-imsg-colhead"/.test(as)
+      && /class="as-imsg-row"/.test(as),
+      '안내문구는 항목명·입력란을 같은 행에 두는 2열 편집 구조');
+    assert.ok(/\.as-imsg-row\{display:grid;grid-template-columns:/.test(as)
+      && /@media \(max-width:640px\)\{[\s\S]{0,250}\.as-imsg-row\{grid-template-columns:1fr/.test(as),
+      '2열 편집은 좁은 화면에서 한 열로 안전하게 전환');
+    ok('D1a: 리뷰어 안내문구 = 데스크톱 2열 · 모바일 1열 편집');
+
     const wd = readFront('workdesk.html');
     assert.ok(/_riMsgAll\(\)[\s\S]{0,400}\/api\/trackb\/settings\/inspect-messages/.test(wd),
       '팝업 프리필도 같은 설정 표에서 읽는다');

@@ -603,7 +603,7 @@ function _inspectmsgHtml() {
           쓸 수 있는 치환어 — <code>{reason}</code> 판정 근거 문장 · <code>{work}</code> 작업명 · <code>{to}</code> 옮긴 칸 이름<br>
           <span style="color:#9CA3AF">비워두고 저장하면 그 유형만 기본 문구로 돌아갑니다.</span>
         </div>
-        <div id="asImsgList"><div class="as-smpload">불러오는 중…</div></div>
+        <div class="as-imsg-grid" id="asImsgList"><div class="as-smpload">불러오는 중…</div></div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
           <button onclick="saveInspectMessages()" style="padding:8px 16px;background:#2563A8;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:700;cursor:pointer">저장</button>
           <span id="asImsgMsg" style="font-size:.76rem;color:#6B7280"></span>
@@ -618,16 +618,22 @@ async function loadInspectMessages() {
     var j = await r.json().catch(function () { return null; });
     if (!j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
     _imsgKinds = j.kinds || [];
-    box.innerHTML = _imsgKinds.map(function (k) {
+    var maxLen = Number(j.maxLen) || 1000;
+    box.innerHTML = '<div class="as-imsg-colhead" aria-hidden="true"><span>항목명</span><span>안내문구 입력</span></div>'
+      + _imsgKinds.map(function (k) {
       var v = (j.messages || {})[k.key] || '';
-      return '<div style="border:1px solid #E5E7EB;border-radius:10px;padding:11px 13px;margin-bottom:9px;background:#fff">'
-        + '<div style="font-size:.84rem;font-weight:750">' + escHtml(k.label) + '</div>'
-        + '<div style="font-size:.72rem;color:#9CA3AF;margin:1px 0 7px">' + escHtml(k.desc || '') + '</div>'
-        + '<textarea id="asImsg_' + escHtml(k.key) + '" rows="5" style="width:100%;border:1px solid #D1D5DB;border-radius:8px;'
-        + 'padding:8px 10px;font-size:.78rem;font-family:inherit;line-height:1.55;resize:vertical"></textarea>'
-        + '<button onclick="_imsgReset(\'' + escHtml(k.key) + '\')" style="margin-top:5px;padding:3px 9px;background:#F3F4F6;color:#374151;border:none;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer">기본 문구로</button>'
+      return '<div class="as-imsg-row">'
+        + '<div class="as-imsg-meta">'
+          + '<div class="as-imsg-label">' + escHtml(k.label) + '</div>'
+          + '<div class="as-imsg-desc">' + escHtml(k.desc || '') + '</div>'
+          + '<button class="as-imsg-reset" onclick="_imsgReset(\'' + escHtml(k.key) + '\')">기본 문구로</button>'
+        + '</div>'
+        + '<div class="as-imsg-field">'
+          + '<textarea class="as-imsg-input" id="asImsg_' + escHtml(k.key) + '" rows="5" maxlength="' + maxLen + '" aria-label="' + escHtml(k.label) + ' 안내문구"></textarea>'
+          + '<div class="as-imsg-help">비워두고 저장하면 기본 문구로 돌아갑니다.</div>'
+        + '</div>'
         + '</div>';
-    }).join('');
+      }).join('');
     // ★ 값은 value 로 넣는다(HTML 보간 금지 — 저장된 문장에 무엇이 있든 안전하게)
     _imsgKinds.forEach(function (k) {
       var t = document.getElementById('asImsg_' + k.key);
@@ -2276,6 +2282,23 @@ async function saveGateCriteria() {
         '.as-bnavt,.as-bnavfoot{display:none}' +
         '.as-bitem{width:auto}.as-bitem .nm{flex:0 1 auto}}' +
       '@media (max-width:640px){.as-slot{flex-wrap:wrap}.as-slotbody{flex:1 1 100%;order:3}}' +
+      /* 리뷰어 안내문구 — 유형과 입력란을 같은 행에 둬 문구의 대상을 즉시 확인한다.
+         서버가 준 kinds/messages 를 그대로 그리므로 저장·전송 문구의 단일 출처는 유지된다. */
+      '.as-imsg-grid{width:100%;max-width:100%;box-sizing:border-box;border:1px solid #DCE3EC;border-radius:9px;overflow:hidden;background:#fff}' +
+      '.as-imsg-colhead{display:grid;grid-template-columns:minmax(190px,31%) minmax(0,1fr);background:#F6F8FB;border-bottom:1px solid #DCE3EC;color:#667085;font-size:.72rem;font-weight:750}' +
+      '.as-imsg-colhead span{padding:9px 12px}.as-imsg-colhead span+span{border-left:1px solid #DCE3EC}' +
+      '.as-imsg-row{display:grid;grid-template-columns:minmax(190px,31%) minmax(0,1fr);min-width:0;border-bottom:1px solid #E8EDF3}' +
+      '.as-imsg-row:last-child{border-bottom:none}' +
+      '.as-imsg-meta{padding:13px 12px;background:#FAFBFD;min-width:0}' +
+      '.as-imsg-label{font-size:.82rem;font-weight:750;color:#1F2937;line-height:1.4}' +
+      '.as-imsg-desc{font-size:.71rem;color:#8491A0;line-height:1.5;margin-top:4px}' +
+      '.as-imsg-reset{margin-top:9px;padding:0;border:none;background:transparent;color:#526E88;font:inherit;font-size:.7rem;font-weight:650;text-decoration:underline;text-underline-offset:3px;cursor:pointer}' +
+      '.as-imsg-reset:hover{color:#2563A8}.as-imsg-reset:focus-visible{outline:2px solid #2563A8;outline-offset:3px;border-radius:2px}' +
+      '.as-imsg-field{min-width:0;padding:11px 12px;border-left:1px solid #DCE3EC}' +
+      '.as-imsg-input{display:block;width:100%;min-height:94px;padding:8px 10px;border:1px solid #C9D5E1;border-radius:7px;background:#fff;color:#1F2937;font:inherit;font-size:.78rem;line-height:1.55;resize:vertical;outline:none;box-sizing:border-box}' +
+      '.as-imsg-input:focus{border-color:#2563A8;box-shadow:0 0 0 3px rgba(37,99,168,.13)}' +
+      '.as-imsg-help{margin-top:5px;color:#94A3B8;font-size:.68rem;line-height:1.4}' +
+      '@media (max-width:640px){.as-imsg-colhead{display:none}.as-imsg-row{grid-template-columns:1fr}.as-imsg-meta{padding:12px 12px 8px}.as-imsg-field{padding:0 12px 12px;border-left:none}.as-imsg-input{min-height:108px}}' +
       /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
       '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
       /* 등록 예시 썸네일 — 클릭하면 크게 본다(40px 로는 내용 확인이 불가능했다) */
