@@ -252,10 +252,9 @@ t('★ 대기 큐 — 세 모드 + 공용 카드 렌더러 + 문의 화면 높�
   const full = WD.slice(WD.indexOf('function _reFullHtml'), WD.indexOf('function _reSyncNavBadge'));
   assert.ok(/class="recards"/.test(full) && /CsReviewEditCard\.html\(_reMeta\(r\)/.test(full),
     'full 모드가 공용 카드 격자를 안 쓴다(사본 드리프트)');
-  // rail 에서도 승인·반려는 **대화창과 같은 핸들러**여야 한다
+  // rail 에서 요청을 누르면 비교·승인·반려가 한 팝업에서 이어져야 한다.
   const rail = WD.slice(WD.indexOf('function _reRailHtml'), WD.indexOf('function _reFullHtml'));
-  assert.ok(/csApproveReviewEdit\(/.test(rail) && /csRejectReviewEdit\(/.test(rail));
-  assert.ok(/CsReviewEditCard\.zoomPair\(/.test(rail), 'rail 썸네일이 기존↔변경 대조로 안 열린다');
+  assert.ok(/_reOpenReviewPopup\(/.test(rail), 'rail 요청이 검토 팝업으로 열리지 않는다');
   // ★ 띠가 먹은 높이만큼 아래 문의 화면을 줄인다 — 안 하면 답장 입력칸이 화면 밖으로 밀린다
   assert.ok(/function _reFitCsHeight/.test(WD) && /calc\(100vh - 250px - \$\{h\}px\)/.test(WD));
   // ★ 공유 모듈(cs-inquiry.js)은 이 통합으로 바뀌지 않는다 — 관리자 대시보드엔 이 띠가 없다
@@ -278,6 +277,17 @@ t('★ 목록 새로고침은 C/S 화면이 있을 때만(AE 403·unhandled reje
 t('전용 탭 뱃지는 부팅 때도 채운다 + 클래스가 기존 이름과 안 겹친다', () => {
   assert.ok(/async function _reBootBadge\(\)/.test(WD) && /_reBootBadge\(\);/.test(WD));
   assert.ok(/\.recards\{display:grid/.test(WD) && /\.recard\{/.test(WD));
+});
+
+t('B스타일 검토 팝업은 기존 승인·반려 API를 재사용하고 다음 요청을 연다', () => {
+  assert.ok(/function _reOpenReviewPopup\(/.test(WD), '대기 요청을 검토 팝업으로 여는 함수가 없다');
+  assert.ok(/function _rePopupResolve\(/.test(WD), '승인·반려 후 다음 요청으로 넘기는 함수가 없다');
+  assert.ok(/class="repopup"/.test(WD), 'B스타일 검토 팝업 마크업이 없다');
+  assert.ok(/event\.key === 'ArrowRight'/.test(WD) && /event\.key === 'ArrowLeft'/.test(WD), '좌우 방향키 이동이 없다');
+  assert.ok(/csApproveReviewEdit\(rid,\{ skipConfirm:true, skipReload:true \}\)/.test(WD), '팝업 승인이 기존 API 호출을 재사용하지 않는다');
+  assert.ok(/csRejectReviewEdit\(rid,\{ note, skipReload:true \}\)/.test(WD), '팝업 반려가 기존 API 호출을 재사용하지 않는다');
+  assert.ok(/async function csApproveReviewEdit\(requestId, opts\)/.test(CSJ), '승인 함수가 팝업 옵션을 받지 못한다');
+  assert.ok(/async function csRejectReviewEdit\(requestId, opts\)/.test(CSJ), '반려 함수가 팝업 사유를 받지 못한다');
 });
 
 /* ── 8) ★★ 런타임 — 정적 grep 이 못 잡는 것 ────────────────── */

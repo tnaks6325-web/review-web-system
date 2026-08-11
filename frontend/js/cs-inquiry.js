@@ -550,22 +550,36 @@ async function _reCall(path, body) {
   const res = await fetch(base + _reApiBase() + path, { method: 'POST', headers, body: JSON.stringify(body) });
   return res.json().catch(() => ({ ok: false, error: '응답을 읽지 못했습니다.' }));
 }
-async function csApproveReviewEdit(requestId) {
+async function csApproveReviewEdit(requestId, opts) {
   if (!requestId) return;
-  if (!confirm('이 교체요청을 승인할까요?\n\n· 리뷰 이미지가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return;
+  opts = opts || {};
+  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 이미지가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
   const r = await _reCall('/approve', { id: requestId });
-  if (r && r.ok) { showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.'); csReloadAfterReviewEdit(); }
-  else showToast('승인 실패: ' + ((r && r.error) || '알 수 없는 오류'), true);
+  if (r && r.ok) {
+    showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.');
+    if (!opts.skipReload) csReloadAfterReviewEdit();
+    return true;
+  }
+  showToast('승인 실패: ' + ((r && r.error) || '알 수 없는 오류'), true);
+  return false;
 }
-async function csRejectReviewEdit(requestId) {
+async function csRejectReviewEdit(requestId, opts) {
   if (!requestId) return;
+  opts = opts || {};
   // 사유는 필수 — 그대로 리뷰어에게 전송되므로 비우면 "왜 반려됐는지" 알 수 없다(서버도 거부).
-  const note = prompt('반려 사유를 입력하세요.\n(리뷰어 채팅에 그대로 전송됩니다)');
-  if (note === null) return;
+  const note = Object.prototype.hasOwnProperty.call(opts, 'note')
+    ? opts.note
+    : prompt('반려 사유를 입력하세요.\n(리뷰어 채팅에 그대로 전송됩니다)');
+  if (note === null) return false;
   if (!String(note).trim()) { showToast('반려 사유를 입력해 주세요.', true); return; }
   const r = await _reCall('/reject', { id: requestId, note: String(note).trim() });
-  if (r && r.ok) { showToast('반려했습니다. 사유가 리뷰어에게 전송되었습니다.'); csReloadAfterReviewEdit(); }
-  else showToast('반려 실패: ' + ((r && r.error) || '알 수 없는 오류'), true);
+  if (r && r.ok) {
+    showToast('반려했습니다. 사유가 리뷰어에게 전송되었습니다.');
+    if (!opts.skipReload) csReloadAfterReviewEdit();
+    return true;
+  }
+  showToast('반려 실패: ' + ((r && r.error) || '알 수 없는 오류'), true);
+  return false;
 }
 function csReloadAfterReviewEdit() {
   try { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); } catch (_) {}

@@ -925,6 +925,11 @@
   .recard .rehd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;font-size:12.5px}
   .recard .remeta{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
   @media (max-width:900px){ .recards{grid-template-columns:1fr} }
+  /* C/S 이미지 교체요청 검토 팝업 — B스타일: 비교와 결정, 다음 요청 이동을 한 작업면에 둔다. */
+  .repopup-scrim{position:fixed;inset:0;z-index:100100;background:rgba(17,32,51,.76);padding:54px 24px 28px;overflow:auto}
+  .repopup{width:min(1180px,calc(100vw - 48px));min-height:670px;margin:0 auto;background:#fff;border:1px solid #b8c7dc;border-radius:7px;box-shadow:0 18px 50px rgba(9,20,38,.34);overflow:hidden;color:#172033;font-family:"SUIT Variable","SUIT","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-variant-numeric:tabular-nums}
+  .repopup-head{height:62px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 18px;border-bottom:1px solid #d9e1ec}.repopup-title{display:flex;align-items:center;gap:8px;min-width:0}.repopup-title b{font-size:15px;letter-spacing:-.03em}.repopup-title span{overflow:hidden;color:#71809a;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.repopup-nav{display:flex;align-items:center;gap:6px}.repopup-nav b{min-width:76px;text-align:center;font-size:12px}.repopup-btn{min-height:29px;border:1px solid #d9e1ec;border-radius:6px;background:#fff;color:#42536d;padding:5px 9px;font:800 10px inherit;cursor:pointer}.repopup-btn:hover:not(:disabled){border-color:#abc6f7;background:#f8fbff;color:#2f70e8}.repopup-btn:disabled{cursor:default;opacity:.45}.repopup-close{justify-self:end;border-color:#aeb9c8}.repopup-body{display:grid;grid-template-columns:minmax(0,1fr) 272px;min-height:608px}.repopup-main{min-width:0;padding:19px 20px 22px}.repopup-summary{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(180px,.9fr) auto;gap:12px;align-items:center;padding:12px 14px;border:1px solid #d9e1ec;border-radius:6px;background:#fff}.repopup-summary h2{margin:0 0 2px;font-size:14px;letter-spacing:-.03em}.repopup-summary p{margin:0;overflow:hidden;color:#71809a;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.repopup-reviewer{border-left:1px solid #d9e1ec;padding-left:12px}.repopup-reviewer span{display:block;color:#71809a;font-size:9.5px}.repopup-reviewer b{font-size:11px}.repopup-status{justify-self:end;padding:4px 7px;border-radius:5px;background:#fff2df;color:#ae5900;font-size:10px;font-weight:850}.repopup-caption{display:flex;align-items:center;margin:17px 0 8px}.repopup-caption h3{margin:0;font-size:13px}.repopup-caption span{margin-left:7px;color:#71809a;font-size:10px}.repopup-compare{display:grid;grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr);align-items:stretch}.repopup-image-card{padding:12px;border:1px solid #d9e1ec;border-radius:6px;background:#fff}.repopup-image-card.pending{border-color:#a9c7f8;background:#fbfdff}.repopup-image-card header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.repopup-image-card header b{font-size:11px}.repopup-image-card header span{color:#71809a;font-size:9.5px}.repopup-image{display:block;width:100%;height:330px;object-fit:contain;border:1px solid #d9e1ec;border-radius:4px;background:#f8fbff}.repopup-image.empty{display:grid;place-items:center;color:#71809a;font-size:11px}.repopup-swap{display:flex;align-items:center;justify-content:center}.repopup-swap span{display:grid;place-items:center;width:35px;height:35px;border:1px solid #abc6f7;border-radius:50%;background:#eaf2ff;color:#2f70e8;font-size:9px;font-weight:850}.repopup-reason{display:grid;grid-template-columns:86px 1fr;gap:12px;margin-top:12px;padding:11px 12px;border:1px solid #d9e1ec;border-radius:6px;background:#f8fbff}.repopup-reason b{font-size:10px}.repopup-reason p{margin:0;color:#4f617b;font-size:10px}.repopup-key{margin:10px 0 0;color:#71809a;font-size:9.5px}.repopup-side{padding:18px;border-left:1px solid #d9e1ec;background:#fafbfd}.repopup-side-label{margin:0 0 7px;color:#71809a;font-size:10px;font-weight:850}.repopup-side h2{margin:0;font-size:15px;letter-spacing:-.035em}.repopup-side-copy{margin:5px 0 14px;color:#71809a;font-size:10px}.repopup-meta{padding:11px;border:1px solid #d9e1ec;border-radius:6px;background:#fff}.repopup-meta dl{display:grid;grid-template-columns:68px 1fr;gap:7px 8px;margin:0;font-size:10px}.repopup-meta dt{color:#71809a}.repopup-meta dd{margin:0;font-weight:800;text-align:right}.repopup-rule{margin-top:12px;padding:12px;border:1px solid #cbdcf9;border-radius:6px;background:#eaf2ff}.repopup-rule b{font-size:11px}.repopup-rule p{margin:3px 0 0;color:#45649b;font-size:10px}.repopup-actions{display:grid;gap:7px;margin-top:12px}.repopup-primary,.repopup-reject,.repopup-confirm{min-height:39px;border-radius:6px;padding:9px 10px;font:850 11px inherit;cursor:pointer}.repopup-primary{border:1px solid #2f70e8;background:#2f70e8;color:#fff}.repopup-primary:hover{background:#2764cf}.repopup-reject{border:1px solid #e2b9bf;background:#fff;color:#bb3c48}.repopup-reject:hover{background:#fff0f2}.repopup-primary:active,.repopup-reject:active,.repopup-confirm:active{transform:translateY(1px)}.repopup-reject-form{display:none;margin-top:10px;padding-top:10px;border-top:1px solid #d9e1ec}.repopup-reject-form.show{display:block}.repopup-reject-form label{display:block;margin-bottom:5px;color:#52627a;font-size:10px;font-weight:850}.repopup-reject-form textarea{display:block;resize:vertical;width:100%;min-height:70px;border:1px solid #d9e1ec;border-radius:6px;padding:8px;color:#172033;font:10px/1.45 inherit}.repopup-reject-form textarea:focus{outline:2px solid rgba(47,112,232,.28);border-color:#2f70e8}.repopup-error{display:none;margin:5px 0 0;color:#bb3c48;font-size:9.5px;font-weight:750}.repopup-error.show{display:block}.repopup-confirm{width:100%;margin-top:7px;border:1px solid #bb3c48;background:#bb3c48;color:#fff}.repopup-audit{margin-top:13px;padding-top:13px;border-top:1px solid #d9e1ec}.repopup-audit h4{margin:0 0 7px;font-size:10px}.repopup-audit p{display:flex;justify-content:space-between;gap:7px;margin:5px 0;color:#71809a;font-size:9.5px}.repopup-audit b{color:#172033;font-weight:800}.repopup-empty{display:grid;place-items:center;min-height:608px;padding:40px;text-align:center}.repopup-empty span{display:inline-block;padding:4px 7px;border-radius:5px;background:#e7f6ed;color:#14734b;font-size:10px;font-weight:850}.repopup-empty h2{margin:9px 0 4px;font-size:20px;letter-spacing:-.04em}.repopup-empty p{margin:0;color:#71809a;font-size:11px}
+  @media(max-width:900px){.repopup-scrim{padding:0}.repopup{width:100%;min-height:0}.repopup-head{grid-template-columns:1fr auto;height:auto;min-height:62px}.repopup-title span{display:none}.repopup-nav{grid-column:1/-1;grid-row:2;padding:0 0 12px;justify-content:center}.repopup-close{grid-column:2;grid-row:1}.repopup-body{grid-template-columns:1fr}.repopup-side{border-left:0;border-top:1px solid #d9e1ec}.repopup-compare{grid-template-columns:1fr}.repopup-swap{height:40px}.repopup-summary{grid-template-columns:1fr}.repopup-reviewer{border-left:0;border-top:1px solid #d9e1ec;padding:9px 0 0}.repopup-status{justify-self:start}.repopup-image{height:280px}}
 
   /* ── 리뷰검수 탭 ── 손볼 것만 카드로. 왼쪽 색 띠로 심각도를 한눈에 구분한다. */
   .ricards{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:11px;max-width:1400px}
@@ -2110,6 +2115,7 @@ function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
    옛 이름을 여기서 한 번 갈아끼운다: 브라우저 히스토리에 남은 항목(_navApply)·북마크·
    외부 호출이 뷰 없는 상태로 떨어져 빈 화면이 되는 것을 막는다(뷰 이름 하나만 옮기면 되게). */
 function switchView(v){ if(v==='reedit'){ v='cs'; STATE.reOpenQueue=true; }
+  if(v!=='cs' && typeof _reCloseReviewPopup==='function') _reCloseReviewPopup();
   STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업보드 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업보드 뷰에만
@@ -7894,6 +7900,102 @@ function _reMeta(r){
 function _reRid(r){ return String((r&&r.id)||'').replace(/[^\w-]/g,''); }
 function _reFmtAt(iso){ return iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):''; }
 
+/* C/S 이미지 교체요청 팝업 — 서버가 돌려준 대기 목록만 순서대로 검토한다.
+   승인·반려의 실제 변경은 공용 C/S 핸들러가 맡으므로 여기서는 화면 전환과 다음 건 이동만 담당한다. */
+const _RE_POPUP = { rows:[], index:0, open:false };
+function _rePopupPendingRows(){ return Array.isArray(STATE.re) ? STATE.re.filter(r=>r && r.status==='pending') : []; }
+function _rePopupImage(fileId, label){
+  const id=String(fileId||'').replace(/[^-\w]/g,'');
+  if(!/^[-\w]{20,}$/.test(id)) return `<div class="repopup-image empty">${esc(label+' 이미지 없음')}</div>`;
+  return `<img class="repopup-image" src="${esc(API_BASE)}/api/drive/image/${encodeURIComponent(id)}" alt="${esc(label)}" loading="eager">`;
+}
+function _reOpenReviewPopup(requestId){
+  const rows=_rePopupPendingRows();
+  if(!rows.length){ showToast('처리 대기 중인 이미지 교체요청이 없습니다.'); return; }
+  const rid=String(requestId||'');
+  _RE_POPUP.rows=rows;
+  _RE_POPUP.index=Math.max(0,rows.findIndex(r=>String(r.id)===rid));
+  _RE_POPUP.open=true;
+  _reRenderReviewPopup();
+}
+function _reCloseReviewPopup(){
+  _RE_POPUP.open=false;
+  const root=document.getElementById('reReviewPopupRoot');
+  if(root) root.remove();
+}
+function _reMoveReviewPopup(delta){
+  const next=_RE_POPUP.index+delta;
+  if(next<0 || next>=_RE_POPUP.rows.length) return;
+  _RE_POPUP.index=next;
+  _reRenderReviewPopup();
+}
+function _rePopupToggleReject(){
+  const box=document.getElementById('rePopupRejectForm');
+  if(!box) return;
+  box.classList.toggle('show');
+  if(box.classList.contains('show')) document.getElementById('rePopupRejectNote').focus();
+}
+async function _rePopupResolve(action){
+  const row=_RE_POPUP.rows[_RE_POPUP.index];
+  if(!row) return;
+  const rid=_reRid(row);
+  if(!rid) return;
+  let ok=false;
+  if(action==='approved'){
+    ok=await csApproveReviewEdit(rid,{ skipConfirm:true, skipReload:true });
+  }else{
+    const note=(document.getElementById('rePopupRejectNote')||{}).value||'';
+    if(!String(note).trim()){
+      const err=document.getElementById('rePopupRejectError'); if(err) err.classList.add('show');
+      const field=document.getElementById('rePopupRejectNote'); if(field) field.focus();
+      return;
+    }
+    ok=await csRejectReviewEdit(rid,{ note, skipReload:true });
+  }
+  if(!ok) return;
+  _RE_POPUP.rows.splice(_RE_POPUP.index,1);
+  if(Array.isArray(STATE.re)) STATE.re=STATE.re.filter(r=>String(r.id)!==String(row.id));
+  if(Number.isFinite(STATE.rePending)) STATE.rePending=Math.max(0,STATE.rePending-1);
+  if(_RE_POPUP.index>=_RE_POPUP.rows.length) _RE_POPUP.index=Math.max(0,_RE_POPUP.rows.length-1);
+  _reRenderQueue();
+  _reRenderReviewPopup();
+  showToast(action==='approved'
+    ? (_RE_POPUP.rows.length?'승인 완료. 다음 교체요청을 열었습니다.':'승인 완료. 대기 요청을 모두 처리했습니다.')
+    : (_RE_POPUP.rows.length?'반려 완료. 다음 교체요청을 열었습니다.':'반려 완료. 대기 요청을 모두 처리했습니다.'));
+  try{ csReloadAfterReviewEdit(); }catch(_){ _loadReedit(); }
+}
+function _reRenderReviewPopup(){
+  let root=document.getElementById('reReviewPopupRoot');
+  if(!root){ root=document.createElement('div'); root.id='reReviewPopupRoot'; document.body.appendChild(root); }
+  if(!_RE_POPUP.rows.length){
+    root.innerHTML=`<div class="repopup-scrim"><section class="repopup" role="dialog" aria-modal="true" aria-label="이미지 교체요청 처리 완료"><div class="repopup-empty"><div><span>모든 요청 처리 완료</span><h2>대기 중인 이미지 교체요청이 없습니다.</h2><p>다음 요청이 접수되면 C/S 대기 큐에 표시됩니다.</p><button class="repopup-btn" style="margin-top:16px" onclick="_reCloseReviewPopup()">목록으로</button></div></div></section></div>`;
+    return;
+  }
+  const r=_RE_POPUP.rows[_RE_POPUP.index];
+  const prev=_RE_POPUP.index===0?'disabled':'';
+  const next=_RE_POPUP.index===_RE_POPUP.rows.length-1?'disabled':'';
+  const product=esc(r.campaign_label||r.tab_name||'이미지 교체 요청');
+  const reviewer=esc(r.reviewer_name||'리뷰어 정보 없음');
+  const reason=esc(r.reason||'요청 사유가 입력되지 않았습니다.');
+  const created=esc(_reFmtAt(r.created_at)||'-');
+  root.innerHTML=`<div class="repopup-scrim"><section class="repopup" role="dialog" aria-modal="true" aria-labelledby="rePopupTitle">
+    <header class="repopup-head"><div class="repopup-title"><b id="rePopupTitle">C/S · 이미지 교체요청</b><span>원본과 변경 요청 이미지를 대조합니다.</span></div>
+      <div class="repopup-nav" aria-label="교체요청 이동"><button class="repopup-btn" type="button" onclick="_reMoveReviewPopup(-1)" ${prev}>이전 요청</button><b>${_RE_POPUP.index+1} / ${_RE_POPUP.rows.length}</b><button class="repopup-btn" type="button" onclick="_reMoveReviewPopup(1)" ${next}>다음 요청</button></div>
+      <button class="repopup-btn repopup-close" type="button" onclick="_reCloseReviewPopup()">닫기</button></header>
+    <div class="repopup-body"><main class="repopup-main"><section class="repopup-summary"><div><h2>${product}</h2><p>리뷰 이미지 ${esc(r.slot_key||r.row_index||'-')}번 교체 요청</p></div><div class="repopup-reviewer"><span>요청 리뷰어</span><b>${reviewer}</b></div><span class="repopup-status">처리 대기</span></section>
+      <div class="repopup-caption"><h3>이미지 비교</h3><span>교체 대상은 동일한 리뷰 이미지 1장입니다.</span></div>
+      <section class="repopup-compare" aria-label="원본과 교체 요청 이미지 비교"><article class="repopup-image-card"><header><b>기존 등록 이미지</b><span>등록본</span></header>${_rePopupImage(r.old_file_id,'기존 등록')}</article><div class="repopup-swap" aria-hidden="true"><span>교체</span></div><article class="repopup-image-card pending"><header><b>변경 요청 이미지</b><span>요청 ${created}</span></header>${_rePopupImage(r.new_file_id,'변경 요청')}</article></section>
+      <section class="repopup-reason"><b>요청 사유</b><p>${reason}</p></section><p class="repopup-key">팁: 좌우 방향키로 이전·다음 교체요청을 확인할 수 있습니다.</p></main>
+      <aside class="repopup-side"><p class="repopup-side-label">현재 요청</p><h2>결정을 기록합니다</h2><p class="repopup-side-copy">결과는 리뷰어 C/S 대화에 안내되고, 승인 시 교체 이미지가 반영됩니다.</p><section class="repopup-meta"><dl><dt>요청 ID</dt><dd>${esc(_reRid(r)||'-')}</dd><dt>교체 대상</dt><dd>리뷰 ${esc(r.slot_key||r.row_index||'-')}번 이미지</dd><dt>요청 시각</dt><dd>${created}</dd><dt>처리 범위</dt><dd>${STATE.reScoped?'담당 업체':'전체'}</dd></dl></section><section class="repopup-rule"><b>판단 기준</b><p>리뷰 내용과 무관한 이미지, 상품과 다른 사진, 부적절한 이미지는 반려 사유를 남깁니다.</p></section><div class="repopup-actions"><button class="repopup-primary" type="button" onclick="_rePopupResolve('approved')">승인 · 다음 요청 보기</button><button class="repopup-reject" type="button" onclick="_rePopupToggleReject()">반려 사유 입력</button></div><div class="repopup-reject-form" id="rePopupRejectForm"><label for="rePopupRejectNote">반려 사유 (필수)</label><textarea id="rePopupRejectNote" placeholder="예: 상품과 무관한 이미지가 포함되어 있어 반려합니다."></textarea><p class="repopup-error" id="rePopupRejectError">반려 사유를 입력해 주세요.</p><button class="repopup-confirm" type="button" onclick="_rePopupResolve('rejected')">반려 확정 · 다음 요청 보기</button></div><section class="repopup-audit"><h4>처리 흐름</h4><p><span>결정 저장</span><b>즉시</b></p><p><span>리뷰어 알림</span><b>자동 발송</b></p><p><span>다음 대기 요청</span><b>자동 열기</b></p></section></aside></div>
+  </section></div>`;
+}
+document.addEventListener('keydown',event=>{
+  if(!_RE_POPUP.open) return;
+  if(['INPUT','TEXTAREA'].includes((document.activeElement&&document.activeElement.tagName)||'')) return;
+  if(event.key === 'ArrowRight'){ event.preventDefault(); _reMoveReviewPopup(1); }
+  if(event.key === 'ArrowLeft'){ event.preventDefault(); _reMoveReviewPopup(-1); }
+});
+
 function _reRenderQueue(){
   const host = $('#reQueueMount'); if(!host) return;   // 다른 뷰에 있으면 아무 것도 안 한다
   const mode = _reMode();
@@ -7955,18 +8057,17 @@ function _reRailHtml(rows){
     const rid = _reRid(r);
     const nid = String(r.new_file_id||'').replace(/[^-\w]/g,'');
     const oid = String(r.old_file_id||'').replace(/[^-\w]/g,'');
-    // 썸네일은 **변경 요청분**을 보여주고, 클릭하면 기존↔변경을 나란히 크게 본다(공용 렌더러의 zoomPair)
+    // 요청을 누르면 원본↔변경 대조와 승인·반려를 한 팝업에서 처리한다.
     const thumb = /^[-\w]{20,}$/.test(nid)
       ? `<img class="reqim" src="${esc(API_BASE)}/api/drive/image/${encodeURIComponent(nid)}" alt="변경 요청" loading="lazy"
-           onclick="CsReviewEditCard.zoomPair('${oid}','${nid}','new')">`
+           onclick="_reOpenReviewPopup('${rid}')">`
       : `<div class="reqim" style="display:grid;place-items:center;color:var(--faint);font-size:10px">없음</div>`;
     return `<div class="reqitem">${thumb}
       <div class="reqm">
         <b>${esc(r.reviewer_name||'-')} · ${esc(r.campaign_label||r.tab_name||'')}</b>
         <div class="rq2">${esc(r.reason||'(사유 없음)')}</div>
         <div class="reqacts">
-          <button class="btn sm" onclick="csApproveReviewEdit('${rid}')">승인</button>
-          <button class="btn sm" onclick="csRejectReviewEdit('${rid}')">반려</button>
+          <button class="btn sm" onclick="_reOpenReviewPopup('${rid}')">팝업 검토</button>
         </div>
       </div></div>`;
   }).join('') + (rest>0
@@ -7992,6 +8093,7 @@ function _reFullHtml(st, rows){
       <div class="rehd"><b>${esc(r.campaign_label||r.tab_name||'')}</b>
         <span class="remeta">${esc(r.reviewer_name||'')} · ${esc(_fmtPhone(r.phone8||''))}</span>
         <span class="sp" style="flex:1"></span>
+        ${r.status==='pending'?`<button class="btn sm" onclick="_reOpenReviewPopup('${rid}')">팝업 검토</button>`:''}
         <span class="remeta">${esc(_reFmtAt(r.created_at))}</span></div>
       ${window.CsReviewEditCard.html(_reMeta(r),{admin:true,
          onApprove:`csApproveReviewEdit('${rid}')`, onReject:`csRejectReviewEdit('${rid}')`})}
