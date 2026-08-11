@@ -8,6 +8,7 @@
      admin.html 과 **같은 CDN·같은 버전**을 쓰므로 두 화면의 아이콘이 어긋나지 않는다.
      못 불러와도 글자만 빠질 뿐 동작은 그대로(모듈은 아이콘에 기능을 걸지 않는다). -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+<link rel="stylesheet" href="css/payment-c-style.css"/>
 <style>
   /* ═══ Clarity Console 공용 UI 키트 토큰 — 단일 블루 액센트 + 쿨그레이 뉴트럴, tabular-nums ═══ */
   :root{
@@ -6372,7 +6373,7 @@ const PAY_FIX_KIND = {
 const PAY_ACCT_ISSUES = ['bank_unknown','no_account','no_holder'];
 
 async function renderPaymentView(){
-  STATE.pmFilter = STATE.pmFilter || {manager:'', workKey:''};
+  _pmFilterState();
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="pmhead"></div><div id="pmbody"><div class="empty">불러오는 중…</div></div></div>`;
   STATE.pmExcluded = STATE.pmExcluded || {};   // {key:true} = 이번 회차에서 뺀 건
   STATE.pmSub = STATE.pmSub || 'targets';      // 서브탭 — 입금 대상·회차 / 🏦 은행 이름
@@ -6401,38 +6402,70 @@ const _pmOn  = it => it.payable && !STATE.pmExcluded[_pmKey(it)];
 const _pmNum = n => (Number(n)||0).toLocaleString();
 
 function _pmWorkKey(it){ return String((it&&it.sheetId)||'')+'||'+String((it&&it.tabName)||''); }
+function _pmManagerName(value){
+  const manager=String(value||'').trim();
+  return manager==='박은비' ? '망고' : manager;
+}
 function _pmFilterItems(items, filters){
   const manager=String((filters&&filters.manager)||'').trim();
-  const workKey=String((filters&&filters.workKey)||'');
+  const workKeys=Array.isArray(filters&&filters.workKeys)
+    ? filters.workKeys.filter(Boolean)
+    : ((filters&&filters.workKey) ? [filters.workKey] : null);
   return (items||[]).filter(it =>
-    (!manager || String(it.manager||'').trim()===manager) &&
-    (!workKey || _pmWorkKey(it)===workKey));
+    (!manager || _pmManagerName(it.manager)===manager) &&
+    (workKeys===null || workKeys.includes(_pmWorkKey(it))));
 }
 function _pmSelectedPaymentTotal(items, filters, isSelected){
   const selected=isSelected || (it => it.payable && !it.excluded);
   return _pmFilterItems(items,filters).filter(selected)
     .reduce((sum,it)=>sum+(Number(it.amount)||0),0);
 }
-function _pmVisibleItems(){ return _pmFilterItems(STATE.pmItems||[], STATE.pmFilter||{}); }
-function _pmSetFilter(kind,value){
-  STATE.pmFilter=STATE.pmFilter || {manager:'', workKey:''};
-  STATE.pmFilter[kind]=value||'';
-  if(kind==='manager') STATE.pmFilter.workKey='';
+function _pmFilterState(){
+  const filter=STATE.pmFilter || {};
+  if(!Array.isArray(filter.workKeys)) filter.workKeys=filter.workKey ? [filter.workKey] : null;
+  delete filter.workKey;
+  filter.manager=_pmManagerName(filter.manager);
+  STATE.pmFilter=filter;
+  return filter;
+}
+function _pmWorkEntries(items, manager){
+  return [...new Map((items||[])
+    .filter(it=>!manager || _pmManagerName(it.manager)===manager)
+    .map(it=>[_pmWorkKey(it),it])).entries()]
+    .sort((a,b)=>String(a[1].tabLabel||a[1].tabName||'').localeCompare(String(b[1].tabLabel||b[1].tabName||''),'ko'));
+}
+function _pmVisibleItems(){ return _pmFilterItems(STATE.pmItems||[], _pmFilterState()); }
+function _pmSelectManager(manager){
+  const filter=_pmFilterState();
+  filter.manager=manager||'';
+  filter.workKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
+  _pmRender();
+}
+function _pmToggleWorkKeys(selectedKeys, allKeys, workKey){
+  const selected=new Set(selectedKeys===null ? allKeys : selectedKeys);
+  if(selected.has(workKey)) selected.delete(workKey); else selected.add(workKey);
+  return allKeys.filter(key=>selected.has(key));
+}
+function _pmToggleWork(workKey){
+  const filter=_pmFilterState();
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
+  filter.workKeys=_pmToggleWorkKeys(filter.workKeys,allKeys,workKey);
   _pmRender();
 }
 function _pmFilterBar(allItems){
-  const filters=STATE.pmFilter||{};
-  const managers=[...new Set((allItems||[]).map(it=>String(it.manager||'').trim()).filter(Boolean))]
+  const filter=_pmFilterState();
+  const managers=[...new Set((allItems||[]).map(it=>_pmManagerName(it.manager)).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'ko'));
-  const works=[...new Map((allItems||[])
-    .filter(it=>!filters.manager || String(it.manager||'').trim()===filters.manager)
-    .map(it=>[_pmWorkKey(it),it])).entries()]
-    .sort((a,b)=>String(a[1].tabLabel||a[1].tabName||'').localeCompare(String(b[1].tabLabel||b[1].tabName||''),'ko'));
-  const managerOptions=['<option value="">전체 담당자</option>']
-    .concat(managers.map(name=>`<option value="${esc(name)}" ${filters.manager===name?'selected':''}>${esc(name)}</option>`)).join('');
-  const workOptions=['<option value="">전체 작업</option>']
-    .concat(works.map(([key,it])=>{ const label=it.tabLabel||it.tabName||key; return `<option value="${esc(key)}" ${filters.workKey===key?'selected':''}>${esc(label)}</option>`; })).join('');
-  return `<div class="pmrow" style="margin:0 0 12px;gap:10px"><label style="font-size:12px;font-weight:700">담당자 <select onchange="_pmSetFilter('manager',this.value)">${managerOptions}</select></label><label style="font-size:12px;font-weight:700">작업 <select onchange="_pmSetFilter('workKey',this.value)">${workOptions}</select></label></div>`;
+  const works=_pmWorkEntries(allItems,filter.manager);
+  const selectedKeys=new Set(filter.workKeys===null ? works.map(([key])=>key) : filter.workKeys);
+  const managerButton=(value,label)=>`<button type="button" class="pmmgr ${filter.manager===value?'on':''}" aria-pressed="${filter.manager===value}" onclick="_pmSelectManager(${esc(JSON.stringify(value))})">${esc(label)}</button>`;
+  const workRows=works.map(([key,it])=>{
+    const selected=selectedKeys.has(key);
+    const selectedItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
+    const label=it.tabLabel||it.tabName||key;
+    return `<button type="button" class="pmworkpick ${selected?'on':''}" aria-pressed="${selected}" onclick="_pmToggleWork(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
+  }).join('');
+  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · ${selectedKeys.size}/${works.length}개 작업 선택</span></div><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span>행 전체를 눌러 여러 작업을 선택합니다.</span></div><div class="pmworklist">${workRows||'<div class="empty">선택할 작업이 없습니다.</div>'}</div></section>`;
 }
 
 function _pmRender(){
