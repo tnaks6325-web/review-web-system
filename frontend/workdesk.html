@@ -540,8 +540,8 @@
   table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
   .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
   table.sheetgrid td.gctr{text-align:center} table.sheetgrid th.gctr .th-in{justify-content:center}   /* 날짜/연락처 열 = 가운데 정렬(값 길이 달라도 앞여백=뒷여백) */
-  table.sheetgrid.advsnug{min-width:0}   /* (역할 무관 기본이 된 규칙 — 광고주 그리드 식별용으로 클래스는 유지) */
-  table.sheetgrid.advsnug td{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;line-height:1.45;vertical-align:top}
+  table.sheetgrid.advsnug{min-width:0}   /* 업체용은 넓어진 고정 열의 합만큼 표를 만들고, 부족한 화면폭은 가로 스크롤한다. */
+  table.sheetgrid.advsnug td{white-space:nowrap;overflow:hidden;text-overflow:clip;overflow-wrap:normal;word-break:normal;line-height:1.45;vertical-align:middle}
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
   /* 리뷰어 로그 딥링크로 찾아온 행 — 앰버로 잠깐 강조(고정열 포함). 호버보다 우선이라 마우스가 위에 있어도 보인다 */
@@ -4801,13 +4801,14 @@ async function refreshUnseen(){
 // table-layout:fixed에서 이 값은 '실제 열 너비'(auto 시절엔 최소폭). 신원열(참여자/연락처)은 이름+배지·번호가 안 잘리게 여유, 데이터열은 초밀도 유지(초과분 …+툴팁).
 // 구매일자=73("12/31 (월)" 핏)·연락처=120(phone "010-0000-0000" + 좌우 여백, 가운데 정렬)·주소=450(전체표시) — 요청 반영. 모든 열이 고정폭(유동 열 없음).
 const _COLW={'#':35,'참여자':105,'연락처':120,'번호':43,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':102,'주소':450,'은행':88,'계좌번호':114,'예금주':60,'결제금액':66,'리뷰제출':102,'입금':48,'주문번호':121,'비고(닉네임)':84};
-// 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤. 구매일자/연락처는 값 핏(내부와 동일 폭).
-//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=450(요청 — 주소 전체표시 우선). _fitGrid가 표폭을 이 합으로 고정 → 넓으면 우측 여백, 좁으면 가로 스크롤.
-const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':450,'택배송장':150,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
+// 광고주 그리드 전용 폭(한 줄 표시) — 내부 그리드(_COLW)와 분리. 각 값의 최대 표기와 셀 좌우 여백을 포함한다.
+//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=680px로 긴 도로명 주소도 한 줄로 우선 표시한다.
+//   _fitGrid가 표폭을 이 합으로 고정하므로, 좁은 화면은 값이 줄바꿈되지 않고 가로 스크롤로 전체를 볼 수 있다.
+const _ADV_COLW={'#':32,'번호':40,'구매일자':76,'주문번호':128,'수취인':72,'연락처':128,'주소':680,'택배송장':160,'결제금액':80,'리뷰제출':112,'리뷰제출일':112,'입금':88,'입금일':88};
 function _colW(h){
   if(typeof h==='string' && h.indexOf('ccol:')===0) return 130;   // 커스텀 열(자유메모) 고정폭 — 역할 무관
   if(STATE.role==='advertiser'){
-    if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 92;   // ID열(시트명 다양)
+    if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 112;  // ID열(시트명 다양)
     return _ADV_COLW[h]!=null?_ADV_COLW[h]:(_COLW[h]||76);
   }
   return _COLW[h]||76;
