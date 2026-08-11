@@ -275,7 +275,7 @@
   .advtop{grid-area:top;display:grid;grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement";gap:12px}
   .advcondition{grid-area:condition}.advprogress{grid-area:progress}.advsettle{grid-area:settlement}
   .advtop .tp3col{height:100%}.advsettle.setldetail{margin-bottom:0}.advsettle .sect{margin-top:0!important}
-  .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px}
+  .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px;display:flex;flex-direction:column;min-height:0}
   .advwork .rvpane{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain}
   .advwork .advgw,.advwork #gridhost{display:contents}#gridhost>.gridbar{grid-area:tools}#gridhost>.gswrap{grid-area:grid}#gridhost>table{grid-area:grid}
   @media(max-width:760px){.advwork{display:block}.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement"}.advwork .rvpane{position:static;align-self:auto;height:420px;min-height:420px;margin-top:12px}.advwork .advgw,.advwork #gridhost{display:block}.advgw{margin-top:12px}}
@@ -284,14 +284,20 @@
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
   .rvwho{font-size:12.5px;font-weight:750;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rvwho span{font-weight:600;color:var(--faint);font-size:11px;margin-left:5px}
-  .rvimg{display:block;width:100%;height:180px;object-fit:contain;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:zoom-in;background:var(--card2)}
-  .rvimg:last-child{margin-bottom:0}
+  .rvmedia{display:grid;grid-auto-rows:minmax(180px,1fr);gap:8px;flex:1;min-height:0;overflow:auto}
+  .rvasset{display:flex;flex-direction:column;min-height:0}.rvasset .rvimg{display:block;width:100%;height:100%;min-height:0;object-fit:contain;border:1px solid var(--line);border-radius:9px;cursor:zoom-in;background:var(--card2)}
   .rvslot{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px}
   .rvnone{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
           border:1px dashed var(--line2);border-radius:10px;background:var(--card2);text-align:center;padding:16px}
   .rvnone b{font-size:13px;font-weight:750;color:var(--muted)}
   .rvnone span{font-size:11px;color:var(--faint)}
   .rvnone.warn b{color:var(--warn)}
+  .rvpopov{position:fixed;inset:0;z-index:240;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(15,35,42,.5)}
+  .rvpop{width:min(1100px,calc(100vw - 56px));height:min(720px,calc(100vh - 56px));background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28);display:grid;grid-template-columns:260px minmax(0,1fr)}
+  .rvplist{border-right:1px solid var(--line);overflow-y:auto;background:var(--card2);padding:12px}.rvplhd{font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
+  .rvplitem{width:100%;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:8px 9px;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}.rvplitem:hover{background:var(--card);border-color:var(--line)}.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}.rvplitem span{margin-left:auto;color:var(--faint);font-size:10.5px}
+  .rvpstage{position:relative;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:42px 22px 22px;background:var(--card)}.rvpstage img{max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--line);border-radius:9px;background:var(--card2)}.rvpmeta{position:absolute;left:22px;top:15px;font-size:12px;font-weight:750;color:var(--muted)}.rvpmeta span{font-weight:600;color:var(--faint);margin-left:5px}.rvpclose{position:absolute;right:14px;top:12px;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;z-index:1}.rvpclose:hover{border-color:var(--accent-line);color:var(--accent-deep);background:var(--card2)}
+  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px}.rvpstage{padding:42px 12px 12px}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
   .sheetgrid tbody tr.rvon>td{background:var(--accent-soft)}
   .sheetgrid tbody tr.rvon>td.gfz{background:var(--accent-soft)}
   /* 사이드바 그룹(진행 중 / 완료) 구분 */
@@ -4201,7 +4207,10 @@ function renderWorkdesk(wd){
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
 const _RV_SLOT={review:'리뷰 캡처',cash_receipt:'현금영수증'};
+function _rvWho(r){ const rj=(r&&r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{}; return rj['수취인']||rj['수령인']||r&&r.recipient||r&&r.name||''; }
+function _rvPeople(){ return ((STATE.wd&&STATE.wd.roster)||[]).map(r=>({r,files:((STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[]).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url)})).filter(p=>p.files.length); }
 async function _rvBoot(t){
+  _rvPopClose();
   STATE.rvImgs=null; STATE.rvSel=null;
   _rvRender();   // 선택 전 안내
   if(!t) return;
@@ -4221,6 +4230,12 @@ function _rvBind(){
     if(tr) _rvSelect(tr.dataset.rid,{scroll:false});
   });
   document.addEventListener('keydown', e=>{
+    if(document.getElementById('rvpop')){
+      const el=e.target; if(el&&(/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.isContentEditable)) return;
+      if(e.key==='ArrowUp'||e.key==='ArrowLeft'){ e.preventDefault(); _rvPopStep(-1); return; }
+      if(e.key==='ArrowDown'||e.key==='ArrowRight'){ e.preventDefault(); _rvPopStep(1); return; }
+      return;
+    }
     if(STATE.role!=='advertiser' || !document.getElementById('rvPane')) return;
     if(e.key!=='ArrowUp'&&e.key!=='ArrowDown') return;
     const el=e.target;   // 입력 중이거나 모달이 떠 있으면 방향키를 가로채지 않는다
@@ -4254,8 +4269,7 @@ function _rvRender(){
   if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 리뷰어의 리뷰 이미지가 여기 표시됩니다.</span></div>`; return; }
-  const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
-  const who=rj['수취인']||rj['수령인']||r.recipient||r.name||'';
+  const who=_rvWho(r);
   const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
   if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>리뷰 이미지를 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
@@ -4267,14 +4281,28 @@ function _rvRender(){
     return;
   }
   let lastSlot=null;
-  const imgs=files.map(f=>{
+  const imgs=files.map((f,i)=>{
     const u=_rvUrl(f.fileId); if(!u) return '';
     const slot=f.slot||'review';
     const lbl=(files.some(x=>(x.slot||'review')!==slot)&&slot!==lastSlot)?`<div class="rvslot">${esc(_RV_SLOT[slot]||slot)}</div>`:'';
     lastSlot=slot;
-    return lbl+`<img class="rvimg" src="${esc(u)}" alt="리뷰 이미지" loading="lazy" onclick="woImageModal(this.src)">`;
+    return `<div class="rvasset">${lbl}<img class="rvimg" src="${esc(u)}" alt="리뷰 이미지" loading="lazy" data-rid="${esc(r.id)}" data-fidx="${i}" onclick="_rvOpenByImage(this)"></div>`;
   }).join('');
-  pane.innerHTML=hd+who2+(imgs||`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
+  pane.innerHTML=hd+who2+(imgs?`<div class="rvmedia">${imgs}</div>`:`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
+}
+function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
+function _rvOpen(rid,fileIndex){
+  const people=_rvPeople(), idx=people.findIndex(p=>String(p.r.id)===String(rid)); if(idx<0) return;
+  STATE.rvPop={people,idx,fileIndex:Math.max(0,Math.min(fileIndex||0,people[idx].files.length-1))}; _rvPopRender();
+}
+function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.fileIndex=0; _rvPopRender(); }
+function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.fileIndex=0; _rvPopRender(); }
+function _rvPopClose(){ STATE.rvPop=null; const ov=document.getElementById('rvpop'); if(ov) ov.remove(); }
+function _rvPopRender(){
+  const p=STATE.rvPop; if(!p||!p.people.length){ _rvPopClose(); return; }
+  const cur=p.people[p.idx], file=cur.files[p.fileIndex]||cur.files[0], who=_rvWho(cur.r);
+  let ov=document.getElementById('rvpop'); if(!ov){ ov=document.createElement('div'); ov.id='rvpop'; ov.className='rvpopov'; document.body.appendChild(ov); }
+  ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="리뷰 이미지 크게 보기"><aside class="rvplist"><div class="rvplhd">리뷰 작성자 · ${p.people.length}명</div>${p.people.map((x,i)=>`<button type="button" class="rvplitem${i===p.idx?' on':''}" onclick="_rvPopPick(${i})">${esc(_rvWho(x.r)||'—')}<span>#${esc(x.r.seq)}</span></button>`).join('')}</aside><div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button><div class="rvpmeta">${esc(who||'—')}<span>#${esc(cur.r.seq)} · ${p.idx+1}/${p.people.length}</span></div><img src="${esc(file.url)}" alt="${esc(who||'리뷰 작성자')} 리뷰 이미지"></div></section>`;
 }
 
 /* ── 시안 B: 상단 3단 — [작업 조건 · 진행 현황 · 정산] 3분할 카드 ──────────────────────

@@ -317,18 +317,26 @@ async function run() {
     return /API_BASE\+'\/api\/drive\/image\/'/.test(body) && !/window\.API_BASE_URL/.test(body);
   })());
   ok('파일ID 형식 검증 후에만 URL 생성(임의 문자열 주입 차단)', /\/\^\[-\\w\]\{20,\}\$\/\.test\(String\(id\|\|''\)\)/.test(src));
-  ok('↑↓ 키로 선택 행 이동 + 입력 중·모달 위에서는 가로채지 않는다',
-    /e\.key!=='ArrowUp'&&e\.key!=='ArrowDown'/.test(src)
-    && /INPUT\|SELECT\|TEXTAREA/.test(src) && /querySelector\('\.modalov,#woImgOv'\)/.test(src));
+  ok('리뷰 팝업은 ↑← 이전 · ↓→ 다음 작성자로 이동하고, 표 행 이동과 분리한다',
+    /if\(document\.getElementById\('rvpop'\)\)\{[\s\S]{0,300}ArrowUp[\s\S]{0,80}ArrowLeft[\s\S]{0,160}_rvPopStep\(-1\)[\s\S]{0,220}ArrowDown[\s\S]{0,80}ArrowRight[\s\S]{0,160}_rvPopStep\(1\)/.test(src)
+    && /e\.key!=='ArrowUp'&&e\.key!=='ArrowDown'/.test(src)
+    && /INPUT\|SELECT\|TEXTAREA/.test(src));
   ok('행 클릭·키 이동이 위임 1회 바인딩(재렌더로 tbody 가 갈려도 유지)', /if\(STATE\._rvBound\) return; STATE\._rvBound=true;/.test(src));
   ok('★ 미제출 행은 패널 가운데에 "리뷰 미작성 · 미제출" 표기', /리뷰 미작성 · 미제출/.test(src));
   ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 이미지 미등록/.test(src));
   // 표 검색(_gsReapply) 도입으로 뒤에 호출이 하나 더 붙었다 — 검사 의미(재렌더 끝에 선택 복원 배선)는 불변.
   ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\);/.test(src));
-  ok('미리보기 패널 CSS(시트 도구막대 하단까지 높이 확보 · 고정 이미지 영역 스크롤 · 미제출 안내 박스)',
+  ok('미리보기 패널 CSS(남는 세로 공간을 이미지에 배정 · 고정 이미지 영역 스크롤 · 미제출 안내 박스)',
     /\.advwork \.rvpane\{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain/.test(css)
-    && /\.rvimg\{display:block;width:100%;height:180px;object-fit:contain/.test(css)
+    && /\.rvmedia\{display:grid;grid-auto-rows:minmax\(180px,1fr\);gap:8px;flex:1;min-height:0;overflow:auto\}/.test(css)
+    && /\.rvasset \.rvimg\{display:block;width:100%;height:100%;min-height:0;object-fit:contain/.test(css)
     && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
+  ok('리뷰 이미지는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
+    /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
+    && /function _rvPopRender\(\)/.test(src)
+    && /<aside class="rvplist">/.test(src)
+    && /class="rvpclose"[^>]*onclick="_rvPopClose\(\)"/.test(src)
+    && /\.rvpop\{width:min\(1100px,calc\(100vw - 56px\)\);height:min\(720px,calc\(100vh - 56px\)\);[\s\S]{0,140}grid-template-columns:260px minmax\(0,1fr\)/.test(css));
 
   console.log(`\n✅ advertiserViewer: ${n} cases passed`);
 }
