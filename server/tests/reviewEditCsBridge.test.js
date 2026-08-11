@@ -290,9 +290,9 @@ t('B스타일 검토 팝업은 기존 승인·반려 API를 재사용하고 다�
   assert.ok(/async function csRejectReviewEdit\(requestId, opts\)/.test(CSJ), '반려 함수가 팝업 사유를 받지 못한다');
 });
 
-t('B스타일 검토 팝업의 비교 이미지는 기존보다 50% 더 높게 표시한다', () => {
-  assert.ok(/\.repopup-image\{[^}]*height:495px/.test(WD), '데스크톱 비교 이미지 높이가 50% 확대되지 않았다');
-  assert.ok(/@media\(max-width:900px\).*?\.repopup-image\{height:420px\}/.test(WD), '모바일 비교 이미지 높이가 50% 확대되지 않았다');
+t('B스타일 검토 팝업의 비교 이미지는 지정한 데스크톱·모바일 높이를 표시한다', () => {
+  assert.ok(/\.repopup-image\{[^}]*height:600px/.test(WD), '데스크톱 비교 이미지 높이가 600px이 아니다');
+  assert.ok(/@media\(max-width:900px\).*?\.repopup-image\{height:500px\}/.test(WD), '모바일 비교 이미지 높이가 500px이 아니다');
 });
 
 /* ── 8) ★★ 런타임 — 정적 grep 이 못 잡는 것 ────────────────── */
