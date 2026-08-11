@@ -2439,7 +2439,7 @@ function renderWorkdeskView(){
         <div class="segwrap" id="segwrap"></div>
       </div>
       <div class="tb2 wb-tier wb-task" id="tb2"><span class="wb-tier-label">&#51089;&#50629;&#47785;&#47197;</span><span class="b2empty">불러오는 중…</span></div>
-      <div class="tb0 wb-tier wb-open" id="tb0"><span class="wb-tier-label">&#50676;&#47536;&#53493;</span></div>
+      <div class="tb0 wb-tier wb-open" id="tb0"><span class="wb-tier-label">&#50676;&#47536;&#53485;</span></div>
     </div>
     <div class="wrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
     <div class="main" id="main"><div class="empty">위에서 작업을 선택하세요.</div></div>
@@ -3878,7 +3878,7 @@ function _renderWorktabs(){
   const host=document.getElementById('tb0'); if(!host) return;   // 작업보드 뷰가 아닐 때
   if(STATE.role==='advertiser'){ host.innerHTML=''; return; }
   const cur=STATE.cur, now=_wtList();
-  const label='<span class="wb-tier-label">&#50676;&#47536;&#53493;</span>';
+  const label='<span class="wb-tier-label">&#50676;&#47536;&#53485;</span>';
   if(!now.length){ host.innerHTML=label+`<button class="wt0add" onclick="switchView('home')" title="홈 작업 목록에서 작업을 고르세요">＋ 작업 열기</button>`; _syncWbScrollMeter(host); return; }
   // 오늘 완료한 탭은 **뒤로** 민다(시트에서 탭을 손으로 뒤로 끌던 그 동작을 시스템이 대신한다).
   const known=now.map(k=>({k,t:_wtTabFor(k)}));
