@@ -2217,6 +2217,25 @@ function _advertiserColumns(rawHeaders, opts = {}) {
   return out;
 }
 
+// raw_sheet_tabs.detected_headers 는 시트 동기화 시점의 스냅샷이라, 열이 추가된 직후에는 실제 행 데이터의
+// 키보다 오래될 수 있다. 광고주 열은 아래 후보를 다시 화이트리스트에 통과시키므로, 이 보완만으로 민감열이
+// 노출되지는 않는다. 원본 시트 순서는 먼저 온 detected_headers 를 그대로 유지한다.
+function _advertiserHeaderCandidates(rawHeaders, roster) {
+  const out = [], seen = new Set();
+  const add = (name) => {
+    const key = String(name == null ? '' : name).trim();
+    if (!key || key === 'id' || seen.has(key)) return;
+    seen.add(key); out.push(key);
+  };
+  for (const h of rawHeaders || []) add(h);
+  for (const row of roster || []) {
+    const rowJson = row && row.row_json;
+    if (!rowJson || typeof rowJson !== 'object') continue;
+    for (const key of Object.keys(rowJson)) add(key);
+  }
+  return out;
+}
+
 // ── 리뷰 이미지(행별) — 업체 뷰어 미리보기 패널용. 읽기 전용·Drive 무접촉(파일ID만 반환). ──
 //   키 = review_index.row_index(= campaign_participants.seq/sheet_row). 원장(032 review_submissions)이 1순위,
 //   그 이전에 저장된 대표 이미지(031 review_index.review_file_id)는 폴백으로 합류시킨다.
@@ -2366,7 +2385,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 광고주: 화이트리스트만. 그 탭의 상태 칸(리뷰제출/입금)은 키워드보다 우선 선점 —
       //   헤더가 키워드에 안 걸리는 탭에서 리뷰제출 열이 통째로 빠지던 것을 막는다.
       const sc = roster.find(r => r.submit_col) || {}, sc2 = roster.find(r => r.submit_col2) || {};
-      advHeaders = _advertiserColumns(raw, { submitCol: sc.submit_col, submitCol2: sc2.submit_col2 });
+      advHeaders = _advertiserColumns(_advertiserHeaderCandidates(raw, roster), {
+        submitCol: sc.submit_col,
+        submitCol2: sc2.submit_col2,
+      });
       headers = advHeaders;
     }
   }
@@ -3667,6 +3689,7 @@ module.exports = {
   brandsForAdvertiser, createBrand, updateBrand, assignBrandTabs, brandTabAllowed,
   settlementSummaryForAdvertiser, advertiserWorkSummary, reviewImagesForTab, saveTabMemo,
   __advertiserColumnsForTest: _advertiserColumns,   // 광고주 컬럼 화이트리스트(회귀가드 전용 노출)
+  __advertiserHeaderCandidatesForTest: _advertiserHeaderCandidates,
   // 회귀가드 전용 — tabStatsMap 의 30초 프로세스 캐시를 비운다(시나리오마다 다른 스텁 응답을 태우기 위해).
   //   운영 코드에서 부르지 말 것: 캐시는 "모든 내부 사용자의 홈 진입 경로"에 붙은 비용 절감 장치다.
   __resetTabStatsCacheForTest() { _tabStatsCache = { at: 0, map: null }; },

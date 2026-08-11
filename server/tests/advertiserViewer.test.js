@@ -217,8 +217,15 @@ async function run() {
 
   /* ═══ 6. 리뷰제출 컬럼 선점(_advertiserColumns) ═══ */
   const advCols = svc.__advertiserColumnsForTest;
+  const advHeaderCandidates = svc.__advertiserHeaderCandidatesForTest;
   ok('_advertiserColumns 가 테스트로 노출돼 있다', typeof advCols === 'function');
+  ok('광고주 헤더 후보 보완기가 테스트로 노출돼 있다', typeof advHeaderCandidates === 'function');
   {
+    const staleDetected = ['번호', '수취인', '쿠팡id', '연락처', '주소', '결제금액', '리뷰제출', '입금'];
+    const recovered = advHeaderCandidates(staleDetected, [{ row_json: { 택배송장: '2616771000000', 은행: '비노출' } }]);
+    ok('동기화가 오래된 detected_headers 에 없는 택배송장도 행 데이터 키에서 보완한다',
+      advCols(recovered).includes('택배송장'));
+
     // 실측 신고: 리뷰제출 열 헤더가 키워드에 안 걸리는 탭(카페/블로그 발행)에서 그 열이 통째로 빠졌다.
     const hs = ['번호', '구매날짜', '수취인', '연락처', '주소', '결제금액', '카페/블로그 발행', '입금'];
     ok('★ 상태 칸(submit_col)이 키워드에 안 걸려도 리뷰제출 열이 나온다',
@@ -242,8 +249,8 @@ async function run() {
     ok('★ 화이트리스트 밖 컬럼(은행·계좌)은 여전히 안 나온다',
       !advCols(['수취인', '은행', '계좌번호', '예금주'], { submitCol: '계좌번호' }).includes('은행'));
   }
-  ok('workdeskTab 이 roster 의 submit_col/submit_col2 를 광고주 헤더 산출에 넘긴다',
-    /_advertiserColumns\(raw, \{ submitCol: sc\.submit_col, submitCol2: sc2\.submit_col2 \}\)/.test(
+  ok('workdeskTab 이 보완된 헤더 후보와 roster 의 submit_col/submit_col2 를 광고주 헤더 산출에 넘긴다',
+    /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster\), \{[\s\S]*submitCol: sc\.submit_col,[\s\S]*submitCol2: sc2\.submit_col2,[\s\S]*\}\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
   /* ═══ 7. 리뷰 이미지 미리보기(행별) ═══ */
