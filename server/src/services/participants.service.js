@@ -485,7 +485,18 @@ async function listActiveTabs({ limit = 500 } = {}) {
     /* ★ sheetless — 화면이 "이 작업은 구글시트를 안 쓴다"고 말하기 위한 재료(탈 구글시트 W3-b).
        없으면 담당자가 어느 작업이 이관됐는지 화면만 봐서는 알 수 없고, 시트를 찾으러 간다.
        ★ tab_configs 는 이미 등록 게이트라 LEFT JOIN 이 행을 늘리지 않는다(탭당 1행 PK). */
-    `SELECT rst.sheet_id AS "sheetId", rst.spreadsheet_title AS "spreadsheetTitle",
+    /*
+     * 시트 기반 작업은 마지막 RAW 미러 + 활성 index_master가 목록의 진실원본이다.
+     * 그러나 탈시트 전환 후에는 그 두 장부가 일시적으로 비어 있거나 재생성에 실패해도
+     * tab_configs.sheetless=true 자체가 "작업표로 전환된 진행 작업"이라는 확정 기록이다.
+     * 이 전환 작업을 RAW 경로에만 의존시키면 홈·작업보드에서 통째로 사라진다.
+     *
+     * raw_tabs가 이미 보이는 경우에는 기존 시트 제목·행 수를 그대로 우선한다. 보충 경로는
+     * 마감되지 않은 sheetless 탭만 대상으로 하고 raw_tabs와 키가 겹치면 제외하므로 중복·마감
+     * 작업의 재노출 없이, 이관 직후에도 작업목록에 안정적으로 남는다.
+     */
+    `WITH raw_tabs AS (
+       SELECT rst.sheet_id AS "sheetId", rst.spreadsheet_title AS "spreadsheetTitle",
             rst.tab_gid AS "tabGid", rst.tab_name AS "tabName", rst.row_count AS "rowCount",
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             /* ★ workKind — [＋ 블로거 추가] 버튼을 어느 작업에 보일지(M5-2). tab_configs 는 이미
@@ -498,7 +509,24 @@ async function listActiveTabs({ limit = 500 } = {}) {
         AND EXISTS (SELECT 1 FROM index_master im
                      WHERE im.status='active' AND im.sheet_id=rst.sheet_id
                        AND (im.tab_gid=rst.tab_gid OR im.tab_name=rst.tab_name))
-      ORDER BY rst.spreadsheet_title, rst.tab_name LIMIT $1`,
+     ), sheetless_tabs AS (
+       SELECT tc.sheet_id AS "sheetId",
+              COALESCE(NULLIF(tc.campaign_name, ''), NULLIF(tc.display_name, ''), tc.tab_name) AS "spreadsheetTitle",
+              tc.tab_gid AS "tabGid", tc.tab_name AS "tabName", COALESCE(im.row_count, 0) AS "rowCount",
+              TRUE AS "sheetless", COALESCE(tc.work_kind, '') AS "workKind"
+         FROM tab_configs tc
+         LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+        WHERE COALESCE(tc.sheetless, FALSE) = TRUE
+          AND COALESCE(tc.is_closed, FALSE) = FALSE
+     )
+     SELECT * FROM raw_tabs
+     UNION ALL
+     SELECT sl.* FROM sheetless_tabs sl
+      WHERE NOT EXISTS (
+        SELECT 1 FROM raw_tabs r
+         WHERE r."sheetId" = sl."sheetId" AND r."tabName" = sl."tabName"
+      )
+     ORDER BY "spreadsheetTitle", "tabName" LIMIT $1`,
     [lim]
   );
   return rows;
