@@ -204,6 +204,7 @@ async function listPaymentTargets(opts = {}) {
       // ★ 무시트/미등록이면 빈 값 = 화면이 버튼을 비활성으로 두고 **사유를 말한다**(죽은 링크 금지).
       sheetUrl: tab ? tab.sheetUrl : '',
       sheetless: !!(tab && tab.sheetless),
+      manager: tab ? (tab.manager || '') : '',
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
       campaignId: camp ? camp.id : null,
@@ -384,6 +385,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
     const { rows } = await pool.query(
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
               COALESCE(NULLIF(btrim(tc.display_name),''), tc.tab_name) AS "label",
+              tc.manager AS "manager",
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
               wo.goods_cost_type AS "goodsCostType"
@@ -398,7 +400,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
       [sheetIds, tabNames]);
     for (const t of rows) {
       map[t.sheetId + '||' + t.tabName] = {
-        label: t.label, transferBank: t.transferBank || '', depositName: t.depositName || '',
+        label: t.label, manager: t.manager || '', transferBank: t.transferBank || '', depositName: t.depositName || '',
         goodsCostType: t.goodsCostType || '',
         sheetless: t.sheetless === true,
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
