@@ -882,6 +882,29 @@
   /* 접수하기(파랑 .pri) ↔ 접수완료(초록·비활성) — 한눈에 갈리게. 눌러도 아무 일 없는 버튼은 두지 않는다. */
   .btn.xs.wodone{background:#ECFDF5;color:#065F46;border-color:#6EE7B7;cursor:default;opacity:1}
   .btn.xs.wolink{background:#D1FAE5;color:#065F46;border-color:#6EE7B7}
+  /* ── 작업오더 B스타일: 실제 목록 폭(1120px)·처리열(320px) 유지 ── */
+  #wohead,#wobody{max-width:1120px;margin-left:auto;margin-right:auto;font-family:"SUIT Variable","SUIT","Noto Sans KR","Apple SD Gothic Neo",sans-serif}
+  #wohead .mh{max-width:1120px;min-height:54px;margin:0;background:#112B55;color:#fff;border-radius:10px 10px 0 0;padding:0 16px;gap:7px}
+  #wohead .mh h1{font-size:17px;letter-spacing:-.03em;color:#fff}
+  #wohead .mh .btn{height:28px;border-color:#486A9E;background:#173B72;color:#fff;border-radius:6px;font-size:10.5px;padding:0 8px}
+  #wohead .mh .btn.pri{background:#2F70E8;border-color:#2F70E8}
+  #wohead .mh .ovsearch{height:28px;width:165px;border:0;border-radius:6px;background:#fff;color:#172033;font-size:10.5px}
+  #wohead .ovnote{max-width:1120px;margin:0;padding:9px 12px;background:#fff;border:1px solid #D9E1EC;border-top:0;color:#61718A;font-size:10.5px}
+  #wohead .ovnote b{color:#34445C}
+  #wohead .wbcmd{display:grid;grid-template-columns:1.4fr repeat(3,1fr);border:1px solid #D9E1EC;border-top:0;background:#fff;overflow:hidden}
+  #wohead .wbmetric{min-height:76px;padding:12px 14px;border-right:1px solid #D9E1EC}
+  #wohead .wbmetric:last-child{border-right:0}#wohead .wbmetric .k{display:block;color:#71809A;font-size:10px;font-weight:800}#wohead .wbmetric .v{display:block;margin:2px 0;font-size:22px;font-weight:850;letter-spacing:-.04em}#wohead .wbmetric .s{color:#71809A;font-size:10px}
+  #wohead .wbmetric.action{background:#112B55;color:#fff}#wohead .wbmetric.action .k,#wohead .wbmetric.action .s{color:#C7D6F1}#wohead .wbmetric.action .v{font-size:20px}
+  #wohead .wbmetric.good .v{color:#14734B}#wohead .wbmetric.warn{background:#FFF2DF}#wohead .wbmetric.warn .v{color:#AE5900}
+  #wohead .wbsignal{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 12px;margin-bottom:12px;background:#fff;border:1px solid #D9E1EC;border-top:0;border-radius:0 0 10px 10px}
+  #wohead .wbsignal button{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;text-align:left;padding:8px 9px;border:1px solid #D9E1EC;border-radius:7px;background:#fff;color:#172033;font:inherit;cursor:pointer}
+  #wohead .wbsignal button:hover{background:#F7FAFF;border-color:#BFD3F6}#wohead .wbsignal b{font-size:11px}#wohead .wbsignal span{display:block;color:#71809A;font-size:9.5px}#wohead .wbsignal em{font-style:normal;color:#AE5900;font-size:10px;font-weight:850}
+  #wobody .lgwrap{max-width:1120px;background:#fff;border:1px solid #D9E1EC;border-radius:10px;overflow:auto}
+  #wobody .lgtable{font-size:11px}#wobody .lgtable thead th{height:32px;padding:0 10px;background:#F7F9FC;color:#8B98AB;font-size:9.5px;font-weight:850;letter-spacing:.02em;border-bottom:1px solid #D9E1EC}
+  #wobody .lgtable td{padding:9px 10px;border-top-color:#EDF1F6}#wobody .lgtable tr.wolrow:hover td{background:#F8FBFF}
+  #wobody .lgtable td:last-child{width:320px;white-space:nowrap}#wobody .lgtable td:last-child .btn{height:25px;border-radius:5px;font-size:9.5px;padding:0 6px}
+  #wobody .lgtable td:last-child .btn.pri{background:#2F70E8;border-color:#2F70E8}
+  @media(max-width:900px){#wohead,#wobody{max-width:none;margin-left:0;margin-right:0}#wohead .mh{border-radius:0;overflow-x:auto}#wohead .ovnote{font-size:10px}#wohead .wbcmd{grid-template-columns:1fr 1fr}#wohead .wbsignal{grid-template-columns:1fr}#wobody .lgwrap{border-radius:0}}
   /* 상태 변경 모달 — 영문 상태값을 타이핑시키지 않고, 지금 고를 수 있는 것만 한국어 버튼으로. */
   .wostnow{font-size:12.5px;color:var(--muted);margin-bottom:10px}
   .wostlist{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
@@ -1534,6 +1557,43 @@
 .pmauto{display:inline-block;font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
 .pmauto.man{color:#1B4F9C;font-weight:700}
 .pmwarn{color:#B3382E;font-size:11.5px}
+/* ── 입금관리 B스타일: 네이비 헤더 + 고밀도 운영 원장 ── */
+#pmhead .mh{max-width:1400px;min-height:54px;margin:0 auto;background:#112B55;color:#fff;border-radius:10px 10px 0 0;padding:0 18px;display:flex;align-items:center;gap:9px}
+#pmhead .mh h1{font-family:"SUIT Variable","SUIT","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:17px;letter-spacing:-.03em;color:#fff}
+#pmhead .mh .bd{background:#244A84;color:#DCE9FF;border:0;border-radius:6px;font-size:11px;font-weight:800}
+#pmhead .mh .btn{border-color:#486A9E;background:#173B72;color:#fff}
+#pmhead .mh .btn:hover{background:#244A84}
+#pmbody{font-family:"SUIT Variable","SUIT","Noto Sans KR","Apple SD Gothic Neo",sans-serif;color:#172033}
+#pmbody>.lgwrap{max-width:1400px!important;background:#fff;border:1px solid #D9E1EC;border-top:0;border-radius:0 0 10px 10px;padding:16px;margin:0 auto 20px}
+#pmbody .pmtabs{gap:4px;margin:0 0 12px}
+#pmbody .pmtabs button{border:0;border-radius:6px;background:#F3F6FB;color:#60718D;padding:7px 10px;font-size:11px;font-weight:800}
+#pmbody .pmtabs button.on{background:#E7F0FF;color:#2865D5}
+#pmbody .pmrow{gap:7px;margin-bottom:10px}
+#pmbody .pmrow label{font-size:11px!important;color:#5F6E85}
+#pmbody .pmrow select{height:30px;border:1px solid #D9E1EC;border-radius:6px;background:#fff;color:#172033;font:inherit;font-size:11px;padding:0 8px}
+#pmbody .pmstats{gap:0;flex-wrap:nowrap;overflow:auto;margin-bottom:11px;border:1px solid #D9E1EC;border-radius:8px}
+#pmbody .pmstat{flex:1 0 142px;min-width:142px;border:0;border-right:1px solid #D9E1EC;border-radius:0;padding:11px 13px;background:#fff}
+#pmbody .pmstat:last-child{border-right:0}
+#pmbody .pmstat .k{font-size:10px;font-weight:800;color:#75839A}
+#pmbody .pmstat .v{margin-top:2px;font-size:19px;letter-spacing:-.03em;color:#172033}
+#pmbody .pmstat.warn{background:#FFF2DF}
+#pmbody .pmstat.warn .v{color:#A45700}
+#pmbody .pmrow .btn{padding:7px 10px;border-radius:6px;font-size:11px}
+#pmbody .pmrow .btn.primary{background:#2F70E8;border-color:#2F70E8}
+#pmbody .pmnote{border:1px solid #F0D4A8;border-left:1px solid #F0D4A8;border-radius:7px;background:#FFF8ED;color:#80500F;font-size:11px;padding:8px 10px}
+#pmbody .pmfix{border-color:#E6D5B6;border-radius:8px;background:#FFF9EF;padding:11px 12px}
+#pmbody .pmfix>h3{font-size:12px;color:#80500F}
+#pmbody .pmfixcard{border-radius:7px;padding:9px 10px}
+#pmbody .pmh2{margin:18px 0 8px;font-size:14px;letter-spacing:-.02em}
+#pmbody .lgwrap{border-color:#D9E1EC;border-radius:8px}
+#pmbody .pmtable{font-size:11px}
+#pmbody .pmtable thead th{padding:8px 9px;background:#F5F7FA;color:#78869A;font-size:10px;font-weight:850;letter-spacing:.02em;border-bottom-color:#D9E1EC}
+#pmbody .pmtable td{padding:9px;border-bottom-color:#EDF1F6}
+#pmbody .pmtable tbody tr:hover td{background:#F7FAFF}
+#pmbody .pmb{border-radius:5px;font-size:9.5px;padding:3px 6px}
+#pmbody .pmauto{font-size:9px}
+#pmbody .btn.sm{border-radius:5px;font-size:10px;padding:4px 7px}
+@media(max-width:720px){#pmhead .mh{border-radius:0;padding:0 14px}#pmhead .mh h1{font-size:16px}#pmbody>.lgwrap{border:0;border-radius:0;padding:12px}#pmbody .pmstats{margin-left:-1px;margin-right:-1px}}
 /* ── 보류 사유 보완 ── 상단 묶음 목록 + 행별 [보완] 버튼 + 전용 팝업 ── */
 .pmfix{border:1px solid #E7D2A3;background:#FDF8EE;border-radius:12px;padding:12px 14px;margin-bottom:12px}
 .pmfix>h3{font-size:13.5px;font-weight:800;color:#7a5a12;margin:0 0 3px}
@@ -5855,7 +5915,22 @@ function _renderWoHead(){
       신규 탭이 등록되는 유일한 경로라 <b>편집 허용명단</b>에 있는 담당자만 누를 수 있습니다.
       ${STATE.canEdit?'':'<b style="color:var(--muted)">(현재 계정은 열람 전용)</b>'}</div>`;
 }
+function _woBStyleSummary(c){
+  const n=k=>Number(c[k])||0;
+  const total=Object.values(c||{}).reduce((sum,v)=>sum+(Number(v)||0),0);
+  return '<section class="wbcmd">'
+    +'<article class="wbmetric action"><span class="k">지금 처리할 오더</span><strong class="v">'+n('submitted')+'건</strong><span class="s">접수 대기 · 우선 확인</span></article>'
+    +'<article class="wbmetric"><span class="k">전체 오더</span><strong class="v">'+total+'</strong><span class="s">현재 조회 기준</span></article>'
+    +'<article class="wbmetric good"><span class="k">발행 완료</span><strong class="v">'+n('published')+'</strong><span class="s">모집공고 연결 완료</span></article>'
+    +'<article class="wbmetric warn"><span class="k">보완 요청</span><strong class="v">'+n('revision')+'</strong><span class="s">정보 확인 필요</span></article>'
+    +'</section><section class="wbsignal">'
+    +'<button onclick="STATE.woStatus=&quot;submitted&quot;;_loadOrders()"><span><b>접수 대기 오더</b><span>작업표 등록과 인덱스 생성을 시작합니다.</span></span><em>'+n('submitted')+'건 보기</em></button>'
+    +'<button onclick="STATE.woStatus=&quot;revision&quot;;_loadOrders()"><span><b>보완 요청 오더</b><span>작업 정보와 연결 상태를 먼저 확인합니다.</span></span><em>'+n('revision')+'건 보기</em></button>'
+    +'</section>';
+}
 function _renderWoBody(){
+  const summary=$('#wohead .wbcmd');
+  if(!summary) $('#wohead').insertAdjacentHTML('beforeend',_woBStyleSummary(STATE.woCounts||{}));
   const rows=STATE.wo||[];
   const b=$('#wobody');
   if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 작업오더가 없습니다.</div>`; return; }
