@@ -2800,7 +2800,8 @@ async function setCellColors({ sheetId, tabName, cells, color, by = 'admin' } = 
     byRow.get(rid).push(field);
   }
   if (!byRow.size) return { ok: false, error: 'cells 필수' };
-  const col = String(color == null ? '' : color).trim().slice(0, 32);
+  const col = String(color == null ? '' : color).trim();
+  if (col && !/^#[0-9a-fA-F]{6}$/.test(col)) return { ok: false, error: 'invalid_color' };
   let applied = 0, skipped = 0;
   for (const [rowId, fields] of byRow) {
     const client = await db.connect();
@@ -2832,7 +2833,11 @@ async function setCellColors({ sheetId, tabName, cells, color, by = 'admin' } = 
     } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} skipped += fields.length; }
     finally { client.release(); }
   }
-  return { ok: true, applied, skipped };
+  // Do not acknowledge a partial write: the client must refresh from the
+  // persisted source of truth instead of retaining only an optimistic color.
+  return skipped
+    ? { ok: false, error: 'cell_color_save_incomplete', applied, skipped }
+    : { ok: true, applied, skipped };
 }
 
 // ══════════════════════════════════════════════════════════════════════════

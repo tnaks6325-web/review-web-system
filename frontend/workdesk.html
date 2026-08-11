@@ -5671,6 +5671,12 @@ function _revertSelection(){
   if(!tds.length) return;
   tds.forEach(td=>{ const b=td.querySelector('.revb'); if(b) revertCell(null,b); });
 }
+async function _reloadWorkdeskAfterColorSaveFailure(t){
+  if(!t || !STATE.cur || STATE.cur.sheetId!==t.sheetId || STATE.cur.tabName!==t.tabName) return;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  const fresh=await api('/api/trackb/workdesk?'+q).catch(()=>null);
+  if(fresh&&fresh.ok&&STATE.cur&&STATE.cur.sheetId===t.sheetId&&STATE.cur.tabName===t.tabName) renderWorkdesk(fresh);
+}
 function _applyRangeColor(color){
   const t=STATE.cur; const tds=[].concat(..._selectionGrid());
   _closeCellMenu(); _clearCellSel();
@@ -5685,8 +5691,8 @@ function _applyRangeColor(color){
   }
   if(!cells.length) return;
   api('/api/trackb/workdesk/cell-color',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,cells,color})})
-    .then(resp=>{ if(!resp||!resp.ok) toast(resp&&resp.error?('배경색 저장 실패: '+resp.error):'배경색 저장 실패'); })
-    .catch(()=>toast('배경색 저장 실패 — 네트워크(새로고침 시 되돌아갈 수 있음)'));
+    .then(resp=>{ if(!resp||!resp.ok){ toast(resp&&resp.error?('배경색 저장 실패: '+resp.error):'배경색 저장 실패'); return _reloadWorkdeskAfterColorSaveFailure(t); } })
+    .catch(()=>{ toast('배경색 저장 실패 — 서버 상태로 되돌립니다'); return _reloadWorkdeskAfterColorSaveFailure(t); });
 }
 // 편집 이력(감사) 모달
 async function showEditHistory(){
