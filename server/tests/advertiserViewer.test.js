@@ -131,12 +131,14 @@ async function run() {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
   const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(src)[1];
   const css = style.replace(/\/\*[\s\S]*?\*\//g, '');
-  ok('택배송장 열은 전체 번호가 보이도록 광고주 그리드에서 150px 폭을 쓴다',
-    /'택배송장':150/.test(src));
+  ok('택배송장 열은 전체 번호가 보이도록 광고주 그리드에서 160px 폭을 쓴다',
+    /'택배송장':160/.test(src));
 
-  // ── 폭 상한: 선언 순서가 규칙(같은 특이성 → 뒤가 이김) ──
-  ok('advertiser grid values wrap instead of showing an ellipsis',
-    /table\.sheetgrid\.advsnug td\{[^}]*white-space:normal[^}]*overflow:visible[^}]*text-overflow:clip[^}]*overflow-wrap:anywhere/.test(css));
+  ok('업체용 시트는 주문·연락처·주소 등을 한 줄로 표시할 수 있는 고정 폭을 쓴다',
+    /const _ADV_COLW=\{'#':32,'번호':40,'구매일자':76,'주문번호':128,'수취인':72,'연락처':128,'주소':680,'택배송장':160,'결제금액':80,'리뷰제출':112,'리뷰제출일':112,'입금':88,'입금일':88\}/.test(src)
+    && /if\(\/아이디\|쿠팡\\s\*id\|네이버\\s\*id\|스토어\\s\*id\|\^\\s\*id\\s\*\$\/i\.test\(String\(h==null\?'':h\)\)\) return 112/.test(src));
+  ok('업체용 시트 값은 줄바꿈·말줄임 없이 셀 너비 안에서 한 줄로 표시한다',
+    /table\.sheetgrid\.advsnug td\{[^}]*white-space:nowrap[^}]*overflow:hidden[^}]*text-overflow:clip[^}]*overflow-wrap:normal[^}]*word-break:normal/.test(css));
 
   const iQhd = css.indexOf('body[data-vw="qhd"]'), iAdv = css.indexOf('body.advm{--app-max:1680px}'), iWide = css.indexOf('body.widemode{--app-max:100vw}');
   ok('★ body.advm 상한(1680px)이 존재한다', iAdv > -1);
