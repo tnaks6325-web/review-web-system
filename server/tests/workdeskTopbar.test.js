@@ -17,6 +17,10 @@ const taskTier = workdeskView.indexOf('class="tb2 wb-tier wb-task"');
 const openedTier = workdeskView.indexOf('class="tb0 wb-tier wb-open"');
 assert.ok(companyTier >= 0 && taskTier > companyTier && openedTier > taskTier,
   '상단 순서는 업체 → 업체 작업 → 열린 작업이어야 함');
+assert.ok(/\.wb-task\{[^}]*gap:3px/.test(HTML)
+  && /\.wb-open\{[^}]*gap:3px/.test(HTML)
+  && /\.segwrap\{gap:3px/.test(HTML),
+  '세 상단 탭 그룹 간격은 3px이어야 함');
 
 // ── 최소 DOM 스텁 ──────────────────────────────────────────────
 function mkEl(id) {
