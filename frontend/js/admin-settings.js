@@ -629,7 +629,7 @@ async function loadInspectMessages() {
           + '<button class="as-imsg-reset" onclick="_imsgReset(\'' + escHtml(k.key) + '\')">기본 문구로</button>'
         + '</div>'
         + '<div class="as-imsg-field">'
-          + '<textarea class="as-imsg-input" id="asImsg_' + escHtml(k.key) + '" rows="5" maxlength="' + maxLen + '" aria-label="' + escHtml(k.label) + ' 안내문구"></textarea>'
+          + '<textarea class="as-imsg-input" id="asImsg_' + escHtml(k.key) + '" rows="3" maxlength="' + maxLen + '" aria-label="' + escHtml(k.label) + ' 안내문구"></textarea>'
           + '<div class="as-imsg-help">비워두고 저장하면 기본 문구로 돌아갑니다.</div>'
         + '</div>'
         + '</div>';
@@ -2289,16 +2289,16 @@ async function saveGateCriteria() {
       '.as-imsg-colhead span{padding:9px 12px}.as-imsg-colhead span+span{border-left:1px solid #DCE3EC}' +
       '.as-imsg-row{display:grid;grid-template-columns:minmax(190px,31%) minmax(0,1fr);min-width:0;border-bottom:1px solid #E8EDF3}' +
       '.as-imsg-row:last-child{border-bottom:none}' +
-      '.as-imsg-meta{padding:13px 12px;background:#FAFBFD;min-width:0}' +
+      '.as-imsg-meta{padding:9px 12px;background:#FAFBFD;min-width:0}' +
       '.as-imsg-label{font-size:.82rem;font-weight:750;color:#1F2937;line-height:1.4}' +
       '.as-imsg-desc{font-size:.71rem;color:#8491A0;line-height:1.5;margin-top:4px}' +
-      '.as-imsg-reset{margin-top:9px;padding:0;border:none;background:transparent;color:#526E88;font:inherit;font-size:.7rem;font-weight:650;text-decoration:underline;text-underline-offset:3px;cursor:pointer}' +
+      '.as-imsg-reset{margin-top:6px;padding:0;border:none;background:transparent;color:#526E88;font:inherit;font-size:.7rem;font-weight:650;text-decoration:underline;text-underline-offset:3px;cursor:pointer}' +
       '.as-imsg-reset:hover{color:#2563A8}.as-imsg-reset:focus-visible{outline:2px solid #2563A8;outline-offset:3px;border-radius:2px}' +
-      '.as-imsg-field{min-width:0;padding:11px 12px;border-left:1px solid #DCE3EC}' +
-      '.as-imsg-input{display:block;width:100%;min-height:94px;padding:8px 10px;border:1px solid #C9D5E1;border-radius:7px;background:#fff;color:#1F2937;font:inherit;font-size:.78rem;line-height:1.55;resize:vertical;outline:none;box-sizing:border-box}' +
+      '.as-imsg-field{min-width:0;padding:8px 12px;border-left:1px solid #DCE3EC}' +
+      '.as-imsg-input{display:block;width:100%;min-height:66px;padding:6px 10px;border:1px solid #C9D5E1;border-radius:7px;background:#fff;color:#1F2937;font:inherit;font-size:.78rem;line-height:1.55;resize:vertical;outline:none;box-sizing:border-box}' +
       '.as-imsg-input:focus{border-color:#2563A8;box-shadow:0 0 0 3px rgba(37,99,168,.13)}' +
       '.as-imsg-help{margin-top:5px;color:#94A3B8;font-size:.68rem;line-height:1.4}' +
-      '@media (max-width:640px){.as-imsg-colhead{display:none}.as-imsg-row{grid-template-columns:1fr}.as-imsg-meta{padding:12px 12px 8px}.as-imsg-field{padding:0 12px 12px;border-left:none}.as-imsg-input{min-height:108px}}' +
+      '@media (max-width:640px){.as-imsg-colhead{display:none}.as-imsg-row{grid-template-columns:1fr}.as-imsg-meta{padding:8px 12px 6px}.as-imsg-field{padding:0 12px 8px;border-left:none}.as-imsg-input{min-height:76px}}' +
       /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
       '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
       /* 등록 예시 썸네일 — 클릭하면 크게 본다(40px 로는 내용 확인이 불가능했다) */
