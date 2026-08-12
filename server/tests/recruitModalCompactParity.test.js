@@ -32,5 +32,16 @@ assert(/if \(act === 'work'\) act = 'prod'/.test(modal),
   'Scrolling through work rows must keep the merged product rail step active.');
 assert(/#recruitModal \.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal),
   'Compact rows must preserve the approved 25/75 label-to-control ratio.');
+assert(/function hydrateParityControls\(\)/.test(modal),
+  'The actual shared runtime modal must hydrate the approved compact controls, not only the static mockup.');
+assert(/\['실배송', '빈박스', '택배발송대행'\]/.test(modal),
+  'Delivery choices must remain the approved square-toggle order.');
+assert(/rf-parity-time-row/.test(modal),
+  'Purchase time must be relocated into the connection rows without changing its original field IDs.');
+assert(/rf-parity-date-row/.test(modal),
+  'The recruitment-start date must be a row-level interactive control below the team chat row.');
+['상품 메인 URL', '공고 썸네일 URL', '모집이월 방식', '입금명', '자율리뷰'].forEach((label) => {
+  assert(modal.includes(label), `The approved label "${label}" must be present in the runtime modal.`);
+});
 
 console.log('recruitModalCompactParity: passed');

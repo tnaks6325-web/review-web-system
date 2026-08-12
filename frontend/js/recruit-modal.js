@@ -198,7 +198,7 @@
               <input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 링크유입일 때 [상품 페이지 열기]로 노출"></div>
           </div>
           <!-- ★ 098 이월 반영: 자동(기본=현행) / 보류 후 수동 반영 — 시안 frontend/docs/이월보류_수동반영_와이어프레임.html -->
-          <div class="rf-hrow" style="margin:8px 0 0"><span class="rf-hl">이월 반영</span>
+          <div class="rf-hrow" style="margin:8px 0 0"><span class="rf-hl">모집이월 방식</span>
             <div>
               <input id="rf_carry_mode" type="hidden" value="auto">
               <div style="display:inline-flex;border:1px solid var(--border,#CBD5E1);border-radius:9px;overflow:hidden">
@@ -242,9 +242,9 @@
         <div class="rf-ch"><span class="rf-ct">💰 리뷰비 · 입금</span><span class="rf-cn">참여한 리뷰어에겐 참여 시점 금액이 영구 고정됩니다</span></div>
         <div class="rf-cb">
       <div class="rf-grid2">
-        <div class="rf-hrow"><span class="rf-hl">리뷰비 (원)</span>
+        <div class="rf-hrow"><span class="rf-hl">리뷰비</span>
           <input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100" oninput="renderFeeSchedule()"></div>
-        <div class="rf-hrow"><span class="rf-hl">통장표시</span>
+        <div class="rf-hrow"><span class="rf-hl">입금명</span>
           <input id="rf_transfer_memo" type="text" class="rform-input" placeholder="예) 파우더망고" maxlength="8"></div>
       </div>
       <!-- 이체은행(086) — 작업오더 '물건비' 수취방식에서 자동 판정(현금→하나 / 계산서→케이뱅크).
@@ -289,7 +289,7 @@
       <div class="rf-hrow"><span class="rf-hl">리뷰타입</span>
         <div>
           <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_review_type_btns">
-            <button class="rchan-btn" data-group="review_type" data-val="" onclick="selectRfBtn('review_type',this)">미지정</button>
+            <button class="rchan-btn" data-group="review_type" data-val="" onclick="selectRfBtn('review_type',this)">자율리뷰</button>
             <button class="rchan-btn" data-group="review_type" data-val="photo" onclick="selectRfBtn('review_type',this)">📷 포토</button>
             <button class="rchan-btn" data-group="review_type" data-val="text" onclick="selectRfBtn('review_type',this)">📝 텍스트</button>
             <button class="rchan-btn" data-group="review_type" data-val="confirm" onclick="selectRfBtn('review_type',this)">✅ 구매확정</button>
@@ -329,7 +329,7 @@
         </div>
       </div>
       <!-- 상품 URL / 썸네일 -->
-      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">상품 URL</span>
+      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">상품 메인 URL</span>
         <div>
           <div style="display:flex;gap:5px">
             <input id="rf_product_url" type="url" class="rform-input" placeholder="상품확인용 URL" style="flex:1;min-width:0">
@@ -348,12 +348,14 @@
           <input id="rf_product_name" type="hidden">
           <input id="rf_price" type="hidden">
         </div></div>
-      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">썸네일</span>
+      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">공고 썸네일 URL</span>
         <div>
           <div style="display:flex;gap:5px">
             <input id="rf_thumb_url" type="url" class="rform-input" style="flex:1;min-width:0;font-size:.72rem" placeholder="쿠팡 이미지 주소 붙여넣기">
             <button type="button" class="rchan-btn" onclick="fetchCampThumbFromUrl()" style="white-space:nowrap"><i class="fas fa-image"></i> 가져오기</button>
+            <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" title="상품 URL 바로가기" aria-label="상품 URL 바로가기">↗</button>
           </div>
+          <div style="font-size:.68rem;color:var(--t3,#94A3B8);margin-top:4px">공고 썸네일 적용방법: 상품페이지에서 썸네일 우클릭→이미지 주소 복사 후 붙혀넣으세요.</div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
             <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCampThumb(this)">
             <img id="rf_thumb_preview" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border,#E2E8F0);display:none">
@@ -926,6 +928,19 @@
 #recruitModal .rf-side #rf_preview_section{margin:0 10px!important}
 #recruitModal .rf-side #rf_preview_listcard{max-width:218px!important}
 #recruitModal .rf-side #rf_preview_card{font-size:.7rem}
+#recruitModal .rf-linked-reference{display:flex;align-items:center;min-height:30px;width:100%;padding:0 8px;border:1px solid #D5DEE9;border-radius:5px;background:#F7F9FC;color:#536178;font-size:.72rem;font-weight:750}
+#recruitModal .rf-linked-reference:before{content:'연결됨';margin-right:6px;color:#2563C8;font-size:.64rem;font-weight:850}
+#recruitModal .rf-delivery-toggle{display:flex;flex-wrap:wrap;gap:4px}
+#recruitModal .rf-delivery-toggle button{min-height:29px;padding:5px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#fff;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rf-delivery-toggle button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
+#recruitModal .rf-delivery-toggle button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8}
+#recruitModal .rf-parity-time-row .rf-time-control{display:flex;align-items:center;gap:6px;width:100%}
+#recruitModal .rf-parity-time-row .rf-time-range{flex:1;width:auto}
+#recruitModal .rf-parity-time-row .rform-label{display:none}
+#recruitModal .rf-parity-date-row .rform-label{display:none}
+#recruitModal .rf-parity-date-row .rf-date-value{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px}
+#recruitModal .rf-parity-date-row .rf-date-value input{min-width:0;flex:1;border:0!important;background:transparent!important;cursor:pointer}
+#recruitModal .rf-parity-date-row .rf-date-value span{flex:none;color:#2563C8;font-size:.65rem;font-weight:850}
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}
@@ -1223,6 +1238,119 @@
   window.recruitSaveBlock      = recruitSaveBlock;
   window.recruitSaveBlockClear = recruitSaveBlockClear;
 
+  /* 시안의 "읽기 전용 연결값 + 사각 선택"을 기존 필드 ID를 보존한 채로 적용한다.
+     데이터 저장은 원래 select/hidden input을 계속 사용하므로 index-recruit.js의 프리필·저장 계약은 바뀌지 않는다. */
+  function hydrateParityControls() {
+    ['rf_linked_campaign', 'rf_linked_tab'].forEach(function (id) {
+      var select = document.getElementById(id);
+      if (!select || select._rfParityReference) return;
+      var reference = document.createElement('div');
+      reference.className = 'rf-linked-reference';
+      reference.setAttribute('aria-live', 'polite');
+      function renderReference() {
+        var option = select.options[select.selectedIndex];
+        reference.textContent = option && option.value ? option.textContent : '작업오더에서 연결되면 자동 표시됩니다.';
+      }
+      select._rfParityReference = reference;
+      select.style.display = 'none';
+      select.disabled = true;
+      select.parentNode.insertBefore(reference, select.nextSibling);
+      select.addEventListener('change', renderReference);
+      renderReference();
+    });
+
+    var delivery = document.getElementById('rf_delivery_type');
+    if (delivery && !delivery._rfParityToggle) {
+      var group = document.createElement('div');
+      group.id = 'rf_delivery_toggle';
+      group.className = 'rf-delivery-toggle';
+      ['실배송', '빈박스', '택배발송대행'].forEach(function (value) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = value;
+        button.setAttribute('data-rf-delivery', value);
+        button.addEventListener('click', function () {
+          delivery.value = value;
+          delivery.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        group.appendChild(button);
+      });
+      function syncDelivery() {
+        Array.prototype.forEach.call(group.querySelectorAll('[data-rf-delivery]'), function (button) {
+          button.classList.toggle('on', button.getAttribute('data-rf-delivery') === delivery.value);
+        });
+      }
+      delivery._rfParityToggle = group;
+      delivery.style.display = 'none';
+      delivery.parentNode.appendChild(group);
+      delivery.addEventListener('change', syncDelivery);
+      syncDelivery();
+    }
+
+    var deliveryRow = delivery && delivery.closest('.rf-hrow');
+    var timeRange = document.getElementById('rf_time_range_control');
+    if (deliveryRow && timeRange && !timeRange.closest('.rf-parity-time-row')) {
+      var timeControl = timeRange.closest('.rf-time-control');
+      var timeSource = timeControl && timeControl.parentNode;
+      if (timeSource) {
+        var timeLabel = timeSource.querySelector('.rform-label');
+        if (timeLabel) timeLabel.style.display = 'none';
+        var timeRow = document.createElement('div');
+        timeRow.className = 'rf-hrow rf-parity-time-row';
+        timeRow.setAttribute('data-rf-parity-time', '1');
+        var timeRowLabel = document.createElement('span');
+        timeRowLabel.className = 'rf-hl';
+        timeRowLabel.textContent = '구매시간대';
+        var timeRowControl = document.createElement('div');
+        timeRowControl.className = 'rf-parity-time-control';
+        timeRow.appendChild(timeRowLabel);
+        timeRow.appendChild(timeRowControl);
+        timeSource.parentNode.removeChild(timeSource);
+        timeRowControl.appendChild(timeSource);
+        deliveryRow.parentNode.insertBefore(timeRow, deliveryRow.nextSibling);
+      }
+    }
+
+    var chat = document.getElementById('rf_chat_url');
+    var chatRow = chat && chat.closest('.rf-hrow');
+    var startDate = document.getElementById('rf_start_date');
+    if (chatRow && startDate && !startDate.closest('.rf-parity-date-row')) {
+      var startSource = startDate.parentNode;
+      if (startSource && startSource.parentNode) {
+        var startRow = document.createElement('div');
+        startRow.className = 'rf-hrow rf-parity-date-row';
+        startRow.setAttribute('data-rf-parity-date', '1');
+        var startLabel = document.createElement('span');
+        startLabel.className = 'rf-hl';
+        startLabel.textContent = '모집 시작일';
+        var startControl = document.createElement('div');
+        startControl.className = 'rf-parity-date-control';
+        startRow.appendChild(startLabel);
+        startRow.appendChild(startControl);
+        startSource.parentNode.removeChild(startSource);
+        startControl.appendChild(startSource);
+        startRow.addEventListener('click', function () {
+          try { if (typeof startDate.showPicker === 'function') startDate.showPicker(); } catch (_) {}
+          startDate.focus();
+        });
+        chatRow.parentNode.insertBefore(startRow, chatRow.nextSibling);
+
+        var weekend = document.getElementById('rf_skip_weekends');
+        var weekendRow = weekend && weekend.closest('.rf-hrow');
+        if (weekendRow && weekendRow.parentNode) {
+          weekendRow.parentNode.removeChild(weekendRow);
+          startRow.parentNode.insertBefore(weekendRow, startRow.nextSibling);
+          var multi = document.getElementById('rf_multi_account');
+          var multiRow = multi && multi.closest('.rf-hrow');
+          if (multiRow && multiRow.parentNode) {
+            multiRow.parentNode.removeChild(multiRow);
+            weekendRow.parentNode.insertBefore(multiRow, weekendRow.nextSibling);
+          }
+        }
+      }
+    }
+  }
+
   function placeFinalSections(participation) {
     var body = _mBody();
     var publish = _mCard('pub');
@@ -1250,6 +1378,7 @@
       work.classList.add('rf-linked-subsection');
       productBody.appendChild(work);
     }
+    hydrateParityControls();
   }
 
   function syncStatusButtons() {
