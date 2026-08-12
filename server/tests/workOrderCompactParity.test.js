@@ -10,6 +10,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..', '..');
 const app = fs.readFileSync(path.join(root, 'frontend', 'js', 'index-app.js'), 'utf8');
+const workdesk = fs.readFileSync(path.join(root, 'frontend', 'workdesk.html'), 'utf8');
 const reference = path.join(root, 'frontend', 'mockups', 'work-order-unification-wireframe.html');
 
 assert.ok(fs.existsSync(reference), 'The approved work-order reference must be versioned with the runtime.');
@@ -28,5 +29,18 @@ assert.match(app, /woAccept\('/);
 assert.match(app, /woCreateCampaignGuarded\('/);
 assert.match(app, /woAdminEdit\('/);
 assert.doesNotMatch(app, /onclick="woRuntimeSelect/);
+
+// The signed-in Track B workspace uses workdesk.html, not the legacy
+// admin dashboard renderer.  The approved layout must be wired here too.
+assert.match(workdesk, /function _renderWoParityBody\(/);
+assert.match(workdesk, /wo-parity-workspace/);
+assert.match(workdesk, /grid-template-columns:232px minmax\(0,1fr\) 276px/);
+assert.match(workdesk, /function _woSelect\(i\)/);
+assert.match(workdesk, /intranet_advertiser_id/);
+assert.match(workdesk, /source_review_order_id/);
+assert.match(workdesk, /skip_weekends/);
+assert.match(workdesk, /_woAccept\('/);
+assert.match(workdesk, /_woCampaign\('/);
+assert.match(workdesk, /_woAdminEdit\('/);
 
 console.log('workOrderCompactParity: passed');
