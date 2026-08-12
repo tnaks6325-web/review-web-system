@@ -48,7 +48,7 @@ ok('생성 게이트가 보정값을 본다',
   /linked_sheet_id: lSheet, linked_tab_gid: lGid, window_start, window_end, daily_limit/.test(rt));
 ok('생성 INSERT에 보정값이 들어간다', /lSheet \|\| '',\s*\n\s*lTab \|\| '',\s*\n\s*lGid \|\| '',/.test(rt));
 ok('★ 본문에 값이 있으면 보정하지 않는다(관리자 선택 우선)',
-  /if \(!lSheet \|\| !lTab\) \{/.test(rt));
+  /if \(!intentionallyUnlinked && \(!lSheet \|\| !lTab\)\) \{/.test(rt));
 
 /* ═══ 수정 라우트 ═══ */
 ok('수정 시에도 보정한다(기존 공고는 열어서 저장하면 복구)',

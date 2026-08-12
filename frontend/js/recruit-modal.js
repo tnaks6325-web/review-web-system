@@ -47,16 +47,16 @@
       <div class="rf-main">
     <div class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0">
 
-      <!-- ═══ 🔗 연결 · 기본 (고정 맨 위 — 시트·탭 연결이 옵션표 프리필·현영 판정·시트 일정 등 모든 자동값의 전제) ═══ -->
+      <!-- ═══ 🔗 연결 · 기본 (고정 맨 위 — 연결하면 옵션표 프리필·현영 판정·시트 일정을 자동으로 쓴다) ═══ -->
       <div class="rf-card" data-sec="link">
-        <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">🔗 연결 · 기본</span><span class="rf-cn">시트·탭이 없으면 공고가 동작하지 않습니다</span></div>
+        <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">🔗 연결 · 기본</span><span class="rf-cn">시트·탭 연결은 나중에 추가할 수 있습니다</span></div>
         <div class="rf-cb">
       <div class="rf-grid2">
-        <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rform-req">*</span></span>
+        <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rf-optional">선택</span></span>
           <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)">
             <option value="">① 캠페인(시트) 선택</option>
           </select></div>
-        <div class="rf-hrow"><span class="rf-hl">탭명 <span class="rform-req">*</span></span>
+        <div class="rf-hrow"><span class="rf-hl">탭명 <span class="rf-optional">선택</span></span>
           <select id="rf_linked_tab" class="rform-input" onchange="onLinkedTabChange(this)" disabled>
             <option value="">② 탭 선택 (시트 먼저)</option>
           </select></div>
@@ -954,7 +954,7 @@
   function _railMark(key) {
     switch (key) {
       case 'link':
-        return (_val('rf_linked_tab') && _val('rf_manager') && _val('rf_channel') && _val('rf_chat_url')) ? 'ok' : 'req';
+        return (_val('rf_manager') && _val('rf_channel') && _val('rf_chat_url')) ? 'ok' : 'req';
       case 'pub': {
         if (!_val('rf_title')) return 'req';
         var pc = document.getElementById('rf_part_check');
