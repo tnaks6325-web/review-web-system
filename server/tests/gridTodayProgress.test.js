@@ -21,8 +21,9 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
-const S = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const normalizeEol = s => s.replace(/\r\n/g, '\n');
+const F = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8'));
+const S = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', p), 'utf8'));
 
 let pass = 0;
 const t = (name, cond, extra) => { assert(cond, name + (extra ? ' → ' + extra : '')); pass++; console.log('  ✓ ' + name); };

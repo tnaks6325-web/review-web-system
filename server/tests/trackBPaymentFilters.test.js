@@ -67,11 +67,10 @@ test('toggling work rows preserves every other selected work', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmToggleWorkKeys(['S1||A', 'S2||A'], ['S1||A', 'S2||A'], 'S1||A'))), ['S2||A']);
 });
 
-test('a transfer result can be reopened from its batch row without opening a file picker', () => {
-  const openResult = sourceOf('_pmOpenResult');
-  assert.match(openResult, /result-preview/);
-  assert.doesNotMatch(openResult, /_pmPickResult/);
-  assert.match(workdesk, /onclick="_pmOpenResult\(\$\{i\}\)"/);
+test('toggling a work preserves the work-list scroll position and exposes the selected-work count', () => {
+  assert.match(sourceOf('_pmToggleWork'), /pmworklist[\s\S]*scrollTop/);
+  assert.match(sourceOf('_pmRender'), /pmworklist[\s\S]*scrollTop\s*=/);
+  assert.match(workdesk, /선택 작업 \$\{selectedKeys\.size\}개/);
 });
 
 test('payment UI keeps the work list and selected-result panel side by side', () => {

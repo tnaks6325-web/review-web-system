@@ -196,7 +196,7 @@ ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리�
     const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
     const paths = writes.map(l => l.route.path).sort();
     // ⚠ W5 줄 정리(`/retire-rows`)가 뒤늦게 합류해 이 목록이 드리프트해 있었다(가드가 계속 빨간 상태였다).
-    return paths.join(',') === '/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
+    return paths.join(',') === '/worktable/add-blogger,/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
       && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',

@@ -19,7 +19,7 @@ function ok(name, cond) {
   else { console.log('  ✗ ' + name); fail++; }
 }
 const ROOT = path.join(__dirname, '..');
-const srv = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+const srv = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 /** ⚠ 줄 주석만 지운다 — 블록 주석 정규식은 이 레포의 정규식 리터럴을 물어 코드를 통째로 먹는다(실측) */
 const noLineComments = (s) => s.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 

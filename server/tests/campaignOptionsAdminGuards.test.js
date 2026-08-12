@@ -53,7 +53,10 @@ ok('index-recruit: 작업오더 프리필 applyProductRowsFromOrder(옵션배열
 ok('index-app: _woOptionRows(product_options_json → 옵션행)', /function _woOptionRows\(o\)/.test(app) && /product_options_json/.test(app));
 // ★ 2026-08 C′/B: 옵션명 자리에 상품명을 넣지 않으므로 '옵션 행'은 optKey 있는 행만 센다.
 //   (옛 패턴 `rows.length >= 2` 를 그대로 두면 배선 변경을 못 보고 통과한다 — grep 가드 갱신 규율)
-ok('index-app: 옵션 2개 이상일 때만(단일=옵션없음)', /return rows\.filter\(r => r\.optKey\)\.length >= 2 \? rows : \[\]/.test(app));
+ok('index-app: 새 오더의 명시적 옵션 모드를 우선하고, 옛 오더는 옵션 2개 이상일 때만 옵션 작업으로 본다',
+  /function _woProductMode\(o\)/.test(app)
+  && /const explicitOptionMode = String\(\(arr\[0\] \|\| \{\}\)\.product_mode \|\| ""\) === "opt"/.test(app)
+  && /return explicitOptionMode \|\| rows\.filter\(r => r\.optKey\)\.length >= 2 \? rows : \[\]/.test(app));
 ok('★ index-app: 상품명을 옵션명(optKey)으로 승격하지 않는다 — 시트 옵션칸 상품명 오기입 차단',
   !/optKey: name\.replace/.test(app) && /optKey: "", payAmount: basePay/.test(app));
 ok('★ index-app: 다상품이어도 옵션명 앞에 상품명을 붙이지 않는다(중복 옵션명일 때만 예외)',

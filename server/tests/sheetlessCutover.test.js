@@ -130,12 +130,18 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
       found[m + ' ' + l.route.path] = l.route.stack.map(h => h.handle.name);
     }
     const keys = Object.keys(found);
-    ok('5경로 전부 등록: ' + keys.join(', '), keys.length === 5
+    const coreKeys = keys.filter(k => k !== 'POST /sheetless/review-submit-time-backfill');
+    ok('5경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 5
       && found['GET /sheetless/list'] && found['GET /sheetless/checklist']
       && found['GET /sheetless/slot-sweep']
       && found['POST /sheetless/cutover'] && found['POST /sheetless/reconnect']);
     ok('★ 전부 authMiddleware + adminOrMaster (AE·광고주 도달 불가)',
-      keys.every(k => found[k].includes('authMiddleware') && found[k].includes('adminOrMasterMiddleware')));
+      coreKeys.every(k => found[k].includes('authMiddleware') && found[k].includes('adminOrMasterMiddleware')));
+    ok('submission-time backfill stays master-only',
+      found['POST /sheetless/review-submit-time-backfill']
+      && found['POST /sheetless/review-submit-time-backfill'].includes('authMiddleware')
+      && found['POST /sheetless/review-submit-time-backfill'].includes('masterOnlyMiddleware')
+      && !found['POST /sheetless/review-submit-time-backfill'].includes('adminOrMasterMiddleware'));
   }
 
   /* ══════════════ B. 점검표 fail-closed ══════════════ */

@@ -31,8 +31,14 @@ ok('copy 이벤트로 선택 범위를 TSV 복사', /addEventListener\('copy'/.t
 ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste'/.test(HTML) && /_pasteIntoSelection\(/.test(HTML));
 ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.map\(j=>commitCellEdit\(/.test(HTML));
 ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
-ok('툴바 안내가 우클릭 편집을 말한다', /셀 우클릭<\/b>=그 셀 편집/.test(HTML));
 ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
+ok('입금 날짜 열은 내부·광고주 작업보드에서 넉넉한 폭을 쓴다', /'입금':120,'입금일':120,'입금일자':120/.test(HTML)
+  && /'입금':120,'입금일':120/.test(HTML));
+ok('그리드 안내 문구는 렌더하지 않는다', !/<span class="gnote">/.test(HTML));
+ok('선택 요약 렌더 영역이 있다', /id="gselstat"/.test(HTML));
+ok('선택 요약은 그리드 툴바의 오른쪽 끝에 남아 있다', /\$\{_folBarHtml\(\)\}\s*\n\s*<output id="gselstat"/.test(HTML));
+ok('선택 변경과 해제 모두 요약을 동기화한다', /function _paintSel\(\)[\s\S]{0,1200}_syncSelectionStat\(\)/.test(HTML)
+  && /function _clearCellSel\(\)[\s\S]{0,500}_syncSelectionStat\(\)/.test(HTML));
 
 // ── 2. 가짜 DOM 위에서 실제 실행 ────────────────────────────────
 function grab(name) {
@@ -85,17 +91,19 @@ function buildFakeGrid() {
     mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:주문자제출', 'data-val': nm } }),
     mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:수취인', 'data-val': nm } }),
     mkCell({ cls: ['gcell', 'gedit'], text: '서울 ' + i, attr: { 'data-id': 'r' + i, 'data-field': 'col:주소', 'data-val': '서울 ' + i } }),
+    mkCell({ cls: ['gcell', 'gedit'], text: '22,000', attr: { 'data-id': 'r' + i, 'data-field': 'col:결제금액', 'data-val': '22000' } }),
   ]));
   const body = { children: rows, id: 'gbody' };
+  const stat = { hidden: true, textContent: '', title: '', removeAttribute(k) { if (k === 'title') this.title = ''; } };
   rows.forEach(r => { r.parentBody = body; });
-  return { body, rows };
+  return { body, rows, stat };
 }
 
 function makeCtx(fake) {
   const commits = [], toasts = [];
   const sandbox = {
     STATE: { canEdit: true, gSelRange: null, cur: { sheetId: 's', tabName: 't' } },
-    $: sel => (sel === '#gbody' ? fake.body : null),
+    $: sel => (sel === '#gbody' ? fake.body : (sel === '#gselstat' ? fake.stat : null)),
     document: {
       querySelectorAll(sel) {
         if (!/gselrange|gselanchor/.test(sel)) return [];
@@ -114,7 +122,7 @@ function makeCtx(fake) {
     console,
   };
   vm.createContext(sandbox);
-  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_pasteIntoSelection'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
   return { sandbox, commits, toasts };
@@ -131,6 +139,22 @@ console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)
   ok('오른쪽 열(수취인·연락처·주소) 미포함', !/010-|\t/.test(tsv));
   const n = vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox);
   eq('선택 칸 수 = 4', n, 4);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:6,r1:2,c1:6})', sandbox);
+  eq('결제금액 선택은 셀 수를 센다', vm.runInContext('_selectionStats().count', sandbox), 3);
+  eq('결제금액 선택은 금액을 합산한다', vm.runInContext('_selectionStats().amount', sandbox), 66000);
+  eq('결제금액 선택은 상단에 셀 수와 합계금액을 표기한다', fake.stat.textContent, '선택 셀 3개 · 합계금액 66,000원');
+  vm.runInContext('_clearCellSel()', sandbox);
+  eq('선택 해제 시 상단 선택 요약을 숨긴다', fake.stat.hidden, true);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:5,r1:2,c1:5})', sandbox);
+  eq('결제금액이 아닌 선택은 금액 합계를 만들지 않는다', vm.runInContext('_selectionStats().amount', sandbox), null);
 }
 {
   const fake = buildFakeGrid();

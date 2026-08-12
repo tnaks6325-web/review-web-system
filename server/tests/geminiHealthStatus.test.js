@@ -57,7 +57,8 @@ const server = app.listen(0, async () => {
   } catch (e) {
     failed = e;
   } finally {
-    server.close();
+    await new Promise((resolve) => server.close(resolve));
+    process.emit('SIGTERM');
   }
   if (failed) { console.error('❌ ' + failed.message); process.exit(1); }
 
@@ -69,5 +70,5 @@ const server = app.listen(0, async () => {
     /catch \(err\) \{\s*\n\s*ai = \{ gemini: `error/.test(appSrc));
 
   console.log(`\n✅ geminiHealthStatus: ${n}개 통과`);
-  process.exit(0);
+  process.exitCode = 0;
 });

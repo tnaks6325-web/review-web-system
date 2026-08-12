@@ -18,8 +18,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
-const S = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const normalizeEol = s => s.replace(/\r\n/g, '\n');
+const F = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8'));
+const S = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', p), 'utf8'));
 
 let pass = 0;
 const t = (name, cond, extra) => { assert(cond, name + (extra ? ' → ' + extra : '')); pass++; console.log('  ✓ ' + name); };
@@ -205,7 +206,8 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
 
   /* ── 7) 프론트 배선 ────────────────────────────────────────── */
   console.log('\n7) 프론트 배선');
-  t('0단 열린 작업 줄이 1·2단 위에 있다', /<div class="tb0" id="tb0"><\/div>[\s\S]{0,80}<div class="tb1">/.test(WD));
+  t('작업보드 상단 순서는 업체 → 업체 작업 → 열린 작업이다',
+    /class="tb1 wb-tier wb-company"[\s\S]{0,1200}class="tb2 wb-tier wb-task"[\s\S]{0,1200}class="tb0 wb-tier wb-open"/.test(WD));
   t('★ 작업을 여는 모든 경로가 selTab 으로 수렴 → 거기서 줄에 추가(사본 금지)',
     /_renderTabList\(\);[\s\S]{0,200}_wtOpen\(t\);/.test(WD) && (WD.match(/_wtOpen\(/g) || []).length === 2);
   t('★★ 열린 줄 변경은 단일 커밋 지점(_wtCommit) — 사본을 두면 dirty 를 안 세워 부팅 경합이 되살아난다',

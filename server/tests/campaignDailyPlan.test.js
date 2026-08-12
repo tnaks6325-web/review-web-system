@@ -22,9 +22,10 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
-const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
-const readM = (p) => fs.readFileSync(path.join(__dirname, '..', 'migrations', p), 'utf8');
+const normalizeEol = (s) => s.replace(/\r\n/g, '\n');
+const readS = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8'));
+const readF = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8'));
+const readM = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', 'migrations', p), 'utf8'));
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };

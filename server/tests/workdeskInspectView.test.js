@@ -25,7 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8').replace(/\r\n/g, '\n');
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };

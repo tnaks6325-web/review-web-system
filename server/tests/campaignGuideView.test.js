@@ -122,10 +122,10 @@ ok('⑥-5b gid는 서버가 tab_configs에서 재도출(클라이언트 gid 미�
 // ★ D(2026-08): 공고 미연결 탭도 **그 행의 작업 옵션(리뷰 형태)만은** 알려준다 —
 //   리뷰 형태는 공고가 아니라 그 행에 적힌 지시다. 공고 필드(카톡·상품·가이드)는 여전히 안 나간다.
 ok('⑥-6 공고 미연결 탭은 공고 정보를 주지 않는다(작업 옵션만·없으면 null)',
-  /return res\.json\(\{ ok: true, brief: workOptions\.length \? \{ workOptions \} : null \}\)/.test(reviewEdit));
+  /if \(!camps\.length\)[\s\S]*?if \(workOptions\.length\) only\.workOptions = workOptions;[\s\S]*?if \(payment\) only\.payment = payment;[\s\S]*?brief: Object\.keys\(only\)\.length \? only : null/.test(reviewEdit));
 ok('⑥-6b 그 응답에 카톡·상품·가이드 필드가 섞이지 않는다', (() => {
-  const m = /brief: workOptions\.length \? \{ ([^}]*) \} : null/.exec(reviewEdit);
-  return m && m[1].trim() === 'workOptions';
+  const m = /if \(!camps\.length\)([\s\S]*?)const c = camps\[0\]/.exec(reviewEdit);
+  return m && !/(campaignId|title|chatUrl)\s*:/.test(m[1]);
 })());
 
 // B: 발행 프리필 정화(신규 스냅샷 클린)

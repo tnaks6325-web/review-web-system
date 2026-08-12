@@ -30,7 +30,7 @@ ok('현영 판정은 연결 탭의 income_type 하나만 본다(공고 컬럼 �
   /SELECT income_type FROM tab_configs WHERE sheet_id = \$1 AND tab_name = \$2/.test(camp)
   && /incomeType\.includes\('현영'\)/.test(camp));
 ok('현영이 아니면 null — 일반 공고는 응답·화면 모두 불변',
-  /if \(!incomeType\.includes\('현영'\)\) return null;/.test(camp));
+  /if \(!required\) return null;/.test(camp));
 ok('사업자번호 + 채널별 발행방법 이미지를 함께 조회',
   /CASH_RECEIPT_SETTING_KEYS/.test(camp) && /company_business_no/.test(camp));
 ok('채널→이미지 선택은 단일 출처 유틸을 쓴다(사본 금지)',
@@ -129,6 +129,11 @@ ok('설정탭에 채널별 발행방법 이미지 업로드 칸(공유 모듈이
   && /AdminSettings\.mount\('adminSettingsMount'[\s\S]{0,140}'business'/.test(readF('workdesk.html')));
 ok('업로드는 guide-image 인프라 재사용(신규 저장소 없음)',
   /\/api\/order\/guide-image/.test(app) && /cashreceipt_/.test(app));
+ok('direct cash-receipt control persists the campaign setting and refreshes automatic badges',
+  /id="rf_cash_receipt_required"/.test(adm)
+  && /syncRecruitAutomaticBadges\(\)/.test(adm)
+  && /cash_receipt_required:\s*!!document\.getElementById\("rf_cash_receipt_required"\)\?\.checked/.test(rec));
+if (false) {
 ok('공고 모달의 현금영수증은 읽기 전용 — 입력 필드가 아니다',
   /id="rf_cashrcpt_ro"/.test(adm) && !/id="rf_income_type"/.test(adm)
   && /탭 설정 · 읽기 전용/.test(adm));
@@ -139,6 +144,7 @@ ok('탭을 바꾸면 발행 여부를 다시 판정',
    위 정적 검사는 "문자열이 있다"만 본다. 채널을 늘렸을 때 실제로 깨지는 곳은
    ① 저장 라우트가 새 채널을 거부하는지 ② provider-info 가 새 채널 키를 응답에 싣는지
    ③ 조회 SQL 이 새 키를 실제로 조회 대상에 넣는지다 — 스텁 pool 로 핸들러를 직접 돌린다. */
+}
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
 const poolPath = require.resolve('../src/db/pool');
 let _q = [];

@@ -85,9 +85,27 @@ ok('캠페인 정원은 표에서 파생(별도 입력칸 없음 — hidden)',
   && /function _syncPreviewFromOptRows/.test(rec));
 ok('종료일은 시트와 다르면 경고만 — 실제 모집은 시트를 따른다',
   /id="rf_deadline"/.test(modal) && /실제 모집은 <b>시트를 따릅니다<\/b>/.test(rec));
-ok('현금영수증은 탭 설정 읽기 전용(공고에서 변경 불가)',
-  /id="rf_cashrcpt_ro"/.test(modal) && /function refreshRecruitCashReceipt/.test(rec)
-  && !/id="rf_income_type"/.test(modal));
+ok('현금영수증은 모집공고에서 직접 토글(무시트 공고도 구매 안내에 반영)',
+  /id="rf_cash_receipt_required"/.test(modal)
+  && /cash_receipt_required:\s*!!document\.getElementById\("rf_cash_receipt_required"\)\?\.checked/.test(rec)
+  && !/id="rf_cashrcpt_ro"/.test(modal));
+ok('리뷰타입 혼합은 바로 아래에서 유형별 수량을 조합하고, 안내문은 별도로 남기지 않는다',
+  /id="rf_review_mix"/.test(modal)
+  && /data-mix-type="photo"/.test(modal)
+  && /data-mix-type="text"/.test(modal)
+  && /data-mix-type="confirm"/.test(modal)
+  && /data-mix-type="star"/.test(modal)
+  && /function syncRecruitReviewTypeMix/.test(rec)
+  && /review_type_mix/.test(rec)
+  && !/const RF_REVIEW_TYPE_HINTS/.test(rec));
+ok('자동 안내배지는 수동 목록에서 제거하고, 현영건·로켓와우·사진 5장+·구매확정을 조건으로만 만든다',
+  !/addPresetBadge\('포토리뷰'\)/.test(modal)
+  && !/addPresetBadge\('와우 필수'\)/.test(modal)
+  && !/addPresetBadge\('사진 5장\+'\)/.test(modal)
+  && !/addPresetBadge\('구매확정'\)/.test(modal)
+  && /function syncRecruitAutomaticBadges/.test(rec)
+  && /AUTOMATIC_RECRUIT_BADGES/.test(rec)
+  && /_isRecruitAutomaticBadge/.test(rec));
 ok('밀도 — 라벨·입력 간격 축소 + 짧은 항목 2열',
   /\.rf-main \.rform-label\{margin-bottom:2px/.test(adm) && /class="rf-grid2"/.test(modal));
 ok('미리보기가 모달 세로를 꽉 쓴다(고정 max-height 캡 제거)',
@@ -135,19 +153,31 @@ ok('레일은 본문 DOM 이 단일 출처(카드에서 다시 그림) — 레�
   /if \(c\.style\.display === 'none'\) return;/.test(modalSrc)
   && /querySelector\('\.rf-ct'\)/.test(modalSrc));
 ok('레일 상태 표시(● 필수 미입력 · ⚠ 경고 · ✓ 입력됨) + 클릭 = 카드로 스크롤',
-  /function _railMark\(key\)/.test(modalSrc) && /scrollIntoView\(\{ behavior: 'smooth'/.test(modalSrc)
+  /function _railMark\(key\)/.test(modalSrc) && /function scrollRailToCard\(card\)/.test(modalSrc)
   && /function updateRailMarks\(\)/.test(modalSrc));
+ok('레일 클릭은 바깥 문서 대신 중앙 입력 영역만 스크롤한다',
+  /function scrollRailToCard\(card\)/.test(modalSrc)
+  && /body\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: 'smooth' \}\)/.test(modalSrc)
+  && /body\.getBoundingClientRect\(\)/.test(modalSrc));
 ok('마운트 시 저장된 배치 복원(applyLayout) + 입력 감시(bindLive)',
   /applyLayout\(loadLayout\(\)\)/.test(modalSrc) && /bindLive\(\)/.test(modalSrc));
 
 /* ── 리뷰어 앱과 맞춘 편의 ── */
 ok('리뷰비 100원 단위(리뷰어 앱과 동일)', /id="rf_review_fee"[\s\S]{0,140}step="100"/.test(modal));
 ok('상품 URL 옆 [바로가기 ↗]', /openRecruitProductUrl\(\)/.test(modal) && /function openRecruitProductUrl/.test(rec));
-ok('자율주문 자동 감지 — 시간 표기에 자유/자율이면 구매시간 비움 + 안내',
-  /function _isRecruitAutoOrder/.test(rec) && /자유\|자율/.test(rec)
-  && /id="rf_autoorder_note"/.test(modal) && /oninput="onRecruitTimeRangeInput\(\)"/.test(modal));
-ok('자율주문 판정은 사용자가 자율로 적었을 때만 값을 지운다(오작동 여지 없음)',
-  /if \(auto\) \{[\s\S]{0,200}if \(el && el\.value\) el\.value = ""/.test(rec));
+ok('구매시간대는 시간지정/자유시간대 토글과 고정 폭 시간 범위로 조작한다',
+  /id="rf_free_time_toggle"/.test(modal) && /id="rf_window_start_button"/.test(modal)
+  && /id="rf_window_end_button"/.test(modal) && /id="rf_time_picker"/.test(modal)
+  && /id="rf_window_start" type="hidden"/.test(modal) && /id="rf_window_end" type="hidden"/.test(modal)
+  && /id="rf_time_range" type="hidden"/.test(modal));
+ok('시간 선택 패널은 시 24개와 10분 단위 6개를 제공하고, 기존 저장 필드로 정규화한다',
+  /function rfSetFreeTime/.test(rec) && /function rfOpenTimePicker/.test(rec)
+  && /function rfSetTimePickerPart/.test(rec) && /Array\.from\(\{ length: 24 \}/.test(rec)
+  && /Array\.from\(\{ length: 6 \}/.test(rec) && /data-time-minute/.test(rec)
+  && /function rfSyncPurchaseTimeValue/.test(rec));
+ok('자유시간대 전환은 양쪽 시각을 비우고, 시간지정은 시작·종료 역전을 기존 검증에서 차단한다',
+  /if \(isFreeTime\) \{[\s\S]{0,260}rfSyncPurchaseTimeValue\(\)/.test(rec)
+  && /we <= ws/.test(rec));
 
 /* ── 필드 보존 (ID를 건드리지 않았는지) ── */
 ok('저장·프리필이 참조하는 필드가 모두 살아있다', (() => {
@@ -172,8 +202,10 @@ ok('★ "옵션 없음" 류는 옵션으로 저장하지 않는다(시트 옵션
   /\^\(옵션\\s\*없음\|없음\|단일/.test(rec));
 ok('분해가 애매해도 값을 버리지 않는다(상품명 칸에 통째로)',
   /parts\.length === 1/.test(rec) && /productName = parts\[0\]/.test(rec));
-ok('옵션 배열이 있으면 분해 없이 그대로 사용',
-  /Array\.isArray\(p\.options\) && p\.options\.length/.test(rec));
+ok('옵션 배열이 있으면 명시 모드를 우선해 분해 없이 그대로 사용',
+  /const sourceOptions = \(Array\.isArray\(p\.options\) \? p\.options : \[\]\)\.map/.test(rec)
+  && /if \(sourceMode\)/.test(rec)
+  && /if \(sourceOptions\.length\)/.test(rec));
 
 /* ── ★★ 모듈 CSS 무결성 (실측 사고 고정) ───────────────────────────
    admin.html 인라인 CSS를 모듈로 옮길 때 **범위를 한 줄 어긋나게 잘라**

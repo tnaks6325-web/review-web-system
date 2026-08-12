@@ -213,6 +213,34 @@ function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
   }));
 }
 
+/* 택배발송대행은 선택형 작업유형이 아니라 주문 이행에 필요한 고정 입력값이다.
+   관리자가 작업유형 템플릿을 아직 만들지 않았어도 송장 입력 열은 빠지면 안 된다. */
+const COURIER_PROXY_TRACKING_HEADER = '택배송장번호';
+
+function isCourierProxyWorkOrder(wo = {}) {
+  const courierProxy = wo.courier_proxy;
+  return courierProxy === true
+    || /^(true|t|y|yes|1|예)$/i.test(String(courierProxy == null ? '' : courierProxy))
+    || /택배\s*발송\s*대행/.test(String(wo.delivery_type == null ? '' : wo.delivery_type));
+}
+
+function hasCourierTrackingColumn(columns = []) {
+  return columns.some((column) => /^\s*택배\s*송장\s*(?:번호)?\s*(?:\([^()]{1,60}\))?\s*$/.test(String(column && column.name || '')));
+}
+
+function systemCourierTrackingColumn() {
+  const [classified] = classifyHeaders([COURIER_PROXY_TRACKING_HEADER], {});
+  return {
+    name: classified.header,
+    role: classified.role,
+    label: classified.label,
+    tier: classified.tier,
+    conflict: classified.conflict || null,
+    origin: 'system',
+    typeKey: 'courier_proxy',
+  };
+}
+
 /* ── 작업유형 자동 선택 조건 ─────────────────────────────────────────────
    "작업오더 내용을 보고 그 유형을 켜 둘까?"를 판정한다(사용자 확정 — 쿠팡 작업 + 상품옵션 2가지면
    채널 쿠팡 + 작업유형 상품옵션이 켜진 표가 만들어져야 한다).
@@ -276,6 +304,9 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
      "정하지 않았는데 정해진" 표가 만들어진다(설정 프리셋과 같은 규율). */
   const workTypes = (Array.isArray(o.workTypes) ? o.workTypes : []).map(k => String(k || '').trim()).filter(Boolean);
   const columns = buildColumns({ template, channel, workTypes });
+  if (isCourierProxyWorkOrder(wo) && !hasCourierTrackingColumn(columns)) {
+    columns.push(systemCourierTrackingColumn());
+  }
 
   const rawTotal = o.total != null ? o.total : wo.recruit_count;
   const total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));

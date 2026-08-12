@@ -235,9 +235,14 @@ await ta('★ 성공 시 장부를 다시 만든다(화면 반영)', async () =>
   assert.strictEqual(rebuilt[0].tabName, 'T');
 });
 t('★★ 상태 칸·memo 칸이 같은 쓰기 함수를 쓴다(쓰기 규율 사본 금지)', () => {
-  const n = (statusSrc.match(/UPDATE campaign_participants/g) || []).length;
+  const writerStart = statusSrc.indexOf('async function _writeCellAndRebuild');
+  const writerEnd = statusSrc.indexOf('const REVIEW_SUBMIT_TIME_BACKFILL_DAYS', writerStart);
+  assert.ok(writerStart >= 0 && writerEnd > writerStart, 'common writer not found');
+  const writer = statusSrc.slice(writerStart, writerEnd);
+  const n = (writer.match(/UPDATE campaign_participants/g) || []).length;
   assert.strictEqual(n, 1, `작업표 UPDATE 가 ${n}곳 — 사본이 생겼다`);
-  assert.ok(/_writeCellAndRebuild/.test(statusSrc));
+  assert.ok(/markStatusCell[\s\S]*?_writeCellAndRebuild/.test(statusSrc));
+  assert.ok(/markSheetlessMemo[\s\S]*?_writeCellAndRebuild/.test(statusSrc));
 });
 
 // ── 5. 제출 경로 배선 ─────────────────────────────────────────────────────
