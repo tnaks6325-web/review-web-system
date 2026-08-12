@@ -96,3 +96,13 @@ test('transfer batch history appears directly below the payment summary cards', 
   const paymentRender = workdesk.slice(workdesk.indexOf("$('#pmbody').innerHTML = `"), workdesk.indexOf('function _pmTargetTable'));
   assert.ok(paymentRender.indexOf('<h2 class="pmh2">이체 회차</h2>') < paymentRender.indexOf('${_pmTargetTable(items)}'));
 });
+
+test('transfer batch separates transfer result from workboard application count', () => {
+  const result = sourceOf('_pmBatchResult');
+  const workboard = sourceOf('_pmBatchWorkboard');
+  const table = sourceOf('_pmBatchTable');
+  assert.doesNotMatch(result, /반영됨\(시트\)/);
+  assert.match(workboard, /반영됨/);
+  assert.match(table, /<th>이체결과<\/th><th>작업보드<\/th>/);
+  assert.match(table, /\$\{_pmBatchResult\(b\)\}<\/td><td>\$\{_pmBatchWorkboard\(b\)\}/);
+});

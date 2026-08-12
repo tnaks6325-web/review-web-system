@@ -6943,9 +6943,12 @@ function _pmTargetTable(items){
 
 function _pmBatchResult(b){
   if(!b.resultUploadId) return '<span class="pmauto">결과 파일 없음</span>';
-  return `<div style="display:grid;gap:2px;white-space:nowrap;font-size:11.5px">
-    <span>${b.itemCount}건 업로드 · <b>${b.resultSuccessCount||0}건 성공</b> · <b>${b.resultFailedCount||0}건 실패</b></span>
-    <span class="pmauto">${b.resultAppliedCount||0}건 반영됨(시트)</span></div>`;
+  return `<span style="white-space:nowrap;font-size:11.5px">${b.itemCount}건 업로드 · <b>${b.resultSuccessCount||0}건 성공</b> · <b>${b.resultFailedCount||0}건 실패</b></span>`;
+}
+function _pmBatchWorkboard(b){
+  return b.resultUploadId && (b.resultAppliedCount||0)>0
+    ? `<span class="pmauto">${b.resultAppliedCount}건 반영됨</span>`
+    : '<span class="pmauto">-</span>';
 }
 function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
@@ -6970,11 +6973,11 @@ function _pmBatchTable(list){
     : '<span class="pmb wait">결과 대기</span>';
   return `<div class="lgwrap"><table class="lgtable pmtable">
     <thead><tr><th>회차</th><th>만든 시각</th><th>은행</th><th class="num">건수</th><th class="num">금액</th>
-      <th>담당</th><th>다운로드</th><th>결과</th><th>상태</th><th></th></tr></thead><tbody>
+      <th>담당</th><th>다운로드</th><th>이체결과</th><th>작업보드</th><th>상태</th><th></th></tr></thead><tbody>
     ${list.map((b,i)=>`<tr><td class="mono">#${b.seq}</td><td class="mono">${esc(_pmDate(b.createdAt))}</td>
       <td>${esc(b.bankLabel)}</td><td class="num">${b.itemCount}</td><td class="num">${_pmNum(b.totalAmount)}</td>
       <td>${esc(b.createdBy||'-')}</td><td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
-      <td>${_pmBatchResult(b)}</td><td>${st(b)}</td><td>${_pmBatchActions(b,i)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td>${_pmBatchResult(b)}</td><td>${_pmBatchWorkboard(b)}</td><td>${st(b)}</td><td>${_pmBatchActions(b,i)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function _pmDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return '-';
   const k=new Date(d.getTime()+9*3600*1000); return k.toISOString().slice(5,16).replace('T',' '); }
