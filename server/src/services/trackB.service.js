@@ -60,7 +60,7 @@ function _deriveAnchor(row) {
 // 편집 가능 필드 → 형태(bool/text). '_hidden'=제거 오버레이(import행). 화이트리스트(인젝션·형오류 차단).
 const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
-  product_name: 'text', phone8: 'text', is_submitted: 'bool', is_paid: 'bool', _hidden: 'bool',
+  product_name: 'text', phone8: 'text', _hidden: 'bool',
 };
 // 시트 컬럼(헤더)이 제출/입금 "상태 토글"열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
 //   ★ 정확 화이트리스트 — '입금자명/입금계좌/입금일'·'리뷰제출일/리뷰미제출'·'주문자제출' 등 정보열 오탐 차단.
@@ -2564,6 +2564,10 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     const row = pr[0];
     // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
     if (isCol) {
+      // 상태값은 시스템 전용이다. 화면 잠금과 별개로 일반 셀 편집 API도 차단한다.
+      if (_linkedToggle(field.slice(4))) {
+        await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
+      }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'field_not_editable', field };
       }
@@ -2626,6 +2630,10 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
 // 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
 async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin' } = {}) {
   if (!sheetId || !tabName || !rowId || !field) throw new Error('revertWorkdeskEdit: 필수 인자 누락');
+  if (field === 'is_submitted' || field === 'is_paid' ||
+      (typeof field === 'string' && field.startsWith('col:') && _linkedToggle(field.slice(4)))) {
+    return { ok: false, error: 'status_column_locked', field };
+  }
   const db = getPool();
   const client = await db.connect();
   try {
@@ -2657,6 +2665,103 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
 }
 
 // 제거: manual 물리행=soft-delete(재투영 부활 없음), import행=hidden 오버레이(앵커 불변).
+// 관리자 수동 리뷰제출: 기존 리뷰 업로드 원장에 연결된 이미지로만 제출을 확정한다.
+function _manualReviewFileIds(fileIds) {
+  if (!Array.isArray(fileIds) || fileIds.length < 1 || fileIds.length > 5) return null;
+  const ids = [...new Set(fileIds.map(v => String(v || '').trim()))];
+  if (ids.length !== fileIds.length || ids.some(v => !/^[A-Za-z0-9_-]{10,200}$/.test(v))) return null;
+  return ids;
+}
+
+async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) throw new Error('manualWorkdeskReviewSubmit: 필수 인자 누락');
+  const ids = _manualReviewFileIds(fileIds);
+  if (!ids) return { ok: false, error: 'invalid_review_files' };
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: pr } = await client.query(
+      `SELECT id, seq, reviewer_name, submit_col, is_submitted,
+              source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+         FROM campaign_participants
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL AND active=TRUE FOR UPDATE`,
+      [rowId, sheetId, tabName]);
+    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    const participant = pr[0];
+    const submitCol = String(participant.submit_col || '').trim();
+    if (!submitCol) { await client.query('ROLLBACK'); return { ok: false, error: 'submit_column_missing' }; }
+
+    const { rows: ir } = await client.query(
+      `SELECT is_submitted FROM review_index
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3 FOR UPDATE`,
+      [sheetId, tabName, participant.seq]);
+    if (!ir.length) { await client.query('ROLLBACK'); return { ok: false, error: 'review_history_missing' }; }
+    if (participant.is_submitted || ir[0].is_submitted) {
+      await client.query('ROLLBACK'); return { ok: false, error: 'already_submitted' };
+    }
+
+    // 파일 ID를 조작해 다른 행의 첨부를 제출하지 못하도록 업로드 원장을 대조한다.
+    const { rows: ownedFiles } = await client.query(
+      `SELECT file_id FROM review_submissions
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3
+          AND slot_key = 'review' AND file_id = ANY($4::text[])`,
+      [sheetId, tabName, participant.seq, ids]);
+    if (new Set(ownedFiles.map(r => String(r.file_id))).size !== ids.length) {
+      await client.query('ROLLBACK'); return { ok: false, error: 'review_file_not_owned' };
+    }
+
+    // 잠금 도입 전의 직접 입력 오버레이가 새 시스템 값을 가리지 않도록, 대상 행 것만 감사 이력으로 되돌린다.
+    let anchor = _deriveAnchor(participant);
+    // identity 앵커는 같은 탭의 중복 참여자가 공유할 수 있다. 단일 행일 때만 정리한다.
+    if (anchor && anchor.type === 'identity') {
+      const { rows: dup } = await client.query(
+        `SELECT COUNT(*)::int AS n FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+            AND order_submission_id IS NULL AND source<>'manual' AND identity_key=$3`,
+        [sheetId, tabName, anchor.value]);
+      if ((dup[0] && dup[0].n || 0) > 1) anchor = null;
+    }
+    if (anchor) {
+      await client.query(
+        `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+          WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5
+            AND field = ANY($6::text[]) AND reverted_at IS NULL`,
+        [String(by).slice(0, 100), sheetId, tabName, anchor.type, anchor.value, [`col:${submitCol}`, 'is_submitted']]);
+    }
+
+    // 제출시각을 실제 작업보드 리뷰제출 열에 쓰고, 두 원장의 제출 상태를 같은 트랜잭션에서 확정한다.
+    const { rows: updated } = await client.query(
+      `UPDATE campaign_participants
+          SET is_submitted=TRUE,
+              row_json=COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI')),
+              updated_at=NOW(), updated_by=$5
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3
+        RETURNING to_char(NOW() AT TIME ZONE 'Asia/Seoul', 'FMMM/FMDD HH24:MI') AS submit_value`,
+      [rowId, sheetId, tabName, submitCol, String(by).slice(0, 100)]);
+    await client.query(
+      `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`,
+      [sheetId, tabName, participant.seq]);
+    await client.query(
+      `UPDATE index_master SET submitted_count = submitted_count + 1
+        WHERE sheet_id=$1 AND tab_name=$2 AND submitted_count < row_count`,
+      [sheetId, tabName]).catch(() => null);
+    await client.query('COMMIT');
+
+    try {
+      require('../utils/sse').emitReviewSubmit({
+        sheetId, tabName, reviewer: participant.reviewer_name || '', rowIndex: participant.seq,
+        dbUpdated: true, sheetsWritten: false,
+      });
+    } catch (_) { /* 실시간 알림 실패는 제출 상태를 되돌리지 않는다. */ }
+    return { ok: true, rowId, rowIndex: participant.seq, submitColumn: submitCol, submitValue: updated[0] && updated[0].submit_value };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally { client.release(); }
+}
+
 async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
   const db = getPool();
   const { rows } = await db.query(
@@ -3787,6 +3892,7 @@ module.exports = {
   setWorkdeskTitle,
   editWorkdeskRow,
   revertWorkdeskEdit,
+  manualWorkdeskReviewSubmit,
   previewWorkdeskOrderDelete,
   deleteWorkdeskOrderRow,
   hideWorkdeskRow,

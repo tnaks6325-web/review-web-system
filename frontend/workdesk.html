@@ -568,6 +568,8 @@
   table.sheetgrid td.gedit{cursor:cell}
   table.sheetgrid td.gedit:hover{background:var(--card2)}
   table.sheetgrid td.gedit.edited{background:var(--accent-soft)} table.sheetgrid td.gedit.edited:hover{background:color-mix(in srgb,var(--accent-soft) 82%,var(--card2))}
+  table.sheetgrid td.gstatuslock{cursor:default;background:color-mix(in srgb,var(--card2) 76%,var(--card));color:var(--t1)}
+  table.sheetgrid td.gstatuslock .glockmark{margin-left:4px;color:var(--faint);font-size:10px}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
   td.gidlock{cursor:default}   /* 참여자·연락처 = 실제 제출 신원(수정 불가) */
   .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
@@ -789,6 +791,7 @@
   .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
   .modalbd{overflow:auto;padding:12px 16px}
+  .mrform{display:grid;gap:14px}.mrnotice{padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line));border-radius:9px;background:var(--accent-soft);font-size:12px;line-height:1.55}.mrfiles{display:grid;gap:7px;padding:12px;border:1px dashed color-mix(in srgb,var(--accent) 48%,var(--line));border-radius:9px;background:var(--card2)}.mrfile{display:flex;align-items:center;gap:8px;font-size:12px}.mrfile b{font-weight:650}.mrfile small{color:var(--faint)}.mrerr{min-height:18px;color:var(--bad);font-size:12px}.mrfoot{display:flex;justify-content:flex-end;gap:8px;padding-top:2px}
   /* ── 리뷰어 비정상 로그 표(컬럼 표기) — 한 줄 문장 대신 항목별 칸으로 ── */
   .lgwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
   table.lgtable{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:940px}
@@ -5008,6 +5011,14 @@ function _tpHtml(tp){
 }
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
+const _WD_SUBMIT_HEADERS=new Set(['리뷰제출','리뷰제출여부','리뷰제출완료','제출']);
+const _WD_PAID_HEADERS=new Set(['입금','입금여부','입금완료']);
+function _workdeskStatusKind(header){
+  const h=String(header||'').trim();
+  return _WD_SUBMIT_HEADERS.has(h)?'review':(_WD_PAID_HEADERS.has(h)?'payment':'');
+}
+function _workdeskStatusKindForField(field){ return String(field||'').indexOf('col:')===0?_workdeskStatusKind(String(field).slice(4)):''; }
+
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
   _ensureCellRangeUI();  // 셀 범위 드래그(복사·붙여넣기·배경색) + 우클릭 편집(1회 바인딩, 위임)
@@ -5015,7 +5026,6 @@ function buildGrid(wd){
   //   **엉뚱한 칸**에 적용된다(필터·정렬·탭 전환 후 인덱스 의미가 바뀐다). 여기서 한 번에 비운다.
   STATE.gSelRange=null; STATE.gSelRanges=null;
   const H=wd.headers||[];
-  const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
   // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
   // 광고주 그리드는 신원열(참여자 이름·연락처=phone8) 제외 — 시트 화이트리스트 컬럼만(요청). 내부는 신원 3열 유지.
   const idCols = STATE.role==='advertiser' ? [{key:'#',kind:'seq'}] : [{key:'#',kind:'seq'},{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];
@@ -5064,9 +5074,13 @@ function buildGrid(wd){
     // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
     const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
-    const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
-      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+    const eCell=(field, disp, edited, extraCls, styleI, editv)=> {
+      const statusKind=_workdeskStatusKindForField(field);
+      const locked=!!statusKind;
+      return canE
+      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 이 화면에서 직접 수정할 수 없습니다.'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':(edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:'')}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
+    };
     let tds='';
     vcols.forEach((c,i)=>{ const h=c.key;
       if(c.kind==='seq'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}${bgStyle('seq')}" data-rid="${esc(r.id)}" data-cfield="seq">${esc(r.seq)}</td>`; }
@@ -5080,10 +5094,10 @@ function buildGrid(wd){
         // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, revert(↩) 없음(원본 개념이 없어 되돌릴 대상이 없음).
         const cv=(r.customValues&&r.customValues[c.colId])||'';
         tds+=eCell(h, cv, false, '', i, cv); }
-      else { const jIdx=H.indexOf(h); const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
+      else { const statusKind=_workdeskStatusKind(h); const ed=!statusKind&&(h in ceMap); const raw= ed?ceMap[h]:rj[h];
         const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
         const editv= ed?disp:_gridEditVal(h, raw);
-        const ok=((jIdx===revI||jIdx===payI)&&disp)?' gok':'';
+        const ok=(_workdeskStatusKind(h)&&disp)?' gok':'';
         const ctr=_isCtrCol(h)?' gctr':'';   // 시트 날짜/연락처 열 가운데 정렬
         tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv); }
     });
@@ -5552,7 +5566,8 @@ window.WorkdeskUndo=_undoLatestCellGroup;
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
-  if(!field||!(field.indexOf('col:')===0||field.indexOf('ccol:')===0)) return;   // 편집 가능한 시트열·커스텀열 셀만(참여자·연락처·# 잠금)
+  if(!field||!(field.indexOf('col:')===0||field.indexOf('ccol:')===0)) return;
+  if(_workdeskStatusKindForField(field)) return;
   td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
   const inp=td.querySelector('input'); inp.focus(); inp.select();
   let done=false;
@@ -5903,12 +5918,19 @@ function _openCellMenu(x,y,td){
   const canE = STATE.canEdit;
   const editable = canE && td && td.classList.contains('gedit');
   STATE._gMenuRowId=td && (td.getAttribute('data-id')||td.getAttribute('data-rid'));
+  const field=td && (td.getAttribute('data-field')||td.getAttribute('data-cfield'));
+  const statusKind=_workdeskStatusKindForField(field);
+  STATE._gMenuCell={rowId:STATE._gMenuRowId,field,statusKind};
+  const selectedRow=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(STATE._gMenuRowId));
+  const manualReview=one && statusKind==='review' && !((selectedRow&&selectedRow.submitted)) && (STATE.role==='master'||STATE.role==='admin');
+  const canPaste=canE && g.some(l=>l.some(c=>c.classList.contains('gedit')));
   const hasEdited = canE && g.some(l=>l.some(c=>c.classList.contains('edited')));
   const row=(icon,label,fn,dim,danger)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
   m.innerHTML=
       (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable):'')
+    + (manualReview?row('📎','관리자 수동 리뷰제출',"openManualReviewSubmission()"):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
-    + (canE?row('📥','붙여넣기','pasteCellSelection()'):'')
+    + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
     + (hasEdited?row('↩','편집 되돌리기','_revertSelection()'):'')
     + (canE?`<div class="gcmdiv"></div><div class="gcmsw">${
         _CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
@@ -5925,6 +5947,59 @@ function _openCellMenu(x,y,td){
 }
 function _closeCellMenu(){ const m=$('#gcellmenu'); if(m) m.classList.remove('show'); }
 function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.classList.contains('gedit')) beginEditCell(td); }
+let _manualReviewState=null;
+function _manualReviewClose(){ const ov=document.getElementById('manualreviewov'); if(ov)ov.remove(); _manualReviewState=null; }
+function _manualReviewFileList(){
+  const host=document.getElementById('manualreviewfiles'), state=_manualReviewState;
+  if(!host||!state)return;
+  host.innerHTML=state.files.length
+    ? state.files.map(f=>`<div class="mrfile"><b>${esc(f.name)}</b><small>${Math.ceil(f.size/1024)} KB</small></div>`).join('')
+    : '<div class="mrfile"><small>아직 첨부된 리뷰 이미지가 없습니다.</small></div>';
+  const go=document.getElementById('manualreviewgo'); if(go)go.disabled=!state.files.length;
+}
+function _manualReviewChoose(input){
+  const state=_manualReviewState, err=document.getElementById('manualreviewerr');
+  if(!state||!input)return;
+  const files=[...input.files||[]]; input.value='';
+  if(!files.length)return;
+  if(files.length>5||files.some(f=>!String(f.type||'').startsWith('image/')||f.size>4*1024*1024)||files.reduce((n,f)=>n+f.size,0)>6*1024*1024){
+    if(err)err.textContent='이미지 최대 5개, 파일당 4MB·합계 6MB까지 첨부할 수 있습니다.';
+    return;
+  }
+  state.files=files; if(err)err.textContent=''; _manualReviewFileList();
+}
+function _manualReviewB64(file){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onerror=()=>reject(new Error('파일을 읽지 못했습니다.')); reader.onload=()=>{ const s=String(reader.result||''); resolve(s.slice(s.indexOf(',')+1)); }; reader.readAsDataURL(file); }); }
+function openManualReviewSubmission(){
+  const cell=STATE._gMenuCell, t=STATE.cur, row=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(cell&&cell.rowId));
+  _closeCellMenu();
+  if(!t||!cell||cell.statusKind!=='review'||!row)return;
+  if(row.submitted){ toast('이미 리뷰제출 처리된 참여자입니다.'); return; }
+  _manualReviewState={ t,row,field:cell.field,files:[],saving:false };
+  const ov=document.createElement('div'); ov.id='manualreviewov'; ov.className='modalov';
+  ov.addEventListener('click',e=>{if(e.target===ov)_manualReviewClose();});
+  ov.innerHTML=`<div class="modalbox" style="width:600px"><div class="modalhd"><b>관리자 수동 리뷰제출</b><button class="btn xs" type="button" id="manualreviewclose">닫기</button></div><div class="modalbd"><div class="mrform"><div class="mrnotice"><b>${esc(row.name||'참여자')}</b> · ${esc(t.tabName)}<br>리뷰 이미지를 첨부하면 리뷰제출 열에 현재 시각을 기록하고, 해당 리뷰어의 리뷰내역을 제출 완료로 처리합니다.</div><label class="btn" style="width:max-content">리뷰 이미지 첨부<input id="manualreviewinput" type="file" accept="image/*" multiple hidden></label><div id="manualreviewfiles" class="mrfiles"></div><div id="manualreviewerr" class="mrerr"></div><div class="mrfoot"><button class="btn" type="button" id="manualreviewcancel">취소</button><button class="btn pri" type="button" id="manualreviewgo" disabled>첨부 후 제출처리</button></div></div></div></div>`;
+  document.body.appendChild(ov);
+  document.getElementById('manualreviewclose').onclick=_manualReviewClose;
+  document.getElementById('manualreviewcancel').onclick=_manualReviewClose;
+  document.getElementById('manualreviewinput').onchange=e=>_manualReviewChoose(e.target);
+  document.getElementById('manualreviewgo').onclick=_manualReviewSubmit;
+  _manualReviewFileList();
+}
+async function _manualReviewSubmit(){
+  const state=_manualReviewState, err=document.getElementById('manualreviewerr'), btn=document.getElementById('manualreviewgo');
+  if(!state||state.saving||!state.files.length)return;
+  state.saving=true; if(btn){btn.disabled=true;btn.textContent='첨부 업로드 중…';} if(err)err.textContent='';
+  try{
+    const files=await Promise.all(state.files.map(async f=>({data:await _manualReviewB64(f),mimeType:f.type||'image/jpeg',name:f.name})));
+    const up=await api('/api/image/review-upload',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,reviewerName:state.row.name||'',campaignName:state.t.tabName,rowIndex:state.row.seq,submitCol:state.field.slice(4),slotKey:'review',files})});
+    const fileIds=(up&&up.files||[]).map(f=>f&&f.fileId).filter(Boolean);
+    if(!up||!up.ok||fileIds.length!==files.length) throw new Error((up&&up.error)||'리뷰 이미지 업로드에 실패했습니다.');
+    if(btn)btn.textContent='제출 처리 중…';
+    const saved=await api('/api/trackb/workdesk/manual-review-submit',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,rowId:state.row.id,fileIds})});
+    if(!saved||!saved.ok) throw new Error((saved&&saved.error)==='already_submitted'?'이미 리뷰제출 처리된 참여자입니다.':((saved&&saved.error)||'제출 처리에 실패했습니다.'));
+    _manualReviewClose(); await reloadWorkdesk(); toast('관리자 수동 리뷰제출이 완료되었습니다.');
+  }catch(e){ if(err)err.textContent=e&&e.message?e.message:'처리에 실패했습니다.'; state.saving=false; if(btn){btn.disabled=false;btn.textContent='첨부 후 제출처리';} }
+}
 function _menuDeleteRow(){ const rowId=STATE._gMenuRowId; _closeCellMenu(); if(rowId) hideRow(rowId); }
 function _revertSelection(){
   const g=_selectionGrid(); _closeCellMenu();
