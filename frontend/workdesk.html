@@ -6924,7 +6924,8 @@ function _pmBatchTable(list){
       <td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
       <td>${st(b)}</td>
       <td>${b.status==='downloaded'?`<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
-           <button class="btn sm" onclick="_pmOpenResult(${i})" title="결과 파일을 선택하거나 이미 확인한 결과를 다시 엽니다">이체결과 확인</button>
+           <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>
+           <button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
            <button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`:''}</td>
     </tr>`).join('')}</tbody></table></div>`;
 }
@@ -7332,26 +7333,22 @@ function _pmPickResult(i){
     const r = await api('/api/trackb/payment/batch/'+b.id+'/result-preview',
       { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
     if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다'); return; }
-    STATE.pmResult = { batch:b, file:{ name:f.name, base64 }, preview:r };
-    STATE.pmResultCache = STATE.pmResultCache || {};
-    STATE.pmResultCache[b.id] = STATE.pmResult;
+    STATE.pmResult = { batch:b, file:{ name:f.name, base64 }, preview:r, persisted:false };
     _pmResultModal();
   };
   inp.click();
 }
 
-/* 결과 파일은 민감정보이므로 서버에 저장하지 않는다. 다만 같은 브라우저 세션에서는
-   닫은 확인 화면을 회차 행에서 다시 열 수 있도록 메모리에만 보관한다. */
-function _pmOpenResult(i){
+/* 확인은 파일 선택을 열지 않는다. 업로드 시 서버에 남긴 마스킹 미리보기를 읽는다. */
+async function _pmOpenResult(i){
   const b = (STATE.pmBatches||[])[i];
   if(!b) return;
-  const cached = STATE.pmResultCache && STATE.pmResultCache[b.id];
-  if(cached){
-    STATE.pmResult = cached;
-    _pmResultModal();
-    return;
-  }
-  _pmPickResult(i);
+  toast('저장된 이체결과를 불러오는 중…');
+  const r = await api('/api/trackb/payment/batch/'+b.id+'/result-preview');
+  if(!r || !r.ok){ toast((r&&r.error)||'이체결과를 불러오지 못했습니다'); return; }
+  if(!r.found){ toast('확인할 이체결과가 없습니다. 먼저 결과 파일을 업로드해 주세요.'); return; }
+  STATE.pmResult = { batch:b, file:{ name:r.fileName||'결과 파일' }, preview:r, persisted:true };
+  _pmResultModal();
 }
 
 function _pmFileB64(file){
@@ -7368,6 +7365,9 @@ const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:
 function _pmResultModal(){
   const R = STATE.pmResult; if(!R) return;
   const p = R.preview, s = p.summary || {};
+  const archivedNote = R.persisted
+    ? `<div class="pmnote">저장된 이체결과 미리보기입니다. 원문 파일은 보관하지 않으므로 여기서는 확인만 할 수 있습니다. 반영이 필요하면 회차의 <b>결과 파일 업로드</b>를 사용해 주세요.</div>`
+    : '';
   const rows = (p.items||[]).map(it=>`<tr>
     <td><span class="pmoc ${it.outcome}">${PM_OUTCOME[it.outcome]||it.outcome}</span></td>
     <td>${esc(it.tabName)}</td>
@@ -7406,7 +7406,7 @@ function _pmResultModal(){
         <div class="pmrs wait"><div class="k">결과없음</div><div class="v">${s.notInFile||0}건</div></div>
         <div class="pmrs"><div class="k">이미 입금</div><div class="v">${s.alreadyPaid||0}건</div></div>
       </div>
-      ${warn}${oa}${nf}${ur}
+      ${archivedNote}${warn}${oa}${nf}${ur}
       <div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C">
         반영하면 <b>입금완료 건만</b> 기록됩니다 — 시스템 입금 표시 + 작업표(또는 시트) 입금칸에
         <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패 건은 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>.
@@ -7416,13 +7416,14 @@ function _pmResultModal(){
         <tbody>${rows}</tbody></table></div>
     </div>
     <div class="pmrft">
+      ${R.persisted ? '' : `
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2,#59626F);cursor:pointer">
         <input type="checkbox" id="pmNotifyFail" ${(s.failed||0)?'checked':''} ${(s.failed||0)?'':'disabled'}>
-        이체실패 ${s.failed||0}건에 <b>계좌 확인 안내</b> 보내기(1:1문의)</label>
+        이체실패 ${s.failed||0}건에 <b>계좌 확인 안내</b> 보내기(1:1문의)</label>`}
       <span class="sp" style="flex:1"></span>
       <button class="btn" onclick="_pmResultClose()">취소</button>
-      <button class="btn primary" id="pmApplyBtn" onclick="_pmResultApply()"
-        ${(s.success||0)+(s.failed||0) ? '' : 'disabled'}>이대로 반영</button></div>
+      ${R.persisted ? '' : `<button class="btn primary" id="pmApplyBtn" onclick="_pmResultApply()"
+        ${(s.success||0)+(s.failed||0) ? '' : 'disabled'}>이대로 반영</button>`}</div>
   </div>`;
   document.body.appendChild(el);   // ★ body 직속
   if(!window._pmResultKeyBound){   // ★ 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
@@ -7451,7 +7452,6 @@ async function _pmResultApply(){
     if(btn){ btn.disabled = false; btn.textContent = '이대로 반영'; }
     return;
   }
-  if(STATE.pmResultCache) delete STATE.pmResultCache[R.batch.id];
   _pmResultClose();
   /* ★ 안내 전송 결과도 말한다 — 보냈다고 했는데 조용히 0건이면 담당자가 알 방법이 없다. */
   const notice = r.notifyTargets

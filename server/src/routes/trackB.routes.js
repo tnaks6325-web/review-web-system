@@ -2675,9 +2675,15 @@ router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMi
   try {
     const b = req.body || {};
     res.json(await paymentResultSvc.previewResultFile({
-      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file,
+      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
     }));
   } catch (err) { _resultErr(err, res, next); }
+});
+
+// 결과 원문을 다시 열지 않고, 업로드 당시 저장한 마스킹 미리보기만 확인한다.
+router.get('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await paymentResultSvc.getLatestResultPreview(req.params.id)); }
+  catch (err) { _resultErr(err, res, next); }
 });
 
 router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

@@ -5,7 +5,7 @@
  *  흐름 = ① 결과 파일 업로드 → ② 해석(`utils/paymentResultParse`) → ③ 회차 건과 짝 맞추기
  *        → ④ **사람이 확인 화면에서 [이대로 반영]** → ⑤ 성공 건만 입금 기록.
  *
- * ★★ 미리보기(preview)는 **쓰기 0**. 반영(apply)만 기록한다(회차 취소·시트 우위 점검과 같은 규율).
+ * ★★ 미리보기(preview)는 입금·실패 상태를 바꾸지 않고, 마스킹된 확인 이력만 남긴다.
  * ★★ 반영은 **서버가 파일을 다시 해석·재매칭**한다 — 화면이 보낸 결과 목록을 믿지 않는다
  *    (낡은 화면·조작 요청이 그대로 "입금완료"가 되면 되돌릴 수 없다).
  * ★★ 입금 기록은 `paymentApply.service` **한 벌**(수동 처리와 같은 함수) —
@@ -128,22 +128,53 @@ async function _analyze(batchId, fileName, base64) {
   };
 }
 
-/** 미리보기 — 쓰기 0 */
-async function previewResultFile({ batchId, fileName, base64 }) {
-  const a = await _analyze(batchId, fileName, base64);
+/** 결과 원문 없이도 관리자 확인 화면을 다시 그릴 수 있는 최소·마스킹 보관본. */
+function _previewArchive(a) {
   return {
-    ok: true,
+    version: 1,
     bank: a.batch.bank,
     batchSeq: Number(a.batch.seq),
     batchStatus: a.batch.status,
     format: a.format,
     fileRows: a.parse.rows.length,
     warnings: a.parse.warnings || [],
-    items: a.view,
+    items: a.view.map(({ outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus }) =>
+      ({ outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus })),
     unmatchedResults: a.unmatchedResults,
     orderAssigned: a.orderAssigned,
     summary: a.summary,
   };
+}
+
+/** 미리보기는 입금·실패 상태를 전혀 바꾸지 않는다. 마스킹된 화면 보관본만 감사 이력에 남긴다. */
+async function previewResultFile({ batchId, fileName, base64, by }) {
+  const a = await _analyze(batchId, fileName, base64);
+  const preview = _previewArchive(a);
+  await _db().query(
+    `INSERT INTO payment_result_uploads
+       (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, summary, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$10)`,
+    [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
+      a.parse.rows.length, a.summary.matched, a.summary.success, a.summary.failed,
+      JSON.stringify({ preview }), by || '']);
+  return {
+    ok: true,
+    fileName: String(fileName || ''),
+    ...preview,
+  };
+}
+
+/** 가장 최근의 저장된 결과 확인본. 원문 파일·전체 계좌번호는 절대 되돌려 주지 않는다. */
+async function getLatestResultPreview(batchId) {
+  if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
+  const { rows: [row] } = await _db().query(
+    `SELECT file_name, uploaded_at, summary
+       FROM payment_result_uploads
+      WHERE batch_id = $1 AND applied = FALSE
+      ORDER BY uploaded_at DESC, id DESC LIMIT 1`, [batchId]);
+  const preview = row && row.summary && row.summary.preview;
+  if (!preview || !Array.isArray(preview.items)) return { ok: true, found: false };
+  return { ok: true, found: true, persisted: true, fileName: row.file_name || '', uploadedAt: row.uploaded_at || null, ...preview };
 }
 
 /* ★★ 실패 안내 문구는 **여기 한 곳**(사용자 확정 ⑤ "등록한 계좌 정보를 확인해 주세요").
@@ -321,4 +352,4 @@ async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) 
   };
 }
 
-module.exports = { previewResultFile, applyResultFile, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };

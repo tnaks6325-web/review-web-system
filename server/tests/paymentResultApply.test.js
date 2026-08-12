@@ -77,6 +77,7 @@ function itemRow(i, r, status) {
 function makePool(items, opts = {}) {
   const calls = [];
   const state = items.map(x => ({ ...x }));
+  const previews = [];
   const client = {
     query: async (sql, params) => {
       calls.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params, tx: true });
@@ -110,6 +111,11 @@ function makePool(items, opts = {}) {
     query: async (sql, params) => {
       calls.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params, tx: false });
       const s = String(sql);
+      if (/INSERT INTO payment_result_uploads/.test(s)) {
+        previews.push({ file_name: params[2], uploaded_at: '2026-08-12T06:04:00.000Z', summary: JSON.parse(params[8]) });
+        return { rows: [], rowCount: 1 };
+      }
+      if (/FROM payment_result_uploads/.test(s)) return { rows: previews.slice(-1), rowCount: previews.length ? 1 : 0 };
       if (/SELECT \* FROM payment_batches WHERE id = \$1$/.test(s.trim())) {
         return { rows: [{ id: 'B1', seq: 7, bank: opts.bank || 'hana', status: opts.batchStatus || 'downloaded' }], rowCount: 1 };
       }
@@ -126,9 +132,9 @@ function makePool(items, opts = {}) {
 const WRITE_RE = /\b(INSERT INTO|UPDATE|DELETE FROM)\b/i;
 
 /* ══════════════════════════════════════════════════════════
-   A. 미리보기는 쓰기 0
+   A. 미리보기는 이체 상태를 바꾸지 않는다
    ══════════════════════════════════════════════════════════ */
-console.log('\n[A] 미리보기 — 쓰기 0');
+console.log('\n[A] 미리보기 — 마스킹 확인 이력');
 (async () => {
   const items = OKROWS.slice(0, 2).map((r, i) => itemRow(i, r));
   const pool = makePool(items);
@@ -136,8 +142,16 @@ console.log('\n[A] 미리보기 — 쓰기 0');
   const out = await RES.previewResultFile({ batchId: 'B1', fileName: 'r.xlsx', base64: FILE_B64 });
 
   ok('미리보기가 결과를 짝지어 돌려준다', out.ok && out.summary.success === 2, JSON.stringify(out.summary));
-  ok('★ 미리보기 중 쓰기 쿼리 0건',
-    pool.calls.every(c => !WRITE_RE.test(c.sql)), pool.calls.map(c => c.sql.slice(0, 40)).join(' | '));
+  ok('★ 미리보기는 감사 이력만 쓰고 입금 상태는 바꾸지 않는다',
+    pool.calls.filter(c => WRITE_RE.test(c.sql)).every(c => /INSERT INTO payment_result_uploads/.test(c.sql)), pool.calls.map(c => c.sql.slice(0, 40)).join(' | '));
+  const previewWrite = pool.calls.find(c => /INSERT INTO payment_result_uploads/.test(c.sql));
+  const archived = previewWrite && JSON.parse(previewWrite.params[8]).preview;
+  ok('★ 미리보기 이력에는 원문 파일 대신 마스킹된 화면 데이터만 남긴다',
+    archived && archived.items.every(x => !('bankAccount' in x) && (!x.accountTail || x.accountTail.length <= 4)));
+  const saved = await RES.getLatestResultPreview('B1');
+  ok('★ 저장된 미리보기는 원문 파일 선택 없이 다시 확인할 수 있다',
+    saved.found === true && saved.persisted === true && saved.fileName === 'r.xlsx'
+      && saved.items.length === out.items.length && saved.items.every(x => !x.accountTail || x.accountTail.length <= 4));
   ok('★ 트랜잭션을 열지 않는다', pool.calls.every(c => !c.tx));
   ok('★ 계좌는 뒤 4자리만 내려간다(확인 화면에 전체 계좌를 늘리지 않는다)',
     out.items.every(x => !x.accountTail || x.accountTail.length <= 4)
@@ -311,13 +325,17 @@ console.log('\n[A] 미리보기 — 쓰기 0');
       const re = new RegExp("router\\.post\\('/payment/batch/:id/" + p + "', authMiddleware, adminOrMasterMiddleware");
       ok(`★ /${p} = adminOrMaster(계좌·금액 표면)`, re.test(tb));
     }
+    ok('★ 저장된 결과 미리보기 조회도 adminOrMaster로 제한한다',
+      /router\.get\('\/payment\/batch\/:id\/result-preview', authMiddleware, adminOrMasterMiddleware/.test(tb));
     ok('★ 반영은 confirm 없이는 실행되지 않는다', /b\.confirm !== true/.test(tb));
     ok('★ 42P01 은 not_ready 로 사유를 말한다(마스킹된 200 방지)', /code: 'not_ready'/.test(tb));
     ok('★ 안내 전송은 명시적으로 끈 경우만 끈다(기본 켬)', /notifyFailed: b\.notifyFailed !== false/.test(tb));
 
     const wd = readF('frontend/workdesk.html');
     ok('회차 줄에 [이체결과 확인] 버튼(인덱스만 전달)', /onclick="_pmOpenResult\(\$\{i\}\)"/.test(wd));
-    ok('★ 닫은 결과 확인창을 같은 세션에서 다시 연다', /function _pmOpenResult\(i\)[\s\S]{0,360}pmResultCache/.test(wd));
+    ok('★ 이체결과 확인은 파일 선택 없이 저장된 미리보기를 조회한다',
+      /function _pmOpenResult\(i\)[\s\S]{0,900}api\('\/api\/trackb\/payment\/batch\/'[\s\S]{0,100}result-preview/.test(wd)
+      && !/function _pmOpenResult\(i\)[\s\S]{0,900}_pmPickResult\(i\)/.test(wd));
     ok('★ 미리보기 → 확인 팝업 → 반영 순서', /result-preview/.test(wd) && /result-apply/.test(wd)
       && wd.indexOf('result-preview') < wd.indexOf('result-apply'));
     ok('★ 반영 요청에 파일을 다시 보낸다(서버가 재해석)', /result-apply[\s\S]{0,240}base64:R\.file\.base64/.test(wd));
