@@ -66,6 +66,7 @@ const REQUIRED_SCHEMA = [
   ['order_submissions', 'blog_url'],
   ['payment_batch_items', 'result_status'],       // 100 — 이체결과 반영 UPDATE SET 목록(없으면 반영이 통째로 42703)
   ['payment_batches', 'applied_at'],              // 100 — 위와 같은 트랜잭션에 들어가므로 함께 막아야 한다
+  ['payment_result_uploads', 'file_blob'],
 ];
 
 async function _runOneMigration(pool, sql) {

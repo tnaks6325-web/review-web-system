@@ -2694,7 +2694,7 @@ router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMidd
       return res.status(400).json({ ok: false, code: 'need_confirm', error: '확인 화면에서 [이대로 반영]을 눌러 주세요.' });
     }
     res.json(await paymentResultSvc.applyResultFile({
-      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
+      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, uploadId: b.uploadId, by: _by(req),
       // ★ 기본은 보냄 — 화면에서 명시적으로 끈 경우(`false`)만 안 보낸다(검수 반려 팝업과 같은 규율).
       notifyFailed: b.notifyFailed !== false,
     }));

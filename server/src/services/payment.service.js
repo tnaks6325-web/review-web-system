@@ -560,8 +560,20 @@ async function listBatches(limit = 50) {
   const { rows } = await pool.query(
     `SELECT b.*,
             (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'paid')   AS paid_count,
-            (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'failed') AS failed_count
-       FROM payment_batches b ORDER BY b.created_at DESC LIMIT $1`, [Math.min(200, Math.max(1, limit))]);
+            (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'failed') AS failed_count,
+            ru.id AS result_upload_id, ru.file_name AS result_file_name, ru.row_count AS result_row_count,
+            ru.success_count AS result_success_count, ru.failed_count AS result_failed_count,
+            ru.applied_count AS result_applied_count, ru.applied AS result_applied,
+            ru.uploaded_at AS result_uploaded_at, ru.applied_at AS result_applied_at,
+            (ru.file_blob IS NOT NULL) AS result_has_file
+       FROM payment_batches b
+       LEFT JOIN LATERAL (
+         SELECT id, file_name, row_count, success_count, failed_count, applied_count, applied,
+                uploaded_at, applied_at, file_blob
+           FROM payment_result_uploads WHERE batch_id = b.id
+          ORDER BY uploaded_at DESC, id DESC LIMIT 1
+       ) ru ON TRUE
+       ORDER BY b.created_at DESC LIMIT $1`, [Math.min(200, Math.max(1, limit))]);
   return rows.map(_batchView);
 }
 
@@ -592,6 +604,15 @@ function _batchView(b) {
     cancelledAt: b.cancelled_at, cancelledBy: b.cancelled_by || '',
     paidCount: b.paid_count == null ? undefined : b.paid_count,
     failedCount: b.failed_count == null ? undefined : b.failed_count,
+    resultUploadId: b.result_upload_id || '',
+    resultFileName: b.result_file_name || '',
+    resultRowCount: b.result_row_count == null ? undefined : Number(b.result_row_count),
+    resultSuccessCount: b.result_success_count == null ? undefined : Number(b.result_success_count),
+    resultFailedCount: b.result_failed_count == null ? undefined : Number(b.result_failed_count),
+    resultAppliedCount: b.result_applied_count == null ? undefined : Number(b.result_applied_count),
+    resultApplied: b.result_applied === true,
+    resultCanApply: !!(b.result_upload_id && b.result_has_file && b.result_applied !== true
+      && (Number(b.result_success_count || 0) + Number(b.result_failed_count || 0) > 0)),
   };
 }
 

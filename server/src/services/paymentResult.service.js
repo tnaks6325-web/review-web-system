@@ -1,4 +1,5 @@
 'use strict';
+const crypto = require('crypto');
 /**
  * 리뷰비 입금 M2 — 이체결과 파일 반영
  *
@@ -125,6 +126,7 @@ async function _analyze(batchId, fileName, base64) {
       alreadyPaid: items.filter(it => it.status === 'paid').length,
       alreadyFailed: items.filter(it => it.status === 'failed').length,
     },
+    fileBuffer: buf,
   };
 }
 
@@ -150,15 +152,20 @@ function _previewArchive(a) {
 async function previewResultFile({ batchId, fileName, base64, by }) {
   const a = await _analyze(batchId, fileName, base64);
   const preview = _previewArchive(a);
-  await _db().query(
+  const fileBlob = Buffer.from(a.fileBuffer);
+  const fileSha256 = crypto.createHash('sha256').update(fileBlob).digest('hex');
+  const { rows: [stored] } = await _db().query(
     `INSERT INTO payment_result_uploads
-       (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, summary, uploaded_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$10)`,
+       (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, summary, uploaded_by, file_blob, file_sha256)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$10,$11,$12)
+     RETURNING id, uploaded_at`,
     [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
       a.parse.rows.length, a.summary.matched, a.summary.success, a.summary.failed,
-      JSON.stringify({ preview }), by || '']);
+      JSON.stringify({ preview }), by || '', fileBlob, fileSha256]);
   return {
     ok: true,
+    uploadId: stored && stored.id ? stored.id : null,
+    canApply: (a.summary.success || 0) + (a.summary.failed || 0) > 0,
     fileName: String(fileName || ''),
     ...preview,
   };
@@ -168,13 +175,19 @@ async function previewResultFile({ batchId, fileName, base64, by }) {
 async function getLatestResultPreview(batchId) {
   if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
   const { rows: [row] } = await _db().query(
-    `SELECT file_name, uploaded_at, summary
+    `SELECT id, file_name, uploaded_at, applied, file_blob IS NOT NULL AS has_file, summary
        FROM payment_result_uploads
-      WHERE batch_id = $1 AND applied = FALSE
+      WHERE batch_id = $1
       ORDER BY uploaded_at DESC, id DESC LIMIT 1`, [batchId]);
   const preview = row && row.summary && row.summary.preview;
   if (!preview || !Array.isArray(preview.items)) return { ok: true, found: false };
-  return { ok: true, found: true, persisted: true, fileName: row.file_name || '', uploadedAt: row.uploaded_at || null, ...preview };
+  return {
+    ok: true, found: true, persisted: true, uploadId: row.id,
+    canApply: row.applied !== true && row.has_file === true
+      && ((preview.summary && preview.summary.success) || 0) + ((preview.summary && preview.summary.failed) || 0) > 0,
+    applied: row.applied === true,
+    fileName: row.file_name || '', uploadedAt: row.uploaded_at || null, ...preview,
+  };
 }
 
 /* ★★ 실패 안내 문구는 **여기 한 곳**(사용자 확정 ⑤ "등록한 계좌 정보를 확인해 주세요").
@@ -211,7 +224,20 @@ async function _notifyFailures(items, by) {
  * 반영 — 성공 건만 입금 기록. **서버가 파일을 다시 해석한다.**
  * @param {boolean} [notifyFailed] false 면 실패 안내(1:1문의)를 보내지 않는다(기본 = 보냄).
  */
-async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) {
+async function applyResultFile({ batchId, fileName, base64, uploadId, by, notifyFailed }) {
+  if (uploadId) {
+    const { rows: [stored] } = await _db().query(
+      `SELECT id, file_name, file_blob, file_sha256, applied
+         FROM payment_result_uploads
+        WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
+    if (!stored || !stored.file_blob) throw new ResultError('not_stored', '저장된 결과 파일을 찾을 수 없습니다. 결과 파일을 다시 업로드해 주세요.');
+    if (stored.applied) throw new ResultError('already_applied', '이미 이체결과가 반영된 파일입니다.');
+    if (stored.file_sha256 && crypto.createHash('sha256').update(stored.file_blob).digest('hex') !== stored.file_sha256) {
+      throw new ResultError('file_changed', '저장된 결과 파일의 무결성을 확인하지 못했습니다. 결과 파일을 다시 업로드해 주세요.');
+    }
+    fileName = stored.file_name || fileName;
+    base64 = Buffer.from(stored.file_blob).toString('base64');
+  }
   const a = await _analyze(batchId, fileName, base64);
   const stampNow = nowStamp();
 
@@ -302,19 +328,28 @@ async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) 
         [batchId, by || '']);
     }
 
-    await client.query(
-      `INSERT INTO payment_result_uploads
-         (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, summary, uploaded_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,$10)`,
-      [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
-       a.parse.rows.length, a.summary.matched, paidItems.length, failed.length,
-       JSON.stringify({
-         warnings: a.parse.warnings || [],
-         orderAssigned: a.orderAssigned,
-         unmatchedResults: a.unmatchedResults.length,
-         notInFile: a.summary.notInFile,
-         remainingPending: remaining,
-       }), by || '']);
+    const applySummary = JSON.stringify({ apply: {
+      warnings: a.parse.warnings || [], orderAssigned: a.orderAssigned,
+      unmatchedResults: a.unmatchedResults.length, notInFile: a.summary.notInFile,
+      remainingPending: remaining,
+    } });
+    if (uploadId) {
+      await client.query(
+        `UPDATE payment_result_uploads
+            SET matched = $3, success_count = $4, failed_count = $5,
+                applied = TRUE, applied_count = $6, applied_at = NOW(),
+                summary = COALESCE(summary, '{}'::jsonb) || $7::jsonb
+          WHERE id = $1 AND batch_id = $2`,
+        [uploadId, batchId, a.summary.matched, paidItems.length, failed.length, paidItems.length, applySummary]);
+    } else {
+      await client.query(
+        `INSERT INTO payment_result_uploads
+           (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, applied_count, applied_at, summary, uploaded_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,NOW(),$10,$11)`,
+        [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
+         a.parse.rows.length, a.summary.matched, paidItems.length, failed.length,
+         paidItems.length, applySummary, by || '']);
+    }
 
     await client.query('COMMIT');
   } catch (err) {
@@ -340,6 +375,7 @@ async function applyResultFile({ batchId, fileName, base64, by, notifyFailed }) 
 
   return {
     ok: true,
+    uploadId: uploadId || null,
     notified,
     notifyTargets: failedItems.length,
     applied: paidItems.length,
