@@ -11,6 +11,8 @@ const path = require('path');
 
 const root = path.join(__dirname, '..', '..');
 const modal = fs.readFileSync(path.join(root, 'frontend', 'js', 'recruit-modal.js'), 'utf8');
+const workdesk = fs.readFileSync(path.join(root, 'frontend', 'workdesk.html'), 'utf8');
+const admin = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
 
 function mustContain(fragment, message) {
   assert(modal.includes(fragment), message);
@@ -50,5 +52,12 @@ mustContain('id="rf_status"', '저장 계약을 위한 상태 필드는 유지�
 mustContain('id="rf_side_audit"', '좌측 하단 자동점검 영역이 있어야 합니다.');
 assert(modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"'),
   '자동점검은 입력 영역보다 앞선 좌측 레일에 배치되어야 합니다.');
+
+// Both shared-modal surfaces must request the released asset URL once anew.
+['workdesk', 'admin'].forEach((surface) => {
+  const html = surface === 'workdesk' ? workdesk : admin;
+  assert(html.includes('js/recruit-modal.js?v=20260812-recruit-ui'), `${surface} should request the released modal asset.`);
+  assert(html.includes('js/index-recruit.js?v=20260812-recruit-ui'), `${surface} should request the released controller asset.`);
+});
 
 console.log('recruitModalFinalRuntimeLayout: passed');
