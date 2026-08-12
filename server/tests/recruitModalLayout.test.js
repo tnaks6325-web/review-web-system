@@ -34,17 +34,19 @@ function withoutComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
-ok('모달은 운영 편집기에 맞는 고밀도 폭을 사용한다',
-  /class="modal-box rf-box"[^>]*max-width:1060px/.test(modal));
-ok('좌측은 드래그 레일이 아니라 5단계 고정 내비게이션이다',
+ok('모달은 승인된 컴팩트 행 편집기 폭을 사용한다',
+  /class="modal-box rf-box"[^>]*max-width:1020px/.test(modal));
+ok('좌측은 드래그 레일이 아니라 3단계 고정 내비게이션이다',
   /class="rf-step-list"/.test(modal)
-  && ['link', 'prod', 'cond', 'fee', 'work'].every((key) => modal.includes(`data-rf-step="${key}"`))
+  && ['link', 'prod', 'cond'].every((key) => modal.includes(`data-rf-step="${key}"`))
+  && ['fee', 'work'].every((key) => !modal.includes(`data-rf-step="${key}"`))
   && !modal.includes('onclick="RecruitModal.preset'));
 ok('스크롤 중 현재 단계를 표시하고 클릭하면 중앙 편집 영역을 스크롤한다',
   /data-rf-step/.test(modal)
   && /scrollRailToCard/.test(modal)
   && /setActiveRail/.test(modal)
-  && /if \(act === 'pub'\) act = 'link'/.test(modal)
+  && /if \(act === 'pub' \|\| act === 'fee'\) act = 'link'/.test(modal)
+  && /if \(act === 'work'\) act = 'prod'/.test(modal)
   && /body\.rf-recruit-modal-open\{overflow:hidden\}/.test(modal)
   && /document\.body\.classList\.add\("rf-recruit-modal-open"\)/.test(editor)
   && /document\.body\.classList\.remove\("rf-recruit-modal-open"\)/.test(editor)
@@ -69,10 +71,10 @@ ok('상품 설정은 별도 단계가 아니라 진행상품 내부 슬롯에 �
   && /id="rf_legacy_product_settings_slot"/.test(modal)
   && /syncProductSettings: placeFinalSections/.test(modal)
   && /RecruitModal\.syncProductSettings\(on\)/.test(editor));
-ok('최종 행형 문법은 96px 라벨 열과 동일 높이의 입력·버튼을 쓴다',
-  /\.rf-hrow\{grid-template-columns:96px minmax\(0,1fr\)/.test(modal)
-  && /\.rf-main \.rform-input\{min-height:27px/.test(modal)
-  && /\.rchan-btn,#recruitModal \.rf-pm-btn,#recruitModal \.rf-status-buttons button\{min-height:26px/.test(modal));
+ok('최종 행형 문법은 승인 시안의 25/75 열과 동일 높이의 입력·버튼을 쓴다',
+  /\.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal)
+  && /\.rf-main \.rform-input\{min-height:30px/.test(modal)
+  && /\.rchan-btn,#recruitModal \.rf-pm-btn,#recruitModal \.rf-status-buttons button\{min-height:29px/.test(modal));
 ok('옵션 URL·주말 제외·구매시간·현금영수증·기간별 리뷰비 필드는 보존한다',
   ['rf-opt-url', 'rf_skip_weekends', 'rf_free_time_toggle', 'rf_cash_receipt_required', 'rf_fee_sched_on']
     .every((token) => modal.includes(token)));

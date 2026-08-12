@@ -367,6 +367,7 @@ async function loadRecruitTabOptions() {
 
 /* 1단계: 캠페인(시트) 선택 드롭다운 구성 */
 function _populateCampaignSelect(currentSheetId) {
+  setTimeout(() => { if (window.RecruitModal?.refreshLinkedReferences) window.RecruitModal.refreshLinkedReferences(); }, 0);
   const sel = document.getElementById("rf_linked_campaign");
   if (!sel) return;
   /* 중복 없는 sheetId 목록 */
@@ -396,6 +397,7 @@ function _populateCampaignSelect(currentSheetId) {
 
 /* 캠페인 선택 시 → 해당 시트의 탭 목록 표시 */
 function onLinkedCampaignChange(camSel) {
+  setTimeout(() => { if (window.RecruitModal?.refreshLinkedReferences) window.RecruitModal.refreshLinkedReferences(); }, 0);
   const sid = camSel.value;
   const tabSel = document.getElementById("rf_linked_tab");
   const info   = document.getElementById("rf_linked_tab_info");
@@ -425,6 +427,7 @@ function onLinkedCampaignChange(camSel) {
 
 /* 탭 선택 시 → 연결 정보 표시 */
 function onLinkedTabChange(sel) {
+  if (window.RecruitModal?.refreshLinkedReferences) window.RecruitModal.refreshLinkedReferences();
   if (typeof renderPartCheck === "function") renderPartCheck(); // 참여형 자동점검 즉시 갱신(N6)
   // 탭을 고르면 안내가 사라지고, 지우면 다시 뜬다(사람이 고른 값이 최우선)
   if (sel && sel.value) _rfLinkedMiss = null;
