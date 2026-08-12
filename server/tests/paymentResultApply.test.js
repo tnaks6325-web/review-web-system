@@ -97,6 +97,9 @@ function makePool(items, opts = {}) {
         it.status = 'failed'; it.result_status = params[1];
         return { rows: [{ notified_at: it.notified_at }], rowCount: 1 };
       }
+      if (/COUNT\(\*\)::int AS n FROM payment_batch_items[\s\S]*status IN \('paid', 'failed'\)/.test(s)) {
+        return { rows: [{ n: state.filter(x => x.status === 'paid' || x.status === 'failed').length }], rowCount: 1 };
+      }
       if (/COUNT\(\*\)::int AS n FROM payment_batch_items/.test(s)) {
         return { rows: [{ n: state.filter(x => x.status === 'pending').length }], rowCount: 1 };
       }
@@ -185,6 +188,21 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('은행 실패 1건이 failed 로 내려간다', r1.failed === 1);
     ok('★ 결과 파일에 없는 건은 pending 그대로(실패로 내리지 않는다 = 이중입금 방지)',
       pool.state.find(x => x.id === 'item-none').status === 'pending');
+    ok('★ 이대로 반영을 확정하면 결과없음이 남아도 회차 상태는 적용완료가 된다',
+      pool.calls.some(c => /UPDATE payment_batches SET status = 'applied'/.test(c.sql)),
+      pool.calls.filter(c => /UPDATE payment_batches/.test(c.sql)).map(c => c.sql).join(' | '));
+
+    const reconcilePool = makePool([
+      { ...itemRow(10, OKROWS[0]), id: 'already-paid', status: 'paid' },
+      { ...itemRow(11, OKROWS[1]), id: 'still-pending', status: 'pending' },
+    ]);
+    RES.__setPoolForTest(reconcilePool);
+    const reconciled = await RES.markBatchApplied({ batchId: 'B1', by: '관리자A' });
+    ok('★ 과거에 반영된 회차는 입금 기록을 다시 쓰지 않고 적용완료 상태만 보정한다',
+      reconciled.ok === true && reconciled.appliedItems === 1 && reconciled.remainingPending === 1
+        && reconcilePool.calls.some(c => /UPDATE payment_batches SET status = 'applied'/.test(c.sql)),
+      JSON.stringify(reconciled));
+    RES.__setPoolForTest(pool);
 
     const paidRows = pool.state.filter(x => x.status === 'paid');
     ok('★ 입금 시각 = 결과 파일의 실제 이체시점(지금이 아니다)',

@@ -2701,4 +2701,14 @@ router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMidd
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// 과거 방식으로 이미 반영된 회차의 상태만 정합화한다. 항목의 입금 기록은 다시 쓰지 않는다.
+router.post('/payment/batch/:id/mark-applied', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if ((req.body || {}).confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '확인 후 적용완료 처리를 진행해 주세요.' });
+    }
+    res.json(await paymentResultSvc.markBatchApplied({ batchId: req.params.id, by: _by(req) }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 module.exports = router;

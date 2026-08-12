@@ -314,19 +314,14 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
       }
     }
 
-    // 회차 상태 — 남은 pending 이 없을 때만 '반영 완료'로 닫는다(결과 없음 건이 남으면 추가 파일을 더 받을 수 있게)
+    // 사람이 [이대로 반영]을 확정한 회차는 결과없음 건이 남아도 '반영 완료'로 표시한다.
+    // pending 건은 그대로 남아 이후 결과 파일로 추가 반영할 수 있다.
     const { rows: [{ n: remaining }] } = await client.query(
       `SELECT COUNT(*)::int AS n FROM payment_batch_items WHERE batch_id = $1 AND status = 'pending'`,
       [batchId]);
-    if (remaining === 0) {
-      await client.query(
-        `UPDATE payment_batches SET status = 'applied', applied_at = NOW(), applied_by = $2 WHERE id = $1`,
-        [batchId, by || '']);
-    } else {
-      await client.query(
-        `UPDATE payment_batches SET applied_at = NOW(), applied_by = $2 WHERE id = $1`,
-        [batchId, by || '']);
-    }
+    await client.query(
+      `UPDATE payment_batches SET status = 'applied', applied_at = NOW(), applied_by = $2 WHERE id = $1`,
+      [batchId, by || '']);
 
     const applySummary = JSON.stringify({ apply: {
       warnings: a.parse.warnings || [], orderAssigned: a.orderAssigned,
@@ -388,4 +383,38 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
   };
 }
 
-module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+/**
+ * 과거 반영분의 회차 상태만 정합화한다. 입금 기록이나 항목 상태는 절대 다시 쓰지 않는다.
+ */
+async function markBatchApplied({ batchId, by }) {
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [batch] } = await client.query(
+      'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 적용완료로 처리할 수 없습니다.');
+
+    const { rows: [{ n: appliedItems }] } = await client.query(
+      `SELECT COUNT(*)::int AS n FROM payment_batch_items
+        WHERE batch_id = $1 AND status IN ('paid', 'failed')`, [batchId]);
+    if (appliedItems === 0) {
+      throw new ResultError('no_applied_items', '이미 반영된 이체 결과가 없어 상태를 완료로 바꿀 수 없습니다.');
+    }
+    const { rows: [{ n: remainingPending }] } = await client.query(
+      `SELECT COUNT(*)::int AS n FROM payment_batch_items WHERE batch_id = $1 AND status = 'pending'`,
+      [batchId]);
+    await client.query(
+      `UPDATE payment_batches SET status = 'applied', applied_at = NOW(), applied_by = $2 WHERE id = $1`,
+      [batchId, by || '']);
+    await client.query('COMMIT');
+    return { ok: true, appliedItems, remainingPending };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
