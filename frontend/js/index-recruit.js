@@ -1026,6 +1026,9 @@ function onParticipationToggle(on) {
   document.querySelectorAll("#recruitModal [data-part-only]").forEach(el => { el.style.display = on ? "" : "none"; });
   const _legacyNote = document.getElementById("rf_legacy_note");
   if (_legacyNote) _legacyNote.style.display = on ? "none" : "";
+  // 상품 설정은 참여형에서는 진행상품 바로 아래, 일반 공고에서는 연결 정보 아래에 둔다.
+  // 값과 input ID는 이동하지 않고 같은 노드를 옮겨 저장·프리필 계약을 유지한다.
+  if (window.RecruitModal && RecruitModal.syncProductSettings) RecruitModal.syncProductSettings(on);
   if (window.RecruitModal && RecruitModal.refreshRail) RecruitModal.refreshRail();   // 레일 목차 동기화
   _syncRecruitPaneGate(on);
   if (on) {
@@ -2230,6 +2233,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   document.getElementById("rf_delivery_type").value = "";
   document.getElementById("rf_status").value = "draft";
+  if (window.RecruitModal?.syncStatusButtons) window.RecruitModal.syncStatusButtons();
   // 상품정보 가져오기 초기화
   ["rf_product_url","rf_thumbnail","rf_product_name","rf_price"].forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
   const _pp = document.getElementById("rf_product_preview"); if (_pp) _pp.style.display = "none";
@@ -2311,6 +2315,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       { const _so = document.getElementById("rf_sort_order"); if (_so) _so.value = c.sort_order ?? 0; }
       document.getElementById("rf_max_slots").value    = c.max_slots ?? 0;
       document.getElementById("rf_status").value       = c.status || "draft";
+      if (window.RecruitModal?.syncStatusButtons) window.RecruitModal.syncStatusButtons();
       document.getElementById("rf_delivery_type").value = c.delivery_type || "";
       const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
 
