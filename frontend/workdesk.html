@@ -6924,7 +6924,7 @@ function _pmBatchTable(list){
       <td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
       <td>${st(b)}</td>
       <td>${b.status==='downloaded'?`<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
-           <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 업로드</button>
+           <button class="btn sm" onclick="_pmOpenResult(${i})" title="결과 파일을 선택하거나 이미 확인한 결과를 다시 엽니다">이체결과 확인</button>
            <button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`:''}</td>
     </tr>`).join('')}</tbody></table></div>`;
 }
@@ -7333,9 +7333,25 @@ function _pmPickResult(i){
       { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
     if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다'); return; }
     STATE.pmResult = { batch:b, file:{ name:f.name, base64 }, preview:r };
+    STATE.pmResultCache = STATE.pmResultCache || {};
+    STATE.pmResultCache[b.id] = STATE.pmResult;
     _pmResultModal();
   };
   inp.click();
+}
+
+/* 결과 파일은 민감정보이므로 서버에 저장하지 않는다. 다만 같은 브라우저 세션에서는
+   닫은 확인 화면을 회차 행에서 다시 열 수 있도록 메모리에만 보관한다. */
+function _pmOpenResult(i){
+  const b = (STATE.pmBatches||[])[i];
+  if(!b) return;
+  const cached = STATE.pmResultCache && STATE.pmResultCache[b.id];
+  if(cached){
+    STATE.pmResult = cached;
+    _pmResultModal();
+    return;
+  }
+  _pmPickResult(i);
 }
 
 function _pmFileB64(file){
@@ -7435,6 +7451,7 @@ async function _pmResultApply(){
     if(btn){ btn.disabled = false; btn.textContent = '이대로 반영'; }
     return;
   }
+  if(STATE.pmResultCache) delete STATE.pmResultCache[R.batch.id];
   _pmResultClose();
   /* ★ 안내 전송 결과도 말한다 — 보냈다고 했는데 조용히 0건이면 담당자가 알 방법이 없다. */
   const notice = r.notifyTargets

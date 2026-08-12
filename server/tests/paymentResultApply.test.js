@@ -316,7 +316,8 @@ console.log('\n[A] 미리보기 — 쓰기 0');
     ok('★ 안내 전송은 명시적으로 끈 경우만 끈다(기본 켬)', /notifyFailed: b\.notifyFailed !== false/.test(tb));
 
     const wd = readF('frontend/workdesk.html');
-    ok('회차 줄에 [결과 업로드] 버튼(인덱스만 전달)', /onclick="_pmPickResult\(\$\{i\}\)"/.test(wd));
+    ok('회차 줄에 [이체결과 확인] 버튼(인덱스만 전달)', /onclick="_pmOpenResult\(\$\{i\}\)"/.test(wd));
+    ok('★ 닫은 결과 확인창을 같은 세션에서 다시 연다', /function _pmOpenResult\(i\)[\s\S]{0,360}pmResultCache/.test(wd));
     ok('★ 미리보기 → 확인 팝업 → 반영 순서', /result-preview/.test(wd) && /result-apply/.test(wd)
       && wd.indexOf('result-preview') < wd.indexOf('result-apply'));
     ok('★ 반영 요청에 파일을 다시 보낸다(서버가 재해석)', /result-apply[\s\S]{0,240}base64:R\.file\.base64/.test(wd));

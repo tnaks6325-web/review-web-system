@@ -67,6 +67,12 @@ test('toggling work rows preserves every other selected work', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmToggleWorkKeys(['S1||A', 'S2||A'], ['S1||A', 'S2||A'], 'S1||A'))), ['S2||A']);
 });
 
+test('a transfer result can be reopened from its batch row without reselecting the file', () => {
+  assert.match(workdesk, /function _pmOpenResult\(i\)/);
+  assert.match(workdesk, /STATE\.pmResultCache/);
+  assert.match(workdesk, /onclick="_pmOpenResult\(\$\{i\}\)"/);
+});
+
 test('payment UI keeps the work list and selected-result panel side by side', () => {
   assert.match(workdesk, /class="pmselectionlayout"/);
   assert.match(workdesk, /입금 대상자 수/);
