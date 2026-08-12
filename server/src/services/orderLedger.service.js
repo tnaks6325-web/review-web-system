@@ -1,5 +1,6 @@
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
 const { logger } = require('../utils/logger');
+const { findSameDayDuplicateInTx, sameDayDuplicateLockKey } = require('./orderDuplicate.service');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
@@ -748,6 +749,7 @@ async function createOrderLedgerEntry(input) {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
     campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
+    sameDayDuplicateGuard, // 구매양식의 오늘 동일 제출 차단(선택 입력)
   } = input;
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
   const ORDER_INSERT_SQL = `INSERT INTO order_submissions
@@ -780,6 +782,12 @@ async function createOrderLedgerEntry(input) {
   let orderSubmissionId;
   let dedupKey;
   let holdResult = null;
+  let duplicateOrderSubmissionId = null;
+  const guardDuplicate = async (client) => {
+    if (!sameDayDuplicateGuard) return null;
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [sameDayDuplicateLockKey(sameDayDuplicateGuard)]);
+    return findSameDayDuplicateInTx(client, sameDayDuplicateGuard);
+  };
 
   if (campaignHold && campaignHold.applicationId) {
     // ★ 참여형(레드-블루-심판 최종안): 주문 INSERT + dedup + 홀드확정 + provenance 링크 = 단일 트랜잭션(부분상태 불가).
@@ -787,6 +795,11 @@ async function createOrderLedgerEntry(input) {
     const client = await db.connect();
     try {
       await client.query('BEGIN');
+      const duplicate = await guardDuplicate(client);
+      if (duplicate) {
+        duplicateOrderSubmissionId = duplicate.id;
+        await client.query('ROLLBACK');
+      } else {
       const ins = await client.query(ORDER_INSERT_SQL, orderInsertParams);
       orderSubmissionId = ins.rows[0].id;
       dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
@@ -801,6 +814,7 @@ async function createOrderLedgerEntry(input) {
         logger.warn(`[orderLedger] 홀드확정 오류(주문은 보존): ${holdErr.message} camp=${campaignHold.campaignId} os=${orderSubmissionId}`);
       }
       await client.query('COMMIT');
+      }
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
       throw err;
@@ -815,11 +829,36 @@ async function createOrderLedgerEntry(input) {
     }
   } else {
     // 비참여 주문: 기존 경로 그대로(핫패스 무변경 — 트랜잭션·커넥션 점유 없음)
-    const insert = await db.query(ORDER_INSERT_SQL, orderInsertParams);
-    orderSubmissionId = insert.rows[0].id;
-    dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
-    await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+    if (sameDayDuplicateGuard) {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const duplicate = await guardDuplicate(client);
+        if (duplicate) {
+          duplicateOrderSubmissionId = duplicate.id;
+          await client.query('ROLLBACK');
+        } else {
+          const insert = await client.query(ORDER_INSERT_SQL, orderInsertParams);
+          orderSubmissionId = insert.rows[0].id;
+          dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+          await client.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+          await client.query('COMMIT');
+        }
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      const insert = await db.query(ORDER_INSERT_SQL, orderInsertParams);
+      orderSubmissionId = insert.rows[0].id;
+      dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+      await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+    }
   }
+
+  if (duplicateOrderSubmissionId) return { duplicateOrderSubmissionId };
 
   let tabContext = null;
   let claim = { row: null, error: 'not_attempted' };

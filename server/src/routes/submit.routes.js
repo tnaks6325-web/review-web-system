@@ -999,7 +999,18 @@ router.post('/order', async (req, res, next) => {
       //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
       //   ★ 방어 D3: orderIdentity = 시트에 실제 기입되는 연락처(정산 귀속 기준) → 명의 드리프트 경고 입력.
       campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone } } : undefined,
+      // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
+      // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
+      sameDayDuplicateGuard: { sheetId, tabName, campaignId: holdCtx && holdCtx.campaignId, orderData },
     });
+
+    if (ledger && ledger.duplicateOrderSubmissionId) {
+      return res.status(409).json({
+        ok: false,
+        code: 'DUPLICATE_SAME_DAY',
+        error: '오늘 동일한 구매양식이 이미 제출되었습니다. 내용을 확인해 주세요.',
+      });
+    }
 
     // ★ 신원 기록(recordParticipationLink/recordReviewIdentity)은 여기서 하지 않는다.
     //   제출 시점의 ledger.sheetRow는 RAW 미러 스냅샷 기반 "빈 행" 추정치라,
