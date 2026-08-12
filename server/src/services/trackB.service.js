@@ -16,6 +16,7 @@ const { logger } = require('../utils/logger');
 const participants = require('./participants.service');
 const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
+const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 
 let _pool;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
@@ -2501,6 +2502,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     total: out.length,
     submitted: out.filter(r => r.submitted).length,
     paid: out.filter(r => r.paid).length,
+    // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
+    paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
     ambiguous: ambiguousCount, hidden: hiddenList.length,
   };
@@ -2668,6 +2671,14 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
   }
   const r = await editWorkdeskRow({ sheetId, tabName, rowId, field: '_hidden', value: true, by });
   return r.ok ? { ok: true, mode: 'overlay_hidden', editId: r.editId } : r;
+}
+
+// 주문이 연결된 한 행을 안전하게 취소한다. 시트 물리행은 유지하고 주문값만 큐로 비워 행 이동 오염을 막는다.
+async function previewWorkdeskOrderDelete(args) { return workdeskOrderDelete.previewWorkdeskOrderDelete(args); }
+async function deleteWorkdeskOrderRow(args) {
+  const out = await workdeskOrderDelete.deleteWorkdeskOrderRow(args);
+  if (out.ok) _tabStatsCache = { at: 0, map: null };
+  return out;
 }
 
 // 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
@@ -3776,6 +3787,8 @@ module.exports = {
   setWorkdeskTitle,
   editWorkdeskRow,
   revertWorkdeskEdit,
+  previewWorkdeskOrderDelete,
+  deleteWorkdeskOrderRow,
   hideWorkdeskRow,
   addWorkdeskRow,
   listEdits,

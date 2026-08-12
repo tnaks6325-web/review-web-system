@@ -1113,6 +1113,25 @@ router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
     res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req) }));
   } catch (err) { next(err); }
 });
+// 주문 행 삭제는 금액·정원·시트 주문값을 함께 바꾸므로 master/admin만 실행한다.
+// 첫 호출은 영향만 계산하고, 실제 삭제는 화면 확인 후 confirm:true가 있어야 한다.
+router.post('/workdesk/order-delete-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.previewWorkdeskOrderDelete({ sheetId, tabName, rowId });
+    res.status(out.ok ? 200 : 404).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, confirm } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    if (confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '삭제 영향 확인 후 다시 실행해 주세요.' });
+    const out = await svc.deleteWorkdeskOrderRow({ sheetId, tabName, rowId, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' ? 409 : 404)).json(out);
+  } catch (err) { next(err); }
+});
 // ── 편집 이력(감사) — master/admin 전체 · staff 담당 탭만 ──
 router.get('/workdesk/edits', authMiddleware, async (req, res, next) => {
   try {
