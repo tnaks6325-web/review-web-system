@@ -72,3 +72,8 @@ test('payment UI keeps the work list and selected-result panel side by side', ()
   assert.match(workdesk, /입금 대상자 수/);
   assert.match(workdesk, /선택 항목 서식 다운로드/);
 });
+
+test('transfer batch history appears directly below the payment summary cards', () => {
+  const paymentRender = workdesk.slice(workdesk.indexOf("$('#pmbody').innerHTML = `"), workdesk.indexOf('function _pmTargetTable'));
+  assert.ok(paymentRender.indexOf('<h2 class="pmh2">이체 회차</h2>') < paymentRender.indexOf('${_pmTargetTable(items)}'));
+});

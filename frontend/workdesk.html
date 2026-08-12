@@ -6779,12 +6779,12 @@ function _pmRender(){
         ${blocked.length?stat('⚠ 보류(계좌·은행)', blocked.length+'건','warn'):''}
         ${noMemo.length?stat('⚠ 통장표시 없음', noMemo.length+'건','warn'):''}
       </div>
+      <h2 class="pmh2">이체 회차</h2>
+      ${_pmBatchTable(STATE.pmBatches||[])}
       ${blocked.length?`<div class="pmnote">⚠ <b>보류 ${blocked.length}건</b>은 파일에서 빠집니다 — 아래에서 사유를 바로 보완할 수 있습니다.</div>`:''}
       ${noMemo.length?`<div class="pmnote">⚠ <b>통장표시가 없는 건 ${noMemo.length}건</b> — 이체는 되지만 리뷰어 통장에 이름이 안 찍힙니다.</div>`:''}
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
-      <h2 class="pmh2">이체 회차</h2>
-      ${_pmBatchTable(STATE.pmBatches||[])}
     </div>`;
 }
 
