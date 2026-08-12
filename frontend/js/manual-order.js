@@ -10,7 +10,7 @@
    ③은 **진짜 admin_token 보유자에게만** 노출한다 — 리뷰어앱 공고수정 스코프 토큰
    (via:'reviewer_campaign')은 이 API에 도달할 수 없어(403) 버튼을 보여주면 막다른 길이 된다.
 
-   사용: ManualOrder.open({ sheetId, tabName, gid, campaignId, title })
+   사용: ManualOrder.open({ sheetId, tabName, gid, campaignId, title, onSubmitted })
    ══════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -570,6 +570,7 @@
     // 목록/관제가 열려 있으면 갱신(있을 때만 — 없는 화면에서 조용히 무시)
     try { if (typeof loadTabDashboard === 'function') loadTabDashboard(); } catch (_) {}
     try { if (CTX && CTX.campaignId && typeof _loadCampControl === 'function') _loadCampControl(CTX.campaignId); } catch (_) {}
+    try { if ((Number(out.okCount) || 0) > 0 && typeof CTX.onSubmitted === 'function') CTX.onSubmitted(out); } catch (_) {}
   }
 
   window.ManualOrder = {

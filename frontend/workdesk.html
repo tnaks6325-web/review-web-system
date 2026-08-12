@@ -4149,6 +4149,7 @@ function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
+  const canExternalManualOrder=STATE.role==='master'||STATE.role==='admin';
   const canDeleteOrder=STATE.role==='master'||STATE.role==='admin';
   // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
@@ -4169,7 +4170,7 @@ function renderWorkdesk(wd){
       (canEdit?`<td>${canDeleteOrder&&r.hasOrder?`<button class="rdel" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${r.id}')">삭제</button>`:''}${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
       +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
     tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
-      ${canEdit?`<div id="addbox"></div><button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}
+      <div id="addbox"></div>${canExternalManualOrder?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}
       ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
   }
   const sot=wd.sourceOfTruth||'sheet';
@@ -5139,8 +5140,7 @@ function buildGrid(wd){
       ${_folBarHtml()}
       <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 우클릭</b>=그 셀 편집·복사·배경색 · <b>셀 드래그</b>=범위 선택(<b>Ctrl+드래그</b>=떨어진 범위 추가 · Ctrl+C 복사 · Ctrl+V 붙여넣기)`:` · <b>열람 전용</b> · 셀 드래그(Ctrl+드래그=범위 추가)+Ctrl+C=복사`}</span></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
-    <div id="addbox"></div>
-    ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
+    <div id="addbox"></div>${canOpenExternalManualOrder()?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
@@ -10263,25 +10263,23 @@ function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
   const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';
   const box=$('#addbox'); if(box){ box.innerHTML=`<div class="add" style="margin-top:10px"><label>숨김 참여자 (${wd.hiddenRows.length})</label>${list}</div>`; box.scrollIntoView({behavior:'smooth'}); }
 }
-function showAddForm(){ const box=$('#addbox'); if(!box)return;
-  box.innerHTML=`<div class="add" style="margin-top:10px">
-    <label>참여자 추가 (Track B 수동행)</label>
-    <div class="addgrid">
-      <input id="a_name" placeholder="참여자명">
-      <input id="a_phone" placeholder="연락처(끝 8자리 매칭)">
-      <input id="a_round" placeholder="차수">
-      <input id="a_opt" placeholder="옵션">
-    </div>
-    <button class="btn pri assignbtn" onclick="submitAdd()">추가</button>
-    <button class="btn" onclick="document.getElementById('addbox').innerHTML=''">취소</button>
-  </div>`;
-  box.scrollIntoView({behavior:'smooth'});
-}
-async function submitAdd(){ const t=STATE.cur; if(!t)return;
-  const body={sheetId:t.sheetId,tabName:t.tabName,reviewerName:$('#a_name').value.trim(),phone:$('#a_phone').value.trim(),round:$('#a_round').value.trim(),optionText:$('#a_opt').value.trim()};
-  if(!body.reviewerName&&!body.phone){ toast('참여자명 또는 연락처를 입력하세요'); return; }
-  const r=await api('/api/trackb/workdesk/add',{method:'POST',body:JSON.stringify(body)});
-  toast(r&&r.ok?'추가됨':'실패'); $('#addbox').innerHTML=''; reloadWorkdesk();
+function canOpenExternalManualOrder(){ return STATE.role==='master'||STATE.role==='admin'; }
+function openExternalManualOrder(){
+  const t=STATE.cur;
+  if(!t){ toast('작업을 먼저 선택해 주세요.'); return; }
+  if(!window.ManualOrder||typeof window.ManualOrder.open!=='function'){
+    toast('외부모집 수동제출 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+    return;
+  }
+  const meta=(STATE.wd&&STATE.wd.meta)||{};
+  window.ManualOrder.open({
+    sheetId:t.sheetId||'',
+    tabName:t.tabName||'',
+    gid:t.tabGid?String(t.tabGid):'',
+    campaignId:null, // 작업보드 탭 단위 진입: 참여형 정원 차감은 공고 화면에서만 처리
+    title:meta.displayName||t.displayName||t.tabName||'',
+    onSubmitted:()=>{ reloadWorkdesk().catch(()=>toast('제출 결과를 반영하지 못했습니다. 새로고침해 주세요.')); },
+  });
 }
 async function reloadWorkdesk(){ _clearCellUndoHistory(); const t=STATE.cur; if(!t)return;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
