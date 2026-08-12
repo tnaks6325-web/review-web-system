@@ -1388,6 +1388,7 @@ function switchAdminTab(tabName) {
    ══════════════════════════════════════════════════════════════ */
 
 let _woCache = [];   // 인박스 목록 캐시 (카드 버튼 핸들러에서 조회)
+let _woSelectedId = ""; // 시안형 수신목록에서 현재 집중 처리 중인 오더
 let _woBadgeTimer = null;     // 신규 오더 배지/알림 폴러
 const _WO_BADGE_POLL_MS = 2 * 60 * 1000; // 2분 (SSE 실시간의 폴백)
 const _WO_SEEN_KEY = "wo_notif_seen_v1"; // localStorage {오더id: 확인시각ms} — 미확인 알림은 재접속에도 유지
@@ -1413,10 +1414,72 @@ async function loadWorkOrders() {
       wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">오더가 없습니다.</div>';
       return;
     }
-    wrap.innerHTML = list.map(_renderWorkOrderCard).join("");
+    if (!list.some(order => String(order.id) === String(_woSelectedId))) {
+      _woSelectedId = String(list[0].id || "");
+    }
+    wrap.innerHTML = _renderWorkOrderWorkspace(list);
+    _bindWorkOrderWorkspace(wrap);
   } catch(e) {
     wrap.innerHTML = '<div style="text-align:center;color:#DC2626;padding:30px;font-size:.85rem">불러오기 실패: ' + escHtml(e.message) + '</div>';
   }
+}
+
+function _renderWorkOrderWorkspace(list) {
+  const selected = (list || []).find(order => String(order.id) === String(_woSelectedId)) || list[0];
+  if (!selected) return "";
+
+  const queue = list.map(order => {
+    const status = order.status || "submitted";
+    const [bg, fg] = WO_COLORS[status] || ["#F3F4F6", "#374151"];
+    const active = String(order.id) === String(selected.id);
+    return `<button type="button" data-wo-runtime-select="${escHtml(String(order.id))}" aria-pressed="${active}"
+      style="display:block;width:100%;padding:9px 10px;border:1px solid ${active ? "#B9CEF5" : "transparent"};border-radius:8px;background:${active ? "#fff" : "transparent"};box-shadow:${active ? "0 3px 10px rgba(24,49,87,.08)" : "none"};text-align:left;cursor:pointer">
+      <span style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
+        <b style="font-size:11px;line-height:1.35;color:#243247">${escHtml(order.title || "(제목 없음)")}</b>
+        <span style="flex:none;padding:2px 5px;border-radius:4px;background:${bg};color:${fg};font-size:9px;font-weight:800;white-space:nowrap">${WO_LABELS[status] || status}</span>
+      </span>
+      <span style="display:block;margin-top:3px;color:#718096;font-size:10px">${escHtml(order.created_by || "-")} · ${order.courier_proxy ? "택배발송대행" : (order.delivery_type || "배송유형 미지정")}</span>
+    </button>`;
+  }).join("");
+
+  return `<div class="wo-runtime-workspace" style="display:grid;grid-template-columns:214px minmax(0,1fr);min-height:620px;border:1px solid #D7E0EA;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 14px 38px rgba(28,43,68,.08)">
+    <aside style="padding:14px 10px;border-right:1px solid #E0E7F0;background:#FBFCFE">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:0 5px 10px">
+        <b style="font-size:13px;color:#243247">받은 오더</b>
+        <span style="color:#2469D8;font-size:11px;font-weight:800">${list.length}</span>
+      </div>
+      <div style="display:grid;gap:4px;max-height:72vh;overflow-y:auto">${queue}</div>
+      <p style="margin:14px 5px 0;padding-top:12px;border-top:1px solid #E0E7F0;color:#718096;font-size:10px;line-height:1.55">오더를 선택하면 상세 정보와 접수 동작을 한 화면에서 처리합니다.</p>
+    </aside>
+    <section style="min-width:0;padding:18px 20px 22px;background:#fff">
+      <header style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:13px">
+        <div>
+          <h3 style="margin:0;color:#172237;font-size:17px;letter-spacing:-.03em">${escHtml(selected.title || "(제목 없음)")}</h3>
+          <p style="margin:4px 0 0;color:#718096;font-size:11px">작업오더 원본을 확인하고 접수·수정·모집공고 생성을 이어서 처리합니다.</p>
+        </div>
+        <span style="flex:none;padding:4px 6px;border-radius:5px;background:#EDF4FF;color:#2469D8;font-size:10px;font-weight:800">선택 오더</span>
+      </header>
+      ${_renderWorkOrderCard(selected)}
+    </section>
+  </div>`;
+}
+
+function woRuntimeSelect(id) {
+  _woSelectedId = String(id || "");
+  const wrap = document.getElementById("woListWrap");
+  if (wrap && _woCache.length) {
+    wrap.innerHTML = _renderWorkOrderWorkspace(_woCache);
+    _bindWorkOrderWorkspace(wrap);
+  }
+}
+
+function _bindWorkOrderWorkspace(wrap) {
+  if (!wrap) return;
+  wrap.querySelectorAll("[data-wo-runtime-select]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      woRuntimeSelect(button.dataset.woRuntimeSelect || "");
+    });
+  });
 }
 
 // ── 대시보드: 작업오더 간편보기 (최신 4건, 카드별 펼쳐보기) ──
@@ -1556,24 +1619,24 @@ function _renderWorkOrderCard(o) {
     ? `<div style="margin-top:4px;font-size:.74rem;color:#991B1B"><b>메모:</b> ${escHtml(o.admin_memo)}</div>` : "";
   const woChatReg = !!(o.chat_room_url && String(o.chat_room_url).trim());
 
-  return `<div style="border:1.5px solid #E5E7EB;border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff">
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  return `<div class="wo-runtime-card" style="border:1px solid #D7E0EA;border-radius:12px;padding:12px 14px;margin-bottom:10px;background:#fff;box-shadow:0 4px 14px rgba(28,43,68,.05)">
+    <div class="wo-runtime-card__heading" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button onclick="woToggleDetail('${o.id}',this)" style="font-size:.72rem;font-weight:700;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
       <span style="font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${fg}">${WO_LABELS[st]||st}</span>
       <b style="font-size:.92rem;color:#111827">${escHtml(o.title||"")}</b>
       <span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by||"-")} · ${date}</span>
     </div>
-    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:.78rem;color:#374151">
-      ${o.recruit_count ? `<span><b style="color:#6B7280">모집</b> ${Number(o.recruit_count).toLocaleString()}명</span>`:""}
-      ${o.delivery_type ? `<span><b style="color:#6B7280">배송</b> ${escHtml(o.delivery_type)}${o.courier_proxy?"·택배대행":""}</span>`:""}
-      ${o.pay_amount ? `<span><b style="color:#6B7280">구입비</b> ${Number(o.pay_amount).toLocaleString()}원</span>`:""}
-      ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
+    <div class="wo-runtime-card__summary" style="margin-top:9px;display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:1px;border:1px solid #E3EAF2;border-radius:8px;overflow:hidden;background:#E3EAF2;font-size:.76rem;color:#374151">
+      ${o.recruit_count ? `<span style="padding:7px 9px;background:#fff"><b style="color:#6B7280">모집</b> ${Number(o.recruit_count).toLocaleString()}명</span>`:""}
+      ${o.delivery_type ? `<span style="padding:7px 9px;background:#fff"><b style="color:#6B7280">배송</b> ${escHtml(o.delivery_type)}${o.courier_proxy?"·택배대행":""}</span>`:""}
+      ${o.pay_amount ? `<span style="padding:7px 9px;background:#fff"><b style="color:#6B7280">구입비</b> ${Number(o.pay_amount).toLocaleString()}원</span>`:""}
+      ${o.start_date ? `<span style="padding:7px 9px;background:#fff"><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
     </div>
     <div id="woDetail_${o.id}" style="display:none">
       <div style="margin-top:10px">${_woDetailHtml(o)}</div>
       <div id="woMemoLog_${o.id}" style="margin-top:6px">${_woMemoLogInner(o)}</div>
     </div>
-    <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
+    <div class="wo-runtime-card__actions" style="margin-top:10px;border-top:1px solid #E5EAF1;padding-top:10px">
       <!-- 카톡 팀채팅방URL 등록 -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)" ${woChatReg ? "readonly" : ""}
