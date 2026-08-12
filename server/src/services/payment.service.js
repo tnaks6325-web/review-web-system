@@ -97,6 +97,20 @@ async function listPaymentTargets(opts = {}) {
     `NOT (ri.is_submitted2 = 'PAID' OR EXISTS (
         SELECT 1 FROM jsonb_each_text(COALESCE(ri.row_json, '{}'::jsonb)) kv
          WHERE kv.key ILIKE ANY($1) AND btrim(kv.value) <> ''))`,
+    // 작업보드에서 수동으로 `8/11`을 입력한 행은 실제 입금완료로 간주한다.
+    // 취소·공란·오류 문구는 제외하지 않으며, participant seq로 같은 행만 연결한다.
+    `NOT EXISTS (
+        SELECT 1
+          FROM campaign_participants cp
+          JOIN participant_edits pe
+            ON pe.sheet_id = cp.sheet_id AND pe.tab_name = cp.tab_name
+           AND ((pe.anchor_type = 'order' AND cp.order_submission_id::text = pe.anchor_value)
+             OR (pe.anchor_type = 'manual' AND cp.id::text = pe.anchor_value)
+             OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+         WHERE cp.sheet_id = ri.sheet_id AND cp.tab_name = ri.tab_name
+           AND cp.seq = ri.row_index AND cp.deleted_at IS NULL AND cp.active = TRUE
+           AND pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
+           AND btrim(pe.value_text) = '8/11')`,
     // ★ 다운로드 이력 잠금 — 살아있는 회차 항목이 있으면 제외
     `NOT EXISTS (
         SELECT 1 FROM payment_batch_items pi
