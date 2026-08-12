@@ -1532,9 +1532,9 @@ function participationCheckErrors() {
   const errs = [];
   const tabKey = document.getElementById("rf_linked_tab")?.value || "";
   const tabMeta = _recruitTabList.find(x => x.key === tabKey);
-  // 작업오더에서 연 공고는 서버가 접수된 무시트 작업표를 연결한다. 이 화면에서
-  // 과거 시트/탭을 다시 고르도록 막으면 정상적인 작업오더→공고 흐름이 멈춘다.
-  if ((!tabKey || !(tabMeta && tabMeta.tabGid)) && !_woPrefillOrderId) errs.push("시트 탭 연결(gid 포함)이 필요해요");
+  // 시트 미연결 공고는 허용한다. 다만 연결을 선택했다면 탭 gid까지 완성되어야
+  // 리네임·시트쓰기 대상이 엇갈리지 않는다.
+  if (tabKey && !(tabMeta && tabMeta.tabGid)) errs.push("선택한 시트 탭의 gid를 확인해주세요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
@@ -1551,8 +1551,10 @@ function renderPartCheck() {
   const _ws = document.getElementById("rf_window_start")?.value || "";
   const _we = document.getElementById("rf_window_end")?.value || "";
   const items = [
-    { label: _woPrefillOrderId ? "작업오더 작업표 자동 연결" : "시트 탭 연결됨 (gid)",
-      fail: errs.some(e => e.includes("탭 연결")) },
+    {
+      label: tabKey ? "시트 탭 연결됨 (gid)" : "시트 탭 미연결 — 나중에 추가 가능",
+      fail: errs.some(e => e.includes("gid")),
+    },
     { label: (!_ws && !_we) ? "구매시간 미설정 = 자율주문(종일 오픈)" : "구매시간 입력됨 (시작 < 종료)",
       fail: errs.some(e => e.includes("구매시간")) },
     { label: "하루 진행 인원 입력됨", fail: errs.some(e => e.includes("하루 진행")) },

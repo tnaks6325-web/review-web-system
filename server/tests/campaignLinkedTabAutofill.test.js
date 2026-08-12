@@ -45,7 +45,7 @@ ok('★ 조회 실패는 null — 보정 실패가 저장을 막지 않는다(fa
 ok('★ 생성 시 게이트 판정 전에 보정한다(순서가 뒤면 게시가 계속 막힘)',
   /연결탭 자동 보정\(생성\)[\s\S]{0,400}_participationActivationErrors\(\{/.test(rt));
 ok('생성 게이트가 보정값을 본다',
-  /linked_sheet_id: lSheet, linked_tab_gid: lGid, window_start, window_end, daily_limit/.test(rt));
+  /linked_sheet_id: lSheet, linked_tab_name: lTab, linked_tab_gid: lGid, window_start, window_end, daily_limit/.test(rt));
 ok('생성 INSERT에 보정값이 들어간다', /lSheet \|\| '',\s*\n\s*lTab \|\| '',\s*\n\s*lGid \|\| '',/.test(rt));
 ok('★ 본문에 값이 있으면 보정하지 않는다(관리자 선택 우선)',
   /if \(!intentionallyUnlinked && \(!lSheet \|\| !lTab\)\) \{/.test(rt));
@@ -58,7 +58,7 @@ ok('★ DB에 이미 연결돼 있으면 건드리지 않는다',
 ok('정방향 링크가 없으면 역방향(linked_campaign_id)으로도 찾는다',
   /SELECT id FROM work_orders\s*\n\s*WHERE linked_campaign_id = \$1 AND deleted_at IS NULL/.test(rt));
 ok('수정 게이트·UPDATE 모두 보정값 사용',
-  /linked_sheet_id: pick\(lSheet, cur\[0\]\.linked_sheet_id\)/.test(rt)
+  /linked_sheet_id: intentionallyUnlinked \? '' : pick\(lSheet, cur\[0\]\.linked_sheet_id\)/.test(rt)
   && /lSheet, lTab, lGid,\s*\/\/ ★ 자동 보정값/.test(rt));
 
 /* ═══ 마이그레이션(기존 공고 백필) ═══ */

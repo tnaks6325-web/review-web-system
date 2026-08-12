@@ -73,6 +73,13 @@ test('toggling a work preserves the work-list scroll position and exposes the se
   assert.match(workdesk, /선택 작업 \$\{selectedKeys\.size\}개/);
 });
 
+test('a transfer result can be reopened from its batch row without opening a file picker', () => {
+  const openResult = sourceOf('_pmOpenResult');
+  assert.match(openResult, /result-preview/);
+  assert.doesNotMatch(openResult, /_pmPickResult/);
+  assert.match(workdesk, /onclick="_pmOpenResult\(\$\{i\}\)"/);
+});
+
 test('payment UI keeps the work list and selected-result panel side by side', () => {
   assert.match(workdesk, /class="pmselectionlayout"/);
   assert.match(workdesk, /입금 대상자 수/);

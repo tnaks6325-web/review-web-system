@@ -31,7 +31,7 @@ ok('서버는 연결 없음 요청일 때 작업오더 자동 연결을 하지 �
   /const intentionallyUnlinked = linked_tab_mode === 'unlinked'/.test(routes)
   && /if \(!intentionallyUnlinked && \(!lSheet \|\| !lTab\)\)/.test(routes));
 ok('수정 저장에서 명시적 연결 해제가 기존 연결을 비운다',
-  /linked_sheet_id = CASE WHEN \$42::boolean THEN '' ELSE COALESCE\(\$17, linked_sheet_id\) END/.test(routes)
-  && /linked_tab_name = CASE WHEN \$42::boolean THEN '' ELSE COALESCE\(\$18, linked_tab_name\) END/.test(routes));
+  /linked_sheet_id = CASE WHEN \$45::boolean THEN '' ELSE COALESCE\(\$17, linked_sheet_id\) END/.test(routes)
+  && /linked_tab_name = CASE WHEN \$45::boolean THEN '' ELSE COALESCE\(\$18, linked_tab_name\) END/.test(routes));
 
 console.log(`\ncampaignSheetlessSave: ${passed} passed`);
