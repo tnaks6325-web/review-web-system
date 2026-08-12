@@ -1442,26 +1442,77 @@ function _renderWorkOrderWorkspace(list) {
     </button>`;
   }).join("");
 
-  return `<div class="wo-runtime-workspace" style="display:grid;grid-template-columns:214px minmax(0,1fr);min-height:620px;border:1px solid #D7E0EA;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 14px 38px rgba(28,43,68,.08)">
-    <aside style="padding:14px 10px;border-right:1px solid #E0E7F0;background:#FBFCFE">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin:0 5px 10px">
-        <b style="font-size:13px;color:#243247">받은 오더</b>
-        <span style="color:#2469D8;font-size:11px;font-weight:800">${list.length}</span>
+  return `<div class="wo-runtime-workspace" style="display:grid;grid-template-columns:232px minmax(0,1fr) 276px;min-height:780px;border:1px solid #D7E0EA;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 17px 48px rgba(0,0,0,.1)">
+    <aside class="wo-runtime-workspace__queue" style="padding:18px 12px;border-right:1px solid #DFE6EF;background:#FBFCFE">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:0 6px 12px">
+        <b style="font-size:14px;color:#172237">받은 오더</b>
+        <span style="color:#2469D8;font-size:11px;font-weight:900">${list.length}</span>
       </div>
-      <div style="display:grid;gap:4px;max-height:72vh;overflow-y:auto">${queue}</div>
-      <p style="margin:14px 5px 0;padding-top:12px;border-top:1px solid #E0E7F0;color:#718096;font-size:10px;line-height:1.55">오더를 선택하면 상세 정보와 접수 동작을 한 화면에서 처리합니다.</p>
+      <div style="display:flex;gap:4px;margin:0 5px 10px"><button type="button" style="padding:5px 6px;border:0;border-radius:5px;background:#EDF4FF;color:#2469D8;font-size:10px;font-weight:850">전체</button><span style="padding:5px 3px;color:#65728A;font-size:10px;font-weight:850">선택하여 검토</span></div>
+      <div style="display:grid;gap:5px;max-height:68vh;overflow-y:auto">${queue}</div>
+      <p style="margin:18px 6px 0;padding:11px 0 0;border-top:1px solid #DFE6EF;color:#65728A;font-size:10px;line-height:1.55"><b style="color:#172237">원본 수정은 인트라넷에서</b><br>계약·광고주·상품·배송·주말제외 정보는 이 화면에서 바꾸지 않습니다.</p>
     </aside>
-    <section style="min-width:0;padding:18px 20px 22px;background:#fff">
-      <header style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:13px">
-        <div>
-          <h3 style="margin:0;color:#172237;font-size:17px;letter-spacing:-.03em">${escHtml(selected.title || "(제목 없음)")}</h3>
-          <p style="margin:4px 0 0;color:#718096;font-size:11px">작업오더 원본을 확인하고 접수·수정·모집공고 생성을 이어서 처리합니다.</p>
-        </div>
-        <span style="flex:none;padding:4px 6px;border-radius:5px;background:#EDF4FF;color:#2469D8;font-size:10px;font-weight:800">선택 오더</span>
-      </header>
-      ${_renderWorkOrderCard(selected)}
+    <section class="wo-runtime-workspace__detail" style="min-width:0;padding:22px 24px 30px;background:#fff;overflow-y:auto">
+      ${_renderWorkOrderWorkspaceDetail(selected)}
     </section>
+    ${_renderWorkOrderWorkspaceActions(selected)}
   </div>`;
+}
+
+function _woParityText(value, fallback) {
+  const text = value == null || String(value).trim() === "" ? (fallback || "—") : String(value);
+  return escHtml(text);
+}
+
+function _woParityDate(value) {
+  const text = String(value || "").replace("T", " ").trim();
+  return text ? escHtml(text.substring(0, 16)) : "—";
+}
+
+function _woParityRow(label, value) {
+  return `<div style="display:grid;grid-template-columns:150px minmax(0,1fr);min-height:42px;border-top:1px solid #DFE6EF"><div style="display:flex;align-items:center;padding:8px 12px;background:#FBFCFE;color:#45536A;font-size:11px;font-weight:850">${label}</div><div style="display:flex;align-items:center;min-width:0;padding:5px 8px"><div style="display:flex;align-items:center;width:100%;min-height:30px;padding:0 8px;border:1px solid #D6E0ED;border-radius:6px;background:#F7F9FC;color:#536179;font-size:11px;word-break:break-word">${value}</div></div></div>`;
+}
+
+function _renderWorkOrderWorkspaceDetail(o) {
+  const sourceId = o.source_review_order_id || o.id || "—";
+  const sourceRevision = o.source_revision || 1;
+  const advertiserName = o.intranet_advertiser_name || "광고주 원본 정보 없음";
+  const advertiserId = o.intranet_advertiser_id || "연결 대기";
+  const contract = o.contract_number || o.sales_id || "계약건 미연결";
+  const manager = (typeof _woManagerLabel === "function" ? _woManagerLabel(o.work_manager || o.manager_name) : (o.work_manager || o.manager_name)) || "담당자 미지정";
+  const weekend = o.skip_weekends === true
+    ? '<b style="margin-right:7px;color:#2469D8">주말 제외</b>카드 노출 · 신청 차단 · 월요일 재개'
+    : '주말 포함 · 주말에도 신청 가능';
+  const products = typeof _woProductLines === "function" ? _woProductLines(o) : (o.product_option || "상품 정보 없음");
+  const productLine = String(products || "상품 정보 없음").split(/\r?\n/)[0];
+  const payment = o.pay_amount ? Number(o.pay_amount).toLocaleString() + "원" : "결제금액 미입력";
+  const recruit = o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : "제한 없음";
+  const daily = o.daily_count_text || (o.daily_count ? Number(o.daily_count).toLocaleString() + "건" : "제한 없음");
+  const delivery = o.courier_proxy ? "택배발송대행 · 송장 입력 자동 적용" : (o.delivery_type || "배송유형 미지정");
+  const purchase = o.purchase_time || "자유시간대";
+  const inflow = o.inflow_type === "link" ? "링크유입 · 진행상품 URL 자동 연동" : "가이드유입 · 유입가이드 표시";
+  const campaignState = o.linked_campaign_id ? "모집공고 연결 완료" : "모집공고 초안 생성 가능";
+
+  return `<header style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px"><div><h2 style="margin:0;color:#172237;font-size:18px;letter-spacing:-.045em">${_woParityText(o.title, "(제목 없음)")}</h2><p style="margin:3px 0 0;color:#65728A;font-size:11px">원본 ${_woParityText(sourceId)} · 마지막 반영 ${_woParityDate(o.updated_at || o.created_at)}</p></div><span style="padding:5px 7px;border-radius:5px;background:#EDF4FF;color:#2469D8;font-size:10px;font-weight:900;white-space:nowrap">원본 v${_woParityText(sourceRevision)}</span></header>
+    <section style="margin-top:0"><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0;font-size:14px;color:#172237">연결 기준</h3><span style="color:#65728A;font-size:10px">리뷰오더 원본 · 읽기 전용</span></div><div style="overflow:hidden;border:1px solid #DFE6EF;border-radius:11px">${_woParityRow('계약건', '<b style="margin-right:7px;color:#2469D8">확인됨</b>' + _woParityText(contract))}${_woParityRow('광고주', '<b style="margin-right:7px;color:#2469D8">원본</b>' + _woParityText(advertiserName) + ' · ID ' + _woParityText(advertiserId))}${_woParityRow('담당자 / 시작일', _woParityText(manager) + ' · 모집 시작 ' + _woParityDate(o.start_date))}${_woParityRow('주말 포함 여부', weekend)}</div></section>
+    <section style="margin-top:21px"><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0;font-size:14px;color:#172237">진행상품 · 구매</h3><span style="color:#65728A;font-size:10px">모집공고 상품 설정으로 그대로 전달</span></div><div style="overflow:hidden;border:1px solid #DFE6EF;border-radius:11px"><div style="display:grid;grid-template-columns:minmax(190px,1.9fr) minmax(110px,1fr) 82px 54px;gap:6px;align-items:center;padding:7px 10px;border-bottom:1px solid #DFE6EF;background:#F7F9FC;color:#96A4B7;font-size:9px;font-weight:850"><span>상품 / 옵션</span><span>URL</span><span style="text-align:right">결제금액</span><span style="text-align:right">모집</span></div><div style="display:grid;grid-template-columns:minmax(190px,1.9fr) minmax(110px,1fr) 82px 54px;gap:6px;align-items:center;padding:9px 10px;border-bottom:1px solid #EDF1F6;font-size:11px"><b>${_woParityText(productLine)}</b><span style="display:inline-flex;justify-content:center;padding:3px 5px;border:1px solid #C5DAFB;border-radius:4px;background:#EDF4FF;color:#2469D8;font-size:9px;font-weight:850">상품 메인 URL</span><span style="text-align:right">${_woParityText(payment)}</span><span style="text-align:right">${_woParityText(recruit)}</span></div>${_woParityRow('옵션 / 일건수', _woParityText(String(products || "옵션 없음").replace(/\r?\n/g, ' · ')) + ' · 일 ' + _woParityText(daily))}${_woParityRow('구매채널 / 시간', _woParityText(o.channel || o.purchase_channel, '구매채널 미지정') + ' · ' + _woParityText(purchase))}${_woParityRow('배송유형', '<b style="margin-right:7px;color:#2469D8">' + _woParityText(delivery) + '</b>')}${_woParityRow('유입방식', _woParityText(inflow))}</div><div style="margin-top:8px;padding:10px;border:1px solid #CBDCF8;border-radius:8px;background:#EDF4FF;color:#4E6F9F;font-size:10px"><b style="color:#2469D8">작업보드 반영</b> · 택배발송대행이면 참여자 작업보드에 송장번호 입력 열이 자동 포함됩니다.</div></section>
+    <section style="margin-top:21px"><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0;font-size:14px;color:#172237">접수 후 연결</h3><span style="color:#65728A;font-size:10px">중복 광고주를 만들지 않고 원본 키로 연결합니다.</span></div><div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:5px"><div style="min-height:58px;padding:8px;border:1px solid #A9C4F6;border-radius:8px;background:#EDF4FF"><strong style="display:block;font-size:10px">작업오더</strong><span style="display:block;margin-top:3px;color:#65728A;font-size:9px">${_woParityText(o.id || sourceId)} · 접수</span></div><span style="color:#9CAEC8;font-size:15px">→</span><div style="min-height:58px;padding:8px;border:1px solid #D9E3F0;border-radius:8px;background:#fff"><strong style="display:block;font-size:10px">광고주 작업</strong><span style="display:block;margin-top:3px;color:#65728A;font-size:9px">${o.advertiser_id ? '원본 광고주 연결 완료' : '접수 시 원본 키로 생성·연결'}</span></div><span style="color:#9CAEC8;font-size:15px">→</span><div style="min-height:58px;padding:8px;border:1px solid #D9E3F0;border-radius:8px;background:#fff"><strong style="display:block;font-size:10px">모집공고 초안</strong><span style="display:block;margin-top:3px;color:#65728A;font-size:9px">${campaignState}</span></div></div></section>`;
+}
+
+function _renderWorkOrderWorkspaceActions(o) {
+  const status = o.status || "submitted";
+  const accepted = ['reviewing', 'await_chatroom', 'published', 'done'].includes(status);
+  const chatRegistered = !!(o.chat_room_url && String(o.chat_room_url).trim());
+  const nexts = WO_TRANSITIONS[status] || [];
+  const transitions = nexts.map(next => `<button type="button" onclick="woTransition('${o.id}','${next}')" style="width:100%;min-height:33px;margin-top:7px;padding:7px 10px;border:1px solid #D6DFEB;border-radius:7px;background:#fff;color:#42516A;font-size:11px;font-weight:850;text-align:left;cursor:pointer">상태 변경 · ${WO_LABELS[next] || next}</button>`).join("");
+  const acceptButton = accepted
+    ? '<button type="button" disabled style="width:100%;min-height:33px;margin-top:10px;padding:7px 10px;border:1px solid #6EE7B7;border-radius:7px;background:#E9F7F1;color:#14775E;font-size:11px;font-weight:850">접수 완료</button>'
+    : `<button type="button" id="woAcceptBtn_${o.id}" onclick="woAccept('${o.id}')" style="width:100%;min-height:33px;margin-top:10px;padding:7px 10px;border:1px solid #2469D8;border-radius:7px;background:#2469D8;color:#fff;font-size:11px;font-weight:850;cursor:pointer">접수하고 광고주 작업 연결</button>`;
+  const campaignButton = o.linked_campaign_id
+    ? `<button type="button" onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="width:100%;min-height:33px;margin-top:9px;padding:7px 10px;border:1px solid #BCE4D5;border-radius:7px;background:#E9F7F1;color:#14775E;font-size:11px;font-weight:850;text-align:left;cursor:pointer">연결된 모집공고 보기</button>`
+    : `<button type="button" onclick="woCreateCampaignGuarded('${o.id}')" style="width:100%;min-height:33px;margin-top:9px;padding:7px 10px;border:1px solid #D6DFEB;border-radius:7px;background:#fff;color:#42516A;font-size:11px;font-weight:850;text-align:left;cursor:pointer">모집공고 초안 만들기</button>`;
+  const weekendPass = o.skip_weekends === true ? '주말제외 값 확인' : '주말 포함 · 게시 가능';
+  return `<aside class="wo-runtime-workspace__actions" style="padding:20px 16px;border-left:1px solid #DFE6EF;background:#FBFCFE"><h2 style="margin:0;font-size:14px;color:#172237">접수 판단</h2><p style="margin:3px 0 12px;color:#65728A;font-size:10px">원본과 연결 상태를 확인한 뒤 접수를 실행합니다.</p><section style="padding:12px;border:1px solid #CBDCF8;border-radius:10px;background:#EDF4FF"><strong style="font-size:11px">현재 상태 · ${_woParityText(WO_LABELS[status] || status)}</strong><p style="margin:4px 0 0;color:#587198;font-size:10px">광고주 원본 키가 있으면 기존 광고주를 찾고, 없을 때만 안전하게 생성합니다.</p>${acceptButton}</section><section style="display:grid;gap:7px;margin-top:13px;padding:11px;border:1px solid #DFE6EF;border-radius:9px;background:#fff"><h3 style="margin:0;font-size:11px">접수 전 점검</h3><div style="font-size:10px;color:#566780">✓ 계약·광고주 원본 키 확인</div><div style="font-size:10px;color:#566780">✓ ${_woParityText(weekendPass)}</div><div style="font-size:10px;color:#566780">✓ ${o.courier_proxy ? '택배발송대행 · 송장 열 적용' : '배송유형 확인'}</div><div style="font-size:10px;color:#566780">✓ ${o.linked_campaign_id ? '모집공고 연결됨' : '모집공고 초안 대기'}</div></section><section style="margin-top:12px;padding:11px;border:1px solid #DFE6EF;border-radius:9px;background:#fff"><h3 style="margin:0;font-size:11px">처리 메모</h3><div style="display:grid;gap:6px;margin-top:8px"><input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url || '')}" placeholder="팀채팅방 URL" ${chatRegistered ? 'readonly' : ''} style="width:100%;min-height:30px;padding:0 8px;border:1px solid #D6E0ED;border-radius:6px;font-size:10px"><button id="woChatBtn_${o.id}" data-reg="${chatRegistered ? 1 : 0}" type="button" onclick="woToggleChat('${o.id}')" style="min-height:30px;border:1px solid #D6DFEB;border-radius:6px;background:#fff;color:#42516A;font-size:10px;font-weight:850;cursor:pointer">${chatRegistered ? '팀채팅방 수정' : '팀채팅방 등록'}</button><input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo || '')}" placeholder="처리 메모 / 보완 사유" style="width:100%;min-height:30px;padding:0 8px;border:1px solid #D6E0ED;border-radius:6px;font-size:10px"><button type="button" onclick="woSendMemo('${o.id}')" style="min-height:30px;border:1px solid #D6DFEB;border-radius:6px;background:#fff;color:#42516A;font-size:10px;font-weight:850;cursor:pointer">인트라넷에 메모 전송</button></div></section><section style="margin-top:12px;padding:11px;border:1px solid #DFE6EF;border-radius:9px;background:#fff"><h3 style="margin:0;font-size:11px">접수 후 가능한 행동</h3><p style="margin:4px 0 0;color:#65728A;font-size:10px;line-height:1.55">동일 작업은 광고주 작업과 모집공고 초안에 같은 원본 식별자로 연결됩니다.</p>${campaignButton}<button type="button" onclick="woAdminEdit('${o.id}')" style="width:100%;min-height:33px;margin-top:7px;padding:7px 10px;border:1px solid #D6DFEB;border-radius:7px;background:#fff;color:#42516A;font-size:11px;font-weight:850;text-align:left;cursor:pointer">작업오더 수정</button>${transitions}</section><button type="button" onclick="woDelete('${o.id}')" style="width:100%;min-height:30px;margin-top:12px;padding:6px 10px;border:1px solid #F1D6B6;border-radius:7px;background:#FFF4E7;color:#8A591C;font-size:10px;font-weight:850;text-align:left;cursor:pointer">작업오더 삭제</button></aside>`;
 }
 
 function woRuntimeSelect(id) {
