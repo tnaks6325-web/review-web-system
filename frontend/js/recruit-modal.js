@@ -26,7 +26,7 @@
 (function () {
   'use strict';
   var HTML = `<div id="recruitModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box rf-box" style="max-width:1280px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
+  <div class="modal-box rf-box" style="max-width:1060px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="modal-header">
       <h3 id="recruitModalTitle"><i class="fas fa-bullhorn"></i> 모집공고 등록</h3>
       <button class="btn-icon-sm" onclick="closeRecruitModal()"><i class="fas fa-times"></i></button>
@@ -35,14 +35,16 @@
          미리보기를 아래로 쌓으면 입력란이 화면 밖으로 밀려 "고치면서 확인"이 안 된다 — 옆으로.
          좁은 화면은 CSS가 레일을 접고 세로로 되돌린다. -->
     <div class="rf-split">
-      <nav class="rf-rail">
-        <div class="rf-rail-t">섹션 <span style="font-weight:600;letter-spacing:0">— ⠿ 끌어서 배치</span></div>
-        <div id="rfRailList"></div>
-        <div class="rf-rtip">● 필수 미입력 · ⚠ 경고 · ✓ 입력됨<br>레일에서 끌면 본문 순서가 함께 바뀌고, 이 브라우저의 내 화면에 저장됩니다.</div>
-        <div class="rf-rpre">
-          <button type="button" class="rf-rpbtn" onclick="RecruitModal.preset('default')">↺ 기본 순서(발행 흐름)</button>
-          <button type="button" class="rf-rpbtn" onclick="RecruitModal.preset('edit')">✏️ 수정 최적화</button>
+      <nav class="rf-rail" aria-label="모집공고 편집 단계">
+        <div class="rf-rail-t">모집공고 편집<span>현재 단계가 자동으로 바뀝니다.</span></div>
+        <div id="rfRailList" class="rf-step-list">
+          <button type="button" class="rf-step on" data-rf-step="link"><span class="rf-step-no">1</span><span>연결 · 기본</span><span class="rf-rmk" data-mk="link"></span></button>
+          <button type="button" class="rf-step" data-rf-step="prod"><span class="rf-step-no">2</span><span>진행상품</span><span class="rf-rmk" data-mk="prod"></span></button>
+          <button type="button" class="rf-step" data-rf-step="cond"><span class="rf-step-no">3</span><span>모집 조건</span><span class="rf-rmk" data-mk="cond"></span></button>
+          <button type="button" class="rf-step" data-rf-step="fee"><span class="rf-step-no">4</span><span>리뷰비 · 입금</span><span class="rf-rmk" data-mk="fee"></span></button>
+          <button type="button" class="rf-step" data-rf-step="work"><span class="rf-step-no">5</span><span>작업내용</span><span class="rf-rmk" data-mk="work"></span></button>
         </div>
+        <div id="rf_side_audit" class="rf-side-audit"><div class="rf-side-audit-head"><span>자동 점검</span><strong id="rf_side_audit_score">–</strong></div><div id="rf_part_check"></div></div>
       </nav>
       <div class="rf-main">
     <div class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0">
@@ -116,6 +118,8 @@
           <button type="button" class="rchan-btn" onclick="rfLegacyConvert()" style="white-space:nowrap">⚡ 참여형으로 전환</button>
         </div>
       </div>
+      <!-- 일반 공고도 리뷰타입·안내배지·썸네일 설정은 유지한다. 참여형일 때는 진행상품 안으로 이동한다. -->
+      <div id="rf_legacy_product_settings_slot"></div>
 
       <!-- ═══ 📦 진행상품 · 옵션 (참여형 전용 · 표가 정원의 진실원본) ═══ -->
       <div class="rf-card" data-sec="prod" data-part-only style="display:none">
@@ -147,6 +151,7 @@
           <textarea id="rf_wd_product" style="display:none"></textarea>
           <input id="rf_daily_limit" type="hidden" value="">
           <input id="rf_recruit_total" type="hidden" value="">
+          <div id="rf_product_settings_slot"></div>
         </div>
         </div>
       </div>
@@ -277,8 +282,8 @@
       </div>
 
       <!-- ═══ 🛍 상품 정보 (리뷰타입·배지·URL·썸네일 — 레거시 공고에도 적용되는 상시 카드) ═══ -->
-      <div class="rf-card" data-sec="info">
-        <div class="rf-ch"><span class="rf-ct">🛍 상품 정보</span><span class="rf-cn">리뷰타입 · 안내배지 · URL · 썸네일</span></div>
+      <section class="rf-product-settings" data-product-settings>
+        <div class="rf-product-settings-head"><span>상품 설정</span></div>
         <div class="rf-cb">
       <!-- 리뷰타입 (★ 087) — 값 목록의 단일 출처는 server/src/utils/reviewType.js.
            data-val 은 **표준 key**라 서버 저장값과 그대로 왕복한다(라벨은 화면 표기 전용).
@@ -357,7 +362,7 @@
           </div>
         </div></div>
         </div>
-      </div>
+      </section>
 
       <!-- ═══ 📝 작업내용 (참여형 전용 — id=rf_work_section 을 카드 자체에 둬 기존 토글 계약 유지) ═══ -->
       <div class="rf-card" data-sec="work" id="rf_work_section" style="display:none">
@@ -399,11 +404,11 @@
       </div>
 
       <!-- ═══ ✅ 게시 · 자동 점검 (고정 맨 아래 — 저장 버튼 직전 확인) ═══ -->
-      <div class="rf-card" data-sec="pub">
+      <div class="rf-card rf-publish-card" data-sec="pub">
         <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">✅ 게시 · 자동 점검</span><span class="rf-cn">제목 · 유의사항 · 상태 — 저장 직전 확인</span></div>
         <div class="rf-cb">
-      <div class="rf-hrow"><span class="rf-hl">공고 제목 <span class="rform-req">*</span></span>
-        <input id="rf_title" type="text" class="rform-input" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></div>
+      <div class="rf-hrow rf-title-row"><span class="rf-hl">공고 제목 <span class="rform-req">*</span></span>
+        <div class="rf-title-control"><input id="rf_title" type="text" class="rform-input" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"><div id="rf_status_buttons" class="rf-status-buttons"><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div></div></div>
       <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유의사항</span>
         <div>
           <textarea id="rf_notes" class="rform-input" rows="2"
@@ -411,9 +416,9 @@
           <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">공고 카드에 노출되는 안내문</div>
           <div id="rf_clean_notes"></div>
         </div></div>
-      <div class="rf-grid2">
-        <div class="rf-hrow"><span class="rf-hl">상태</span>
-          <select id="rf_status" class="rform-input">
+      <div class="rf-grid2 rf-publish-legacy-fields">
+        <div class="rf-hrow" style="display:none"><span class="rf-hl">상태</span>
+          <select id="rf_status" class="rform-input" onchange="RecruitModal.syncStatusButtons()">
             <option value="draft">임시저장</option>
             <option value="active">모집중</option>
             <option value="closed">마감</option>
@@ -434,10 +439,7 @@
         </div>
       </div>
       <!-- 게시 전 자동 점검 — 참여형 전용(레거시 공고엔 점검 항목이 없다) -->
-      <div data-part-only style="margin-top:8px;border-top:1px solid var(--border,#EDF1F6);padding-top:8px">
-        <div style="font-size:.76rem;font-weight:800;margin-bottom:6px">🧮 게시 전 자동 점검</div>
-        <div id="rf_part_check" style="display:flex;flex-direction:column;gap:5px"></div>
-      </div>
+      <div data-part-only class="rf-publish-check-note">자동 점검 결과는 왼쪽 하단에서 확인합니다.</div>
       <!-- 참여형 여부(기본 ON) — v2에서 스위치 UI 를 없앴다. 값은 이 hidden 체크박스가 계속 들고 있어
            저장 페이로드·서버 분기·프리필(index-recruit.js)이 전부 무변경으로 동작한다. -->
       <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
@@ -842,7 +844,90 @@
 #igLightbox .iglb-close:hover{background:#2A3750}
 #igLightbox .iglb-close:focus-visible{outline:3px solid rgba(147,180,245,.6);outline-offset:2px}
 #igLightbox .iglb-fld{font-size:.68rem;font-weight:800;color:#93B4F5;letter-spacing:.03em}
-#igLightbox .iglb-tip{font-size:.62rem;color:#7E8BA0}`;
+#igLightbox .iglb-tip{font-size:.62rem;color:#7E8BA0}
+/* ── 최종 런타임 편집기: 고밀도 행형 구조 ── */
+#recruitModal .rf-box{border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.18),0 3px 12px rgba(15,23,42,.08)}
+#recruitModal .modal-header{padding:13px 16px;background:#F8FAFD}
+#recruitModal .modal-header h3{font-size:.92rem;letter-spacing:-.025em}
+#recruitModal .rf-rail{width:164px;padding:14px 10px;background:#FBFCFE;overflow:hidden}
+#recruitModal .rf-rail-t{padding:2px 8px 12px;color:#172033;font-size:.82rem;letter-spacing:-.025em}
+#recruitModal .rf-rail-t span{display:block;margin-top:4px;color:#7F8A9B;font-size:.62rem;font-weight:600;letter-spacing:0}
+#recruitModal .rf-step-list{display:grid;gap:2px}
+#recruitModal .rf-step{display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;gap:7px;min-height:31px;width:100%;padding:5px 7px;border:1px solid transparent;border-radius:7px;background:transparent;color:#526078;font:inherit;font-size:.7rem;font-weight:800;text-align:left;cursor:pointer;transition:background-color .16s ease-out,border-color .16s ease-out,color .16s ease-out}
+#recruitModal .rf-step:hover{background:#F1F5FA;color:#263449}
+#recruitModal .rf-step.on{border-color:#C9D9F5;background:#EDF4FF;color:#2563C8}
+#recruitModal .rf-step-no{display:grid;place-items:center;width:18px;height:18px;border:1px solid currentColor;border-radius:50%;font-size:.6rem;font-style:normal}
+#recruitModal .rf-step .rf-rmk{margin-left:auto}
+#recruitModal .rf-side-audit{margin-top:auto;padding:10px 8px 0;border-top:1px solid #DCE3EC;color:#526078;font-size:.64rem;line-height:1.45}
+#recruitModal .rf-side-audit-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:.7rem;font-weight:850;color:#243148}
+#recruitModal .rf-side-audit-head strong{color:#2563C8;font-size:.9rem}
+#recruitModal .rf-side-audit-head strong.warn{color:#B66A15}
+#recruitModal .rf-side-audit #rf_part_check{display:grid;gap:4px}
+#recruitModal .rf-side-audit #rf_part_check>*{font-size:.61rem;line-height:1.3}
+#recruitModal .rf-side{width:238px;background:#FBFCFE}
+#recruitModal .modal-body{gap:0!important;padding:0 16px 18px!important}
+#recruitModal .rf-card{border:0;border-bottom:1px solid #DCE3EC;border-radius:0;overflow:visible;background:transparent}
+#recruitModal .rf-card:last-child{border-bottom:0}
+#recruitModal .rf-ch{padding:15px 0 7px;border:0;background:transparent}
+#recruitModal .rf-ct{font-size:.84rem;letter-spacing:-.025em}
+#recruitModal .rf-cn{display:none}
+#recruitModal .rf-pinbadge{display:none}
+#recruitModal .rf-cb{padding:0 0 14px;gap:0}
+#recruitModal .rf-grid2{display:block;margin:0}
+#recruitModal .rf-hrow{grid-template-columns:96px minmax(0,1fr);gap:0;min-height:35px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
+#recruitModal .rf-hrow:first-child{border-radius:8px 8px 0 0}
+#recruitModal .rf-hrow:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
+#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:39px}
+#recruitModal .rf-hrow.rf-hrow-top .rf-hl{padding-top:9px}
+#recruitModal .rf-hrow .rf-hl{display:flex;align-items:center;padding:6px 10px;background:#FBFCFE;color:#46546B;font-size:.68rem;font-weight:800;text-align:left;line-height:1.3}
+#recruitModal .rf-hrow>:not(.rf-hl){min-width:0;padding:4px 7px}
+#recruitModal .rf-hrow>.rform-input{height:27px;margin:auto 7px;padding:4px 7px}
+#recruitModal .rf-main .rform-input{min-height:27px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
+#recruitModal .rf-main textarea.rform-input{min-height:56px;padding:7px}
+#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:26px;padding:4px 7px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rchan-btn:hover,#recruitModal .rf-pm-btn:hover,#recruitModal .rf-status-buttons button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
+#recruitModal .rchan-btn.active,#recruitModal .rf-pm-btn.on,#recruitModal .rf-status-buttons button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8;box-shadow:none}
+#recruitModal .rf-time-free{height:27px;flex-basis:92px;width:92px;font-size:.65rem}
+#recruitModal .rf-time-range{min-width:0;height:27px}
+#recruitModal .rf-time-field{height:27px;font-size:.7rem}
+#recruitModal .rf-prod-head{margin:0;border:1px solid #DCE3EC;border-bottom:0;border-radius:8px 8px 0 0;padding:5px 8px;background:#FBFCFE}
+#recruitModal .rf-opt-row{margin:0;padding:4px 7px;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
+#recruitModal #rf_opt_rows .rf-opt-row:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
+#recruitModal .rf-opt-row .rform-input{height:27px;min-height:27px;padding:4px 6px;font-size:.68rem}
+#recruitModal .rf-pmsw{margin:0 0 6px}
+#recruitModal .rf-pm-note{margin-left:7px;font-size:.62rem}
+#recruitModal .rf-gp{margin:0;border:1px solid #DCE3EC;border-radius:8px;background:#FCFDFF;box-shadow:none}
+#recruitModal .rf-gp-head{padding:5px 7px;margin:0;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-product-settings{margin-top:12px;border-top:1px solid #DCE3EC}
+#recruitModal .rf-product-settings-head{padding:10px 0 6px;color:#27364E;font-size:.72rem;font-weight:850}
+#recruitModal .rf-product-settings .rf-cb{padding:0}
+#recruitModal .rf-product-settings .rf-hrow{border-radius:0}
+#recruitModal .rf-product-settings .rf-hrow:first-of-type{border-radius:8px 8px 0 0}
+#recruitModal .rf-product-settings .rf-hrow:last-child{border-radius:0 0 8px 8px}
+#recruitModal .rf-fee-box{margin:0;border:1px solid #DCE3EC;border-radius:0;background:#FFFFFF}
+#recruitModal .rf-fee-sw{min-height:31px;font-size:.68rem}
+#recruitModal .rf-publish-card{order:-1;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-publish-card .rf-ch{display:none}
+#recruitModal .rf-publish-card .rf-cb{padding:12px 0 14px}
+#recruitModal .rf-title-row{border:0;background:transparent;min-height:31px}
+#recruitModal .rf-title-row .rf-hl{background:transparent;padding-left:0}
+#recruitModal .rf-title-control{display:flex;align-items:center;gap:6px;padding:0!important}
+#recruitModal .rf-title-control .rform-input{flex:1;min-width:0;height:28px}
+#recruitModal .rf-status-buttons{display:flex;gap:4px;flex:none}
+#recruitModal .rf-status-buttons button{white-space:nowrap}
+#recruitModal .rf-publish-check-note{display:none}
+#recruitModal .ig-wrap{gap:6px}
+#recruitModal .ig-wrap>textarea.rform-input,#recruitModal .ig-strip{height:72px;min-height:72px}
+#recruitModal .ig-strip{width:244px;border-color:#C9D6E8;border-style:dashed;border-radius:6px}
+#recruitModal .ig-add,.rf-ig-empty{border-radius:5px}
+#recruitModal .rf-side #rf_preview_section{margin:0 10px!important}
+#recruitModal .rf-side #rf_preview_listcard{max-width:218px!important}
+#recruitModal .rf-side #rf_preview_card{font-size:.7rem}
+@media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
+@media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
+@media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}
+@media (prefers-reduced-motion:reduce){#recruitModal .rf-step,#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{transition:none}}
+`;
   function injectCss() {
     if (document.getElementById('recruit-modal-css')) return;
     var st = document.createElement('style');
@@ -861,65 +946,19 @@
      · 레거시 공고: 참여형 전용 카드(display:none)는 레일에서도 빠지고 번호가 다시 매겨진다.
        index-recruit 의 onParticipationToggle 이 RecruitModal.refreshRail() 을 불러 동기화.
      ═══════════════════════════════════════════════════════════════ */
-  var SEC_FREE = ['prod', 'cond', 'fee', 'info', 'work'];
-  var PRESETS = {
-    'default': ['prod', 'cond', 'fee', 'info', 'work'],   // 발행 워크플로 순
-    'edit':    ['cond', 'fee', 'prod', 'info', 'work'],   // 수정 최적화 — 자주 고치는 것 위로
-  };
-  var LAYOUT_KEY = 'rf_layout_v1';
-  var _drag = null;
-
   function _mBody() { return document.querySelector('#recruitModal .modal-body'); }
   function _mCard(k) { var b = _mBody(); return b ? b.querySelector('.rf-card[data-sec="' + k + '"]') : null; }
 
-  function loadLayout() {
-    try {
-      var a = JSON.parse(localStorage.getItem(LAYOUT_KEY) || 'null');
-      return Array.isArray(a) ? a : null;
-    } catch (_) { return null; }
-  }
-  function saveLayout(order) {
-    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(order)); } catch (_) { /* fail-soft */ }
-  }
+  /** 최종안 레일은 정해진 발행 순서를 안내한다. 입력 중 목차를 드래그해 바꾸지 않는다. */
+  function applyLayout() { renderRail(); }
 
-  /** 자유 섹션을 order 순으로 pub(맨 아래 고정) 앞에 재배치. 모르는 키 무시·빠진 키는 기본 순서로 보충 */
-  function applyLayout(order) {
-    var b = _mBody(); if (!b) return;
-    var valid = (order || []).filter(function (k) { return SEC_FREE.indexOf(k) >= 0; });
-    SEC_FREE.forEach(function (k) { if (valid.indexOf(k) < 0) valid.push(k); });
-    var pub = _mCard('pub');
-    valid.forEach(function (k) { var c = _mCard(k); if (c && pub) b.insertBefore(c, pub); });
-    renderRail();
-  }
-
-  function currentOrder() {
-    var b = _mBody(), out = [];
-    if (!b) return out;
-    Array.prototype.forEach.call(b.querySelectorAll('.rf-card[data-sec]'), function (c) {
-      var k = c.getAttribute('data-sec');
-      if (SEC_FREE.indexOf(k) >= 0) out.push(k);
-    });
-    return out;
-  }
-
-  /** 레일을 본문 카드(보이는 것만)에서 다시 그린다 — 목록의 단일 출처는 본문 DOM */
   function renderRail() {
     var rail = document.getElementById('rfRailList'), b = _mBody();
     if (!rail || !b) return;
-    var html = [], no = 0;
-    Array.prototype.forEach.call(b.querySelectorAll('.rf-card[data-sec]'), function (c) {
-      if (c.style.display === 'none') return;    // 레거시 공고에서 숨은 참여형 카드
-      var k = c.getAttribute('data-sec');
-      var t = c.querySelector('.rf-ct'); t = t ? t.textContent : k;
-      var pin = (k === 'link'), pinb = (k === 'pub');
-      var noHtml = (pin || pinb) ? '<span class="rf-rno rf-rno-pin">📌</span>'
-                                 : '<span class="rf-rno">' + (++no) + '</span>';
-      var hnd = (pin || pinb) ? '' : '<span class="rf-rhnd" title="끌어서 배치">⠿</span>';
-      html.push('<div class="rf-ritem' + (pin ? ' rf-rpin' : '') + (pinb ? ' rf-rpinb' : '') +
-        '" data-key="' + k + '">' + hnd + noHtml +
-        '<span class="rf-rlb">' + t + '</span><span class="rf-rmk" data-mk="' + k + '"></span></div>');
+    Array.prototype.forEach.call(rail.querySelectorAll('[data-rf-step]'), function (item) {
+      var card = _mCard(item.getAttribute('data-rf-step'));
+      item.hidden = !card || card.style.display === 'none';
     });
-    rail.innerHTML = html.join('');
     bindRail(rail);
     updateRailMarks();
   }
@@ -932,64 +971,15 @@
   }
 
   function bindRail(rail) {
-    Array.prototype.forEach.call(rail.children, function (it) {
-      var key = it.getAttribute('data-key');
+    if (rail._rfFinalNav) return;
+    rail._rfFinalNav = 1;
+    Array.prototype.forEach.call(rail.querySelectorAll('[data-rf-step]'), function (it) {
+      var key = it.getAttribute('data-rf-step');
       it.addEventListener('click', function () {
         var c = _mCard(key);
         if (c) { scrollRailToCard(c); setActiveRail(key); }
       });
-      var h = it.querySelector('.rf-rhnd');
-      if (!h) return;                                        // 고정 항목은 드래그 없음
-      h.addEventListener('mousedown', function () { it.draggable = true; });
-      it.addEventListener('dragstart', function () {
-        _drag = it;
-        setTimeout(function () { it.classList.add('rf-lift'); }, 0);
-      });
-      it.addEventListener('dragend', function () {
-        it.classList.remove('rf-lift');
-        it.draggable = false;
-        if (_drag === it) commitRailOrder();                 // drop 미발화(밖에 놓음)에도 확정
-        _drag = null;
-      });
     });
-    if (!rail._rfDnD) {
-      rail._rfDnD = 1;
-      rail.addEventListener('dragover', function (e) {
-        if (!_drag) return;
-        e.preventDefault();
-        var els = Array.prototype.filter.call(rail.children, function (el) {
-          return el !== _drag && el.querySelector('.rf-rhnd');   // 자유 항목 사이로만
-        });
-        var after = null;
-        for (var i = 0; i < els.length; i++) {
-          var r = els[i].getBoundingClientRect();
-          if (e.clientY < r.top + r.height / 2) { after = els[i]; break; }
-        }
-        if (after) rail.insertBefore(_drag, after);
-        else {
-          var pinb = rail.querySelector('.rf-rpinb');            // 하단 고정(pub) 위까지만
-          if (pinb) rail.insertBefore(_drag, pinb); else rail.appendChild(_drag);
-        }
-      });
-      rail.addEventListener('drop', function (e) { e.preventDefault(); });
-    }
-  }
-
-  /** 레일 순서 → 본문 재배치 + 저장. 숨은 카드(레일에 없음)는 현재 위치를 유지한 채 병합 */
-  function commitRailOrder() {
-    var rail = document.getElementById('rfRailList');
-    if (!rail) return;
-    var order = [];
-    Array.prototype.forEach.call(rail.children, function (it) {
-      var k = it.getAttribute('data-key');
-      if (SEC_FREE.indexOf(k) >= 0) order.push(k);
-    });
-    var merged = order.slice();
-    currentOrder().forEach(function (k) { if (merged.indexOf(k) < 0) merged.push(k); });
-    var b = _mBody(), pub = _mCard('pub');
-    merged.forEach(function (k) { var c = _mCard(k); if (c && pub) b.insertBefore(c, pub); });
-    saveLayout(merged);
-    renderRail();
   }
 
   /* ── 레일 상태 표시(● 필수 미입력 · ⚠ 경고 · ✓ 입력됨) — 가벼운 판정만(진실은 저장 시 서버 게이트) ── */
@@ -1001,17 +991,9 @@
     switch (key) {
       case 'link':
         return (_val('rf_manager') && _val('rf_channel') && _val('rf_chat_url')) ? 'ok' : 'req';
-      case 'pub': {
-        if (!_val('rf_title')) return 'req';
-        var pc = document.getElementById('rf_part_check');
-        var t = pc ? (pc.textContent || '') : '';
-        var w = (t.match(/[⚠⛔]/g) || []).length;
-        return w ? ('warn:' + w) : 'ok';
-      }
       case 'prod': { var r = document.getElementById('rf_opt_rows'); return (r && r.children.length) ? 'ok' : ''; }
       case 'cond': return (_val('rf_start_date') || _val('rf_window_start')) ? 'ok' : '';
       case 'fee':  return _val('rf_review_fee') ? 'ok' : '';
-      case 'info': return (_val('rf_thumbnail') || _val('rf_thumb_url') || _val('rf_product_url')) ? 'ok' : '';
       case 'work': return (_val('rf_wd_inflow') || _val('rf_wd_review')) ? 'ok' : '';
     }
     return '';
@@ -1026,12 +1008,20 @@
       else if (s && s.indexOf('warn:') === 0) { mk.className = 'rf-rmk wrn'; mk.textContent = '⚠' + s.slice(5); mk.title = '자동 점검 경고'; }
       else { mk.className = 'rf-rmk'; mk.textContent = ''; mk.title = ''; }
     });
+    var check = document.getElementById('rf_part_check');
+    var score = document.getElementById('rf_side_audit_score');
+    if (score) {
+      var body = (check && check.textContent) || '';
+      var warnings = (body.match(/[⚠⛔]/g) || []).length;
+      score.textContent = warnings ? ('!' + warnings) : '✓';
+      score.className = warnings ? 'warn' : 'ok';
+    }
   }
   function setActiveRail(key) {
     var rail = document.getElementById('rfRailList');
     if (!rail) return;
-    Array.prototype.forEach.call(rail.children, function (it) {
-      it.classList.toggle('on', it.getAttribute('data-key') === key);
+    Array.prototype.forEach.call(rail.querySelectorAll('[data-rf-step]'), function (it) {
+      it.classList.toggle('on', it.getAttribute('data-rf-step') === key);
     });
   }
 
@@ -1056,6 +1046,9 @@
             if (c.style.display === 'none') return;
             if (c.offsetTop <= top) act = c.getAttribute('data-sec');
           });
+          // 게시 영역은 최상단에 고정하지만 왼쪽 단계에는 넣지 않는다.
+          // 최상단 스크롤에서는 첫 단계(연결 · 기본)를 선택 상태로 유지한다.
+          if (act === 'pub') act = 'link';
           if (act) setActiveRail(act);
         });
       });
@@ -1226,6 +1219,38 @@
   window.recruitSaveBlock      = recruitSaveBlock;
   window.recruitSaveBlockClear = recruitSaveBlockClear;
 
+  function placeFinalSections(participation) {
+    var body = _mBody();
+    var publish = _mCard('pub');
+    var link = _mCard('link'), product = _mCard('prod');
+    var settings = document.querySelector('#recruitModal [data-product-settings]');
+    var settingsSlot = document.getElementById('rf_product_settings_slot');
+    var legacySlot = document.getElementById('rf_legacy_product_settings_slot');
+    if (participation == null) {
+      var participationEl = document.getElementById('rf_participation');
+      participation = !participationEl || participationEl.checked;
+    }
+    if (body && publish && link) body.insertBefore(publish, link);
+    var destination = participation ? settingsSlot : legacySlot;
+    if (settings && destination && settings.parentNode !== destination) destination.appendChild(settings);
+  }
+
+  function syncStatusButtons() {
+    var select = document.getElementById('rf_status');
+    if (!select) return;
+    Array.prototype.forEach.call(document.querySelectorAll('#rf_status_buttons [data-rf-status]'), function (button) {
+      button.classList.toggle('on', button.getAttribute('data-rf-status') === select.value);
+    });
+  }
+
+  function setStatus(value) {
+    var select = document.getElementById('rf_status');
+    if (!select) return;
+    select.value = value;
+    syncStatusButtons();
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   function mount(id) {
     injectCss();
     var host = document.getElementById(id || 'recruitModalMount');
@@ -1239,7 +1264,9 @@
     }
     if (!document.getElementById('recruitModal')) host.innerHTML = HTML;   // 멱등
     injectIconFallback();
-    applyLayout(loadLayout());     // 저장된 배치 복원(없으면 기본 순서) + 레일 렌더
+    placeFinalSections();
+    applyLayout();
+    syncStatusButtons();
     bindLive();
     return true;
   }
@@ -1247,14 +1274,12 @@
   window.RecruitModal = {
     mount: mount,
     html: HTML,
-    refreshRail: renderRail,       // index-recruit onParticipationToggle 이 호출(레거시 카드 숨김 동기화)
+    refreshRail: renderRail,
     marks: updateRailMarks,
     applyLayout: applyLayout,
-    preset: function (name) {
-      var p = PRESETS[name] || PRESETS['default'];
-      applyLayout(p);
-      saveLayout(p.slice());
-    },
+    syncProductSettings: placeFinalSections,
+    syncStatusButtons: syncStatusButtons,
+    setStatus: setStatus,
   };
   // 스크립트가 마운트 지점 뒤에 로드되면 즉시, 아니면 DOM 준비 후
   if (!mount()) document.addEventListener('DOMContentLoaded', function () { mount(); });
