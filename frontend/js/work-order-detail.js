@@ -810,35 +810,36 @@ function woAdminEditModal(order, opts) {
     return n;
   }
   function card(parent, title) {
-    var c = mk("div", "border:1px solid #E5E7EB;border-radius:10px;margin-bottom:14px", parent);
-    var h = mk("div", "font-size:12px;font-weight:800;color:#4B5563;background:#F3F4F6;padding:7px 12px;border-radius:10px 10px 0 0", c);
+    var c = mk("section", "border:1px solid #DCE5EF;border-radius:10px;margin-bottom:12px;overflow:hidden;background:#fff", parent);
+    c.className = "wo-runtime-modal__section";
+    var h = mk("div", "font-size:12px;font-weight:800;color:#26364E;background:#F7F9FC;padding:8px 12px;border-bottom:1px solid #E4EBF3", c);
     h.textContent = title;
-    return mk("div", "padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:10px 14px", c);
+    return mk("div", "display:block", c);
   }
   function label(parent, text) {
-    var w = mk("label", "display:block;font-size:12px", parent);
-    var l = mk("span", "display:block;font-size:11px;font-weight:700;color:#6B7280;margin-bottom:3px", w);
+    var w = mk("label", "display:grid;grid-template-columns:154px minmax(0,1fr);align-items:stretch;min-height:40px;border-top:1px solid #E8EDF3;font-size:12px", parent);
+    w.className = "wo-runtime-modal__row";
+    var l = mk("span", "display:flex;align-items:center;padding:7px 10px;background:#F8FAFC;color:#526077;font-size:11px;font-weight:800", w);
     l.textContent = text;
     return w;
   }
   function field(parent, f, text, opts2) {
     opts2 = opts2 || {};
     var w = label(parent, text);
-    if (opts2.full) w.style.gridColumn = "1 / -1";
     var cur = o[f] == null ? "" : String(o[f]);
     if (f === "start_date") cur = cur.slice(0, 10);
     var inp;
     if (opts2.area) {
-      inp = mk("textarea", "width:100%;border:1.5px solid #D1D5DB;border-radius:7px;padding:7px 10px;font-size:12.5px;min-height:64px;font-family:inherit;box-sizing:border-box", w);
+      inp = mk("textarea", "width:calc(100% - 16px);margin:5px 8px;border:1px solid #D6E0ED;border-radius:6px;padding:7px 9px;font-size:12px;min-height:62px;font-family:inherit;box-sizing:border-box", w);
     } else {
-      inp = mk("input", "width:100%;border:1.5px solid #D1D5DB;border-radius:7px;padding:7px 10px;font-size:12.5px;box-sizing:border-box", w);
+      inp = mk("input", "width:calc(100% - 16px);height:29px;margin:5px 8px;border:1px solid #D6E0ED;border-radius:6px;padding:0 9px;font-size:12px;box-sizing:border-box", w);
       inp.type = opts2.type || "text";
     }
     inp.value = cur;   // ★ 보간 금지 — 프로퍼티 대입만
     initial[f] = cur;
     readers[f] = function () { return inp.value; };
     if (opts2.hint) {
-      var h = mk("div", "font-size:10.5px;color:" + (opts2.warn ? "#B45309" : "#9CA3AF") + ";margin-top:3px", w);
+      var h = mk("div", "grid-column:2;font-size:10.5px;color:" + (opts2.warn ? "#A76013" : "#8491A4") + ";padding:0 8px 6px", w);
       h.textContent = opts2.hint;
     }
     return inp;
@@ -846,13 +847,13 @@ function woAdminEditModal(order, opts) {
   function pills(parent, f, text, values, opts2) {
     opts2 = opts2 || {};
     var w = label(parent, text);
-    if (opts2.full) w.style.gridColumn = "1 / -1";
     var cur = o[f] == null ? "" : String(o[f]);
     if (f === "courier_proxy") cur = (o[f] === true || o[f] === "true") ? "true" : "false";
     var list = values.slice();
     // 현재 값이 목록 밖(레거시 표기)이면 지우지 않고 알약으로 함께 보여준다
     if (cur && !list.some(function (v) { return v.v === cur; })) list.push({ v: cur, l: cur });
-    var row = mk("div", "display:flex;gap:6px;flex-wrap:wrap", w);
+    var row = mk("div", "display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:5px 8px", w);
+    row.className = "wo-runtime-modal__choice";
     var sel = cur;
     var btns = [];
     list.forEach(function (it) {
@@ -864,28 +865,28 @@ function woAdminEditModal(order, opts) {
     });
     function paint() {
       btns.forEach(function (x) {
-        x.b.style.cssText = "font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:20px;cursor:pointer;border:1.5px solid " +
-          (x.v === sel ? "#4F46E5;background:#4F46E5;color:#fff" : "#D1D5DB;background:#fff;color:#6B7280");
+        x.b.style.cssText = "font-size:11px;font-weight:700;min-height:27px;padding:4px 9px;border-radius:6px;cursor:pointer;transition:background .16s cubic-bezier(.22,1,.36,1),border-color .16s cubic-bezier(.22,1,.36,1),color .16s cubic-bezier(.22,1,.36,1);border:1px solid " +
+          (x.v === sel ? "#B7CEF7;background:#EEF4FF;color:#2469D8" : "#D6E0ED;background:#fff;color:#5D6B81");
       });
     }
     paint();
     initial[f] = cur;
     readers[f] = function () { return sel; };
     if (opts2.hint) {
-      var h = mk("div", "font-size:10.5px;color:#9CA3AF;margin-top:3px", w);
+      var h = mk("div", "grid-column:2;font-size:10.5px;color:#8491A4;padding:0 8px 6px", w);
       h.textContent = opts2.hint;
     }
   }
   function roField(parent, text, value, full) {
     var w = label(parent, text);
-    if (full) w.style.gridColumn = "1 / -1";
-    var v = mk("div", "border:1.5px solid #E5E7EB;border-radius:7px;padding:7px 10px;font-size:12px;background:#F3F4F6;color:#9CA3AF;word-break:break-all", w);
+    var v = mk("div", "margin:5px 8px;padding:6px 9px;border:1px solid #E1E8F0;border-radius:6px;font-size:12px;background:#F7F9FC;color:#78869A;word-break:break-all", w);
     v.textContent = value || "—";
   }
 
-  var ov = mk("div", "position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:18px");
+  var ov = mk("div", "position:fixed;inset:0;z-index:99998;background:rgba(23,34,55,.42);display:flex;align-items:center;justify-content:center;padding:18px");
   ov.id = "woAdminEditModal";
-  var box = mk("div", "background:#fff;border-radius:13px;max-width:740px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden", ov);
+  var box = mk("div", "background:#fff;border-radius:14px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(12,24,45,.24);overflow:hidden", ov);
+  box.className = "wo-runtime-modal";
 
   var head = mk("div", "display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid #E5E7EB;background:#F9FAFB", box);
   var ht = mk("b", "font-size:14.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", head);
@@ -894,7 +895,7 @@ function woAdminEditModal(order, opts) {
   xBtn.type = "button"; xBtn.textContent = "✕";
   xBtn.addEventListener("click", function () { ov.remove(); });
 
-  var body = mk("div", "padding:16px 18px;overflow-y:auto", box);
+  var body = mk("div", "padding:14px 18px;overflow-y:auto;background:#FBFCFE", box);
 
   var c1 = card(body, "📌 기본 정보");
   field(c1, "title", "작업명 *", { full: true, hint: "⚠ 접수된 오더의 작업명을 바꿔도 이미 등록된 시트 탭 이름은 바뀌지 않습니다.", warn: true });
