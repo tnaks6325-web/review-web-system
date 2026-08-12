@@ -60,7 +60,7 @@ ok('hold: confirm RETURNING id, option_key', /RETURNING id, option_key/.test(hol
 ok('hold: 드리프트 warn은 홀드 옵션 비NULL일 때만(오탐 차단)', /_dbOpt && expectedOptKey !== undefined/.test(hold));
 ok('hold: expectedOptKey는 비차단(확정 UPDATE WHERE에 미사용)', !/expectedOptKey/.test((hold.match(/UPDATE campaign_applications\s+SET status = 'submitted'[\s\S]*?RETURNING id, option_key/) || [''])[0]));
 // ── 옵션 closed 재오픈 봉합 ──
-ok('options: 미지정 status는 기존 유지(COALESCE)', /status=COALESCE\(\$7, campaign_options\.status\)/.test(routes) && !/status=EXCLUDED\.status/.test(routes));
+ok('options: 미지정 status는 기존 유지(COALESCE)', /status=COALESCE\(\$\d+, campaign_options\.status\)/.test(routes) && !/status=EXCLUDED\.status/.test(routes));
 // ── 노출·격리 ──
 const scoped = routes.slice(routes.indexOf('async function _scopedCampaignEdit'), routes.indexOf('// 오픈 러시 방어'));
 ok('스코프 토큰: multi_account_mode/multi_daily_limit 편집 불가', !/multi_account_mode/.test(scoped) && !/multi_daily_limit/.test(scoped));
