@@ -1252,6 +1252,7 @@
         reference.textContent = option && option.value ? option.textContent : '작업오더에서 연결되면 자동 표시됩니다.';
       }
       select._rfParityReference = reference;
+      select._rfParityReferenceRender = renderReference;
       select.style.display = 'none';
       select.disabled = true;
       select.parentNode.insertBefore(reference, select.nextSibling);
@@ -1351,6 +1352,13 @@
     }
   }
 
+  function refreshLinkedReferences() {
+    ['rf_linked_campaign', 'rf_linked_tab'].forEach(function (id) {
+      var select = document.getElementById(id);
+      if (select && typeof select._rfParityReferenceRender === 'function') select._rfParityReferenceRender();
+    });
+  }
+
   function placeFinalSections(participation) {
     var body = _mBody();
     var publish = _mCard('pub');
@@ -1424,6 +1432,7 @@
     marks: updateRailMarks,
     applyLayout: applyLayout,
     syncProductSettings: placeFinalSections,
+    refreshLinkedReferences: refreshLinkedReferences,
     syncStatusButtons: syncStatusButtons,
     setStatus: setStatus,
   };

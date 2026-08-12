@@ -11,6 +11,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..', '..');
 const modal = fs.readFileSync(path.join(root, 'frontend', 'js', 'recruit-modal.js'), 'utf8');
+const recruit = fs.readFileSync(path.join(root, 'frontend', 'js', 'index-recruit.js'), 'utf8');
 const reference = path.join(root, 'frontend', 'mockups', 'recruit-popup-compact-rows.html');
 
 assert(fs.existsSync(reference), 'Approved compact-rows reference must remain versioned with the runtime.');
@@ -43,5 +44,9 @@ assert(/rf-parity-date-row/.test(modal),
 ['상품 메인 URL', '공고 썸네일 URL', '모집이월 방식', '입금명', '자율리뷰'].forEach((label) => {
   assert(modal.includes(label), `The approved label "${label}" must be present in the runtime modal.`);
 });
+assert(/refreshLinkedReferences: refreshLinkedReferences/.test(modal),
+  'The shared modal must expose a real-time refresh hook for read-only linked values.');
+assert((recruit.match(/refreshLinkedReferences/g) || []).length >= 3,
+  'Campaign and tab prefills must refresh the visible linked values after programmatic changes.');
 
 console.log('recruitModalCompactParity: passed');
