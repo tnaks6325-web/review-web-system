@@ -570,7 +570,7 @@ async function listBatches(limit = 50) {
        FROM payment_batches b
        LEFT JOIN LATERAL (
          SELECT id, file_name, row_count, success_count, failed_count, applied_count, applied,
-                uploaded_at, applied_at, file_blob
+                uploaded_at, applied_at, file_blob, summary
            FROM payment_result_uploads WHERE batch_id = b.id
           -- 실제 반영 이력은 이후의 단순 미리보기보다 우선한다.
           ORDER BY (applied = TRUE) DESC, applied_at DESC NULLS LAST, uploaded_at DESC, id DESC LIMIT 1
