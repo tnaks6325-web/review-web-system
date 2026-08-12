@@ -571,7 +571,8 @@ async function listBatches(limit = 50) {
          SELECT id, file_name, row_count, success_count, failed_count, applied_count, applied,
                 uploaded_at, applied_at, file_blob
            FROM payment_result_uploads WHERE batch_id = b.id
-          ORDER BY uploaded_at DESC, id DESC LIMIT 1
+          -- 실제 반영 이력은 이후의 단순 미리보기보다 우선한다.
+          ORDER BY (applied = TRUE) DESC, applied_at DESC NULLS LAST, uploaded_at DESC, id DESC LIMIT 1
        ) ru ON TRUE
        ORDER BY b.created_at DESC LIMIT $1`, [Math.min(200, Math.max(1, limit))]);
   return rows.map(_batchView);

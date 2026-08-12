@@ -30,7 +30,8 @@ function __setPoolForTest(p) { _pool = p || null; }
 const { logger } = require('../utils/logger');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly } = require('../utils/paymentResultParse');
-const { nowStamp, recordDeposits, markDepositCells } = require('./paymentApply.service');
+const paymentApply = require('./paymentApply.service');
+const { nowStamp, recordDeposits } = paymentApply;
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
 
@@ -356,7 +357,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
 
   /* ★ 입금칸 기록은 커밋 뒤 백그라운드(수동 처리와 같은 계약) — 시트/Drive 지연이 응답을 붙잡지 않는다.
        ★ 시각은 **건별 실제 이체시점**(item.stamp). */
-  setImmediate(() => markDepositCells(paidItems, { stamp: stampNow, by: by || 'payment' })
+  setImmediate(() => paymentApply.markDepositCells(paidItems, { stamp: stampNow, by: by || 'payment' })
     .catch(e => logger.warn(`[paymentResult] 입금칸 기록 예외: ${e.message}`)));
 
   // 실패 안내(1:1문의) — 기본 켬(사용자 확정 ⑤). 커밋 뒤에 보낸다(전송 실패가 반영을 되돌리지 않게).
@@ -417,4 +418,49 @@ async function markBatchApplied({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+/**
+ * 이미 paid 로 확정된 회차 항목의 작업표 입금 칸만 다시 기록한다.
+ * DB 입금 원장(payment_records)이나 항목 상태는 변경하지 않는다.
+ */
+async function backfillPaidDepositStamp({ batchId, stamp, by }) {
+  const m = /^([0-9]{4})\.([0-9]{1,2})\.([0-9]{1,2})$/.exec(String(stamp || '').trim());
+  if (!m) throw new ResultError('bad_stamp', '입금일은 YYYY.M.D 형식으로 입력해 주세요.');
+  const [year, month, day] = m.slice(1).map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    throw new ResultError('bad_stamp', '올바른 입금일을 입력해 주세요.');
+  }
+
+  const client = await _db().connect();
+  let items = [];
+  try {
+    await client.query('BEGIN');
+    const { rows: [batch] } = await client.query(
+      'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
+    const { rows } = await client.query(
+      `SELECT i.sheet_id, i.tab_name, i.row_index, r.submit_col2, r.tab_gid
+         FROM payment_batch_items i
+         LEFT JOIN review_index r
+           ON r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name AND r.row_index = i.row_index
+        WHERE i.batch_id = $1 AND i.status = 'paid'
+        ORDER BY i.created_at, i.id`, [batchId]);
+    items = rows.map(r => ({
+      sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
+      depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', stamp: String(stamp).trim(),
+    })).filter(x => x.sheetId && x.tabName && x.rowIndex);
+    if (!items.length) throw new ResultError('no_paid_items', '입금일을 기록할 완료 항목이 없습니다.');
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  await paymentApply.markDepositCells(items, { stamp: String(stamp).trim(), by: by || 'payment' });
+  return { ok: true, candidates: items.length, stamp: String(stamp).trim() };
+}
+
+module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };

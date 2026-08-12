@@ -6951,10 +6951,12 @@ function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
   const reconcile = b.status==='downloaded' && ((b.paidCount||0)+(b.failedCount||0)>0)
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
+  const depositDate = b.status==='applied' && (b.paidCount||0)>0
+    ? `<button class="btn sm" onclick="_pmBackfillPaidDeposit(${i})">입금일 기록</button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
     <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
-    : (b.status==='applied' ? `<button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>` : '');
+    : (b.status==='applied' ? `${depositDate}<button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>` : '');
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ${b.resultCanApply?`<button class="btn sm primary" onclick="_pmApplySavedResult(${i})">이대로 반영</button>`:''}` : '';
   return manage + result;
@@ -7523,6 +7525,19 @@ async function _pmMarkApplied(i){
   if(!r || !r.ok){ toast((r&&r.error)||'적용완료 처리 실패'); return; }
   toast(`적용완료로 처리했습니다${r.remainingPending ? ` · 결과 확인 대기 ${r.remainingPending}건` : ''}`);
   await _pmLoad();
+}
+
+async function _pmBackfillPaidDeposit(i){
+  const b = (STATE.pmBatches||[])[i];
+  if(!b) return;
+  const stamp = prompt(`#${b.seq} 회차의 이미 입금된 ${b.paidCount||0}건에 기록할 입금일을 입력하세요.\nYYYY.M.D 형식으로 기록됩니다.`, '2026.8.11');
+  if(stamp == null || !String(stamp).trim()) return;
+  const normalized = String(stamp).trim();
+  if(!confirm(`#${b.seq} 회차의 이미 입금된 ${b.paidCount||0}건 입금 칸에 ${normalized}을 기록할까요?\n\n입금 원장·금액·회차 상태는 변경하지 않습니다.`)) return;
+  const r = await api('/api/trackb/payment/batch/'+b.id+'/deposit-date-backfill',
+    { method:'POST', body: JSON.stringify({ stamp:normalized }) });
+  if(!r || !r.ok){ toast((r&&r.error)||'입금일 기록 실패'); return; }
+  toast(`${r.candidates||0}건의 입금 칸에 ${r.stamp}을 기록했습니다`);
 }
 
 async function _pmCancel(id, seq){

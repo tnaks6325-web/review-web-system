@@ -85,6 +85,9 @@ function makePool(items, opts = {}) {
       if (/SELECT \* FROM payment_batches WHERE id = \$1 FOR UPDATE/.test(s)) {
         return { rows: [{ id: 'B1', seq: 7, bank: 'hana', status: 'downloaded' }], rowCount: 1 };
       }
+      if (/FROM payment_batch_items i[\s\S]*LEFT JOIN review_index r/.test(s)) {
+        return { rows: state.filter(x => x.status === 'paid').map(x => ({ ...x, submit_col2: '입금', tab_gid: 'G1' })), rowCount: state.filter(x => x.status === 'paid').length };
+      }
       if (/UPDATE payment_batch_items[\s\S]*status = 'paid'/.test(s)) {
         const it = state.find(x => x.id === params[0] && x.status === 'pending');
         if (!it) return { rows: [], rowCount: 0 };
@@ -202,6 +205,22 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       reconciled.ok === true && reconciled.appliedItems === 1 && reconciled.remainingPending === 1
         && reconcilePool.calls.some(c => /UPDATE payment_batches SET status = 'applied'/.test(c.sql)),
       JSON.stringify(reconciled));
+    RES.__setPoolForTest(pool);
+
+    const stampPool = makePool([
+      { ...itemRow(20, OKROWS[0]), id: 'paid-for-stamp', status: 'paid' },
+      { ...itemRow(21, OKROWS[1]), id: 'pending-for-stamp', status: 'pending' },
+    ]);
+    const stampWrites = [];
+    RES.__setPoolForTest(stampPool);
+    APPLY.markDepositCells = async (items, opts) => { stampWrites.push({ items, opts }); };
+    const stampBackfill = await RES.backfillPaidDepositStamp({ batchId: 'B1', stamp: '2026.8.11', by: '관리자A' });
+    ok('★ 이미 입금 처리된 항목만 입금 칸에 지정 날짜를 기록하고 payment_records는 다시 만들지 않는다',
+      stampBackfill.ok === true && stampBackfill.candidates === 1 && stampWrites.length === 1
+        && stampWrites[0].items.length === 1 && stampWrites[0].opts.stamp === '2026.8.11'
+        && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
+      JSON.stringify(stampBackfill));
+    APPLY.markDepositCells = origMark;
     RES.__setPoolForTest(pool);
 
     const paidRows = pool.state.filter(x => x.status === 'paid');

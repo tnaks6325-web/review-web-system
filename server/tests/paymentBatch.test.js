@@ -252,6 +252,11 @@ t('★ 목록 라우트가 상세보다 먼저 등록됐다(라우트 삼킴 방
   assert.ok(iList >= 0 && iOne >= 0 && iList < iOne, '/payment/batches 가 /payment/batch/:id 뒤에 있다');
 });
 
+t('★ 회차 결과는 재업로드 미리보기보다 실제 반영된 결과를 우선 표시한다', () => {
+  assert.ok(/ORDER BY \(applied = TRUE\) DESC,[\s\S]{0,120}uploaded_at DESC/.test(svcSrc),
+    '최신 미리보기 파일이 실제 반영된 결과를 덮어 표시한다');
+});
+
 t('★ 전 라우트가 authMiddleware + adminOrMaster (AE·광고주 차단 — 계좌 PII)', () => {
   const src = R('src/routes/trackB.routes.js');
   const block = src.slice(src.indexOf('입금관리 — 리뷰비 입금 자동화'));
