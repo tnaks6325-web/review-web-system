@@ -85,6 +85,9 @@ function makePool(items, opts = {}) {
       if (/SELECT \* FROM payment_batches WHERE id = \$1 FOR UPDATE/.test(s)) {
         return { rows: [{ id: 'B1', seq: 7, bank: 'hana', status: 'downloaded' }], rowCount: 1 };
       }
+      if (/SELECT id FROM payment_batch_items[\s\S]*status = 'pending'[\s\S]*FOR UPDATE/.test(s)) {
+        return { rows: state.filter(x => x.status === 'pending').map(x => ({ id: x.id })), rowCount: state.filter(x => x.status === 'pending').length };
+      }
       if (/FROM payment_batch_items i[\s\S]*LEFT JOIN review_index r/.test(s)) {
         return { rows: state.filter(x => x.status === 'paid').map(x => ({ ...x, submit_col2: '입금', tab_gid: 'G1' })), rowCount: state.filter(x => x.status === 'paid').length };
       }
@@ -223,6 +226,18 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     APPLY.markDepositCells = origMark;
     RES.__setPoolForTest(pool);
 
+    const failurePool = makePool([
+      { ...itemRow(30, OKROWS[0]), id: 'paid-before-confirm', status: 'paid' },
+      { ...itemRow(31, OKROWS[1]), id: 'pending-before-confirm', status: 'pending' },
+    ]);
+    RES.__setPoolForTest(failurePool);
+    const confirmedFailure = await RES.confirmOutstandingFailures({ batchId: 'B1', by: '관리자A' });
+    ok('★ 확인된 이체실패만 pending에서 failed로 전환해 다음 회차 대상이 되게 한다',
+      confirmedFailure.ok === true && confirmedFailure.failed === 1
+        && failurePool.state.find(x => x.id === 'pending-before-confirm').status === 'failed',
+      JSON.stringify(confirmedFailure));
+    RES.__setPoolForTest(pool);
+
     const paidRows = pool.state.filter(x => x.status === 'paid');
     ok('★ 입금 시각 = 결과 파일의 실제 이체시점(지금이 아니다)',
       paidRows.length === 2 && paidRows.every(x => x.paid_at && OKROWS.some(o => o.transferredAtIso === x.paid_at)),
@@ -301,10 +316,10 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       !/UPDATE review_index/i.test(resSrc) && !/INSERT INTO payment_records/i.test(resSrc));
     /* ★★ 스텁 DB 는 SQL 을 해석하지 않으므로 "조건이 SQL 에 있는가"는 **문장으로 고정**한다 —
          이 조건이 빠지면 이미 paid 인 건이 다시 paid 로 덮여 이중입금 경로가 열린다(변이시험이 잡은 구멍). */
-    ok('★★ 두 UPDATE 모두 `AND status = \'pending\'` 조건을 건다', (() => {
+    ok('★★ 모든 대기건 상태 변경 UPDATE가 `AND status = \'pending\'` 조건을 건다', (() => {
       const ups = resSrc.match(/UPDATE payment_batch_items[\s\S]*?`/g) || [];
       const gated = ups.filter(u => /WHERE id = \$1 AND status = 'pending'/.test(u));
-      return gated.length === 2;
+      return gated.length === 3;
     })());
     ok('★ recordDeposits / markDepositCells 를 재사용한다',
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)

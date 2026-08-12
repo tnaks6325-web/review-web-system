@@ -2719,4 +2719,14 @@ router.post('/payment/batch/:id/deposit-date-backfill', authMiddleware, adminOrM
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// 결과 파일 누락분이 실제 은행 실패로 확인된 경우에만, 대기 항목을 실패로 확정한다.
+router.post('/payment/batch/:id/confirm-failures', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if ((req.body || {}).confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '확인 후 이체실패 처리를 진행해 주세요.' });
+    }
+    res.json(await paymentResultSvc.confirmOutstandingFailures({ batchId: req.params.id, by: _by(req) }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 module.exports = router;

@@ -6953,10 +6953,12 @@ function _pmBatchActions(b,i){
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
   const depositDate = b.status==='applied' && (b.paidCount||0)>0
     ? `<button class="btn sm" onclick="_pmBackfillPaidDeposit(${i})">입금일 기록</button>` : '';
+  const confirmFailures = b.status==='applied' && (b.paidCount||0)>0 && (b.pendingCount||0)>0
+    ? `<button class="btn sm danger" onclick="_pmConfirmFailures(${i})">이체실패 처리</button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
     <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
-    : (b.status==='applied' ? `${depositDate}<button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>` : '');
+    : (b.status==='applied' ? `${depositDate}${confirmFailures}<button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>` : '');
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ${b.resultCanApply?`<button class="btn sm primary" onclick="_pmApplySavedResult(${i})">이대로 반영</button>`:''}` : '';
   return manage + result;
@@ -7538,6 +7540,18 @@ async function _pmBackfillPaidDeposit(i){
     { method:'POST', body: JSON.stringify({ stamp:normalized }) });
   if(!r || !r.ok){ toast((r&&r.error)||'입금일 기록 실패'); return; }
   toast(`${r.candidates||0}건의 입금 칸에 ${r.stamp}을 기록했습니다`);
+}
+
+async function _pmConfirmFailures(i){
+  const b = (STATE.pmBatches||[])[i];
+  if(!b) return;
+  const n = b.pendingCount||0;
+  if(!confirm(`#${b.seq} 회차의 결과 미확인 ${n}건을 이체실패로 처리할까요?\n\n실패 처리된 건은 다음 이체 회차에 다시 포함됩니다. 입금완료 건은 변경하지 않습니다.`)) return;
+  const r = await api('/api/trackb/payment/batch/'+b.id+'/confirm-failures',
+    { method:'POST', body: JSON.stringify({ confirm:true }) });
+  if(!r || !r.ok){ toast((r&&r.error)||'이체실패 처리 실패'); return; }
+  toast(`${r.failed||0}건을 이체실패로 처리했습니다`);
+  await _pmLoad();
 }
 
 async function _pmCancel(id, seq){

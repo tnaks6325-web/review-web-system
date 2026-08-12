@@ -463,4 +463,34 @@ async function backfillPaidDepositStamp({ batchId, stamp, by }) {
   return { ok: true, candidates: items.length, stamp: String(stamp).trim() };
 }
 
-module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+/** 확인된 은행 실패만 pending 에서 failed 로 확정한다. 실패 안내는 별도 발송하지 않는다. */
+async function confirmOutstandingFailures({ batchId, by }) {
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [batch] } = await client.query(
+      'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 실패 처리할 수 없습니다.');
+    const { rows: pending } = await client.query(
+      `SELECT id FROM payment_batch_items
+        WHERE batch_id = $1 AND status = 'pending' FOR UPDATE`, [batchId]);
+    if (!pending.length) throw new ResultError('no_pending_items', '실패 처리할 대기 항목이 없습니다.');
+    for (const item of pending) {
+      await client.query(
+        `UPDATE payment_batch_items
+            SET status = 'failed', result_status = $2, fail_reason = $3
+          WHERE id = $1 AND status = 'pending'`,
+        [item.id, '관리자 확인: 이체 실패', '관리자 확인 이체 실패']);
+    }
+    await client.query('COMMIT');
+    return { ok: true, failed: pending.length };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };

@@ -561,11 +561,12 @@ async function listBatches(limit = 50) {
     `SELECT b.*,
             (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'paid')   AS paid_count,
             (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'failed') AS failed_count,
+            (SELECT COUNT(*)::int FROM payment_batch_items i WHERE i.batch_id = b.id AND i.status = 'pending') AS pending_count,
             ru.id AS result_upload_id, ru.file_name AS result_file_name, ru.row_count AS result_row_count,
             ru.success_count AS result_success_count, ru.failed_count AS result_failed_count,
             ru.applied_count AS result_applied_count, ru.applied AS result_applied,
             ru.uploaded_at AS result_uploaded_at, ru.applied_at AS result_applied_at,
-            (ru.file_blob IS NOT NULL) AS result_has_file
+            (ru.file_blob IS NOT NULL) AS result_has_file, ru.summary AS result_summary
        FROM payment_batches b
        LEFT JOIN LATERAL (
          SELECT id, file_name, row_count, success_count, failed_count, applied_count, applied,
@@ -596,6 +597,12 @@ async function markDownloaded(batchId, by) {
 }
 
 function _batchView(b) {
+  const preview = b.result_summary && b.result_summary.preview;
+  const unmatched = Array.isArray(preview && preview.unmatchedResults) ? preview.unmatchedResults : [];
+  const parsedSuccess = unmatched.filter(x => x && x.success === true).length;
+  const parsedFailed = unmatched.filter(x => x && x.success === false).length;
+  const paidCount = b.paid_count == null ? undefined : Number(b.paid_count);
+  const failedCount = b.failed_count == null ? undefined : Number(b.failed_count);
   return {
     id: b.id, seq: Number(b.seq), bank: b.bank, bankLabel: BANK_LABEL[b.bank] || b.bank,
     status: b.status, itemCount: b.item_count, totalAmount: Number(b.total_amount || 0),
@@ -603,14 +610,15 @@ function _batchView(b) {
     downloadCount: b.download_count, lastDownloadedAt: b.last_downloaded_at,
     lastDownloadedBy: b.last_downloaded_by || '',
     cancelledAt: b.cancelled_at, cancelledBy: b.cancelled_by || '',
-    paidCount: b.paid_count == null ? undefined : b.paid_count,
-    failedCount: b.failed_count == null ? undefined : b.failed_count,
+    paidCount,
+    failedCount,
+    pendingCount: b.pending_count == null ? undefined : Number(b.pending_count),
     resultUploadId: b.result_upload_id || '',
     resultFileName: b.result_file_name || '',
     resultRowCount: b.result_row_count == null ? undefined : Number(b.result_row_count),
-    resultSuccessCount: b.result_success_count == null ? undefined : Number(b.result_success_count),
-    resultFailedCount: b.result_failed_count == null ? undefined : Number(b.result_failed_count),
-    resultAppliedCount: b.result_applied_count == null ? undefined : Number(b.result_applied_count),
+    resultSuccessCount: Math.max(Number(b.result_success_count || 0), parsedSuccess, Number(paidCount || 0)),
+    resultFailedCount: Math.max(Number(b.result_failed_count || 0), parsedFailed, Number(failedCount || 0)),
+    resultAppliedCount: Math.max(Number(b.result_applied_count || 0), Number(paidCount || 0)),
     resultApplied: b.result_applied === true,
     resultCanApply: !!(b.result_upload_id && b.result_has_file && b.result_applied !== true
       && (Number(b.result_success_count || 0) + Number(b.result_failed_count || 0) > 0)),
