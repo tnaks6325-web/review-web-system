@@ -26,7 +26,7 @@
 (function () {
   'use strict';
   var HTML = `<div id="recruitModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box rf-box" style="max-width:1060px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
+  <div class="modal-box rf-box" style="max-width:1020px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="modal-header">
       <h3 id="recruitModalTitle"><i class="fas fa-bullhorn"></i> 모집공고 등록</h3>
       <button class="btn-icon-sm" onclick="closeRecruitModal()"><i class="fas fa-times"></i></button>
@@ -39,10 +39,8 @@
         <div class="rf-rail-t">모집공고 편집<span>현재 단계가 자동으로 바뀝니다.</span></div>
         <div id="rfRailList" class="rf-step-list">
           <button type="button" class="rf-step on" data-rf-step="link"><span class="rf-step-no">1</span><span>연결 · 기본</span><span class="rf-rmk" data-mk="link"></span></button>
-          <button type="button" class="rf-step" data-rf-step="prod"><span class="rf-step-no">2</span><span>진행상품</span><span class="rf-rmk" data-mk="prod"></span></button>
+          <button type="button" class="rf-step" data-rf-step="prod"><span class="rf-step-no">2</span><span>진행상품 · 상품 정보</span><span class="rf-rmk" data-mk="prod"></span></button>
           <button type="button" class="rf-step" data-rf-step="cond"><span class="rf-step-no">3</span><span>모집 조건</span><span class="rf-rmk" data-mk="cond"></span></button>
-          <button type="button" class="rf-step" data-rf-step="fee"><span class="rf-step-no">4</span><span>리뷰비 · 입금</span><span class="rf-rmk" data-mk="fee"></span></button>
-          <button type="button" class="rf-step" data-rf-step="work"><span class="rf-step-no">5</span><span>작업내용</span><span class="rf-rmk" data-mk="work"></span></button>
         </div>
         <div id="rf_side_audit" class="rf-side-audit"><div class="rf-side-audit-head"><span>자동 점검</span><strong id="rf_side_audit_score">–</strong></div><div id="rf_part_check"></div></div>
       </nav>
@@ -875,17 +873,17 @@
 #recruitModal .rf-pinbadge{display:none}
 #recruitModal .rf-cb{padding:0 0 14px;gap:0}
 #recruitModal .rf-grid2{display:block;margin:0}
-#recruitModal .rf-hrow{grid-template-columns:96px minmax(0,1fr);gap:0;min-height:35px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
+#recruitModal .rf-hrow{grid-template-columns:minmax(112px,25%) minmax(0,75%);gap:0;min-height:43px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
 #recruitModal .rf-hrow:first-child{border-radius:8px 8px 0 0}
 #recruitModal .rf-hrow:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
-#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:39px}
+#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:43px}
 #recruitModal .rf-hrow.rf-hrow-top .rf-hl{padding-top:9px}
 #recruitModal .rf-hrow .rf-hl{display:flex;align-items:center;padding:6px 10px;background:#FBFCFE;color:#46546B;font-size:.68rem;font-weight:800;text-align:left;line-height:1.3}
 #recruitModal .rf-hrow>:not(.rf-hl){min-width:0;padding:4px 7px}
-#recruitModal .rf-hrow>.rform-input{height:27px;margin:auto 7px;padding:4px 7px}
-#recruitModal .rf-main .rform-input{min-height:27px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
+#recruitModal .rf-hrow>.rform-input{height:30px;margin:auto 7px;padding:4px 7px}
+#recruitModal .rf-main .rform-input{min-height:30px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
 #recruitModal .rf-main textarea.rform-input{min-height:56px;padding:7px}
-#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:26px;padding:4px 7px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:29px;padding:5px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rchan-btn:hover,#recruitModal .rf-pm-btn:hover,#recruitModal .rf-status-buttons button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
 #recruitModal .rchan-btn.active,#recruitModal .rf-pm-btn.on,#recruitModal .rf-status-buttons button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8;box-shadow:none}
 #recruitModal .rf-time-free{height:27px;flex-basis:92px;width:92px;font-size:.65rem}
@@ -905,6 +903,10 @@
 #recruitModal .rf-product-settings .rf-hrow{border-radius:0}
 #recruitModal .rf-product-settings .rf-hrow:first-of-type{border-radius:8px 8px 0 0}
 #recruitModal .rf-product-settings .rf-hrow:last-child{border-radius:0 0 8px 8px}
+#recruitModal .rf-card.rf-linked-subsection{margin:0;border:0;background:transparent;box-shadow:none}
+#recruitModal .rf-card.rf-linked-subsection>.rf-ch{display:none}
+#recruitModal .rf-card.rf-linked-subsection>.rf-cb{padding:0}
+#recruitModal .rf-card.rf-linked-subsection .rf-hrow{border-radius:0}
 #recruitModal .rf-fee-box{margin:0;border:1px solid #DCE3EC;border-radius:0;background:#FFFFFF}
 #recruitModal .rf-fee-sw{min-height:31px;font-size:.68rem}
 #recruitModal .rf-publish-card{order:-1;border-bottom:1px solid #DCE3EC}
@@ -1049,7 +1051,8 @@
           });
           // 게시 영역은 최상단에 고정하지만 왼쪽 단계에는 넣지 않는다.
           // 최상단 스크롤에서는 첫 단계(연결 · 기본)를 선택 상태로 유지한다.
-          if (act === 'pub') act = 'link';
+          if (act === 'pub' || act === 'fee') act = 'link';
+          if (act === 'work') act = 'prod';
           if (act) setActiveRail(act);
         });
       });
@@ -1224,6 +1227,7 @@
     var body = _mBody();
     var publish = _mCard('pub');
     var link = _mCard('link'), product = _mCard('prod');
+    var fee = _mCard('fee'), work = _mCard('work');
     var settings = document.querySelector('#recruitModal [data-product-settings]');
     var settingsSlot = document.getElementById('rf_product_settings_slot');
     var legacySlot = document.getElementById('rf_legacy_product_settings_slot');
@@ -1234,6 +1238,18 @@
     if (body && publish && link) body.insertBefore(publish, link);
     var destination = participation ? settingsSlot : legacySlot;
     if (settings && destination && settings.parentNode !== destination) destination.appendChild(settings);
+    var linkBody = link && link.querySelector('.rf-cb');
+    var chatRow = document.getElementById('rf_chat_url');
+    chatRow = chatRow && chatRow.closest('.rf-hrow');
+    if (fee && linkBody && chatRow && fee.parentNode !== linkBody) {
+      fee.classList.add('rf-linked-subsection');
+      linkBody.insertBefore(fee, chatRow);
+    }
+    var productBody = product && product.querySelector('.rf-cb');
+    if (work && productBody && work.parentNode !== productBody) {
+      work.classList.add('rf-linked-subsection');
+      productBody.appendChild(work);
+    }
   }
 
   function syncStatusButtons() {
