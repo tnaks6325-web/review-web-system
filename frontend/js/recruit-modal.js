@@ -509,7 +509,8 @@
   //   → 필요한 규칙만 `#recruitModal` 로 **스코프해서** 모듈에 동봉한다.
   //     · 스코프 = 호스트 페이지의 다른 모달·폼을 건드리지 않는다
   //     · CSS 변수는 폴백 값을 넣어 admin 테마 변수가 없는 화면에서도 제대로 보인다
-  var SHELL_CSS = `#recruitModal.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:fadeIn .2s ease}
+  var SHELL_CSS = `body.rf-recruit-modal-open{overflow:hidden}
+#recruitModal.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:fadeIn .2s ease}
 #recruitModal .modal-box{background:var(--card,#FFFFFF);border-radius:24px;width:100%;max-width:460px;max-height:calc(100vh - 40px);box-shadow:0 8px 48px rgba(15,23,42,.18),0 2px 12px rgba(15,23,42,.10);overflow:hidden;display:flex;flex-direction:column;animation:slideUp .22s ease}
 #recruitModal .modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--border,#E2E8F0);background:linear-gradient(135deg,#f8faff 0%,#f0f4ff 100%)}
 #recruitModal .modal-header h3{font-size:1rem;font-weight:700}
