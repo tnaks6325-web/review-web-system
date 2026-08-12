@@ -63,6 +63,10 @@
   function _zeroQuotaNote(c, isPre, isDraft) {
     if (isPre) return { label: '오픈 전', desc: '오픈하면 집계가 시작됩니다' };
     if (isDraft) return { label: '게시 전', desc: '게시하면 집계가 시작됩니다' };
+    if (c.stateReason === 'weekend_unpublished') {
+      const monday = _fmtMD(c.resumesOn);
+      return { label: '주말 미게시', desc: monday ? `주말에는 신청할 수 없습니다 · ${monday} 재개` : '주말에는 신청할 수 없습니다 · 월요일 재개' };
+    }
     if (c.stateReason === 'rest_day') {
       const nx = _fmtMD(c.nextWorkDate);
       return { label: '오늘 휴무', desc: nx ? `오늘은 진행일이 아닙니다 · 다음 진행일 ${nx}` : '오늘은 진행일이 아닙니다' };
@@ -696,10 +700,12 @@
     }
 
     // 시트 일정(063) 파생 표기: 휴무일이면 다음 진행일, 마감일 경과면 일정 종료
+    const weekendUnpublished = c.stateReason === 'weekend_unpublished';
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
     if (c.state === 'open') footer = `<button type="button" class="pbtn go">참여하기</button>`;
+    else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
     else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;

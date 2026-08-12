@@ -329,7 +329,6 @@ function _woDetailHtml(o) {
     _woKv("구매시간대", o.purchase_time),
     _woKv("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || ""),
     _woKv("배송유형", o.delivery_type),
-    _woKv("택배대행", o.courier_proxy ? "예" : ""),
     _woKv("리뷰타입", o.review_type),
     _woKv("물건비", o.goods_cost_type),
     _woSection("상품확인용URL", o.product_url, urlR),
@@ -475,7 +474,7 @@ const WO_TRANSITIONS = {
   revision:       ['reviewing'],
 };
 
-const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈택배' };
+const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈박스', '택배발송대행':'택배발송대행' };
 
 /* ★ 구매채널 = 상품 URL의 **호스트**로 판정한다.
    쿼리스트링까지 보면 `coupang.com/...?src=naver_ad` 같은 광고 링크를 네이버로 오판한다.
@@ -503,6 +502,17 @@ function _woChannel(o) {
       || _woChannelFromUrl((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "");
 }
 
+/** 작업오더가 명시한 진행상품 모드. 옛 오더는 빈 값으로 두고 기존 추론 규칙을 따른다. */
+function _woProductMode(o) {
+  try {
+    const products = JSON.parse(o.product_options_json || "[]");
+    const mode = Array.isArray(products) && products.length ? String(products[0].product_mode || "") : "";
+    return mode === "opt" ? "opt" : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 /** 작업오더 product_options_json → 캠페인 옵션표 행 [{optKey,payAmount,recruitTotal,dailyLimit}].
  *  옵션 2개 이상일 때만 반환(단일=옵션 없는 상품). 정원·하루건수는 오더에 없어 0(관리자 입력). */
 function _woOptionRows(o) {
@@ -515,6 +525,7 @@ function _woOptionRows(o) {
     const name = clean(prod.name);
     const opts = Array.isArray(prod.options) ? prod.options : [];
     const basePay = Number(prod.base && prod.base.pay) || 0;
+    const baseDaily = Math.max(0, Number(prod.base && (prod.base.daily_limit ?? prod.base.dailyLimit)) || 0);
     if (opts.length) {
       for (const op of opts) {
         const lab = clean(op.label);
@@ -525,15 +536,16 @@ function _woOptionRows(o) {
           // ★ 옵션명에 상품명을 붙이지 않는다 — opt_key 는 시트 옵션열에 그대로 기입되므로
           //   상품명이 섞이면 리뷰형태(텍스트/포토리뷰) 칸이 상품명으로 덮이는 사고가 난다.
           optKey: isNone ? "" : lab,
+          optionUrl: clean(op.url || op.option_url || ""),
           payAmount: Number(op.pay) || basePay,
-          // ★ 옵션별 건수가 오면 옵션 정원으로 프리필(인트라넷 구조 신호) — 없으면 0(관리자 입력).
-          //   하루건수는 오더에 옵션 단위로 없어 종전대로 관리자가 정한다.
-          recruitTotal: Math.max(0, Number(op.count) || 0), dailyLimit: 0,
+          // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
+          recruitTotal: Math.max(0, Number(op.count) || 0),
+          dailyLimit: Math.max(0, Number(op.daily_limit ?? op.dailyLimit) || 0),
         });
       }
     } else if (name) {
       // ★ 옵션이 없는 상품 — 상품명을 옵션명으로 승격시키지 않는다(상품명 칸으로만 간다).
-      rows.push({ productName: name, optKey: "", payAmount: basePay, recruitTotal: 0, dailyLimit: 0 });
+      rows.push({ productName: name, optKey: "", payAmount: basePay, optionUrl: "", recruitTotal: 0, dailyLimit: baseDaily });
     }
   }
   // 서로 다른 상품에 같은 옵션명이 있을 때만 상품명을 붙여 구분(옵션명은 공고 안에서 유일해야 한다).
@@ -542,9 +554,13 @@ function _woOptionRows(o) {
   rows.forEach(r => {
     if (r.optKey && dup.get(r.optKey) > 1 && r.productName) r.optKey = clean(r.productName + " " + r.optKey);
   });
-  // 옵션이 1개뿐이면 옵션 없는 단일상품 취급(옵션 기능은 2개 이상일 때 opt-in)
+  // 새 인트라넷 오더는 product_mode=opt 로 1개 옵션도 명시한다. 옛 오더는 종전처럼
+  // 옵션이 2개 이상일 때만 옵션 작업으로 추론한다.
   //  → 종전대로 빈 배열을 돌려 텍스트 분해 경로(parseProductLinesToRows)로 넘긴다(동작 불변).
-  return rows.filter(r => r.optKey).length >= 2 ? rows : [];
+  // 이 함수는 작업오더 화면·단독 회귀 테스트에서도 실행된다. 별도 보조함수에 의존하지 않고
+  // 같은 JSON에서 명시 모드를 읽어, 기존 오더의 2개 이상 추론 규칙과 함께 유지한다.
+  const explicitOptionMode = String((arr[0] || {}).product_mode || "") === "opt";
+  return explicitOptionMode || rows.filter(r => r.optKey).length >= 2 ? rows : [];
 }
 
 // 평문 유입가이드 → 리뷰어 노출용 HTML: 첨부 이미지 URL(guide-image 프록시·Drive)을 실제 <img>로,
@@ -706,6 +722,7 @@ function _woCampaignPrefill(o) {
     //   ★ 099: 블로그체험단에는 리뷰타입이 없다(별도 축) — 프리필하지 않는다.
     //     여기서 값을 흘리면 발행 폼이 블로그 공고에 리뷰타입을 저장해 캡처 검수가 개입한다.
     review_type:   _woIsBlogKind(o.work_kind) ? "" : (o.review_type || ""),
+    review_type_mix: _woIsBlogKind(o.work_kind) ? [] : (o.review_type_mix || []),
     // ★ 099: 체험단 종류 — 발행 폼이 그대로 저장한다(빈 값 = 리뷰 = 기존 동작).
     work_kind:     String(o.work_kind || "").trim(),
     product_url:   o.product_url || "",
@@ -725,6 +742,8 @@ function _woCampaignPrefill(o) {
     participation:  true,
     // ★ 062: 작업오더 시작일 → 발행폼 시작일 프리필(시작일 전 게시 시 "오픈 예정" 카운트다운)
     start_date:     (o.start_date || "").slice(0, 10),
+    // 주말 제외는 작업오더가 원본이다. 모집공고에는 동일한 값을 보여 주되, 실제 주말 신청 차단은 서버가 강제한다.
+    skip_weekends:  o.skip_weekends === true,
     daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
     recruit_total:  o.recruit_count || 0,
     purchase_time:  o.purchase_time || "",
@@ -748,8 +767,9 @@ function _woCampaignPrefill(o) {
     landing_url:    o.inflow_type === "link"
                       ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")
                       : "",
-    // 🧩 상품 옵션 프리필(061): product_options_json → 옵션표(2개 이상일 때만). 정원·하루는 관리자가 입력.
+    // 🧩 상품 옵션 프리필: 새 인트라넷의 명시 모드를 우선하고, 옛 오더는 기존 추론을 유지한다.
     options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
+    productMode:    (typeof _woProductMode === "function") ? _woProductMode(o) : "",
     // ★ 065: 구매채널 = 상품 URL 호스트 판정 / 담당자 = 작업담당 매핑(랜덤이면 빈 값=직접결정)
     channel:        _woChannel(o),
     manager:        _woManagerNick(o.work_manager),
@@ -888,8 +908,7 @@ function woAdminEditModal(order, opts) {
   var c2 = card(body, "📦 진행 조건");
   field(c2, "recruit_count", "총 모집건수", { type: "number" });
   field(c2, "daily_count", "일일 진행건수", { type: "number" });
-  pills(c2, "delivery_type", "배송유형", [{ v: "실배송", l: "실배송" }, { v: "빈박스", l: "빈박스" }]);
-  pills(c2, "courier_proxy", "택배대행", [{ v: "true", l: "예" }, { v: "false", l: "아니오" }]);
+  pills(c2, "delivery_type", "배송유형", [{ v: "실배송", l: "실배송" }, { v: "빈박스", l: "빈박스" }, { v: "택배발송대행", l: "택배발송대행" }]);
   pills(c2, "review_type", "리뷰타입", [
     { v: "포토", l: "포토" }, { v: "텍스트", l: "텍스트" }, { v: "구매확정", l: "구매확정" },
     { v: "별점", l: "별점" }, { v: "혼합", l: "혼합" },
@@ -1046,7 +1065,7 @@ function woAcceptTabPicker(resp, onPick) {
     _woPlainGuideToHtml: _woPlainGuideToHtml, _woReviewImgHtml: _woReviewImgHtml,
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,
     _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
-    _woOptionRows: _woOptionRows, _woCampaignPrefill: _woCampaignPrefill,
+    _woOptionRows: _woOptionRows, _woProductMode: _woProductMode, _woCampaignPrefill: _woCampaignPrefill,
     woAcceptTabPicker: woAcceptTabPicker,
     woAdminEditModal: woAdminEditModal,
   };

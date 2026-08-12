@@ -49,10 +49,10 @@
 
       <!-- ═══ 🔗 연결 · 기본 (고정 맨 위 — 연결하면 옵션표 프리필·현영 판정·시트 일정을 자동으로 쓴다) ═══ -->
       <div class="rf-card" data-sec="link">
-        <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">🔗 연결 · 기본</span><span class="rf-cn">시트·탭 연결은 나중에 추가할 수 있습니다</span></div>
+        <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">🔗 연결 · 기본</span><span id="rf_link_heading_note" class="rf-cn">시트·탭이 없으면 공고가 동작하지 않습니다</span></div>
         <div class="rf-cb">
-      <div class="rf-grid2">
-        <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rf-optional">선택</span></span>
+      <div id="rf_sheet_link_row" class="rf-grid2">
+        <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rform-req">*</span></span>
           <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)">
             <option value="">① 캠페인(시트) 선택</option>
           </select></div>
@@ -64,6 +64,7 @@
       <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 90px">
         <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
       </div>
+      <div id="rf_work_order_link_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:700;margin:-4px 0 4px 90px"></div>
       <!-- 탭이 비어 있을 때: 왜 비었는지(작업오더의 탭을 못 찾음) + 제목 유사도 추천.
            ★ 조용한 빈칸 금지 — 자동점검은 "gid 가 필요해요"라고만 하고 사유를 말하지 않는다. -->
       <div id="rf_linked_tab_note" style="display:none"></div>
@@ -93,13 +94,18 @@
         <div class="rf-hrow"><span class="rf-hl">배송유형</span>
           <select id="rf_delivery_type" class="rform-input">
             <option value="">선택 안 함</option>
-            <option value="빈택배">빈택배</option>
             <option value="실배송">실배송</option>
-            <option value="회수건">회수건</option>
+            <option value="빈박스">빈박스</option>
+            <option value="택배발송대행">택배발송대행</option>
           </select></div>
-        <div class="rf-hrow"><span class="rf-hl">팀채팅방 <span class="rform-req">*</span></span>
-          <input id="rf_chat_url" type="url" class="rform-input" placeholder="https://open.kakao.com/..."></div>
+        <div class="rf-hrow"><span class="rf-hl">현금영수증</span>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem">
+            <input type="checkbox" id="rf_cash_receipt_required" onchange="syncRecruitAutomaticBadges()" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">
+            발행 필요 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">카드와 구매 안내에 자동 표기</span>
+          </label></div>
       </div>
+      <div class="rf-hrow"><span class="rf-hl">팀채팅방 <span class="rform-req">*</span></span>
+          <input id="rf_chat_url" type="url" class="rform-input" placeholder="https://open.kakao.com/..."></div>
         </div>
       </div>
 
@@ -156,21 +162,35 @@
               <div><label class="rform-label">종료일 <span id="rf_deadline_day" style="font-weight:400;color:#9CA3AF"></span></label>
                 <input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
             </div>
-            <div><label class="rform-label">구매시간대 <span style="font-weight:400;color:#9CA3AF">(비우면 자율주문)</span></label>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input id="rf_window_start" type="time" class="rform-input" oninput="renderPartCheck()" style="flex:1">
-                <span style="color:#9CA3AF;font-weight:800">~</span>
-                <input id="rf_window_end" type="time" class="rform-input" oninput="renderPartCheck()" style="flex:1">
+            <div class="rf-hrow" style="margin:7px 0 0"><span class="rf-hl">주말 게시</span>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem">
+                <input type="checkbox" id="rf_skip_weekends" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">
+                주말 제외 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">주말에는 카드만 보이고 신청은 월요일에 재개됩니다</span>
+              </label>
+            </div>
+            <div><label class="rform-label">구매시간대</label>
+              <input id="rf_time_range" type="hidden" value="">
+              <input id="rf_window_start" type="hidden" value="">
+              <input id="rf_window_end" type="hidden" value="">
+              <div class="rf-time-control">
+                <button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))">
+                  <span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span>
+                  <span id="rf_free_time_state">시간 지정</span>
+                </button>
+                <div id="rf_time_range_control" class="rf-time-range">
+                  <button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button>
+                  <span class="rf-time-divider" aria-hidden="true">~</span>
+                  <button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button>
+                  <div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden>
+                    <div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div>
+                    <div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
           <div id="rf_deadline_warn" style="display:none;font-size:.68rem;font-weight:700;margin-top:4px"></div>
           <div class="rf-grid2" style="margin-top:8px">
-            <div class="rf-hrow" style="margin:0"><span class="rf-hl">시간 표기</span>
-              <div>
-                <input id="rf_time_range" type="text" class="rform-input" placeholder="예) 두시 ~ 네시 · 자율" maxlength="30" oninput="onRecruitTimeRangeInput()">
-                <div id="rf_autoorder_note" style="display:none;font-size:.66rem;color:#0ca678;font-weight:700;margin-top:3px">⏱ 자율주문 — 구매시간이 자동으로 비워집니다.</div>
-              </div></div>
             <div class="rf-hrow" style="margin:0"><span class="rf-hl">랜딩 URL</span>
               <input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 링크유입일 때 [상품 페이지 열기]로 노출"></div>
           </div>
@@ -186,7 +206,7 @@
               <div id="rf_carry_hold_note" style="display:none;margin-top:5px;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:7px 10px;font-size:.68rem;color:#5B21B6">⏸ 보류로 저장하면 자동 이월이 멈추고, 이미 자동 이월로 늘어나 있던 오늘 정원은 기본 일건수로 돌아가며 그만큼 보류로 이동합니다. 반영하지 않아도 물량은 사라지지 않습니다(총량까지 계속 모집 · 종료일만 뒤로).<br>※ 연결 탭의 구매일자로 일정이 잡히는 공고(시트 일정)는 정원을 시트가 정하므로 이 설정이 적용되지 않습니다 — 그때는 [📅 인원]에서 날짜별로 조절하세요.</div>
             </div>
           </div>
-          <!-- 타계정 허용 / 현금영수증 — 색 박스 대신 같은 문법의 필드행(v2 통일) -->
+          <!-- 타계정 허용 — 색 박스 대신 같은 문법의 필드행(v2 통일) -->
           <div class="rf-grid2" style="margin-top:8px;align-items:start">
             <div class="rf-hrow rf-hrow-top" style="margin:0"><span class="rf-hl">타계정</span>
               <div>
@@ -203,11 +223,6 @@
                   </div>
                   <div style="font-size:.64rem;color:var(--t3,#94A3B8);margin-top:4px">타계정 5개 보유 리뷰어는 하루 한도 1이면 5일에 걸쳐 참여합니다.</div>
                 </div>
-              </div></div>
-            <div class="rf-hrow rf-hrow-top" style="margin:0"><span class="rf-hl">현금영수증</span>
-              <div>
-                <div id="rf_cashrcpt_ro" style="font-size:.74rem;color:var(--t3,#94A3B8);font-weight:700">탭을 연결하면 진행방식에서 판정합니다</div>
-                <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">탭 설정 · 읽기 전용 — 발행 여부는 대시보드 탭설정(진행방식)에서 바꿉니다</div>
               </div></div>
           </div>
           <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3,#94A3B8);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
@@ -278,23 +293,28 @@
             <button class="rchan-btn" data-group="review_type" data-val="star" onclick="selectRfBtn('review_type',this)">⭐ 별점</button>
             <button class="rchan-btn" data-group="review_type" data-val="mixed" onclick="selectRfBtn('review_type',this)">🧩 혼합</button>
           </div>
-          <div id="rf_review_type_hint" style="font-size:.7rem;color:var(--t3,#94A3B8);margin-top:5px"></div>
+          <div id="rf_review_mix" style="display:none;margin-top:7px;padding:8px 9px;border:1px solid var(--border,#E2E8F0);border-radius:7px;background:var(--bg,#F8FAFC)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:.72rem">
+              <strong style="color:var(--t1,#1E293B)">리뷰 조합</strong>
+              <span id="rf_review_mix_total" style="color:var(--t3,#64748B)">합계 0명 · 총인원 0명</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px">
+              <label style="font-size:.68rem;color:var(--t3,#64748B)">포토<input class="rform-input" data-mix-type="photo" type="number" min="0" inputmode="numeric" value="0" oninput="syncRecruitReviewTypeMix()" style="width:100%;height:28px;margin-top:3px;text-align:right"></label>
+              <label style="font-size:.68rem;color:var(--t3,#64748B)">텍스트<input class="rform-input" data-mix-type="text" type="number" min="0" inputmode="numeric" value="0" oninput="syncRecruitReviewTypeMix()" style="width:100%;height:28px;margin-top:3px;text-align:right"></label>
+              <label style="font-size:.68rem;color:var(--t3,#64748B)">구매확정<input class="rform-input" data-mix-type="confirm" type="number" min="0" inputmode="numeric" value="0" oninput="syncRecruitReviewTypeMix()" style="width:100%;height:28px;margin-top:3px;text-align:right"></label>
+              <label style="font-size:.68rem;color:var(--t3,#64748B)">별점<input class="rform-input" data-mix-type="star" type="number" min="0" inputmode="numeric" value="0" oninput="syncRecruitReviewTypeMix()" style="width:100%;height:28px;margin-top:3px;text-align:right"></label>
+            </div>
+          </div>
           <input id="rf_review_type" type="hidden">
         </div></div>
       <!-- 안내배지 -->
       <div class="rf-hrow rf-hrow-top"><span class="rf-hl">안내배지</span>
         <div>
           <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px" id="rf_badge_presets">
-            <button class="rbadge-preset" onclick="addPresetBadge('현영건')">현영건</button>
-            <button class="rbadge-preset" onclick="addPresetBadge('로켓와우')">로켓와우</button>
             <button class="rbadge-preset" onclick="addPresetBadge('3.3% 공제')">3.3% 공제</button>
             <button class="rbadge-preset" onclick="addPresetBadge('텍스트 제공')">텍스트 제공</button>
-            <button class="rbadge-preset" onclick="addPresetBadge('포토리뷰')">포토리뷰</button>
             <button class="rbadge-preset" onclick="addPresetBadge('옵션지정')">옵션지정</button>
-            <button class="rbadge-preset" onclick="addPresetBadge('와우 필수')">와우 필수</button>
-            <button class="rbadge-preset" onclick="addPresetBadge('사진 5장+')">사진 5장+</button>
             <button class="rbadge-preset" onclick="addPresetBadge('일반결제')">일반결제</button>
-            <button class="rbadge-preset" onclick="addPresetBadge('구매확정')">구매확정</button>
           </div>
           <div id="rf_badges_wrap"
             style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;min-height:40px;cursor:text;align-items:center"
@@ -315,7 +335,7 @@
           </div>
           <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">가져오기: 네이버·올리브영 (쿠팡 제한적)</div>
           <div id="rf_product_preview" style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border,#E2E8F0);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
-            <img id="rf_pp_img" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border,#E2E8F0);background:#fff">
+            <img id="rf_pp_img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border,#E2E8F0);background:#fff">
             <div style="min-width:0;flex:1">
               <div id="rf_pp_name" style="font-weight:700;font-size:.8rem;word-break:break-word"></div>
               <div id="rf_pp_price" style="font-size:.8rem;color:var(--p,#3182f6);font-weight:700;margin-top:2px"></div>
@@ -333,7 +353,7 @@
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
             <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCampThumb(this)">
-            <img id="rf_thumb_preview" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border,#E2E8F0);display:none">
+            <img id="rf_thumb_preview" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border,#E2E8F0);display:none">
           </div>
         </div></div>
         </div>
@@ -536,7 +556,7 @@
      그래서 모달이 떠 있는 동안의 안내는 전부 여기서 그린다. */
 #recruitModal .modal-footer{position:relative}
 #recruitModal .rf-blockbar{position:absolute;left:18px;right:18px;bottom:calc(100% + 6px);background:#FDF0F0;
-  border:1px solid #F4C3C3;border-left:4px solid #E5484D;border-radius:9px;padding:8px 11px;font-size:.74rem;
+  border:1.5px solid #F4C3C3;border-radius:9px;padding:8px 11px;font-size:.74rem;
   font-weight:700;color:#B42318;display:flex;align-items:center;gap:7px;box-shadow:0 4px 14px rgba(180,35,24,.12);
   z-index:2;animation:fadeIn .16s ease}
 #recruitModal .rf-blockbar .rf-bb-go{margin-left:auto;flex:none;font-size:.7rem;font-weight:800;color:#B42318;background:#fff;
@@ -620,7 +640,7 @@
 .rf-cn{flex:1;font-size:.64rem;font-weight:700;color:var(--t3,#94A3B8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rf-cb{padding:11px 13px;display:flex;flex-direction:column;gap:2px}
 .rf-pinbadge{font-size:.6rem;font-weight:800;color:#B0BAC9;border:1px dashed var(--border,#E2E8F0);border-radius:6px;padding:1px 6px;flex-shrink:0}
-.rf-legacy{border-left:3px solid #F59E0B;background:#FFFDF6}
+.rf-legacy{border-color:#F4C978;background:#FFFDF6}
 /* 밀도 — 라벨·입력 간격을 좁혀 한 화면에 더 담는다 */
 .rf-main .rform-label{margin-bottom:2px;font-size:.72rem}
 .rf-main .rform-input{padding:7px 9px;font-size:.82rem}
@@ -633,6 +653,22 @@
 .rf-hrow.rf-hrow-top .rf-hl{padding-top:7px}
 .rf-hrow .rf-hl{font-size:.72rem;font-weight:700;color:var(--t2,#475569);text-align:right;line-height:1.25}
 .rf-hrow .rform-input{margin:0}
+.rf-time-control{display:flex;align-items:center;gap:6px;min-width:0}
+.rf-time-free{display:inline-flex;align-items:center;gap:5px;flex:0 0 88px;width:88px;height:30px;padding:0 7px;border:1px solid var(--border,#E2E8F0);border-radius:7px;background:var(--card,#fff);color:var(--t2,#475569);font:inherit;font-size:.68rem;font-weight:800;white-space:nowrap;cursor:pointer;transition:border-color .16s ease-out,background-color .16s ease-out,color .16s ease-out}
+.rf-time-free:hover{border-color:var(--p,#3182F6)}
+.rf-time-free.on{border-color:#B9D1FA;background:#EEF4FE;color:var(--p,#3182F6)}
+.rf-time-switch{position:relative;width:24px;height:14px;border-radius:999px;background:#CBD5E1;transition:background-color .16s ease-out;flex:none}
+.rf-time-knob{position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgb(0 0 0 / .18);transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.rf-time-free.on .rf-time-switch{background:var(--p,#3182F6)}
+.rf-time-free.on .rf-time-knob{transform:translateX(10px)}
+.rf-time-range{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);flex:1;min-width:180px}
+.rf-time-field{height:30px;min-width:0;padding:0 8px;border:1px solid var(--border,#E2E8F0);background:var(--card,#fff);color:var(--t1,#0F172A);font:inherit;font-size:.76rem;text-align:left;cursor:pointer;transition:border-color .16s ease-out,background-color .16s ease-out}
+.rf-time-field:first-child{border-radius:7px 0 0 7px}.rf-time-field:last-of-type{border-left:0;border-radius:0 7px 7px 0}.rf-time-field:hover{border-color:var(--p,#3182F6)}.rf-time-field:disabled{cursor:not-allowed;background:#F3F6FA;color:#94A3B8}
+.rf-time-divider{display:grid;place-items:center;border-top:1px solid var(--border,#E2E8F0);border-bottom:1px solid var(--border,#E2E8F0);background:var(--card,#fff);color:var(--t3,#94A3B8);font-size:.72rem}.rf-time-range.is-disabled{opacity:.64}
+.rf-time-picker{position:absolute;z-index:30;top:calc(100% + 6px);left:0;width:258px;padding:8px;border:1px solid var(--border,#E2E8F0);border-radius:9px;background:var(--card,#fff);box-shadow:0 14px 28px rgb(0 0 0 / .12)}
+.rf-time-picker-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--t2,#475569);font-size:.68rem}.rf-time-picker-head button{display:grid;place-items:center;width:20px;height:20px;border:0;border-radius:5px;background:transparent;color:var(--t3,#94A3B8);font:inherit;cursor:pointer}.rf-time-picker-head button:hover{background:#F1F5F9;color:var(--t2,#475569)}
+.rf-time-picker-body{display:grid;grid-template-columns:1fr 74px;gap:8px}.rf-time-picker-body>div>span{display:block;margin-bottom:4px;color:var(--t3,#94A3B8);font-size:.6rem;font-weight:800}.rf-time-hour-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:3px}.rf-time-minute-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}.rf-time-hour-grid button,.rf-time-minute-grid button{height:24px;padding:0;border:0;border-radius:4px;background:#F5F7FA;color:var(--t2,#475569);font:inherit;font-size:.62rem;font-weight:800;cursor:pointer}.rf-time-hour-grid button:hover,.rf-time-minute-grid button:hover{background:#E7F0FF;color:var(--p,#3182F6)}.rf-time-hour-grid button.on,.rf-time-minute-grid button.on{background:var(--p,#3182F6);color:#fff}
+@media (prefers-reduced-motion:reduce){.rf-time-free,.rf-time-switch,.rf-time-knob,.rf-time-field{transition:none}}
 @media (max-width:1100px){
   .rf-hrow,.rf-hrow.rf-hrow-top{grid-template-columns:1fr;gap:3px}
   .rf-hrow .rf-hl{text-align:left;padding-top:0}
@@ -660,9 +696,12 @@
 #recruitModal .rf-pm-none .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-prod-head[data-pm="none"],
 #recruitModal .rf-pm-none .rf-pm-help[data-pm="opt"],#recruitModal .rf-pm-opt .rf-pm-help[data-pm="none"]{display:none}
 #recruitModal .rf-pm-none .rf-prod-head[data-pm="none"],#recruitModal .rf-pm-none .rf-opt-row{grid-template-columns:1.6fr .85fr .62fr .62fr 26px}
+#recruitModal .rf-pm-none .rf-opt-url{display:none}
 #recruitModal .rf-pm-none .rf-opt-name{display:none}
-#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px 1.6fr .85fr .62fr .62fr 26px}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns:18px minmax(0,1.18fr) minmax(0,1fr) .85fr .62fr .62fr 26px}
 #recruitModal .rf-pm-opt .rf-opt-prod{display:none}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"]::before{content:''}
+#recruitModal .rf-pm-opt .rf-prod-head[data-pm="opt"] span:first-child::before{content:'옵션 URL'}
 #recruitModal .rf-pm-opt .rf-opt-row::before{content:'└';color:var(--t4,#CBD5E1);font-size:.72rem;text-align:center}
 /* 상품 그룹 머리(옵션 있는 작업 전용) */
 #recruitModal .rf-gp{border:1px solid var(--border,#E2E8F0);border-radius:10px;padding:9px 10px;margin-bottom:9px;background:#FCFDFF}
@@ -700,9 +739,9 @@
 .rf-pvtoggle{display:none;width:100%;margin:0;padding:9px;background:#EEF3FD;color:var(--p,#3182F6);
              border:none;border-top:1px solid var(--border,#E2E8F0);font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit}
 /* 🔗 연결 탭 안내 + 유사도 추천 — 탭이 비어 있을 때만 뜬다(선택되면 사라진다) */
-.rf-ltnote{margin:-2px 0 6px 90px;border:1px solid var(--border,#E2E8F0);border-left:3px solid #F59E0B;border-radius:9px;
+.rf-ltnote{margin:-2px 0 6px 90px;border:1px solid #F4C978;border-radius:9px;
   background:#FFFDF6;padding:8px 10px;font-size:.72rem;color:var(--t2,#475569);line-height:1.55}
-.rf-ltnote.plain{border-left-color:var(--p,#3182F6);background:#F6F9FF}
+.rf-ltnote.plain{border-color:var(--p,#3182F6);background:#F6F9FF}
 .rf-ltnote b{color:var(--t1,#0F172A)}
 .rf-ltnote .rf-ltwant{font-weight:800;color:#92400E;word-break:break-all}
 .rf-ltnote .rf-ltrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
@@ -885,12 +924,19 @@
     updateRailMarks();
   }
 
+  function scrollRailToCard(card) {
+    var body = _mBody();
+    if (!body || !card) return;
+    var top = card.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop - 10;
+    body.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
   function bindRail(rail) {
     Array.prototype.forEach.call(rail.children, function (it) {
       var key = it.getAttribute('data-key');
       it.addEventListener('click', function () {
         var c = _mCard(key);
-        if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'start' }); setActiveRail(key); }
+        if (c) { scrollRailToCard(c); setActiveRail(key); }
       });
       var h = it.querySelector('.rf-rhnd');
       if (!h) return;                                        // 고정 항목은 드래그 없음
@@ -954,7 +1000,8 @@
   function _railMark(key) {
     switch (key) {
       case 'link':
-        return (_val('rf_manager') && _val('rf_channel') && _val('rf_chat_url')) ? 'ok' : 'req';
+        var sourceWorkOrder = (typeof _woPrefillOrderId !== 'undefined' && _woPrefillOrderId);
+        return ((sourceWorkOrder || _val('rf_linked_tab')) && _val('rf_manager') && _val('rf_channel') && _val('rf_chat_url')) ? 'ok' : 'req';
       case 'pub': {
         if (!_val('rf_title')) return 'req';
         var pc = document.getElementById('rf_part_check');

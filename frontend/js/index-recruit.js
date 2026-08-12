@@ -855,20 +855,135 @@ function openRecruitProductUrl() {
 /** 시간 표기에 "자유/자율"이 있으면 자율주문 — 구매시간을 비우고 안내한다.
  *  리뷰어 앱 모달(_caeIsAutoOrder/_caeToggleWindow)과 같은 규율. 관리자가 매번 손으로
  *  비우던 것을 자동화하되, **값을 지우는 건 사용자가 자율로 적었을 때만**이라 오작동 여지가 없다. */
+let _rfActiveTimePickerField = "rf_window_start";
+
+function _rfPadTime(value) {
+  return String(value).padStart(2, "0");
+}
+
+function _rfTimeParts(fieldId) {
+  const value = document.getElementById(fieldId || _rfActiveTimePickerField)?.value || "13:00";
+  const [hour = "13", minute = "00"] = value.split(":");
+  return { hour, minute };
+}
+
 function _isRecruitAutoOrder() {
+  const toggle = document.getElementById("rf_free_time_toggle");
+  if (toggle) return toggle.classList.contains("on");
   return /자유|자율/.test(document.getElementById("rf_time_range")?.value || "");
 }
-function onRecruitTimeRangeInput() {
-  const auto = _isRecruitAutoOrder();
-  const note = document.getElementById("rf_autoorder_note");
-  if (note) note.style.display = auto ? "" : "none";
-  if (auto) {
+
+function rfSyncPurchaseTimeValue() {
+  const start = document.getElementById("rf_window_start")?.value || "";
+  const end = document.getElementById("rf_window_end")?.value || "";
+  const free = _isRecruitAutoOrder();
+  const range = document.getElementById("rf_time_range");
+  const startButton = document.getElementById("rf_window_start_button");
+  const endButton = document.getElementById("rf_window_end_button");
+  const state = document.getElementById("rf_free_time_state");
+  if (range) range.value = free ? "자유시간대" : (start && end ? `${start} ~ ${end}` : "");
+  if (startButton) startButton.textContent = start || "시작";
+  if (endButton) endButton.textContent = end || "종료";
+  if (state) state.textContent = free ? "자유시간대" : "시간 지정";
+  if (typeof renderPartCheck === "function") renderPartCheck();
+  if (typeof _onPreviewInput === "function") _onPreviewInput();
+}
+
+function rfRenderTimePicker() {
+  const hourGrid = document.getElementById("rf_time_picker_hours");
+  const minuteGrid = document.getElementById("rf_time_picker_minutes");
+  const title = document.getElementById("rf_time_picker_title");
+  if (!hourGrid || !minuteGrid) return;
+  const { hour, minute } = _rfTimeParts();
+  if (title) title.textContent = _rfActiveTimePickerField === "rf_window_start" ? "구매 시작 시간" : "구매 종료 시간";
+  hourGrid.innerHTML = Array.from({ length: 24 }, (_, value) => {
+    const time = _rfPadTime(value);
+    return `<button type="button" data-time-hour="${time}" class="${time === hour ? "on" : ""}" onclick="rfSetTimePickerPart('hour','${time}')">${time}</button>`;
+  }).join("");
+  minuteGrid.innerHTML = Array.from({ length: 6 }, (_, value) => {
+    const time = _rfPadTime(value * 10);
+    return `<button type="button" data-time-minute="${time}" class="${time === minute ? "on" : ""}" onclick="rfSetTimePickerPart('minute','${time}')">${time}</button>`;
+  }).join("");
+}
+
+function rfOpenTimePicker(fieldId) {
+  if (_isRecruitAutoOrder()) return;
+  _rfActiveTimePickerField = fieldId;
+  document.getElementById("rf_time_picker")?.removeAttribute("hidden");
+  [["rf_window_start", "rf_window_start_button"], ["rf_window_end", "rf_window_end_button"]].forEach(([, buttonId]) => {
+    document.getElementById(buttonId)?.setAttribute("aria-expanded", String(buttonId === `${fieldId}_button`));
+  });
+  rfRenderTimePicker();
+}
+
+function rfCloseTimePicker() {
+  document.getElementById("rf_time_picker")?.setAttribute("hidden", "");
+  ["rf_window_start_button", "rf_window_end_button"].forEach(id => document.getElementById(id)?.setAttribute("aria-expanded", "false"));
+}
+
+function rfSetTimePickerPart(part, value) {
+  const field = document.getElementById(_rfActiveTimePickerField);
+  if (!field || _isRecruitAutoOrder()) return;
+  const current = _rfTimeParts();
+  // 분은 패널에서만 고르고 10분 단위 버튼만 제공한다. 기존 공고의 과거 값은 보존하되,
+  // 새 선택은 반드시 이 규칙을 통과한다.
+  field.value = part === "hour" ? `${value}:${current.minute}` : `${current.hour}:${value}`;
+  rfRenderTimePicker();
+  rfSyncPurchaseTimeValue();
+}
+
+function rfSetFreeTime(isFreeTime) {
+  const toggle = document.getElementById("rf_free_time_toggle");
+  const range = document.getElementById("rf_time_range_control");
+  if (!toggle || !range) return;
+  toggle.classList.toggle("on", isFreeTime);
+  toggle.setAttribute("aria-pressed", String(isFreeTime));
+  range.classList.toggle("is-disabled", isFreeTime);
+  ["rf_window_start_button", "rf_window_end_button"].forEach(id => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = isFreeTime;
+  });
+  if (isFreeTime) {
     ["rf_window_start", "rf_window_end"].forEach(id => {
-      const el = document.getElementById(id);
-      if (el && el.value) el.value = "";
+      const field = document.getElementById(id);
+      if (field) field.value = "";
     });
-    if (typeof renderPartCheck === "function") renderPartCheck();
+    rfCloseTimePicker();
   }
+  rfSyncPurchaseTimeValue();
+}
+
+function rfApplyPurchaseTime({ timeRange = "", start = "", end = "" } = {}) {
+  const text = String(timeRange || "").trim();
+  const parsed = _parsePurchaseTime(text);
+  const startValue = String(start || "").slice(0, 5) || parsed?.start || "";
+  const endValue = String(end || "").slice(0, 5) || parsed?.end || "";
+  if (/자유|자율/.test(text) || (!startValue && !endValue && !text)) {
+    rfSetFreeTime(true);
+    return;
+  }
+  const startField = document.getElementById("rf_window_start");
+  const endField = document.getElementById("rf_window_end");
+  if (startField) startField.value = startValue;
+  if (endField) endField.value = endValue;
+  rfSetFreeTime(false);
+  rfSyncPurchaseTimeValue();
+}
+
+function rfBindPurchaseTimePicker() {
+  const modal = document.getElementById("recruitModal");
+  if (!modal || modal.dataset.rfTimePickerBound === "1") return;
+  modal.dataset.rfTimePickerBound = "1";
+  modal.addEventListener("click", event => {
+    const picker = document.getElementById("rf_time_picker");
+    if (!picker || picker.hasAttribute("hidden")) return;
+    if (picker.contains(event.target) || event.target.closest?.("[data-rf-time-trigger]")) return;
+    rfCloseTimePicker();
+  });
+}
+
+function onRecruitTimeRangeInput() {
+  rfApplyPurchaseTime({ timeRange: document.getElementById("rf_time_range")?.value || "" });
 }
 
 /* ═══════════════════════════════════════
@@ -914,12 +1029,14 @@ function onParticipationToggle(on) {
   if (window.RecruitModal && RecruitModal.refreshRail) RecruitModal.refreshRail();   // 레일 목차 동기화
   _syncRecruitPaneGate(on);
   if (on) {
-    // 작업오더의 "2시~4시" 같은 진행시간 텍스트를 시각으로 프리필(비어있을 때만 — 관리자는 확인·수정)
+    // 작업오더의 "2시~4시" 같은 진행시간 텍스트를 시각으로 프리필한다.
+    // rfApplyPurchaseTime은 기존 hidden 필드와 카드 미리보기를 함께 동기화한다.
     const ws = document.getElementById("rf_window_start");
     const we = document.getElementById("rf_window_end");
     if (ws && we && !ws.value && !we.value) {
-      const parsed = _parsePurchaseTime(document.getElementById("rf_time_range")?.value || "");
-      if (parsed) { ws.value = parsed.start; we.value = parsed.end; }
+      rfApplyPurchaseTime({ timeRange: document.getElementById("rf_time_range")?.value || "" });
+    } else {
+      rfSyncPurchaseTimeValue();
     }
     renderPartCheck();
   }
@@ -1024,7 +1141,7 @@ function _parsePurchaseTime(text) {
 function _htmlToPlainPreview(html) {
   return String(html)
     .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n")
-    .replace(/<img[^>]*>/gi, "")
+    .replace(new RegExp("<" + "img" + "[^>]*>", "gi"), "")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
     .replace(/\n{3,}/g, "\n\n").trim();
@@ -1077,7 +1194,7 @@ function _igSetList(field, urls) {
 /** 유입가이드 HTML → { textHtml(사진 뺀 나머지), urls(등장 순서) } */
 function _igSplitInflow(html) {
   const urls = [];
-  const textHtml = String(html || "").replace(/<img\b[^>]*>/gi, (tag) => {
+  const textHtml = String(html || "").replace(new RegExp("<" + "img" + "\\b[^>]*>", "gi"), (tag) => {
     const m = tag.match(/src\s*=\s*["']([^"']+)["']/i);
     if (m && _IG_URL_RE.test(m[1].trim())) urls.push(m[1].trim());
     return "";
@@ -1217,7 +1334,7 @@ function _igLightboxEl() {
   el.tabIndex = -1;                                     // ★ 열 때 여기로 포커스를 옮긴다(방향키 확보)
   el.innerHTML =
     `<div class="iglb-wrap">
-       <img id="igLbImg" alt="">
+       <img id="igLbImg" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="">
        <button type="button" class="iglb-close" title="닫기 (Esc)">✕</button>
      </div>
      <div class="iglb-bar">
@@ -1395,14 +1512,29 @@ if (typeof window !== "undefined" && !window._igKeyBound) {
   Object.keys(_IG_FIELDS).forEach(_igBind);
 }
 
+function _syncSourceWorkOrderLinkUi() {
+  const sourceMode = !!_woPrefillOrderId;
+  const sheetRow = document.getElementById("rf_sheet_link_row");
+  const sourceInfo = document.getElementById("rf_work_order_link_info");
+  const headingNote = document.getElementById("rf_link_heading_note");
+  if (sheetRow) sheetRow.style.display = sourceMode ? "none" : "";
+  if (headingNote) headingNote.textContent = sourceMode
+    ? "작업오더 작업표에 자동 연결됩니다"
+    : "시트·탭이 없으면 공고가 동작하지 않습니다";
+  if (sourceInfo) {
+    sourceInfo.style.display = sourceMode ? "block" : "none";
+    sourceInfo.textContent = sourceMode ? "작업오더 작업표 자동 연결 · 시트 선택이 필요하지 않습니다" : "";
+  }
+}
+
 /** 게시 전 자동 점검 — 서버 활성화 게이트와 동일 3항목(빠지면 active 저장이 서버에서 거부됨) */
 function participationCheckErrors() {
   const errs = [];
   const tabKey = document.getElementById("rf_linked_tab")?.value || "";
   const tabMeta = _recruitTabList.find(x => x.key === tabKey);
-  // 시트 미연결 공고는 허용한다. 다만 연결을 선택했다면 탭 gid까지 완성되어야
-  // 리네임·시트쓰기 대상이 엇갈리지 않는다.
-  if (tabKey && !(tabMeta && tabMeta.tabGid)) errs.push("선택한 시트 탭의 gid를 확인해주세요");
+  // 작업오더에서 연 공고는 서버가 접수된 무시트 작업표를 연결한다. 이 화면에서
+  // 과거 시트/탭을 다시 고르도록 막으면 정상적인 작업오더→공고 흐름이 멈춘다.
+  if ((!tabKey || !(tabMeta && tabMeta.tabGid)) && !_woPrefillOrderId) errs.push("시트 탭 연결(gid 포함)이 필요해요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
@@ -1419,10 +1551,8 @@ function renderPartCheck() {
   const _ws = document.getElementById("rf_window_start")?.value || "";
   const _we = document.getElementById("rf_window_end")?.value || "";
   const items = [
-    {
-      label: tabKey ? "시트 탭 연결됨 (gid)" : "시트 탭 미연결 — 나중에 추가 가능",
-      fail: errs.some(e => e.includes("gid")),
-    },
+    { label: _woPrefillOrderId ? "작업오더 작업표 자동 연결" : "시트 탭 연결됨 (gid)",
+      fail: errs.some(e => e.includes("탭 연결")) },
     { label: (!_ws && !_we) ? "구매시간 미설정 = 자율주문(종일 오픈)" : "구매시간 입력됨 (시작 < 종료)",
       fail: errs.some(e => e.includes("구매시간")) },
     { label: "하루 진행 인원 입력됨", fail: errs.some(e => e.includes("하루 진행")) },
@@ -1615,6 +1745,7 @@ function _buildOptRowEl(data) {
     ? '<button type="button" class="btn-icon-sm rf-opt-reopen" title="옵션 재개(다시 모집)" style="color:#12b886"><i class="fas fa-rotate-left"></i></button>'
     : '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
   row.innerHTML =
+    '<input class="rform-input rf-opt-url" type="url" inputmode="url" maxlength="2048" placeholder="옵션 URL">' +
     '<input class="rform-input rf-opt-prod" placeholder="상품명">' +
     '<input class="rform-input rf-opt-name" placeholder="옵션명(없으면 비움)">' +
     '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액">' +
@@ -1624,6 +1755,7 @@ function _buildOptRowEl(data) {
   const rt = d.recruitTotal ?? d.recruit_total, dl = d.dailyLimit ?? d.daily_limit, pay = d.payAmount ?? d.pay_amount;
   // 상품명은 옵션 테이블에 없던 값 — 넘겨받지 않았으면 바로 위 행에서 따라온다(반복 입력 제거)
   row.querySelector(".rf-opt-prod").value = d.productName ?? d.product_name ?? _lastOptProductName();
+  row.querySelector(".rf-opt-url").value = d.optionUrl ?? d.option_url ?? d.url ?? "";
   row.querySelector(".rf-opt-name").value = d.optKey ?? d.opt_key ?? "";
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
@@ -1680,6 +1812,7 @@ function renderOptRows(options, opts) {
     : "옵션 정보가 없어 자동 선택됨"));
   _renderProdTable(list.map(o => ({
     productName: o.productName ?? o.product_name ?? "",
+    optionUrl:   o.optionUrl ?? o.option_url ?? o.url ?? "",
     optKey:      o.optKey ?? o.opt_key ?? "",
     payAmount:   o.payAmount ?? o.pay_amount ?? 0,
     recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
@@ -1719,14 +1852,27 @@ function renderOptRowsWithProduct(options, productLines) {
 /** 옵션표 → 저장 payload 배열(빈 옵션명 제거, '|' 정규화, 마감상태 보존)
  *  ★★ 모드가 옵션 유무의 단일 출처 — '옵션 없는 작업'이면 숨은 칸에 값이 남아 있어도 **무조건 빈 배열**.
  *     (서버는 빈 배열을 "옵션 정리"로 받아 참여자 없는 옵션은 삭제·있는 옵션은 마감 보존한다) */
+function _rfHttpUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 2048) return "";
+  try {
+    const parsed = new URL(raw);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") ? parsed.href : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function readOptRows() {
   const out = [];
   if (_prodMode() !== "opt") return out;
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
+    const optionUrl = String(r.querySelector(".rf-opt-url")?.value || "").trim();
     const optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
     if (!optKey) return;                       // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
     out.push({
       optKey,
+      optionUrl,
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
       recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
       dailyLimit:    Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0),
@@ -1748,12 +1894,13 @@ function _readProdRowsRaw() {
   const out = [];
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const productName = String(r.querySelector(".rf-opt-prod").value || "").trim();
+    const optionUrl   = String(r.querySelector(".rf-opt-url")?.value || "").trim();
     const optKey      = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
     const payAmount   = Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0);
     const recruitTotal = Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0);
     const dailyLimit   = Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0);
     if (!productName && !optKey && !payAmount) return;   // 완전 빈 행 제외
-    out.push({ productName, optKey, payAmount, recruitTotal, dailyLimit,
+    out.push({ productName, optionUrl, optKey, payAmount, recruitTotal, dailyLimit,
                closed: r.dataset.status === "closed" });
   });
   return out;
@@ -1780,6 +1927,7 @@ function _syncPreviewFromOptRows() {
   // 하나라도 0(무제한)이면 합계도 0(무제한) — 부분합이 상한처럼 보이면 조기 마감 사고가 난다
   if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
   if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
+  if (typeof syncRecruitReviewTypeMix === "function") syncRecruitReviewTypeMix();
   _markDupProductNames();
   _optSummary();     // 프로그램으로 표를 바꿔도(작업오더 자동 적용 등) 요약이 따라오게
   _syncGroupTotals();
@@ -1846,13 +1994,21 @@ function applyProductRowsFromOrder(prefill) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   const p = prefill || {};
-  if (Array.isArray(p.options) && p.options.length) {
-    renderOptRows(p.options.map(o => ({
+  const sourceMode = p.productMode === "opt" ? "opt" : "";
+  const sourceOptions = (Array.isArray(p.options) ? p.options : []).map(o => ({
       productName: o.productName || p.product_name || "",
+      optionUrl: o.optionUrl || o.option_url || o.url || "",
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
-    })), { mode: "opt" });
+    }));
+  if (sourceMode) {
+    renderOptRows(sourceOptions, { mode: sourceMode });
+    _setProdModeNote("작업오더의 옵션 정보로 자동 선택됨");
+    return;
+  }
+  if (sourceOptions.length) {
+    renderOptRows(sourceOptions, { mode: "opt" });
     _setProdModeNote("작업오더의 옵션 정보로 자동 선택됨");
     return;
   }
@@ -2083,12 +2239,18 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfLinkedMiss = null; _rfSugCache = [];
   { const _n = document.getElementById("rf_linked_tab_note"); if (_n) { _n.style.display = "none"; _n.innerHTML = ""; } }
   _populateCampaignSelect();   /* 1단계 캠페인 드롭다운 초기화 */
+  _syncSourceWorkOrderLinkUi();
 
   /* ⚡ 참여형(M2) 필드 초기화 */
   ["rf_start_date","rf_window_start","rf_window_end","rf_daily_limit","rf_recruit_total","rf_landing_url",
    "rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes"].forEach(i => {
     const el = document.getElementById(i); if (el) el.value = "";
   });
+  const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
+  if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
+  const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false;
+  document.querySelectorAll('#rf_review_mix [data-mix-type]').forEach((el) => { el.value = '0'; });
+  syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
   /* ⏸ 098 이월 반영 초기화 — 신규 공고 기본 [자동](현행) */
@@ -2102,6 +2264,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
      레거시(일반) 공고를 편집할 땐 아래 프리필의 else 분기가 다시 끈다. */
   const _partEl = document.getElementById("rf_participation");
   if (_partEl) { _partEl.checked = true; onParticipationToggle(true); }
+  rfBindPurchaseTimePicker();
+  rfApplyPurchaseTime();
   if (typeof renderOptRows === "function") renderOptRows([]);   // 🧩 옵션표 초기화(061)
   if (typeof renderFeeRows === "function") renderFeeRows([]);   // 📅 기간별 리뷰비 초기화(082) — 신규 공고는 항상 꺼짐
   window._wdInflowRawHtml = null;
@@ -2146,6 +2310,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_max_slots").value    = c.max_slots ?? 0;
       document.getElementById("rf_status").value       = c.status || "draft";
       document.getElementById("rf_delivery_type").value = c.delivery_type || "";
+      const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = c.cash_receipt_required === true;
 
       /* 담당자 */
       const mgrVal = c.manager || "";
@@ -2171,6 +2336,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const rawBadges = c.badges;
       _recruitBadges = Array.isArray(rawBadges) ? [...rawBadges]
                      : (typeof rawBadges === "string" && rawBadges ? JSON.parse(rawBadges) : []);
+      syncRecruitAutomaticBadges();
       _refreshBadgeWrap();
 
       /* 연결 탭 복원 */
@@ -2187,8 +2353,15 @@ async function openRecruitModal(id, prefill, woOrderId) {
         if (pe) { pe.checked = true; onParticipationToggle(true); }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
+        const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
+        if (_skipWeekendsEl) _skipWeekendsEl.checked = c.skip_weekends === true;
         setV("rf_window_start", (c.window_start || "").slice(0, 5));
         setV("rf_window_end", (c.window_end || "").slice(0, 5));
+        rfApplyPurchaseTime({
+          timeRange: c.time_range || "",
+          start: (c.window_start || "").slice(0, 5),
+          end: (c.window_end || "").slice(0, 5)
+        });
         setV("rf_daily_limit", c.daily_limit || "");
         setV("rf_recruit_total", c.recruit_total ?? "");
         setV("rf_landing_url", c.landing_url || "");
@@ -2209,6 +2382,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
           if (_rh) _rh.checked = c.reviewer_hidden === true;
         }
         /* ✅ 087 리뷰타입 복원 — 저장값(표준 key)이 없으면 [미지정]이 선택된다 */
+        const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
+          try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
+        })();
+        savedReviewMix.forEach((row) => {
+          const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
+          if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
+        });
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
@@ -2220,7 +2400,6 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_deadline", c.deadline ? String(c.deadline).slice(0, 10) : "");   // 종료일(deadline)
         window._rfSheetEndDate = c.endDate || "";      // 시트 파생 마감일 — 다르면 경고(시트 우선)
         onRecruitDatesChange();
-        refreshRecruitCashReceipt();
         // ★ M3 리뷰 #1: 저장본이 리치 HTML(<br> 외 태그 — 프리필 raw로 발행된 이미지 포함 가이드)이면
         //   편집모드도 raw 모드로 복원 — 아니면 "다른 필드만 고쳐 저장"해도 escape 경로가 태그를 문자로 게시(라운드트립 파괴)
         {
@@ -2280,6 +2459,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.manager) _rfPickBtn("manager", prefill.manager);
       /* ★ 087: 작업오더의 리뷰타입(한국어·혼합 문자열) → 표준 key 버튼.
          판정 불가값(실배송·빈박스 = 배송유형)은 ''로 떨어져 [미지정]이 된다 — 틀린 값보다 빈 값. */
+      const prefillReviewMix = Array.isArray(prefill.review_type_mix) ? prefill.review_type_mix : (() => {
+        try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
+      })();
+      prefillReviewMix.forEach((row) => {
+        const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
+        if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
+      });
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
@@ -2308,10 +2494,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
         pe.checked = true; onParticipationToggle(true);
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", prefill.start_date);
+        const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
+        if (_skipWeekendsEl) _skipWeekendsEl.checked = prefill.skip_weekends === true;
         setV("rf_daily_limit", prefill.daily_limit);
         setV("rf_recruit_total", prefill.recruit_total);
-        const t = _parsePurchaseTime(prefill.purchase_time || prefill.time_range || "");
-        if (t) { setV("rf_window_start", t.start); setV("rf_window_end", t.end); }
+        rfApplyPurchaseTime({ timeRange: prefill.purchase_time || prefill.time_range || "" });
         setV("rf_landing_url", prefill.landing_url);
         setV("rf_wd_product", prefill.wd_product);
         setV("rf_wd_review", prefill.wd_review);
@@ -2431,6 +2618,7 @@ function selectRfBtn(group, btn) {
     const customInput = document.getElementById('rf_channel_custom');
     customInput.style.display = val === '직접입력' ? '' : 'none';
     if (val !== '직접입력') customInput.value = '';
+    syncRecruitAutomaticBadges();
   } else if (group === 'manager') {
     document.getElementById('rf_manager').value = val;
   } else if (group === 'transfer_bank') {
@@ -2441,24 +2629,48 @@ function selectRfBtn(group, btn) {
     /* ★ 087: 빈 값 = 미지정. 서버에서 ''는 NULL(해제)로 해석된다(CASE 센티널). */
     const el = document.getElementById('rf_review_type');
     if (el) el.value = val || '';
-    _renderReviewTypeHint(val || '');
+    syncRecruitReviewTypeMix();
+    syncRecruitAutomaticBadges();
   }
 }
 
-/* ★ 087 리뷰타입 안내 — 유형마다 리뷰어가 올리는 캡처가 달라지므로 그 결과를 미리 알려준다.
-   ★ '혼합'은 이 값만으로 행을 결정하지 못한다(어느 행이 무슨 유형인지는 시트 작업옵션 칸에만 있다)
-     → 그 사실을 화면에 적는다. 조용히 리뷰형으로 접으면 구매확정 행이 잘못 검수된다. */
-const RF_REVIEW_TYPE_HINTS = {
-  '':        '지정하지 않으면 지금과 동일하게 리뷰 캡처를 받습니다.',
-  photo:     '리뷰어는 리뷰 화면을 캡처해 제출합니다.',
-  text:      '리뷰어는 리뷰 화면을 캡처해 제출합니다.',
-  confirm:   '리뷰어는 리뷰 대신 <b>구매확정 완료 화면</b>을 제출합니다.',
-  star:      '리뷰어는 리뷰 화면을 캡처해 제출합니다.',
-  mixed:     '행마다 다른 유형이면 <b>시트 작업옵션 칸</b>에 적힌 값이 우선합니다.',
-};
-function _renderReviewTypeHint(val) {
-  const el = document.getElementById('rf_review_type_hint');
-  if (el) el.innerHTML = RF_REVIEW_TYPE_HINTS[val] || '';
+const RF_REVIEW_MIX_TYPES = ['photo', 'text', 'confirm', 'star'];
+
+function getRecruitReviewTypeMix() {
+  return RF_REVIEW_MIX_TYPES.map((type) => {
+    const el = document.querySelector(`#rf_review_mix [data-mix-type="${type}"]`);
+    return { type, quantity: Math.max(0, Math.floor(Number(el?.value) || 0)) };
+  }).filter(({ quantity }) => quantity > 0);
+}
+
+/** 혼합을 선택한 경우에만 조합 행을 보인다. 선택별 설명문 대신 현재 조합을 직접 보여준다. */
+function syncRecruitReviewTypeMix() {
+  const root = document.getElementById('rf_review_mix');
+  const reviewType = document.getElementById('rf_review_type')?.value || '';
+  if (!root) return [];
+  root.style.display = reviewType === 'mixed' ? '' : 'none';
+  const mix = getRecruitReviewTypeMix();
+  const sum = mix.reduce((total, row) => total + row.quantity, 0);
+  const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
+  const totalEl = document.getElementById('rf_review_mix_total');
+  if (totalEl) {
+    totalEl.textContent = `합계 ${sum}명 · 총인원 ${expected}명`;
+    totalEl.style.color = reviewType === 'mixed' && sum !== expected ? 'var(--danger,#EF4444)' : 'var(--t3,#64748B)';
+  }
+  syncRecruitAutomaticBadges();
+  return mix;
+}
+
+function validateRecruitReviewTypeMix() {
+  const reviewType = document.getElementById('rf_review_type')?.value || '';
+  if (reviewType !== 'mixed') return '';
+  const mix = syncRecruitReviewTypeMix();
+  const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
+  const sum = mix.reduce((total, row) => total + row.quantity, 0);
+  if (mix.length < 2) return '혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.';
+  if (expected <= 0) return '혼합 리뷰는 총인원을 먼저 설정해주세요.';
+  if (sum !== expected) return `리뷰 조합 합계(${sum}명)를 총인원(${expected}명)과 일치시켜주세요.`;
+  return '';
 }
 
 /* 작업오더가 넘겨준 한국어 리뷰타입 → 표준 key.
@@ -2490,7 +2702,7 @@ function handleBadgeInput(e) {
     e.preventDefault();
     const inp = document.getElementById("rf_badge_input");
     const val = inp.value.trim();
-    if (val && !_recruitBadges.includes(val)) {
+    if (val && !_isRecruitAutomaticBadge(val) && !_isRetiredRecruitBadge(val) && !_recruitBadges.includes(val)) {
       _recruitBadges.push(val);
       _refreshBadgeWrap();
     }
@@ -2500,12 +2712,40 @@ function handleBadgeInput(e) {
 
 /* 추천 배지 클릭 → 바로 추가 (중복 방지) */
 function addPresetBadge(val) {
-  if (!val || _recruitBadges.includes(val)) return;
+  if (!val || _isRecruitAutomaticBadge(val) || _isRetiredRecruitBadge(val) || _recruitBadges.includes(val)) return;
   _recruitBadges.push(val);
   _refreshBadgeWrap();
 }
 
+const AUTOMATIC_RECRUIT_BADGES = ['현영건', '로켓와우', '사진 5장+', '구매확정'];
+const RETIRED_RECRUIT_BADGES = ['와우 필수', '포토리뷰'];
+function _isRecruitAutomaticBadge(val) { return AUTOMATIC_RECRUIT_BADGES.includes(val); }
+function _isRetiredRecruitBadge(val) { return RETIRED_RECRUIT_BADGES.includes(val); }
+
+/* 배지는 입력값이 아니라 업무 규칙의 파생 결과다.
+   - 현영건: 현금영수증 발행
+   - 로켓와우: 쿠팡 채널
+   - 사진 5장+: 포토가 포함된 리뷰 조합
+   - 구매확정: 구매확정이 포함된 리뷰 조합
+   예전에 수동으로 붙인 값과 폐기한 배지는 저장 시 함께 정리한다. */
+function syncRecruitAutomaticBadges() {
+  const required = !!document.getElementById("rf_cash_receipt_required")?.checked;
+  const channel = document.getElementById('rf_channel')?.value || '';
+  const reviewType = document.getElementById('rf_review_type')?.value || '';
+  const mix = getRecruitReviewTypeMix();
+  const hasReviewType = (type) => reviewType === type || (reviewType === 'mixed' && mix.some(row => row.type === type && row.quantity > 0));
+  const next = _recruitBadges.filter((badge) => !_isRecruitAutomaticBadge(badge) && !_isRetiredRecruitBadge(badge));
+  if (required) next.push('현영건');
+  if (channel === '쿠팡') next.push('로켓와우');
+  if (hasReviewType('photo')) next.push('사진 5장+');
+  if (hasReviewType('confirm')) next.push('구매확정');
+  const changed = next.length !== _recruitBadges.length || next.some((b, i) => b !== _recruitBadges[i]);
+  _recruitBadges = next;
+  if (changed) _refreshBadgeWrap();
+}
+
 function removeBadge(idx) {
+  if (_isRecruitAutomaticBadge(_recruitBadges[idx])) return;
   _recruitBadges.splice(idx, 1);
   _refreshBadgeWrap();
 }
@@ -2518,7 +2758,9 @@ function _refreshBadgeWrap() {
   _recruitBadges.forEach((b, i) => {
     const chip = document.createElement("span");
     chip.className = "rbadge-chip";
-    chip.innerHTML = `${escHtml(b)}<button type="button" onclick="removeBadge(${i})" title="삭제"><i class="fas fa-times"></i></button>`;
+    chip.innerHTML = _isRecruitAutomaticBadge(b)
+      ? `${escHtml(b)}<small style="margin-left:4px;color:var(--t3,#64748B)">자동</small>`
+      : `${escHtml(b)}<button type="button" onclick="removeBadge(${i})" title="삭제"><i class="fas fa-times"></i></button>`;
     wrap.insertBefore(chip, inp);
   });
 }
@@ -2959,6 +3201,7 @@ function _rfSame(a, b) {
 function _rfNormOptRows(list) {
   return (Array.isArray(list) ? list : []).map(o => [
     String(o.optKey ?? o.opt_key ?? "").trim(),
+    String(o.optionUrl ?? o.option_url ?? "").trim(),
     _rfNormVal(o.payAmount    ?? o.pay_amount    ?? 0),
     _rfNormVal(o.recruitTotal ?? o.recruit_total ?? 0),
     _rfNormVal(o.dailyLimit   ?? o.daily_limit   ?? 0),
@@ -3024,6 +3267,7 @@ function _rfGoToCheck() {
 ═══════════════════════════════════════ */
 async function saveRecruitPost() {
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();   // 지난 사유 지우고 시작
+  syncRecruitAutomaticBadges();
   const title    = document.getElementById("rf_title").value.trim();
   const channel  = document.getElementById("rf_channel").value.trim();
   const manager  = document.getElementById("rf_manager").value.trim();
@@ -3042,6 +3286,7 @@ async function saveRecruitPost() {
     channel_custom: document.getElementById("rf_channel_custom").value.trim(),
     time_range:     document.getElementById("rf_time_range").value.trim(),
     delivery_type:  document.getElementById("rf_delivery_type").value,
+    cash_receipt_required: !!document.getElementById("rf_cash_receipt_required")?.checked,
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
     notes:          document.getElementById("rf_notes").value.trim(),
@@ -3070,6 +3315,7 @@ async function saveRecruitPost() {
      ''(미지정) 전송은 "해제"로 해석되는데, 그건 사람이 [미지정]을 누른 경우뿐이다. */
   if (document.getElementById("rf_review_type_btns")) {
     payload.review_type = document.getElementById("rf_review_type")?.value || "";
+    payload.review_type_mix = getRecruitReviewTypeMix();
   }
 
   /* ⚡ 참여형(M2): 설정·작업내용 스냅샷 포함 + 게시 전 자동 점검(서버 게이트와 동일 3항목)
@@ -3091,11 +3337,14 @@ async function saveRecruitPost() {
       }
       /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
+      payload.skip_weekends  = !!document.getElementById("rf_skip_weekends")?.checked;
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
       _syncPreviewFromOptRows();   // 표가 진실원본 — 저장 직전 파생값(상품 원문·정원) 최신화
       payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
       payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
+      const reviewMixError = validateRecruitReviewTypeMix();
+      if (reviewMixError) { _rfSaveBlocked(reviewMixError); return; }
       payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
       /* ⏸ 098 이월 반영 방식 — ★ 세그먼트 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 유지) */
       if (document.getElementById("rf_carry_mode")) {
@@ -3155,6 +3404,8 @@ async function saveRecruitPost() {
         const _optChk = (typeof _optSummary === "function") ? _optSummary() : { dup: false };
         if (_optChk.dup) { renderPartCheck(); _rfSaveBlocked("옵션명이 중복됐어요 — 옵션명을 다르게 하거나 삭제해주세요.", { go: _rfGoToCheck }); return; }
         payload.options = readOptRows();
+        const invalidOptionUrl = payload.options.find(option => !_rfHttpUrl(option.optionUrl));
+        if (invalidOptionUrl) { renderPartCheck(); _rfSaveBlocked("옵션 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
       }
     }
   }
@@ -3356,6 +3607,7 @@ function _buildCardPreviewData() {
     channel: v("rf_channel"),
     channel_custom: v("rf_channel_custom"),
     delivery_type: v("rf_delivery_type"),
+    cashReceiptRequired: !!document.getElementById("rf_cash_receipt_required")?.checked,
     // ★ 082: 구간을 켰으면 카드 미리보기도 **오늘 적용 금액**을 보여준다(서버 목록 응답과 같은 규칙)
     review_fee: _feePreviewToday(Number(v("rf_review_fee")) || 0),
     time_range: v("rf_time_range"),
@@ -3423,6 +3675,7 @@ function _renderPreview() {
 const _PREVIEW_INPUTS = ["rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes","rf_landing_url","rf_hold_ttl",
   "rf_title","rf_channel_custom","rf_review_fee","rf_time_range"];
 const _PREVIEW_SELECTS = ["rf_delivery_type","rf_status"];
+const _PREVIEW_CHECKS = ["rf_cash_receipt_required"];
 
 function _onPreviewInput() {
   if (!_previewOpen) return;
@@ -3439,6 +3692,10 @@ function _attachPreviewListeners() {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", _onPreviewInput);
   });
+  _PREVIEW_CHECKS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", _onPreviewInput);
+  });
 }
 
 function _detachPreviewListeners() {
@@ -3447,6 +3704,10 @@ function _detachPreviewListeners() {
     if (el) el.removeEventListener("input", _onPreviewInput);
   });
   _PREVIEW_SELECTS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.removeEventListener("change", _onPreviewInput);
+  });
+  _PREVIEW_CHECKS.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.removeEventListener("change", _onPreviewInput);
   });
