@@ -514,7 +514,6 @@
   table.sheetgrid td.cellsaved{animation:cellsaved .55s ease-out}   /* 백그라운드 저장 완료 = 초록 링 페이드(엑셀식 즉시감) */
   .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
   .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
-  .revb{cursor:pointer;color:var(--accent);font-size:12px;user-select:none} .revb:hover{color:var(--bad)}
   .lock{font-size:10px;opacity:.5}
   tr.amb{background:color-mix(in srgb,var(--warn-soft) 40%,transparent)}
   .rmrow{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;font-size:13px;line-height:1} .rmrow:hover{color:var(--bad);border-color:var(--bad)}
@@ -4138,12 +4137,14 @@ function _tcell(r, field, val){   // 편집 가능 텍스트 셀
   if(!STATE.canEdit) return `<td>${esc(v||'')}</td>`;
   if(r.editable===false) return `<td>${esc(v||'')} <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span></td>`;
   const edited=(r.editedFields||[]).includes(field);
-  return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}" onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+  const menu=edited?` data-legacy-row="${esc(r.id)}" data-legacy-field="${esc(field)}" oncontextmenu="openLegacyRevertMenu(event,this)"`:'';
+  return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}"${menu} onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span></td>`;
 }
 function _bcell(r, field, val){   // 제출/입금 토글 셀
   if(!STATE.canEdit || r.editable===false) return `<td><span class="chk ${val?'y':'n'}">${val?'✓':'–'}</span></td>`;
   const edited=(r.editedFields||[]).includes(field);
-  return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+  const menu=edited?` data-legacy-row="${esc(r.id)}" data-legacy-field="${esc(field)}" oncontextmenu="openLegacyRevertMenu(event,this)"`:'';
+  return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}"${menu} onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span></td>`;
 }
 function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
@@ -5061,7 +5062,7 @@ function buildGrid(wd){
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
     const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
-      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     let tds='';
     vcols.forEach((c,i)=>{ const h=c.key;
@@ -5491,7 +5492,7 @@ function _paintGridCell(r, field, td){
   td.classList.toggle('edited', ed); td.classList.toggle('gempty', !disp); if(isOk) td.classList.toggle('gok', !!disp);
   td.setAttribute('data-val', editv!=null?editv:disp);   // 편집 대상 값(다음 클릭 시 입력 초기값)
   td.setAttribute('title', disp||'');   // 축약된 전체값 = 호버 툴팁
-  td.innerHTML=`${esc(disp||'—')}${ed?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}`;
+  td.innerHTML=esc(disp||'—');
 }
 const _CELL_UNDO_MAX=100;
 const _cellUndoStack=[];
@@ -5545,6 +5546,13 @@ function _undoLatestCellGroup(){
   return true;
 }
 window.WorkdeskUndo=_undoLatestCellGroup;
+function _handleWorkdeskUndoShortcut(e){
+  if(STATE.view!=='workdesk'||!(e.ctrlKey||e.metaKey)||e.shiftKey||e.altKey||String(e.key||'').toLowerCase()!=='z') return;
+  const target=e.target, tag=String((target&&target.tagName)||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||tag==='select'||(target&&target.isContentEditable)) return;
+  if(_undoLatestCellGroup()) e.preventDefault();
+}
+document.addEventListener('keydown',_handleWorkdeskUndoShortcut);
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
@@ -5617,19 +5625,24 @@ function _navFromCell(td, dir){
     const ri=rows.indexOf(tr); const target=rows[ri+(dir==='down'?1:-1)]; if(target) open(target.children[ci]); }
 }
 // 되돌리기(그리드 col): 로컬 즉시 원복 + 백그라운드 revert. 실패 시 복원.
-function revertCell(ev, el){ if(ev)ev.stopPropagation();
-  const rowId=el.getAttribute('data-id'), field=el.getAttribute('data-field');
-  const td=el&&el.closest?el.closest('td'):null, r=_gridRowById(rowId);
+function revertGridCell(td){
+  const rowId=td&&td.getAttribute?td.getAttribute('data-id'):null, field=td&&td.getAttribute?td.getAttribute('data-field'):null;
+  const r=_gridRowById(rowId);
   if(r&&td&&field&&field.indexOf('col:')===0){
     const h=field.slice(4), had=!!(r.cellEdits&&(h in r.cellEdits)), prev=had?r.cellEdits[h]:undefined;
+    if(!had) return;
     if(r.cellEdits) delete r.cellEdits[h];
     _paintGridCell(r, field, td);
     const t=STATE.cur; if(!t) return;
     api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})})
-      .catch(()=>{ if(had){ r.cellEdits=r.cellEdits||{}; r.cellEdits[h]=prev; _paintGridCell(r,field,td); } toast('되돌리기 실패'); });
+      .then(resp=>{
+        if(resp&&resp.ok&&resp.reverted) return;
+        r.cellEdits=r.cellEdits||{}; r.cellEdits[h]=prev; _paintGridCell(r,field,td);
+        toast(resp&&resp.error?('되돌리기 실패: '+resp.error):'되돌릴 편집이 없습니다.');
+      })
+      .catch(()=>{ r.cellEdits=r.cellEdits||{}; r.cellEdits[h]=prev; _paintGridCell(r,field,td); toast('되돌리기 실패'); });
     return;
   }
-  revertEdit(rowId, field);   // 비그리드(폴백) 경로
 }
 // ── 커스텀 열(행별 자유메모, migration 080) — 탭 공용 저장, 시트/write-back 무접촉 ──
 function addCustomColumnPrompt(){
@@ -5676,9 +5689,33 @@ function deleteCustomColumnPrompt(colKey){
       건너뛰고 그 건수를 말한다(조용한 누락 금지). 저장은 기존 `commitCellEdit` 한 경로. */
 const _CELL_COLORS=['#ffe9a8','#ffd0d0','#ffdcb0','#c9f2c0','#c7e3ff','#e6d3ff','#d9d9d9'];
 const _PASTE_MAX=500;   // 한 번에 붙여넣을 수 있는 셀 수(셀당 저장 왕복 1회 — 폭주 차단)
+function _cellMenuElement(){
+  let m=$('#gcellmenu');
+  if(!m){ m=document.createElement('div'); m.className='gcellmenu'; m.id='gcellmenu'; document.body.appendChild(m); }
+  return m;
+}
+function _showCellMenuAt(m,x,y){
+  m.classList.add('show');
+  const w=m.offsetWidth||210, h=m.offsetHeight||160;
+  m.style.left=Math.max(8,Math.min(x,window.innerWidth-w-10))+'px';
+  m.style.top=Math.max(8,Math.min(y,window.innerHeight-h-10))+'px';
+}
+function openLegacyRevertMenu(e,cell){
+  const rowId=cell&&cell.getAttribute('data-legacy-row'), field=cell&&cell.getAttribute('data-legacy-field');
+  if(!rowId||!field) return;
+  e.preventDefault(); e.stopPropagation();
+  const m=_cellMenuElement();
+  STATE._legacyRevert={rowId,field};
+  m.innerHTML='<button class="gcmrow" onclick="_revertLegacyCell()"><span class="i">↩</span>편집 되돌리기</button>';
+  _showCellMenuAt(m,e.clientX,e.clientY);
+}
+function _revertLegacyCell(){
+  const item=STATE._legacyRevert; STATE._legacyRevert=null; _closeCellMenu();
+  if(item) revertEdit(item.rowId,item.field);
+}
 function _ensureCellRangeUI(){
   if(STATE._gColorInit) return; STATE._gColorInit=true;
-  if(!$('#gcellmenu')){ const p=document.createElement('div'); p.className='gcellmenu'; p.id='gcellmenu'; document.body.appendChild(p); }
+  _cellMenuElement();
   let drag=null;   // { r0,c0,r1,c1 }
   const posOf=(td)=>{ const tr=td.closest('tr'); const tbody=td.closest('tbody'); if(!tr||!tbody) return null;
     return { ri:[...tbody.children].indexOf(tr), ci:[...tr.children].indexOf(td) }; };
@@ -5690,7 +5727,7 @@ function _ensureCellRangeUI(){
     // 표 밖을 누르면 선택 해제 — 남겨 두면 Ctrl+C 가 계속 표 범위를 가로챈다.
     if(!e.target.closest('.sheetgrid')) { _clearCellSel(); return; }
     if(!td || td.querySelector('input') || td.closest('tr.grouphd')) return;
-    if(e.target.closest('.revb')||e.target.closest('.rmx')||e.target.closest('.rdel')) return;   // ↩ 되돌리기·행 제거 버튼은 자기 동작 유지
+    if(e.target.closest('.rmx')||e.target.closest('.rdel')) return;   // 행 제거 버튼은 자기 동작 유지
     const pos=posOf(td); if(!pos) return;
     drag={ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci };
     _setCellSel(drag, e.ctrlKey||e.metaKey);   // Ctrl(⌘) = 기존 선택에 **더한다**(떨어진 범위)
@@ -5814,7 +5851,7 @@ function _cellCopyText(td){
   const dv=td.getAttribute('data-val');
   if(dv!=null) return dv;
   const c=td.cloneNode(true);
-  c.querySelectorAll('.revb,.rmx,.rdel,.src,.lock').forEach(x=>x.remove());
+  c.querySelectorAll('.rmx,.rdel,.src,.lock').forEach(x=>x.remove());
   const s=(c.textContent||'').trim();
   return s==='—'?'':s;
 }
@@ -5923,7 +5960,7 @@ function _revertSelection(){
   const g=_selectionGrid(); _closeCellMenu();
   const tds=[].concat(...g).filter(td=>td.classList.contains('edited'));
   if(!tds.length) return;
-  tds.forEach(td=>{ const b=td.querySelector('.revb'); if(b) revertCell(null,b); });
+  tds.forEach(td=>revertGridCell(td));
 }
 async function _reloadWorkdeskAfterColorSaveFailure(t){
   if(!t || !STATE.cur || STATE.cur.sheetId!==t.sheetId || STATE.cur.tabName!==t.tabName) return;
