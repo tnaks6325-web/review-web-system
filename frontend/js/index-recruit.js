@@ -2534,6 +2534,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   modal.classList.remove("hidden");
   modal.style.display = "";
+  // 배경 작업 화면은 고정하고, 모집공고 모달의 중앙 편집 영역만 스크롤한다.
+  // 닫을 때 클래스를 제거해 다른 화면의 스크롤 동작에는 영향을 남기지 않는다.
+  document.body.classList.add("rf-recruit-modal-open");
 
   /* 미리보기 항상 자동 렌더링 */
   _previewOpen = true;
@@ -2601,6 +2604,7 @@ function closeRecruitModal() {
   const modal = document.getElementById("recruitModal");
   modal.classList.add("hidden");
   modal.style.display = "none";
+  document.body.classList.remove("rf-recruit-modal-open");
   _recruitEditId = null;
   _woPrefillOrderId = null;
 }

@@ -45,6 +45,9 @@ ok('스크롤 중 현재 단계를 표시하고 클릭하면 중앙 편집 영�
   && /scrollRailToCard/.test(modal)
   && /setActiveRail/.test(modal)
   && /if \(act === 'pub'\) act = 'link'/.test(modal)
+  && /body\.rf-recruit-modal-open\{overflow:hidden\}/.test(modal)
+  && /document\.body\.classList\.add\("rf-recruit-modal-open"\)/.test(editor)
+  && /document\.body\.classList\.remove\("rf-recruit-modal-open"\)/.test(editor)
   && /body\.scrollTo\(\{ top: Math\.max\(0, top\), behavior: 'smooth' \}\)/.test(modal));
 ok('자동점검은 좌측 하단에 있으며 본문 단계가 아니다',
   /id="rf_side_audit"/.test(modal)
