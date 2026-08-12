@@ -310,6 +310,13 @@ else {
   sb._o = { product_options_json: JSON.stringify([{ name: '힙스', base: { pay: 0 }, options: [
     { label: '콰이어트', pay: 31400, count: 20 }, { label: '어나더', pay: 31400, count: 25 }] }]) };
   const rows = vm.runInContext('_woOptionRows(_o)', sb);
+  sb._oNew = { product_options_json: JSON.stringify([{ name: 'new single option', product_mode: 'opt', base: { pay: 0 }, options: [
+    { label: 'white', url: 'https://store.example/item?option=white', pay: 31400, count: 20, daily_limit: 4 }] }]) };
+  const explicitOptRows = vm.runInContext('_woOptionRows(_oNew)', sb);
+  ok('new explicit option mode preserves a single option, its URL, and daily limit',
+    explicitOptRows.length === 1 && explicitOptRows[0].optKey === 'white'
+      && explicitOptRows[0].optionUrl === 'https://store.example/item?option=white'
+      && explicitOptRows[0].dailyLimit === 4);
   ok('리뷰웹: 옵션별 건수 → 옵션 정원 프리필', rows.length === 2 && rows[0].recruitTotal === 20 && rows[1].recruitTotal === 25);
   sb._o2 = { product_options_json: JSON.stringify([{ name: '우레온', base: { pay: 22000, count: 5 }, options: [] }]) };
   ok('리뷰웹: 옵션 없는 구조 → 옵션행 0(종전 규칙 유지)', vm.runInContext('_woOptionRows(_o2)', sb).length === 0);

@@ -20,9 +20,10 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
-const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
-const readM = (p) => fs.readFileSync(path.join(__dirname, '..', 'migrations', p), 'utf8');
+const normalizeEol = (s) => s.replace(/\r\n/g, '\n');
+const readS = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8'));
+const readF = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8'));
+const readM = (p) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', 'migrations', p), 'utf8'));
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
@@ -141,7 +142,7 @@ ok('★ 병합 유실 복구: repairRecruitTotalFromRounds export 생존(미expo
 
 const rt = readS('routes/campaign.routes.js');
 ok('PUT: carry_mode COALESCE 센티널($40) + auto/hold 만 인정',
-  /carry_mode = COALESCE\(\$40, carry_mode\)/.test(rt)
+  /carry_mode = COALESCE\(\$41, carry_mode\)/.test(rt)
   && /\['auto', 'hold'\]\.includes\(carry_mode\) \? carry_mode : null/.test(rt));
 ok('★ 확정 ③: 스코프 편집(홈 인라인)도 carry_mode 변경 가능 + 프리필 뷰 포함',
   /\['auto', 'hold'\]\.includes\(b\.carry_mode\)/.test(rt) && /carry_mode: row\.carry_mode \|\| 'auto'/.test(rt));
@@ -156,12 +157,19 @@ ok('★ getPlanOverview: 일정 판정 실패(unknown)면 이월·잔량을 계�
   /if \(schedule !== 'unknown'\) \{/.test(cp)
   && /heldCarry\(camp, counts, today, carryAppliedSum, sch\)/.test(cp)
   && /carryPending = pendingCarry\(camp, counts, today, counts && counts\.carry, sch\)/.test(cp));
+ok('public list includes carry mode with other publication controls',
+  /carry_mode,\s+skip_weekends,\s+cash_receipt_required/.test(rt));
+ok('campaign creation persists carry mode after review-type mix',
+  /review_type, review_type_mix, carry_mode, work_kind/.test(rt)
+  && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
+/*
 ok('★ 코드리뷰 B1: 공개 /list SELECT 에 carry_mode — 빠지면 hold 공고가 목록에선 자동 이월 정원으로 계산돼 "카드는 열렸는데 참여 거부"',
   /carry_mode\s+-- ★ 098\(코드리뷰 B1\)/.test(rt));
 // ⚠ 닫는 괄호에 앵커를 걸면 컬럼이 꼬리에 붙을 때마다 깨진다(099 work_kind 에서 실측) —
 //   검사 의미(create INSERT 컬럼 목록에 carry_mode 가 있고 값이 hold/auto 로 정규화된다)는 불변.
 ok('★ 코드리뷰 M1: 생성(create) INSERT 에도 carry_mode — 발행 시 선택이 조용히 auto 로 떨어지지 않게',
   /review_type, carry_mode[,)]/.test(rt) && /carry_mode === 'hold' \? 'hold' : 'auto'/.test(rt));
+*/
 const idx = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
 ok("★ 코드리뷰 M4: REQUIRED_SCHEMA 등록(['recruit_campaigns','carry_mode']) — 마이그레이션 미적용이면 부팅 거부(공고 발행·수정 전면 42703 차단)",
   /\['recruit_campaigns', 'carry_mode'\]/.test(idx));

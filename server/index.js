@@ -35,11 +35,25 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'review_type'],           // 087 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
   ['work_orders', 'sales_id'],                    // 088 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'guide_images'],                // 090 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
+  ['work_orders', 'source_review_order_id'],      // 102 — 원본 오더 식별자(중복 수신 방지)
+  ['work_orders', 'source_revision'],             // 102 — 원본 수정 버전
+  ['work_orders', 'intake_idempotency_key'],      // 102 — 네트워크 재시도 키
+  ['work_orders', 'intranet_advertiser_id'],      // 102 — 원본 광고주 식별자
+  ['work_orders', 'intranet_advertiser_name'],    // 102 — 원본 광고주명 스냅샷
+  ['work_orders', 'intranet_advertiser_contact'], // 102 — 원본 광고주 연락처 스냅샷
+  ['work_orders', 'intranet_advertiser_business_number'], // 102 — 원본 사업자번호 스냅샷
+  ['advertisers', 'intranet_advertiser_id'],     // 103 — 인트라넷 광고주 원본 키
+  ['portal_works', 'work_order_id'],             // 103 — 포털 작업의 원 작업오더 키
+  ['work_orders', 'advertiser_id'],              // 103 — 접수된 리뷰웹 광고주 연결
   ['review_inspections', 'resolution'],           // 092 — 리뷰검수 목록 SELECT·확인 UPDATE(없으면 리뷰검수 탭 전면 42703)
   ['tab_configs', 'inspect_product_aliases'],     // 092 — 기대값 조회·별칭 학습(조회는 fail-soft지만 대조가 조용히 죽는다)
   ['tab_configs', 'sheetless'],                   // 096 — 크론 단속·장부 생성기·접수 업서트(없으면 무시트 경로 전면 42703)
   ['work_orders', 'skip_weekends'],               // 097 — _insertWorkOrder INSERT 목록(없으면 인트라넷 오더 접수 전면 42703)
   ['work_orders', 'holidays'],                    // 097 — 위와 같은 문장에 들어가므로 함께 막아야 한다
+  ['work_orders', 'review_type_mix'],             // 107 — 인트라넷 혼합 리뷰 수량의 원장 보존·모집공고 프리필
+  ['recruit_campaigns', 'skip_weekends'],         // 104 — public weekend publication guard
+  ['recruit_campaigns', 'cash_receipt_required'], // 105 — 모집공고 현금영수증 직접 설정·공개 안내
+  ['recruit_campaigns', 'review_type_mix'],       // 106 — 혼합 리뷰 유형별 모집 수량(발행 전 합계 검증)
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
   // 099 — 체험단 종류(리뷰/블로그) 축. 셋 다 INSERT·SET 목록에 들어가므로 하나라도 없으면
   //   ① 인트라넷 오더 접수 ② 작업오더 접수(tab_configs 업서트) ③ 공고 발행·수정이 전면 42703.

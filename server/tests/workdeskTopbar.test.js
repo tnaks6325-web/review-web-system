@@ -115,7 +115,7 @@ const sheetTitle = sid => (({ S1:'로스터A', S2:'로스터B', S3:'로스터C' 
 // eslint-disable-next-line no-new-func
 const load = new Function('STATE','$','esc','document','localStorage','refreshUnseen','_favLoad','W_FAV',
   'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu','sheetTitle','_favSaveLocal','_favPushServer','_navPush','_wtOpen',
-  bodies + '\n return {' + WANT.join(',') + '};');
+  'const _clearCellUndoHistory = () => {};\n' + bodies + '\n return {' + WANT.join(',') + '};');
 const F = load(STATE, $, esc, document, localStorage, refreshUnseen, _favLoad, W_FAV,
   api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu, sheetTitle, ()=>{}, ()=>{}, _navPush, _wtOpen);
 // wPickSearch/selTab 은 서로를 호출하므로 추출본끼리 연결(전역 선언과 동일한 관계 재현)

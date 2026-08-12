@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const {
+  SourceContractError,
+  normalizeReviewOrderSourceContract,
+} = require('../services/reviewOrderSourceContract.service');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -12,7 +16,8 @@ const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { fetchThumbFromUrl } = require('../utils/thumbFetch');
 const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
-const { LEGACY_DELIVERY_VALUES } = require('../utils/reviewType');
+const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/reviewType');
+const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
 
 // ═══════════════════════════════════════════════════════════
@@ -21,6 +26,14 @@ const { workKindForStore } = require('../utils/workKind');   // 099 — 체험�
 
 function _genOrderId() {
   return 'wo_' + crypto.randomBytes(6).toString('hex');
+}
+
+function _intakeKeyMatches(received, expected) {
+  const actual = Buffer.from(String(received || ''));
+  const configured = Buffer.from(String(expected || ''));
+  return actual.length === configured.length
+    && actual.length > 0
+    && crypto.timingSafeEqual(actual, configured);
 }
 
 // 상태 전이 단일 소스 (서버에서만 검증)
@@ -48,7 +61,7 @@ const INTAKE_EDITABLE_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
   'pay_amount', 'daily_count', 'daily_count_text', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
-  'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
+  'delivery_type', 'courier_proxy', 'review_type', 'review_type_mix', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
   'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
   'sales_id', 'contract_number', 'quote_id',   // 인트라넷 계약건 — 088
@@ -83,6 +96,7 @@ async function _ensureTables() {
         delivery_type   TEXT DEFAULT '',
         courier_proxy   BOOLEAN DEFAULT FALSE,
         review_type     TEXT DEFAULT '',
+        review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb,
         recruit_count   INTEGER DEFAULT 0,
         review_guide    TEXT DEFAULT '',
         special_notes   TEXT DEFAULT '',
@@ -106,6 +120,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide         TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS memo_log             TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at           TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_by           TEXT DEFAULT ''`);
@@ -121,6 +136,19 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_manager         TEXT DEFAULT ''`);
     // 099: 체험단 종류(리뷰/블로그) — 빈 값 = 리뷰체험단(기존 동작). 마이그레이션 안전망.
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_kind            TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_review_order_id TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_revision        INTEGER DEFAULT 0`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intake_idempotency_key TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_id TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_name TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_contact TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS intranet_advertiser_business_number TEXT DEFAULT ''`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_work_orders_source_review_order
+      ON work_orders(source_review_order_id) WHERE source_review_order_id <> ''`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_work_orders_intake_idempotency_key
+      ON work_orders(intake_idempotency_key) WHERE intake_idempotency_key <> ''`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_intranet_advertiser_id
+      ON work_orders(intranet_advertiser_id) WHERE intranet_advertiser_id <> ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -168,6 +196,36 @@ function _boolOrNull(v) {
   return null;
 }
 
+// 혼합 리뷰 수량은 작업오더 원장에서도 구조화해 보존한다. 단일 타입이면 빈 배열로 정리해
+// 이전 혼합 공고의 잔여 구성이 다음 공고로 번지는 일을 막는다.
+function _reviewTypeMixJson(raw, reviewType) {
+  if (normalizeReviewType(reviewType) !== 'mixed') return '[]';
+  const state = normalizeReviewTypeMix(raw);
+  return JSON.stringify(state.error ? [] : (state.mix || []));
+}
+
+function _isTrue(v) {
+  return v === true || /^(true|t|y|yes|1|예)$/i.test(String(v == null ? '' : v));
+}
+
+function _isCourierProxyDeliveryType(v) {
+  return /^택배\s*발송\s*대행$/.test(String(v == null ? '' : v).trim());
+}
+
+// 배송유형이 택배발송대행이면 courier_proxy는 파생값이다. 이전의 별도 boolean을
+// 받은 경우에도 한 가지 배송유형으로 정규화해 작업표·모집공고가 엇갈리지 않게 한다.
+function _canonicalDeliveryType(deliveryType, courierProxy) {
+  const raw = String(deliveryType == null ? '' : deliveryType).trim();
+  if (_isCourierProxyDeliveryType(raw) || _isTrue(courierProxy)) return '택배발송대행';
+  if (/^빈\s*(?:택배|박스)$/.test(raw)) return '빈박스';
+  if (/^실\s*배송$/.test(raw)) return '실배송';
+  return raw;
+}
+
+function _courierProxyFromDelivery(deliveryType, courierProxy) {
+  return _isCourierProxyDeliveryType(deliveryType) || _isTrue(courierProxy);
+}
+
 /* ★ 휴무일 = 'YYYY-MM-DD' 배열(JSON). 형식이 맞는 값만 받는다 — 잘못된 값 하나로 날짜 분배가
    통째로 깨지는 것보다 그 날짜만 무시하는 쪽이 낫다(worktablePlan 의 holidays 규율과 같다). */
 function _holidaysJson(v) {
@@ -182,18 +240,27 @@ function _holidaysJson(v) {
 }
 
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
-async function _insertWorkOrder(b, createdBy) {
+async function _insertWorkOrder(b, createdBy, sourceContract) {
+  const source = sourceContract || {
+    sourceReviewOrderId: '', sourceRevision: 0, idempotencyKey: '', intranetAdvertiserId: '',
+    intranetAdvertiserName: '', intranetAdvertiserContact: '', intranetAdvertiserBusinessNumber: '',
+  };
   const optionsJson = (typeof b.product_options_json === 'string')
     ? b.product_options_json
     : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+  const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
+  const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
     `INSERT INTO work_orders
       (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
        purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
-       review_type, recruit_count, review_guide, special_notes,
+       review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
-       sales_id, contract_number, quote_id, skip_weekends, holidays, status, created_by, work_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$29,$30,'submitted',$28,$31)
+       sales_id, contract_number, quote_id, skip_weekends, holidays,
+       source_review_order_id, source_revision, intake_idempotency_key, intranet_advertiser_id,
+       intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
+       status, created_by, work_kind)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,'submitted',$38,$39)
      RETURNING *`,
     [
       _genOrderId(),
@@ -209,9 +276,10 @@ async function _insertWorkOrder(b, createdBy) {
       b.inflow_type || '',
       b.inflow_guide || '',
       _guideImagesJson(b.guide_images),   // 첨부 이미지 URL 배열(090) — 미전송·구버전 인트라넷은 ''
-      b.delivery_type || '',
-      b.courier_proxy === true || b.courier_proxy === 'true',
+      deliveryType,
+      courierProxy,
       b.review_type || '',
+      _reviewTypeMixJson(b.review_type_mix, b.review_type),
       b.recruit_count || 0,
       b.review_guide || '',
       b.special_notes || '',
@@ -227,11 +295,18 @@ async function _insertWorkOrder(b, createdBy) {
       String(b.sales_id || '').trim(),
       String(b.contract_number || '').trim(),
       String(b.quote_id || '').trim(),
-      createdBy,
       // ★ 097(W2-b): 진행 일정 신호. **미전송 = NULL = 종전 동작**(계획 계산 기본값 + 미리보기 지정) —
       //   `false` 와 "안 보냄"을 구분해야 구버전 인트라넷이 주말 제외를 조용히 끄지 않는다.
       _boolOrNull(b.skip_weekends),
       _holidaysJson(b.holidays),
+      source.sourceReviewOrderId,
+      source.sourceRevision,
+      source.idempotencyKey,
+      source.intranetAdvertiserId,
+      source.intranetAdvertiserName,
+      source.intranetAdvertiserContact,
+      source.intranetAdvertiserBusinessNumber,
+      createdBy,
       // ★ 099: 체험단 종류. **미전송은 빈 값으로 둔다**(`'review'` 로 굳히지 않는다) —
       //   "한 번도 정하지 않음"과 "리뷰로 정함"이 구분돼야 접수의 blank-only 전파가 성립한다.
       //   판정에서는 어차피 빈 값 = 리뷰라 동작은 같고 원장만 정직해진다.
@@ -264,6 +339,103 @@ function _emitWorkOrderNew(row, extra) {
 // 인트라넷(inadd-system)에서 직접 POST. created_by 는 페이로드의 requester_name.
 // 필요 env: ORDER_INTAKE_KEY
 // ═══════════════════════════════════════════════════════════
+function _portalWorkId() {
+  return 'pw_' + crypto.randomBytes(6).toString('hex');
+}
+
+function _sourceText(value, maxLength) {
+  return String(value == null ? '' : value).trim().slice(0, maxLength);
+}
+
+// 이름은 표시값이다. 원본 연결은 인트라넷 광고주 ID가 같을 때에만 허용한다.
+async function _upsertIntranetAdvertiserAndPortalWork(order, context) {
+  const intranetId = _sourceText(order.intranet_advertiser_id, 128);
+  if (!intranetId) return null;
+
+  const name = _sourceText(order.intranet_advertiser_name, 200);
+  if (!name) throw new Error('원본 광고주명이 없어 광고주를 연결할 수 없습니다.');
+  const contact = _sourceText(order.intranet_advertiser_contact, 300);
+  const businessNumber = _sourceText(order.intranet_advertiser_business_number, 80);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: existingRows } = await client.query(
+      `SELECT id, intranet_advertiser_id FROM advertisers
+        WHERE intranet_advertiser_id = $1
+        FOR UPDATE`,
+      [intranetId]
+    );
+
+    let advertiserId = existingRows[0] && existingRows[0].id;
+    if (!advertiserId) {
+      const { rows: sameNameRows } = await client.query(
+        `SELECT id, intranet_advertiser_id FROM advertisers WHERE name = $1 FOR UPDATE`, [name]
+      );
+      if (sameNameRows.length) {
+        throw new Error('동일 이름의 기존 광고주가 있어 자동 병합하지 않았습니다. 원본 연결을 확인해 주세요.');
+      }
+      const { rows: inserted } = await client.query(
+        `INSERT INTO advertisers
+           (id, name, intranet_advertiser_id, intranet_contact, intranet_business_number)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (intranet_advertiser_id) WHERE intranet_advertiser_id <> ''
+         DO UPDATE SET
+           name = EXCLUDED.name,
+           intranet_contact = COALESCE(NULLIF(EXCLUDED.intranet_contact, ''), advertisers.intranet_contact),
+           intranet_business_number = COALESCE(NULLIF(EXCLUDED.intranet_business_number, ''), advertisers.intranet_business_number),
+           updated_at = NOW()
+         RETURNING id`,
+        ['adv_' + crypto.randomBytes(6).toString('hex'), name, intranetId, contact, businessNumber]
+      );
+      advertiserId = inserted[0].id;
+    } else {
+      await client.query(
+        `UPDATE advertisers SET
+           name = $2,
+           intranet_contact = COALESCE(NULLIF($3, ''), intranet_contact),
+           intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
+           updated_at = NOW()
+         WHERE id = $1`,
+        [advertiserId, name, contact, businessNumber]
+      );
+    }
+
+    const { rows: workRows } = await client.query(
+      `INSERT INTO portal_works
+         (id, advertiser_id, work_order_id, inad_manager, work_type, product, channel,
+          qty, progress_date, work_sheet_url, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (work_order_id) WHERE work_order_id <> ''
+       DO UPDATE SET
+         advertiser_id = EXCLUDED.advertiser_id,
+         inad_manager = EXCLUDED.inad_manager,
+         work_type = EXCLUDED.work_type,
+         product = EXCLUDED.product,
+         channel = EXCLUDED.channel,
+         qty = EXCLUDED.qty,
+         progress_date = EXCLUDED.progress_date,
+         work_sheet_url = COALESCE(NULLIF(EXCLUDED.work_sheet_url, ''), portal_works.work_sheet_url),
+         updated_at = NOW()
+       RETURNING id`,
+      [
+        _portalWorkId(), advertiserId, order.id, _sourceText(order.manager_name || order.work_manager, 100),
+        order.work_kind === 'blog' ? '블로그 체험단' : '리뷰 체험단',
+        _sourceText(order.product_option || order.title, 1000), _sourceText(order.inflow_type, 100),
+        _intOrZero(order.recruit_count), _dateOrNull(order.start_date),
+        _sourceText(context && context.workSheetUrl, 1000), _sourceText(context && context.by, 100),
+      ]
+    );
+    await client.query(`UPDATE work_orders SET advertiser_id = $2, updated_at = NOW() WHERE id = $1`, [order.id, advertiserId]);
+    await client.query('COMMIT');
+    return { advertiserId, portalWorkId: workRows[0].id };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 router.post('/intake', async (req, res, next) => {
   try {
     await _ensureTables();
@@ -273,7 +445,7 @@ router.post('/intake', async (req, res, next) => {
       return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
     }
     const key = b.intakeKey || req.headers['x-intake-key'];
-    if (!key || key !== expected) {
+    if (!_intakeKeyMatches(key, expected)) {
       return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
     }
     if (!b.title || !String(b.title).trim()) {
@@ -282,13 +454,189 @@ router.post('/intake', async (req, res, next) => {
     // ★ work_sheet_url 은 선택 항목 (작업표 생성 도입에 따라 제출 필수 해제).
     //   시트 없이 제출된 오더는 접수 시점에 시트 URL을 채우거나 작업표를 생성해야 접수된다(accept 게이트 유지).
     const requester = (b.requester_name || b.created_by || '').toString().trim() || '인트라넷';
-    const data = await _insertWorkOrder(b, requester);
+    let sourceContract;
+    try {
+      sourceContract = normalizeReviewOrderSourceContract(b);
+    } catch (err) {
+      if (err instanceof SourceContractError) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+      throw err;
+    }
+
+    // A matching retry returns the original work order. A different key or
+    // version for the same source is intentionally not treated as a new order.
+    if (sourceContract) {
+      const { rows: existingRows } = await pool.query(
+        `SELECT * FROM work_orders
+           WHERE source_review_order_id = $1 OR intake_idempotency_key = $2
+           LIMIT 1`,
+        [sourceContract.sourceReviewOrderId, sourceContract.idempotencyKey]
+      );
+      if (existingRows.length) {
+        const existing = existingRows[0];
+        const sameAttempt = existing.source_review_order_id === sourceContract.sourceReviewOrderId
+          && Number(existing.source_revision || 0) === sourceContract.sourceRevision
+          && existing.intake_idempotency_key === sourceContract.idempotencyKey;
+        if (sameAttempt) {
+          return res.json({ ok: true, data: existing, idempotent: true });
+        }
+        return res.status(409).json({
+          ok: false,
+          error: '동일 원본 오더가 이미 수신되었습니다. 원본 수정은 수정 동기화로 처리해야 합니다.',
+          work_order_id: existing.id,
+          source_revision: existing.source_revision,
+        });
+      }
+    }
+
+    let data;
+    try {
+      data = await _insertWorkOrder(b, requester, sourceContract);
+    } catch (err) {
+      // Unique indexes close the race between the pre-check and INSERT.
+      if (sourceContract && err && err.code === '23505') {
+        const { rows } = await pool.query(
+          `SELECT * FROM work_orders
+             WHERE source_review_order_id = $1 OR intake_idempotency_key = $2
+             LIMIT 1`,
+          [sourceContract.sourceReviewOrderId, sourceContract.idempotencyKey]
+        );
+        const existing = rows[0];
+        if (existing
+          && existing.source_review_order_id === sourceContract.sourceReviewOrderId
+          && Number(existing.source_revision || 0) === sourceContract.sourceRevision
+          && existing.intake_idempotency_key === sourceContract.idempotencyKey) {
+          return res.json({ ok: true, data: existing, idempotent: true });
+        }
+      }
+      throw err;
+    }
     _emitWorkOrderNew(data);
     res.json({ ok: true, data });
   } catch (err) {
     next(err);
   }
 });
+
+// Intranet review-order revisions use a source identity rather than the
+// work-order id.  This deliberately updates only source-owned values: the
+// receiving team keeps control of status, assignee, notes, sheet/tab links,
+// and the advertiser/portal projection once it has been accepted.
+async function _intakeSourceRevisionHandler(req, res, next) {
+  try {
+    await _ensureTables();
+    const b = req.body || {};
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) {
+      return res.status(503).json({ ok: false, error: 'intake key is not configured (ORDER_INTAKE_KEY).' });
+    }
+    const key = b.intakeKey || req.headers['x-intake-key'];
+    if (!_intakeKeyMatches(key, expected)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized.' });
+    }
+    if (!b.title || !String(b.title).trim()) {
+      return res.status(400).json({ ok: false, error: '작업명은 비워둘 수 없습니다.' });
+    }
+
+    let source;
+    try {
+      source = normalizeReviewOrderSourceContract(b);
+    } catch (err) {
+      if (err instanceof SourceContractError) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+      throw err;
+    }
+    const sourceReviewOrderId = String(req.params.sourceReviewOrderId || '').trim();
+    if (!source || source.sourceReviewOrderId !== sourceReviewOrderId) {
+      return res.status(400).json({ ok: false, error: '원본 리뷰오더 ID가 요청 경로와 일치해야 합니다.' });
+    }
+
+    const { rows: currentRows } = await pool.query(
+      `SELECT * FROM work_orders WHERE source_review_order_id = $1 LIMIT 1`,
+      [sourceReviewOrderId]
+    );
+    const current = currentRows[0];
+    if (!current) {
+      return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
+    }
+    if (current.deleted_at || current.status === 'done' || current.status === 'published'
+      || current.linked_campaign_id || current.advertiser_id) {
+      return res.status(409).json({
+        ok: false,
+        error: '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
+        work_order_id: current.id,
+      });
+    }
+
+    const currentRevision = Number(current.source_revision || 0);
+    const sameAttempt = currentRevision === source.sourceRevision
+      && current.intake_idempotency_key === source.idempotencyKey;
+    if (sameAttempt) {
+      return res.json({ ok: true, data: current, idempotent: true });
+    }
+    if (source.sourceRevision <= currentRevision) {
+      return res.status(409).json({
+        ok: false,
+        error: '이미 처리된 원본 버전입니다. 최신 원본을 다시 확인해 주세요.',
+        work_order_id: current.id,
+        source_revision: currentRevision,
+      });
+    }
+    if (source.sourceRevision !== currentRevision + 1) {
+      return res.status(409).json({
+        ok: false,
+        error: '원본 리뷰오더 버전이 순서대로 전달되지 않았습니다.',
+        work_order_id: current.id,
+        source_revision: currentRevision,
+      });
+    }
+
+    const optionsJson = typeof b.product_options_json === 'string'
+      ? b.product_options_json
+      : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+    const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
+    const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+    const { rows } = await pool.query(
+      `UPDATE work_orders SET
+         title = $2, start_date = $3, product_option = $4, product_options_json = $5,
+         pay_amount = $6, daily_count = $7, daily_count_text = $8, purchase_time = $9,
+         inflow_keyword = $10, inflow_type = $11, inflow_guide = $12, guide_images = $13,
+         delivery_type = $14, courier_proxy = $15, review_type = $16, review_type_mix = $17, recruit_count = $18,
+         review_guide = $19, special_notes = $20, product_url = $21, work_sheet_url = $22,
+         goods_cost_type = $23, manager_name = $24, work_manager = $25, sales_id = $26,
+         contract_number = $27, quote_id = $28, skip_weekends = $29, holidays = $30,
+         work_kind = $31, source_revision = $32, intake_idempotency_key = $33,
+         intranet_advertiser_id = $34, intranet_advertiser_name = $35,
+         intranet_advertiser_contact = $36, intranet_advertiser_business_number = $37,
+         updated_at = NOW()
+       WHERE id = $1 AND source_review_order_id = $38
+       RETURNING *`,
+      [
+        current.id,
+        String(b.title).trim(), _dateOrNull(b.start_date), b.product_option || '', optionsJson,
+        _intOrZero(b.pay_amount), _intOrZero(b.daily_count), b.daily_count_text || '', b.purchase_time || '',
+        b.inflow_keyword || '', b.inflow_type || '', b.inflow_guide || '', _guideImagesJson(b.guide_images),
+        deliveryType, courierProxy, b.review_type || '', _reviewTypeMixJson(b.review_type_mix, b.review_type),
+        _intOrZero(b.recruit_count), b.review_guide || '', b.special_notes || '', b.product_url || '',
+        String(b.work_sheet_url || '').trim(), b.goods_cost_type || '', b.manager_name || '',
+        pickWorkManager(b), String(b.sales_id || '').trim(), String(b.contract_number || '').trim(),
+        String(b.quote_id || '').trim(), _boolOrNull(b.skip_weekends), _holidaysJson(b.holidays),
+        workKindForStore(b.work_kind), source.sourceRevision, source.idempotencyKey,
+        source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
+        source.intranetAdvertiserBusinessNumber, sourceReviewOrderId,
+      ]
+    );
+    const updated = rows[0];
+    _emitWorkOrderNew(updated, { event: 'source_revision', source_revision: source.sourceRevision });
+    res.json({ ok: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+router.put('/intake/source/:sourceReviewOrderId', _intakeSourceRevisionHandler);
 
 // ═══════════════════════════════════════════════════════════
 // 외부(인트라넷) 보낸 오더 조회 — 공유 시크릿 인증 (JWT 불필요)
@@ -315,7 +663,8 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
-              inflow_type, work_kind, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo, created_at, updated_at
+              inflow_type, work_kind, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo,
+              source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
@@ -436,7 +785,7 @@ async function _intakeUpdateHandler(req, res, next) {
 
     // 현재 상태 확인 (존재/삭제/완료 여부)
     const { rows: cur } = await pool.query(
-      `SELECT id, status, deleted_at FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+      `SELECT id, status, deleted_at, delivery_type, courier_proxy FROM work_orders WHERE id = $1 LIMIT 1`, [id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -446,6 +795,17 @@ async function _intakeUpdateHandler(req, res, next) {
     }
     if (cur[0].status === 'done') {
       return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
+    }
+
+    // 배송유형은 단일 입력값이고 택배발송대행 여부는 그 파생값이다. 구형 인트라넷이
+    // 둘 중 하나만 보내도 두 저장값을 같이 정규화해 작업표·모집공고와 어긋나지 않게 한다.
+    if (b.delivery_type !== undefined || b.courier_proxy !== undefined) {
+      const deliveryType = _canonicalDeliveryType(
+        b.delivery_type !== undefined ? b.delivery_type : cur[0].delivery_type,
+        b.courier_proxy
+      );
+      b.delivery_type = deliveryType;
+      b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
     }
 
     // 동적 SET (전달된 수정 가능 필드만 — 부분 수정)
@@ -669,7 +1029,7 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
     if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
 
     const { rows: cur } = await pool.query(
-      `SELECT created_by, status FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
+      `SELECT created_by, status, delivery_type, courier_proxy FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -681,6 +1041,17 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
     // 제출됨/보완요청 상태에서만 수정 허용
     if (!['submitted', 'revision'].includes(cur[0].status)) {
       return res.status(400).json({ ok: false, error: '검토가 시작된 오더는 수정할 수 없습니다.' });
+    }
+
+    // AE 수정 경로도 배송유형 하나를 진실원천으로 사용한다. 과거 courier_proxy만
+    // 전송하는 화면과 함께 동작하도록 두 DB 열은 항상 같은 의미로 갱신한다.
+    if (b.delivery_type !== undefined || b.courier_proxy !== undefined) {
+      const deliveryType = _canonicalDeliveryType(
+        b.delivery_type !== undefined ? b.delivery_type : cur[0].delivery_type,
+        b.courier_proxy
+      );
+      b.delivery_type = deliveryType;
+      b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
     }
 
     // 동적 SET (전달된 AE 필드만)
@@ -1052,6 +1423,20 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     // ★ 순서 계약: tab_configs 에 `sheetless=TRUE` 가 **들어간 뒤**에 불러야 한다
     //   (`rebuildLedgers` 가 fail-closed 로 그 플래그를 확인한다).
     // ════════════════════════════════════════════════════════════════════
+    let advertiserProjection = null;
+    try {
+      advertiserProjection = await _upsertIntranetAdvertiserAndPortalWork(o, {
+        workSheetUrl: wantSheetless ? '' : tabSheetUrl,
+        by: req.admin?.name || '',
+      });
+    } catch (projectionErr) {
+      return res.status(409).json({
+        ok: false,
+        error: `광고주 작업 연결을 완료하지 못했습니다: ${projectionErr.message}`,
+        work_order_id: o.id,
+      });
+    }
+
     let indexBuilt = true;
     let sheetlessResult = null;
     if (wantSheetless) {
@@ -1148,6 +1533,7 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       indexBuilt,
       gidCorrected,       // true = 사람이 고른 탭으로 URL 의 죽은 gid 를 교정해 접수함
       settlementLinked,   // linked | already | kept_existing | failed | null(계약 미첨부 오더)
+      advertiserProjection,
       sheetless: wantSheetless || undefined,
       // 무시트일 때만: 만든 작업표 줄 수·장부 결과(실패 사유 포함 — 조용한 누락 금지)
       worktable: wantSheetless ? {
@@ -1250,6 +1636,15 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
 
     // 동적 SET — 화이트리스트 밖 필드(status/sales_id/work_sheet_url 등)는 조용히 무시가 아니라
     // 도달 자체가 불가(목록을 순회하므로). 값이 실제로 달라진 필드만 SET + diff 기록.
+    if (b.delivery_type !== undefined || b.courier_proxy !== undefined) {
+      const deliveryType = _canonicalDeliveryType(
+        b.delivery_type !== undefined ? b.delivery_type : o.delivery_type,
+        b.courier_proxy
+      );
+      b.delivery_type = deliveryType;
+      b.courier_proxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+    }
+
     const sets = [], vals = [], changes = [];
     let i = 1;
     for (const f of ADMIN_EDIT_FIELDS) {

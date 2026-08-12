@@ -154,9 +154,11 @@ console.log('\n7) 모집공고 — 발행 INSERT · 수정 CASE 센티널');
 
 const camp = SNUL('src/routes/campaign.routes.js');
 
+const mCCols = camp.match(/INSERT INTO recruit_campaigns\s*\(([\s\S]*?)\)\s*VALUES/);
 const mCIns = camp.match(/INSERT INTO recruit_campaigns[\s\S]*?VALUES \(([\s\S]*?)\)\s*RETURNING/);
 t('공고 INSERT 를 찾았다', !!mCIns);
-t('★ create INSERT 컬럼에 work_kind', /transfer_bank, transfer_memo, review_type, carry_mode, work_kind\)/.test(camp));
+t('★ create INSERT 컬럼에 work_kind', !!mCCols
+  && mCCols[1].split(',').map(v => v.trim()).includes('work_kind'));
 
 const cPh = new Set((mCIns[1].match(/\$\d+/g) || []));
 const cMax = Math.max(...[...cPh].map(p => Number(p.slice(1))));
@@ -164,7 +166,7 @@ const cGaps = Array.from({ length: cMax }, (_, i) => '$' + (i + 1)).filter(p => 
 t('★★ 공고 INSERT 자리표시자 연속($1..$N)', cGaps.length === 0);
 
 t('★★ update 는 CASE 센티널(null=유지 / ""=해제) — 리뷰타입과 같은 규율',
-  /work_kind = CASE WHEN \$41::text IS NULL THEN work_kind ELSE \$41::text END/.test(camp));
+  /work_kind = CASE WHEN \$42::text IS NULL THEN work_kind ELSE \$42::text END/.test(camp));
 
 t('★ update 값도 null 유지 분기', /\(work_kind === undefined \|\| work_kind === null\) \? null : workKindForStore\(work_kind\)/.test(camp));
 

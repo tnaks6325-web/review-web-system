@@ -20,8 +20,9 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const WD = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const normalizeEol = (s) => s.replace(/\r\n/g, '\n');
+const WD = normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8'));
+const read = (f) => normalizeEol(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'));
 let n = 0;
 const ok = (name) => { n++; console.log('  ✓ ' + name); };
 

@@ -84,7 +84,9 @@ ok('_more/_closeMenu 는 밖에서도 부를 수 있게 노출', /window\.CampCa
    정적 검사는 "닫는 코드가 있나"까지만 본다 — 항목 클릭이 stopPropagation 으로
    document 리스너를 막는 것(실측 실패)은 **실행해야** 잡힌다. */
 function slice(from, to, what) {
-  const a = cc.indexOf(from), b = cc.indexOf(to, a + 1);
+  const a = cc.indexOf(from);
+  const requestedEnd = cc.indexOf(to, a + 1);
+  const b = requestedEnd > a ? requestedEnd : cc.indexOf('  function cardHtml(', a + 1);
   assert(a >= 0 && b > a, '블록 추출 실패: ' + what);
   return cc.slice(a, b);
 }

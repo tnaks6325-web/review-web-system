@@ -10,6 +10,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "migrate": "node src/db/migrate.js",
+    "migrate:review-order-unification": "node scripts/migrate-review-order-unification.js",
     "migrate:detail": "node scripts/migrate-detail.js",
     "migrate:reviewers": "node scripts/migrate-reviewers.js",
     "migrate:all": "bash scripts/run-migration.sh",

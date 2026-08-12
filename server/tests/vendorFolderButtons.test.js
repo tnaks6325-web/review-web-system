@@ -359,7 +359,7 @@ async function run() {
   t('★ 행 셀은 공용 렌더러 호출(사본 금지)', /if\(c\.mat\) cells\.push\(`<span class="ocol omat">\$\{_folBtnsHtml\(t,i,'own'\)\}<\/span>`\)/.test(HTML));
   t('★ 배치 = 진척 다음 · 계약 앞(시안 A)',
     HTML.indexOf("if(c.mat) cells.push(`<span class=\"ocol omat\">") < HTML.indexOf('cells.push(`<span class="ocol octr">'));
-  t('작업보드 상단 툴바(.gridbar)에 폴더 버튼 묶음', /\$\{_folBarHtml\(\)\}\s*\n\s*<span class="gnote">/.test(HTML));
+  t('작업보드 상단 툴바(.gridbar)에 폴더 버튼 묶음', /\$\{_folBarHtml\(\)\}\s*\n\s*<output id="gselstat"/.test(HTML));
   // ★ .catch() 필수 — finally 가 DOM 을 건드리므로 거기서 throw 하면 처리되지 않은 rejection 이 된다.
   t('★ 탭을 열 때 지연조회 1회 + .catch()', /_folEnsureCur\(\)\.catch\(\(\)=>\{\}\);/.test(HTML));
   t('★ 지연조회는 kind=info 경로(무거운 stats=1 금지)',

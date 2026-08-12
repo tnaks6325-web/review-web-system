@@ -423,7 +423,9 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
   });
 
   await ta('계좌 정규화는 사본 없이 bankCodes 단일 출처를 쓴다', async () => {
-    const fn = svcSrc.match(/async function buildWorkbook[\s\S]*?\n}\n/);
+    const start = svcSrc.indexOf('async function buildWorkbook(');
+    const end = svcSrc.indexOf('function batchFileName(', start);
+    const fn = start >= 0 && end > start ? [svcSrc.slice(start, end)] : null;
     assert.ok(fn, 'buildWorkbook 을 못 찾았다');
     const n = (fn[0].match(/normalizeAccount\(/g) || []).length;
     assert.strictEqual(n, 2, `buildWorkbook 이 normalizeAccount 를 ${n}회 쓴다(두 양식 = 2회)`);

@@ -460,6 +460,8 @@
   .mh.mh-wb{flex-wrap:nowrap}
   .mh.mh-wb h1,.mh.mh-wb .mhsheet{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
   .mh.mh-wb .bd,.mh.mh-wb .btn,.mh.mh-wb .wchip{flex:none}
+  .gselstat{flex:none;white-space:nowrap;padding:4px 8px;border:1px solid var(--accent-line);border-radius:7px;background:var(--accent-soft);color:var(--accent-deep);font-size:11px;font-weight:750;font-variant-numeric:tabular-nums}
+  .gselstat[hidden]{display:none}
   .tp3fin{display:flex;align-items:center;gap:8px;min-width:0;flex:0 1 auto}
   .tp3fin .ft{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
   .tp3fin .wbl-s,.tp3fin .wbl-b{flex:none}
@@ -575,7 +577,7 @@
   .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
   .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
-  .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+  .gridbar .gselstat{margin-left:auto}
 
   /* ══ 오늘 참여현황(툴바 맨 앞 = 표 왼쪽 위) — 시안 C+B 믹스 · docs/design-grid-today-progress.html ══
      `◔ 8/10 (월) 참여현황 12/20명` — 오늘 채워야 할 인원 대비 지금까지 구매(제출 확정)한 인원.
@@ -5025,6 +5027,7 @@ function buildGrid(wd){
   // ★ 표를 다시 그리면 선택 범위(행/열 인덱스)는 가리키던 셀을 잃는다 — 남겨 두면 복사·붙여넣기가
   //   **엉뚱한 칸**에 적용된다(필터·정렬·탭 전환 후 인덱스 의미가 바뀐다). 여기서 한 번에 비운다.
   STATE.gSelRange=null; STATE.gSelRanges=null;
+  _syncSelectionStat();
   const H=wd.headers||[];
   // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
   // 광고주 그리드는 신원열(참여자 이름·연락처=phone8) 제외 — 시트 화이트리스트 컬럼만(요청). 내부는 신원 3열 유지.
@@ -5156,7 +5159,7 @@ function buildGrid(wd){
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
       ${_folBarHtml()}
-      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 우클릭</b>=그 셀 편집·복사·배경색 · <b>셀 드래그</b>=범위 선택(<b>Ctrl+드래그</b>=떨어진 범위 추가 · Ctrl+C 복사 · Ctrl+V 붙여넣기)`:` · <b>열람 전용</b> · 셀 드래그(Ctrl+드래그=범위 추가)+Ctrl+C=복사`}</span></div>
+      <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
     <div id="addbox"></div>${canOpenExternalManualOrder()?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}`;
 }
@@ -5784,7 +5787,7 @@ function _updateActiveSel(rng){
 }
 // 그리기(단일 출처) — 모든 범위의 합집합을 칠하고 활성 범위의 왼쪽 위를 앵커로 표시.
 function _paintSel(){
-  const tbody=$('#gbody'); if(!tbody) return;
+  const tbody=$('#gbody'); if(!tbody){ _syncSelectionStat(); return; }
   document.querySelectorAll('#gbody td.gselrange,#gbody td.gselanchor').forEach(td=>td.classList.remove('gselrange','gselanchor'));
   const trs=[...tbody.children];
   _selRanges().forEach(s=>{
@@ -5794,10 +5797,12 @@ function _paintSel(){
       const tds=[...tr.children]; for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) td.classList.add('gselrange'); } }
   });
   const a=_selAnchorTd(); if(a) a.classList.add('gselanchor');
+  _syncSelectionStat();
 }
 function _clearCellSel(){
   STATE.gSelRange=null; STATE.gSelRanges=null;
   document.querySelectorAll('#gbody td.gselrange,#gbody td.gselanchor').forEach(td=>td.classList.remove('gselrange','gselanchor'));
+  _syncSelectionStat();
 }
 // 앵커 = 활성 범위의 왼쪽 위 셀(편집·붙여넣기 시작점)
 function _selAnchorTd(){
@@ -5826,6 +5831,30 @@ function _selectionGrid(){
     if(line.length) out.push(line);
   });
   return out;
+}
+// 선택한 전체 셀 수와, 선택 범위 안의 결제금액만 합산한다. 겹친 Ctrl(⌘) 선택은 _selectionGrid가 한 번으로 합친다.
+function _selectionStats(){
+  const cells=_selectionGrid().flat();
+  let amount=0, hasAmount=false;
+  cells.forEach(td=>{
+    const field=String(td.getAttribute('data-field')||td.getAttribute('data-cfield')||'').replace(/^col:/,'').replace(/\s/g,'');
+    if(field!=='결제금액') return;
+    const raw=String(td.getAttribute('data-val')==null ? td.textContent||'' : td.getAttribute('data-val'));
+    const normalized=raw.replace(/[₩원,\s]/g,'');
+    if(!/^-?\d+(?:\.\d+)?$/.test(normalized)) return;
+    const value=Number(normalized); if(!Number.isFinite(value)) return;
+    amount+=value; hasAmount=true;
+  });
+  return {count:cells.length,amount:hasAmount?amount:null};
+}
+function _syncSelectionStat(){
+  const el=$('#gselstat'); if(!el) return;
+  const {count,amount}=_selectionStats();
+  if(!count){ el.hidden=true; el.textContent=''; el.removeAttribute('title'); return; }
+  const text=amount==null
+    ? `선택 셀 ${count.toLocaleString('ko-KR')}개`
+    : `선택 셀 ${count.toLocaleString('ko-KR')}개 · 합계금액 ${amount.toLocaleString('ko-KR')}원`;
+  el.hidden=false; el.textContent=text; el.title=text;
 }
 // 셀의 복사값 — 편집 셀은 편집 원값(data-val), 그 외는 표시 텍스트(배지·버튼 제외).
 function _cellCopyText(td){
@@ -6792,6 +6821,7 @@ function _pmWorkEntries(items, manager){
 function _pmVisibleItems(){ return _pmFilterItems(STATE.pmItems||[], _pmFilterState()); }
 function _pmSelectManager(manager){
   const filter=_pmFilterState();
+  STATE.pmWorkScrollTop=null;
   filter.manager=manager||'';
   filter.workKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
   _pmRender();
@@ -6802,6 +6832,8 @@ function _pmToggleWorkKeys(selectedKeys, allKeys, workKey){
   return allKeys.filter(key=>selected.has(key));
 }
 function _pmToggleWork(workKey){
+  const workList=$('#pmbody .pmworklist');
+  STATE.pmWorkScrollTop=workList ? workList.scrollTop : null;
   const filter=_pmFilterState();
   const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
   filter.workKeys=_pmToggleWorkKeys(filter.workKeys,allKeys,workKey);
@@ -6829,7 +6861,7 @@ function _pmFilterBar(allItems){
       ? `<button class="btn primary pmdownload" onclick="_pmDownload('${bank}')">${label} 서식 다운로드 · ${bankItems.length}건</button>`
       : `<button class="btn pmdownload" disabled>${label} 대상 없음</button>`;
   };
-  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · ${selectedKeys.size}/${works.length}개 작업 선택</span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span>행 전체를 눌러 여러 작업을 선택합니다.</span></div><div class="pmworklist">${workRows||'<div class="empty">선택할 작업이 없습니다.</div>'}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
+  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span>행 전체를 눌러 여러 작업을 선택합니다.</span></div><div class="pmworklist">${workRows||'<div class="empty">선택할 작업이 없습니다.</div>'}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
 }
 
 function _pmRender(){
@@ -6866,6 +6898,9 @@ function _pmRender(){
       ${_pmFixBlock()}
       ${_pmTargetTable(items)}
     </div>`;
+  const workList=$('#pmbody .pmworklist');
+  if(workList && Number.isFinite(STATE.pmWorkScrollTop)) workList.scrollTop=STATE.pmWorkScrollTop;
+  STATE.pmWorkScrollTop=null;
 }
 
 function _pmTargetTable(items){

@@ -18,8 +18,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const S = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
-const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
+const normalizeEol = s => s.replace(/\r\n/g, '\n');
+const S = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', p), 'utf8'));
+const F = p => normalizeEol(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8'));
 
 let pass = 0;
 const t = (name, cond) => { assert(cond, name); pass++; console.log('  ✓ ' + name); };
@@ -168,7 +169,7 @@ t('공고 create INSERT 에 review_type 이 있다',
 t('★ 공고 update 는 CASE 센티널 — null=유지 / \'\'=해제(조용한 해제 차단)',
   /review_type = CASE WHEN \$39::text IS NULL THEN review_type[\s\S]{0,120}WHEN \$39::text = '' THEN NULL/.test(CAMP));
 t('★ create·update 양쪽이 req.body 에서 review_type 을 구조분해한다(누락=500)',
-  (CAMP.match(/review_type, \/\/ ★ 087/g) || []).length === 2);
+  (CAMP.match(/transfer_memo,\s*\/\/[^\n]*\n\s*review_type,\s*review_type_mix/g) || []).length === 2);
 t('★ REQUIRED_SCHEMA 에 등록(컬럼 누락 = 공고 발행·수정 전면 42703)',
   /\['recruit_campaigns', 'review_type'\]/.test(IDX));
 
