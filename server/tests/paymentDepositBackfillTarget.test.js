@@ -15,6 +15,9 @@ assert.match(result, /COALESCE\(p\.seq, i\.row_index\) AS target_row_index/);
 assert.match(result, /cp\.seq = i\.row_index/);
 assert.match(result, /same_phone\.phone8 = i\.phone8/);
 assert.match(result, /AND 1 = \(\s*SELECT COUNT\(\*\)/);
+assert.match(result, /LEFT JOIN recruit_campaigns rc ON rc\.id = i\.campaign_id/);
+assert.match(result, /rc\.linked_sheet_id/);
+assert.match(result, /rc\.linked_tab_name/);
 
 // The workdesk renders campaign_participants.row_json, not raw_sheet_rows.
 // A confirmation using another projection would reintroduce false-green UI.

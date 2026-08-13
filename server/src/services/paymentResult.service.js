@@ -478,20 +478,34 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
       `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at,
-              COALESCE(p.submit_col2, r.submit_col2) AS submit_col2,
-              COALESCE(p.tab_gid, r.tab_gid) AS tab_gid,
+              COALESCE(p.sheet_id, i.sheet_id) AS target_sheet_id,
+              COALESCE(p.tab_name, i.tab_name) AS target_tab_name,
+              COALESCE(p.submit_col2, target_r.submit_col2, r.submit_col2) AS submit_col2,
+              COALESCE(p.tab_gid, target_r.tab_gid, r.tab_gid, rc.linked_tab_gid) AS tab_gid,
               COALESCE(p.seq, i.row_index) AS target_row_index,
-              COALESCE(tc.sheetless, FALSE) AS sheetless
+              COALESCE(target_tc.sheetless, FALSE) AS sheetless
          FROM payment_batch_items i
          LEFT JOIN review_index r
            ON r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name AND r.row_index = i.row_index
-         LEFT JOIN tab_configs tc
-           ON tc.sheet_id = i.sheet_id AND tc.tab_name = i.tab_name
+         -- A payment row keeps the tab identity at download time.  The board can
+         -- be rebuilt or renamed before the result arrives, so prefer the live
+         -- campaign link (gid first) when resolving the row to write back.
+         LEFT JOIN recruit_campaigns rc ON rc.id = i.campaign_id
          LEFT JOIN LATERAL (
-           SELECT cp.seq, cp.submit_col2, cp.tab_gid
+           SELECT cp.sheet_id, cp.tab_name, cp.seq, cp.submit_col2, cp.tab_gid
              FROM campaign_participants cp
-            WHERE cp.sheet_id = i.sheet_id AND cp.tab_name = i.tab_name
-              AND cp.deleted_at IS NULL AND cp.active = TRUE
+            WHERE cp.deleted_at IS NULL AND cp.active = TRUE
+              AND (
+                (
+                  cp.sheet_id = COALESCE(NULLIF(rc.linked_sheet_id, ''), i.sheet_id)
+                  AND (
+                    (NULLIF(rc.linked_tab_gid, '') IS NOT NULL AND cp.tab_gid = rc.linked_tab_gid)
+                    OR (NULLIF(rc.linked_tab_gid, '') IS NULL
+                        AND cp.tab_name = COALESCE(NULLIF(rc.linked_tab_name, ''), i.tab_name))
+                  )
+                )
+                OR (cp.sheet_id = i.sheet_id AND cp.tab_name = i.tab_name)
+              )
               AND (
                 cp.seq = i.row_index
                 OR (
@@ -499,19 +513,31 @@ async function backfillPaidDepositStamp({ batchId, by }) {
                   AND 1 = (
                     SELECT COUNT(*)
                       FROM campaign_participants same_phone
-                     WHERE same_phone.sheet_id = i.sheet_id AND same_phone.tab_name = i.tab_name
+                     WHERE same_phone.sheet_id = cp.sheet_id AND same_phone.tab_name = cp.tab_name
                        AND same_phone.phone8 = i.phone8 AND same_phone.deleted_at IS NULL
                        AND same_phone.active = TRUE
                   )
                 )
               )
-            ORDER BY (cp.seq = i.row_index) DESC
+            ORDER BY
+              (cp.sheet_id = COALESCE(NULLIF(rc.linked_sheet_id, ''), i.sheet_id)
+                AND ((NULLIF(rc.linked_tab_gid, '') IS NOT NULL AND cp.tab_gid = rc.linked_tab_gid)
+                  OR (NULLIF(rc.linked_tab_gid, '') IS NULL
+                    AND cp.tab_name = COALESCE(NULLIF(rc.linked_tab_name, ''), i.tab_name)))) DESC,
+              (cp.seq = i.row_index) DESC
             LIMIT 1
          ) p ON TRUE
+         LEFT JOIN review_index target_r
+           ON target_r.sheet_id = COALESCE(p.sheet_id, i.sheet_id)
+          AND target_r.tab_name = COALESCE(p.tab_name, i.tab_name)
+          AND target_r.row_index = COALESCE(p.seq, i.row_index)
+         LEFT JOIN tab_configs target_tc
+           ON target_tc.sheet_id = COALESCE(p.sheet_id, i.sheet_id)
+          AND target_tc.tab_name = COALESCE(p.tab_name, i.tab_name)
         WHERE i.batch_id = $1 AND i.status = 'paid'
         ORDER BY i.created_at, i.id`, [batchId]);
     items = rows.map(r => ({
-      sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.target_row_index,
+      sheetId: r.target_sheet_id, tabName: r.target_tab_name, rowIndex: r.target_row_index,
       depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', sheetless: r.sheetless === true,
       stamp: _depositDateFromPaidAt(r.paid_at),
     })).filter(x => x.sheetId && x.tabName && x.rowIndex);
