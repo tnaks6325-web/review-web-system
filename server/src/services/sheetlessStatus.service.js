@@ -122,17 +122,15 @@ async function verifyStatusCell({ sheetId, tabName, rowIndex, kind, value = '' }
   const header = headerRows.length ? String(headerRows[0].h || '').trim() : '';
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
+  // `workdeskTab` renders campaign_participants.row_json directly.  The RAW
+  // mirror is a derived ledger and can be stale while the board is already
+  // showing different data, so it must not be used as this confirmation's
+  // source of truth.
   const { rows } = await db.query(
-    `SELECT r.cells ->> (
-         SELECT e.ordinality - 1
-           FROM jsonb_array_elements_text(COALESCE(t.detected_headers, t.headers)) WITH ORDINALITY AS e(value, ordinality)
-          WHERE e.value = $4
-          LIMIT 1
-       )::int AS value
-       FROM raw_sheet_tabs t
-       JOIN raw_sheet_rows r ON r.sheet_id = t.sheet_id AND r.tab_gid = t.tab_gid AND r.row_index = $3
-      WHERE t.sheet_id = $1 AND t.tab_name = $2
-      ORDER BY t.mirrored_at DESC
+    `SELECT COALESCE(row_json ->> $4, '') AS value
+       FROM campaign_participants
+      WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3
+        AND deleted_at IS NULL AND active = TRUE
       LIMIT 1`, [sheetId, tabName, rowIndex, header]);
   if (!rows.length) return { handled: true, ok: false, reason: 'workboard_row_not_found', column: header };
   const observed = String(rows[0].value || '').trim();

@@ -477,17 +477,41 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
-      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, r.submit_col2, r.tab_gid,
+      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at,
+              COALESCE(p.submit_col2, r.submit_col2) AS submit_col2,
+              COALESCE(p.tab_gid, r.tab_gid) AS tab_gid,
+              COALESCE(p.seq, i.row_index) AS target_row_index,
               COALESCE(tc.sheetless, FALSE) AS sheetless
          FROM payment_batch_items i
          LEFT JOIN review_index r
            ON r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name AND r.row_index = i.row_index
          LEFT JOIN tab_configs tc
            ON tc.sheet_id = i.sheet_id AND tc.tab_name = i.tab_name
+         LEFT JOIN LATERAL (
+           SELECT cp.seq, cp.submit_col2, cp.tab_gid
+             FROM campaign_participants cp
+            WHERE cp.sheet_id = i.sheet_id AND cp.tab_name = i.tab_name
+              AND cp.deleted_at IS NULL AND cp.active = TRUE
+              AND (
+                cp.seq = i.row_index
+                OR (
+                  COALESCE(i.phone8, '') <> '' AND cp.phone8 = i.phone8
+                  AND 1 = (
+                    SELECT COUNT(*)
+                      FROM campaign_participants same_phone
+                     WHERE same_phone.sheet_id = i.sheet_id AND same_phone.tab_name = i.tab_name
+                       AND same_phone.phone8 = i.phone8 AND same_phone.deleted_at IS NULL
+                       AND same_phone.active = TRUE
+                  )
+                )
+              )
+            ORDER BY (cp.seq = i.row_index) DESC
+            LIMIT 1
+         ) p ON TRUE
         WHERE i.batch_id = $1 AND i.status = 'paid'
         ORDER BY i.created_at, i.id`, [batchId]);
     items = rows.map(r => ({
-      sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
+      sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.target_row_index,
       depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', sheetless: r.sheetless === true,
       stamp: _depositDateFromPaidAt(r.paid_at),
     })).filter(x => x.sheetId && x.tabName && x.rowIndex);
