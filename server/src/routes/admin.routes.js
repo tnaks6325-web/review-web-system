@@ -27,6 +27,26 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
+// The test frontend can intentionally enter without typing credentials.
+// This stays unavailable everywhere unless the test deployment explicitly
+// opts in, and browsers must originate from that one frontend hostname.
+const TEST_AUTO_LOGIN_ORIGIN = 'https://test-review-wdb-web-production.up.railway.app';
+router.post('/test-auto-login', async (req, res, next) => {
+  if (process.env.TEST_AUTO_LOGIN !== '1' || req.get('origin') !== TEST_AUTO_LOGIN_ORIGIN) {
+    return res.status(404).json({ success: false, error: 'Not found' });
+  }
+  try {
+    const result = await loginAdmin(process.env.MASTER_ADMIN_NAME, process.env.MASTER_ADMIN_PW);
+    if (!result || !result.success || !result.token) {
+      return res.status(503).json({ success: false, error: 'Test automatic login is unavailable.' });
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // ═══════════════════════════════════════════════════════════
 // POST /api/admin/staff-login — 영업담당자 로그인 (GAS: staffLogin)
 // ═══════════════════════════════════════════════════════════
