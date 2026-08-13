@@ -18,6 +18,8 @@ assert.match(recruit, /const composer = document\.getElementById\('rf_mixed_revi
 assert.match(recruit, /composer\.hidden = !visible/);
 assert.match(recruit, /function getRecruitOptionReviewTypeMix/);
 assert.match(recruit, /function renderRecruitOptionReviewMix/);
+assert.match(recruit, /const typeLabel = document\.createElement\('span'\);/);
+assert.match(recruit, /typeLabel\.className = 'mixed-review-type-label';/);
 assert.match(recruit, /input\.addEventListener\('focus', \(\) => \{\s*if \(input\.value === '0'\) input\.value = '';\s*\}\);/);
 assert.match(recruit, /_readOptionReviewMix\(r\)/);
 assert.match(recruit, /payload\.options = readOptRows\(\)/);

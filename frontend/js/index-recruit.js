@@ -2834,7 +2834,9 @@ function renderRecruitOptionReviewMix() {
     grid.className = 'mixed-review-grid';
     RF_REVIEW_MIX_TYPES.forEach((type) => {
       const label = document.createElement('label');
-      label.textContent = ({ photo: '포토', text: '텍스트', confirm: '구매확정', star: '별점' })[type];
+      const typeLabel = document.createElement('span');
+      typeLabel.className = 'mixed-review-type-label';
+      typeLabel.textContent = ({ photo: '포토', text: '텍스트', confirm: '구매확정', star: '별점' })[type];
       const input = document.createElement('input');
       input.type = 'number'; input.min = '0'; input.inputMode = 'numeric'; input.value = String(_mixQuantity(card.mix, type));
       input.dataset.mixType = type;
@@ -2847,7 +2849,7 @@ function renderRecruitOptionReviewMix() {
         else window._rfGlobalReviewTypeMix = next.filter((entry) => entry.quantity > 0);
         syncRecruitReviewTypeMix();
       });
-      label.appendChild(input);
+      label.append(typeLabel, input);
       grid.appendChild(label);
     });
     box.append(head, grid);
