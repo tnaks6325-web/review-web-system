@@ -6996,15 +6996,13 @@ function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
   const reconcile = b.status==='downloaded' && ((b.paidCount||0)+(b.failedCount||0)>0)
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
-  const retryDepositDate = b.status==='applied' && (b.boardFailedCount||0)>0
-    ? `<button class="btn sm" onclick="_pmBackfillPaidDeposit(${i})">입금일 재시도</button>` : '';
   const confirmFailures = b.status==='applied' && (b.paidCount||0)>0 && (b.pendingCount||0)>0
     ? `<button class="btn sm danger" onclick="_pmConfirmFailures(${i})">이체실패 처리</button>` : '';
   const resultUpload = (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span><span class="pmdrophint">드래그 가능</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
-    : (b.status==='applied' ? `${retryDepositDate}${confirmFailures}` : '');
+    : (b.status==='applied' ? `${confirmFailures}` : '');
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
   return manage + result + resultUpload;
@@ -7601,25 +7599,6 @@ async function _pmMarkApplied(i){
   if(!r || !r.ok){ toast((r&&r.error)||'적용완료 처리 실패'); return; }
   toast(`적용완료로 처리했습니다${r.remainingPending ? ` · 결과 확인 대기 ${r.remainingPending}건` : ''}`);
   await _pmLoad();
-}
-
-async function _pmBackfillPaidDeposit(i){
-  const b = (STATE.pmBatches||[])[i];
-  if(!b) return;
-  if(!confirm(`#${b.seq} 회차의 결과파일에 기록된 실제 이체일을 성공 건의 작업보드 입금 칸에 기록할까요?\n\n날짜가 없는 결과 행은 기록하지 않습니다.`)) return;
-  const r = await api('/api/trackb/payment/batch/'+b.id+'/deposit-date-backfill',
-    { method:'POST', body: JSON.stringify({}) });
-  if(r && r.ok){
-    const resultParts = [`${r.recorded||0}건 실제 기록`];
-    if(r.queued) resultParts.push(`${r.queued}건 대기`);
-    if(r.skipped) resultParts.push(`${r.skipped}건 제외`);
-    if(r.failed) resultParts.push(`${r.failed}건 실패`);
-    toast(`${r.stamp} 입금일: ${resultParts.join(' · ')}`);
-    await _pmLoad();
-    return;
-  }
-  if(!r || !r.ok){ toast((r&&r.error)||'입금일 기록 실패'); return; }
-  toast(`${r.candidates||0}건의 입금 칸에 ${r.stamp}을 기록했습니다`);
 }
 
 async function _pmRestoreManual811(){
