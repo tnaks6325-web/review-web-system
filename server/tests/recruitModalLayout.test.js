@@ -82,6 +82,11 @@ ok('중앙 편집부는 사후 DOM 이동 없이 시안 순서로 직접 렌더�
   && !/\.rf-card\[data-sec="(?:link|fee|prod|work|cond)"\]\{order:/.test(modal)
   && !/\.rf-publish-card\{order:/.test(modal)
   && !/RecruitModal\.syncProductSettings\(on\)/.test(editor));
+ok('브라우저가 템플릿의 모달 셸을 잘못 분리해도 미리보기·푸터를 원래 레이아웃으로 복구한다',
+  /function normalizeShellLayout/.test(modal)
+  && /split\.appendChild\(side\)/.test(modal)
+  && /editor\.appendChild\(compactFooter\)/.test(modal)
+  && /box\.appendChild\(legacyFooter\)/.test(modal));
 ok('실제 런타임 중앙 편집부는 승인 시안의 editor/section/row-form 마크업을 직접 사용한다',
   /class="rf-main rf-compact-main"/.test(modal)
   && /class="editor-head"/.test(modal)
