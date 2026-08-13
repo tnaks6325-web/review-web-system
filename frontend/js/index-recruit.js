@@ -2838,6 +2838,9 @@ function renderRecruitOptionReviewMix() {
       const input = document.createElement('input');
       input.type = 'number'; input.min = '0'; input.inputMode = 'numeric'; input.value = String(_mixQuantity(card.mix, type));
       input.dataset.mixType = type;
+      input.addEventListener('focus', () => {
+        if (input.value === '0') input.value = '';
+      });
       input.addEventListener('input', () => {
         const next = RF_REVIEW_MIX_TYPES.map((key) => ({ type: key, quantity: Number(grid.querySelector(`[data-mix-type="${key}"]`)?.value) || 0 }));
         if (card.row) _writeOptionReviewMix(card.row, next);

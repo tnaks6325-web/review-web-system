@@ -26,7 +26,7 @@
 (function () {
   'use strict';
   var HTML = `<div id="recruitModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box rf-box" style="max-width:1224px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
+  <div class="modal-box rf-box" style="max-width:1020px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="modal-header">
       <h3 id="recruitModalTitle"><i class="fas fa-bullhorn"></i> 모집공고 등록</h3>
       <button class="btn-icon-sm" onclick="closeRecruitModal()"><i class="fas fa-times"></i></button>
@@ -926,7 +926,7 @@
 #recruitModal .rf-box{height:calc(100vh - 78px)!important;min-height:630px;max-height:940px!important;border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.18),0 3px 12px rgba(15,23,42,.08)}
 #recruitModal .modal-header{padding:13px 16px;background:#F8FAFD}
 #recruitModal .modal-header h3{font-size:.92rem;letter-spacing:-.025em}
-#recruitModal .rf-rail{width:197px;padding:14px 10px;background:#FBFCFE;overflow:hidden}
+#recruitModal .rf-rail{width:164px;padding:14px 10px;background:#FBFCFE;overflow:hidden}
 #recruitModal .rf-rail-t{padding:2px 8px 12px;color:#172033;font-size:.82rem;letter-spacing:-.025em}
 #recruitModal .rf-rail-t span{display:block;margin-top:4px;color:#7F8A9B;font-size:.62rem;font-weight:600;letter-spacing:0}
 #recruitModal .rf-step-list{display:grid;gap:2px}
@@ -941,7 +941,7 @@
 #recruitModal .rf-side-audit-head strong.warn{color:#B66A15}
 #recruitModal .rf-side-audit #rf_part_check{display:grid;gap:4px}
 #recruitModal .rf-side-audit #rf_part_check>*{font-size:.61rem;line-height:1.3}
-#recruitModal .rf-side{width:286px;background:#FBFCFE}
+#recruitModal .rf-side{width:238px;background:#FBFCFE}
 #recruitModal .modal-body{gap:0!important;padding:0 16px 18px!important}
 #recruitModal .rf-card{border:0;border-bottom:1px solid #DCE3EC;border-radius:0;overflow:visible;background:transparent}
 #recruitModal .rf-card:last-child{border-bottom:0}
@@ -1001,7 +1001,7 @@
 #recruitModal .ig-strip{width:244px;border-color:#C9D6E8;border-style:dashed;border-radius:6px}
 #recruitModal .ig-add,.rf-ig-empty{border-radius:5px}
 #recruitModal .rf-side #rf_preview_section{margin:0 10px!important}
-#recruitModal .rf-side #rf_preview_listcard{max-width:262px!important}
+#recruitModal .rf-side #rf_preview_listcard{max-width:218px!important}
 #recruitModal .rf-side #rf_preview_card{font-size:.7rem}
 #recruitModal .rf-linked-reference{display:flex;align-items:center;min-height:30px;width:100%;padding:0 8px;border:1px solid #D5DEE9;border-radius:5px;background:#F7F9FC;color:#536178;font-size:.72rem;font-weight:750}
 #recruitModal .rf-linked-reference:before{content:'연결됨';margin-right:6px;color:#2563C8;font-size:.64rem;font-weight:850}
@@ -1054,7 +1054,7 @@
 #recruitModal .rf-compact-main .product-link-button{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#2563EB}.rf-compact-main .thumb-url-control input[type=file]{display:none}.rf-compact-main .thumb-guide-row .form-control{color:#7F8A9B;font-size:11px}
 #recruitModal .rf-compact-main .rf-review-type-row .form-control{display:block}.rf-compact-main .review-type-buttons{width:100%}#recruitModal .rf-compact-main .mixed-review-composer{margin-top:7px;padding:7px;border:1px solid #DCE3EC;border-radius:6px;background:#F8FAFC}#recruitModal .rf-compact-main .mixed-review-card+.mixed-review-card{margin-top:7px;padding-top:7px;border-top:1px solid #E3E9F2}#recruitModal .rf-compact-main .mixed-review-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;color:#617087;font-size:10px}#recruitModal .rf-compact-main .mixed-review-heading strong{color:#172033}.rf-compact-main .mixed-review-total{color:#64748B;font-weight:800}.rf-compact-main .mixed-review-total.is-invalid{color:#DC2626}#recruitModal .rf-compact-main .mixed-review-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}#recruitModal .rf-compact-main .mixed-review-grid label{display:flex;align-items:center;justify-content:space-between;gap:4px;color:#617087;font-size:9px;font-weight:800}#recruitModal .rf-compact-main .mixed-review-grid input{flex:0 0 50%;width:50%;height:24px;min-width:0;padding:0 5px;border:1px solid #D5DDE8;border-radius:5px;text-align:right;color:#172033;font-size:10px}
 #recruitModal .rf-compact-main .product-main-url{border-top:1px solid #DCE3EC;background:#FBFCFE}.rf-compact-main .product-main-url .form-label{background:#F5F7FA}.rf-compact-main .product-main-url .form-control{gap:6px}.rf-compact-main .product-main-url input{min-width:0;flex:1}.rf-compact-main .rbadge-chip.automatic{border-color:#B9D2FB!important;background:#EDF4FF!important;color:#2563C8!important}
-#recruitModal .rf-compact-main .work-compose{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:6px;align-items:stretch;width:100%}.rf-compact-main .work-compose textarea{width:100%;min-width:0;height:58px!important}.rf-compact-main .work-image-strip{justify-self:end;width:88px;min-width:0;min-height:58px;border:1px dashed #C9D6E8;border-radius:6px;background:#FBFCFE}.rf-compact-main .ig-strip{height:58px;padding:4px}.rf-compact-main .advanced{margin-top:8px;border:1px solid #DCE3EC;border-radius:8px;background:#FBFCFE}.rf-compact-main .advanced summary{padding:9px 11px;color:#58667D;font-size:10px;font-weight:850;cursor:pointer}
+#recruitModal .rf-compact-main .work-compose{display:grid;grid-template-columns:minmax(220px,1fr) 76px;gap:6px;align-items:stretch;width:100%}.rf-compact-main .work-compose textarea{width:100%;min-width:220px;height:58px!important}.rf-compact-main .work-image-strip{justify-self:end;width:76px;min-width:0;min-height:58px;border:1px dashed #C9D6E8;border-radius:6px;background:#FBFCFE}.rf-compact-main .ig-strip{height:58px;padding:4px}.rf-compact-main .advanced{margin-top:8px;border:1px solid #DCE3EC;border-radius:8px;background:#FBFCFE}.rf-compact-main .advanced summary{padding:9px 11px;color:#58667D;font-size:10px;font-weight:850;cursor:pointer}
 #recruitModal .rf-compact-main .footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 22px;border-top:1px solid #DCE3EC;background:#fff}.rf-compact-main .footer-copy{color:#7F8A9B;font-size:10px}.rf-compact-main .btn{min-height:29px;padding:6px 10px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#526078;font-size:10px;font-weight:850}.rf-compact-main .footer .rf-savebtn{min-height:29px;padding:6px 10px;border-color:#2563EB;background:#2563EB;color:#fff;font-size:10px}
 #recruitModal #rf_linked_campaign,#recruitModal #rf_linked_tab,#recruitModal #rf_delivery_type{display:none}
 #recruitModal .rf-delivery-toggle{display:flex;flex-wrap:wrap;gap:4px}
