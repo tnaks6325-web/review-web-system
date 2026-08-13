@@ -19,6 +19,7 @@ const { writeSheet, readSheet } = require('./sheets.service');
 const { enqueue } = require('./syncQueue.service');
 const { logger } = require('../utils/logger');
 const { mergeDepositStamps } = require('../utils/depositStamp');
+const { findPaymentColumnIndex } = require('./columnResolver');
 
 /** 열 인덱스 → 알파벳 (A=0) */
 function colLetter(colIdx) {
@@ -129,7 +130,8 @@ async function markDepositCells(items, opts = {}) {
       logger.warn(`[paymentApply] 무시트 판정 예외 → 시트 경로로 진행: ${e.message}`);
     }
 
-    if (!depositColKey || !rowIndex) continue; // 입금컬럼 미지정 행은 시트 기록 생략
+    if (!rowIndex) continue;
+    let resolvedDepositColKey = depositColKey;
     try {
       const cacheKey = item.sheetId + '||' + item.tabName;
       let headers = headerCache[cacheKey];
@@ -138,8 +140,10 @@ async function markDepositCells(items, opts = {}) {
         headers = detectHeaderRow(hv);
         headerCache[cacheKey] = headers;
       }
-      const colIdx = headers.findIndex(h => h === depositColKey);
-      if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey}' 을 헤더에서 찾을 수 없음`);
+      let colIdx = headers.findIndex(h => h === depositColKey);
+      if (colIdx < 0) colIdx = findPaymentColumnIndex(headers);
+      if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey || '자동 감지'}' 을 헤더에서 찾을 수 없음`);
+      resolvedDepositColKey = headers[colIdx];
       const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
       const sheetOpts = item.gid ? { gid: item.gid } : {};
       const current = await readSheet(item.sheetId, range, sheetOpts);
@@ -154,7 +158,7 @@ async function markDepositCells(items, opts = {}) {
           sheetId: item.sheetId,
           tabName: item.tabName,
           rowIndex,
-          depositColKey,
+          depositColKey: resolvedDepositColKey,
           value: stamp,
           gid: item.gid || '',
         });
@@ -191,14 +195,14 @@ async function verifyDepositCells(items) {
         continue;
       }
 
-      if (!item.depositColKey) { outcome.missing += 1; continue; }
       const cacheKey = item.sheetId + '||' + item.tabName;
       let headers = headerCache[cacheKey];
       if (!headers) {
         headers = detectHeaderRow(await readSheet(item.sheetId, `'${item.tabName}'!1:50`));
         headerCache[cacheKey] = headers;
       }
-      const colIdx = headers.findIndex(h => h === item.depositColKey);
+      let colIdx = headers.findIndex(h => h === item.depositColKey);
+      if (colIdx < 0) colIdx = findPaymentColumnIndex(headers);
       if (colIdx < 0) { outcome.missing += 1; continue; }
       const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
       const current = await readSheet(item.sheetId, range, item.gid ? { gid: item.gid } : {});
