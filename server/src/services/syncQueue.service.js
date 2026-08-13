@@ -37,6 +37,7 @@ const { logger } = require('../utils/logger');
 const { logAbnormal } = require('./errorLog.service');
 // 비고/포스팅 열 고르기 — 제출 경로(submit.routes)·무시트 기록과 **같은 규칙**(사본 금지)
 const { pickMemoColumnIndex } = require('../utils/memoColumn');
+const { mergeDepositStamps } = require('../utils/depositStamp');
 
 // ── 큐에 작업 추가 ──
 async function enqueue(type, payload, maxRetry = 3) {
@@ -638,7 +639,10 @@ async function _executeItem(item) {
 
       const colLetter = _getColLetter(colIdx);
       const range = `'${tabName}'!${colLetter}${rowIndex}`;
-      await throttledCall(() => writeSheet(sheetId, range, [[value || '']], gid ? { gid } : {}));
+      const sheetOpts = gid ? { gid } : {};
+      const current = await throttledCall(() => readSheet(sheetId, range, sheetOpts));
+      await throttledCall(() => writeSheet(sheetId, range,
+        [[mergeDepositStamps(current && current[0] && current[0][0], value || '')]], sheetOpts));
       break;
     }
 

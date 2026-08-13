@@ -35,6 +35,7 @@
 
 const { logger } = require('../utils/logger');
 const pool = require('../db/pool');
+const { mergeDepositStamps } = require('../utils/depositStamp');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
@@ -55,7 +56,7 @@ const SUBMIT_MARK = 'O';
  * @returns {Promise<{handled:boolean, ok?:boolean, reason?:string, column?:string}>}
  *   handled=false → 무시트 탭이 아님(호출부는 종전 경로 유지)
  */
-async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by = 'system' } = {}) {
+async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by = 'system', deferRebuild = false } = {}) {
   if (!sheetId || !tabName || !rowIndex) return { handled: false };
   if (kind !== 'submit' && kind !== 'paid') return { handled: false };
 
@@ -91,7 +92,8 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   //   담당자가 열을 추가해야 표시가 남는다(모르면 "왜 입금 표시가 안 뜨지"가 된다).
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
-  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by });
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: mark, by,
+    mergeDeposit: kind === 'paid', deferRebuild });
 }
 
 /**
@@ -134,20 +136,35 @@ async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = fals
 }
 
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
-async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by }) {
+async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, mergeDeposit = false, deferRebuild = false }) {
+  let nextValue = value;
+  if (mergeDeposit) {
+    try {
+      const { rows } = await db.query(
+        `SELECT COALESCE(row_json ->> $4, '') AS value
+           FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
+          LIMIT 1`, [sheetId, tabName, rowIndex, header]);
+      nextValue = mergeDepositStamps(rows[0] && rows[0].value, value);
+    } catch (e) {
+      return { handled: true, ok: false, reason: 'lookup_failed', message: e.message, column: header };
+    }
+  }
   try {
     const r = await db.query(
       `UPDATE campaign_participants
           SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
               updated_at = NOW()
         WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
-      [sheetId, tabName, rowIndex, header, value]);
+      [sheetId, tabName, rowIndex, header, nextValue]);
     if (!r.rowCount) return { handled: true, ok: false, reason: 'row_not_found', column: header };
   } catch (e) {
     return { handled: true, ok: false, reason: 'write_failed', message: e.message, column: header };
   }
 
   // ── 장부 재생성 — 이걸 빼면 화면(검색·리뷰내역·홈 통계)에 반영되지 않는다 ──
+  if (deferRebuild) return { handled: true, ok: true, deferred: true, column: header, value: nextValue };
+
   try {
     await require('./sheetlessLedger.service').rebuildLedgers({ sheetId, tabName, by });
   } catch (e) {
@@ -156,7 +173,7 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
     return { handled: true, ok: true, deferred: true, reason: 'ledger_deferred', column: header };
   }
 
-  return { handled: true, ok: true, column: header, value };
+  return { handled: true, ok: true, column: header, value: nextValue };
 }
 
 /*

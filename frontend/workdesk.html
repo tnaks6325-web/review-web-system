@@ -6876,6 +6876,7 @@ function _pmRender(){
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
     <span class="bd g">${items.filter(_pmOn).length}건 대상</span>
     <span class="sp" style="flex:1"></span>
+    <button class="btn" onclick="_pmRestoreManual811()">8/11 입금일 복구</button>
     <button class="btn" onclick="_pmLoad()">새로고침</button></div>`;
 
   const stat=(k,v,cls)=>`<div class="pmstat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
@@ -7559,6 +7560,19 @@ async function _pmBackfillPaidDeposit(i){
   }
   if(!r || !r.ok){ toast((r&&r.error)||'입금일 기록 실패'); return; }
   toast(`${r.candidates||0}건의 입금 칸에 ${r.stamp}을 기록했습니다`);
+}
+
+async function _pmRestoreManual811(){
+  if(!confirm('수동으로 8/11을 기록했던 대상의 작업보드 입금칸에 8/11을 복구합니다.\n이미 기록된 8/12 등은 지우지 않고 8/11, 8/12로 함께 보존합니다.')) return;
+  const r=await api('/api/trackb/payment/repair/manual-811-deposit-dates',
+    {method:'POST',body:JSON.stringify({confirm:true})});
+  if(!r||!r.ok){ toast((r&&r.error)||'8/11 입금일 복구에 실패했습니다.'); return; }
+  const parts=[`${r.recorded||0}건 기록`];
+  if(r.queued) parts.push(`${r.queued}건 재시도 대기`);
+  if(r.skipped) parts.push(`${r.skipped}건 제외`);
+  if(r.failed) parts.push(`${r.failed}건 실패`);
+  toast(`8/11 입금일 복구 완료 · 대상 ${r.candidates||0}건 · ${parts.join(' · ')}`);
+  await _pmLoad();
 }
 
 async function _pmConfirmFailures(i){

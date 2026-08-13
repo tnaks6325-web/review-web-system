@@ -2658,6 +2658,7 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
    ★ 반영(result-apply)은 서버가 **파일을 다시 해석·재매칭**한다(화면이 보낸 목록 불신).
    ★ 42P01(migration 100 미적용) = `not_ready` 로 사유를 말한다(마스킹된 200 방지 — 088 규율). */
 const paymentResultSvc = require('../services/paymentResult.service');
+const manualDepositRepairSvc = require('../services/manualDepositRepair.service');
 
 function _resultErr(err, res, next) {
   if (err && err.code === '42P01') {
@@ -2716,6 +2717,18 @@ router.post('/payment/batch/:id/deposit-date-backfill', authMiddleware, adminOrM
   try {
     res.json(await paymentResultSvc.backfillPaidDepositStamp({ batchId: req.params.id, by: _by(req) }));
   } catch (err) { _resultErr(err, res, next); }
+});
+
+// 2026-08-11 manual payment marks were used to exclude targets before board
+// writeback existed.  Restore that historical date without changing batch or
+// target-lock state; date merging keeps any later transfer date visible too.
+router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if ((req.body || {}).confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '8/11 입금일 복구를 확인해 주세요.' });
+    }
+    res.json(await manualDepositRepairSvc.restoreManual811DepositDates({ by: _by(req) }));
+  } catch (err) { next(err); }
 });
 
 // 결과 파일 누락분이 실제 은행 실패로 확인된 경우에만, 대기 항목을 실패로 확정한다.

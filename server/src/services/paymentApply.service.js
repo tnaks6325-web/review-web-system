@@ -18,6 +18,7 @@
 const { writeSheet, readSheet } = require('./sheets.service');
 const { enqueue } = require('./syncQueue.service');
 const { logger } = require('../utils/logger');
+const { mergeDepositStamps } = require('../utils/depositStamp');
 
 /** 열 인덱스 → 알파벳 (A=0) */
 function colLetter(colIdx) {
@@ -115,7 +116,7 @@ async function markDepositCells(items, opts = {}) {
     try {
       const st = await require('./sheetlessStatus.service').markStatusCell({
         sheetId: item.sheetId, tabName: item.tabName, rowIndex,
-        kind: 'paid', value: stamp, by,
+        kind: 'paid', value: stamp, by, deferRebuild: opts.deferSheetlessRebuild === true,
       });
       if (st.handled) {
         if (st.ok) outcome.recorded += 1;
@@ -140,7 +141,10 @@ async function markDepositCells(items, opts = {}) {
       const colIdx = headers.findIndex(h => h === depositColKey);
       if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey}' 을 헤더에서 찾을 수 없음`);
       const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
-      await writeSheet(item.sheetId, range, [[stamp]], item.gid ? { gid: item.gid } : {});
+      const sheetOpts = item.gid ? { gid: item.gid } : {};
+      const current = await readSheet(item.sheetId, range, sheetOpts);
+      const value = mergeDepositStamps(current && current[0] && current[0][0], stamp);
+      await writeSheet(item.sheetId, range, [[value]], sheetOpts);
       outcome.recorded += 1;
       logger.info(`[paymentApply] 입금칸 기록 성공 (tab=${item.tabName}, row=${rowIndex})`);
     } catch (bgErr) {
@@ -165,4 +169,4 @@ async function markDepositCells(items, opts = {}) {
   return outcome;
 }
 
-module.exports = { nowStamp, colLetter, detectHeaderRow, recordDeposits, markDepositCells };
+module.exports = { nowStamp, colLetter, detectHeaderRow, recordDeposits, markDepositCells, mergeDepositStamps };
