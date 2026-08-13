@@ -1029,9 +1029,8 @@ function onParticipationToggle(on) {
   document.querySelectorAll("#recruitModal [data-part-only]").forEach(el => { el.style.display = on ? "" : "none"; });
   const _legacyNote = document.getElementById("rf_legacy_note");
   if (_legacyNote) _legacyNote.style.display = on ? "none" : "";
-  // 상품 설정은 참여형에서는 진행상품 바로 아래, 일반 공고에서는 연결 정보 아래에 둔다.
-  // 값과 input ID는 이동하지 않고 같은 노드를 옮겨 저장·프리필 계약을 유지한다.
-  if (window.RecruitModal && RecruitModal.syncProductSettings) RecruitModal.syncProductSettings(on);
+  // 컴팩트 편집기는 입력 DOM을 이동하지 않는다. 상태 동기화만 수행한다.
+  if (window.RecruitModal && RecruitModal.refreshStaticControls) RecruitModal.refreshStaticControls();
   if (window.RecruitModal && RecruitModal.refreshRail) RecruitModal.refreshRail();   // 레일 목차 동기화
   _syncRecruitPaneGate(on);
   if (on) {

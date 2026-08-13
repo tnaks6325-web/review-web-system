@@ -63,14 +63,18 @@ ok('제목 오른쪽의 상태 버튼은 기존 저장 select와 동기화된다
   && /function syncStatusButtons/.test(modal)
   && /function setStatus/.test(modal)
   && /syncStatusButtons\(\)/.test(editor));
-ok('상품 설정은 별도 단계가 아니라 진행상품 내부 슬롯에 이어진다',
+ok('중앙 편집부는 사후 DOM 이동 없이 시안 구조로 직접 렌더링된다',
   !modal.includes('data-sec="info"')
   && /id="rf_product_settings_slot"/.test(modal)
   && /data-product-settings/.test(modal)
-  && /function placeFinalSections/.test(modal)
-  && /id="rf_legacy_product_settings_slot"/.test(modal)
-  && /syncProductSettings: placeFinalSections/.test(modal)
-  && /RecruitModal\.syncProductSettings\(on\)/.test(editor));
+  && /id="rf_delivery_toggle"/.test(modal)
+  && /rf-parity-time-row/.test(modal)
+  && /rf-parity-date-row/.test(modal)
+  && !/function hydrateParityControls/.test(modal)
+  && !/function placeFinalSections/.test(modal)
+  && !/\.appendChild\(settings\)/.test(modal)
+  && !/\.insertBefore\(publish, link\)/.test(modal)
+  && !/RecruitModal\.syncProductSettings\(on\)/.test(editor));
 ok('최종 행형 문법은 승인 시안의 25/75 열과 동일 높이의 입력·버튼을 쓴다',
   /\.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal)
   && /\.rf-main \.rform-input\{min-height:30px/.test(modal)

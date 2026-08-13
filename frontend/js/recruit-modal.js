@@ -55,11 +55,11 @@
         <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rf-optional">선택</span></span>
           <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)">
             <option value="">① 캠페인(시트) 선택</option>
-          </select></div>
+          </select><div id="rf_linked_campaign_reference" class="rf-linked-reference" aria-live="polite">작업오더에서 연결되면 자동 표시됩니다.</div></div>
         <div class="rf-hrow"><span class="rf-hl">탭명 <span class="rf-optional">선택</span></span>
           <select id="rf_linked_tab" class="rform-input" onchange="onLinkedTabChange(this)" disabled>
             <option value="">② 탭 선택 (시트 먼저)</option>
-          </select></div>
+          </select><div id="rf_linked_tab_reference" class="rf-linked-reference" aria-live="polite">작업오더에서 연결되면 자동 표시됩니다.</div></div>
       </div>
       <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 90px">
         <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
@@ -97,7 +97,21 @@
             <option value="실배송">실배송</option>
             <option value="빈박스">빈박스</option>
             <option value="택배발송대행">택배발송대행</option>
-          </select></div>
+          </select>
+          <div id="rf_delivery_toggle" class="rf-delivery-toggle" role="group" aria-label="배송유형">
+            <button type="button" data-rf-delivery="실배송">실배송</button>
+            <button type="button" data-rf-delivery="빈박스">빈박스</button>
+            <button type="button" data-rf-delivery="택배발송대행">택배발송대행</button>
+          </div></div>
+        <div class="rf-hrow rf-parity-time-row"><span class="rf-hl">구매시간대</span>
+          <div class="rf-parity-time-control">
+            <input id="rf_time_range" type="hidden" value=""><input id="rf_window_start" type="hidden" value=""><input id="rf_window_end" type="hidden" value="">
+            <div class="rf-time-control"><button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))"><span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span><span id="rf_free_time_state">시간 지정</span></button>
+              <div id="rf_time_range_control" class="rf-time-range"><button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button><span class="rf-time-divider" aria-hidden="true">~</span><button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button>
+                <div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden><div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div><div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div></div>
+              </div></div>
+          </div>
+        </div>
         <div class="rf-hrow"><span class="rf-hl">현금영수증</span>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem">
             <input type="checkbox" id="rf_cash_receipt_required" onchange="syncRecruitAutomaticBadges()" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">
@@ -106,6 +120,8 @@
       </div>
       <div class="rf-hrow"><span class="rf-hl">팀채팅방 <span class="rform-req">*</span></span>
           <input id="rf_chat_url" type="url" class="rform-input" placeholder="https://open.kakao.com/..."></div>
+      <div class="rf-hrow rf-parity-date-row" onclick="rfOpenStartDatePicker(event)"><span class="rf-hl">모집 시작일 <span class="rform-req">*</span></span><div class="rf-parity-date-control"><input id="rf_start_date" type="date" class="rform-input" onchange="onRecruitDatesChange()"><span id="rf_start_day" class="rf-date-day"></span></div></div>
+      <div class="rf-hrow"><span class="rf-hl">주말 포함 여부</span><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem"><input type="checkbox" id="rf_skip_weekends" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">주말 제외 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">주말에는 카드만 보이고 신청은 월요일에 재개됩니다</span></label></div>
         </div>
       </div>
 
@@ -159,38 +175,8 @@
         <div class="rf-ch"><span class="rf-ct">📅 모집 조건</span><span class="rf-cn">언제 · 몇 명을 모으나 — 시트 일정이 인식되면 시트가 우선합니다</span></div>
         <div class="rf-cb">
           <div class="rf-grid2">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-              <div><label class="rform-label">시작일 <span id="rf_start_day" style="font-weight:400;color:#9CA3AF"></span></label>
-                <input id="rf_start_date" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
-              <div><label class="rform-label">종료일 <span id="rf_deadline_day" style="font-weight:400;color:#9CA3AF"></span></label>
-                <input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
-            </div>
-            <div class="rf-hrow" style="margin:7px 0 0"><span class="rf-hl">주말 게시</span>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem">
-                <input type="checkbox" id="rf_skip_weekends" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">
-                주말 제외 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">주말에는 카드만 보이고 신청은 월요일에 재개됩니다</span>
-              </label>
-            </div>
-            <div><label class="rform-label">구매시간대</label>
-              <input id="rf_time_range" type="hidden" value="">
-              <input id="rf_window_start" type="hidden" value="">
-              <input id="rf_window_end" type="hidden" value="">
-              <div class="rf-time-control">
-                <button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))">
-                  <span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span>
-                  <span id="rf_free_time_state">시간 지정</span>
-                </button>
-                <div id="rf_time_range_control" class="rf-time-range">
-                  <button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button>
-                  <span class="rf-time-divider" aria-hidden="true">~</span>
-                  <button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button>
-                  <div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden>
-                    <div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div>
-                    <div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <div class="rf-hrow"><span class="rf-hl">종료일 <span id="rf_deadline_day" style="font-weight:400;color:#9CA3AF"></span></span>
+              <input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
           </div>
           <div id="rf_deadline_warn" style="display:none;font-size:.68rem;font-weight:700;margin-top:4px"></div>
           <div class="rf-grid2" style="margin-top:8px">
@@ -868,6 +854,12 @@
 #recruitModal .rf-side{width:238px;background:#FBFCFE}
 #recruitModal .modal-body{gap:0!important;padding:0 16px 18px!important}
 #recruitModal .rf-card{border:0;border-bottom:1px solid #DCE3EC;border-radius:0;overflow:visible;background:transparent}
+#recruitModal .rf-card[data-sec="link"]{order:0}
+#recruitModal .rf-card[data-sec="fee"]{order:1}
+#recruitModal .rf-card[data-sec="prod"]{order:2}
+#recruitModal [data-product-settings]{order:3}
+#recruitModal .rf-card[data-sec="work"]{order:4}
+#recruitModal .rf-card[data-sec="cond"]{order:5}
 #recruitModal .rf-card:last-child{border-bottom:0}
 #recruitModal .rf-ch{padding:15px 0 7px;border:0;background:transparent}
 #recruitModal .rf-ct{font-size:.84rem;letter-spacing:-.025em}
@@ -906,6 +898,8 @@
 #recruitModal .rf-product-settings .rf-hrow:first-of-type{border-radius:8px 8px 0 0}
 #recruitModal .rf-product-settings .rf-hrow:last-child{border-radius:0 0 8px 8px}
 #recruitModal .rf-fee-box{margin:0;border:1px solid #DCE3EC;border-radius:0;background:#FFFFFF}
+#recruitModal .rf-card[data-sec="fee"] .rf-ch{display:none}
+#recruitModal .rf-card[data-sec="fee"] .rf-cb{padding:0 0 14px}
 #recruitModal .rf-fee-sw{min-height:31px;font-size:.68rem}
 #recruitModal .rf-publish-card{order:-1;border-bottom:1px solid #DCE3EC}
 #recruitModal .rf-publish-card .rf-ch{display:none}
@@ -926,6 +920,7 @@
 #recruitModal .rf-side #rf_preview_card{font-size:.7rem}
 #recruitModal .rf-linked-reference{display:flex;align-items:center;min-height:30px;width:100%;padding:0 8px;border:1px solid #D5DEE9;border-radius:5px;background:#F7F9FC;color:#536178;font-size:.72rem;font-weight:750}
 #recruitModal .rf-linked-reference:before{content:'연결됨';margin-right:6px;color:#2563C8;font-size:.64rem;font-weight:850}
+#recruitModal #rf_linked_campaign,#recruitModal #rf_linked_tab,#recruitModal #rf_delivery_type{display:none}
 #recruitModal .rf-delivery-toggle{display:flex;flex-wrap:wrap;gap:4px}
 #recruitModal .rf-delivery-toggle button{min-height:29px;padding:5px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#fff;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rf-delivery-toggle button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
@@ -933,10 +928,9 @@
 #recruitModal .rf-parity-time-row .rf-time-control{display:flex;align-items:center;gap:6px;width:100%}
 #recruitModal .rf-parity-time-row .rf-time-range{flex:1;width:auto}
 #recruitModal .rf-parity-time-row .rform-label{display:none}
-#recruitModal .rf-parity-date-row .rform-label{display:none}
-#recruitModal .rf-parity-date-row .rf-date-value{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px}
-#recruitModal .rf-parity-date-row .rf-date-value input{min-width:0;flex:1;border:0!important;background:transparent!important;cursor:pointer}
-#recruitModal .rf-parity-date-row .rf-date-value span{flex:none;color:#2563C8;font-size:.65rem;font-weight:850}
+#recruitModal .rf-parity-date-control{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px}
+#recruitModal .rf-parity-date-control input{min-width:0;flex:1;border:0!important;background:transparent!important;cursor:pointer}
+#recruitModal .rf-parity-date-control span{flex:none;color:#2563C8;font-size:.65rem;font-weight:850}
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}
@@ -1234,129 +1228,48 @@
   window.recruitSaveBlock      = recruitSaveBlock;
   window.recruitSaveBlockClear = recruitSaveBlockClear;
 
-  /* 승인 시안의 읽기 전용 연결값과 사각 선택 UI를 기존 저장 필드 ID에 연결한다.
-     데이터는 기존 select/hidden input을 그대로 사용해 저장·프리필 계약을 보존한다. */
-  function hydrateParityControls() {
-    ['rf_linked_campaign', 'rf_linked_tab'].forEach(function (id) {
-      var select = document.getElementById(id);
-      if (!select || select._rfParityReference) return;
-      var reference = document.createElement('div');
-      reference.className = 'rf-linked-reference';
-      reference.setAttribute('aria-live', 'polite');
-      function renderReference() {
-        var option = select.options[select.selectedIndex];
-        reference.textContent = option && option.value ? option.textContent : '작업오더에서 연결되면 자동 표시됩니다.';
-      }
-      select._rfParityReference = reference;
-      select._rfParityReferenceRender = renderReference;
-      select.style.display = 'none';
-      select.disabled = true;
-      select.parentNode.insertBefore(reference, select.nextSibling);
-      select.addEventListener('change', renderReference);
-      renderReference();
-    });
-
-    var delivery = document.getElementById('rf_delivery_type');
-    if (delivery && !delivery._rfParityToggle) {
-      var group = document.createElement('div');
-      group.id = 'rf_delivery_toggle';
-      group.className = 'rf-delivery-toggle';
-      ['실배송', '빈박스', '택배발송대행'].forEach(function (value) {
-        var button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = value;
-        button.setAttribute('data-rf-delivery', value);
-        button.addEventListener('click', function () {
-          delivery.value = value;
-          delivery.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-        group.appendChild(button);
-      });
-      function syncDelivery() {
-        Array.prototype.forEach.call(group.querySelectorAll('[data-rf-delivery]'), function (button) {
-          button.classList.toggle('on', button.getAttribute('data-rf-delivery') === delivery.value);
-        });
-      }
-      delivery._rfParityToggle = group;
-      delivery.style.display = 'none';
-      delivery.parentNode.appendChild(group);
-      delivery.addEventListener('change', syncDelivery);
-      syncDelivery();
-    }
-
-    var deliveryRow = delivery && delivery.closest('.rf-hrow');
-    var timeRange = document.getElementById('rf_time_range_control');
-    if (deliveryRow && timeRange && !timeRange.closest('.rf-parity-time-row')) {
-      var timeControl = timeRange.closest('.rf-time-control');
-      var timeSource = timeControl && timeControl.parentNode;
-      if (timeSource) {
-        var timeLabel = timeSource.querySelector('.rform-label');
-        if (timeLabel) timeLabel.style.display = 'none';
-        var timeRow = document.createElement('div');
-        timeRow.className = 'rf-hrow rf-parity-time-row';
-        timeRow.setAttribute('data-rf-parity-time', '1');
-        timeRow.innerHTML = '<span class="rf-hl">구매시간대</span><div class="rf-parity-time-control"></div>';
-        timeSource.parentNode.removeChild(timeSource);
-        timeRow.querySelector('.rf-parity-time-control').appendChild(timeSource);
-        deliveryRow.parentNode.insertBefore(timeRow, deliveryRow.nextSibling);
-      }
-    }
-
-    var chat = document.getElementById('rf_chat_url');
-    var chatRow = chat && chat.closest('.rf-hrow');
-    var startDate = document.getElementById('rf_start_date');
-    if (chatRow && startDate && !startDate.closest('.rf-parity-date-row')) {
-      var startSource = startDate.parentNode;
-      if (startSource && startSource.parentNode) {
-        startSource.classList.add('rf-date-value');
-        var startRow = document.createElement('div');
-        startRow.className = 'rf-hrow rf-parity-date-row';
-        startRow.setAttribute('data-rf-parity-date', '1');
-        startRow.innerHTML = '<span class="rf-hl">모집 시작일</span><div class="rf-parity-date-control"></div>';
-        startSource.parentNode.removeChild(startSource);
-        startRow.querySelector('.rf-parity-date-control').appendChild(startSource);
-        startRow.addEventListener('click', function () {
-          try { if (typeof startDate.showPicker === 'function') startDate.showPicker(); } catch (_) {}
-          startDate.focus();
-        });
-        chatRow.parentNode.insertBefore(startRow, chatRow.nextSibling);
-        var weekend = document.getElementById('rf_skip_weekends');
-        var weekendRow = weekend && weekend.closest('.rf-hrow');
-        if (weekendRow && weekendRow.parentNode) {
-          weekendRow.parentNode.removeChild(weekendRow);
-          startRow.parentNode.insertBefore(weekendRow, startRow.nextSibling);
-          var multi = document.getElementById('rf_multi_account');
-          var multiRow = multi && multi.closest('.rf-hrow');
-          if (multiRow && multiRow.parentNode) {
-            multiRow.parentNode.removeChild(multiRow);
-            weekendRow.parentNode.insertBefore(multiRow, weekendRow.nextSibling);
-          }
-        }
-      }
-    }
-  }
-
   function refreshLinkedReferences() {
     ['rf_linked_campaign', 'rf_linked_tab'].forEach(function (id) {
       var select = document.getElementById(id);
-      if (select && typeof select._rfParityReferenceRender === 'function') select._rfParityReferenceRender();
+      var reference = document.getElementById(id + '_reference');
+      if (!select || !reference) return;
+      var option = select.options[select.selectedIndex];
+      reference.textContent = option && option.value ? option.textContent : '작업오더에서 연결되면 자동 표시됩니다.';
     });
   }
 
-  function placeFinalSections(participation) {
-    var body = _mBody();
-    var publish = _mCard('pub');
-    var link = _mCard('link'), product = _mCard('prod');
-    var settings = document.querySelector('#recruitModal [data-product-settings]');
-    var settingsSlot = document.getElementById('rf_product_settings_slot');
-    var legacySlot = document.getElementById('rf_legacy_product_settings_slot');
-    if (participation == null) {
-      var participationEl = document.getElementById('rf_participation');
-      participation = !participationEl || participationEl.checked;
+  function bindStaticCompactControls() {
+    var delivery = document.getElementById('rf_delivery_type');
+    var group = document.getElementById('rf_delivery_toggle');
+    if (delivery && group && !group.dataset.bound) {
+      group.dataset.bound = '1';
+      group.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-rf-delivery]');
+        if (!button) return;
+        delivery.value = button.getAttribute('data-rf-delivery');
+        delivery.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      delivery.addEventListener('change', syncDeliveryButtons);
     }
-    if (body && publish && link) body.insertBefore(publish, link);
-    var destination = participation ? settingsSlot : legacySlot;
-    if (settings && destination && settings.parentNode !== destination) destination.appendChild(settings);
+    syncDeliveryButtons();
+    refreshLinkedReferences();
+  }
+
+  function syncDeliveryButtons() {
+    var delivery = document.getElementById('rf_delivery_type');
+    var group = document.getElementById('rf_delivery_toggle');
+    if (!delivery || !group) return;
+    Array.prototype.forEach.call(group.querySelectorAll('[data-rf-delivery]'), function (button) {
+      button.classList.toggle('on', button.getAttribute('data-rf-delivery') === delivery.value);
+    });
+  }
+
+  function rfOpenStartDatePicker(event) {
+    if (event && event.target && event.target.closest('input,button,label')) return;
+    var startDate = document.getElementById('rf_start_date');
+    if (!startDate) return;
+    try { if (typeof startDate.showPicker === 'function') startDate.showPicker(); } catch (_) {}
+    startDate.focus();
   }
 
   function syncStatusButtons() {
@@ -1388,8 +1301,7 @@
     }
     if (!document.getElementById('recruitModal')) host.innerHTML = HTML;   // 멱등
     injectIconFallback();
-    hydrateParityControls();
-    placeFinalSections();
+    bindStaticCompactControls();
     applyLayout();
     syncStatusButtons();
     bindLive();
@@ -1402,7 +1314,7 @@
     refreshRail: renderRail,
     marks: updateRailMarks,
     applyLayout: applyLayout,
-    syncProductSettings: placeFinalSections,
+    refreshStaticControls: bindStaticCompactControls,
     refreshLinkedReferences: refreshLinkedReferences,
     syncStatusButtons: syncStatusButtons,
     setStatus: setStatus,
