@@ -18,7 +18,7 @@
 const { writeSheet, readSheet } = require('./sheets.service');
 const { enqueue } = require('./syncQueue.service');
 const { logger } = require('../utils/logger');
-const { mergeDepositStamps } = require('../utils/depositStamp');
+const { formatDepositStamp, mergeDepositStamps } = require('../utils/depositStamp');
 const { findPaymentColumnIndex } = require('./columnResolver');
 
 /** 열 인덱스 → 알파벳 (A=0) */
@@ -52,12 +52,12 @@ function detectHeaderRow(headerValues) {
 function nowStamp(when) {
   const parts = new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
-    year: 'numeric', month: 'numeric', day: 'numeric',
+    month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(when || new Date());
   const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
   const hh = p.hour === '24' ? '00' : p.hour;   // 자정 표기 '24' 방어
-  return `${p.year}.${p.month}.${p.day} ${hh}:${p.minute}`;
+  return formatDepositStamp(`${p.month}/${p.day} ${hh}:${p.minute}`);
 }
 
 /**

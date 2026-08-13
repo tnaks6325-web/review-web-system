@@ -28,6 +28,7 @@ let _pool;
 function _db() { if (!_pool) _pool = require('../db/pool'); return _pool; }
 function __setPoolForTest(p) { _pool = p || null; }
 const { logger } = require('../utils/logger');
+const { formatDepositStamp } = require('../utils/depositStamp');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly } = require('../utils/paymentResultParse');
 const paymentApply = require('./paymentApply.service');
@@ -55,19 +56,18 @@ function decideAutoApply({ summary, duplicateApplied = false }) {
 }
 
 function _depositDateFromResultStamp(value) {
-  const m = /^\s*(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/.exec(String(value || ''));
-  if (!m) return '';
-  const year = Number(m[1]); const month = Number(m[2]); const day = Number(m[3]);
-  const d = new Date(Date.UTC(year, month - 1, day));
-  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return '';
-  return `${year}.${month}.${day}`;
+  return formatDepositStamp(value);
 }
 
 function _depositDateFromPaidAt(value) {
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return '';
-  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-  return `${kst.getUTCFullYear()}.${kst.getUTCMonth() + 1}.${kst.getUTCDate()}`;
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+  return formatDepositStamp(`${p.month}/${p.day} ${p.hour === '24' ? '00' : p.hour}:${p.minute}`);
 }
 
 async function _saveBoardWriteOutcome({ batchId, outcome, stamp, by }) {
