@@ -35,10 +35,10 @@ function withoutComments(css) {
 }
 
 ok('모달은 승인된 컴팩트 행 편집기 폭을 사용한다',
-  /class="modal-box rf-box"[^>]*max-width:1224px/.test(modal)
-  && /#recruitModal \.rf-rail\{width:197px/.test(modal)
-  && /#recruitModal \.rf-side\{width:286px/.test(modal)
-  && /#recruitModal \.rf-side #rf_preview_listcard\{max-width:262px!important\}/.test(modal));
+  /class="modal-box rf-box"[^>]*max-width:1020px/.test(modal)
+  && /#recruitModal \.rf-rail\{width:164px/.test(modal)
+  && /#recruitModal \.rf-side\{width:238px/.test(modal)
+  && /#recruitModal \.rf-side #rf_preview_listcard\{max-width:218px!important\}/.test(modal));
 ok('좌측은 드래그 레일이 아니라 3단계 고정 내비게이션이다',
   /class="rf-step-list"/.test(modal)
   && ['link', 'prod', 'cond'].every((key) => modal.includes(`data-rf-step="${key}"`))
@@ -120,8 +120,8 @@ ok('mixed review composer opens below review type buttons',
 ok('badge and guide inputs use the compact two-to-one composition',
   /class="badge-field"/.test(compact)
   && /\.badge-field\{display:grid;gap:6px;width:100%\}/.test(modal)
-  && /\.work-compose\{display:grid;grid-template-columns:minmax\(0,1fr\) 88px/.test(modal)
-  && /\.work-image-strip\{justify-self:end;width:88px/.test(modal));
+  && /\.work-compose\{display:grid;grid-template-columns:minmax\(220px,1fr\) 76px/.test(modal)
+  && /\.work-image-strip\{justify-self:end;width:76px/.test(modal));
 ok('이전 마크업 템플릿은 새 컴팩트 편집기 전에 정확히 닫혀 실제 입력 DOM을 만든다',
   legacyRootClose > modal.indexOf('<template id="rf_legacy_card_editor_markup">')
   && legacyRootClose < compactEditorStart);
