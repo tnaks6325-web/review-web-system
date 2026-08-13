@@ -69,6 +69,7 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
   }
   const from = _seqs(sourceSeqs, '기존');
   const to = _seqs(targetSeqs, '대상');
+  const targetValue = mergeDepositStamps('', date);
   if (from.length !== to.length || from.some(seq => to.includes(seq))) {
     throw new ManualDepositRepairError('bad_request', '기존/대상 순번은 같은 수여야 하며 서로 겹칠 수 없습니다.');
   }
@@ -110,7 +111,6 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
     if (targetRows.some(row => String(row.paid_value || '').trim())) {
       throw new ManualDepositRepairError('target_not_blank', '대상 행 중 비어 있지 않은 입금칸이 있어 이동을 중단했습니다.');
     }
-    const targetValue = mergeDepositStamps('', date);
     for (const { row, value } of sourceUpdates) {
       await client.query(
         `UPDATE campaign_participants
