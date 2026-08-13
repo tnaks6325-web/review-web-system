@@ -1644,6 +1644,8 @@
 .pmb.wait{background:#FBF2E1;color:#9A6414}
 .pmauto{display:inline-block;font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
 .pmauto.man{color:#1B4F9C;font-weight:700}
+.pmdrop{display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:0 8px;border:1px dashed #9AA8B8;border-radius:6px;color:var(--t2,#59626F);font-size:11px;cursor:copy}
+.pmdrop.over{border-color:#1B75D0;background:#EAF4FF;color:#155BA5;font-weight:700}
 .pmwarn{color:#B3382E;font-size:11.5px}
 /* ── 입금관리 B스타일: 네이비 헤더 + 고밀도 운영 원장 ── */
 #pmhead .mh{max-width:1400px;min-height:54px;margin:0 auto;background:#112B55;color:#fff;border-radius:10px 10px 0 0;padding:0 18px;display:flex;align-items:center;gap:9px}
@@ -6994,13 +6996,15 @@ function _pmBatchActions(b,i){
     ? `<button class="btn sm" onclick="_pmBackfillPaidDeposit(${i})">입금일 재시도</button>` : '';
   const confirmFailures = b.status==='applied' && (b.paidCount||0)>0 && (b.pendingCount||0)>0
     ? `<button class="btn sm danger" onclick="_pmConfirmFailures(${i})">이체실패 처리</button>` : '';
+  const resultDrop = (b.status==='downloaded' || b.status==='applied')
+    ? `<span class="pmdrop" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})">결과 파일 놓기</span>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
     <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
     : (b.status==='applied' ? `${retryDepositDate}${confirmFailures}<button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>` : '');
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
-    ${b.resultCanApply?`<button class="btn sm primary" onclick="_pmApplySavedResult(${i})">이대로 반영</button>`:''}` : '';
-  return manage + result;
+    ` : '';
+  return manage + result + resultDrop;
 }
 function _pmBatchTable(list){
   if(!list.length) return `<div class="empty">아직 만든 회차가 없습니다.</div>`;
@@ -7398,10 +7402,35 @@ async function _pmRefile(id){
   }catch(e){ toast('다운로드 실패: '+e.message); }
 }
 
-/* ── 이체결과 파일 업로드 → 확인 화면 → 반영 (M2) ───────────────
-   ★ 순서가 계약: **미리보기(쓰기 0) → 사람이 [이대로 반영]** — 업로드만으로 입금 기록이 되면 되돌릴 수 없다.
-   ★ 반영 요청은 파일을 **다시 보낸다**(서버가 재해석·재매칭한다 — 화면 목록을 서버가 믿지 않는다).
-   ★ 회차는 **인덱스로 넘긴다**(onclick 에 은행·파일명 같은 외부 문자열 보간 금지). */
+/* ── 이체결과 파일 업로드 → 조건 충족 시 자동 반영 (M2) ───────────────
+   ★ 서버가 파일을 재해석·재매칭한다. 정확 매칭 90% 이상, 회차 밖 행 없음,
+     반영된 동일 파일 없음일 때만 입금 기록을 바꾼다. 화면 목록은 신뢰하지 않는다.
+   ★ 회차는 인덱스로 넘긴다(onclick 에 외부 문자열을 보간하지 않는다). */
+function _pmResultDragOver(event){
+  event.preventDefault();
+  event.currentTarget.classList.add('over');
+}
+function _pmResultDragLeave(event){ event.currentTarget.classList.remove('over'); }
+function _pmResultDrop(event, i){
+  event.preventDefault();
+  event.currentTarget.classList.remove('over');
+  const f = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+  const b = (STATE.pmBatches||[])[i];
+  if(f && b) _pmUploadResultFile(b, f);
+}
+async function _pmUploadResultFile(b, f){
+  if(f.size > 12*1024*1024){ toast('파일이 너무 큽니다(12MB 초과)'); return; }
+  toast('결과 파일을 대조하는 중…');
+  let base64;
+  try { base64 = await _pmFileB64(f); }
+  catch(e){ toast('파일을 읽지 못했습니다: '+e.message); return; }
+  const r = await api('/api/trackb/payment/batch/'+b.id+'/result-auto-apply',
+    { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
+  if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다.'); return; }
+  STATE.pmResult = { batch:b, file:{ name:f.name }, preview:r, persisted:true, autoApplied:r.autoApplied===true };
+  _pmResultModal();
+  await _pmLoad();
+}
 function _pmPickResult(i){
   const b = (STATE.pmBatches||[])[i];
   if(!b) return;
@@ -7416,11 +7445,12 @@ function _pmPickResult(i){
     let base64;
     try { base64 = await _pmFileB64(f); }
     catch(e){ toast('파일을 읽지 못했습니다: '+e.message); return; }
-    const r = await api('/api/trackb/payment/batch/'+b.id+'/result-preview',
+    const r = await api('/api/trackb/payment/batch/'+b.id+'/result-auto-apply',
       { method:'POST', body: JSON.stringify({ fileName:f.name, base64 }) });
     if(!r || !r.ok){ toast((r&&r.error)||'결과 파일을 해석하지 못했습니다'); return; }
-    STATE.pmResult = { batch:b, file:{ name:f.name, base64 }, preview:r, persisted:false };
+    STATE.pmResult = { batch:b, file:{ name:f.name }, preview:r, persisted:true, autoApplied:r.autoApplied===true };
     _pmResultModal();
+    await _pmLoad();
   };
   inp.click();
 }
@@ -7451,8 +7481,14 @@ const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:
 function _pmResultModal(){
   const R = STATE.pmResult; if(!R) return;
   const p = R.preview, s = p.summary || {};
-  const canApply = (s.success||0)+(s.failed||0)>0 && (!R.persisted || p.canApply === true);
-  const archivedNote = R.persisted
+  const auto = p.autoApply || { blockers: [] };
+  const autoLabels = { match_below_90:'회차 항목 일치율이 90% 미만입니다', result_outside_batch:'회차 밖 이체 결과가 포함되어 있습니다', duplicate_file:'이미 반영된 동일 결과 파일입니다', no_pending_items:'반영할 미처리 항목이 없습니다' };
+  const autoNote = p.autoApply ? (R.autoApplied
+    ? `<div class="pmnote" style="background:#E5F3EE;border-left-color:#27A17A;color:#126449"><b>자동 반영 완료</b> · 정확 매칭 ${Math.round((auto.matchRate||0)*100)}%</div>`
+    : `<div class="pmnote" style="background:#FBF2E1;border-left-color:#D29A39;color:#80550D"><b>자동 반영 보류</b> · ${(auto.blockers||[]).map(x=>autoLabels[x]||x).join(' · ')||'일치 기준을 확인하지 못했습니다'}</div>`) : '';
+  const archivedNote = R.autoApplied
+    ? `<div class="pmnote">업로드한 결과 파일은 자동 반영 이력으로 저장됐습니다.</div>`
+    : R.persisted
     ? `<div class="pmnote">업로드한 결과 파일이 시스템에 보관되어 있습니다. ${p.applied ? '이 파일은 이미 반영된 이력입니다.' : (p.canApply ? '아래에서 원본 파일을 다시 올리지 않고 그대로 반영할 수 있습니다.' : '현재는 반영할 새 결과가 없습니다.')}</div>` : '';
   const rows = (p.items||[]).map(it=>`<tr>
     <td><span class="pmoc ${it.outcome}">${PM_OUTCOME[it.outcome]||it.outcome}</span></td>
@@ -7492,9 +7528,9 @@ function _pmResultModal(){
         <div class="pmrs wait"><div class="k">결과없음</div><div class="v">${s.notInFile||0}건</div></div>
         <div class="pmrs"><div class="k">이미 입금</div><div class="v">${s.alreadyPaid||0}건</div></div>
       </div>
-      ${archivedNote}${warn}${oa}${nf}${ur}
+      ${archivedNote}${autoNote}${warn}${oa}${nf}${ur}
       <div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C">
-        반영하면 <b>입금완료 건만</b> 기록됩니다 — 시스템 입금 표시 + 작업표(또는 시트) 입금칸에
+        ${R.autoApplied ? '자동 반영으로' : '자동 반영 조건을 충족하면'} <b>입금완료 건만</b> 기록됩니다 — 시스템 입금 표시 + 작업표(또는 시트) 입금칸에
         <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패 건은 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>.
       </div>
       <div class="lgwrap"><table class="lgtable pmtable">
@@ -7502,13 +7538,8 @@ function _pmResultModal(){
         <tbody>${rows}</tbody></table></div>
     </div>
     <div class="pmrft">
-      ${canApply ? `
-      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2,#59626F);cursor:pointer">
-        <input type="checkbox" id="pmNotifyFail" ${(s.failed||0)?'checked':''} ${(s.failed||0)?'':'disabled'}>
-        이체실패 ${s.failed||0}건에 <b>계좌 확인 안내</b> 보내기(1:1문의)</label>` : ''}
       <span class="sp" style="flex:1"></span>
-      <button class="btn" onclick="_pmResultClose()">취소</button>
-      ${canApply ? `<button class="btn primary" id="pmApplyBtn" onclick="_pmResultApply()">이대로 반영</button>` : ''}</div>
+      <button class="btn" onclick="_pmResultClose()">닫기</button></div>
   </div>`;
   document.body.appendChild(el);   // ★ body 직속
   if(!window._pmResultKeyBound){   // ★ 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)

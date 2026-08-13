@@ -80,6 +80,12 @@ test('a transfer result can be reopened from its batch row without opening a fil
   assert.match(workdesk, /onclick="_pmOpenResult\(\$\{i\}\)"/);
 });
 
+test('result upload supports drag-and-drop and has no second manual apply action', () => {
+  assert.match(sourceOf('_pmResultDrop'), /dataTransfer/);
+  assert.match(sourceOf('_pmUploadResultFile'), /result-auto-apply/);
+  assert.doesNotMatch(sourceOf('_pmBatchActions'), /_pmApplySavedResult\(\$\{i\}\)/);
+});
+
 test('payment UI keeps the work list and selected-result panel side by side', () => {
   assert.match(workdesk, /class="pmselectionlayout"/);
   assert.match(workdesk, /입금 대상자 수/);

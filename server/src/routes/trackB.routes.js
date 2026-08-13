@@ -2682,6 +2682,18 @@ router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMi
 });
 
 // 결과 원문을 다시 열지 않고, 업로드 당시 저장한 마스킹 미리보기만 확인한다.
+// The server re-parses and re-matches the uploaded file.  Only the approved
+// threshold and duplicate guards may trigger a payment-state change.
+router.post('/payment/batch/:id/result-auto-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentResultSvc.autoApplyResultFile({
+      batchId: req.params.id, fileName: b.fileName, base64: b.base64 || b.file, by: _by(req),
+      notifyFailed: b.notifyFailed !== false,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 router.get('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await paymentResultSvc.getLatestResultPreview(req.params.id)); }
   catch (err) { _resultErr(err, res, next); }
