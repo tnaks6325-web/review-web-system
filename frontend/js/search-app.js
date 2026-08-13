@@ -501,9 +501,8 @@ function _activateEmbedMode() {
         body.embed-mode .app-header{display:none!important}
         body.embed-mode #screenOrderForm{padding-top:4px!important}
         body.embed-mode{background:#fff!important}
-        /* 관리자 미리보기: 제출 버튼을 시각·물리적으로 비활성(재렌더돼도 CSS가 유지) */
-        body.embed-preview #btnOrderFormSubmit{opacity:.45!important;pointer-events:none!important;filter:grayscale(1)}
-        body.embed-preview #screenOrderForm::before{content:"👁 관리자 미리보기 — 제출되지 않습니다";
+        /* 관리자 미리보기: 버튼은 가상 제출을 위해 유지하고, 실제 저장이 없음을 명시한다. */
+        body.embed-preview #screenOrderForm::before{content:"👁 관리자 미리보기 — 가상 제출만 진행되며 실제 기록은 남지 않습니다";
           display:block;background:#F5F3FF;color:#5B21B6;border:1.5px dashed #C4B5FD;border-radius:10px;
           padding:9px 12px;margin:6px 0 10px;font-size:.78rem;font-weight:700;text-align:center}
       `;
@@ -8172,7 +8171,6 @@ function _openOrderConfirm() {
   m.style.display = "flex";
 }
 function confirmOrderSubmit() {
-  if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
   if (window._submitOrderFormInProgress) { console.warn("[confirmOrderSubmit] 제출 진행 중 — 무시"); return; }
   const missing = _cardsMissingCapture();
   const gate = document.getElementById("captureGateModal");
@@ -8186,6 +8184,7 @@ function confirmOrderSubmit() {
     gate.style.display = "flex";
     return;
   }
+  if (_PREVIEW_MODE) { _openOrderConfirm(); return; }
   window._captureSkipped = false;
   _openOrderConfirm();
 }
@@ -8198,9 +8197,22 @@ function _proceedOrderSubmit() {
   submitOrderForm();
 }
 
+/** 관리자 미리보기 전용 완료 처리. 주문·첨부·작업보드 API를 호출하지 않는다. */
+function _finishPreviewSubmit() {
+  _closeOrderConfirm();
+  _embedPost({
+    type: "order-submitted",
+    simulation: true,
+    successCount: 1,
+    campaignHold: "simulation",
+    results: [{ ok: true, simulation: true }],
+  });
+  showToast("가상 제출이 완료되었습니다. 실제 작업 기록은 남지 않습니다.", "success");
+}
+
 async function submitOrderForm() {
   // ★ 최종 방어선: 재제출 등 팝업을 건너뛰는 내부 호출까지 포함해 미리보기에서는 주문이 절대 생성되지 않는다.
-  if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
+  if (_PREVIEW_MODE) { _finishPreviewSubmit(); return; }
   window._capUploads = [];   // 캡처 첨부/업로드 추적 초기화(재제출 시 이전 결과 잔존 방지)
   if (window._submitOrderFormInProgress) { console.warn("[submitOrderForm] 진행 중 — 무시"); return; }
   window._submitOrderFormInProgress = true;
