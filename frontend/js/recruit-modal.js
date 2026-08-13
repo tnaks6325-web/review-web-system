@@ -1425,6 +1425,27 @@
     select.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  function normalizeShellLayout() {
+    var modal = document.getElementById('recruitModal');
+    var box = modal && modal.querySelector('.modal-box.rf-box');
+    var split = box && box.querySelector('.rf-split');
+    var main = split && split.querySelector('.rf-main.rf-compact-main');
+    var editor = main && main.querySelector('.editor');
+    if (!modal || !box || !split || !editor) return;
+
+    var side = modal.querySelector('.rf-side');
+    if (side && side.parentElement !== split) split.appendChild(side);
+
+    var compactFooter = split.querySelector('footer.modal-footer');
+    if (compactFooter && compactFooter.parentElement !== editor) editor.appendChild(compactFooter);
+
+    var legacyFooter = null;
+    Array.prototype.forEach.call(modal.children, function (child) {
+      if (!legacyFooter && child.classList && child.classList.contains('modal-footer')) legacyFooter = child;
+    });
+    if (legacyFooter && legacyFooter.parentElement !== box) box.appendChild(legacyFooter);
+  }
+
   function mount(id) {
     injectCss();
     var host = document.getElementById(id || 'recruitModalMount');
@@ -1437,6 +1458,7 @@
       document.body.appendChild(host);
     }
     if (!document.getElementById('recruitModal')) host.innerHTML = HTML;   // 멱등
+    normalizeShellLayout();
     injectIconFallback();
     bindStaticCompactControls();
     applyLayout();
