@@ -36,6 +36,13 @@ async function run() {
   assert.equal(payload.via, 'intranet', '1a: 출처 표기');
   assert.equal(payload.ir, 'admin', '1a: ir(인트라넷 원천 role) 감사 클레임');
 
+  // 1a1: 현재 인트라넷 API는 사용자 레코드를 { data: {...} }로 감싼다.
+  // 이 응답을 최상위 레코드로만 읽으면 실제 계정도 "비밀번호 오류"로 오인된다.
+  r = await auth.loginIntranet('admin', 'pw123',
+    mockFetch(200, { data: { id: 'u-admin', username: 'admin', display_name: '김수만', role: 'admin' } }));
+  assert.equal(r.success, true, '1a1: data 래퍼 인트라넷 응답 로그인 성공');
+  assert.equal(r.name, '김수만', '1a1: data 래퍼의 표시 이름을 사용');
+
   // 1a2(정책 1a): INTRANET_SSO_ADMIN_USERS 지정 계정만 admin 승격 — username 매칭(대소문·공백 무시)
   process.env.INTRANET_SSO_ADMIN_USERS = ' Boss , ceo2 ';
   r = await auth.loginIntranet('boss', 'pw123',
