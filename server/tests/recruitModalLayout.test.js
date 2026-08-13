@@ -101,6 +101,17 @@ ok('옵션 URL·주말 제외·구매시간·현금영수증·기간별 리뷰�
 ok('작업내용 3종의 이미지 첨부 입력은 그대로 유지한다',
   ['rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes', 'rf_ig_inflow', 'rf_ig_review', 'rf_ig_notes']
     .every((id) => modal.includes(id)));
+ok('시안의 상품 URL·단일 선택·혼합 조합·토글 상태 DOM을 런타임이 직접 가진다',
+  /class="form-row product-main-url"/.test(modal)
+  && /id="rf_product_main_url"/.test(modal)
+  && /id="rf_mixed_review_composer"/.test(modal)
+  && /id="rf_mixed_review_rows"/.test(modal)
+  && /id="rf_cashrcpt_toggle"/.test(modal)
+  && /id="feeScheduleState"/.test(modal)
+  && /id="weekendNotice"/.test(modal)
+  && /id="accountNote"/.test(modal)
+  && /function rfSetWeekendPolicy/.test(editor)
+  && /function rfSetMultiAccount/.test(editor));
 ok('모달 CSS의 중괄호가 균형을 이뤄 브라우저 파싱이 끊기지 않는다',
   ['SHELL_CSS', 'CSS'].every((name) => {
     const css = withoutComments(cssOf(name));
