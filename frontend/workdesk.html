@@ -7545,12 +7545,9 @@ async function _pmMarkApplied(i){
 async function _pmBackfillPaidDeposit(i){
   const b = (STATE.pmBatches||[])[i];
   if(!b) return;
-  const stamp = prompt(`#${b.seq} 회차의 이미 입금된 ${b.paidCount||0}건에 기록할 입금일을 입력하세요.\nYYYY.M.D 형식으로 기록됩니다.`, '2026.8.11');
-  if(stamp == null || !String(stamp).trim()) return;
-  const normalized = String(stamp).trim();
-  if(!confirm(`#${b.seq} 회차의 이미 입금된 ${b.paidCount||0}건 입금 칸에 ${normalized}을 기록할까요?\n\n입금 원장·금액·회차 상태는 변경하지 않습니다.`)) return;
+  if(!confirm(`#${b.seq} 회차의 결과파일에 기록된 실제 이체일을 성공 건의 작업보드 입금 칸에 기록할까요?\n\n날짜가 없는 결과 행은 기록하지 않습니다.`)) return;
   const r = await api('/api/trackb/payment/batch/'+b.id+'/deposit-date-backfill',
-    { method:'POST', body: JSON.stringify({ stamp:normalized }) });
+    { method:'POST', body: JSON.stringify({}) });
   if(r && r.ok){
     const resultParts = [`${r.recorded||0}건 실제 기록`];
     if(r.queued) resultParts.push(`${r.queued}건 대기`);

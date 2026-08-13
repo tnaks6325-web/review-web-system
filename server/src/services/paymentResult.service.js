@@ -31,12 +31,42 @@ const { logger } = require('../utils/logger');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly } = require('../utils/paymentResultParse');
 const paymentApply = require('./paymentApply.service');
-const { nowStamp, recordDeposits } = paymentApply;
+const { recordDeposits } = paymentApply;
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
 
 class ResultError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
+}
+
+function _depositDateFromResultStamp(value) {
+  const m = /^\s*(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})/.exec(String(value || ''));
+  if (!m) return '';
+  const year = Number(m[1]); const month = Number(m[2]); const day = Number(m[3]);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return '';
+  return `${year}.${month}.${day}`;
+}
+
+function _depositDateFromPaidAt(value) {
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '';
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return `${kst.getUTCFullYear()}.${kst.getUTCMonth() + 1}.${kst.getUTCDate()}`;
+}
+
+async function _saveBoardWriteOutcome({ batchId, outcome, stamp, by }) {
+  await _db().query(
+    `UPDATE payment_batches
+        SET board_recorded_count = $2,
+            board_queued_count = $3,
+            board_skipped_count = $4,
+            board_failed_count = $5,
+            board_stamp = $6,
+            board_recorded_at = NOW(),
+            board_recorded_by = $7
+      WHERE id = $1`,
+    [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, stamp || '', by || 'payment']);
 }
 
 /** DB 행 → 짝맞추기 입력 모양(파서는 DB 컬럼명을 모른다) */
@@ -240,7 +270,6 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     base64 = Buffer.from(stored.file_blob).toString('base64');
   }
   const a = await _analyze(batchId, fileName, base64);
-  const stampNow = nowStamp();
 
   const success = a.pairs.filter(p => p.success);
   const failed  = a.pairs.filter(p => p.result && !p.success);
@@ -276,7 +305,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
         sheetId: it.sheetId, tabName: it.tabName, rowIndex: it.rowIndex,
         reviewerName: it.reviewerName, amount: String(it.amount || ''),
         depositColKey: null, gid: '',
-        stamp: p.result.transferredStamp || stampNow,
+        stamp: _depositDateFromResultStamp(p.result.transferredStamp),
         paidAt: paidAtIso,
       });
     }
@@ -355,10 +384,19 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     client.release();
   }
 
-  /* ★ 입금칸 기록은 커밋 뒤 백그라운드(수동 처리와 같은 계약) — 시트/Drive 지연이 응답을 붙잡지 않는다.
-       ★ 시각은 **건별 실제 이체시점**(item.stamp). */
-  setImmediate(() => paymentApply.markDepositCells(paidItems, { stamp: stampNow, by: by || 'payment' })
-    .catch(e => logger.warn(`[paymentResult] 입금칸 기록 예외: ${e.message}`)));
+  /* ★ 결과 반영은 반환 전에 작업보드 입금칸 쓰기 결과까지 확인한다.
+       ★ 날짜는 결과파일의 건별 실제 이체일(item.stamp)만 사용한다. */
+  const boardItems = paidItems.filter(x => x.stamp);
+  const undatedPaid = paidItems.length - boardItems.length;
+  const writeResult = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
+  const board = {
+    recorded: Number(writeResult.recorded) || 0,
+    queued: Number(writeResult.queued) || 0,
+    skipped: (Number(writeResult.skipped) || 0) + undatedPaid,
+    failed: Number(writeResult.failed) || 0,
+  };
+  const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
+  await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
 
   // 실패 안내(1:1문의) — 기본 켬(사용자 확정 ⑤). 커밋 뒤에 보낸다(전송 실패가 반영을 되돌리지 않게).
   let notified = 0;
@@ -375,6 +413,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     notified,
     notifyTargets: failedItems.length,
     applied: paidItems.length,
+    board,
     failed: failed.length,
     notInFile: a.summary.notInFile,
     unmatchedResults: a.unmatchedResults.length,
@@ -422,14 +461,7 @@ async function markBatchApplied({ batchId, by }) {
  * 이미 paid 로 확정된 회차 항목의 작업표 입금 칸만 다시 기록한다.
  * DB 입금 원장(payment_records)이나 항목 상태는 변경하지 않는다.
  */
-async function backfillPaidDepositStamp({ batchId, stamp, by }) {
-  const m = /^([0-9]{4})\.([0-9]{1,2})\.([0-9]{1,2})$/.exec(String(stamp || '').trim());
-  if (!m) throw new ResultError('bad_stamp', '입금일은 YYYY.M.D 형식으로 입력해 주세요.');
-  const [year, month, day] = m.slice(1).map(Number);
-  const d = new Date(Date.UTC(year, month - 1, day));
-  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
-    throw new ResultError('bad_stamp', '올바른 입금일을 입력해 주세요.');
-  }
+async function backfillPaidDepositStamp({ batchId, by }) {
 
   const client = await _db().connect();
   let items = [];
@@ -440,7 +472,7 @@ async function backfillPaidDepositStamp({ batchId, stamp, by }) {
     if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
-      `SELECT i.sheet_id, i.tab_name, i.row_index, r.submit_col2, r.tab_gid
+      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, r.submit_col2, r.tab_gid
          FROM payment_batch_items i
          LEFT JOIN review_index r
            ON r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name AND r.row_index = i.row_index
@@ -448,7 +480,7 @@ async function backfillPaidDepositStamp({ batchId, stamp, by }) {
         ORDER BY i.created_at, i.id`, [batchId]);
     items = rows.map(r => ({
       sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
-      depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', stamp: String(stamp).trim(),
+      depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', stamp: _depositDateFromPaidAt(r.paid_at),
     })).filter(x => x.sheetId && x.tabName && x.rowIndex);
     if (!items.length) throw new ResultError('no_paid_items', '입금일을 기록할 완료 항목이 없습니다.');
     await client.query('COMMIT');
@@ -459,25 +491,16 @@ async function backfillPaidDepositStamp({ batchId, stamp, by }) {
     client.release();
   }
 
-  const normalizedStamp = String(stamp).trim();
-  const writeResult = await paymentApply.markDepositCells(items, { stamp: normalizedStamp, by: by || 'payment' }) || {};
+  const datedItems = items.filter(x => x.stamp);
+  const normalizedStamp = [...new Set(datedItems.map(x => x.stamp))].join(', ');
+  const writeResult = await paymentApply.markDepositCells(datedItems, { by: by || 'payment' }) || {};
   const outcome = {
     recorded: Number(writeResult.recorded) || 0,
     queued: Number(writeResult.queued) || 0,
-    skipped: Number(writeResult.skipped) || 0,
+    skipped: (Number(writeResult.skipped) || 0) + (items.length - datedItems.length),
     failed: Number(writeResult.failed) || 0,
   };
-  await _db().query(
-    `UPDATE payment_batches
-        SET board_recorded_count = $2,
-            board_queued_count = $3,
-            board_skipped_count = $4,
-            board_failed_count = $5,
-            board_stamp = $6,
-            board_recorded_at = NOW(),
-            board_recorded_by = $7
-      WHERE id = $1`,
-    [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, normalizedStamp, by || 'payment']);
+  await _saveBoardWriteOutcome({ batchId, outcome, stamp: normalizedStamp, by: by || 'payment' });
   return { ok: true, candidates: items.length, stamp: normalizedStamp, ...outcome };
 }
 

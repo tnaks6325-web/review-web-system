@@ -2714,8 +2714,7 @@ router.post('/payment/batch/:id/mark-applied', authMiddleware, adminOrMasterMidd
 // 이미 입금 처리된 항목의 작업표 입금일만 다시 기록한다. 입금 원장·회차 상태는 건드리지 않는다.
 router.post('/payment/batch/:id/deposit-date-backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const stamp = String((req.body || {}).stamp || '').trim();
-    res.json(await paymentResultSvc.backfillPaidDepositStamp({ batchId: req.params.id, stamp, by: _by(req) }));
+    res.json(await paymentResultSvc.backfillPaidDepositStamp({ batchId: req.params.id, by: _by(req) }));
   } catch (err) { _resultErr(err, res, next); }
 });
 

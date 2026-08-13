@@ -186,9 +186,13 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     csb.postAdminNotice = async (p) => { notices.push(p); return { threadId: 1, messageId: 2 }; };
     // 시트/작업표 쓰기는 이 가드의 대상이 아니다(별도 서비스) — 배경 호출만 무해화
     const origMark = APPLY.markDepositCells;
-    APPLY.markDepositCells = async () => {};
+    APPLY.markDepositCells = async (items) => ({ total: items.length, recorded: items.length, queued: 0, skipped: 0, failed: 0 });
 
     const r1 = await RES.applyResultFile({ batchId: 'B1', fileName: 'r.xlsx', base64: FILE_B64, by: '관리자A' });
+
+    ok('result-file application waits for workboard date writes and persists their outcome',
+      r1.board && r1.board.recorded === 2 && pool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql)),
+      JSON.stringify(r1.board));
 
     ok('성공 2건이 입금완료로 기록된다', r1.applied === 2, JSON.stringify(r1));
     ok('은행 실패 1건이 failed 로 내려간다', r1.failed === 1);
@@ -211,7 +215,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     RES.__setPoolForTest(pool);
 
     const stampPool = makePool([
-      { ...itemRow(20, OKROWS[0]), id: 'paid-for-stamp', status: 'paid' },
+      { ...itemRow(20, OKROWS[0]), id: 'paid-for-stamp', status: 'paid', paid_at: OKROWS[0].transferredAtIso },
       { ...itemRow(21, OKROWS[1]), id: 'pending-for-stamp', status: 'pending' },
     ]);
     const stampWrites = [];
@@ -220,11 +224,12 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       stampWrites.push({ items, opts });
       return { total: items.length, recorded: 0, queued: 1, skipped: 0, failed: 0 };
     };
-    const stampBackfill = await RES.backfillPaidDepositStamp({ batchId: 'B1', stamp: '2026.8.11', by: '관리자A' });
+    const stampBackfill = await RES.backfillPaidDepositStamp({ batchId: 'B1', by: '관리자A' });
     ok('★ 이미 입금 처리된 항목만 입금 칸에 지정 날짜를 기록하고 payment_records는 다시 만들지 않는다',
       stampBackfill.ok === true && stampBackfill.candidates === 1 && stampBackfill.recorded === 0
         && stampBackfill.queued === 1 && stampBackfill.failed === 0 && stampWrites.length === 1
-        && stampWrites[0].items.length === 1 && stampWrites[0].opts.stamp === '2026.8.11'
+        && stampWrites[0].items.length === 1 && stampWrites[0].items[0].stamp === '2026.6.9'
+        && stampWrites[0].opts.stamp === undefined
         && stampPool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql))
         && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
       JSON.stringify(stampBackfill));
