@@ -139,6 +139,7 @@ function makeTable(opts) {
     confirm: () => (opts && opts.confirm !== undefined) ? opts.confirm : true,
     renderPartCheck: () => {},
     _renderPreview: () => {},
+    syncRecruitProductMainUrl: () => {},
     showToast: () => {},
   };
   sandbox.window = sandbox;

@@ -52,6 +52,19 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('combined'));
 app.use('/api/', rateLimiter);
+
+// PR preview can be pointed at production data for verification.  Keep this
+// enforcement on the server (not only in the UI) so an accidental save request
+// cannot mutate the production database even when a valid admin session exists.
+const readOnlyPreview = process.env.READ_ONLY_MODE === 'true';
+if (readOnlyPreview) {
+  app.use('/api', (req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    // Session creation must remain available; every business-data mutation is blocked.
+    if (req.path === '/auth/login') return next();
+    return res.status(403).json({ ok: false, error: '읽기 전용 프리뷰에서는 저장할 수 없습니다.' });
+  });
+}
 app.use(metricsMiddleware);  // API 메트릭 수집
 
 // ── 라우터 등록 ──

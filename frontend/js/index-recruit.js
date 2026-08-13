@@ -6,7 +6,9 @@
  *   이 파일을 포크하지 않고 두 화면이 같은 발행·수정 로직을 쓰는 유일한 방법.
  */
 function _campApi(path) {
-  const base = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '/api/campaign/admin';
+  const configured = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '';
+  const onWorkdesk = typeof location !== 'undefined' && /^\/workdesk(?:\/|$)/.test(location.pathname || '');
+  const base = configured || (onWorkdesk ? '/api/trackb/campaigns' : '/api/campaign/admin');
   return API_BASE_URL + base + (path || '');
 }
 
@@ -1884,7 +1886,7 @@ function renderOptRows(options, opts) {
  * 그래서 작업내용 원문(productLines)을 분해해 옵션명으로 상품명을 되찾아 표를 채운다.
  * 옵션이 없는 단일상품 공고는 원문만으로 행을 만든다(표가 비어 보이지 않게).
  */
-function renderOptRowsWithProduct(options, productLines) {
+function renderOptRowsWithProduct(options, productLines, campaign) {
   const parsed = parseProductLinesToRows(productLines);
   const byOpt = new Map();
   parsed.forEach(r => { if (r.optKey) byOpt.set(r.optKey, r); });
@@ -1893,9 +1895,13 @@ function renderOptRowsWithProduct(options, productLines) {
     // ★★ 옵션 원장이 비어 있으면 이 공고는 **확정적으로** 옵션 없는 공고다 —
     //   원문 분해(parseProductLinesToRows)가 상품명 속 하이픈·빗금을 옵션으로 쪼갰더라도
     //   그 추측을 옵션으로 승격시키지 않고 상품명으로 되붙인다(우레온 사고 경로 차단).
+    const fallback = campaign || {};
+    const singleProduct = parsed.length === 1;
     renderOptRows(parsed.map(r => ({
       productName: [r.productName, r.optKey].filter(Boolean).join(" "),
       optKey: "", payAmount: r.payAmount,
+      recruitTotal: singleProduct ? (fallback.recruit_total ?? 0) : 0,
+      dailyLimit: singleProduct ? (fallback.daily_limit ?? 0) : 0,
     })), { mode: "none" });
     return;
   }
@@ -2365,14 +2371,16 @@ async function openRecruitModal(id, prefill, woOrderId) {
          `/api/campaign/:id`(admin JWT 면 전체 행), 리뷰웹시스템[3버전]은 `/api/trackb/campaigns/:id`.
          인트라넷 SSO 토큰은 원본 경로에서 **무시**되어 공개 화이트리스트 뷰가 오므로
          수정 모달이 조용히 빈 칸으로 열린다 — 같은 핸들러를 Track B 로 태워야 전체 행이 온다. */
-      const _detailUrl = (typeof window !== "undefined" && window.CAMPAIGN_ADMIN_API)
-        ? _campApi(`/${encodeURIComponent(id)}`)
-        : API_BASE_URL + `/api/campaign/${id}`;
+      const _detailUrl = _campApi(`/${encodeURIComponent(id)}`);
       const res  = await fetch(_detailUrl, {
         headers: _getAuthHeaders()
       });
       const json = await res.json();
       const c = json.data || json;
+      // 수정 모달에는 전체 편집 응답만 허용한다. 공개용 축약 응답으로 저장하면 기존 값이 빈값으로 덮인다.
+      if (!Object.prototype.hasOwnProperty.call(c, "work_detail")) {
+        throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
+      }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
       window._recruitEditLoadedFees = json.feeSchedules || [];
@@ -2381,7 +2389,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
       // 📅 082: 리뷰비 구간 프리필 — 구간이 있으면 스위치가 자동으로 켜진다(없으면 종전 화면 그대로)
       if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
-      document.getElementById("rf_notes").value        = c.notes || "";
+      // The compact editor intentionally does not render the legacy public-note
+      // textarea.  Treat it as an optional compatibility field so an older
+      // campaign cannot abort loading before its product and guide values are
+      // restored into the visible compact fields.
+      { const notesEl = document.getElementById("rf_notes"); if (notesEl) notesEl.value = c.notes || ""; }
       document.getElementById("rf_chat_url").value     = c.chat_url || "";
       // ★ 064: 노출 순서 UI 제거 — 요소가 남아있는 구버전 화면만 프리필(null-safe)
       { const _so = document.getElementById("rf_sort_order"); if (_so) _so.value = c.sort_order ?? 0; }
@@ -2427,9 +2439,15 @@ async function openRecruitModal(id, prefill, woOrderId) {
       }
 
       /* ⚡ 참여형(M2) 필드 복원 */
-      if (c.participation_mode) {
+      {
         const pe = document.getElementById("rf_participation");
-        if (pe) { pe.checked = true; onParticipationToggle(true); }
+        const preserveLegacyCampaign = c.participation_mode === false;
+        if (pe) {
+          pe.checked = !preserveLegacyCampaign;
+          // 기존 공고도 새 편집 UI에서 값을 확인·수정할 수 있게 하되,
+          // 저장 시 참여형 여부는 아래의 보존 규칙으로 그대로 둔다.
+          onParticipationToggle(true);
+        }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
         const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
@@ -2444,6 +2462,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_daily_limit", c.daily_limit || "");
         setV("rf_recruit_total", c.recruit_total ?? "");
         setV("rf_landing_url", c.landing_url || "");
+        setV("rf_product_url", c.landing_url || "");
         setV("rf_hold_ttl", c.hold_ttl_min ?? 15);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
         /* ⏸ 098 이월 반영 방식 복원 */
@@ -2503,17 +2522,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _igSetList("notes", wd.specialNotesImages);
         _igRenderAll();
         setV("rf_thumbnail", c.thumbnail_url || "");
+        setV("rf_thumb_url", c.thumbnail_url || "");
         if (c.thumbnail_url) {
           const pv = document.getElementById("rf_thumb_preview");
           if (pv) { pv.src = c.thumbnail_url; pv.style.display = ""; }
         }
-        renderOptRowsWithProduct(json.options || [], wd.productLines);   // 🧩 옵션표 + 상품명 복원
+        renderOptRowsWithProduct(json.options || [], wd.productLines, c);   // 🧩 옵션표 + 상품명 복원
         renderPartCheck();
-      } else {
-        /* ★ v2: 레거시(일반) 공고 — 참여형 기본에서 유일하게 꺼지는 경로.
-           초기화가 켜 둔 것을 여기서 꺼야 전용 카드가 숨고 레거시 안내가 뜬다. */
-        const pe = document.getElementById("rf_participation");
-        if (pe) { pe.checked = false; onParticipationToggle(false); }
       }
     } catch(e) {
       // ★ B1: 로드 실패 상태에서 저장하면 참여형 필드가 미복원 기본값으로 덮일 수 있음 → 저장 시 참여형 필드 미전송 플래그
@@ -2528,7 +2543,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.time_range)   document.getElementById("rf_time_range").value = prefill.time_range;
       if (prefill.max_slots)    document.getElementById("rf_max_slots").value = prefill.max_slots;
       if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
-      if (prefill.notes)        document.getElementById("rf_notes").value = prefill.notes;
+      if (prefill.notes) {
+        const notesEl = document.getElementById("rf_notes");
+        if (notesEl) notesEl.value = prefill.notes;
+      }
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
 
@@ -3357,6 +3375,10 @@ function _rfGoToCheck() {
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
 async function saveRecruitPost() {
+  if (_recruitEditId && window._recruitEditLoadFailed) {
+    _rfSaveBlocked("기존 공고 정보를 완전히 불러오지 못해 저장을 차단했습니다. 새로고침 후 다시 시도해주세요.");
+    return;
+  }
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();   // 지난 사유 지우고 시작
   syncRecruitAutomaticBadges();
   const title    = document.getElementById("rf_title").value.trim();
@@ -3380,7 +3402,9 @@ async function saveRecruitPost() {
     cash_receipt_required: !!document.getElementById("rf_cash_receipt_required")?.checked,
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
-    notes:          document.getElementById("rf_notes").value.trim(),
+    // `rf_notes` belongs to the retired layout; compact editing keeps it
+    // optional so saving the visible fields never fails when it is absent.
+    notes:          String(document.getElementById("rf_notes")?.value || "").trim(),
     chat_url:       chatUrl,
     linked_sheet_id: sid,
     linked_tab_name: tab,
@@ -3416,9 +3440,10 @@ async function saveRecruitPost() {
   const partEl = document.getElementById("rf_participation");
   if (partEl && !(window._recruitEditLoadFailed && _recruitEditId)) {
     const isPart = !!partEl.checked;
-    payload.participation_mode = isPart;
-    if (isPart) {
-      if (payload.status === "active") {
+    const preserveLegacyCampaign = Boolean(_recruitEditId && window._recruitEditLoaded?.participation_mode === false);
+    if (!preserveLegacyCampaign) payload.participation_mode = isPart;
+    if (isPart || preserveLegacyCampaign) {
+      if (isPart && payload.status === "active") {
         const errs = participationCheckErrors();
         if (errs.length) {
           renderPartCheck();

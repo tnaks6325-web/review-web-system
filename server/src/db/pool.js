@@ -4,6 +4,11 @@ const { logger } = require('../utils/logger');
 // Railway, Render 등 외부 PostgreSQL 서비스의 URL에 sslmode=require가 포함될 수 있음
 const isProduction = process.env.NODE_ENV === 'production';
 const connectionString = process.env.DATABASE_URL;
+// The PR verification preview uses Railway's public PostgreSQL proxy, which
+// presents a self-signed certificate. This opt-in only relaxes verification for
+// the pg client; it never disables Node's global TLS verification.
+const allowSelfSignedDatabaseCert = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'false';
+const databaseUrlRequestsSsl = /sslmode=require/.test(connectionString || '');
 
 // ★ 제안D: 풀 크기 env 조정 가능(DB_POOL_MAX). 제출 폭주 시 err의 실제 원인이 시트 throttle가
 //   아니라 PG 커넥션 풀 고갈이므로, Railway PG의 max_connections 한도 내에서 상향하면 제출 안정화.
@@ -19,8 +24,10 @@ const poolConfig = {
 };
 
 // Railway PostgreSQL은 SSL 필수
-if (isProduction && connectionString) {
-  poolConfig.ssl = { rejectUnauthorized: false };
+if ((isProduction || databaseUrlRequestsSsl || allowSelfSignedDatabaseCert) && connectionString) {
+  // Keep the established Railway production behavior unchanged. The explicit
+  // preview flag is still scoped to this pg client for non-production checks.
+  poolConfig.ssl = { rejectUnauthorized: isProduction ? false : !allowSelfSignedDatabaseCert };
 }
 
 const pool = new Pool(poolConfig);
