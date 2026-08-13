@@ -24,4 +24,25 @@ function mergeDepositStamps(existing, incoming) {
   return [...other, ...[...dated.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, label]) => label)].join(', ');
 }
 
-module.exports = { mergeDepositStamps };
+// A transfer date may be moved only after the caller has positively identified
+// both sides of the correction.  This helper deliberately removes a matching
+// *date token* only; arbitrary free text in the audit value is retained.
+function removeDepositStamp(existing, removing) {
+  const target = _dateToken(removing);
+  if (!target) return String(existing == null ? '' : existing).trim();
+  const dated = new Map();
+  const other = [];
+  for (const part of String(existing == null ? '' : existing).split(/\s*,\s*/)) {
+    const clean = part.trim();
+    if (!clean) continue;
+    const date = _dateToken(clean);
+    if (date) {
+      if (date.key !== target.key) dated.set(date.key, date.label);
+    } else if (!other.includes(clean)) {
+      other.push(clean);
+    }
+  }
+  return [...other, ...[...dated.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, label]) => label)].join(', ');
+}
+
+module.exports = { mergeDepositStamps, removeDepositStamp };

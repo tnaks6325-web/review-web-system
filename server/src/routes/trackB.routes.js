@@ -2731,6 +2731,24 @@ router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrM
   } catch (err) { next(err); }
 });
 
+// Admin-only, explicit support correction.  Accept visible workboard seq values
+// so the operator can verify the source/destination rows before moving a date.
+router.post('/payment/repair/move-deposit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '입금일 이동 내용을 확인해 주세요.' });
+    }
+    res.json(await manualDepositRepairSvc.moveDepositDateBetweenRows({
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+      sourceSeqs: b.sourceSeqs, targetSeqs: b.targetSeqs, date: String(b.date || ''), by: _by(req),
+    }));
+  } catch (err) {
+    if (err && err.code) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+    next(err);
+  }
+});
+
 // 결과 파일 누락분이 실제 은행 실패로 확인된 경우에만, 대기 항목을 실패로 확정한다.
 router.post('/payment/batch/:id/confirm-failures', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

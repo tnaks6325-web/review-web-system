@@ -6886,6 +6886,7 @@ function _pmRender(){
   $('#pmhead').innerHTML=`<div class="mh"><h1>입금관리</h1>
     <span class="bd g">${items.filter(_pmOn).length}건 대상</span>
     <span class="sp" style="flex:1"></span>
+    <button class="btn" onclick="_pmOpenDepositDateCorrection()">수동 입금일 이동</button>
     <button class="btn" onclick="_pmRestoreManual811()">8/11 입금일 복구</button>
     <button class="btn" onclick="_pmLoad()">새로고침</button></div>`;
 
@@ -7582,6 +7583,34 @@ async function _pmRestoreManual811(){
   if(r.skipped) parts.push(`${r.skipped}건 제외`);
   if(r.failed) parts.push(`${r.failed}건 실패`);
   toast(`8/11 입금일 복구 완료 · 대상 ${r.candidates||0}건 · ${parts.join(' · ')}`);
+  await _pmLoad();
+}
+
+function _pmOpenDepositDateCorrection(){
+  const t=STATE.cur;
+  if(!t || !t.sheetId || !t.tabName){ toast('작업보드에서 대상 작업을 연 뒤 입금관리로 이동해 주세요.'); return; }
+  let ov=document.getElementById('pmdepositmoveov');
+  if(!ov){ ov=document.createElement('div'); ov.id='pmdepositmoveov'; ov.className='modalov'; ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();}); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modalbox" style="width:560px"><div class="modalhd"><b>수동 입금일 이동</b><button class="btn xs" onclick="document.getElementById('pmdepositmoveov').remove()">닫기</button></div><div class="modalbd">
+    <div style="padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#f7faff;margin-bottom:14px;line-height:1.6"><b>${esc(t.tabName)}</b><br><span class="muted">기존 행에서는 지정한 입금일만 제거하고, 비어 있는 대상 행에는 같은 날짜를 기록합니다. 대상 입금칸이 비어 있지 않으면 적용하지 않습니다.</span></div>
+    <label style="display:block;margin:10px 0 5px;font-weight:700">기존 행 순번 <span class="muted">(예: 65, 271, 272)</span></label><input id="pmdepositmovesource" class="in" style="width:100%" autocomplete="off">
+    <label style="display:block;margin:12px 0 5px;font-weight:700">비어 있는 대상 행 순번</label><input id="pmdepositmovetarget" class="in" style="width:100%" autocomplete="off">
+    <label style="display:block;margin:12px 0 5px;font-weight:700">이동할 입금일</label><input id="pmdepositmovedate" class="in" style="width:140px" value="8/12" autocomplete="off">
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px"><button class="btn" onclick="document.getElementById('pmdepositmoveov').remove()">취소</button><button class="btn pri" onclick="_pmApplyDepositDateCorrection()">이대로 이동</button></div>
+  </div></div>`;
+}
+
+async function _pmApplyDepositDateCorrection(){
+  const t=STATE.cur;
+  const toSeqs=id=>String(document.getElementById(id)?.value||'').split(/[\s,]+/).filter(Boolean).map(v=>Number(v));
+  const sourceSeqs=toSeqs('pmdepositmovesource'), targetSeqs=toSeqs('pmdepositmovetarget');
+  const date=String(document.getElementById('pmdepositmovedate')?.value||'').trim();
+  if(!sourceSeqs.length || sourceSeqs.length!==targetSeqs.length || sourceSeqs.some(v=>!Number.isInteger(v)||v<1) || targetSeqs.some(v=>!Number.isInteger(v)||v<1) || !date){ toast('기존/대상 순번과 입금일을 같은 건수로 입력해 주세요.'); return; }
+  if(!confirm(`${esc(t.tabName)}\n\n${date} 기록을 기존 ${sourceSeqs.length}건에서 제거하고, 비어 있는 대상 ${targetSeqs.length}건에 기록합니다.\n기존 행과 대상 행을 다시 확인했을 때만 적용됩니다.`)) return;
+  const r=await api('/api/trackb/payment/repair/move-deposit-date',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,sourceSeqs,targetSeqs,date,confirm:true})});
+  if(!r||!r.ok){ toast((r&&r.error)||'입금일 이동에 실패했습니다.'); return; }
+  document.getElementById('pmdepositmoveov')?.remove();
+  toast(`${r.date} 입금일 ${r.moved}건 이동 완료 · 기존 ${r.sourceRemoved}건 / 대상 ${r.targetRecorded}건 확인`);
   await _pmLoad();
 }
 
