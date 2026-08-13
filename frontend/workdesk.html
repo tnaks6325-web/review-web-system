@@ -5449,6 +5449,7 @@ function openGColMenu(col, rect){   // 컬럼명(헤더) 클릭으로 호출 —
     ${canHide?`<div class="gcm-div"></div><button class="gcm-hide" onclick="hideGCol()">⤫ 이 열 숨기기</button>`:''}
     ${(isCustom&&STATE.canEdit)?`<button class="gcm-hide" onclick="deleteCustomColumnPrompt('${esc(col)}')">🗑 이 열 삭제(모든 메모 삭제)</button>`:''}`;
   m.classList.add('show');
+  m.querySelector('.gcm-search').focus();
   _placeMenu(m, rect, 252, 340);
 }
 function closeGColMenu(){ STATE._gMenuCol=null; const m=$('#gcolmenu'); if(m) m.classList.remove('show'); }
