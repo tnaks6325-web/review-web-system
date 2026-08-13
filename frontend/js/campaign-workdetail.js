@@ -207,7 +207,10 @@
      *   그래서 유입방식이 불명일 때는 **유입가이드 내용이 있으면 가이드유입으로 간주**해 버튼을 숨긴다
      *   (작업오더 연결이 없는 수동 공고가 여기 해당 — 종전엔 불명이면 무조건 노출이었다).
      */
-    var isLinkInflow = d.inflowType === 'link' || (!d.inflowType && !hasGuide);
+    // 과거 공고 중에는 작업오더 연결 정보가 빠져 inflowType이 비어 있지만, 안내문에는
+    // "링크유입"이 남아 있다. 명시적으로 링크유입이라고 적힌 경우만 호환 처리한다.
+    var legacyLinkInflow = !d.inflowType && /링크\s*유입/.test(String(wd.inflowGuideHtml || '').replace(/<[^>]*>/g, ' '));
+    var isLinkInflow = d.inflowType === 'link' || legacyLinkInflow || (!d.inflowType && !hasGuide);
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
       + '<div class="cwd-body">' + guideHtml + extraImgs + '</div>';
     // 옵션 공고는 리뷰어가 참여 시 고른 옵션의 링크로 이동한다.

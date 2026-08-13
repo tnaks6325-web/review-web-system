@@ -29,6 +29,14 @@ const fallbackHtml = cardsHtml({
 }, {});
 assert.match(fallbackHtml, new RegExp('data-cwd-landing="' + fallbackUrl.replace(/[?]/g, '\\?') + '"'));
 
+const legacyLinkHtml = cardsHtml({
+  inflowType: '',
+  landingUrl: fallbackUrl,
+  workDetail: { inflowGuideHtml: '링크유입 — 아래 상품 페이지 열기 버튼으로 진행하세요.' },
+  selectedOption: { optKey: '블루', optionUrl: selectedOptionUrl },
+}, {});
+assert.match(legacyLinkHtml, /선택 옵션 링크 열기/);
+
 const optionLoader = routesSource.slice(
   routesSource.indexOf('async function _loadOptionViews'),
   routesSource.indexOf('/** 참여 전 공개용 옵션 뷰')
