@@ -7606,7 +7606,6 @@ async function _pmApplyDepositDateCorrection(){
   const sourceSeqs=toSeqs('pmdepositmovesource'), targetSeqs=toSeqs('pmdepositmovetarget');
   const date=String(document.getElementById('pmdepositmovedate')?.value||'').trim();
   if(!sourceSeqs.length || sourceSeqs.length!==targetSeqs.length || sourceSeqs.some(v=>!Number.isInteger(v)||v<1) || targetSeqs.some(v=>!Number.isInteger(v)||v<1) || !date){ toast('기존/대상 순번과 입금일을 같은 건수로 입력해 주세요.'); return; }
-  if(!confirm(`${esc(t.tabName)}\n\n${date} 기록을 기존 ${sourceSeqs.length}건에서 제거하고, 비어 있는 대상 ${targetSeqs.length}건에 기록합니다.\n기존 행과 대상 행을 다시 확인했을 때만 적용됩니다.`)) return;
   const r=await api('/api/trackb/payment/repair/move-deposit-date',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,sourceSeqs,targetSeqs,date,confirm:true})});
   if(!r||!r.ok){ toast((r&&r.error)||'입금일 이동에 실패했습니다.'); return; }
   document.getElementById('pmdepositmoveov')?.remove();
