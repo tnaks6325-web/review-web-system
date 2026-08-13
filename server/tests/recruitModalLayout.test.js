@@ -63,9 +63,14 @@ ok('제목 오른쪽의 상태 버튼은 기존 저장 select와 동기화된다
   && /function syncStatusButtons/.test(modal)
   && /function setStatus/.test(modal)
   && /syncStatusButtons\(\)/.test(editor));
-ok('중앙 편집부는 사후 DOM 이동 없이 시안 구조로 직접 렌더링된다',
+ok('중앙 편집부는 사후 DOM 이동 없이 시안 순서로 직접 렌더링된다',
   !modal.includes('data-sec="info"')
-  && /id="rf_product_settings_slot"/.test(modal)
+  && modal.indexOf('data-sec="pub"') < modal.indexOf('data-sec="link"')
+  && modal.indexOf('data-sec="link"') < modal.indexOf('data-sec="fee"')
+  && modal.indexOf('data-sec="fee"') < modal.indexOf('data-sec="prod"')
+  && modal.indexOf('data-sec="prod"') < modal.indexOf('data-product-settings')
+  && modal.indexOf('data-product-settings') < modal.indexOf('id="rf_work_section"')
+  && modal.indexOf('id="rf_work_section"') < modal.indexOf('data-sec="cond"')
   && /data-product-settings/.test(modal)
   && /id="rf_delivery_toggle"/.test(modal)
   && /rf-parity-time-row/.test(modal)
@@ -74,11 +79,13 @@ ok('중앙 편집부는 사후 DOM 이동 없이 시안 구조로 직접 렌더�
   && !/function placeFinalSections/.test(modal)
   && !/\.appendChild\(settings\)/.test(modal)
   && !/\.insertBefore\(publish, link\)/.test(modal)
+  && !/\.rf-card\[data-sec="(?:link|fee|prod|work|cond)"\]\{order:/.test(modal)
+  && !/\.rf-publish-card\{order:/.test(modal)
   && !/RecruitModal\.syncProductSettings\(on\)/.test(editor));
 ok('최종 행형 문법은 승인 시안의 25/75 열과 동일 높이의 입력·버튼을 쓴다',
   /\.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal)
-  && /\.rf-main \.rform-input\{min-height:30px/.test(modal)
-  && /\.rchan-btn,#recruitModal \.rf-pm-btn,#recruitModal \.rf-status-buttons button\{min-height:29px/.test(modal));
+  && /\.rf-main \.rform-input\{min-height:26px;height:26px/.test(modal)
+  && /\.rchan-btn,#recruitModal \.rf-pm-btn,#recruitModal \.rf-status-buttons button\{min-height:26px/.test(modal));
 ok('옵션 URL·주말 제외·구매시간·현금영수증·기간별 리뷰비 필드는 보존한다',
   ['rf-opt-url', 'rf_skip_weekends', 'rf_free_time_toggle', 'rf_cash_receipt_required', 'rf_fee_sched_on']
     .every((token) => modal.includes(token)));

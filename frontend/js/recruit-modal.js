@@ -45,7 +45,20 @@
         <div id="rf_side_audit" class="rf-side-audit"><div class="rf-side-audit-head"><span>자동 점검</span><strong id="rf_side_audit_score">–</strong></div><div id="rf_part_check"></div></div>
       </nav>
       <div class="rf-main">
-    <div class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0">
+    <div id="editorScroller" class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0" tabindex="0" aria-label="모집공고 수정 항목">
+
+      <!-- 게시 정보는 시안과 같이 중앙 편집부 최상단에 직접 둔다. 저장 필드 ID는 유지한다. -->
+      <section class="rf-card rf-publish-card" data-sec="pub">
+        <div class="rf-cb">
+          <div class="rf-hrow rf-title-row"><span class="rf-hl">공고 제목 <span class="rform-req">*</span></span>
+            <div class="rf-title-control"><input id="rf_title" type="text" class="rform-input" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"><div id="rf_status_buttons" class="rf-status-buttons"><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div></div></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유의사항</span><div><textarea id="rf_notes" class="rform-input" rows="2" placeholder="참여 전 모두에게 공개되는 짧은 안내만 — 예) 와우회원 전용 · 계정당 1회" style="resize:vertical"></textarea><div class="rf-help">공고 카드에 노출되는 안내문</div><div id="rf_clean_notes"></div></div></div>
+          <div class="rf-hrow"><span class="rf-hl">모집인원 <small>(레거시)</small></span><input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0"></div>
+          <select id="rf_status" class="rform-input" onchange="RecruitModal.syncStatusButtons()" hidden><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select>
+          <div id="rf_hidden_box" class="rf-hidden-row"><label><input type="checkbox" id="rf_reviewer_hidden"> 🧪 리뷰어에게 숨김 <span>— 내부 테스트용</span></label><div>리뷰어 공고 목록에 뜨지 않지만, 공고 링크로 직접 테스트할 수 있습니다.</div></div>
+          <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
+        </div>
+      </section>
 
       <!-- ═══ 🔗 연결 · 기본 (고정 맨 위 — 연결하면 옵션표 프리필·현영 판정·시트 일정을 자동으로 쓴다) ═══ -->
       <div class="rf-card" data-sec="link">
@@ -125,6 +138,16 @@
         </div>
       </div>
 
+      <!-- 시안 순서: 연결·기본 다음에는 리뷰비·입금이 이어진다. -->
+      <section class="rf-card rf-fee-card" data-sec="fee">
+        <div class="rf-cb">
+          <div class="rf-hrow"><span class="rf-hl">리뷰비</span><input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100" oninput="renderFeeSchedule()"></div>
+          <div class="rf-hrow"><span class="rf-hl">입금명</span><input id="rf_transfer_memo" type="text" class="rform-input" placeholder="예) 파우더망고" maxlength="8"></div>
+          <div class="rf-hrow"><span class="rf-hl">이체은행</span><div><div id="rf_transfer_bank_btns" class="rf-inline-buttons"><button class="rchan-btn" data-group="transfer_bank" data-val="" onclick="selectRfBtn('transfer_bank',this)">자동</button><button class="rchan-btn" data-group="transfer_bank" data-val="hana" onclick="selectRfBtn('transfer_bank',this)">하나은행</button><button class="rchan-btn" data-group="transfer_bank" data-val="kbank" onclick="selectRfBtn('transfer_bank',this)">케이뱅크</button></div><input id="rf_transfer_bank" type="hidden"><div id="rf_transfer_bank_hint" class="rf-help">현금이체 → 하나은행 · 세금계산서 → 케이뱅크</div></div></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">기간별 리뷰비</span><div class="rf-fee-box"><label class="rf-fee-sw"><input type="checkbox" id="rf_fee_sched_on" onchange="onFeeScheduleToggle(this.checked)"> 기간별 리뷰비 사용</label><div id="rf_fee_sched_section" style="display:none"><div class="rf-fee-head"><span>적용 시작일</span><span>리뷰비(원)</span><span>메모</span><span></span></div><div id="rf_fee_rows"></div><button type="button" class="rchan-btn" onclick="addFeeRow()">+ 구간 추가</button><div id="rf_fee_summary"></div><div id="rf_fee_check"></div></div></div></div>
+        </div>
+      </section>
+
       <!-- 레거시(일반) 공고 안내 — 참여형이 꺼진 공고를 열었을 때만 보인다(신규는 참여형 기본) -->
       <div id="rf_legacy_note" class="rf-card rf-legacy" style="display:none">
         <div class="rf-cb" style="flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap">
@@ -170,8 +193,9 @@
         </div>
       </div>
 
-      <!-- ═══ 📅 모집 조건 (참여형 전용 — id=rf_part_section 을 카드 자체에 둬 기존 토글 계약 유지) ═══ -->
-      <div class="rf-card" data-sec="cond" id="rf_part_section" style="display:none">
+      <!-- 이전 조건 위치는 렌더링하지 않는다. 활성 조건 템플릿은 작업내용 뒤에 있다. -->
+      <template id="rf_legacy_condition_markup">
+      <div class="rf-card" data-legacy-sec="cond" id="rf_part_section" style="display:none">
         <div class="rf-ch"><span class="rf-ct">📅 모집 조건</span><span class="rf-cn">언제 · 몇 명을 모으나 — 시트 일정이 인식되면 시트가 우선합니다</span></div>
         <div class="rf-cb">
           <div class="rf-grid2">
@@ -222,9 +246,11 @@
           </details>
         </div>
       </div>
+      </template>
 
-      <!-- ═══ 💰 리뷰비 · 입금 (레거시 공고에도 적용되는 상시 카드) ═══ -->
-      <div class="rf-card" data-sec="fee">
+      <!-- 이전 리뷰비 카드 위치는 렌더링하지 않는다. 활성 행은 연결·기본 아래에 있다. -->
+      <template id="rf_legacy_fee_markup">
+      <div class="rf-card" data-legacy-sec="fee">
         <div class="rf-ch"><span class="rf-ct">💰 리뷰비 · 입금</span><span class="rf-cn">참여한 리뷰어에겐 참여 시점 금액이 영구 고정됩니다</span></div>
         <div class="rf-cb">
       <div class="rf-grid2">
@@ -266,6 +292,7 @@
       </div>
 
       <!-- ═══ 🛍 상품 정보 (리뷰타입·배지·URL·썸네일 — 레거시 공고에도 적용되는 상시 카드) ═══ -->
+      </template>
       <section class="rf-product-settings" data-product-settings>
         <div class="rf-product-settings-head"><span>상품 설정</span></div>
         <div class="rf-cb">
@@ -389,7 +416,22 @@
         </div>
       </div>
 
-      <!-- ═══ ✅ 게시 · 자동 점검 (고정 맨 아래 — 저장 버튼 직전 확인) ═══ -->
+      <!-- 모집 조건은 시안의 마지막 단계에 직접 렌더링한다. -->
+      <section class="rf-card" data-sec="cond" id="rf_part_section" style="display:none">
+        <div class="rf-ch"><span class="rf-ct">모집 조건</span></div>
+        <div class="rf-cb">
+          <div class="rf-hrow"><span class="rf-hl">종료일 <span id="rf_deadline_day"></span></span><input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
+          <div id="rf_deadline_warn" class="rf-help" style="display:none"></div>
+          <div class="rf-hrow"><span class="rf-hl">랜딩 URL</span><input id="rf_landing_url" type="text" class="rform-input" placeholder="링크유입 URL은 진행상품 URL에서 자동 제공됩니다"></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">모집이월 방식</span><div><input id="rf_carry_mode" type="hidden" value="auto"><div class="rf-inline-buttons"><button type="button" id="rf_carry_auto" class="rchan-btn active" onclick="rfCarrySet('auto')">자동 반영 (기본)</button><button type="button" id="rf_carry_hold" class="rchan-btn" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" class="rf-help" style="display:none"></div></div></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">다계정 허용</span><div><label class="rf-checkline"><input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)"> 허용 <span>— 명의당 1건</span></label><div id="rf_multi_section" style="display:none"><div class="rf-inline-inputs"><label>하루 한도 <input id="rf_multi_daily" type="number" min="0" class="rform-input" value="1" oninput="renderPartCheck()"></label><label>제한시간 <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="10"></label></div></div></div></div>
+          <details class="rf-advanced"><summary>고급 설정 (참여 제한시간·마감 버퍼)</summary><div class="rf-inline-inputs"><label>참여 제한시간 <input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></label><label>종료 전 신규참여 마감 <input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></label></div></details>
+        </div>
+      </section>
+
+      <!-- 이전 게시 카드 마크업은 이전 배포와의 소스 비교용 비활성 템플릿이다.
+           런타임 편집기는 위 최상단의 정적 행 템플릿만 렌더링한다. -->
+      <template id="rf_legacy_publish_markup">
       <div class="rf-card rf-publish-card" data-sec="pub">
         <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">✅ 게시 · 자동 점검</span><span class="rf-cn">제목 · 유의사항 · 상태 — 저장 직전 확인</span></div>
         <div class="rf-cb">
@@ -431,6 +473,7 @@
       <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
         </div>
       </div>
+      </template>
 
     </div>
       </div><!-- /rf-main -->
@@ -854,12 +897,6 @@
 #recruitModal .rf-side{width:238px;background:#FBFCFE}
 #recruitModal .modal-body{gap:0!important;padding:0 16px 18px!important}
 #recruitModal .rf-card{border:0;border-bottom:1px solid #DCE3EC;border-radius:0;overflow:visible;background:transparent}
-#recruitModal .rf-card[data-sec="link"]{order:0}
-#recruitModal .rf-card[data-sec="fee"]{order:1}
-#recruitModal .rf-card[data-sec="prod"]{order:2}
-#recruitModal [data-product-settings]{order:3}
-#recruitModal .rf-card[data-sec="work"]{order:4}
-#recruitModal .rf-card[data-sec="cond"]{order:5}
 #recruitModal .rf-card:last-child{border-bottom:0}
 #recruitModal .rf-ch{padding:15px 0 7px;border:0;background:transparent}
 #recruitModal .rf-ct{font-size:.84rem;letter-spacing:-.025em}
@@ -867,22 +904,22 @@
 #recruitModal .rf-pinbadge{display:none}
 #recruitModal .rf-cb{padding:0 0 14px;gap:0}
 #recruitModal .rf-grid2{display:block;margin:0}
-#recruitModal .rf-hrow{grid-template-columns:minmax(112px,25%) minmax(0,75%);gap:0;min-height:43px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
+#recruitModal .rf-hrow{grid-template-columns:minmax(112px,25%) minmax(0,75%);gap:0;min-height:37px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
 #recruitModal .rf-hrow:first-child{border-radius:8px 8px 0 0}
 #recruitModal .rf-hrow:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
-#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:43px}
-#recruitModal .rf-hrow.rf-hrow-top .rf-hl{padding-top:9px}
+#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:37px}
+#recruitModal .rf-hrow.rf-hrow-top .rf-hl{padding-top:7px}
 #recruitModal .rf-hrow .rf-hl{display:flex;align-items:center;padding:6px 10px;background:#FBFCFE;color:#46546B;font-size:.68rem;font-weight:800;text-align:left;line-height:1.3}
 #recruitModal .rf-hrow>:not(.rf-hl){min-width:0;padding:4px 7px}
 #recruitModal .rf-hrow>.rform-input{height:30px;margin:auto 7px;padding:4px 7px}
-#recruitModal .rf-main .rform-input{min-height:30px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
+#recruitModal .rf-main .rform-input{min-height:26px;height:26px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
 #recruitModal .rf-main textarea.rform-input{min-height:56px;padding:7px}
-#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:29px;padding:5px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:26px;padding:4px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rchan-btn:hover,#recruitModal .rf-pm-btn:hover,#recruitModal .rf-status-buttons button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
 #recruitModal .rchan-btn.active,#recruitModal .rf-pm-btn.on,#recruitModal .rf-status-buttons button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8;box-shadow:none}
-#recruitModal .rf-time-free{height:27px;flex-basis:92px;width:92px;font-size:.65rem}
-#recruitModal .rf-time-range{min-width:0;height:27px}
-#recruitModal .rf-time-field{height:27px;font-size:.7rem}
+#recruitModal .rf-time-free{height:26px;flex-basis:92px;width:92px;font-size:.65rem}
+#recruitModal .rf-time-range{min-width:0;height:26px}
+#recruitModal .rf-time-field{height:26px;font-size:.7rem}
 #recruitModal .rf-prod-head{margin:0;border:1px solid #DCE3EC;border-bottom:0;border-radius:8px 8px 0 0;padding:5px 8px;background:#FBFCFE}
 #recruitModal .rf-opt-row{margin:0;padding:4px 7px;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
 #recruitModal #rf_opt_rows .rf-opt-row:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
@@ -891,8 +928,9 @@
 #recruitModal .rf-pm-note{margin-left:7px;font-size:.62rem}
 #recruitModal .rf-gp{margin:0;border:1px solid #DCE3EC;border-radius:8px;background:#FCFDFF;box-shadow:none}
 #recruitModal .rf-gp-head{padding:5px 7px;margin:0;border-bottom:1px solid #DCE3EC}
-#recruitModal .rf-product-settings{margin-top:12px;border-top:1px solid #DCE3EC}
-#recruitModal .rf-product-settings-head{padding:10px 0 6px;color:#27364E;font-size:.72rem;font-weight:850}
+#recruitModal .rf-card[data-sec="prod"]{border-bottom:0}
+#recruitModal .rf-product-settings{margin-top:0;border-top:0;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-product-settings-head{display:none}
 #recruitModal .rf-product-settings .rf-cb{padding:0}
 #recruitModal .rf-product-settings .rf-hrow{border-radius:0}
 #recruitModal .rf-product-settings .rf-hrow:first-of-type{border-radius:8px 8px 0 0}
@@ -901,7 +939,7 @@
 #recruitModal .rf-card[data-sec="fee"] .rf-ch{display:none}
 #recruitModal .rf-card[data-sec="fee"] .rf-cb{padding:0 0 14px}
 #recruitModal .rf-fee-sw{min-height:31px;font-size:.68rem}
-#recruitModal .rf-publish-card{order:-1;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-publish-card{border-bottom:1px solid #DCE3EC}
 #recruitModal .rf-publish-card .rf-ch{display:none}
 #recruitModal .rf-publish-card .rf-cb{padding:12px 0 14px}
 #recruitModal .rf-title-row{border:0;background:transparent;min-height:31px}
@@ -920,9 +958,19 @@
 #recruitModal .rf-side #rf_preview_card{font-size:.7rem}
 #recruitModal .rf-linked-reference{display:flex;align-items:center;min-height:30px;width:100%;padding:0 8px;border:1px solid #D5DEE9;border-radius:5px;background:#F7F9FC;color:#536178;font-size:.72rem;font-weight:750}
 #recruitModal .rf-linked-reference:before{content:'연결됨';margin-right:6px;color:#2563C8;font-size:.64rem;font-weight:850}
+#recruitModal .rf-help{margin-top:3px;color:#7F8A9B;font-size:.65rem;font-weight:600;line-height:1.4}
+#recruitModal .rf-inline-buttons{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+#recruitModal .rf-checkline{display:flex;align-items:center;gap:7px;min-height:29px;color:#536178;font-size:.7rem;font-weight:800;cursor:pointer}
+#recruitModal .rf-checkline span{color:#94A3B8;font-size:.64rem;font-weight:600}
+#recruitModal .rf-inline-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
+#recruitModal .rf-inline-inputs label{display:grid;gap:3px;color:#64748B;font-size:.64rem;font-weight:700}
+#recruitModal .rf-advanced{padding:7px 9px;border:1px solid #DCE3EC;border-top:0;background:#FBFCFE;color:#64748B;font-size:.68rem;font-weight:750}
+#recruitModal .rf-hidden-row{margin-top:6px;padding:7px 9px;border:1px dashed #C9D6E8;border-radius:6px;color:#64748B;font-size:.65rem;line-height:1.4}
+#recruitModal .rf-hidden-row label{font-size:.7rem;font-weight:800;cursor:pointer}
+#recruitModal .rf-hidden-row label span{color:#94A3B8;font-size:.63rem}
 #recruitModal #rf_linked_campaign,#recruitModal #rf_linked_tab,#recruitModal #rf_delivery_type{display:none}
 #recruitModal .rf-delivery-toggle{display:flex;flex-wrap:wrap;gap:4px}
-#recruitModal .rf-delivery-toggle button{min-height:29px;padding:5px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#fff;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rf-delivery-toggle button{min-height:26px;padding:4px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#fff;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rf-delivery-toggle button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
 #recruitModal .rf-delivery-toggle button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8}
 #recruitModal .rf-parity-time-row .rf-time-control{display:flex;align-items:center;gap:6px;width:100%}
