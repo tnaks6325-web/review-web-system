@@ -7,6 +7,7 @@ const vm = require('vm');
 
 const workdesk = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'workdesk.html'), 'utf8');
 const paymentService = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'payment.service.js'), 'utf8');
+const sheetlessStatus = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'sheetlessStatus.service.js'), 'utf8');
 
 function sourceOf(name) {
   const start = workdesk.indexOf('function ' + name + '(');
@@ -103,6 +104,11 @@ test('legacy failed deposit-date writes are repaired automatically once per paym
   assert.match(load, /pmLegacyDepositRepairRun/);
   assert.match(load, /boardFailedCount/);
   assert.match(load, /deposit-date-backfill/);
+});
+
+test('sheetless payment-date writes recover a missing saved column from workboard headers', () => {
+  assert.match(sheetlessStatus, /findPaymentColumnIndex/);
+  assert.match(sheetlessStatus, /raw_sheet_tabs/);
 });
 
 test('payment UI keeps the work list and selected-result panel side by side', () => {
