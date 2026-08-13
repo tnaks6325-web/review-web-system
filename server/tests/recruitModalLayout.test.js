@@ -110,7 +110,7 @@ ok('시안의 상품 URL·단일 선택·혼합 조합·토글 상태 DOM을 런
   /class="form-row product-main-url"/.test(modal)
   && /id="rf_product_main_url"/.test(modal)
   && /id="rf_mixed_review_composer"/.test(modal)
-  && /id="rf_review_mix_rows"/.test(modal)
+  && /id="rf_mixed_review_rows"/.test(modal)
   && /id="rf_cashrcpt_toggle"/.test(modal)
   && /id="feeScheduleState"/.test(modal)
   && /id="weekendNotice"/.test(modal)
