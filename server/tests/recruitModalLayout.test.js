@@ -117,12 +117,15 @@ ok('product main URL is directly editable below work type and synced to landing 
 ok('mixed review composer opens below review type buttons',
   /class="form-row rf-review-type-row"/.test(compact)
   && /class="review-type-buttons"/.test(compact)
-  && /rf-review-type-row \.form-control\{display:block/.test(modal));
+  && /rf-review-type-row \.form-control\{display:block/.test(modal)
+  && /\.mixed-review-grid label\{display:grid;grid-template-columns:48px minmax\(0,1fr\)/.test(modal)
+  && /\.mixed-review-type-label\{white-space:nowrap;text-align:left\}/.test(modal));
 ok('badge and guide inputs use the compact two-to-one composition',
   /class="badge-field"/.test(compact)
   && /\.badge-field\{display:grid;gap:6px;width:100%\}/.test(modal)
   && /\.work-compose\{display:grid;grid-template-columns:minmax\(220px,1fr\) 128px/.test(modal)
-  && /\.work-image-strip\{justify-self:end;width:128px!important/.test(modal)
+  && /\.work-image-strip\{justify-self:end;width:128px!important;height:58px;min-width:0;min-height:58px/.test(modal)
+  && /#recruitModal \.rf-compact-main \.ig-strip\{height:58px!important;min-height:58px!important/.test(modal)
   && /\.rf-compact-main \.footer-copy\{min-width:0;flex:1/.test(modal)
   && /\.footer>div\{display:flex;flex:0 0 auto;flex-wrap:nowrap/.test(modal));
 ok('이전 마크업 템플릿은 새 컴팩트 편집기 전에 정확히 닫혀 실제 입력 DOM을 만든다',
