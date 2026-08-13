@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>모집공고 수정 · 런타임 프리뷰</title>
+  <style>
+    :root{font-family:"Pretendard Variable","Noto Sans KR",system-ui,sans-serif;color:#172033;background:#eef2f7}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;background:linear-gradient(135deg,#eef3f9,#e7edf5)}
+    .preview-note{position:fixed;z-index:9000;top:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #bcd1f6;border-radius:8px;background:#f5f9ff;color:#2563c8;box-shadow:0 7px 20px rgb(42 66 106 / .12);font-size:12px;font-weight:800}
+    .preview-note span{color:#64748b;font-size:11px;font-weight:650}.preview-note button{border:0;border-radius:5px;background:#2769df;color:#fff;padding:4px 7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}
+    #recruitModal .modal-header .btn-icon-sm{pointer-events:none;opacity:.55}
+  </style>
+</head>
+<body>
+  <div class="preview-note">무로그인 런타임 프리뷰 <span>저장·실데이터 API는 실행되지 않습니다.</span><button type="button" id="resetPreview">초기 상태</button></div>
+  <div id="recruitModalMount"></div>
+  <script>
+    /* 이 파일은 모집공고 수정 런타임 컴포넌트를 그대로 마운트한다.
+       API 저장만 차단하고 화면에서 변경되는 상태는 그대로 재현한다. */
+    window.closeRecruitModal = function () {};
+    window.saveRecruitPost = function () { alert('프리뷰에서는 저장하지 않습니다.'); };
+    window.onLinkedCampaignChange = window.onLinkedTabChange = function () {};
+    window.onRecruitDatesChange = function () {};
+    window.onParticipationToggle = function () {};
+    window.renderPartCheck = function () {};
+    window.renderFeeSchedule = function () {};
+    window.addFeeRow = function () {};
+    window.igPickFiles = function () {};
+    window.openRecruitProductUrl = function () {};
+    window.uploadCampThumb = function () {};
+    window.addPresetBadge = function () {};
+    window.handleBadgeInput = function () {};
+  </script>
+  <script src="js/recruit-modal.js?v=20260813-compact-parity-c98"></script>
+  <script>
+    (function () {
+      const byId = (id) => document.getElementById(id);
+      const choice = (root, predicate) => root && root.querySelectorAll('button').forEach((button) => button.classList.toggle('active', predicate(button)));
+      function setText(id, value) { const el = byId(id); if (el) el.value = value; }
+      function setPreview() {
+        const modal = byId('recruitModal');
+        modal.classList.remove('hidden'); modal.style.display = 'flex';
+        byId('recruitModalTitle').textContent = '✎ 모집공고 수정 · 런타임 프리뷰';
+        setText('rf_title', '8/11(네이버) 제주갈치조림 15건');
+        setText('rf_chat_url', 'https://invite.kakao.com/tc/example');
+        setText('rf_review_fee', '1000'); setText('rf_transfer_memo', '양정제공');
+        setText('rf_start_date', '2026-08-12'); setText('rf_product_url', 'https://smartstore.naver.com/example');
+        setText('rf_thumb_url', 'https://image.example.com/jeju-galchi.jpg');
+        byId('rf_linked_campaign_reference').textContent = '연결됨 어니스트람_업무시트 2';
+        byId('rf_linked_tab_reference').textContent = '연결됨 8/11(네이버)제주갈치조림 15건';
+        const status = byId('rf_status'); status.value = 'active'; window.RecruitModal.syncStatusButtons();
+        const channel = byId('rf_channel'); channel.value = '네이버';
+        choice(byId('rf_channel_btns'), (button) => button.dataset.val === '네이버');
+        choice(byId('rf_manager_btns'), (button) => button.dataset.val === '만두'); byId('rf_manager').value = '만두';
+        byId('rf_delivery_type').value = '택배발송대행'; byId('rf_delivery_type').dispatchEvent(new Event('change'));
+        const row = document.createElement('div');
+        row.className = 'rf-opt-row';
+        row.innerHTML = '<input class="rform-input" value="국내산 제주은갈치 손질 갈치조림 구이"><input class="rform-input" value="33,000" style="text-align:right"><input class="rform-input" value="15" style="text-align:right"><input class="rform-input" value="5" style="text-align:right"><button type="button" class="row-action" disabled>×</button>';
+        byId('rf_opt_rows').replaceChildren(row);
+        byId('rf_product_main_url_value').textContent = 'https://smartstore.naver.com/example';
+        byId('rf_wd_inflow').value = '이미지 참고 후 상품을 검색해 구매해주세요.';
+        byId('rf_wd_review').value = '상품정보를 참고해 자연스러운 리뷰를 작성해주세요.';
+        byId('rf_wd_notes').value = '별점 5점, 재고 소진 전 구매 요청';
+        setChoices();
+      }
+      function setChoices() {
+        choice(byId('rf_inflow_type_ui'), (button) => button.dataset.inflow === 'link');
+        choice(byId('rf_skip_weekends_toggle'), (button) => button.dataset.weekend === 'exclude');
+        choice(byId('rf_multi_account_toggle'), (button) => button.dataset.multi === 'off');
+        choice(byId('rf_review_type_btns'), (button) => button.dataset.val === 'photo');
+      }
+      window.selectRfBtn = function (group, button) {
+        const root = button.closest('#rf_channel_btns,#rf_manager_btns,#rf_transfer_bank_btns,#rf_review_type_btns');
+        choice(root, (item) => item === button);
+        if (group === 'channel') { byId('rf_channel').value = button.dataset.val; }
+        if (group === 'manager') { byId('rf_manager').value = button.dataset.val; }
+        if (group === 'review_type') { byId('rf_review_type').value = button.dataset.val || ''; syncReviewMix(); }
+      };
+      window.rfSetInflowType = function (type, button) { choice(byId('rf_inflow_type_ui'), (item) => item === button); byId('rf_product_main_url_state').textContent = type === 'guide' ? '가이드유입 · 상품 URL 미사용' : '링크유입 · 자동 제공'; };
+      window.rfToggleCashReceipt = function () { const t=byId('rf_cashrcpt_toggle'); const on=!t.classList.contains('on'); t.classList.toggle('on',on); t.setAttribute('aria-pressed',on); byId('rf_cash_receipt_required').checked=on; byId('rf_cash_receipt_state').textContent=on?'발행 필요':'발행 안 함'; };
+      window.rfToggleFeeSchedule = function () { const t=byId('rf_fee_sched_toggle'); const on=!t.classList.contains('on'); t.classList.toggle('on',on); t.setAttribute('aria-pressed',on); byId('rf_fee_sched_on').checked=on; byId('feeScheduleState').textContent=on?'사용':'사용 안 함'; byId('rf_fee_sched_section').style.display=on?'':'none'; };
+      window.rfSetWeekendPolicy = function (skip, button) { choice(byId('rf_skip_weekends_toggle'), (item) => item === button); byId('rf_skip_weekends').checked=skip; };
+      window.rfSetMultiAccount = function (on, button) { choice(byId('rf_multi_account_toggle'), (item) => item === button); byId('rf_multi_account').checked=on; byId('rf_multi_section').hidden=!on; };
+      window.setProdMode = function (mode) { byId('rf_prod_mode').value=mode; choice(byId('rf_prod_mode_sw'), (button) => button.dataset.mode===mode); };
+      window.syncRecruitReviewTypeMix = function () { syncReviewMix(); };
+      function syncReviewMix() { const mixed=byId('rf_review_type').value==='mixed'; const composer=byId('rf_mixed_review_composer'); composer.hidden=!mixed; composer.classList.toggle('is-visible',mixed); const sum=[...composer.querySelectorAll('[data-mix-type]')].reduce((n,input)=>n+(Number(input.value)||0),0); byId('rf_review_mix_total').textContent='합계 '+sum+'명 · 총인원 15명'; }
+      document.addEventListener('DOMContentLoaded', function () { setPreview(); byId('resetPreview').addEventListener('click', setPreview); });
+    })();
+  </script>
+</body>
+</html>
