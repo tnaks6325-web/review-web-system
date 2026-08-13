@@ -86,6 +86,13 @@ test('result upload supports drag-and-drop and has no second manual apply action
   assert.doesNotMatch(sourceOf('_pmBatchActions'), /_pmApplySavedResult\(\$\{i\}\)/);
 });
 
+test('result upload uses one clickable drop zone with a drag affordance', () => {
+  const actions = sourceOf('_pmBatchActions');
+  assert.match(actions, /<button class="pmdrop"[^>]*onclick="_pmPickResult\(\$\{i\}\)"/);
+  assert.match(actions, /드래그 가능/);
+  assert.doesNotMatch(actions, /<button class="btn sm" onclick="_pmPickResult/);
+});
+
 test('payment UI keeps the work list and selected-result panel side by side', () => {
   assert.match(workdesk, /class="pmselectionlayout"/);
   assert.match(workdesk, /입금 대상자 수/);
