@@ -1644,8 +1644,12 @@
 .pmb.wait{background:#FBF2E1;color:#9A6414}
 .pmauto{display:inline-block;font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
 .pmauto.man{color:#1B4F9C;font-weight:700}
-.pmdrop{display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:0 8px;border:1px dashed #9AA8B8;border-radius:6px;color:var(--t2,#59626F);font-size:11px;cursor:copy}
+.pmdrop{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:0 8px;border:1px dashed #9AA8B8;border-radius:6px;background:#fff;color:var(--t2,#59626F);font:inherit;font-size:11px;cursor:pointer}
+.pmdrop:hover{border-color:#1B75D0;background:#F5FAFF;color:#155BA5}
+.pmdropicon{font-size:14px;font-weight:800;line-height:1}
+.pmdrophint{padding-left:5px;border-left:1px solid #C9D3DE;color:#758292;font-size:10px}
 .pmdrop.over{border-color:#1B75D0;background:#EAF4FF;color:#155BA5;font-weight:700}
+.pmdrop.over .pmdrophint{border-color:#9FC3E7;color:#155BA5}
 .pmwarn{color:#B3382E;font-size:11.5px}
 /* ── 입금관리 B스타일: 네이비 헤더 + 고밀도 운영 원장 ── */
 #pmhead .mh{max-width:1400px;min-height:54px;margin:0 auto;background:#112B55;color:#fff;border-radius:10px 10px 0 0;padding:0 18px;display:flex;align-items:center;gap:9px}
@@ -6996,15 +7000,14 @@ function _pmBatchActions(b,i){
     ? `<button class="btn sm" onclick="_pmBackfillPaidDeposit(${i})">입금일 재시도</button>` : '';
   const confirmFailures = b.status==='applied' && (b.paidCount||0)>0 && (b.pendingCount||0)>0
     ? `<button class="btn sm danger" onclick="_pmConfirmFailures(${i})">이체실패 처리</button>` : '';
-  const resultDrop = (b.status==='downloaded' || b.status==='applied')
-    ? `<span class="pmdrop" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})">결과 파일 놓기</span>` : '';
+  const resultUpload = (b.status==='downloaded' || b.status==='applied')
+    ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span><span class="pmdrophint">드래그 가능</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
-    <button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
-    : (b.status==='applied' ? `${retryDepositDate}${confirmFailures}<button class="btn sm" onclick="_pmPickResult(${i})">⬆ 결과 파일 업로드</button>` : '');
+    : (b.status==='applied' ? `${retryDepositDate}${confirmFailures}` : '');
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
-  return manage + result + resultDrop;
+  return manage + result + resultUpload;
 }
 function _pmBatchTable(list){
   if(!list.length) return `<div class="empty">아직 만든 회차가 없습니다.</div>`;
