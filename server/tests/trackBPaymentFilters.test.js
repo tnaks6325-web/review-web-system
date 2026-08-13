@@ -106,6 +106,12 @@ test('legacy failed deposit-date writes are repaired automatically once per paym
   assert.match(load, /deposit-date-backfill/);
 });
 
+test('legacy year-formatted deposit dates are normalized automatically once per payment view', () => {
+  const load = sourceOf('_pmLoad');
+  assert.match(load, /boardStamp/);
+  assert.match(load, /compactDepositFormat/);
+});
+
 test('sheetless payment-date writes recover a missing saved column from workboard headers', () => {
   assert.match(sheetlessStatus, /findPaymentColumnIndex/);
   assert.match(sheetlessStatus, /raw_sheet_tabs/);

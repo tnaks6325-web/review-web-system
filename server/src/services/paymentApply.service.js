@@ -18,7 +18,7 @@
 const { writeSheet, readSheet } = require('./sheets.service');
 const { enqueue } = require('./syncQueue.service');
 const { logger } = require('../utils/logger');
-const { mergeDepositStamps } = require('../utils/depositStamp');
+const { formatDepositStamp, mergeDepositStamps } = require('../utils/depositStamp');
 const { findPaymentColumnIndex } = require('./columnResolver');
 
 /** 열 인덱스 → 알파벳 (A=0) */
@@ -45,19 +45,19 @@ function detectHeaderRow(headerValues) {
 }
 
 /**
- * 이체완료시각 표기 "YYYY.M.D HH:mm" (Asia/Seoul)
- * ★ 시트/작업표 입금 칸에 그대로 찍히는 문자열이라 형식을 바꾸면 과거 표기와 갈린다.
+ * 이체완료시각 표기 "M/D HH:mm" (Asia/Seoul)
+ * ★ 시트/작업표 입금 칸과 리뷰제출일 표기를 통일한다.
  * @param {Date} [when] 없으면 지금
  */
 function nowStamp(when) {
   const parts = new Intl.DateTimeFormat('ko-KR', {
     timeZone: 'Asia/Seoul',
-    year: 'numeric', month: 'numeric', day: 'numeric',
+    month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(when || new Date());
   const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
   const hh = p.hour === '24' ? '00' : p.hour;   // 자정 표기 '24' 방어
-  return `${p.year}.${p.month}.${p.day} ${hh}:${p.minute}`;
+  return formatDepositStamp(`${p.month}/${p.day} ${hh}:${p.minute}`);
 }
 
 /**
