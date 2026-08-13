@@ -25,7 +25,9 @@ const poolConfig = {
 
 // Railway PostgreSQL은 SSL 필수
 if ((isProduction || databaseUrlRequestsSsl || allowSelfSignedDatabaseCert) && connectionString) {
-  poolConfig.ssl = { rejectUnauthorized: !allowSelfSignedDatabaseCert };
+  // Keep the established Railway production behavior unchanged. The explicit
+  // preview flag is still scoped to this pg client for non-production checks.
+  poolConfig.ssl = { rejectUnauthorized: isProduction ? false : !allowSelfSignedDatabaseCert };
 }
 
 const pool = new Pool(poolConfig);

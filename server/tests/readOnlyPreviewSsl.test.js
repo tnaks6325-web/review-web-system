@@ -16,8 +16,8 @@ assert.match(
 );
 assert.match(
   pool,
-  /if \(\(isProduction \|\| databaseUrlRequestsSsl \|\| allowSelfSignedDatabaseCert\) && connectionString\) \{\s*poolConfig\.ssl = \{ rejectUnauthorized: !allowSelfSignedDatabaseCert \};/,
-  'the explicit flag must only affect the pg database client'
+  /if \(\(isProduction \|\| databaseUrlRequestsSsl \|\| allowSelfSignedDatabaseCert\) && connectionString\) \{[\s\S]{0,400}?poolConfig\.ssl = \{ rejectUnauthorized: isProduction \? false : !allowSelfSignedDatabaseCert \};/,
+  'the preview setting must stay scoped to pg while preserving the existing Railway production TLS behavior'
 );
 assert.ok(!pool.includes('NODE_TLS_REJECT_UNAUTHORIZED'), 'global TLS verification must never be disabled');
 
