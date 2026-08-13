@@ -26,7 +26,7 @@
 (function () {
   'use strict';
   var HTML = `<div id="recruitModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box rf-box" style="max-width:1060px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
+  <div class="modal-box rf-box" style="max-width:1020px;width:97%;max-height:94vh;display:flex;flex-direction:column;overflow:hidden">
     <div class="modal-header">
       <h3 id="recruitModalTitle"><i class="fas fa-bullhorn"></i> 모집공고 등록</h3>
       <button class="btn-icon-sm" onclick="closeRecruitModal()"><i class="fas fa-times"></i></button>
@@ -39,15 +39,27 @@
         <div class="rf-rail-t">모집공고 편집<span>현재 단계가 자동으로 바뀝니다.</span></div>
         <div id="rfRailList" class="rf-step-list">
           <button type="button" class="rf-step on" data-rf-step="link"><span class="rf-step-no">1</span><span>연결 · 기본</span><span class="rf-rmk" data-mk="link"></span></button>
-          <button type="button" class="rf-step" data-rf-step="prod"><span class="rf-step-no">2</span><span>진행상품</span><span class="rf-rmk" data-mk="prod"></span></button>
+          <button type="button" class="rf-step" data-rf-step="prod"><span class="rf-step-no">2</span><span>진행상품 · 상품 정보</span><span class="rf-rmk" data-mk="prod"></span></button>
           <button type="button" class="rf-step" data-rf-step="cond"><span class="rf-step-no">3</span><span>모집 조건</span><span class="rf-rmk" data-mk="cond"></span></button>
-          <button type="button" class="rf-step" data-rf-step="fee"><span class="rf-step-no">4</span><span>리뷰비 · 입금</span><span class="rf-rmk" data-mk="fee"></span></button>
-          <button type="button" class="rf-step" data-rf-step="work"><span class="rf-step-no">5</span><span>작업내용</span><span class="rf-rmk" data-mk="work"></span></button>
         </div>
         <div id="rf_side_audit" class="rf-side-audit"><div class="rf-side-audit-head"><span>자동 점검</span><strong id="rf_side_audit_score">–</strong></div><div id="rf_part_check"></div></div>
       </nav>
-      <div class="rf-main">
-    <div class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0">
+      <!-- 이전 카드 편집기는 렌더링하지 않는다. 필드 순서 이동식 UI를 방지한다. -->
+      <template id="rf_legacy_card_editor_markup"><div class="rf-main">
+    <div id="editorScroller" class="modal-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:0" tabindex="0" aria-label="모집공고 수정 항목">
+
+      <!-- 게시 정보는 시안과 같이 중앙 편집부 최상단에 직접 둔다. 저장 필드 ID는 유지한다. -->
+      <section class="rf-card rf-publish-card" data-sec="pub">
+        <div class="rf-cb">
+          <div class="rf-hrow rf-title-row"><span class="rf-hl">공고 제목 <span class="rform-req">*</span></span>
+            <div class="rf-title-control"><input id="rf_title" type="text" class="rform-input" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"><div id="rf_status_buttons" class="rf-status-buttons"><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div></div></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유의사항</span><div><textarea id="rf_notes" class="rform-input" rows="2" placeholder="참여 전 모두에게 공개되는 짧은 안내만 — 예) 와우회원 전용 · 계정당 1회" style="resize:vertical"></textarea><div class="rf-help">공고 카드에 노출되는 안내문</div><div id="rf_clean_notes"></div></div></div>
+          <div class="rf-hrow"><span class="rf-hl">모집인원 <small>(레거시)</small></span><input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0"></div>
+          <select id="rf_status" class="rform-input" onchange="RecruitModal.syncStatusButtons()" hidden><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select>
+          <div id="rf_hidden_box" class="rf-hidden-row"><label><input type="checkbox" id="rf_reviewer_hidden"> 🧪 리뷰어에게 숨김 <span>— 내부 테스트용</span></label><div>리뷰어 공고 목록에 뜨지 않지만, 공고 링크로 직접 테스트할 수 있습니다.</div></div>
+          <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
+        </div>
+      </section>
 
       <!-- ═══ 🔗 연결 · 기본 (고정 맨 위 — 연결하면 옵션표 프리필·현영 판정·시트 일정을 자동으로 쓴다) ═══ -->
       <div class="rf-card" data-sec="link">
@@ -57,11 +69,11 @@
         <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rf-optional">선택</span></span>
           <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)">
             <option value="">① 캠페인(시트) 선택</option>
-          </select></div>
+          </select><div id="rf_linked_campaign_reference" class="rf-linked-reference" aria-live="polite">작업오더에서 연결되면 자동 표시됩니다.</div></div>
         <div class="rf-hrow"><span class="rf-hl">탭명 <span class="rf-optional">선택</span></span>
           <select id="rf_linked_tab" class="rform-input" onchange="onLinkedTabChange(this)" disabled>
             <option value="">② 탭 선택 (시트 먼저)</option>
-          </select></div>
+          </select><div id="rf_linked_tab_reference" class="rf-linked-reference" aria-live="polite">작업오더에서 연결되면 자동 표시됩니다.</div></div>
       </div>
       <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 90px">
         <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
@@ -99,7 +111,21 @@
             <option value="실배송">실배송</option>
             <option value="빈박스">빈박스</option>
             <option value="택배발송대행">택배발송대행</option>
-          </select></div>
+          </select>
+          <div id="rf_delivery_toggle" class="rf-delivery-toggle" role="group" aria-label="배송유형">
+            <button type="button" data-rf-delivery="실배송">실배송</button>
+            <button type="button" data-rf-delivery="빈박스">빈박스</button>
+            <button type="button" data-rf-delivery="택배발송대행">택배발송대행</button>
+          </div></div>
+        <div class="rf-hrow rf-parity-time-row"><span class="rf-hl">구매시간대</span>
+          <div class="rf-parity-time-control">
+            <input id="rf_time_range" type="hidden" value=""><input id="rf_window_start" type="hidden" value=""><input id="rf_window_end" type="hidden" value="">
+            <div class="rf-time-control"><button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))"><span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span><span id="rf_free_time_state">시간 지정</span></button>
+              <div id="rf_time_range_control" class="rf-time-range"><button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button><span class="rf-time-divider" aria-hidden="true">~</span><button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button>
+                <div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden><div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div><div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div></div>
+              </div></div>
+          </div>
+        </div>
         <div class="rf-hrow"><span class="rf-hl">현금영수증</span>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem">
             <input type="checkbox" id="rf_cash_receipt_required" onchange="syncRecruitAutomaticBadges()" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">
@@ -108,8 +134,20 @@
       </div>
       <div class="rf-hrow"><span class="rf-hl">팀채팅방 <span class="rform-req">*</span></span>
           <input id="rf_chat_url" type="url" class="rform-input" placeholder="https://open.kakao.com/..."></div>
+      <div class="rf-hrow rf-parity-date-row" onclick="rfOpenStartDatePicker(event)"><span class="rf-hl">모집 시작일 <span class="rform-req">*</span></span><div class="rf-parity-date-control"><input id="rf_start_date" type="date" class="rform-input" onchange="onRecruitDatesChange()"><span id="rf_start_day" class="rf-date-day"></span></div></div>
+      <div class="rf-hrow"><span class="rf-hl">주말 포함 여부</span><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem"><input type="checkbox" id="rf_skip_weekends" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">주말 제외 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">주말에는 카드만 보이고 신청은 월요일에 재개됩니다</span></label></div>
         </div>
       </div>
+
+      <!-- 시안 순서: 연결·기본 다음에는 리뷰비·입금이 이어진다. -->
+      <section class="rf-card rf-fee-card" data-sec="fee">
+        <div class="rf-cb">
+          <div class="rf-hrow"><span class="rf-hl">리뷰비</span><input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100" oninput="renderFeeSchedule()"></div>
+          <div class="rf-hrow"><span class="rf-hl">입금명</span><input id="rf_transfer_memo" type="text" class="rform-input" placeholder="예) 파우더망고" maxlength="8"></div>
+          <div class="rf-hrow"><span class="rf-hl">이체은행</span><div><div id="rf_transfer_bank_btns" class="rf-inline-buttons"><button class="rchan-btn" data-group="transfer_bank" data-val="" onclick="selectRfBtn('transfer_bank',this)">자동</button><button class="rchan-btn" data-group="transfer_bank" data-val="hana" onclick="selectRfBtn('transfer_bank',this)">하나은행</button><button class="rchan-btn" data-group="transfer_bank" data-val="kbank" onclick="selectRfBtn('transfer_bank',this)">케이뱅크</button></div><input id="rf_transfer_bank" type="hidden"><div id="rf_transfer_bank_hint" class="rf-help">현금이체 → 하나은행 · 세금계산서 → 케이뱅크</div></div></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">기간별 리뷰비</span><div class="rf-fee-box"><label class="rf-fee-sw"><input type="checkbox" id="rf_fee_sched_on" onchange="onFeeScheduleToggle(this.checked)"> 기간별 리뷰비 사용</label><div id="rf_fee_sched_section" style="display:none"><div class="rf-fee-head"><span>적용 시작일</span><span>리뷰비(원)</span><span>메모</span><span></span></div><div id="rf_fee_rows"></div><button type="button" class="rchan-btn" onclick="addFeeRow()">+ 구간 추가</button><div id="rf_fee_summary"></div><div id="rf_fee_check"></div></div></div></div>
+        </div>
+      </section>
 
       <!-- 레거시(일반) 공고 안내 — 참여형이 꺼진 공고를 열었을 때만 보인다(신규는 참여형 기본) -->
       <div id="rf_legacy_note" class="rf-card rf-legacy" style="display:none">
@@ -156,43 +194,14 @@
         </div>
       </div>
 
-      <!-- ═══ 📅 모집 조건 (참여형 전용 — id=rf_part_section 을 카드 자체에 둬 기존 토글 계약 유지) ═══ -->
-      <div class="rf-card" data-sec="cond" id="rf_part_section" style="display:none">
+      <!-- 이전 조건 위치는 렌더링하지 않는다. 활성 조건 템플릿은 작업내용 뒤에 있다. -->
+      <template id="rf_legacy_condition_markup">
+      <div class="rf-card" data-legacy-sec="cond" id="rf_part_section" style="display:none">
         <div class="rf-ch"><span class="rf-ct">📅 모집 조건</span><span class="rf-cn">언제 · 몇 명을 모으나 — 시트 일정이 인식되면 시트가 우선합니다</span></div>
         <div class="rf-cb">
           <div class="rf-grid2">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-              <div><label class="rform-label">시작일 <span id="rf_start_day" style="font-weight:400;color:#9CA3AF"></span></label>
-                <input id="rf_start_date" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
-              <div><label class="rform-label">종료일 <span id="rf_deadline_day" style="font-weight:400;color:#9CA3AF"></span></label>
-                <input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
-            </div>
-            <div class="rf-hrow" style="margin:7px 0 0"><span class="rf-hl">주말 게시</span>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;font-size:.76rem">
-                <input type="checkbox" id="rf_skip_weekends" style="width:15px;height:15px;accent-color:var(--p,#3182F6)">
-                주말 제외 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">주말에는 카드만 보이고 신청은 월요일에 재개됩니다</span>
-              </label>
-            </div>
-            <div><label class="rform-label">구매시간대</label>
-              <input id="rf_time_range" type="hidden" value="">
-              <input id="rf_window_start" type="hidden" value="">
-              <input id="rf_window_end" type="hidden" value="">
-              <div class="rf-time-control">
-                <button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))">
-                  <span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span>
-                  <span id="rf_free_time_state">시간 지정</span>
-                </button>
-                <div id="rf_time_range_control" class="rf-time-range">
-                  <button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button>
-                  <span class="rf-time-divider" aria-hidden="true">~</span>
-                  <button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button>
-                  <div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden>
-                    <div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div>
-                    <div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <div class="rf-hrow"><span class="rf-hl">종료일 <span id="rf_deadline_day" style="font-weight:400;color:#9CA3AF"></span></span>
+              <input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
           </div>
           <div id="rf_deadline_warn" style="display:none;font-size:.68rem;font-weight:700;margin-top:4px"></div>
           <div class="rf-grid2" style="margin-top:8px">
@@ -200,7 +209,7 @@
               <input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 링크유입일 때 [상품 페이지 열기]로 노출"></div>
           </div>
           <!-- ★ 098 이월 반영: 자동(기본=현행) / 보류 후 수동 반영 — 시안 frontend/docs/이월보류_수동반영_와이어프레임.html -->
-          <div class="rf-hrow" style="margin:8px 0 0"><span class="rf-hl">이월 반영</span>
+          <div class="rf-hrow" style="margin:8px 0 0"><span class="rf-hl">모집이월 방식</span>
             <div>
               <input id="rf_carry_mode" type="hidden" value="auto">
               <div style="display:inline-flex;border:1px solid var(--border,#CBD5E1);border-radius:9px;overflow:hidden">
@@ -238,15 +247,17 @@
           </details>
         </div>
       </div>
+      </template>
 
-      <!-- ═══ 💰 리뷰비 · 입금 (레거시 공고에도 적용되는 상시 카드) ═══ -->
-      <div class="rf-card" data-sec="fee">
+      <!-- 이전 리뷰비 카드 위치는 렌더링하지 않는다. 활성 행은 연결·기본 아래에 있다. -->
+      <template id="rf_legacy_fee_markup">
+      <div class="rf-card" data-legacy-sec="fee">
         <div class="rf-ch"><span class="rf-ct">💰 리뷰비 · 입금</span><span class="rf-cn">참여한 리뷰어에겐 참여 시점 금액이 영구 고정됩니다</span></div>
         <div class="rf-cb">
       <div class="rf-grid2">
-        <div class="rf-hrow"><span class="rf-hl">리뷰비 (원)</span>
+        <div class="rf-hrow"><span class="rf-hl">리뷰비</span>
           <input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100" oninput="renderFeeSchedule()"></div>
-        <div class="rf-hrow"><span class="rf-hl">통장표시</span>
+        <div class="rf-hrow"><span class="rf-hl">입금명</span>
           <input id="rf_transfer_memo" type="text" class="rform-input" placeholder="예) 파우더망고" maxlength="8"></div>
       </div>
       <!-- 이체은행(086) — 작업오더 '물건비' 수취방식에서 자동 판정(현금→하나 / 계산서→케이뱅크).
@@ -282,6 +293,7 @@
       </div>
 
       <!-- ═══ 🛍 상품 정보 (리뷰타입·배지·URL·썸네일 — 레거시 공고에도 적용되는 상시 카드) ═══ -->
+      </template>
       <section class="rf-product-settings" data-product-settings>
         <div class="rf-product-settings-head"><span>상품 설정</span></div>
         <div class="rf-cb">
@@ -291,7 +303,7 @@
       <div class="rf-hrow"><span class="rf-hl">리뷰타입</span>
         <div>
           <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_review_type_btns">
-            <button class="rchan-btn" data-group="review_type" data-val="" onclick="selectRfBtn('review_type',this)">미지정</button>
+            <button class="rchan-btn" data-group="review_type" data-val="" onclick="selectRfBtn('review_type',this)">자율리뷰</button>
             <button class="rchan-btn" data-group="review_type" data-val="photo" onclick="selectRfBtn('review_type',this)">📷 포토</button>
             <button class="rchan-btn" data-group="review_type" data-val="text" onclick="selectRfBtn('review_type',this)">📝 텍스트</button>
             <button class="rchan-btn" data-group="review_type" data-val="confirm" onclick="selectRfBtn('review_type',this)">✅ 구매확정</button>
@@ -331,7 +343,7 @@
         </div>
       </div>
       <!-- 상품 URL / 썸네일 -->
-      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">상품 URL</span>
+      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">상품 메인 URL</span>
         <div>
           <div style="display:flex;gap:5px">
             <input id="rf_product_url" type="url" class="rform-input" placeholder="상품확인용 URL" style="flex:1;min-width:0">
@@ -350,12 +362,14 @@
           <input id="rf_product_name" type="hidden">
           <input id="rf_price" type="hidden">
         </div></div>
-      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">썸네일</span>
+      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">공고 썸네일 URL</span>
         <div>
           <div style="display:flex;gap:5px">
             <input id="rf_thumb_url" type="url" class="rform-input" style="flex:1;min-width:0;font-size:.72rem" placeholder="쿠팡 이미지 주소 붙여넣기">
             <button type="button" class="rchan-btn" onclick="fetchCampThumbFromUrl()" style="white-space:nowrap"><i class="fas fa-image"></i> 가져오기</button>
+            <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" title="상품 URL 바로가기" aria-label="상품 URL 바로가기">↗</button>
           </div>
+          <div style="font-size:.68rem;color:var(--t3,#94A3B8);margin-top:4px">공고 썸네일 적용방법: 상품페이지에서 썸네일 우클릭→이미지 주소 복사 후 붙혀넣으세요.</div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
             <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCampThumb(this)">
             <img id="rf_thumb_preview" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border,#E2E8F0);display:none">
@@ -403,7 +417,22 @@
         </div>
       </div>
 
-      <!-- ═══ ✅ 게시 · 자동 점검 (고정 맨 아래 — 저장 버튼 직전 확인) ═══ -->
+      <!-- 모집 조건은 시안의 마지막 단계에 직접 렌더링한다. -->
+      <section class="rf-card" data-sec="cond" id="rf_part_section" style="display:none">
+        <div class="rf-ch"><span class="rf-ct">모집 조건</span></div>
+        <div class="rf-cb">
+          <div class="rf-hrow"><span class="rf-hl">종료일 <span id="rf_deadline_day"></span></span><input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
+          <div id="rf_deadline_warn" class="rf-help" style="display:none"></div>
+          <div class="rf-hrow"><span class="rf-hl">랜딩 URL</span><input id="rf_landing_url" type="text" class="rform-input" placeholder="링크유입 URL은 진행상품 URL에서 자동 제공됩니다"></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">모집이월 방식</span><div><input id="rf_carry_mode" type="hidden" value="auto"><div class="rf-inline-buttons"><button type="button" id="rf_carry_auto" class="rchan-btn active" onclick="rfCarrySet('auto')">자동 반영 (기본)</button><button type="button" id="rf_carry_hold" class="rchan-btn" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" class="rf-help" style="display:none"></div></div></div>
+          <div class="rf-hrow rf-hrow-top"><span class="rf-hl">다계정 허용</span><div><label class="rf-checkline"><input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)"> 허용 <span>— 명의당 1건</span></label><div id="rf_multi_section" style="display:none"><div class="rf-inline-inputs"><label>하루 한도 <input id="rf_multi_daily" type="number" min="0" class="rform-input" value="1" oninput="renderPartCheck()"></label><label>제한시간 <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="10"></label></div></div></div></div>
+          <details class="rf-advanced"><summary>고급 설정 (참여 제한시간·마감 버퍼)</summary><div class="rf-inline-inputs"><label>참여 제한시간 <input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></label><label>종료 전 신규참여 마감 <input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></label></div></details>
+        </div>
+      </section>
+
+      <!-- 이전 게시 카드 마크업은 이전 배포와의 소스 비교용 비활성 템플릿이다.
+           런타임 편집기는 위 최상단의 정적 행 템플릿만 렌더링한다. -->
+      <template id="rf_legacy_publish_markup">
       <div class="rf-card rf-publish-card" data-sec="pub">
         <div class="rf-ch"><span class="rf-pinbadge">고정</span><span class="rf-ct">✅ 게시 · 자동 점검</span><span class="rf-cn">제목 · 유의사항 · 상태 — 저장 직전 확인</span></div>
         <div class="rf-cb">
@@ -445,9 +474,55 @@
       <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
         </div>
       </div>
+      </template>
 
     </div>
-      </div><!-- /rf-main -->
+      </div></template><!-- /legacy rf-main -->
+      <div class="rf-main rf-compact-main">
+        <section class="editor">
+          <header class="editor-head"><div><h2 id="rf_editor_title">연결 · 기본</h2><p id="rf_editor_description">작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.</p></div><span class="autosaved">자동 저장됨</span></header>
+          <div class="title-control-bar"><label class="title-control-label" for="rf_title"><span>공고 제목</span><input id="rf_title" type="text" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></label><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
+          <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
+            <section class="section" data-sec="link">
+              <div class="section-heading"><div><h3>연결 · 기본</h3><span class="section-hint">공고가 참조하는 원본과 운영·입금 기준</span></div><span class="section-count">13개 항목</span></div>
+              <div class="row-form">
+                <div class="form-row"><span class="form-label">시트명 <em class="required">*</em></span><div class="form-control"><select id="rf_linked_campaign" onchange="onLinkedCampaignChange(this)" hidden><option value="">① 캠페인(시트) 선택</option></select><div id="rf_linked_campaign_reference" class="linked-reference">작업오더에서 연결되면 자동 표시됩니다.</div></div></div>
+                <div class="form-row"><span class="form-label">탭명 <em class="required">*</em></span><div class="form-control"><select id="rf_linked_tab" onchange="onLinkedTabChange(this)" disabled hidden><option value="">② 탭 선택 (시트 먼저)</option></select><div id="rf_linked_tab_reference" class="linked-reference">작업오더에서 연결되면 자동 표시됩니다.</div></div></div>
+                <div id="rf_linked_tab_info" hidden><span id="rf_linked_tab_text"></span></div><div id="rf_work_order_link_info" hidden></div><div id="rf_linked_tab_note" hidden></div>
+                <div class="form-row"><span class="form-label">유입 방식 <small>작업오더 기준</small></span><div class="form-control"><div id="rf_inflow_type_ui" class="square-toggle"><button type="button" class="active" data-inflow="link" onclick="rfSetInflowType('link',this)">링크유입</button><button type="button" data-inflow="guide" onclick="rfSetInflowType('guide',this)">가이드유입</button></div><input id="rf_inflow_type_value" type="hidden" value="link"><span class="tag public">작업오더 연동 · 상품 페이지 열기</span></div></div>
+                <div class="form-row"><span class="form-label">담당자 <em class="required">*</em></span><div class="form-control"><div id="rf_manager_btns" class="choice-set"><button class="choice rchan-btn" data-group="manager" data-val="만두" onclick="selectRfBtn('manager',this)">만두</button><button class="choice rchan-btn" data-group="manager" data-val="망고" onclick="selectRfBtn('manager',this)">망고</button></div><input id="rf_manager" type="hidden"></div></div>
+                <div class="form-row"><span class="form-label">구매채널 <em class="required">*</em></span><div class="form-control"><div id="rf_channel_btns" class="square-toggle"><button data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">쿠팡</button><button data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">네이버</button><button data-group="channel" data-val="올리브영" onclick="selectRfBtn('channel',this)">올리브영</button><button data-group="channel" data-val="카카오메이커스" onclick="selectRfBtn('channel',this)">카카오메이커스</button><button data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">직접입력</button></div><input id="rf_channel_custom" placeholder="채널명 직접 입력" hidden><input id="rf_channel" type="hidden"></div></div>
+                <div class="form-row"><span class="form-label">배송유형</span><div class="form-control"><select id="rf_delivery_type" hidden><option value="">선택 안 함</option><option value="실배송">실배송</option><option value="빈박스">빈박스</option><option value="택배발송대행">택배발송대행</option></select><div id="rf_delivery_toggle" class="square-toggle"><button type="button" data-rf-delivery="실배송">실배송</button><button type="button" data-rf-delivery="빈박스">빈박스</button><button type="button" data-rf-delivery="택배발송대행">택배발송대행</button></div></div></div>
+                <div class="form-row"><span class="form-label">구매 시간대</span><div class="form-control"><input id="rf_time_range" type="hidden" value=""><input id="rf_window_start" type="hidden" value=""><input id="rf_window_end" type="hidden" value=""><div class="rf-time-control"><button id="rf_free_time_toggle" type="button" class="rf-time-free" aria-pressed="false" onclick="rfSetFreeTime(!this.classList.contains('on'))"><span class="rf-time-switch" aria-hidden="true"><span class="rf-time-knob"></span></span><span id="rf_free_time_state">시간 지정</span></button><div id="rf_time_range_control" class="rf-time-range"><button id="rf_window_start_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_start')">13:00</button><span class="rf-time-divider" aria-hidden="true">~</span><button id="rf_window_end_button" type="button" class="rf-time-field" data-rf-time-trigger aria-haspopup="dialog" aria-expanded="false" onclick="rfOpenTimePicker('rf_window_end')">18:00</button><div id="rf_time_picker" class="rf-time-picker" role="dialog" aria-label="구매 시간 선택" hidden><div class="rf-time-picker-head"><strong id="rf_time_picker_title">구매 시작 시간</strong><button type="button" onclick="rfCloseTimePicker()" aria-label="시간 선택 닫기">×</button></div><div class="rf-time-picker-body"><div><span>시</span><div id="rf_time_picker_hours" class="rf-time-hour-grid"></div></div><div><span>분</span><div id="rf_time_picker_minutes" class="rf-time-minute-grid"></div></div></div></div></div></div></div></div>
+                <div class="form-row"><span class="form-label">현금영수증</span><div class="form-control"><input type="checkbox" id="rf_cash_receipt_required" hidden><button type="button" id="rf_cashrcpt_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleCashReceipt()"><span aria-hidden="true"></span></button><strong id="rf_cash_receipt_state">발행 안 함</strong><span class="tag" id="rf_cash_receipt_note">참여자에게 미노출</span></div></div>
+                <div class="form-row"><label class="form-label" for="rf_review_fee">리뷰비</label><div class="form-control"><input id="rf_review_fee" type="number" min="0" step="100" oninput="renderFeeSchedule()"></div></div>
+                <div class="form-row"><label class="form-label" for="rf_transfer_memo">입금명</label><div class="form-control"><input id="rf_transfer_memo" maxlength="8"></div></div>
+                <div class="form-row"><span class="form-label">이체은행</span><div class="form-control"><div id="rf_transfer_bank_btns" class="choice-set"><button class="choice rchan-btn" data-group="transfer_bank" data-val="" onclick="selectRfBtn('transfer_bank',this)">자동</button><button class="choice rchan-btn" data-group="transfer_bank" data-val="hana" onclick="selectRfBtn('transfer_bank',this)">하나은행</button><button class="choice rchan-btn" data-group="transfer_bank" data-val="kbank" onclick="selectRfBtn('transfer_bank',this)">케이뱅크</button></div><input id="rf_transfer_bank" type="hidden"></div></div>
+                <div class="form-row"><span class="form-label">기간별 리뷰비</span><div class="form-control"><input type="checkbox" id="rf_fee_sched_on" hidden><button type="button" id="rf_fee_sched_toggle" class="switch-button" aria-pressed="false" onclick="rfToggleFeeSchedule()"><span aria-hidden="true"></span></button><strong id="feeScheduleState">사용 안 함</strong></div></div>
+                <div id="rf_fee_sched_section" class="fee-schedule" style="display:none"><div class="fee-schedule-inner"><div class="fee-schedule-box"><div class="fee-head"><span>적용 시작일</span><span>리뷰비</span><span>메모</span><span></span></div><div id="rf_fee_rows"></div><button type="button" class="fee-add rchan-btn" onclick="addFeeRow()">+ 리뷰비 구간 추가</button><div id="rf_fee_summary"></div><div id="rf_fee_check"></div></div></div></div>
+                <div class="form-row"><label class="form-label" for="rf_chat_url">팀채팅방 <em class="required">*</em></label><div class="form-control"><input id="rf_chat_url" type="url"></div></div>
+                <div class="form-row clickable-date-row" onclick="rfOpenStartDatePicker(event)"><span class="form-label">모집 시작일 <em class="required">*</em></span><div class="form-control"><div class="date-control"><input id="rf_start_date" type="date" onchange="onRecruitDatesChange()"><span id="rf_start_day">날짜 변경</span></div></div></div>
+                <div class="form-row"><span class="form-label">주말 포함 여부</span><div class="form-control"><input type="checkbox" id="rf_skip_weekends" hidden><div id="rf_skip_weekends_toggle" class="square-toggle"><button type="button" data-weekend="include" onclick="rfSetWeekendPolicy(false,this)">주말 포함</button><button type="button" data-weekend="exclude" onclick="rfSetWeekendPolicy(true,this)">주말 제외</button></div><span class="tag public" id="weekendNotice">주말 카드 노출 · 신청 차단</span></div></div>
+                <div class="form-row"><span class="form-label">다계정 허용</span><div class="form-control"><input type="checkbox" id="rf_multi_account" hidden><div id="rf_multi_account_toggle" class="square-toggle"><button type="button" data-multi="off" onclick="rfSetMultiAccount(false,this)">미허용</button><button type="button" data-multi="on" onclick="rfSetMultiAccount(true,this)">허용</button></div><span class="tag" id="accountNote">기본 제한 적용</span><div id="rf_multi_section" hidden><input id="rf_multi_daily" type="number" min="0" value="1"><input id="rf_sub_ttl" type="number" min="1" value="10"></div></div></div>
+              </div>
+            </section>
+            <section class="section" data-sec="prod" data-part-only>
+              <div class="section-heading"><div><h3>진행상품</h3><span class="section-hint">상품, 옵션, 인원을 한 번에 설정하고 자동 합계를 확인</span></div><button type="button" class="product-add rchan-btn" id="rf_opt_addbtn" onclick="addOptRow()">+ 상품 추가</button></div>
+              <div class="product-editor"><div class="form-row product-work-type"><span class="form-label">작업 종류</span><div class="form-control"><div id="rf_prod_mode_sw" class="square-toggle"><button type="button" class="rf-pm-btn on" data-mode="none" onclick="setProdMode('none')">옵션 없는 작업</button><button type="button" class="rf-pm-btn" data-mode="opt" onclick="setProdMode('opt')">옵션 있는 작업</button></div><input id="rf_prod_mode" type="hidden" value="none"></div></div><div id="rf_opt_wrap"><div class="product-head rf-prod-head" data-pm="none"><span>상품명</span><span>결제금액</span><span>총인원</span><span>일건수</span><span></span></div><div class="product-head rf-prod-head" data-pm="opt"><span>옵션 URL</span><span>옵션명</span><span>결제금액</span><span>옵션인원</span><span>일건수</span><span></span></div><div id="rf_opt_rows"></div><div id="rf_product_main_url" class="form-row product-main-url"><span class="form-label">상품메인 URL <small>작업오더 연동</small></span><div class="form-control"><div id="rf_product_main_url_value" class="linked-reference">작업오더 URL 미연동입니다.</div><span id="rf_product_main_url_state" class="tag public">링크유입 · 자동 제공</span></div></div><div id="rf_opt_summary" class="product-summary"></div><textarea id="rf_wd_product" hidden></textarea><input id="rf_daily_limit" type="hidden"><input id="rf_recruit_total" type="hidden"></div></div>
+              <div class="row-form"><div class="form-row"><span class="form-label">리뷰 타입</span><div class="form-control"><div id="rf_review_type_btns" class="square-toggle"><button class="rchan-btn" data-group="review_type" data-val="" onclick="selectRfBtn('review_type',this)">자율리뷰</button><button class="rchan-btn" data-group="review_type" data-val="photo" onclick="selectRfBtn('review_type',this)">포토</button><button class="rchan-btn" data-group="review_type" data-val="text" onclick="selectRfBtn('review_type',this)">텍스트</button><button class="rchan-btn" data-group="review_type" data-val="confirm" onclick="selectRfBtn('review_type',this)">구매확정</button><button class="rchan-btn" data-group="review_type" data-val="star" onclick="selectRfBtn('review_type',this)">별점</button><button class="rchan-btn" data-group="review_type" data-val="mixed" onclick="selectRfBtn('review_type',this)">혼합</button></div><input id="rf_review_type" type="hidden"><div id="rf_mixed_review_composer" class="mixed-review-composer" hidden><div id="rf_review_mix"><div class="mixed-review-heading"><strong>리뷰 조합</strong><span id="rf_review_mix_total">합계 0명</span></div><div id="rf_mixed_review_rows" class="mixed-review-grid"><label>포토<input data-mix-type="photo" type="number" value="0" oninput="syncRecruitReviewTypeMix()"></label><label>텍스트<input data-mix-type="text" type="number" value="0" oninput="syncRecruitReviewTypeMix()"></label><label>구매확정<input data-mix-type="confirm" type="number" value="0" oninput="syncRecruitReviewTypeMix()"></label><label>별점<input data-mix-type="star" type="number" value="0" oninput="syncRecruitReviewTypeMix()"></label></div></div></div></div></div>
+                <div class="form-row tall"><span class="form-label">안내배지</span><div class="form-control"><div><div id="rf_badge_presets" class="badge-presets"><button onclick="addPresetBadge('3.3% 공제')">+ 3.3% 공제</button><button onclick="addPresetBadge('텍스트 제공')">+ 텍스트 제공</button><button onclick="addPresetBadge('옵션지정')">+ 옵션지정</button><button onclick="addPresetBadge('일반결제')">+ 일반결제</button></div><div id="rf_badges_wrap" class="badge-wrap" onclick="document.getElementById('rf_badge_input').focus()"><input id="rf_badge_input" placeholder="배지 직접 입력 후 Enter" onkeydown="handleBadgeInput(event)"></div></div></div></div>
+                <div class="form-row"><span class="form-label">공고 썸네일 URL</span><div class="form-control thumb-url-control"><input id="rf_thumb_url" type="url" placeholder="쿠팡 이미지 주소 붙여넣기"><button type="button" class="product-link-button" onclick="openRecruitProductUrl()">↗</button><input id="rf_thumb_file" type="file" accept="image/*" onchange="uploadCampThumb(this)"><img id="rf_thumb_preview" alt="썸네일 미리보기" hidden></div></div>
+                <div class="form-row thumb-guide-row"><span class="form-label">공고 썸네일 적용방법</span><div class="form-control">상품페이지에서 썸네일 우클릭→이미지 주소 복사 후 붙혀넣으세요.</div></div>
+                <div class="form-row tall"><span class="form-label">유입 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_inflow" class="rform-input"></textarea><div id="rf_ig_inflow" class="work-image-strip ig-strip" data-igf="inflow"></div><input id="rf_igf_inflow" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('inflow',this)"></div><div id="rf_igm_inflow"></div><div id="rf_clean_inflow"></div></div></div>
+                <div class="form-row tall"><span class="form-label">리뷰 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_review" class="rform-input"></textarea><div id="rf_ig_review" class="work-image-strip ig-strip" data-igf="review"></div><input id="rf_igf_review" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('review',this)"></div><div id="rf_igm_review"></div><div id="rf_clean_review"></div></div></div>
+                <div class="form-row tall"><span class="form-label">특이사항</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_notes" class="rform-input"></textarea><div id="rf_ig_notes" class="work-image-strip ig-strip" data-igf="notes"></div><input id="rf_igf_notes" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('notes',this)"></div><div id="rf_igm_notes"></div></div></div>
+              </div><input id="rf_landing_url" type="hidden"><input id="rf_product_url" type="hidden"><input id="rf_thumbnail" type="hidden"><input id="rf_product_name" type="hidden"><input id="rf_price" type="hidden"><div id="rf_product_preview" hidden><img id="rf_pp_img" alt=""><span id="rf_pp_name"></span><span id="rf_pp_price"></span></div></section>
+            <section class="section" data-sec="cond" id="rf_part_section" data-part-only><div class="row-form"><div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><div class="square-toggle"><button type="button" id="rf_carry_auto" onclick="rfCarrySet('auto')">자동 반영</button><button type="button" id="rf_carry_hold" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" hidden></div></div></div></div><details class="advanced"><summary>마감 · 보류 · 인원 제한 세부 설정</summary><div class="row-form"><div class="form-row"><span class="form-label">모집 마감</span><div class="form-control"><input id="rf_deadline" type="date" onchange="onRecruitDatesChange()"><span id="rf_deadline_day"></span></div></div><div class="form-row"><span class="form-label">최대 참여 제한</span><div class="form-control"><input id="rf_max_slots" type="number"></div></div><div class="form-row"><span class="form-label">마감 버퍼</span><div class="form-control"><input id="rf_close_buffer" type="number"><input id="rf_hold_ttl" type="number" hidden></div></div><div id="rf_deadline_warn" hidden></div></div></details></section>
+            <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden>
+          </div>
+          <footer class="footer modal-footer"><span class="footer-copy">필수 항목을 확인하면 게시할 수 있습니다.</span><div><button type="button" class="btn" onclick="closeRecruitModal()">취소</button><button id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost()">변경 저장</button></div></footer>
+        </section>
+      </div><!-- /rf-compact-main -->
 
       <!-- 우측 고정 미리보기 — 왼쪽에서 값을 고치면 여기가 바로 따라 그려진다 -->
       <aside class="rf-side">
@@ -494,7 +569,7 @@
     <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border,#E2E8F0)">
       <button onclick="closeRecruitModal()"
         style="padding:8px 18px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;background:#fff;color:var(--t2,#475569);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
-      <button id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost()">
+      <button id="recruitSaveBtnLegacy" class="rf-savebtn" onclick="saveRecruitPost()">
         <i class="fas fa-save"></i> 저장
       </button>
     </div>
@@ -847,7 +922,7 @@
 #igLightbox .iglb-fld{font-size:.68rem;font-weight:800;color:#93B4F5;letter-spacing:.03em}
 #igLightbox .iglb-tip{font-size:.62rem;color:#7E8BA0}
 /* ── 최종 런타임 편집기: 고밀도 행형 구조 ── */
-#recruitModal .rf-box{border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.18),0 3px 12px rgba(15,23,42,.08)}
+#recruitModal .rf-box{height:calc(100vh - 78px)!important;min-height:630px;max-height:940px!important;border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.18),0 3px 12px rgba(15,23,42,.08)}
 #recruitModal .modal-header{padding:13px 16px;background:#F8FAFD}
 #recruitModal .modal-header h3{font-size:.92rem;letter-spacing:-.025em}
 #recruitModal .rf-rail{width:164px;padding:14px 10px;background:#FBFCFE;overflow:hidden}
@@ -875,22 +950,22 @@
 #recruitModal .rf-pinbadge{display:none}
 #recruitModal .rf-cb{padding:0 0 14px;gap:0}
 #recruitModal .rf-grid2{display:block;margin:0}
-#recruitModal .rf-hrow{grid-template-columns:96px minmax(0,1fr);gap:0;min-height:35px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
+#recruitModal .rf-hrow{grid-template-columns:minmax(112px,25%) minmax(0,75%);gap:0;min-height:37px;margin:0;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
 #recruitModal .rf-hrow:first-child{border-radius:8px 8px 0 0}
 #recruitModal .rf-hrow:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
-#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:39px}
-#recruitModal .rf-hrow.rf-hrow-top .rf-hl{padding-top:9px}
+#recruitModal .rf-hrow.rf-hrow-top{align-items:stretch;min-height:37px}
+#recruitModal .rf-hrow.rf-hrow-top .rf-hl{padding-top:7px}
 #recruitModal .rf-hrow .rf-hl{display:flex;align-items:center;padding:6px 10px;background:#FBFCFE;color:#46546B;font-size:.68rem;font-weight:800;text-align:left;line-height:1.3}
 #recruitModal .rf-hrow>:not(.rf-hl){min-width:0;padding:4px 7px}
-#recruitModal .rf-hrow>.rform-input{height:27px;margin:auto 7px;padding:4px 7px}
-#recruitModal .rf-main .rform-input{min-height:27px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
+#recruitModal .rf-hrow>.rform-input{height:30px;margin:auto 7px;padding:4px 7px}
+#recruitModal .rf-main .rform-input{min-height:26px;height:26px;padding:4px 7px;border-color:#D5DEE9;border-radius:5px;font-size:.72rem;line-height:1.25}
 #recruitModal .rf-main textarea.rform-input{min-height:56px;padding:7px}
-#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:26px;padding:4px 7px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rchan-btn,#recruitModal .rf-pm-btn,#recruitModal .rf-status-buttons button{min-height:26px;padding:4px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#FFFFFF;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
 #recruitModal .rchan-btn:hover,#recruitModal .rf-pm-btn:hover,#recruitModal .rf-status-buttons button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
 #recruitModal .rchan-btn.active,#recruitModal .rf-pm-btn.on,#recruitModal .rf-status-buttons button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8;box-shadow:none}
-#recruitModal .rf-time-free{height:27px;flex-basis:92px;width:92px;font-size:.65rem}
-#recruitModal .rf-time-range{min-width:0;height:27px}
-#recruitModal .rf-time-field{height:27px;font-size:.7rem}
+#recruitModal .rf-time-free{height:26px;flex-basis:92px;width:92px;font-size:.65rem}
+#recruitModal .rf-time-range{min-width:0;height:26px}
+#recruitModal .rf-time-field{height:26px;font-size:.7rem}
 #recruitModal .rf-prod-head{margin:0;border:1px solid #DCE3EC;border-bottom:0;border-radius:8px 8px 0 0;padding:5px 8px;background:#FBFCFE}
 #recruitModal .rf-opt-row{margin:0;padding:4px 7px;border:1px solid #DCE3EC;border-bottom:0;background:#FFFFFF}
 #recruitModal #rf_opt_rows .rf-opt-row:last-child{border-bottom:1px solid #DCE3EC;border-radius:0 0 8px 8px}
@@ -899,15 +974,18 @@
 #recruitModal .rf-pm-note{margin-left:7px;font-size:.62rem}
 #recruitModal .rf-gp{margin:0;border:1px solid #DCE3EC;border-radius:8px;background:#FCFDFF;box-shadow:none}
 #recruitModal .rf-gp-head{padding:5px 7px;margin:0;border-bottom:1px solid #DCE3EC}
-#recruitModal .rf-product-settings{margin-top:12px;border-top:1px solid #DCE3EC}
-#recruitModal .rf-product-settings-head{padding:10px 0 6px;color:#27364E;font-size:.72rem;font-weight:850}
+#recruitModal .rf-card[data-sec="prod"]{border-bottom:0}
+#recruitModal .rf-product-settings{margin-top:0;border-top:0;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-product-settings-head{display:none}
 #recruitModal .rf-product-settings .rf-cb{padding:0}
 #recruitModal .rf-product-settings .rf-hrow{border-radius:0}
 #recruitModal .rf-product-settings .rf-hrow:first-of-type{border-radius:8px 8px 0 0}
 #recruitModal .rf-product-settings .rf-hrow:last-child{border-radius:0 0 8px 8px}
 #recruitModal .rf-fee-box{margin:0;border:1px solid #DCE3EC;border-radius:0;background:#FFFFFF}
+#recruitModal .rf-card[data-sec="fee"] .rf-ch{display:none}
+#recruitModal .rf-card[data-sec="fee"] .rf-cb{padding:0 0 14px}
 #recruitModal .rf-fee-sw{min-height:31px;font-size:.68rem}
-#recruitModal .rf-publish-card{order:-1;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-publish-card{border-bottom:1px solid #DCE3EC}
 #recruitModal .rf-publish-card .rf-ch{display:none}
 #recruitModal .rf-publish-card .rf-cb{padding:12px 0 14px}
 #recruitModal .rf-title-row{border:0;background:transparent;min-height:31px}
@@ -924,6 +1002,70 @@
 #recruitModal .rf-side #rf_preview_section{margin:0 10px!important}
 #recruitModal .rf-side #rf_preview_listcard{max-width:218px!important}
 #recruitModal .rf-side #rf_preview_card{font-size:.7rem}
+#recruitModal .rf-linked-reference{display:flex;align-items:center;min-height:30px;width:100%;padding:0 8px;border:1px solid #D5DEE9;border-radius:5px;background:#F7F9FC;color:#536178;font-size:.72rem;font-weight:750}
+#recruitModal .rf-linked-reference:before{content:'연결됨';margin-right:6px;color:#2563C8;font-size:.64rem;font-weight:850}
+#recruitModal .rf-help{margin-top:3px;color:#7F8A9B;font-size:.65rem;font-weight:600;line-height:1.4}
+#recruitModal .rf-inline-buttons{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+#recruitModal .rf-checkline{display:flex;align-items:center;gap:7px;min-height:29px;color:#536178;font-size:.7rem;font-weight:800;cursor:pointer}
+#recruitModal .rf-checkline span{color:#94A3B8;font-size:.64rem;font-weight:600}
+#recruitModal .rf-inline-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
+#recruitModal .rf-inline-inputs label{display:grid;gap:3px;color:#64748B;font-size:.64rem;font-weight:700}
+#recruitModal .rf-advanced{padding:7px 9px;border:1px solid #DCE3EC;border-top:0;background:#FBFCFE;color:#64748B;font-size:.68rem;font-weight:750}
+#recruitModal .rf-hidden-row{margin-top:6px;padding:7px 9px;border:1px dashed #C9D6E8;border-radius:6px;color:#64748B;font-size:.65rem;line-height:1.4}
+#recruitModal .rf-hidden-row label{font-size:.7rem;font-weight:800;cursor:pointer}
+#recruitModal .rf-hidden-row label span{color:#94A3B8;font-size:.63rem}
+#recruitModal>.modal-box>.modal-footer{display:none}
+/* 승인 시안의 중앙 편집기 수치를 그대로 사용한다. */
+#recruitModal .rf-compact-main{display:flex;min-width:0;min-height:0;flex:1;overflow:hidden}
+#recruitModal .rf-compact-main .editor{display:flex;min-width:0;min-height:0;flex:1;flex-direction:column}
+#recruitModal .rf-compact-main .editor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:18px 22px 14px;border-bottom:1px solid #DCE3EC}
+#recruitModal .rf-compact-main .editor-head h2{margin:0;font-size:19px;letter-spacing:-.04em}
+#recruitModal .rf-compact-main .editor-head p{margin:3px 0 0;color:#7F8A9B;font-size:11px}
+#recruitModal .autosaved{padding:4px 6px;border-radius:5px;background:#EDF8F5;color:#15803D;font-size:10px;font-weight:850;white-space:nowrap}
+#recruitModal .title-control-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:7px 22px;border-bottom:1px solid #DCE3EC;background:#FBFCFE}
+#recruitModal .title-control-label{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-width:0;color:#45536A;font-size:11px;font-weight:850}
+#recruitModal .title-control-label input{min-width:0;width:100%;height:26px;padding:0 9px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#172033;font-size:12px;font-weight:750}
+#recruitModal .rf-compact-main #editorScroller{flex:1;min-height:0;overflow-y:auto;padding:0 22px 20px;background:#fff}
+#recruitModal .rf-compact-main .section{padding:17px 0 20px;border-bottom:1px solid #DCE3EC;background:transparent}
+#recruitModal .rf-compact-main .section:last-of-type{border-bottom:0}
+#recruitModal .rf-compact-main .section-heading{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+#recruitModal .rf-compact-main .section-heading h3{margin:0;color:#172033;font-size:14px;letter-spacing:-.025em}
+#recruitModal .section-hint{color:#7F8A9B;font-size:10px}.section-count{color:#2563C8;font-size:10px;font-weight:850}
+#recruitModal .rf-compact-main .row-form{border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#fff}
+#recruitModal .rf-compact-main .form-row{display:grid;grid-template-columns:minmax(112px,25%) minmax(0,75%);min-height:37px;border:0;border-top:1px solid #DCE3EC;border-radius:0;background:#fff}
+#recruitModal .rf-compact-main .form-row:first-child{border-top:0}
+#recruitModal .rf-compact-main .form-label{display:flex;align-items:center;gap:6px;padding:6px 12px;background:#FBFCFE;color:#45536A;font-size:11px;font-weight:850}
+#recruitModal .rf-compact-main .form-label small{color:#94A3B8;font-weight:650}.required{color:#E15241;font-style:normal}
+#recruitModal .rf-compact-main .form-control{display:flex;align-items:center;min-width:0;padding:4px 8px;gap:6px}
+#recruitModal .rf-compact-main .form-control>input:not([type=checkbox]),#recruitModal .rf-compact-main .form-control>textarea{min-width:0;width:100%;height:26px;padding:0 8px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#172033;font-size:11px}
+#recruitModal .rf-compact-main .form-control>textarea{height:58px;padding:7px 8px;line-height:1.4;resize:vertical}
+#recruitModal .rf-compact-main .form-row.tall{min-height:70px}.rf-compact-main .form-row.tall .form-label{align-items:flex-start;padding-top:12px}.rf-compact-main .form-row.tall .form-control{align-items:stretch}
+#recruitModal .rf-compact-main .choice-set,#recruitModal .rf-compact-main .square-toggle{display:flex;flex-wrap:wrap;gap:4px}
+#recruitModal .rf-compact-main .choice,#recruitModal .rf-compact-main .square-toggle button{min-height:26px;padding:4px 8px;border:1px solid #D6DEE9;border-radius:5px;background:#fff;color:#617087;font-size:10px;font-weight:850;line-height:1;transition:transform .18s cubic-bezier(.16,1,.3,1),border-color .18s cubic-bezier(.16,1,.3,1),background-color .18s cubic-bezier(.16,1,.3,1),box-shadow .18s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rf-compact-main .choice.active,#recruitModal .rf-compact-main .choice.selected,#recruitModal .rf-compact-main .square-toggle button.on,#recruitModal .rf-compact-main .square-toggle button.active{border-color:#2769DF;background:#2769DF;color:#fff;box-shadow:none}
+#recruitModal .rf-compact-main .linked-reference{display:flex;align-items:center;min-height:26px;width:100%;padding:0 8px;border:1px solid #D5DDE8;border-radius:6px;background:#F7F9FC;color:#536178;font-size:10px;font-weight:750}.rf-compact-main .linked-reference:before{margin-right:6px;color:#2563EB;content:'연결됨'}
+#recruitModal .rf-compact-main .tag{padding:3px 5px;border-radius:4px;background:#EFF3F8;color:#59677D;font-size:9px;font-weight:850;white-space:nowrap}.rf-compact-main .tag.public{background:#EDF4FF;color:#2563C8}
+#recruitModal .rf-compact-main .switch-button{position:relative;flex:0 0 32px;width:32px;height:19px;padding:0;border:0;border-radius:99px;background:#CBD5E1;cursor:pointer;transition:background-color .18s cubic-bezier(.16,1,.3,1)}#recruitModal .rf-compact-main .switch-button>span{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.22);transition:transform .18s cubic-bezier(.16,1,.3,1)}#recruitModal .rf-compact-main .switch-button.on{background:#2769DF}#recruitModal .rf-compact-main .switch-button.on>span{transform:translateX(13px)}#recruitModal .rf-compact-main .form-control>strong{color:#617087;font-size:10px;font-weight:850}
+#recruitModal .rf-compact-main .time-range{display:grid;grid-template-columns:1fr auto 1fr;width:100%;gap:0;position:relative}.rf-compact-main .time-field{min-width:0;width:100%;height:26px;padding:0 8px;border:1px solid #D5DDE8;background:#fff;color:#172033;font-size:11px;text-align:left}.rf-compact-main .time-field:first-child{border-radius:6px 0 0 6px}.rf-compact-main .time-field:last-of-type{border-left:0;border-radius:0 6px 6px 0}.rf-compact-main .time-range-separator{display:grid;place-items:center;min-width:18px;border-top:1px solid #D5DDE8;border-bottom:1px solid #D5DDE8;background:#fff;color:#94A3B8;font-size:11px}
+#recruitModal .rf-compact-main .product-editor{margin-top:8px;border:1px solid #DCE3EC;border-radius:8px;overflow:hidden;background:#FBFCFE}.rf-compact-main .product-head{display:grid;grid-template-columns:minmax(0,2.25fr) minmax(92px,.88fr) minmax(44px,.45fr) minmax(40px,.4fr) 58px;gap:5px;align-items:center;padding:7px 9px;border-bottom:1px solid #DCE3EC;color:#94A3B8;font-size:9px;font-weight:850}.rf-compact-main .product-head span:nth-child(n+2){text-align:right}
+#recruitModal .rf-compact-main .rf-opt-row{margin:0;padding:5px 8px;border:0;border-bottom:1px solid #E9EEF5;background:#fff}.rf-compact-main .rf-opt-row .rform-input{height:26px;min-height:26px;font-size:10px}.rf-compact-main .rf-pmsw{margin:0}.rf-compact-main .rf-prod-head[data-pm=opt]{grid-template-columns:minmax(0,1.05fr) minmax(0,1.25fr) minmax(70px,.76fr) minmax(44px,.43fr) minmax(40px,.38fr) 58px}
+#recruitModal .rf-compact-main .badge-presets{display:flex;flex-wrap:wrap;gap:4px}.rf-compact-main .badge-presets button{padding:3px 6px;border:1px solid #D8E0EB;border-radius:5px;background:#fff;color:#5F6D82;font-size:9px;font-weight:800}.rf-compact-main .badge-wrap{display:flex;align-items:center;flex-wrap:wrap;gap:4px;min-height:30px;width:100%;padding:4px 5px;border:1px solid #D5DDE8;border-radius:6px;background:#fff}.rf-compact-main .badge-wrap input{flex:1;min-width:90px;height:20px;border:0!important;padding:0 3px!important;background:transparent!important}
+#recruitModal .rf-compact-main .product-link-button{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#2563EB}.rf-compact-main .thumb-url-control input[type=file]{display:none}.rf-compact-main .thumb-guide-row .form-control{color:#7F8A9B;font-size:11px}
+#recruitModal .rf-compact-main .mixed-review-composer{margin-top:7px;padding:7px;border:1px solid #DCE3EC;border-radius:6px;background:#F8FAFC}#recruitModal .rf-compact-main .mixed-review-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;color:#617087;font-size:10px}#recruitModal .rf-compact-main .mixed-review-heading strong{color:#172033}#recruitModal .rf-compact-main .mixed-review-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}#recruitModal .rf-compact-main .mixed-review-grid label{display:flex;align-items:center;justify-content:space-between;gap:4px;color:#617087;font-size:9px;font-weight:800}#recruitModal .rf-compact-main .mixed-review-grid input{flex:0 0 50%;width:50%;height:24px;min-width:0;padding:0 5px;border:1px solid #D5DDE8;border-radius:5px;text-align:right;color:#172033;font-size:10px}
+#recruitModal .rf-compact-main .product-main-url{border-top:0;background:#FBFCFE}.rf-compact-main .product-main-url .form-label{background:#F5F7FA}.rf-compact-main .rbadge-chip.automatic{border-color:#B9D2FB!important;background:#EDF4FF!important;color:#2563C8!important}
+#recruitModal .rf-compact-main .work-compose{display:flex;gap:6px;align-items:stretch;width:100%}.rf-compact-main .work-compose textarea{flex:1;min-width:0;height:58px!important}.rf-compact-main .work-image-strip{flex:0 0 116px;width:116px;min-height:58px;border:1px dashed #C9D6E8;border-radius:6px;background:#FBFCFE}.rf-compact-main .ig-strip{height:58px;padding:4px}.rf-compact-main .advanced{margin-top:8px;border:1px solid #DCE3EC;border-radius:8px;background:#FBFCFE}.rf-compact-main .advanced summary{padding:9px 11px;color:#58667D;font-size:10px;font-weight:850;cursor:pointer}
+#recruitModal .rf-compact-main .footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 22px;border-top:1px solid #DCE3EC;background:#fff}.rf-compact-main .footer-copy{color:#7F8A9B;font-size:10px}.rf-compact-main .btn{min-height:29px;padding:6px 10px;border:1px solid #D5DDE8;border-radius:6px;background:#fff;color:#526078;font-size:10px;font-weight:850}.rf-compact-main .footer .rf-savebtn{min-height:29px;padding:6px 10px;border-color:#2563EB;background:#2563EB;color:#fff;font-size:10px}
+#recruitModal #rf_linked_campaign,#recruitModal #rf_linked_tab,#recruitModal #rf_delivery_type{display:none}
+#recruitModal .rf-delivery-toggle{display:flex;flex-wrap:wrap;gap:4px}
+#recruitModal .rf-delivery-toggle button{min-height:26px;padding:4px 8px;border:1px solid #D5DEE9;border-radius:5px;background:#fff;color:#5D6B80;font:inherit;font-size:.67rem;font-weight:800;line-height:1;cursor:pointer;transition:background-color .16s cubic-bezier(.16,1,.3,1),border-color .16s cubic-bezier(.16,1,.3,1),color .16s cubic-bezier(.16,1,.3,1),transform .16s cubic-bezier(.16,1,.3,1)}
+#recruitModal .rf-delivery-toggle button:hover{border-color:#AAC5F5;transform:translateY(-1px)}
+#recruitModal .rf-delivery-toggle button.on{border-color:#B9D2FB;background:#EDF4FF;color:#2563C8}
+#recruitModal .rf-parity-time-row .rf-time-control{display:flex;align-items:center;gap:6px;width:100%}
+#recruitModal .rf-parity-time-row .rf-time-range{flex:1;width:auto}
+#recruitModal .rf-parity-time-row .rform-label{display:none}
+#recruitModal .rf-parity-date-control{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px}
+#recruitModal .rf-parity-date-control input{min-width:0;flex:1;border:0!important;background:transparent!important;cursor:pointer}
+#recruitModal .rf-parity-date-control span{flex:none;color:#2563C8;font-size:.65rem;font-weight:850}
 @media (max-width:1060px){#recruitModal .rf-side{display:none}#recruitModal .rf-rail{width:160px}}
 @media (min-width:781px) and (max-width:900px){#recruitModal .rf-rail{display:flex}}
 @media (max-width:780px){#recruitModal .rf-rail{display:none}#recruitModal .modal-body{padding:0 12px 16px!important}#recruitModal .rf-hrow{grid-template-columns:1fr;border-radius:0!important}#recruitModal .rf-hrow .rf-hl{border-bottom:1px solid #E7ECF3;padding:6px 7px}#recruitModal .rf-title-control{flex-wrap:wrap}#recruitModal .rf-status-buttons{width:100%}#recruitModal .rf-status-buttons button{flex:1}#recruitModal .ig-strip{width:100%}}
@@ -947,8 +1089,8 @@
      · 레거시 공고: 참여형 전용 카드(display:none)는 레일에서도 빠지고 번호가 다시 매겨진다.
        index-recruit 의 onParticipationToggle 이 RecruitModal.refreshRail() 을 불러 동기화.
      ═══════════════════════════════════════════════════════════════ */
-  function _mBody() { return document.querySelector('#recruitModal .modal-body'); }
-  function _mCard(k) { var b = _mBody(); return b ? b.querySelector('.rf-card[data-sec="' + k + '"]') : null; }
+  function _mBody() { return document.getElementById('editorScroller'); }
+  function _mCard(k) { var b = _mBody(); return b ? b.querySelector('[data-sec="' + k + '"]') : null; }
 
   /** 최종안 레일은 정해진 발행 순서를 안내한다. 입력 중 목차를 드래그해 바꾸지 않는다. */
   function applyLayout() { renderRail(); }
@@ -1043,13 +1185,14 @@
         requestAnimationFrame(function () {
           b._rfTick = 0;
           var top = b.scrollTop + 60, act = null;
-          Array.prototype.forEach.call(b.querySelectorAll('.rf-card[data-sec]'), function (c) {
+          Array.prototype.forEach.call(b.querySelectorAll('[data-sec]'), function (c) {
             if (c.style.display === 'none') return;
             if (c.offsetTop <= top) act = c.getAttribute('data-sec');
           });
           // 게시 영역은 최상단에 고정하지만 왼쪽 단계에는 넣지 않는다.
           // 최상단 스크롤에서는 첫 단계(연결 · 기본)를 선택 상태로 유지한다.
-          if (act === 'pub') act = 'link';
+          if (act === 'pub' || act === 'fee') act = 'link';
+          if (act === 'work') act = 'prod';
           if (act) setActiveRail(act);
         });
       });
@@ -1220,20 +1363,48 @@
   window.recruitSaveBlock      = recruitSaveBlock;
   window.recruitSaveBlockClear = recruitSaveBlockClear;
 
-  function placeFinalSections(participation) {
-    var body = _mBody();
-    var publish = _mCard('pub');
-    var link = _mCard('link'), product = _mCard('prod');
-    var settings = document.querySelector('#recruitModal [data-product-settings]');
-    var settingsSlot = document.getElementById('rf_product_settings_slot');
-    var legacySlot = document.getElementById('rf_legacy_product_settings_slot');
-    if (participation == null) {
-      var participationEl = document.getElementById('rf_participation');
-      participation = !participationEl || participationEl.checked;
+  function refreshLinkedReferences() {
+    ['rf_linked_campaign', 'rf_linked_tab'].forEach(function (id) {
+      var select = document.getElementById(id);
+      var reference = document.getElementById(id + '_reference');
+      if (!select || !reference) return;
+      var option = select.options[select.selectedIndex];
+      reference.textContent = option && option.value ? option.textContent : '작업오더에서 연결되면 자동 표시됩니다.';
+    });
+  }
+
+  function bindStaticCompactControls() {
+    var delivery = document.getElementById('rf_delivery_type');
+    var group = document.getElementById('rf_delivery_toggle');
+    if (delivery && group && !group.dataset.bound) {
+      group.dataset.bound = '1';
+      group.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-rf-delivery]');
+        if (!button) return;
+        delivery.value = button.getAttribute('data-rf-delivery');
+        delivery.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      delivery.addEventListener('change', syncDeliveryButtons);
     }
-    if (body && publish && link) body.insertBefore(publish, link);
-    var destination = participation ? settingsSlot : legacySlot;
-    if (settings && destination && settings.parentNode !== destination) destination.appendChild(settings);
+    syncDeliveryButtons();
+    refreshLinkedReferences();
+  }
+
+  function syncDeliveryButtons() {
+    var delivery = document.getElementById('rf_delivery_type');
+    var group = document.getElementById('rf_delivery_toggle');
+    if (!delivery || !group) return;
+    Array.prototype.forEach.call(group.querySelectorAll('[data-rf-delivery]'), function (button) {
+      button.classList.toggle('on', button.getAttribute('data-rf-delivery') === delivery.value);
+    });
+  }
+
+  function rfOpenStartDatePicker(event) {
+    if (event && event.target && event.target.closest('input,button,label')) return;
+    var startDate = document.getElementById('rf_start_date');
+    if (!startDate) return;
+    try { if (typeof startDate.showPicker === 'function') startDate.showPicker(); } catch (_) {}
+    startDate.focus();
   }
 
   function syncStatusButtons() {
@@ -1265,7 +1436,7 @@
     }
     if (!document.getElementById('recruitModal')) host.innerHTML = HTML;   // 멱등
     injectIconFallback();
-    placeFinalSections();
+    bindStaticCompactControls();
     applyLayout();
     syncStatusButtons();
     bindLive();
@@ -1278,7 +1449,8 @@
     refreshRail: renderRail,
     marks: updateRailMarks,
     applyLayout: applyLayout,
-    syncProductSettings: placeFinalSections,
+    refreshStaticControls: bindStaticCompactControls,
+    refreshLinkedReferences: refreshLinkedReferences,
     syncStatusButtons: syncStatusButtons,
     setStatus: setStatus,
   };

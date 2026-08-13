@@ -367,6 +367,7 @@ async function loadRecruitTabOptions() {
 
 /* 1단계: 캠페인(시트) 선택 드롭다운 구성 */
 function _populateCampaignSelect(currentSheetId) {
+  setTimeout(() => { if (window.RecruitModal?.refreshLinkedReferences) window.RecruitModal.refreshLinkedReferences(); }, 0);
   const sel = document.getElementById("rf_linked_campaign");
   if (!sel) return;
   /* 중복 없는 sheetId 목록 */
@@ -396,6 +397,7 @@ function _populateCampaignSelect(currentSheetId) {
 
 /* 캠페인 선택 시 → 해당 시트의 탭 목록 표시 */
 function onLinkedCampaignChange(camSel) {
+  setTimeout(() => { if (window.RecruitModal?.refreshLinkedReferences) window.RecruitModal.refreshLinkedReferences(); }, 0);
   const sid = camSel.value;
   const tabSel = document.getElementById("rf_linked_tab");
   const info   = document.getElementById("rf_linked_tab_info");
@@ -425,6 +427,7 @@ function onLinkedCampaignChange(camSel) {
 
 /* 탭 선택 시 → 연결 정보 표시 */
 function onLinkedTabChange(sel) {
+  if (window.RecruitModal?.refreshLinkedReferences) window.RecruitModal.refreshLinkedReferences();
   if (typeof renderPartCheck === "function") renderPartCheck(); // 참여형 자동점검 즉시 갱신(N6)
   // 탭을 고르면 안내가 사라지고, 지우면 다시 뜬다(사람이 고른 값이 최우선)
   if (sel && sel.value) _rfLinkedMiss = null;
@@ -1026,9 +1029,8 @@ function onParticipationToggle(on) {
   document.querySelectorAll("#recruitModal [data-part-only]").forEach(el => { el.style.display = on ? "" : "none"; });
   const _legacyNote = document.getElementById("rf_legacy_note");
   if (_legacyNote) _legacyNote.style.display = on ? "none" : "";
-  // 상품 설정은 참여형에서는 진행상품 바로 아래, 일반 공고에서는 연결 정보 아래에 둔다.
-  // 값과 input ID는 이동하지 않고 같은 노드를 옮겨 저장·프리필 계약을 유지한다.
-  if (window.RecruitModal && RecruitModal.syncProductSettings) RecruitModal.syncProductSettings(on);
+  // 컴팩트 편집기는 입력 DOM을 이동하지 않는다. 상태 동기화만 수행한다.
+  if (window.RecruitModal && RecruitModal.refreshStaticControls) RecruitModal.refreshStaticControls();
   if (window.RecruitModal && RecruitModal.refreshRail) RecruitModal.refreshRail();   // 레일 목차 동기화
   _syncRecruitPaneGate(on);
   if (on) {
@@ -1107,10 +1109,10 @@ function rfCarrySet(mode, opts) {
   const a = document.getElementById("rf_carry_auto");
   const h = document.getElementById("rf_carry_hold");
   if (a && h) {
-    a.style.background = m === "auto" ? "var(--p,#2563EB)" : "var(--card,#fff)";
-    a.style.color = m === "auto" ? "#fff" : "var(--t3,#64748B)";
-    h.style.background = m === "hold" ? "#7C3AED" : "var(--card,#fff)";
-    h.style.color = m === "hold" ? "#fff" : "var(--t3,#64748B)";
+    a.classList.toggle("active", m === "auto");
+    h.classList.toggle("active", m === "hold");
+    a.style.background = ""; a.style.color = "";
+    h.style.background = ""; h.style.color = "";
   }
   const note = document.getElementById("rf_carry_hold_note");
   // 프리필·초기화(silent)에서는 고지문을 접어 둔다 — 사람이 보류를 "직접 고른" 순간에만 펼친다
@@ -1123,6 +1125,57 @@ function onMultiAccountToggle(on) {
   if (sec) sec.style.display = on ? "" : "none";
   renderPartCheck();
 }
+
+function rfSetInflowType(type, button) {
+  const value = type === "guide" ? "guide" : "link";
+  const hidden = document.getElementById("rf_inflow_type_value");
+  if (hidden) hidden.value = value;
+  const root = document.getElementById("rf_inflow_type_ui");
+  root?.querySelectorAll("button").forEach((el) => el.classList.toggle("active", el === button || el.dataset.inflow === value));
+  syncRecruitProductMainUrl();
+}
+window.rfSetInflowType = rfSetInflowType;
+
+function rfToggleCashReceipt() {
+  const input = document.getElementById("rf_cash_receipt_required");
+  rfSetCashReceipt(!input?.checked);
+}
+function rfSetCashReceipt(on) {
+  const input = document.getElementById("rf_cash_receipt_required");
+  if (input) input.checked = !!on;
+  const toggle = document.getElementById("rf_cashrcpt_toggle");
+  const state = document.getElementById("rf_cash_receipt_state");
+  const note = document.getElementById("rf_cash_receipt_note");
+  toggle?.classList.toggle("on", !!on); toggle?.setAttribute("aria-pressed", String(!!on));
+  if (state) state.textContent = on ? "발행 필요" : "발행 안 함";
+  if (note) note.textContent = on ? "카드와 구매 안내에 자동 표기" : "참여자에게 미노출";
+  syncRecruitAutomaticBadges();
+}
+window.rfToggleCashReceipt = rfToggleCashReceipt;
+window.rfSetCashReceipt = rfSetCashReceipt;
+
+function rfToggleFeeSchedule() {
+  const input = document.getElementById("rf_fee_sched_on");
+  onFeeScheduleToggle(!input?.checked);
+}
+window.rfToggleFeeSchedule = rfToggleFeeSchedule;
+
+function rfSetWeekendPolicy(skip, button) {
+  const input = document.getElementById("rf_skip_weekends");
+  if (input) input.checked = !!skip;
+  const root = document.getElementById("rf_skip_weekends_toggle");
+  root?.querySelectorAll("button").forEach((el) => el.classList.toggle("active", el === button || (skip ? el.dataset.weekend === "exclude" : el.dataset.weekend === "include")));
+}
+window.rfSetWeekendPolicy = rfSetWeekendPolicy;
+
+function rfSetMultiAccount(on, button) {
+  const input = document.getElementById("rf_multi_account");
+  if (input) input.checked = !!on;
+  const root = document.getElementById("rf_multi_account_toggle");
+  root?.querySelectorAll("button").forEach((el) => el.classList.toggle("active", el === button || (on ? el.dataset.multi === "on" : el.dataset.multi === "off")));
+  onMultiAccountToggle(!!on);
+}
+window.rfSetMultiAccount = rfSetMultiAccount;
 
 /** "2시~4시" / "14:00~16:00" / "17시 오픈 이후~19시까지" → {start:'14:00', end:'16:00'} (실패 시 null)
  *  구매시간대 특성상 1~8시는 오후로 해석(+12). 프리필용 — 최종 확정은 관리자 확인. */
@@ -1933,10 +1986,23 @@ function _syncPreviewFromOptRows() {
   if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
   if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
   if (typeof syncRecruitReviewTypeMix === "function") syncRecruitReviewTypeMix();
+  syncRecruitProductMainUrl();
   _markDupProductNames();
   _optSummary();     // 프로그램으로 표를 바꿔도(작업오더 자동 적용 등) 요약이 따라오게
   _syncGroupTotals();
   if (typeof _renderPreview === "function") _renderPreview();
+}
+
+/** 승인 시안의 상품메인 URL 행은 작업오더 원본을 읽기 전용으로 보여준다. */
+function syncRecruitProductMainUrl() {
+  const reference = document.getElementById("rf_product_main_url_value");
+  const state = document.getElementById("rf_product_main_url_state");
+  if (!reference) return;
+  const url = String(document.getElementById("rf_product_url")?.value || "").trim();
+  const inflow = document.getElementById("rf_inflow_type_value")?.value || "link";
+  reference.textContent = url || "작업오더 URL 미연동입니다.";
+  reference.classList.toggle("is-unavailable", !url);
+  if (state) state.textContent = inflow === "guide" ? "가이드유입 · 상품 URL 미사용" : "링크유입 · 자동 제공";
 }
 
 /**
@@ -2117,6 +2183,12 @@ function renderFeeRows(list) {
 }
 
 function onFeeScheduleToggle(on) {
+  const input = document.getElementById("rf_fee_sched_on");
+  if (input) input.checked = !!on;
+  const toggle = document.getElementById("rf_fee_sched_toggle");
+  const state = document.getElementById("feeScheduleState");
+  toggle?.classList.toggle("on", !!on); toggle?.setAttribute("aria-pressed", String(!!on));
+  if (state) state.textContent = on ? "사용" : "사용 안 함";
   const sec = document.getElementById("rf_fee_sched_section");
   if (sec) sec.style.display = on ? "" : "none";
   // 켤 때 비어 있으면 첫 줄을 오늘 날짜·현재 리뷰비로 깔아준다(빈 표를 마주하지 않게)
@@ -2532,6 +2604,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
     }
   }
 
+  /* 읽기/쓰기 입력은 숨겨도, 승인 시안의 조작부는 항상 같은 현재 상태를 표시한다. */
+  rfSetCashReceipt(!!document.getElementById("rf_cash_receipt_required")?.checked);
+  onFeeScheduleToggle(!!document.getElementById("rf_fee_sched_on")?.checked);
+  rfSetWeekendPolicy(!!document.getElementById("rf_skip_weekends")?.checked);
+  rfSetMultiAccount(!!document.getElementById("rf_multi_account")?.checked);
+  rfSetInflowType(document.getElementById("rf_inflow_type_value")?.value || "link");
+  syncRecruitProductMainUrl();
   modal.classList.remove("hidden");
   modal.style.display = "";
   // 배경 작업 화면은 고정하고, 모집공고 모달의 중앙 편집 영역만 스크롤한다.
@@ -2616,7 +2695,7 @@ function selectRfBtn(group, btn) {
   /* 같은 그룹 버튼만 비활성화 */
   const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns, #rf_review_type_btns');
   if (container) {
-    container.querySelectorAll('.rchan-btn').forEach(b => b.classList.remove('active'));
+    container.querySelectorAll('button').forEach(b => b.classList.remove('active'));
   } else {
     /* fallback: data-group 속성으로 구분 */
     document.querySelectorAll(`.rchan-btn[data-group="${group}"]`).forEach(b => b.classList.remove('active'));
@@ -2657,9 +2736,12 @@ function getRecruitReviewTypeMix() {
 /** 혼합을 선택한 경우에만 조합 행을 보인다. 선택별 설명문 대신 현재 조합을 직접 보여준다. */
 function syncRecruitReviewTypeMix() {
   const root = document.getElementById('rf_review_mix');
+  const composer = document.getElementById('rf_mixed_review_composer');
   const reviewType = document.getElementById('rf_review_type')?.value || '';
   if (!root) return [];
-  root.style.display = reviewType === 'mixed' ? '' : 'none';
+  const visible = reviewType === 'mixed';
+  root.style.display = visible ? '' : 'none';
+  if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
@@ -2743,13 +2825,11 @@ function syncRecruitAutomaticBadges() {
   const required = !!document.getElementById("rf_cash_receipt_required")?.checked;
   const channel = document.getElementById('rf_channel')?.value || '';
   const reviewType = document.getElementById('rf_review_type')?.value || '';
-  const mix = getRecruitReviewTypeMix();
-  const hasReviewType = (type) => reviewType === type || (reviewType === 'mixed' && mix.some(row => row.type === type && row.quantity > 0));
   const next = _recruitBadges.filter((badge) => !_isRecruitAutomaticBadge(badge) && !_isRetiredRecruitBadge(badge));
   if (required) next.push('현영건');
   if (channel === '쿠팡') next.push('로켓와우');
-  if (hasReviewType('photo')) next.push('사진 5장+');
-  if (hasReviewType('confirm')) next.push('구매확정');
+  if (reviewType === 'photo') next.push('사진 5장+');
+  if (reviewType === 'confirm') next.push('구매확정');
   const changed = next.length !== _recruitBadges.length || next.some((b, i) => b !== _recruitBadges[i]);
   _recruitBadges = next;
   if (changed) _refreshBadgeWrap();
@@ -2768,7 +2848,7 @@ function _refreshBadgeWrap() {
   wrap.querySelectorAll(".rbadge-chip").forEach(el => el.remove());
   _recruitBadges.forEach((b, i) => {
     const chip = document.createElement("span");
-    chip.className = "rbadge-chip";
+    chip.className = "rbadge-chip" + (_isRecruitAutomaticBadge(b) ? " automatic" : "");
     chip.innerHTML = _isRecruitAutomaticBadge(b)
       ? `${escHtml(b)}<small style="margin-left:4px;color:var(--t3,#64748B)">자동</small>`
       : `${escHtml(b)}<button type="button" onclick="removeBadge(${i})" title="삭제"><i class="fas fa-times"></i></button>`;

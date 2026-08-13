@@ -111,6 +111,9 @@ async function loginIntranet(name, pw, _fetch = fetch) {
       signal: ctrl.signal,
     });
     body = await resp.json().catch(() => null);
+    // 인트라넷 Pages API의 현재 응답은 { data: { username, display_name, ... } }다.
+    // 구 응답(최상위 사용자 레코드)도 계속 수용해 서버 배포 순서에 따른 SSO 단절을 막는다.
+    if (body && typeof body === 'object' && body.data && typeof body.data === 'object') body = body.data;
   } catch (_) {
     return { success: false, error: '인트라넷 인증 서버에 연결할 수 없습니다.' };
   } finally { clearTimeout(timer); }
