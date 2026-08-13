@@ -56,7 +56,8 @@ function decideAutoApply({ summary, duplicateApplied = false }) {
 }
 
 function _depositDateFromResultStamp(value) {
-  return formatDepositStamp(value);
+  const stamp = formatDepositStamp(value);
+  return /^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/.test(stamp) ? stamp : '';
 }
 
 function _depositDateFromPaidAt(value) {
