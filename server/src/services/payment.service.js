@@ -620,6 +620,12 @@ function _batchView(b) {
     resultFailedCount: Math.max(Number(b.result_failed_count || 0), parsedFailed, Number(failedCount || 0)),
     resultAppliedCount: Math.max(Number(b.result_applied_count || 0), Number(paidCount || 0)),
     resultApplied: b.result_applied === true,
+    boardRecordedCount: Number(b.board_recorded_count || 0),
+    boardQueuedCount: Number(b.board_queued_count || 0),
+    boardSkippedCount: Number(b.board_skipped_count || 0),
+    boardFailedCount: Number(b.board_failed_count || 0),
+    boardStamp: b.board_stamp || '',
+    boardRecordedAt: b.board_recorded_at || null,
     resultCanApply: !!(b.result_upload_id && b.result_has_file && b.result_applied !== true
       && (Number(b.result_success_count || 0) + Number(b.result_failed_count || 0) > 0)),
   };

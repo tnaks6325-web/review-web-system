@@ -459,8 +459,26 @@ async function backfillPaidDepositStamp({ batchId, stamp, by }) {
     client.release();
   }
 
-  await paymentApply.markDepositCells(items, { stamp: String(stamp).trim(), by: by || 'payment' });
-  return { ok: true, candidates: items.length, stamp: String(stamp).trim() };
+  const normalizedStamp = String(stamp).trim();
+  const writeResult = await paymentApply.markDepositCells(items, { stamp: normalizedStamp, by: by || 'payment' }) || {};
+  const outcome = {
+    recorded: Number(writeResult.recorded) || 0,
+    queued: Number(writeResult.queued) || 0,
+    skipped: Number(writeResult.skipped) || 0,
+    failed: Number(writeResult.failed) || 0,
+  };
+  await _db().query(
+    `UPDATE payment_batches
+        SET board_recorded_count = $2,
+            board_queued_count = $3,
+            board_skipped_count = $4,
+            board_failed_count = $5,
+            board_stamp = $6,
+            board_recorded_at = NOW(),
+            board_recorded_by = $7
+      WHERE id = $1`,
+    [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, normalizedStamp, by || 'payment']);
+  return { ok: true, candidates: items.length, stamp: normalizedStamp, ...outcome };
 }
 
 /** 확인된 은행 실패만 pending 에서 failed 로 확정한다. 실패 안내는 별도 발송하지 않는다. */
