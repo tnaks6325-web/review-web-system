@@ -36,6 +36,7 @@
 const { logger } = require('../utils/logger');
 const pool = require('../db/pool');
 const { mergeDepositStamps } = require('../utils/depositStamp');
+const { findPaymentColumnIndex } = require('./columnResolver');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
@@ -43,6 +44,24 @@ function __setPoolForTest(p) { _pool = p; }
 
 /** 리뷰제출 칸에 쓰는 값 — Track B write-back(`_wantMark`)과 같은 표기 */
 const SUBMIT_MARK = 'O';
+
+async function _resolveStatusHeader(db, { sheetId, tabName, col, kind }) {
+  const { rows } = await db.query(
+    `SELECT ${col} AS h FROM review_index
+      WHERE sheet_id = $1 AND tab_name = $2 AND COALESCE(${col}, '') <> ''
+      LIMIT 1`, [sheetId, tabName]);
+  let header = rows.length ? String(rows[0].h || '').trim() : '';
+  if (header || kind !== 'paid') return header;
+
+  // 이전 빌드가 입금 헤더를 저장하지 못한 무시트 탭도, 작업보드가 보관한 실제 헤더에서 복구한다.
+  const { rows: tabRows } = await db.query(
+    `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+      WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
+    [sheetId, tabName]);
+  const headers = Array.isArray(tabRows[0] && tabRows[0].h) ? tabRows[0].h : [];
+  const index = findPaymentColumnIndex(headers);
+  return index >= 0 ? String(headers[index] || '').trim() : '';
+}
 
 /**
  * 무시트 탭의 상태 칸(리뷰제출·입금)에 값을 기록하고 장부를 다시 만든다.
@@ -80,11 +99,7 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
   // ── 그 탭이 쓰는 상태 칸 헤더명(파서가 감지한 값) ──
   let header = '';
   try {
-    const { rows } = await db.query(
-      `SELECT ${col} AS h FROM review_index
-        WHERE sheet_id = $1 AND tab_name = $2 AND COALESCE(${col}, '') <> ''
-        LIMIT 1`, [sheetId, tabName]);
-    header = rows.length ? String(rows[0].h || '').trim() : '';
+    header = await _resolveStatusHeader(db, { sheetId, tabName, col, kind });
   } catch (e) {
     return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
   }
@@ -115,11 +130,7 @@ async function verifyStatusCell({ sheetId, tabName, rowIndex, kind, value = '' }
   if (!sheetless) return { handled: false };
 
   const col = kind === 'submit' ? 'submit_col' : 'submit_col2';
-  const { rows: headerRows } = await db.query(
-    `SELECT ${col} AS h FROM review_index
-      WHERE sheet_id = $1 AND tab_name = $2 AND COALESCE(${col}, '') <> ''
-      LIMIT 1`, [sheetId, tabName]);
-  const header = headerRows.length ? String(headerRows[0].h || '').trim() : '';
+  const header = await _resolveStatusHeader(db, { sheetId, tabName, col, kind });
   if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
 
   // `workdeskTab` renders campaign_participants.row_json directly.  The RAW
