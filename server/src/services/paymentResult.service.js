@@ -35,9 +35,23 @@ const { recordDeposits } = paymentApply;
 const { rebuildLedgers } = require('./sheetlessLedger.service');
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
+const AUTO_APPLY_MATCH_RATE = 0.9;
 
 class ResultError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
+}
+
+function decideAutoApply({ summary, duplicateApplied = false }) {
+  const s = summary || {};
+  const items = Number(s.items) || 0;
+  const matched = Number(s.matched) || 0;
+  const matchRate = items ? matched / items : 0;
+  const blockers = [];
+  if (!items) blockers.push('no_pending_items');
+  else if (matchRate < AUTO_APPLY_MATCH_RATE) blockers.push('match_below_90');
+  if ((Number(s.unmatchedResults) || 0) > 0) blockers.push('result_outside_batch');
+  if (duplicateApplied) blockers.push('duplicate_file');
+  return { allowed: blockers.length === 0, matchRate, blockers };
 }
 
 function _depositDateFromResultStamp(value) {
@@ -602,4 +616,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, AUTO_APPLY_MATCH_RATE, FAIL_NOTICE, __setPoolForTest };
