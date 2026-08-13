@@ -202,7 +202,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   if (roundIdx < 0) roundIdx = headers.findIndex(h => roundKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
 
   // ── 입금열 (P2b: DB매핑 'payment' 우선 → 정확/부분/제외 키워드 폴백) ──
-  const PAYMENT_EXACT = ['입금', '입금완료', '입금확인', '입금여부', '페이백'];
+  const PAYMENT_EXACT = ['입금', '입금일', '입금일자', '입금완료', '입금확인', '입금여부', '페이백'];
   const PAYMENT_PARTIAL = ['페이백입금', '페이백'];
   const PAYMENT_EXCLUDE = ['입금명', '입금자', '예금주', '입금자명', '결제금액', '결제금', '결제일', '결제수단'];
   let paymentColIdx = _dbCol(dbColMap, 'payment', headers, drift);

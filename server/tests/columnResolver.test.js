@@ -32,6 +32,13 @@ function run() {
   assert.equal(a.productName, '샴푸');
   assert.equal(a.phone8, '12345678');
   assert.equal(a.rowIndex, 2, 'headerRow(0)+1+0+1');
+
+  const paymentDateHeader = parseTabRows([
+    ['번호', '주문자', '연락처', '리뷰제출', '입금일'],
+    ['1', '테스터', '010-1111-2222', 'O', ''],
+  ], 's-payment-date', 'payment-date', 'gid-payment-date', '입금일 테스트', KW);
+  assert.equal(paymentDateHeader[0].submitCol2, '입금일');
+  assert.equal(paymentDateHeader[0].isSubmitted2, 'NONE');
   assert.equal(a.campaignName, '캠페인A');
 
   // ── 케이스2: 주문자 우선순위 — 수취인이 더 왼쪽이어도 주문자열을 이름으로(리뷰어=구매자). ──
