@@ -2002,16 +2002,12 @@ function _syncPreviewFromOptRows() {
   if (typeof _renderPreview === "function") _renderPreview();
 }
 
-/** 승인 시안의 상품메인 URL 행은 작업오더 원본을 읽기 전용으로 보여준다. */
+/** 상품메인 URL은 관리자가 편집하며 공고의 landing URL로 함께 저장한다. */
 function syncRecruitProductMainUrl() {
-  const reference = document.getElementById("rf_product_main_url_value");
-  const state = document.getElementById("rf_product_main_url_state");
-  if (!reference) return;
-  const url = String(document.getElementById("rf_product_url")?.value || "").trim();
-  const inflow = document.getElementById("rf_inflow_type_value")?.value || "link";
-  reference.textContent = url || "작업오더 URL 미연동입니다.";
-  reference.classList.toggle("is-unavailable", !url);
-  if (state) state.textContent = inflow === "guide" ? "가이드유입 · 상품 URL 미사용" : "링크유입 · 자동 제공";
+  const input = document.getElementById("rf_product_url");
+  const landing = document.getElementById("rf_landing_url");
+  if (!input || !landing) return;
+  landing.value = String(input.value || "").trim();
 }
 
 /**
