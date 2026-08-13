@@ -478,6 +478,8 @@
       </div>
       </template>
 
+    </div>
+      </div></template><!-- /legacy rf-main -->
       <div class="rf-main rf-compact-main">
         <section class="editor">
           <header class="editor-head"><div><h2 id="rf_editor_title">연결 · 기본</h2><p id="rf_editor_description">작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.</p></div><span class="autosaved">자동 저장됨</span></header>
