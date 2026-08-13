@@ -16,6 +16,7 @@ const KW = {
 function run() {
   assert.equal(findPaymentColumnIndex(['번호', '입금자명', '입금일']), 2, '입금자명은 제외하고 입금일을 선택한다');
   assert.equal(findPaymentColumnIndex(['번호', '입금자명', '(입금 여부)']), 2, '공백·괄호가 있는 입금 여부도 선택한다');
+  assert.equal(findPaymentColumnIndex(['번호', '입금자명', '입금 확인 날짜']), 2, '긴 입금 확인 헤더도 선택한다');
 
   // ── 케이스1: 주문자형(주문자=name, 별도 수취인열) + 입금열 + 상품 ──
   const v1 = [

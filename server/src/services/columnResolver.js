@@ -11,7 +11,7 @@
 const { logger } = require('../utils/logger');
 
 const PAYMENT_EXACT = ['입금', '입금일', '입금일자', '입금완료', '입금확인', '입금여부', '페이백'];
-const PAYMENT_PARTIAL = ['페이백입금', '페이백'];
+const PAYMENT_PARTIAL = ['페이백입금', '페이백', '입금'];
 const PAYMENT_EXCLUDE = ['입금명', '입금자', '예금주', '입금자명', '결제금액', '결제금', '결제일', '결제수단'];
 
 function compactPaymentHeader(value) {
