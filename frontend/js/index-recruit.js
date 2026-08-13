@@ -2491,6 +2491,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
+        const _inflowInput = document.getElementById("rf_inflow_type_value");
+        if (_inflowInput) _inflowInput.value = wd.inflowType === "guide" ? "guide" : "link";
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
@@ -3637,6 +3639,8 @@ async function saveRecruitPost() {
       }
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
+        // 작업오더가 연결되지 않은 직접 등록 공고도 링크/가이드 유입을 정확히 재현할 수 있게 저장한다.
+        inflowType:      document.getElementById("rf_inflow_type_value")?.value === "guide" ? "guide" : "link",
         inflowGuideHtml: _igComposeInflow(),
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
