@@ -45,8 +45,8 @@ function detectHeaderRow(headerValues) {
 }
 
 /**
- * 이체완료시각 표기 "YYYY.M.D HH:mm" (Asia/Seoul)
- * ★ 시트/작업표 입금 칸에 그대로 찍히는 문자열이라 형식을 바꾸면 과거 표기와 갈린다.
+ * 이체완료시각 표기 "M/D HH:mm" (Asia/Seoul)
+ * ★ 시트/작업표 입금 칸과 리뷰제출일 표기를 통일한다.
  * @param {Date} [when] 없으면 지금
  */
 function nowStamp(when) {
