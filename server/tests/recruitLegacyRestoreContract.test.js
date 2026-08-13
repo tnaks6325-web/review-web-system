@@ -44,6 +44,20 @@ assert.match(
   /setV\("rf_thumb_url", c\.thumbnail_url \|\| ""\)/,
   '기존 공고 썸네일 URL을 새 입력란에 복원해야 합니다.'
 );
+assert.ok(
+  !/document\.getElementById\("rf_notes"\)\.value\s*=\s*c\.notes/.test(FRONT),
+  'the retired public-note field must be optional so it cannot stop compact legacy-value restoration'
+);
+assert.match(
+  FRONT,
+  /const notesEl = document\.getElementById\("rf_notes"\); if \(notesEl\) notesEl\.value = c\.notes \|\| "";/,
+  'legacy public notes must be restored only when the active layout renders that field'
+);
+assert.match(
+  FRONT,
+  /notes:\s+String\(document\.getElementById\("rf_notes"\)\?\.value \|\| ""\)\.trim\(\)/,
+  'saving the compact layout must not require the retired public-note field'
+);
 assert.match(
   FRONT,
   /onWorkdesk[\s\S]{0,160}\? '\/api\/trackb\/campaigns' : '\/api\/campaign\/admin'/,

@@ -2389,7 +2389,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
       // 📅 082: 리뷰비 구간 프리필 — 구간이 있으면 스위치가 자동으로 켜진다(없으면 종전 화면 그대로)
       if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
-      document.getElementById("rf_notes").value        = c.notes || "";
+      // The compact editor intentionally does not render the legacy public-note
+      // textarea.  Treat it as an optional compatibility field so an older
+      // campaign cannot abort loading before its product and guide values are
+      // restored into the visible compact fields.
+      { const notesEl = document.getElementById("rf_notes"); if (notesEl) notesEl.value = c.notes || ""; }
       document.getElementById("rf_chat_url").value     = c.chat_url || "";
       // ★ 064: 노출 순서 UI 제거 — 요소가 남아있는 구버전 화면만 프리필(null-safe)
       { const _so = document.getElementById("rf_sort_order"); if (_so) _so.value = c.sort_order ?? 0; }
@@ -2539,7 +2543,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.time_range)   document.getElementById("rf_time_range").value = prefill.time_range;
       if (prefill.max_slots)    document.getElementById("rf_max_slots").value = prefill.max_slots;
       if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
-      if (prefill.notes)        document.getElementById("rf_notes").value = prefill.notes;
+      if (prefill.notes) {
+        const notesEl = document.getElementById("rf_notes");
+        if (notesEl) notesEl.value = prefill.notes;
+      }
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
 
@@ -3395,7 +3402,9 @@ async function saveRecruitPost() {
     cash_receipt_required: !!document.getElementById("rf_cash_receipt_required")?.checked,
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
-    notes:          document.getElementById("rf_notes").value.trim(),
+    // `rf_notes` belongs to the retired layout; compact editing keeps it
+    // optional so saving the visible fields never fails when it is absent.
+    notes:          String(document.getElementById("rf_notes")?.value || "").trim(),
     chat_url:       chatUrl,
     linked_sheet_id: sid,
     linked_tab_name: tab,
