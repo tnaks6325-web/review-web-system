@@ -10,6 +10,11 @@ assert.match(
   /onkeydown="if\(event\.key==='Enter'\)\{event\.preventDefault\(\);applyGFilter\(\);\}"/,
   'Pressing Enter in the filter search must apply the filter immediately.'
 );
+assert.match(
+  html,
+  /m\.classList\.add\('show'\);\s*m\.querySelector\('\.gcm-search'\)\.focus\(\);/,
+  'Opening the filter menu must focus the value search input.'
+);
 
 function grab(name) {
   const start = html.indexOf(`function ${name}(`);
