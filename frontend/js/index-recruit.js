@@ -2333,7 +2333,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
   const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false;
-  document.querySelectorAll('#rf_review_mix [data-mix-type]').forEach((el) => { el.value = '0'; });
+  window._rfReviewMixPending = null;
+  document.querySelectorAll('#rf_review_mix_rows [data-mix-type]').forEach((el) => { el.value = '0'; });
   syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
@@ -2483,15 +2484,16 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
           try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
         })();
-        savedReviewMix.forEach((row) => {
-          const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
-          if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
-        });
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
+        const savedReviewMixByOption = Array.isArray(wd.reviewMixByOption) && wd.reviewMixByOption.length
+          ? wd.reviewMixByOption
+          : [{ optionKey: '__total__', mix: savedReviewMix }];
+        _renderRecruitReviewMixRows(savedReviewMixByOption, true);
+        syncRecruitReviewTypeMix();
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
@@ -2559,11 +2561,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const prefillReviewMix = Array.isArray(prefill.review_type_mix) ? prefill.review_type_mix : (() => {
         try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
       })();
-      prefillReviewMix.forEach((row) => {
-        const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
-        if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
-      });
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
+      if (prefillReviewMix.length) {
+        _renderRecruitReviewMixRows([{ optionKey: '__total__', mix: prefillReviewMix }], true);
+        syncRecruitReviewTypeMix();
+      }
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
          탭 리네임 대비로 gid 우선 재매칭 후 이름 폴백. 미접수 오더는 값이 없어 그대로 수동. */
@@ -2744,11 +2746,66 @@ function selectRfBtn(group, btn) {
 
 const RF_REVIEW_MIX_TYPES = ['photo', 'text', 'confirm', 'star'];
 
+function _rfMixOptionRows() {
+  const options = typeof readOptRows === 'function' ? readOptRows() : [];
+  return options.length ? options.map(row => ({ key: row.optKey, label: row.optKey })) : [{ key: '__total__', label: '전체 상품' }];
+}
+
+function _rfMixOptionSignature() {
+  return _rfMixOptionRows().map(option => option.key).join('\u001f');
+}
+
+function _rfMixHtml(value) {
+  return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _renderRecruitReviewMixRows(saved, force) {
+  const host = document.getElementById('rf_review_mix_rows');
+  if (!host) return;
+  const options = _rfMixOptionRows();
+  const signature = _rfMixOptionSignature();
+  if (!force && host.dataset.optionSignature === signature && host.children.length) return;
+  if (saved) window._rfReviewMixPending = saved;
+  const prior = window._rfReviewMixPending || getRecruitReviewTypeMixByOption();
+  const byKey = new Map(prior.map(row => [row.optionKey, row.mix]));
+  const hasProductOptions = options.some(option => option.key !== '__total__');
+  if (!hasProductOptions && prior.some(row => row.optionKey !== '__total__')) {
+    host.innerHTML = '';
+    host.dataset.optionSignature = signature;
+    return;
+  }
+  const legacyMix = byKey.get('__total__') || [];
+  host.innerHTML = options.map((option, index) => {
+    const mix = new Map(((byKey.get(option.key) || (index === 0 ? legacyMix : []))).map(row => [row.type, row.quantity]));
+    const fields = RF_REVIEW_MIX_TYPES.map(type => {
+      const label = { photo: '포토', text: '텍스트', confirm: '구매확정', star: '별점' }[type];
+      return '<label style="font-size:.68rem;color:var(--t3,#64748B)">' + label +
+        '<input class="rform-input" data-mix-option="' + _rfMixHtml(option.key) +
+        '" data-mix-type="' + type + '" type="number" min="0" inputmode="numeric" value="' + (mix.get(type) || 0) +
+        '" oninput="syncRecruitReviewTypeMix()" style="width:100%;height:28px;margin-top:3px;text-align:right"></label>';
+    }).join('');
+    return '<div class="rf-mix-option" style="margin-top:7px;padding:7px;border:1px solid var(--border,#E2E8F0);border-radius:7px;background:#fff">' +
+      '<div style="display:flex;justify-content:space-between;margin-bottom:5px;font-size:.7rem;font-weight:700"><span>' + _rfMixHtml(option.label) + '</span><span class="rf-mix-option-total">총 0명</span></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px">' + fields + '</div></div>';
+  }).join('');
+  host.dataset.optionSignature = signature;
+  if (hasProductOptions) window._rfReviewMixPending = null;
+}
+
+function getRecruitReviewTypeMixByOption() {
+  const rows = new Map();
+  document.querySelectorAll('#rf_review_mix_rows [data-mix-option]').forEach(el => {
+    const key = el.dataset.mixOption;
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key).push({ type: el.dataset.mixType, quantity: Math.max(0, Math.floor(Number(el.value) || 0)) });
+  });
+  return [...rows.entries()].map(([optionKey, mix]) => ({ optionKey, mix: mix.filter(row => row.quantity > 0) }));
+}
+
 function getRecruitReviewTypeMix() {
-  return RF_REVIEW_MIX_TYPES.map((type) => {
-    const el = document.querySelector(`#rf_review_mix [data-mix-type="${type}"]`);
-    return { type, quantity: Math.max(0, Math.floor(Number(el?.value) || 0)) };
-  }).filter(({ quantity }) => quantity > 0);
+  const sums = new Map();
+  getRecruitReviewTypeMixByOption().forEach(row => row.mix.forEach(item => sums.set(item.type, (sums.get(item.type) || 0) + item.quantity)));
+  return [...sums.entries()].map(([type, quantity]) => ({ type, quantity })).filter(({ quantity }) => quantity > 0);
 }
 
 /** 혼합을 선택한 경우에만 조합 행을 보인다. 선택별 설명문 대신 현재 조합을 직접 보여준다. */
@@ -2760,6 +2817,7 @@ function syncRecruitReviewTypeMix() {
   const visible = reviewType === 'mixed';
   root.style.display = visible ? '' : 'none';
   if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
+  if (reviewType === 'mixed') _renderRecruitReviewMixRows();
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
@@ -2768,6 +2826,10 @@ function syncRecruitReviewTypeMix() {
     totalEl.textContent = `합계 ${sum}명 · 총인원 ${expected}명`;
     totalEl.style.color = reviewType === 'mixed' && sum !== expected ? 'var(--danger,#EF4444)' : 'var(--t3,#64748B)';
   }
+  document.querySelectorAll('.rf-mix-option').forEach(card => {
+    const total = [...card.querySelectorAll('[data-mix-type]')].reduce((sum, el) => sum + (Number(el.value) || 0), 0);
+    const label = card.querySelector('.rf-mix-option-total'); if (label) label.textContent = `총 ${total}명`;
+  });
   syncRecruitAutomaticBadges();
   return mix;
 }
@@ -3279,6 +3341,7 @@ const _RF_DIFF_FIELDS = [
 ];
 const _RF_DIFF_WORKDETAIL = [
   ["productLines",    "상품 정보"],
+  ["reviewMixByOption", "옵션별 리뷰 조합"],
   ["inflowGuideHtml", "유입가이드"],
   ["reviewGuide",     "리뷰가이드"],
   ["specialNotes",    "특이사항"],
@@ -3504,6 +3567,7 @@ async function saveRecruitPost() {
       }
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
+        reviewMixByOption: getRecruitReviewTypeMixByOption(),
         inflowGuideHtml: _igComposeInflow(),
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
