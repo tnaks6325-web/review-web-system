@@ -5440,7 +5440,7 @@ function openGColMenu(col, rect){   // 컬럼명(헤더) 클릭으로 호출 —
   const isCustom = col.indexOf('ccol:')===0;
   m.innerHTML=`
     <div class="gcm-sort"><button class="${so==='asc'?'on':''}" onclick="gSortCol('asc')">▲ 오름차순</button><button class="${so==='desc'?'on':''}" onclick="gSortCol('desc')">▼ 내림차순</button></div>
-    <input class="gcm-search" placeholder="값 검색…" oninput="gFilterMenuList(this.value)">
+    <input class="gcm-search" placeholder="값 검색…" oninput="gFilterMenuList(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applyGFilter();}">
     <div class="gcm-acts"><a onclick="gcmAll(true)">전체 선택</a><a onclick="gcmAll(false)">전체 해제</a></div>
     <div class="gcm-list" id="gcmlist">${vals.map(v=>{ const on=!cur||cur.has(v);
       return `<label class="gcm-opt" data-v="${esc(v)}"><input type="checkbox" ${on?'checked':''} value="${esc(v)}"><span class="cv">${esc(v||'(빈값)')}</span><span class="cn">${counts[v]}</span></label>`;
@@ -5455,11 +5455,16 @@ function closeGColMenu(){ STATE._gMenuCol=null; const m=$('#gcolmenu'); if(m) m.
 function gFilterMenuList(q){ const ql=(q||'').trim().toLowerCase(); const box=$('#gcmlist'); if(!box) return;
   box.querySelectorAll('.gcm-opt').forEach(o=>{ const v=(o.getAttribute('data-v')||'').toLowerCase(); o.style.display=(!ql||v.includes(ql))?'':'none'; }); }
 function gcmAll(on){ const box=$('#gcmlist'); if(!box) return; box.querySelectorAll('.gcm-opt').forEach(o=>{ if(o.style.display!=='none') o.querySelector('input').checked=on; }); }
+function _gFilterSelection(boxes, query){
+  const searched=String(query||'').trim()!=='';
+  const scoped=searched ? boxes.filter(b=>b.closest('.gcm-opt').style.display!=='none') : boxes;
+  return { values:new Set(scoped.filter(b=>b.checked).map(b=>b.value)), total:scoped.length };
+}
 function applyGFilter(){ const col=STATE._gMenuCol; if(col==null) return;
   const boxes=[...$('#gcmlist').querySelectorAll('input')];
-  const checked=boxes.filter(b=>b.checked).map(b=>b.value);
-  if(checked.length===boxes.length){ delete STATE.gFilters[col]; }   // 전부 선택 = 필터 해제
-  else{ STATE.gFilters[col]=new Set(checked); }
+  const query=$('.gcm-search'); const picked=_gFilterSelection(boxes, query&&query.value);
+  if(picked.total===boxes.length&&picked.values.size===boxes.length){ delete STATE.gFilters[col]; }   // 검색어 없이 전부 선택 = 필터 해제
+  else{ STATE.gFilters[col]=picked.values; }
   STATE.gCollapsed.clear(); closeGColMenu(); rerenderGrid();
 }
 function gSortCol(dir){ const col=STATE._gMenuCol; if(col==null) return;
