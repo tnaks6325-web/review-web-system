@@ -1800,6 +1800,7 @@ function _buildOptRowEl(data) {
   const row = document.createElement("div");
   row.className = "rf-opt-row";
   row.dataset.status = status;
+  row.dataset.reviewTypeMix = JSON.stringify(Array.isArray(d.reviewTypeMix ?? d.review_type_mix) ? (d.reviewTypeMix ?? d.review_type_mix) : []);
   if (status === "closed") row.style.opacity = ".68";
   const lastBtn = status === "closed"
     ? '<button type="button" class="btn-icon-sm rf-opt-reopen" title="옵션 재개(다시 모집)" style="color:#12b886"><i class="fas fa-rotate-left"></i></button>'
@@ -1877,6 +1878,7 @@ function renderOptRows(options, opts) {
     payAmount:   o.payAmount ?? o.pay_amount ?? 0,
     recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
     dailyLimit:  o.dailyLimit ?? o.daily_limit ?? 0,
+    reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
     status:      o.status === "closed" ? "closed" : "active",
   })));
 }
@@ -1940,6 +1942,7 @@ function readOptRows() {
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
       recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
       dailyLimit:    Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0),
+      reviewTypeMix: typeof _readOptionReviewMix === "function" ? _readOptionReviewMix(r) : [],
       status:        r.dataset.status === "closed" ? "closed" : "active",   // ★ 마감상태 보존(리뷰 #1)
     });
   });
@@ -2744,7 +2747,126 @@ function selectRfBtn(group, btn) {
 
 const RF_REVIEW_MIX_TYPES = ['photo', 'text', 'confirm', 'star'];
 
+function _reviewMixRows() {
+  return Array.from(document.querySelectorAll('#rf_opt_rows .rf-opt-row'))
+    .filter((row) => row.dataset.status !== 'closed' && String(row.querySelector('.rf-opt-name')?.value || '').trim());
+}
+
+function _readOptionReviewMix(row) {
+  try {
+    const parsed = JSON.parse(row?.dataset.reviewTypeMix || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function _writeOptionReviewMix(row, mix) {
+  if (row) row.dataset.reviewTypeMix = JSON.stringify(RF_REVIEW_MIX_TYPES.map((type) => {
+    const hit = (mix || []).find((entry) => entry?.type === type);
+    return { type, quantity: Math.max(0, Math.floor(Number(hit?.quantity) || 0)) };
+  }).filter((entry) => entry.quantity > 0));
+}
+
+function getRecruitOptionReviewTypeMix() {
+  return _reviewMixRows().map((row) => ({
+    optKey: String(row.querySelector('.rf-opt-name')?.value || '').trim(),
+    recruitTotal: Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0),
+    reviewTypeMix: _readOptionReviewMix(row),
+  }));
+}
+
+function _isOptionReviewMix() {
+  return _prodMode() === 'opt' && _reviewMixRows().length > 0;
+}
+
+function _mixQuantity(mix, type) {
+  const hit = (mix || []).find((entry) => entry?.type === type);
+  return Math.max(0, Math.floor(Number(hit?.quantity) || 0));
+}
+
+function renderRecruitOptionReviewMix() {
+  const root = document.getElementById('rf_review_mix_rows');
+  if (!root) return;
+  const optionMode = _isOptionReviewMix();
+  const rows = optionMode ? _reviewMixRows() : [];
+  const signature = optionMode
+    ? rows.map((row, index) => `${index}:${row.querySelector('.rf-opt-name')?.value || ''}:${row.querySelector('.rf-opt-rt')?.value || 0}`).join('|')
+    : 'global';
+  if (root.dataset.signature === signature) {
+    root.querySelectorAll('[data-rf-review-mix-card]').forEach((box) => {
+      const sum = Array.from(box.querySelectorAll('[data-mix-type]')).reduce((total, input) => total + (Number(input.value) || 0), 0);
+      const expected = Number(box.dataset.expected) || 0;
+      const total = box.querySelector('.mixed-review-total');
+      if (total) {
+        total.textContent = `합계 ${sum}명 / 옵션인원 ${expected}명`;
+        total.classList.toggle('is-invalid', sum !== expected);
+      }
+    });
+    return;
+  }
+  root.dataset.signature = signature;
+  root.innerHTML = '';
+
+  const cards = optionMode ? rows.map((row, index) => ({
+    row,
+    index,
+    label: String(row.querySelector('.rf-opt-name')?.value || '').trim() || '옵션명 입력 필요',
+    expected: Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0),
+    mix: _readOptionReviewMix(row),
+  })) : [{
+    row: null,
+    index: -1,
+    label: '전체 모집',
+    expected: Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0),
+    mix: window._rfGlobalReviewTypeMix || [],
+  }];
+
+  cards.forEach((card) => {
+    const box = document.createElement('div');
+    box.className = 'mixed-review-card';
+    box.dataset.rfReviewMixCard = String(card.index);
+    box.dataset.expected = String(card.expected);
+    const head = document.createElement('div');
+    head.className = 'mixed-review-heading';
+    const title = document.createElement('strong');
+    title.textContent = card.label;
+    const total = document.createElement('span');
+    total.className = 'mixed-review-total';
+    head.append(title, total);
+    const grid = document.createElement('div');
+    grid.className = 'mixed-review-grid';
+    RF_REVIEW_MIX_TYPES.forEach((type) => {
+      const label = document.createElement('label');
+      label.textContent = ({ photo: '포토', text: '텍스트', confirm: '구매확정', star: '별점' })[type];
+      const input = document.createElement('input');
+      input.type = 'number'; input.min = '0'; input.inputMode = 'numeric'; input.value = String(_mixQuantity(card.mix, type));
+      input.dataset.mixType = type;
+      input.addEventListener('input', () => {
+        const next = RF_REVIEW_MIX_TYPES.map((key) => ({ type: key, quantity: Number(grid.querySelector(`[data-mix-type="${key}"]`)?.value) || 0 }));
+        if (card.row) _writeOptionReviewMix(card.row, next);
+        else window._rfGlobalReviewTypeMix = next.filter((entry) => entry.quantity > 0);
+        syncRecruitReviewTypeMix();
+      });
+      label.appendChild(input);
+      grid.appendChild(label);
+    });
+    box.append(head, grid);
+    root.appendChild(box);
+    const sum = card.mix.reduce((totalValue, entry) => totalValue + (Number(entry.quantity) || 0), 0);
+    total.textContent = `합계 ${sum}명 / 옵션인원 ${card.expected}명`;
+    total.classList.toggle('is-invalid', sum !== card.expected);
+  });
+}
+
 function getRecruitReviewTypeMix() {
+  if (_isOptionReviewMix()) {
+    const sums = new Map();
+    getRecruitOptionReviewTypeMix().forEach((option) => option.reviewTypeMix.forEach((entry) => {
+      sums.set(entry.type, (sums.get(entry.type) || 0) + entry.quantity);
+    }));
+    return [...sums.entries()].map(([type, quantity]) => ({ type, quantity })).filter((entry) => entry.quantity > 0);
+  }
   return RF_REVIEW_MIX_TYPES.map((type) => {
     const el = document.querySelector(`#rf_review_mix [data-mix-type="${type}"]`);
     return { type, quantity: Math.max(0, Math.floor(Number(el?.value) || 0)) };
@@ -2760,11 +2882,12 @@ function syncRecruitReviewTypeMix() {
   const visible = reviewType === 'mixed';
   root.style.display = visible ? '' : 'none';
   if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
+  if (visible) renderRecruitOptionReviewMix();
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
   const totalEl = document.getElementById('rf_review_mix_total');
-  if (totalEl) {
+  if (totalEl && !_isOptionReviewMix()) {
     totalEl.textContent = `합계 ${sum}명 · 총인원 ${expected}명`;
     totalEl.style.color = reviewType === 'mixed' && sum !== expected ? 'var(--danger,#EF4444)' : 'var(--t3,#64748B)';
   }
@@ -2776,6 +2899,15 @@ function validateRecruitReviewTypeMix() {
   const reviewType = document.getElementById('rf_review_type')?.value || '';
   if (reviewType !== 'mixed') return '';
   const mix = syncRecruitReviewTypeMix();
+  if (_isOptionReviewMix()) {
+    const options = getRecruitOptionReviewTypeMix();
+    for (const option of options) {
+      const sum = option.reviewTypeMix.reduce((total, row) => total + row.quantity, 0);
+      if (option.reviewTypeMix.length < 2) return `옵션 ${option.optKey}에 두 가지 이상 리뷰방식을 입력해주세요.`;
+      if (option.recruitTotal <= 0 || sum !== option.recruitTotal) return `옵션 ${option.optKey}의 리뷰 조합 합계를 옵션인원 ${option.recruitTotal}명과 일치시켜주세요.`;
+    }
+    return '';
+  }
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   if (mix.length < 2) return '혼합 리뷰는 두 가지 이상 유형의 수량을 입력해주세요.';

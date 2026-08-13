@@ -38,4 +38,21 @@ function validateReviewTypeMix(reviewType, mixState, recruitTotal, { requireWhen
   return null;
 }
 
-module.exports = { REVIEW_TYPE_MIX_KEYS, normalizeReviewTypeMix, validateReviewTypeMix };
+/** 옵션 있는 공고는 전체 합계 외에도 옵션별 정원과 리뷰 조합을 각각 맞춘다. */
+function validateOptionReviewTypeMix(reviewType, options) {
+  if (reviewType !== 'mixed' || !Array.isArray(options) || options.length === 0) return null;
+  for (const option of options) {
+    if (option?.status === 'closed') continue;
+    if (option?.reviewMixError) {
+      return `옵션 "${String(option?.optKey ?? option?.opt_key ?? '').trim() || '이름 없음'}": ${option.reviewMixError}`;
+    }
+    const state = normalizeReviewTypeMix(option?.reviewTypeMix ?? option?.review_type_mix);
+    const error = validateReviewTypeMix('mixed', state, option?.recruitTotal ?? option?.recruit_total, {
+      requireWhenMixed: true,
+    });
+    if (error) return `옵션 "${String(option?.optKey ?? option?.opt_key ?? '').trim() || '이름 없음'}": ${error}`;
+  }
+  return null;
+}
+
+module.exports = { REVIEW_TYPE_MIX_KEYS, normalizeReviewTypeMix, validateReviewTypeMix, validateOptionReviewTypeMix };
