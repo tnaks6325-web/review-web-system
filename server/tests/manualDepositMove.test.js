@@ -13,6 +13,7 @@ assert.match(repair, /FOR UPDATE/, 'source and destination participants must be 
 assert.match(repair, /removeDepositStamp/, 'the move must remove only the requested source date');
 assert.match(repair, /target_not_blank/, 'a populated destination must fail closed');
 assert.match(repair, /rebuildLedgers\(/, 'sheetless workboard ledgers are rebuilt after the move');
+assert.match(repair, /ledgerDeferred/, 'large ledger rebuilds must not block the completed correction response');
 assert.match(routes, /payment\/repair\/move-deposit-date', authMiddleware, adminOrMasterMiddleware/, 'manual move endpoint must be admin protected');
 assert.match(routes, /sourceSeqs/, 'route receives visible workboard row numbers instead of opaque client ids');
 assert.match(workdesk, /_pmOpenDepositDateCorrection/, 'payment UI exposes the controlled correction action');

@@ -133,12 +133,25 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
     client.release();
   }
 
+  // The participant row_json write above is the workboard source of truth.
+  // Ledger rebuild can touch every row in a large tab, so do not hold the
+  // operator's correction dialog open behind it.  Let it continue after a
+  // short budget and expose that fact to the caller.
+  const ledgerPromise = rebuildLedgers({ sheetId, tabName, by: `manual-deposit-move:${by}` });
   let ledger = null;
   let ledgerError = null;
-  try {
-    ledger = await rebuildLedgers({ sheetId, tabName, by: `manual-deposit-move:${by}` });
-  } catch (err) {
-    ledgerError = (err && (err.code || err.message)) || 'rebuild_failed';
+  let ledgerDeferred = false;
+  const ledgerState = await Promise.race([
+    ledgerPromise.then(value => ({ value }), err => ({ err })),
+    new Promise(resolve => setTimeout(() => resolve({ deferred: true }), 8000)),
+  ]);
+  if (ledgerState.deferred) {
+    ledgerDeferred = true;
+    ledgerPromise.catch(() => {}); // result is already persisted; background rebuild is best-effort.
+  } else if (ledgerState.err) {
+    ledgerError = (ledgerState.err && (ledgerState.err.code || ledgerState.err.message)) || 'rebuild_failed';
+  } else {
+    ledger = ledgerState.value;
   }
   const { rows: verified } = await pool.query(
     `SELECT seq, COALESCE(row_json ->> $4, '') AS paid_value
@@ -152,7 +165,7 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
     ok: true, moved: from.length, date: targetValue,
     sourceSeqs: from, targetSeqs: to,
     sourceRemoved, targetRecorded,
-    ledgerRebuilt: !!ledger, ledgerError,
+    ledgerRebuilt: !!ledger, ledgerDeferred, ledgerError,
   };
 }
 
