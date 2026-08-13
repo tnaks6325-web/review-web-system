@@ -55,9 +55,10 @@
         choice(byId('rf_manager_btns'), (button) => button.dataset.val === '만두'); byId('rf_manager').value = '만두';
         byId('rf_delivery_type').value = '택배발송대행'; byId('rf_delivery_type').dispatchEvent(new Event('change'));
         const row = document.createElement('div');
-        row.className = 'rf-opt-row';
-        row.innerHTML = '<input class="rform-input" value="국내산 제주은갈치 손질 갈치조림 구이"><input class="rform-input" value="33,000" style="text-align:right"><input class="rform-input" value="15" style="text-align:right"><input class="rform-input" value="5" style="text-align:right"><button type="button" class="row-action" disabled>×</button>';
+        row.className = 'rf-opt-row rf-preview-product-row';
+        row.innerHTML = '<input class="rform-input rf-opt-url" value="https://smartstore.naver.com/example/option" placeholder="옵션 URL"><input class="rform-input rf-opt-prod" value="국내산 제주은갈치 손질 갈치조림 구이" placeholder="상품명"><input class="rform-input rf-opt-name" value="손질 갈치" placeholder="옵션명"><input class="rform-input rf-opt-pay" value="33,000" aria-label="결제금액" style="text-align:right"><input class="rform-input rf-opt-rt" value="15" aria-label="모집인원" style="text-align:right"><input class="rform-input rf-opt-dl" value="5" aria-label="일건수" style="text-align:right"><button type="button" class="row-action" disabled>×</button>';
         byId('rf_opt_rows').replaceChildren(row);
+        applyProductMode('none');
         byId('rf_product_main_url_value').textContent = 'https://smartstore.naver.com/example';
         byId('rf_wd_inflow').value = '이미지 참고 후 상품을 검색해 구매해주세요.';
         byId('rf_wd_review').value = '상품정보를 참고해 자연스러운 리뷰를 작성해주세요.';
@@ -82,7 +83,15 @@
       window.rfToggleFeeSchedule = function () { const t=byId('rf_fee_sched_toggle'); const on=!t.classList.contains('on'); t.classList.toggle('on',on); t.setAttribute('aria-pressed',on); byId('rf_fee_sched_on').checked=on; byId('feeScheduleState').textContent=on?'사용':'사용 안 함'; byId('rf_fee_sched_section').style.display=on?'':'none'; };
       window.rfSetWeekendPolicy = function (skip, button) { choice(byId('rf_skip_weekends_toggle'), (item) => item === button); byId('rf_skip_weekends').checked=skip; };
       window.rfSetMultiAccount = function (on, button) { choice(byId('rf_multi_account_toggle'), (item) => item === button); byId('rf_multi_account').checked=on; byId('rf_multi_section').hidden=!on; };
-      window.setProdMode = function (mode) { byId('rf_prod_mode').value=mode; choice(byId('rf_prod_mode_sw'), (button) => button.dataset.mode===mode); };
+      function applyProductMode(mode) {
+        const selected = mode === 'opt' ? 'opt' : 'none';
+        const wrap = byId('rf_opt_wrap');
+        byId('rf_prod_mode').value = selected;
+        if (wrap) { wrap.classList.toggle('rf-pm-opt', selected === 'opt'); wrap.classList.toggle('rf-pm-none', selected !== 'opt'); }
+        const root = byId('rf_prod_mode_sw');
+        if (root) root.querySelectorAll('button').forEach((button) => { const on = button.dataset.mode === selected; button.classList.toggle('active', on); button.classList.toggle('on', on); });
+      }
+      window.setProdMode = function (mode) { applyProductMode(mode); };
       window.syncRecruitReviewTypeMix = function () { syncReviewMix(); };
       function syncReviewMix() { const mixed=byId('rf_review_type').value==='mixed'; const composer=byId('rf_mixed_review_composer'); composer.hidden=!mixed; composer.classList.toggle('is-visible',mixed); const sum=[...composer.querySelectorAll('[data-mix-type]')].reduce((n,input)=>n+(Number(input.value)||0),0); byId('rf_review_mix_total').textContent='합계 '+sum+'명 · 총인원 15명'; }
       document.addEventListener('DOMContentLoaded', function () { setPreview(); byId('resetPreview').addEventListener('click', setPreview); });
