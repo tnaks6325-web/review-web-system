@@ -216,11 +216,16 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ]);
     const stampWrites = [];
     RES.__setPoolForTest(stampPool);
-    APPLY.markDepositCells = async (items, opts) => { stampWrites.push({ items, opts }); };
+    APPLY.markDepositCells = async (items, opts) => {
+      stampWrites.push({ items, opts });
+      return { total: items.length, recorded: 0, queued: 1, skipped: 0, failed: 0 };
+    };
     const stampBackfill = await RES.backfillPaidDepositStamp({ batchId: 'B1', stamp: '2026.8.11', by: '관리자A' });
     ok('★ 이미 입금 처리된 항목만 입금 칸에 지정 날짜를 기록하고 payment_records는 다시 만들지 않는다',
-      stampBackfill.ok === true && stampBackfill.candidates === 1 && stampWrites.length === 1
+      stampBackfill.ok === true && stampBackfill.candidates === 1 && stampBackfill.recorded === 0
+        && stampBackfill.queued === 1 && stampBackfill.failed === 0 && stampWrites.length === 1
         && stampWrites[0].items.length === 1 && stampWrites[0].opts.stamp === '2026.8.11'
+        && stampPool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql))
         && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
       JSON.stringify(stampBackfill));
     APPLY.markDepositCells = origMark;

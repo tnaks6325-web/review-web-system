@@ -101,6 +101,7 @@ async function recordDeposits(client, items, opts = {}) {
 async function markDepositCells(items, opts = {}) {
   const by = opts.by || 'payment';
   const headerCache = {};
+  const outcome = { total: Array.isArray(items) ? items.length : 0, recorded: 0, queued: 0, skipped: 0, failed: 0 };
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const stamp = item.stamp || opts.stamp;
@@ -117,6 +118,8 @@ async function markDepositCells(items, opts = {}) {
         kind: 'paid', value: stamp, by,
       });
       if (st.handled) {
+        if (st.ok) outcome.recorded += 1;
+        else outcome.failed += 1;
         if (st.ok) logger.info(`[paymentApply] 무시트 입금칸 기록 (tab=${item.tabName}, row=${rowIndex}, col=${st.column})`);
         else logger.warn(`[paymentApply] 무시트 입금칸 기록 실패 (tab=${item.tabName}, row=${rowIndex}) reason=${st.reason}`);
         continue;   // ★ 시트 쓰기·deposit_mark 큐로 내려가지 않는다(무시트에는 쓸 시트가 없다)
@@ -138,6 +141,7 @@ async function markDepositCells(items, opts = {}) {
       if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey}' 을 헤더에서 찾을 수 없음`);
       const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
       await writeSheet(item.sheetId, range, [[stamp]], item.gid ? { gid: item.gid } : {});
+      outcome.recorded += 1;
       logger.info(`[paymentApply] 입금칸 기록 성공 (tab=${item.tabName}, row=${rowIndex})`);
     } catch (bgErr) {
       logger.warn(`[paymentApply] 시트 쓰기 실패 → 큐 등록: ${bgErr.message}`);
@@ -150,11 +154,15 @@ async function markDepositCells(items, opts = {}) {
           value: stamp,
           gid: item.gid || '',
         });
+        outcome.queued += 1;
       } catch (qErr) {
+        outcome.failed += 1;
         logger.error(`[paymentApply] 큐 등록도 실패: ${qErr.message}`);
       }
     }
   }
+  outcome.skipped = Math.max(0, outcome.total - outcome.recorded - outcome.queued - outcome.failed);
+  return outcome;
 }
 
 module.exports = { nowStamp, colLetter, detectHeaderRow, recordDeposits, markDepositCells };

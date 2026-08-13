@@ -6946,9 +6946,19 @@ function _pmBatchResult(b){
   return `<span style="white-space:nowrap;font-size:11.5px">${b.itemCount}건 업로드 · <b>${b.resultSuccessCount||0}건 성공</b> · <b>${b.resultFailedCount||0}건 실패</b></span>`;
 }
 function _pmBatchWorkboard(b){
-  return b.resultUploadId && (b.resultAppliedCount||0)>0
-    ? `<span class="pmauto">${b.resultAppliedCount}건 반영됨</span>`
-    : '<span class="pmauto">-</span>';
+  const recorded = b.boardRecordedCount||0;
+  const queued = b.boardQueuedCount||0;
+  const skipped = b.boardSkippedCount||0;
+  const failed = b.boardFailedCount||0;
+  if(recorded || queued || skipped || failed){
+    const parts = [`${recorded}건 기록됨`];
+    if(queued) parts.push(`${queued}건 대기`);
+    if(skipped) parts.push(`${skipped}건 제외`);
+    if(failed) parts.push(`${failed}건 실패`);
+    return `<span class="pmauto">${esc(b.boardStamp||'-')} · ${parts.join(' · ')}</span>`;
+  }
+  if((b.resultAppliedCount||0)>0) return '<span class="pmauto">입금일 미기록</span>';
+  return '<span class="pmauto">-</span>';
 }
 function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
@@ -7541,6 +7551,15 @@ async function _pmBackfillPaidDeposit(i){
   if(!confirm(`#${b.seq} 회차의 이미 입금된 ${b.paidCount||0}건 입금 칸에 ${normalized}을 기록할까요?\n\n입금 원장·금액·회차 상태는 변경하지 않습니다.`)) return;
   const r = await api('/api/trackb/payment/batch/'+b.id+'/deposit-date-backfill',
     { method:'POST', body: JSON.stringify({ stamp:normalized }) });
+  if(r && r.ok){
+    const resultParts = [`${r.recorded||0}건 실제 기록`];
+    if(r.queued) resultParts.push(`${r.queued}건 대기`);
+    if(r.skipped) resultParts.push(`${r.skipped}건 제외`);
+    if(r.failed) resultParts.push(`${r.failed}건 실패`);
+    toast(`${r.stamp} 입금일: ${resultParts.join(' · ')}`);
+    await _pmLoad();
+    return;
+  }
   if(!r || !r.ok){ toast((r&&r.error)||'입금일 기록 실패'); return; }
   toast(`${r.candidates||0}건의 입금 칸에 ${r.stamp}을 기록했습니다`);
 }
