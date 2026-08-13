@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 3000;
+const readOnlyPreview = process.env.READ_ONLY_MODE === 'true';
 
 // ── 마이그레이션 안전장치(방어 D2·D7) ──
 // D2: 종전 에러 "메시지" 부분일치(duplicate/already exists)는 23505(duplicate key = 데이터 마이그레이션 실패)까지
@@ -189,12 +190,16 @@ async function runMigrations() {
 
 // ── 서버 시작 ──
 (async () => {
-  try {
-    await runMigrations();
+  if (!readOnlyPreview) {
+    try {
+      await runMigrations();
   } catch (err) {
     logger.warn(`[migrate] 마이그레이션 오류 (프리플라이트가 부팅 가부 판정): ${err.message}`);
   }
-  await assertSchemaReady();   // ★ 필수 컬럼 누락이면 여기서 종료 — listen 하지 않는다(무신호 500 방지)
+    await assertSchemaReady();   // ★ 필수 컬럼 누락이면 여기서 종료 — listen 하지 않는다(무신호 500 방지)
+  } else {
+    logger.info('[read-only-preview] migration and schema preflight skipped');
+  }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     // ★ 서버 타임아웃 설정 — 이미지 업로드 등 대용량 요청 대응 (3분)
@@ -208,7 +213,7 @@ async function runMigrations() {
     logger.info(`   Google: ${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? '설정됨' : '⚠️ 미설정'}`);
 
     // 스케줄러 시작 (GAS 트리거 대체)
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && !readOnlyPreview) {
       startCronJobs();
       logger.info('✅ 인덱스 빌드 스케줄러 시작됨');
     } else {
@@ -219,7 +224,9 @@ async function runMigrations() {
     //   SMART_BUILD_DISABLED=1 이면 코드레벨 미기동(env 킬스위치). 미설정=기존 동작(가산적·롤백가능).
     //   startSmartBuild는 app_settings.smart_build_paused_until을 읽어 관리자 pause를 부팅 복원(async)한다.
     //   listen 콜백은 async가 아니므로 fire-and-forget(.then/.catch) — 부팅복원 실패는 비치명.
-    if (process.env.SMART_BUILD_DISABLED === '1') {
+    if (readOnlyPreview) {
+      logger.info('[read-only-preview] smart build scheduler skipped');
+    } else if (process.env.SMART_BUILD_DISABLED === '1') {
       logger.warn('⏸ SMART_BUILD_DISABLED=1 — 스마트 빌드 스케줄러 미기동(env 킬스위치). 근실시간 인덱스 갱신 없음(전체빌드만).');
     } else {
       startSmartBuild()
@@ -240,7 +247,7 @@ async function runMigrations() {
     //   ★ 1회성 가드(app_settings, 057과 동일 패턴): 재배포마다 반복 실행되면 Sheets API 쿼터를
     //     불필요하게 소모하므로 최초 1회만 수행한다. 키를 8/4 라운드로 갱신해 ①만 반영됐던
     //     배포에서도 ②까지 포함해 다시 한번 강제 재빌드되게 한다(8/3 플래그는 재사용하지 않음).
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && !readOnlyPreview) {
       (async () => {
         const pool = require('./src/db/pool');
         try {
@@ -264,7 +271,7 @@ async function runMigrations() {
     //   이미 무시트 이관된 탭이라 시스템이 시트를 더 안 읽고 내부 시트 사본도 작업표 기준으로
     //   재생성돼 빈 행 기록이 없다 → 시트를 **한 번만** 다시 읽어 1~50 자리를 표에 만든다.
     //   추가만·시트 쓰기 0·멱등. 실패하면 가드를 안 남겨 다음 부팅에 재시도한다(부팅은 계속).
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && !readOnlyPreview) {
       (async () => {
         try {
           const { runBlog0804Backfill } = require('./src/services/blog0804Backfill.service');
