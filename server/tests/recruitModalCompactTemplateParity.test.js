@@ -31,9 +31,9 @@ assert(/if \(act === 'work'\) act = 'prod'/.test(modal),
   '작업내용을 지날 때 좌측 단계는 진행상품·상품 정보로 유지해야 합니다.');
 assert(/#recruitModal \.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal),
   '승인 시안의 25/75 라벨·입력 열 비율을 사용해야 합니다.');
-assert(/#recruitModal \.rf-main \.rform-input\{min-height:30px/.test(modal),
+assert(/#recruitModal \.rf-compact-main \.form-control>input:not\(\[type=checkbox\]\),#recruitModal \.rf-compact-main \.form-control>textarea\{[^}]*height:26px/.test(modal),
   '입력란은 승인 시안의 30px 높이를 사용해야 합니다.');
-assert(/#recruitModal \.rchan-btn,#recruitModal \.rf-pm-btn,#recruitModal \.rf-status-buttons button\{min-height:29px/.test(modal),
+assert(/#recruitModal \.rf-compact-main \.choice,#recruitModal \.rf-compact-main \.square-toggle button\{min-height:26px/.test(modal),
   '선택 버튼은 승인 시안의 29px 높이를 사용해야 합니다.');
 assert(/rf-parity-time-row/.test(modal) && /rf-parity-date-row/.test(modal),
   '구매시간대와 모집 시작일은 승인 시안의 행 위치로 렌더링되어야 합니다.');
