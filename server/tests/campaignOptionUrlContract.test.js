@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { normalizeReviewTypeMix } = require('../src/utils/reviewTypeMix');
 
 const root = path.join(__dirname, '..', '..');
 const routes = fs.readFileSync(path.join(root, 'server', 'src', 'routes', 'campaign.routes.js'), 'utf8');
@@ -33,7 +34,10 @@ function functionSource(source, name) {
   throw new Error(`${name} body is incomplete`);
 }
 
-const sandbox = { URL };
+// _normalizeOptionsInput also normalizes option-level mixed review data.
+// Load its production helper into the isolated contract sandbox so the URL
+// assertions exercise the same dependency graph as the route does.
+const sandbox = { URL, normalizeReviewTypeMix };
 vm.createContext(sandbox);
 vm.runInContext(functionSource(routes, '_normOptKey'), sandbox);
 vm.runInContext(functionSource(routes, '_optNum'), sandbox);
@@ -56,6 +60,8 @@ assert.deepEqual(normalizedOptions, [{
   payAmount: 33000,
   recruitTotal: 15,
   dailyLimit: 5,
+  reviewTypeMix: [],
+  reviewMixError: null,
   sortOrder: 0,
   status: null,
 }]);
