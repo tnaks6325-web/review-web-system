@@ -24,7 +24,7 @@ const poolConfig = {
 };
 
 // Railway PostgreSQL은 SSL 필수
-if ((isProduction || databaseUrlRequestsSsl) && connectionString) {
+if ((isProduction || databaseUrlRequestsSsl || allowSelfSignedDatabaseCert) && connectionString) {
   poolConfig.ssl = { rejectUnauthorized: !allowSelfSignedDatabaseCert };
 }
 
