@@ -294,6 +294,7 @@ let _pollTimer = null;
 let _afterLogin = null;    // 본인확인 성공 후 이어서 할 동작
 let _pvStep = 'pre';       // 미리보기 현재 단계
 let _pvForceOpen = true;   // 미리보기 ①단계를 '모집중'으로 가정해 보여줄지(마감·게시전 공고 확인용)
+let _pvSimSubmitted = false; // 미리보기 가상 제출 완료 여부(브라우저 메모리에만 존재)
 
 function $(id){ return document.getElementById(id); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
@@ -896,9 +897,11 @@ function onBlogSheetConfirm(){
 
 /* ═══ 참여하기 ═══ */
 async function onJoin(){
-  if(PREVIEW) return _pvBlock('참여하기');   // ★ 미리보기: 홀드 생성 요청 자체를 보내지 않음
-  const s = getSession();
-  if(!s) return needLogin(onJoin);
+  // 관리자 미리보기는 리뷰어 세션·서버 홀드 없이도 옵션 선택부터 가상 진행을 확인한다.
+  if(!PREVIEW){
+    const s = getSession();
+    if(!s) return needLogin(onJoin);
+  }
   const opts = (_camp && _camp.options) || [];
   if(opts.length){
     // 옵션 등록 캠페인 → 선택 필수(선택 가능 옵션 없으면 안내, 1개면 자동선택)
@@ -912,15 +915,34 @@ async function onJoin(){
 
 /** 옵션 확정 후 분기: 타계정 가능 공고 + 타계정 보유면 명의 선택, 아니면 본계정 즉시 참여 */
 async function _joinWithOption(optionKey){
+  if(PREVIEW) return _pvSimulateApply(optionKey);
   if(!multiEnabled()) return _doApply(optionKey);
   await loadSubs();
   if(!(_subs || []).length) return _doApply(optionKey);   // 타계정 없음 = 기존 흐름 그대로
   return openAcctSheet(optionKey);
 }
 
+/** 관리자 미리보기 전용 가상 참여. 서버/스토리지에 전혀 기록하지 않는다. */
+function _pvSimulateApply(optionKey){
+  if(!PREVIEW || !_detail) return;
+  const options = _detail.options || (_camp && _camp.options) || [];
+  const selectedOption = optionKey ? (options.find(o => String(o.optKey) === String(optionKey)) || null) : (_detail.selectedOption || null);
+  _detail = {
+    ..._detail,
+    application: { ...(_detail.application || {}), id:'preview', status:'applied', optionKey: selectedOption ? selectedOption.optKey : null },
+    selectedOption,
+    canChangeOption: false,
+  };
+  _pvSimSubmitted = false;
+  hideOptSheet();
+  _pvStep = 'joined';
+  _renderJoinedView(_detail, null);
+  toast('가상 참여로 작업가이드를 열었습니다. 실제 참여 기록은 남지 않습니다.');
+}
+
 /** @param sub {name,phone}|null — 있으면 타계정 명의로 참여(서버가 sub_accounts로 재검증) */
 async function _doApply(optionKey, sub){
-  if(PREVIEW) return _pvBlock('참여하기');   // ★ 어떤 경로로도 apply 요청 금지(옵션 시트 확인 포함)
+  if(PREVIEW) return _pvSimulateApply(optionKey); // 어떤 경로로도 /apply 요청을 보내지 않는다.
   const s = getSession();
   if(!s) return needLogin(onJoin);
   hideOptSheet();
@@ -1184,7 +1206,23 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnc
 function renderDone(pendingConfirm){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   // chatUrl은 제출확정 후에만 서버가 반환 → 제출 직후 _detail(제출 전 응답)엔 비어있어 1회 재조회로 채운다
-  _ensureDoneChat();
+  if(!PREVIEW) _ensureDoneChat();
+  if(PREVIEW){
+    const done = $('vDone');
+    const heading = done.querySelector('h2');
+    const copy = done.querySelector('p');
+    const home = done.querySelector('.btn:not(#doneChatBtn)');
+    const chat = $('doneChatBtn');
+    if(heading) heading.textContent = _pvSimSubmitted ? '시뮬레이션 제출 완료' : '제출 완료 화면 미리보기';
+    if(copy) copy.innerHTML = _pvSimSubmitted
+      ? '구매양식이 가상으로 제출되었습니다.<br/><b>실제 참여·작업보드·서버 기록은 생성되지 않았습니다.</b>'
+      : '실제 제출이 완료된 뒤 리뷰어가 보는 화면입니다.<br/><b>이 미리보기에서는 어떠한 기록도 생성되지 않습니다.</b>';
+    if(home){
+      home.textContent = '참여 전 시뮬레이션으로 돌아가기';
+      home.onclick = () => { _pvSimSubmitted = false; pvGo('pre'); };
+    }
+    if(chat) chat.style.display = 'none';
+  }
   // 👥 063 2단계: 제출 완료된 명의는 홀드 맵에서 정리하고, 진행 중인 다른 명의가 남아 있으면 이어서 진행 안내
   if(!PREVIEW){
     try{
@@ -1240,6 +1278,11 @@ window.addEventListener('message', (ev)=>{
     return;
   }
   if(d.type === 'order-submitted'){
+    if(PREVIEW && d.simulation){
+      _pvSimSubmitted = true;
+      pvGo('done');
+      return;
+    }
     if(Array.isArray(d.results) && d.results.length > 1) renderDoneBatch(d.results);
     // ★ 홀드 확정 결과 분기(S1): confirmed 외(late/tab_mismatch/error 등)는 자동 확정이 아님 —
     //   주문은 안전히 접수됐고 운영자 수동확정 대상임을 안내(거짓 "참여 확정!" 금지)
@@ -1313,7 +1356,14 @@ function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src,
 
 /* 참여 취소 */
 async function onCancel(){
-  if(PREVIEW) return _pvBlock('참여 취소');
+  if(PREVIEW){
+    _pvSimSubmitted = false;
+    hideOptSheet();
+    _pvStep = 'pre';
+    renderPre();
+    toast('가상 참여를 취소했습니다. 실제 기록은 남지 않습니다.');
+    return;
+  }
   const h = getHold(); if(!h) return;
   if(!confirm('참여를 취소할까요?\n취소해도 오늘은 이 캠페인에 다시 참여할 수 없어요.')) return;
   try{
