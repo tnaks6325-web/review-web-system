@@ -2745,6 +2745,7 @@ router.post('/payment/repair/move-deposit-date', authMiddleware, adminOrMasterMi
     }));
   } catch (err) {
     if (err && err.code) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+    if (err) return res.status(500).json({ ok: false, code: 'manual_move_failed', error: err.message || '수동 입금일 이동에 실패했습니다.' });
     next(err);
   }
 });
