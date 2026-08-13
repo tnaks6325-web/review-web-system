@@ -19,6 +19,7 @@ assert.match(route, /status\(404\)/, 'disabled or foreign-origin requests are in
 assert.match(cors, /TEST_AUTO_LOGIN_ORIGIN/, 'the test frontend is allowed through CORS only when test auto-login is enabled');
 
 assert.match(workdesk, /TEST_AUTO_LOGIN_HOST\s*=\s*'test-review-wdb-web-production\.up\.railway\.app'/, 'only the test frontend activates direct entry');
+assert.match(workdesk, /window\.REVIEW_API_URL\s*=\s*TEST_AUTO_LOGIN_API/, 'test frontend also supplies its API base to api.js modules');
 assert.match(workdesk, /\/api\/admin\/test-auto-login/, 'test frontend requests the dedicated endpoint');
 assert.match(workdesk, /sessionStorage\.setItem\('admin_token',\s*result\.token\)/, 'issued token is stored in the existing session location');
 assert.match(workdesk, /if\s*\(await tryTestAutoLogin\(\)\)\s*return boot\(\)/, 'boot retries after automatic session creation');
