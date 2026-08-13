@@ -2377,6 +2377,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
       });
       const json = await res.json();
       const c = json.data || json;
+      // 수정 모달에는 전체 편집 응답만 허용한다. 공개용 축약 응답으로 저장하면 기존 값이 빈값으로 덮인다.
+      if (!Object.prototype.hasOwnProperty.call(c, "work_detail")) {
+        throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
+      }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
       window._recruitEditLoadedFees = json.feeSchedules || [];
@@ -3364,6 +3368,10 @@ function _rfGoToCheck() {
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
 async function saveRecruitPost() {
+  if (_recruitEditId && window._recruitEditLoadFailed) {
+    _rfSaveBlocked("기존 공고 정보를 완전히 불러오지 못해 저장을 차단했습니다. 새로고침 후 다시 시도해주세요.");
+    return;
+  }
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();   // 지난 사유 지우고 시작
   syncRecruitAutomaticBadges();
   const title    = document.getElementById("rf_title").value.trim();

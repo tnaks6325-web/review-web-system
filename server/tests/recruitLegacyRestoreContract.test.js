@@ -14,6 +14,17 @@ const saveStart = FRONT.lastIndexOf('const partEl = document.getElementById("rf_
 assert.ok(saveStart >= 0, '참여형 저장 경로를 찾을 수 없습니다.');
 const save = FRONT.slice(saveStart, saveStart + 12000);
 
+assert.match(
+  FRONT,
+  /Object\.prototype\.hasOwnProperty\.call\(c, "work_detail"\)/,
+  'public detail payload must not be treated as an editable campaign'
+);
+assert.match(
+  FRONT,
+  /if \(_recruitEditId && window\._recruitEditLoadFailed\) \{[\s\S]{0,360}?return;/,
+  'saving an existing campaign must stop after detail loading fails'
+);
+
 assert.ok(
   !/if \(c\.participation_mode\) \{[\s\S]{0,9000}renderOptRowsWithProduct/.test(FRONT),
   '기존 공고도 상품·옵션 복원이 participation_mode 조건에 막히면 안 됩니다.'
