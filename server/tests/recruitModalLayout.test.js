@@ -98,6 +98,26 @@ ok('실제 런타임 중앙 편집부는 승인 시안의 editor/section/row-for
   && /class="form-control"/.test(modal));
 const compactEditorStart = modal.indexOf('<div class="rf-main rf-compact-main">');
 const legacyRootClose = modal.indexOf('</div></template><!-- /legacy rf-main -->');
+const compact = modal.slice(compactEditorStart);
+ok('sheetless compact editor keeps sheet and tab only as hidden compatibility fields',
+  /<div class="sheetless-compat-fields" hidden><select id="rf_linked_campaign"/.test(compact)
+  && /<select id="rf_linked_tab"/.test(compact)
+  && !/class="form-row"><span class="form-label">[^<]*<em class="required"/.test(compact.slice(0, compact.indexOf('id="rf_inflow_type_ui"')))
+  && !/class="linked-reference"/.test(compact.slice(0, compact.indexOf('id="rf_inflow_type_ui"'))));
+ok('product main URL is directly editable below work type and synced to landing URL',
+  compact.indexOf('product-work-type') < compact.indexOf('id="rf_product_main_url"')
+  && compact.indexOf('id="rf_product_main_url"') < compact.indexOf('id="rf_opt_wrap"')
+  && /<input id="rf_product_url" type="url"/.test(compact)
+  && !/rf_product_main_url_value|rf_product_main_url_state|linked-reference/.test(compact.slice(compact.indexOf('id="rf_product_main_url"'), compact.indexOf('id="rf_opt_wrap"')))
+  && /landing\.value\s*=\s*String\(input\.value/.test(editor));
+ok('mixed review composer opens below review type buttons',
+  /class="form-row rf-review-type-row"/.test(compact)
+  && /class="review-type-buttons"/.test(compact)
+  && /rf-review-type-row \.form-control\{display:block/.test(modal));
+ok('badge and guide inputs use the compact two-to-one composition',
+  /class="badge-field"/.test(compact)
+  && /\.badge-field\{display:grid;gap:6px;width:100%\}/.test(modal)
+  && /\.work-compose\{display:grid;grid-template-columns:minmax\(0,2fr\) minmax\(86px,1fr\)/.test(modal));
 ok('이전 마크업 템플릿은 새 컴팩트 편집기 전에 정확히 닫혀 실제 입력 DOM을 만든다',
   legacyRootClose > modal.indexOf('<template id="rf_legacy_card_editor_markup">')
   && legacyRootClose < compactEditorStart);
