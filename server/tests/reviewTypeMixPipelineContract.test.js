@@ -24,7 +24,8 @@ const boot = readReview('server/index.js');
 if (intranetRoot) {
   assert.match(intranetUi, /reviewOrderReviewTypeMix/);
   assert.match(intranetUi, /review-order-review-confirm-count/);
-  assert.match(intranetUi, /review_type_mix:\s*reviewMix/);
+  assert.match(intranetUi, /review_type_mix:\s*reviewOrderReviewTypeMix\(products\)/);
+  assert.match(intranetUi, /review_type_mix:\s*option\.reviewTypeMix\s*\|\|\s*\[\]/);
   assert.match(intranetApi, /'review_type_mix'/);
 } else {
   console.log('reviewTypeMixPipelineContract: intranet cross-repository assertions skipped (set INTRANET_PROJECT_ROOT to enable)');
