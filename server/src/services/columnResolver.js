@@ -14,14 +14,18 @@ const PAYMENT_EXACT = ['입금', '입금일', '입금일자', '입금완료', '�
 const PAYMENT_PARTIAL = ['페이백입금', '페이백'];
 const PAYMENT_EXCLUDE = ['입금명', '입금자', '예금주', '입금자명', '결제금액', '결제금', '결제일', '결제수단'];
 
+function compactPaymentHeader(value) {
+  return String(value || '').trim().toLowerCase().replace(/[\s_\-()[\]{}]/g, '');
+}
+
 function findPaymentColumnIndex(headers) {
   const normalized = (headers || []).map(h => String(h || '').trim());
-  const exact = normalized.findIndex(h => PAYMENT_EXACT.includes(h));
+  const exact = normalized.findIndex(h => PAYMENT_EXACT.includes(compactPaymentHeader(h)));
   if (exact >= 0) return exact;
   return normalized.findIndex(h => {
-    const lower = h.toLowerCase();
-    return !PAYMENT_EXCLUDE.some(p => lower.includes(p))
-      && PAYMENT_PARTIAL.some(k => lower.includes(k.toLowerCase()));
+    const compact = compactPaymentHeader(h);
+    return !PAYMENT_EXCLUDE.some(p => compact.includes(compactPaymentHeader(p)))
+      && PAYMENT_PARTIAL.some(k => compact.includes(compactPaymentHeader(k)));
   });
 }
 
