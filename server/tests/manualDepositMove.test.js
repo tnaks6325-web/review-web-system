@@ -11,6 +11,7 @@ const workdesk = fs.readFileSync(path.join(root, '..', 'frontend/workdesk.html')
 assert.match(repair, /async function moveDepositDateBetweenRows/, 'manual correction service must support a guarded date move');
 assert.match(repair, /FOR UPDATE/, 'source and destination participants must be locked before a move');
 assert.match(repair, /removeDepositStamp/, 'the move must remove only the requested source date');
+assert.match(repair, /jsonb_build_object\(\$2::text, \$3::text\)/, 'the JSON key/value parameters must have explicit PostgreSQL types');
 assert.match(repair, /target_not_blank/, 'a populated destination must fail closed');
 assert.match(repair, /rebuildLedgers\(/, 'sheetless workboard ledgers are rebuilt after the move');
 assert.match(repair, /ledgerDeferred/, 'large ledger rebuilds must not block the completed correction response');

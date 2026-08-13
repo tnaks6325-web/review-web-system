@@ -114,14 +114,14 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
     for (const { row, value } of sourceUpdates) {
       await client.query(
         `UPDATE campaign_participants
-            SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2, $3),
+            SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
                 updated_at = NOW(), updated_by = $4
           WHERE id = $1`, [row.id, depositColKey, value, by]);
     }
     for (const row of targetRows) {
       await client.query(
         `UPDATE campaign_participants
-            SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2, $3),
+            SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
                 updated_at = NOW(), updated_by = $4
           WHERE id = $1`, [row.id, depositColKey, targetValue, by]);
     }
