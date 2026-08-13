@@ -409,10 +409,11 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('★ 반영 요청에 파일을 다시 보낸다(서버가 재해석)', /result-apply[\s\S]{0,240}base64:R\.file\.base64/.test(wd));
     ok('★ 순서 배정을 화면이 고지한다', /결과를 순서대로 배정/.test(wd));
     ok('★ 결과없음은 "대기 유지"라고 말한다', /그대로 대기 상태로 둡니다/.test(wd));
-    ok('실패 안내 체크박스(기본 켬)', /id="pmNotifyFail"/.test(wd) && /계좌 확인 안내/.test(wd));
+    ok('자동 반영은 실패 안내를 기본으로 켠다', /result-auto-apply/.test(wd)
+      && /notifyFailed: b\.notifyFailed !== false/.test(tb));
     ok('★ 확인 팝업은 body 직속', /document\.body\.appendChild\(el\);\s*\/\/ ★ body 직속/.test(wd));
     ok('★ Esc 리스너는 최상위 1회만', /_pmResultKeyBound/.test(wd));
-    ok('★ [이대로 반영] 완료 안내에 작업보드 입금일 기록 결과를 함께 표시하고, 회차별 별도 입금일 기록 버튼은 남기지 않는다',
+    ok('★ 자동 반영 결과에 작업보드 입금일 기록 결과를 표시하고, 회차별 별도 입금일 기록 버튼은 남기지 않는다',
       /function _pmBoardApplyText\(board\)/.test(wd)
       && /_pmBoardApplyText\(r\.board\)/.test(wd)
       && !/const depositDate\s*=/.test(wd)

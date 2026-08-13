@@ -218,6 +218,55 @@ async function previewResultFile({ batchId, fileName, base64, by }) {
 }
 
 /** 가장 최근의 저장된 결과 확인본. 원문 파일·전체 계좌번호는 절대 되돌려 주지 않는다. */
+async function _hasAppliedFileSha256(fileSha256) {
+  const { rows } = await _db().query(
+    `SELECT id FROM payment_result_uploads
+      WHERE file_sha256 = $1 AND applied = TRUE
+      LIMIT 1`, [fileSha256]);
+  return rows.length > 0;
+}
+
+async function _saveAutoApplyDecision(uploadId, autoApply) {
+  if (!uploadId) return;
+  await _db().query(
+    `UPDATE payment_result_uploads
+        SET summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb
+      WHERE id = $1`,
+    [uploadId, JSON.stringify({ autoApply })]);
+}
+
+/** Store every upload for audit, but change payment state only when the
+ * explicitly approved auto-apply policy says the file belongs to this batch. */
+async function autoApplyResultFile({ batchId, fileName, base64, by, notifyFailed }) {
+  const a = await _analyze(batchId, fileName, base64);
+  const fileSha256 = crypto.createHash('sha256').update(a.fileBuffer).digest('hex');
+  const duplicateApplied = await _hasAppliedFileSha256(fileSha256);
+  const autoApply = decideAutoApply({ summary: a.summary, duplicateApplied });
+  const preview = await previewResultFile({ batchId, fileName, base64, by });
+  await _saveAutoApplyDecision(preview.uploadId, autoApply);
+
+  if (!autoApply.allowed) return { ...preview, canApply: false, autoApplied: false, autoApply };
+
+  try {
+    const applied = await applyResultFile({
+      batchId, uploadId: preview.uploadId, by, notifyFailed, preventDuplicate: true,
+    });
+    return { ...preview, ...applied, canApply: false, autoApplied: true, autoApply };
+  } catch (err) {
+    // Another request can apply the same SHA after the first lookup.  Return
+    // the safe duplicate warning instead of letting a second payment proceed.
+    if (err instanceof ResultError && err.code === 'duplicate_file') {
+      return {
+        ...preview,
+        canApply: false,
+        autoApplied: false,
+        autoApply: decideAutoApply({ summary: a.summary, duplicateApplied: true }),
+      };
+    }
+    throw err;
+  }
+}
+
 async function getLatestResultPreview(batchId) {
   if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
   const { rows: [row] } = await _db().query(
@@ -232,7 +281,9 @@ async function getLatestResultPreview(batchId) {
     canApply: row.applied !== true && row.has_file === true
       && ((preview.summary && preview.summary.success) || 0) + ((preview.summary && preview.summary.failed) || 0) > 0,
     applied: row.applied === true,
-    fileName: row.file_name || '', uploadedAt: row.uploaded_at || null, ...preview,
+    fileName: row.file_name || '', uploadedAt: row.uploaded_at || null,
+    autoApply: row.summary && row.summary.autoApply ? row.summary.autoApply : undefined,
+    ...preview,
   };
 }
 
@@ -270,7 +321,7 @@ async function _notifyFailures(items, by) {
  * 반영 — 성공 건만 입금 기록. **서버가 파일을 다시 해석한다.**
  * @param {boolean} [notifyFailed] false 면 실패 안내(1:1문의)를 보내지 않는다(기본 = 보냄).
  */
-async function applyResultFile({ batchId, fileName, base64, uploadId, by, notifyFailed }) {
+async function applyResultFile({ batchId, fileName, base64, uploadId, by, notifyFailed, preventDuplicate = false }) {
   if (uploadId) {
     const { rows: [stored] } = await _db().query(
       `SELECT id, file_name, file_blob, file_sha256, applied
@@ -285,6 +336,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     base64 = Buffer.from(stored.file_blob).toString('base64');
   }
   const a = await _analyze(batchId, fileName, base64);
+  const fileSha256 = crypto.createHash('sha256').update(a.fileBuffer).digest('hex');
 
   const success = a.pairs.filter(p => p.success);
   const failed  = a.pairs.filter(p => p.result && !p.success);
@@ -297,6 +349,19 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
   const client = await _db().connect();
   try {
     await client.query('BEGIN');
+
+    if (preventDuplicate) {
+      // Serialize same-file uploads before changing any payment item.  A hash
+      // collision can only wait; it can never create a second payment.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [fileSha256]);
+      const { rows: priorApplied } = await client.query(
+        `SELECT id FROM payment_result_uploads
+          WHERE file_sha256 = $1 AND applied = TRUE AND id <> $2
+          LIMIT 1`, [fileSha256, uploadId || '']);
+      if (priorApplied.length) {
+        throw new ResultError('duplicate_file', '이미 반영된 동일 이체결과 파일입니다. 중복 이체 여부를 확인해 주세요.');
+      }
+    }
 
     // 회차 행 잠금 — 동시에 두 사람이 같은 회차에 파일을 올리는 경합 차단
     const { rows: [b] } = await client.query(
@@ -616,4 +681,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, AUTO_APPLY_MATCH_RATE, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, AUTO_APPLY_MATCH_RATE, FAIL_NOTICE, __setPoolForTest };
