@@ -412,6 +412,11 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('실패 안내 체크박스(기본 켬)', /id="pmNotifyFail"/.test(wd) && /계좌 확인 안내/.test(wd));
     ok('★ 확인 팝업은 body 직속', /document\.body\.appendChild\(el\);\s*\/\/ ★ body 직속/.test(wd));
     ok('★ Esc 리스너는 최상위 1회만', /_pmResultKeyBound/.test(wd));
+    ok('★ [이대로 반영] 완료 안내에 작업보드 입금일 기록 결과를 함께 표시하고, 회차별 별도 입금일 기록 버튼은 남기지 않는다',
+      /function _pmBoardApplyText\(board\)/.test(wd)
+      && /_pmBoardApplyText\(r\.board\)/.test(wd)
+      && !/const depositDate\s*=/.test(wd)
+      && /const retryDepositDate\s*=\s*b\.status==='applied' && \(b\.boardFailedCount\|\|0\)>0/.test(wd));
 
     const brief = noLineComments(read('src/routes/reviewEdit.routes.js'));
     ok('★ 리뷰어 brief 에 입금 결과를 싣는다', /FROM payment_batch_items/.test(brief) && /payment,\s/.test(brief));
