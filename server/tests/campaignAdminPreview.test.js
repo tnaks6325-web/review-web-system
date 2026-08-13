@@ -48,9 +48,9 @@ ok('②-1 preview 라우트 본문에 INSERT/UPDATE/DELETE 없음(홀드·카운
   return !!m && !/\b(INSERT|UPDATE|DELETE)\b/i.test(m[0]);
 })());
 ok('②-2 application 은 미저장 가짜 객체(id:\'preview\')', /id: 'preview'/.test(routes));
-ok('②-3 미리보기에서는 옵션 변경 불가(canChangeOption:false)', (() => {
+ok('②-3 미리보기에서는 가상 옵션 변경을 허용한다(canChangeOption:true)', (() => {
   const m = routes.match(/router\.get\('\/admin\/:id\/preview'[\s\S]*?\n\}\);/);
-  return !!m && /canChangeOption: false/.test(m[0]);
+  return !!m && /canChangeOption: options\.filter\(o => o\.status === 'open'\)\.length >= 2/.test(m[0]);
 })());
 
 // ── ①b 토큰 격리: 리뷰어앱 스코프 토큰은 preview 라우트에 도달 불가 ──
@@ -83,9 +83,8 @@ ok('③-5 미리보기 진입은 관리자 전용 엔드포인트 + Bearer',
 ok('③-5b Track B 경로 폴백은 401/403 에서만',
   /if\(r\.status === 401 \|\| r\.status === 403\)\s*\n\s*r = await _pvGet\('\/api\/trackb\/campaigns\/'/.test(camp));
 
-// ── ④ 상태 변경 동작 차단 ──
+// ── ④ 실제 상태 변경 동작 차단 ──
 for (const [label, re] of [
-  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   // ★ 063 2단계 신규 진입점도 동일 차단(명의 선택·타계정 추가참여)
   ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['타계정 추가참여(onAddSubJoin)', /async function onAddSubJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
@@ -137,6 +136,12 @@ ok('⑤-8-2 미리보기 가상 제출은 부모에만 완료 신호를 보내�
 ok('⑤-8-3 가상 제출 완료는 실제 참여 확정 문구 대신 시뮬레이션 완료로 표시한다',
   /if\(PREVIEW\)\{[\s\S]{0,600}_pvSimSubmitted/.test(camp)
   && /시뮬레이션 제출 완료/.test(camp));
+ok('⑤-8-4 미리보기는 실제 공고 상태와 무관하게 열린 옵션을 가상 선택한다',
+  /function _pvOptionSelectable\(o\)\{[\s\S]{0,160}o\.status === 'open'/.test(camp)
+  && /PREVIEW \? _pvOptionSelectable\(o\) : o\.selectable/.test(camp));
+ok('⑤-8-5 미리보기 옵션 변경은 로컬 상태만 갱신한다',
+  /function _pvSimulateChangeOption\(newKey\)/.test(camp)
+  && /가상 옵션을 변경했습니다/.test(camp));
 
 // ── ⑥ 진입점 · 토큰 전달 ──
 ok('⑥-1 공고 카드에 [리뷰어 화면] 버튼(참여형만)', /openReviewerPreview\('\$\{escHtml\(c\.id\)\}'\)/.test(recjs));

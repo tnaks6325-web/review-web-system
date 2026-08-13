@@ -2959,15 +2959,14 @@ function addPresetBadge(val) {
   _refreshBadgeWrap();
 }
 
-const AUTOMATIC_RECRUIT_BADGES = ['현영건', '로켓와우', '사진 5장+', '구매확정'];
-const RETIRED_RECRUIT_BADGES = ['와우 필수', '포토리뷰'];
+const AUTOMATIC_RECRUIT_BADGES = ['현영건', '로켓와우', '구매확정'];
+const RETIRED_RECRUIT_BADGES = ['와우 필수', '포토리뷰', '사진 5장+'];
 function _isRecruitAutomaticBadge(val) { return AUTOMATIC_RECRUIT_BADGES.includes(val); }
 function _isRetiredRecruitBadge(val) { return RETIRED_RECRUIT_BADGES.includes(val); }
 
 /* 배지는 입력값이 아니라 업무 규칙의 파생 결과다.
    - 현영건: 현금영수증 발행
    - 로켓와우: 쿠팡 채널
-   - 사진 5장+: 포토가 포함된 리뷰 조합
    - 구매확정: 구매확정이 포함된 리뷰 조합
    예전에 수동으로 붙인 값과 폐기한 배지는 저장 시 함께 정리한다. */
 function syncRecruitAutomaticBadges() {
@@ -2977,7 +2976,6 @@ function syncRecruitAutomaticBadges() {
   const next = _recruitBadges.filter((badge) => !_isRecruitAutomaticBadge(badge) && !_isRetiredRecruitBadge(badge));
   if (required) next.push('현영건');
   if (channel === '쿠팡') next.push('로켓와우');
-  if (reviewType === 'photo') next.push('사진 5장+');
   if (reviewType === 'confirm') next.push('구매확정');
   const changed = next.length !== _recruitBadges.length || next.some((b, i) => b !== _recruitBadges[i]);
   _recruitBadges = next;

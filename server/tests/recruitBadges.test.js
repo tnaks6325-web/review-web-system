@@ -14,14 +14,14 @@ ok('로켓와우는 쿠팡 채널일 때만 적용된다', () => {
   assert.ok(!normalizeRecruitBadges(['로켓와우'], { channel: '네이버' }).includes('로켓와우'));
 });
 
-ok('포토·구매확정 배지는 단일 리뷰타입과 혼합 조합에서 자동 적용된다', () => {
-  assert.deepStrictEqual(normalizeRecruitBadges([], { reviewType: 'photo' }), ['사진 5장+']);
+ok('포토 리뷰 선택만으로 사진 5장+ 배지를 자동 적용하지 않는다', () => {
+  assert.deepStrictEqual(normalizeRecruitBadges([], { reviewType: 'photo' }), []);
   assert.deepStrictEqual(normalizeRecruitBadges([], {
     reviewType: 'mixed', reviewTypeMix: [{ type: 'photo', quantity: 10 }, { type: 'confirm', quantity: 5 }],
-  }), ['사진 5장+', '구매확정']);
+  }), ['구매확정']);
 });
 
-ok('폐기된 와우 필수·포토리뷰과 자동 배지는 수동 저장값에서 제거된다', () => {
+ok('사진 5장+을 포함한 이전 자동·폐기 배지는 수동 저장값에서 제거된다', () => {
   assert.deepStrictEqual(normalizeRecruitBadges(['와우 필수', '포토리뷰', '사진 5장+', '3.3% 공제'], {}), ['3.3% 공제']);
 });
 

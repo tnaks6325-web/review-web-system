@@ -615,6 +615,9 @@ function _optBadgeHtml(o, isCur){
   if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
   return '';
 }
+// 관리자 미리보기는 실제 공고의 게시·시간 상태를 무시하고, 마감되지 않은 옵션을 가상으로 선택한다.
+// 실제 리뷰어 화면은 서버가 계산한 selectable 값을 그대로 사용한다.
+function _pvOptionSelectable(o){ return !!(o && o.status === 'open'); }
 // 참여 전: 옵션명+잔여 읽기전용 표시
 function renderPreOptions(){
   const opts = (_camp && _camp.options) || [];
@@ -636,7 +639,7 @@ function _renderOptSheetList(opts, curKey){
   const list = $('optSheetList'); list.innerHTML = ''; _optSheetSel = null;
   (opts || []).forEach(o => {
     const isCur = curKey && o.optKey === curKey;
-    const pickable = o.selectable && !isCur;
+    const pickable = (PREVIEW ? _pvOptionSelectable(o) : o.selectable) && !isCur;
     const div = document.createElement('div');
     div.className = 'optrow' + (pickable ? '' : ' dis');
     div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(o.optKey) +
@@ -905,7 +908,7 @@ async function onJoin(){
   const opts = (_camp && _camp.options) || [];
   if(opts.length){
     // 옵션 등록 캠페인 → 선택 필수(선택 가능 옵션 없으면 안내, 1개면 자동선택)
-    const pickable = opts.filter(o => o.selectable);
+    const pickable = opts.filter(o => PREVIEW ? _pvOptionSelectable(o) : o.selectable);
     if(!pickable.length){ toast('지금은 선택 가능한 옵션이 없어요'); await loadCampaign(); return; }
     if(pickable.length === 1) return _joinWithOption(pickable[0].optKey);
     return openOptSheet();
@@ -931,13 +934,29 @@ function _pvSimulateApply(optionKey){
     ..._detail,
     application: { ...(_detail.application || {}), id:'preview', status:'applied', optionKey: selectedOption ? selectedOption.optKey : null },
     selectedOption,
-    canChangeOption: false,
+    canChangeOption: options.filter(_pvOptionSelectable).length >= 2,
   };
   _pvSimSubmitted = false;
   hideOptSheet();
   _pvStep = 'joined';
   _renderJoinedView(_detail, null);
   toast('가상 참여로 작업가이드를 열었습니다. 실제 참여 기록은 남지 않습니다.');
+}
+
+/** 관리자 미리보기 전용 가상 옵션 변경. 서버 요청·재고·참여 기록을 만들지 않는다. */
+function _pvSimulateChangeOption(newKey){
+  if(!PREVIEW || !_detail) return;
+  const selectedOption = (_detail.options || []).find(o => String(o.optKey) === String(newKey));
+  if(!_pvOptionSelectable(selectedOption)) return toast('선택한 옵션은 현재 마감 상태예요');
+  _detail = {
+    ..._detail,
+    application: { ...(_detail.application || {}), optionKey: selectedOption.optKey },
+    selectedOption,
+    canChangeOption: (_detail.options || []).filter(_pvOptionSelectable).length >= 2,
+  };
+  hideOptSheet();
+  _renderJoinedView(_detail, null);
+  toast('가상 옵션을 변경했습니다. 실제 참여 기록은 남지 않습니다.');
 }
 
 /** @param sub {name,phone}|null — 있으면 타계정 명의로 참여(서버가 sub_accounts로 재검증) */
@@ -1024,7 +1043,7 @@ async function _doApply(optionKey, sub){
 }
 
 async function _doChangeOption(newKey){
-  if(PREVIEW) return _pvBlock('옵션 변경');
+  if(PREVIEW) return _pvSimulateChangeOption(newKey);
   const h = getHold(); if(!h) return;
   hideOptSheet();
   toast('옵션 변경 중…');
@@ -1083,6 +1102,9 @@ async function enterJoined(){
     }
     _detailRetry = 0;
     _detail = j;
+    // 목록 API는 실제 모집 상태를 반영한 selectable 값을 주지만, 관리자 미리보기는
+    // 게시 여부와 무관한 가상 진행 화면이다. 미리보기 전용 옵션 뷰로 교체한다.
+    if(_camp && Array.isArray(j.options)) _camp.options = j.options;
     if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
     _renderJoinedView(j, h);
   }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
