@@ -6800,9 +6800,12 @@ async function _pmLoad(){
   // 새 결과 파일은 result-apply 경로에서 즉시 기록하므로, 이 경로는 기존 실패 이력에만 해당한다.
   const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
     && batch.resultUploadId && Number(batch.boardFailedCount) > 0);
-  if (legacyFailed.length && !STATE.pmLegacyDepositRepairRun) {
+  const compactDepositFormat = STATE.pmBatches.filter(batch => batch.status === 'applied'
+    && batch.resultUploadId && /^\d{4}[.\/-]/.test(String(batch.boardStamp||'')));
+  const repairBatches = [...new Map([...legacyFailed, ...compactDepositFormat].map(batch => [batch.id, batch])).values()];
+  if (repairBatches.length && !STATE.pmLegacyDepositRepairRun) {
     STATE.pmLegacyDepositRepairRun = true;
-    for (const batch of legacyFailed) {
+    for (const batch of repairBatches) {
       await api('/api/trackb/payment/batch/' + batch.id + '/deposit-date-backfill',
         { method:'POST', body: JSON.stringify({}) });
     }
