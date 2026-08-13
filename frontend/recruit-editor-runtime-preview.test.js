@@ -18,5 +18,15 @@ assert.match(
   /wrap\.classList\.toggle\('rf-pm-none',\s*selected !== 'opt'\)/,
   '작업 종류를 전환할 때 옵션 없는 작업의 열 구성이 복구되어야 합니다.'
 );
+assert.match(
+  preview,
+  /className\s*=\s*'rf-gp-add rf-preview-add-option'/,
+  '옵션 있는 작업에서는 상품 그룹의 옵션 추가 버튼이 필요합니다.'
+);
+assert.match(
+  preview,
+  /appendChild\(createPreviewOptionRow\(name\.value\)\)/,
+  '옵션 추가 버튼은 실제로 새 옵션 행을 추가해야 합니다.'
+);
 
 console.log('runtime preview product row guard passed');
