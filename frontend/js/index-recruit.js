@@ -1587,14 +1587,9 @@ function _syncSourceWorkOrderLinkUi() {
   }
 }
 
-/** 게시 전 자동 점검 — 서버 활성화 게이트와 동일 3항목(빠지면 active 저장이 서버에서 거부됨) */
+/** 게시 전 자동 점검 — 서버 활성화 게이트와 동일한 필수 항목만 검사한다. */
 function participationCheckErrors() {
   const errs = [];
-  const tabKey = document.getElementById("rf_linked_tab")?.value || "";
-  const tabMeta = _recruitTabList.find(x => x.key === tabKey);
-  // 시트 미연결 공고는 허용한다. 다만 연결을 선택했다면 탭 gid까지 완성되어야
-  // 리네임·시트쓰기 대상이 엇갈리지 않는다.
-  if (tabKey && !(tabMeta && tabMeta.tabGid)) errs.push("선택한 시트 탭의 gid를 확인해주세요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
@@ -1613,7 +1608,8 @@ function renderPartCheck() {
   const items = [
     {
       label: tabKey ? "시트 탭 연결됨 (gid)" : "시트 탭 미연결 — 나중에 추가 가능",
-      fail: errs.some(e => e.includes("gid")),
+      // 시트·탭 연결은 작업오더 연동용 선택 정보다. 게시 조건으로 사용하지 않는다.
+      fail: false,
     },
     { label: (!_ws && !_we) ? "구매시간 미설정 = 자율주문(종일 오픈)" : "구매시간 입력됨 (시작 < 종료)",
       fail: errs.some(e => e.includes("구매시간")) },

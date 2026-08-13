@@ -371,7 +371,7 @@
     const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
     const tab = c.linked_tab_name
       ? `<div class="sp-link">🔗 ${_esc(c.linked_tab_name)}</div>`
-      : `<div class="sp-link warn">⚠️ 시트 탭 미연결 — 게시할 수 없습니다</div>`;
+      : `<div class="sp-link">🔗 시트 탭 미연결 · 나중에 연결 가능</div>`;
     return `<div class="pspec">
       <div class="sp-row"><div class="sp-chipwrap"><div class="sp-chips">${chips.join('')}</div></div><span class="sp-tot">${totTxt}</span></div>
       ${tab}</div>`;
