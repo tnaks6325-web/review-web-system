@@ -228,7 +228,9 @@ async function toggleCampFlag(campId, kind, on) {
 function openReviewerPreview(campId) {
   const token = sessionStorage.getItem("admin_token") || "";
   if (!token) { showToast("관리자 로그인이 필요합니다.", "error"); return; }
-  const url = "campaign.html?id=" + encodeURIComponent(campId) + "&preview=1#tok=" + encodeURIComponent(token);
+  // 미리보기는 화면 코드가 자주 갱신되므로, 카드에서 새 창을 열 때는 현재 시뮬레이션 번들을
+  // 확실히 받도록 버전 표식을 붙인다. 토큰은 기존처럼 fragment로만 전달한다.
+  const url = "campaign.html?id=" + encodeURIComponent(campId) + "&preview=1&previewBuild=sim-20260814#tok=" + encodeURIComponent(token);
   // ★ noopener 미사용 의도: 새 탭이 sessionStorage를 이어받아야 토큰 폴백이 동작한다(프래그먼트가 떨어지는
   //   인앱 브라우저 대비). 팝업 차단 시 무반응이 되지 않도록 반환값을 확인해 안내한다.
   const w = window.open(url, "_blank");

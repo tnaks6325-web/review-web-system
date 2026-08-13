@@ -1402,6 +1402,7 @@ function _pvCaptureToken(){
       // preview 파라미터까지 제거 — 이 주소를 복사해 공유해도 평범한 리뷰어 링크가 되게 한다(R1)
       const q = new URLSearchParams(location.search);
       q.delete('preview');
+      q.delete('previewBuild');
       const qs = q.toString();
       history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
     }catch(_){}
