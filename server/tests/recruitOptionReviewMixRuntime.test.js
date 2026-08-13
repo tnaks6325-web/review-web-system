@@ -16,5 +16,9 @@ assert.doesNotMatch(compact, /리뷰 조합/);
 assert.match(compact, /id="rf_review_mix_total" hidden/);
 assert.match(recruit, /const composer = document\.getElementById\('rf_mixed_review_composer'\)/);
 assert.match(recruit, /composer\.hidden = !visible/);
+assert.match(recruit, /function getRecruitOptionReviewTypeMix/);
+assert.match(recruit, /function renderRecruitOptionReviewMix/);
+assert.match(recruit, /_readOptionReviewMix\(r\)/);
+assert.match(recruit, /payload\.options = readOptRows\(\)/);
 
-console.log('recruitOptionReviewMixRuntime: 8 passed');
+console.log('recruitOptionReviewMixRuntime: 12 passed');
