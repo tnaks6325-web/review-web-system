@@ -209,8 +209,9 @@ t('연결 탭 목록은 호스트가 재기준(RECRUIT_TABS_API)', () => {
 });
 
 t('★ 공고 상세(수정 프리필)도 재기준 — 안 하면 공개뷰가 와서 모달이 빈 칸으로 열린다', () => {
-  assert.ok(/window\.CAMPAIGN_ADMIN_API\)\s*\n\s*\? _campApi\(`\/\$\{encodeURIComponent\(id\)\}`\)/.test(REC));
-  assert.ok(REC.includes(': API_BASE_URL + `/api/campaign/${id}`'), '관리자 대시보드 경로 폴백이 없다');
+  assert.ok(/const _detailUrl = _campApi\(`\/\$\{encodeURIComponent\(id\)\}`\);/.test(REC));
+  assert.ok(/onWorkdesk[\s\S]{0,160}\? '\/api\/trackb\/campaigns' : '\/api\/campaign\/admin'/.test(REC),
+    '작업보드에서 설정이 빠져도 공개 상세 API로 내려가면 안 된다');
 });
 
 t('Track B 에 GET /campaigns/:id 가 실제로 등록돼 있다(라우터 스택 실검사)', () => {
@@ -284,6 +285,29 @@ const callDetail = (req) => new Promise((resolve) => {
 
   Object.prototype._trustedAdminView = true;                 // 프로토타입 오염 시나리오
   let polluted; try { polluted = await callDetail({}); } finally { delete Object.prototype._trustedAdminView; }
+
+  const LEGACY_ROW = {
+    ...ROW,
+    id: 'legacy-camp-1',
+    participation_mode: false,
+    work_detail: { productLines: 'legacy product - standard option - 12,000' },
+  };
+  pool.query = async (sql) => {
+    if (/FROM recruit_campaigns WHERE id/.test(sql)) return { rows: [LEGACY_ROW] };
+    if (/FROM campaign_options/.test(sql)) {
+      return { rows: [{ optKey: 'standard option', optionUrl: 'https://example.com/option', payAmount: 12000, recruitTotal: 15, dailyLimit: 5, status: 'active' }] };
+    }
+    return { rows: [] };
+  };
+  const legacyTrusted = await callDetail({ _trustedAdminView: true, params: { id: 'legacy-camp-1' } });
+  t('legacy campaign trusted detail keeps stored options', () => {
+    assert.ok(legacyTrusted.body && legacyTrusted.body.ok);
+    assert.strictEqual(legacyTrusted.body.data.participation_mode, false);
+    assert.deepStrictEqual(legacyTrusted.body.options, [{
+      optKey: 'standard option', optionUrl: 'https://example.com/option', payAmount: 12000,
+      recruitTotal: 15, dailyLimit: 5, status: 'active',
+    }]);
+  });
   t('\u2605 플래그는 요청으로 만들 수 없다 — 오염 방어(자기 프로퍼티만 인정)', () => {
     assert.ok(polluted.body && polluted.body.ok);
     assert.ok(!('work_detail' in polluted.body.data),

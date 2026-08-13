@@ -39,8 +39,8 @@ ok('index-recruit: 하루합은 전부 하루한도 있을 때만 표기',
   /allHaveDaily = active\.length > 0 && active\.every\(o => o\.dailyLimit > 0\)/.test(recruit));
 // v4: 표가 [상품명·옵션명·결제금액·총인원·일건수] 5열이 되면서 프리필도 상품명을 함께 복원한다
 // (campaign_options에는 상품명이 없어 작업내용 원문에서 되찾음).
-ok('index-recruit: 편집 프리필 renderOptRowsWithProduct(json.options, 상품원문)',
-  /renderOptRowsWithProduct\(json\.options \|\| \[\], wd\.productLines\)/.test(recruit)
+ok('index-recruit: 편집 프리필 renderOptRowsWithProduct(json.options, 상품원문, 기존 공고)',
+  /renderOptRowsWithProduct\(json\.options \|\| \[\], wd\.productLines, c\)/.test(recruit)
   && /function renderOptRowsWithProduct/.test(recruit));
 ok('index-recruit: 신규 모달 옵션표 초기화 renderOptRows([])', /renderOptRows\(\[\]\);\s*\/\/ .*옵션표 초기화/.test(recruit));
 // v4: 작업오더는 옵션 배열이 있으면 그대로, 없으면 상품정보 텍스트를 줄 단위로 분해해 표를 채운다
