@@ -56,8 +56,8 @@ assert(modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"'),
 // Both shared-modal surfaces must request the released asset URL once anew.
 ['workdesk', 'admin'].forEach((surface) => {
   const html = surface === 'workdesk' ? workdesk : admin;
-  assert(html.includes('js/recruit-modal.js?v=20260813-compact-parity-c99'), `${surface} should request the released modal asset.`);
-  assert(html.includes('js/index-recruit.js?v=20260813-compact-parity-c99'), `${surface} should request the released controller asset.`);
+  assert(html.includes('js/recruit-modal.js?v=20260813-compact-parity-c100'), `${surface} should request the released modal asset.`);
+  assert(html.includes('js/index-recruit.js?v=20260813-compact-parity-c100'), `${surface} should request the released controller asset.`);
 });
 
 console.log('recruitModalFinalRuntimeLayout: passed');

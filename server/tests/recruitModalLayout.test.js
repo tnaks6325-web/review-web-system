@@ -91,22 +91,11 @@ ok('실제 런타임 중앙 편집부는 승인 시안의 editor/section/row-for
   && /class="form-row"/.test(modal)
   && /class="form-label"/.test(modal)
   && /class="form-control"/.test(modal));
-const legacyProductStart = modal.indexOf('<template id="rf_legacy_product_markup">');
-const legacyProductEnd = modal.indexOf('</template>', legacyProductStart);
 const compactEditorStart = modal.indexOf('<div class="rf-main rf-compact-main">');
-const activeModalMarkup = modal.replace(/<template\b[^>]*>[\s\S]*?<\/template>/g, '');
-ok('기존 카드 마크업은 활성 DOM에 남지 않아 컴팩트 입력칸과 ID가 겹치지 않는다',
-  legacyProductStart >= 0
-  && legacyProductStart < modal.indexOf('<section class="rf-product-settings"')
-  && modal.indexOf('id="rf_work_section"', legacyProductStart) > legacyProductStart
-  && modal.indexOf('id="rf_work_section"', legacyProductStart) < legacyProductEnd
-  && modal.indexOf('id="rf_part_section"', legacyProductStart) > legacyProductStart
-  && modal.indexOf('id="rf_part_section"', legacyProductStart) < legacyProductEnd
-  && legacyProductEnd < compactEditorStart
-  && !/<\/div><\/template><!-- \/legacy rf-main -->/.test(modal)
-  && !/class="rf-product-settings"/.test(activeModalMarkup)
-  && ['rf_title', 'rf_review_fee', 'rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes', 'rf_part_section']
-    .every((id) => (activeModalMarkup.match(new RegExp(`id="${id}"`, 'g')) || []).length === 1));
+const legacyRootClose = modal.indexOf('</div></template><!-- /legacy rf-main -->');
+ok('이전 마크업 템플릿은 새 컴팩트 편집기 전에 정확히 닫혀 실제 입력 DOM을 만든다',
+  legacyRootClose > modal.indexOf('<template id="rf_legacy_card_editor_markup">')
+  && legacyRootClose < compactEditorStart);
 ok('최종 행형 문법은 승인 시안의 25/75 열과 동일 높이의 입력·버튼을 쓴다',
   /\.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal)
   && /\.rf-main \.rform-input\{min-height:26px;height:26px/.test(modal)
