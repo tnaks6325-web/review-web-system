@@ -32,6 +32,7 @@ const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly } = require('../utils/paymentResultParse');
 const paymentApply = require('./paymentApply.service');
 const { recordDeposits } = paymentApply;
+const { rebuildLedgers } = require('./sheetlessLedger.service');
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
 
@@ -472,15 +473,19 @@ async function backfillPaidDepositStamp({ batchId, by }) {
     if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
     if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차에는 입금일을 기록할 수 없습니다.');
     const { rows } = await client.query(
-      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, r.submit_col2, r.tab_gid
+      `SELECT i.sheet_id, i.tab_name, i.row_index, i.paid_at, r.submit_col2, r.tab_gid,
+              COALESCE(tc.sheetless, FALSE) AS sheetless
          FROM payment_batch_items i
          LEFT JOIN review_index r
            ON r.sheet_id = i.sheet_id AND r.tab_name = i.tab_name AND r.row_index = i.row_index
+         LEFT JOIN tab_configs tc
+           ON tc.sheet_id = i.sheet_id AND tc.tab_name = i.tab_name
         WHERE i.batch_id = $1 AND i.status = 'paid'
         ORDER BY i.created_at, i.id`, [batchId]);
     items = rows.map(r => ({
       sheetId: r.sheet_id, tabName: r.tab_name, rowIndex: r.row_index,
-      depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', stamp: _depositDateFromPaidAt(r.paid_at),
+      depositColKey: r.submit_col2 || null, gid: r.tab_gid || '', sheetless: r.sheetless === true,
+      stamp: _depositDateFromPaidAt(r.paid_at),
     })).filter(x => x.sheetId && x.tabName && x.rowIndex);
     if (!items.length) throw new ResultError('no_paid_items', '입금일을 기록할 완료 항목이 없습니다.');
     await client.query('COMMIT');
@@ -493,7 +498,13 @@ async function backfillPaidDepositStamp({ batchId, by }) {
 
   const datedItems = items.filter(x => x.stamp);
   const normalizedStamp = [...new Set(datedItems.map(x => x.stamp))].join(', ');
-  const writeResult = await paymentApply.markDepositCells(datedItems, { by: by || 'payment' }) || {};
+  const writeResult = await paymentApply.markDepositCells(datedItems,
+    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
+  const sheetlessTabs = [...new Map(datedItems.filter(x => x.sheetless)
+    .map(x => [`${x.sheetId}\t${x.tabName}`, x])).values()];
+  for (const tab of sheetlessTabs) {
+    await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
+  }
   const outcome = {
     recorded: Number(writeResult.recorded) || 0,
     queued: Number(writeResult.queued) || 0,

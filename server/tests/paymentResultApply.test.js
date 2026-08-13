@@ -229,7 +229,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       stampBackfill.ok === true && stampBackfill.candidates === 1 && stampBackfill.recorded === 0
         && stampBackfill.queued === 1 && stampBackfill.failed === 0 && stampWrites.length === 1
         && stampWrites[0].items.length === 1 && stampWrites[0].items[0].stamp === '2026.6.9'
-        && stampWrites[0].opts.stamp === undefined
+        && stampWrites[0].opts.stamp === undefined && stampWrites[0].opts.deferSheetlessRebuild === true
         && stampPool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql))
         && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
       JSON.stringify(stampBackfill));
