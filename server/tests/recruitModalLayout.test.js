@@ -82,6 +82,15 @@ ok('중앙 편집부는 사후 DOM 이동 없이 시안 순서로 직접 렌더�
   && !/\.rf-card\[data-sec="(?:link|fee|prod|work|cond)"\]\{order:/.test(modal)
   && !/\.rf-publish-card\{order:/.test(modal)
   && !/RecruitModal\.syncProductSettings\(on\)/.test(editor));
+ok('실제 런타임 중앙 편집부는 승인 시안의 editor/section/row-form 마크업을 직접 사용한다',
+  /class="rf-main rf-compact-main"/.test(modal)
+  && /class="editor-head"/.test(modal)
+  && /class="title-control-bar"/.test(modal)
+  && /class="section" data-sec="link"/.test(modal)
+  && /class="row-form"/.test(modal)
+  && /class="form-row"/.test(modal)
+  && /class="form-label"/.test(modal)
+  && /class="form-control"/.test(modal));
 ok('최종 행형 문법은 승인 시안의 25/75 열과 동일 높이의 입력·버튼을 쓴다',
   /\.rf-hrow\{grid-template-columns:minmax\(112px,25%\) minmax\(0,75%\)/.test(modal)
   && /\.rf-main \.rform-input\{min-height:26px;height:26px/.test(modal)
