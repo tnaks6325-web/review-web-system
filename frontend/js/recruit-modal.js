@@ -294,6 +294,7 @@
 
       <!-- ═══ 🛍 상품 정보 (리뷰타입·배지·URL·썸네일 — 레거시 공고에도 적용되는 상시 카드) ═══ -->
       </template>
+      <template id="rf_legacy_product_markup">
       <section class="rf-product-settings" data-product-settings>
         <div class="rf-product-settings-head"><span>상품 설정</span></div>
         <div class="rf-cb">
@@ -429,6 +430,7 @@
           <details class="rf-advanced"><summary>고급 설정 (참여 제한시간·마감 버퍼)</summary><div class="rf-inline-inputs"><label>참여 제한시간 <input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></label><label>종료 전 신규참여 마감 <input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></label></div></details>
         </div>
       </section>
+      </template>
 
       <!-- 이전 게시 카드 마크업은 이전 배포와의 소스 비교용 비활성 템플릿이다.
            런타임 편집기는 위 최상단의 정적 행 템플릿만 렌더링한다. -->
@@ -476,8 +478,6 @@
       </div>
       </template>
 
-    </div>
-      </div></template><!-- /legacy rf-main -->
       <div class="rf-main rf-compact-main">
         <section class="editor">
           <header class="editor-head"><div><h2 id="rf_editor_title">연결 · 기본</h2><p id="rf_editor_description">작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.</p></div><span class="autosaved">자동 저장됨</span></header>

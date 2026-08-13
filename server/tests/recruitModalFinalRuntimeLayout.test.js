@@ -31,8 +31,8 @@ mustContain('class="rf-step-list"', '좌측 단계 목록이 있어야 합니다
 mustContain('data-rf-step="link"', '연결·기본 단계가 있어야 합니다.');
 mustContain('data-rf-step="prod"', '진행상품 단계가 있어야 합니다.');
 mustContain('data-rf-step="cond"', '모집 조건 단계가 있어야 합니다.');
-mustContain('data-rf-step="fee"', '리뷰비·입금 단계가 있어야 합니다.');
-mustContain('data-rf-step="work"', '작업내용 단계가 있어야 합니다.');
+mustNotContain('data-rf-step="fee"', '리뷰비·입금은 연결·기본 단계 안에서 편집해야 합니다.');
+mustNotContain('data-rf-step="work"', '작업내용은 진행상품·상품 정보 단계 안에서 편집해야 합니다.');
 mustNotContain('onclick="RecruitModal.preset', '최종안의 단계 이동은 드래그 배치 프리셋을 노출하지 않아야 합니다.');
 mustNotContain('class="rf-rhnd"', '최종안의 단계 목록은 드래그 핸들을 렌더하지 않아야 합니다.');
 
@@ -56,8 +56,8 @@ assert(modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"'),
 // Both shared-modal surfaces must request the released asset URL once anew.
 ['workdesk', 'admin'].forEach((surface) => {
   const html = surface === 'workdesk' ? workdesk : admin;
-  assert(html.includes('js/recruit-modal.js?v=20260812-recruit-ui'), `${surface} should request the released modal asset.`);
-  assert(html.includes('js/index-recruit.js?v=20260812-recruit-ui'), `${surface} should request the released controller asset.`);
+  assert(html.includes('js/recruit-modal.js?v=20260813-compact-parity-c99'), `${surface} should request the released modal asset.`);
+  assert(html.includes('js/index-recruit.js?v=20260813-compact-parity-c99'), `${surface} should request the released controller asset.`);
 });
 
 console.log('recruitModalFinalRuntimeLayout: passed');
