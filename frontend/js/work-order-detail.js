@@ -519,6 +519,24 @@ function _woOptionRows(o) {
   let arr = null;
   try { const p = JSON.parse(o.product_options_json || "[]"); if (Array.isArray(p) && p.length) arr = p; } catch (_) {}
   if (!arr) return [];
+  /** 작업오더 옵션에 실린 혼합 리뷰 수량을 모집공고 옵션행 형식으로 안전하게 보존한다. */
+  const optionReviewTypeMix = option => {
+    let raw = option && (option.review_type_mix ?? option.reviewTypeMix);
+    if (typeof raw === "string") {
+      try { raw = JSON.parse(raw); } catch (_) { raw = []; }
+    }
+    if (!Array.isArray(raw)) return [];
+    const allowed = { photo: true, text: true, confirm: true, star: true };
+    const seen = new Set();
+    return raw.reduce((mix, entry) => {
+      const type = String(entry && entry.type || "").trim();
+      const quantity = Math.max(0, Math.floor(Number(entry && entry.quantity) || 0));
+      if (!allowed[type] || !quantity || seen.has(type)) return mix;
+      seen.add(type);
+      mix.push({ type, quantity });
+      return mix;
+    }, []);
+  };
   const clean = s => String(s || "").replace(/\|/g, "").trim();
   const rows = [];
   for (const prod of arr) {
@@ -541,6 +559,7 @@ function _woOptionRows(o) {
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
           recruitTotal: Math.max(0, Number(op.count) || 0),
           dailyLimit: Math.max(0, Number(op.daily_limit ?? op.dailyLimit) || 0),
+          reviewTypeMix: optionReviewTypeMix(op),
         });
       }
     } else if (name) {
