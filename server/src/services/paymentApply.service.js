@@ -169,4 +169,48 @@ async function markDepositCells(items, opts = {}) {
   return outcome;
 }
 
-module.exports = { nowStamp, colLetter, detectHeaderRow, recordDeposits, markDepositCells, mergeDepositStamps };
+/**
+ * Read-after-write verification for the rendered workboard value.  `recorded`
+ * must never mean merely that an UPDATE was issued; the requested transfer
+ * date has to survive ledger rebuilding and be visible in the workboard data.
+ */
+async function verifyDepositCells(items) {
+  const headerCache = {};
+  const outcome = { total: Array.isArray(items) ? items.length : 0, verified: 0, missing: 0 };
+  for (const item of (items || [])) {
+    const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
+    const stamp = item.stamp;
+    if (!item.sheetId || !item.tabName || !rowIndex || !stamp) { outcome.missing += 1; continue; }
+    try {
+      const st = await require('./sheetlessStatus.service').verifyStatusCell({
+        sheetId: item.sheetId, tabName: item.tabName, rowIndex, kind: 'paid', value: stamp,
+      });
+      if (st.handled) {
+        if (st.ok) outcome.verified += 1;
+        else outcome.missing += 1;
+        continue;
+      }
+
+      if (!item.depositColKey) { outcome.missing += 1; continue; }
+      const cacheKey = item.sheetId + '||' + item.tabName;
+      let headers = headerCache[cacheKey];
+      if (!headers) {
+        headers = detectHeaderRow(await readSheet(item.sheetId, `'${item.tabName}'!1:50`));
+        headerCache[cacheKey] = headers;
+      }
+      const colIdx = headers.findIndex(h => h === item.depositColKey);
+      if (colIdx < 0) { outcome.missing += 1; continue; }
+      const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
+      const current = await readSheet(item.sheetId, range, item.gid ? { gid: item.gid } : {});
+      const observed = current && current[0] && current[0][0];
+      if (mergeDepositStamps(observed, '') === mergeDepositStamps(observed, stamp)) outcome.verified += 1;
+      else outcome.missing += 1;
+    } catch (e) {
+      logger.warn(`[paymentApply] 입금칸 재확인 실패 (tab=${item.tabName}, row=${rowIndex}): ${e.message}`);
+      outcome.missing += 1;
+    }
+  }
+  return outcome;
+}
+
+module.exports = { nowStamp, colLetter, detectHeaderRow, recordDeposits, markDepositCells, verifyDepositCells, mergeDepositStamps };

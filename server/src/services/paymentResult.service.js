@@ -390,11 +390,15 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
   const boardItems = paidItems.filter(x => x.stamp);
   const undatedPaid = paidItems.length - boardItems.length;
   const writeResult = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
+  const verification = await paymentApply.verifyDepositCells(boardItems) || {};
+  const verified = Number(verification.verified) || 0;
+  const queued = Number(writeResult.queued) || 0;
+  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
   const board = {
-    recorded: Number(writeResult.recorded) || 0,
-    queued: Number(writeResult.queued) || 0,
+    recorded: verified,
+    queued,
     skipped: (Number(writeResult.skipped) || 0) + undatedPaid,
-    failed: Number(writeResult.failed) || 0,
+    failed: (Number(writeResult.failed) || 0) + verificationMissing,
   };
   const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
   await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
@@ -505,14 +509,17 @@ async function backfillPaidDepositStamp({ batchId, by }) {
   for (const tab of sheetlessTabs) {
     await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
   }
+  const verification = await paymentApply.verifyDepositCells(datedItems) || {};
+  const queued = Number(writeResult.queued) || 0;
+  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
   const outcome = {
-    recorded: Number(writeResult.recorded) || 0,
-    queued: Number(writeResult.queued) || 0,
+    recorded: Number(verification.verified) || 0,
+    queued,
     skipped: (Number(writeResult.skipped) || 0) + (items.length - datedItems.length),
-    failed: Number(writeResult.failed) || 0,
+    failed: (Number(writeResult.failed) || 0) + verificationMissing,
   };
   await _saveBoardWriteOutcome({ batchId, outcome, stamp: normalizedStamp, by: by || 'payment' });
-  return { ok: true, candidates: items.length, stamp: normalizedStamp, ...outcome };
+  return { ok: true, candidates: items.length, stamp: normalizedStamp, verified: outcome.recorded, ...outcome };
 }
 
 /** 확인된 은행 실패만 pending 에서 failed 로 확정한다. 실패 안내는 별도 발송하지 않는다. */

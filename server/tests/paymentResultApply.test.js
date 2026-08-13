@@ -186,7 +186,9 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     csb.postAdminNotice = async (p) => { notices.push(p); return { threadId: 1, messageId: 2 }; };
     // 시트/작업표 쓰기는 이 가드의 대상이 아니다(별도 서비스) — 배경 호출만 무해화
     const origMark = APPLY.markDepositCells;
+    const origVerify = APPLY.verifyDepositCells;
     APPLY.markDepositCells = async (items) => ({ total: items.length, recorded: items.length, queued: 0, skipped: 0, failed: 0 });
+    APPLY.verifyDepositCells = async (items) => ({ total: items.length, verified: items.length, missing: 0 });
 
     const r1 = await RES.applyResultFile({ batchId: 'B1', fileName: 'r.xlsx', base64: FILE_B64, by: '관리자A' });
 
@@ -222,17 +224,20 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     RES.__setPoolForTest(stampPool);
     APPLY.markDepositCells = async (items, opts) => {
       stampWrites.push({ items, opts });
-      return { total: items.length, recorded: 0, queued: 1, skipped: 0, failed: 0 };
+      return { total: items.length, recorded: 1, queued: 0, skipped: 0, failed: 0 };
     };
+    const preBackfillVerify = APPLY.verifyDepositCells;
+    APPLY.verifyDepositCells = async (items) => ({ total: items.length, verified: 0, missing: 1 });
     const stampBackfill = await RES.backfillPaidDepositStamp({ batchId: 'B1', by: '관리자A' });
-    ok('★ 이미 입금 처리된 항목만 입금 칸에 지정 날짜를 기록하고 payment_records는 다시 만들지 않는다',
+    ok('★ 작업보드에 남았는지 재확인된 건만 기록됨으로 표시하고, 누락은 실패로 남긴다',
       stampBackfill.ok === true && stampBackfill.candidates === 1 && stampBackfill.recorded === 0
-        && stampBackfill.queued === 1 && stampBackfill.failed === 0 && stampWrites.length === 1
+        && stampBackfill.queued === 0 && stampBackfill.failed === 1 && stampBackfill.verified === 0 && stampWrites.length === 1
         && stampWrites[0].items.length === 1 && stampWrites[0].items[0].stamp === '2026.6.9'
         && stampWrites[0].opts.stamp === undefined && stampWrites[0].opts.deferSheetlessRebuild === true
         && stampPool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql))
         && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
       JSON.stringify(stampBackfill));
+    APPLY.verifyDepositCells = preBackfillVerify;
     APPLY.markDepositCells = origMark;
     RES.__setPoolForTest(pool);
 
@@ -312,6 +317,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     }
 
     csb.postAdminNotice = origNotice;
+    APPLY.verifyDepositCells = origVerify;
     APPLY.markDepositCells = origMark;
     RES.__setPoolForTest(null);
   }

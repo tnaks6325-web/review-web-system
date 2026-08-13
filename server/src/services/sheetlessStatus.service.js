@@ -97,6 +97,57 @@ async function markStatusCell({ sheetId, tabName, rowIndex, kind, value = '', by
 }
 
 /**
+ * Verify the value that is actually rendered by a sheetless workboard after
+ * its ledger has been rebuilt.  A successful UPDATE alone is not enough:
+ * the workboard reads the rebuilt raw mirror, not the transient request.
+ */
+async function verifyStatusCell({ sheetId, tabName, rowIndex, kind, value = '' } = {}) {
+  if (!sheetId || !tabName || !rowIndex) return { handled: false };
+  if (kind !== 'submit' && kind !== 'paid') return { handled: false };
+
+  const db = getPool();
+  let sheetless = false;
+  try {
+    sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
+  } catch (_) {
+    return { handled: false };
+  }
+  if (!sheetless) return { handled: false };
+
+  const col = kind === 'submit' ? 'submit_col' : 'submit_col2';
+  const { rows: headerRows } = await db.query(
+    `SELECT ${col} AS h FROM review_index
+      WHERE sheet_id = $1 AND tab_name = $2 AND COALESCE(${col}, '') <> ''
+      LIMIT 1`, [sheetId, tabName]);
+  const header = headerRows.length ? String(headerRows[0].h || '').trim() : '';
+  if (!header) return { handled: true, ok: false, reason: 'no_status_column' };
+
+  const { rows } = await db.query(
+    `SELECT r.cells ->> (
+         SELECT e.ordinality - 1
+           FROM jsonb_array_elements_text(COALESCE(t.detected_headers, t.headers)) WITH ORDINALITY AS e(value, ordinality)
+          WHERE e.value = $4
+          LIMIT 1
+       )::int AS value
+       FROM raw_sheet_tabs t
+       JOIN raw_sheet_rows r ON r.sheet_id = t.sheet_id AND r.tab_gid = t.tab_gid AND r.row_index = $3
+      WHERE t.sheet_id = $1 AND t.tab_name = $2
+      ORDER BY t.mirrored_at DESC
+      LIMIT 1`, [sheetId, tabName, rowIndex, header]);
+  if (!rows.length) return { handled: true, ok: false, reason: 'workboard_row_not_found', column: header };
+  const observed = String(rows[0].value || '').trim();
+  const normalized = mergeDepositStamps(observed, '');
+  const expected = mergeDepositStamps(observed, value);
+  return {
+    handled: true,
+    ok: normalized === expected,
+    reason: normalized === expected ? undefined : 'workboard_value_missing',
+    column: header,
+    observed,
+  };
+}
+
+/**
  * 무시트 탭의 **memo(비고 / 포스팅URL) 칸** 기록 — 블로그체험단 결과물이 여기 남는다(099 · M4).
  *
  * ★★ 왜 별도 경로인가: 시트 기반 탭은 `submit.routes` 배경 작업이 시트 칸에 memo 를 쓰지만,
@@ -284,6 +335,7 @@ async function backfillReviewSubmitTimes({ dryRun = true, by = 'system' } = {}) 
 
 module.exports = {
   markStatusCell,
+  verifyStatusCell,
   markSheetlessMemo,
   backfillReviewSubmitTimes,
   REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
