@@ -212,9 +212,10 @@
       + '<div class="cwd-body">' + guideHtml + extraImgs + '</div>';
     // 옵션 공고는 리뷰어가 참여 시 고른 옵션의 링크로 이동한다.
     // 옵션 링크가 비어 있는 기존 공고는 공고 공통 링크를 그대로 사용한다.
+    var hasSelectedOptionUrl = !!(so && so.optionUrl);
     var landingUrl = (so && so.optionUrl) || d.landingUrl;
     if (o.showLanding !== false && landingUrl && isLinkInflow) {
-      html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(landingUrl) + '">🔗 상품 페이지 열기 (새 탭)</button>';
+      html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(landingUrl) + '">🔗 ' + (hasSelectedOptionUrl ? '선택 옵션 링크 열기' : '상품 페이지 열기') + ' (새 탭)</button>';
     }
     html += '</div>';
 

@@ -379,7 +379,7 @@ function _applyCurrentFee(view, schedules, now) {
 /** 캠페인 옵션 뷰 목록(정렬: 활성 먼저, 마감 하단). campState 반영해 selectable 계산. 옵션 없으면 []. */
 async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   const { rows } = await db.query(
-    `SELECT opt_key, pay_amount, recruit_total, daily_limit, status
+    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   if (!rows.length) return [];
@@ -990,7 +990,9 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
 
     // 유입방식(inflow_type): 연결 작업오더에서 라이브 역조회(스냅샷·마이그레이션 불필요, 기발행분도 즉시 정확).
     //   상품 페이지 열기 버튼을 '링크유입'일 때만 노출하기 위한 신호. 실패는 '' 폴백(fail-soft).
-    const inflowType = await _lookupInflowType(camp.id, camp.source_work_order_id);
+    const workDetail = sanitizeWorkDetail(camp.work_detail);
+    // 작업오더가 연결된 경우 그 값을 우선하고, 직접 저장된 공고는 work_detail의 값을 사용한다.
+    const inflowType = (await _lookupInflowType(camp.id, camp.source_work_order_id)) || (workDetail && workDetail.inflowType) || '';
 
     // 상품옵션(참여 후 공개): 옵션 목록(금액 포함) + 내가 고른 옵션 + 변경 가능 여부
     let options = [], selectedOption = null;
@@ -1017,7 +1019,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
       selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
       canChangeOption,
-      workDetail: sanitizeWorkDetail(camp.work_detail),          // HTML은 응답 직전 방어적 재정화
+      workDetail,                                                // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
       cashReceipt: await _cashReceiptInfo(camp),                  // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
       // 카톡 팀채팅방 URL은 제출확정 후에만 반환(화면 숨김을 API에서도 강제 — DevTools 우회 차단)
@@ -2434,7 +2436,9 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     const options = optionViews.map(o => o.status === 'open' ? { ...o, selectable: true } : o);
     // 미리보기용 대표 옵션 — 선택 가능한 첫 옵션(없으면 첫 옵션). 실제 선택이 아니라 화면 예시.
     const sample = options.find(o => o.selectable) || options[0] || null;
-    const inflowType = await _lookupInflowType(camp.id, camp.source_work_order_id);
+    const workDetail = sanitizeWorkDetail(camp.work_detail);
+    // 미리보기도 실제 리뷰어 화면과 같은 유입방식 우선순위를 사용한다.
+    const inflowType = (await _lookupInflowType(camp.id, camp.source_work_order_id)) || (workDetail && workDetail.inflowType) || '';
     const ttlMin = Number(camp.hold_ttl_min) || 15;
 
     res.json({
@@ -2453,7 +2457,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
       options,
       selectedOption: sample,
       canChangeOption: options.filter(o => o.status === 'open').length >= 2,
-      workDetail: sanitizeWorkDetail(camp.work_detail),
+      workDetail,
       inflowType,
       cashReceipt: await _cashReceiptInfo(camp),   // 미리보기 = 실제 화면(현영 안내 카드 포함)
       chatUrl: camp.chat_url || '',         // 관리자는 원래 카톡 URL을 설정·조회하는 주체

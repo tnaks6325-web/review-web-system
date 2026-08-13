@@ -622,6 +622,8 @@ function computeOptionView(opt, cnt, campState) {
   const campOpen = !campState || campState.state === 'open';
   return {
     optKey: opt.opt_key,
+    // 참여 후 작업가이드에서 선택한 상품의 링크를 열 수 있도록 옵션 URL도 보존한다.
+    optionUrl: String(opt.option_url || ''),
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
     recruitTotal, dailyLimit,
     used, remaining, todayUsed, todayRemaining,

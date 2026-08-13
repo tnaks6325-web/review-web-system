@@ -36,6 +36,15 @@ async function run() {
     assert.equal(v.payAmount, 29900);
   });
 
+  // 옵션 URL은 참여 후 작업가이드에서 선택한 상품 링크를 열기 위해 함께 전달한다.
+  ok('1-1. 선택 옵션 URL을 작업가이드용 옵션 뷰에 유지', () => {
+    const v = computeOptionView(
+      { opt_key: '코튼', option_url: 'https://shop.example.com/item?option=cotton', pay_amount: 29900, recruit_total: 20, daily_limit: 0, status: 'active' },
+      { activeHolds: 0, todayActiveHolds: 0, submitted: 0, todaySubmitted: 0 },
+      OPEN_CAMP);
+    assert.equal(v.optionUrl, 'https://shop.example.com/item?option=cotton');
+  });
+
   // ═══ 2. 정원 소진 → soldout ═══
   ok('2. 정원 소진 → soldout·미선택', () => {
     const v = computeOptionView(
