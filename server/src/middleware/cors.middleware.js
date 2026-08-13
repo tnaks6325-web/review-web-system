@@ -3,6 +3,11 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .map(o => o.trim())
   .filter(Boolean);
 
+// The dedicated Railway test frontend talks only to the isolated test API.
+// Keep it out of production unless that deployment explicitly opts in.
+const TEST_AUTO_LOGIN_ORIGIN = 'https://test-review-wdb-web-production.up.railway.app';
+if (process.env.TEST_AUTO_LOGIN === '1') allowedOrigins.push(TEST_AUTO_LOGIN_ORIGIN);
+
 // 개발환경에서는 localhost 허용
 if (process.env.NODE_ENV !== 'production') {
   allowedOrigins.push(
