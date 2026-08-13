@@ -98,6 +98,13 @@ test('payment result application does not expose a manual deposit-date retry', (
   assert.doesNotMatch(workdesk, /function _pmBackfillPaidDeposit/);
 });
 
+test('legacy failed deposit-date writes are repaired automatically once per payment view', () => {
+  const load = sourceOf('_pmLoad');
+  assert.match(load, /pmLegacyDepositRepairRun/);
+  assert.match(load, /boardFailedCount/);
+  assert.match(load, /deposit-date-backfill/);
+});
+
 test('payment UI keeps the work list and selected-result panel side by side', () => {
   assert.match(workdesk, /class="pmselectionlayout"/);
   assert.match(workdesk, /입금 대상자 수/);

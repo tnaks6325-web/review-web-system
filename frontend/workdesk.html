@@ -6796,6 +6796,18 @@ async function _pmLoad(){
   const [t, b] = await Promise.all([ api('/api/trackb/payment/targets'), api('/api/trackb/payment/batches?limit=30') ]);
   if(!t || !t.ok){ $('#pmbody').innerHTML=`<div class="empty">입금대상을 불러오지 못했습니다.${t&&t.error?' ('+esc(t.error)+')':''}</div>`; return; }
   STATE.pmItems = t.items||[]; STATE.pmSum = t.summary||{}; STATE.pmBatches = (b&&b.ok?b.items:[])||[];
+  // 과거 버전에서 저장된 입금 열 정보가 비어 실패한 회차는 화면을 열 때 한 번만 자동 보완한다.
+  // 새 결과 파일은 result-apply 경로에서 즉시 기록하므로, 이 경로는 기존 실패 이력에만 해당한다.
+  const legacyFailed = STATE.pmBatches.filter(batch => batch.status === 'applied'
+    && batch.resultUploadId && Number(batch.boardFailedCount) > 0);
+  if (legacyFailed.length && !STATE.pmLegacyDepositRepairRun) {
+    STATE.pmLegacyDepositRepairRun = true;
+    for (const batch of legacyFailed) {
+      await api('/api/trackb/payment/batch/' + batch.id + '/deposit-date-backfill',
+        { method:'POST', body: JSON.stringify({}) });
+    }
+    return _pmLoad();
+  }
   _pmPaint();
 }
 
