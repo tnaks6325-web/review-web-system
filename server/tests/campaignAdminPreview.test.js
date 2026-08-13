@@ -148,7 +148,7 @@ ok('⑥-2 수정 모달 미리보기에 전체화면 링크(편집 중 + 참여�
   && /_pvBtn\.onclick = \(\) => openReviewerPreview\(_recruitEditId\)/.test(recjs)
   && /id="rf_preview_full"/.test((readF('js/recruit-modal.js') + readF('admin.html'))));
 ok('⑥-3 토큰은 프래그먼트(#tok=)로 전달 — 서버 로그·Referer 미유출',
-  /preview=1#tok=" \+ encodeURIComponent\(token\)/.test(recjs));
+  /preview=1(?:&previewBuild=sim-20260814)?#tok=" \+ encodeURIComponent\(token\)/.test(recjs));
 ok('⑥-4 도착 즉시 주소창·히스토리에서 토큰 제거(fetch보다 먼저)',
   /history\.replaceState\(null, ''/.test(camp)
   && /if\(PREVIEW_REQ\)\{ _pvCaptureToken\(\);[\s\S]{0,40}\}\s*\n\s*try\{\s*\n\s*await loadCampaign/.test(camp));
@@ -185,5 +185,8 @@ ok('⑦-R10 미리보기는 선택 가능한 옵션만 고정표시(마감 옵�
   /const _pvOptBlocked = PREVIEW && !\(_selOpt && _selOpt\.selectable\);/.test(camp)
   && /if\(j\.application && j\.application\.optionKey\) qp\.set\('optionKey', j\.application\.optionKey\)/.test(camp));
 ok('⑦-R11 팝업 차단 시 안내(무반응 방지)', /if \(!w\) showToast\("팝업이 차단되었습니다/.test(recjs));
+ok('⑦-R12 관리자 미리보기는 새 URL로 열려 이전 캐시가 아닌 현재 시뮬레이션 코드를 사용',
+  /&preview=1&previewBuild=sim-20260814#tok=/.test(recjs)
+  && /q\.delete\('previewBuild'\)/.test(camp));
 
 console.log(`\n✅ campaignAdminPreview: ${passed}개 통과`);
