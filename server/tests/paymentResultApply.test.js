@@ -356,6 +356,10 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /item\.stamp \|\| opts\.stamp/.test(applySrc) && /item\.paidAt \|\| opts\.paidAt/.test(applySrc));
     ok('★ paid_at 미지정이면 DEFAULT NOW()(종전 동작 보존)',
       /COALESCE\(\$7::timestamptz, NOW\(\)\)/.test(applySrc));
+    ok('★ 저장된 입금 열이 비어도 실제 헤더의 입금일을 찾아 기록·검증한다',
+      /findPaymentColumnIndex\(headers\)/.test(applySrc)
+      && /let resolvedDepositColKey = depositColKey;/.test(applySrc)
+      && /depositColKey: resolvedDepositColKey/.test(applySrc));
   }
 
   /* ══════════════════════════════════════════════════════════
