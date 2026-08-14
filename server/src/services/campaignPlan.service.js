@@ -421,6 +421,47 @@ async function savePlans(campaignId, body, actor) {
   }
 }
 
+/** 관리자가 명시적으로 실행하는 빈 준비 행 날짜 재구성. 일반 저장과 달리 과거의 빈 오염 행도 정리한다. */
+async function rebuildWorktableFromPlans(campaignId, actor) {
+  const camp = await _loadCampaign(campaignId);
+  if (!camp.participation_mode) { const e = new Error('참여형 공고만 작업표 재구성을 지원합니다.'); e.code = 'not_participation'; throw e; }
+  if (!camp.linked_sheet_id || !camp.linked_tab_name) { const e = new Error('연결된 작업표가 없습니다.'); e.code = 'worktable_not_linked'; throw e; }
+  const today = kstTodayStr();
+  const client = await pool.connect();
+  let target = null;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    const { isSheetless } = require('../utils/sheetlessScope');
+    if (!await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
+      const e = new Error('이 작업표는 시트 원본으로 설정되어 있어 안전하게 재구성할 수 없습니다. 먼저 무시트 작업표 설정을 확인해주세요.');
+      e.code = 'not_sheetless'; throw e;
+    }
+    const plans = (await client.query(
+      `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
+         FROM campaign_daily_plans WHERE campaign_id=$1 AND plan_date >= $2::date ORDER BY plan_date`, [campaignId, today])).rows;
+    const { rebuildAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
+    const worktableRebuild = await rebuildAdjustedPlansToWorktable({ client, sheetId: camp.linked_sheet_id,
+      tabName: camp.linked_tab_name, plans, today, by: actor || 'campaign-plan-rebuild' });
+    target = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
+    await client.query(`INSERT INTO campaign_plan_events (campaign_id,actor,action,detail) VALUES ($1,$2,'worktable_rebuild',$3)`,
+      [campaignId, actor || null, JSON.stringify({ today, plannedDates: worktableRebuild.plannedDates, ...worktableRebuild })]);
+    await client.query('COMMIT');
+    try {
+      const { rebuildLedgers } = require('./sheetlessLedger.service');
+      const r = await rebuildLedgers({ ...target, by: actor || 'campaign-plan-rebuild' });
+      return { worktableRebuild, worktableProjection: { ok: true, mirrorRows: r.mirrorRows, indexRows: r.indexRows, submittedCount: r.submittedCount } };
+    } catch (cause) {
+      logger.error(`[campaignPlan] 작업표 재구성 투영 실패 camp=${campaignId}: ${cause.message}`);
+      const e = new Error('작업표 날짜는 재구성됐지만 작업보드 갱신에 실패했습니다. 다시 실행해주세요.');
+      e.code = 'worktable_projection_failed'; throw e;
+    }
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally { client.release(); }
+}
+
 /* ── 차수(물량 추가) ─────────────────────────────────────── */
 /**
  * 차수 추가 = 총량을 늘리는 유일한 창구. 첫 추가 시 기존 recruit_total(>0)을 1차(초도)로 흡수.
@@ -606,6 +647,7 @@ async function fetchCarryAppliedSums(db, campaignIds) {
 module.exports = {
   getPlanOverview,
   savePlans,
+  rebuildWorktableFromPlans,
   addRound,
   removeLastRound,
   roundsLockRecruitTotal,

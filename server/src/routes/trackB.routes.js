@@ -1385,6 +1385,7 @@ function _cdpFail(res, err) {
     worktable_slots_shortage: 409,
     worktable_default_missing: 409,
     worktable_projection_failed: 503,
+    worktable_not_linked: 409, worktable_rebuild_empty: 409, worktable_rebuild_below_used: 422,
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
@@ -1403,6 +1404,14 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware
     const { savePlans, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
     const out = await savePlans(campaignId, req.body, _by(req));
+    res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
+  } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
+});
+router.post('/campaigns/:id/worktable-rebuild', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { rebuildWorktableFromPlans, getPlanOverview } = require('../services/campaignPlan.service');
+    const campaignId = String(req.params.id);
+    const out = await rebuildWorktableFromPlans(campaignId, _by(req));
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
