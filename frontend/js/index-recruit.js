@@ -441,8 +441,9 @@ function onLinkedTabChange(sel) {
   if (sel.value) {
     const t = _recruitTabList.find(x => x.key === sel.value);
     if (t) {
-      txt.textContent = t.sheetName + " > " + t.tabName + " 탭으로 이동";
-      info.style.display = "block";
+      // 연결 정보는 저장·검증에는 필요하지만 모집공고 편집 화면에는 노출하지 않는다.
+      txt.textContent = "";
+      info.style.display = "none";
       window._rfLinkedTabName = t.tabName;      // 현영 판정·시트 일정 조회 키
     }
   } else {
@@ -1582,8 +1583,8 @@ function _syncSourceWorkOrderLinkUi() {
     ? "작업오더 작업표에 자동 연결됩니다"
     : "시트·탭이 없으면 공고가 동작하지 않습니다";
   if (sourceInfo) {
-    sourceInfo.style.display = sourceMode ? "block" : "none";
-    sourceInfo.textContent = sourceMode ? "작업오더 작업표 자동 연결 · 시트 선택이 필요하지 않습니다" : "";
+    sourceInfo.style.display = "none";
+    sourceInfo.textContent = "";
   }
 }
 
