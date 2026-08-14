@@ -143,7 +143,8 @@ ok('B5. #recruitModal .modal-footer 가 position:relative — 없으면 줄이 �
   /#recruitModal \.modal-footer\{position:relative\}/.test(modal));
 
 console.log('\n── C. 저장 흐름 배선(index-recruit.js) ──');
-const save = pick(recruit, 'saveRecruitPost');
+// saveRecruitPost is the exception boundary; saveRecruitPostImpl contains validation and persistence.
+const save = pick(recruit, 'saveRecruitPostImpl');
 ok('C1. 저장 시작 시 지난 차단 사유를 지운다',
   /recruitSaveBlockClear\(\)/.test(save.slice(0, 400)));
 ok('C2. ★ 성공 = 버튼 ✓ → closeRecruitModal → campSaveFeedback 순서',
@@ -256,7 +257,7 @@ ok('D12. ★ 비교 결과는 저장 여부를 가르지 않는다(빈 목록이
 
 console.log('\n── E. 저장 버튼 인터랙션 ──');
 ok('E1. ★ 인라인 style 이 아니라 클래스 — 인라인은 :hover 의 background 를 이길 수 없다',
-  /<button id="recruitSaveBtn" class="rf-savebtn"/.test(modal) &&
+  /<button type="button" id="recruitSaveBtn" class="rf-savebtn"/.test(modal) &&
   !/id="recruitSaveBtn"[^>]*style="/.test(modal));
 ok('E2. hover / active / focus-visible / disabled 규칙이 있다',
   /\.rf-savebtn:hover:not\(:disabled\)/.test(modal) && /\.rf-savebtn:active:not\(:disabled\)/.test(modal) &&
