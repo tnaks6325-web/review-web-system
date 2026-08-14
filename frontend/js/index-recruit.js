@@ -2098,9 +2098,16 @@ function applyProductRowsFromOrder(prefill) {
   if (!p.wd_product) return;
   const rows = parseProductLinesToRows(p.wd_product, p.product_name);
   if (!rows.length) return;
+  // 구조화 옵션이 없는 인트라넷 오더는 여기서 평문 상품행으로 내려온다.
+  // 단일 상품일 때 총인원·일건수는 오더 상단 값이므로 그 행에 옮겨야
+  // `_syncPreviewFromOptRows()`가 합계를 0(무제한)으로 재계산하지 않는다.
+  if (rows.length === 1) {
+    rows[0].recruitTotal ||= Number(p.recruit_total) || 0;
+    rows[0].dailyLimit ||= Number(p.daily_limit) || 0;
+  }
   renderOptRows(rows.map(r => ({
     productName: [r.productName, r.optKey].filter(Boolean).join(" "),   // 쪼개진 조각은 상품명으로 되붙인다
-    optKey: "", payAmount: r.payAmount,
+    optKey: "", payAmount: r.payAmount, recruitTotal: r.recruitTotal, dailyLimit: r.dailyLimit,
   })), { mode: "none" });
   _setProdModeNote("작업오더에 옵션이 없어 자동 선택됨");
 }
