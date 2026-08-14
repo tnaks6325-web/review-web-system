@@ -2354,7 +2354,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
   document.getElementById("rf_status").value = "draft";
   if (window.RecruitModal?.syncStatusButtons) window.RecruitModal.syncStatusButtons();
   // 상품정보 가져오기 초기화
-  ["rf_product_url","rf_thumbnail","rf_product_name","rf_price"].forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
+  ["rf_product_url","rf_thumbnail","rf_thumb_url","rf_product_name","rf_price"].forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
+  const _pp = document.getElementById("rf_product_preview"); if (_pp) _pp.style.display = "none";
   document.getElementById("rf_channel_custom").style.display = "none";
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
   _refreshBadgeWrap();
@@ -2396,7 +2397,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
   _igResetAll();                 // 🖼 작업내용 첨부 이미지 3칸 초기화
   ["inflow", "review", "notes"].forEach(f => _igSay(f, ""));
-  const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
+  _syncCampThumbUrlPreview();
   const _tfi = document.getElementById("rf_thumb_file"); if (_tfi) _tfi.value = "";
   /* 💸 086 이체 설정 초기화 — 신규 공고 기본 [자동](작업오더 물건비 판정을 계속 따라간다) */
   _rfPickTransferBank("");
@@ -2565,10 +2566,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _igRenderAll();
         setV("rf_thumbnail", c.thumbnail_url || "");
         setV("rf_thumb_url", c.thumbnail_url || "");
-        if (c.thumbnail_url) {
-          const pv = document.getElementById("rf_thumb_preview");
-          if (pv) { pv.src = c.thumbnail_url; pv.style.display = ""; }
-        }
+        _syncCampThumbUrlPreview();
         renderOptRowsWithProduct(json.options || [], wd.productLines, c);   // 🧩 옵션표 + 상품명 복원
         renderPartCheck();
       }
@@ -2705,8 +2703,9 @@ async function fetchProductInfo(opts) {
       // ★ 리뷰 #10: 자동추출이 빈 값으로 직접 업로드 썸네일을 덮지 않게
       if (r.thumbnail) {
         document.getElementById("rf_thumbnail").value = r.thumbnail;
-        const _pv = document.getElementById("rf_thumb_preview");
-        if (_pv) { _pv.src = r.thumbnail; _pv.style.display = ""; }
+        const _thumbUrl = document.getElementById("rf_thumb_url");
+        if (_thumbUrl) _thumbUrl.value = r.thumbnail;
+        _syncCampThumbUrlPreview();
       }
       // ★ 성공 항목만 덮어씀 — 누락 항목은 작업오더 기본값 등 기존 값 유지
       if (r.name)  nEl.value = r.name;
@@ -3042,6 +3041,48 @@ function _refreshBadgeWrap() {
 /* ═══════════════════════════════════════
    ⚡ M3: 썸네일 직접 업로드 (유입가이드 이미지 인프라 재사용 — Drive+무인증 프록시)
 ═══════════════════════════════════════ */
+/* URL을 붙여넣는 순간 저장될 값과 미리보기를 함께 갱신한다. 이전에는 [가져오기]를
+   눌러 서버에 다시 저장하기 전까지 아무 변화가 없어, 유효한 쿠팡 CDN 주소도 확인할 수 없었다. */
+function _syncCampThumbUrlPreview() {
+  const input = document.getElementById("rf_thumb_url");
+  const saved = document.getElementById("rf_thumbnail");
+  const wrap = document.getElementById("rf_thumb_preview_wrap");
+  const image = document.getElementById("rf_thumb_preview");
+  const state = document.getElementById("rf_thumb_preview_state");
+  if (!input || !saved || !wrap || !image) return;
+
+  const url = input.value.trim();
+  if (!url) {
+    wrap.hidden = true;
+    wrap.classList.remove("is-error");
+    image.removeAttribute("src");
+    return;
+  }
+  if (!/^https:\/\//i.test(url)) {
+    wrap.hidden = false;
+    wrap.classList.add("is-error");
+    if (state) state.textContent = "https URL만 가능";
+    image.removeAttribute("src");
+    return;
+  }
+
+  // 직접 입력 URL도 확정 저장 시 카드가 같은 이미지를 쓰도록 저장 필드에 동기화한다.
+  saved.value = url;
+  wrap.hidden = false;
+  wrap.classList.remove("is-error");
+  if (state) state.textContent = "불러오는 중…";
+  image.onload = function () {
+    wrap.classList.remove("is-error");
+    if (state) state.textContent = "미리보기";
+  };
+  image.onerror = function () {
+    wrap.classList.add("is-error");
+    if (state) state.textContent = "이미지 확인 실패";
+  };
+  image.src = url;
+  _onPreviewInput();
+}
+
 async function uploadCampThumb(input) {
   const file = input.files && input.files[0];
   if (!file) return;
@@ -3064,7 +3105,9 @@ async function uploadCampThumb(input) {
     // 절대 프록시 URL — 프론트(pages.dev)와 API(railway) 오리진이 달라 절대 URL이어야 카드에 뜬다
     document.getElementById("rf_thumbnail").value = j.url;
     const pv = document.getElementById("rf_thumb_preview");
-    if (pv) { pv.src = j.url; pv.style.display = ""; }
+    const pvWrap = document.getElementById("rf_thumb_preview_wrap");
+    if (pv) { pv.src = j.url; }
+    if (pvWrap) { pvWrap.hidden = false; pvWrap.classList.remove("is-error"); }
     showToast("썸네일이 업로드되었습니다.", "success");
     _onPreviewInput();
   } catch (e) {
@@ -3094,7 +3137,9 @@ async function fetchCampThumbFromUrl() {
     // 절대 프록시 URL — 프론트(pages.dev)와 API(railway) 오리진이 달라 절대 URL이어야 카드에 뜬다
     document.getElementById("rf_thumbnail").value = j.url;
     const pv = document.getElementById("rf_thumb_preview");
-    if (pv) { pv.src = j.url; pv.style.display = ""; }
+    const pvWrap = document.getElementById("rf_thumb_preview_wrap");
+    if (pv) { pv.src = j.url; }
+    if (pvWrap) { pvWrap.hidden = false; pvWrap.classList.remove("is-error"); }
     inp.value = "";
     showToast("썸네일이 등록되었습니다.", "success");
     _onPreviewInput();
@@ -3990,6 +4035,8 @@ function _attachPreviewListeners() {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", _onPreviewInput);
   });
+  const thumbUrl = document.getElementById("rf_thumb_url");
+  if (thumbUrl) thumbUrl.addEventListener("input", _syncCampThumbUrlPreview);
 }
 
 function _detachPreviewListeners() {
@@ -4005,6 +4052,8 @@ function _detachPreviewListeners() {
     const el = document.getElementById(id);
     if (el) el.removeEventListener("change", _onPreviewInput);
   });
+  const thumbUrl = document.getElementById("rf_thumb_url");
+  if (thumbUrl) thumbUrl.removeEventListener("input", _syncCampThumbUrlPreview);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
