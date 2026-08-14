@@ -3498,11 +3498,21 @@ async function tabStatsMap({ force = false } = {}) {
               tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
               tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl", tc.income_type AS "incomeType",
               tc.capture_slots AS "captureSlots",
-              im.row_count AS "rowCount", im.submitted_count AS "submittedCount",
+              /* 무시트 작업표의 빈 슬롯은 review_index 에 들어가지 않는다(이름 없는 행은 검색 대상이 아님).
+                 홈의 작업 인원은 검색 명단이 아니라 실제 작업표 원장으로 보여야 하므로, 무시트 탭만
+                 campaign_participants 활성 행을 쓴다. 시트 탭은 기존 index_master 집계를 그대로 유지한다. */
+              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.total_count, 0) ELSE im.row_count END AS "rowCount",
+              CASE WHEN COALESCE(tc.sheetless, FALSE) THEN COALESCE(cp.submitted_count, 0) ELSE im.submitted_count END AS "submittedCount",
               COALESCE(paid.paid_count, 0)::int AS "paidCount",
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*) FILTER (WHERE active AND deleted_at IS NULL)::int AS total_count,
+                  COUNT(*) FILTER (WHERE active AND deleted_at IS NULL AND is_submitted)::int AS submitted_count
+             FROM campaign_participants cp
+            WHERE cp.sheet_id = tc.sheet_id AND cp.tab_name = tc.tab_name
+         ) cp ON TRUE
          -- ★ WHERE 로 걸러 집계 대상을 줄인다(FILTER 만 쓰면 review_index 전 행을 훑는다). 결과는 동일 —
          --   입금 0건 탭은 조인이 안 붙고 아래 COALESCE 가 0 으로 받는다. 이 쿼리는 관리자 화면 하나가
          --   아니라 **모든 내부 사용자의 홈 진입 경로**에 붙으므로 비용 차이가 그대로 체감된다.

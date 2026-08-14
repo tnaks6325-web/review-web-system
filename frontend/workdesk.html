@@ -3522,13 +3522,32 @@ async function openTabCampaign(i){
   if(cs.length>1) return _campPickerOpen(i);
   if(cs.length===1) return _campOpenModal(cs[0].id);
   if(!(await _loadCampPerm())){ toast('공고 발행 권한이 없습니다(편집 허용명단).'); return; }
-  await _campOpenModal(null,{linked_sheet_id:t.sheetId, linked_tab_name:t.tabName, linked_tab_gid:t.tabGid||''});
+  /* 홈 작업목록은 탭 요약만 갖고 있어, 그것만 넘기면 제목·모집인원·일건수·가이드 등
+     작업오더 프리필이 전부 비었다. 연결된 작업오더 원본을 한 번 찾아 공용 프리필 함수로
+     조립한다. 목록을 이미 열었으면 재요청하지 않는다. */
+  const wo=await _campWorkOrderForTab(t);
+  const prefill=wo && typeof _woCampaignPrefill==='function'
+    ? _woCampaignPrefill(wo)
+    : {linked_sheet_id:t.sheetId, linked_tab_name:t.tabName, linked_tab_gid:t.tabGid||''};
+  await _campOpenModal(null,prefill,wo&&wo.id);
 }
-async function _campOpenModal(id, prefill){
+async function _campWorkOrderForTab(t){
+  const matches=o=>o&&String(o.linked_tab_sheet_id||'')===String(t.sheetId||'')&&String(o.linked_tab_name||'')===String(t.tabName||'');
+  let wo=(STATE.wo||[]).find(matches);
+  if(wo) return wo;
+  try{
+    const r=await api('/api/trackb/work-orders/list');
+    const list=(r&&r.ok&&Array.isArray(r.data))?r.data:[];
+    // 홈에서 처음 여는 경우에도 이후 발행은 같은 원본을 쓰도록 캐시한다.
+    if(list.length) STATE.wo=list;
+    return list.find(matches)||null;
+  }catch(_){ return null; }
+}
+async function _campOpenModal(id, prefill, woOrderId){
   if(window.RecruitModal) RecruitModal.mount();     // 모달 마크업은 body 직속(뷰 스크롤에 섞이지 않게)
   // 연결 탭 드롭다운은 _recruitTabList 에 의존한다 — 열기 전에 반드시 채운다(작업오더 경로와 같은 순서).
   try{ if(typeof loadRecruitTabOptions==='function') await loadRecruitTabOptions(); }catch(_){ }
-  try{ await openRecruitModal(id||null, prefill); }
+  try{ await openRecruitModal(id||null, prefill, woOrderId||null); }
   catch(e){ toast('모달 열기 실패: '+((e&&e.message)||'')); }
 }
 /* 공고가 여럿인 작업 — 제목 + **생성일** + 상태를 보여주고 고르게 한다(사용자 확정). */
