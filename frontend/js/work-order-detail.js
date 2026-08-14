@@ -498,7 +498,8 @@ function _woChannelFromUrl(url) {
 }
 /** 작업오더에서 채널 추정 — 상품 URL 우선, 없으면 유입가이드의 첫 링크 */
 function _woChannel(o) {
-  return _woChannelFromUrl(o.product_url)
+  return String(o && o.purchase_channel || '').trim()
+      || _woChannelFromUrl(o.product_url)
       || _woChannelFromUrl((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "");
 }
 
