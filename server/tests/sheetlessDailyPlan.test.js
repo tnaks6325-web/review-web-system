@@ -229,6 +229,28 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     ok('빈 행이 없어도 0→2 증원은 새 작업표 행 2개를 만든다', r.ok && r.created === 2 && inserts.length === 2);
     ok('새 행은 이어지는 seq와 목표 날짜를 갖는다', inserts[0][3] === 8 && inserts[1][3] === 9 && inserts.every(p => p[4] === '8/15 (토)'));
   }
+  {
+    // [기본으로]는 조절 후 남은 행 수가 아니라, 처음 조절하기 직전 작업표의 날짜별 행 수로 돌아간다.
+    // 그래야 0명 주말을 10명으로 열었다가 해제했을 때 0명으로, 기존 40명을 조절했다가 해제하면 40명으로 복귀한다.
+    const written = [];
+    const client = { query: async (sql, params) => {
+      if (/SELECT row_json FROM campaign_participants/.test(sql)) return { rows: [
+        { row_json: { '구매일자': '8/18 (화)' } },
+        { row_json: { '구매일자': '8/18 (화)' } },
+      ] };
+      if (/INSERT INTO campaign_worktable_defaults/.test(sql)) { written.push(params); return { rowCount: 1 }; }
+      if (/FROM campaign_worktable_defaults/.test(sql)) return { rows: [
+        { date: '2026-08-15', default_count: 0 }, { date: '2026-08-18', default_count: 40 },
+      ] };
+      throw new Error('unexpected sql');
+    }};
+    await dailyPlan.captureWorktableDefaults({ client, campaignId: 'c1', sheetId: 'wt_a', tabName: 'T1',
+      today: '2026-08-15', dates: ['2026-08-15', '2026-08-18'] });
+    ok('기본 복귀 기준은 첫 조절 전 작업표 날짜별 인원으로 기록',
+      written.some(p => p[1] === '2026-08-15' && p[2] === 0) && written.some(p => p[1] === '2026-08-18' && p[2] === 2));
+    const defaults = await dailyPlan.loadWorktableDefaults({ client, campaignId: 'c1', dates: ['2026-08-15', '2026-08-18'] });
+    ok('기본 복귀는 보존된 기준값을 날짜별로 다시 읽는다', defaults.get('2026-08-15') === 0 && defaults.get('2026-08-18') === 40);
+  }
 
   /* ══════════════ C. 공고 발행 배선 ══════════════ */
   console.log('\n[C] 공고 발행 시 프리필 배선');

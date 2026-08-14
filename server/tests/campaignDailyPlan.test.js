@@ -430,6 +430,13 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /isSheetless\(client, camp\.linked_sheet_id, camp\.linked_tab_name\)/.test(readS('services/campaignPlan.service.js'))
     && /rebuildLedgers\(\{ \.\.\.projectionTarget/.test(readS('services/campaignPlan.service.js'))
     && /worktableProjection/.test(readS('services/campaignPlan.service.js')));
+  ok('★ 기본으로(remove)도 작업표 원장에 기본값을 적용하고 투영을 재생성',
+    /\(set\.length \|\| remove\.length\)/.test(readS('services/campaignPlan.service.js'))
+    && /loadWorktableDefaults/.test(readS('services/campaignPlan.service.js'))
+    && /remove\.map\(date => \(\{ date, count: defaults\.get\(date\) \}\)\)/.test(readS('services/campaignPlan.service.js')));
+  ok('★ 투영 재생성 실패는 성공으로 숨기지 않고 같은 저장으로 재시도 가능',
+    /worktable_projection_failed/.test(readS('services/campaignPlan.service.js'))
+    && /worktable_projection_failed: 503/.test(rtB));
   ok('admin/list 가 rounds·todayPlanned·planAdjusted 를 내려준다',
     /fetchRoundsSummary/.test(rt) && /todayPlanned: st\.todayPlanned/.test(rt) && /planAdjusted: st\.planAdjusted === true/.test(rt));
 
