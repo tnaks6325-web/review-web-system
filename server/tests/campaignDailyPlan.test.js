@@ -459,7 +459,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     !/여기서는 조절할 수 없습니다/.test(modal) && !/시트 일정 캠페인 — 읽기 전용/.test(modal));
   ok('★ 시트 계획을 기준선으로 표시(baseFor/sheetFor 단일 출처) + 규칙 안내',
     /function sheetFor\(d\)/.test(modal) && /function baseFor\(d\)/.test(modal)
-    && /S\.data\.scheduleDriven === true \? sheetFor\(d\) :/.test(modal)
+    && /S\.data\.scheduleDriven === true\) return sheetFor\(d\);/.test(modal)
+    && /function worktableFor\(d\)/.test(modal)
     && /여기서 조절한 날짜만 시스템 값이 우선/.test(modal));
   ok('★ 시트 일정 공고는 보류 미적용을 사유로 말한다(조회 실패로 뭉뚱그리지 않는다)',
     /이월 보류 설정이 적용되지 않습니다/.test(modal)
@@ -685,7 +686,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   eq('7i-2 저장된 첫날에는 이월을 중복 배치하지 않는다', A.carryOn('2026-08-08'), 0);
   eq('7i-2 재오픈해도 총량 균형 유지', A.sumPlan(), 750);
 
-  // 7j. ★ 시트 일정 공고 — 휴무일(0명)은 구간에서 빠지고 총량은 시트 행 수
+  // 7j. ★ 시트 일정 공고 — 휴무일도 0명 조절행으로 보여야 주말 증원이 가능하고, 총량은 시트 행 수
   {
     const dates = [];
     for (let i = 0; i < 14; i++) {
@@ -701,7 +702,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('7j 시트 일정 공고도 균형 모드', A.applyCarryMode('next') === true);
     eq('7j 총량 = 시트 행 수 기준 남은 배분수', A.targetTotal(), 140);
     eq('7j 배분 합계 ≡ 목표', A.sumPlan(), 140);
-    ok('7j 휴무일은 구간에서 제외', sandbox.S.horiz.every((d) => A.planFor(d) > 0));
+    ok('7j 휴무일도 0명 조절행으로 남는다', sandbox.S.horiz.some((d) => A.planFor(d) === 0));
   }
 
   // 7k. ★★ 균형 모드 불가 조건 = 조용히 반쪽으로 켜지 않고 **꺼진다**(종전 동작 유지)
@@ -913,7 +914,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('★ 시트 자리 부족이어도 균형 모드는 켜진다(늘리면 초록이 되는 창구)', A.applyCarryMode('next') === true);
     eq('★ 꺼진 사유는 없다', sandbox.S.balanceOff, null);
     eq('★ 부족분을 기록한다(안내 문구 재료)', sandbox.S.shortBy, 200);
-    eq('구간 = 앞으로의 시트 진행일 전부', sandbox.S.horiz.length, 5);
+    eq('구간 = 실제 진행일 + 0명 조절 창', sandbox.S.horiz.length, 18);
     ok('균형 바는 "부족"으로 뜬다(합계 < 배분해야 할 인원)', A.sumPlan() < A.targetTotal(), [A.sumPlan(), A.targetTotal()]);
     // 사람이 인원을 올리면 그대로 일치(저장가능)가 된다 — 안내문이 시키는 조치가 실제로 통해야 한다
     sandbox.S.plan[sandbox.S.horiz[0]] += 200;

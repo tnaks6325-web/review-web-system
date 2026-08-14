@@ -141,6 +141,23 @@ async function getPlanOverview(campaignId) {
   }));
   const roundsTotal = rounds.reduce((s, r) => s + r.count, 0);
 
+  // 무시트 작업표 연결 공고는 "기본 일건수"가 아니라 실제 작업표의 날짜별 준비 행을
+  // 기준선으로 내려준다. 없는 날짜를 0명으로 표현해야 주말/휴무일을 조절 대상으로
+  // 표시해도 가짜 인원이 생기지 않는다.
+  let worktableDates = null;
+  try {
+    const { isSheetless } = require('../utils/sheetlessScope');
+    if (camp.linked_sheet_id && camp.linked_tab_name
+      && await isSheetless(pool, camp.linked_sheet_id, camp.linked_tab_name)) {
+      const { readWorktableDates } = require('./sheetlessDailyPlan.service');
+      const read = await readWorktableDates({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name });
+      if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({ date, slots: read.byDate[date] }));
+      else logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 실패 camp=${camp.id}: ${read.reason}`);
+    }
+  } catch (e) {
+    logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 예외 camp=${camp.id}: ${e.message}`);
+  }
+
   return {
     campaignId: camp.id,
     title: camp.title || '',
@@ -172,6 +189,7 @@ async function getPlanOverview(campaignId) {
     scheduleDriven: schedule === 'unknown' ? null : !!schedule,
     scheduleDates: (schedule && schedule !== 'unknown')
       ? schedule.dates.map(d => ({ date: d.date, slots: d.slots })) : null,
+    worktableDates,
     plans: plansQ.rows.map(r => ({
       date: r.date, count: Number(r.count) || 0, updatedBy: r.updated_by || '', updatedAt: r.updated_at,
     })),

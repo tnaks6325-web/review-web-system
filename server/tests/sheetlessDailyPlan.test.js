@@ -213,6 +213,22 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     const src = noLineComments(srv('src/services/sheetlessDailyPlan.service.js'));
     ok('역동기화는 빈 준비 행만 대상으로 한다', /reviewer_name.*recipient_name.*phone8.*order_submission_id/.test(src));
   }
+  {
+    // 빈 준비 행이 없는 경우에도 새 행을 만들어 0명 날짜 증원을 실제 작업표에 반영한다.
+    const inserts = [];
+    const client = { query: async (sql, params) => {
+      if (/FROM campaign_participants/.test(sql)) return { rows: [
+        { id: 'fixed', seq: 7, tab_gid: 'g1', reviewer_name: '참여자', recipient_name: '참여자', phone8: '12345678', order_submission_id: 'order', row_json: { '번호': '7', '구매일자': '8/18 (화)' } },
+      ] };
+      if (/INSERT INTO campaign_participants/.test(sql)) { inserts.push(params); return { rowCount: 1 }; }
+      if (/UPDATE campaign_participants/.test(sql)) throw new Error('filled row must not be updated');
+      throw new Error('unexpected sql');
+    }};
+    const r = await dailyPlan.syncAdjustedPlansToWorktable({
+      client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15', set: [{ date: '2026-08-15', count: 2 }], by: 'tester' });
+    ok('빈 행이 없어도 0→2 증원은 새 작업표 행 2개를 만든다', r.ok && r.created === 2 && inserts.length === 2);
+    ok('새 행은 이어지는 seq와 목표 날짜를 갖는다', inserts[0][3] === 8 && inserts[1][3] === 9 && inserts.every(p => p[4] === '8/15 (토)'));
+  }
 
   /* ══════════════ C. 공고 발행 배선 ══════════════ */
   console.log('\n[C] 공고 발행 시 프리필 배선');
