@@ -230,12 +230,21 @@ async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans
   // 남은 관리 풀은 어떤 조절 날짜에도 필요하지 않은 빈 행이다. 과거/꼬인 날짜만 지워
   // 다음 재구성에서 안전하게 재사용한다. 다른 미래 날짜는 pool에 들어오지 않는다.
   for (const r of pool) if (r.rawDate) changed.push({ id: r.id, value: '' });
-  for (const c of changed) {
+  // 800행을 한 행씩 UPDATE하면 네트워크 왕복만으로 수 분이 걸려 요청이 끊긴다.
+  // VALUES 배치 하나로 원장 갱신을 끝내고, 이후 장부 투영도 같은 요청 안에서 수행한다.
+  if (changed.length) {
+    const vals = [], params = [];
+    changed.forEach((c, i) => {
+      const n = i * 2;
+      vals.push(`($${n + 1}::uuid,$${n + 2}::text)`);
+      params.push(c.id, c.value);
+    });
+    params.push(dateHeader, String(by).slice(0, 100));
     await client.query(
-      `UPDATE campaign_participants
-          SET row_json=COALESCE(row_json,'{}'::jsonb) || jsonb_build_object($2::text,$3::text),
-              start_date=$3, updated_by=$4, updated_at=NOW() WHERE id=$1`,
-      [c.id, dateHeader, c.value, String(by).slice(0, 100)]);
+      `UPDATE campaign_participants p
+          SET row_json=COALESCE(p.row_json,'{}'::jsonb) || jsonb_build_object($${params.length - 1}::text,v.value),
+              start_date=v.value, updated_by=$${params.length}::text, updated_at=NOW()
+         FROM (VALUES ${vals.join(',')}) AS v(id,value) WHERE p.id=v.id`, params);
   }
   const maxSeq = rows.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 0);
   const blank = {}; headers.forEach(h => { blank[h] = ''; });

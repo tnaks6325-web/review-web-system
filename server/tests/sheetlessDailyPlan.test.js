@@ -263,7 +263,10 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     ];
     const client = { query: async (sql, params) => {
       if (/SELECT id, seq/.test(sql)) return { rows };
-      if (/UPDATE campaign_participants/.test(sql)) { updates.push({ id: params[0], value: params[2] }); return { rowCount: 1 }; }
+      if (/UPDATE campaign_participants/.test(sql)) {
+        for (let i = 0; i < params.length - 2; i += 2) updates.push({ id: params[i], value: params[i + 1] });
+        return { rowCount: updates.length };
+      }
       throw new Error('unexpected sql');
     }};
     const r = await dailyPlan.rebuildAdjustedPlansToWorktable({ client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15',
