@@ -221,8 +221,10 @@
     // 카드(81명)와 모달(81 + 이월 40 = 121명)이 갈린다. 날짜 범위가 시작일 등으로
     // 오늘과 다르게 잡혀도 저장된 계획을 놓치지 않도록, 오늘 이후 명시 계획이 하나라도
     // 있으면 자동 이월을 다시 제안하지 않고 저장값을 그대로 연다.
-    var todayKey = String(S.data.today || '').slice(0, 10);
-    if (Object.keys(S.base).some(function (d) { return String(d).slice(0, 10) >= todayKey; })) carry = 0;
+    // S.base는 화면에 표시할 수 있는 저장된 일자 계획만 모아 둔 상태다. 하나라도
+    // 있으면 사용자가 확정한 배치이므로 pending carry를 별도로 얹지 않는다. 응답의
+    // 날짜 표기 방식과 무관하게 카드와 재오픈 모달이 같은 정원을 보게 한다.
+    if (Object.keys(S.base).length) carry = 0;
     // ★ 나눌 대상 = 이월 없이도 **온전히** 채워지는 진행일(마지막 부분일 제외) — 부분일까지 세면
     //   그 몫이 총량 맞추기에서 잘려 "이월 30명인데 29명만 얹혔다"가 된다(시안 실측).
     var slots = Math.max(1, wd.days.filter(function (x) { return x.v >= x.base; }).length);
