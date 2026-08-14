@@ -36,10 +36,10 @@ ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPl
 ok('prefill: 작업오더 첫 상품명·결제금액 헬퍼(_woFirstProductInfo)', /function _woFirstProductInfo/.test(app) && /product_options_json/.test(app));
 ok('prefill: product_name/price 프리필 전달', /_woFirstProductInfo\(o\)/.test(app) && /product_name:\s+_pi\.name/.test(app));
 ok('prefill: 공고 제목 = 상품명 우선(업체명·건수 미노출), 오더 제목 폴백', /title:\s+_pi\.name \|\| o\.title/.test(app));
-ok('modal: 작업오더 기본값을 상품 미리보기에 표시', /prefill\.product_name \|\| prefill\.price/.test(recjs));
+ok('modal: 작업오더 상품명·가격은 저장값으로만 유지(편집 화면 미리보기 제거)', /prefill\.product_name \|\| prefill\.price/.test(recjs) && !/rf_product_preview|rf_pp_name|rf_pp_price/.test(recjs));
 ok('modal: 프리필 시 자동수집 1회 시도', /fetchProductInfo\(\{ auto: true \}\)/.test(recjs));
 ok('fetch: 성공 항목만 덮어씀(누락 항목은 기존 값 유지)', /if \(r\.name\)\s+nEl\.value = r\.name;/.test(recjs) && /if \(r\.price\) pEl\.value = r\.price;/.test(recjs));
-ok('fetch: 실패 시 작업오더 기본값 유지 + 미리보기 미숨김', /작업오더에 입력된 상품명\/가격을 유지합니다/.test(recjs) && /if \(!hasBase\) document\.getElementById\("rf_product_preview"\)\.style\.display = "none"/.test(recjs));
+ok('fetch: 실패 시 작업오더 기본값 유지', /작업오더에 입력된 상품명\/가격을 유지합니다/.test(recjs));
 
 // ── 시작일(062): 작업오더 start_date → 발행폼 → 시작일 전 오픈예정 ──
 const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');

@@ -352,13 +352,6 @@
             <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" style="white-space:nowrap" title="상품 페이지를 새 탭에서 엽니다">↗</button>
           </div>
           <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">가져오기: 네이버·올리브영 (쿠팡 제한적)</div>
-          <div id="rf_product_preview" hidden style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border,#E2E8F0);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
-            <img id="rf_pp_img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border,#E2E8F0);background:#fff">
-            <div style="min-width:0;flex:1">
-              <div id="rf_pp_name" style="font-weight:700;font-size:.8rem;word-break:break-word"></div>
-              <div id="rf_pp_price" style="font-size:.8rem;color:var(--p,#3182f6);font-weight:700;margin-top:2px"></div>
-            </div>
-          </div>
           <input id="rf_thumbnail" type="hidden">
           <input id="rf_product_name" type="hidden">
           <input id="rf_price" type="hidden">
@@ -517,7 +510,7 @@
                 <div class="form-row tall"><span class="form-label">유입 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_inflow" class="rform-input"></textarea><div id="rf_ig_inflow" class="work-image-strip ig-strip" data-igf="inflow"></div><input id="rf_igf_inflow" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('inflow',this)"></div><div id="rf_igm_inflow"></div><div id="rf_clean_inflow"></div></div></div>
                 <div class="form-row tall"><span class="form-label">리뷰 가이드</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_review" class="rform-input"></textarea><div id="rf_ig_review" class="work-image-strip ig-strip" data-igf="review"></div><input id="rf_igf_review" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('review',this)"></div><div id="rf_igm_review"></div><div id="rf_clean_review"></div></div></div>
                 <div class="form-row tall"><span class="form-label">특이사항</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_notes" class="rform-input"></textarea><div id="rf_ig_notes" class="work-image-strip ig-strip" data-igf="notes"></div><input id="rf_igf_notes" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('notes',this)"></div><div id="rf_igm_notes"></div></div></div>
-              </div><input id="rf_landing_url" type="hidden"><input id="rf_thumbnail" type="hidden"><input id="rf_product_name" type="hidden"><input id="rf_price" type="hidden"><div id="rf_product_preview" hidden><img id="rf_pp_img" alt=""><span id="rf_pp_name"></span><span id="rf_pp_price"></span></div></section>
+              </div><input id="rf_landing_url" type="hidden"><input id="rf_thumbnail" type="hidden"><input id="rf_product_name" type="hidden"><input id="rf_price" type="hidden"></section>
             <section class="section" data-sec="cond" id="rf_part_section" data-part-only><div class="row-form"><div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><div class="square-toggle"><button type="button" id="rf_carry_auto" onclick="rfCarrySet('auto')">자동 반영</button><button type="button" id="rf_carry_hold" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" hidden></div></div></div></div><details class="advanced"><summary>마감 · 보류 · 인원 제한 세부 설정</summary><div class="row-form"><div class="form-row"><span class="form-label">모집 마감</span><div class="form-control"><input id="rf_deadline" type="date" onchange="onRecruitDatesChange()"><span id="rf_deadline_day"></span></div></div><div class="form-row"><span class="form-label">최대 참여 제한</span><div class="form-control"><input id="rf_max_slots" type="number"></div></div><div class="form-row"><span class="form-label">마감 버퍼</span><div class="form-control"><input id="rf_close_buffer" type="number"><input id="rf_hold_ttl" type="number" hidden></div></div><div id="rf_deadline_warn" hidden></div></div></details></section>
             <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden>
           </div>
