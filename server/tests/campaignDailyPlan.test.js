@@ -426,6 +426,10 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('★ m4: 조절값 판정 단일 출처(planOverrideFor — dailyQuota·표시 공용)',
     /function planOverrideFor/.test(st) && /planOverrideFor\(counts\.plans \|\| null, todayStr\)/.test(st)
     && /const ov = planOverrideFor\(plans, todayStr\)/.test(st));
+  ok('★ 무시트 작업표 조절 저장은 원장·작업보드 투영까지 재생성',
+    /isSheetless\(client, camp\.linked_sheet_id, camp\.linked_tab_name\)/.test(readS('services/campaignPlan.service.js'))
+    && /rebuildLedgers\(\{ \.\.\.projectionTarget/.test(readS('services/campaignPlan.service.js'))
+    && /worktableProjection/.test(readS('services/campaignPlan.service.js')));
   ok('admin/list 가 rounds·todayPlanned·planAdjusted 를 내려준다',
     /fetchRoundsSummary/.test(rt) && /todayPlanned: st\.todayPlanned/.test(rt) && /planAdjusted: st\.planAdjusted === true/.test(rt));
 
