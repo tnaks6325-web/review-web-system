@@ -12,6 +12,29 @@ function _campApi(path) {
   return API_BASE_URL + base + (path || '');
 }
 
+/**
+ * 작업오더에서 만든 공고의 역방향 링크를 저장한다.
+ * 인트라넷 SSO로 열린 workdesk는 /api/trackb/* 만 접근 가능하므로,
+ * 공고 API가 Track B를 쓰는 경우 같은 네임스페이스의 위임 경로를 사용한다.
+ */
+async function _linkPrefilledWorkOrder(orderId, campaignId) {
+  const configured = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '';
+  const pathName = typeof location !== 'undefined' ? (location.pathname || '') : '';
+  const onWorkdesk = /^\/workdesk(?:\.html)?(?:\/|$)/.test(pathName);
+  const useTrackB = onWorkdesk || configured.indexOf('/api/trackb/') >= 0;
+  const path = useTrackB ? '/api/trackb/work-orders/update' : '/api/order/admin/update';
+  const res = await fetch(API_BASE_URL + path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
+    body: JSON.stringify({ id: orderId, linked_campaign_id: campaignId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    throw new Error(body.error || `작업오더 연결 실패 (HTTP ${res.status})`);
+  }
+  return body;
+}
+
 /* ═══════════════════════════════════════
    모집공고 관리 — 전역 상태
 ═══════════════════════════════════════ */
@@ -3711,14 +3734,11 @@ async function saveRecruitPostImpl() {
     const newCampId = saved && saved.data && saved.data.id;
     /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
     if (!_recruitEditId && _woPrefillOrderId && newCampId) {
-      // gasGet 은 실패 시 throw 하지 않고 {error} 를 반환하므로 결과를 명시적으로 검사
       try {
-        const linkRes = await gasGet({ action: "orderAdminUpdate", id: _woPrefillOrderId, linked_campaign_id: newCampId });
-        if (linkRes && linkRes.error) {
-          showToast("공고는 등록됐으나 작업오더 연결에 실패했습니다. 인박스에서 다시 연결해주세요.", "error");
-        }
-      } catch(_) {
-        showToast("공고는 등록됐으나 작업오더 연결 중 오류가 발생했습니다.", "error");
+        await _linkPrefilledWorkOrder(_woPrefillOrderId, newCampId);
+      } catch (error) {
+        console.warn('[recruit] work-order campaign link failed:', error);
+        showToast("공고는 등록됐으나 작업오더 연결에 실패했습니다. 인박스에서 다시 연결해주세요.", "error");
       }
       try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
     }
