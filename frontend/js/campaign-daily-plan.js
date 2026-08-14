@@ -1442,7 +1442,11 @@
           ...(apply > 0 ? { carryApply: apply } : {}) });
       S.notes = [];
       applyOverview(j);
-      toast('저장했습니다 — 카드·리뷰어 화면에 바로 반영됩니다');
+      if (j.worktableProjection && j.worktableProjection.ok === false) {
+        toast('모집계획은 저장됐지만 작업보드 갱신에 실패했습니다 — 다시 저장해 재시도해주세요', 'warning');
+      } else {
+        toast('저장했습니다 — 작업보드·카드·리뷰어 화면에 바로 반영됩니다');
+      }
       refreshHost();
     } catch (e) {
       toast('저장 실패: ' + (e.message || e));

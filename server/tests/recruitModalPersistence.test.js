@@ -18,7 +18,7 @@ assert.match(recruit, /channel,\s*\n\s*channel_custom: document\.getElementById\
   '구매채널과 직접입력값은 저장 요청에 함께 포함돼야 합니다.');
 assert.match(routes, /channel = COALESCE\(\$3, channel\),\s*\n\s*channel_custom = COALESCE\(\$4, channel_custom\)/,
   '서버 수정 경로는 구매채널과 직접입력값을 함께 보존해야 합니다.');
-assert.match(modal, /#recruitModal \.rf-compact-main \.footer\{display:none/, 
+assert.match(modal, /#recruitModal \.rf-compact-main \.footer\{display:none/,
   '중앙 편집영역의 취소·저장 버튼은 숨겨야 합니다.');
 assert.match(modal, /<button type="button" id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost\(\)">/,
   '저장 상태를 제어하는 버튼은 팝업 우측 하단 버튼 하나여야 합니다.');

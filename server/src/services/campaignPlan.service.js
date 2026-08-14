@@ -340,16 +340,27 @@ async function savePlans(campaignId, body, actor) {
     // 달력만 바꾸면 주말 0명→10명 조절에도 작업표 자리가 생기지 않는다.
     // 연결된 작업표의 빈 준비 행만 같은 트랜잭션에서 재배치한다.
     let worktableSync = null;
+    let projectionTarget = null;
     if (set.length && camp.linked_sheet_id && camp.linked_tab_name) {
-      const { syncAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
-      worktableSync = await syncAdjustedPlansToWorktable({
-        client,
-        sheetId: camp.linked_sheet_id,
-        tabName: camp.linked_tab_name,
-        set,
-        today,
-        by: actor || 'campaign-plan',
-      });
+      // 시트 기반 탭은 원본이 구글시트이므로 로컬 작업표를 움직이면 안 된다.
+      // 무시트 탭에서만 달력 조절 → 작업표 역동기화를 수행한다.
+      const { isSheetless } = require('../utils/sheetlessScope');
+      if (await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
+        const { syncAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
+        worktableSync = await syncAdjustedPlansToWorktable({
+          client,
+          sheetId: camp.linked_sheet_id,
+          tabName: camp.linked_tab_name,
+          set,
+          today,
+          by: actor || 'campaign-plan',
+        });
+        if (!worktableSync.skipped) {
+          projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
+        }
+      } else {
+        worktableSync = { ok: true, skipped: true, reason: 'not_sheetless', moved: 0, cleared: 0 };
+      }
     }
     await client.query(
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'plan_save', $3)`,
@@ -360,8 +371,29 @@ async function savePlans(campaignId, body, actor) {
         [campaignId, actor || null, JSON.stringify({ amount: carryApply, note: note || undefined })]);
     }
     await client.query('COMMIT');
+    // 작업표 원본(campaign_participants)만 바꾸면 기존 작업보드·검색·집계가 읽는
+    // raw/review 원장이 이전 날짜를 유지한다. 커밋 후 같은 탭의 투영을 즉시 재생성해
+    // 저장 결과와 작업보드 표를 같은 요청 안에서 맞춘다.
+    let worktableProjection = null;
+    if (projectionTarget) {
+      try {
+        const { rebuildLedgers } = require('./sheetlessLedger.service');
+        const rebuilt = await rebuildLedgers({ ...projectionTarget, by: actor || 'campaign-plan' });
+        worktableProjection = {
+          ok: true,
+          mirrorRows: rebuilt.mirrorRows,
+          indexRows: rebuilt.indexRows,
+          submittedCount: rebuilt.submittedCount,
+        };
+      } catch (e) {
+        // 계획 저장은 이미 커밋됐으므로 "성공"으로 숨기지 않는다. 호출자는 즉시 경고를
+        // 받고 재시도할 수 있으며, 로그에는 재생성 실패 원인이 남는다.
+        logger.error(`[campaignPlan] 작업보드 투영 재생성 실패 camp=${campaignId}: ${e.message}`);
+        worktableProjection = { ok: false, code: e.code || 'projection_failed', error: e.message };
+      }
+    }
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
-    return { applied: set.length + remove.length, worktableSync };
+    return { applied: set.length + remove.length, worktableSync, worktableProjection };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
