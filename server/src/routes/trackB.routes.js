@@ -1386,6 +1386,9 @@ function _cdpFail(res, err) {
     worktable_default_missing: 409,
     worktable_projection_failed: 503,
     worktable_not_linked: 409, worktable_rebuild_empty: 409, worktable_rebuild_below_used: 422,
+    // 작업표 재구성은 무시트 원장만 안전하게 변경한다. 전환 전 대상은 500으로 숨기지 말고
+    // 운영자가 전환 상태를 바로 확인할 수 있도록 명시적으로 안내한다.
+    not_sheetless: 409,
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });
