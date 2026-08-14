@@ -38,6 +38,43 @@ function _kstDateLabel(iso) {
   return `${Number(m[2])}/${Number(m[3])} (${['일', '월', '화', '수', '목', '금', '토'][day]})`;
 }
 
+/** 첫 조절 직전의 작업표 날짜별 인원을 보존한다. 이후 행을 재배치해도 [기본으로]의 기준은 바뀌지 않는다. */
+async function captureWorktableDefaults({ client, campaignId, sheetId, tabName, dates = [], today = '' } = {}) {
+  if (!client || !campaignId || !sheetId || !tabName || !dates.length) return new Map();
+  const { rows } = await client.query(
+    `SELECT row_json FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE ORDER BY seq`, [sheetId, tabName]);
+  const headers = [];
+  for (const r of rows) for (const k of Object.keys(r.row_json || {})) if (k && !headers.includes(k)) headers.push(k);
+  const { findDateColumnIndex } = require('./campaignSchedule.service');
+  const idx = findDateColumnIndex(headers);
+  const counts = new Map();
+  if (idx >= 0) {
+    const { parseDateColumn } = require('../utils/koreanDate');
+    const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
+    const parsed = parseDateColumn(rows.map(r => String((r.row_json || {})[headers[idx]] || '')), {
+      fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined,
+    });
+    parsed.forEach(d => { if (d) counts.set(d, (counts.get(d) || 0) + 1); });
+  }
+  for (const date of [...new Set(dates)].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(String(d)))) {
+    await client.query(
+      `INSERT INTO campaign_worktable_defaults (campaign_id, plan_date, default_count)
+       VALUES ($1,$2::date,$3) ON CONFLICT (campaign_id,plan_date) DO NOTHING`,
+      [campaignId, date, counts.get(date) || 0]);
+  }
+  return counts;
+}
+
+async function loadWorktableDefaults({ client, campaignId, dates = [] } = {}) {
+  if (!client || !campaignId || !dates.length) return new Map();
+  const { rows } = await client.query(
+    `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, default_count
+       FROM campaign_worktable_defaults WHERE campaign_id=$1 AND plan_date = ANY($2::date[])`,
+    [campaignId, dates]);
+  return new Map(rows.map(r => [r.date, Number(r.default_count) || 0]));
+}
+
 /**
  * 수동 조절한 미래 날짜를 작업표의 빈 준비 행에도 반영한다.
  * 참여자·주문이 있는 행은 절대 이동하지 않으며, 달력 저장 트랜잭션과 함께 실행한다.
@@ -230,6 +267,8 @@ module.exports = {
   readWorktableDates,
   prefillFromWorktable,
   syncAdjustedPlansToWorktable,
+  captureWorktableDefaults,
+  loadWorktableDefaults,
   MAX_PLAN_DAYS,
   __setPoolForTest,
 };

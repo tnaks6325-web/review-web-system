@@ -1383,6 +1383,8 @@ function _cdpFail(res, err) {
     bad_carry: 400, carry_not_hold: 400,   // 098: 이월 반영 검증
     carry_stale: 409, carry_unknown: 503,  // 098: 잔량 경합·조회 실패(fail-closed — 코드리뷰 M2)
     worktable_slots_shortage: 409,
+    worktable_default_missing: 409,
+    worktable_projection_failed: 503,
   };
   if (err && err.code && codes[err.code]) {
     res.status(codes[err.code]).json({ ok: false, code: err.code, error: err.message, ...(err.floor != null ? { floor: err.floor } : {}) });

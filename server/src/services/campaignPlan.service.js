@@ -324,6 +324,18 @@ async function savePlans(campaignId, body, actor) {
       }
     }
 
+    let worktableSync = null;
+    let projectionTarget = null;
+    let sheetlessLinked = false;
+    if ((set.length || remove.length) && camp.linked_sheet_id && camp.linked_tab_name) {
+      const { isSheetless } = require('../utils/sheetlessScope');
+      sheetlessLinked = await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name);
+      if (sheetlessLinked && set.length) {
+        const { captureWorktableDefaults } = require('./sheetlessDailyPlan.service');
+        await captureWorktableDefaults({ client, campaignId, sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name,
+          dates: set.map(x => x.date), today });
+      }
+    }
     for (const x of set) {
       await client.query(
         `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
@@ -339,19 +351,22 @@ async function savePlans(campaignId, body, actor) {
     }
     // 달력만 바꾸면 주말 0명→10명 조절에도 작업표 자리가 생기지 않는다.
     // 연결된 작업표의 빈 준비 행만 같은 트랜잭션에서 재배치한다.
-    let worktableSync = null;
-    let projectionTarget = null;
-    if (set.length && camp.linked_sheet_id && camp.linked_tab_name) {
+    if ((set.length || remove.length) && camp.linked_sheet_id && camp.linked_tab_name) {
       // 시트 기반 탭은 원본이 구글시트이므로 로컬 작업표를 움직이면 안 된다.
       // 무시트 탭에서만 달력 조절 → 작업표 역동기화를 수행한다.
-      const { isSheetless } = require('../utils/sheetlessScope');
-      if (await isSheetless(client, camp.linked_sheet_id, camp.linked_tab_name)) {
-        const { syncAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
+      if (sheetlessLinked) {
+        const { syncAdjustedPlansToWorktable, loadWorktableDefaults } = require('./sheetlessDailyPlan.service');
+        const defaults = await loadWorktableDefaults({ client, campaignId, dates: remove });
+        if (defaults.size !== remove.length) {
+          const e = new Error('이 날짜의 최초 작업표 기준을 찾지 못했습니다. 기본 복귀 전에 작업표 기준을 확인해주세요.');
+          e.code = 'worktable_default_missing'; throw e;
+        }
+        const syncSet = set.concat(remove.map(date => ({ date, count: defaults.get(date) })));
         worktableSync = await syncAdjustedPlansToWorktable({
           client,
           sheetId: camp.linked_sheet_id,
           tabName: camp.linked_tab_name,
-          set,
+          set: syncSet,
           today,
           by: actor || 'campaign-plan',
         });
@@ -386,10 +401,14 @@ async function savePlans(campaignId, body, actor) {
           submittedCount: rebuilt.submittedCount,
         };
       } catch (e) {
-        // 계획 저장은 이미 커밋됐으므로 "성공"으로 숨기지 않는다. 호출자는 즉시 경고를
-        // 받고 재시도할 수 있으며, 로그에는 재생성 실패 원인이 남는다.
+        // 계획 저장은 이미 커밋됐으므로 성공 응답으로 숨기지 않는다. 프런트는 현재 입력을
+        // 유지한 채 같은 저장을 다시 호출할 수 있고, 그 호출은 투영 재생성도 재시도한다.
         logger.error(`[campaignPlan] 작업보드 투영 재생성 실패 camp=${campaignId}: ${e.message}`);
         worktableProjection = { ok: false, code: e.code || 'projection_failed', error: e.message };
+        const retry = new Error('모집계획은 저장됐지만 작업보드 갱신에 실패했습니다. 저장을 다시 눌러 재시도해주세요.');
+        retry.code = 'worktable_projection_failed';
+        retry.projection = worktableProjection;
+        throw retry;
       }
     }
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
