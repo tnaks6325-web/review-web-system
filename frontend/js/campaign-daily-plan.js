@@ -106,6 +106,8 @@
   /** 그날 조절이 없을 때의 기본 정원 — 시트 일정 공고는 **시트가**, 아니면 기본 일건수가 정한다.
    *  ★ 이 한 곳이 게이지·"기본 N" 표기·예상 종료일 계산의 공통 기준(사본을 두면 화면이 갈린다). */
   function baseFor(d) {
+    if (S.data.skipWeekends === true && dayKind(d) === 'sat') return 0;
+    if (S.data.skipWeekends === true && dayKind(d) === 'hol') return 0;
     return S.data.scheduleDriven === true ? sheetFor(d) : (S.data.defaultDaily || 0);
   }
   function planFor(d) {

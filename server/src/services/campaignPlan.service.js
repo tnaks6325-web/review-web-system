@@ -146,6 +146,7 @@ async function getPlanOverview(campaignId) {
     title: camp.title || '',
     status: camp.status,
     defaultDaily: Number(camp.daily_limit) || 0,
+    skipWeekends: camp.skip_weekends === true,
     recruitTotal: Number(camp.recruit_total) || 0,
     // ★ 시트 일정 공고의 **실제 총량은 시트 행 수**(computeCampaignState 가 sch.totalSlots 로 판정) —
     //   화면이 recruit_total 을 총량으로 쓰면 서버 판정과 다른 숫자를 보여주고 예상 종료일도 어긋난다.
