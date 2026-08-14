@@ -318,6 +318,20 @@ async function savePlans(campaignId, body, actor) {
         `DELETE FROM campaign_daily_plans WHERE campaign_id = $1 AND plan_date = ANY($2::date[])`,
         [campaignId, remove]);
     }
+    // 달력만 바꾸면 주말 0명→10명 조절에도 작업표 자리가 생기지 않는다.
+    // 연결된 작업표의 빈 준비 행만 같은 트랜잭션에서 재배치한다.
+    let worktableSync = null;
+    if (set.length && camp.linked_sheet_id && camp.linked_tab_name) {
+      const { syncAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
+      worktableSync = await syncAdjustedPlansToWorktable({
+        client,
+        sheetId: camp.linked_sheet_id,
+        tabName: camp.linked_tab_name,
+        set,
+        today,
+        by: actor || 'campaign-plan',
+      });
+    }
     await client.query(
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail) VALUES ($1, $2, 'plan_save', $3)`,
       [campaignId, actor || null, JSON.stringify({ set, remove, note: note || undefined })]);
@@ -328,7 +342,7 @@ async function savePlans(campaignId, body, actor) {
     }
     await client.query('COMMIT');
     logger.info(`[campaignPlan] ${actor || '?'} 가 공고 ${campaignId} 계획 저장 — set ${set.length} / remove ${remove.length}`);
-    return { applied: set.length + remove.length };
+    return { applied: set.length + remove.length, worktableSync };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
