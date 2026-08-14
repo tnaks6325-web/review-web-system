@@ -1590,6 +1590,12 @@ function _syncSourceWorkOrderLinkUi() {
 /** 게시 전 자동 점검 — 서버 활성화 게이트와 동일한 필수 항목만 검사한다. */
 function participationCheckErrors() {
   const errs = [];
+  const manager = document.getElementById("rf_manager")?.value.trim() || "";
+  const channel = document.getElementById("rf_channel")?.value.trim() || "";
+  const startDate = document.getElementById("rf_start_date")?.value || "";
+  if (!manager) errs.push("담당자를 선택해주세요");
+  if (!channel) errs.push("구매채널을 선택해주세요");
+  if (!startDate) errs.push("모집 시작일을 입력해주세요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
