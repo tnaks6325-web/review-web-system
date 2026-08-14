@@ -31,6 +31,86 @@ function __setPoolForTest(p) { _pool = p; }
 
 const MAX_PLAN_DAYS = 400;   // 상한(비정상 데이터로 달력이 폭발하는 것 방지)
 
+function _kstDateLabel(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '';
+  const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  return `${Number(m[2])}/${Number(m[3])} (${['일', '월', '화', '수', '목', '금', '토'][day]})`;
+}
+
+/**
+ * 수동 조절한 미래 날짜를 작업표의 빈 준비 행에도 반영한다.
+ * 참여자·주문이 있는 행은 절대 이동하지 않으며, 달력 저장 트랜잭션과 함께 실행한다.
+ */
+async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = [], today = '', by = 'system' } = {}) {
+  if (!client || !sheetId || !tabName || !Array.isArray(set) || !set.length) {
+    return { ok: true, skipped: true, reason: 'no_link_or_change', moved: 0, cleared: 0 };
+  }
+  const wanted = new Map();
+  for (const x of set) {
+    if (!x || !/^\d{4}-\d{2}-\d{2}$/.test(String(x.date || ''))) continue;
+    wanted.set(String(x.date), Math.max(0, Number(x.count) || 0));
+  }
+  if (!wanted.size) return { ok: true, skipped: true, reason: 'no_valid_change', moved: 0, cleared: 0 };
+
+  const { rows } = await client.query(
+    `SELECT id, seq, reviewer_name, recipient_name, phone8, order_submission_id, row_json
+       FROM campaign_participants
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+      ORDER BY seq FOR UPDATE`, [sheetId, tabName]);
+  if (!rows.length) return { ok: true, skipped: true, reason: 'no_worktable_rows', moved: 0, cleared: 0 };
+
+  const { findDateColumnIndex } = require('./campaignSchedule.service');
+  const headers = [];
+  for (const r of rows) for (const k of Object.keys(r.row_json || {})) if (k && !headers.includes(k)) headers.push(k);
+  const dateIdx = findDateColumnIndex(headers);
+  if (dateIdx < 0) return { ok: true, skipped: true, reason: 'no_date_column', moved: 0, cleared: 0 };
+  const dateHeader = headers[dateIdx];
+  const { parseDateColumn } = require('../utils/koreanDate');
+  const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
+  const parsed = parseDateColumn(rows.map(r => String((r.row_json || {})[dateHeader] || '')), {
+    fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined,
+  });
+  const slots = rows.map((r, i) => ({ ...r, date: parsed[i] || '', empty: !String(r.reviewer_name || '').trim() && !String(r.recipient_name || '').trim() && !String(r.phone8 || '').trim() && !r.order_submission_id }));
+  const editable = slots.filter(r => r.empty && (!r.date || !today || r.date >= today));
+  const changed = [];
+  let moved = 0, cleared = 0;
+
+  // 먼저 축소해 남는 빈 자리를 재사용 가능 상태로 만든다.
+  for (const [date, count] of wanted) {
+    const atDate = editable.filter(r => r.date === date);
+    for (const row of atDate.slice(Math.max(0, count))) {
+      row.date = '';
+      changed.push({ id: row.id, value: '' });
+      cleared++;
+    }
+  }
+  // 증원은 날짜 없는 행을 우선하고, 부족하면 더 늦은 미래의 빈 준비 행만 당긴다.
+  for (const [date, count] of [...wanted.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    let need = Math.max(0, count - editable.filter(r => r.date === date).length);
+    const donors = editable.filter(r => r.date !== date && (!r.date || r.date > date)).sort((a, b) => (a.date || '9999-12-31').localeCompare(b.date || '9999-12-31') || a.seq - b.seq);
+    for (const row of donors) {
+      if (!need) break;
+      row.date = date;
+      changed.push({ id: row.id, value: _kstDateLabel(date) });
+      moved++; need--;
+    }
+    if (need) {
+      const err = new Error(`작업표의 비어 있는 준비 행이 부족해 ${date}에 ${need}명을 배정할 수 없습니다.`);
+      err.code = 'worktable_slots_shortage';
+      throw err;
+    }
+  }
+  for (const c of changed) {
+    await client.query(
+      `UPDATE campaign_participants
+          SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
+              start_date = $3, updated_by = $4, updated_at = NOW()
+        WHERE id = $1`, [c.id, dateHeader, c.value, String(by).slice(0, 100)]);
+  }
+  return { ok: true, dateHeader, moved, cleared, changed: changed.length };
+}
+
 /**
  * 작업표 날짜 분배를 읽는다(달력에 넣기 전 계산만).
  * @returns {Promise<{ok:boolean, byDate?:object, reason?:string}>}
@@ -136,6 +216,7 @@ async function prefillFromWorktable({ campaignId, sheetId, tabName, today = '', 
 module.exports = {
   readWorktableDates,
   prefillFromWorktable,
+  syncAdjustedPlansToWorktable,
   MAX_PLAN_DAYS,
   __setPoolForTest,
 };
