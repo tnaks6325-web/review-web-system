@@ -631,11 +631,12 @@ function _woReviewImgHtml(raw, existingHtml) {
 
 // guide_images(090 · 칸=칸 매핑 2단계) — 첨부 이미지 URL 배열. DB 는 JSON 문자열, 화면 전달은 배열일 수
 // 있어 양쪽 다 받는다. 파싱 실패·비배열은 [](= 종전 텍스트 블록 승격 경로 폴백, 가산적).
-function _woGuideImages(o) {
+function _woGuideImages(o, section) {
   try {
     const v = o && o.guide_images;
     if (!v) return [];
-    const arr = Array.isArray(v) ? v : JSON.parse(String(v));
+    const parsed = Array.isArray(v) || (v && typeof v === "object") ? v : JSON.parse(String(v));
+    const arr = Array.isArray(parsed) ? (section && section !== "inflow" ? [] : parsed) : (parsed && parsed[section || "inflow"]);
     return Array.isArray(arr) ? arr.filter(u => typeof u === "string" && u.trim()) : [];
   } catch (_) { return []; }
 }
@@ -651,7 +652,7 @@ function _woBuildInflowHtml(o) {
     base = /<[a-z][^>]*>/i.test(o.inflow_guide) ? o.inflow_guide
          : (typeof _woPlainGuideToHtml === "function" ? _woPlainGuideToHtml(o.inflow_guide) : "");
   }
-  const structImgs = _woReviewImgHtml(_woGuideImages(o).join("\n"), base);
+  const structImgs = _woReviewImgHtml(_woGuideImages(o, "inflow").join("\n"), base);
   const imgs = structImgs + _woReviewImgHtml(o.review_guide, base + structImgs);
   if (!imgs) return base;   // 승격할 이미지 없음 → base 그대로(빈 문자열이면 평문 경로)
   // 이미지는 있는데 base가 비면(평문 inflow_guide·이미지 없음) 그 텍스트를 escape해 함께 보존
@@ -780,8 +781,8 @@ function _woCampaignPrefill(o) {
     //   걷어낸다(구조 필드가 이미 보여주는 값 — 리뷰어 화면 이중 표기의 원인 2·4).
     wd_review:      _woStripReviewMeta(typeof _woPickSections === "function"
                       ? _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"])
-                      : (o.review_guide || "")),
-    wd_notes:       o.special_notes || "",
+                      : (o.review_guide || "")) + _woReviewImgHtml(_woGuideImages(o, "review").join("\n"), o.review_guide || ""),
+    wd_notes:       (o.special_notes || "") + _woReviewImgHtml(_woGuideImages(o, "notes").join("\n"), o.special_notes || ""),
     // ★ 상품 페이지 열기 버튼용 랜딩 — 링크유입일 때만(비링크는 product_url 폴백 제거 = 유입가이드형에 버튼 안 뜸)
     landing_url:    o.inflow_type === "link"
                       ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")

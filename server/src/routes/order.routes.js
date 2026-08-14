@@ -178,13 +178,16 @@ function _intOrZero(v) {
 // <img src>로 그대로 나가는 값이라 자유 문자열을 저장하지 않는다. 실패·빈 값은 ''(종전 동작).
 function _guideImagesJson(v) {
   try {
-    const arr = Array.isArray(v) ? v : ((typeof v === 'string' && v.trim()) ? JSON.parse(v) : []);
-    if (!Array.isArray(arr)) return '';
-    const clean = arr
+    const parsed = (typeof v === 'string' && v.trim()) ? JSON.parse(v) : v;
+    const clean = arr => (Array.isArray(arr) ? arr : [])
       .filter(u => typeof u === 'string' && /^https?:\/\//i.test(u.trim()))
       .map(u => u.trim().slice(0, 600))
       .slice(0, 8);
-    return clean.length ? JSON.stringify(clean) : '';
+    // Legacy array = inflow images. New object keeps each guide section independent.
+    if (Array.isArray(parsed)) { const urls = clean(parsed); return urls.length ? JSON.stringify(urls) : ''; }
+    if (!parsed || typeof parsed !== 'object') return '';
+    const grouped = Object.fromEntries(['inflow', 'review', 'notes'].map(k => [k, clean(parsed[k])]).filter(([, urls]) => urls.length));
+    return Object.keys(grouped).length ? JSON.stringify(grouped) : '';
   } catch (_) { return ''; }
 }
 
