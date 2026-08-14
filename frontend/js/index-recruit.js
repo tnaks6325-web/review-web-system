@@ -1593,6 +1593,12 @@ function participationCheckErrors() {
   // 시트 미연결 공고는 허용한다. 다만 연결을 선택했다면 탭 gid까지 완성되어야
   // 리네임·시트쓰기 대상이 엇갈리지 않는다.
   if (tabKey && !(tabMeta && tabMeta.tabGid)) errs.push("선택한 시트 탭의 gid를 확인해주세요");
+  const manager = document.getElementById("rf_manager")?.value.trim() || "";
+  const channel = document.getElementById("rf_channel")?.value.trim() || "";
+  const startDate = document.getElementById("rf_start_date")?.value || "";
+  if (!manager) errs.push("담당자를 선택해주세요");
+  if (!channel) errs.push("구매채널을 선택해주세요");
+  if (!startDate) errs.push("모집 시작일을 입력해주세요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
