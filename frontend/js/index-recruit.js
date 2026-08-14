@@ -3529,7 +3529,7 @@ function _rfGoToCheck() {
 /* ═══════════════════════════════════════
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
-async function saveRecruitPost() {
+async function saveRecruitPostImpl() {
   if (_recruitEditId && window._recruitEditLoadFailed) {
     _rfSaveBlocked("기존 공고 정보를 완전히 불러오지 못해 저장을 차단했습니다. 새로고침 후 다시 시도해주세요.");
     return;
@@ -3778,6 +3778,15 @@ async function saveRecruitPost() {
 // The shared recruit modal invokes this action from inline controls in both
 // admin.html and workdesk.html.  Expose it explicitly so the action remains
 // callable even when the host page's script scope is isolated.
+async function saveRecruitPost() {
+  try {
+    return await saveRecruitPostImpl();
+  } catch (e) {
+    const reason = e && e.message ? e.message : '알 수 없는 저장 전 오류';
+    _rfSaveBlocked(`저장 전 처리 중 오류가 발생했습니다: ${reason}`);
+    console.error('[recruit] save preflight failed', e);
+  }
+}
 window.saveRecruitPost = saveRecruitPost;
 
 /* ═══════════════════════════════════════
