@@ -130,6 +130,16 @@ ok('★ 구조 배열 → 유입가이드 HTML 에 <img> 로 실린다(파싱 �
     const h = W._woBuildInflowHtml({ inflow_type: 'guide', inflow_guide: '검색어: 립밤', guide_images: [IMG_URL] });
     return h.includes('<img') && h.includes(TOK) && h.includes('검색어: 립밤');
   })());
+ok('★ 리뷰·특이사항 첨부는 textarea HTML이 아니라 칸별 이미지 배열로 분리된다',
+  (() => {
+    const q = W._woCampaignPrefill({
+      review_guide: '리뷰 본문', special_notes: '특이사항 본문',
+      guide_images: { review: [IMG_URL], notes: [IMG_URL] },
+    });
+    return q.wd_review === '리뷰 본문' && q.wd_notes === '특이사항 본문'
+      && !q.wd_review.includes('<img') && !q.wd_notes.includes('<img')
+      && q.wd_review_images[0] === IMG_URL && q.wd_notes_images[0] === IMG_URL;
+  })());
 ok('★ 과도기(텍스트 블록 + 배열 동시 전송)에도 같은 이미지는 1번만(토큰 중복 제거)',
   (() => {
     const o = { inflow_type: 'guide',

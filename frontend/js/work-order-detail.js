@@ -785,10 +785,15 @@ function _woCampaignPrefill(o) {
     // ★ 리뷰가이드는 [리뷰등록 가이드] 섹션만 스냅샷 + 메타 줄 스트립(4칸 정리 개선 ②) —
     //   [라벨]이 하나도 없어 전문 폴백될 때도 첨부 파일명·저장 URL·상품번호·▶옵션:결제금액◀ 줄은
     //   걷어낸다(구조 필드가 이미 보여주는 값 — 리뷰어 화면 이중 표기의 원인 2·4).
+    // 본문 textarea에는 글만 넣는다. 첨부 이미지는 아래 배열로 분리해 발행폼의
+    // 사진 스트립에서 렌더한다. 여기서 <img>를 이어 붙이면 textarea에 태그가
+    // 문자로 보이고, 저장 시 리뷰어 작업내용까지 태그 문자열로 남는다.
     wd_review:      _woStripReviewMeta(typeof _woPickSections === "function"
                       ? _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"])
-                      : (o.review_guide || "")) + _woReviewImgHtml(_woGuideImages(o, "review").join("\n"), o.review_guide || ""),
-    wd_notes:       (o.special_notes || "") + _woReviewImgHtml(_woGuideImages(o, "notes").join("\n"), o.special_notes || ""),
+                      : (o.review_guide || "")),
+    wd_review_images: _woGuideImages(o, "review"),
+    wd_notes:       o.special_notes || "",
+    wd_notes_images: _woGuideImages(o, "notes"),
     // ★ 상품 페이지 열기 버튼용 랜딩 — 링크유입일 때만(비링크는 product_url 폴백 제거 = 유입가이드형에 버튼 안 뜸)
     landing_url:    o.inflow_type === "link"
                       ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")

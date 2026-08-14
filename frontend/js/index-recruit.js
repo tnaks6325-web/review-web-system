@@ -2619,6 +2619,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_wd_product", prefill.wd_product);
         setV("rf_wd_review", prefill.wd_review);
         setV("rf_wd_notes", prefill.wd_notes);
+        // 작업오더의 guide_images는 리뷰가이드·특이사항 본문에 HTML로 섞지 않는다.
+        // textarea는 글만, 이미지는 해당 칸의 썸네일 스트립으로 분리한다.
+        _igSetList("review", prefill.wd_review_images);
+        _igSetList("notes", prefill.wd_notes_images);
         const ta = document.getElementById("rf_wd_inflow");
         if (prefill.wd_inflow_html && ta) {
           /* 유입가이드 원본 HTML(서식) 보존: textarea엔 미리보기 텍스트만, 저장 시 미수정이면 원본 그대로
@@ -2632,6 +2636,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         } else if (prefill.wd_inflow_text) {
           setV("rf_wd_inflow", prefill.wd_inflow_text);
         }
+        _igRenderAll();
         /* 🧩 작업오더 상품정보 → 진행상품 표: 옵션 배열이 있으면 그대로, 없으면 텍스트를 줄 단위로 분해 */
         applyProductRowsFromOrder(prefill);
         setV("rf_deadline", prefill.end_date || prefill.deadline);
