@@ -115,6 +115,10 @@ ok('프리필에 채널·담당자·연결탭이 실린다',
 ok('프리필이 채널·담당자 버튼을 실제로 선택한다',
   /if \(prefill\.channel\) _rfPickBtn\("channel", prefill\.channel\)/.test(rec)
   && /if \(prefill\.manager\) _rfPickBtn\("manager", prefill\.manager\)/.test(rec));
+ok('단일 상품 오더의 총인원·일건수는 상품표 동기화에도 유지한다',
+  /if \(sourceOptions\.length === 1\)/.test(rec)
+  && /sourceOptions\[0\]\.recruitTotal \|\|= Number\(p\.recruit_total\) \|\| 0/.test(rec)
+  && /sourceOptions\[0\]\.dailyLimit \|\|= Number\(p\.daily_limit\) \|\| 0/.test(rec));
 ok('★ 값이 없으면 건드리지 않는다(랜덤·판정불가 = 기존처럼 빈 칸)',
   /if \(prefill\.channel\)/.test(rec) && /if \(prefill\.manager\)/.test(rec));
 ok('연결 탭은 gid 우선 재매칭(리네임된 탭도 찾음)',
