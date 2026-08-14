@@ -54,7 +54,7 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
   if (!wanted.size) return { ok: true, skipped: true, reason: 'no_valid_change', moved: 0, cleared: 0 };
 
   const { rows } = await client.query(
-    `SELECT id, seq, reviewer_name, recipient_name, phone8, order_submission_id, row_json
+    `SELECT id, seq, tab_gid, reviewer_name, recipient_name, phone8, order_submission_id, row_json
        FROM campaign_participants
       WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
       ORDER BY seq FOR UPDATE`, [sheetId, tabName]);
@@ -74,7 +74,7 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
   const slots = rows.map((r, i) => ({ ...r, date: parsed[i] || '', empty: !String(r.reviewer_name || '').trim() && !String(r.recipient_name || '').trim() && !String(r.phone8 || '').trim() && !r.order_submission_id }));
   const editable = slots.filter(r => r.empty && (!r.date || !today || r.date >= today));
   const changed = [];
-  let moved = 0, cleared = 0;
+  let moved = 0, cleared = 0, created = 0;
 
   // 먼저 축소해 남는 빈 자리를 재사용 가능 상태로 만든다.
   for (const [date, count] of wanted) {
@@ -96,9 +96,22 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
       moved++; need--;
     }
     if (need) {
-      const err = new Error(`작업표의 비어 있는 준비 행이 부족해 ${date}에 ${need}명을 배정할 수 없습니다.`);
-      err.code = 'worktable_slots_shortage';
-      throw err;
+      // 빈 준비 행이 모두 찼어도 날짜 조절 자체를 막지 않는다. 새 빈 작업표 행을
+      // 같은 트랜잭션으로 만들어, 0명 날짜를 늘린 결과가 실제 표에도 보이게 한다.
+      const maxSeq = rows.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 0);
+      const blank = {};
+      headers.forEach(h => { blank[h] = ''; });
+      for (let i = 0; i < need; i++) {
+        const value = _kstDateLabel(date);
+        const rowJson = { ...blank, [dateHeader]: value };
+        await client.query(
+          `INSERT INTO campaign_participants
+             (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'worktable', $7, NOW())`,
+          [sheetId, rows[0].tab_gid || null, tabName, maxSeq + created + 1, value,
+            JSON.stringify(rowJson), String(by).slice(0, 100)]);
+        created++; moved++;
+      }
     }
   }
   for (const c of changed) {
@@ -108,7 +121,7 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
               start_date = $3, updated_by = $4, updated_at = NOW()
         WHERE id = $1`, [c.id, dateHeader, c.value, String(by).slice(0, 100)]);
   }
-  return { ok: true, dateHeader, moved, cleared, changed: changed.length };
+  return { ok: true, dateHeader, moved, cleared, created, changed: changed.length };
 }
 
 /**

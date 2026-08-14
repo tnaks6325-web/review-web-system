@@ -103,12 +103,27 @@
     }
     return S.data._schMap[d] || 0;
   }
+  /** 무시트 작업표의 실제 날짜별 준비 행 수. 날짜가 없으면 0명이다.
+   *  기본 일건수를 빈 날짜에 다시 채우면, 작업표에는 없는 주말/휴무일이 40명으로
+   *  꾸며져 조절 화면과 작업표가 다시 갈린다. */
+  function worktableFor(d) {
+    if (!S.data._wtMap) {
+      var m = {};
+      (S.data.worktableDates || []).forEach(function (x) { m[x.date] = Number(x.slots) || 0; });
+      S.data._wtMap = m;
+    }
+    return S.data._wtMap[d] || 0;
+  }
   /** 그날 조절이 없을 때의 기본 정원 — 시트 일정 공고는 **시트가**, 아니면 기본 일건수가 정한다.
    *  ★ 이 한 곳이 게이지·"기본 N" 표기·예상 종료일 계산의 공통 기준(사본을 두면 화면이 갈린다). */
   function baseFor(d) {
     if (S.data.skipWeekends === true && dayKind(d) === 'sat') return 0;
     if (S.data.skipWeekends === true && dayKind(d) === 'hol') return 0;
-    return S.data.scheduleDriven === true ? sheetFor(d) : (S.data.defaultDaily || 0);
+    if (S.data.scheduleDriven === true) return sheetFor(d);
+    // worktableDates 가 있으면 이 공고는 무시트 작업표 연결 공고다. 없는 날짜는
+    // "기본 일건수"가 아니라 실제로는 아직 행이 없는 0명으로 보여야 한다.
+    if (Array.isArray(S.data.worktableDates)) return worktableFor(d);
+    return S.data.defaultDaily || 0;
   }
   function planFor(d) {
     return (S.plan[d] != null) ? S.plan[d] : baseFor(d);
@@ -178,15 +193,29 @@
   function effBase(d) {
     return (S.base[d] != null) ? S.base[d] : baseFor(d);
   }
+  // 일정/작업표가 유한한 공고는 마지막 실제 날짜 뒤에도 짧은 조절 창을 남긴다.
+  // 이 창의 날짜는 0명으로 표시되어, 원래 없던 주말·휴무일에도 직접 인원을 배정할 수 있다.
+  // 반대로 400일치 0명 행을 만들면 "시트 자리가 부족한 공고"가 MAX_ROWS에 걸려
+  // 조절 모달 자체가 닫히므로 여기서 경계를 둔다.
+  function finitePlanLimit() {
+    var src = S.data.scheduleDriven === true ? S.data.scheduleDates : S.data.worktableDates;
+    if (!Array.isArray(src) || !src.length) return '';
+    var last = src.map(function (x) { return x && x.date || ''; }).filter(Boolean).sort().pop();
+    return last ? addDays(last, 13) : ''; // 기본 표시 창과 같은 14일(마지막 실제 날짜 포함)
+  }
   /** 이월을 얹지 않았을 때의 진행 구간 — { days:[{date,base,v}], sum, short }.
-   *  ★ 출발값이 0인 날(시트 일정 공고의 휴무일·0명으로 저장한 날)은 진행일이 아니라 구간에서 빠진다.
+   *  ★ 출발값이 0인 날도 달력 행에는 남긴다. 그래야 주말 제외·작업표 미배정일을
+   *    0명에서 직접 늘릴 수 있고, 저장 시 작업표와 동기화할 수 있다.
    *  ★★ 400일 안에 목표를 못 채워도(`short`) **모아 둔 진행일을 그대로 돌려준다** — 그 상태가
    *    바로 균형 바의 "부족(파랑)"이고, 사람이 날짜별 인원을 올리면 초록이 된다. */
   function walkDays(target) {
-    var out = [], sum = 0, d = baseDate(), guard = 0;
+    var out = [], sum = 0, d = baseDate(), guard = 0, finiteLimit = finitePlanLimit();
     while (sum < target && guard++ < 400) {
       var b = effBase(d);
-      if (b > 0) { var v = Math.min(b, target - sum); out.push({ date: d, base: b, v: v }); sum += v; }
+      var v = b > 0 ? Math.min(b, target - sum) : 0;
+      if (b <= 0 && finiteLimit && d > finiteLimit) break;
+      out.push({ date: d, base: b, v: v });
+      sum += v;
       d = addDays(d, 1);
     }
     S.capAhead = sum;                                 // 못 채웠을 때 "얼마나 모자란지"를 말하는 재료
@@ -216,7 +245,7 @@
     //   기능 불가가 아니라 **"부족(파랑) — 저장불가"** 그 자체다(요구 ⑥). 종전엔 이때 균형 모드를
     //   통째로 꺼 놓고 안내문만 "어느 날의 인원을 늘려주세요"라고 말해, 시키는 대로 늘려도 아무
     //   변화가 없는 **막다른 길**이었다(사용자 신고 2026-08-07 · 시트 800명 공고).
-    if (!wd.days.length) { S.balanceOff = 'no_room'; return null; }
+    if (!wd.days.some(function (x) { return x.base > 0; })) { S.balanceOff = 'no_room'; return null; }
     var carry = (mode === 'extend') ? 0 : (carryAmt() || 0);
     // 첫 진행일에 이미 저장된 계획이 있으면 그 값은 서버가 실제 정원으로 쓰는
     // 완성값이다. 여기에 pending carry를 다시 얹으면, 저장 후 모달을 재오픈할 때
