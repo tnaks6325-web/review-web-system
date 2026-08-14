@@ -2078,6 +2078,13 @@ function applyProductRowsFromOrder(prefill) {
       payAmount: o.payAmount || o.pay_amount || 0,
       recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
     }));
+  // 옵션 없는 단일 상품은 표가 모집공고의 정원 단일 출처다. 인트라넷이
+  // 총인원·일건수를 상품 행이 아니라 오더 상단에 보낸 경우, 0인 행을 그대로
+  // 그리면 `_syncPreviewFromOptRows()`가 방금 채운 총인원/일건수를 다시 0으로 덮는다.
+  if (sourceOptions.length === 1) {
+    sourceOptions[0].recruitTotal ||= Number(p.recruit_total) || 0;
+    sourceOptions[0].dailyLimit ||= Number(p.daily_limit) || 0;
+  }
   if (sourceMode) {
     renderOptRows(sourceOptions, { mode: sourceMode });
     _setProdModeNote("작업오더의 옵션 정보로 자동 선택됨");
