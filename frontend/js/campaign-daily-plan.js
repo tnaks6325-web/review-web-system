@@ -221,7 +221,8 @@
     // 카드(81명)와 모달(81 + 이월 40 = 121명)이 갈린다. 날짜 범위가 시작일 등으로
     // 오늘과 다르게 잡혀도 저장된 계획을 놓치지 않도록, 오늘 이후 명시 계획이 하나라도
     // 있으면 자동 이월을 다시 제안하지 않고 저장값을 그대로 연다.
-    if (Object.keys(S.base).some(function (d) { return d >= S.data.today; })) carry = 0;
+    var todayKey = String(S.data.today || '').slice(0, 10);
+    if (Object.keys(S.base).some(function (d) { return String(d).slice(0, 10) >= todayKey; })) carry = 0;
     // ★ 나눌 대상 = 이월 없이도 **온전히** 채워지는 진행일(마지막 부분일 제외) — 부분일까지 세면
     //   그 몫이 총량 맞추기에서 잘려 "이월 30명인데 29명만 얹혔다"가 된다(시안 실측).
     var slots = Math.max(1, wd.days.filter(function (x) { return x.v >= x.base; }).length);
