@@ -597,8 +597,13 @@
     S.plan = {};
     S.base = {};
     S.carryStage = 0;   // 이월 반영 스테이징은 저장/재조회 시 초기화(서버 잔량이 진실)
+    // API의 today에는 시각이 붙을 수 있지만 계획 날짜는 YYYY-MM-DD다. 원문을
+    // 비교하면 오늘의 저장 계획이 과거로 오인되어 S.base에 들어가지 않고, 재오픈할
+    // 때 이월분이 또 더해진다. 날짜 키만 맞춰 비교한다.
+    var todayKey = String(j.today || '').slice(0, 10);
     (j.plans || []).forEach(function (p) {
-      if (p.date >= j.today) { S.plan[p.date] = p.count; S.base[p.date] = p.count; }
+      var planKey = String(p.date || '').slice(0, 10);
+      if (planKey >= todayKey) { S.plan[p.date] = p.count; S.base[p.date] = p.count; }
     });
     S.baseEnd = null;
     S.balance = false; S.horiz = null; S.carryMap = null; S.openPlan = null; S.outside = null;
