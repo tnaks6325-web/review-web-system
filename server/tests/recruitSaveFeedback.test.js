@@ -144,31 +144,32 @@ ok('B5. #recruitModal .modal-footer 가 position:relative — 없으면 줄이 �
 
 console.log('\n── C. 저장 흐름 배선(index-recruit.js) ──');
 const save = pick(recruit, 'saveRecruitPost');
+const saveImpl = pick(recruit, 'saveRecruitPostImpl');
 ok('C1. 저장 시작 시 지난 차단 사유를 지운다',
   /recruitSaveBlockClear\(\)/.test(save.slice(0, 400)));
 ok('C2. ★ 성공 = 버튼 ✓ → closeRecruitModal → campSaveFeedback 순서',
   (() => {
-    const iDone  = save.indexOf('✓ 저장됨');
-    const iClose = save.indexOf('closeRecruitModal()');
-    const iFb    = save.indexOf('campSaveFeedback(');
+    const iDone  = saveImpl.indexOf('✓ 저장됨');
+    const iClose = saveImpl.indexOf('closeRecruitModal()');
+    const iFb    = saveImpl.indexOf('campSaveFeedback(');
     return iDone > -1 && iClose > iDone && iFb > iClose;
   })());
 ok('C3. 안내에 공고 이름과 바뀐 항목을 넘긴다',
-  /campSaveFeedback\(\{ title: payload\.title, changes: _changed/.test(save));
+  /campSaveFeedback\(\{ title: payload\.title, changes: _changed/.test(saveImpl));
 ok('C4. ★ 변경 항목은 **모달을 닫기 전에** 계산한다(닫은 뒤엔 폼 값을 읽을 수 없다)',
-  save.indexOf('_rfChangedLabels(payload)') > -1 &&
-  save.indexOf('_rfChangedLabels(payload)') < save.indexOf('closeRecruitModal()'));
+  saveImpl.indexOf('_rfChangedLabels(payload)') > -1 &&
+  saveImpl.indexOf('_rfChangedLabels(payload)') < saveImpl.indexOf('closeRecruitModal()'));
 ok('C5. 실패는 모달 안 인라인으로 남긴다(토스트 아님)',
-  /catch\(e\) \{[\s\S]{0,320}_rfSaveBlocked\(/.test(save) &&
-  !/catch\(e\) \{[\s\S]{0,200}showToast\("저장 오류/.test(save));
+  /catch\(e\) \{[\s\S]{0,320}_rfSaveBlocked\(/.test(saveImpl) &&
+  !/catch\(e\) \{[\s\S]{0,200}showToast\("저장 오류/.test(saveImpl));
 ok('C6. 게시 전 자동 점검 차단도 인라인 + [점검 항목 보기]',
-  /errs\.length\) \{[\s\S]{0,220}_rfSaveBlocked\([^)]*\{ go: _rfGoToCheck \}\)/.test(save));
+  /errs\.length\) \{[\s\S]{0,220}_rfSaveBlocked\([^)]*\{ go: _rfGoToCheck \}\)/.test(saveImpl));
 ok('C7. ★ 성공 후에는 버튼을 원복하지 않는다(모달이 닫히므로) — 실패에만 되돌린다',
-  /if \(!_ok\) \{[\s\S]{0,220}btn\.innerHTML = '<i class="fas fa-save"><\/i> 저장'/.test(save));
+  /if \(!_ok\) \{[\s\S]{0,220}btn\.innerHTML = '<i class="fas fa-save"><\/i> 저장'/.test(saveImpl));
 ok('C8. 모달을 다시 열 때 버튼 상태를 되돌린다(✓ 저장됨/비활성 잔류 방지)',
   /_sb\.classList\.remove\("busy", "done"\)/.test(pick(recruit, 'openRecruitModal')));
 ok('C9. 구버전 모듈 폴백 — 렌더러가 없으면 종전 토스트로 알린다(무신호 금지)',
-  /typeof campSaveFeedback === "function"/.test(save) && /showToast\(_wasEdit \?/.test(save));
+  /typeof campSaveFeedback === "function"/.test(saveImpl) && /showToast\(_wasEdit \?/.test(saveImpl));
 /* ★ 남아 있는 showToast 2건(작업오더 역연결 실패)은 **성공 확정 후** 나가고 토스트가 5.2초
    유지되어 모달이 닫힌 뒤에도 보인다 — 그래서 그대로 둔다. 고정하는 것은
    "모달이 떠 있는 동안의 차단·오류 사유"를 토스트로 되돌리지 않는 것이다. */
@@ -252,22 +253,22 @@ ok('D11. ★ 빈 값 ↔ 0 은 같은 상태(실측 오탐: 서버 NULL 을 폼�
   !sandbox._rfSame(0, 1) &&
   diff({ max_slots: 0, review_fee: 0, reviewer_hidden: false }, { title: 'A' }).length === 0);
 ok('D12. ★ 비교 결과는 저장 여부를 가르지 않는다(빈 목록이어도 저장·안내는 그대로)',
-  !/_changed\.length[\s\S]{0,40}return/.test(save) && !/if \(!_changed\.length\)/.test(save));
+  !/_changed\.length[\s\S]{0,40}return/.test(saveImpl) && !/if \(!_changed\.length\)/.test(saveImpl));
 
 console.log('\n── E. 저장 버튼 인터랙션 ──');
 ok('E1. ★ 인라인 style 이 아니라 클래스 — 인라인은 :hover 의 background 를 이길 수 없다',
-  /<button id="recruitSaveBtn" class="rf-savebtn"/.test(modal) &&
+  /<button type="button" id="recruitSaveBtn" class="rf-savebtn"/.test(modal) &&
   !/id="recruitSaveBtn"[^>]*style="/.test(modal));
 ok('E2. hover / active / focus-visible / disabled 규칙이 있다',
   /\.rf-savebtn:hover:not\(:disabled\)/.test(modal) && /\.rf-savebtn:active:not\(:disabled\)/.test(modal) &&
   /\.rf-savebtn:focus-visible/.test(modal) && /\.rf-savebtn:disabled/.test(modal));
 ok('E3. 전송 중(busy) · 성공(done) 상태 클래스',
   /\.rf-savebtn\.busy/.test(modal) && /\.rf-savebtn\.done/.test(modal) &&
-  /btn\.classList\.add\("busy"\)/.test(save) && /btn\.classList\.add\("done"\)/.test(save));
+  /btn\.classList\.add\("busy"\)/.test(saveImpl) && /btn\.classList\.add\("done"\)/.test(saveImpl));
 ok('E4. 전송 중에는 비활성 — 두 번 눌러 두 번 저장되지 않는다',
-  /btn\.disabled = true;[\s\S]{0,120}btn\.classList\.add\("busy"\)/.test(save));
+  /btn\.disabled = true;[\s\S]{0,120}btn\.classList\.add\("busy"\)/.test(saveImpl));
 ok('E5. 스피너는 폰트어썸에 기대지 않는다(리뷰웹시스템[3버전]엔 아이콘이 없을 수 있다)',
-  /rf-spin/.test(modal) && /<span class="rf-spin">/.test(save));
+  /rf-spin/.test(modal) && /<span class="rf-spin">/.test(saveImpl));
 
 console.log('\n── F. 단일 출처 · 사본 금지 ──');
 ok('F1. ★ 안내 렌더러 정의는 recruit-modal.js 한 곳 — 화면별 사본 금지',

@@ -3782,6 +3782,7 @@ async function saveRecruitPostImpl() {
 // callable even when the host page's script scope is isolated.
 async function saveRecruitPost() {
   try {
+    if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();
     return await saveRecruitPostImpl();
   } catch (e) {
     const reason = e && e.message ? e.message : '알 수 없는 저장 전 오류';

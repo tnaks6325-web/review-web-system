@@ -20,7 +20,7 @@ assert.match(routes, /channel = COALESCE\(\$3, channel\),\s*\n\s*channel_custom 
   '서버 수정 경로는 구매채널과 직접입력값을 함께 보존해야 합니다.');
 assert.match(modal, /#recruitModal \.rf-compact-main \.footer\{display:none/,
   '중앙 편집영역의 취소·저장 버튼은 숨겨야 합니다.');
-assert.match(modal, /<button id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost\(\)">/,
+assert.match(modal, /<button type="button" id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost\(\)">/,
   '저장 상태를 제어하는 버튼은 팝업 우측 하단 버튼 하나여야 합니다.');
 assert.doesNotMatch(modal, /id="recruitSaveBtnLegacy"/,
   '별도 하단 저장 버튼 ID를 남기면 상태 제어가 분리됩니다.');
