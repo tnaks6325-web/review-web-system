@@ -59,7 +59,7 @@ const AE_FIELDS = [
 // updated_by / updated_by_name 은 감사용으로 별도 처리(컨텐츠 수정으로 카운트하지 않음).
 const INTAKE_EDITABLE_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'daily_count', 'daily_count_text', 'purchase_time',
+  'pay_amount', 'daily_count', 'daily_count_text', 'purchase_channel', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
   'delivery_type', 'courier_proxy', 'review_type', 'review_type_mix', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
@@ -134,6 +134,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_gid       TEXT DEFAULT ''`);
     // 065: 작업담당(박세희/박은비/랜덤) — 리뷰웹 담당자(만두/망고) 자동 선택의 원천
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_manager         TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS purchase_channel      TEXT DEFAULT ''`);
     // 099: 체험단 종류(리뷰/블로그) — 빈 값 = 리뷰체험단(기존 동작). 마이그레이션 안전망.
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_kind            TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_review_order_id TEXT DEFAULT ''`);
@@ -256,14 +257,14 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
   const { rows } = await pool.query(
     `INSERT INTO work_orders
       (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
-       purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
+       purchase_channel, purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
        sales_id, contract_number, quote_id, skip_weekends, holidays,
        source_review_order_id, source_revision, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,'submitted',$38,$39)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,'submitted',$39,$40)
      RETURNING *`,
     [
       _genOrderId(),
@@ -274,6 +275,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       b.pay_amount || 0,
       b.daily_count || 0,
       b.daily_count_text || '',
+      String(b.purchase_channel || '').trim(),
       b.purchase_time || '',
       b.inflow_keyword || '',
       b.inflow_type || '',
@@ -604,22 +606,22 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     const { rows } = await pool.query(
       `UPDATE work_orders SET
          title = $2, start_date = $3, product_option = $4, product_options_json = $5,
-         pay_amount = $6, daily_count = $7, daily_count_text = $8, purchase_time = $9,
-         inflow_keyword = $10, inflow_type = $11, inflow_guide = $12, guide_images = $13,
-         delivery_type = $14, courier_proxy = $15, review_type = $16, review_type_mix = $17, recruit_count = $18,
-         review_guide = $19, special_notes = $20, product_url = $21, work_sheet_url = $22,
-         goods_cost_type = $23, manager_name = $24, work_manager = $25, sales_id = $26,
-         contract_number = $27, quote_id = $28, skip_weekends = $29, holidays = $30,
-         work_kind = $31, source_revision = $32, intake_idempotency_key = $33,
-         intranet_advertiser_id = $34, intranet_advertiser_name = $35,
-         intranet_advertiser_contact = $36, intranet_advertiser_business_number = $37,
+         pay_amount = $6, daily_count = $7, daily_count_text = $8, purchase_channel = $9, purchase_time = $10,
+         inflow_keyword = $11, inflow_type = $12, inflow_guide = $13, guide_images = $14,
+         delivery_type = $15, courier_proxy = $16, review_type = $17, review_type_mix = $18, recruit_count = $19,
+         review_guide = $20, special_notes = $21, product_url = $22, work_sheet_url = $23,
+         goods_cost_type = $24, manager_name = $25, work_manager = $26, sales_id = $27,
+         contract_number = $28, quote_id = $29, skip_weekends = $30, holidays = $31,
+         work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
+         intranet_advertiser_id = $35, intranet_advertiser_name = $36,
+         intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38,
          updated_at = NOW()
-       WHERE id = $1 AND source_review_order_id = $38
+       WHERE id = $1 AND source_review_order_id = $39
        RETURNING *`,
       [
         current.id,
         String(b.title).trim(), _dateOrNull(b.start_date), b.product_option || '', optionsJson,
-        _intOrZero(b.pay_amount), _intOrZero(b.daily_count), b.daily_count_text || '', b.purchase_time || '',
+        _intOrZero(b.pay_amount), _intOrZero(b.daily_count), b.daily_count_text || '', String(b.purchase_channel || '').trim(), b.purchase_time || '',
         b.inflow_keyword || '', b.inflow_type || '', b.inflow_guide || '', _guideImagesJson(b.guide_images),
         deliveryType, courierProxy, b.review_type || '', _reviewTypeMixJson(b.review_type_mix, b.review_type),
         _intOrZero(b.recruit_count), b.review_guide || '', b.special_notes || '', b.product_url || '',

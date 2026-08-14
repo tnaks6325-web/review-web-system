@@ -84,6 +84,10 @@ ok('★ 랜덤 목록도 같다',
 const ord = readS('routes/order.routes.js');
 ok('인트라넷·AE 양쪽에서 work_manager 를 받는다',
   /'goods_cost_type', 'work_manager'/.test(ord) && /'work_manager',\s+\/\/ 작업담당/.test(ord));
+ok('인트라넷 구매채널은 작업오더에 보존한다',
+  /'daily_count_text', 'purchase_channel', 'purchase_time'/.test(ord)
+  && /ADD COLUMN IF NOT EXISTS purchase_channel/.test(ord)
+  && /String\(b\.purchase_channel \|\| ''\)\.trim\(\)/.test(ord));
 // ⚠ 088(계약건 컬럼)에서 컬럼 목록 중간에 sales_id/contract_number/quote_id 가 들어와 옛 패턴
 //   (`manager_name, work_manager, status, created_by`)이 드리프트했다 — 검사 의미는 불변(INSERT 에
 //   work_manager 가 있고 값은 pickWorkManager 에서 온다)이라 패턴만 갱신한다.
@@ -105,7 +109,8 @@ const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');   // 모�
 const siand = readF('admin-siand.html');
 
 ok('프리필에 채널·담당자·연결탭이 실린다',
-  /channel:\s+_woChannel\(o\)/.test(appSrc) && /manager:\s+_woManagerNick\(o\.work_manager\)/.test(appSrc)
+  /String\(o && o\.purchase_channel \|\| ''\)\.trim\(\)/.test(appSrc)
+  && /channel:\s+_woChannel\(o\)/.test(appSrc) && /manager:\s+_woManagerNick\(o\.work_manager\)/.test(appSrc)
   && /linked_sheet_id: o\.linked_tab_sheet_id/.test(appSrc) && /linked_tab_gid:\s+o\.linked_tab_gid/.test(appSrc));
 ok('프리필이 채널·담당자 버튼을 실제로 선택한다',
   /if \(prefill\.channel\) _rfPickBtn\("channel", prefill\.channel\)/.test(rec)
