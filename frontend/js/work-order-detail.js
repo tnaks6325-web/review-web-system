@@ -308,6 +308,10 @@ function _woDetailHtml(o) {
   const guide = _woCleanGuide(o.inflow_guide);
   // 구조 첨부(090) — 유입 원문·리뷰가이드 원문에 이미 있는 URL(토큰)은 제외 = 이중 표기 없음
   const structDetailImgs = _woReviewImgHtml(_woGuideImages(o).join("\n"), String(o.inflow_guide || "") + String(o.review_guide || ""));
+  // 칸별 첨부는 본문 URL 추출에 의존하지 않는다. 인트라넷이 보낸 guide_images의
+  // review / notes 배열을 해당 상세 카드 바로 아래에 그대로 미리보기로 붙인다.
+  const reviewDetailImgs = _woReviewImgHtml(_woGuideImages(o, "review").join("\n"), String(o.review_guide || ""));
+  const notesDetailImgs = _woReviewImgHtml(_woGuideImages(o, "notes").join("\n"), String(o.special_notes || ""));
   const rg = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]);
   const sn = _woPickSections(o.special_notes, ["특이사항"]);
   const txtR = t => _woLinkify(t).replace(/\n/g, "<br>");   // 텍스트(줄바꿈 보존)
@@ -326,6 +330,7 @@ function _woDetailHtml(o) {
     _woSection("상품·옵션", prodText, txtR),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
+    _woKv("구매채널", _woChannel(o)),
     _woKv("구매시간대", o.purchase_time),
     _woKv("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || ""),
     _woKv("배송유형", o.delivery_type),
@@ -333,8 +338,8 @@ function _woDetailHtml(o) {
     _woKv("물건비", o.goods_cost_type),
     _woSection("상품확인용URL", o.product_url, urlR),
     _woSection("작업시트탭URL", o.work_sheet_url, urlR),
-    rg ? _woSection("리뷰가이드", rg, txtR) : "",
-    sn ? _woSection("특이사항", sn, txtR) : "",
+    rg ? _woSection("리뷰가이드", rg, txtR) + reviewDetailImgs : reviewDetailImgs,
+    sn ? _woSection("특이사항", sn, txtR) + notesDetailImgs : notesDetailImgs,
     o.inflow_type === "link"
       ? _woKv("유입방법", "링크유입")
       : (guide ? _woSection("유입가이드", guide, guideR)
