@@ -521,7 +521,7 @@
             <section class="section" data-sec="cond" id="rf_part_section" data-part-only><div class="row-form"><div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><div class="square-toggle"><button type="button" id="rf_carry_auto" onclick="rfCarrySet('auto')">자동 반영</button><button type="button" id="rf_carry_hold" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" hidden></div></div></div></div><details class="advanced"><summary>마감 · 보류 · 인원 제한 세부 설정</summary><div class="row-form"><div class="form-row"><span class="form-label">모집 마감</span><div class="form-control"><input id="rf_deadline" type="date" onchange="onRecruitDatesChange()"><span id="rf_deadline_day"></span></div></div><div class="form-row"><span class="form-label">최대 참여 제한</span><div class="form-control"><input id="rf_max_slots" type="number"></div></div><div class="form-row"><span class="form-label">마감 버퍼</span><div class="form-control"><input id="rf_close_buffer" type="number"><input id="rf_hold_ttl" type="number" hidden></div></div><div id="rf_deadline_warn" hidden></div></div></details></section>
             <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden>
           </div>
-          <footer class="footer modal-footer"><span class="footer-copy">필수 항목을 확인하면 게시할 수 있습니다.</span><div><button type="button" class="btn" onclick="closeRecruitModal()">취소</button><button id="recruitSaveBtnInline" class="rf-savebtn" onclick="saveRecruitPost()">변경 저장</button></div></footer>
+          <footer class="footer modal-footer"><span class="footer-copy">필수 항목을 확인하면 게시할 수 있습니다.</span><div><button type="button" class="btn" onclick="closeRecruitModal()">취소</button><button type="button" id="recruitSaveBtnInline" class="rf-savebtn" onclick="saveRecruitPost()">변경 저장</button></div></footer>
         </section>
       </div><!-- /rf-compact-main -->
 
@@ -570,7 +570,7 @@
     <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border,#E2E8F0)">
       <button onclick="closeRecruitModal()"
         style="padding:8px 18px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;background:#fff;color:var(--t2,#475569);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
-      <button id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost()">
+      <button type="button" id="recruitSaveBtn" class="rf-savebtn" onclick="saveRecruitPost()">
         <i class="fas fa-save"></i> 저장
       </button>
     </div>
