@@ -3775,6 +3775,11 @@ async function saveRecruitPost() {
   }
 }
 
+// The shared recruit modal invokes this action from inline controls in both
+// admin.html and workdesk.html.  Expose it explicitly so the action remains
+// callable even when the host page's script scope is isolated.
+window.saveRecruitPost = saveRecruitPost;
+
 /* ═══════════════════════════════════════
    공고 삭제
 ═══════════════════════════════════════ */
