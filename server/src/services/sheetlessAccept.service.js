@@ -54,42 +54,22 @@ function isVirtualSheetId(sheetId) {
 }
 
 /**
- * ★★ 지금부터 들어오는 작업은 **무시트가 기본**이다 (사용자 확정 2026-08-10).
- *   인트라넷 리뷰오더에는 구글시트탭URL 칸이 없으므로(D4-b) 접수가 "URL 없음" 400 으로
- *   막다른 길이 되던 것을 없앤다 — URL 이 **비어 있으면 무시트로 접수**한다.
- *
- * ★ 킬스위치 `SHEETLESS_ACCEPT_DEFAULT=0` → 종전 동작(시트 필수 400)으로 즉시 복귀.
+ * ★★ 리뷰웹시스템 3버전은 **무시트 전용**이다 (사용자 확정 2026-08-15).
+ *   작업오더에 남아 있는 work_sheet_url 은 과거 이력일 뿐 접수 모드를 바꾸지 않는다.
+ *   새 접수는 항상 가상 작업표·DB 원장을 만들며, 구글시트를 원본으로 되돌리는
+ *   킬스위치·요청 파라미터는 제공하지 않는다.
  */
-function sheetlessAcceptDefaultOn() {
-  return String(process.env.SHEETLESS_ACCEPT_DEFAULT || '1') !== '0';
-}
-
 /**
  * 이 접수를 무시트로 할 것인가 — **판정 단일 출처**(라우트·화면에 사본 금지).
- *
- * 우선순위(완화 금지):
- *  ① `body.sheetless === true`            → 명시 요청(작업 단위 예외)
- *  ② 이미 무시트 작업표가 만들어진 오더    → **되돌리지 않는다**(tab_configs 의 `OR` 병합과 같은 규율 —
- *     시트 URL 이 뒤늦게 채워졌다고 시트 기반으로 되돌리면 크론이 옛 시트 값으로 장부를 덮는다)
- *  ③ `body.sheetless === false`           → 명시적으로 시트 경로 요청
- *  ④ work_sheet_url 이 있음                → 시트 경로(종전 그대로)
- *  ⑤ 킬스위치 OFF                          → 시트 경로(= 종전 400 안내로 떨어진다)
- *  ⑥ 그 외(URL 없음)                       → **무시트**
- *
- * ★ URL 이 "있는데 형식이 틀린" 경우는 여기서 추측하지 않는다 — 사람이 붙일 의도로 넣은 값이므로
- *   라우트가 종전대로 사유를 말하고 멈춘다(조용히 다른 길로 가지 않는다).
+ * 3버전에서는 항상 true다. 기존 URL·body.sheetless=false 를 존중하면 새 작업이
+ * 시트 원본으로 되돌아가므로, 그 값들은 표시용 과거 데이터로만 남긴다.
  *
  * @returns {{sheetless:boolean, reason:string}}
  */
 function resolveAcceptMode({ workOrder, body } = {}) {
   const o = workOrder || {};
-  const b = body || {};
-  if (b.sheetless === true || b.sheetless === 'true') return { sheetless: true, reason: 'requested' };
   if (isVirtualSheetId(o.linked_tab_sheet_id)) return { sheetless: true, reason: 'already_sheetless' };
-  if (b.sheetless === false || b.sheetless === 'false') return { sheetless: false, reason: 'sheet_requested' };
-  if (String(o.work_sheet_url || '').trim()) return { sheetless: false, reason: 'sheet_url' };
-  if (!sheetlessAcceptDefaultOn()) return { sheetless: false, reason: 'killswitch' };
-  return { sheetless: true, reason: 'no_sheet_url' };
+  return { sheetless: true, reason: 'v3_sheetless_only' };
 }
 
 /**
@@ -180,7 +160,6 @@ module.exports = {
   createSheetlessWorktable,
   persistSheetlessWorktable,
   resolveAcceptMode,
-  sheetlessAcceptDefaultOn,
   newVirtualSheetId,
   newVirtualGid,
   isVirtualSheetId,
