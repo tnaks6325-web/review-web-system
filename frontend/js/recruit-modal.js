@@ -1175,6 +1175,22 @@
     var m = document.getElementById('recruitModal');
     if (!m || m._rfLive) return;
     m._rfLive = 1;
+
+    // Workdesk mounts this shared modal dynamically.  Delegate the save action
+    // from the mounted shell so it remains reliable even when inline handlers
+    // are isolated by the host page's script scope.
+    m.addEventListener('click', function (event) {
+      var target = event.target && event.target.closest
+        ? event.target.closest('#recruitSaveBtn, #recruitSaveBtnInline')
+        : null;
+      if (!target) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (typeof window.saveRecruitPost === 'function') window.saveRecruitPost();
+      else if (typeof window.recruitSaveBlock === 'function') {
+        window.recruitSaveBlock('저장 기능을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
+      }
+    }, true);
     var t = null;
     var kick = function () { clearTimeout(t); t = setTimeout(updateRailMarks, 180); };
     m.addEventListener('input', kick);
