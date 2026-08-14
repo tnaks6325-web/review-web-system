@@ -22,6 +22,7 @@ const doc = readF('docs/작업오더-모집공고_자동반영_와이어프레�
 const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const rec = readF('js/index-recruit.js');   // openRecruitModal — prefill 적용
 const ord = readS('routes/order.routes.js');// accept — tab_configs 자동기입
+const trackB = readS('routes/trackB.routes.js');
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
@@ -108,8 +109,12 @@ ok('진행방식(현영)은 작업오더에 없다 — 탭에서 지정',
 /* ── 저장 후 역연결 ── */
 ok('저장 시 작업오더 ↔ 공고 양방향 링크',
   /source_work_order_id: \(!_recruitEditId && _woPrefillOrderId\)/.test(rec)
-  && /action: "orderAdminUpdate", id: _woPrefillOrderId, linked_campaign_id: newCampId/.test(rec)
+  && /_linkPrefilledWorkOrder\(_woPrefillOrderId, newCampId\)/.test(rec)
   && /서로 기록됩니다/.test(doc));
+ok('리뷰웹 SSO에서는 Track B 작업오더 갱신 경로를 쓴다',
+  /\/api\/trackb\/work-orders\/update/.test(rec)
+  && /router\.put\('\/work-orders\/update'/.test(trackB)
+  && /_delegate\(_orderRoutes, 'put', '\/admin\/update'\)/.test(trackB));
 
 /* ── 운영 중 시트 우선 ── */
 // 문서가 "시트가 우선"이라 약속한 근거 = 상태 계산이 시트 일정을 진실원천으로 삼는 분기.

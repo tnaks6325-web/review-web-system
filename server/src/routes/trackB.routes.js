@@ -1283,12 +1283,18 @@ function _delegate(routerRef, method, path) {
 const _orderRoutes = require('./order.routes');
 const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
+const _updateHandler = _delegate(_orderRoutes, 'put', '/admin/update');
 const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
 
 router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _acceptHandler(req, res, next));
 router.put('/work-orders/status', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _statusHandler(req, res, next));
+// 공고 저장 직후 work_orders.linked_campaign_id를 기록하는 역연결.
+// 리뷰웹시스템[3버전]의 인트라넷 SSO 토큰은 /api/trackb/* 로만 허용되므로,
+// 기존 /api/order/admin/update를 직접 호출하면 공고는 생성돼도 링크만 401로 실패했다.
+router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _updateHandler(req, res, next));
 // 관리자 수동 수정 — 인트라넷 SSO 토큰(via:'intranet')은 /api/order/* 에 도달 불가라 여기로 위임.
 // 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · 편집 허용명단만 수정).
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
