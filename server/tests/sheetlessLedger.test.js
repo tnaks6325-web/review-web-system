@@ -57,7 +57,6 @@ console.log('\n[A] 헤더 결정 · 2차원 배열 조립');
   ok('헤더에 없는 키는 실리지 않는다(열 구성이 진실)',
     ledger.buildValues({ headers: ['번호'], rows }).values[2].length === 1);
 }
-
 /* ══════════════ B·C·E. 서비스 실행(스텁 pool) ══════════════ */
 console.log('\n[B·C·E] 게이트 · 파서 재사용 · 두 장부의 행 수');
 function makeStub({ sheetless = true, parts = [], storedHeaders = null, registered = true,
@@ -99,6 +98,17 @@ const PARTS = [
 ];
 
 (async () => {
+  {
+    // 대량 접수는 행마다 DB 왕복을 하면 Railway 환경에서 요청 시간이 길어진다.
+    // 800행도 배치 5회 이하로 끝나는지(빈 줄 제외 규칙 포함) 고정한다.
+    const calls = [];
+    const client = { query: async (sql, params) => calls.push({ sql, params }) };
+    const values = Array.from({ length: 801 }, (_, i) => i === 0 ? ['번호', '구매일자'] : ['' + i, '8/15 (토)']);
+    const written = await ledger.writeRawMirrorRows(client, { sheetId: 'S', tabGid: 'G', tabName: 'T', values });
+    ok('800행 raw 미러는 행별 800회가 아닌 배치 5회 이하로 기록', written === 801 && calls.length <= 5);
+    ok('raw 미러 배치도 행 번호와 JSON 셀을 함께 바인딩', calls[0].params.length === 3 + 2 * 200);
+  }
+
   // B. fail-closed — 시트 기반 탭
   {
     const { db, log } = makeStub({ sheetless: false, parts: PARTS });
@@ -164,7 +174,7 @@ const PARTS = [
     ok('① 시트 사본 갱신(raw_sheet_tabs upsert + rows 재기록)',
       sqls.some(s => /INSERT INTO raw_sheet_tabs/.test(s)) &&
       sqls.some(s => /DELETE FROM raw_sheet_rows/.test(s)) &&
-      sqls.filter(s => /INSERT INTO raw_sheet_rows/.test(s)).length === 4);   // 헤더행 + 데이터 3
+      sqls.filter(s => /INSERT INTO raw_sheet_rows/.test(s)).length === 1);   // 헤더행 + 데이터 3을 한 배치로
     ok('② 검색 명단 재기록(그 탭만 DELETE 후 INSERT)',
       sqls.some(s => /DELETE FROM review_index WHERE sheet_id = \$1 AND tab_name = \$2/.test(s)) &&
       sqls.filter(s => /INSERT INTO review_index/.test(s)).length === 2);

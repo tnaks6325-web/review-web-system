@@ -35,6 +35,40 @@ let _pool = null;
 function getPool() { return _pool || pool; }
 function __setPoolForTest(p) { _pool = p; }
 
+// Railway↔Postgres 왕복 지연이 있는 환경에서 행마다 INSERT 하면 800행 접수 시
+// 트랜잭션이 수십 초 이상 걸릴 수 있다. 한 쿼리의 파라미터 수도 안전하게 유지하면서
+// 왕복 횟수만 줄이기 위한 단위다(3,200 params/800행 대신 최대 800 params/배치).
+const RAW_MIRROR_BATCH_SIZE = 200;
+
+/**
+ * raw_sheet_rows 미러를 묶어서 쓴다.
+ * `DELETE → INSERT` 순서는 기존과 같고, 빈 줄을 건너뛰는 규칙도 보존한다.
+ */
+async function writeRawMirrorRows(client, { sheetId, tabGid, tabName, values }) {
+  const rows = [];
+  for (let i = 0; i < values.length; i++) {
+    const cells = values[i];
+    if (cells && cells.length) rows.push({ rowIndex: i + 1, cells });
+  }
+
+  for (let start = 0; start < rows.length; start += RAW_MIRROR_BATCH_SIZE) {
+    const batch = rows.slice(start, start + RAW_MIRROR_BATCH_SIZE);
+    const params = [sheetId, tabGid, tabName];
+    const tuples = batch.map((row, index) => {
+      const offset = 4 + index * 2;
+      params.push(row.rowIndex, JSON.stringify(row.cells));
+      return `($1,$2,$3,$${offset},$${offset + 1}::jsonb,NOW())`;
+    });
+    await client.query(
+      `INSERT INTO raw_sheet_rows (sheet_id, tab_gid, tab_name, row_index, cells, mirrored_at)
+       VALUES ${tuples.join(',')}
+       ON CONFLICT (sheet_id, tab_gid, row_index) DO UPDATE SET
+         cells = EXCLUDED.cells, tab_name = EXCLUDED.tab_name, mirrored_at = NOW()`,
+      params);
+  }
+  return rows.length;
+}
+
 /** 헤더 없이 만들 수 없다 — 열 이름이 곧 파서의 판정 재료다 */
 class LedgerError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -196,17 +230,7 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
        JSON.stringify(headers), checksum]);
 
     await client.query('DELETE FROM raw_sheet_rows WHERE sheet_id = $1 AND tab_gid = $2', [sheetId, tabGid]);
-    for (let i = 0; i < values.length; i++) {
-      const cells = values[i];
-      if (!cells || !cells.length) continue;            // 빈 줄은 넣지 않는다(시트 미러와 같은 성질)
-      await client.query(
-        `INSERT INTO raw_sheet_rows (sheet_id, tab_gid, tab_name, row_index, cells, mirrored_at)
-         VALUES ($1,$2,$3,$4,$5::jsonb,NOW())
-         ON CONFLICT (sheet_id, tab_gid, row_index) DO UPDATE SET
-           cells = EXCLUDED.cells, tab_name = EXCLUDED.tab_name, mirrored_at = NOW()`,
-        [sheetId, tabGid, tabName, i + 1, JSON.stringify(cells)]);
-      mirrorRows++;
-    }
+    mirrorRows = await writeRawMirrorRows(client, { sheetId, tabGid, tabName, values });
 
     /* ★★ ②-0 시스템 전용 값 스냅샷 — **시트에 칸이 없어 작업표에서 되만들 수 없는 값**.
        `review_index` 를 지우고 다시 넣으므로, 파서가 만들지 않는 컬럼은 여기서 보존하지 않으면
@@ -339,4 +363,5 @@ module.exports = {
   buildValues,
   LedgerError,
   __setPoolForTest,
+  writeRawMirrorRows,
 };
