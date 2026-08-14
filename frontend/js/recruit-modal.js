@@ -75,10 +75,10 @@
             <option value="">② 탭 선택 (시트 먼저)</option>
           </select><div id="rf_linked_tab_reference" class="rf-linked-reference" aria-live="polite">작업오더에서 연결되면 자동 표시됩니다.</div></div>
       </div>
-      <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 90px">
+      <div id="rf_linked_tab_info" hidden style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 90px">
         <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
       </div>
-      <div id="rf_work_order_link_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:700;margin:-4px 0 4px 90px"></div>
+      <div id="rf_work_order_link_info" hidden style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:700;margin:-4px 0 4px 90px"></div>
       <!-- 탭이 비어 있을 때: 왜 비었는지(작업오더의 탭을 못 찾음) + 제목 유사도 추천.
            ★ 조용한 빈칸 금지 — 자동점검은 "gid 가 필요해요"라고만 하고 사유를 말하지 않는다. -->
       <div id="rf_linked_tab_note" style="display:none"></div>
@@ -352,7 +352,7 @@
             <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" style="white-space:nowrap" title="상품 페이지를 새 탭에서 엽니다">↗</button>
           </div>
           <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:3px">가져오기: 네이버·올리브영 (쿠팡 제한적)</div>
-          <div id="rf_product_preview" style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border,#E2E8F0);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
+          <div id="rf_product_preview" hidden style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border,#E2E8F0);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
             <img id="rf_pp_img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border,#E2E8F0);background:#fff">
             <div style="min-width:0;flex:1">
               <div id="rf_pp_name" style="font-weight:700;font-size:.8rem;word-break:break-word"></div>
