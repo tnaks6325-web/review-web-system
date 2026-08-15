@@ -31,7 +31,8 @@ ok('045: 스윕 부분 인덱스 존재', /idx_campaign_apps_sweep[\s\S]*?WHERE 
 ok('apply: 캠페인 행 FOR UPDATE', /_applyParticipation[\s\S]*?FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));
 ok('apply: phone8 advisory xact lock', /pg_advisory_xact_lock\(hashtext\('camp_hold_phone:/.test(routes));
 ok('apply: 23505 백스톱(duplicate_hold)', /duplicate_hold/.test(routes));
-ok('apply: 당일 재신청 차단(상태 무관 이력 검사)', /already_today/.test(routes));
+ok('apply: 미제출 홀드는 당일 제한에 미포함(제출완료만 차단)',
+  /status = 'submitted'/.test(routes) && /today_submitted/.test(routes) && !/already_today/.test(routes));
 // 레드 #5·심판 J2: 확정과 스윕의 grace 경계 단일 출처 + SAVEPOINT 격리(주문 손실 0)
 ok('hold: HOLD_GRACE_SEC 단일 정의', (hold.match(/const HOLD_GRACE_SEC = /g) || []).length === 1);
 ok('hold: confirm은 applied+grace 경계', /status = 'applied'[\s\S]*?expires_at > NOW\(\) - make_interval/.test(hold));
