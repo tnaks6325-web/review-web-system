@@ -15,6 +15,7 @@ const ledger = read('src/services/orderLedger.service.js');
 const rl = read('src/middleware/rateLimit.middleware.js');
 const state = read('src/services/campaignState.service.js');
 const appJs = read('src/app.js');
+const rejoinMigration = read('migrations/113_campaign_expired_hold_rejoin.sql');
 
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
@@ -31,6 +32,10 @@ ok('045: 스윕 부분 인덱스 존재', /idx_campaign_apps_sweep[\s\S]*?WHERE 
 ok('apply: 캠페인 행 FOR UPDATE', /_applyParticipation[\s\S]*?FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));
 ok('apply: phone8 advisory xact lock', /pg_advisory_xact_lock\(hashtext\('camp_hold_phone:/.test(routes));
 ok('apply: 23505 백스톱(duplicate_hold)', /duplicate_hold/.test(routes));
+ok('apply: 재참여 전 만료 applied 홀드를 같은 grace 경계로 정리',
+  /UPDATE campaign_applications[\s\S]*?SET status = 'expired'[\s\S]*?expires_at <= NOW\(\) - make_interval[\s\S]*?HOLD_GRACE_SEC/.test(routes));
+ok('113: 중복 인덱스는 살아 있는 applied 홀드만 보호',
+  /DROP INDEX IF EXISTS uq_campaign_apps_active_hold[\s\S]*?WHERE status = 'applied'/.test(rejoinMigration));
 ok('apply: 미제출 홀드는 당일 제한에 미포함(제출완료만 차단)',
   /status = 'submitted'/.test(routes) && /today_submitted/.test(routes) && !/already_today/.test(routes));
 // 레드 #5·심판 J2: 확정과 스윕의 grace 경계 단일 출처 + SAVEPOINT 격리(주문 손실 0)
