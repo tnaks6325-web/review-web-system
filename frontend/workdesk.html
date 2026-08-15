@@ -8127,6 +8127,7 @@ function _coRender(){
       <span class="sp" style="flex:1"></span>
       <input class="ovsearch" id="coq" placeholder="작업 검색" value="${esc(STATE.co.q||'')}"
         oninput="STATE.co.q=this.value;_coRows()">
+      <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
@@ -8198,6 +8199,28 @@ function _coFixBtn(c,i){
   return '';
 }
 function _coAudit(){ window.open('sheet-sync-audit.html','_blank','noopener'); }
+/* 모집 중인 공고는 작업표가 원본이다. 과거 시트 점검 절차를 거치지 않고, 아직 연결값이 없는
+ * 활성 공고에는 서버 작업표를 만들고 그 내부 키를 공고에 연결한다. Google Sheets는 읽거나 쓰지 않는다. */
+async function _coActiveServerOnlyCutover(){
+  const message = '현재 모집 중인 공고 전체를 서버 작업표(무시트)로 전환합니다.\n\n'
+    + '기존 참여·주문·리뷰 데이터는 변경하지 않으며, 구글시트는 읽거나 쓰지 않습니다.\n'
+    + '작업표 연결값이 없는 공고에는 내부 작업표를 새로 만든 뒤 연결합니다.\n\n진행할까요?';
+  if(!confirm(message)) return;
+  const head = document.querySelector('#cohead .mh');
+  const btn = head && Array.from(head.querySelectorAll('button')).find(b => b.textContent.includes('전수 무시트'));
+  if(btn){ btn.disabled=true; btn.textContent='전수 전환 중…'; }
+  try{
+    const j = await api('/api/trackb/sheetless/cutover-active-server-only', {
+      method:'POST', body:JSON.stringify({confirm:'server-only-active-campaigns'})
+    });
+    if(!j || j.ok===false){ alert((j&&(j.error||j.message))||'활성 공고 전수 전환에 실패했습니다.'); return; }
+    const made = Number(j.provisioned||j.created||0), converted = Number(j.converted||j.cutover||0), skipped = Number(j.skipped||0);
+    alert(`활성 공고 전수 무시트 전환이 완료되었습니다.\n새 작업표 연결 ${made}건 · 기존 연결 전환 ${converted}건 · 건너뜀 ${skipped}건`);
+    await _coLoad();
+    if(typeof _loadCampaigns==='function') _loadCampaigns();
+  }catch(e){ alert('활성 공고 전수 전환 실패: '+(e.message||'')); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='⚡ 활성 공고 전수 무시트 전환'; } }
+}
 /* ★★ "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에 답한다.
  *    점검표 ①과 같은 판정이지만 남은 작업 전체를 한 번에 훑는다 — 85건을 하나씩 누르던 것을 없앤다.
  *    ★ 읽기 전용 · 시트 API 0(RAW 미러만)이라 몇 번을 눌러도 구글 쿼터에 영향이 없다. */
