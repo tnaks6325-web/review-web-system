@@ -355,11 +355,14 @@
     const chips = [];
     // 유입방식 — 리뷰어 화면의 [상품 페이지 열기] 노출 규칙과 **같은 기준**으로 판정한다
     //   (카드는 링크유입이라는데 리뷰어 화면엔 버튼이 없는 식의 불일치 차단).
-    //   유입가이드 내용이 있으면 가이드유입, 없고 랜딩 URL만 있으면 링크유입.
+    //   모집공고에서 고른 구조값을 최우선으로 쓴다. 유입가이드 텍스트는 링크유입에도
+    //   안내문으로 들어갈 수 있으므로, 텍스트 유무로 가이드유입으로 덮어쓰지 않는다.
     let _wd = c.work_detail;
     if (typeof _wd === 'string') { try { _wd = JSON.parse(_wd); } catch (_) { _wd = null; } }
+    const inflowType = _wd && _wd.inflowType;
     const hasGuide = !!(_wd && _wd.inflowGuideHtml);
-    chips.push((c.landing_url && !hasGuide)
+    const isLinkInflow = inflowType === 'link' || (!inflowType && c.landing_url && !hasGuide);
+    chips.push(isLinkInflow
       ? '<span class="sp-chip flow">링크유입</span>'
       : '<span class="sp-chip flow">가이드유입</span>');
     // 결제·리뷰 형태 배지(공고 등록 시 고른 값) — 접지 않고 전부 노출
