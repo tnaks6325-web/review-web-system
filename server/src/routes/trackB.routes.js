@@ -453,6 +453,19 @@ router.post('/sheetless/cutover', authMiddleware, adminOrMasterMiddleware, async
     res.status(out.ok ? 200 : 409).json(out);
   } catch (err) { _cutoverErr(err, res, next); }
 });
+// 활성 모집공고 전수 전환: 작업보드/서버 원장만 진실원본으로 사용한다.
+// 외부 시트 읽기·마지막 동기화·시트 안내문 쓰기를 절대 수행하지 않는다.
+// 실수로 전체 작업을 전환하지 않도록 정확한 확인 문구를 요구한다.
+router.post('/sheetless/cutover-active-server-only', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (req.body?.confirm !== 'server-only-active-campaigns') {
+      return res.status(400).json({ ok: false,
+        error: '활성 모집공고 전환 확인이 필요합니다.',
+        confirmRequired: 'server-only-active-campaigns' });
+    }
+    res.json(await cutover.cutoverActiveCampaignsServerOnly({ by: _by(req) }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
 router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body || {};
