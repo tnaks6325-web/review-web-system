@@ -884,9 +884,13 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     ok('연도 필터 = utils/tabActivity 재사용', /require\('\.\.\/utils\/tabActivity'\)/.test(src));
     ok('★ 헤더 탐지·날짜 파서 사본을 만들지 않았다',
       !/detectSheetHeader|parseDateColumn/.test(src));
-    ok('★ 쓰기 표면은 tab_configs.sheetless 한 칸뿐(운영 테이블 무접촉)', (() => {
+    ok('★ 기존 탭 이관은 tab_configs.sheetless만 바꾸고, 연결 없는 활성 공고만 내부 작업표·링크를 만든다', (() => {
       const w = src.match(/\b(INSERT INTO|UPDATE|DELETE FROM)\s+([a-z_]+)/gi) || [];
-      return w.every(x => /tab_configs/i.test(x));
+      const allowed = /tab_configs|campaigns|recruit_campaigns|work_orders/i;
+      return w.filter(x => !/^UPDATE SET$/i.test(x)).every(x => allowed.test(x))
+        && /source_work_order_id AS "sourceWorkOrderId"/.test(src)
+        && /createSheetlessWorktable/.test(src)
+        && /linked_sheet_id=\$2, linked_tab_name=\$3, linked_tab_gid=\$4/.test(src);
     })());
     ok('★ 이미 이관된 작업은 연도 필터로 숨기지 않는다(현황이 거짓말하지 않게)',
       /if \(!t\.sheetless\) \{[\s\S]{0,260}activityVerdict/.test(src));

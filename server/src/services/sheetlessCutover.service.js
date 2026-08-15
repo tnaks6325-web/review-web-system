@@ -654,16 +654,74 @@ async function disableSheetless({ sheetId, tabName, by = '' } = {}) {
 /**
  * 현재 모집 중인 공고의 연결 작업을 서버 원장 기준으로 일괄 무시트 전환한다.
  *
- * 외부 시트는 읽지 않으며, `linked_*`가 없는 공고는 억지로 가상 키를 만들어
- * 구매양식과 다른 작업에 연결하지 않는다. 그런 공고는 `unlinked`로 돌려 운영자가
- * 작업오더/내부 작업표를 먼저 연결하게 한다.
+ * 외부 시트는 읽지 않는다. 연결값이 없는 공고도 원본 작업오더가 있으면 그 오더에서
+ * 서버 작업표를 새로 만들고 공고·오더 양쪽을 같은 가상 키로 연결한다. 따라서 리뷰어
+ * 구매양식이 빈 시트 파라미터로 홈으로 되돌아가는 경로가 남지 않는다.
  */
+async function _provisionUnlinkedCampaign(db, row, by) {
+  if (!row.sourceWorkOrderId) {
+    return { ok: false, reason: 'source_work_order_missing' };
+  }
+  const { rows: workOrders } = await db.query(
+    `SELECT * FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
+    [row.sourceWorkOrderId]
+  );
+  const workOrder = workOrders[0];
+  if (!workOrder) return { ok: false, reason: 'source_work_order_not_found' };
+
+  // 작업표 생성은 접수 경로와 같은 단일 서비스로 위임한다. 구글 API를 전혀 호출하지 않는다.
+  const { createSheetlessWorktable } = require('./sheetlessAccept.service');
+  const made = await createSheetlessWorktable({
+    workOrder,
+    tabName: String(row.title || workOrder.title || '').trim(),
+    by: by || 'active-campaign-cutover',
+  });
+  if (!made.ok) return { ok: false, reason: 'worktable_create_failed', message: made.error || '' };
+
+  await db.query(
+    `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+     VALUES ($1, $2, '')
+     ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET sheet_url='', updated_at=NOW()`,
+    [made.sheetId, made.campaignName]
+  );
+  await db.query(
+    `INSERT INTO tab_configs
+       (sheet_id, tab_name, tab_gid, sheet_url, campaign_name, display_name,
+        manager, time_range, review_type, delivery_type, sheetless, work_kind, updated_at)
+     VALUES ($1,$2,$3,'',$4,$5,$6,$7,$8,$9,TRUE,$10,NOW())
+     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+       sheetless=TRUE, tab_gid=COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
+       sheet_url='', updated_at=NOW()`,
+    [made.sheetId, made.tabName, made.gid, made.campaignName, row.title || made.tabName,
+      row.manager || '', row.timeRange || '', workOrder.review_type || '', workOrder.delivery_type || '', workOrder.work_kind || '']
+  );
+
+  // 먼저 공고와 오더를 같은 내부 키로 묶고, 그 다음 작업표 행·장부를 만든다.
+  // 이 순서면 생성 중 재시도가 나도 공고가 다른 표를 가리키지 않는다.
+  await db.query(
+    `UPDATE recruit_campaigns
+        SET linked_sheet_id=$2, linked_tab_name=$3, linked_tab_gid=$4, updated_at=NOW()
+      WHERE id=$1 AND (COALESCE(linked_sheet_id,'')='' OR COALESCE(linked_tab_name,'')='')`,
+    [row.campaignId, made.sheetId, made.tabName, made.gid]
+  );
+  await db.query(
+    `UPDATE work_orders
+        SET linked_tab_sheet_id=$2, linked_tab_name=$3, linked_tab_gid=$4, updated_at=NOW()
+      WHERE id=$1 AND deleted_at IS NULL`,
+    [workOrder.id, made.sheetId, made.tabName, made.gid]
+  );
+  const persisted = await made.persist();
+  return { ok: true, sheetId: made.sheetId, tabName: made.tabName, gid: made.gid, persisted };
+}
+
 async function cutoverActiveCampaignsServerOnly({ by = '' } = {}) {
   const db = _db();
   const { rows } = await db.query(
     `SELECT rc.id AS "campaignId", rc.title AS "title",
             COALESCE(rc.linked_sheet_id, '') AS "sheetId",
             COALESCE(rc.linked_tab_name, '') AS "tabName",
+            rc.source_work_order_id AS "sourceWorkOrderId",
+            COALESCE(rc.manager, '') AS "manager", COALESCE(rc.time_range, '') AS "timeRange",
             COALESCE(tc.sheetless, FALSE) AS "sheetless"
        FROM recruit_campaigns rc
        LEFT JOIN tab_configs tc
@@ -676,7 +734,13 @@ async function cutoverActiveCampaignsServerOnly({ by = '' } = {}) {
   for (const row of rows) {
     const item = { campaignId: row.campaignId, title: row.title || '', sheetId: row.sheetId, tabName: row.tabName };
     if (!row.sheetId || !row.tabName) {
-      out.unlinked.push({ ...item, reason: 'internal_worktable_not_linked' });
+      try {
+        const made = await _provisionUnlinkedCampaign(db, row, by);
+        if (made.ok) out.converted.push({ ...item, sheetId: made.sheetId, tabName: made.tabName, provisioned: true, ledger: made.persisted && made.persisted.ledger });
+        else out.unlinked.push({ ...item, reason: made.reason, message: made.message || '' });
+      } catch (e) {
+        out.failed.push({ ...item, reason: 'provision_exception', message: e.message || String(e) });
+      }
       continue;
     }
     if (row.sheetless === true) {
