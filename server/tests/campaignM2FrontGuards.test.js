@@ -39,7 +39,7 @@ ok('campaign.html: message 수신 오리진 검증', /ev\.origin !== location\.o
 ok('campaign.html: 세션 키·포맷 = rapp_reviewer_auth(name/phone8/expAt)', /rapp_reviewer_auth/.test(camp) && /registeredMember:true/.test(camp));
 ok('campaign.html: profile_missing → 내정보 안내(자리 미점유)', /profile_missing/.test(camp) && /renderMissing/.test(camp));
 ok('campaign.html: 만료 홀드는 당일 재참여 화면으로 복귀',
-  /releaseExpiredHold/.test(camp) && /다시 참여할 수 있어요/.test(camp) && !/오늘은 이 캠페인에 다시 참여할 수 없어요/.test(camp));
+  /releaseExpiredHold/.test(camp) && /clearHold\(h && h\.phone8\)/.test(camp) && /다시 참여할 수 있어요/.test(camp));
 ok('campaign.html: 폴링 + visibilitychange 복귀 재조회(새 창 제출 폴백)', /visibilitychange/.test(camp) && /setInterval\(pollOnce, 10000\)/.test(camp));
 ok('campaign.html: work-detail 호출에 phone8+holdToken 이중 열쇠', /work-detail\?phone8=/.test(camp) && /holdToken=/.test(camp));
 

@@ -466,7 +466,7 @@ function renderPre(){
   const ttl = holdTtlText();
   $('preNotice').textContent =
     '지금 참여하면 ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
-    ' 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나면 자동 취소되며 오늘은 이 캠페인에 다시 참여할 수 없어요.\n' +
+    ' 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나 자동 취소돼도 구매양식을 제출하지 않았다면 다시 참여할 수 있어요.\n' +
     '이 캠페인은 상품을 직접 구매(선결제)한 뒤 리뷰비와 함께 환급받는 방식이에요.';
   const jb = $('joinBtn');
   const st = c.state;
@@ -1375,7 +1375,7 @@ async function onCancel(){
     return;
   }
   const h = getHold(); if(!h) return;
-  if(!confirm('참여를 취소할까요?\n취소해도 오늘은 이 캠페인에 다시 참여할 수 없어요.')) return;
+  if(!confirm('참여를 취소할까요?\n구매양식을 제출하지 않았다면 오늘 다시 참여할 수 있어요.')) return;
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/cancel', {
       method:'POST', headers:{'Content-Type':'application/json'},
