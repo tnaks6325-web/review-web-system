@@ -5124,7 +5124,8 @@ function buildGrid(wd){
       if(c.kind==='seq'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}${bgStyle('seq')}" data-rid="${esc(r.id)}" data-cfield="seq">${esc(r.seq)}</td>`; }
       else if(c.kind==='name'){
         // 참여자 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 배지는 유지, 제거(×, 명단 큐레이션=행 숨김)는 편집자만.
-        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canDeleteOrder?`<button class="rdel" type="button" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${esc(r.id)}')">삭제</button>`:''}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
+        const isAutoTestOrder = r.name==='테스트자동삭제' && r.phone8==='00000000' && String(rj['주문번호']||'')==='TEST-AUTO-DELETE-20260815';
+        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canDeleteOrder?`<button class="rdel" type="button" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${esc(r.id)}')">삭제</button>`:''}${isAutoTestOrder?`<button class="rdel" type="button" title="자동 테스트 기록 전체 제거" onclick="cleanupAutoTestRecord('${esc(r.id)}')">테스트 정리</button>`:''}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
       else if(c.kind==='phone'){ const _ph=_fmtPhone(r.phone8);
         // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
         tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}${bgStyle('idphone')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idphone">${esc(_ph||'')}</td>`; }
@@ -10610,6 +10611,13 @@ async function deleteOrderRow(rowId){
     await reloadWorkdesk();
   }catch(_){ toast('삭제 정보를 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.'); }
   finally{ STATE._orderDeleteBusy=false; }
+}
+async function cleanupAutoTestRecord(rowId){
+  if(!confirm('자동 테스트로 만든 구매양식·참여·작업보드 행·테스트 리뷰어를 모두 영구 제거할까요?')) return;
+  const result=await api('/api/trackb/workdesk/test-auto-delete-cleanup',{method:'POST',body:JSON.stringify({rowId,confirm:true})});
+  if(!result||!result.ok){ toast((result&&result.error)||'자동 테스트 기록 정리에 실패했습니다.'); return; }
+  toast('자동 테스트 기록을 모두 제거했습니다.');
+  await reloadWorkdesk();
 }
 function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
   const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';

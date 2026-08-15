@@ -1156,6 +1156,71 @@ router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, a
     res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' ? 409 : 404)).json(out);
   } catch (err) { next(err); }
 });
+
+// 테스트 자동제출 정리 — 테스트 전용 식별자가 모두 일치하는 경우에만 영구 제거한다.
+// 일반 주문은 이 경로로 절대 삭제할 수 없으며, 운영 주문 삭제는 위 order-delete만 사용한다.
+router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, res, next) => {
+  const TEST_CAMPAIGN_ID = 'camp_4c981df9de49';
+  const TEST_NAME = '테스트자동삭제';
+  const TEST_PHONE8 = '00000000';
+  const TEST_ORDER_NUM = 'TEST-AUTO-DELETE-20260815';
+  try {
+    const { rowId, confirm } = req.body || {};
+    if (!rowId || confirm !== true) {
+      return res.status(400).json({ ok: false, error: '테스트 행 식별자와 확인값이 필요합니다.' });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: found } = await client.query(
+        `SELECT cp.id AS participant_id, cp.order_submission_id, os.campaign_application_id
+           FROM campaign_participants cp
+           JOIN order_submissions os ON os.id = cp.order_submission_id
+          WHERE cp.id = $1 AND cp.deleted_at IS NULL
+            AND cp.reviewer_name = $2 AND cp.phone8 = $3
+            AND os.order_num = $4 AND os.deleted_at IS NULL
+          FOR UPDATE OF cp, os`,
+        [rowId, TEST_NAME, TEST_PHONE8, TEST_ORDER_NUM]
+      );
+      if (found.length !== 1) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: '삭제 가능한 자동 테스트 기록이 아닙니다.' });
+      }
+      const target = found[0];
+      const { rows: apps } = await client.query(
+        `DELETE FROM campaign_applications
+          WHERE campaign_id = $1
+            AND (id = $2 OR order_submission_id = $3::uuid)
+            AND phone8 = $4
+          RETURNING id`,
+        [TEST_CAMPAIGN_ID, target.campaign_application_id || -1, target.order_submission_id, TEST_PHONE8]
+      );
+      const participants = await client.query(
+        'DELETE FROM campaign_participants WHERE id = $1 AND order_submission_id = $2::uuid',
+        [rowId, target.order_submission_id]
+      );
+      await client.query(
+        `DELETE FROM sync_queue WHERE payload->>'orderSubmissionId' = $1`,
+        [String(target.order_submission_id)]
+      );
+      await client.query('DELETE FROM sheet_row_claims WHERE order_id = $1::uuid', [target.order_submission_id]);
+      const orders = await client.query(
+        `DELETE FROM order_submissions
+          WHERE id = $1::uuid AND order_num = $2 AND deleted_at IS NULL`,
+        [target.order_submission_id, TEST_ORDER_NUM]
+      );
+      const reviewers = await client.query(
+        'DELETE FROM reviewers WHERE name = $1 AND phone8 = $2',
+        [TEST_NAME, TEST_PHONE8]
+      );
+      await client.query('COMMIT');
+      res.json({ ok: true, deleted: { application: apps.rowCount, participant: participants.rowCount, order: orders.rowCount, reviewer: reviewers.rowCount } });
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      throw err;
+    } finally { client.release(); }
+  } catch (err) { next(err); }
+});
 // ── 편집 이력(감사) — master/admin 전체 · staff 담당 탭만 ──
 router.get('/workdesk/edits', authMiddleware, async (req, res, next) => {
   try {
