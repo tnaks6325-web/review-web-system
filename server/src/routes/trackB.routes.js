@@ -466,6 +466,32 @@ router.post('/sheetless/cutover-active-server-only', authMiddleware, adminOrMast
     res.json(await cutover.cutoverActiveCampaignsServerOnly({ by: _by(req) }));
   } catch (err) { _cutoverErr(err, res, next); }
 });
+// 당일 미제출 홀드 해제 — 운영 중 잘못 적용됐던 "참여 클릭만으로 당일 제한"을 복구하는 1회성 안전 도구.
+// 대상 공고·날짜·상태를 서버에 고정해, 완료된 구매양식(submitted)·다른 공고는 절대 건드리지 않는다.
+router.post('/campaigns/release-today-unsubmitted-holds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const campaignIds = ['camp_4c981df9de49', 'camp_bb0980ceddd4'];
+  try {
+    if (req.body?.confirm !== 'release-today-unsubmitted-holds') {
+      return res.status(400).json({ ok: false, error: '당일 미제출 홀드 해제 확인이 필요합니다.' });
+    }
+    const { rows } = await pool.query(
+      `WITH released AS (
+         UPDATE campaign_applications
+            SET status = 'cancelled', expires_at = NOW(), hold_token = NULL,
+                updated_at = NOW()
+          WHERE campaign_id = ANY($1::text[])
+            AND status = 'applied'
+            AND applied_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+          RETURNING campaign_id
+       )
+       SELECT campaign_id, COUNT(*)::int AS released
+         FROM released GROUP BY campaign_id`,
+      [campaignIds]
+    );
+    const released = Object.fromEntries(rows.map(row => [row.campaign_id, Number(row.released) || 0]));
+    res.json({ ok: true, released, total: rows.reduce((sum, row) => sum + (Number(row.released) || 0), 0) });
+  } catch (err) { next(err); }
+});
 router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body || {};

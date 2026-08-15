@@ -8129,6 +8129,7 @@ function _coRender(){
       <input class="ovsearch" id="coq" placeholder="작업 검색" value="${esc(STATE.co.q||'')}"
         oninput="STATE.co.q=this.value;_coRows()">
       <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
+      <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
@@ -8221,6 +8222,17 @@ async function _coActiveServerOnlyCutover(){
     if(typeof _loadCampaigns==='function') _loadCampaigns();
   }catch(e){ alert('활성 공고 전수 전환 실패: '+(e.message||'')); }
   finally{ if(btn){ btn.disabled=false; btn.textContent='⚡ 활성 공고 전수 무시트 전환'; } }
+}
+async function _coReleaseTodayUnsubmittedHolds(){
+  const message = '웰스앤헬스 도라지청·삼백초캔디 공고에서 오늘 참여만 하고 구매양식을 제출하지 않은 홀드를 해제합니다.\n\n'
+    + '15분이 지나 만료된 홀드도 포함되며, 구매양식 제출완료·작업보드 기록은 변경하지 않습니다.\n\n진행할까요?';
+  if(!confirm(message)) return;
+  const j = await api('/api/trackb/campaigns/release-today-unsubmitted-holds', {
+    method:'POST', body:JSON.stringify({confirm:'release-today-unsubmitted-holds'})
+  });
+  if(!j || j.ok===false){ alert((j&&j.error)||'당일 미제출 제한 해제에 실패했습니다.'); return; }
+  alert(`당일 미제출 제한을 해제했습니다.\n도라지청 ${Number(j.released?.camp_4c981df9de49)||0}명 · 삼백초캔디 ${Number(j.released?.camp_bb0980ceddd4)||0}명`);
+  if(typeof _loadCampaigns==='function') _loadCampaigns();
 }
 /* ★★ "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에 답한다.
  *    점검표 ①과 같은 판정이지만 남은 작업 전체를 한 번에 훑는다 — 85건을 하나씩 누르던 것을 없앤다.
