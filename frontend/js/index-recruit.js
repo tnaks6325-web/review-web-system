@@ -122,7 +122,7 @@ function updateRecruitPopularity(campId, on) {
 }
 window.updateRecruitPopularity = updateRecruitPopularity;
 
-/** 인기 ON 직전 선행참여 공고 우선순위 선택. 선택 후 행을 드래그해 순서를 바꾼다. */
+/** 인기 ON 직전, 모든 모집중 비인기 공고의 선행참여 우선순위를 정한다. */
 function openPopularPriorityModal(campId) {
   const target = _recruitLastList.find(c => String(c.id) === String(campId));
   const candidates = _recruitLastList.filter(c => String(c.id) !== String(campId)
@@ -130,27 +130,30 @@ function openPopularPriorityModal(campId) {
   if (!target) return;
   const old = document.getElementById('popularPriorityModal');
   if (old) old.remove();
-  const rows = candidates.map(c => `<label style="display:flex;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid #eef2f7;cursor:pointer">
-    <input type="checkbox" value="${escHtml(c.id)}" style="width:17px;height:17px;accent-color:#2563eb">
-    <span style="flex:1;font-weight:700">${escHtml(c.title || '(제목 없음)')}</span><small data-rank style="color:#2563eb;font-weight:800"></small><small style="color:#64748b">모집중</small></label>`).join('') || '<p style="color:#64748b">선택 가능한 비인기 모집공고가 없습니다.</p>';
+  const priorityIds = candidates.map(c => String(c.id));
+  const deliveryLabel = value => {
+    const delivery = String(value || '').trim();
+    if (delivery === '택배발송대행') return '빈박스';
+    return delivery || '—';
+  };
+  const dailyLimitLabel = campaign => Number(campaign.daily_limit) > 0 ? `${Number(campaign.daily_limit)}명` : '—';
   const modal = document.createElement('div');
   modal.id = 'popularPriorityModal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:18px';
-  modal.innerHTML = `<section role="dialog" aria-modal="true" style="width:min(620px,100%);max-height:86vh;overflow:auto;background:#fff;border-radius:16px;box-shadow:0 22px 60px rgba(15,23,42,.3)">
-    <div style="padding:22px 24px 14px;border-bottom:1px solid #e2e8f0"><b style="font-size:18px">🔥 인기상품 설정</b><p style="margin:5px 0 0;color:#64748b">선택 후 드래그해 우선순위를 정하세요.</p></div>
-    <div style="padding:14px 24px"><div style="font-size:12px;color:#64748b;margin-bottom:5px">인기상품</div><b>${escHtml(target.title || '')}</b><div style="margin-top:18px;font-size:13px;font-weight:800">선행참여 우선순위</div><div id="popularPriorityQueue" style="margin:8px 0 14px"></div><div style="font-size:13px;font-weight:800">선택 가능한 비인기 공고</div>${rows}</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 24px;border-top:1px solid #e2e8f0"><button type="button" data-close style="padding:9px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff">취소</button><button type="button" data-save style="padding:9px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:800">ON 저장</button></div></section>`;
+  modal.innerHTML = `<section role="dialog" aria-modal="true" aria-label="인기상품 설정" style="width:min(700px,100%);max-height:86vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 22px 60px rgba(15,23,42,.3)">
+    <div style="padding:22px 24px 16px;border-bottom:1px solid #e2e8f0"><b style="font-size:19px">🔥 인기상품 설정</b><p style="margin:6px 0 0;color:#64748b;font-size:13px">비인기 공고의 선행참여 순서를 정하세요.</p></div>
+    <div style="padding:18px 24px"><div style="padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:5px"><span style="font-size:12px;color:#64748b">인기상품</span><span style="padding:2px 7px;border-radius:99px;background:#fff1f2;color:#e11d48;font-size:11px;font-weight:800">인기 ON</span></div><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(target.title || '')}</b></div><div style="margin-top:20px;font-size:14px;font-weight:800">선행참여 우선순위 : 행을 드래그해 순서 변경</div><div id="popularPriorityQueue" style="margin-top:9px"></div><p style="margin:12px 0 0;color:#64748b;font-size:12px">1순위 공고가 모집완료되면 다음 공고가 자동으로 선행참여 대상으로 적용됩니다.</p></div>
+    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:15px 24px;border-top:1px solid #e2e8f0"><span style="color:#64748b;font-size:12px">모집중 비인기 공고 ${priorityIds.length}개 적용</span><div style="display:flex;gap:8px"><button type="button" data-close style="padding:9px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff">취소</button><button type="button" data-save style="padding:9px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:800">ON 저장</button></div></div></section>`;
   modal.querySelector('[data-close]').onclick = () => modal.remove();
   modal.onclick = e => { if (e.target === modal) modal.remove(); };
-  const selectedIds = [];
   const queue = modal.querySelector('#popularPriorityQueue');
   let draggingId = '';
   const renderQueue = () => {
-    if (!selectedIds.length) { queue.innerHTML = '<div style="padding:10px 12px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:12px">아래 공고를 선택하세요.</div>'; return; }
-    queue.innerHTML = selectedIds.map((id, i) => {
+    if (!priorityIds.length) { queue.innerHTML = '<div style="padding:14px;border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;font-size:13px;text-align:center">모집중인 비인기 공고가 없습니다.</div>'; return; }
+    queue.innerHTML = priorityIds.map((id, i) => {
       const c = candidates.find(x => String(x.id) === String(id));
-      return `<div draggable="true" data-priority-id="${escHtml(id)}" style="display:flex;align-items:center;gap:9px;padding:10px 11px;margin-top:6px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;cursor:grab">
-        <b style="color:#2563eb">${i + 1}</b><span style="flex:1;font-weight:700">${escHtml(c && c.title || '')}</span><span style="color:#64748b">⠿</span></div>`;
+      return `<div draggable="true" data-priority-id="${escHtml(id)}" style="display:flex;align-items:center;gap:9px;height:48px;padding:0 11px;margin-top:6px;border:1px solid #dbeafe;border-radius:10px;background:#fff;cursor:grab">
+        <b style="display:grid;place-items:center;flex:0 0 22px;height:22px;border-radius:50%;background:#eff6ff;color:#2563eb;font-size:12px">${i + 1}</b><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:13px">${escHtml(c && c.title || '(제목 없음)')}</span><span style="flex:0 0 178px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:12px;text-align:right">${escHtml(c && c.purchase_channel || '—')} · ${escHtml(deliveryLabel(c && c.delivery_type))} · ${dailyLimitLabel(c || {})}</span><span aria-hidden="true" style="color:#94a3b8;font-size:18px">⠿</span></div>`;
     }).join('');
     queue.querySelectorAll('[data-priority-id]').forEach(row => {
       row.ondragstart = () => { draggingId = String(row.dataset.priorityId); row.style.opacity = '.45'; };
@@ -158,26 +161,16 @@ function openPopularPriorityModal(campId) {
       row.ondragover = e => { e.preventDefault(); row.style.boxShadow = 'inset 0 3px #2563eb'; };
       row.ondragleave = () => { row.style.boxShadow = ''; };
       row.ondrop = e => {
-        e.preventDefault(); const to = String(row.dataset.priorityId); const from = selectedIds.indexOf(draggingId); const at = selectedIds.indexOf(to);
-        if (from >= 0 && at >= 0 && from !== at) { selectedIds.splice(from, 1); selectedIds.splice(at, 0, draggingId); }
-        renderQueue(); redrawRanks();
+        e.preventDefault(); const to = String(row.dataset.priorityId); const from = priorityIds.indexOf(draggingId); const at = priorityIds.indexOf(to);
+        if (from >= 0 && at >= 0 && from !== at) { priorityIds.splice(from, 1); priorityIds.splice(at, 0, draggingId); }
+        renderQueue();
       };
     });
   };
-  const redrawRanks = () => modal.querySelectorAll('input[type="checkbox"]').forEach(input => {
-    const rank = selectedIds.indexOf(input.value);
-    input.closest('label').querySelector('[data-rank]').textContent = rank >= 0 ? `${rank + 1}순위` : '';
-  });
-  modal.querySelectorAll('input[type="checkbox"]').forEach(input => { input.onchange = () => {
-    const at = selectedIds.indexOf(input.value);
-    if (input.checked && at < 0) selectedIds.push(input.value);
-    if (!input.checked && at >= 0) selectedIds.splice(at, 1);
-    redrawRanks(); renderQueue();
-  }; });
   renderQueue();
   modal.querySelector('[data-save]').onclick = async () => {
     const btn = modal.querySelector('[data-save]'); btn.disabled = true; btn.textContent = '저장 중…';
-    try { await CampCards.togglePopular(campId, true, selectedIds); modal.remove(); }
+    try { await CampCards.togglePopular(campId, true, priorityIds); modal.remove(); }
     catch (_) { btn.disabled = false; btn.textContent = 'ON 저장'; }
   };
   document.body.appendChild(modal);

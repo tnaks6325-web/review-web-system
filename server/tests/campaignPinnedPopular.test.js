@@ -108,11 +108,15 @@ ok('index-recruit: sort_order 읽기 null-safe(+편집 로드값 재전송 = 0-�
   !/getElementById\("rf_sort_order"\)\.value/.test(recruit) && /_recruitEditLoaded\?\.sort_order/.test(recruit));
 ok('index-recruit: 새 공고 열 때 로드값 초기화(이전 편집값 누수 방지)', /window\._recruitEditLoaded = null/.test(recruit));
 ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]/.test(recruit) && /c\.participation_mode \? `<button[^`]*'popular'/.test(recruit));
-ok('index-recruit: 선택된 선행공고는 드래그로 우선순위를 재정렬한다',
-  /id="popularPriorityQueue"/.test(recruit)
-  && /draggable="true"/.test(recruit)
-  && /ondrop/.test(recruit)
-  && /selectedIds\.splice\(from, 1\); selectedIds\.splice\(at, 0, draggingId\)/.test(recruit));
+{
+  const priorityModal = recruit.slice(recruit.indexOf('function openPopularPriorityModal'), recruit.indexOf('window.openPopularPriorityModal'));
+  ok('index-recruit: 모집중 비인기 공고 전체를 체크 없이 드래그 우선순위로 저장한다',
+    /const priorityIds = candidates\.map/.test(priorityModal)
+    && !/checkbox/.test(priorityModal)
+    && /택배발송대행/.test(priorityModal)
+    && /daily_limit/.test(priorityModal)
+    && /priorityIds\.splice\(from, 1\); priorityIds\.splice\(at, 0, draggingId\)/.test(priorityModal));
+}
 ok('index-recruit: toggleCampFlag → /flags POST + 현재 카드 즉시 갱신',
   /\/flags`/.test(recruit)
   && /updateRecruitPopularity\(campId, on\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400))
