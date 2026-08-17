@@ -99,6 +99,7 @@ ok('우선순위: 첫 공고가 마감·총원충족되면 다음 비인기 공�
   /campaign_popular_prerequisites/.test(routes)
   && /async function _currentPopularPrerequisite/.test(routes)
   && /ORDER BY q\.priority/.test(routes)
+  && /COALESCE\(c\.reviewer_hidden, FALSE\) = FALSE/.test(routes)
   && /COALESCE\(a\.submitted, 0\) < c\.recruit_total/.test(routes));
 
 // ── 관리자 UI ──
@@ -112,6 +113,7 @@ ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]
   const priorityModal = recruit.slice(recruit.indexOf('function openPopularPriorityModal'), recruit.indexOf('window.openPopularPriorityModal'));
   ok('index-recruit: 모집중 비인기 공고 전체를 체크 없이 드래그 우선순위로 저장한다',
     /const priorityIds = candidates\.map/.test(priorityModal)
+    && /c\.reviewer_hidden !== true/.test(priorityModal)
     && !/checkbox/.test(priorityModal)
     && /campaign\.channel \|\| campaign\.purchase_channel/.test(priorityModal)
     && /택배발송대행/.test(priorityModal)
