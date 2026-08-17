@@ -80,6 +80,8 @@ ok('cards: 인기 ON/OFF는 진짜 admin_token 또는 관리자 목록만',
   && !/pstarchip/.test(cards));
 ok('cards: 인기 아이콘은 썸네일 좌상단에서 클릭해 ON/OFF', /pt-pop-toggle/.test(cards) && /pt-topleft">\$\{popToggle\}/.test(cards) && /CampCards\.togglePopular/.test(cards));
 ok('cards: togglePopular — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePopular\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
+ok('cards: 공개 API도 실제 함수명 togglePopular을 내보낸다(모듈 초기화 중단 방지)',
+  /window\.CampCards = \{[\s\S]*togglePopular[\s\S]*\};/.test(cards) && !/openAdminEdit, togglePin,/.test(cards));
 // ★★ 리뷰웹시스템[3버전](인트라넷 SSO `via:'intranet'`)은 authMiddleware가 `/api/trackb/*` 로만
 //    도달을 허용하므로, togglePin이 `/api/campaign/admin/...` 을 하드코딩하면 별표만 403
 //    ("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다 — 호스트 재기준(CAMPAIGN_ADMIN_API) 고정.
