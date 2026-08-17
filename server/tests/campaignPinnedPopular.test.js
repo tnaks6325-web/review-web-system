@@ -113,6 +113,7 @@ ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]
   ok('index-recruit: 모집중 비인기 공고 전체를 체크 없이 드래그 우선순위로 저장한다',
     /const priorityIds = candidates\.map/.test(priorityModal)
     && !/checkbox/.test(priorityModal)
+    && /campaign\.channel \|\| campaign\.purchase_channel/.test(priorityModal)
     && /택배발송대행/.test(priorityModal)
     && /daily_limit/.test(priorityModal)
     && /priorityIds\.splice\(from, 1\); priorityIds\.splice\(at, 0, draggingId\)/.test(priorityModal));

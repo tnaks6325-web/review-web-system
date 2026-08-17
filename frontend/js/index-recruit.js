@@ -136,6 +136,10 @@ function openPopularPriorityModal(campId) {
     if (delivery === '택배발송대행') return '빈박스';
     return delivery || '—';
   };
+  const purchaseChannelLabel = campaign => {
+    const channel = String(campaign.channel || campaign.purchase_channel || '').trim();
+    return channel === '직접입력' ? (String(campaign.channel_custom || '').trim() || '직접입력') : (channel || '—');
+  };
   const dailyLimitLabel = campaign => Number(campaign.daily_limit) > 0 ? `${Number(campaign.daily_limit)}명` : '—';
   const modal = document.createElement('div');
   modal.id = 'popularPriorityModal';
@@ -153,7 +157,7 @@ function openPopularPriorityModal(campId) {
     queue.innerHTML = priorityIds.map((id, i) => {
       const c = candidates.find(x => String(x.id) === String(id));
       return `<div draggable="true" data-priority-id="${escHtml(id)}" style="display:flex;align-items:center;gap:9px;height:48px;padding:0 11px;margin-top:6px;border:1px solid #dbeafe;border-radius:10px;background:#fff;cursor:grab">
-        <b style="display:grid;place-items:center;flex:0 0 22px;height:22px;border-radius:50%;background:#eff6ff;color:#2563eb;font-size:12px">${i + 1}</b><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:13px">${escHtml(c && c.title || '(제목 없음)')}</span><span style="flex:0 0 178px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:12px;text-align:right">${escHtml(c && c.purchase_channel || '—')} · ${escHtml(deliveryLabel(c && c.delivery_type))} · ${dailyLimitLabel(c || {})}</span><span aria-hidden="true" style="color:#94a3b8;font-size:18px">⠿</span></div>`;
+        <b style="display:grid;place-items:center;flex:0 0 22px;height:22px;border-radius:50%;background:#eff6ff;color:#2563eb;font-size:12px">${i + 1}</b><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:13px">${escHtml(c && c.title || '(제목 없음)')}</span><span style="flex:0 0 178px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:12px;text-align:right">${escHtml(purchaseChannelLabel(c || {}))} · ${escHtml(deliveryLabel(c && c.delivery_type))} · ${dailyLimitLabel(c || {})}</span><span aria-hidden="true" style="color:#94a3b8;font-size:18px">⠿</span></div>`;
     }).join('');
     queue.querySelectorAll('[data-priority-id]').forEach(row => {
       row.ondragstart = () => { draggingId = String(row.dataset.priorityId); row.style.opacity = '.45'; };
