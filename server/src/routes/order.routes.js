@@ -39,8 +39,10 @@ function _intakeKeyMatches(received, expected) {
 // 상태 전이 단일 소스 (서버에서만 검증)
 const ORDER_TRANSITIONS = {
   submitted:      ['reviewing', 'rejected', 'revision'],
-  reviewing:      ['await_chatroom', 'rejected', 'revision'],
-  await_chatroom: ['published', 'reviewing', 'rejected'],
+  reviewing:      ['rejected', 'revision'],
+  // 과거에 저장된 채팅방대기 오더는 보완·반려 또는 접수완료로만 정리한다.
+  // 신규 오더를 이 상태로 보내는 경로는 제공하지 않는다.
+  await_chatroom: ['reviewing', 'rejected', 'revision'],
   published:      ['done'],            // MVP: done 으로만 진행 (역행 없음)
   done:           [],                   // 종착
   rejected:       ['reviewing'],        // 반려 후 재검토
@@ -1136,7 +1138,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
 });
 
 // PUT /api/order/admin/status — 상태 전이 (전이 규칙 서버 검증)
-// body: { id, status, admin_memo?, chat_room_url?, linked_campaign_id? }
+// body: { id, status, admin_memo?, linked_campaign_id? }
 router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     await _ensureTables();
@@ -1162,12 +1164,10 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
       });
     }
 
-    // ★ 모집공고발행(published) 전이 시 카톡 팀채팅방URL 필수
-    if (to === 'published') {
-      const nextChat = (b.chat_room_url !== undefined ? b.chat_room_url : cur[0].chat_room_url) || '';
-      if (!String(nextChat).trim()) {
-        return res.status(400).json({ ok: false, error: '카톡 팀채팅방URL이 있어야 모집공고발행이 가능합니다.' });
-      }
+    // 상태변경은 보완·반려 전용이다. 사유 없는 상태 변경은 인트라넷에서도
+    // 무엇을 고쳐야 하는지 알 수 없으므로 서버에서 막는다(클라이언트 우회 방지).
+    if ((to === 'rejected' || to === 'revision') && !String(b.admin_memo || '').trim()) {
+      return res.status(400).json({ ok: false, error: '반려 또는 보완요청 사유를 입력해주세요.' });
     }
 
     // ※ NULLIF($n,'') : 빈 문자열은 "변경 없음"으로 처리해 기존 값 유실 방지

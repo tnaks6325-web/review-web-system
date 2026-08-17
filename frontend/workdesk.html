@@ -6296,7 +6296,7 @@ function _renderWoBody(){
       <tr class="woldetail" id="woldetail-${i}" style="display:none"><td colspan="8">
         <div class="wolexpand" id="wolbox-${i}"></div></td></tr>`).join('')}</tbody></table></div>`;
 }
-/** 접수·작업표·모집공고·상태변경 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지).
+/** 접수·작업표·모집공고·보완&반려 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지).
  *  ★ '상세' 버튼은 두지 않는다 — 행을 누르면 상세가 아래로 펼쳐지므로 하는 일이 겹친다.
  *  ★ 접수는 **하기/완료를 눈으로 가른다**: 접수 가능 상태면 파란 [접수하기],
  *    이미 접수된 오더는 초록 [✓ 접수완료](비활성 + 등록된 탭 이름을 툴팁으로).
@@ -6311,8 +6311,9 @@ function _woEditActions(o){
   const camp = o.linked_campaign_id
     ? ` <button class="btn xs wolink" onclick="event.stopPropagation();_woCampaign('${id}')" title="연결된 모집공고를 열어 리뷰어 화면을 바로 확인합니다">👁 모집공고</button>`
     : ` <button class="btn xs" onclick="event.stopPropagation();_woCampaign('${id}')" title="이 작업오더 내용으로 모집공고를 채워 열고, 리뷰어가 볼 화면을 바로 미리 봅니다">📢 모집공고</button>`;
-  return acc+wt+camp
-    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${id}')" title="진행 상태를 바꿉니다">상태변경</button>`
+  const remedy=((window.WO_TRANSITIONS||{})[o.status||'submitted']||[]).some(s=>s==='rejected'||s==='revision')
+    ? ` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${id}')" title="반려 또는 보완요청 사유를 전달합니다">보완&반려</button>` : '';
+  return acc+wt+camp+remedy
     +` <button class="btn xs" onclick="event.stopPropagation();_woAdminEdit('${id}')" title="작업오더 내용을 직접 수정합니다 (인트라넷 보낸오더 카드에도 반영)">✏ 관리자 수정</button>`;
 }
 /* ✏ 관리자 수정 — 공유 모달(js/work-order-detail.js woAdminEditModal) 한 벌.
@@ -6356,7 +6357,7 @@ function _woFillDetail(i){
   const acts=_woEditActions(o);
   box.innerHTML=`<div class="wolmeta">${chips}<span style="flex:1"></span>${acts}</div>
     <div class="woldoc">${_woDetailHtml(o)}${o.admin_memo?_woKv('관리자메모',o.admin_memo):''}</div>
-    ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·상태변경은 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
+    ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·보완&반려는 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
 }
 /* ══════════════════════════════════════════════════════════════
    작업표 생성 미리보기 (M2a) — 읽기 전용
@@ -6620,45 +6621,32 @@ async function _woAccept(id, pickGid, opts){
   return false;
 }
 /* ══════════════════════════════════════════════════════════════
-   상태 변경 — **고를 수 있는 상태만 한국어 버튼으로** 보여준다.
-
-   ★ 종전엔 `prompt()` 로 영문 상태값(submitted/reviewing/…)을 직접 타이핑하게 했다.
-     비개발자는 그 이름의 뜻도, 지금 상태에서 무엇이 가능한지도 알 수 없고,
-     서버 전이표(ORDER_TRANSITIONS)에 없는 값을 적으면 400 으로 튕겼다.
-   ★ 그래서 화면은 **공유 전이표(WO_TRANSITIONS)** 가 허용한 상태만 버튼으로 내고,
-     각 버튼 아래에 "이걸 누르면 무슨 일이 일어나는가"(WO_STATUS_HINTS)를 한 줄 붙인다.
-     전이표는 서버와 같은 표라 화면이 통과시킨 버튼이 서버에서 거절되지 않는다.
-   ★ 서버가 요구하는 두 조건도 **누르기 전에** 화면에서 받는다:
-     발행(published)=카톡 팀채팅방URL 필수 / 반려·보완요청=사유(메모) 확인.
+   보완&반려 — 상태 전이를 넓게 노출하지 않는다.
+   접수·공고게시 흐름과 분리된 예외 처리만 이 모달에서 수행한다.
    ══════════════════════════════════════════════════════════════ */
 function _woStatus(id){
   const o=(STATE.wo||[]).find(x=>x.id===id);
   if(!o){ _toast('오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
   const cur=o.status||'submitted';
-  const nexts=((window.WO_TRANSITIONS||{})[cur])||[];
+  const nexts=(((window.WO_TRANSITIONS||{})[cur])||[]).filter(s=>s==='rejected'||s==='revision');
   const hint=st=>((window.WO_STATUS_HINTS||{})[st])||'';
   const body = nexts.length
     ? nexts.map(ns=>`<button class="btn wostbtn" onclick="_woStatusPick('${esc(id)}','${esc(ns)}')">
          <b>${esc(_woLabel(ns))}(으)로 변경</b><span>${esc(hint(ns))}</span></button>`).join('')
-    : `<div class="empty">더 바꿀 수 있는 상태가 없습니다. (${esc(_woLabel(cur))} = 종착)</div>`;
-  _modal('상태 변경 — '+(o.title||''),
+    : `<div class="empty">이 상태에서는 보완 또는 반려할 수 없습니다.</div>`;
+  _modal('보완&반려 — '+(o.title||''),
     `<div class="wostnow">지금 상태 <span class="bd g">${esc(_woLabel(cur))}</span></div>
      <div class="wostlist">${body}</div>
      <div class="wostmemo">
-       <label>메모 (반려·보완요청은 이 내용이 AE에게 전달됩니다)</label>
-       <textarea id="woStMemo" rows="2" placeholder="예) 상품 URL이 빠져 있습니다. 채워서 다시 제출해주세요.">${esc(o.admin_memo||'')}</textarea>
-       <label>카톡 팀채팅방URL <span class="wostreq">공고발행에 필요</span></label>
-       <input id="woStChat" type="text" placeholder="https://open.kakao.com/..." value="${esc(o.chat_room_url||'')}">
+       <label>사유 <span class="wostreq">필수 · AE와 인트라넷에 전달됩니다</span></label>
+       <textarea id="woStMemo" rows="3" placeholder="예) 상품 URL이 빠져 있습니다. 채워서 다시 제출해주세요."></textarea>
      </div>`);
 }
 async function _woStatusPick(id, to){
   const memo=(($('#woStMemo')||{}).value||'').trim();
-  const chat=(($('#woStChat')||{}).value||'').trim();
-  if(to==='published' && !chat){ _toast('⚠ 카톡 팀채팅방URL을 입력해야 공고발행으로 바꿀 수 있습니다.'); const c=$('#woStChat'); if(c)c.focus(); return; }
-  if((to==='rejected'||to==='revision') && !memo
-     && !confirm((to==='rejected'?'반려':'보완요청')+' 사유를 적지 않고 진행할까요?\nAE는 무엇을 고쳐야 할지 알 수 없습니다.')) return;
+  if(!memo){ _toast('⚠ 반려 또는 보완요청 사유를 입력해주세요.'); const el=$('#woStMemo'); if(el)el.focus(); return; }
   const r=await api('/api/trackb/work-orders/status',
-    {method:'PUT',body:JSON.stringify({id,status:to,admin_memo:memo,chat_room_url:chat})});
+    {method:'PUT',body:JSON.stringify({id,status:to,admin_memo:memo})});
   if(r&&r.ok){ const m=document.getElementById('wdModal'); if(m)m.remove(); _toast(_woLabel(to)+'(으)로 바꿨습니다.'); _loadOrders(); }
   else _toast('⚠ 변경 실패'+(r&&r.error?': '+r.error:''));
 }

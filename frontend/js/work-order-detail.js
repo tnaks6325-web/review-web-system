@@ -457,8 +457,8 @@ const WO_LABELS = {
 const WO_STATUS_HINTS = {
   submitted:      'AE가 제출한 상태로 되돌립니다.',
   reviewing:      '접수완료로 표시합니다. (시트·탭 등록은 [접수하기] 버튼이 합니다)',
-  await_chatroom: '카톡 팀채팅방이 만들어지길 기다리는 상태로 둡니다.',
-  published:      '모집공고를 발행한 상태로 표시합니다. (카톡 팀채팅방URL 필요)',
+  await_chatroom: '과거 채팅방대기 오더입니다. 보완·반려 또는 접수완료로 정리합니다.',
+  published:      '모집공고가 게시된 상태입니다.',
   done:           '이 작업을 종료 처리합니다. 되돌릴 수 없습니다.',
   rejected:       '반려합니다. 사유를 적으면 AE에게 전달됩니다.',
   revision:       'AE에게 보완을 요청합니다. 사유를 적으면 그대로 전달됩니다.',
@@ -471,8 +471,8 @@ const WO_COLORS = {
 
 const WO_TRANSITIONS = {
   submitted:      ['reviewing', 'rejected', 'revision'],
-  reviewing:      ['await_chatroom', 'rejected', 'revision'],
-  await_chatroom: ['published', 'reviewing', 'rejected'],
+  reviewing:      ['rejected', 'revision'],
+  await_chatroom: ['reviewing', 'rejected', 'revision'],
   published:      ['done'],
   done:           [],
   rejected:       ['reviewing'],
