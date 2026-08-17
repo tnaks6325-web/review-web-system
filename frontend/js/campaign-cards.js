@@ -367,7 +367,8 @@
       : '<span class="sp-chip flow">가이드유입</span>');
     // 결제·리뷰 형태 배지(공고 등록 시 고른 값) — 접지 않고 전부 노출
     (c.badges || []).forEach(b => {
-      if (b) chips.push('<span class="sp-chip pay">' + _esc(b) + '</span>');
+      // 과거 자동 저장값인 "사진 5장+"는 실제 설정이 아닌 레거시 보조값이라 카드에 노출하지 않는다.
+      if (b && String(b) !== '사진 5장+') chips.push('<span class="sp-chip pay">' + _esc(b) + '</span>');
     });
     const total = Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;

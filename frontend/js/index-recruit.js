@@ -126,7 +126,9 @@ window.updateRecruitPopularity = updateRecruitPopularity;
 function openPopularPriorityModal(campId) {
   const target = _recruitLastList.find(c => String(c.id) === String(campId));
   const candidates = _recruitLastList.filter(c => String(c.id) !== String(campId)
-    && c.participation_mode && c.is_popular !== true && c.status === 'active');
+    // 리뷰어에게 숨긴 내부·테스트 공고는 선행참여 대상으로 삼지 않는다.
+    // 목록에 보이지 않는 공고가 1순위가 되면 인기상품 참여가 막히기 때문이다.
+    && c.participation_mode && c.is_popular !== true && c.status === 'active' && c.reviewer_hidden !== true);
   if (!target) return;
   const old = document.getElementById('popularPriorityModal');
   if (old) old.remove();
