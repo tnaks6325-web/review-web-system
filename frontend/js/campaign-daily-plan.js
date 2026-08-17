@@ -1518,6 +1518,12 @@
     try {
       if (typeof window.loadRecruitList === 'function') window.loadRecruitList();
       else if (typeof window.loadRecruitPreview === 'function') window.loadRecruitPreview();
+      // 작업보드에서 같은 공용 모달을 열었을 때는 카드만 갱신해서는 안 된다.
+      // 저장 API가 무시트 작업표의 미배정 행을 재배치·투영한 뒤이므로, 열린 작업보드도
+      // 즉시 다시 읽어 날짜/행을 같은 결과로 보여 준다. 호출부가 없으면 기존 화면은 무영향.
+      if (typeof window.CAMPAIGN_DAILY_PLAN_SAVED === 'function') {
+        window.CAMPAIGN_DAILY_PLAN_SAVED({ campaignId: S && S.campId ? String(S.campId) : '' });
+      }
     } catch (_) {}
   }
 

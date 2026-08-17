@@ -504,6 +504,15 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /function baseDate\(\)/.test(modal) && /sd > S\.data\.today\) \? sd : S\.data\.today/.test(modal));
   ok('admin.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('admin.html')));
   ok('workdesk.html 에 모듈 로드', /campaign-daily-plan\.js/.test(readF('workdesk.html')));
+  const workdesk = readF('workdesk.html');
+  ok('★ 작업보드 [모집인원 조절]도 공용 모달만 연다(별도 스케줄 저장 경로 금지)',
+    /function openCurrentCampaignDailyPlan\(\)/.test(workdesk)
+    && /CampaignDailyPlan\.open\(String\(cs\[0\]\.id\)\)/.test(workdesk)
+    && /📅 모집인원 조절/.test(workdesk));
+  ok('★ 공용 모달 저장 후 열린 작업보드를 재조회해 작업표 투영 결과를 표시',
+    /CAMPAIGN_DAILY_PLAN_SAVED/.test(modal)
+    && /window\.CAMPAIGN_DAILY_PLAN_SAVED=function/.test(workdesk)
+    && /selTab\(i,\{nav:true\}\)/.test(workdesk));
 
   /* ═══════════════════════════════════════════════════════════
      6. 진짜 PG (PGTEST_URL 있을 때만) — 마이그레이션·유니크·CASCADE

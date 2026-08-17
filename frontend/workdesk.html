@@ -3592,6 +3592,46 @@ function _campPick(i,ci){
   if(c) _campOpenModal(c.id);
 }
 function _campDateFull(v){ if(!v) return ''; const d=new Date(v); return isNaN(d)?'':`${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()}`; }
+
+/* ── 작업보드 → 모집인원 조절: 공고 카드와 **같은 공용 모달/API**만 연다 ─────────
+   별도 "작업스케줄 저장" 경로를 만들면 공고 정원과 무시트 작업표가 갈라진다.
+   campaignPlan.savePlans()가 모집계획 저장 → 미배정 행 재배치 → 장부 투영을 한 흐름으로
+   수행하므로, 여기서는 연결 공고 식별·진입만 담당한다. */
+async function openCurrentCampaignDailyPlan(){
+  const t=STATE.cur; if(!t) return;
+  if(!window.CampaignDailyPlan || typeof window.CampaignDailyPlan.open!=='function'){
+    toast('모집인원 조절 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return;
+  }
+  // 작업보드에서 바로 연 경우에도 tabs 통계 응답의 연결 공고 주석을 먼저 확보한다.
+  // 조회 실패를 "연결 없음"으로 해석하지 않는다.
+  if(!Array.isArray(t.campaigns) && !STATE.campsUnavailable){
+    await _finEnsureStats(true);
+  }
+  if(STATE.campsUnavailable){ toast('연결된 모집공고를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
+  const cs=Array.isArray(t.campaigns)?t.campaigns.filter(c=>c&&c.id):[];
+  if(!cs.length){ toast('이 작업보드에는 연결된 모집공고가 없습니다.'); return; }
+  if(cs.length===1){ window.CampaignDailyPlan.open(String(cs[0].id)); return; }
+  _wbPlanPickerOpen(cs);
+}
+function _wbPlanPickerClose(){ const o=document.getElementById('wbPlanPickOv'); if(o) o.remove(); STATE.wbPlanCandidates=null; }
+function _wbPlanPickerOpen(cs){
+  _wbPlanPickerClose(); STATE.wbPlanCandidates=cs.slice();
+  const rows=cs.map((c,i)=>`<button class="wbl-pick" onclick="_wbPlanPick(${i})"><span class="pt"><i class="wbl-cdot ${_campRank(c)===0?'open':(_campRank(c)===1?'pre':'')}"></i>${esc(c.title||'(제목 없음)')}</span><span class="pm">${esc(_campDateFull(c.createdAt)||'생성일 미상')} 생성${_campLabel(c)?' · '+esc(_campLabel(c)):''}</span></button>`).join('');
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='wbPlanPickOv';
+  ov.onclick=e=>{ if(e.target===ov) _wbPlanPickerClose(); };
+  ov.innerHTML=`<div class="wbl-dlg"><div class="wbl-dh">📅 어느 모집공고의 인원을 조절할까요?</div><div class="wbl-db">연결된 공고가 여러 건입니다. 작업표와 동기화할 공고를 선택하세요.${rows}</div><div class="wbl-df"><button class="wbl-b" onclick="_wbPlanPickerClose()">취소</button></div></div>`;
+  document.body.appendChild(ov);
+}
+function _wbPlanPick(i){ const c=(STATE.wbPlanCandidates||[])[i]; _wbPlanPickerClose(); if(c&&window.CampaignDailyPlan) window.CampaignDailyPlan.open(String(c.id)); }
+// 공용 모달 저장/재구성 후, 현재 열린 작업이 그 공고와 연결됐을 때만 작업보드를 새로 읽는다.
+// 카드 화면에서 모달을 연 경우에는 아무 동작도 하지 않아 기존 목록 갱신 흐름을 유지한다.
+window.CAMPAIGN_DAILY_PLAN_SAVED=function(ev){
+  const t=STATE.cur, campId=String(ev&&ev.campaignId||'');
+  if(!t||!campId||!Array.isArray(t.campaigns)||!t.campaigns.some(c=>String(c&&c.id||'')===campId)) return;
+  const i=(STATE.tabs||[]).findIndex(x=>x===t || (x.sheetId===t.sheetId&&x.tabName===t.tabName));
+  if(i<0) return;
+  selTab(i,{nav:true}).catch(()=>toast('모집계획은 저장됐습니다. 작업보드 새로고침에 실패했으니 새로고침해 주세요.'));
+};
 /* 공고 저장/삭제 후 — 홈 목록이 떠 있으면 주석을 **강제로 새로 받아** 다시 그린다.
    ★ 서버 30초 캐시 때문에 그냥 새로고침하면 방금 발행한 공고가 한동안 안 잡혀
      [＋공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
@@ -4232,11 +4272,13 @@ function renderWorkdesk(wd){
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
   const workdeskTitle=m.displayName||STATE.cur.displayName||STATE.cur.tabName;
+  const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
     ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     <span class="sp" style="flex:1"></span>
+    ${planBtn}
     ${_finBarHtml()}
     ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
