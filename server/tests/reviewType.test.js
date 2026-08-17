@@ -209,7 +209,7 @@ t('공고 모달에 리뷰타입 버튼군(표준 key 5종 + 미지정)',
   && RT.REVIEW_TYPE_KEYS.every(k => new RegExp(`data-val="${k}"`).test(MODAL))
   && /<input id="rf_review_type" type="hidden">/.test(MODAL));
 t('★ 참여형 전용 섹션 밖 — 레거시 공고도 지정할 수 있어야 한다',
-  MODAL.indexOf('id="rf_review_type_btns"') < MODAL.indexOf('rf_participation'));
+  (() => { const compact = MODAL.slice(MODAL.indexOf('class="rf-main rf-compact-main"')); return compact.indexOf('id="rf_review_type_btns"') < compact.indexOf('id="rf_participation"'); })());
 t('selectRfBtn 이 리뷰타입 그룹을 안다(컨테이너 + 분기)',
   /#rf_review_type_btns/.test(REC) && /group === 'review_type'/.test(REC));
 t('★ _rfPickBtn 이 그룹명으로 hidden 을 찾는다(삼항 하드코딩이면 새 그룹이 조용히 빠진다)',

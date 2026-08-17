@@ -2470,6 +2470,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
   const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false;
+  // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
+  // 수량이 섞이지 않도록 함께 초기화한다.
+  window._rfGlobalReviewTypeMix = [];
   document.querySelectorAll('#rf_review_mix [data-mix-type]').forEach((el) => { el.value = '0'; });
   syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
@@ -2620,10 +2623,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
           try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
         })();
-        savedReviewMix.forEach((row) => {
-          const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
-          if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
-        });
+        // 혼합 입력칸은 [혼합]을 선택할 때 동적으로 만들어진다. 먼저 진실원본을 채운 뒤
+        // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
+        _setRecruitGlobalReviewTypeMix(savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
@@ -2696,10 +2698,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const prefillReviewMix = Array.isArray(prefill.review_type_mix) ? prefill.review_type_mix : (() => {
         try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
       })();
-      prefillReviewMix.forEach((row) => {
-        const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
-        if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
-      });
+      // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
+      _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
@@ -2872,6 +2872,19 @@ function selectRfBtn(group, btn) {
 }
 
 const RF_REVIEW_MIX_TYPES = ['photo', 'text', 'confirm', 'star'];
+
+/** 동적으로 렌더되는 혼합 입력칸의 프리필 원본. 유효 키·양수 수량만 보관한다. */
+function _setRecruitGlobalReviewTypeMix(mix) {
+  const byType = new Map();
+  (Array.isArray(mix) ? mix : []).forEach((entry) => {
+    const type = String(entry?.type || '');
+    const quantity = Math.max(0, Math.floor(Number(entry?.quantity) || 0));
+    if (RF_REVIEW_MIX_TYPES.includes(type) && quantity > 0) byType.set(type, quantity);
+  });
+  window._rfGlobalReviewTypeMix = RF_REVIEW_MIX_TYPES
+    .filter((type) => byType.has(type))
+    .map((type) => ({ type, quantity: byType.get(type) }));
+}
 
 function _reviewMixRows() {
   return Array.from(document.querySelectorAll('#rf_opt_rows .rf-opt-row'))
