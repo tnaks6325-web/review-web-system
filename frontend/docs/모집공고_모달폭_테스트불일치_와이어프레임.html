@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모집공고 모달 폭 테스트 불일치</title>
+<style>
+  :root{--ink:#17243a;--mut:#68778d;--line:#dbe4ef;--bg:#f3f6fb;--blue:#2563eb;--amber:#c66a00;--amberbg:#fff7e8;--ok:#087a48}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,"Malgun Gothic",sans-serif}
+  main{max-width:1180px;margin:0 auto;padding:42px 24px 60px}h1{font-size:26px;margin:0 0 8px}p{margin:0}.lead{color:var(--mut);margin-bottom:28px}.notice{display:flex;gap:10px;padding:14px 16px;background:var(--amberbg);border:1px solid #f5c977;border-radius:12px;color:#7a4800;margin-bottom:30px}.compare{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 4px 16px #2537530d}.tag{display:inline-flex;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800}.old{background:#eef4ff;color:#2458aa}.now{background:#fff0e1;color:#a85200}h2{font-size:18px;margin:10px 0 4px}.desc{font-size:13px;color:var(--mut);min-height:42px}.stage{height:320px;margin-top:18px;padding:30px 14px;background:linear-gradient(135deg,#e7edf6,#f7f9fc);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden}.modal{height:250px;background:#fff;border:1px solid #cad7e8;border-radius:12px;box-shadow:0 12px 28px #31445a24;overflow:hidden;flex:none}.expected{width:86%;max-width:520px}.actual{width:96%;max-width:570px}.bar{height:38px;padding:10px 13px;background:#f8fbff;border-bottom:1px solid #e5edf6;font-size:12px;font-weight:800}.body{display:grid;grid-template-columns:84px 1fr 92px;height:170px}.rail{padding:12px 8px;background:#fbfdff;border-right:1px solid #e8eef6;font-size:10px;color:#64748b}.rail b{display:block;margin:8px 0;padding:4px;background:#eaf2ff;border-radius:4px;color:#2563eb}.form{padding:13px}.line{height:11px;border-radius:4px;background:#e8eef6;margin-bottom:9px}.line.blue{background:#bdd6ff;width:78%}.preview{margin:13px 12px 13px 0;border-radius:7px;background:#f7f9fc;border:1px dashed #cad6e5}.foot{height:42px;border-top:1px solid #e5edf6;display:flex;justify-content:flex-end;align-items:center;padding-right:12px}.btn{padding:6px 11px;border-radius:5px;background:var(--blue);color:white;font-size:11px;font-weight:800}.measure{display:flex;justify-content:center;align-items:center;gap:8px;margin-top:13px;font:700 13px ui-monospace,Consolas,monospace}.ruler{height:1px;flex:1;background:#8aa0bb;position:relative}.ruler:before,.ruler:after{content:"";position:absolute;height:9px;width:1px;background:#8aa0bb;top:-4px}.ruler:before{left:0}.ruler:after{right:0}.result{margin-top:28px;background:#fff;border-left:5px solid var(--amber);border-radius:10px;padding:16px 18px}.result h3{margin:0 0 6px;font-size:16px}.result p{color:var(--mut)}code{background:#eef2f7;border-radius:4px;padding:1px 5px;font-family:ui-monospace,Consolas,monospace;color:#34445c}@media(max-width:760px){main{padding:28px 16px}.compare{grid-template-columns:1fr}.stage{height:280px}}
+</style>
+</head>
+<body>
+<main>
+  <h1>모집공고 모달 폭: 테스트와 현재 화면의 기준 불일치</h1>
+  <p class="lead">기능은 정상이며, 자동 테스트가 기대하는 모달 너비와 현재 디자인에 설정된 너비가 서로 다릅니다.</p>
+
+  <div class="notice"><span>⚠️</span><div><b>실패한 테스트</b><br><code>server/tests/recruitModalFinalRuntimeLayout.test.js</code> — “모달 최대폭은 1020~1080px이어야 한다”는 기준을 검사합니다.</div></div>
+
+  <section class="compare">
+    <article class="panel">
+      <span class="tag old">테스트가 기대하는 화면</span>
+      <h2>최대폭 1020~1080px</h2>
+      <p class="desc">이 폭 안에 좌측 단계 메뉴 · 입력 영역 · 우측 미리보기가 배치된다는 예전 기준입니다.</p>
+      <div class="stage"><div class="modal expected"><div class="bar">📣 모집공고 등록</div><div class="body"><div class="rail">단계<b>기본</b><b>상품</b><b>조건</b></div><div class="form"><div class="line blue"></div><div class="line"></div><div class="line"></div><div class="line blue"></div><div class="line"></div></div><div class="preview"></div></div><div class="foot"><span class="btn">저장</span></div></div></div>
+      <div class="measure"><span class="ruler"></span>1020~1080px<span class="ruler"></span></div>
+    </article>
+
+    <article class="panel">
+      <span class="tag now">현재 코드의 화면</span>
+      <h2>최대폭 1124px</h2>
+      <p class="desc">현재 운영 코드가 더 넓은 폭을 사용합니다. 입력표와 미리보기에 조금 더 여유가 생깁니다.</p>
+      <div class="stage"><div class="modal actual"><div class="bar">📣 모집공고 등록</div><div class="body"><div class="rail">단계<b>기본</b><b>상품</b><b>조건</b></div><div class="form"><div class="line blue"></div><div class="line"></div><div class="line"></div><div class="line blue"></div><div class="line"></div></div><div class="preview"></div></div><div class="foot"><span class="btn">저장</span></div></div></div>
+      <div class="measure"><span class="ruler"></span>1124px<span class="ruler"></span></div>
+    </article>
+  </section>
+
+  <section class="result">
+    <h3>그래서 왜 테스트가 실패했나요?</h3>
+    <p>테스트는 <b>1080px 이하</b>만 통과로 보는데, 실제 코드는 <b>1124px</b>로 되어 있어 실패합니다. 구매시간대·리뷰비·옵션 선택 기능과는 관계없는 <b>디자인 수치 검증</b>입니다.</p>
+  </section>
+</main>
+</body>
+</html>

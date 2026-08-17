@@ -33,7 +33,7 @@ if (intranetRoot) {
 
 assert.match(orderRoute, /review_type_mix JSONB NOT NULL DEFAULT '\[\]'::jsonb/);
 assert.match(orderRoute, /_reviewTypeMixJson\(b\.review_type_mix, b\.review_type\)/);
-assert.match(orderRoute, /review_type_mix = \$17/);
+assert.match(orderRoute, /review_type_mix = \$18/);
 assert.match(workOrderUi, /review_type_mix: _woIsBlogKind/);
 
 assert.match(recruitUi, /prefill\.review_type_mix/);

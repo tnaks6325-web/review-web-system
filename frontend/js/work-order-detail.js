@@ -739,6 +739,7 @@ function _woCampaignPrefill(o) {
     // ★ 공고 제목 = 상품명 우선(리뷰어 노출용 — 업체명·건수·배송유형 미노출), 없으면 오더 제목 폴백. 관리자 자유 수정 가능.
     title:         _pi.name || o.title || "",
     time_range:    o.purchase_time || "",
+    review_fee:    Number(o.review_fee ?? o.reviewFee ?? 0) || 0,
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
@@ -952,6 +953,7 @@ function woAdminEditModal(order, opts) {
   field(c3, "product_url", "상품확인용 URL", { full: true });
   field(c3, "product_option", "상품 · 옵션 · 결제금액", { full: true, area: true });
   field(c3, "pay_amount", "결제금액(원)", { type: "number" });
+  field(c3, "review_fee", "리뷰비(원)", { type: "number", hint: "모집공고 생성 시 같은 금액으로 자동 표시됩니다." });
   pills(c3, "inflow_type", "유입방식", [{ v: "guide", l: "가이드유입" }, { v: "link", l: "링크유입" }]);
   field(c3, "inflow_keyword", "유입 키워드", { full: true });
   field(c3, "inflow_guide", "유입가이드", { full: true, area: true, hint: "⚠ 내용을 수정하지 않으면 원본(첨부 이미지 포함)이 그대로 보존됩니다.", warn: true });

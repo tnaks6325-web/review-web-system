@@ -1,8 +1,7 @@
 /**
- * campaignPinnedPopular.test.js — 별표 고정(우선노출)·인기상품 게이트 회귀가드 (064)
+ * campaignPinnedPopular.test.js — 인기상품 게이트 회귀가드 (064)
  * 실행: node tests/campaignPinnedPopular.test.js
- * 고정하는 것: 노출순서(sort_order) 정렬 제거 + 별표(pinned_at ASC=먼저 별표한 순서) 정렬 ·
- *   flags 토글 라우트(adminOrMaster, 재별표 순서보존, 스코프 토큰 도달 불가) ·
+ * 고정하는 것: 별표 우선노출 제거 + 인기 ON/OFF 라우트(adminOrMaster, 스코프 토큰 도달 불가) ·
  *   인기 선행참여 게이트(명의별 1:1, 만료 환불, 게이트=INSERT 이전) · popular-status 라우트 순서 함정 ·
  *   공개필드 is_popular(양쪽) · 관리자/리뷰어 UI · sort_order UI 제거(null-safe)
  */
@@ -29,24 +28,22 @@ ok('064: pinned_at TIMESTAMPTZ + is_popular 기본 FALSE', /pinned_at\s+TIMESTAM
 ok('064: idempotent(IF NOT EXISTS)', !/ADD COLUMN (?!IF NOT EXISTS)/.test(mig));
 ok('064: sort_order 컬럼 드롭 없음(데이터 보존 = 롤백 안전)', !/DROP COLUMN/i.test(mig));
 
-// ── 정렬: sort_order 제거 + 별표 우선 ──
+// ── 정렬: 별표 우선노출 제거 ──
 {
   const list = routes.slice(routes.indexOf("router.get('/list'"), routes.indexOf("router.get('/popular-status'"));
   ok('/list: 정렬에서 sort_order 제거', !/ORDER BY[\s\S]{0,200}sort_order/.test(list));
-  ok('/list: 별표 우선(pinned_at IS NULL → pinned_at ASC = 먼저 별표한 순서)', /\(pinned_at IS NULL\), pinned_at ASC/.test(list));
-  ok('/list SELECT에 is_popular·pinned_at 포함(명시 컬럼 SELECT 함정)', /sub_hold_ttl_min, is_popular, pinned_at/.test(list));
+  ok('/list: 별표 정렬을 쓰지 않고 생성일 순서를 사용', !/pinned_at IS NULL/.test(list) && /created_at DESC/.test(list));
+  ok('/list SELECT에 인기 여부 포함(명시 컬럼 SELECT 함정)', /sub_hold_ttl_min, is_popular/.test(list));
   const admList = routes.slice(routes.indexOf("router.get('/admin/list'"), routes.indexOf("router.post('/admin/:id/flags'"));
-  ok('/admin/list: 동일 별표 정렬 + sort_order 제거', /\(pinned_at IS NULL\), pinned_at ASC/.test(admList) && !/sort_order ASC/.test(admList));
+  ok('/admin/list: 별표 정렬 없이 생성일 순서', !/pinned_at IS NULL/.test(admList) && /created_at DESC/.test(admList));
 }
 
 // ── flags 토글 라우트 ──
 {
   const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
   ok('flags: authMiddleware + adminOrMaster', /authMiddleware, adminOrMasterMiddleware/.test(flags));
-  ok('flags: 재별표해도 원래 자리 유지(COALESCE(pinned_at, NOW()))', /COALESCE\(pinned_at, NOW\(\)\)/.test(flags));
-  ok('flags: pinned=false → NULL(해제)', /ELSE NULL END/.test(flags));
-  ok('flags: popular은 COALESCE 부분수정(미전송=유지)', /is_popular = COALESCE\(\$3::boolean, is_popular\)/.test(flags));
-  ok('flags: 빈 요청 400', /pinned 또는 popular/.test(flags));
+  ok('flags: 인기 ON/OFF만 저장하고 별표 값은 받지 않는다', /is_popular = \$2::boolean/.test(flags) && !/b\.pinned/.test(flags));
+  ok('flags: 인기 값 없는 요청은 400', /popular 값이 필요합니다/.test(flags));
   // 스코프 토큰(via reviewer_campaign)은 PUT 끝앵커만 허용 → POST flags 도달 불가(격리 불변 확인)
   ok('auth: 스코프 토큰은 PUT /admin/:id 끝앵커만(POST /flags 차단)', /req\.method === 'PUT' && \/\^\\\/api\\\/campaign\\\/admin\\\/\[\^\/\]\+\$\//.test(auth));
 }
@@ -73,29 +70,36 @@ ok('popular-status: 리미터 적용 + 게이트와 동일 계산', /router\.get
   const leg = (routes.match(/PUBLIC_FIELDS_LEGACY = \[[\s\S]*?\];/) || [''])[0];
   const part = (routes.match(/PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/) || [''])[0];
   ok('공개필드: is_popular 양쪽 노출(레거시 카드도 배지)', leg.includes("'is_popular'") && part.includes("'is_popular'"));
-  // ★ 리뷰어 홈 별표 토글이 현재 상태(⭐/☆)를 렌더하려면 pinned_at 노출 필요(정렬 메타 — 민감정보 아님)
-  ok('공개필드: pinned_at 양쪽 노출(관리자 별표 상태 표시용)', part.includes("'pinned_at'") && leg.includes("'pinned_at'"));
+  ok('공개필드: 별표 상태는 노출하지 않는다', !part.includes("'pinned_at'") && !leg.includes("'pinned_at'"));
 }
 
-// ── 리뷰어 홈 카드 별표 토글(관리자 전용) ──
-// 관리자 모집공고 목록(admin:true)도 같은 별표를 쓴다(중복 컨트롤 금지). admin:true는 admin.html
-// 에서만 넘어오므로 스코프 토큰(rapp_camp_edit_token) 보유자에겐 여전히 렌더되지 않는다 —
-// 핵심 방어는 _adminTok()(스코프 토큰 포함)을 쓰지 않는 것.
-ok('cards: 별표는 진짜 admin_token 또는 관리자 목록만(스코프 토큰은 서버 403이라 버튼 미노출)',
+// ── 썸네일 좌상단 인기 ON/OFF(관리자 전용) ──
+ok('cards: 인기 ON/OFF는 진짜 admin_token 또는 관리자 목록만',
   /function _realAdminTok\(\)/.test(cards)
-  && /const starChip = \(admin \|\| _realAdminTok\(\)\)/.test(cards)
-  && !/const starChip = _adminTok\(\)/.test(cards));
-ok('cards: 별표 클릭은 카드 이동 차단(stopPropagation+preventDefault)', /pstarchip[\s\S]{0,200}stopPropagation\(\);event\.preventDefault\(\);CampCards\.togglePin/.test(cards));
-ok('cards: togglePin — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePin\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
+  && /const popToggle = c\.participation_mode && \(admin \|\| _realAdminTok\(\)\)/.test(cards)
+  && !/pstarchip/.test(cards));
+ok('cards: 인기 아이콘은 썸네일 좌상단에서 클릭해 ON/OFF', /pt-pop-toggle/.test(cards) && /pt-topleft">\$\{popToggle\}/.test(cards) && /CampCards\.togglePopular/.test(cards));
+ok('cards: OFF→ON은 우선순위 선택 후 /flags로 저장하고 홈은 재렌더',
+  /async function togglePopular\(campId, on, prerequisiteCampaignIds\)/.test(cards)
+  && /openPopularPriorityModal/.test(cards)
+  && /prerequisiteCampaignIds/.test(cards)
+  && /loadRecruitPreview === 'function'/.test(cards));
+ok('cards: 공개 API도 실제 함수명 togglePopular을 내보낸다(모듈 초기화 중단 방지)',
+  /window\.CampCards = \{[\s\S]*togglePopular[\s\S]*\};/.test(cards) && !/openAdminEdit, togglePin,/.test(cards));
 // ★★ 리뷰웹시스템[3버전](인트라넷 SSO `via:'intranet'`)은 authMiddleware가 `/api/trackb/*` 로만
 //    도달을 허용하므로, togglePin이 `/api/campaign/admin/...` 을 하드코딩하면 별표만 403
 //    ("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다 — 호스트 재기준(CAMPAIGN_ADMIN_API) 고정.
-ok('cards: togglePin 경로는 호스트가 재기준(CAMPAIGN_ADMIN_API) — trackb에서도 별표 동작',
+ok('cards: togglePopular 경로는 호스트가 재기준(CAMPAIGN_ADMIN_API) — trackb에서도 인기 설정 동작',
   /window\.CAMPAIGN_ADMIN_API/.test(cards)
   && /function _flagsUrl\(campId\)/.test(cards)
   && /await fetch\(_flagsUrl\(campId\)/.test(cards)
   && !/['"]\/api\/campaign\/admin\/['"] ?\+ ?encodeURIComponent\(campId\) ?\+ ?['"]\/flags['"]/.test(cards));
-ok('flags: 토글 직후 /list 캐시 무효화(5초 stale 순서 방지)', /_listCache = \{ at: 0, rows: null, countsMap: null(, feeMap: null)? \};[\s\S]{0,200}pinnedAt/.test(routes));
+ok('flags: 토글 직후 /list 캐시 무효화', /_listCache = \{ at: 0, rows: null, countsMap: null(, feeMap: null)? \};[\s\S]{0,200}isPopular/.test(routes));
+ok('우선순위: 첫 공고가 마감·총원충족되면 다음 비인기 공고로 자동 전환',
+  /campaign_popular_prerequisites/.test(routes)
+  && /async function _currentPopularPrerequisite/.test(routes)
+  && /ORDER BY q\.priority/.test(routes)
+  && /COALESCE\(a\.submitted, 0\) < c\.recruit_total/.test(routes));
 
 // ── 관리자 UI ──
 ok('admin.html: 노출 순서(rf_sort_order) 제거', !adminHtml.includes('rf_sort_order'));
@@ -103,8 +107,21 @@ ok('admin-siand.html: 노출 순서 제거', !siandHtml.includes('rf_sort_order'
 ok('index-recruit: sort_order 읽기 null-safe(+편집 로드값 재전송 = 0-덮어쓰기 방지)',
   !/getElementById\("rf_sort_order"\)\.value/.test(recruit) && /_recruitEditLoaded\?\.sort_order/.test(recruit));
 ok('index-recruit: 새 공고 열 때 로드값 초기화(이전 편집값 누수 방지)', /window\._recruitEditLoaded = null/.test(recruit));
-ok('index-recruit: 카드 토글 ⭐(pinned)·🔥(popular, 참여형만)', /toggleCampFlag\('\$\{escHtml\(c\.id\)\}','pinned'/.test(recruit) && /c\.participation_mode \? `<button[^`]*'popular'/.test(recruit));
-ok('index-recruit: toggleCampFlag → /flags POST + 목록 재정렬', /\/flags`/.test(recruit) && /await loadRecruitList\(\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400)));
+ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]/.test(recruit) && /c\.participation_mode \? `<button[^`]*'popular'/.test(recruit));
+{
+  const priorityModal = recruit.slice(recruit.indexOf('function openPopularPriorityModal'), recruit.indexOf('window.openPopularPriorityModal'));
+  ok('index-recruit: 모집중 비인기 공고 전체를 체크 없이 드래그 우선순위로 저장한다',
+    /const priorityIds = candidates\.map/.test(priorityModal)
+    && !/checkbox/.test(priorityModal)
+    && /campaign\.channel \|\| campaign\.purchase_channel/.test(priorityModal)
+    && /택배발송대행/.test(priorityModal)
+    && /daily_limit/.test(priorityModal)
+    && /priorityIds\.splice\(from, 1\); priorityIds\.splice\(at, 0, draggingId\)/.test(priorityModal));
+}
+ok('index-recruit: toggleCampFlag → /flags POST + 현재 카드 즉시 갱신',
+  /\/flags`/.test(recruit)
+  && /updateRecruitPopularity\(campId, on\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400))
+  && !/await loadRecruitList\(\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400)));
 
 // ── 리뷰어 UI ──
 ok('campaign-cards: [인기!] 배지(pt-pop) — is_popular === true 만', /c\.is_popular === true \? `<span class="pt-pop">/.test(cards) && /\.pcard \.pt-pop\{/.test(cards));
@@ -112,6 +129,12 @@ ok('campaign.html: popular_locked → 일반 목록 모달(openPopGate)', /popul
 ok('campaign.html: 인기 안내 카드(renderPopNotice) — 인기 공고만', /renderPopNotice/.test(campHtml) && /_camp\.is_popular === true/.test(campHtml));
 ok('campaign.html: 일반 목록은 open·비인기·참여형·자기자신 제외 필터', /x\.participation_mode && x\.is_popular !== true && x\.state === 'open' && String\(x\.id\) !== String\(CAMP_ID\)/.test(campHtml));
 ok('campaign.html: 복귀 CTA — pop_return_camp 기록 후 이동, 제출완료 화면에서 복귀 버튼', /pop_return_camp/.test(campHtml) && /popReturnBtn/.test(campHtml));
-ok('campaign.html: 지각 접수(pendingConfirm)는 복귀 버튼 미노출(크레딧 아님)', /!pendingConfirm && !\$\('popReturnBtn'\)/.test(campHtml));
+ok('campaign.html: 우선순위 게이트는 현재 선행공고만 안내·복귀 대상도 공고쌍으로 제한',
+  /gateInfo\.prerequisite/.test(campHtml)
+  && /String\(x\.id\) === requiredId/.test(campHtml)
+  && /prerequisiteId:String\(id\)/.test(campHtml)
+  && /String\(back\.prerequisiteId\) === String\(CAMP_ID\)/.test(campHtml));
+ok('campaign.html: 지각 접수(pendingConfirm)는 복귀 버튼 미노출(크레딧 아님)',
+  /String\(back\.campaignId\) !== String\(CAMP_ID\) && !pendingConfirm/.test(campHtml));
 
 console.log(`\n✅ campaignPinnedPopular: ${passed}개 통과`);

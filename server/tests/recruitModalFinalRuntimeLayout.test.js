@@ -23,8 +23,8 @@ function mustNotContain(fragment, message) {
 }
 
 // A compact desktop editor: left step rail / editor / preview at a controlled width.
-assert(/class="modal-box rf-box"[^>]*max-width:10(?:2|3|4|5|6|7|8)0px/.test(modal),
-  '최종 런타임 모달은 고밀도 폭(1020~1080px)을 사용해야 합니다.');
+assert(/class="modal-box rf-box"[^>]*max-width:1124px/.test(modal),
+  '최종 런타임 모달은 승인된 1124px 폭을 사용해야 합니다.');
 
 // The rail is navigation, not a per-user drag-and-drop layout editor.
 mustContain('class="rf-step-list"', '좌측 단계 목록이 있어야 합니다.');
@@ -56,8 +56,9 @@ assert(modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"'),
 // Both shared-modal surfaces must request the released asset URL once anew.
 ['workdesk', 'admin'].forEach((surface) => {
   const html = surface === 'workdesk' ? workdesk : admin;
-  assert(html.includes('js/recruit-modal.js?v=20260813-compact-parity-c101'), `${surface} should request the released modal asset.`);
-  assert(html.includes('js/index-recruit.js?v=20260813-compact-parity-c102'), `${surface} should request the released controller asset.`);
+  assert(html.includes('js/recruit-modal.js?v=20260817-editor-ui-c117'), `${surface} should request the released modal asset.`);
+  assert(html.includes('js/campaign-cards.js?v=20260817-popular-priority-c118'), `${surface} should request the released card asset.`);
+  assert(html.includes('js/index-recruit.js?v=20260817-review-mix-restore-c124'), `${surface} should request the released controller asset.`);
 });
 
 console.log('recruitModalFinalRuntimeLayout: passed');

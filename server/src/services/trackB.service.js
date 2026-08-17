@@ -2322,7 +2322,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
-            pay_amount AS "payAmount", daily_count AS "dailyCount", daily_count_text AS "dailyCountText",
+            pay_amount AS "payAmount", review_fee AS "reviewFee", daily_count AS "dailyCount", daily_count_text AS "dailyCountText",
             purchase_time AS "purchaseTime", inflow_keyword AS "inflowKeyword", inflow_type AS "inflowType",
             inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
             review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",

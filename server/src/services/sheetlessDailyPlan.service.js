@@ -162,6 +162,107 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
 }
 
 /**
+ * 날짜가 꼬인 기존 작업표를 조절 계획으로 다시 배열한다.
+ *
+ * 이미 참여자·수취인·연락처·주문이 있는 행은 절대 이동하지 않는다. 조절된 미래 날짜와
+ * 빈 준비 행만 다루므로, 과거에 남은 "26.8.11" 같은 빈 행은 비워서 가장 이른 조절일에
+ * 재사용할 수 있다. 이것은 일반 저장의 증분 동기화가 아니라, 관리자가 명시적으로 누르는
+ * 복구 동작이다.
+ */
+async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans = [], today = '', by = 'system' } = {}) {
+  if (!client || !sheetId || !tabName) {
+    const e = new Error('연결된 작업표가 없습니다.'); e.code = 'worktable_not_linked'; throw e;
+  }
+  const wanted = new Map();
+  for (const x of plans || []) {
+    const date = String(x && x.date || '');
+    if (date >= today && /^\d{4}-\d{2}-\d{2}$/.test(date)) wanted.set(date, Math.max(0, Number(x.count) || 0));
+  }
+  if (!wanted.size) {
+    const e = new Error('오늘 이후의 조절된 모집계획이 없어 재구성할 대상이 없습니다.'); e.code = 'worktable_rebuild_empty'; throw e;
+  }
+  const { rows } = await client.query(
+    `SELECT id, seq, tab_gid, reviewer_name, recipient_name, phone8, order_submission_id, row_json
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+      ORDER BY seq FOR UPDATE`, [sheetId, tabName]);
+  if (!rows.length) {
+    const e = new Error('작업표 행이 없습니다.'); e.code = 'no_worktable_rows'; throw e;
+  }
+  const { findDateColumnIndex } = require('./campaignSchedule.service');
+  const headers = [];
+  for (const r of rows) for (const k of Object.keys(r.row_json || {})) if (k && !headers.includes(k)) headers.push(k);
+  const dateIdx = findDateColumnIndex(headers);
+  if (dateIdx < 0) {
+    const e = new Error('작업표에서 구매일자 컬럼을 찾지 못했습니다.'); e.code = 'no_date_column'; throw e;
+  }
+  const dateHeader = headers[dateIdx];
+  const { parseDateColumn } = require('../utils/koreanDate');
+  const anchor = String(today || '').match(/^(\d{4})-(\d{2})/);
+  const parsed = parseDateColumn(rows.map(r => String((r.row_json || {})[dateHeader] || '')), {
+    fallbackAnchor: anchor ? { y: Number(anchor[1]), m: Number(anchor[2]) } : undefined,
+  });
+  const slots = rows.map((r, i) => ({ ...r, date: parsed[i] || '', rawDate: String((r.row_json || {})[dateHeader] || ''),
+    empty: !String(r.reviewer_name || '').trim() && !String(r.recipient_name || '').trim() && !String(r.phone8 || '').trim() && !r.order_submission_id }));
+  const fixedByDate = new Map();
+  for (const r of slots) if (!r.empty && r.date) fixedByDate.set(r.date, (fixedByDate.get(r.date) || 0) + 1);
+  for (const [date, count] of wanted) {
+    const fixed = fixedByDate.get(date) || 0;
+    if (fixed > count) {
+      const e = new Error(`${date}에는 이미 참여·주문 행이 ${fixed}개 있어 ${count}명으로 재구성할 수 없습니다.`);
+      e.code = 'worktable_rebuild_below_used'; e.date = date; e.floor = fixed; throw e;
+    }
+  }
+  const managed = new Set(wanted.keys());
+  // 조절 대상 날짜, 날짜가 비어/해석되지 않는 행, 과거 날짜의 빈 행만 재구성 풀에 넣는다.
+  // 다른 미래 날짜의 준비 행은 별도 계획일 수 있어 손대지 않는다.
+  const pool = slots.filter(r => r.empty && (!r.date || r.date < today || managed.has(r.date))).sort((a, b) => a.seq - b.seq);
+  const assignments = [];
+  for (const [date, count] of [...wanted.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    let need = count - (fixedByDate.get(date) || 0);
+    while (need > 0 && pool.length) { assignments.push({ row: pool.shift(), date }); need--; }
+    while (need-- > 0) assignments.push({ row: null, date });
+  }
+  const changed = [];
+  for (const a of assignments) {
+    if (a.row && a.row.rawDate !== _kstDateLabel(a.date)) changed.push({ id: a.row.id, value: _kstDateLabel(a.date) });
+  }
+  // 남은 관리 풀은 어떤 조절 날짜에도 필요하지 않은 빈 행이다. 과거/꼬인 날짜만 지워
+  // 다음 재구성에서 안전하게 재사용한다. 다른 미래 날짜는 pool에 들어오지 않는다.
+  for (const r of pool) if (r.rawDate) changed.push({ id: r.id, value: '' });
+  // 800행을 한 행씩 UPDATE하면 네트워크 왕복만으로 수 분이 걸려 요청이 끊긴다.
+  // VALUES 배치 하나로 원장 갱신을 끝내고, 이후 장부 투영도 같은 요청 안에서 수행한다.
+  if (changed.length) {
+    const vals = [], params = [];
+    changed.forEach((c, i) => {
+      const n = i * 2;
+      vals.push(`($${n + 1}::uuid,$${n + 2}::text)`);
+      params.push(c.id, c.value);
+    });
+    params.push(dateHeader, String(by).slice(0, 100));
+    await client.query(
+      `UPDATE campaign_participants p
+          SET row_json=COALESCE(p.row_json,'{}'::jsonb) || jsonb_build_object($${params.length - 1}::text,v.value),
+              start_date=v.value, updated_by=$${params.length}::text, updated_at=NOW()
+         FROM (VALUES ${vals.join(',')}) AS v(id,value) WHERE p.id=v.id`, params);
+  }
+  const maxSeq = rows.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 0);
+  const blank = {}; headers.forEach(h => { blank[h] = ''; });
+  const inserts = assignments.filter(a => !a.row);
+  for (let i = 0; i < inserts.length; i++) {
+    const value = _kstDateLabel(inserts[i].date);
+    await client.query(
+      `INSERT INTO campaign_participants
+         (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())`,
+      [sheetId, rows[0].tab_gid || null, tabName, maxSeq + i + 1, value,
+        JSON.stringify({ ...blank, [dateHeader]: value }), String(by).slice(0, 100)]);
+  }
+  return { ok: true, dateHeader, plannedDates: wanted.size, reassigned: changed.filter(c => c.value).length,
+    cleared: changed.filter(c => !c.value).length, created: inserts.length, protectedRows: [...fixedByDate.values()].reduce((a, n) => a + n, 0) };
+}
+
+/**
  * 작업표 날짜 분배를 읽는다(달력에 넣기 전 계산만).
  * @returns {Promise<{ok:boolean, byDate?:object, reason?:string}>}
  *   byDate = { 'YYYY-MM-DD': 그날 행 수 }
@@ -267,6 +368,7 @@ module.exports = {
   readWorktableDates,
   prefillFromWorktable,
   syncAdjustedPlansToWorktable,
+   rebuildAdjustedPlansToWorktable,
   captureWorktableDefaults,
   loadWorktableDefaults,
   MAX_PLAN_DAYS,

@@ -34,6 +34,11 @@ const API_BASE_URL = (function() {
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
     return 'http://localhost:3000';
   }
+  // 테스트 프론트는 테스트 API에만 연결한다. 본서버 API를 호출하면 CORS로 차단되고
+  // 테스트 데이터와 실제 운영 데이터가 섞일 수 있다.
+  if (typeof window !== 'undefined' && window.location.hostname === 'test-review-wdb-web-production.up.railway.app') {
+    return 'https://test-review-wdb-production.up.railway.app';
+  }
   // ★ Railway 프로덕션 URL
   return 'https://sublime-magic-production-790b.up.railway.app';
 })();

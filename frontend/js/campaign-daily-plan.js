@@ -565,7 +565,8 @@
       + '<div class="cdp-hd">📅 <span id="cdpTitle"></span><button type="button" class="cdp-x" onclick="CampaignDailyPlan.close()">✕</button></div>'
       + '<div class="cdp-bd" id="cdpBody"></div>'
       + '<div class="cdp-ft"><span class="cdp-hint" id="cdpHint"></span>'
-      + '<span><button type="button" class="cdp-btn" onclick="CampaignDailyPlan.close()">닫기</button> '
+      + '<span><button type="button" class="cdp-btn" id="cdpRebuildBtn" onclick="CampaignDailyPlan._rebuildWorktable()">작업표 재구성</button> '
+      + '<button type="button" class="cdp-btn" onclick="CampaignDailyPlan.close()">닫기</button> '
       + '<button type="button" class="cdp-btn pri" id="cdpSaveBtn" onclick="CampaignDailyPlan._save()">확정 저장</button></span></div>'
       + '</div>';
     document.body.appendChild(ov);
@@ -1457,6 +1458,23 @@
     }
   }
 
+  async function _rebuildWorktable() {
+    if (!S || !S.data || S.saving) return;
+    if (!window.confirm('저장된 날짜별 모집계획으로 빈 준비 행만 다시 배치할까요?\n참여자·주문 완료 행은 변경하지 않습니다.')) return;
+    S.saving = true;
+    var btn = document.getElementById('cdpRebuildBtn'); if (btn) btn.disabled = true;
+    try {
+      var j = await _req('POST', EP + encodeURIComponent(S.campId) + '/worktable-rebuild', {});
+      applyOverview(j);
+      toast('작업표를 재구성했습니다 — 빈 준비 행만 날짜별 계획에 맞췄습니다');
+      refreshHost();
+    } catch (e) {
+      toast('작업표 재구성 실패: ' + (e.message || e));
+    } finally {
+      if (S) { S.saving = false; if (btn) btn.disabled = false; }
+    }
+  }
+
   /* ── 차수 ───────────────────────────────────────────────── */
   function _roundForm() {
     var f = document.getElementById('cdpRoundForm');
@@ -1519,7 +1537,7 @@
 
   window.CampaignDailyPlan = {
     open: open, close: close,
-    _save: _save, _retry: _retry, _revert: _revert, _mode: _mode, _autoFit: _autoFit,
+    _save: _save, _rebuildWorktable: _rebuildWorktable, _retry: _retry, _revert: _revert, _mode: _mode, _autoFit: _autoFit,
     _chExtend: _chExtend, _chSpread: _chSpread, _chCancel: _chCancel,
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
     _heldApply: _heldApply,

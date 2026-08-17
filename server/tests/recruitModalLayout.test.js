@@ -141,6 +141,14 @@ ok('옵션 URL·주말 제외·구매시간·현금영수증·기간별 리뷰�
 ok('작업내용 3종의 이미지 첨부 입력은 그대로 유지한다',
   ['rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes', 'rf_ig_inflow', 'rf_ig_review', 'rf_ig_notes']
     .every((id) => modal.includes(id)));
+ok('컴팩트 편집기의 썸네일·숫자·가이드 입력 UI가 일관되게 동작한다',
+  /class="product-link-button thumb-product-link"/.test(compact)
+  && /미리<br>보기/.test(compact)
+  && /thumb-product-link:hover/.test(modal)
+  && /rf-opt-pay::-webkit-outer-spin-button/.test(modal)
+  && /mixed-review-grid input::-webkit-outer-spin-button/.test(modal)
+  && /#rf_wd_inflow,#recruitModal \.rf-compact-main #rf_wd_review,#recruitModal \.rf-compact-main #rf_wd_notes/.test(modal)
+  && /끌어다 놓기 · Ctrl\+V<br>클릭/.test(editor));
 ok('시안의 상품 URL·단일 선택·혼합 조합·토글 상태 DOM을 런타임이 직접 가진다',
   /class="form-row product-main-url"/.test(modal)
   && /id="rf_product_main_url"/.test(modal)

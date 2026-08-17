@@ -104,6 +104,83 @@ function _renderRecruitCards(list) {
   _syncDelBar();
 }
 
+/**
+ * 인기 ON/OFF 저장 직후의 화면 동기화.
+ *
+ * 목록 전체를 다시 요청하면 카드가 사라졌다 다시 그려져 토글 직후 화면이
+ * "새로고침"되는 것처럼 보인다. 서버 저장이 성공한 뒤에는 현재 목록 캐시의
+ * 해당 공고만 바꿔 공용 카드 렌더러로 즉시 다시 그린다. 다음 일반 목록 조회는
+ * 서버값을 다시 기준으로 삼으므로 클라이언트 캐시가 장기 출처가 되지 않는다.
+ */
+function updateRecruitPopularity(campId, on) {
+  const id = String(campId);
+  const found = _recruitLastList.find(c => String(c.id) === id);
+  if (!found) return false;
+  found.is_popular = on === true;
+  _renderRecruitCards(_recruitLastList);
+  return true;
+}
+window.updateRecruitPopularity = updateRecruitPopularity;
+
+/** 인기 ON 직전, 모든 모집중 비인기 공고의 선행참여 우선순위를 정한다. */
+function openPopularPriorityModal(campId) {
+  const target = _recruitLastList.find(c => String(c.id) === String(campId));
+  const candidates = _recruitLastList.filter(c => String(c.id) !== String(campId)
+    && c.participation_mode && c.is_popular !== true && c.status === 'active');
+  if (!target) return;
+  const old = document.getElementById('popularPriorityModal');
+  if (old) old.remove();
+  const priorityIds = candidates.map(c => String(c.id));
+  const deliveryLabel = value => {
+    const delivery = String(value || '').trim();
+    if (delivery === '택배발송대행') return '빈박스';
+    return delivery || '—';
+  };
+  const purchaseChannelLabel = campaign => {
+    const channel = String(campaign.channel || campaign.purchase_channel || '').trim();
+    return channel === '직접입력' ? (String(campaign.channel_custom || '').trim() || '직접입력') : (channel || '—');
+  };
+  const dailyLimitLabel = campaign => Number(campaign.daily_limit) > 0 ? `${Number(campaign.daily_limit)}명` : '—';
+  const modal = document.createElement('div');
+  modal.id = 'popularPriorityModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:18px';
+  modal.innerHTML = `<section role="dialog" aria-modal="true" aria-label="인기상품 설정" style="width:min(700px,100%);max-height:86vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 22px 60px rgba(15,23,42,.3)">
+    <div style="padding:22px 24px 16px;border-bottom:1px solid #e2e8f0"><b style="font-size:19px">🔥 인기상품 설정</b><p style="margin:6px 0 0;color:#64748b;font-size:13px">비인기 공고의 선행참여 순서를 정하세요.</p></div>
+    <div style="padding:18px 24px"><div style="padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:5px"><span style="font-size:12px;color:#64748b">인기상품</span><span style="padding:2px 7px;border-radius:99px;background:#fff1f2;color:#e11d48;font-size:11px;font-weight:800">인기 ON</span></div><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(target.title || '')}</b></div><div style="margin-top:20px;font-size:14px;font-weight:800">선행참여 우선순위 : 행을 드래그해 순서 변경</div><div id="popularPriorityQueue" style="margin-top:9px"></div><p style="margin:12px 0 0;color:#64748b;font-size:12px">1순위 공고가 모집완료되면 다음 공고가 자동으로 선행참여 대상으로 적용됩니다.</p></div>
+    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:15px 24px;border-top:1px solid #e2e8f0"><span style="color:#64748b;font-size:12px">모집중 비인기 공고 ${priorityIds.length}개 적용</span><div style="display:flex;gap:8px"><button type="button" data-close style="padding:9px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff">취소</button><button type="button" data-save style="padding:9px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:800">ON 저장</button></div></div></section>`;
+  modal.querySelector('[data-close]').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  const queue = modal.querySelector('#popularPriorityQueue');
+  let draggingId = '';
+  const renderQueue = () => {
+    if (!priorityIds.length) { queue.innerHTML = '<div style="padding:14px;border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;font-size:13px;text-align:center">모집중인 비인기 공고가 없습니다.</div>'; return; }
+    queue.innerHTML = priorityIds.map((id, i) => {
+      const c = candidates.find(x => String(x.id) === String(id));
+      return `<div draggable="true" data-priority-id="${escHtml(id)}" style="display:flex;align-items:center;gap:9px;height:48px;padding:0 11px;margin-top:6px;border:1px solid #dbeafe;border-radius:10px;background:#fff;cursor:grab">
+        <b style="display:grid;place-items:center;flex:0 0 22px;height:22px;border-radius:50%;background:#eff6ff;color:#2563eb;font-size:12px">${i + 1}</b><span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:13px">${escHtml(c && c.title || '(제목 없음)')}</span><span style="flex:0 0 178px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:12px;text-align:right">${escHtml(purchaseChannelLabel(c || {}))} · ${escHtml(deliveryLabel(c && c.delivery_type))} · ${dailyLimitLabel(c || {})}</span><span aria-hidden="true" style="color:#94a3b8;font-size:18px">⠿</span></div>`;
+    }).join('');
+    queue.querySelectorAll('[data-priority-id]').forEach(row => {
+      row.ondragstart = () => { draggingId = String(row.dataset.priorityId); row.style.opacity = '.45'; };
+      row.ondragend = () => { draggingId = ''; row.style.opacity = ''; row.style.boxShadow = ''; };
+      row.ondragover = e => { e.preventDefault(); row.style.boxShadow = 'inset 0 3px #2563eb'; };
+      row.ondragleave = () => { row.style.boxShadow = ''; };
+      row.ondrop = e => {
+        e.preventDefault(); const to = String(row.dataset.priorityId); const from = priorityIds.indexOf(draggingId); const at = priorityIds.indexOf(to);
+        if (from >= 0 && at >= 0 && from !== at) { priorityIds.splice(from, 1); priorityIds.splice(at, 0, draggingId); }
+        renderQueue();
+      };
+    });
+  };
+  renderQueue();
+  modal.querySelector('[data-save]').onclick = async () => {
+    const btn = modal.querySelector('[data-save]'); btn.disabled = true; btn.textContent = '저장 중…';
+    try { await CampCards.togglePopular(campId, true, priorityIds); modal.remove(); }
+    catch (_) { btn.disabled = false; btn.textContent = 'ON 저장'; }
+  };
+  document.body.appendChild(modal);
+}
+window.openPopularPriorityModal = openPopularPriorityModal;
+
 /* 삭제 모드 토글 — 카드에서 삭제를 뺀 대신, 켰을 때만 선택·삭제할 수 있다 */
 function toggleRecruitDelMode() {
   window._recruitDelMode = !window._recruitDelMode;
@@ -174,17 +251,14 @@ function _buildRecruitCard(c) {
   window._recruitCardTitles[c.id] = c.title || "";
   const div = document.createElement("div");
   div.className = `recruit-card status-${c.status || "draft"}`;
-  div.style.position = "relative";   // ★ 064: 우측상단 토글(별표·인기) 배치 기준
-  // ★ 064: 카드 우측상단 토글 — ⭐ 별표(우선노출: 먼저 별표한 순서대로 최상단) + 🔥 인기(리뷰어 [인기!] 배지 + 일반모집 선행참여 조건, 참여형만)
-  const pinOn = !!c.pinned_at, popOn = c.is_popular === true;
+  div.style.position = "relative";
+  // 인기상품만 남긴다. 별표 우선노출은 제거됐고, 인기 설정만 선행참여 게이트를 건다.
+  const popOn = c.is_popular === true;
   const flagBtns = `
-    <div style="position:absolute;top:10px;right:12px;display:flex;gap:6px;z-index:2">
+    <div style="position:absolute;top:10px;left:12px;display:flex;z-index:2">
       ${c.participation_mode ? `<button type="button" title="${popOn ? "인기 해제" : "인기 설정 — 리뷰어에게 [인기!] 배지가 붙고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 걸립니다"}"
         onclick="event.stopPropagation();toggleCampFlag('${escHtml(c.id)}','popular',${popOn ? "false" : "true"})"
-        style="border:1px solid ${popOn ? "#FCA5A5" : "#E5E7EB"};cursor:pointer;background:${popOn ? "#FEE2E2" : "#F9FAFB"};color:${popOn ? "#B91C1C" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.72rem;font-weight:800">🔥${popOn ? " 인기" : ""}</button>` : ""}
-      <button type="button" title="${pinOn ? "별표 해제(우선노출 해제)" : "별표 — 목록 최상단 고정(여러 개면 먼저 별표한 순서대로)"}"
-        onclick="event.stopPropagation();toggleCampFlag('${escHtml(c.id)}','pinned',${pinOn ? "false" : "true"})"
-        style="border:1px solid ${pinOn ? "#FCD34D" : "#E5E7EB"};cursor:pointer;background:${pinOn ? "#FEF3C7" : "#F9FAFB"};color:${pinOn ? "#B45309" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.86rem;line-height:1">${pinOn ? "⭐" : "☆"}</button>
+        style="border:1px solid ${popOn ? "#FCA5A5" : "#E5E7EB"};cursor:pointer;background:${popOn ? "#FEE2E2" : "#F9FAFB"};color:${popOn ? "#B91C1C" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.72rem;font-weight:800">🔥 ${popOn ? "ON" : "OFF"}</button>` : ""}
     </div>`;
   div.innerHTML = flagBtns + `
     <div class="recruit-card-header">
@@ -218,11 +292,10 @@ function _buildRecruitCard(c) {
   return div;
 }
 
-/* ★ 064: 카드 우측상단 토글(별표·인기) — 즉시 저장 후 목록 재정렬.
-   별표 순서 = 먼저 별표한 공고가 위(서버 pinned_at ASC · 재별표해도 원래 자리 유지). */
+/* 인기상품 ON/OFF — 저장 성공 후 해당 카드만 즉시 반영한다. */
 async function toggleCampFlag(campId, kind, on) {
   try {
-    const body = kind === "pinned" ? { pinned: on } : { popular: on };
+    const body = { popular: on };
     const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/flags`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
@@ -230,11 +303,9 @@ async function toggleCampFlag(campId, kind, on) {
     });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
-    showToast(kind === "pinned"
-      ? (on ? "⭐ 별표 — 목록 최상단에 고정됩니다 (여러 개면 먼저 별표한 순서대로)" : "별표를 해제했습니다")
-      : (on ? "🔥 인기 설정 — 리뷰어에게 [인기!] 배지가 표시되고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 적용됩니다" : "인기 설정을 해제했습니다"),
+    updateRecruitPopularity(campId, on);
+    showToast(on ? "🔥 인기 설정 — 리뷰어에게 [인기!] 배지가 표시되고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 적용됩니다" : "인기 설정을 해제했습니다",
       "success");
-    await loadRecruitList();   // 서버 정렬(별표 우선) 즉시 반영
   } catch (e) {
     showToast("설정 실패: " + e.message, "error");
   }
@@ -887,6 +958,9 @@ function openRecruitProductUrl() {
  *  리뷰어 앱 모달(_caeIsAutoOrder/_caeToggleWindow)과 같은 규율. 관리자가 매번 손으로
  *  비우던 것을 자동화하되, **값을 지우는 건 사용자가 자율로 적었을 때만**이라 오작동 여지가 없다. */
 let _rfActiveTimePickerField = "rf_window_start";
+// 자유시간대로 잠시 전환해도 이 모달에서 이미 불러온/입력한 시간창은 보존한다.
+// 저장값은 자유시간대가 우선이므로, 다시 시간 지정으로 바꿀 때만 이 값을 복원한다.
+let _rfLastScheduledPurchaseWindow = { start: "", end: "" };
 
 function _rfPadTime(value) {
   return String(value).padStart(2, "0");
@@ -975,11 +1049,19 @@ function rfSetFreeTime(isFreeTime) {
     if (button) button.disabled = isFreeTime;
   });
   if (isFreeTime) {
+    const start = document.getElementById("rf_window_start")?.value || "";
+    const end = document.getElementById("rf_window_end")?.value || "";
+    if (start || end) _rfLastScheduledPurchaseWindow = { start, end };
     ["rf_window_start", "rf_window_end"].forEach(id => {
       const field = document.getElementById(id);
       if (field) field.value = "";
     });
     rfCloseTimePicker();
+  } else {
+    const startField = document.getElementById("rf_window_start");
+    const endField = document.getElementById("rf_window_end");
+    if (startField && !startField.value) startField.value = _rfLastScheduledPurchaseWindow.start || "";
+    if (endField && !endField.value) endField.value = _rfLastScheduledPurchaseWindow.end || "";
   }
   rfSyncPurchaseTimeValue();
 }
@@ -997,6 +1079,7 @@ function rfApplyPurchaseTime({ timeRange = "", start = "", end = "" } = {}) {
   const endField = document.getElementById("rf_window_end");
   if (startField) startField.value = startValue;
   if (endField) endField.value = endValue;
+  _rfLastScheduledPurchaseWindow = { start: startValue, end: endValue };
   rfSetFreeTime(false);
   rfSyncPurchaseTimeValue();
 }
@@ -1345,7 +1428,7 @@ function _igRender(field) {
   let h = "";
   if (!list.length) {
     h = `<button type="button" class="ig-empty" data-igadd="1">
-           <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V · 클릭</span></button>`;
+           <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V<br>클릭</span></button>`;
   } else {
     list.forEach((im, i) => {
       const cls = "ig-thumb" + (im.state === "up" ? " up" : im.state === "bad" ? " bad" : "");
@@ -1700,6 +1783,17 @@ function _applyProdModeUi(m) {
   const add = document.getElementById("rf_opt_addbtn");
   if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
 }
+/** 옵션 유무 선택 바로 아래 한 줄 안내. 진행상품 수가 아직 없으면 기본 1건으로 안내한다. */
+function _renderProdModeHelp() {
+  const el = document.getElementById("rf_prod_mode_help");
+  if (!el) return;
+  const mode = _prodMode();
+  const productCount = Math.max(1, _readProdRows().filter(r => r.productName || r.payAmount).length);
+  el.dataset.mode = mode;
+  el.textContent = mode === "opt"
+    ? "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출)."
+    : "옵션 없이 진행하는 작업 " + productCount + "건 — 리뷰어는 옵션 선택 없이 바로 참여합니다.";
+}
 /** 자동 판정 사유 문구(조용한 자동 선택 금지 — 왜 이 모드인지 화면이 말한다) */
 function _setProdModeNote(txt) {
   const n = document.getElementById("rf_prod_mode_note");
@@ -1721,6 +1815,7 @@ function setProdMode(mode, opts) {
   }
   _applyProdModeUi(m);
   _setProdModeNote("");
+  _renderProdModeHelp();
   _renderProdTable(_convertProdRows(rows, m));
 }
 /** 모드 전환 시 값 이월 — none↔opt 어느 쪽으로도 입력한 값이 사라지지 않게 */
@@ -2147,18 +2242,14 @@ function applyProductRowsFromOrder(prefill) {
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 function _optSummary() {
+  _renderProdModeHelp();
   const el = document.getElementById("rf_opt_summary");
   const opts = readOptRows();
   const names = opts.map(o => o.optKey.toLowerCase());
   const dup = names.some((n, i) => names.indexOf(n) !== i);
   if (!el) return { dup, count: opts.length };
   if (!opts.length) {
-    // 모드에 맞는 안내 — '옵션 없는 작업'에서 "옵션을 추가하면…"이라 말하면 없는 칸을 찾게 만든다
-    const prods = _readProdRows().filter(r => r.productName || r.payAmount).length;
-    el.textContent = (_prodMode() === "opt")
-      ? "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출)."
-      : (prods ? "옵션 없이 진행하는 작업 " + prods + "건 — 리뷰어는 옵션 선택 없이 바로 참여합니다."
-               : "상품을 추가하세요. 옵션별로 정원·금액을 나눠야 하면 [옵션 있는 작업]으로 바꾸세요.");
+    el.textContent = _prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요.";
     el.style.color = "var(--t3)";
     return { dup, count: 0 };
   }
@@ -2329,6 +2420,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoaded = null;   // ★ 064: 이전 편집의 로드값(sort_order 등)이 새 공고에 새는 것 방지
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
+  _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
@@ -2378,6 +2470,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
   if (_skipWeekendsEl) _skipWeekendsEl.checked = false;
   const _cashReceiptRequiredEl = document.getElementById("rf_cash_receipt_required"); if (_cashReceiptRequiredEl) _cashReceiptRequiredEl.checked = false;
+  // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
+  // 수량이 섞이지 않도록 함께 초기화한다.
+  window._rfGlobalReviewTypeMix = [];
   document.querySelectorAll('#rf_review_mix [data-mix-type]').forEach((el) => { el.value = '0'; });
   syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
@@ -2528,10 +2623,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
           try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
         })();
-        savedReviewMix.forEach((row) => {
-          const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
-          if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
-        });
+        // 혼합 입력칸은 [혼합]을 선택할 때 동적으로 만들어진다. 먼저 진실원본을 채운 뒤
+        // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
+        _setRecruitGlobalReviewTypeMix(savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
@@ -2581,11 +2675,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
     }
   } else {
     titleEl.innerHTML = `<i class="fas fa-bullhorn"></i> 모집공고 등록`;
-    /* ★ 작업오더 프리필 — 매핑 가능한 필드만 채움 (channel/manager/리뷰비는 관리자가 직접) */
+    /* ★ 작업오더 프리필 — 원장에 기록된 값은 공고 폼에도 표시하고 관리자가 최종 확인한다. */
     if (prefill) {
       if (prefill.title)        document.getElementById("rf_title").value = prefill.title;
       if (prefill.time_range)   document.getElementById("rf_time_range").value = prefill.time_range;
       if (prefill.max_slots)    document.getElementById("rf_max_slots").value = prefill.max_slots;
+      if (prefill.review_fee != null && prefill.review_fee !== "") document.getElementById("rf_review_fee").value = prefill.review_fee;
       if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
       if (prefill.notes) {
         const notesEl = document.getElementById("rf_notes");
@@ -2603,10 +2698,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       const prefillReviewMix = Array.isArray(prefill.review_type_mix) ? prefill.review_type_mix : (() => {
         try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
       })();
-      prefillReviewMix.forEach((row) => {
-        const input = document.querySelector(`#rf_review_mix [data-mix-type="${row?.type}"]`);
-        if (input) input.value = Math.max(0, Math.floor(Number(row?.quantity) || 0));
-      });
+      // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
+      _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
@@ -2779,6 +2872,19 @@ function selectRfBtn(group, btn) {
 }
 
 const RF_REVIEW_MIX_TYPES = ['photo', 'text', 'confirm', 'star'];
+
+/** 동적으로 렌더되는 혼합 입력칸의 프리필 원본. 유효 키·양수 수량만 보관한다. */
+function _setRecruitGlobalReviewTypeMix(mix) {
+  const byType = new Map();
+  (Array.isArray(mix) ? mix : []).forEach((entry) => {
+    const type = String(entry?.type || '');
+    const quantity = Math.max(0, Math.floor(Number(entry?.quantity) || 0));
+    if (RF_REVIEW_MIX_TYPES.includes(type) && quantity > 0) byType.set(type, quantity);
+  });
+  window._rfGlobalReviewTypeMix = RF_REVIEW_MIX_TYPES
+    .filter((type) => byType.has(type))
+    .map((type) => ({ type, quantity: byType.get(type) }));
+}
 
 function _reviewMixRows() {
   return Array.from(document.querySelectorAll('#rf_opt_rows .rf-opt-row'))
@@ -3079,7 +3185,7 @@ function _syncCampThumbUrlPreview() {
   if (state) state.textContent = "불러오는 중…";
   image.onload = function () {
     wrap.classList.remove("is-error");
-    if (state) state.textContent = "미리보기";
+    if (state) state.innerHTML = "미리<br>보기";
   };
   image.onerror = function () {
     wrap.classList.add("is-error");
@@ -3632,8 +3738,7 @@ async function saveRecruitPostImpl() {
     status:         document.getElementById("rf_status").value,
     // 종료일 — 시트 일정과 다르면 화면에 경고가 뜨고 실제 모집은 시트를 따른다(참고값으로 보관)
     deadline:       document.getElementById("rf_deadline")?.value || null,
-    // ★ 064: 노출 순서 UI 제거 — 정렬은 별표(pinned_at)가 담당. 서버가 미전송을 0으로 강제하므로
-    //   기존값 보존을 위해 편집 모드에선 로드값을 재전송(신규는 0).
+    // 노출 순서 UI는 제거됐다. 기존 데이터 호환을 위해 값만 보존해 전송한다.
     sort_order:     Number(document.getElementById("rf_sort_order")?.value ?? (window._recruitEditLoaded?.sort_order ?? 0)) || 0,
     // 작업오더 프리필로 만든 신규 공고면 정방향 링크(source_work_order_id) 즉시 기록 —
     // work-detail 유입방식 역조회의 보조키(주: linked_campaign_id). 편집 시엔 미전송=COALESCE 유지.

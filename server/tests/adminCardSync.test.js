@@ -83,15 +83,16 @@ ok('움직임 최소화 설정이면 애니메이션 대신 스크롤',
   /prefers-reduced-motion:reduce\)\{[\s\S]{0,200}\.sp-row\.ovf \.sp-chips\{animation:none/.test(cc));
 ok('총 모집 숫자는 칩에 밀리지 않는다', /\.sp-tot\{[^}]*flex-shrink:0/.test(cc));
 
-/* ── 별표 겹침 ── */
-// 별표 UI는 리뷰어 홈(_realAdminTok)과 관리자 목록(admin:true)이 **하나의 컨트롤**을 공유한다 —
-// 둘로 두면 관리자 화면에서 별표가 두 개 뜬다. 배지와 같은 줄에 둬야 배송 배지를 가리지 않는다.
-ok('★ 별표는 채널·배송 배지와 같은 줄 + 단일 컨트롤(중복 렌더 금지)',
-  /const starChip = \(admin \|\| _realAdminTok\(\)\)/.test(cc)
-  && /pt-badges">\$\{starChip\}/.test(cc)
-  && !/starBtn/.test(cc));
-ok('별표 토글은 관리자 목록도 새로고침한다',
-  /typeof window\.loadRecruitList === 'function'[\s\S]{0,120}loadRecruitList\(\)/.test(cc));
+/* ── 인기 ON/OFF ── */
+ok('★ 인기 ON/OFF는 썸네일 좌상단 단일 컨트롤(별표 없음)',
+  /const popToggle = c\.participation_mode && \(admin \|\| _realAdminTok\(\)\)/.test(cc)
+  && /pt-topleft">\$\{popToggle\}/.test(cc)
+  && !/pstarchip/.test(cc));
+ok('인기 토글은 목록 재요청 없이 현재 카드만 즉시 반영한다',
+  /window\.updateRecruitPopularity\(campId, on === true\)/.test(cc)
+  && /function updateRecruitPopularity\(campId, on\)/.test(rec)
+  && /found\.is_popular = on === true/.test(rec)
+  && !/await loadRecruitList\(\);/.test(rec.slice(rec.indexOf('async function toggleCampFlag'), rec.indexOf('async function toggleCampFlag') + 1200)));
 
 /* ── 삭제 모드 ── */
 ok('카드에는 삭제 버튼이 없다(액션 = 수정·시트·관제·게시)',
