@@ -119,6 +119,12 @@ ok('campaign.html: popular_locked → 일반 목록 모달(openPopGate)', /popul
 ok('campaign.html: 인기 안내 카드(renderPopNotice) — 인기 공고만', /renderPopNotice/.test(campHtml) && /_camp\.is_popular === true/.test(campHtml));
 ok('campaign.html: 일반 목록은 open·비인기·참여형·자기자신 제외 필터', /x\.participation_mode && x\.is_popular !== true && x\.state === 'open' && String\(x\.id\) !== String\(CAMP_ID\)/.test(campHtml));
 ok('campaign.html: 복귀 CTA — pop_return_camp 기록 후 이동, 제출완료 화면에서 복귀 버튼', /pop_return_camp/.test(campHtml) && /popReturnBtn/.test(campHtml));
-ok('campaign.html: 지각 접수(pendingConfirm)는 복귀 버튼 미노출(크레딧 아님)', /!pendingConfirm && !\$\('popReturnBtn'\)/.test(campHtml));
+ok('campaign.html: 우선순위 게이트는 현재 선행공고만 안내·복귀 대상도 공고쌍으로 제한',
+  /gateInfo\.prerequisite/.test(campHtml)
+  && /String\(x\.id\) === requiredId/.test(campHtml)
+  && /prerequisiteId:String\(id\)/.test(campHtml)
+  && /String\(back\.prerequisiteId\) === String\(CAMP_ID\)/.test(campHtml));
+ok('campaign.html: 지각 접수(pendingConfirm)는 복귀 버튼 미노출(크레딧 아님)',
+  /String\(back\.campaignId\) !== String\(CAMP_ID\) && !pendingConfirm/.test(campHtml));
 
 console.log(`\n✅ campaignPinnedPopular: ${passed}개 통과`);

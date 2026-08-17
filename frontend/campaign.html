@@ -551,13 +551,17 @@ async function openPopGate(gateInfo){
   ovl.style.display = 'flex';
   const body = $('popGateBody');
   const cnt = $('popGateCount');
-  cnt.textContent = gateInfo ? `현재 제출완료 일반 ${gateInfo.normalDone || 0}건 · 사용한 인기 ${gateInfo.popularUsed || 0}건` : '';
+  const requiredId = gateInfo && gateInfo.prerequisite && gateInfo.prerequisite.id ? String(gateInfo.prerequisite.id) : '';
+  const requiredTitle = gateInfo && gateInfo.prerequisite && gateInfo.prerequisite.title ? String(gateInfo.prerequisite.title) : '';
+  cnt.textContent = requiredTitle ? `현재 선행참여 공고 · ${requiredTitle}`
+    : (gateInfo ? `현재 제출완료 일반 ${gateInfo.normalDone || 0}건 · 사용한 인기 ${gateInfo.popularUsed || 0}건` : '');
   body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 일반 모집을 불러오는 중…</div>';
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/list');
     const j = await r.json();
     const rows = (j.data || []).filter(x =>
-      x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID));
+      x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID)
+      && (!requiredId || String(x.id) === requiredId));
     if(!rows.length){
       body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3);font-size:.84rem">지금 참여 가능한 일반 모집이 없어요.<br>일반 모집이 열리면 먼저 참여해주세요.</div>';
       return;
@@ -580,14 +584,16 @@ async function openPopGate(gateInfo){
             '<button class="btn" style="width:auto;padding:9px 14px;font-size:.78rem" onclick="goPopNormal(\'' + esc(x.id) + '\')">참여하기</button></td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>' +
-      '<div class="muted" style="margin-top:8px">일반 모집을 <b>구매양식 제출완료</b>까지 마치면, 이 인기 상품에 바로 참여할 수 있어요.</div>';
+      '<div class="muted" style="margin-top:8px">구매양식을 <b>제출완료</b>하면, 이 인기 상품으로 바로 돌아갈 수 있어요.</div>';
   }catch(e){
     body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--err)">목록을 불러오지 못했어요: ' + _escAttr(e.message) + '</div>';
   }
 }
 function hidePopGate(){ const o=$('popGate'); if(o) o.style.display='none'; }
 function goPopNormal(id){
-  try{ sessionStorage.setItem('pop_return_camp', CAMP_ID); }catch(_){}
+  // 복귀 대상은 인기공고+현재 선행공고를 한 묶음으로 보관한다.
+  // 일반 공고를 다른 경로로 참여한 뒤 우연히 완료해도 잘못된 복귀 CTA가 생기지 않는다.
+  try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID, prerequisiteId:String(id) })); }catch(_){}
   location.href = 'campaign.html?id=' + encodeURIComponent(id);
 }
 function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
@@ -1282,14 +1288,17 @@ function renderDone(pendingConfirm){
   // ★ 064: 인기상품 모달에서 넘어와 "일반 모집"을 방금 제출완료한 경우 → 인기 상품 복귀 CTA
   //   (정상 확정 시에만 — 지각 접수(pendingConfirm)는 아직 크레딧이 아니므로 미노출)
   try{
-    const back = sessionStorage.getItem('pop_return_camp');
-    if(back && back !== CAMP_ID && !pendingConfirm && !$('popReturnBtn')){
+    const raw = sessionStorage.getItem('pop_return_camp');
+    let back = null;
+    try { back = raw ? JSON.parse(raw) : null; } catch (_) { back = raw ? { campaignId: raw, prerequisiteId: CAMP_ID } : null; }
+    const oldBtn = $('popReturnBtn'); if(oldBtn) oldBtn.remove();
+    if(back && back.campaignId && String(back.prerequisiteId) === String(CAMP_ID) && String(back.campaignId) !== String(CAMP_ID) && !pendingConfirm){
       const btn = document.createElement('button');
       btn.id = 'popReturnBtn';
       btn.className = 'btn';
       btn.style.cssText = 'margin-top:8px;background:linear-gradient(135deg,#EF4444,#DC2626)';
       btn.textContent = '🔥 참여하려던 인기 상품으로 돌아가기';
-      btn.onclick = ()=>{ sessionStorage.removeItem('pop_return_camp'); location.href='campaign.html?id='+encodeURIComponent(back); };
+      btn.onclick = ()=>{ sessionStorage.removeItem('pop_return_camp'); location.href='campaign.html?id='+encodeURIComponent(back.campaignId); };
       $('vDone').querySelector('.sec').insertBefore(btn, $('vDone').querySelector('.sec').firstChild);
     }
   }catch(_){ /* sessionStorage 불가 환경 무시 */ }
