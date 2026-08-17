@@ -32,13 +32,21 @@ ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste
 ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.map\(j=>commitCellEdit\(/.test(HTML));
 ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
 ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
-ok('입금 날짜 열은 내부·광고주 작업보드에서 넉넉한 폭을 쓴다', /'입금':120,'입금일':120,'입금일자':120/.test(HTML)
-  && /'입금':120,'입금일':120/.test(HTML));
+ok('입금 날짜 열은 내부·광고주 작업보드에서 지정 폭을 쓴다', /'입금':96/.test(HTML)
+  && /'입금':88,'입금일':88/.test(HTML));
 ok('그리드 안내 문구는 렌더하지 않는다', !/<span class="gnote">/.test(HTML));
 ok('선택 요약 렌더 영역이 있다', /id="gselstat"/.test(HTML));
 ok('선택 요약은 그리드 툴바의 오른쪽 끝에 남아 있다', /\$\{_folBarHtml\(\)\}\s*\n\s*<output id="gselstat"/.test(HTML));
 ok('선택 변경과 해제 모두 요약을 동기화한다', /function _paintSel\(\)[\s\S]{0,1200}_syncSelectionStat\(\)/.test(HTML)
   && /function _clearCellSel\(\)[\s\S]{0,500}_syncSelectionStat\(\)/.test(HTML));
+{ // `#`는 원본 시트 행번호라 무시트 작업보드에 보이면 안 된다. 단, 서버 행 앵커 seq 자체는 전혀 건드리지 않는다.
+  const i = HTML.indexOf('function buildGrid(wd)');
+  const body = i > 0 ? HTML.slice(i, HTML.indexOf('function _fitGrid()', i)) : '';
+  ok('작업보드 고정 신원열에서 #/seq 표시 컬럼을 제거', !!body
+    && /const idCols = STATE\.role==='advertiser' \? \[\] : \[\{key:'참여자',kind:'name'\},\{key:'연락처',kind:'phone'\}\]/.test(body)
+    && !/key:'#',kind:'seq'/.test(body), body ? '' : 'buildGrid을 찾지 못함');
+  ok('표 폭 계산도 # 없이 참여자·연락처만 고정', /const idKeys = STATE\.role==='advertiser' \? \[\] : \['참여자','연락처'\]/.test(HTML));
+}
 
 // ── 2. 가짜 DOM 위에서 실제 실행 ────────────────────────────────
 function grab(name) {
@@ -81,11 +89,11 @@ function mkRow(cells, grouphd) {
   return row;
 }
 
-/* 실측 화면과 같은 모양: [#(잠금) · 참여자(잠금) · 연락처(잠금) · 주문자제출(편집) · 수취인(편집)] */
+/* 실측 화면과 같은 모양: [참여자(잠금) · 연락처(잠금) · 주문자제출(편집) · 수취인(편집)]
+ * `seq`는 서버 행 앵커로만 남고, 과거 시트 행번호 `#` 열은 작업보드에 표시하지 않는다. */
 function buildFakeGrid() {
   const names = ['이진우', '조수빈', '고덕하', '윤지혜'];
   const rows = names.map((nm, i) => mkRow([
-    mkCell({ cls: ['gnum'], text: String(i + 1), attr: { 'data-rid': 'r' + i, 'data-cfield': 'seq' } }),
     mkCell({ cls: ['gnm', 'gidlock'], text: nm, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idname' } }),
     mkCell({ cls: ['gcell', 'gidlock'], text: '010-1111-000' + i, attr: { 'data-rid': 'r' + i, 'data-cfield': 'idphone' } }),
     mkCell({ cls: ['gcell', 'gedit'], text: nm, attr: { 'data-id': 'r' + i, 'data-field': 'col:주문자제출', 'data-val': nm } }),
@@ -132,8 +140,8 @@ console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)
 {
   const fake = buildFakeGrid();
   const { sandbox } = makeCtx(fake);
-  // 참여자 열(ci=1)을 이진우(0) → 윤지혜(3) 로 세로 드래그
-  vm.runInContext('_setCellSel({r0:0,c0:1,r1:3,c1:1})', sandbox);
+  // 참여자 열(ci=0)을 이진우(0) → 윤지혜(3) 로 세로 드래그
+  vm.runInContext('_setCellSel({r0:0,c0:0,r1:3,c1:0})', sandbox);
   const tsv = vm.runInContext('_selectionTsv()', sandbox);
   eq('세로 드래그 = 그 열만 복사', tsv, '이진우\n조수빈\n고덕하\n윤지혜');
   ok('오른쪽 열(수취인·연락처·주소) 미포함', !/010-|\t/.test(tsv));
@@ -143,7 +151,7 @@ console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)
 {
   const fake = buildFakeGrid();
   const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:6,r1:2,c1:6})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:5,r1:2,c1:5})', sandbox);
   eq('결제금액 선택은 셀 수를 센다', vm.runInContext('_selectionStats().count', sandbox), 3);
   eq('결제금액 선택은 금액을 합산한다', vm.runInContext('_selectionStats().amount', sandbox), 66000);
   eq('결제금액 선택은 상단에 셀 수와 합계금액을 표기한다', fake.stat.textContent, '선택 셀 3개 · 합계금액 66,000원');
@@ -153,14 +161,14 @@ console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)
 {
   const fake = buildFakeGrid();
   const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:5,r1:2,c1:5})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:4,r1:2,c1:4})', sandbox);
   eq('결제금액이 아닌 선택은 금액 합계를 만들지 않는다', vm.runInContext('_selectionStats().amount', sandbox), null);
 }
 {
   const fake = buildFakeGrid();
   const { sandbox } = makeCtx(fake);
   // 역방향(아래→위, 오른쪽→왼쪽) 드래그도 같은 직사각형
-  vm.runInContext('_setCellSel({r0:2,c0:4,r1:1,c1:3})', sandbox);
+  vm.runInContext('_setCellSel({r0:2,c0:3,r1:1,c1:2})', sandbox);
   eq('4방향 자유 드래그 = 같은 직사각형(TSV 2×2)', vm.runInContext('_selectionTsv()', sandbox), '조수빈\t조수빈\n고덕하\t고덕하');
   eq('앵커 = 범위의 왼쪽 위', vm.runInContext('_selAnchorTd().getAttribute("data-field")', sandbox), 'col:주문자제출');
 }
@@ -168,7 +176,7 @@ console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)
   const fake = buildFakeGrid();
   fake.rows.splice(2, 0, (() => { const r = mkRow([mkCell({ text: '그룹' })], true); r.parentBody = fake.body; return r; })());
   const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:1,r1:4,c1:1})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:0,r1:4,c1:0})', sandbox);
   ok('그룹 머리행은 복사에서 제외', !/그룹/.test(vm.runInContext('_selectionTsv()', sandbox)));
 }
 
@@ -176,7 +184,7 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
 {
   const fake = buildFakeGrid();
   const { sandbox, commits, toasts } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:0,c1:3})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
   vm.runInContext('_pasteIntoSelection("가\\t나\\n다\\t라")', sandbox);
   eq('2×2 붙여넣기 = 4칸 저장', commits.length, 4);
   eq('첫 칸은 선택 시작 칸', commits[0].field, 'col:주문자제출');
@@ -187,7 +195,7 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
 {
   const fake = buildFakeGrid();
   const { sandbox, commits, toasts } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:1,r1:1,c1:1})', sandbox);   // 참여자(신원 잠금) 열
+  vm.runInContext('_setCellSel({r0:0,c0:0,r1:1,c1:0})', sandbox);   // 참여자(신원 잠금) 열
   vm.runInContext('_pasteIntoSelection("홍길동\\n임꺽정")', sandbox);
   eq('잠긴 신원 칸에는 쓰지 않는다', commits.length, 0);
   ok('잠긴 칸을 조용히 넘기지 않고 말한다', toasts.some(t => /잠긴 칸 2개/.test(t)), toasts.join('|'));
@@ -195,7 +203,7 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
 {
   const fake = buildFakeGrid();
   const { sandbox, commits } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:2,c1:3})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:2,c1:2})', sandbox);
   vm.runInContext('_pasteIntoSelection("공통값")', sandbox);
   eq('한 칸 복사 → 선택 범위 채우기(엑셀식)', commits.length, 3);
   ok('모두 같은 값', commits.every(c => c.val === '공통값'));
@@ -203,7 +211,7 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
 {
   const fake = buildFakeGrid();
   const { sandbox, commits } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:0,c1:3})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
   vm.runInContext('_pasteIntoSelection("이진우")', sandbox);   // 이미 같은 값
   eq('같은 값은 저장 왕복을 만들지 않는다', commits.length, 0);
 }
@@ -211,7 +219,7 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
   const fake = buildFakeGrid();
   const { sandbox, commits, toasts } = makeCtx(fake);
   sandbox.STATE.canEdit = false;
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:0,c1:3})', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
   vm.runInContext('_selectionTsv()', sandbox);
   ok('열람 전용도 복사는 된다(선택은 유효)', vm.runInContext('_selectionTsv()', sandbox) === '이진우');
   eq('열람 전용 계정에는 붙여넣기 이벤트가 애초에 걸리지 않는다(배선)', /if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
@@ -220,17 +228,17 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
 
 /* ── 4. Ctrl(⌘) = 떨어진 범위 추가 (사용자 확정 2026-08-10) ──────────────────
    실제 작업: 사이에 낀 id 열을 빼고 **수취인 + 연락처 + 주소** 만 복사한다.
-   가짜 표의 열: 0=# · 1=참여자 · 2=연락처 · 3=주문자제출 · 4=수취인 · 5=주소 */
+   가짜 표의 열: 0=참여자 · 1=연락처 · 2=주문자제출 · 3=수취인 · 4=주소 */
 console.log('\n[4] Ctrl+드래그 = 떨어진 범위 추가');
 ok('Ctrl(⌘) 로 선택을 더한다(배선)', /_setCellSel\(drag, ?e\.ctrlKey\|\|e\.metaKey\)/.test(HTML));
 ok('드래그 중에는 활성 범위만 갱신(앞서 더한 범위 보존)', /_updateActiveSel\(drag\)/.test(HTML));
 {
   const fake = buildFakeGrid();
   const { sandbox } = makeCtx(fake);
-  // 일부러 **화면 순서와 반대로** 고른다: 주소(5) → 수취인(4) → 연락처(2)
-  vm.runInContext('_setCellSel({r0:0,c0:5,r1:1,c1:5},false)', sandbox);
-  vm.runInContext('_setCellSel({r0:0,c0:4,r1:1,c1:4},true)', sandbox);
-  vm.runInContext('_setCellSel({r0:0,c0:2,r1:1,c1:2},true)', sandbox);
+  // 일부러 **화면 순서와 반대로** 고른다: 주소(4) → 수취인(3) → 연락처(1)
+  vm.runInContext('_setCellSel({r0:0,c0:4,r1:1,c1:4},false)', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:3},true)', sandbox);
+  vm.runInContext('_setCellSel({r0:0,c0:1,r1:1,c1:1},true)', sandbox);
   eq('범위 3개가 유지된다', vm.runInContext('_selRanges().length', sandbox), 3);
   eq('복사본은 화면 열 순서(연락처→수취인→주소)', vm.runInContext('_selectionTsv()', sandbox),
      '010-1111-0000\t이진우\t서울 0\n010-1111-0001\t조수빈\t서울 1');
@@ -241,16 +249,16 @@ ok('드래그 중에는 활성 범위만 갱신(앞서 더한 범위 보존)', /
 {
   const fake = buildFakeGrid();
   const { sandbox } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:3},false)', sandbox);   // 주문자제출
-  vm.runInContext('_setCellSel({r0:0,c0:5,r1:1,c1:5},true)', sandbox);    // 주소
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:1,c1:2},false)', sandbox);   // 주문자제출
+  vm.runInContext('_setCellSel({r0:0,c0:4,r1:1,c1:4},true)', sandbox);    // 주소
   vm.runInContext('_clearCellSel()', sandbox);
   eq('해제하면 범위 목록도 비운다', vm.runInContext('_selRanges().length', sandbox), 0);
 }
 {
   const fake = buildFakeGrid();
   const { sandbox, commits } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:3},false)', sandbox);   // 주문자제출 2칸
-  vm.runInContext('_setCellSel({r0:0,c0:5,r1:1,c1:5},true)', sandbox);    // 주소 2칸
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:1,c1:2},false)', sandbox);   // 주문자제출 2칸
+  vm.runInContext('_setCellSel({r0:0,c0:4,r1:1,c1:4},true)', sandbox);    // 주소 2칸
   vm.runInContext('_pasteIntoSelection("가\\t나\\n다\\t라")', sandbox);
   eq('떨어진 범위 붙여넣기 = 선택한 칸에만', commits.length, 4);
   eq('행 안에서는 화면 열 순서대로', commits.map(c => c.field).join(','),
@@ -260,14 +268,14 @@ ok('드래그 중에는 활성 범위만 갱신(앞서 더한 범위 보존)', /
 {
   const fake = buildFakeGrid();
   const { sandbox, commits } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:1,c1:4},false)', sandbox);   // 2×2 선택
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:1,c1:3},false)', sandbox);   // 2×2 선택
   vm.runInContext('_pasteIntoSelection("가")', sandbox);                   // 한 칸만 복사 → 채우기
   eq('한 칸 복사 → 여러 범위/칸 채우기', commits.length, 4);
 }
 {
   const fake = buildFakeGrid();
   const { sandbox, commits } = makeCtx(fake);
-  vm.runInContext('_setCellSel({r0:0,c0:3,r1:2,c1:4},false)', sandbox);   // 3행 선택
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:2,c1:3},false)', sandbox);   // 3행 선택
   vm.runInContext('_pasteIntoSelection("가\\t나")', sandbox);              // 1행짜리 복사본
   eq('복사본에 없는 행은 건드리지 않는다(빈 값으로 지우지 않음)', commits.length, 2);
 }
