@@ -130,9 +130,9 @@ function openPopularPriorityModal(campId) {
   if (!target) return;
   const old = document.getElementById('popularPriorityModal');
   if (old) old.remove();
-  const rows = candidates.map((c, i) => `<label style="display:flex;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid #eef2f7;cursor:pointer">
-    <input type="checkbox" value="${escHtml(c.id)}" data-priority="${i + 1}" style="width:17px;height:17px;accent-color:#2563eb">
-    <span style="flex:1;font-weight:700">${escHtml(c.title || '(제목 없음)')}</span><small style="color:#64748b">모집중</small></label>`).join('') || '<p style="color:#64748b">선택 가능한 비인기 모집공고가 없습니다.</p>';
+  const rows = candidates.map(c => `<label style="display:flex;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid #eef2f7;cursor:pointer">
+    <input type="checkbox" value="${escHtml(c.id)}" style="width:17px;height:17px;accent-color:#2563eb">
+    <span style="flex:1;font-weight:700">${escHtml(c.title || '(제목 없음)')}</span><small data-rank style="color:#2563eb;font-weight:800"></small><small style="color:#64748b">모집중</small></label>`).join('') || '<p style="color:#64748b">선택 가능한 비인기 모집공고가 없습니다.</p>';
   const modal = document.createElement('div');
   modal.id = 'popularPriorityModal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:18px';
@@ -142,10 +142,20 @@ function openPopularPriorityModal(campId) {
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 24px;border-top:1px solid #e2e8f0"><button type="button" data-close style="padding:9px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff">취소</button><button type="button" data-save style="padding:9px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:800">ON 저장</button></div></section>`;
   modal.querySelector('[data-close]').onclick = () => modal.remove();
   modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  const selectedIds = [];
+  const redrawRanks = () => modal.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    const rank = selectedIds.indexOf(input.value);
+    input.closest('label').querySelector('[data-rank]').textContent = rank >= 0 ? `${rank + 1}순위` : '';
+  });
+  modal.querySelectorAll('input[type="checkbox"]').forEach(input => { input.onchange = () => {
+    const at = selectedIds.indexOf(input.value);
+    if (input.checked && at < 0) selectedIds.push(input.value);
+    if (!input.checked && at >= 0) selectedIds.splice(at, 1);
+    redrawRanks();
+  }; });
   modal.querySelector('[data-save]').onclick = async () => {
-    const ids = [...modal.querySelectorAll('input:checked')].map(x => x.value);
     const btn = modal.querySelector('[data-save]'); btn.disabled = true; btn.textContent = '저장 중…';
-    try { await CampCards.togglePopular(campId, true, ids); modal.remove(); }
+    try { await CampCards.togglePopular(campId, true, selectedIds); modal.remove(); }
     catch (_) { btn.disabled = false; btn.textContent = 'ON 저장'; }
   };
   document.body.appendChild(modal);
