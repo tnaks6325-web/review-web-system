@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS work_orders (
   start_date      DATE,                                -- 시작일 (빈값은 null 로 저장)
   product_option  TEXT DEFAULT '',                     -- 상품옵션·결제금액 (자유서술)
   pay_amount      INTEGER DEFAULT 0,                   -- 결제금액 (숫자 분리)
+  review_fee      INTEGER DEFAULT 0,                   -- 리뷰비 (모집공고 프리필)
   daily_count     INTEGER DEFAULT 0,                   -- 일일진행건수
   purchase_time   TEXT DEFAULT '',                     -- 구매시간대
   inflow_keyword  TEXT DEFAULT '',                     -- 유입키워드

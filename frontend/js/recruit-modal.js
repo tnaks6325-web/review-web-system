@@ -173,6 +173,7 @@
             <span class="rf-pm-note" id="rf_prod_mode_note"></span>
             <input id="rf_prod_mode" type="hidden" value="none">
           </div>
+          <div id="rf_prod_mode_help" class="rf-prod-mode-help" data-mode="none">옵션 없이 진행하는 작업 1건 — 리뷰어는 옵션 선택 없이 바로 참여합니다.</div>
           <div class="rf-prod-head" data-pm="none">
             <span>상품명</span><span style="text-align:right">결제금액</span>
             <span style="text-align:right">총인원</span><span style="text-align:right">일건수</span><span></span>
@@ -183,8 +184,6 @@
           </div>
           <div id="rf_opt_rows"></div>
           <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3,#94A3B8);margin-top:4px"></div>
-          <div class="rf-pm-help" data-pm="none" style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:2px">옵션 없이 진행하는 작업입니다 · 총인원/일건수 0 = 제한 없음 · 여러 상품이면 [상품 추가]</div>
-          <div class="rf-pm-help" data-pm="opt" style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:2px">리뷰어가 참여할 때 옵션을 고릅니다 · 상품 총인원은 옵션인원 합계(자동) · 마감 옵션은 흐리게 남습니다(↩ 재개 가능)</div>
           <!-- 표에서 자동 생성되는 저장용 값(작업내용 원문·캠페인 정원) — 화면엔 표만 보인다 -->
           <textarea id="rf_wd_product" style="display:none"></textarea>
           <input id="rf_daily_limit" type="hidden" value="">
@@ -966,6 +965,8 @@
 #recruitModal .rf-opt-row .rform-input{height:27px;min-height:27px;padding:4px 6px;font-size:.68rem}
 #recruitModal .rf-pmsw{margin:0 0 6px}
 #recruitModal .rf-pm-note{margin-left:7px;font-size:.62rem}
+#recruitModal .rf-prod-mode-help{min-height:28px;display:flex;align-items:center;margin:0 0 6px;padding:6px 8px;border:1px solid #DCE3EC;border-radius:6px;background:#F8FAFC;color:#64748B;font-size:.69rem;font-weight:650;line-height:1.4}
+#recruitModal .rf-prod-mode-help[data-mode="opt"]{background:#F5F9FF;border-color:#CFE0FA;color:#3569A9}
 #recruitModal .rf-gp{margin:0;border:1px solid #DCE3EC;border-radius:8px;background:#FCFDFF;box-shadow:none}
 #recruitModal .rf-gp-head{padding:5px 7px;margin:0;border-bottom:1px solid #DCE3EC}
 #recruitModal .rf-card[data-sec="prod"]{border-bottom:0}

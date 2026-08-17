@@ -42,6 +42,10 @@ ok('공고 제목 = 상품명 우선, 없으면 작업명',
 ok('구매시간대 → 시간창 분해',
   /rfApplyPurchaseTime\(\{ timeRange: prefill\.purchase_time \|\| prefill\.time_range \|\| "" \}\)/.test(rec)
   && /시작\/종료로 분해/.test(doc));
+ok('자유시간대 전환 뒤 시간 지정으로 돌아오면 기존 시간창을 복원',
+  /_rfLastScheduledPurchaseWindow/.test(rec)
+  && /if \(start \|\| end\) _rfLastScheduledPurchaseWindow/.test(rec)
+  && /startField\.value = _rfLastScheduledPurchaseWindow\.start/.test(rec));
 ok('시작일 프리필', /setV\("rf_start_date", prefill\.start_date\)/.test(rec) && /시작일<\/span>/.test(doc));
 ok('하루 진행 건수 — 텍스트형 숫자 폴백까지',
   /daily_count_text[\s\S]{0,60}match\(\/\\d\+\//.test(app) && /숫자만 추출/.test(doc));
@@ -86,9 +90,10 @@ ok('★★ 확신 없으면 빈 값 — 랜덤·판정불가는 자동 선택하
   && /모르는 쇼핑몰이면 비워 둡니다/.test(doc));
 
 /* ── '직접 입력'이라 약속한 칸이 정말 비어 있는가(오약속 = 빈 칸 게시 사고) ── */
-ok('★ 리뷰비는 프리필하지 않는다(결제금액과 의미가 다름)',
-  !/rf_review_fee"\)\.value = prefill/.test(rec) && !/_rfPickBtn\("review_fee"/.test(rec)
-  && /리뷰비와 다릅니다/.test(doc));
+ok('★ 작업오더 리뷰비는 공고 리뷰비로 프리필한다(결제금액과 별도 항목)',
+  /review_fee:\s+Number\(o\.review_fee/.test(app)
+  && /rf_review_fee"\)\.value = prefill\.review_fee/.test(rec)
+  && /작업오더에 기재된 <b>리뷰비<\/b>/.test(doc));
 ok('★ 안내배지는 프리필하지 않는다', !/_recruitBadges = prefill|badges: *prefill/.test(rec));
 ok('★ 타계정 허용은 기본 [불가]',
   /_maEl\.checked = false; onMultiAccountToggle\(false\)/.test(rec) && /항상 <b>\[불가\]<\/b>로 시작/.test(doc));

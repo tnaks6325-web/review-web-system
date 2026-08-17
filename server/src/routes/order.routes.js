@@ -49,7 +49,7 @@ const ORDER_TRANSITIONS = {
 
 // AE 가 입력/수정 가능한 필드 (status/created_by/processed_by/admin_memo 등은 제외)
 const AE_FIELDS = [
-  'title', 'start_date', 'product_option', 'product_options_json', 'pay_amount', 'daily_count', 'daily_count_text',
+  'title', 'start_date', 'product_option', 'product_options_json', 'pay_amount', 'review_fee', 'daily_count', 'daily_count_text',
   'purchase_time', 'inflow_type', 'inflow_guide', 'delivery_type', 'courier_proxy',
   'review_type', 'recruit_count', 'review_guide', 'special_notes',
   'product_url', 'work_sheet_url', 'goods_cost_type', 'work_manager',
@@ -59,7 +59,7 @@ const AE_FIELDS = [
 // updated_by / updated_by_name 은 감사용으로 별도 처리(컨텐츠 수정으로 카운트하지 않음).
 const INTAKE_EDITABLE_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'daily_count', 'daily_count_text', 'purchase_channel', 'purchase_time',
+  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_channel', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
   'delivery_type', 'courier_proxy', 'review_type', 'review_type_mix', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
@@ -72,7 +72,7 @@ const INTAKE_EDITABLE_FIELDS = [
   // ★ 099: 체험단 종류(리뷰/블로그). 미전송·빈 값 = 리뷰체험단(기존 동작).
   'work_kind',
 ];
-const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
+const INTAKE_INT_FIELDS = new Set(['pay_amount', 'review_fee', 'daily_count', 'recruit_count']);
 
 // ── 테이블 자동 생성 (마이그레이션 실패 시 안전장치) ──
 let _tableChecked = false;
@@ -86,6 +86,7 @@ async function _ensureTables() {
         start_date      DATE,
         product_option  TEXT DEFAULT '',
         pay_amount      INTEGER DEFAULT 0,
+        review_fee      INTEGER DEFAULT 0,
         daily_count     INTEGER DEFAULT 0,
         purchase_time   TEXT DEFAULT '',
         inflow_keyword  TEXT DEFAULT '',
@@ -120,6 +121,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide         TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_fee INTEGER DEFAULT 0`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS review_type_mix JSONB NOT NULL DEFAULT '[]'::jsonb`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS memo_log             TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at           TIMESTAMPTZ`);
@@ -256,7 +258,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
   const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
   const { rows } = await pool.query(
     `INSERT INTO work_orders
-      (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
+      (id, title, start_date, product_option, product_options_json, pay_amount, review_fee, daily_count, daily_count_text,
        purchase_channel, purchase_time, inflow_keyword, inflow_type, inflow_guide, guide_images, delivery_type, courier_proxy,
        review_type, review_type_mix, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, manager_name, work_manager,
@@ -264,7 +266,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
        source_review_order_id, source_revision, intake_idempotency_key, intranet_advertiser_id,
        intranet_advertiser_name, intranet_advertiser_contact, intranet_advertiser_business_number,
        status, created_by, work_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,'submitted',$39,$40)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,'submitted',$40,$41)
      RETURNING *`,
     [
       _genOrderId(),
@@ -273,6 +275,7 @@ async function _insertWorkOrder(b, createdBy, sourceContract) {
       b.product_option || '',
       optionsJson,
       b.pay_amount || 0,
+      _intOrZero(b.review_fee),
       b.daily_count || 0,
       b.daily_count_text || '',
       String(b.purchase_channel || '').trim(),
@@ -614,9 +617,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
          contract_number = $28, quote_id = $29, skip_weekends = $30, holidays = $31,
          work_kind = $32, source_revision = $33, intake_idempotency_key = $34,
          intranet_advertiser_id = $35, intranet_advertiser_name = $36,
-         intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38,
+         intranet_advertiser_contact = $37, intranet_advertiser_business_number = $38, review_fee = $39,
          updated_at = NOW()
-       WHERE id = $1 AND source_review_order_id = $39
+       WHERE id = $1 AND source_review_order_id = $40
        RETURNING *`,
       [
         current.id,
@@ -630,7 +633,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
         String(b.quote_id || '').trim(), _boolOrNull(b.skip_weekends), _holidaysJson(b.holidays),
         workKindForStore(b.work_kind), source.sourceRevision, source.idempotencyKey,
         source.intranetAdvertiserId, source.intranetAdvertiserName, source.intranetAdvertiserContact,
-        source.intranetAdvertiserBusinessNumber, sourceReviewOrderId,
+        source.intranetAdvertiserBusinessNumber, _intOrZero(b.review_fee), sourceReviewOrderId,
       ]
     );
     const updated = rows[0];
@@ -829,6 +832,7 @@ async function _intakeUpdateHandler(req, res, next) {
       sets.push(`${f} = $${i++}`);
       if (f === 'start_date') vals.push(_dateOrNull(b[f]));
       else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
+      else if (f === 'review_fee') vals.push(_intOrZero(b[f]));
       else if (f === 'guide_images') vals.push(_guideImagesJson(b[f]));   // 배열 → 정규화 JSON(090)
       else if (f === 'skip_weekends') vals.push(_boolOrNull(b[f]));       // 097 — 안 보냄/끔 구분
       else if (f === 'holidays') vals.push(_holidaysJson(b[f]));          // 097 — 배열 → 정규화 JSON
@@ -1068,6 +1072,7 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
       sets.push(`${f} = $${i++}`);
       if (f === 'start_date') vals.push(_dateOrNull(b[f]));
       else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
+      else if (f === 'review_fee') vals.push(_intOrZero(b[f]));
       else vals.push(b[f]);
     }
     if (sets.length === 0) {
@@ -1600,14 +1605,14 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
 // ═══════════════════════════════════════════════════════════
 const ADMIN_EDIT_FIELDS = [
   'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
-  'pay_amount', 'daily_count', 'daily_count_text', 'purchase_time',
+  'pay_amount', 'review_fee', 'daily_count', 'daily_count_text', 'purchase_time',
   'inflow_keyword', 'inflow_type', 'inflow_guide',
   'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'goods_cost_type', 'work_manager',
 ];
 const ADMIN_EDIT_LABELS = {
   title: '작업명', start_date: '시작일', manager_name: '담당AE', product_option: '상품·옵션',
-  product_options_json: '상품옵션표', pay_amount: '결제금액', daily_count: '일일건수',
+  product_options_json: '상품옵션표', pay_amount: '결제금액', review_fee: '리뷰비', daily_count: '일일건수',
   daily_count_text: '일일건수(텍스트)', purchase_time: '구매시간대', inflow_keyword: '유입키워드',
   inflow_type: '유입방식', inflow_guide: '유입가이드', delivery_type: '배송유형',
   courier_proxy: '택배대행', review_type: '리뷰타입', recruit_count: '총모집',

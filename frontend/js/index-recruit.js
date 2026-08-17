@@ -887,6 +887,9 @@ function openRecruitProductUrl() {
  *  리뷰어 앱 모달(_caeIsAutoOrder/_caeToggleWindow)과 같은 규율. 관리자가 매번 손으로
  *  비우던 것을 자동화하되, **값을 지우는 건 사용자가 자율로 적었을 때만**이라 오작동 여지가 없다. */
 let _rfActiveTimePickerField = "rf_window_start";
+// 자유시간대로 잠시 전환해도 이 모달에서 이미 불러온/입력한 시간창은 보존한다.
+// 저장값은 자유시간대가 우선이므로, 다시 시간 지정으로 바꿀 때만 이 값을 복원한다.
+let _rfLastScheduledPurchaseWindow = { start: "", end: "" };
 
 function _rfPadTime(value) {
   return String(value).padStart(2, "0");
@@ -975,11 +978,19 @@ function rfSetFreeTime(isFreeTime) {
     if (button) button.disabled = isFreeTime;
   });
   if (isFreeTime) {
+    const start = document.getElementById("rf_window_start")?.value || "";
+    const end = document.getElementById("rf_window_end")?.value || "";
+    if (start || end) _rfLastScheduledPurchaseWindow = { start, end };
     ["rf_window_start", "rf_window_end"].forEach(id => {
       const field = document.getElementById(id);
       if (field) field.value = "";
     });
     rfCloseTimePicker();
+  } else {
+    const startField = document.getElementById("rf_window_start");
+    const endField = document.getElementById("rf_window_end");
+    if (startField && !startField.value) startField.value = _rfLastScheduledPurchaseWindow.start || "";
+    if (endField && !endField.value) endField.value = _rfLastScheduledPurchaseWindow.end || "";
   }
   rfSyncPurchaseTimeValue();
 }
@@ -997,6 +1008,7 @@ function rfApplyPurchaseTime({ timeRange = "", start = "", end = "" } = {}) {
   const endField = document.getElementById("rf_window_end");
   if (startField) startField.value = startValue;
   if (endField) endField.value = endValue;
+  _rfLastScheduledPurchaseWindow = { start: startValue, end: endValue };
   rfSetFreeTime(false);
   rfSyncPurchaseTimeValue();
 }
@@ -1700,6 +1712,17 @@ function _applyProdModeUi(m) {
   const add = document.getElementById("rf_opt_addbtn");
   if (add) add.innerHTML = '<i class="fas fa-plus"></i> 상품 추가';
 }
+/** 옵션 유무 선택 바로 아래 한 줄 안내. 진행상품 수가 아직 없으면 기본 1건으로 안내한다. */
+function _renderProdModeHelp() {
+  const el = document.getElementById("rf_prod_mode_help");
+  if (!el) return;
+  const mode = _prodMode();
+  const productCount = Math.max(1, _readProdRows().filter(r => r.productName || r.payAmount).length);
+  el.dataset.mode = mode;
+  el.textContent = mode === "opt"
+    ? "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출)."
+    : "옵션 없이 진행하는 작업 " + productCount + "건 — 리뷰어는 옵션 선택 없이 바로 참여합니다.";
+}
 /** 자동 판정 사유 문구(조용한 자동 선택 금지 — 왜 이 모드인지 화면이 말한다) */
 function _setProdModeNote(txt) {
   const n = document.getElementById("rf_prod_mode_note");
@@ -1721,6 +1744,7 @@ function setProdMode(mode, opts) {
   }
   _applyProdModeUi(m);
   _setProdModeNote("");
+  _renderProdModeHelp();
   _renderProdTable(_convertProdRows(rows, m));
 }
 /** 모드 전환 시 값 이월 — none↔opt 어느 쪽으로도 입력한 값이 사라지지 않게 */
@@ -2147,18 +2171,14 @@ function applyProductRowsFromOrder(prefill) {
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 function _optSummary() {
+  _renderProdModeHelp();
   const el = document.getElementById("rf_opt_summary");
   const opts = readOptRows();
   const names = opts.map(o => o.optKey.toLowerCase());
   const dup = names.some((n, i) => names.indexOf(n) !== i);
   if (!el) return { dup, count: opts.length };
   if (!opts.length) {
-    // 모드에 맞는 안내 — '옵션 없는 작업'에서 "옵션을 추가하면…"이라 말하면 없는 칸을 찾게 만든다
-    const prods = _readProdRows().filter(r => r.productName || r.payAmount).length;
-    el.textContent = (_prodMode() === "opt")
-      ? "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출)."
-      : (prods ? "옵션 없이 진행하는 작업 " + prods + "건 — 리뷰어는 옵션 선택 없이 바로 참여합니다."
-               : "상품을 추가하세요. 옵션별로 정원·금액을 나눠야 하면 [옵션 있는 작업]으로 바꾸세요.");
+    el.textContent = _prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요.";
     el.style.color = "var(--t3)";
     return { dup, count: 0 };
   }
@@ -2329,6 +2349,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoaded = null;   // ★ 064: 이전 편집의 로드값(sort_order 등)이 새 공고에 새는 것 방지
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
+  _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
@@ -2581,11 +2602,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
     }
   } else {
     titleEl.innerHTML = `<i class="fas fa-bullhorn"></i> 모집공고 등록`;
-    /* ★ 작업오더 프리필 — 매핑 가능한 필드만 채움 (channel/manager/리뷰비는 관리자가 직접) */
+    /* ★ 작업오더 프리필 — 원장에 기록된 값은 공고 폼에도 표시하고 관리자가 최종 확인한다. */
     if (prefill) {
       if (prefill.title)        document.getElementById("rf_title").value = prefill.title;
       if (prefill.time_range)   document.getElementById("rf_time_range").value = prefill.time_range;
       if (prefill.max_slots)    document.getElementById("rf_max_slots").value = prefill.max_slots;
+      if (prefill.review_fee != null && prefill.review_fee !== "") document.getElementById("rf_review_fee").value = prefill.review_fee;
       if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
       if (prefill.notes) {
         const notesEl = document.getElementById("rf_notes");
