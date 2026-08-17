@@ -108,6 +108,11 @@ ok('index-recruit: sort_order 읽기 null-safe(+편집 로드값 재전송 = 0-�
   !/getElementById\("rf_sort_order"\)\.value/.test(recruit) && /_recruitEditLoaded\?\.sort_order/.test(recruit));
 ok('index-recruit: 새 공고 열 때 로드값 초기화(이전 편집값 누수 방지)', /window\._recruitEditLoaded = null/.test(recruit));
 ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]/.test(recruit) && /c\.participation_mode \? `<button[^`]*'popular'/.test(recruit));
+ok('index-recruit: 선택된 선행공고는 드래그로 우선순위를 재정렬한다',
+  /id="popularPriorityQueue"/.test(recruit)
+  && /draggable="true"/.test(recruit)
+  && /ondrop/.test(recruit)
+  && /selectedIds\.splice\(from, 1\); selectedIds\.splice\(at, 0, draggingId\)/.test(recruit));
 ok('index-recruit: toggleCampFlag → /flags POST + 현재 카드 즉시 갱신',
   /\/flags`/.test(recruit)
   && /updateRecruitPopularity\(campId, on\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400))

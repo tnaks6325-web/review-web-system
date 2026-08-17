@@ -58,7 +58,7 @@ assert(modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"'),
   const html = surface === 'workdesk' ? workdesk : admin;
   assert(html.includes('js/recruit-modal.js?v=20260817-card-module-fix-c116'), `${surface} should request the released modal asset.`);
   assert(html.includes('js/campaign-cards.js?v=20260817-popular-priority-c118'), `${surface} should request the released card asset.`);
-  assert(html.includes('js/index-recruit.js?v=20260817-popular-priority-c119'), `${surface} should request the released controller asset.`);
+  assert(html.includes('js/index-recruit.js?v=20260817-popular-drag-c120'), `${surface} should request the released controller asset.`);
 });
 
 console.log('recruitModalFinalRuntimeLayout: passed');
