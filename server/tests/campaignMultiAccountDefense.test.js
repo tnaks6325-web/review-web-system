@@ -82,12 +82,13 @@ async function callHandler(method, routePath, req) {
     routes.indexOf("'sub_is_registered_reviewer'") > routes.indexOf('const holdP8 = isSubApply'));
 
   ok('D1b: 기존 사유 코드 불변(프론트 문구 계약)',
-    routes.includes("'already_submitted'") && routes.includes("'already_today'"));
+    routes.includes("'already_submitted'") && !routes.includes("'already_today'"));
   ok('D1b: 귀속 판별 사유 신설', routes.includes("'blocked_by_other_owner'") && routes.includes("'same_phone_other_name'"));
   ok('D1b: done/hist 2쿼리 → 1쿼리(왕복 순증 0)',
     !/const done = await client\.query/.test(routes) && !/const hist = await client\.query/.test(routes)
     && /const blk = await client\.query/.test(routes));
-  ok('D1b: submitted 우선순위 보존(ORDER BY)', /ORDER BY \(status = 'submitted'\) DESC, applied_at DESC/.test(routes));
+  ok('D1b: 제출완료만 이력으로 읽고 제출시각 최신순(홀드는 미포함)',
+    /status = 'submitted'[\s\S]*?ORDER BY submitted_at DESC NULLS LAST/.test(routes));
   ok('D1b: normName 은 identity.service 공식 export 사용',
     typeof require('../src/services/identity.service').normName === 'function');
 

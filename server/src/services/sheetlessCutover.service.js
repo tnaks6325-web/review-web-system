@@ -438,14 +438,19 @@ async function sweepPreparedRows({ since = null, includeUnknown = false, limit =
  *    그리고 되돌리기(재연결)가 점검표 없이 언제든 가능하다(파괴적 조작이 아니다).
  *    ⚠ 되살릴 거면 화면·서버·가드 세 곳을 같이 되돌릴 것 — 서버만 켜면 화면이 못 보내 전면 잠금이 된다.
  */
-async function enableSheetless({ sheetId, tabName, by = '', force = false, now = new Date() } = {}) {
+async function enableSheetless({ sheetId, tabName, by = '', force = false, serverOnly = false, now = new Date() } = {}) {
   if (!sheetId || !tabName) throw new Error('enableSheetless: sheetId, tabName 필수');
   const db = _db();
   const tab = await _loadTab(db, sheetId, tabName);
   if (!tab) return { ok: false, reason: 'tab_not_found', message: '등록되지 않은 작업입니다.' };
   if (tab.sheetless) return { ok: true, already: true, message: '이미 이관된 작업입니다.' };
 
-  const list = await cutoverChecklist({ sheetId, tabName, now });
+  // 서버 작업보드가 진실원본인 전환에서는 외부 시트의 최신성·대조를 다시 보지 않는다.
+  // 이 플래그는 활성 모집공고 전수 전환 전용 라우트만 전달한다. 기존 개별 이관은 종전
+  // fail-closed 점검표를 그대로 사용한다.
+  const list = serverOnly
+    ? { ok: true, canCutover: true, blocking: [], checks: [], serverOnly: true }
+    : await cutoverChecklist({ sheetId, tabName, now });
   if (!list.ok) return list;
   if (!list.canCutover && !force) {
     return { ok: false, reason: 'checklist_failed', message: '점검표를 통과하지 못했습니다.',
@@ -456,7 +461,9 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
   }
 
   // ★★ 끊기 **전에** 그 시트를 마지막으로 한 번 더 읽어 반영한다(순서가 계약 — 아래 함수 주석).
-  const reflect = await _reflectSheetOnce({ sheetId, tabName, by });
+  const reflect = serverOnly
+    ? { ok: true, skipped: 'server_only' }
+    : await _reflectSheetOnce({ sheetId, tabName, by });
 
   await db.query(
     `UPDATE tab_configs SET sheetless = TRUE, sheetless_at = NOW(), sheetless_by = $3
@@ -475,13 +482,17 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
        seen-set 대상이 아니라 비활성이 될 수 없고, 건드리면 빈 슬롯이 통째로 사라진다.
      ★ fail-soft — 실패해도 이관은 유지하고 사유를 응답에 싣는다. */
   let retired = null;
-  try {
-    retired = await require('./participants.service')
-      .retireInactiveImportRows({ sheetId, tabName, by: `cutover:${String(by || '').slice(0, 90)}` });
-    if (retired.rows) logger.info(`[cutover] 시트에서 사라진 줄 ${retired.rows}개 은퇴 — ${tabName}`);
-  } catch (e) {
-    retired = { ok: false, message: e.message };
-    logger.warn(`[cutover] 사라진 줄 은퇴 실패(이관은 유지) — ${tabName}: ${e.message}`);
+  if (serverOnly) {
+    retired = { ok: true, skipped: 'server_only' };
+  } else {
+    try {
+      retired = await require('./participants.service')
+        .retireInactiveImportRows({ sheetId, tabName, by: `cutover:${String(by || '').slice(0, 90)}` });
+      if (retired.rows) logger.info(`[cutover] 시트에서 사라진 줄 ${retired.rows}개 은퇴 — ${tabName}`);
+    } catch (e) {
+      retired = { ok: false, message: e.message };
+      logger.warn(`[cutover] 사라진 줄 은퇴 실패(이관은 유지) — ${tabName}: ${e.message}`);
+    }
   }
 
   // ── 부수효과 3종. 전부 실패해도 이관 자체는 유지하고 **사유를 응답에 실어** 화면이 말한다.
@@ -495,18 +506,23 @@ async function enableSheetless({ sheetId, tabName, by = '', force = false, now =
   }
 
   let notice = null;
-  try {
-    // ★ force:true — 시트에 이미 있는 공지는 "행 삭제 금지" 안내인데, 이제 그 시트를 안 쓰므로
-    //   그대로 두면 직원이 계속 그 시트에서 작업한다. 이관 안내가 그 자리를 대신해야 한다.
-    notice = await require('./sheetNotice.service').applySheetNotice(sheetId, {
-      gid: tab.tabGid || undefined, tabName, text: CUTOVER_NOTICE, force: true,
-    });
-  } catch (e) {
-    notice = { ok: false, skipped: 'exception', message: e.message };
+  if (serverOnly) {
+    notice = { ok: true, skipped: 'server_only' };
+  } else {
+    try {
+      // ★ force:true — 시트에 이미 있는 공지는 "행 삭제 금지" 안내인데, 이제 그 시트를 안 쓰므로
+      //   그대로 두면 직원이 계속 그 시트에서 작업한다. 이관 안내가 그 자리를 대신해야 한다.
+      notice = await require('./sheetNotice.service').applySheetNotice(sheetId, {
+        gid: tab.tabGid || undefined, tabName, text: CUTOVER_NOTICE, force: true,
+      });
+    } catch (e) {
+      notice = { ok: false, skipped: 'exception', message: e.message };
+    }
   }
 
   logger.info(`[cutover] 이관 완료 — ${tabName} (${sheetId}) by=${by}${force && !list.canCutover ? ' [UNVERIFIED]' : ''}`);
-  return { ok: true, sheetId, tabName, displayName: tab.displayName, forced: !!(force && !list.canCutover),
+  return { ok: true, sheetId, tabName, displayName: tab.displayName, serverOnly: !!serverOnly,
+    forced: !!(force && !list.canCutover),
     reflect, handoff, retired, ledger, notice };
 }
 
@@ -635,6 +651,116 @@ async function disableSheetless({ sheetId, tabName, by = '' } = {}) {
     message: '시트를 다시 읽습니다 — 다음 갱신부터 시트 값이 시스템 표 대신 반영됩니다.' };
 }
 
+/**
+ * 현재 모집 중인 공고의 연결 작업을 서버 원장 기준으로 일괄 무시트 전환한다.
+ *
+ * 외부 시트는 읽지 않는다. 연결값이 없는 공고도 원본 작업오더가 있으면 그 오더에서
+ * 서버 작업표를 새로 만들고 공고·오더 양쪽을 같은 가상 키로 연결한다. 따라서 리뷰어
+ * 구매양식이 빈 시트 파라미터로 홈으로 되돌아가는 경로가 남지 않는다.
+ */
+async function _provisionUnlinkedCampaign(db, row, by) {
+  if (!row.sourceWorkOrderId) {
+    return { ok: false, reason: 'source_work_order_missing' };
+  }
+  const { rows: workOrders } = await db.query(
+    `SELECT * FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`,
+    [row.sourceWorkOrderId]
+  );
+  const workOrder = workOrders[0];
+  if (!workOrder) return { ok: false, reason: 'source_work_order_not_found' };
+
+  // 작업표 생성은 접수 경로와 같은 단일 서비스로 위임한다. 구글 API를 전혀 호출하지 않는다.
+  const { createSheetlessWorktable } = require('./sheetlessAccept.service');
+  const made = await createSheetlessWorktable({
+    workOrder,
+    tabName: String(row.title || workOrder.title || '').trim(),
+    by: by || 'active-campaign-cutover',
+  });
+  if (!made.ok) return { ok: false, reason: 'worktable_create_failed', message: made.error || '' };
+
+  await db.query(
+    `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+     VALUES ($1, $2, '')
+     ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET sheet_url='', updated_at=NOW()`,
+    [made.sheetId, made.campaignName]
+  );
+  await db.query(
+    `INSERT INTO tab_configs
+       (sheet_id, tab_name, tab_gid, sheet_url, campaign_name, display_name,
+        manager, time_range, review_type, delivery_type, sheetless, work_kind, updated_at)
+     VALUES ($1,$2,$3,'',$4,$5,$6,$7,$8,$9,TRUE,$10,NOW())
+     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+       sheetless=TRUE, tab_gid=COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
+       sheet_url='', updated_at=NOW()`,
+    [made.sheetId, made.tabName, made.gid, made.campaignName, row.title || made.tabName,
+      row.manager || '', row.timeRange || '', workOrder.review_type || '', workOrder.delivery_type || '', workOrder.work_kind || '']
+  );
+
+  // 먼저 공고와 오더를 같은 내부 키로 묶고, 그 다음 작업표 행·장부를 만든다.
+  // 이 순서면 생성 중 재시도가 나도 공고가 다른 표를 가리키지 않는다.
+  await db.query(
+    `UPDATE recruit_campaigns
+        SET linked_sheet_id=$2, linked_tab_name=$3, linked_tab_gid=$4, updated_at=NOW()
+      WHERE id=$1 AND (COALESCE(linked_sheet_id,'')='' OR COALESCE(linked_tab_name,'')='')`,
+    [row.campaignId, made.sheetId, made.tabName, made.gid]
+  );
+  await db.query(
+    `UPDATE work_orders
+        SET linked_tab_sheet_id=$2, linked_tab_name=$3, linked_tab_gid=$4, updated_at=NOW()
+      WHERE id=$1 AND deleted_at IS NULL`,
+    [workOrder.id, made.sheetId, made.tabName, made.gid]
+  );
+  const persisted = await made.persist();
+  return { ok: true, sheetId: made.sheetId, tabName: made.tabName, gid: made.gid, persisted };
+}
+
+async function cutoverActiveCampaignsServerOnly({ by = '' } = {}) {
+  const db = _db();
+  const { rows } = await db.query(
+    `SELECT rc.id AS "campaignId", rc.title AS "title",
+            COALESCE(rc.linked_sheet_id, '') AS "sheetId",
+            COALESCE(rc.linked_tab_name, '') AS "tabName",
+            rc.source_work_order_id AS "sourceWorkOrderId",
+            COALESCE(rc.manager, '') AS "manager", COALESCE(rc.time_range, '') AS "timeRange",
+            COALESCE(tc.sheetless, FALSE) AS "sheetless"
+       FROM recruit_campaigns rc
+       LEFT JOIN tab_configs tc
+         ON tc.sheet_id = rc.linked_sheet_id AND tc.tab_name = rc.linked_tab_name
+      WHERE rc.status = 'active'
+      ORDER BY rc.created_at ASC, rc.id ASC`
+  );
+
+  const out = { ok: true, total: rows.length, converted: [], already: [], unlinked: [], failed: [] };
+  for (const row of rows) {
+    const item = { campaignId: row.campaignId, title: row.title || '', sheetId: row.sheetId, tabName: row.tabName };
+    if (!row.sheetId || !row.tabName) {
+      try {
+        const made = await _provisionUnlinkedCampaign(db, row, by);
+        if (made.ok) out.converted.push({ ...item, sheetId: made.sheetId, tabName: made.tabName, provisioned: true, ledger: made.persisted && made.persisted.ledger });
+        else out.unlinked.push({ ...item, reason: made.reason, message: made.message || '' });
+      } catch (e) {
+        out.failed.push({ ...item, reason: 'provision_exception', message: e.message || String(e) });
+      }
+      continue;
+    }
+    if (row.sheetless === true) {
+      out.already.push(item);
+      continue;
+    }
+    try {
+      const r = await enableSheetless({
+        sheetId: row.sheetId, tabName: row.tabName, by,
+        force: true, serverOnly: true,
+      });
+      if (r.ok) out.converted.push({ ...item, handoff: r.handoff, ledger: r.ledger });
+      else out.failed.push({ ...item, reason: r.reason || 'cutover_failed', message: r.message || '' });
+    } catch (e) {
+      out.failed.push({ ...item, reason: 'exception', message: e.message || String(e) });
+    }
+  }
+  return out;
+}
+
 module.exports = {
   cutoverChecklist,
   listCutoverTabs,
@@ -642,6 +768,7 @@ module.exports = {
   sweepPreparedRows,
   handoffPendingOrders,
   disableSheetless,
+  cutoverActiveCampaignsServerOnly,
   CUTOVER_NOTICE,
   __setPoolForTest,
 };

@@ -368,7 +368,7 @@ module.exports = {
   readWorktableDates,
   prefillFromWorktable,
   syncAdjustedPlansToWorktable,
-  rebuildAdjustedPlansToWorktable,
+   rebuildAdjustedPlansToWorktable,
   captureWorktableDefaults,
   loadWorktableDefaults,
   MAX_PLAN_DAYS,

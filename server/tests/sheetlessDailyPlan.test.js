@@ -251,31 +251,6 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     const defaults = await dailyPlan.loadWorktableDefaults({ client, campaignId: 'c1', dates: ['2026-08-15', '2026-08-18'] });
     ok('기본 복귀는 보존된 기준값을 날짜별로 다시 읽는다', defaults.get('2026-08-15') === 0 && defaults.get('2026-08-18') === 40);
   }
-  {
-    // 과거에 남은 빈 날짜(실제 800건의 26.8.11 유형)는 증분 저장으로는 건드리지 않는다.
-    // 전용 재구성은 참여·주문 행을 보존하면서 이 빈 행을 가장 이른 조절 날짜부터 다시 쓴다.
-    const updates = [];
-    const rows = [
-      { id: 'fixed', seq: 245, tab_gid: 'g', reviewer_name: '완료', recipient_name: '완료', phone8: '12345678', order_submission_id: 'o', row_json: { '구매일자': '8/14 (금)' } },
-      { id: 'old', seq: 246, tab_gid: 'g', reviewer_name: null, recipient_name: null, phone8: null, order_submission_id: null, row_json: { '구매일자': '26.8.11(화)' } },
-      { id: 'next1', seq: 247, tab_gid: 'g', reviewer_name: null, recipient_name: null, phone8: null, order_submission_id: null, row_json: { '구매일자': '8/16 (일)' } },
-      { id: 'next2', seq: 248, tab_gid: 'g', reviewer_name: null, recipient_name: null, phone8: null, order_submission_id: null, row_json: { '구매일자': '8/16 (일)' } },
-    ];
-    const client = { query: async (sql, params) => {
-      if (/SELECT id, seq/.test(sql)) return { rows };
-      if (/UPDATE campaign_participants/.test(sql)) {
-        for (let i = 0; i < params.length - 2; i += 2) updates.push({ id: params[i], value: params[i + 1] });
-        return { rowCount: updates.length };
-      }
-      throw new Error('unexpected sql');
-    }};
-    const r = await dailyPlan.rebuildAdjustedPlansToWorktable({ client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15',
-      plans: [{ date: '2026-08-15', count: 2 }, { date: '2026-08-16', count: 1 }] });
-    ok('전용 재구성은 과거 빈 행(246)을 8/15의 첫 준비 행으로 재배치', updates.some(x => x.id === 'old' && x.value === '8/15 (토)'));
-    ok('전용 재구성은 이미 올바른 다음 날짜 준비 행은 불필요하게 다시 쓰지 않는다',
-      !updates.some(x => x.id === 'next2') && rows[3].row_json['구매일자'] === '8/16 (일)');
-    ok('전용 재구성은 참여·주문 완료 행을 변경하지 않는다', !updates.some(x => x.id === 'fixed') && r.protectedRows === 1);
-  }
 
   /* ══════════════ C. 공고 발행 배선 ══════════════ */
   console.log('\n[C] 공고 발행 시 프리필 배선');

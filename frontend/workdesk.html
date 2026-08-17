@@ -5142,7 +5142,8 @@ function buildGrid(wd){
       if(c.kind==='seq'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}${bgStyle('seq')}" data-rid="${esc(r.id)}" data-cfield="seq">${esc(r.seq)}</td>`; }
       else if(c.kind==='name'){
         // 참여자 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 배지는 유지, 제거(×, 명단 큐레이션=행 숨김)는 편집자만.
-        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canDeleteOrder?`<button class="rdel" type="button" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${esc(r.id)}')">삭제</button>`:''}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
+        const isAutoTestOrder = r.name==='테스트자동삭제' && r.phone8==='00000000' && String(rj['주문번호']||'')==='TEST-AUTO-DELETE-20260815';
+        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canDeleteOrder?`<button class="rdel" type="button" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${esc(r.id)}')">삭제</button>`:''}${isAutoTestOrder?`<button class="rdel" type="button" title="자동 테스트 기록 전체 제거" onclick="cleanupAutoTestRecord('${esc(r.id)}')">테스트 정리</button>`:''}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
       else if(c.kind==='phone'){ const _ph=_fmtPhone(r.phone8);
         // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
         tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}${bgStyle('idphone')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idphone">${esc(_ph||'')}</td>`; }
@@ -8145,6 +8146,8 @@ function _coRender(){
       <span class="sp" style="flex:1"></span>
       <input class="ovsearch" id="coq" placeholder="작업 검색" value="${esc(STATE.co.q||'')}"
         oninput="STATE.co.q=this.value;_coRows()">
+      <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
+      <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
@@ -8216,6 +8219,39 @@ function _coFixBtn(c,i){
   return '';
 }
 function _coAudit(){ window.open('sheet-sync-audit.html','_blank','noopener'); }
+/* 모집 중인 공고는 작업표가 원본이다. 과거 시트 점검 절차를 거치지 않고, 아직 연결값이 없는
+ * 활성 공고에는 서버 작업표를 만들고 그 내부 키를 공고에 연결한다. Google Sheets는 읽거나 쓰지 않는다. */
+async function _coActiveServerOnlyCutover(){
+  const message = '현재 모집 중인 공고 전체를 서버 작업표(무시트)로 전환합니다.\n\n'
+    + '기존 참여·주문·리뷰 데이터는 변경하지 않으며, 구글시트는 읽거나 쓰지 않습니다.\n'
+    + '작업표 연결값이 없는 공고에는 내부 작업표를 새로 만든 뒤 연결합니다.\n\n진행할까요?';
+  if(!confirm(message)) return;
+  const head = document.querySelector('#cohead .mh');
+  const btn = head && Array.from(head.querySelectorAll('button')).find(b => b.textContent.includes('전수 무시트'));
+  if(btn){ btn.disabled=true; btn.textContent='전수 전환 중…'; }
+  try{
+    const j = await api('/api/trackb/sheetless/cutover-active-server-only', {
+      method:'POST', body:JSON.stringify({confirm:'server-only-active-campaigns'})
+    });
+    if(!j || j.ok===false){ alert((j&&(j.error||j.message))||'활성 공고 전수 전환에 실패했습니다.'); return; }
+    const made = Number(j.provisioned||j.created||0), converted = Number(j.converted||j.cutover||0), skipped = Number(j.skipped||0);
+    alert(`활성 공고 전수 무시트 전환이 완료되었습니다.\n새 작업표 연결 ${made}건 · 기존 연결 전환 ${converted}건 · 건너뜀 ${skipped}건`);
+    await _coLoad();
+    if(typeof _loadCampaigns==='function') _loadCampaigns();
+  }catch(e){ alert('활성 공고 전수 전환 실패: '+(e.message||'')); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='⚡ 활성 공고 전수 무시트 전환'; } }
+}
+async function _coReleaseTodayUnsubmittedHolds(){
+  const message = '웰스앤헬스 도라지청·삼백초캔디 공고에서 오늘 참여만 하고 구매양식을 제출하지 않은 홀드를 해제합니다.\n\n'
+    + '15분이 지나 만료된 홀드도 포함되며, 구매양식 제출완료·작업보드 기록은 변경하지 않습니다.\n\n진행할까요?';
+  if(!confirm(message)) return;
+  const j = await api('/api/trackb/campaigns/release-today-unsubmitted-holds', {
+    method:'POST', body:JSON.stringify({confirm:'release-today-unsubmitted-holds'})
+  });
+  if(!j || j.ok===false){ alert((j&&j.error)||'당일 미제출 제한 해제에 실패했습니다.'); return; }
+  alert(`당일 미제출 제한을 해제했습니다.\n도라지청 ${Number(j.released?.camp_4c981df9de49)||0}명 · 삼백초캔디 ${Number(j.released?.camp_bb0980ceddd4)||0}명`);
+  if(typeof _loadCampaigns==='function') _loadCampaigns();
+}
 /* ★★ "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에 답한다.
  *    점검표 ①과 같은 판정이지만 남은 작업 전체를 한 번에 훑는다 — 85건을 하나씩 누르던 것을 없앤다.
  *    ★ 읽기 전용 · 시트 API 0(RAW 미러만)이라 몇 번을 눌러도 구글 쿼터에 영향이 없다. */
@@ -10605,6 +10641,13 @@ async function deleteOrderRow(rowId){
     await reloadWorkdesk();
   }catch(_){ toast('삭제 정보를 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.'); }
   finally{ STATE._orderDeleteBusy=false; }
+}
+async function cleanupAutoTestRecord(rowId){
+  if(!confirm('자동 테스트로 만든 구매양식·참여·작업보드 행·테스트 리뷰어를 모두 영구 제거할까요?')) return;
+  const result=await api('/api/trackb/workdesk/test-auto-delete-cleanup',{method:'POST',body:JSON.stringify({rowId,confirm:true})});
+  if(!result||!result.ok){ toast((result&&result.error)||'자동 테스트 기록 정리에 실패했습니다.'); return; }
+  toast('자동 테스트 기록을 모두 제거했습니다.');
+  await reloadWorkdesk();
 }
 function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
   const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';

@@ -1611,9 +1611,14 @@ function _syncSourceWorkOrderLinkUi() {
   }
 }
 
-/** 게시 전 자동 점검 — 서버 활성화 게이트와 동일한 필수 항목만 검사한다. */
+/** 게시 전 자동 점검 — 서버 활성화 게이트와 동일 3항목(빠지면 active 저장이 서버에서 거부됨) */
 function participationCheckErrors() {
   const errs = [];
+  const tabKey = document.getElementById("rf_linked_tab")?.value || "";
+  const tabMeta = _recruitTabList.find(x => x.key === tabKey);
+  // 시트 미연결 공고는 허용한다. 다만 연결을 선택했다면 탭 gid까지 완성되어야
+  // 리네임·시트쓰기 대상이 엇갈리지 않는다.
+  if (tabKey && !(tabMeta && tabMeta.tabGid)) errs.push("선택한 시트 탭의 gid를 확인해주세요");
   const manager = document.getElementById("rf_manager")?.value.trim() || "";
   const channel = document.getElementById("rf_channel")?.value.trim() || "";
   const startDate = document.getElementById("rf_start_date")?.value || "";
@@ -1638,8 +1643,7 @@ function renderPartCheck() {
   const items = [
     {
       label: tabKey ? "시트 탭 연결됨 (gid)" : "시트 탭 미연결 — 나중에 추가 가능",
-      // 시트·탭 연결은 작업오더 연동용 선택 정보다. 게시 조건으로 사용하지 않는다.
-      fail: false,
+      fail: errs.some(e => e.includes("gid")),
     },
     { label: (!_ws && !_we) ? "구매시간 미설정 = 자율주문(종일 오픈)" : "구매시간 입력됨 (시작 < 종료)",
       fail: errs.some(e => e.includes("구매시간")) },
@@ -2994,14 +2998,15 @@ function addPresetBadge(val) {
   _refreshBadgeWrap();
 }
 
-const AUTOMATIC_RECRUIT_BADGES = ['현영건', '로켓와우', '구매확정'];
-const RETIRED_RECRUIT_BADGES = ['와우 필수', '포토리뷰', '사진 5장+'];
+const AUTOMATIC_RECRUIT_BADGES = ['현영건', '로켓와우', '사진 5장+', '구매확정'];
+const RETIRED_RECRUIT_BADGES = ['와우 필수', '포토리뷰'];
 function _isRecruitAutomaticBadge(val) { return AUTOMATIC_RECRUIT_BADGES.includes(val); }
 function _isRetiredRecruitBadge(val) { return RETIRED_RECRUIT_BADGES.includes(val); }
 
 /* 배지는 입력값이 아니라 업무 규칙의 파생 결과다.
    - 현영건: 현금영수증 발행
    - 로켓와우: 쿠팡 채널
+   - 사진 5장+: 포토가 포함된 리뷰 조합
    - 구매확정: 구매확정이 포함된 리뷰 조합
    예전에 수동으로 붙인 값과 폐기한 배지는 저장 시 함께 정리한다. */
 function syncRecruitAutomaticBadges() {
@@ -3011,6 +3016,7 @@ function syncRecruitAutomaticBadges() {
   const next = _recruitBadges.filter((badge) => !_isRecruitAutomaticBadge(badge) && !_isRetiredRecruitBadge(badge));
   if (required) next.push('현영건');
   if (channel === '쿠팡') next.push('로켓와우');
+  if (reviewType === 'photo') next.push('사진 5장+');
   if (reviewType === 'confirm') next.push('구매확정');
   const changed = next.length !== _recruitBadges.length || next.some((b, i) => b !== _recruitBadges[i]);
   _recruitBadges = next;
@@ -3832,6 +3838,7 @@ async function saveRecruitPostImpl() {
 // callable even when the host page's script scope is isolated.
 async function saveRecruitPost() {
   try {
+    if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();
     return await saveRecruitPostImpl();
   } catch (e) {
     const reason = e && e.message ? e.message : '알 수 없는 저장 전 오류';

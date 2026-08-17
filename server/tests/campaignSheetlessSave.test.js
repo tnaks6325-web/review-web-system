@@ -15,7 +15,7 @@ let passed = 0;
 function ok(name, condition) { assert.ok(condition, name); passed++; console.log('  ✓ ' + name); }
 
 ok('프론트 게시 점검은 시트·탭 연결 여부를 검사하지 않는다',
-  !/const tabKey = document\.getElementById\("rf_linked_tab"\)/.test(
+  /if \(tabKey && !\(tabMeta && tabMeta\.tabGid\)\)/.test(
     recruit.slice(recruit.indexOf('function participationCheckErrors()'), recruit.indexOf('function renderPartCheck()'))
   ));
 ok('저장 요청이 연결 없음 의도를 명시한다',
@@ -26,10 +26,10 @@ ok('연결 없음 선택은 안내 문구와 선택 항목으로 표시된다',
   && /탭명 <span class="rf-optional">선택<\/span>/.test(modal));
 ok('점검표는 미연결을 안내만 하고 게시 불가 상태로 표시하지 않는다',
   /시트 탭 미연결 — 나중에 추가 가능/.test(recruit)
-  && !/errs\.some\(e => e\.includes\("gid"\)\)/.test(recruit));
+  && !/if \(!tabKey/.test(recruit.slice(recruit.indexOf('function participationCheckErrors()'), recruit.indexOf('function renderPartCheck()'))));
 ok('서버 활성화 점검은 시트·탭 연결 여부를 게시 조건으로 삼지 않는다',
-  !/const hasAnyLink = !!\(c\.linked_sheet_id \|\| c\.linked_tab_name \|\| c\.linked_tab_gid\)/.test(routes)
-  && !/연결 시트\/탭 정보를 모두 입력해주세요/.test(routes));
+  /const hasAnyLink = !!\(c\.linked_sheet_id \|\| c\.linked_tab_name \|\| c\.linked_tab_gid\)/.test(routes)
+  && /if \(hasAnyLink && \(!c\.linked_sheet_id \|\| !c\.linked_tab_name \|\| !c\.linked_tab_gid\)\)/.test(routes));
 ok('카드의 미연결 상태는 게시 불가로 표시하지 않는다',
   !/시트 탭 미연결 — 게시할 수 없습니다/.test(
     fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'js', 'campaign-cards.js'), 'utf8')

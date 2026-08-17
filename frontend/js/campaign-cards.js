@@ -353,19 +353,21 @@
   /** 관리자 카드 하단 = 스펙 두 줄(유입방식·결제방식·총 모집 / 연결 탭) */
   function _adminSpec(c) {
     const chips = [];
-    // 유입방식은 연결 작업오더의 명시값이 최우선이다. 작업 가이드는 링크유입에도 함께
-    // 있을 수 있으므로, 가이드 내용으로 링크유입을 가이드유입으로 덮어쓰면 안 된다.
+    // 유입방식 — 리뷰어 화면의 [상품 페이지 열기] 노출 규칙과 **같은 기준**으로 판정한다
+    //   (카드는 링크유입이라는데 리뷰어 화면엔 버튼이 없는 식의 불일치 차단).
+    //   모집공고에서 고른 구조값을 최우선으로 쓴다. 유입가이드 텍스트는 링크유입에도
+    //   안내문으로 들어갈 수 있으므로, 텍스트 유무로 가이드유입으로 덮어쓰지 않는다.
     let _wd = c.work_detail;
     if (typeof _wd === 'string') { try { _wd = JSON.parse(_wd); } catch (_) { _wd = null; } }
+    const inflowType = _wd && _wd.inflowType;
     const hasGuide = !!(_wd && _wd.inflowGuideHtml);
-    const isLinkInflow = c.inflowType === 'link' || (!c.inflowType && c.landing_url && !hasGuide);
+    const isLinkInflow = inflowType === 'link' || (!inflowType && c.landing_url && !hasGuide);
     chips.push(isLinkInflow
       ? '<span class="sp-chip flow">링크유입</span>'
       : '<span class="sp-chip flow">가이드유입</span>');
     // 결제·리뷰 형태 배지(공고 등록 시 고른 값) — 접지 않고 전부 노출
     (c.badges || []).forEach(b => {
-      // 이전 버전이 포토 리뷰만으로 자동 저장한 사진 5장+는 실제 요구사항이 아니므로 숨긴다.
-      if (b && String(b) !== '사진 5장+') chips.push('<span class="sp-chip pay">' + _esc(b) + '</span>');
+      if (b) chips.push('<span class="sp-chip pay">' + _esc(b) + '</span>');
     });
     const total = Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;

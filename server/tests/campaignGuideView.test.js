@@ -103,7 +103,8 @@ ok('⑤-3 참여 후(vJoined) 화면에서 chatBox 카드 제거', !/id="chatBox
 ok('⑤-4 제출완료 화면 chatUrl은 재조회로 채움(_ensureDoneChat)', /_ensureDoneChat/.test(camp));
 
 // ④·⑤ 서버 work-detail 게이트
-ok('④ work-detail 응답에 inflowType(연결 작업오더 역조회)', /_lookupInflowType/.test(campRoutes) && /inflowType,/.test(campRoutes));
+ok('④ work-detail 응답 유입방식은 공고 직접설정 우선, 작업오더는 폴백',
+  /workDetail && workDetail\.inflowType\) \|\| \(await _lookupInflowType/.test(campRoutes) && /inflowType,/.test(campRoutes));
 ok('⑤ chatUrl은 제출확정(isSubmitted) 후에만 반환', /chatUrl: isSubmitted \? \(camp\.chat_url \|\| ''\) : ''/.test(campRoutes));
 
 // ⑥ [v1.1] 리뷰 내역 카드 → 참여상품 정보 시트 + participation-brief
