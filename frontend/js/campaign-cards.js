@@ -162,10 +162,10 @@
       .rc-view-row .pcard .pbtn{padding:8px 0;font-size:.74rem;margin-top:2px}
       .rc-view-row .pcard .pnote{font-size:.6rem}
       .rc-view-row .pcard .poptchip{margin-top:2px}
-      /* ★ 064 관리자 별표 토글 — 우측상단 배지열 맨 앞(관리자 토큰 보유 시에만 렌더) */
-      .pcard .pstarchip{border:1px solid #E5E7EB;background:rgba(255,255,255,.94);color:#9CA3AF;border-radius:7px;
-        padding:2px 7px;font-size:.78rem;line-height:1.2;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15)}
-      .pcard .pstarchip.on{background:#FEF3C7;border-color:#FCD34D;color:#B45309}
+      /* 인기 설정은 관리자에게만: 썸네일 좌측 상단의 고정 이모지 ON/OFF 버튼 */
+      .pcard .pt-pop-toggle{border:1px solid #FCA5A5;background:rgba(255,255,255,.95);color:#9CA3AF;border-radius:7px;
+        padding:3px 7px;font-size:.64rem;font-weight:900;line-height:1.2;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+      .pcard .pt-pop-toggle.on{background:#FEE2E2;border-color:#F87171;color:#B91C1C}
       /* 관리자 수정 버튼: 썸네일 좌하단(상단 배지·리본과 겹치지 않게) */
       .pcard .peditchip{position:absolute;bottom:8px;left:8px;z-index:7;font-size:.6rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .peditchip:hover{background:#1550b8}
@@ -571,18 +571,16 @@
     const thumbInner = c.thumbnail_url
       ? `<img class="pt-img" src="${_esc(c.thumbnail_url)}" alt="" loading="lazy">`
       : `<div class="pt-ph">🛍️</div>`;
-    // ★ 064: 관리자(진짜 admin_token)에게만 카드 우측상단 ⭐ 별표 토글 — 리뷰어 홈에서도 우선노출 즉시 조작.
-    //   별표한 순서대로 최상단(서버 pinned_at ASC 정렬). 리뷰어·스코프 토큰에겐 렌더 자체를 안 함.
-    // 관리자 모집공고(admin:true)에서도 같은 별표를 쓴다 — 별표 UI를 둘로 두면 카드에 두 개가 뜬다.
-    const starChip = (admin || _realAdminTok())
-      ? `<button type="button" class="pstarchip${c.pinned_at ? ' on' : ''}" title="${c.pinned_at ? '별표 해제(우선노출 해제)' : '별표 — 목록 최상단 고정(여러 개면 먼저 별표한 순서대로)'}"
-          onclick="event.stopPropagation();event.preventDefault();CampCards.togglePin('${_esc(c.id)}', ${c.pinned_at ? 'false' : 'true'})">${c.pinned_at ? '⭐' : '☆'}</button>`
+    // 인기상품만 관리자에게 ON/OFF로 제공한다. 별표 우선노출은 제거됐다.
+    const popToggle = c.participation_mode && (admin || _realAdminTok())
+      ? `<button type="button" class="pt-pop-toggle${c.is_popular === true ? ' on' : ''}" title="${c.is_popular === true ? '인기 설정 해제' : '인기 설정'}"
+          onclick="event.stopPropagation();event.preventDefault();CampCards.togglePopular('${_esc(c.id)}', ${c.is_popular !== true})">🔥 ${c.is_popular === true ? 'ON' : 'OFF'}</button>`
       : '';
     // 🧾 현금영수증 대상 배지(D안 ① — 참여 전 인지). 서버가 연결 탭 income_type으로 판정한
     //   cashReceiptRequired === true 일 때만(필드 부재 = 구버전 백엔드/조회 실패 → 배지 없음).
     const crChip = c.cashReceiptRequired === true ? `<span class="pt-badge cr">🧾 현금영수증</span>` : '';
-    const badges = (channel || c.delivery_type || starChip || crChip)
-      ? `<div class="pt-badges">${starChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
+    const badges = (channel || c.delivery_type || crChip)
+      ? `<div class="pt-badges">${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
     // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다
@@ -611,7 +609,7 @@
     // 덤프가 남아 있으면 관리자에게만 표시. 수정 모달을 열면 같은 감지가 [🧹 정리]를 띄운다.
     const cleanBadge = (admin && _campNeedsFieldCleanup(c))
       ? `<span class="pt-pop" style="background:#B45309" title="유의사항·리뷰가이드에 작업오더 원문이 남아 있어요 — 수정 모달에서 🧹 정리">🧹 본문 정리</span>` : '';
-    const topleft = (ribbon || popBadge || hidBadge || cleanBadge) ? `<div class="pt-topleft">${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
+    const topleft = (popToggle || ribbon || popBadge || hidBadge || cleanBadge) ? `<div class="pt-topleft">${popToggle}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
@@ -1174,36 +1172,36 @@
     }
   }
 
-  /** ★ 064: 리뷰어 홈 카드의 관리자 별표 토글 — POST /flags(adminOrMaster) 후 목록 재렌더.
+  /** ★ 인기상품 ON/OFF — POST /flags(adminOrMaster) 후 목록 재렌더.
    *  진짜 admin_token 전용(_realAdminTok — 스코프 토큰은 서버 403이라 버튼 미노출과 짝).
    *  성공 시: 홈이면 loadRecruitPreview() 재호출(서버가 /list 캐시를 즉시 무효화해 새 순서 반영),
    *  로더가 없는 화면(campaign.html 상세 등)은 버튼 상태만 제자리 갱신.
    *  ★★ 경로는 호스트가 재기준한다(`window.CAMPAIGN_ADMIN_API` — index-recruit.js `_campApi`와 같은 장치):
    *     리뷰웹시스템[3버전]은 인트라넷 SSO 토큰(`via:'intranet'`)을 쓰는데 그 토큰은 authMiddleware에서
    *     `/api/trackb/*` 로만 도달 가능하므로, 여기서 `/api/campaign/admin/...` 을 하드코딩하면
-   *     별표만 403("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다. 전역 미설정 = 종전 경로. */
-  async function togglePin(campId, on) {
+   *     인기 설정만 403("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다. 전역 미설정 = 종전 경로. */
+  async function togglePopular(campId, on) {
     const tok = _realAdminTok();
     if (!tok) return;
     try {
       const res = await fetch(_flagsUrl(campId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-        body: JSON.stringify({ pinned: on === true }),
+        body: JSON.stringify({ popular: on === true }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);
       if (typeof window.loadRecruitList === 'function') {
-        await window.loadRecruitList();      // 관리자 모집공고: 새 순서로 재렌더
+        await window.loadRecruitList();      // 관리자 모집공고: ON/OFF 상태 재렌더
       } else if (typeof window.loadRecruitPreview === 'function') {
-        await window.loadRecruitPreview();   // 홈: 새 순서로 재렌더(별표 상태 포함)
+        await window.loadRecruitPreview();   // 홈: 인기 상태 재렌더
       } else {
         // 상세 등 로더 없는 화면: 버튼만 제자리 갱신
-        document.querySelectorAll('.pcard[data-camp-id="' + (window.CSS && CSS.escape ? CSS.escape(campId) : campId) + '"] .pstarchip')
-          .forEach(b => { b.classList.toggle('on', on === true); b.textContent = on ? '⭐' : '☆'; });
+        document.querySelectorAll('.pcard[data-camp-id="' + (window.CSS && CSS.escape ? CSS.escape(campId) : campId) + '"] .pt-pop-toggle')
+          .forEach(b => { b.classList.toggle('on', on === true); b.textContent = on ? '🔥 ON' : '🔥 OFF'; });
       }
     } catch (e) {
-      alert('별표 설정 실패: ' + (e && e.message ? e.message : e));
+      alert('인기 설정 실패: ' + (e && e.message ? e.message : e));
     }
   }
 

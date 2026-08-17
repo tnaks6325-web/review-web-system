@@ -174,17 +174,14 @@ function _buildRecruitCard(c) {
   window._recruitCardTitles[c.id] = c.title || "";
   const div = document.createElement("div");
   div.className = `recruit-card status-${c.status || "draft"}`;
-  div.style.position = "relative";   // ★ 064: 우측상단 토글(별표·인기) 배치 기준
-  // ★ 064: 카드 우측상단 토글 — ⭐ 별표(우선노출: 먼저 별표한 순서대로 최상단) + 🔥 인기(리뷰어 [인기!] 배지 + 일반모집 선행참여 조건, 참여형만)
-  const pinOn = !!c.pinned_at, popOn = c.is_popular === true;
+  div.style.position = "relative";
+  // 인기상품만 남긴다. 별표 우선노출은 제거됐고, 인기 설정만 선행참여 게이트를 건다.
+  const popOn = c.is_popular === true;
   const flagBtns = `
-    <div style="position:absolute;top:10px;right:12px;display:flex;gap:6px;z-index:2">
+    <div style="position:absolute;top:10px;left:12px;display:flex;z-index:2">
       ${c.participation_mode ? `<button type="button" title="${popOn ? "인기 해제" : "인기 설정 — 리뷰어에게 [인기!] 배지가 붙고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 걸립니다"}"
         onclick="event.stopPropagation();toggleCampFlag('${escHtml(c.id)}','popular',${popOn ? "false" : "true"})"
-        style="border:1px solid ${popOn ? "#FCA5A5" : "#E5E7EB"};cursor:pointer;background:${popOn ? "#FEE2E2" : "#F9FAFB"};color:${popOn ? "#B91C1C" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.72rem;font-weight:800">🔥${popOn ? " 인기" : ""}</button>` : ""}
-      <button type="button" title="${pinOn ? "별표 해제(우선노출 해제)" : "별표 — 목록 최상단 고정(여러 개면 먼저 별표한 순서대로)"}"
-        onclick="event.stopPropagation();toggleCampFlag('${escHtml(c.id)}','pinned',${pinOn ? "false" : "true"})"
-        style="border:1px solid ${pinOn ? "#FCD34D" : "#E5E7EB"};cursor:pointer;background:${pinOn ? "#FEF3C7" : "#F9FAFB"};color:${pinOn ? "#B45309" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.86rem;line-height:1">${pinOn ? "⭐" : "☆"}</button>
+        style="border:1px solid ${popOn ? "#FCA5A5" : "#E5E7EB"};cursor:pointer;background:${popOn ? "#FEE2E2" : "#F9FAFB"};color:${popOn ? "#B91C1C" : "#9CA3AF"};border-radius:8px;padding:4px 9px;font-size:.72rem;font-weight:800">🔥 ${popOn ? "ON" : "OFF"}</button>` : ""}
     </div>`;
   div.innerHTML = flagBtns + `
     <div class="recruit-card-header">
@@ -218,11 +215,10 @@ function _buildRecruitCard(c) {
   return div;
 }
 
-/* ★ 064: 카드 우측상단 토글(별표·인기) — 즉시 저장 후 목록 재정렬.
-   별표 순서 = 먼저 별표한 공고가 위(서버 pinned_at ASC · 재별표해도 원래 자리 유지). */
+/* 인기상품 ON/OFF — 즉시 저장 후 목록을 다시 그린다. */
 async function toggleCampFlag(campId, kind, on) {
   try {
-    const body = kind === "pinned" ? { pinned: on } : { popular: on };
+    const body = { popular: on };
     const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/flags`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
@@ -230,11 +226,9 @@ async function toggleCampFlag(campId, kind, on) {
     });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
-    showToast(kind === "pinned"
-      ? (on ? "⭐ 별표 — 목록 최상단에 고정됩니다 (여러 개면 먼저 별표한 순서대로)" : "별표를 해제했습니다")
-      : (on ? "🔥 인기 설정 — 리뷰어에게 [인기!] 배지가 표시되고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 적용됩니다" : "인기 설정을 해제했습니다"),
+    showToast(on ? "🔥 인기 설정 — 리뷰어에게 [인기!] 배지가 표시되고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 적용됩니다" : "인기 설정을 해제했습니다",
       "success");
-    await loadRecruitList();   // 서버 정렬(별표 우선) 즉시 반영
+    await loadRecruitList();
   } catch (e) {
     showToast("설정 실패: " + e.message, "error");
   }
@@ -3654,8 +3648,7 @@ async function saveRecruitPostImpl() {
     status:         document.getElementById("rf_status").value,
     // 종료일 — 시트 일정과 다르면 화면에 경고가 뜨고 실제 모집은 시트를 따른다(참고값으로 보관)
     deadline:       document.getElementById("rf_deadline")?.value || null,
-    // ★ 064: 노출 순서 UI 제거 — 정렬은 별표(pinned_at)가 담당. 서버가 미전송을 0으로 강제하므로
-    //   기존값 보존을 위해 편집 모드에선 로드값을 재전송(신규는 0).
+    // 노출 순서 UI는 제거됐다. 기존 데이터 호환을 위해 값만 보존해 전송한다.
     sort_order:     Number(document.getElementById("rf_sort_order")?.value ?? (window._recruitEditLoaded?.sort_order ?? 0)) || 0,
     // 작업오더 프리필로 만든 신규 공고면 정방향 링크(source_work_order_id) 즉시 기록 —
     // work-detail 유입방식 역조회의 보조키(주: linked_campaign_id). 편집 시엔 미전송=COALESCE 유지.
