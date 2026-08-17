@@ -1608,7 +1608,7 @@ function _renderWorkOrderCard(o) {
   const st = o.status || "submitted";
   const [bg, fg] = WO_COLORS[st] || ["#F3F4F6","#374151"];
   const date = (o.created_at || "").replace("T"," ").substring(0,16);
-  const nexts = WO_TRANSITIONS[st] || [];
+  const nexts = (WO_TRANSITIONS[st] || []).filter(ns => ns === "rejected" || ns === "revision");
   const btns = nexts.map(ns => {
     const [nbg, nfg] = WO_COLORS[ns] || ["#e8f1fe","#1b64da"];
     return `<button onclick="woTransition('${o.id}','${ns}')"
@@ -1617,7 +1617,6 @@ function _renderWorkOrderCard(o) {
 
   const memo = o.admin_memo
     ? `<div style="margin-top:4px;font-size:.74rem;color:#991B1B"><b>메모:</b> ${escHtml(o.admin_memo)}</div>` : "";
-  const woChatReg = !!(o.chat_room_url && String(o.chat_room_url).trim());
 
   return `<div class="wo-runtime-card" style="border:1px solid #D7E0EA;border-radius:12px;padding:12px 14px;margin-bottom:10px;background:#fff;box-shadow:0 4px 14px rgba(28,43,68,.05)">
     <div class="wo-runtime-card__heading" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1637,13 +1636,6 @@ function _renderWorkOrderCard(o) {
       <div id="woMemoLog_${o.id}" style="margin-top:6px">${_woMemoLogInner(o)}</div>
     </div>
     <div class="wo-runtime-card__actions" style="margin-top:10px;border-top:1px solid #E5EAF1;padding-top:10px">
-      <!-- 카톡 팀채팅방URL 등록 -->
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)" ${woChatReg ? "readonly" : ""}
-          style="width:300px;max-width:100%;padding:8px 10px;border:1.5px solid ${woChatReg?'#6EE7B7':'#E5E7EB'};border-radius:7px;font-size:.78rem;${woChatReg?'background:#ECFDF5;color:#065F46;font-weight:600':''}">
-        <button id="woChatBtn_${o.id}" data-reg="${woChatReg?1:0}" onclick="woToggleChat('${o.id}')"
-          style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${woChatReg?'#FCD34D':'#3182f6'};background:${woChatReg?'#FEF9C3':'#3182f6'};color:${woChatReg?'#92400E':'#fff'}">${woChatReg?'링크수정':'등록'}</button>
-      </div>
       <!-- 처리 메모 → 인트라넷 전송 -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo||"")}" placeholder="처리 메모 / 보완 사유 (인트라넷으로 전송)"

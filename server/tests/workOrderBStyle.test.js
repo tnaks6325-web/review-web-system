@@ -34,7 +34,7 @@ test('keeps the real 1120px list width and processing column', () => {
 test('keeps existing processing actions in the real work-order renderer', () => {
   assert.match(source, /function _woEditActions\(o\)/);
   assert.match(source, /접수하기/);
-  assert.match(source, /상태변경/);
+  assert.match(source, /보완&반려/);
   assert.match(source, /관리자 수정/);
 });
 

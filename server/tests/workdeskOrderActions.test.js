@@ -149,19 +149,20 @@ t('★★ prompt() 로 영문 상태값을 타이핑시키지 않는다', () => 
   assert.ok(/_woStatusPick\(/.test(body), '버튼이 전이를 실행하지 않는다');
 });
 
-t('종착 상태는 버튼 대신 이유를 말한다', () => {
-  assert.ok(/더 바꿀 수 있는 상태가 없습니다/.test(HTML));
+t('보완·반려만 노출하고, 그 외 상태는 사유를 말한다', () => {
+  const i = HTML.indexOf('function _woStatus(id){');
+  const body = HTML.slice(i, HTML.indexOf('async function _woStatusPick', i));
+  assert.ok(/filter\(s=>s==='rejected'\|\|s==='revision'\)/.test(body));
+  assert.ok(/이 상태에서는 보완 또는 반려할 수 없습니다/.test(body));
 });
 
-t('서버가 요구하는 두 조건을 누르기 전에 화면에서 받는다', () => {
+t('보완·반려 사유는 화면과 서버에서 모두 필수다', () => {
   const i = HTML.indexOf('async function _woStatusPick(id, to){');
   const body = HTML.slice(i, i + 1200);
-  assert.ok(/to==='published' && !chat/.test(body), '발행 시 카톡 URL 필수 검사가 없다');
-  assert.ok(/to==='rejected'\|\|to==='revision'/.test(body) && /confirm\(/.test(body),
-    '반려·보완요청 사유 확인이 없다');
-  assert.ok(/chat_room_url:chat/.test(body) && /admin_memo:memo/.test(body), '메모·URL 을 함께 보내지 않는다');
-  // 서버도 같은 조건을 강제하고 있어야 한다(화면만 막으면 우회 가능)
-  assert.ok(/카톡 팀채팅방URL이 있어야 모집공고발행이 가능합니다/.test(ORD));
+  assert.ok(/if\(!memo\)/.test(body), '사유 빈값 검사가 없다');
+  assert.ok(/admin_memo:memo/.test(body), '사유를 보내지 않는다');
+  assert.ok(!/woStChat|chat_room_url/.test(body), '카톡 URL 입력이 남아 있다');
+  assert.ok(/반려 또는 보완요청 사유를 입력해주세요/.test(ORD), '서버 사유 검사가 없다');
 });
 
 /* ══════════════════════════════════════════════════════════
