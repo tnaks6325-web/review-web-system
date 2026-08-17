@@ -1428,7 +1428,7 @@ function _igRender(field) {
   let h = "";
   if (!list.length) {
     h = `<button type="button" class="ig-empty" data-igadd="1">
-           <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V · 클릭</span></button>`;
+           <span class="t1">＋ 사진 넣기</span><span class="t2">끌어다 놓기 · Ctrl+V<br>클릭</span></button>`;
   } else {
     list.forEach((im, i) => {
       const cls = "ig-thumb" + (im.state === "up" ? " up" : im.state === "bad" ? " bad" : "");
@@ -3172,7 +3172,7 @@ function _syncCampThumbUrlPreview() {
   if (state) state.textContent = "불러오는 중…";
   image.onload = function () {
     wrap.classList.remove("is-error");
-    if (state) state.textContent = "미리보기";
+    if (state) state.innerHTML = "미리<br>보기";
   };
   image.onerror = function () {
     wrap.classList.add("is-error");
