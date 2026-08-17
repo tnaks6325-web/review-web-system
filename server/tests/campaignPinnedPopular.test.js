@@ -79,7 +79,11 @@ ok('cards: 인기 ON/OFF는 진짜 admin_token 또는 관리자 목록만',
   && /const popToggle = c\.participation_mode && \(admin \|\| _realAdminTok\(\)\)/.test(cards)
   && !/pstarchip/.test(cards));
 ok('cards: 인기 아이콘은 썸네일 좌상단에서 클릭해 ON/OFF', /pt-pop-toggle/.test(cards) && /pt-topleft">\$\{popToggle\}/.test(cards) && /CampCards\.togglePopular/.test(cards));
-ok('cards: togglePopular — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePopular\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
+ok('cards: OFF→ON은 우선순위 선택 후 /flags로 저장하고 홈은 재렌더',
+  /async function togglePopular\(campId, on, prerequisiteCampaignIds\)/.test(cards)
+  && /openPopularPriorityModal/.test(cards)
+  && /prerequisiteCampaignIds/.test(cards)
+  && /loadRecruitPreview === 'function'/.test(cards));
 ok('cards: 공개 API도 실제 함수명 togglePopular을 내보낸다(모듈 초기화 중단 방지)',
   /window\.CampCards = \{[\s\S]*togglePopular[\s\S]*\};/.test(cards) && !/openAdminEdit, togglePin,/.test(cards));
 // ★★ 리뷰웹시스템[3버전](인트라넷 SSO `via:'intranet'`)은 authMiddleware가 `/api/trackb/*` 로만
@@ -91,6 +95,11 @@ ok('cards: togglePopular 경로는 호스트가 재기준(CAMPAIGN_ADMIN_API) �
   && /await fetch\(_flagsUrl\(campId\)/.test(cards)
   && !/['"]\/api\/campaign\/admin\/['"] ?\+ ?encodeURIComponent\(campId\) ?\+ ?['"]\/flags['"]/.test(cards));
 ok('flags: 토글 직후 /list 캐시 무효화', /_listCache = \{ at: 0, rows: null, countsMap: null(, feeMap: null)? \};[\s\S]{0,200}isPopular/.test(routes));
+ok('우선순위: 첫 공고가 마감·총원충족되면 다음 비인기 공고로 자동 전환',
+  /campaign_popular_prerequisites/.test(routes)
+  && /async function _currentPopularPrerequisite/.test(routes)
+  && /ORDER BY q\.priority/.test(routes)
+  && /COALESCE\(a\.submitted, 0\) < c\.recruit_total/.test(routes));
 
 // ── 관리자 UI ──
 ok('admin.html: 노출 순서(rf_sort_order) 제거', !adminHtml.includes('rf_sort_order'));

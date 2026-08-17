@@ -71,6 +71,7 @@ const REQUIRED_SCHEMA = [
   ['payment_batches', 'board_recorded_count'],    // 110 actual workboard write outcome
   ['payment_batches', 'board_queued_count'],      // 110 queued writes are not records yet
   ['payment_result_uploads', 'file_blob'],
+  ['campaign_popular_prerequisites', 'priority'], // 115 인기공고 선행참여 우선순위
 ];
 
 async function _runOneMigration(pool, sql) {

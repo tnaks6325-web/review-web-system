@@ -122,6 +122,36 @@ function updateRecruitPopularity(campId, on) {
 }
 window.updateRecruitPopularity = updateRecruitPopularity;
 
+/** 인기 ON 직전 선행참여 공고 우선순위 선택. 선택 순서가 1→2→3 순위다. */
+function openPopularPriorityModal(campId) {
+  const target = _recruitLastList.find(c => String(c.id) === String(campId));
+  const candidates = _recruitLastList.filter(c => String(c.id) !== String(campId)
+    && c.participation_mode && c.is_popular !== true && c.status === 'active');
+  if (!target) return;
+  const old = document.getElementById('popularPriorityModal');
+  if (old) old.remove();
+  const rows = candidates.map((c, i) => `<label style="display:flex;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid #eef2f7;cursor:pointer">
+    <input type="checkbox" value="${escHtml(c.id)}" data-priority="${i + 1}" style="width:17px;height:17px;accent-color:#2563eb">
+    <span style="flex:1;font-weight:700">${escHtml(c.title || '(제목 없음)')}</span><small style="color:#64748b">모집중</small></label>`).join('') || '<p style="color:#64748b">선택 가능한 비인기 모집공고가 없습니다.</p>';
+  const modal = document.createElement('div');
+  modal.id = 'popularPriorityModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:18px';
+  modal.innerHTML = `<section role="dialog" aria-modal="true" style="width:min(620px,100%);max-height:86vh;overflow:auto;background:#fff;border-radius:16px;box-shadow:0 22px 60px rgba(15,23,42,.3)">
+    <div style="padding:22px 24px 14px;border-bottom:1px solid #e2e8f0"><b style="font-size:18px">🔥 인기상품 설정</b><p style="margin:5px 0 0;color:#64748b">선택 순서대로 자동 전환됩니다.</p></div>
+    <div style="padding:14px 24px"><div style="font-size:12px;color:#64748b;margin-bottom:5px">인기상품</div><b>${escHtml(target.title || '')}</b><div style="margin-top:18px;font-size:13px;font-weight:800">선행참여 우선순위</div>${rows}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 24px;border-top:1px solid #e2e8f0"><button type="button" data-close style="padding:9px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff">취소</button><button type="button" data-save style="padding:9px 14px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:800">ON 저장</button></div></section>`;
+  modal.querySelector('[data-close]').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  modal.querySelector('[data-save]').onclick = async () => {
+    const ids = [...modal.querySelectorAll('input:checked')].map(x => x.value);
+    const btn = modal.querySelector('[data-save]'); btn.disabled = true; btn.textContent = '저장 중…';
+    try { await CampCards.togglePopular(campId, true, ids); modal.remove(); }
+    catch (_) { btn.disabled = false; btn.textContent = 'ON 저장'; }
+  };
+  document.body.appendChild(modal);
+}
+window.openPopularPriorityModal = openPopularPriorityModal;
+
 /* 삭제 모드 토글 — 카드에서 삭제를 뺀 대신, 켰을 때만 선택·삭제할 수 있다 */
 function toggleRecruitDelMode() {
   window._recruitDelMode = !window._recruitDelMode;
