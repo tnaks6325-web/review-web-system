@@ -1191,8 +1191,8 @@
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);
-      if (typeof window.loadRecruitList === 'function') {
-        await window.loadRecruitList();      // 관리자 모집공고: ON/OFF 상태 재렌더
+      if (typeof window.updateRecruitPopularity === 'function' && window.updateRecruitPopularity(campId, on === true)) {
+        // 관리자 모집공고: 목록 재요청 없이 해당 카드만 즉시 반영
       } else if (typeof window.loadRecruitPreview === 'function') {
         await window.loadRecruitPreview();   // 홈: 인기 상태 재렌더
       } else {

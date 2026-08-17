@@ -99,7 +99,10 @@ ok('index-recruit: sort_order 읽기 null-safe(+편집 로드값 재전송 = 0-�
   !/getElementById\("rf_sort_order"\)\.value/.test(recruit) && /_recruitEditLoaded\?\.sort_order/.test(recruit));
 ok('index-recruit: 새 공고 열 때 로드값 초기화(이전 편집값 누수 방지)', /window\._recruitEditLoaded = null/.test(recruit));
 ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]/.test(recruit) && /c\.participation_mode \? `<button[^`]*'popular'/.test(recruit));
-ok('index-recruit: toggleCampFlag → /flags POST + 목록 재정렬', /\/flags`/.test(recruit) && /await loadRecruitList\(\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400)));
+ok('index-recruit: toggleCampFlag → /flags POST + 현재 카드 즉시 갱신',
+  /\/flags`/.test(recruit)
+  && /updateRecruitPopularity\(campId, on\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400))
+  && !/await loadRecruitList\(\)/.test(recruit.slice(recruit.indexOf('function toggleCampFlag'), recruit.indexOf('function toggleCampFlag') + 1400)));
 
 // ── 리뷰어 UI ──
 ok('campaign-cards: [인기!] 배지(pt-pop) — is_popular === true 만', /c\.is_popular === true \? `<span class="pt-pop">/.test(cards) && /\.pcard \.pt-pop\{/.test(cards));

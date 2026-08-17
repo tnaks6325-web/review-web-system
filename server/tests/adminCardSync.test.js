@@ -88,8 +88,11 @@ ok('★ 인기 ON/OFF는 썸네일 좌상단 단일 컨트롤(별표 없음)',
   /const popToggle = c\.participation_mode && \(admin \|\| _realAdminTok\(\)\)/.test(cc)
   && /pt-topleft">\$\{popToggle\}/.test(cc)
   && !/pstarchip/.test(cc));
-ok('인기 토글은 관리자 목록도 새로고침한다',
-  /typeof window\.loadRecruitList === 'function'[\s\S]{0,120}loadRecruitList\(\)/.test(cc));
+ok('인기 토글은 목록 재요청 없이 현재 카드만 즉시 반영한다',
+  /window\.updateRecruitPopularity\(campId, on === true\)/.test(cc)
+  && /function updateRecruitPopularity\(campId, on\)/.test(rec)
+  && /found\.is_popular = on === true/.test(rec)
+  && !/await loadRecruitList\(\);/.test(rec.slice(rec.indexOf('async function toggleCampFlag'), rec.indexOf('async function toggleCampFlag') + 1200)));
 
 /* ── 삭제 모드 ── */
 ok('카드에는 삭제 버튼이 없다(액션 = 수정·시트·관제·게시)',

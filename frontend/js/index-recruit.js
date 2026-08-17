@@ -104,6 +104,24 @@ function _renderRecruitCards(list) {
   _syncDelBar();
 }
 
+/**
+ * 인기 ON/OFF 저장 직후의 화면 동기화.
+ *
+ * 목록 전체를 다시 요청하면 카드가 사라졌다 다시 그려져 토글 직후 화면이
+ * "새로고침"되는 것처럼 보인다. 서버 저장이 성공한 뒤에는 현재 목록 캐시의
+ * 해당 공고만 바꿔 공용 카드 렌더러로 즉시 다시 그린다. 다음 일반 목록 조회는
+ * 서버값을 다시 기준으로 삼으므로 클라이언트 캐시가 장기 출처가 되지 않는다.
+ */
+function updateRecruitPopularity(campId, on) {
+  const id = String(campId);
+  const found = _recruitLastList.find(c => String(c.id) === id);
+  if (!found) return false;
+  found.is_popular = on === true;
+  _renderRecruitCards(_recruitLastList);
+  return true;
+}
+window.updateRecruitPopularity = updateRecruitPopularity;
+
 /* 삭제 모드 토글 — 카드에서 삭제를 뺀 대신, 켰을 때만 선택·삭제할 수 있다 */
 function toggleRecruitDelMode() {
   window._recruitDelMode = !window._recruitDelMode;
@@ -215,7 +233,7 @@ function _buildRecruitCard(c) {
   return div;
 }
 
-/* 인기상품 ON/OFF — 즉시 저장 후 목록을 다시 그린다. */
+/* 인기상품 ON/OFF — 저장 성공 후 해당 카드만 즉시 반영한다. */
 async function toggleCampFlag(campId, kind, on) {
   try {
     const body = { popular: on };
@@ -226,9 +244,9 @@ async function toggleCampFlag(campId, kind, on) {
     });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    updateRecruitPopularity(campId, on);
     showToast(on ? "🔥 인기 설정 — 리뷰어에게 [인기!] 배지가 표시되고, 일반 모집 1건 제출완료당 인기 1건 참여(1:1) 조건이 적용됩니다" : "인기 설정을 해제했습니다",
       "success");
-    await loadRecruitList();
   } catch (e) {
     showToast("설정 실패: " + e.message, "error");
   }
