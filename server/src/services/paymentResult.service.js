@@ -50,7 +50,9 @@ function decideAutoApply({ summary, duplicateApplied = false }) {
   const blockers = [];
   if (!items) blockers.push('no_pending_items');
   else if (matchRate < AUTO_APPLY_MATCH_RATE) blockers.push('match_below_90');
-  if ((Number(s.unmatchedResults) || 0) > 0) blockers.push('result_outside_batch');
+  /* 회차 밖 행은 파일에 그대로 보여 주되, 이 회차의 매칭 성공 건을 막지는 않는다.
+     실제 반영 대상은 pairs 로 짝지어진 행뿐이므로 밖의 행이 다른 회차에 섞여도
+     이 회차의 입금일을 누락시키지 않는다. */
   if (duplicateApplied) blockers.push('duplicate_file');
   return { allowed: blockers.length === 0, matchRate, blockers };
 }
@@ -165,7 +167,8 @@ async function _analyze(batchId, fileName, base64) {
     view: [...m.pairs, ...donePairs].map(_pairView),
     unmatchedResults: m.unmatchedResults.map(r => ({
       seq: r.seq, accountTail: String(r.accountDigits || '').slice(-4),
-      amount: r.amount, holder: r.holder, status: r.statusRaw, success: r.success,
+      amount: r.amount, holder: r.holder, memo: r.memo || '',
+      transferredAt: r.transferredStamp || '', status: r.statusRaw, success: r.success,
     })),
     orderAssigned: m.orderAssigned,
     summary: {
