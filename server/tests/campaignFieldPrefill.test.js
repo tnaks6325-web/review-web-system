@@ -22,6 +22,7 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 
 const src = readF('js/work-order-detail.js');
 const modalSrc = readF('js/recruit-modal.js');
+const recruitSrc = readF('js/index-recruit.js');
 
 let n = 0;
 const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
@@ -109,6 +110,10 @@ ok('빈 입력은 빈 값', W._woStripReviewMeta('') === '' && W._woStripReviewM
 console.log('\n[③] 무회귀');
 ok('유입가이드 프리필 경로 불변(원문 텍스트 경로)',
   W._woCampaignPrefill({ inflow_type: 'guide', inflow_guide: '검색어: 립밤' }).wd_inflow_text === '검색어: 립밤');
+ok('유입방식은 신규 모집공고 편집의 선택값으로 명시 전달',
+  W._woCampaignPrefill({ inflow_type: 'guide' }).inflowType === 'guide'
+  && W._woCampaignPrefill({ inflow_type: 'link' }).inflowType === 'link'
+  && /prefillInflowType\.value = prefill\.inflowType === "guide" \? "guide" : "link"/.test(recruitSrc));
 ok('특이사항은 여전히 special_notes 그대로',
   W._woCampaignPrefill({ special_notes: '주소 정확히!' }).wd_notes === '주소 정확히!');
 ok('참여형 기본·제목·채팅방 등 다른 키 불변',
