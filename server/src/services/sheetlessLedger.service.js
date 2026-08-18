@@ -155,6 +155,12 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   const tabGid = String(tcRows[0].tab_gid || '');
   const campaignName = tcRows[0].campaign_name || '';
 
+  // #0 같은 수동 이체 원장은 작업표를 재구성해도 잃으면 안 된다. 행 번호가 아니라
+  // 리뷰어/주문 앵커로 다시 찾아 입금칸을 보강한 뒤, 그 값을 이번 장부 재료로 읽는다.
+  if (!dryRun && tcRows[0].sheetless) {
+    await require('./manualPaymentLedger.service').rehydrateManualPaymentMarks(db, { sheetId, tabName, by });
+  }
+
   // ── 작업표(진실원본) ──
   const { rows: parts } = await db.query(
     `SELECT seq, row_json FROM campaign_participants

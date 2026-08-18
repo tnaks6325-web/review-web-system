@@ -2879,6 +2879,11 @@ router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrM
   } catch (err) { next(err); }
 });
 
+router.get('/payment/repair/manual-811-transfer-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await manualDepositRepairSvc.previewManual811Transfer()); }
+  catch (err) { next(err); }
+});
+
 // Admin-only, explicit support correction.  Accept visible workboard seq values
 // so the operator can verify the source/destination rows before moving a date.
 router.post('/payment/repair/move-deposit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

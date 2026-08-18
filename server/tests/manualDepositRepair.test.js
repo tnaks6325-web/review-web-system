@@ -7,6 +7,8 @@ const root = path.join(__dirname, '..');
 const repair = fs.readFileSync(path.join(root, 'src/services/manualDepositRepair.service.js'), 'utf8');
 const routes = fs.readFileSync(path.join(root, 'src/routes/trackB.routes.js'), 'utf8');
 const workdesk = fs.readFileSync(path.join(root, '..', 'frontend/workdesk.html'), 'utf8');
+const migration = fs.readFileSync(path.join(root, 'migrations/117_manual_811_transfer_ledger.sql'), 'utf8');
+const ledger = fs.readFileSync(path.join(root, 'src/services/sheetlessLedger.service.js'), 'utf8');
 
 assert.match(repair, /btrim\(pe\.value_text\) = '8\/11'/, 'repair scope must be fixed to the historical 8/11 marker');
 assert.doesNotMatch(repair, /pe\.reverted_at IS NULL/, 'reverted markers are the affected records and must not be omitted');
@@ -16,5 +18,13 @@ assert.match(repair, /stamp: '8\/11'/, 'repair must write the original historica
 assert.match(routes, /payment\/repair\/manual-811-deposit-dates', authMiddleware, adminOrMasterMiddleware/, 'repair endpoint must be admin protected');
 assert.match(routes, /need_confirm/, 'repair endpoint requires an explicit confirmation');
 assert.match(workdesk, /_pmRestoreManual811/, 'payment UI exposes the repair action');
+assert.match(repair, /seq, bank, status, item_count, total_amount/, 'recovery creates an auditable transfer batch');
+assert.match(repair, /VALUES \(0, 'manual', 'applied'/, 'historical batch is always #0 and applied');
+assert.match(repair, /manual_payment_marks/, 'persistent marker is recorded beside the batch');
+assert.match(repair, /payment_records[\s\S]*source_key/, 'payment ledger has an idempotent source key');
+assert.match(repair, /already_locked/, 'existing active transfer items stop a duplicate recovery');
+assert.match(migration, /historical_key/, 'only one #0 historical batch can exist');
+assert.match(migration, /manual_payment_marks/, 'migration creates durable manual payment marker storage');
+assert.match(ledger, /rehydrateManualPaymentMarks/, 'every sheetless ledger rebuild restores permanent manual payment marks first');
 
 console.log('manual 8/11 deposit repair contract passed');
