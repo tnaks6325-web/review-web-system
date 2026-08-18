@@ -6917,9 +6917,10 @@ function _pmFilterState(){
   STATE.pmFilter=filter;
   return filter;
 }
-function _pmWorkEntries(items, manager){
+function _pmWorkEntries(items, manager, isPaymentTarget){
+  const target=isPaymentTarget || (it=>it.payable && !it.excluded);
   return [...new Map((items||[])
-    .filter(it=>!manager || _pmManagerName(it.manager)===manager)
+    .filter(it=>target(it) && (!manager || _pmManagerName(it.manager)===manager))
     .map(it=>[_pmWorkKey(it),it])).entries()]
     .sort((a,b)=>String(a[1].tabLabel||a[1].tabName||'').localeCompare(String(b[1].tabLabel||b[1].tabName||''),'ko'));
 }
@@ -6928,7 +6929,7 @@ function _pmSelectManager(manager){
   const filter=_pmFilterState();
   STATE.pmWorkScrollTop=null;
   filter.manager=manager||'';
-  filter.workKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
+  filter.workKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
   _pmRender();
 }
 function _pmToggleWorkKeys(selectedKeys, allKeys, workKey){
@@ -6940,7 +6941,7 @@ function _pmToggleWork(workKey){
   const workList=$('#pmbody .pmworklist');
   STATE.pmWorkScrollTop=workList ? workList.scrollTop : null;
   const filter=_pmFilterState();
-  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
   filter.workKeys=_pmToggleWorkKeys(filter.workKeys,allKeys,workKey);
   _pmRender();
 }
@@ -6948,8 +6949,10 @@ function _pmFilterBar(allItems){
   const filter=_pmFilterState();
   const managers=[...new Set((allItems||[]).map(it=>_pmManagerName(it.manager)).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'ko'));
-  const works=_pmWorkEntries(allItems,filter.manager);
-  const selectedKeys=new Set(filter.workKeys===null ? works.map(([key])=>key) : filter.workKeys);
+  const works=_pmWorkEntries(allItems,filter.manager,_pmOn);
+  const allWorkKeys=works.map(([key])=>key);
+  const selectedKeys=new Set(filter.workKeys===null ? allWorkKeys : filter.workKeys.filter(key=>allWorkKeys.includes(key)));
+  if(filter.workKeys!==null) filter.workKeys=[...selectedKeys];
   const selectedItems=_pmFilterItems(allItems,filter).filter(_pmOn);
   const selectedTotal=_pmSelectedPaymentTotal(allItems,filter,_pmOn);
   const recipientCount=_pmSelectedRecipientCount(allItems,filter,_pmOn);
