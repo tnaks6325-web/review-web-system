@@ -2779,14 +2779,18 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
     if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const row = rows[0];
 
+    // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
+    // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
+    await client.query(
+      `INSERT INTO workdesk_participant_deletions
+         (sheet_id, tab_name, seq, order_submission_id, deleted_by)
+       VALUES ($1,$2,$3,$4::uuid,$5)
+       ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
+      [sheetId, tabName, row.seq, row.order_submission_id || null, String(by).slice(0, 100)]);
     const removed = await client.query(
-      `UPDATE campaign_participants
-          SET deleted_at=NOW(), active=FALSE, updated_at=NOW(), updated_by=$4,
-              -- import 재투영은 같은 seq를 UPSERT한다. 삭제 의도를 이 행에 남겨야
-              -- 새로고침/동기화 뒤에 작업표·참여내역이 되살아나지 않는다.
-              row_json=COALESCE(row_json, '{}'::jsonb) || '{"__workdesk_deleted":true}'::jsonb
-        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
-      [rowId, sheetId, tabName, String(by).slice(0, 100)]);
+      `DELETE FROM campaign_participants
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`,
+      [rowId, sheetId, tabName]);
     if (removed.rowCount !== 1) {
       await client.query('ROLLBACK');
       return { ok: false, error: 'row_changed' };
@@ -2813,7 +2817,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
     await client.query('COMMIT');
     return {
       ok: true,
-      mode: 'participant_history_removed',
+      mode: 'hard_deleted',
       removed: removed.rowCount,
       participationLinksRemoved: links.rowCount,
       applicationsCancelled: applications.rowCount,

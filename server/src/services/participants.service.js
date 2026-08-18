@@ -34,14 +34,22 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
       ORDER BY row_index`,
     [sheetId, tabName]
   );
+  // 실제 삭제한 작업표 행은 재임포트 대상에서 제외한다. 행은 campaign_participants에
+  // 남기지 않고, 최소 삭제 식별자만 별도 보관한다.
+  const { rows: deleted } = await db.query(
+    `SELECT seq FROM workdesk_participant_deletions WHERE sheet_id=$1 AND tab_name=$2`,
+    [sheetId, tabName]
+  );
+  const deletedSeqs = new Set(deleted.map(r => Number(r.seq)));
+  const liveIdx = idx.filter(r => !deletedSeqs.has(Number(r.row_index)));
 
   if (dryRun) {
     const { rows: cur } = await db.query(
       `SELECT COUNT(*)::int AS n FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`,
       [sheetId, tabName]);
     return {
-      dryRun: true, indexRows: idx.length, existingInDb: cur[0].n,
-      sample: idx.slice(0, 5).map(r => ({
+      dryRun: true, indexRows: liveIdx.length, existingInDb: cur[0].n,
+      sample: liveIdx.slice(0, 5).map(r => ({
         seq: r.row_index, reviewerName: r.reviewer_name, phone8: _mask(r.phone8),
         round: r.round, product: r.product_name, submitted: !!r.is_submitted, paid: r.is_submitted2 === 'PAID',
       })),
@@ -49,7 +57,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
   }
 
   let inserted = 0, updated = 0;
-  for (const r of idx) {
+  for (const r of liveIdx) {
     const isPaid = r.is_submitted2 === 'PAID';
     const res = await db.query(
       `INSERT INTO campaign_participants
@@ -64,14 +72,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          product_name = EXCLUDED.product_name, product_url = EXCLUDED.product_url,
          start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
          submit_col = EXCLUDED.submit_col, submit_col2 = EXCLUDED.submit_col2,
-         -- 관리자가 작업보드에서 제거한 행은 재임포트가 같은 seq를 만나도
-         -- 되살리지 않는다. 원본 시트의 스냅샷은 최신으로 갱신하되 삭제 표식만
-         -- 보존해, 작업표와 리뷰어 참여내역의 삭제 결과가 안정적으로 유지된다.
-         row_json = CASE
-           WHEN COALESCE(campaign_participants.row_json->>'__workdesk_deleted', 'false') = 'true'
-             THEN EXCLUDED.row_json || '{"__workdesk_deleted":true}'::jsonb
-           ELSE EXCLUDED.row_json
-         END,
+         row_json = EXCLUDED.row_json,
          sheet_row = EXCLUDED.sheet_row,
          -- ★ Phase 4: import 행은 리뷰제출/입금 상태도 review_index에서 최신화(DB를 살아있는 원본화).
          --   campaign_participants.* = 갱신 전(기존행) 값(EXCLUDED=새 행). 기존행 source='import'면 새 상태로,
@@ -83,11 +84,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          --   시스템이 자리만 잡아둔 줄이므로 '보존' 대상이 아니다.
          is_submitted = CASE WHEN campaign_participants.source IN ('import','worktable') THEN EXCLUDED.is_submitted ELSE campaign_participants.is_submitted END,
          is_paid      = CASE WHEN campaign_participants.source IN ('import','worktable') THEN EXCLUDED.is_paid      ELSE campaign_participants.is_paid END,
-         deleted_at = CASE
-           WHEN COALESCE(campaign_participants.row_json->>'__workdesk_deleted', 'false') = 'true'
-             THEN campaign_participants.deleted_at
-           ELSE NULL
-         END,
+         deleted_at = NULL,
          imported_at = NOW()
        RETURNING (xmax = 0) AS inserted`,
       [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
@@ -97,7 +94,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
     );
     if (res.rows[0] && res.rows[0].inserted) inserted++; else updated++;
   }
-  return { imported: idx.length, inserted, updated };
+  return { imported: liveIdx.length, inserted, updated, skippedDeleted: deletedSeqs.size };
 }
 
 // 탭 로스터 조회(DB). phone8은 마스킹.
