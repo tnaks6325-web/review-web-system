@@ -6,10 +6,12 @@ const outside = [
   { seq: 8, memo: '올바디로션만두', holder: '리뷰어A', amount: 20300, accountTail: '1623', transferredAt: '2026.8.14 12:42' },
   { seq: 9, memo: '올바디로션만두', holder: '리뷰어B', amount: 20300, accountTail: '8350', transferredAt: '2026.8.14 12:42' },
 ];
+let searchSql = '';
 
 svc.__setPoolForTest({
   async query(sql) {
     if (/GROUP BY ri\.sheet_id, ri\.tab_name/.test(sql)) {
+      searchSql = sql;
       return { rows: [{ sheetId: 's1', tabName: '0807(올리브영)바디로션 100건', label: '0807(올리브영)바디로션 100건' }] };
     }
     if (/FROM payment_result_uploads WHERE id/.test(sql)) {
@@ -28,6 +30,8 @@ svc.__setPoolForTest({
 (async () => {
   const search = await svc.searchUnconfirmedWorkCandidates({ query: '바디로션' });
   assert.equal(search.candidates.length, 1);
+  assert.match(searchSql, /tc\.display_name/);
+  assert.doesNotMatch(searchSql, /tc\.label/);
 
   const out = await svc.inspectUnconfirmedWorkMatch({
     batchId: 'b1', uploadId: 'u1', memo: '올바디로션만두', sheetId: 's1', tabName: '0807(올리브영)바디로션 100건',

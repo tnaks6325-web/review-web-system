@@ -307,14 +307,14 @@ async function searchUnconfirmedWorkCandidates({ query }) {
   const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
   const { rows } = await _db().query(
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
-            COALESCE(NULLIF(MAX(tc.label), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label"
+            COALESCE(NULLIF(MAX(tc.display_name), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label"
        FROM review_index ri
        LEFT JOIN tab_configs tc ON tc.sheet_id = ri.sheet_id AND tc.tab_name = ri.tab_name
        LEFT JOIN recruit_campaigns rc
          ON rc.linked_sheet_id = ri.sheet_id
         AND (rc.linked_tab_name = ri.tab_name OR (NULLIF(rc.linked_tab_gid, '') IS NOT NULL AND rc.linked_tab_gid = ri.tab_gid))
       WHERE ri.tab_name ILIKE $1 ESCAPE '\\'
-         OR COALESCE(tc.label, '') ILIKE $1 ESCAPE '\\'
+         OR COALESCE(tc.display_name, '') ILIKE $1 ESCAPE '\\'
          OR COALESCE(rc.title, '') ILIKE $1 ESCAPE '\\'
       GROUP BY ri.sheet_id, ri.tab_name
       ORDER BY "label", ri.tab_name
