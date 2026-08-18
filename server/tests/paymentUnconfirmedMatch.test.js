@@ -71,6 +71,7 @@ svc.__setPoolForTest({
   assert.equal(out.results.length, 2);
   assert.equal(out.results[0].state, 'duplicate_payment');
   assert.equal(out.results[1].state, 'candidate_unpaid');
+  assert.equal(out.results[1].rowIndex, 6, 'unique workboard participant exposes its source row');
   assert.equal(out.summary.duplicatePayment, 1);
   assert.equal(out.summary.candidateUnpaid, 1);
   assert.deepEqual(out.reconciliationCandidates, []);
