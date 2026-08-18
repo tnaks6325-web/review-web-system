@@ -12,6 +12,7 @@ const creditService = readServer('src/services/popularCredit.service.js');
 const cards = readFrontend('js/campaign-cards.js');
 const recruit = readFrontend('js/index-recruit.js');
 const campaign = readFrontend('campaign.html');
+const searchApp = readFrontend('js/search-app.js');
 const manualOrder = readServer('src/services/manualOrder.service.js');
 const apply = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
@@ -34,5 +35,9 @@ assert(!campaign.includes('gateInfo.prerequisite'), 'reviewer UI never requires 
 assert(!campaign.includes('requiredTitle'), 'reviewer UI has no stale prerequisite title state');
 assert.match(campaign, /남은 참여권/, 'reviewer UI shows the remaining credit count');
 assert.match(campaign, /_camp && _camp\.participation_mode && _camp\.is_popular !== true/, 'return CTA is limited to the selected normal participation campaign');
+assert.match(campaign, /embed:'1',\s*mode:'form'/, 'embedded purchase forms force form mode even when a sheet link is unavailable');
+assert(!campaign.includes('PREVIEW && !f.sheetId'), 'admin preview follows the same purchase-form mode as the reviewer path for unlinked campaigns');
+assert.match(searchApp, /const isFormMode = !!sheetId \|\| params\.get\("mode"\) === "form"/, 'search page supports an explicit form-mode entry');
+assert.match(searchApp, /if \(!ctx\.sheetId \|\| \(!ctx\.tabName && !ctx\.gid\)\)/, 'missing sheet mapping blocks submission instead of routing to the home screen');
 
 console.log('campaignPinnedPopular: passed');
