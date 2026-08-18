@@ -2106,10 +2106,9 @@ async function markThreadSeen({ sheetId, tabName, role = 'master', name = '', ad
 
 // 미확인 수 집계(1쿼리): 내 last_seen 이후 생성 + 내가 볼 수 있는(광고주=internal_only FALSE) 글.
 //   tabs 지정 시 그 탭들만(작업목록 배지), 미지정 시 전체. 반환 = { 'sheetId\ttabName': count } 맵 + total.
-//   ★ B2(교차 테넌트 메타 유출) 방어: staff/advertiser는 소유/담당 탭으로 서버 강제 제한 —
-//     클라 tabs는 소유와 교집합만, tabs 미지정도 전역 쿼리 금지(소유 탭으로 대체). master/admin만 전체.
-async function unseenCounts({ role = 'master', name = '', advertiserId = null, tabs = null } = {}) {
-  if (role === 'staff' || role === 'advertiser') {
+//   advertiser는 소유 탭으로 서버 강제 제한한다. staff는 작업보드에서 allWorkdesk를 명시한 경우 전체를 쓴다.
+async function unseenCounts({ role = 'master', name = '', advertiserId = null, tabs = null, allWorkdesk = false } = {}) {
+  if (role === 'advertiser' || (role === 'staff' && !allWorkdesk)) {
     const scoped = await scopedActiveTabs({ role, staffName: name, advertiserId });
     const ownedSet = new Set(scoped.map(t => `${t.sheetId}\t${t.tabName}`));
     if (!ownedSet.size) return { map: {}, total: 0 };

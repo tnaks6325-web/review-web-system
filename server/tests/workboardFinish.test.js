@@ -58,11 +58,11 @@ router.stack.filter(l => l.route).forEach(l => {
 const FIN = L['POST /workdesk/tab-finish'];
 t('POST /workdesk/tab-finish 등록됨', Array.isArray(FIN), JSON.stringify(Object.keys(L).slice(0, 5)));
 t('★ authMiddleware 가 맨 앞(빠지면 마스터 포함 전원 403 — 레포 실측 사고)', FIN[0] === 'authMiddleware', FIN.join(','));
-// staff(AE)도 담당 탭은 마감할 수 있어야 하므로 라우트레벨 adminOrMaster 를 걸면 안 된다(사용자 확정 ㉣).
-t('★ 라우트레벨 adminOrMaster 없음 — staff 담당 탭 마감 경로 보존(스코프는 _ensureEditScope 가 건다)',
+// staff(AE)는 전체 작업을 마감할 수 있어야 하므로 라우트레벨 adminOrMaster 를 걸면 안 된다.
+t('★ 라우트레벨 adminOrMaster 없음 — staff 전체 작업 마감 경로 보존(스코프는 _ensureEditScope 가 건다)',
   !FIN.includes('adminOrMasterMiddleware') && !FIN.includes('masterOnlyMiddleware'), FIN.join(','));
 t('GET /tabs 생존(작업목록·홈의 유일한 출처)', Array.isArray(L['GET /tabs']));
-t('마감 라우트가 _ensureEditScope 를 쓴다(master/admin 전체 · staff 담당 · advertiser 차단)',
+t('마감 라우트가 _ensureEditScope 를 쓴다(master/admin/staff 전체 · advertiser 차단)',
   /tab-finish[\s\S]{0,700}_ensureEditScope/.test(ROUTES));
 
 /* ── 3) 검수 게이트 + 멱등 — 서비스 실제 실행(스텁 pool) ────────── */
@@ -136,22 +136,14 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   let svcCalls = 0;
   const origSet = svc.setTabFinished;
   svc.setTabFinished = async (...a) => { svcCalls++; return { ok: true }; };
-  const origCan = svc.canAccessTab;
 
   svcCalls = 0;
   const rMaster = await call({ role: 'master', name: 'm' }, { sheetId: 'S1', tabName: 'T1', finish: true, inspected: true });
   t('master 는 전체 탭 마감 가능', rMaster.status === 200 && svcCalls === 1);
 
   svcCalls = 0;
-  svc.canAccessTab = async () => false;
-  const rStaffNo = await call({ role: 'staff', name: 'ae1' }, { sheetId: 'S1', tabName: 'T1', finish: true, inspected: true });
-  t('★ staff 담당 밖 탭 = 403', rStaffNo.status === 403);
-  t('★ 거부 시 서비스 미호출(스코프 밖인데 상태가 바뀌면 안 된다)', svcCalls === 0);
-
-  svcCalls = 0;
-  svc.canAccessTab = async () => true;
-  const rStaffOk = await call({ role: 'staff', name: 'ae1' }, { sheetId: 'S1', tabName: 'T1', finish: true, inspected: true });
-  t('staff 담당 탭은 마감 가능(사용자 확정 ㉣)', rStaffOk.status === 200 && svcCalls === 1);
+  const rStaffAll = await call({ role: 'staff', name: 'ae1' }, { sheetId: 'S1', tabName: 'T1', finish: true, inspected: true });
+  t('staff는 담당 여부와 무관하게 전체 탭 마감 가능', rStaffAll.status === 200 && svcCalls === 1);
 
   svcCalls = 0;
   const rAdv = await call({ role: 'advertiser', advertiser_id: 'a1' }, { sheetId: 'S1', tabName: 'T1', finish: true, inspected: true });
@@ -160,7 +152,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   const rNoArgs = await call({ role: 'master', name: 'm' }, {});
   t('sheetId/tabName 없으면 400(형식 선검사 — Express 4 는 async rejection 을 안 잡는다)', rNoArgs.status === 400);
 
-  svc.setTabFinished = origSet; svc.canAccessTab = origCan;
+  svc.setTabFinished = origSet;
 
   /* ── 5) 목록 응답 계약 ─────────────────────────────────────── */
   console.log('\n5) 목록 응답 계약 (/tabs)');

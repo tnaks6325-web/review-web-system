@@ -11,7 +11,7 @@
  *     컬럼으로 바꾸는 순간 어제 체크가 영원히 남는다(그리고 그걸 지울 배치가 필요해진다).
  *  ③ **순서 보존** — 열린 줄의 순서 = 사용자가 드래그로 정한 탭 배치. 즐겨찾기(Set)에 얹으면 사라진다.
  *  ④ **부팅 경합** — 부팅 조회가 사용자의 첫 클릭보다 늦게 도착하면 방금 연 탭을 덮어쓴다(실측).
- *  ⑤ **권한** — 오늘 완료도 전사 공통 쓰기다(staff 담당 탭만·광고주 차단). authMiddleware 선행 필수.
+ *  ⑤ **권한** — 오늘 완료도 전사 공통 쓰기다(staff 전체 탭·광고주 차단). authMiddleware 선행 필수.
  *  ⑥ **CSS/스크립트 무결성** — 주석 조기 종료가 규칙을 통째로 삼키고 브라우저는 에러 없이 넘어간다.
  */
 const assert = require('assert');
@@ -59,7 +59,7 @@ t('POST /workdesk/worktabs 등록 + authMiddleware 선행', (L['POST /workdesk/w
 const DD = L['POST /workdesk/tab-daily-done'];
 t('POST /workdesk/tab-daily-done 등록', Array.isArray(DD));
 t('★ authMiddleware 가 맨 앞(빠지면 마스터 포함 전원 403 — 레포 실측 사고)', DD[0] === 'authMiddleware', (DD || []).join(','));
-t('★ 라우트레벨 adminOrMaster 없음 — staff 담당 탭 체크 경로 보존(스코프는 _ensureEditScope 가 건다)',
+t('★ 라우트레벨 adminOrMaster 없음 — staff 전체 탭 체크 경로 보존(스코프는 _ensureEditScope 가 건다)',
   !DD.includes('adminOrMasterMiddleware') && !DD.includes('masterOnlyMiddleware'));
 t('오늘 완료 라우트가 _ensureEditScope 를 쓴다', /tab-daily-done[\s\S]{0,700}_ensureEditScope/.test(ROUTES));
 t('★ 열린 작업 줄은 **개인 데이터**라 스코프 게이트가 없다(자기 것만 읽고 쓴다 — 즐겨찾기와 같은 계약)',
@@ -145,17 +145,14 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     await handler({ admin, body, query: {} }, res, e => { payload = { thrown: e && e.message }; });
     return { status, payload };
   };
-  const origSet = svc.setTabDailyDone, origCan = svc.canAccessTab;
+  const origSet = svc.setTabDailyDone;
   let calls = 0, lastArgs = null;
   svc.setTabDailyDone = async (a) => { calls++; lastArgs = a; return { ok: true }; };
 
   calls = 0;
   t('master 는 전체 탭 체크 가능', (await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', done: true })).status === 200 && calls === 1);
-  calls = 0; svc.canAccessTab = async () => false;
-  const staffNo = await call({ role: 'staff', name: 'ae' }, { sheetId: 'S', tabName: 'T', done: true });
-  t('★ staff 담당 밖 탭 = 403 + 서비스 미호출', staffNo.status === 403 && calls === 0);
-  calls = 0; svc.canAccessTab = async () => true;
-  t('staff 담당 탭은 체크 가능', (await call({ role: 'staff', name: 'ae' }, { sheetId: 'S', tabName: 'T', done: true })).status === 200 && calls === 1);
+  calls = 0;
+  t('staff는 담당 여부와 무관하게 전체 탭 체크 가능', (await call({ role: 'staff', name: 'ae' }, { sheetId: 'S', tabName: 'T', done: true })).status === 200 && calls === 1);
   calls = 0;
   t('★ 광고주는 차단(오늘 완료도 내부 업무)', (await call({ role: 'advertiser', advertiser_id: 'a' }, { sheetId: 'S', tabName: 'T' })).status === 403 && calls === 0);
   t('sheetId/tabName 없으면 400', (await call({ role: 'master', name: 'm' }, {})).status === 400);
@@ -163,7 +160,7 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t("★ done:'false'(문자열)를 완료로 오해하지 않는다(해제가 체크가 되면 되돌릴 수 없다)", lastArgs.done === false);
   await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', done: true });
   t('done:true 는 완료', lastArgs.done === true);
-  svc.setTabDailyDone = origSet; svc.canAccessTab = origCan;
+  svc.setTabDailyDone = origSet;
 
   /* ── 5) 목록 응답 계약 ─────────────────────────────────────── */
   console.log('\n5) 목록 응답 계약 (/tabs)');
