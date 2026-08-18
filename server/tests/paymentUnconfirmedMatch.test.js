@@ -106,6 +106,12 @@ svc.__setPoolForTest({
     '연결된 작업보드가 없을 때 관리자가 작업보드를 직접 연결할 수 있어야 한다');
   assert.match(workdesk, /function _pmAccountNumber\(transfer\)/,
     '계좌번호는 전체 값이 있을 때 끝자리로 축약하지 않고 표시해야 한다');
+  assert.match(workdesk, /function _pmUnconfirmedStateLabel\(state\)/,
+    '대조 판정 코드는 운영자가 읽을 수 있는 한글로 변환해야 한다');
+  assert.match(workdesk, /function _pmCompleteUnconfirmedRow\(rowIndex\)/,
+    '여러 이체결과는 카드 전체가 아니라 행별로 대조 완료할 수 있어야 한다');
+  assert.match(workdesk, /이 행 대조 완료/,
+    '각 이체결과 행에서 개별 대조 완료 동작을 제공해야 한다');
   const paymentResultSource = fs.readFileSync(require.resolve('../src/services/paymentResult.service.js'), 'utf8');
   assert.match(paymentResultSource, /function _adminUnconfirmedAccountPreview\(preview, rows\)/,
     '저장본은 마스킹을 유지하고 관리자 대조 응답에서만 전체 계좌번호를 복원해야 한다');
