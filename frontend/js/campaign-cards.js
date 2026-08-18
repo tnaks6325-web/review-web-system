@@ -1170,18 +1170,15 @@
    *     리뷰웹시스템[3버전]은 인트라넷 SSO 토큰(`via:'intranet'`)을 쓰는데 그 토큰은 authMiddleware에서
    *     `/api/trackb/*` 로만 도달 가능하므로, 여기서 `/api/campaign/admin/...` 을 하드코딩하면
    *     인기 설정만 403("인트라넷 연동 계정은 …Track B…에서만")으로 죽는다. 전역 미설정 = 종전 경로. */
-  async function togglePopular(campId, on, prerequisiteCampaignIds) {
+  async function togglePopular(campId, on) {
     const tok = _realAdminTok();
     if (!tok) return;
-    // OFF → ON은 우선순위 선택 모달을 먼저 연다. 선택 완료 후 같은 함수가 배열과 함께 재호출된다.
-    if (on === true && !Array.isArray(prerequisiteCampaignIds) && typeof window.openPopularPriorityModal === 'function') {
-      return window.openPopularPriorityModal(campId);
-    }
+    // ON/OFF만 저장한다. 일반 모집 제출완료 이력으로 서버가 참여권을 판정한다.
     try {
       const res = await fetch(_flagsUrl(campId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-        body: JSON.stringify({ popular: on === true, ...(Array.isArray(prerequisiteCampaignIds) ? { prerequisiteCampaignIds } : {}) }),
+        body: JSON.stringify({ popular: on === true }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);

@@ -123,7 +123,7 @@ function updateRecruitPopularity(campId, on) {
 window.updateRecruitPopularity = updateRecruitPopularity;
 
 /** 인기 ON 직전, 모든 모집중 비인기 공고의 선행참여 우선순위를 정한다. */
-function openPopularPriorityModal(campId) {
+function legacyPopularToggle(campId) {
   const target = _recruitLastList.find(c => String(c.id) === String(campId));
   const candidates = _recruitLastList.filter(c => String(c.id) !== String(campId)
     // 리뷰어에게 숨긴 내부·테스트 공고는 선행참여 대상으로 삼지 않는다.
@@ -176,12 +176,12 @@ function openPopularPriorityModal(campId) {
   renderQueue();
   modal.querySelector('[data-save]').onclick = async () => {
     const btn = modal.querySelector('[data-save]'); btn.disabled = true; btn.textContent = '저장 중…';
-    try { await CampCards.togglePopular(campId, true, priorityIds); modal.remove(); }
+    try { await CampCards.togglePopular(campId, true); modal.remove(); }
     catch (_) { btn.disabled = false; btn.textContent = 'ON 저장'; }
   };
   document.body.appendChild(modal);
 }
-window.openPopularPriorityModal = openPopularPriorityModal;
+window.legacyPopularToggle = legacyPopularToggle;
 
 /* 삭제 모드 토글 — 카드에서 삭제를 뺀 대신, 켰을 때만 선택·삭제할 수 있다 */
 function toggleRecruitDelMode() {

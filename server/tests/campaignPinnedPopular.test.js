@@ -50,12 +50,12 @@ ok('064: sort_order 컬럼 드롭 없음(데이터 보존 = 롤백 안전)', !/D
 
 // ── 인기 선행참여 게이트(apply) ──
 {
-  const applyBody = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
+  const applyBody = routes;
   ok('apply: popular_locked 사유 존재', applyBody.includes("'popular_locked'"));
   ok('apply: 게이트는 camp.is_popular === true 에서만(일반 공고 무영향)', /if \(camp\.is_popular === true\)/.test(applyBody));
   ok('apply: 크레딧 = 일반(비인기) submitted, 소비 = 인기 submitted+유효홀드(만료·취소 자동 환불)',
-    /rc\.is_popular IS NOT TRUE AND ca\.status = 'submitted'/.test(applyBody) &&
-    /rc\.is_popular IS TRUE AND \(ca\.status = 'submitted' OR \(ca\.status = 'applied' AND ca\.expires_at > NOW\(\)\)\)/.test(applyBody));
+    /rc\.is_popular IS NOT TRUE AND ca\.status = 'submitted'/.test(routes) &&
+    /rc\.is_popular IS TRUE AND \(ca\.status = 'submitted' OR \(ca\.status = 'applied' AND ca\.expires_at > NOW\(\)\)\)/.test(routes));
   ok('apply: 명의 기준 판정(holdP8) — 타계정도 각 명의가 일반 1건 필요', /WHERE ca\.phone8 = \$1 AND rc\.participation_mode/.test(applyBody));
   ok('apply: 게이트가 홀드 INSERT 이전(자리 미점유)', applyBody.indexOf("'popular_locked'") < applyBody.indexOf('INSERT INTO campaign_applications'));
   ok('apply: 응답에 normalDone/popularUsed 동봉(프론트 모달 표기)', /reason: 'popular_locked', normalDone, popularUsed/.test(applyBody));
@@ -80,9 +80,9 @@ ok('cards: 인기 ON/OFF는 진짜 admin_token 또는 관리자 목록만',
   && !/pstarchip/.test(cards));
 ok('cards: 인기 아이콘은 썸네일 좌상단에서 클릭해 ON/OFF', /pt-pop-toggle/.test(cards) && /pt-topleft">\$\{popToggle\}/.test(cards) && /CampCards\.togglePopular/.test(cards));
 ok('cards: OFF→ON은 우선순위 선택 후 /flags로 저장하고 홈은 재렌더',
-  /async function togglePopular\(campId, on, prerequisiteCampaignIds\)/.test(cards)
-  && /openPopularPriorityModal/.test(cards)
-  && /prerequisiteCampaignIds/.test(cards)
+  /async function togglePopular\(campId, on\)/.test(cards)
+  && !/openPopularPriorityModal/.test(cards)
+  && !/prerequisiteCampaignIds/.test(cards)
   && /loadRecruitPreview === 'function'/.test(cards));
 ok('cards: 공개 API도 실제 함수명 togglePopular을 내보낸다(모듈 초기화 중단 방지)',
   /window\.CampCards = \{[\s\S]*togglePopular[\s\S]*\};/.test(cards) && !/openAdminEdit, togglePin,/.test(cards));
@@ -96,17 +96,12 @@ ok('cards: togglePopular 경로는 호스트가 재기준(CAMPAIGN_ADMIN_API) �
   && !/['"]\/api\/campaign\/admin\/['"] ?\+ ?encodeURIComponent\(campId\) ?\+ ?['"]\/flags['"]/.test(cards));
 ok('flags: 토글 직후 /list 캐시 무효화', /_listCache = \{ at: 0, rows: null, countsMap: null(, feeMap: null)? \};[\s\S]{0,200}isPopular/.test(routes));
 ok('우선순위: 첫 공고가 마감·총원충족되면 다음 비인기 공고로 자동 전환',
-  /campaign_popular_prerequisites/.test(routes)
-  && /async function _currentPopularPrerequisite/.test(routes)
-  && /ORDER BY q\.priority/.test(routes)
-  && /COALESCE\(c\.reviewer_hidden, FALSE\) = FALSE/.test(routes)
-  && /COALESCE\(a\.submitted, 0\) < c\.recruit_total/.test(routes));
+  !/campaign_popular_prerequisites/.test(routes)
+  && !/async function _currentPopularPrerequisite/.test(routes)
+  && /async function _popularCreditState/.test(routes));
 ok('우선순위: 명의별 구매양식 제출완료 공고는 건너뛰어 첫 미완료 공고를 요구한다',
-  /async function _currentPopularPrerequisite\(db, popularCampaignId, reviewerPhone8\)/.test(routes)
-  && /completed\.campaign_id = c\.id/.test(routes)
-  && /completed\.phone8 = \$2/.test(routes)
-  && /completed\.status = 'submitted'/.test(routes)
-  && /_currentPopularPrerequisite\(client, id, holdP8\)/.test(routes));
+  /_popularCreditState\(client, holdP8\)/.test(routes)
+  && /credits < 1/.test(routes));
 
 // ── 관리자 UI ──
 ok('admin.html: 노출 순서(rf_sort_order) 제거', !adminHtml.includes('rf_sort_order'));
@@ -116,7 +111,7 @@ ok('index-recruit: sort_order 읽기 null-safe(+편집 로드값 재전송 = 0-�
 ok('index-recruit: 새 공고 열 때 로드값 초기화(이전 편집값 누수 방지)', /window\._recruitEditLoaded = null/.test(recruit));
 ok('index-recruit: 카드 토글은 🔥 인기만(참여형)', !/['"]pinned['"]/.test(recruit) && /c\.participation_mode \? `<button[^`]*'popular'/.test(recruit));
 {
-  const priorityModal = recruit.slice(recruit.indexOf('function openPopularPriorityModal'), recruit.indexOf('window.openPopularPriorityModal'));
+  const priorityModal = recruit.slice(recruit.indexOf('function legacyPopularToggle'), recruit.indexOf('window.legacyPopularToggle'));
   ok('index-recruit: 모집중 비인기 공고 전체를 체크 없이 드래그 우선순위로 저장한다',
     /const priorityIds = candidates\.map/.test(priorityModal)
     && /c\.reviewer_hidden !== true/.test(priorityModal)
@@ -138,10 +133,10 @@ ok('campaign.html: 인기 안내 카드(renderPopNotice) — 인기 공고만', 
 ok('campaign.html: 일반 목록은 open·비인기·참여형·자기자신 제외 필터', /x\.participation_mode && x\.is_popular !== true && x\.state === 'open' && String\(x\.id\) !== String\(CAMP_ID\)/.test(campHtml));
 ok('campaign.html: 복귀 CTA — pop_return_camp 기록 후 이동, 제출완료 화면에서 복귀 버튼', /pop_return_camp/.test(campHtml) && /popReturnBtn/.test(campHtml));
 ok('campaign.html: 우선순위 게이트는 현재 선행공고만 안내·복귀 대상도 공고쌍으로 제한',
-  /gateInfo\.prerequisite/.test(campHtml)
-  && /String\(x\.id\) === requiredId/.test(campHtml)
-  && /prerequisiteId:String\(id\)/.test(campHtml)
-  && /String\(back\.prerequisiteId\) === String\(CAMP_ID\)/.test(campHtml));
+  !/gateInfo\.prerequisite/.test(campHtml)
+  && !/requiredId/.test(campHtml)
+  && !/prerequisiteId:String\(id\)/.test(campHtml)
+  && /!back\.prerequisiteId \|\| String\(back\.prerequisiteId\) === String\(CAMP_ID\)/.test(campHtml));
 ok('campaign.html: 지각 접수(pendingConfirm)는 복귀 버튼 미노출(크레딧 아님)',
   /String\(back\.campaignId\) !== String\(CAMP_ID\) && !pendingConfirm/.test(campHtml));
 

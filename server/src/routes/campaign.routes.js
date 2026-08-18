@@ -836,34 +836,20 @@ router.get('/list', async (req, res, next) => {
 /**
  * 인기공고의 현재 선행참여 대상.
  * priority 순서대로 보되, 해당 명의가 구매양식을 제출완료했거나 모집이 마감·총원충족된
- * 공고는 건너뛴다. 그러므로 리뷰어별 제출 이력에 따라 다음 미완료 비인기 공고가 자동으로
- * 대상이 된다. 모든 선행 공고를 제출완료한 경우 null을 반환해 인기상품 참여를 허용한다.
+ * 일반 모집의 구매양식 제출완료 1건은 인기상품 참여 1회에만 사용한다.
+ * 기존 선행우선순위 테이블은 보존하지만 이 정책의 판정에는 사용하지 않는다.
  */
-async function _currentPopularPrerequisite(db, popularCampaignId, reviewerPhone8) {
+async function _popularCreditState(db, reviewerPhone8) {
   const { rows } = await db.query(
-    `SELECT q.prerequisite_campaign_id AS id, q.priority, c.title
-       FROM campaign_popular_prerequisites q
-       JOIN recruit_campaigns c ON c.id = q.prerequisite_campaign_id
-       LEFT JOIN LATERAL (
-         SELECT COUNT(*) FILTER (WHERE status = 'submitted')::int AS submitted
-           FROM campaign_applications WHERE campaign_id = c.id
-       ) a ON TRUE
-      WHERE q.popular_campaign_id = $1
-        AND c.participation_mode = TRUE
-        AND c.is_popular IS NOT TRUE
-        AND c.status = 'active'
-        AND COALESCE(c.reviewer_hidden, FALSE) = FALSE
-        AND (COALESCE(c.recruit_total, 0) <= 0 OR COALESCE(a.submitted, 0) < c.recruit_total)
-        AND NOT EXISTS (
-          SELECT 1
-            FROM campaign_applications completed
-           WHERE completed.campaign_id = c.id
-             AND completed.phone8 = $2
-             AND completed.status = 'submitted'
-        )
-      ORDER BY q.priority
-      LIMIT 1`, [popularCampaignId, reviewerPhone8]);
-  return rows[0] || null;
+    `SELECT
+       COUNT(*) FILTER (WHERE rc.is_popular IS NOT TRUE AND ca.status = 'submitted') AS normal_done,
+       COUNT(*) FILTER (WHERE rc.is_popular IS TRUE AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))) AS popular_used
+     FROM campaign_applications ca
+     JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+    WHERE ca.phone8 = $1 AND rc.participation_mode`, [reviewerPhone8]);
+  const normalDone = Number(rows[0].normal_done) || 0;
+  const popularUsed = Number(rows[0].popular_used) || 0;
+  return { normalDone, popularUsed, credits: Math.max(0, normalDone - popularUsed) };
 }
 
 // GET /api/campaign/popular-status?phone8= — 인기상품 참여 가능 여부(무인증 phone8 스코프, 064)
@@ -874,16 +860,7 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   try {
     const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
     if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
-    const { rows } = await pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE rc.is_popular IS NOT TRUE AND ca.status = 'submitted') AS normal_done,
-         COUNT(*) FILTER (WHERE rc.is_popular IS TRUE AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))) AS popular_used
-       FROM campaign_applications ca
-       JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-      WHERE ca.phone8 = $1 AND rc.participation_mode`, [p8]);
-    const normalDone = Number(rows[0].normal_done) || 0;
-    const popularUsed = Number(rows[0].popular_used) || 0;
-    res.json({ ok: true, normalDone, popularUsed, credits: Math.max(0, normalDone - popularUsed) });
+    res.json({ ok: true, ...(await _popularCreditState(pool, p8)) });
   } catch (err) {
     next(err);
   }
@@ -1452,34 +1429,14 @@ async function _applyParticipation(req, res, next, campPre) {
       }
     }
 
-    // ★ 인기상품 선행참여 게이트: 우선순위 큐가 있으면 해당 명의가 아직 구매양식을
-    //   제출완료하지 않은 첫 공고를 요구한다. 이미 제출한 공고·마감·총원충족 공고는 건너뛴다.
-    //   큐가 없는 과거 인기공고만 기존 1:1 크레딧 규칙을 유지한다.
+    // ★ 인기상품 참여권: 동일 명의의 일반 모집 제출완료 1건당 인기상품 1건을 허용한다.
+    //   기존 선행우선순위 데이터는 삭제하지 않고 무시해 롤백 가능성을 보존한다.
     if (camp.is_popular === true) {
-      const queued = await client.query(
-        'SELECT 1 FROM campaign_popular_prerequisites WHERE popular_campaign_id=$1 LIMIT 1', [id]);
-      if (queued.rows.length) {
-        const prerequisite = await _currentPopularPrerequisite(client, id, holdP8);
-        if (prerequisite) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ ok: false, reason: 'popular_locked', prerequisite,
-            error: `인기 상품 참여 전 '${prerequisite.title}' 구매양식을 먼저 제출해주세요.` });
-        }
-      } else {
-        const cr = await client.query(
-          `SELECT
-             COUNT(*) FILTER (WHERE rc.is_popular IS NOT TRUE AND ca.status = 'submitted') AS normal_done,
-             COUNT(*) FILTER (WHERE rc.is_popular IS TRUE AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))) AS popular_used
-           FROM campaign_applications ca
-           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-          WHERE ca.phone8 = $1 AND rc.participation_mode`, [holdP8]);
-        const normalDone = Number(cr.rows[0].normal_done) || 0;
-        const popularUsed = Number(cr.rows[0].popular_used) || 0;
-        if (normalDone <= popularUsed) {
-          await client.query('ROLLBACK');
-          return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone, popularUsed,
-            error: '인기 상품은 일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
-        }
+      const { normalDone, popularUsed, credits } = await _popularCreditState(client, holdP8);
+      if (credits < 1) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone, popularUsed,
+          error: '인기 상품은 일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
       }
     }
 
@@ -1814,27 +1771,6 @@ router.post('/admin/:id/flags', authMiddleware, adminOrMasterMiddleware, async (
         [id, b.popular === true]));
       if (!rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
 
-      // popular=true에서 배열을 보낸 경우에만 우선순위 큐를 교체한다.
-      // 배열 미전달은 기존 설정을 보존해 구버전 클라이언트가 우선순위를 지우지 않는다.
-      if (b.popular === true && Array.isArray(b.prerequisiteCampaignIds)) {
-        const ids = [...new Set(b.prerequisiteCampaignIds.map(String).filter(x => x && x !== id))];
-        if (ids.length) {
-          const valid = await client.query(
-            `SELECT id FROM recruit_campaigns
-              WHERE id = ANY($1) AND participation_mode = TRUE AND is_popular IS NOT TRUE AND status = 'active'
-                AND COALESCE(reviewer_hidden, FALSE) = FALSE`, [ids]);
-          if (valid.rows.length !== ids.length) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ ok: false, error: '선행참여 공고는 모집중인 비인기 참여형 공고만 선택할 수 있습니다.' });
-          }
-        }
-        await client.query('DELETE FROM campaign_popular_prerequisites WHERE popular_campaign_id=$1', [id]);
-        for (let i = 0; i < ids.length; i++) {
-          await client.query(
-            `INSERT INTO campaign_popular_prerequisites (popular_campaign_id, prerequisite_campaign_id, priority)
-             VALUES ($1, $2, $3)`, [id, ids[i], i + 1]);
-        }
-      }
       await client.query('COMMIT');
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
