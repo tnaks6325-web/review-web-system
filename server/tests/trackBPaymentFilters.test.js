@@ -33,7 +33,7 @@ test('payment target metadata includes the work manager', () => {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmToggleWorkKeys'), sandbox);
+vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys'), sandbox);
 
 test('legacy manager name is normalized to mango', () => {
   assert.strictEqual(sandbox._pmManagerName('\uBC15\uC740\uBE44'), '\uB9DD\uACE0');
@@ -57,6 +57,15 @@ test('download total excludes unchecked rows within the active filters', () => {
 
 test('selected recipient count uses the same work and checked-item conditions as the download', () => {
   assert.strictEqual(sandbox._pmSelectedRecipientCount(rows, { manager: '\uB9CC\uB450', workKeys: ['S1||A', 'S2||A'] }, it => it.payable && !it.excluded), 1);
+});
+
+test('work selector hides works with no payment targets', () => {
+  const works = sandbox._pmWorkEntries([
+    { sheetId: 'S1', tabName: 'zero', manager: '\uB9CC\uB450', payable: false },
+    { sheetId: 'S2', tabName: 'excluded', manager: '\uB9CC\uB450', payable: true, excluded: true },
+    { sheetId: 'S3', tabName: 'payable', manager: '\uB9CC\uB450', payable: true, excluded: false },
+  ], '\uB9CC\uB450');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(works.map(([key]) => key))), ['S3||payable']);
 });
 
 test('an empty selected-work list produces no download candidates', () => {
