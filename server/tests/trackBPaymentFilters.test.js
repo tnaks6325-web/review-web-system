@@ -33,7 +33,7 @@ test('payment target metadata includes the work manager', () => {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys') + '\n' + sourceOf('_pmSetWorkSelection'), sandbox);
+vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys') + '\n' + sourceOf('_pmSetWorkSelection') + '\n' + sourceOf('_pmWorkKeyRange'), sandbox);
 
 test('legacy manager name is normalized to mango', () => {
   assert.strictEqual(sandbox._pmManagerName('\uBC15\uC740\uBE44'), '\uB9DD\uACE0');
@@ -81,6 +81,12 @@ test('drag selection applies the initial row direction to each newly crossed wor
   const all = ['S1||A', 'S1||B', 'S1||C'];
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmSetWorkSelection(['S1||A'], all, 'S1||B', true))), ['S1||A', 'S1||B']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmSetWorkSelection(['S1||A', 'S1||B'], all, 'S1||A', false))), ['S1||B']);
+});
+
+test('fast drag fills every work key between the last and current pointer row', () => {
+  const all = ['S1||A', 'S1||B', 'S1||C', 'S1||D'];
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmWorkKeyRange(all, 'S1||A', 'S1||D'))), all);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmWorkKeyRange(all, 'S1||D', 'S1||B'))), ['S1||B', 'S1||C', 'S1||D']);
 });
 
 test('work rows start and extend a pointer drag without double-toggling on click', () => {

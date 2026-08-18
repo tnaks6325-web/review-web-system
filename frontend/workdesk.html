@@ -6966,6 +6966,11 @@ function _pmSetWorkSelection(selectedKeys, allKeys, workKey, selectedValue){
   if(selectedValue) selected.add(workKey); else selected.delete(workKey);
   return allKeys.filter(key=>selected.has(key));
 }
+function _pmWorkKeyRange(allKeys, fromKey, toKey){
+  const from=allKeys.indexOf(fromKey), to=allKeys.indexOf(toKey);
+  if(from<0 || to<0) return [toKey];
+  return allKeys.slice(Math.min(from,to),Math.max(from,to)+1);
+}
 function _pmApplyWorkSelection(workKey, selectedValue){
   const filter=_pmFilterState();
   const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
@@ -6977,17 +6982,28 @@ function _pmStartWorkDrag(event, workKey){
   const filter=_pmFilterState();
   const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
   const selected=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
-  STATE.pmWorkDrag={ selected:!selected.has(workKey), seen:new Set() };
+  STATE.pmWorkDrag={ selected:!selected.has(workKey), seen:new Set(), lastWorkKey:null };
   _pmDragSelectWork(event,workKey);
   window.addEventListener('pointerup',_pmEndWorkDrag,{once:true});
 }
 function _pmDragSelectWork(event, workKey){
   const drag=STATE.pmWorkDrag;
-  if(!drag || drag.seen.has(workKey)) return;
-  drag.seen.add(workKey);
-  _pmApplyWorkSelection(workKey,drag.selected);
-  const row=event.currentTarget;
-  if(row){ row.classList.toggle('on',drag.selected); row.setAttribute('aria-pressed',String(drag.selected)); }
+  if(!drag) return;
+  const filter=_pmFilterState();
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  const crossed=_pmWorkKeyRange(allKeys,drag.lastWorkKey||workKey,workKey);
+  crossed.forEach(key=>{
+    if(drag.seen.has(key)) return;
+    drag.seen.add(key);
+    _pmApplyWorkSelection(key,drag.selected);
+  });
+  drag.lastWorkKey=workKey;
+  document.querySelectorAll('#pmbody .pmworkpick').forEach(row=>{
+    if(drag.seen.has(row.dataset.workKey)){
+      row.classList.toggle('on',drag.selected);
+      row.setAttribute('aria-pressed',String(drag.selected));
+    }
+  });
 }
 function _pmEndWorkDrag(){
   if(!STATE.pmWorkDrag) return;
@@ -7026,7 +7042,7 @@ function _pmFilterBar(allItems){
     const selected=selectedKeys.has(key);
     const selectedItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
     const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick ${selected?'on':''}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
+    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
   }).join('');
   const downloadButton=(bank,label)=>{
     const bankItems=selectedItems.filter(it=>it.bank===bank);
