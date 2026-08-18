@@ -1,8 +1,7 @@
 'use strict';
 
-// One-time recovery for the 8/11 manual exclusion markers.  The edit history
-// is intentionally read even when a marker was later reverted: the purpose is
-// to materialize the historical payment date, not to re-enable target blocking.
+// One-time recovery for the final 8/11 manual payment marks.  A reverted edit
+// is historical evidence only; it must never be re-materialized as a payment.
 const pool = require('../db/pool');
 const { markDepositCells } = require('./paymentApply.service');
 const { rebuildLedgers } = require('./sheetlessLedger.service');
@@ -29,7 +28,7 @@ async function _manual811Candidates(client) {
     `WITH marked AS (
        SELECT DISTINCT pe.id::text AS edit_id, pe.sheet_id, pe.tab_name, pe.anchor_type, pe.anchor_value
          FROM participant_edits pe
-        WHERE pe.field = 'col:입금' AND pe.kind = 'text'
+        WHERE pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
           AND btrim(pe.value_text) = '8/11'
      ), resolved AS (
        SELECT DISTINCT pe.edit_id, pe.sheet_id, pe.tab_name, pe.anchor_type, pe.anchor_value,
