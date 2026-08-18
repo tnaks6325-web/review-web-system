@@ -1182,6 +1182,17 @@ router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, a
     res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' ? 409 : 404)).json(out);
   } catch (err) { next(err); }
 });
+// 번호 없는 주문행은 목표 인원 밖의 추가 참여자로 남기지 않고, 작업오더 목표 안의 빈 슬롯으로만 이동한다.
+// 대상·빈 슬롯은 서버가 다시 검증하므로 클라이언트가 번호를 지정하거나 이미 채워진 행을 덮을 수 없다.
+router.post('/workdesk/assign-unslotted-order', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by: _by(req) });
+    const code = out.ok ? 200 : (out.error === 'no_open_slot' ? 409 : 400);
+    res.status(code).json(out);
+  } catch (err) { next(err); }
+});
 
 // 테스트 자동제출 정리 — 테스트 전용 식별자가 모두 일치하는 경우에만 영구 제거한다.
 // 일반 주문은 이 경로로 절대 삭제할 수 없으며, 운영 주문 삭제는 위 order-delete만 사용한다.
