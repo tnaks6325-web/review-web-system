@@ -200,6 +200,14 @@ function _previewArchive(a) {
   };
 }
 
+function _adminUnconfirmedAccountPreview(preview, rows) {
+  if (!preview || !Array.isArray(preview.unmatchedResults)) return preview;
+  const accountBySeq = new Map((rows || []).map(r => [Number(r.seq), String(r.accountDigits || '')]));
+  return { ...preview, unmatchedResults: preview.unmatchedResults.map(r => ({
+    ...r, accountNumber: accountBySeq.get(Number(r.seq)) || '',
+  })) };
+}
+
 /** 미리보기는 입금·실패 상태를 전혀 바꾸지 않는다. 마스킹된 화면 보관본만 감사 이력에 남긴다. */
 async function previewResultFile({ batchId, fileName, base64, by }) {
   const a = await _analyze(batchId, fileName, base64);
@@ -219,7 +227,7 @@ async function previewResultFile({ batchId, fileName, base64, by }) {
     uploadId: stored && stored.id ? stored.id : null,
     canApply: (a.summary.success || 0) + (a.summary.failed || 0) > 0,
     fileName: String(fileName || ''),
-    ...preview,
+    ..._adminUnconfirmedAccountPreview(preview, a.parse.rows),
   };
 }
 
@@ -276,12 +284,18 @@ async function autoApplyResultFile({ batchId, fileName, base64, by, notifyFailed
 async function getLatestResultPreview(batchId) {
   if (!batchId) throw new ResultError('bad_request', '회차를 지정해 주세요.');
   const { rows: [row] } = await _db().query(
-    `SELECT id, file_name, uploaded_at, applied, file_blob IS NOT NULL AS has_file, summary
+    `SELECT id, file_name, uploaded_at, applied, file_blob, file_blob IS NOT NULL AS has_file, summary
        FROM payment_result_uploads
       WHERE batch_id = $1
       ORDER BY uploaded_at DESC, id DESC LIMIT 1`, [batchId]);
   const preview = row && row.summary && row.summary.preview;
   if (!preview || !Array.isArray(preview.items)) return { ok: true, found: false };
+  let adminPreview = preview;
+  try {
+    const loaded = row.file_blob && loadSheetAoa(row.file_blob, row.file_name || '');
+    const parsed = loaded && loaded.ok && parseResultAoa(loaded.aoa, { expectBank: preview.bank });
+    if (parsed && parsed.ok) adminPreview = _adminUnconfirmedAccountPreview(preview, parsed.rows);
+  } catch (_) { /* historical previews remain safely masked if the original cannot be parsed */ }
   return {
     ok: true, found: true, persisted: true, uploadId: row.id,
     canApply: row.applied !== true && row.has_file === true
@@ -289,7 +303,7 @@ async function getLatestResultPreview(batchId) {
     applied: row.applied === true,
     fileName: row.file_name || '', uploadedAt: row.uploaded_at || null,
     autoApply: row.summary && row.summary.autoApply ? row.summary.autoApply : undefined,
-    ...preview,
+    ...adminPreview,
   };
 }
 
