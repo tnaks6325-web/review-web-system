@@ -10669,9 +10669,9 @@ async function assignUnslottedOrder(rowId){
   if(!confirm('번호 없는 이 주문을 작업오더 목표 인원 안의 첫 빈 번호 슬롯으로 이동할까요?\n\n주문·리뷰·입금 정보는 유지되고, 추가 행은 제거됩니다.')) return;
   STATE._assignUnslottedBusy=true;
   try{
-    const result=await api('/api/trackb/workdesk/assign-unslotted-order',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
+    const result=await api('/api/trackb/workdesk/assign-unslotted-order',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,confirm:true})});
     if(!result||!result.ok){
-      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.'};
+      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.',need_confirm:'확인 후 다시 시도해 주세요.'};
       toast(messages[result&&result.error]||(result&&result.error)||'번호 배정에 실패했습니다. 새로고침 후 다시 시도해 주세요.');
       return;
     }
