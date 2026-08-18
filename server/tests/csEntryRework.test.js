@@ -107,6 +107,9 @@ pool.query = async (sql) => {
   if (/FROM recruit_campaigns/.test(sql)) {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };
   }
+  // 무시트 주문원장 집계는 이 기존 시트행 전용 fixture에 포함하지 않는다.
+  // 같은 주문을 review_index와 양쪽에서 돌려 이중 집계하는 것을 막는 경로다.
+  if (/ca\.campaign_id IS NOT NULL/.test(sql)) return { rows: [] };
   if (/FROM order_submissions/.test(sql)) {
     return { rows: RI_ROWS.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, sheetRow: r.rowIndex, price: PRICES[r.rowIndex] })) };
   }
