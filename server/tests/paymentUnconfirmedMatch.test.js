@@ -104,6 +104,10 @@ svc.__setPoolForTest({
     '운영 대조표는 모달 안에서 가로 스크롤을 만들지 않아야 한다');
   assert.match(workdesk, /\.pm-unconfirmed-compare-table table\.lgtable\{min-width:0;table-layout:fixed\}/,
     '운영 대조표는 공통 테이블의 최소 폭을 상속하지 않아야 한다');
+  assert.match(workdesk, /table\.lgtable\.pm-unconfirmed-two-row-table\{width:100%;min-width:0;table-layout:fixed\}/,
+    '7열 비교표는 모달 폭 안에서 모든 값을 보여주는 전용 폭 규칙을 가져야 한다');
+  assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(7\)\{width:23%\}/,
+    '7번째 판정 열은 밀리지 않도록 전용 폭을 가져야 한다');
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
