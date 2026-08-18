@@ -186,6 +186,16 @@ console.log('\n[I] 빈 줄·합계 줄은 데이터가 아니다');
   ok('빈 줄·계좌금액 없는 줄은 건수에서 빠진다', P.ok && P.totals.total === 10, JSON.stringify(P.totals));
 }
 {
+  const aoa = JSON.parse(JSON.stringify(FIX.KBANK_AOA));
+  /* 인쇄/복사본에서 본문 중간에 반복된 열 제목 + 합계 금액만 있는 줄. 둘 다
+     이체결과가 아니므로 10건에 영향을 주면 안 된다. */
+  aoa.splice(4, 0, [...aoa[0]]);
+  aoa.push(['', '', '합계', '', '178,000', '', '', '']);
+  const P = parseResultAoa(aoa);
+  ok('★ 반복 헤더와 금액만 있는 합계 줄은 결과 행으로 세지 않는다',
+    P.ok && P.totals.total === 10 && P.rows.every(r => r.accountDigits && r.amount > 0), JSON.stringify(P.totals));
+}
+{
   const P = parseResultAoa([['아무', '상관없는', '표']]);
   ok('은행 파일이 아니면 사유를 말하고 거부', !P.ok && /입금계좌/.test(P.error), P.error);
   ok('빈 파일도 거부', parseResultAoa([]).ok === false);

@@ -7599,8 +7599,13 @@ function _pmResultModal(){
     ? `<div class="pmnote">⚠ <b>결과 파일에 없는 건 ${s.notInFile}건</b>은 <b>그대로 대기 상태로 둡니다</b>(실패로 내리지 않습니다 — 실제로는 이체됐는데 파일만 부분적일 수 있어 이중입금이 됩니다). 은행에서 전체 결과 파일을 다시 받아 한 번 더 올려 주세요.</div>`
     : '';
   const ur = p.unmatchedResults && p.unmatchedResults.length
-    ? `<div class="pmnote">⚠ <b>이 회차에 없는 결과 줄 ${p.unmatchedResults.length}건</b>이 파일에 있습니다 — 다른 회차 파일이 섞였는지 확인하세요(반영에서 제외됩니다).</div>`
+    ? `<div class="pmnote">⚠ <b>이 회차에 없는 결과 ${p.unmatchedResults.length}건</b>도 아래에 모두 표시합니다. 이 회차에는 반영하지 않으며, 매칭된 성공 건은 정상 반영됩니다.</div>`
     : '';
+  const outsideRows = (p.unmatchedResults||[]).map(it=>`<tr>
+    <td><span class="pmoc not_in_file">회차 외</span></td>
+    <td>${esc(it.memo||'—')}</td><td>—</td><td class="num">${_pmNum(it.amount)}</td>
+    <td class="mono">…${esc(it.accountTail||'')}</td><td>${esc(it.holder||'')}</td>
+    <td class="mono">${esc(it.transferredAt||'-')}</td><td>${esc(it.status||'')}</td></tr>`).join('');
 
   const el = document.createElement('div');
   el.className='pmrov'; el.id='pmResultOv';
@@ -7622,7 +7627,7 @@ function _pmResultModal(){
       </div>
       <div class="lgwrap"><table class="lgtable pmtable">
         <thead><tr><th>결과</th><th>작업</th><th>리뷰어</th><th class="num">금액</th><th>계좌</th><th>예금주</th><th>이체시각</th><th>은행 응답</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>
+        <tbody>${rows}${outsideRows}</tbody></table></div>
     </div>
     <div class="pmrft">
       <span class="sp" style="flex:1"></span>
