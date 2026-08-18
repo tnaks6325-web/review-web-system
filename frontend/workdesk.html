@@ -1792,6 +1792,15 @@
 .pmrhd{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line,#E1E5EB)}
 .pmrhd h3{margin:0;font-size:15.5px;font-weight:800}
 .pmrbd{padding:14px 18px;overflow:auto;flex:1;min-height:0}
+.pm-unconfirmed-box{width:min(880px,100%);min-height:min(590px,80vh)}
+.pm-unconfirmed-search{margin:16px 0 0;display:grid;gap:8px}
+.pm-unconfirmed-search .inp{height:44px;font-size:15px;padding:0 13px}
+.pm-unconfirmed-candidates{position:static;display:grid;gap:7px;max-height:360px;overflow:auto;padding:2px}
+.pm-unconfirmed-candidate{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;text-align:left;border:1px solid #D7E3F4;border-radius:10px;padding:12px;background:#FFF}
+.pm-unconfirmed-candidate:hover{border-color:#7FA7D4;background:#F6FAFF}
+.pm-unconfirmed-candidate-main{min-width:0;display:grid;gap:3px}.pm-unconfirmed-candidate-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pm-unconfirmed-candidate-meta{font-size:12px;color:var(--t3,#6B7280)}
+.pmUnconfirmedRecommendation{flex:none;border-radius:999px;background:#E5F3EE;color:#127A5E;font-size:11px;font-weight:800;padding:4px 7px}
 .pmrft{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line,#E1E5EB);background:var(--bg,#F7F8FA)}
 .pmrsum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .pmrs{border:1px solid var(--line,#E1E5EB);border-radius:9px;padding:8px 12px;min-width:104px;background:var(--card,#fff)}
@@ -7629,8 +7638,18 @@ async function _pmUnconfirmedSearch({ live=false }={}){
   if(seq!==_pmUnconfirmedSearchSeq || !document.getElementById('pmUnconfirmedOv')) return;
   if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'작업을 찾지 못했습니다.')}</div>`; return; }
   const memo=String(el.dataset.memo||'');
-  out.innerHTML=(r.candidates||[]).length ? r.candidates.map((x,i)=>`<button class="btn" style="display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #E6EDF7;border-radius:0;padding:10px 12px" onclick="_pmUnconfirmedInspect(${i})">${esc(x.label||x.tabName)}</button>`).join('') : '<div class="muted" style="padding:9px 10px">검색 결과가 없습니다.</div>';
-  STATE.pmUnconfirmed={ memo, candidates:r.candidates||[] };
+  const candidates=r.candidates||[];
+  STATE.pmUnconfirmed={ memo, candidates };
+  _pmUnconfirmedRenderCandidates(out, candidates);
+}
+
+function _pmUnconfirmedRenderCandidates(out, candidates){
+  if(!out) return;
+  if(!candidates.length){ out.innerHTML='<div class="muted" style="padding:9px 10px">검색 결과가 없습니다.</div>'; return; }
+  out.innerHTML=candidates.map((x,i)=>{
+    const campaign=x.campaignTitle ? `<span class="pm-unconfirmed-candidate-meta">${esc(x.campaignTitle)}${x.depositName ? ` · 입금명 ${esc(x.depositName)}` : ''}</span>` : '';
+    return `<button class="pm-unconfirmed-candidate" onclick="_pmUnconfirmedInspect(${i})"><span class="pm-unconfirmed-candidate-main"><b>${esc(x.label||x.tabName)}</b>${campaign}</span>${x.recommended ? '<span class="pmUnconfirmedRecommendation">추천 공고</span>' : ''}</button>`;
+  }).join('');
 }
 
 async function _pmUnconfirmedInspect(i){
@@ -7665,7 +7684,7 @@ function _pmOpenUnconfirmedMatch(memo){
   const R=STATE.pmResult; if(!R || !R.preview || !R.preview.uploadId) return;
   _pmUnconfirmedClose();
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo;
-  el.innerHTML=`<div class="pmrbox" style="max-width:720px"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote"><b>${esc(memo)}</b> 동일 통장표시 이체를 한 작업 묶음으로 보고 대조합니다. 작업을 선택하면 같은 이름의 참여자와 기존 입금 기록을 확인합니다.</div><div style="position:relative;margin:12px 0"><input id="pmUnconfirmedQuery" class="inp" style="width:100%" value="${esc(memo)}" placeholder="작업명 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" style="display:block;position:absolute;z-index:3;left:0;right:0;top:calc(100% + 4px);max-height:220px;overflow:auto;background:#FFF;border:1px solid #D7E3F4;border-radius:10px;box-shadow:0 8px 20px rgba(20,50,90,.14)"></div></div></div></div>`;
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote"><b>${esc(memo)}</b> 통장표시와 같은 이체를 한 작업 묶음으로 대조합니다. 공고에 같은 입금명이 있으면 먼저 추천하며, 선택만으로 입금 기록은 생성되지 않습니다.</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
   document.body.appendChild(el);
   document.getElementById('pmUnconfirmedQuery').focus();
 }
