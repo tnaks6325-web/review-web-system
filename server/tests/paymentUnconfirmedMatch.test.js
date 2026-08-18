@@ -1,5 +1,6 @@
 'use strict';
 const assert = require('assert');
+const fs = require('fs');
 const svc = require('../src/services/paymentResult.service');
 
 const outside = [
@@ -42,5 +43,15 @@ svc.__setPoolForTest({
   assert.equal(out.results[1].state, 'candidate_unpaid');
   assert.equal(out.summary.duplicatePayment, 1);
   assert.equal(out.summary.candidateUnpaid, 1);
+  const routes = fs.readFileSync(require.resolve('../src/routes/trackB.routes.js'), 'utf8');
+  assert.match(routes, /router\.get\('\/payment\/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware/);
+  assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
+  const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
+  assert.match(workdesk, /작업 검색·대조/);
+  assert.match(workdesk, /function _pmUnconfirmedLiveSearch\(\)/);
+  assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
+  assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
+  assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
+  assert.match(workdesk, /position:absolute;z-index:3/);
   console.log('payment unconfirmed work-match tests passed');
 })().finally(() => svc.__setPoolForTest(null));
