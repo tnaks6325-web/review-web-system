@@ -101,6 +101,12 @@ ok('우선순위: 첫 공고가 마감·총원충족되면 다음 비인기 공�
   && /ORDER BY q\.priority/.test(routes)
   && /COALESCE\(c\.reviewer_hidden, FALSE\) = FALSE/.test(routes)
   && /COALESCE\(a\.submitted, 0\) < c\.recruit_total/.test(routes));
+ok('우선순위: 명의별 구매양식 제출완료 공고는 건너뛰어 첫 미완료 공고를 요구한다',
+  /async function _currentPopularPrerequisite\(db, popularCampaignId, reviewerPhone8\)/.test(routes)
+  && /completed\.campaign_id = c\.id/.test(routes)
+  && /completed\.phone8 = \$2/.test(routes)
+  && /completed\.status = 'submitted'/.test(routes)
+  && /_currentPopularPrerequisite\(client, id, holdP8\)/.test(routes));
 
 // ── 관리자 UI ──
 ok('admin.html: 노출 순서(rf_sort_order) 제거', !adminHtml.includes('rf_sort_order'));
