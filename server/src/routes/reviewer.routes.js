@@ -494,7 +494,8 @@ router.get('/review-earnings', async (req, res, next) => {
     // 작업보드(campaign_participants)의 결제금액을 리뷰어 예상 금액에 바로 반영한다.
     // 시트 색인으로 이미 보이는 주문은 NOT EXISTS로 제외해 이중 집계를 막는다.
     const { rows: sheetlessOrders } = await pool.query(
-      `SELECT os.id, os.price, os.review_fee_snapshot AS "feeSnapshot",
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.price,
+              os.review_fee_snapshot AS "feeSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
               COALESCE(rc.review_fee, 0) AS "reviewFee",
               rc.thumbnail_url AS "thumbnailUrl",
@@ -518,6 +519,9 @@ router.get('/review-earnings', async (req, res, next) => {
 
     // 아이템별 맵 + 합계 (참여중=받을 예정 / 제출완료 중 입금완료=누적)
     const items = {};
+    // review_index의 행 번호가 작업보드 순번과 달라 정확 행 매칭이 실패한 과거 건 보완용.
+    // 같은 작업에 주문이 하나일 때만 카드에 대체 연결해 다건 작업의 오매칭을 막는다.
+    const sheetlessFallbackCounts = new Map();
     let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
     let dProductTotal = 0, dReviewTotal = 0, dCount = 0, dProductUnknown = 0, dUnpaidCount = 0;
     for (const r of riRows) {
@@ -565,9 +569,23 @@ router.get('/review-earnings', async (req, res, next) => {
         productPrice: price > 0 ? price : null,
         thumbnailUrl: o.thumbnailUrl || '',
       };
+      const fallbackKey = `${o.sheetId || ''}||${o.tabName || ''}`;
+      const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
+      if (existingFallback) {
+        existingFallback.count++;
+      } else {
+        sheetlessFallbackCounts.set(fallbackKey, {
+          count: 1,
+          value: items[`order||${o.id}`],
+        });
+      }
       count++;
       reviewTotal += reviewFee;
       if (price > 0) productTotal += price; else productUnknown++;
+    }
+
+    for (const [fallbackKey, fallback] of sheetlessFallbackCounts) {
+      if (fallback.count === 1) items[fallbackKey + '||order'] = fallback.value;
     }
 
     res.json({
