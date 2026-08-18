@@ -2002,7 +2002,13 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 const TEST_AUTO_LOGIN_HOST = 'test-review-wdb-web-production.up.railway.app';
 const TEST_AUTO_LOGIN_API = 'https://test-review-wdb-production.up.railway.app';
 if (location.hostname === TEST_AUTO_LOGIN_HOST) window.REVIEW_API_URL = TEST_AUTO_LOGIN_API;
-const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
+const API_BASE = (function(){
+  if (window.REVIEW_API_URL) return window.REVIEW_API_URL;
+  const pr = location.hostname.match(/^test-review-wdb-web-review-web-system-pr-(\d+)\.up\.railway\.app$/i);
+  if (pr) return `https://sublime-magic-review-web-system-pr-${pr[1]}.up.railway.app`;
+  if (location.hostname==='localhost') return 'http://localhost:3000';
+  return 'https://sublime-magic-production-790b.up.railway.app';
+})();
 // 토큰 핸드오프 2경로: ① 인트라넷 SSO(#sso=<token> 프래그먼트, 크로스오리진이라 URL 경유 — 도착 즉시 저장 후
 //   주소창에서 제거, 새 신원 도착이므로 기존 세션 덮어씀) ② admin.html raw_sso(localStorage, 기존 세션 존중).
 // ── 리뷰어 로그 → 작업보드 딥링크(#go=) 수신 ──
@@ -8359,15 +8365,7 @@ async function _coActiveServerOnlyCutover(){
   finally{ if(btn){ btn.disabled=false; btn.textContent='⚡ 활성 공고 전수 무시트 전환'; } }
 }
 async function _coReleaseTodayUnsubmittedHolds(){
-  const message = '웰스앤헬스 도라지청·삼백초캔디 공고에서 오늘 참여만 하고 구매양식을 제출하지 않은 홀드를 해제합니다.\n\n'
-    + '15분이 지나 만료된 홀드도 포함되며, 구매양식 제출완료·작업보드 기록은 변경하지 않습니다.\n\n진행할까요?';
-  if(!confirm(message)) return;
-  const j = await api('/api/trackb/campaigns/release-today-unsubmitted-holds', {
-    method:'POST', body:JSON.stringify({confirm:'release-today-unsubmitted-holds'})
-  });
-  if(!j || j.ok===false){ alert((j&&j.error)||'당일 미제출 제한 해제에 실패했습니다.'); return; }
-  alert(`당일 미제출 제한을 해제했습니다.\n도라지청 ${Number(j.released?.camp_4c981df9de49)||0}명 · 삼백초캔디 ${Number(j.released?.camp_bb0980ceddd4)||0}명`);
-  if(typeof _loadCampaigns==='function') _loadCampaigns();
+  return _coChooseTodayHoldReleaseCampaign();
 }
 /* ★★ "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에 답한다.
  *    점검표 ①과 같은 판정이지만 남은 작업 전체를 한 번에 훑는다 — 85건을 하나씩 누르던 것을 없앤다.
@@ -12552,6 +12550,24 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
     };
   }
 })();
+function _coChooseTodayHoldReleaseCampaign(){
+  return api('/api/trackb/campaigns/list').then(function(result){
+    if(!result || result.ok===false) throw new Error((result&&result.error)||'활성 모집공고 목록을 불러오지 못했습니다.');
+    var campaigns=(result.data||[]).filter(function(c){ return c&&c.status==='active'; });
+    _coShowTodayHoldReleaseModal(campaigns);
+  }).catch(function(e){ alert(e.message||'활성 모집공고 목록을 불러오지 못했습니다.'); });
+}
+function _coShowTodayHoldReleaseModal(campaigns){
+  var old=document.getElementById('coReleaseTodayHoldModal'); if(old) old.remove();
+  var ov=document.createElement('div'); ov.id='coReleaseTodayHoldModal'; ov.className='modalov';
+  var rows=campaigns.map(function(c){ return '<button type="button" class="co-release-row" data-id="'+esc(String(c.id||''))+'"><span class="co-release-radio"></span><span class="co-release-copy"><b>'+esc(c.title||c.id)+'</b><small>모집 '+Number(c.ops&&c.ops.totalConfirmed||c.current_slots||0)+' / '+Number(c.display_recruit_total||c.recruit_total||c.max_slots||0)+'명 · '+esc(c.channel||'채널 미설정')+'</small></span><span class="bd g">활성</span></button>'; }).join('');
+  ov.innerHTML='<style>#coReleaseTodayHoldModal .modalbox{width:660px;max-width:96vw}#coReleaseTodayHoldModal .modalbd{padding:18px}#coReleaseTodayHoldModal .co-release-note{display:flex;gap:9px;padding:11px 12px;background:#fff7e8;border:1px solid #f3d595;border-radius:9px;color:#75500f;font-size:12px;line-height:1.55}#coReleaseTodayHoldModal .co-release-search{width:100%;margin:16px 0 9px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}#coReleaseTodayHoldModal .co-release-list{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:9px}#coReleaseTodayHoldModal .co-release-row{width:100%;display:flex;align-items:center;gap:10px;text-align:left;background:var(--card);border:0;border-bottom:1px solid var(--line);padding:12px;cursor:pointer;color:var(--ink)}#coReleaseTodayHoldModal .co-release-row:last-child{border-bottom:0}#coReleaseTodayHoldModal .co-release-row:hover{background:#f7faff}#coReleaseTodayHoldModal .co-release-row.on{background:#eef5ff}#coReleaseTodayHoldModal .co-release-radio{width:17px;height:17px;border:2px solid #aab8cb;border-radius:50%;flex:0 0 auto}#coReleaseTodayHoldModal .co-release-row.on .co-release-radio{border-color:var(--pri);box-shadow:inset 0 0 0 3px #eef5ff;background:var(--pri)}#coReleaseTodayHoldModal .co-release-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}#coReleaseTodayHoldModal .co-release-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#coReleaseTodayHoldModal .co-release-copy small{color:var(--muted);font-size:11px}#coReleaseTodayHoldModal .co-release-selected{margin-top:12px;padding:10px 12px;border-radius:8px;background:#f4f7fb;color:var(--muted);font-size:12px}#coReleaseTodayHoldModal .co-release-selected b{color:var(--ink)}#coReleaseTodayHoldModal .modalft{display:flex;align-items:center;gap:8px;padding:13px 16px;border-top:1px solid var(--line)}#coReleaseTodayHoldModal .modalft .sp{flex:1}</style><section class="modalbox" role="dialog" aria-modal="true" aria-labelledby="coReleaseTodayTitle"><header class="modalhd"><b id="coReleaseTodayTitle">오늘 미제출 제한 해제</b><button class="btn" type="button" data-close>닫기</button></header><div class="modalbd"><div class="co-release-note"><b>!</b><span>선택한 활성 공고에서만 오늘 미제출 제한을 해제합니다. 15분이 지나면 제한이 다시 적용되며, 구매양식·작업보드 기록은 변경되지 않습니다.</span></div><input class="co-release-search" type="search" placeholder="공고명 또는 채널로 검색" aria-label="활성 모집공고 검색"><div class="co-release-list">'+(rows||'<div class="empty" style="padding:28px">현재 활성 모집공고가 없습니다.</div>')+'</div><div class="co-release-selected">선택 공고: <b>아직 선택되지 않았습니다</b></div></div><footer class="modalft"><span class="comuted">실행자·공고·해제 건수는 운영 로그에 남습니다.</span><span class="sp"></span><button class="btn" type="button" data-close>취소</button><button class="btn pri" type="button" data-run disabled>제한 해제</button></footer></section>';
+  document.body.appendChild(ov); var selected=null, search=ov.querySelector('.co-release-search'), run=ov.querySelector('[data-run]'), selectedBox=ov.querySelector('.co-release-selected b');
+  ov.querySelectorAll('[data-close]').forEach(function(b){ b.onclick=function(){ ov.remove(); }; });
+  ov.querySelectorAll('.co-release-row').forEach(function(row){ row.onclick=function(){ selected=campaigns.find(function(c){ return String(c.id)===row.dataset.id; })||null; ov.querySelectorAll('.co-release-row').forEach(function(x){ x.classList.toggle('on',x===row); }); selectedBox.textContent=selected?(selected.title||selected.id):'아직 선택되지 않았습니다'; run.disabled=!selected; }; });
+  search.oninput=function(){ var q=search.value.trim().toLowerCase(); ov.querySelectorAll('.co-release-row').forEach(function(row){ row.hidden=!!q&&!row.textContent.toLowerCase().includes(q); }); };
+  run.onclick=async function(){ if(!selected) return; var name=selected.title||selected.id; if(!confirm('"'+name+'" 공고의 오늘 미제출 제한을 해제할까요?\n\n구매양식·작업보드 기록은 변경되지 않습니다.')) return; run.disabled=true; run.textContent='해제 중…'; try{ var out=await api('/api/trackb/campaigns/release-today-unsubmitted-holds',{method:'POST',body:JSON.stringify({confirm:'release-today-unsubmitted-holds',campaignId:selected.id})}); if(!out||out.ok===false) throw new Error((out&&out.error)||'제한 해제에 실패했습니다.'); ov.remove(); alert('당일 미제출 제한을 해제했습니다.\n'+(out.campaign&&out.campaign.title||name)+': '+(Number(out.total)||0)+'명'); if(typeof _loadCampaigns==='function') _loadCampaigns(); }catch(e){ alert(e.message||'제한 해제에 실패했습니다.'); run.disabled=false; run.textContent='제한 해제'; } };
+}
 </script>
 
 </body>
