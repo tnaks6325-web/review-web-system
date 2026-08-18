@@ -4,8 +4,8 @@ const fs = require('fs');
 const svc = require('../src/services/paymentResult.service');
 
 const outside = [
-  { seq: 8, memo: '올바디로션만두', holder: '리뷰어A', amount: 20300, accountTail: '1623', transferredAt: '2026.8.14 12:42' },
-  { seq: 9, memo: '올바디로션만두', holder: '리뷰어B', amount: 20300, accountTail: '8350', transferredAt: '2026.8.14 12:42' },
+  { seq: 8, memo: '올바디로션만두', holder: '리뷰어A', amount: 20300, accountTail: '1623', transferredAt: '2026.8.14 12:42', success: true },
+  { seq: 9, memo: '올바디로션만두', holder: '리뷰어B', amount: 20300, accountTail: '8350', transferredAt: '2026.8.14 12:42', success: true },
 ];
 
 assert.equal(typeof svc.findAccountMismatchCandidates, 'function',
@@ -43,6 +43,9 @@ svc.__setPoolForTest({
     if (/FROM payment_result_uploads WHERE id/.test(sql)) {
       return { rows: [{ summary: { preview: { unmatchedResults: outside } } }] };
     }
+    if (/FROM unconfirmed_transfer_reviews WHERE upload_id/.test(sql)) {
+      return { rows: [] };
+    }
     if (/FROM payment_batch_items WHERE batch_id = \$1/.test(sql)) {
       return { rows: [] };
     }
@@ -75,6 +78,10 @@ svc.__setPoolForTest({
   assert.equal(out.summary.duplicatePayment, 1);
   assert.equal(out.summary.candidateUnpaid, 1);
   assert.deepEqual(out.reconciliationCandidates, []);
+  const paymentResultSource = fs.readFileSync(require.resolve('../src/services/paymentResult.service.js'), 'utf8');
+  assert.match(paymentResultSource, /FROM unconfirmed_transfer_reviews WHERE upload_id = \$1/,
+    '이미 검토한 이체 결과는 다시 미확인 목록에 나타나지 않아야 한다');
+  assert.doesNotMatch(paymentResultSource, /const state = paid.length/, '이체 성공 여부를 먼저 판정해야 한다');
   const routes = fs.readFileSync(require.resolve('../src/routes/trackB.routes.js'), 'utf8');
   assert.match(routes, /router\.get\('\/payment\/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
@@ -108,11 +115,14 @@ svc.__setPoolForTest({
     '계좌번호는 전체 값이 있을 때 끝자리로 축약하지 않고 표시해야 한다');
   assert.match(workdesk, /function _pmUnconfirmedStateLabel\(state\)/,
     '대조 판정 코드는 운영자가 읽을 수 있는 한글로 변환해야 한다');
-  assert.match(workdesk, /function _pmCompleteUnconfirmedRow\(rowIndex\)/,
-    '여러 이체결과는 카드 전체가 아니라 행별로 대조 완료할 수 있어야 한다');
-  assert.match(workdesk, /이 행 대조 완료/,
-    '각 이체결과 행에서 개별 대조 완료 동작을 제공해야 한다');
-  const paymentResultSource = fs.readFileSync(require.resolve('../src/services/paymentResult.service.js'), 'utf8');
+  assert.match(workdesk, /function _pmReviewUnconfirmedResult\(rowIndex, action\)/,
+    '여러 이체결과는 카드 전체가 아니라 행별 판정에 맞춰 처리해야 한다');
+  assert.match(workdesk, /입금 성공 승인/,
+    '입금 이력이 없는 행에만 대조 승인 동작을 제공해야 한다');
+  assert.match(workdesk, /중복 입금 처리/,
+    '이미 입금된 행은 중복입금 후속관리로 보내야 한다');
+  assert.doesNotMatch(workdesk, /남은 행 전체 완료/,
+    '서로 다른 판정의 행을 일괄 대조 완료할 수 없어야 한다');
   assert.match(paymentResultSource, /function _adminUnconfirmedAccountPreview\(preview, rows\)/,
     '저장본은 마스킹을 유지하고 관리자 대조 응답에서만 전체 계좌번호를 복원해야 한다');
   assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-compare-table\{overflow-x:hidden;/,
@@ -121,8 +131,8 @@ svc.__setPoolForTest({
     '운영 대조표는 공통 테이블의 최소 폭을 상속하지 않아야 한다');
   assert.match(workdesk, /table\.lgtable\.pm-unconfirmed-two-row-table\{width:100%;min-width:0;table-layout:fixed\}/,
     '7열 비교표는 모달 폭 안에서 모든 값을 보여주는 전용 폭 규칙을 가져야 한다');
-  assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(7\)\{width:18%\}/,
-    '7번째 판정 열은 밀리지 않도록 전용 폭을 가져야 한다');
+  assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(8\)\{width:16%\}/,
+    '행별 조치 열은 밀리지 않도록 전용 폭을 가져야 한다');
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);

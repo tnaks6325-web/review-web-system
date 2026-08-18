@@ -2139,6 +2139,8 @@ const _setHandlers = {
   notices:      _delegate(_reviewerRoutes, 'get', '/notices/all'),
   noticeSave:   _delegate(_reviewerRoutes, 'post', '/notices/save'),
   noticeDelete: _delegate(_reviewerRoutes, 'post', '/notices/delete'),
+  homeBanner:   _delegate(_reviewerRoutes, 'get', '/home-banner/all'),
+  homeBannerSave: _delegate(_reviewerRoutes, 'post', '/home-banner/save'),
   // ★ 087: 리뷰타입 옛 값 정리 — 원본은 `/api/diag/review-type-cleanup`.
   //   인트라넷 SSO 토큰(via:'intranet')은 `/api/diag/*` 에 **도달 자체가 불가**라
   //   리뷰웹시스템[3버전]에서 이 정리를 부르려면 Track B 경로가 필요하다(로직 복제 0).
@@ -2162,6 +2164,10 @@ router.post('/settings/notices/save', authMiddleware, adminOrMasterMiddleware, (
   _setHandlers.noticeSave(req, res, next));
 router.post('/settings/notices/delete', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.noticeDelete(req, res, next));
+router.get('/settings/home-banner', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.homeBanner(req, res, next));
+router.post('/settings/home-banner/save', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.homeBannerSave(req, res, next));
 // ★ 087: 원본과 같은 권한(admin/master). dryRun 기본은 원본 핸들러가 판정한다.
 router.post('/settings/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.reviewTypeCleanup(req, res, next));
@@ -2868,6 +2874,32 @@ router.post('/payment/batch/:id/unconfirmed-work-inspect', authMiddleware, admin
     res.json(await paymentResultSvc.inspectUnconfirmedWorkMatch({
       batchId: req.params.id, uploadId: b.uploadId, memo: b.memo,
       sheetId: b.sheetId, tabName: b.tabName,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
+router.post('/payment/batch/:id/unconfirmed-transfer-review', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '이체 결과와 조치를 확인한 뒤 처리해 주세요.' });
+    res.json(await paymentResultSvc.reviewUnconfirmedTransfer({
+      batchId: req.params.id, uploadId: b.uploadId, memo: b.memo, sheetId: b.sheetId, tabName: b.tabName,
+      resultSeq: b.resultSeq, action: b.action, note: b.note, caseInfo: b.caseInfo, by: _by(req),
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
+router.get('/payment/batch/:id/duplicate-payment-cases', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await paymentResultSvc.listDuplicatePaymentCases({ batchId: req.params.id })); }
+  catch (err) { _resultErr(err, res, next); }
+});
+
+router.patch('/payment/duplicate-payment-case/:caseId', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentResultSvc.updateDuplicatePaymentCase({
+      caseId: req.params.caseId, caseStatus: b.caseStatus, ownerName: b.ownerName,
+      dueAt: b.dueAt, memo: b.memo, by: _by(req),
     }));
   } catch (err) { _resultErr(err, res, next); }
 });

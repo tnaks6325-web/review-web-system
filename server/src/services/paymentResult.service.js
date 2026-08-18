@@ -296,6 +296,12 @@ async function getLatestResultPreview(batchId) {
     const parsed = loaded && loaded.ok && parseResultAoa(loaded.aoa, { expectBank: preview.bank });
     if (parsed && parsed.ok) adminPreview = _adminUnconfirmedAccountPreview(preview, parsed.rows);
   } catch (_) { /* historical previews remain safely masked if the original cannot be parsed */ }
+  const { rows: reviewedRows } = await _db().query(
+    'SELECT result_seq FROM unconfirmed_transfer_reviews WHERE upload_id = $1', [row.id]);
+  const reviewedSeqs = new Set(reviewedRows.map(x => Number(x.result_seq)));
+  adminPreview = { ...adminPreview,
+    unmatchedResults: (adminPreview.unmatchedResults || []).filter(x => !reviewedSeqs.has(Number(x && x.seq))),
+  };
   return {
     ok: true, found: true, persisted: true, uploadId: row.id,
     canApply: row.applied !== true && row.has_file === true
@@ -380,20 +386,23 @@ async function searchUnconfirmedWorkCandidates({ query }) {
   })) };
 }
 
-async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName }) {
+async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db = _db() }) {
   const normalizedMemo = _unconfirmedMemo(memo);
   if (!batchId || !uploadId || !normalizedMemo || !sheetId || !tabName) {
     throw new ResultError('bad_request', '회차·결과파일·통장표시·작업을 모두 선택해 주세요.');
   }
-  const { rows: [upload] } = await _db().query(
+  const { rows: [upload] } = await db.query(
     `SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
   const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
   if (!Array.isArray(outside)) throw new ResultError('not_found', '저장된 미확인 이체 결과를 찾을 수 없습니다.');
-  const transfers = outside.filter(x => _unconfirmedMemo(x && x.memo) === normalizedMemo);
+  const { rows: reviewedRows } = await db.query(
+    'SELECT result_seq FROM unconfirmed_transfer_reviews WHERE upload_id = $1', [uploadId]);
+  const reviewedSeqs = new Set(reviewedRows.map(x => Number(x.result_seq)));
+  const transfers = outside.filter(x => _unconfirmedMemo(x && x.memo) === normalizedMemo && !reviewedSeqs.has(Number(x && x.seq)));
   if (!transfers.length) throw new ResultError('not_found', '선택한 통장표시의 미확인 이체가 이 결과파일에 없습니다.');
 
   const holders = [...new Set(transfers.map(x => String(x && x.holder || '').trim()).filter(Boolean))];
-  const { rows: participants } = holders.length ? await _db().query(
+  const { rows: participants } = holders.length ? await db.query(
     `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex",
             ri.is_submitted2 = 'PAID' OR EXISTS (
               SELECT 1 FROM payment_records pr
@@ -408,7 +417,7 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
       ORDER BY ri.reviewer_name, ri.row_index`, [sheetId, tabName, holders]) : [];
   // The selection is scoped to this work, but uniqueness must be checked against
   // every item in the batch to prevent same-name/same-amount cross-work matching.
-  const { rows: batchItems } = await _db().query(
+  const { rows: batchItems } = await db.query(
     'SELECT * FROM payment_batch_items WHERE batch_id = $1', [batchId]);
   const selectedItemIds = new Set(batchItems
     .filter(x => x.sheet_id === sheetId && x.tab_name === tabName)
@@ -422,7 +431,8 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
   const results = transfers.map(t => {
     const matches = byName.get(String(t.holder || '').trim()) || [];
     const paid = matches.filter(m => m.alreadyPaid === true);
-    const state = paid.length ? 'duplicate_payment'
+    const state = t.success !== true ? 'transfer_not_confirmed'
+      : paid.length ? 'duplicate_payment'
       : matches.length === 1 ? 'candidate_unpaid'
       : matches.length ? 'ambiguous_participant' : 'participant_not_found';
     return {
@@ -445,8 +455,121 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
       candidateUnpaid: results.filter(x => x.state === 'candidate_unpaid').length,
       ambiguous: results.filter(x => x.state === 'ambiguous_participant').length,
       notFound: results.filter(x => x.state === 'participant_not_found').length,
+      transferNotConfirmed: results.filter(x => x.state === 'transfer_not_confirmed').length,
     },
   };
+}
+
+const DUPLICATE_CASE_STATUSES = new Set(['PENDING', 'RECOVERY_REQUESTED', 'REFUND_REQUESTED', 'RECOVERED', 'REFUNDED', 'CLOSED']);
+const DUPLICATE_CASE_TYPES = new Set(['RECOVERY', 'REFUND']);
+
+function _reviewText(value, limit = 500) {
+  return String(value || '').trim().slice(0, limit);
+}
+
+function _reviewDate(value) {
+  if (!value) return null;
+  const normalized = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new ResultError('bad_request', '처리 기한은 YYYY-MM-DD 형식으로 입력해 주세요.');
+  return normalized;
+}
+
+function _reviewUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+}
+
+async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tabName, resultSeq, action, note, caseInfo, by }) {
+  const normalizedAction = String(action || '').trim().toUpperCase();
+  if (!['APPROVE', 'DUPLICATE'].includes(normalizedAction) || !Number.isInteger(Number(resultSeq))) {
+    throw new ResultError('bad_request', '이체 결과와 처리 조치를 확인해 주세요.');
+  }
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [batch] } = await client.query('SELECT id, status FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
+    if (!batch) throw new ResultError('not_found', '이체 회차를 찾을 수 없습니다.');
+    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 이체 회차는 대조할 수 없습니다.');
+    const match = await inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db: client });
+    const result = match.results.find(x => Number(x.seq) === Number(resultSeq));
+    if (!result) throw new ResultError('not_found', '선택한 이체 결과를 찾을 수 없습니다.');
+    const allowed = normalizedAction === 'APPROVE' ? result.state === 'candidate_unpaid' : result.state === 'duplicate_payment';
+    if (!allowed) throw new ResultError('not_eligible', '현재 판정에서는 선택한 조치를 실행할 수 없습니다.');
+
+    const decision = normalizedAction === 'APPROVE' ? 'APPROVED' : 'DUPLICATE_CASE_OPENED';
+    const { rows: [review] } = await client.query(
+      `INSERT INTO unconfirmed_transfer_reviews
+        (batch_id, upload_id, result_seq, memo, sheet_id, tab_name, participant_row_index, decision, review_note, reviewed_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (upload_id, result_seq) DO NOTHING
+       RETURNING *`,
+      [batchId, uploadId, Number(resultSeq), match.memo, sheetId, tabName, result.rowIndex, decision, _reviewText(note), _reviewText(by, 100)]);
+    if (!review) throw new ResultError('already_reviewed', '이 이체 결과는 이미 처리되었습니다. 새로고침 후 확인해 주세요.');
+
+    let duplicateCase = null;
+    if (normalizedAction === 'DUPLICATE') {
+      const resolutionType = String(caseInfo && caseInfo.resolutionType || 'RECOVERY').trim().toUpperCase();
+      if (!DUPLICATE_CASE_TYPES.has(resolutionType)) throw new ResultError('bad_request', '회수 또는 환불 조치 유형을 선택해 주세요.');
+      const caseStatus = resolutionType === 'REFUND' ? 'REFUND_REQUESTED' : 'RECOVERY_REQUESTED';
+      const { rows: [created] } = await client.query(
+        `INSERT INTO duplicate_payment_cases
+          (review_id, case_status, owner_name, due_at, resolution_type, memo, created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+         RETURNING *`,
+        [review.id, caseStatus, _reviewText(caseInfo && caseInfo.ownerName, 100), _reviewDate(caseInfo && caseInfo.dueAt),
+          resolutionType, _reviewText(caseInfo && caseInfo.memo), _reviewText(by, 100)]);
+      duplicateCase = created;
+      await client.query(
+        `INSERT INTO duplicate_payment_case_events (case_id, event_type, after_status, note, changed_by)
+         VALUES ($1, 'CREATED', $2, $3, $4)`,
+        [created.id, caseStatus, _reviewText(caseInfo && caseInfo.memo), _reviewText(by, 100)]);
+    }
+    await client.query('COMMIT');
+    return { ok: true, review: { id: review.id, decision: review.decision, resultSeq: review.result_seq }, duplicateCase };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally { client.release(); }
+}
+
+async function createDuplicatePaymentCase(input) {
+  return reviewUnconfirmedTransfer({ ...input, action: 'DUPLICATE' });
+}
+
+async function updateDuplicatePaymentCase({ caseId, caseStatus, ownerName, dueAt, memo, by }) {
+  const status = String(caseStatus || '').trim().toUpperCase();
+  if (!_reviewUuid(caseId) || !DUPLICATE_CASE_STATUSES.has(status)) throw new ResultError('bad_request', '중복입금 후속관리 상태를 확인해 주세요.');
+  const client = await _db().connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [current] } = await client.query('SELECT * FROM duplicate_payment_cases WHERE id = $1 FOR UPDATE', [caseId]);
+    if (!current) throw new ResultError('not_found', '중복입금 후속관리 건을 찾을 수 없습니다.');
+    const { rows: [updated] } = await client.query(
+      `UPDATE duplicate_payment_cases
+          SET case_status = $2, owner_name = $3, due_at = $4, memo = $5, updated_by = $6, updated_at = NOW()
+        WHERE id = $1 RETURNING *`,
+      [caseId, status, _reviewText(ownerName, 100), _reviewDate(dueAt), _reviewText(memo), _reviewText(by, 100)]);
+    await client.query(
+      `INSERT INTO duplicate_payment_case_events (case_id, event_type, before_status, after_status, note, changed_by)
+       VALUES ($1, 'UPDATED', $2, $3, $4, $5)`,
+      [caseId, current.case_status, status, _reviewText(memo), _reviewText(by, 100)]);
+    await client.query('COMMIT');
+    return { ok: true, duplicateCase: updated };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally { client.release(); }
+}
+
+async function listDuplicatePaymentCases({ batchId }) {
+  if (!batchId) throw new ResultError('bad_request', '이체 회차를 선택해 주세요.');
+  const { rows } = await _db().query(
+    `SELECT c.*, r.result_seq AS "resultSeq", r.memo AS "transferMemo", r.sheet_id AS "sheetId", r.tab_name AS "tabName",
+            r.reviewed_at AS "reviewedAt", r.reviewed_by AS "reviewedBy"
+       FROM duplicate_payment_cases c
+       JOIN unconfirmed_transfer_reviews r ON r.id = c.review_id
+      WHERE r.batch_id = $1
+      ORDER BY CASE WHEN c.case_status = 'CLOSED' THEN 1 ELSE 0 END, c.due_at NULLS LAST, c.updated_at DESC`, [batchId]);
+  return { ok: true, cases: rows };
 }
 
 async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, by }) {
@@ -969,4 +1092,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, findAccountMismatchCandidates, reconcileAccountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
