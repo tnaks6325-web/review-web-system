@@ -1349,7 +1349,7 @@ document.addEventListener("DOMContentLoaded", () => {
     _switchAuthTab("register");
   }
   // ★ GAS URL 자동 부트스트랩
-  // BOOTSTRAP_GAS_URL이 없으면 localStorage → GAS PropertiesService 순서로 조회
+  // Node API endpoint is selected by deployment configuration.
   bootstrapGasUrl();
 
   // ★ Phase 1-2: 공지 배너 로드 (비동기, 실패 무시)
@@ -1374,11 +1374,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 /**
  * GAS URL 자동 로드 순서:
- * 1. BOOTSTRAP_GAS_URL 하드코딩값 → 있으면 즉시 사용
- * 2. localStorage 저장값 → 있으면 그 URL로 GAS getAppUrl 호출해서 최신값 확인
- * 3. 둘 다 없으면 gasNotSet 배너 표시
+ * The endpoint is provided by the deployment configuration.
  */
 async function bootstrapGasUrl() {
+  APP_CONFIG.GAS_WEB_APP_URL = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) || APP_CONFIG.GAS_WEB_APP_URL;
   // ★ [Node.js 이관] GAS URL 부트스트랩 → API_BASE_URL 헬스체크로 대체
   if (APP_CONFIG.GAS_WEB_APP_URL) {
     hide("gasNotSet");
@@ -3383,173 +3382,8 @@ function clearAdminSession() {}
 function getAdminSessionRemaining() { return null; }
 
 /* ── GAS URL 설정 모달 (비밀번호 인증) ── */
-const GAS_URL_PW = "rhakdnjdy1!"; // 설정 접근 비밀번호
+// GAS URL configuration was retired; deployment-owned Node API is used instead.
 
-function openGasUrlModal() {
-  // 항상 STEP1(비밀번호)부터 시작
-  show("gasUrlStep1");
-  hide("gasUrlStep2");
-  const pwEl = document.getElementById("gasUrlPwInput");
-  pwEl.value = "";
-  hide("gasUrlPwError");
-  hide("gasUrlError");
-  show("gasUrlModal", "flex");
-  setTimeout(() => pwEl.focus(), 100);
-}
-function closeGasUrlModal() {
-  hide("gasUrlModal");
-}
-function verifyGasUrlPw() {
-  const pw    = document.getElementById("gasUrlPwInput").value;
-  const errEl = document.getElementById("gasUrlPwError");
-  hide(errEl);
-  if (!pw) {
-    errEl.textContent = "비밀번호를 입력하세요.";
-    show(errEl);
-    return;
-  }
-  if (pw !== GAS_URL_PW) {
-    errEl.textContent = "비밀번호가 틀렸습니다.";
-    show(errEl);
-    document.getElementById("gasUrlPwInput").value = "";
-    document.getElementById("gasUrlPwInput").focus();
-    return;
-  }
-  // 비밀번호 확인 성공 → STEP2로 전환
-  hide("gasUrlStep1");
-  const urlInput = document.getElementById("gasUrlInput");
-  urlInput.value = APP_CONFIG.GAS_WEB_APP_URL || "";
-  hide("gasUrlError");
-  show("gasUrlStep2");
-  _renderGasUrlHistory(); // ← 이력 목록 갱신
-  setTimeout(() => urlInput.focus(), 100);
-}
-function saveGasUrl() {
-  const url   = document.getElementById("gasUrlInput").value.trim();
-  const errEl = document.getElementById("gasUrlError");
-  hide(errEl);
-  if (!url) {
-    errEl.textContent = "URL을 입력해주세요.";
-    show(errEl);
-    return;
-  }
-  if (!url.includes("script.google.com/macros/s/")) {
-    errEl.textContent = "올바른 GAS 배포 URL 형식이 아닙니다. (/macros/s/.../exec)";
-    show(errEl);
-    return;
-  }
-  // ── 변경 이력 기록 ──
-  _addGasUrlHistory(url);
-  saveConfig({ GAS_WEB_APP_URL: url });
-  APP_CONFIG.GAS_WEB_APP_URL = url;
-  // ★ GAS PropertiesService에도 저장 → 다른 접속자에게 자동 반영
-  _saveAppUrlToGas(url);
-  closeGasUrlModal();
-  hide("gasNotSet");
-  showToast("GAS URL이 저장되었습니다. 다른 접속자에게도 자동 반영됩니다.", "success");
-}
-
-/* ── GAS URL 변경 이력 관리 ── */
-const GAS_URL_HISTORY_KEY = "rapp_url_history";
-const GAS_URL_HISTORY_MAX = 10; // 최대 보관 건수
-
-/** 이력 배열 반환 (최신순) */
-function _loadGasUrlHistory() {
-  try {
-    const raw = localStorage.getItem(GAS_URL_HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (_) { return []; }
-}
-
-/** URL 저장 시 이력에 추가 */
-function _addGasUrlHistory(url) {
-  const list = _loadGasUrlHistory();
-  // 버전 번호: 현재 이력 중 같은 URL의 최대 버전 + 1, 없으면 전체 최대 버전 + 1
-  const allVersions = list.map(h => h.version || 0);
-  const nextVersion = (allVersions.length ? Math.max(...allVersions) : 0) + 1;
-
-  // 동일 URL이 최신 항목이면 중복 추가 안 함
-  if (list.length && list[0].url === url) return;
-
-  const entry = {
-    version:   nextVersion,
-    url:       url,
-    savedAt:   Date.now()  // ms timestamp
-  };
-  list.unshift(entry); // 최신을 앞에
-  if (list.length > GAS_URL_HISTORY_MAX) list.splice(GAS_URL_HISTORY_MAX);
-  try { localStorage.setItem(GAS_URL_HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
-}
-
-/** 이력 전체 삭제 */
-function clearGasUrlHistory() {
-  if (!confirm("변경 이력을 모두 삭제하시겠습니까?")) return;
-  try { localStorage.removeItem(GAS_URL_HISTORY_KEY); } catch (_) {}
-  _renderGasUrlHistory();
-}
-
-/** 이력 목록을 모달에 렌더링 */
-function _renderGasUrlHistory() {
-  const wrap = document.getElementById("gasUrlHistoryWrap");
-  const list = document.getElementById("gasUrlHistoryList");
-  if (!wrap || !list) return;
-  const history = _loadGasUrlHistory();
-  if (!history.length) { wrap.style.display = "none"; return; }
-  wrap.style.display = "block";
-  list.innerHTML = history.map((h, i) => {
-    const dt  = new Date(h.savedAt);
-    const pad = n => String(n).padStart(2, "0");
-    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-    // URL 중간 생략 (앞 30자 + … + 끝 20자)
-    const short = h.url.length > 54
-      ? h.url.slice(0, 32) + "…" + h.url.slice(-20)
-      : h.url;
-    const isCurrent = (APP_CONFIG.GAS_WEB_APP_URL === h.url);
-    return `
-      <div class="gas-url-history-item${isCurrent ? ' gas-url-history-current' : ''}"
-           onclick="_selectGasUrlHistory('${i}')" title="${h.url}">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0">
-          <span class="gas-url-ver-badge">v${h.version}</span>
-          <span class="gas-url-history-url">${short}</span>
-          ${isCurrent ? '<span class="gas-url-cur-tag">현재</span>' : ''}
-        </div>
-        <span class="gas-url-history-date">${dateStr}</span>
-      </div>`;
-  }).join('');
-}
-
-/** 이력 항목 클릭 → 입력칸에 자동 입력 */
-function _selectGasUrlHistory(idx) {
-  const history = _loadGasUrlHistory();
-  const entry   = history[Number(idx)];
-  if (!entry) return;
-  const input = document.getElementById("gasUrlInput");
-  if (input) {
-    input.value = entry.url;
-    input.focus();
-    // 선택 피드백
-    document.querySelectorAll(".gas-url-history-item").forEach((el, i) => {
-      el.classList.toggle("gas-url-history-selected", i === Number(idx));
-    });
-  }
-}
-
-/** GAS PropertiesService에 URL 저장 (백그라운드, 비동기) */
-async function _saveAppUrlToGas(url) {
-  try {
-    const pw = GAS_URL_PW; // 설정 비밀번호 (기존 상수 그대로 사용)
-    const res = await fetch(`${url}?action=saveAppUrl&url=${encodeURIComponent(url)}&pw=${encodeURIComponent(pw)}`, { redirect: "follow" });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.ok) console.log("[GAS] URL PropertiesService 저장 완료");
-      else console.warn("[GAS] URL 저장 실패:", json.error);
-    }
-  } catch (e) {
-    console.warn("[GAS] URL 저장 오류 (무시):", e.message);
-  }
-}
-
-/* ── 관리자 접근 차단 (search.html에서는 모든 경로 비활성) ── */
 function openAdminLogin() {}
 function closeAdminLogin() {}
 async function submitAdminLogin() {}
@@ -4757,7 +4591,7 @@ function openFormLink(btnEl) {
   const gid = gidMatch ? gidMatch[1] : "";
 
   // gasUrl은 URL에 포함하지 않음 → 링크를 짧고 깔끔하게 유지
-  // 리뷰어 접속 시 BOOTSTRAP_GAS_URL(하드코딩) 또는 localStorage에서 자동 확보
+  // Reviewer links use the deployment-selected Node API.
   const base   = location.origin + location.pathname;
   const params = new URLSearchParams({
     mode: "form",
@@ -4829,11 +4663,7 @@ function initOrderFormMode() {
         const resp = await fetch(apiBase + '/api/short/resolve?code=' + encodeURIComponent(shortCode));
         return await resp.json();
       }
-      // GAS 폴백 (JSONP)
-      const savedUrl = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
-      const gasUrl = BOOTSTRAP_GAS_URL || savedUrl || "";
-      if (!gasUrl) throw new Error("API URL이 설정되지 않았습니다.");
-      return await _jsonpGet(gasUrl + "?action=resolveShort&code=" + encodeURIComponent(shortCode), 10000);
+      throw new Error("Node API URL이 설정되지 않았습니다.");
     };
 
     resolveViaApi()
@@ -4881,12 +4711,8 @@ function initOrderFormMode() {
 
   // GAS URL 확보 순서:
   // 1) URL 파라미터 gasUrl (구버전 링크 하위 호환용)
-  // 2) BOOTSTRAP_GAS_URL (하드코딩 — 가장 신뢰할 수 있는 값)
-  // 3) localStorage 저장값
-  const gasUrlParam = params.get("gasUrl") || "";
-  const savedUrl    = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
-  const resolvedGasUrl = gasUrlParam || BOOTSTRAP_GAS_URL || savedUrl || "";
-  if (resolvedGasUrl) APP_CONFIG.GAS_WEB_APP_URL = resolvedGasUrl;
+  // Legacy gasUrl values are ignored.
+  // Legacy gasUrl parameters are intentionally ignored. Node API selection is deployment-owned.
 
   // 전역에 폼 컨텍스트 저장 (sheetUrl, round, ncMode 포함)
   const _sheetUrl = sheetId ? "https://docs.google.com/spreadsheets/d/" + sheetId + "/edit" : "";
@@ -9645,7 +9471,7 @@ async function confirmTcSave() {
   if (!APP_CONFIG.GAS_WEB_APP_URL) {
     showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다. 설정 화면에서 URL을 먼저 입력해주세요.", true);
     _tcCurrent = null;
-    openGasUrlModal();
+    // Node API is always deployment-configured; no browser-side setup is available.
     return;
   }
 
@@ -10544,7 +10370,7 @@ async function testGasJsonp() {
 
   try {
     const t0   = Date.now();
-    const data = await _jsonpGet(`${url}?action=indexStatus`, 10000);
+    const data = await gasGet({ action: "indexStatus" });
     const ms   = Date.now() - t0;
     if (data && (data.exists !== undefined || data.count !== undefined)) {
       const verBadge = data.codeVersion
@@ -10592,51 +10418,12 @@ async function testGasJsonp() {
  * GAS 웹앱은 긴 요청 시 302 리다이렉트 발생 → CORS 헤더 유실 문제
  * 해결: <script> 태그 JSONP 방식으로 완전 우회 (preflight 없음, CORS 무관)
  */
-let _jsonpSeq = 0;
-function _jsonpGet(fullUrl, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const cbName = "__gasCb" + (++_jsonpSeq) + "_" + Date.now();
-    const script  = document.createElement("script");
-    let   settled = false;
-    const tid = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      script.remove();
-      delete window[cbName];
-      reject(new Error("요청 시간 초과"));
-    }, timeoutMs || 60000);
-
-    window[cbName] = function(data) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(tid);
-      script.remove();
-      delete window[cbName];
-      resolve(data);
-    };
-
-    // GAS에 callback 파라미터 추가
-    const sep = fullUrl.includes("?") ? "&" : "?";
-    script.src = fullUrl + sep + "callback=" + cbName;
-    script.onerror = function() {
-      if (settled) return;
-      settled = true;
-      clearTimeout(tid);
-      script.remove();
-      delete window[cbName];
-      reject(new Error("스크립트 로드 실패 (GAS URL 확인)"));
-    };
-    document.head.appendChild(script);
-  });
-}
-
 // ★ [Node.js 이관] api.js로 대체됨
 // // async function gasGet(params, timeoutMs) {
 //   const url = APP_CONFIG.GAS_WEB_APP_URL;
 //   if (!url) throw new Error("GAS URL 없음");
 //   const qs      = new URLSearchParams(params).toString();
 //   const fullUrl = `${url}?${qs}`;
-//   const json = await _jsonpGet(fullUrl, timeoutMs || 60000);
 //   if (json && json.error) throw new Error(json.error);
 //   return json;
 // }
@@ -10693,7 +10480,6 @@ function _jsonpGet(fullUrl, timeoutMs) {
 //     )
 //   ).toString();
 //   const fullUrl = `${url}?${qs}`;
-//   const json = await _jsonpGet(fullUrl, 30000);
 //   if (json && json.error) throw new Error(json.error);
 //   return json;
 // }

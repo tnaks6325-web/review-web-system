@@ -96,77 +96,6 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
 </div>
 
 <!-- ────────── GAS URL 설정 모달 (비밀번호 인증 후 설정) ────────── -->
-<div id="gasUrlModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3><i class="fas fa-link"></i> GAS 웹앱 URL 설정</h3>
-      <button class="btn-icon-sm" onclick="closeGasUrlModal()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-
-      <!-- STEP 1: 비밀번호 확인 -->
-      <div id="gasUrlStep1">
-        <div class="info-banner" style="margin-bottom:14px">
-          <i class="fas fa-lock"></i>
-          <span>설정 접근을 위해 비밀번호를 입력하세요.</span>
-        </div>
-        <div class="field-group">
-          <label>접근 비밀번호 <span class="req">*</span></label>
-          <div class="pw-input-wrap">
-            <input type="password" id="gasUrlPwInput" placeholder="비밀번호 입력"
-                   onkeydown="if(event.key==='Enter') verifyGasUrlPw()"/>
-            <button class="btn-pw-toggle" onclick="togglePwVisible('gasUrlPwInput', this)">
-              <i class="fas fa-eye"></i>
-            </button>
-          </div>
-        </div>
-        <p id="gasUrlPwError" class="login-error hidden" style="display:none"></p>
-        <div class="modal-actions">
-          <button class="btn-ghost" onclick="closeGasUrlModal()">취소</button>
-          <button class="btn-primary" onclick="verifyGasUrlPw()">
-            <i class="fas fa-unlock"></i> 확인
-          </button>
-        </div>
-      </div>
-
-      <!-- STEP 2: URL 입력 (비밀번호 확인 후 표시) -->
-      <div id="gasUrlStep2" class="hidden" style="display:none">
-        <div class="info-banner" style="margin-bottom:14px">
-          <i class="fas fa-info-circle"></i>
-          <span>Google Apps Script 배포 URL을 입력하세요.<br>
-          형식: <code>https://script.google.com/macros/s/.../exec</code></span>
-        </div>
-        <div class="field-group">
-          <label>GAS 웹앱 URL <span class="req">*</span></label>
-          <input type="url" id="gasUrlInput" placeholder="https://script.google.com/macros/s/.../exec"
-                 style="font-size:.82rem"
-                 onkeydown="if(event.key==='Enter') saveGasUrl()"/>
-          <p class="field-hint">GAS 편집 URL이 아닌 <strong>배포(/exec) URL</strong>을 입력하세요</p>
-        </div>
-        <p id="gasUrlError" class="login-error hidden" style="display:none"></p>
-
-        <!-- ── URL 변경 이력 ── -->
-        <div id="gasUrlHistoryWrap" style="margin-top:12px;display:none">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-            <span style="font-size:.72rem;font-weight:700;color:var(--t2)"><i class="fas fa-history" style="margin-right:4px;color:var(--p)"></i>변경 이력</span>
-            <button onclick="clearGasUrlHistory()" style="font-size:.65rem;color:#EF4444;background:none;border:none;cursor:pointer;padding:2px 4px;border-radius:4px" title="이력 전체 삭제">전체 삭제</button>
-          </div>
-          <div id="gasUrlHistoryList" style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
-        </div>
-
-        <div class="modal-actions">
-          <button class="btn-ghost" onclick="closeGasUrlModal()">취소</button>
-          <button class="btn-primary" onclick="saveGasUrl()">
-            <i class="fas fa-save"></i> 저장
-          </button>
-        </div>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-
 <!-- ────────── 비밀번호 변경 모달 ────────── -->
 <div id="changePwModal" class="modal-overlay hidden" style="display:none">
   <div class="modal-box">
@@ -762,16 +691,13 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       <div id="btnNameNext"       style="display:none"></div>
 
       <!-- GAS 미설정 안내 -->
-      <div id="gasNotSet" class="notice-card hidden" style="display:none">
+      <div id="gasNotSet" class="notice-card hidden" style="display:none" aria-hidden="true">
         <i class="fas fa-exclamation-triangle"></i>
         <div style="flex:1">
           <strong>GAS URL 설정이 필요합니다</strong>
           <p>관리자에게 문의하거나, 관리자라면 아래 버튼을 눌러 URL을 설정하세요.<br>
           <span style="font-size:.72rem;color:var(--t3)">설정 후 모든 접속자에게 자동 반영됩니다.</span></p>
         </div>
-        <button class="btn-primary" style="flex-shrink:0;padding:8px 14px;font-size:.82rem" onclick="openGasUrlModal()">
-          <i class="fas fa-link"></i> URL 설정
-        </button>
       </div>
 
     </main>
