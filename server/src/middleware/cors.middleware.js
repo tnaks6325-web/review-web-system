@@ -7,6 +7,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 // Keep it out of production unless that deployment explicitly opts in.
 const TEST_AUTO_LOGIN_ORIGIN = 'https://test-review-wdb-web-production.up.railway.app';
 if (process.env.TEST_AUTO_LOGIN === '1') allowedOrigins.push(TEST_AUTO_LOGIN_ORIGIN);
+const TEST_PR_FRONTEND_ORIGIN = /^https:\/\/test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/;
 
 // 개발환경에서는 localhost 허용
 if (process.env.NODE_ENV !== 'production') {
@@ -25,6 +26,9 @@ const corsOptions = {
     if (!origin || origin === 'null') return callback(null, true);
     // 정확히 일치하는 origin
     if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (process.env.TEST_AUTO_LOGIN === '1' && TEST_PR_FRONTEND_ORIGIN.test(origin)) {
+      return callback(null, true);
+    }
     // Cloudflare Pages 서브도메인 허용 (배포별 URL: https://<hash>.review-web-system.pages.dev)
     // 해시값에 하이픈(-), 숫자, 소문자 포함 가능 (예: main, abc-123, 8f3a2b1)
     if (/^https:\/\/[a-z0-9-]+\.review-web-system\.pages\.dev$/.test(origin)) {

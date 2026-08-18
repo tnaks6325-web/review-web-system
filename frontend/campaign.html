@@ -253,8 +253,8 @@
 <div class="sheet-ovl" id="popGate">
   <div class="sheet" style="max-height:82vh;overflow-y:auto">
     <h3>🔥 인기 상품 참여 조건</h3>
-    <p>선행참여 우선순위의 <b>미완료 공고</b>를 먼저 구매양식 제출완료해주세요.<br>
-      이미 제출완료한 공고는 자동으로 건너뛰어 다음 공고가 표시됩니다.</p>
+    <p><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>
+      어떤 일반 모집을 제출할지는 직접 선택할 수 있습니다.</p>
     <div class="muted" id="popGateCount" style="margin-bottom:8px"></div>
     <div id="popGateBody"></div>
     <button class="btn ghost" style="margin-top:12px" onclick="hidePopGate()">닫기</button>
@@ -540,8 +540,8 @@ function renderPopNotice(){
   box.style.display = '';
   box.innerHTML =
     '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
-    '<div style="font-size:.82rem;line-height:1.65">선행참여 우선순위의 <b>미완료 공고를 먼저 제출완료</b>하면 참여할 수 있어요.<br>' +
-    '<span class="muted">이미 제출완료한 공고는 자동으로 건너뛰고 다음 순위 공고가 연결됩니다.</span></div>' +
+    '<div style="font-size:.82rem;line-height:1.65"><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
+    '<span class="muted">원하는 일반 모집을 선택해 제출완료한 뒤 인기상품으로 돌아오세요.</span></div>' +
     '<button class="btn ghost" style="margin-top:10px;padding:10px" onclick="openPopGate()">📋 지금 참여 가능한 일반 모집 보기</button>';
 }
 
@@ -552,17 +552,17 @@ async function openPopGate(gateInfo){
   ovl.style.display = 'flex';
   const body = $('popGateBody');
   const cnt = $('popGateCount');
-  const requiredId = gateInfo && gateInfo.prerequisite && gateInfo.prerequisite.id ? String(gateInfo.prerequisite.id) : '';
-  const requiredTitle = gateInfo && gateInfo.prerequisite && gateInfo.prerequisite.title ? String(gateInfo.prerequisite.title) : '';
-  cnt.textContent = requiredTitle ? `현재 선행참여 공고 · ${requiredTitle}`
-    : (gateInfo ? `현재 제출완료 일반 ${gateInfo.normalDone || 0}건 · 사용한 인기 ${gateInfo.popularUsed || 0}건` : '');
+  const normalDone = Number(gateInfo && gateInfo.normalDone) || 0;
+  const popularUsed = Number(gateInfo && gateInfo.popularUsed) || 0;
+  cnt.textContent = gateInfo
+    ? `제출완료 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
+    : '';
   body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 일반 모집을 불러오는 중…</div>';
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/list');
     const j = await r.json();
     const rows = (j.data || []).filter(x =>
-      x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID)
-      && (!requiredId || String(x.id) === requiredId));
+      x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID));
     if(!rows.length){
       body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3);font-size:.84rem">지금 참여 가능한 일반 모집이 없어요.<br>일반 모집이 열리면 먼저 참여해주세요.</div>';
       return;
@@ -592,9 +592,8 @@ async function openPopGate(gateInfo){
 }
 function hidePopGate(){ const o=$('popGate'); if(o) o.style.display='none'; }
 function goPopNormal(id){
-  // 복귀 대상은 인기공고+현재 선행공고를 한 묶음으로 보관한다.
-  // 일반 공고를 다른 경로로 참여한 뒤 우연히 완료해도 잘못된 복귀 CTA가 생기지 않는다.
-  try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID, prerequisiteId:String(id) })); }catch(_){}
+  // 선택한 일반 모집을 완료하면 원래 인기 공고로 돌아갈 수 있게 보관한다.
+  try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID })); }catch(_){}
   location.href = 'campaign.html?id=' + encodeURIComponent(id);
 }
 function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
@@ -1293,7 +1292,7 @@ function renderDone(pendingConfirm){
     let back = null;
     try { back = raw ? JSON.parse(raw) : null; } catch (_) { back = raw ? { campaignId: raw, prerequisiteId: CAMP_ID } : null; }
     const oldBtn = $('popReturnBtn'); if(oldBtn) oldBtn.remove();
-    if(back && back.campaignId && String(back.prerequisiteId) === String(CAMP_ID) && String(back.campaignId) !== String(CAMP_ID) && !pendingConfirm){
+    if(back && back.campaignId && _camp && _camp.participation_mode && _camp.is_popular !== true && String(back.campaignId) !== String(CAMP_ID) && !pendingConfirm){
       const btn = document.createElement('button');
       btn.id = 'popReturnBtn';
       btn.className = 'btn';

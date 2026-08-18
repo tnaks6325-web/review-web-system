@@ -157,7 +157,7 @@ async function confirmExternalApplication(client, {
   sheetId, gid, tabName,
 }) {
   const { rows: cRows } = await client.query(
-    `SELECT id, participation_mode, recruit_total, linked_sheet_id, linked_tab_gid, linked_tab_name
+    `SELECT id, participation_mode, is_popular, recruit_total, linked_sheet_id, linked_tab_gid, linked_tab_name
        FROM recruit_campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
   if (!cRows.length) return { ok: false, error: '캠페인을 찾을 수 없습니다' };
   if (!cRows[0].participation_mode) return { ok: false, skipped: 'not_participation' };
@@ -206,10 +206,10 @@ async function confirmExternalApplication(client, {
   } else {
     const ins = await client.query(
       `INSERT INTO campaign_applications
-         (campaign_id, applicant_name, applicant_phone, phone8, status, applied_at, submitted_at, order_submission_id, option_key)
-       VALUES ($1,$2,$3,$4,'submitted',NOW(),NOW(),$5,$6)
+         (campaign_id, applicant_name, applicant_phone, phone8, status, applied_at, submitted_at, order_submission_id, option_key, is_popular_snapshot)
+       VALUES ($1,$2,$3,$4,'submitted',NOW(),NOW(),$5,$6,$7)
        RETURNING id`,
-      [campaignId, name, phone, phone8, orderSubmissionId, optionKey || null]);
+      [campaignId, name, phone, phone8, orderSubmissionId, optionKey || null, cRows[0].is_popular === true]);
     appId = ins.rows[0].id;
   }
 
