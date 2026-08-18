@@ -36,7 +36,6 @@ const { recordDeposits } = paymentApply;
 const { rebuildLedgers } = require('./sheetlessLedger.service');
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
-const AUTO_APPLY_MATCH_RATE = 0.9;
 
 class ResultError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
@@ -49,7 +48,10 @@ function decideAutoApply({ summary, duplicateApplied = false }) {
   const matchRate = items ? matched / items : 0;
   const blockers = [];
   if (!items) blockers.push('no_pending_items');
-  else if (matchRate < AUTO_APPLY_MATCH_RATE) blockers.push('match_below_90');
+  /* 일치율은 파일 완전성 확인 정보일 뿐 반영 게이트가 아니다. 계좌+금액으로
+     정확히 짝지어진 이체 결과는 일부 파일이어도 안전하게 기록할 수 있다.
+     파일에 없는 대상은 applyResultFile 에서 pending 으로 그대로 남는다. */
+  else if (!matched) blockers.push('no_matched_results');
   /* 회차 밖 행은 파일에 그대로 보여 주되, 이 회차의 매칭 성공 건을 막지는 않는다.
      실제 반영 대상은 pairs 로 짝지어진 행뿐이므로 밖의 행이 다른 회차에 섞여도
      이 회차의 입금일을 누락시키지 않는다. */
@@ -687,4 +689,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, AUTO_APPLY_MATCH_RATE, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
