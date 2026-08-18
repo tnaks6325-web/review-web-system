@@ -459,27 +459,45 @@ router.post('/sheetless/cutover-active-server-only', authMiddleware, adminOrMast
 // 당일 미제출 홀드 해제 — 운영 중 잘못 적용됐던 "참여 클릭만으로 당일 제한"을 복구하는 1회성 안전 도구.
 // 대상 공고·날짜·상태를 서버에 고정해, 완료된 구매양식(submitted)·다른 공고는 절대 건드리지 않는다.
 router.post('/campaigns/release-today-unsubmitted-holds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  const campaignIds = ['camp_4c981df9de49', 'camp_bb0980ceddd4'];
   try {
     if (req.body?.confirm !== 'release-today-unsubmitted-holds') {
       return res.status(400).json({ ok: false, error: '당일 미제출 홀드 해제 확인이 필요합니다.' });
     }
+    const campaignId = String(req.body?.campaignId || '').trim();
+    if (!campaignId || campaignId.length > 100) {
+      return res.status(400).json({ ok: false, error: '활성 모집공고를 선택해 주세요.' });
+    }
+    const { rows: campaigns } = await pool.query(
+      `SELECT id, title
+         FROM recruit_campaigns
+        WHERE id = $1 AND status = 'active'
+        LIMIT 1`,
+      [campaignId]
+    );
+    const campaign = campaigns[0];
+    if (!campaign) return res.status(409).json({ ok: false, error: '선택한 공고가 활성 상태가 아닙니다. 목록을 새로고침해 주세요.' });
     const { rows } = await pool.query(
       `WITH released AS (
          UPDATE campaign_applications
             SET status = 'cancelled', expires_at = NOW(), hold_token = NULL,
                 updated_at = NOW()
-          WHERE campaign_id = ANY($1::text[])
+          WHERE campaign_id = $1
             AND status = 'applied'
             AND applied_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
+            AND EXISTS (
+              SELECT 1 FROM recruit_campaigns
+               WHERE id = $1 AND status = 'active'
+            )
           RETURNING campaign_id
        )
        SELECT campaign_id, COUNT(*)::int AS released
          FROM released GROUP BY campaign_id`,
-      [campaignIds]
+      [campaignId]
     );
     const released = Object.fromEntries(rows.map(row => [row.campaign_id, Number(row.released) || 0]));
-    res.json({ ok: true, released, total: rows.reduce((sum, row) => sum + (Number(row.released) || 0), 0) });
+    const total = rows.reduce((sum, row) => sum + (Number(row.released) || 0), 0);
+    logger.info(`[trackb] today unsubmitted holds released by=${_by(req)} campaign=${campaignId} title=${campaign.title} total=${total}`);
+    res.json({ ok: true, campaign: { id: campaign.id, title: campaign.title }, released, total });
   } catch (err) { next(err); }
 });
 router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

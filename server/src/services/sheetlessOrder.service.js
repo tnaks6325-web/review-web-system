@@ -89,7 +89,7 @@ async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, loginPhone8 = '', loginName = '', recovered = false,
 } = {}) {
-  if (!sheetId || !tabName || !sheetRow) return { ok: false, reason: 'bad_request' };
+  if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
 
   const ledgerSvc = require('./orderLedger.service');
@@ -98,7 +98,19 @@ async function writeOrderToWorktable({
   // ── 열 구성 = 장부(raw_sheet_tabs)에서. 시트 경로와 **같은 로더**를 쓴다(사본 0). ──
   let ctx = null;
   try { ctx = await loadRawTabContext(sheetId, tabGid, tabName); } catch (_) { ctx = null; }
-  const headers = (ctx && ctx.headers) || [];
+  let headers = (ctx && ctx.headers) || [];
+  // 과거 작업보드는 RAW 탭 메타가 비어 있을 수 있다. 이미 준비된 작업보드
+  // 슬롯의 row_json 열 이름을 같은 DB 원본으로 사용해 복구를 막지 않는다.
+  if (!headers.length) {
+    try {
+      const { rows: stored } = await getPool().query(
+        `SELECT row_json FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+            AND row_json IS NOT NULL
+          ORDER BY seq LIMIT 1`, [sheetId, tabName]);
+      headers = Object.keys((stored[0] && stored[0].row_json) || {}).filter(Boolean);
+    } catch (_) { headers = []; }
+  }
   if (!headers.length) {
     // ★ 열을 모르면 아무 칸에도 쓸 수 없다 — 조용히 "완결" 처리하지 않는다(주문은 원장에 살아 있고
     //   화면·복구 경로가 미반영으로 본다).
@@ -106,8 +118,8 @@ async function writeOrderToWorktable({
   }
   const gid = String((ctx && ctx.tabGid) || tabGid || '');
 
-  const seq = parseInt(sheetRow, 10);
-  if (!Number.isInteger(seq) || seq < 1) return { ok: false, reason: 'bad_row' };
+  const requestedSeq = sheetRow == null ? null : parseInt(sheetRow, 10);
+  if (sheetRow != null && (!Number.isInteger(requestedSeq) || requestedSeq < 1)) return { ok: false, reason: 'bad_row' };
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -116,10 +128,38 @@ async function writeOrderToWorktable({
   let optionSuppressed = [];
   try {
     await client.query('BEGIN');
-    const { rows: cur } = await client.query(
-      `SELECT id, row_json FROM campaign_participants
-        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
-        FOR UPDATE`, [sheetId, tabName, seq]);
+    let cur;
+    let seq = requestedSeq;
+    if (seq != null) {
+      ({ rows: cur } = await client.query(
+        `SELECT id, seq, row_json FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
+          FOR UPDATE`, [sheetId, tabName, seq]));
+    } else {
+      // 재시도는 이미 연결된 행을 먼저 잠근다. 없을 때만 준비된 빈 슬롯을 선점한다.
+      ({ rows: cur } = await client.query(
+        `SELECT id, seq, row_json FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+            AND order_submission_id = $3::uuid
+          FOR UPDATE`, [sheetId, tabName, orderSubmissionId]));
+      if (!cur.length) {
+        ({ rows: cur } = await client.query(
+          `SELECT id, seq, row_json FROM campaign_participants
+            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+              AND order_submission_id IS NULL
+              AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
+            ORDER BY seq
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1`, [sheetId, tabName]));
+      }
+      if (!cur.length) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'no_open_slot' };
+      }
+      seq = Number(cur[0].seq);
+    }
 
     const currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
     const built = buildRowPatch(headers, orderData, currentRowJson);
@@ -140,20 +180,27 @@ async function writeOrderToWorktable({
                 recipient_name = COALESCE(NULLIF($6,''), recipient_name),
                 phone8         = COALESCE(NULLIF($7,''), phone8),
                 option_text    = COALESCE(NULLIF($8,''), option_text),
+                order_submission_id = $9::uuid,
                 updated_by = 'sheetless-order', updated_at = NOW()
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3`,
-        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText]);
+        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId]);
     } else {
+      // 행 번호가 명시된 레거시 복구만 표 끝 append를 허용한다. 신규 무시트 접수는 위의
+      // 준비 슬롯 선점만 사용하므로 모집 인원을 초과해 작업보드 행을 만들지 않는다.
+      if (requestedSeq == null) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'no_open_slot' };
+      }
       // 표 끝을 넘어 배정된 경우(append) — 그 자리에 줄을 만든다.
       //   ★ source='worktable' — `importTabFromIndex` 상태 CASE 가 인정하는 값(신규 값 금지).
       await client.query(
         `INSERT INTO campaign_participants
            (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8,
-            option_text, row_json, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,'worktable','sheetless-order',NOW())
+            option_text, order_submission_id, row_json, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,'worktable','sheetless-order',NOW())
          ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
-         optText || null, JSON.stringify(merged)]);
+         optText || null, orderSubmissionId, JSON.stringify(merged)]);
     }
     await client.query('COMMIT');
   } catch (err) {
@@ -203,8 +250,111 @@ async function writeOrderToWorktable({
   return { ok: true, written: true, seq, ledger, optionSuppressed };
 }
 
+/**
+ * 과거 첫 탈시트 배포 구간의 주문은 order_submissions에만 있고 작업보드 행이 없을 수 있다.
+ * 이 복구는 그런 주문만 골라 이미 준비된 빈 작업보드 슬롯에 연결한다.
+ * 외부 시트/GAS 호출은 전혀 하지 않으며, 각 행은 writeOrderToWorktable의 잠금으로 선점된다.
+ */
+/**
+ * 전환 중 누락된 공고→작업보드 연결을, 사람이 입력한 제목이 아닌 이미 저장된
+ * work-order 식별자로만 되살린다. 후보가 불명확하면 연결하지 않아 복구도 보류한다.
+ */
+async function reconcileCampaignWorktableLinks() {
+  const db = getPool();
+  const { rows } = await db.query(
+    `WITH candidates AS (
+       SELECT rc.id, wo.linked_tab_sheet_id, wo.linked_tab_name, wo.linked_tab_gid
+         FROM recruit_campaigns rc
+         JOIN work_orders wo
+           ON (rc.source_work_order_id = wo.id OR wo.linked_campaign_id = rc.id)
+        WHERE COALESCE(rc.linked_sheet_id, '') = ''
+          AND COALESCE(rc.linked_tab_name, '') = ''
+          AND wo.deleted_at IS NULL
+          AND COALESCE(wo.linked_tab_sheet_id, '') <> ''
+          AND COALESCE(wo.linked_tab_name, '') <> ''
+          AND EXISTS (
+            SELECT 1 FROM tab_configs tc
+             WHERE tc.sheet_id = wo.linked_tab_sheet_id
+               AND tc.tab_name = wo.linked_tab_name
+               AND COALESCE(tc.sheetless, FALSE) = TRUE
+          )
+     )
+     UPDATE recruit_campaigns rc
+        SET linked_sheet_id = c.linked_tab_sheet_id,
+            linked_tab_name = c.linked_tab_name,
+            linked_tab_gid = COALESCE(c.linked_tab_gid, ''),
+            updated_at = NOW()
+       FROM candidates c
+      WHERE rc.id = c.id
+      RETURNING rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid`
+  );
+  return { linked: rows.length, items: rows };
+}
+
+async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-order-recovery' } = {}) {
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
+  const links = await reconcileCampaignWorktableLinks();
+  const { rows } = await db.query(
+    `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
+            os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
+            os.memo, os.selected_opt_key,
+            ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
+            rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid
+       FROM order_submissions os
+       JOIN campaign_applications ca
+         ON (os.campaign_application_id = ca.id
+             OR ca.order_submission_id = os.id
+             OR ca.late_order_id = os.id)
+       JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+       LEFT JOIN reviewers r ON r.phone8 = COALESCE(ca.owner_phone8, ca.phone8)
+      WHERE os.deleted_at IS NULL
+        AND COALESCE(rc.linked_sheet_id, '') <> ''
+        AND COALESCE(rc.linked_tab_name, '') <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM campaign_participants cp
+           WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
+        )
+      ORDER BY os.submitted_at ASC
+      LIMIT $1`, [lim]);
+
+  const result = { linked: links.linked, scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
+  for (const row of rows) {
+    let out;
+    try {
+      out = await writeOrderToWorktable({
+        sheetId: row.linked_sheet_id, tabName: row.linked_tab_name, tabGid: row.linked_tab_gid || '',
+        orderSubmissionId: row.id,
+        loginPhone8: row.login_phone8 || row.owner_phone8 || '', loginName: row.login_name || row.orderer || '',
+        recovered: true,
+        orderData: {
+          orderer: row.orderer, recipient: row.recipient, userId: row.user_id, phone: row.phone,
+          address: row.address, bank: row.bank, account: row.account, depositor: row.depositor,
+          price: row.price, dateStr: row.date_str, orderNum: row.order_num, memo: row.memo,
+          selectedOptKey: row.selected_opt_key,
+        },
+      });
+      if (out.ok) result.written++;
+      else {
+        result.failed++;
+        if (out.reason === 'no_open_slot') result.noOpenSlot++;
+        await require('./orderLedger.service').markOrderMirrorFailed(row.id, out.message || out.reason);
+      }
+    } catch (err) {
+      out = { ok: false, reason: 'exception', message: err.message };
+      result.failed++;
+      await require('./orderLedger.service').markOrderMirrorFailed(row.id, err);
+    }
+    result.items.push({ orderSubmissionId: row.id, ok: !!out.ok, reason: out.reason || null, seq: out.seq || null });
+  }
+  logger.info(`[sheetlessOrder] 과거 작업보드 복구 by=${by} scanned=${result.scanned} written=${result.written} failed=${result.failed}`);
+  return result;
+}
+
 module.exports = {
   writeOrderToWorktable,
+  reconcileCampaignWorktableLinks,
+  recoverUnwrittenSheetlessOrders,
   buildRowPatch,
   __setPoolForTest,
 };

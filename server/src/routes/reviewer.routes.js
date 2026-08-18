@@ -18,6 +18,7 @@ const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/sea
 const adminNickname = require('../services/adminNickname.service');
 // ★ 082: 기간별 리뷰비 — 판정은 utils/campaignFee 가 단일 출처(화면마다 규칙을 만들면 합계가 갈라진다)
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
+const { extractAmountNumber } = require('../utils/paymentAmount');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -470,24 +471,58 @@ router.get('/review-earnings', async (req, res, next) => {
     const orderFeeMap = {};   // ★ 082: 행별 리뷰비 근거(참여시점 스냅샷 · 주문 제출일)
     if (sheetIds.length) {
       const { rows: orders } = await pool.query(
-        `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow", price,
-                review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt"
-           FROM order_submissions
-          WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
-            AND deleted_at IS NULL AND sheet_row IS NOT NULL AND sheet_id = ANY($2)`,
+        `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.sheet_row AS "sheetRow", os.price,
+                os.review_fee_snapshot AS "feeSnapshot", os.submitted_at AS "orderedAt"
+                , cp.row_json AS "rowJson"
+           FROM order_submissions os
+           LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
+          WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+            AND os.deleted_at IS NULL AND os.sheet_row IS NOT NULL AND os.sheet_id = ANY($2)`,
         [phoneList, sheetIds]
       );
       for (const o of orders) {
         const key = o.sheetId + '||' + o.tabName + '||' + o.sheetRow;
         const n = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
-        if (Number.isFinite(n) && n > 0) priceMap[key] = n;
+        const price = Number.isFinite(n) && n > 0 ? n : extractAmountNumber(o.rowJson);
+        if (price > 0) priceMap[key] = price;
         // ★ 082: 그 행의 참여 근거(스냅샷·구매일) — 리뷰비 판정에 쓴다.
         orderFeeMap[key] = { snapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt) };
       }
     }
 
+    // 무시트 전환 후 주문은 review_index 행이 아직 없을 수 있다. 이 경우에도
+    // 작업보드(campaign_participants)의 결제금액을 리뷰어 예상 금액에 바로 반영한다.
+    // 시트 색인으로 이미 보이는 주문은 NOT EXISTS로 제외해 이중 집계를 막는다.
+    const { rows: sheetlessOrders } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              ca.campaign_id AS "campaignId", os.price,
+              os.review_fee_snapshot AS "feeSnapshot",
+              os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
+              COALESCE(rc.review_fee, 0) AS "reviewFee",
+              rc.thumbnail_url AS "thumbnailUrl",
+              to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
+         FROM order_submissions os
+         LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
+         LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+         LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+          AND os.deleted_at IS NULL
+          AND ca.campaign_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM review_index ri
+             WHERE ri.phone8 = ANY($1)
+               AND ri.sheet_id = os.sheet_id
+               AND ri.tab_name = os.tab_name
+               AND ri.row_index = os.sheet_row
+          )`,
+      [phoneList]
+    );
+
     // 아이템별 맵 + 합계 (참여중=받을 예정 / 제출완료 중 입금완료=누적)
     const items = {};
+    // review_index의 행 번호가 작업보드 순번과 달라 정확 행 매칭이 실패한 과거 건 보완용.
+    // 같은 작업에 주문이 하나일 때만 카드에 대체 연결해 다건 작업의 오매칭을 막는다.
+    const sheetlessFallbackCounts = new Map();
     let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
     let dProductTotal = 0, dReviewTotal = 0, dCount = 0, dProductUnknown = 0, dUnpaidCount = 0;
     for (const r of riRows) {
@@ -517,6 +552,52 @@ router.get('/review-earnings', async (req, res, next) => {
         if (price != null) dProductTotal += price; else dProductUnknown++;
       } else {
         dUnpaidCount++;   // 제출완료지만 아직 입금 전 — 누적 합계에서 제외(사용자 확정 기준)
+      }
+    }
+
+    for (const o of sheetlessOrders) {
+      const parsed = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
+      const price = Number.isFinite(parsed) && parsed > 0 ? parsed : extractAmountNumber(o.rowJson);
+      const reviewFee = resolveReviewFee({
+        schedules: [],
+        fallback: o.reviewFee || 0,
+        snapshot: o.feeSnapshot,
+        orderDate: toKstDate(o.orderedAt),
+        sheetDate: o.campStartDate || null,
+      }).fee;
+      items[`order||${o.id}`] = {
+        reviewFee,
+        productPrice: price > 0 ? price : null,
+        thumbnailUrl: o.thumbnailUrl || '',
+      };
+      const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
+      const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
+      if (existingFallback) {
+        existingFallback.count++;
+      } else {
+        sheetlessFallbackCounts.set(fallbackKey, {
+          count: 1,
+          value: items[`order||${o.id}`],
+        });
+      }
+      count++;
+      reviewTotal += reviewFee;
+      if (price > 0) productTotal += price; else productUnknown++;
+    }
+
+    for (const [fallbackKey, fallback] of sheetlessFallbackCounts) {
+      if (fallback.count === 1) items[fallbackKey + '||order'] = fallback.value;
+    }
+
+    // 구 시트 색인의 sheet/tab 값이 무시트 작업의 식별자와 다른 과도기 데이터 보완.
+    // 같은 모집공고의 미매칭 주문이 정확히 한 건일 때만 기존 카드 행에 연결한다.
+    for (const r of riRows) {
+      const rowKey = `${r.sheetId}||${r.tabName}||${r.rowIndex}`;
+      const current = items[rowKey];
+      const campaignId = campMap[`${r.sheetId}||${r.tabName}`]?.id;
+      const fallback = campaignId ? sheetlessFallbackCounts.get(campaignId) : null;
+      if (current && current.productPrice == null && fallback && fallback.count === 1) {
+        items[rowKey] = fallback.value;
       }
     }
 

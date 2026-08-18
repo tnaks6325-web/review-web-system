@@ -1144,18 +1144,13 @@ function _renderJoinedView(j, h){
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
     }, { showOption: false, apiBase: API_BASE_URL });
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
-    const f = j.form || {};
     const frame = $('orderFrame');
-    if(PREVIEW && !f.sheetId){
-      // 연결 탭이 없는 공고 — 리뷰어에게도 구매양식이 안 뜨는 상태임을 관리자에게 그대로 알림
-      frame.style.display = 'none';
-      $('frameFallback').style.display = 'none';
-      $('pvFormNote').style.display = '';
-    }else{
-      frame.style.display = '';
-      if($('pvFormNote')) $('pvFormNote').style.display = 'none';
-      const qp = new URLSearchParams({ embed:'1', s:f.sheetId||'', g:f.gid||'', t:f.tabName||'', d:f.displayName||'',
-        campId:CAMP_ID });
+    frame.style.display = '';
+    if($('pvFormNote')) $('pvFormNote').style.display = 'none';
+    // 구매양식은 시트가 아니라 캠페인 홀드 문맥으로 제출한다.
+    // 과거 공고의 연결 시트 정보도 iframe URL로 전달하지 않는다.
+    // mode=form은 임베드 진입을 보장하는 기존 보호 장치다.
+    const qp = new URLSearchParams({ embed:'1', mode:'form', campId:CAMP_ID });
       // ★ 미리보기: 홀드 문맥(app·holdToken·holdPhone8) 미전달 + preview=1 → 구매양식이 제출을 차단한다.
       //   리뷰어 경로는 기존과 동일하게 홀드 문맥을 싣는다(preview 파라미터 없음 = 동작 불변).
       if(PREVIEW){ qp.set('preview','1'); }
@@ -1189,7 +1184,6 @@ function _renderJoinedView(j, h){
         frame.onerror = ()=>{ $('frameFallback').style.display=''; };
       }
       setTimeout(()=>{ $('frameFallback').style.display=''; }, 6000); // 폴백 버튼은 어차피 노출(새 창 경로 보장)
-    }
     startHoldCountdown(j.application.expiresAt || (h && h.expiresAt));
     if(!PREVIEW) startPolling();   // 미리보기는 서버 상태를 폴링하지 않음(홀드 없음)
     show('vJoined');

@@ -109,13 +109,18 @@ async function _mergeOrderSubmissions(results, phoneList) {
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               os.tab_gid AS "gid", os.sheet_row AS "sheetRow",
               os.mirror_status AS "mirrorStatus", os.recipient AS "recipientName",
-              tc.display_name AS "displayNameTC", tc.campaign_name AS "campaignName",
+              COALESCE(rc.title, tc.display_name) AS "displayNameTC",
+              COALESCE(rc.title, tc.campaign_name) AS "campaignName",
               tc.manager, tc.review_type AS "reviewType",
               tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
               tc.is_closed AS "isClosed"
          FROM order_submissions os
-         JOIN tab_configs tc
+         LEFT JOIN tab_configs tc
            ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+         LEFT JOIN campaign_applications ca
+           ON ca.id = os.campaign_application_id
+         LEFT JOIN recruit_campaigns rc
+           ON rc.id = ca.campaign_id
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
@@ -145,6 +150,9 @@ async function _mergeOrderSubmissions(results, phoneList) {
         incomeType: o.incomeType, displayNameTC: o.displayNameTC, ncMode: null,
         folderUrl: null, captureFolderUrl: null, captureSlots: null, submittedSlots: [],
         row: {}, submitCol: null, reviewFileAt: null, isPaid: false, score: 0.5,
+        // 리뷰 내역 금액은 주문원장 집계의 order||<id> 키로 연결한다.
+        // sheet_row가 없는 무시트 주문도 카드별 결제금액을 보여주기 위한 식별자다.
+        orderSubmissionId: o.id,
         isOrderPending: true, orderMirrorStatus: o.mirrorStatus,
         orderStage,
       });
