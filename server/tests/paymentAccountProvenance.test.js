@@ -67,11 +67,15 @@ assert.deepEqual(payment.reconcileAccountSnapshots(subItem, subOwners), {
   ok: true, mismatches: [], unverifiable: 0,
 }, '타계정은 소유자 본계좌가 아니라 동일 전화번호의 타계정만 비교해야 한다');
 
-const migration = fs.readFileSync(require.resolve('../migrations/120_payment_account_provenance.sql'), 'utf8');
-assert.match(migration, /account_reviewer_id UUID/);
-assert.match(migration, /account_source TEXT/);
-assert.match(migration, /reviewer_account_change_audit/);
-assert.match(migration, /changed_by TEXT/);
-assert.match(migration, /trg_reviewer_account_change_audit/);
+const baseMigration = fs.readFileSync(require.resolve('../migrations/120_payment_account_provenance.sql'), 'utf8');
+const followupMigration = fs.readFileSync(require.resolve('../migrations/121_payment_account_snapshot_and_audit_trigger.sql'), 'utf8');
+assert.match(baseMigration, /account_reviewer_id UUID/);
+assert.match(baseMigration, /account_source TEXT/);
+assert.match(baseMigration, /reviewer_account_change_audit/);
+assert.match(baseMigration, /changed_by TEXT/);
+assert.match(followupMigration, /account_snapshot_fingerprint TEXT/);
+assert.match(followupMigration, /trg_reviewer_account_change_audit/);
+assert.match(followupMigration, /sub_phone8/);
+assert.match(followupMigration, /\[\^0-9\]/);
 
 console.log('payment account provenance tests passed');
