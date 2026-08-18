@@ -55,6 +55,9 @@ svc.__setPoolForTest({
   assert.match(workdesk, /position:absolute;z-index:3/);
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
+  assert.match(workdesk, /STATE\.pmUnconfirmedGroups=groups\.map/);
+  assert.match(workdesk, /function _pmOpenBatchUnconfirmedGroup\(i\)/);
+  assert.doesNotMatch(workdesk, /_pmOpenBatchUnconfirmedMemo\(\$\{JSON\.stringify\(memo\)\}\)/);
   const paymentService = fs.readFileSync(require.resolve('../src/services/payment.service.js'), 'utf8');
   assert.match(paymentService, /resultUnconfirmedCount: unmatched\.length/);
   assert.match(paymentService, /itemCount - resultSuccessCount/);
