@@ -19,6 +19,7 @@ const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
 const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/reviewType');
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
+const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -608,6 +609,9 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
     const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
     const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+    // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.
+    // 실제 UPDATE 전에 하한을 검증해, 이미 참여한 인원보다 낮춘 값으로 반쪽만 남지 않게 한다.
+    await assertWorkOrderQuota({ workOrderId: current.id, recruitTotal: _intOrZero(b.recruit_count) });
     const { rows } = await pool.query(
       `UPDATE work_orders SET
          title = $2, start_date = $3, product_option = $4, product_options_json = $5,
@@ -639,6 +643,7 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       ]
     );
     const updated = rows[0];
+    await syncWorkOrderRecruitTotal({ workOrderId: updated.id, recruitTotal: updated.recruit_count });
     _emitWorkOrderNew(updated, { event: 'source_revision', source_revision: source.sourceRevision });
     res.json({ ok: true, data: updated });
   } catch (err) {
@@ -795,7 +800,7 @@ async function _intakeUpdateHandler(req, res, next) {
 
     // 현재 상태 확인 (존재/삭제/완료 여부)
     const { rows: cur } = await pool.query(
-      `SELECT id, status, deleted_at, delivery_type, courier_proxy FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+      `SELECT id, status, deleted_at, delivery_type, courier_proxy, linked_campaign_id FROM work_orders WHERE id = $1 LIMIT 1`, [id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -849,6 +854,9 @@ async function _intakeUpdateHandler(req, res, next) {
     if (touched === 0) {
       return res.status(400).json({ ok: false, error: '수정할 항목이 없습니다.' });
     }
+    if (b.recruit_count !== undefined) {
+      await assertWorkOrderQuota({ workOrderId: id, recruitTotal: _intOrZero(b.recruit_count) });
+    }
     // 감사 필드(누가 수정했는지) — 전달된 경우에만 기록
     if (b.updated_by !== undefined) {
       sets.push(`updated_by = $${i++}`);
@@ -866,6 +874,9 @@ async function _intakeUpdateHandler(req, res, next) {
       vals
     );
     const updated = rows[0];
+    if (b.recruit_count !== undefined) {
+      await syncWorkOrderRecruitTotal({ workOrderId: updated.id, recruitTotal: updated.recruit_count });
+    }
     logger.info(`[order] 인트라넷 작업오더 수정: ${id} (by ${b.updated_by || '?'}, fields=${touched})`);
 
     // ★ 관리자 대시보드에 실시간 시스템알림 (SSE) — 인박스 원본이 인트라넷에서 수정됨
@@ -1685,11 +1696,19 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
     }
     if (sets.length === 0) return res.json({ ok: true, data: o, unchanged: true, changed: [] });
 
+    const recruitChange = changes.find(change => change.field === 'recruit_count');
+    if (recruitChange) {
+      await assertWorkOrderQuota({ workOrderId: id, recruitTotal: recruitChange.to });
+    }
+
     vals.push(id);
     const { rows: upd } = await pool.query(
       `UPDATE work_orders SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`,
       vals
     );
+    if (recruitChange) {
+      await syncWorkOrderRecruitTotal({ workOrderId: id, recruitTotal: upd[0].recruit_count });
+    }
 
     // 수정 요약 → memo_log 누적 + 인트라넷 알림 push (admin_memo 는 덮지 않는다 — 처리메모 칸 보호)
     const by = req.admin?.name || '';
