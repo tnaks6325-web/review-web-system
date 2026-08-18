@@ -7562,17 +7562,36 @@ const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:
 
 function _pmUnconfirmedClose(){ const el=document.getElementById('pmUnconfirmedOv'); if(el) el.remove(); }
 
-async function _pmUnconfirmedSearch(){
+let _pmUnconfirmedSearchTimer=null, _pmUnconfirmedSearchSeq=0;
+
+function _pmUnconfirmedLiveSearch(){
+  clearTimeout(_pmUnconfirmedSearchTimer);
+  const q=String(document.getElementById('pmUnconfirmedQuery')?.value||'').trim();
+  const out=document.getElementById('pmUnconfirmedCandidates');
+  if(q.length<2){
+    _pmUnconfirmedSearchSeq++;
+    if(out) out.innerHTML=q ? '<div class="muted" style="padding:9px 10px">두 글자 이상 입력해 주세요.</div>' : '';
+    return;
+  }
+  _pmUnconfirmedSearchTimer=setTimeout(()=>_pmUnconfirmedSearch({ live:true }),180);
+}
+
+async function _pmUnconfirmedSearch({ live=false }={}){
   const R=STATE.pmResult, el=document.getElementById('pmUnconfirmedOv');
   if(!R || !el) return;
   const q=String(document.getElementById('pmUnconfirmedQuery')?.value||'').trim();
-  if(q.length<2){ toast('작업명을 두 글자 이상 입력해 주세요.'); return; }
+  if(q.length<2){
+    if(!live) toast('작업명을 두 글자 이상 입력해 주세요.');
+    return;
+  }
   const out=document.getElementById('pmUnconfirmedCandidates');
-  out.innerHTML='<div class="muted" style="padding:10px">작업을 찾는 중…</div>';
+  const seq=++_pmUnconfirmedSearchSeq;
+  out.innerHTML='<div class="muted" style="padding:9px 10px">작업을 찾는 중…</div>';
   const r=await api('/api/trackb/payment/unconfirmed-work-search?q='+encodeURIComponent(q));
+  if(seq!==_pmUnconfirmedSearchSeq || !document.getElementById('pmUnconfirmedOv')) return;
   if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'작업을 찾지 못했습니다.')}</div>`; return; }
   const memo=String(el.dataset.memo||'');
-  out.innerHTML=(r.candidates||[]).length ? r.candidates.map((x,i)=>`<button class="btn" style="display:block;width:100%;text-align:left;margin:6px 0" onclick="_pmUnconfirmedInspect(${i})">${esc(x.label||x.tabName)}</button>`).join('') : '<div class="muted" style="padding:10px">검색 결과가 없습니다.</div>';
+  out.innerHTML=(r.candidates||[]).length ? r.candidates.map((x,i)=>`<button class="btn" style="display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #E6EDF7;border-radius:0;padding:10px 12px" onclick="_pmUnconfirmedInspect(${i})">${esc(x.label||x.tabName)}</button>`).join('') : '<div class="muted" style="padding:9px 10px">검색 결과가 없습니다.</div>';
   STATE.pmUnconfirmed={ memo, candidates:r.candidates||[] };
 }
 
@@ -7592,7 +7611,7 @@ function _pmOpenUnconfirmedMatch(memo){
   const R=STATE.pmResult; if(!R || !R.preview || !R.preview.uploadId) return;
   _pmUnconfirmedClose();
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo;
-  el.innerHTML=`<div class="pmrbox" style="max-width:720px"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote"><b>${esc(memo)}</b> 동일 통장표시 이체를 한 작업 묶음으로 보고 대조합니다. 작업을 선택하면 같은 이름의 참여자와 기존 입금 기록을 확인합니다.</div><div style="display:flex;gap:8px;margin:12px 0"><input id="pmUnconfirmedQuery" class="inp" style="flex:1" value="${esc(memo)}" placeholder="작업명 검색"><button class="btn primary" onclick="_pmUnconfirmedSearch()">검색</button></div><div id="pmUnconfirmedCandidates"></div></div></div>`;
+  el.innerHTML=`<div class="pmrbox" style="max-width:720px"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote"><b>${esc(memo)}</b> 동일 통장표시 이체를 한 작업 묶음으로 보고 대조합니다. 작업을 선택하면 같은 이름의 참여자와 기존 입금 기록을 확인합니다.</div><div style="position:relative;margin:12px 0"><input id="pmUnconfirmedQuery" class="inp" style="width:100%" value="${esc(memo)}" placeholder="작업명 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" style="display:block;position:absolute;z-index:3;left:0;right:0;top:calc(100% + 4px);max-height:220px;overflow:auto;background:#FFF;border:1px solid #D7E3F4;border-radius:10px;box-shadow:0 8px 20px rgba(20,50,90,.14)"></div></div></div></div>`;
   document.body.appendChild(el);
   document.getElementById('pmUnconfirmedQuery').focus();
 }

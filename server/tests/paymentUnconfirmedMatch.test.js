@@ -48,5 +48,10 @@ svc.__setPoolForTest({
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
   const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(workdesk, /작업 검색·대조/);
+  assert.match(workdesk, /function _pmUnconfirmedLiveSearch\(\)/);
+  assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
+  assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
+  assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
+  assert.match(workdesk, /position:absolute;z-index:3/);
   console.log('payment unconfirmed work-match tests passed');
 })().finally(() => svc.__setPoolForTest(null));
