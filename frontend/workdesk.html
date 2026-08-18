@@ -10660,7 +10660,7 @@ async function revertEdit(rowId, field){ const t=STATE.cur; if(!t)return;
   const r=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})});
   toast(r&&r.reverted?'되돌림':'되돌릴 편집 없음'); reloadWorkdesk();
 }
-async function hideRow(rowId){ if(!confirm('이 참여자를 명단에서 제거(숨김)할까요? (Track B에만 반영, 되돌릴 수 있음)'))return; const t=STATE.cur;
+async function hideRow(rowId){ if(!confirm('이 참여자를 작업표와 리뷰어 참여내역에서 제거할까요? 주문 원장은 감사용으로 보관됩니다.'))return; const t=STATE.cur;
   const r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
   toast(r&&r.ok?'제거됨':'실패'); reloadWorkdesk();
 }
