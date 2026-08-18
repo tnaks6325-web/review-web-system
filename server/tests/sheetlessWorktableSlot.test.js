@@ -10,5 +10,8 @@ assert.ok(/order_submission_id IS NULL/.test(source), 'only an unlinked slot may
 assert.ok(/order_submission_id = \$9::uuid/.test(source), 'the claimed worktable row must link to the order ledger');
 assert.ok(/requestedSeq == null[\s\S]*?no_open_slot/.test(source), 'new sheetless orders must not append beyond prepared roster slots');
 assert.ok(!/getSpreadsheetMeta\(/.test(source) && !/writeSheet\(/.test(source), 'worktable write must not call Google Sheets');
+assert.ok(/recoverUnwrittenSheetlessOrders/.test(source), 'existing ledger-only orders need a DB worktable recovery path');
+assert.ok(/os\.sheet_id LIKE 'campaign:%'/.test(source), 'recovery must only touch sheetless campaign orders');
+assert.ok(/NOT EXISTS \([\s\S]*?cp\.order_submission_id = os\.id/.test(source), 'recovery must skip orders already linked to a worktable row');
 
 console.log('sheetless worktable slot checks passed');

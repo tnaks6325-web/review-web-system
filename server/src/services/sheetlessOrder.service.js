@@ -238,8 +238,71 @@ async function writeOrderToWorktable({
   return { ok: true, written: true, seq, ledger, optionSuppressed };
 }
 
+/**
+ * 과거 첫 탈시트 배포 구간의 주문은 order_submissions에만 있고 작업보드 행이 없을 수 있다.
+ * 이 복구는 그런 주문만 골라 이미 준비된 빈 작업보드 슬롯에 연결한다.
+ * 외부 시트/GAS 호출은 전혀 하지 않으며, 각 행은 writeOrderToWorktable의 잠금으로 선점된다.
+ */
+async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-order-recovery' } = {}) {
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
+  const { rows } = await db.query(
+    `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
+            os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
+            os.memo, os.selected_opt_key,
+            ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
+            rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid
+       FROM order_submissions os
+       JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+       JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+       LEFT JOIN reviewers r ON r.phone8 = COALESCE(ca.owner_phone8, ca.phone8)
+      WHERE os.deleted_at IS NULL
+        AND os.sheet_id LIKE 'campaign:%'
+        AND COALESCE(rc.linked_sheet_id, '') <> ''
+        AND COALESCE(rc.linked_tab_name, '') <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM campaign_participants cp
+           WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
+        )
+      ORDER BY os.created_at ASC
+      LIMIT $1`, [lim]);
+
+  const result = { scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
+  for (const row of rows) {
+    let out;
+    try {
+      out = await writeOrderToWorktable({
+        sheetId: row.linked_sheet_id, tabName: row.linked_tab_name, tabGid: row.linked_tab_gid || '',
+        orderSubmissionId: row.id,
+        loginPhone8: row.login_phone8 || row.owner_phone8 || '', loginName: row.login_name || row.orderer || '',
+        recovered: true,
+        orderData: {
+          orderer: row.orderer, recipient: row.recipient, userId: row.user_id, phone: row.phone,
+          address: row.address, bank: row.bank, account: row.account, depositor: row.depositor,
+          price: row.price, dateStr: row.date_str, orderNum: row.order_num, memo: row.memo,
+          selectedOptKey: row.selected_opt_key,
+        },
+      });
+      if (out.ok) result.written++;
+      else {
+        result.failed++;
+        if (out.reason === 'no_open_slot') result.noOpenSlot++;
+        await require('./orderLedger.service').markOrderMirrorFailed(row.id, out.message || out.reason);
+      }
+    } catch (err) {
+      out = { ok: false, reason: 'exception', message: err.message };
+      result.failed++;
+      await require('./orderLedger.service').markOrderMirrorFailed(row.id, err);
+    }
+    result.items.push({ orderSubmissionId: row.id, ok: !!out.ok, reason: out.reason || null, seq: out.seq || null });
+  }
+  logger.info(`[sheetlessOrder] 과거 작업보드 복구 by=${by} scanned=${result.scanned} written=${result.written} failed=${result.failed}`);
+  return result;
+}
+
 module.exports = {
   writeOrderToWorktable,
+  recoverUnwrittenSheetlessOrders,
   buildRowPatch,
   __setPoolForTest,
 };
