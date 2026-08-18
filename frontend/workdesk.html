@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>리뷰웹시스템[3버전] (Track B · 그림자)</title>
+<title>리뷰웹시스템[3버전]</title>
 <!-- 관리자 대시보드에서 가져온 공유 모듈(cs-inquiry.js 등)이 <i class="fas fa-*"> 아이콘을 쓴다.
      admin.html 과 **같은 CDN·같은 버전**을 쓰므로 두 화면의 아이콘이 어긋나지 않는다.
      못 불러와도 글자만 빠질 뿐 동작은 그대로(모듈은 아이콘에 기능을 걸지 않는다). -->
@@ -2118,7 +2118,6 @@ async function boot(){
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
     if(t){ const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
       if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); }
-      else if(r&&r.requiresLogin){ return renderLogin('🔒 '+(r.advertiserName||'이 업체')+' 전용 접속 — 발급받은 계정으로 로그인하세요.'); }   // 계정 있는 업체 = 링크가 로그인 게이트
       else return renderLogin('접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.'); } }
   if (!token()) {
     if (await tryTestAutoLogin()) return boot();
@@ -11186,7 +11185,6 @@ function _ovmRenderOverview(opt){
     const lkb = !linkKnown ? `<span class="ovm-fin" title="${esc(_ovmCandWhy()||'접속링크 상태를 불러오지 못했습니다')}">?</span>`
       : !lk ? '<span class="ovm-fin" title="접속 링크 미생성 — 업체를 열면 자동 생성됩니다">미생성</span>'
       : !lk.active ? '<span class="ovm-fin cand">폐기</span>'
-      : lk.loginRequired ? '<span class="ovm-fin" style="background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent-line)">로그인</span>'
       : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
     const acct=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
     return `<div class="ovm-ovt r" data-i="${i}" data-ovmb-search="${esc(String(a.name||'')+' '+String(a.inadPm||''))}" onclick="selAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selAdv(${i});}" role="button" tabindex="0">`
@@ -11481,7 +11479,7 @@ function _advLinkHtml(a){
   const lk=STATE.advLink;
   // ★ 로그인 요구 여부는 **명시 플래그**(083 login_required) — 계정 존재로 자동 판정하지 않는다.
   //   계정을 발급해 두고도 링크는 공개로 둘 수 있다(계정 = 선택적 보안). 서버 판정과 같은 값을 본다.
-  const lockOn=!!(lk && lk.loginRequired);
+  const lockOn=false;
   if(!(lk && lk.token)){   // ensure로 항상 생성되나 방어(네트워크 실패 등)
     return `<div class="sect"><div class="st">광고주 접속 링크</div>
       <div class="linkempty">링크 준비 중… <button class="btn xs" onclick="advLinkGen('${esc(a.id)}',false)">지금 생성</button></div></div>`;
@@ -11529,61 +11527,35 @@ function advLinkCopy(){ const el=$('#advLinkUrl'); if(!el) return; el.select();
   catch(_){ try{ document.execCommand('copy'); done(); }catch(e){ toast('복사 실패 — 수동 선택하세요'); } } }
 // ── 광고주 로그인 계정(업체별) — master/admin 만. 광고주는 이 아이디/비번으로 리뷰웹시스템[3버전]에 로그인 →
 //   role='advertiser' → 이 업체 소유 탭만·마스킹·읽기전용으로 열람. 계정 CRUD = /api/trackb/advertiser-account. ──
+// 전용 링크는 모든 업체에 대해 항상 무로그인으로 열리도록 고정한다.
+// 계정은 별도 관리용으로만 유지하며 링크 접속 조건에는 사용하지 않는다.
 function _advAcctHtml(a){
-  if(!(STATE.role==='master'||STATE.role==='admin')) return '';   // 계정관리는 관리자만
+  if(!(STATE.role==='master'||STATE.role==='admin')) return '';
   const accts=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id);
   const rows=accts.map(u=>`<div class="acctrow">
       <span class="acctid">${esc(u.name)}</span>
       <span class="acctst ${u.active?'on':'off'}">${u.active?'활성':'비활성'}</span>
       <span style="flex:1"></span>
-      <button class="btn xs" onclick="advAcctResetPw('${esc(u.name).replace(/'/g,'&#39;')}')">비번 재설정</button>
+      <button class="btn xs" onclick="advAcctResetPw('${esc(u.name).replace(/'/g,'&#39;')}')">비밀번호 재설정</button>
       <button class="btn xs" onclick="advAcctToggle('${esc(u.name).replace(/'/g,'&#39;')}',${u.active?'false':'true'})">${u.active?'비활성화':'활성화'}</button>
       <button class="btn xs bad" onclick="advAcctDelete('${esc(u.name).replace(/'/g,'&#39;')}')">삭제</button>
     </div>`).join('');
-  // 아이디 기본 제안: 거래처명에서 공백 제거(소문자·영숫자 유지). 관리자가 수정 가능.
-  const suggest = String(a.name||'').trim().replace(/\s+/g,'');
-  // ★ 사용/미사용 토글 = 접속 링크가 로그인을 요구하는지(083). 끄면 계정은 **지우지 않고 잠그기만** 하므로
-  //   다시 켤 때 그대로 쓸 수 있다. 켜기는 활성 계정이 있어야 가능(없으면 아무도 못 들어감) — 서버도 재검증.
-  // ★ 링크 조회 실패(null)와 "꺼짐"을 구분한다 — 둘을 합치면 실제로 잠긴 업체가 "미사용/공개"로 보여
-  //   관리자가 "안 잠겼네"로 오판한다(표시 전용이라 서버 게이트는 안전하지만 오판 자체가 위험).
-  const lkKnown=!!(STATE.advLink && STATE.advLink.token);
-  const lockOn=!!(STATE.advLink && STATE.advLink.loginRequired);
-  const hasActive=accts.some(u=>u.active);
-  const note = !lkKnown
-    ? '<b>확인 중</b> — 접속 링크 정보를 불러오지 못했습니다. 새로고침 후에도 같으면 관리자에게 문의하세요.'
-    : lockOn
-    ? '<b>사용 중</b> — 링크를 열면 로그인 화면이 먼저 뜹니다. 아래 계정의 아이디·비밀번호를 광고주에게 전달하세요.'
-    : '<b>미사용</b> — 접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 위 스위치를 켜세요.';
-  const swLabel = !lkKnown ? '확인 중' : (lockOn?'사용 중':'미사용');
-  return `<div class="sect"><div class="st sthead">광고주 계정
-      <span class="swrap">
-        <span class="slabel ${lockOn?'on':'off'}">${swLabel}</span>
-        <button class="sw" role="switch" aria-checked="${lockOn?'true':'false'}" aria-label="광고주 계정 사용"
-          title="${!lkKnown?'접속 링크 정보를 불러오지 못해 변경할 수 없습니다':lockOn?'끄면 링크만으로 입장합니다(계정은 보존)':(hasActive?'켜면 링크를 열 때 로그인 화면이 뜹니다':'활성 계정을 먼저 발급하세요')}"
-          ${(!lkKnown || (!lockOn && !hasActive))?'disabled':''} onclick="advAcctLoginToggle('${_advQ(a.id)}',${lockOn?'false':'true'})"></button>
-      </span></div>
-    <div class="acctnote">${note}</div>
-    <div class="acctbody${lockOn?'':' dim'}">
-    ${rows||'<div class="acctempty">발급된 계정 없음 — 아래에서 만들어 광고주에게 전달하세요.</div>'}
+  const suggest=String(a.name||'').trim().replace(/\s+/g,'');
+  return `<div class="sect"><div class="st sthead">광고주 계정 <span class="slabel off">선택 사항</span></div>
+    <div class="acctnote"><b>전용 링크는 항상 로그인 없이 열립니다.</b> 계정의 생성·비활성화 여부는 전용 링크 접속에 영향을 주지 않습니다.</div>
+    <div class="acctbody">
+    ${rows||'<div class="acctempty">발급된 계정 없음 — 필요할 때만 아래에서 만들어 전달하세요.</div>'}
     <div class="acctadd">
       <input id="acctId" placeholder="아이디" autocomplete="off" value="${esc(suggest)}">
       <input id="acctPw" placeholder="비밀번호(4자 이상)" autocomplete="new-password" type="text">
-      <button class="btn pri" onclick="advAcctAdd('${esc(a.id)}')">＋ 계정 발급</button>
+      <button class="btn pri" onclick="advAcctAdd('${esc(a.id)}')">계정 발급</button>
     </div></div></div>`;
 }
-// onclick 문자열 인자용 이스케이프 — esc 는 &<>" 만 치환하므로 작은따옴표가 들어오면 속성이 깨진다.
-//   이 파일의 계정 버튼들이 쓰던 관용구(esc(x).replace(/'/g,'&#39;'))를 함수로 모은 것.
 function _advQ(v){ return esc(v).replace(/'/g,'&#39;'); }
 // 광고주 계정 사용/미사용 토글 — 접속 링크의 로그인 요구를 켜고 끈다(083). 계정은 지우지 않는다.
 //   ★ 보안이 풀리는 방향(ON→OFF)에서만 확인을 받는다 — 끄는 순간 링크를 아는 사람이 바로 들어온다.
 //   ★ 켤 때는 "이미 들어와 있는 세션"을 알린다 — 링크로 발급된 JWT 는 최대 8시간 유효해
 //     토글이 즉시 로그아웃시키지 않는다(링크 폐기도 같은 한계). 모르면 "켰는데 왜 아직 보이지"가 된다.
-async function advAcctLoginToggle(advertiserId, on){
-  if(!on && !confirm('광고주 계정 로그인을 끌까요?\n이 업체의 접속 링크를 아는 사람은 로그인 없이 바로 들어오게 됩니다.\n(발급된 계정은 지워지지 않습니다.)')) return;
-  const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'login-required',advertiserId,required:!!on})});
-  if(r&&r.ok){ toast(on?'광고주 계정 사용 — 지금부터 링크에 로그인 필요(이미 접속 중인 세션은 최대 8시간 유지)':'광고주 계정 미사용 — 링크만으로 입장'); await _advLinkReload(); }
-  else toast('변경 실패'+(r&&r.error?': '+r.error:''));
-}
 async function _advAcctReload(){ const cur=STATE.advCur; if(!cur) return;
   const ac=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null);
   STATE.advAccts=(ac&&ac.success&&ac.users)||STATE.advAccts;
@@ -11606,11 +11578,7 @@ async function advAcctResetPw(name){
 // 마지막 활성 계정을 비활성/삭제하는데 "계정 사용"이 켜져 있으면 아무도 못 들어간다(링크도 로그인 화면).
 //   막지는 않되(관리자 의도일 수 있다) 반드시 사전에 알린다 — 조용한 잠금은 금지.
 function _advAcctLockoutOk(name){
-  if(!(STATE.advLink && STATE.advLink.loginRequired)) return true;
-  const cur=STATE.advCur; if(!cur) return true;
-  const others=(STATE.advAccts||[]).filter(u=>u.advertiserId===cur.id && u.active && u.name!==name);
-  if(others.length) return true;
-  return confirm('이 업체의 마지막 활성 계정입니다.\n"광고주 계정 사용"이 켜져 있어, 진행하면 접속 링크로도 로그인으로도 아무도 들어올 수 없게 됩니다.\n\n계속할까요? (스위치를 끄면 링크는 다시 열립니다)');
+  return true;
 }
 async function advAcctToggle(name,active){
   if(!active && !_advAcctLockoutOk(name)) return;
@@ -11664,7 +11632,6 @@ function renderOwnPanel(a, items){
   const lk=STATE.advLink;
   const lkb = !isAdmin ? '' : (!lk||!lk.token) ? '<span class="ovm-fin">준비중</span>'
     : !lk.active ? '<span class="ovm-fin cand">폐기</span>'
-    : lk.loginRequired ? '<span class="ovm-fin" style="background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent-line)">로그인</span>'
     : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
   const accts=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
   $('#ownPanel').innerHTML = `

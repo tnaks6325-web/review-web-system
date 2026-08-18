@@ -227,7 +227,7 @@ async function loginByLinkToken(linkToken, _pool = pool) {
   const tok = String(linkToken || '').trim();
   if (!tok) return { success: false, error: '유효하지 않은 링크입니다.' };
   const { rows } = await _pool.query(
-    `SELECT l.advertiser_id, l.login_required, a.name AS advertiser_name, a.status AS advertiser_status
+    `SELECT l.advertiser_id, a.name AS advertiser_name, a.status AS advertiser_status
        FROM trackb_advertiser_links l JOIN advertisers a ON a.id = l.advertiser_id
       WHERE l.token = $1 AND l.active = TRUE LIMIT 1`, [tok]);
   if (rows.length === 0) return loginByBrandToken(tok, _pool);   // 094: 광고주 링크가 아니면 브랜드 링크 폴백
@@ -236,9 +236,6 @@ async function loginByLinkToken(linkToken, _pool = pool) {
   //   켠 업체만 로그인 화면을 거친다. 계정을 발급해도 켜지 않으면 링크는 그대로 공개(=계정은 선택적 보안).
   //   ★ 완화 금지: 여기서 "계정이 없으면 그냥 통과"로 폴백하지 말 것 — 계정이 삭제·비활성된 순간
   //     켜 둔 보안이 조용히 풀린다. 잠긴 업체는 관리자가 계정을 다시 발급하거나 토글을 끄면 된다(fail-closed).
-  if (rows[0].login_required === true) {
-    return { success: false, requiresLogin: true, advertiserId: rows[0].advertiser_id, advertiserName: rows[0].advertiser_name };
-  }
   _pool.query('UPDATE trackb_advertiser_links SET last_used_at = NOW() WHERE token = $1', [tok]).catch(() => {});
   const token = jwt.sign(
     { name: rows[0].advertiser_name, role: 'advertiser', advertiser_id: rows[0].advertiser_id, via: 'link' },
