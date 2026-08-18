@@ -22,7 +22,7 @@ function routeBody(method, routePath) {
 function functionBody(name) {
   const start = routes.indexOf(`async function ${name}(`);
   assert.ok(start >= 0, `${name} 함수가 있어야 합니다.`);
-  const end = routes.indexOf('\n}\n', start);
+  const end = routes.indexOf('\n}', start);
   return routes.slice(start, end + 2);
 }
 
@@ -41,13 +41,16 @@ for (const [method, routePath] of [['post', '/workdesk/edit'], ['post', '/workde
 
 const tabsRoute = routeBody('get', '/tabs');
 assert.match(tabsRoute, /allStaff: role === 'staff'/, '직원은 작업보드 목록에서 모든 작업을 받아야 합니다.');
+assert.match(tabsRoute, /allWorkdesk: true/, '리뷰어 외 역할은 작업보드 목록에서 소유와 무관하게 모든 작업을 받아야 합니다.');
 
 const workdeskRoute = routeBody('get', '/workdesk');
 assert.match(workdeskRoute, /allowAllStaff: role === 'staff'/, '직원은 담당 밖 작업표도 열 수 있어야 합니다.');
+assert.match(workdeskRoute, /allowAllWorkdesk: true/, '리뷰어 외 역할은 소유와 무관하게 작업표를 열 수 있어야 합니다.');
 
 assert.match(service, /allStaff = false/, '목록 전체 공개는 작업보드 요청에서만 명시적으로 켜야 합니다.');
 assert.match(service, /allowAllStaff = false/, '작업표 열람 전체 공개는 작업보드 요청에서만 명시적으로 켜야 합니다.');
-assert.match(service, /role === 'staff' && !allowAllStaff/, '직원 담당 작업 제한은 전체 열람 플래그가 없을 때 유지해야 합니다.');
+assert.match(service, /allWorkdesk = false/, '비작업보드 호출은 전체 열람을 명시적으로 요청해야 합니다.');
+assert.match(service, /!allowAllWorkdesk && \(role === 'advertiser' \|\| \(role === 'staff' && !allowAllStaff\)\)/, '기본 호출은 광고주/직원 담당 작업 제한을 유지해야 합니다.');
 
 const sharedScope = functionBody('_ensureEditScope');
 assert.match(sharedScope, /canAccessTab/, '마감·정산 등 공용 작업은 기존 담당 작업 스코프를 유지해야 합니다.');
