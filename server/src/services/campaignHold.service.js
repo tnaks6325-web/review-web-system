@@ -77,7 +77,7 @@ function detectIdentityDrift(row, orderIdentity) {
  * 반환: 'confirmed' | 'late' | 'tab_mismatch' | 'not_found' | 'invalid_params'
  *   — 어떤 반환값이든 주문 저장은 막지 않는다(호출측이 SAVEPOINT로 예외도 격리).
  */
-async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey, orderIdentity }) {
+async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey, orderIdentity, skipTabBinding = false }) {
   const appId = parseInt(applicationId, 10);
   if (!appId || !campaignId || !holdToken || !phone8) return 'invalid_params';
 
@@ -106,7 +106,9 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
     [orderSubmissionId, appId, campaignId, phone8, holdToken]
   );
 
-  if (!tabMatchesCampaign(camp, sheetId, gid, tabName)) return 'tab_mismatch'; // 확정 보류 — 호출측 관제 로그
+  // 탈시트 구매양식은 서버가 검증한 캠페인 홀드로만 진입한다.
+  // 수동/레거시 경로는 기존 탭 결속 검증을 그대로 유지한다.
+  if (!skipTabBinding && !tabMatchesCampaign(camp, sheetId, gid, tabName)) return 'tab_mismatch';
 
   const conf = await client.query(
     `UPDATE campaign_applications
