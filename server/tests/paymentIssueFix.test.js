@@ -355,9 +355,7 @@ function withStubPool(handler, run) {
   });
 
   await ta('4g 리뷰어 계좌 — reviewers.id 로 지목하고 빈 칸은 안 덮는다', async () => {
-    await withStubPool((sql) => (/SELECT bank_name, bank_account FROM reviewers/.test(sql)
-      ? { rows: [{ bank_name: '국민은행', bank_account: '0000' }], rowCount: 1 }
-      : { rows: [], rowCount: 1 }), async (svc, calls) => {
+    await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
       const out = await svc.saveReviewerAccount({
         reviewerId: '22222222-2222-2222-2222-222222222222',
         bankName: '국민은행', bankAccount: '123-456', accountHolder: '',
@@ -478,7 +476,7 @@ function withStubPool(handler, run) {
     const handlers = tbl.match(/onclick="[^"]*"|onchange="[^"]*"/g) || [];
     assert.ok(handlers.length >= 3, '표에 핸들러가 없다');
     for (const h of handlers) {
-      assert.ok(/\(\$\{(?:idx|i)\}(,[^)]*)?\)/.test(h), '인덱스가 아닌 값을 넘긴다: ' + h);
+      assert.ok(/\(\$\{idx\}(,[^)]*)?\)/.test(h), '인덱스가 아닌 값을 넘긴다: ' + h);
       assert.ok(!/esc\(/.test(h), 'onclick 안에서 esc() 로 문자열을 보간하고 있다(엔티티 디코드로 탈출된다): ' + h);
     }
   });

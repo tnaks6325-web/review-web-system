@@ -1,5 +1,4 @@
 'use strict';
-const crypto = require('crypto');
 /**
  * 리뷰비 입금 자동화 M1 — 입금대상 추출 · 은행별 분류 · 회차(다운로드) 기록
  *
@@ -31,31 +30,6 @@ const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
-
-function accountFingerprint(value) {
-  const account = normalizeAccount(value);
-  return account ? crypto.createHash('sha256').update(account).digest('hex') : '';
-}
-function snapshotFingerprint(bankName, account, holder) {
-  return crypto.createHash('sha256').update([String(bankName || '').trim(), normalizeAccount(account), String(holder || '').trim()].join('\u0000')).digest('hex');
-}
-
-function compareAccountSnapshot(item, current) {
-  const itemId = item && item.id;
-  const reviewerId = item && (item.account_reviewer_id || item.accountReviewerId);
-  const source = item && (item.account_source || item.accountSource);
-  const subPhone8 = item && (item.account_sub_phone8 || item.accountSubPhone8 || '');
-  const snapshotAccount = item && (item.bank_account || item.bankAccount);
-  const savedFingerprint = item && (item.account_snapshot_fingerprint || item.accountSnapshotFingerprint)
-    || snapshotFingerprint(item && (item.bank_name || item.bankName), snapshotAccount, item && (item.account_holder || item.accountHolder));
-  if (!item || !reviewerId || !source || !savedFingerprint || !current) return { state: 'unverifiable', itemId };
-  const sameIdentity = String(reviewerId) === String(current.reviewerId)
-    && String(source) === (current.isSub ? 'sub' : 'self')
-    && String(subPhone8) === (current.isSub ? String(current.subPhone8 || '') : '');
-  if (!sameIdentity) return { state: 'mismatch', itemId };
-  return savedFingerprint === snapshotFingerprint(current.bankName, current.bankAccount, current.accountHolder)
-    ? { state: 'match', itemId } : { state: 'mismatch', itemId };
-}
 
 /** 작업오더 물건비 수취방식 → 이체 은행 (사용자 확정 규칙)
  *  현금이체 → 하나은행 / 수수료(세금계산서) → 케이뱅크 */
@@ -520,13 +494,10 @@ async function createBatch({ bank, rows, by }) {
           `INSERT INTO payment_batch_items
              (batch_id, sheet_id, tab_name, row_index, campaign_id, reviewer_name, phone8,
               bank_name, bank_code, bank_account, account_holder,
-              account_reviewer_id, account_source, account_sub_phone8, account_fingerprint, account_snapshot_fingerprint,
               product_price, review_fee, amount, transfer_memo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
-           it.accountRef && it.accountRef.reviewerId || null, it.accountRef ? (it.isSub ? 'sub' : 'self') : null,
-           it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
            it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
         await client.query('RELEASE SAVEPOINT sp_item');
         saved.push({ ...it, id: row.id });
@@ -623,37 +594,6 @@ async function markDownloaded(batchId, by) {
     `UPDATE payment_batches
         SET download_count = download_count + 1, last_downloaded_at = NOW(), last_downloaded_by = $2
       WHERE id = $1`, [batchId, by || '']);
-}
-
-async function checkBatchAccountSnapshots({ batch, items }) {
-  const guarded = (items || []).filter(i => i.account_reviewer_id && i.account_source);
-  if (!guarded.length) return { ok: true, mismatches: [], unverifiable: (items || []).length };
-  const ids = [...new Set(guarded.map(i => String(i.account_reviewer_id)))];
-  const { rows } = await pool.query(
-    `SELECT id AS "reviewerId", bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder", sub_accounts AS "subAccounts"
-       FROM reviewers WHERE id::text = ANY($1::text[])`, [ids]);
-  const byId = new Map(rows.map(r => [String(r.reviewerId), r]));
-  return reconcileAccountSnapshots(guarded, byId);
-}
-
-function reconcileAccountSnapshots(items, ownersById) {
-  const mismatches = [];
-  let unverifiable = 0;
-  for (const item of items || []) {
-    const owner = ownersById.get(String(item.account_reviewer_id));
-    let current = null;
-    if (owner && item.account_source === 'self') {
-      current = { reviewerId: owner.reviewerId, isSub: false, bankName: owner.bankName || '', bankAccount: owner.bankAccount || '', accountHolder: owner.accountHolder || '' };
-    } else if (owner && item.account_source === 'sub') {
-      const subs = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
-      const sub = subs.find(s => String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === String(item.account_sub_phone8 || ''));
-      if (sub) current = { reviewerId: owner.reviewerId, isSub: true, subPhone8: item.account_sub_phone8 || '', bankName: sub.bankName || owner.bankName || '', bankAccount: sub.bankAccount || owner.bankAccount || '', accountHolder: sub.accountHolder || owner.accountHolder || '' };
-    }
-    const comparison = compareAccountSnapshot(item, current);
-    if (comparison.state !== 'match') mismatches.push({ itemId: item.id, reviewerName: item.reviewer_name || '', accountTail: String(item.bank_account || '').replace(/[^0-9]/g, '').slice(-4) });
-    if (comparison.state === 'unverifiable') unverifiable++;
-  }
-  return { ok: mismatches.length === 0, mismatches, unverifiable };
 }
 
 function _batchView(b) {
@@ -853,7 +793,7 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo })
  *   소유자 공통계좌를 덮지 않는다(타계정 전용계좌 규약 유지).
  * ★ 빈 값은 **덮지 않는다**(부분 보완 허용) — 지우려면 화면이 아니라 등록리뷰어DB에서.
  */
-async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder, by }) {
+async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccount, accountHolder }) {
   // ★ 아래 `resolveBank` 검증이 화면에서 방금 등록한 표기를 알아야 한다(안 그러면
   //   표기를 넣어 두고도 계좌 저장이 '인식불가'로 거부되는 막다른 길).
   await _bankOv.ensureBankOverrides();
@@ -869,52 +809,37 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
   if (bn && !resolveBank(bn)) throw new PaymentFixError('bad_bank_name', `'${bn}' 은행명을 인식할 수 없습니다. 정식 은행명으로 입력해 주세요(예: 국민은행 · 카카오뱅크).`);
 
   const sub = String(subPhone8 || '').replace(/[^0-9]/g, '');
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query("SELECT set_config('app.changed_by', $1, true)", [String(by || 'payment-workdesk')]);
-    if (sub) {
-      // 타계정 — 소유자 행의 배열에서 그 명의 항목만 병합
-      const { rows } = await client.query(`SELECT sub_accounts FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
-      if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-      const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
-      let hit = false;
-      const next = arr.map(s => {
-        const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
-        if (p8 !== sub || hit) return s;
-        hit = true;
-        return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
-      });
-      if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
-      await client.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
-      await client.query('COMMIT');
-      return { ok: true, target: 'sub' };
-    }
-
-    const { rows: [existing] } = await client.query(`SELECT bank_name, bank_account FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
-    if (!existing) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-    const { rowCount } = await client.query(
-      `UPDATE reviewers
-          SET bank_name      = CASE WHEN $2::text <> '' THEN $2::text ELSE bank_name END,
-              bank_account   = CASE WHEN $3::text <> '' THEN $3::text ELSE bank_account END,
-              account_holder = CASE WHEN $4::text <> '' THEN $4::text ELSE account_holder END
-        WHERE id = $1`,
-      [id, bn, ba, ah]);
-    if (!rowCount) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-    await client.query('COMMIT');
-    return { ok: true, target: 'self' };
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* best effort */ }
-    throw err;
-  } finally {
-    client.release();
+  if (sub) {
+    // 타계정 — 소유자 행의 배열에서 그 명의 항목만 병합
+    const { rows } = await pool.query(`SELECT sub_accounts FROM reviewers WHERE id = $1`, [id]);
+    if (!rows.length) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+    const arr = Array.isArray(rows[0].sub_accounts) ? rows[0].sub_accounts : [];
+    let hit = false;
+    const next = arr.map(s => {
+      const p8 = String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8);
+      if (p8 !== sub || hit) return s;
+      hit = true;
+      return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
+    });
+    if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
+    await pool.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
+    return { ok: true, target: 'sub' };
   }
+
+  const { rowCount } = await pool.query(
+    `UPDATE reviewers
+        SET bank_name      = CASE WHEN $2::text <> '' THEN $2::text ELSE bank_name END,
+            bank_account   = CASE WHEN $3::text <> '' THEN $3::text ELSE bank_account END,
+            account_holder = CASE WHEN $4::text <> '' THEN $4::text ELSE account_holder END
+      WHERE id = $1`,
+    [id, bn, ba, ah]);
+  if (!rowCount) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+  return { ok: true, target: 'self' };
 }
 
 module.exports = {
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
   buildWorkbook, batchFileName,
-  saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
-  compareAccountSnapshot, accountFingerprint, PaymentFixError,
+  saveTransferSetting, saveReviewerAccount, PaymentFixError,
 };

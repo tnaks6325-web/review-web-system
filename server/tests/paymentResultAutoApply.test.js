@@ -31,7 +31,7 @@ assert.deepStrictEqual(
 assert.deepStrictEqual(
   decision({ items: 10, matched: 10, unmatchedResults: 1 }),
   { allowed: true, matchRate: 1, blockers: [] },
-  '회차 밖 결과 행은 표시만 하고, 이 회차에 정확히 매칭된 성공 건의 자동 반영을 막지 않는다');
+  '회차 밖 결과 행은 표시만 하고 이 회차의 매칭 성공 반영을 막지 않는다');
 
 assert.deepStrictEqual(
   decision({ items: 10, matched: 10, unmatchedResults: 0 }, true),

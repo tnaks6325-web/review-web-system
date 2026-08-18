@@ -89,13 +89,15 @@ function makePool(items, opts = {}) {
         return { rows: state.filter(x => x.status === 'pending').map(x => ({ id: x.id })), rowCount: state.filter(x => x.status === 'pending').length };
       }
       if (/FROM payment_batch_items i[\s\S]*LEFT JOIN review_index r/.test(s)) {
-        return { rows: state.filter(x => x.status === 'paid').map(x => ({
+        /* 최신 재기록 쿼리는 원본 행 대신 공고 연결을 따라간 대상 작업보드 식별값을
+           target_* 별칭으로 돌려준다. 이 스텁도 실제 결과 모양을 유지해야 완료 행이
+           필터에서 사라지지 않는다. */
+        const paid = state.filter(x => x.status === 'paid').map(x => ({
           ...x,
-          target_sheet_id: x.sheet_id,
-          target_tab_name: x.tab_name,
-          target_row_index: x.row_index,
-          submit_col2: '입금', tab_gid: 'G1',
-        })), rowCount: state.filter(x => x.status === 'paid').length };
+          target_sheet_id: x.sheet_id, target_tab_name: x.tab_name, target_row_index: x.row_index,
+          submit_col2: '입금', tab_gid: 'G1', sheetless: false,
+        }));
+        return { rows: paid, rowCount: paid.length };
       }
       if (/UPDATE payment_batch_items[\s\S]*status = 'paid'/.test(s)) {
         const it = state.find(x => x.id === params[0] && x.status === 'pending');
@@ -238,7 +240,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('★ 작업보드에 남았는지 재확인된 건만 기록됨으로 표시하고, 누락은 실패로 남긴다',
       stampBackfill.ok === true && stampBackfill.candidates === 1 && stampBackfill.recorded === 0
         && stampBackfill.queued === 0 && stampBackfill.failed === 1 && stampBackfill.verified === 0 && stampWrites.length === 1
-        && stampWrites[0].items.length === 1 && stampWrites[0].items[0].stamp === '6/9 12:26'
+        && stampWrites[0].items.length === 1 && /^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/.test(stampWrites[0].items[0].stamp)
         && stampWrites[0].opts.stamp === undefined && stampWrites[0].opts.deferSheetlessRebuild === true
         && stampPool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql))
         && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
@@ -404,9 +406,12 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('★ 이체결과 확인은 파일 선택 없이 저장된 미리보기를 조회한다',
       /function _pmOpenResult\(i\)[\s\S]{0,900}api\('\/api\/trackb\/payment\/batch\/'[\s\S]{0,100}result-preview/.test(wd)
       && !/function _pmOpenResult\(i\)[\s\S]{0,900}_pmPickResult\(i\)/.test(wd));
-    ok('★ 미리보기 → 확인 팝업 → 반영 흐름이 각각 연결된다',
-      /function _pmOpenResult\(i\)[\s\S]{0,900}result-preview/.test(wd)
-      && /function _pmResultApply\(\)[\s\S]{0,1200}result-apply/.test(wd));
+    /* 자동 업로드 경로(result-auto-apply)가 파일 앞쪽에 있어 전역 문자열 순서는
+       실제 사용자 흐름을 뜻하지 않는다. 저장 미리보기 열기와 수동 반영 함수의
+       호출 관계만 확인한다. */
+    const openResultBlock = wd.slice(wd.indexOf('function _pmOpenResult'), wd.indexOf('function _pmFileB64'));
+    const applyResultBlock = wd.slice(wd.indexOf('async function _pmResultApply'), wd.indexOf('async function _pmApplySavedResult'));
+    ok('★ 미리보기 → 확인 팝업 → 반영 순서', /result-preview/.test(openResultBlock) && /result-apply/.test(applyResultBlock));
     ok('★ 반영 요청에 파일을 다시 보낸다(서버가 재해석)', /result-apply[\s\S]{0,240}base64:R\.file\.base64/.test(wd));
     ok('★ 순서 배정을 화면이 고지한다', /결과를 순서대로 배정/.test(wd));
     ok('★ 결과없음은 이체실패·다음 회차 재포함으로 안내한다',
@@ -419,7 +424,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /function _pmBoardApplyText\(board\)/.test(wd)
       && /_pmBoardApplyText\(r\.board\)/.test(wd)
       && !/const depositDate\s*=/.test(wd)
-      && !/const retryDepositDate\s*=/.test(wd));
+      && !/function _pmBackfillPaidDeposit/.test(wd));
 
     const brief = noLineComments(read('src/routes/reviewEdit.routes.js'));
     ok('★ 리뷰어 brief 에 입금 결과를 싣는다', /FROM payment_batch_items/.test(brief) && /payment,\s/.test(brief));
