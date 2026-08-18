@@ -409,12 +409,15 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
       state, participantCount: matches.length, alreadyPaidCount: paid.length,
     };
   });
+  const duplicateResultSeqs = new Set(results
+    .filter(result => result.state === 'duplicate_payment')
+    .map(result => Number(result.seq)));
   return {
     ok: true,
     work: { sheetId, tabName }, memo: normalizedMemo,
     results,
     reconciliationCandidates: findAccountMismatchCandidates({ transfers, items: batchItems.map(_itemView) })
-      .filter(x => selectedItemIds.has(String(x.itemId))),
+      .filter(x => selectedItemIds.has(String(x.itemId)) && !duplicateResultSeqs.has(Number(x.resultSeq))),
     summary: {
       duplicatePayment: results.filter(x => x.state === 'duplicate_payment').length,
       candidateUnpaid: results.filter(x => x.state === 'candidate_unpaid').length,
@@ -448,6 +451,12 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
     const row = batchItems.find(x => String(x.id) === String(itemId));
     if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
     const item = _itemView(row);
+    const { rows: [paidState] } = await client.query(
+      `SELECT EXISTS (SELECT 1 FROM payment_records WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3)
+           OR EXISTS (SELECT 1 FROM payment_batch_items WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND status = 'paid')
+           OR EXISTS (SELECT 1 FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND is_submitted2 = 'PAID') AS "alreadyPaid"`,
+      [item.sheetId, item.tabName, item.rowIndex]);
+    if (paidState && paidState.alreadyPaid) throw new ResultError('already_paid', '이미 입금 처리된 참여자는 수동 대조할 수 없습니다.');
     const candidates = findAccountMismatchCandidates({ transfers: [transfer], items: batchItems.map(_itemView) });
     const candidate = candidates.find(x => x.itemId === item.id && x.resultSeq === Number(resultSeq));
     if (!candidate || candidates.length !== 1) throw new ResultError('not_eligible', '계좌 불일치 수동 대조 조건을 충족하지 않습니다.');

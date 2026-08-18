@@ -7,7 +7,7 @@ const BATCH_ID = '00000000-0000-0000-0000-000000000008';
 const UPLOAD_ID = '00000000-0000-0000-0000-000000000010';
 const ITEM_ID = '00000000-0000-0000-0000-000000000114';
 
-function makeHarness({ failRecord = false } = {}) {
+function makeHarness({ failRecord = false, alreadyPaid = false } = {}) {
   const state = {
     item: {
       id: ITEM_ID, sheet_id: 'sheet-8', tab_name: '장수돌침대 900건', row_index: 457,
@@ -40,6 +40,7 @@ function makeHarness({ failRecord = false } = {}) {
     if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied' }], rowCount: 1 };
     if (/SELECT summary FROM payment_result_uploads/.test(text)) return { rows: [upload], rowCount: 1 };
     if (/SELECT \* FROM payment_batch_items WHERE batch_id/.test(text)) return { rows: [state.item], rowCount: 1 };
+    if (/SELECT EXISTS \(SELECT 1 FROM payment_records/.test(text)) return { rows: [{ alreadyPaid }], rowCount: 1 };
     if (/INSERT INTO payment_account_mismatch_reconciliations/.test(text)) {
       if (state.reconciliations.length) return { rows: [], rowCount: 0 };
       state.reconciliations.push({ itemId: params[3], resultSeq: params[2], by: params[7] });
@@ -88,6 +89,16 @@ async function run() {
       '같은 #8 결과 행은 두 번 성공 처리할 수 없어야 한다'
     );
     assert.equal(ok.state.reconciliations.length, 1, '중복 실행은 새 감사 이력을 만들면 안 된다');
+
+    const alreadyPaid = makeHarness({ alreadyPaid: true });
+    svc.__setPoolForTest(alreadyPaid.pool);
+    await assert.rejects(
+      svc.reconcileAccountMismatch({ batchId: BATCH_ID, uploadId: UPLOAD_ID, itemId: ITEM_ID, resultSeq: 114, by: 'admin-test' }),
+      err => err && err.code === 'already_paid',
+      '기존 입금 기록이 있으면 수동 대조가 거부되어야 한다'
+    );
+    assert.equal(alreadyPaid.state.item.status, 'failed', '이미 입금된 행의 회차 상태를 다시 바꾸면 안 된다');
+    assert.equal(alreadyPaid.state.reconciliations.length, 0, '이미 입금된 행에는 새 대조 이력을 만들면 안 된다');
 
     const fail = makeHarness({ failRecord: true });
     svc.__setPoolForTest(fail.pool);

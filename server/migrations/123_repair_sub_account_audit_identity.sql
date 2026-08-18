@@ -21,9 +21,9 @@ BEGIN
       FROM (SELECT item, ordinal, RIGHT(regexp_replace(COALESCE(item->>'phone',''),'[^0-9]','','g'),8) AS phone8 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(NEW.sub_accounts)='array' THEN NEW.sub_accounts ELSE '[]'::jsonb END) WITH ORDINALITY AS x(item,ordinal)) s
     ) SELECT o.item, n.item FROM old_rows o FULL OUTER JOIN new_rows n ON o.phone8=n.phone8 AND o.occurrence=n.occurrence
   LOOP
-    before_bank := COALESCE(NULLIF(before_sub->>'bankName',''),OLD.bank_name,''); after_bank := COALESCE(NULLIF(after_sub->>'bankName',''),NEW.bank_name,'');
-    before_account := regexp_replace(COALESCE(NULLIF(before_sub->>'bankAccount',''),OLD.bank_account,''),'[^0-9]','','g'); after_account := regexp_replace(COALESCE(NULLIF(after_sub->>'bankAccount',''),NEW.bank_account,''),'[^0-9]','','g');
-    before_holder := COALESCE(NULLIF(before_sub->>'accountHolder',''),OLD.account_holder,''); after_holder := COALESCE(NULLIF(after_sub->>'accountHolder',''),NEW.account_holder,'');
+    before_bank := CASE WHEN before_sub IS NULL THEN '' ELSE COALESCE(NULLIF(before_sub->>'bankName',''),OLD.bank_name,'') END; after_bank := CASE WHEN after_sub IS NULL THEN '' ELSE COALESCE(NULLIF(after_sub->>'bankName',''),NEW.bank_name,'') END;
+    before_account := CASE WHEN before_sub IS NULL THEN '' ELSE regexp_replace(COALESCE(NULLIF(before_sub->>'bankAccount',''),OLD.bank_account,''),'[^0-9]','','g') END; after_account := CASE WHEN after_sub IS NULL THEN '' ELSE regexp_replace(COALESCE(NULLIF(after_sub->>'bankAccount',''),NEW.bank_account,''),'[^0-9]','','g') END;
+    before_holder := CASE WHEN before_sub IS NULL THEN '' ELSE COALESCE(NULLIF(before_sub->>'accountHolder',''),OLD.account_holder,'') END; after_holder := CASE WHEN after_sub IS NULL THEN '' ELSE COALESCE(NULLIF(after_sub->>'accountHolder',''),NEW.account_holder,'') END;
     IF before_bank IS DISTINCT FROM after_bank OR before_account IS DISTINCT FROM after_account OR before_holder IS DISTINCT FROM after_holder THEN
       phone8 := NULLIF(RIGHT(regexp_replace(COALESCE(after_sub->>'phone',before_sub->>'phone',''),'[^0-9]','','g'),8),'');
       INSERT INTO reviewer_account_change_audit (reviewer_id,sub_phone8,before_bank_name,before_account_tail,before_fingerprint,after_bank_name,after_account_tail,after_fingerprint,changed_by)
