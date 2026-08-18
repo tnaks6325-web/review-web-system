@@ -344,7 +344,10 @@ async function searchUnconfirmedWorkCandidates({ query }) {
   const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
   const { rows } = await _db().query(
     `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
-            COALESCE(NULLIF(MAX(tc.display_name), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label"
+            COALESCE(NULLIF(MAX(tc.display_name), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label",
+            COALESCE(NULLIF(MAX(rc.title), ''), '') AS "campaignTitle",
+            COALESCE(NULLIF(MAX(rc.transfer_memo), ''), '') AS "depositName",
+            BOOL_OR(LOWER(TRIM(COALESCE(rc.transfer_memo, ''))) = LOWER($2)) AS "recommended"
        FROM review_index ri
        LEFT JOIN tab_configs tc ON tc.sheet_id = ri.sheet_id AND tc.tab_name = ri.tab_name
        LEFT JOIN recruit_campaigns rc
@@ -353,10 +356,14 @@ async function searchUnconfirmedWorkCandidates({ query }) {
       WHERE ri.tab_name ILIKE $1 ESCAPE '\\'
          OR COALESCE(tc.display_name, '') ILIKE $1 ESCAPE '\\'
          OR COALESCE(rc.title, '') ILIKE $1 ESCAPE '\\'
+         OR COALESCE(rc.transfer_memo, '') ILIKE $1 ESCAPE '\\'
       GROUP BY ri.sheet_id, ri.tab_name
-      ORDER BY "label", ri.tab_name
-      LIMIT 30`, [like]);
-  return { ok: true, candidates: rows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, label: r.label || r.tabName })) };
+      ORDER BY "recommended" DESC, "label", ri.tab_name
+      LIMIT 30`, [like, q]);
+  return { ok: true, candidates: rows.map(r => ({
+    sheetId: r.sheetId, tabName: r.tabName, label: r.label || r.tabName,
+    campaignTitle: r.campaignTitle || '', depositName: r.depositName || '', recommended: r.recommended === true,
+  })) };
 }
 
 async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName }) {
