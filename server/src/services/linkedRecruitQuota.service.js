@@ -18,6 +18,38 @@ function quotaError(message, code = 'recruit_quota_invalid') {
   return err;
 }
 
+/**
+ * 화면에 보여줄 총정원만 결정한다. 레거시 공고의 recruit_total=0은 기존에는
+ * "무제한"이라는 뜻이기도 했으므로 DB 값을 쓰거나 참여 판정을 바꾸지 않는다.
+ * 연결 작업오더에 양수 모집인원이 있을 때에만 표시용 대체값으로 사용한다.
+ */
+function displayRecruitTotal(campaignTotal, workOrderTotal) {
+  const campaign = quota(campaignTotal);
+  if (campaign > 0) return { total: campaign, source: 'campaign' };
+  const workOrder = quota(workOrderTotal);
+  return workOrder > 0
+    ? { total: workOrder, source: 'work_order' }
+    : { total: 0, source: 'none' };
+}
+
+/** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
+async function displayRecruitTotalForCampaign(campaign) {
+  const primary = quota(campaign && campaign.recruit_total);
+  if (primary > 0) return { total: primary, source: 'campaign' };
+  if (!campaign || !campaign.id) return { total: 0, source: 'none' };
+  const sourceId = String(campaign.source_work_order_id || '').trim();
+  const { rows } = await pool.query(
+    `SELECT recruit_count
+       FROM work_orders
+      WHERE deleted_at IS NULL
+        AND ((linked_campaign_id = $1 AND $1 <> '') OR (id = $2 AND $2 <> ''))
+      ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
+      LIMIT 1`,
+    [String(campaign.id), sourceId]
+  );
+  return displayRecruitTotal(primary, rows[0] && rows[0].recruit_count);
+}
+
 /** 차수 공고에서는 뒤 차수를 보존하고 1차만 조절해 합계를 목표 정원과 일치시킨다. */
 function firstRoundQuota(rounds, target) {
   const sorted = (Array.isArray(rounds) ? rounds : []).slice().sort((a, b) => Number(a.round_no) - Number(b.round_no));
@@ -212,6 +244,8 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
 
 module.exports = {
   quota,
+  displayRecruitTotal,
+  displayRecruitTotalForCampaign,
   firstRoundQuota,
   allocateOptionQuotas,
   assertWorkOrderQuota,
