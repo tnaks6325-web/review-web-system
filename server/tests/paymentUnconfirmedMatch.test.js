@@ -115,6 +115,10 @@ svc.__setPoolForTest({
     '작업보드값행과 이체결과값행은 결과별로 연속된 2행 세트여야 한다');
   assert.match(workdesk, /const transfers=group\?\.items\|\|\[\]/,
     '선택한 통장표시 묶음의 미확인 이체결과 전체를 비교표에 표시해야 한다');
+  assert.match(workdesk, /그룹 작업 선택 필요/,
+    '작업 미연결 상태는 행별 선택이 아니라 그룹 단위 선택으로 안내해야 한다');
+  assert.match(workdesk, /작업 1회 선택/,
+    '한 미확인 이체 그룹은 작업 하나만 선택하도록 단일 진입점을 제공해야 한다');
   assert.match(workdesk, /function _pmOpenUnconfirmedWorkSearch\(\)/,
     '연결된 작업보드가 없을 때 관리자가 작업보드를 직접 연결할 수 있어야 한다');
   assert.match(workdesk, /function _pmAccountNumber\(transfer\)/,

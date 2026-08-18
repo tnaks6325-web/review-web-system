@@ -7699,22 +7699,22 @@ function _pmRenderUnconfirmedDirect(match=null){
     const workboardAmount=Number(result.workboardAmount)||0;
     const workboardAccount=result.workboardAccount||'—';
     const decision=hasParticipant?'대조 대상':(matched?'참여자 미확인':'작업보드 연결 필요');
-    const action=hasParticipant?'—':`<button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">${matched?'작업 다시 선택':'작업 선택'}</button>`;
+    const action=hasParticipant?'—':`<span class="muted">${matched?'작업 재선택 필요':'그룹 작업 선택 필요'}</span>`;
     return `<tr class="pm-workboard-row"><th>작업보드값행</th><td><b>${esc(boardName)}</b><span class="pm-unconfirmed-work-reviewer">리뷰어 ${esc(reviewer)}</span></td><td>${esc(rowLabel)}</td><td class="num">${workboardAmount?_pmNum(workboardAmount):'—'}</td><td>${esc(reviewer)}</td><td class="pm-unconfirmed-account">${esc(workboardAccount)}</td><td>${esc(decision)}</td><td>${action}</td></tr>`;
   };
   const comparisonRows=transfers.map((transfer,rowIndex)=>{
     const result=resultBySeq.get(Number(transfer.seq))||{};
     const decision=_pmUnconfirmedStateLabel(result.state);
-    const action=!matched ? '<span class="muted">작업 선택 필요</span>'
+    const action=!matched ? '<span class="muted">그룹 작업 선택 필요</span>'
       : result.state==='candidate_unpaid' ? `<button class="btn pri xs" onclick="_pmReviewUnconfirmedResult(${rowIndex},'APPROVE')">입금 성공 승인</button>`
       : result.state==='duplicate_payment' ? `<button class="btn xs" onclick="_pmOpenDuplicateCaseForm(${rowIndex})">중복 입금 처리</button>`
-      : result.state==='participant_not_found' ? `<button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">작업 다시 선택</button>`
-      : `<button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">수동 확인 필요</button>`;
+      : result.state==='participant_not_found' ? '<span class="muted">작업 재선택 필요</span>'
+      : '<span class="muted">수동 확인 필요</span>';
     return workRowForTransfer(transfer,result)+`<tr class="pm-transfer-row"><th>이체결과값행</th><td>${esc(transfer.memo||'—')}</td><td>${esc(result.rowIndex||'—')}</td><td class="num">${_pmNum(transfer.amount)}</td><td>${esc(transfer.holder||'—')}</td><td class="pm-unconfirmed-account">${esc(_pmAccountNumber(transfer))}</td><td>${esc(decision)}</td><td>${action}</td></tr>`;
   }).join('');
   el.querySelector('.pm-unconfirmed-direct-view')?.remove();
   const view=document.createElement('div'); view.className='pm-unconfirmed-direct-view';
-  view.innerHTML=`<div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th><th>조치</th></tr></thead><tbody>${comparisonRows}</tbody></table></div><div id="pmUnconfirmedDecision" class="pm-unconfirmed-decision" style="display:none"></div><div class="pm-unconfirmed-actionbar"><span class="muted">${matched?'입금 이력 없음 행만 승인할 수 있으며, 승인 시 해당 작업보드 행의 입금일을 기록합니다.':'작업보드를 연결하면 각 이체결과의 참여자·입금 이력을 대조합니다.'}</span><button class="btn sm" onclick="_pmOpenDuplicateCaseManagement()">중복 입금 관리</button><button class="btn sm" onclick="_pmOpenUnconfirmedWorkSearch()">${matched?'작업 다시 선택':'작업보드 연결'}</button></div>`;
+  view.innerHTML=`<div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th><th>조치</th></tr></thead><tbody>${comparisonRows}</tbody></table></div><div id="pmUnconfirmedDecision" class="pm-unconfirmed-decision" style="display:none"></div><div class="pm-unconfirmed-actionbar"><span class="muted">${matched?'입금 이력 없음 행만 승인할 수 있으며, 승인 시 해당 작업보드 행의 입금일을 기록합니다.':`이 그룹 ${transfers.length}건은 작업 1개를 선택하면 참여자·입금 이력을 한 번에 대조합니다.`}</span><button class="btn sm" onclick="_pmOpenDuplicateCaseManagement()">중복 입금 관리</button><button class="btn sm" onclick="_pmOpenUnconfirmedWorkSearch()">${matched?'작업 다시 선택':'작업 1회 선택'}</button></div>`;
   el.querySelector('.pm-unconfirmed-search')?.before(view);
 }
 function _pmUnconfirmedContext(rowIndex){
@@ -7874,7 +7874,7 @@ function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   _pmUnconfirmedClose();
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo; el.dataset.groupIndex=String(selectedGroupIndex);
   const groups=STATE.pmUnconfirmedGroups||[];
-  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택해 대조합니다. 추천은 자동 반영되지 않으며, 승인 전에는 입금 기록이 생성되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 통장표시 그룹 하나를 선택해 대조합니다. 그룹 안의 이체결과는 작업 1개를 선택하면 함께 조회되며, 추천은 자동 반영되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체 그룹의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
   document.body.appendChild(el);
   _pmRenderUnconfirmedDirect();
 }
