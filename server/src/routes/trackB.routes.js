@@ -2712,6 +2712,14 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     if (out.batch.status === 'cancelled') {
       return res.status(400).json({ ok: false, error: '취소된 회차는 내려받을 수 없습니다.' });
     }
+    if (Number(out.batch.downloadCount || 0) === 0) {
+      const accountCheck = await paymentSvc.checkBatchAccountSnapshots(out);
+      if (!accountCheck.ok) {
+        return res.status(409).json({ ok: false, code: 'account_snapshot_changed',
+          error: '회차 생성 후 등록 계좌가 변경되었습니다. 이 회차를 취소하고 최신 계좌로 새 회차를 만들어 주세요.',
+          mismatches: accountCheck.mismatches.map(x => ({ reviewerName: x.reviewerName, accountTail: x.accountTail })) });
+      }
+    }
     const live = out.items.filter(i => i.status !== 'cancelled');
     const buf = await paymentSvc.buildWorkbook(out.batch.bank, live);
     await paymentSvc.markDownloaded(out.batch.id, _by(req));
@@ -2794,6 +2802,7 @@ router.post('/payment/reviewer-account', authMiddleware, adminOrMasterMiddleware
     const out = await paymentSvc.saveReviewerAccount({
       reviewerId: b.reviewerId, subPhone8: b.subPhone8,
       bankName: b.bankName, bankAccount: b.bankAccount, accountHolder: b.accountHolder,
+      by: _by(req),
     });
     logger.info(`[payment] 리뷰어 계좌 보완 by ${_by(req)} — ${out.target}`);
     res.json(out);
@@ -2859,6 +2868,18 @@ router.post('/payment/batch/:id/unconfirmed-work-inspect', authMiddleware, admin
     res.json(await paymentResultSvc.inspectUnconfirmedWorkMatch({
       batchId: req.params.id, uploadId: b.uploadId, memo: b.memo,
       sheetId: b.sheetId, tabName: b.tabName,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
+// 계좌가 다른 실제 이체는 자동 처리하지 않는다. 저장된 결과 행과 회차 실패 항목을 서버에서 다시 대조하고,
+// 관리자가 명시적으로 확인한 경우에만 감사 이력과 함께 입금 완료로 전환한다.
+router.post('/payment/batch/:id/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '계좌 불일치 이체를 확인한 뒤 반영해 주세요.' });
+    res.json(await paymentResultSvc.reconcileAccountMismatch({
+      batchId: req.params.id, uploadId: b.uploadId, itemId: b.itemId, resultSeq: b.resultSeq, by: _by(req),
     }));
   } catch (err) { _resultErr(err, res, next); }
 });

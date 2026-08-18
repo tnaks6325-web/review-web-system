@@ -160,9 +160,8 @@ console.log('\n[C] 두 기록 경로가 무시트 분기를 탄다');
   const pay = noLineComments(srv('src/services/paymentApply.service.js'));
   ok('입금 완료에서 상태 기록 호출', /markStatusCell\(\{[\s\S]{0,200}?kind: 'paid', value: stamp/.test(pay));
   ok('★ 무시트면 시트 쓰기·deposit_mark 큐로 내려가지 않는다', /if \(st\.handled\) \{[\s\S]{0,400}?continue;/.test(pay));
-  // 시트 경로는 그대로 살아 있어야 한다(무회귀)
-  ok('시트 기반 경로(writeSheet)는 그대로', /await writeSheet\(item\.sheetId, range/.test(pay));
-  ok("시트 실패 시 deposit_mark 큐도 그대로", /enqueue\('deposit_mark'/.test(pay));
+  ok('입금 처리에는 시트 기반 경로가 없다', !/writeSheet\(/.test(pay));
+  ok('입금 처리에는 deposit_mark 큐가 없다', !/enqueue\('deposit_mark'/.test(pay));
 }
 
 /* ══════════════ F. Existing O → submission-time backfill ══════════════ */

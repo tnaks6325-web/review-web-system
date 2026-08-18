@@ -620,29 +620,9 @@ async function _executeItem(item) {
     }
 
     case 'deposit_mark': {
-      // 입금처리 이체완료시각을 구글시트 입금칸(submit_col2)에 기록 (재시도)
-      const { sheetId, tabName, rowIndex, depositColKey, value, gid } = payload;
-      if (!sheetId || !tabName || !rowIndex || !depositColKey) throw new Error('payload 누락');
-
-      const headerValues = await throttledCall(() => readSheet(sheetId, `'${tabName}'!1:50`));
-      if (!headerValues || headerValues.length === 0) throw new Error('헤더 행을 읽을 수 없음');
-
-      const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드', '리뷰', '입금'];
-      let headerRow = headerValues[0];
-      for (const row of headerValues) {
-        const matchCount = (row || []).filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
-        if (matchCount >= 2) { headerRow = row; break; }
-      }
-      const headers = (headerRow || []).map(h => String(h || '').trim());
-      const colIdx = headers.findIndex(h => h === depositColKey);
-      if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey}' 을 헤더에서 찾을 수 없음`);
-
-      const colLetter = _getColLetter(colIdx);
-      const range = `'${tabName}'!${colLetter}${rowIndex}`;
-      const sheetOpts = gid ? { gid } : {};
-      const current = await throttledCall(() => readSheet(sheetId, range, sheetOpts));
-      await throttledCall(() => writeSheet(sheetId, range,
-        [[mergeDepositStamps(current && current[0] && current[0][0], value || '')]], sheetOpts));
+      // 입금 기록은 서버 DB 작업보드만 사용한다. 이전 배포에서 남은 큐는
+      // 구글시트에 쓰지 않고 정상 소진해 재시도 루프를 막는다.
+      logger.info('[queue:deposit_mark] DB-only 입금 정책으로 구글시트 기록 건너뜀');
       break;
     }
 

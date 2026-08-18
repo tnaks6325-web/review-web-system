@@ -2,24 +2,20 @@
 /**
  * 입금 기록 단일 출처 (M1 수동 처리 · M2 이체결과 반영 공용)
  *
- * ★★ 왜 서비스로 뺐나: "입금됐다"를 기록하는 일은 네 군데를 동시에 건드린다 —
+ * ★★ 왜 서비스로 뺐나: "입금됐다"를 기록하는 일은 서버 DB 원장과 작업표를 함께 맞춘다 —
  *    ① `review_index.is_submitted2='PAID'` ② `payment_records` 이력
  *    ③ **무시트 탭**이면 작업표 입금 칸(W3-a `sheetlessStatus.markStatusCell`)
- *    ④ 시트 탭이면 구글시트 입금 칸(실패 시 `deposit_mark` 큐).
  *    이 순서를 사본으로 두면 "관리자 수동 처리는 작업표에 남는데 M2 자동 반영은 안 남는다" 같은
  *    드리프트가 조용히 생긴다(무시트 탭에서는 다음 장부 재생성에 ①이 지워지므로 ③이 유일한 생존 경로다).
  *
  * ★ **시점(stamp)은 호출자가 준다** — 수동 처리는 '지금', M2 는 **결과 파일의 실제 이체시점**
  *   (사용자 확정 ④ "입금칸 기록값 = 결과 파일의 실제 이체시점"). 그래서 건별 stamp 를 허용한다.
  *
- * ★ 시트 쓰기는 **응답 뒤 백그라운드**로 도는 기존 계약을 그대로 유지한다(호출부가 setImmediate).
+ * ★ 입금 처리에서 구글시트와 `deposit_mark` 큐는 사용하지 않는다.
  */
 
-const { writeSheet, readSheet } = require('./sheets.service');
-const { enqueue } = require('./syncQueue.service');
 const { logger } = require('../utils/logger');
 const { formatDepositStamp, mergeDepositStamps } = require('../utils/depositStamp');
-const { findPaymentColumnIndex } = require('./columnResolver');
 
 /** 열 인덱스 → 알파벳 (A=0) */
 function colLetter(colIdx) {
@@ -71,15 +67,19 @@ function nowStamp(when) {
  */
 async function recordDeposits(client, items, opts = {}) {
   const by = opts.by || '';
+  const appliedItems = Array.isArray(opts.appliedItems) ? opts.appliedItems : null;
   let updated = 0;
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const r = await client.query(
       `UPDATE review_index SET is_submitted2 = 'PAID'
-       WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+       WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+         AND is_submitted2 IS DISTINCT FROM 'PAID'`,
       [item.sheetId, item.tabName, rowIndex]
     );
     updated += r.rowCount;
+    if (!r.rowCount) continue;
+    if (appliedItems) appliedItems.push(item);
 
     // ★ paid_at 은 값이 있을 때만 넣는다(없으면 DEFAULT NOW() = 종전 동작 그대로).
     const paidAt = item.paidAt || opts.paidAt || null;
@@ -94,26 +94,22 @@ async function recordDeposits(client, items, opts = {}) {
 }
 
 /**
- * ③④ 입금 칸 기록 — 무시트면 작업표, 시트면 구글시트(실패 시 큐).
- *  ★ 절대 throw 하지 않는다(백그라운드 후처리라 예외가 오르면 아무도 안 잡는다).
+ * ③ DB 작업표 입금 칸 기록 — 무시트 탭만 보조 입금일을 남긴다.
+ *  ★ 절대 throw 하지 않는다(입금 원장 기록 뒤의 보조 작업이므로 예외가 원장을 되돌리면 안 된다).
  *
  * @param {Array}  items [{sheetId, tabName, rowIndex|rowNum, gid, depositColKey, stamp?}]
  * @param {object} opts  {by, stamp}  stamp = 기본 표기값. 건별 item.stamp 가 우선.
  */
 async function markDepositCells(items, opts = {}) {
   const by = opts.by || 'payment';
-  const headerCache = {};
   const outcome = { total: Array.isArray(items) ? items.length : 0, recorded: 0, queued: 0, skipped: 0, failed: 0 };
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const stamp = item.stamp || opts.stamp;
-    const depositColKey = item.depositColKey;
+    if (!item.sheetId || !item.tabName || !rowIndex || !stamp) { outcome.skipped += 1; continue; }
 
-    /* ★★ 무시트 탭 — `review_index.is_submitted2='PAID'` 는 **다음 장부 재생성에 지워진다**
-       (재생성이 review_index 를 지우고 작업표에서 다시 만든다). 시트 쓰기도 막혀 있으므로
-       작업표 입금 칸에 스탬프를 남겨야 **입금 표시가 살아남는다**(W3-a).
-       ★ 입금 칸 헤더명은 파서가 감지한 `submit_col2` 를 쓰므로 depositColKey 가 없어도 동작한다
-         (그 값은 화면이 준 힌트일 뿐 — 무시트에서는 서버가 다시 정한다). */
+    // 입금 원장은 DB(review_index + payment_records)만 사용한다. 무시트 작업표의
+    // 날짜 칸 역시 DB에만 보조 기록하며, 시트 기반 탭은 추가 외부 쓰기를 하지 않는다.
     try {
       const st = await require('./sheetlessStatus.service').markStatusCell({
         sheetId: item.sheetId, tabName: item.tabName, rowIndex,
@@ -124,50 +120,14 @@ async function markDepositCells(items, opts = {}) {
         else outcome.failed += 1;
         if (st.ok) logger.info(`[paymentApply] 무시트 입금칸 기록 (tab=${item.tabName}, row=${rowIndex}, col=${st.column})`);
         else logger.warn(`[paymentApply] 무시트 입금칸 기록 실패 (tab=${item.tabName}, row=${rowIndex}) reason=${st.reason}`);
-        continue;   // ★ 시트 쓰기·deposit_mark 큐로 내려가지 않는다(무시트에는 쓸 시트가 없다)
+        continue;
       }
     } catch (e) {
-      logger.warn(`[paymentApply] 무시트 판정 예외 → 시트 경로로 진행: ${e.message}`);
+      logger.warn(`[paymentApply] DB 작업표 입금칸 기록 실패 (tab=${item.tabName}, row=${rowIndex}): ${e.message}`);
+      outcome.failed += 1;
+      continue;
     }
-
-    if (!rowIndex) continue;
-    let resolvedDepositColKey = depositColKey;
-    try {
-      const cacheKey = item.sheetId + '||' + item.tabName;
-      let headers = headerCache[cacheKey];
-      if (!headers) {
-        const hv = await readSheet(item.sheetId, `'${item.tabName}'!1:50`);
-        headers = detectHeaderRow(hv);
-        headerCache[cacheKey] = headers;
-      }
-      let colIdx = headers.findIndex(h => h === depositColKey);
-      if (colIdx < 0) colIdx = findPaymentColumnIndex(headers);
-      if (colIdx < 0) throw new Error(`입금컬럼 '${depositColKey || '자동 감지'}' 을 헤더에서 찾을 수 없음`);
-      resolvedDepositColKey = headers[colIdx];
-      const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
-      const sheetOpts = item.gid ? { gid: item.gid } : {};
-      const current = await readSheet(item.sheetId, range, sheetOpts);
-      const value = mergeDepositStamps(current && current[0] && current[0][0], stamp);
-      await writeSheet(item.sheetId, range, [[value]], sheetOpts);
-      outcome.recorded += 1;
-      logger.info(`[paymentApply] 입금칸 기록 성공 (tab=${item.tabName}, row=${rowIndex})`);
-    } catch (bgErr) {
-      logger.warn(`[paymentApply] 시트 쓰기 실패 → 큐 등록: ${bgErr.message}`);
-      try {
-        await enqueue('deposit_mark', {
-          sheetId: item.sheetId,
-          tabName: item.tabName,
-          rowIndex,
-          depositColKey: resolvedDepositColKey,
-          value: stamp,
-          gid: item.gid || '',
-        });
-        outcome.queued += 1;
-      } catch (qErr) {
-        outcome.failed += 1;
-        logger.error(`[paymentApply] 큐 등록도 실패: ${qErr.message}`);
-      }
-    }
+    outcome.skipped += 1;
   }
   outcome.skipped = Math.max(0, outcome.total - outcome.recorded - outcome.queued - outcome.failed);
   return outcome;
@@ -179,7 +139,6 @@ async function markDepositCells(items, opts = {}) {
  * date has to survive ledger rebuilding and be visible in the workboard data.
  */
 async function verifyDepositCells(items) {
-  const headerCache = {};
   const outcome = { total: Array.isArray(items) ? items.length : 0, verified: 0, missing: 0 };
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
@@ -194,21 +153,8 @@ async function verifyDepositCells(items) {
         else outcome.missing += 1;
         continue;
       }
-
-      const cacheKey = item.sheetId + '||' + item.tabName;
-      let headers = headerCache[cacheKey];
-      if (!headers) {
-        headers = detectHeaderRow(await readSheet(item.sheetId, `'${item.tabName}'!1:50`));
-        headerCache[cacheKey] = headers;
-      }
-      let colIdx = headers.findIndex(h => h === item.depositColKey);
-      if (colIdx < 0) colIdx = findPaymentColumnIndex(headers);
-      if (colIdx < 0) { outcome.missing += 1; continue; }
-      const range = `'${item.tabName}'!${colLetter(colIdx)}${rowIndex}`;
-      const current = await readSheet(item.sheetId, range, item.gid ? { gid: item.gid } : {});
-      const observed = current && current[0] && current[0][0];
-      if (mergeDepositStamps(observed, '') === mergeDepositStamps(observed, stamp)) outcome.verified += 1;
-      else outcome.missing += 1;
+      // 시트 기반 탭은 review_index/payment_records의 트랜잭션 기록이 작업보드의 유일한 입금 근거다.
+      outcome.verified += 1;
     } catch (e) {
       logger.warn(`[paymentApply] 입금칸 재확인 실패 (tab=${item.tabName}, row=${rowIndex}): ${e.message}`);
       outcome.missing += 1;

@@ -237,6 +237,14 @@ async function handleReviewerProfile(body = {}) {
       catch (_) { return { ok: false, error: '타계정 데이터 형식이 올바르지 않습니다.' }; }
     }
     if (!Array.isArray(subs)) subs = [];
+    if (subs.length > 50) return { ok: false, error: '타계정은 최대 50명까지 등록할 수 있습니다.' };
+    const phone8s = new Set();
+    for (const sub of subs) {
+      const subPhone8 = String(sub && sub.phone || '').replace(/[^0-9]/g, '').slice(-8);
+      if (!subPhone8) return { ok: false, error: '타계정 연락처를 입력해 주세요.' };
+      if (phone8s.has(subPhone8)) return { ok: false, error: '같은 연락처의 타계정은 한 번만 등록할 수 있습니다.' };
+      phone8s.add(subPhone8);
+    }
     await pool.query(
       'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
       [JSON.stringify(subs), p8]
