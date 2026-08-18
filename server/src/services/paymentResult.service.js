@@ -293,6 +293,91 @@ async function getLatestResultPreview(batchId) {
   };
 }
 
+/* ── 회차 밖(미확인) 이체의 작업 대조 ────────────────────────
+   결과 파일에만 있는 행은 자동 입금 기록의 근거가 될 수 없다. 다만 관리자가
+   통장표시(메모)로 작업을 선택하면, 서버가 그 작업의 참여자와 기존 입금 원장을
+   다시 대조해 중복 이체 가능성을 보여 준다. 이 경로는 조회 전용이다. */
+function _unconfirmedMemo(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+async function searchUnconfirmedWorkCandidates({ query }) {
+  const q = String(query || '').trim();
+  if (q.length < 2) throw new ResultError('bad_request', '작업명 두 글자 이상을 입력해 주세요.');
+  const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+  const { rows } = await _db().query(
+    `SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
+            COALESCE(NULLIF(MAX(tc.label), ''), NULLIF(MAX(rc.title), ''), ri.tab_name) AS "label"
+       FROM review_index ri
+       LEFT JOIN tab_configs tc ON tc.sheet_id = ri.sheet_id AND tc.tab_name = ri.tab_name
+       LEFT JOIN recruit_campaigns rc
+         ON rc.linked_sheet_id = ri.sheet_id
+        AND (rc.linked_tab_name = ri.tab_name OR (NULLIF(rc.linked_tab_gid, '') IS NOT NULL AND rc.linked_tab_gid = ri.tab_gid))
+      WHERE ri.tab_name ILIKE $1 ESCAPE '\\'
+         OR COALESCE(tc.label, '') ILIKE $1 ESCAPE '\\'
+         OR COALESCE(rc.title, '') ILIKE $1 ESCAPE '\\'
+      GROUP BY ri.sheet_id, ri.tab_name
+      ORDER BY "label", ri.tab_name
+      LIMIT 30`, [like]);
+  return { ok: true, candidates: rows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, label: r.label || r.tabName })) };
+}
+
+async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName }) {
+  const normalizedMemo = _unconfirmedMemo(memo);
+  if (!batchId || !uploadId || !normalizedMemo || !sheetId || !tabName) {
+    throw new ResultError('bad_request', '회차·결과파일·통장표시·작업을 모두 선택해 주세요.');
+  }
+  const { rows: [upload] } = await _db().query(
+    `SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2`, [uploadId, batchId]);
+  const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
+  if (!Array.isArray(outside)) throw new ResultError('not_found', '저장된 미확인 이체 결과를 찾을 수 없습니다.');
+  const transfers = outside.filter(x => _unconfirmedMemo(x && x.memo) === normalizedMemo);
+  if (!transfers.length) throw new ResultError('not_found', '선택한 통장표시의 미확인 이체가 이 결과파일에 없습니다.');
+
+  const holders = [...new Set(transfers.map(x => String(x && x.holder || '').trim()).filter(Boolean))];
+  const { rows: participants } = holders.length ? await _db().query(
+    `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex",
+            EXISTS (
+              SELECT 1 FROM payment_records pr
+               WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name AND pr.row_index = ri.row_index
+            ) OR EXISTS (
+              SELECT 1 FROM payment_batch_items pi
+               WHERE pi.sheet_id = ri.sheet_id AND pi.tab_name = ri.tab_name AND pi.row_index = ri.row_index
+                 AND pi.status = 'paid'
+            ) AS "alreadyPaid"
+       FROM review_index ri
+      WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.reviewer_name = ANY($3::text[])
+      ORDER BY ri.reviewer_name, ri.row_index`, [sheetId, tabName, holders]) : [];
+  const byName = new Map();
+  for (const p of participants) {
+    const key = String(p.reviewerName || '');
+    const list = byName.get(key) || [];
+    list.push(p); byName.set(key, list);
+  }
+  const results = transfers.map(t => {
+    const matches = byName.get(String(t.holder || '').trim()) || [];
+    const paid = matches.filter(m => m.alreadyPaid === true);
+    const state = paid.length ? 'duplicate_payment'
+      : matches.length === 1 ? 'candidate_unpaid'
+      : matches.length ? 'ambiguous_participant' : 'participant_not_found';
+    return {
+      seq: t.seq, holder: t.holder || '', amount: t.amount, accountTail: t.accountTail || '', transferredAt: t.transferredAt || '',
+      state, participantCount: matches.length, alreadyPaidCount: paid.length,
+    };
+  });
+  return {
+    ok: true,
+    work: { sheetId, tabName }, memo: normalizedMemo,
+    results,
+    summary: {
+      duplicatePayment: results.filter(x => x.state === 'duplicate_payment').length,
+      candidateUnpaid: results.filter(x => x.state === 'candidate_unpaid').length,
+      ambiguous: results.filter(x => x.state === 'ambiguous_participant').length,
+      notFound: results.filter(x => x.state === 'participant_not_found').length,
+    },
+  };
+}
+
 /* ★★ 실패 안내 문구는 **여기 한 곳**(사용자 확정 ⑤ "등록한 계좌 정보를 확인해 주세요").
      ★ 은행 응답 원문(`result_status`)을 리뷰어에게 그대로 보내지 않는다 — 내부 표기이고,
        "예금주불일치" 같은 문구가 그대로 나가면 리뷰어가 무엇을 고쳐야 하는지 오히려 헷갈린다. */
@@ -702,4 +787,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };

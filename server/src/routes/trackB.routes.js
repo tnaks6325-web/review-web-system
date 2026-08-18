@@ -2835,6 +2835,23 @@ router.get('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMid
   catch (err) { _resultErr(err, res, next); }
 });
 
+// 회차 밖 이체는 절대 자동 입금 처리하지 않는다. 관리자가 통장표시로 작업을 찾고
+// 선택한 뒤, 참여자·기존 입금 이력을 조회해 중복입금 가능성만 확인한다.
+router.get('/payment/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await paymentResultSvc.searchUnconfirmedWorkCandidates({ query: req.query.q })); }
+  catch (err) { _resultErr(err, res, next); }
+});
+
+router.post('/payment/batch/:id/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await paymentResultSvc.inspectUnconfirmedWorkMatch({
+      batchId: req.params.id, uploadId: b.uploadId, memo: b.memo,
+      sheetId: b.sheetId, tabName: b.tabName,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
