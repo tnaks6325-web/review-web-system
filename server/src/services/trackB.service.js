@@ -2789,19 +2789,26 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
     // 진행일의 계획을 1건 늘리고, 같은 트랜잭션 안에 비어 있는 보충 슬롯을 만든다.
     // 내부 seq는 주문·리뷰 원장의 연결키이므로 재번호화하지 않는다. 화면의 #만
     // 표시 순번으로 계산해 1~총건수 범위를 유지한다.
+    // 여러 공고가 같은 작업표를 공유해도, 주문이 있는 참여행은 그 주문에 연결된
+    // campaign_application의 공고만 대상으로 삼는다. 주문 없는 빈/수동 행은 연결 공고가
+    // 정확히 하나일 때만 처리해 다른 공고의 마지막 날짜를 임의로 바꾸지 않는다.
     const { rows: scopes } = await client.query(
       `SELECT rc.id AS campaign_id
          FROM recruit_campaigns rc
          JOIN tab_configs tc ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
         WHERE rc.linked_sheet_id=$1 AND rc.linked_tab_name=$2
           AND rc.status IN ('draft','active') AND COALESCE(tc.sheetless,FALSE)=TRUE
+          AND ($3::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM campaign_applications ca
+             WHERE ca.campaign_id=rc.id AND ca.order_submission_id=$3::uuid
+          ))
         ORDER BY rc.updated_at DESC
         LIMIT 2
         FOR UPDATE`,
-      [sheetId, tabName]);
+      [sheetId, tabName, row.order_submission_id || null]);
     if (scopes.length !== 1) {
       await client.query('ROLLBACK');
-      return { ok: false, error: scopes.length ? 'ambiguous_campaign' : 'sheetless_campaign_not_found' };
+      return { ok: false, error: row.order_submission_id ? 'row_campaign_not_found' : (scopes.length ? 'ambiguous_campaign' : 'sheetless_campaign_not_found') };
     }
     const campaignId = scopes[0].campaign_id;
     const { rows: tabRows } = await client.query(
