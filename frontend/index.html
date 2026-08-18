@@ -255,11 +255,13 @@
     .c-meta { font-size:.69rem; font-weight:600; color:var(--t3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .c-meta .c-who { color:var(--t2); font-weight:700; }
     .c-meta .c-tail { color:var(--t4); font-weight:600; }
-    /* 오른쪽 상태 열: 배지+화살표 한 줄 / 완료 건의 입금완료는 그 아래 줄 */
+    /* 오른쪽 상태 열: 반영 상태 위, 제출기한 아래로 고정해 좁은 화면에서도 읽는다. */
     .result-right.rr-col { flex-direction:column; align-items:flex-end; gap:4px; }
     .result-right .rr-row { display:flex; align-items:center; gap:6px; }
+    .status-stack { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+    .status-badge-order.reflected { padding:5px 9px; }
     .c-name { font-size:.83rem; font-weight:700; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px; }
-    .fee-line { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; overflow:hidden; }
+    .fee-line { display:flex; align-items:center; gap:4px 6px; flex-wrap:wrap; overflow:visible; }
     .fee { font-size:.63rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; font-variant-numeric:tabular-nums; flex:none; }
     .fee.prod { background:#EEF2FF; color:#3730A3; }
     .fee.rev  { background:var(--ok-light); color:#065F46; }
@@ -1645,7 +1647,7 @@ function renderReviewSubTab() {
         ? '<span class="status-badge-submitted">제출완료</span>'
         : item.isOrderPending
           ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
-          : `<span class="status-badge-pending">${escHtml(_pendingBadgeText(item))}</span>`;
+          : '<span class="status-badge-order reflected">구매양식반영완료</span>';
       const subBadgeHtml = (isDone && item.isPaid) ? '<span class="status-badge-paid">입금완료</span>' : '';
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
@@ -1689,13 +1691,10 @@ function renderReviewSubTab() {
         const prodBadge = (fee.productPrice != null)
           ? `<span class="fee prod">상품비 ${_fnum(fee.productPrice)}</span>`
           : `<span class="fee unknown">상품비 조회안됨</span>`;
-        const reflectedBadge = _hasPurchaseFormReflected(item)
-          ? '<span class="fee reflected">구매양식 반영완료</span>'
-          : '';
         const revBadge = (fee.reviewFee > 0)
           ? `<span class="fee rev">리뷰비 ${_fnum(fee.reviewFee)}</span>`
           : '<span class="fee rev none">리뷰비 없음</span>';
-        feeLineHtml = `<div class="fee-line">${prodBadge}${reflectedBadge}${revBadge}</div>`;
+        feeLineHtml = `<div class="fee-line">${prodBadge}${revBadge}</div>`;
       }
       card.innerHTML = `
         <div class="camp-thumb">${thumbHtml}</div>
@@ -1706,8 +1705,10 @@ function renderReviewSubTab() {
         </div>
         <div class="result-right rr-col">
           <div class="rr-row">
-            ${deadlineHtml}
-            ${badgeHtml}
+            <div class="status-stack">
+              ${badgeHtml}
+              ${deadlineHtml}
+            </div>
             ${item.isOrderPending ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
           </div>
           ${deadline && deadline.notice ? `<div class="deadline-close-note">${deadline.notice}</div>` : ''}
