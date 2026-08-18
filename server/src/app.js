@@ -127,6 +127,23 @@ app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
 
+// 첫 무시트 구매양식 배포 구간에 원장만 남은 주문을 한 번 더 안전하게 인계한다.
+// 작업보드에 연결된 주문은 서비스 조회에서 제외되므로 재시작마다 실행돼도 비파괴·멱등이다.
+// Google Sheet/GAS는 전혀 호출하지 않는다. 멀티 인스턴스 경합은 DB job lock으로 직렬화한다.
+setImmediate(async () => {
+  try {
+    const { withJobLock } = require('./utils/jobLock');
+    const { recoverUnwrittenSheetlessOrders } = require('./services/sheetlessOrder.service');
+    await withJobLock('sheetless_worktable_recover', () => recoverUnwrittenSheetlessOrders({
+      limit: 1000,
+      by: 'startup-recovery',
+    }));
+  } catch (err) {
+    // 서비스 기동/사용자 요청은 막지 않고 Sentry·로그로만 남긴다.
+    console.error('[sheetless-worktable-recover] startup failed:', err.message);
+  }
+});
+
 // ── 단축링크 OG 프리뷰 (카카오톡/SNS 공유용) ──
 // /r/:code → 크롤러에게 동적 OG HTML, 일반 브라우저에게 프론트엔드 리다이렉트
 app.get('/r/:code', (req, res, next) => {
