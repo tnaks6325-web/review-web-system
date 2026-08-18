@@ -1806,6 +1806,7 @@
 .pm-unconfirmed-transfer:hover{border-color:#7FA7D4;background:#F6FAFF}.pm-unconfirmed-transfer.on{border-color:#3B82F6;background:#EFF6FF;box-shadow:inset 0 0 0 1px #3B82F6}
 .pm-unconfirmed-transfer b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-unconfirmed-transfer span{font-size:11px;color:var(--t3,#6B7280)}
 .pm-unconfirmed-compare-table{margin-top:10px}.pm-unconfirmed-compare-table th{font-size:11px}.pm-unconfirmed-compare-table td{font-size:12px}
+.pm-unconfirmed-two-row-table{margin-top:14px}.pm-unconfirmed-two-row-table tbody th{min-width:92px;background:#F8FAFC;font-size:11px}.pm-unconfirmed-two-row-table .pm-workboard-row td{background:#FFFDF5}.pm-unconfirmed-two-row-table .pm-transfer-row td{background:#F8FBFF}.pm-unconfirmed-actionbar{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid var(--line,#E1E5EB);border-radius:10px;background:#F8FAFC}.pm-unconfirmed-actionbar .muted{flex:1;font-size:12px}
 @media(max-width:680px){.pm-unconfirmed-listbox{grid-template-columns:1fr}.pm-unconfirmed-box{min-height:0}}
 .pmrft{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line,#E1E5EB);background:var(--bg,#F7F8FA)}
 .pmrsum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -7666,6 +7667,21 @@ function _pmSelectUnconfirmedMemo(i){
   _pmOpenUnconfirmedMatch(group.memo, Number(i));
 }
 
+async function _pmCompleteTestUnconfirmedMatch(){
+  const R=STATE.pmResult, groups=STATE.pmUnconfirmedGroups||[];
+  const index=Number(document.getElementById('pmUnconfirmedOv')?.dataset.groupIndex||0);
+  const transfer=(groups[index]&&groups[index].items||[])[0];
+  if(!R||!transfer||!R.preview?.uploadId) return;
+  if(!confirm('이 이체의 대조를 완료할까요?\n\n테섭 시드 회차에서는 실제 입금 기록을 만들지 않고 미확인 카드만 제거합니다.')) return;
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/test-unconfirmed-match',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,resultSeq:transfer.seq})});
+  if(!r||!r.ok){ toast((r&&r.error)||'미확인 이체를 제거하지 못했습니다.'); return; }
+  R.preview.unmatchedResults=(R.preview.unmatchedResults||[]).filter(x=>Number(x&&x.seq)!==Number(transfer.seq));
+  const nextGroups=groups.map(g=>({ ...g, items:(g.items||[]).filter(x=>Number(x&&x.seq)!==Number(transfer.seq)) })).filter(g=>g.items.length);
+  STATE.pmUnconfirmedGroups=nextGroups;
+  if(!nextGroups.length){ _pmUnconfirmedClose(); toast('대조를 완료했습니다. 미확인 이체가 없습니다.'); await _pmLoad(); return; }
+  _pmOpenUnconfirmedMatchList(Math.min(index,nextGroups.length-1));
+}
+
 async function _pmUnconfirmedInspect(i){
   const R=STATE.pmResult, st=STATE.pmUnconfirmed, el=document.getElementById('pmUnconfirmedOv');
   const c=st&&st.candidates&&st.candidates[i]; if(!R||!st||!c||!el) return;
@@ -7701,12 +7717,8 @@ function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   const groups=STATE.pmUnconfirmedGroups||[];
   const transfer=(groups[selectedGroupIndex]&&groups[selectedGroupIndex].items||[])[0]||{};
   const match=transfer.workboardMatch||null;
-  const workboardValue=match
-    ? `${match.tabName||'작업보드'} · ${match.rowNo||'—'}행 · ${match.reviewerName||'—'} · ${_pmNum(match.amount)}원 · 계좌끝 ${match.accountTail||'—'}`
-    : '연결된 작업보드가 없습니다.';
-  const transferValue=`${transfer.holder||'—'} · ${_pmNum(transfer.amount)}원 · 계좌끝 ${transfer.accountTail||'—'}`;
   const decision=match&&match.status ? match.status : '매칭 대기';
-  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택하면 연결된 작업보드값과 이체결과를 바로 비교합니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 연결값 확인</span></button>`).join('')}</div><div class="lgwrap pm-unconfirmed-compare-table pm-unconfirmed-direct-match"><table class="lgtable pmtable"><thead><tr><th>작업보드값</th><th>이체결과값</th><th>판정</th></tr></thead><tbody><tr><td>${esc(workboardValue)}</td><td>${esc(transferValue)}</td><td>${esc(decision)}</td></tr></tbody></table></div></div></div>`;
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택하면 연결된 작업보드값과 이체결과를 바로 비교합니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 연결값 확인</span></button>`).join('')}</div><div class="lgwrap pm-unconfirmed-compare-table pm-unconfirmed-direct-match"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th></tr></thead><tbody><tr class="pm-workboard-row"><th>작업보드값행</th><td>${esc(match?.tabName||'연결된 작업보드 없음')}</td><td>${esc(match?.rowNo||'—')}</td><td class="num">${_pmNum(match?.amount)}</td><td>${esc(match?.reviewerName||'—')}</td><td>…${esc(match?.accountTail||'—')}</td><td>${esc(decision)}</td></tr><tr class="pm-transfer-row"><th>이체결과값행</th><td>${esc(transfer.memo||'—')}</td><td>—</td><td class="num">${_pmNum(transfer.amount)}</td><td>${esc(transfer.holder||'—')}</td><td>…${esc(transfer.accountTail||'—')}</td><td>${esc(transfer.transferredAt||'—')}</td></tr></tbody></table></div>${match?`<div class="pm-unconfirmed-actionbar"><span class="muted">값을 확인한 뒤 대조 완료하면 이 미확인 카드가 즉시 제거됩니다.</span><button class="btn pri sm" onclick="_pmCompleteTestUnconfirmedMatch()">매칭 완료</button></div>`:''}</div></div>`;
   document.body.appendChild(el);
 }
 

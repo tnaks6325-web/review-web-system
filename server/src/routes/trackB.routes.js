@@ -2854,6 +2854,38 @@ router.post('/payment/test-seed-unconfirmed', authMiddleware, adminOrMasterMiddl
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// 테섭 시드 회차에서만 대조 완료한 미확인 이체를 목록에서 제외한다.
+// 실제 작업보드·입금 기록은 변경하지 않는다.
+router.post('/payment/batch/:id/test-unconfirmed-match', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  if (process.env.TEST_AUTO_LOGIN !== '1') return res.status(404).json({ ok: false, error: 'Not found' });
+  const b = req.body || {};
+  const resultSeq = Number(b.resultSeq);
+  if (!b.uploadId || !Number.isInteger(resultSeq)) return res.status(400).json({ ok: false, error: '대조할 이체 정보가 필요합니다.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [upload] } = await client.query(
+      `SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE`,
+      [b.uploadId, req.params.id]);
+    const preview = upload && upload.summary && upload.summary.preview;
+    const unmatched = Array.isArray(preview && preview.unmatchedResults) ? preview.unmatchedResults : [];
+    const remaining = unmatched.filter((x) => Number(x && x.seq) !== resultSeq);
+    if (!upload || remaining.length === unmatched.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: '미확인 이체를 찾지 못했습니다.' });
+    }
+    preview.unmatchedResults = remaining;
+    preview.summary = { ...(preview.summary || {}), unmatched: remaining.length };
+    const summary = { ...(upload.summary || {}), preview };
+    await client.query(`UPDATE payment_result_uploads SET summary = $2::jsonb WHERE id = $1`, [b.uploadId, JSON.stringify(summary)]);
+    await client.query('COMMIT');
+    res.json({ ok: true, remaining: remaining.length });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    _resultErr(err, res, next);
+  } finally { client.release(); }
+});
+
 router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
