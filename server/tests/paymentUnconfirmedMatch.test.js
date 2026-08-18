@@ -53,5 +53,10 @@ svc.__setPoolForTest({
   assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
   assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
   assert.match(workdesk, /position:absolute;z-index:3/);
+  assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
+  assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
+  const paymentService = fs.readFileSync(require.resolve('../src/services/payment.service.js'), 'utf8');
+  assert.match(paymentService, /resultUnconfirmedCount: unmatched\.length/);
+  assert.match(paymentService, /itemCount - resultSuccessCount/);
   console.log('payment unconfirmed work-match tests passed');
 })().finally(() => svc.__setPoolForTest(null));

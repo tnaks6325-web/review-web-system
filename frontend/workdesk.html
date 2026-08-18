@@ -7051,7 +7051,8 @@ function _pmTargetTable(items){
 
 function _pmBatchResult(b){
   if(!b.resultUploadId) return '<span class="pmauto">결과 파일 없음</span>';
-  return `<span style="white-space:nowrap;font-size:11.5px">${b.itemCount}건 업로드 · <b>${b.resultSuccessCount||0}건 성공</b> · <b>${b.resultFailedCount||0}건 실패</b></span>`;
+  const unconfirmed=Number(b.resultUnconfirmedCount||0);
+  return `<span style="display:inline-flex;flex-wrap:wrap;gap:4px 7px;font-size:11.5px;line-height:1.6"><span>${b.itemCount}건 업로드</span><b style="color:#167450">${b.resultSuccessCount||0}건 성공</b><b style="color:#B24A3A">${b.resultFailedCount||0}건 실패</b>${unconfirmed?`<b style="color:#A66A10">미확인 ${unconfirmed}건</b>`:''}</span>`;
 }
 function _pmBatchWorkboard(b){
   const recorded = b.boardRecordedCount||0;
@@ -7086,7 +7087,9 @@ function _pmBatchActions(b,i){
     : '';
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
-  return manage + result + resultUpload;
+  const unconfirmed=Number(b.resultUnconfirmedCount||0);
+  const unconfirmedAction=unconfirmed ? `<button class="btn sm" style="color:#9A6108;border-color:#E5BF79;background:#FFF9ED" onclick="_pmOpenBatchUnconfirmed(${i})">미확인 ${unconfirmed}건 조치</button>` : '';
+  return manage + result + unconfirmedAction + resultUpload;
 }
 function _pmBatchTable(list){
   if(!list.length) return `<div class="empty">아직 만든 회차가 없습니다.</div>`;
@@ -7548,6 +7551,25 @@ async function _pmOpenResult(i){
   STATE.pmResult = { batch:b, file:{ name:r.fileName||'결과 파일' }, preview:r, persisted:true };
   _pmResultModal();
 }
+
+async function _pmOpenBatchUnconfirmed(i){
+  const b=(STATE.pmBatches||[])[i]; if(!b) return;
+  toast('미확인 이체를 불러오는 중…');
+  const r=await api('/api/trackb/payment/batch/'+b.id+'/result-preview');
+  if(!r||!r.ok){ toast((r&&r.error)||'이체결과를 불러오지 못했습니다'); return; }
+  const outside=Array.isArray(r.unmatchedResults)?r.unmatchedResults:[];
+  if(!outside.length){ toast('이 회차에 미확인 이체가 없습니다.'); return; }
+  STATE.pmResult={ batch:b, file:{name:r.fileName||'결과 파일'}, preview:r, persisted:true };
+  const groups=Object.values(outside.reduce((acc,x)=>{
+    const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
+    (acc[memo]||(acc[memo]=[])).push(x); return acc;
+  },{}));
+  const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedGroupsOv';
+  el.innerHTML=`<div class="pmrbox" style="max-width:620px"><div class="pmrhd"><h3>미확인 이체 ${outside.length}건</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedGroupsClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">통장표시가 같은 이체를 한 작업 묶음으로 대조합니다. 묶음을 선택해 매칭할 작업을 검색하세요.</div><div style="display:grid;gap:8px;margin-top:12px">${groups.map(g=>{const memo=String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음';return `<button class="btn" style="display:flex;justify-content:space-between;gap:12px;padding:11px 12px;text-align:left" onclick="_pmOpenBatchUnconfirmedMemo(${JSON.stringify(memo)})"><b>${esc(memo)}</b><span class="muted">${g.length}건 · 작업 검색</span></button>`;}).join('')}</div></div></div>`;
+  document.body.appendChild(el);
+}
+function _pmUnconfirmedGroupsClose(){ const el=document.getElementById('pmUnconfirmedGroupsOv'); if(el) el.remove(); }
+function _pmOpenBatchUnconfirmedMemo(memo){ _pmUnconfirmedGroupsClose(); _pmOpenUnconfirmedMatch(memo); }
 
 function _pmFileB64(file){
   return new Promise((res,rej)=>{
