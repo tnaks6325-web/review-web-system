@@ -40,8 +40,9 @@ ok('★ 주 줄 직접 버튼 = 3개(수정·관제·⋯) + ${viewBtn} 보간 1 
 ok('★ 주 줄에 시트·인원조절·리뷰어게이트 버튼이 없다(전부 [⋯] 안으로)',
   !/sheetBtn/.test(actHtml) && !/planBtn/.test(actHtml) && !/gateBtn/.test(actHtml));
 ok('[⋯] 버튼이 주 줄 마지막(게시 토글 앞)', /class="uic more"[\s\S]*\$\{pubToggle\}/.test(actHtml));
-ok('메뉴 항목은 sheet·plan·gate 셋을 모은다',
-  /_ACT_MORE\[c\.id\] = \[sheetBtn, planBtn, gateBtn\]\.filter\(Boolean\)\.join\(''\)/.test(cc));
+ok('메뉴 항목은 인원조절·리뷰어게이트만 모은다(시트 열기 제거)',
+  /_ACT_MORE\[c\.id\] = \[planBtn, gateBtn\]\.filter\(Boolean\)\.join\(''\)/.test(cc)
+  && !/sheetBtn/.test(cc));
 
 // ⑤ 관제 배지는 주 줄에
 ok('★ 관제 빨간 배지(지각)는 주 줄에 남는다(목록에서 바로 보여야 한다)',
@@ -55,12 +56,10 @@ ok('주 줄 라벨은 <span class="lbl"> 로 감싼다(수정·관제 + 보기 2
 ok('[⋯] 는 고정 폭(글자 폭을 안 먹는다)', /\.pcard \.uic\.more\{[^}]*flex:0 0 auto[^}]*width:\d+px/.test(cc));
 
 /* ── 메뉴 항목: 좁은 칸이 아니라 메뉴라 이름을 온전히 쓴다 ── */
-ok('메뉴 항목 3종이 온전한 이름을 쓴다',
-  /📄 연결된 시트 열기/.test(cc) && /📅 날짜별 인원 조절/.test(cc) && /🚫 참여 리뷰어 관리/.test(cc));
-ok('시트 없음·무시트도 사유를 말한다(조용한 누락 금지)',
-  /🗒 무시트 작업 \(시트 없음\)/.test(cc) && /📄 연결된 시트 없음/.test(cc));
+ok('메뉴 항목은 인원조절·리뷰어 관리 2종만 표시한다',
+  !/연결된 시트 열기/.test(cc) && /📅 날짜별 인원 조절/.test(cc) && /🚫 참여 리뷰어 관리/.test(cc));
 ok('메뉴 항목 클래스는 .pcmi (주 줄 .uic 와 분리)',
-  (cc.match(/class="pcmi"/g) || []).length >= 3 && /\.pcmenu \.pcmi\{/.test(cc));
+  (cc.match(/class="pcmi"/g) || []).length >= 2 && /\.pcmenu \.pcmi\{/.test(cc));
 
 /* ── ② body 직속 + 테마 무의존 ── */
 ok('★ 메뉴는 body 직속으로 붙인다(.pcard overflow:hidden 에 안 잘리게)',

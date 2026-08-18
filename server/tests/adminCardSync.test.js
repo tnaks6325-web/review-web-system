@@ -95,16 +95,13 @@ ok('인기 토글은 목록 재요청 없이 현재 카드만 즉시 반영한�
   && !/await loadRecruitList\(\);/.test(rec.slice(rec.indexOf('async function toggleCampFlag'), rec.indexOf('async function toggleCampFlag') + 1200)));
 
 /* ── 삭제 모드 ── */
-ok('카드에는 삭제 버튼이 없다(액션 = 수정·시트·관제·게시)',
+ok('카드에는 삭제 버튼이 없다(액션 = 수정·보기·관제·게시)',
   !/deleteRecruitPost/.test(cc));
-// 시트 열기는 유지하고, ★ 2026-08-05 사용자 요청으로 [👁 보기]
-// (리뷰어 화면 미리보기 — 마감·투입완료 공고의 현영 안내 확인용)가 다시 추가됐다.
-// ⚠ 2026-08-07 시안 C 적용으로 시트 열기는 주 줄 → [⋯] 메뉴 항목(`📄 연결된 시트 열기`)으로
-//   자리를 옮겼다(검사 의미 불변 — 여전히 같은 URL 을 새 창으로 연다).
-ok('관리자 카드 액션 = 시트 열기 + 👁 리뷰어 화면 보기(마감 공고 포함)',
-  /📄 연결된 시트 열기/.test(cc)
-  && /window\.open\('\$\{_esc\(sheetUrl\)\}'/.test(cc)
-  && /docs\.google\.com\/spreadsheets\/d\//.test(cc)
+// 무시트 운영 전환: 카드 메뉴에서 외부 구글시트를 여는 기능은 제거하고,
+// 리뷰어 화면 미리보기와 내부 운영 메뉴만 남긴다.
+ok('관리자 카드 액션 = 시트 열기 제거 + 👁 리뷰어 화면 보기 유지',
+  !/연결된 시트 열기/.test(cc)
+  && !/docs\.google\.com\/spreadsheets\/d\//.test(cc)
   && /openReviewerPreview\('\$\{id\}'\)/.test(cc));
 ok('삭제는 헤더 삭제 모드로 분리', /toggleRecruitDelMode/.test(rec) && /recruitDelModeBtn/.test(adm));
 ok('삭제 모드일 때만 선택 오버레이', /delMode\s*\n?\s*\? `<div class="pdelpick"/.test(cc));

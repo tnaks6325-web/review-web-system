@@ -10,7 +10,6 @@
 
   // 무시트 작업(탈 구글시트)의 가상 시트ID 접두. 단일 출처 = 서버 sheetlessAccept.VIRTUAL_SHEET_PREFIX
   //   — 최소 사본이고 회귀가드가 두 값의 일치를 고정한다(workManager 사본 규율).
-  const _VIRTUAL_SHEET_PREFIX = 'wt_';
 
   let _serverOffsetMs = 0;          // serverNow - Date.now()
   let _tickTimer = null;
@@ -435,18 +434,6 @@
     const pubToggle = (c.status === 'closed')
       ? '<span class="ppub">마감</span>'
       : `<span class="ppub">게시<span class="psw${on ? '' : ' off'}" onclick="${stop}toggleRecruitPublish('${id}',${on ? 'false' : 'true'},this)"></span></span>`;
-    // 연결된 구글시트로 이동하는 버튼(리뷰어 화면 미리보기 버튼 대체).
-    //   sheetId 없으면 비활성(연결 탭 없는 공고 = 이동 대상 없음).
-    //   ★ 무시트 작업(탈 구글시트 W1~)은 가상 시트ID(wt_…)라 구글 URL 을 만들면 죽은 링크가 된다
-    //     → 비활성 + 사유. 판정 문자열은 서버 sheetlessAccept.VIRTUAL_SHEET_PREFIX 와 같아야 하고
-    //     회귀가드가 두 값의 일치를 고정한다(workManager 사본 규율).
-    const sid = c.linked_sheet_id || '';
-    const gid = c.linked_tab_gid || '';
-    const sheetless = sid.indexOf(_VIRTUAL_SHEET_PREFIX) === 0;
-    const sheetUrl = (sid && !sheetless) ? ('https://docs.google.com/spreadsheets/d/' + sid + '/edit' + (gid ? '#gid=' + gid : '')) : '';
-    const sheetBtn = sheetUrl
-      ? `<button type="button" class="pcmi" onclick="${stop}window.open('${_esc(sheetUrl)}','_blank','noopener')" title="연결된 구글시트 열기">📄 연결된 시트 열기</button>`
-      : `<button type="button" class="pcmi" disabled title="${sheetless ? '무시트 작업입니다 — 구글시트를 쓰지 않습니다' : '연결된 시트가 없습니다'}">${sheetless ? '🗒 무시트 작업 (시트 없음)' : '📄 연결된 시트 없음'}</button>`;
     // 🚫 참여 리뷰어(공고별 블랙리스트 건별 관리, 091) — apply 게이트가 있는 참여형만 의미가 있다
     //   (레거시는 카톡 신청이라 차단 지점이 없음). 모듈 미로드 화면(리뷰어 홈 등)에는 버튼을 안 그린다.
     const gateBtn = (c.participation_mode && typeof window !== 'undefined' && window.ReviewerGate)
@@ -469,13 +456,13 @@
     //   토글 57px 고정 → 버튼 하나에 27px 인데 글자는 35~48px 필요 = 6개 전부 넘침).
     //   ★ 버튼이 더 늘어도 [⋯] 안으로 들어가므로 **같은 방식으로 다시 깨지지 않는다**.
     //   ★ 관제의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
-    _ACT_MORE[c.id] = [sheetBtn, planBtn, gateBtn].filter(Boolean).join('');
+    _ACT_MORE[c.id] = [planBtn, gateBtn].filter(Boolean).join('');
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')"><span class="lbl">✏️ 수정</span></button>
       ${viewBtn}
       <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')"><span class="lbl">📡 관제</span>${bdg}</button>
       <button type="button" class="uic more" onclick="${stop}CampCards._more('${id}',this)"
-        title="더보기 — 시트 열기 · 날짜별 인원 조절 · 참여 리뷰어 관리">⋯</button>
+        title="더보기 — 날짜별 인원 조절 · 참여 리뷰어 관리">⋯</button>
       ${pubToggle}
     </div>`;
   }
