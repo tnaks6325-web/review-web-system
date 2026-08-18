@@ -24,6 +24,7 @@ assert.doesNotMatch(block, /SET deleted_at=NOW/, '참여행을 논리삭제로 �
 assert.match(block, /planned_count=planned_count\+1/, '행 삭제가 날짜별 모집 총량을 줄이지 않고 마지막 계획에 1건을 보충한다');
 assert.match(block, /INSERT INTO campaign_participants[\s\S]*?'worktable'/, '삭제한 자리 대신 마지막 진행일의 빈 작업표 슬롯을 실제 생성한다');
 assert.match(block, /participant_delete_replenish/, '총량 보충은 모집계획 이력에도 남긴다');
+assert.match(block, /ca\.campaign_id=rc\.id AND ca\.order_submission_id=\$3::uuid/, '여러 공고가 같은 작업표를 써도 삭제 행의 주문이 연결된 공고만 고른다');
 assert.match(block, /DELETE FROM participation_links[\s\S]*?sheet_id=\$1 AND tab_name=\$2 AND row_index=\$3/, '삭제한 정확한 행의 신원 링크만 제거한다');
 assert.match(block, /WHERE order_submission_id=\$1::uuid AND status IN \('applied','submitted'\)/, '연결된 구매양식의 참여상태만 취소한다');
 assert.doesNotMatch(block, /DELETE FROM order_submissions/, '주문 원장은 감사용으로 보존한다');
@@ -91,6 +92,8 @@ test('가상 삭제: 참여기록을 실제 삭제해도 마지막 진행일에 
     assert.deepEqual(plan.params.slice(0, 2), ['camp-1', '2026-08-21'], '마지막 날짜의 계획만 1건 늘린다');
     const sourcePlan = calls.find(c => /INSERT INTO campaign_daily_plans/.test(c.sql));
     assert.deepEqual(sourcePlan.params.slice(0, 3), ['camp-1', '2026-08-18', 29], '삭제된 날짜는 1건 줄여 계획 총량이 증가하지 않는다');
+    const scope = calls.find(c => /FROM recruit_campaigns rc/.test(c.sql));
+    assert.deepEqual(scope.params, ['sheet-a', '작업A', '00000000-0000-0000-0000-000000000001'], '계획 이동 대상은 삭제한 행의 주문으로 연결된 공고로 한정한다');
     assert.deepEqual(ledgerArgs, { sheetId: 'sheet-a', tabName: '작업A', by: 'participant-delete:virtual-test' }, '삭제 뒤 작업표 장부도 다시 만든다');
     assert.ok(calls.some(c => /^COMMIT$/.test(c.sql)), '모든 해제가 완료된 뒤 커밋한다');
   } finally {
