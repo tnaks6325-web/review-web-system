@@ -30,13 +30,17 @@ test('embedded purchase form opens and submits without sheet parameters', () => 
     'legacy GAS URL configuration must not block API-based submission');
 });
 
-test('server uses a DB-only campaign scope for every reviewer campaign', () => {
+test('server uses a DB-only campaign scope and writes the verified order to the DB worktable', () => {
   assert.ok(/async function _resolveCampaignOrderScope/.test(submit), 'server-owned campaign scope resolver is missing');
   assert.ok(/sheetless: true/.test(submit), 'DB-only campaign branch is missing');
   assert.ok(/skipSheetMirror: orderScope\.sheetless/.test(submit), 'sheetless submissions must skip Google Sheet mirroring');
   assert.ok(/if \(!orderScope\) \{[\s\S]*?참여 문맥/.test(submit), 'anonymous sheetless submission must remain blocked');
   assert.ok(/if \(skipSheetMirror\) \{[\s\S]*?mirror_status = 'written'/.test(ledger),
     'DB-only submission must finish without row claim or sync queue');
+  assert.ok(/linked_sheet_id, linked_tab_name, linked_tab_gid/.test(submit),
+    'verified campaign must resolve its DB worktable key');
+  assert.ok(/orderScope\.worktable/.test(submit) && /writeOrderToWorktable/.test(submit),
+    'DB-only submission must be written to the worktable, not only the order ledger');
 });
 
 test('campaign confirmation can explicitly bypass old sheet binding after server hold verification', () => {
