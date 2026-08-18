@@ -7565,6 +7565,43 @@ function _pmFileB64(file){
 
 const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:'결과없음', already_paid:'이미 입금' };
 
+function _pmUnconfirmedClose(){ const el=document.getElementById('pmUnconfirmedOv'); if(el) el.remove(); }
+
+async function _pmUnconfirmedSearch(){
+  const R=STATE.pmResult, el=document.getElementById('pmUnconfirmedOv');
+  if(!R || !el) return;
+  const q=String(document.getElementById('pmUnconfirmedQuery')?.value||'').trim();
+  if(q.length<2){ toast('작업명을 두 글자 이상 입력해 주세요.'); return; }
+  const out=document.getElementById('pmUnconfirmedCandidates');
+  out.innerHTML='<div class="muted" style="padding:10px">작업을 찾는 중…</div>';
+  const r=await api('/api/trackb/payment/unconfirmed-work-search?q='+encodeURIComponent(q));
+  if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'작업을 찾지 못했습니다.')}</div>`; return; }
+  const memo=String(el.dataset.memo||'');
+  out.innerHTML=(r.candidates||[]).length ? r.candidates.map((x,i)=>`<button class="btn" style="display:block;width:100%;text-align:left;margin:6px 0" onclick="_pmUnconfirmedInspect(${i})">${esc(x.label||x.tabName)}</button>`).join('') : '<div class="muted" style="padding:10px">검색 결과가 없습니다.</div>';
+  STATE.pmUnconfirmed={ memo, candidates:r.candidates||[] };
+}
+
+async function _pmUnconfirmedInspect(i){
+  const R=STATE.pmResult, st=STATE.pmUnconfirmed, el=document.getElementById('pmUnconfirmedOv');
+  const c=st&&st.candidates&&st.candidates[i]; if(!R||!st||!c||!el) return;
+  const out=document.getElementById('pmUnconfirmedCandidates');
+  out.innerHTML='<div class="muted" style="padding:10px">참여·입금 이력을 대조하는 중…</div>';
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/unconfirmed-work-inspect',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,memo:st.memo,sheetId:c.sheetId,tabName:c.tabName})});
+  if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'대조하지 못했습니다.')}</div>`; return; }
+  const label=esc(c.label||c.tabName);
+  const state={duplicate_payment:'중복입금 발견',candidate_unpaid:'입금이력 없음',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인'};
+  out.innerHTML=`<div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C"><b>${label}</b> 대조 결과입니다. 선택만으로 입금완료 기록은 생성되지 않습니다.</div><div class="lgwrap"><table class="lgtable pmtable"><thead><tr><th>수취인</th><th>금액</th><th>판정</th></tr></thead><tbody>${(r.results||[]).map(x=>`<tr><td>${esc(x.holder||'—')}</td><td class="num">${_pmNum(x.amount)}</td><td>${esc(state[x.state]||x.state)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function _pmOpenUnconfirmedMatch(memo){
+  const R=STATE.pmResult; if(!R || !R.preview || !R.preview.uploadId) return;
+  _pmUnconfirmedClose();
+  const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo;
+  el.innerHTML=`<div class="pmrbox" style="max-width:720px"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote"><b>${esc(memo)}</b> 동일 통장표시 이체를 한 작업 묶음으로 보고 대조합니다. 작업을 선택하면 같은 이름의 참여자와 기존 입금 기록을 확인합니다.</div><div style="display:flex;gap:8px;margin:12px 0"><input id="pmUnconfirmedQuery" class="inp" style="flex:1" value="${esc(memo)}" placeholder="작업명 검색"><button class="btn primary" onclick="_pmUnconfirmedSearch()">검색</button></div><div id="pmUnconfirmedCandidates"></div></div></div>`;
+  document.body.appendChild(el);
+  document.getElementById('pmUnconfirmedQuery').focus();
+}
+
 function _pmResultModal(){
   const R = STATE.pmResult; if(!R) return;
   const p = R.preview, s = p.summary || {};
@@ -7602,11 +7639,12 @@ function _pmResultModal(){
   const ur = outside.length
     ? `<div class="pmnote">⚠ <b>이 회차에 없는 결과 ${outside.length}건</b>도 아래에 모두 표시합니다. 이 회차에는 반영하지 않으며, 매칭된 성공 건은 정상 반영됩니다.</div>`
     : '';
-  const outsideRows = outside.map(it=>`<tr>
-    <td><span class="pmoc not_in_file">회차 외</span></td>
+  const outsideGroups = outside.reduce((m,it)=>{ const k=String(it.memo||'미표기'); (m[k]||(m[k]=[])).push(it); return m; },{});
+  const outsideRows = Object.entries(outsideGroups).map(([memo,items])=>{ const memoArg=esc(JSON.stringify(memo)); return `<tr><td colspan="8" style="background:#FFF9EF;padding:8px 10px"><b>미확인 이체 · ${esc(memo)}</b> <span class="muted">${items.length}건</span><button class="btn xs" style="float:right" onclick="_pmOpenUnconfirmedMatch(${memoArg})">작업 검색·대조</button></td></tr>${items.map(it=>`<tr>
+    <td><span class="pmoc not_in_file">미확인 이체</span></td>
     <td>${esc(it.memo||'—')}</td><td>—</td><td class="num">${_pmNum(it.amount)}</td>
     <td class="mono">…${esc(it.accountTail||'')}</td><td>${esc(it.holder||'')}</td>
-    <td class="mono">${esc(it.transferredAt||'-')}</td><td>${esc(it.status||'')}</td></tr>`).join('');
+    <td class="mono">${esc(it.transferredAt||'-')}</td><td>${esc(it.status||'')}</td></tr>`).join('')}`; }).join('');
 
   const el = document.createElement('div');
   el.className='pmrov'; el.id='pmResultOv';
