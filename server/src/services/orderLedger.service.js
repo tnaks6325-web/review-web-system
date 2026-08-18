@@ -748,6 +748,7 @@ async function createOrderLedgerEntry(input) {
   const {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
+    skipSheetMirror = false,
     campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
     sameDayDuplicateGuard, // 구매양식의 오늘 동일 제출 차단(선택 입력)
   } = input;
@@ -859,6 +860,27 @@ async function createOrderLedgerEntry(input) {
   }
 
   if (duplicateOrderSubmissionId) return { duplicateOrderSubmissionId };
+
+  // 탈시트 구매양식: 주문원장과 홀드 확정까지만 같은 트랜잭션으로 남긴다.
+  // 이후 RAW 행 배정·시트 동기화 큐는 실행하지 않는다.
+  if (skipSheetMirror) {
+    await db.query(
+      `UPDATE order_submissions
+          SET mirror_status = 'written', sheet_error = NULL
+        WHERE id = $1`,
+      [orderSubmissionId]
+    );
+    return {
+      orderSubmissionId,
+      dedupKey,
+      sheetRow: null,
+      claim: { row: null, error: 'db_only' },
+      tabContext: null,
+      tabGid: gid || '',
+      headers: [],
+      holdResult,
+    };
+  }
 
   let tabContext = null;
   let claim = { row: null, error: 'not_attempted' };
