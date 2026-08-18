@@ -309,7 +309,8 @@ function _reconciliationName(value) {
 }
 
 /**
- * 계좌가 바뀐 실제 이체 결과는 자동 반영하지 않는다. 같은 회차의 결과파일 누락 실패 항목 중
+ * 계좌가 바뀐 실제 이체 결과는 자동 반영하지 않는다. 같은 회차의 결과파일 누락 실패 또는
+ * 자동반영 전 pending 항목 중
  * 이름(괄호 설명 제외)과 금액이 정확히 하나만 맞을 때에만 관리자 확인용 후보로 제시한다.
  */
 function findAccountMismatchCandidates({ transfers, items }) {
@@ -319,8 +320,8 @@ function findAccountMismatchCandidates({ transfers, items }) {
     const holder = _reconciliationName(transfer.holder);
     if (!holder) continue;
     const matches = (items || []).filter(item =>
-      item && item.status === 'failed'
-      && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')
+      item && (item.status === 'pending'
+        || (item.status === 'failed' && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')))
       && Number(item.amount) === Number(transfer.amount)
       && _reconciliationName(item.reviewerName) === holder);
     if (matches.length !== 1) continue;
@@ -463,9 +464,9 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
       `UPDATE payment_batch_items
           SET status = 'paid', paid_at = COALESCE($2::timestamptz, NOW()), result_status = '관리자 확인: 계좌 불일치 이체완료',
               result_seq = $3, fail_reason = NULL
-        WHERE id = $1 AND status = 'failed' AND result_status = '결과 파일에 없음'`,
+        WHERE id = $1 AND (status = 'pending' OR (status = 'failed' AND result_status = '결과 파일에 없음'))`,
       [itemId, paidAt, Number(resultSeq)]);
-    if (!updated.rowCount) throw new ResultError('not_eligible', '결과 파일 누락으로 실패 처리된 미입금 항목만 대조할 수 있습니다.');
+    if (!updated.rowCount) throw new ResultError('not_eligible', '대기 또는 결과 파일 누락 실패 처리된 미입금 항목만 대조할 수 있습니다.');
     const preview = (upload.summary && upload.summary.preview) || {};
     const oldSummary = preview.summary || {};
     const nextItems = Array.isArray(preview.items) ? preview.items.map(entry => {
