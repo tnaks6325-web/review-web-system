@@ -18,6 +18,7 @@ svc.__setPoolForTest({
       return { rows: [{ summary: { preview: { unmatchedResults: outside } } }] };
     }
     if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) {
+      assert.match(sql, /ri\.is_submitted2 = 'PAID'/);
       return { rows: [
         { reviewerName: '리뷰어A', rowIndex: 5, alreadyPaid: true },
         { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false },

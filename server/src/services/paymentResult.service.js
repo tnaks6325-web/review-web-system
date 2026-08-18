@@ -337,7 +337,7 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
   const holders = [...new Set(transfers.map(x => String(x && x.holder || '').trim()).filter(Boolean))];
   const { rows: participants } = holders.length ? await _db().query(
     `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex",
-            EXISTS (
+            ri.is_submitted2 = 'PAID' OR EXISTS (
               SELECT 1 FROM payment_records pr
                WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name AND pr.row_index = ri.row_index
             ) OR EXISTS (
