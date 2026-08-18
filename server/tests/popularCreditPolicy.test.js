@@ -8,12 +8,13 @@ const routes = read('server/src/routes/campaign.routes.js');
 const cards = read('frontend/js/campaign-cards.js');
 const recruit = read('frontend/js/index-recruit.js');
 const campaign = read('frontend/campaign.html');
+const creditService = read('server/src/services/popularCredit.service.js');
 const apply = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
 
-assert(routes.includes('normal_done'), 'popular policy must calculate completed normal campaigns');
-assert(routes.includes('popular_used'), 'popular policy must consume submitted or active popular holds');
-assert(apply.includes('_popularCreditState(client, holdP8)'), 'popular apply must use the shared credit calculation');
+assert(creditService.includes('normal_done'), 'popular policy must calculate completed normal campaigns');
+assert(creditService.includes('popular_used'), 'popular policy must consume submitted or active popular holds');
+assert(apply.includes('loadPopularCreditState(client, holdP8)'), 'popular apply must use the shared credit calculation');
 assert(!apply.includes('campaign_popular_prerequisites'), 'legacy prerequisite queue must not gate popular participation');
 assert(!apply.includes('_currentPopularPrerequisite'), 'popular apply must not select a required normal campaign');
 assert(!flags.includes('campaign_popular_prerequisites'), 'popular flag setting must not write a prerequisite queue');

@@ -36,6 +36,7 @@ const { weekendPublicationState } = require('../services/campaignWeekend.service
 const { isPostUrl, BLOG_URL_HINT } = require('../utils/blogPostUrl');
 const { workKindForTab: tabWorkKind } = require('../services/workKindContext.service');
 const { syncCampaignRecruitTotal, displayRecruitTotalForCampaign, assertCampaignRecruitTotal } = require('../services/linkedRecruitQuota.service');
+const { loadPopularCreditState, canUsePopularCredit } = require('../services/popularCredit.service');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -833,25 +834,6 @@ router.get('/list', async (req, res, next) => {
   }
 });
 
-/**
- * 인기공고의 현재 선행참여 대상.
- * priority 순서대로 보되, 해당 명의가 구매양식을 제출완료했거나 모집이 마감·총원충족된
- * 일반 모집의 구매양식 제출완료 1건은 인기상품 참여 1회에만 사용한다.
- * 기존 선행우선순위 테이블은 보존하지만 이 정책의 판정에는 사용하지 않는다.
- */
-async function _popularCreditState(db, reviewerPhone8) {
-  const { rows } = await db.query(
-    `SELECT
-       COUNT(*) FILTER (WHERE rc.is_popular IS NOT TRUE AND ca.status = 'submitted') AS normal_done,
-       COUNT(*) FILTER (WHERE rc.is_popular IS TRUE AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))) AS popular_used
-     FROM campaign_applications ca
-     JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-    WHERE ca.phone8 = $1 AND rc.participation_mode`, [reviewerPhone8]);
-  const normalDone = Number(rows[0].normal_done) || 0;
-  const popularUsed = Number(rows[0].popular_used) || 0;
-  return { normalDone, popularUsed, credits: Math.max(0, normalDone - popularUsed) };
-}
-
 // GET /api/campaign/popular-status?phone8= — 인기상품 참여 가능 여부(무인증 phone8 스코프, 064)
 //   apply의 popular_locked 게이트와 **동일 계산**(명의 기준): 크레딧 = 일반(비인기) 참여형 제출완료 수
 //   − 인기 소비(제출확정 + 유효홀드). 만료·취소된 인기 건은 자동 환불(미계수).
@@ -860,7 +842,7 @@ router.get('/popular-status', applyLimiter, async (req, res, next) => {
   try {
     const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
     if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
-    res.json({ ok: true, ...(await _popularCreditState(pool, p8)) });
+    res.json({ ok: true, ...(await loadPopularCreditState(pool, p8)) });
   } catch (err) {
     next(err);
   }
@@ -1432,10 +1414,10 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ 인기상품 참여권: 동일 명의의 일반 모집 제출완료 1건당 인기상품 1건을 허용한다.
     //   기존 선행우선순위 데이터는 삭제하지 않고 무시해 롤백 가능성을 보존한다.
     if (camp.is_popular === true) {
-      const { normalDone, popularUsed, credits } = await _popularCreditState(client, holdP8);
-      if (credits < 1) {
+      const creditState = await loadPopularCreditState(client, holdP8);
+      if (!canUsePopularCredit(creditState)) {
         await client.query('ROLLBACK');
-        return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone, popularUsed,
+        return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone: creditState.normalDone, popularUsed: creditState.popularUsed,
           error: '인기 상품은 일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
       }
     }
