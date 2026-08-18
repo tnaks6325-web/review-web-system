@@ -1186,8 +1186,9 @@ router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, a
 // 대상·빈 슬롯은 서버가 다시 검증하므로 클라이언트가 번호를 지정하거나 이미 채워진 행을 덮을 수 없다.
 router.post('/workdesk/assign-unslotted-order', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, rowId } = req.body || {};
+    const { sheetId, tabName, rowId, confirm } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    if (confirm !== true) return res.status(400).json({ ok: false, error: 'need_confirm' });
     const out = await svc.assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by: _by(req) });
     const code = out.ok ? 200 : (out.error === 'no_open_slot' ? 409 : 400);
     res.status(code).json(out);
