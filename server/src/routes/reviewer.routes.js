@@ -418,6 +418,7 @@ router.get('/review-earnings', async (req, res, next) => {
     const { rows: riRows } = await pool.query(
       `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex",
               is_submitted AS "isSubmitted", start_date AS "startDate",
+              row_json AS "rowJson",
               (is_submitted2 = 'PAID' OR EXISTS (
                  SELECT 1 FROM jsonb_each_text(COALESCE(row_json, '{}'::jsonb)) kv
                   WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
@@ -529,7 +530,7 @@ router.get('/review-earnings', async (req, res, next) => {
       const tk = r.sheetId + '||' + r.tabName;
       const camp = campMap[tk] || {};
       const pk = tk + '||' + r.rowIndex;
-      const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : null;
+      const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : extractAmountNumber(r.rowJson);
       // ★★ 082: 리뷰비는 **그 건의 참여 시점** 기준 — 공고의 현재 값을 그대로 쓰면
       //   금액을 올리는 순간 과거 참여자의 카드·누적 합계까지 바뀐다(2026-08 사고).
       //   순서: 참여시점 스냅샷 → 주문 제출일 → 시트 구매일자 → 오늘 → 기존 review_fee 폴백.
