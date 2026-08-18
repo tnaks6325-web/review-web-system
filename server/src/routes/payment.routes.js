@@ -3,10 +3,10 @@ const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 
-/* ★★ 입금 기록(review_index PAID + payment_records + 무시트 작업표 칸 + 시트 칸/큐)은
+/* ★★ 입금 기록(review_index PAID + payment_records + 무시트 작업표 칸)은
    `paymentApply.service` **한 곳**이 한다 — M2 이체결과 반영이 같은 함수를 쓴다.
    사본을 두면 "수동 처리는 작업표에 남는데 자동 반영은 안 남는" 드리프트가 조용히 생긴다. */
-const { nowStamp, recordDeposits, markDepositCells } = require('../services/paymentApply.service');
+const { recordDeposits } = require('../services/paymentApply.service');
 
 // ── 헬퍼: row_json에서 결제금액 추출 ──
 // ★ 규칙 본체는 utils/paymentAmount.js 단일 출처(입금관리 M1 의 상품비 폴백과 공용).
@@ -65,8 +65,7 @@ router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res,
 // ═══════════════════════════════════════════════════════════
 // POST /api/payment/mark-done — 이체 완료 처리 (GAS: markPaymentDone)
 //   1) DB: review_index.is_submitted2='PAID' + payment_records 이력
-//   2) 백그라운드: 구글시트 입금칸(submit_col2)에 이체완료시각 기록
-//      (실패 시 sync_queue 'deposit_mark' 로 재시도)
+//   2) 작업보드 상태는 서버 DB 원장만 사용한다(구글시트 입금칸 미기록)
 // ═══════════════════════════════════════════════════════════
 router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -77,14 +76,12 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
       return res.json({ error: '처리할 항목이 없습니다.' });
     }
 
-    const stamp = nowStamp();
     let updated = 0;
-    const recordedItems = [];
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      updated = await recordDeposits(client, items, { by: req.admin?.name || '', appliedItems: recordedItems });
+      updated = await recordDeposits(client, items, { by: req.admin?.name || '' });
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -94,11 +91,7 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
     }
 
     // ── 즉시 응답 (DB 저장 = 처리 성공) ──
-    res.json({ ok: true, updated, successCount: updated, paidAt: stamp, errors: [] });
-
-    // ── 백그라운드: 입금칸 기록(무시트=작업표 / 시트=구글시트·실패 시 큐) ──
-    //    ★ 실행부는 paymentApply.service 한 벌 — M2 이체결과 반영이 같은 함수를 쓴다.
-    setImmediate(() => markDepositCells(recordedItems, { stamp, by: req.admin?.name || 'payment' }));
+    res.json({ ok: true, updated, successCount: updated, errors: [] });
   } catch (err) {
     next(err);
   }
