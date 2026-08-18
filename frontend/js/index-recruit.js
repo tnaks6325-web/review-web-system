@@ -2694,6 +2694,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       }
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
+      const prefillInflowType = document.getElementById("rf_inflow_type_value");
+      if (prefillInflowType) prefillInflowType.value = prefill.inflowType === "guide" ? "guide" : "link";
 
       /* ★ 065: 구매채널(상품 URL 호스트 판정) · 담당자(작업담당 매핑) 자동 선택.
          값이 없으면(판정 불가·랜덤) 아무것도 건드리지 않아 기존처럼 빈 상태로 남는다. */
