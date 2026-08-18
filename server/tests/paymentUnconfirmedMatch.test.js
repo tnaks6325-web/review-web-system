@@ -78,6 +78,10 @@ svc.__setPoolForTest({
   assert.match(routes, /router\.get\('\/payment\/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware/);
+  assert.match(routes, /router\.post\('\/payment\/test-seed-unconfirmed', authMiddleware, adminOrMasterMiddleware/,
+    '테섭에서만 가상 미확인 이체 회차를 만들 수 있어야 한다');
+  assert.match(routes, /process\.env\.TEST_AUTO_LOGIN !== '1'/,
+    '가상 회차 생성 경로는 테스트 자동로그인 환경에서만 열려야 한다');
   assert.match(routes, /b\.confirm !== true/);
   const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(workdesk, /작업 검색·대조/);
