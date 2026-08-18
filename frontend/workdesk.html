@@ -6689,7 +6689,8 @@ async function renderCampaignsView(){
      시트 선택이 통째로 비어 있었다. 모달도 스스로 보장하지만(index-recruit), 뷰 진입 때
      미리 최신화해 두면 첫 클릭이 기다리지 않는다. 목록 로드를 막지 않게 await 없이. */
   try{ if(typeof loadRecruitTabOptions==='function') loadRecruitTabOptions(); }catch(_){ }
-  await loadRecruitList();     // index-recruit.js — 관리자 대시보드와 같은 로더
+  if (typeof window.loadRecruitList === 'function') await window.loadRecruitList();
+  // index-recruit.js가 아직 준비되지 않은 초기 진입에서도 뷰 렌더링은 유지한다.
 }
 /** index-recruit.js 가 기대하는 컨테이너·전역을 리뷰웹시스템[3버전]에 맞춰 채운다(사본 금지) */
 function _rcRenderHead(total){

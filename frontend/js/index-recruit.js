@@ -78,6 +78,10 @@ async function loadRecruitList() {
     wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--err)"><i class="fas fa-exclamation-circle"></i> 불러오기 실패: ${escHtml(e.message)}</div>`;
   }
 }
+// workdesk.html is an inline runtime and can be evaluated before this file in a
+// different script scope. Publish the shared loader explicitly so its refresh
+// path never relies on an implicit global function binding.
+window.loadRecruitList = loadRecruitList;
 
 /* ═══════════════════════════════════════
    공고 카드 렌더 — 리뷰어 홈과 **같은 모듈**(campaign-cards.js)로 그린다.
@@ -2926,6 +2930,12 @@ function _mixQuantity(mix, type) {
   return Math.max(0, Math.floor(Number(hit?.quantity) || 0));
 }
 
+function _reviewMixTotalLabel(sum, expected, optionMode) {
+  return optionMode
+    ? `합계 ${sum}명 / 옵션인원 ${expected}명`
+    : `합계 ${sum}명 / 총모집인원 ${expected}명`;
+}
+
 function renderRecruitOptionReviewMix() {
   const root = document.getElementById('rf_review_mix_rows');
   if (!root) return;
@@ -2940,7 +2950,7 @@ function renderRecruitOptionReviewMix() {
       const expected = Number(box.dataset.expected) || 0;
       const total = box.querySelector('.mixed-review-total');
       if (total) {
-        total.textContent = `합계 ${sum}명 / 옵션인원 ${expected}명`;
+        total.textContent = _reviewMixTotalLabel(sum, expected, optionMode);
         total.classList.toggle('is-invalid', sum !== expected);
       }
     });
@@ -3000,7 +3010,7 @@ function renderRecruitOptionReviewMix() {
     box.append(head, grid);
     root.appendChild(box);
     const sum = card.mix.reduce((totalValue, entry) => totalValue + (Number(entry.quantity) || 0), 0);
-    total.textContent = `합계 ${sum}명 / 옵션인원 ${card.expected}명`;
+    total.textContent = _reviewMixTotalLabel(sum, card.expected, optionMode);
     total.classList.toggle('is-invalid', sum !== card.expected);
   });
 }
