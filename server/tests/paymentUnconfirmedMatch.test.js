@@ -76,14 +76,21 @@ svc.__setPoolForTest({
   assert.match(routes, /router\.get\('\/payment\/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware/);
+  assert.match(routes, /workboardMatch:/,
+    'test transfers include their resolved workboard comparison values');
   assert.match(routes, /b\.confirm !== true/);
   const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(workdesk, /작업 검색·대조/);
   assert.match(workdesk, /function _pmUnconfirmedLiveSearch\(\)/);
-  assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
+  assert.doesNotMatch(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/,
+    '연결값 대조 모달은 수동 검색을 실행하지 않는다');
   assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
   assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
   assert.match(workdesk, /pm-unconfirmed-listbox/);
+  assert.match(workdesk, /pm-unconfirmed-direct-match/,
+    'selected transfers render their linked workboard values without a search step');
+  assert.doesNotMatch(workdesk, /선택한 이체의 작업 또는 모집공고 검색/,
+    'the comparison modal does not retain a manual work search field');
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
