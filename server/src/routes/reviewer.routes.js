@@ -19,6 +19,7 @@ const adminNickname = require('../services/adminNickname.service');
 // ★ 082: 기간별 리뷰비 — 판정은 utils/campaignFee 가 단일 출처(화면마다 규칙을 만들면 합계가 갈라진다)
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 const { extractAmountNumber } = require('../utils/paymentAmount');
+const { normalizeStoredBanner, validateBannerInput, toPublicBanner } = require('../utils/reviewerHomeBanner');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -1046,6 +1047,36 @@ router.post('/notices/delete', authMiddleware, adminOrMasterMiddleware, async (r
     if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
     await pool.query(`DELETE FROM reviewer_notices WHERE id = $1`, [id]);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// 리뷰어 홈 가로 배너. 공개 응답은 완성되어 활성화된 배너만 노출한다.
+const REVIEWER_HOME_BANNER_KEY = 'reviewer_home_banner';
+async function _loadReviewerHomeBanner() {
+  const { rows } = await pool.query('SELECT value FROM app_settings WHERE key = $1 LIMIT 1', [REVIEWER_HOME_BANNER_KEY]);
+  return normalizeStoredBanner(rows[0] && rows[0].value);
+}
+
+router.get('/home-banner', async (req, res, next) => {
+  try { res.json({ ok: true, banner: toPublicBanner(await _loadReviewerHomeBanner()) }); }
+  catch (err) { next(err); }
+});
+
+router.get('/home-banner/all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, banner: await _loadReviewerHomeBanner() }); }
+  catch (err) { next(err); }
+});
+
+router.post('/home-banner/save', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const checked = validateBannerInput(req.body);
+    if (!checked.ok) return res.status(400).json(checked);
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [REVIEWER_HOME_BANNER_KEY, JSON.stringify(checked.banner)]
+    );
+    res.json({ ok: true, banner: checked.banner });
   } catch (err) { next(err); }
 });
 

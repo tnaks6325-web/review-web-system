@@ -56,6 +56,8 @@
     noticesAll:   "/api/reviewer/notices/all",       // GET
     noticeSave:   "/api/reviewer/notices/save",      // POST
     noticeDelete: "/api/reviewer/notices/delete",    // POST
+    homeBanner: "/api/reviewer/home-banner/all",
+    homeBannerSave: "/api/reviewer/home-banner/save",
   };
   var EP_SUFFIX = {
     nickname:     "/my-nickname",
@@ -66,6 +68,8 @@
     noticesAll:   "/notices",
     noticeSave:   "/notices/save",
     noticeDelete: "/notices/delete",
+    homeBanner: "/home-banner",
+    homeBannerSave: "/home-banner/save",
   };
   function _ep(key) {
     var base = window.ADMIN_SETTINGS_API;
@@ -851,6 +855,17 @@ async function runRouteSweep() {
    ★ 리뷰어 소식·공지 관리 (관리자) — 리뷰어 홈 상단 노출
    ══════════════════════════════════════════════════════════════ */
 let _rvNotices = [];
+
+function _homeBannerHtml() {
+  return '<div class="as-noticebox" style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">' +
+    '<div class="admin-section-header"><span style="font-size:.95rem;font-weight:700;color:var(--t1)">리뷰홈 배너광고</span></div>' +
+    '<p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">리뷰어 홈의 공지와 모집공고 사이에 노출됩니다. <b>권장 이미지 크기: 1080 × 240px (4.5:1)</b></p>' +
+    '<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap"><div style="width:216px;height:48px;border:1px dashed #CBD5E1;border-radius:8px;overflow:hidden;background:#F8FAFC;display:grid;place-items:center"><img id="rvHomeBannerPreview" alt="배너 미리보기" style="display:none;width:100%;height:100%;object-fit:cover"><span id="rvHomeBannerEmpty" style="font-size:.7rem;color:#94A3B8">이미지 없음</span></div><div style="flex:1;min-width:220px"><label class="as-btn" for="rvHomeBannerFile">이미지 첨부</label><input class="as-file" id="rvHomeBannerFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onchange="uploadReviewerHomeBanner(this)"><div style="font-size:.7rem;color:#94A3B8;margin-top:6px">PNG, JPG, WebP, GIF · 최대 5MB</div><input id="rvHomeBannerUrl" type="url" maxlength="2048" placeholder="https:// 클릭 시 새 창으로 열 URL" style="margin-top:10px;width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font:inherit;font-size:.78rem"><label style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--t2);margin-top:10px"><input id="rvHomeBannerActive" type="checkbox"> 배너 노출</label><button class="as-btn" style="margin-top:10px;background:#2563EB;color:#fff;border-color:#2563EB" onclick="saveReviewerHomeBanner()">저장</button></div></div></div>';
+}
+function _setHomeBannerPreview(url) { var img=document.getElementById('rvHomeBannerPreview'), empty=document.getElementById('rvHomeBannerEmpty'); if(!img||!empty)return; img.src=url||''; img.style.display=url?'':'none'; empty.style.display=url?'none':''; }
+async function loadReviewerHomeBanner() { if(!document.getElementById('rvHomeBannerUrl'))return; try { var j=await _get('homeBanner'),b=(j&&j.banner)||{}; document.getElementById('rvHomeBannerUrl').value=b.clickUrl||''; document.getElementById('rvHomeBannerActive').checked=!!b.active; window._rvHomeBannerImageUrl=b.imageUrl||''; _setHomeBannerPreview(b.imageUrl||''); } catch(e){showToast('배너 설정을 불러오지 못했습니다: '+e.message,true);} }
+async function uploadReviewerHomeBanner(input) { var file=input&&input.files&&input.files[0]; if(!file)return; if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)||file.size>5*1024*1024){showToast('PNG, JPG, WebP, GIF 파일만 최대 5MB까지 올릴 수 있습니다.',true);input.value='';return;} var data=await new Promise(function(resolve,reject){var r=new FileReader();r.onload=function(){resolve(r.result);};r.onerror=reject;r.readAsDataURL(file);}); try {var j=await _post('guideImage',{imageBase64:data,mimeType:file.type,fileName:'reviewer_home_banner_'+Date.now()+'_'+file.name});if(!j||!j.ok||!j.url)throw new Error((j&&j.error)||'업로드 실패');window._rvHomeBannerImageUrl=j.url;_setHomeBannerPreview(j.url);showToast('배너 이미지를 올렸습니다. 저장하면 반영됩니다.');}catch(e){showToast('이미지 업로드 실패: '+e.message,true);} }
+async function saveReviewerHomeBanner() { try {var j=await _post('homeBannerSave',{active:document.getElementById('rvHomeBannerActive').checked,imageUrl:window._rvHomeBannerImageUrl||'',clickUrl:(document.getElementById('rvHomeBannerUrl').value||'').trim()});if(!j||!j.ok)throw new Error((j&&j.error)||'저장 실패');window._rvHomeBannerImageUrl=j.banner.imageUrl;_setHomeBannerPreview(j.banner.imageUrl);showToast('리뷰홈 배너광고를 저장했습니다.');}catch(e){showToast('배너 저장 실패: '+e.message,true);} }
 
 function _noticeHtml() {
   return `
@@ -2175,11 +2190,12 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, homebanner: _homeBannerHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, homebanner: loadReviewerHomeBanner, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
+    homebanner: { ic: '🖼️', nm: '리뷰홈 배너광고' },
     nickname:  { ic: '👤', nm: '내 닉네임' },
     business:  { ic: '🏢', nm: '제공정보' },
     aisamples: { ic: '🤖', nm: 'AI 판별 예시' },
@@ -2628,6 +2644,9 @@ async function saveGateCriteria() {
   window.wtSaveTemplate = wtSaveTemplate;
   window.wtToggleReport = wtToggleReport;
   window.loadReviewerNoticesAdmin = loadReviewerNoticesAdmin;
+  window.loadReviewerHomeBanner = loadReviewerHomeBanner;
+  window.uploadReviewerHomeBanner = uploadReviewerHomeBanner;
+  window.saveReviewerHomeBanner = saveReviewerHomeBanner;
   window.saveReviewerNotice = saveReviewerNotice;
   window.toggleReviewerNoticeForm = toggleReviewerNoticeForm;
   window.editReviewerNotice = editReviewerNotice;
