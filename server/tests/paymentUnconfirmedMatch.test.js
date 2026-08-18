@@ -107,6 +107,10 @@ svc.__setPoolForTest({
     '작업보드와 이체결과를 표 행으로 비교해야 한다');
   assert.match(workdesk, /function _pmRenderUnconfirmedDirect\(match=null\)/,
     '팝업을 열면 검색 없이 즉시 비교표를 렌더링해야 한다');
+  assert.match(workdesk, /const workRowForTransfer=\(transfer,result\)=>/,
+    '각 이체결과에 연결된 작업보드 행을 개별로 생성해야 한다');
+  assert.match(workdesk, /return workRowForTransfer\(transfer,result\)\+`<tr class="pm-transfer-row">/,
+    '작업보드값행과 이체결과값행은 결과별로 연속된 2행 세트여야 한다');
   assert.match(workdesk, /const transfers=group\?\.items\|\|\[\]/,
     '선택한 통장표시 묶음의 미확인 이체결과 전체를 비교표에 표시해야 한다');
   assert.match(workdesk, /function _pmOpenUnconfirmedWorkSearch\(\)/,
