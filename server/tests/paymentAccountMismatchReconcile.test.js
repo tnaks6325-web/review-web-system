@@ -40,7 +40,9 @@ function makeHarness({ failRecord = false, alreadyPaid = false } = {}) {
     if (/SELECT \* FROM payment_batches WHERE id/.test(text)) return { rows: [{ id: BATCH_ID, status: 'applied' }], rowCount: 1 };
     if (/SELECT summary FROM payment_result_uploads/.test(text)) return { rows: [upload], rowCount: 1 };
     if (/SELECT \* FROM payment_batch_items WHERE batch_id/.test(text)) return { rows: [state.item], rowCount: 1 };
-    if (/SELECT EXISTS \(SELECT 1 FROM payment_records/.test(text)) return { rows: [{ alreadyPaid }], rowCount: 1 };
+    if (/SELECT ri\.is_submitted2 AS "isSubmitted2"/.test(text)) {
+      return { rows: [{ isSubmitted2: alreadyPaid ? 'PAID' : 'NONE', hasPaymentRecord: false, hasPaidBatchItem: false }], rowCount: 1 };
+    }
     if (/INSERT INTO payment_account_mismatch_reconciliations/.test(text)) {
       if (state.reconciliations.length) return { rows: [], rowCount: 0 };
       state.reconciliations.push({ itemId: params[3], resultSeq: params[2], by: params[7] });

@@ -452,11 +452,16 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
     if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
     const item = _itemView(row);
     const { rows: [paidState] } = await client.query(
-      `SELECT EXISTS (SELECT 1 FROM payment_records WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3)
-           OR EXISTS (SELECT 1 FROM payment_batch_items WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND status = 'paid')
-           OR EXISTS (SELECT 1 FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND is_submitted2 = 'PAID') AS "alreadyPaid"`,
+      `SELECT ri.is_submitted2 AS "isSubmitted2",
+              EXISTS (SELECT 1 FROM payment_records WHERE sheet_id = ri.sheet_id AND tab_name = ri.tab_name AND row_index = ri.row_index) AS "hasPaymentRecord",
+              EXISTS (SELECT 1 FROM payment_batch_items WHERE sheet_id = ri.sheet_id AND tab_name = ri.tab_name AND row_index = ri.row_index AND status = 'paid') AS "hasPaidBatchItem"
+         FROM review_index ri
+        WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+        FOR UPDATE`,
       [item.sheetId, item.tabName, item.rowIndex]);
-    if (paidState && paidState.alreadyPaid) throw new ResultError('already_paid', '이미 입금 처리된 참여자는 수동 대조할 수 없습니다.');
+    if (!paidState || paidState.isSubmitted2 === 'PAID' || paidState.hasPaymentRecord || paidState.hasPaidBatchItem) {
+      throw new ResultError('already_paid', '이미 입금 처리된 참여자는 수동 대조할 수 없습니다.');
+    }
     const candidates = findAccountMismatchCandidates({ transfers: [transfer], items: batchItems.map(_itemView) });
     const candidate = candidates.find(x => x.itemId === item.id && x.resultSeq === Number(resultSeq));
     if (!candidate || candidates.length !== 1) throw new ResultError('not_eligible', '계좌 불일치 수동 대조 조건을 충족하지 않습니다.');

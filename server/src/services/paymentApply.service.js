@@ -76,10 +76,12 @@ async function recordDeposits(client, items, opts = {}) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
     const r = await client.query(
       `UPDATE review_index SET is_submitted2 = 'PAID'
-       WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+       WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+         AND is_submitted2 IS DISTINCT FROM 'PAID'`,
       [item.sheetId, item.tabName, rowIndex]
     );
     updated += r.rowCount;
+    if (!r.rowCount) continue;
 
     // ★ paid_at 은 값이 있을 때만 넣는다(없으면 DEFAULT NOW() = 종전 동작 그대로).
     const paidAt = item.paidAt || opts.paidAt || null;

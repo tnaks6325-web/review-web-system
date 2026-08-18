@@ -2,4 +2,6 @@
 ALTER TABLE payment_account_mismatch_reconciliations
   DROP CONSTRAINT IF EXISTS payment_account_mismatch_reconciliation_batch_id_result_seq_key;
 ALTER TABLE payment_account_mismatch_reconciliations
+  DROP CONSTRAINT IF EXISTS payment_account_mismatch_reconciliations_upload_id_result_seq_key;
+ALTER TABLE payment_account_mismatch_reconciliations
   ADD CONSTRAINT payment_account_mismatch_reconciliations_upload_id_result_seq_key UNIQUE (upload_id, result_seq);
