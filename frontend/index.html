@@ -974,6 +974,8 @@
     </div>
 
     <!-- 모집공고 섹션 -->
+    <div id="reviewerHomeBanner" class="home-section" style="display:none;padding-bottom:14px"></div>
+
     <div class="home-section" id="sectionRecruit">
       <div class="home-section-title rc-title-row">
         <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고</span>
@@ -1057,6 +1059,7 @@ function showHome(user) {
   loadInlineProfile(user);
   loadReviewList(user);
   loadReviewerNoticesHome();
+  loadReviewerHomeBanner();
 
   // 기본 탭 = 홈(소식·공지 + 모집공고)
   switchTab('home');
@@ -2916,6 +2919,23 @@ async function loadReviewerNoticesHome() {
 }
 
 /* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
+async function loadReviewerHomeBanner() {
+  const wrap = document.getElementById('reviewerHomeBanner');
+  if (!wrap) return;
+  wrap.style.display = 'none';
+  wrap.innerHTML = '';
+  try {
+    const res = await fetch(API_BASE_URL + '/api/reviewer/home-banner');
+    const json = await res.json();
+    const banner = json && json.banner;
+    if (!banner || !/^https?:\/\//i.test(banner.imageUrl || '') || !/^https?:\/\//i.test(banner.clickUrl || '')) return;
+    const imageUrl = escHtml(banner.imageUrl);
+    const clickUrl = escHtml(banner.clickUrl);
+    wrap.innerHTML = `<a href="${clickUrl}" target="_blank" rel="noopener noreferrer" style="display:block;border-radius:12px;overflow:hidden;background:#F1F5F9;box-shadow:0 2px 8px rgba(15,23,42,.08)"><img src="${imageUrl}" alt="광고 배너" width="1080" height="240" style="display:block;width:100%;height:auto;aspect-ratio:4.5/1;object-fit:cover"></a>`;
+    wrap.style.display = '';
+  } catch (_) { /* 배너 오류는 홈의 다른 콘텐츠를 막지 않는다. */ }
+}
+
 async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
