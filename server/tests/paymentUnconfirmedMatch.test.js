@@ -93,6 +93,10 @@ svc.__setPoolForTest({
     'selected transfers render their linked workboard values without a search step');
   assert.match(workdesk, /pm-unconfirmed-two-row-table/,
     'comparison uses separate workboard and transfer-result rows');
+  assert.match(workdesk, /table\.lgtable\.pm-unconfirmed-two-row-table\{width:100%;min-width:0;table-layout:fixed\}/,
+    'comparison table fits the modal instead of inheriting the shared minimum width');
+  assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-direct-match\{overflow-x:hidden\}/,
+    'the comparison wrapper does not provide a horizontal scrollbar');
   assert.match(workdesk, /function _pmCompleteTestUnconfirmedMatch\(\)/,
     'approved test matches remove the selected unconfirmed card immediately');
   assert.match(workdesk, /test-unconfirmed-match/);
