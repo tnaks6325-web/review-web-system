@@ -2827,6 +2827,14 @@ router.post('/payment/test-seed-unconfirmed', authMiddleware, adminOrMasterMiddl
       seq: i + 1, memo: `TEST-미확인-${String(i + 1).padStart(2, '0')}`,
       holder: `테스터${i + 1}`, amount: (i + 1) * 1000, accountTail: String(1000 + i),
       transferredAt: '2026.08.19 10:00', success: true,
+      workboardMatch: {
+        tabName: `TEST 작업보드 ${String(i + 1).padStart(2, '0')}`,
+        rowNo: i + 1,
+        reviewerName: `테스터${i + 1}`,
+        amount: (i + 1) * 1000,
+        accountTail: String(1000 + i),
+        status: '입금성공처리 가능',
+      },
     }));
     const client = await pool.connect();
     try {

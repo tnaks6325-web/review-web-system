@@ -7661,14 +7661,9 @@ function _pmUnconfirmedRenderCandidates(out, candidates){
 }
 
 function _pmSelectUnconfirmedMemo(i){
-  const group=(STATE.pmUnconfirmedGroups||[])[Number(i)], el=document.getElementById('pmUnconfirmedOv');
-  if(!group||!el) return;
-  el.dataset.memo=group.memo; el.dataset.groupIndex=String(i);
-  document.querySelectorAll('#pmUnconfirmedTransferList .pm-unconfirmed-transfer').forEach((x,n)=>x.classList.toggle('on',n===Number(i)));
-  const query=document.getElementById('pmUnconfirmedQuery'), out=document.getElementById('pmUnconfirmedCandidates');
-  if(query) query.value=group.memo;
-  if(out) out.innerHTML='<div class="muted" style="padding:9px 10px">추천 작업을 불러오는 중…</div>';
-  _pmUnconfirmedSearch({ live:true });
+  const group=(STATE.pmUnconfirmedGroups||[])[Number(i)];
+  if(!group) return;
+  _pmOpenUnconfirmedMatch(group.memo, Number(i));
 }
 
 async function _pmUnconfirmedInspect(i){
@@ -7704,10 +7699,15 @@ function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   _pmUnconfirmedClose();
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo; el.dataset.groupIndex=String(selectedGroupIndex);
   const groups=STATE.pmUnconfirmedGroups||[];
-  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택해 대조합니다. 추천은 자동 반영되지 않으며, 승인 전에는 입금 기록이 생성되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
+  const transfer=(groups[selectedGroupIndex]&&groups[selectedGroupIndex].items||[])[0]||{};
+  const match=transfer.workboardMatch||null;
+  const workboardValue=match
+    ? `${match.tabName||'작업보드'} · ${match.rowNo||'—'}행 · ${match.reviewerName||'—'} · ${_pmNum(match.amount)}원 · 계좌끝 ${match.accountTail||'—'}`
+    : '연결된 작업보드가 없습니다.';
+  const transferValue=`${transfer.holder||'—'} · ${_pmNum(transfer.amount)}원 · 계좌끝 ${transfer.accountTail||'—'}`;
+  const decision=match&&match.status ? match.status : '매칭 대기';
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택하면 연결된 작업보드값과 이체결과를 바로 비교합니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 연결값 확인</span></button>`).join('')}</div><div class="lgwrap pm-unconfirmed-compare-table pm-unconfirmed-direct-match"><table class="lgtable pmtable"><thead><tr><th>작업보드값</th><th>이체결과값</th><th>판정</th></tr></thead><tbody><tr><td>${esc(workboardValue)}</td><td>${esc(transferValue)}</td><td>${esc(decision)}</td></tr></tbody></table></div></div></div>`;
   document.body.appendChild(el);
-  document.getElementById('pmUnconfirmedQuery').focus();
-  _pmUnconfirmedSearch({ live:true });
 }
 
 function _pmResultModal(){
