@@ -504,7 +504,9 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     board,
     failed: failed.length,
     notInFile: a.summary.notInFile,
-    unmatchedResults: a.unmatchedResults.length,
+    /* preview.unmatchedResults 는 화면에 표시할 행 배열이다. 자동반영 응답에서
+       같은 이름에 숫자를 덮어쓰면 프런트가 배열로 렌더링하다 중단된다. */
+    unmatchedResultCount: a.unmatchedResults.length,
     orderAssigned: a.orderAssigned,
     warnings: a.parse.warnings || [],
     summary: a.summary,

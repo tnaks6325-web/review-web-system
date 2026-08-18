@@ -60,6 +60,8 @@ assert.doesNotMatch(workdesk, /id="pmApplyBtn"/,
   '결과 확인창에 별도 이대로 반영 버튼을 남기지 않는다');
 assert.match(workdesk, /outsideRows/, '회차 밖 이체결과도 확인 표에 표시한다');
 assert.match(workdesk, /매칭된 성공 건은 정상 반영됩니다/, '회차 밖 결과와 매칭 성공 반영 기준을 화면에 고지한다');
+assert.match(workdesk, /Array\.isArray\(p\.unmatchedResults\)/,
+  '자동반영 응답의 회차 밖 결과가 배열이 아니어도 결과 화면이 중단되지 않는다');
 
 function fileBase64(aoa) {
   const wb = XLSX.utils.book_new();
