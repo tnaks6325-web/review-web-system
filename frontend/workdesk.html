@@ -7696,9 +7696,11 @@ function _pmRenderUnconfirmedDirect(match=null){
     const hasParticipant=Boolean(matched&&result.rowIndex);
     const boardName=matched?(matched.label||matched.tabName||'선택한 작업보드'):'연결된 작업보드 없음';
     const rowLabel=hasParticipant?result.rowIndex:'—';
+    const workboardAmount=Number(result.workboardAmount)||0;
+    const workboardAccount=result.workboardAccount||'—';
     const decision=hasParticipant?'대조 대상':(matched?'참여자 미확인':'작업보드 연결 필요');
     const action=hasParticipant?'—':`<button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">${matched?'작업 다시 선택':'작업 선택'}</button>`;
-    return `<tr class="pm-workboard-row"><th>작업보드값행</th><td><b>${esc(boardName)}</b><span class="pm-unconfirmed-work-reviewer">리뷰어 ${esc(reviewer)}</span></td><td>${esc(rowLabel)}</td><td>—</td><td>${esc(reviewer)}</td><td>—</td><td>${esc(decision)}</td><td>${action}</td></tr>`;
+    return `<tr class="pm-workboard-row"><th>작업보드값행</th><td><b>${esc(boardName)}</b><span class="pm-unconfirmed-work-reviewer">리뷰어 ${esc(reviewer)}</span></td><td>${esc(rowLabel)}</td><td class="num">${workboardAmount?_pmNum(workboardAmount):'—'}</td><td>${esc(reviewer)}</td><td class="pm-unconfirmed-account">${esc(workboardAccount)}</td><td>${esc(decision)}</td><td>${action}</td></tr>`;
   };
   const comparisonRows=transfers.map((transfer,rowIndex)=>{
     const result=resultBySeq.get(Number(transfer.seq))||{};

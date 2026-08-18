@@ -31,6 +31,7 @@ const { logger } = require('../utils/logger');
 const { formatDepositStamp } = require('../utils/depositStamp');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly, parseTransferAt } = require('../utils/paymentResultParse');
+const { extractAmountNumber } = require('../utils/paymentAmount');
 let paymentApply = require('./paymentApply.service');
 const { recordDeposits } = paymentApply;
 function __setPaymentApplyForTest(v) { paymentApply = v || require('./paymentApply.service'); }
@@ -387,6 +388,13 @@ async function searchUnconfirmedWorkCandidates({ query }) {
   })) };
 }
 
+function _unconfirmedWorkboardAccount(rowJson) {
+  if (!rowJson || typeof rowJson !== 'object') return '';
+  const entry = Object.entries(rowJson).find(([key, value]) =>
+    String(key || '').replace(/\s/g, '').includes('계좌번호') && String(value || '').trim());
+  return entry ? digitsOnly(entry[1]) : '';
+}
+
 async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, tabName, db = _db() }) {
   const normalizedMemo = _unconfirmedMemo(memo);
   if (!batchId || !uploadId || !normalizedMemo || !sheetId || !tabName) {
@@ -404,7 +412,7 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
 
   const holders = [...new Set(transfers.map(x => String(x && x.holder || '').trim()).filter(Boolean))];
   const { rows: participants } = holders.length ? await db.query(
-    `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex",
+    `SELECT ri.reviewer_name AS "reviewerName", ri.row_index AS "rowIndex", ri.row_json AS "rowJson",
             ri.is_submitted2 = 'PAID' OR EXISTS (
               SELECT 1 FROM payment_records pr
                WHERE pr.sheet_id = ri.sheet_id AND pr.tab_name = ri.tab_name AND pr.row_index = ri.row_index
@@ -432,13 +440,16 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
   const results = transfers.map(t => {
     const matches = byName.get(String(t.holder || '').trim()) || [];
     const paid = matches.filter(m => m.alreadyPaid === true);
+    const participant = matches.length === 1 ? matches[0] : null;
     const state = t.success !== true ? 'transfer_not_confirmed'
       : paid.length ? 'duplicate_payment'
       : matches.length === 1 ? 'candidate_unpaid'
       : matches.length ? 'ambiguous_participant' : 'participant_not_found';
     return {
       seq: t.seq, holder: t.holder || '', amount: t.amount, accountTail: t.accountTail || '', transferredAt: t.transferredAt || '',
-      state, rowIndex: matches.length === 1 ? matches[0].rowIndex : null,
+      state, rowIndex: participant ? participant.rowIndex : null,
+      workboardAmount: participant ? extractAmountNumber(participant.rowJson) : 0,
+      workboardAccount: participant ? _unconfirmedWorkboardAccount(participant.rowJson) : '',
       participantCount: matches.length, alreadyPaidCount: paid.length,
     };
   });

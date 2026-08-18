@@ -52,8 +52,8 @@ svc.__setPoolForTest({
     if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) {
       assert.match(sql, /ri\.is_submitted2 = 'PAID'/);
       return { rows: [
-        { reviewerName: '리뷰어A', rowIndex: 5, alreadyPaid: true },
-        { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false },
+        { reviewerName: '리뷰어A', rowIndex: 5, alreadyPaid: true, rowJson: { '결제금액': '20,300', '계좌번호': '3515516491623' } },
+        { reviewerName: '리뷰어B', rowIndex: 6, alreadyPaid: false, rowJson: { '결제금액': '17,800', '계좌번호': '3515516491623' } },
       ] };
     }
     throw new Error(`unexpected query: ${sql.slice(0, 90)}`);
@@ -75,6 +75,8 @@ svc.__setPoolForTest({
   assert.equal(out.results[0].state, 'duplicate_payment');
   assert.equal(out.results[1].state, 'candidate_unpaid');
   assert.equal(out.results[1].rowIndex, 6, 'unique workboard participant exposes its source row');
+  assert.equal(out.results[1].workboardAmount, 17800, '작업보드 결제금액을 대조표에 제공해야 한다');
+  assert.equal(out.results[1].workboardAccount, '3515516491623', '작업보드 계좌번호를 대조표에 제공해야 한다');
   assert.equal(out.summary.duplicatePayment, 1);
   assert.equal(out.summary.candidateUnpaid, 1);
   assert.deepEqual(out.reconciliationCandidates, []);
