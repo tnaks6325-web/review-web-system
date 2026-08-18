@@ -15,8 +15,9 @@ assert.ok(/recoverUnwrittenSheetlessOrders/.test(source), 'existing ledger-only 
 assert.ok(/reconcileCampaignWorktableLinks/.test(source), 'recovery must repair a missing campaign-to-worktable link before replaying submitted orders');
 assert.ok(/rc\.source_work_order_id = wo\.id[\s\S]*?wo\.linked_campaign_id = rc\.id/.test(source), 'link repair must use persisted work-order identities, not title matching');
 assert.ok(!/os\.sheet_id LIKE 'campaign:%'/.test(source), 'recovery must include pre-transition campaign orders that still carry legacy sheet keys');
-assert.ok(/JOIN campaign_applications ca ON ca\.id = os\.campaign_application_id/.test(source), 'recovery must be scoped by the verified campaign application, not a client-supplied sheet key');
+assert.ok(/JOIN campaign_applications ca/.test(source), 'recovery must be scoped by the verified campaign application, not a client-supplied sheet key');
 assert.ok(/COALESCE\(rc\.linked_sheet_id, ''\) <> ''/.test(source) && /COALESCE\(rc\.linked_tab_name, ''\) <> ''/.test(source), 'recovery must only write to campaigns with an internal worktable');
+assert.ok(/os\.campaign_application_id = ca\.id[\s\S]*?ca\.order_submission_id = os\.id[\s\S]*?ca\.late_order_id = os\.id/.test(source), 'recovery must include legacy orders linked from the application record');
 assert.ok(/NOT EXISTS \([\s\S]*?cp\.order_submission_id = os\.id/.test(source), 'recovery must skip orders already linked to a worktable row');
 assert.ok(/startup-recovery/.test(app) && /recoverUnwrittenSheetlessOrders/.test(app), 'existing missing worktable rows must be recovered after deployment without reviewer resubmission');
 
