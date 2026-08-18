@@ -33,7 +33,7 @@ test('payment target metadata includes the work manager', () => {
 
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys'), sandbox);
+vm.runInContext(sourceOf('_pmWorkKey') + '\n' + sourceOf('_pmManagerName') + '\n' + sourceOf('_pmFilterItems') + '\n' + sourceOf('_pmSelectedPaymentTotal') + '\n' + sourceOf('_pmSelectedRecipientCount') + '\n' + sourceOf('_pmWorkEntries') + '\n' + sourceOf('_pmToggleWorkKeys') + '\n' + sourceOf('_pmSetWorkSelection'), sandbox);
 
 test('legacy manager name is normalized to mango', () => {
   assert.strictEqual(sandbox._pmManagerName('\uBC15\uC740\uBE44'), '\uB9DD\uACE0');
@@ -75,6 +75,19 @@ test('an empty selected-work list produces no download candidates', () => {
 test('toggling work rows preserves every other selected work', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmToggleWorkKeys(['S1||A', 'S3||C'], ['S1||A', 'S2||A', 'S3||C'], 'S2||A'))), ['S1||A', 'S2||A', 'S3||C']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmToggleWorkKeys(['S1||A', 'S2||A'], ['S1||A', 'S2||A'], 'S1||A'))), ['S2||A']);
+});
+
+test('drag selection applies the initial row direction to each newly crossed work', () => {
+  const all = ['S1||A', 'S1||B', 'S1||C'];
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmSetWorkSelection(['S1||A'], all, 'S1||B', true))), ['S1||A', 'S1||B']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(sandbox._pmSetWorkSelection(['S1||A', 'S1||B'], all, 'S1||A', false))), ['S1||B']);
+});
+
+test('work rows start and extend a pointer drag without double-toggling on click', () => {
+  const filterBar = sourceOf('_pmFilterBar');
+  assert.match(filterBar, /onpointerdown="_pmStartWorkDrag/);
+  assert.match(filterBar, /onpointerenter="_pmDragSelectWork/);
+  assert.match(sourceOf('_pmEndWorkDrag'), /pmWorkDragClickSuppressed/);
 });
 
 test('toggling a work preserves the work-list scroll position and exposes the selected-work count', () => {

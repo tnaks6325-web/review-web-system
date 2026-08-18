@@ -6960,6 +6960,47 @@ function _pmToggleWorkKeys(selectedKeys, allKeys, workKey){
   if(selected.has(workKey)) selected.delete(workKey); else selected.add(workKey);
   return allKeys.filter(key=>selected.has(key));
 }
+function _pmSetWorkSelection(selectedKeys, allKeys, workKey, selectedValue){
+  const selected=new Set(selectedKeys===null ? allKeys : selectedKeys);
+  if(selectedValue) selected.add(workKey); else selected.delete(workKey);
+  return allKeys.filter(key=>selected.has(key));
+}
+function _pmApplyWorkSelection(workKey, selectedValue){
+  const filter=_pmFilterState();
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  filter.workKeys=_pmSetWorkSelection(filter.workKeys,allKeys,workKey,selectedValue);
+}
+function _pmStartWorkDrag(event, workKey){
+  if(event.button!==0) return;
+  event.preventDefault();
+  const filter=_pmFilterState();
+  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
+  const selected=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
+  STATE.pmWorkDrag={ selected:!selected.has(workKey), seen:new Set() };
+  _pmDragSelectWork(event,workKey);
+  window.addEventListener('pointerup',_pmEndWorkDrag,{once:true});
+}
+function _pmDragSelectWork(event, workKey){
+  const drag=STATE.pmWorkDrag;
+  if(!drag || drag.seen.has(workKey)) return;
+  drag.seen.add(workKey);
+  _pmApplyWorkSelection(workKey,drag.selected);
+  const row=event.currentTarget;
+  if(row){ row.classList.toggle('on',drag.selected); row.setAttribute('aria-pressed',String(drag.selected)); }
+}
+function _pmEndWorkDrag(){
+  if(!STATE.pmWorkDrag) return;
+  STATE.pmWorkDrag=null;
+  STATE.pmWorkDragClickSuppressed=true;
+  _pmRender();
+}
+function _pmToggleWorkFromClick(workKey){
+  if(STATE.pmWorkDragClickSuppressed){
+    STATE.pmWorkDragClickSuppressed=false;
+    return;
+  }
+  _pmToggleWork(workKey);
+}
 function _pmToggleWork(workKey){
   const workList=$('#pmbody .pmworklist');
   STATE.pmWorkScrollTop=workList ? workList.scrollTop : null;
@@ -6984,7 +7025,7 @@ function _pmFilterBar(allItems){
     const selected=selectedKeys.has(key);
     const selectedItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
     const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick ${selected?'on':''}" aria-pressed="${selected}" onclick="_pmToggleWork(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
+    return `<button type="button" class="pmworkpick ${selected?'on':''}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
   }).join('');
   const downloadButton=(bank,label)=>{
     const bankItems=selectedItems.filter(it=>it.bank===bank);
