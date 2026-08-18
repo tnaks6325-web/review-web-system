@@ -89,6 +89,14 @@ svc.__setPoolForTest({
   assert.match(workdesk, /추천 공고/);
   assert.match(workdesk, /pmUnconfirmedRecommendation/);
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
+  assert.match(workdesk, /function _pmOpenUnconfirmedMatchList\(i\)/,
+    '미확인 이체를 여러 건 목록에서 선택해 대조하는 진입점이 있어야 한다');
+  assert.match(workdesk, /pm-unconfirmed-listbox/,
+    '다건 미확인 이체 목록은 고정 높이 스크롤 영역으로 렌더링해야 한다');
+  assert.match(workdesk, /function _pmSelectUnconfirmedMemo\(i\)/,
+    '목록에서 선택한 이체만 아래 검색 및 대조 대상으로 전환해야 한다');
+  assert.match(workdesk, /pm-unconfirmed-compare-table/,
+    '작업보드와 이체결과를 표 행으로 비교해야 한다');
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
