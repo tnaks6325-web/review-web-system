@@ -7059,11 +7059,10 @@ function _pmBatchWorkboard(b){
   const skipped = b.boardSkippedCount||0;
   const failed = b.boardFailedCount||0;
   if(recorded || queued || skipped || failed){
-    const parts = [`${recorded}건 기록됨`];
+    const parts = [`${recorded}건 기록됨`, `기록실패 ${failed}건`];
     if(queued) parts.push(`${queued}건 대기`);
     if(skipped) parts.push(`${skipped}건 제외`);
-    if(failed) parts.push(`${failed}건 실패`);
-    return `<span class="pmauto">${esc(b.boardStamp||'-')} · ${parts.join(' · ')}</span>`;
+    return `<span class="pmauto">${esc(b.boardStamp||'-')}<br>${parts.join(' · ')}</span>`;
   }
   if((b.resultAppliedCount||0)>0) return '<span class="pmauto">입금일 미기록</span>';
   return '<span class="pmauto">-</span>';
@@ -7080,13 +7079,11 @@ function _pmBatchActions(b,i){
   if(b.status==='cancelled') return b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>` : '';
   const reconcile = b.status==='downloaded' && ((b.paidCount||0)+(b.failedCount||0)>0)
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
-  const confirmFailures = b.status==='applied' && (b.paidCount||0)>0 && (b.pendingCount||0)>0
-    ? `<button class="btn sm danger" onclick="_pmConfirmFailures(${i})">이체실패 처리</button>` : '';
   const resultUpload = (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
   const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
     ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
-    : (b.status==='applied' ? `${confirmFailures}` : '');
+    : '';
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
   return manage + result + resultUpload;
@@ -7561,7 +7558,7 @@ function _pmFileB64(file){
   });
 }
 
-const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:'결과없음', already_paid:'이미 입금' };
+const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:'이체실패(결과없음)', already_paid:'이미 입금' };
 
 function _pmResultModal(){
   const R = STATE.pmResult; if(!R) return;
@@ -7594,14 +7591,14 @@ function _pmResultModal(){
         같은 사람·같은 금액이라 입금 결과는 같지만, <b>어느 줄에 붙었는지는 임의</b>입니다.</div>`
     : '';
   const nf = s.notInFile
-    ? `<div class="pmnote">⚠ <b>결과 파일에 없는 건 ${s.notInFile}건</b>은 <b>그대로 대기 상태로 둡니다</b>(실패로 내리지 않습니다 — 실제로는 이체됐는데 파일만 부분적일 수 있어 이중입금이 됩니다). 은행에서 전체 결과 파일을 다시 받아 한 번 더 올려 주세요.</div>`
+    ? `<div class="pmnote">⚠ <b>결과 파일에 없는 건 ${s.notInFile}건</b>은 <b>이체실패로 처리</b>되어 다음 회차에 다시 포함됩니다.</div>`
     : '';
   const outside = Array.isArray(p.unmatchedResults) ? p.unmatchedResults : [];
   const ur = outside.length
-    ? `<div class="pmnote">⚠ <b>이 회차에 없는 결과 ${outside.length}건</b>도 아래에 모두 표시합니다. 이 회차에는 반영하지 않으며, 매칭된 성공 건은 정상 반영됩니다.</div>`
+    ? `<div class="pmnote">⚠ <b>미확인 이체 ${outside.length}건</b>도 아래에 모두 표시합니다. 이 회차에는 반영하지 않으며, 매칭된 성공 건은 정상 반영됩니다.</div>`
     : '';
   const outsideRows = outside.map(it=>`<tr>
-    <td><span class="pmoc not_in_file">회차 외</span></td>
+    <td><span class="pmoc not_in_file">미확인 이체</span></td>
     <td>${esc(it.memo||'—')}</td><td>—</td><td class="num">${_pmNum(it.amount)}</td>
     <td class="mono">…${esc(it.accountTail||'')}</td><td>${esc(it.holder||'')}</td>
     <td class="mono">${esc(it.transferredAt||'-')}</td><td>${esc(it.status||'')}</td></tr>`).join('');
@@ -7616,13 +7613,13 @@ function _pmResultModal(){
       <div class="pmrsum">
         <div class="pmrs ok"><div class="k">입금완료로 기록</div><div class="v">${s.success||0}건</div></div>
         <div class="pmrs bad"><div class="k">이체실패</div><div class="v">${s.failed||0}건</div></div>
-        <div class="pmrs wait"><div class="k">결과없음</div><div class="v">${s.notInFile||0}건</div></div>
+        <div class="pmrs wait"><div class="k">결과없음 → 이체실패</div><div class="v">${s.notInFile||0}건</div></div>
         <div class="pmrs"><div class="k">이미 입금</div><div class="v">${s.alreadyPaid||0}건</div></div>
       </div>
       ${archivedNote}${autoNote}${warn}${oa}${nf}${ur}
       <div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C">
         ${R.autoApplied ? '자동 반영으로' : '자동 반영 조건을 충족하면'} <b>입금완료 건만</b> 기록됩니다 — 시스템 입금 표시 + 작업표(또는 시트) 입금칸에
-        <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패 건은 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>.
+        <b>결과 파일의 실제 이체시각</b>이 찍힙니다. 이체실패·결과없음 건은 잠금이 풀려 <b>다음 회차에 다시 담깁니다</b>.
       </div>
       <div class="lgwrap"><table class="lgtable pmtable">
         <thead><tr><th>결과</th><th>작업</th><th>리뷰어</th><th class="num">금액</th><th>계좌</th><th>예금주</th><th>이체시각</th><th>은행 응답</th></tr></thead>
@@ -7647,7 +7644,7 @@ function _pmResultClose(){
 async function _pmResultApply(){
   const R = STATE.pmResult; if(!R) return;
   const s = R.preview.summary || {};
-  if(!confirm(`#${R.batch.seq} 회차에 이체결과를 반영합니다.\n\n· 입금완료 기록 ${s.success||0}건\n· 이체실패 처리 ${s.failed||0}건 (다음 회차에 다시 담깁니다)\n· 결과없음 ${s.notInFile||0}건은 그대로 대기\n\n입금완료로 기록된 건은 되돌릴 수 없습니다.`)) return;
+  if(!confirm(`#${R.batch.seq} 회차에 이체결과를 반영합니다.\n\n· 입금완료 기록 ${s.success||0}건\n· 이체실패 처리 ${s.failed||0}건 (결과없음 ${s.notInFile||0}건 포함 · 다음 회차에 다시 담깁니다)\n\n입금완료로 기록된 건은 되돌릴 수 없습니다.`)) return;
   const nf = document.getElementById('pmNotifyFail');
   const notifyFailed = !!(nf && nf.checked);
   const btn = document.getElementById('pmApplyBtn');
