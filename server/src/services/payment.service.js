@@ -29,7 +29,7 @@ const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
 
-const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행' };
+const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
 /** 작업오더 물건비 수취방식 → 이체 은행 (사용자 확정 규칙)
  *  현금이체 → 하나은행 / 수수료(세금계산서) → 케이뱅크 */
