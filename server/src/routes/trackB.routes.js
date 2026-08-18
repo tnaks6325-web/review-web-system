@@ -2819,6 +2819,33 @@ function _resultErr(err, res, next) {
   return next(err);
 }
 
+// PR 테섭 전용: 작업보드·입금기록은 만들지 않고 미확인 이체 UI만 검증한다.
+router.post('/payment/test-seed-unconfirmed', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  if (process.env.TEST_AUTO_LOGIN !== '1') return res.status(404).json({ ok: false, error: 'Not found' });
+  try {
+    const transfers = Array.from({ length: 10 }, (_, i) => ({
+      seq: i + 1, memo: `TEST-미확인-${String(i + 1).padStart(2, '0')}`,
+      holder: `테스터${i + 1}`, amount: (i + 1) * 1000, accountTail: String(1000 + i),
+      transferredAt: '2026.08.19 10:00', success: true,
+    }));
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: [batch] } = await client.query(
+        `INSERT INTO payment_batches (bank, status, item_count, total_amount, created_by)
+         VALUES ('kbank', 'downloaded', 0, 0, $1) RETURNING *`, [_by(req)]);
+      const preview = { items: [], unmatchedResults: transfers, summary: { success: 0, failed: 0, unmatched: transfers.length } };
+      await client.query(
+        `INSERT INTO payment_result_uploads (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, summary, uploaded_by)
+         VALUES ($1, 'kbank', 'TEST-미확인이체-10건.xlsx', 'test', $2, 0, 0, 0, FALSE, $3::jsonb, $4)`,
+        [batch.id, transfers.length, JSON.stringify({ preview }), _by(req)]);
+      await client.query('COMMIT');
+      res.json({ ok: true, batchId: batch.id, count: transfers.length });
+    } catch (err) { try { await client.query('ROLLBACK'); } catch (_) {} throw err; }
+    finally { client.release(); }
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 router.post('/payment/batch/:id/result-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
@@ -2859,6 +2886,18 @@ router.post('/payment/batch/:id/unconfirmed-work-inspect', authMiddleware, admin
     res.json(await paymentResultSvc.inspectUnconfirmedWorkMatch({
       batchId: req.params.id, uploadId: b.uploadId, memo: b.memo,
       sheetId: b.sheetId, tabName: b.tabName,
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
+// 계좌가 다른 실제 이체는 자동 처리하지 않는다. 저장된 결과 행과 회차 실패 항목을 서버에서 다시 대조하고,
+// 관리자가 명시적으로 확인한 경우에만 감사 이력과 함께 입금 완료로 전환한다.
+router.post('/payment/batch/:id/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '계좌 불일치 이체를 확인한 뒤 반영해 주세요.' });
+    res.json(await paymentResultSvc.reconcileAccountMismatch({
+      batchId: req.params.id, uploadId: b.uploadId, itemId: b.itemId, resultSeq: b.resultSeq, by: _by(req),
     }));
   } catch (err) { _resultErr(err, res, next); }
 });
