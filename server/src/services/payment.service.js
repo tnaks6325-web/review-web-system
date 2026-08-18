@@ -599,10 +599,15 @@ async function markDownloaded(batchId, by) {
 function _batchView(b) {
   const preview = b.result_summary && b.result_summary.preview;
   const unmatched = Array.isArray(preview && preview.unmatchedResults) ? preview.unmatchedResults : [];
-  const parsedSuccess = unmatched.filter(x => x && x.success === true).length;
-  const parsedFailed = unmatched.filter(x => x && x.success === false).length;
   const paidCount = b.paid_count == null ? undefined : Number(b.paid_count);
   const failedCount = b.failed_count == null ? undefined : Number(b.failed_count);
+  const itemCount = Number(b.item_count || 0);
+  // 미확인 이체는 이 회차 밖 결과다. 회차 성공/실패 수에 섞지 않고 별도로 보여 준다.
+  const resultSuccessCount = Math.min(itemCount, Math.max(Number(b.result_success_count || 0), Number(paidCount || 0)));
+  // 결과 파일이 있으면 성공으로 매칭되지 않은 회차 항목은 이체실패(결과없음)로 처리한다.
+  const resultFailedCount = b.result_upload_id
+    ? Math.max(Number(b.result_failed_count || 0), Number(failedCount || 0), Math.max(0, itemCount - resultSuccessCount))
+    : Math.max(Number(b.result_failed_count || 0), Number(failedCount || 0));
   return {
     id: b.id, seq: Number(b.seq), bank: b.bank, bankLabel: BANK_LABEL[b.bank] || b.bank,
     status: b.status, itemCount: b.item_count, totalAmount: Number(b.total_amount || 0),
@@ -616,8 +621,9 @@ function _batchView(b) {
     resultUploadId: b.result_upload_id || '',
     resultFileName: b.result_file_name || '',
     resultRowCount: b.result_row_count == null ? undefined : Number(b.result_row_count),
-    resultSuccessCount: Math.max(Number(b.result_success_count || 0), parsedSuccess, Number(paidCount || 0)),
-    resultFailedCount: Math.max(Number(b.result_failed_count || 0), parsedFailed, Number(failedCount || 0)),
+    resultSuccessCount,
+    resultFailedCount,
+    resultUnconfirmedCount: unmatched.length,
     resultAppliedCount: Math.max(Number(b.result_applied_count || 0), Number(paidCount || 0)),
     resultApplied: b.result_applied === true,
     boardRecordedCount: Number(b.board_recorded_count || 0),
