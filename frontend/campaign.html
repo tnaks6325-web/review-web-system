@@ -253,8 +253,8 @@
 <div class="sheet-ovl" id="popGate">
   <div class="sheet" style="max-height:82vh;overflow-y:auto">
     <h3>🔥 인기 상품 참여 조건</h3>
-    <p>일반 모집 <b>1건을 먼저 제출완료</b>하면 인기 상품 <b>1건</b>에 참여할 수 있어요 (1:1 교환).<br>
-      아래 일반 모집에 지금 바로 참여해보세요.</p>
+    <p>선행참여 우선순위의 <b>미완료 공고</b>를 먼저 구매양식 제출완료해주세요.<br>
+      이미 제출완료한 공고는 자동으로 건너뛰어 다음 공고가 표시됩니다.</p>
     <div class="muted" id="popGateCount" style="margin-bottom:8px"></div>
     <div id="popGateBody"></div>
     <button class="btn ghost" style="margin-top:12px" onclick="hidePopGate()">닫기</button>
@@ -523,7 +523,8 @@ function renderCrNotice(){
 }
 
 /* ═══ 🔥 인기상품 참여 조건 (064) ═══
-   인기 공고 = 일반(비인기) 모집 1건을 "구매양식 제출완료"해야 1건 참여 가능(1:1 교환).
+   선행참여 우선순위가 있는 인기 공고는 명의별 "구매양식 제출완료" 이력을 기준으로
+   첫 미완료 일반(비인기) 공고를 먼저 요구한다.
    서버 게이트(apply 403 popular_locked)가 최종 권위 — 여기 안내·목록은 UX 보조. */
 function renderPopNotice(){
   let box = $('popNotice');
@@ -539,8 +540,8 @@ function renderPopNotice(){
   box.style.display = '';
   box.innerHTML =
     '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
-    '<div style="font-size:.82rem;line-height:1.65">일반 모집 <b>1건을 먼저 제출완료</b>하면 인기 상품 <b>1건</b>에 참여할 수 있어요 (1:1 교환).<br>' +
-    '<span class="muted">타계정으로 참여할 때도 각 계정마다 일반 1건씩 필요해요.</span></div>' +
+    '<div style="font-size:.82rem;line-height:1.65">선행참여 우선순위의 <b>미완료 공고를 먼저 제출완료</b>하면 참여할 수 있어요.<br>' +
+    '<span class="muted">이미 제출완료한 공고는 자동으로 건너뛰고 다음 순위 공고가 연결됩니다.</span></div>' +
     '<button class="btn ghost" style="margin-top:10px;padding:10px" onclick="openPopGate()">📋 지금 참여 가능한 일반 모집 보기</button>';
 }
 
@@ -1004,7 +1005,7 @@ async function _doApply(optionKey, sub){
     // ★ 공고별 참여 리뷰어 게이트(091) — 자리 미점유 상태에서 차단 안내(마감 위장/사유 고지)
     if(j.reason === 'reviewer_blocked'){ _renderGateBlocked(j); return; }
     // ★ 064: 인기상품 선행조건 미충족 → 일반 모집 목록 모달(테이블+참여 CTA)
-    if(j.reason === 'popular_locked'){ toast('일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요'); openPopGate(j); return; }
+    if(j.reason === 'popular_locked'){ toast('선행 공고의 구매양식을 먼저 제출해주세요'); openPopGate(j); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
     if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable'].includes(j.reason)){
