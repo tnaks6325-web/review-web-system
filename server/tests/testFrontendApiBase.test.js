@@ -14,4 +14,10 @@ assert.match(
   '테스트 프론트는 test-review-wdb API를 사용해야 합니다.'
 );
 
+assert.match(
+  apiSource,
+  /test-review-wdb-web-review-web-system-pr-\(\\d\+\)[\s\S]{0,260}test-review-wdb-review-web-system-pr-' \+ pr\[1\]/,
+  'Railway PR 테섭 프론트는 같은 PR 번호의 test-review-wdb API를 사용해야 합니다.'
+);
+
 console.log('✅ testFrontendApiBase: 테스트 프론트 API 연결 통과');
