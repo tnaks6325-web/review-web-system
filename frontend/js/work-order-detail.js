@@ -774,6 +774,9 @@ function _woCampaignPrefill(o) {
     daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
     recruit_total:  o.recruit_count || 0,
     purchase_time:  o.purchase_time || "",
+    // The intake value must reach the new-campaign inflow selector unchanged.
+    // Older orders without a value retain the historical link-inflow default.
+    inflowType:     o.inflow_type === "guide" ? "guide" : "link",
     wd_product:     (typeof _woProductLines === "function" ? (_woProductLines(o) || "") : "") || (o.product_option || ""),
     // ★ 리뷰 #2: inflow_guide는 HTML(에디터)·평문(인트라넷/레거시) 두 형태 실존 —
     //   태그가 실제로 있을 때만 raw HTML 경로(이미지 보존), 평문은 escape 경로(개행·'<옵션>' 안전)
