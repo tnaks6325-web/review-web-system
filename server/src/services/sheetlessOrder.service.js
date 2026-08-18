@@ -98,7 +98,19 @@ async function writeOrderToWorktable({
   // ── 열 구성 = 장부(raw_sheet_tabs)에서. 시트 경로와 **같은 로더**를 쓴다(사본 0). ──
   let ctx = null;
   try { ctx = await loadRawTabContext(sheetId, tabGid, tabName); } catch (_) { ctx = null; }
-  const headers = (ctx && ctx.headers) || [];
+  let headers = (ctx && ctx.headers) || [];
+  // 과거 작업보드는 RAW 탭 메타가 비어 있을 수 있다. 이미 준비된 작업보드
+  // 슬롯의 row_json 열 이름을 같은 DB 원본으로 사용해 복구를 막지 않는다.
+  if (!headers.length) {
+    try {
+      const { rows: stored } = await getPool().query(
+        `SELECT row_json FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+            AND row_json IS NOT NULL
+          ORDER BY seq LIMIT 1`, [sheetId, tabName]);
+      headers = Object.keys((stored[0] && stored[0].row_json) || {}).filter(Boolean);
+    } catch (_) { headers = []; }
+  }
   if (!headers.length) {
     // ★ 열을 모르면 아무 칸에도 쓸 수 없다 — 조용히 "완결" 처리하지 않는다(주문은 원장에 살아 있고
     //   화면·복구 경로가 미반영으로 본다).
