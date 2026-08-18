@@ -79,11 +79,12 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
 
     const stamp = nowStamp();
     let updated = 0;
+    const recordedItems = [];
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      updated = await recordDeposits(client, items, { by: req.admin?.name || '' });
+      updated = await recordDeposits(client, items, { by: req.admin?.name || '', appliedItems: recordedItems });
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -97,7 +98,7 @@ router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, r
 
     // ── 백그라운드: 입금칸 기록(무시트=작업표 / 시트=구글시트·실패 시 큐) ──
     //    ★ 실행부는 paymentApply.service 한 벌 — M2 이체결과 반영이 같은 함수를 쓴다.
-    setImmediate(() => markDepositCells(items, { stamp, by: req.admin?.name || 'payment' }));
+    setImmediate(() => markDepositCells(recordedItems, { stamp, by: req.admin?.name || 'payment' }));
   } catch (err) {
     next(err);
   }

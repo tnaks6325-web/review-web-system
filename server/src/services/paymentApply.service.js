@@ -71,6 +71,7 @@ function nowStamp(when) {
  */
 async function recordDeposits(client, items, opts = {}) {
   const by = opts.by || '';
+  const appliedItems = Array.isArray(opts.appliedItems) ? opts.appliedItems : null;
   let updated = 0;
   for (const item of (items || [])) {
     const rowIndex = item.rowIndex != null ? item.rowIndex : item.rowNum;
@@ -82,6 +83,7 @@ async function recordDeposits(client, items, opts = {}) {
     );
     updated += r.rowCount;
     if (!r.rowCount) continue;
+    if (appliedItems) appliedItems.push(item);
 
     // ★ paid_at 은 값이 있을 때만 넣는다(없으면 DEFAULT NOW() = 종전 동작 그대로).
     const paidAt = item.paidAt || opts.paidAt || null;
