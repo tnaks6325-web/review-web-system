@@ -243,9 +243,46 @@ async function writeOrderToWorktable({
  * 이 복구는 그런 주문만 골라 이미 준비된 빈 작업보드 슬롯에 연결한다.
  * 외부 시트/GAS 호출은 전혀 하지 않으며, 각 행은 writeOrderToWorktable의 잠금으로 선점된다.
  */
+/**
+ * 전환 중 누락된 공고→작업보드 연결을, 사람이 입력한 제목이 아닌 이미 저장된
+ * work-order 식별자로만 되살린다. 후보가 불명확하면 연결하지 않아 복구도 보류한다.
+ */
+async function reconcileCampaignWorktableLinks() {
+  const db = getPool();
+  const { rows } = await db.query(
+    `WITH candidates AS (
+       SELECT rc.id, wo.linked_tab_sheet_id, wo.linked_tab_name, wo.linked_tab_gid
+         FROM recruit_campaigns rc
+         JOIN work_orders wo
+           ON (rc.source_work_order_id = wo.id OR wo.linked_campaign_id = rc.id)
+        WHERE COALESCE(rc.linked_sheet_id, '') = ''
+          AND COALESCE(rc.linked_tab_name, '') = ''
+          AND wo.deleted_at IS NULL
+          AND COALESCE(wo.linked_tab_sheet_id, '') <> ''
+          AND COALESCE(wo.linked_tab_name, '') <> ''
+          AND EXISTS (
+            SELECT 1 FROM tab_configs tc
+             WHERE tc.sheet_id = wo.linked_tab_sheet_id
+               AND tc.tab_name = wo.linked_tab_name
+               AND COALESCE(tc.sheetless, FALSE) = TRUE
+          )
+     )
+     UPDATE recruit_campaigns rc
+        SET linked_sheet_id = c.linked_tab_sheet_id,
+            linked_tab_name = c.linked_tab_name,
+            linked_tab_gid = COALESCE(c.linked_tab_gid, ''),
+            updated_at = NOW()
+       FROM candidates c
+      WHERE rc.id = c.id
+      RETURNING rc.id, rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid`
+  );
+  return { linked: rows.length, items: rows };
+}
+
 async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-order-recovery' } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
+  const links = await reconcileCampaignWorktableLinks();
   const { rows } = await db.query(
     `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
             os.bank, os.account, os.depositor, os.price, os.date_str, os.order_num,
@@ -266,7 +303,7 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-or
       ORDER BY os.created_at ASC
       LIMIT $1`, [lim]);
 
-  const result = { scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
+  const result = { linked: links.linked, scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
   for (const row of rows) {
     let out;
     try {
@@ -301,6 +338,7 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-or
 
 module.exports = {
   writeOrderToWorktable,
+  reconcileCampaignWorktableLinks,
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,
   __setPoolForTest,
