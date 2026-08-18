@@ -1807,7 +1807,7 @@
 .pm-unconfirmed-transfer:hover{border-color:#7FA7D4;background:#F6FAFF}.pm-unconfirmed-transfer.on{border-color:#3B82F6;background:#EFF6FF;box-shadow:inset 0 0 0 1px #3B82F6}
 .pm-unconfirmed-transfer b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-unconfirmed-transfer span{font-size:11px;color:var(--t3,#6B7280)}
 .lgwrap.pm-unconfirmed-compare-table{overflow-x:hidden;margin-top:10px}.pm-unconfirmed-compare-table table.lgtable{min-width:0;table-layout:fixed}.pm-unconfirmed-compare-table th,.pm-unconfirmed-compare-table td{white-space:normal;overflow-wrap:anywhere;word-break:keep-all}.pm-unconfirmed-compare-table th{font-size:11px}.pm-unconfirmed-compare-table td{font-size:12px}
-table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:fixed}table.lgtable.pm-unconfirmed-two-row-table th,table.lgtable.pm-unconfirmed-two-row-table td{padding:8px 7px;vertical-align:middle;white-space:normal;overflow-wrap:anywhere;word-break:keep-all}table.lgtable.pm-unconfirmed-two-row-table thead th:nth-child(1){width:13%}.pm-unconfirmed-two-row-table thead th:nth-child(2){width:22%}.pm-unconfirmed-two-row-table thead th:nth-child(3){width:6%}.pm-unconfirmed-two-row-table thead th:nth-child(4),.pm-unconfirmed-two-row-table thead th:nth-child(5){width:12%}.pm-unconfirmed-two-row-table thead th:nth-child(6){width:17%}.pm-unconfirmed-two-row-table thead th:nth-child(7){width:18%}.pm-unconfirmed-two-row-table tbody th{min-width:0;background:#F8FAFC;font-size:11px}.pm-unconfirmed-two-row-table .num{white-space:nowrap}.pm-unconfirmed-two-row-table .pm-workboard-row td{background:#FFFDF5}.pm-unconfirmed-two-row-table .pm-transfer-row td{background:#F8FBFF}.pm-unconfirmed-two-row-table td .btn{margin-top:4px}.pm-unconfirmed-actionbar{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid var(--line,#E1E5EB);border-radius:10px;background:#F8FAFC}.pm-unconfirmed-actionbar .muted{flex:1;font-size:12px}.pm-unconfirmed-account{font-family:var(--mono);font-size:11px;letter-spacing:-.02em;overflow-wrap:anywhere}
+table.lgtable.pm-unconfirmed-two-row-table{width:100%;min-width:0;table-layout:fixed}table.lgtable.pm-unconfirmed-two-row-table th,table.lgtable.pm-unconfirmed-two-row-table td{padding:8px 7px;vertical-align:middle;white-space:normal;overflow-wrap:anywhere;word-break:keep-all}table.lgtable.pm-unconfirmed-two-row-table thead th:nth-child(1){width:10%}.pm-unconfirmed-two-row-table thead th:nth-child(2){width:20%}.pm-unconfirmed-two-row-table thead th:nth-child(3){width:5%}.pm-unconfirmed-two-row-table thead th:nth-child(4),.pm-unconfirmed-two-row-table thead th:nth-child(5){width:10%}.pm-unconfirmed-two-row-table thead th:nth-child(6){width:15%}.pm-unconfirmed-two-row-table thead th:nth-child(7){width:14%}.pm-unconfirmed-two-row-table thead th:nth-child(8){width:16%}.pm-unconfirmed-two-row-table tbody th{min-width:0;background:#F8FAFC;font-size:11px}.pm-unconfirmed-two-row-table .num{white-space:nowrap}.pm-unconfirmed-two-row-table .pm-workboard-row td{background:#FFFDF5}.pm-unconfirmed-two-row-table .pm-transfer-row td{background:#F8FBFF}.pm-unconfirmed-two-row-table td .btn{margin-top:4px}.pm-unconfirmed-actionbar{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid var(--line,#E1E5EB);border-radius:10px;background:#F8FAFC}.pm-unconfirmed-actionbar .muted{flex:1;font-size:12px}.pm-unconfirmed-account{font-family:var(--mono);font-size:11px;letter-spacing:-.02em;overflow-wrap:anywhere}.pm-unconfirmed-decision{margin-top:10px;padding:11px 12px;border:1px solid #D7E3F4;border-radius:10px;background:#F8FBFF}.pm-unconfirmed-decision p{margin:0 0 9px;font-size:12px;line-height:1.55}.pm-unconfirmed-decision .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.pm-unconfirmed-decision input,.pm-unconfirmed-decision select{height:30px;min-width:120px;padding:0 8px;border:1px solid var(--line,#E1E5EB);border-radius:7px;background:var(--card,#fff);font:inherit;font-size:12px}.pm-unconfirmed-decision .memo{flex:1;min-width:180px}
 @media(max-width:680px){.pm-unconfirmed-listbox{grid-template-columns:1fr}.pm-unconfirmed-box{min-height:0}table.lgtable.pm-unconfirmed-two-row-table th,table.lgtable.pm-unconfirmed-two-row-table td{padding:7px 4px;font-size:10px}.pm-unconfirmed-two-row-table thead th,.pm-unconfirmed-two-row-table tbody th{font-size:9px}.pm-unconfirmed-actionbar .muted{font-size:11px}}
 .pmrft{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line,#E1E5EB);background:var(--bg,#F7F8FA)}
 .pmrsum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -7680,7 +7680,7 @@ function _pmAccountNumber(transfer){
   return account || (transfer&&transfer.accountTail ? `끝 4자리 ${transfer.accountTail}` : '—');
 }
 function _pmUnconfirmedStateLabel(state){
-  return ({candidate_unpaid:'입금 이력 없음',duplicate_payment:'이미 입금',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인'})[state] || '작업보드 연결 필요';
+  return ({candidate_unpaid:'입금 이력 없음',duplicate_payment:'이미 입금',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인',transfer_not_confirmed:'이체 성공 확인 필요'})[state] || '작업보드 연결 필요';
 }
 function _pmRenderUnconfirmedDirect(match=null){
   const el=document.getElementById('pmUnconfirmedOv'), group=(STATE.pmUnconfirmedGroups||[])[Number(el?.dataset.groupIndex)];
@@ -7690,16 +7690,79 @@ function _pmRenderUnconfirmedDirect(match=null){
   if(match){ STATE.pmUnconfirmedMatches={...(STATE.pmUnconfirmedMatches||{}),[matchKey]:match}; }
   const activeMatch=match||savedMatch, matched=activeMatch&&activeMatch.candidate, results=(activeMatch&&activeMatch.results)||[];
   const resultBySeq=new Map(results.map(x=>[Number(x.seq),x]));
-  const workRow=matched ? `<tr class="pm-workboard-row"><th>작업보드값행</th><td>${esc(matched.label||matched.tabName)}</td><td>선택됨</td><td>—</td><td>—</td><td>—</td><td>대조 대상</td></tr>` : `<tr class="pm-workboard-row"><th>작업보드값행</th><td>연결된 작업보드 없음</td><td>—</td><td>—</td><td>—</td><td>—</td><td>작업보드 연결 필요</td></tr>`;
+  const workRow=matched ? `<tr class="pm-workboard-row"><th>작업보드값행</th><td>${esc(matched.label||matched.tabName)}</td><td>선택됨</td><td>—</td><td>—</td><td>—</td><td>대조 대상</td><td><button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">작업 다시 선택</button></td></tr>` : `<tr class="pm-workboard-row"><th>작업보드값행</th><td>연결된 작업보드 없음</td><td>—</td><td>—</td><td>—</td><td>—</td><td>작업보드 연결 필요</td><td><button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">작업 선택</button></td></tr>`;
   const transferRows=transfers.map((transfer,rowIndex)=>{
     const result=resultBySeq.get(Number(transfer.seq))||{};
-    const decision=_pmUnconfirmedStateLabel(result.state), action=matched ? `<button class="btn xs" onclick="_pmCompleteUnconfirmedRow(${rowIndex})">이 행 대조 완료</button>` : '';
-    return `<tr class="pm-transfer-row"><th>이체결과값행</th><td>${esc(transfer.memo||'—')}</td><td>${esc(result.rowIndex||'—')}</td><td class="num">${_pmNum(transfer.amount)}</td><td>${esc(transfer.holder||'—')}</td><td class="pm-unconfirmed-account">${esc(_pmAccountNumber(transfer))}</td><td>${esc(decision)}${action}</td></tr>`;
+    const decision=_pmUnconfirmedStateLabel(result.state);
+    const action=!matched ? '<span class="muted">작업 선택 필요</span>'
+      : result.state==='candidate_unpaid' ? `<button class="btn pri xs" onclick="_pmReviewUnconfirmedResult(${rowIndex},'APPROVE')">입금 성공 승인</button>`
+      : result.state==='duplicate_payment' ? `<button class="btn xs" onclick="_pmOpenDuplicateCaseForm(${rowIndex})">중복 입금 처리</button>`
+      : result.state==='participant_not_found' ? `<button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">작업 다시 선택</button>`
+      : `<button class="btn xs" onclick="_pmOpenUnconfirmedWorkSearch()">수동 확인 필요</button>`;
+    return `<tr class="pm-transfer-row"><th>이체결과값행</th><td>${esc(transfer.memo||'—')}</td><td>${esc(result.rowIndex||'—')}</td><td class="num">${_pmNum(transfer.amount)}</td><td>${esc(transfer.holder||'—')}</td><td class="pm-unconfirmed-account">${esc(_pmAccountNumber(transfer))}</td><td>${esc(decision)}</td><td>${action}</td></tr>`;
   }).join('');
   el.querySelector('.pm-unconfirmed-direct-view')?.remove();
   const view=document.createElement('div'); view.className='pm-unconfirmed-direct-view';
-  view.innerHTML=`<div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th></tr></thead><tbody>${workRow}${transferRows}</tbody></table></div><div class="pm-unconfirmed-actionbar"><span class="muted">${matched?'각 이체결과를 확인한 뒤 행별로 대조 완료할 수 있습니다.':'작업보드를 연결하면 각 이체결과의 참여자·입금 이력을 대조합니다.'}</span><button class="btn sm" onclick="_pmOpenUnconfirmedWorkSearch()">${matched?'작업 다시 선택':'작업보드 연결'}</button><button class="btn pri sm" onclick="_pmCompleteUnconfirmedView()">남은 행 전체 완료</button></div>`;
+  view.innerHTML=`<div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th><th>조치</th></tr></thead><tbody>${workRow}${transferRows}</tbody></table></div><div id="pmUnconfirmedDecision" class="pm-unconfirmed-decision" style="display:none"></div><div class="pm-unconfirmed-actionbar"><span class="muted">${matched?'판정별로 허용된 행만 처리합니다. 승인해도 입금기록과 작업보드 상태는 변경되지 않습니다.':'작업보드를 연결하면 각 이체결과의 참여자·입금 이력을 대조합니다.'}</span><button class="btn sm" onclick="_pmOpenDuplicateCaseManagement()">중복 입금 관리</button><button class="btn sm" onclick="_pmOpenUnconfirmedWorkSearch()">${matched?'작업 다시 선택':'작업보드 연결'}</button></div>`;
   el.querySelector('.pm-unconfirmed-search')?.before(view);
+}
+function _pmUnconfirmedContext(rowIndex){
+  const el=document.getElementById('pmUnconfirmedOv'), group=(STATE.pmUnconfirmedGroups||[])[Number(el?.dataset.groupIndex)], active=(STATE.pmUnconfirmedMatches||{})[String(group?.memo||'')];
+  const transfer=group?.items?.[Number(rowIndex)], result=(active?.results||[]).find(x=>Number(x.seq)===Number(transfer?.seq));
+  return {el,group,active,transfer,result,rowIndex:Number(rowIndex)};
+}
+function _pmOpenDuplicateCaseForm(rowIndex){
+  const c=_pmUnconfirmedContext(rowIndex), box=document.getElementById('pmUnconfirmedDecision');
+  if(!c.transfer||!c.result||!box) return;
+  box.style.display='block';
+  box.innerHTML=`<p><b>${esc(c.transfer.holder||'—')} · ${_pmNum(c.transfer.amount)}</b>은 이미 입금된 참여자입니다. 추가 입금 기록을 만들지 않고, 회수·환불 후속관리 건만 생성합니다. 실제 은행 처리는 외부에서 진행합니다.</p><div class="row"><select id="pmDuplicateType"><option value="RECOVERY">회수 요청</option><option value="REFUND">환불 요청</option></select><input id="pmDuplicateOwner" placeholder="담당자" value=""><input id="pmDuplicateDue" type="date"><input id="pmDuplicateMemo" class="memo" placeholder="조치 메모"><button class="btn xs" onclick="_pmReviewUnconfirmedResult(${c.rowIndex},'DUPLICATE')">후속관리 건 생성</button><button class="btn xs" onclick="_pmCloseUnconfirmedDecision()">취소</button></div>`;
+}
+function _pmCloseUnconfirmedDecision(){ const box=document.getElementById('pmUnconfirmedDecision'); if(box){box.style.display='none';box.innerHTML='';} }
+async function _pmReviewUnconfirmedResult(rowIndex, action){
+  const c=_pmUnconfirmedContext(rowIndex), R=STATE.pmResult;
+  if(!R||!c.group||!c.active||!c.transfer||!c.result) return;
+  const isApprove=action==='APPROVE';
+  if(isApprove && !confirm(`${c.transfer.holder||'참여자'} ${_pmNum(c.transfer.amount)}원 이체결과를 승인할까요?\n\n입금기록과 작업보드 입금 상태는 변경되지 않으며, 대조 검토 이력만 남습니다.`)) return;
+  const caseInfo=action==='DUPLICATE' ? {
+    resolutionType:document.getElementById('pmDuplicateType')?.value,
+    ownerName:document.getElementById('pmDuplicateOwner')?.value,
+    dueAt:document.getElementById('pmDuplicateDue')?.value,
+    memo:document.getElementById('pmDuplicateMemo')?.value,
+  } : undefined;
+  if(action==='DUPLICATE' && !confirm('중복입금 후속관리 건을 생성할까요? 실제 회수·환불 이체는 실행되지 않습니다.')) return;
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/unconfirmed-transfer-review',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,memo:c.group.memo,sheetId:c.active.candidate.sheetId,tabName:c.active.candidate.tabName,resultSeq:c.transfer.seq,action,caseInfo,confirm:true})});
+  if(!r||!r.ok){ toast((r&&r.error)||'대조 처리에 실패했습니다.'); return; }
+  c.group.items.splice(c.rowIndex,1);
+  _pmCloseUnconfirmedDecision();
+  if(c.group.items.length){ _pmRenderUnconfirmedDirect(); }
+  else {
+    delete (STATE.pmUnconfirmedMatches||{})[String(c.group.memo||'')];
+    const index=Number(c.el?.dataset.groupIndex); STATE.pmUnconfirmedGroups.splice(index,1); _pmUnconfirmedClose();
+    if(STATE.pmUnconfirmedGroups.length) _pmOpenUnconfirmedMatchList(Math.min(index,STATE.pmUnconfirmedGroups.length-1));
+  }
+  toast(action==='DUPLICATE'?'중복입금 후속관리 건을 생성했습니다.':'이체결과 승인 이력을 남겼습니다.');
+}
+const PM_DUPLICATE_CASE_LABEL={PENDING:'확인 대기',RECOVERY_REQUESTED:'회수 요청',REFUND_REQUESTED:'환불 요청',RECOVERED:'회수 완료',REFUNDED:'환불 완료',CLOSED:'종결'};
+function _pmDuplicateStatusOptions(selected){return Object.entries(PM_DUPLICATE_CASE_LABEL).map(([value,label])=>`<option value="${value}" ${value===selected?'selected':''}>${label}</option>`).join('');}
+async function _pmOpenDuplicateCaseManagement(){
+  const R=STATE.pmResult, box=document.getElementById('pmUnconfirmedDecision'); if(!R||!box) return;
+  box.style.display='block'; box.innerHTML='<p>중복입금 후속관리 건을 불러오는 중…</p>';
+  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/duplicate-payment-cases');
+  if(!r||!r.ok){box.innerHTML=`<p>${esc((r&&r.error)||'중복입금 후속관리 건을 불러오지 못했습니다.')}</p>`;return;}
+  const cases=Array.isArray(r.cases)?r.cases:[];
+  if(!cases.length){box.innerHTML='<p>현재 회차에 열린 중복입금 후속관리 건이 없습니다.</p>';return;}
+  box.innerHTML=`<p><b>중복입금 후속관리</b> · 실제 회수·환불 이체는 외부에서 처리하며, 아래에서 업무 상태와 담당·기한만 기록합니다.</p>${cases.map(x=>{const id=String(x.id);return `<div class="row" style="padding-top:8px;border-top:1px solid var(--line,#E1E5EB)"><span style="min-width:92px"><b>#${esc(x.resultSeq)}</b> · ${esc(x.transferMemo||'이체 결과')}</span><select id="pmCaseStatus-${id}">${_pmDuplicateStatusOptions(x.case_status)}</select><input id="pmCaseOwner-${id}" value="${esc(x.owner_name||'')}" placeholder="담당자"><input id="pmCaseDue-${id}" type="date" value="${esc(x.due_at||'')}"><input id="pmCaseMemo-${id}" class="memo" value="${esc(x.memo||'')}" placeholder="메모"><button class="btn xs" onclick="_pmUpdateDuplicatePaymentCase('${id}')">저장</button></div>`;}).join('')}<div class="row" style="justify-content:flex-end;margin-top:9px"><button class="btn xs" onclick="_pmCloseUnconfirmedDecision()">닫기</button></div>`;
+}
+async function _pmUpdateDuplicatePaymentCase(caseId){
+  const status=document.getElementById('pmCaseStatus-'+caseId)?.value;
+  const ownerName=document.getElementById('pmCaseOwner-'+caseId)?.value;
+  const dueAt=document.getElementById('pmCaseDue-'+caseId)?.value;
+  const memo=document.getElementById('pmCaseMemo-'+caseId)?.value;
+  if(!status) return;
+  if(!confirm('중복입금 후속관리 상태를 저장할까요? 실제 은행 이체는 실행되지 않습니다.')) return;
+  const r=await api('/api/trackb/payment/duplicate-payment-case/'+encodeURIComponent(caseId),{method:'PATCH',body:JSON.stringify({caseStatus:status,ownerName,dueAt,memo})});
+  if(!r||!r.ok){toast((r&&r.error)||'후속관리 상태를 저장하지 못했습니다.');return;}
+  toast('중복입금 후속관리 상태를 저장했습니다.'); await _pmOpenDuplicateCaseManagement();
 }
 function _pmOpenUnconfirmedWorkSearch(){
   const el=document.getElementById('pmUnconfirmedOv'), search=el?.querySelector('.pm-unconfirmed-search'), query=document.getElementById('pmUnconfirmedQuery');
@@ -7707,26 +7770,6 @@ function _pmOpenUnconfirmedWorkSearch(){
   search.classList.add('on');
   if(query){ query.focus(); _pmUnconfirmedLiveSearch(); }
 }
-function _pmCompleteUnconfirmedView(){
-  const el=document.getElementById('pmUnconfirmedOv'), index=Number(el?.dataset.groupIndex);
-  if(!Number.isInteger(index)) return;
-  STATE.pmUnconfirmedGroups.splice(index,1);
-  _pmUnconfirmedClose();
-  if(STATE.pmUnconfirmedGroups.length) _pmOpenUnconfirmedMatchList(Math.min(index,STATE.pmUnconfirmedGroups.length-1));
-  else toast('모든 미확인 이체 대조를 완료했습니다. 입금완료 기록은 생성되지 않았습니다.');
-}
-function _pmCompleteUnconfirmedRow(rowIndex){
-  const el=document.getElementById('pmUnconfirmedOv'), groupIndex=Number(el?.dataset.groupIndex), group=(STATE.pmUnconfirmedGroups||[])[groupIndex];
-  if(!group||!Number.isInteger(rowIndex)||rowIndex<0||rowIndex>=group.items.length) return;
-  group.items.splice(rowIndex,1);
-  if(group.items.length){ _pmRenderUnconfirmedDirect(); return; }
-  delete (STATE.pmUnconfirmedMatches||{})[String(group.memo||'')];
-  STATE.pmUnconfirmedGroups.splice(groupIndex,1);
-  _pmUnconfirmedClose();
-  if(STATE.pmUnconfirmedGroups.length) _pmOpenUnconfirmedMatchList(Math.min(groupIndex,STATE.pmUnconfirmedGroups.length-1));
-  else toast('모든 미확인 이체 대조를 완료했습니다. 입금완료 기록은 생성되지 않았습니다.');
-}
-
 let _pmUnconfirmedSearchTimer=null, _pmUnconfirmedSearchSeq=0;
 
 function _pmUnconfirmedLiveSearch(){
@@ -8680,7 +8723,7 @@ async function renderSettingsView(){
     <div class="ovnote">관리자 대시보드의 설정과 <b>같은 화면·같은 저장소</b>입니다 — 어느 쪽에서 바꿔도 결과가 같습니다.
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임만 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','gatecriteria','notice'] : ['nickname'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','gatecriteria','homebanner','notice'] : ['nickname'] });
 }
 
 /* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (frontend/docs/design-workdesk-home.html) ══
