@@ -126,6 +126,17 @@ async function _mergeOrderSubmissions(results, phoneList) {
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
           AND (os.mirror_status <> 'written' OR os.sheet_written_at > now() - interval '2 hours')
+          AND NOT (
+            os.sheet_id LIKE 'campaign:%'
+            AND os.mirror_status IN ('failed', 'stuck_manual')
+            AND EXISTS (
+              SELECT 1
+                FROM review_index ri
+               WHERE ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
+                 AND ri.tab_name = rc.title
+                 AND COALESCE(NULLIF(ri.row_json->>'주문번호', ''), '') <> ''
+            )
+          )
         ORDER BY os.submitted_at DESC
         LIMIT ${_ORDER_MERGE_LIMIT}`,
       [phoneList, String(_ORDER_MERGE_DAYS)]

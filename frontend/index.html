@@ -259,6 +259,7 @@
     .fee.prod { background:#EEF2FF; color:#3730A3; }
     .fee.rev  { background:var(--ok-light); color:#065F46; }
     .fee.unknown { background:#F1F3F6; color:#9199A6; font-weight:700; }
+    .fee.reflected { background:#DCFCE7; color:#166534; }
 
     /* ─── 받을 예정 금액 요약 카드 ─── */
     .sumcard { background:#fff; border:1px solid #D8E6FA; border-radius:var(--radius); padding:13px 15px; margin-bottom:12px; box-shadow:0 1px 5px rgba(49,130,246,.07); }
@@ -1538,8 +1539,15 @@ function _fmtReviewDateMeta(v) {
 function _pendingBadgeText(item) {
   const total = Array.isArray(item.captureSlots) ? item.captureSlots.length : 0;
   const done = Array.isArray(item.submittedSlots) ? Math.min(item.submittedSlots.length, total) : 0;
-  if (total > 1 && done > 0) return done + "/" + total + " 제출";
-  return "미제출";
+  if (total > 1 && done > 0) return "리뷰 " + done + "/" + total + " 제출";
+  return "리뷰제출대기";
+}
+
+/** 작업보드에 구매양식의 필수 주문정보가 기록된 경우만 리뷰 제출 상태와 별도로 표시한다. */
+function _hasPurchaseFormReflected(item) {
+  if (!item || item.isOrderPending || !item.row || typeof item.row !== 'object') return false;
+  const orderNumber = item.row['주문번호'];
+  return orderNumber != null && String(orderNumber).trim() !== '';
 }
 
 /** 구매양식 주문(isOrderPending) 카드의 배지 상태 → CSS 클래스 / 문구.
@@ -1654,8 +1662,11 @@ function renderReviewSubTab() {
         const prodBadge = (fee.productPrice != null)
           ? `<span class="fee prod">상품비 ${_fnum(fee.productPrice)}</span>`
           : `<span class="fee unknown">상품비 조회안됨</span>`;
+        const reflectedBadge = _hasPurchaseFormReflected(item)
+          ? '<span class="fee reflected">구매양식 반영완료</span>'
+          : '';
         const revBadge = (fee.reviewFee > 0) ? `<span class="fee rev">리뷰비 ${_fnum(fee.reviewFee)}</span>` : '';
-        feeLineHtml = `<div class="fee-line">${prodBadge}${revBadge}</div>`;
+        feeLineHtml = `<div class="fee-line">${prodBadge}${reflectedBadge}${revBadge}</div>`;
       }
       card.innerHTML = `
         <div class="camp-thumb">${thumbHtml}</div>
