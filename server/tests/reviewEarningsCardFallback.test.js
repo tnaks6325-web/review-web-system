@@ -27,5 +27,10 @@ assert.match(
   /\+ '\|\|order'\] \|\| null/,
   'a legacy review-index card must fall back to its work-level order amount'
 );
+assert.match(
+  body,
+  /campaignId = campMap\[`\$\{r\.sheetId\}\|\|\$\{r\.tabName\}`\]\?\.id[\s\S]*items\[rowKey\] = fallback\.value/,
+  'legacy rows with a different work key must receive the unambiguous campaign order amount'
+);
 
 console.log('review earnings card fallback contract passed');

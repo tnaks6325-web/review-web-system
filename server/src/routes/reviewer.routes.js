@@ -494,7 +494,8 @@ router.get('/review-earnings', async (req, res, next) => {
     // 작업보드(campaign_participants)의 결제금액을 리뷰어 예상 금액에 바로 반영한다.
     // 시트 색인으로 이미 보이는 주문은 NOT EXISTS로 제외해 이중 집계를 막는다.
     const { rows: sheetlessOrders } = await pool.query(
-      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.price,
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              ca.campaign_id AS "campaignId", os.price,
               os.review_fee_snapshot AS "feeSnapshot",
               os.submitted_at AS "orderedAt", cp.row_json AS "rowJson",
               COALESCE(rc.review_fee, 0) AS "reviewFee",
@@ -569,7 +570,7 @@ router.get('/review-earnings', async (req, res, next) => {
         productPrice: price > 0 ? price : null,
         thumbnailUrl: o.thumbnailUrl || '',
       };
-      const fallbackKey = `${o.sheetId || ''}||${o.tabName || ''}`;
+      const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
       const existingFallback = sheetlessFallbackCounts.get(fallbackKey);
       if (existingFallback) {
         existingFallback.count++;
@@ -586,6 +587,18 @@ router.get('/review-earnings', async (req, res, next) => {
 
     for (const [fallbackKey, fallback] of sheetlessFallbackCounts) {
       if (fallback.count === 1) items[fallbackKey + '||order'] = fallback.value;
+    }
+
+    // 구 시트 색인의 sheet/tab 값이 무시트 작업의 식별자와 다른 과도기 데이터 보완.
+    // 같은 모집공고의 미매칭 주문이 정확히 한 건일 때만 기존 카드 행에 연결한다.
+    for (const r of riRows) {
+      const rowKey = `${r.sheetId}||${r.tabName}||${r.rowIndex}`;
+      const current = items[rowKey];
+      const campaignId = campMap[`${r.sheetId}||${r.tabName}`]?.id;
+      const fallback = campaignId ? sheetlessFallbackCounts.get(campaignId) : null;
+      if (current && current.productPrice == null && fallback && fallback.count === 1) {
+        items[rowKey] = fallback.value;
+      }
     }
 
     res.json({
