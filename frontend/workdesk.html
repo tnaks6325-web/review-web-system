@@ -1801,6 +1801,12 @@
 .pm-unconfirmed-candidate-main{min-width:0;display:grid;gap:3px}.pm-unconfirmed-candidate-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pm-unconfirmed-candidate-meta{font-size:12px;color:var(--t3,#6B7280)}
 .pmUnconfirmedRecommendation{flex:none;border-radius:999px;background:#E5F3EE;color:#127A5E;font-size:11px;font-weight:800;padding:4px 7px}
+.pm-unconfirmed-listbox{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:138px;overflow:auto;padding:2px 4px 2px 2px}
+.pm-unconfirmed-transfer{display:grid;gap:3px;width:100%;padding:9px 10px;text-align:left;border:1px solid #D7E3F4;border-radius:9px;background:#FFF;color:var(--ink);font:inherit;cursor:pointer}
+.pm-unconfirmed-transfer:hover{border-color:#7FA7D4;background:#F6FAFF}.pm-unconfirmed-transfer.on{border-color:#3B82F6;background:#EFF6FF;box-shadow:inset 0 0 0 1px #3B82F6}
+.pm-unconfirmed-transfer b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pm-unconfirmed-transfer span{font-size:11px;color:var(--t3,#6B7280)}
+.lgwrap.pm-unconfirmed-compare-table{overflow-x:hidden;margin-top:10px}.pm-unconfirmed-compare-table table.lgtable{min-width:0;table-layout:fixed}.pm-unconfirmed-compare-table th,.pm-unconfirmed-compare-table td{white-space:normal;overflow-wrap:anywhere;word-break:keep-all}.pm-unconfirmed-compare-table th{font-size:11px}.pm-unconfirmed-compare-table td{font-size:12px}.pm-unconfirmed-compare-table th:nth-child(1),.pm-unconfirmed-compare-table th:nth-child(2){width:39%}.pm-unconfirmed-compare-table th:nth-child(3){width:22%}
+@media(max-width:680px){.pm-unconfirmed-listbox{grid-template-columns:1fr}.pm-unconfirmed-box{min-height:0}}
 .pmrft{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line,#E1E5EB);background:var(--bg,#F7F8FA)}
 .pmrsum{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .pmrs{border:1px solid var(--line,#E1E5EB);border-radius:9px;padding:8px 12px;min-width:104px;background:var(--card,#fff)}
@@ -7588,13 +7594,15 @@ async function _pmOpenBatchUnconfirmed(i){
     const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
     (acc[memo]||(acc[memo]=[])).push(x); return acc;
   },{}));
-  STATE.pmUnconfirmedGroups=groups.map(g=>String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음');
-  const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedGroupsOv';
-  el.innerHTML=`<div class="pmrbox" style="max-width:620px"><div class="pmrhd"><h3>미확인 이체 ${outside.length}건</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedGroupsClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">통장표시가 같은 이체를 한 작업 묶음으로 대조합니다. 묶음을 선택해 매칭할 작업을 검색하세요.</div><div style="display:grid;gap:8px;margin-top:12px">${groups.map((g,i)=>{const memo=STATE.pmUnconfirmedGroups[i];return `<button class="btn" style="display:flex;justify-content:space-between;gap:12px;padding:11px 12px;text-align:left" onclick="_pmOpenBatchUnconfirmedGroup(${i})"><b>${esc(memo)}</b><span class="muted">${g.length}건 · 작업 검색</span></button>`;}).join('')}</div></div></div>`;
-  document.body.appendChild(el);
+  STATE.pmUnconfirmedGroups=groups.map(g=>({ memo:String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음', items:g }));
+  _pmOpenUnconfirmedMatchList(0);
 }
 function _pmUnconfirmedGroupsClose(){ const el=document.getElementById('pmUnconfirmedGroupsOv'); if(el) el.remove(); }
-function _pmOpenBatchUnconfirmedGroup(i){ const memo=(STATE.pmUnconfirmedGroups||[])[Number(i)]; if(!memo) return; _pmUnconfirmedGroupsClose(); _pmOpenUnconfirmedMatch(memo); }
+function _pmOpenBatchUnconfirmedGroup(i){ _pmOpenUnconfirmedMatchList(i); }
+function _pmOpenUnconfirmedMatchList(i){
+  const group=(STATE.pmUnconfirmedGroups||[])[Number(i)]; if(!group) return;
+  _pmUnconfirmedGroupsClose(); _pmOpenUnconfirmedMatch(group.memo, Number(i));
+}
 
 function _pmFileB64(file){
   return new Promise((res,rej)=>{
@@ -7652,6 +7660,17 @@ function _pmUnconfirmedRenderCandidates(out, candidates){
   }).join('');
 }
 
+function _pmSelectUnconfirmedMemo(i){
+  const group=(STATE.pmUnconfirmedGroups||[])[Number(i)], el=document.getElementById('pmUnconfirmedOv');
+  if(!group||!el) return;
+  el.dataset.memo=group.memo; el.dataset.groupIndex=String(i);
+  document.querySelectorAll('#pmUnconfirmedTransferList .pm-unconfirmed-transfer').forEach((x,n)=>x.classList.toggle('on',n===Number(i)));
+  const query=document.getElementById('pmUnconfirmedQuery'), out=document.getElementById('pmUnconfirmedCandidates');
+  if(query) query.value=group.memo;
+  if(out) out.innerHTML='<div class="muted" style="padding:9px 10px">추천 작업을 불러오는 중…</div>';
+  _pmUnconfirmedSearch({ live:true });
+}
+
 async function _pmUnconfirmedInspect(i){
   const R=STATE.pmResult, st=STATE.pmUnconfirmed, el=document.getElementById('pmUnconfirmedOv');
   const c=st&&st.candidates&&st.candidates[i]; if(!R||!st||!c||!el) return;
@@ -7668,7 +7687,7 @@ async function _pmUnconfirmedInspect(i){
     const note=`<div class="pmnote" style="margin-top:10px;background:#FFF7E8;border-left-color:#D99A34;color:#784C09"><b>계좌 불일치 이체완료 후보</b><br>등록 계좌와 실제 이체 계좌가 달라 자동 반영되지 않은 건입니다. 계좌 소유를 확인한 뒤에만 반영하세요.</div><div style="display:grid;gap:7px;margin-top:8px">${reconciliationCandidates.map((x,i)=>`<button class="btn sm" style="text-align:left" onclick="_pmReconcileMismatch(${i})">${esc(x.reviewerName)} · ${_pmNum(x.amount)}원 · 등록 …${esc(x.expectedAccountTail)} / 실제 …${esc(x.resultAccountTail)} · 확인 후 입금 반영</button>`).join('')}</div>`;
     document.getElementById('pmUnconfirmedCandidates').insertAdjacentHTML('beforeend',note);
   });
-  out.innerHTML=`<div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C"><b>${label}</b> 대조 결과입니다. 선택만으로 입금완료 기록은 생성되지 않습니다.</div><div class="lgwrap"><table class="lgtable pmtable"><thead><tr><th>수취인</th><th>금액</th><th>판정</th></tr></thead><tbody>${(r.results||[]).map(x=>`<tr><td>${esc(x.holder||'—')}</td><td class="num">${_pmNum(x.amount)}</td><td>${esc(state[x.state]||x.state)}</td></tr>`).join('')}</tbody></table></div>`;
+  out.innerHTML=`<div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C"><b>${label}</b> 대조 결과입니다. 선택만으로 입금완료 기록은 생성되지 않습니다.</div><div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable"><thead><tr><th>작업보드값</th><th>이체결과값</th><th>판정</th></tr></thead><tbody>${(r.results||[]).map(x=>`<tr><td>${esc(x.holder||'—')} · ${_pmNum(x.amount)}</td><td>${esc(x.holder||'—')} · ${_pmNum(x.amount)}${x.accountTail?` · 계좌끝 ${esc(x.accountTail)}`:''}</td><td>${esc(state[x.state]||x.state)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 async function _pmReconcileMismatch(i){
@@ -7680,13 +7699,15 @@ async function _pmReconcileMismatch(i){
   _pmUnconfirmedClose(); toast('계좌 불일치 이체를 입금완료로 반영했습니다.'); await _pmLoad();
 }
 
-function _pmOpenUnconfirmedMatch(memo){
+function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   const R=STATE.pmResult; if(!R || !R.preview || !R.preview.uploadId) return;
   _pmUnconfirmedClose();
-  const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo;
-  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote"><b>${esc(memo)}</b> 통장표시와 같은 이체를 한 작업 묶음으로 대조합니다. 공고에 같은 입금명이 있으면 먼저 추천하며, 선택만으로 입금 기록은 생성되지 않습니다.</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
+  const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedOv'; el.dataset.memo=memo; el.dataset.groupIndex=String(selectedGroupIndex);
+  const groups=STATE.pmUnconfirmedGroups||[];
+  el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택해 대조합니다. 추천은 자동 반영되지 않으며, 승인 전에는 입금 기록이 생성되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
   document.body.appendChild(el);
   document.getElementById('pmUnconfirmedQuery').focus();
+  _pmUnconfirmedSearch({ live:true });
 }
 
 function _pmResultModal(){
