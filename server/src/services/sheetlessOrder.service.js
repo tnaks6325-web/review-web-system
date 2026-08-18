@@ -290,7 +290,10 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-or
             ca.phone8 AS login_phone8, ca.owner_phone8, r.name AS login_name,
             rc.linked_sheet_id, rc.linked_tab_name, rc.linked_tab_gid
        FROM order_submissions os
-       JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+       JOIN campaign_applications ca
+         ON (os.campaign_application_id = ca.id
+             OR ca.order_submission_id = os.id
+             OR ca.late_order_id = os.id)
        JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
        LEFT JOIN reviewers r ON r.phone8 = COALESCE(ca.owner_phone8, ca.phone8)
       WHERE os.deleted_at IS NULL
