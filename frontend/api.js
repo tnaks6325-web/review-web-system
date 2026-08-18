@@ -39,6 +39,12 @@ const API_BASE_URL = (function() {
   if (typeof window !== 'undefined' && window.location.hostname === 'test-review-wdb-web-production.up.railway.app') {
     return 'https://test-review-wdb-production.up.railway.app';
   }
+  // Railway PR 테섭은 프론트·API가 같은 PR 번호로 함께 생성된다.
+  // PR 프론트가 본섭 API를 보지 않도록 번호를 보존해 테스트 API로 연결한다.
+  if (typeof window !== 'undefined') {
+    const pr = window.location.hostname.match(/^test-review-wdb-web-review-web-system-pr-(\d+)\.up\.railway\.app$/);
+    if (pr) return 'https://test-review-wdb-review-web-system-pr-' + pr[1] + '.up.railway.app';
+  }
   // ★ Railway 프로덕션 URL
   return 'https://sublime-magic-production-790b.up.railway.app';
 })();

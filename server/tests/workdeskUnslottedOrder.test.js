@@ -29,9 +29,10 @@ t('서버는 목표 안의 빈 슬롯만 FOR UPDATE로 선택', () => {
   assert.match(src, /FOR UPDATE SKIP LOCKED/);
   assert.match(src, /deleted_at=NOW\(\), active=FALSE/);
 });
-t('관리자 전용 재배정 라우트와 화면 실행 경로가 있다', () => {
+t('관리자 확인을 요구하는 재배정 라우트와 화면 실행 경로가 있다', () => {
   assert.match(route, /\/workdesk\/assign-unslotted-order/);
   assert.match(route, /adminOrMasterMiddleware/);
+  assert.match(route, /confirm !== true/);
   assert.match(front, /function assignUnslottedOrder\(rowId\)/);
   assert.match(front, /번호 배정/);
 });

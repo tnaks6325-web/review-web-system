@@ -7091,8 +7091,8 @@ function _pmBatchActions(b,i){
     ? `<button class="btn sm primary" onclick="_pmMarkApplied(${i})">적용완료 처리</button>` : '';
   const resultUpload = (b.status==='downloaded' || b.status==='applied')
     ? `<button class="pmdrop" type="button" title="클릭하거나 결과 파일을 끌어 놓으세요" onclick="_pmPickResult(${i})" ondragover="_pmResultDragOver(event)" ondragleave="_pmResultDragLeave(event)" ondrop="_pmResultDrop(event,${i})"><span class="pmdropicon" aria-hidden="true">⇧</span><span>결과 파일 업로드</span></button>` : '';
-  const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefileByIndex(${i})">⬇ 다시 받기</button>
-    ${reconcile}<button class="btn sm danger" onclick="_pmCancelByIndex(${i})">회차 취소</button>`
+  const manage = b.status==='downloaded' ? `<button class="btn sm" onclick="_pmRefile('${b.id}')">⬇ 다시 받기</button>
+    ${reconcile}<button class="btn sm danger" onclick="_pmCancel('${b.id}',${b.seq})">회차 취소</button>`
     : '';
   const result = b.resultUploadId ? `<button class="btn sm" onclick="_pmOpenResult(${i})">이체결과 확인</button>
     ` : '';
@@ -7496,12 +7496,6 @@ async function _pmRefile(id){
   }catch(e){ toast('다운로드 실패: '+e.message); }
 }
 
-async function _pmRefileByIndex(i){
-  const b = (STATE.pmBatches||[])[i];
-  if(!b) return;
-  return _pmRefile(b.id);
-}
-
 /* ── 이체결과 파일 업로드 → 조건 충족 시 자동 반영 (M2) ───────────────
    ★ 서버가 파일을 재해석·재매칭한다. 계좌+금액이 정확히 매칭된 성공 건은
      파일 완전성과 무관하게 즉시 기록하고, 매칭되지 않은 대상만 대기로 둔다.
@@ -7642,23 +7636,7 @@ async function _pmUnconfirmedInspect(i){
   if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'대조하지 못했습니다.')}</div>`; return; }
   const label=esc(c.label||c.tabName);
   const state={duplicate_payment:'중복입금 발견',candidate_unpaid:'입금이력 없음',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인'};
-  const reconciliationCandidates=Array.isArray(r.reconciliationCandidates)?r.reconciliationCandidates:[];
-  STATE.pmReconciliationCandidates=reconciliationCandidates;
-  queueMicrotask(()=>{
-    if(!reconciliationCandidates.length || !document.getElementById('pmUnconfirmedCandidates')) return;
-    const note=`<div class="pmnote" style="margin-top:10px;background:#FFF7E8;border-left-color:#D99A34;color:#784C09"><b>계좌 불일치 이체완료 후보</b><br>등록 계좌와 실제 이체 계좌가 달라 자동 반영되지 않은 건입니다. 계좌 소유를 확인한 뒤에만 반영하세요.</div><div style="display:grid;gap:7px;margin-top:8px">${reconciliationCandidates.map((x,i)=>`<button class="btn sm" style="text-align:left" onclick="_pmReconcileMismatch(${i})">${esc(x.reviewerName)} · ${_pmNum(x.amount)}원 · 등록 …${esc(x.expectedAccountTail)} / 실제 …${esc(x.resultAccountTail)} · 확인 후 입금 반영</button>`).join('')}</div>`;
-    document.getElementById('pmUnconfirmedCandidates').insertAdjacentHTML('beforeend',note);
-  });
   out.innerHTML=`<div class="pmnote" style="background:#EEF4FB;border-left-color:#7FA7D4;color:#1B4F9C"><b>${label}</b> 대조 결과입니다. 선택만으로 입금완료 기록은 생성되지 않습니다.</div><div class="lgwrap"><table class="lgtable pmtable"><thead><tr><th>수취인</th><th>금액</th><th>판정</th></tr></thead><tbody>${(r.results||[]).map(x=>`<tr><td>${esc(x.holder||'—')}</td><td class="num">${_pmNum(x.amount)}</td><td>${esc(state[x.state]||x.state)}</td></tr>`).join('')}</tbody></table></div>`;
-}
-
-async function _pmReconcileMismatch(i){
-  const R=STATE.pmResult, x=(STATE.pmReconciliationCandidates||[])[Number(i)];
-  if(!R||!x||!R.preview?.uploadId) return;
-  if(!confirm(`${x.reviewerName} ${_pmNum(x.amount)}원\n\n등록 계좌 …${x.expectedAccountTail}와 실제 이체 계좌 …${x.resultAccountTail}가 다릅니다.\n계좌 소유를 확인했고 이 이체를 입금완료로 반영할까요?\n\n이 작업은 감사 이력에 기록되며 되돌릴 수 없습니다.`)) return;
-  const r=await api('/api/trackb/payment/batch/'+R.batch.id+'/unconfirmed-reconcile',{method:'POST',body:JSON.stringify({uploadId:R.preview.uploadId,itemId:x.itemId,resultSeq:x.resultSeq,confirm:true})});
-  if(!r||!r.ok){ toast((r&&r.error)||'계좌 불일치 이체를 반영하지 못했습니다.'); return; }
-  _pmUnconfirmedClose(); toast('계좌 불일치 이체를 입금완료로 반영했습니다.'); await _pmLoad();
 }
 
 function _pmOpenUnconfirmedMatch(memo){
@@ -7859,12 +7837,6 @@ async function _pmCancel(id, seq){
   if(!r || !r.ok){ toast((r&&r.error)||'취소 실패'); return; }
   toast('회차를 취소했습니다');
   await _pmLoad();
-}
-
-async function _pmCancelByIndex(i){
-  const b = (STATE.pmBatches||[])[i];
-  if(!b) return;
-  return _pmCancel(b.id, b.seq);
 }
 
 
@@ -10773,9 +10745,9 @@ async function assignUnslottedOrder(rowId){
   if(!confirm('번호 없는 이 주문을 작업오더 목표 인원 안의 첫 빈 번호 슬롯으로 이동할까요?\n\n주문·리뷰·입금 정보는 유지되고, 추가 행은 제거됩니다.')) return;
   STATE._assignUnslottedBusy=true;
   try{
-    const result=await api('/api/trackb/workdesk/assign-unslotted-order',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
+    const result=await api('/api/trackb/workdesk/assign-unslotted-order',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,confirm:true})});
     if(!result||!result.ok){
-      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.'};
+      const messages={no_open_slot:'목표 인원 안에 비어 있는 슬롯이 없습니다.',already_numbered:'이미 번호가 배정된 주문입니다.',work_order_target_missing:'작업오더 목표인원을 찾을 수 없습니다.',need_confirm:'확인 후 다시 시도해 주세요.'};
       toast(messages[result&&result.error]||(result&&result.error)||'번호 배정에 실패했습니다. 새로고침 후 다시 시도해 주세요.');
       return;
     }

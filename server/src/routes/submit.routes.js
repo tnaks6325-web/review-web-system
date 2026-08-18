@@ -830,12 +830,26 @@ async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
   }
 
   // _authoritativeHold가 이미 applicationId·campaignId·holdToken 소유권을 확인했다.
-  // 기존 공고도 동일한 DB 전용 주문원장으로 전환하므로 연결 시트 값은 읽지 않는다.
+  // linked_* 값은 Google Sheet 접근 정보가 아니라 기존 작업보드 행의 DB 내부 식별자다.
+  // 이 조회는 DB만 읽으며, Google Sheet/GAS를 읽거나 쓰지 않는다.
+  const { rows } = await pool.query(
+    `SELECT linked_sheet_id, linked_tab_name, linked_tab_gid
+       FROM recruit_campaigns
+      WHERE id = $1
+      LIMIT 1`,
+    [holdCtx.campaignId]
+  );
+  const campaign = rows[0] || {};
   return {
     sheetId: `campaign:${holdCtx.campaignId}`,
     gid: '',
     tabName: `campaign:${holdCtx.campaignId}`,
     sheetless: true,
+    worktable: (campaign.linked_sheet_id && campaign.linked_tab_name) ? {
+      sheetId: campaign.linked_sheet_id,
+      tabName: campaign.linked_tab_name,
+      tabGid: campaign.linked_tab_gid || '',
+    } : null,
   };
 }
 
@@ -1048,7 +1062,32 @@ router.post('/order', async (req, res, next) => {
     //   버린) 구글 시트에 쓰려다 실패하고, reconcile 이 영원히 재시도한다.
     //   ★ 판정은 `sheetlessScope` 단일 출처. 조회 실패는 false(fail-open = 종전 경로) —
     //     최종 방어는 큐 실행부(syncQueue)가 쓰기 직전 다시 확인하는 백스톱이다.
-    let sheetlessDone = orderScope.sheetless ? { ok: true, dbOnly: true } : null;
+    // 참여형 무시트 주문은 `campaign:*` 원장 키와 별도로, 공고에 연결된 DB 작업보드의
+    // 빈 슬롯 하나를 즉시 선점한다. sheetRow가 없는 것은 정상이며 서비스가 원자적으로 배정한다.
+    let sheetlessDone = null;
+    if (orderScope.sheetless) {
+      try {
+        const wt = orderScope.worktable;
+        sheetlessDone = wt
+          ? await require('../services/sheetlessOrder.service').writeOrderToWorktable({
+              sheetId: wt.sheetId, tabName: wt.tabName, tabGid: wt.tabGid,
+              orderData, orderSubmissionId: ledger.orderSubmissionId,
+              loginPhone8: loginPhone8 || '', loginName: loginName || '',
+            })
+          : { ok: false, reason: 'no_worktable_mapping' };
+      } catch (slErr) {
+        sheetlessDone = { ok: false, reason: 'exception', message: slErr.message };
+      }
+      if (!sheetlessDone.ok) {
+        await markOrderMirrorFailed(ledger.orderSubmissionId, sheetlessDone.message || sheetlessDone.reason);
+        logger.error(`[submit/order] 작업보드 기록 실패(주문은 저장됨): ${sheetlessDone.reason} ${sheetlessDone.message || ''}`);
+        logAbnormal({
+          flow: 'order_submit', step: 'sheetless_worktable_write', severity: 'critical',
+          error: new Error(`작업보드 기록 실패: ${sheetlessDone.reason}`),
+          context: { campaignId: holdCtx && holdCtx.campaignId, orderSubmissionId: ledger.orderSubmissionId },
+        });
+      }
+    }
     if (ledger.sheetRow) {
       let isSl = false;
       try {
@@ -1118,8 +1157,8 @@ router.post('/order', async (req, res, next) => {
       slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
-      // 무시트는 큐 없이 같은 요청에서 끝난다 — 'written' 이 곧 완결(시트 경로의 종결값과 같은 값).
-      mirrorStatus: orderScope.sheetless ? 'written'
+      // 무시트는 DB 작업보드 기록까지 성공한 경우에만 완결이다.
+      mirrorStatus: orderScope.sheetless ? (sheetlessDone && sheetlessDone.ok ? 'written' : 'failed')
         : (sheetlessDone && sheetlessDone.ok) ? 'written'
         : queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
       campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내

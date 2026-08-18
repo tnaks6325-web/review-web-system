@@ -2430,6 +2430,20 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
   }
 });
 
+// POST /api/diag/sheetless-worktable-recover — 첫 탈시트 배포 구간에 원장만 남은 주문을
+// DB 작업보드의 준비 슬롯으로 일회성 복구한다. Google Sheet/GAS는 호출하지 않는다.
+router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { withJobLock } = require('../utils/jobLock');
+    const { recoverUnwrittenSheetlessOrders } = require('../services/sheetlessOrder.service');
+    const limit = Math.min(parseInt((req.body || {}).limit, 10) || 100, 1000);
+    const by = (req.user && (req.user.name || req.user.username || req.user.id)) || 'admin';
+    const out = await withJobLock('sheetless_worktable_recover', () => recoverUnwrittenSheetlessOrders({ limit, by }));
+    if (out && out.skipped) return res.status(409).json({ ok: false, busy: true, error: '다른 작업보드 복구가 진행 중입니다.' });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/order-flush-tab — 특정 탭만 우선 시트반영(FIFO 우회, 백그라운드)
 //   글로벌 큐는 created_at FIFO라 최근 캠페인 탭이 뒤로 밀린다. 이 엔드포인트는

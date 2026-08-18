@@ -30,7 +30,7 @@ function __setPoolForTest(p) { _pool = p || null; }
 const { logger } = require('../utils/logger');
 const { formatDepositStamp } = require('../utils/depositStamp');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
-const { parseResultAoa, matchResults, digitsOnly, parseTransferAt } = require('../utils/paymentResultParse');
+const { parseResultAoa, matchResults, digitsOnly } = require('../utils/paymentResultParse');
 const paymentApply = require('./paymentApply.service');
 const { recordDeposits } = paymentApply;
 const { rebuildLedgers } = require('./sheetlessLedger.service');
@@ -99,7 +99,7 @@ function _itemView(r) {
     accountHolder: r.account_holder || '',
     amount: Number(r.amount || 0),
     transferMemo: r.transfer_memo || '',
-    status: r.status, failReason: r.fail_reason || '', resultStatus: r.result_status || '',
+    status: r.status,
   };
 }
 
@@ -301,42 +301,6 @@ function _unconfirmedMemo(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function _reconciliationName(value) {
-  return String(value || '')
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\s+/g, '')
-    .trim();
-}
-
-/**
- * 계좌가 바뀐 실제 이체 결과는 자동 반영하지 않는다. 같은 회차의 결과파일 누락 실패 항목 중
- * 이름(괄호 설명 제외)과 금액이 정확히 하나만 맞을 때에만 관리자 확인용 후보로 제시한다.
- */
-function findAccountMismatchCandidates({ transfers, items }) {
-  const candidates = [];
-  for (const transfer of (transfers || [])) {
-    if (!transfer || transfer.success !== true || !transfer.seq || !(Number(transfer.amount) > 0)) continue;
-    const holder = _reconciliationName(transfer.holder);
-    if (!holder) continue;
-    const matches = (items || []).filter(item =>
-      item && item.status === 'failed'
-      && String(item.failReason || '').includes('결과 파일에 해당 이체내역 없음')
-      && Number(item.amount) === Number(transfer.amount)
-      && _reconciliationName(item.reviewerName) === holder);
-    if (matches.length !== 1) continue;
-    const item = matches[0];
-    const expectedAccountTail = digitsOnly(item.bankAccount || item.accountTail || '').slice(-4);
-    const resultAccountTail = String(transfer.accountTail || digitsOnly(transfer.accountDigits || '')).slice(-4);
-    if (!expectedAccountTail || !resultAccountTail || expectedAccountTail === resultAccountTail) continue;
-    candidates.push({
-      resultSeq: Number(transfer.seq), itemId: item.id, reviewerName: item.reviewerName || '',
-      amount: Number(transfer.amount), resultAccountTail, expectedAccountTail,
-      transferredAt: transfer.transferredAt || '',
-    });
-  }
-  return candidates;
-}
-
 async function searchUnconfirmedWorkCandidates({ query }) {
   const q = String(query || '').trim();
   if (q.length < 2) throw new ResultError('bad_request', '작업명 두 글자 이상을 입력해 주세요.');
@@ -384,13 +348,6 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
        FROM review_index ri
       WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.reviewer_name = ANY($3::text[])
       ORDER BY ri.reviewer_name, ri.row_index`, [sheetId, tabName, holders]) : [];
-  // The selection is scoped to this work, but uniqueness must be checked against
-  // every item in the batch to prevent same-name/same-amount cross-work matching.
-  const { rows: batchItems } = await _db().query(
-    'SELECT * FROM payment_batch_items WHERE batch_id = $1', [batchId]);
-  const selectedItemIds = new Set(batchItems
-    .filter(x => x.sheet_id === sheetId && x.tab_name === tabName)
-    .map(x => String(x.id)));
   const byName = new Map();
   for (const p of participants) {
     const key = String(p.reviewerName || '');
@@ -412,8 +369,6 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
     ok: true,
     work: { sheetId, tabName }, memo: normalizedMemo,
     results,
-    reconciliationCandidates: findAccountMismatchCandidates({ transfers, items: batchItems.map(_itemView) })
-      .filter(x => selectedItemIds.has(String(x.itemId))),
     summary: {
       duplicatePayment: results.filter(x => x.state === 'duplicate_payment').length,
       candidateUnpaid: results.filter(x => x.state === 'candidate_unpaid').length,
@@ -421,92 +376,6 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
       notFound: results.filter(x => x.state === 'participant_not_found').length,
     },
   };
-}
-
-async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, by }) {
-  if (!batchId || !uploadId || !itemId || !Number.isInteger(Number(resultSeq))) {
-    throw new ResultError('bad_request', '회차·결과파일·대상 항목·결과 행을 모두 지정해 주세요.');
-  }
-  const client = await _db().connect();
-  let paidItem;
-  let transfer;
-  try {
-    await client.query('BEGIN');
-    const { rows: [batch] } = await client.query('SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    if (!batch) throw new ResultError('not_found', '회차를 찾을 수 없습니다.');
-    if (batch.status === 'cancelled') throw new ResultError('cancelled', '취소된 회차는 대조할 수 없습니다.');
-    const { rows: [upload] } = await client.query(
-      'SELECT summary FROM payment_result_uploads WHERE id = $1 AND batch_id = $2 FOR UPDATE', [uploadId, batchId]);
-    const outside = upload && upload.summary && upload.summary.preview && upload.summary.preview.unmatchedResults;
-    transfer = Array.isArray(outside) && outside.find(x => Number(x && x.seq) === Number(resultSeq));
-    if (!transfer || transfer.success !== true) throw new ResultError('not_found', '저장된 이체완료 미확인 행을 찾을 수 없습니다.');
-    // A name and amount can occur in multiple jobs in one batch.  Lock and assess
-    // the complete batch, so a result row cannot be manually paired across jobs.
-    const { rows: batchItems } = await client.query(
-      'SELECT * FROM payment_batch_items WHERE batch_id = $1 FOR UPDATE', [batchId]);
-    const row = batchItems.find(x => String(x.id) === String(itemId));
-    if (!row) throw new ResultError('not_found', '회차 대상 항목을 찾을 수 없습니다.');
-    const item = _itemView(row);
-    const candidates = findAccountMismatchCandidates({ transfers: [transfer], items: batchItems.map(_itemView) });
-    const candidate = candidates.find(x => x.itemId === item.id && x.resultSeq === Number(resultSeq));
-    if (!candidate || candidates.length !== 1) throw new ResultError('not_eligible', '계좌 불일치 수동 대조 조건을 충족하지 않습니다.');
-    const { rowCount: inserted } = await client.query(
-      `INSERT INTO payment_account_mismatch_reconciliations
-        (batch_id, upload_id, result_seq, batch_item_id, expected_account_tail, result_account_tail, amount, reconciled_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
-      [batchId, uploadId, Number(resultSeq), itemId, candidate.expectedAccountTail,
-        candidate.resultAccountTail, Number(transfer.amount), by || '']);
-    if (!inserted) throw new ResultError('already_reconciled', '이 결과 행 또는 대상 항목은 이미 수동 대조되었습니다.');
-    const parsedAt = parseTransferAt(transfer.transferredAt || '');
-    const paidAt = parsedAt ? parsedAt.iso : null;
-    const updated = await client.query(
-      `UPDATE payment_batch_items
-          SET status = 'paid', paid_at = COALESCE($2::timestamptz, NOW()), result_status = '관리자 확인: 계좌 불일치 이체완료',
-              result_seq = $3, fail_reason = NULL
-        WHERE id = $1 AND status = 'failed' AND result_status = '결과 파일에 없음'`,
-      [itemId, paidAt, Number(resultSeq)]);
-    if (!updated.rowCount) throw new ResultError('not_eligible', '결과 파일 누락으로 실패 처리된 미입금 항목만 대조할 수 있습니다.');
-    const nextPreview = { ...(upload.summary && upload.summary.preview), unmatchedResults: outside.filter(x => Number(x && x.seq) !== Number(resultSeq)) };
-    await client.query(
-      `UPDATE payment_result_uploads SET success_count = success_count + 1, failed_count = GREATEST(0, failed_count - 1),
-          applied_count = applied_count + 1, summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
-      [uploadId, JSON.stringify({ preview: nextPreview })]);
-    paidItem = {
-      sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex, reviewerName: item.reviewerName,
-      amount: String(item.amount || ''), depositColKey: null, gid: '', paidAt,
-      stamp: _depositDateFromResultStamp(transfer.transferredAt || ''),
-    };
-    await recordDeposits(client, [paidItem], { by: by || '' });
-    const { rows: [meta] } = await client.query(
-      'SELECT submit_col2, tab_gid FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3',
-      [paidItem.sheetId, paidItem.tabName, paidItem.rowIndex]);
-    if (meta) { paidItem.depositColKey = meta.submit_col2 || null; paidItem.gid = meta.tab_gid || ''; }
-    await client.query('COMMIT');
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw err;
-  } finally { client.release(); }
-
-  const boardItems = paidItem && paidItem.stamp ? [paidItem] : [];
-  const write = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
-  const verify = await paymentApply.verifyDepositCells(boardItems) || {};
-  const queued = Number(write.queued) || 0;
-  const missing = Math.max(0, (Number(verify.missing) || 0) - queued);
-  const outcome = { recorded: Number(verify.verified) || 0, queued,
-    skipped: (Number(write.skipped) || 0) + (paidItem ? 1 - boardItems.length : 0),
-    failed: (Number(write.failed) || 0) + missing };
-  await _db().query(
-    `UPDATE payment_batches SET board_recorded_count = COALESCE(board_recorded_count,0) + $2,
-      board_queued_count = COALESCE(board_queued_count,0) + $3, board_skipped_count = COALESCE(board_skipped_count,0) + $4,
-      board_failed_count = COALESCE(board_failed_count,0) + $5,
-      board_stamp = CASE
-        WHEN COALESCE(board_stamp, '') = '' THEN $6
-        WHEN $6 = '' OR POSITION($6 IN board_stamp) > 0 THEN board_stamp
-        ELSE board_stamp || ', ' || $6
-      END,
-      board_recorded_at = NOW(), board_recorded_by = $7 WHERE id = $1`,
-    [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, paidItem.stamp || '', by || 'payment']);
-  return { ok: true, itemId, resultSeq: Number(resultSeq), amount: Number(transfer.amount), board: outcome };
 }
 
 /* ★★ 실패 안내 문구는 **여기 한 곳**(사용자 확정 ⑤ "등록한 계좌 정보를 확인해 주세요").
@@ -918,4 +787,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, findAccountMismatchCandidates, reconcileAccountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
