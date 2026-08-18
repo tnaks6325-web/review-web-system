@@ -29,22 +29,29 @@ assert.match(migration, /unconfirmed_transfer_reviews/);
 assert.match(migration, /duplicate_payment_cases/);
 assert.match(migration, /UNIQUE \(upload_id, result_seq\)/,
   '같은 이체 결과를 두 번 검토하지 못하게 해야 한다');
-assert.doesNotMatch(svc.reviewUnconfirmedTransfer.toString(), /recordDeposits|status = 'paid'/,
-  '행별 대조 검토가 입금기록이나 회차 상태를 변경하면 안 된다');
+assert.match(svc.reviewUnconfirmedTransfer.toString(), /recordDeposits/,
+  '입금 성공 승인 시 해당 참여자 행의 입금 이력과 작업보드 입금일을 기록해야 한다');
 
 const queries = [];
+let approvedBoardItems = [];
+svc.__setPaymentApplyForTest({
+  markDepositCells: async items => { approvedBoardItems = items; return { recorded: items.length, queued: 0, skipped: 0, failed: 0 }; },
+  verifyDepositCells: async items => ({ verified: items.length, missing: 0 }),
+});
 const client = {
   async query(sql) {
     queries.push(sql);
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
     if (/SELECT id, status FROM payment_batches/.test(sql)) return { rows: [{ id: 'batch-1', status: 'created' }] };
     if (/SELECT summary FROM payment_result_uploads/.test(sql)) return { rows: [{ summary: { preview: { unmatchedResults: [
-      { seq: 8, memo: '테스트입금명', holder: '황민정', amount: 20300, success: true },
+      { seq: 8, memo: '테스트입금명', holder: '황민정', amount: 20300, success: true, transferredAt: '2026.08.19 10:00' },
     ] } } }] };
     if (/FROM unconfirmed_transfer_reviews WHERE upload_id/.test(sql)) return { rows: [] };
     if (/FROM review_index ri/.test(sql) && /alreadyPaid/.test(sql)) return { rows: [{ reviewerName: '황민정', rowIndex: 45, alreadyPaid: false }] };
     if (/FROM payment_batch_items WHERE batch_id/.test(sql)) return { rows: [] };
     if (/INSERT INTO unconfirmed_transfer_reviews/.test(sql)) return { rows: [{ id: 'review-1', decision: 'APPROVED', result_seq: 8 }] };
+    if (/UPDATE review_index SET is_submitted2 = 'PAID'/.test(sql)) return { rowCount: 1, rows: [] };
+    if (/INSERT INTO payment_records/.test(sql)) return { rowCount: 1, rows: [] };
     throw new Error(`unexpected query: ${sql.slice(0, 80)}`);
   },
   release() {},
@@ -63,8 +70,13 @@ const client = {
   assert.equal(out.ok, true);
   assert.equal(out.review.decision, 'APPROVED');
   assert.ok(queries.some(sql => /INSERT INTO unconfirmed_transfer_reviews/.test(sql)), '대조 검토 이력을 남겨야 한다');
-  assert.ok(!queries.some(sql => /UPDATE payment_batch_items|INSERT INTO payment_records|recordDeposits/.test(sql)),
-    '대조 승인만으로 입금 기록 또는 회차 상태를 변경하면 안 된다');
+  assert.ok(queries.some(sql => /UPDATE review_index SET is_submitted2 = 'PAID'/.test(sql)),
+    '승인한 참여자 행을 입금 완료 상태로 기록해야 한다');
+  assert.ok(queries.some(sql => /INSERT INTO payment_records/.test(sql)),
+    '승인한 참여자의 입금 이력을 기록해야 한다');
+  assert.equal(approvedBoardItems.length, 1, '승인한 참여자 행의 입금 셀 기록을 요청해야 한다');
+  assert.equal(approvedBoardItems[0].rowIndex, 45, '대조된 참여자 행에만 입금일을 기록해야 한다');
+  assert.equal(out.board.recorded, 1, '입금 셀 기록 결과를 반환해야 한다');
 
   const duplicateQueries = [];
   const duplicateClient = {
@@ -112,5 +124,6 @@ const client = {
   assert.equal(failedTransfer.results[0].state, 'transfer_not_confirmed',
     '성공으로 확인되지 않은 이체 결과는 승인 후보가 아니어야 한다');
   svc.__setPoolForTest(null);
+  svc.__setPaymentApplyForTest(null);
   console.log('payment unconfirmed review tests passed');
-})().catch(err => { svc.__setPoolForTest(null); throw err; });
+})().catch(err => { svc.__setPoolForTest(null); svc.__setPaymentApplyForTest(null); throw err; });

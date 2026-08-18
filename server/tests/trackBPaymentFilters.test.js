@@ -163,6 +163,12 @@ test('transfer batch history appears directly below the payment summary cards', 
   assert.ok(paymentRender.indexOf('<h2 class="pmh2">이체 회차</h2>') < paymentRender.indexOf('${_pmTargetTable(items)}'));
 });
 
+test('transfer batch history shows ten rows before scrolling within its own area', () => {
+  const table = sourceOf('_pmBatchTable');
+  assert.match(table, /class="lgwrap pm-batch-scroll"/);
+  assert.match(workdesk, /\.pm-batch-scroll\{[^}]*max-height:.*overflow-y:auto/);
+});
+
 test('transfer batch separates transfer result from workboard application count', () => {
   const result = sourceOf('_pmBatchResult');
   const workboard = sourceOf('_pmBatchWorkboard');
