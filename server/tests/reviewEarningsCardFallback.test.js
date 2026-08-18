@@ -32,5 +32,15 @@ assert.match(
   /campaignId = campMap\[`\$\{r\.sheetId\}\|\|\$\{r\.tabName\}`\]\?\.id[\s\S]*items\[rowKey\] = fallback\.value/,
   'legacy rows with a different work key must receive the unambiguous campaign order amount'
 );
+assert.match(
+  body,
+  /row_json AS "rowJson"/,
+  'a workboard row must expose its recorded order data to the earnings calculation'
+);
+assert.match(
+  body,
+  /const price = Object\.prototype\.hasOwnProperty\.call\(priceMap, pk\) \? priceMap\[pk\] : extractAmountNumber\(r\.rowJson\);/,
+  'the workboard payment amount must remain the fallback after old ledger cleanup'
+);
 
 console.log('review earnings card fallback contract passed');
