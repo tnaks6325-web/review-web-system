@@ -38,8 +38,7 @@ BEGIN
     SELECT o.item, n.item
       FROM jsonb_array_elements(CASE WHEN jsonb_typeof(OLD.sub_accounts) = 'array' THEN OLD.sub_accounts ELSE '[]'::jsonb END) WITH ORDINALITY AS o(item, ordinal)
       FULL OUTER JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(NEW.sub_accounts) = 'array' THEN NEW.sub_accounts ELSE '[]'::jsonb END) WITH ORDINALITY AS n(item, ordinal)
-        ON COALESCE(NULLIF(RIGHT(regexp_replace(COALESCE(o.item->>'phone', ''), '[^0-9]', '', 'g'), 8), ''), '#' || o.ordinal::text)
-         = COALESCE(NULLIF(RIGHT(regexp_replace(COALESCE(n.item->>'phone', ''), '[^0-9]', '', 'g'), 8), ''), '#' || n.ordinal::text)
+        ON o.ordinal = n.ordinal
   LOOP
     before_bank := COALESCE(NULLIF(before_sub->>'bankName', ''), OLD.bank_name, '');
     after_bank := COALESCE(NULLIF(after_sub->>'bankName', ''), NEW.bank_name, '');
