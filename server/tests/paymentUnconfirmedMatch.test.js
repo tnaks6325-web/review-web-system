@@ -61,6 +61,8 @@ svc.__setPoolForTest({
   const search = await svc.searchUnconfirmedWorkCandidates({ query: '바디로션' });
   assert.equal(search.candidates.length, 1);
   assert.match(searchSql, /tc\.display_name/);
+  assert.match(searchSql, /rc\.transfer_memo/, '공고 입금명도 미확인 이체 후보 검색에 포함한다');
+  assert.match(searchSql, /AS "recommended"/, '입금명 정확 일치 후보를 추천으로 표시한다');
   assert.doesNotMatch(searchSql, /tc\.label/);
 
   const out = await svc.inspectUnconfirmedWorkMatch({
@@ -83,7 +85,9 @@ svc.__setPoolForTest({
   assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
   assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
   assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
-  assert.match(workdesk, /position:absolute;z-index:3/);
+  assert.match(workdesk, /pm-unconfirmed-candidates/);
+  assert.match(workdesk, /추천 공고/);
+  assert.match(workdesk, /pmUnconfirmedRecommendation/);
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
