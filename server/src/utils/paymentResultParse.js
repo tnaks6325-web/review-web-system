@@ -155,10 +155,16 @@ function parseResultAoa(aoa, opt = {}) {
   let noDate = 0;
   for (let i = headerRow + 1; i < grid.length; i++) {
     const r = grid[i] || [];
+    const cells = r.map(_cell);
+    /* 은행 파일을 여러 페이지로 출력하거나 복사하면 본문 중간에 열 제목이 다시
+       들어갈 수 있다. 헤더는 절대 이체결과 행으로 세지 않는다. */
+    if (spec.detect(cells)
+      || (cells[idx.account] === header[idx.account] && cells[idx.amount] === header[idx.amount])) continue;
     const acct = accountDigits(r[idx.account]);
     const amount = parseInt(digitsOnly(r[idx.amount]) || '0', 10) || 0;
-    // 계좌·금액이 모두 없는 줄은 데이터가 아니다(빈 줄·합계 줄). 조용히 건너뛴다.
-    if (!acct && !amount) continue;
+    /* 결과 행의 최소 식별값은 계좌와 금액 둘 다다. 하나만 있는 합계·안내·깨진
+       행은 회차 대조 대상이 될 수 없으므로 결과 건수에서도 제외한다. */
+    if (acct.length < 4 || amount <= 0) continue;
     const statusRaw = _cell(r[idx.status]);
     const at = parseTransferAt(r[idx.transferredAt]);
     if (!at) noDate++;
