@@ -31,8 +31,9 @@ const { logger } = require('../utils/logger');
 const { formatDepositStamp } = require('../utils/depositStamp');
 const { loadSheetAoa } = require('../utils/spreadsheetLoad');
 const { parseResultAoa, matchResults, digitsOnly, parseTransferAt } = require('../utils/paymentResultParse');
-const paymentApply = require('./paymentApply.service');
+let paymentApply = require('./paymentApply.service');
 const { recordDeposits } = paymentApply;
+function __setPaymentApplyForTest(v) { paymentApply = v || require('./paymentApply.service'); }
 const { rebuildLedgers } = require('./sheetlessLedger.service');
 
 const MAX_BASE64 = 16 * 1024 * 1024;   // base64 는 원본의 약 1.34배 — 12MB 파일까지 수용
@@ -484,6 +485,8 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
     throw new ResultError('bad_request', '이체 결과와 처리 조치를 확인해 주세요.');
   }
   const client = await _db().connect();
+  let approvedDepositItem = null;
+  let response;
   try {
     await client.query('BEGIN');
     const { rows: [batch] } = await client.query('SELECT id, status FROM payment_batches WHERE id = $1 FOR UPDATE', [batchId]);
@@ -505,6 +508,22 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
       [batchId, uploadId, Number(resultSeq), match.memo, sheetId, tabName, result.rowIndex, decision, _reviewText(note), _reviewText(by, 100)]);
     if (!review) throw new ResultError('already_reviewed', '이 이체 결과는 이미 처리되었습니다. 새로고침 후 확인해 주세요.');
 
+    if (normalizedAction === 'APPROVE') {
+      const paidAt = parseTransferAt(result.transferredAt || '');
+      if (!paidAt || !paidAt.stamp) {
+        throw new ResultError('missing_transfer_time', '은행 이체시각이 없어 입금일을 기록할 수 없습니다. 결과 파일을 확인해 주세요.');
+      }
+      approvedDepositItem = {
+        sheetId, tabName, rowIndex: result.rowIndex,
+        reviewerName: result.holder || '', amount: String(result.amount || ''),
+        paidAt: paidAt.iso, stamp: paidAt.stamp,
+      };
+      const recorded = await recordDeposits(client, [approvedDepositItem], { by: by || '' });
+      if (recorded !== 1) {
+        throw new ResultError('already_paid', '참여자의 입금 기록이 이미 존재하거나 변경할 수 없습니다. 새로고침 후 확인해 주세요.');
+      }
+    }
+
     let duplicateCase = null;
     if (normalizedAction === 'DUPLICATE') {
       const resolutionType = String(caseInfo && caseInfo.resolutionType || 'RECOVERY').trim().toUpperCase();
@@ -524,11 +543,30 @@ async function reviewUnconfirmedTransfer({ batchId, uploadId, memo, sheetId, tab
         [created.id, caseStatus, _reviewText(caseInfo && caseInfo.memo), _reviewText(by, 100)]);
     }
     await client.query('COMMIT');
-    return { ok: true, review: { id: review.id, decision: review.decision, resultSeq: review.result_seq }, duplicateCase };
+    response = { ok: true, review: { id: review.id, decision: review.decision, resultSeq: review.result_seq }, duplicateCase };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
   } finally { client.release(); }
+
+  if (approvedDepositItem) {
+    try {
+      const boardItems = approvedDepositItem.stamp ? [approvedDepositItem] : [];
+      const write = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
+      const verify = await paymentApply.verifyDepositCells(boardItems) || {};
+      const queued = Number(write.queued) || 0;
+      response.board = {
+        recorded: Number(verify.verified) || 0,
+        queued,
+        skipped: (Number(write.skipped) || 0) + (approvedDepositItem.stamp ? 0 : 1),
+        failed: (Number(write.failed) || 0) + Math.max(0, (Number(verify.missing) || 0) - queued),
+      };
+    } catch (err) {
+      logger.warn(`[paymentResult] 미확인 이체 승인 후 입금셀 기록 실패(${sheetId}/${tabName}/${resultSeq}): ${err.message}`);
+      response.board = { recorded: 0, queued: 0, skipped: 0, failed: 1 };
+    }
+  }
+  return response;
 }
 
 async function createDuplicatePaymentCase(input) {
@@ -1092,4 +1130,4 @@ async function confirmOutstandingFailures({ batchId, by }) {
   }
 }
 
-module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest };
+module.exports = { previewResultFile, autoApplyResultFile, getLatestResultPreview, searchUnconfirmedWorkCandidates, inspectUnconfirmedWorkMatch, reviewUnconfirmedTransfer, createDuplicatePaymentCase, updateDuplicatePaymentCase, listDuplicatePaymentCases, findAccountMismatchCandidates, reconcileAccountMismatch, applyResultFile, markBatchApplied, backfillPaidDepositStamp, confirmOutstandingFailures, decideAutoApply, ResultError, MAX_BASE64, FAIL_NOTICE, __setPoolForTest, __setPaymentApplyForTest };
