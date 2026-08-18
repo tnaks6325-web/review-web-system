@@ -78,6 +78,8 @@ svc.__setPoolForTest({
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /workboardMatch:/,
     'test transfers include their resolved workboard comparison values');
+  assert.match(routes, /payment\/batch\/:id\/test-unconfirmed-match/,
+    'test-only matching removes a resolved transfer from the persisted unconfirmed list');
   assert.match(routes, /b\.confirm !== true/);
   const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(workdesk, /작업 검색·대조/);
@@ -89,6 +91,11 @@ svc.__setPoolForTest({
   assert.match(workdesk, /pm-unconfirmed-listbox/);
   assert.match(workdesk, /pm-unconfirmed-direct-match/,
     'selected transfers render their linked workboard values without a search step');
+  assert.match(workdesk, /pm-unconfirmed-two-row-table/,
+    'comparison uses separate workboard and transfer-result rows');
+  assert.match(workdesk, /function _pmCompleteTestUnconfirmedMatch\(\)/,
+    'approved test matches remove the selected unconfirmed card immediately');
+  assert.match(workdesk, /test-unconfirmed-match/);
   assert.doesNotMatch(workdesk, /선택한 이체의 작업 또는 모집공고 검색/,
     'the comparison modal does not retain a manual work search field');
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
