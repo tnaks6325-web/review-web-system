@@ -1143,6 +1143,15 @@ router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, a
     res.status(out.ok ? 200 : (out.code === 'concurrent_cancel' || out.code === 'row_changed' ? 409 : 404)).json(out);
   } catch (err) { next(err); }
 });
+router.post('/workdesk/assign-unslotted-order', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, confirm } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    if (confirm !== true) return res.status(400).json({ ok: false, error: 'need_confirm' });
+    const out = await svc.assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'no_open_slot' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
 // ── 편집 이력(감사) — master/admin 전체 · staff 담당 탭만 ──
 router.get('/workdesk/edits', authMiddleware, async (req, res, next) => {
   try {

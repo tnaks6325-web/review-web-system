@@ -3796,6 +3796,86 @@ async function setTabDailyDone({ sheetId, tabName, done = true, by = '' } = {}) 
   }
 }
 
+function _displayNumber(rowJson) {
+  const row = rowJson && typeof rowJson === 'object' ? rowJson : {};
+  const key = Object.keys(row).find(k => /^(번호|no|#)$/i.test(String(k).trim()));
+  return key ? String(row[key] == null ? '' : row[key]).trim() : '';
+}
+
+function _mergeUnslottedOrderRow(slotRowJson, orderRowJson, slotSeq) {
+  const slot = slotRowJson && typeof slotRowJson === 'object' ? { ...slotRowJson } : {};
+  const order = orderRowJson && typeof orderRowJson === 'object' ? orderRowJson : {};
+  for (const [key, value] of Object.entries(order)) {
+    if (value != null && String(value).trim() !== '') slot[key] = value;
+  }
+  const numberKey = Object.keys(slot).find(k => /^(번호|no|#)$/i.test(String(k).trim())) || '번호';
+  slot[numberKey] = String(slotSeq);
+  return slot;
+}
+
+// 서버가 목표 인원 내 빈 슬롯을 잠근 뒤 한 건만 이동한다. 어떤 검증이라도 실패하면 트랜잭션 전체를 되돌린다.
+async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) throw new Error('assignUnslottedOrderToOpenSlot: sheetId, tabName, rowId 필수');
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: sourceRows } = await client.query(
+      `SELECT * FROM campaign_participants
+        WHERE id=$3 AND sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+        FOR UPDATE`, [sheetId, tabName, rowId]);
+    const source = sourceRows[0];
+    if (!source) { await client.query('ROLLBACK'); return { ok: false, error: 'source_not_found' }; }
+    if (!source.order_submission_id) { await client.query('ROLLBACK'); return { ok: false, error: 'not_an_order_row' }; }
+    if (_displayNumber(source.row_json)) { await client.query('ROLLBACK'); return { ok: false, error: 'already_numbered' }; }
+
+    const effectiveId = await _effectiveLinkedWorkOrderId(client, sheetId, tabName);
+    const { rows: workOrders } = await client.query(
+      `SELECT recruit_count FROM work_orders
+        WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
+        ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`, [sheetId, tabName, effectiveId]);
+    const target = Number(workOrders[0] && workOrders[0].recruit_count) || 0;
+    if (target < 1) { await client.query('ROLLBACK'); return { ok: false, error: 'work_order_target_missing' }; }
+
+    const { rows: slots } = await client.query(
+      `SELECT * FROM campaign_participants
+        WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+          AND seq BETWEEN 1 AND $3 AND order_submission_id IS NULL
+          AND NULLIF(btrim(COALESCE(reviewer_name,'')), '') IS NULL
+          AND NULLIF(btrim(COALESCE(recipient_name,'')), '') IS NULL
+          AND NULLIF(btrim(COALESCE(phone8,'')), '') IS NULL
+        ORDER BY seq FOR UPDATE SKIP LOCKED LIMIT 1`, [sheetId, tabName, target]);
+    const slot = slots[0];
+    if (!slot) { await client.query('ROLLBACK'); return { ok: false, error: 'no_open_slot', target }; }
+
+    const merged = _mergeUnslottedOrderRow(slot.row_json, source.row_json, slot.seq);
+    await client.query(
+      `UPDATE campaign_participants
+          SET reviewer_name=$2, recipient_name=$3, phone8=$4, round=$5, option_text=$6,
+              product_name=$7, product_url=$8, start_date=$9, end_date=$10,
+              is_submitted=$11, submitted_at=$12, is_paid=$13, paid_at=$14,
+              source=$15, sheet_row=COALESCE(sheet_row,$16), last_sheet_write_sig=$17,
+              identity_key=$18, order_submission_id=$19, row_json=$20::jsonb,
+              updated_by=$21, updated_at=NOW()
+        WHERE id=$1`, [slot.id, source.reviewer_name, source.recipient_name, source.phone8, source.round,
+        source.option_text, source.product_name, source.product_url, source.start_date, source.end_date,
+        source.is_submitted, source.submitted_at, source.is_paid, source.paid_at, source.source,
+        slot.seq, source.last_sheet_write_sig, source.identity_key, source.order_submission_id,
+        JSON.stringify(merged), String(by).slice(0, 100)]);
+    await client.query(
+      `UPDATE campaign_participants SET deleted_at=NOW(), active=FALSE, updated_by=$2, updated_at=NOW() WHERE id=$1`,
+      [source.id, String(by).slice(0, 100)]);
+    await client.query(
+      `UPDATE order_submissions SET sheet_row=COALESCE(sheet_row,$2), updated_at=NOW()
+        WHERE id=$1::uuid AND deleted_at IS NULL`, [source.order_submission_id, slot.seq]);
+    await client.query('COMMIT');
+    return { ok: true, sourceRowId: source.id, slotRowId: slot.id, slotSeq: slot.seq, target };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
 module.exports = {
   getWorkdeskFavorites,
   setWorkdeskFavorites,
@@ -3803,6 +3883,7 @@ module.exports = {
   setWorkdeskWorktabs,
   dailyDoneMap,
   setTabDailyDone,
+  assignUnslottedOrderToOpenSlot,
   finishedTabsMap,
   setTabFinished,
   tabStatsMap,
@@ -3903,5 +3984,7 @@ module.exports = {
   deleteCustomColumn,
   setCustomColumnValue,
   setCellColors,
+  __displayNumberForTest: _displayNumber,
+  __mergeUnslottedOrderRowForTest: _mergeUnslottedOrderRow,
   __setPoolForTest,
 };
