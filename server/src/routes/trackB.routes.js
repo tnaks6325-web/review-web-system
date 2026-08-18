@@ -2844,6 +2844,18 @@ router.post('/payment/batch/:id/unconfirmed-work-inspect', authMiddleware, admin
   } catch (err) { _resultErr(err, res, next); }
 });
 
+// 계좌가 다른 실제 이체는 자동 처리하지 않는다. 저장된 결과 행과 회차 실패 항목을 서버에서 다시 대조하고,
+// 관리자가 명시적으로 확인한 경우에만 감사 이력과 함께 입금 완료로 전환한다.
+router.post('/payment/batch/:id/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ ok: false, code: 'need_confirm', error: '계좌 불일치 이체를 확인한 뒤 반영해 주세요.' });
+    res.json(await paymentResultSvc.reconcileAccountMismatch({
+      batchId: req.params.id, uploadId: b.uploadId, itemId: b.itemId, resultSeq: b.resultSeq, by: _by(req),
+    }));
+  } catch (err) { _resultErr(err, res, next); }
+});
+
 router.post('/payment/batch/:id/result-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
