@@ -542,7 +542,12 @@ router.get('/review-earnings', async (req, res, next) => {
         orderDate: of.orderDate,
         sheetDate: sheetDateToIso(r.startDate, camp.campStartDate),
       }).fee;
-      items[pk] = { reviewFee, productPrice: price, thumbnailUrl: camp.thumbnailUrl || '' };
+      items[pk] = {
+        reviewFee,
+        productPrice: price,
+        thumbnailUrl: camp.thumbnailUrl || '',
+        purchaseDate: of.orderDate || sheetDateToIso(r.startDate, camp.campStartDate) || null,
+      };
       if (!r.isSubmitted) {
         count++;
         reviewTotal += reviewFee;
@@ -570,6 +575,7 @@ router.get('/review-earnings', async (req, res, next) => {
         reviewFee,
         productPrice: price > 0 ? price : null,
         thumbnailUrl: o.thumbnailUrl || '',
+        purchaseDate: toKstDate(o.orderedAt) || o.campStartDate || null,
       };
       const fallbackKey = o.campaignId || `${o.sheetId || ''}||${o.tabName || ''}`;
       const existingFallback = sheetlessFallbackCounts.get(fallbackKey);

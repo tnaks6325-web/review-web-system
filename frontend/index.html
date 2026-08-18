@@ -237,6 +237,11 @@
     .status-badge-order { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0EDFF; color:#1B4F9C; }
     .status-badge-order.attention { background:#FEE2E2; color:#991B1B; }
     .status-badge-order.reflected { background:#DCFCE7; color:#166534; }
+    .status-badge-deadline { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .status-badge-deadline.good { background:#DCFCE7; color:#166534; }
+    .status-badge-deadline.warn { background:var(--warn-light); color:#92400E; }
+    .status-badge-deadline.danger { background:#FEE2E2; color:#991B1B; }
+    .deadline-close-note { color:#B91C1C; font-size:.59rem; font-weight:700; line-height:1.35; text-align:right; }
     .result-card.is-order-pending { cursor:default; }
 
     /* ─── 리뷰 내역 3줄 카드 (참여중): 썸네일 + 날짜·이름 / 상품명 / 상품비·리뷰비 ─── */
@@ -258,6 +263,7 @@
     .fee { font-size:.63rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; font-variant-numeric:tabular-nums; flex:none; }
     .fee.prod { background:#EEF2FF; color:#3730A3; }
     .fee.rev  { background:var(--ok-light); color:#065F46; }
+    .fee.rev.none { background:#F1F3F6; color:#6B7280; }
     .fee.unknown { background:#F1F3F6; color:#9199A6; font-weight:700; }
     .fee.reflected { background:#DCFCE7; color:#166534; }
 
@@ -1373,6 +1379,21 @@ function _feeForItem(item) {
   const fallback = _reviewEarnings.items[(item.sheetId || '') + '||' + (item.tabName || '') + '||order'] || null;
   return fallback || exact;
 }
+function _reviewDeadlineState(purchaseDate, now = new Date()) {
+  const match = String(purchaseDate || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(now).reduce((out, part) => {
+    if (part.type !== 'literal') out[part.type] = part.value;
+    return out;
+  }, {});
+  const purchased = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const today = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  const remaining = Math.max(0, 30 - Math.max(0, Math.floor((today - purchased) / 86400000)));
+  const tone = remaining >= 20 ? 'good' : remaining >= 10 ? 'warn' : 'danger';
+  return { remaining, tone, notice: remaining <= 5 ? `${remaining}일 뒤 작업종료 · 페이백 불가` : '' };
+}
 async function _loadReviewEarnings(phone8) {
   if (!phone8 || phone8.length !== 8) { _reviewEarnings = { totals: null, doneTotals: null, items: {} }; renderReviewSummary(); return; }
   try {
@@ -1540,7 +1561,7 @@ function _pendingBadgeText(item) {
   const total = Array.isArray(item.captureSlots) ? item.captureSlots.length : 0;
   const done = Array.isArray(item.submittedSlots) ? Math.min(item.submittedSlots.length, total) : 0;
   if (total > 1 && done > 0) return "리뷰 " + done + "/" + total + " 제출";
-  return "리뷰제출대기";
+  return "구매양식반영완료";
 }
 
 /** 작업보드에 구매양식의 필수 주문정보가 기록된 경우만 리뷰 제출 상태와 별도로 표시한다. */
@@ -1648,6 +1669,12 @@ function renderReviewSubTab() {
       //   두 탭 카드를 한 코드로 그린다 — 사본을 두면 두 탭이 계속 어긋난다.
       //   완료 건의 액션(이미지 확인·수정요청)·1:1문의는 카드가 아니라 참여상품 정보 팝업 안에 있다.
       const fee = _feeForItem(item);
+      const deadline = (!isDone && !item.isOrderPending && fee)
+        ? _reviewDeadlineState(fee.purchaseDate)
+        : null;
+      const deadlineHtml = deadline
+        ? `<span class="status-badge-deadline ${deadline.tone}">제출기한 : ${deadline.remaining}일 남음</span>`
+        : '';
       const thumbUrl = (fee && fee.thumbnailUrl) ? fee.thumbnailUrl : '';
       const thumbHtml = thumbUrl
         ? `<img src="${_escAttrX(thumbUrl)}" alt="" onerror="_thumbErr(this)">`
@@ -1665,7 +1692,9 @@ function renderReviewSubTab() {
         const reflectedBadge = _hasPurchaseFormReflected(item)
           ? '<span class="fee reflected">구매양식 반영완료</span>'
           : '';
-        const revBadge = (fee.reviewFee > 0) ? `<span class="fee rev">리뷰비 ${_fnum(fee.reviewFee)}</span>` : '';
+        const revBadge = (fee.reviewFee > 0)
+          ? `<span class="fee rev">리뷰비 ${_fnum(fee.reviewFee)}</span>`
+          : '<span class="fee rev none">리뷰비 없음</span>';
         feeLineHtml = `<div class="fee-line">${prodBadge}${reflectedBadge}${revBadge}</div>`;
       }
       card.innerHTML = `
@@ -1677,9 +1706,11 @@ function renderReviewSubTab() {
         </div>
         <div class="result-right rr-col">
           <div class="rr-row">
+            ${deadlineHtml}
             ${badgeHtml}
             ${item.isOrderPending ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
           </div>
+          ${deadline && deadline.notice ? `<div class="deadline-close-note">${deadline.notice}</div>` : ''}
           ${subBadgeHtml}
         </div>`;
       if (item.isOrderPending) {
