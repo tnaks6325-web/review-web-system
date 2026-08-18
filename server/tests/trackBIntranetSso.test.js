@@ -386,10 +386,14 @@ async function run() {
   tabs = await svc.scopedActiveTabs({ role: 'advertiser', advertiserId: 'adv_x', forMapping: true });
   assert.ok(tabs.length < allTabs.length, '4c: advertiser는 forMapping 무시(전체 미개방)');
 
+  // 4c2: 작업보드 표 열람에 한해서는 비리뷰어 전체 탭을 명시적으로 연다.
+  tabs = await svc.scopedActiveTabs({ role: 'advertiser', advertiserId: 'adv_x', allWorkdesk: true });
+  assert.equal(tabs.length, allTabs.length, '4c2: advertiser + allWorkdesk = 전체 탭');
+
   // 4d: master는 forMapping 여부와 무관하게 전체
   tabs = await svc.scopedActiveTabs({ role: 'master' });
   assert.equal(tabs.length, allTabs.length, '4d: master 전체');
-  console.log('  4. scopedActiveTabs forMapping — staff만 전체·advertiser 무시·master 불변 ✓');
+  console.log('  4. scopedActiveTabs forMapping·작업보드 전체열람 — staff 매핑·advertiser 표열람·master 불변 ✓');
 
   svc.__setPoolForTest(null); participants.__setPoolForTest(null);
   console.log('✅ trackBIntranetSso 테스트 전체 통과');

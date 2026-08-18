@@ -92,7 +92,7 @@ async function run() {
   assert.equal(wd.counts.ambiguous, 2, '1i: ambiguous 카운트(중복 identity 2행 각각)');
   console.log('  1. workdeskTab 합성 — FALSE보존·text·ambiguous·hidden·orphan ✓');
 
-  // ═══ 2. 광고주 렌즈: 스코프 밖 거부 + PII 마스킹 + 편집메타 미노출 ═══
+  // ═══ 2. 광고주 렌즈: 기본 소유 스코프 + 작업보드 전체 열람 시 PII 마스킹 + 편집메타 미노출 ═══
   const pool2 = makeQueryPool({ meta: [], roster: [
     { id: 'r1', seq: 1, name: '홍길동', recipient: '김철수', phone8: '11112222', round: '1', option: '', product: '', submitted: false, paid: false, source: 'import', order_submission_id: null, identity_key: 'phone8:11112222', row_json: {} },
   ], edits: [] });
@@ -114,7 +114,11 @@ async function run() {
   assert.equal(wda.orphanEdits, undefined, '2d: 광고주엔 orphan 미노출');
   const wdDenied = await svc.workdeskTab({ sheetId: 'other', tabName: 'T', role: 'advertiser', advertiserId: 'adv_1' });
   assert.ok(wdDenied.denied === true, '2e: 소유 스코프 밖 거부');
-  console.log('  2. 광고주 렌즈 — 스코프·마스킹·편집메타 은닉 ✓');
+  const wdAll = await svc.workdeskTab({ sheetId: 'other', tabName: 'T', role: 'advertiser', advertiserId: 'adv_1', allowAllWorkdesk: true });
+  assert.equal(wdAll.denied, undefined, '2f: 작업보드 전체 열람은 타 업체 작업도 연다');
+  assert.equal(wdAll.maskPII, true, '2g: 전체 열람에도 PII 마스킹 유지');
+  assert.equal(wdAll.roster[0].editedFields, undefined, '2h: 전체 열람에도 편집메타 미노출');
+  console.log('  2. 광고주 렌즈 — 기본 스코프·작업보드 전체열람·마스킹·편집메타 은닉 ✓');
 
   // ═══ 3. editWorkdeskRow 앵커 도출 + 거부 ═══
   // 3a: order 우선

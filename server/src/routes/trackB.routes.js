@@ -1,8 +1,8 @@
 /**
  * Track B — 백그라운드 평행 트랙(리뷰웹시스템[3버전]의 그림자) 라우트.
  *
- * ★ 무영향·격리: 투영/대조/소유/작업보드는 master 전용. 작업보드 읽기는 advertiser(광고주)에게도
- *   "본인 소유 탭만" 열되(스코프 강제 + PII 마스킹), 라이브 검색·주문·시트 흐름을 일절 안 건드린다.
+ * ★ 무영향·격리: 투영/대조/소유는 master 전용. 작업보드 표 열람은 리뷰어를 제외한 로그인 역할에
+ *   열되, advertiser(광고주)는 PII 마스킹·읽기 전용으로 제한한다. 라이브 검색·주문·시트 흐름은 건드리지 않는다.
  *   되돌리기 = app.js 마운트 제거.
  */
 const express = require('express');
@@ -89,8 +89,10 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
   try {
     const role = _role(req);
     if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
-    // 작업보드에서는 내부 직원이 모든 작업표를 보고 편집한다. 광고주는 소유 탭만 유지한다.
-    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1', allStaff: role === 'staff' });
+    // 작업보드의 표 열람·셀 범위 선택/합계는 리뷰어를 제외한 로그인 역할 모두에게 연다.
+    // 광고주는 타 업체 작업도 목록에서 열 수 있지만, service의 advertiser 렌즈가 PII를 마스킹하고
+    // 편집·정산·스레드 같은 별도 권한 기능은 기존 스코프를 그대로 유지한다.
+    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1', allStaff: role === 'staff', allWorkdesk: true });
     // ── 마감(전사 공통) 주석 + 작업목록 통계(?stats=1) ── migration 088 · PRD prd-workboard-worktabs.html
     //   ★ 스코프 단일 출처는 위 scopedActiveTabs 하나 — 여기서는 그 결과에 **주석만** 얹는다.
     //     서버가 마감 탭을 거르지 않는 이유 = 홈 "마감 보관함"이 같은 응답에서 마감분을 골라 그린다.
@@ -945,7 +947,9 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName, tabGid } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
-    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff' });
+    // `/tabs`와 동일하게, 작업보드 표는 모든 비리뷰어 역할이 열람할 수 있다. PII 마스킹과
+    // 쓰기 권한은 역할별 service 렌즈/각 write route에서 계속 분리한다.
+    const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null, allowAllStaff: role === 'staff', allowAllWorkdesk: true });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
