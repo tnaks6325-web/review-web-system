@@ -50,6 +50,7 @@ function makeHarness({ failRecord = false } = {}) {
       state.item.status = 'paid'; state.item.paid_at = params[1]; state.item.result_seq = params[2]; state.item.fail_reason = null;
       return { rows: [], rowCount: 1 };
     }
+    if (/UPDATE payment_result_uploads SET success_count = success_count \+ 1/.test(text)) return { rows: [], rowCount: 1 };
     if (/UPDATE review_index SET is_submitted2 = 'PAID'/.test(text)) { state.paidRows.push(params); return { rows: [], rowCount: 1 }; }
     if (/INSERT INTO payment_records/.test(text)) {
       if (failRecord) throw new Error('forced payment record failure');

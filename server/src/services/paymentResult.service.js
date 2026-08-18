@@ -466,6 +466,11 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
         WHERE id = $1 AND status = 'failed' AND result_status = '결과 파일에 없음'`,
       [itemId, paidAt, Number(resultSeq)]);
     if (!updated.rowCount) throw new ResultError('not_eligible', '결과 파일 누락으로 실패 처리된 미입금 항목만 대조할 수 있습니다.');
+    const nextPreview = { ...(upload.summary && upload.summary.preview), unmatchedResults: outside.filter(x => Number(x && x.seq) !== Number(resultSeq)) };
+    await client.query(
+      `UPDATE payment_result_uploads SET success_count = success_count + 1, failed_count = GREATEST(0, failed_count - 1),
+          applied_count = applied_count + 1, summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+      [uploadId, JSON.stringify({ preview: nextPreview })]);
     paidItem = {
       sheetId: item.sheetId, tabName: item.tabName, rowIndex: item.rowIndex, reviewerName: item.reviewerName,
       amount: String(item.amount || ''), depositColKey: null, gid: '', paidAt,

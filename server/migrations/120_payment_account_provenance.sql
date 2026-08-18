@@ -3,6 +3,7 @@ ALTER TABLE payment_batch_items ADD COLUMN IF NOT EXISTS account_reviewer_id UUI
 ALTER TABLE payment_batch_items ADD COLUMN IF NOT EXISTS account_source TEXT CHECK (account_source IN ('self', 'sub'));
 ALTER TABLE payment_batch_items ADD COLUMN IF NOT EXISTS account_sub_phone8 TEXT;
 ALTER TABLE payment_batch_items ADD COLUMN IF NOT EXISTS account_fingerprint TEXT;
+ALTER TABLE payment_batch_items ADD COLUMN IF NOT EXISTS account_snapshot_fingerprint TEXT;
 
 CREATE TABLE IF NOT EXISTS reviewer_account_change_audit (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
