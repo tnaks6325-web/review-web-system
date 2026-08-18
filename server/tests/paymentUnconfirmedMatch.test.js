@@ -83,7 +83,7 @@ svc.__setPoolForTest({
   assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
   assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
   assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
-  assert.match(workdesk, /position:absolute;z-index:3/);
+  assert.match(workdesk, /pm-unconfirmed-listbox/);
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
