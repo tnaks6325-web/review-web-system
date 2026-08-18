@@ -87,10 +87,11 @@ test('result upload supports drag-and-drop and has no second manual apply action
   assert.doesNotMatch(sourceOf('_pmBatchActions'), /_pmApplySavedResult\(\$\{i\}\)/);
 });
 
-test('result upload uses one clickable drop zone with a drag affordance', () => {
+test('result upload uses one clickable drop zone with a concise label', () => {
   const actions = sourceOf('_pmBatchActions');
   assert.match(actions, /<button class="pmdrop"[^>]*onclick="_pmPickResult\(\$\{i\}\)"/);
-  assert.match(actions, /드래그 가능/);
+  assert.match(actions, /결과 파일 업로드/);
+  assert.doesNotMatch(actions, /드래그 가능/);
   assert.doesNotMatch(actions, /<button class="btn sm" onclick="_pmPickResult/);
 });
 
