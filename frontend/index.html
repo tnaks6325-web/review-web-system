@@ -1367,7 +1367,10 @@ function _feeForItem(item) {
   }
   if (item.rowIndex == null) return null;
   const key = (item.sheetId || '') + '||' + (item.tabName || '') + '||' + item.rowIndex;
-  return _reviewEarnings.items[key] || null;
+  const exact = _reviewEarnings.items[key] || null;
+  if (exact && exact.productPrice != null) return exact;
+  const fallback = _reviewEarnings.items[(item.sheetId || '') + '||' + (item.tabName || '') + '||order'] || null;
+  return fallback || exact;
 }
 async function _loadReviewEarnings(phone8) {
   if (!phone8 || phone8.length !== 8) { _reviewEarnings = { totals: null, doneTotals: null, items: {} }; renderReviewSummary(); return; }
