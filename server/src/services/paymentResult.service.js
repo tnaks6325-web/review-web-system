@@ -192,8 +192,8 @@ function _previewArchive(a) {
     format: a.format,
     fileRows: a.parse.rows.length,
     warnings: a.parse.warnings || [],
-    items: a.view.map(({ outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus }) =>
-      ({ outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus })),
+    items: a.view.map(({ itemId, resultSeq, outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus }) =>
+      ({ itemId, resultSeq, outcome, tabName, reviewerName, amount, accountTail, holder, transferredAt, resultStatus })),
     unmatchedResults: a.unmatchedResults,
     orderAssigned: a.orderAssigned,
     summary: a.summary,
@@ -466,7 +466,21 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
         WHERE id = $1 AND status = 'failed' AND result_status = '결과 파일에 없음'`,
       [itemId, paidAt, Number(resultSeq)]);
     if (!updated.rowCount) throw new ResultError('not_eligible', '결과 파일 누락으로 실패 처리된 미입금 항목만 대조할 수 있습니다.');
-    const nextPreview = { ...(upload.summary && upload.summary.preview), unmatchedResults: outside.filter(x => Number(x && x.seq) !== Number(resultSeq)) };
+    const preview = (upload.summary && upload.summary.preview) || {};
+    const oldSummary = preview.summary || {};
+    const nextItems = Array.isArray(preview.items) ? preview.items.map(entry => {
+      const isTarget = String(entry && entry.itemId || '') === String(itemId)
+        || (!entry.itemId && entry && entry.outcome === 'not_in_file'
+          && entry.reviewerName === item.reviewerName && Number(entry.amount) === Number(item.amount)
+          && String(entry.accountTail || '') === String(item.accountTail || ''));
+      return isTarget ? { ...entry, outcome: 'success', status: 'paid', resultSeq: Number(resultSeq),
+        transferredAt: transfer.transferredAt || entry.transferredAt || '', resultStatus: '관리자 확인: 계좌 불일치 이체완료' } : entry;
+    }) : [];
+    const nextPreview = { ...preview, items: nextItems,
+      unmatchedResults: outside.filter(x => Number(x && x.seq) !== Number(resultSeq)),
+      summary: { ...oldSummary, success: Number(oldSummary.success || 0) + 1,
+        failed: Math.max(0, Number(oldSummary.failed || 0) - 1),
+        notInFile: Math.max(0, Number(oldSummary.notInFile || 0) - 1) } };
     await client.query(
       `UPDATE payment_result_uploads SET success_count = success_count + 1, failed_count = GREATEST(0, failed_count - 1),
           applied_count = applied_count + 1, summary = COALESCE(summary, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
