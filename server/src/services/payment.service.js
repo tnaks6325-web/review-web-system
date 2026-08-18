@@ -872,6 +872,7 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query("SELECT set_config('app.changed_by', $1, true)", [String(by || 'payment-workdesk')]);
     if (sub) {
       // 타계정 — 소유자 행의 배열에서 그 명의 항목만 병합
       const { rows } = await client.query(`SELECT sub_accounts FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
@@ -885,19 +886,13 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
         return { ...s, ...(bn ? { bankName: bn } : {}), ...(ba ? { bankAccount: ba } : {}), ...(ah ? { accountHolder: ah } : {}) };
       });
       if (!hit) throw new PaymentFixError('sub_not_found', '그 타계정을 찾지 못했습니다. 화면을 새로고침해 주세요.');
-      const before = arr.find(s => String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === sub) || {};
       await client.query(`UPDATE reviewers SET sub_accounts = $2::jsonb WHERE id = $1`, [id, JSON.stringify(next)]);
-      await client.query(
-        `INSERT INTO reviewer_account_change_audit (reviewer_id, sub_phone8, before_bank_name, before_account_tail, before_fingerprint, after_bank_name, after_account_tail, after_fingerprint, changed_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [id, sub, before.bankName || '', normalizeAccount(before.bankAccount).slice(-4), accountFingerprint(before.bankAccount),
-          bn || before.bankName || '', (ba || normalizeAccount(before.bankAccount)).slice(-4), accountFingerprint(ba || before.bankAccount), String(by || '')]);
       await client.query('COMMIT');
       return { ok: true, target: 'sub' };
     }
 
-    const { rows: [before] } = await client.query(`SELECT bank_name, bank_account FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
-    if (!before) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
+    const { rows: [existing] } = await client.query(`SELECT bank_name, bank_account FROM reviewers WHERE id = $1 FOR UPDATE`, [id]);
+    if (!existing) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
     const { rowCount } = await client.query(
       `UPDATE reviewers
           SET bank_name      = CASE WHEN $2::text <> '' THEN $2::text ELSE bank_name END,
@@ -906,11 +901,6 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
         WHERE id = $1`,
       [id, bn, ba, ah]);
     if (!rowCount) throw new PaymentFixError('reviewer_not_found', '리뷰어를 찾지 못했습니다.');
-    await client.query(
-      `INSERT INTO reviewer_account_change_audit (reviewer_id, before_bank_name, before_account_tail, before_fingerprint, after_bank_name, after_account_tail, after_fingerprint, changed_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [id, before.bank_name || '', normalizeAccount(before.bank_account).slice(-4), accountFingerprint(before.bank_account),
-        bn || before.bank_name || '', (ba || normalizeAccount(before.bank_account)).slice(-4), accountFingerprint(ba || before.bank_account), String(by || '')]);
     await client.query('COMMIT');
     return { ok: true, target: 'self' };
   } catch (err) {
