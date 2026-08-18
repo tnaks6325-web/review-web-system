@@ -4253,7 +4253,7 @@ function renderWorkdesk(wd){
   if(gridMode){
     tableSection = buildGrid(wd);
   } else {
-    const rows=(wd.roster||[]).map(r=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${esc(r.seq)}</td>`+
+    const rows=(wd.roster||[]).map((r,displayIndex)=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${displayIndex+1}</td>`+
       `<td class="gidlock" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}`+
       `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}</td>`+
       `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
@@ -10648,7 +10648,7 @@ async function revertEdit(rowId, field){ const t=STATE.cur; if(!t)return;
   const r=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})});
   toast(r&&r.reverted?'되돌림':'되돌릴 편집 없음'); reloadWorkdesk();
 }
-async function hideRow(rowId){ if(!confirm('이 참여자를 작업표와 리뷰어 참여내역에서 제거할까요? 주문 원장은 감사용으로 보관됩니다.'))return; const t=STATE.cur;
+async function hideRow(rowId){ if(!confirm('이 참여자를 작업표와 리뷰어 참여내역에서 실제로 제거할까요? 총 모집인원은 유지되며 마지막 진행일에 미진행 1건이 보충됩니다. 주문 원장은 감사용으로 보관됩니다.'))return; const t=STATE.cur;
   const r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
   toast(r&&r.ok?'제거됨':'실패'); reloadWorkdesk();
 }

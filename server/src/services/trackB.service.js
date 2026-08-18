@@ -19,8 +19,14 @@ const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots')
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 
 let _pool;
+let _rebuildLedgersForTest = null;
 function getPool() { if (!_pool) _pool = require('../db/pool'); return _pool; }
 function __setPoolForTest(p) { _pool = p || null; }
+function __setLedgerRebuildForTest(fn) { _rebuildLedgersForTest = typeof fn === 'function' ? fn : null; }
+async function _rebuildWorkdeskLedgers(args) {
+  if (_rebuildLedgersForTest) return _rebuildLedgersForTest(args);
+  return require('./sheetlessLedger.service').rebuildLedgers(args);
+}
 
 function _phone8(v) { const d = String(v == null ? '' : v).replace(/[^0-9]/g, ''); return d.length >= 8 ? d.slice(-8) : ''; }
 function _norm(v) { return String(v == null ? '' : v).trim().replace(/\s+/g, ''); }
@@ -2771,13 +2777,70 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
     const { rows } = await client.query(
-      `SELECT id, seq, phone8, order_submission_id
+      `SELECT id, seq, phone8, row_json, order_submission_id
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL
         FOR UPDATE`,
       [rowId, sheetId, tabName]);
     if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const row = rows[0];
+
+    // 행 삭제가 곧 총 모집수 축소가 되면 안 된다. 무시트 작업표에서는 마지막
+    // 진행일의 계획을 1건 늘리고, 같은 트랜잭션 안에 비어 있는 보충 슬롯을 만든다.
+    // 내부 seq는 주문·리뷰 원장의 연결키이므로 재번호화하지 않는다. 화면의 #만
+    // 표시 순번으로 계산해 1~총건수 범위를 유지한다.
+    const { rows: scopes } = await client.query(
+      `SELECT rc.id AS campaign_id
+         FROM recruit_campaigns rc
+         JOIN tab_configs tc ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
+        WHERE rc.linked_sheet_id=$1 AND rc.linked_tab_name=$2
+          AND rc.status IN ('draft','active') AND COALESCE(tc.sheetless,FALSE)=TRUE
+        ORDER BY rc.updated_at DESC
+        LIMIT 2
+        FOR UPDATE`,
+      [sheetId, tabName]);
+    if (scopes.length !== 1) {
+      await client.query('ROLLBACK');
+      return { ok: false, error: scopes.length ? 'ambiguous_campaign' : 'sheetless_campaign_not_found' };
+    }
+    const campaignId = scopes[0].campaign_id;
+    const { rows: tabRows } = await client.query(
+      `SELECT seq, tab_gid, row_json
+         FROM campaign_participants
+        WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+        ORDER BY seq
+        FOR UPDATE`, [sheetId, tabName]);
+    const headers = [];
+    for (const r of tabRows) for (const key of Object.keys(r.row_json || {})) {
+      if (key && !headers.includes(key)) headers.push(key);
+    }
+    const { findDateColumnIndex } = require('./campaignSchedule.service');
+    const dateHeader = headers[findDateColumnIndex(headers)];
+    if (!dateHeader) { await client.query('ROLLBACK'); return { ok: false, error: 'worktable_date_column_not_found' }; }
+    const { rows: plans } = await client.query(
+      `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
+         FROM campaign_daily_plans
+        WHERE campaign_id=$1 AND planned_count > 0
+        ORDER BY plan_date DESC
+        LIMIT 1
+        FOR UPDATE`, [campaignId]);
+    if (!plans.length) { await client.query('ROLLBACK'); return { ok: false, error: 'final_plan_not_found' }; }
+    const finalPlan = plans[0];
+    const finalYearMonth = String(finalPlan.date).match(/^(\d{4})-(\d{2})/);
+    const { parseDateColumn } = require('../utils/koreanDate');
+    const [removedDate] = parseDateColumn([String((row.row_json || {})[dateHeader] || '')], {
+      fallbackAnchor: finalYearMonth ? { y: Number(finalYearMonth[1]), m: Number(finalYearMonth[2]) } : undefined,
+    });
+    if (!removedDate) { await client.query('ROLLBACK'); return { ok: false, error: 'removed_row_date_invalid' }; }
+    const blank = {};
+    headers.forEach(h => { blank[h] = ''; });
+    const finalDateLabel = (() => {
+      const m = String(finalPlan.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return '';
+      const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+      return `${Number(m[2])}/${Number(m[3])} (${['일','월','화','수','목','금','토'][day]})`;
+    })();
+    if (!finalDateLabel) { await client.query('ROLLBACK'); return { ok: false, error: 'final_plan_date_invalid' }; }
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -2814,13 +2877,59 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
           WHERE order_submission_id=$1::uuid AND status IN ('applied','submitted')`,
         [row.order_submission_id]);
     }
+
+    const maxSeq = tabRows.reduce((max, r) => Math.max(max, Number(r.seq) || 0), 0);
+    const replacement = await client.query(
+      `INSERT INTO campaign_participants
+         (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())
+       RETURNING id, seq`,
+      [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName, maxSeq + 1,
+        finalDateLabel, JSON.stringify({ ...blank, [dateHeader]: finalDateLabel }), String(by).slice(0, 100)]);
+    // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
+    if (removedDate !== finalPlan.date) {
+      const dateCount = new Map();
+      const parsedDates = parseDateColumn(tabRows.map(r => String((r.row_json || {})[dateHeader] || '')), {
+        fallbackAnchor: finalYearMonth ? { y: Number(finalYearMonth[1]), m: Number(finalYearMonth[2]) } : undefined,
+      });
+      parsedDates.forEach(d => { if (d) dateCount.set(d, (dateCount.get(d) || 0) + 1); });
+      const { rows: sourcePlans } = await client.query(
+        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
+           FROM campaign_daily_plans
+          WHERE campaign_id=$1 AND plan_date=$2::date
+          FOR UPDATE`, [campaignId, removedDate]);
+      const sourceCount = sourcePlans.length ? Number(sourcePlans[0].planned_count) : (dateCount.get(removedDate) || 0);
+      if (sourceCount < 1) { await client.query('ROLLBACK'); return { ok: false, error: 'removed_date_plan_invalid' }; }
+      await client.query(
+        `UPDATE campaign_daily_plans
+            SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
+          WHERE campaign_id=$1 AND plan_date=$2::date`,
+        [campaignId, finalPlan.date, `행삭제 보충:${by}`.slice(0, 100)]);
+      await client.query(
+        `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
+         VALUES ($1,$2::date,$3,$4,NOW())
+         ON CONFLICT (campaign_id,plan_date) DO UPDATE
+           SET planned_count=EXCLUDED.planned_count, updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
+        [campaignId, removedDate, sourceCount - 1, `행삭제 이동:${by}`.slice(0, 100)]);
+    }
+    await client.query(
+      `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
+       VALUES ($1,$2,'participant_delete_replenish',$3::jsonb)`,
+      [campaignId, String(by).slice(0, 100), JSON.stringify({ removedSeq: row.seq, removedDate, finalDate: finalPlan.date, added: 1 })]);
     await client.query('COMMIT');
+    let ledgerError = null;
+    try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by: `participant-delete:${by}` }); }
+    catch (e) { ledgerError = (e && (e.code || e.message)) || 'rebuild_failed'; logger.warn(`[trackB] 행 삭제 후 장부 재생성 실패 tab=${tabName}: ${ledgerError}`); }
     return {
       ok: true,
       mode: 'hard_deleted',
       removed: removed.rowCount,
       participationLinksRemoved: links.rowCount,
       applicationsCancelled: applications.rowCount,
+      replenished: 1,
+      finalPlanDate: finalPlan.date,
+      replacementSeq: replacement.rows[0] && replacement.rows[0].seq,
+      ledgerError,
     };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
@@ -3964,4 +4073,5 @@ module.exports = {
   setCustomColumnValue,
   setCellColors,
   __setPoolForTest,
+  __setLedgerRebuildForTest,
 };
