@@ -346,7 +346,10 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
 
   const success = a.pairs.filter(p => p.success);
   const failed  = a.pairs.filter(p => p.result && !p.success);
-  if (!success.length && !failed.length) {
+  // 결과 파일에 없는 회차 대상도 이번 이체에서 실패한 것으로 확정한다.
+  // 해당 항목은 failed 가 되어 다음 이체 회차 후보에 다시 포함된다.
+  const notInFile = a.pairs.filter(p => !p.result);
+  if (!success.length && !failed.length && !notInFile.length) {
     throw new ResultError('empty', '이 회차에 반영할 결과가 없습니다(결과 파일과 짝지어진 건이 0건입니다).');
   }
 
@@ -409,6 +412,17 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
       if (r.rowCount && !r.rows[0].notified_at) failedItems.push(it);
     }
 
+    for (const p of notInFile) {
+      const it = p.item;
+      const r = await client.query(
+        `UPDATE payment_batch_items
+            SET status = 'failed', result_status = $2, result_seq = NULL, fail_reason = $3
+          WHERE id = $1 AND status = 'pending'
+        RETURNING notified_at`,
+        [it.id, '결과 파일에 없음', '이체 실패 — 결과 파일에 해당 이체내역 없음']);
+      if (r.rowCount && !r.rows[0].notified_at) failedItems.push(it);
+    }
+
     /* ★ 입금 기록(review_index PAID + payment_records)은 같은 트랜잭션 안에서 —
          회차 항목만 paid 로 바뀌고 원장이 안 남는 어긋난 상태를 만들지 않는다. */
     const updated = paidItems.length
@@ -430,8 +444,7 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
       }
     }
 
-    // 사람이 [이대로 반영]을 확정한 회차는 결과없음 건이 남아도 '반영 완료'로 표시한다.
-    // pending 건은 그대로 남아 이후 결과 파일로 추가 반영할 수 있다.
+    // 파일 누락 항목도 실패로 확정했으므로, 회차에는 새 pending 이 남지 않는다.
     const { rows: [{ n: remaining }] } = await client.query(
       `SELECT COUNT(*)::int AS n FROM payment_batch_items WHERE batch_id = $1 AND status = 'pending'`,
       [batchId]);
@@ -451,14 +464,14 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
                 applied = TRUE, applied_count = $6, applied_at = NOW(),
                 summary = COALESCE(summary, '{}'::jsonb) || $7::jsonb
           WHERE id = $1 AND batch_id = $2`,
-        [uploadId, batchId, a.summary.matched, paidItems.length, failed.length, paidItems.length, applySummary]);
+        [uploadId, batchId, a.summary.matched, paidItems.length, failed.length + notInFile.length, paidItems.length, applySummary]);
     } else {
       await client.query(
         `INSERT INTO payment_result_uploads
            (batch_id, bank, file_name, file_format, row_count, matched, success_count, failed_count, applied, applied_count, applied_at, summary, uploaded_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,NOW(),$10,$11)`,
         [batchId, a.batch.bank, String(fileName || '').slice(0, 200), a.format,
-         a.parse.rows.length, a.summary.matched, paidItems.length, failed.length,
+         a.parse.rows.length, a.summary.matched, paidItems.length, failed.length + notInFile.length,
          paidItems.length, applySummary, by || '']);
     }
 
@@ -504,14 +517,14 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
     notifyTargets: failedItems.length,
     applied: paidItems.length,
     board,
-    failed: failed.length,
-    notInFile: a.summary.notInFile,
+    failed: failed.length + notInFile.length,
+    notInFile: notInFile.length,
     /* preview.unmatchedResults 는 화면에 표시할 행 배열이다. 자동반영 응답에서
        같은 이름에 숫자를 덮어쓰면 프런트가 배열로 렌더링하다 중단된다. */
     unmatchedResultCount: a.unmatchedResults.length,
     orderAssigned: a.orderAssigned,
     warnings: a.parse.warnings || [],
-    summary: a.summary,
+    summary: { ...a.summary, failed: failed.length + notInFile.length, notInFile: notInFile.length },
   };
 }
 

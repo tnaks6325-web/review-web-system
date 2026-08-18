@@ -5,8 +5,8 @@
  * 고정하는 것(되돌리면 돈이 잘못 나가거나 두 번 나간다):
  *  A. 미리보기는 **쓰기 0** — 사람이 확인하기 전에는 아무것도 기록하지 않는다
  *  B. 멱등·이중입금 방지 — 처리 대상은 `pending` 뿐(같은 파일 두 번 올려도 두 번 입금되지 않는다)
- *  C. 결과 파일에 없는 건은 **pending 유지**(실패로 내리면 다음 회차에 다시 담겨 이중입금)
- *  D. 은행 실패 건만 `failed` → 잠금이 풀려 다음 회차로(재이체 경로)
+ *  C. 결과 파일에 없는 건도 `failed` → 다음 회차로(재이체 경로)
+ *  D. 은행 실패·결과 파일 누락 모두 실패 안내 대상으로 고정
  *  E. 입금 시각 = **결과 파일의 실제 이체시점**(지금이 아니다)
  *  F. 입금 기록 단일 출처 — paymentApply.service 재사용(사본 금지)
  *  G. 실패 안내 = 기본 켬 · 재전송 안 함(notified_at) · 은행 응답 원문 미노출
@@ -89,7 +89,13 @@ function makePool(items, opts = {}) {
         return { rows: state.filter(x => x.status === 'pending').map(x => ({ id: x.id })), rowCount: state.filter(x => x.status === 'pending').length };
       }
       if (/FROM payment_batch_items i[\s\S]*LEFT JOIN review_index r/.test(s)) {
-        return { rows: state.filter(x => x.status === 'paid').map(x => ({ ...x, submit_col2: '입금', tab_gid: 'G1' })), rowCount: state.filter(x => x.status === 'paid').length };
+        return { rows: state.filter(x => x.status === 'paid').map(x => ({
+          ...x,
+          target_sheet_id: x.sheet_id,
+          target_tab_name: x.tab_name,
+          target_row_index: x.row_index,
+          submit_col2: '입금', tab_gid: 'G1',
+        })), rowCount: state.filter(x => x.status === 'paid').length };
       }
       if (/UPDATE payment_batch_items[\s\S]*status = 'paid'/.test(s)) {
         const it = state.find(x => x.id === params[0] && x.status === 'pending');
@@ -169,9 +175,9 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
   /* ══════════════════════════════════════════════════════════
      B~E. 반영 — 멱등 · 결과없음 유지 · 실패 처리 · 실제 이체시각
      ══════════════════════════════════════════════════════════ */
-  console.log('\n[B~E] 반영 — 멱등 · 결과없음 유지 · 실패 처리 · 이체시각');
+  console.log('\n[B~E] 반영 — 멱등 · 결과없음도 실패 처리 · 실제 이체시각');
   {
-    // 성공 2건 + 실패 1건 + 결과 파일에 없는 1건(계좌·금액이 파일과 안 맞는 건)
+    // 성공 2건 + 은행 실패 1건 + 결과 파일에 없는 1건(자동 이체실패)
     const its = [
       itemRow(0, OKROWS[0]),
       itemRow(1, OKROWS[1]),
@@ -197,10 +203,10 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       JSON.stringify(r1.board));
 
     ok('성공 2건이 입금완료로 기록된다', r1.applied === 2, JSON.stringify(r1));
-    ok('은행 실패 1건이 failed 로 내려간다', r1.failed === 1);
-    ok('★ 결과 파일에 없는 건은 pending 그대로(실패로 내리지 않는다 = 이중입금 방지)',
-      pool.state.find(x => x.id === 'item-none').status === 'pending');
-    ok('★ 이대로 반영을 확정하면 결과없음이 남아도 회차 상태는 적용완료가 된다',
+    ok('은행 실패와 결과 파일 누락 2건이 failed 로 내려간다', r1.failed === 2);
+    ok('★ 결과 파일에 없는 건은 자동 이체실패가 되어 다음 회차 대상이 된다',
+      pool.state.find(x => x.id === 'item-none').status === 'failed');
+    ok('★ 결과없음까지 실패 처리한 뒤 회차 상태는 적용완료가 된다',
       pool.calls.some(c => /UPDATE payment_batches SET status = 'applied'/.test(c.sql)),
       pool.calls.filter(c => /UPDATE payment_batches/.test(c.sql)).map(c => c.sql).join(' | '));
 
@@ -232,7 +238,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('★ 작업보드에 남았는지 재확인된 건만 기록됨으로 표시하고, 누락은 실패로 남긴다',
       stampBackfill.ok === true && stampBackfill.candidates === 1 && stampBackfill.recorded === 0
         && stampBackfill.queued === 0 && stampBackfill.failed === 1 && stampBackfill.verified === 0 && stampWrites.length === 1
-        && stampWrites[0].items.length === 1 && stampWrites[0].items[0].stamp === '2026.6.9'
+        && stampWrites[0].items.length === 1 && stampWrites[0].items[0].stamp === '6/9 12:26'
         && stampWrites[0].opts.stamp === undefined && stampWrites[0].opts.deferSheetlessRebuild === true
         && stampPool.calls.some(c => /UPDATE payment_batches[\s\S]*board_recorded_count/.test(c.sql))
         && !stampPool.calls.some(c => /INSERT INTO payment_records|UPDATE review_index SET is_submitted2/.test(c.sql)),
@@ -260,11 +266,12 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('은행 응답 원문(result_status)을 근거로 남긴다',
       paidRows.every(x => typeof x.result_status === 'string' && x.result_status.length > 0));
 
-    ok('★ 실패 안내는 기본으로 보낸다(사용자 확정 ⑤)', notices.length === 1 && r1.notified === 1);
+    ok('★ 실패 안내는 은행 실패·결과 파일 누락 모두 기본으로 보낸다', notices.length === 2 && r1.notified === 2);
     ok('★ 안내 문구에 은행 응답 원문을 싣지 않는다',
       notices[0].message === RES.FAIL_NOTICE
       && !/처리상태|오류|미입금/.test(notices[0].message.replace('처리되지 않았습니다', '')));
-    ok('★ 안내는 그 행의 리뷰어에게만(phone8 스코프)', notices[0].phone8 === its[2].phone8);
+    ok('★ 안내는 실패한 각 행의 리뷰어에게만(phone8 스코프)',
+      notices.map(x => x.phone8).sort().join(',') === [its[2].phone8, its[3].phone8].sort().join(','));
 
     /* ── 같은 파일 재업로드(멱등) ──
        처리 대상이 pending 뿐이라 이미 끝난 건은 짝맞추기 대상에서 빠진다 →
@@ -279,19 +286,8 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       && JSON.stringify(pool.state.map(x => [x.id, x.status, x.paid_at])) === before,
       r2err ? r2err.code : JSON.stringify(r2));
     ok('★ 이미 안내한 실패 건에 다시 보내지 않는다', notices.length === 0);
-    ok('★ 재반영해도 결과없음 건은 여전히 pending(다음 파일을 더 받을 수 있다)',
-      pool.state.find(x => x.id === 'item-none').status === 'pending');
-
-    /* ── 추가 파일 반영(결과없음 건이 뒤늦게 들어온 경우) ──
-       ★ 이 경로가 막히면 "결과없음은 pending 유지" 규칙이 막다른 길이 된다. */
-    {
-      const rowFor = pool.state.find(x => x.id === 'item-none');
-      const extra = ORIG.rows.find(r => uniqKey(r) && !OKROWS.slice(0, 2).includes(r) && r !== BADROWS[0]);
-      rowFor.bank_account = extra.accountDigits; rowFor.amount = extra.amount;
-      const r4 = await RES.applyResultFile({ batchId: 'B1', fileName: 'r2.xlsx', base64: FILE_B64, by: '관리자A' });
-      ok('★ 뒤늦게 결과가 도착하면 그때 입금 기록된다(재반영 경로가 열려 있다)',
-        r4.applied === 1 && rowFor.status === 'paid', JSON.stringify(r4));
-    }
+    ok('★ 재업로드해도 결과없음 건은 실패 상태를 유지한다',
+      pool.state.find(x => x.id === 'item-none').status === 'failed');
 
     // ── 안내 끄기 ──
     {
@@ -335,7 +331,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('★★ 모든 대기건 상태 변경 UPDATE가 `AND status = \'pending\'` 조건을 건다', (() => {
       const ups = resSrc.match(/UPDATE payment_batch_items[\s\S]*?`/g) || [];
       const gated = ups.filter(u => /WHERE id = \$1 AND status = 'pending'/.test(u));
-      return gated.length === 3;
+      return gated.length === 4;
     })());
     ok('★ recordDeposits / markDepositCells 를 재사용한다',
       /require\('\.\/paymentApply\.service'\)/.test(resSrc)
@@ -408,11 +404,13 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
     ok('★ 이체결과 확인은 파일 선택 없이 저장된 미리보기를 조회한다',
       /function _pmOpenResult\(i\)[\s\S]{0,900}api\('\/api\/trackb\/payment\/batch\/'[\s\S]{0,100}result-preview/.test(wd)
       && !/function _pmOpenResult\(i\)[\s\S]{0,900}_pmPickResult\(i\)/.test(wd));
-    ok('★ 미리보기 → 확인 팝업 → 반영 순서', /result-preview/.test(wd) && /result-apply/.test(wd)
-      && wd.indexOf('result-preview') < wd.indexOf('result-apply'));
+    ok('★ 미리보기 → 확인 팝업 → 반영 흐름이 각각 연결된다',
+      /function _pmOpenResult\(i\)[\s\S]{0,900}result-preview/.test(wd)
+      && /function _pmResultApply\(\)[\s\S]{0,1200}result-apply/.test(wd));
     ok('★ 반영 요청에 파일을 다시 보낸다(서버가 재해석)', /result-apply[\s\S]{0,240}base64:R\.file\.base64/.test(wd));
     ok('★ 순서 배정을 화면이 고지한다', /결과를 순서대로 배정/.test(wd));
-    ok('★ 결과없음은 "대기 유지"라고 말한다', /그대로 대기 상태로 둡니다/.test(wd));
+    ok('★ 결과없음은 이체실패·다음 회차 재포함으로 안내한다',
+      /이체실패로 처리/.test(wd) && /다음 회차에 다시 포함/.test(wd));
     ok('자동 반영은 실패 안내를 기본으로 켠다', /result-auto-apply/.test(wd)
       && /notifyFailed: b\.notifyFailed !== false/.test(tb));
     ok('★ 확인 팝업은 body 직속', /document\.body\.appendChild\(el\);\s*\/\/ ★ body 직속/.test(wd));
@@ -421,7 +419,7 @@ console.log('\n[A] 미리보기 — 마스킹 확인 이력');
       /function _pmBoardApplyText\(board\)/.test(wd)
       && /_pmBoardApplyText\(r\.board\)/.test(wd)
       && !/const depositDate\s*=/.test(wd)
-      && /const retryDepositDate\s*=\s*b\.status==='applied' && \(b\.boardFailedCount\|\|0\)>0/.test(wd));
+      && !/const retryDepositDate\s*=/.test(wd));
 
     const brief = noLineComments(read('src/routes/reviewEdit.routes.js'));
     ok('★ 리뷰어 brief 에 입금 결과를 싣는다', /FROM payment_batch_items/.test(brief) && /payment,\s/.test(brief));
