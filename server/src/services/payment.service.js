@@ -36,6 +36,9 @@ function accountFingerprint(value) {
   const account = normalizeAccount(value);
   return account ? crypto.createHash('sha256').update(account).digest('hex') : '';
 }
+function snapshotFingerprint(bankName, account, holder) {
+  return crypto.createHash('sha256').update([String(bankName || '').trim(), normalizeAccount(account), String(holder || '').trim()].join('\u0000')).digest('hex');
+}
 
 function compareAccountSnapshot(item, current) {
   const itemId = item && item.id;
@@ -43,14 +46,14 @@ function compareAccountSnapshot(item, current) {
   const source = item && (item.account_source || item.accountSource);
   const subPhone8 = item && (item.account_sub_phone8 || item.accountSubPhone8 || '');
   const snapshotAccount = item && (item.bank_account || item.bankAccount);
-  const snapshotFingerprint = item && (item.account_fingerprint || item.accountFingerprint)
-    || accountFingerprint(snapshotAccount);
-  if (!item || !reviewerId || !source || !snapshotFingerprint || !current) return { state: 'unverifiable', itemId };
+  const savedFingerprint = item && (item.account_snapshot_fingerprint || item.accountSnapshotFingerprint)
+    || snapshotFingerprint(item && (item.bank_name || item.bankName), snapshotAccount, item && (item.account_holder || item.accountHolder));
+  if (!item || !reviewerId || !source || !savedFingerprint || !current) return { state: 'unverifiable', itemId };
   const sameIdentity = String(reviewerId) === String(current.reviewerId)
     && String(source) === (current.isSub ? 'sub' : 'self')
     && String(subPhone8) === (current.isSub ? String(current.subPhone8 || '') : '');
   if (!sameIdentity) return { state: 'mismatch', itemId };
-  return snapshotFingerprint === accountFingerprint(current.bankAccount)
+  return savedFingerprint === snapshotFingerprint(current.bankName, current.bankAccount, current.accountHolder)
     ? { state: 'match', itemId } : { state: 'mismatch', itemId };
 }
 
@@ -517,13 +520,13 @@ async function createBatch({ bank, rows, by }) {
           `INSERT INTO payment_batch_items
              (batch_id, sheet_id, tab_name, row_index, campaign_id, reviewer_name, phone8,
               bank_name, bank_code, bank_account, account_holder,
-              account_reviewer_id, account_source, account_sub_phone8, account_fingerprint,
+              account_reviewer_id, account_source, account_sub_phone8, account_fingerprint, account_snapshot_fingerprint,
               product_price, review_fee, amount, transfer_memo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
            it.accountRef && it.accountRef.reviewerId || null, it.accountRef ? (it.isSub ? 'sub' : 'self') : null,
-           it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount),
+           it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
            it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
         await client.query('RELEASE SAVEPOINT sp_item');
         saved.push({ ...it, id: row.id });
@@ -627,7 +630,7 @@ async function checkBatchAccountSnapshots({ batch, items }) {
   if (!guarded.length) return { ok: true, mismatches: [], unverifiable: (items || []).length };
   const ids = [...new Set(guarded.map(i => String(i.account_reviewer_id)))];
   const { rows } = await pool.query(
-    `SELECT id AS "reviewerId", bank_account AS "bankAccount", sub_accounts AS "subAccounts"
+    `SELECT id AS "reviewerId", bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder", sub_accounts AS "subAccounts"
        FROM reviewers WHERE id::text = ANY($1::text[])`, [ids]);
   const byId = new Map(rows.map(r => [String(r.reviewerId), r]));
   return reconcileAccountSnapshots(guarded, byId);
@@ -640,14 +643,14 @@ function reconcileAccountSnapshots(items, ownersById) {
     const owner = ownersById.get(String(item.account_reviewer_id));
     let current = null;
     if (owner && item.account_source === 'self') {
-      current = { reviewerId: owner.reviewerId, isSub: false, bankAccount: owner.bankAccount || '' };
+      current = { reviewerId: owner.reviewerId, isSub: false, bankName: owner.bankName || '', bankAccount: owner.bankAccount || '', accountHolder: owner.accountHolder || '' };
     } else if (owner && item.account_source === 'sub') {
       const subs = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
       const sub = subs.find(s => String((s && s.phone) || '').replace(/[^0-9]/g, '').slice(-8) === String(item.account_sub_phone8 || ''));
-      if (sub) current = { reviewerId: owner.reviewerId, isSub: true, subPhone8: item.account_sub_phone8 || '', bankAccount: sub.bankAccount || owner.bankAccount || '' };
+      if (sub) current = { reviewerId: owner.reviewerId, isSub: true, subPhone8: item.account_sub_phone8 || '', bankName: sub.bankName || owner.bankName || '', bankAccount: sub.bankAccount || owner.bankAccount || '', accountHolder: sub.accountHolder || owner.accountHolder || '' };
     }
     const comparison = compareAccountSnapshot(item, current);
-    if (comparison.state === 'mismatch') mismatches.push({ itemId: item.id, reviewerName: item.reviewer_name || '', accountTail: String(item.bank_account || '').replace(/[^0-9]/g, '').slice(-4) });
+    if (comparison.state !== 'match') mismatches.push({ itemId: item.id, reviewerName: item.reviewer_name || '', accountTail: String(item.bank_account || '').replace(/[^0-9]/g, '').slice(-4) });
     if (comparison.state === 'unverifiable') unverifiable++;
   }
   return { ok: mismatches.length === 0, mismatches, unverifiable };
