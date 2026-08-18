@@ -98,15 +98,24 @@ svc.__setPoolForTest({
     '목록에서 선택한 이체만 아래 검색 및 대조 대상으로 전환해야 한다');
   assert.match(workdesk, /pm-unconfirmed-compare-table/,
     '작업보드와 이체결과를 표 행으로 비교해야 한다');
-  assert.match(workdesk, /function _pmRenderUnconfirmedDirect\(\)/,
-    '팝업을 열면 검색 없이 즉시 2행 비교표를 렌더링해야 한다');
+  assert.match(workdesk, /function _pmRenderUnconfirmedDirect\(match=null\)/,
+    '팝업을 열면 검색 없이 즉시 비교표를 렌더링해야 한다');
+  assert.match(workdesk, /const transfers=group\?\.items\|\|\[\]/,
+    '선택한 통장표시 묶음의 미확인 이체결과 전체를 비교표에 표시해야 한다');
+  assert.match(workdesk, /function _pmOpenUnconfirmedWorkSearch\(\)/,
+    '연결된 작업보드가 없을 때 관리자가 작업보드를 직접 연결할 수 있어야 한다');
+  assert.match(workdesk, /function _pmAccountNumber\(transfer\)/,
+    '계좌번호는 전체 값이 있을 때 끝자리로 축약하지 않고 표시해야 한다');
+  const paymentResultSource = fs.readFileSync(require.resolve('../src/services/paymentResult.service.js'), 'utf8');
+  assert.match(paymentResultSource, /function _adminUnconfirmedAccountPreview\(preview, rows\)/,
+    '저장본은 마스킹을 유지하고 관리자 대조 응답에서만 전체 계좌번호를 복원해야 한다');
   assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-compare-table\{overflow-x:hidden;/,
     '운영 대조표는 모달 안에서 가로 스크롤을 만들지 않아야 한다');
   assert.match(workdesk, /\.pm-unconfirmed-compare-table table\.lgtable\{min-width:0;table-layout:fixed\}/,
     '운영 대조표는 공통 테이블의 최소 폭을 상속하지 않아야 한다');
   assert.match(workdesk, /table\.lgtable\.pm-unconfirmed-two-row-table\{width:100%;min-width:0;table-layout:fixed\}/,
     '7열 비교표는 모달 폭 안에서 모든 값을 보여주는 전용 폭 규칙을 가져야 한다');
-  assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(7\)\{width:23%\}/,
+  assert.match(workdesk, /\.pm-unconfirmed-two-row-table thead th:nth-child\(7\)\{width:18%\}/,
     '7번째 판정 열은 밀리지 않도록 전용 폭을 가져야 한다');
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
