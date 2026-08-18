@@ -1794,6 +1794,7 @@
 .pmrbd{padding:14px 18px;overflow:auto;flex:1;min-height:0}
 .pm-unconfirmed-box{width:min(880px,100%);min-height:min(590px,80vh)}
 .pm-unconfirmed-search{margin:16px 0 0;display:grid;gap:8px}
+.pm-unconfirmed-box .pm-unconfirmed-search{display:none}
 .pm-unconfirmed-search .inp{height:44px;font-size:15px;padding:0 13px}
 .pm-unconfirmed-candidates{position:static;display:grid;gap:7px;max-height:360px;overflow:auto;padding:2px}
 .pm-unconfirmed-candidate{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;text-align:left;border:1px solid #D7E3F4;border-radius:10px;padding:12px;background:#FFF}
@@ -7616,6 +7617,13 @@ function _pmFileB64(file){
 const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:'이체실패(결과없음)', already_paid:'이미 입금' };
 
 function _pmUnconfirmedClose(){ const el=document.getElementById('pmUnconfirmedOv'); if(el) el.remove(); }
+function _pmRenderUnconfirmedDirect(){
+  const el=document.getElementById('pmUnconfirmedOv'), group=(STATE.pmUnconfirmedGroups||[])[Number(el?.dataset.groupIndex)], transfer=(group?.items||[])[0]||{};
+  if(!el) return;
+  const view=document.createElement('div'); view.className='pm-unconfirmed-direct-view';
+  view.innerHTML=`<div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th></tr></thead><tbody><tr class="pm-workboard-row"><th>작업보드값행</th><td>연결된 작업보드 없음</td><td>—</td><td>—</td><td>—</td><td>—</td><td>추천 결과 없음</td></tr><tr class="pm-transfer-row"><th>이체결과값행</th><td>${esc(transfer.memo||'—')}</td><td>—</td><td class="num">${_pmNum(transfer.amount)}</td><td>${esc(transfer.holder||'—')}</td><td>…${esc(transfer.accountTail||'—')}</td><td>${esc(transfer.transferredAt||'—')}</td></tr></tbody></table></div><div class="pm-unconfirmed-actionbar"><span class="muted">대조 완료 시 이 화면에서 해당 미확인 카드를 제외합니다. 입금완료 기록은 생성되지 않습니다.</span><button class="btn pri sm" onclick="_pmCompleteUnconfirmedView()">대조 완료</button></div>`;
+  el.querySelector('.pm-unconfirmed-search')?.before(view);
+}
 function _pmCompleteUnconfirmedView(){
   const el=document.getElementById('pmUnconfirmedOv'), index=Number(el?.dataset.groupIndex);
   if(!Number.isInteger(index)) return;
@@ -7717,8 +7725,7 @@ function _pmOpenUnconfirmedMatch(memo, selectedGroupIndex=0){
   const groups=STATE.pmUnconfirmedGroups||[];
   el.innerHTML=`<div class="pmrbox pm-unconfirmed-box"><div class="pmrhd"><h3>미확인 이체 작업 대조</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">미확인 이체 <b>${groups.reduce((n,g)=>n+(g.items||[]).length,0)}건</b> 중 한 건을 선택해 대조합니다. 추천은 자동 반영되지 않으며, 승인 전에는 입금 기록이 생성되지 않습니다.</div><div id="pmUnconfirmedTransferList" class="pm-unconfirmed-listbox" style="margin-top:12px">${groups.map((g,i)=>`<button class="pm-unconfirmed-transfer ${i===selectedGroupIndex?'on':''}" onclick="_pmSelectUnconfirmedMemo(${i})"><b>${esc(g.memo)}</b><span>${(g.items||[]).length}건 · ${_pmNum((g.items||[]).reduce((n,x)=>n+Number(x.amount||0),0))}원 · 작업 대조</span></button>`).join('')}</div><div class="pm-unconfirmed-search"><label for="pmUnconfirmedQuery" class="muted">선택한 이체의 작업 또는 모집공고 검색</label><input id="pmUnconfirmedQuery" class="inp" value="${esc(memo)}" placeholder="작업명·공고명·입금명으로 검색" oninput="_pmUnconfirmedLiveSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();_pmUnconfirmedSearch()}"><div id="pmUnconfirmedCandidates" class="pm-unconfirmed-candidates"></div></div></div></div>`;
   document.body.appendChild(el);
-  document.getElementById('pmUnconfirmedQuery').focus();
-  _pmUnconfirmedSearch({ live:true });
+  _pmRenderUnconfirmedDirect();
 }
 
 function _pmResultModal(){

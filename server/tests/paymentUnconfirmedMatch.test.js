@@ -98,6 +98,8 @@ svc.__setPoolForTest({
     '목록에서 선택한 이체만 아래 검색 및 대조 대상으로 전환해야 한다');
   assert.match(workdesk, /pm-unconfirmed-compare-table/,
     '작업보드와 이체결과를 표 행으로 비교해야 한다');
+  assert.match(workdesk, /function _pmRenderUnconfirmedDirect\(\)/,
+    '팝업을 열면 검색 없이 즉시 2행 비교표를 렌더링해야 한다');
   assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-compare-table\{overflow-x:hidden;/,
     '운영 대조표는 모달 안에서 가로 스크롤을 만들지 않아야 한다');
   assert.match(workdesk, /\.pm-unconfirmed-compare-table table\.lgtable\{min-width:0;table-layout:fixed\}/,
