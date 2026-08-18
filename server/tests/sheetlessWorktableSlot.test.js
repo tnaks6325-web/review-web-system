@@ -20,6 +20,8 @@ assert.ok(/JOIN campaign_applications ca/.test(source), 'recovery must be scoped
 assert.ok(/COALESCE\(rc\.linked_sheet_id, ''\) <> ''/.test(source) && /COALESCE\(rc\.linked_tab_name, ''\) <> ''/.test(source), 'recovery must only write to campaigns with an internal worktable');
 assert.ok(/os\.campaign_application_id = ca\.id[\s\S]*?ca\.order_submission_id = os\.id[\s\S]*?ca\.late_order_id = os\.id/.test(source), 'recovery must include legacy orders linked from the application record');
 assert.ok(/NOT EXISTS \([\s\S]*?cp\.order_submission_id = os\.id/.test(source), 'recovery must skip orders already linked to a worktable row');
+assert.ok(/ORDER BY os\.submitted_at ASC/.test(source), 'recovery must order the order ledger by submitted_at; order_submissions has no created_at column');
+assert.ok(!/os\.created_at/.test(source), 'recovery must never read the non-existent order_submissions.created_at column');
 assert.ok(/startup-recovery/.test(app) && /recoverUnwrittenSheetlessOrders/.test(app), 'existing missing worktable rows must be recovered after deployment without reviewer resubmission');
 
 console.log('sheetless worktable slot checks passed');

@@ -315,7 +315,7 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-or
           SELECT 1 FROM campaign_participants cp
            WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
         )
-      ORDER BY os.created_at ASC
+      ORDER BY os.submitted_at ASC
       LIMIT $1`, [lim]);
 
   const result = { linked: links.linked, scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
