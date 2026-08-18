@@ -2764,18 +2764,64 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
 
 async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
   const db = getPool();
-  const { rows } = await db.query(
-    `SELECT id, source FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
-    [rowId, sheetId, tabName]);
-  if (!rows.length) return { ok: false, error: 'row_not_found' };
-  if (rows[0].source === 'manual') {
-    const { rowCount } = await db.query(
-      `UPDATE campaign_participants SET deleted_at=NOW(), updated_at=NOW(), updated_by=$2 WHERE id=$1 AND deleted_at IS NULL`,
-      [rowId, String(by).slice(0, 100)]);
-    return { ok: true, mode: 'soft_delete', removed: rowCount };
-  }
-  const r = await editWorkdeskRow({ sheetId, tabName, rowId, field: '_hidden', value: true, by });
-  return r.ok ? { ok: true, mode: 'overlay_hidden', editId: r.editId } : r;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
+    // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
+    // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
+    const { rows } = await client.query(
+      `SELECT id, seq, phone8, order_submission_id
+         FROM campaign_participants
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL
+        FOR UPDATE`,
+      [rowId, sheetId, tabName]);
+    if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    const row = rows[0];
+
+    const removed = await client.query(
+      `UPDATE campaign_participants
+          SET deleted_at=NOW(), active=FALSE, updated_at=NOW(), updated_by=$4,
+              -- import 재투영은 같은 seq를 UPSERT한다. 삭제 의도를 이 행에 남겨야
+              -- 새로고침/동기화 뒤에 작업표·참여내역이 되살아나지 않는다.
+              row_json=COALESCE(row_json, '{}'::jsonb) || '{"__workdesk_deleted":true}'::jsonb
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
+      [rowId, sheetId, tabName, String(by).slice(0, 100)]);
+    if (removed.rowCount !== 1) {
+      await client.query('ROLLBACK');
+      return { ok: false, error: 'row_changed' };
+    }
+
+    // 시트 기반 보조 신원 링크도 정확히 이 행(seq)만 제거한다. 동명이인·다른
+    // 작업의 링크는 전혀 건드리지 않는다.
+    const links = await client.query(
+      `DELETE FROM participation_links
+        WHERE sheet_id=$1 AND tab_name=$2 AND row_index=$3`,
+      [sheetId, tabName, row.seq]);
+
+    // 구매양식으로 확정된 참여는 주문 UUID로만 찾아 취소한다. order_submission_id가
+    // 없는 수동/이관 행은 여기서 다른 공고의 참여상태를 추측해 바꾸지 않는다.
+    let applications = { rowCount: 0 };
+    if (row.order_submission_id) {
+      applications = await client.query(
+        `UPDATE campaign_applications
+            SET status='cancelled', submitted_at=NULL, order_submission_id=NULL,
+                expires_at=NOW(), hold_token=NULL, updated_at=NOW()
+          WHERE order_submission_id=$1::uuid AND status IN ('applied','submitted')`,
+        [row.order_submission_id]);
+    }
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      mode: 'participant_history_removed',
+      removed: removed.rowCount,
+      participationLinksRemoved: links.rowCount,
+      applicationsCancelled: applications.rowCount,
+    };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw e;
+  } finally { client.release(); }
 }
 
 // 주문이 연결된 한 행을 안전하게 취소한다. 시트 물리행은 유지하고 주문값만 큐로 비워 행 이동 오염을 막는다.

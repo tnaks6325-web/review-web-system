@@ -64,7 +64,15 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          product_name = EXCLUDED.product_name, product_url = EXCLUDED.product_url,
          start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
          submit_col = EXCLUDED.submit_col, submit_col2 = EXCLUDED.submit_col2,
-         row_json = EXCLUDED.row_json, sheet_row = EXCLUDED.sheet_row,
+         -- 관리자가 작업보드에서 제거한 행은 재임포트가 같은 seq를 만나도
+         -- 되살리지 않는다. 원본 시트의 스냅샷은 최신으로 갱신하되 삭제 표식만
+         -- 보존해, 작업표와 리뷰어 참여내역의 삭제 결과가 안정적으로 유지된다.
+         row_json = CASE
+           WHEN COALESCE(campaign_participants.row_json->>'__workdesk_deleted', 'false') = 'true'
+             THEN EXCLUDED.row_json || '{"__workdesk_deleted":true}'::jsonb
+           ELSE EXCLUDED.row_json
+         END,
+         sheet_row = EXCLUDED.sheet_row,
          -- ★ Phase 4: import 행은 리뷰제출/입금 상태도 review_index에서 최신화(DB를 살아있는 원본화).
          --   campaign_participants.* = 갱신 전(기존행) 값(EXCLUDED=새 행). 기존행 source='import'면 새 상태로,
          --   'manual'(직접 토글/추가)이면 보존. 한 번 손대면 그 행은 통째로 수동관리(컬럼별 provenance 없음).
@@ -75,7 +83,12 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          --   시스템이 자리만 잡아둔 줄이므로 '보존' 대상이 아니다.
          is_submitted = CASE WHEN campaign_participants.source IN ('import','worktable') THEN EXCLUDED.is_submitted ELSE campaign_participants.is_submitted END,
          is_paid      = CASE WHEN campaign_participants.source IN ('import','worktable') THEN EXCLUDED.is_paid      ELSE campaign_participants.is_paid END,
-         deleted_at = NULL, imported_at = NOW()
+         deleted_at = CASE
+           WHEN COALESCE(campaign_participants.row_json->>'__workdesk_deleted', 'false') = 'true'
+             THEN campaign_participants.deleted_at
+           ELSE NULL
+         END,
+         imported_at = NOW()
        RETURNING (xmax = 0) AS inserted`,
       [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
        r.product_name, r.product_url, r.start_date, r.end_date, !!r.is_submitted, isPaid,

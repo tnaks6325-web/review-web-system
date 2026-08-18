@@ -204,8 +204,10 @@ router.get('/my-applications', async (req, res, next) => {
         rc.status AS "campaignStatus"
       FROM campaign_applications ca
       LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE ca.applicant_name = $1
-         OR ca.applicant_phone LIKE $2
+      WHERE (ca.applicant_name = $1
+         OR ca.applicant_phone LIKE $2)
+        -- 작업보드에서 참여행을 삭제하며 취소된 건은 리뷰어의 참여이력에서 제외한다.
+        AND ca.status <> 'cancelled'
       ORDER BY ca.applied_at DESC
       LIMIT 50
     `, [reviewer.name, '%' + phone8]);
@@ -248,6 +250,13 @@ router.get('/my-status', async (req, res, next) => {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.phone8 = $1
+        -- 작업보드에서 삭제된 정확한 참여 행은 리뷰어의 참여내역에도 노출하지 않는다.
+        -- campaign_participants가 없는 레거시 행은 그대로 보존한다.
+        AND NOT EXISTS (
+          SELECT 1 FROM campaign_participants cp
+           WHERE cp.sheet_id=ri.sheet_id AND cp.tab_name=ri.tab_name
+             AND cp.seq=ri.row_index AND cp.deleted_at IS NOT NULL
+        )
       ORDER BY ri.built_at DESC
       LIMIT 100
     `, [phone8]);
@@ -288,6 +297,13 @@ router.get('/my-status', async (req, res, next) => {
       FROM order_submissions os
       LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
       WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
+        AND os.deleted_at IS NULL
+        -- 주문 원장은 감사용으로 남겨도, 삭제된 작업보드 참여행의 주문은 리뷰어
+        -- 참여현황에 다시 나타나면 안 된다.
+        AND NOT EXISTS (
+          SELECT 1 FROM campaign_participants cp
+           WHERE cp.order_submission_id=os.id AND cp.deleted_at IS NOT NULL
+        )
       ORDER BY os.submitted_at DESC
       LIMIT 100
     `, [phone8]);
