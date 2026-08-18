@@ -2,7 +2,7 @@
  * 작업보드 셀 편집 권한 회귀가드.
  *
  * 직원은 담당자 배정과 무관하게 모든 작업표의 값을 편집·붙여넣기할 수 있어야 한다.
- * 다만 마감·정산 등 다른 작업은 기존 담당 작업 스코프를 유지한다.
+ * 마감·정산·협업 등 작업보드 기능도 staff가 전체 작업에서 수행할 수 있어야 한다.
  * 실행: node tests/workdeskCellEditScope.test.js
  */
 const assert = require('assert');
@@ -53,6 +53,7 @@ assert.match(service, /allWorkdesk = false/, '비작업보드 호출은 전체 �
 assert.match(service, /!allowAllWorkdesk && \(role === 'advertiser' \|\| \(role === 'staff' && !allowAllStaff\)\)/, '기본 호출은 광고주/직원 담당 작업 제한을 유지해야 합니다.');
 
 const sharedScope = functionBody('_ensureEditScope');
-assert.match(sharedScope, /canAccessTab/, '마감·정산 등 공용 작업은 기존 담당 작업 스코프를 유지해야 합니다.');
+assert.match(sharedScope, /role === 'staff'/, 'staff는 마감·정산 등 작업보드 공용 기능을 전체 작업에서 수행할 수 있어야 합니다.');
+assert.doesNotMatch(sharedScope, /canAccessTab/, '작업보드 공용 기능에 담당 작업 검사가 남으면 안 됩니다.');
 
-console.log('✓ 직원 전체 작업표 셀 편집/붙여넣기 권한 및 공용 스코프 분리 확인');
+console.log('✓ staff 전체 작업보드 편집·정산·협업 권한 및 외부 역할 차단 확인');

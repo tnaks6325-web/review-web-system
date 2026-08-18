@@ -125,6 +125,13 @@ async function run() {
   assert.ok(!/internal_only = FALSE/.test(p.q[0].s), '5c: 내부는 internal 필터 없음');
   assert.equal(p.q[0].params[0], 'master:root', '5d: seen 키 = role:name');
 
+  // staff의 작업보드 전체 운영 모드에서는 담당/소유 집합으로 다시 줄이지 않는다.
+  p = pool([[/FROM trackb_tab_threads t LEFT JOIN trackb_thread_seen s/, () => ({ rows: [{ sheetId: 'S2', tabName: 'X', n: 2 }] })]]);
+  svc.__setPoolForTest(p);
+  r = await svc.unseenCounts({ role: 'staff', name: 'ae', allWorkdesk: true, tabs: [{ sheetId: 'S2', tabName: 'X' }] });
+  assert.equal(r.total, 2, '5e: staff 전체 작업보드 미확인 수');
+  assert.ok(p.q.some(x => /FROM trackb_tab_threads t LEFT JOIN/.test(x.s)), '5f: staff 전체 모드는 스레드 집계 실행');
+
   // ═══ 5.5 B2: staff/advertiser 는 소유 탭으로 서버 강제 제한 ═══
   //   scopedActiveTabs 목: participants.listActiveTabs(전체 탭) + svc 풀(advertiser_campaigns 스코프/주석).
   //   광고주 adv_1 은 시트 S1 전체 소유 → S1 탭만. S2(타 업체)는 소유 아님.

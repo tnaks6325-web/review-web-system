@@ -21,15 +21,10 @@ const { logger } = require('../utils/logger');
 function _by(req) { return String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100); }
 function _role(req) { return (req.admin && req.admin.role) || ''; }
 
-// 편집 스코프 가드: master/admin=전체 허용, staff=담당 탭만(canAccessTab), advertiser/그외=차단.
-//   ★ 라우트레벨 adminOrMaster 를 대체 — staff 를 "자기 담당 탭"에 한해 편집 허용하되 교차 접근 차단.
+// 작업보드 편집 스코프: 내부 역할(master/admin/staff)=전체 허용, advertiser/그외=차단.
 async function _ensureEditScope(req, sheetId, tabName) {
   const role = _role(req);
-  if (role === 'master' || role === 'admin') return { ok: true };
-  if (role === 'staff') {
-    const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
-    return okc ? { ok: true } : { ok: false, code: 403, error: '담당하지 않은 작업(스코프 밖)' };
-  }
+  if (role === 'master' || role === 'admin' || role === 'staff') return { ok: true };
   return { ok: false, code: 403, error: '편집 권한이 없습니다.' };
 }
 
@@ -41,12 +36,12 @@ async function _ensureWorkdeskCellEditScope(req) {
   return { ok: false, code: 403, error: '편집 권한이 없습니다.' };
 }
 
-// 스레드 스코프 가드: master/admin=전체 · staff=담당 탭 · advertiser=소유 탭(양방향 협업이라 read/write 동일) · reviewer 차단.
+// 스레드 스코프 가드: 내부 역할(master/admin/staff)=전체 · advertiser=소유 탭(양방향 협업) · reviewer 차단.
 //   ★ (sheetId, tabName) 기준 canAccessTab(gid 신뢰 금지). 광고주 내부글 제외는 서비스(internal_only 필터)가 담당.
 async function _ensureThreadScope(req, sheetId, tabName) {
   const role = _role(req);
-  if (role === 'master' || role === 'admin') return { ok: true };
-  if (role === 'staff' || role === 'advertiser') {
+  if (role === 'master' || role === 'admin' || role === 'staff') return { ok: true };
+  if (role === 'advertiser') {
     const okc = await svc.canAccessTab({ role, staffName: (req.admin && req.admin.name) || null, advertiserId: (req.admin && req.admin.advertiser_id) || null, sheetId, tabName });
     if (!okc) return { ok: false, code: 403, error: '스코프 밖 탭(담당/소유 아님)' };
     // 094: 브랜드 링크 세션은 소유 탭 중에서도 **그 브랜드에 배정된 탭만**(타 브랜드 작업 도달 불가).
@@ -165,14 +160,7 @@ router.get('/tab-folders', authMiddleware, internalMiddleware, async (req, res) 
   const wantInfo = String(req.query.kind || '') === 'info';
   const key = `${sheetId}\t${tabName}`;
   try {
-    // ★★ 스코프 게이트가 **캐시보다 먼저**다(코드리뷰가 잡은 실측 구멍): 캐시 히트를 위에서 반환하면
-    //   누군가 그 탭을 최근에 열어 둔 동안 **담당 밖 AE 가 Drive 링크를 그대로 받는다**(60초/10분 창).
-    //   "폴더 URL 도 담당 스코프 밖으로 새지 않는다"는 이 라우트의 불변식이 캐시 한 줄로 무력화됐다.
-    //   순서 고정 = 파싱 → **스코프** → 캐시 → 작업.
-    if (_role(req) === 'staff') {
-      const okc = await svc.canAccessTab({ role: 'staff', staffName: req.admin && req.admin.name, sheetId, tabName });
-      if (!okc) return res.status(403).json({ ok: false, error: '담당하지 않은 작업(스코프 밖)' });
-    }
+    // staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다.
     if (wantInfo) {
       const ih = _tabFolderInfoCache.get(key);
       if (ih && Date.now() - ih.at < 60000) return res.json({ ok: true, kind: 'info', ...ih.val });
@@ -1124,7 +1112,7 @@ router.post('/workdesk/unseen', authMiddleware, async (req, res, next) => {
     const role = _role(req);
     if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
     const tabs = Array.isArray(req.body && req.body.tabs) ? req.body.tabs.slice(0, 500) : null;
-    const out = await svc.unseenCounts({ role, name: (req.admin && req.admin.name) || '', advertiserId: (req.admin && req.admin.advertiser_id) || null, tabs });
+    const out = await svc.unseenCounts({ role, name: (req.admin && req.admin.name) || '', advertiserId: (req.admin && req.admin.advertiser_id) || null, tabs, allWorkdesk: role === 'staff' });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
