@@ -177,7 +177,7 @@ t('★ M1 본체(대상 추출·회차)의 쓰기는 payment_* 테이블에만 �
 t('★ 보완 경로의 쓰기는 이체설정·리뷰어 계좌 3곳뿐(주문 원장·회차·검색인덱스 무접촉)', () => {
   assert.ok(_fixSrc, '보완 경로(PaymentFixError)를 찾지 못했다 — 경계 표식이 바뀌었다면 가드를 갱신할 것');
   const tables = [...new Set(_writesIn(_fixSrc))].sort();
-  assert.deepStrictEqual(tables, ['recruit_campaigns', 'reviewers', 'tab_configs'],
+  assert.deepStrictEqual(tables, ['recruit_campaigns', 'reviewer_account_change_audit', 'reviewers', 'tab_configs'],
     '보완 경로가 다른 테이블을 건드린다: ' + tables.join(', '));
 });
 
