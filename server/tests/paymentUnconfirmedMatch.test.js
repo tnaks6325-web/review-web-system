@@ -97,6 +97,10 @@ svc.__setPoolForTest({
     '목록에서 선택한 이체만 아래 검색 및 대조 대상으로 전환해야 한다');
   assert.match(workdesk, /pm-unconfirmed-compare-table/,
     '작업보드와 이체결과를 표 행으로 비교해야 한다');
+  assert.match(workdesk, /\.lgwrap\.pm-unconfirmed-compare-table\{overflow-x:hidden;/,
+    '운영 대조표는 모달 안에서 가로 스크롤을 만들지 않아야 한다');
+  assert.match(workdesk, /\.pm-unconfirmed-compare-table table\.lgtable\{min-width:0;table-layout:fixed\}/,
+    '운영 대조표는 공통 테이블의 최소 폭을 상속하지 않아야 한다');
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
