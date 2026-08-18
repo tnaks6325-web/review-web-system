@@ -21,17 +21,17 @@ function decision(summary, duplicateApplied = false) {
 assert.deepStrictEqual(
   decision({ items: 10, matched: 9, unmatchedResults: 0 }),
   { allowed: true, matchRate: 0.9, blockers: [] },
-  '회차 대상의 정확 매칭이 90%면 자동 반영한다');
+  '회차 대상 일부만 매칭돼도 매칭 성공 건은 자동 반영한다');
 
 assert.deepStrictEqual(
   decision({ items: 10, matched: 8, unmatchedResults: 0 }),
-  { allowed: false, matchRate: 0.8, blockers: ['match_below_90'] },
-  '정확 매칭이 90% 미만이면 자동 반영하지 않는다');
+  { allowed: true, matchRate: 0.8, blockers: [] },
+  '정확 매칭률이 90% 미만이어도 매칭 성공 건은 자동 반영한다');
 
 assert.deepStrictEqual(
   decision({ items: 10, matched: 10, unmatchedResults: 1 }),
   { allowed: true, matchRate: 1, blockers: [] },
-  '회차 밖 결과 행은 표시만 하고, 이 회차에 정확히 매칭된 성공 건의 자동 반영을 막지 않는다');
+  '회차 밖 결과 행은 표시만 하고 이 회차의 매칭 성공 반영을 막지 않는다');
 
 assert.deepStrictEqual(
   decision({ items: 10, matched: 10, unmatchedResults: 0 }, true),
@@ -42,6 +42,11 @@ assert.deepStrictEqual(
   decision({ items: 0, matched: 0, unmatchedResults: 0 }),
   { allowed: false, matchRate: 0, blockers: ['no_pending_items'] },
   '대상이 없는 결과 파일은 자동 반영하지 않는다');
+
+assert.deepStrictEqual(
+  decision({ items: 10, matched: 0, unmatchedResults: 10 }),
+  { allowed: false, matchRate: 0, blockers: ['no_matched_results'] },
+  '매칭된 결과가 하나도 없으면 자동 반영하지 않는다');
 
 assert.strictEqual(typeof autoApplyResultFile, 'function',
   '서버가 업로드·판정·반영을 하나의 자동 반영 경로에서 처리한다');
@@ -115,7 +120,7 @@ async function verifyAutomaticApplication() {
   try {
     const onlyThisBatch = HANA_AOA.slice(0, parsed.rows[1].sheetRow);
     const out = await autoApplyResultFile({ batchId: 'B1', fileName: 'result.xlsx', base64: fileBase64(onlyThisBatch), by: 'test', notifyFailed: false });
-    assert.strictEqual(out.autoApplied, true, '90% 이상 회차 일치 결과는 업로드 즉시 자동 반영한다');
+    assert.strictEqual(out.autoApplied, true, '매칭된 결과가 있으면 업로드 즉시 자동 반영한다');
     assert.strictEqual(out.applied, 2, '자동 반영은 기존 입금 기록 경로를 통해 성공 항목을 반영한다');
     assert.strictEqual(out.board.recorded, 2, '자동 반영은 작업보드 입금일 기록 결과를 함께 반환한다');
     assert.ok(uploads[0].applied, '자동 반영한 파일은 이후 동일 파일 경고를 위해 반영 이력으로 남긴다');
