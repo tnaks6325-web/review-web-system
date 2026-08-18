@@ -1,7 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { allocateOptionQuotas, firstRoundQuota } = require('../src/services/linkedRecruitQuota.service');
+const { allocateOptionQuotas, firstRoundQuota, worktableSlotDelta } = require('../src/services/linkedRecruitQuota.service');
 
 let passed = 0;
 function test(name, fn) {
@@ -46,6 +46,12 @@ test('차수 공고는 후속 차수를 보존하고 1차를 조절해 총원을
   assert.deepStrictEqual(firstRoundQuota([
     { round_no: 1, slot_count: 100 }, { round_no: 2, slot_count: 30 },
   ], 180), { roundNo: 1, slotCount: 150 });
+});
+
+test('작업보드 슬롯은 빈 행만 증감하고 참여·주문 행 아래로는 줄이지 않는다', () => {
+  assert.deepStrictEqual(worktableSlotDelta({ current: 600, protectedCount: 93, target: 900 }), { target: 900, add: 300, retire: 0 });
+  assert.deepStrictEqual(worktableSlotDelta({ current: 900, protectedCount: 93, target: 600 }), { target: 600, add: 0, retire: 300 });
+  assert.throws(() => worktableSlotDelta({ current: 900, protectedCount: 601, target: 600 }), /작업보드 인원/);
 });
 
 test('후속 차수 합계보다 낮은 목표는 차수 불변식을 깨므로 거부한다', () => {

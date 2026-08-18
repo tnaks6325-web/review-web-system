@@ -32,6 +32,93 @@ function displayRecruitTotal(campaignTotal, workOrderTotal) {
     : { total: 0, source: 'none' };
 }
 
+/** 작업보드 슬롯 증감량. 참여/주문 정보가 있는 행은 어떤 경우에도 제거 대상이 아니다. */
+function worktableSlotDelta({ current = 0, protectedCount = 0, target = 0 } = {}) {
+  const live = quota(current);
+  const fixed = quota(protectedCount);
+  const next = quota(target);
+  if (next < fixed) {
+    throw quotaError('이미 참여자 또는 구매양식이 있는 작업보드 인원보다 낮게 목표 인원을 설정할 수 없습니다.', 'recruit_quota_worktable_below_used');
+  }
+  return { target: next, add: Math.max(0, next - live), retire: Math.max(0, live - next) };
+}
+
+function _worktableSlotEmpty(row) {
+  return !String(row.reviewer_name || '').trim()
+    && !String(row.recipient_name || '').trim()
+    && !String(row.phone8 || '').trim()
+    && !row.order_submission_id;
+}
+
+/**
+ * 연결된 무시트 작업표의 활성 슬롯 수를 목표 인원과 일치시킨다.
+ * 호출자는 동일 트랜잭션에서 작업오더/공고 정원을 갱신하므로, 슬롯 축소 실패 시
+ * 두 저장값도 함께 롤백된다. 투영 장부 재생성은 커밋 후 별도 수행한다.
+ */
+async function syncWorktableSlotsInTx(client, campaign, target, by = 'quota-sync') {
+  if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { synced: false, reason: 'no_worktable_link' };
+  const { isSheetless } = require('../utils/sheetlessScope');
+  if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { synced: false, reason: 'not_sheetless' };
+  const { rows } = await client.query(
+    `SELECT id, seq, tab_gid, reviewer_name, recipient_name, phone8, order_submission_id
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+      ORDER BY seq FOR UPDATE`, [campaign.linked_sheet_id, campaign.linked_tab_name]
+  );
+  const fixed = rows.filter(r => !_worktableSlotEmpty(r));
+  const delta = worktableSlotDelta({ current: rows.length, protectedCount: fixed.length, target });
+  if (delta.retire) {
+    const ids = rows.filter(_worktableSlotEmpty).sort((a, b) => Number(b.seq) - Number(a.seq)).slice(0, delta.retire).map(r => r.id);
+    if (ids.length !== delta.retire) throw quotaError('줄일 수 있는 빈 작업보드 슬롯이 부족합니다.', 'recruit_quota_worktable_below_used');
+    await client.query(
+      `UPDATE campaign_participants
+          SET deleted_at=NOW(), active=FALSE, updated_by=$2, updated_at=NOW()
+        WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+      [ids, String(by).slice(0, 100)]
+    );
+  }
+  if (delta.add) {
+    // 은퇴한 행도 (sheet_id, tab_name, seq) 유니크키를 차지한다. 활성 행만 기준으로
+    // 다시 1번부터 만들면 재증원 때 충돌하므로 탭 전체의 최댓값 뒤에만 추가한다.
+    const { rows: seqRows } = await client.query(
+      `SELECT COALESCE(MAX(seq), 0)::int AS max_seq FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
+      [campaign.linked_sheet_id, campaign.linked_tab_name]
+    );
+    const maxSeq = Number(seqRows[0] && seqRows[0].max_seq) || 0;
+    const tabGid = rows.find(r => r.tab_gid != null)?.tab_gid || null;
+    for (let i = 0; i < delta.add; i++) {
+      await client.query(
+        `INSERT INTO campaign_participants
+           (sheet_id, tab_gid, tab_name, seq, row_json, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,'{}'::jsonb,'worktable',$5,NOW())`,
+        [campaign.linked_sheet_id, tabGid, campaign.linked_tab_name, maxSeq + i + 1, String(by).slice(0, 100)]
+      );
+    }
+  }
+  return { synced: true, ...delta, sheetId: campaign.linked_sheet_id, tabName: campaign.linked_tab_name };
+}
+
+/** 작업오더 저장 전의 fail-fast 검사. 실제 증감은 동기화 트랜잭션에서 한 번만 한다. */
+async function assertWorktableSlotsInTx(client, campaign, target) {
+  if (!campaign || !campaign.linked_sheet_id || !campaign.linked_tab_name) return { checked: false, reason: 'no_worktable_link' };
+  const { isSheetless } = require('../utils/sheetlessScope');
+  if (!await isSheetless(client, campaign.linked_sheet_id, campaign.linked_tab_name)) return { checked: false, reason: 'not_sheetless' };
+  const { rows } = await client.query(
+    `SELECT reviewer_name, recipient_name, phone8, order_submission_id
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL FOR UPDATE`,
+    [campaign.linked_sheet_id, campaign.linked_tab_name]
+  );
+  return { checked: true, ...worktableSlotDelta({ current: rows.length, protectedCount: rows.filter(r => !_worktableSlotEmpty(r)).length, target }) };
+}
+
+async function rebuildWorktableProjection(worktable, by) {
+  if (!worktable || !worktable.synced || (!worktable.add && !worktable.retire)) return worktable;
+  const { rebuildLedgers } = require('./sheetlessLedger.service');
+  const rebuilt = await rebuildLedgers({ sheetId: worktable.sheetId, tabName: worktable.tabName, by: String(by).slice(0, 100) });
+  return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
+}
+
 /** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
 async function displayRecruitTotalForCampaign(campaign) {
   const primary = quota(campaign && campaign.recruit_total);
@@ -110,7 +197,7 @@ async function linkedWorkOrder(client, campaign) {
 
 async function linkedCampaign(client, order) {
   const { rows } = await client.query(
-    `SELECT id, source_work_order_id
+    `SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name
        FROM recruit_campaigns
       WHERE (id = $1 AND $1 <> '') OR source_work_order_id = $2
       ORDER BY (id = $1) DESC, updated_at DESC
@@ -147,6 +234,7 @@ async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
       `SELECT COUNT(*)::int AS used FROM campaign_applications WHERE campaign_id=$1 AND status IN ('applied','submitted')`, [campaign.id]
     );
     if (quota(recruitTotal) < quota(used[0]?.used)) throw quotaError('이미 참여 또는 진행 중인 인원보다 낮게 정원을 설정할 수 없습니다.', 'recruit_quota_below_used');
+    await assertWorktableSlotsInTx(client, campaign, quota(recruitTotal));
     const { rows: options } = await client.query(
       `SELECT opt_key, recruit_total, status, sort_order FROM campaign_options WHERE campaign_id=$1 ORDER BY sort_order, id FOR UPDATE`, [campaign.id]
     );
@@ -172,11 +260,34 @@ async function assertWorkOrderQuota({ workOrderId, recruitTotal }) {
   } finally { client.release(); }
 }
 
+/** 공고 수정 화면도 UPDATE 전에 같은 작업보드 하한을 확인한다(반쪽 저장 방지). */
+async function assertCampaignRecruitTotal({ campaignId, recruitTotal }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]
+    );
+    if (!rows.length) { await client.query('ROLLBACK'); return null; }
+    const campaign = rows[0];
+    const { rows: used } = await client.query(
+      `SELECT COUNT(*)::int AS used FROM campaign_applications WHERE campaign_id=$1 AND status IN ('applied','submitted')`, [campaign.id]
+    );
+    if (quota(recruitTotal) < quota(used[0]?.used)) throw quotaError('이미 참여 또는 진행 중인 인원보다 낮게 정원을 설정할 수 없습니다.', 'recruit_quota_below_used');
+    await assertWorktableSlotsInTx(client, campaign, quota(recruitTotal));
+    await client.query('ROLLBACK');
+    return { campaignId: campaign.id };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
 async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows } = await client.query('SELECT id, source_work_order_id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    const { rows } = await client.query('SELECT id, source_work_order_id, linked_sheet_id, linked_tab_name FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
     if (!rows.length) { await client.query('ROLLBACK'); return { linked: false }; }
     const order = await linkedWorkOrder(client, rows[0]);
     if (!order) { await client.query('ROLLBACK'); return { linked: false }; }
@@ -185,8 +296,9 @@ async function syncCampaignRecruitTotal({ campaignId, recruitTotal }) {
       `UPDATE work_orders SET linked_campaign_id=$2, recruit_count=$3, updated_at=NOW() WHERE id=$1`,
       [order.id, campaignId, total]
     );
+    const worktable = await syncWorktableSlotsInTx(client, rows[0], total, 'campaign-quota-sync');
     await client.query('COMMIT');
-    return { linked: true, workOrderId: order.id, recruitTotal: total };
+    return { linked: true, workOrderId: order.id, recruitTotal: total, worktable: await rebuildWorktableProjection(worktable, 'campaign-quota-sync') };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
@@ -233,9 +345,10 @@ async function syncWorkOrderRecruitTotal({ workOrderId, recruitTotal }) {
     for (const [optKey, optionTotal] of nextOptions) {
       await client.query('UPDATE campaign_options SET recruit_total=$3, updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2', [campaign.id, optKey, optionTotal]);
     }
+    const worktable = await syncWorktableSlotsInTx(client, campaign, total, 'workorder-quota-sync');
     await client.query('UPDATE recruit_campaigns SET recruit_total=$2, updated_at=NOW() WHERE id=$1', [campaign.id, total]);
     await client.query('COMMIT');
-    return { linked: true, campaignId: campaign.id, recruitTotal: total, optionCount: nextOptions.size };
+    return { linked: true, campaignId: campaign.id, recruitTotal: total, optionCount: nextOptions.size, worktable: await rebuildWorktableProjection(worktable, 'workorder-quota-sync') };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
@@ -246,9 +359,11 @@ module.exports = {
   quota,
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
+  worktableSlotDelta,
   firstRoundQuota,
   allocateOptionQuotas,
   assertWorkOrderQuota,
+  assertCampaignRecruitTotal,
   syncCampaignRecruitTotal,
   syncWorkOrderRecruitTotal,
 };
