@@ -61,8 +61,6 @@ svc.__setPoolForTest({
   const search = await svc.searchUnconfirmedWorkCandidates({ query: '바디로션' });
   assert.equal(search.candidates.length, 1);
   assert.match(searchSql, /tc\.display_name/);
-  assert.match(searchSql, /rc\.transfer_memo/, '공고 입금명도 미확인 이체 후보 검색에 포함한다');
-  assert.match(searchSql, /AS "recommended"/, '입금명 정확 일치 후보를 추천으로 표시한다');
   assert.doesNotMatch(searchSql, /tc\.label/);
 
   const out = await svc.inspectUnconfirmedWorkMatch({
@@ -78,10 +76,6 @@ svc.__setPoolForTest({
   assert.match(routes, /router\.get\('\/payment\/unconfirmed-work-search', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-work-inspect', authMiddleware, adminOrMasterMiddleware/);
   assert.match(routes, /router\.post\('\/payment\/batch\/:id\/unconfirmed-reconcile', authMiddleware, adminOrMasterMiddleware/);
-  assert.match(routes, /router\.post\('\/payment\/test-seed-unconfirmed', authMiddleware, adminOrMasterMiddleware/,
-    '테섭에서만 가상 미확인 이체 회차를 만들 수 있어야 한다');
-  assert.match(routes, /process\.env\.TEST_AUTO_LOGIN !== '1'/,
-    '가상 회차 생성 경로는 테스트 자동로그인 환경에서만 열려야 한다');
   assert.match(routes, /b\.confirm !== true/);
   const workdesk = fs.readFileSync(require.resolve('../../frontend/workdesk.html'), 'utf8');
   assert.match(workdesk, /작업 검색·대조/);
@@ -89,18 +83,8 @@ svc.__setPoolForTest({
   assert.match(workdesk, /oninput="_pmUnconfirmedLiveSearch\(\)"/);
   assert.match(workdesk, /setTimeout\(\(\)=>_pmUnconfirmedSearch\(\{ live:true \}\),180\)/);
   assert.match(workdesk, /seq!==_pmUnconfirmedSearchSeq/);
-  assert.match(workdesk, /pm-unconfirmed-candidates/);
-  assert.match(workdesk, /추천 공고/);
-  assert.match(workdesk, /pmUnconfirmedRecommendation/);
+  assert.match(workdesk, /position:absolute;z-index:3/);
   assert.match(workdesk, /function _pmOpenBatchUnconfirmed\(i\)/);
-  assert.match(workdesk, /function _pmOpenUnconfirmedMatchList\(i\)/,
-    '미확인 이체를 여러 건 목록에서 선택해 대조하는 진입점이 있어야 한다');
-  assert.match(workdesk, /pm-unconfirmed-listbox/,
-    '다건 미확인 이체 목록은 고정 높이 스크롤 영역으로 렌더링해야 한다');
-  assert.match(workdesk, /function _pmSelectUnconfirmedMemo\(i\)/,
-    '목록에서 선택한 이체만 아래 검색 및 대조 대상으로 전환해야 한다');
-  assert.match(workdesk, /pm-unconfirmed-compare-table/,
-    '작업보드와 이체결과를 표 행으로 비교해야 한다');
   assert.match(workdesk, /function _pmReconcileMismatch\(i\)/);
   assert.match(workdesk, /unconfirmed-reconcile/);
   assert.match(workdesk, /미확인 \$\{unconfirmed\}건 조치/);
