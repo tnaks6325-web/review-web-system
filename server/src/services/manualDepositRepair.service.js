@@ -132,6 +132,13 @@ async function restoreManual811DepositDates({ by = 'payment-repair' } = {}) {
   } finally { client.release(); }
 
   const board = await markDepositCells(items, { by, deferSheetlessRebuild: true });
+  // #0도 자동 이체회차와 같은 작업보드 반영 이력을 남긴다. 이 값이 없으면 입금칸이
+  // 실제로 복구돼도 회차 목록에는 "입금일 미기록"으로 보여 운영자가 다시 실행하게 된다.
+  await pool.query(
+    `UPDATE payment_batches
+        SET board_recorded_count = $2, board_queued_count = $3, board_skipped_count = $4,
+            board_failed_count = $5, board_stamp = '8/11', board_recorded_at = NOW(), board_recorded_by = $6
+      WHERE id = $1`, [batch.id, board.recorded, board.queued, board.skipped, board.failed, by]);
   const sheetlessTabs = [...new Map(items.filter(x => x.sheetless)
     .map(x => [`${x.sheetId}\t${x.tabName}`, x])).values()];
   for (const tab of sheetlessTabs) {

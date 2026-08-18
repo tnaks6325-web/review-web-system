@@ -22,6 +22,7 @@ assert.match(repair, /seq, bank, status, item_count, total_amount/, 'recovery cr
 assert.match(repair, /VALUES \(0, 'manual', 'applied'/, 'historical batch is always #0 and applied');
 assert.match(repair, /manual_payment_marks/, 'persistent marker is recorded beside the batch');
 assert.match(repair, /payment_records[\s\S]*source_key/, 'payment ledger has an idempotent source key');
+assert.match(repair, /board_recorded_count[\s\S]*board_stamp = '8\/11'/, 'batch table records the real workboard write outcome');
 assert.match(repair, /already_locked/, 'existing active transfer items stop a duplicate recovery');
 assert.match(migration, /historical_key/, 'only one #0 historical batch can exist');
 assert.match(migration, /manual_payment_marks/, 'migration creates durable manual payment marker storage');
