@@ -7564,12 +7564,13 @@ async function _pmOpenBatchUnconfirmed(i){
     const memo=String(x&&x.memo||'통장표시 없음').trim()||'통장표시 없음';
     (acc[memo]||(acc[memo]=[])).push(x); return acc;
   },{}));
+  STATE.pmUnconfirmedGroups=groups.map(g=>String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음');
   const el=document.createElement('div'); el.className='pmrov'; el.id='pmUnconfirmedGroupsOv';
-  el.innerHTML=`<div class="pmrbox" style="max-width:620px"><div class="pmrhd"><h3>미확인 이체 ${outside.length}건</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedGroupsClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">통장표시가 같은 이체를 한 작업 묶음으로 대조합니다. 묶음을 선택해 매칭할 작업을 검색하세요.</div><div style="display:grid;gap:8px;margin-top:12px">${groups.map(g=>{const memo=String(g[0]&&g[0].memo||'통장표시 없음').trim()||'통장표시 없음';return `<button class="btn" style="display:flex;justify-content:space-between;gap:12px;padding:11px 12px;text-align:left" onclick="_pmOpenBatchUnconfirmedMemo(${JSON.stringify(memo)})"><b>${esc(memo)}</b><span class="muted">${g.length}건 · 작업 검색</span></button>`;}).join('')}</div></div></div>`;
+  el.innerHTML=`<div class="pmrbox" style="max-width:620px"><div class="pmrhd"><h3>미확인 이체 ${outside.length}건</h3><span class="sp" style="flex:1"></span><button class="btn xs" onclick="_pmUnconfirmedGroupsClose()">닫기</button></div><div class="pmrbd"><div class="pmnote">통장표시가 같은 이체를 한 작업 묶음으로 대조합니다. 묶음을 선택해 매칭할 작업을 검색하세요.</div><div style="display:grid;gap:8px;margin-top:12px">${groups.map((g,i)=>{const memo=STATE.pmUnconfirmedGroups[i];return `<button class="btn" style="display:flex;justify-content:space-between;gap:12px;padding:11px 12px;text-align:left" onclick="_pmOpenBatchUnconfirmedGroup(${i})"><b>${esc(memo)}</b><span class="muted">${g.length}건 · 작업 검색</span></button>`;}).join('')}</div></div></div>`;
   document.body.appendChild(el);
 }
 function _pmUnconfirmedGroupsClose(){ const el=document.getElementById('pmUnconfirmedGroupsOv'); if(el) el.remove(); }
-function _pmOpenBatchUnconfirmedMemo(memo){ _pmUnconfirmedGroupsClose(); _pmOpenUnconfirmedMatch(memo); }
+function _pmOpenBatchUnconfirmedGroup(i){ const memo=(STATE.pmUnconfirmedGroups||[])[Number(i)]; if(!memo) return; _pmUnconfirmedGroupsClose(); _pmOpenUnconfirmedMatch(memo); }
 
 function _pmFileB64(file){
   return new Promise((res,rej)=>{
