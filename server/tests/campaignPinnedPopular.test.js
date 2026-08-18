@@ -12,12 +12,15 @@ const creditService = readServer('src/services/popularCredit.service.js');
 const cards = readFrontend('js/campaign-cards.js');
 const recruit = readFrontend('js/index-recruit.js');
 const campaign = readFrontend('campaign.html');
+const manualOrder = readServer('src/services/manualOrder.service.js');
 const apply = routes.slice(routes.indexOf('async function _applyParticipation'), routes.indexOf("router.post('/:id/apply'"));
 const flags = routes.slice(routes.indexOf("router.post('/admin/:id/flags'"), routes.indexOf("router.post('/admin/create'"));
 
 assert.match(creditService, /normal_done/, 'normal submitted campaigns are counted');
 assert.match(creditService, /popular_used/, 'submitted and active popular holds are counted as consumed');
 assert.match(creditService, /ca\.phone8 = \$1/, 'credit accounting is isolated by participating identity');
+assert.match(routes, /is_popular_snapshot\)/, 'reviewer application stores immutable popularity');
+assert.match(manualOrder, /is_popular_snapshot\)/, 'manual application stores immutable popularity');
 assert.match(apply, /loadPopularCreditState\(client, holdP8\)/, 'apply evaluates credits after the identity lock');
 assert.match(apply, /canUsePopularCredit\(creditState\)/, 'apply blocks only when no credit remains');
 assert(apply.indexOf("'popular_locked'") < apply.indexOf('INSERT INTO campaign_applications'), 'a blocked application cannot create a hold');
@@ -30,5 +33,6 @@ assert(!recruit.includes('popularPriorityQueue'), 'legacy priority queue DOM is 
 assert(!campaign.includes('gateInfo.prerequisite'), 'reviewer UI never requires a specific normal campaign');
 assert(!campaign.includes('requiredTitle'), 'reviewer UI has no stale prerequisite title state');
 assert.match(campaign, /남은 참여권/, 'reviewer UI shows the remaining credit count');
+assert.match(campaign, /_camp && _camp\.participation_mode && _camp\.is_popular !== true/, 'return CTA is limited to the selected normal participation campaign');
 
 console.log('campaignPinnedPopular: passed');

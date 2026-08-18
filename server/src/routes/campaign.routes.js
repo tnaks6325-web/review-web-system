@@ -1450,10 +1450,10 @@ async function _applyParticipation(req, res, next, campPre) {
     }
     const ins = await client.query(
       `INSERT INTO campaign_applications
-         (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key, review_fee_snapshot, blog_url)
-       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9,$10)
+         (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key, review_fee_snapshot, blog_url, is_popular_snapshot)
+       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9,$10,$11)
        RETURNING id, expires_at, option_key`,
-      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns]);
+      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true]);
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));

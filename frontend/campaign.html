@@ -1292,7 +1292,7 @@ function renderDone(pendingConfirm){
     let back = null;
     try { back = raw ? JSON.parse(raw) : null; } catch (_) { back = raw ? { campaignId: raw, prerequisiteId: CAMP_ID } : null; }
     const oldBtn = $('popReturnBtn'); if(oldBtn) oldBtn.remove();
-    if(back && back.campaignId && (!back.prerequisiteId || String(back.prerequisiteId) === String(CAMP_ID)) && String(back.campaignId) !== String(CAMP_ID) && !pendingConfirm){
+    if(back && back.campaignId && _camp && _camp.participation_mode && _camp.is_popular !== true && String(back.campaignId) !== String(CAMP_ID) && !pendingConfirm){
       const btn = document.createElement('button');
       btn.id = 'popReturnBtn';
       btn.className = 'btn';
