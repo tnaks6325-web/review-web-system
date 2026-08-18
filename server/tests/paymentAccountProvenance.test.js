@@ -22,6 +22,9 @@ assert.deepEqual(payment.compareAccountSnapshot(snapshot, {
 assert.deepEqual(payment.compareAccountSnapshot(snapshot, {
   reviewerId: snapshot.accountReviewerId, isSub: false, bankAccount: '100190950172',
 }), { state: 'mismatch', itemId: 'item-1' }, '같은 리뷰어라도 계좌가 바뀌면 첫 다운로드를 막는다');
+assert.deepEqual(payment.compareAccountSnapshot({ ...snapshot, bankName: '토스뱅크', accountHolder: '원지웅' }, {
+  reviewerId: snapshot.accountReviewerId, isSub: false, bankName: '다른은행', bankAccount: '100240066895', accountHolder: '원지웅',
+}), { state: 'mismatch', itemId: 'item-1' }, '계좌번호가 같아도 은행 또는 예금주가 바뀌면 첫 다운로드를 막는다');
 assert.deepEqual(payment.compareAccountSnapshot({ ...snapshot, accountReviewerId: '', accountSource: '' }, null),
   { state: 'unverifiable', itemId: 'item-1' }, '기존 회차처럼 출처가 없으면 자동 변경·차단하지 않는다');
 
@@ -45,6 +48,11 @@ batch8Owners.set(snapshot.accountReviewerId, {
 assert.deepEqual(payment.reconcileAccountSnapshots(batch8Items, batch8Owners), {
   ok: true, mismatches: [], unverifiable: 0,
 }, '스냅샷과 현재 등록계좌가 같으면 회차 다운로드를 허용해야 한다');
+assert.deepEqual(payment.reconcileAccountSnapshots(batch8Items, new Map()), {
+  ok: false,
+  mismatches: [{ itemId: 'batch-8-item', reviewerName: '원지웅', accountTail: '6895' }],
+  unverifiable: 1,
+}, '계좌 출처를 검증할 수 없는 회차도 다운로드를 차단해야 한다');
 
 const subItem = [{
   id: 'sub-item', reviewer_name: '타계정', bank_account: '33334444',
@@ -64,5 +72,6 @@ assert.match(migration, /account_reviewer_id UUID/);
 assert.match(migration, /account_source TEXT/);
 assert.match(migration, /reviewer_account_change_audit/);
 assert.match(migration, /changed_by TEXT/);
+assert.match(migration, /trg_reviewer_account_change_audit/);
 
 console.log('payment account provenance tests passed');
