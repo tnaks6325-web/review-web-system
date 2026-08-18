@@ -5,6 +5,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const test = require('node:test');
 
 const root = path.join(__dirname, '..');
 const serviceSrc = fs.readFileSync(path.join(root, 'src/services/trackB.service.js'), 'utf8');
@@ -32,5 +33,38 @@ assert.match(workdeskSrc, /작업표와 리뷰어 참여내역에서 제거/, '�
 
 const importSrc = fs.readFileSync(path.join(root, 'src/services/participants.service.js'), 'utf8');
 assert.match(importSrc, /__workdesk_deleted[\s\S]*?THEN campaign_participants\.deleted_at/, '재임포트 UPSERT가 작업보드 삭제 표식을 보존한다');
+
+test('가상 삭제: 한 참여 행의 링크·확정 참여상태만 같은 트랜잭션에서 해제한다', async () => {
+  const trackB = require('../src/services/trackB.service.js');
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT id, seq, phone8, order_submission_id/.test(sql)) {
+        return { rows: [{ id: 'row-1', seq: 77, phone8: '12345678', order_submission_id: '00000000-0000-0000-0000-000000000001' }] };
+      }
+      if (/UPDATE campaign_participants[\s\S]*?SET deleted_at=NOW/.test(sql)) return { rowCount: 1, rows: [] };
+      if (/DELETE FROM participation_links/.test(sql)) return { rowCount: 1, rows: [] };
+      if (/UPDATE campaign_applications/.test(sql)) return { rowCount: 1, rows: [] };
+      return { rowCount: 0, rows: [] }; // BEGIN/COMMIT/ROLLBACK
+    },
+    release() {},
+  };
+  trackB.__setPoolForTest({ connect: async () => client });
+  try {
+    const out = await trackB.hideWorkdeskRow({ sheetId: 'sheet-a', tabName: '작업A', rowId: 'row-1', by: 'virtual-test' });
+    assert.deepEqual(out, {
+      ok: true, mode: 'participant_history_removed', removed: 1,
+      participationLinksRemoved: 1, applicationsCancelled: 1,
+    });
+    const links = calls.find(c => /DELETE FROM participation_links/.test(c.sql));
+    const app = calls.find(c => /UPDATE campaign_applications/.test(c.sql));
+    assert.deepEqual(links.params, ['sheet-a', '작업A', 77], '다른 작업/행의 신원 링크를 삭제하지 않는다');
+    assert.deepEqual(app.params, ['00000000-0000-0000-0000-000000000001'], '주문 UUID가 같은 참여신청만 취소한다');
+    assert.ok(calls.some(c => /^COMMIT$/.test(c.sql)), '모든 해제가 완료된 뒤 커밋한다');
+  } finally {
+    trackB.__setPoolForTest(null);
+  }
+});
 
 console.log('workdeskParticipantDeleteHistory.test.js: OK');
