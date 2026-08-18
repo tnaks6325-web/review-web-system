@@ -89,7 +89,7 @@ async function writeOrderToWorktable({
   sheetId, tabName, tabGid = '', sheetRow, orderData = {},
   orderSubmissionId, loginPhone8 = '', loginName = '', recovered = false,
 } = {}) {
-  if (!sheetId || !tabName || !sheetRow) return { ok: false, reason: 'bad_request' };
+  if (!sheetId || !tabName || !orderSubmissionId) return { ok: false, reason: 'bad_request' };
   const db = getPool();
 
   const ledgerSvc = require('./orderLedger.service');
@@ -106,8 +106,8 @@ async function writeOrderToWorktable({
   }
   const gid = String((ctx && ctx.tabGid) || tabGid || '');
 
-  const seq = parseInt(sheetRow, 10);
-  if (!Number.isInteger(seq) || seq < 1) return { ok: false, reason: 'bad_row' };
+  const requestedSeq = sheetRow == null ? null : parseInt(sheetRow, 10);
+  if (sheetRow != null && (!Number.isInteger(requestedSeq) || requestedSeq < 1)) return { ok: false, reason: 'bad_row' };
 
   // ── 작업표 줄에 병합 ────────────────────────────────────────────────
   //   ★ 행 잠금(FOR UPDATE) — 같은 줄에 동시에 두 건이 들어오는 경우는 claim 이 막지만,
@@ -116,10 +116,38 @@ async function writeOrderToWorktable({
   let optionSuppressed = [];
   try {
     await client.query('BEGIN');
-    const { rows: cur } = await client.query(
-      `SELECT id, row_json FROM campaign_participants
-        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
-        FOR UPDATE`, [sheetId, tabName, seq]);
+    let cur;
+    let seq = requestedSeq;
+    if (seq != null) {
+      ({ rows: cur } = await client.query(
+        `SELECT id, seq, row_json FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL
+          FOR UPDATE`, [sheetId, tabName, seq]));
+    } else {
+      // 재시도는 이미 연결된 행을 먼저 잠근다. 없을 때만 준비된 빈 슬롯을 선점한다.
+      ({ rows: cur } = await client.query(
+        `SELECT id, seq, row_json FROM campaign_participants
+          WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+            AND order_submission_id = $3::uuid
+          FOR UPDATE`, [sheetId, tabName, orderSubmissionId]));
+      if (!cur.length) {
+        ({ rows: cur } = await client.query(
+          `SELECT id, seq, row_json FROM campaign_participants
+            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
+              AND order_submission_id IS NULL
+              AND NULLIF(btrim(COALESCE(reviewer_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(recipient_name, '')), '') IS NULL
+              AND NULLIF(btrim(COALESCE(phone8, '')), '') IS NULL
+            ORDER BY seq
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1`, [sheetId, tabName]));
+      }
+      if (!cur.length) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'no_open_slot' };
+      }
+      seq = Number(cur[0].seq);
+    }
 
     const currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
     const built = buildRowPatch(headers, orderData, currentRowJson);
@@ -140,20 +168,27 @@ async function writeOrderToWorktable({
                 recipient_name = COALESCE(NULLIF($6,''), recipient_name),
                 phone8         = COALESCE(NULLIF($7,''), phone8),
                 option_text    = COALESCE(NULLIF($8,''), option_text),
+                order_submission_id = $9::uuid,
                 updated_by = 'sheetless-order', updated_at = NOW()
           WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3`,
-        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText]);
+        [sheetId, tabName, seq, JSON.stringify(merged), reviewerName, recipientName, p8, optText, orderSubmissionId]);
     } else {
+      // 행 번호가 명시된 레거시 복구만 표 끝 append를 허용한다. 신규 무시트 접수는 위의
+      // 준비 슬롯 선점만 사용하므로 모집 인원을 초과해 작업보드 행을 만들지 않는다.
+      if (requestedSeq == null) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'no_open_slot' };
+      }
       // 표 끝을 넘어 배정된 경우(append) — 그 자리에 줄을 만든다.
       //   ★ source='worktable' — `importTabFromIndex` 상태 CASE 가 인정하는 값(신규 값 금지).
       await client.query(
         `INSERT INTO campaign_participants
            (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8,
-            option_text, row_json, source, updated_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,'worktable','sheetless-order',NOW())
+            option_text, order_submission_id, row_json, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid,$10::jsonb,'worktable','sheetless-order',NOW())
          ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
-         optText || null, JSON.stringify(merged)]);
+         optText || null, orderSubmissionId, JSON.stringify(merged)]);
     }
     await client.query('COMMIT');
   } catch (err) {
