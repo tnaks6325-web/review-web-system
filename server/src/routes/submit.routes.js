@@ -792,6 +792,7 @@ async function _authoritativeHold(ctx) {
           AND ca.hold_token = $3 AND ca.hold_token <> '' LIMIT 1`,
       [ctx.applicationId, ctx.campaignId, ctx.holdToken]);
     if (!rows.length) return ctx;                     // 미확인 = 기존 late 경로(오확정 없음)
+    ctx.verified = true;
     const srv = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
     if (srv.length === 8 && srv !== ctx.phone8) {
       logger.warn(`[submit/order] holdPhone8 보정 app=${ctx.applicationId} ` +
@@ -818,6 +819,26 @@ async function _authoritativeHold(ctx) {
   }
 }
 
+/**
+ * 구매양식의 저장 범위는 클라이언트 URL이나 Google Sheet 연결값으로 정하지 않는다.
+ * 참여형 공고는 서버에서 검증한 캠페인 홀드를 기준으로 DB 전용 범위를 만든다.
+ * 비참여형 레거시 요청만 기존 시트 범위를 계속 사용한다.
+ */
+async function _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx }) {
+  if (!holdCtx || !holdCtx.applicationId || !holdCtx.campaignId || !holdCtx.holdToken || !holdCtx.verified) {
+    return (sheetId && tabName) ? { sheetId, gid: gid || '', tabName, sheetless: false } : null;
+  }
+
+  // _authoritativeHold가 이미 applicationId·campaignId·holdToken 소유권을 확인했다.
+  // 기존 공고도 동일한 DB 전용 주문원장으로 전환하므로 연결 시트 값은 읽지 않는다.
+  return {
+    sheetId: `campaign:${holdCtx.campaignId}`,
+    gid: '',
+    tabName: `campaign:${holdCtx.campaignId}`,
+    sheetless: true,
+  };
+}
+
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
@@ -827,10 +848,6 @@ router.post('/order', async (req, res, next) => {
             // ★ 슬롯 매칭 파라미터 (find-slot에서 받은 값)
             slotRowNumber, slotInadName, loginPhone8, loginName } = b;
 
-    if (!sheetId || !tabName) {
-      return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
-    }
-
     // ═══ 신원 게이트: 내정보(사용자명/전화/주소/계좌) 완비 + 제출정보 유사도 검증 ═══
     // - loginPhone8이 있는 리뷰어 제출에만 적용 (레거시/관리자 경유 제출은 통과)
     // - identityConfirmed='true'면 NEED_CONFIRM 단계는 리뷰어가 확인한 것으로 간주(로그만 남김)
@@ -838,6 +855,10 @@ router.post('/order', async (req, res, next) => {
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
     const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+    const orderScope = await _resolveCampaignOrderScope({ sheetId, gid, tabName, holdCtx });
+    if (!orderScope) {
+      return res.status(400).json({ error: '유효한 참여 문맥이 없어 구매양식을 제출할 수 없습니다.' });
+    }
 
     // ★★ 홀드 멱등 게이트(중복 원장·중복 시트행 차단) — 일괄 제출(batch) 도입의 선행 조건.
     //   이 홀드는 이미 주문을 하나 만들었다. 그대로 태우면 createOrderLedgerEntry 가
@@ -989,7 +1010,10 @@ router.post('/order', async (req, res, next) => {
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo,
                         selectedOptKey: effectiveOptKey, blogUrl: (holdCtx && holdCtx.blogUrl) || '' };
     const ledger = await createOrderLedgerEntry({
-      sheetId, tabName, gid,
+      sheetId: orderScope.sheetId,
+      tabName: orderScope.tabName,
+      gid: orderScope.gid,
+      skipSheetMirror: orderScope.sheetless,
       orderData,
       slotRowNumber: slotRowNumber || null,
       loginPhone8: loginPhone8 || '',
@@ -998,10 +1022,10 @@ router.post('/order', async (req, res, next) => {
       //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
       //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
       //   ★ 방어 D3: orderIdentity = 시트에 실제 기입되는 연락처(정산 귀속 기준) → 명의 드리프트 경고 입력.
-      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone } } : undefined,
+      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
-      sameDayDuplicateGuard: { sheetId, tabName, campaignId: holdCtx && holdCtx.campaignId, orderData },
+      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData },
     });
 
     if (ledger && ledger.duplicateOrderSubmissionId) {
@@ -1024,7 +1048,7 @@ router.post('/order', async (req, res, next) => {
     //   버린) 구글 시트에 쓰려다 실패하고, reconcile 이 영원히 재시도한다.
     //   ★ 판정은 `sheetlessScope` 단일 출처. 조회 실패는 false(fail-open = 종전 경로) —
     //     최종 방어는 큐 실행부(syncQueue)가 쓰기 직전 다시 확인하는 백스톱이다.
-    let sheetlessDone = null;
+    let sheetlessDone = orderScope.sheetless ? { ok: true, dbOnly: true } : null;
     if (ledger.sheetRow) {
       let isSl = false;
       try {
@@ -1076,7 +1100,7 @@ router.post('/order', async (req, res, next) => {
           context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
         });
       }
-    } else if (!ledger.sheetRow) {
+    } else if (!ledger.sheetRow && !orderScope.sheetless) {
       logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
       logAbnormal({
         flow: 'order_submit', step: 'row_claim', severity: 'warn',
@@ -1095,7 +1119,8 @@ router.post('/order', async (req, res, next) => {
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
       // 무시트는 큐 없이 같은 요청에서 끝난다 — 'written' 이 곧 완결(시트 경로의 종결값과 같은 값).
-      mirrorStatus: (sheetlessDone && sheetlessDone.ok) ? 'written'
+      mirrorStatus: orderScope.sheetless ? 'written'
+        : (sheetlessDone && sheetlessDone.ok) ? 'written'
         : queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
       campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
     });

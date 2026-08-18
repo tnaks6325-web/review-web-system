@@ -4870,7 +4870,7 @@ function initOrderFormMode() {
   const incomeType  = decodeURIComponent(params.get("ic") || "");
 
   // 진입 조건: 단축키(s) 또는 mode=form 파라미터가 있을 때
-  const isFormMode = !!sheetId || params.get("mode") === "form";
+  const isFormMode = !!sheetId || !!_EMBED_CTX || params.get("mode") === "form";
   if (!isFormMode) return false;
 
   // ★ 즉시 모든 화면 숨김 — screenSearch가 잠깐 보이는 현상 방지
@@ -8233,14 +8233,8 @@ async function submitOrderForm() {
   }
 
   const ctx = window._orderFormCtx || {};
-  // ★ [방법A] gid가 있으면 tabName 없이도 제출 가능 (탭명 변경 대응)
-  if (!ctx.sheetId || (!ctx.tabName && !ctx.gid)) { showToast("잘못된 링크입니다. (sheetId/tabName 또는 gid 필요)", "error"); _resetBtn(); return; }
-
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    const sv = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig")||"{}").GAS_WEB_APP_URL||""; } catch(_){return "";} })();
-    if (sv) APP_CONFIG.GAS_WEB_APP_URL = sv;
-  }
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("서버 연결 정보가 없습니다.", "error"); _resetBtn(); return; }
+  // 캠페인 구매양식은 캠페인·신청건·홀드 토큰으로 서버가 문맥을 확정한다.
+  // 시트 ID·탭명·gid 및 레거시 GAS URL은 제출 조건이 아니다.
 
   // 날짜 생성
   const now = new Date();
