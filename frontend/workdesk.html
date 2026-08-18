@@ -7616,6 +7616,14 @@ function _pmFileB64(file){
 const PM_OUTCOME = { success:'입금완료', failed:'이체실패', not_in_file:'이체실패(결과없음)', already_paid:'이미 입금' };
 
 function _pmUnconfirmedClose(){ const el=document.getElementById('pmUnconfirmedOv'); if(el) el.remove(); }
+function _pmCompleteUnconfirmedView(){
+  const el=document.getElementById('pmUnconfirmedOv'), index=Number(el?.dataset.groupIndex);
+  if(!Number.isInteger(index)) return;
+  STATE.pmUnconfirmedGroups.splice(index,1);
+  _pmUnconfirmedClose();
+  if(STATE.pmUnconfirmedGroups.length) _pmOpenUnconfirmedMatchList(Math.min(index,STATE.pmUnconfirmedGroups.length-1));
+  else toast('모든 미확인 이체 대조를 완료했습니다. 입금완료 기록은 생성되지 않았습니다.');
+}
 
 let _pmUnconfirmedSearchTimer=null, _pmUnconfirmedSearchSeq=0;
 
@@ -7680,6 +7688,9 @@ async function _pmUnconfirmedInspect(i){
   if(!r||!r.ok){ out.innerHTML=`<div class="pmnote">${esc((r&&r.error)||'대조하지 못했습니다.')}</div>`; return; }
   const label=esc(c.label||c.tabName);
   const state={duplicate_payment:'중복입금 발견',candidate_unpaid:'입금이력 없음',ambiguous_participant:'참여자 복수',participant_not_found:'참여자 미확인'};
+  const direct=(r.results||[])[0]||{};
+  out.innerHTML=`<div class="lgwrap pm-unconfirmed-compare-table"><table class="lgtable pmtable pm-unconfirmed-two-row-table"><thead><tr><th>구분</th><th>작업보드 / 공고</th><th>행</th><th>이체금액</th><th>예금주</th><th>계좌번호</th><th>판정</th></tr></thead><tbody><tr class="pm-workboard-row"><th>작업보드값행</th><td>${esc(c.label||c.tabName)}</td><td>${esc(direct.rowIndex||'—')}</td><td class="num">${_pmNum(direct.amount)}</td><td>${esc(direct.holder||'—')}</td><td>…${esc(direct.accountTail||'—')}</td><td>${esc(direct.state||'매칭 대기')}</td></tr><tr class="pm-transfer-row"><th>이체결과값행</th><td>${esc(st.memo||'—')}</td><td>—</td><td class="num">${_pmNum(direct.amount)}</td><td>${esc(direct.holder||'—')}</td><td>…${esc(direct.accountTail||'—')}</td><td>${esc(direct.transferredAt||'—')}</td></tr></tbody></table></div><div class="pm-unconfirmed-actionbar"><span class="muted">대조 완료 시 이 화면에서 해당 미확인 카드를 제외합니다. 입금완료 기록은 생성되지 않습니다.</span><button class="btn pri sm" onclick="_pmCompleteUnconfirmedView()">대조 완료</button></div>`;
+  return;
   const reconciliationCandidates=Array.isArray(r.reconciliationCandidates)?r.reconciliationCandidates:[];
   STATE.pmReconciliationCandidates=reconciliationCandidates;
   queueMicrotask(()=>{

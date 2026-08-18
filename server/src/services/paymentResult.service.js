@@ -413,7 +413,8 @@ async function inspectUnconfirmedWorkMatch({ batchId, uploadId, memo, sheetId, t
       : matches.length ? 'ambiguous_participant' : 'participant_not_found';
     return {
       seq: t.seq, holder: t.holder || '', amount: t.amount, accountTail: t.accountTail || '', transferredAt: t.transferredAt || '',
-      state, participantCount: matches.length, alreadyPaidCount: paid.length,
+      state, rowIndex: matches.length === 1 ? matches[0].rowIndex : null,
+      participantCount: matches.length, alreadyPaidCount: paid.length,
     };
   });
   const duplicateResultSeqs = new Set(results
