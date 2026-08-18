@@ -725,7 +725,7 @@ router.post('/advertiser-link', authMiddleware, adminOrMasterMiddleware, async (
     if (action === 'generate') { const o = await svc.generateAdvertiserLink({ advertiserId, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'revoke') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: false, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'enable') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: true, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
-    // 광고주 계정 사용/미사용(=이 링크가 로그인을 요구하는지, 083). 켤 때 활성 계정 0개면 서비스가 거부.
+    // 이전 관리 화면 호환용: 요청값과 무관하게 전용 링크는 무로그인으로 유지한다.
     if (action === 'login-required') {
       const o = await svc.setAdvertiserLinkLoginRequired({ advertiserId, required: (req.body || {}).required, by: _by(req) });
       return res.status(o.ok ? 200 : (o.code || 400)).json(o);
