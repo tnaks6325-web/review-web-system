@@ -150,6 +150,9 @@ async function _mergeOrderSubmissions(results, phoneList) {
         incomeType: o.incomeType, displayNameTC: o.displayNameTC, ncMode: null,
         folderUrl: null, captureFolderUrl: null, captureSlots: null, submittedSlots: [],
         row: {}, submitCol: null, reviewFileAt: null, isPaid: false, score: 0.5,
+        // 리뷰 내역 금액은 주문원장 집계의 order||<id> 키로 연결한다.
+        // sheet_row가 없는 무시트 주문도 카드별 결제금액을 보여주기 위한 식별자다.
+        orderSubmissionId: o.id,
         isOrderPending: true, orderMirrorStatus: o.mirrorStatus,
         orderStage,
       });

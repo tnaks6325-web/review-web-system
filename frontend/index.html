@@ -1361,7 +1361,11 @@ function _fnum(n) { return (Math.round(Number(n) || 0)).toLocaleString('ko-KR');
 function _thumbErr(img) { try { img.onerror = null; const p = img.parentNode; if (p) p.innerHTML = '<i class="fas fa-box"></i>'; } catch (_) {} }
 /** 카드 item → 매칭된 상품비/리뷰비/썸네일 (없으면 null) — 키: sheetId||tabName||rowIndex */
 function _feeForItem(item) {
-  if (!item || item.rowIndex == null) return null;
+  if (!item) return null;
+  if (item.orderSubmissionId) {
+    return _reviewEarnings.items['order||' + item.orderSubmissionId] || null;
+  }
+  if (item.rowIndex == null) return null;
   const key = (item.sheetId || '') + '||' + (item.tabName || '') + '||' + item.rowIndex;
   return _reviewEarnings.items[key] || null;
 }
