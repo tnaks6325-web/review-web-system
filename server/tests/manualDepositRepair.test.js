@@ -11,7 +11,7 @@ const migration = fs.readFileSync(path.join(root, 'migrations/117_manual_811_tra
 const ledger = fs.readFileSync(path.join(root, 'src/services/sheetlessLedger.service.js'), 'utf8');
 
 assert.match(repair, /btrim\(pe\.value_text\) = '8\/11'/, 'repair scope must be fixed to the historical 8/11 marker');
-assert.doesNotMatch(repair, /pe\.reverted_at IS NULL/, 'reverted markers are the affected records and must not be omitted');
+assert.match(repair, /pe\.reverted_at IS NULL/, 'only the administrator\'s final active manual mark may be restored');
 assert.match(repair, /markDepositCells\(items, \{ by, deferSheetlessRebuild: true \}\)/, 'repair writes through the shared board path but rebuilds a tab once');
 assert.match(repair, /rebuildLedgers\(/, 'sheetless workboard ledgers are rebuilt after the repair');
 assert.match(repair, /stamp: '8\/11'/, 'repair must write the original historical payment date');
