@@ -31,8 +31,10 @@ router.post('/login', async (req, res, next) => {
 // This stays unavailable everywhere unless the test deployment explicitly
 // opts in, and browsers must originate from that one frontend hostname.
 const TEST_AUTO_LOGIN_ORIGIN = 'https://test-review-wdb-web-production.up.railway.app';
+const TEST_PR_FRONTEND_ORIGIN = /^https:\/\/test-review-wdb-web-review-web-system-pr-\d+\.up\.railway\.app$/;
 router.post('/test-auto-login', async (req, res, next) => {
-  if (process.env.TEST_AUTO_LOGIN !== '1' || req.get('origin') !== TEST_AUTO_LOGIN_ORIGIN) {
+  const origin = req.get('origin');
+  if (process.env.TEST_AUTO_LOGIN !== '1' || (origin !== TEST_AUTO_LOGIN_ORIGIN && !TEST_PR_FRONTEND_ORIGIN.test(origin || ''))) {
     return res.status(404).json({ success: false, error: 'Not found' });
   }
   try {
