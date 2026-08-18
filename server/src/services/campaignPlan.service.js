@@ -68,6 +68,15 @@ async function getPlanOverview(campaignId) {
   const camp = await _loadCampaign(campaignId);
   if (!camp.participation_mode) { const e = new Error('참여형 공고만 인원 조절을 지원합니다.'); e.code = 'not_participation'; throw e; }
   const today = kstTodayStr();
+  // 레거시 공고의 0(미설정)은 작업오더 모집인원으로 화면에만 보완한다.
+  // recruit_campaigns 자체를 쓰지 않아 "0=무제한" 참여 정책은 바꾸지 않는다.
+  let displayTotal = { total: Number(camp.recruit_total) || 0, source: 'campaign' };
+  try {
+    const { displayRecruitTotalForCampaign } = require('./linkedRecruitQuota.service');
+    displayTotal = await displayRecruitTotalForCampaign(camp);
+  } catch (e) {
+    logger.warn(`[campaignPlan] 작업오더 모집인원 표시 대체 실패 camp=${camp.id}: ${e.message}`);
+  }
 
   let schedule = null;
   try { schedule = await _scheduleFor(camp); } catch (_) { schedule = 'unknown'; }
@@ -164,7 +173,8 @@ async function getPlanOverview(campaignId) {
     status: camp.status,
     defaultDaily: Number(camp.daily_limit) || 0,
     skipWeekends: camp.skip_weekends === true,
-    recruitTotal: Number(camp.recruit_total) || 0,
+    recruitTotal: displayTotal.total,
+    recruitTotalSource: displayTotal.source,
     // ★ 시트 일정 공고의 **실제 총량은 시트 행 수**(computeCampaignState 가 sch.totalSlots 로 판정) —
     //   화면이 recruit_total 을 총량으로 쓰면 서버 판정과 다른 숫자를 보여주고 예상 종료일도 어긋난다.
     scheduleTotal: (schedule && schedule !== 'unknown') ? (Number(schedule.totalSlots) || 0) : null,
