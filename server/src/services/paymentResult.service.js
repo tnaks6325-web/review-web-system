@@ -472,7 +472,7 @@ async function reconcileAccountMismatch({ batchId, uploadId, itemId, resultSeq, 
       const isTarget = String(entry && entry.itemId || '') === String(itemId)
         || (!entry.itemId && entry && entry.outcome === 'not_in_file'
           && entry.reviewerName === item.reviewerName && Number(entry.amount) === Number(item.amount)
-          && String(entry.accountTail || '') === String(item.accountTail || ''));
+          && String(entry.accountTail || '') === digitsOnly(item.bankAccount).slice(-4));
       return isTarget ? { ...entry, outcome: 'success', status: 'paid', resultSeq: Number(resultSeq),
         transferredAt: transfer.transferredAt || entry.transferredAt || '', resultStatus: '관리자 확인: 계좌 불일치 이체완료' } : entry;
     }) : [];
