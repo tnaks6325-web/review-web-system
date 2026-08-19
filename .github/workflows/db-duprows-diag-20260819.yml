@@ -22,7 +22,7 @@ jobs:
           SELECT seq, source, reviewer_name AS 참여자,
                  row_json->>'구매일자' AS 구매일자,
                  regexp_replace(COALESCE(row_json->>'주문번호',''), '\D','','g') AS 표번호,
-                 to_char(created_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 생성,
+                 to_char(first_seen_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 생성,
                  to_char(updated_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 수정,
                  COALESCE(updated_by,'(없음)') AS 수정주체,
                  CASE WHEN deleted_at IS NULL THEN '살아있음' ELSE '삭제됨' END AS 상태
@@ -38,8 +38,8 @@ jobs:
                  COUNT(*) AS 줄수,
                  string_agg(DISTINCT source, ',') AS 출처,
                  string_agg(DISTINCT COALESCE(updated_by,'(없음)'), ',') AS 수정주체,
-                 MIN(to_char(created_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI')) AS 최초생성,
-                 MAX(to_char(created_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI')) AS 마지막생성
+                 MIN(to_char(first_seen_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI')) AS 최초생성,
+                 MAX(to_char(first_seen_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI')) AS 마지막생성
             FROM campaign_participants
            WHERE tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건' AND deleted_at IS NULL
              AND length(regexp_replace(COALESCE(row_json->>'주문번호',''),'\D','','g')) >= 6
@@ -67,8 +67,8 @@ jobs:
              GROUP BY 1,2 HAVING COUNT(*) > 1
           )
           SELECT cp.tab_name AS 작업, COUNT(*) AS 중복줄,
-                 to_char(MIN(cp.created_at AT TIME ZONE 'Asia/Seoul'),'MM-DD') AS 최초,
-                 to_char(MAX(cp.created_at AT TIME ZONE 'Asia/Seoul'),'MM-DD') AS 마지막,
+                 to_char(MIN(cp.first_seen_at AT TIME ZONE 'Asia/Seoul'),'MM-DD') AS 최초,
+                 to_char(MAX(cp.first_seen_at AT TIME ZONE 'Asia/Seoul'),'MM-DD') AS 마지막,
                  string_agg(DISTINCT cp.source, ',') AS 출처
             FROM campaign_participants cp
             JOIN dup d ON d.tab_name = cp.tab_name
