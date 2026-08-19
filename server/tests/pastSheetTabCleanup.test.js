@@ -306,6 +306,26 @@ const ROWS = [
     assert.ok(/archivedByGidOnly/.test(SRC), '스캔 응답에 건수 동봉(조용한 변화 금지)');
   });
 
+  t('8f: 이름 어긋난 탭을 목록으로 보여준다(건수만으로는 고칠 수 없다)', () => {
+    assert.ok(/function _ptDriftBlock/.test(FE), '목록 렌더러');
+    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    assert.ok(/\$\{_ptDriftBlock\(r\)\}/.test(rd), '렌더가 실제로 그린다');
+    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptRender'));
+    assert.ok(/reason\s*===\s*'name_drift'/.test(b), '서버가 준 사유로 고른다(판정 사본 0)');
+    assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b),
+      '★ 탭명은 시트발 외부 문자열 — 반드시 escape');
+    assert.ok(/if\(!d\.length\) return ''/.test(b), '없으면 안 그린다');
+    assert.ok(/sync-tab-names/.test(b), '고칠 곳을 말한다');
+    assert.ok(/index_master_archive/.test(b), '그 도구가 못 고치는 것까지 말한다(조용한 누락 금지)');
+  });
+  t('8g: 「정리 대상에 포함」이라고 말하지 않는다(후보가 0일 수 있다)', () => {
+    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    const i = rd.indexOf('archivedByGidOnly');
+    assert.ok(i > 0);
+    assert.ok(!/정리 대상에 포함/.test(rd.slice(i, i + 220)),
+      '읽히지만 후보가 아닌 탭이 있으므로 "포함"은 거짓이 될 수 있다(2026-08-19 실측)');
+  });
+
   /* ── 9) 연도 확인 먼저 (사용자 확정 2026-08-19) ─────────
    *  시트 표기에 연도가 없으면(`7 / 12 (금)`) 판정이 시트 등록일로 폴백해
    *  `weak_signal` 이 되어 **정리 대상에서 빠진다**. 그래서 연도 확인이 먼저다. */
