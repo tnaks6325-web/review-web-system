@@ -9,12 +9,17 @@ const migrationPath = path.join(root, 'migrations', '120_cleanup_reflected_faile
 
 assert.match(page, /function _hasPurchaseFormReflected\(item\)/,
   'workboard rows must expose purchase-form reflection independently of review submission');
-assert.match(page, /구매양식 반영완료/,
+// 2026-08-19: 배지가 금액 줄(.fee)에서 상태 배지로 옮겨졌다(7768c3d) — 검사 의미는 그대로
+// "반영완료를 말하는 배지가 있다 / 미제출로 부르지 않는다".
+assert.match(page, /status-badge-order reflected">구매양식반영완료</,
   'a reflected purchase form must have a dedicated badge');
-assert.match(page, /리뷰제출대기/,
+assert.doesNotMatch(page, /return "미제출";/,
   'unsubmitted review cards must not be labelled as purchase-form unsubmitted');
 assert.match(search, /AND NOT \([\s\S]*FROM review_index ri[\s\S]*ri\.tab_name = rc\.title/,
   'a failed sheetless order already represented by a workboard row must not be appended to reviewer history');
+// 제목은 언제든 바뀐다 — 좌표 매칭이 함께 있어야 제목 수정으로 dedup 이 풀리지 않는다.
+assert.match(search, /ri\.sheet_id = rc\.linked_sheet_id[\s\S]{0,120}ri\.tab_name = rc\.linked_tab_name/,
+  'title-based dedup must also match the linked workboard tab coordinates');
 
 assert.ok(fs.existsSync(migrationPath), 'reflected failed-order cleanup migration must exist');
 const migration = fs.readFileSync(migrationPath, 'utf8');
