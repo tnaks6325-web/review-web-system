@@ -435,6 +435,13 @@ const ROWS = [
     assert.equal(gLed.refused[0].reviewRows, 12);
     assert.ok(!gp3.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '★ 장부가 있으면 한 줄도 지우지 않는다');
   });
+  t('10d: 삭제 라우트도 미리보기가 기본 + adminOrMaster', () => {
+    assert.ok(/router\.post\('\/past-tabs\/delete-ghost', authMiddleware, adminOrMasterMiddleware/.test(RT),
+      '이관과 같은 게이트');
+    const seg = RT.slice(RT.indexOf("'/past-tabs/delete-ghost'"), RT.indexOf("'/past-tabs/reopen'"));
+    assert.ok(/dryRun:\s*dryRun !== false/.test(seg),
+      '★ dryRun 을 안 보내면 지우지 않는다(기본 미리보기)');
+  });
   t('10c: 화면은 미리보기 → confirm 2단계 · 되돌릴 수 없다고 말한다', () => {
     const i = FE.indexOf('async function _ptDelGhost');
     const b = FE.slice(i, FE.indexOf('\n}', FE.indexOf('catch(e)', i)));
