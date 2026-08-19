@@ -71,7 +71,13 @@ function stubPool(handlers) {
     ok('★ 결정적 파생 — 다시 불러도 같은 시트ID(재시도해도 탭이 늘지 않는다)', out.sheetId === again);
     ok('★ 탭 이름 = 공고 제목', out.tabName === '모기위키 모기기피제');
     const tcq = pool.log.find(q => /INSERT INTO tab_configs/.test(q.text));
-    ok('tab_configs 에 sheetless=TRUE 로 등록한다', !!tcq && /sheetless[\s\S]*TRUE/.test(tcq.text));
+    /* ★ VALUES 와 ON CONFLICT **양쪽 다** TRUE 여야 한다 — 한쪽만 보면 신규 INSERT 가
+       sheetless=FALSE 로 들어가는 회귀를 통과시킨다(그러면 장부 재생성이 `not_sheetless` 로
+       거부되고 그 탭이 크론에서 구글시트로 취급된다). 변이시험이 실제로 뚫은 자리. */
+    ok('tab_configs 에 sheetless=TRUE 로 등록한다(VALUES)',
+      !!tcq && /VALUES \(\$1, \$2, \$3, '', \$4, \$4, TRUE,/.test(tcq.text));
+    ok('★ 재실행(ON CONFLICT)에서도 sheetless=TRUE 로 못박는다',
+      !!tcq && /ON CONFLICT[\s\S]*sheetless = TRUE/.test(tcq.text));
     ok("★ sheet_url 은 빈 값 — 가상 ID 를 구글 URL 로 조립하면 죽은 링크가 된다",
       !!tcq && !/docs\.google\.com/.test(tcq.text));
     ok('공고에 연결을 기록한다', pool.log.some(q => /UPDATE recruit_campaigns[\s\S]*linked_sheet_id = \$2/.test(q.text)));
