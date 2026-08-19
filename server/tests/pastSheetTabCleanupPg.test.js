@@ -33,7 +33,10 @@ CREATE TABLE raw_sheet_tabs (sheet_id text, tab_gid text, tab_name text, mirrore
 CREATE TABLE tab_configs (
   sheet_id text, tab_name text, tab_gid text, campaign_name text, sheetless boolean DEFAULT FALSE,
   is_closed boolean DEFAULT FALSE, PRIMARY KEY (sheet_id, tab_name));
-CREATE TABLE campaigns (sheet_id text PRIMARY KEY, created_at timestamptz);
+-- ★★ 운영과 같은 제약: 한 시트에 여러 campaigns 행이 정상이다(UNIQUE(sheet_id, campaign_name)).
+--   픽스처가 sheet_id 를 PK 로 두면 **행 부풀리기 버그가 구조적으로 안 잡힌다**(실제로 놓쳤다).
+CREATE TABLE campaigns (sheet_id text, campaign_name text, created_at timestamptz,
+  UNIQUE (sheet_id, campaign_name));
 CREATE TABLE order_submissions (
   id serial PRIMARY KEY, sheet_id text, tab_name text, submitted_at timestamptz,
   deleted_at timestamptz, mirror_status text);
@@ -48,7 +51,9 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
 (async () => {
   await pool.query(DDL);
   const S = 'sheetA';
-  await pool.query(`INSERT INTO campaigns VALUES ($1, '2024-03-01')`, [S]);
+  // 한 시트에 campaigns 행 2개 — 시트 단위로 조인하면 그 시트의 모든 탭이 2배가 된다
+  await pool.query(`INSERT INTO campaigns VALUES ($1, '캠A', '2024-03-01')`, [S]);
+  await pool.query(`INSERT INTO campaigns VALUES ($1, '캠B', '2024-04-15')`, [S]);
   const mk = async (tab, opt = {}) => {
     await pool.query(
       `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheetless, is_closed)
