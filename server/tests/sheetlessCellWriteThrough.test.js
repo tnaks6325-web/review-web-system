@@ -180,6 +180,13 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
   t('4d: 스윕 클리어는 `<= $3`(재생성 중 들어온 편집 유실 금지)', () => {
     assert.ok(/SET ledger_dirty_at = NULL[\s\S]{0,200}ledger_dirty_at <= \$3/.test(sw), '조건부 클리어여야 한다');
   });
+  t('4d-2: 클리어 기준은 startedAt — 되보낸 dirtyAt 은 마이크로초가 잘려 한 행도 안 맞는다', () => {
+    // PG timestamptz(마이크로초) → JS Date(밀리초) 절삭. `t.dirtyAt` 을 그대로 되보내면
+    // dirty 가 영영 안 지워져 같은 탭을 매 주기 재생성하는 무한 루프가 된다(테섭 실측).
+    assert.ok(/const startedAt = new Date\(\);[\s\S]{0,400}ledger_dirty_at <= \$3/.test(sw),
+      'rebuild 시작 시각을 기준으로 클리어해야 한다');
+    assert.ok(!/\[t\.sheetId, t\.tabName, t\.dirtyAt\]/.test(sw), 'dirtyAt 되보내기 부활 금지');
+  });
   t('4e: 스윕 실패는 dirty 를 지우지 않는다(자가치유)', () => {
     assert.ok(/catch \(e\) \{ failed\+\+;/.test(sw), '실패 시 클리어로 넘어가면 안 된다');
   });
