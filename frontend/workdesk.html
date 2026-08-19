@@ -7523,8 +7523,10 @@ function _pmDragSelectWork(event, workKey){
   const drag=STATE.pmWorkDrag;
   if(!drag) return;
   const filter=_pmFilterState();
-  const allKeys=_pmWorkEntries(STATE.pmItems||[],filter.manager,_pmOn).map(([key])=>key);
-  const crossed=_pmWorkKeyRange(allKeys,drag.lastWorkKey||workKey,workKey);
+  // ★ 범위는 **화면에 보이는 목록** 기준 — 검색으로 접힌 작업이 드래그 범위에 딸려오면
+  //   보이지도 않는 작업이 조용히 선택/해제된다.
+  const visibleKeys=_pmVisibleWorkEntries(STATE.pmItems||[],filter.manager).map(([key])=>key);
+  const crossed=_pmWorkKeyRange(visibleKeys,drag.lastWorkKey||workKey,workKey);
   crossed.forEach(key=>{
     if(drag.seen.has(key)) return;
     drag.seen.add(key);
@@ -7559,6 +7561,58 @@ function _pmToggleWork(workKey){
   filter.workKeys=_pmToggleWorkKeys(filter.workKeys,allKeys,workKey);
   _pmRender();
 }
+/* ★★ 입금대상 작업 검색 — **표시만 좁힌다**(선택 상태·합계·다운로드 대상은 건드리지 않는다).
+   검색으로 접힌 작업이라도 이미 선택돼 있으면 서식에는 그대로 들어간다(검색은 찾는 도구이지
+   해제 수단이 아니다 — 조용한 선택 해제 금지). 헤더가 "검색 K개 / 전체 M개"로 그 사실을 말한다.
+   ★ 입력 중에는 `#pmbody` 를 다시 그리지 않고 **목록 조각만** 갈아끼운다 — 입력칸 DOM 이
+     재생성되면 한글 IME 조합이 파괴된다(홈 목록 검색 `ㅁ며면면` 실측 계열). */
+function _pmNormQ(v){ return String(v==null?'':v).toLowerCase().replace(/\s+/g,''); }
+function _pmMatchWork(entry, q){
+  if(!q) return true;
+  const it=entry[1]||{};
+  return _pmNormQ([it.tabLabel,it.tabName,entry[0]].filter(Boolean).join(' ')).includes(q);
+}
+function _pmVisibleWorkEntries(items, manager){
+  const q=_pmNormQ(STATE.pmWorkQ);
+  return _pmWorkEntries(items,manager,_pmOn).filter(e=>_pmMatchWork(e,q));
+}
+/* 작업 행 HTML — 전체 렌더와 검색 중 목록-only 렌더가 **같은 한 벌**을 쓴다(사본을 두면
+   검색 결과 행만 모양·배선이 어긋난다). */
+function _pmWorkRowsHtml(allItems, works, selectedKeys){
+  return works.map(([key,it])=>{
+    const selected=selectedKeys.has(key);
+    const rowItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
+    const label=it.tabLabel||it.tabName||key;
+    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${rowItems.length}건 · ${_pmNum(rowItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
+  }).join('');
+}
+function _pmWorkHintHtml(matched, total){
+  const q=String(STATE.pmWorkQ||'').trim();
+  return q ? `<b>검색 ${matched}개</b> / 전체 ${total}개` : '행 전체를 눌러 여러 작업을 선택합니다.';
+}
+function _pmRenderWorkList(){
+  const wrap=$('#pmbody .pmworklist');
+  if(!wrap) return;                       // 입금관리 화면이 아니면 무동작
+  const allItems=STATE.pmItems||[];
+  const filter=_pmFilterState();
+  const allKeys=_pmWorkEntries(allItems,filter.manager,_pmOn).map(([key])=>key);
+  const selectedKeys=new Set(filter.workKeys===null ? allKeys : filter.workKeys);
+  const works=_pmVisibleWorkEntries(allItems,filter.manager);
+  const rows=_pmWorkRowsHtml(allItems,works,selectedKeys);
+  // ★ "검색 결과 없음"과 "애초에 작업이 없음"을 구분해 말한다(뭉뚱그리면 원인을 못 찾는다).
+  wrap.innerHTML = rows || (String(STATE.pmWorkQ||'').trim()
+    ? `<div class="pmworkempty">‘${esc(String(STATE.pmWorkQ).trim())}’ 와 일치하는 작업이 없습니다.</div>`
+    : '<div class="empty">선택할 작업이 없습니다.</div>');
+  wrap.scrollTop=0;
+  const hint=$('#pmWorkHint'); if(hint) hint.innerHTML=_pmWorkHintHtml(works.length,allKeys.length);
+  const box=$('#pmbody .pmsearch'); if(box) box.classList.toggle('has', !!String(STATE.pmWorkQ||'').trim());
+}
+function _pmWorkSearch(v){ STATE.pmWorkQ=v; _pmRenderWorkList(); }
+function _pmClearWorkSearch(){
+  STATE.pmWorkQ='';
+  const el=$('#pmWorkQ'); if(el){ el.value=''; el.focus(); }
+  _pmRenderWorkList();
+}
 function _pmFilterBar(allItems){
   const filter=_pmFilterState();
   const managers=[...new Set((allItems||[]).map(it=>_pmManagerName(it.manager)).filter(Boolean))]
@@ -7571,19 +7625,16 @@ function _pmFilterBar(allItems){
   const selectedTotal=_pmSelectedPaymentTotal(allItems,filter,_pmOn);
   const recipientCount=_pmSelectedRecipientCount(allItems,filter,_pmOn);
   const managerButton=(value,label)=>`<button type="button" class="pmmgr ${filter.manager===value?'on':''}" aria-pressed="${filter.manager===value}" onclick="_pmSelectManager(${esc(JSON.stringify(value))})">${esc(label)}</button>`;
-  const workRows=works.map(([key,it])=>{
-    const selected=selectedKeys.has(key);
-    const selectedItems=(allItems||[]).filter(row=>_pmWorkKey(row)===key && _pmOn(row));
-    const label=it.tabLabel||it.tabName||key;
-    return `<button type="button" class="pmworkpick ${selected?'on':''}" data-work-key="${esc(key)}" aria-pressed="${selected}" onpointerdown="_pmStartWorkDrag(event,${esc(JSON.stringify(key))})" onpointerenter="_pmDragSelectWork(event,${esc(JSON.stringify(key))})" onclick="_pmToggleWorkFromClick(${esc(JSON.stringify(key))})"><span class="pmworkname">${esc(label)}</span><span class="pmworkmeta">${selectedItems.length}건 · ${_pmNum(selectedItems.reduce((sum,row)=>sum+(Number(row.amount)||0),0))}원</span><span class="pmworkcheck" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="m5 12 4 4L19 6"/></svg></span></button>`;
-  }).join('');
+  const visibleWorks=_pmVisibleWorkEntries(allItems,filter.manager);
+  const searchQ=String(STATE.pmWorkQ||'');
+  const workRows=_pmWorkRowsHtml(allItems,visibleWorks,selectedKeys);
   const downloadButton=(bank,label)=>{
     const bankItems=selectedItems.filter(it=>it.bank===bank);
     return bankItems.length
       ? `<button class="btn primary pmdownload" onclick="_pmDownload('${bank}')">${label} 서식 다운로드 · ${bankItems.length}건</button>`
       : `<button class="btn pmdownload" disabled>${label} 대상 없음</button>`;
   };
-  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}</div><div class="pmworkhead"><strong>작업 선택</strong><span>행 전체를 눌러 여러 작업을 선택합니다.</span></div><div class="pmworklist">${workRows||'<div class="empty">선택할 작업이 없습니다.</div>'}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
+  return `<section class="pmselect" aria-label="입금 대상 선택"><div class="pmselecthead"><strong>입금 대상 선택</strong><span>${filter.manager||'전체 담당자'} · <b>선택 작업 ${selectedKeys.size}개</b><em> / 전체 ${works.length}개</em></span></div><div class="pmselectionlayout"><div class="pmselectionleft"><div class="pmmanagers" role="group" aria-label="담당자 선택">${managerButton('','전체')}${managers.map(name=>managerButton(name,name)).join('')}<div class="pmsearch ${searchQ.trim()?'has':''}"><span class="pmsearchic" aria-hidden="true">🔎</span><input id="pmWorkQ" class="pmsearchin" type="search" autocomplete="off" placeholder="작업명 검색" aria-label="입금 대상 작업 검색" value="${esc(searchQ)}" oninput="_pmWorkSearch(this.value)"><button type="button" class="pmsearchx" title="검색어 지우기" aria-label="검색어 지우기" onclick="_pmClearWorkSearch()">✕</button></div></div><div class="pmworkhead"><strong>작업 선택</strong><span id="pmWorkHint">${_pmWorkHintHtml(visibleWorks.length,allWorkKeys.length)}</span></div><div class="pmworklist">${workRows||(searchQ.trim()?`<div class="pmworkempty">‘${esc(searchQ.trim())}’ 와 일치하는 작업이 없습니다.</div>`:'<div class="empty">선택할 작업이 없습니다.</div>')}</div></div><aside class="pmsummary" aria-label="선택 항목 요약"><div><div class="pmsummarytitle">선택한 입금 항목</div><p class="pmsummarycopy">선택된 작업의 체크된 입금 항목만 서식에 포함합니다.</p></div><div class="pmresultgrid"><div class="pmresult"><span>입금 대상자 수</span><strong>${recipientCount}명</strong></div><div class="pmresult total"><span>선택 항목 합계</span><strong>${_pmNum(selectedTotal)}원</strong></div></div><div class="pmdownloadtitle">선택 항목 서식 다운로드</div><div class="pmdownloads">${downloadButton('kbank','케이뱅크')}${downloadButton('hana','하나은행')}</div><p class="pmdownloadnote">은행별 서식으로 각각 내려받습니다.</p></aside></div></section>`;
 }
 
 function _pmRender(){
