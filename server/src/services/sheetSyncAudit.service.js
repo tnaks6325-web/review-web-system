@@ -251,7 +251,11 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
     const probed = probeMap[r.sheetId + '\t' + r.tabName];
     const probedAt = (probed && probed !== 'none') ? probed : null;
     const act = activity.resolveActivity({ ...r, probedAt });
-    if (activity.purchaseUnconfirmed({ ...r, probedAt })) purchaseUnconfirmed++;
+    /* ★★ 무시트 작업은 이 경고의 대상이 아니다 — **읽을 시트가 없다**(2026-08-19).
+     *   이 숫자는 "[📅 시트에서 연도 확인] 을 눌러 구매일 연도를 확정하라"는 권유인데,
+     *   무시트 탭에는 그 확인이 성립하지 않는다(아래 probeUnknownYears 가 대상에서 제외).
+     *   세면 화면이 **누를 수 없는 버튼을 계속 권하는** 상태가 된다(막다른 길). */
+    if (r.sheetless !== true && activity.purchaseUnconfirmed({ ...r, probedAt })) purchaseUnconfirmed++;
     const verdict = activity.activityVerdict(act, sinceDay, includeUnknown);
     if (verdict === 'old') { filteredOld++; continue; }
     if (verdict === 'unknown') { yearUnknown++; continue; }
@@ -617,6 +621,11 @@ async function probeUnknownYears({ limit = _PROBE_CAP, by = 'sheet-sync', force 
        ) rst ON TRUE
        ${activity.ACTIVITY_LATERAL_SQL}
       WHERE COALESCE(tc.is_closed, FALSE) = FALSE
+        /* ★★ 무시트 작업은 대상이 아니다 — 가상 시트ID(wt_ 접두)로 구글을 읽으려다
+         *   read_error 로 끝날 뿐이고, 그 탭의 날짜는 시트가 아니라 작업표가 갖고 있다.
+         *   ★ SQL 에서 거른다(가장 좁은 게이트 — 후보에 들어오면 시트 API 호출로 이어진다).
+         *   ⚠ 이 문자열은 템플릿 리터럴 안이다 — 주석에 백틱을 쓰지 말 것(문자열이 끊긴다). */
+        AND COALESCE(tc.sheetless, FALSE) = FALSE
       LIMIT $1`, [_AUDIT_TAB_CAP]);
 
   const cached = await _loadProbeMap();
