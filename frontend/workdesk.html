@@ -8994,6 +8994,7 @@ function _coRender(){
       <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
       <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
+      <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
     <div id="coSweep"></div>
@@ -9092,6 +9093,49 @@ async function _coReleaseTodayUnsubmittedHolds(){
 /* ★★ "우레온 같은(시트 100줄 · 표 20줄) 작업이 남아 있나"를 한 번에 답한다.
  *    점검표 ①과 같은 판정이지만 남은 작업 전체를 한 번에 훑는다 — 85건을 하나씩 누르던 것을 없앤다.
  *    ★ 읽기 전용 · 시트 API 0(RAW 미러만)이라 몇 번을 눌러도 구글 쿼터에 영향이 없다. */
+/* ══════════════════════════════════════════════════════════════
+   🧹 중복 잔재 정리 — 무시트 접수 실패 잔재(빈 가상 탭)를 목록에서 내린다.
+   ★ 판정·대상 선정은 **서버**가 한다(화면은 보여주고 확인만 받는다 — 프론트 재판정 0).
+   ★ 미리보기 → confirm → 실행 2단계. 조작은 `is_closed=TRUE` 한 칸이라 되돌릴 수 있다.
+   ══════════════════════════════════════════════════════════════ */
+async function _coOrphans(){
+  const box = $('#coSweep'); if(!box) return;
+  box.innerHTML = `<div class="ovnote">잔재를 찾는 중…</div>`;
+  let j;
+  try{ j = await api('/api/trackb/sheetless/orphan-tabs'); }
+  catch(e){ box.innerHTML = `<div class="ovnote bad">잔재 조회 실패: ${esc(e.message||'')}
+    <button class="btn" onclick="_coOrphans()">다시 시도</button></div>`; return; }
+  if(!j || j.ok===false){ box.innerHTML = `<div class="ovnote bad">${esc((j&&(j.error||j.message))||'잔재 조회 실패')}
+    <button class="btn" onclick="_coOrphans()">다시 시도</button></div>`; return; }
+  const items = j.items||[];
+  if(!items.length){ box.innerHTML = `<div class="ovnote"><b class="good">정리할 잔재가 없습니다</b>
+    <div class="comuted">대상 = 줄·명단·주문이 하나도 없고 작업오더·모집공고·계약에도 연결되지 않은
+      빈 시스템 작업(최근 ${j.graceMinutes||60}분 이내 갱신분은 진행 중일 수 있어 제외).</div></div>`; return; }
+  STATE.co.orph = items;
+  box.innerHTML = `<div class="ovnote"><b class="bad">정리할 잔재 ${items.length}건</b>
+    <div class="comuted">전부 <b>줄·명단·주문 0</b> 이고 작업오더·모집공고·계약 어디에도 연결되지 않은
+      빈 시스템 작업입니다. 목록에서만 내리며(마감 처리) <b>데이터는 지우지 않습니다</b>.${j.truncated?' · <b>일부만 표시</b>':''}</div>
+    <div class="cosweep">${items.map(t=>`<div class="cosrow">
+      <b>${esc(t.displayName||t.tabName)}</b>
+      ${t.siblings?`<span class="bd">같은 이름 ${t.siblings}건 더 있음</span>`:'<span class="bd">같은 이름 없음</span>'}
+      <span class="comuted">줄 0 · 명단 0 · 주문 0</span></div>`).join('')}</div>
+    <button class="btn pri" onclick="_coOrphansGo()">🧹 ${items.length}건 정리하기</button></div>`;
+}
+async function _coOrphansGo(){
+  const items = (STATE.co && STATE.co.orph) || [];
+  if(!items.length){ _toast('정리할 잔재가 없습니다.'); return; }
+  if(!confirm(`빈 시스템 작업 ${items.length}건을 목록에서 내릴까요?\n\n· 작업표 줄·명단·주문이 하나도 없는 작업만 대상입니다.\n· 데이터는 지우지 않습니다(마감 처리 — 되돌릴 수 있습니다).`)) return;
+  let j;
+  try{ j = await api('/api/trackb/sheetless/orphan-tabs/close',
+    { method:'POST', body: JSON.stringify({ dryRun:false, sheetIds: items.map(t=>t.sheetId) }) }); }
+  catch(e){ _toast('⚠ 정리 실패: '+(e.message||'')); return; }
+  if(!j || j.ok===false){ _toast('⚠ '+((j&&(j.error||j.message))||'정리 실패')); return; }
+  // ★ 부분 결과를 "완료"로 꾸미지 않는다 — 몇 건이 내려갔는지 사실대로 말한다.
+  _toast(j.closed===j.total ? `🧹 ${j.closed}건 정리 완료` : `일부만 정리됨 (${j.closed}/${j.total}) — 그 사이 사용이 시작된 작업은 남겨둡니다`);
+  if(STATE.co) STATE.co.orph = null;
+  await _coLoad();
+  _coOrphans();
+}
 async function _coSweep(){
   const box = $('#coSweep'); if(!box) return;
   box.innerHTML = `<div class="ovnote">준비 자리를 훑는 중… (남은 작업 수만큼 걸립니다)</div>`;
