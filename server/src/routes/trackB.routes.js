@@ -2945,9 +2945,12 @@ router.post('/payment/transfer-setting', authMiddleware, adminOrMasterMiddleware
     const b = req.body || {};
     const out = await paymentSvc.saveTransferSetting({
       sheetId: b.sheetId, tabName: b.tabName, campaignId: b.campaignId || null,
-      bank: b.bank, memo: b.memo,
+      // ★ `reviewFee` 도 **undefined = 변경 없음** 계약 그대로 넘긴다(칸이 없는 화면이
+      //   저장해도 리뷰비가 조용히 지워지지 않는다 — 옵션표·이체설정과 같은 원칙).
+      bank: b.bank, memo: b.memo, reviewFee: b.reviewFee,
     });
-    logger.info(`[payment] 이체설정 저장 by ${_by(req)} — ${b.tabName} → ${out.target}/${out.bank || '자동'}`);
+    logger.info(`[payment] 이체설정 저장 by ${_by(req)} — ${b.tabName} → ${out.target}/${out.bank || '자동'}` +
+      (out.reviewFee !== undefined ? ` · 리뷰비 ${out.reviewFee == null ? '미설정' : out.reviewFee}` : ''));
     res.json(out);
   } catch (err) { _payFix(res, err, next); }
 });

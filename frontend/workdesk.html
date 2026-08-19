@@ -7656,7 +7656,9 @@ function _pmTargetTable(items){
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>
       <td class="num">${_pmNum(it.amount)}</td>
-      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${_pmNum(it.reviewFee)}</td>
+      <td class="num dim">${_pmNum(it.productPrice)}${it.priceSource==='sheet'?'<span class="pmauto" title="주문 원장에 없어 시트 결제금액 칸에서 읽었습니다">시트</span>':''}+${it.reviewFee
+        ? _pmNum(it.reviewFee)
+        : `<button class="btn sm" title="리뷰비가 없어 상품비만 이체됩니다 — 눌러서 설정" onclick="_pmRowMemo(${idx})">0</button>`}</td>
       <td>${esc(it.transferMemo||'') || (memoFixable
         ? `<button class="btn sm" onclick="_pmRowMemo(${idx})">미설정</button>` : '<span class="pmwarn">미설정</span>')}</td>
       <td class="pmwarn">${esc(why)} ${fixBtn}</td></tr>`;
@@ -7753,7 +7755,10 @@ function _pmBuildFix(items){
       sheetUrl:it.sheetUrl||'', sheetless:!!it.sheetless,
       bank:it.bank||'', bankSource:it.bankSource||null,
       memo:it.transferMemo||'', memoSource:it.memoSource||null,
-      needBank:false, needMemo:false, bankRows:0, memoRows:0,
+      // 리뷰비 — 화면은 **서버가 준 값만** 쓴다(어디서 왔는지도 서버 판정 `feeSource` 그대로).
+      fee:(typeof it.reviewFee==='number'?it.reviewFee:null), feeSource:it.feeSource||null,
+      tabFee:(it.tabReviewFee==null?null:it.tabReviewFee), campFee:(it.campaignReviewFee==null?null:it.campaignReviewFee),
+      needBank:false, needMemo:false, needFee:false, bankRows:0, memoRows:0, feeRows:0,
       accts:[], acctRows:0, _nr:new Set(), _np:new Set(), rows:0 });
     return w;
   };
@@ -7761,12 +7766,14 @@ function _pmBuildFix(items){
     const iss=it.issues||[], warn=it.warnings||[];
     const hasAcct = iss.some(x=>PAY_ACCT_ISSUES.includes(x));
     // 이 작업 카드에 실을 일이 하나라도 있는 행만 센다(정상 행은 카드를 만들지 않는다)
-    if(!(iss.includes('no_bank') || warn.includes('no_memo') || hasAcct
+    if(!(iss.includes('no_bank') || warn.includes('no_memo') || warn.includes('no_review_fee') || hasAcct
         || iss.includes('no_reviewer') || iss.includes('no_price'))) continue;
     const w=work(it); w.rows++;
     // ── 작업 단위(이체은행 미지정 · 통장표시 없음) — 저장하면 그 작업의 모든 행이 함께 풀린다
     if(iss.includes('no_bank')){ w.needBank=true; w.bankRows++; }
     if(warn.includes('no_memo')){ w.needMemo=true; w.memoRows++; }
+    // ★ 리뷰비 0 = 상품비만 이체된다 — 보류(막는 사유)는 아니지만 **말하지 않으면 그대로 나간다**.
+    if(warn.includes('no_review_fee')){ w.needFee=true; w.feeRows++; }
     // ── 리뷰어 단위(은행명·계좌·예금주) — 원장은 평면 배열 하나로 두고(인덱스 계약 유지)
     //    작업 카드는 그 리뷰어의 인덱스를 참조만 한다(한 리뷰어가 여러 작업에 걸칠 수 있다).
     if(hasAcct){
@@ -7897,6 +7904,7 @@ function _pmFixBlock(){
     const lines=[];
     if(w.needBank) lines.push(line('🏦','이체은행 미지정', w.bankRows, fixWork));
     if(w.needMemo) lines.push(line('🏷','통장표시 없음', w.memoRows, fixWork));
+    if(w.needFee) lines.push(line('💵','리뷰비 미설정 — 상품비만 이체됩니다', w.feeRows, fixWork));
     // ★ 줄이 좁아 말줄임되어도 **누구 명의인지**는 title 로 남는다(이름만으로 구분 안 되는 케이스)
     for(const a of w.accts) lines.push(line('💳',
       `계좌 — ${_pmAcctLabel(a)}`,
@@ -7929,8 +7937,21 @@ function _pmFixBlock(){
 function _pmFixWork(i){
   const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return;
   const scope = w.campaignId
-    ? `연결된 <b>모집공고</b>에 저장됩니다 — 공고 수정 화면의 [이체은행]·[통장표시]와 같은 값입니다.`
-    : `이 작업엔 연결된 모집공고가 없어 <b>탭 설정</b>에 저장됩니다 — 관리자 대시보드 탭설정의 [이체은행]·[입금명]과 같은 칸입니다.`;
+    ? `연결된 <b>모집공고</b>에 저장됩니다 — 공고 수정 화면의 [이체은행]·[통장표시]·[리뷰비]와 같은 값입니다.`
+    : `이 작업엔 연결된 모집공고가 없어 <b>탭 설정</b>에 저장됩니다 — 이체은행·통장표시는 관리자 대시보드 탭설정의 [이체은행]·[입금명]과 같은 칸이고, 리뷰비는 이 작업 전용 값입니다.`;
+  /* 리뷰비 안내 — ★ 지금 값이 **어디서 온 값인지**를 말한다(조용한 추정 금지).
+     ★ 참여 시점 스냅샷·기간별 구간(082)은 여기서 넣는 값보다 **항상 우선**이라
+       그 경우엔 "이 칸을 바꿔도 그 건들은 안 바뀐다"를 문장으로 못박는다. */
+  const feeHint = w.feeSource==='snapshot'
+    ? '지금 금액은 <b>참여 시점에 새긴 값(스냅샷)</b>입니다 — 이미 참여한 건은 이 칸을 바꿔도 그대로 유지됩니다(리뷰어가 본 금액이 진실).'
+    : w.feeSource==='schedule'
+      ? '지금 금액은 <b>공고의 기간별 리뷰비 구간</b>에서 온 값입니다 — 구간이 이 칸보다 우선하므로, 바꾸려면 공고 수정 화면의 구간표를 고치세요.'
+      : w.feeSource==='campaign'
+        ? '지금 금액은 <b>연결된 모집공고</b>의 리뷰비입니다.'
+        : w.feeSource==='tab'
+          ? '지금 금액은 <b>이 작업(탭)</b>에 저장해 둔 리뷰비입니다.'
+          : '아직 리뷰비가 없어 <b>상품비만</b> 이체됩니다. 비워 두면 계속 미설정입니다.';
+  const feeVal = (w.campFee!=null ? w.campFee : (w.tabFee!=null ? w.tabFee : (typeof w.fee==='number'&&w.fee>0 ? w.fee : '')));
   const cur = w.bank||'';
   const btn=(v,l)=>`<button type="button" data-v="${v}" class="${cur===v?'on':''}" onclick="_pmPickBank(this)">${l}</button>`;
   _pmDialog({
@@ -7943,6 +7964,9 @@ function _pmFixWork(i){
       <div class="pmf"><label>통장표시 (받는분 통장에 찍히는 이름 · 8자)</label>
         <input id="pmMemoIn" maxlength="8" value="${esc(w.memo||'')}" placeholder="예) 파우더망고">
         <div class="hint">비워 두면 리뷰어 통장에 무슨 돈인지 안 찍힙니다(이체 자체는 됩니다).</div></div>
+      <div class="pmf"><label>리뷰비 (원 · 이 작업의 건당 리뷰비)</label>
+        <input id="pmFeeIn" inputmode="numeric" value="${esc(String(feeVal))}" placeholder="예) 3000">
+        <div class="hint">${feeHint} 이체금액 = <b>상품비 + 리뷰비</b>입니다. 비우면 미설정으로 되돌립니다.</div></div>
       <div class="pmf"><label>구글시트</label>
         <div>${_pmSheetBtn(i)}</div>
         <div class="hint">시트에서 직접 봐야 하는 값(결제금액 칸 등)을 확인할 때 씁니다 — 새 창으로 열립니다.</div></div>
@@ -7952,8 +7976,11 @@ function _pmFixWork(i){
       const pick=document.querySelector('#pmBankPick button.on');
       const bank=pick?(pick.dataset.v||''):'';
       const memo=(document.querySelector('#pmMemoIn')||{}).value||'';
+      const feeRaw=String((document.querySelector('#pmFeeIn')||{}).value||'').trim();
+      // ★ 형식은 서버가 최종 판정한다 — 화면은 명백한 오입력만 막아 왕복을 아낀다.
+      if(feeRaw!=='' && !/^[0-9,]+$/.test(feeRaw)){ toast('리뷰비는 숫자로 입력해 주세요'); return false; }
       const r=await api('/api/trackb/payment/transfer-setting',{ method:'POST', body: JSON.stringify({
-        sheetId:w.sheetId, tabName:w.tabName, campaignId:w.campaignId||null, bank, memo }) });
+        sheetId:w.sheetId, tabName:w.tabName, campaignId:w.campaignId||null, bank, memo, reviewFee:feeRaw }) });
       if(!r||!r.ok){ toast((r&&r.error)||'저장하지 못했습니다'); return false; }
       // ★ 저장이 끝나면 **먼저 닫는다** — 뒤이은 안내·재조회가 실패해도 팝업이 남아
       //   "저장이 안 됐나?"로 오해되지 않게(성공을 실패처럼 보이게 하지 않는다).
@@ -8069,7 +8096,7 @@ function _pmRowFix(idx){
   }
 }
 
-/** 통장표시 [미설정] 클릭 — 같은 작업 팝업을 연다(이체은행과 한 칸에서 정한다) */
+/** 표에서 작업 단위 값(통장표시·리뷰비) 클릭 — 같은 작업 팝업을 연다(이체은행과 한 칸에서 정한다) */
 function _pmRowMemo(idx){
   const it=(STATE.pmItems||[])[idx]; if(!it) return;
   const f=STATE.pmFix||{works:[]};
