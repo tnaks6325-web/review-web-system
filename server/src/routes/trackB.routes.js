@@ -3003,6 +3003,34 @@ router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrM
   } catch (err) { next(err); }
 });
 
+// 번진 입금일 정리 — 미리보기(읽기 전용) / 실행(confirm 필수).
+//   판정: 그룹에 리뷰 제출된 줄이 정확히 1개일 때만 그 줄을 남기고 나머지에서 그 날짜를 회수한다.
+//   0개·2개 이상은 보류(사람이 고른다) — 서버가 임의로 정하지 않는다.
+router.get('/payment/repair/deposit-fanout-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    res.json(await manualDepositRepairSvc.previewDepositFanoutCleanup({
+      sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
+      stamp: String(req.query.stamp || '8/11'),
+    }));
+  } catch (err) { next(err); }
+});
+
+router.post('/payment/repair/deposit-fanout-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '정리 내용을 확인해 주세요.' });
+    }
+    res.json(await manualDepositRepairSvc.applyDepositFanoutCleanup({
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+      stamp: String(b.stamp || '8/11'), by: _by(req),
+    }));
+  } catch (err) {
+    if (err && err.code) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+    next(err);
+  }
+});
+
 // 입금일 오염 진단 — 읽기 전용(쓰기 쿼리 0). 어떤 것도 고치지 않고 세기만 한다.
 //   ① 앵커가 여러 줄을 가리키는 수동 입금 마커 ② 리뷰 미작성인데 입금 기록 ③ 입금 원장 중복
 router.get('/payment/repair/deposit-anomalies', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

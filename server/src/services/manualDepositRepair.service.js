@@ -390,4 +390,198 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
   };
 }
 
-module.exports = { previewManual811Transfer, depositAnomalyReport, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };
+
+/* ══════════════════════════════════════════════════════════════════
+   번진 입금일 정리 (사용자 확정 2026-08-19)
+   ──────────────────────────────────────────────────────────────────
+   ★★ 판정 규칙(완화 금지) — 정규 입금 대상은 `is_submitted = TRUE` 였으므로
+      **실제 이체된 줄 = 리뷰 제출된 줄**이다.
+        · 그룹에 제출된 줄이 **정확히 1개** → 그 줄만 남기고 나머지에서 그 날짜를 회수
+        · 제출된 줄이 **0개 또는 2개 이상** → **보류**(자동 판단 금지, 사람이 고른다)
+   ★ 미리보기와 실행이 **같은 판정 함수**(`_fanoutGroups`)를 쓴다 — 사본을 두면
+     "미리보기 ≠ 실제 결과"가 되고 그건 되돌릴 수 없는 조작에서 가장 나쁜 실패다.
+   ★ 남길 줄은 **절대 건드리지 않는다**. 회수는 **그 날짜 토큰만**(`removeDepositStamp`) —
+     같은 칸의 다른 입금일(예 `8/3, 8/11`)은 보존한다.
+   ★ 무시트 탭만 — 시트 기반 탭의 `row_json` 은 시트의 사본이라 지워도 다음 빌드가 되돌린다.
+   ══════════════════════════════════════════════════════════════════ */
+
+const CLEANUP_HOLD = {
+  no_submitted_row: '리뷰 제출된 줄이 없습니다 — 어느 줄이 실제 이체인지 사람이 판단해야 합니다.',
+  multiple_submitted_rows: '리뷰 제출된 줄이 2개 이상입니다 — 사람이 골라야 합니다.',
+  not_sheetless: '시트 기반 작업입니다 — 작업표 값을 지워도 다음 빌드가 되돌립니다.',
+  deposit_column_missing: '입금 컬럼을 찾지 못했습니다.',
+};
+
+/** 번진 마커 그룹 + 처리 계획(판정 단일 출처). 읽기만 한다. */
+async function _fanoutGroups(client, { sheetId = '', tabName = '', stamp = '8/11' } = {}) {
+  const params = [String(stamp)];
+  const scope = [];
+  if (sheetId) { params.push(sheetId); scope.push(`m.sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); scope.push(`m.tab_name = $${params.length}`); }
+  const { rows } = await client.query(
+    `SELECT m.id::text AS "markId", m.sheet_id AS "sheetId", m.tab_name AS "tabName",
+            m.anchor_type AS "anchorType", m.anchor_value AS "anchorValue",
+            m.deposit_col_key AS "depositColKey", m.stamp,
+            cp.id::text AS "rowId", cp.seq AS "rowIndex", cp.reviewer_name AS "reviewerName",
+            COALESCE(cp.row_json ->> m.deposit_col_key, '') AS "paidValue",
+            COALESCE(ri.is_submitted, FALSE) AS submitted,
+            COALESCE(tc.sheetless, FALSE) AS sheetless
+       FROM manual_payment_marks m
+       JOIN campaign_participants cp
+         ON cp.sheet_id = m.sheet_id AND cp.tab_name = m.tab_name
+        AND cp.deleted_at IS NULL AND cp.active = TRUE
+        AND (( m.anchor_type = 'order'    AND cp.order_submission_id::text = m.anchor_value)
+          OR ( m.anchor_type = 'manual'   AND cp.id::text = m.anchor_value)
+          OR ( m.anchor_type = 'identity' AND cp.identity_key = m.anchor_value))
+       LEFT JOIN review_index ri
+         ON ri.sheet_id = m.sheet_id AND ri.tab_name = m.tab_name AND ri.row_index = cp.seq
+       LEFT JOIN tab_configs tc
+         ON tc.sheet_id = m.sheet_id AND tc.tab_name = m.tab_name
+      WHERE btrim(m.stamp) = $1${scope.length ? ' AND ' + scope.join(' AND ') : ''}
+      ORDER BY m.sheet_id, m.tab_name, m.id, cp.seq`, params);
+
+  const byMark = new Map();
+  for (const r of rows) {
+    if (!byMark.has(r.markId)) {
+      byMark.set(r.markId, {
+        markId: r.markId, sheetId: r.sheetId, tabName: r.tabName,
+        anchorType: r.anchorType, anchorValue: r.anchorValue,
+        depositColKey: r.depositColKey, stamp: r.stamp, sheetless: r.sheetless === true,
+        targets: [],
+      });
+    }
+    byMark.get(r.markId).targets.push({
+      rowId: r.rowId, rowIndex: Number(r.rowIndex), reviewerName: r.reviewerName || '',
+      submitted: r.submitted === true, paidValue: r.paidValue || '',
+    });
+  }
+
+  const groups = [];
+  for (const g of byMark.values()) {
+    if (g.targets.length <= 1) continue;              // 번지지 않은 마커는 대상 아님
+    const submitted = g.targets.filter(t => t.submitted);
+    let hold = null;
+    if (!g.sheetless) hold = 'not_sheetless';
+    else if (!g.depositColKey) hold = 'deposit_column_missing';
+    else if (submitted.length === 0) hold = 'no_submitted_row';
+    else if (submitted.length > 1) hold = 'multiple_submitted_rows';
+    const keep = hold ? null : submitted[0];
+    // ★ 회수 대상은 "그 칸에 그 날짜가 실제로 있는 줄"만 — 없는 줄은 셀 필요가 없다.
+    const drop = hold ? [] : g.targets.filter(t =>
+      t.rowId !== keep.rowId
+      && removeDepositStamp(t.paidValue, g.stamp) !== String(t.paidValue || '').trim());
+    groups.push({ ...g, hold, holdReason: hold ? CLEANUP_HOLD[hold] : null, keep, drop,
+      submittedCount: submitted.length });
+  }
+  return groups;
+}
+
+function _cleanupSummary(groups) {
+  const actionable = groups.filter(g => !g.hold && g.drop.length);
+  return {
+    groups: groups.length,
+    actionableGroups: actionable.length,
+    dropRows: actionable.reduce((n, g) => n + g.drop.length, 0),
+    holdGroups: groups.filter(g => g.hold).length,
+    holdByReason: groups.filter(g => g.hold).reduce((acc, g) => {
+      acc[g.hold] = (acc[g.hold] || 0) + 1; return acc;
+    }, {}),
+  };
+}
+
+function _cleanupView(groups) {
+  return groups.map(g => ({
+    tabName: g.tabName, anchorType: g.anchorType, stamp: g.stamp,
+    rows: g.targets.map(t => t.rowIndex),
+    keepRow: g.keep ? g.keep.rowIndex : null,
+    dropRows: g.drop.map(t => t.rowIndex),
+    reviewerName: (g.targets[0] && g.targets[0].reviewerName) || '',
+    submittedCount: g.submittedCount,
+    hold: g.hold, holdReason: g.holdReason,
+  }));
+}
+
+async function previewDepositFanoutCleanup({ sheetId = '', tabName = '', stamp = '8/11' } = {}) {
+  const groups = await _fanoutGroups(pool, { sheetId, tabName, stamp });
+  return { ok: true, dryRun: true, stamp, summary: _cleanupSummary(groups), items: _cleanupView(groups) };
+}
+
+/**
+ * 실행 — 그룹별로 남길 줄 1개를 빼고 나머지 줄에서 그 날짜만 회수한다.
+ *  ① 작업표 입금칸에서 해당 날짜 제거  ② 그 줄의 `review_index.is_submitted2` 해제(칸이 비면)
+ *  ③ 수동 회차(#0) 항목 `cancelled` 로 회수  ④ 마커를 남긴 줄에 정확히 재고정(manual 앵커)
+ *  ⑤ 무시트 장부 재생성
+ */
+async function applyDepositFanoutCleanup({ sheetId = '', tabName = '', stamp = '8/11', by = 'payment-repair' } = {}) {
+  const client = await pool.connect();
+  let groups = [];
+  const touchedTabs = new Map();
+  let removedCells = 0, cancelledItems = 0, reanchored = 0;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('manual_811_transfer_batch'))`);
+    groups = await _fanoutGroups(client, { sheetId, tabName, stamp });
+    const actionable = groups.filter(g => !g.hold && g.drop.length);
+    if (!actionable.length) {
+      await client.query('ROLLBACK');
+      throw new ManualDepositRepairError('empty', '정리할 대상이 없습니다(모두 보류이거나 이미 정리됨).');
+    }
+    for (const g of actionable) {
+      for (const t of g.drop) {
+        const next = removeDepositStamp(t.paidValue, g.stamp);
+        const upd = await client.query(
+          `UPDATE campaign_participants
+              SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
+                  updated_at = NOW(), updated_by = $4
+            WHERE id = $1 AND deleted_at IS NULL`,
+          [t.rowId, g.depositColKey, next, by]);
+        removedCells += upd.rowCount;
+        // 칸이 비면 그 줄의 입금완료 표시도 내린다(장부 재생성도 같은 결과를 만든다 — 즉시 반영용).
+        if (!next) {
+          await client.query(
+            `UPDATE review_index SET is_submitted2 = 'NONE'
+              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND is_submitted2 = 'PAID'`,
+            [g.sheetId, g.tabName, t.rowIndex]);
+        }
+        // ★ 회수는 **수동 이력 회차(#0)** 항목만 — 실제 이체 회차 항목은 절대 건드리지 않는다.
+        const c = await client.query(
+          `UPDATE payment_batch_items i
+              SET status = 'cancelled', result_status = '정리: 번진 입금일 회수'
+             FROM payment_batches b
+            WHERE i.batch_id = b.id AND b.historical_key = 'manual-811'
+              AND i.sheet_id = $1 AND i.tab_name = $2 AND i.row_index = $3
+              AND i.status = 'paid'`,
+          [g.sheetId, g.tabName, t.rowIndex]);
+        cancelledItems += c.rowCount;
+      }
+      // ④ 마커를 남긴 줄에 정확히 고정 — 앵커가 다시 여러 줄을 가리키지 않게 한다.
+      const ra = await client.query(
+        `UPDATE manual_payment_marks SET anchor_type = 'manual', anchor_value = $2 WHERE id = $1::uuid`,
+        [g.markId, g.keep.rowId]);
+      reanchored += ra.rowCount;
+      touchedTabs.set(`${g.sheetId}\t${g.tabName}`, { sheetId: g.sheetId, tabName: g.tabName });
+    }
+    // 회차 #0 합계 재계산 — 회수분을 빼야 "이체 1건 = 원장 1건"이 맞는다.
+    await client.query(
+      `UPDATE payment_batches b
+          SET item_count = s.n, total_amount = s.amt
+         FROM (SELECT batch_id, COUNT(*)::int AS n, COALESCE(SUM(amount), 0) AS amt
+                 FROM payment_batch_items WHERE status = 'paid' GROUP BY batch_id) s
+        WHERE b.id = s.batch_id AND b.historical_key = 'manual-811'`);
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally { client.release(); }
+
+  // ⑤ 장부 재생성 — 실패해도 작업표 값은 이미 정리됐다(다음 재생성에 자동 반영).
+  const rebuilt = [];
+  for (const tab of touchedTabs.values()) {
+    try { await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: `deposit-cleanup:${by}` }); rebuilt.push(tab.tabName); }
+    catch (e) { rebuilt.push(`${tab.tabName}(재생성 실패: ${e.code || e.message})`); }
+  }
+  return { ok: true, dryRun: false, stamp, removedCells, cancelledItems, reanchored,
+    rebuiltTabs: rebuilt, summary: _cleanupSummary(groups), items: _cleanupView(groups) };
+}
+
+module.exports = { previewManual811Transfer, depositAnomalyReport, previewDepositFanoutCleanup, applyDepositFanoutCleanup, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };
