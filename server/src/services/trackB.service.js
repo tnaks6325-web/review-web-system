@@ -4220,6 +4220,7 @@ const _AMB_REASON = {
   dedupe_target:      '정리 도구가 이미 대상으로 잡는 그룹입니다 — [미리보기]에 나옵니다.',
   dedupe_skipped:     '정리 도구가 보류한 그룹입니다 — 미리보기의 보류 사유를 보세요.',
   no_order_link:      '주문 기록에 연결되지 않은 줄이 섞여 있습니다 — 정리 도구는 연결된 줄만 보므로 이 그룹은 조회 대상 밖입니다.',
+  order_deleted:      '연결된 주문이 취소(삭제)된 줄이 섞여 있습니다 — 정리 도구는 살아 있는 주문만 보므로 이 그룹은 조회 대상 밖입니다.',
   row_order_num_missing: '표에 주문번호가 없거나 6자리 미만인 줄이 있습니다 — 정리 도구가 "모르면 안 지운다"로 제외합니다.',
   row_order_num_differs: '표에 보이는 주문번호가 줄마다 다릅니다 — 정리 도구는 다른 구매로 봅니다(줄↔주문 링크가 어긋난 상태일 수 있습니다).',
   ledger_order_num_differs: '주문 기록의 주문번호가 줄마다 다릅니다 — 정리 도구는 다른 구매로 봅니다.',
@@ -4252,8 +4253,11 @@ async function ambiguousRowReport({ sheetId, tabName, maxGroups = 200, dedupeFn 
   let ordMap = new Map();
   if (orderIds.length) {
     const { rows: ords } = await db.query(
-      `SELECT id, order_num, phone, submitted_at
-         FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+      /* ★★ 취소(소프트삭제)된 주문도 함께 읽는다 — `dedupeRows` 는 `os.deleted_at IS NULL` 이라
+         **취소된 주문에 매달린 줄을 통째로 못 본다**. 그 줄은 표에 그대로 남아 겹침을 만드는데
+         진단까지 못 보면 "왜 중복인데 정리가 0인지" 를 영영 설명할 수 없다(2026-08-19 위드프렌즈). */
+      `SELECT id, order_num, phone, submitted_at, deleted_at
+         FROM order_submissions WHERE id = ANY($1::uuid[])`,
       [orderIds]).catch(() => ({ rows: [] }));
     ordMap = new Map(ords.map(o => [String(o.id), o]));
   }
@@ -4299,6 +4303,7 @@ async function ambiguousRowReport({ sheetId, tabName, maxGroups = 200, dedupeFn 
       rowOrderNum: _dig(_ikFromRow(r).orderNum),        // 표(row_json)에 보이는 주문번호
       ledgerOrderNum: _dig(os && os.order_num),          // 주문 기록의 주문번호
       ledgerPhone: _dig(os && os.phone).slice(-8),
+      orderDeleted: !!(os && os.deleted_at),
       submittedAt: (os && os.submitted_at) || null,
       submitted: !!r.submitted,
       paid: !!r.paid,
@@ -4315,6 +4320,8 @@ async function ambiguousRowReport({ sheetId, tabName, maxGroups = 200, dedupeFn 
     if (dedupePlanSeqs && seqs.every(s => dedupePlanSeqs.has(s))) reason = 'dedupe_target';
     else if (dedupeSkipSeqs && seqs.every(s => dedupeSkipSeqs.has(s))) reason = 'dedupe_skipped';
     else if (g.rows.some(r => !r.hasOrder)) reason = 'no_order_link';
+    /* ★ 취소된 주문은 `no_order_link` 로 뭉뚱그리지 않는다 — 조치가 다르다(줄 정리 vs 주문 복구). */
+    else if (g.rows.some(r => r.orderDeleted)) reason = 'order_deleted';
     else if (g.rows.some(r => r.rowOrderNum.length < 6)) reason = 'row_order_num_missing';
     else if (!_same(g.rows, r => r.rowOrderNum)) reason = 'row_order_num_differs';
     else if (!_same(g.rows, r => r.ledgerOrderNum)) reason = 'ledger_order_num_differs';

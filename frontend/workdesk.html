@@ -3639,6 +3639,7 @@ function _abGroupHtml(g, i){
   const rows = (g.rows || []).map(r => {
     const flags = [
       r.hasOrder ? '' : '<span style="color:#b91c1c">주문 링크 없음</span>',
+      r.orderDeleted ? '<span style="color:#b91c1c">주문 취소됨</span>' : '',
       r.submitted ? '리뷰제출' : '',
       r.paid ? '입금' : '',
       r.inPayment === true ? '<span style="color:#b91c1c"><b>입금 회차에 담김</b></span>' : (r.inPayment === null ? '<span style="color:#6b7280">이체 담김 여부 모름</span>' : ''),
