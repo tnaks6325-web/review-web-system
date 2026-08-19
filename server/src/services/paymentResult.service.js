@@ -91,6 +91,57 @@ async function _saveBoardWriteOutcome({ batchId, outcome, stamp, by }) {
     [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, stamp || '', by || 'payment']);
 }
 
+/**
+ * 회차 단위 작업보드 입금칸 기록 — 결과 반영·소급 백필의 **공용 실행부**.
+ *
+ * ★★ **건별 장부 재생성 금지(완화 금지 — 2026-08-19 회차 #12 실사고)**
+ *   종전 결과 반영 경로는 `markDepositCells` 를 기본값으로 불러, 한 건 쓸 때마다 그 탭 장부를
+ *   통째로 다시 만들었다(`sheetlessStatus._writeCellAndRebuild`). 517건·20탭 회차에서 300~800행
+ *   재생성이 **517번 직렬**로 돌아 커밋 뒤 루프가 **6번째에서 끊겼고**, 입금 원장은 517건인데
+ *   작업보드 입금일은 **5건만** 남았다. 게다가 루프 끝의 `_saveBoardWriteOutcome` 에 도달하지
+ *   못해 `board_*` 가 전부 0 → 화면은 "입금일 미기록"이라고만 말했다.
+ *   → 쓰기는 모아서 하고 **탭당 1회만** 재생성한다(같은 회차 실측: 517건 약 40초).
+ *
+ * ★ 재생성은 **탭 단위로 격리**한다 — 한 탭이 실패해도 나머지 탭은 계속 간다. 값은 이미
+ *   작업표(`campaign_participants.row_json`)에 있으므로 다음 재생성에 자동 반영된다.
+ * ★ 무시트 판정은 `utils/sheetlessScope` 단일 출처(시트 기반 탭은 애초에 재생성 대상이 아니다).
+ *   백필 경로처럼 호출부가 `sheetless` 를 이미 알고 있으면 그 값을 쓴다(조회 순증 0).
+ * ★ 반환 모양은 종전과 동일하다(`recorded/queued/skipped/failed`) — 호출부가 자기 사유
+ *   (날짜 없는 건 등)를 `skipped` 에 더한다.
+ */
+async function _rebuildTouchedLedgers(items, by) {
+  const tabs = [...new Map((items || [])
+    .map(x => [`${x.sheetId}\u0000${x.tabName}`, x])).values()];
+  for (const tab of tabs) {
+    if (!tab.sheetId || !tab.tabName) continue;
+    try {
+      if (tab.sheetless !== true) {
+        const sheetless = await require('../utils/sheetlessScope').isSheetless(_db(), tab.sheetId, tab.tabName);
+        if (!sheetless) continue;   // 시트 기반 탭 — 장부는 시트에서 만들어진다
+      }
+      await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
+    } catch (e) {
+      logger.warn(`[paymentResult] 입금일 기록 후 장부 재생성 실패(값은 작업표에 남음) tab=${tab.tabName}: ${e.message}`);
+    }
+  }
+}
+
+async function _writeBoardDeposits(items, { by } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const writeResult = await paymentApply.markDepositCells(list,
+    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
+  await _rebuildTouchedLedgers(list, by);
+  const verification = await paymentApply.verifyDepositCells(list) || {};
+  const queued = Number(writeResult.queued) || 0;
+  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
+  return {
+    recorded: Number(verification.verified) || 0,
+    queued,
+    skipped: Number(writeResult.skipped) || 0,
+    failed: (Number(writeResult.failed) || 0) + verificationMissing,
+  };
+}
+
 /** DB 행 → 짝맞추기 입력 모양(파서는 DB 컬럼명을 모른다) */
 function _itemView(r) {
   return {
@@ -926,17 +977,8 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
        ★ 날짜는 결과파일의 건별 실제 이체일(item.stamp)만 사용한다. */
   const boardItems = paidItems.filter(x => x.stamp);
   const undatedPaid = paidItems.length - boardItems.length;
-  const writeResult = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
-  const verification = await paymentApply.verifyDepositCells(boardItems) || {};
-  const verified = Number(verification.verified) || 0;
-  const queued = Number(writeResult.queued) || 0;
-  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
-  const board = {
-    recorded: verified,
-    queued,
-    skipped: (Number(writeResult.skipped) || 0) + undatedPaid,
-    failed: (Number(writeResult.failed) || 0) + verificationMissing,
-  };
+  const board = await _writeBoardDeposits(boardItems, { by: by || 'payment' });
+  board.skipped += undatedPaid;
   const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
   await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
 
@@ -1091,22 +1133,8 @@ async function backfillPaidDepositStamp({ batchId, by }) {
 
   const datedItems = items.filter(x => x.stamp);
   const normalizedStamp = [...new Set(datedItems.map(x => x.stamp))].join(', ');
-  const writeResult = await paymentApply.markDepositCells(datedItems,
-    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
-  const sheetlessTabs = [...new Map(datedItems.filter(x => x.sheetless)
-    .map(x => [`${x.sheetId}\t${x.tabName}`, x])).values()];
-  for (const tab of sheetlessTabs) {
-    await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
-  }
-  const verification = await paymentApply.verifyDepositCells(datedItems) || {};
-  const queued = Number(writeResult.queued) || 0;
-  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
-  const outcome = {
-    recorded: Number(verification.verified) || 0,
-    queued,
-    skipped: (Number(writeResult.skipped) || 0) + (items.length - datedItems.length),
-    failed: (Number(writeResult.failed) || 0) + verificationMissing,
-  };
+  const outcome = await _writeBoardDeposits(datedItems, { by: by || 'payment' });
+  outcome.skipped += (items.length - datedItems.length);
   await _saveBoardWriteOutcome({ batchId, outcome, stamp: normalizedStamp, by: by || 'payment' });
   return { ok: true, candidates: items.length, stamp: normalizedStamp, verified: outcome.recorded, ...outcome };
 }
