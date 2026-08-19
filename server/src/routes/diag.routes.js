@@ -3791,7 +3791,12 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
               os.bank, os.account, os.depositor, os.price,
               os.order_num AS "orderNum", os.date_str AS "dateStr",
               os.selected_opt_key AS "selectedOptKey", os.memo,
-              os.sheet_written_at AS "writtenAt", os.submitted_at AS "submittedAt"
+              os.sheet_written_at AS "writtenAt", os.submitted_at AS "submittedAt",
+              /* 취소 내력(진단 전용) — "누가 왜 취소했나"를 API 밖에서 알 방법이 없어
+                 canceled 주문을 만나면 원인 추적이 막다른 길이 됐다(2026-08-19 유재휘 건).
+                 ★ JSON 응답에만 실린다 — 아래 CSV 는 head 목록으로 칸을 정하므로
+                   직원 붙여넣기용 CSV 의 열 구성은 한 칸도 바뀌지 않는다. */
+              os.canceled_by AS "canceledBy", os.deleted_at AS "deletedAt"
          FROM order_submissions os
         WHERE os.sheet_id = $1 AND os.tab_name = $2${statusCond}
         ORDER BY os.sheet_row ASC NULLS LAST, os.submitted_at ASC
