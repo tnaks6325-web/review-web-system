@@ -1,0 +1,128 @@
+name: Oneoff - 링크 정정 미리보기 (읽기 전용)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'oneoff/link-preview' ]
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Preview
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -e
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \pset pager off
+
+          CREATE TEMP VIEW tgt AS
+          SELECT * FROM (VALUES
+            ('8/3(쿠팡)위프_블랙 탈취제 800건', 23),
+            ('8/3(쿠팡)위프_블랙 탈취제 800건', 164),
+            ('8/3(쿠팡)위프_블랙 탈취제 800건', 166),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 28),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 95),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 96),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 517),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 98),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 420),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 101),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 293),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 102),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 292),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 75),
+            ('8/3(네이버)우레온_바디미스트 100건', 19)
+          ) AS t(tab, seq);
+
+          CREATE TEMP VIEW rws AS
+          SELECT cp.id AS row_id, cp.sheet_id, cp.tab_name, cp.seq,
+                 cp.phone8, cp.recipient_name,
+                 COALESCE(cp.row_json->>'번호','') AS 번호칸,
+                 cp.order_submission_id AS cur_link,
+                 regexp_replace(COALESCE((
+                   SELECT string_agg(t.value,'' ORDER BY t.key)
+                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
+                    WHERE t.key LIKE '%주문번호%'
+                 ),''),'\D','','g') AS onum
+            FROM campaign_participants cp
+            JOIN tgt ON tgt.tab = cp.tab_name AND tgt.seq = cp.seq
+           WHERE cp.deleted_at IS NULL;
+
+          CREATE TEMP VIEW cand AS
+          SELECT r.row_id, os.id AS os_id,
+                 regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS os_num,
+                 os.submitted_at
+            FROM rws r
+            JOIN order_submissions os
+              ON regexp_replace(COALESCE(os.order_num,''),'\D','','g') = r.onum
+             AND right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) = r.phone8
+             AND os.deleted_at IS NULL
+           WHERE length(r.onum) >= 6;
+
+          CREATE TEMP VIEW plan AS
+          SELECT r.*,
+                 (SELECT COUNT(*) FROM cand c WHERE c.row_id=r.row_id) AS 후보수,
+                 (SELECT c.os_id FROM cand c WHERE c.row_id=r.row_id LIMIT 1) AS 후보주문,
+                 CASE
+                   WHEN length(r.onum) < 6 THEN '비움(표 주문번호 없음)'
+                   WHEN (SELECT COUNT(*) FROM cand c WHERE c.row_id=r.row_id) = 0 THEN '비움(원장에 그 번호 없음)'
+                   WHEN (SELECT COUNT(*) FROM cand c WHERE c.row_id=r.row_id) > 1 THEN '손대지 않음(후보 여럿)'
+                   WHEN (SELECT c.os_id FROM cand c WHERE c.row_id=r.row_id LIMIT 1) = r.cur_link
+                        THEN '변경 없음(이미 올바름)'
+                   ELSE '연결 교체'
+                 END AS 조치
+            FROM rws r;
+
+          \echo '=== ① 줄별 미리보기 ==='
+          SELECT tab_name, 번호칸 AS "번호", seq AS "#", recipient_name AS 참여자,
+                 COALESCE(NULLIF(onum,''),'(빈칸)') AS 표주문번호,
+                 (SELECT regexp_replace(COALESCE(os.order_num,''),'\D','','g')
+                    FROM order_submissions os WHERE os.id=p.cur_link) AS 지금가리키는주문번호,
+                 후보수, 조치
+            FROM plan p ORDER BY tab_name, seq;
+
+          \echo ''
+          \echo '=== ② 조치별 건수 ==='
+          SELECT 조치, COUNT(*) FROM plan GROUP BY 1 ORDER BY 2 DESC;
+
+          \echo ''
+          \echo '=== ③ 정정 후 가리키는 줄이 없어지는 주문 ==='
+          WITH after AS (
+            SELECT row_id, cur_link,
+                   CASE WHEN 조치 = '연결 교체' THEN 후보주문
+                        WHEN 조치 LIKE '비움%' THEN NULL
+                        ELSE cur_link END AS new_link
+              FROM plan
+          ), lost AS (
+            SELECT DISTINCT a.cur_link AS os_id FROM after a
+             WHERE a.cur_link IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM after b WHERE b.new_link = a.cur_link)
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_participants cp
+                  WHERE cp.order_submission_id = a.cur_link AND cp.deleted_at IS NULL
+                    AND cp.id NOT IN (SELECT row_id FROM after))
+          )
+          SELECT os.id, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
+                 os.recipient, right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
+                 to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출시각, os.mirror_status
+            FROM lost JOIN order_submissions os ON os.id=lost.os_id
+           ORDER BY os.submitted_at;
+
+          \echo ''
+          \echo '=== ④ 쓰기 0건 확인 ==='
+          SELECT '이 조회는 SELECT 만 수행했습니다' AS 확인;
+          SQL
