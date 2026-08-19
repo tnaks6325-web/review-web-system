@@ -202,16 +202,25 @@ async function listPaymentTargets(opts = {}) {
     const productPrice = orderPrice || sheetPrice;
     const priceSource = orderPrice ? 'order' : (sheetPrice ? 'sheet' : null);
 
-    // 리뷰비 = 082 단일 출처(스냅샷 → 주문일 → 시트 구매일자 → 오늘 → 폴백)
-    const fee = camp
-      ? resolveReviewFee({
-          snapshot: ord ? ord.feeSnapshot : null,
-          schedules: camp.schedules,
-          orderDate: ord ? ord.orderDate : null,
-          sheetDate: sheetDateToIso(r.startDate, camp.campStartDate),
-          fallback: camp.reviewFee,
-        }).fee
-      : 0;
+    // 리뷰비 = 082 단일 출처(스냅샷 → 구간표 → 폴백). 판정 자체는 `resolveReviewFee` 가 한다.
+    // ★ 폴백 순서만 이체은행·통장표시와 **같은 규율**로 넓혔다: 공고 값 → **탭 값**(128).
+    //   공고가 없는 작업(옛 작업·외부모집)은 리뷰비를 넣을 칸이 아예 없어 상품비만 이체돼 왔다.
+    // ★ 스냅샷·구간표는 여전히 최우선(완화 금지) — 탭 값은 그 뒤의 폴백일 뿐이다.
+    const tabFee = tab && tab.reviewFee != null ? tab.reviewFee : null;
+    const campFee = camp && camp.reviewFee ? camp.reviewFee : null;
+    const feeInfo = resolveReviewFee({
+      snapshot: ord ? ord.feeSnapshot : null,
+      schedules: camp ? camp.schedules : [],
+      orderDate: ord ? ord.orderDate : null,
+      sheetDate: camp ? sheetDateToIso(r.startDate, camp.campStartDate) : null,
+      fallback: campFee != null ? campFee : (tabFee != null ? tabFee : 0),
+    });
+    const fee = feeInfo.fee;
+    // 이 금액이 **어디서 왔는지** — 화면이 "공고 값" / "탭 설정" 을 구분해 말한다(조용한 추정 금지).
+    const feeSource = feeInfo.source === 'snapshot' ? 'snapshot'
+      : feeInfo.source === 'schedule' ? 'schedule'
+      : campFee != null ? 'campaign'
+      : tabFee != null ? 'tab' : null;
 
     // 은행 우선순위 = 공고(사람이 정한 값) → **탭 설정** → 작업오더 물건비 자동판정.
     // ★ 탭 설정(`tab_configs.transfer_bank`)은 관리자 대시보드 탭설정에서 예전부터 채워 온 칸인데
@@ -281,7 +290,8 @@ async function listPaymentTargets(opts = {}) {
         : null,
       // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
       accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
-      productPrice, reviewFee: fee, amount, priceSource,
+      productPrice, reviewFee: fee, amount, priceSource, feeSource,
+      tabReviewFee: tabFee, campaignReviewFee: campFee,
       transferMemo: memo, memoSource,
       issues, warnings,
       payable: issues.length === 0,
@@ -589,6 +599,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
               COALESCE(NULLIF(btrim(tc.display_name),''), tc.tab_name) AS "label",
               tc.manager AS "manager",
               tc.transfer_bank AS "transferBank", tc.deposit_name AS "depositName",
+              tc.review_fee AS "reviewFee",
               tc.tab_gid AS "tabGid", tc.sheetless AS "sheetless",
               wo.goods_cost_type AS "goodsCostType"
          FROM tab_configs tc
@@ -603,6 +614,9 @@ async function _loadTabMeta(sheetIds, tabNames) {
     for (const t of rows) {
       map[t.sheetId + '||' + t.tabName] = {
         label: t.label, manager: t.manager || '', transferBank: t.transferBank || '', depositName: t.depositName || '',
+        // ★ 리뷰비는 **NULL(미설정)과 0(무상 지정)을 구분**한다 — `|| 0` 으로 접으면
+        //   미설정이 조용히 0원이 되어 공고 값이 있는데도 탭 폴백이 이긴 것처럼 보인다.
+        reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
         goodsCostType: t.goodsCostType || '',
         sheetless: t.sheetless === true,
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
@@ -954,18 +968,19 @@ class PaymentFixError extends Error {
  *   덮는 것을 막는다(계약 오링크와 같은 규율).
  *
  * @param {{sheetId:string, tabName:string, campaignId?:string|null,
- *          bank?:string|null, memo?:string|null}} p
- *        bank/memo 는 **undefined = 변경 없음**, `''` = 지움(자동으로 되돌림).
- * @returns {{ok:true, target:'campaign'|'tab', bank:string|null, memo:string}}
+ *          bank?:string|null, memo?:string|null, reviewFee?:number|string|null}} p
+ *        bank/memo/reviewFee 는 **undefined = 변경 없음**, `''`(또는 null) = 지움(자동/미설정으로 되돌림).
+ * @returns {{ok:true, target:'campaign'|'tab', bank:string|null, memo:string, reviewFee:number|null}}
  */
-async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo }) {
+async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo, reviewFee }) {
   const sid = String(sheetId || '').trim();
   const tab = String(tabName || '').trim();
   if (!sid || !tab) throw new PaymentFixError('bad_target', '작업(시트·탭)이 지정되지 않았습니다.');
 
   const touchBank = bank !== undefined;
   const touchMemo = memo !== undefined;
-  if (!touchBank && !touchMemo) throw new PaymentFixError('empty', '변경할 값이 없습니다.');
+  const touchFee = reviewFee !== undefined;
+  if (!touchBank && !touchMemo && !touchFee) throw new PaymentFixError('empty', '변경할 값이 없습니다.');
 
   // 빈 값 = 지움(자동 판정으로 되돌림) / 모르는 표기는 거부(추측 저장 금지)
   let bankCode = null;
@@ -974,6 +989,16 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo })
     if (!bankCode) throw new PaymentFixError('bad_bank', '이체은행은 케이뱅크 또는 하나은행만 지정할 수 있습니다.');
   }
   const memoText = touchMemo ? normalizeMemo(String(memo || '')) : null;
+
+  // 리뷰비 — 빈 값(''·null) = **미설정으로 되돌림**(0원 지정과 구분).
+  // ★ 숫자가 아니거나 음수는 거부한다(추측 저장 금지 — 잘못 넣으면 리뷰어에게 잘못된 금액이 나간다).
+  let feeVal = null;
+  if (touchFee && !(reviewFee === null || String(reviewFee).trim() === '')) {
+    const n = Number(String(reviewFee).replace(/[,\s]/g, ''));
+    if (!Number.isFinite(n) || n < 0) throw new PaymentFixError('bad_fee', '리뷰비는 0 이상의 숫자로 입력해 주세요.');
+    if (n > 10000000) throw new PaymentFixError('bad_fee', '리뷰비가 너무 큽니다(1천만원 이하).');
+    feeVal = Math.floor(n);
+  }
 
   // 공고 대상 검증 — 그 탭에 연결된 공고만 인정
   let campId = null;
@@ -988,25 +1013,30 @@ async function saveTransferSetting({ sheetId, tabName, campaignId, bank, memo })
 
   if (campId) {
     // ★ 이 두 칸만 UPDATE — 공고의 다른 설정은 절대 건드리지 않는다(축약 폼 클로버 금지).
+    // ★ 공고의 `review_fee` 는 **구간표(082)가 없을 때의 그 공고 금액**이다 — 구간이 있으면
+    //   구간이 계속 이긴다(그 사실을 화면이 문장으로 말한다). 0 은 무상 지정이라 그대로 저장한다.
     await pool.query(
       `UPDATE recruit_campaigns
           SET transfer_bank = CASE WHEN $2::bool THEN $3::text ELSE transfer_bank END,
-              transfer_memo = CASE WHEN $4::bool THEN $5::text ELSE transfer_memo END
+              transfer_memo = CASE WHEN $4::bool THEN $5::text ELSE transfer_memo END,
+              review_fee    = CASE WHEN $6::bool THEN COALESCE($7::int, 0) ELSE review_fee END
         WHERE id = $1`,
-      [campId, touchBank, bankCode, touchMemo, memoText]);
-    return { ok: true, target: 'campaign', bank: bankCode, memo: memoText || '' };
+      [campId, touchBank, bankCode, touchMemo, memoText, touchFee, feeVal]);
+    return { ok: true, target: 'campaign', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? (feeVal == null ? 0 : feeVal) : undefined };
   }
 
   // 탭 설정 — ★ 표기는 **한글 라벨**(관리자 대시보드 탭설정이 그 형식을 그대로 비교해 배지를 그린다)
+  // ★ 탭 리뷰비(128)는 **NULL = 미설정**을 유지한다(0 으로 접으면 공고 폴백과 구분이 사라진다).
   const { rowCount } = await pool.query(
     `UPDATE tab_configs
         SET transfer_bank = CASE WHEN $3::bool THEN $4::text ELSE transfer_bank END,
             deposit_name  = CASE WHEN $5::bool THEN $6::text ELSE deposit_name END,
+            review_fee    = CASE WHEN $7::bool THEN $8::int ELSE review_fee END,
             updated_at    = NOW()
       WHERE sheet_id = $1 AND tab_name = $2`,
-    [sid, tab, touchBank, bankCode ? tabBankLabel(bankCode) : '', touchMemo, memoText]);
+    [sid, tab, touchBank, bankCode ? tabBankLabel(bankCode) : '', touchMemo, memoText, touchFee, feeVal]);
   if (!rowCount) throw new PaymentFixError('tab_not_found', '탭 설정이 없어 저장하지 못했습니다(작업오더 접수 전 탭일 수 있습니다).');
-  return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '' };
+  return { ok: true, target: 'tab', bank: bankCode, memo: memoText || '', reviewFee: touchFee ? feeVal : undefined };
 }
 
 /**

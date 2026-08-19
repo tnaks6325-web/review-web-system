@@ -189,6 +189,65 @@ function withStubPool(handler, run) {
     });
   });
 
+  /* ── 리뷰비(128) — 판정은 여전히 082 단일 출처, **폴백 순서만** 공고 → 탭으로 넓혔다 ── */
+  await ta('3c2 ★ 공고 없는 작업도 탭 리뷰비가 이체금액에 실린다(상품비만 나가던 것)', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: 3000, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '22,000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 3000);
+      assert.strictEqual(it.feeSource, 'tab');
+      assert.strictEqual(it.amount, 25000, '이체금액 = 상품비 + 리뷰비');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'));
+    });
+  });
+
+  await ta('3c3 공고 리뷰비가 탭 값을 이긴다 · 탭 미설정이면 0(추측 금지)', async () => {
+    await withStubPool(targetsHandler({
+      campRows: [{ id: 'C1', title: '공고', sheetId: 'S1', tabName: 'T1', reviewFee: 1500,
+        transferBank: 'hana', transferMemo: 'M', campStartDate: null, goodsCostType: '' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '', depositName: '', reviewFee: 3000, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 1500);
+      assert.strictEqual(it.feeSource, 'campaign');
+    });
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 0);
+      assert.strictEqual(it.feeSource, null, '미설정을 "탭에서 왔다"고 말하면 안 된다');
+      assert.ok((it.warnings || []).includes('no_review_fee'));
+    });
+  });
+
+  await ta('3c4 ★★ 스냅샷은 여전히 최우선 — 탭 리뷰비가 참여 시점 금액을 덮지 않는다', async () => {
+    await withStubPool(targetsHandler({
+      orderRows: [{ sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: 1000, feeSnapshot: 700, orderDate: '2026-08-01' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: 3000, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 700, '★ 스냅샷 우선(082 완화 금지)');
+      assert.strictEqual(it.feeSource, 'snapshot');
+    });
+  });
+
+  await ta('3c5 ★ 탭 메타 SELECT 가 review_fee 를 실제로 읽는다(스텁은 SQL 을 해석하지 않는다)', async () => {
+    await withStubPool(targetsHandler({}), async (svc, calls) => {
+      await svc.listPaymentTargets();
+      const q = calls.find(c => /FROM tab_configs tc/.test(c.sql));
+      assert.ok(q && /tc\.review_fee\s+AS\s+"reviewFee"/.test(q.sql), '탭 리뷰비를 안 읽으면 저장해도 화면이 안 바뀐다');
+    });
+  });
+
   await ta('3d ★ 상품비 시트 폴백 — 주문 원장이 없어도 금액이 선다', async () => {
     await withStubPool(targetsHandler({
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],
@@ -294,7 +353,7 @@ function withStubPool(handler, run) {
      ══════════════════════════════════════════════════════════ */
   console.log('\n§4 보완 저장(saveTransferSetting · saveReviewerAccount)');
 
-  await ta('4a 공고가 있으면 공고에 저장 — 이체설정 2칸만 UPDATE', async () => {
+  await ta('4a 공고가 있으면 공고에 저장 — 이체설정 2칸 + 리뷰비만 UPDATE', async () => {
     await withStubPool((sql) => {
       if (/FROM recruit_campaigns/.test(sql) && /linked_sheet_id/.test(sql)) return { rows: [{ id: 'C1' }] };
       return { rows: [], rowCount: 1 };
@@ -304,7 +363,9 @@ function withStubPool(handler, run) {
       const upd = calls.find(c => /UPDATE recruit_campaigns/.test(c.sql));
       assert.ok(upd, '공고 UPDATE 가 없다');
       const setCols = (upd.sql.match(/SET([\s\S]*?)WHERE/)[1].match(/(\w+)\s*=\s*CASE/g) || []);
-      assert.deepStrictEqual(setCols.map(s => s.split(/\s/)[0]).sort(), ['transfer_bank', 'transfer_memo'],
+      // 128 로 `review_fee` 가 합류했다(사용자 확정 — 보류 보완에서 리뷰비도 정한다).
+      // ★ 그 외 칸이 늘면 축약 폼이 공고 설정을 조용히 덮는다 = 이 단언이 막는 것.
+      assert.deepStrictEqual(setCols.map(s => s.split(/\s/)[0]).sort(), ['review_fee', 'transfer_bank', 'transfer_memo'],
         '★ 공고의 다른 설정을 건드리면 안 된다(축약 폼 클로버)');
     });
   });
@@ -352,6 +413,60 @@ function withStubPool(handler, run) {
       await assert.rejects(() => svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', bank: 'hana' }),
         e => e.code === 'tab_not_found');
     });
+  });
+
+  /* ── 리뷰비(128) — 통장표시와 같은 팝업에서 정하고, 저장처도 같은 규칙(공고 → 탭) ── */
+  await ta('4f2 리뷰비 — 공고가 있으면 공고 review_fee, 없으면 탭 review_fee', async () => {
+    await withStubPool((sql) => {
+      if (/FROM recruit_campaigns/.test(sql) && /linked_sheet_id/.test(sql)) return { rows: [{ id: 'C1' }] };
+      return { rows: [], rowCount: 1 };
+    }, async (svc, calls) => {
+      const out = await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', campaignId: 'C1', reviewFee: '3,000' });
+      assert.strictEqual(out.target, 'campaign');
+      assert.strictEqual(out.reviewFee, 3000, '쉼표는 걷어내고 숫자로 저장한다');
+      const upd = calls.find(c => /UPDATE recruit_campaigns/.test(c.sql));
+      assert.ok(/review_fee\s*=\s*CASE/.test(upd.sql), '공고 저장처는 recruit_campaigns.review_fee');
+      assert.strictEqual(upd.params[1], false, '★ 미전송 은행은 그대로(부분 저장)');
+      assert.strictEqual(upd.params[3], false, '★ 미전송 통장표시도 그대로');
+      assert.strictEqual(upd.params[5], true);
+      assert.strictEqual(upd.params[6], 3000);
+    });
+    await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
+      const out = await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: 2500 });
+      assert.strictEqual(out.target, 'tab');
+      const upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.ok(/review_fee\s*=\s*CASE WHEN \$7::bool THEN \$8::int/.test(upd.sql),
+        '★ 탭 리뷰비는 int 그대로 — 텍스트로 넣으면 다음 조회가 숫자로 못 읽는다');
+      assert.strictEqual(upd.params[6], true);
+      assert.strictEqual(upd.params[7], 2500);
+    });
+  });
+
+  await ta('4f3 ★ 빈 리뷰비 = 미설정으로 되돌림(0 지정과 구분) · 미전송은 변경 없음', async () => {
+    await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
+      await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: '' });
+      let upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(upd.params[6], true, '빈 값도 "고치는 것"이다');
+      assert.strictEqual(upd.params[7], null, '★ 탭은 NULL = 미설정(0 으로 접으면 공고 폴백과 구분이 사라진다)');
+      calls.length = 0;
+      await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: 0 });
+      upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(upd.params[7], 0, '0 은 "무상 지정" 이라 그대로 저장한다');
+      calls.length = 0;
+      await svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', bank: 'hana' });
+      upd = calls.find(c => /UPDATE tab_configs/.test(c.sql));
+      assert.strictEqual(upd.params[6], false, '★ 리뷰비 칸이 없는 화면이 저장해도 리뷰비가 지워지면 안 된다');
+    });
+  });
+
+  await ta('4f4 리뷰비 형식은 서버가 최종 판정 — 숫자 아님·음수는 쓰기 0건', async () => {
+    for (const bad of ['삼천원', -1, '1e9999']) {
+      await withStubPool(() => ({ rows: [], rowCount: 1 }), async (svc, calls) => {
+        await assert.rejects(() => svc.saveTransferSetting({ sheetId: 'S1', tabName: 'T1', reviewFee: bad }),
+          e => e.code === 'bad_fee', '거부해야 한다: ' + bad);
+        assert.ok(!calls.some(c => /UPDATE/.test(c.sql)), '거부 시 쓰기 0건: ' + bad);
+      });
+    }
   });
 
   await ta('4g 리뷰어 계좌 — reviewers.id 로 지목하고 빈 칸은 안 덮는다', async () => {
@@ -534,6 +649,17 @@ function withStubPool(handler, run) {
     assert.ok(/catch\(e\)\{[\s\S]*?toast\(/.test(dlg), 'onOk 예외 안내가 없다');
   });
 
+  t('6j ★ 리뷰비도 같은 요청으로 저장한다 — 칸이 없는 화면은 미전송(조용한 삭제 금지)', () => {
+    const work = HTML.slice(HTML.indexOf('function _pmFixWork'), HTML.indexOf('function _pmPickBank'));
+    assert.ok(/id="pmFeeIn"/.test(work), '리뷰비 입력칸이 없다');
+    assert.ok(/reviewFee:\s*feeRaw/.test(work), '저장 요청에 리뷰비가 실리지 않는다');
+    // 서버 계약(undefined = 변경 없음)이 라우트까지 이어지는지
+    const routes = read('routes/trackB.routes.js');
+    const seg = routes.slice(routes.indexOf("'/payment/transfer-setting'"), routes.indexOf("'/payment/reviewer-account'"));
+    assert.ok(/reviewFee:\s*b\.reviewFee/.test(seg), '라우트가 리뷰비를 서비스로 넘기지 않는다');
+    assert.ok(!/b\.reviewFee\s*\|\|/.test(seg), "★ `|| 0` 로 접으면 미전송이 '0원 지정'이 된다");
+  });
+
   t('6g 표 [보완] 버튼은 고칠 수 있을 때만 그린다(죽은 버튼 금지)', () => {
     const tbl = HTML.slice(HTML.indexOf('function _pmTargetTable'), HTML.indexOf('function _pmBatchTable'));
     assert.ok(/const fixable[\s\S]*?PAY_FIX_KIND/.test(tbl), '고칠 수 있는지 판정이 없다');
@@ -561,7 +687,7 @@ function withStubPool(handler, run) {
     // vm 최상위 `const` 는 전역 객체에 안 붙는다 → 값을 밖에서도 읽도록 `var` 로만 바꿔 주입(값은 소스 그대로)
     const src = [capLine.replace(/^const/, 'var'), pick('_pmSheetOk'), pick('_pmSheetBtn'),
       pick('_pmBuildFix'), pick('_pmAcctName'), pick('_pmAcctTail'), pick('_pmAcctLabel'),
-      pick('_pmAcctPlain'), pick('_pmFixBlock'), pick('_pmFixAcct')].join('\n');
+      pick('_pmAcctPlain'), pick('_pmFixBlock'), pick('_pmFixWork'), pick('_pmFixAcct')].join('\n');
     const sandbox = {
       esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
       _pmKey: it => it.sheetId + '||' + it.tabName + '||' + it.rowIndex,
@@ -610,6 +736,50 @@ function withStubPool(handler, run) {
     assert.strictEqual(f.works.length, 1);
     assert.strictEqual(f.works[0].needMemo, true);
     assert.strictEqual(f.works[0].needBank, false, '은행은 멀쩡한데 은행 카드에 들어가면 안 된다');
+  });
+
+  t('7c2 ★ 리뷰비 미설정(warning)도 같은 작업 묶음 — 상품비만 이체되는 것을 말한다', () => {
+    const S = loadFixFns();
+    S.STATE.pmFix = S._pmBuildFix([mkItem({ transferMemo: '망고', warnings: ['no_review_fee'] })]);
+    const w = S.STATE.pmFix.works[0];
+    assert.ok(w, '리뷰비만 비어도 작업 카드가 나와야 한다(안 그리면 영영 모른다)');
+    assert.strictEqual(w.needFee, true);
+    assert.strictEqual(w.feeRows, 1);
+    assert.strictEqual(w.needMemo, false, '통장표시는 멀쩡한데 통장표시 줄이 뜨면 안 된다');
+    const html = S._pmFixBlock();
+    assert.ok(/리뷰비/.test(html) && /상품비만/.test(html), '사유 문장이 없다');
+    assert.ok(/_pmFixWork\(0\)/.test(html), '그 자리에서 고칠 버튼이 있어야 한다');
+  });
+
+  t('7c3 ★ 리뷰비 팝업 — 값의 출처를 말하고, 스냅샷·구간은 "여기서 못 바꾼다"를 못박는다', () => {
+    const S = loadFixFns();
+    // 탭 값이 실려 있는 경우
+    S.STATE.pmFix = S._pmBuildFix([mkItem({
+      transferMemo: '망고', bank: 'hana', warnings: [], issues: ['no_account'],
+      accountRef: { reviewerId: 'r-1', subPhone8: null },
+      reviewFee: 3000, feeSource: 'tab', tabReviewFee: 3000, campaignReviewFee: null,
+    })]);
+    S._pmFixWork(0);
+    let body = S._dlg.body;
+    assert.ok(/id="pmFeeIn"/.test(body), '리뷰비 입력칸이 없다');
+    assert.ok(/value="3000"/.test(body), '저장해 둔 탭 리뷰비가 프리필되지 않는다');
+    assert.ok(/작업\(탭\)/.test(body), '출처(탭)를 말하지 않는다');
+
+    // 기간별 구간에서 온 값이면 그 사실을 말해야 한다
+    S.STATE.pmFix = S._pmBuildFix([mkItem({
+      transferMemo: '', warnings: ['no_memo'], reviewFee: 1500, feeSource: 'schedule',
+      tabReviewFee: null, campaignReviewFee: 1000, campaignId: 'C1',
+    })]);
+    S._pmFixWork(0);
+    body = S._dlg.body;
+    assert.ok(/구간/.test(body), '★ 구간이 우선한다는 사실을 말하지 않으면 "저장했는데 안 바뀐다"가 된다');
+
+    // 스냅샷이면 이미 참여한 건이 안 바뀐다는 것을 말한다
+    S.STATE.pmFix = S._pmBuildFix([mkItem({
+      transferMemo: '', warnings: ['no_memo'], reviewFee: 700, feeSource: 'snapshot',
+    })]);
+    S._pmFixWork(0);
+    assert.ok(/스냅샷|참여 시점/.test(S._dlg.body), '스냅샷 우선(082)을 말하지 않는다');
   });
 
   t('7d ★ 리뷰어는 accountRef 기준으로 묶인다(같은 사람의 여러 작업이 한 번에)', () => {
