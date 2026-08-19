@@ -1068,7 +1068,21 @@ router.post('/order', async (req, res, next) => {
     let sheetlessDone = null;
     if (orderScope.sheetless) {
       try {
-        const wt = orderScope.worktable;
+        /* ★★ 공고에 작업보드가 아직 없으면 **그 자리에서 만들어 연결**한다(사람이 시트탭을
+           고르는 절차 없음 — 탈 구글시트). 종전에는 여기서 `no_worktable_mapping` 으로 주문을
+           failed 로 강등하고 critical 로그를 남겼는데, 그 주문은 `campaign:*` 키라 큐 복구가
+           해석하지 못해 2분마다 스킵만 반복됐다(반복 이상현상의 실체).
+           ★ 이미 연결된 공고는 손대지 않는다(멱등) · 실패해도 예외를 던지지 않는다. */
+        let wt = orderScope.worktable;
+        if (!wt && holdCtx && holdCtx.campaignId) {
+          try {
+            const ens = await require('../services/campaignWorktable.service')
+              .ensureCampaignWorktable({ campaignId: holdCtx.campaignId, by: 'order-submit' });
+            if (ens && ens.ok) wt = { sheetId: ens.sheetId, tabName: ens.tabName, tabGid: ens.tabGid || '' };
+          } catch (ensErr) {
+            logger.warn(`[submit/order] 공고 작업보드 확보 실패: ${ensErr.message}`);
+          }
+        }
         sheetlessDone = wt
           ? await require('../services/sheetlessOrder.service').writeOrderToWorktable({
               sheetId: wt.sheetId, tabName: wt.tabName, tabGid: wt.tabGid,

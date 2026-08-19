@@ -136,6 +136,11 @@ async function writeOrderToWorktable({
   let seq = requestedSeq;
   try {
     await client.query('BEGIN');
+    /* ★ 탭 단위 직렬화 — 빈 슬롯 선점과 줄 이어붙이기(MAX(seq)+1)가 겹쳐도 두 건이 같은
+       번호를 집지 않는다. 트랜잭션 스코프라 누수 불가이고, 장부 재생성 락은 커밋 뒤
+       별도 트랜잭션에서 잡히므로 중첩(=교착) 이 생기지 않는다. */
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',
+      [`sheetless_worktable:${sheetId}:${tabName}`]);
     let cur;
     if (seq != null) {
       ({ rows: cur } = await client.query(
@@ -193,8 +198,26 @@ async function writeOrderToWorktable({
             LIMIT 1`, [sheetId, tabName]));
       }
       if (!cur.length) {
-        await client.query('ROLLBACK');
-        return { ok: false, reason: 'no_open_slot' };
+        /* ★★ 빈 자리가 없다고 주문을 미반영으로 두지 않는다 — **확정된 주문에는 줄이 있어야 한다**.
+           작업표가 진실원본인 지금 "준비된 줄 수만큼만 받는다"로 두면, 결제한 리뷰어가 어느 표에도
+           없는 상태가 되고 복구 잡이 같은 실패(`no_open_slot`)를 영원히 반복한다(반복 이상현상).
+           ★ 쓰기 소유자 규율 — `campaign_participants` INSERT 는 participants.service 가 한다. */
+        /* ★ fail-closed — 무시트로 등록된 탭에서만 이어붙인다. 시트 기반 탭에 줄을 만들면
+           그 표의 진실원본(시트)과 갈라진다(장부 재생성도 `not_sheetless` 로 거부한다). */
+        const { rows: tc } = await client.query(
+          `SELECT COALESCE(sheetless, FALSE) AS sheetless FROM tab_configs
+            WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+        if (!tc.length || !tc[0].sheetless) {
+          await client.query('ROLLBACK');
+          return { ok: false, reason: 'no_open_slot' };
+        }
+        const appended = await require('./participants.service').appendSlot(client, {
+          sheetId, tabName, tabGid: gid || null, by: 'sheetless-order-append',
+        });
+        if (!appended) { await client.query('ROLLBACK'); return { ok: false, reason: 'append_failed' }; }
+        // 준비된 줄을 넘겨 이어붙였다는 사실은 남긴다(정원 대비 실제 반영 수 대조용).
+        logger.warn(`[sheetlessOrder] 준비된 빈 자리가 없어 줄을 이어붙임 tab=${tabName} seq=${appended.seq} os=${orderSubmissionId}`);
+        cur = [appended];
       }
       seq = Number(cur[0].seq);
     }

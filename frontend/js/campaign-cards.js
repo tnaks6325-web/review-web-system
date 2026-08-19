@@ -8,8 +8,7 @@
 (function () {
   'use strict';
 
-  // 무시트 작업(탈 구글시트)의 가상 시트ID 접두. 단일 출처 = 서버 sheetlessAccept.VIRTUAL_SHEET_PREFIX
-  //   — 최소 사본이고 회귀가드가 두 값의 일치를 고정한다(workManager 사본 규율).
+  // 시트 관련 표기·버튼은 카드에서 전부 제거됐다(탈 구글시트) — 가상 시트ID 접두 사본도 필요 없다.
 
   let _serverOffsetMs = 0;          // serverNow - Date.now()
   let _tickTimer = null;
@@ -374,12 +373,13 @@
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
     const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
-    const tab = c.linked_tab_name
-      ? `<div class="sp-link">🔗 ${_esc(c.linked_tab_name)}</div>`
-      : `<div class="sp-link">🔗 시트 탭 미연결 · 나중에 연결 가능</div>`;
+    /* ★★ 시트 탭 연결 표기는 그리지 않는다 (탈 구글시트 · 사용자 확정 2026-08-19).
+       리뷰웹시스템은 무시트라 담당자가 시트 탭을 고를 일이 없고, 공고의 작업보드는
+       접수 또는 첫 주문 때 시스템이 확보한다(`campaignWorktable.ensureCampaignWorktable`).
+       "미연결 · 나중에 연결 가능"은 이제 사실이 아닌 안내라 줄 자체를 없앤다. */
     return `<div class="pspec">
       <div class="sp-row"><div class="sp-chipwrap"><div class="sp-chips">${chips.join('')}</div></div><span class="sp-tot">${totTxt}</span></div>
-      ${tab}</div>`;
+      </div>`;
   }
 
   /**
