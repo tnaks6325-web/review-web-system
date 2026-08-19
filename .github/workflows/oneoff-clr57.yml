@@ -1,0 +1,95 @@
+name: Oneoff - 말따/레티놀 57줄 링크 비움 (쓰기)
+on:
+  push:
+    branches: [ 'oneoff/clr57' ]
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Clear57
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -e
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \pset pager off
+          BEGIN;
+
+          -- 대상은 서버가 다시 판정한다 (화면이 보낸 목록 불신)
+          CREATE TEMP TABLE tgt AS
+          SELECT cp.id, cp.tab_name, cp.seq,
+                 COALESCE(cp.row_json->>'번호','') AS num,
+                 regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g') AS nm,
+                 regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g') AS onm
+            FROM campaign_participants cp
+            JOIN order_submissions os ON os.id = cp.order_submission_id
+           WHERE cp.deleted_at IS NULL
+             AND cp.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+             AND COALESCE(os.recipient,'') <> ''
+             AND regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g')
+                 <> regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g')
+             AND cp.phone8 IS DISTINCT FROM right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8);
+
+          DO $$
+          DECLARE n int;
+          BEGIN
+            SELECT COUNT(*) INTO n FROM tgt;
+            IF n <> 57 THEN RAISE EXCEPTION '대상이 57줄이 아닙니다 (실제 %줄) — 전체 취소', n; END IF;
+
+            -- 부작용 재확인: order 앵커 편집·색·커스텀열·이체회차가 하나라도 걸리면 중단
+            SELECT COUNT(*) INTO n FROM tgt t
+              JOIN campaign_participants cp ON cp.id=t.id
+              JOIN participant_edits pe ON pe.sheet_id=cp.sheet_id AND pe.tab_name=cp.tab_name
+               AND pe.anchor_type='order' AND pe.anchor_value = cp.order_submission_id::text;
+            IF n <> 0 THEN RAISE EXCEPTION '편집 오버레이가 %건 걸려 있습니다 — 전체 취소', n; END IF;
+
+            SELECT COUNT(*) INTO n FROM tgt t
+              JOIN campaign_participants cp ON cp.id=t.id
+              JOIN trackb_cell_colors cc ON cc.sheet_id=cp.sheet_id AND cc.tab_name=cp.tab_name
+               AND cc.anchor_type='order' AND cc.anchor_value = cp.order_submission_id::text;
+            IF n <> 0 THEN RAISE EXCEPTION '셀 배경색이 %건 걸려 있습니다 — 전체 취소', n; END IF;
+
+            SELECT COUNT(*) INTO n FROM tgt t
+              JOIN campaign_participants cp ON cp.id=t.id
+              JOIN trackb_custom_column_values cv
+                ON cv.anchor_type='order' AND cv.anchor_value = cp.order_submission_id::text;
+            IF n <> 0 THEN RAISE EXCEPTION '커스텀 열 값이 %건 걸려 있습니다 — 전체 취소', n; END IF;
+
+            SELECT COUNT(*) INTO n FROM tgt t
+              JOIN campaign_participants cp ON cp.id=t.id
+              JOIN payment_batch_items pi
+                ON pi.sheet_id=cp.sheet_id AND pi.tab_name=cp.tab_name AND pi.row_index=cp.seq;
+            IF n <> 0 THEN RAISE EXCEPTION '이체 회차에 담긴 줄이 %건 있습니다 — 전체 취소', n; END IF;
+          END $$;
+
+          \echo '=== 링크 비움 실행 ==='
+          UPDATE campaign_participants cp SET order_submission_id = NULL
+            FROM tgt t WHERE cp.id = t.id;
+
+          \echo ''
+          \echo '=== 확인: 처리 후 (표 값은 그대로여야 함) ==='
+          SELECT CASE WHEN cp.tab_name LIKE '6/29%' THEN '말따' ELSE '레티놀' END AS 작업,
+                 COUNT(*) AS 처리줄,
+                 COUNT(*) FILTER (WHERE cp.order_submission_id IS NULL) AS 링크비워짐,
+                 COUNT(*) FILTER (WHERE cp.deleted_at IS NULL) AS 살아있음,
+                 COUNT(*) FILTER (WHERE COALESCE(cp.row_json->>'결제금액','')<>'') AS 결제금액있음,
+                 COUNT(*) FILTER (WHERE cp.is_submitted) AS 리뷰제출,
+                 COUNT(*) FILTER (WHERE cp.is_paid) AS 입금
+            FROM campaign_participants cp JOIN tgt t ON t.id=cp.id
+           GROUP BY 1;
+
+          \echo ''
+          \echo '=== 잔여: 두 작업에 아직 남은 이름 불일치 링크 ==='
+          SELECT COUNT(*) AS 남은오염
+            FROM campaign_participants cp
+            JOIN order_submissions os ON os.id = cp.order_submission_id
+           WHERE cp.deleted_at IS NULL
+             AND cp.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+             AND COALESCE(os.recipient,'') <> ''
+             AND regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g')
+                 <> regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g')
+             AND cp.phone8 IS DISTINCT FROM right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8);
+
+          COMMIT;
+          SQL
