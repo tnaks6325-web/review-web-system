@@ -516,6 +516,12 @@
   .home-section-title,.results-title{ font-size:.98rem; color:var(--t1); font-weight:800; }
   .results-badge{ background:#e8f1fe; color:#3182f6; }
 
+  /* ===== 모집공고 종류 탭 (127 — 리뷰체험단/블로그체험단) ===== */
+  .rc-kind-tabs{display:flex;gap:6px;margin:2px 0 10px}
+  .rc-kt{flex:0 0 auto;font-size:.78rem;font-weight:800;padding:6px 14px;border-radius:999px;border:1.5px solid var(--border,#E5E7EB);background:#fff;color:#6B7280;cursor:pointer}
+  .rc-kt.on{background:var(--p,#6C5CE7);border-color:var(--p,#6C5CE7);color:#fff}
+  .rc-kt .n{font-weight:700;opacity:.85;margin-left:3px;font-size:.7rem}
+
   /* ===== 모집공고 카드/행 전환 토글 ===== */
   .rc-title-row{ justify-content:space-between; }
   .rc-viewtoggle{ display:inline-flex; background:#ECEDF2; border-radius:11px; padding:3px; gap:2px; flex-shrink:0; }
@@ -696,6 +702,10 @@
           <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
           <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
         </span>
+      </div>
+      <div class="rc-kind-tabs">
+        <button type="button" class="rc-kt" data-kind="review" onclick="setRecruitKind('review')">리뷰체험단</button>
+        <button type="button" class="rc-kt" data-kind="blog" onclick="setRecruitKind('blog')">블로그체험단</button>
       </div>
       <div id="recruitPreviewList" class="rc-list">
         <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
@@ -983,6 +993,10 @@
           <button type="button" class="rc-vt-list" title="행으로 보기" onclick="setRecruitView('row')"><i class="fas fa-list"></i></button>
           <button type="button" class="rc-vt-card" title="카드로 보기" onclick="setRecruitView('card')"><i class="fas fa-table-cells-large"></i></button>
         </span>
+      </div>
+      <div class="rc-kind-tabs">
+        <button type="button" class="rc-kt" data-kind="review" onclick="setRecruitKind('review')">리뷰체험단</button>
+        <button type="button" class="rc-kt" data-kind="blog" onclick="setRecruitKind('blog')">블로그체험단</button>
       </div>
       <div id="recruitPreviewList2" class="rc-list">
         <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
@@ -2956,24 +2970,62 @@ async function loadReviewerHomeBanner() {
   } catch (_) { /* 배너 오류는 홈의 다른 콘텐츠를 막지 않는다. */ }
 }
 
+/* ═══ 127: 모집공고 종류 탭(리뷰체험단/블로그체험단) ═══
+   판정은 서버가 준 work_kind 정확 일치(빈 값·필드 부재 = 리뷰 — utils/workKind 어휘와 동일).
+   탭은 화면 필터일 뿐이라 렌더러는 기존 CampCards.cardHtml 한 벌 그대로(사본 0). */
+let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return v === "blog" ? "blog" : "review"; }catch(_){ return "review"; } })();
+let _rcLastJson = null;
+function _rcKindOf(c){ return c && c.work_kind === "blog" ? "blog" : "review"; }
+function setRecruitKind(k){
+  _rcKind = k === "blog" ? "blog" : "review";
+  try{ sessionStorage.setItem("rc_kind_v1", _rcKind); }catch(_){}
+  _rcPaintKindTabs();
+  if (_rcLastJson) _renderRecruitPreview(_rcLastJson); else loadRecruitPreview();
+}
+function _rcPaintKindTabs(counts){
+  document.querySelectorAll(".rc-kind-tabs .rc-kt").forEach(b => {
+    b.classList.toggle("on", b.dataset.kind === _rcKind);
+    if (counts) {
+      const n = counts[b.dataset.kind] || 0;
+      b.innerHTML = (b.dataset.kind === "blog" ? "블로그체험단" : "리뷰체험단") + (n ? `<span class="n">${n}</span>` : "");
+    }
+  });
+}
+
 async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
+    _rcLastJson = json;
+    _renderRecruitPreview(json);
+  } catch(e) {
+    const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 로드 실패</div>`;
+    const el1 = document.getElementById("recruitPreviewList");
+    const el2 = document.getElementById("recruitPreviewList2");
+    if (el1) el1.innerHTML = errHtml;
+    if (el2) el2.innerHTML = errHtml;
+  }
+}
+
+function _renderRecruitPreview(json) {
+  try {
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈(campaign-cards.js)로 렌더 —
     //   카드 탭 시 전용 상세(campaign.html)로 이동해 참여·작업내용·인라인 제출 진행.
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
     // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
+    // 127: 종류 탭 건수(탭에 표기 — 필터 전에 센다)
+    const _all = (json.data || []).filter(c => (c.participation_mode && c.status !== "closed") || (c.status === "active" && !c.participation_mode));
+    _rcPaintKindTabs({ review: _all.filter(c => _rcKindOf(c) === "review").length, blog: _all.filter(c => _rcKindOf(c) === "blog").length });
     const parts = window.CampCards
-      ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed"))
-      : (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+      ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind))
+      : (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind);
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";
-    const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode);
+    const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode && _rcKindOf(c) === _rcKind);
 
     const html = partHtml + ((list.length === 0 && !partHtml)
-      ? `<div class="empty-state" style="padding:16px"><i class="fas fa-inbox"></i>현재 진행 중인 모집공고가 없습니다</div>`
+      ? `<div class="empty-state" style="padding:16px"><i class="fas fa-inbox"></i>${_rcKind === "blog" ? "진행 중인 블로그체험단 공고가 없습니다" : "현재 진행 중인 모집공고가 없습니다"}</div>`
       : list.map(c => {
           const channel = c.channel === "직접입력" ? (c.channel_custom || "") : (c.channel || "");
           const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + "원" : "";
@@ -3036,7 +3088,7 @@ async function loadRecruitPreview() {
     // 참여형 오픈예정 카운트다운 틱 + 0 도달 시 재조회(오픈 전환)
     if (partHtml && window.CampCards) CampCards.startTicker(loadRecruitPreview);
   } catch(e) {
-    const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 로드 실패</div>`;
+    const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 렌더 실패</div>`;
     const el1 = document.getElementById("recruitPreviewList");
     const el2 = document.getElementById("recruitPreviewList2");
     if (el1) el1.innerHTML = errHtml;

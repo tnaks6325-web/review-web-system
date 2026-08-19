@@ -84,7 +84,7 @@ t('normalizePostUrl 은 앞뒤 공백만 턴다(주소 자체 미변형)', () =>
 console.log('\n2) 제출 게이트 (라우트 실제 호출)');
 
 /** submit.routes 를 스텁 pool 로 로드 — DB·시트·큐를 전부 갈아끼운다 */
-function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null }) {
+function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null, hasCapture = true }) {
   const queries = [];
   const poolPath = require.resolve('../src/db/pool');
   const wkPath = require.resolve('../src/services/workKindContext.service');
@@ -98,6 +98,11 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null }) 
   const db = {
     async query(sql, params) {
       queries.push({ sql: String(sql), params });
+      // 127: blog 캡처 확인 2쿼리(원장 → 대표 이미지 폴백) — hasCapture 로 시나리오를 가른다
+      if (/FROM review_submissions/.test(String(sql))) {
+        return hasCapture ? { rows: [{ x: 1 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+      if (/review_file_id/.test(String(sql))) return { rows: [], rowCount: 0 };
       if (/FROM review_index ri/.test(String(sql))) {
         return { rows: [{ capture_slots: captureSlots, income_type: incomeType, is_submitted: false }], rowCount: 1 };
       }
@@ -111,6 +116,7 @@ function loadSubmitRouter({ workKind, captureSlots = null, incomeType = null }) 
   require.cache[ssPath] = { exports: {
     markStatusCell: async () => ({ handled: false }),
     markSheetlessMemo: async () => ({ handled: false }),
+    markSheetlessPostDate: async () => ({ handled: false }),   // 127
   } };
   require.cache[sheetsPath] = { exports: {
     writeSheet: async () => ({}), readSheet: async () => [], appendSheet: async () => ({}),
@@ -152,11 +158,21 @@ await ta('★★ blog 탭 + 주소 아님(문장) = 거부', async () => {
   const { payload } = await callReview({ workKind: 'blog' }, { ...BASE, memo: '포스팅 다 했어요' });
   assert.strictEqual(payload.code, 'post_url_required');
 });
-await ta('★ blog 탭 + 유효 포스팅URL = 통과 + 제출 기록', async () => {
-  const { payload, queries } = await callReview({ workKind: 'blog' }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
+await ta('★ blog 탭 + 유효 포스팅URL + 캡처 있음 = 통과 + 제출 기록', async () => {
+  const { payload, queries } = await callReview({ workKind: 'blog', hasCapture: true }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
   assert.strictEqual(payload.ok, true, JSON.stringify(payload));
   assert.strictEqual(payload.complete, true);
   assert.ok(queries.some(q => /UPDATE review_index SET is_submitted = TRUE/.test(q.sql)), 'is_submitted 미기록');
+});
+await ta('★★ 127: blog + URL 인데 캡처 0장 = capture_required 거부 (사용자 확정 2026-08-19 — 캡처+URL 둘 다)', async () => {
+  const { payload, queries } = await callReview({ workKind: 'blog', hasCapture: false }, { ...BASE, memo: 'https://blog.naver.com/a/1' });
+  assert.strictEqual(payload.code, 'capture_required', JSON.stringify(payload));
+  assert.ok(!queries.some(q => /UPDATE review_index SET is_submitted = TRUE/.test(q.sql)),
+    '거부인데 is_submitted 를 기록했다 — 캡처 없는 제출이 완료로 찍힌다');
+});
+await ta('★ 127: 리뷰체험단은 캡처 확인 쿼리 자체가 안 나간다(무회귀 — blog 전용 게이트)', async () => {
+  const { queries } = await callReview({ workKind: 'review', hasCapture: false }, { ...BASE, memo: '' });
+  assert.ok(!queries.some(q => /FROM review_submissions/.test(q.sql)), '리뷰 경로가 blog 캡처 게이트를 탄다');
 });
 await ta('★★ 리뷰체험단은 memo 없이도 제출된다 (무회귀 선 — 완화 아님)', async () => {
   const { payload, queries } = await callReview({ workKind: 'review' }, { ...BASE, memo: '' });
@@ -171,7 +187,7 @@ await ta('★★ 판정 실패(null)도 리뷰 경로 — 모른다고 blog 로 
 await ta('★★ blog 탭은 슬롯 대조를 건너뛴다(현영 겸 blog = 영영 미완료 차단)', async () => {
   // 화면 슬롯 2개(리뷰+현금영수증) + 원장에 제출 슬롯 0건 → 리뷰체험단이면 미완료
   const opts = { captureSlots: null, incomeType: '사업자현영' };
-  const rBlog = await callReview({ workKind: 'blog', ...opts }, { ...BASE, memo: 'https://a.com/1' });
+  const rBlog = await callReview({ workKind: 'blog', hasCapture: true, ...opts }, { ...BASE, memo: 'https://a.com/1' });
   assert.strictEqual(rBlog.payload.complete, true, 'blog 인데 슬롯 미충족으로 막혔다');
   assert.ok(!rBlog.queries.some(q => /DISTINCT slot_key/.test(q.sql)), 'blog 인데 원장 대조를 돌렸다');
 
@@ -302,12 +318,18 @@ t('★★ 파일 0장이면 업로드 호출 자체를 건너뛴다', () => {
   assert.ok(iName >= 0, 'reviewerName 선언을 못 찾음');
   assert.ok(iName < i0, 'reviewerName 이 업로드 블록 안에 있다 — 0건 제출에서 ReferenceError');
 });
-t('★★ 슬롯 모드: blog 면 캡처 0장 허용 + 0건을 "전부 실패"로 오판하지 않는다', () => {
+t('★★ 127 슬롯 모드: blog 도 캡처 필수(재제출로 이미 제출된 슬롯이 있을 때만 0장 허용)', () => {
   const body = bodyOf(appSrc, 'async function _submitReviewSlots(item)', 'async function submitReview()');
   assert.ok(/const _blogSlot = _isBlogItem\(item\)/.test(body), '슬롯 모드 blog 판정이 없다');
-  assert.ok(/if \(slotsToUpload\.length === 0 && !_blogSlot\)/.test(body), '슬롯 0건 게이트에 blog 예외가 없다');
+  // 사용자 확정(2026-08-19): 캡처+URL 둘 다 — 무조건 0장 허용(!_blogSlot)으로 되돌리면 실패한다
+  assert.ok(/if \(slotsToUpload\.length === 0 && !\(_blogSlot && submitted\.size > 0\)\)/.test(body),
+    'blog 캡처 필수 게이트가 사라졌다(0장 무조건 허용으로 회귀)');
   assert.ok(/slotsToUpload\.length > 0 && uploadErrors\.length === slotsToUpload\.length/.test(body),
     '0건일 때 0===0 이 참이 되어 아무 오류 없이 "업로드 실패"로 돌아간다');
+});
+t('★★ 127 단건 경로: blog 행도 캡처 1장 이상 필수', () => {
+  const body = bodyOf(appSrc, 'async function submitReview()', 'async function _submitOne');
+  assert.ok(/리뷰 캡처\(포스팅 화면\)를 1장 이상 첨부해주세요/.test(appSrc), 'blog 단건 캡처 필수 안내가 사라졌다');
 });
 
 // ── 5. 소스 위생 ─────────────────────────────────────────────────────────

@@ -23,6 +23,8 @@ const { isSheetHeaderRow } = require('./sheetHeader');
 //   여기서 어휘 표를 다시 만들면 검수(resolveReviewType)와 시트 표기가 갈라진다.
 const { REVIEW_TYPE_SHEET_LABELS, isReviewOptionHeader } = require('./reviewType');
 const { normalizeReviewTypeMix } = require('./reviewTypeMix');
+const { isBlogKind } = require('./workKind');
+const { isPostDateHeader } = require('./memoColumn');
 
 const MAX_ROWS = 2000;          // prepareRosterSlots 상한과 같은 값(폭주 방지)
 const MAX_DAYS = 400;           // 날짜 분배 무한루프 백스톱
@@ -394,6 +396,44 @@ function systemCourierTrackingColumn() {
   };
 }
 
+/* ── 블로그체험단 필수 3열 (127 · 사용자 확정 2026-08-19) ─────────────────
+   블로그 작업표에는 **블로그URL·포스팅결과URL·포스팅제출일**이 반드시 있어야 한다:
+     · 블로그URL     — 참여(승인) 시점의 블로거 블로그 주소. 매퍼(orderLedger)가 구매양식
+                       제출 때 기입한다(헤더에 '블로그'/'blog' 포함 규칙).
+     · 포스팅결과URL — 결과물(쓴 글 주소). 리뷰 제출 때 memo 경로(utils/memoColumn)가 기입.
+     · 포스팅제출일  — 결과물 제출 시각을 시스템이 자동 기록(사용자 확정 ⑤).
+   ★ 택배송장번호(courier_proxy)와 같은 규율: 템플릿에 없어도 시스템이 붙인다(빠지면 결과물이
+     들어갈 칸이 없어 조용히 사라진다). 이미 같은 성격의 열이 있으면 중복 생성하지 않는다.
+   ★ 존재 판정은 실제 기입 규칙과 같은 규칙을 쓴다 — 매퍼('블로그'/'blog' 포함)·memoColumn
+     (isPostDateHeader / 포스팅≠날짜). 규칙이 갈리면 "만든 칸 ≠ 쓰는 칸"이 된다(회귀가드가 대조). */
+const BLOG_REQUIRED_HEADERS = ['블로그URL', '포스팅결과URL', '포스팅제출일'];
+
+function _bnorm(v) { return String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ''); }
+function _blogColKind(name) {
+  const k = _bnorm(name);
+  if (isPostDateHeader(name)) return 'postDate';                    // 포스팅제출일 계열
+  if (k.includes('포스팅')) return 'postUrl';                        // 포스팅결과URL 계열(memo 기입 칸)
+  if (k.includes('블로그') || k.includes('blog')) return 'blogUrl';  // 매퍼의 블로그URL 기입 규칙과 동일
+  return null;
+}
+function isBlogWorkOrder(wo = {}) { return isBlogKind(wo.work_kind); }
+function systemBlogColumn(header) {
+  const [classified] = classifyHeaders([header], {});
+  return {
+    name: classified.header, role: classified.role, label: classified.label,
+    tier: classified.tier, conflict: classified.conflict || null,
+    origin: 'system', typeKey: 'blog',
+  };
+}
+function ensureBlogColumns(columns) {
+  const have = new Set(columns.map(c => _blogColKind(c.name)).filter(Boolean));
+  BLOG_REQUIRED_HEADERS.forEach(h => {
+    const kind = _blogColKind(h);
+    if (!have.has(kind)) { columns.push(systemBlogColumn(h)); have.add(kind); }
+  });
+  return columns;
+}
+
 /* ── 작업유형 자동 선택 조건 ─────────────────────────────────────────────
    "작업오더 내용을 보고 그 유형을 켜 둘까?"를 판정한다(사용자 확정 — 쿠팡 작업 + 상품옵션 2가지면
    채널 쿠팡 + 작업유형 상품옵션이 켜진 표가 만들어져야 한다).
@@ -460,6 +500,9 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (isCourierProxyWorkOrder(wo) && !hasCourierTrackingColumn(columns)) {
     columns.push(systemCourierTrackingColumn());
   }
+  /* ★ 127: 블로그 작업표에는 필수 3열(블로그URL·포스팅결과URL·포스팅제출일)을 시스템이 보장한다. */
+  const isBlogPlan = isBlogWorkOrder(wo);
+  if (isBlogPlan) ensureBlogColumns(columns);
 
   const rawTotal = o.total != null ? o.total : wo.recruit_count;
   const total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
@@ -510,7 +553,12 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   const optionKindCount = (Array.isArray(optKeys) ? optKeys : [])
     .map(x => (typeof x === 'string' ? x : String((x && x.key) || ''))).filter(v => v.trim()).length;
   const { buckets, rowOptions } = distributeOptions({ total, options: optKeys });
-  const { days, rowDates } = distributeDates({ total, daily, startDate, skipWeekends, holidays });
+  /* ★★ 127: 블로그체험단은 구매일자를 **미리 정할 수 없다**(모집·승인된 블로거가 생기면 그때 구매).
+     날짜를 깔면 리뷰 규칙(그날 정원 파생)이 잘못 작동하므로 구매일자 칸을 통째로 비워 둔다 —
+     바를참스킨 0804 시트(번호 1~50 + 구매일자 빈 칸)가 곧 블로그 표의 정상 모양이다. */
+  const { days, rowDates } = isBlogPlan
+    ? { days: [], rowDates: [] }
+    : distributeDates({ total, daily, startDate, skipWeekends, holidays });
 
   /* ★★ 리뷰 종류(포토/텍스트/구매확정/별점) 행 배분 — 사용자 확정(2026-08-19).
      시트 시절 직원이 `리뷰옵션` 칸에 손으로 적던 ㉯ 작업옵션(리뷰형태) 선기입을 작업표
@@ -576,7 +624,11 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
 
   /* ── 알릴 것(warnings) — 생성은 되지만 사람이 알아야 하는 것 ── */
   const warnings = [];
-  if (!startDate) warnings.push({ code: 'no_start_date', message: '시작일이 없어 구매일자 칸을 비워 둡니다. 날짜가 없으면 그날 모집 정원이 시트에서 파생되지 않습니다.' });
+  if (isBlogPlan) {
+    // 리뷰 규칙의 날짜 경고(no_start_date 등)는 blog 에선 전부 오탐 — 대신 사실을 한 줄로 말한다.
+    warnings.push({ code: 'blog_no_dates', message: '블로그체험단 — 구매일자는 미리 깔지 않습니다(승인된 블로거가 구매할 때 채워집니다). 블로그URL·포스팅결과URL·포스팅제출일 열이 자동 포함됩니다.' });
+  }
+  else if (!startDate) warnings.push({ code: 'no_start_date', message: '시작일이 없어 구매일자 칸을 비워 둡니다. 날짜가 없으면 그날 모집 정원이 시트에서 파생되지 않습니다.' });
   else if (!daily) warnings.push({ code: 'no_daily', message: '일건수가 없어 날짜를 나누지 않았습니다.' });
   else if (rows.some(r => !r.date)) warnings.push({ code: 'date_short', message: '날짜를 다 채우지 못했습니다(기간이 너무 깁니다). 일건수를 확인하세요.' });
   if (channel === 'unknown') warnings.push({ code: 'unknown_channel', message: '상품 URL로 구매채널을 알 수 없어 채널 전용 열(예: 쿠팡ID)을 넣지 않았습니다.' });
@@ -666,6 +718,7 @@ function _channelChoices(template) {
 module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
+  BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,

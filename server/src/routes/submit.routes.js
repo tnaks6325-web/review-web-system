@@ -26,7 +26,7 @@ const { reviewTypeForTab } = require('../services/reviewTypeContext.service');
 // 열 고르기는 `utils/memoColumn` 단일 출처(이 경로·큐 재시도·무시트 작업표 기록 공용).
 // ★ 판정 실패·리뷰체험단은 종전 순서 그대로 = 무회귀.
 // ═══════════════════════════════════════════════════════════
-const { pickMemoColumnIndex } = require('../utils/memoColumn');
+const { pickMemoColumnIndex, pickPostDateColumnIndex } = require('../utils/memoColumn');
 const { workKindForTab } = require('../services/workKindContext.service');
 const { isBlogKind } = require('../utils/workKind');
 const { isPostUrl, POST_URL_HINT } = require('../utils/blogPostUrl');
@@ -484,6 +484,37 @@ router.post('/review', async (req, res, next) => {
       return res.json({ error: POST_URL_HINT, code: 'post_url_required' });
     }
 
+    /* ★★ 127(사용자 확정 2026-08-19): 블로그 결과물 = **리뷰 캡처 + 포스팅결과URL 둘 다**.
+       — M4-2 의 "포스팅URL만 제출 = 완료(캡처 0장 허용)" 확정을 사용자가 뒤집었다.
+       업로드(/api/image/review-upload)가 이 호출보다 먼저라 원장(review_submissions)·대표
+       이미지(review_index.review_file_id)에 캡처 흔적이 있어야 한다. 화면만 막으면 낡은
+       화면·직접 호출이 우회하므로 서버가 최종 방어한다.
+       ★ 조회 실패는 fail-open(warn) — 검사 인프라 장애로 정상 제출을 막는 쪽이 더 나쁘다. */
+    if (_isBlog) {
+      try {
+        const { rows: capRows } = await pool.query(
+          `SELECT 1 FROM review_submissions
+            WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+              AND COALESCE(slot_key, '') <> 'trashed'
+            LIMIT 1`, [sheetId, tabName, rowIndex]);
+        let hasCapture = capRows.length > 0;
+        if (!hasCapture) {
+          const { rows: fRows } = await pool.query(
+            `SELECT 1 FROM review_index
+              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3
+                AND COALESCE(review_file_id, '') <> '' LIMIT 1`, [sheetId, tabName, rowIndex]);
+          hasCapture = fRows.length > 0;
+        }
+        if (!hasCapture) {
+          return res.json({ error: '블로그체험단은 리뷰 캡처와 포스팅URL을 함께 제출해야 해요. 캡처를 먼저 첨부해주세요.', code: 'capture_required' });
+        }
+      } catch (capErr) {
+        logger.warn(`[submit/review] blog 캡처 확인 실패(fail-open): ${capErr.message}`);
+      }
+    }
+    // 127 ⑤: 포스팅제출일 = 제출 시각을 시스템이 자동 기록(KST 날짜, 사본 금지 — kstTodayStr 재사용)
+    const _postDate = _isBlog ? require('../services/campaignState.service').kstTodayStr(new Date()) : '';
+
     // ── Step 1: 완료 판정 + DB 업데이트 ──
     //   다중 캡처 슬롯 탭(예: 리뷰+현금영수증)은 "필요 슬롯 전부 제출"되어야 완료.
     //   업로드(/api/image/review-upload)가 submitReview보다 먼저 실행되어 원장
@@ -565,6 +596,19 @@ router.post('/review', async (req, res, next) => {
           }
         } catch (e) {
           logger.warn(`[submit] 무시트 memo 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
+        }
+
+        /* ★ 127: 포스팅제출일(blog) — 같은 규율로 작업표 칸에 자동 기록(재제출 = 최신 제출일 갱신). */
+        if (_isBlog && _postDate) {
+          try {
+            const pd = await require('../services/sheetlessStatus.service')
+              .markSheetlessPostDate({ sheetId, tabName, rowIndex, date: _postDate, by: 'review-submit' });
+            if (pd.handled && !pd.ok) {
+              logger.warn(`[submit] 무시트 포스팅제출일 기록 실패 tab=${tabName} row=${rowIndex} reason=${pd.reason}`);
+            }
+          } catch (e) {
+            logger.warn(`[submit] 무시트 포스팅제출일 기록 예외 tab=${tabName} row=${rowIndex}: ${e.message}`);
+          }
         }
 
         // index_master 카운트: FALSE→TRUE 전이일 때만 증가 (보완 제출 중복 방지)
@@ -660,6 +704,17 @@ router.post('/review', async (req, res, next) => {
               logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.slice(0, 30).join(',')})`);
             }
           }
+
+          // ★ 127: 포스팅제출일(blog 완료) — 열 고르기는 memoColumn 단일 출처(큐 재시도와 동일).
+          if (_isBlog && complete && _postDate) {
+            const dateColIdx = pickPostDateColumnIndex(headers);
+            if (dateColIdx >= 0) {
+              const dateRange = `'${tabName}'!${getColLetter(dateColIdx)}${rowIndex}`;
+              await throttledCall(() => writeSheet(sheetId, dateRange, [[_postDate]], sheetOpts));
+            } else {
+              logger.warn(`[submit/review:bg] 포스팅제출일 컬럼을 찾을 수 없음 (tab=${tabName})`);
+            }
+          }
         })();
 
         const timeoutPromise = new Promise((_, reject) =>
@@ -682,6 +737,7 @@ router.post('/review', async (req, res, next) => {
             value: submitValue,
             memo: memo || '',
             blog: _isBlog,          // ★ 재시도도 같은 열 우선순위를 써야 값이 흩어지지 않는다
+            postDate: (_isBlog && complete) ? _postDate : '',   // 127: 제출 시점 날짜(재시도 시각 아님)
           });
         } catch (queueErr) {
           logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);

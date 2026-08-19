@@ -2042,8 +2042,9 @@ function _buildInfoFallback(item) {
 }
 
 /** STEP2: 다건 이미지 슬롯 동적 생성 */
-/* ═══ 블로그체험단(099 · M4-2) — 결과물은 포스팅URL 하나 ═══
-   사용자 확정: "포스팅URL 제출 = 리뷰제출 완료" · 사진은 선택.
+/* ═══ 블로그체험단(099 · M4-2 → 127 개정) — 결과물 = 리뷰 캡처 + 포스팅URL 둘 다 ═══
+   사용자 확정(2026-08-19): 캡처와 포스팅URL 을 **함께** 제출해야 완료다 — M4-2 의
+   "포스팅URL만 = 완료(사진 선택)" 확정을 뒤집었다(서버 /submit/review 가 최종 방어).
    ★ 판정은 서버가 실어 준 `item.workKind` 하나만 본다 — 탭명·상품명으로 추측하지 않는다
      (추측하면 리뷰체험단이 블로그로 오인돼 사진 없이 제출이 완료로 찍힌다).
    ★ 필드가 없으면(구버전 백엔드) false = 종전 동작 그대로. */
@@ -2079,7 +2080,7 @@ function _applyBlogMemoUi(el, item) {
   const h = document.createElement('div');
   h.id = hintId;
   h.style.cssText = 'font-size:.74rem;color:#1D4ED8;margin:6px 2px 0;line-height:1.5';
-  h.textContent = '📝 블로그체험단이에요 — 포스팅URL만 넣으면 제출이 완료됩니다(사진은 선택).';
+  h.textContent = '📝 블로그체험단이에요 — 리뷰 캡처(포스팅 화면)와 포스팅URL을 함께 제출해주세요.';
   el.parentNode.insertBefore(h, el.nextSibling);
 }
 
@@ -2929,15 +2930,14 @@ async function _submitReviewSlots(item) {
   // 이번에 업로드할 슬롯 = 파일이 첨부된 슬롯
   const slotsToUpload = slots.filter(s => (S.filesBySlot[s.key] || []).length > 0);
 
-  /* ★★ 블로그체험단(099)은 결과물이 포스팅URL 이라 캡처 0장으로도 제출된다(사용자 확정).
-     현영을 겸한 blog 탭이 슬롯 모드로 뜨는데, 여기서 막으면 **제출할 방법 자체가 없다**.
-     ★ 대신 URL 은 그 자리에서 검증한다(서버 `/submit/review` 가 최종 방어). */
+  /* ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
+     "캡처 0장 허용"을 뒤집었다. 이미 제출한 슬롯이 있는 재제출(URL 만 고침)은 캡처 재첨부 불요. */
   const _blogSlot = _isBlogItem(item);
   if (_blogSlot && !_isPostUrl(document.getElementById("csMemo")?.value || "")) {
     showToast(_BLOG_POST_URL_HINT, "warning");
     return;
   }
-  if (slotsToUpload.length === 0 && !_blogSlot) {
+  if (slotsToUpload.length === 0 && !(_blogSlot && submitted.size > 0)) {
     showToast("제출할 캡처 이미지를 1장 이상 첨부해주세요.", "warning");
     return;
   }
@@ -3145,9 +3145,8 @@ async function submitReview() {
   const isMulti = items.length > 1;
 
   /* ── 파일 유효성 검사 ──
-     ★★ 블로그체험단(099)은 **결과물이 포스팅URL** 이라 사진 0장으로도 제출된다(사용자 확정).
-       대신 URL 이 비었거나 형식이 아니면 그 자리에서 막는다 — 서버가 최종 방어하지만,
-       거기까지 갔다 돌아오면 리뷰어는 "왜 실패했는지"를 토스트 한 줄로만 알게 된다.
+     ★ 127(사용자 확정 2026-08-19): 블로그도 **캡처 + 포스팅URL 둘 다** 필수 — M4-2 의
+       "사진 0장 허용"을 뒤집었다. URL 형식 검증도 그 자리에서(서버가 최종 방어).
      ★ 판정은 행마다(다건은 서로 다른 작업일 수 있다). 리뷰체험단 규칙은 종전 그대로. */
   if (isMulti) {
     const badUrl = [];
@@ -3156,7 +3155,6 @@ async function submitReview() {
       if (_isBlogItem(it)) {
         const m = document.getElementById("mrMemo_" + idx)?.value.trim() || "";
         if (!_isPostUrl(m)) badUrl.push(idx + 1);
-        return;                                   // 사진은 선택 — 빈 슬롯으로 세지 않는다
       }
       if ((S.filesByIdx[idx] || []).length === 0) emptySlots.push(idx + 1);
     });
@@ -3172,6 +3170,7 @@ async function submitReview() {
   } else if (_isBlogItem(items[0])) {
     const m = document.getElementById("memoTxt")?.value.trim() || "";
     if (!_isPostUrl(m)) { showToast(_BLOG_POST_URL_HINT, "warning"); return; }
+    if (S.files.length === 0) { showToast("리뷰 캡처(포스팅 화면)를 1장 이상 첨부해주세요.", "warning"); return; }
   } else {
     if (S.files.length === 0) { showToast("이미지를 1장 이상 첨부해주세요.", "warning"); return; }
   }

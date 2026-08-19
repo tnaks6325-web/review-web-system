@@ -424,6 +424,7 @@ const PUBLIC_FIELDS_LEGACY = [
   'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
   'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
   'is_popular', // ★ 064: [인기!] 배지(표시용 — 선행참여 게이트는 참여형 apply에서만 판정)
+  'work_kind',  // ★ 127: 리뷰어 홈 공고 탭(리뷰/블로그) 필터 재료 — 레거시 공고도 같은 축으로 갈린다
 ];
 const PUBLIC_FIELDS_PARTICIPATION = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
@@ -929,7 +930,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
 
     // holdToken은 신청 시 발급된 1회성 열쇠 — phone8만 아는 제3자의 열람 차단(정확 일치)
     const { rows: apps } = await pool.query(
-      `SELECT id, status, expires_at, applied_at, submitted_at, option_key
+      `SELECT id, status, expires_at, applied_at, submitted_at, option_key, reject_reason, decided_at
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
         ORDER BY applied_at DESC
@@ -940,6 +941,23 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       return res.status(403).json({ ok: false, error: '참여 내역이 없습니다.', reason: 'no_hold' });
     }
     const app = apps[0];
+    /* ★ 127 블로그 승인제 — 대기/반려는 '만료'가 아니다. 별도 reason 으로 구분해 돌려준다.
+       구버전 화면은 모르는 reason 을 재시도 경로로 처리해 홀드 토큰을 지우지 않는다(안전).
+       신형 campaign.html 은 이 응답으로 대기/반려 화면을 그리고 30초 폴링으로 승인을 감지한다. */
+    if (app.status === 'blog_pending') {
+      return res.status(403).json({
+        ok: false, reason: 'pending_approval',
+        appliedAt: app.applied_at, serverNow: new Date().toISOString(),
+        error: '신청이 접수되었어요. 관리자가 블로그를 확인하고 승인하면 구매를 진행할 수 있어요.',
+      });
+    }
+    if (app.status === 'blog_rejected') {
+      return res.status(403).json({
+        ok: false, reason: 'apply_rejected',
+        rejectReason: app.reject_reason || '', decidedAt: app.decided_at,
+        error: '신청이 반려되었어요.' + (app.reject_reason ? ' 사유: ' + app.reject_reason : ''),
+      });
+    }
     const now = new Date();
     const validHold = app.status === 'applied' && app.expires_at && new Date(app.expires_at) > now;
     const isSubmitted = app.status === 'submitted';
@@ -1008,12 +1026,13 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
     if (p8.length !== 8 || !token) {
       return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
     }
-    // status='applied' 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
+    // status 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
+    //   ★ 127: 블로그 승인 대기(blog_pending)도 리뷰어가 직접 취소할 수 있다(자리 미점유 상태라 무해).
     const { rows } = await pool.query(
       `UPDATE campaign_applications
           SET status = 'cancelled'
         WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
-          AND status = 'applied'
+          AND status IN ('applied', 'blog_pending')
         RETURNING id`,
       [id, p8, token]
     );
@@ -1120,6 +1139,7 @@ async function _applyParticipation(req, res, next, campPre) {
   //   ★ 판정은 `workKindContext`(공고 > 탭, 60초 캐시) 단일 출처 — 규칙 사본 0.
   //   ★ **판정 실패·리뷰체험단은 종전 동작 그대로**(모르면 요구하지 않는다 — 멀쩡한 참여를 막는 쪽이 더 나쁘다).
   let blogUrlIns = null;
+  let blogApply = false;   // ★ 127: 이 신청이 블로그체험단인가(승인제 분기의 근거)
   {
     let _kind = null;
     try {
@@ -1129,6 +1149,7 @@ async function _applyParticipation(req, res, next, campPre) {
       });
     } catch (_) { _kind = null; }
     if (isBlogKind(_kind)) {
+      blogApply = true;
       const raw = String(req.body.blogUrl || '').trim().slice(0, 500);
       if (!isPostUrl(raw)) {
         return res.status(403).json({
@@ -1448,17 +1469,28 @@ async function _applyParticipation(req, res, next, campPre) {
       feeSnapshot = null;
       try { await client.query('ROLLBACK TO SAVEPOINT fee_snap'); } catch (_e) { /* noop */ }
     }
+    /* ★★ 127 블로그 승인제(사용자 확정 2026-08-19): 블로그 공고의 신청은 홀드가 아니라
+         **승인 대기(blog_pending)** 로 들어간다 — TTL 없음(expires_at NULL)·정원 미점유.
+         관리자가 [승인]하면 그때 status='applied' + 구매기한(기본 24h)이 찍혀 기존 홀드
+         파이프라인을 그대로 탄다. 킬스위치 BLOG_APPROVAL_FLOW=0 = 신규 신청만 종전
+         즉시-홀드 경로(이미 대기 중인 신청은 승인 API 로 소화 — 되돌려도 고아 없음). */
+    const blogApproval = blogApply && String(process.env.BLOG_APPROVAL_FLOW || '1') !== '0';
+    const insStatus = blogApproval ? 'blog_pending' : 'applied';
+    const insExpires = blogApproval ? null : expiresAt.toISOString();
     const ins = await client.query(
       `INSERT INTO campaign_applications
          (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key, review_fee_snapshot, blog_url, is_popular_snapshot)
-       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8,$9,$10,$11)
-       RETURNING id, expires_at, option_key`,
-      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true]);
+       VALUES ($1,$2,$3,$4,$5,$12,$6,$7,$8,$9,$10,$11)
+       RETURNING id, status, expires_at, option_key`,
+      [id, insName, insPhone, holdP8, p8, insExpires, holdToken, chosenOpt ? chosenOpt.opt_key : null, feeSnapshot, blogUrlIns, camp.is_popular === true, insStatus]);
     await client.query('COMMIT');
     logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
       (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));
     return res.json({
       ok: true, applicationId: ins.rows[0].id, holdToken,
+      // ★ 127: pending=true = 승인 대기(구매 불가) — 프론트가 "승인 대기 중" 화면으로 분기
+      pending: ins.rows[0].status === 'blog_pending',
+      status: ins.rows[0].status,
       phone8: holdP8,   // ★ 계약(레드 #4): 응답 phone8 = "명의" p8 — 프론트 h.phone8 → work-detail/cancel/change-option/embed holdPhone8 전 경로 무수정 정합
       ownerPhone8: p8,  // 소유자(요청자 자신 — 유출 아님). 2단계 명의 배지·복원용
       participant: { type: isSubApply ? 'sub' : 'self', name: insName },
@@ -1602,6 +1634,23 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
  *   ※ 만료·취소 자체는 세지 않는다 — 신청만 하고 구매하지 않은 건이라 자리가 이미 반환돼 할 일이 없다.
  *     매일 숫자가 떠 있으면 정작 급한 지각 건이 묻히므로 의도적으로 제외한다.
  */
+/** 127: 공고별 승인 대기(blog_pending) 건수 — 카드 관제 버튼 배지 재료(지각 배지와 같은 규율:
+ *  "반드시 눌러야 하는" 신호. blog 에서 그 신호는 승인 대기다). 실패는 호출부 fail-soft. */
+async function _fetchBlogPendingCounts(pool, campaignIds) {
+  const out = new Map();
+  const ids = (campaignIds || []).filter(Boolean);
+  if (!ids.length) return out;
+  const { rows } = await pool.query(
+    `SELECT campaign_id, COUNT(*) AS n
+       FROM campaign_applications
+      WHERE campaign_id = ANY($1) AND status = 'blog_pending'
+      GROUP BY campaign_id`,
+    [ids]
+  );
+  for (const r of rows) out.set(r.campaign_id, Number(r.n) || 0);
+  return out;
+}
+
 async function _fetchLateCounts(pool, campaignIds) {
   const out = new Map();
   const ids = (campaignIds || []).filter(Boolean);
@@ -1640,15 +1689,16 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
     const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
     // 실패해도 목록 자체는 떠야 한다(관리 기능 마비 방지) — 집계만 비우고 진행.
     // carrySumMap: null = 반영 합계 모름(조회 실패) → 잔량도 null(부풀린 칩 금지 — 코드리뷰 M3)
-    let countsMap = new Map(), schedMap = null, lateMap = new Map(), roundsMap = new Map(), carrySumMap = null;
+    let countsMap = new Map(), schedMap = null, lateMap = new Map(), roundsMap = new Map(), carrySumMap = null, blogPendingMap = new Map();
     try {
       const { fetchRoundsSummary, fetchCarryAppliedSums } = require('../services/campaignPlan.service');
-      [countsMap, schedMap, lateMap, roundsMap, carrySumMap] = await Promise.all([
+      [countsMap, schedMap, lateMap, roundsMap, carrySumMap, blogPendingMap] = await Promise.all([
         fetchCampaignCounts(pool, partIds, now),
         deriveSchedules(pool, tabsOfCampaigns(rows), now),
         _fetchLateCounts(pool, partIds),
         fetchRoundsSummary(pool, partIds),   // 095: 카드 차수 칩 재료(자체 fail-soft = 빈 Map)
         fetchCarryAppliedSums(pool, partIds), // 098: 이월 반영 누적(보류 잔량 차감분, 자체 fail-soft)
+        _fetchBlogPendingCounts(pool, partIds), // 127: 카드 관제 버튼 승인 대기 배지 재료
       ]);
     } catch (e) {
       logger.warn(`[campaign] admin/list 집계 실패 — 목록만 반환: ${e.message}`);
@@ -1720,6 +1770,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
           todaySubmitted: cnt.todaySubmitted,
           totalConfirmed: cnt.submittedAll,
           late: lateMap.get(r.id) || 0,
+          blogPending: blogPendingMap.get(r.id) || 0,   // 127: 승인 대기(블로그) — 카드 관제 배지
         },
       };
     });
@@ -1829,10 +1880,19 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       ? sourceWorkOrder.skipWeekends
       : requestedSkipWeekends;
 
+    /* ★ 127: 블로그 공고의 일건수 정규화 — 블로그는 '그날 정원' 개념이 없다(구매일 미정·승인제).
+       일건수가 비면 총모집(무제한이면 9999)으로 채워 활성화 게이트·상태엔진(daily_done 판정)이
+       블로그 모집을 조용히 막지 않게 한다. **상태엔진은 무수정**(가장 위험한 경로 무접촉) —
+       daily=총원이면 일일 마감이 총원 마감보다 먼저 올 수 없어 리뷰 규칙 위에서 안전하다. */
+    let effDailyLimit = Number(daily_limit) || 0;
+    if (isBlogKind(workKindForStore(work_kind)) && effDailyLimit <= 0) {
+      effDailyLimit = (Number(recruit_total) || 0) > 0 ? Number(recruit_total) : 9999;
+    }
+
     // 참여형을 active로 "생성"하는 것도 활성화 게이트 통과 필요(status 라우트 우회 방지)
     if (participation_mode && (status === 'active')) {
       const errs = _participationActivationErrors({
-        linked_sheet_id: lSheet, linked_tab_name: lTab, linked_tab_gid: lGid, window_start, window_end, daily_limit,
+        linked_sheet_id: lSheet, linked_tab_name: lTab, linked_tab_gid: lGid, window_start, window_end, daily_limit: effDailyLimit,
       });
       if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
     }
@@ -1874,7 +1934,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         participation_mode === true,
         thumbnail_url || '',
         landing_url || '',
-        Number(daily_limit) || 0,
+        effDailyLimit,
         Number(recruit_total) || 0,
         window_start || null,
         window_end || null,
@@ -2328,7 +2388,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
               status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
               order_submission_id, late_order_id, option_key, owner_phone8, dismissed_at,
-              dismissed_by
+              dismissed_by, blog_url, reject_reason, decided_at, decided_by
        FROM campaign_applications
        WHERE campaign_id = $1
        ORDER BY applied_at ASC`,
@@ -2512,6 +2572,153 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (err.code === '23505') return res.status(409).json({ ok: false, error: '동일 리뷰어의 활성 참여와 충돌 — 새로고침 후 재시도하세요.' });
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/* ═══ 127 블로그 승인제 — 승인/반려 (사용자 확정 2026-08-19) ═══
+   승인 = blog_pending → 'applied' + expires_at=NOW()+구매기한(기본 24h = BLOG_PURCHASE_TTL_MIN)
+     → 그 뒤로는 **기존 홀드 파이프라인 그대로**(카운트·스윕(만료→expired)·확정·late 구제·work-detail).
+   반려 = blog_pending → 'blog_rejected' + 사유(필수 — 리뷰어 화면에 그대로 표시) → 즉시 재신청 가능.
+   ★ 승인 시점에 정원 재검사(사용자 확정 ① "승인한 사람만 센다" — 대기는 미점유이므로 승인이 소비 시점).
+     잠금 계층 = confirm 과 동일(캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE).
+   ★ 알림(사용자 확정 ④ 둘 다): 공고 페이지 상태 표시(work-detail reason) + 1:1 문의 자동 메시지
+     (csBridge.postAdminNotice — COMMIT 뒤 fail-soft, 통지 실패가 승인/반려를 되돌리지 않는다). */
+const BLOG_PURCHASE_TTL_MIN = () => {
+  const v = parseInt(process.env.BLOG_PURCHASE_TTL_MIN || '1440', 10);
+  return (Number.isFinite(v) && v > 0) ? v : 1440;
+};
+
+async function _notifyBlogDecision(camp, app, text, by) {
+  // 1:1 문의 자동 메시지 — 스레드 키는 연결 탭(sheetId||tabName). 무시트 공고도 가상 시트ID 로 성립.
+  // ★ 절대 throw 하지 않는다(csBridge 규율). 연결 탭 없는 공고는 통지 생략(스레드 키가 없다).
+  try {
+    if (!camp.linked_tab_sheet_id || !camp.linked_tab_name) return;
+    await require('../services/csBridge.service').postAdminNotice({
+      sheetId: camp.linked_tab_sheet_id, tabName: camp.linked_tab_name,
+      reviewerName: app.applicant_name, phone8: app.phone8, message: text, by,
+    });
+  } catch (e) { logger.warn(`[campaign/blog-decide] 1:1 통지 실패(무해): ${e.message}`); }
+}
+
+// POST /api/campaign/admin/:id/blog-approve {applicationId}
+router.post('/admin/:id/blog-approve', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const { id } = req.params;
+  const appId = parseInt(req.body.applicationId, 10);
+  if (!appId) return res.status(400).json({ ok: false, error: 'applicationId 필수' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    const camp = cRows[0];
+    const { rows: t } = await client.query(
+      `SELECT * FROM campaign_applications WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [appId, id]);
+    if (!t.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '신청을 찾을 수 없습니다.' }); }
+    const a = t[0];
+    if (a.status === 'applied') { await client.query('ROLLBACK'); return res.json({ ok: true, already: true, expiresAt: a.expires_at }); } // 멱등(더블클릭)
+    if (a.status !== 'blog_pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'not_pending', status: a.status,
+        error: `'${a.status}' 상태는 승인 대상이 아닙니다(승인 대기 건만 승인할 수 있어요).` });
+    }
+    /* ★ 정원 재검사 — 승인이 정원 소비 시점(사용자 확정 ①). 총원 0 = 무제한.
+       사용량 = 제출확정 + 유효홀드(승인분 포함) — fetchCampaignCounts 와 같은 판정 시각 기준. */
+    const total = Number(camp.recruit_total) || 0;
+    if (total > 0) {
+      const { rows: u } = await client.query(
+        `SELECT COUNT(*) FILTER (WHERE status='submitted') AS sub,
+                COUNT(*) FILTER (WHERE status='applied' AND expires_at > NOW()) AS holds
+           FROM campaign_applications WHERE campaign_id = $1`, [id]);
+      const used = (Number(u[0].sub) || 0) + (Number(u[0].holds) || 0);
+      if (used >= total) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'capacity_full', used, total,
+          error: `정원이 가득 찼어요(확정+진행 ${used} / 총 ${total}). 총모집을 늘리거나 다른 신청을 정리한 뒤 승인하세요.` });
+      }
+    }
+    /* ★ 옵션 정원 재검사 — 신청이 고른 옵션이 이미 소진됐으면 승인 불가(자리 없는 승인 금지). */
+    if (a.option_key) {
+      const { rows: opt } = await client.query(
+        `SELECT recruit_total FROM campaign_options WHERE campaign_id = $1 AND opt_key = $2 LIMIT 1`, [id, a.option_key]);
+      const optTotal = opt.length ? (Number(opt[0].recruit_total) || 0) : 0;
+      if (optTotal > 0) {
+        const { rows: ou } = await client.query(
+          `SELECT COUNT(*) FILTER (WHERE status='submitted') AS sub,
+                  COUNT(*) FILTER (WHERE status='applied' AND expires_at > NOW()) AS holds
+             FROM campaign_applications WHERE campaign_id = $1 AND option_key = $2`, [id, a.option_key]);
+        const optUsed = (Number(ou[0].sub) || 0) + (Number(ou[0].holds) || 0);
+        if (optUsed >= optTotal) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok: false, reason: 'option_full', optionKey: a.option_key,
+            error: `선택한 옵션(${a.option_key})의 정원이 가득 찼어요(${optUsed}/${optTotal}).` });
+        }
+      }
+    }
+    const ttlMin = BLOG_PURCHASE_TTL_MIN();
+    const { rows: up } = await client.query(
+      `UPDATE campaign_applications
+          SET status = 'applied',
+              expires_at = NOW() + make_interval(mins => $2),
+              decided_at = NOW(), decided_by = $3, reject_reason = NULL
+        WHERE id = $1 AND status = 'blog_pending'
+        RETURNING expires_at`, [appId, ttlMin, String((req.admin && req.admin.name) || 'admin').slice(0, 100)]);
+    if (!up.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: '상태가 바뀌었어요. 새로고침 후 다시 시도하세요.' }); }
+    await client.query('COMMIT');
+    logger.info(`[campaign/blog-approve] camp=${id} app=${appId} ttl=${ttlMin}m by=${req.admin && req.admin.name}`);
+    const hours = Math.round(ttlMin / 60);
+    await _notifyBlogDecision(camp, a,
+      `블로그체험단 참여가 승인되었어요! 🎉\n공고 페이지에서 ${hours}시간 안에 구매를 진행하고 구매양식을 제출해주세요. 기한이 지나면 자리가 자동 취소됩니다.`,
+      (req.admin && req.admin.name) || 'admin');
+    res.json({ ok: true, expiresAt: up[0].expires_at });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    if (err.code === '23505') return res.status(409).json({ ok: false, error: '같은 명의의 활성 참여와 충돌 — 새로고침 후 재시도하세요.' });
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/campaign/admin/:id/blog-reject {applicationId, reason}
+router.post('/admin/:id/blog-reject', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const { id } = req.params;
+  const appId = parseInt(req.body.applicationId, 10);
+  const reason = String(req.body.reason || '').trim().slice(0, 500);
+  if (!appId) return res.status(400).json({ ok: false, error: 'applicationId 필수' });
+  // ★ 사유 필수 — 리뷰어 화면·1:1 문의에 그대로 전달된다(사유 없는 반려는 리뷰어가 고칠 방법을 모른다).
+  if (!reason) return res.status(400).json({ ok: false, error: '반려 사유를 입력해주세요(리뷰어에게 그대로 전달됩니다).' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    const camp = cRows[0];
+    const { rows: t } = await client.query(
+      `SELECT * FROM campaign_applications WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [appId, id]);
+    if (!t.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '신청을 찾을 수 없습니다.' }); }
+    const a = t[0];
+    if (a.status === 'blog_rejected') { await client.query('ROLLBACK'); return res.json({ ok: true, already: true }); } // 멱등
+    if (a.status !== 'blog_pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'not_pending', status: a.status,
+        error: `'${a.status}' 상태는 반려 대상이 아닙니다(승인 대기 건만 반려할 수 있어요).` });
+    }
+    await client.query(
+      `UPDATE campaign_applications
+          SET status = 'blog_rejected', reject_reason = $2, decided_at = NOW(), decided_by = $3
+        WHERE id = $1 AND status = 'blog_pending'`,
+      [appId, reason, String((req.admin && req.admin.name) || 'admin').slice(0, 100)]);
+    await client.query('COMMIT');
+    logger.info(`[campaign/blog-reject] camp=${id} app=${appId} by=${req.admin && req.admin.name}`);
+    await _notifyBlogDecision(camp, a,
+      `블로그체험단 참여 신청이 반려되었어요.\n사유: ${reason}\n블로그 주소를 확인한 뒤 공고 페이지에서 바로 다시 신청할 수 있어요.`,
+      (req.admin && req.admin.name) || 'admin');
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     next(err);
   } finally {
     client.release();

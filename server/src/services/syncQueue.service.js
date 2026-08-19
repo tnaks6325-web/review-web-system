@@ -36,7 +36,7 @@ const {
 const { logger } = require('../utils/logger');
 const { logAbnormal } = require('./errorLog.service');
 // 비고/포스팅 열 고르기 — 제출 경로(submit.routes)·무시트 기록과 **같은 규칙**(사본 금지)
-const { pickMemoColumnIndex } = require('../utils/memoColumn');
+const { pickMemoColumnIndex, pickPostDateColumnIndex } = require('../utils/memoColumn');
 const { mergeDepositStamps } = require('../utils/depositStamp');
 
 // ── 큐에 작업 추가 ──
@@ -576,7 +576,7 @@ async function _executeItem(item) {
          읽지도 쓰지도 않아 **시트 쓰기가 한 번 실패해 큐로 내려가면 비고/포스팅URL 이 영구 유실**됐다
          (제출열만 다시 써지고 memo 는 사라진다). 블로그체험단은 그 값이 곧 결과물이라 치명적이지만,
          리뷰체험단에서도 현행 버그였다. 열 고르기는 `utils/memoColumn` 단일 출처(제출 경로와 같은 규칙). */
-      const { sheetId, tabName, rowIndex, submitCol, value, memo, blog } = payload;
+      const { sheetId, tabName, rowIndex, submitCol, value, memo, blog, postDate } = payload;
       if (!sheetId || !tabName || !rowIndex) throw new Error('payload 누락');
 
       // 헤더 행을 최대 50행까지 읽어서 실제 헤더 위치 찾기
@@ -611,6 +611,18 @@ async function _executeItem(item) {
           } else {
             // 조용히 넘기지 않는다 — 그 탭에 비고/포스팅 열이 없다는 신호(담당자 조치 대상).
             logger.warn(`[queue:review_submit] 비고/포스팅 열 없음 tab=${tabName} row=${rowIndex}`);
+          }
+        }
+        /* ★ 127: 포스팅제출일(blog 완료 시각) — 제출 시점에 계산된 날짜를 그대로 쓴다
+           (재시도 시각으로 다시 만들면 실제 제출일과 어긋난다). 열 고르기 단일 출처 = memoColumn. */
+        const postDateText = String(postDate == null ? '' : postDate).trim();
+        if (postDateText) {
+          const dateIdx = pickPostDateColumnIndex(headers);
+          if (dateIdx >= 0) {
+            const dateRange = `'${tabName}'!${_getColLetter(dateIdx)}${rowIndex}`;
+            await throttledCall(() => writeSheet(sheetId, dateRange, [[postDateText]]));
+          } else {
+            logger.warn(`[queue:review_submit] 포스팅제출일 열 없음 tab=${tabName} row=${rowIndex}`);
           }
         }
       } else {

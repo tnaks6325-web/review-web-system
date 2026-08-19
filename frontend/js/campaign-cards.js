@@ -431,7 +431,10 @@
     const stop = 'event.stopPropagation();event.preventDefault();';
     // 빨간 원 = 지각 접수 건수(결제했는데 자리 없음 → 수동확정 필요). 0이면 원 없음.
     const late = (c.ops && Number(c.ops.late)) || 0;
-    const bdg = late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '';
+    // 📝 127: 보라 원 = 블로그 승인 대기 건수 — blog 공고에서 "반드시 눌러야 하는" 신호는 승인 대기다.
+    const blogPend = (c.ops && Number(c.ops.blogPending)) || 0;
+    const bdg = (late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '')
+      + (blogPend > 0 ? `<span class="bdg bdg-blog" style="background:#7C3AED" title="블로그 참여 신청 ${blogPend}건 — 승인 대기 중">${blogPend}</span>` : '');
     const on = (c.status || 'draft') === 'active';
     const pubToggle = (c.status === 'closed')
       ? '<span class="ppub">마감</span>'
@@ -569,8 +572,11 @@
     // 🧾 현금영수증 대상 배지(D안 ① — 참여 전 인지). 서버가 연결 탭 income_type으로 판정한
     //   cashReceiptRequired === true 일 때만(필드 부재 = 구버전 백엔드/조회 실패 → 배지 없음).
     const crChip = c.cashReceiptRequired === true ? `<span class="pt-badge cr">🧾 현금영수증</span>` : '';
-    const badges = (channel || c.delivery_type || crChip)
-      ? `<div class="pt-badges">${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
+    // 📝 127: 블로그체험단 배지 — 서버가 준 work_kind 정확 일치(빈 값·필드 부재 = 리뷰 = 배지 없음)
+    const isBlogCard = c.work_kind === 'blog';
+    const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>` : '';
+    const badges = (channel || c.delivery_type || crChip || blogChip)
+      ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
     // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다
@@ -695,7 +701,9 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open') footer = `<button type="button" class="pbtn go">참여하기</button>`;
+    if (c.state === 'open') footer = isBlogCard
+      ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
+      : `<button type="button" class="pbtn go">참여하기</button>`;
     else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
@@ -719,7 +727,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${gauge}
           ${_roundsLine(c)}
           ${_adminSpec(c)}
@@ -733,7 +741,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}${moChip}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${_optChip(c)}
           ${gauge}
           ${footer}

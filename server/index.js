@@ -75,6 +75,11 @@ const REQUIRED_SCHEMA = [
   // 126 — 만료 자동 취소확정 마커. 스윕 UPDATE·되살리기 판정이 이 컬럼을 읽으므로
   //   없으면 매분 스윕이 42703 으로 죽어 **만료 마킹까지 함께 멈춘다**.
   ['campaign_applications', 'dismissed_by'],
+  // 127 — 블로그 승인제. reject_reason·decided_at 은 work-detail SELECT 에도 들어가므로
+  //   없으면 **모든 참여형 공고의 work-detail 이 전면 42703**(리뷰어 작업가이드 전멸).
+  ['campaign_applications', 'decided_at'],
+  ['campaign_applications', 'decided_by'],
+  ['campaign_applications', 'reject_reason'],
 ];
 
 async function _runOneMigration(pool, sql) {

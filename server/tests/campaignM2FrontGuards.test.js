@@ -55,7 +55,8 @@ ok('cards: 카드 탭 → campaign.html 이동(목록에서 신청 없음)', /ca
 
 // ── 소비처 분리(레거시 회귀 방지) ──
 ok('index.html: 참여형은 CampCards로만 렌더(레거시 목록에서 제외)', /!c\.participation_mode\)/.test(idx) && /CampCards\.cardHtml/.test(idx));
-ok('recruit.html: 참여형은 CampCards로만 렌더(레거시 목록에서 제외)', /!c\.participation_mode\)/.test(rec) && /CampCards\.cardHtml/.test(rec));
+// ★ 127: 종류 탭 필터가 뒤에 붙어 닫는 괄호 앵커를 뗐다(검사 의미 불변 — 레거시 목록에서 참여형 제외)
+ok('recruit.html: 참여형은 CampCards로만 렌더(레거시 목록에서 제외)', /!c\.participation_mode/.test(rec) && /CampCards\.cardHtml/.test(rec));
 ok('index-recruit.js: 게시 전 자동 점검 = 서버 게이트와 동일 3항목', /participationCheckErrors/.test(recjs) && /gid/.test(recjs));
 ok('index-recruit.js: active 저장 시 점검 실패면 차단(서버 게이트 이중화)', /payload\.status === "active"[\s\S]{0,200}participationCheckErrors\(\)/.test(recjs));
 

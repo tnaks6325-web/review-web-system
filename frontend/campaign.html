@@ -179,6 +179,37 @@
     </div>
   </div>
 
+  <!-- 📝 127 블로그 승인제: 승인 대기 -->
+  <div id="vBlogPending" class="statebig" style="display:none">
+    <div class="e">📮</div><h2>신청이 접수됐어요</h2>
+    <p>관리자가 블로그를 확인한 뒤 승인하면<br/><b>이 페이지에서 바로 구매를 진행</b>할 수 있어요.</p>
+    <div class="sec">
+      <div class="cardbx" style="border-color:#7C3AED">
+        <div class="wd-tt" style="color:#6D28D9">📝 제출한 블로그 주소</div>
+        <div id="bpUrl" style="font-size:.82rem;word-break:break-all;color:#374151"></div>
+      </div>
+      <div class="cardbx lockcard"><div class="e">⏳</div><div class="m">승인을 기다리는 중</div>
+        <div class="s">승인되면 이 화면이 자동으로 바뀌어요(30초마다 확인). 결과는 리뷰어 홈 1:1문의로도 알려드려요.</div>
+      </div>
+      <button class="btn ghost" onclick="onCancel()">신청 취소</button>
+      <button class="btn ghost" onclick="location.href='/'">홈으로</button>
+    </div>
+  </div>
+
+  <!-- 📝 127 블로그 승인제: 반려 -->
+  <div id="vBlogRejected" class="statebig" style="display:none">
+    <div class="e">↩️</div><h2>신청이 반려되었어요</h2>
+    <p id="brReasonHead">아래 사유를 확인하고 다시 신청할 수 있어요.</p>
+    <div class="sec">
+      <div class="cardbx" style="border-color:#F59E0B">
+        <div class="wd-tt" style="color:#B45309">반려 사유</div>
+        <div id="brReason" style="font-size:.84rem;white-space:pre-wrap;color:#374151"></div>
+      </div>
+      <button class="btn" onclick="retryBlogApply()">블로그 주소 확인하고 다시 신청하기</button>
+      <button class="btn ghost" onclick="location.href='/'">홈으로</button>
+    </div>
+  </div>
+
   <!-- 만료 -->
   <div id="vExpired" class="statebig" style="display:none">
     <div class="e">⌛</div><h2>참여가 만료되었어요</h2>
@@ -299,7 +330,7 @@ let _pvSimSubmitted = false; // 미리보기 가상 제출 완료 여부(브라�
 function $(id){ return document.getElementById(id); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
-function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone'].forEach(v=>$(v).style.display = v===view?'':'none'); }
+function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone','vBlogPending','vBlogRejected'].forEach(v=>$(v).style.display = v===view?'':'none'); }
 function showPre(){ if(_camp) renderPre(); else show('vPre'); } // renderPre가 참여 버튼 상태도 복원(N4)
 
 /* ═══ 세션 (index.html·search-app.js와 동일 키·포맷) ═══ */
@@ -1087,6 +1118,31 @@ function renderMissing(missing){
 let _detailRetry = 0;
 // 당일 미제출 홀드는 재참여를 허용한다. 만료 토큰을 그대로 복원하면 서버는 계속 expired를
 // 반환하므로, 해당 명의의 로컬 홀드만 제거하고 참여 전 화면으로 되돌린다.
+/* ═══ 📝 127 블로그 승인제: 대기/반려 화면 ═══
+   ★ 상태의 단일 출처 = work-detail 응답(reason) — 화면은 30초 폴링으로 승인을 감지한다.
+   ★ 홀드 토큰은 지우지 않는다(승인되면 같은 토큰으로 work-detail 이 열린다). */
+let _bpTimer = null;
+function renderBlogPending(){
+  clearInterval(_pollTimer); clearInterval(_holdTick); clearInterval(_bpTimer);
+  const u = $('bpUrl'); if(u) u.textContent = _blogUrl || (function(){ try{ return localStorage.getItem(_BLOG_URL_LS) || ''; }catch(_){ return ''; } })();
+  show('vBlogPending');
+  _bpTimer = setInterval(enterJoined, 30000);
+}
+function renderBlogRejected(j, h){
+  clearInterval(_pollTimer); clearInterval(_holdTick); clearInterval(_bpTimer);
+  const el = $('brReason'); if(el) el.textContent = (j && j.rejectReason) || '관리자가 별도 사유를 남기지 않았어요.';
+  show('vBlogRejected');
+}
+/** 반려 후 재신청 — 반려는 즉시 재신청 가능(사용자 확정 ③). 새 주소를 받기 위해 기존 값을 비운다. */
+async function retryBlogApply(){
+  const h = getHold();
+  clearHold(h && h.phone8);
+  _blogUrl = '';
+  try{ await loadCampaign(); }catch(_){ /* 상태 갱신 실패해도 신청은 진행 가능 */ }
+  if(_camp) renderPre();
+  onJoin();
+}
+
 async function releaseExpiredHold(h){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   clearHold(h && h.phone8);
@@ -1097,12 +1153,16 @@ async function releaseExpiredHold(h){
 }
 async function enterJoined(){
   const h = getHold();
+  clearInterval(_bpTimer);
   if(!h) return renderPre();
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
       '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
     const j = await r.json().catch(()=>({}));
     if(!r.ok || !j.ok){
+      /* 📝 127 블로그 승인제 — 대기/반려는 만료가 아니다(토큰 보존). 서버 reason 이 단일 출처. */
+      if(j.reason === 'pending_approval'){ renderBlogPending(); return; }
+      if(j.reason === 'apply_rejected'){ renderBlogRejected(j, h); return; }
       if(j.reason === 'expired'){ await releaseExpiredHold(h); return; }
       if(j.reason === 'no_hold'){ clearHold(); renderPre(); return; } // 확정 무효일 때만 토큰 파기
       // 일시 장애(429/5xx/배포 중 응답 파싱 실패): holdToken 보존 + 자동 재시도
@@ -1209,6 +1269,13 @@ function startHoldCountdown(expiresAtIso){
   _holdTick = setInterval(()=>{
     const remain = end - CampCards.serverNow();
     if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); return; }
+    // 📝 127: 블로그 구매기한(24h)처럼 1시간 이상 남으면 시:분으로 — 분:초로 '1440 : 00' 이 뜨지 않게
+    if(remain >= 3600000){
+      const hh = Math.floor(remain/3600000);
+      const mm = String(Math.floor(remain%3600000/60000)).padStart(2,'0');
+      el.textContent = hh + '시간 ' + mm + '분';
+      return;
+    }
     const m = String(Math.floor(remain/60000)).padStart(2,'0');
     const s2 = String(Math.floor(remain%60000/1000)).padStart(2,'0');
     el.textContent = m + ' : ' + s2;
