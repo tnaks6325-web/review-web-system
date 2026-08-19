@@ -644,7 +644,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     // 엔진이 부르는 바깥 함수(행 하한) — 오늘은 확정·진행 인원 아래로 못 줄인다
     + '\nfunction minFor(d){ return d === S.data.today ? (S.data.todayUsed || 0) : 0; }'
     + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
-    + ' autoFit, maxFor, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
+    + ' autoFit, maxFor, dayCeil, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
     + ' payload, naturalFor, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY,'
     + ' holidayName, dayKind, fmtMD, FIXED_HOLIDAYS, LUNAR_HOLIDAYS, DEFAULT_CARRY_MODE };',
     sandbox);
@@ -696,10 +696,26 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   eq('7d 연장 — 마지막 날은 남은 만큼만', sandbox.S.plan[sandbox.S.horiz[18]], 30);
   eq('7d 연장 — 배분 합계 유지', A.sumPlan(), 750);
 
-  // 7e. ★★ 요구 ① — 한 날 최대 = 남은 배분수(총원 밖으로는 못 늘린다)
+  /* 7e. ★★ 사용자 확정 2026-08-19: 합계가 총건수를 넘는 조절은 **경고가 아니라 차단**이다.
+     한 날 상한 = 그 날 값 + 아직 남은 배분수 → 게이지·[＋]·숫자입력 어느 쪽으로도 총량을
+     넘기는 값 자체가 들어가지 않는다(종전에는 한 날에 750 까지 넣고 "초과 — 저장불가"였다). */
   mkS();
   A.applyCarryMode('next');
-  eq('7e 한 날 상한 = 남은 배분수', A.maxFor(), 750);
+  const d7e = sandbox.S.horiz[1];
+  eq('7e 합계가 딱 맞으면 상한 = 그 날 값(더 못 올린다)', A.maxFor(d7e), A.planFor(d7e));
+  eq('7e 절대 상한(autoFit 용)은 종전 의미 — 배분해야 할 인원', A.dayCeil(), 750);
+  sandbox.S.plan[d7e] = A.planFor(d7e) - 3;      // 3명 줄여 여유를 만든다
+  eq('7e 3명 줄이면 그만큼만 다시 열린다', A.maxFor(d7e), A.planFor(d7e) + 3);
+  eq('7e 여유는 다른 날에도 같은 크기로 열린다', A.maxFor(sandbox.S.horiz[2]), A.planFor(sandbox.S.horiz[2]) + 3);
+  // ★ 이미 초과 상태(작업표 프리필이 총량을 안 보고 심은 계획 등)로 열려도 **줄이는 길은 남긴다**
+  mkS(); A.applyCarryMode('next');
+  const dOver = sandbox.S.horiz[0];
+  sandbox.S.plan[dOver] = A.planFor(dOver) + 50;   // 강제로 초과 상태를 만든다
+  ok('7e 초과 상태 = 상한이 현재값(늘리기만 막힌다)', A.maxFor(dOver) === A.planFor(dOver) && A.diffPlan() > 0);
+  ok('7e 초과 상태에서도 줄이기는 막지 않는다(하한은 오늘 확정분뿐)', A.maxFor(dOver) > 0);
+  // ★ 오늘 하한(확정·진행 인원)이 상한보다 크면 하한이 이긴다(음수·역전 방지)
+  mkS({ data: { todayUsed: 999 } }); A.applyCarryMode('next');
+  ok('7e 오늘 하한이 상한을 넘어서지 않는다', A.maxFor('2026-08-08') >= 999);
 
   // 7f. ★★ 요구 ⑥ — 초과/부족을 만들고 [자동 맞춤]이 고른 방식대로 되돌린다
   for (const mode of ['next', 'spread', 'extend']) {
@@ -928,7 +944,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   mkS({ data: { recruitTotal: 500000, defaultDaily: 9000, carryPending: 0, submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, todayNaturalQuota: 9000 } });
   ok('7A-5 큰 총량 공고도 균형 모드로 열린다', A.applyCarryMode('next') === true);
   ok('7A-5 배분 목표는 9999 보다 크다(상한이 실제로 물리는 조건)', A.targetTotal() > 9999, A.targetTotal());
-  eq('7A-5 한 날 상한은 9999 를 넘지 않는다', A.maxFor(), 9999);
+  eq('7A-5 한 날 상한은 9999 를 넘지 않는다', A.dayCeil(), 9999);
+  ok('7A-5 사람 조절 상한도 9999 를 넘지 않는다',
+    sandbox.S.horiz.every((x) => A.maxFor(x) <= 9999));
   mkS({ data: { defaultDaily: 9000, carryPending: 5000, recruitTotal: 100000, submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0, todayNaturalQuota: 9999 } });
   A.applyCarryMode('next');
   ok('7A-5 이월 전액을 얹어도 9999 를 넘지 않는다',
@@ -1096,6 +1114,16 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /pre \+ ' 일치합니다\. — <b>저장가능<\/b>'/.test(CDP)
     && /'<\/span>건 초과입니다\. — <b>저장불가<\/b>'/.test(CDP)
     && /'<\/span>건 적게 모집합니다\. — <b>저장가능<\/b>'/.test(CDP));
+  /* ★★ 입력 3창구(게이지 드래그 · ±/기본으로 · 숫자 직접 입력)가 **같은 상한 함수**를 쓴다 —
+     한 곳이라도 빠지면 그 창구로만 총량을 넘길 수 있다(사용자 확정 2026-08-19). */
+  ok('7n-2 ★ 드래그·커밋이 날짜별 상한 maxFor(d) 를 쓴다',
+    /v = Math\.max\(minFor\(drag\.d\), Math\.min\(maxFor\(drag\.d\), v\)\);/.test(CDP)
+    && /var cur = planFor\(d\), want = Math\.round\(next\), cap = maxFor\(d\);/.test(CDP)
+    && /next = Math\.max\(minFor\(d\), Math\.min\(cap, want\)\);/.test(CDP));
+  ok('7n-3 ★ 막고 끝내지 않는다 — 총건수·남은건수를 문장으로 말한다',
+    /want > cap && balanceOn\(\)/.test(CDP)
+    && /총 ' \+ totalFor\(\) \+ '건을 넘길 수 없습니다 — 남은건수 /.test(CDP)
+    && /\[차수 추가\]로 총량을 늘려주세요/.test(CDP));
   ok('7o ★ 알림창 높이는 "일치" 기준 41px 고정(상태마다 표가 흔들리면 조절하던 줄을 놓친다)',
     /\.cdp-bal\{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px/.test(CDP));
   ok('7p ★ 종료일 연장 문구 — 사용자 확정 문장(숫자는 실제 마지막 진행일에서 읽는다)',
