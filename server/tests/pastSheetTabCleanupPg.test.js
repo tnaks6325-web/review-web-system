@@ -28,7 +28,8 @@ const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
 
 const DDL = `
 DROP TABLE IF EXISTS tab_configs, campaigns, order_submissions, recruit_campaigns,
-                     review_index, index_master, index_master_archive CASCADE;
+                     review_index, index_master, index_master_archive, raw_sheet_tabs CASCADE;
+CREATE TABLE raw_sheet_tabs (sheet_id text, tab_gid text, tab_name text, mirrored_at timestamptz DEFAULT NOW());
 CREATE TABLE tab_configs (
   sheet_id text, tab_name text, tab_gid text, sheetless boolean DEFAULT FALSE,
   is_closed boolean DEFAULT FALSE, PRIMARY KEY (sheet_id, tab_name));
@@ -81,6 +82,12 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   //   ⇒ "이미 아카이브"로 접으면 정리 대상이 조용히 사라진다(2026-08-19 「0개」 보고의 원인).
   await mk('리네임후_새이름', { startDate: '24.5.10', gid: '777' });
   await pool.query(`INSERT INTO index_master_archive VALUES ($1,'리네임전_옛이름','777')`, [S]);
+  // ★ 시트에서 이름이 바뀌었는데 tab_configs 는 옛 이름 — 마감 표시가 있어도 smartBuild 는
+  //   **시트의 현재 이름**으로 조회하므로 스킵이 빗나가 계속 읽는다(마감으로 못 멈춘다).
+  await mk('이름어긋남_옛', { startDate: '24.5.10', gid: '888', closed: true });
+  await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'888','이름어긋남_새')`, [S]);
+  // 대조군: 이름이 같으면 종전대로 조용하다
+  await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'4','이미마감')`, [S]);
 
   // ── ① 스캔이 실제로 돈다 ─────────────────────────────────
   const scan = await svc.scanPastSheetTabs({ since: '2026-01-01' });
@@ -88,7 +95,7 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     [...scan.items, ...scan.holds].map(i => [i.tabName, i]));
   t('①: 스캔 SQL 이 진짜 PG 에서 실행되고 별칭이 맞는다', () => {
     assert.equal(scan.ok, true);
-    assert.equal(scan.total, 11, '탭 11개 (받음 ' + scan.total + ')');
+    assert.equal(scan.total, 12, '탭 12개 (받음 ' + scan.total + ')');
   });
   t('②: 판정이 5갈래로 갈린다', () => {
     assert.equal(by['과거_구매일2024'].reason, 'past');
@@ -100,7 +107,7 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     // 이미 안 읽는 탭은 목록에 싣지 않고 **건수로** 말한다(payload 절약 + 조용한 누락 금지)
     assert.equal(scan.alreadyQuiet, 3, '이미 조용한 탭 3개 (받음 ' + scan.alreadyQuiet + ')');
     assert.equal(scan.quietBy.already_sheetless, 1);
-    assert.equal(scan.quietBy.already_closed, 1);
+    assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감만 조용하다');
     assert.equal(scan.quietBy.already_archived, 1);
   });
   t('②b: 구매일 신호가 우선 — 시트 등록일(2024)로 최근 작업을 과거로 몰지 않는다', () => {
@@ -115,12 +122,13 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   });
   t('③b: "지금도 읽히는 탭"과 "이미 안 읽는 탭"을 구분해 센다', () => {
     // 무시트·아카이브·마감 3개를 뺀 7개가 지금도 읽힌다
-    assert.equal(scan.stillReading, 8, 'stillReading (받음 ' + scan.stillReading + ')');
+    assert.equal(scan.stillReading, 9, 'stillReading (받음 ' + scan.stillReading + ')');
     assert.equal(scan.candidates, 3, '후보 3개 (받음 ' + scan.candidates + ')');
     assert.equal(scan.heldBy.recent, 1);
     assert.equal(scan.heldBy.weak_signal, 2, '등록일만으로는 닫지 않는다');
     assert.equal(scan.heldBy.pending_orders, 1);
     assert.equal(scan.heldBy.active_campaign, 1);
+    assert.equal(scan.heldBy.name_drift, 1, '이름 어긋남은 후보가 아니라 사유로 말한다');
   });
 
   // ── ④ 닫기 ───────────────────────────────────────────────
@@ -138,6 +146,16 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     assert.equal(by['리네임후_새이름'].archivedGidOnly, true, '옛 이름 마커는 건수로만 말한다');
     assert.equal(scan.archivedByGidOnly, 1);
     assert.equal(scan.quietBy.already_archived, 1, '진짜 아카이브만 1건(이름 일치)');
+  });
+
+  t('③d: 시트에서 이름이 바뀐 마감 탭은 조용하지 않다(RAW 미러 조인 — 진짜 PG 로만)', () => {
+    const d = by['이름어긋남_옛'];
+    assert.equal(d.reason, 'name_drift');
+    assert.equal(d.reads, true, '마감 표시가 있어도 새 이름으로 읽힌다');
+    assert.equal(d.candidate, false, '마감해도 안 멈추므로 후보로 올리지 않는다');
+    assert.equal(d.liveTabName, '이름어긋남_새', '시트의 현재 이름을 말해 준다');
+    // ★ 조용한 탭은 목록에 싣지 않고 건수로만 말한다 — `by` 에서 찾으면 안 된다
+    assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감은 종전대로 조용하다');
   });
 
   t('④: 미리보기는 쓰지 않는다', () => {

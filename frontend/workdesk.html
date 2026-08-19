@@ -9833,6 +9833,7 @@ const _PT_REASON = {
   weak_signal:'근거가 시트 등록일뿐', pending_orders:'미반영 주문 있음',
   active_campaign:'모집중 공고 연결', already_sheetless:'이미 무시트',
   already_archived:'이미 아카이브', already_closed:'이미 마감',
+  name_drift:'탭 이름이 어긋남(마감으로 못 멈춤)',
 };
 let _PT = null;
 function _ptBox(){ return $('#ptBox'); }
@@ -9902,8 +9903,11 @@ function _ptRender(){
       그 작업에 참여한 <b>리뷰어의 제출완료 내역도 화면에서 사라집니다</b> — 끝난 작업만 고르세요.
       ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
       ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
-      ${r.archivedByGidOnly?`<br><b>이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 작업 ${r.archivedByGidOnly}개</b>
-        — 시스템은 새 이름으로 <b>여전히 읽습니다</b>. 위 정리 대상에 포함돼 있습니다.`:''}
+      ${r.archivedByGidOnly?`<br>이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 작업 ${r.archivedByGidOnly}개
+        — 위 정리 대상에 포함돼 있습니다.`:''}
+      ${(r.heldBy&&r.heldBy.name_drift)?`<br><b>시트에서 탭 이름이 바뀐 작업 ${r.heldBy.name_drift}개는 마감 표시가 있어도 여전히 읽힙니다.</b>
+        시스템이 <b>등록된 옛 이름</b>으로 찾기 때문입니다 — <b>여기서 정리해도 멈추지 않습니다.</b>
+        관리자 대시보드의 <b>탭명 교정(sync-tab-names)</b>으로 이름을 맞춘 뒤 다시 정리하세요.`:''}
       ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
     </div>
     ${_ptProbeBlock(r)}

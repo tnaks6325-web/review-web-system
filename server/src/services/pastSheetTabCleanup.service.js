@@ -73,6 +73,7 @@ const _SCAN_SQL = `
          ${ACTIVITY_SELECT_SQL},
          arch."isArchived",
          archg."archivedGidOnly",
+         live."liveTabName",
          ord."pendingOrders",
          camp."activeCampaigns",
          idx."indexRows"
@@ -93,6 +94,20 @@ const _SCAN_SQL = `
         FROM index_master_archive ima
        WHERE ima.sheet_id = tc.sheet_id AND ima.tab_name = tc.tab_name
     ) arch ON TRUE
+    /* ★★ smartBuild 의 마감·아카이브 스킵은 **시트의 현재 탭 이름**으로 조회한다
+     *   (tcMap/archivedSet 둘 다 sheet_id||tab_name 키, gid 미참조 — indexBuilder:278,543).
+     *   그래서 시트에서 탭 이름이 바뀌었는데 tab_configs 가 옛 이름을 들고 있으면
+     *   그 탭은 마감·아카이브 표시가 있어도 **새 이름으로 계속 읽힌다**
+     *   ⇒ 그런 탭은 "이미 안 읽음"이 아니고, 게다가 **마감해도 읽기가 안 멈춘다**
+     *     (탭명 교정이 먼저다). 라이브 이름은 RAW 미러에서 gid 로 읽는다(시트 재읽기 0). */
+    LEFT JOIN LATERAL (
+      SELECT rst.tab_name AS "liveTabName"
+        FROM raw_sheet_tabs rst
+       WHERE rst.sheet_id = tc.sheet_id
+         AND NULLIF(tc.tab_gid, '') IS NOT NULL AND rst.tab_gid = tc.tab_gid
+       ORDER BY rst.mirrored_at DESC NULLS LAST
+       LIMIT 1
+    ) live ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int > 0 AS "archivedGidOnly"
         FROM index_master_archive ima
@@ -131,9 +146,18 @@ function classifyPastTab(row, since) {
     indexRows: row.indexRows || 0,
     // 아카이브 마커가 옛 이름으로만 남은 탭 표식(판정에는 쓰지 않는다 — smartBuild 는 읽는다)
     archivedGidOnly: !!row.archivedGidOnly,
+    // 시트의 현재 탭 이름이 등록명과 다르다 = smartBuild 의 이름 기준 스킵이 빗나간다
+    nameDrift: !!(row.liveTabName && row.liveTabName !== row.tabName),
+    liveTabName: row.liveTabName || '',
   };
   // (5) 이미 안 읽는 상태 — 할 일 없음
+  // ★ 무시트 판정만 gid 폴백이 있다(sheetlessScope) — 이름이 바뀌어도 유효
   if (row.sheetless)   return { ...base, reads: false, candidate: false, reason: 'already_sheetless' };
+  // ★★ 마감·아카이브 스킵은 **이름 기준**이라 이름이 어긋나면 빗나간다 → 여전히 읽힌다.
+  //   그리고 이 상태는 **마감으로 고칠 수 없다**(마감 표시는 옛 이름 행에 붙는다)
+  //   ⇒ 후보로 올리지 않고 사유를 말한다: 탭명 교정이 먼저다.
+  if (base.nameDrift && (row.isArchived || row.isClosed))
+    return { ...base, reads: true, candidate: false, reason: 'name_drift' };
   if (row.isArchived)  return { ...base, reads: false, candidate: false, reason: 'already_archived' };
   if (row.isClosed)    return { ...base, reads: false, candidate: false, reason: 'already_closed' };
   // 여기부터는 **지금도 시트를 읽고 장부를 다시 만드는 탭**이다.
@@ -188,7 +212,9 @@ async function scanPastSheetTabs({ since, limit = SCAN_CAP } = {}) {
     quietBy: quiet,
     // 이름이 바뀌어 아카이브 마커가 옛 이름으로만 남은 탭 — smartBuild 는 새 이름으로 계속 읽으므로
     // "아카이브"로 접지 않고 정상 판정에 태운다. 건수를 말하는 이유 = 숫자가 왜 늘었는지 설명하려고.
-    archivedByGidOnly: items.filter(i => i.archivedGidOnly).length,
+    // ★ 읽히는 것만 센다 — 무시트·마감이라 어차피 안 읽는 탭까지 세면
+    //   "여전히 읽습니다"가 거짓이 된다(2026-08-19 실측: 6개 전부 무시트·마감이었다).
+    archivedByGidOnly: items.filter(i => i.archivedGidOnly && i.reads).length,
     candidates: candidates.length,
     heldBy: held,
     sheetsAffected: new Set(candidates.map(i => i.sheetId)).size,
