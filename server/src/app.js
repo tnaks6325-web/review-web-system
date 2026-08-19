@@ -128,9 +128,18 @@ app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
 
 // 첫 무시트 구매양식 배포 구간에 원장만 남은 주문을 한 번 더 안전하게 인계한다.
-// 작업보드에 연결된 주문은 서비스 조회에서 제외되므로 재시작마다 실행돼도 비파괴·멱등이다.
 // Google Sheet/GAS는 전혀 호출하지 않는다. 멀티 인스턴스 경합은 DB job lock으로 직렬화한다.
-setImmediate(async () => {
+//
+// ★★ 2026-08-19: 기본 OFF 로 전환(긴급). 이 잡은 "멱등"이 아니라 **os(order_submissions) 행 단위**로
+//   멱등이다 — 같은 실물 주문이 여러 os 로 존재하면(무시트 경로가 `sheet_row_claims` 의
+//   `(sheet_id,tab_name,dedup_key)` 유니크를 건너뛰고, `campaign_participants.order_submission_id`
+//   도 유니크가 아니다) 그 하나하나가 "아직 반영 안 됨"으로 판정돼 **부팅할 때마다 빈 슬롯을 하나씩 더
+//   소비**한다. 8/18~19 배포 40여 회 동안 같은 리뷰어 쌍이 규칙적으로 반복 반영되고 참여자가 정원을
+//   넘긴(870/800 · 901/900) 원인이 이것이다.
+// ★ 기능 자체는 살아 있다 — 필요할 때 `POST /api/diag/sheetless-worktable-recover`(adminOrMaster)로
+//   사람이 실행한다. 자동 실행을 되살리려면 Railway `SHEETLESS_RECOVER_ON_BOOT=1`(중복 방어가
+//   구조적으로 복구된 뒤에만).
+if (process.env.SHEETLESS_RECOVER_ON_BOOT === '1') setImmediate(async () => {
   try {
     const { withJobLock } = require('./utils/jobLock');
     const { recoverUnwrittenSheetlessOrders } = require('./services/sheetlessOrder.service');
@@ -138,6 +147,7 @@ setImmediate(async () => {
       limit: 1000,
       by: 'startup-recovery',
     }));
+    console.warn('[sheetless-worktable-recover] startup recovery ran (SHEETLESS_RECOVER_ON_BOOT=1)');
   } catch (err) {
     // 서비스 기동/사용자 요청은 막지 않고 Sentry·로그로만 남긴다.
     console.error('[sheetless-worktable-recover] startup failed:', err.message);

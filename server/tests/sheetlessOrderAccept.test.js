@@ -138,7 +138,8 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       const client = {
         query: async (sql, params) => {
           log.client.push({ sql: String(sql).trim(), params });
-          if (/SELECT id, row_json FROM campaign_participants/.test(sql)) {
+          // ⚠ 컬럼 목록은 구현이 늘릴 수 있다(seq 추가 등) — 열 이름을 고정하면 가드가 조용히 빨개진다.
+          if (/SELECT id,[\s\S]*?row_json FROM campaign_participants/.test(sql)) {
             return { rows: exists ? [{ id: 'p1', row_json: curRowJson }] : [] };
           }
           return { rows: [], rowCount: 1 };
