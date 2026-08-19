@@ -35,11 +35,18 @@ async function sweepDirtyLedgers({ by = 'ledger-sweep', force = false } = {}) {
   let done = 0, failed = 0;
   for (const t of rows) {
     try {
+      /* ★★ 클리어 기준은 **재생성을 시작한 시각**이지, 조회해 온 `dirtyAt` 이 아니다.
+         PG timestamptz 는 마이크로초, JS Date 는 밀리초까지라 되보내면 `12:19:59.123456`
+         이 `.123` 으로 잘려 `<=` 가 **한 행도 안 맞는다**(로컬 PG16 실증 — dirty 가 영영
+         안 지워져 같은 탭을 매 주기 재생성하는 무한 루프가 된다).
+         startedAt 은 항상 dirtyAt 보다 뒤이므로 그 편집은 확실히 지우고,
+         재생성 중(> startedAt) 들어온 새 편집은 그대로 남긴다 — 원래 의도 그대로. */
+      const startedAt = new Date();
       await require('./sheetlessLedger.service').rebuildLedgers({ sheetId: t.sheetId, tabName: t.tabName, by });
       await db.query(
         `UPDATE tab_configs SET ledger_dirty_at = NULL
           WHERE sheet_id = $1 AND tab_name = $2 AND ledger_dirty_at <= $3`,
-        [t.sheetId, t.tabName, t.dirtyAt]);
+        [t.sheetId, t.tabName, startedAt]);
       done++;
     } catch (e) { failed++; logger.warn(`[ledgerSweep] ${t.tabName} 재생성 실패(dirty 유지): ${e.message}`); }
   }
