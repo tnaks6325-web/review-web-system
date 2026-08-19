@@ -731,6 +731,14 @@
     // ★★ 시트 일정 공고도 조절 가능(사용자 확정 2026-08-07 — 종전 읽기 전용 잠금 해제).
     //   규칙은 "조절한 날짜만 시스템이 이긴다" — 그래서 잠그는 대신 **시트 계획을 기준선으로**
     //   보여주고(baseFor/sheetFor), 조절하지 않은 날은 계속 시트를 따른다고 문장으로 말한다.
+    /* ★ 지금은 모든 작업이 무시트 작업표다 — 연결이 무시트가 아니면 조절이 **정원만** 바꾸고
+       작업표의 줄은 그대로다. 그 상태를 조용히 두면 "조절했는데 표에 줄이 안 생긴다"가 된다. */
+    var wtNote = (j.worktableLinked === false)
+      ? '<div class="cdp-note" style="border-color:#FCA5A5;background:#FEF2F2;color:#B42318">'
+        + '⚠ 이 작업은 <b>무시트 작업표로 전환되지 않은 상태</b>입니다 — 여기서 조절하면 '
+        + '<b>정원만 바뀌고 작업표의 줄은 그대로</b>입니다. 표까지 맞추려면 먼저 탈시트 전환을 확인해주세요.'
+        + '</div>'
+      : '';
     var schNote = '';
     if (j.scheduleDriven === true) {
       var up = (j.scheduleDates || []).filter(function (x) { return x.date >= j.today; });
@@ -968,6 +976,7 @@
     bd.innerHTML =
       '<div class="cdp-fix">'
       + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
+      + wtNote
       + schNote
       + statBlk
       + offNote
@@ -1053,6 +1062,7 @@
         ? '조절 ' + dirty + '일 — [확정 저장]을 눌러야 반영됩니다'
         : '조절은 [확정 저장]을 눌러야 반영됩니다 · 차수는 즉시 반영';
     }
+    syncRebuildBtn();
   }
 
   function histHtml() {
@@ -1445,6 +1455,10 @@
       applyOverview(j);
       if (j.worktableProjection && j.worktableProjection.ok === false) {
         toast('모집계획은 저장됐지만 작업보드 갱신에 실패했습니다 — 다시 저장해 재시도해주세요', 'warning');
+      } else if (j.worktableSync && j.worktableSync.warn) {
+        /* ★ 작업표의 줄이 안 바뀐 경우를 "저장 완료"로 뭉뚱그리지 않는다 —
+           지금은 모든 작업이 무시트라 이 상태 자체가 이상 신호(전환 누락)다. */
+        toast(j.worktableSync.message || '정원만 조절됐습니다 — 작업표의 줄은 바뀌지 않았습니다', 'warning');
       } else {
         toast('저장했습니다 — 작업보드·카드·리뷰어 화면에 바로 반영됩니다');
       }
@@ -1456,6 +1470,19 @@
     } finally {
       if (S) S.saving = false;
     }
+  }
+
+  /** [작업표 재구성] 상태 — 무시트 작업표가 아니면 눌러도 409 라 비활성 + 사유를 붙인다.
+   *  ★ 눌러도 아무 일 없는(또는 오류만 나는) 버튼을 두지 않는다. */
+  function syncRebuildBtn() {
+    var btn = document.getElementById('cdpRebuildBtn');
+    if (!btn || !S || !S.data) return;
+    var linked = S.data.worktableLinked;
+    btn.disabled = (linked === false);
+    btn.title = linked === false
+      ? '이 작업은 아직 무시트 작업표로 전환되지 않아 재구성할 수 없습니다 — 조절은 정원만 바꿉니다'
+      : (linked === true ? '저장된 날짜별 계획으로 빈 준비 행만 다시 배치합니다'
+        : '작업표 연결 상태를 확인하지 못했습니다 — 실행하면 서버가 다시 판정합니다');
   }
 
   async function _rebuildWorktable() {

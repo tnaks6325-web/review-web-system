@@ -154,16 +154,23 @@ async function getPlanOverview(campaignId) {
   // 기준선으로 내려준다. 없는 날짜를 0명으로 표현해야 주말/휴무일을 조절 대상으로
   // 표시해도 가짜 인원이 생기지 않는다.
   let worktableDates = null;
+  /* 무시트 작업표 연결 여부 — true=조절이 표의 줄까지 바꾼다 / false=정원만 바뀐다(전환 누락 신호)
+     / null=연결 없음·판정 실패(모름). ★ 화면이 이 값으로 [작업표 재구성] 활성·경고를 정한다.
+     worktableDates 유무로 추정하면 "행이 없다·날짜 열이 없다"까지 전환 누락으로 오독한다. */
+  let sheetlessLinked = null;
   try {
     const { isSheetless } = require('../utils/sheetlessScope');
-    if (camp.linked_sheet_id && camp.linked_tab_name
-      && await isSheetless(pool, camp.linked_sheet_id, camp.linked_tab_name)) {
-      const { readWorktableDates } = require('./sheetlessDailyPlan.service');
-      const read = await readWorktableDates({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name });
-      if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({ date, slots: read.byDate[date] }));
-      else logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 실패 camp=${camp.id}: ${read.reason}`);
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      sheetlessLinked = await isSheetless(pool, camp.linked_sheet_id, camp.linked_tab_name);
+      if (sheetlessLinked) {
+        const { readWorktableDates } = require('./sheetlessDailyPlan.service');
+        const read = await readWorktableDates({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name });
+        if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({ date, slots: read.byDate[date] }));
+        else logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 실패 camp=${camp.id}: ${read.reason}`);
+      }
     }
   } catch (e) {
+    sheetlessLinked = null;   // 모르면 모른다고 한다(전환 누락으로 단정하지 않는다)
     logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 예외 camp=${camp.id}: ${e.message}`);
   }
 
@@ -200,6 +207,8 @@ async function getPlanOverview(campaignId) {
     scheduleDates: (schedule && schedule !== 'unknown')
       ? schedule.dates.map(d => ({ date: d.date, slots: d.slots })) : null,
     worktableDates,
+    // 조절이 작업표의 줄까지 바꾸는가(true) · 정원만 바꾸는가(false) · 모름(null)
+    worktableLinked: sheetlessLinked,
     plans: plansQ.rows.map(r => ({
       date: r.date, count: Number(r.count) || 0, updatedBy: r.updated_by || '', updatedAt: r.updated_at,
     })),
@@ -441,7 +450,12 @@ async function savePlans(campaignId, body, actor) {
           projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         }
       } else {
-        worktableSync = { ok: true, skipped: true, reason: 'not_sheetless', moved: 0, cleared: 0 };
+        /* ★★ 시트 기반 탭은 이제 정상 상태가 아니다(탈 구글시트 완료 — 2026-08 사용자 확정).
+           표식(tab_configs.sheetless)이 안 켜진 탭이면 조절은 **정원만 바꾸고 작업표는 그대로**인데,
+           그걸 조용히 넘기면 "조절했는데 표에 줄이 안 생긴다"가 원인 불명으로 남는다.
+           저장 자체는 막지 않되(정원 조절은 유효) 화면이 사유를 말하도록 신호를 올린다. */
+        worktableSync = { ok: true, skipped: true, reason: 'not_sheetless', warn: true, moved: 0, cleared: 0,
+          message: '이 작업은 아직 무시트 작업표로 전환되지 않아 표의 줄은 바뀌지 않았습니다 — 정원만 조절됐습니다.' };
       }
     }
     await client.query(

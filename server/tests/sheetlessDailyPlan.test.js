@@ -217,6 +217,9 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     // 빈 준비 행이 없는 경우에도 새 행을 만들어 0명 날짜 증원을 실제 작업표에 반영한다.
     const inserts = [];
     const client = { query: async (sql, params) => {
+      // ★ 새 행의 seq 는 **지운 줄까지 포함한 최대값**을 따로 묻는다(활성 행만 보면 지운 번호를
+      //   재사용해 23505 로 저장이 통째로 실패한다 — 2026-08-19).
+      if (/workdesk_participant_deletions/.test(sql)) return { rows: [{ max_seq: 7 }] };
       if (/FROM campaign_participants/.test(sql)) return { rows: [
         { id: 'fixed', seq: 7, tab_gid: 'g1', reviewer_name: '참여자', recipient_name: '참여자', phone8: '12345678', order_submission_id: 'order', row_json: { '번호': '7', '구매일자': '8/18 (화)' } },
       ] };
