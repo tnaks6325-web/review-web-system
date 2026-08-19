@@ -65,6 +65,47 @@ console.log('\n[A] 정렬 규칙 — 구매일자 → 주문 제출 시각 → s
   ok('★ 145번(8/18)이 146번으로 밀린다', byId.a === 2 && byId.b === 1, JSON.stringify(byId));
 }
 
+console.log('\n[A2] 지나간 날짜의 빈 줄은 표 맨 아래(사용자 확정 2026-08-19 — 든든푸드 쭈꾸미)');
+{
+  const rows = [
+    { id: 'p1', seq: 10, iso: '2026-06-08', submittedAt: '2026-06-08T01:00:00Z', filled: true },
+    { id: 'pb', seq: 11, iso: '2026-06-08', submittedAt: null, filled: false },   // 지나간 날짜의 빈 줄
+    { id: 'p2', seq: 12, iso: '2026-06-09', submittedAt: '2026-06-09T01:00:00Z', filled: true },
+    { id: 'fb', seq: 13, iso: '2026-08-25', submittedAt: null, filled: false },   // 미래의 빈 자리(모집 계획)
+    { id: 'nd', seq: 14, iso: null, submittedAt: null, filled: false },           // 날짜 판독 불가
+  ];
+  const today = '2026-08-19';
+  const order = U.orderRowsForNumbering(rows, { today }).map(r => r.id).join(',');
+  ok('★ 지나간 날짜의 빈 줄이 채워진 줄 뒤로 밀린다',
+     order.indexOf('pb') > order.indexOf('p2'), order);
+  ok('★ 미래의 빈 자리는 제자리(밀리지 않는다)',
+     order.indexOf('fb') < order.indexOf('pb'), order);
+  ok('★ 날짜 없는 줄은 여전히 맨 끝(④ 불변)',
+     order.split(',').pop() === 'nd', order);
+  ok('전체 순서 = p1,p2,fb,pb,nd', order === 'p1,p2,fb,pb,nd', order);
+
+  // ★★ `today` 를 안 주면 종전 동작 그대로(무회귀) — 이 파일은 시계를 보지 않는다
+  const legacy = U.orderRowsForNumbering(rows).map(r => r.id).join(',');
+  ok('★ today 미전달 = 종전 규칙(지난 빈 줄이 제자리)', legacy === 'p1,pb,p2,fb,nd', legacy);
+
+  // ★ 오늘 날짜의 빈 줄은 밀지 않는다(아직 지나가지 않았다)
+  const t2 = U.orderRowsForNumbering(
+    [{ id: 'x', seq: 1, iso: '2026-08-19', filled: false }, { id: 'y', seq: 2, iso: '2026-08-19', filled: true, submittedAt: '2026-08-19T01:00:00Z' }],
+    { today }).map(r => r.id).join(',');
+  ok('★ 오늘 날짜의 빈 줄은 밀지 않는다', t2 === 'y,x', t2);
+
+  // ★ 지나간 날짜라도 **채워진 줄**은 절대 밀지 않는다(주문·참여가 붙은 줄)
+  const t3 = U.orderRowsForNumbering(
+    [{ id: 'old', seq: 1, iso: '2026-06-01', filled: true }, { id: 'new', seq: 2, iso: '2026-08-18', filled: true }],
+    { today }).map(r => r.id).join(',');
+  ok('★ 지나간 날짜라도 채워진 줄은 제자리', t3 === 'old,new', t3);
+
+  // 계획으로도 반영된다(번호가 실제로 뒤로 간다)
+  const plan = U.computeRenumberPlan(rows, { hasNumberCol: true, today });
+  const byId = Object.fromEntries(plan.ordered.map((r, i) => [r.id, i + 1]));
+  ok('★ 지난 빈 줄의 번호가 마지막 직전으로 간다', byId.pb === 4 && byId.nd === 5, JSON.stringify(byId));
+}
+
 console.log('\n[B] 바뀌는 줄만 · 같은 값 재기록 없음');
 {
   const rows = [
@@ -153,6 +194,28 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 대상은 활성 줄만', /deleted_at IS NULL/.test(upd[0].sql) && /active = TRUE/.test(upd[0].sql));
     ok('번호 칸 이름은 표에서 찾은 값을 쓴다', upd[0].params[2] === '번호');
   }
+  // ── ⑤ 지나간 날짜의 빈 줄은 맨 아래(서비스 배선: filled + today 를 실제로 넘기는가)
+  {
+    const past = [
+      { id: 'aaaaaaaa-1111-1111-1111-111111111111', seq: 1, filled: true,  submitted_at: '2026-06-08T01:00:00Z',
+        row_json: { '번호': '1', '구매일자': '6 / 8 (월)', '수취인': '니징' } },
+      { id: 'bbbbbbbb-2222-2222-2222-222222222222', seq: 2, filled: false, submitted_at: null,
+        row_json: { '번호': '2', '구매일자': '6 / 8 (월)', '수취인': '' } },   // 지나간 날짜의 빈 줄
+      { id: 'cccccccc-3333-3333-3333-333333333333', seq: 3, filled: true,  submitted_at: '2026-06-09T01:00:00Z',
+        row_json: { '번호': '3', '구매일자': '6 / 9 (화)', '수취인': '박' } },
+    ];
+    const pool = makePool([
+      [/FROM tab_configs/i, { rows: [{ sheetless: true }] }],
+      [/FROM campaign_participants p/i, { rows: past }],
+    ]);
+    S.__setPoolForTest(pool);
+    const r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
+    const to = Object.fromEntries(r.sample.map(x => [x.seq, x.to]));
+    ok('★★ 서비스도 지난 빈 줄을 맨 아래로 민다(seq2 → 3번)', to[2] === '3', JSON.stringify(r.sample));
+    const sel = pool.calls.find(c => /FROM campaign_participants p/i.test(c.sql));
+    ok('★★ 빈 줄 판정은 SQL 단일 출처(FILLED_SQL)를 그대로 읽는다',
+      /AS filled/i.test(sel.sql) && /order_submission_id IS NOT NULL/i.test(sel.sql), sel.sql.slice(0, 300));
+  }
   // ── 번호·담당자 칸이 아예 없는 표
   {
     S.__setPoolForTest(makePool([
@@ -186,6 +249,14 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
   }
 
   console.log('\n[F] 판정 사본 0 · fallbackAnchor 필수');
+  {
+    const svc = read('src/services/rowNumbering.service.js');
+    ok('★★ 서비스는 오늘 날짜만 넘기고 판정은 util 이 한다(사본 0)',
+      /today:\s*todayIso/.test(svc) && !/iso\s*<\s*today/.test(svc), 'service 에 지난날짜 판정 사본 금지');
+    /* ★ 함수 **본문**으로 본다 — 머리말 주석에 'Date.now()' 라는 글자가 있어 파일 전체 검사는 못 쓴다. */
+    const bodies = String(U.orderRowsForNumbering) + String(U.computeRenumberPlan);
+    ok('★ util 은 여전히 시계를 보지 않는다(결정적)', !/Date\.now\(|new Date\(\)/.test(bodies));
+  }
   {
     const src = noLineComments(read('src/services/rowNumbering.service.js'));
     ok('★ 날짜 칸 찾기는 campaignSchedule.findDateColumnIndex 재사용',

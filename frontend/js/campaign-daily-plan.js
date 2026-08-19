@@ -1470,6 +1470,12 @@
         /* ★ 작업표의 줄이 안 바뀐 경우를 "저장 완료"로 뭉뚱그리지 않는다 —
            지금은 모든 작업이 무시트라 이 상태 자체가 이상 신호(전환 누락)다. */
         toast(j.worktableSync.message || '정원만 조절됐습니다 — 작업표의 줄은 바뀌지 않았습니다', 'warning');
+      } else if (j.worktableSync && j.worktableSync.rebuild && j.worktableSync.rebuild.ok === false
+                 && j.worktableSync.rebuild.reason !== 'worktable_rebuild_empty') {
+        /* ★ 저장 후 자동 재구성(오늘 이후 전체)이 실패한 경우 — 조절은 저장됐지만 미래 자리는
+           그대로다. 조용히 "저장 완료"라고 말하면 "왜 스케줄이 안 바뀌지"가 원인 불명으로 남는다. */
+        toast('조절은 저장됐지만 오늘 이후 자리 재구성에 실패했습니다 — '
+              + (j.worktableSync.rebuild.message || '[작업표 재구성]으로 다시 시도해주세요'), 'warning');
       } else {
         toast('저장했습니다 — 작업보드·카드·리뷰어 화면에 바로 반영됩니다');
       }

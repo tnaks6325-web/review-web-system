@@ -342,6 +342,76 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   schedMod.deriveSchedules = async () => new Map();
   schedMod.scheduleFor = () => null;
 
+  /* 4f-2. ★★ 조절을 저장하면 **오늘 이후 전체를 자동 재구성**한다(사용자 확정 2026-08-19).
+     계기 = 「위프 800건」 — 8/20부터여야 할 스케줄이 26.8.26 으로 남아 있었다.
+     종전 증분 동기화는 **이번에 저장한 날짜만** 손대서 과거·꼬인 빈 줄이 미래에 그대로 남는다. */
+  {
+    const sdp = require('../src/services/sheetlessDailyPlan.service');
+    const led = require('../src/services/sheetlessLedger.service');
+    const scope = require('../src/utils/sheetlessScope');
+    const keep = {
+      sync: sdp.syncAdjustedPlansToWorktable, defaults: sdp.loadWorktableDefaults,
+      rebuild: sdp.rebuildAdjustedPlansToWorktable, ledgers: led.rebuildLedgers, isSheetless: scope.isSheetless,
+      sheet: CAMP_ROW.linked_sheet_id, tab: CAMP_ROW.linked_tab_name,
+    };
+    CAMP_ROW.linked_sheet_id = 'wt_abc'; CAMP_ROW.linked_tab_name = '위프800';
+    scope.isSheetless = async () => true;
+    sdp.loadWorktableDefaults = async () => new Map();
+    sdp.syncAdjustedPlansToWorktable = async () => ({ ok: true, moved: 1, cleared: 0 });
+    led.rebuildLedgers = async () => ({ mirrorRows: 1, indexRows: 1, submittedCount: 0 });
+
+    const planRows = [{ date: d(1), count: 20 }, { date: d(2), count: 20 }];
+    const stubWithPlans = () => {
+      const st = baseStub();
+      st['FROM campaign_daily_plans'] = (sql) => ({ rows: /plan_date >=/.test(sql) ? planRows : [] });
+      return st;
+    };
+
+    // ① 저장하면 재구성이 오늘 이후 계획 전체로 자동 실행된다
+    let seen = null;
+    sdp.rebuildAdjustedPlansToWorktable = async (a) => { seen = a; return { ok: true, reassigned: 3, cleared: 2, created: 0 }; };
+    STUB = stubWithPlans(); CALLS.length = 0;
+    let r = await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
+    ok('★★ 조절 저장 = 오늘 이후 전체 자동 재구성(사용자 확정 2026-08-19)', !!seen);
+    ok('★ 재구성 대상은 오늘 이후 저장된 계획 전부(저장한 날짜만이 아니다)',
+      seen && seen.plans.length === 2 && seen.today === today);
+    ok('★ 재구성은 관리자 버튼과 같은 함수(사본 0)',
+      /rebuildAdjustedPlansToWorktable/.test(readS('services/campaignPlan.service.js')));
+    ok('★★ SAVEPOINT 격리(재구성 실패가 계획 저장을 죽이지 않는다)',
+      /* ★ 부분일치로 보면 RELEASE/ROLLBACK TO 가 대신 통과시킨다(변이시험 실측) — 정확일치로 본다. */
+      CALLS.some(c => c.sql.trim() === 'SAVEPOINT cp_auto_rebuild'));
+    ok('★ 결과를 응답에 실어 화면이 말할 수 있다', !!(r.worktableSync && r.worktableSync.rebuild));
+
+    // ② 재구성이 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
+    sdp.rebuildAdjustedPlansToWorktable = async () => { const e = new Error('boom'); e.code = 'worktable_rebuild_below_used'; throw e; };
+    STUB = stubWithPlans(); CALLS.length = 0;
+    r = await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
+    eq('★★ 재구성 실패해도 계획 저장은 성공', r.applied, 1);
+    ok('★ 실패는 사유로 드러난다(조용한 누락 금지)',
+      r.worktableSync.rebuild.ok === false && r.worktableSync.rebuild.reason === 'worktable_rebuild_below_used');
+    ok('★ 트랜잭션 전체가 아니라 SAVEPOINT 만 되돌린다',
+      CALLS.some(c => c.sql.includes('ROLLBACK TO SAVEPOINT cp_auto_rebuild'))
+      && !CALLS.some(c => c.sql.trim() === 'ROLLBACK'));
+    ok('★ 화면이 재구성 실패를 말한다',
+      /worktableSync\.rebuild/.test(readF('js/campaign-daily-plan.js'))
+      && /worktable_rebuild_empty/.test(readF('js/campaign-daily-plan.js')));
+
+    // ③ 킬스위치 = 종전 동작(증분 동기화만)
+    seen = null;
+    sdp.rebuildAdjustedPlansToWorktable = async (a) => { seen = a; return { ok: true }; };
+    process.env.CAMPAIGN_PLAN_AUTO_REBUILD = '0';
+    STUB = stubWithPlans();
+    await P.savePlans('c1', { set: [{ date: d(1), count: 20 }] }, 'tester');
+    ok('★ 킬스위치 CAMPAIGN_PLAN_AUTO_REBUILD=0 이면 자동 재구성 없음', seen === null);
+    delete process.env.CAMPAIGN_PLAN_AUTO_REBUILD;
+
+    sdp.syncAdjustedPlansToWorktable = keep.sync; sdp.loadWorktableDefaults = keep.defaults;
+    sdp.rebuildAdjustedPlansToWorktable = keep.rebuild; led.rebuildLedgers = keep.ledgers;
+    scope.isSheetless = keep.isSheetless;
+    CAMP_ROW.linked_sheet_id = keep.sheet; CAMP_ROW.linked_tab_name = keep.tab;
+    STUB = baseStub();
+  }
+
   // 4g. 차수: 첫 추가 = 초도 흡수(1차 200) + 2차 100 → 총량 300 동기화
   STUB = baseStub();
   CALLS.length = 0;

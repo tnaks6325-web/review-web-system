@@ -90,7 +90,8 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
   /* 활성 줄 + 그 줄의 주문 제출 시각.
      ★ 주문이 취소(soft-delete)된 줄은 시각을 쓰지 않는다 — 살아 있는 주문만 순서의 근거다. */
   const { rows } = await db.query(
-    `SELECT p.id, p.seq, p.row_json, os.submitted_at AS submitted_at
+    `SELECT p.id, p.seq, p.row_json, os.submitted_at AS submitted_at,
+            ${FILLED_SQL} AS filled
        FROM campaign_participants p
        LEFT JOIN order_submissions os
               ON os.id = p.order_submission_id AND os.deleted_at IS NULL
@@ -109,6 +110,11 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
      ★★ `fallbackAnchor` 는 선택이 아니다: 작업표의 구매일자는 `M / D (요일)` 라 **연도가 하나도 없다**.
         앵커가 없으면 전 행 null 이 되어 재번호가 "전부 날짜 없음"으로 조용히 무너진다
         (탈시트 W2-b F-2 와 같은 자리). */
+  /* KST 오늘 — ⑤ "지나간 날짜의 빈 줄은 맨 아래" 판정 기준.
+     ★ 판정 자체는 `utils/rowNumbering` 이 하고 여기서는 **오늘 날짜만** 넘긴다(판정 사본 0). */
+  const _kstNow = new Date(Date.now() + 9 * 3600 * 1000);
+  const todayIso = _kstNow.toISOString().slice(0, 10);
+
   let iso = rows.map(() => null);
   {
     const { findDateColumnIndex } = require('./campaignSchedule.service');
@@ -120,8 +126,7 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
         return rj[dateKey] == null ? '' : String(rj[dateKey]);
       });
       const { parseDateColumn } = require('../utils/koreanDate');
-      const kst = new Date(Date.now() + 9 * 3600 * 1000);
-      iso = parseDateColumn(raw, { fallbackAnchor: { y: kst.getUTCFullYear(), m: kst.getUTCMonth() + 1 } });
+      iso = parseDateColumn(raw, { fallbackAnchor: { y: _kstNow.getUTCFullYear(), m: _kstNow.getUTCMonth() + 1 } });
     }
   }
 
@@ -129,9 +134,9 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
     const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
     return {
       id: r.id, seq: r.seq, iso: iso[i] || null, submittedAt: r.submitted_at || null,
-      number: rj[numKey],
+      number: rj[numKey], filled: r.filled === true,
     };
-  }), { hasNumberCol: true });
+  }), { hasNumberCol: true, today: todayIso });
 
   const sample = plan.changes.slice(0, 20).map(c => ({ seq: c.seq, from: c.numberFrom || null, to: c.numberTo }));
   if (dryRun) {

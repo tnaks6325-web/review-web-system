@@ -14,7 +14,13 @@
  *     ② 같은 날짜 안에서는 **주문 제출 시각** 오름차순(주문이 없는 빈 슬롯은 그 날짜의 뒤)
  *     ③ 그래도 같으면 `seq`(안정 정렬 — 다시 돌려도 순서가 흔들리지 않는다)
  *     ④ **구매일자를 읽을 수 없는 줄은 맨 아래**(순서는 `seq`)
+ *     ⑤ **지나간 날짜의 빈 줄은 표 맨 아래로 민다**(사용자 확정 2026-08-19 — 든든푸드 쭈꾸미 건):
+ *        구매일자가 오늘보다 이전인데 주문·이름·수취인·연락처가 **전부 비어 있는 줄**은
+ *        그 날짜 자리를 지키지 않고 아래로 내려간다. **줄은 지우지 않는다**(밀기만).
  *   ★ ④ 를 "맨 위"로 바꾸지 말 것 — 날짜를 모르는 줄이 1번을 차지하면 그 뒤 번호가 전부 밀린다.
+ *   ★★ ⑤ 는 **`today` 를 받았을 때만** 켜진다 — 이 파일은 시계를 보지 않으므로(결정적),
+ *      호출부가 KST 오늘(`YYYY-MM-DD`)을 넘긴다. 못 받으면 종전 동작 그대로(무회귀).
+ *   ★ 순서는 `일반 → 지난 빈 줄 → 날짜 없는 줄` — 날짜 없는 줄이 계속 맨 끝이다(④ 불변).
  *
  * ★ 이 파일은 DB·시간(`Date.now()`)에 접근하지 않는다(결정적) — 날짜 파싱은 호출부가
  *   `utils/koreanDate.parseDateColumn` 으로 미리 해서 넘긴다(파서 사본 금지).
@@ -50,15 +56,23 @@ function _txt(v) { return v == null ? '' : String(v).trim(); }
  * @param {Array<{seq:number, iso?:string|null, submittedAt?:(Date|string|null)}>} rows
  * @returns {Array} 같은 원소들을 정렬한 새 배열
  */
-function orderRowsForNumbering(rows) {
+function orderRowsForNumbering(rows, opts = {}) {
+  const today = _txt(opts && opts.today);
   const t = v => {
     if (!v) return null;
     const n = (v instanceof Date) ? v.getTime() : Date.parse(String(v));
     return Number.isFinite(n) ? n : null;
   };
+  const rank = r => {
+    const iso = _txt(r && r.iso);
+    if (!iso) return 2;                                  // ④ 날짜 없는 줄이 계속 맨 끝
+    if (today && iso < today && r && r.filled === false) return 1;  // ⑤ 지나간 날짜의 빈 줄
+    return 0;
+  };
   return (Array.isArray(rows) ? rows.slice() : []).sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
     const ai = _txt(a && a.iso), bi = _txt(b && b.iso);
-    if (!!ai !== !!bi) return ai ? -1 : 1;              // ④ 날짜 없는 줄은 맨 아래
     if (ai && bi && ai !== bi) return ai < bi ? -1 : 1; // ① 구매일자 asc ('YYYY-MM-DD' 문자열 비교 = 날짜 비교)
     const at = t(a && a.submittedAt), bt = t(b && b.submittedAt);
     if ((at == null) !== (bt == null)) return at == null ? 1 : -1;  // ② 주문 없는 빈 슬롯은 그 날짜 뒤
@@ -73,14 +87,15 @@ function orderRowsForNumbering(rows) {
  * ★★ **담당자 칸은 건드리지 않는다**(사용자 확정 2026-08-19) — 담당자는 작업보드 좌측 상단
  *   [작업 조건]에 이미 표기되므로 줄마다 반복할 이유가 없다. 이미 적혀 있는 값도 그대로 둔다.
  *
- * @param {Array<{id:*, seq:number, iso?:string|null, submittedAt?:*, number?:*}>} rows
+ * @param {Array<{id:*, seq:number, iso?:string|null, submittedAt?:*, number?:*, filled?:boolean}>} rows
  * @param {object} [opts]
  * @param {boolean} [opts.hasNumberCol]  표에 번호 칸이 있는가(없으면 변경 없음)
+ * @param {string}  [opts.today]        KST 오늘 `YYYY-MM-DD`(⑤ 규칙 — 없으면 종전 동작)
  * @returns {{ordered:Array, changes:Array<{id:*, seq:number, numberFrom:string, numberTo:string}>}}
  */
 function computeRenumberPlan(rows, opts = {}) {
   const hasNum = opts.hasNumberCol !== false;
-  const ordered = orderRowsForNumbering(rows);
+  const ordered = orderRowsForNumbering(rows, { today: opts.today });
   const changes = [];
   ordered.forEach((r, i) => {
     if (!hasNum) return;
