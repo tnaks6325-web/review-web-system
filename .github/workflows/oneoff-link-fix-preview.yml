@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Preview3
+      - name: Preview4
         env:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
@@ -18,43 +18,71 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
 
-          \echo '=== ⓔ 이지유 연락처(33536503)로 낸 모든 주문 ==='
-          SELECT os.id, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
-                 os.orderer AS 주문자, os.recipient AS 수취인,
-                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
-                 os.tab_name, to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출,
-                 os.mirror_status, os.sheet_row, os.deleted_at IS NOT NULL AS 삭제됨
-            FROM order_submissions os
-           WHERE right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) = '33536503'
-           ORDER BY os.submitted_at;
-
-          \echo ''
-          \echo '=== ⓕ 수취인이 이지유/노대송/김옥선 인 주문 (전 탭) ==='
-          SELECT os.id, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
-                 os.orderer AS 주문자, os.recipient AS 수취인,
-                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
-                 os.tab_name, to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출,
-                 os.mirror_status, os.sheet_row, os.deleted_at IS NOT NULL AS 삭제됨
-            FROM order_submissions os
-           WHERE btrim(COALESCE(os.recipient,'')) IN ('이지유','노대송','김옥선')
-              OR btrim(COALESCE(os.orderer,''))   IN ('이지유','노대송','김옥선')
-           ORDER BY os.submitted_at;
-
-          \echo ''
-          \echo '=== ⓖ 장수돌침대 표에서 그 세 사람 줄 (내려간 줄 포함) ==='
-          SELECT cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
-                 cp.row_json->>'수취인' AS 수취인, cp.phone8,
-                 cp.row_json->>'구매일자' AS 구매일자,
+          CREATE TEMP VIEW onum AS
+          SELECT cp.*,
                  regexp_replace(COALESCE((
                    SELECT string_agg(t.value,'' ORDER BY t.key)
                      FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
-                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS 표주문번호,
-                 cp.order_submission_id AS 링크, cp.source,
-                 cp.deleted_at IS NOT NULL AS 내려간줄,
-                 to_char(cp.deleted_at,'MM-DD HH24:MI') AS 내려간시각
-            FROM campaign_participants cp
-           WHERE cp.tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건'
-             AND (cp.row_json->>'수취인' IN ('이지유','노대송','김옥선')
-                  OR cp.phone8 IN ('33536503','53849851'))
-           ORDER BY cp.seq;
+                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS onum
+            FROM campaign_participants cp;
+
+          \echo '=== ① 08-19 에 내려간 줄 — 시각대별 묶음 ==='
+          SELECT to_char(deleted_at,'MM-DD HH24:MI') AS 내려간시각, COUNT(*) AS 줄수,
+                 COUNT(DISTINCT tab_name) AS 작업수
+            FROM campaign_participants
+           WHERE deleted_at >= '2026-08-19'::date
+           GROUP BY 1 ORDER BY 1;
+
+          \echo ''
+          \echo '=== ② 07:00~08:00 내려간 줄 — 지금 규칙으로 재판정 ==='
+          WITH gone AS (
+            SELECT * FROM onum
+             WHERE deleted_at >= '2026-08-19 07:00'::timestamp
+               AND deleted_at <  '2026-08-19 08:00'::timestamp
+          )
+          SELECT g.tab_name, g.seq AS "#", COALESCE(g.row_json->>'번호','') AS 번호칸,
+                 g.row_json->>'수취인' AS 수취인, g.phone8,
+                 COALESCE(NULLIF(g.onum,''),'(빈칸)') AS 표주문번호,
+                 CASE
+                   WHEN length(g.onum) < 6 THEN '판정불가(표 주문번호 없음)'
+                   WHEN EXISTS (SELECT 1 FROM onum s
+                                 WHERE s.sheet_id=g.sheet_id AND s.tab_name=g.tab_name
+                                   AND s.deleted_at IS NULL AND s.onum = g.onum
+                                   AND s.phone8 = g.phone8)
+                        THEN '정상 정리(같은 번호+명의 줄이 살아있음)'
+                   ELSE '★ 오삭제 의심(같은 번호+명의 줄 없음)'
+                 END AS 판정
+            FROM gone g
+           ORDER BY 판정 DESC, g.tab_name, g.seq;
+
+          \echo ''
+          \echo '=== ③ 08-19 전체 내려간 줄 — 판정 요약 ==='
+          WITH gone AS (SELECT * FROM onum WHERE deleted_at >= '2026-08-19'::date)
+          SELECT to_char(g.deleted_at,'HH24:MI') AS 시각,
+                 CASE
+                   WHEN length(g.onum) < 6 THEN '판정불가'
+                   WHEN EXISTS (SELECT 1 FROM onum s
+                                 WHERE s.sheet_id=g.sheet_id AND s.tab_name=g.tab_name
+                                   AND s.deleted_at IS NULL AND s.onum = g.onum
+                                   AND s.phone8 = g.phone8)
+                        THEN '정상 정리'
+                   ELSE '★ 오삭제 의심'
+                 END AS 판정,
+                 COUNT(*)
+            FROM gone g GROUP BY 1,2 ORDER BY 1,2;
+
+          \echo ''
+          \echo '=== ④ 08-19 전체 오삭제 의심 줄 목록 ==='
+          WITH gone AS (SELECT * FROM onum WHERE deleted_at >= '2026-08-19'::date)
+          SELECT to_char(g.deleted_at,'HH24:MI') AS 시각, g.tab_name,
+                 g.seq AS "#", COALESCE(g.row_json->>'번호','') AS 번호칸,
+                 g.row_json->>'수취인' AS 수취인, g.phone8, g.onum AS 표주문번호,
+                 g.order_submission_id IS NOT NULL AS 링크있음
+            FROM gone g
+           WHERE length(g.onum) >= 6
+             AND NOT EXISTS (SELECT 1 FROM onum s
+                              WHERE s.sheet_id=g.sheet_id AND s.tab_name=g.tab_name
+                                AND s.deleted_at IS NULL AND s.onum = g.onum
+                                AND s.phone8 = g.phone8)
+           ORDER BY g.tab_name, g.seq;
           SQL
