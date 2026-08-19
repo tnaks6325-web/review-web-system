@@ -1190,6 +1190,22 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
 });
+/* ★★ 일괄 되돌리기 — 붙여넣기 실행취소·여러 칸 ↩ 의 창구.
+ *  편집 배치와 같은 이유·같은 상한·같은 게이트(권한이 넓어지지 않는다). */
+router.post('/workdesk/revert-batch', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, reverts } = req.body || {};
+    if (!sheetId || !tabName || !Array.isArray(reverts) || reverts.length === 0) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, reverts 필수' });
+    }
+    if (reverts.length > svc.EDIT_BATCH_MAX) {
+      return res.status(400).json({ ok: false, error: 'too_many_edits', max: svc.EDIT_BATCH_MAX, got: reverts.length });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.revertWorkdeskEditsBatch({ sheetId, tabName, reverts, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

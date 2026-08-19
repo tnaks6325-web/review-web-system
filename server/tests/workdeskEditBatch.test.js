@@ -356,6 +356,117 @@ const mk = (n, field) => Array.from({ length: n }, (_, i) => ({ rowId: 'r' + i, 
     assert.equal(j.ok, 100, '100칸 전부 저장');
   });
 
+  /* ── 9) 일괄 되돌리기 ────────────────────────────────── */
+  function revertPool({ failRowIds = [], throwRowIds = [] } = {}) {
+    const q = []; let connects = 0, released = 0;
+    const client = {
+      async query(sql, params) {
+        const str = String(sql).replace(/\s+/g, ' ').trim();
+        q.push({ s: str, params });
+        if (/^BEGIN|^ROLLBACK|^COMMIT/.test(str)) return { rows: [] };
+        if (/FROM campaign_participants WHERE id=\$1 .* FOR UPDATE/.test(str)) {
+          const id = params[0];
+          if (throwRowIds.indexOf(id) >= 0) throw new Error('boom ' + id);
+          if (failRowIds.indexOf(id) >= 0) return { rows: [] };
+          return { rows: [{ id, seq: 7, source: 'manual', order_submission_id: null, identity_key: null,
+                            phone8: null, recipient_name: null, option_text: null, row_json: { 비고: '새값' } }] };
+        }
+        if (/UPDATE participant_edits SET reverted_at/.test(str)) {
+          return { rowCount: 1, rows: [{ field: 'col:비고', value_text: '새값', prev_text: '옛값', had_prev: true, wrote_row_json: true }] };
+        }
+        if (/UPDATE campaign_participants SET row_json/.test(str)) return { rowCount: 1, rows: [] };
+        return { rows: [] };
+      },
+      release() { released++; },
+    };
+    return { q, get connects() { return connects; }, get released() { return released; },
+             async connect() { connects++; return client; }, async query(sql, p) { return client.query(sql, p); } };
+  }
+  const mkR = n => Array.from({ length: n }, (_, i) => ({ rowId: 'r' + i, field: 'col:비고' }));
+
+  const rp1 = revertPool();
+  svc.__setPoolForTest(rp1);
+  const rv1 = await svc.revertWorkdeskEditsBatch({ sheetId: 's', tabName: 'T', reverts: mkR(25) });
+  t('9a: 25칸 되돌리기도 커넥션이 칸 수에 비례하지 않는다', () => {
+    assert.ok(rv1.ok); assert.equal(rv1.succeeded, 25); assert.equal(rv1.failed, 0);
+    assert.ok(rp1.connects <= svc.EDIT_BATCH_CONCURRENCY, '커넥션 ≤ 동시 상한 (받음 ' + rp1.connects + ')');
+    assert.ok(rp1.connects < 25, '칸 수만큼 잡으면 안 된다');
+    assert.equal(rp1.released, rp1.connects, '잡은 만큼 반납');
+  });
+  t('9b: 건별 트랜잭션 — 한 칸 실패가 나머지를 죽이지 않는다', async () => {});
+  const rp2 = revertPool({ failRowIds: ['r2'], throwRowIds: ['r5'] });
+  svc.__setPoolForTest(rp2);
+  const rv2 = await svc.revertWorkdeskEditsBatch({ sheetId: 's', tabName: 'T', reverts: mkR(8) });
+  t('9c: 실패·예외 칸만 실패로 보고되고 나머지는 되돌아간다', () => {
+    assert.equal(rv2.succeeded, 6, '성공 6 (받음 ' + rv2.succeeded + ')');
+    assert.equal(rv2.results[2].error, 'row_not_found');
+    assert.equal(rv2.results[5].error, 'revert_failed');
+    assert.equal(rv2.results[6].ok, true, '그 다음 칸은 정상');
+  });
+  t('9d: 원본 복원 건수를 보고한다(무엇이 되돌아갔는지 세지 못하면 조용한 누락)', () => {
+    assert.equal(rv1.restored, 25, 'rowJsonRestored 집계 (받음 ' + rv1.restored + ')');
+  });
+  t('9e: 상태 열은 일괄 경로에서도 잠긴다(단건과 같은 규칙)', async () => {});
+  const rp3 = revertPool();
+  svc.__setPoolForTest(rp3);
+  const rv3 = await svc.revertWorkdeskEditsBatch({ sheetId: 's', tabName: 'T',
+    reverts: [{ rowId: 'r0', field: 'is_paid' }, { rowId: 'r1', field: 'col:비고' }] });
+  t('9f: is_paid 되돌리기는 거부, 나머지는 처리', () => {
+    assert.equal(rv3.results[0].ok, false); assert.equal(rv3.results[0].error, 'status_column_locked');
+    assert.equal(rv3.results[1].ok, true);
+  });
+  t('9g: 상한·빈 배열은 서버가 거부한다(쿼리 0)', async () => {});
+  const rp4 = revertPool();
+  svc.__setPoolForTest(rp4);
+  const rOver = await svc.revertWorkdeskEditsBatch({ sheetId: 's', tabName: 'T', reverts: mkR(svc.EDIT_BATCH_MAX + 1) });
+  const rEmpty = await svc.revertWorkdeskEditsBatch({ sheetId: 's', tabName: 'T', reverts: [] });
+  t('9h: 상한 초과·빈 배열 거부', () => {
+    assert.equal(rOver.error, 'too_many_edits'); assert.equal(rEmpty.error, 'reverts_required');
+    assert.equal(rp4.connects, 0, '커넥션조차 잡지 않는다');
+  });
+  t('9i: 되돌리기 로직 사본 0 — 단건·일괄이 _revertOneInTx 를 탄다', () => {
+    const i = S.indexOf('async function revertWorkdeskEditsBatch');
+    const body = S.slice(i, S.indexOf('\n}\n', i));
+    assert.ok(/_revertOneInTx\(client,/.test(body), '일괄이 실행부 위임');
+    assert.ok(!/UPDATE participant_edits/.test(body), '자체 SQL 금지');
+    const j = S.indexOf('async function revertWorkdeskEdit(');
+    assert.ok(/_revertOneInTx\(client,/.test(S.slice(j, j + 400)), '단건도 실행부 위임');
+    const k = S.indexOf('async function _revertOneInTx');
+    const impl = S.slice(k, S.indexOf('async function revertWorkdeskEdit(', k));
+    assert.ok(!/getPool\(\)\.connect|client\.release\(\)/.test(impl), '실행부는 커넥션을 잡지도 반납하지도 않는다');
+  });
+  t('9j: 라우트가 등록되고 단건과 같은 게이트를 쓴다', () => {
+    const i = RT.indexOf("router.post('/workdesk/revert-batch'");
+    assert.ok(i > 0, 'revert-batch 라우트');
+    const body = RT.slice(i, RT.indexOf('router.', i + 10));
+    assert.ok(/authMiddleware/.test(RT.slice(i, i + 200)));
+    assert.ok(/_ensureWorkdeskCellEditScope\(req\)/.test(body), '같은 스코프 게이트');
+    assert.ok(/svc\.EDIT_BATCH_MAX/.test(body), '라우트에도 상한');
+    const router = require('../src/routes/trackB.routes');
+    assert.ok((router.stack || []).some(l => l.route && l.route.path === '/workdesk/revert-batch' && l.route.methods.post),
+      '라우터 스택 등록');
+  });
+  t('9k: 실행취소도 묶음 왕복 — 칸마다 요청하지 않는다', () => {
+    const i = FE.indexOf('async function _undoRunGroup');
+    assert.ok(i > 0, '_undoRunGroup 정의');
+    const body = FE.slice(i, FE.indexOf('\n}\n', i));
+    assert.ok(/edit-batch/.test(body) && /revert-batch/.test(body), '두 묶음 경로 사용');
+    assert.ok(/_PASTE_CHUNK/.test(body), '묶음 크기로 나눠 보낸다');
+    const undo = FE.slice(FE.indexOf('function _undoLatestCellGroup'), i);
+    assert.ok(!/workdesk\/revert'/.test(undo) && !/workdesk\/edit'/.test(undo),
+      '실행취소가 단건 경로로 되돌아가면 500칸 실행취소가 리미터에 다시 막힌다');
+  });
+  t('9l: 한 칸이 막혀도 전체를 포기하지 않는다(옛 경로는 첫 칸에서 중단했다)', () => {
+    const i = FE.indexOf('async function _undoRunGroup');
+    const body = FE.slice(i, FE.indexOf('\n}\n', i));
+    assert.ok(/stale\.push\(e\)|: stale/.test(body) || /doable/.test(body), '되돌릴 수 있는 칸을 따로 고른다');
+    assert.ok(/failed\.push\(e\)/.test(body), '실패 칸만 따로 모은다');
+    const caller = FE.slice(FE.indexOf('function _undoLatestCellGroup'), i);
+    assert.ok(/group\.entries=out\.stale\.concat\(out\.failed\)/.test(caller.replace(/\s+/g, '')),
+      '못 되돌린 칸은 그룹에 남겨 다시 시도할 수 있어야 한다');
+    assert.ok(/칸 되돌림/.test(caller), '몇 칸이 남았는지 말한다');
+  });
+
   console.log('\n✅ 통과 ' + pass + '건\n');
   process.exit(0);
 })();
