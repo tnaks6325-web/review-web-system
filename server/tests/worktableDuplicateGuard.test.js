@@ -364,8 +364,12 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     const dedupeH = ledSrcH.slice(ledSrcH.indexOf('async function dedupeRows('),
                                   ledSrcH.indexOf('module.exports'));
     ok('조회가 제출 시각을 함께 읽는다', /os\.submitted_at AS at/.test(dedupeH));
+    /* ⚠ 2026-08-19: **남길 줄과 같은 주문을 쓰는 줄(㉯ 축)은 제외**하도록 좁혔다 — 그 시각은
+       "중복이 생긴 때" 가 아니라 "그 주문이 접수된 때" 라 빨간 경고가 오탐으로 떴다(실측).
+       검사 의미는 그대로: **발생 시각은 늦게 들어온 줄에서만 뽑는다**. */
     ok('★ 발생 시각은 **늦게 들어온 줄**에서 뽑는다(먼저 온 줄은 정상 참여)',
-      /const _lastAt = losers\.reduce\(/.test(dedupeH));
+      /const _lastAt = _newOrderLosers\.reduce\(/.test(dedupeH)
+      && /_newOrderLosers = losers\.filter\(r => String\(r\.osid \|\| ''\) !== String\(keep\.osid \|\| ''\)\)/.test(dedupeH));
     ok('보류 건에도 발생 시각을 싣는다(사람이 판단할 근거)', /seqs: list\.map\(r => r\.seq\), lastAt: _lastAt/.test(dedupeH));
     ok('탭 요약에 가장 최근 발생 시각', /const lastDupAt = \[\.\.\.plan, \.\.\.skipped\]/.test(dedupeH));
 

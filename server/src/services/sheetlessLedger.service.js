@@ -469,6 +469,7 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   /* ★★ 남길 줄이 쓰는 주문은 **절대 취소하지 않는다** — ㉯ 축의 지울 줄들은 남길 줄과
      **같은 주문 기록**을 공유하므로, 그대로 취소하면 살아남은 줄의 주문까지 함께 사라진다. */
   const keepOsIds = new Set();
+  let sameOrderGroups = 0;   // 발생 시각을 알 수 없는 그룹(㉯ 축만) — 조용히 빼지 않고 고지한다
   for (const g of groups.values()) {
     const list = g.rows;
     if (list.length < 2) continue;
@@ -480,8 +481,14 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
     /* ★★ "언제 생긴 중복인가" — 판정에는 쓰지 않고 **보여주기만** 한다.
        재발 방지(2026-08-19)가 실제로 듣고 있는지는 이 값 하나로 판별된다: 남은 목록이
        전부 그 이전 날짜면 **정리 안 한 과거분**이고, 그 이후 날짜가 보이면 **아직 새는 구멍**이 있다.
-       ★ 기준은 **늦게 들어온 줄(losers)** 의 제출 시각 — 먼저 들어온 줄은 정상 참여다. */
-    const _lastAt = losers.reduce((m, r) => (r.at && (!m || r.at > m) ? r.at : m), null);
+       ★ 기준은 **늦게 들어온 줄(losers)** 의 제출 시각 — 먼저 들어온 줄은 정상 참여다.
+       ★★ 단 **남길 줄과 같은 주문을 쓰는 줄(㉯ 축)은 세지 않는다** — 그 시각은 "중복이 생긴 때" 가
+          아니라 "그 주문이 접수된 때" 다. 오늘 들어온 주문이 여러 줄에 기록되면 발생 시점과 무관하게
+          오늘 날짜가 찍혀 **"배포 이후에 또 샜다" 는 빨간 경고가 오탐으로 뜬다**(2026-08-19 실측).
+          작업표 줄이 언제 만들어졌는지는 이 원장에 없으므로 **모른다고 둔다**(0 이나 오늘로 꾸미지 않는다). */
+    const _newOrderLosers = losers.filter(r => String(r.osid || '') !== String(keep.osid || ''));
+    const _lastAt = _newOrderLosers.reduce((m, r) => (r.at && (!m || r.at > m) ? r.at : m), null);
+    if (!_newOrderLosers.length) sameOrderGroups++;
     if (blockedPayment.length || blockedUsed.length) {
       skipped.push({
         orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
@@ -548,6 +555,8 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   const stat = {
     sheetId, tabName, boardRows: rows.length, skippedNoRowOrder: noRowOrder.length, lastDupAt,
     groups: plan.length, removeRows: removeSeqs.length, cancelOrders: cancelOsIds.length,
+    /* 발생 시각을 알 수 없는 그룹 수 — 화면이 "이만큼은 이 판정에 안 들어갔다" 고 말한다. */
+    sameOrderGroups,
     /* 어느 규칙이 몇 그룹을 잡았는지 — ㉯(같은 주문 기록) 축이 실제로 듣고 있는지 이 값으로 갈린다. */
     byAxis: [...plan, ...skipped].reduce((a, g) => {
       for (const k of (g.matchedBy || [])) a[k] = (a[k] || 0) + 1; return a;
@@ -610,7 +619,7 @@ async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeR
           sheetId: t.sheetId, tabName: t.tabName, label: t.label,
           boardRows: r.boardRows, groups: r.groups, removeRows: r.removeRows,
           skippedGroups: r.skippedGroups, skippedNoRowOrder: r.skippedNoRowOrder || 0,
-          lastDupAt: r.lastDupAt || null,
+          lastDupAt: r.lastDupAt || null, sameOrderGroups: r.sameOrderGroups || 0,
         });
       }
     } catch (e) {
@@ -624,6 +633,8 @@ async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeR
   out.totalSkipped = out.tabs.reduce((n, t) => n + t.skippedGroups, 0);
   /* ★ 전 작업 통틀어 가장 최근에 생긴 중복 — "지금도 늘어나는가" 의 답. */
   out.lastDupAt = out.tabs.reduce((m, t) => (t.lastDupAt && (!m || t.lastDupAt > m) ? t.lastDupAt : m), null);
+  /* 발생 시각을 알 수 없는 그룹(㉯ 축만) — 조용히 빼면 "배포 이후 유입 0" 으로 오독된다. */
+  out.sameOrderGroups = out.tabs.reduce((n, t) => n + (t.sameOrderGroups || 0), 0);
   logger.info(`[sheetlessLedger] 중복 일괄 점검 by=${by} 탭 ${out.scanned}개 · 해당 ${out.tabs.length}개 · ` +
     `정리대상 ${out.totalRemoveRows}줄 · 보류 ${out.totalSkipped}건 · 실패 ${out.failed}`);
   return out;
