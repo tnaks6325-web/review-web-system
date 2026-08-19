@@ -182,12 +182,44 @@ ok('★ 옵션이 1개 이하면 배분하지 않는다(선택지가 하나면 �
   P.distributeOptions({ total: 6, options: ['단일'] }).buckets.length === 0);
 ok('★ "옵션 없음·단일·해당없음" 은 옵션명이 아니라 서술 — 시트 옵션 칸을 오염시키지 않는다',
   (() => {
+    // ★ 반환 모양은 {key, count} — 갭 A(옵션별 지정 수량) 반영으로 라벨과 수량을 함께 나른다.
     const k = P.optionKeysFromWorkOrder({ product_options_json: JSON.stringify([{ options: [{ label: '옵션 없음' }, { label: '해당없음' }, { label: '레드' }] }]) });
-    return k.length === 1 && k[0] === '레드';
+    return k.length === 1 && k[0].key === '레드' && k[0].count === null;
   })());
 ok('깨진 옵션 JSON 은 옵션 없음으로 수렴(fail-soft)',
   P.optionKeysFromWorkOrder({ product_options_json: '{깨짐' }).length === 0);
 ok('행마다 옵션이 배정된다', plan.rows[0].optionKey === '골라담기' && plan.rows[99].optionKey === '어나더');
+ok('★★ 갭 A — 오더의 옵션별 수량(count)이 배분에 그대로 쓰인다(종전엔 라벨만 뽑아 균등으로 갈라졌다)',
+  (() => {
+    const p = P.buildWorktablePlan({
+      workOrder: { recruit_count: 30, product_options_json: JSON.stringify([{ options: [{ label: 'A', count: 10 }, { label: 'B', count: 20 }] }]) },
+      template: TPL });
+    return p.optionBuckets.map(b => b.key + ':' + b.count).join(',') === 'A:10,B:20' && p.canCreate
+      && !p.warnings.some(w => w.code === 'option_count_mismatch');
+  })());
+ok('★ 같은 라벨이 두 상품에 걸치면 수량은 합산한다',
+  (() => {
+    const k = P.optionKeysFromWorkOrder({ product_options_json: JSON.stringify([
+      { options: [{ label: '단품', count: 5 }] }, { options: [{ label: '단품', count: 7 }] }]) });
+    return k.length === 1 && k[0].count === 12;
+  })());
+ok('★★ 오더 수량 합계 ≠ 총 건수(미리보기 조정)면 잠그지 않고 균등 폴백 + 경고 — 수량 조절 UI 가 없어 잠그면 막다른 길',
+  (() => {
+    const p = P.buildWorktablePlan({
+      workOrder: { recruit_count: 30, product_options_json: JSON.stringify([{ options: [{ label: 'A', count: 10 }, { label: 'B', count: 20 }] }]) },
+      template: TPL, options: { total: 20 } });
+    return p.canCreate && p.optionBuckets.map(b => b.count).join(',') === '10,10'
+      && p.warnings.some(w => w.code === 'option_count_mismatch')
+      && !p.blockers.some(b => b.code === 'option_sum');
+  })());
+ok('★ 수량이 일부 옵션에만 있으면 수량을 버리고 균등(반쪽 지정을 절반만 적용하지 않는다)',
+  (() => {
+    const p = P.buildWorktablePlan({
+      workOrder: { recruit_count: 30, product_options_json: JSON.stringify([{ options: [{ label: 'A', count: 10 }, { label: 'B' }] }]) },
+      template: TPL });
+    return p.optionBuckets.map(b => b.count).join(',') === '15,15'
+      && p.warnings.some(w => w.code === 'option_count_mismatch');
+  })());
 
 /* ══════════════════════════════════════════════════════════
    E. 막을 것 vs 알릴 것
@@ -531,6 +563,115 @@ ok('탭 삭제 후 표의 줄도 함께 내린다',
   /deleteWorktableRows\(\{ sheetId, tabName, confirmed: true/.test(createSrc));
 ok('서버 탭 삭제 라우트는 남아 있다(화면 창구는 제거)',
   !!layers.find(x => x.route.path === '/worktable/delete-tab' && x.route.methods.post));
+
+/* ══════════════════════════════════════════════════════════
+   L. 리뷰 종류(포토/텍스트/구매확정/별점) 배분 — 사용자 확정(2026-08-19)
+      날짜별 비율 유지 · 기입 칸 = 리뷰옵션 · 어휘는 utils/reviewType 단일 출처
+   ══════════════════════════════════════════════════════════ */
+console.log('\nL. 리뷰 종류 배분(리뷰옵션 칸)');
+const RT = require('../src/utils/reviewType');
+const MIX_WO = {
+  recruit_count: 30, daily_count: 10, start_date: '2026-08-24',
+  product_url: 'https://www.coupang.com/vp/1',
+  review_type: '혼합(포토 10건, 텍스트 20건)',
+  review_type_mix: JSON.stringify([{ type: 'photo', quantity: 10 }, { type: 'text', quantity: 20 }]),
+};
+const mixPlan = P.buildWorktablePlan({ workOrder: MIX_WO, template: TPL });
+ok('★★ 혼합 수량이 행에 배분된다(포토 10 + 텍스트 20 = 30행 전부)',
+  (() => {
+    const c = {};
+    mixPlan.rows.forEach(r => { c[r.reviewOption] = (c[r.reviewOption] || 0) + 1; });
+    return c['포토리뷰'] === 10 && c['텍스트'] === 20 && !c[null] && !c[undefined];
+  })());
+ok('★★ 날짜별 비율 유지 — 앞 행부터 몰아 적으면(포토 10행→텍스트 20행) 앞 날짜가 전부 포토가 된다',
+  (() => {
+    const byDay = {};
+    mixPlan.rows.forEach(r => { byDay[r.date] = byDay[r.date] || {}; byDay[r.date][r.reviewOption] = (byDay[r.date][r.reviewOption] || 0) + 1; });
+    // 매일 10행 = 포토 3~4 · 텍스트 6~7 (largest remainder — 하루가 한 유형으로 쏠리지 않는다)
+    return Object.values(byDay).every(d => (d['포토리뷰'] || 0) >= 3 && (d['포토리뷰'] || 0) <= 4
+      && (d['텍스트'] || 0) >= 6 && (d['텍스트'] || 0) <= 7);
+  })());
+ok('★★ 리뷰옵션 칸이 없으면 자동으로 덧붙는다 — 자리는 자동 열(번호·구매일자) 바로 뒤(작업지시 앞쪽 규칙)',
+  (() => {
+    const names = mixPlan.columns.map(c => c.name);
+    const at = names.indexOf('리뷰옵션');
+    return at === 2 && names[0] === '번호' && names[1] === '구매일자'
+      && mixPlan.columns[at].origin === 'system';
+  })());
+ok('★ 템플릿에 리뷰옵션 칸이 이미 있으면 새로 만들지 않는다(같은 열 2번 금지)',
+  (() => {
+    const t = { core: ['번호', '구매일자', '리뷰옵션', '수취인', '연락처'], channels: {} };
+    const p = P.buildWorktablePlan({ workOrder: MIX_WO, template: t });
+    return p.columns.filter(c => /리뷰\s*옵션/.test(c.name)).length === 1;
+  })());
+ok('★ 혼합이 아니면(유형 2가지 미만·수량 없음) 행에 적지 않고 열도 안 붙는다 — 단일 유형은 공고·탭 리뷰타입이 담당(opt-in)',
+  (() => {
+    const p1 = P.buildWorktablePlan({ workOrder: WO, template: TPL });   // mix 없음
+    const p2 = P.buildWorktablePlan({ workOrder: { ...MIX_WO, review_type_mix: JSON.stringify([{ type: 'photo', quantity: 30 }]) }, template: TPL });
+    return p1.rows.every(r => !r.reviewOption) && !p1.columns.some(c => c.name === '리뷰옵션')
+      && p2.rows.every(r => !r.reviewOption) && !p2.columns.some(c => c.name === '리뷰옵션');
+  })());
+ok('★ 수량 합계 ≠ 총 건수면 비율 유지 스케일 + 경고(review_mix_scaled)',
+  (() => {
+    const p = P.buildWorktablePlan({ workOrder: MIX_WO, template: TPL, options: { total: 15 } });
+    const c = {};
+    p.rows.forEach(r => { c[r.reviewOption] = (c[r.reviewOption] || 0) + 1; });
+    return c['포토리뷰'] === 5 && c['텍스트'] === 10 && p.warnings.some(w => w.code === 'review_mix_scaled');
+  })());
+ok('★ 옵션별 mix(109) — 모든 옵션에 수량이 실려 오면 옵션 묶음 안에서 배분한다',
+  (() => {
+    const wo = { recruit_count: 30, daily_count: 10, start_date: '2026-08-24',
+      product_options_json: JSON.stringify([{ options: [
+        { label: 'A', count: 10, review_type_mix: [{ type: 'photo', quantity: 10 }] },
+        { label: 'B', count: 20, review_type_mix: [{ type: 'confirm', quantity: 20 }] }] }]) };
+    const p = P.buildWorktablePlan({ workOrder: wo, template: TPL });
+    return p.rows.filter(r => r.optionKey === 'A').every(r => r.reviewOption === '포토리뷰')
+      && p.rows.filter(r => r.optionKey === 'B').every(r => r.reviewOption === '구매확정');
+  })());
+ok('★★ 시트 표기 왕복 — 리뷰옵션 칸에 적는 표기를 normalizeReviewType 이 정확히 되읽는다(검수 ① 행 우선의 전제)',
+  Object.entries(RT.REVIEW_TYPE_SHEET_LABELS).every(([k, label]) => RT.normalizeReviewType(label) === k));
+ok('★★ planToSheetValues — 상품옵션과 리뷰옵션이 서로의 칸에 섞이지 않는다',
+  (() => {
+    const { planToSheetValues } = require('../src/services/worktableCreate.service');
+    const wo = { recruit_count: 4, product_options_json: JSON.stringify([{ options: [
+      { label: 'A', count: 2, review_type_mix: [{ type: 'photo', quantity: 2 }] },
+      { label: 'B', count: 2, review_type_mix: [{ type: 'confirm', quantity: 2 }] }] }]) };
+    const p = P.buildWorktablePlan({ workOrder: wo, template: TPL });
+    const { header, body, filled } = planToSheetValues(p);
+    const iOpt = header.indexOf('옵션'), iRt = header.indexOf('리뷰옵션');
+    return filled.reviewOption === true && iOpt >= 0 && iRt >= 0
+      && body[0][iOpt] === 'A' && body[0][iRt] === '포토리뷰'
+      && body[3][iOpt] === 'B' && body[3][iRt] === '구매확정';
+  })());
+ok('★ 리뷰옵션 칸은 상품옵션 기입처로 세지 않는다 — no_option_column 경고·duplicate_role 판정에서 제외',
+  (() => {
+    const t = { core: ['번호', '구매일자', '리뷰옵션', '수취인', '연락처'], channels: {} };   // 상품옵션 칸 없음
+    const wo = { recruit_count: 10, review_type_mix: JSON.stringify([{ type: 'photo', quantity: 5 }, { type: 'text', quantity: 5 }]),
+      product_options_json: JSON.stringify([{ options: [{ label: 'A' }, { label: 'B' }] }]) };
+    const p = P.buildWorktablePlan({ workOrder: wo, template: t });
+    return p.warnings.some(w => w.code === 'no_option_column')
+      && !p.warnings.some(w => w.code === 'duplicate_role' && /option/.test(w.message));
+  })());
+ok('★★ 행배정 매칭은 리뷰옵션 칸을 대조하지 않는다 — 포함하면 상품옵션 매칭이 구조적으로 전패한다',
+  (() => {
+    const L = require('../src/services/orderLedger.service');
+    const headers = ['번호', '구매일자', '리뷰옵션', '옵션', '수취인', '연락처', '주소'];
+    const mk = (row, rt, opt) => ({ rowIndex: row, cells: ['', '', rt, opt, '', '', ''] });
+    const rows = [mk(2, '포토리뷰', 'A'), mk(3, '텍스트', 'B'), mk(4, '포토리뷰', 'B')];
+    const cand = L.buildCandidateRows({ headers, dataRows: rows, headerRowIndex: 1, orderData: { selectedOptKey: 'B' } });
+    // B 행(3·4행)이 리뷰옵션 값('텍스트'·'포토리뷰')과 무관하게 먼저 온다
+    return cand[0] === 3 && cand[1] === 4;
+  })());
+ok('★ 미리보기가 리뷰 배분을 그린다(reviewBuckets + 리뷰옵션 칸 — 서버 계획 재계산 금지)',
+  (() => {
+    const w = readF('workdesk.html');
+    return /p\.reviewBuckets/.test(w) && /리뷰 종류 배분/.test(w)
+      && /r\.reviewOption\|\|'—'/.test(w);
+  })());
+ok('★ plan 라우트 SELECT 에 리뷰 배분 재료가 실린다(빠지면 미리보기 ≠ 실제 표)',
+  /review_type, review_type_mix, skip_weekends, holidays, courier_proxy, delivery_type/.test(routes));
+ok('★ 접수 확인창의 휴무일 — 화면에서 안 건드렸으면 계획 값 그대로(빈 배열 = 오더 휴무일 삭제 사고)',
+  /Array\.isArray\(f\.holidays\)\?f\.holidays:\(\(_WTP\.plan&&_WTP\.plan\.holidays\)\|\|\[\]\)/.test(readF('workdesk.html')));
 
 console.log(`\n✅ worktablePlan: ${n}개 통과`);
 process.exit(0);   // trackB.routes 가 DB 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)

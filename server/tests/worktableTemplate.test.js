@@ -196,7 +196,8 @@ ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리�
     const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
     const paths = writes.map(l => l.route.path).sort();
     // ⚠ W5 줄 정리(`/retire-rows`)가 뒤늦게 합류해 이 목록이 드리프트해 있었다(가드가 계속 빨간 상태였다).
-    return paths.join(',') === '/worktable/add-blogger,/worktable/create,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
+    // ⚠ 중복 줄 정리(`/dedupe-rows`·`/dedupe-scan`, 2026-08-19 본섭 합류)도 같은 드리프트 — 목록만 갱신(검사 의미 불변).
+    return paths.join(',') === '/worktable/add-blogger,/worktable/create,/worktable/dedupe-rows,/worktable/dedupe-scan,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
       && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
@@ -602,8 +603,10 @@ ok('★ 켠 유형의 열이 이미 있어 하나도 안 붙으면 조용히 넘
   })());
 ok('★ 유형 열이 옵션 역할이면 생성 시 값도 채워진다(planToSheetValues 는 role 로 판정 — 사본 없음)',
   (() => {
+    // ★ 2026-08-19: 리뷰옵션 칸(리뷰형태 전용)은 상품옵션 기입 대상에서 제외 — 판정은
+    //   utils/reviewType.isReviewOptionHeader 단일 출처(검사 의미 확장).
     const create = readS('services/worktableCreate.service.js');
-    return /idxOpt = plan\.columns\.findIndex\(c => c\.role === 'option'\)/.test(create);
+    return /idxOpt = plan\.columns\.findIndex\(c => c\.role === 'option' && !isReviewOptionHeader\(c\.name\)\)/.test(create);
   })());
 
 /* ── 배선: 작업오더 [📋 작업표] 미리보기 ── */

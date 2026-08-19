@@ -2590,9 +2590,13 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
     const id = String(q.workOrderId || '').trim();
     if (!id) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
 
+    // ★ 접수(accept)는 work_orders **전체 행**으로 같은 buildWorktablePlan 을 부른다 —
+    //   여기서 컬럼이 빠지면 "미리보기 ≠ 실제 표"가 된다(리뷰 종류 배분(review_type_mix)·
+    //   주말 제외/휴무일 신호(097)·택배대행/작업유형 트리거가 실제로 빠져 있던 자리).
     const { rows } = await pool.query(
       `SELECT id, title, start_date, recruit_count, daily_count, product_url,
-              product_option, product_options_json, work_sheet_url, status
+              product_option, product_options_json, work_sheet_url, status,
+              review_type, review_type_mix, skip_weekends, holidays, courier_proxy, delivery_type
          FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
     const wo = rows[0];
     if (!wo) return res.json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });

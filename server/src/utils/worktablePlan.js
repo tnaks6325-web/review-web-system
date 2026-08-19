@@ -19,6 +19,10 @@
 const { classifyHeaders } = require('./worktableTemplate');
 const { CASH_RECEIPT_CHANNELS } = require('./cashReceiptChannels');
 const { isSheetHeaderRow } = require('./sheetHeader');
+// ★ 리뷰 종류(포토/텍스트/구매확정/별점) 표기·판정은 utils/reviewType 단일 출처 —
+//   여기서 어휘 표를 다시 만들면 검수(resolveReviewType)와 시트 표기가 갈라진다.
+const { REVIEW_TYPE_SHEET_LABELS, isReviewOptionHeader } = require('./reviewType');
+const { normalizeReviewTypeMix } = require('./reviewTypeMix');
 
 const MAX_ROWS = 2000;          // prepareRosterSlots 상한과 같은 값(폭주 방지)
 const MAX_DAYS = 400;           // 날짜 분배 무한루프 백스톱
@@ -113,29 +117,178 @@ function distributeDates({ total, daily, startDate, skipWeekends = true, holiday
 }
 
 /* ── 옵션 ────────────────────────────────────────────────────────────────
-   작업오더 `product_options_json` = [{ name, base:{pay}, options:[{label,pay}] }]
-   (프론트 `_woOptionRows`·reviewInspect 와 같은 형태). 옵션 라벨이 곧 시트 옵션 칸 기입값이다. */
+   작업오더 `product_options_json` = [{ name, base:{pay}, options:[{label,pay,count,review_type_mix}] }]
+   (프론트 `_woOptionRows`·reviewInspect 와 같은 형태). 옵션 라벨이 곧 시트 옵션 칸 기입값이다.
+   ★ 옵션별 지정 수량(`count`)도 함께 추출한다 — 종전엔 라벨만 뽑아 인트라넷이 "A 100건 /
+     B 200건"을 보내도 작업표가 균등(150/150)으로 갈라졌다(공고의 옵션별 정원과 어긋남).
+     같은 라벨이 두 상품에 걸치면 수량은 **합산**한다. 수량 미상(0·없음)은 null. */
 function optionKeysFromWorkOrder(wo) {
   const out = [];
-  const seen = new Set();
-  const put = (v) => {
+  const byKey = new Map();   // lowercase label → out 항목
+  const put = (v, count) => {
     const s = String(v == null ? '' : v).trim();
-    if (!s || seen.has(s.toLowerCase())) return;
+    if (!s) return;
     // ★ "옵션 없음/단일/해당없음" 류는 옵션명이 아니라 서술 — 시트 옵션 칸을 오염시킨다.
     if (/^(옵션\s*없음|없음|단일|해당\s*없음|무옵션|n\/?a)$/i.test(s)) return;
-    seen.add(s.toLowerCase());
-    out.push(s);
+    const n = parseInt(count, 10);
+    const c = Number.isInteger(n) && n > 0 ? n : null;
+    const k = s.toLowerCase();
+    const hit = byKey.get(k);
+    if (hit) { if (c != null) hit.count = (hit.count || 0) + c; return; }
+    const item = { key: s, count: c };
+    byKey.set(k, item);
+    out.push(item);
   };
   try {
     const arr = JSON.parse((wo && wo.product_options_json) || '[]');
     if (Array.isArray(arr)) {
       for (const p of arr) {
         const opts = (p && Array.isArray(p.options)) ? p.options : [];
-        if (opts.length) opts.forEach(o => put(o && (o.label != null ? o.label : o)));
+        if (opts.length) opts.forEach(o => put(o && (o.label != null ? o.label : o), o && o.count));
       }
     }
   } catch (_) { /* 깨진 JSON 은 옵션 없음으로 */ }
   return out;
+}
+
+/* ── 리뷰 종류(포토/텍스트/구매확정/별점) 배분 재료 ──────────────────────
+   혼합 수량은 두 곳에 실려 온다(migration 107·인트라넷 구조 신호):
+     · 오더 전체 : `work_orders.review_type_mix` = [{type:'photo',quantity:10}, …]
+     · 옵션별    : `product_options_json` 각 옵션의 `review_type_mix`
+   정규화는 `utils/reviewTypeMix.normalizeReviewTypeMix` 단일 출처(모르는 유형·0건 제거). */
+function _mixOf(raw) {
+  let v = raw;
+  if (typeof v === 'string') { try { v = v.trim() ? JSON.parse(v) : []; } catch (_) { v = []; } }
+  const st = normalizeReviewTypeMix(v);
+  return (st && Array.isArray(st.mix)) ? st.mix : [];
+}
+
+function reviewMixFromWorkOrder(wo) {
+  return _mixOf(wo && wo.review_type_mix);
+}
+
+/** 옵션 라벨(lowercase) → 그 옵션의 혼합 수량. mix 없는 옵션은 항목 자체가 없다. */
+function optionReviewMixesFromWorkOrder(wo) {
+  const map = new Map();
+  try {
+    const arr = JSON.parse((wo && wo.product_options_json) || '[]');
+    if (Array.isArray(arr)) {
+      for (const p of arr) {
+        const opts = (p && Array.isArray(p.options)) ? p.options : [];
+        for (const o of opts) {
+          const label = String((o && (o.label != null ? o.label : o)) || '').trim();
+          if (!label) continue;
+          const mix = _mixOf(o && (o.review_type_mix != null ? o.review_type_mix : o.reviewTypeMix));
+          if (mix.length) map.set(label.toLowerCase(), mix);
+        }
+      }
+    }
+  } catch (_) { /* 깨진 JSON = 옵션별 mix 없음 */ }
+  return map;
+}
+
+/** 혼합 수량 합을 목표 줄 수에 맞춘다(비율 유지 · largest remainder). 합이 같으면 무변경. */
+function _scaleMix(mix, target) {
+  const sum = mix.reduce((a, b) => a + b.quantity, 0);
+  if (!mix.length || sum <= 0 || target <= 0) return { mix: [], scaled: false };
+  if (sum === target) return { mix, scaled: false };
+  const exact = mix.map(m => m.quantity * target / sum);
+  const base = exact.map(Math.floor);
+  let left = target - base.reduce((a, b) => a + b, 0);
+  const order = exact.map((v, i) => ({ i, f: v - Math.floor(v) })).sort((a, b) => b.f - a.f || a.i - b.i);
+  for (const o of order) { if (left <= 0) break; base[o.i]++; left--; }
+  return { mix: mix.map((m, i) => ({ type: m.type, quantity: base[i] })).filter(m => m.quantity > 0), scaled: true };
+}
+
+/**
+ * 한 묶음(행 인덱스 목록)에 혼합 수량을 **날짜별 비율 유지**로 배정한다(사용자 확정).
+ * 앞 행부터 몰아 적으면(포토 10행 → 텍스트 20행) 앞 날짜가 전부 포토가 되어
+ * "매일 포토 3·텍스트 7" 같은 운영 의도가 깨진다.
+ * ★ 같은 날짜 안에서는 mix 순서 블록(포토들 → 텍스트들) — 같은 날이라 순서는 의미가 없고
+ *   시트에서 읽기 좋다. 날짜 없는 행(시작일 미정)은 마지막 한 묶음으로 취급.
+ * ★ 호출 전 `_scaleMix` 로 합계 == 줄 수를 맞춰 두므로 전 행이 채워진다(캡 보정은 안전망).
+ */
+function _allocByDateRatio(rowIdxs, dateOf, mix, out) {
+  const groups = [];
+  let cur = null;
+  for (const i of rowIdxs) {
+    const d = dateOf(i) || '';
+    if (!cur || cur.date !== d) { cur = { date: d, idxs: [] }; groups.push(cur); }
+    cur.idxs.push(i);
+  }
+  const remaining = mix.map(m => ({ type: m.type, left: m.quantity }));
+  let rowsLeft = rowIdxs.length;
+  for (const g of groups) {
+    const gn = g.idxs.length;
+    const exact = remaining.map(r => (rowsLeft > 0 ? r.left * gn / rowsLeft : 0));
+    const take = exact.map((v, i) => Math.min(Math.floor(v), remaining[i].left));
+    let left = gn - take.reduce((a, b) => a + b, 0);
+    const order = exact.map((v, i) => ({ i, f: v - Math.floor(v) })).sort((a, b) => b.f - a.f || a.i - b.i);
+    for (const o of order) {
+      if (left <= 0) break;
+      if (remaining[o.i].left - take[o.i] > 0) { take[o.i]++; left--; }
+    }
+    for (let i = 0; left > 0 && i < remaining.length; i++) {   // 안전망(수량이 모자라는 경우)
+      const add = Math.min(remaining[i].left - take[i], left);
+      if (add > 0) { take[i] += add; left -= add; }
+    }
+    let p = 0;
+    remaining.forEach((r, i) => {
+      for (let k = 0; k < take[i]; k++) out[g.idxs[p++]] = REVIEW_TYPE_SHEET_LABELS[r.type] || null;
+      r.left -= take[i];
+    });
+    rowsLeft -= gn;
+  }
+}
+
+/**
+ * 리뷰 종류 배분 — 행마다 리뷰옵션 칸에 적을 표기(`포토리뷰`·`텍스트`·`구매확정`·`별점`)를 정한다.
+ *
+ * 모드(위에서부터 첫 성립):
+ *   ① 옵션별 — 옵션 배분이 있고 **모든** 옵션에 혼합 수량이 실려 오면, 옵션 묶음 안에서
+ *      그 옵션의 수량을 날짜별 비율로 배정(합이 다르면 그 묶음 안에서 비율 유지 스케일).
+ *   ② 전역   — `work_orders.review_type_mix` 를 전체 행에 날짜별 비율로 배정.
+ *   ③ 없음   — 유형이 **2가지 미만이면 행에 적지 않는다**(단일 유형은 공고·탭 리뷰타입이
+ *      이미 담당 — 옵션 배분의 "1개 이하 미배분"과 같은 규율).
+ */
+function distributeReviewTypes({ total, rowDates = [], rowOptions = [], globalMix = [], optionMixes = null } = {}) {
+  const n = Math.max(0, parseInt(total, 10) || 0);
+  const out = new Array(n).fill(null);
+  const none = { rowReviewTypes: out, reviewBuckets: [], mode: 'none', scaled: false };
+  if (!n) return none;
+  const dateOf = (i) => (rowDates[i] ? rowDates[i].date : null);
+
+  const allOpted = n > 0 && rowOptions.length >= n && rowOptions.slice(0, n).every(Boolean);
+  const optKeysInRows = allOpted ? [...new Set(rowOptions.slice(0, n).map(k => String(k).toLowerCase()))] : [];
+  const optionMode = allOpted && optionMixes instanceof Map && optKeysInRows.length > 0
+    && optKeysInRows.every(k => (optionMixes.get(k) || []).length > 0);
+
+  let scaled = false;
+  const bucketCount = new Map();   // 표기 → 최종 배정 수(미리보기 요약용)
+
+  if (optionMode) {
+    // 전체적으로 유형이 2가지 미만이면 모드와 무관하게 적지 않는다(③).
+    const kinds = new Set();
+    optKeysInRows.forEach(k => (optionMixes.get(k) || []).forEach(m => kinds.add(m.type)));
+    if (kinds.size < 2) return none;
+    for (const k of optKeysInRows) {
+      const idxs = [];
+      for (let i = 0; i < n; i++) if (String(rowOptions[i]).toLowerCase() === k) idxs.push(i);
+      const sc = _scaleMix(optionMixes.get(k) || [], idxs.length);
+      if (sc.scaled) scaled = true;
+      _allocByDateRatio(idxs, dateOf, sc.mix.map(m => ({ ...m })), out);
+    }
+  } else {
+    const mix = (Array.isArray(globalMix) ? globalMix : []).filter(m => m && REVIEW_TYPE_SHEET_LABELS[m.type] && m.quantity > 0);
+    if (mix.length < 2) return none;
+    const sc = _scaleMix(mix, n);
+    scaled = sc.scaled;
+    _allocByDateRatio(Array.from({ length: n }, (_, i) => i), dateOf, sc.mix.map(m => ({ ...m })), out);
+  }
+
+  for (const l of out) { if (l) bucketCount.set(l, (bucketCount.get(l) || 0) + 1); }
+  const reviewBuckets = [...bucketCount.entries()].map(([label, count]) => ({ label, count }));
+  return { rowReviewTypes: out, reviewBuckets, mode: optionMode ? 'option' : 'global', scaled };
 }
 
 /**
@@ -337,12 +490,49 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     .filter(h => !!parseYmd(h))
     .map(h => ymdStr(parseYmd(h))))].sort();
 
-  const optKeys = o.options != null ? o.options : optionKeysFromWorkOrder(wo);
+  let optKeys = o.options != null ? o.options : optionKeysFromWorkOrder(wo);
+  /* ★ 옵션별 지정 수량(갭 A) — **오더 파생 경로에만** 완충을 둔다: 수량이 일부 옵션에만
+     있거나 합계 ≠ 총 건수(미리보기에서 총 건수를 조정한 경우)면 수량을 버리고 균등으로
+     폴백 + 경고. 미리보기에는 옵션 수량을 고칠 칸이 없어 잠그면(`option_sum`) 막다른 길이
+     된다. 호출자가 명시로 넘긴 `o.options` 는 종전대로 `option_sum` 잠금(의도가 명시라 다르다). */
+  let optionCountFallbackSum = null;
+  if (o.options == null && Array.isArray(optKeys) && optKeys.length >= 2) {
+    const withCount = optKeys.filter(k => k && Number.isInteger(k.count) && k.count > 0);
+    if (withCount.length) {
+      const sum = withCount.reduce((a, b) => a + b.count, 0);
+      if (withCount.length !== optKeys.length || sum !== total) {
+        optionCountFallbackSum = sum;
+        optKeys = optKeys.map(k => ({ key: k.key, count: null }));
+      }
+    }
+  }
   /* 자동 선택 조건이 세는 "옵션 가지 수" — 배분 형태({key,count})로 와도 같은 수를 센다. */
   const optionKindCount = (Array.isArray(optKeys) ? optKeys : [])
     .map(x => (typeof x === 'string' ? x : String((x && x.key) || ''))).filter(v => v.trim()).length;
   const { buckets, rowOptions } = distributeOptions({ total, options: optKeys });
   const { days, rowDates } = distributeDates({ total, daily, startDate, skipWeekends, holidays });
+
+  /* ★★ 리뷰 종류(포토/텍스트/구매확정/별점) 행 배분 — 사용자 확정(2026-08-19).
+     시트 시절 직원이 `리뷰옵션` 칸에 손으로 적던 ㉯ 작업옵션(리뷰형태) 선기입을 작업표
+     생성이 대신한다. 이 값이 행에 있어야 리뷰어 안내(참여상품 팝업 D)와 행 단위 검수
+     (`resolveReviewType` ① 행 우선)가 실제로 돈다 — 혼합 오더는 행에만 답이 있다. */
+  const rtDist = distributeReviewTypes({
+    total, rowDates, rowOptions,
+    globalMix: reviewMixFromWorkOrder(wo),
+    optionMixes: optionReviewMixesFromWorkOrder(wo),
+  });
+  /* ★ 배분이 성립하면 `리뷰옵션` 칸이 없을 때 **자동으로 덧붙인다**(courier 송장 열과 같은
+     규율 — 칸이 없으면 배분이 조용히 사라진다). 자리 = 자동 열(번호·구매일자) 바로 뒤
+     (작업지시 칸은 앞쪽 규칙). 분류는 classifyHeaders 단일 출처. */
+  if (rtDist.rowReviewTypes.some(Boolean) && !columns.some(c => isReviewOptionHeader(c.name))) {
+    const [rc] = classifyHeaders(['리뷰옵션'], {});
+    let at = 0;
+    while (at < columns.length && columns[at].tier === 'auto') at++;
+    columns.splice(at, 0, {
+      name: rc.header, role: rc.role, label: rc.label, tier: rc.tier,
+      conflict: rc.conflict || null, origin: 'system', typeKey: null,
+    });
+  }
 
   const rows = [];
   for (let i = 0; i < total; i++) {
@@ -351,6 +541,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
       date: rowDates[i] ? rowDates[i].date : null,
       dateLabel: rowDates[i] ? rowDates[i].label : null,
       optionKey: rowOptions[i] || null,
+      reviewOption: rtDist.rowReviewTypes[i] || null,
     });
   }
 
@@ -375,7 +566,12 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   }
 
   const dup = {};
-  columns.forEach(c => { if (c.role) dup[c.role] = (dup[c.role] || 0) + 1; });
+  // ★ 리뷰옵션 칸은 역할이 'option'이어도 중복으로 세지 않는다 — 리뷰형태 전용 칸이라
+  //   상품옵션 칸과 기입 대상이 서로 배제된다(planToSheetValues·행배정 매칭이 같은 판정).
+  columns.forEach(c => {
+    if (!c.role || (c.role === 'option' && isReviewOptionHeader(c.name))) return;
+    dup[c.role] = (dup[c.role] || 0) + 1;
+  });
   const dupRoles = Object.keys(dup).filter(r => dup[r] > 1);
 
   /* ── 알릴 것(warnings) — 생성은 되지만 사람이 알아야 하는 것 ── */
@@ -394,8 +590,15 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     const outside = holidays.filter(h => h < first || h > last);
     if (outside.length) warnings.push({ code: 'holiday_outside', message: `제외 날짜 중 진행 기간 밖이라 영향이 없는 날: ${outside.join(', ')}` });
   }
-  if (buckets.length && !columns.some(c => c.role === 'option')) {
+  // ★ 리뷰옵션 칸은 상품옵션 기입처가 아니다 — 그 칸만 있고 상품옵션 칸이 없으면 여전히 경고.
+  if (buckets.length && !columns.some(c => c.role === 'option' && !isReviewOptionHeader(c.name))) {
     warnings.push({ code: 'no_option_column', message: '옵션을 나눴지만 표에 옵션 열이 없어 기입되지 않습니다. 공통 열에 옵션 칸을 추가하세요.' });
+  }
+  if (optionCountFallbackSum != null) {
+    warnings.push({ code: 'option_count_mismatch', message: `작업오더의 옵션별 수량 합계(${optionCountFallbackSum}건)가 총 건수(${total}건)와 달라 균등 배분했습니다.` });
+  }
+  if (rtDist.scaled) {
+    warnings.push({ code: 'review_mix_scaled', message: '리뷰 종류별 수량 합계가 총 건수와 달라 비율을 유지해 맞춰 배분했습니다.' });
   }
   /* ★ 날짜를 나눠 놓고 쓸 칸이 없으면 조용히 사라진다 — 게다가 구매일자 칸이 없으면
      시트 일정 자동 인식이 그날 모집 정원을 파생하지 못한다(발행폼 값 경로로 되돌아간다). */
@@ -443,6 +646,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     rows,
     dates: days,
     optionBuckets: buckets,
+    reviewBuckets: rtDist.reviewBuckets,
     workTypes: allTypes,
     enabledWorkTypes: workTypes,
     suggestedWorkTypes,
@@ -461,6 +665,7 @@ function _channelChoices(template) {
 
 module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
+  distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,

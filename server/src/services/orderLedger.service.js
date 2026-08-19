@@ -164,9 +164,13 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
   const selectedOptKey = String(orderData.selectedOptKey || '').trim();
   const optParts = selectedOptKey ? selectedOptKey.split('|').map(v => v.trim().toLowerCase()) : [];
   const optColIndices = [];
+  // ★ 리뷰옵션 칸(행별 리뷰형태 지시 — 작업표 생성이 '포토리뷰'·'텍스트'를 선기입)은 매칭에서
+  //   제외한다. 포함하면 리뷰어가 고른 상품옵션('블랙')을 리뷰옵션 칸 값과 대조해 매칭이
+  //   구조적으로 전패 → 옵션별 행 소진이 무너진다(판정은 utils/reviewType 단일 출처).
+  const { isReviewOptionHeader: _isRtCol } = require('../utils/reviewType');
   (headers || []).forEach((h, idx) => {
     const key = String(h || '').toLowerCase();
-    if (optColIndices.length < 3 && OPTION_COL_KEYWORDS.some(kw => key.includes(kw))) {
+    if (optColIndices.length < 3 && !_isRtCol(h) && OPTION_COL_KEYWORDS.some(kw => key.includes(kw))) {
       optColIndices.push(idx);
     }
   });

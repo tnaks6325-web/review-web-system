@@ -984,6 +984,16 @@ async function inspectSubmission({
     //   같은 samples 를 써야 review-upload 의 verifyCapture 와 캐시가 공유된다.
     const exp = isReview ? await loadTabExpectations({ sheetId, tabName }) : { expectedChannel: null, productNames: [] };
 
+    /* ★★ 행 단위 리뷰타입(리뷰옵션 칸) — 혼합 오더(포토+구매확정)는 탭·공고 값이 mixed 라
+       null 로 떨어지고, "어느 행이 무슨 유형인지"는 그 행의 작업옵션 칸에만 적혀 있다
+       (작업표 생성이 배분 · 시트 시절엔 직원 손기입). `resolveReviewType` ① 행 우선 그대로.
+       ★ 조회 실패·행 미연결(rowIndex 없음)·값 없음 = exp.reviewType(탭/공고) 그대로 = 오늘 동작. */
+    let _rowType = null;
+    if (isReview && rowIndex) {
+      try { _rowType = await require('./reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex }); } catch (_) {}
+    }
+    const effReviewType = resolveReviewType({ rowOption: _rowType, campaignType: exp.reviewType });
+
     let cls = null;
     if (base64) {
       try {
@@ -1008,7 +1018,8 @@ async function inspectSubmission({
        ★ 같은 파일(duplicate)은 **그대로 검사한다** — 슬롯 무관이고 캡처 재탕은 blog 에서도 신호다.
        ★ workKind 가 null(미지정·조회 실패)이면 종전 경로 그대로. */
     const _isBlogTab = exp.workKind === 'blog';
-    const _okKinds = exp.reviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review'];
+    // ★ 판정 기준은 **행 우선 유효 리뷰타입**(effReviewType) — 혼합 탭의 구매확정 행이 여기서 산다.
+    const _okKinds = effReviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review'];
     if (_isBlogTab) {
       checks.format = { verdict: 'skip', reason: 'blog_tab', kind: (cls && cls.kind) || '' };
     } else if (!cls) {

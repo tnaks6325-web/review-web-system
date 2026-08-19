@@ -255,8 +255,12 @@ const fileRoute = require('../src/services/fileRoute.service');
   {
     // F1: 구매확정 탭의 2차 검수 — 구매확정 화면을 불량으로 몰지 않는다
     const ri = read('src/services/reviewInspect.service.js');
-    assert.ok(ri.includes("exp.reviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review']"),
+    // ★ 2026-08-19: 판정 기준이 행 우선 유효 리뷰타입(effReviewType)으로 확장 — 혼합 탭의
+    //   구매확정 행이 리뷰옵션 칸 값으로 산다(resolveReviewType ① 행 우선, 검사 의미 확장).
+    assert.ok(ri.includes("effReviewType === 'confirm' ? ['review', 'purchase_confirm'] : ['review']"),
       '2차 검수 형식 판정이 리뷰타입(confirm)을 본다');
+    assert.ok(ri.includes("resolveReviewType({ rowOption: _rowType, campaignType: exp.reviewType })"),
+      '2차 검수가 행 단위 리뷰타입(리뷰옵션 칸)을 우선 본다');
     assert.ok(ri.includes('!_okKinds.includes(cls.kind) && cls.confidence >= BLOCK_CONFIDENCE'),
       'fail 조건이 okKinds 기반(잡는 범위를 좁히는 방향만)');
     ok('F1: ★★ 구매확정 작업의 구매확정 화면 = 정상 제출(2차 검수도 087 안전핀과 같은 규율)');
