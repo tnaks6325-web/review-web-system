@@ -1278,7 +1278,7 @@
   .ovm-bledger .ovm-ovh{padding:12px 14px 0}.ovm-bledger .ovm-ovh h2{font-size:14px}.ovm-bledger .ovm-lead{padding:0 14px;margin:3px 0 11px;font-size:11px}
   .ovm-bledger .ovm-cta{margin:0 14px 11px;border-color:#F0D4A8;border-radius:7px;background:#FFF8ED;padding:9px 10px}.ovm-bledger .ovm-cta .ct b{font-size:11px;color:#80500F}.ovm-bledger .ovm-cta .ct span{font-size:10px}.ovm-bledger .ovm-cta .btn{border-radius:6px;font-size:10.5px}
   .ovm-bsearch{display:flex;align-items:center;gap:7px;margin:0 14px 11px;padding:0 9px;height:30px;max-width:280px;border:1px solid #D9E1EC;border-radius:6px;background:#fff}.ovm-bsearch input{width:100%;min-width:0;border:0;outline:0;color:#172033;font:inherit;font-size:11px}.ovm-bsearch input::placeholder{color:#71809A}.ovm-bsearch:focus-within{border-color:#2F70E8;box-shadow:0 0 0 3px rgba(47,112,232,.12)}
-  .ovm-bledger .ovm-ovt{grid-template-columns:minmax(190px,1.5fr) 88px 64px 92px 108px 96px 74px;gap:10px;min-width:860px}.ovm-bledger .ovm-ovt.h{padding:8px 14px;background:#F7F9FC;color:#8B98AB;font-size:9.5px}.ovm-bledger .ovm-ovt.r{margin:0;border:0;border-top:1px solid #EDF1F6;border-radius:0;padding:10px 14px;transition:background .12s}.ovm-bledger .ovm-ovt.r:hover{background:#F8FBFF;transform:none}.ovm-bledger .ovm-ovt.r:focus-visible{outline:2px solid #2F70E8;outline-offset:-2px}.ovm-bledger .ovm-fin{border-radius:5px}.ovm-bledger .ovm-num.hot{color:#AE5900}
+  .ovm-bledger .ovm-ovt{grid-template-columns:minmax(190px,1.5fr) 88px 64px 92px 108px 158px 74px;gap:10px;min-width:920px}.ovm-bledger .ovm-ovt.h{padding:8px 14px;background:#F7F9FC;color:#8B98AB;font-size:9.5px}.ovm-bledger .ovm-ovt.r{margin:0;border:0;border-top:1px solid #EDF1F6;border-radius:0;padding:10px 14px;transition:background .12s}.ovm-bledger .ovm-ovt.r:hover{background:#F8FBFF;transform:none}.ovm-bledger .ovm-ovt.r:focus-visible{outline:2px solid #2F70E8;outline-offset:-2px}.ovm-bledger .ovm-fin{border-radius:5px}.ovm-bledger .ovm-num.hot{color:#AE5900}
   @media(max-width:900px){.own-wrap.ovm-bwrap .own-panel{padding:18px 14px 32px}.ovm-bhead{align-items:flex-start;flex-wrap:wrap}.ovm-bhead h2{font-size:22px}.ovm-bmetrics{grid-template-columns:1fr 1fr}.ovm-bmetric:nth-child(2){border-right:0}.ovm-bmetric:nth-child(-n+2){border-bottom:1px solid #D9E1EC}.ovm-bupdates{grid-template-columns:1fr}.ovm-bledger{border-radius:8px}}
   /* 전체 개요 표(업체 미선택) */
   .ovm-ov{max-width:1060px}
@@ -1292,6 +1292,9 @@
   .ovm-cta .ct b{display:block;font-size:13px;font-weight:800;color:var(--warn)}
   .ovm-cta .ct span{font-size:11.5px;color:var(--muted)}
   .ovm-ovt{display:grid;grid-template-columns:minmax(150px,1.3fr) 78px 62px 92px 108px 96px 74px;gap:9px;align-items:center}
+  /* ★★ .ovm-ovt 는 display:grid 라 UA 기본 [hidden]{display:none} 를 이긴다 — 이 한 줄이 없으면
+     검색 필터가 row.hidden 을 세워도 행이 그대로 보인다(업체관리 검색이 동작하지 않던 원인). */
+  .ovm-ovt[hidden]{display:none}
   .ovm-ovt.h{font-size:9.5px;font-weight:800;letter-spacing:.045em;text-transform:uppercase;color:var(--muted);padding:0 12px 6px}
   .ovm-ovt.r{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:9px 12px;margin-bottom:5px;cursor:pointer;
     transition:border-color .15s,transform .15s var(--ease)}
@@ -1300,6 +1303,11 @@
   .ovm-ovt .an .ava{width:24px;height:24px;border-radius:7px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:10.5px;flex:none}
   .ovm-ovt .an b{font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ovm-ovt .c{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ovm-lkcell{display:flex;align-items:center;gap:6px;min-width:0}
+  .ovm-lkcopy{flex:none;font:inherit;font-size:10.5px;font-weight:800;height:22px;padding:0 8px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--accent-line,#c7d7f5);background:var(--accent-soft,#eef4ff);color:var(--accent-deep,#1c4fa8);white-space:nowrap}
+  .ovm-lkcopy:hover{background:#e2ecff}
+  .ovm-lkcopy[disabled]{opacity:.55;cursor:not-allowed}
   .ovm-num{font-size:12.5px;font-weight:750;font-variant-numeric:tabular-nums}
   .ovm-num.z{color:var(--faint);font-weight:600}
   .ovm-num.hot{color:var(--warn);font-weight:800}
@@ -11968,11 +11976,20 @@ function _ovmbSummaryHtml(advs, works, total, free, bad, matchKnown, candKnown){
   </section>`;
 }
 
+/* 개요 표 검색 — 업체명·담당 AE 부분일치.
+   ★ 목록 컨테이너의 행만 숨긴다(입력칸을 다시 그리면 한글 IME 조합이 깨진다 — 홈 작업목록 실측 사고).
+   ★★ 비교값은 **양쪽 다 소문자**로 — 행 쪽을 원문 그대로 두면 영문 담당AE(예 'Kim')가 영영 안 걸린다.
+   ★ 0건은 조용히 빈 표로 두지 않고 그 사실을 말한다(검색어가 걸러낸 것인지 데이터가 없는 것인지 구분). */
 function _ovmbFilterRows(v){
   const q=String(v||'').trim().toLowerCase();
   let count=0;
-  document.querySelectorAll('#ovmbRows .ovm-ovt.r').forEach(row=>{ const show=!q || String(row.dataset.ovmbSearch||'').includes(q); row.hidden=!show; if(show) count++; });
-  const out=$('#ovmbCnt'); if(out) out.textContent=count+'개 업체';
+  document.querySelectorAll('#ovmbRows .ovm-ovt.r').forEach(row=>{
+    const hay=String(row.dataset.ovmbSearch||'').toLowerCase();
+    const show=!q || hay.includes(q);
+    row.hidden=!show; if(show) count++;
+  });
+  const out=$('#ovmbCnt');
+  if(out) out.textContent = (q && !count) ? '검색 결과 없음 — 업체명 또는 담당 AE 를 확인하세요' : (count+'개 업체');
 }
 
 /* ── 사이드바: 업체 목록(검색·필터) ── ★ 목록 컨테이너만 교체한다(입력칸을 다시 그리면 한글 IME
@@ -12066,14 +12083,19 @@ function _ovmRenderOverview(opt){
       : !lk ? '<span class="ovm-fin" title="접속 링크 미생성 — 업체를 열면 자동 생성됩니다">미생성</span>'
       : !lk.active ? '<span class="ovm-fin cand">폐기</span>'
       : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
+    // ★ 업체용 뷰어(광고주 접속) 링크 복사 — 토큰은 개요 응답에 실리지 않으므로(데이터 최소화)
+    //   누를 때 ensure 로 받아온다. 링크가 없던 업체도 그 자리에서 생성된다.
+    const lkcopy = (STATE.role==='master'||STATE.role==='admin')
+      ? `<button class="ovm-lkcopy" type="button" title="업체용 뷰어 접속 링크를 복사합니다"
+          onclick="event.stopPropagation();_ovmCopyAdvLink(${i},this)">🔗 링크복사</button>` : '';
     const acct=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
-    return `<div class="ovm-ovt r" data-i="${i}" data-ovmb-search="${esc(String(a.name||'')+' '+String(a.inadPm||''))}" onclick="selAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selAdv(${i});}" role="button" tabindex="0">`
+    return `<div class="ovm-ovt r" data-i="${i}" data-ovmb-search="${esc((String(a.name||'')+' '+String(a.inadPm||'')).toLowerCase())}" onclick="selAdv(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selAdv(${i});}" role="button" tabindex="0">`
       +`<span class="an"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><b>${esc(a.name)}</b></span>`
       +`<span class="c${a.inadPm?'':' dim'}" style="${a.inadPm?'':'color:var(--warn)'}">${a.inadPm?esc(a.inadPm):'미지정'}</span>`
       +`<span class="ovm-num${(+a.works)?'':' z'}">${bad?'?':(+a.works||0)}</span>`
       +num(+a.noMatch||0,false,matchKnown,'계약 매칭 정보를 불러오지 못했습니다')
       +num(+a.finishCand||0,true,candKnown,_ovmCandWhy())
-      +`<span>${STATE.role==='master'||STATE.role==='admin'?lkb:'<span class="ovm-fin">—</span>'}</span>`
+      +`<span class="ovm-lkcell">${STATE.role==='master'||STATE.role==='admin'?(lkb+lkcopy):'<span class="ovm-fin">—</span>'}</span>`
       +`<span class="c${acct?'':' dim'}">${STATE.role==='master'||STATE.role==='admin'?(acct?acct+'개':'없음'):'—'}</span>`
       +`</div>`;
   }).join('') || '<div class="ovm-empty"><b>등록된 업체가 없습니다</b>업체 등록 후 소유 시트를 지정하세요.</div>';
@@ -12400,6 +12422,45 @@ async function advLinkRevoke(advertiserId){
 async function advLinkEnable(advertiserId){
   const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'enable',advertiserId})});
   if(r&&r.ok){ toast('링크 다시 활성'); await _advLinkReload(); } else toast('실패'+(r&&r.error?': '+r.error:''));
+}
+/* ── 개요 표의 업체별 [🔗 링크복사] — 업체를 열지 않고 그 자리에서 뷰어 링크를 복사한다. ──
+   ★ 토큰은 개요 응답(?overview=1)에 실리지 않는다(데이터 최소화 — hasToken 만 온다) → 누를 때
+     기존 `action:'ensure'` 로 받아온다(신규 엔드포인트 0, 없으면 그때 생성).
+   ★★ 폐기(active=false) 링크는 **복사하지 않는다** — 죽은 링크를 광고주에게 건네는 쪽이 빈 손보다
+     나쁘다(빈 링크 > 죽은 링크 규율). 사유와 조치를 말하고 멈춘다.
+   ★ 성공하면 그 행의 상태 배지도 실제 상태로 갱신한다(미생성 → 공개). */
+function _ovmClipWrite(text){
+  return new Promise(res=>{
+    const fb=()=>{ try{
+      const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;top:-1000px;left:-1000px;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      let ok=false; try{ ok=document.execCommand('copy'); }catch(_){ ok=false; }
+      ta.remove(); res(!!ok);
+    }catch(_){ res(false); } };
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(()=>res(true)).catch(fb);
+      else fb();
+    }catch(_){ fb(); }
+  });
+}
+async function _ovmCopyAdvLink(i, btn){
+  const a=(STATE.advs||[])[i];
+  if(!a){ toast('업체를 찾을 수 없습니다 — 새로고침 후 다시 시도하세요'); return; }
+  if(btn){ if(btn.disabled) return; btn.disabled=true; btn.textContent='…'; }
+  const restore=()=>{ if(btn){ btn.disabled=false; btn.textContent='🔗 링크복사'; } };
+  let lk=null;
+  try{
+    const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'ensure',advertiserId:a.id})});
+    lk=(r&&r.ok&&r.link)||null;
+  }catch(_){ lk=null; }
+  restore();
+  if(!lk||!lk.token){ toast('접속 링크를 불러오지 못했습니다 — 업체를 열어 [접속 링크]에서 확인하세요'); return; }
+  a.link={ active:!!lk.active, loginRequired:!!lk.loginRequired, lastUsedAt:lk.lastUsedAt, hasToken:true };
+  if(!lk.active){ toast('이 업체의 접속 링크는 폐기 상태입니다 — 업체를 열어 [다시 활성] 후 전달하세요'); return; }
+  const ok=await _ovmClipWrite(_advLinkUrl(lk.token));
+  toast(ok ? (a.name+' 접속 링크 복사됨 — 광고주에게 전달하세요')
+           : '복사 실패 — 업체를 열어 [접속 링크]에서 직접 복사하세요');
 }
 function advLinkCopy(){ const el=$('#advLinkUrl'); if(!el) return; el.select();
   const done=()=>toast('링크 복사됨 — 광고주에게 전달하세요');
