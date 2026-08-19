@@ -509,11 +509,16 @@
       out = await post(false);
       if (out && out.needConfirm === 'over_daily') {
         const q = out.quota || {};
+        // ★ 외부모집은 **이미 구매가 끝난 건의 사후 등록**이다 — 취소해도 구매가 되돌아가지
+        //   않고 기록만 빠진다. 그래서 "진행할까요?"(취소가 안전해 보이는 질문)가 아니라
+        //   "초과로 기록됩니다"(고지) + 취소의 실제 의미를 문장으로 말한다(사용자 지적 2026-08-19).
         const okGo = confirm(
-          `오늘 모집인원을 초과합니다.\n\n`
+          `오늘 모집인원을 넘겨 기록됩니다.\n\n`
           + `· 오늘 정원 ${q.quota}명 중 ${q.todayCount}명 접수됨 (남은 자리 ${q.remaining}명)\n`
-          + `· 지금 제출 ${q.want}건 → ${q.over}명 초과\n\n`
-          + `외부모집 건이라 초과 접수 자체는 가능합니다. 그대로 진행할까요?`);
+          + `· 지금 접수 ${q.want}건 → ${q.over}명 초과\n\n`
+          + `이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.\n`
+          + `[확인] 초과 상태로 그대로 기록합니다.\n`
+          + `[취소] 이 건은 시스템에 남지 않습니다 — 나중에 다시 접수해야 합니다.`);
         if (!okGo) {
           BUSY = false;
           if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }

@@ -97,7 +97,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
         return res.json({
           ok: false, needConfirm: 'over_daily',
           quota: { ...dq, want: items.length, over: items.length - dq.remaining },
-          error: `오늘 모집인원 ${dq.quota}명 중 ${dq.todayCount}명이 찼습니다. 남은 자리 ${dq.remaining}명인데 ${items.length}건을 제출하면 ${items.length - dq.remaining}명 초과합니다.`,
+          error: `오늘 모집인원 ${dq.quota}명 중 ${dq.todayCount}명이 찼습니다. 남은 자리 ${dq.remaining}명인데 ${items.length}건을 접수하면 ${items.length - dq.remaining}명 초과합니다. 이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.`,
         });
       }
     }
