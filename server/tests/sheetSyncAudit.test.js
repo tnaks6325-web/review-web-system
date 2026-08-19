@@ -774,6 +774,29 @@ t('★★ 화면: 무시트는 [반영] 버튼을 만들지 않고 사유를 적
   assert.ok(/toggleSheetless\(\)/.test(HTML) && /includeSheetless=1/.test(HTML), '무시트 열람 경로가 없다');
   assert.ok(/tag skip/.test(HTML) && /점검 제외/.test(HTML), "'정상'으로 그리면 점검해서 이상 없음으로 읽힌다");
 });
+await ta('★★ 무시트는 "구매일 연도 미확정" 으로도 세지 않는다 — 누를 수 없는 버튼을 권하지 않게', async () => {
+  // 연도 판정 재료가 전혀 없는 탭(= purchaseUnconfirmed 참) 둘: 시트 기반 1 · 무시트 1
+  const bare = { ...baseTab, registeredAt: '2026-08-14T00:00:00Z', lastOrderAt: null,
+    campaignCreatedAt: null, sampleStartDate: null };
+  const nsTab = { ...bare, sheetId: 'wt_x', tabName: '무시트작업', displayName: '무시트작업', sheetless: true };
+  svc.__setPoolForTest(auditPool({ tabs: [bare, nsTab], imRows: [] }));
+  const out = await svc.auditSheetSync({ includeUnknown: true, includeSheetless: true });
+  assert.strictEqual(out.purchaseUnconfirmed, 1,
+    '무시트까지 세면 화면이 "시트에서 연도 확인" 을 계속 권한다(그 탭엔 읽을 시트가 없다) — ' + out.purchaseUnconfirmed);
+  svc.__setPoolForTest(null);
+});
+t('★★ 연도 확인(probe) 후보 SQL 이 무시트를 제외한다 — 가상 시트로 구글을 읽지 않는다', () => {
+  const src = R('src/services/sheetSyncAudit.service.js');
+  const i = src.indexOf('async function probeUnknownYears(');
+  const fn = src.slice(i, src.indexOf('\n}', i));
+  const q = fn.slice(fn.indexOf('FROM tab_configs tc'), fn.indexOf('LIMIT $1'));
+  assert.ok(/COALESCE\(tc\.sheetless, FALSE\) = FALSE/.test(q),
+    'probe 후보에 무시트 탭이 들어간다 — 시트 API 호출이 read_error 로 낭비된다');
+  // 시트 읽기가 이 게이트 뒤에 있어야 한다(후보에 들어오면 곧바로 호출로 이어진다)
+  assert.ok(fn.indexOf('COALESCE(tc.sheetless, FALSE) = FALSE') < fn.indexOf('readSheet('),
+    '게이트가 시트 읽기보다 뒤에 있다');
+});
+
 t("★ 문제 건수 기준이 서버와 같다 — 'skip' 은 문제가 아니다", () => {
   const src = R('src/services/sheetSyncAudit.service.js');
   assert.ok(/severity !== 'ok' && i\.severity !== 'skip'/.test(src), '서버 flagged 계수가 skip 을 센다');
