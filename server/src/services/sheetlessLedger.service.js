@@ -394,6 +394,7 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
             COALESCE(cp.is_submitted, FALSE) AS submitted, COALESCE(cp.is_paid, FALSE) AS paid,
             regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g') AS ordnum,
             regexp_replace(COALESCE(os.phone, ''), '\\D', '', 'g') AS ph,
+            os.submitted_at AS at,
             /* ★★ 작업보드 표에 **실제로 보이는** 주문번호. 원장(os.order_num)만 보면
                "화면에는 서로 다른 주문번호인데 중복으로 잡히는" 일이 생긴다(2026-08-19 신다인 건).
                담당자가 눈으로 판단하는 값과 시스템 판정이 같은 값을 봐야 한다. */
@@ -433,10 +434,15 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
     const losers = list.slice(1);
     const blockedPayment = losers.filter(r => r.in_payment);
     const blockedUsed = losers.filter(r => (r.submitted && !keep.submitted) || (r.paid && !keep.paid));
+    /* ★★ "언제 생긴 중복인가" — 판정에는 쓰지 않고 **보여주기만** 한다.
+       재발 방지(2026-08-19)가 실제로 듣고 있는지는 이 값 하나로 판별된다: 남은 목록이
+       전부 그 이전 날짜면 **정리 안 한 과거분**이고, 그 이후 날짜가 보이면 **아직 새는 구멍**이 있다.
+       ★ 기준은 **늦게 들어온 줄(losers)** 의 제출 시각 — 먼저 들어온 줄은 정상 참여다. */
+    const _lastAt = losers.reduce((m, r) => (r.at && (!m || r.at > m) ? r.at : m), null);
     if (blockedPayment.length || blockedUsed.length) {
       skipped.push({
         orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
-        seqs: list.map(r => r.seq),
+        seqs: list.map(r => r.seq), lastAt: _lastAt,
         reason: blockedPayment.length ? 'in_payment_batch' : 'used_row_is_not_first',
         detail: blockedPayment.length
           ? '지울 줄이 입금 회차(대기·완료)에 담겨 있습니다 — 이체 내역을 먼저 확인하세요.'
@@ -446,13 +452,15 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
     }
     plan.push({
       orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
-      keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq),
+      keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq), lastAt: _lastAt,
     });
     for (const r of losers) { removeSeqs.push(r.seq); if (r.osid) removeOsIds.push(r.osid); }
   }
 
+  const lastDupAt = [...plan, ...skipped]
+    .reduce((m, g) => (g.lastAt && (!m || g.lastAt > m) ? g.lastAt : m), null);
   const stat = {
-    sheetId, tabName, boardRows: rows.length, skippedNoRowOrder: noRowOrder.length,
+    sheetId, tabName, boardRows: rows.length, skippedNoRowOrder: noRowOrder.length, lastDupAt,
     groups: plan.length, removeRows: removeSeqs.length,
     skippedGroups: skipped.length, plan: plan.slice(0, 100), skipped: skipped.slice(0, 100),
   };
@@ -510,6 +518,7 @@ async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeR
           sheetId: t.sheetId, tabName: t.tabName, label: t.label,
           boardRows: r.boardRows, groups: r.groups, removeRows: r.removeRows,
           skippedGroups: r.skippedGroups, skippedNoRowOrder: r.skippedNoRowOrder || 0,
+          lastDupAt: r.lastDupAt || null,
         });
       }
     } catch (e) {
@@ -521,6 +530,8 @@ async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeR
   out.tabs.sort((a, b) => (b.removeRows - a.removeRows) || (b.skippedGroups - a.skippedGroups));
   out.totalRemoveRows = out.tabs.reduce((n, t) => n + t.removeRows, 0);
   out.totalSkipped = out.tabs.reduce((n, t) => n + t.skippedGroups, 0);
+  /* ★ 전 작업 통틀어 가장 최근에 생긴 중복 — "지금도 늘어나는가" 의 답. */
+  out.lastDupAt = out.tabs.reduce((m, t) => (t.lastDupAt && (!m || t.lastDupAt > m) ? t.lastDupAt : m), null);
   logger.info(`[sheetlessLedger] 중복 일괄 점검 by=${by} 탭 ${out.scanned}개 · 해당 ${out.tabs.length}개 · ` +
     `정리대상 ${out.totalRemoveRows}줄 · 보류 ${out.totalSkipped}건 · 실패 ${out.failed}`);
   return out;
