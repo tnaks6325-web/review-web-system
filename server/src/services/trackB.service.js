@@ -2302,8 +2302,11 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
     const k = String(rowIndex);
     if (!out.has(k)) out.set(k, []);
     const arr = out.get(k);
-    if (arr.length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
-    arr.push({ fileId, slot: slot || 'review', at: at || null });
+    const sl = slot || 'review';
+    /* ★ 상한은 **묶음별**로 센다 — 전체 개수로 자르면 리뷰가 12장인 줄에서
+       나중에 붙는 구매 캡처가 통째로 잘려 "구매 캡처 없음"으로 거짓 표시된다. */
+    if (arr.filter(f => f.slot === sl).length >= _RV_MAX_PER_ROW || arr.some(f => f.fileId === fileId)) return;
+    arr.push({ fileId, slot: sl, at: at || null });
   };
   const { rows: subs } = await db.query(
     `SELECT row_index, file_id, slot_key, COALESCE(uploaded_at, created_at) AS at
@@ -2318,6 +2321,21 @@ async function reviewImagesForTab({ sheetId, tabName } = {}) {
       WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL AND review_file_id IS NOT NULL`,
     [sheetId, tabName]).catch(() => ({ rows: [] }));
   for (const r of idx) push(r.row_index, r.review_file_id, 'review', r.review_file_at);
+  /* ── 구매 캡처(062 `order_submissions.capture_file_id`) ─────────────────────────
+     ★★ 줄 짝짓기는 **`sheet_row`(그 주문이 실제로 기록된 줄)** 하나로 한다.
+       `campaign_participants.order_submission_id` 링크는 오염 사례가 문서화돼 있어
+       (2026-08-19 장수산업 건) 그것으로 붙이면 **남의 구매 캡처가 이 줄에 뜬다** —
+       검수에서 잘못된 판단의 근거가 되므로, 근거가 확실한 값만 쓴다.
+     ★ 아직 표에 반영되지 않은 주문(sheet_row NULL)은 안 보인다 — 정직한 상태다.
+     ★ fail-soft: 실패해도 리뷰 이미지는 그대로 나간다. */
+  const { rows: caps } = await db.query(
+    `SELECT sheet_row, capture_file_id, capture_uploaded_at
+       FROM order_submissions
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+        AND sheet_row IS NOT NULL AND capture_file_id IS NOT NULL
+      ORDER BY sheet_row, capture_uploaded_at NULLS LAST`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  for (const r of caps) push(r.sheet_row, r.capture_file_id, 'order_capture', r.capture_uploaded_at);
   return Object.fromEntries(out);
 }
 
@@ -2354,6 +2372,88 @@ function _collectRowJsonKeys(rows) {
   }
   return keys;
 }
+/* ══ 작업 조건 10항목(작업보드 상단 ① 카드) ══════════════════════════════════════
+   상품명 · 총건수 · 일건수 · 구매채널 · 유입방식 · 다계정 · 현금영수증 · 리뷰비 · 입금명 · 리뷰타입.
+
+   ★★ 판정을 여기서 새로 만들지 않는다 — 전부 기존 단일 출처를 그대로 태운다:
+      리뷰비 = `utils/campaignFee.resolveReviewFee` · 리뷰타입 = `utils/reviewType.resolveReviewType`
+      현금영수증 = `utils/captureSlots.hasCashReceiptSlot`(폴더 바로가기·검수와 같은 함수).
+      여기서 다시 세면 카드·모집공고 탭·입금관리와 숫자가 갈린다.
+   ★★ **구매채널은 화면이 상품 URL 로 판정한다** — 호스트 판정 단일 출처가 프론트
+      `work-order-detail.js._woChannelFromUrl` 이라 서버에 사본을 만들지 않는다.
+      여기서는 공고에 **명시된** 채널만 실어 보내고, 없으면 null(추측 금지).
+   ★ 공고가 여럿(차수 재발행)이면 **살아있는 최신 하나**를 쓰고 `campaignCount` 로 그 사실을 말한다.
+   ★ 매칭은 이름 → gid 폴백(리네임으로 연결이 조용히 풀리지 않게). **빈 gid 는 절을 켜지 않는다.**
+   ★ 어떤 실패에도 throw 하지 않는다 — 작업보드가 이것 때문에 죽으면 안 된다. */
+async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null } = {}) {
+  try {
+    const gid = String(meta.tabGid || '').trim();
+    const { rows: camps } = await db.query(
+      `SELECT id, title, recruit_total AS "recruitTotal", daily_limit AS "dailyLimit",
+              channel, channel_custom AS "channelCustom", review_type AS "reviewType",
+              review_fee AS "reviewFee", transfer_memo AS "transferMemo",
+              multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
+              status, participation_mode AS "participationMode"
+         FROM recruit_campaigns
+        WHERE linked_sheet_id = $1
+          AND (linked_tab_name = $2 OR ($3 <> '' AND linked_tab_gid = $3))
+        ORDER BY (status = 'active') DESC, created_at DESC`,
+      [sheetId, tabName, gid]).catch(() => ({ rows: [] }));
+    const c = camps[0] || null;
+
+    // 기간별 리뷰비 구간(082) — 실패해도 기존 review_fee 로 떨어진다(fail-soft)
+    let schedules = [];
+    if (c) {
+      const { rows: fs } = await db.query(
+        `SELECT to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom", review_fee AS "reviewFee"
+           FROM campaign_fee_schedules WHERE campaign_id = $1 ORDER BY effective_from`,
+        [c.id]).catch(() => ({ rows: [] }));
+      schedules = fs;
+    }
+    /* ★ 0 을 null 로 접지 말 것 — "0원으로 정한 무상 작업"과 "값이 없는 공고"는 다르다.
+       폴백 순서(공고 → 탭)는 입금관리(payment.service)와 **같아야** 한다. */
+    const num = v => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+    const campFee = num(c && c.reviewFee);
+    const tabFee  = num(meta.tabReviewFee);
+    const { resolveReviewFee } = require('../utils/campaignFee');
+    const feeInfo = resolveReviewFee({ schedules, fallback: campFee != null ? campFee : (tabFee != null ? tabFee : 0) });
+    const feeSource = feeInfo.source === 'schedule' ? 'schedule'
+      : campFee != null ? 'campaign'
+      : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
+
+    const { resolveReviewType, reviewTypeLabel } = require('../utils/reviewType');
+    const { hasCashReceiptSlot } = require('../utils/captureSlots');
+
+    let cashReceipt = null;
+    try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
+
+    return {
+      productName: (wo && wo.productOption) || meta.campaignName || '',
+      recruitTotal: num(c && c.recruitTotal) != null ? num(c.recruitTotal) : num(wo && wo.recruitCount),
+      dailyLimit:   num(c && c.dailyLimit)   != null ? num(c.dailyLimit)   : num(wo && wo.dailyCount),
+      // 공고에 명시된 채널만(직접입력은 custom). 없으면 null → 화면이 상품 URL 로 판정한다.
+      channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
+      productUrl: (wo && wo.productUrl) || null,
+      inflowType: (wo && wo.inflowType) || null,
+      inflowKeyword: (wo && wo.inflowKeyword) || null,
+      multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
+      cashReceipt,
+      reviewFee: feeInfo.fee, feeSource,
+      depositName: (meta.depositName || (c && c.transferMemo) || '') || null,
+      reviewType: (() => { const k = resolveReviewType({ campaignType: c && c.reviewType, tabReviewType: meta.reviewType }); return k; })(),
+      reviewTypeLabel: (() => {
+        const k = resolveReviewType({ campaignType: c && c.reviewType, tabReviewType: meta.reviewType });
+        return k ? (reviewTypeLabel(k) || k) : null;
+      })(),
+      campaignId: c ? c.id : null,
+      campaignCount: camps.length,
+    };
+  } catch (e) {
+    logger.warn(`[trackB] tabConditionSummary 실패(작업 조건 축약 표시): ${e.message}`);
+    return null;   // ★ null = "못 불러옴" — 화면이 종전 4줄로 떨어지고 사유를 말한다
+  }
+}
+
 async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
@@ -2371,7 +2471,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
-            tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless
+            tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless,
+            tc.tab_gid AS "tabGid", tc.capture_slots AS "captureSlots",
+            tc.deposit_name AS "depositName", tc.review_fee AS "tabReviewFee"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
@@ -2632,6 +2734,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
+    /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
+       fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
+    res.condition = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
     //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });

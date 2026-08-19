@@ -204,9 +204,17 @@ ok('★ [⋯] 바깥클릭/Esc 리스너는 1회만 등록(열 때마다 걸면 
   /_mhToolsBound/.test(src) && (src.match(/document\.addEventListener\('click',e=>\{ const t=document\.getElementById\('mhTools'\)/g) || []).length === 1);
 
 /* ── K. 발주 '미연결' 안내는 한 곳에서만 — 상단 ① 작업 조건 카드 안쪽 줄 ── */
-ok('★ 미연결 배너가 renderWorkOrderSection 에서 제거됐다(같은 말 두 번 금지)', (() => {
-  const m = src.match(/function renderWorkOrderSection\(wd\)\{[\s\S]*?\n\}/);
-  return !!m && /if\(!d\) return '';/.test(m[0]) && !/작업발주 미연결/.test(m[0]);
+/* ⚠ 2026-08-19 시안 C: 「작업세부 펼치기」 상시 노출을 폐지하고 발주 원문을
+   [⋯] → 팝업(_woRawRowsHtml)으로 옮겼다. renderWorkOrderSection 은 사라졌고,
+   검사 의미(= 미연결 안내를 두 곳에서 그리지 않는다)는 그대로 새 렌더러에 건다. */
+ok('★ 미연결 배너가 발주 원문 렌더러에 없다(같은 말 두 번 금지)', (() => {
+  const m = src.match(/function _woRawRowsHtml\(d\)\{[\s\S]*?\n\}/);
+  return !!m && !/작업발주 미연결/.test(m[0]) && !/function renderWorkOrderSection/.test(src);
+})());
+ok('★ 작업세부 상시 펼침(.wodetail)은 본문에 그리지 않는다 — 팝업에서만', (() => {
+  const m = src.match(/function openWoRawModal\(\)\{[\s\S]*?\n\}/);
+  return !!m && /_woRawRowsHtml\(d\)/.test(m[0])
+    && !/\$\{renderWorkOrderSection\(wd\)\}/.test(src);
 })());
 ok('★ 미연결 줄은 _woUnlinkedRow 한 곳(admin/master 만, 광고주·AE 미노출)', (() => {
   const m = src.match(/function _woUnlinkedRow\(wd\)\{[\s\S]*?\n\}/);
