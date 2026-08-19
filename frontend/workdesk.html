@@ -5382,6 +5382,7 @@ function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.c
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
 async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t; _clearCellUndoHistory();
+  try{ _wtNoticed={}; }catch(_){}   // 130 — 쓰기-through 사유 안내는 작업마다 새로 한 번씩
   // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
   if(!(opt&&opt.nav)) _navPush();
   // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
@@ -7091,6 +7092,33 @@ function beginEditCell(td){
   });
 }
 // 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
+/* 무시트 쓰기-through(130) 거부 사유 — "왜 이 칸만 검색 명단에 안 뜨나"를 화면이 말한다.
+   ★ 붙여넣기 500칸에서 같은 토스트가 500번 뜨지 않게 **사유별 1회**로 접는다. */
+var _WT_SKIP_MSG={
+  sheet_backed:'', disabled:'', not_sheet_column:'', not_applicable:'', tab_not_registered:'',
+  dry_run:'관측 모드입니다 — 화면 표시만 반영되고 원본에는 아직 쓰지 않습니다',
+  not_in_allowlist:'이 칸은 화면 표시에만 반영됩니다 — 검색 명단·정산 원본에는 반영되지 않습니다',
+  header_not_in_ledger:'이 칸은 장부 열 구성에 없어 화면 표시에만 반영됩니다',
+  status_column:'상태 칸이라 원본에는 반영하지 않습니다',
+  payment_column:'입금 판정에 쓰이는 칸이라 원본에는 반영하지 않습니다',
+  amount_column:'이체 금액 판정에 쓰이는 칸이라 원본에는 반영하지 않습니다',
+  order_number_column:'주문 연결 판정에 쓰이는 칸이라 원본에는 반영하지 않습니다',
+  name_column:'이름 칸은 원본에 반영하지 않습니다(명단에서 줄이 사라질 수 있습니다)',
+  identity_column:'연락처 칸은 원본에 반영하지 않습니다 — 등록리뷰어DB에서 변경하세요',
+  no_tab_gid:'탭 연결 정보가 없어 원본에 반영하지 못했습니다 — 관리자에게 알려주세요',
+  lookup_failed:'원본 반영 여부를 확인하지 못했습니다(화면 표시만 반영)',
+  keywords_unavailable:'원본 반영 여부를 확인하지 못했습니다(화면 표시만 반영)'
+};
+var _wtNoticed={};
+function _wtNotice(resp){
+  if(!resp) return;
+  var sk=resp.writeThroughSkipped;
+  if(sk && _WT_SKIP_MSG[sk] && !_wtNoticed[sk]){ _wtNoticed[sk]=1; toast(_WT_SKIP_MSG[sk]); return; }
+  if(resp.writeThrough && resp.writeThrough.queued===false && !_wtNoticed._dirty){
+    _wtNoticed._dirty=1; toast('원본에는 저장됐지만 장부 반영 예약에 실패했습니다 — 관리자에게 알려주세요');
+  }
+}
+
 function commitCellEdit(rowId, field, value, td, opt){
   const r=_gridRowById(rowId); if(!r||!field) return;
   const t=STATE.cur; if(!t) return;
@@ -7118,6 +7146,7 @@ function commitCellEdit(rowId, field, value, td, opt){
   return api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
     .then(resp=>{
       if(resp&&resp.ok){
+        _wtNotice(resp);
         _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
         if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
         undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
@@ -7151,6 +7180,8 @@ function revertCell(ev, el){ if(ev)ev.stopPropagation();
     _paintGridCell(r, field, td);
     const t=STATE.cur; if(!t) return;
     api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})})
+      // ★ 원본 값이 그 사이 다른 경로(주문 유입 등)로 바뀌었으면 되돌리지 않는다 — 화면이 그 사실을 말한다(130).
+      .then(resp=>{ if(resp&&resp.reason==='superseded'&&resp.message) toast(resp.message); })
       .catch(()=>{ if(had){ r.cellEdits=r.cellEdits||{}; r.cellEdits[h]=prev; _paintGridCell(r,field,td); } toast('되돌리기 실패'); });
     return;
   }

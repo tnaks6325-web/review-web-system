@@ -26,6 +26,13 @@ function _mask(phone8) {
 async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test' } = {}) {
   if (!sheetId || !tabName) throw new Error('importTabFromIndex: sheetId, tabName 필수');
   const db = getPool();
+  /* ★★ 무시트 탭의 `row_json` 은 **작업표가 진실원본**이고 `review_index` 는 그 파생물이다(130).
+     되임포트하면 A→B→A 순환이라 정보 이득이 0인데, 장부 재생성이 늦은 순간에는
+     **작업보드 편집을 옛 값으로 덮는다**(10분 뒤 조용한 롤백).
+     ★ 동결 대상은 `row_json` **한 칸뿐** — 신원 컬럼은 row_json 파생이라 동결하면 오히려 스테일이 된다.
+     ★ 판정 실패는 종전 경로(fail-open). */
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); } catch (_) {}
   const { rows: idx } = await db.query(
     `SELECT reviewer_name, recipient_name, tab_gid, campaign_name, row_index, is_submitted, is_submitted2,
             submit_col, submit_col2, product_url, product_name, row_json, start_date, end_date, round, phone8
@@ -72,7 +79,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          product_name = EXCLUDED.product_name, product_url = EXCLUDED.product_url,
          start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
          submit_col = EXCLUDED.submit_col, submit_col2 = EXCLUDED.submit_col2,
-         row_json = EXCLUDED.row_json,
+         row_json = CASE WHEN $20 THEN campaign_participants.row_json ELSE EXCLUDED.row_json END,
          sheet_row = EXCLUDED.sheet_row,
          -- ★ Phase 4: import 행은 리뷰제출/입금 상태도 review_index에서 최신화(DB를 살아있는 원본화).
          --   campaign_participants.* = 갱신 전(기존행) 값(EXCLUDED=새 행). 기존행 source='import'면 새 상태로,
@@ -90,7 +97,7 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
       [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
        r.product_name, r.product_url, r.start_date, r.end_date, !!r.is_submitted, isPaid,
        r.submit_col || null, r.submit_col2 || null,
-       JSON.stringify(r.row_json || {}), String(by).slice(0, 100)]
+       JSON.stringify(r.row_json || {}), String(by).slice(0, 100), sheetless]
     );
     if (res.rows[0] && res.rows[0].inserted) inserted++; else updated++;
   }
