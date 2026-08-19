@@ -1,28 +1,18 @@
 # ─────────────────────────────────────────────────────────────
-# 일회성 복구 + 전수 진단: 2026-08-19 작업보드 줄 오삭제
+# 일회성 복구 + 전수 진단: 2026-08-19 작업보드 줄 오삭제  (2차 — 1차는 psql -c 의
+#   `:'변수'` 미치환으로 복구 단계에서 멈췄다. 진단 단계 출력은 정상이었다.)
 #
-# 사고: 「0721)장수돌침대_쿠팡_탄소매트 900건」 8/19 구간에서 다섯 줄
-#   (seq 863·864·870·871·874 — 김소라/김민경/이수연/전한나/배상엽)이 작업보드에서 사라졌다.
-#   다섯 명 모두 8/19 구매양식 제출이 정상 접수(mirror_status='written', 78,000원)됐고
-#   주문 원장은 취소되지 않았다 → **줄만** 소프트삭제된 상태.
-#   그 줄들은 전부 같은 작업의 이전 차수 참여 이력이 있어 "중복" 으로 오인되기 쉬운 그룹이었다.
-#   내려간 줄은 작업보드뿐 아니라 장부 재생성 재료에서도 빠져 **리뷰어 검색 명단·리뷰비 입금
-#   대상에서도 사라진다**(실측: 김소라/이수연/배상엽 검색 시 8/19 건이 안 나옴).
+# 사고: 「0721)장수돌침대_쿠팡_탄소매트 900건」 8/19 구간에서 다섯 줄(seq 863·864·870·871·874)이
+#   작업보드에서 사라졌다. 다섯 명 모두 구매양식 제출이 정상 접수(written)됐고 주문도 취소되지
+#   않았다 — 줄만 소프트삭제된 상태.
 #
-# 이 워크플로가 하는 일
-#   ① 진단(읽기 전용) — "구매는 살아 있는데 줄만 내려간" 케이스를 **DB 전체에서** 뽑아 표로 출력.
-#   ② 복구(쓰기)      — 위 다섯 줄만 `deleted_at=NULL, active=TRUE` 로 되돌린다.
-#   ③ 재확인(읽기)    — 복구 결과와 잔여 케이스 요약.
+# ★★ "같은 케이스" 의 정의(이번 진단의 핵심): 내려간 줄이 쓰던 주문을 **살아 있는 줄이 하나도
+#    쓰지 않는다** = 그 구매가 표에서 통째로 사라졌다(진짜 사고). 반대로 같은 주문을 쓰는 줄이
+#    남아 있으면 "한 주문이 여러 줄에 기록된 것을 접은 것" 이라 정상 정리다. 둘을 갈라서 센다.
 #
-# ★★ 복구 범위를 다섯 줄로 못박은 이유(완화 금지): 같은 조건에 걸리는 줄 중에는
-#    **의도적으로 내린 옛 차수 줄**도 있다(2026-08-07 쿠팡(26년) 216줄 사례). 조건만 보고
-#    일괄 복구하면 그때 막았던 "옛 차수 되살아남" 사고를 그대로 재현한다. 나머지는 표로만 보고한다.
-# ★ 하드삭제·컬럼 추가 없음. 되돌리기 = 그 다섯 줄을 다시 내리면 된다(소프트).
-# ★ 장부 재생성은 여기서 하지 않는다 — 앱 로직(`rebuildLedgers`)이라
-#   `POST /api/trackb/worktable/rebuild-ledgers` 로 배포 후 호출한다.
-#
-# 실행: 이 파일이 main 에 올라오면 1회 자동 실행(workflow_dispatch 403 우회 — 2026-08-19 선례).
-#   성공 확인 후 이 파일은 삭제한다.
+# ★★ 복구 범위는 다섯 줄로 못박는다(완화 금지) — 같은 조건에는 의도적으로 내린 옛 차수 줄도
+#    걸린다(2026-08-07 쿠팡(26년) 216줄). 나머지는 표로만 보고하고 사람이 판단한다.
+# ★ 하드삭제·스키마 변경 0 · 되돌리기 = 그 줄을 다시 내리면 된다(소프트).
 # ─────────────────────────────────────────────────────────────
 name: DB Workboard Row Restore 2026-08-19 (one-off)
 
@@ -43,94 +33,104 @@ jobs:
     timeout-minutes: 15
     env:
       PGCONN: ${{ secrets.BACKUP_DATABASE_URL }}
-      SHEET_ID: 1E_Kvn5pyORuv3xp0Zob5T82YefDjy1tzqcFlTb5OrTw
-      TAB_NAME: '0721)장수돌침대_쿠팡_탄소매트 900건'
     steps:
       - name: psql 준비
         run: psql --version || (sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client)
 
-      # ── ① 진단: 구매(written)는 살아 있는데 줄만 내려간 케이스 전수 ──────────────
-      - name: 진단 — 요약(작업별)
+      # ── ① 진단: 내려간 줄 ÷ (그 구매가 표에서 통째로 사라졌나) ────────────────
+      - name: 진단 — 작업별 요약(고아 = 진짜 사고)
         run: |
-          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 -c "
-            SELECT cp.tab_name AS 작업,
-                   COUNT(*)                        AS 사라진줄,
-                   MIN(cp.deleted_at)::date        AS 최초,
-                   MAX(cp.deleted_at)::date        AS 최근,
-                   string_agg(DISTINCT cp.updated_by, ', ') AS 내린주체
+          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
+          WITH gone AS (
+            SELECT cp.sheet_id, cp.tab_name, cp.seq, cp.deleted_at, cp.updated_by, cp.order_submission_id AS osid
               FROM campaign_participants cp
               JOIN order_submissions os ON os.id = cp.order_submission_id
              WHERE cp.deleted_at IS NOT NULL
                AND os.deleted_at IS NULL
                AND os.mirror_status = 'written'
-             GROUP BY cp.tab_name
-             ORDER BY MAX(cp.deleted_at) DESC;"
+          )
+          SELECT g.tab_name AS 작업,
+                 COUNT(*) AS 내려간줄,
+                 COUNT(*) FILTER (WHERE NOT EXISTS (
+                   SELECT 1 FROM campaign_participants live
+                    WHERE live.sheet_id = g.sheet_id AND live.tab_name = g.tab_name
+                      AND live.deleted_at IS NULL AND live.order_submission_id = g.osid)) AS 구매가통째로사라짐,
+                 MAX(g.deleted_at AT TIME ZONE 'Asia/Seoul')::date AS 최근,
+                 string_agg(DISTINCT g.updated_by, ', ') AS 내린주체
+            FROM gone g
+           GROUP BY g.tab_name, g.sheet_id
+          HAVING COUNT(*) FILTER (WHERE NOT EXISTS (
+                   SELECT 1 FROM campaign_participants live
+                    WHERE live.sheet_id = g.sheet_id AND live.tab_name = g.tab_name
+                      AND live.deleted_at IS NULL AND live.order_submission_id = g.osid)) > 0
+           ORDER BY 2 DESC;
+          SQL
 
-      - name: 진단 — 최근 14일 상세(최대 300줄)
+      - name: 진단 — 장수산업 상세(내려간 줄 전부)
         run: |
-          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 -c "
-            SELECT cp.tab_name AS 작업, cp.seq AS 줄, cp.reviewer_name AS 이름,
-                   right(cp.phone8, 4) AS 연락처뒤4, os.order_num AS 주문번호,
-                   os.date_str AS 구매일자,
-                   (os.submitted_at AT TIME ZONE 'Asia/Seoul')::timestamp(0) AS 제출시각,
-                   (cp.deleted_at   AT TIME ZONE 'Asia/Seoul')::timestamp(0) AS 내려간시각,
-                   cp.updated_by AS 내린주체, cp.is_submitted AS 리뷰제출, cp.is_paid AS 입금
-              FROM campaign_participants cp
-              JOIN order_submissions os ON os.id = cp.order_submission_id
-             WHERE cp.deleted_at IS NOT NULL
-               AND cp.deleted_at > NOW() - INTERVAL '14 days'
-               AND os.deleted_at IS NULL
-               AND os.mirror_status = 'written'
-             ORDER BY cp.deleted_at DESC, cp.tab_name, cp.seq
-             LIMIT 300;"
+          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT cp.seq AS 줄, cp.reviewer_name AS 이름, right(cp.phone8,4) AS 뒤4,
+                 os.order_num AS 주문번호, os.date_str AS 구매일자,
+                 (cp.deleted_at AT TIME ZONE 'Asia/Seoul')::timestamp(0) AS 내려간시각,
+                 cp.updated_by AS 내린주체,
+                 NOT EXISTS (SELECT 1 FROM campaign_participants live
+                              WHERE live.sheet_id = cp.sheet_id AND live.tab_name = cp.tab_name
+                                AND live.deleted_at IS NULL
+                                AND live.order_submission_id = cp.order_submission_id) AS 구매가통째로사라짐
+            FROM campaign_participants cp
+            JOIN order_submissions os ON os.id = cp.order_submission_id
+           WHERE cp.sheet_id = '1E_Kvn5pyORuv3xp0Zob5T82YefDjy1tzqcFlTb5OrTw'
+             AND cp.tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건'
+             AND cp.deleted_at IS NOT NULL
+             AND os.deleted_at IS NULL AND os.mirror_status = 'written'
+           ORDER BY cp.seq;
+          SQL
 
-      # 표에서 분리(보관)된 줄 — migration 129. 삭제와 다른 축이라 따로 본다.
-      #   ★ 컬럼이 아직 없는 배포 시점이면 조용히 넘어간다(continue-on-error).
-      - name: 진단 — 표에서 분리(보관)된 줄
+      - name: 진단 — 표에서 분리(보관)된 줄 (migration 129)
         continue-on-error: true
         run: |
-          psql "$PGCONN" -P pager=off -c "
-            SELECT cp.tab_name AS 작업, cp.seq AS 줄, cp.reviewer_name AS 이름,
-                   (cp.held_at AT TIME ZONE 'Asia/Seoul')::timestamp(0) AS 분리시각,
-                   cp.held_by AS 분리주체, cp.held_reason AS 사유
-              FROM campaign_participants cp
-             WHERE cp.held_at IS NOT NULL AND cp.deleted_at IS NULL
-             ORDER BY cp.held_at DESC LIMIT 200;"
+          psql "$PGCONN" -P pager=off <<'SQL'
+          SELECT tab_name AS 작업, seq AS 줄, reviewer_name AS 이름,
+                 (held_at AT TIME ZONE 'Asia/Seoul')::timestamp(0) AS 분리시각,
+                 held_by AS 분리주체, held_reason AS 사유
+            FROM campaign_participants
+           WHERE held_at IS NOT NULL AND deleted_at IS NULL
+           ORDER BY held_at DESC LIMIT 200;
+          SQL
 
       # ── ② 복구: 장수산업 다섯 줄만 ────────────────────────────────────────────
       - name: 복구 전 상태
         run: |
-          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 \
-            -v sid="$SHEET_ID" -v tab="$TAB_NAME" -c "
-            SELECT seq, reviewer_name, deleted_at, active, updated_by, order_submission_id IS NOT NULL AS 주문링크
-              FROM campaign_participants
-             WHERE sheet_id = :'sid' AND tab_name = :'tab' AND seq IN (863,864,870,871,874)
-             ORDER BY seq;"
+          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT seq, reviewer_name, deleted_at, active, updated_by,
+                 order_submission_id IS NOT NULL AS 주문링크
+            FROM campaign_participants
+           WHERE sheet_id = '1E_Kvn5pyORuv3xp0Zob5T82YefDjy1tzqcFlTb5OrTw'
+             AND tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건'
+             AND seq IN (863,864,870,871,874)
+           ORDER BY seq;
+          SQL
 
       - name: 복구 실행
         run: |
-          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 \
-            -v sid="$SHEET_ID" -v tab="$TAB_NAME" -c "
-            UPDATE campaign_participants
-               SET deleted_at = NULL, active = TRUE,
-                   updated_by = 'restore:20260819-jangsu', updated_at = NOW()
-             WHERE sheet_id = :'sid' AND tab_name = :'tab'
-               AND seq IN (863,864,870,871,874)
-               AND deleted_at IS NOT NULL
-             RETURNING seq, reviewer_name, right(phone8,4) AS 연락처뒤4;"
+          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
+          UPDATE campaign_participants
+             SET deleted_at = NULL, active = TRUE,
+                 updated_by = 'restore:20260819-jangsu', updated_at = NOW()
+           WHERE sheet_id = '1E_Kvn5pyORuv3xp0Zob5T82YefDjy1tzqcFlTb5OrTw'
+             AND tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건'
+             AND seq IN (863,864,870,871,874)
+             AND deleted_at IS NOT NULL
+          RETURNING seq, reviewer_name, right(phone8,4) AS 뒤4;
+          SQL
 
       - name: 복구 후 확인
         run: |
-          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 \
-            -v sid="$SHEET_ID" -v tab="$TAB_NAME" -c "
-            SELECT seq, reviewer_name, deleted_at, active, updated_by
-              FROM campaign_participants
-             WHERE sheet_id = :'sid' AND tab_name = :'tab' AND seq BETWEEN 855 AND 891
-               AND deleted_at IS NULL
-             ORDER BY seq;"
-          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 \
-            -v sid="$SHEET_ID" -v tab="$TAB_NAME" -c "
-            SELECT COUNT(*) AS 그작업_8월19일_활성줄
-              FROM campaign_participants
-             WHERE sheet_id = :'sid' AND tab_name = :'tab' AND deleted_at IS NULL
-               AND row_json->>'구매일자' LIKE '8 / 19%';"
+          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT COUNT(*) AS 그작업_8월19일_활성줄
+            FROM campaign_participants
+           WHERE sheet_id = '1E_Kvn5pyORuv3xp0Zob5T82YefDjy1tzqcFlTb5OrTw'
+             AND tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건'
+             AND deleted_at IS NULL
+             AND row_json->>'구매일자' LIKE '8 / 19%';
+          SQL
