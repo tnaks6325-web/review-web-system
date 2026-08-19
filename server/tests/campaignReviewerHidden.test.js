@@ -79,47 +79,30 @@ ok("★ REQUIRED_SCHEMA 에 등록(컬럼 누락 = 리뷰어 목록 전면 42703
   /\['recruit_campaigns', 'reviewer_hidden'\]/.test(indexJs));
 
 // ── D. 프론트 ──
+/* ★★ 사용자 확정(2026-08-19 오후): 모집공고 편집 모달의 [🧪 리뷰어에게 숨김] 토글은 **제거**한다
+     — 숨기는 일은 게시(모집중) 토글을 내리는 것으로 갈음한다(창구 단일화).
+   ★ 서버 기능(085 reviewer_hidden 컬럼·공개 목록 필터·관리자 카드 배지)은 그대로다:
+     이미 숨김으로 저장된 공고는 계속 숨겨져야 하고, 토글이 없으므로 저장 payload 에
+     reviewer_hidden 이 실리지 않아(요소 존재 게이트) 서버 COALESCE 가 기존 값을 지킨다. */
 console.log('\n[D] 관리자 화면');
-ok('모달에 "리뷰어에게 숨김" 토글', /id="rf_reviewer_hidden"/.test(modal));
-ok('토글 설명에 "참여·제출은 정상" 명시(오해 방지)', /참여·제출은 정상 동작/.test(modal));
-// ★ 참여형 전용 섹션(rf_part_section) 안에 두면 평소 접혀 있어 존재를 모르고, 레거시 공고는 숨길 수도 없다.
-//   상태(rf_status)와 같은 "항상 보이는" 묶음에 있어야 한다. (브라우저 렌더로 실측해 잡은 회귀)
-{
-  // 참여형 전용 div(rf_part_section)의 실제 범위를 <div> 깊이로 계산해, 토글이 그 **밖**에 있는지 본다.
-  const partIdx = modal.indexOf('id="rf_part_section"');
-  const hidIdx  = modal.indexOf('id="rf_hidden_box"');
-  assert(partIdx > -1 && hidIdx > -1, 'rf_part_section / rf_hidden_box 를 찾지 못함');
-  let depth = 0, k = modal.lastIndexOf('<div', partIdx), end = -1;
-  const tag = /<div\b|<\/div>/g; tag.lastIndex = k;
-  for (let m; (m = tag.exec(modal)); ) {
-    depth += m[0] === '</div>' ? -1 : 1;
-    if (depth === 0) { end = m.index; break; }
-  }
-  assert(end > -1, 'rf_part_section div 의 끝을 찾지 못함');
-  ok('★ 토글이 참여형 전용 섹션 밖(참여형을 꺼도 항상 보인다 · 레거시 공고도 숨길 수 있다)',
-    hidIdx > end, { hidIdx, partSectionEnd: end });
-  ok('토글이 상태(rf_status)와 같은 묶음(모집정보)', modal.indexOf('id="rf_status"') < hidIdx
-    && !modal.slice(modal.indexOf('id="rf_status"'), hidIdx).includes('</section>'));
-}
-ok('★ 한계(링크를 아는 사람은 접근)를 화면에 고지', /링크를 아는 사람은 들어올 수 있습니다/.test(modal));
-ok('저장 payload 전송 — ★ 토글 UI 있는 화면에서만(축약 화면이 설정을 끄지 않게)',
+ok('★★ 모달에 "리뷰어에게 숨김" 토글이 없다(사용자 확정 — 게시 토글로 갈음)',
+  !/rf_reviewer_hidden/.test(modal) && !/rf_hidden_box/.test(modal));
+ok('★ 저장 payload 는 여전히 "요소 있는 화면에서만" 전송 — 토글이 없으니 미전송 = 기존 값 유지',
   /if \(document\.getElementById\("rf_reviewer_hidden"\)\) \{\s*\n\s*payload\.reviewer_hidden = !!document\.getElementById\("rf_reviewer_hidden"\)\.checked;/.test(recruitJs));
-ok('편집 프리필 복원', /_rh\.checked = c\.reviewer_hidden === true/.test(recruitJs));
-ok('★ 카드 배지는 관리자 화면에서만(admin 분기)', /const hidBadge = \(admin && c\.reviewer_hidden === true\)/.test(cards));
+ok('편집 프리필 복원 코드는 유지(토글이 다시 생겨도 값이 살아난다)', /_rh\.checked = c\.reviewer_hidden === true/.test(recruitJs));
+ok('★ 카드 배지는 관리자 화면에서만(admin 분기) — 이미 숨김인 공고를 알아볼 유일한 표식',
+  /const hidBadge = \(admin && c\.reviewer_hidden === true\)/.test(cards));
 
 ok('테스트 공고 프리셋 함수 존재', /async function openTestCampaignModal\(\)/.test(recruitJs));
 ok('★ 프리셋은 status=active(참여가 실제로 되어야 테스트가 된다)', /set\("rf_status", "active"\)/.test(recruitJs));
-ok('★ 프리셋이 리뷰어 숨김을 켠다', /chk\("rf_reviewer_hidden", true\)/.test(recruitJs));
+ok('★ 프리셋은 더 이상 리뷰어 숨김을 켜지 않는다(토글 제거)', !/chk\("rf_reviewer_hidden"/.test(recruitJs));
 ok('★ 프리셋이 타계정 허용을 켠다(일괄 제출의 전제)', /chk\("rf_multi_account", true, onMultiAccountToggle\)/.test(recruitJs));
 ok('프리셋이 참여형을 켠다(홀드·배치 경로)', /chk\("rf_participation", true, onParticipationToggle\)/.test(recruitJs));
 ok('프리셋은 기존 발행 모달을 재사용(신규 모달 사본 금지)', /await openRecruitModal\(null\);/.test(recruitJs));
 // ★ 창구는 리뷰웹시스템[3버전] 하나 — 관리자 대시보드에는 두지 않는다(사용자 확정).
-//   Track B(리뷰웹시스템[3버전])가 관리자 대시보드를 대체하는 방향이라 버튼을 양쪽에 두면 창구가 둘이 된다.
 ok('★ [🧪 테스트 공고] 버튼은 리뷰웹시스템[3버전]에만(편집 권한자에게만)',
   /STATE\.canEdit\?'<button class="btn" onclick="openTestCampaignModal\(\)"/.test(workdesk));
 ok('★ 관리자 대시보드에는 버튼을 두지 않는다(창구 이중화 금지)', !/openTestCampaignModal/.test(adminHtml));
-// 모달 토글은 공유 모듈이라 양쪽에서 쓴다 — 버튼(창구)만 리뷰웹시스템[3버전]으로 단일화한 것.
-ok('공고 모달 토글은 공유 모듈에 유지(관리자 대시보드에서도 수정 가능)', /id="rf_reviewer_hidden"/.test(modal));
 
 // ── E. 진짜 PG 로 필터 실행 확인(있을 때만) ──
 (async () => {
