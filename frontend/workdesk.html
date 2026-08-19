@@ -2031,6 +2031,9 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 /* ♻ 중복 줄 정리 — 표가 7칸이고 전체 점검 목록이 수십 줄이라 기본 460px·무한 높이로는 조작이 안 된다
    (사용자 신고 2026-08-19). ★ **이 모달에만** 스코프 · flex 자식 min-height:0(없으면 스크롤이 안 생긴다). */
 #ddOv .wbl-dlg{width:min(1080px,100%);max-height:86vh;display:flex;flex-direction:column}
+#hbOv .wbl-dlg{width:min(900px,100%);max-height:86vh;display:flex;flex-direction:column}
+#hbOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #ddOv table.wbl-t{font-size:11.5px}
 #ddOv table.wbl-t th{padding:5px 8px}
@@ -3518,12 +3521,14 @@ function _ddRender(){
       <td class="num">${esc(String(g.keepSeq))}</td>
       <td class="num">${esc((g.removeSeqs || []).join(', '))}</td>
       <td class="num">${esc(_ddDay(g.lastAt))}</td></tr>`).join('') : '';
-  const skips = p ? (p.skipped || []).map(g =>
+  const skips = p ? (p.skipped || []).map((g, i) =>
     `<li style="margin-bottom:6px"><b>${esc(g.name || '')}</b> · 주문번호 ${esc(String(g.orderNum || ''))} · 규칙 ${_ddAxis(g.matchedBy)} · 줄 ${esc((g.seqs || []).join(', '))}
       ${g.lastAt ? `· ${esc(_ddDay(g.lastAt))} ` : ''}— ${esc(g.detail || g.reason || '')}
       ${g.doublePaid ? `<div style="margin:4px 0 0 12px;color:#b91c1c"><b>⚠ 같은 구매에 입금완료가 ${esc(String((g.paidRows || []).length))}건입니다 —
         이미 두 번 나갔을 수 있습니다.</b> 이체 내역을 확인하고, 회수·조정은 입금관리에서 하세요.</div>` : ''}
-      ${_ddSkipRows(g)}</li>`).join('') : '';
+      ${_ddSkipRows(g)}
+      ${_hbCan() ? `<div style="margin:5px 0 0 12px"><button class="wbl-b" onclick="ddHoldSkipped(${i})">🔒 표에서 분리</button>
+        <span style="color:#6b7280">지울 줄만 표에서 빼 둡니다 — 데이터·이체 근거는 그대로, 언제든 되돌립니다.</span></div>` : ''}</li>`).join('') : '';
   b.innerHTML = `<b>${esc(tg.label || tg.tabName)}</b>${
     _DD.target ? ` <button class="wbl-b" style="margin-left:8px" onclick="ddBackToScan()">← 점검 목록으로</button>` : ''}
     <details class="wbl-facts" id="ddRuleBox"><summary style="cursor:pointer;font-weight:700">판정 규칙 — ㉮ 주문번호 셋 다 같음 · ㉯ 같은 주문 기록을 여러 줄이 씀 <span style="font-weight:400;color:#6b7280">(눌러서 자세히)</span></summary>
@@ -3862,6 +3867,111 @@ function _abRender(){
     ${all.length ? all.slice(0, shown).map(_abGroupHtml).join('') : `<div class="wbl-facts">겹친 줄이 없습니다.</div>`}
     ${shown < all.length ? `<div style="margin:10px 0 2px;text-align:center">
       <button class="wbl-b" onclick="abMore()">더 보기 (${esc(String(all.length - shown))}그룹 남음)</button></div>` : ''}`;
+}
+/* ── 🔒 표에서 분리(보관함) ─────────────────────────────────────────────────
+   왜: 8/18~19 중복 반영으로 생긴 줄 중 **이체 근거가 걸려 지울 수 없는 줄**이 작업표에 남아
+   담당자가 매일 지나쳐야 했다. 지우면 그 줄의 입금 표시가 표에서 빠져 **남길 줄이 미입금으로
+   보이고 다음 회차에 다시 담겨 이중 송금**이 난다(payment.service 입금대상 조건).
+   ★★ 그래서 **화면에서만** 뺀다(사용자 확정 2026-08-19 "표에서만 빼기") — 장부·리뷰어 검색·
+      입금대상은 무접촉이고 언제든 되돌린다. 상단 집계 숫자도 그대로다(그 사실을 화면이 말한다).
+   ★ 게이트는 서버(adminOrMaster)와 1:1. */
+function _hbCan(){ return STATE.role === 'master' || STATE.role === 'admin'; }
+let _HB = null;
+function closeHeldModal(){ const o = document.getElementById('hbOv'); if (o) o.remove(); _HB = null; }
+if (!window._hbKeyBound) {
+  window._hbKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('hbOv')) closeHeldModal(); });
+}
+function openHeldModal(){
+  if (!_hbCan() || !STATE.cur) return;
+  const t = STATE.cur;
+  _HB = { sheetId: t.sheetId, tabName: t.tabName, label: (t.displayName || t.tabName), rows: null, err: '', busy: true, picked: new Set() };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'hbOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🔒 표에서 분리한 줄</div>
+    <div class="wbl-db" id="hbBody"></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="closeHeldModal()">닫기</button>
+      <button class="wbl-b" id="hbBack" onclick="hbRestore()">↩ 표로 되돌리기</button></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
+  _hbRender(); _hbLoad();
+}
+async function _hbLoad(){
+  const q = `?sheetId=${encodeURIComponent(_HB.sheetId)}&tabName=${encodeURIComponent(_HB.tabName)}`;
+  try {
+    const j = await api('/api/trackb/worktable/held-rows' + q);
+    if (!_HB) return;
+    if (!j || j.ok === false) { _HB.busy = false; _HB.err = (j && (j.error || j.message)) || '조회 실패'; _hbRender(); return; }
+    _HB.busy = false; _HB.rows = j.rows || []; _hbRender();
+  } catch (e) {
+    /* 자리표시자를 깐 창은 어떤 예외에도 화면을 종결시킨다(무한 '불러오는 중' 금지). */
+    if (!_HB) return; _HB.busy = false; _HB.err = '조회 실패: ' + (e.message || ''); _hbRender();
+  }
+}
+function hbPick(i){
+  if (!_HB || !_HB.rows) return;
+  const seq = Number(_HB.rows[i].seq);
+  if (_HB.picked.has(seq)) _HB.picked.delete(seq); else _HB.picked.add(seq);
+  _hbRender();
+}
+function _hbRender(){
+  const b = document.getElementById('hbBody'); if (!b || !_HB) return;
+  const back = document.getElementById('hbBack');
+  if (back) back.disabled = !(_HB.picked && _HB.picked.size) || !!_HB.busy;
+  if (_HB.busy) { b.innerHTML = `<b>${esc(_HB.label)}</b><div class="wbl-facts">불러오는 중…</div>`; return; }
+  if (_HB.err) {
+    b.innerHTML = `<b>${esc(_HB.label)}</b><div class="wbl-facts" style="color:#b91c1c">${esc(_HB.err)}</div>
+      <div><button class="wbl-b" onclick="_HB.busy=true;_HB.err='';_hbRender();_hbLoad()">다시 시도</button></div>`;
+    return;
+  }
+  const rows = (_HB.rows || []).map((r, i) =>
+    `<tr><td class="num"><input type="checkbox" ${_HB.picked.has(Number(r.seq)) ? 'checked' : ''} onclick="hbPick(${i})"></td>
+      <td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
+      <td class="num">${esc(String(r.phone8 || ''))}</td>
+      <td>${[r.submitted ? '리뷰제출' : '', r.paid ? '입금' : ''].filter(Boolean).join(' · ')}</td>
+      <td>${esc(_ddDay(r.heldAt))}</td><td>${esc(r.heldBy || '')}</td>
+      <td title="${esc(r.heldReason || '')}">${esc(String(r.heldReason || '').slice(0, 40))}</td></tr>`).join('');
+  b.innerHTML = `<b>${esc(_HB.label)}</b>
+    <div class="wbl-facts">이 줄들은 <b>작업표 표에서만 빠져 있습니다</b> — 데이터·이체 근거·리뷰어 검색은
+      그대로입니다(삭제가 아닙니다). 상단 <b>참여자·제출·입금 숫자에는 계속 포함</b>됩니다.
+      되돌리면 표에 다시 나타납니다.</div>
+    ${(_HB.rows || []).length ? `<table class="wbl-t"><thead><tr><th></th><th>줄</th><th>참여자</th><th>연락처 뒤8</th>
+      <th>표시</th><th>분리일</th><th>분리한 사람</th><th>사유</th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<div class="wbl-facts">분리한 줄이 없습니다.</div>`}`;
+}
+async function hbRestore(){
+  if (!_HB || _HB.busy || !_HB.picked.size) return;
+  const seqs = [..._HB.picked];
+  if (!confirm(`분리한 줄 ${seqs.length}개를 표로 되돌립니다.\n\n줄 ${seqs.join(', ')}\n\n계속할까요?`)) return;
+  _HB.busy = true; _hbRender();
+  try {
+    const j = await api('/api/trackb/worktable/hold-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: _HB.sheetId, tabName: _HB.tabName, seqs, hold: false }) });
+    if (!j || j.ok === false) { _HB.busy = false; _HB.err = (j && (j.error || j.message)) || '되돌리기 실패'; _hbRender(); return; }
+    const idx = STATE.tabs.indexOf(STATE.cur);
+    closeHeldModal();
+    toast(`${j.changed}줄을 표로 되돌렸습니다`);
+    if (idx >= 0) selTab(idx);
+  } catch (e) { _HB.busy = false; _HB.err = '되돌리기 실패: ' + (e.message || ''); _hbRender(); }
+}
+/* 중복 정리 보류 목록에서 그 그룹의 **지울 줄만** 표에서 분리한다(남길 줄은 건드리지 않는다).
+   ★ 대상·사유를 확인창이 그대로 말한다. 실행 후 미리보기를 다시 불러 목록을 갱신한다. */
+async function ddHoldSkipped(i){
+  const g = (_DD && _DD.prev && (_DD.prev.skipped || [])[i]); if (!g || _DD.busy) return;
+  const seqs = (g.removeSeqs || []).filter(s => Number(s) !== Number(g.keepSeq));
+  if (!seqs.length) { toast('분리할 줄이 없습니다.'); return; }
+  const tg = _ddTarget();
+  if (!confirm(`「${tg.label || tg.tabName}」 표에서 ${seqs.length}줄을 분리합니다.\n\n` +
+    `줄 ${seqs.join(', ')} (남길 줄 ${g.keepSeq} 은 그대로 둡니다)\n\n` +
+    `표에서만 빠지고 데이터·이체 근거·리뷰어 검색은 그대로입니다. 언제든 되돌릴 수 있습니다.\n\n계속할까요?`)) return;
+  _DD.busy = true; _ddRender();
+  try {
+    const j = await api('/api/trackb/worktable/hold-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: tg.sheetId, tabName: tg.tabName, seqs, hold: true,
+      reason: `중복 보류(${g.reason || ''}) · ${g.name || ''} · 남길 줄 ${g.keepSeq}` }) });
+    _DD.busy = false;
+    if (!j || j.ok === false) { _DD.err = (j && (j.error || j.message)) || '분리 실패'; _ddRender(); return; }
+    toast(`${j.changed}줄을 표에서 분리했습니다`);
+    await ddPreview();
+  } catch (e) { _DD.busy = false; _DD.err = '분리 실패: ' + (e.message || ''); _ddRender(); }
 }
 /* ── ＋ 블로거 추가 (블로그체험단 M5-2) ────────────────────────────────────────
    왜: 블로그체험단은 공고 밖(카톡·직접 섭외)으로 데려오는 블로거가 있는데, 그 사람은
@@ -4792,6 +4902,13 @@ function renderWorkdesk(wd){
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
   if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
+  /* ★ 표에서 분리(보관)한 줄 — **삭제가 아니다**. 숫자를 안 보여주면 "사라진 줄"이 된다.
+     클릭 가능은 서버 게이트(adminOrMaster)와 1:1 — AE 에겐 숫자만(눌러도 403 나는 버튼 금지). */
+  if(canEdit && c.held>0){
+    const hbCan = _hbCan();
+    warn.push(`<span class="wchip${hbCan?' clk':''}" title="표에서 분리한 줄 — 데이터·이체 근거는 그대로 있고 표에서만 빠져 있습니다${hbCan?' · 눌러서 보관함 열기':''}"${hbCan?' onclick="openHeldModal()"':''}>🔒 분리 ${c.held}${hbCan?' 🔎':''}</span>`);
+  }
+  if(canEdit && c.heldUnavailable) warn.push(`<span class="wchip bad" title="${esc(c.heldUnavailable)}">분리 ?</span>`);
   if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
   /* ★ 배지를 누르면 그 줄들의 실체를 본다(읽기 전용 진단). 클릭 가능은 **서버 게이트와 1:1**
      (`/worktable/ambiguous-rows` = adminOrMaster) — AE 에게 열면 눌러도 403 나는 죽은 버튼이 된다.

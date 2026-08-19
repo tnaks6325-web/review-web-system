@@ -2353,7 +2353,22 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             order_submission_id, identity_key, row_json, submit_col, submit_col2
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE
+        AND held_at IS NULL
       ORDER BY seq`, [sheetId, tabName]);
+  /* ★★ 표에서 분리(보관)한 줄 — **화면에서만** 뺀다(129, 사용자 확정 2026-08-19).
+     장부 재생성·리뷰어 검색·입금대상 추출은 `deleted_at` 만 보므로 그대로다(무접촉).
+     ★ 조용히 빼지 않는다 — 건수를 실어 보내 화면이 "분리 N건" 을 말하고 되돌릴 수 있게 한다.
+     ★ 조회 실패는 fail-soft(표는 떠야 한다) — 컬럼 미적용(구버전 DB)에서도 죽지 않는다. */
+  let heldCount = 0, heldUnavailable = null;
+  if (showEdits) {
+    try {
+      const { rows: hc } = await db.query(
+        `SELECT COUNT(*)::int AS n FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND held_at IS NOT NULL`,
+        [sheetId, tabName]);
+      heldCount = (hc[0] && hc[0].n) || 0;
+    } catch (e) { heldUnavailable = e.message; }
+  }
   // 활성 오버레이(합성 + orphan 판정 공용 — 추가 쿼리 없음)
   const { rows: edits } = await db.query(
     `SELECT anchor_type, anchor_value, field, kind, value_bool, value_text
@@ -2542,6 +2557,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
     ambiguous: ambiguousCount, hidden: hiddenList.length,
+    /* 표에서 분리한 줄(129) — 표에는 없지만 데이터는 그대로다. 숫자를 지우면 "사라진 줄" 이 된다. */
+    held: heldCount, heldUnavailable: heldUnavailable || undefined,
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
