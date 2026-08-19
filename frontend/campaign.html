@@ -1020,7 +1020,11 @@ function _renderJoinedView(j, h){
     CampWorkDetail.renderInto($('wdCards'), {
       workDetail: j.workDetail || {},
       landingUrl: j.landingUrl,
+      landingSource: j.landingSource, // 'option'이면 [상품 페이지 열기] 위에 옵션 칩 한 줄(M4)
       inflowType: j.inflowType,
+      // ★ selectedOption 은 옵션 칩 재료로만 쓴다 — 아래 showOption:false 라 옵션 카드는
+      //   여전히 renderJoinedOption([변경] 버튼 포함)이 그린다(카드 이중 렌더 없음).
+      selectedOption: j.selectedOption,
       cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
     }, { showOption: false, apiBase: API_BASE_URL });
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)

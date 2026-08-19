@@ -24,7 +24,13 @@
     +   'font-size:.84rem;font-weight:800;border-radius:11px;padding:11px;font-family:inherit;margin-top:10px}'
     + '.cwd-opt{display:flex;align-items:center;gap:10px}'
     + '.cwd-opt .nm{font-size:.9rem;font-weight:800;color:#111827}'
-    + '.cwd-opt .sub{font-size:.72rem;color:#4B5563;margin-top:2px}';
+    + '.cwd-opt .sub{font-size:.72rem;color:#4B5563;margin-top:2px}'
+    /* 옵션별 유입 링크(M4 · 시안 C) — [상품 페이지 열기] 바로 위 한 줄.
+       클래스는 전부 cwd- 접두(호스트 화면의 맨몸 .chip/.bdg 와 충돌 금지). */
+    + '.cwd-lnd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}'
+    + '.cwd-lchip{font-size:.72rem;font-weight:800;border-radius:999px;padding:4px 10px;background:#EEF4FF;color:#1B64DA}'
+    + '.cwd-lbdg{font-size:.66rem;font-weight:800;border-radius:999px;padding:3px 8px;background:#E7F5EC;color:#0B7A45}'
+    + '.cwd-lnd + .cwd-btn{margin-top:6px}';
 
   function _injectCss() {
     if (document.getElementById('cwd-style')) return;
@@ -141,7 +147,7 @@
 
   /**
    * 작업내용 카드 HTML.
-   * @param {object} d  { workDetail, landingUrl, inflowType, selectedOption }
+   * @param {object} d  { workDetail, landingUrl, landingSource, inflowType, selectedOption }
    * @param {object} o  { showLanding:bool(기본 true), showOption:bool(기본 true), apiBase }
    */
   function cardsHtml(d, o) {
@@ -211,6 +217,21 @@
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
       + '<div class="cwd-body">' + guideHtml + extraImgs + '</div>';
     if (o.showLanding !== false && d.landingUrl && isLinkInflow) {
+      /**
+       * 옵션별 유입 링크 표기(M4 · 시안 C = 칩 + 출처 배지, 사용자 확정 2026-08-10).
+       *
+       * ★ **`landingSource === 'option'` 일 때만** 그린다(사용자 확정 ②) — 공고 공통 주소로
+       *   가는 경우엔 줄 자체가 없다. 옵션 없는 공고도 종전 그대로(확정 ③).
+       * ★★ 출처 판정은 **서버 `resolveLanding` 단일 출처**가 실어 준 값을 그대로 쓴다 —
+       *   여기서 "옵션에 URL이 있으니 옵션 주소겠지"로 되계산하면 킬스위치
+       *   `CAMPAIGN_OPTION_LANDING=0` 일 때 **버튼은 공통 주소로 가는데 배지는 '옵션 전용'**
+       *   이라고 말하는 상태가 된다.
+       * ★ 관리자 미리보기 분기 없음(확정 ④) — 미리보기 = 실제 화면이 이 모듈의 존재 이유다.
+       */
+      if (d.landingSource === 'option' && so && so.optKey) {
+        html += '<div class="cwd-lnd"><span class="cwd-lchip">' + escAttr(so.optKey) + '</span>'
+          + '<span class="cwd-lbdg">옵션 전용 주소</span></div>';
+      }
       html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(d.landingUrl) + '">🔗 상품 페이지 열기 (새 탭)</button>';
     }
     html += '</div>';

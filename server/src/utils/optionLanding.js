@@ -43,20 +43,38 @@ function landingUrlError(v) {
 }
 
 /**
- * 리뷰어가 열 주소를 고른다.
+ * 리뷰어가 열 주소를 고른다 + **그 주소가 어디서 왔는지**(M4 화면 표기용).
+ *
+ * ★★ 판정은 여기 한 곳 — `resolveLandingUrl` 은 이 함수의 얇은 래퍼다.
+ *   화면(옵션 칩·배지)이 "옵션 전용 주소인가"를 따로 계산하면 **버튼은 옵션 주소로 가는데
+ *   배지는 공통이라고 말하는** 상태가 생긴다.
+ *
+ * ★★ **가이드유입이면 주소를 아예 내보내지 않는다**(사용자 확정 2026-08-10):
+ *   종전에는 화면에서 버튼만 숨기고 응답 JSON 에는 주소가 그대로 실려 개발자도구로 보였다.
+ *   그 공고의 유입가이드는 "검색해서 들어오라"는 지시인데 주소가 노출되면 그 지시가 무의미해진다
+ *   — 카톡방 URL 이 이미 쓰는 규율(화면 숨김을 API 에서도 강제)과 같다.
+ *   ★ `inflowType` 이 **불명('')** 이면 여기서 단정하지 않는다 — 그 판정은 유입가이드 **내용 유무**까지
+ *     봐야 하고 그건 화면(`campaign-workdetail.js`)이 이미 한다. 서버가 흉내 내면 사본이 된다.
+ *
  * @param {object} ctx
- * @param {string} [ctx.optionLandingUrl]  그 리뷰어가 고른 옵션의 campaign_options.landing_url
+ * @param {string} [ctx.optionLandingUrl]   그 리뷰어가 고른 옵션의 campaign_options.landing_url
  * @param {string} [ctx.campaignLandingUrl] recruit_campaigns.landing_url(진행상품 표 첫 상품 URL 파생)
- * @returns {string} 열 주소(없으면 빈 문자열 = 버튼 미노출)
+ * @param {string} [ctx.inflowType]         'link' | 'guide' | ''(미지정)
+ * @returns {{url:string, source:'option'|'campaign'|''}} source '' = 열 주소 없음
  */
-function resolveLandingUrl(ctx) {
+function resolveLanding(ctx) {
   const c = ctx || {};
+  if (String(c.inflowType || '') === 'guide') return { url: '', source: '' };
   if (OPTION_LANDING_ENABLED) {
     const opt = sanitizeLandingUrl(c.optionLandingUrl);
-    if (opt) return opt;
+    if (opt) return { url: opt, source: 'option' };
   }
-  return sanitizeLandingUrl(c.campaignLandingUrl);
+  const camp = sanitizeLandingUrl(c.campaignLandingUrl);
+  return camp ? { url: camp, source: 'campaign' } : { url: '', source: '' };
 }
+
+/** 열 주소만(기존 호출부 계약 유지 — 판정은 `resolveLanding` 단일 출처) */
+function resolveLandingUrl(ctx) { return resolveLanding(ctx).url; }
 
 /**
  * 진행상품 표 → 공고 랜딩 URL 파생(D3·D5 확정).
@@ -77,6 +95,7 @@ module.exports = {
   OPTION_LANDING_ENABLED,
   sanitizeLandingUrl,
   landingUrlError,
+  resolveLanding,
   resolveLandingUrl,
   deriveCampaignLandingUrl,
 };
