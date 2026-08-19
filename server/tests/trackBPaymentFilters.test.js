@@ -126,9 +126,16 @@ test('result upload uses one clickable drop zone with a concise label', () => {
   assert.doesNotMatch(actions, /<button class="btn sm" onclick="_pmPickResult/);
 });
 
-test('payment result application does not expose a manual deposit-date retry', () => {
-  assert.doesNotMatch(sourceOf('_pmBatchActions'), /_pmBackfillPaidDeposit/);
+/* 2026-08-19 회차 #12 이후 규칙 변경(사용자 확정): 입금일 재기록 창구를 **하나** 둔다.
+   종전에는 재시도 수단이 아예 없어, 반영이 도중에 끊긴 회차(board_* 전부 0)를 아무도
+   치울 수 없었다. 창구는 작업보드 칸의 [입금일 기록] 하나이고, 회차 액션 줄(다시 받기·
+   취소·결과 업로드)에는 두지 않는다 — 그쪽에 버튼을 더하면 주 행동이 묻힌다. */
+test('deposit-date retry lives only in the workboard cell, not in the batch actions', () => {
+  assert.doesNotMatch(sourceOf('_pmBatchActions'), /_pmDepositBackfill/);
   assert.doesNotMatch(workdesk, /function _pmBackfillPaidDeposit/);
+  assert.match(sourceOf('_pmBatchWorkboard'), /_pmDepositBackfill\(\$\{i\}\)/);
+  // 실행부는 한 벌이어야 한다(사본을 두면 확인창·후처리가 갈린다).
+  assert.strictEqual((workdesk.match(/async function _pmDepositBackfill/g) || []).length, 1);
 });
 
 test('legacy failed deposit-date writes are repaired automatically once per payment view', () => {
@@ -179,7 +186,8 @@ test('transfer batch separates transfer result from workboard application count'
   assert.doesNotMatch(result, /반영됨\(시트\)/);
   assert.match(workboard, /기록됨/);
   assert.match(table, /<th>이체결과<\/th><th>작업보드<\/th>/);
-  assert.match(table, /\$\{_pmBatchResult\(b\)\}<\/td><td>\$\{_pmBatchWorkboard\(b\)\}/);
+  // 작업보드 칸은 회차 인덱스를 받는다(미기록·기록실패 회차의 [입금일 기록] 버튼이 인덱스만 넘긴다).
+  assert.match(table, /\$\{_pmBatchResult\(b\)\}<\/td><td>\$\{_pmBatchWorkboard\(b,\s*i\)\}/);
 });
 
 test('workboard result uses confirmed write counts instead of paid-result counts', () => {
