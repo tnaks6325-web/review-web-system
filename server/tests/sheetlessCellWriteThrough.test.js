@@ -164,7 +164,9 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
 })().then(() => {
   /* ── 4) 정적 계약 ───────────────────────────────────────── */
   const tb = R('server/src/services/trackB.service.js');
-  const edit = tb.slice(tb.indexOf('async function editWorkdeskRow'), tb.indexOf('async function revertWorkdeskEdit'));
+  // ★ 편집 경로 = `_editOneInTx`(실행부) + 단건/일괄 래퍼 — 세 함수를 한 구간으로 본다.
+  //   실행부만 보면 래퍼가 rebuildLedgers 를 부르는 회귀를 놓치고, 래퍼만 보면 실행부 회귀를 놓친다.
+  const edit = tb.slice(tb.indexOf('async function _editOneInTx'), tb.indexOf('async function revertWorkdeskEdit'));
   t('4a: 편집 경로는 rebuildLedgers 를 직접 부르지 않는다(락 점유 차단)', () => {
     assert.ok(!/rebuildLedgers/.test(edit), '편집 함수 안에 rebuildLedgers 호출이 있으면 안 된다');
   });
