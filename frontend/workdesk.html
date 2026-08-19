@@ -4735,10 +4735,9 @@ async function openTaskDelete(i){
     <div class="tdrow"><span>리뷰 캡처 기록</span><b>${num(c.reviewFiles)}건</b></div>
     <div class="tdrow"><span>지워질 전체 행</span><b>${num(j.totalRows)}행 (${(j.tables||[]).length}개 표)</b></div>
   </div>`;
-  const camps=(j.campaigns||[]).filter(x=>!x.archivedAt);
   const side=`<ul class="wbl-ul">
     <li>연결된 <b>작업오더 ${(j.workOrders||[]).length}건</b>은 지우지 않고 <b>연결만 해제</b>합니다 — 같은 오더를 다시 접수할 수 있습니다.</li>
-    <li>연결된 <b>모집공고 ${camps.length}건</b>은 지우지 않고 <b>보관 처리</b>합니다(참여 이력·리뷰비 기록 보존).</li>
+    <li>연결된 <b>모집공고 ${(j.campaigns||[]).length}건</b>도 <b>함께 삭제</b>됩니다 — 그 공고의 참여 신청·옵션·리뷰비 구간·차수·날짜별 인원도 같이 사라집니다.</li>
     <li>구글시트 파일·탭은 <b>건드리지 않습니다</b>(목록에서만 사라집니다).</li>
   </ul>`;
   /* ★ 입금 기록이 걸린 작업 — 막지는 않되(사용자 확정 2026-08-19) **별도 체크 + 별도 버튼**으로만
@@ -4790,7 +4789,7 @@ async function _tdGo(forcePayment){
   }
   _tdClose();
   const pay=(j.paymentDeleted||[]).reduce((n,m)=>n+(m.count||0),0);
-  toast(`🗑 삭제 완료 — ${j.totalRows}행${pay?` · 입금 기록 ${pay}건 포함`:''}${j.campaignsArchived?` · 공고 ${j.campaignsArchived}건 보관`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
+  toast(`🗑 삭제 완료 — ${j.totalRows}행${pay?` · 입금 기록 ${pay}건 포함`:''}${j.campaignsDeleted?` · 공고 ${j.campaignsDeleted}건 삭제`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
   try{ await loadTabs(); }catch(_){ toast('삭제는 완료됐습니다. 목록 새로고침에 실패했으니 새로고침해 주세요.'); }
 }
 

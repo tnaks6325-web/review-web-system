@@ -143,9 +143,10 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     const pool = stubPool((text) => {
       if (/COUNT\(\*\)::int AS n/.test(text)) return { rows: [{ n: 0 }] };
       if (/COALESCE\(NULLIF\(tc\.tab_gid/.test(text)) return { rows: [{ gid: '123' }] };
+      // ★ 좁은 조건을 먼저(스텁 매칭 순서 함정 — 넓은 DELETE 분기가 가로챈다)
+      if (/^\s*DELETE\s+FROM recruit_campaigns/i.test(text)) return { rows: [], rowCount: 1 };
       if (/^\s*DELETE\s+FROM/i.test(text)) return { rows: [], rowCount: 2 };
       if (/^\s*UPDATE\s+work_orders/i.test(text)) return { rows: [], rowCount: 1 };
-      if (/^\s*UPDATE\s+recruit_campaigns/i.test(text)) return { rows: [], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     });
     const out = await svc.deleteTask({ sheetId: 'S', tabName: 'T', confirm: true, by: '만두', pool });
@@ -158,9 +159,9 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     ok('★ 작업오더는 링크만 해제한다(오더 삭제 금지 — 다시 접수할 수 있어야 한다)',
       pool.log.some(q => /UPDATE work_orders SET linked_tab_sheet_id=''/.test(q.text))
       && !pool.log.some(q => /DELETE FROM work_orders/i.test(q.text)));
-    ok('★ 모집공고는 보관 처리한다(공고 삭제 금지 — 참여 이력·리뷰비 스냅샷 보존)',
-      pool.log.some(q => /UPDATE recruit_campaigns SET archived_at=NOW\(\)/.test(q.text))
-      && !pool.log.some(q => /DELETE FROM recruit_campaigns/i.test(q.text)));
+    ok('★ 모집공고도 함께 삭제한다(사용자 확정 — 갈 곳 없는 공고를 남기지 않는다)',
+      pool.log.some(q => /DELETE FROM recruit_campaigns[\s\S]*linked_sheet_id=\$1/.test(q.text))
+      && !pool.log.some(q => /UPDATE recruit_campaigns SET archived_at/.test(q.text)));
     ok('업체 소유는 탭 지정(gid) 행만', pool.log.some(q => /DELETE FROM advertiser_campaigns[\s\S]*tab_gid=\$2/.test(q.text)));
     ok('★ 시트 등록행(campaigns)은 남은 탭이 없을 때만',
       pool.log.some(q => /DELETE FROM campaigns[\s\S]*NOT EXISTS[\s\S]*tab_configs/.test(q.text)));
@@ -169,7 +170,7 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     ok('gid 는 표를 지우기 전에 읽는다(지운 뒤에는 알 수 없다)',
       pool.log.findIndex(q => /COALESCE\(NULLIF\(tc\.tab_gid/.test(q.text)) < pool.log.findIndex(q => /^\s*DELETE FROM/i.test(q.text)));
     ok('COMMIT 으로 끝난다', pool.log.some(q => /COMMIT/.test(q.text)));
-    ok('결과가 건수를 사실대로 말한다', out.campaignsArchived === 1 && out.workOrdersUnlinked === 1 && out.totalRows > 0);
+    ok('결과가 건수를 사실대로 말한다', out.campaignsDeleted === 1 && out.workOrdersUnlinked === 1 && out.totalRows > 0);
   }
   {
     // gid 를 모르면 업체 소유는 건드리지 않는다(빈 값 매칭 = 남의 탭·시트 전체 소유 삭제)
@@ -259,6 +260,8 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
       /payment_locked[\s\S]{0,160}openTaskDelete\(i\)/.test(WD));
     ok('★ 미리보기 실패는 "삭제 가능"으로 위장하지 않는다',
       /확인하지 못한 상태로는 지우지 않습니다/.test(WD));
+    ok('★ 화면이 "공고도 함께 삭제된다"를 말한다(조용한 파괴 금지)',
+      /모집공고 \$\{\(j\.campaigns\|\|\[\]\)\.length\}건<\/b>도 <b>함께 삭제<\/b>/.test(WD));
     ok('삭제 후 목록을 다시 읽는다', /_tdGo[\s\S]{0,1200}loadTabs\(\)/.test(WD));
     ok('확인창은 바깥 클릭으로 닫히지 않는다(실수 클릭 보호)', /_tdShell[\s\S]{0,600}바깥 클릭으로 닫지 않는다/.test(WD));
   }
