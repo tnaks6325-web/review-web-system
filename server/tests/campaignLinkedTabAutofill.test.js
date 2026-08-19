@@ -42,8 +42,12 @@ ok('★ 조회 실패는 null — 보정 실패가 저장을 막지 않는다(fa
   /작업오더 연결탭 조회 실패\(무시\)/.test(rt));
 
 /* ═══ 생성 라우트 ═══ */
-ok('★ 생성 시 게이트 판정 전에 보정한다(순서가 뒤면 게시가 계속 막힘)',
-  /연결탭 자동 보정\(생성\)[\s\S]{0,400}_participationActivationErrors\(\{/.test(rt));
+// ★ 거리 기반 정규식(400자 안)은 사이에 코드가 늘면 조용히 깨진다 — 고정할 것은 **순서**다.
+ok('★ 생성 시 게이트 판정 전에 보정한다(순서가 뒤면 게시가 계속 막힘)', (() => {
+  const fix = rt.indexOf('연결탭 자동 보정(생성)');
+  const gate = rt.indexOf('_participationActivationErrors({', fix);
+  return fix > -1 && gate > fix;
+})());
 ok('생성 게이트가 보정값을 본다',
   /linked_sheet_id: lSheet, linked_tab_name: lTab, linked_tab_gid: lGid, window_start, window_end, daily_limit/.test(rt));
 ok('생성 INSERT에 보정값이 들어간다', /lSheet \|\| '',\s*\n\s*lTab \|\| '',\s*\n\s*lGid \|\| '',/.test(rt));

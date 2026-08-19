@@ -120,8 +120,20 @@ ok('★ force 없이 부르면 needConfirm 만 반환하고 **DELETE 하지 않�
   /if \(!force && \(historyTotal > 0 \|\| countsPartial\)\) \{[\s\S]{0,320}?needConfirm: true/.test(routes));
 ok('★ needConfirm 반환이 DELETE 문보다 먼저 온다(early return 이 실제로 막는다)',
   routes.indexOf('needConfirm: true') < routes.indexOf("DELETE FROM reviewers WHERE id = $1"));
-ok('이력 집계는 주문·참여·문의 3종', /order_submissions WHERE phone8/.test(routes)
+ok('이력 집계는 주문·참여·문의 3종', /FROM order_submissions/.test(routes)
   && /campaign_applications WHERE phone8/.test(routes) && /cs_threads WHERE reviewer_phone8/.test(routes));
+// ★★ `order_submissions` 에는 **phone8 컬럼이 없다**(전체 번호 `phone` 뿐) — 종전 가드는 그 버그 쪽
+//   컬럼명(`order_submissions WHERE phone8`)을 고정하고 있었고, 실제 코드는 42703 으로 **항상 실패**해
+//   확인창이 "구매양식 제출 0건"으로 조용히 속였다(진짜 PG 검증으로 발견·수정됨).
+//   가드를 수정본에 맞추고, 되돌아가지 못하게 못박는다.
+ok('★★ 주문 집계는 phone(뒤 8자리 파생)으로 센다 — order_submissions.phone8 은 없는 컬럼', (() => {
+  const i = routes.indexOf("'/reviewers/delete'");
+  const j = routes.indexOf('FROM order_submissions', i);
+  // ★ 슬라이스를 **그 probe 안에서** 끊는다 — 넘치면 다음 probe(campaign_applications WHERE phone8)가
+  //   섞여 들어와 "phone8 없음" 단언이 항상 실패한다.
+  const q = routes.slice(j, routes.indexOf('],', j));
+  return j > -1 && /RIGHT\(regexp_replace\(COALESCE\(phone,''\)/.test(q) && !/\bphone8\b/.test(q);
+})());
 ok('★ 집계 실패를 0건으로 속이지 않는다(countsPartial 로 알린다)',
   /countsPartial = true/.test(routes) && /countsPartial/.test(jsNoComment));
 ok('삭제는 감사 로그를 남긴다(누가·누구를·이력 몇 건)',
