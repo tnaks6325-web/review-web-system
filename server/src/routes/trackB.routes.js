@@ -508,6 +508,24 @@ router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, asy
   } catch (err) { _cutoverErr(err, res, next); }
 });
 
+/* ── 무시트 장부 재생성 스윕 수동 실행(130) — adminOrMaster ──
+   ★★ 왜 수동 창구가 필요한가: 스윕은 1분 크론이 돌리지만 **크론이 없는 배포**가 있다
+      (`server/index.js` 는 `NODE_ENV==='production'` 일 때만 `startCronJobs()` 를 부른다 —
+      테스트 환경은 development 라 크론이 통째로 꺼져 있다). 그 환경에서는 편집이 원본에는
+      남지만 장부에 영영 반영되지 않으므로, 사람이 눌러 돌릴 수 있어야 한다.
+   ★ 응답의 `pending`·`oldestWaitSec` 은 "장부 반영이 얼마나 밀렸나"의 관측값이다
+      (스윕 실패가 로그에만 남는 상태를 없앤다).
+   ★ 크론과 **같은 함수·같은 락** — 사본 0. force=true 면 디바운스만 건너뛴다. */
+router.post('/sheetless/ledger-sweep', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { withJobLock } = require('../utils/jobLock');
+    const { sweepDirtyLedgers } = require('../services/sheetlessLedgerSweep.service');
+    const out = await withJobLock('sheetless_ledger_sweep',
+      () => sweepDirtyLedgers({ by: _by(req), force: req.body && req.body.force !== false }));
+    res.json({ ok: true, ...(out || {}) });
+  } catch (err) { next(err); }
+});
+
 /* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
    preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
    run     : 등록 + 업체 소유 + 작업표 + 장부 + 무시트 표식 + 시트 안내문
