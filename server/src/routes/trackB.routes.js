@@ -2272,11 +2272,16 @@ router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, re
       // 이름 부분일치 또는 연락처 숫자 부분일치(하이픈 유무 무관).
       // ★ 자리표시자를 안 쓸 파라미터는 push 하지 않는다 — 숫자 없는 이름 검색에서
       //   "bind message supplies N parameters" 로 통째로 500 난다.
+      // ★★ 숫자 부분일치는 4자리부터(2026-08-19 실측 사고): 'E2E블로거' 같은 혼합 검색어에서
+      //   추출된 짧은 숫자('22')가 연락처·계좌 부분일치로 번져 **무관한 리뷰어 수십 명**이 결과에
+      //   섞였고, 그 목록을 신뢰한 정리 스크립트가 실제 리뷰어를 오삭제했다(R2 백업으로 복구).
+      //   작업보드 표 검색의 "4자리 이상 숫자만 비교" 규칙과 같은 기준 — 문서화된 용례
+      //   '전화 뒤4자리 검색'은 그대로 살아 있다.
       const d = q.replace(/[^0-9]/g, '');
       const ors = [];
       params.push('%' + q + '%');
       ors.push(`name ILIKE $${params.length}`);
-      if (d) {
+      if (d.length >= 4) {
         params.push('%' + d + '%');
         ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
         // 등록 계좌번호 부분일치(블랙리뷰어 추적 — 이름·번호를 바꿔 재가입해도 계좌로 찾는다)

@@ -60,8 +60,9 @@ const SRC = R('src/routes/trackB.routes.js');
 t('라우트가 안 쓸 파라미터를 push 하지 않는다(회귀 방지)', () => {
   const fn = SRC.slice(SRC.indexOf("router.get('/reviewers'"), SRC.indexOf("router.post('/reviewers/memo'"));
   assert.ok(/const d = q\.replace\(\/\[\^0-9\]\/g, ''\);/.test(fn), '숫자 추출부가 사라짐');
-  assert.ok(/if \(d\) \{[\s\S]{0,200}params\.push/.test(fn),
-    '숫자 파라미터는 d 가 있을 때만 push 해야 한다(없으면 bind 개수 불일치로 500)');
+  assert.ok(/if \(d\.length >= 4\) \{[\s\S]{0,200}params\.push/.test(fn),
+    "★ 숫자 부분일치는 4자리부터(2026-08-19 오삭제 사고 — 'E2E블로거'의 '22'가 연락처 부분일치로 " +
+    '번져 무관한 리뷰어 수십 명이 결과에 섞였다). 문서화된 용례 = 전화 뒤4자리 검색.');
   assert.ok(/LIMIT \$\$\{params\.length - 1\} OFFSET \$\$\{params\.length\}/.test(fn),
     'LIMIT/OFFSET 자리표시자 계산이 바뀜');
 });
@@ -72,7 +73,7 @@ function build({ q = '', status = '', limit = 50, offset = 0 }) {
     const d = q.replace(/[^0-9]/g, '');
     const ors = [];
     params.push('%' + q + '%'); ors.push(`name ILIKE $${params.length}`);
-    if (d) { params.push('%' + d + '%'); ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`); }
+    if (d.length >= 4) { params.push('%' + d + '%'); ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`); }
     where.push('(' + ors.join(' OR ') + ')');
   }
   if (status) { params.push(status); where.push(`status = $${params.length}`); }
@@ -96,6 +97,7 @@ const CASES = [
   ['★ 숫자 없는 이름 검색', { q: '이시현' }],
   ['숫자만 검색', { q: '7701' }],
   ['하이픈 포함 검색', { q: '010-1111-2222' }],
+  ['★ 혼합 검색어(숫자 3자리 이하)', { q: 'E2E블로거' }],
   ['상태만', { status: 'active' }],
   ['검색+상태', { q: '김하나', status: 'inactive' }],
   ['숫자검색+상태', { q: '1111', status: 'active' }],
