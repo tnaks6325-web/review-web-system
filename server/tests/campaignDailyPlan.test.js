@@ -378,7 +378,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ok('★ 재구성은 관리자 버튼과 같은 함수(사본 0)',
       /rebuildAdjustedPlansToWorktable/.test(readS('services/campaignPlan.service.js')));
     ok('★★ SAVEPOINT 격리(재구성 실패가 계획 저장을 죽이지 않는다)',
-      CALLS.some(c => c.sql.includes('SAVEPOINT cp_auto_rebuild')));
+      /* ★ 부분일치로 보면 RELEASE/ROLLBACK TO 가 대신 통과시킨다(변이시험 실측) — 정확일치로 본다. */
+      CALLS.some(c => c.sql.trim() === 'SAVEPOINT cp_auto_rebuild'));
     ok('★ 결과를 응답에 실어 화면이 말할 수 있다', !!(r.worktableSync && r.worktableSync.rebuild));
 
     // ② 재구성이 실패해도 계획 저장은 살아남는다(throw 없음 · ROLLBACK TO 만)
