@@ -244,4 +244,40 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
   };
 }
 
-module.exports = { renumberTab, renumberTabInTx, renumberAllSheetless, scanNumbering, enabled, __setPoolForTest };
+/**
+ * 주기 자동 스윕 — **번호가 빈 줄이 있는 작업만** 골라 다시 매긴다(크론).
+ *
+ * ★★ 왜 스캔부터 하는가: 전 탭에 재번호를 돌리면 그 탭의 모든 줄과 `row_json` 을 읽는다.
+ *   대부분의 작업은 이미 정리돼 있으므로 **한 쿼리로 대상만 추려** 그것만 연다
+ *   (정리가 끝난 뒤에는 매 사이클 쿼리 1번으로 끝난다).
+ * ★ 사이클당 상한(`cap`) — 한 번에 다 돌면 업무 시간에 DB 를 흔든다. 남은 것은 다음 사이클이 맡는다.
+ * ★ 건별 독립 — 한 작업의 실패가 나머지를 죽이지 않는다. 어떤 실패도 throw 하지 않는다(크론 보호).
+ * ★★ "번호는 차 있는데 순서만 어긋난" 작업은 여기서 안 잡힌다(스캔이 빈칸만 센다) — 그건
+ *   **주문이 들어올 때 그 자리에서** 다시 매겨지므로(`renumberTabInTx`) 쌓이지 않는다.
+ */
+async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
+  if (!enabled()) return { skipped: true, reason: 'disabled' };
+  const limit = Math.min(Math.max(parseInt(cap, 10) || 12, 1), 60);
+  let scan;
+  try { scan = await scanNumbering({}); }
+  catch (err) {
+    logger.warn(`[rowNumbering] 스윕 스캔 실패: ${err.message}`);
+    return { skipped: true, reason: 'scan_failed', message: err.message };
+  }
+  const need = (scan.items || []).filter(r => r.blankNumber > 0);
+  const targets = need.slice(0, limit);
+  const out = { scanned: scan.tabs, need: need.length, tabs: targets.length,
+                remaining: Math.max(0, need.length - targets.length), changedTabs: 0, changedRows: 0, failed: 0 };
+  for (const t of targets) {
+    try {
+      const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, by });
+      if (r && r.ok && r.changed) { out.changedTabs++; out.changedRows += r.changed; }
+    } catch (err) {
+      out.failed++;
+      logger.warn(`[rowNumbering] 스윕 실패 tab=${t.tabName}: ${err.message}`);
+    }
+  }
+  return out;
+}
+
+module.exports = { renumberTab, renumberTabInTx, renumberAllSheetless, scanNumbering, sweepNumbering, enabled, __setPoolForTest };

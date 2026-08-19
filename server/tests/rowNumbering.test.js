@@ -232,6 +232,69 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 스캔도 담당자를 세지 않는다', !/manager|담당자/i.test(pool.calls[0].sql));
   }
 
+  console.log('\n[I] 자동 스윕(크론) — 대상만 · 상한 · 건별 독립 · throw 없음');
+  {
+    /* 스캔이 추린 대상만 연다(정리 끝난 작업을 매번 열지 않는다) */
+    const opened = [];
+    const pool = makePool([
+      [/FROM tab_configs tc/i, { rows: [
+        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 100, blankNumber: 5 },
+        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 100, blankNumber: 0 },   // 이미 정리됨
+        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 2 },
+      ] }],
+      [/FROM tab_configs\s+WHERE sheet_id/i, (p) => { opened.push(p[1]); return { rows: [{ sheetless: true }] }; }],
+      [/FROM campaign_participants p/i, { rows: [] }],
+    ]);
+    S.__setPoolForTest(pool);
+    const r = await S.sweepNumbering({ cap: 10 });
+    ok('★ 번호 빈칸이 있는 작업만 연다', opened.join(',') === 'T1,T3', opened.join(','));
+    ok('스캔 결과를 보고한다', r.need === 2 && r.tabs === 2, JSON.stringify(r));
+
+    /* 사이클 상한 — 남은 것은 다음 사이클(업무 시간에 DB 를 흔들지 않는다) */
+    S.__setPoolForTest(makePool([
+      [/FROM tab_configs tc/i, { rows: [1, 2, 3, 4].map(i => ({ sheetId: 'S' + i, tabName: 'T' + i, displayName: 'x', total: 9, blankNumber: 1 })) }],
+      [/FROM tab_configs\s+WHERE sheet_id/i, { rows: [{ sheetless: true }] }],
+      [/FROM campaign_participants p/i, { rows: [] }],
+    ]));
+    const r2 = await S.sweepNumbering({ cap: 2 });
+    ok('★ 사이클 상한을 지킨다', r2.tabs === 2 && r2.remaining === 2, JSON.stringify(r2));
+
+    /* 한 작업의 실패가 나머지를 죽이지 않고, 크론으로 예외가 새지 않는다 */
+    let calls = 0;
+    S.__setPoolForTest({ query: async (sql) => {
+      if (/FROM tab_configs tc/i.test(sql)) return { rows: [
+        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 9, blankNumber: 1 },
+        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 9, blankNumber: 1 }] };
+      if (/FROM tab_configs\s+WHERE sheet_id/i.test(sql)) { calls++; if (calls === 1) throw new Error('boom'); return { rows: [{ sheetless: true }] }; }
+      return { rows: [] };
+    } });
+    let threw = false, r3;
+    try { r3 = await S.sweepNumbering({ cap: 10 }); } catch (_) { threw = true; }
+    ok('★★ 실패해도 throw 하지 않는다(크론 보호)', !threw && r3 && r3.failed === 1, JSON.stringify(r3));
+    ok('★ 실패한 작업이 나머지를 죽이지 않는다', calls === 2, String(calls));
+
+    /* 스캔 자체가 실패하면 아무것도 열지 않는다(모르는 채로 쓰지 않는다) */
+    S.__setPoolForTest({ query: async () => { throw new Error('down'); } });
+    const r4 = await S.sweepNumbering({});
+    ok('★ 스캔 실패는 skip(쓰기 0)', r4.skipped === true && r4.reason === 'scan_failed');
+
+    /* 킬스위치 */
+    process.env.WORKTABLE_AUTO_NUMBER = '0';
+    const r5 = await S.sweepNumbering({});
+    ok('킬스위치면 스캔조차 하지 않는다', r5.skipped === true && r5.reason === 'disabled');
+    delete process.env.WORKTABLE_AUTO_NUMBER;
+  }
+  {
+    const cronSrc = noLineComments(read('src/jobs/cron.js'));
+    ok('★ 크론에 스윕 등록', /sweepNumbering/.test(cronSrc) && /cron\.schedule\(rnSchedule/.test(cronSrc));
+    ok('★★ 인스턴스 직렬화(락) — 멀티 인스턴스가 같은 탭을 두 번 매기지 않는다',
+      /withJobLock\('worktable_renumber_sweep'/.test(cronSrc));
+    ok('★ 중복 실행 방지(rnRunning)', /if \(rnRunning\) return;[\s\S]{0,40}rnRunning = true/.test(cronSrc));
+    ok('★ 킬스위치 두 겹(기능 전체·스윕만)',
+      /WORKTABLE_AUTO_NUMBER !== '0' && process\.env\.WORKTABLE_RENUMBER_SWEEP !== '0'/.test(cronSrc));
+    ok('★ 다른 크론과 분이 겹치지 않는다(기본 스케줄)', /'3-59\/5 \* \* \* \*'/.test(cronSrc));
+  }
+
   console.log('\n[G] 라우트·화면 배선');
   {
     const rt = noLineComments(read('src/routes/trackB.routes.js'));
@@ -297,6 +360,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));
     ok('★★ 표에 담당자 열이 없다', !/담당자/.test(thead) && !/담당자|blankManager/.test(rowsBlk), thead.slice(0, 120));
     ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
+    ok('★ 자동으로 돈다는 사실을 화면이 말한다(수동 버튼은 즉시 실행용)',
+      /5분마다 자동으로 정리됩니다/.test(fe) && /5분 주기로 자동<\/b> 정리되므로/.test(fe));
   }
 
   console.log(`\n✅ rowNumbering 회귀가드 통과 (${passed}케이스)`);

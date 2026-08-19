@@ -217,6 +217,37 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 무시트 작업표 번호 자동 정리(스윕) ──────────────────────────────────────
+  //   주문이 들어올 때는 그 자리에서 다시 매겨지지만(renumberTabInTx), **이미 비어 있던 줄**과
+  //   그때 실패한 건은 남는다. 사람이 [🔢 번호 정리]를 누르지 않아도 채워지도록 주기로 훑는다.
+  //   ★ 대상은 **한 쿼리 스캔으로 추린 작업만**(정리가 끝나면 매 사이클 쿼리 1번으로 끝난다).
+  //   ★ 사이클 상한이 있어 업무 시간에 DB 를 흔들지 않는다 — 남은 것은 다음 사이클.
+  //   ★ 다른 크론과 분(minute)을 겹치지 않게(*/5 미러 · */2 리컨실 · 4-59/10 검수와 오프셋).
+  //   끄기: WORKTABLE_RENUMBER_SWEEP=0 (기능 전체는 WORKTABLE_AUTO_NUMBER=0)
+  if (process.env.WORKTABLE_AUTO_NUMBER !== '0' && process.env.WORKTABLE_RENUMBER_SWEEP !== '0') {
+    const rnSchedule = process.env.WORKTABLE_RENUMBER_SWEEP_SCHEDULE || '3-59/5 * * * *';
+    let rnRunning = false;
+    cron.schedule(rnSchedule, async () => {
+      if (rnRunning) return;
+      rnRunning = true;
+      try {
+        const { sweepNumbering } = require('../services/rowNumbering.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const cap = parseInt(process.env.WORKTABLE_RENUMBER_SWEEP_CAP || '12', 10);
+        const r = await withJobLock('worktable_renumber_sweep', () => sweepNumbering({ cap }));
+        // 할 일이 있었을 때만 로그(평상시 로그 소음 0)
+        if (r && !r.skipped && (r.changedTabs || r.failed)) {
+          logger.info(`[CRON-Renumber] 대상=${r.need} 처리=${r.tabs} 작업=${r.changedTabs} 줄=${r.changedRows}`
+            + `${r.failed ? ` 실패=${r.failed}` : ''}${r.remaining ? ` 남음=${r.remaining}` : ''}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-Renumber] error: ${err.message}`);
+      } finally {
+        rnRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
   //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
   //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).
