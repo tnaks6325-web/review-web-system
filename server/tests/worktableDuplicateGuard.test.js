@@ -334,6 +334,20 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('화면에 [전체 작업 점검] 버튼', /onclick="ddScanAll\(\)"/.test(wd));
     ok('결과에서 작업으로 이동(onclick 은 인덱스만)', /ddOpenTab\(\$\{i\}\)/.test(wd));
     ok('목록에 없는 작업이면 사유를 말한다(막다른 길 금지)', /그 작업이 지금 목록에 없습니다/.test(wd));
+
+    /* ★ 작업별로 이어서 처리 — 모달을 벗어나지 않는다(2026-08-19 사용자 요청) */
+    ok('점검 목록에서 [확인·정리]로 그 작업 미리보기', /onclick="ddPickScan\(\$\{i\}\)"/.test(wd));
+    ok('★ 미리보기·실행·확인창이 모두 같은 대상(_ddTarget)을 본다', /function _ddTarget\(\)/.test(wd)
+      && /sheetId: tg\.sheetId, tabName: tg\.tabName, dryRun: true/.test(wd)
+      && /sheetId: tg\.sheetId, tabName: tg\.tabName, dryRun: false/.test(wd)
+      && /confirm\(`「\$\{tg\.label \|\| tg\.tabName\}」/.test(wd));
+    ok('★ 목록에서 고른 작업은 정리 후 창을 닫지 않고 목록으로 돌아간다',
+      /_DD\.target && _DD\.scan[\s\S]{0,600}row\.done = true[\s\S]{0,400}_DD\.target = null;[\s\S]{0,80}_ddRender\(\);\s*\n\s*return;/.test(wd));
+    ok('★ 처리한 줄은 완료 표시로 바뀐다(같은 작업을 두 번 돌지 않게)',
+      /t\.done \? `✅ 정리함/.test(wd) && /row\.removeRows = 0/.test(wd));
+    ok('남은 작업 수를 말한다', /남은 작업\s*\n?\s*\$\{esc\(String\(\(sc\.tabs \|\| \[\]\)\.filter\(t => !t\.done\)\.length\)\)\}개/.test(wd));
+    ok('★ 한 작업을 고른 동안에는 목록을 겹쳐 그리지 않는다', /if \(_DD\.scan && !_DD\.target\)/.test(wd));
+    ok('전체 점검을 다시 돌리면 고른 작업이 풀린다', /_DD\.scan = null; _DD\.target = null; _DD\.prev = null;/.test(wd));
   }
 
   /* ── [F] 진짜 PG (선택) — 스텁은 SQL 을 해석하지 않는다 ──────────────────────
