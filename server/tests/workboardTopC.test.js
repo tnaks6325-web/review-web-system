@@ -103,9 +103,11 @@ t('★ 광고주 화면은 종전 4줄(.tp3kv) 그대로 — 10항목 조건표�
   return /isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건<\/div><dl class="tp3kv">/.test(m)
     && /: _condCardHtml\(wd,d,m\)/.test(m);
 })());
-t('★ 진행 현황은 내부만 2줄 배치(절반 폭에서 막대가 뭉갠다) — 광고주는 종전 한 줄', (() => {
+/* ⚠ 2026-08-19 사용자 확정: 진행 현황 폭을 작업 조건과 같게 맞추면서 2줄 배치의 근거
+   (절반 폭 → 막대 26px)가 사라졌다. 게이지는 내부·광고주 **한 벌**로 되돌린다. */
+t('★ 게이지는 내부·광고주 한 벌(사본 금지) — 2줄 배치 잔재 0', (() => {
   const m = fnBody(wd, 'function summaryStrip(wd,d,m,c){');
-  return /const gg=isAdv\?g:g2;/.test(m);
+  return /const gg=g;/.test(m) && !/tp3g cmp/.test(wd) && !/\.tp3g\.cmp/.test(wd);
 })());
 
 console.log('\n── D. 화면: 작업 조건 10항목 ──');
@@ -163,8 +165,8 @@ t('⑦ 셀 범위를 잡고 있으면 방향키는 셀 이동이 우선 — 미�
   /if\(STATE\.gSelRange\) return;/.test(fnBody(wd, 'function _rvBind(){')));
 
 console.log('\n── G. CSS 계약 ──');
-t('★ 3분할 폭 = 439 / 242 / 659 비율(고정 px 금지)',
-  /\.tp3grid\.c3\{grid-template-columns:minmax\(230px,439fr\) minmax\(170px,242fr\) minmax\(330px,659fr\)/.test(wd));
+t('★ 3분할 폭 = 439 / 439 / 659 비율 — 앞 두 칸은 같은 너비(고정 px 금지)',
+  /\.tp3grid\.c3\{grid-template-columns:minmax\(230px,439fr\) minmax\(230px,439fr\) minmax\(330px,659fr\)/.test(wd));
 t('★ 높이는 px 로 못박지 않는다 — min-height + stretch(내용이 넘치면 발주 줄이 겹친다)',
   /\.tp3grid\.c3 \.tp3col,\.tp3grid\.c3 \.rvpane\{min-height:330px\}/.test(wd)
   && !/\.tp3grid\.c3 \.tp3col\{height:330px\}/.test(wd));

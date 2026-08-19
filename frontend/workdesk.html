@@ -1594,13 +1594,14 @@
   .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
   /* ══ 작업보드 상단 3분할(내부) — 시안 C 확정 2026-08-19 ══════════════════════════
      시안 = frontend/docs/design-workboard-top-redesign.html (?v=C)
-     폭 = 작업조건 439 / 진행현황 242 / 미리보기 659 (종전 A안 439/483/439 기준 재분배)
+     폭 = 작업조건 439 / 진행현황 439 / 미리보기 659 — 앞 두 칸은 **같은 너비**(사용자 확정 2026-08-19,
+        종전 242 에서 넓힘). 합이 상한(1380)을 넘으므로 세 칸이 같은 비율로 줄어든다(1 : 1 : 1.5).
      ★ 고정 px 로 두면 좁은 화면에서 깨진다 — 같은 비율의 fr + minmax.
      ★★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다(열 많은 작업에서
         가로 스크롤이 늘어난다) → **상단 한 줄에서 끝내고** 높이만 왼쪽 카드에 맞춘다.
      ★★ 높이를 px 로 못박지 않는다 — 작업 조건 카드는 상품명 2줄 + 9행 + 발주 줄이라
         내용이 넘치면 발주 줄이 리뷰타입 줄 위로 겹친다(실측). min-height + stretch. */
-  .tp3grid.c3{grid-template-columns:minmax(230px,439fr) minmax(170px,242fr) minmax(330px,659fr);align-items:stretch}
+  .tp3grid.c3{grid-template-columns:minmax(230px,439fr) minmax(230px,439fr) minmax(330px,659fr);align-items:stretch}
   .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:330px}
   @media(max-width:1100px){.tp3grid.c3{grid-template-columns:1fr}
     .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}}
@@ -1630,13 +1631,6 @@
         border:1px solid var(--line2);border-radius:9px;box-shadow:0 8px 22px rgba(16,24,40,.14);padding:5px;min-width:170px}
   .womenu.open .womm{display:flex;flex-direction:column;gap:3px}
   .womm .btn{justify-content:flex-start;width:100%;height:28px;font-size:11.5px}
-  /* ② 진행 현황 2줄 배치(절반 폭에서는 한 줄 배치의 막대가 뭉갠다) */
-  .tp3g.cmp{display:block;padding:6px 0}
-  .tp3g.cmp .top{display:flex;align-items:baseline;gap:6px}
-  .tp3g.cmp .lb{width:auto;flex:none}
-  .tp3g.cmp .nm{width:auto;flex:1;text-align:right;font-size:15px}
-  .tp3g.cmp .pc{width:auto;flex:none}
-  .tp3g.cmp .track{display:block;width:100%;margin-top:4px;height:5px}
   /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단 구역(#setlCell 계약 유지) */
   .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2);cursor:pointer}
   .setlin:hover{opacity:.9}
@@ -5708,12 +5702,10 @@ function summaryStrip(wd,d,m,c){
     `<span class="nm">${n}<small>/${den}</small></span>`+
     `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
     `<span class="pc">${pc}%</span></div>`;
-  // ★ 내부 화면은 진행 현황 칸이 절반 폭이라 한 줄 배치(라벨·숫자·막대·%)가 성립하지 않는다
-  //   → 2줄 배치(윗줄 라벨·숫자·%, 아랫줄 전폭 막대). 광고주 화면은 종전 한 줄 그대로.
-  const g2=(lb,n,den,pc,cls)=>`<div class="tp3g cmp"><span class="top"><span class="lb">${lb}</span>`+
-    `<span class="nm">${n}<small>/${den}</small></span><span class="pc">${pc}%</span></span>`+
-    `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span></div>`;
-  const gg=isAdv?g:g2;
+  /* ★ 게이지는 내부·광고주 **한 벌**(한 줄 배치)이다 — 종전에는 내부 진행 현황이 절반 폭이라
+     막대가 26px 로 뭉개져 2줄 배치를 따로 뒀는데, 폭을 작업 조건과 같게 맞추면서(사용자 확정
+     2026-08-19) 그 근거가 사라졌다. 사본을 남겨 두면 두 화면이 계속 다른 모양으로 갈린다. */
+  const gg=g;
   /* ★ 정산은 별도 칸(박스)이 아니라 **진행 현황 카드 하단 구역**이다(사용자 확정).
      루트 id(#setlCell)·클래스(.setlsummary)·클릭(toggleSettleDetail) 계약은 그대로 —
      갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
