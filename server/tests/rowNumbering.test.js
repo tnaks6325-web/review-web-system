@@ -88,7 +88,15 @@ console.log('\n[C] 담당자 — 번호 정리는 담당자 칸을 건드리지 
   ];
   const plan = U.computeRenumberPlan(rows, { hasNumberCol: true, hasManagerCol: true, manager: '망고' });
   ok('★★ 담당자만 비어 있는 줄은 변경 대상이 아니다', plan.changes.length === 0, JSON.stringify(plan.changes));
-  ok('★★ 계획에 담당자 필드가 없다', !JSON.stringify(plan.changes).includes('manager'));
+  /* ★ 변경이 0건이면 "담당자 필드가 없다"는 공허하게 참이다(변이시험 실측) →
+       **번호가 실제로 바뀌는 계획**을 만들어 그 change 객체를 본다. */
+  const moved = U.computeRenumberPlan([
+    { id: 'x', seq: 9, iso: '2026-08-01', number: '', manager: '' },
+  ], { hasNumberCol: true, hasManagerCol: true, manager: '망고' });
+  ok('번호가 바뀌는 계획이 만들어진다(단언 전제)', moved.changes.length === 1, JSON.stringify(moved.changes));
+  ok('★★ 그 계획에도 담당자 필드가 없다',
+    !JSON.stringify(moved.changes).includes('manager') && Object.keys(moved.changes[0]).join(',') === 'id,seq,numberFrom,numberTo',
+    Object.keys(moved.changes[0]).join(','));
   const src = noLineComments(read('src/utils/rowNumbering.js'));
   ok('★ 담당자 칸 판정 자체를 두지 않는다(죽은 규칙 금지)', !/MANAGER_KEY|managerColumnKey/.test(src));
 }
@@ -276,6 +284,18 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
       /const i = all\.indexOf\(r\);/.test(fe));
     ok('★ 빈 목록도 사유를 말한다', /검색 결과가 없습니다/.test(fe) && /정리할 작업이 없습니다/.test(fe));
+
+    /* ★★ 헤더 칸 수 ≡ 행 칸 수 ≡ colspan — 열을 끼워 넣을 때 가장 흔히 깨지는 자리.
+         담당자 열이 되살아나면 여기서 걸린다(사용자 확정: 담당자는 번호 정리 대상 아님). */
+    const allBlk = fe.slice(fe.indexOf('function _rnRenderAll('), fe.indexOf('function _rnNeed('));
+    const rowsBlk = fe.slice(fe.indexOf('function _rnRows('), fe.indexOf('/* 서버가 준 사유를'));
+    const th = (allBlk.match(/<th>/g) || []).length;
+    const td = (rowsBlk.match(/<td[ >]/g) || []).length - (rowsBlk.match(/<td colspan/g) || []).length;  // 빈 목록 줄 제외
+    ok('★★ 전체 목록 표는 4칸(작업·표 줄·번호 빈칸·버튼)', th === 4, '헤더 ' + th);
+    ok('★★ 행 칸 수 = 헤더 칸 수', td === th, `헤더 ${th} · 행 ${td}`);
+    ok('★ 빈 목록 colspan 도 같은 칸 수', new RegExp('colspan="' + th + '"').test(rowsBlk));
+    const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));
+    ok('★★ 표에 담당자 열이 없다', !/담당자/.test(thead) && !/담당자|blankManager/.test(rowsBlk), thead.slice(0, 120));
     ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
   }
 
