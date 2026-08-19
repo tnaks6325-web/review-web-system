@@ -1,0 +1,111 @@
+name: Oneoff - 진행 중 작업 정합 조사 (읽기 전용)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'oneoff/active-scan' ]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Scan
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -e
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \pset pager off
+
+          -- 채워짐 판정 = 주문 링크 / 이름 / 수취인 / 연락처 중 하나라도 있으면
+          CREATE TEMP VIEW rows_all AS
+          SELECT cp.*,
+                 regexp_replace(COALESCE((
+                   SELECT string_agg(t.value, '' ORDER BY t.key)
+                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
+                    WHERE t.key LIKE '%주문번호%'
+                 ),''), '\D','','g') AS onum,
+                 (cp.order_submission_id IS NOT NULL
+                  OR COALESCE(btrim(cp.reviewer_name),'') <> ''
+                  OR COALESCE(btrim(cp.recipient_name),'') <> ''
+                  OR COALESCE(btrim(cp.phone8),'') <> '') AS filled
+            FROM campaign_participants cp
+            JOIN tab_configs tc ON tc.sheet_id=cp.sheet_id AND tc.tab_name=cp.tab_name
+             AND COALESCE(tc.sheetless,FALSE)=TRUE
+           WHERE cp.deleted_at IS NULL;
+
+          -- 진행 중 = 빈 줄이 남아 있거나, 연결된 공고가 아직 게시(active)·미보관
+          CREATE TEMP VIEW active_tabs AS
+          SELECT r.sheet_id, r.tab_name,
+                 COUNT(*) AS 총줄, COUNT(*) FILTER (WHERE r.filled) AS 채워진줄,
+                 COUNT(*) FILTER (WHERE NOT r.filled) AS 빈줄,
+                 EXISTS (SELECT 1 FROM recruit_campaigns rc
+                          WHERE rc.linked_tab_sheet_id=r.sheet_id
+                            AND rc.linked_tab_name=r.tab_name
+                            AND rc.status='active' AND rc.archived_at IS NULL) AS 공고게시중
+            FROM rows_all r GROUP BY 1,2;
+
+          \echo '=== ① 진행 중(모집 미완료) 작업 목록 ==='
+          SELECT tab_name, 총줄, 채워진줄, 빈줄, 공고게시중
+            FROM active_tabs
+           WHERE 빈줄 > 0 OR 공고게시중
+           ORDER BY 빈줄 DESC, tab_name;
+
+          \echo ''
+          \echo '=== ② 진행 중 작업의 중복 줄 (표 주문번호 + 명의) ==='
+          SELECT r.tab_name, r.onum, r.phone8, COUNT(*) AS 줄수,
+                 array_agg(r.seq ORDER BY r.seq) AS 줄들
+            FROM rows_all r
+            JOIN active_tabs a USING (sheet_id, tab_name)
+           WHERE (a.빈줄 > 0 OR a.공고게시중)
+             AND length(r.onum) >= 6 AND length(COALESCE(r.phone8,'')) >= 8
+           GROUP BY 1,2,3 HAVING COUNT(*) > 1
+           ORDER BY 4 DESC, 1;
+
+          \echo ''
+          \echo '=== ③ 진행 중 작업의 링크 어긋남 (줄이 가리키는 주문 ≠ 줄에 적힌 주문번호) ==='
+          SELECT r.tab_name, COUNT(*) AS 어긋난줄,
+                 (array_agg(r.seq ORDER BY r.seq))[1:12] AS 줄일부
+            FROM rows_all r
+            JOIN active_tabs a USING (sheet_id, tab_name)
+            JOIN order_submissions os ON os.id = r.order_submission_id
+           WHERE (a.빈줄 > 0 OR a.공고게시중)
+             AND length(r.onum) >= 6
+             AND length(regexp_replace(COALESCE(os.order_num,''),'\D','','g')) >= 6
+             AND regexp_replace(COALESCE(os.order_num,''),'\D','','g') <> r.onum
+           GROUP BY 1 ORDER BY 2 DESC;
+
+          \echo ''
+          \echo '=== ④ 진행 중 작업: 한 주문을 여러 줄이 가리킴 ==='
+          SELECT r.tab_name, r.order_submission_id, COUNT(*) AS 줄수,
+                 array_agg(r.seq ORDER BY r.seq) AS 줄들
+            FROM rows_all r
+            JOIN active_tabs a USING (sheet_id, tab_name)
+           WHERE (a.빈줄 > 0 OR a.공고게시중) AND r.order_submission_id IS NOT NULL
+           GROUP BY 1,2 HAVING COUNT(*) > 1
+           ORDER BY 3 DESC, 1;
+
+          \echo ''
+          \echo '=== ⑤ 진행 중 작업: 미반영 주문(표에 줄이 없는 주문) ==='
+          SELECT a.tab_name, COUNT(*) AS 미반영주문
+            FROM active_tabs a
+            JOIN order_submissions os
+              ON os.sheet_id=a.sheet_id AND os.tab_name=a.tab_name AND os.deleted_at IS NULL
+           WHERE (a.빈줄 > 0 OR a.공고게시중)
+             AND NOT EXISTS (SELECT 1 FROM rows_all r
+                              WHERE r.sheet_id=a.sheet_id AND r.tab_name=a.tab_name
+                                AND r.order_submission_id = os.id)
+           GROUP BY 1 ORDER BY 2 DESC;
+          SQL
