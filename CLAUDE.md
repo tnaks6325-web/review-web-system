@@ -1488,6 +1488,19 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.
 
+### ★★ 테섭 / 본섭 분리 (완화 금지 · 2026-08-19 정리)
+- **`main` = 본섭(운영)**, **`TEST_REVIEW` = 테섭(테스트)**. 두 브랜치는 **의도적으로 분기**돼 있다(2026-08-19 실측: 테섭이 main보다 **1718커밋 앞**, main도 테섭보다 **120커밋 앞** — 양방향).
+- ★★ **`TEST_REVIEW`(및 `TEST_REVIEW-deploy`)를 `main`에 병합하지 않는다.** 본섭 반영 방식은 **"검증된 변경만 선별 적용"**이다(2026-08-18 패치노트: *"TEST_REVIEW 브랜치 병합이 아니라 검증된 권한 변경 두 건만 본섭 최신 코드에 선별 적용"*). 한 번 병합하면 **미검증 1718커밋이 운영에 유입**되고, 되돌리기가 사실상 불가능하다.
+  - "테섭 내용 반영해줘" = **그 기능의 변경만 최신 `main` 위에서 다시 구현하거나 cherry-pick** 하라는 뜻이다. 병합으로 처리하지 말 것.
+  - 반대 방향(`main` → `TEST_REVIEW`)은 무관(테섭 최신화는 자유).
+- ★★ **본섭 PR은 반드시 최신 `origin/main` 기준으로 만든다.** 착수 전 `git fetch origin main && git log --oneline HEAD..origin/main` 로 뒤처짐 0을 확인한다. 수십 커밋 뒤처진 브랜치를 병합하면 **그 시점 파일로 회귀**한다(2026-08-19에 이 사유로 열린 PR 6건을 전부 닫았다 — #802·#769는 내용이 이미 main에 있었고 workdesk.html·payment 서비스에서 충돌).
+- ★ **병합 전 3줄 점검**(코덱스·클로드 어느 쪽이 만든 PR이든 동일):
+  1. `git log --oneline HEAD..origin/main` → 뒤처진 커밋 수 확인
+  2. `git merge-tree --write-tree origin/main <PR head>` → **충돌 0** 확인(충돌이 있으면 최신 main 위에서 다시 만든다)
+  3. `ls server/migrations` → **같은 번호·같은 이름의 마이그레이션이 이미 있는지** 확인(있으면 그 PR의 내용은 이미 배포된 것)
+- ★ **테섭 URL 분기는 코드에 있다**(`frontend/api.js`): `test-review-wdb-web-*` 프론트는 `test-review-wdb-*` API로만 연결되고, Railway PR 테섭은 PR 번호를 보존해 짝을 맞춘다. **테섭 전용 설정(테스트 API 주소·자동로그인 `TEST_AUTO_LOGIN`·테스트 Origin CORS)은 본섭에 반영하지 않는다**(2026-08-15 패치노트).
+- ★ 운영 반영 후에는 `docs/patch-notes/YYYY-MM-DD-*.md` 에 **적용 대상·변경·검증·롤백**을 남긴다(기존 관행).
+
 ## 요구사항 확인 (질문 우선)
 - **사용자의 입력 메시지에서 의미가 모호하거나 불확실한 부분이 있으면, 추측해서 진행하지 말고 반드시 먼저 질문해서 답을 받은 뒤 구현한다.**
 - 한 번에 명확히 하기 위해 필요한 질문은 모아서 묻되, 답이 없으면 해당 부분의 구현을 시작하지 않는다.
