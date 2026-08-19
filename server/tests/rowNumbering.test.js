@@ -215,7 +215,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const pool = makePool([[/FROM tab_configs/i, { rows: [
       { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', total: 187, blankNumber: 42, dupNumber: 0 },
       { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 100, blankNumber: 0, dupNumber: 0 },
-      { sheetId: 'S3', tabName: 'T3', displayName: '위프(중복줄 정리 뒤)', total: 800, blankNumber: 0, dupNumber: 233 },
+      { sheetId: 'S3', tabName: 'T3', displayName: '위프(중복줄 정리 뒤)', total: 800, blankNumber: 0, dupNumber: 233, pairedBlank: 233 },
     ] }]]);
     S.__setPoolForTest(pool);
     const r = await S.scanNumbering({});
@@ -226,7 +226,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 중복 번호만 있는 작업도 정리 대상(빈칸 0 이라 종전엔 통째로 빠졌다)',
       r.needTabs === 2 && r.blankNumberRows === 42 && r.dupNumberRows === 233, JSON.stringify(r));
     ok('★ 스캔 SQL 이 중복을 센다(DISTINCT 차)',
-      /COUNT\(DISTINCT btrim\(n\.val\)\)/.test(pool.calls[0].sql));
+      /COUNT\(DISTINCT num\)/.test(pool.calls[0].sql));
     /* ★★ 칸 이름은 SQL 에 적지 않고 utils 목록을 파라미터로 넘긴다(판정 두 벌 금지) */
     const U2 = require('../src/utils/rowNumbering');
     ok('★★ 칸 이름 후보를 파라미터로 넘긴다', Array.isArray(pool.calls[0].params[0]) &&
@@ -234,6 +234,47 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ SQL 에 칸 이름 리터럴이 없다', !/'번호'|'담당자'/.test(pool.calls[0].sql));
     ok('★★ 정규식은 그 목록에서 만든다(사본 0)', U2.NUMBER_KEYS.every(k => U2.NUMBER_KEY_RE.test(k)));
     ok('★★ 스캔도 담당자를 세지 않는다', !/manager|담당자/i.test(pool.calls[0].sql));
+  }
+
+  console.log('\n[J] 짝 빈 줄 정리 — 채워진 줄과 번호가 겹치는 빈 줄만(사용자 확정 2026-08-19)');
+  {
+    const RN = require('../src/utils/rowNumbering');
+    const svcSrc = noLineComments(read('src/services/rowNumbering.service.js'));
+    const blk = svcSrc.slice(svcSrc.indexOf('async function cleanupPairedBlanks('), svcSrc.indexOf('async function sweepNumbering('));
+    ok('★★ 대상은 비어 있는 줄만(채워진 줄은 조건에서 제외)', /WHERE NOT filled AND num <> '' AND grp_filled/.test(blk));
+    ok('★★ "채워짐" 판정은 주문·이름·수취인·연락처(조각 단일 출처)',
+      /FILLED_SQL/.test(blk) && /order_submission_id IS NOT NULL[\s\S]{0,200}reviewer_name[\s\S]{0,120}recipient_name[\s\S]{0,120}phone8/.test(svcSrc));
+    ok('★ 활성 줄만 본다', /p\.deleted_at IS NULL AND p\.active = TRUE/.test(blk));
+    ok('★★ 지우지 않고 내린다 — 실행은 sheetlessLedger.retireRows 위임(무시트 게이트·장부 순서 상속)',
+      /sheetlessLedger\.service/.test(blk) && /\.retireRows\(/.test(blk) && !/DELETE FROM/i.test(blk));
+    ok('★ 번호가 빈 줄끼리는 짝으로 묶지 않는다', /FILTER \(WHERE b\.num <> ''\) OVER \(PARTITION BY b\.num\)/.test(blk));
+
+    /* 스텁 pool 로 실제 실행 — 대상 선정·위임·미리보기 쓰기 0 */
+    const calls = [];
+    const pool = makePool([[/WITH base AS/i, { rows: [{ seq: 11, num: '566' }, { seq: 13, num: '567' }] }]]);
+    S.__setPoolForTest(pool);
+    const led = require('../src/services/sheetlessLedger.service');
+    const origRetire = led.retireRows;
+    led.retireRows = async (a) => { calls.push(a); return { retired: a.dryRun ? 0 : (a.seqs || []).length, indexRows: 7 }; };
+    const pre = await S.cleanupPairedBlanks({ sheetId: 's', tabName: 't', dryRun: true });
+    ok('미리보기: 대상 수를 세고 내리지는 않는다', pre.ok && pre.matched === 2 && pre.retired === 0, JSON.stringify(pre));
+    ok('★ 미리보기도 같은 조건으로 위임(dryRun 전달)', calls[0] && calls[0].dryRun === true && calls[0].seqs.join(',') === '11,13');
+    const run = await S.cleanupPairedBlanks({ sheetId: 's', tabName: 't', dryRun: false, by: 'tester' });
+    ok('실행: 고른 줄만 내린다', run.ok && run.retired === 2 && calls[1].seqs.join(',') === '11,13', JSON.stringify(run));
+    ok('★ 게이트 거부(무시트 아님 등)는 사유를 올린다(조용한 성공 금지)', await (async () => {
+      led.retireRows = async () => { const e = new Error('시트 기반 탭입니다'); e.code = 'not_sheetless'; throw e; };
+      const r = await S.cleanupPairedBlanks({ sheetId: 's', tabName: 't', dryRun: false });
+      return r.ok === false && r.reason === 'not_sheetless';
+    })());
+    led.retireRows = origRetire;
+    ok('★ 킬스위치 적용', await (async () => {
+      process.env.WORKTABLE_AUTO_NUMBER = '0';
+      const r = await S.cleanupPairedBlanks({ sheetId: 's', tabName: 't' });
+      delete process.env.WORKTABLE_AUTO_NUMBER;
+      return r.ok === false && r.reason === 'disabled';
+    })());
+    ok('★ 스캔이 짝 빈 줄도 센다(윈도우 판정)', /pairedBlank/.test(svcSrc) && /bool_or\(b\.filled\)/.test(svcSrc));
+    ok('★ 칸 이름 후보는 여기서도 utils 목록', RN.NUMBER_KEYS.length > 0 && /NUMBER_KEYS/.test(blk));
   }
 
   console.log('\n[I] 자동 스윕(크론) — 대상만 · 상한 · 건별 독립 · throw 없음');
@@ -244,7 +285,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       [/FROM tab_configs tc/i, { rows: [
         { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 100, blankNumber: 5, dupNumber: 0 },
         { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 100, blankNumber: 0, dupNumber: 0 },   // 이미 정리됨
-        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 0, dupNumber: 7 },   // 번호 중복만
+        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 0, dupNumber: 7, pairedBlank: 7 },
       ] }],
       [/FROM tab_configs\s+WHERE sheet_id/i, (p) => { opened.push(p[1]); return { rows: [{ sheetless: true }] }; }],
       [/FROM campaign_participants p/i, { rows: [] }],
@@ -253,6 +294,39 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const r = await S.sweepNumbering({ cap: 10 });
     ok('★★ 빈칸 또는 중복이 있는 작업만 연다(정리 끝난 작업은 열지 않는다)',
       opened.join(',') === 'T1,T3', opened.join(','));
+    /* ★★★ 순서 계약 — 정리가 재번호보다 먼저여야 한다. 재번호가 번호를 1..N 로 유일하게 만들면
+         "채워진 줄과 번호가 겹친다"는 짝 신호가 사라져 그 뒤로는 영영 정리되지 않는다. */
+    const sweepBlk = noLineComments(read('src/services/rowNumbering.service.js'));
+    const swp = sweepBlk.slice(sweepBlk.indexOf('async function sweepNumbering('));
+    ok('★★★ 스윕은 짝 빈 줄 정리를 재번호보다 먼저 한다',
+      swp.indexOf('cleanupPairedBlanks(') > 0 && swp.indexOf('cleanupPairedBlanks(') < swp.indexOf('renumberTab('),
+      `clean=${swp.indexOf('cleanupPairedBlanks(')} renum=${swp.indexOf('renumberTab(')}`);
+    ok('★ 정리 실패가 재번호를 막지 않는다(둘은 독립)', /catch \(e\) \{ logger\.warn\(`\[rowNumbering\] 짝 빈 줄 정리 실패/.test(swp));
+
+    /* ★★ 정적 순서 검사만으로는 "정리를 아예 안 부르게" 만든 변이를 놓친다(변이시험 실측) →
+         스윕을 **실제로 실행**해 짝 빈 줄이 있는 탭에서 정리가 재번호보다 먼저 불렸는지 본다. */
+    {
+      const order = [];
+      const pool2 = makePool([
+        [/WITH base AS[\s\S]*pairedBlank/i, { rows: [
+          { sheetId: 'S9', tabName: 'T9', displayName: 'X', total: 10, blankNumber: 0, dupNumber: 0, pairedBlank: 3 }] }],
+        [/WITH base AS/i, () => { order.push('clean-select'); return { rows: [{ seq: 2, num: '5' }] }; }],
+        [/FROM tab_configs\s+WHERE sheet_id/i, () => { order.push('renumber'); return { rows: [{ sheetless: true }] }; }],
+        [/FROM campaign_participants p/i, { rows: [] }],
+      ]);
+      S.__setPoolForTest(pool2);
+      const led2 = require('../src/services/sheetlessLedger.service');
+      const keep = led2.retireRows;
+      led2.retireRows = async (a) => { order.push('retire'); return { retired: (a.seqs || []).length }; };
+      const sw = await S.sweepNumbering({ cap: 5 });
+      led2.retireRows = keep;
+      ok('★★★ 스윕이 짝 빈 줄 정리를 실제로 부른다', order.includes('retire'), order.join('>'));
+      ok('★★★ 그리고 재번호보다 먼저 부른다',
+        order.indexOf('retire') < order.indexOf('renumber'), order.join('>'));
+      ok('정리한 줄 수를 보고한다', sw.blankRows === 1, JSON.stringify(sw));
+    }
+    const allBlk2 = sweepBlk.slice(sweepBlk.indexOf('async function renumberAllSheetless('), sweepBlk.indexOf('async function scanNumbering('));
+    ok('★★ 전체 정리도 같은 순서', allBlk2.indexOf('cleanupPairedBlanks(') > 0 && allBlk2.indexOf('cleanupPairedBlanks(') < allBlk2.indexOf('renumberTab('));
     ok('스캔 결과를 보고한다', r.need === 2 && r.tabs === 2, JSON.stringify(r));
 
     /* 사이클 상한 — 남은 것은 다음 사이클(업무 시간에 DB 를 흔들지 않는다) */
@@ -307,6 +381,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('탭 단위 정리 = authMiddleware + internalMiddleware',
       /router\.post\('\/worktable\/renumber',\s*authMiddleware,\s*internalMiddleware/.test(rt));
     ok('★ confirm !== true 면 미리보기(쓰기 0)', /dryRun:\s*confirm\s*!==\s*true/.test(blk));
+    ok('★★ 줄 내리기는 명시 요청일 때만(기본 계약 = 번호만)', /if \(cleanBlanks === true\)/.test(blk));
+    ok('★★ 라우트도 정리 → 재번호 순서', blk.indexOf('cleanupPairedBlanks(') < blk.indexOf('renumberTab('));
     ok('전체 소급 정리는 adminOrMaster',
       /router\.post\('\/worktable\/renumber-all',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(rt));
 
@@ -349,8 +425,11 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       /oninput="_RN\.q=this\.value;_rnRows\(\)"/.test(fe) &&
       /function _rnRows\(\)\{[\s\S]{0,400}getElementById\('rnRows'\)/.test(fe));
     ok('★ 기본은 정리 대상만 보기(121개를 다 늘어놓지 않는다)', /_RN\.onlyNeed !== false/.test(fe));
-    ok('★★ 화면 판정도 중복을 포함한다(서버 대상과 갈리면 "목록엔 없는데 자동으로 바뀐다")',
-      /r\.blankNumber > 0 \|\| r\.dupNumber > 0/.test(fe));
+    ok('★★ 화면 판정도 중복·짝 빈 줄을 포함한다(서버 대상과 갈리면 "목록엔 없는데 자동으로 바뀐다")',
+      /r\.blankNumber > 0 \|\| r\.dupNumber > 0 \|\| r\.pairedBlank > 0/.test(fe));
+    ok('★★ 실행 요청에 cleanBlanks 를 실어 보낸다', (fe.match(/cleanBlanks: true/g) || []).length === 2);
+    ok('★ 확인창이 "줄이 내려간다"를 말한다(되돌릴 수 있음 포함)', /짝 빈 줄 \$\{r\.pairedBlank\}줄은 표에서 내려갑니다\(되돌릴 수 있습니다\)/.test(fe));
+    ok('★ 짝 없는 빈 자리는 그대로 둔다고 화면이 말한다', /짝이 없는 빈 자리\(아직 안 팔린 미래 자리\)는 그대로 둡니다/.test(fe));
     ok('★ 빈 줄 자체를 내리는 창구를 안내한다(번호 정리가 줄을 지우지 않는다)', /🧹 줄 정리\]를 쓰세요/.test(fe));
     ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
       /const i = all\.indexOf\(r\);/.test(fe));
@@ -362,7 +441,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const rowsBlk = fe.slice(fe.indexOf('function _rnRows('), fe.indexOf('/* 서버가 준 사유를'));
     const th = (allBlk.match(/<th>/g) || []).length;
     const td = (rowsBlk.match(/<td[ >]/g) || []).length - (rowsBlk.match(/<td colspan/g) || []).length;  // 빈 목록 줄 제외
-    ok('★★ 전체 목록 표는 5칸(작업·표 줄·번호 빈칸·번호 중복·버튼)', th === 5, '헤더 ' + th);
+    ok('★★ 전체 목록 표는 6칸(작업·표 줄·번호 빈칸·번호 중복·짝 빈 줄·버튼)', th === 6, '헤더 ' + th);
     ok('★★ 행 칸 수 = 헤더 칸 수', td === th, `헤더 ${th} · 행 ${td}`);
     ok('★ 빈 목록 colspan 도 같은 칸 수', new RegExp('colspan="' + th + '"').test(rowsBlk));
     const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));

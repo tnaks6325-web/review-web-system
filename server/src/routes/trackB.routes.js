@@ -1244,10 +1244,17 @@ router.post('/workdesk/assign-unslotted-order', authMiddleware, internalMiddlewa
    ★ 게이트는 [번호 배정]과 같은 `internalMiddleware`(같은 표의 같은 성격 조작). */
 router.post('/worktable/renumber', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, confirm } = req.body || {};
+    const { sheetId, tabName, confirm, cleanBlanks } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const out = await require('../services/rowNumbering.service')
-      .renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
+    const svcRn = require('../services/rowNumbering.service');
+    /* ★★ 짝 빈 줄 정리는 **명시 요청일 때만**(기본 계약 = 번호만 다시 매김) — 줄을 내리는 일이
+       "번호 정리" 라는 이름 뒤에 숨으면 안 된다. ★ 정리가 **재번호보다 먼저**여야 짝 신호가 남는다. */
+    let blank = null;
+    if (cleanBlanks === true) {
+      blank = await svcRn.cleanupPairedBlanks({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
+    }
+    const out = await svcRn.renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
+    if (blank) out.blank = blank;
     const bad = { not_sheetless: 409, tab_not_registered: 404, disabled: 409 };
     res.status(out.ok ? 200 : (bad[out.reason] || 400)).json(out);
   } catch (err) {
@@ -1272,9 +1279,9 @@ router.get('/worktable/renumber-scan', authMiddleware, adminOrMasterMiddleware, 
 /* 소급 정리 — 무시트 작업 전체. 되돌리기 어려운 광범위 조작이라 adminOrMaster. */
 router.post('/worktable/renumber-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { confirm, limit } = req.body || {};
+    const { confirm, limit, cleanBlanks } = req.body || {};
     const out = await require('../services/rowNumbering.service')
-      .renumberAllSheetless({ dryRun: confirm !== true, by: _by(req), limit });
+      .renumberAllSheetless({ dryRun: confirm !== true, by: _by(req), limit, cleanBlanks: cleanBlanks === true });
     res.json(out);
   } catch (err) { next(err); }
 });
