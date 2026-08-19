@@ -2327,7 +2327,8 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     const { rows } = await pool.query(
       `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
               status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
-              order_submission_id, late_order_id, option_key, owner_phone8, dismissed_at
+              order_submission_id, late_order_id, option_key, owner_phone8, dismissed_at,
+              dismissed_by
        FROM campaign_applications
        WHERE campaign_id = $1
        ORDER BY applied_at ASC`,
@@ -2497,7 +2498,7 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
     await client.query(
       `UPDATE campaign_applications ca
           SET status = 'submitted',
-              dismissed_at = NULL,
+              dismissed_at = NULL, dismissed_by = NULL,
               submitted_at = COALESCE(
                 (SELECT os.submitted_at FROM order_submissions os WHERE os.id = ca.late_order_id),
                 ca.applied_at, NOW()),
@@ -2548,7 +2549,8 @@ router.post('/admin/:id/dismiss', authMiddleware, adminOrMasterMiddleware, async
     }
     // status='cancelled'로 통일 + dismissed_at 기록. quota/유효홀드 불변(종료 상태 마커).
     await client.query(
-      `UPDATE campaign_applications SET status = 'cancelled', dismissed_at = NOW() WHERE id = $1`, [appId]);
+      `UPDATE campaign_applications SET status = 'cancelled', dismissed_at = NOW(), dismissed_by = 'admin'
+        WHERE id = $1`, [appId]);
     await client.query('COMMIT');
     logger.info(`[campaign/dismiss] 취소확정 camp=${id} app=${appId} by=${req.admin && req.admin.name}`);
     res.json({ ok: true });

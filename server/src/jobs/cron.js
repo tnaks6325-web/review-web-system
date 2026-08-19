@@ -446,8 +446,10 @@ function startCronJobs() {
       const { withJobLock } = require('../utils/jobLock');
       const { sweepExpiredHolds } = require('../services/campaignHold.service');
       const r = await withJobLock('campaign_hold_sweep', () => sweepExpiredHolds(pool));
-      if (r && !r.skipped && ((r.expired || 0) > 0 || (r.closedPersisted || 0) > 0)) {
-        logger.info(`[CRON-HoldSweep] expired=${r.expired} closedPersisted=${r.closedPersisted}`);
+      if (r && !r.skipped && ((r.expired || 0) > 0 || (r.closedPersisted || 0) > 0
+          || (r.autoDismissed || 0) > 0 || (r.revived || 0) > 0)) {
+        logger.info(`[CRON-HoldSweep] expired=${r.expired} autoDismissed=${r.autoDismissed || 0} `
+          + `revived=${r.revived || 0} closedPersisted=${r.closedPersisted}`);
       }
     } catch (err) {
       logger.error(`[CRON-HoldSweep] ${err.message}`);
