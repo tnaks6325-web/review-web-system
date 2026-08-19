@@ -1764,15 +1764,15 @@ async function woAccept(id, pickGid, linkAdvertiserId) {
   const url = ((o && o.work_sheet_url) || "").trim();
 
   // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
-  // ★★ 시트탭URL이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성 — 사용자 확정 2026-08-10).
-  //   종전엔 여기서 막아 인트라넷 리뷰오더(시트URL 칸 없음)를 접수할 방법이 없었다.
-  //   판정·생성은 서버(`sheetlessAccept.resolveAcceptMode`)가 하고 화면은 확인만 받는다.
-  if (!url && !linkAdvertiserId) {
-    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.")) return;
-  }
-  if (url && !/[#?&]gid=\d+/.test(url) && !pickGid) {
-    woNotice("작업시트탭URL에 gid가 없습니다.\n특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.\n\n현재 URL:\n" + url);
-    return;
+  // ★★ 접수는 **항상 무시트**다(서버 `sheetlessAccept.resolveAcceptMode` = v3_sheetless_only).
+  //   판정 사본을 두지 않고 공유 모듈 `_woAcceptSheetless`(표시용)를 그대로 쓴다.
+  //   ★ 종전에는 여기서 `work_sheet_url` 을 보고 ① URL 이 있으면 시트 접수인 양 확인창을 건너뛰고
+  //     ② gid 가 없으면 **접수를 아예 막았다** — 서버는 무시트로 등록하는데 화면만 시트 기반으로
+  //     인식하던 막다른 길이다(2026-08-19 신고). URL 은 과거 이력일 뿐 접수 모드를 바꾸지 않는다.
+  const _ns = (typeof _woAcceptSheetless === "function") ? _woAcceptSheetless(o) : true;
+  if (_ns && !linkAdvertiserId && !pickGid) {
+    if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다."
+      + (url ? "\n\n※ 이 오더에 남아 있는 작업시트탭URL은 사용하지 않습니다(과거 이력)." : ""))) return;
   }
 
   const btn = document.getElementById("woAcceptBtn_" + id);

@@ -717,11 +717,15 @@ function _woAcceptable(o) { return WO_ACCEPT_ELIGIBLE.indexOf(String((o && o.sta
 function _woAccepted(o) { return !_woAcceptable(o); }
 
 /* ★★ 이 오더를 접수하면 **구글시트 없이 시스템 작업표로 등록되는가**(표시용 판정).
-   지금부터 들어오는 작업은 무시트가 기본이라(사용자 확정 2026-08-10) 시트탭URL이 비어 있으면
-   서버가 무시트로 접수한다 — 화면은 그 사실을 확인창 문구로만 가른다.
-   ★ 최종 판정은 서버 `sheetlessAccept.resolveAcceptMode` 하나다(화면은 값을 보내지 않는다). */
+   ★★ 서버 `sheetlessAccept.resolveAcceptMode` 가 **항상 무시트**를 돌려주므로(v3_sheetless_only)
+   여기도 항상 true 다. 종전엔 `work_sheet_url` 유무로 판정해, URL 이 실려 온(또는
+   과거 잔재가 남은) 오더에서 화면이 **서버와 반대로** 말했다 — 접수 확인창은 "그 시트 탭이
+   등록된다", 작업표 미리보기는 "아래 구성은 미적용"이라고 안내해 담당자가 조정을 포기했다
+   (2026-08-19 신고). 판정은 여기 한 곳이므로 소비처 3곳(접수 확인창·버튼 툴팁·미리보기
+   안내문)이 함께 정정된다.
+   ★ 화면은 이 값을 **서버로 보내지 않는다**(표시 전용) — 최종 판정은 여전히 서버가 한다. */
 function _woAcceptSheetless(o) {
-  return !String((o && o.work_sheet_url) || '').trim();
+  return true;
 }
 
 

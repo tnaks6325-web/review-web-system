@@ -384,6 +384,42 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
       /pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(led));
   }
 
+  /* ══════════════ I. 화면 판정(표시) — 서버 규칙과 같은 방향 ══════════════
+     ★★ 2026-08-19 신고: 서버는 v3_sheetless_only 로 **항상 무시트**인데 화면만 `work_sheet_url`
+        유무로 판정해, URL 이 실려 온 오더에서 접수 확인창·툴팁·작업표 미리보기가 "그 시트 탭이
+        등록된다 / 아래 구성은 미적용"이라고 **거짓 안내**했고, 관리자 대시보드는 gid 가 없으면
+        접수를 **아예 막았다**(막다른 길). 판정은 `_woAcceptSheetless` 한 곳이다. */
+  console.log('\n[I] 화면 접수 판정 — 서버와 같은 방향(무시트 전용)');
+  {
+    const wod = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/work-order-detail.js'), 'utf8');
+    // 함수 본문을 꺼내 **실행**한다 — 문자열 검사만으로는 판정식이 되살아나도 통과한다.
+    const m = /function _woAcceptSheetless\(o\) \{([\s\S]*?)\n\}/.exec(wod);
+    ok('_woAcceptSheetless 선언 존재', !!m);
+    const fn = new Function('o', m[1]);
+    ok('시트URL 없는 오더 = 무시트(표시)', fn({}) === true);
+    ok('시트URL 이 있어도 무시트(표시) — 서버 resolveAcceptMode 와 같은 답',
+      fn({ work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }) === true);
+    // 서버 판정과 **같은 입력에 같은 답**인지 교차 확인(두 규칙이 갈라지면 화면이 또 거짓말한다)
+    for (const wo of [{}, { work_sheet_url: 'https://docs.google.com/spreadsheets/d/AAAAAAAAAAAAAAAAAAAAAA/edit#gid=1' }]) {
+      ok('화면 판정 ≡ 서버 판정', fn(wo) === slAccept.resolveAcceptMode({ workOrder: wo, body: {} }).sheetless);
+    }
+    ok('판정 사본 0 — 화면 함수가 work_sheet_url 을 다시 보지 않는다', !/work_sheet_url/.test(m[1]));
+
+    const wd = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/workdesk.html'), 'utf8');
+    const wdN = noLineComments(wd);
+    // 모듈 미로드 폴백도 무시트 방향이어야 한다(폴백이 반대면 그 화면만 시트 기반으로 말한다)
+    ok('접수 확인창 폴백 = 무시트', /_woAcceptSheetless\(o\) : true;/.test(wdN));
+    ok('미리보기 시트결속 폴백 = 아님', /_woAcceptSheetless\(wo\) : false;/.test(wdN));
+    ok('접수 버튼 툴팁 폴백 = 무시트', /typeof _woAcceptSheetless!=='function'\|\|_woAcceptSheetless\(o\)/.test(wdN));
+
+    const ia = noLineComments(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/index-app.js'), 'utf8'));
+    const wa = /async function woAccept\(id, pickGid, linkAdvertiserId\) \{([\s\S]*?)\n\}/.exec(ia);
+    ok('관리자 대시보드 woAccept 선언 존재', !!wa);
+    // ★ gid 선검증으로 접수를 막던 막다른 길이 없어야 한다(서버는 무시트로 등록한다)
+    ok('gid 없다고 접수를 막지 않는다', !/작업시트탭URL에 gid가 없습니다/.test(wa[1]));
+    ok('관리자 대시보드도 공유 판정을 쓴다', /_woAcceptSheetless\(o\)/.test(wa[1]));
+  }
+
   console.log(`\n총 ${passed}개 통과\n`);
   process.exit(0);
 })();

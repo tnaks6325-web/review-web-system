@@ -6707,7 +6707,7 @@ function _woEditActions(o){
   const id=esc(o.id);
   const wt=` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${id}')" title="작업표 생성 미리보기">📋 작업표</button>`;
   const acc = (typeof _woAcceptable==='function' ? _woAcceptable(o) : ['submitted','revision','rejected'].includes(o.status))
-    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="${(typeof _woAcceptSheetless==='function'&&_woAcceptSheetless(o))?'구글시트 없이 시스템 작업표를 만들어 등록합니다':'작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다'}">접수하기</button>`
+    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="${(typeof _woAcceptSheetless!=='function'||_woAcceptSheetless(o))?'구글시트 없이 시스템 작업표를 만들어 등록합니다':'작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다'}">접수하기</button>`
     : `<button class="btn xs wodone" disabled title="${esc(o.linked_tab_name?('등록된 탭 — '+o.linked_tab_name):'이미 접수된 작업오더입니다')}">✓ 접수완료</button>`;
   const camp = o.linked_campaign_id
     ? ` <button class="btn xs wolink" onclick="event.stopPropagation();_woCampaign('${id}')" title="연결된 모집공고를 열어 리뷰어 화면을 바로 확인합니다">👁 모집공고</button>`
@@ -6970,7 +6970,8 @@ function _wtpAcceptable(){
 }
 function _wtpSheetBound(){
   const wo=_WTP&&_WTP.workOrder; if(!wo) return false;
-  return (typeof _woAcceptSheetless==='function') ? !_woAcceptSheetless(wo) : !!String(wo.work_sheet_url||'').trim();
+  // ★ 모듈 미로드 폴백도 **무시트**(서버 규칙과 같은 방향) — 옛 폴백은 URL 유무를 봐서 화면만 시트 기반으로 말했다.
+  return (typeof _woAcceptSheetless==='function') ? !_woAcceptSheetless(wo) : false;
 }
 /* ★★ 탈 구글시트 — 미리보기에서 바로 **접수**한다(시트 생성 창구 없음).
    조정한 값(총건수·일건수·시작일·주말제외·휴무일·채널·작업유형)과 작업 이름을 그대로 접수에 실어
@@ -7001,7 +7002,7 @@ async function _woAccept(id, pickGid, opts){
   //  ★ 구글시트탭URL 이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성) — 확인창이 그 사실을 말한다.
   //    판정은 공유 모듈 `_woAcceptSheetless`(표시용) 하나이고 최종 판정은 서버가 한다.
   const o=(STATE.wo||[]).find(x=>x.id===id);
-  const ns = (typeof _woAcceptSheetless==='function') ? _woAcceptSheetless(o) : !String((o&&o.work_sheet_url)||'').trim();
+  const ns = (typeof _woAcceptSheetless==='function') ? _woAcceptSheetless(o) : true;
   const msg = ns
     ? '이 작업오더를 접수할까요?\n\n· 구글시트 없이 시스템 작업표(모집인원만큼의 줄)를 만들어 등록합니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.'
     : '이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.';
