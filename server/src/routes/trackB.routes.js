@@ -2770,6 +2770,17 @@ router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async 
    ★ 게이트 = adminOrMaster — 장부를 통째로 다시 만드는 조작이라 줄 정리(retire)와 같은 급.
    ★ 새 판정 0 — `rebuildLedgers` 를 그대로 부른다(무시트 아님·미등록·열 구성 불명은 그쪽 fail-closed).
    ★ 시트·Drive 무접촉 · dryRun 기본(값이 빠진 요청이 곧바로 실행되지 않는다). */
+/* 작업표 중복 줄 감시 — **읽기 전용 조회**(사람이 지금 상태를 확인하는 창구).
+   ★ 크론이 같은 함수를 주기로 돌며 달라졌을 때만 알린다. 이 라우트는 **스냅샷을 갱신하지 않는다**
+     (사람이 눌러 본 것 때문에 다음 크론 알림이 조용해지면 안 된다).
+   ★ 게이트 = adminOrMaster — 탭명·명의·줄 번호가 실리므로 중복 정리와 같은 급. */
+router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { watchDuplicateRows } = require('../services/worktableDupWatch.service');
+    res.json(await watchDuplicateRows({ by: _by(req), record: false }));
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { rebuildLedgers, LedgerError } = require('../services/sheetlessLedger.service');
