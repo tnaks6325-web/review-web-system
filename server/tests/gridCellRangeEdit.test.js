@@ -130,7 +130,7 @@ function makeCtx(fake) {
     console,
   };
   vm.createContext(sandbox);
-  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
   return { sandbox, commits, toasts };
@@ -313,6 +313,78 @@ ok('드래그 중에는 활성 범위만 갱신(앞서 더한 범위 보존)', /
   vm.runInContext('_setCellSel({r0:0,c0:2,r1:2,c1:3},false)', sandbox);   // 3행 선택
   vm.runInContext('_pasteIntoSelection("가\\t나")', sandbox);              // 1행짜리 복사본
   eq('복사본에 없는 행은 건드리지 않는다(빈 값으로 지우지 않음)', commits.length, 2);
+}
+
+/* ── 9. 방향키 이동 · Shift+방향키 범위 확장 (사용자 확정 2026-08-19) ──────────────────
+   ★ 이동해도 선택은 **직사각형**이라 복사·붙여넣기·배경색·합계가 드래그 선택과 같은 재료를 쓴다.
+   ★ Shift 없이 누르면 떨어진 범위(Ctrl 선택)를 정리하고 한 칸으로 되돌린다. */
+console.log('\n[9] 방향키 이동 · Shift 범위 확장');
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:1,c0:2,r1:1,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,false)', sandbox);
+  eq('아래 방향키 = 한 행 아래 한 칸', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 2, c0: 2, r1: 2, c1: 2 }));
+  vm.runInContext('_moveCellSel(0,1,false)', sandbox);
+  eq('오른쪽 방향키 = 한 열 오른쪽', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 2, c0: 3, r1: 2, c1: 3 }));
+  eq('★ Shift 없이 이동하면 한 칸만 선택된다', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 1);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,true)', sandbox);
+  vm.runInContext('_moveCellSel(0,1,true)', sandbox);
+  eq('★ Shift+방향키 = 시작 모서리 고정, 끝만 이동', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 0, c0: 2, r1: 1, c1: 3 }));
+  eq('확장된 범위 = 2행 × 2열', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 4);
+  eq('★ 확장 범위도 드래그 선택과 같은 복사본을 만든다', vm.runInContext('_selectionTsv()', sandbox),
+    '이진우\t이진우\n조수빈\t조수빈');
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:0,r1:0,c1:0})', sandbox);
+  vm.runInContext('_moveCellSel(-1,0,false)', sandbox);
+  vm.runInContext('_moveCellSel(0,-1,false)', sandbox);
+  eq('★ 표 경계에서는 제자리(선택이 사라지지 않는다)', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 0, c0: 0, r1: 0, c1: 0 }));
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_setCellSel({r0:2,c0:4,r1:2,c1:4}, true)', sandbox);   // Ctrl 로 떨어진 범위 추가
+  vm.runInContext('_moveCellSel(1,0,false)', sandbox);
+  eq('★ Shift 없는 이동은 떨어진 범위를 정리한다', vm.runInContext('_selRanges().length', sandbox), 1);
+}
+ok('★ 모달·라이트박스가 떠 있으면 방향키를 가로채지 않는다',
+  /ArrowUp:\[-1,0\][\s\S]{0,400}querySelector\('\.modalov,#woImgOv,#rvpop'\)/.test(HTML));
+ok('★ Ctrl/Alt/Cmd 조합은 가로채지 않는다', /if\(D && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/.test(HTML));
+ok('★ 안 그려진 청크를 먼저 그린다(표 아래쪽으로도 이동)',
+  /function _moveCellSel[\s\S]{0,300}_gsFlushAll\(\)/.test(HTML));
+
+/* ── 10. 선택 요약은 빈 셀을 세지 않는다 (사용자 확정 2026-08-19) ─────────────────── */
+console.log('\n[10] 선택 요약 — 빈 셀 제외');
+{
+  const fake = buildFakeGrid();
+  // 마지막 두 행의 주문자제출 칸을 비워 둔다(드래그로 여백까지 훑은 상태)
+  fake.rows[2].children[2].setAttribute('data-val', '');
+  fake.rows[3].children[2].setAttribute('data-val', '');
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:3,c1:2})', sandbox);
+  eq('★ 값이 든 칸만 센다', vm.runInContext('_selectionStats().count', sandbox), 2);
+  eq('상단 표기도 같은 수', fake.stat.textContent, '선택 셀 2개');
+}
+{
+  const fake = buildFakeGrid();
+  fake.rows[1].children[5].setAttribute('data-val', '');   // 결제금액 한 칸이 빈 값
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:5,r1:2,c1:5})', sandbox);
+  eq('★ 빈 결제금액 칸은 합계에도 셀 수에도 안 든다', vm.runInContext('_selectionStats().count', sandbox), 2);
+  eq('합계는 값이 든 칸만', vm.runInContext('_selectionStats().amount', sandbox), 44000);
 }
 
 console.log(`\n${fail ? '❌' : '✅'} pass ${pass} · fail ${fail}`);
