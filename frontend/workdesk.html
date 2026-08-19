@@ -10068,6 +10068,128 @@ function _coMatch(t){
   if(q && !((t.displayName||'')+' '+(t.tabName||'')).toLowerCase().includes(q)) return false;
   return true;
 }
+/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
+   "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
+   ★★ 조작은 tab_configs.is_closed 한 칸이지만 **결과는 마감(아카이브)** 이다 —
+      다음 전체 빌드가 그 탭의 장부를 보관함으로 옮기고 활성 목록에서 지운다.
+      그래서 화면은 "데이터를 안 지운다"고 말하지 않고 **아카이브된다**고 말한다.
+   판정·후보 선별은 전부 서버가 한다 — 화면은 서버가 준 것을 그리고 사람이 확인만 한다. */
+const _PT_REASON = {
+  recent:'최근 활동 있음', year_unknown:'연도 모름',
+  weak_signal:'근거가 시트 등록일뿐', pending_orders:'미반영 주문 있음',
+  active_campaign:'모집중 공고 연결', already_sheetless:'이미 무시트',
+  already_archived:'이미 아카이브', already_closed:'이미 마감',
+};
+let _PT = null;
+function _ptBox(){ return $('#ptBox'); }
+async function _ptScan(){
+  const box=_ptBox(); if(!box) return;
+  box.innerHTML = `<div class="ovnote">과거 작업이 아직 시트를 읽는지 살펴보는 중…</div>`;
+  try{
+    const r = await api('/api/trackb/past-tabs/scan');
+    if(!r||!r.ok){ throw new Error((r&&r.error)||'조회 실패'); }
+    _PT = r; _ptRender();
+  }catch(e){
+    // 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다(무한 로딩 금지)
+    box.innerHTML = `<div class="ovnote"><b>과거 작업 점검을 불러오지 못했습니다</b> — ${esc(String(e&&e.message||e))}
+      <button class="btn" style="margin-left:6px" onclick="_ptScan()">다시 시도</button></div>`;
+  }
+}
+/* 연도를 확정하지 못해 후보에서 빠진 수 — 시트 표기에 연도가 없으면(`7 / 12 (금)`)
+   판정이 시트 등록일로 폴백해 `weak_signal` 이 된다. 그래서 **연도 확인이 먼저**다. */
+function _ptUnconfirmed(r){
+  const h=(r&&r.heldBy)||{}; return (h.year_unknown||0) + (h.weak_signal||0);
+}
+function _ptProbeBlock(r){
+  const n=_ptUnconfirmed(r); if(!n) return '';
+  return `<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--line,#e5c07b);border-radius:6px;background:rgba(255,200,0,.08)">
+    <b>먼저 연도를 확인하세요</b> — ${n}개 작업은 시트 표기에 연도가 없어(<code>7 / 12 (금)</code>)
+    언제 진행한 작업인지 확정할 수 없어 정리 대상에서 빠져 있습니다.
+    <span style="opacity:.8">확인은 그 탭의 날짜 열 한 줄만 읽습니다.</span>
+    <div style="margin-top:6px"><button class="btn" onclick="_ptProbe()">📅 연도 확인 실행</button></div>
+  </div>`;
+}
+async function _ptProbe(){
+  const box=_ptBox(); if(!box) return;
+  const note=document.createElement('div'); note.className='ovnote';
+  note.textContent='연도 확인 중…'; box.prepend(note);
+  let probed=0, round=0;
+  try{
+    while(round < 12){                       // 상한: 한 번에 100개씩 · 무한 루프 금지
+      round++;
+      const r = await api('/api/trackb/sheet-sync/year-probe',{method:'POST',
+        body:JSON.stringify({limit:100})});
+      if(!r||!r.ok){ toast('연도 확인 실패: '+esc(String(r&&r.error||''))); break; }
+      probed += (r.probed||0);
+      note.textContent = `연도 확인 중… ${probed}개 확인 (남음 ${r.remaining||0})`;
+      if(!r.probed || !r.remaining) break;   // 더 확인할 것이 없다
+    }
+    toast(`연도 확인 ${probed}개 완료`);
+  }catch(e){ toast('연도 확인 실패 — '+String(e&&e.message||e)); }
+  await _ptScan();                            // 확인 결과를 반영해 다시 판정
+}
+function _ptRender(){
+  const box=_ptBox(), r=_PT; if(!box||!r) return;
+  const held = Object.keys(r.heldBy||{}).map(k=>`${_PT_REASON[k]||k} ${r.heldBy[k]}`).join(' · ');
+  const quiet = Object.keys(r.quietBy||{}).map(k=>`${_PT_REASON[k]||k} ${r.quietBy[k]}`).join(' · ');
+  const rows = (r.items||[]).map((it,i)=>`<tr>
+      <td><input type="checkbox" class="ptck" data-i="${i}" checked></td>
+      <td>${esc(it.tabName)}</td>
+      <td style="color:var(--sub,#666)">${esc(it.activityAt||'-')}</td>
+      <td style="color:var(--sub,#666)">${esc(it.activitySource||'-')}</td>
+      <td style="text-align:right">${it.indexRows||0}</td></tr>`).join('');
+  box.innerHTML = `<div class="ovnote" style="border:1px dashed var(--line,#ccc);border-radius:8px;padding:12px 14px">
+    <b>과거 작업 시트 읽기 정리</b>
+    — 등록된 ${r.total}개 중 <b>${r.stillReading}개가 지금도 시트를 읽습니다.</b>
+    그중 <b>${r.candidates}개</b>가 과거 작업으로 확인돼 정리 대상입니다(시트 ${r.sheetsAffected}개).
+    <div style="margin-top:6px;font-size:13px">
+      정리하면 그 탭의 <b>시트 읽기와 장부 재생성이 멈춥니다.</b>
+      정리한 작업은 다음 전체 빌드에서 <b>아카이브(보관함으로 이동)</b>되어 작업 목록에서 사라지고,
+      그 작업에 참여한 <b>리뷰어의 제출완료 내역도 화면에서 사라집니다</b> — 끝난 작업만 고르세요.
+      ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
+      ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
+      ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
+    </div>
+    ${_ptProbeBlock(r)}
+    ${r.candidates ? `<table class="lgtable" style="margin-top:10px">
+        <thead><tr><th style="width:34px"></th><th>작업</th><th style="width:110px">마지막 활동</th>
+          <th style="width:110px">근거</th><th style="width:70px">명단</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      <div style="margin-top:8px">
+        <button class="btn pri" onclick="_ptClose()">선택한 작업 정리하기</button>
+        <button class="btn" onclick="_ptScan()">새로고침</button>
+        <button class="btn" onclick="_ptBox().innerHTML=''">닫기</button>
+      </div>`
+      : `<div style="margin-top:8px"><button class="btn" onclick="_ptBox().innerHTML=''">닫기</button></div>`}
+  </div>`;
+}
+function _ptPicked(){
+  const out=[]; document.querySelectorAll('#ptBox .ptck').forEach(c=>{
+    if(c.checked){ const it=(_PT&&_PT.items||[])[+c.getAttribute('data-i')];
+      if(it) out.push({sheetId:it.sheetId, tabName:it.tabName}); }});
+  return out;
+}
+async function _ptClose(){
+  const picked=_ptPicked();
+  if(!picked.length){ toast('정리할 작업을 선택하세요'); return; }
+  try{
+    const pre = await api('/api/trackb/past-tabs/close',{method:'POST',
+      body:JSON.stringify({tabs:picked})});                       // 미리보기(기본)
+    if(!pre||!pre.ok){ toast('미리보기 실패: '+esc(String(pre&&pre.error||''))); return; }
+    // ★ 확인창은 실제로 일어나는 일을 말한다 — "한 칸만 바꾼다"로 줄여 말하면 거짓이 된다
+    if(!confirm(`${pre.wouldClose}개 작업의 구글시트 읽기를 멈춥니다.\n\n`
+      + `· 다음 전체 빌드에서 아카이브(보관함으로 이동)되어 작업 목록에서 사라집니다\n`
+      + `· 그 작업에 참여한 리뷰어의 제출완료 내역도 화면에서 사라집니다\n`
+      + `· 되돌리려면 아카이브 복구를 써야 합니다(마감 해제는 빌드 전까지만 유효)\n\n`
+      + `끝난 과거 작업이 맞습니까?`)) return;
+    const r = await api('/api/trackb/past-tabs/close',{method:'POST',
+      body:JSON.stringify({tabs:picked, dryRun:false})});
+    if(!r||!r.ok){ toast('정리 실패: '+esc(String(r&&r.error||''))); return; }
+    toast(`${r.closed}개 작업 정리 완료`+(r.refused&&r.refused.length?` · ${r.refused.length}개는 조건이 바뀌어 제외`:''));
+    await _ptScan();
+    await _coLoad();
+  }catch(e){ toast('정리 실패 — '+String(e&&e.message||e)); }
+}
 function _coRender(){
   const all = STATE.co.items||[], m = STATE.co.meta||{};
   const list = all.filter(_coMatch);
@@ -10080,11 +10202,13 @@ function _coRender(){
       <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
       <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
+      <button class="btn" onclick="_ptScan()">🧹 과거 작업 시트 읽기 정리</button>
       <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
       <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
     <div id="coSweep"></div>
+    <div id="ptBox"></div>
     <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
       막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.

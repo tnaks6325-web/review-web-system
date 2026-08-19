@@ -322,12 +322,14 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit, includeArchived, since, includeUnknown, includeIgnored } = req.query;
+    const { before, limit, includeArchived, since, includeUnknown, includeIgnored, includeSheetless } = req.query;
     res.json({ ok: true, ...(await sheetSync.auditSheetSync({
       before, limit, since,
       includeArchived: includeArchived === '1' || includeArchived === 'true',
       includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
       includeIgnored: includeIgnored === '1' || includeIgnored === 'true',
+      // 무시트 작업은 기본 제외(점검 대상 아님) — 보고 싶을 때만 켠다.
+      includeSheetless: includeSheetless === '1' || includeSheetless === 'true',
     })) });
   } catch (err) { next(err); }
 });
@@ -369,7 +371,9 @@ router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async
   try {
     const { sheetId, tabName } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) }));
+    const out = await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) });
+    // ★ 무시트 = 실행 불가(막다른 길 대신 사유) — 상태코드로도 "성공 아님"을 말한다.
+    res.status(out && out.code === 'sheetless' ? 409 : 200).json(out);
   } catch (err) { next(err); }
 });
 
@@ -1230,6 +1234,33 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
+});
+/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
+ *  "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
+ *  조작은 tab_configs.is_closed 한 칸뿐이고 되돌릴 수 있다(서비스 주석 참조).
+ *  게이트는 이관(cutover)과 같은 adminOrMaster — 무엇을 읽을지 정하는 전사 조작이다. */
+const _pastTabs = require('../services/pastSheetTabCleanup.service');
+function _pastTabErr(res, err, next) {
+  if (err && typeof err.code === 'string' && !/^\d/.test(err.code)) {
+    const st = err.code === 'not_ready' ? 503 : 400;
+    return res.status(st).json({ ok: false, error: err.code, max: err.max, got: err.got });
+  }
+  return next(err);
+}
+router.get('/past-tabs/scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _pastTabs.scanPastSheetTabs({ since: req.query.since, limit: req.query.limit })); }
+  catch (err) { _pastTabErr(res, err, next); }
+});
+router.post('/past-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { tabs, since, dryRun } = req.body || {};
+    // 미리보기가 기본 — 값이 빠진 요청이 곧바로 닫으면 안 된다
+    res.json(await _pastTabs.closePastTabs({ tabs, since, by: _by(req), dryRun: dryRun !== false }));
+  } catch (err) { _pastTabErr(res, err, next); }
+});
+router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
+  catch (err) { _pastTabErr(res, err, next); }
 });
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {

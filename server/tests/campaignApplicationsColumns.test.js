@@ -46,7 +46,9 @@ for (const p of files) {
   const src = fs.readFileSync(p, 'utf8').split(NUL).join('');   // 의도된 NUL(복합키 구분자) 제거 후 검사
   for (const m of src.matchAll(/UPDATE campaign_applications[\s\S]{0,400}?SET([\s\S]{0,400}?)WHERE/g)) {
     updates++;
-    for (const c of m[1].matchAll(/([a-z_]+)\s*=/g)) {
+    // ★ `make_interval(mins => $2)` 같은 **명명 인자**(`=>`)는 컬럼 대입이 아니다 —
+    //   부정 전방탐색이 없으면 멀쩡한 코드를 42703 위험으로 오탐한다(실제로 그랬다).
+    for (const c of m[1].matchAll(/([a-z_]+)\s*=(?!>)/g)) {
       if (!columns.has(c[1])) bad.push(`${path.relative(srcDir, p)} → ${c[1]}`);
     }
   }
