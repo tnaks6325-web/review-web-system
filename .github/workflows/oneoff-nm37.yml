@@ -1,0 +1,14 @@
+name: oneoff-nm37
+on:
+  push:
+    branches: [oneoff/nm37]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: scan
+        env:
+          PGURL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          psql "$PGURL" -X -A -F $'\t' -P pager=off -f q.sql
