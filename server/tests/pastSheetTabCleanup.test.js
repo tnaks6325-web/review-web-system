@@ -230,8 +230,13 @@ const ROWS = [
     assert.ok(cfm > pre, '확인창이 미리보기 뒤 (받음 ' + cfm + ')');
     assert.ok(run > cfm, '실행은 확인창 뒤');
     assert.ok(/if\(!confirm\([\s\S]{0,600}\)\) return;/.test(body), '확인하지 않으면 실행하지 않는다');
-    assert.ok(/되돌리려면/.test(body), '되돌릴 수 있음을 문장으로 말한다');
-    assert.ok(/데이터는 지우지 않습니다/.test(body), '무엇을 바꾸는지 말한다');
+    // ★★ 마감은 "표시 한 칸"이 아니다 — 다음 전체 빌드가 아카이브로 옮기고 tab_configs 행까지 지운다.
+    //   확인창이 그 사실을 말하지 않으면 담당자가 되돌리기 비용을 모른 채 누른다.
+    assert.ok(/아카이브/.test(body), '아카이브로 옮겨진다는 사실을 말한다');
+    assert.ok(/되돌리기/.test(body), '되돌리는 방법을 말한다');
+    assert.ok(/리뷰어의 제출완료 내역/.test(body), '리뷰어 화면 부작용을 말한다');
+    assert.ok(!/데이터는 지우지 않습니다/.test(body),
+      '"데이터를 지우지 않는다"는 부정확한 설명이 되살아나면 안 된다(전체 빌드가 원본을 지운다)');
   });
   t('8c: 실패는 자리표시자를 남기지 않는다(무한 로딩 금지)', () => {
     const i = FE.indexOf('async function _ptScan');

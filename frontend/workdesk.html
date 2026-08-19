@@ -8525,8 +8525,10 @@ function _ptRender(){
     — 등록된 ${r.total}개 중 <b>${r.stillReading}개가 지금도 시트를 읽습니다.</b>
     그중 <b>${r.candidates}개</b>가 과거 작업으로 확인돼 정리 대상입니다(시트 ${r.sheetsAffected}개).
     <div style="margin-top:6px;font-size:13px">
-      정리하면 그 탭의 <b>시트 읽기와 장부 재생성이 멈춥니다.</b>
-      바꾸는 것은 <b>마감 표시 한 칸</b>뿐이고 데이터는 지우지 않습니다 — 언제든 되돌릴 수 있습니다.
+      정리하면 그 탭의 <b>시트 읽기와 장부 재생성이 즉시 멈추고</b>,
+      <b>다음 새벽 전체 빌드에서 아카이브로 옮겨집니다</b>(명단은 아카이브 테이블에 보존·등록은 해제).
+      되돌리기는 전체 빌드 전에는 마감 해제, 그 뒤에는 아카이브 복구로 합니다.
+      <b>과거 자료로 확인된 작업에만 쓰세요.</b>
       ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
       ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
       ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
@@ -8556,10 +8558,13 @@ async function _ptClose(){
     const pre = await api('/api/trackb/past-tabs/close',{method:'POST',
       body:JSON.stringify({tabs:picked})});                       // 미리보기(기본)
     if(!pre||!pre.ok){ toast('미리보기 실패: '+esc(String(pre&&pre.error||''))); return; }
-    if(!confirm(`${pre.wouldClose}개 작업의 구글시트 읽기를 멈춥니다.\n\n`
-      + `· 바꾸는 것은 마감 표시 한 칸뿐이고 데이터는 지우지 않습니다\n`
-      + `· 시트 읽기와 장부 재생성이 멈춥니다(작업보드 목록에서도 빠집니다)\n`
-      + `· 되돌리려면 그 작업의 마감을 해제하면 됩니다\n\n진행할까요?`)) return;
+    if(!confirm(`${pre.wouldClose}개 작업을 마감 처리합니다.\n\n`
+      + `· 지금 바뀌는 것: 마감 표시 한 칸 (시트 읽기와 장부 재생성이 멈춥니다)\n`
+      + `· 다음 새벽 전체 빌드에서 이 작업들은 아카이브로 옮겨집니다\n`
+      + `  (명단·인덱스는 아카이브 테이블로 보존되고 등록은 해제됩니다)\n`
+      + `· 그 뒤에는 참여했던 리뷰어의 제출완료 내역이 화면에서 사라집니다\n`
+      + `· 되돌리기: 전체 빌드 전에는 마감 해제, 그 뒤에는 아카이브 복구\n\n`
+      + `과거 자료가 맞는지 확인하셨나요?`)) return;
     const r = await api('/api/trackb/past-tabs/close',{method:'POST',
       body:JSON.stringify({tabs:picked, dryRun:false})});
     if(!r||!r.ok){ toast('정리 실패: '+esc(String(r&&r.error||''))); return; }
