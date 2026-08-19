@@ -2019,6 +2019,15 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #abOv th:last-child,#abOv td:last-child{width:99%}
 #abOv .abchip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;
   background:var(--card2);border:1px solid var(--line);margin:0 5px 5px 0;cursor:help}
+/* 그룹별 수동 정리 — 남길 줄 라디오 · 내릴 줄 체크 · 실행 줄(2026-08-19).
+   ★ 표 왼쪽 두 칸은 조작 칸이라 폭을 고정한다(값 칸과 섞이면 눌러야 할 곳이 안 보인다). */
+#abOv th.pick,#abOv td.pick{width:44px;text-align:center;padding:4px 6px}
+#abOv td.pick input{cursor:pointer;margin:0}
+#abOv tr.keeprow{background:#f0f9ff}
+#abOv tr.remrow{background:#fef2f2}
+#abOv .abact{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 10px;border-top:1px solid var(--line);background:var(--card2);font-size:11.5px}
+#abOv .abact .msg{color:var(--warn)}
+#abOv .abact .done{color:#166534;font-weight:700}
 /* ♻ 중복 줄 정리 — 표가 7칸이고 전체 점검 목록이 수십 줄이라 기본 460px·무한 높이로는 조작이 안 된다
    (사용자 신고 2026-08-19). ★ **이 모달에만** 스코프 · flex 자식 min-height:0(없으면 스크롤이 안 생긴다). */
 #ddOv .wbl-dlg{width:min(1080px,100%);max-height:86vh;display:flex;flex-direction:column}
@@ -3650,11 +3659,19 @@ async function ddRun(){
    그래서 "중복 줄 116 · 정리 대상 0" 이 정상적으로 나온다(2026-08-19 장수산업 실측).
    이 창은 그 겹친 줄들이 **무엇이고 왜 정리 대상이 아닌지**를 그룹별로 보여주기만 한다.
    ★ 판정·분류는 전부 서버(`/worktable/ambiguous-rows`) — 화면은 결과를 그대로 그린다(재판정 0).
-   ★ 읽기 전용 — 이 창에는 실행 버튼이 없다. */
+   ★★ 2026-08-19 사용자 확정: **그룹마다 사람이 직접 정리**할 수 있다(`/worktable/dedupe-manual`).
+      자동 정리(♻)가 손대지 못하는 그룹이 표에 그대로 남아 **광고주가 같은 사람을 여러 줄로 보고
+      혼동**했기 때문. 조회는 여전히 읽기 전용이고, 실행은 미리보기 확인창을 거친다. */
 let _AB = null;
 /* ★ 서버 게이트(adminOrMaster)와 1:1 — 넓히면 눌러도 403 나는 죽은 버튼이 된다. */
 function _abCan(){ return STATE.role === 'master' || STATE.role === 'admin'; }
-function closeAmbiguousModal(){ const o = document.getElementById('abOv'); if (o) o.remove(); _AB = null; }
+/* ★ 정리를 한 번이라도 실행했으면 닫을 때 작업보드를 다시 그린다 —
+   창 안에서만 사라지고 뒤 표에는 그대로 남아 있으면 "정리가 안 된 것" 으로 읽힌다. */
+function closeAmbiguousModal(){
+  const dirty = !!(_AB && _AB.dirty);
+  const o = document.getElementById('abOv'); if (o) o.remove(); _AB = null;
+  if (dirty) { const i = STATE.tabs.indexOf(STATE.cur); if (i >= 0) selTab(i); }
+}
 if (!window._abKeyBound) {
   window._abKeyBound = true;
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('abOv')) closeAmbiguousModal(); });
@@ -3678,9 +3695,10 @@ const _AB_PAGE = 20;   // 한 번에 그리는 그룹 수(나머지는 [더 보�
 function openAmbiguousModal(){
   if (!_abCan() || !STATE.cur) return;
   const t = STATE.cur;
-  _AB = { sheetId: t.sheetId, tabName: t.tabName, label: (t.displayName || t.tabName), rep: null, err: '', busy: true };
+  _AB = { sheetId: t.sheetId, tabName: t.tabName, label: (t.displayName || t.tabName), rep: null, err: '', busy: true,
+          pick: {}, dirty: false };   // pick = 그룹별 사람이 고른 남길/내릴 줄
   const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'abOv';
-  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🔎 ⚠중복 진단 — 무엇이 겹쳤나</div>
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🔎 ⚠중복 진단 — 무엇이 겹쳤나 · 그룹별 정리</div>
     <div class="wbl-db" id="abBody"></div>
     <div class="wbl-df"><button class="wbl-b" onclick="closeAmbiguousModal()">닫기</button></div></div>`;
   document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
@@ -3700,8 +3718,82 @@ async function _abLoad(){
     _AB.busy = false; _AB.err = '조회 실패: ' + (e.message || ''); _abRender();
   }
 }
+/* ── 그룹별 수동 정리 (사용자 요청 2026-08-19) ────────────────────────────────
+   왜: 자동 정리(♻)는 확신할 때만 잡아 무링크·취소주문·주문번호 불일치 그룹을 손대지 못한다.
+   그 줄들이 표에 남아 **광고주가 같은 사람을 여러 줄로 보고 혼동**했다.
+   ★ 판정은 서버가 다시 한다(화면은 고른 줄 번호만 보낸다) — 미리보기 → 확인창 → 실행 2단계.
+   ★ 기본 선택 = 가장 이른 줄 남김(♻ 정리와 같은 규율). **입금 표시·이체 회차에 담긴 줄은
+     기본으로 체크하지 않는다** — 돈이 걸린 줄은 사람이 명시로 켜야 한다. */
+function _abKey(g){ return (g.seqs || []).join('-'); }
+function _abPick(g){
+  const k = _abKey(g);
+  if (!_AB.pick[k]) {
+    const rows = g.rows || [];
+    const keep = rows.length ? rows[0].seq : null;
+    const rem = rows.filter(r => r.seq !== keep && !r.paid && r.inPayment !== true).map(r => r.seq);
+    _AB.pick[k] = { keep, rem: new Set(rem), busy: false, msg: '', done: '' };
+  }
+  return _AB.pick[k];
+}
+function abKeep(i, seq){
+  const g = (_AB && _AB.rep && (_AB.rep.groups || [])[i]); if (!g) return;
+  const p = _abPick(g); p.keep = seq; p.rem.delete(seq); p.msg = ''; _abRender();
+}
+function abRem(i, seq, on){
+  const g = (_AB && _AB.rep && (_AB.rep.groups || [])[i]); if (!g) return;
+  const p = _abPick(g);
+  if (on) { if (seq === p.keep) return; p.rem.add(seq); } else p.rem.delete(seq);
+  p.msg = ''; _abRender();
+}
+async function abResolve(i, ackPending){
+  const g = (_AB && _AB.rep && (_AB.rep.groups || [])[i]); if (!g) return;
+  const p = _abPick(g);
+  if (p.busy || !p.keep || !p.rem.size) return;
+  const body = { sheetId: _AB.sheetId, tabName: _AB.tabName, keepSeq: p.keep,
+                 removeSeqs: [...p.rem], ackPending: ackPending === true };
+  p.busy = true; p.msg = ''; _abRender();
+  try {
+    const pv = await api('/api/trackb/worktable/dedupe-manual',
+      { method: 'POST', body: JSON.stringify({ ...body, dryRun: true }) });
+    if (!pv || pv.ok === false) {
+      p.busy = false;
+      /* ★ 이체 대기 회차는 막다른 길이 아니다 — 사실을 보여주고 사람이 한 번 더 확인하면 진행한다.
+         이미 이체가 나간 줄(in_paid_batch)은 확인으로도 열리지 않는다(서버 fail-closed). */
+      if (pv && pv.code === 'in_pending_batch') {
+        p.msg = ''; _abRender();
+        if (confirm((pv.error || '') + '\n\n그래도 이 줄들을 내릴까요?')) return abResolve(i, true);
+        return;
+      }
+      p.msg = (pv && (pv.error || pv.message)) || '확인 실패'; _abRender(); return;
+    }
+    const warn = [
+      pv.losesPaid ? '· 내릴 줄에만 입금 표시가 있습니다' : '',
+      pv.losesSubmitted ? '· 내릴 줄에만 리뷰제출 표시가 있습니다' : '',
+      (pv.pendingSeqs || []).length ? `· 이체 대기 회차에 담긴 줄 ${pv.pendingSeqs.join(', ')} (회차 항목은 자동으로 빠지지 않습니다)` : '',
+    ].filter(Boolean).join('\n');
+    const okGo = confirm(
+      `「${_AB.label}」\n\n남길 줄 ${pv.keep.seq}번 (${pv.keep.name || '이름 없음'})\n` +
+      `내릴 줄 ${pv.remove.map(r => r.seq).join(', ')} — ${pv.removeRows}줄\n` +
+      (pv.cancelOrders ? `함께 취소되는 주문 기록 ${pv.cancelOrders}건 (그 주문을 쓰는 줄이 하나도 안 남습니다)\n` : '') +
+      (warn ? '\n' + warn + '\n' : '') +
+      '\n내린 줄은 리뷰어 검색 명단에서도 빠집니다. 구글시트는 건드리지 않고 되돌릴 수 있습니다.\n\n계속할까요?');
+    if (!okGo) { p.busy = false; _abRender(); return; }
+    const r = await api('/api/trackb/worktable/dedupe-manual',
+      { method: 'POST', body: JSON.stringify({ ...body, dryRun: false }) });
+    if (!r || r.ok === false) { p.busy = false; p.msg = (r && (r.error || r.message)) || '정리 실패'; _abRender(); return; }
+    _AB.dirty = true;
+    p.busy = false; p.done = `${r.removed}줄 내림${r.canceledOrders ? ` · 주문 ${r.canceledOrders}건 취소` : ''}`;
+    if (r.ledgerError) alert('줄은 내려갔지만 검색 명단 재생성에 실패했습니다: ' + r.ledgerError + '\n잠시 후 다시 실행해 주세요.');
+    _abRender();
+    _abLoad();                                  // 남은 그룹을 다시 센다(숫자가 그대로면 오독한다)
+  } catch (e) { p.busy = false; p.msg = '정리 실패: ' + (e.message || ''); _abRender(); }
+}
 function _abGroupHtml(g, i){
+  const can = _abCan();
+  const p = can ? _abPick(g) : null;
   const rows = (g.rows || []).map(r => {
+    const isKeep = p && p.keep === r.seq;
+    const isRem = p && p.rem.has(r.seq);
     const flags = [
       r.hasOrder ? '' : '<span style="color:#b91c1c">링크 없음</span>',
       r.orderDeleted ? '<span style="color:#b91c1c">주문 취소됨</span>' : '',
@@ -3710,22 +3802,34 @@ function _abGroupHtml(g, i){
       r.inPayment === true ? '<span style="color:#b91c1c"><b>이체 회차</b></span>'
         : (r.inPayment === null ? '<span style="color:#6b7280">이체 담김 모름</span>' : ''),
     ].filter(Boolean).join(' · ');
-    return `<tr><td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
+    const pick = can ? `<td class="pick"><input type="radio" name="abk${i}" ${isKeep ? 'checked' : ''}
+        title="이 줄을 남깁니다" onclick="abKeep(${i},${Number(r.seq)})"></td>
+      <td class="pick"><input type="checkbox" ${isRem ? 'checked' : ''} ${isKeep ? 'disabled' : ''}
+        title="이 줄을 표에서 내립니다" onclick="abRem(${i},${Number(r.seq)},this.checked)"></td>` : '';
+    return `<tr class="${isKeep ? 'keeprow' : (isRem ? 'remrow' : '')}">${pick}
+      <td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
       <td class="num">${esc(r.phone8 || '')}</td>
       <td class="num">${esc(r.rowOrderNum || '—')}</td>
       <td class="num">${esc(r.ledgerOrderNum || '—')}</td>
       <td class="num">${esc(_ddDay(r.submittedAt))}</td>
       <td>${flags}</td></tr>`;
   }).join('');
+  const head = can ? '<th class="pick">남김</th><th class="pick">내림</th>' : '';
+  const act = can ? `<div class="abact">
+      <button class="wbl-b" ${(!p.keep || !p.rem.size || p.busy) ? 'disabled' : ''} onclick="abResolve(${i})">
+        ${p.busy ? '처리 중…' : `✓ 이 그룹 정리 (${p.rem.size}줄 내림)`}</button>
+      <span style="color:#6b7280">남길 줄 <b>${esc(String(p.keep == null ? '—' : p.keep))}</b> · 나머지는 표에서 내려갑니다(되돌릴 수 있음)</span>
+      ${p.msg ? `<span class="msg">${esc(p.msg)}</span>` : ''}
+      ${p.done ? `<span class="done">✓ ${esc(p.done)}</span>` : ''}</div>` : '';
   return `<div class="abg">
     <div class="abgh"><b>#${i + 1}</b> ${esc(String(g.rowCount))}줄
       <span style="color:#6b7280">줄 ${esc((g.seqs || []).join(', '))}</span>
       <span style="flex:1"></span>
       <span style="color:#6b7280">${esc(_AB_KIND[g.anchorKind] || g.anchorKind)}</span>
       <span class="abrs" title="${esc(g.detail || g.reason || '')}">${esc(_AB_RLABEL[g.reason] || g.reason)}</span></div>
-    <table><thead><tr><th>줄</th><th>참여자</th><th>연락처 뒤8</th>
+    <table><thead><tr>${head}<th>줄</th><th>참여자</th><th>연락처 뒤8</th>
       <th>표 주문번호</th><th>주문기록 주문번호</th><th>제출시각</th><th>표시</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+      <tbody>${rows}</tbody></table>${act}</div>`;
 }
 function abMore(){ if (!_AB) return; _AB.shown = (_AB.shown || _AB_PAGE) + _AB_PAGE; _abRender(); }
 function _abRender(){
@@ -3750,7 +3854,7 @@ function _abRender(){
       <span style="color:#6b7280;font-size:11.5px">표 ${esc(String(r.totalRows))}줄 · 겹친 줄 <b>${esc(String(r.ambiguousRows))}</b> · 그룹 <b>${esc(String(r.groupCount))}</b></span></div>
     <div class="wbl-facts">배지 <b>중복 줄 ${esc(String(r.ambiguousRows))}</b> 는 <b>앵커가 겹쳐 수정 오버레이(직원이 적은 입금일·리뷰제출 표시)를 적용하지 못한</b> 줄입니다.
       [♻ 중복 줄 정리]는 <b>살아 있는 주문에 연결된 줄만</b>, <b>표·기록 주문번호와 연락처가 셋 다 같을 때만</b> 대상으로 잡아 두 숫자가 다를 수 있습니다.
-      이 창은 <b>읽기 전용</b>입니다.</div>
+      ${_abCan() ? '그룹마다 <b>남길 줄</b>을 고르고 나머지를 <b>내림</b>으로 체크한 뒤 [이 그룹 정리]를 누르세요 — 미리보기 확인창을 거쳐 실행되고, 내린 줄은 되돌릴 수 있습니다.' : '이 창은 <b>읽기 전용</b>입니다.'}</div>
     <div style="margin:8px 0 2px">${legend || ''}</div>
     ${r.dedupeError ? `<div class="wbl-facts" style="color:#92400e">정리 도구와 대조하지 못했습니다(${esc(r.dedupeError)}) — "정리 대상/보류" 표시는 이번 결과에 없습니다.</div>` : ''}
     ${r.payUnavailable ? `<div class="wbl-facts" style="color:#b91c1c">이체 회차에 담긴 줄인지 확인하지 못했습니다 — 지우기 전에 입금관리에서 직접 확인하세요.</div>` : ''}
