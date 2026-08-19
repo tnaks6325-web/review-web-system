@@ -218,6 +218,46 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     assert.equal(afterBack.rows[0].is_closed, false);
   });
 
+  // ── ⑥ 빈 껍데기 행 삭제 (되돌릴 수 없는 유일한 조작) ─────
+  const SNAP2 = `SELECT (SELECT count(*)::int FROM tab_configs) tc,
+                        (SELECT count(*)::int FROM index_master) im,
+                        (SELECT count(*)::int FROM review_index) ri,
+                        (SELECT count(*)::int FROM order_submissions) os`;
+  // 픽스처는 모든 탭에 index_master 행을 넣으므로, 먼저 그 줄을 비워 "빈 껍데기" 상태로 만든다
+  await pool.query(`DELETE FROM index_master WHERE sheet_id=$1 AND tab_name='유령_옛이름'`, [S]);
+  await pool.query(`DELETE FROM review_index WHERE sheet_id=$1 AND tab_name='유령_옛이름'`, [S]);
+  const b6 = await pool.query(SNAP2);
+  const dg = await svc.deleteGhostRows({ tabs: [{ sheetId: S, tabName: '유령_옛이름' }] });
+  const afterDry6 = await pool.query(SNAP2);
+  t('⑥: 미리보기는 쓰지 않는다', () => {
+    assert.equal(dg.wouldDelete, 1);
+    assert.equal(afterDry6.rows[0].tc, b6.rows[0].tc, '행 수 불변');
+  });
+  // 장부가 있으면 거부 — 그 탭에 index_master 한 줄을 넣어 확인
+  await pool.query(`INSERT INTO index_master VALUES ($1,'유령_옛이름')`, [S]);
+  const refuse6 = await svc.deleteGhostRows({
+    tabs: [{ sheetId: S, tabName: '유령_옛이름' }], dryRun: false });
+  t('⑥b: 장부가 한 줄이라도 있으면 지우지 않는다(fail-closed)', () => {
+    assert.equal(refuse6.deleted, 0);
+    assert.equal(refuse6.refused[0].reason, 'has_ledger');
+  });
+  await pool.query(`DELETE FROM index_master WHERE sheet_id=$1 AND tab_name='유령_옛이름'`, [S]);
+  const done6 = await svc.deleteGhostRows({
+    tabs: [{ sheetId: S, tabName: '유령_옛이름' }], dryRun: false });
+  const after6 = await pool.query(SNAP2);
+  t('⑥c: 실행하면 그 등록 행 하나만 사라진다(장부·주문 무접촉)', () => {
+    assert.equal(done6.deleted, 1);
+    assert.equal(after6.rows[0].tc, b6.rows[0].tc - 1, 'tab_configs 만 -1');
+    assert.equal(after6.rows[0].ri, b6.rows[0].ri, 'review_index 불변');
+    assert.equal(after6.rows[0].os, b6.rows[0].os, 'order_submissions 불변');
+  });
+  const ghostAfter = await svc.deleteGhostRows({
+    tabs: [{ sheetId: S, tabName: '유령_옛이름' }], dryRun: false });
+  t('⑥d: 이미 지운 행은 ghost 목록에 없으므로 거부(멱등)', () => {
+    assert.equal(ghostAfter.deleted, 0);
+    assert.equal(ghostAfter.refused[0].reason, 'not_ghost');
+  });
+
   console.log('\n✅ 진짜 PG 통과 ' + pass + '건\n');
   await pool.end();
   process.exit(0);

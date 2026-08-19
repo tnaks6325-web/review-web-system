@@ -92,7 +92,7 @@ t('3f: 강한 신호로 과거가 확인되면 후보', () => {
 });
 
 /* ── 4) 서비스 실행(스텁 pool) ──────────────────────────── */
-function stubPool(rows, { onUpdate } = {}) {
+function stubPool(rows, { onUpdate, counts } = {}) {
   const q = []; let connects = 0;
   const client = {
     async query(sql, params) {
@@ -111,6 +111,8 @@ function stubPool(rows, { onUpdate } = {}) {
       const s = String(sql).replace(/\s+/g, ' ').trim();
       q.push({ s, params });
       if (/FROM tab_configs tc/.test(s)) return { rows };
+      // 빈 껍데기 삭제의 장부·주문 계수(스텁은 SQL 을 해석하지 않으므로 형태로 분기)
+      if (counts && /FROM review_index/.test(s) && /FROM index_master/.test(s)) return { rows: [counts] };
       return { rows: [] };
     },
   };
@@ -372,7 +374,8 @@ const ROWS = [
     assert.ok(/r\.ghosts/.test(b) && /if\(!g\.length\) return ''/.test(b), '없으면 안 그린다');
     assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b), 'escape');
     assert.ok(/그대로 두셔도 됩니다/.test(b), '읽기에 영향 없음을 말한다');
-    assert.ok(/탭명 교정으로는 고칠 수 없고/.test(b), '되지 않는 조치를 시키지 않는다');
+    assert.ok(/탭명 교정으로는 고칠 수 없습니다/.test(b), '되지 않는 조치를 시키지 않는다');
+    assert.ok(/_ptDelGhost\(\)/.test(b), '지울 수단을 준다');
     // 어긋남 목록이 비어도 빈 껍데기는 보여준다
     const d = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
     assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(d), '어긋남 0건이어도 표시');
@@ -392,6 +395,53 @@ const ROWS = [
     assert.ok(i > 0);
     assert.ok(!/정리 대상에 포함/.test(rd.slice(i, i + 220)),
       '읽히지만 후보가 아닌 탭이 있으므로 "포함"은 거짓이 될 수 있다(2026-08-19 실측)');
+  });
+
+  /* ── 10) 빈 껍데기 행 삭제 — 유일한 비가역 조작 ────────── */
+  t('10a: 쓰기 표면 — DELETE 대상은 tab_configs 하나뿐', () => {
+    const dels = [...SRC.matchAll(/DELETE FROM (\w+)/g)].map(m => m[1]);
+    assert.deepEqual([...new Set(dels)], ['tab_configs'], '받음 ' + JSON.stringify(dels));
+  });
+  t('10b: 서버가 ghost 판정을 다시 하고 장부가 있으면 거부한다', async () => {
+    const rows = [
+      { sheetId: 's', tabName: '유령', tabGid: '9', isClosed: true,
+        liveTabName: '새이름', liveNameRegistered: true, sampleStartDate: '24.5.1' },
+      { sheetId: 's', tabName: '보통', tabGid: '1', sampleStartDate: '24.5.1' },
+    ];
+    // 장부가 비어 있으면 삭제 대상
+    const p = stubPool(rows, { counts: { ri: 0, im: 0, os: 3 } });
+    svc.__setPoolForTest(p);
+    const pre = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }] });
+    assert.equal(pre.dryRun, true);
+    assert.equal(pre.wouldDelete, 1);
+    assert.equal(pre.targets[0].orderRows, 3, '주문은 막지 않고 건수만 말한다');
+    assert.ok(!p.q.some(x => /DELETE/i.test(x.s)), '미리보기는 쓰기 0');
+    // ghost 가 아닌 탭은 거부
+    const p2 = stubPool(rows, { counts: { ri: 0, im: 0, os: 0 } });
+    svc.__setPoolForTest(p2);
+    const r2 = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '보통' }], dryRun: false });
+    assert.equal(r2.deleted, 0);
+    assert.equal(r2.refused[0].reason, 'not_ghost');
+    assert.ok(!p2.q.some(x => /DELETE/i.test(x.s)), '거부 시 쓰기 0');
+    // 장부가 있으면 거부
+    const p3 = stubPool(rows, { counts: { ri: 12, im: 1, os: 0 } });
+    svc.__setPoolForTest(p3);
+    const r3 = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }], dryRun: false });
+    assert.equal(r3.deleted, 0);
+    assert.equal(r3.refused[0].reason, 'has_ledger');
+    assert.equal(r3.refused[0].reviewRows, 12);
+    assert.ok(!p3.q.some(x => /DELETE/i.test(x.s)), '★ 장부가 있으면 한 줄도 지우지 않는다');
+  });
+  t('10c: 화면은 미리보기 → confirm 2단계 · 되돌릴 수 없다고 말한다', () => {
+    const i = FE.indexOf('async function _ptDelGhost');
+    const b = FE.slice(i, FE.indexOf('\n}', FE.indexOf('catch(e)', i)));
+    const pre = b.indexOf('body:JSON.stringify({tabs})');
+    const cfm = b.indexOf('if(!confirm(');
+    const run = b.indexOf('dryRun:false');
+    assert.ok(pre > 0 && cfm > pre && run > cfm, '미리보기 → 확인 → 실행');
+    assert.ok(/되돌릴 수 없습니다/.test(b), '비가역임을 말한다');
+    assert.ok(/구글시트 탭·명단·주문은 그대로/.test(b), '무엇을 안 건드리는지 말한다');
+    assert.ok(/has_ledger/.test(b), '거부 사유를 사람 말로 옮긴다');
   });
 
   /* ── 9) 연도 확인 먼저 (사용자 확정 2026-08-19) ─────────
