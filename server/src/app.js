@@ -211,6 +211,14 @@ app.get('/health', async (req, res) => {
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',
+    /* ★★ 되돌리기 어려운 결과를 내는 킬스위치는 **화면에서 확인 가능해야 한다**.
+       `SHEETLESS_RECOVER_ON_BOOT` 은 켜져 있으면 부팅마다 무시트 미반영 주문을 다시 인계하는데,
+       그 잡은 os(주문원장) 행 단위로만 멱등이라 같은 실물 주문이 여러 os 로 있으면
+       **배포할 때마다 작업보드 줄을 하나씩 더 만든다**(2026-08-19 중복 사고의 증폭기).
+       코드는 기본 OFF 지만 환경변수는 코드에서 안 보이므로 여기서 실제 값을 드러낸다. */
+    flags: {
+      sheetlessRecoverOnBoot: process.env.SHEETLESS_RECOVER_ON_BOOT === '1' ? 'on' : 'off',
+    },
     sse: {
       connections: getSSEStatus().activeConnections,
     },

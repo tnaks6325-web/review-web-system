@@ -409,6 +409,20 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
       /9 \* 3600 \* 1000/.test(wdH));
   }
 
+  /* ── [I] 증폭기 킬스위치가 화면에서 확인 가능한가 ─────────────────────────────
+     환경변수는 코드에 안 보인다. `/health` 가 실제 값을 드러내지 않으면 "꺼져 있겠지" 로 넘어간다. */
+  console.log('\n[I] 부팅 복구잡 스위치 노출');
+  {
+    const appSrc = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
+    ok('★ 부팅 복구잡은 여전히 opt-in(기본 OFF)',
+      /if \(process\.env\.SHEETLESS_RECOVER_ON_BOOT === '1'\) setImmediate/.test(appSrc));
+    ok('★ /health 가 그 스위치의 실제 값을 말한다',
+      /sheetlessRecoverOnBoot: process\.env\.SHEETLESS_RECOVER_ON_BOOT === '1' \? 'on' : 'off'/.test(appSrc));
+    ok('노출 위치는 인증 없는 /health(운영자가 바로 확인)',
+      appSrc.indexOf('sheetlessRecoverOnBoot') > appSrc.indexOf("app.get('/health'")
+      && appSrc.indexOf('sheetlessRecoverOnBoot') < appSrc.indexOf('app.use(errorMetricsMiddleware)'));
+  }
+
   /* ── [F] 진짜 PG (선택) — 스텁은 SQL 을 해석하지 않는다 ──────────────────────
      `PGTEST_URL=postgres://... node server/tests/worktableDuplicateGuard.test.js`
      표 주문번호(row_json) 추출과 숫자 정규화가 **실제로** 도는지 확인한다. */
