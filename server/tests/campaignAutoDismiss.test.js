@@ -1,9 +1,9 @@
 /**
- * campaignAutoDismiss.test.js — 구매시간만료 자동 취소확정 회귀가드 (126)
+ * campaignAutoDismiss.test.js — 만료·취소 줄 자동 취소확정 회귀가드 (126)
  * 실행: node tests/campaignAutoDismiss.test.js
  *
  * 확정된 규칙(사용자 2026-08-19):
- *   ① 주문 흔적이 하나도 없는 만료 건만 시스템이 취소확정한다(기구매 = 사람이 [제출확정]).
+ *   ① 주문 흔적이 하나도 없는 **만료·취소** 건만 시스템이 취소확정한다(기구매 = 사람이 [제출확정]).
  *   ② 시점은 만료 즉시(매분 스윕).
  * 이 파일은 그 규칙과, 자동화가 만드는 유일한 새 위험(만료 뒤 도착한 주문이 가려지는 것)을
  * 막는 되살리기 경로를 **스텁 pool 로 실제 실행**해 고정한다.
@@ -59,14 +59,16 @@ async function main() {
   const iLate = sqls.findIndex(s => /SET late_order_id = o\.id/.test(s));
 
   ok('스윕이 자동 취소확정 UPDATE 를 실행한다', !!dismiss);
-  ok('★ 대상은 만료 && 미확정 건만',
-    /status = 'expired'/.test(dismiss) && /dismissed_at IS NULL/.test(dismiss));
+  ok('★ 대상은 (만료 | 취소) && 미확정 건만 — 취소 줄도 자동 정리(사용자 확정 2026-08-19)',
+    /status IN \('expired', 'cancelled'\)/.test(dismiss) && /dismissed_at IS NULL/.test(dismiss));
+  ok('★ 진행중(applied)·확정(submitted)은 자동 대상이 아니다 — 살아있는 자리를 시스템이 접지 않는다',
+    !/'applied'/.test(dismiss) && !/'submitted'/.test(dismiss));
   ok('★★ 기구매(late_order_id)·확정주문(order_submission_id)은 자동 대상에서 제외 — 결제한 리뷰어를 시스템이 미참여로 접지 않는다',
     /late_order_id IS NULL/.test(dismiss) && /order_submission_id IS NULL/.test(dismiss));
   ok('★★ 살아있는 주문이 있으면 제외(NOT EXISTS · deleted_at IS NULL) — 링크 백필 전이라도 fail-closed',
     /NOT EXISTS \(SELECT 1 FROM order_submissions o[\s\S]*?campaign_application_id = a\.id[\s\S]*?deleted_at IS NULL\)/.test(dismiss));
-  ok('★ status 는 expired 그대로 — cancelled 로 바꾸면 late 백필(status=expired 조건)이 끊겨 되살리기가 무력화된다',
-    !/status = 'cancelled'/.test(dismiss));
+  ok('★ 상태는 손대지 않는다(SET 은 마커 2칸뿐) — 만료를 cancelled 로 바꾸면 late 백필이 끊긴다',
+    /SET dismissed_at = NOW\(\), dismissed_by = 'auto'\s*\n/.test(dismiss) && !/SET[^\n]*status =/.test(dismiss));
   ok('사이클 상한(LIMIT) + SKIP LOCKED — 백로그를 한 번에 몰아치지 않고 확정 tx와 교착 0',
     /LIMIT \$1/.test(dismiss) && /FOR UPDATE SKIP LOCKED/.test(dismiss));
 
@@ -96,14 +98,15 @@ async function main() {
   ok('수동 제출확정은 마커를 비운다(잔류 금지)', /dismissed_at = NULL, dismissed_by = NULL/.test(routes));
 
   /* ═══ 4. 화면 배선 ═══ */
-  ok('자동 확정건은 "미참여(자동)"으로 구분 표기',
-    /autoDismissed \? "🚫 미참여\(자동\)" : "🚫 취소확정"/.test(front));
+  ok('자동 정리건은 원래 상태를 밝혀 표기(만료=미참여(자동) / 취소=취소 · 자동정리)',
+    /r\.status === "cancelled" \? "🚫 취소 · 자동정리" : "🚫 미참여\(자동\)"/.test(front));
   ok('★★ 자동 확정건에도 [제출확정]은 남는다 — 시스템 주문 링크 없는 실구매의 막다른 길 방지',
     /const canConfirm = [^\n]*\(!dismissed \|\| autoDismissed\)/.test(front));
   ok('자동 확정건에 [취소확정]은 안 띄운다(이미 확정 상태)',
     /const canDismiss = [^\n]*&& !dismissed;/.test(front)
       && /\$\{canDismiss \? `<button onclick="campDismiss/.test(front));
-  ok('화면이 자동 처리 사실을 문장으로 고지한다', /미참여\(자동\)<\/b> = 구매시간이 만료됐고/.test(front));
+  ok('화면이 자동 처리 사실을 문장으로 고지한다',
+    /시스템이 정리한 건입니다/.test(front) && /다시 목록에 올라옵니다/.test(front));
 
   console.log('\n✅ campaignAutoDismiss: ' + passed + '건 통과');
 }
