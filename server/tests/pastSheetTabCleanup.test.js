@@ -318,6 +318,20 @@ const ROWS = [
     assert.ok(/sync-tab-names/.test(b), '고칠 곳을 말한다');
     assert.ok(/index_master_archive/.test(b), '그 도구가 못 고치는 것까지 말한다(조용한 누락 금지)');
   });
+  t('8f-2: 두 표 모두 시트를 함께 적는다 + 헤더 칸 수 ≡ 행 칸 수', () => {
+    // ★ tab_configs 는 UNIQUE(sheet_id, tab_name) 이라 **다른 시트에 같은 탭 이름**이 있을 수 있다
+    //   (시트 복사본이 흔하다) — 시트를 안 적으면 똑같아 보이는 줄이 여럿 생겨
+    //   어느 것을 고르는지 알 수 없다(2026-08-19 실측 4줄). 체크박스 표에서는 오조작이 된다.
+    assert.ok(/campaignName/.test(SRC), '서버가 시트명을 싣는다');
+    const drift = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptRender'));
+    const rend = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    for (const [name, body] of [['drift', drift], ['candidates', rend]]) {
+      assert.ok(/esc\((h|it)\.campaignName/.test(body), name + ': 시트를 그린다(escape)');
+      const th = (body.match(/<th[ >]/g) || []).length;
+      const td = (body.match(/<td[ >]/g) || []).length;
+      assert.equal(th, td, name + ': 헤더 칸 수 ≡ 행 칸 수 (th ' + th + ' / td ' + td + ')');
+    }
+  });
   t('8g: 「정리 대상에 포함」이라고 말하지 않는다(후보가 0일 수 있다)', () => {
     const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
     const i = rd.indexOf('archivedByGidOnly');
