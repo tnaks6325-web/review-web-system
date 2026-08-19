@@ -1,4 +1,3 @@
-\set QUIET on
 WITH raw_tabs AS (
   SELECT rst.sheet_id, rst.tab_name FROM raw_sheet_tabs rst
    WHERE rst.is_system_tab = FALSE
@@ -15,25 +14,21 @@ WITH raw_tabs AS (
    WHERE COALESCE(tc.sheetless,FALSE)=TRUE
      AND NOT EXISTS (SELECT 1 FROM trackb_tab_finished f WHERE f.deleted_at IS NULL AND f.sheet_id=t.sheet_id
           AND (f.tab_name=t.tab_name OR (COALESCE(tc.tab_gid,'')<>'' AND f.tab_name=tc.tab_gid)))
-), b AS (
-  SELECT cp.*, os.recipient AS o_rcp, os.phone AS o_ph, os.order_num AS o_num
+), n AS (
+  SELECT cp.tab_name, cp.seq, COALESCE(cp.row_json->>'번호','') AS no,
+         COALESCE(cp.row_json->>'구매일자','') AS pdate,
+         COALESCE(cp.recipient_name,'') AS row_name, COALESCE(cp.phone8,'') AS row_p8,
+         COALESCE(os.recipient,'') AS ord_name,
+         right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS ord_p8,
+         regexp_replace(COALESCE(cp.row_json->>'주문번호',''),'\D','','g') AS row_num,
+         regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS ord_num,
+         CASE WHEN btrim(COALESCE(cp.row_json->>'리뷰제출',''))<>'' THEN 'O' ELSE '-' END AS rv,
+         (SELECT count(*) FROM order_submissions o2
+            WHERE o2.sheet_id=cp.sheet_id AND o2.tab_name=cp.tab_name AND o2.deleted_at IS NULL
+              AND right(regexp_replace(COALESCE(o2.phone,''),'\D','','g'),8)=cp.phone8) AS own_orders
     FROM campaign_participants cp
     JOIN live l ON l.sheet_id=cp.sheet_id AND l.tab_name=cp.tab_name
     JOIN order_submissions os ON os.id=cp.order_submission_id AND os.deleted_at IS NULL
    WHERE cp.deleted_at IS NULL AND cp.active=TRUE
-), n AS (SELECT b.*,
-   regexp_replace(COALESCE(recipient_name,''),'[\s ]','','g') AS rn,
-   regexp_replace(COALESCE(o_rcp,''),'[\s ]','','g') AS on_,
-   right(regexp_replace(COALESCE(o_ph,''),'\D','','g'),8) AS o_p8,
-   regexp_replace(COALESCE(row_json->>'수취인',''),'[\s ]','','g') AS rj_rcp,
-   regexp_replace(COALESCE(row_json->>'참여자',''),'[\s ]','','g') AS rj_join
-  FROM b)
-SELECT 'A 줄이름 <> 원장수취인' AS kind, count(*) FROM n WHERE rn<>'' AND on_<>'' AND rn<>on_
-UNION ALL SELECT 'B 줄연락처 <> 원장연락처', count(*) FROM n WHERE COALESCE(phone8,'')<>'' AND o_p8<>'' AND phone8<>o_p8
-UNION ALL SELECT 'C 표수취인 <> 줄이름', count(*) FROM n WHERE rj_rcp<>'' AND rn<>'' AND rj_rcp<>rn
-UNION ALL SELECT 'D 표참여자 <> 표수취인', count(*) FROM n WHERE rj_join<>'' AND rj_rcp<>'' AND rj_join<>rj_rcp
-UNION ALL SELECT 'E 표주문번호 <> 원장주문번호', count(*) FROM n
-   WHERE length(regexp_replace(COALESCE(row_json->>'주문번호',''),'\D','','g'))>=6
-     AND length(regexp_replace(COALESCE(o_num,''),'\D','','g'))>=6
-     AND regexp_replace(COALESCE(row_json->>'주문번호',''),'\D','','g') <> regexp_replace(COALESCE(o_num,''),'\D','','g')
-UNION ALL SELECT '총 링크된 줄', count(*) FROM n;
+)
+SELECT * FROM n WHERE row_p8<>'' AND ord_p8<>'' AND row_p8<>ord_p8 ORDER BY tab_name, seq;
