@@ -25,15 +25,9 @@
      정규식을 따로 적어 두면 "화면 목록엔 뜨는데 정리는 안 되는" 칸이 생긴다. */
 /** `번호` 계열 칸 — `trackB.service._displayNumber` 가 쓰던 규칙을 여기로 승격(사본 금지). */
 const NUMBER_KEYS = ['번호', 'no', 'no.', '#', '순번'];
-/**
- * `담당자` 계열 칸.
- * ★ `담당AE` 는 제외한다 — 그건 영업 담당자(실명)라 작업 담당자 닉네임(만두/망고)과 다른 칸이다.
- */
-const MANAGER_KEYS = ['담당', '담당자', '작업담당', '작업담당자'];
 
 const _esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const NUMBER_KEY_RE = new RegExp('^(' + NUMBER_KEYS.map(_esc).join('|') + ')$', 'i');
-const MANAGER_KEY_RE = new RegExp('^(' + MANAGER_KEYS.map(_esc).join('|') + ')$', 'i');
 
 function _keys(src) {
   if (Array.isArray(src)) return src;
@@ -47,8 +41,6 @@ function _findKey(src, re) {
 
 /** 표의 `번호` 칸 이름(없으면 null). 헤더 배열·row_json 어느 쪽이든 받는다. */
 function numberColumnKey(src) { return _findKey(src, NUMBER_KEY_RE); }
-/** 표의 `담당자` 칸 이름(없으면 null). */
-function managerColumnKey(src) { return _findKey(src, MANAGER_KEY_RE); }
 
 /** 문자열 정리 — 빈 값 판정을 한 곳에서(공백만 있는 칸 = 빈 칸). */
 function _txt(v) { return v == null ? '' : String(v).trim(); }
@@ -78,32 +70,24 @@ function orderRowsForNumbering(rows) {
 /**
  * 재부여 계획 산출 — **바뀌는 줄만** 돌려준다(같은 값 재기록 금지 = 쓸데없는 UPDATE 0).
  *
- * @param {Array<{id:*, seq:number, iso?:string|null, submittedAt?:*, number?:*, manager?:*}>} rows
+ * ★★ **담당자 칸은 건드리지 않는다**(사용자 확정 2026-08-19) — 담당자는 작업보드 좌측 상단
+ *   [작업 조건]에 이미 표기되므로 줄마다 반복할 이유가 없다. 이미 적혀 있는 값도 그대로 둔다.
+ *
+ * @param {Array<{id:*, seq:number, iso?:string|null, submittedAt?:*, number?:*}>} rows
  * @param {object} [opts]
- * @param {string} [opts.manager]        `담당자` 칸에 채울 값(빈 값이면 담당자는 건드리지 않는다)
- * @param {boolean} [opts.hasNumberCol]  표에 번호 칸이 있는가(없으면 번호 변경 없음)
- * @param {boolean} [opts.hasManagerCol] 표에 담당자 칸이 있는가
- * @returns {{ordered:Array, changes:Array<{id:*, seq:number, numberFrom:string, numberTo:string|null, managerTo:string|null}>}}
+ * @param {boolean} [opts.hasNumberCol]  표에 번호 칸이 있는가(없으면 변경 없음)
+ * @returns {{ordered:Array, changes:Array<{id:*, seq:number, numberFrom:string, numberTo:string}>}}
  */
 function computeRenumberPlan(rows, opts = {}) {
-  const manager = _txt(opts.manager);
   const hasNum = opts.hasNumberCol !== false;
-  const hasMgr = !!opts.hasManagerCol;
   const ordered = orderRowsForNumbering(rows);
   const changes = [];
   ordered.forEach((r, i) => {
-    const numberTo = hasNum ? String(i + 1) : null;
+    if (!hasNum) return;
+    const numberTo = String(i + 1);
     const numberFrom = _txt(r && r.number);
-    const numChanged = hasNum && numberFrom !== numberTo;
-    /* ★ 담당자는 **blank-only** — 사람이 적어 둔 값(예 다른 담당자)을 시스템이 덮지 않는다.
-       ★ 채울 값이 없으면(랜덤·미매핑 = `mapWorkManager` 가 빈 문자열) 아무것도 하지 않는다.
-         자동으로 아무나 배정하지 않는다는 `utils/workManager` 규율 그대로. */
-    const managerTo = (hasMgr && manager && !_txt(r && r.manager)) ? manager : null;
-    if (!numChanged && !managerTo) return;
-    changes.push({
-      id: r.id, seq: Number(r.seq),
-      numberFrom, numberTo: numChanged ? numberTo : null, managerTo,
-    });
+    if (numberFrom === numberTo) return;              // 같은 값 재기록 금지(쓸데없는 UPDATE 0)
+    changes.push({ id: r.id, seq: Number(r.seq), numberFrom, numberTo });
   });
   return { ordered, changes };
 }
@@ -123,7 +107,7 @@ function displaySortKey(row, numberKey) {
 }
 
 module.exports = {
-  NUMBER_KEYS, MANAGER_KEYS, NUMBER_KEY_RE, MANAGER_KEY_RE,
-  numberColumnKey, managerColumnKey,
+  NUMBER_KEYS, NUMBER_KEY_RE,
+  numberColumnKey,
   orderRowsForNumbering, computeRenumberPlan, displaySortKey,
 };
