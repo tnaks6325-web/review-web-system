@@ -425,6 +425,27 @@ router.get('/sheetless/slot-sweep', authMiddleware, adminOrMasterMiddleware, asy
     }));
   } catch (err) { _cutoverErr(err, res, next); }
 });
+/* ══════════════ 무시트 접수 잔재(빈 가상 탭) 정리 ══════════════
+   2026-08-19 실사고 수습 창구 — 랜덤 시트ID 시절 재시도가 남긴 "어디에도 쓰이지 않는 빈 탭"을
+   목록에서 내린다(`is_closed=TRUE` 한 칸 · 데이터 삭제 0 · 되돌리기 가능).
+   ★ 미리보기(GET)는 쓰기 0 · 실행(POST)은 서버가 후보를 다시 골라 그 교집합만 닫는다. */
+const orphanCleanup = require('../services/sheetlessOrphanCleanup.service');
+router.get('/sheetless/orphan-tabs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    res.json(await orphanCleanup.findOrphanTabs({ limit: req.query.limit }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
+router.post('/sheetless/orphan-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    // ★ 기본은 미리보기 — 값이 빠진 요청이 곧바로 실행되지 않게(`dryRun !== false`).
+    res.json(await orphanCleanup.closeOrphanTabs({
+      dryRun: b.dryRun !== false,
+      sheetIds: Array.isArray(b.sheetIds) ? b.sheetIds : null,
+      by: _by(req),
+    }));
+  } catch (err) { _cutoverErr(err, res, next); }
+});
 router.get('/sheetless/checklist', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;

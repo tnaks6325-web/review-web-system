@@ -120,7 +120,7 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
 
 (async () => {
   /* ══════════════ A. 라우터 스택 ══════════════ */
-  console.log('\n[A] 라우트 6종 · adminOrMaster');
+  console.log('\n[A] 라우트 8종 · adminOrMaster');
   {
     const r = require('../src/routes/trackB.routes');
     const found = {};
@@ -131,9 +131,11 @@ function stubDeps({ prepared = 3, readOk = true, parityReal = 0, parityThrows = 
     }
     const keys = Object.keys(found);
     const coreKeys = keys.filter(k => k !== 'POST /sheetless/review-submit-time-backfill');
-    ok('6경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 6
+    // ⚠ 잔재 정리 2경로 합류(2026-08-19) — 검사 의미는 불변(전부 adminOrMaster 뒤).
+    ok('8경로 전부 등록: ' + coreKeys.join(', '), coreKeys.length === 8
       && found['GET /sheetless/list'] && found['GET /sheetless/checklist']
       && found['GET /sheetless/slot-sweep']
+      && found['GET /sheetless/orphan-tabs'] && found['POST /sheetless/orphan-tabs/close']
       && found['POST /sheetless/cutover'] && found['POST /sheetless/cutover-active-server-only']
       && found['POST /sheetless/reconnect']);
     ok('★ 전부 authMiddleware + adminOrMaster (AE·광고주 도달 불가)',
