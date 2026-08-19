@@ -1,0 +1,67 @@
+name: oneoff-audit
+on:
+  push:
+    branches: [oneoff/audit]
+jobs:
+  q:
+    runs-on: ubuntu-latest
+    steps:
+      - name: run
+        env:
+          PGURL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          cat > /tmp/q.sql <<'EOSQL'
+\pset pager off
+\echo '=== Q1 자동 은퇴 후보(짝 빈 줄) 중 사람 데이터가 실린 줄 ==='
+WITH base AS (
+  SELECT p.id,p.sheet_id,p.tab_name,p.seq,p.row_json,
+         btrim(COALESCE(n.val,'')) AS num,
+         (p.order_submission_id IS NOT NULL
+          OR NULLIF(btrim(COALESCE(p.reviewer_name,'')),'') IS NOT NULL
+          OR NULLIF(btrim(COALESCE(p.recipient_name,'')),'') IS NOT NULL
+          OR NULLIF(btrim(COALESCE(p.phone8,'')),'') IS NOT NULL) AS filled
+    FROM tab_configs tc
+    JOIN campaign_participants p ON p.sheet_id=tc.sheet_id AND p.tab_name=tc.tab_name
+     AND p.deleted_at IS NULL AND p.active=TRUE
+    LEFT JOIN LATERAL (SELECT p.row_json->>k AS val
+       FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json)='object' THEN p.row_json ELSE '{}'::jsonb END) k
+      WHERE lower(btrim(k)) = ANY(ARRAY['번호','no','no.','#','순번']) LIMIT 1) n ON TRUE
+   WHERE COALESCE(tc.sheetless,FALSE)=TRUE
+), marked AS (
+  SELECT b.*, bool_or(b.filled) FILTER (WHERE b.num<>'') OVER (PARTITION BY b.sheet_id,b.tab_name,b.num) AS grp_filled
+    FROM base b
+), cand AS (
+  SELECT * FROM marked WHERE NOT filled AND num<>'' AND grp_filled
+)
+SELECT COUNT(*) AS 자동은퇴후보,
+       COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM participant_edits pe
+          WHERE pe.sheet_id=cand.sheet_id AND pe.tab_name=cand.tab_name
+            AND pe.anchor_type='manual' AND pe.anchor_value=cand.id::text
+            AND pe.reverted_at IS NULL)) AS 수기편집있음,
+       COUNT(*) FILTER (WHERE EXISTS (
+          SELECT 1 FROM jsonb_each_text(CASE WHEN jsonb_typeof(cand.row_json)='object' THEN cand.row_json ELSE '{}'::jsonb END) e
+           WHERE btrim(e.value)<>'' AND lower(btrim(e.key)) <> ALL(ARRAY['번호','no','no.','#','순번','구매일자','구매날짜','담당자','차수']))) AS 표에값있음
+  FROM cand;
+\echo '=== Q2 한 주문을 여러 줄이 가리킴(살아있는 줄) ==='
+SELECT COUNT(*) AS 묶음, SUM(n) AS 줄수 FROM (
+  SELECT cp.sheet_id,cp.tab_name,cp.order_submission_id, COUNT(*) n
+    FROM campaign_participants cp
+   WHERE cp.deleted_at IS NULL AND cp.order_submission_id IS NOT NULL
+   GROUP BY 1,2,3 HAVING COUNT(*)>1) t;
+\echo '=== Q3 지금 복구 대상(48h 창, 줄 없음) ==='
+SELECT COUNT(*) AS 복구대상,
+       COUNT(*) FILTER (WHERE length(regexp_replace(COALESCE(os.order_num,''),'\D','','g'))<6) AS 주문번호6자리미만
+  FROM order_submissions os
+  JOIN campaign_applications ca ON (os.campaign_application_id=ca.id OR ca.order_submission_id=os.id OR ca.late_order_id=os.id)
+  JOIN recruit_campaigns rc ON rc.id=ca.campaign_id
+ WHERE os.deleted_at IS NULL AND COALESCE(rc.linked_sheet_id,'')<>'' AND COALESCE(rc.linked_tab_name,'')<>''
+   AND NOT EXISTS (SELECT 1 FROM campaign_participants cp WHERE cp.order_submission_id=os.id AND cp.deleted_at IS NULL)
+   AND os.submitted_at > NOW() - interval '48 hours';
+\echo '=== Q4 링크는 있는데 표 주문번호가 비어 감시망 사각인 줄 ==='
+SELECT COUNT(*) AS 사각줄
+  FROM campaign_participants cp
+  JOIN tab_configs tc ON tc.sheet_id=cp.sheet_id AND tc.tab_name=cp.tab_name AND COALESCE(tc.sheetless,FALSE)=TRUE
+ WHERE cp.deleted_at IS NULL AND cp.active=TRUE AND cp.order_submission_id IS NOT NULL
+   AND length(regexp_replace(COALESCE((SELECT e.value FROM jsonb_each_text(CASE WHEN jsonb_typeof(cp.row_json)='object' THEN cp.row_json ELSE '{}'::jsonb END) e WHERE e.key ILIKE '%주문번호%' LIMIT 1),''),'\D','','g'))<6;
+EOSQL
+          psql "$PGURL" -f /tmp/q.sql
