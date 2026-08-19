@@ -889,8 +889,12 @@
   async function toggleArchive(campId, archived) {
     const tok = _adminTok();
     if (!tok) { _toast('권한이 없습니다.', true); return; }
+    /* ★ 문구는 "무엇이 닫히는가"를 정확히 말한다(사용자 신고 2026-08-19): 종전 '참여가 닫힙니다'는
+       **이미 참여한 리뷰어의 참여까지 끊기는 것**으로 읽혔다. 실제로 닫히는 것은 **새 참여 신청**뿐이고,
+       리뷰 내역·리뷰 제출·리뷰비 입금 경로(search.service·reviewer.routes·payment.service·submit.routes)에는
+       보관 필터가 **한 곳도 없다** — 이 문장이 그 사실을 그대로 말해야 한다. */
     const msg = archived
-      ? '이 공고를 보관할까요?\n\n· 리뷰어 목록에서 빠지고 참여가 닫힙니다\n· 참여 이력·리뷰비·정산 기록은 그대로 남습니다\n· [⋯] → [↩ 보관 해제]로 언제든 되돌릴 수 있습니다'
+      ? '이 공고를 보관할까요?\n\n· 리뷰어 공고 목록에서 빠지고 새 참여 신청이 닫힙니다\n· 이미 참여한 리뷰어는 영향 없습니다 — 리뷰 내역·리뷰 제출·리뷰비 입금 모두 그대로 진행됩니다\n· [⋯] → [↩ 보관 해제]로 언제든 되돌릴 수 있습니다'
       : '보관을 해제할까요?\n\n공고 상태(게시/임시저장/마감)대로 목록에 다시 나타납니다.';
     if (typeof window !== 'undefined' && window.confirm && !window.confirm(msg)) return;
     try {
