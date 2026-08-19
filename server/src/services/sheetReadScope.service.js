@@ -17,13 +17,16 @@
  *
  * ★ 읽기 전용 — 쓰기 쿼리 0 · 구글 시트/Drive API 호출 0(전부 DB 조회).
  */
-const { getPool } = require('../db/pool');
 const { REGISTERED_SHEET_IDS_SQL, fullySheetlessSheetIds } = require('../utils/sheetlessScope');
+
+/* ★★ `db/pool` 은 **풀 자체를 export** 한다(`module.exports = pool`) — `{ getPool }` 로 구조분해하면
+   undefined 라 호출 순간 TypeError → 마스킹된 500("서버 오류가 발생했습니다") 이 된다.
+   레포 관용구는 지연 require(순환참조 회피). 실측으로 밟았다(2026-08-19). */
+let _pool = null;
+function _db() { return _pool || (_pool = require('../db/pool')); }
 
 const LIST_CAP = 300;      // 목록 상한(초과분은 건수로만 — 조용히 자르지 않는다)
 const NAME_CAP = 5;        // 시트당 보여줄 탭 이름 수
-
-function _db() { return getPool(); }
 
 /** 남는 사유 — 화면 문구까지 여기 한 곳(사본 금지). */
 const REASONS = {
