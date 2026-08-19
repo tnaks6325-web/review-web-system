@@ -26,16 +26,20 @@ m AS (
    WHERE cp.deleted_at IS NULL AND cp.active=TRUE
      AND COALESCE(cp.phone8,'')<>'' AND right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8)<>''
      AND cp.phone8 <> right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8))
-SELECT count(*) AS total,
-       count(*) FILTER (WHERE in_index=0)                       AS "명단에 없음",
-       count(*) FILTER (WHERE is_submitted IS TRUE)             AS "리뷰제출 완료",
-       count(*) FILTER (WHERE is_submitted IS NOT TRUE)         AS "리뷰 미제출",
-       count(*) FILTER (WHERE is_submitted2='PAID')             AS "입금 완료",
-       count(*) FILTER (WHERE is_submitted IS TRUE AND is_submitted2 IS DISTINCT FROM 'PAID') AS "입금대상 후보",
-       count(*) FILTER (WHERE reg=0)                            AS "표연락처 미등록리뷰어",
-       count(*) FILTER (WHERE pay_items>0)                      AS "회차에 담김"
-  FROM m;
-
-\echo '=== 입금대상 후보(제출O·미입금)가 있으면 그 목록 ==='
-SELECT tab_name, seq, phone8, reg AS 등록리뷰어수 FROM m
- WHERE is_submitted IS TRUE AND is_submitted2 IS DISTINCT FROM 'PAID' ORDER BY tab_name, seq;
+SELECT cp2.tab_name, cp2.seq, cp2.row_json->>'번호' AS no,
+       cp2.row_json->>'수취인' AS tbl_nm, cp2.phone8 AS tbl_p8,
+       os2.recipient AS ord_nm, right(regexp_replace(COALESCE(os2.phone,''),'\D','','g'),8) AS ord_p8,
+       (SELECT count(*) FROM reviewers r WHERE r.phone8=cp2.phone8) AS 표연락처_등록,
+       (SELECT string_agg(r.name||'/'||COALESCE(r.bank_name,'')||' '||COALESCE(r.bank_account,''),' | ')
+          FROM reviewers r WHERE r.phone8=cp2.phone8) AS 표연락처_계좌,
+       (SELECT count(*) FROM reviewers r WHERE r.phone8=right(regexp_replace(COALESCE(os2.phone,''),'\D','','g'),8)) AS 주문연락처_등록,
+       ri2.is_submitted, ri2.is_submitted2
+  FROM campaign_participants cp2
+  JOIN live l2 ON l2.sheet_id=cp2.sheet_id AND l2.tab_name=cp2.tab_name
+  JOIN order_submissions os2 ON os2.id=cp2.order_submission_id AND os2.deleted_at IS NULL
+  LEFT JOIN review_index ri2 ON ri2.sheet_id=cp2.sheet_id AND ri2.tab_name=cp2.tab_name AND ri2.row_index=cp2.seq
+ WHERE cp2.deleted_at IS NULL AND cp2.active=TRUE
+   AND COALESCE(cp2.phone8,'')<>'' AND right(regexp_replace(COALESCE(os2.phone,''),'\D','','g'),8)<>''
+   AND cp2.phone8 <> right(regexp_replace(COALESCE(os2.phone,''),'\D','','g'),8)
+   AND ri2.is_submitted IS TRUE AND ri2.is_submitted2 IS DISTINCT FROM 'PAID'
+ ORDER BY cp2.tab_name, cp2.seq;
