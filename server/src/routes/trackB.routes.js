@@ -2881,10 +2881,13 @@ router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, a
     const buf = await paymentSvc.buildWorkbook(out.batch.bank, live);
     await paymentSvc.markDownloaded(out.batch.id, _by(req));
     const name = paymentSvc.batchFileName(out.batch);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    // ★ 형식은 은행마다 다르다(하나 = .xls BIFF8) — MIME·확장자는 서비스 단일 출처를 그대로 쓴다.
+    //   내용은 .xls 인데 이름만 .xlsx 로 나가면 은행 화면이 확장자만 보고 거부한다.
+    const fmt = paymentSvc.batchFileFormat(out.batch.bank);
+    res.setHeader('Content-Type', fmt.mime);
     // 한글 파일명 — RFC 5987(filename*)로 보내고 ASCII 폴백을 함께 준다
     res.setHeader('Content-Disposition',
-      `attachment; filename="payment_${out.batch.seq}.xlsx"; filename*=UTF-8''${encodeURIComponent(name)}`);
+      `attachment; filename="payment_${out.batch.seq}.${fmt.ext}"; filename*=UTF-8''${encodeURIComponent(name)}`);
     res.send(buf);
   } catch (err) { next(err); }
 });
