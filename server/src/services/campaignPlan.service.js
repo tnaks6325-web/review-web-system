@@ -462,6 +462,31 @@ async function savePlans(campaignId, body, actor) {
         if (!worktableSync.skipped) {
           projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         }
+        /* ★★ 조절을 저장하면 **오늘 이후 전체를 자동 재구성**한다(사용자 확정 2026-08-19).
+           종전엔 위 증분 동기화가 **이번에 저장한 날짜만** 손대서, 과거·꼬인 빈 줄이 미래에
+           그대로 남았다("8/20부터여야 하는데 26.8.26으로 스케줄링" 신고). 재구성은 관리자가
+           [작업표 재구성]으로 누르던 것과 **같은 함수**다(사본 0).
+           ★★ SAVEPOINT 격리 + 절대 throw 없음 — 재구성 실패(계획 없음·확정분 초과 등)로
+              **계획 저장 자체가 죽으면 안 된다**(082 apply 규율과 같은 자리). 실패는 사유만 싣고,
+              사람이 [작업표 재구성] 버튼으로 다시 시도할 수 있다.
+           ★ 킬스위치 `CAMPAIGN_PLAN_AUTO_REBUILD=0` = 종전 동작(증분 동기화만). */
+        if (!worktableSync.skipped && process.env.CAMPAIGN_PLAN_AUTO_REBUILD !== '0') {
+          const plansAll = Object.keys(plannedMap).sort().map(date => ({ date, count: plannedMap[date] }));
+          try {
+            await client.query('SAVEPOINT cp_auto_rebuild');
+            const { rebuildAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
+            worktableSync.rebuild = await rebuildAdjustedPlansToWorktable({
+              client, sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name,
+              plans: plansAll, today, by: actor || 'campaign-plan-autorebuild',
+            });
+            await client.query('RELEASE SAVEPOINT cp_auto_rebuild');
+          } catch (err) {
+            try { await client.query('ROLLBACK TO SAVEPOINT cp_auto_rebuild'); } catch (_) {}
+            try { await client.query('RELEASE SAVEPOINT cp_auto_rebuild'); } catch (_) {}
+            worktableSync.rebuild = { ok: false, reason: err.code || 'rebuild_failed', message: err.message };
+            logger.warn(`[campaignPlan] 저장 후 자동 재구성 실패(계획 저장은 유지) camp=${campaignId}: ${err.message}`);
+          }
+        }
       } else {
         /* ★★ 시트 기반 탭은 이제 정상 상태가 아니다(탈 구글시트 완료 — 2026-08 사용자 확정).
            표식(tab_configs.sheetless)이 안 켜진 탭이면 조절은 **정원만 바꾸고 작업표는 그대로**인데,
