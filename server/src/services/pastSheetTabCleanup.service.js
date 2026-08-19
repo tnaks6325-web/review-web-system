@@ -46,7 +46,10 @@ function _db() { return _pool || (_pool = require('../db/pool')); }
 function __setPoolForTest(p) { _pool = p; }
 
 const SCAN_CAP = 1000;          // 한 번에 훑는 탭 수 상한(넘으면 절단 사실을 고지)
-const CLOSE_CAP = 300;          // 한 번에 닫는 탭 수 상한(오조작 폭발반경 제한)
+const CLOSE_CAP = 300;          // 한 번에 닫는 탭 수(오조작 폭발반경 제한)
+// ★ 복합키 구분자 — 소스에 리터럴 NUL 을 넣으면 git 이 파일을 바이너리로 취급해
+//   grep·grep 기반 회귀가드가 그 파일에서 통째로 무력화된다(이번에 실제로 밟았다).
+const KEY_SEP = '\u0000';
 
 class PastTabError extends Error {
   constructor(code, extra) { super(code); this.code = code; Object.assign(this, extra || {}); }
@@ -178,12 +181,12 @@ async function closePastTabs({ tabs, since, by = 'admin', dryRun = true } = {}) 
   if (!Array.isArray(tabs) || tabs.length === 0) throw new PastTabError('tabs_required');
   if (tabs.length > CLOSE_CAP) throw new PastTabError('too_many_tabs', { max: CLOSE_CAP, got: tabs.length });
   const scan = await scanPastSheetTabs({ since });
-  const okKey = new Set(scan.items.map(i => i.sheetId + ' ' + i.tabName));
+  const okKey = new Set(scan.items.map(i => i.sheetId + KEY_SEP + i.tabName));
   const wanted = [], refused = [];
   for (const t of tabs) {
     const sid = t && t.sheetId, tab = t && t.tabName;
     if (!sid || !tab) { refused.push({ sheetId: sid || null, tabName: tab || null, reason: 'bad_key' }); continue; }
-    if (!okKey.has(sid + ' ' + tab)) { refused.push({ sheetId: sid, tabName: tab, reason: 'not_candidate' }); continue; }
+    if (!okKey.has(sid + KEY_SEP + tab)) { refused.push({ sheetId: sid, tabName: tab, reason: 'not_candidate' }); continue; }
     wanted.push({ sheetId: sid, tabName: tab });
   }
   if (dryRun) return { ok: true, dryRun: true, wouldClose: wanted.length, refused, tabs: wanted };

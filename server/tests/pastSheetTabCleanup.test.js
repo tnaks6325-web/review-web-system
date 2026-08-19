@@ -35,6 +35,12 @@ t('1a: 과거 판정은 tabActivity 를 그대로 쓴다(자체 SQL 조각·날�
   assert.ok(!/2026-01-01/.test(SRC), '컷오프 기본값 사본 금지(normalizeSince 가 정한다)');
 });
 
+t('1b: 소스에 리터럴 NUL 금지 — git 이 바이너리로 취급하면 grep 가드가 통째로 죽는다', () => {
+  const raw = fs.readFileSync(path.join(ROOT, 'server/src/services/pastSheetTabCleanup.service.js'));
+  assert.equal(raw.indexOf(0), -1, '리터럴 NUL 발견 — 이스케이프 표기(KEY_SEP)를 쓸 것');
+  assert.ok(/const KEY_SEP = '\\u0000'/.test(SRC), '복합키 구분자는 이스케이프 표기로');
+});
+
 /* ── 2) 쓰기 표면 ───────────────────────────────────────── */
 t('2a: 쓰기는 tab_configs.is_closed 두 문장뿐 — 다른 테이블 UPDATE/DELETE/INSERT 0', () => {
   const writes = SRC.match(/\b(UPDATE|DELETE\s+FROM|INSERT\s+INTO)\s+([a-z_]+)/gi) || [];
@@ -217,9 +223,13 @@ const ROWS = [
     const i = FE.indexOf('async function _ptClose');
     const body = FE.slice(i, FE.indexOf('\n}', FE.indexOf('catch(e)', i)));
     const pre = body.indexOf("body:JSON.stringify({tabs:picked})");
-    const cfm = body.indexOf('confirm(');
+    // ★ `confirm(` 만 찾으면 `if(false&&confirm(` 도 통과한다(변이시험 실측) — **막는 형태**를 본다
+    const cfm = body.indexOf('if(!confirm(');
     const run = body.indexOf('dryRun:false');
-    assert.ok(pre > 0 && cfm > pre && run > cfm, '미리보기 → confirm → 실행 순서');
+    assert.ok(pre > 0, '미리보기 요청');
+    assert.ok(cfm > pre, '확인창이 미리보기 뒤 (받음 ' + cfm + ')');
+    assert.ok(run > cfm, '실행은 확인창 뒤');
+    assert.ok(/if\(!confirm\([\s\S]{0,600}\)\) return;/.test(body), '확인하지 않으면 실행하지 않는다');
     assert.ok(/되돌리려면/.test(body), '되돌릴 수 있음을 문장으로 말한다');
     assert.ok(/데이터는 지우지 않습니다/.test(body), '무엇을 바꾸는지 말한다');
   });
