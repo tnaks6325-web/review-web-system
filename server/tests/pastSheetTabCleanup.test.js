@@ -402,35 +402,38 @@ const ROWS = [
     const dels = [...SRC.matchAll(/DELETE FROM (\w+)/g)].map(m => m[1]);
     assert.deepEqual([...new Set(dels)], ['tab_configs'], '받음 ' + JSON.stringify(dels));
   });
-  t('10b: 서버가 ghost 판정을 다시 하고 장부가 있으면 거부한다', async () => {
-    const rows = [
-      { sheetId: 's', tabName: '유령', tabGid: '9', isClosed: true,
-        liveTabName: '새이름', liveNameRegistered: true, sampleStartDate: '24.5.1' },
-      { sheetId: 's', tabName: '보통', tabGid: '1', sampleStartDate: '24.5.1' },
-    ];
-    // 장부가 비어 있으면 삭제 대상
-    const p = stubPool(rows, { counts: { ri: 0, im: 0, os: 3 } });
-    svc.__setPoolForTest(p);
-    const pre = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }] });
-    assert.equal(pre.dryRun, true);
-    assert.equal(pre.wouldDelete, 1);
-    assert.equal(pre.targets[0].orderRows, 3, '주문은 막지 않고 건수만 말한다');
-    assert.ok(!p.q.some(x => /DELETE/i.test(x.s)), '미리보기는 쓰기 0');
-    // ghost 가 아닌 탭은 거부
-    const p2 = stubPool(rows, { counts: { ri: 0, im: 0, os: 0 } });
-    svc.__setPoolForTest(p2);
-    const r2 = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '보통' }], dryRun: false });
-    assert.equal(r2.deleted, 0);
-    assert.equal(r2.refused[0].reason, 'not_ghost');
-    assert.ok(!p2.q.some(x => /DELETE/i.test(x.s)), '거부 시 쓰기 0');
-    // 장부가 있으면 거부
-    const p3 = stubPool(rows, { counts: { ri: 12, im: 1, os: 0 } });
-    svc.__setPoolForTest(p3);
-    const r3 = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }], dryRun: false });
-    assert.equal(r3.deleted, 0);
-    assert.equal(r3.refused[0].reason, 'has_ledger');
-    assert.equal(r3.refused[0].reviewRows, 12);
-    assert.ok(!p3.q.some(x => /DELETE/i.test(x.s)), '★ 장부가 있으면 한 줄도 지우지 않는다');
+  // ★ `t()` 는 동기 함수라 async 콜백의 단언은 process.exit(0) 뒤로 밀려 **실행되지 않는다**
+  //   (변이시험 3종이 전부 미검출로 통과했다) → 비동기 작업은 t() **밖에서** 먼저 끝낸다.
+  const GROWS = [
+    { sheetId: 's', tabName: '유령', tabGid: '9', isClosed: true,
+      liveTabName: '새이름', liveNameRegistered: true, sampleStartDate: '24.5.1' },
+    { sheetId: 's', tabName: '보통', tabGid: '1', sampleStartDate: '24.5.1' },
+  ];
+  const gp1 = stubPool(GROWS, { counts: { ri: 0, im: 0, os: 3 } });
+  svc.__setPoolForTest(gp1);
+  const gPre = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }] });
+  const gp2 = stubPool(GROWS, { counts: { ri: 0, im: 0, os: 0 } });
+  svc.__setPoolForTest(gp2);
+  const gNot = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '보통' }], dryRun: false });
+  const gp3 = stubPool(GROWS, { counts: { ri: 12, im: 1, os: 0 } });
+  svc.__setPoolForTest(gp3);
+  const gLed = await svc.deleteGhostRows({ tabs: [{ sheetId: 's', tabName: '유령' }], dryRun: false });
+  t('10b: 미리보기는 쓰지 않고 주문은 막지 않는다', () => {
+    assert.equal(gPre.dryRun, true);
+    assert.equal(gPre.wouldDelete, 1);
+    assert.equal(gPre.targets[0].orderRows, 3, '주문은 막지 않고 건수만 말한다');
+    assert.ok(!gp1.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '미리보기는 쓰기 0');
+  });
+  t('10b-2: ghost 가 아닌 탭은 서버가 거부한다(쓰기 0)', () => {
+    assert.equal(gNot.deleted, 0);
+    assert.equal(gNot.refused[0].reason, 'not_ghost');
+    assert.ok(!gp2.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '거부 시 쓰기 0');
+  });
+  t('10b-3: 장부가 한 줄이라도 있으면 지우지 않는다(fail-closed)', () => {
+    assert.equal(gLed.deleted, 0);
+    assert.equal(gLed.refused[0].reason, 'has_ledger');
+    assert.equal(gLed.refused[0].reviewRows, 12);
+    assert.ok(!gp3.q.some(x => /\bDELETE\s+FROM\b/i.test(x.s)), '★ 장부가 있으면 한 줄도 지우지 않는다');
   });
   t('10c: 화면은 미리보기 → confirm 2단계 · 되돌릴 수 없다고 말한다', () => {
     const i = FE.indexOf('async function _ptDelGhost');
