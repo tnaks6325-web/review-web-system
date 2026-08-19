@@ -918,10 +918,13 @@
       var cls = diff === 0 ? 'ok' : (diff > 0 ? 'over' : 'under');
       var ico = diff === 0 ? '✓' : (diff > 0 ? '▲' : '▼');
       // ★ 문구는 한 줄(사용자 확정) — 상태·숫자·저장 가능 여부만 말한다.
+      // ★ 사용자 확정(2026-08-19): **초과만 막고, 부족은 저장한다** — 부족하게 저장하면
+      //   그만큼만 모집하고 작업표의 줄도 그 수로 줄어든다(총건수 축소가 실제로 반영된다).
       var l1 = diff === 0
         ? '총량 <span class="num">' + target + '</span>명과 딱 맞습니다. — <b>저장가능</b>'
-        : '총량이 <span class="num">' + target + '</span>명보다 <span class="num">' + Math.abs(diff) + '</span>명 '
-          + (diff > 0 ? '초과' : '부족') + '입니다. — <b>저장불가</b>';
+        : diff > 0
+          ? '총량이 <span class="num">' + target + '</span>명보다 <span class="num">' + diff + '</span>명 초과입니다. — <b>저장불가</b>'
+          : '총량 <span class="num">' + target + '</span>명보다 <span class="num">' + (-diff) + '</span>명 적게 모집합니다. — <b>저장가능</b>';
       balBlk = '<div class="cdp-bal ' + cls + '"><div class="ico">' + ico + '</div>'
         + '<div class="txt"><div class="l1">' + l1 + '</div></div>'
         + (diff === 0 ? ''
@@ -1041,11 +1044,12 @@
       // ★ 균형 모드의 저장 게이트 = 합계 일치 AND 실제 저장할 것이 있음(요구 ⑥)
       //   + 서버 저장 상한(한 번에 120일)을 넘으면 통째로 거부되므로 미리 잠그고 **사유를 말한다**.
       var over = dirty > MAX_ROWS;
-      save.disabled = killOff || S.saving || diff !== 0 || !dirty || over;
+      // ★ 초과만 잠근다(총건수는 넘을 수 없다). 부족은 "그만큼만 모집"이라 저장 가능.
+      save.disabled = killOff || S.saving || diff > 0 || !dirty || over;
       hint.textContent = over
         ? '저장할 날짜가 ' + dirty + '일로 한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘었습니다 — 구간을 나눠 저장해주세요'
         : diff > 0 ? '초과 ' + diff + '명 — 저장불가'
-        : diff < 0 ? '부족 ' + (-diff) + '명 — 저장불가'
+        : diff < 0 ? '총량보다 ' + (-diff) + '명 적게 모집합니다 — 저장하면 작업표도 그 수로 줄어듭니다'
         : dirty ? '총량과 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다'
         // ★ "저장할 것 없음"을 그냥 말하면 화면에 이월이 얹혀 보이는데 저장이 잠겨 있어
         //   "반영이 안 된 것"으로 오독된다 — 이미 그렇게 돌고 있다는 사실을 말한다.
@@ -1423,8 +1427,9 @@
       });
     }
     if (!set.length && !remove.length) return;
-    // 균형 모드 저장 게이트(버튼 우회 방어) — 합계 불일치·저장 상한 초과는 보내지 않는다
-    if (balanceOn() && (diffPlan() !== 0 || set.length + remove.length > MAX_ROWS)) return;
+    // 균형 모드 저장 게이트(버튼 우회 방어) — **초과**·저장 상한 초과는 보내지 않는다.
+    //   ★ 부족은 보낸다(2026-08-19 확정: 그만큼만 모집하고 작업표도 그 수로 줄어든다).
+    if (balanceOn() && (diffPlan() > 0 || set.length + remove.length > MAX_ROWS)) return;
     // ★ "기본"은 날짜마다 다를 수 있다(시트 일정 공고 = 그날 시트 행 수) — 한 값으로 적으면 거짓말
     var lines = set.map(function (x) { return '· ' + fmtMD(x.date) + ' → ' + x.count + '명' + (x.count === baseFor(x.date) ? ' (기본과 동일)' : ''); })
       .concat(remove.map(function (d) { return '· ' + fmtMD(d) + ' → 기본(' + baseFor(d) + '명)으로 해제'; }));
@@ -1435,8 +1440,14 @@
       : lines.join('\n');
     // ★ 저장 범위를 과장하지 않는다 — 실제로 보내는 것은 **손댄 날뿐**이고, 그 날들만
     //   "그 값이 그날의 전부"가 되어 자동 이월이 얹히지 않는다. 나머지 날은 종전대로 열린다.
+    // ★ 부족하게 저장하면 "총량은 변하지 않는다"는 사실이 아니다 — 그만큼만 모집하고
+    //   작업표의 줄도 그 수로 줄어든다. 확인창이 실제로 일어날 일을 말한다.
+    var _short = balanceOn() ? (targetTotal() - sumPlan()) : 0;
     var tail = balanceOn()
-      ? '\n\n배분 합계 ' + sumPlan() + '명 = 남은 배분수 ' + targetTotal() + '명. 총량은 변하지 않습니다.'
+      ? '\n\n배분 합계 ' + sumPlan() + '명 / 남은 배분수 ' + targetTotal() + '명.'
+        + (_short > 0
+          ? '\n★ ' + _short + '명 적게 모집합니다 — 작업표의 남는 빈 줄도 함께 정리됩니다.'
+          : ' 총량은 변하지 않습니다.')
         + '\n고정되는 날은 위 ' + (set.length + remove.length) + '일뿐이고, 나머지 날은 종전대로 열립니다'
         + (set.length ? '(고정한 날에는 자동 이월이 더 얹히지 않습니다).' : '.')
       : '\n\n총량은 변하지 않습니다.';

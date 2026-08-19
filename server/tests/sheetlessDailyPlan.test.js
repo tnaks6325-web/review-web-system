@@ -208,7 +208,9 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     const r = await dailyPlan.syncAdjustedPlansToWorktable({
       client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15', set: [{ date: '2026-08-15', count: 2 }], by: 'tester' });
     ok('주말 0→2 조절 시 미래의 빈 준비 행 2개를 작업표 날짜로 이동', r.ok && r.moved === 2 && updates.length === 2);
-    ok('작업표 날짜는 사람이 읽는 8/15 (토) 표기로 쓴다', updates.every(p => p[2] === '8/15 (토)'));
+    /* ★ 표기는 작업표를 처음 만든 함수(worktablePlan.sheetDateStr)와 **같은 것**을 쓴다 —
+       종전엔 여기만 공백 없는 `8/15 (토)` 라 한 열에 두 표기가 섞였다(2026-08-19 실측). */
+    ok('작업표 날짜 표기는 작업표 생성과 같은 `8 / 15 (토)` 형식', updates.every(p => p[2] === '8 / 15 (토)'));
     ok('참여자·주문이 있는 행은 절대 이동하지 않는다', !updates.some(p => p[0] === 'fixed'));
     const src = noLineComments(srv('src/services/sheetlessDailyPlan.service.js'));
     ok('역동기화는 빈 준비 행만 대상으로 한다', /reviewer_name.*recipient_name.*phone8.*order_submission_id/.test(src));
@@ -230,7 +232,7 @@ console.log('\n[A] 무시트 탭은 시트 일정 파생에서 빠진다 (달력
     const r = await dailyPlan.syncAdjustedPlansToWorktable({
       client, sheetId: 'wt_a', tabName: 'T1', today: '2026-08-15', set: [{ date: '2026-08-15', count: 2 }], by: 'tester' });
     ok('빈 행이 없어도 0→2 증원은 새 작업표 행 2개를 만든다', r.ok && r.created === 2 && inserts.length === 2);
-    ok('새 행은 이어지는 seq와 목표 날짜를 갖는다', inserts[0][3] === 8 && inserts[1][3] === 9 && inserts.every(p => p[4] === '8/15 (토)'));
+    ok('새 행은 이어지는 seq와 목표 날짜를 갖는다', inserts[0][3] === 8 && inserts[1][3] === 9 && inserts.every(p => p[4] === '8 / 15 (토)'));
   }
   {
     // [기본으로]는 조절 후 남은 행 수가 아니라, 처음 조절하기 직전 작업표의 날짜별 행 수로 돌아간다.
