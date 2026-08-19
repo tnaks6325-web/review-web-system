@@ -75,8 +75,11 @@ console.log('\n[A] 투영 링크 — 표 주문번호가 정한다(phone8 단독
     const led = read('src/services/sheetlessLedger.service.js');
     const dd = led.slice(led.indexOf('async function dedupeRows('), led.indexOf('async function dedupeManual('));
     const m = dd.match(/const k = 'os:' \+ String\(r\.osid\)([^\n]*)/);
-    ok('★ ㉯ 축 키에 표 주문번호가 합류했다', !!m && /roword/.test(m[1]), m ? m[1] : '(없음)');
-    ok('★ 6자리 미만은 판정하지 않고 빈 값으로 분리', !!m && /length >= 6/.test(m[1]));
+    ok('★ ㉯ 축 키에 표 주문번호가 합류했다', !!m && /_rw/.test(m[1]), m ? m[1] : '(없음)');
+    // ★★ 표 주문번호가 없으면 이 축에 **담지도 않는다** — 빈 값끼리 묶던 종전 규칙을 폐기했다.
+    //    (링크는 연락처 추측으로 채워지므로 표 번호가 없으면 판정 근거가 없다.)
+    ok('★ 6자리 미만은 ㉯ 축에서 제외(빈 값끼리 묶지 않는다)',
+      /if \(_rw\.length >= 6\)\s*\{[\s\S]{0,200}byOrder\.get\(k\)\.push/.test(dd));
     ok('★ 리터럴 NUL 금지(이스케이프 표기)', fs.readFileSync(path.join(__dirname, '..', 'src/services/sheetlessLedger.service.js')).indexOf(0) === -1);
 
     /* 실행 대조 — 링크는 같지만 표 주문번호가 다른 두 줄은 한 그룹이 되지 않는다. */
@@ -98,6 +101,21 @@ console.log('\n[A] 투영 링크 — 표 주문번호가 정한다(phone8 단독
     DDROWS[1].roword = '16102062667987';   // 표 번호까지 같으면 진짜 중복
     const out2 = await L.dedupeRows({ sheetId: 's', tabName: 't', dryRun: true });
     ok('★ 표 번호까지 같으면 종전대로 정리 대상(무회귀)', out2.removeRows === 1, JSON.stringify({ removeRows: out2.removeRows }));
+
+    /* ★★ 표 주문번호가 **둘 다 비어 있으면** 링크가 같아도 묶지 않는다(2026-08-19 2차 확정).
+       투영이 연락처만으로 링크를 채우므로, 같은 사람의 서로 다른 참여가 한 주문에 매달릴 수 있다.
+       그 상태에서 링크만으로 지우면 **별개 참여가 사라진다**. */
+    DDROWS[0].roword = ''; DDROWS[1].roword = '';
+    DDROWS[0].ordnum = ''; DDROWS[1].ordnum = '';
+    const out3 = await L.dedupeRows({ sheetId: 's', tabName: 't', dryRun: true });
+    ok('★ 표 주문번호가 둘 다 없으면 링크가 같아도 정리하지 않는다',
+      out3.groups === 0 && out3.removeRows === 0, JSON.stringify({ groups: out3.groups, removeRows: out3.removeRows }));
+
+    /* 한쪽만 값이 있어도 묶이지 않는다(모르는 것을 같다고 하지 않는다). */
+    DDROWS[1].roword = '16102062667987';
+    const out4 = await L.dedupeRows({ sheetId: 's', tabName: 't', dryRun: true });
+    ok('★ 한쪽만 표 주문번호가 있으면 묶지 않는다',
+      out4.groups === 0 && out4.removeRows === 0, JSON.stringify({ groups: out4.groups, removeRows: out4.removeRows }));
 
     console.log(`\n✅ dedupeLinkCorruption — ${passed} 케이스 통과`);
     process.exit(0);

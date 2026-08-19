@@ -1,6 +1,11 @@
 /**
  * 중복 줄 정리 — ㉯ 축(같은 주문 기록을 여러 줄이 씀) 회귀가드 · 2026-08-19
  *
+ * ⚠ 2026-08-19 2차 확정으로 이 축의 키가 좁아졌다 — **표 주문번호가 같을 때만** 묶는다.
+ *   링크(`order_submission_id`)는 투영이 연락처만으로 추측해 채우는 값이라, 그것만 믿으면
+ *   같은 사람의 **별개 참여가 중복으로 지워진다**. 그래서 픽스처의 표 주문번호를 맞췄고,
+ *   "다르면 안 묶는다 · 없으면 판정하지 않는다" 케이스를 아래 [A-2] 에 추가했다.
+ *
  * 왜 이 축이 생겼나(실측 · 0729)위드프렌즈_면마스크 200건):
  *   한 주문이 **7줄**에 기록됐다(제출시각이 7줄 모두 동일). 부팅 복구 잡이 배포마다 빈 자리를
  *   하나씩 더 먹은 자국이다. 그런데 뒤쪽 줄들은 **표 주문번호가 서로 달라** 종전 ㉮ 축
@@ -87,6 +92,30 @@ function stub(rows, { pay = [] } = {}) {
         p.groups === 1 && p.removeRows === 5 && p.plan[0].keepSeq === 161);
       ok('★★ 다른 구매(117)는 정리 대상에서 아예 빠진다 — 오삭제 0',
         !p.plan.some(g => (g.removeSeqs || []).includes(117)));
+      led.__setPoolForTest(null);
+    }
+
+    console.log('\n[A-2] ★★ 링크만으로는 묶지 않는다 — 표 주문번호가 판정 근거 (2026-08-19 2차 확정)');
+    {
+      // 표 주문번호가 서로 다르면 별개 구매다(링크가 같아도).
+      const rows = [
+        R({ seq: 10, osid: 'os-1', roword: '2026080552706861', submitted: true }),
+        R({ seq: 20, osid: 'os-1', roword: '2026081822051841' }),
+      ];
+      led.__setPoolForTest(stub(rows));
+      const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+      ok('★ 표 주문번호가 다르면 링크가 같아도 묶지 않는다', p.groups === 0 && p.removeRows === 0);
+      led.__setPoolForTest(null);
+    }
+    {
+      // 표 주문번호가 아예 없으면 판정 근거가 없다 — 사람이 [♻ 중복 줄 정리]로 고른다.
+      const rows = [
+        R({ seq: 10, osid: 'os-1', roword: '', submitted: true }),
+        R({ seq: 20, osid: 'os-1', roword: '' }),
+      ];
+      led.__setPoolForTest(stub(rows));
+      const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+      ok('★ 표 주문번호가 둘 다 없으면 링크가 같아도 묶지 않는다', p.groups === 0 && p.removeRows === 0);
       led.__setPoolForTest(null);
     }
 
