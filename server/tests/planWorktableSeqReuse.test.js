@@ -68,6 +68,16 @@ async function runSeqCase() {
   ok('★ [작업표 재구성]은 무시트가 아니면 비활성 + 사유(죽은 버튼 금지)',
     /function syncRebuildBtn\(\)[\s\S]{0,500}btn\.disabled = \(linked === false\)/.test(front)
     && /syncRebuildBtn\(\);/.test(front));
+  /* ★ 툴팁·확인창은 실제로 일어나는 일 3가지(날짜 이동 · 부족분 줄 추가 · 남는 빈 줄 날짜 비우기)와
+     건드리지 않는 것(참여·주문 있는 줄, 계획에 없는 미래 날짜 줄)을 말해야 한다 — "빈 줄만 다시
+     배치"로 줄이면 줄 수가 늘거나 준 것을 사고로 오해한다(rebuildAdjustedPlansToWorktable 실제 동작). */
+  ok('★ [작업표 재구성] 툴팁이 실제 동작 3가지를 말한다',
+    /저장된 오늘 이후 계획에 맞춰 작업표의 빈 줄을 다시 배열합니다[^']*날짜 이동[^']*줄 추가[^']*날짜 비우기/.test(front));
+  ok('★ 확인창이 줄 추가·날짜 비우기·보호 대상까지 말한다(뭉뚱그리기 금지)',
+    /빈 줄의 구매일자를 계획일로 옮깁니다/.test(front)
+    && /계획 인원이 모자라면 빈 줄을 새로 만듭니다/.test(front)
+    && /필요 없는 빈 줄은 구매일자를 비웁니다/.test(front)
+    && /참여자·연락처·주문이 있는 줄과, 계획에 없는 미래 날짜의 준비 줄은 건드리지 않습니다/.test(front));
   ok('연결 상태는 서버가 판정해 내려준다(화면 추정 금지)',
     /worktableLinked: sheetlessLinked/.test(planSrc) && /sheetlessLinked = null;   \/\/ 모르면/.test(planSrc));
 
