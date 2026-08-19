@@ -72,6 +72,9 @@ const REQUIRED_SCHEMA = [
   ['payment_batches', 'board_queued_count'],      // 110 queued writes are not records yet
   ['payment_result_uploads', 'file_blob'],
   ['campaign_popular_prerequisites', 'priority'], // 115 인기공고 선행참여 우선순위
+  // 126 — 만료 자동 취소확정 마커. 스윕 UPDATE·되살리기 판정이 이 컬럼을 읽으므로
+  //   없으면 매분 스윕이 42703 으로 죽어 **만료 마킹까지 함께 멈춘다**.
+  ['campaign_applications', 'dismissed_by'],
 ];
 
 async function _runOneMigration(pool, sql) {
