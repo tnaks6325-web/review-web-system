@@ -76,7 +76,14 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
   if (!tc.length) return { ok: false, reason: 'tab_not_registered' };
   /* ★ 시트 기반 탭은 거부 — 투영이 row_json 을 덮어 조용히 되돌아간다(위 머리말). */
   if (!tc[0].sheetless) return { ok: false, reason: 'not_sheetless' };
-  const manager = String(tc[0].manager || '').trim();
+  /* ★★ 담당자 값은 **닉네임으로 정규화**한다(`utils/workManager` 단일 출처) — 접수 시 매핑이
+     들어오기 전에 만들어진 탭은 `tab_configs.manager` 에 **실명**(박은비)이 남아 있어, 그대로
+     채우면 같은 열에 `망고`(기존 줄)와 `박은비`(새 줄)가 섞인다(실측 화면).
+     ★ 매핑에 없는 이름은 **버리지 않고 그대로** 쓴다 — 그건 담당자를 아예 못 채우는 것보다 낫다.
+     ★ 단 `랜덤`·`미정` 은 사람이 정해야 하는 값이라 **채우지 않는다**(자동 배정 금지 규율). */
+  const { mapWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
+  const rawManager = String(tc[0].manager || '').trim();
+  const manager = isUndecidedWorkManager(rawManager) ? '' : (mapWorkManager(rawManager) || rawManager);
 
   /* 활성 줄 + 그 줄의 주문 제출 시각.
      ★ 주문이 취소(soft-delete)된 줄은 시각을 쓰지 않는다 — 살아 있는 주문만 순서의 근거다. */

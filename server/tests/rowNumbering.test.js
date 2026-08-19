@@ -144,6 +144,25 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('번호 칸 이름은 표에서 찾은 값을 쓴다', upd[0].params[3] === '번호' && upd[0].params[4] === '담당자');
     ok('담당자는 빈 줄만 채운다(param 배열)', upd[0].params[2].filter(Boolean).length === 1);
   }
+  // ── 담당자 값 정규화(실명 → 닉네임) · 랜덤은 미기입
+  {
+    const st = shapes.map(x => x[0].source === undefined ? x : x);
+    const mk = (mgr) => makePool([
+      [/FROM tab_configs/i, { rows: [{ sheetless: true, manager: mgr }] }],
+      [/FROM campaign_participants p/i, { rows: [{ id: '33333333-3333-3333-3333-333333333333', seq: 2, row_json: { '번호': '1', '구매일자': '8 / 18 (화)', '담당자': '' }, submitted_at: null }] }],
+      [/UPDATE campaign_participants/i, { rows: [], rowCount: 1 }],
+    ]);
+    S.__setPoolForTest(mk('박은비'));
+    let r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
+    ok('★★ 실명 담당자는 닉네임으로 정규화(박은비 → 망고 — 같은 열에 두 표기가 섞이지 않게)',
+      r.manager === '망고', String(r.manager));
+    S.__setPoolForTest(mk('랜덤'));
+    r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
+    ok('★ 랜덤·미정은 채우지 않는다(사람이 정한다)', !r.manager && r.changed === 0, JSON.stringify(r));
+    S.__setPoolForTest(mk('이만수'));
+    r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
+    ok('★ 매핑에 없는 이름은 버리지 않고 그대로 쓴다(못 채우는 것보다 낫다)', r.manager === '이만수', String(r.manager));
+  }
   // ── 번호·담당자 칸이 아예 없는 표
   {
     S.__setPoolForTest(makePool([
