@@ -13,7 +13,11 @@ const { logger } = require('../utils/logger');
 const DEBOUNCE_SEC = Number(process.env.SHEETLESS_LEDGER_DEBOUNCE_SEC || 20);
 const CAP = Number(process.env.SHEETLESS_LEDGER_SWEEP_CAP || 20);
 
-async function sweepDirtyLedgers({ by = 'ledger-sweep' } = {}) {
+/**
+ * @param {object} o
+ * @param {boolean} [o.force]  디바운스를 건너뛴다(사람이 누른 수동 실행 — 크론이 없는 환경의 창구)
+ */
+async function sweepDirtyLedgers({ by = 'ledger-sweep', force = false } = {}) {
   if (process.env.SHEETLESS_LEDGER_SWEEP === '0') return { skipped: true, reason: 'disabled' };
   const db = require('../db/pool');
   let rows = [];
@@ -23,9 +27,9 @@ async function sweepDirtyLedgers({ by = 'ledger-sweep' } = {}) {
          FROM tab_configs
         WHERE COALESCE(sheetless, FALSE) = TRUE
           AND ledger_dirty_at IS NOT NULL
-          AND ledger_dirty_at < NOW() - ($1 || ' seconds')::interval
+          AND ($3 OR ledger_dirty_at < NOW() - ($1 || ' seconds')::interval)
         ORDER BY ledger_dirty_at
-        LIMIT $2`, [String(DEBOUNCE_SEC), CAP]));
+        LIMIT $2`, [String(DEBOUNCE_SEC), CAP, !!force]));
   } catch (e) { logger.warn(`[ledgerSweep] 조회 실패: ${e.message}`); return { error: e.message }; }
 
   let done = 0, failed = 0;
@@ -40,7 +44,19 @@ async function sweepDirtyLedgers({ by = 'ledger-sweep' } = {}) {
     } catch (e) { failed++; logger.warn(`[ledgerSweep] ${t.tabName} 재생성 실패(dirty 유지): ${e.message}`); }
   }
   if (rows.length) logger.info(`[ledgerSweep] 후보 ${rows.length} · 완료 ${done} · 실패 ${failed}`);
-  return { candidates: rows.length, done, failed };
+  /* ★ 남은 대기(dirty)를 함께 보고한다 — 실패가 로그에만 남으면 담당자가 알 길이 없다.
+     화면·운영자가 "장부 반영이 밀리고 있다"를 숫자로 볼 수 있어야 한다. */
+  let pending = null, oldestWaitSec = null;
+  try {
+    const { rows: p } = await db.query(
+      `SELECT COUNT(*)::int AS n,
+              COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(ledger_dirty_at)))::int, 0) AS wait
+         FROM tab_configs
+        WHERE COALESCE(sheetless, FALSE) = TRUE AND ledger_dirty_at IS NOT NULL`);
+    pending = p[0] ? p[0].n : null;
+    oldestWaitSec = p[0] ? p[0].wait : null;
+  } catch (_) { /* 관측 실패는 스윕 결과를 바꾸지 않는다 */ }
+  return { candidates: rows.length, done, failed, pending, oldestWaitSec };
 }
 
 module.exports = { sweepDirtyLedgers };

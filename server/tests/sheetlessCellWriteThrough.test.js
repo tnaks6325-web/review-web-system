@@ -212,6 +212,15 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
     assert.ok(/_WT_SKIP_MSG/.test(wd) && /_wtNotice\(resp\)/.test(wd), '사유 표기 배선 필요');
     assert.ok(/_wtNoticed=\{\}/.test(wd), '사유별 1회 접기 상태 필요');
   });
+  t('4l-1: 크론 없는 배포를 위한 수동 스윕 창구(adminOrMaster)', () => {
+    // server/index.js 는 NODE_ENV==='production' 일 때만 크론을 켠다 → 그 밖의 배포에서는
+    // 사람이 눌러 장부를 반영할 수 있어야 한다(안 그러면 편집이 원본에만 남는다).
+    const rt = R('server/src/routes/trackB.routes.js');
+    assert.ok(/router\.post\('\/sheetless\/ledger-sweep', authMiddleware, adminOrMasterMiddleware/.test(rt), '수동 스윕 라우트 필요');
+    assert.ok(/withJobLock\('sheetless_ledger_sweep'/.test(rt), '크론과 같은 락을 써야 한다(이중 실행 차단)');
+    const sw2 = R('server/src/services/sheetlessLedgerSweep.service.js');
+    assert.ok(/pending, oldestWaitSec/.test(sw2), '밀린 대기 건수를 보고해야 한다(무신호 금지)');
+  });
   t('4l: 기본값은 테섭에서만 allow — 본섭 표식이 없으면 off', () => {
     const u = R('server/src/utils/sheetlessCellWrite.js');
     assert.ok(/TEST_AUTO_LOGIN === '1' \? 'allow' : 'off'/.test(u), '본섭에서 자동으로 켜지면 안 된다');
