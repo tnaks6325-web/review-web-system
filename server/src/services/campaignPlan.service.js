@@ -438,11 +438,24 @@ async function savePlans(campaignId, body, actor) {
           e.code = 'worktable_default_missing'; throw e;
         }
         const syncSet = set.concat(remove.map(date => ({ date, count: defaults.get(date) })));
+        /* ★ 이번에 손대지 않은 날의 **저장된 계획**도 함께 넘긴다 — 안 넘기면 다른 날의 빈 줄을
+           도너로 뺏어 그 날짜가 계획보다 적어진다(표 ≠ 계획, 실측). */
+        const plannedMap = {};
+        try {
+          const { rows: pr } = await client.query(
+            `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
+               FROM campaign_daily_plans WHERE campaign_id = $1 AND plan_date >= $2::date`,
+            [campaignId, today]);
+          for (const r of pr) plannedMap[r.date] = Number(r.count) || 0;
+        } catch (e) {
+          logger.warn(`[campaignPlan] 저장된 계획 조회 실패(도너 보호 생략) camp=${campaignId}: ${e.message}`);
+        }
         worktableSync = await syncAdjustedPlansToWorktable({
           client,
           sheetId: camp.linked_sheet_id,
           tabName: camp.linked_tab_name,
           set: syncSet,
+          planned: plannedMap,
           today,
           by: actor || 'campaign-plan',
         });
