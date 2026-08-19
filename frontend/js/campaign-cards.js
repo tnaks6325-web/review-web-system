@@ -8,8 +8,7 @@
 (function () {
   'use strict';
 
-  // 무시트 작업(탈 구글시트)의 가상 시트ID 접두. 단일 출처 = 서버 sheetlessAccept.VIRTUAL_SHEET_PREFIX
-  //   — 최소 사본이고 회귀가드가 두 값의 일치를 고정한다(workManager 사본 규율).
+  // 시트 관련 표기·버튼은 카드에서 전부 제거됐다(탈 구글시트) — 가상 시트ID 접두 사본도 필요 없다.
 
   let _serverOffsetMs = 0;          // serverNow - Date.now()
   let _tickTimer = null;
@@ -195,6 +194,15 @@
       .pcard .pg-row{display:flex;justify-content:space-between;align-items:baseline;font-size:.66rem}
       .pcard .pg-lb{color:#6B7280;font-weight:700}
       .pcard .pg-vl{font-weight:800;font-variant-numeric:tabular-nums;color:#111827}
+      /* 게이지 줄 오른쪽 = [값][↗ 작업보드]. pg-row 는 space-between 2칸이라 ↗ 을 세 번째
+         자식으로 넣으면 값이 가운데로 밀린다 → 오른쪽 둘을 한 묶음으로 감싼다.
+         ★ 이 블록은 템플릿 리터럴 안이다 — 주석에 백틱·달러중괄호를 쓰면 CSS 가 그 자리에서
+           끊기고 뒤가 JS 로 파싱된다(실측: ReferenceError). */
+      .pcard .pg-rt{display:flex;align-items:baseline;gap:5px;min-width:0}
+      .pcard .pgwb{flex:0 0 auto;align-self:center;border:1px solid #D3DAE6;background:#fff;color:#2563EB;
+        border-radius:6px;font-size:.62rem;font-weight:900;line-height:1;padding:2px 5px;cursor:pointer}
+      .pcard .pgwb:hover{background:#EFF4FF;border-color:#A9C2F5}
+      .pcard .pgwb[disabled]{opacity:.35;cursor:default;color:#6B7280}
       .pcard .pg-vl b{color:#1b64da;font-size:.86rem}
       .pcard .pgauge.full .pg-vl b{color:#B45309}
       .pcard .pg-carry{display:inline-block;margin-right:5px;padding:1px 5px;border-radius:5px;
@@ -374,12 +382,13 @@
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
     const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
-    const tab = c.linked_tab_name
-      ? `<div class="sp-link">🔗 ${_esc(c.linked_tab_name)}</div>`
-      : `<div class="sp-link">🔗 시트 탭 미연결 · 나중에 연결 가능</div>`;
+    /* ★★ 시트 탭 연결 표기는 그리지 않는다 (탈 구글시트 · 사용자 확정 2026-08-19).
+       리뷰웹시스템은 무시트라 담당자가 시트 탭을 고를 일이 없고, 공고의 작업보드는
+       접수 또는 첫 주문 때 시스템이 확보한다(`campaignWorktable.ensureCampaignWorktable`).
+       "미연결 · 나중에 연결 가능"은 이제 사실이 아닌 안내라 줄 자체를 없앤다. */
     return `<div class="pspec">
       <div class="sp-row"><div class="sp-chipwrap"><div class="sp-chips">${chips.join('')}</div></div><span class="sp-tot">${totTxt}</span></div>
-      ${tab}</div>`;
+      </div>`;
   }
 
   /**
@@ -426,14 +435,37 @@
     return `<div class="prounds">${chips}<span>총 ${conf}/${total}</span></div>`;
   }
 
+  /** ↗ 작업보드 바로가기(새 탭) — 관리자 카드의 게이지 줄 오른쪽.
+   *  ★ 재료는 이미 카드에 있는 연결 탭(linked_*) 뿐이고, 이동은 리뷰어 로그가 쓰는 딥링크
+   *    (`workdesk.html#go={s,t,g}&sso=`) 재사용이라 **서버 변경 0**이다.
+   *  ★ 작업표가 아직 없는 공고는 **비활성 + 사유**(눌러도 아무 일 없는 버튼을 두지 않는다).
+   *  ★ 리뷰어 카드에는 그리지 않는다 — 호출부가 admin 분기 안에서만 부른다. */
+  function _worktableBtn(c) {
+    const stop = 'event.stopPropagation();event.preventDefault();';
+    const linked = !!(c && c.linked_sheet_id && c.linked_tab_name);
+    if (!linked) {
+      return '<button type="button" class="pgwb" disabled title="이 공고에 연결된 작업표가 아직 없습니다 — 접수 또는 첫 주문 때 만들어집니다">↗</button>';
+    }
+    if (!_realAdminTok()) {
+      return '<button type="button" class="pgwb" disabled title="작업보드는 관리자 로그인이 필요합니다">↗</button>';
+    }
+    return `<button type="button" class="pgwb" onclick="${stop}CampCards.openWorkdesk('${_esc(c.id)}')"
+      title="작업보드를 새 탭으로 열기 — ${_esc(c.linked_tab_name)}">↗</button>`;
+  }
+
   function _adminActions(c) {
     const id = _esc(c.id);
     const stop = 'event.stopPropagation();event.preventDefault();';
     // 빨간 원 = 지각 접수 건수(결제했는데 자리 없음 → 수동확정 필요). 0이면 원 없음.
     const late = (c.ops && Number(c.ops.late)) || 0;
-    const bdg = late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '';
+    // 📝 127: 보라 원 = 블로그 승인 대기 건수 — blog 공고에서 "반드시 눌러야 하는" 신호는 승인 대기다.
+    const blogPend = (c.ops && Number(c.ops.blogPending)) || 0;
+    const bdg = (late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '')
+      + (blogPend > 0 ? `<span class="bdg bdg-blog" style="background:#7C3AED" title="블로그 참여 신청 ${blogPend}건 — 승인 대기 중">${blogPend}</span>` : '');
     const on = (c.status || 'draft') === 'active';
-    const pubToggle = (c.status === 'closed')
+    const pubToggle = c.archived_at
+      ? '<span class="ppub" title="보관된 공고입니다 — [⋯] → [↩ 보관 해제] 후 게시할 수 있어요">보관</span>'
+      : (c.status === 'closed')
       ? '<span class="ppub">마감</span>'
       : `<span class="ppub">게시<span class="psw${on ? '' : ' off'}" onclick="${stop}toggleRecruitPublish('${id}',${on ? 'false' : 'true'},this)"></span></span>`;
     // 🚫 참여 리뷰어(공고별 블랙리스트 건별 관리, 091) — apply 게이트가 있는 참여형만 의미가 있다
@@ -458,7 +490,12 @@
     //   토글 57px 고정 → 버튼 하나에 27px 인데 글자는 35~48px 필요 = 6개 전부 넘침).
     //   ★ 버튼이 더 늘어도 [⋯] 안으로 들어가므로 **같은 방식으로 다시 깨지지 않는다**.
     //   ★ 관제의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
-    _ACT_MORE[c.id] = [planBtn, gateBtn].filter(Boolean).join('');
+    /* 📦 130 보관/보관 해제 — 카드 주 줄이 아니라 [⋯] 안에 둔다(주 줄은 3개 고정 규율).
+       ★ 보관은 되돌릴 수 있지만 리뷰어 목록·참여를 닫으므로 **확인창을 거친다**(CampCards.toggleArchive). */
+    const arcBtn = c.archived_at
+      ? `<button type="button" class="pcmi" onclick="${stop}CampCards.toggleArchive('${id}',false)" title="목록으로 되돌립니다(리뷰어 노출·참여가 상태값대로 복구)">↩ 보관 해제</button>`
+      : `<button type="button" class="pcmi" onclick="${stop}CampCards.toggleArchive('${id}',true)" title="끝난 공고를 목록에서 내립니다 — 데이터는 그대로 남고 언제든 되돌릴 수 있어요">📦 보관</button>`;
+    _ACT_MORE[c.id] = [planBtn, gateBtn, arcBtn].filter(Boolean).join('');
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')"><span class="lbl">✏️ 수정</span></button>
       ${viewBtn}
@@ -569,8 +606,11 @@
     // 🧾 현금영수증 대상 배지(D안 ① — 참여 전 인지). 서버가 연결 탭 income_type으로 판정한
     //   cashReceiptRequired === true 일 때만(필드 부재 = 구버전 백엔드/조회 실패 → 배지 없음).
     const crChip = c.cashReceiptRequired === true ? `<span class="pt-badge cr">🧾 현금영수증</span>` : '';
-    const badges = (channel || c.delivery_type || crChip)
-      ? `<div class="pt-badges">${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
+    // 📝 127: 블로그체험단 배지 — 서버가 준 work_kind 정확 일치(빈 값·필드 부재 = 리뷰 = 배지 없음)
+    const isBlogCard = c.work_kind === 'blog';
+    const blogChip = isBlogCard ? `<span class="pt-badge" style="background:#7C3AED;color:#fff">📝 블로그</span>` : '';
+    const badges = (channel || c.delivery_type || crChip || blogChip)
+      ? `<div class="pt-badges">${blogChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}${crChip}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
     // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다
@@ -599,7 +639,18 @@
     // 덤프가 남아 있으면 관리자에게만 표시. 수정 모달을 열면 같은 감지가 [🧹 정리]를 띄운다.
     const cleanBadge = (admin && _campNeedsFieldCleanup(c))
       ? `<span class="pt-pop" style="background:#B45309" title="유의사항·리뷰가이드에 작업오더 원문이 남아 있어요 — 수정 모달에서 🧹 정리">🧹 본문 정리</span>` : '';
-    const topleft = (popToggle || ribbon || popBadge || hidBadge || cleanBadge) ? `<div class="pt-topleft">${popToggle}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
+    /* ★ 130: 보관(폐기) 표기 — 관리자 화면에서만(리뷰어 응답엔 archived_at 이 실리지 않고,
+       보관된 공고는 애초에 공개 목록에서 빠진다). admin 분기로 한 번 더 못 박는다. */
+    const arcBadge = (admin && c.archived_at)
+      ? `<span class="pt-pop" style="background:#334155" title="보관된 공고 — 리뷰어 목록·참여가 모두 닫혔습니다. [⋯] 에서 되돌릴 수 있어요">📦 보관됨</span>` : '';
+    /* 📦 보관 제안 — **작업표의 모든 줄이 채워졌을 때만**(사용자 확정 2026-08-19).
+       ★ 자동으로 보관하지 않는다. 제안은 배지까지이고 실행은 사람이 [⋯] → [보관]을 누른다.
+       ★ 판정 불가(archiveSuggest 없음·조회 실패)는 아무 말도 하지 않는다(0/0 을 "다 찼다"로 읽지 않는다). */
+    const sug = admin && !c.archived_at && c.archiveSuggest && c.archiveSuggest.full === true ? c.archiveSuggest : null;
+    const arcSuggestBadge = sug
+      ? `<span class="pt-pop" style="background:#0F766E" title="작업표 ${sug.filled}/${sug.total}줄이 모두 채워졌습니다 — 모집이 끝났다면 [⋯] → [📦 보관]">📦 보관 제안</span>` : '';
+    const topleft = (popToggle || ribbon || popBadge || hidBadge || cleanBadge || arcBadge || arcSuggestBadge)
+      ? `<div class="pt-topleft">${popToggle}${arcBadge}${arcSuggestBadge}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
@@ -629,6 +680,8 @@
       ? `<div class="pgauge${pubFull ? ' full' : ''}"${todayFilled != null ? ` title="작업표에 오늘 채워진 줄 ${pubN}명 / 오늘 정원 ${quota}명 · 공고를 거쳐 확정된 건 ${today}명"` : ''}><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${pubN}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pubPct}%"></div></div></div>`
       : '';
     if (admin) {
+      // ↗ 작업보드 바로가기 — 게이지 유무·상태와 무관하게 **같은 자리**에 둔다(두 갈래 공용 조각)
+      const wbBtn = _worktableBtn(c);
       // 관리자 게이지 = 같은 자리에 확정/진행중을 나눠 담는다(리뷰어는 단색 1구간).
       //   진행중 = 유효 홀드 = 지금 15분 타이머를 안고 구매 중인 사람 → 가장 시간에 민감한 값.
       const holdNow = (c.ops && Number(c.ops.holdNow)) || 0;
@@ -674,7 +727,7 @@
             + (shownN !== confirmedN ? ` · 공고를 거쳐 확정된 건 ${confirmedN}명 — 차이 ${Math.abs(shownN - confirmedN)}명은 지각 참여 확정 대기 또는 수기 입력일 수 있습니다` : '')
           : `공고 기준(표 기준으로 세지 못했습니다) — 확정 ${confirmedN}명 · 진행중 ${holdNow}명`;
         gauge = `<div class="pgauge${shownFull ? ' full' : ''}" title="${_esc(gapTip)}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${chips}<b>${shownN}</b> / ${quota}명${shownFull ? ' 완료' : ''}</span></div>
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-rt"><span class="pg-vl">${chips}<b>${shownN}</b> / ${quota}명${shownFull ? ' 완료' : ''}</span>${wbBtn}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
           <div class="pg-key"><span><i class="sub"></i>${todayFilled != null ? '표' : '확정'} <b>${shownN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;
@@ -683,7 +736,7 @@
         //   — 종전엔 게시된 공고에도 "게시 전"이라고 적어 미게시로 오해됐다.
         const z = _zeroQuotaNote(c, isPre, isDraft);
         gauge = `<div class="pgauge">
-          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-vl">${chips}<span style="color:#B6BDC9">${z.label}</span></span></div>
+          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-rt"><span class="pg-vl">${chips}<span style="color:#B6BDC9">${z.label}</span></span>${wbBtn}</span></div>
           <div class="pg-track"></div>
           <div class="pg-key"><span style="color:#B6BDC9">${z.desc}</span></div>
         </div>`;
@@ -695,7 +748,9 @@
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
-    if (c.state === 'open') footer = `<button type="button" class="pbtn go">참여하기</button>`;
+    if (c.state === 'open') footer = isBlogCard
+      ? `<button type="button" class="pbtn go">신청하기</button><div class="pnote">블로그 주소 제출 → 관리자 승인 후 구매 진행</div>`
+      : `<button type="button" class="pbtn go">참여하기</button>`;
     else if (weekendUnpublished) footer = `<button type="button" class="pbtn off">주말 미게시</button><div class="pnote">${_esc(c.stateMessage || '주말 미게시 · 월요일 재개')}</div>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
@@ -719,7 +774,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${gauge}
           ${_roundsLine(c)}
           ${_adminSpec(c)}
@@ -733,7 +788,7 @@
         <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}${moChip}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
-          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">${isBlogCard ? '승인제' : '바로참여'}</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
           ${_optChip(c)}
           ${gauge}
           ${footer}
@@ -854,6 +909,39 @@
   function _flagsUrl(campId) {
     return _apiBase() + _campAdminBase() + '/' + encodeURIComponent(campId) + '/flags';
   }
+  /** ★ 130 보관/보관 해제 — 끝난 공고를 목록에서 내린다(데이터는 그대로).
+   *  ★★ 경로는 호스트가 재기준한다(`_campAdminBase` — togglePopular 와 같은 장치):
+   *     리뷰웹시스템[3버전]의 인트라넷 SSO 토큰은 `/api/trackb/*` 로만 도달 가능하다.
+   *  ★ 판정을 화면에서 다시 하지 않는다 — 살아 있는 참여가 있으면 **서버가 사유와 함께 거부**하고
+   *    화면은 그 문장을 그대로 보여준다(막다른 길 금지).
+   *  ★ 확인창은 되돌릴 수 있다는 사실까지 말한다(조용한 파괴로 오해하지 않게). */
+  async function toggleArchive(campId, archived) {
+    const tok = _adminTok();
+    if (!tok) { _toast('권한이 없습니다.', true); return; }
+    /* ★ 문구는 "무엇이 닫히는가"를 정확히 말한다(사용자 신고 2026-08-19): 종전 '참여가 닫힙니다'는
+       **이미 참여한 리뷰어의 참여까지 끊기는 것**으로 읽혔다. 실제로 닫히는 것은 **새 참여 신청**뿐이고,
+       리뷰 내역·리뷰 제출·리뷰비 입금 경로(search.service·reviewer.routes·payment.service·submit.routes)에는
+       보관 필터가 **한 곳도 없다** — 이 문장이 그 사실을 그대로 말해야 한다. */
+    const msg = archived
+      ? '이 공고를 보관할까요?\n\n· 리뷰어 공고 목록에서 빠지고 새 참여 신청이 닫힙니다\n· 이미 참여한 리뷰어는 영향 없습니다 — 리뷰 내역·리뷰 제출·리뷰비 입금 모두 그대로 진행됩니다\n· [⋯] → [↩ 보관 해제]로 언제든 되돌릴 수 있습니다'
+      : '보관을 해제할까요?\n\n공고 상태(게시/임시저장/마감)대로 목록에 다시 나타납니다.';
+    if (typeof window !== 'undefined' && window.confirm && !window.confirm(msg)) return;
+    try {
+      const res = await fetch(_apiBase() + _campAdminBase() + '/' + encodeURIComponent(campId) + '/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+        body: JSON.stringify({ archived: archived === true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);
+      _toast(archived ? '보관했습니다 — [📦 보관함]에서 볼 수 있어요.' : '보관을 해제했습니다.');
+      if (typeof window.loadRecruitList === 'function') await window.loadRecruitList();
+      else if (typeof window.loadRecruitPreview === 'function') await window.loadRecruitPreview();
+    } catch (e) {
+      _toast(e.message, true);
+    }
+  }
+
   function _toast(msg, isErr) {
     _injectStyles();
     const t = document.createElement('div');
@@ -1224,22 +1312,63 @@
     };
   }
 
+  /** 연결 탭 문맥 보충 — 캐시에 없으면 관리자 조회로 채운다(수동제출·작업보드 바로가기 공용).
+   *  ★ 화면마다 도달 가능한 경로가 다르다: 리뷰웹시스템[3버전]은 `/api/trackb/campaigns/:id`,
+   *    관리자 대시보드는 공개 `/api/campaign/:id` + admin JWT(그 경로가 admin 이면 전체 행을 준다).
+   *    `_campAdminBase()+'/'+id` 를 무조건 쓰면 admin 호스트엔 GET /admin/:id 가 없어 404 다. */
+  async function _ensureCampCtx(id, tok) {
+    let ctx = _moCtx[String(id)];
+    if (ctx && ctx.sheetId && ctx.tabName) return ctx;
+    const base = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '';
+    const url = base ? (base + '/' + encodeURIComponent(id))
+                     : (_apiBase() + '/api/campaign/' + encodeURIComponent(id));
+    try {
+      const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tok } });
+      const j = await r.json();
+      const row = j && j.ok && (j.data || j.campaign);
+      if (row) { _cacheMoCtx(row); ctx = _moCtx[String(id)]; }
+    } catch (_) { /* 호출부 안내로 수렴 */ }
+    return ctx;
+  }
+
+  /** ↗ 작업보드를 새 탭으로 — 리뷰어 로그의 딥링크(`#go=`)와 **같은 방식**(신규 엔드포인트 0).
+   *  ★★ `window.open` 은 **await 앞에서** 부른다 — 비동기 뒤에 열면 브라우저가 팝업으로 막는다
+   *    (폴더 바로가기에서 실측한 규율). 문맥을 못 구하면 열어 둔 창을 닫고 사유를 말한다.
+   *  ★ 토큰을 프래그먼트로 함께 넘긴다: 새 탭은 sessionStorage 를 물려받지 못해 로그인 화면으로
+   *    떨어진다. 권한 확대가 아니다 — 새 탭도 서버 스코프 검증(canAccessTab)을 그대로 거친다. */
+  async function openWorkdesk(id) {
+    const tok = _realAdminTok();
+    if (!tok) { alert('작업보드는 관리자 로그인이 필요합니다.'); return; }
+    // ★★ 미리 여는 창에는 'noopener' 를 쓰지 않는다 — 그 옵션은 **핸들을 null 로 돌려주므로**
+    //   주소를 넣지 못하고 빈 탭 + 진짜 탭이 **두 개** 열린다(실브라우저 실측). 대신 주소를 넣은
+    //   직후 opener 를 끊어 같은 보호를 얻는다.
+    let w = null;
+    try { w = window.open('', '_blank'); } catch (_) { w = null; }
+    const ctx = await _ensureCampCtx(id, tok);
+    if (!ctx || !ctx.sheetId || !ctx.tabName) {
+      try { if (w) w.close(); } catch (_) {}
+      alert('이 공고에 연결된 작업표가 없어 작업보드를 열 수 없습니다.');
+      return;
+    }
+    const payload = { s: ctx.sheetId, t: ctx.tabName, g: ctx.gid || '' };
+    let url;
+    try { url = new URL('workdesk.html', location.href).href; }
+    catch (_) { url = 'workdesk.html'; }
+    url += '#go=' + encodeURIComponent(JSON.stringify(payload)) + '&sso=' + encodeURIComponent(tok);
+    if (w) {
+      try { w.opener = null; } catch (_) {}
+      try { w.location.replace(url); return; } catch (_) {}
+    }
+    window.open(url, '_blank', 'noopener');   // 팝업이 막힌 경우의 폴백
+  }
+
   /** 공고 id로 외부제출 모달 열기(카드 칩·관제 패널 공용) */
   async function openManualOrder(id) {
     if (!window.ManualOrder) { alert('수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.'); return; }
     const tok = _realAdminTok();
     if (!tok) { alert('관리자 로그인이 필요합니다.'); return; }
-    let ctx = _moCtx[String(id)];
-    if (!ctx || !ctx.sheetId || !ctx.tabName) {
-      // 공개 목록 응답엔 연결 탭이 없다 → 관리자 조회로 보충
-      try {
-        const r = await fetch(_apiBase() + '/api/campaign/' + encodeURIComponent(id), {
-          headers: { 'Authorization': 'Bearer ' + tok },
-        });
-        const j = await r.json();
-        if (j && j.ok && j.data) { _cacheMoCtx(j.data); ctx = _moCtx[String(id)]; }
-      } catch (_) { /* 아래 안내로 수렴 */ }
-    }
+    // 공개 목록 응답엔 연결 탭이 없다 → 관리자 조회로 보충(작업보드 바로가기와 같은 헬퍼)
+    const ctx = await _ensureCampCtx(id, tok);
     if (!ctx || !ctx.sheetId || !ctx.tabName) {
       alert('이 공고에 연결된 작업 탭이 없어 수동제출을 열 수 없습니다.\n공고 수정에서 연결 탭을 먼저 지정해 주세요.');
       return;
@@ -1251,5 +1380,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();
