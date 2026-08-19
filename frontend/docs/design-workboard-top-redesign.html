@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>작업보드 상단 재구성 — 시안 A / B</title>
+<style>
+  /* ★ 화면 재현 목업이라 라이트 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다.
+     색 토큰은 workdesk.html(Clarity Console)에서 그대로 옮겼다. */
+  :root{color-scheme:light;
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);background:var(--paper);color:var(--ink);font-size:14px;line-height:1.6;
+       padding:26px 16px 90px;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+  .page{max-width:1420px;margin:0 auto}
+  h1.doc{font-size:22px;letter-spacing:-.02em;margin-bottom:5px}
+  .lead{color:var(--muted);font-size:12.5px;margin-bottom:4px}
+  h2{font-size:16px;margin:34px 0 10px;padding-left:10px;border-left:4px solid var(--accent)}
+  h3{font-size:13.5px;margin:18px 0 7px}
+  p{margin:6px 0;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 17px;margin:10px 0;
+        box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  ul{padding-left:19px;margin:6px 0} li{margin:3px 0;font-size:13px}
+  code{background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:11.5px;
+       font-family:ui-monospace,Consolas,monospace}
+  .small{font-size:11.5px;color:var(--muted)}
+  table.doc{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}
+  table.doc th{background:var(--card2);text-align:left;padding:7px 10px;border:1px solid var(--line);font-size:11.5px;color:var(--muted);white-space:nowrap}
+  table.doc td{padding:7px 10px;border:1px solid var(--line);vertical-align:top}
+  .note{background:var(--warn-soft);border:1px solid #f3e2c4;border-radius:10px;padding:10px 13px;font-size:12.5px;margin:10px 0}
+  .note b{color:var(--warn)}
+  .ask{background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:10px;padding:10px 13px;font-size:12.5px;margin:10px 0}
+  .tag{display:inline-block;font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 9px;vertical-align:2px;margin-right:4px}
+  .tag.del{background:var(--bad-soft);color:var(--bad)}
+  .tag.new{background:var(--accent-soft);color:var(--accent-deep)}
+  .tag.mv{background:var(--warn-soft);color:var(--warn)}
+  .tag.keep{background:var(--card2);color:var(--muted)}
+
+  /* ── 안 전환 바 ── */
+  .vbar{display:flex;gap:6px;align-items:center;margin:14px 0 6px;flex-wrap:wrap}
+  .vbtn{font:inherit;font-size:12px;font-weight:750;padding:6px 14px;border-radius:8px;border:1px solid var(--line2);
+        background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none}
+  .vbtn.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* ══ 목업 프레임 ══ */
+  .mock{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--paper);margin:12px 0;
+        box-shadow:0 2px 10px rgba(16,24,40,.07)}
+  .mock-cap{font-size:11px;color:var(--faint);padding:6px 13px;background:var(--card2);border-bottom:1px solid var(--line);font-weight:650}
+  .mock-body{padding:14px}
+
+  /* ── 실제 workdesk 클래스에 대응하는 목업 부품 ── */
+  .k-mh{display:flex;align-items:center;gap:9px;flex-wrap:nowrap;margin-bottom:10px}
+  .k-mh h1{font-size:19px;font-weight:800;letter-spacing:-.02em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}
+  .k-sheet{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:7px;padding:2px 8px;
+           max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0}
+  .k-bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line);flex:none;white-space:nowrap}
+  .k-sp{flex:1}
+  .k-b{font:inherit;font-size:10.5px;font-weight:750;padding:5px 11px;border-radius:7px;border:1px solid var(--line2);
+       background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap;flex:none}
+  .k-b.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .k-b.more{padding:2px 9px;color:var(--muted);font-size:15px;line-height:1.4;letter-spacing:.08em}
+  .k-fin{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
+  @media(max-width:1280px){.k-fin .opt{display:none}}
+
+  /* ── 상단 카드 공통 ── */
+  .tp3col{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-width:0;display:flex;flex-direction:column}
+  .tp3t{font-size:9.5px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;
+        display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .tp3t .rt{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:700;font-size:10.5px}
+
+  /* ★ 요구 5: 작업 조건 · 진행 현황 카드를 정사각 비율로.
+     aspect-ratio 는 grid 트랙 폭이 흔들리면 높이도 흔들려 두 카드 높이가 갈린다 →
+     한 카드에만 aspect-ratio 를 걸고(기준 카드) 나머지는 grid 의 stretch 로 따라오게 한다. */
+  .tp3col.sq{aspect-ratio:1/1}
+  @media(max-width:1000px){.tp3col.sq{aspect-ratio:auto;min-height:0}}
+
+  /* ── ① 작업 조건 : 10항목 조밀 표기(요구 4) ── */
+  .cndl{display:grid;grid-template-columns:62px minmax(0,1fr);gap:0 8px;font-size:11.5px;align-content:start;flex:1;min-height:0}
+  .cndl dt{color:var(--faint);font-weight:650;padding:3px 0;border-top:1px solid var(--line)}
+  .cndl dd{margin:0;font-weight:700;padding:3px 0;border-top:1px solid var(--line);
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cndl dt:first-of-type,.cndl dd:nth-of-type(1){border-top:0}
+  .cndl dd .u{font-size:10px;font-weight:600;color:var(--faint);margin-left:1px}
+  .cndl dd.na{color:var(--faint);font-weight:600}
+  .yn{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;border-radius:999px;padding:0 7px;line-height:16px}
+  .yn.y{background:var(--safe-soft);color:var(--safe)} .yn.n{background:var(--card2);color:var(--faint)}
+  .yn.b{background:var(--accent-soft);color:var(--accent-deep)}
+  /* 상품명은 길다 — 첫 줄은 전폭 2줄 허용(축약해도 무엇인지 알아야 한다) */
+  .cndprod{font-size:12.5px;font-weight:750;line-height:1.35;margin-bottom:7px;
+           display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  /* 발주 칩(요구 2) — 전폭 띠를 없애고 카드 안 작은 줄로 */
+  .wochip2{margin-top:auto;padding-top:8px;border-top:1px dashed var(--line2);display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--muted)}
+  .wochip2 .ic{font-size:11px}
+  .wochip2 .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+  .wochip2 .st{background:var(--card2);border-radius:999px;padding:0 7px;font-weight:700;flex:none}
+  .wochip2 .k-b{margin-left:auto;padding:2px 8px;font-size:10px}
+  .wochip2.un{color:var(--warn)} .wochip2.un b{color:var(--warn)}
+
+  /* ── ② 진행 현황 + 정산(요구 3) ── */
+  .tp3g{display:flex;align-items:center;gap:9px;padding:5px 0}
+  .tp3g + .tp3g{border-top:1px solid var(--line)}
+  .tp3g .lb{font-size:11px;color:var(--muted);font-weight:650;width:54px;flex:none}
+  .tp3g .nm{font-size:16px;font-weight:800;letter-spacing:-.02em;width:84px;flex:none}
+  .tp3g .nm small{font-size:10.5px;font-weight:600;color:var(--faint);margin-left:1px}
+  .tp3g .track{flex:1;height:6px;border-radius:4px;background:var(--line);overflow:hidden;min-width:34px}
+  .tp3g .track i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+  .tp3g .track i.s{background:var(--safe)}
+  .tp3g .pc{font-size:10.5px;font-weight:800;width:34px;text-align:right;flex:none;color:var(--muted)}
+  .tp3money{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .tp3money b{font-size:15px;color:var(--ink)}
+  /* 정산 현황 = 진행 현황 카드 하단 구역(별도 박스 없음) */
+  .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2)}
+  .setlin .hd{display:flex;align-items:center;gap:6px;font-size:9.5px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+  .setlin .hd .more{margin-left:auto;font-size:10px;font-weight:700;color:var(--accent);text-transform:none;letter-spacing:0;cursor:pointer}
+  .tp3setl{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;font-weight:700}
+  .schip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
+  .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
+  .tp3steps{display:flex;gap:4px;margin-top:8px}
+  .tp3steps i{flex:1;height:4px;border-radius:3px;background:var(--line)}
+  .tp3steps i.on{background:var(--accent)}
+  .tp3steplb{display:flex;justify-content:space-between;margin-top:4px;font-size:9.5px;color:var(--faint);font-weight:700}
+
+  /* ── ③ 미리보기(요구 6) ── */
+  .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .rvhd{font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);
+        display:flex;align-items:center;gap:6px;margin-bottom:8px;flex:none}
+  .rvhd .rvsub{margin-left:auto;font-weight:650;letter-spacing:0;text-transform:none;font-size:10px}
+  .rvwho{font-size:12.5px;font-weight:750;display:flex;align-items:baseline;gap:6px;margin-bottom:8px;flex:none}
+  .rvwho span{font-size:10.5px;color:var(--faint);font-weight:650}
+  .rvgrp{flex:none;margin-bottom:6px}
+  .rvgrp .gt{font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:4px}
+  .rvgrp .gt .cnt{background:var(--card2);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
+  .rvstrip{display:flex;gap:6px;overflow-x:auto;padding-bottom:3px}
+  .rvstrip::-webkit-scrollbar{height:6px} .rvstrip::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  .rvth{flex:none;width:74px;height:96px;border-radius:8px;border:1px solid var(--line);overflow:hidden;cursor:pointer;
+        background:var(--card2);display:flex;align-items:center;justify-content:center;position:relative}
+  .rvth:hover{border-color:var(--accent)}
+  .rvth .ph{font-size:9.5px;color:var(--faint);text-align:center;padding:0 4px;line-height:1.35}
+  .rvcol{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+  .rvbig{width:100%;border-radius:9px;border:1px solid var(--line);background:var(--card2);
+         display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--faint);text-align:center;padding:10px;min-height:150px}
+  .rvnone{border:1px dashed var(--line2);border-radius:9px;padding:16px 12px;text-align:center;color:var(--faint);font-size:11px;flex:1;
+          display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+  .rvnone b{font-size:12px;color:var(--muted)} .rvnone.warn b{color:var(--warn)}
+
+  /* ── 목업 표(행 선택 데모) ── */
+  .gridbar{display:flex;align-items:center;gap:7px;margin:10px 0 6px;font-size:10.5px;color:var(--muted);flex-wrap:wrap}
+  .gridbar .sch{border:1px solid var(--line2);border-radius:7px;padding:4px 9px;background:var(--card);width:150px;color:var(--faint)}
+  table.mg{width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px;background:var(--card);
+           border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  table.mg th{background:var(--card2);text-align:left;padding:6px 9px;font-size:10.5px;color:var(--muted);font-weight:700;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.mg td{padding:6px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.mg tbody tr{cursor:pointer}
+  table.mg tbody tr:hover{background:var(--card2)}
+  table.mg tbody tr.on{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .vb{display:inline-block;font-size:9.5px;font-weight:800;border-radius:999px;padding:0 6px;background:var(--accent-soft);color:var(--accent-deep)}
+  .ok{color:var(--safe);font-weight:800} .no{color:var(--faint)}
+
+  /* ══ 안별 레이아웃 ══ */
+  /* A안 : 상단 3분할 — [조건] [진행+정산] [미리보기] 가 모두 같은 높이(정사각 라인) */
+  .lay-a{display:grid;grid-template-columns:minmax(240px,1fr) minmax(270px,1.1fr) minmax(250px,1fr);
+         gap:9px;max-width:1380px;align-items:stretch}
+  @media(max-width:1000px){.lay-a{grid-template-columns:1fr}}
+
+  /* B안 : 왼쪽 2칸(정사각) + 오른쪽 세로 레일이 표까지 이어짐(업체뷰어와 동형) */
+  .lay-b{display:grid;grid-template-columns:minmax(240px,1fr) minmax(270px,1.1fr) minmax(250px,300px);
+         grid-template-areas:"cond prog rail" "grid grid rail";gap:9px;max-width:1380px;align-items:stretch}
+  /* ★ B안은 레일이 한 칸을 가져가 왼쪽 두 칸이 넓어진다 — 여기에 정사각(1:1)을 그대로 걸면
+     카드 높이가 490px가 되어 표가 화면 밖으로 밀린다. 그래서 B안에서는 "정사각"이 아니라
+     **두 카드 같은 높이 + 최소 330px**(A안 정사각과 같은 세로)로 둔다. */
+  .lay-b .tp3col.sq{aspect-ratio:auto}
+  .lay-b .tp3col{min-height:330px}
+  .lay-b .b-grid{align-self:start}
+  .lay-b .b-cond{grid-area:cond} .lay-b .b-prog{grid-area:prog}
+  .lay-b .b-rail{grid-area:rail;position:sticky;top:10px;align-self:stretch;min-height:0;max-height:640px}
+  .lay-b .b-grid{grid-area:grid;min-width:0}
+  @media(max-width:1000px){.lay-b{grid-template-columns:1fr;grid-template-areas:"cond" "prog" "rail" "grid"}.lay-b .b-rail{position:static;max-height:none;height:380px}}
+
+  .hide{display:none !important}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1 class="doc">작업보드 상단 재구성 — 시안 A / B</h1>
+<p class="lead">요구 1~6 반영 · 가짜 데이터로 실제 동작(행을 클릭하면 미리보기가 바뀝니다) · 외부 리소스 0</p>
+
+<div class="vbar">
+  <a class="vbtn" href="?v=all" id="tab-all">두 안 비교</a>
+  <a class="vbtn" href="?v=A" id="tab-A">A안 — 상단 3분할</a>
+  <a class="vbtn" href="?v=B" id="tab-B">B안 — 오른쪽 세로 레일</a>
+  <span class="small" style="margin-left:6px">주소에 <code>?v=A</code> / <code>?v=B</code> 로 단독 보기</span>
+</div>
+
+<!-- ══════════════════════════════ A 안 ══════════════════════════════ -->
+<section id="secA">
+<h2>A안 — 상단을 [작업 조건 · 진행 현황+정산 · 미리보기] 3분할</h2>
+<p class="small">세 카드가 같은 높이(정사각 라인). 미리보기는 상단에만 있고, 표를 스크롤해도 따라오지 않습니다.</p>
+
+<div class="mock">
+  <div class="mock-cap">A안 · 관리자 화면 (1380px 기준)</div>
+  <div class="mock-body">
+
+    <!-- 제목 행 : 현행 그대로(마감 문구·버튼 동일) -->
+    <div class="k-mh">
+      <h1>8/3(네이버)우레온_바디미스트 100건</h1>
+      <span class="k-bd">무시트</span>
+      <span class="k-sheet">🗂 어니스트캄_업무시트 2</span>
+      <span class="k-bd">원본 : 시트</span>
+      <span class="k-sp"></span>
+      <button class="k-b">🔗 링크 복사</button>
+      <button class="k-b">📅 모집인원 조절</button>
+      <span class="k-fin">작업이 모두 끝나면 마감해 주세요. <span class="opt">마감해도 리뷰어 화면·데이터는 그대로입니다.</span></span>
+      <button class="k-b dark">🏁 마감</button>
+      <button class="k-b more">⋯</button>
+    </div>
+
+    <div class="lay-a">
+      <!-- ① 작업 조건 -->
+      <div class="tp3col sq" id="condA"></div>
+      <!-- ② 진행 현황 + 정산 -->
+      <div class="tp3col" id="progA"></div>
+      <!-- ③ 미리보기 -->
+      <aside class="rvpane" id="rvA"></aside>
+    </div>
+
+    <!-- 표 -->
+    <div class="gridbar"><span>◔ 8/19 (수) 참여현황 12/20명</span><span class="sch">🔍 표 검색</span><span>필터</span><span>열 ▾</span></div>
+    <div id="gridA"></div>
+
+  </div>
+</div>
+
+<div class="card">
+  <h3>A안의 성질</h3>
+  <ul>
+    <li><b>좋은 점</b> — 상단 한 줄에 모든 것이 모여 화면 위쪽만 보면 상황 파악이 끝납니다. 표는 종전대로 전폭을 씁니다.</li>
+    <li><b>대가</b> — 미리보기 높이가 카드 한 칸(≈330px)으로 <b>고정</b>이라 캡처를 크게 볼 수 없고, <b>표를 아래로 스크롤하면 미리보기가 화면 밖으로 사라집니다</b>(행을 눌러도 위로 올라가야 보임).</li>
+  </ul>
+</div>
+</section>
+
+<!-- ══════════════════════════════ B 안 ══════════════════════════════ -->
+<section id="secB">
+<h2>B안 — 왼쪽 2칸(같은 높이) + 오른쪽 미리보기 세로 레일</h2>
+<p class="small">업체(광고주) 뷰어와 같은 구조. 미리보기가 상단부터 표 옆까지 이어지고 <b>스크롤을 따라옵니다</b>(sticky).</p>
+
+<div class="mock">
+  <div class="mock-cap">B안 · 관리자 화면 (1380px 기준)</div>
+  <div class="mock-body">
+
+    <div class="k-mh">
+      <h1>8/3(네이버)우레온_바디미스트 100건</h1>
+      <span class="k-bd">무시트</span>
+      <span class="k-sheet">🗂 어니스트캄_업무시트 2</span>
+      <span class="k-bd">원본 : 시트</span>
+      <span class="k-sp"></span>
+      <button class="k-b">🔗 링크 복사</button>
+      <button class="k-b">📅 모집인원 조절</button>
+      <span class="k-fin">작업이 모두 끝나면 마감해 주세요. <span class="opt">마감해도 리뷰어 화면·데이터는 그대로입니다.</span></span>
+      <button class="k-b dark">🏁 마감</button>
+      <button class="k-b more">⋯</button>
+    </div>
+
+    <div class="lay-b">
+      <div class="tp3col sq b-cond" id="condB"></div>
+      <div class="tp3col b-prog" id="progB"></div>
+      <aside class="rvpane b-rail" id="rvB"></aside>
+      <div class="b-grid">
+        <div class="gridbar"><span>◔ 8/19 (수) 참여현황 12/20명</span><span class="sch">🔍 표 검색</span><span>필터</span><span>열 ▾</span></div>
+        <div id="gridB"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="card">
+  <h3>B안의 성질</h3>
+  <ul>
+    <li><b>좋은 점</b> — 미리보기가 세로로 길어 <b>캡처를 크게</b> 볼 수 있고, 표를 훑으며 위아래로 이동해도 <b>계속 옆에 붙어 있습니다</b>. 업체 뷰어와 같은 구조라 조작법을 새로 배울 것이 없습니다.</li>
+    <li><b>대가</b> — 표의 가로 폭이 레일(≈290px)만큼 줄어듭니다. 열이 많은 작업은 가로 스크롤이 늘어납니다.
+      → 레일 머리의 <b>[◀ 접기]</b>로 언제든 폭을 되돌립니다(접힘 상태 기억).</li>
+    <li><b>정사각 비율은 A안에서만</b> — B안은 레일이 한 칸을 가져가 왼쪽 두 칸이 넓어지므로, 1:1을 그대로 걸면 카드가 490px까지 높아져 표가 화면 밖으로 밀립니다. 대신 <b>두 카드 같은 높이 + 최소 330px</b>(A안 정사각과 같은 세로)로 둡니다.</li>
+  </ul>
+</div>
+</section>
+
+<!-- ══════════════════════════════ 공통 설명 ══════════════════════════════ -->
+<h2>바뀌는 것 — 지금 화면과 1:1 대조</h2>
+<table class="doc">
+  <tr><th style="width:30px">#</th><th style="width:200px">지금</th><th>바뀐 뒤</th></tr>
+  <tr><td>1</td><td><span class="tag del">삭제</span> 하단 「작업세부 펼치기 (발주 정형 정보)」</td>
+      <td>없앱니다. 그 안에 있던 값 중 <b>실제로 매일 보는 10가지는 ① 작업 조건 카드로 승격</b>(요구 4)되고, 나머지(유입가이드 전문·리뷰가이드·특이사항·상품 URL 등 긴 텍스트)는 <b>[⋯] → 발주 원문 보기</b> 팝업에서 봅니다. <span class="small">값이 사라지는 것이 아니라 자리를 옮깁니다.</span></td></tr>
+  <tr><td>2</td><td><span class="tag mv">이동</span> 전폭 「📋 발주: … / 명단 준비 / 발주 변경 / 연결 해제」 띠</td>
+      <td>① 작업 조건 카드 <b>맨 아래 한 줄</b>로 작게 들어갑니다 — <code>📋 발주 연결됨 · reviewing</code> + <b>[⋯]</b>(명단 준비 · 발주 변경 · 연결 해제). 미연결이면 같은 자리에 주황 <b>⚠ 발주 미연결 [＋ 연결]</b>(지금 동작 그대로).</td></tr>
+  <tr><td>3</td><td><span class="tag del">삭제</span> 세 번째 「정산」 박스</td>
+      <td>박스를 없애고 <b>② 진행 현황 카드 하단 구역</b>으로 넣습니다(계약 칩 · 금액 · 4단계 막대). <b>[상세]</b>를 누르면 종전 정산 스텝퍼가 표 위에 펼쳐집니다 — <span class="small">클릭 동작·데이터는 그대로.</span></td></tr>
+  <tr><td>4</td><td><span class="tag new">신설</span> ① 작업 조건 = 상품 / 모집 / 구매시간 / 배송 4줄</td>
+      <td><b>10줄</b>로 확장(아래 표). 글자를 작고 조밀하게(11.5px · 줄높이 22px) 두어 카드 한 칸에 들어갑니다.</td></tr>
+  <tr><td>5</td><td><span class="tag keep">조정</span> 카드 높이 = 내용만큼</td>
+      <td>① ②를 <b>정사각 비율</b>로 고정(<code>aspect-ratio:1/1</code>). 1000px 미만에서는 세로 배치로 접히며 비율을 풉니다.</td></tr>
+  <tr><td>6</td><td><span class="tag new">신설</span> —</td>
+      <td><b>구매캡처 · 리뷰 이미지 미리보기</b>. 표의 행을 클릭(또는 ↑↓)하면 그 줄의 제출물이 뜹니다 — 업체 뷰어와 <b>같은 조작</b>.</td></tr>
+</table>
+
+<h2>① 작업 조건 10항목 — 값이 어디서 오는가</h2>
+<table class="doc">
+  <tr><th style="width:110px">표기</th><th style="width:250px">데이터 출처</th><th>비고 / 값이 없을 때</th></tr>
+  <tr><td>상품명</td><td>발주 <code>product_option</code> → 없으면 탭 <code>campaign_name</code></td><td>2줄까지 보이고 넘치면 …(전문은 툴팁)</td></tr>
+  <tr><td>총건수</td><td>공고 <code>recruit_total</code> → 없으면 발주 <code>recruit_count</code></td><td>차수가 있으면 차수 합계가 이깁니다</td></tr>
+  <tr><td>일건수</td><td>공고 <code>daily_limit</code> → 없으면 발주 <code>daily_count</code></td><td>날짜별 조절이 걸린 날은 <code>조절</code> 표기를 함께</td></tr>
+  <tr><td>구매채널</td><td>공고 <code>channel</code> → 없으면 상품 URL <b>호스트</b> 판정</td><td>판정 실패는 <b>빈 값</b>(추측 금지 — 채널이 틀리면 현금영수증 안내가 잘못 나갑니다)</td></tr>
+  <tr><td>유입방식</td><td>발주 <code>inflow_type</code>(링크유입 / 가이드유입)</td><td>키워드가 있으면 <code>가이드 · 키워드</code>로 한 줄에</td></tr>
+  <tr><td>다계정 허용</td><td>공고 <code>multi_account_mode</code></td><td>허용 / 불가 배지. 공고 미연결이면 <b>—</b></td></tr>
+  <tr><td>현금영수증</td><td>탭 <code>capture_slots</code> · <code>income_type</code> (<code>hasCashReceiptSlot</code>)</td><td>폴더 바로가기·검수와 <b>같은 판정 함수</b>를 씁니다(사본 금지)</td></tr>
+  <tr><td>리뷰비</td><td><code>resolveReviewFee</code> (스냅샷 → 구간표 → 공고 → 탭)</td><td>구간표가 있으면 <code>오늘 기준</code>임을 툴팁으로. <b>0원 = 무상</b>(미설정 아님)</td></tr>
+  <tr><td>입금명</td><td>탭 <code>deposit_name</code> → 공고 <code>transfer_memo</code></td><td>미설정이면 회색 <b>미설정</b> — 입금관리 보류 사유와 같은 값</td></tr>
+  <tr><td>리뷰타입</td><td><code>resolveReviewType</code> (공고 → 탭)</td><td>혼합·판정 불가는 <b>—</b>(추측하지 않습니다)</td></tr>
+</table>
+<div class="note"><b>필요한 서버 작업</b> — 지금 작업보드 응답(<code>workdeskTab</code>)에는 <b>공고(모집공고) 값이 실려 있지 않습니다</b>. 총건수·일건수·구매채널·다계정 허용·리뷰비·입금명·리뷰타입을 정확히 표기하려면 그 응답에 연결 공고 요약을 한 덩어리로 더 실어야 합니다. <b>판정은 기존 함수를 그대로 태웁니다</b>(리뷰비 = <code>resolveReviewFee</code>, 리뷰타입 = <code>resolveReviewType</code>, 현영 = <code>hasCashReceiptSlot</code>) — 화면에서 다시 계산하면 카드·모집공고 탭과 숫자가 갈립니다.</div>
+
+<h2>⑥ 미리보기 — 무엇을 보여주나</h2>
+<table class="doc">
+  <tr><th style="width:110px">묶음</th><th style="width:250px">출처</th><th>비고</th></tr>
+  <tr><td>🛒 구매 캡처</td><td><code>order_submissions.capture_file_id</code></td><td><b>지금 API에 없습니다</b> — 기존 리뷰 이미지 응답에 <b>묶음만 하나 더</b> 얹으면 됩니다(신규 저장소 0)</td></tr>
+  <tr><td>📷 리뷰 이미지</td><td><code>review_submissions</code> → 없으면 대표 <code>review_index.review_file_id</code></td><td>업체 뷰어가 이미 쓰는 <code>/workdesk/review-images</code> 그대로</td></tr>
+  <tr><td>🧾 현금영수증</td><td>같은 응답의 <code>slot='cash_receipt'</code></td><td>슬롯이 있는 작업에서만 묶음이 생깁니다</td></tr>
+</table>
+<ul>
+  <li>이미지는 <b>기존 무인증 프록시</b>(<code>/api/drive/image/&lt;파일ID&gt;</code>)가 그대로 내보냅니다 — 새 저장소·새 프록시가 필요 없습니다.</li>
+  <li>썸네일을 누르면 <b>크게 보기</b>(← → 이동, Esc 닫기). 업체 뷰어의 팝업을 그대로 씁니다.</li>
+  <li><b>"미제출"과 "제출 표시는 있는데 이미지가 없음"을 구분해서</b> 말합니다(뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾습니다).</li>
+  <li>권한 — 관리자·AE는 지금과 같고, <b>광고주 화면은 손대지 않습니다</b>(그쪽은 이미 같은 레일을 쓰고 있습니다).</li>
+</ul>
+
+<div class="ask">
+  <b>확인이 필요한 것 3가지</b>
+  <ul>
+    <li><b>㉮ A안 / B안</b> — 미리보기를 상단 한 칸(A)으로 둘지, 표 옆 세로 레일(B)로 둘지. <span class="small">캡처를 자주 대조하신다면 B, 상단 한눈 파악이 우선이면 A입니다.</span></li>
+    <li><b>㉯ 발주 원문</b> — 「작업세부 펼치기」를 없애는 대신 [⋯] 팝업으로 두면 되는지, 아니면 <b>아예 안 봐도 되는지</b>.</li>
+    <li><b>㉰ 미리보기 묶음</b> — 구매캡처·리뷰 이미지 외에 <b>현금영수증</b>도 함께 보여드릴지.</li>
+  </ul>
+</div>
+
+</div>
+
+<script>
+/* ── 가짜 데이터 ─────────────────────────────────────────────── */
+var COND=[
+  ['상품명','우레온 모이스처 바디 리셋 미스트 150ml 등드름 가라앉히는 여름 바디미스트',{prod:1}],
+  ['총건수','100<span class="u">건</span>'],
+  ['일건수','20<span class="u">건/일</span>'],
+  ['구매채널','네이버'],
+  ['유입방식','가이드유입 · 우레온 바디미스트'],
+  ['다계정','<span class="yn y">허용</span> <span class="u">하루 1건</span>'],
+  ['현금영수증','<span class="yn n">해당 없음</span>'],
+  ['리뷰비','1,500<span class="u">원</span>'],
+  ['입금명','어니스트캄'],
+  ['리뷰타입','<span class="yn b">포토</span>']
+];
+var ROWS=[
+  {seq:12,name:'김O연',phone:'****3401',date:'8/19',pay:'17,790원',sub:1,paid:1,visit:1,cap:2,rev:1,rc:0},
+  {seq:13,name:'박O수',phone:'****8812',date:'8/19',pay:'17,790원',sub:1,paid:0,visit:2,cap:1,rev:2,rc:0},
+  {seq:14,name:'이O진',phone:'****2240',date:'8/19',pay:'17,790원',sub:1,paid:0,visit:1,cap:1,rev:0,rc:0},
+  {seq:15,name:'최O아',phone:'****9075',date:'8/19',pay:'17,790원',sub:0,paid:0,visit:1,cap:1,rev:0,rc:0},
+  {seq:16,name:'정O호',phone:'****6613',date:'8/20',pay:'—',sub:0,paid:0,visit:3,cap:0,rev:0,rc:0}
+];
+var SEL={A:12,B:12};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+/* ── ① 작업 조건 카드 ── */
+function condHtml(){
+  var prod=COND[0], rest=COND.slice(1);
+  var rows=rest.map(function(x){ return '<dt>'+esc(x[0])+'</dt><dd>'+x[1]+'</dd>'; }).join('');
+  return '<div class="tp3t">작업 조건</div>'+
+    '<div class="cndprod" title="'+esc(prod[1])+'">'+esc(prod[1])+'</div>'+
+    '<dl class="cndl">'+rows+'</dl>'+
+    '<div class="wochip2"><span class="ic">📋</span><span class="nm">발주 연결됨</span>'+
+      '<span class="st">reviewing · 모집 100</span>'+
+      '<button class="k-b more" title="명단 준비 · 발주 변경 · 연결 해제 · 발주 원문 보기">⋯</button></div>';
+}
+
+/* ── ② 진행 현황 + 정산 ── */
+function g(lb,n,den,pc,cls){
+  return '<div class="tp3g"><span class="lb">'+lb+'</span><span class="nm">'+n+'<small>/'+den+'</small></span>'+
+    '<span class="track"><i class="'+(cls||'')+'" style="width:'+pc+'%"></i></span><span class="pc">'+pc+'%</span></div>';
+}
+function progHtml(){
+  return '<div class="tp3t">진행 현황</div>'+
+    g('참여자',100,100,100)+g('제출완료',52,100,52,'s')+g('입금완료',19,100,19)+
+    '<div class="tp3money"><span>결제금액</span><b>1,779,000원</b></div>'+
+    '<div class="setlin"><div class="hd">정산<span class="more">상세 ▾</span></div>'+
+      '<div class="tp3setl"><span class="schip warn">미매칭</span>'+
+      '<span style="color:var(--faint);font-weight:500;font-size:11.5px">계약 매칭 필요</span></div>'+
+      '<div class="tp3steps"><i></i><i></i><i></i><i></i></div>'+
+      '<div class="tp3steplb"><span>마감자료</span><span>견적서</span><span>계산서</span><span>입금</span></div>'+
+    '</div>';
+}
+
+/* ── ③ 미리보기 ── */
+function thumbs(n,label){
+  var out=''; for(var i=0;i<n;i++){ out+='<div class="rvth" title="크게 보기"><span class="ph">'+label+'<br>'+(i+1)+'</span></div>'; }
+  return out;
+}
+function rvHtml(which,big){
+  var rid=SEL[which], r=null;
+  for(var i=0;i<ROWS.length;i++){ if(ROWS[i].seq===rid) r=ROWS[i]; }
+  var hd='<div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓</span></div>';
+  if(!r) return hd+'<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 누르면 그 줄의 제출물이 여기 표시됩니다.</span></div>';
+  var who='<div class="rvwho">'+esc(r.name)+'<span>#'+r.seq+' · '+esc(r.phone)+'</span></div>';
+  var body='';
+  if(!r.cap && !r.rev){
+    body='<div class="rvnone warn"><b>'+(r.sub?'이미지 미등록':'미제출')+'</b><span>'+
+      (r.sub?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 구매 캡처·리뷰가 제출되지 않았습니다.')+'</span></div>';
+    return hd+who+body;
+  }
+  if(r.cap){
+    body+='<div class="rvgrp"><div class="gt">🛒 구매 캡처<span class="cnt">'+r.cap+'</span></div>'+
+      '<div class="rvstrip">'+thumbs(r.cap,'구매')+'</div></div>';
+  }
+  if(r.rev){
+    body+='<div class="rvgrp"><div class="gt">📷 리뷰 이미지<span class="cnt">'+r.rev+'</span></div>'+
+      '<div class="rvstrip">'+thumbs(r.rev,'리뷰')+'</div></div>';
+  } else {
+    body+='<div class="rvgrp"><div class="gt">📷 리뷰 이미지<span class="cnt">0</span></div>'+
+      '<div class="rvnone" style="flex:none;padding:11px">'+(r.sub?'<b>이미지 미등록</b>':'<b>리뷰 미제출</b>')+'</div></div>';
+  }
+  if(big){
+    var first=r.cap?'구매 캡처 1':'리뷰 이미지 1';
+    body+='<div class="rvcol"><div class="rvbig">선택한 캡처가 여기에 크게 보입니다<br>('+first+')</div></div>';
+  }
+  return hd+who+body;
+}
+
+/* ── 목업 표 ── */
+function gridHtml(which){
+  var head='<tr><th>#</th><th>참여</th><th>이름</th><th>연락처</th><th>구매일</th><th>결제금액</th><th>리뷰제출</th><th>입금</th></tr>';
+  var body=ROWS.map(function(r){
+    return '<tr data-w="'+which+'" data-seq="'+r.seq+'" class="'+(SEL[which]===r.seq?'on':'')+'">'+
+      '<td>'+r.seq+'</td><td><span class="vb">'+r.visit+'회</span></td><td>'+esc(r.name)+'</td><td>'+esc(r.phone)+'</td>'+
+      '<td>'+esc(r.date)+'</td><td>'+esc(r.pay)+'</td>'+
+      '<td>'+(r.sub?'<span class="ok">✓</span>':'<span class="no">—</span>')+'</td>'+
+      '<td>'+(r.paid?'<span class="ok">✓</span>':'<span class="no">—</span>')+'</td></tr>';
+  }).join('');
+  return '<table class="mg"><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+}
+
+function render(){
+  document.getElementById('condA').innerHTML=condHtml();
+  document.getElementById('condB').innerHTML=condHtml();
+  document.getElementById('progA').innerHTML=progHtml();
+  document.getElementById('progB').innerHTML=progHtml();
+  document.getElementById('rvA').innerHTML=rvHtml('A',false);
+  document.getElementById('rvB').innerHTML=rvHtml('B',true);
+  document.getElementById('gridA').innerHTML=gridHtml('A');
+  document.getElementById('gridB').innerHTML=gridHtml('B');
+}
+document.addEventListener('click',function(e){
+  var tr=e.target && e.target.closest ? e.target.closest('tr[data-seq]') : null;
+  if(!tr) return;
+  SEL[tr.getAttribute('data-w')]=+tr.getAttribute('data-seq');
+  render();
+});
+/* 안 전환 */
+(function(){
+  /* ★ 끝을 반드시 고정한다 — 앵커가 없으면 `?v=all` 의 첫 글자 a 가 잡혀 A안 단독 보기로 떨어진다(실측). */
+  var v=(location.search.match(/[?&]v=([ABab])(?=&|$)/)||[])[1];
+  v=v?v.toUpperCase():'all';
+  if(v==='A'){ document.getElementById('secB').classList.add('hide'); }
+  if(v==='B'){ document.getElementById('secA').classList.add('hide'); }
+  var id={A:'tab-A',B:'tab-B'}[v]||'tab-all';
+  var el=document.getElementById(id); if(el) el.classList.add('on');
+})();
+render();
+</script>
+</body>
+</html>
