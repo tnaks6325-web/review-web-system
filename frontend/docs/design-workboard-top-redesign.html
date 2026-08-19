@@ -180,19 +180,22 @@
   .lay-b .b-grid{grid-area:grid;min-width:0}
   @media(max-width:1000px){.lay-b{grid-template-columns:1fr;grid-template-areas:"cond" "prog" "rail" "grid"}.lay-b .b-rail{position:static;max-height:none;height:380px}}
 
-  /* ══ C안 ══ 높이는 B안(레일형 · 두 카드 같은 높이) · 폭은 A안 기준으로 재분배
+  /* ══ C안 ══ 폭은 A안 기준으로 재분배 · 높이는 세 칸 모두 같게(상단 한 줄로 끝)
      A안 실측 폭(1380px 기준) = 작업조건 439 / 진행현황 483 / 미리보기 439
        → C안 = 439 (그대로) · 483×0.5 ≈ 242 · 439×1.5 ≈ 659  (합 1340 + gap 18 = 1358)
-     ★ 고정 px 로 두면 좁은 화면에서 깨진다 — 같은 비율의 fr + minmax 로 둔다. */
+     ★ 고정 px 로 두면 좁은 화면에서 깨진다 — 같은 비율의 fr + minmax 로 둔다.
+     ★★ 미리보기를 표 옆까지 내려오는 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다
+        (열이 많은 작업에서 가로 스크롤이 늘어난다) → C안은 **상단 한 줄에서 끝내고**
+        미리보기 높이를 왼쪽 두 카드와 같은 330px 로 맞춘다. 표는 전폭을 그대로 쓴다. */
   .lay-c{display:grid;grid-template-columns:minmax(230px,439fr) minmax(170px,242fr) minmax(330px,659fr);
-         grid-template-areas:"cond prog rail" "grid grid rail";gap:9px;max-width:1380px;align-items:stretch}
-  .lay-c .c-cond{grid-area:cond} .lay-c .c-prog{grid-area:prog}
-  .lay-c .c-rail{grid-area:rail;position:sticky;top:10px;align-self:stretch;min-height:0;max-height:640px}
-  .lay-c .c-grid{grid-area:grid;min-width:0;align-self:start}
+         gap:9px;max-width:1380px;align-items:stretch}
   .lay-c .tp3col.sq{aspect-ratio:auto}
-  .lay-c .tp3col{min-height:330px}
-  @media(max-width:1000px){.lay-c{grid-template-columns:1fr;grid-template-areas:"cond" "prog" "rail" "grid"}
-    .lay-c .c-rail{position:static;max-height:none;height:420px}}
+  /* ★ 높이를 330px 로 못박지 않는다 — 작업 조건 카드는 상품명 2줄 + 9행 + 발주 줄이라
+     내용이 330 을 넘으면 발주 줄이 리뷰타입 줄 위로 겹친다(실측). min-height 만 두고
+     stretch 로 세 칸을 **가장 높은 칸에 맞춘다** = 미리보기가 왼쪽 두 칸 높이를 따라간다. */
+  .lay-c .tp3col,.lay-c .rvpane{min-height:330px}
+  @media(max-width:1000px){.lay-c{grid-template-columns:1fr}
+    .lay-c .tp3col,.lay-c .rvpane{height:auto}.lay-c .rvpane{min-height:360px}}
 
   /* 진행 현황이 절반 폭이 되면 한 줄(라벨·숫자·막대·%) 배치가 성립하지 않는다
      — 내부 폭 ≈216px 에 라벨54+숫자84+%34 만 190px 라 막대가 26px 로 뭉갠다.
@@ -233,7 +236,7 @@
   <a class="vbtn" href="?v=all" id="tab-all">두 안 비교</a>
   <a class="vbtn" href="?v=A" id="tab-A">A안 — 상단 3분할</a>
   <a class="vbtn" href="?v=B" id="tab-B">B안 — 오른쪽 세로 레일</a>
-  <a class="vbtn" href="?v=C" id="tab-C">C안 — B높이 + 폭 재분배</a>
+  <a class="vbtn" href="?v=C" id="tab-C">C안 — 상단 3분할 + 폭 재분배</a>
   <span class="small" style="margin-left:6px">주소에 <code>?v=A</code> / <code>?v=B</code> / <code>?v=C</code> 로 단독 보기</span>
 </div>
 
@@ -333,8 +336,8 @@
 
 <!-- ══════════════════════════════ C 안 ══════════════════════════════ -->
 <section id="secC">
-<h2>C안 — 높이는 B안, 폭은 재분배(조건 그대로 · 진행현황 절반 · 미리보기 1.5배)</h2>
-<p class="small">A안 실측 폭(1380px 기준) <b>439 / 483 / 439</b> → C안 <b>439 / 242 / 659</b>. 높이·스크롤 동작은 B안(세로 레일 · sticky)과 같습니다.</p>
+<h2>C안 — 상단 한 줄로 끝(조건 그대로 · 진행현황 절반 · 미리보기 1.5배)</h2>
+<p class="small">A안 실측 폭(1380px 기준) <b>439 / 483 / 439</b> → C안 <b>439 / 242 / 659</b>. 세 칸 모두 <b>같은 높이</b>(왼쪽 카드 내용이 정함 · 최소 330px, 실측 385px)라 <b>표는 전폭을 그대로 씁니다</b>.</p>
 
 <div class="mock">
   <div class="mock-cap">C안 · 관리자 화면 (1380px 기준)</div>
@@ -354,14 +357,14 @@
     </div>
 
     <div class="lay-c">
-      <div class="tp3col sq c-cond" id="condC"></div>
-      <div class="tp3col c-prog" id="progC"></div>
-      <aside class="rvpane c-rail" id="rvC"></aside>
-      <div class="c-grid">
-        <div class="gridbar"><span>◔ 8/19 (수) 참여현황 12/20명</span><span class="sch">🔍 표 검색</span><span>필터</span><span>열 ▾</span></div>
-        <div id="gridC"></div>
-      </div>
+      <div class="tp3col sq" id="condC"></div>
+      <div class="tp3col" id="progC"></div>
+      <aside class="rvpane" id="rvC"></aside>
     </div>
+
+    <!-- ★ 표는 상단 밖 — 전폭을 그대로 쓴다(미리보기가 폭을 가져가지 않는다) -->
+    <div class="gridbar"><span>◔ 8/19 (수) 참여현황 12/20명</span><span class="sch">🔍 표 검색</span><span>필터</span><span>열 ▾</span></div>
+    <div id="gridC"></div>
 
   </div>
 </div>
@@ -372,7 +375,8 @@
     <li><b>미리보기가 좌우 두 칸</b> — 왼쪽 🛒 구매 캡처 / 오른쪽 📷 리뷰 이미지. 두 묶음이 <b>같은 높이에서 나란히</b> 보여 "산 것과 쓴 것"을 눈으로 바로 대조합니다(위아래로 쌓이면 스크롤을 오가야 합니다).</li>
     <li><b>진행 현황이 절반 폭</b> — 한 줄 배치(라벨·숫자·막대·%)가 성립하지 않습니다. 내부 폭 약 216px에 라벨 54 + 숫자 84 + % 34 = 190px라 <b>막대가 26px로 뭉갭니다</b>. 그래서 C안만 <b>2줄 배치</b>(윗줄 라벨·숫자·%, 아랫줄 전폭 막대)로 바꿨습니다 — 숫자 크기는 15px로 한 단계만 줄였습니다.</li>
     <li><b>정산 구역은 그대로</b> 진행 현황 카드 하단에 남습니다. 폭이 좁아 계약 칩과 안내 문구가 두 줄로 접힐 수 있습니다(4단계 막대는 전폭 유지).</li>
-    <li><b>표 폭은 B안과 같습니다</b>(레일 659px). 열이 많은 작업은 가로 스크롤이 B안보다 더 늘어납니다 → 레일 <b>[◀ 접기]</b>가 C안에서는 더 자주 쓰이게 됩니다.</li>
+    <li><b>표 가로 폭은 침해되지 않습니다</b> — 미리보기가 상단 한 줄에서 끝나고 표 옆으로 내려오지 않습니다. B안과 달리 <b>[◀ 접기]</b>가 필요 없습니다.</li>
+    <li><b>대가</b> — 미리보기 높이가 왼쪽 카드에 묶여(≈385px) 캡처를 크게 볼 수 없고(썸네일 클릭 → 크게 보기 팝업으로 봅니다), <b>표를 아래로 스크롤하면 미리보기가 화면 밖으로 사라집니다</b>(A안과 같은 성질). 두 칸이 각각 독립 스크롤이라 장수가 많아도 칸 안에서 넘깁니다.</li>
   </ul>
 </div>
 </section>
@@ -430,7 +434,7 @@
   <ul>
     <li><b>㉮ A안 / B안 / C안</b> — 미리보기를 상단 한 칸(A) · 표 옆 세로 레일(B) · 레일을 1.5배로 넓혀 <b>구매캡처↔리뷰를 좌우로 나란히</b>(C) 중 어느 쪽으로 둘지.
       <span class="small">A 439/483/439 · B 506/556/300 · C 439/242/659 (1380px 기준 폭).
-      C안은 대조가 가장 편한 대신 <b>표 폭이 가장 좁아집니다</b>.</span></li>
+      표 전폭을 지키는 것은 A·C, 미리보기가 스크롤을 따라오는 것은 B뿐입니다.</span></li>
     <li><b>㉯ 발주 원문</b> — 「작업세부 펼치기」를 없애는 대신 [⋯] 팝업으로 두면 되는지, 아니면 <b>아예 안 봐도 되는지</b>.</li>
     <li><b>㉰ 미리보기 묶음</b> — 구매캡처·리뷰 이미지 외에 <b>현금영수증</b>도 함께 보여드릴지.</li>
   </ul>
