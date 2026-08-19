@@ -303,6 +303,33 @@ async function createSlotsFromSheetRows({ sheetId, tabName, tabGid = null, campa
 }
 
 /**
+ * 빈 자리가 없을 때 작업표에 **줄을 하나 이어붙인다**(무시트 전용).
+ *
+ * ★★ 왜 필요한가: 무시트 공고는 준비된 빈 슬롯이 동나면 `no_open_slot` 으로 주문이 미반영이
+ *   되어 "결제는 했는데 작업보드 어디에도 없는" 주문이 남고, 복구 잡이 같은 실패를 반복했다.
+ *   작업표가 진실원본인 지금은 **확정된 주문에는 줄이 있어야 한다** — 그래서 이어붙인다.
+ * ★★ `seq` 는 **`MAX(seq)+1`(삭제된 줄도 세어 재사용하지 않는다)** — 번호를 재사용하면
+ *   `(sheet_id, tab_name, seq)` 키가 충돌해 표가 두 겹이 된다.
+ * ★ `client` 를 받는다 — 호출부(주문 기록)의 트랜잭션·탭 advisory 락 안에서 실행되어야
+ *   동시 주문 두 건이 같은 번호를 집지 않는다.
+ * ★ `source='worktable'` — 'manual' 로 넣으면 투영의 상태 CASE 가 인정하지 않아
+ *   리뷰제출·입금 표시가 영영 안 켜진다.
+ */
+async function appendSlot(client, { sheetId, tabName, tabGid = null, campaignName = null, rowJson = {}, by = 'sheetless-append' } = {}) {
+  if (!client || !sheetId || !tabName) throw new Error('appendSlot: client, sheetId, tabName 필수');
+  const { rows } = await client.query(
+    `INSERT INTO campaign_participants
+       (sheet_id, tab_gid, tab_name, campaign_name, seq, row_json, source, updated_by, updated_at)
+     SELECT $1, $2, $3, $4, COALESCE(MAX(seq), 0) + 1, $5::jsonb, 'worktable', $6, NOW()
+       FROM campaign_participants WHERE sheet_id = $1 AND tab_name = $3
+     ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING
+     RETURNING id, seq, row_json`,
+    [sheetId, tabGid, tabName, campaignName,
+     JSON.stringify(rowJson && typeof rowJson === 'object' ? rowJson : {}), String(by).slice(0, 100)]);
+  return rows[0] || null;
+}
+
+/**
  * 가져오기 되돌리기 전용 — 그 탭의 표 줄을 **하드 삭제**한다.
  *
  * ★★ 왜 하드인가: "시트에서 가져오기"의 되돌리기는 **가져오기 전 상태로 복귀**하는 것이고,
@@ -543,7 +570,7 @@ async function listActiveTabs({ limit = 500 } = {}) {
 }
 
 module.exports = {
-  createWorktableSlots, createSlotsFromSheetRows, deleteWorktableRows, retireRows, retireInactiveImportRows,
+  createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows, retireInactiveImportRows,
   purgeImportedRows,
   importTabFromIndex,
   syncImportedTabs,

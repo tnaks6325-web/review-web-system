@@ -9,7 +9,14 @@ assert.ok(/order_submission_id = \$3::uuid/.test(source), 'idempotent retry must
 assert.ok(/FOR UPDATE SKIP LOCKED/.test(source), 'concurrent submissions must claim different open slots');
 assert.ok(/order_submission_id IS NULL/.test(source), 'only an unlinked slot may be claimed');
 assert.ok(/order_submission_id = \$9::uuid/.test(source), 'the claimed worktable row must link to the order ledger');
-assert.ok(/requestedSeq == null[\s\S]*?no_open_slot/.test(source), 'new sheetless orders must not append beyond prepared roster slots');
+/* ★★ 2026-08-19 사용자 확정으로 규칙이 바뀌었다 — **확정된 주문에는 줄이 있어야 한다**.
+   빈 자리가 없다고 미반영으로 두면 결제한 리뷰어가 어느 표에도 없고 복구가 같은 실패를 반복한다.
+   대신 ① 무시트로 등록된 탭에서만 ② 쓰기 소유자(participants.service) 를 통해 ③ 탭 advisory 락
+   안에서만 이어붙인다. 이 세 조건을 지운 채 append 를 열면 시트 기반 표 오염·번호 충돌이 난다. */
+assert.ok(/appendSlot\(client/.test(source), 'a confirmed order with no open slot must extend the worktable, not be dropped');
+assert.ok(/pg_advisory_xact_lock/.test(source), 'appending must be serialized per tab so two orders never take the same seq');
+assert.ok(/COALESCE\(sheetless, FALSE\) AS sheetless[\s\S]{0,400}?no_open_slot/.test(source), 'append must be fail-closed to sheetless-registered tabs');
+assert.ok(!/INSERT INTO campaign_participants[\s\S]{0,200}?COALESCE\(MAX\(seq\)/.test(source), 'the append INSERT belongs to participants.service (single writer), not here');
 assert.ok(!/getSpreadsheetMeta\(/.test(source) && !/writeSheet\(/.test(source), 'worktable write must not call Google Sheets');
 assert.ok(/SELECT row_json FROM campaign_participants/.test(source), 'legacy worktables without RAW metadata must recover headers from their prepared DB slots');
 assert.ok(/recoverUnwrittenSheetlessOrders/.test(source), 'existing ledger-only orders need a DB worktable recovery path');
