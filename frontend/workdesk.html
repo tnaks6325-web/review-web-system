@@ -5872,7 +5872,7 @@ function buildGrid(wd){
       if(c.kind==='name'){
         // 참여자 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 배지는 유지, 제거(×, 명단 큐레이션=행 숨김)는 편집자만.
         const isAutoTestOrder = r.name==='테스트자동삭제' && r.phone8==='00000000' && String(rj['주문번호']||'')==='TEST-AUTO-DELETE-20260815';
-        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canAssignUnslotted?`<button class="rdel" type="button" title="작업오더 목표 인원 안의 빈 번호 슬롯으로 이동" onclick="assignUnslottedOrder('${esc(r.id)}')">번호 배정</button>`:''}${canDeleteOrder?`<button class="rdel" type="button" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${esc(r.id)}')">삭제</button>`:''}${isAutoTestOrder?`<button class="rdel" type="button" title="자동 테스트 기록 전체 제거" onclick="cleanupAutoTestRecord('${esc(r.id)}')">테스트 정리</button>`:''}</td>`; }
+        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canAssignUnslotted?`<button class="rdel" type="button" title="작업오더 목표 인원 안의 빈 번호 슬롯으로 이동" onclick="assignUnslottedOrder('${esc(r.id)}')">번호 배정</button>`:''}${isAutoTestOrder?`<button class="rdel" type="button" title="자동 테스트 기록 전체 제거" onclick="cleanupAutoTestRecord('${esc(r.id)}')">테스트 정리</button>`:''}</td>`; }
       else if(c.kind==='phone'){ const _ph=_fmtPhone(r.phone8);
         // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
         tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}${bgStyle('idphone')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idphone">${esc(_ph||'')}</td>`; }
