@@ -1,0 +1,64 @@
+name: Oneoff - 표주문번호 없는 이유 (읽기 전용)
+on:
+  push:
+    branches: [ 'oneoff/why' ]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Why
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -e
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \pset pager off
+
+          \echo '=== 1. 두 작업의 헤더 ==='
+          SELECT tab_name, COALESCE(detected_headers, headers) AS 헤더
+            FROM raw_sheet_tabs
+           WHERE tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건');
+
+          \echo ''
+          \echo '=== 2. 작업 전체 주문번호 칸 채움 비율 ==='
+          SELECT cp.tab_name AS 작업, COUNT(*) AS 살아있는줄,
+                 COUNT(*) FILTER (WHERE length(regexp_replace(COALESCE((
+                   SELECT string_agg(t.value,'' ORDER BY t.key)
+                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
+                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g')) >= 6) AS 번호있음,
+                 COUNT(*) FILTER (WHERE length(regexp_replace(COALESCE((
+                   SELECT string_agg(t.value,'' ORDER BY t.key)
+                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
+                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g')) < 6) AS 번호없음,
+                 COUNT(*) FILTER (WHERE cp.order_submission_id IS NOT NULL) AS 링크있음,
+                 COUNT(*) FILTER (WHERE cp.source='import') AS 시트이관,
+                 MIN(cp.first_seen_at)::date AS 최초생성, MAX(cp.first_seen_at)::date AS 최종생성
+            FROM campaign_participants cp
+           WHERE cp.deleted_at IS NULL
+             AND cp.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+           GROUP BY 1;
+
+          \echo ''
+          \echo '=== 3. 번호없음 줄 표본 2개 ==='
+          SELECT cp.tab_name, cp.seq, jsonb_pretty(cp.row_json)
+            FROM campaign_participants cp
+           WHERE cp.deleted_at IS NULL
+             AND cp.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+             AND length(regexp_replace(COALESCE((
+                   SELECT string_agg(t.value,'' ORDER BY t.key)
+                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
+                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g')) < 6
+             AND cp.order_submission_id IS NOT NULL
+           ORDER BY cp.tab_name, cp.seq LIMIT 2;
+
+          \echo ''
+          \echo '=== 4. 원장 주문 건수 ==='
+          SELECT os.tab_name AS 작업, COUNT(*) AS 원장주문수,
+                 COUNT(*) FILTER (WHERE COALESCE(os.order_num,'') <> '') AS 주문번호있음,
+                 MIN(os.submitted_at)::date AS 최초제출, MAX(os.submitted_at)::date AS 최종제출
+            FROM order_submissions os
+           WHERE os.deleted_at IS NULL
+             AND os.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+           GROUP BY 1;
+          SQL
