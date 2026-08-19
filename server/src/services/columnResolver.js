@@ -142,7 +142,12 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
 
   // ── 제출열 (P2b: DB매핑 'review_submit' 우선 → 3단계 키워드 폴백) ──
   const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];
-  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주'];
+  // ★★ '포스팅' 제외(2026-08-19 블로그 E2E 실측): 블로그체험단 작업표의 '포스팅제출일' 헤더가
+  //   완료신호 '제출'을 포함해 2단계에서 **리뷰제출 열로 오탐**됐다 — 제출 표시('제출')가 날짜 칸에
+  //   들어갔다가 포스팅제출일 스탬프에 덮이고, 진짜 '리뷰' 칸은 비어 is_submitted 가 장부 재생성마다
+  //   FALSE 로 무너졌다. 포스팅 계열 칸(포스팅결과URL·포스팅제출일)은 결과물·날짜 칸이지 제출 표시
+  //   칸이 아니므로 이름열과 같은 급으로 제외한다(제외 후 3단계가 '리뷰' 단독 열을 정상 채택).
+  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주', '포스팅'];
   // ★★ 8/3 실측 사고(박은비 탭): SUBMIT_KEYWORDS에 완료신호 단어(제출/완료/submit)와 함께
   //   넓은 catch-all인 '리뷰' 단독도 섞여 있다. 1·2단계(우선탐지)에서 '리뷰'를 그대로 매칭에
   //   쓰면 그 자체가 SUBMIT_PRIORITY_PREFIXES('리뷰')와 항상 동시에 참이 되어 AND 조건이
