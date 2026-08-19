@@ -12343,9 +12343,18 @@ function _ovmRenderFoot(){
     ? `<button class="ovm-unm imp" onclick="openSheetImport('')"
          title="업체관리·작업보드 어디에도 없는 시트를 주소로 가져옵니다">＋ 시트에서 가져오기</button>`
     : '';
-  el.innerHTML = (free.length
-    ? `<button class="ovm-unm" onclick="_ovmOpenDrawer('unm')" title="업체를 지정하면 계약·정산이 붙습니다">⚠ 업체 미지정 시트<span class="n">${free.length}</span></button>`
-    : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 시트가 지정됨<span class="n">${total}</span></button>`) + imp;
+  /* ★ 세는 단위 = **작업(탭)** — 시트 단위로 세면 "시트는 지정됐는데 그 안의 탭만 미지정"인 건이
+     통째로 안 보인다(작업바 '미지정' 그룹과 같은 판정을 쓴다). 재료(mapTabs)를 못 받았으면
+     0 으로 위장하지 않고 종전 시트 기준 표기로 접는다. */
+  const unTabs=_ovmUnassignedTabs().length, tabsKnown=(STATE.mapTabs||[]).length>0;
+  const main = tabsKnown
+    ? (unTabs
+        ? `<button class="ovm-unm" onclick="_ovmOpenDrawer('unm')" title="업체를 지정하면 계약·정산이 붙습니다">⚠ 업체 미지정 작업<span class="n">${unTabs}</span></button>`
+        : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 작업이 지정됨<span class="n">${total}</span></button>`)
+    : (free.length
+        ? `<button class="ovm-unm" onclick="_ovmOpenDrawer('unm')" title="업체를 지정하면 계약·정산이 붙습니다">⚠ 업체 미지정 시트<span class="n">${free.length}</span></button>`
+        : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 시트가 지정됨<span class="n">${total}</span></button>`);
+  el.innerHTML = main + imp;
 }
 
 /* ── 전체 개요(업체 미선택) — 빈 폼 대신 "어느 업체를 봐야 하는가"를 먼저 보여준다 ──
@@ -12363,6 +12372,7 @@ function _ovmRenderOverview(opt){
   const owned=STATE.ownedSheetIds||new Set();
   const total=Object.keys(STATE.sheetMap||{}).length;
   const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid)).length;
+  const unTabs=_ovmUnassignedTabs().length;   // 미지정 **작업(탭)** 수 — 시트 단위로는 안 보이는 건까지 센다
   const works=advs.reduce((n,a)=>n+(+a.works||0),0);
   const bad=!meta||!meta.ok;
   // ★★ 열마다 재료가 달라 실패도 따로 온다 — 한 덩어리로 묶으면 "계약 링크만 죽었는데 미매칭 0"처럼
@@ -12403,9 +12413,10 @@ function _ovmRenderOverview(opt){
       <span class="s">캠페인 시트 ${total}개 중 ${total-free}개가 업체에 지정됨</span></div>
     <p class="ovm-lead">업체를 고르면 그 업체의 작업·정산·접속설정으로 들어갑니다. <b>마감자료 검수</b>가 있는 업체부터 보세요.
       ${(bad||!candKnown||!matchKnown||!linkKnown)?`<b style="color:var(--warn)"> · ${esc(bad?'집계를 불러오지 못해 숫자를 ?로 표시합니다':'일부 집계를 불러오지 못해 그 칸만 ?로 표시합니다')}</b>`:''}</p>
-    ${free?`<div class="ovm-cta"><span class="ct"><b>⚠ 업체가 지정되지 않은 시트 ${free}개</b>
-        <span>지정 전에는 계약·정산이 붙지 않습니다.</span></span>
-      <button class="btn pri" onclick="showAddAdvertiser()">＋ 거래처 등록 · 매칭</button></div>`:''}
+    ${(unTabs||free)?`<div class="ovm-cta"><span class="ct"><b>⚠ 업체가 지정되지 않은 ${unTabs?('작업 '+unTabs+'개'):('시트 '+free+'개')}</b>
+        <span>지정 전에는 계약·정산이 붙지 않습니다. 이미 등록된 업체에 바로 지정할 수 있습니다.</span></span>
+      <button class="btn pri" onclick="_ovmOpenDrawer('unm')">미지정 작업 보기 · 업체 지정</button>
+      <button class="btn" onclick="showAddAdvertiser()">＋ 거래처 등록</button></div>`:''}
     <label class="ovm-bsearch"><span>검색</span><input id="ovmbQ" placeholder="업체명 · 담당 AE 검색" autocomplete="off" oninput="_ovmbFilterRows(this.value)"></label>
     <div class="ovm-ovt h"><span>업체</span><span>담당 AE</span><span>작업</span><span>계약 미매칭</span><span>마감자료 검수</span><span>접속링크</span><span>계정</span></div>
     <div id="ovmbRows">${rows}</div>
@@ -12438,7 +12449,7 @@ function _ovmCloseDrawer(silent){
   if(d){ d.classList.remove('on'); d.setAttribute('aria-hidden','true'); d.innerHTML=''; }
   if(sc) sc.classList.remove('on');
 }
-const _OVM_DTITLE={link:'접속 링크',acct:'광고주 계정',own:'소유 캠페인',add:'거래처 등록',unm:'업체 미지정 시트'};
+const _OVM_DTITLE={link:'접속 링크',acct:'광고주 계정',own:'소유 캠페인',add:'거래처 등록',unm:'업체 미지정 작업'};
 function _ovmDrawerHtml(tab,a){
   const isAdmin=_isInternalRole();   // 접속 링크·광고주 계정 = 내부 담당자(AE 포함, 서버 internalMiddleware 와 1:1)
   let body='';
@@ -12486,19 +12497,60 @@ function _ovmAddOwnHtml(){
         <button class="btn pri assignbtn" onclick="assignOwn()">＋ 소유 지정</button>
       </div></div>`;
 }
-// 업체 미지정 시트 목록 — 클릭하면 그 시트로 거래처 등록 폼을 연다(반복 작업을 목록에서 시작).
+/* ── 업체 미지정 작업 — **탭(작업) 단위** 목록 + 기존 업체로 바로 지정 ──────────────────────
+   ★★ 종전에는 "미지정 **시트**"만 보여 주고 행동은 [거래처 등록] 하나뿐이었다. 그래서
+      ① 이미 등록된 업체(예: 주식회사 유일기획)에 붙일 창구가 **없었고**(등록 폼은 이름이 겹치면
+         '이미 존재하는 거래처명입니다'로 막힌다) ② 시트의 **일부 탭만** 미지정인 경우는 그 시트가
+         owned 로 잡혀 목록에 아예 안 떴다.
+   ★ 판정은 작업바 '미지정' 그룹과 **같은 기준**(scopedActiveTabs 가 붙여 준 `advertiserId` 없음) —
+     재료가 이미 받아 둔 `STATE.mapTabs` 하나뿐이라 **서버 변경 0**(신규 엔드포인트 0).
+   ★ onclick 은 **인덱스만** — 탭명·시트명은 시트발 외부 문자열이다(문자열 보간 금지 규율). */
+let _ovmUnmList=[], _ovmUnmSheets=[];
+function _ovmUnassignedTabs(){ return (STATE.mapTabs||[]).filter(t=>!t.advertiserId); }
 function _ovmUnmatchedHtml(){
   const owned=STATE.ownedSheetIds||new Set();
-  const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid));
-  if(!free.length) return `<div class="sect"><div class="st">업체 미지정 시트</div>
-    <div class="empty" style="padding:16px">모든 시트가 업체에 지정됐습니다.</div></div>`;
-  const rows=free.map(sid=>{
-    const tabs=((STATE.sheetMap[sid]||{}).tabs||[]).length;
-    return `<div class="own"><span class="ic">▤</span><div class="info"><b>${esc(sheetTitle(sid))}</b><span>탭 ${tabs}개</span></div>
-      <button class="btn xs pri" onclick="_ovmAddForSheet('${_advQ(sid)}')">거래처 등록</button></div>`;
+  const tabs=_ovmUnassignedTabs();
+  _ovmUnmList=tabs; _ovmUnmSheets=[];
+  // 매핑용 탭 목록을 못 받은 경우 — 0건으로 위장하지 않고 사유를 말한다(무신호 금지).
+  if(!(STATE.mapTabs||[]).length) return `<div class="sect"><div class="st">업체 미지정 작업</div>
+    <div class="empty" style="padding:16px">작업 목록을 불러오지 못했습니다 — 화면을 새로고침한 뒤 다시 확인하세요.</div></div>`;
+  if(!tabs.length) return `<div class="sect"><div class="st">업체 미지정 작업</div>
+    <div class="empty" style="padding:16px">모든 작업이 업체에 지정됐습니다.</div></div>`;
+  const groups=new Map();
+  tabs.forEach((t,i)=>{ if(!groups.has(t.sheetId)) groups.set(t.sheetId,[]); groups.get(t.sheetId).push(i); });
+  const secs=[...groups.entries()].map(([sid,idxs])=>{
+    const si=_ovmUnmSheets.push(sid)-1;
+    const free=!owned.has(sid);   // 이 시트에 소유가 하나도 없다 = 시트 전체 지정·거래처 등록 대상
+    const rows=idxs.map(i=>{
+      const t=_ovmUnmList[i];
+      const gid=String(t.tabGid==null?'':t.tabGid).trim();
+      return `<div class="own"><span class="ic">▤</span>
+        <div class="info"><b>${esc(t.tabName)}</b><span>${esc(sheetTitle(sid))}</span></div>
+        ${gid?`<button class="btn xs pri" onclick="ownAssign(${i})">업체 지정</button>`
+             :`<button class="btn xs" disabled title="탭 gid 가 없어 개별 지정이 불가합니다 — 시트 전체 지정을 사용하세요">개별 불가</button>`}</div>`;
+    }).join('');
+    return `<div class="st sthead" style="margin-top:12px"><span>${esc(sheetTitle(sid))}</span>
+        <span class="sthint" style="margin-left:0">미지정 작업 ${idxs.length}개</span><span style="flex:1"></span>
+        ${free?`<button class="btn xs" onclick="ownAssignSheet(${si})">시트 전체 지정</button>
+                <button class="btn xs" onclick="_ovmAddForSheetIdx(${si})">거래처 등록</button>`:''}</div>${rows}`;
   }).join('');
-  return `<div class="sect"><div class="st">업체 미지정 시트 ${free.length}
-      <span class="sthint">지정 전에는 계약·정산이 붙지 않습니다</span></div>${rows}</div>`;
+  return `<div class="sect"><div class="st">업체 미지정 작업 ${tabs.length}
+      <span class="sthint">지정 전에는 계약·정산이 붙지 않습니다</span></div>
+    <div class="empty" style="padding:10px 12px;text-align:left">[업체 지정]은 <b>이미 등록된 업체</b>에 이 작업을 소속시킵니다.
+      업체가 아직 없으면 [거래처 등록]으로 새로 만드세요.</div>${secs}</div>`;
+}
+function _ovmAddForSheetIdx(si){ const sid=_ovmUnmSheets[si]; if(sid) _ovmAddForSheet(sid); }
+/* ── 미지정 작업 → 기존 업체 지정(팝업은 이관과 **같은 한 벌**) ──
+   ★ 사본을 두면 "이관에는 있는 인트라넷 검증·확인창이 지정에는 없는" 식으로 갈린다. */
+function ownAssign(i){
+  const t=_ovmUnmList[i]; if(!t) return;
+  const gid=String(t.tabGid==null?'':t.tabGid).trim();
+  if(!gid){ toast('이 작업은 탭 gid 가 없어 개별 지정이 불가합니다 — 시트 전체 지정을 사용하세요'); return; }
+  _trOpen({kind:'assign', sheetId:t.sheetId, tabGid:gid, label:t.tabName+' · '+sheetTitle(t.sheetId)});
+}
+function ownAssignSheet(si){
+  const sid=_ovmUnmSheets[si]; if(!sid) return;
+  _trOpen({kind:'assign', sheetId:sid, tabGid:null, label:sheetTitle(sid)+' — 시트 전체'});
 }
 function _ovmAddForSheet(sid){ _ovmOpenDrawer('add');
   const el=$('#advSheet'); if(el){ el.value=sid; onAdvSheet(); } }
@@ -13245,38 +13297,46 @@ async function rmOwn(sheetId, tabGid){ const a=STATE.advCur; if(!a) return;
        만들 수 없던 막다른 길(2026-08-10 위프코리아 건)의 해소.
      ★ 새 거래처명 입력 중에는 팝업을 재렌더하지 않는다(제안 목록·검증 문구만 갱신 — IME 조합 보호). */
 let _trS=null, _trSugTimer=null, _trItems=[];
-function ownTransfer(i){
-  const a=STATE.advCur, o=(STATE.ownItems||[])[i]; if(!a||!o) return;
+/* 팝업 한 벌 — kind:'transfer'(소유 이관) | 'assign'(미지정 작업을 기존 업체에 지정).
+   ★ 다른 것은 **어느 API 를 부르는가와 문구**뿐이고, 범위 선택·인트라넷 등록 검증·확인창은 공유한다. */
+function _trOpen(o){
   const allTabs=((STATE.sheetMap[o.sheetId]||{}).tabs||[]);
   const tabs=allTabs.filter(t=>t.tabGid!=null&&String(t.tabGid).trim()!=='');
-  _trS={ own:o, from:a, tabs, gidless:allTabs.length-tabs.length, mode:o.tabGid?'tab':'all', picks:{}, target:'', newName:'', newOk:false, newPm:'' };
+  _trS={ kind:o.kind||'transfer', own:{sheetId:o.sheetId, tabGid:o.tabGid||null}, from:o.from||null, srcLabel:o.label||'',
+    tabs, gidless:allTabs.length-tabs.length, mode:o.tabGid?'tab':'all', picks:{}, target:'', newName:'', newOk:false, newPm:'' };
   let ov=document.getElementById('ownTrPop');
   if(!ov){ ov=document.createElement('div'); ov.id='ownTrPop'; ov.className='owntr-ov'; document.body.appendChild(ov); }
   ov.style.display='flex';
   _trRender();
 }
+function ownTransfer(i){
+  const a=STATE.advCur, o=(STATE.ownItems||[])[i]; if(!a||!o) return;
+  _trOpen({kind:'transfer', from:a, sheetId:o.sheetId, tabGid:o.tabGid||null});
+}
 function _trClose(){ const ov=document.getElementById('ownTrPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _trS=null; _trItems=[]; }
 function _trRender(){
   const S=_trS; if(!S) return; const ov=document.getElementById('ownTrPop'); if(!ov) return;
+  const asg=S.kind==='assign';                     // 미지정 → 기존 업체 지정
   const whole=!S.own.tabGid;
-  const srcLabel = whole ? (sheetTitle(S.own.sheetId)+' — 시트 전체 소유')
-    : ((STATE.tabIndex[S.own.sheetId+'::'+S.own.tabGid]||('탭 '+S.own.tabGid))+' · '+sheetTitle(S.own.sheetId));
-  const advOpts=(STATE.advs||[]).filter(x=>x.id!==S.from.id)
+  const srcLabel = S.srcLabel || (whole ? (sheetTitle(S.own.sheetId)+' — 시트 전체 소유')
+    : ((STATE.tabIndex[S.own.sheetId+'::'+S.own.tabGid]||('탭 '+S.own.tabGid))+' · '+sheetTitle(S.own.sheetId)));
+  const advOpts=(STATE.advs||[]).filter(x=>!S.from||x.id!==S.from.id)
     .map(x=>`<option value="${esc(x.id)}" ${S.target===x.id?'selected':''}>${esc(x.name)}</option>`).join('');
   const scopeUi = whole ? `
-    <label>이관 범위</label>
+    <label>${asg?'지정 범위':'이관 범위'}</label>
     <div class="radios">
       <div class="radio ${S.mode==='all'?'on':''}" onclick="_trMode('all')"><span class="d"></span>시트 전체(모든 탭)</div>
       <div class="radio ${S.mode==='tab'?'on':''}" onclick="_trMode('tab')"><span class="d"></span>특정 탭(작업)만</div>
     </div>
     ${S.mode==='tab'?`<div class="tabs">${S.tabs.map((t,ti)=>`<div class="tchip ${S.picks[ti]?'on':''}" onclick="_trPick(${ti})"><span class="cb">${S.picks[ti]?'✓':''}</span>${esc(t.tabName)}</div>`).join('')||'<span style="font-size:12px;color:var(--faint)">이 시트에 활성 탭 없음</span>'}</div>
-    ${S.gidless>0?`<div class="chk" style="color:var(--faint)">gid 없는 탭 ${S.gidless}개는 개별 이관이 불가합니다(시트 전체 이관만 가능).</div>`:''}
-    <div class="note">특정 탭만 이관하면 <b>나머지 탭은 ${esc(S.from.name)} 소유로 남습니다</b>(탭 지정이 시트 전체보다 우선).</div>`:''}` : '';
+    ${S.gidless>0?`<div class="chk" style="color:var(--faint)">gid 없는 탭 ${S.gidless}개는 개별 ${asg?'지정':'이관'}이 불가합니다(시트 전체만 가능).</div>`:''}
+    <div class="note">${asg?'특정 탭만 지정하면 <b>나머지 탭은 미지정으로 남습니다</b>(탭 지정이 시트 전체보다 우선).'
+      :`특정 탭만 이관하면 <b>나머지 탭은 ${esc((S.from&&S.from.name)||'')} 소유로 남습니다</b>(탭 지정이 시트 전체보다 우선).`}</div>`:''}` : '';
   ov.innerHTML=`<div class="owntr">
-    <h3>작업 이관</h3>
-    <div class="src"><b>${esc(srcLabel)}</b><br>현재 소유: ${esc(S.from.name)}</div>
+    <h3>${asg?'작업 업체 지정':'작업 이관'}</h3>
+    <div class="src"><b>${esc(srcLabel)}</b><br>현재 소유: ${asg?'<span style="color:var(--warn)">미지정</span>':esc((S.from&&S.from.name)||'')}</div>
     ${scopeUi}
-    <label>이관할 거래처</label>
+    <label>${asg?'지정할 거래처':'이관할 거래처'}</label>
     <select id="trTarget" onchange="_trTargetSel()">
       <option value="">— 업체 선택 —</option>
       ${advOpts}
@@ -13289,9 +13349,11 @@ function _trRender(){
         <div id="trSug" class="advsug"></div>
       </div>
       <div id="trNewChk" class="chk"></div>`:''}
-    <div class="note">이관하면 이 범위의 기존 소유는 해제되고, 작업보드 그룹·업체관리 표·계약 매칭 후보가 새 거래처 기준으로 바뀝니다. 이미 매칭된 계약·정산 링크는 그대로 유지됩니다(필요 시 별도 재매칭).</div>
+    <div class="note">${asg
+      ? '지정하면 이 작업이 그 업체 소유가 되어 작업보드 그룹·업체관리 표·계약 매칭 후보에 나타납니다. 잘못 지정했으면 업체 패널의 [이관]·[×]로 되돌릴 수 있습니다.'
+      : '이관하면 이 범위의 기존 소유는 해제되고, 작업보드 그룹·업체관리 표·계약 매칭 후보가 새 거래처 기준으로 바뀝니다. 이미 매칭된 계약·정산 링크는 그대로 유지됩니다(필요 시 별도 재매칭).'}</div>
     <div class="ft"><button class="btn" onclick="_trClose()">취소</button>
-      <button class="btn pri" id="trGoBtn" onclick="ownTransferGo()">이관하기</button></div>
+      <button class="btn pri" id="trGoBtn" onclick="ownTransferGo()">${asg?'지정하기':'이관하기'}</button></div>
   </div>`;
   if(S.target==='__new__'){ _trChk(); const el=document.getElementById('trNewName'); if(el&&!S.newName) setTimeout(()=>el.focus(),30); }
 }
@@ -13330,12 +13392,14 @@ function _trChk(){ const S=_trS; if(!S) return; const chk=document.getElementByI
     else { chk.textContent='⚠ 거래처정보에 등록되지 않은 광고주입니다 — 목록에서 선택하세요'; chk.style.color='var(--bad)'; } } }
 async function ownTransferGo(){
   const S=_trS; if(!S) return;
+  const asg=S.kind==='assign';                       // 지정(미지정 → 업체) / 이관(업체 → 업체)
+  const V=asg?'지정':'이관';
   let targetId=S.target, targetName='';
-  if(!targetId){ toast('이관할 거래처를 선택하세요'); return; }
+  if(!targetId){ toast(V+'할 거래처를 선택하세요'); return; }
   let posts=[];
   if(S.own.tabGid) posts=[{tabGid:String(S.own.tabGid)}];
   else if(S.mode==='all') posts=[{tabGid:null}];
-  else { const idxs=Object.keys(S.picks).filter(k=>S.picks[k]); if(!idxs.length){ toast('이관할 탭을 선택하세요'); return; }
+  else { const idxs=Object.keys(S.picks).filter(k=>S.picks[k]); if(!idxs.length){ toast(V+'할 탭을 선택하세요'); return; }
     posts=idxs.map(k=>({tabGid:String((S.tabs[k]||{}).tabGid||'')})).filter(p=>p.tabGid); }
   if(targetId==='__new__'){
     if(!S.newOk){ toast('거래처정보(인트라넷 광고주DB)에 등록된 이름을 목록에서 선택하세요'); return; }
@@ -13344,8 +13408,9 @@ async function ownTransferGo(){
   } else { const t=(STATE.advs||[]).find(x=>x.id===targetId); targetName=(t&&t.name)||''; }
   const scopeTxt=S.own.tabGid?'이 작업(탭) 1개':(S.mode==='all'?'시트 전체':('선택한 작업(탭) '+posts.length+'개'));
   const nm=targetId==='__new__'?S.newName:targetName;
-  if(!confirm(scopeTxt+'를\n\''+S.from.name+'\' → \''+nm+'\' 거래처로 이관할까요?\n\n이 범위의 기존 소유는 해제됩니다.')) return;
-  const btn=document.getElementById('trGoBtn'); if(btn){ btn.disabled=true; btn.textContent='이관 중…'; }
+  if(asg){ if(!confirm(scopeTxt+'를\n\''+nm+'\' 거래처 소유로 지정할까요?')) return; }
+  else if(!confirm(scopeTxt+'를\n\''+S.from.name+'\' → \''+nm+'\' 거래처로 이관할까요?\n\n이 범위의 기존 소유는 해제됩니다.')) return;
+  const btn=document.getElementById('trGoBtn'); if(btn){ btn.disabled=true; btn.textContent=V+' 중…'; }
   try{
     if(targetId==='__new__'){
       const r=await api('/api/trackb/advertisers',{method:'POST',body:JSON.stringify({name:S.newName, inad_pm:S.newPm||''})});
@@ -13354,16 +13419,32 @@ async function ownTransferGo(){
     }
     let okCnt=0, fail=null;
     for(const p of posts){
-      const r=await api('/api/trackb/ownership/transfer',{method:'POST',body:JSON.stringify({sheetId:S.own.sheetId, tabGid:p.tabGid, toAdvertiserId:targetId})}).catch(()=>null);
-      if(r&&r.ok) okCnt++; else fail=(r&&r.error)||'이관 실패';
+      const r=asg
+        ? await api('/api/trackb/ownership',{method:'POST',body:JSON.stringify({advertiserId:targetId, sheetId:S.own.sheetId, tabGid:p.tabGid})}).catch(()=>null)
+        : await api('/api/trackb/ownership/transfer',{method:'POST',body:JSON.stringify({sheetId:S.own.sheetId, tabGid:p.tabGid, toAdvertiserId:targetId})}).catch(()=>null);
+      if(r&&r.ok) okCnt++; else fail=(r&&r.error)||(V+' 실패');
     }
     // ★ 부분 실패를 "완료"로 꾸미지 않는다 — 몇 건이 옮겨졌는지 사실대로 말한다.
-    if(!okCnt){ toast('이관 실패'+(fail?(': '+fail):'')); return; }
-    toast(fail?('일부만 이관됨 ('+okCnt+'/'+posts.length+') — '+fail):('이관 완료 → '+targetName+' ('+okCnt+'건)'));
-    const fromId=S.from.id; _trClose();
+    if(!okCnt){ toast(V+' 실패'+(fail?(': '+fail):'')); return; }
+    toast(fail?('일부만 '+V+'됨 ('+okCnt+'/'+posts.length+') — '+fail):(V+' 완료 → '+targetName+' ('+okCnt+'건)'));
+    const fromId=S.from?S.from.id:null; _trClose();
     await refreshAdvCounts();
+    if(asg){
+      // ★ 지정하면 그 작업은 미지정 목록에서 빠져야 한다 — 매핑용 탭 목록을 다시 받아 화면을 갱신한다
+      //   (안 하면 방금 지정한 작업이 그대로 남아 "저장이 안 된 것"으로 보인다).
+      await _ovmReloadMapTabs();
+      if(_ovmDrawer==='unm') _ovmOpenDrawer('unm');
+      const ai=(STATE.advs||[]).findIndex(x=>x.id===targetId); if(ai>=0 && STATE.advCur && STATE.advCur.id===targetId) selAdv(ai);
+      else if(!STATE.advCur) _ovmRenderOverview();
+      return;
+    }
     const idx=(STATE.advs||[]).findIndex(x=>x.id===fromId); if(idx>=0) selAdv(idx);
-  } finally { const b=document.getElementById('trGoBtn'); if(b){ b.disabled=false; b.textContent='이관하기'; } }
+  } finally { const b=document.getElementById('trGoBtn'); if(b){ b.disabled=false; b.textContent=asg?'지정하기':'이관하기'; } }
+}
+// 매핑용 탭 목록 재조회 — 미지정 작업 판정(advertiserId)의 유일한 재료다. 실패하면 종전 목록을 유지한다.
+async function _ovmReloadMapTabs(){
+  const r=await api('/api/trackb/tabs?limit=500&forMapping=1').catch(()=>null);
+  if(r&&r.tabs){ STATE.mapTabs=r.tabs; buildTabIndex(STATE.mapTabs); }
 }
 // ★ Esc = 이관 팝업 먼저 닫기 — 드로어 ESC 리스너보다 먼저 등록돼(파일 순서) stopImmediatePropagation 으로
 //   "팝업과 드로어가 한 번에 같이 닫히는" 것을 막는다. 리스너는 최상위 1회(규율).
