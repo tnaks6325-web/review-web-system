@@ -101,7 +101,10 @@ const FIXTURE = {
     { sheetId: 'S2', tabs: 2, sheetlessTabs: 1, liveSheetTabs: 0, closedSheetTabs: 1 },
   ],
   names: [{ sheetId: 'S1', tabName: 'T1', displayName: '0801 살아있는작업' }],
-  pend: [{ sheetId: 'S1', n: 4 }],
+  pend: [
+    { sheetId: 'S1', status: 'stuck_manual', n: 3, oldest: '2026-06-01T00:00:00Z', newest: '2026-06-02T00:00:00Z' },
+    { sheetId: 'S1', status: 'failed', n: 1, oldest: '2026-08-18T00:00:00Z', newest: '2026-08-18T00:00:00Z' },
+  ],
   mir: [{ sheetId: 'S1', mirroredAt: '2026-08-19T10:00:00Z' }],
 };
 
@@ -132,6 +135,13 @@ let R = null;
     assert.deepStrictEqual(s1.liveTabNames, ['0801 살아있는작업']);
     assert.strictEqual(s1.pendingOrders, 4);
     assert.strictEqual(R.pendingOrdersTotal, 4);
+  });
+  t('3d-2 ★★ 막힌 주문을 상태·기간으로 갈라 준다(건수만으로는 잔재인지 살아있는지 못 가린다)', () => {
+    const s1 = R.items.find(i => i.sheetId === 'S1');
+    assert.deepStrictEqual(s1.pendingByStatus, { stuck_manual: 3, failed: 1 });
+    assert.deepStrictEqual(R.pendingByStatus, { stuck_manual: 3, failed: 1 });
+    assert.ok(s1.pendingOldest && s1.pendingNewest, '제출 기간이 없다');
+    assert.ok(new Date(s1.pendingOldest) < new Date(s1.pendingNewest), '최오래/최근이 뒤바뀌었다');
   });
   t('3e 조치가 필요한 순서로 정렬한다(살아있음 → 마감만 → campaigns만)', () => {
     assert.deepStrictEqual(R.items.map(i => i.reason), ['sheet_tab_live', 'closed_only', 'campaigns_only']);
@@ -215,6 +225,8 @@ let R = null;
     assert.ok(/시트 기반 작업이 아직 살아 있음/.test(h) && /마감 탭만 남았는데/.test(h) && /campaigns\) 행만 남음/.test(h),
       '사유 세 갈래가 다 안 나온다');
     assert.ok(/시트에 아직 못 쓴 주문 4건/.test(h), '★ 미반영 주문 경고가 없다(끄면 주문이 사라지는 상태를 못 말한다)');
+    assert.ok(/수동 처리 필요 3/.test(h) && /실패 1/.test(h),
+      '★ 상태 분해가 화면에 없다 — 재기록으로 안 풀리는 건(stuck_manual)을 구분 못 한다');
     assert.ok(/0801 살아있는작업/.test(h), '살아 있는 작업 이름이 없다');
   });
   t('6b 읽는 시트 0이면 "없습니다"로 끝낸다(빈 표를 그리지 않는다)', () => {

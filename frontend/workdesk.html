@@ -10449,6 +10449,23 @@ async function _rsScan(){
       <button class="btn" style="margin-left:6px" onclick="_rsScan()">다시 시도</button></div>`;
   }
 }
+/* 막힌 주문 상태를 사람 말로 — ★ 판정이 아니라 **표기**다(서버 값 그대로 세어 보여줄 뿐).
+   `stuck_manual` 은 reconcile 이 제외해 재기록으로 안 풀린다 → 사람이 처리해야 함을 이름으로 말한다. */
+var _RS_STATUS = {
+  pending:'대기', queued:'큐 대기', failed:'실패', pending_no_row:'행 못 찾음',
+  stuck_manual:'수동 처리 필요', canceled:'취소됨'
+};
+function _rsStatusLine(by, short){
+  var ks = Object.keys(by||{}); if(!ks.length) return '';
+  ks.sort(function(a,b){ return by[b]-by[a]; });
+  var parts = ks.map(function(k){ return (_RS_STATUS[k]||k) + ' ' + by[k]; });
+  return short ? parts.join(' · ') : '— ' + parts.join(' · ');
+}
+function _rsPendTitle(it){
+  var a = it.pendingOldest ? new Date(it.pendingOldest).toLocaleDateString('ko-KR') : '';
+  var b = it.pendingNewest ? new Date(it.pendingNewest).toLocaleDateString('ko-KR') : '';
+  return (a && b) ? ('제출 ' + a + ' ~ ' + b) : '';
+}
 function _rsRender(){
   const box=_rsBox(), r=_RS; if(!box||!r) return;
   if(!r.reading){
@@ -10468,7 +10485,9 @@ function _rsRender(){
       <td>${esc(it.reasonText||it.reason||'')}</td>
       <td>${esc((it.liveTabNames||[]).join(' · '))}${it.liveSheetTabs>(it.liveTabNames||[]).length?` 외 ${it.liveSheetTabs-(it.liveTabNames||[]).length}개`:''}</td>
       <td style="text-align:right">${it.tabs||0}</td>
-      <td style="text-align:right${it.pendingOrders?';color:#DC2626;font-weight:700':''}">${it.pendingOrders||0}</td>
+      <td style="text-align:right${it.pendingOrders?';color:#DC2626;font-weight:700':''}"
+          title="${esc(_rsPendTitle(it))}">${it.pendingOrders||0}${
+        it.pendingOrders?`<div style="font-weight:400;font-size:10.5px;color:#8B94A1">${esc(_rsStatusLine(it.pendingByStatus, true))}</div>`:''}</td>
       <td style="font-size:11px;color:#8B94A1">${it.mirroredAt?esc(new Date(it.mirroredAt).toLocaleString('ko-KR')):'-'}</td>
     </tr>`).join('');
   box.innerHTML = `<div class="ovnote">
@@ -10478,7 +10497,8 @@ function _rsRender(){
       <div style="margin-top:6px">탈시트 전환 화면의 <b>“남음”</b>은 마감 탭·아카이브만 남은 시트·연도 미확정 작업을 세지 않습니다 —
         그 시트들도 주기 작업(RAW 미러·인덱스 빌드)은 계속 읽습니다.</div>
       ${r.pendingOrdersTotal?`<div style="margin-top:6px;color:#DC2626"><b>⚠ 시트에 아직 못 쓴 주문 ${r.pendingOrdersTotal}건</b> —
-        지금 주기 작업을 끄면 이 주문들이 시트에 영영 기록되지 않습니다.</div>`:''}
+        지금 주기 작업을 끄면 이 주문들이 시트에 영영 기록되지 않습니다.
+        ${_rsStatusLine(r.pendingByStatus)}</div>`:''}
       ${r.truncated?`<div style="margin-top:6px">목록은 ${(r.items||[]).length}개까지만 보여줍니다(전체 ${r.reading}개).</div>`:''}
     </div>
     <table class="lgtable" style="margin-top:8px"><thead><tr>
