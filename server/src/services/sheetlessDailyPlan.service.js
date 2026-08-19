@@ -79,6 +79,22 @@ async function loadWorktableDefaults({ client, campaignId, dates = [] } = {}) {
  * 수동 조절한 미래 날짜를 작업표의 빈 준비 행에도 반영한다.
  * 참여자·주문이 있는 행은 절대 이동하지 않으며, 달력 저장 트랜잭션과 함께 실행한다.
  */
+/** 새 작업표 행에 쓸 **다음 번호**(seq) — 활성 행만 보면 안 된다.
+ *  ★★ `uq_participants_seq(sheet_id, tab_name, seq)` 에는 **소프트 삭제·비활성 행도 그대로 들어 있고**,
+ *    116 의 삭제 표식(workdesk_participant_deletions)은 "그 번호를 되살리지 말라"는 기록이다.
+ *    활성 행 기준으로 번호를 매기면 [🧹 줄 정리]로 **뒤쪽 줄을 지운 탭**에서 인원을 늘리는 순간
+ *    지운 번호를 다시 써 23505 로 **조절 저장이 통째로 실패**하고, 운 좋게 안 겹쳐도 삭제한 줄이
+ *    같은 번호로 되살아난다(삭제 표식의 목적 위반). 그래서 **지운 것까지 포함한 최대값 + 1** 에서 시작한다. */
+async function _nextSeqStart(client, sheetId, tabName) {
+  const { rows } = await client.query(
+    `SELECT GREATEST(
+              COALESCE((SELECT MAX(seq) FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2), 0),
+              COALESCE((SELECT MAX(seq) FROM workdesk_participant_deletions WHERE sheet_id=$1 AND tab_name=$2), 0)
+            ) AS max_seq`,
+    [sheetId, tabName]);
+  return (Number(rows[0] && rows[0].max_seq) || 0) + 1;
+}
+
 async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = [], today = '', by = 'system' } = {}) {
   if (!client || !sheetId || !tabName || !Array.isArray(set) || !set.length) {
     return { ok: true, skipped: true, reason: 'no_link_or_change', moved: 0, cleared: 0 };
@@ -135,7 +151,7 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
     if (need) {
       // 빈 준비 행이 모두 찼어도 날짜 조절 자체를 막지 않는다. 새 빈 작업표 행을
       // 같은 트랜잭션으로 만들어, 0명 날짜를 늘린 결과가 실제 표에도 보이게 한다.
-      const maxSeq = rows.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 0);
+      const seqStart = await _nextSeqStart(client, sheetId, tabName);
       const blank = {};
       headers.forEach(h => { blank[h] = ''; });
       for (let i = 0; i < need; i++) {
@@ -145,7 +161,7 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
           `INSERT INTO campaign_participants
              (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'worktable', $7, NOW())`,
-          [sheetId, rows[0].tab_gid || null, tabName, maxSeq + created + 1, value,
+          [sheetId, rows[0].tab_gid || null, tabName, seqStart + created, value,
             JSON.stringify(rowJson), String(by).slice(0, 100)]);
         created++; moved++;
       }
@@ -246,7 +262,7 @@ async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans
               start_date=v.value, updated_by=$${params.length}::text, updated_at=NOW()
          FROM (VALUES ${vals.join(',')}) AS v(id,value) WHERE p.id=v.id`, params);
   }
-  const maxSeq = rows.reduce((m, r) => Math.max(m, Number(r.seq) || 0), 0);
+  const seqStart = await _nextSeqStart(client, sheetId, tabName);
   const blank = {}; headers.forEach(h => { blank[h] = ''; });
   const inserts = assignments.filter(a => !a.row);
   for (let i = 0; i < inserts.length; i++) {
@@ -255,7 +271,7 @@ async function rebuildAdjustedPlansToWorktable({ client, sheetId, tabName, plans
       `INSERT INTO campaign_participants
          (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())`,
-      [sheetId, rows[0].tab_gid || null, tabName, maxSeq + i + 1, value,
+      [sheetId, rows[0].tab_gid || null, tabName, seqStart + i, value,
         JSON.stringify({ ...blank, [dateHeader]: value }), String(by).slice(0, 100)]);
   }
   return { ok: true, dateHeader, plannedDates: wanted.size, reassigned: changed.filter(c => c.value).length,
@@ -274,8 +290,10 @@ async function readWorktableDates({ sheetId, tabName }) {
   let rows;
   try {
     const r = await db.query(
+      // ★ 기준을 작업보드 그리드·조절 실행과 같게(active = TRUE) — 비활성 행까지 세면
+      //   모달의 "기본 N명"이 실제 표보다 많아 보이고, 조절은 그 행을 옮기지도 못한다.
       `SELECT row_json FROM campaign_participants
-        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
         ORDER BY seq`, [sheetId, tabName]);
     rows = r.rows;
   } catch (e) {
