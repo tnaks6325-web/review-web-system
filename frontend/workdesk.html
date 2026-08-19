@@ -12499,8 +12499,8 @@ function _ovmUnmatchedHtml(){
         ${gid?`<button class="btn xs pri" onclick="ownAssign(${i})">업체 지정</button>`
              :`<button class="btn xs" disabled title="탭 gid 가 없어 개별 지정이 불가합니다 — 시트 전체 지정을 사용하세요">개별 불가</button>`}</div>`;
     }).join('');
-    return `<div class="st" style="margin-top:12px">${esc(sheetTitle(sid))}
-        <span class="sthint">미지정 작업 ${idxs.length}개</span>
+    return `<div class="st sthead" style="margin-top:12px"><span>${esc(sheetTitle(sid))}</span>
+        <span class="sthint" style="margin-left:0">미지정 작업 ${idxs.length}개</span><span style="flex:1"></span>
         ${free?`<button class="btn xs" onclick="ownAssignSheet(${si})">시트 전체 지정</button>
                 <button class="btn xs" onclick="_ovmAddForSheetIdx(${si})">거래처 등록</button>`:''}</div>${rows}`;
   }).join('');
