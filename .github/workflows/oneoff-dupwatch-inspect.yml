@@ -2,6 +2,8 @@ name: Oneoff - 중복 줄 성격 조사 (읽기 전용)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ 'oneoff/dupwatch-run' ]
 
 jobs:
   inspect:
