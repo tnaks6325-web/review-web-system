@@ -239,8 +239,11 @@ t('★★ 상태 칸·memo 칸이 같은 쓰기 함수를 쓴다(쓰기 규율 �
   const writerEnd = statusSrc.indexOf('const REVIEW_SUBMIT_TIME_BACKFILL_DAYS', writerStart);
   assert.ok(writerStart >= 0 && writerEnd > writerStart, 'common writer not found');
   const writer = statusSrc.slice(writerStart, writerEnd);
-  const n = (writer.match(/UPDATE campaign_participants/g) || []).length;
-  assert.strictEqual(n, 1, `작업표 UPDATE 가 ${n}곳 — 사본이 생겼다`);
+  // 130 — 실제 UPDATE 문은 공용 헬퍼 `writeRowJsonCell` 한 곳으로 추출됐다(셀 편집 쓰기-through 와 공유).
+  //   검사 의미는 그대로 "작업표 쓰기 문장은 하나" 이고, 범위만 파일 전체로 넓어졌다(더 강함).
+  assert.ok(/writeRowJsonCell\(/.test(writer), '_writeCellAndRebuild 는 공용 헬퍼로 위임해야 한다');
+  const merges = (statusSrc.match(/UPDATE campaign_participants\s*\n?\s*SET row_json = COALESCE\(row_json, '\{\}'::jsonb\) \|\|/g) || []).length;
+  assert.strictEqual(merges, 1, `작업표 병합 UPDATE 가 ${merges}곳 — 사본이 생겼다`);
   assert.ok(/markStatusCell[\s\S]*?_writeCellAndRebuild/.test(statusSrc));
   assert.ok(/markSheetlessMemo[\s\S]*?_writeCellAndRebuild/.test(statusSrc));
 });

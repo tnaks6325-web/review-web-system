@@ -196,6 +196,42 @@ async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = fals
 }
 
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
+/** 작업표 한 칸 병합 쓰기 — 상태·memo·셀 편집(130) 공용. exec 에 client 를 주면 그 tx 안에서 실행된다. */
+async function writeRowJsonCell(exec, { sheetId, tabName, rowIndex, header, value }) {
+  const r = await exec.query(
+    `UPDATE campaign_participants
+        SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
+            updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+    [sheetId, tabName, rowIndex, header, value]);
+  return r.rowCount;
+}
+
+/** 작업표 한 칸 제거(키 삭제) — 되돌리기 전용(had_prev=false 였던 편집). */
+async function removeRowJsonCell(exec, { sheetId, tabName, rowIndex, header }) {
+  const r = await exec.query(
+    `UPDATE campaign_participants
+        SET row_json = COALESCE(row_json, '{}'::jsonb) - $4::text, updated_at = NOW()
+      WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
+    [sheetId, tabName, rowIndex, header]);
+  return r.rowCount;
+}
+
+/**
+ * 장부 재생성 예약 — 편집 경로는 rebuild 를 직접 부르지 않는다(붙여넣기 500칸 = 락 점유).
+ * ★ `ledger_dirty_at IS NULL` 조건: **첫 편집만** 그 행을 잠그고 나머지는 술어 불일치로 잠금 0.
+ *   (안 걸면 500 동시 편집이 같은 tab_configs 행에 줄 선다)
+ */
+async function markLedgerDirty(exec, { sheetId, tabName }) {
+  try {
+    await exec.query(
+      `UPDATE tab_configs SET ledger_dirty_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND ledger_dirty_at IS NULL`,
+      [sheetId, tabName]);
+    return true;
+  } catch (_) { return false; }   // 42703(미적용) 등 — 호출부가 사유를 응답에 싣는다
+}
+
 async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, mergeDeposit = false, deferRebuild = false }) {
   let nextValue = value;
   if (mergeDeposit) {
@@ -211,13 +247,9 @@ async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, va
     }
   }
   try {
-    const r = await db.query(
-      `UPDATE campaign_participants
-          SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($4::text, $5::text),
-              updated_at = NOW()
-        WHERE sheet_id = $1 AND tab_name = $2 AND seq = $3 AND deleted_at IS NULL`,
-      [sheetId, tabName, rowIndex, header, nextValue]);
-    if (!r.rowCount) return { handled: true, ok: false, reason: 'row_not_found', column: header };
+    // ★ 쓰기는 공용 헬퍼 한 곳(writeRowJsonCell) — 셀 편집 쓰기-through(130) 와 같은 문장을 쓴다(사본 금지).
+    const n = await writeRowJsonCell(db, { sheetId, tabName, rowIndex, header, value: nextValue });
+    if (!n) return { handled: true, ok: false, reason: 'row_not_found', column: header };
   } catch (e) {
     return { handled: true, ok: false, reason: 'write_failed', message: e.message, column: header };
   }
@@ -344,6 +376,9 @@ async function backfillReviewSubmitTimes({ dryRun = true, by = 'system' } = {}) 
 
 module.exports = {
   markStatusCell,
+  writeRowJsonCell,
+  removeRowJsonCell,
+  markLedgerDirty,
   verifyStatusCell,
   markSheetlessMemo,
   backfillReviewSubmitTimes,
