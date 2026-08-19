@@ -259,7 +259,9 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('[⋯] 메뉴에 번호 정리 버튼', /openRenumberModal\(\)"[^>]*>🔢 번호 정리/.test(fe));
     ok('★ 오버레이는 body 직속', /rnOv[\s\S]{0,600}document\.body\.appendChild\(ov\)/.test(fe));
     ok('★ Esc 리스너는 최상위 1회', /_rnKeyBound/.test(fe));
-    ok('★ 실행 전 confirm(번호가 바뀐다는 사실 고지)', /confirm\(`「\$\{_RN\.tabName\}」 표의 번호를/.test(fe));
+    /* ★ 문자열 존재만 보면 `if (false && !confirm(...))` 을 통과시킨다(변이시험 실측)
+         → **게이트 형태(`if (!confirm(`)** 자체를 고정한다. */
+    ok('★ 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`「\$\{_RN\.tabName\}」 표의 번호를/.test(fe));
     ok('★ 프론트에 정렬 재계산 사본 없음(서버 결과만 그린다)',
       !/orderRowsForNumbering|computeRenumberPlan/.test(fe));
 
@@ -272,7 +274,7 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 전체 모드는 작업을 안 골라도 열린다', /if \(!all && !_rnCanRenumber\(\)\) return;/.test(fe));
     ok('★ 목록 행 실행은 인덱스만 넘긴다(작업명 보간 금지)',
       /onclick="rnRunOne\(\$\{i\}\)"/.test(fe) && !/rnRunOne\('\$\{esc/.test(fe));
-    ok('★ 전체 실행 전 confirm(번호가 바뀐다는 사실 고지)', /무시트 작업 \$\{s\.needTabs\}개의 번호를/.test(fe));
+    ok('★ 전체 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`무시트 작업 \$\{s\.needTabs\}개의 번호를/.test(fe));
     ok('★ 실패한 작업을 조용히 넘기지 않는다', /정리하지 못한 작업/.test(fe));
     ok('★ 목록이 잘리면 고지', /목록이 잘렸습니다/.test(fe));
     ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
