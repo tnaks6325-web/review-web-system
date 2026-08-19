@@ -350,6 +350,65 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('전체 점검을 다시 돌리면 고른 작업이 풀린다', /_DD\.scan = null; _DD\.target = null; _DD\.prev = null;/.test(wd));
   }
 
+  /* ── [H] "언제 생긴 중복인가" 표기 — 재발 방지가 듣고 있는지의 유일한 판별 재료 ────── */
+  console.log('\n[H] 중복 발생 시각 표기');
+  {
+    const ledSrcH = fs.readFileSync(path.join(__dirname, '../src/services/sheetlessLedger.service.js'), 'utf8');
+    const dedupeH = ledSrcH.slice(ledSrcH.indexOf('async function dedupeRows('),
+                                  ledSrcH.indexOf('module.exports'));
+    ok('조회가 제출 시각을 함께 읽는다', /os\.submitted_at AS at/.test(dedupeH));
+    ok('★ 발생 시각은 **늦게 들어온 줄**에서 뽑는다(먼저 온 줄은 정상 참여)',
+      /const _lastAt = losers\.reduce\(/.test(dedupeH));
+    ok('보류 건에도 발생 시각을 싣는다(사람이 판단할 근거)', /seqs: list\.map\(r => r\.seq\), lastAt: _lastAt/.test(dedupeH));
+    ok('탭 요약에 가장 최근 발생 시각', /const lastDupAt = \[\.\.\.plan, \.\.\.skipped\]/.test(dedupeH));
+
+    const scanH = ledSrcH.slice(ledSrcH.indexOf('async function scanDuplicateRows('),
+                                ledSrcH.indexOf('module.exports'));
+    ok('일괄 점검이 작업별 발생 시각을 싣는다', /lastDupAt: r\.lastDupAt \|\| null/.test(scanH));
+    ok('일괄 점검이 전체 최근 발생 시각을 낸다', /out\.lastDupAt = out\.tabs\.reduce\(/.test(scanH));
+
+    // 실행 — 늦게 들어온 줄의 시각이 잡히는가(먼저 온 줄의 시각이 아니라)
+    const led3 = require('../src/services/sheetlessLedger.service');
+    led3.__setPoolForTest({
+      query: async (sql) => {
+        if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+        if (/JOIN order_submissions os ON os\.id = cp\.order_submission_id/.test(sql)) return { rows: [
+          { seq: 1, osid: 'o1', name: '김신혜', submitted: false, paid: false,
+            ordnum: '11111111111', roword: '11111111111', ph: '01090411926', in_payment: false,
+            at: '2026-08-01T00:00:00.000Z' },
+          { seq: 9, osid: 'o2', name: '김신혜', submitted: false, paid: false,
+            ordnum: '11111111111', roword: '11111111111', ph: '01090411926', in_payment: false,
+            at: '2026-08-18T00:00:00.000Z' },
+        ] };
+        return { rows: [] };
+      },
+    });
+    const rH = await led3.dedupeRows({ sheetId: 'wt_x', tabName: 'T1' });
+    ok('★ 실행: 내릴 줄의 시각이 발생 시각이다', rH.removeRows === 1
+      && String(rH.plan[0].lastAt) === '2026-08-18T00:00:00.000Z'
+      && String(rH.lastDupAt) === '2026-08-18T00:00:00.000Z');
+    led3.__setPoolForTest(null);
+
+    const wdH = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
+    ok('★ 판정 경계는 재발 방지 배포 시각 그대로(뒤로 미루지 않는다)',
+      /_DD_FIX_AT = '2026-08-19T11:48:00\+09:00'/.test(wdH));
+    ok('★ 배포 이후 발생분은 경고로 말한다(정리만 하고 넘어가지 않게)',
+      /재발 방지 배포\(8\/19 11:48\) 이후에 생긴 중복이 있습니다/.test(wdH));
+    ok('★ 값이 없으면 아무 말도 하지 않는다(모르는 것을 "안전"으로 꾸미지 않는다)',
+      /function _ddVerdict\(lastAt\)\{\s*\n\s*if \(!lastAt\) return '';/.test(wdH));
+    ok('미리보기·일괄 점검 양쪽에 판정을 붙인다',
+      (wdH.match(/\$\{_ddVerdict\(/g) || []).length >= 2);
+    const prevHead = (wdH.match(/<th>참여자<\/th>[\s\S]{0,240}?<\/tr><\/thead>/) || [''])[0];
+    ok('미리보기 표 머리 칸 수 ≡ 행 칸 수(발생일 포함)',
+      (prevHead.match(/<th>/g) || []).length === 6
+      && /esc\(_ddDay\(g\.lastAt\)\)\}<\/td><\/tr>/.test(wdH));
+    const scanHead = (wdH.match(/<th>작업<\/th>[\s\S]{0,240}?<\/tr><\/thead>/) || [''])[0];
+    ok('일괄 점검 표 머리 칸 수 7(최근 발생 포함)', (scanHead.match(/<th>/g) || []).length === 7
+      && /esc\(_ddDay\(t\.lastDupAt\)\)/.test(wdH));
+    ok('KST 로 환산해 표기한다(UTC 자정 전후가 하루 밀리지 않게)',
+      /9 \* 3600 \* 1000/.test(wdH));
+  }
+
   /* ── [F] 진짜 PG (선택) — 스텁은 SQL 을 해석하지 않는다 ──────────────────────
      `PGTEST_URL=postgres://... node server/tests/worktableDuplicateGuard.test.js`
      표 주문번호(row_json) 추출과 숫자 정규화가 **실제로** 도는지 확인한다. */
@@ -360,12 +419,12 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     await c.query(`DROP TABLE IF EXISTS campaign_participants, order_submissions, payment_batch_items`);
     await c.query(`CREATE TABLE campaign_participants(seq int, sheet_id text, tab_name text,
       order_submission_id uuid, reviewer_name text, is_submitted bool, is_paid bool, row_json jsonb, deleted_at timestamptz)`);
-    await c.query(`CREATE TABLE order_submissions(id uuid primary key, order_num text, phone text, deleted_at timestamptz)`);
+    await c.query(`CREATE TABLE order_submissions(id uuid primary key, order_num text, phone text, deleted_at timestamptz, submitted_at timestamptz)`);
     await c.query(`CREATE TABLE payment_batch_items(sheet_id text, tab_name text, row_index int, status text)`);
     // ★ 실사고 재현: 원장 주문번호는 같은데 **표에 보이는 주문번호가 다르다**
     await c.query(`INSERT INTO order_submissions VALUES
-      ('11111111-1111-1111-1111-111111111111','231020413029 15','010-5147-5613',NULL),
-      ('22222222-2222-2222-2222-222222222222','231020413029 15','010-5147-5613',NULL)`);
+      ('11111111-1111-1111-1111-111111111111','231020413029 15','010-5147-5613',NULL,'2026-08-10T03:00:00Z'),
+      ('22222222-2222-2222-2222-222222222222','231020413029 15','010-5147-5613',NULL,'2026-08-11T03:00:00Z')`);
     await c.query(`INSERT INTO campaign_participants VALUES
       (19 ,'wt_x','T1','11111111-1111-1111-1111-111111111111','신다인',false,false,
         '{"번호":"1","주문번호":"23102041302915"}',NULL),
@@ -378,6 +437,7 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('PG: 숫자만 정규화된다', r[0].ordnum === '23102041302915' && r[0].ph === '01051475613');
     ok('PG: 표 주문번호를 row_json 에서 뽑는다', r[0].roword === '23102041302915' && r[1].roword === '23102367337800');
     ok('PG: 원장이 같아도 표가 다르면 다른 그룹', r[0].roword !== r[1].roword && r[0].ordnum === r[1].ordnum);
+    ok('PG: 제출 시각이 함께 실려 온다(발생일 표기 재료)', !!r[0].at && !!r[1].at && r[1].at > r[0].at);
     await c.end();
   } else {
     console.log('\n[F] 진짜 PG 검증 건너뜀 (PGTEST_URL 미설정)');
