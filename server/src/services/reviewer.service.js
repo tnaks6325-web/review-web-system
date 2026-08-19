@@ -203,6 +203,7 @@ async function handleReviewerProfile(body = {}) {
     action, phone8, name, subAccounts, incomeInfo,
     incomeName, residentNum, jumin,            // saveIncomeInfo (프론트는 top-level로 전송)
     bankName, bankAccount, accountHolder,      // saveBankInfo
+    onlyIfEmpty,                               // saveBankInfo — 빈 칸만 채움(구매양식 제출 후 자동 저장)
     address,                                   // saveAddress
   } = body;
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
@@ -273,15 +274,25 @@ async function handleReviewerProfile(body = {}) {
     const bn = (bankName || '').trim();
     const ba = (bankAccount || '').trim();
     const ah = (accountHolder || '').trim();
+    // ★★ onlyIfEmpty = "빈 칸만 채운다"(blank-only). 구매양식 제출 후 자동 저장(search-app.js)이 쓴다.
+    //   그 호출은 1번 카드의 계좌를 로그인 리뷰어의 마스터 계좌에 저장하는데, 1번 카드가 타계정 명의면
+    //   본인 대표계좌가 타계정 계좌로 덮여 **본인 리뷰비가 타계정 계좌로 송금**된다(payment.service._loadAccounts
+    //   가 본인 건에 reviewers.bank_account 를 그대로 쓴다). submit.routes 의 타계정 자동보강이 "본인 공통계좌와
+    //   다른 계좌일 때만" 타계정에 기록하는 것과 정면으로 어긋나던 경로 — manualOrder 의 blank-only 규율과 같다.
+    // ★ 미전송(undefined) = 종전 덮어쓰기 = 내정보 화면의 계좌 "변경"은 동작 불변(완화가 아니라 범위 축소).
+    const fillOnly = onlyIfEmpty === true || String(onlyIfEmpty) === 'true';
     await pool.query(
       `UPDATE reviewers SET
-         bank_name      = COALESCE(NULLIF($1, ''), bank_name),
-         bank_account   = COALESCE(NULLIF($2, ''), bank_account),
-         account_holder = COALESCE(NULLIF($3, ''), account_holder)
-       WHERE phone8 = $4`,
-      [bn, ba, ah, p8]
+         bank_name      = CASE WHEN $4::bool AND COALESCE(bank_name, '')      <> '' THEN bank_name
+                               ELSE COALESCE(NULLIF($1, ''), bank_name) END,
+         bank_account   = CASE WHEN $4::bool AND COALESCE(bank_account, '')   <> '' THEN bank_account
+                               ELSE COALESCE(NULLIF($2, ''), bank_account) END,
+         account_holder = CASE WHEN $4::bool AND COALESCE(account_holder, '') <> '' THEN account_holder
+                               ELSE COALESCE(NULLIF($3, ''), account_holder) END
+       WHERE phone8 = $5`,
+      [bn, ba, ah, fillOnly, p8]
     );
-    return { ok: true };
+    return { ok: true, fillOnly };
   }
 
   if (action === 'saveAddress') {
