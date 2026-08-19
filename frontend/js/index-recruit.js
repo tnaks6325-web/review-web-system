@@ -3626,12 +3626,21 @@ function _rfChangedLabels(payload) {
 }
 
 /** 저장 차단·실패 안내 — 모달 안쪽(토스트 금지: 덮개 아래로 깔려 안 보인다) */
+/** 연결 탭을 "사람이 비웠는가" — 복원 실패·목록 미로드는 판단 불가로 보고 미전송(=기존 연결 유지).
+ *  ★ 이 구분이 없으면 탭 리네임·아카이브·목록 조회 실패 때 저장 한 번에 시트 연결이 사라진다. */
+function _rfExplicitUnlink() {
+  if (!_recruitEditId) return true;                       // 신규 공고는 "연결 안 함"이 곧 의도
+  const sel = document.getElementById("rf_linked_tab");
+  if (!sel || sel.options.length <= 1 || !_recruitTabList.length) return false;   // 목록을 못 받았다
+  if (_rfLinkedMiss && _rfLinkedMiss.source === "campaign") return false;         // 저장된 탭을 못 찾았다
+  return true;
+}
+
 function _rfSaveBlocked(msg, opts) {
-  if (typeof recruitSaveBlock === "function") {
-    recruitSaveBlock(msg, (opts && opts.go) || undefined);
-  } else {
-    showToast(msg, "error");   // 구버전 모듈 폴백
-  }
+  // ★ 붙일 자리를 못 찾으면(레이아웃 변형) 조용히 삼키지 않는다 — 토스트로라도 사유를 말한다.
+  const shown = (typeof recruitSaveBlock === "function")
+    ? recruitSaveBlock(msg, (opts && opts.go) || undefined) : false;
+  if (!shown) showToast(msg, "error");   // 구버전 모듈·렌더 실패 폴백
 }
 /** [점검 항목 보기 ↑] — 자동 점검 블록으로 스크롤 + 깜빡임 */
 function _rfGoToCheck() {
@@ -3677,16 +3686,18 @@ async function saveRecruitPostImpl() {
     cash_receipt_required: !!document.getElementById("rf_cash_receipt_required")?.checked,
     review_fee:     Number(document.getElementById("rf_review_fee").value) || 0,
     badges:         _recruitBadges,
-    // `rf_notes` belongs to the retired layout; compact editing keeps it
-    // optional so saving the visible fields never fails when it is absent.
-    notes:          String(document.getElementById("rf_notes")?.value || "").trim(),
+    // ★ 유의사항(notes)은 **입력칸이 있는 화면에서만** 전송한다(옵션표·리뷰타입과 같은 원칙).
+    //   지금 편집기에는 이 칸이 없는데 종전처럼 ''를 보내면 서버 COALESCE 가 '지움'으로 받아
+    //   **저장할 때마다 유의사항이 조용히 삭제**된다 → 아래 조건부 전송으로 대체(미전송=유지).
     chat_url:       chatUrl,
     linked_sheet_id: sid,
     linked_tab_name: tab,
     linked_tab_gid:  (tabMeta && tabMeta.tabGid) || "",
     // 빈 연결은 "값 누락"이 아니라, 관리자가 명시적으로 시트 없이 저장한다는 뜻이다.
-    // 수정 저장에서도 기존 연결을 지우고 작업오더 자동연결을 건너뛸 수 있게 서버에 전달한다.
-    linked_tab_mode: tabKey ? "linked" : "unlinked",
+    // ★★ 단, "사람이 비운 것"과 "화면이 복원하지 못한 것"을 반드시 구분한다 —
+    //    탭 목록 로드 실패·리네임·아카이브로 select 가 비었을 때 'unlinked' 를 보내면
+    //    저장 한 번에 **시트 탭 연결(gid)이 조용히 끊긴다**. 모르면 미전송(=서버 COALESCE 유지).
+    linked_tab_mode: tabKey ? "linked" : (_rfExplicitUnlink() ? "unlinked" : "keep"),
     max_slots:      Number(document.getElementById("rf_max_slots").value) || 0,
     status:         document.getElementById("rf_status").value,
     // 종료일 — 시트 일정과 다르면 화면에 경고가 뜨고 실제 모집은 시트를 따른다(참고값으로 보관)
@@ -3697,6 +3708,12 @@ async function saveRecruitPostImpl() {
     // work-detail 유입방식 역조회의 보조키(주: linked_campaign_id). 편집 시엔 미전송=COALESCE 유지.
     source_work_order_id: (!_recruitEditId && _woPrefillOrderId) ? _woPrefillOrderId : undefined,
   };
+
+  /* 유의사항 — 입력칸이 있는 화면에서만 전송(없으면 미전송 = 서버가 기존 값 유지) */
+  {
+    const _notesEl = document.getElementById("rf_notes");
+    if (_notesEl) payload.notes = String(_notesEl.value || "").trim();
+  }
 
   /* ✅ 087 리뷰타입 — ★ 버튼군 UI 가 있는 화면에서만 전송.
      미전송이면 서버 CASE 센티널이 기존값을 유지한다(옵션표·이체설정과 같은 원칙) —
@@ -3796,7 +3813,11 @@ async function saveRecruitPostImpl() {
         const _optChk = (typeof _optSummary === "function") ? _optSummary() : { dup: false };
         if (_optChk.dup) { renderPartCheck(); _rfSaveBlocked("옵션명이 중복됐어요 — 옵션명을 다르게 하거나 삭제해주세요.", { go: _rfGoToCheck }); return; }
         payload.options = readOptRows();
-        const invalidOptionUrl = payload.options.find(option => !_rfHttpUrl(option.optionUrl));
+        /* ★ 옵션 URL 은 **값이 있는데 형식이 틀린 경우에만** 막는다.
+           칸이 생기기 전(2026-08 편집기 개편 이전)에 만든 공고는 이 값이 전부 비어 있어,
+           '필수'로 두면 **기존 공고의 수정 저장이 전부 차단**된다(빈 값 = 미입력이지 오류가 아니다). */
+        const invalidOptionUrl = payload.options.find(option =>
+          String(option.optionUrl || "").trim() && !_rfHttpUrl(option.optionUrl));
         if (invalidOptionUrl) { renderPartCheck(); _rfSaveBlocked("옵션 URL은 http:// 또는 https:// 주소로 입력해주세요.", { go: _rfGoToCheck }); return; }
       }
     }

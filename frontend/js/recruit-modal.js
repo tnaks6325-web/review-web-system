@@ -1346,10 +1346,25 @@
     }, FB_HOLD_MS));
   }
 
+  /** 차단 줄을 붙일 자리 — **눈에 보이는** 푸터를 고른다.
+   *  ★★ 이 모달에는 `.modal-footer` 가 둘이다(편집기 안쪽 인라인 푸터 + 아래 고정 푸터).
+   *     인라인 쪽은 `.rf-compact-main .footer{display:none}` 로 숨겨져 있어서, 종전처럼
+   *     `querySelector`(첫 번째)에 붙이면 **차단 사유가 0×0 으로 화면에 전혀 안 나온다** —
+   *     "저장을 눌렀는데 아무 일도 안 일어난다"(무신호)의 정체였다. 실브라우저로 실측 확인. */
+  function _blockHost() {
+    var foots = Array.prototype.slice.call(document.querySelectorAll('#recruitModal .modal-footer'));
+    for (var i = foots.length - 1; i >= 0; i--) {
+      if (foots[i].offsetParent !== null || foots[i].getClientRects().length) return foots[i];
+    }
+    // 전부 숨어 있으면(레이아웃 변형) 모달 상자 자체에 붙인다 — 사유를 잃는 것보다 낫다
+    return foots.length ? foots[foots.length - 1]
+      : (document.querySelector('#recruitModal .modal-box') || null);
+  }
+
   /* 모달 안 차단·실패 줄. onGo 가 있으면 [점검 항목 보기 ↑] 버튼이 붙는다. */
   function recruitSaveBlock(text, onGo) {
-    var foot = document.querySelector('#recruitModal .modal-footer');
-    if (!foot) return;
+    var foot = _blockHost();
+    if (!foot) return false;
     recruitSaveBlockClear();
     var bar = document.createElement('div');
     bar.className = 'rf-blockbar';
@@ -1366,10 +1381,12 @@
     void foot.offsetWidth;
     foot.classList.add('rf-shake');
     setTimeout(function () { foot.classList.remove('rf-shake'); }, 420);
+    try { bar.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+    return true;
   }
   function recruitSaveBlockClear() {
-    var old = document.querySelector('#recruitModal .rf-blockbar');
-    if (old) old.remove();
+    Array.prototype.forEach.call(document.querySelectorAll('#recruitModal .rf-blockbar'),
+      function (el) { el.remove(); });
   }
 
   window.campSaveFeedback      = campSaveFeedback;

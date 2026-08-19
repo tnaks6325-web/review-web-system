@@ -19,7 +19,8 @@ ok('프론트 게시 점검은 시트·탭 연결 여부를 검사하지 않는�
     recruit.slice(recruit.indexOf('function participationCheckErrors()'), recruit.indexOf('function renderPartCheck()'))
   ));
 ok('저장 요청이 연결 없음 의도를 명시한다',
-  /linked_tab_mode:\s*tabKey \? "linked" : "unlinked"/.test(recruit));
+  /linked_tab_mode:\s*tabKey \? "linked" : \(_rfExplicitUnlink\(\) \? "unlinked" : "keep"\)/.test(recruit)
+  && /function _rfExplicitUnlink\(\)/.test(recruit));
 ok('연결 없음 선택은 안내 문구와 선택 항목으로 표시된다',
   /시트·탭 연결은 나중에 추가할 수 있습니다/.test(modal)
   && /시트명 <span class="rf-optional">선택<\/span>/.test(modal)

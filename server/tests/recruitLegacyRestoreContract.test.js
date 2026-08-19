@@ -53,10 +53,16 @@ assert.match(
   /const notesEl = document\.getElementById\("rf_notes"\); if \(notesEl\) notesEl\.value = c\.notes \|\| "";/,
   'legacy public notes must be restored only when the active layout renders that field'
 );
+/* ★ 2026-08-19: 종전엔 칸이 없어도 ''를 보내 서버 COALESCE 가 '지움'으로 받았다(저장할 때마다
+   유의사항 삭제) → 입력칸이 있는 화면에서만 전송한다(미전송 = 서버가 기존 값 유지). */
 assert.match(
   FRONT,
-  /notes:\s+String\(document\.getElementById\("rf_notes"\)\?\.value \|\| ""\)\.trim\(\)/,
-  'saving the compact layout must not require the retired public-note field'
+  /const _notesEl = document\.getElementById\("rf_notes"\);\s*\n\s*if \(_notesEl\) payload\.notes = String\(_notesEl\.value \|\| ""\)\.trim\(\);/,
+  'saving the compact layout must omit the retired public-note field instead of blanking it'
+);
+assert.ok(
+  !/notes:\s+String\(document\.getElementById\("rf_notes"\)/.test(FRONT),
+  'the payload literal must not send an empty note when the field is absent'
 );
 assert.match(
   FRONT,
