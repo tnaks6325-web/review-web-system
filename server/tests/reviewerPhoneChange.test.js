@@ -142,9 +142,9 @@ function ok(name, cond, extra) {
       await q(`DELETE FROM reviewer_phone_changes WHERE reviewer_name LIKE '테스트%'`);
       await q(`DELETE FROM campaign_reviewer_gates WHERE campaign_id = $1`, [CID]);
       await q(`DELETE FROM recruit_campaigns WHERE id = $1`, [CID]);
-      await q(`DELETE FROM cs_threads WHERE reviewer_phone8 IN ('85926325','91869944')`);
-      await q(`DELETE FROM reviewer_campaign_editors WHERE phone8 IN ('85926325','91869944')`);
-      await q(`DELETE FROM blacklist WHERE phone IN ('01085926325','01091869944')`);
+      await q(`DELETE FROM cs_threads WHERE campaign_key = 'sheet_rpc'`);
+      await q(`DELETE FROM reviewer_campaign_editors WHERE phone8 IN ('85926325','91869944','55550001')`);
+      await q(`DELETE FROM blacklist WHERE phone IN ('01085926325','01091869944','01055550001')`);
       await q(`DELETE FROM review_index WHERE sheet_id = 'sheet_rpc'`);
       await q(`DELETE FROM order_submissions WHERE sheet_id = 'sheet_rpc'`);
       await q(`DELETE FROM campaign_applications WHERE campaign_id = $1`, [CID]);
