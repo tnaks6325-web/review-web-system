@@ -6436,6 +6436,22 @@ function _pasteIntoSelection(text){
 }
 /* 우클릭 메뉴 — 편집·복사·붙여넣기·되돌리기·배경색을 한 곳에서.
    ★ **body 직속**(표는 가로 스크롤 컨테이너 안이라 그 안에 그리면 잘린다) · onclick 에 시트 문자열 보간 없음. */
+/* 편집이 잠긴 칸에 **왜** 잠겼는지 붙인다 — 흐린 [이 셀 편집] 만 두면 사용자는 원인을 찾을 데가 없다
+   (실제로 "우클릭 편집이 안 된다"는 신고가 이 자리에서 나왔다). 판정 순서 = 칸 성격 → 줄 상태 → 계정 권한. */
+function _cellLockReason(td, r){
+  if(!td) return '';
+  const f=td.getAttribute('data-field')||td.getAttribute('data-cfield')||'';
+  const k=_workdeskStatusKindForField(f);
+  if(k==='review') return '리뷰 제출은 [📎 관리자 수동 리뷰제출]로 처리합니다 — 값을 직접 고칠 수 없습니다';
+  if(k==='payment') return '입금 값은 이 화면에서 직접 수정할 수 없습니다';
+  if(f==='idname'||f==='idphone') return '실제 제출 리뷰어 정보라 수정할 수 없습니다';
+  if(!f) return '번호 칸은 표 구조라 수정할 수 없습니다';
+  if(r&&r.ambiguous) return '같은 주문·신원이 여러 줄이라 편집이 잠겼습니다 — 중복 줄을 먼저 정리해 주세요';
+  if(STATE.role==='advertiser') return '업체 계정은 택배송장 칸만 입력할 수 있습니다';
+  if(!STATE.canEdit) return '열람 전용 계정입니다';
+  if(r&&r.editable===false) return '이 줄은 편집 기준(주문·신원)이 없어 잠겼습니다';
+  return '이 칸은 수정할 수 없습니다';
+}
 function _openCellMenu(x,y,td){
   const m=$('#gcellmenu'); if(!m) return;
   const g=_selectionGrid(); const nCells=g.reduce((n,l)=>n+l.length,0);
@@ -6459,7 +6475,7 @@ function _openCellMenu(x,y,td){
   const menuRowHasOrder=!!(selectedRow&&selectedRow.hasOrder);
   const menuCanOrderDelete=(STATE.role==='master'||STATE.role==='admin');
   m.innerHTML=
-      (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable):'')
+      (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')
     + (manualReview?row('📎','관리자 수동 리뷰제출',"openManualReviewSubmission()"):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')

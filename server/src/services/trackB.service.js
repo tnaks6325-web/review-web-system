@@ -62,8 +62,17 @@ function _deriveAnchor(row) {
   if (row.order_submission_id) return { type: 'order', value: String(row.order_submission_id) };
   if (row.source === 'manual') return { type: 'manual', value: String(row.id) };   // 재투영 면역 물리행
   const ik = row.identity_key || identityKey(_ikFromRow(row));
-  return ik ? { type: 'identity', value: ik } : null;
+  if (ik) return { type: 'identity', value: ik };
+  // ★★ 아직 아무도 배정되지 않은 **빈 준비 자리**(작업표 슬롯·시트 선기입 줄)는 이름·연락처가 없어
+  //    identity 앵커를 만들 수 없다. 종전엔 앵커 없음 = 그 줄 전체 편집 잠금이라, 시트에서 늘 하던
+  //    "빈 줄에 송장·비고를 미리 적어 두기"가 작업보드에서 **구조적으로 불가능**했다(사용자 신고).
+  //    → 물리행 id 를 앵커로 쓴다. 투영 업서트가 (sheet_id, tab_name, seq) 기준이라 그 id 는
+  //    재투영에도 보존되므로 manual 물리행과 **같은 수준으로 안정적**이다(정렬 면역 규율 유지).
+  //  ⚠ 나중에 주문이 붙으면 앵커가 order 로 **승격**한다 — 그때 이 값이 화면에서 사라지지 않도록
+  //    읽는 쪽(workdeskTab)이 물리행 앵커 오버레이를 밑에 깔아 함께 합성한다(아래 `_rowAnchorKey`).
+  return _rowAnchorId(row) ? { type: 'manual', value: _rowAnchorId(row) } : null;
 }
+function _rowAnchorId(row) { return row && row.id != null ? String(row.id) : ''; }
 // 편집 가능 필드 → 형태(bool/text). '_hidden'=제거 오버레이(import행). 화이트리스트(인젝션·형오류 차단).
 const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
@@ -2457,6 +2466,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         ambiguous = true; editable = false; ambiguousCount++;
         if (editMap.has(k)) consumed.add(k);          // 소비 표시(orphan 오분류 방지), 단 미적용
       } else if (editMap.has(k)) { ov = editMap.get(k); consumed.add(k); }
+      // ★ 앵커 승격 대비 — 빈 자리였을 때 **물리행 앵커**로 저장해 둔 값(예: 미리 적어 둔 송장)이
+      //   주문이 붙어 order 앵커로 승격한 뒤에도 화면에서 사라지지 않게 밑에 깔아 합성한다.
+      //   같은 필드는 **현재 앵커 값이 이긴다**(더 나중·더 구체적인 근거). `_hidden` 은 제외 —
+      //   빈 자리를 치웠던 제거 표시가 실제 참여자가 배정된 줄을 숨기면 안 된다.
+      const rowKey = _akey('manual', _rowAnchorId(r));
+      if (!ambiguous && anchor.value !== _rowAnchorId(r) && editMap.has(rowKey)) {
+        const base = { ...editMap.get(rowKey) }; delete base._hidden;
+        ov = { ...base, ...ov }; consumed.add(rowKey);
+      }
     }
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
     const syn = {
@@ -2610,7 +2628,11 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
         ik = identityKey(_ikFromRow(row));
         if (ik) await client.query(`UPDATE campaign_participants SET identity_key=$2 WHERE id=$1 AND identity_key IS NULL`, [row.id, ik]);
       }
-      if (!ik) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+      if (!ik) {
+        // 빈 준비 자리(이름·연락처 없음) — 읽는 쪽과 **같은 규칙**으로 물리행 앵커에 저장한다.
+        //   여기서 거부하면 화면은 편집 가능으로 그리는데 저장만 실패하는 막다른 길이 된다.
+        anchorType = 'manual'; anchorValue = String(row.id);
+      } else {
       const { rows: dup } = await client.query(
         `SELECT COUNT(*)::int AS n FROM campaign_participants
           WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
@@ -2618,6 +2640,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
         [sheetId, tabName, ik]);
       if ((dup[0].n || 0) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_identity' }; }
       anchorType = 'identity'; anchorValue = ik;
+      }
     }
     let vBool = null, vText = null;
     if (kind === 'bool') vBool = (value === true || value === 'true' || value === 1 || value === '1');
@@ -2681,7 +2704,16 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
         [String(by).slice(0, 100), sheetId, tabName, a.type, a.value, f]);
       return rowCount;
     };
-    const revertedPrimary = await doRevert(field); n += revertedPrimary;
+    let revertedPrimary = await doRevert(field); n += revertedPrimary;
+    // 앵커 승격분: 빈 자리였을 때 물리행 앵커로 저장된 값은 읽을 때 합성되므로, 되돌리기도 그쪽을 함께 지운다
+    //   (안 지우면 ↩ 를 눌러도 옛 값이 그대로 다시 보인다).
+    if (a.value !== String(pr[0].id)) {
+      const { rowCount } = await client.query(
+        `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+          WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type='manual' AND anchor_value=$4 AND field=$5 AND reverted_at IS NULL`,
+        [String(by).slice(0, 100), sheetId, tabName, String(pr[0].id), field]);
+      n += rowCount; revertedPrimary += rowCount;
+    }
     // 연동 되돌리기: col:리뷰제출/입금 을 되돌리면 링크된 물리 토글도 함께 되돌림.
     //   ★ primary 가 실제로 되돌렸을 때만 연쇄(독립적으로 토글한 is_submitted 를 무관한 revert 로 지우지 않게).
     const linked = field.indexOf('col:') === 0 ? _linkedToggle(field.slice(4)) : null;
