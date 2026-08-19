@@ -2567,13 +2567,15 @@ async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson) 
 //   단일 tx + 대상행 FOR UPDATE(동일행 직렬화) + revert(활성)→insert(신규, append-only 감사).
 //   부분유니크 uq_participant_edits_active 가 cross-row 레이스 backstop(23505 → concurrent_edit_conflict).
 //   field: 물리필드(_EDIT_FIELD_KIND) 또는 'col:<시트헤더>'(그 탭 실재 컬럼만, text 오버레이) — 물리컬럼 무접촉.
-async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
+/* ★★ 한 건의 편집 = 한 트랜잭션. **커넥션은 호출자가 준다**(일괄 편집이 같은 커넥션을
+ *  재사용해 붙여넣기 한 번에 풀을 고갈시키지 않도록). 로직은 여기 한 벌뿐 —
+ *  단건(editWorkdeskRow)과 일괄(editWorkdeskRowsBatch)이 같은 함수를 탄다(사본 금지).
+ *  decideCache: 같은 배치 안에서 (탭,열) 판정을 재사용(판정은 행과 무관하다). */
+async function _editOneInTx(client, { sheetId, tabName, rowId, field, value, by = 'admin', decideCache = null } = {}) {
   if (!sheetId || !tabName || !rowId || !field) throw new Error('editWorkdeskRow: 필수 인자 누락');
   let kind = _EDIT_FIELD_KIND[field];
   const isCol = !kind && typeof field === 'string' && field.startsWith('col:');
   if (!kind && !isCol) return { ok: false, error: 'field_not_editable', field };
-  const db = getPool();
-  const client = await db.connect();
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
@@ -2639,7 +2641,13 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     let wt = { write: false, reason: 'not_applicable' };
     let prevText = null, hadPrev = null;
     if (isCol) {
-      wt = await _scw.decide(client, { sheetId, tabName, field });
+      // 판정은 (탭, 열)만 보므로 배치 안에서 재사용한다 — 500칸 붙여넣기의 판정 쿼리 500회를 열 수만큼으로 줄인다.
+      const ck = decideCache ? (sheetId + String.fromCharCode(0) + tabName + String.fromCharCode(0) + field) : null;
+      if (ck && decideCache.has(ck)) wt = decideCache.get(ck);
+      else {
+        wt = await _scw.decide(client, { sheetId, tabName, field });
+        if (ck) decideCache.set(ck, wt);
+      }
       if (wt.write) {
         const rj = (row.row_json && typeof row.row_json === 'object') ? row.row_json : {};
         hadPrev  = Object.prototype.hasOwnProperty.call(rj, wt.header);
@@ -2694,7 +2702,53 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
     throw e;
+  }
+}
+
+// 단건 편집 — 커넥션 하나를 잡아 위 함수를 그대로 태운다(동작 불변).
+async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
+  const client = await getPool().connect();
+  try { return await _editOneInTx(client, { sheetId, tabName, rowId, field, value, by }); }
+  finally { client.release(); }
+}
+
+/* ★★ 일괄 편집(붙여넣기) — **왕복 1회 · 커넥션 1개**.
+ *  종전엔 칸마다 요청이 나가 500칸 붙여넣기가 ① 전역 리미터(분당 120)에 잘리고
+ *  ② PG 풀(20)을 고갈시켜 실측 500건 중 419건이 커넥션 타임아웃으로 죽었다.
+ *  ★ 건별 트랜잭션을 순차로 돌린다 — 한 tx 로 묶으면 500행을 동시에 FOR UPDATE 로 잡아
+ *    그동안 주문 유입·투영이 그 행들에서 멈추고, 한 칸이 거부되면 전부 롤백된다.
+ *    붙여넣기는 원래 **칸마다 성패가 갈리는** 조작이라 건별 독립이 의미상으로도 맞다.
+ *  ★ 한 건이 던져도 배치를 죽이지 않는다(그 칸만 실패로 보고) — 화면이 그 칸만 되돌린다. */
+const EDIT_BATCH_MAX = 500;
+async function editWorkdeskRowsBatch({ sheetId, tabName, edits, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('editWorkdeskRowsBatch: 필수 인자 누락');
+  if (!Array.isArray(edits) || edits.length === 0) return { ok: false, error: 'edits_required' };
+  if (edits.length > EDIT_BATCH_MAX) {
+    return { ok: false, error: 'too_many_edits', max: EDIT_BATCH_MAX, got: edits.length };
+  }
+  const client = await getPool().connect();
+  const decideCache = new Map();
+  const results = [];
+  try {
+    for (let i = 0; i < edits.length; i++) {
+      const e = edits[i] || {};
+      const rowId = e.rowId, field = e.field;
+      if (!rowId || !field) { results.push({ index: i, rowId: rowId || null, field: field || null, ok: false, error: 'rowId, field 필수' }); continue; }
+      let r;
+      try {
+        r = await _editOneInTx(client, { sheetId, tabName, rowId, field, value: e.value, by, decideCache });
+      } catch (err) {
+        // 그 건의 tx 는 _editOneInTx 안에서 이미 롤백됐다. 커넥션을 재사용하기 전에 한 번 더 확실히 푼다.
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        logger.warn('[trackB] 일괄 편집 중 개별 실패', { sheetId, tabName, rowId, field, err: err && err.message });
+        r = { ok: false, error: 'edit_failed' };
+      }
+      results.push({ index: i, rowId, field, ...r });
+    }
   } finally { client.release(); }
+  const succeeded = results.filter(r => r.ok).length;
+  return { ok: true, total: results.length, succeeded, failed: results.length - succeeded,
+           wroteRowJson: results.filter(r => r.ok && r.writeThrough).length, results };
 }
 
 // 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
@@ -4264,6 +4318,8 @@ module.exports = {
   workdeskTab,
   setWorkdeskTitle,
   editWorkdeskRow,
+  editWorkdeskRowsBatch,
+  EDIT_BATCH_MAX,
   revertWorkdeskEdit,
   manualWorkdeskReviewSubmit,
   previewWorkdeskOrderDelete,
