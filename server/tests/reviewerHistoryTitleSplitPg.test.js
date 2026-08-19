@@ -4,8 +4,8 @@
  * 스텁 DB 는 SQL 을 해석하지 않는다. 이 건의 핵심은 전부 조건절·조인의 실제 동작이라
  * 여기서만 잡힌다:
  *   1. 참여형(무시트) 주문 + 작업표 링크 → 카드 **1장**(수정 전 코드에서는 2장이 재현된다)
- *   2. 병합 카드 제목 = 연결 작업표 탭 이름(= 색인행 카드와 **같은 문자열**) — 공고 제목을
- *      바꿔도 두 이름으로 갈리지 않는다
+ *   2. 카드 이름 = **지금 적용된 공고 제목**(사용자 확정 2026-08-19) — 색인행 카드·병합 카드가
+ *      같은 문자열이라 제목을 바꿔도 두 이름으로 갈리지 않는다
  *   3. 주문 id dedup 의 스코프 — 남의 작업표 행(다른 phone8)으로 내 카드가 사라지지 않는다
  *   4. 소프트삭제된 작업표 줄은 dedup 근거가 아니다(주문이 다시 보여야 한다)
  *
@@ -25,6 +25,10 @@ const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.PGTEST_URL });
 const svc = require('../src/services/search.service');
+// 제목 조회는 탭당 60초 캐시(리뷰타입·종류와 같은 규율) — 테스트는 매 케이스 캐시를 비운다.
+// ⚠ 운영 함의: 공고 제목을 고치면 리뷰어 화면 반영이 최대 60초 늦다(CAMPAIGN_TITLE_CACHE_MS).
+const titleCtx = require('../src/services/campaignTitleContext.service');
+const resetTitleCache = () => titleCtx.__setPoolForTest(null);
 
 let pass = 0;
 const ta = async (name, fn) => { await fn(); pass++; console.log('  ✓ ' + name); };
@@ -76,6 +80,7 @@ async function schema() {
 }
 
 async function seed() {
+  resetTitleCache();
   await pool.query('TRUNCATE review_index, tab_configs, recruit_campaigns, campaign_applications, order_submissions, campaign_participants');
   await pool.query(
     `INSERT INTO recruit_campaigns(id,title,linked_sheet_id,linked_tab_name,linked_tab_gid)
@@ -105,22 +110,41 @@ async function cards() {
 (async () => {
   await schema();
 
-  await ta('제목을 바꿔도 한 참여 = 카드 1장', async () => {
+  await ta('제목을 바꿔도 한 참여 = 카드 1장 · 이름은 지금 적용된 공고 제목', async () => {
     await seed();
     const c = await cards();
     assert.equal(c.length, 1, `카드 1장이어야 한다(실제: ${JSON.stringify(c)})`);
     assert.equal(c[0].order, false, '남는 카드는 작업표 색인행이다');
-    assert.equal(c[0].title, TAB, '카드 제목은 접수 시점 작업 이름');
+    assert.equal(c[0].title, NEW_TITLE,
+      '색인행 카드도 지금 적용된 공고 제목으로 표기한다(접수 시점 탭 이름 아님)');
   });
 
-  await ta('작업표 링크가 없으면 병합 카드가 뜨되 제목은 색인행과 같다', async () => {
+  await ta('제목을 또 바꾸면 카드 이름도 따라 바뀐다', async () => {
+    await seed();
+    await pool.query("UPDATE recruit_campaigns SET title = '모기위키 모기기피제(2차)' WHERE id = 'c1'");
+    resetTitleCache();
+    const c = await cards();
+    assert.equal(c.length, 1, '이름이 바뀌어도 카드는 1장');
+    assert.equal(c[0].title, '모기위키 모기기피제(2차)', '최신 제목이 그대로 카드 이름');
+  });
+
+  await ta('작업표 링크가 없으면 병합 카드가 뜨되 이름은 색인행과 같다', async () => {
     await seed();
     await pool.query('UPDATE campaign_participants SET order_submission_id = NULL');
     const c = await cards();
     const merged = c.filter(x => x.order);
     assert.equal(merged.length, 1, '링크가 없으면 종전대로 병합된다');
-    assert.equal(merged[0].title, TAB,
-      '병합 카드 제목도 연결 작업표 탭 이름 — 공고 제목(변경본)이 그대로 나오면 두 이름으로 갈린다');
+    assert.equal(merged[0].title, NEW_TITLE, '병합 카드도 같은 제목 — 두 이름으로 갈리지 않는다');
+    assert.deepEqual([...new Set(c.map(x => x.title))], [NEW_TITLE],
+      '두 카드가 같은 문자열이어야 한다');
+  });
+
+  await ta('공고가 연결되지 않은 탭은 종전 탭 표시명으로 접는다', async () => {
+    await seed();
+    await pool.query("UPDATE recruit_campaigns SET linked_sheet_id = 'other', linked_tab_name = 'other'");
+    resetTitleCache();
+    const c = await cards();
+    assert.equal(c[0].title, TAB, '미연결이면 이름이 비지 않고 종전 표시명');
   });
 
   await ta('남의 작업표 행은 내 카드를 지우지 못한다', async () => {

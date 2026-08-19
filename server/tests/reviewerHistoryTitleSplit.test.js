@@ -110,10 +110,10 @@ async function run() {
     '5: 작업표 seq = 색인 row_index 좌표 계약');
   console.log('  5. dedup 조회 스코프 계약 ✓');
 
-  // ── 6) 카드 제목 = 연결 작업표 탭 이름 우선(색인행 카드와 같은 문자열) ──
+  // ── 6) 카드 제목 = **지금 적용된 공고 제목** 우선(색인행 카드와 같은 문자열) ──
   const sqlOrder = orderQuerySql();
-  assert.ok(/COALESCE\(NULLIF\(wt\.display_name, ''\), NULLIF\(wt\.tab_name, ''\)/.test(sqlOrder),
-    '6: 병합 카드 제목은 연결 작업표 탭 이름이 먼저다(rc.title 우선이면 제목 수정 시 두 이름으로 갈린다)');
+  assert.ok(/COALESCE\(NULLIF\(rc\.title, ''\), NULLIF\(wt\.display_name, ''\)/.test(sqlOrder),
+    '6: 병합 카드 제목은 지금 적용된 공고 제목이 먼저다(사용자 확정 2026-08-19)');
   assert.ok(/LEFT JOIN tab_configs wt[\s\S]{0,200}wt\.sheet_id = rc\.linked_sheet_id[\s\S]{0,80}wt\.tab_name = rc\.linked_tab_name/.test(sqlOrder),
     '6: 연결 작업표 탭 조인이 있어야 한다');
   console.log('  6. 카드 제목 단일 출처 ✓');
@@ -123,12 +123,23 @@ async function run() {
     '7: 제목 문자열이 바뀌어도 연결 작업표 좌표로 짝지어져야 한다(제목만 보면 수정 즉시 풀린다)');
   console.log('  7. 제목 변경 내성(좌표 매칭 병기) ✓');
 
-  // ── 8) 접수 시 tab_configs.display_name 은 blank-only — 제목을 따라가지 않는다(전제 고정) ──
+  // ── 8) 색인행 카드도 **같은 출처**로 지금 적용된 공고 제목을 쓴다(사본 금지) ──
+  //   접수 업서트의 display_name 은 blank-only 라 제목을 절대 안 따라간다 → 그 값만 쓰면
+  //   같은 참여가 화면에서 옛 이름으로 남는다(사용자 확정으로 뒤집힌 지점).
   const orderRoutes = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'routes', 'order.routes.js'), 'utf8');
   assert.ok(/display_name\s*=\s*COALESCE\(NULLIF\(tab_configs\.display_name,''\),\s*EXCLUDED\.display_name\)/.test(orderRoutes),
-    '8: 색인행 카드 제목은 접수 시점 고정(blank-only) — 이 전제가 깨지면 이 가드의 의미가 바뀐다');
-  console.log('  8. 색인행 카드 제목 전제 ✓');
+    '8: 접수 업서트의 display_name 은 blank-only(제목을 따라가지 않는다) — 이 전제 위에서 아래를 요구한다');
+  const searchSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'services', 'search.service.js'), 'utf8');
+  const ctUses = (searchSrc.match(/campaignTitlesForTabs\(/g) || []).length;
+  assert.ok(ctUses >= 2,
+    '8: 본검색·폴백 **두 경로 모두** 공고 제목을 조회해야 한다(한쪽만 고치면 화면이 갈린다)');
+  const ctApply = (searchSrc.match(/displayNameTC:\s*_ctMap\.get\(/g) || []).length;
+  assert.ok(ctApply >= 2, '8: 조회만 하고 라벨에 안 쓰면 아무 일도 일어나지 않는다');
+  assert.ok(/_ctMap\.get\(`\$\{row\.sheetId\} \$\{row\.tabName\}`\) \|\| row\.displayName/.test(searchSrc),
+    '8: 미연결·조회 실패는 종전 탭 표시명으로 접는다(이름이 비면 안 된다)');
+  console.log('  8. 색인행 카드도 같은 제목(단일 출처) ✓');
 
   console.log('✅ reviewerHistoryTitleSplit 테스트 전체 통과');
 }

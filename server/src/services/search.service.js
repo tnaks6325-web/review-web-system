@@ -3,6 +3,7 @@ const { logger } = require('../utils/logger');
 const { effectiveCaptureSlots } = require('../utils/captureSlots');
 const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 const { workKindsForTabs } = require('./workKindContext.service');
+const { campaignTitlesForTabs } = require('./campaignTitleContext.service');
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -135,8 +136,8 @@ async function _mergeOrderSubmissions(results, phoneList) {
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               os.tab_gid AS "gid", os.sheet_row AS "sheetRow",
               os.mirror_status AS "mirrorStatus", os.recipient AS "recipientName",
-              COALESCE(NULLIF(wt.display_name, ''), NULLIF(wt.tab_name, ''),
-                       NULLIF(tc.display_name, ''), rc.title) AS "displayNameTC",
+              COALESCE(NULLIF(rc.title, ''), NULLIF(wt.display_name, ''),
+                       NULLIF(wt.tab_name, ''), tc.display_name) AS "displayNameTC",
               COALESCE(rc.title, tc.campaign_name) AS "campaignName",
               tc.manager, tc.review_type AS "reviewType",
               tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
@@ -148,9 +149,10 @@ async function _mergeOrderSubmissions(results, phoneList) {
            ON ca.id = os.campaign_application_id
          LEFT JOIN recruit_campaigns rc
            ON rc.id = ca.campaign_id
-         /* ★ 공고에 연결된 작업표 탭 — 카드 제목의 단일 출처.
-            rc.title 을 먼저 쓰면 색인행 카드(= tab_configs.display_name, 접수 시점 고정)와
-            갈려서 같은 참여가 옛 제목·새 제목 두 이름으로 보인다(2026-08-19 신고). */
+         /* ★ 공고에 연결된 작업표 탭 — 공고가 없을 때의 이름 폴백.
+            카드 이름은 **지금 적용된 공고 제목**이 먼저다(사용자 확정) — 색인행 카드도
+            campaignTitleContext 로 같은 제목을 쓰므로 두 이름으로 갈리지 않는다.
+            (중복 자체는 주문 id dedup 이 막는다 — 이름이 달라도 카드가 늘지 않는다.) */
          LEFT JOIN tab_configs wt
            ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
@@ -452,6 +454,16 @@ async function searchByName(query, phone8, opts = {}) {
         filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
     } catch (_) { _wkMap = new Map(); }
 
+    /* ★★ 카드에 보이는 작업 이름 = **지금 적용된 공고 제목**(2026-08-19 사용자 확정).
+       `tab_configs.display_name` 은 접수 시점 값으로 고정(업서트가 blank-only)이라 관리자가
+       제목을 고쳐도 화면만 옛 이름으로 남아 "다른 작업"으로 읽힌다.
+       ★ 리뷰타입·체험단 종류와 **같은 배치·같은 fail-soft**(조회 실패 = 종전 이름). */
+    let _ctMap = new Map();
+    try {
+      _ctMap = await campaignTitlesForTabs(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+    } catch (_) { _ctMap = new Map(); }
+
     // GAS 호환 결과 변환
     const results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
@@ -479,7 +491,8 @@ async function searchByName(query, phone8, opts = {}) {
       deliveryType: row.deliveryType,
       isBulk:      row.isBulk,
       incomeType:  row.incomeType,
-      displayNameTC: row.displayName,
+      // 공고 제목이 있으면 그것이 이름 — 없으면(미연결·조회 실패) 종전 탭 표시명
+      displayNameTC: _ctMap.get(`${row.sheetId} ${row.tabName}`) || row.displayName,
       ncMode:      row.ncMode,
       folderUrl:   row.folderUrl,
       captureFolderUrl: row.captureFolderUrl,
@@ -641,6 +654,13 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     return !archivedSet.has(row.round);
   });
 
+  // ★ 본검색과 같은 이름을 쓴다(사본 금지 — 폴백 경로만 옛 이름이면 화면이 갈린다)
+  let _ctMap = new Map();
+  try {
+    _ctMap = await campaignTitlesForTabs(
+      filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+  } catch (_) { _ctMap = new Map(); }
+
   const results = filteredRows.map(row => {
     const rowObj = _parseRowJson(row.rowJson);
     return {
@@ -658,7 +678,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     startDate:   row.startDate,
     endDate:     row.endDate,
     round:       row.round,
-    displayNameTC: row.displayName,
+    displayNameTC: _ctMap.get(`${row.sheetId} ${row.tabName}`) || row.displayName,
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
     captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
