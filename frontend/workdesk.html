@@ -509,6 +509,12 @@
   .chk{font-weight:800}.chk.y{color:var(--safe)}.chk.n{color:var(--faint)}
   .ph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   .src{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--card2);color:var(--faint)} .src.manual{background:var(--warn-soft);color:var(--warn)} .src.order{background:var(--accent-soft);color:var(--accent)}
+  /* 참여횟수 배지(명의 기준) — 1회 파랑 / 2회 노랑 / 3회 이상 빨강.
+     ★ 색은 3단계로 끝내고 **숫자가 실제 횟수를 말한다**(4회·5회도 빨강) — 색을 늘리면 한눈에 읽히는 신호가 약해진다.
+     ★ 색은 리터럴 — 테마 토큰이 없는 호스트에 얹혀도 같은 색으로 보인다. */
+  .visit{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:#dbeafe;color:#1d4ed8}
+  .visit.v2{background:#fef3c7;color:#b45309}
+  .visit.v3{background:#fee2e2;color:#b91c1c}
   /* ── 편집 UI ── */
   .ecell{cursor:text;border-bottom:1px dashed transparent;border-radius:3px;padding:1px 3px} .ecell:hover{border-bottom-color:var(--line2);background:var(--card2)}
   .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
@@ -5061,6 +5067,17 @@ function _bcell(r, field, val){   // 제출/입금 토글 셀
   const edited=(r.editedFields||[]).includes(field);
   return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
 }
+/* ★★ 참여자 칸 참여횟수 배지 — 시트 그리드·기본 표 **공용 한 벌**(사본을 두면 한쪽만 안 바뀐다).
+   숫자는 서버가 명의(phone8)별로 센 값(`visitNo`)을 그대로 쓴다 — 화면에서 다시 세지 않는다.
+   ★ 값이 없으면(구버전 백엔드·명의 미상) **아무것도 그리지 않는다** — 모르는 것을 1회로 꾸미지 않는다.
+   ★ 종전 `주문` 배지를 이 배지가 대신하므로, 그 정보(주문 원장 연결 여부)는 **툴팁으로 남긴다**(정보 손실 0). */
+function _visitBadge(r){
+  const n=Number(r&&r.visitNo);
+  if(!Number.isFinite(n)||n<1) return '';
+  const cls=n>=3?'v3':(n===2?'v2':'v1');
+  const link=r.hasOrder?'구매양식 주문과 연결된 줄':'주문 연결 없음(수기 입력 등)';
+  return ` <span class="visit ${cls}" title="이 작업에서 이 계정(명의)의 ${n}번째 참여 — ${link}">${n}회</span>`;
+}
 function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
@@ -5092,7 +5109,7 @@ function renderWorkdesk(wd){
   } else {
     const rows=(wd.roster||[]).map((r,displayIndex)=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${displayIndex+1}</td>`+
       `<td class="gidlock" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}`+
-      `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':''}${_visitBadge(r)}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
       `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
@@ -6024,7 +6041,7 @@ function buildGrid(wd){
     // 빈 슬롯을 찾아 재배정한다. 번호는 브라우저가 정하지 않는다.
     const numberKey=Object.keys(rj).find(k=>/^(번호|no|#)$/i.test(String(k).trim()));
     const canAssignUnslotted=canDeleteOrder && !String(numberKey?rj[numberKey]:'').trim();
-    const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
+    const badge = (r.source==='manual'?' <span class="src manual">수동</span>':'') + _visitBadge(r)
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
     // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
@@ -6878,7 +6895,7 @@ function _cellCopyText(td){
   const dv=td.getAttribute('data-val');
   if(dv!=null) return dv;
   const c=td.cloneNode(true);
-  c.querySelectorAll('.revb,.rdel,.src,.lock').forEach(x=>x.remove());
+  c.querySelectorAll('.revb,.rdel,.src,.visit,.lock').forEach(x=>x.remove());
   const s=(c.textContent||'').trim();
   return s==='—'?'':s;
 }

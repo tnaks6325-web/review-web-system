@@ -2511,6 +2511,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     anchorCount.set(k, (anchorCount.get(k) || 0) + 1);
   }
   const consumed = new Set();
+  /* ★★ 참여횟수(명의 기준) — 이 작업표에서 그 **계정 명의**가 몇 번째 참여인가 (사용자 확정 2026-08-19).
+     단위는 리뷰어(소유자)가 아니라 **명의(phone8)** 다 — 한 사람이 본계정으로 1회, 타계정으로 1회면
+     둘 다 1회이고, 같은 타계정으로 또 참여해야 2회다.
+     ★ 마스킹 **전** 원본 phone8 로 센다 — 광고주 렌즈의 `_mask` 를 거친 뒤 세면 전 줄이 같은 값이 되어
+       숫자가 통째로 무너진다.
+     ★ 명의를 모르는 줄(빈 슬롯·연락처 없음)은 **세지 않는다**(null) — 화면이 배지를 그리지 않는다.
+     ★ 제거 오버레이로 화면에서 빠지는 줄은 세지 않는다(카운트는 `continue` 뒤에서 한다). */
+  const visitSeen = new Map();
   const out = [], hiddenList = [];
   let ambiguousCount = 0;
   for (const r of roster) {
@@ -2549,6 +2557,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
       continue;
     }
+    const _vp8 = String(syn.phone8 == null ? '' : syn.phone8).trim();
+    if (_vp8) { const n = (visitSeen.get(_vp8) || 0) + 1; visitSeen.set(_vp8, n); syn.visitNo = n; }
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
     if (maskPII) { syn.phone8 = _mask(syn.phone8); syn.name = _maskName(syn.name); syn.recipient = _maskName(syn.recipient); }
     if (showEdits) {
