@@ -22,7 +22,7 @@ const { computeChecksum } = require('../utils/checksum');
 const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
-const { fullySheetlessSheetIds } = require('../utils/sheetlessScope');
+const { fullySheetlessSheetIds, REGISTERED_SHEET_IDS_SQL } = require('../utils/sheetlessScope');
 
 // 시스템 탭 키워드 — 제외하지 않고 is_system_tab 플래그만 부여
 const SYSTEM_TAB_KEYWORDS = [
@@ -77,9 +77,8 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
   const startTime = Date.now();
 
   // ── 1) 인덱스 기반 sheet_id 목록 ──
-  const { rows: idRows } = await pool.query(
-    'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
-  );
+  // ★ 열거식은 `sheetlessScope` 단일 출처 — 읽는 범위 진단이 같은 문장을 봐야 관측이 거짓말을 안 한다.
+  const { rows: idRows } = await pool.query(REGISTERED_SHEET_IDS_SQL);
   let sheetIds = [...new Set(idRows.map(r => r.sheet_id))].filter(Boolean);
   const totalRegistered = sheetIds.length;
 
