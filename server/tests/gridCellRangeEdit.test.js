@@ -112,6 +112,14 @@ function buildFakeGrid() {
   return { body, rows, stat };
 }
 
+/* 동기로 해소되는 thenable — 붙여넣기가 묶음을 이어 보내는 체인을 그 자리에서 끝까지 태운다
+   (실제 Promise 를 쓰면 이 가드의 동기 단언이 완료 처리보다 먼저 실행된다). */
+function syncThen(v) {
+  return {
+    then(f) { const r = f ? f(v) : v; return (r && typeof r.then === 'function') ? r : syncThen(r); },
+    catch() { return this; },
+  };
+}
 function makeCtx(fake) {
   const commits = [], toasts = [], batches = [];
   const sandbox = {
@@ -145,13 +153,15 @@ function makeCtx(fake) {
       // 성공 응답을 동기로 흘려 완료 처리(확정 토스트·되돌리기 기록)까지 실제로 태운다
       const resp = { ok: true, total: (body.edits || []).length, succeeded: (body.edits || []).length, failed: 0,
                      results: (body.edits || []).map((e, i) => ({ index: i, rowId: e.rowId, field: e.field, ok: true })) };
-      return { then(f) { f(resp); return { catch() {} }; } };
+      return syncThen(resp);
     },
     _PASTE_MAX: 500,
+    _PASTE_CHUNK: 50,
+    Promise: { resolve: v => syncThen(v) },
     console,
   };
   vm.createContext(sandbox);
-  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_pasteCommitBatch'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_pasteCommitBatch', '_pasteApplyResults'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
   return { sandbox, commits, toasts, batches };
