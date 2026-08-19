@@ -3,8 +3,8 @@
  *
  *   1. transferOwnership — 한 트랜잭션(BEGIN/COMMIT) · 같은 범위만 해제 · 업서트 · 대상 검증 fail-closed.
  *   2. 우선순위 정합 — 시트전체 전개에서 "타 업체 탭지정" 배제(ownedTabsForAdvertiser · advertiserOverview).
- *   3. 라우터 — POST /ownership/transfer 가 adminOrMaster 게이트(staff 재배치 금지).
- *   4. 프론트 배선 — [이관] 버튼 admin 한정 · onclick 인덱스만 · 팝업 body 직속 · Esc 닫힘 · 부분실패 고지.
+ *   3. 라우터 — POST /ownership/transfer 가 internal 게이트(광고주 차단 · AE 허용, 2026-08 사용자 확정).
+ *   4. 프론트 배선 — [이관] 버튼 내부 담당자 한정 · onclick 인덱스만 · 팝업 body 직속 · Esc 닫힘 · 부분실패 고지.
  * 실행: node tests/ownershipTransfer.test.js
  */
 const assert = require('assert');
@@ -107,7 +107,9 @@ async function run() {
   console.log('\n3) 라우트 권한');
   const line = ROUTES.split('\n').find(l => l.includes("router.post('/ownership/transfer'"));
   t('POST /ownership/transfer 존재', !!line);
-  t('★ adminOrMaster 게이트(staff 재배치 금지)', /authMiddleware, adminOrMasterMiddleware/.test(line || ''), line);
+  // ★ 사용자 확정(2026-08): 업체 간 재배치는 AE(staff)도 한다 — 게이트는 internal(광고주 차단).
+  //   authMiddleware 없이 열리는 것(무인증)은 여전히 회귀다.
+  t('★ internal 게이트(광고주 차단 · AE 허용)', /authMiddleware, internalMiddleware/.test(line || ''), line);
   const router = require('../src/routes/trackB.routes');
   const hit = router.stack.filter(l => l.route && l.route.path === '/ownership/transfer' && l.route.methods.post);
   t('라우터 스택에 실제 등록(1건)', hit.length === 1);

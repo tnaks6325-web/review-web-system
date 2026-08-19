@@ -109,9 +109,16 @@ t('nav 에 설정 탭(관리자·AE 양쪽)', (wdk.match(/data-v="settings"/g) |
 t('switchView 분기', /v==='settings'\) renderSettingsView\(\)/.test(wdk));
 t('★ 서버 경로 재기준 — /api/trackb/settings (SSO 토큰이 도달 가능한 유일 경로)',
   /window\.ADMIN_SETTINGS_API\s*=\s*'\/api\/trackb\/settings'/.test(wdk));
-t('★ 패널 노출 = 서버 게이트와 1:1(AE 는 닉네임만 — 작업표 표준열·AI 예시·블랙리스트 관리기준은 adminOrMaster)',
-  // ⚠ 패널이 늘어도 검사 의미는 불변: 관리자 목록에 포함 + AE 는 nickname 하나뿐.
-  /isAdmin \? \[[^\]]*'aisamples'[^\]]*'inspectmsg'[^\]]*\] : \['nickname'\]/.test(wdk));
+t('★ 패널 노출 = 서버 게이트와 1:1(전사 설정은 AE 에게 안 보인다 — 작업표 표준열·AI 예시·안내문구·공지)',
+  // ⚠ 패널이 늘어도 검사 의미는 불변: 관리자 목록에 포함 + **adminOrMaster 인 패널은 AE 목록에 없다**.
+  //   AE 목록 자체는 늘 수 있다(2026-08: gatecriteria = 공고별 참여 리뷰어 관리와 같은 범위로 개방).
+  (() => {
+    const m = /isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdk);
+    if (!m) return false;
+    const adminOnly = ['business', 'aisamples', 'inspectmsg', 'worktable', 'homebanner', 'notice'];
+    return adminOnly.every(p => m[1].includes(`'${p}'`) && !m[2].includes(`'${p}'`))
+      && m[2].includes("'nickname'");
+  })());
 t('모듈 미로드 시 조용히 빈 화면이 아니라 사유를 보여준다',
   /설정 모듈\(js\/admin-settings\.js\)을 불러오지 못했습니다/.test(wdk));
 
