@@ -260,7 +260,10 @@ const ROWS = [
     const body = FE.slice(i, FE.indexOf('function _ptProbeBlock'));
     assert.ok(/year_unknown/.test(body) && /weak_signal/.test(body),
       '두 사유 모두 — weak_signal 을 빼면 연도 없는 표기가 통째로 누락된다');
-    assert.ok(/_ptProbeBlock\(r\)/.test(FE), '렌더가 확인 블록을 그린다');
+    // ★ 파일 전체로 보면 **함수 선언**(`function _ptProbeBlock(r){`)이 대신 통과시킨다
+    //   (변이시험 실측) — 렌더 본문 안에서 호출되는지를 본다
+    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    assert.ok(/\$\{_ptProbeBlock\(r\)\}/.test(rd), '렌더가 확인 블록을 그린다');
     const rb = FE.slice(FE.indexOf('function _ptProbeBlock'), FE.indexOf('async function _ptProbe'));
     assert.ok(/if\(!n\) return ''/.test(rb), '확정할 것이 없으면 안 띄운다');
   });
