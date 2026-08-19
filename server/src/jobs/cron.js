@@ -328,6 +328,35 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 작업표 중복 줄 감시망: 기본 ON · 읽기 전용 ─────────────────────────────
+  //   ★★ 왜 필요한가 — 같은 구매가 표에 여러 줄로 늘어난 사고(2026-08-19 권정현 11줄)를
+  //     **아무도 몰랐다**. 사람이 표를 보다 우연히 발견했다. 기록 경로의 2차 중복 판정이
+  //     최종 방어지만, 그것이 또 뚫려도 알 길이 없는 상태를 없앤다.
+  //   ★ 읽기 전용 — 줄을 내리지도 주문을 취소하지도 않는다. 정리는 사람이 [♻ 중복 줄 정리]로.
+  //   ★ 같은 상태가 이어지면 알리지 않는다(직전 스냅샷과 달라졌을 때만) — 늑대소년 방지.
+  //   ★ 구글시트·GAS 호출 0(DB→DB).
+  //   되돌리기 = Railway `WORKTABLE_DUP_WATCH=0`.
+  if (process.env.WORKTABLE_DUP_WATCH !== '0') {
+    const dwSchedule = process.env.WORKTABLE_DUP_WATCH_SCHEDULE || '17 * * * *';
+    let dwRunning = false;
+    cron.schedule(dwSchedule, async () => {
+      if (dwRunning) return;
+      dwRunning = true;
+      try {
+        const { watchDuplicateRows } = require('../services/worktableDupWatch.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('worktable_dup_watch', () => watchDuplicateRows({ by: 'cron' }));
+        if (r && r.skipped) logger.debug('[CRON-DupWatch] lock busy — 양보');
+        else if (r && r.ok && r.groupCount > 0) {
+          logger.warn(`[CRON-DupWatch] 중복 묶음 ${r.groupCount}개 · 군더더기 ${r.extraRows}줄 (알림 ${r.alerted ? '발신' : '생략 — 직전과 동일'})`);
+        }
+      } catch (err) {
+        // ★ 감시망이 크론을 죽이지 않는다.
+        logger.error(`[CRON-DupWatch] error: ${err.message}`);
+      } finally { dwRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
