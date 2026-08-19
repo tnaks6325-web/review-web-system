@@ -8,6 +8,10 @@ const { rebuildLedgers } = require('./sheetlessLedger.service');
 const { mergeDepositStamps, removeDepositStamp } = require('../utils/depositStamp');
 const { extractAmountNumber } = require('../utils/paymentAmount');
 
+// 직전 후보 산출에서 "앵커가 여러 줄"이라 제외한 행들 — 화면·응답이 사실대로 말하기 위한 값이다
+// (조용히 빼면 담당자가 "왜 N건이 줄었지"를 알 수 없다).
+let _lastAmbiguous = [];
+
 class ManualDepositRepairError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -62,7 +66,24 @@ async function _manual811Candidates(client) {
       ORDER BY r.sheet_id, r.tab_name, r.row_index`);
 
   const uniqueRows = [...new Map(rows.map(r => [`${r.sheetId}\t${r.tabName}\t${r.rowIndex}`, r])).values()];
-  return uniqueRows.map(r => ({
+  // ★★ 한 앵커가 여러 줄을 가리키면 그 앵커 전체를 제외한다 (완화 금지 · 2026-08-19 실사고)
+  //   `order_submission_id` 는 유니크가 아니고 `identity_key` 는 `num:<주문번호>` 라서, 중복 줄이
+  //   생긴 탭에서는 수기 표기 1건이 **여러 줄의 입금 원장**(payment_records·batch_items)으로 승격돼
+  //   "이체 1건 = 입금완료 N건" 이 된다. 어느 줄이 진짜인지 모르면 **한 줄도 만들지 않는다.**
+  const perAnchor = new Map();
+  for (const r of uniqueRows) {
+    const k = `${r.sheetId}\t${r.tabName}\t${r.anchorType}\t${r.anchorValue}`;
+    perAnchor.set(k, (perAnchor.get(k) || 0) + 1);
+  }
+  const ambiguous = uniqueRows.filter(r =>
+    perAnchor.get(`${r.sheetId}\t${r.tabName}\t${r.anchorType}\t${r.anchorValue}`) > 1);
+  const single = uniqueRows.filter(r =>
+    perAnchor.get(`${r.sheetId}\t${r.tabName}\t${r.anchorType}\t${r.anchorValue}`) === 1);
+  _lastAmbiguous = ambiguous.map(r => ({
+    sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
+    anchorType: r.anchorType, anchorValue: r.anchorValue, reviewerName: r.reviewerName || '',
+  }));
+  return single.map(r => ({
     ...r,
     stamp: '8/11',
     sourceKey: `manual-811:${r.editId}`,
@@ -81,7 +102,84 @@ async function previewManual811Transfer() {
         AND status IN ('pending','paid')`,
     [items.map(x => x.sheetId), items.map(x => x.tabName), items.map(x => x.rowIndex)]) : { rows: [] };
   return { ok: true, candidates: items.length, totalAmount: items.reduce((n, x) => n + x.amount, 0),
-    existingBatch: !!existing.length, conflicts: conflicts.length, blocked: items.filter(x => !x.sheetless || !x.depositColKey).length };
+    existingBatch: !!existing.length, conflicts: conflicts.length, blocked: items.filter(x => !x.sheetless || !x.depositColKey).length,
+    // 앵커가 여러 줄을 가리켜 제외한 행 — 조용히 빼지 않는다(중복 줄부터 정리해야 한다는 신호).
+    ambiguous: _lastAmbiguous.length, ambiguousRows: _lastAmbiguous.slice(0, 200) };
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   입금일 오염 진단 (읽기 전용 · 쓰기 쿼리 0)
+   ──────────────────────────────────────────────────────────────────
+   2026-08-19 조사에서 확인된 세 증상을 한 번에 센다.
+     ① 한 수동 입금 마커가 여러 작업표 줄을 가리킴 = 입금일 번짐의 원인
+     ② 리뷰 미작성인데 입금 기록됨
+     ③ 실제 이체 1건인데 입금 원장 N건(같은 사람·같은 날짜 중복 기록)
+   ★ 어떤 것도 고치지 않는다 — 정리는 사람이 결과를 보고 결정한다.
+   ★ 소스별 실패를 뭉뚱그리지 않는다(`*Unavailable`) — 0 으로 꾸미면 "이상 없음"으로 오독된다.
+   ══════════════════════════════════════════════════════════════════ */
+const _ANOMALY_CAP = 300;
+
+async function depositAnomalyReport({ sheetId = '', tabName = '' } = {}) {
+  const scope = [];
+  const params = [];
+  if (sheetId) { params.push(sheetId); scope.push(`sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); scope.push(`tab_name = $${params.length}`); }
+  const whereScope = scope.length ? scope.join(' AND ') : 'TRUE';
+  const out = { ok: true, scope: { sheetId: sheetId || null, tabName: tabName || null }, cap: _ANOMALY_CAP };
+
+  // ① 앵커가 여러 줄을 가리키는 수동 입금 마커
+  try {
+    const { rows } = await pool.query(
+      `SELECT m.sheet_id AS "sheetId", m.tab_name AS "tabName", m.anchor_type AS "anchorType",
+              m.anchor_value AS "anchorValue", m.stamp,
+              count(cp.id)::int AS "rowCount", array_agg(cp.seq ORDER BY cp.seq) AS rows
+         FROM manual_payment_marks m
+         JOIN campaign_participants cp
+           ON cp.sheet_id = m.sheet_id AND cp.tab_name = m.tab_name
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+          AND ((m.anchor_type = 'order'    AND cp.order_submission_id::text = m.anchor_value)
+            OR (m.anchor_type = 'manual'   AND cp.id::text = m.anchor_value)
+            OR (m.anchor_type = 'identity' AND cp.identity_key = m.anchor_value))
+        WHERE ${whereScope.replace(/\b(sheet_id|tab_name)\b/g, 'm.$1')}
+        GROUP BY 1,2,3,4,5
+       HAVING count(cp.id) > 1
+        ORDER BY count(cp.id) DESC
+        LIMIT ${_ANOMALY_CAP}`, params);
+    out.ambiguousMarks = rows;
+    out.ambiguousMarkCount = rows.length;
+    out.ambiguousRowCount = rows.reduce((n, r) => n + (Number(r.rowCount) - 1), 0);   // 번져 나간 줄 수
+  } catch (e) { out.ambiguousUnavailable = e.message; }
+
+  // ② 리뷰 미작성인데 입금 기록된 행
+  try {
+    const { rows } = await pool.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex",
+              reviewer_name AS "reviewerName"
+         FROM review_index
+        WHERE ${whereScope} AND is_submitted = FALSE AND is_submitted2 = 'PAID'
+        ORDER BY sheet_id, tab_name, row_index
+        LIMIT ${_ANOMALY_CAP}`, params);
+    out.paidWithoutSubmit = rows;
+    out.paidWithoutSubmitCount = rows.length;
+  } catch (e) { out.paidWithoutSubmitUnavailable = e.message; }
+
+  // ③ 같은 사람·같은 입금일에 입금 원장이 2건 이상
+  try {
+    const { rows } = await pool.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", reviewer_name AS "reviewerName",
+              (paid_at AT TIME ZONE 'Asia/Seoul')::date AS "paidDate",
+              count(*)::int AS "records", array_agg(row_index ORDER BY row_index) AS rows
+         FROM payment_records
+        WHERE ${whereScope}
+        GROUP BY 1,2,3,4
+       HAVING count(*) > 1
+        ORDER BY count(*) DESC
+        LIMIT ${_ANOMALY_CAP}`, params);
+    out.duplicateLedger = rows;
+    out.duplicateLedgerCount = rows.length;
+  } catch (e) { out.duplicateLedgerUnavailable = e.message; }
+
+  return out;
 }
 
 async function restoreManual811DepositDates({ by = 'payment-repair' } = {}) {
@@ -256,4 +354,4 @@ async function moveDepositDateBetweenRows({ sheetId, tabName, sourceSeqs, target
   };
 }
 
-module.exports = { previewManual811Transfer, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };
+module.exports = { previewManual811Transfer, depositAnomalyReport, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };

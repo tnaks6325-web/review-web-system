@@ -2986,6 +2986,16 @@ router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrM
   } catch (err) { next(err); }
 });
 
+// 입금일 오염 진단 — 읽기 전용(쓰기 쿼리 0). 어떤 것도 고치지 않고 세기만 한다.
+//   ① 앵커가 여러 줄을 가리키는 수동 입금 마커 ② 리뷰 미작성인데 입금 기록 ③ 입금 원장 중복
+router.get('/payment/repair/deposit-anomalies', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    res.json(await manualDepositRepairSvc.depositAnomalyReport({
+      sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
+    }));
+  } catch (err) { next(err); }
+});
+
 router.get('/payment/repair/manual-811-transfer-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await manualDepositRepairSvc.previewManual811Transfer()); }
   catch (err) { next(err); }
