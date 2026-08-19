@@ -8394,7 +8394,7 @@ async function _pmOpenOverlayFix(){
 /* 보류건 — 줄별 근거를 나란히 보여주고 사람이 고르게 한다.
    ★ 판단 사다리(입금 원장 → 리뷰 캡처 → 편집 시각 이전 채워짐)는 **서버가** 계산해 `suggest` 로 준다.
      화면은 추천을 미리 찍어 주기만 하고, 확정은 사람이 누른 값으로 서버에 보낸다. */
-const PM_OVFIX_BASIS={ledger:'입금 원장',review_file:'리뷰 캡처',filled_before_edit:'적은 시각 이전'};
+const PM_OVFIX_BASIS={ledger_same_date:'입금 원장 날짜 일치',ledger:'입금 원장',review_file:'리뷰 캡처',filled_before_edit:'적은 시각 이전'};
 function _pmOvDate(v){ if(!v) return '—'; const d=new Date(v); return isNaN(d)?'—':`${d.getMonth()+1}/${d.getDate()}`; }
 function _pmOvHoldHtml(hold){
   if(!hold.length) return '<div class="muted" style="padding:6px 0">해당 없음</div>';
@@ -8408,8 +8408,14 @@ function _pmOvHoldHtml(hold){
       </label>`;
     }).join('');
     return `<div style="border:1px solid var(--line,#D9E1EC);border-radius:8px;padding:10px 12px;margin-bottom:10px">
-      <div style="margin-bottom:6px"><b>${esc(g.tabName)}</b> · ${esc(g.reviewerName||'')} · 값 <b>${esc(g.stamp)}</b>
-        <span class="muted"> — ${esc(g.holdReason||'')}</span></div>
+      <div style="margin-bottom:4px"><b>${esc(g.tabName)}</b> · ${esc(g.reviewerName||'')} · 값 <b>${esc(g.stamp)}</b></div>
+      <div class="muted" style="margin-bottom:6px">
+        ${esc(g.groupReason||'')}<br>
+        <b>고르는 것</b>: 직원이 적은 <b>${esc(g.stamp)}</b> 가 <b>어느 줄의 것인지</b>를 정합니다.
+        고른 줄에만 그 값이 남고, 나머지 줄에서는 사라집니다.
+        <span style="color:var(--warn,#B45309)">확신이 없으면 <b>고르지 않음</b>으로 두세요 — 그대로 보류됩니다.</span>
+        <span style="display:block;margin-top:2px">막힌 이유: ${esc(g.holdReason||'')}</span>
+      </div>
       ${g.suggest?`<div class="muted" style="margin-bottom:6px">추천: <b>${esc(g.suggest.rowIndex)}번</b> (${esc(PM_OVFIX_BASIS[g.suggest.basis]||g.suggest.basis)}) — ${esc(g.suggestReason||'')}</div>`
         :'<div class="muted" style="margin-bottom:6px">근거로 좁혀지지 않았습니다 — 아래 은행 이체결과와 대조해 직접 고르세요.</div>'}
       ${_pmOvBankHtml(g)}
@@ -8447,7 +8453,8 @@ async function _pmApplyOverlayFix(){
   const R=STATE.pmOvFix; if(!R) return;
   const s2=R.summary||{}, t=STATE.cur;
   const picks=_pmOvDecisions();
-  if(!confirm(`${Number(s2.actionableGroups||0)}건${picks.length?` + 직접 고른 ${picks.length}건`:''}을 복원합니다.\n\n· 원래 줄 ${Number(s2.keepRows||0)}개에 직원이 적은 값을 그대로 새깁니다\n· 번져 나간 줄 ${Number(s2.clearRows||0)}개에서 그 값을 지웁니다\n· 입금 원장이 있는 ${Number(s2.ledgerBlockedRows||0)}줄은 건드리지 않습니다\n· 보류 ${Number(s2.holdGroups||0)}건은 그대로 둡니다\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+  const holdLeft=Math.max(0,Number(s2.holdGroups||0)-picks.length);
+  if(!confirm(`자동 판정 ${Number(s2.actionableGroups||0)}건${picks.length?`, 보류건 중 화면에서 줄을 고른 ${picks.length}건`:''}을 복원합니다.\n\n· 원래 줄 ${Number(s2.keepRows||0)}개에 직원이 적은 값을 그대로 새깁니다\n· 번져 나간 줄 ${Number(s2.clearRows||0)}개에서 그 값을 지웁니다\n· 입금 원장이 있는 ${Number(s2.ledgerBlockedRows||0)}줄은 건드리지 않습니다\n· 아직 고르지 않은 보류 ${holdLeft}건은 그대로 둡니다\n\n이 작업은 되돌릴 수 없습니다.`)) return;
   const body={confirm:true,decisions:_pmOvDecisions()};
   if(t&&t.sheetId) body.sheetId=t.sheetId;
   if(t&&t.tabName) body.tabName=t.tabName;

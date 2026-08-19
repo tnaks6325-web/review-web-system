@@ -165,9 +165,9 @@ function row(o) {
   assert.equal(out.keptRows, 2); assert.equal(out.clearedRows, 2);
 
   /* 11. 보류건 판단 사다리 — 추천은 하되 자동 확정하지 않는다 */
-  //  ① 입금 원장이 1줄에만
+  //  ① 입금 원장이 1줄에만 (날짜는 몰라도 원장 자체가 1줄이면 그 줄)
   pool = makePool([
-    row({ rowId: 'a', rowIndex: 1, hasLedger: true, ledgerPaidAt: '2026-08-11T00:00:00Z' }),
+    row({ rowId: 'a', rowIndex: 1, hasLedger: true, ledgerPaidAt: null }),
     row({ rowId: 'b', rowIndex: 2 }),
   ]);
   svc = install(pool);
@@ -175,6 +175,16 @@ function row(o) {
   assert.equal(pv.items[0].hold, 'no_submitted_row', '11a: 자동 확정 규칙은 그대로(보류 유지)');
   assert.equal(pv.items[0].suggest.rowIndex, 1, '11b: 입금 원장 있는 줄을 추천');
   assert.equal(pv.items[0].suggest.basis, 'ledger');
+
+  //  ①-a 원장이 2줄이어도 **날짜가 표기와 같은 줄**이 1개면 그 줄(실사용 신고 케이스)
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, hasLedger: true, ledgerPaidAt: '2026-08-11T00:00:00Z' }),
+    row({ rowId: 'b', rowIndex: 2, hasLedger: true, ledgerPaidAt: null }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].suggest.basis, 'ledger_same_date', '11a2: 날짜 일치가 최상위 근거');
+  assert.equal(pv.items[0].suggest.rowIndex, 1);
   assert.equal(pool.writes.length, 0, '11c: 추천만으로는 아무것도 쓰지 않는다');
 
   //  ② 리뷰 캡처가 1줄에만
@@ -306,6 +316,46 @@ function row(o) {
   assert.equal(g박.bank.unmatched[0].name, '박', '13l: 남의 미확인 이체가 섞이면 안 된다');
   assert.equal(g최.bank.matched[0].rowIndex, 70, '13m: 각 그룹은 자기 참여자 것만 본다');
   assert.equal(g최.bank.unmatched[0].name, '최');
+
+  /* 14. 실사용 신고 재현 (2026-08-19) — "왜 근거로 좁혀지지 않는지 모르겠다"
+     장수돌침대 900건: 57번 원장 8/11 · 434번 원장 날짜없음. 둘 다 리뷰제출·캡처 ✓.
+     종전 사다리는 "원장이 있는가"만 봐서 둘 다 ✓ → 보류로 떨어뜨렸다(명백한 답을 놓침). */
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 57, name: '정은혜', submitted: true, hasReviewFile: true,
+          hasLedger: true, ledgerPaidAt: '2026-08-11T01:00:00Z', firstSeenAt: '2026-07-23T00:00:00Z',
+          createdAt: '2026-08-11T09:00:00Z' }),
+    row({ rowId: 'b', rowIndex: 434, name: '정은혜', submitted: true, hasReviewFile: true,
+          hasLedger: true, ledgerPaidAt: null, firstSeenAt: '2026-08-07T00:00:00Z',
+          createdAt: '2026-08-11T09:00:00Z' }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].hold, 'multiple_submitted_rows', '14a: 자동 확정은 여전히 보류(규칙 불변)');
+  assert.ok(pv.items[0].suggest, '14b: 그러나 이제 추천은 나온다 — 원장 날짜가 표기와 같은 날');
+  assert.equal(pv.items[0].suggest.rowIndex, 57, '14c: 8/11 에 입금된 줄이 그 표기의 주인이다');
+  assert.equal(pv.items[0].suggest.basis, 'ledger_same_date');
+  assert.ok(pv.items[0].groupReason, '14d: 왜 이 줄들이 한 묶음인지 말해야 한다');
+
+  //  원장 날짜가 둘 다 표기와 같으면 여전히 좁히지 않는다(억지로 고르지 않는다)
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, hasLedger: true, ledgerPaidAt: '2026-08-11T01:00:00Z' }),
+    row({ rowId: 'b', rowIndex: 2, hasLedger: true, ledgerPaidAt: '2026-08-11T05:00:00Z' }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].suggest, null, '14e: 같은 날 원장이 2줄이면 추천 없음');
+
+  //  표기가 8/12 인데 원장이 8/11 이면 그 줄이 아니다(날짜를 실제로 대조한다)
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, stamp: '8/12', hasLedger: true, ledgerPaidAt: '2026-08-11T01:00:00Z' }),
+    row({ rowId: 'b', rowIndex: 2, stamp: '8/12', hasLedger: true, ledgerPaidAt: '2026-08-12T01:00:00Z' }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].suggest.rowIndex, 2, '14f: 표기 날짜와 같은 날 입금된 줄을 고른다');
+
+  //  묶인 이유가 종류별로 다르게 설명된다
+  assert.match(pv.items[0].groupReason, /같은 주문/, '14g: order 앵커는 중복 줄이라고 말한다');
 
   console.log('deposit overlay bank evidence passed');
   console.log('deposit overlay hold-decision rules passed');
