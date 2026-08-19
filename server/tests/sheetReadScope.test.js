@@ -43,6 +43,21 @@ t('1c ★ 제외 게이트도 사본 없이 같은 함수', () => {
   assert.ok(!/HAVING\s+BOOL_AND/i.test(svcSrc), '★ 진단에 게이트 SQL 사본이 생겼다');
 });
 
+t('1d ★★ db/pool 을 구조분해로 가져오지 않는다(레포 전체) — 그 모듈은 풀 자체를 export 한다', () => {
+  // 실측(2026-08-19): `const { getPool } = require('../db/pool')` 는 undefined → 호출 순간 TypeError →
+  // 마스킹된 500("서버 오류가 발생했습니다"). 스텁을 편의 모양으로 감싸면 테스트가 이걸 가려 준다.
+  const dir = path.join(__dirname, '..', 'src');
+  const bad = [];
+  (function walk(d) {
+    for (const f of fs.readdirSync(d, { withFileTypes: true })) {
+      const fp = path.join(d, f.name);
+      if (f.isDirectory()) walk(fp);
+      else if (f.name.endsWith('.js') && /\{[^}]*\}\s*=\s*require\((['"])[^'"]*db\/pool\1\)/.test(fs.readFileSync(fp, 'utf8'))) bad.push(fp);
+    }
+  })(dir);
+  assert.strictEqual(bad.length, 0, '★ 구조분해 import: ' + bad.join(', '));
+});
+
 console.log('\n[2] 읽기 전용');
 t('2a 쓰기 쿼리 0 · 시트/Drive API 0', () => {
   assert.ok(!/\b(INSERT|UPDATE|\bDELETE\s+FROM\b|ALTER|DROP)\b/i.test(svcSrc), '★ 진단이 쓰기를 한다');
@@ -63,7 +78,9 @@ function withStub(rows, run) {
     if (/FROM raw_sheet_tabs/.test(sql)) return { rows: rows.mir || [] };
     throw new Error('예상 못한 쿼리: ' + sql.slice(0, 60));
   } };
-  require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: { getPool: () => stub, pool: stub } };
+  // ★★ 스텁은 **실제 모듈과 같은 모양**이어야 한다 — `db/pool` 은 풀 자체를 export 한다.
+  //   `{ getPool }` 같은 편의 모양으로 감싸면 잘못된 import(구조분해)를 가려 준다(2026-08-19 실측 500).
+  require.cache[poolPath] = { id: poolPath, filename: poolPath, loaded: true, exports: stub };
   delete require.cache[require.resolve('../src/services/sheetReadScope.service')];
   delete require.cache[require.resolve('../src/utils/sheetlessScope')];
   const svc = require('../src/services/sheetReadScope.service');
