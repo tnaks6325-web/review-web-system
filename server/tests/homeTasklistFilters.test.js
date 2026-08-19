@@ -131,10 +131,13 @@ const thCount = (thead.match(/<th[>\s]/g) || []).length;   // <thead 오계수 �
 const tb = html.indexOf('<tbody>');
 const firstRow = html.slice(tb, html.indexOf('</tr>', tb));   // 헤더의 </tr> 을 집지 않게 tbody 뒤에서 탐색
 const tdCount = (firstRow.match(/<td/g) || []).length;
-t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 10, `th=${thCount} td=${tdCount}`);
+t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 12, `th=${thCount} td=${tdCount}`);
+// 2026-08-19 사용자 확정: 목록에서 바로 공유 주소를 복사하는 [🔗 링크] 열이 작업표 옆에 붙었다.
+t('공유 열이 작업표 바로 뒤(작업표=내가 연다 / 공유=남에게 보낸다)',
+  /작업표<\/th>\s*<th[^>]*>공유<\/th>/.test(thead));
 t('v3 헤더열 — 작업표·저장폴더·모집공고·오늘완료·마감이 독립 열',
   /<th class="wbl-c">작업표<\/th>/.test(thead) && /저장폴더/.test(thead) && /모집공고/.test(thead) && /오늘완료/.test(thead) && /<th class="wbl-c">마감<\/th>/.test(thead));
-t('작업표 열이 작업명↔담당 사이(사용자 확정)', /작업명<\/th><th class="wbl-c">작업표<\/th><th>담당/.test(thead.replace(/\s+/g, '')) || /작업명[\s\S]{0,40}작업표[\s\S]{0,40}담당/.test(thead));
+t('작업표 열이 작업명↔담당 사이(사용자 확정)', /작업명[\s\S]{0,60}작업표[\s\S]{0,60}담당/.test(thead));
 t('히어로 "진행 중 작업" 단일 writer 유지', hero.textContent === '2');
 // 현영 비활성(사용자 확정): 숨기지 않고 옅은색 + 클릭 불가 + 사유
 const rowNone = html.slice(html.indexOf('공고없는탭'), html.indexOf('</tr>', html.indexOf('공고없는탭')));
@@ -174,7 +177,7 @@ sandbox._finRenderList();
 t('보관함에는 스위치 없음 + 필터 무시', !/wbl-sw/.test(host.innerHTML) && /끝난탭/.test(host.innerHTML));
 const finTb = host.innerHTML.indexOf('<tbody>');
 t('보관함 행도 칸 수 동일(빈 칸 유지 — 열 수가 사람·모드마다 달라지지 않는다)',
-  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 10);
+  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 12);
 sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = '';
 t('탭 전환이 필터를 초기화한다', (sandbox._finPickTab('fin'), sandbox.STATE.finFilter === ''));
 
@@ -281,20 +284,27 @@ const svc = require('../src/services/trackB.service');
   tabRow = { folder_url: null, capture_slots: null, income_type: '현영' };
   r4 = await call({ sheetId: 'S1', tabName: 'D' });
   t('리뷰 폴더 없음 = 자동 생성 시점 안내', r4.out.ok === false && /리뷰 폴더가 아직 없습니다/.test(r4.out.error));
-  // ⑥ staff 스코프 — 담당 밖 탭은 403(폴더 URL 도 스코프 밖으로 새지 않는다)
-  //   ★★ **캐시가 채워진 키로도** 확인한다(코드리뷰가 잡은 테스트 공백): 종전 검사는 한 번도 캐시되지
-  //     않은 탭명을 써서, 캐시 히트가 스코프 게이트를 건너뛰던 구멍을 통과시켰다. admin 으로 먼저
-  //     같은 키를 성공시켜 캐시를 데운 뒤 담당 밖 staff 로 부른다.
+  // ⑥ AE(staff) 범위 — ★★ **사용자 확정 2026-08-19: AE 는 담당이 아니어도 전부 연다.**
+  //   종전 이 자리는 "담당 밖 = 403" 을 고정했지만, 그때 이미 `/workdesk`(작업보드 본문)·`/tabs`
+  //   (작업 목록)가 `allowAllStaff` 로 전체를 열어 주고 있어 **폴더 버튼만 막는 반쪽 규칙**이었다.
+  //   지금은 라우트가 그 사실을 주석으로 못박고 있고(“staff는 작업보드 전체 운영 권한”), 이 가드도
+  //   같은 규칙을 고정한다. ★ 좁히기로 되돌린다면 `/workdesk`·`/tabs`·공유 링크와 **함께** 좁혀야 한다.
+  //   ★ 남은 경계는 **광고주 차단**이고 그것은 핸들러가 아니라 라우터 단계(internalMiddleware)가 맡는다
+  //     — 아래에서 미들웨어가 핸들러보다 앞에 있음을 스택으로 고정한다(캐시가 그 앞을 우회할 수 없다).
   tabRow = { folder_url: 'https://drive.google.com/drive/folders/rv9', capture_slots: null, income_type: '현영' };
   driveFound = { id: 'sub9', webViewLink: 'https://drive.google.com/drive/folders/sub9' };
   const warm = await call({ sheetId: 'S1', tabName: 'E' });
   t('캐시 워밍(admin) 성공', warm.out.ok === true && /sub9/.test(warm.out.url || ''));
-  const origScope = svc.canAccessTab;
-  svc.canAccessTab = async () => false;
   r4 = await call({ sheetId: 'S1', tabName: 'E' }, { role: 'staff', name: 'AE1' });
-  t('★★ staff 담당 밖 = 403 — **캐시된 탭에서도**(캐시가 스코프를 우회하지 않는다)',
-    r4.status === 403 && r4.out.ok === false && !r4.out.url);
-  svc.canAccessTab = origScope;
+  t('★★ AE 는 담당이 아니어도 연다 — 캐시된 탭에서도 작업보드와 같은 규칙(사용자 확정)',
+    r4.status === 200 && r4.out.ok === true && /sub9/.test(r4.out.url || ''));
+  t('★ 담당 스코프 판정을 이 라우트가 따로 만들지 않는다(작업보드와 갈리는 두 번째 기준 금지)',
+    !/tab-folders'[\s\S]{0,2600}canAccessTab/.test(ROUTES));
+  {
+    const idxInternal = names.indexOf('internalMiddleware');
+    t('★ 광고주 차단은 라우터 단계 — internalMiddleware 가 핸들러보다 앞(캐시가 그 앞을 우회할 수 없다)',
+      idxInternal > -1 && idxInternal < names.length - 1, names.join(','));
+  }
   // ⑦ DB 예외 = fail-soft 200
   pool.query = async () => { throw new Error('db down'); };
   r4 = await call({ sheetId: 'S1', tabName: 'F' });

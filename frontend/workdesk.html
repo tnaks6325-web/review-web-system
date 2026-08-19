@@ -796,6 +796,15 @@
   .btn.xs{font-size:11px;padding:3px 9px}
   /* ── 그리드 제거 × · 편집 이력 모달 ── */
   .rdel{margin-left:6px;padding:1px 5px;border:1px solid color-mix(in srgb,var(--bad) 35%,var(--line));border-radius:5px;background:var(--card);color:var(--bad);font:700 10.5px/1.35 inherit;cursor:pointer;opacity:0;transition:opacity .12s,background .12s,border-color .12s} tr:hover .rdel,.rdel:focus-visible{opacity:1}.rdel:hover{background:var(--bad-soft);border-color:var(--bad)}.rdel:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* 공유 링크 복사 완료 — 화면 중앙에서 천천히 사라지는 알림(사용자 확정 2026-08-19).
+     ★ pointer-events:none — 알림이 떠 있는 동안에도 화면 조작이 막히지 않는다.
+     ★ 애니메이션이 끝나면 요소를 제거한다(잔재가 클릭을 먹지 않게). */
+  #shlOk{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  #shlOk .shlbox{background:rgba(17,24,39,.92);color:#fff;padding:16px 28px;border-radius:14px;font-size:15px;font-weight:750;
+    letter-spacing:-.2px;box-shadow:0 12px 34px rgba(0,0,0,.3);animation:shlFade 1.9s ease forwards}
+  @keyframes shlFade{0%{opacity:0;transform:scale(.94)}12%{opacity:1;transform:scale(1)}55%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+  @media (prefers-reduced-motion:reduce){ #shlOk .shlbox{animation:shlFadeR 1.9s linear forwards} }
+  @keyframes shlFadeR{0%{opacity:0}8%{opacity:1}60%{opacity:1}100%{opacity:0}}
   .modalov{position:fixed;inset:0;background:rgba(15,35,42,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px}
   .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
@@ -2008,6 +2017,21 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-chk input{margin-top:2px}
 .wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+/* 줄별 [⋯] 더보기 — **body 직속**(표는 가로 스크롤 컨테이너라 안에 그리면 잘린다: 공고 카드 [⋯]와 같은 처방).
+   ★ 색은 리터럴 폴백을 함께 둔다(테마 변수 없는 호스트에서도 같은 모양). */
+.wbl-menu{position:fixed;z-index:9500;min-width:168px;background:var(--card,#fff);border:1px solid var(--line,#e5e7eb);
+  border-radius:10px;box-shadow:0 14px 34px rgba(16,24,40,.18);padding:5px;font-size:12px}
+.wbl-menu button{display:block;width:100%;text-align:left;padding:7px 10px;border:0;background:transparent;
+  border-radius:7px;font-size:12px;color:var(--ink,#111827);cursor:pointer}
+.wbl-menu button:hover{background:var(--card2,#f3f4f6)}
+.wbl-menu button.danger{color:#b42318}
+/* 🗑 작업 삭제 확인창 — 지워질 표 목록이 길어 기본 460px·무한 높이로는 읽을 수 없다.
+   ★ flex 자식 min-height:0 이 없으면 스크롤이 안 생긴다(레포 상습 함정). */
+#tdOv .wbl-dlg{width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column}
+#tdOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#tdOv .tdrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px}
+#tdOv .tdrow b{font-variant-numeric:tabular-nums}
+#tdOv .tdbad{margin-top:10px;padding:10px 12px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
 /* ⚠중복 진단 — 표가 7칸이라 기본 460px 로는 가로가 잘린다. **이 모달에만** 넓힘(다른 wbl 모달 불변).
    ★ flex 자식은 기본 min-height:auto 라 min-height:0 이 없으면 본문이 늘어나 스크롤이 안 생긴다. */
 #abOv .wbl-dlg{width:min(1040px,100%);max-height:86vh;display:flex;flex-direction:column}
@@ -2276,13 +2300,34 @@ async function _consumeShare(){
    ★★ 링크는 권한이 아니다 — 받은 사람은 평소대로 로그인해야 하고, 담당 범위 밖이면 서버가 막는다.
    ★ 클립보드는 브라우저·권한에 따라 **조용히 실패**한다 → 성공 여부와 무관하게 주소를 팝업으로
      보여 손으로도 복사할 수 있게 한다(조용한 실패 금지). 팝업은 body 직속(스크롤 컨테이너 밖).       */
+// ★★ 클릭 = 즉시 복사(사용자 확정 2026-08-19) — 주소를 눈으로 확인할 일이 없어 팝업을 거치지 않는다.
+//   성공하면 화면 중앙에 "복사되었습니다"가 천천히 사라진다. **복사가 막힌 경우에만** 주소 팝업을
+//   띄운다(조용한 실패 금지 — 복사된 줄 알고 빈 메시지를 보내는 것이 가장 나쁘다).
 async function _shareLinkCopy(body, title){
   let r=null; try{ r=await api('/api/trackb/share-link',{method:'POST',body:JSON.stringify(body)}); }catch(_){ r=null; }
   if(!r||!r.ok){ alert('링크를 만들지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
   const url=location.origin+location.pathname+'#w='+r.code;
-  let copied=false;
-  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(url); copied=true; } }catch(_){ copied=false; }
-  _shareLinkPopup(title, url, copied);
+  if(await _copyText(url)){ _shareLinkOk('링크가 복사되었습니다'); return; }
+  _shareLinkPopup(title, url, false);   // 자동 복사가 막힌 경우에만 — 손으로 복사할 길을 남긴다
+}
+// 복사 단일 출처: Clipboard API → 막히면 임시 textarea + execCommand 폴백(비보안 오리진·구브라우저).
+async function _copyText(t){
+  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(t); return true; } }catch(_){ }
+  try{ const ta=document.createElement('textarea'); ta.value=t;
+    ta.setAttribute('readonly',''); ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta); ta.select(); const okc=document.execCommand('copy'); ta.remove(); return !!okc;
+  }catch(_){ return false; }
+}
+// 화면 중앙 페이드아웃 알림 — body 직속(스크롤 컨테이너 밖) · 애니메이션 끝나면 제거(잔재 금지).
+function _shareLinkOk(msg){
+  const prev=document.getElementById('shlOk'); if(prev) prev.remove();   // 연타 시 겹치지 않게
+  const el=document.createElement('div'); el.id='shlOk';
+  el.innerHTML='<div class="shlbox"></div>';
+  el.firstChild.textContent=msg;   // ★ textContent — 문자열 보간 금지
+  document.body.appendChild(el);
+  const kill=()=>{ if(el.parentNode) el.remove(); };
+  el.firstChild.addEventListener('animationend', kill);
+  setTimeout(kill, 2600);   // 애니메이션 이벤트가 안 와도(탭 비활성 등) 반드시 사라진다
 }
 function _shareLinkPopup(title, url, copied){
   let ov=document.getElementById('shlov');
@@ -2293,7 +2338,7 @@ function _shareLinkPopup(title, url, copied){
   ov.innerHTML=`<div class="modalbox" style="width:560px"><div class="modalhd"><b>🔗 ${esc(title)}</b>
       <span style="flex:1"></span><button class="btn xs" onclick="document.getElementById('shlov').remove()">닫기</button></div>
     <div class="modalbd">
-      <div style="font-size:12px;color:#64748b;margin-bottom:6px">${copied?'주소를 복사했습니다 — 메신저에 그대로 붙여넣으세요.':'자동 복사가 막혀 있습니다 — 아래 주소를 직접 복사하세요.'}</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:6px">${copied?'주소를 복사했습니다 — 메신저에 그대로 붙여넣으세요.':'자동 복사가 브라우저에서 막혔습니다 — 아래 주소를 직접 복사해 주세요.'}</div>
       <input id="shlUrl" readonly value="${esc(url)}" onclick="this.select()"
              style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box">
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -2303,17 +2348,18 @@ function _shareLinkPopup(title, url, copied){
   const i=document.getElementById('shlUrl'); if(i){ i.focus(); i.select(); }
 }
 function _shareLinkCopyAgain(){ const i=document.getElementById('shlUrl'); if(!i) return; i.select();
-  let ok=false; try{ ok=document.execCommand('copy'); }catch(_){ ok=false; }
-  if(ok){ toast('주소를 복사했습니다'); return; }
-  if(navigator.clipboard){ navigator.clipboard.writeText(i.value)
-    .then(()=>toast('주소를 복사했습니다')).catch(()=>toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요')); return; }
-  toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요');
-}
+  _copyText(i.value).then(okc=>{ if(okc){ const o=document.getElementById('shlov'); if(o) o.remove(); _shareLinkOk('링크가 복사되었습니다'); }
+    else toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요'); }); }
 // 작업보드 상단 [🔗 링크 복사] — 지금 보고 있는 작업 하나로 직행하는 주소.
 function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
   const m=(STATE.wd&&STATE.wd.meta)||{};
   _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
                  '작업보드 링크 — '+(m.displayName||t.displayName||t.tabName||'')); }
+// 홈 작업목록 [🔗 링크] — 그 줄 작업의 공유 주소. 작업보드를 열지 않고 목록에서 바로 복사한다.
+//   ★ 인덱스만 넘긴다(시트에서 온 작업명을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다).
+function copyTaskLinkFromHome(i){ const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
+  _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
+                 '작업보드 링크 — '+(t.displayName||t.tabName||'')); }
 // 업체관리 [🔗 이 업체 링크 복사] — 그 업체의 작업 목록으로 직행하는 주소(광고주 접속 링크와 다르다).
 function copyAdvertiserLink(){ const a=STATE.advCur; if(!a){ toast('업체를 먼저 선택하세요'); return; }
   _shareLinkCopy({ kind:'advertiser', advertiserId:a.id }, '업체 링크 — '+(a.name||'')); }
@@ -4613,6 +4659,129 @@ function _nsBadge(t){
     ? ' <span class="ns-b" title="구글시트를 쓰지 않는 작업입니다 — 표가 곧 원본이고, 시트를 열 필요가 없습니다">무시트</span>'
     : '';
 }
+/* ══════════════════════════════════════════════════════════════════════════
+   줄별 [⋯] 더보기 → [🗑 작업 삭제] (admin/master 전용, 사용자 확정 2026-08-19)
+   ★★ 서버 게이트(adminOrMaster)와 1:1 — AE·광고주에게는 **버튼 자체를 그리지 않는다**
+     (눌러도 403 인 막다른 길 금지). 칸은 항상 만든다(열 수가 사람마다 달라지면 눈이 헤맨다).
+   ★ onclick 에는 **인덱스만** 넘긴다 — 시트에서 온 탭명을 문자열로 넣으면 따옴표 하나로 탈출된다.
+   ══════════════════════════════════════════════════════════════════════════ */
+function _taskDelAllowed(){ return STATE.role==='master'||STATE.role==='admin'; }
+function _taskMoreCell(i){
+  return `<td class="wbl-c wbl-btncol">${_taskDelAllowed()
+    ? `<button class="wbl-b" onclick="event.stopPropagation();openTaskMenu(${i},this)" title="이 작업의 추가 도구">⋯</button>` : ''}</td>`;
+}
+let _tmBound=false;
+function _closeTaskMenu(){ const m=document.getElementById('tmMenu'); if(m) m.remove(); }
+function openTaskMenu(i,el){
+  const cur=document.getElementById('tmMenu'), same=cur&&cur.dataset.i===String(i);
+  _closeTaskMenu(); if(same) return;                     // 같은 버튼 재클릭 = 닫기
+  if(!_taskDelAllowed()) return;
+  const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
+  const m=document.createElement('div'); m.className='wbl-menu'; m.id='tmMenu'; m.dataset.i=String(i);
+  m.innerHTML=`<button class="danger" onclick="event.stopPropagation();openTaskDelete(${i})">🗑 작업 삭제</button>`;
+  document.body.appendChild(m);
+  const r=el.getBoundingClientRect(), w=m.offsetWidth||168, h=m.offsetHeight||44;
+  let top=r.bottom+4; if(top+h>window.innerHeight-8) top=Math.max(8,r.top-h-4);   // 아래가 좁으면 위로 뒤집는다
+  m.style.top=top+'px';
+  m.style.left=Math.max(8,Math.min(window.innerWidth-w-8,r.right-w))+'px';
+  // ★ 항목 onclick 이 stopPropagation 하므로 document 리스너까지 닿지 않는다 → 자기 자신에게 캡처 단계로 건다.
+  m.addEventListener('click',()=>setTimeout(_closeTaskMenu,0),true);
+  if(!_tmBound){ _tmBound=true;                          // ★ 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
+    document.addEventListener('click',e=>{ const mm=document.getElementById('tmMenu');
+      if(mm&&!mm.contains(e.target)) _closeTaskMenu(); },true);
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') _closeTaskMenu(); });
+    window.addEventListener('scroll',_closeTaskMenu,true);   // body 직속이라 표를 따라 움직이지 않는다
+    window.addEventListener('resize',_closeTaskMenu);
+  }
+}
+/* ── 삭제 확인창 — 미리보기(쓰기 0) → 체크 → 실행 ─────────────────────────────
+   ★★ 되돌릴 수 없는 조작이라 **무엇이 몇 건 지워지는지 먼저 보여준다**. 서버도 confirm 없이는 거부.
+   ★ 돈 기록(입금 회차·원장 등)이 걸린 작업은 서버가 거부하므로 실행 버튼 자체를 만들지 않고 사유를 적는다. */
+function _tdClose(){ const o=document.getElementById('tdOv'); if(o) o.remove(); STATE.tdPrev=null; }
+function _tdShell(inner){
+  let ov=document.getElementById('tdOv');
+  if(!ov){ ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='tdOv'; document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="wbl-dlg">${inner}</div>`;     // ★ 바깥 클릭으로 닫지 않는다(실수 클릭 보호) — [취소]·Esc 만
+  if(!ov.dataset.k){ ov.dataset.k='1'; document.addEventListener('keydown',e=>{ if(e.key==='Escape') _tdClose(); }); }
+}
+async function openTaskDelete(i){
+  _closeTaskMenu();
+  const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
+  if(!_taskDelAllowed()){ toast('관리자만 삭제할 수 있습니다'); return; }
+  STATE.tdI=i;
+  _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+    <div class="wbl-db">삭제 대상을 확인하는 중…<div class="wbl-sub">${esc(t.tabName||'')}</div></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/delete-preview?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName)); }
+  catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+      <div class="wbl-db"><b class="bad">삭제 대상을 확인하지 못했습니다</b>
+        <div class="wbl-sub">${esc((j&&(j.error||j.message))||'조회 실패')}</div>
+        <div class="wbl-sub">확인하지 못한 상태로는 지우지 않습니다.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="openTaskDelete(${i})">다시 시도</button>
+        <button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+    return;
+  }
+  STATE.tdPrev=j;
+  const c=j.counts||{};
+  const num=v=>(v==null?'—':String(v));
+  const facts=`<div class="wbl-facts">
+    <div class="tdrow"><span>작업표 줄</span><b>${num(c.boardRows)}줄</b></div>
+    <div class="tdrow"><span>참여자(연락처 있는 줄)</span><b>${num(c.participants)}명</b></div>
+    <div class="tdrow"><span>구매양식 주문</span><b>${num(c.orders)}건</b></div>
+    <div class="tdrow"><span>검색 명단</span><b>${num(c.roster)}줄</b></div>
+    <div class="tdrow"><span>리뷰 캡처 기록</span><b>${num(c.reviewFiles)}건</b></div>
+    <div class="tdrow"><span>지워질 전체 행</span><b>${num(j.totalRows)}행 (${(j.tables||[]).length}개 표)</b></div>
+  </div>`;
+  const camps=(j.campaigns||[]).filter(x=>!x.archivedAt);
+  const side=`<ul class="wbl-ul">
+    <li>연결된 <b>작업오더 ${(j.workOrders||[]).length}건</b>은 지우지 않고 <b>연결만 해제</b>합니다 — 같은 오더를 다시 접수할 수 있습니다.</li>
+    <li>연결된 <b>모집공고 ${camps.length}건</b>은 지우지 않고 <b>보관 처리</b>합니다(참여 이력·리뷰비 기록 보존).</li>
+    <li>구글시트 파일·탭은 <b>건드리지 않습니다</b>(목록에서만 사라집니다).</li>
+  </ul>`;
+  if(j.blocked){
+    _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+      <div class="wbl-db"><b>${esc(j.tab&&j.tab.displayName||t.tabName)}</b>
+        <div class="wbl-sub">${esc(t.tabName)}</div>${facts}
+        <div class="tdbad"><b>이 작업은 삭제할 수 없습니다 — 입금 기록이 걸려 있습니다.</b><br>
+          ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}<br>
+          지우면 남은 줄이 미입금으로 보여 <b>다음 회차에 다시 담기고 이중 송금</b>이 납니다.
+          입금관리에서 정리한 뒤 다시 시도하거나, [🏁 마감]으로 목록에서 내려 주세요.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+    return;
+  }
+  _tdShell(`<div class="wbl-dh">🗑 작업 삭제 — 되돌릴 수 없습니다</div>
+    <div class="wbl-db"><b>${esc(j.tab&&j.tab.displayName||t.tabName)}</b>
+      <div class="wbl-sub">${esc(t.tabName)} · ${esc(t.advertiserName||'업체 미지정')}</div>
+      ${facts}${side}
+      <label class="wbl-chk"><input type="checkbox" id="tdOk" onchange="_tdSync()">
+        위 내용을 확인했고, 이 작업의 기록이 <b>영구히 삭제</b>되는 것에 동의합니다.
+        <span class="sub">복구 수단이 없습니다 — 지운 뒤에는 백업으로만 되살릴 수 있습니다.</span></label></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">취소</button>
+      <button class="wbl-b dark" id="tdGo" disabled onclick="_tdGo()">🗑 삭제</button></div>`);
+}
+function _tdSync(){ const ok=document.getElementById('tdOk'), b=document.getElementById('tdGo');
+  if(b) b.disabled=!(ok&&ok.checked); }
+async function _tdGo(){
+  const i=STATE.tdI, t=(STATE.tabs||[])[i], ok=document.getElementById('tdOk');
+  if(!t||!(ok&&ok.checked)) return;
+  const b=document.getElementById('tdGo'); if(b){ b.disabled=true; b.textContent='삭제 중…'; }
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/delete',{method:'POST',
+    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,confirm:true})}); }
+  catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    if(b){ b.disabled=false; b.textContent='🗑 삭제'; }
+    toast('⚠ 삭제 실패: '+((j&&(j.error||j.message))||''));
+    return;
+  }
+  _tdClose();
+  toast(`🗑 삭제 완료 — ${j.totalRows}행${j.campaignsArchived?` · 공고 ${j.campaignsArchived}건 보관`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
+  try{ await loadTabs(); }catch(_){ toast('삭제는 완료됐습니다. 목록 새로고침에 실패했으니 새로고침해 주세요.'); }
+}
+
 function _finBodyHtml(){
   const fin=STATE.finTab==='fin';
   const all=STATE.tabs||[];
@@ -4637,6 +4806,9 @@ function _finBodyHtml(){
     //   열 정렬은 표 구조가 보장한다. 열람전용·보관함도 열 수는 같다(빈 칸 유지 — 사람마다 열이 달라지면 눈이 헤맨다).
     // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
     const tdOpen=`<td class="wbl-c wbl-btncol"><button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">${fin?'열람':'열기'}</button></td>`;
+    // [🔗] — 그 줄 작업의 공유 주소를 복사한다(작업보드를 열지 않고 목록에서 바로).
+    //   ★ 마감 보관함에도 같은 칸을 둔다 — 열 수가 모드마다 달라지면 눈이 열을 다시 찾는다(v3 규율).
+    const tdLink=`<td class="wbl-c wbl-btncol"><button class="wbl-b" onclick="event.stopPropagation();copyTaskLinkFromHome(${i})" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 작업보드로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크</button></td>`;
     const tdToday=`<td class="wbl-c wbl-btncol">${(fin||!canEdit)?''
       :`<button class="wbl-b today${td?' on':''}" onclick="toggleTodayDone(${i},event)" title="${td?'오늘 완료됨 — 다시 누르면 해제됩니다':'오늘 할 일을 끝냈다면 클릭 — 다음날 자동으로 풀립니다'}">☑ 오늘 완료</button>`}</td>`;
     const tdFinish=`<td class="wbl-c wbl-btncol">${!canEdit?''
@@ -4644,16 +4816,16 @@ function _finBodyHtml(){
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
       <td><div class="wbl-nm">${esc(t.tabName)}${_nsBadge(t)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
-      ${tdOpen}
+      ${tdOpen}${tdLink}
       <td>${esc((s.manager)||'—')}</td>
       <td>${prog}</td>${last}
       <td>${st}</td>
       <td class="wbl-c wbl-btncol">${_folBtnsHtml(t,i)}</td>
       <td class="wbl-c wbl-btncol">${_campBtnHtml(t,i)}</td>
-      ${tdToday}${tdFinish}</tr>`;
+      ${tdToday}${tdFinish}${_taskMoreCell(i)}</tr>`;
   }).join(''):'';
   return rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }
@@ -9896,6 +10068,130 @@ function _coMatch(t){
   if(q && !((t.displayName||'')+' '+(t.tabName||'')).toLowerCase().includes(q)) return false;
   return true;
 }
+/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
+   "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
+   ★★ 조작은 tab_configs.is_closed 한 칸이지만 **결과는 마감(아카이브)** 이다 —
+      다음 전체 빌드가 그 탭의 장부를 보관함으로 옮기고 활성 목록에서 지운다.
+      그래서 화면은 "데이터를 안 지운다"고 말하지 않고 **아카이브된다**고 말한다.
+   판정·후보 선별은 전부 서버가 한다 — 화면은 서버가 준 것을 그리고 사람이 확인만 한다. */
+const _PT_REASON = {
+  recent:'최근 활동 있음', year_unknown:'연도 모름',
+  weak_signal:'근거가 시트 등록일뿐', pending_orders:'미반영 주문 있음',
+  active_campaign:'모집중 공고 연결', already_sheetless:'이미 무시트',
+  already_archived:'이미 아카이브', already_closed:'이미 마감',
+};
+let _PT = null;
+function _ptBox(){ return $('#ptBox'); }
+async function _ptScan(){
+  const box=_ptBox(); if(!box) return;
+  box.innerHTML = `<div class="ovnote">과거 작업이 아직 시트를 읽는지 살펴보는 중…</div>`;
+  try{
+    const r = await api('/api/trackb/past-tabs/scan');
+    if(!r||!r.ok){ throw new Error((r&&r.error)||'조회 실패'); }
+    _PT = r; _ptRender();
+  }catch(e){
+    // 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다(무한 로딩 금지)
+    box.innerHTML = `<div class="ovnote"><b>과거 작업 점검을 불러오지 못했습니다</b> — ${esc(String(e&&e.message||e))}
+      <button class="btn" style="margin-left:6px" onclick="_ptScan()">다시 시도</button></div>`;
+  }
+}
+/* 연도를 확정하지 못해 후보에서 빠진 수 — 시트 표기에 연도가 없으면(`7 / 12 (금)`)
+   판정이 시트 등록일로 폴백해 `weak_signal` 이 된다. 그래서 **연도 확인이 먼저**다. */
+function _ptUnconfirmed(r){
+  const h=(r&&r.heldBy)||{}; return (h.year_unknown||0) + (h.weak_signal||0);
+}
+function _ptProbeBlock(r){
+  const n=_ptUnconfirmed(r); if(!n) return '';
+  return `<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--line,#e5c07b);border-radius:6px;background:rgba(255,200,0,.08)">
+    <b>먼저 연도를 확인하세요</b> — ${n}개 작업은 시트 표기에 연도가 없어(<code>7 / 12 (금)</code>)
+    언제 진행한 작업인지 확정할 수 없어 정리 대상에서 빠져 있습니다.
+    <span style="opacity:.8">확인은 그 탭의 날짜 열 한 줄만 읽습니다.</span>
+    <div style="margin-top:6px"><button class="btn" onclick="_ptProbe()">📅 연도 확인 실행</button></div>
+  </div>`;
+}
+async function _ptProbe(){
+  const box=_ptBox(); if(!box) return;
+  const note=document.createElement('div'); note.className='ovnote';
+  note.textContent='연도 확인 중…'; box.prepend(note);
+  let probed=0, round=0;
+  try{
+    while(round < 12){                       // 상한: 한 번에 100개씩 · 무한 루프 금지
+      round++;
+      const r = await api('/api/trackb/sheet-sync/year-probe',{method:'POST',
+        body:JSON.stringify({limit:100})});
+      if(!r||!r.ok){ toast('연도 확인 실패: '+esc(String(r&&r.error||''))); break; }
+      probed += (r.probed||0);
+      note.textContent = `연도 확인 중… ${probed}개 확인 (남음 ${r.remaining||0})`;
+      if(!r.probed || !r.remaining) break;   // 더 확인할 것이 없다
+    }
+    toast(`연도 확인 ${probed}개 완료`);
+  }catch(e){ toast('연도 확인 실패 — '+String(e&&e.message||e)); }
+  await _ptScan();                            // 확인 결과를 반영해 다시 판정
+}
+function _ptRender(){
+  const box=_ptBox(), r=_PT; if(!box||!r) return;
+  const held = Object.keys(r.heldBy||{}).map(k=>`${_PT_REASON[k]||k} ${r.heldBy[k]}`).join(' · ');
+  const quiet = Object.keys(r.quietBy||{}).map(k=>`${_PT_REASON[k]||k} ${r.quietBy[k]}`).join(' · ');
+  const rows = (r.items||[]).map((it,i)=>`<tr>
+      <td><input type="checkbox" class="ptck" data-i="${i}" checked></td>
+      <td>${esc(it.tabName)}</td>
+      <td style="color:var(--sub,#666)">${esc(it.activityAt||'-')}</td>
+      <td style="color:var(--sub,#666)">${esc(it.activitySource||'-')}</td>
+      <td style="text-align:right">${it.indexRows||0}</td></tr>`).join('');
+  box.innerHTML = `<div class="ovnote" style="border:1px dashed var(--line,#ccc);border-radius:8px;padding:12px 14px">
+    <b>과거 작업 시트 읽기 정리</b>
+    — 등록된 ${r.total}개 중 <b>${r.stillReading}개가 지금도 시트를 읽습니다.</b>
+    그중 <b>${r.candidates}개</b>가 과거 작업으로 확인돼 정리 대상입니다(시트 ${r.sheetsAffected}개).
+    <div style="margin-top:6px;font-size:13px">
+      정리하면 그 탭의 <b>시트 읽기와 장부 재생성이 멈춥니다.</b>
+      정리한 작업은 다음 전체 빌드에서 <b>아카이브(보관함으로 이동)</b>되어 작업 목록에서 사라지고,
+      그 작업에 참여한 <b>리뷰어의 제출완료 내역도 화면에서 사라집니다</b> — 끝난 작업만 고르세요.
+      ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
+      ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
+      ${r.archivedByGidOnly?`<br><b>이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 작업 ${r.archivedByGidOnly}개</b>
+        — 시스템은 새 이름으로 <b>여전히 읽습니다</b>. 위 정리 대상에 포함돼 있습니다.`:''}
+      ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
+    </div>
+    ${_ptProbeBlock(r)}
+    ${r.candidates ? `<table class="lgtable" style="margin-top:10px">
+        <thead><tr><th style="width:34px"></th><th>작업</th><th style="width:110px">마지막 활동</th>
+          <th style="width:110px">근거</th><th style="width:70px">명단</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      <div style="margin-top:8px">
+        <button class="btn pri" onclick="_ptClose()">선택한 작업 정리하기</button>
+        <button class="btn" onclick="_ptScan()">새로고침</button>
+        <button class="btn" onclick="_ptBox().innerHTML=''">닫기</button>
+      </div>`
+      : `<div style="margin-top:8px"><button class="btn" onclick="_ptBox().innerHTML=''">닫기</button></div>`}
+  </div>`;
+}
+function _ptPicked(){
+  const out=[]; document.querySelectorAll('#ptBox .ptck').forEach(c=>{
+    if(c.checked){ const it=(_PT&&_PT.items||[])[+c.getAttribute('data-i')];
+      if(it) out.push({sheetId:it.sheetId, tabName:it.tabName}); }});
+  return out;
+}
+async function _ptClose(){
+  const picked=_ptPicked();
+  if(!picked.length){ toast('정리할 작업을 선택하세요'); return; }
+  try{
+    const pre = await api('/api/trackb/past-tabs/close',{method:'POST',
+      body:JSON.stringify({tabs:picked})});                       // 미리보기(기본)
+    if(!pre||!pre.ok){ toast('미리보기 실패: '+esc(String(pre&&pre.error||''))); return; }
+    // ★ 확인창은 실제로 일어나는 일을 말한다 — "한 칸만 바꾼다"로 줄여 말하면 거짓이 된다
+    if(!confirm(`${pre.wouldClose}개 작업의 구글시트 읽기를 멈춥니다.\n\n`
+      + `· 다음 전체 빌드에서 아카이브(보관함으로 이동)되어 작업 목록에서 사라집니다\n`
+      + `· 그 작업에 참여한 리뷰어의 제출완료 내역도 화면에서 사라집니다\n`
+      + `· 되돌리려면 아카이브 복구를 써야 합니다(마감 해제는 빌드 전까지만 유효)\n\n`
+      + `끝난 과거 작업이 맞습니까?`)) return;
+    const r = await api('/api/trackb/past-tabs/close',{method:'POST',
+      body:JSON.stringify({tabs:picked, dryRun:false})});
+    if(!r||!r.ok){ toast('정리 실패: '+esc(String(r&&r.error||''))); return; }
+    toast(`${r.closed}개 작업 정리 완료`+(r.refused&&r.refused.length?` · ${r.refused.length}개는 조건이 바뀌어 제외`:''));
+    await _ptScan();
+    await _coLoad();
+  }catch(e){ toast('정리 실패 — '+String(e&&e.message||e)); }
+}
 function _coRender(){
   const all = STATE.co.items||[], m = STATE.co.meta||{};
   const list = all.filter(_coMatch);
@@ -9908,11 +10204,13 @@ function _coRender(){
       <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
       <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
+      <button class="btn" onclick="_ptScan()">🧹 과거 작업 시트 읽기 정리</button>
       <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
       <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
     <div id="coSweep"></div>
+    <div id="ptBox"></div>
     <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
       막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.

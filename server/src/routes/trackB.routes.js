@@ -322,12 +322,14 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit, includeArchived, since, includeUnknown, includeIgnored } = req.query;
+    const { before, limit, includeArchived, since, includeUnknown, includeIgnored, includeSheetless } = req.query;
     res.json({ ok: true, ...(await sheetSync.auditSheetSync({
       before, limit, since,
       includeArchived: includeArchived === '1' || includeArchived === 'true',
       includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
       includeIgnored: includeIgnored === '1' || includeIgnored === 'true',
+      // 무시트 작업은 기본 제외(점검 대상 아님) — 보고 싶을 때만 켠다.
+      includeSheetless: includeSheetless === '1' || includeSheetless === 'true',
     })) });
   } catch (err) { next(err); }
 });
@@ -369,7 +371,9 @@ router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async
   try {
     const { sheetId, tabName } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) }));
+    const out = await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) });
+    // ★ 무시트 = 실행 불가(막다른 길 대신 사유) — 상태코드로도 "성공 아님"을 말한다.
+    res.status(out && out.code === 'sheetless' ? 409 : 200).json(out);
   } catch (err) { next(err); }
 });
 
@@ -791,12 +795,13 @@ router.get('/share-link/:code', authMiddleware, internalMiddleware, async (req, 
     const row = await shareLinks.resolveShareLink(req.params.code);
     if (!row) return res.status(404).json({ ok: false, error: '링크를 찾을 수 없습니다. 주소가 잘렸거나 폐기된 링크일 수 있습니다.' });
     if (row.kind === 'tab') {
-      const okc = await svc.canAccessTab({
-        role: _role(req), staffName: (req.admin && req.admin.name) || null,
-        advertiserId: (req.admin && req.admin.advertiser_id) || null,
-        sheetId: row.sheetId, tabName: row.tabName,
-      });
-      if (!okc) return res.status(403).json({ ok: false, error: '담당 범위 밖의 작업입니다. 관리자에게 문의하세요.' });
+      // ★★ 게이트는 **작업보드 본문(`/workdesk`)과 같은 규칙**이어야 한다(사용자 확정 2026-08-19).
+      //   내부 직원(master/admin/staff)은 이미 모든 작업보드를 열고 표까지 편집한다(`allowAllStaff`).
+      //   여기서만 담당 스코프를 걸면 **작업 목록에는 보이는데 링크로는 안 열리는 막다른 길**이 된다.
+      //   판정 사본을 만들지 않고 이 파일의 단일 출처 `_ensureEditScope`(내부=허용 · 광고주=차단)를 쓴다 —
+      //   나중에 내부 범위를 좁히면 작업보드와 이 링크가 **함께** 좁아진다.
+      const g = await _ensureEditScope(req, row.sheetId, row.tabName);
+      if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
       shareLinks.touchShareLink(row.code);
       return res.json({ ok: true, kind: 'tab', sheetId: row.sheetId, tabName: row.tabName, tabGid: row.tabGid || '' });
     }
@@ -1229,6 +1234,33 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
+});
+/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
+ *  "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
+ *  조작은 tab_configs.is_closed 한 칸뿐이고 되돌릴 수 있다(서비스 주석 참조).
+ *  게이트는 이관(cutover)과 같은 adminOrMaster — 무엇을 읽을지 정하는 전사 조작이다. */
+const _pastTabs = require('../services/pastSheetTabCleanup.service');
+function _pastTabErr(res, err, next) {
+  if (err && typeof err.code === 'string' && !/^\d/.test(err.code)) {
+    const st = err.code === 'not_ready' ? 503 : 400;
+    return res.status(st).json({ ok: false, error: err.code, max: err.max, got: err.got });
+  }
+  return next(err);
+}
+router.get('/past-tabs/scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _pastTabs.scanPastSheetTabs({ since: req.query.since, limit: req.query.limit })); }
+  catch (err) { _pastTabErr(res, err, next); }
+});
+router.post('/past-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { tabs, since, dryRun } = req.body || {};
+    // 미리보기가 기본 — 값이 빠진 요청이 곧바로 닫으면 안 된다
+    res.json(await _pastTabs.closePastTabs({ tabs, since, by: _by(req), dryRun: dryRun !== false }));
+  } catch (err) { _pastTabErr(res, err, next); }
+});
+router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
+  catch (err) { _pastTabErr(res, err, next); }
 });
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
@@ -2836,6 +2868,53 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
       }));
     } catch (e) {
       if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   작업(탭) 통째 삭제 — admin/master 전용 (사용자 확정 2026-08-19)
+   ★★ 되돌릴 수 없다. 그래서 ① 미리보기(GET, 쓰기 0) → ② `confirm:true` 실행 2단계이고,
+      ③ 돈 기록(입금 회차·원장·수기 표기·미확인 이체)이 걸린 작업은 **확인해도 거부**한다.
+   ★ 게이트 = adminOrMaster — AE 에게는 화면에도 그리지 않는다(눌러도 403 인 버튼 금지).
+   ══════════════════════════════════════════════════════════════════════════ */
+router.get('/work-tab/delete-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { previewTaskDelete } = require('../services/workTabDelete.service');
+    try {
+      res.json(await previewTaskDelete({
+        sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
+      }));
+    } catch (e) {
+      if (e && e.code === 'bad_args') return res.status(400).json({ ok: false, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { deleteTask } = require('../services/workTabDelete.service');
+    const b = req.body || {};
+    try {
+      const out = await deleteTask({
+        sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+        confirm: b.confirm === true, by: _by(req),
+      });
+      // 검증 실패는 400대로 — errorHandler 의 500 마스킹에 사유가 묻히면 담당자가 손쓸 수 없다.
+      if (!out.ok && (out.code === 'confirm_required' || out.code === 'payment_locked')) {
+        return res.status(out.code === 'payment_locked' ? 409 : 400).json(out);
+      }
+      res.json(out);
+    } catch (e) {
+      if (e && e.code === 'bad_args') return res.status(400).json({ ok: false, error: e.message });
       if (e && (e.code === '42P01' || e.code === '42703')) {
         return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
       }
