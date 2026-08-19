@@ -479,8 +479,7 @@ router.post('/campaigns/release-today-unsubmitted-holds', authMiddleware, adminO
     const { rows } = await pool.query(
       `WITH released AS (
          UPDATE campaign_applications
-            SET status = 'cancelled', expires_at = NOW(), hold_token = NULL,
-                updated_at = NOW()
+            SET status = 'cancelled', expires_at = NOW(), hold_token = NULL
           WHERE campaign_id = $1
             AND status = 'applied'
             AND applied_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'
