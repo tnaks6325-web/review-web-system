@@ -147,19 +147,15 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
       f({ sheetless: 'false' }) === '' && f({ sheetless: 1 }) === '');
   }
 
-  /* ══════════════ E. 공고 카드 시트 버튼 ══════════════ */
-  console.log('\n[E] 모집공고 카드 [시트] 버튼 — 무시트면 죽은 링크를 안 만든다');
+  /* ══════════════ E. 공고 카드 — 구글시트 링크 자체가 없다 ══════════════ */
+  console.log('\n[E] 모집공고 카드 — 죽은 시트 링크를 만들지 않는다');
   {
+    // ⚠ 검사 의미 갱신: 카드의 [시트] 버튼이 제거되어(업체 링크 일원화) 이제 검사할 것은
+    //   "카드가 구글시트 URL 을 조립하지 않는다"는 **더 강한 불변식** 하나다.
+    //   버튼을 되살리려면 무시트 분기(가상 ID·sheetless 플래그)를 함께 되살려야 한다.
     const cc = readFe('js/campaign-cards.js');
-    const { VIRTUAL_SHEET_PREFIX } = require('../src/services/sheetlessAccept.service');
-    const mm = cc.match(/_VIRTUAL_SHEET_PREFIX\s*=\s*'([^']+)'/);
-    assert(mm, '프론트 접두 상수를 찾지 못함');
-    ok('★ 가상 시트ID 접두 사본이 서버 단일 출처와 일치한다', mm[1] === VIRTUAL_SHEET_PREFIX);
-    ok('무시트면 구글 URL 을 조립하지 않는다',
-      /const sheetUrl = \(sid && !sheetless\)/.test(cc));
-    ok('무시트 버튼은 비활성 + 사유를 말한다', /무시트 작업입니다 — 구글시트를 쓰지 않습니다/.test(cc));
-    ok('시트 기반 공고의 버튼 동작은 그대로(무회귀)',
-      /https:\/\/docs\.google\.com\/spreadsheets\/d\/' \+ sid \+ '\/edit/.test(cc));
+    ok('★ 카드는 구글시트 URL 을 조립하지 않는다(무시트 작업의 죽은 링크 원천 차단)',
+      !/docs\.google\.com\/spreadsheets/.test(cc));
   }
 
   /* ══════════════ F. 업체 링크 일원화 ══════════════ */
