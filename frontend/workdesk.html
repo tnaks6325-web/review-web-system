@@ -2038,6 +2038,24 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #ddOv .wbl-dlg{width:min(1080px,100%);max-height:86vh;display:flex;flex-direction:column}
 #hbOv .wbl-dlg{width:min(900px,100%);max-height:86vh;display:flex;flex-direction:column}
 #hbOv .wbl-db{flex:1;min-height:0;overflow:auto}
+/* 🔢 번호 정리 — 전체 작업 목록이 100개를 넘어 기본 460px·무한 높이로는 조작이 안 된다(실측 121개).
+   ★ `min-height:0` 이 없으면 flex 자식이 내용만큼 늘어나 **스크롤이 안 생긴다**(레포 상습 함정). */
+#rnOv .wbl-dlg{width:min(560px,100%);max-height:86vh;display:flex;flex-direction:column}
+#rnOv.rn-all .wbl-dlg{width:min(980px,100%)}        /* 전체 목록은 6칸이라 넓게 */
+#rnOv .wbl-db{flex:1;min-height:0;overflow:auto}
+/* ★★ 표를 감싸는 래퍼에 `overflow-x:auto` 를 두지 말 것 — 한 축만 지정해도 다른 축이 `auto` 가 되어
+   그 래퍼가 **sticky 기준(스크롤 조상)** 을 가로채 표 머리 고정이 조용히 죽는다(실측).
+   가로·세로 스크롤은 `.wbl-db` 한 곳이 맡는다. */
+/* ★★ 표 머리 고정 — `border-collapse:collapse` 에서는 sticky th 가 먹지 않는다(실측: 두 번 밟음).
+   `separate` 로 바꾸고 경계선은 box-shadow 로 그린다(홈 작업목록 헤더행 고정과 같은 처방). */
+/* ★★ 전역 `table{overflow:hidden}` 이 sticky 기준을 표 자신으로 만들어 머리 고정이 **조용히 죽는다**
+   — 홈 작업목록 헤더행에서 이미 겪은 함정이다(CLAUDE.md 기록). 상쇄가 없으면 `position:sticky` 는
+   계산값만 sticky 이고 실제로는 따라오지 않는다(실브라우저로만 보인다). */
+#rnOv .wbl-wrt{border-collapse:separate;border-spacing:0;overflow:visible}
+#rnOv .wbl-wrt th{position:sticky;top:0;background:var(--card,#fff);z-index:1;
+  border-bottom:0;box-shadow:inset 0 -1px 0 var(--border,#e5e7eb)}
+#rnOv .rn-tools{display:flex;gap:6px;align-items:center;margin:8px 0 2px}
+#rnOv .rn-tools input{flex:1;min-width:0;height:28px;padding:0 9px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card,#fff);color:var(--ink,#111827);box-sizing:border-box}
 #hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #ddOv table.wbl-t{font-size:11.5px}
@@ -3457,6 +3475,8 @@ function _rnRender(){
       ${_RN.tabName ? `<button class="wbl-b${_RN.mode === 'tab' ? ' dark' : ''}" onclick="rnSetMode('tab')">이 작업</button>` : ''}
       <button class="wbl-b${_RN.mode === 'all' ? ' dark' : ''}" onclick="rnSetMode('all')">전체 작업</button>
       <span style="color:var(--faint,#94a3b8)">${_RN.busy ? '불러오는 중…' : ''}</span></div>`;
+  /* 폭은 모드에 따라 — 목록(6칸)은 넓게, 이 작업(설명+미리보기)은 좁게 */
+  const ov = document.getElementById('rnOv'); if (ov) ov.classList.toggle('rn-all', _RN.mode === 'all');
   if (_RN.mode === 'all') { _rnRenderAll(b, f, tabs); return; }
   const p = _RN.prev;
   if (f) f.innerHTML = `<button class="wbl-b" onclick="closeRenumberModal()">닫기</button>
@@ -3483,24 +3503,48 @@ function _rnRenderAll(b, f, tabs){
   if (f) f.innerHTML = `<button class="wbl-b" onclick="closeRenumberModal()">닫기</button>
       <button class="wbl-b" onclick="rnScan()">다시 조회</button>
       <button class="wbl-b dark" id="rnGoAll" ${(s && s.needTabs) ? '' : 'disabled'} onclick="rnRunAll()">🔢 전체 정리 실행</button>`;
-  const rows = (s && s.items) || [];
-  const need = rows.filter(r => r.blankNumber > 0 || (r.blankManager > 0 && r.manager));
   b.innerHTML = tabs + `
     <div class="wbl-facts">무시트 작업 전체에서 <b>번호·담당자가 비어 있는 줄</b>을 셉니다.
       정리하면 그 작업의 번호가 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매겨집니다.<br>
       <span style="color:var(--faint,#94a3b8)">※ 번호가 이미 다 차 있고 순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다 — 그 작업을 열어 [이 작업] 미리보기로 확인하세요.</span></div>
-    ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${need.length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>
+    ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${_rnNeed().length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>
         ${s.truncated ? ' <span style="color:var(--danger,#c22f2f)">(목록이 잘렸습니다 — 정리 후 다시 조회하세요)</span>' : ''}</div>
-      <table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th>담당자 빈칸</th><th>담당자</th><th></th></tr></thead><tbody>
-      ${rows.map((r, i) => `<tr class="${(r.blankNumber || (r.blankManager && r.manager)) ? 'on' : ''}">
-          <td style="text-align:left">${esc(r.displayName || r.tabName)}</td>
-          <td>${r.total}</td>
-          <td>${r.blankNumber ? '<b>' + r.blankNumber + '</b>' : '0'}</td>
-          <td>${r.blankManager ? (r.manager ? '<b>' + r.blankManager + '</b>' : r.blankManager) : '0'}</td>
-          <td>${r.manager ? esc(r.manager) : '<span style="color:var(--faint,#94a3b8)">미지정</span>'}</td>
-          <td><button class="wbl-b" onclick="rnRunOne(${i})">정리</button></td></tr>`).join('')}
-      </tbody></table>` : ''}
-    ${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}`;
+      <div class="rn-tools">
+        <button class="wbl-b${_RN.onlyNeed === false ? '' : ' dark'}" id="rnOnly" onclick="_RN.onlyNeed=!(_RN.onlyNeed!==false);_rnRows()"></button>
+        <input id="rnq" placeholder="작업 검색" value="${esc(_RN.q || '')}" oninput="_RN.q=this.value;_rnRows()">
+      </div>
+      <div class="rn-tw"><table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th>담당자 빈칸</th><th>담당자</th><th></th></tr></thead>
+        <tbody id="rnRows"></tbody></table></div>` : ''}
+    <div id="rnErr">${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}</div>`;
+  if (s) _rnRows();
+}
+/* 정리 대상 = 번호가 빈 줄이 있거나, 담당자가 비어 있고 채울 담당자가 정해진 작업 */
+function _rnNeed(){
+  return (((_RN.scan || {}).items) || []).filter(r => r.blankNumber > 0 || (r.blankManager > 0 && r.manager));
+}
+/* ★★ 행만 갈아끼운다 — 검색 입력칸이 든 껍데기를 다시 그리면 **한글 IME 조합이 깨진다**
+     (홈 목록 검색에서 실측된 `ㅁ며면면` 사고와 같은 자리). */
+function _rnRows(){
+  const tb = document.getElementById('rnRows'); if (!tb || !_RN || !_RN.scan) return;
+  const only = _RN.onlyNeed !== false;
+  const q = String(_RN.q || '').trim().toLowerCase();
+  const all = _RN.scan.items || [];
+  const need = _rnNeed();
+  const base = only ? need : all;
+  const rows = q ? base.filter(r => String(r.displayName || r.tabName).toLowerCase().indexOf(q) >= 0) : base;
+  const btn = document.getElementById('rnOnly');
+  if (btn) { btn.textContent = only ? `정리 대상만 (${need.length})` : `전체 보기 (${all.length})`; btn.className = 'wbl-b' + (only ? ' dark' : ''); }
+  tb.innerHTML = rows.length ? rows.map(r => {
+    const i = all.indexOf(r);                       // ★ 실행에는 **원본 인덱스**를 넘긴다(필터된 순번이 아니라)
+    return `<tr class="${(r.blankNumber || (r.blankManager && r.manager)) ? 'on' : ''}">
+      <td style="text-align:left">${esc(r.displayName || r.tabName)}</td>
+      <td>${r.total}</td>
+      <td>${r.blankNumber ? '<b>' + r.blankNumber + '</b>' : '0'}</td>
+      <td>${r.blankManager ? (r.manager ? '<b>' + r.blankManager + '</b>' : r.blankManager) : '0'}</td>
+      <td>${r.manager ? esc(r.manager) : '<span style="color:var(--faint,#94a3b8)">미지정</span>'}</td>
+      <td><button class="wbl-b" onclick="rnRunOne(${i})">정리</button></td></tr>`;
+  }).join('') : `<tr><td colspan="6" style="text-align:left;color:var(--faint,#94a3b8)">${
+    q ? '검색 결과가 없습니다.' : (only ? '정리할 작업이 없습니다 — 전체 작업의 번호가 모두 채워져 있습니다.' : '무시트 작업이 없습니다.')}</td></tr>`;
 }
 async function rnScan(){
   if (!_RN || _RN.busy) return;
