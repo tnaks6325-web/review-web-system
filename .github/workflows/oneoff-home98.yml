@@ -1,4 +1,4 @@
-name: Oneoff - 진행중 무시트 중복링크 148줄 명단 (읽기 전용)
+name: Oneoff - 비운 링크 재부착 확인 (읽기 전용)
 on:
   push:
     branches: [ 'oneoff/home98' ]
@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: List
+      - name: Check
         env:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
@@ -15,81 +15,48 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
 
-          CREATE TEMP TABLE live_tabs AS
-          WITH raw_tabs AS (
-            SELECT rst.sheet_id AS sid, rst.tab_gid AS gid, rst.tab_name AS tab,
-                   COALESCE(tc.sheetless, FALSE) AS sheetless
-              FROM raw_sheet_tabs rst
-              LEFT JOIN tab_configs tc ON tc.sheet_id=rst.sheet_id AND tc.tab_name=rst.tab_name
-             WHERE rst.is_system_tab = FALSE
-               AND EXISTS (SELECT 1 FROM index_master im
-                            WHERE im.status='active' AND im.sheet_id=rst.sheet_id
-                              AND (im.tab_gid=rst.tab_gid OR im.tab_name=rst.tab_name))
-          ), sl AS (
-            SELECT tc.sheet_id AS sid, tc.tab_gid AS gid, tc.tab_name AS tab, TRUE AS sheetless
-              FROM tab_configs tc
-             WHERE COALESCE(tc.sheetless,FALSE)=TRUE AND COALESCE(tc.is_closed,FALSE)=FALSE
-               AND NOT EXISTS (SELECT 1 FROM raw_sheet_tabs r2
-                                WHERE r2.sheet_id=tc.sheet_id AND r2.tab_name=tc.tab_name AND r2.is_system_tab=FALSE)
-          ), u AS (SELECT * FROM raw_tabs UNION ALL SELECT * FROM sl)
-          SELECT DISTINCT u.sid, u.tab FROM u
-           WHERE u.sheetless
-             AND NOT EXISTS (SELECT 1 FROM trackb_tab_finished f
-                              WHERE f.deleted_at IS NULL AND f.sheet_id=u.sid
-                                AND (f.tab_name=u.tab OR (COALESCE(u.gid,'')<>'' AND f.tab_gid=u.gid)));
+          \echo '=== 아까 비운 14줄의 현재 링크 상태 ==='
+          WITH t(tab,seq,nm) AS (VALUES
+            ('8/3(쿠팡)위프_블랙 탈취제 800건',166,'김현숙'),
+            ('8/3(쿠팡)위프_블랙 탈취제 800건',375,'유재휘'),
+            ('0729)이노크아든_면마스크 200건(실배)',117,'박세희'),
+            ('8/3(쿠팡)위프_블랙 탈취제 800건',44,'박세준1'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',101,'장대한'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',95,'신우진'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',104,'이희웅'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',98,'윤승환'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',96,'김윤식'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',102,'장지남'),
+            ('8/3(쿠팡)위프_블랙 탈취제 800건',164,'박세희'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건',598,'이재희'),
+            ('7/24(네이버)메디슨벨_파라다이스 그레인 200건',40,'이수진'),
+            ('8/3(네이버)우레온_바디미스트 100건',19,'박세희'))
+          SELECT t.tab AS 작업, t.seq AS "#", t.nm AS 참여자,
+                 cp.order_submission_id IS NULL AS 여전히비어있음,
+                 regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 다시붙은주문,
+                 os.recipient AS 그주문수취인,
+                 cp.updated_at, cp.updated_by
+            FROM t LEFT JOIN campaign_participants cp
+              ON cp.tab_name=t.tab AND cp.seq=t.seq AND cp.deleted_at IS NULL
+            LEFT JOIN order_submissions os ON os.id=cp.order_submission_id
+           ORDER BY t.tab, t.seq;
 
-          CREATE TEMP TABLE liv AS
-          SELECT cp.id, cp.sheet_id, cp.tab_name, cp.seq, cp.order_submission_id AS osid,
-                 COALESCE(cp.row_json->>'번호','') AS num,
-                 regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g') AS nm,
-                 cp.phone8,
-                 regexp_replace(COALESCE((
-                   SELECT string_agg(t.value,'' ORDER BY t.key)
-                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
-                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS tnum,
-                 cp.is_submitted, cp.is_paid
+          \echo ''
+          \echo '=== 말따/레티놀 57줄 중 다시 붙은 것 ==='
+          SELECT cp.tab_name AS 작업, COUNT(*) AS 살아있는줄,
+                 COUNT(*) FILTER (WHERE cp.order_submission_id IS NOT NULL) AS 링크있음
             FROM campaign_participants cp
-            JOIN live_tabs lt ON lt.sid=cp.sheet_id AND lt.tab=cp.tab_name
-           WHERE cp.deleted_at IS NULL AND cp.order_submission_id IS NOT NULL;
+           WHERE cp.deleted_at IS NULL
+             AND cp.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+           GROUP BY 1;
 
-          CREATE TEMP TABLE dup AS
-          SELECT l.*, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS onum,
-                 regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g') AS onm,
-                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS ophone8
-            FROM liv l JOIN order_submissions os ON os.id=l.osid
-           WHERE l.osid IN (SELECT osid FROM liv GROUP BY osid HAVING COUNT(*)>1);
-
-          \echo '=== 1. 요약 ==='
-          SELECT COUNT(*) AS 줄수, COUNT(DISTINCT osid) AS 묶음수, COUNT(DISTINCT tab_name) AS 작업수 FROM dup;
-
-          \echo ''
-          \echo '=== 2. 묶음 유형별 ==='
-          WITH g AS (
-            SELECT osid, COUNT(*) n,
-                   COUNT(DISTINCT nm) AS 이름종류,
-                   COUNT(DISTINCT phone8) AS 연락처종류,
-                   COUNT(*) FILTER (WHERE length(tnum)>=6 AND tnum=onum) AS 표번호일치줄,
-                   COUNT(*) FILTER (WHERE length(tnum)>=6 AND tnum<>onum) AS 표번호다름줄,
-                   COUNT(*) FILTER (WHERE length(tnum)<6) AS 표번호없음줄
-              FROM dup GROUP BY osid)
-          SELECT CASE
-                   WHEN 이름종류=1 AND 연락처종류=1 THEN 'A 같은 사람이 여러 줄'
-                   WHEN 표번호일치줄=1 THEN 'B 주인 1줄 + 나머지 오염'
-                   WHEN 표번호일치줄=0 THEN 'C 주인 없음'
-                   ELSE 'D 기타' END AS 유형,
-                 COUNT(*) AS 묶음수, SUM(n) AS 줄수
-            FROM g GROUP BY 1 ORDER BY 3 DESC;
-
-          \echo ''
-          \echo '=== 3. 전체 명단 (묶음별) ==='
-          SELECT d.tab_name AS 작업, d.onum AS 링크된주문, d.onm AS 주문수취인, d.ophone8 AS 주문연락처,
-                 d.num AS 번호, d.seq AS "#", d.nm AS 참여자, d.phone8 AS 줄연락처,
-                 d.tnum AS 표주문번호,
-                 CASE WHEN length(d.tnum)>=6 AND d.tnum=d.onum THEN '주인'
-                      WHEN length(d.tnum)>=6 THEN '다른구매'
-                      WHEN d.nm=d.onm AND d.phone8=d.ophone8 THEN '같은사람(번호없음)'
-                      ELSE '번호없음' END AS 판정,
-                 CASE WHEN d.is_submitted THEN 'O' ELSE '-' END AS 리뷰,
-                 CASE WHEN d.is_paid THEN 'O' ELSE '-' END AS 입금
-            FROM dup d ORDER BY d.tab_name, d.osid, d.seq;
+          SELECT COUNT(*) AS 말따레티놀_이름불일치_재발
+            FROM campaign_participants cp
+            JOIN order_submissions os ON os.id = cp.order_submission_id
+           WHERE cp.deleted_at IS NULL
+             AND cp.tab_name IN ('6/29(메이커스)말따_부스터샷 세럼 세트 300건','6/30(쿠팡)레티놀크림 300건')
+             AND COALESCE(os.recipient,'') <> ''
+             AND regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g')
+                 <> regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g')
+             AND cp.phone8 IS DISTINCT FROM right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8);
           SQL
