@@ -12085,7 +12085,7 @@ function _ovmRenderOverview(opt){
       : '<span class="ovm-fin" style="background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 25%,transparent)">공개</span>';
     // ★ 업체용 뷰어(광고주 접속) 링크 복사 — 토큰은 개요 응답에 실리지 않으므로(데이터 최소화)
     //   누를 때 ensure 로 받아온다. 링크가 없던 업체도 그 자리에서 생성된다.
-    const lkcopy = (STATE.role==='master'||STATE.role==='admin')
+    const lkcopy = _isInternalRole()
       ? `<button class="ovm-lkcopy" type="button" title="업체용 뷰어 접속 링크를 복사합니다"
           onclick="event.stopPropagation();_ovmCopyAdvLink(${i},this)">🔗 링크복사</button>` : '';
     const acct=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id).length;
@@ -12095,7 +12095,7 @@ function _ovmRenderOverview(opt){
       +`<span class="ovm-num${(+a.works)?'':' z'}">${bad?'?':(+a.works||0)}</span>`
       +num(+a.noMatch||0,false,matchKnown,'계약 매칭 정보를 불러오지 못했습니다')
       +num(+a.finishCand||0,true,candKnown,_ovmCandWhy())
-      +`<span class="ovm-lkcell">${STATE.role==='master'||STATE.role==='admin'?(lkb+lkcopy):'<span class="ovm-fin">—</span>'}</span>`
+      +`<span class="ovm-lkcell">${_isInternalRole()?(lkb+lkcopy):'<span class="ovm-fin">—</span>'}</span>`
       +`<span class="c${acct?'':' dim'}">${STATE.role==='master'||STATE.role==='admin'?(acct?acct+'개':'없음'):'—'}</span>`
       +`</div>`;
   }).join('') || '<div class="ovm-empty"><b>등록된 업체가 없습니다</b>업체 등록 후 소유 시트를 지정하세요.</div>';
@@ -12377,7 +12377,9 @@ async function createAdvertiser(){
 //   이 업체 뷰(소유 탭·마스킹·읽기전용)로 진입. 유출 대비 회전/폐기 가능. 링크 CRUD = /api/trackb/advertiser-link. ──
 function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeURIComponent(token); }
 function _advLinkHtml(a){
-  if(!(STATE.role==='master'||STATE.role==='admin')) return '';
+  // ★ 게이트 = 서버 /advertiser-link(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
+  //   여기를 admin 으로 좁히면 개요 표의 [🔗 링크복사]가 안내하는 [다시 활성]·[회전]에 갈 곳이 없다.
+  if(!_isInternalRole()) return '';
   const lk=STATE.advLink;
   // ★ 로그인 요구 여부는 **명시 플래그**(083 login_required) — 계정 존재로 자동 판정하지 않는다.
   //   계정을 발급해 두고도 링크는 공개로 둘 수 있다(계정 = 선택적 보안). 서버 판정과 같은 값을 본다.
