@@ -2707,6 +2707,31 @@ router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async 
   } catch (err) { next(err); }
 });
 
+/* 무시트 작업 **장부 재생성** — 작업표(진실원본) → 장부 3권(raw 미러·index_master·review_index).
+   왜 필요한가(2026-08-19 실측): 작업표 줄을 DB 에서 직접 되살려도(오삭제 복구) 장부를 다시 만들
+   창구가 어디에도 없어 **리뷰어 검색 명단·입금 대상에 그 줄이 영영 안 돌아왔다**. 지금까지 재생성은
+   정리·이관·접수의 부수효과로만 일어났다(그 자체를 부를 길이 없다 = 복구의 막다른 길).
+   ★ 게이트 = adminOrMaster — 장부를 통째로 다시 만드는 조작이라 줄 정리(retire)와 같은 급.
+   ★ 새 판정 0 — `rebuildLedgers` 를 그대로 부른다(무시트 아님·미등록·열 구성 불명은 그쪽 fail-closed).
+   ★ 시트·Drive 무접촉 · dryRun 기본(값이 빠진 요청이 곧바로 실행되지 않는다). */
+router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { rebuildLedgers, LedgerError } = require('../services/sheetlessLedger.service');
+    const b = req.body || {};
+    try {
+      res.json(await rebuildLedgers({
+        sheetId: b.sheetId, tabName: b.tabName, dryRun: b.dryRun !== false, by: `rebuild:${_by(req)}`,
+      }));
+    } catch (e) {
+      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
    ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
    ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
