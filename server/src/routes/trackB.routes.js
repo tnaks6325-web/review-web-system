@@ -2845,6 +2845,53 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { next(err); }
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+   작업(탭) 통째 삭제 — admin/master 전용 (사용자 확정 2026-08-19)
+   ★★ 되돌릴 수 없다. 그래서 ① 미리보기(GET, 쓰기 0) → ② `confirm:true` 실행 2단계이고,
+      ③ 돈 기록(입금 회차·원장·수기 표기·미확인 이체)이 걸린 작업은 **확인해도 거부**한다.
+   ★ 게이트 = adminOrMaster — AE 에게는 화면에도 그리지 않는다(눌러도 403 인 버튼 금지).
+   ══════════════════════════════════════════════════════════════════════════ */
+router.get('/work-tab/delete-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { previewTaskDelete } = require('../services/workTabDelete.service');
+    try {
+      res.json(await previewTaskDelete({
+        sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
+      }));
+    } catch (e) {
+      if (e && e.code === 'bad_args') return res.status(400).json({ ok: false, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { deleteTask } = require('../services/workTabDelete.service');
+    const b = req.body || {};
+    try {
+      const out = await deleteTask({
+        sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+        confirm: b.confirm === true, by: _by(req),
+      });
+      // 검증 실패는 400대로 — errorHandler 의 500 마스킹에 사유가 묻히면 담당자가 손쓸 수 없다.
+      if (!out.ok && (out.code === 'confirm_required' || out.code === 'payment_locked')) {
+        return res.status(out.code === 'payment_locked' ? 409 : 400).json(out);
+      }
+      res.json(out);
+    } catch (e) {
+      if (e && e.code === 'bad_args') return res.status(400).json({ ok: false, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 작업표 줄 "표에서 분리"(보관) — 129. **삭제가 아니다**(사용자 확정 2026-08-19 "표에서만 빼기").
    왜: 이체 근거가 걸려 지울 수 없는 중복 줄이 표에 남아 매일 눈에 걸린다. 지우면 그 줄의 입금
    표시가 표에서 빠져 **남길 줄이 미입금으로 보이고 다음 회차에 다시 담겨 이중 송금**이 난다.
