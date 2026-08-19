@@ -954,19 +954,19 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
       !/var em = function \(m\) \{ var h = buildHorizon\(m\); return h && h\.dates\.length \?/.test(src));
   }
 
-  /* 7A-13 ★★ 기본 이월 방식은 '다음날에 더하기' 가 아니다 (사용자 확정 2026-08-19).
-     이월이 크게 쌓인 공고(위프 625명)에서 next 가 기본이면 **다음 진행일 하루에 625명**이
-     열린다 — 066 하루 상한(2×일건수)을 훌쩍 넘고 리뷰어 화면에도 그대로 나간다. */
+  /* 7A-13 ★★ 기본 이월 방식 = '종료일 뒤에 붙이기'(사용자 확정 2026-08-19 2차 — 종전 spread 에서
+     뒤집혔다). next 가 기본이면 이월이 크게 쌓인 공고(위프 625명)에서 **다음 진행일 하루에 625명**이
+     열리고, spread 는 각 날 인원을 말없이 늘린다. extend 는 각 날 인원을 건드리지 않고 종료일만 민다. */
   {
-    eq('7A-13 ★★ 기본 이월 방식 = 남은 날에 나눠 담기', A.DEFAULT_CARRY_MODE, 'spread');
+    eq('7A-13 ★★ 기본 이월 방식 = 종료일 뒤에 붙이기', A.DEFAULT_CARRY_MODE, 'extend');
     ok('7A-13 기본값은 실제 선택지 안에 있다', A.CARRY_MODES.indexOf(A.DEFAULT_CARRY_MODE) >= 0);
     const src = readF('js/campaign-daily-plan.js');
     ok("7A-13 ★ 기본값 하드코딩('next') 부활 차단 — 폴백이 단일 출처를 본다",
       /_loadMode\(\) \|\| DEFAULT_CARRY_MODE/.test(src)
       && !/S\.carryMode \|\| _loadMode\(\) \|\| 'next'/.test(src));
-    ok("7A-13 ★ '기본' 배지도 같은 방식에 붙는다(화면과 코드가 갈리지 않는다)",
-      /_mode\(\\'spread\\'\)[\s\S]{0,160}<span class="df">기본<\/span>/.test(src)
-      && !/_mode\(\\'next\\'\)[\s\S]{0,160}<span class="df">기본<\/span>/.test(src));
+    ok("7A-13 ★ '기본' 배지는 DEFAULT_CARRY_MODE 에서 파생한다(손으로 단 배지 부활 차단)",
+      /m === DEFAULT_CARRY_MODE \? '<span class="df">기본<\/span>' : ''/.test(src)
+      && !/(다음날에 더하기|남은 날에 나눠 담기|종료일 뒤에 붙이기)<span class="df">기본<\/span>/.test(src));
   }
 
   // 7A-6 ★ 시작일이 미래여도 오늘 이후의 저장된 계획은 삭제되지 않는다
@@ -1071,8 +1071,8 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /오늘 이미 확정·진행 중인 인원이 남은 배분수보다 많아/.test(cdpSrc));
   ok('★ 부족 상태는 균형 모드 안에서 사유·다음 행동을 말한다(조용한 파랑 금지)',
     /bal && S\.shortBy > 0 && diffPlan\(\) < 0/.test(cdpSrc) && /명<\/b>이 모자랍니다/.test(cdpSrc));
-  ok('★ 부족은 저장 가능 — 총량보다 적게 모집한다고 말한다(2026-08-19 확정)',
-    /명 적게 모집합니다\. — <b>저장가능<\/b>/.test(cdpSrc)
+  ok('★ 부족은 저장 가능 — 남은건수보다 적게 모집한다고 말한다(2026-08-19 확정)',
+    /건 적게 모집합니다\. — <b>저장가능<\/b>/.test(cdpSrc)
     && /총량보다 ' \+ \(-diff\) \+ '명 적게 모집합니다 — 저장하면 작업표도 그 수로 줄어듭니다/.test(cdpSrc));
 
   // 7A-11 ★★ 한 날에 평소 상한을 넘겨 여는 배치는 **경고한다**(막지는 않는다 — 사용자가 고른 방식)
@@ -1089,10 +1089,13 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   const CDP = cdpSrc;
   /* ★ 2026-08-19 확정으로 문구가 3갈래가 됐다 — 일치(저장가능) / 초과(저장불가) /
      부족(저장가능 · 그만큼만 모집). 부족을 "저장불가"로 되돌리면 그 확정이 깨진다. */
-  ok('7n 요구 ⑥ 문구(초과/부족/일치) — 사용자가 확정한 문장 그대로',
-    /총량 <span class="num">' \+ target \+ '<\/span>명과 딱 맞습니다\. — <b>저장가능<\/b>/.test(CDP)
-    && /'<\/span>명 초과입니다\. — <b>저장불가<\/b>'/.test(CDP)
-    && /'<\/span>명 적게 모집합니다\. — <b>저장가능<\/b>'/.test(CDP));
+  /* ★★ 2026-08-19 사용자 신고로 문구가 바뀌었다 — "총량 410명"은 거짓(총원은 500명이고 410 은
+     남은 건수). 진행 현황(확정/총원)과 남은건수를 함께 말한다. 되돌리면 그 오해가 재현된다. */
+  ok('7n 요구 ⑥ 문구(초과/부족/일치) — 진행 현황 + 남은건수 기준',
+    /'<span class="num">' \+ done \+ '<\/span> \/ ' \+ tot \+ '건 진행중 · 남은건수 <span class="num">' \+ target \+ '<\/span>건'/.test(CDP)
+    && /pre \+ ' 일치합니다\. — <b>저장가능<\/b>'/.test(CDP)
+    && /'<\/span>건 초과입니다\. — <b>저장불가<\/b>'/.test(CDP)
+    && /'<\/span>건 적게 모집합니다\. — <b>저장가능<\/b>'/.test(CDP));
   ok('7o ★ 알림창 높이는 "일치" 기준 41px 고정(상태마다 표가 흔들리면 조절하던 줄을 놓친다)',
     /\.cdp-bal\{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px/.test(CDP));
   ok('7p ★ 종료일 연장 문구 — 사용자 확정 문장(숫자는 실제 마지막 진행일에서 읽는다)',
@@ -1101,9 +1104,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   /* ⚠ 2026-08-19 사용자 확정으로 **기본값이 뒤집혔다** — "다음날로 이월하는 것이 기본값이
      되어선 안 된다"(위프 800건 이월 625명이 다음 진행일 하루에 몰리는 것을 실측하고 결정).
      되돌리면 그 사고가 재현된다. 상세는 7A-13. */
-  ok('7q ★ 기본 보충 방식 = 남은 날에 나눠 담기(사용자 확정 2026-08-19) — 여는 순간 적용',
+  ok('7q ★ 기본 보충 방식 = 종료일 뒤에 붙이기(사용자 확정 2026-08-19 2차) — 여는 순간 적용',
     /applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP)
-    && /남은 날에 나눠 담기<span class="df">기본<\/span>/.test(CDP));
+    && /segBtn\('extend', '종료일 뒤에 붙이기'/.test(CDP));
   ok('7r ★ 저장 게이트 = 초과 아님 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
     /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(CDP)
     && /if \(balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
@@ -1111,9 +1114,12 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     A.MAX_ROWS === 120
     && /const MAX_PLAN_ENTRIES = 120;/.test(readS('services/campaignPlan.service.js'))
     && /한 번에 저장 가능한 ' \+ MAX_ROWS \+ '일을 넘었습니다/.test(CDP));
-  ok('7t ★ 방식 전환 onclick 은 고정 문자열만(외부 값 보간 금지 — XSS 규율)',
-    /onclick="CampaignDailyPlan\._mode\(\\'next\\'\)"/.test(CDP)
-    && !/onclick="CampaignDailyPlan\._mode\(\\'' \+/.test(CDP));
+  /* ★ 세그먼트 버튼이 segBtn 한 벌로 모이면서 mode 는 인자가 됐다 — 대신 **CARRY_MODES
+     화이트리스트**로 잠그고, 호출부는 고정 문자열만 넘긴다(보간 사고 차단). */
+  ok('7t ★ 방식 전환 onclick 은 화이트리스트 통과 값만(외부 값 보간 금지 — XSS 규율)',
+    /if \(CARRY_MODES\.indexOf\(m\) < 0\) return '';/.test(CDP)
+    && /segBtn\('next', /.test(CDP) && /segBtn\('spread', /.test(CDP) && /segBtn\('extend', /.test(CDP)
+    && !/\+ segBtn\((?!'(next|spread|extend)')/.test(CDP));
   ok('7u ★ 균형 모드에서는 보류 블록을 그리지 않는다(반영 창구가 둘이면 이중 반영)',
     /if \(bal\) \{\n\s*\/\/ 균형 모드에서는 위 "이월 보충 투입 방식"이 반영 창구다/.test(CDP));
   ok('7v ★ 균형 모드에서는 「빠진 인원 처리」 팝업을 띄우지 않는다(판정 단일 출처 = 균형 바)',
