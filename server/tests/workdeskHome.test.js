@@ -155,8 +155,11 @@ function makeSandbox(role, apiImpl) {
     const { viewroot } = makeSandbox('staff');
     const sb2 = makeSandbox('staff'); vm.runInContext('renderHomeView()', sb2.sb);
     const h = sb2.viewroot._html;
-    ok('staff: admin 전용 타일(관측·입금관리·등록리뷰어DB)이 없다 — nav 정책과 1:1',
-      !h.includes('등록리뷰어DB') && !h.includes('입금관리') && !h.includes('Track B 전환 현황'));
+    // ★ 2026-08 사용자 확정: 관측은 AE 도 본다(서버 /overview·/parity 가 internal) — 타일도 함께 열었다.
+    //   입금관리·등록리뷰어DB 는 여전히 adminOrMaster 라 타일이 없어야 한다(눌러도 403 인 막다른 길 금지).
+    ok('staff: admin 전용 타일(입금관리·등록리뷰어DB)이 없다 — nav 정책과 1:1',
+      !h.includes('등록리뷰어DB') && !h.includes('입금관리'));
+    ok('staff: 관측 타일은 있다(서버 게이트 internal 과 1:1)', h.includes('Track B 전환 현황'));
     ok('staff: 미확인 문의 줄이 없다(AE 는 문의 미열람 — 영원한 – 방지)', !h.includes('미확인 문의'));
     ok('staff: 공통 타일(작업보드·C/S·리뷰검수)은 있다', h.includes('작업보드') && h.includes('리뷰검수'));
     void viewroot;

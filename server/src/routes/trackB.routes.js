@@ -66,10 +66,10 @@ router.post('/project', authMiddleware, masterOnlyMiddleware, async (req, res, n
   } catch (err) { next(err); }
 });
 
-// ── parity 리포트(B ↔ A, 6차원×3버킷) — adminOrMaster ──
-//   관측 뷰(adminOrMaster)의 [정밀] 버튼이 호출하는데 master 전용이면 admin이 dead-end.
+// ── parity 리포트(B ↔ A, 6차원×3버킷) — 내부 담당자(master/admin/staff) ──
+//   관측 뷰의 [정밀] 버튼이 호출하는데 게이트가 더 좁으면 그 버튼이 dead-end 가 된다.
 //   PII 등가: real/benign 샘플 phone8은 _mask 처리 + 동일 수치가 parity-all(adminOrMaster)로 기노출 → 신규 노출 0.
-router.get('/parity', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/parity', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
@@ -289,12 +289,12 @@ router.post('/workdesk/favorites', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── 관측 대시보드: 투영된 전 탭 롤업(카운트 대조 + 준비도) — adminOrMaster ──
+// ── 관측 대시보드: 투영된 전 탭 롤업(카운트 대조 + 준비도) — 내부 담당자(master/admin/staff) ──
 //   coverage = 투영완료/총작업 · 미투영 요약(읽기 전용). items 는 **투영된 탭만** 담으므로 미투영 탭은
 //   목록에 아예 없다 → 분모를 따로 실어 보내야 화면이 "총 몇 개 중 몇 개"를 말할 수 있다.
 //   ★ 부가 신호라 **fail-soft**: 커버리지 조회가 실패해도 관측 목록 자체는 그대로 뜬다(null = 화면 '?').
 //     필드 부재(구버전 백엔드)와 null(조회 실패)을 프론트가 구분한다 — 배포 스큐 허위 정상 차단.
-router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/overview', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const items = await svc.overview();
     // items 를 재료로 넘겨 "투영완료 = 이 목록에 뜨는 탭"을 구조적으로 보장(+ 중복 조회 제거).
@@ -577,13 +577,13 @@ router.post('/sheet-import/revert', authMiddleware, adminOrMasterMiddleware, asy
   } catch (err) { _importErr(err, res, next); }
 });
 
-// ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
-router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — 내부 담당자(master/admin/staff) ──
+router.post('/parity-all', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, ...(await svc.parityAll({ store: true, source: 'manual' })) }); }
   catch (err) { next(err); }
 });
-// ── parity 추이(한 탭 스냅샷 이력) — adminOrMaster ──
-router.get('/parity-trend', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── parity 추이(한 탭 스냅샷 이력) — 내부 담당자(master/admin/staff) ──
+router.get('/parity-trend', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, limit } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
@@ -593,8 +593,8 @@ router.get('/parity-trend', authMiddleware, adminOrMasterMiddleware, async (req,
 
 // ── 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 ──
 //   ★ 격리: 이 플래그를 읽는 소비처는 Track B write-back 엔진(P2, 미착수)뿐 — 값을 바꿔도 Track A 라이브 불변.
-//   읽기는 adminOrMaster(관측), 플립(설정)은 master 전용(되돌리기 어려운 방향 전환이라 보수적).
-router.get('/source-of-truth', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+//   읽기는 내부 담당자(master/admin/staff)(관측), 플립(설정)은 master 전용(되돌리기 어려운 방향 전환이라 보수적).
+router.get('/source-of-truth', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
@@ -734,8 +734,8 @@ router.get('/owned-sheets', authMiddleware, internalMiddleware, async (req, res,
   catch (err) { next(err); }
 });
 
-// ── 광고주 접속 링크(매직 링크) 관리 — master/admin. 업체당 1토큰 발급/회전/폐기. ──
-router.post('/advertiser-link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 광고주 접속 링크(매직 링크) 관리 — 내부 담당자(master/admin/staff). 업체당 1토큰 발급/회전/폐기. ──
+router.post('/advertiser-link', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { action, advertiserId } = req.body || {};
     if (action === 'get') return res.json({ ok: true, link: await svc.getAdvertiserLink(advertiserId) });
@@ -761,7 +761,7 @@ router.post('/advertiser-link-login', advertiserLinkLimiter, async (req, res, ne
 // ── 광고주(거래처) 로그인 계정 관리 — master/admin. /api/admin/advertiser-users 와 동일 로직을
 //   Track B 표면(/api/trackb/*)으로도 노출: 인트라넷 SSO 관리자 토큰(via:intranet)은 /api/admin/* 격리라
 //   소유지정 UI에서 계정을 발급하려면 이 경로가 필요하다. 실제 CRUD는 auth.service 재사용(로직 단일). ──
-router.post('/advertiser-account', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/advertiser-account', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { action, name, pw, newPw, active, advertiserId } = req.body || {};
     if (action === 'add') return res.json(await authSvc.addAdvertiserUser(name, pw, advertiserId));
@@ -772,8 +772,8 @@ router.post('/advertiser-account', authMiddleware, adminOrMasterMiddleware, asyn
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-// ── 업체(거래처) 삭제(soft) — master/admin 전용. 포털 공유 원장이라 status='ended'로 숨김(가역)+소유 매핑 해제. ──
-router.delete('/advertisers/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 업체(거래처) 삭제(soft) — 내부 담당자(master/admin/staff). 포털 공유 원장이라 status='ended'로 숨김(가역)+소유 매핑 해제. ──
+router.delete('/advertisers/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const out = await svc.deleteAdvertiser({ advertiserId: req.params.id, by: _by(req) });
     res.status(out.ok ? 200 : (out.code || 400)).json(out);
@@ -789,13 +789,13 @@ router.get('/intranet/advertisers', authMiddleware, internalMiddleware, async (r
 
 // ── 인트라넷 사용자(AE) 자동완성 프록시 — 담당AE 매칭 전용. 이름·아이디·부서만(민감필드 미노출).
 //   dept=AE 등 부서 필터 지원(담당AE 후보를 AE 부서로 제한). ──
-router.get('/intranet/users', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/intranet/users', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json(await svc.intranetStaffUsers({ q: req.query.q, limit: req.query.limit, dept: req.query.dept })); }
   catch (err) { next(err); }
 });
 
-// ── 담당 AE(inad_pm) 매칭/변경 — master/admin 전용(스코프 재배치는 관리자 소관, staff 자기지정은 생성 시 강제). ──
-router.post('/advertisers/inad-pm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 담당 AE(inad_pm) 매칭/변경 — 내부 담당자(master/admin/staff)(업체 생성 시 staff 는 여전히 자기지정 강제). ──
+router.post('/advertisers/inad-pm', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, inadPm } = req.body || {};
     const out = await svc.setAdvertiserInadPm({ advertiserId, inadPm, by: _by(req) });
@@ -934,9 +934,10 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
-// ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ adminOrMaster 전용:
-//    업체 간 재배치는 staff 초기매핑 게이트("재배치는 관리자에게 요청")와 같은 규율로 admin 소관이다. ──
-router.post('/ownership/transfer', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ 내부 담당자(master/admin/staff):
+//    사용자 확정(2026-08)으로 AE 도 업체 간 재배치를 한다(광고주는 차단). 대상 검증은 서비스가
+//    fail-closed 로 한다(업체 미존재 404 · 종료 거래처 거부 · 필수값 없으면 쓰기 0 + ROLLBACK). ──
+router.post('/ownership/transfer', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabGid, toAdvertiserId } = req.body || {};
     const o = await svc.transferOwnership({ sheetId, tabGid: tabGid || null, toAdvertiserId, by: _by(req) });
@@ -1155,7 +1156,7 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
-router.post('/workdesk/manual-review-submit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, fileIds } = req.body || {};
     if (!sheetId || !tabName || !rowId || !Array.isArray(fileIds)) {
@@ -1173,9 +1174,9 @@ router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
     res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req) }));
   } catch (err) { next(err); }
 });
-// 주문 행 삭제는 금액·정원·시트 주문값을 함께 바꾸므로 master/admin만 실행한다.
+// 주문 행 삭제는 금액·정원·시트 주문값을 함께 바꾸므로 내부 담당자(master/admin/staff)만 실행한다(광고주 차단).
 // 첫 호출은 영향만 계산하고, 실제 삭제는 화면 확인 후 confirm:true가 있어야 한다.
-router.post('/workdesk/order-delete-preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/workdesk/order-delete-preview', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
@@ -1183,7 +1184,7 @@ router.post('/workdesk/order-delete-preview', authMiddleware, adminOrMasterMiddl
     res.status(out.ok ? 200 : 404).json(out);
   } catch (err) { next(err); }
 });
-router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/workdesk/order-delete', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, confirm } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
@@ -1194,7 +1195,7 @@ router.post('/workdesk/order-delete', authMiddleware, adminOrMasterMiddleware, a
 });
 // 번호 없는 주문행은 목표 인원 밖의 추가 참여자로 남기지 않고, 작업오더 목표 안의 빈 슬롯으로만 이동한다.
 // 대상·빈 슬롯은 서버가 다시 검증하므로 클라이언트가 번호를 지정하거나 이미 채워진 행을 덮을 수 없다.
-router.post('/workdesk/assign-unslotted-order', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/workdesk/assign-unslotted-order', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, confirm } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
@@ -1357,18 +1358,18 @@ router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) =
   } catch (err) { next(err); }
 });
 
-// ── 편집 허용명단 관리 — master/admin 전용(후보는 인트라넷 직원DB에서 고른다) ──
-router.get('/workdesk-editors', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 편집 허용명단 관리 — 내부 담당자(master/admin/staff)(후보는 인트라넷 직원DB에서 고른다) ──
+router.get('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await wdEditors.listEditors() }); } catch (err) { next(err); }
 });
-router.post('/workdesk-editors', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
     const out = await wdEditors.addEditor({ name: b.name, username: b.username, dept: b.dept, by: _by(req) });
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
-router.delete('/workdesk-editors/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.delete('/workdesk-editors/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const out = await wdEditors.removeEditor(req.params.id);
     res.status(out.ok ? 200 : 404).json(out);
@@ -1489,7 +1490,7 @@ router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editor
 // ── 날짜별 모집인원 조절 + 차수(095) ─────────────────────────
 //   경로는 재기준 없이 양쪽 호스트 공용(리뷰어 게이트와 같은 판단): admin_token(관리자 대시보드)도
 //   인트라넷 SSO admin 토큰(리뷰웹시스템[3버전])도 /api/trackb/* 에 그대로 닿는다.
-//   전부 adminOrMaster — 정원·총량 변경은 공고 관제 수동확정과 같은 급(AE 편집명단에 열지 않는다).
+//   전부 내부 담당자(master/admin/staff) — 사용자 확정(2026-08)으로 AE(staff)도 정원·총량을 조절한다(광고주는 차단).
 //   스코프 토큰(via:'reviewer_campaign')은 authMiddleware 격리로 도달 자체가 불가.
 function _cdpNotReady(res, err) {
   if (err && err.code === '42P01') {
@@ -1522,13 +1523,13 @@ function _cdpFail(res, err) {
   }
   return false;
 }
-router.get('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getPlanOverview } = require('../services/campaignPlan.service');
     res.json({ ok: true, ...(await getPlanOverview(String(req.params.id))) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
-router.post('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/campaigns/:id/daily-plan', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { savePlans, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
@@ -1536,7 +1537,7 @@ router.post('/campaigns/:id/daily-plan', authMiddleware, adminOrMasterMiddleware
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
-router.post('/campaigns/:id/worktable-rebuild', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/campaigns/:id/worktable-rebuild', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { rebuildWorktableFromPlans, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
@@ -1544,7 +1545,7 @@ router.post('/campaigns/:id/worktable-rebuild', authMiddleware, adminOrMasterMid
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
-router.post('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { addRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
@@ -1552,7 +1553,7 @@ router.post('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, as
     res.json({ ok: true, ...out, ...(await getPlanOverview(campaignId)) });
   } catch (err) { if (!_cdpNotReady(res, err) && !_cdpFail(res, err)) next(err); }
 });
-router.delete('/campaigns/:id/rounds', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.delete('/campaigns/:id/rounds', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { removeLastRound, getPlanOverview } = require('../services/campaignPlan.service');
     const campaignId = String(req.params.id);
@@ -2399,8 +2400,9 @@ router.post('/reviewers/delete', authMiddleware, adminOrMasterMiddleware, async 
 
 /* ══════════════════════════════════════════════════════════════
    모집공고별 참여가능 리뷰어 게이트 (블랙리스트 건별 관리, migration 091)
-   ★ 전부 adminOrMaster — 검색이 **계좌번호**까지 받는 화면이라 등록리뷰어DB와 같은 판단
-     (AE·광고주 차단, 응답의 연락처·계좌는 뒤4자리만).
+   ★ 전부 내부 담당자(master/admin/staff) — 사용자 확정(2026-08)으로 AE 도 공고별 참여 리뷰어를
+     관리한다(광고주·리뷰어는 차단). 검색이 **계좌번호**까지 받지만 응답의 연락처·계좌는 뒤4자리만이고,
+     PII 를 늘리지 않는다는 규율은 그대로다(전사 원장 조회인 등록리뷰어DB 는 여전히 adminOrMaster).
    ★ Track B 경로 하나로 관리자 대시보드(admin_token)·리뷰웹시스템[3버전](인트라넷 SSO)
      양쪽이 그대로 닿는다(리뷰타입 정리 RTC_EP와 같은 판단 — 호스트별 재기준 불필요).
    ★ 42P01(마이그레이션 미적용)은 not_ready 로 말한다 — /api/trackb/* 는 isAdminApi 밖이라
@@ -2414,7 +2416,7 @@ function _rgNotReady(res, err) {
   return false;
 }
 
-router.get('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/campaigns/:id/reviewer-gate', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { listGates, getCriteria, listGlobalBlacklist } = require('../services/reviewerGate.service');
     const data = await listGates(String(req.params.id));
@@ -2427,14 +2429,14 @@ router.get('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddlewa
   } catch (err) { if (!_rgNotReady(res, err)) next(err); }
 });
 
-router.get('/campaigns/:id/reviewer-gate/search', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/campaigns/:id/reviewer-gate/search', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { searchReviewers } = require('../services/reviewerGate.service');
     res.json({ ok: true, ...(await searchReviewers(String(req.params.id), req.query.q)) });
   } catch (err) { if (!_rgNotReady(res, err)) next(err); }
 });
 
-router.post('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/campaigns/:id/reviewer-gate', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { applyGateChanges, listGates } = require('../services/reviewerGate.service');
     const campaignId = String(req.params.id);
@@ -2445,14 +2447,14 @@ router.post('/campaigns/:id/reviewer-gate', authMiddleware, adminOrMasterMiddlew
 });
 
 // 블랙리스트 관리기준(사용자 확정 Q4 — 판정 일수 별도 설정) : 설정탭 "블랙리스트 관리기준" 패널이 사용
-router.get('/settings/reviewer-gate-criteria', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/settings/reviewer-gate-criteria', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { getCriteria } = require('../services/reviewerGate.service');
     res.json({ ok: true, criteria: await getCriteria() });
   } catch (err) { next(err); }
 });
 
-router.post('/settings/reviewer-gate-criteria', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/settings/reviewer-gate-criteria', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { saveCriteria } = require('../services/reviewerGate.service');
     res.json({ ok: true, criteria: await saveCriteria(req.body || {}) });
@@ -2602,9 +2604,9 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
 });
 
 /* 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
-   ★ adminOrMaster — 검색 명단에서 사람을 빼는 조작이라 정원 변경(날짜별 인원)과 같은 급.
+   ★ 내부 담당자(master/admin/staff) — 정원 변경(날짜별 인원)과 같은 급이고, 그것과 함께 AE 에게 열었다.
    ★ dryRun 기본(`dryRun !== false`) — 값이 빠진 요청이 곧바로 실행되지 않는다. */
-router.post('/worktable/retire-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
     const b = req.body || {};

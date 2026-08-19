@@ -12,7 +12,7 @@
  *  C. 마이그레이션 — FK 타입 TEXT ≡ 018(recruit_campaigns.id), 활성 부분유니크, mode CHECK 없음
  *  D. apply 게이트 배선 — 홀드 INSERT 전 · SAVEPOINT 격리 · ROLLBACK 후 403 · fail-open
  *  E. 서비스 실행(스텁 db) — checkApplyGate 분기 · 검색 자리표시자 정합 · PII 마스킹 · 변경 tx
- *  F. 라우터 스택 실검사 — trackB 5경로 전부 authMiddleware+adminOrMaster 체인
+ *  F. 라우터 스택 실검사 — trackB 5경로 전부 authMiddleware+internal 체인(2026-08: AE 도 관리)
  *  G. 프론트 배선 — 카드 버튼(참여형+모듈 존재 시만) · 모듈 로드 · campaign.html 위장/고지 · 설정 패널
  */
 const assert = require('assert');
@@ -213,7 +213,7 @@ const gate = require('../src/utils/reviewerGate');
     ['/settings/reviewer-gate-criteria', 'post'],
   ]) {
     const r = findRoute(p, m);
-    ok(`${m.toUpperCase()} ${p} 등록 + 미들웨어 체인 3단(auth→adminOrMaster→핸들러)`,
+    ok(`${m.toUpperCase()} ${p} 등록 + 미들웨어 체인 3단(auth→internal→핸들러)`,
       !!r && r.route.stack.length >= 3, r && r.route.stack.length);
   }
   ok('42P01 = not_ready 로 말함(마스킹된 200 무신호 방지 — 088 규율)',
@@ -254,7 +254,18 @@ const gate = require('../src/utils/reviewerGate');
   ok('설정 경로는 /api/trackb/settings/*(양쪽 호스트 공용 — 재기준 금지)',
     /RGC_EP = '\/api\/trackb\/settings\/reviewer-gate-criteria'/.test(settings));
   ok('admin.html 설정 마운트에 gatecriteria 포함', /'worktable', 'gatecriteria'/.test(adminHtml));
-  ok('workdesk 설정 마운트에 gatecriteria 포함(관리자만)', /'worktable','gatecriteria','notice'/.test(workdesk));
+  // ★ 2026-08 사용자 확정: 공고별 [🚫 참여 리뷰어 관리]를 AE 도 쓰므로, 그 판정 기준인
+  //   gatecriteria 패널은 admin/staff **양쪽 마운트 목록**에 있어야 한다(한쪽만 있으면 AE 가
+  //   기준을 못 보고 관리만 하게 된다). 다른 패널 목록이 늘어도 깨지지 않게 두 목록을 따로 본다.
+  {
+    const mount = /AdminSettings\.mount\('adminSettingsMount',[^\n]*/.exec(workdesk);
+    const line = (mount && mount[0]) || '';
+    const both = line.split('?')[1] || '';
+    const [adminList, staffList] = both.split(':');
+    ok('workdesk 설정 마운트 — 관리자 목록에 gatecriteria', /gatecriteria/.test(adminList || ''));
+    ok('workdesk 설정 마운트 — AE 목록에도 gatecriteria(관리 기준 = 그 기능과 같은 범위)',
+      /gatecriteria/.test(staffList || ''));
+  }
   ok('admin 탭 전환 시 loadGateCriteria 호출', /loadGateCriteria\(\)/.test(indexApp));
   ok('전역 노출(onclick 이 부를 이름)', /window\.saveGateCriteria = saveGateCriteria/.test(settings));
 

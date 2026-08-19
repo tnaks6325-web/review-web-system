@@ -409,7 +409,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     ['/campaigns/:id/rounds', 'post'], ['/campaigns/:id/rounds', 'delete'],
   ]) {
     const l = find(p, m);
-    ok(`라우트 ${m.toUpperCase()} ${p} 등록 + 미들웨어 체인(auth→adminOrMaster→핸들러)`, l && l.count >= 3);
+    ok(`라우트 ${m.toUpperCase()} ${p} 등록 + 미들웨어 체인(auth→internal→핸들러)`, l && l.count >= 3);
   }
   const rtB = readS('routes/trackB.routes.js');
   ok('42P01 → not_ready(migration 095 안내)', /not_ready.*migration 095/.test(rtB));
