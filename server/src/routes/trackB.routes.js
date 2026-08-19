@@ -14,6 +14,7 @@ const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
 const sheetlessStatus = require('../services/sheetlessStatus.service');
+const shareLinks = require('../services/shareLink.service');   // 작업보드·업체 공유 링크(131)
 const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 // ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
@@ -762,6 +763,50 @@ router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res,
 router.get('/owned-sheets', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, sheetIds: await svc.ownedSheetIds() }); }
   catch (err) { next(err); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 공유 링크(작업보드·업체) — 메신저로 "그 작업보드 주소"를 바로 전달 (migration 131)
+//   ★★ 링크는 권한이 아니다(완화 금지): code 는 어디로 갈지만 말하고, 여는 사람은 평소와 똑같이
+//      로그인 + 스코프 검증을 통과해야 한다. 그래서 카톡방에 굴러다녀도 담당 밖에는 열리지 않는다.
+//   ★ 발급·되찾기 모두 internalMiddleware(광고주·리뷰어 도달 불가). 광고주에게는 058 전용 링크가 따로 있다.
+// ══════════════════════════════════════════════════════════════════════════
+router.post('/share-link', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { kind, sheetId, tabName, tabGid, advertiserId } = req.body || {};
+    let out;
+    if (kind === 'advertiser') out = await shareLinks.ensureAdvertiserShareLink({ advertiserId, by: _by(req) });
+    else out = await shareLinks.ensureTabShareLink({ sheetId, tabName, tabGid, by: _by(req) });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    if (shareLinks.notReady(err)) return res.status(200).json({ ok: false, code: 'not_ready', error: '공유 링크 기능이 아직 준비되지 않았습니다(마이그레이션 131 미적용).' });
+    if (err && err.status === 400) return res.status(400).json({ ok: false, error: err.message });
+    next(err);
+  }
+});
+
+// 코드 → 대상 되찾기. ★ 작업 링크는 여기서 canAccessTab 을 통과해야 한다(담당 밖에는 탭 이름조차 안 준다).
+router.get('/share-link/:code', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const row = await shareLinks.resolveShareLink(req.params.code);
+    if (!row) return res.status(404).json({ ok: false, error: '링크를 찾을 수 없습니다. 주소가 잘렸거나 폐기된 링크일 수 있습니다.' });
+    if (row.kind === 'tab') {
+      const okc = await svc.canAccessTab({
+        role: _role(req), staffName: (req.admin && req.admin.name) || null,
+        advertiserId: (req.admin && req.admin.advertiser_id) || null,
+        sheetId: row.sheetId, tabName: row.tabName,
+      });
+      if (!okc) return res.status(403).json({ ok: false, error: '담당 범위 밖의 작업입니다. 관리자에게 문의하세요.' });
+      shareLinks.touchShareLink(row.code);
+      return res.json({ ok: true, kind: 'tab', sheetId: row.sheetId, tabName: row.tabName, tabGid: row.tabGid || '' });
+    }
+    if (!row.advertiserId) return res.status(404).json({ ok: false, error: '연결된 업체가 없습니다(삭제되었을 수 있습니다).' });
+    shareLinks.touchShareLink(row.code);
+    return res.json({ ok: true, kind: 'advertiser', advertiserId: row.advertiserId, advertiserName: row.advertiserName || '' });
+  } catch (err) {
+    if (shareLinks.notReady(err)) return res.status(200).json({ ok: false, code: 'not_ready', error: '공유 링크 기능이 아직 준비되지 않았습니다(마이그레이션 131 미적용).' });
+    next(err);
+  }
 });
 
 // ── 광고주 접속 링크(매직 링크) 관리 — 내부 담당자(master/admin/staff). 업체당 1토큰 발급/회전/폐기. ──
