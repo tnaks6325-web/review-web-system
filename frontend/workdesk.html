@@ -9892,7 +9892,9 @@ function _ptDriftBlock(r){
   // ★ 시트를 함께 적는다 — 다른 시트에 같은 탭 이름이 있을 수 있어(시트 복사본) 없으면 구분이 안 된다
   const rows = d.map(h=>`<tr><td style="color:var(--sub,#666)">${esc(h.campaignName||'-')}</td>
       <td>${esc(h.tabName)}</td><td style="color:var(--sub,#666)">→</td>
-      <td><b>${esc(h.liveTabName||'?')}</b></td></tr>`).join('');
+      <td><b>${esc(h.liveTabName||'?')}</b>${h.liveNameRegistered
+        ? ` <span style="color:#b45309;font-weight:600">· 이 이름은 이미 따로 등록됨</span>` : ''}</td></tr>`).join('');
+  const ghost = d.filter(h=>h.liveNameRegistered).length;
   return `<div style="margin-top:10px;padding:9px 11px;border:1px solid var(--line,#e5a0a0);border-radius:6px;background:rgba(255,80,80,.07)">
     <b>시트에서 탭 이름이 바뀐 작업 ${d.length}개는 마감 표시가 있어도 여전히 읽힙니다.</b>
     시스템이 <b>등록된 옛 이름</b>으로 찾기 때문입니다 — <b>여기서 정리해도 멈추지 않습니다.</b>
@@ -9901,7 +9903,10 @@ function _ptDriftBlock(r){
         <th>시트의 현재 이름</th></tr></thead>
       <tbody>${rows}</tbody></table>
     <div style="margin-top:6px;font-size:13px">
-      관리자 대시보드의 <b>탭명 교정(sync-tab-names)</b>으로 이름을 맞춘 뒤 여기서 다시 확인하세요.
+      ${ghost ? `<b>${ghost}개는 시트의 현재 이름이 이미 따로 등록돼 있습니다</b> —
+        옛 이름 행은 <b>gid 만 등록해 두는 빈 껍데기</b>라 <b>탭명 교정으로 고칠 수 없습니다</b>
+        (같은 시트에 같은 이름을 둘 수 없어 충돌합니다).<br>` : ''}
+      ${d.length - ghost ? `나머지는 관리자 대시보드의 <b>탭명 교정(sync-tab-names)</b>으로 이름을 맞춘 뒤 여기서 다시 확인하세요.` : ''}
       ★ 이름을 맞추면 <b>마감 표시가 되살아나</b> 그 작업들은 다음 전체 빌드에서 아카이브됩니다
       (참여 리뷰어의 제출완료 내역도 화면에서 사라집니다).
       ⚠ 탭명 교정은 <b>보관 기록(index_master_archive)까지는 고치지 않습니다</b> —

@@ -75,6 +75,7 @@ const _SCAN_SQL = `
          ${ACTIVITY_SELECT_SQL},
          arch."isArchived",
          archg."archivedGidOnly",
+         livereg."liveNameRegistered",
          live."liveTabName",
          ord."pendingOrders",
          camp."activeCampaigns",
@@ -113,6 +114,15 @@ const _SCAN_SQL = `
        ORDER BY rst.mirrored_at DESC NULLS LAST
        LIMIT 1
     ) live ON TRUE
+    /* 시트의 현재 이름이 **이미 별도 행으로 등록**돼 있는가.
+     *  있으면 옛 이름 행은 gid 만 등록해 두는 유령 행이고, 탭명 교정은
+     *  UNIQUE(sheet_id, tab_name) 충돌로 실패한다 — 조치가 달라지므로 구분해서 말한다. */
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int > 0 AS "liveNameRegistered"
+        FROM tab_configs t2
+       WHERE t2.sheet_id = tc.sheet_id AND t2.tab_name = live."liveTabName"
+         AND t2.tab_name <> tc.tab_name
+    ) livereg ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int > 0 AS "archivedGidOnly"
         FROM index_master_archive ima
@@ -158,6 +168,8 @@ function classifyPastTab(row, since) {
     // 시트의 현재 탭 이름이 등록명과 다르다 = smartBuild 의 이름 기준 스킵이 빗나간다
     nameDrift: !!(row.liveTabName && row.liveTabName !== row.tabName),
     liveTabName: row.liveTabName || '',
+    // 새 이름이 이미 등록돼 있으면 탭명 교정이 충돌한다(조치가 다르다)
+    liveNameRegistered: !!row.liveNameRegistered,
   };
   // (5) 이미 안 읽는 상태 — 할 일 없음
   // ★ 무시트 판정만 gid 폴백이 있다(sheetlessScope) — 이름이 바뀌어도 유효
