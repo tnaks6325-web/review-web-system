@@ -179,6 +179,42 @@ async function depositAnomalyReport({ sheetId = '', tabName = '' } = {}) {
     out.duplicateLedgerCount = rows.length;
   } catch (e) { out.duplicateLedgerUnavailable = e.message; }
 
+  // ④ 수정 오버레이로 남아 있는 입금 표기 (8/12 계열) — 앵커가 몇 줄을 가리키는지까지
+  //    ★ 이건 row_json 에 박힌 값이 아니라 **표시·집계에만 얹히는 오버레이**다. 앵커가 여러 줄이면
+  //      게이트가 적용을 막지만(이번 배포), 편집 자체는 남아 있으므로 날짜별로 규모를 보여준다.
+  try {
+    const { rows } = await pool.query(
+      `SELECT pe.sheet_id AS "sheetId", pe.tab_name AS "tabName", pe.anchor_type AS "anchorType",
+              btrim(pe.value_text) AS stamp, pe.created_by AS "createdBy",
+              count(cp.id)::int AS "rowCount", array_agg(cp.seq ORDER BY cp.seq) AS rows
+         FROM participant_edits pe
+         LEFT JOIN campaign_participants cp
+           ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
+          AND cp.deleted_at IS NULL AND cp.active = TRUE
+          AND ((pe.anchor_type = 'order'    AND cp.order_submission_id::text = pe.anchor_value)
+            OR (pe.anchor_type = 'manual'   AND cp.id::text = pe.anchor_value)
+            OR (pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+        WHERE ${whereScope.replace(/\b(sheet_id|tab_name)\b/g, 'pe.$1')}
+          AND pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
+          AND btrim(COALESCE(pe.value_text, '')) <> ''
+        GROUP BY 1,2,3,4,5
+        ORDER BY count(cp.id) DESC
+        LIMIT ${_ANOMALY_CAP}`, params);
+    out.overlayMarks = rows;
+    out.overlayMarkCount = rows.length;
+    out.overlaySpreadCount = rows.filter(r => Number(r.rowCount) > 1).length;
+    // 날짜별 요약 — "8/11 몇 건 · 8/12 몇 건" 을 한눈에
+    const byDate = {};
+    for (const r of rows) {
+      const k = r.stamp || '(빈값)';
+      if (!byDate[k]) byDate[k] = { marks: 0, spread: 0, rows: 0 };
+      byDate[k].marks += 1;
+      byDate[k].rows += Number(r.rowCount) || 0;
+      if (Number(r.rowCount) > 1) byDate[k].spread += 1;
+    }
+    out.overlayByDate = byDate;
+  } catch (e) { out.overlayUnavailable = e.message; }
+
   return out;
 }
 

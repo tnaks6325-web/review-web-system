@@ -1584,17 +1584,20 @@ async function _closeoutRoster(sheetId, tabName) {
     if (!editMap.has(k)) editMap.set(k, {});
     editMap.get(k)[e.field] = e.kind === 'bool' ? !!e.value_bool : (e.value_text == null ? '' : e.value_text);
   }
-  const identCount = new Map();
+  // ★ order 앵커도 센다 — `order_submission_id` 는 유니크가 아니다(작업보드 합성과 같은 규율).
+  //   마감자료가 그리드와 다른 게이트를 쓰면 "화면엔 안 뜨는 입금일이 마감자료에는 남는" 상태가 된다.
+  const anchorCount = new Map();
   for (const r of rows) {
-    if (r.order_submission_id || r.source === 'manual') continue;
-    const ik = r.identity_key || identityKey(_ikFromRow(r));
-    if (ik) identCount.set(ik, (identCount.get(ik) || 0) + 1);
+    const a = _deriveAnchor(r);
+    if (!a || a.type === 'manual') continue;
+    const k = _akey(a.type, a.value);
+    anchorCount.set(k, (anchorCount.get(k) || 0) + 1);
   }
   const out = [];
   for (const r of rows) {
     const anchor = _deriveAnchor(r);
     let ov = {};
-    if (anchor && !(anchor.type === 'identity' && (identCount.get(anchor.value) || 0) > 1)) {
+    if (anchor && !(anchor.type !== 'manual' && (anchorCount.get(_akey(anchor.type, anchor.value)) || 0) > 1)) {
       const k = _akey(anchor.type, anchor.value); if (editMap.has(k)) ov = editMap.get(k);
     }
     if (ov._hidden === true) continue;   // 제거 오버레이 → 마감자료에서 제외
@@ -2427,12 +2430,19 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       headers = advHeaders;
     }
   }
-  // identity 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
-  const identCount = new Map();
+  /* 앵커 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
+     ★★ order 앵커도 센다 (2026-08-19 실사고) — `order_submission_id` 는 **유니크가 아니다**
+        (`sheetlessOrder.service.js:154`). 8/18~19 무시트 사고로 같은 주문이 여러 줄로 복제된 탭에서
+        종전엔 order 앵커에 게이트가 없어, 입금칸 수기 표기 1건(과 그에 연동된 `is_paid`)이
+        **중복 줄 전부에 오버레이로 번져** 리뷰 미작성 줄에 입금일이 보이고 `counts.paid`(입금완료)가
+        부풀었다. 어느 줄의 편집인지 모르면 **어느 줄에도 적용하지 않는다**(identity 와 같은 규율).
+     ★ manual 앵커는 물리행 id 라 구조적으로 유일하다 — 셀 필요가 없다. */
+  const anchorCount = new Map();
   for (const r of roster) {
-    if (r.order_submission_id || r.source === 'manual') continue;
-    const ik = r.identity_key || identityKey(_ikFromRow(r));
-    if (ik) identCount.set(ik, (identCount.get(ik) || 0) + 1);
+    const a = _deriveAnchor(r);
+    if (!a || a.type === 'manual') continue;
+    const k = _akey(a.type, a.value);
+    anchorCount.set(k, (anchorCount.get(k) || 0) + 1);
   }
   const consumed = new Set();
   const out = [], hiddenList = [];
@@ -2442,7 +2452,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     let ov = {}, editable = !!anchor, ambiguous = false;
     if (anchor) {
       const k = _akey(anchor.type, anchor.value);
-      if (anchor.type === 'identity' && (identCount.get(anchor.value) || 0) > 1) {
+      if (anchor.type !== 'manual' && (anchorCount.get(k) || 0) > 1) {
         ambiguous = true; editable = false; ambiguousCount++;
         if (editMap.has(k)) consumed.add(k);          // 소비 표시(orphan 오분류 방지), 단 미적용
       } else if (editMap.has(k)) { ov = editMap.get(k); consumed.add(k); }
@@ -2573,7 +2583,17 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       kind = 'text';
     }
     let anchorType, anchorValue;
-    if (row.order_submission_id) { anchorType = 'order'; anchorValue = String(row.order_submission_id); }
+    if (row.order_submission_id) {
+      // ★ order 앵커도 유일성을 확인한다 — `order_submission_id` 는 유니크가 아니라,
+      //   중복 줄이 있는 상태에서 편집을 받으면 그 값이 **여러 줄에 동시에 적용**된다(8/19 실사고).
+      const { rows: odup } = await client.query(
+        `SELECT COUNT(*)::int AS n FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+            AND order_submission_id=$3::uuid`,
+        [sheetId, tabName, row.order_submission_id]);
+      if ((odup[0] && odup[0].n || 0) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_order' }; }
+      anchorType = 'order'; anchorValue = String(row.order_submission_id);
+    }
     else if (row.source === 'manual') { anchorType = 'manual'; anchorValue = String(row.id); }
     else {
       let ik = row.identity_key;
@@ -3295,11 +3315,17 @@ async function _computeWritebackPlan(db, sheetId, tabName, { scope = 'all' } = {
     `SELECT id, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name,
             sheet_row, tab_gid, submit_col, submit_col2, source, order_submission_id, identity_key, deleted_at, active
        FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
-  const byOrder = new Map(), byManual = new Map(), byIdent = new Map(), identCount = new Map();
+  const byOrder = new Map(), byManual = new Map(), byIdent = new Map(), identCount = new Map(), orderCount = new Map();
   for (const r of roster) {
     if (r.deleted_at || !r.active) continue;
     byManual.set(String(r.id), r);
-    if (r.order_submission_id) byOrder.set(String(r.order_submission_id), r);
+    // ★ order 앵커도 중복을 센다 — 유니크가 아니라, 세지 않으면 `set` 이 마지막 행으로 조용히 덮어
+    //   **어느 줄인지 모르는 채 한 줄을 골라** 시트에 쓰게 된다(identity 와 같은 규율).
+    if (r.order_submission_id) {
+      const ok = String(r.order_submission_id);
+      orderCount.set(ok, (orderCount.get(ok) || 0) + 1);
+      if (!byOrder.has(ok)) byOrder.set(ok, r);
+    }
     if (r.source !== 'manual') { const ik = r.identity_key || identityKey(_ikFromRow(r)); if (ik) { identCount.set(ik, (identCount.get(ik) || 0) + 1); if (!byIdent.has(ik)) byIdent.set(ik, r); } }
   }
   let headers = [];
@@ -3308,7 +3334,7 @@ async function _computeWritebackPlan(db, sheetId, tabName, { scope = 'all' } = {
   const mask = headers.length ? _wbOrderMappedMask(headers) : [];
 
   const resolve = (e) => {
-    if (e.anchor_type === 'order') return byOrder.get(e.anchor_value) || null;
+    if (e.anchor_type === 'order') return (orderCount.get(e.anchor_value) || 0) > 1 ? { __ambiguous: true } : (byOrder.get(e.anchor_value) || null);
     if (e.anchor_type === 'manual') return byManual.get(e.anchor_value) || null;
     if (e.anchor_type === 'identity') return (identCount.get(e.anchor_value) || 0) > 1 ? { __ambiguous: true } : (byIdent.get(e.anchor_value) || null);
     return null;

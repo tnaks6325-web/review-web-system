@@ -91,6 +91,37 @@ async function run() {
   assert.equal(wd.orphanEdits.byType.identity, 1, '1h: orphan 타입별 집계');
   assert.equal(wd.counts.ambiguous, 2, '1i: ambiguous 카운트(중복 identity 2행 각각)');
   console.log('  1. workdeskTab 합성 — FALSE보존·text·ambiguous·hidden·orphan ✓');
+  /* ═══ 1B. order 앵커 중복 게이트 (2026-08-19 실사고) ═══
+     `order_submission_id` 는 유니크가 아니다. 같은 주문이 여러 줄로 복제된 탭에서 종전엔
+     order 앵커에 게이트가 없어 입금칸 수기 표기 1건이 **중복 줄 전부에 번져** 리뷰 미작성 줄에
+     입금일이 보이고 `counts.paid`(입금완료)가 부풀었다. → 어느 줄인지 모르면 어느 줄에도 적용 금지. */
+  const dupPool = makeQueryPool({
+    meta: [{ campaignName: 'C' }],
+    roster: [
+      { id: 'd1', seq: 179, name: '박', recipient: null, phone8: '11112222', round: '', option: '', product: '', submitted: true,  paid: false, source: 'import', order_submission_id: 'os-dup', identity_key: 'num:20260818147149', row_json: {} },
+      { id: 'd2', seq: 189, name: '박', recipient: null, phone8: '11112222', round: '', option: '', product: '', submitted: false, paid: false, source: 'import', order_submission_id: 'os-dup', identity_key: 'num:20260818147149', row_json: {} },
+      { id: 'd3', seq: 199, name: '박', recipient: null, phone8: '11112222', round: '', option: '', product: '', submitted: false, paid: false, source: 'import', order_submission_id: 'os-dup', identity_key: 'num:20260818147149', row_json: {} },
+      // 정상(유일 order 앵커) — 무회귀 확인용
+      { id: 'd9', seq: 9, name: '김', recipient: null, phone8: '33334444', round: '', option: '', product: '', submitted: true, paid: false, source: 'import', order_submission_id: 'os-one', identity_key: 'num:1', row_json: {} },
+    ],
+    edits: [
+      { anchor_type: 'order', anchor_value: 'os-dup', field: 'is_paid', kind: 'bool', value_bool: true, value_text: null },
+      { anchor_type: 'order', anchor_value: 'os-one', field: 'is_paid', kind: 'bool', value_bool: true, value_text: null },
+    ],
+  });
+  svc.__setPoolForTest(dupPool);
+  const wdDup = await svc.workdeskTab({ sheetId: 's', tabName: 'T', role: 'master' });
+  const dById = Object.fromEntries(wdDup.roster.map(r => [r.id, r]));
+  assert.equal(dById.d1.paid, false, '1B-a: 중복 order 앵커 편집은 어느 줄에도 적용되지 않는다');
+  assert.equal(dById.d2.paid, false, '1B-b: 리뷰 미작성 줄에 입금 표시가 번지면 안 된다');
+  assert.equal(dById.d3.paid, false, '1B-c: 세 번째 중복 줄도 마찬가지');
+  assert.ok(dById.d1.ambiguous === true && dById.d1.editable === false, '1B-d: 중복 줄은 ambiguous·편집잠금');
+  assert.equal(dById.d9.paid, true, '1B-e: 유일한 order 앵커는 종전대로 적용된다(무회귀)');
+  assert.ok(dById.d9.ambiguous !== true, '1B-f: 정상 행은 ambiguous 아님');
+  assert.equal(wdDup.counts.paid, 1, '1B-g: 입금완료 집계가 부풀지 않는다(1건)');
+  assert.equal(wdDup.counts.ambiguous, 3, '1B-h: 중복 줄 수를 화면이 말한다');
+  console.log('  1B. order 앵커 중복 게이트 — 번짐 차단·집계 정상·무회귀 ✓');
+
 
   // ═══ 2. 광고주 렌즈: 기본 소유 스코프 + 작업보드 전체 열람 시 PII 마스킹 + 편집메타 미노출 ═══
   const pool2 = makeQueryPool({ meta: [], roster: [
@@ -124,7 +155,8 @@ async function run() {
   // 3a: order 우선
   let cp = makeConnectPool({ row: { id: 'r1', source: 'import', order_submission_id: 'ord-1', identity_key: 'phone8:1', phone8: '1', recipient_name: null, option_text: null, row_json: {} } });
   svc.__setPoolForTest(cp);
-  let e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'is_paid', value: true });
+  // ★ 상태칸(is_paid/is_submitted)은 시스템 전용으로 잠겼다 — 앵커 우선순위 검사는 일반 필드로 한다.
+  let e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'round', value: '2' });
   assert.ok(e.ok && e.anchorType === 'order', '3a: order_submission_id 있으면 order 앵커');
   const ins = cp.q.find(x => /INSERT INTO participant_edits/.test(x.s));
   assert.ok(ins && ins.params.includes('ord-1'), '3a2: 오버레이가 order 앵커값 저장');
@@ -159,7 +191,8 @@ async function run() {
   // 3h: bool 값은 value_bool 로 저장(캐스팅 예외 차단)
   cp = makeConnectPool({ row: { id: 'r1', source: 'import', order_submission_id: 'ord-1', identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {} } });
   svc.__setPoolForTest(cp);
-  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'is_submitted', value: 'true' });
+  // ★ 상태칸은 잠겼으므로 bool 저장 형태 검사는 편집 가능한 bool 필드(_hidden)로 한다.
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: '_hidden', value: 'true' });
   const ins2 = cp.q.find(x => /INSERT INTO participant_edits/.test(x.s));
   // params: [sheet,tab,type,val,field,kind,value_bool,value_text,by]
   assert.equal(ins2.params[5], 'bool', '3h: kind=bool');
@@ -189,15 +222,17 @@ async function run() {
   svc.__setPoolForTest(cp);
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', value: 'y' });
   assert.ok(e.ok && e.field === 'col:비고', '3l: detected_headers NULL → row_json 키 폴백 수락');
-  // 3m: col:리뷰제출 편집 → 물리 is_submitted 토글도 함께 기록(카운트 연동)
-  cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['리뷰제출', '입금'] });
-  svc.__setPoolForTest(cp);
-  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:리뷰제출', value: '6/20', by: 'm' });
-  assert.ok(e.ok && e.linkedField === 'is_submitted', '3m: col:리뷰제출 → linkedField=is_submitted');
-  const insList = cp.q.filter(x => /INSERT INTO participant_edits/.test(x.s));
-  assert.equal(insList.length, 2, '3m2: 오버레이 2건(col:리뷰제출 + is_submitted)');
-  const boolIns = insList.find(x => x.params[4] === 'is_submitted');   // 링크 insert 파라미터: [sheet,tab,type,val,field,value_bool,by]
-  assert.ok(boolIns && boolIns.params[5] === true, '3m3: is_submitted value_bool=true(값 있음)');
+  /* 3m: 상태칸(리뷰제출·입금)은 **시스템 전용**이라 셀 편집 API 도 거부한다.
+     ★ 종전엔 `col:리뷰제출` 편집이 물리 토글까지 함께 기록했는데, 그 경로가 수기 입금일 오염의
+       입구였다(입금칸 수기 표기 → is_paid 연동 → 중복 줄로 번짐). 잠금을 풀어 이 가드를
+       되살리지 말 것 — 통과시키려면 코드를 사고 이전으로 되돌리게 된다. */
+  for (const f of ['col:리뷰제출', 'col:입금']) {
+    cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['리뷰제출', '입금'] });
+    svc.__setPoolForTest(cp);
+    e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: f, value: '6/20', by: 'm' });
+    assert.ok(!e.ok && e.error === 'status_column_locked', `3m: ${f} 편집은 거부해야 한다`);
+    assert.ok(!cp.q.some(x => /INSERT INTO participant_edits/.test(x.s)), `3m2: ${f} 는 오버레이를 만들지 않는다`);
+  }
   // 3n: col:입금자명(정보열)은 링크 토글 안 함 — is_paid 오탐 차단(리뷰 지적 #1)
   cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['입금자명', '입금'] });
   svc.__setPoolForTest(cp);
@@ -208,15 +243,19 @@ async function run() {
 
   // ═══ 5. revertWorkdeskEdit 연동 되돌리기 — primary 실제 revert 시에만 연쇄(리뷰 지적 #2) ═══
   const rrow = { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {} };
-  // 5a: col:리뷰제출 revert 되고(revertN=1) → is_submitted 도 함께 revert(2회)
+  // 5a: 상태칸은 되돌리기도 시스템 전용 — 거부하고 아무것도 건드리지 않는다
+  for (const f of ['col:리뷰제출', 'col:입금', 'is_submitted', 'is_paid']) {
+    cp = makeConnectPool({ row: rrow, revertN: 1 }); svc.__setPoolForTest(cp);
+    const rr = await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: f, by: 'm' });
+    assert.ok(!rr.ok && rr.error === 'status_column_locked', `5a: ${f} 되돌리기는 거부해야 한다`);
+    assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 0,
+      `5a2: ${f} 거부 시 쓰기 0`);
+  }
+  // 5b: 일반 열은 종전대로 1회 되돌림(무회귀)
   cp = makeConnectPool({ row: rrow, revertN: 1 }); svc.__setPoolForTest(cp);
-  await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:리뷰제출', by: 'm' });
-  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 2, '5a: primary 되돌림 시 링크 토글도 되돌림(2회)');
-  // 5b: col:리뷰제출 활성 편집 없음(revertN=0) → 링크 토글 건드리지 않음(1회) — 독립 토글 보호
-  cp = makeConnectPool({ row: rrow, revertN: 0 }); svc.__setPoolForTest(cp);
-  await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:리뷰제출', by: 'm' });
-  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 1, '5b: primary 미되돌림 시 링크 미연쇄(독립 토글 보호)');
-  console.log('  5. revertWorkdeskEdit — 연동 되돌리기 provenance 게이트 ✓');
+  await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', by: 'm' });
+  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 1, '5b: 일반 열 되돌리기는 종전대로');
+  console.log('  5. revertWorkdeskEdit — 상태칸 잠금 + 일반 열 무회귀 ✓');
 
   // ═══ 4. classifyParity editedKeys → BD-8 benign(하위호환 기본 Set) ═══
   const A = [{ phone8: '11112222', name: 'A', submitted: false, paid: false, round: '1' }];
