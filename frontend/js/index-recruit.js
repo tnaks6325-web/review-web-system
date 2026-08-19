@@ -1875,49 +1875,34 @@ function addOptRow(data) {
  *  보여주기만 하고 저장에도 싣지 않는다(미전송 = 서버 COALESCE 유지).
  *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 오므로 파생이 정확 — 종전대로 편집 가능.
  *  ★ 신규 발행은 여기가 초도 정원을 정하는 유일한 창구라 잠그지 않는다. */
-let _rfQuotaUnlock = false;   // 사람이 명시적으로 연 경우만 true (모달을 열 때마다 리셋)
+/** ★★ 정원(총인원·일건수) 잠금 — **수정 모드 + 옵션 없는 작업**에서 켠다.
+ *  사용자 확정(2026-08-19): 총인원·일건수는 **작업오더에서 받은 값 그대로 고정**하고,
+ *  조절은 [📅 모집인원 조절]에서 **총건수가 지켜지는 범위 안에서만** 한다.
+ *  왜 잠그나: 이 표의 두 칸은 캠페인 정원(recruit_total·daily_limit)의 **파생 입력**인데,
+ *  옵션 없는 작업은 옵션 원장이 비어 있어 표를 작업내용 상품 원문에서 **다시 파싱**해 만든다.
+ *  원문이 두 줄 이상이면 인원이 0(무제한)으로 떨어지고 그대로 저장돼 **총 200건이 리셋**됐다(실측).
+ *  ★ 해제 버튼은 두지 않는다 — 창구가 둘이면 같은 사고가 그 문으로 다시 들어온다.
+ *  ★ 신규 발행은 초도 정원을 정하는 유일한 창구라 잠그지 않는다.
+ *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 와 파생이 정확하고, 옵션별 정원은
+ *    [📅 인원]에서 바꿀 수 없다(잠그면 막다른 길) — 종전대로 편집 가능. */
+function _rfQuotaLocked() { return !!_recruitEditId && _prodMode() !== "opt"; }
 
-function _rfQuotaApplicable() { return !!_recruitEditId && _prodMode() !== "opt"; }
-function _rfQuotaLocked() { return _rfQuotaApplicable() && !_rfQuotaUnlock; }
-
-/** 잠금/해제 안내 줄 — "왜 못 고치는가 · 어디서 고치는가 · 열면 무엇이 덮이는가"를 말한다.
- *  ★ 잠그기만 하면 **기본 일건수를 고칠 창구가 사라진다**([📅 인원]은 날짜별 조절·차수 담당) —
- *    그래서 [🔓 직접 수정] 탈출구를 두되, 열면 저장 시 덮일 값을 실시간으로 보여준다(조용한 리셋 금지). */
+/** 잠금 안내 줄 — "무엇이 고정됐는지 · 어디서 바꾸는지"를 문장으로 말한다(막다른 길 금지) */
 function _syncQuotaLockUi() {
   const box = document.getElementById("rf_quota_lock");
   if (!box) return;
-  if (!_rfQuotaApplicable()) { box.hidden = true; box.textContent = ""; box.classList.remove("open"); return; }
+  if (!_rfQuotaLocked()) { box.hidden = true; box.textContent = ""; return; }
   const num = (v) => Number(v || 0);
   const rt = num(document.getElementById("rf_recruit_total")?.value);
   const dl = num(document.getElementById("rf_daily_limit")?.value);
   const fmt = (v, zero) => (v > 0 ? v.toLocaleString() + "명" : zero);
   box.hidden = false;
-  box.classList.toggle("open", !!_rfQuotaUnlock);
-  box.innerHTML = _rfQuotaUnlock
-    ? '<b>🔓 총인원 · 일건수를 직접 수정 중</b>' +
-      '<span>저장하면 <b>총 ' + fmt(rt, "무제한") + ' · 일건수 ' + fmt(dl, "무제한") + '</b> 상태로 덮어씁니다.</span>' +
-      '<span>표의 상품 줄에 인원이 비어 있으면 합계가 <b>무제한(0)</b> 이 됩니다 — 위 숫자를 확인하세요. ' +
-      '<button type="button" class="rf-qbtn" onclick="rfQuotaLock()">🔒 다시 잠그기</button></span>'
-    : '<b>🔒 총인원 · 일건수는 여기서 바꾸지 않습니다</b>' +
-      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
-      '<span>변경은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — 총량은 차수 추가, 그날 인원은 날짜별 조절로. ' +
-      '저장해도 이 값들은 바뀌지 않습니다. ' +
-      '<button type="button" class="rf-qbtn" onclick="rfQuotaUnlock()">🔓 직접 수정</button></span>';
+  box.innerHTML =
+    '<b>🔒 총인원 · 일건수는 작업오더 값으로 고정됩니다</b>' +
+    '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
+    '<span>조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 날짜별로 나눠 담습니다. ' +
+    '이 화면에서 저장해도 두 값은 바뀌지 않습니다.</span>';
 }
-
-/** 표를 지금 값 그대로 다시 그린다(잠금 상태만 바뀐다) */
-function _rfRerenderProdRows() {
-  const rows = _readProdRowsRaw().map(r => Object.assign({}, r, { status: r.closed ? "closed" : "active" }));
-  _renderProdTable(rows);
-}
-function rfQuotaUnlock() {
-  if (!confirm("총인원 · 일건수를 직접 수정할까요?\n\n저장하면 표에서 계산된 값으로 원장이 덮어써집니다.\n(정상 경로는 공고 카드의 [📅 인원] — 차수 추가 · 날짜별 조절입니다)")) return;
-  _rfQuotaUnlock = true;
-  _rfRerenderProdRows();
-}
-function rfQuotaLock() { _rfQuotaUnlock = false; _rfRerenderProdRows(); }
-window.rfQuotaUnlock = rfQuotaUnlock;
-window.rfQuotaLock = rfQuotaLock;
 
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
 function _buildOptRowEl(data) {
@@ -2438,7 +2423,6 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
-  _rfQuotaUnlock = false;   // ★ 지난 공고에서 연 잠금이 다음 공고로 새지 않게
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */

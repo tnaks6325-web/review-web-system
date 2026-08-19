@@ -629,9 +629,6 @@
   border:1px solid #FDE68A;border-radius:8px;background:#FFFBEB;color:#92400E;font-size:11px;line-height:1.5}
 #recruitModal .rf-quota-lock b{font-weight:850}
 #recruitModal .rf-opt-row input.rf-locked{background:#F1F5F9;color:#64748B;cursor:not-allowed}
-#recruitModal .rf-quota-lock.open{border-color:#FCA5A5;background:#FEF2F2;color:#B42318}
-#recruitModal .rf-qbtn{margin-left:6px;padding:2px 8px;border:1px solid currentColor;border-radius:999px;
-  background:#fff;color:inherit;font-size:10px;font-weight:850;cursor:pointer}
 
 #recruitModal .modal-footer{position:relative}
 #recruitModal .rf-blockbar{position:absolute;left:18px;right:18px;bottom:calc(100% + 6px);background:#FDF0F0;
