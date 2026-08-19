@@ -436,7 +436,9 @@
     const bdg = (late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '')
       + (blogPend > 0 ? `<span class="bdg bdg-blog" style="background:#7C3AED" title="블로그 참여 신청 ${blogPend}건 — 승인 대기 중">${blogPend}</span>` : '');
     const on = (c.status || 'draft') === 'active';
-    const pubToggle = (c.status === 'closed')
+    const pubToggle = c.archived_at
+      ? '<span class="ppub" title="보관된 공고입니다 — [⋯] → [↩ 보관 해제] 후 게시할 수 있어요">보관</span>'
+      : (c.status === 'closed')
       ? '<span class="ppub">마감</span>'
       : `<span class="ppub">게시<span class="psw${on ? '' : ' off'}" onclick="${stop}toggleRecruitPublish('${id}',${on ? 'false' : 'true'},this)"></span></span>`;
     // 🚫 참여 리뷰어(공고별 블랙리스트 건별 관리, 091) — apply 게이트가 있는 참여형만 의미가 있다
@@ -461,7 +463,12 @@
     //   토글 57px 고정 → 버튼 하나에 27px 인데 글자는 35~48px 필요 = 6개 전부 넘침).
     //   ★ 버튼이 더 늘어도 [⋯] 안으로 들어가므로 **같은 방식으로 다시 깨지지 않는다**.
     //   ★ 관제의 빨간 배지(지각 접수 = 수동확정 필요)는 주 줄에 남긴다 — 목록에서 바로 보여야 한다.
-    _ACT_MORE[c.id] = [planBtn, gateBtn].filter(Boolean).join('');
+    /* 📦 130 보관/보관 해제 — 카드 주 줄이 아니라 [⋯] 안에 둔다(주 줄은 3개 고정 규율).
+       ★ 보관은 되돌릴 수 있지만 리뷰어 목록·참여를 닫으므로 **확인창을 거친다**(CampCards.toggleArchive). */
+    const arcBtn = c.archived_at
+      ? `<button type="button" class="pcmi" onclick="${stop}CampCards.toggleArchive('${id}',false)" title="목록으로 되돌립니다(리뷰어 노출·참여가 상태값대로 복구)">↩ 보관 해제</button>`
+      : `<button type="button" class="pcmi" onclick="${stop}CampCards.toggleArchive('${id}',true)" title="끝난 공고를 목록에서 내립니다 — 데이터는 그대로 남고 언제든 되돌릴 수 있어요">📦 보관</button>`;
+    _ACT_MORE[c.id] = [planBtn, gateBtn, arcBtn].filter(Boolean).join('');
     return `<div class="pact">
       <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')"><span class="lbl">✏️ 수정</span></button>
       ${viewBtn}
@@ -605,7 +612,18 @@
     // 덤프가 남아 있으면 관리자에게만 표시. 수정 모달을 열면 같은 감지가 [🧹 정리]를 띄운다.
     const cleanBadge = (admin && _campNeedsFieldCleanup(c))
       ? `<span class="pt-pop" style="background:#B45309" title="유의사항·리뷰가이드에 작업오더 원문이 남아 있어요 — 수정 모달에서 🧹 정리">🧹 본문 정리</span>` : '';
-    const topleft = (popToggle || ribbon || popBadge || hidBadge || cleanBadge) ? `<div class="pt-topleft">${popToggle}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
+    /* ★ 130: 보관(폐기) 표기 — 관리자 화면에서만(리뷰어 응답엔 archived_at 이 실리지 않고,
+       보관된 공고는 애초에 공개 목록에서 빠진다). admin 분기로 한 번 더 못 박는다. */
+    const arcBadge = (admin && c.archived_at)
+      ? `<span class="pt-pop" style="background:#334155" title="보관된 공고 — 리뷰어 목록·참여가 모두 닫혔습니다. [⋯] 에서 되돌릴 수 있어요">📦 보관됨</span>` : '';
+    /* 📦 보관 제안 — **작업표의 모든 줄이 채워졌을 때만**(사용자 확정 2026-08-19).
+       ★ 자동으로 보관하지 않는다. 제안은 배지까지이고 실행은 사람이 [⋯] → [보관]을 누른다.
+       ★ 판정 불가(archiveSuggest 없음·조회 실패)는 아무 말도 하지 않는다(0/0 을 "다 찼다"로 읽지 않는다). */
+    const sug = admin && !c.archived_at && c.archiveSuggest && c.archiveSuggest.full === true ? c.archiveSuggest : null;
+    const arcSuggestBadge = sug
+      ? `<span class="pt-pop" style="background:#0F766E" title="작업표 ${sug.filled}/${sug.total}줄이 모두 채워졌습니다 — 모집이 끝났다면 [⋯] → [📦 보관]">📦 보관 제안</span>` : '';
+    const topleft = (popToggle || ribbon || popBadge || hidBadge || cleanBadge || arcBadge || arcSuggestBadge)
+      ? `<div class="pt-topleft">${popToggle}${arcBadge}${arcSuggestBadge}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
@@ -862,6 +880,35 @@
   function _flagsUrl(campId) {
     return _apiBase() + _campAdminBase() + '/' + encodeURIComponent(campId) + '/flags';
   }
+  /** ★ 130 보관/보관 해제 — 끝난 공고를 목록에서 내린다(데이터는 그대로).
+   *  ★★ 경로는 호스트가 재기준한다(`_campAdminBase` — togglePopular 와 같은 장치):
+   *     리뷰웹시스템[3버전]의 인트라넷 SSO 토큰은 `/api/trackb/*` 로만 도달 가능하다.
+   *  ★ 판정을 화면에서 다시 하지 않는다 — 살아 있는 참여가 있으면 **서버가 사유와 함께 거부**하고
+   *    화면은 그 문장을 그대로 보여준다(막다른 길 금지).
+   *  ★ 확인창은 되돌릴 수 있다는 사실까지 말한다(조용한 파괴로 오해하지 않게). */
+  async function toggleArchive(campId, archived) {
+    const tok = _adminTok();
+    if (!tok) { _toast('권한이 없습니다.', true); return; }
+    const msg = archived
+      ? '이 공고를 보관할까요?\n\n· 리뷰어 목록에서 빠지고 참여가 닫힙니다\n· 참여 이력·리뷰비·정산 기록은 그대로 남습니다\n· [⋯] → [↩ 보관 해제]로 언제든 되돌릴 수 있습니다'
+      : '보관을 해제할까요?\n\n공고 상태(게시/임시저장/마감)대로 목록에 다시 나타납니다.';
+    if (typeof window !== 'undefined' && window.confirm && !window.confirm(msg)) return;
+    try {
+      const res = await fetch(_apiBase() + _campAdminBase() + '/' + encodeURIComponent(campId) + '/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+        body: JSON.stringify({ archived: archived === true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);
+      _toast(archived ? '보관했습니다 — [📦 보관함]에서 볼 수 있어요.' : '보관을 해제했습니다.');
+      if (typeof window.loadRecruitList === 'function') await window.loadRecruitList();
+      else if (typeof window.loadRecruitPreview === 'function') await window.loadRecruitPreview();
+    } catch (e) {
+      _toast(e.message, true);
+    }
+  }
+
   function _toast(msg, isErr) {
     _injectStyles();
     const t = document.createElement('div');
@@ -1259,5 +1306,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();
