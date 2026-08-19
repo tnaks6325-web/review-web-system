@@ -238,7 +238,12 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   console.log('\n[E] 화면 창구 — 미리보기 → 확인 → 실행');
   const wd = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
   ok('[⋯] 도구 메뉴에 중복 정리 버튼', /onclick="openDedupeModal\(\)"/.test(wd));
-  ok('게이트는 줄 정리와 같다(무시트 + master/admin)', /function _ddCan\(\)\{ return _wrCanRetire\(\); \}/.test(wd));
+  /* ★★ 화면 게이트 = 서버 게이트(adminOrMaster). `_wrCanRetire()` 재사용 금지 —
+     그쪽은 staff 까지 열려 있어 따라 넓히면 AE 에게 403 나는 죽은 버튼이 생긴다. */
+  ok('★ 게이트는 무시트 + master/admin(서버 adminOrMaster 와 1:1)',
+    /function _ddCan\(\)\{[\s\S]{0,240}sheetless === true[\s\S]{0,120}'master'[\s\S]{0,40}'admin'/.test(wd));
+  ok('★ staff 까지 열린 _wrCanRetire 를 재사용하지 않는다',
+    !/function _ddCan\(\)\{[^}]*_wrCanRetire\(\)/.test(wd));
   ok('미리보기는 dryRun:true', /ddPreview[\s\S]{0,400}dryRun: true/.test(wd));
   ok('실행은 확인창을 거친다', /async function ddRun[\s\S]{0,600}confirm\(/.test(wd));
   ok('미리보기 없이는 실행 버튼이 잠긴다', /go\.disabled = !\(p && p\.removeRows > 0\)/.test(wd));

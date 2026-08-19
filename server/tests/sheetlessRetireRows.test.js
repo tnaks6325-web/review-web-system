@@ -214,8 +214,10 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     ok('★ 검증 오류는 400대로(errorHandler 마스킹 방지)', /LedgerError\) return res\.status\(400\)/.test(routes));
 
     const wd = read('../frontend/workdesk.html');
-    ok('★ 무시트 + admin/master 일 때만 버튼(_wrCanRetire)',
-      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,120}'master'[\s\S]{0,40}'admin'/.test(wd));
+    /* 2026-08-18 '작업보드 staff 전체권한' 으로 이 조작은 내부인 전체에 열렸다(라우트도 internalMiddleware).
+       ★ 검사의 의미는 그대로 — **화면 게이트 = 서버 게이트**. 무시트 조건은 유지된다. */
+    ok('★ 무시트 + 내부인일 때만 버튼(_wrCanRetire = 라우트 internalMiddleware 와 1:1)',
+      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(wd));
     ok('도구 메뉴에 [🧹 줄 정리]', /openRetireModal\(\)/.test(wd) && /🧹 줄 정리/.test(wd));
     ok('★ 미리보기 → 실행 2단계(미리보기 전에는 실행 비활성)',
       /id="wrGo" disabled/.test(wd) && /go\.disabled = !\(_WR\.prev/.test(wd));

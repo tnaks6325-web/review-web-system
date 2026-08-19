@@ -3356,7 +3356,13 @@ async function wrRun(){
    ★ 미리보기 → 확인창 → 실행 2단계. 보류 그룹은 **사유를 그대로** 보여준다(조용한 누락 금지).
    ★ 입금 회차에 담긴 줄이 섞인 그룹은 서버가 손대지 않는다 — 화면이 그 사실을 문장으로 말한다. */
 let _DD = null;
-function _ddCan(){ return _wrCanRetire(); }   // 무시트 + master/admin — 줄 정리와 같은 게이트
+/* ★★ 게이트는 **서버(`/worktable/dedupe-rows` = adminOrMaster)와 1:1** 이어야 한다.
+   `_wrCanRetire()` 를 그대로 쓰면 안 된다 — 그쪽은 2026-08-18 '작업보드 staff 전체권한' 으로
+   `_isInternalRole()`(staff 포함)로 넓어졌다. 따라 넓히면 AE 에게 눌러도 403 나는 버튼이 생긴다
+   (막다른 길 금지). 줄 정리와 달리 이 조작은 주문 취소까지 동반해 되돌리기가 더 무겁다. */
+function _ddCan(){
+  return !!(STATE.cur && STATE.cur.sheetless === true && (STATE.role === 'master' || STATE.role === 'admin'));
+}
 function closeDedupeModal(){ const o = document.getElementById('ddOv'); if (o) o.remove(); _DD = null; }
 if (!window._ddKeyBound) {
   window._ddKeyBound = true;
