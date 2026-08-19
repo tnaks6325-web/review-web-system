@@ -8533,6 +8533,7 @@ function _ptRender(){
       ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
       ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
     </div>
+    ${_ptProbeBlock(r)}
     ${r.candidates ? `<table class="lgtable" style="margin-top:10px">
         <thead><tr><th style="width:34px"></th><th>작업</th><th style="width:110px">마지막 활동</th>
           <th style="width:110px">근거</th><th style="width:70px">명단</th></tr></thead>
@@ -8544,6 +8545,53 @@ function _ptRender(){
       </div>`
       : `<div style="margin-top:8px"><button class="btn" onclick="_ptBox().innerHTML=''">닫기</button></div>`}
   </div>`;
+}
+/* ★★ 순서: **연도 확인 먼저 → 그다음 정리**(사용자 확정 2026-08-19).
+   정리는 fail-closed 라 "구매일 연도 미확정" 탭을 닫지 않는다(`year_unknown`·`weak_signal`).
+   그런데 시트 표기가 `7 / 12 (금)` 처럼 연도가 없으면 대부분 그 상태로 떨어지므로,
+   연도 확인을 먼저 돌리지 않으면 **정리 후보가 거의 나오지 않는다**.
+   연도 확인은 기존 도구(`/sheet-sync/year-probe`)를 그대로 부른다 — 신규 판정 0. */
+function _ptUnconfirmed(r){
+  const h = (r && r.heldBy) || {};
+  return (h.year_unknown || 0) + (h.weak_signal || 0);
+}
+function _ptProbeBlock(r){
+  const n = _ptUnconfirmed(r);
+  if(!n) return '';
+  return `<div style="margin-top:10px;padding:10px 12px;border:1px dashed var(--line,#ccc);border-radius:6px">
+    <b>① 연도 확인을 먼저 돌리세요</b> — 구매일 연도가 확정되지 않은 작업이 <b>${n}건</b> 있습니다.
+    <div style="font-size:13px;margin-top:4px">
+      시트 표기에 연도가 없으면(<code>7 / 12 (금)</code>) 정리가 <b>그 작업을 닫지 않습니다</b>(모르면 건드리지 않음).
+      연도 확인은 그 탭의 날짜 칸을 <b>한 번만</b> 읽어 진짜 연도를 확정합니다(탭당 시트 읽기 1회).
+      끝나면 자동으로 다시 살펴봅니다.
+    </div>
+    <div style="margin-top:6px">
+      <button class="btn pri" id="ptProbeBtn" onclick="_ptProbe()">① 연도 확인 실행</button>
+      <span id="ptProbeMsg" style="margin-left:8px;font-size:13px;color:var(--sub,#666)"></span>
+    </div></div>`;
+}
+async function _ptProbe(){
+  const btn=$('#ptProbeBtn'), msg=$('#ptProbeMsg');
+  if(btn) btn.disabled = true;
+  let round=0, probed=0, resolved=0, failed=0, remaining=null;
+  try{
+    // 서버가 한 번에 100탭까지만 읽는다 — 남은 게 없어질 때까지 이어서 부른다(상한 있음)
+    while(round < 12){
+      round++;
+      if(msg) msg.textContent = `${round}회차 확인 중… (지금까지 ${probed}탭)`;
+      const r = await api('/api/trackb/sheet-sync/year-probe',{method:'POST',body:JSON.stringify({limit:100})});
+      if(!r||!r.ok){ if(msg) msg.textContent = '연도 확인 실패: '+String((r&&r.error)||''); break; }
+      probed += r.probed||0; resolved += r.resolved||0; failed += r.failedCount||0;
+      remaining = r.remaining;
+      if(!r.probed || !r.remaining) break;      // 더 읽을 것이 없다
+    }
+    if(msg) msg.textContent = `확인 ${probed}탭 · 연도 확정 ${resolved}건`
+      + (failed?` · 읽기 실패 ${failed}건`:'')
+      + (remaining?` · 남음 ${remaining}건(다시 실행하세요)`:'');
+    await _ptScan();                            // ② 확정된 연도로 다시 살펴본다
+  }catch(e){
+    if(msg) msg.textContent = '연도 확인 실패 — '+String(e&&e.message||e);
+  }finally{ if(btn) btn.disabled = false; }
 }
 function _ptPicked(){
   const out=[]; document.querySelectorAll('#ptBox .ptck').forEach(c=>{
