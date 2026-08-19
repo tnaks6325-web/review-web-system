@@ -1,6 +1,6 @@
 'use strict';
 /**
- * sheetlessLedgerSweep.service.js — 무시트 장부 재생성 스윕(130).
+ * sheetlessLedgerSweep.service.js — 무시트 장부 재생성 스윕(132).
  *
  * ★ 편집 tx 는 `tab_configs.ledger_dirty_at` 만 찍는다 → 여기서 **탭당 1회** 재생성한다.
  *   (붙여넣기 500칸 = rebuild 1회. 종전처럼 편집마다 즉시 rebuild 하면 같은 advisory lock 에

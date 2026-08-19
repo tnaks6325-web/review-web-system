@@ -198,7 +198,7 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
     assert.ok(/supersededReason = 'superseded'/.test(revert.slice(0, 4000)), 'stale 감지 필요');
     assert.ok(/removeRowJsonCell/.test(revert.slice(0, 4000)), 'had_prev=false 면 키 삭제');
   });
-  const mig = R('server/migrations/130_sheetless_cell_writethrough.sql');
+  const mig = R('server/migrations/132_sheetless_cell_writethrough.sql');
   t('4i: 마이그레이션은 컬럼 추가만(백필·CHECK 0)', () => {
     assert.ok(/ADD COLUMN IF NOT EXISTS prev_text/.test(mig) && /ADD COLUMN IF NOT EXISTS ledger_dirty_at/.test(mig));
     assert.ok(!/UPDATE |DELETE |CHECK \(/.test(mig), '백필·CHECK 가 있으면 안 된다');

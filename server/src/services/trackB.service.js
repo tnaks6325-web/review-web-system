@@ -96,7 +96,7 @@ async function projectTab({ sheetId, tabName, by = 'trackB' } = {}) {
   const runStart = new Date().toISOString();
   /* ★★ 무시트 탭에서 `review_index` 는 `campaign_participants` 의 **파생물**(sheetlessLedger)이다.
      그래서 "명단에 없다"가 "원본에서 사라졌다"를 의미할 수 없다 — 제거 채널은 `deleted_at` 뿐이다.
-     여기서 비활성으로 내리면 장부 재생성이 늦은 순간에 줄이 통째로 사라진다(130).
+     여기서 비활성으로 내리면 장부 재생성이 늦은 순간에 줄이 통째로 사라진다(132).
      ★ 판정 실패는 종전 경로(fail-open) — 시트 기반이 절대 다수다. */
   let sheetless = false;
   try { sheetless = await require('../utils/sheetlessScope').isSheetless(getPool(), sheetId, tabName); } catch (_) {}
@@ -2842,7 +2842,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     if (kind === 'bool') vBool = (value === true || value === 'true' || value === 1 || value === '1');
     else vText = field === 'phone8' ? (_phone8(value) || '') : (value == null ? '' : String(value).slice(0, 2000));
 
-    /* ★★ 무시트 쓰기-through(130) 판정 + 되돌리기용 이전값 스냅샷.
+    /* ★★ 무시트 쓰기-through(132) 판정 + 되돌리기용 이전값 스냅샷.
        판정 재료는 **잠근 행의 row_json** 이다(다른 스냅샷을 쓰면 prev 가 어긋난다).
        ★ `decide` 에 넘기는 것은 **이 tx 의 client** — pool 을 쓰면 붙여넣기(최대 500 동시)에서 풀 고갈 교착. */
     const _scw = require('../utils/sheetlessCellWrite');
@@ -2954,7 +2954,7 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
     const linked = field.indexOf('col:') === 0 ? _linkedToggle(field.slice(4)) : null;
     if (linked && revertedPrimary > 0) n += (await doRevert(linked)).rowCount;
 
-    /* ── 쓰기-through 편집이었으면 원본도 되돌린다(130) ──
+    /* ── 쓰기-through 편집이었으면 원본도 되돌린다(132) ──
        ★★ 그 사이 다른 경로(주문 유입 등)가 같은 칸을 바꿨으면 **덮지 않는다** —
           옛 값으로 되돌리는 것이 곧 데이터 손상이다. 화면이 사유를 말한다. */
     let rowJsonRestored = false, supersededReason = null;
@@ -3901,7 +3901,7 @@ async function _writebackSheetless({ sheetId, tabName }) {
     if (!e.row_index) { await markStatus(e.id, 'blocked'); blocked++; continue; }      // 행 앵커 없음 = 자가치유 재시도
     let r = null;
     try {
-      /* ★ 장부 재생성은 이 자리에서 하지 않는다(130) — `blocked` 항목이 30분마다 재픽업되면서
+      /* ★ 장부 재생성은 이 자리에서 하지 않는다(132) — `blocked` 항목이 30분마다 재픽업되면서
          그때마다 전량 재생성을 유발해 주문 유입과 락을 다툰다. dirty 만 찍고 스윕이 탭당 1회 흡수한다. */
       r = await st.markStatusCell({
         sheetId, tabName, rowIndex: e.row_index,
@@ -4665,7 +4665,7 @@ async function ambiguousRowReport({ sheetId, tabName, maxGroups = 200, dedupeFn 
 
 module.exports = {
   ambiguousRowReport,
-  linkedToggleHeader: _linkedToggle,   // 130 — utils/sheetlessCellWrite 가 상태열 판정을 재사용(사본 금지)
+  linkedToggleHeader: _linkedToggle,   // 132 — utils/sheetlessCellWrite 가 상태열 판정을 재사용(사본 금지)
 
   getWorkdeskFavorites,
   setWorkdeskFavorites,
