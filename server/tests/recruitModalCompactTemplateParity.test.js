@@ -13,8 +13,20 @@ const root = path.join(__dirname, '..', '..');
 const modal = fs.readFileSync(path.join(root, 'frontend', 'js', 'recruit-modal.js'), 'utf8');
 const recruit = fs.readFileSync(path.join(root, 'frontend', 'js', 'index-recruit.js'), 'utf8');
 
-assert(/class="modal-box rf-box"[^>]*max-width:1020px/.test(modal),
-  '모집공고 편집 팝업은 승인 시안의 1020px 데스크톱 폭을 사용해야 합니다.');
+/* ★★ 데스크톱 폭 = **1124px (사용자 확정 2026-08-19)**.
+   ⚠ 이 숫자를 바꾸려면 **이 줄도 함께** 고쳐야 한다 — 그것이 이 검사의 목적이다(실수로 바뀌는 것을 잡는다).
+   ⚠ 그동안 이 자리가 1020 으로 굳어 있어(문서 1280 · 가드 1020 · 코드 1124 로 셋이 갈림) 가드가
+     상시 빨간 상태였고, 그 더미에 진짜 회귀가 묻혔다. 값이 바뀔 땐 반드시 같이 갱신할 것. */
+const RF_DESKTOP_WIDTH = 1124;
+{
+  const box = (/class="modal-box rf-box"[^>]*style="([^"]*)"/.exec(modal) || [, ''])[1];
+  const w = Number((/max-width:(\d+)px/.exec(box) || [, ''])[1]);
+  assert(w === RF_DESKTOP_WIDTH,
+    `모집공고 편집 팝업의 데스크톱 폭은 확정값 ${RF_DESKTOP_WIDTH}px 이어야 합니다(현재 ${w || '없음'}px). ` +
+    '의도한 변경이라면 이 테스트의 RF_DESKTOP_WIDTH 도 함께 고치세요.');
+  assert(/width:\d+%/.test(box) && /max-height:\d+vh/.test(box),
+    '좁은 화면·낮은 화면에서 접히도록 %·vh 상한이 함께 있어야 합니다.');
+}
 
 ['link', 'prod', 'cond'].forEach((step) => {
   assert(modal.includes(`data-rf-step="${step}"`), `${step} 단계가 좌측 레일에 있어야 합니다.`);

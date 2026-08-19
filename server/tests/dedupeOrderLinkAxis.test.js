@@ -52,9 +52,14 @@ function stub(rows, { pay = [] } = {}) {
   try {
     console.log('\n[A] 같은 주문 기록을 여러 줄이 씀 — 원장 주문번호가 없어도 잡는다');
     {
-      // 실측 그대로: 한 주문(os-1)이 7줄, 원장 주문번호 빈 값, 표 주문번호는 줄마다 다름
+      // 실측 그대로: 한 주문(os-1)이 7줄, 원장 주문번호 빈 값.
+      // ⚠ 이 픽스처는 원래 표 주문번호를 줄마다 다르게 두고 7줄을 한 덩어리로 기대했지만,
+      //   그 뒤 **장수산업 실사고(2026-08-19 사용자 확정)** 로 "표 주문번호가 다르면 묶지 않는다"가
+      //   들어왔다(링크가 오염돼 있어도 담당자가 눈으로 보는 값을 믿는다 = 안 지우는 쪽).
+      //   그래서 ㉯ 축 본래의 교훈(원장 주문번호가 없어도 잡는다)은 **표 주문번호가 같은** 줄로 고정하고,
+      //   섞였을 때 묶지 않는다는 새 규율은 바로 아래 [A-2] 에서 따로 고정한다.
       const rows = [
-        R({ seq: 117, osid: 'os-1', roword: '2026080552706861', submitted: true, paid: true }),
+        R({ seq: 117, osid: 'os-1', roword: '2026081822051841', submitted: true, paid: true }),
         ...[161, 173, 183, 193, 203, 213].map(s => R({ seq: s, osid: 'os-1', roword: '2026081822051841' })),
       ];
       led.__setPoolForTest(stub(rows));
@@ -68,12 +73,30 @@ function stub(rows, { pay = [] } = {}) {
       ok('어느 규칙으로 묶였는지 말한다', (p.byAxis || {}).order === 1 && !(p.byAxis || {}).keys);
       led.__setPoolForTest(null);
     }
+    console.log('\n[A-2] ★★ 링크가 같아도 표 주문번호가 다르면 묶지 않는다(장수산업 실사고 · 완화 금지)');
+    {
+      // 링크(order_submission_id)는 투영이 채우는 값이라 오염될 수 있다 — 그 상태에서 이 축만 믿으면
+      // **별개 참여가 중복으로 지워진다**(실측: 8/19 줄이 8/4 주문 링크를 들고 있었다).
+      const rows = [
+        R({ seq: 117, osid: 'os-1', roword: '2026080552706861', submitted: true, paid: true }),
+        ...[161, 173, 183, 193, 203, 213].map(s => R({ seq: s, osid: 'os-1', roword: '2026081822051841' })),
+      ];
+      led.__setPoolForTest(stub(rows));
+      const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+      ok('표 주문번호가 다른 줄은 같은 덩어리에 들어가지 않는다(6줄만 대상)',
+        p.groups === 1 && p.removeRows === 5 && p.plan[0].keepSeq === 161);
+      ok('★★ 다른 구매(117)는 정리 대상에서 아예 빠진다 — 오삭제 0',
+        !p.plan.some(g => (g.removeSeqs || []).includes(117)));
+      led.__setPoolForTest(null);
+    }
 
     console.log('\n[B] ★★ 남길 줄이 쓰는 주문은 취소하지 않는다 (주문 소실 차단)');
     {
+      // ⚠ 두 줄은 **같은 표 주문번호**여야 ㉯ 축으로 묶인다(장수산업 규율 이후) — 이 블록이 고정하려는
+      //   것은 "묶였을 때 남길 줄의 주문을 취소하지 않는다"이므로 묶이는 조건을 갖춰 둔다.
       const rows = [
         R({ seq: 10, osid: 'os-1', roword: 'AAAAAA111111', submitted: true }),
-        R({ seq: 20, osid: 'os-1', roword: 'BBBBBB222222' }),
+        R({ seq: 20, osid: 'os-1', roword: 'AAAAAA111111' }),
       ];
       led.__setPoolForTest(stub(rows));
       calls.retire = null; calls.cancel = null;
@@ -99,8 +122,9 @@ function stub(rows, { pay = [] } = {}) {
     console.log('\n[C] 보류 규칙은 ㉯ 에도 그대로');
     {
       const rows = [
+        // ⚠ 같은 표 주문번호여야 ㉯ 로 묶인다(장수산업 규율) — 이 블록은 "묶인 뒤의 보류 규칙"을 본다
         R({ seq: 45, osid: 'os-1', roword: 'AAAAAA111111', submitted: true, paid: true, in_payment: true }),
-        R({ seq: 123, osid: 'os-1', roword: 'BBBBBB222222', submitted: true, paid: true, in_payment: true }),
+        R({ seq: 123, osid: 'os-1', roword: 'AAAAAA111111', submitted: true, paid: true, in_payment: true }),
       ];
       led.__setPoolForTest(stub(rows, { pay: [{ seq: 123, status: 'paid', amount: 9900, batchSeq: 3 }] }));
       const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
@@ -111,7 +135,7 @@ function stub(rows, { pay = [] } = {}) {
     {
       const rows = [
         R({ seq: 5, osid: 'os-1', roword: 'AAAAAA111111' }),
-        R({ seq: 9, osid: 'os-1', roword: 'BBBBBB222222', submitted: true }),
+        R({ seq: 9, osid: 'os-1', roword: 'AAAAAA111111', submitted: true }),
       ];
       led.__setPoolForTest(stub(rows));
       const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
@@ -160,8 +184,9 @@ function stub(rows, { pay = [] } = {}) {
        "중복 발생 시각" 으로 잡혀 **"재발 방지 배포 이후에 또 샜다" 는 빨간 경고**가 잘못 떴다.
        ㉯ 축의 지울 줄은 남길 줄과 같은 주문이라 그 시각은 발생 시각이 아니다. */
     const rows = [
+      // ⚠ 같은 표 주문번호여야 ㉯ 로 묶인다(장수산업 규율) — 이 블록은 "묶인 뒤의 발생 시각 판정"을 본다
       R({ seq: 10, osid: 'os-1', roword: 'AAAAAA111111', at: '2026-08-19T05:00:00Z', submitted: true }),
-      R({ seq: 20, osid: 'os-1', roword: 'BBBBBB222222', at: '2026-08-19T05:00:00Z' }),
+      R({ seq: 20, osid: 'os-1', roword: 'AAAAAA111111', at: '2026-08-19T05:00:00Z' }),
     ];
     led.__setPoolForTest(stub(rows));
     const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });

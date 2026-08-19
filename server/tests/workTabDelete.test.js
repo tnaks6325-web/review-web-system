@@ -6,8 +6,9 @@
  *  A. **표 분류 전수** — (sheet_id, tab_name) 을 가진 표는 전부 DELETE_TABLES ∪ MONEY_TABLES 에
  *     있어야 한다. 새 표가 생겼는데 분류가 없으면 여기서 빨개진다("지워야 하는데 남는" 잔재도,
  *     "지우면 안 되는데 지워지는" 사고도 이 자리에서 막는다).
- *  B. **돈 기록 fail-closed** — 입금 기록이 한 줄이라도 있으면 확인해도 거부하고 **쓰기 0건**.
- *     (지우면 남은 줄이 미입금으로 보여 다음 회차에 다시 담기고 이중 송금이 난다 — 129 규율)
+ *  B. **돈 기록은 두 번째 확인으로만 지워진다**(사용자 확정 2026-08-19) — 일반 요청은 **쓰기 0건**으로
+ *     거부하고, `forcePayment:true` 일 때만 함께 지운다. 지울 때는 **대조 이력(119, RESTRICT)을
+ *     먼저** 지워야 FK 로 튕기지 않고, **회차(payment_batches) 자체는 남긴다**(한 회차가 여러 작업).
  *  C. **확인 없이는 아무것도 안 지운다** — confirm !== true 면 DELETE 쿼리 0.
  *  D. **곁다리 정리의 방향** — 작업오더는 링크만 해제(삭제 금지) · 공고는 보관(삭제 금지) ·
  *     업체 소유는 gid 를 모르면 손대지 않는다 · 시트 등록행은 남은 탭이 없을 때만.
@@ -72,7 +73,7 @@ const countDeletes = log => log.filter(q => /^\s*DELETE\s+FROM/i.test(q.text)).l
 const countWrites = log => log.filter(q => /^\s*(DELETE|UPDATE|INSERT)\b/i.test(q.text)).length;
 
 /* ── B. 돈 기록이 있으면 쓰기 0 ────────────────────────────────────────── */
-console.log('\n[B] 입금 기록 fail-closed — 확인해도 거부 · 쓰기 0건');
+console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 확인으로만 삭제');
 (async () => {
   {
     const pool = stubPool((text) => {
@@ -81,12 +82,48 @@ console.log('\n[B] 입금 기록 fail-closed — 확인해도 거부 · 쓰기 0
       return { rows: [], rowCount: 0 };
     });
     const out = await svc.deleteTask({ sheetId: 'S', tabName: 'T', confirm: true, pool });
-    ok('payment_locked 로 거부', out.ok === false && out.code === 'payment_locked');
+    ok('★ forcePayment 없으면 payment_locked 로 거부', out.ok === false && out.code === 'payment_locked');
     ok('★ 무엇이 걸렸는지 말한다', Array.isArray(out.money) && out.money[0].count === 3);
     ok('★ DELETE 를 한 번도 실행하지 않았다', countDeletes(pool.log) === 0);
     ok('★ 어떤 쓰기도 없다', countWrites(pool.log) === 0);
     ok('ROLLBACK 으로 끝난다', pool.log.some(q => /ROLLBACK/.test(q.text)));
     ok('커넥션을 반납한다', pool.client.released === true);
+  }
+  {
+    // 두 번째 확인(forcePayment) — 돈 기록까지 함께 지운다
+    const pool = stubPool((text) => {
+      if (/FROM payment_batch_items WHERE/.test(text) && /COUNT/.test(text)) return { rows: [{ n: 2 }] };
+      if (/FROM payment_records WHERE/.test(text) && /COUNT/.test(text)) return { rows: [{ n: 1 }] };
+      if (/COUNT\(\*\)::int AS n/.test(text)) return { rows: [{ n: 0 }] };
+      if (/COALESCE\(NULLIF\(tc\.tab_gid/.test(text)) return { rows: [{ gid: '9' }] };
+      return { rows: [], rowCount: 1 };
+    });
+    const out = await svc.deleteTask({ sheetId: 'S', tabName: 'T', confirm: true, forcePayment: true, by: '만두', pool });
+    ok('★ forcePayment:true 면 삭제된다', out.ok === true, JSON.stringify(out && out.code));
+    for (const m of MONEY_TABLES) {
+      assert(pool.log.some(q => new RegExp(`DELETE FROM ${m.table} WHERE sheet_id=\\$1 AND tab_name=\\$2`).test(q.text)),
+        `돈 표 ${m.table} 를 지우지 않았다`);
+    }
+    passed++; console.log('  ✓ 돈 표 4종도 (sheet_id, tab_name) 으로 지운다');
+    const iRec = pool.log.findIndex(q => /DELETE FROM payment_account_mismatch_reconciliations/.test(q.text));
+    const iItem = pool.log.findIndex(q => /DELETE FROM payment_batch_items/.test(q.text));
+    ok('★ 대조 이력(119, RESTRICT)을 회차 항목보다 **먼저** 지운다', iRec >= 0 && iRec < iItem, `rec=${iRec} item=${iItem}`);
+    ok('★ 입금 회차(payment_batches) 자체는 지우지 않는다(한 회차가 여러 작업에 걸린다)',
+      !pool.log.some(q => /DELETE FROM payment_batches/i.test(q.text)));
+    ok('무엇을 지웠는지 응답이 말한다', Array.isArray(out.paymentDeleted) && out.paymentDeleted.length === 2);
+    ok('COMMIT 으로 끝난다', pool.log.some(q => /COMMIT/.test(q.text)));
+  }
+  {
+    // 돈 기록이 없으면 forcePayment 를 줘도 돈 표를 건드리지 않는다
+    const pool = stubPool((text) => {
+      if (/COUNT\(\*\)::int AS n/.test(text)) return { rows: [{ n: 0 }] };
+      if (/COALESCE\(NULLIF\(tc\.tab_gid/.test(text)) return { rows: [{ gid: '' }] };
+      return { rows: [], rowCount: 0 };
+    });
+    const out = await svc.deleteTask({ sheetId: 'S', tabName: 'T', confirm: true, forcePayment: true, pool });
+    ok('★ 걸린 돈 기록이 없으면 돈 표에는 손대지 않는다',
+      out.ok === true && !pool.log.some(q => /DELETE FROM payment_(batch_items|records)/.test(q.text))
+      && !pool.log.some(q => /DELETE FROM payment_account_mismatch_reconciliations/.test(q.text)));
   }
 
   /* ── C. 확인 없이는 아무것도 안 지운다 ──────────────────────────────── */
@@ -213,8 +250,13 @@ console.log('\n[B] 입금 기록 fail-closed — 확인해도 거부 · 쓰기 0
     ok('★ 실행 전 미리보기를 먼저 부른다', /openTaskDelete[\s\S]{0,900}work-tab\/delete-preview/.test(WD));
     ok('★ 확인 체크 전에는 실행 버튼이 잠겨 있다', /id="tdGo" disabled/.test(WD));
     ok('★ 되돌릴 수 없음을 문장으로 말한다', /영구히 삭제/.test(WD) && /되돌릴 수 없습니다/.test(WD));
-    ok('★ 입금 기록으로 막히면 사유와 대안을 말한다',
-      /입금 기록이 걸려 있습니다/.test(WD) && /이중 송금/.test(WD));
+    ok('★ 입금 기록이 걸리면 사유와 대안([🏁 마감])을 말한다',
+      /입금 기록이 걸려 있습니다/.test(WD) && /이중 송금/.test(WD) && /\[🏁 마감\]/.test(WD));
+    ok('★ 입금 기록 삭제는 **별도 버튼 + 별도 체크**로만(일반 삭제 버튼으로는 안 열린다)',
+      /_tdGo\(true\)/.test(WD) && /입금 기록까지 삭제/.test(WD) && /id="tdOk"[\s\S]{0,400}_tdGo\(true\)/.test(WD));
+    ok('★ 일반 경로는 forcePayment 없이 보낸다', /forcePayment:forcePayment===true/.test(WD));
+    ok('★ 미리보기 이후 입금이 생기면(TOCTOU) 확인 화면을 다시 그린다',
+      /payment_locked[\s\S]{0,160}openTaskDelete\(i\)/.test(WD));
     ok('★ 미리보기 실패는 "삭제 가능"으로 위장하지 않는다',
       /확인하지 못한 상태로는 지우지 않습니다/.test(WD));
     ok('삭제 후 목록을 다시 읽는다', /_tdGo[\s\S]{0,1200}loadTabs\(\)/.test(WD));

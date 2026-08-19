@@ -28,7 +28,17 @@ assert.ok(/SELECT row_json FROM campaign_participants/.test(source), 'legacy wor
 assert.ok(/recoverUnwrittenSheetlessOrders/.test(source), 'existing ledger-only orders need a DB worktable recovery path');
 assert.ok(/reconcileCampaignWorktableLinks/.test(source), 'recovery must repair a missing campaign-to-worktable link before replaying submitted orders');
 assert.ok(/rc\.source_work_order_id = wo\.id[\s\S]*?wo\.linked_campaign_id = rc\.id/.test(source), 'link repair must use persisted work-order identities, not title matching');
-assert.ok(!/os\.sheet_id LIKE 'campaign:%'/.test(source), 'recovery must include pre-transition campaign orders that still carry legacy sheet keys');
+// ★★ 이 검사는 **복구 함수 본문에만** 적용한다 — 파일 전체를 훑으면, 나중에 합류한
+//   `repairWrittenMarkForBoardRows`(작업보드 줄은 있는데 원장만 미완결인 주문을 정정)가
+//   `campaign:%` 를 **일부러** 대상으로 삼는 것까지 잡아 멀쩡한 코드를 회귀로 신고한다(실제로 그랬다).
+const recoverySrc = (() => {
+  const i = source.indexOf('async function recoverUnwrittenSheetlessOrders(');
+  assert.ok(i > -1, 'recovery function not found');
+  const m = /\n\}\n/g; m.lastIndex = i;
+  const e = m.exec(source);
+  return source.slice(i, e ? e.index : source.length);
+})();
+assert.ok(!/os\.sheet_id LIKE 'campaign:%'/.test(recoverySrc), 'recovery must include pre-transition campaign orders that still carry legacy sheet keys');
 assert.ok(/JOIN campaign_applications ca/.test(source), 'recovery must be scoped by the verified campaign application, not a client-supplied sheet key');
 assert.ok(/COALESCE\(rc\.linked_sheet_id, ''\) <> ''/.test(source) && /COALESCE\(rc\.linked_tab_name, ''\) <> ''/.test(source), 'recovery must only write to campaigns with an internal worktable');
 assert.ok(/os\.campaign_application_id = ca\.id[\s\S]*?ca\.order_submission_id = os\.id[\s\S]*?ca\.late_order_id = os\.id/.test(source), 'recovery must include legacy orders linked from the application record');
