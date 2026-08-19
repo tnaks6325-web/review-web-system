@@ -41,6 +41,8 @@ function _phone8(v) {
   const d = String(v || '').replace(/\D/g, '');
   return d.length >= 8 ? d.slice(-8) : '';
 }
+// 중복 판정 키 정규화 — SQL 쪽 regexp_replace(…, '\D', '', 'g') 와 **같은 규칙**이어야 한다.
+function _digits(v) { return String(v == null ? '' : v).replace(/\D/g, ''); }
 
 /**
  * 주문 값 → 작업표 행에 병합할 `row_json` 조각.
@@ -147,6 +149,37 @@ async function writeOrderToWorktable({
           WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
             AND order_submission_id = $3::uuid
           FOR UPDATE`, [sheetId, tabName, orderSubmissionId]));
+      // ★★ 빈 슬롯을 새로 먹기 전에 "같은 구매가 이미 이 표에 있는가" 를 본다.
+      //   무시트 경로는 시트 시절의 `sheet_row_claims`(=(sheet,tab,dedup_key) 유니크)를 건너뛰고
+      //   `campaign_participants.order_submission_id` 도 유니크가 아니라, **주문원장 행이 하나 더 생기면
+      //   작업보드 줄도 하나 더 생긴다**(2026-08-19 중복 사고). 여기서 그 마지막 수렴점을 만든다.
+      //   ★ 판정 키 = 주문번호(숫자만) + 연락처(숫자만). 주문번호가 없으면(비번호 쿠팡 등) 판정하지
+      //     않고 종전대로 진행한다 — 모르면 막지 않는다(fail-open).
+      if (!cur.length && _digits(orderData.orderNum).length >= 6) {
+        const { rows: dup } = await client.query(
+          `SELECT cp.seq, cp.order_submission_id
+             FROM campaign_participants cp
+             JOIN order_submissions os2 ON os2.id = cp.order_submission_id
+            WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL
+              AND cp.order_submission_id <> $3::uuid
+              AND os2.deleted_at IS NULL
+              AND regexp_replace(COALESCE(os2.order_num, ''), '\D', '', 'g') = $4
+              AND regexp_replace(COALESCE(os2.phone, ''), '\D', '', 'g') = $5
+            ORDER BY cp.seq
+            LIMIT 1`,
+          [sheetId, tabName, orderSubmissionId,
+           _digits(orderData.orderNum), _digits(orderData.phone)]);
+        if (dup.length) {
+          // 이미 반영된 구매다. 새 줄을 만들지 않고 그 줄을 가리켜 돌려준다.
+          //   ★ 기존 줄의 `order_submission_id` 는 **바꾸지 않는다** — 링크를 빼앗으면 원래 주문이
+          //     "미반영"으로 되살아나 복구 잡이 다시 줄을 만든다(막으려던 사고의 재현).
+          await client.query('ROLLBACK');
+          logger.warn(`[sheetlessOrder] 같은 구매가 이미 반영됨 tab=${tabName} seq=${dup[0].seq} ` +
+            `os=${orderSubmissionId} 기존os=${dup[0].order_submission_id} — 새 줄을 만들지 않는다`);
+          return { ok: true, written: false, reason: 'duplicate_row',
+                   seq: Number(dup[0].seq), duplicateOf: String(dup[0].order_submission_id) };
+        }
+      }
       if (!cur.length) {
         ({ rows: cur } = await client.query(
           `SELECT id, seq, row_json FROM campaign_participants
