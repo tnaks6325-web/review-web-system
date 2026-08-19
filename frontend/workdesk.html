@@ -8525,12 +8525,15 @@ function _ptRender(){
     — 등록된 ${r.total}개 중 <b>${r.stillReading}개가 지금도 시트를 읽습니다.</b>
     그중 <b>${r.candidates}개</b>가 과거 작업으로 확인돼 정리 대상입니다(시트 ${r.sheetsAffected}개).
     <div style="margin-top:6px;font-size:13px">
-      정리하면 그 탭의 <b>시트 읽기와 장부 재생성이 멈춥니다.</b>
-      바꾸는 것은 <b>마감 표시 한 칸</b>뿐이고 데이터는 지우지 않습니다 — 언제든 되돌릴 수 있습니다.
+      정리하면 그 탭의 <b>시트 읽기와 장부 재생성이 즉시 멈추고</b>,
+      <b>다음 새벽 전체 빌드에서 아카이브로 옮겨집니다</b>(명단은 아카이브 테이블에 보존·등록은 해제).
+      되돌리기는 전체 빌드 전에는 마감 해제, 그 뒤에는 아카이브 복구로 합니다.
+      <b>과거 자료로 확인된 작업에만 쓰세요.</b>
       ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
       ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
       ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
     </div>
+    ${_ptProbeBlock(r)}
     ${r.candidates ? `<table class="lgtable" style="margin-top:10px">
         <thead><tr><th style="width:34px"></th><th>작업</th><th style="width:110px">마지막 활동</th>
           <th style="width:110px">근거</th><th style="width:70px">명단</th></tr></thead>
@@ -8542,6 +8545,53 @@ function _ptRender(){
       </div>`
       : `<div style="margin-top:8px"><button class="btn" onclick="_ptBox().innerHTML=''">닫기</button></div>`}
   </div>`;
+}
+/* ★★ 순서: **연도 확인 먼저 → 그다음 정리**(사용자 확정 2026-08-19).
+   정리는 fail-closed 라 "구매일 연도 미확정" 탭을 닫지 않는다(`year_unknown`·`weak_signal`).
+   그런데 시트 표기가 `7 / 12 (금)` 처럼 연도가 없으면 대부분 그 상태로 떨어지므로,
+   연도 확인을 먼저 돌리지 않으면 **정리 후보가 거의 나오지 않는다**.
+   연도 확인은 기존 도구(`/sheet-sync/year-probe`)를 그대로 부른다 — 신규 판정 0. */
+function _ptUnconfirmed(r){
+  const h = (r && r.heldBy) || {};
+  return (h.year_unknown || 0) + (h.weak_signal || 0);
+}
+function _ptProbeBlock(r){
+  const n = _ptUnconfirmed(r);
+  if(!n) return '';
+  return `<div style="margin-top:10px;padding:10px 12px;border:1px dashed var(--line,#ccc);border-radius:6px">
+    <b>① 연도 확인을 먼저 돌리세요</b> — 구매일 연도가 확정되지 않은 작업이 <b>${n}건</b> 있습니다.
+    <div style="font-size:13px;margin-top:4px">
+      시트 표기에 연도가 없으면(<code>7 / 12 (금)</code>) 정리가 <b>그 작업을 닫지 않습니다</b>(모르면 건드리지 않음).
+      연도 확인은 그 탭의 날짜 칸을 <b>한 번만</b> 읽어 진짜 연도를 확정합니다(탭당 시트 읽기 1회).
+      끝나면 자동으로 다시 살펴봅니다.
+    </div>
+    <div style="margin-top:6px">
+      <button class="btn pri" id="ptProbeBtn" onclick="_ptProbe()">① 연도 확인 실행</button>
+      <span id="ptProbeMsg" style="margin-left:8px;font-size:13px;color:var(--sub,#666)"></span>
+    </div></div>`;
+}
+async function _ptProbe(){
+  const btn=$('#ptProbeBtn'), msg=$('#ptProbeMsg');
+  if(btn) btn.disabled = true;
+  let round=0, probed=0, resolved=0, failed=0, remaining=null;
+  try{
+    // 서버가 한 번에 100탭까지만 읽는다 — 남은 게 없어질 때까지 이어서 부른다(상한 있음)
+    while(round < 12){
+      round++;
+      if(msg) msg.textContent = `${round}회차 확인 중… (지금까지 ${probed}탭)`;
+      const r = await api('/api/trackb/sheet-sync/year-probe',{method:'POST',body:JSON.stringify({limit:100})});
+      if(!r||!r.ok){ if(msg) msg.textContent = '연도 확인 실패: '+String((r&&r.error)||''); break; }
+      probed += r.probed||0; resolved += r.resolved||0; failed += r.failedCount||0;
+      remaining = r.remaining;
+      if(!r.probed || !r.remaining) break;      // 더 읽을 것이 없다
+    }
+    if(msg) msg.textContent = `확인 ${probed}탭 · 연도 확정 ${resolved}건`
+      + (failed?` · 읽기 실패 ${failed}건`:'')
+      + (remaining?` · 남음 ${remaining}건(다시 실행하세요)`:'');
+    await _ptScan();                            // ② 확정된 연도로 다시 살펴본다
+  }catch(e){
+    if(msg) msg.textContent = '연도 확인 실패 — '+String(e&&e.message||e);
+  }finally{ if(btn) btn.disabled = false; }
 }
 function _ptPicked(){
   const out=[]; document.querySelectorAll('#ptBox .ptck').forEach(c=>{
@@ -8556,10 +8606,13 @@ async function _ptClose(){
     const pre = await api('/api/trackb/past-tabs/close',{method:'POST',
       body:JSON.stringify({tabs:picked})});                       // 미리보기(기본)
     if(!pre||!pre.ok){ toast('미리보기 실패: '+esc(String(pre&&pre.error||''))); return; }
-    if(!confirm(`${pre.wouldClose}개 작업의 구글시트 읽기를 멈춥니다.\n\n`
-      + `· 바꾸는 것은 마감 표시 한 칸뿐이고 데이터는 지우지 않습니다\n`
-      + `· 시트 읽기와 장부 재생성이 멈춥니다(작업보드 목록에서도 빠집니다)\n`
-      + `· 되돌리려면 그 작업의 마감을 해제하면 됩니다\n\n진행할까요?`)) return;
+    if(!confirm(`${pre.wouldClose}개 작업을 마감 처리합니다.\n\n`
+      + `· 지금 바뀌는 것: 마감 표시 한 칸 (시트 읽기와 장부 재생성이 멈춥니다)\n`
+      + `· 다음 새벽 전체 빌드에서 이 작업들은 아카이브로 옮겨집니다\n`
+      + `  (명단·인덱스는 아카이브 테이블로 보존되고 등록은 해제됩니다)\n`
+      + `· 그 뒤에는 참여했던 리뷰어의 제출완료 내역이 화면에서 사라집니다\n`
+      + `· 되돌리기: 전체 빌드 전에는 마감 해제, 그 뒤에는 아카이브 복구\n\n`
+      + `과거 자료가 맞는지 확인하셨나요?`)) return;
     const r = await api('/api/trackb/past-tabs/close',{method:'POST',
       body:JSON.stringify({tabs:picked, dryRun:false})});
     if(!r||!r.ok){ toast('정리 실패: '+esc(String(r&&r.error||''))); return; }

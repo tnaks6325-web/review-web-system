@@ -214,7 +214,9 @@ const ROWS = [
     assert.ok(/onclick="_ptScan\(\)"/.test(FE), '진입 버튼');
     assert.ok(/id="ptBox"/.test(FE), '마운트 지점');
     const i = FE.indexOf('function _ptRender');
-    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    // ★ 주석의 날짜(사용자 확정 2026-08-19)가 검사에 걸린다 — **주석을 걷어내고** 본다
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'))
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     // 화면이 과거를 다시 판정하면 서버와 갈린다 — 날짜 비교·컷오프가 있으면 안 된다
     assert.ok(!/new Date\(|20\d\d-\d\d-\d\d/.test(body), '화면 자체 날짜 판정 금지');
     assert.ok(/r\.candidates/.test(body) && /r\.stillReading/.test(body), '서버 집계를 그대로 표기');
@@ -230,13 +232,53 @@ const ROWS = [
     assert.ok(cfm > pre, '확인창이 미리보기 뒤 (받음 ' + cfm + ')');
     assert.ok(run > cfm, '실행은 확인창 뒤');
     assert.ok(/if\(!confirm\([\s\S]{0,600}\)\) return;/.test(body), '확인하지 않으면 실행하지 않는다');
-    assert.ok(/되돌리려면/.test(body), '되돌릴 수 있음을 문장으로 말한다');
-    assert.ok(/데이터는 지우지 않습니다/.test(body), '무엇을 바꾸는지 말한다');
+    // ★★ 마감은 "표시 한 칸"이 아니다 — 다음 전체 빌드가 아카이브로 옮기고 tab_configs 행까지 지운다.
+    //   확인창이 그 사실을 말하지 않으면 담당자가 되돌리기 비용을 모른 채 누른다.
+    assert.ok(/아카이브/.test(body), '아카이브로 옮겨진다는 사실을 말한다');
+    assert.ok(/되돌리기/.test(body), '되돌리는 방법을 말한다');
+    assert.ok(/리뷰어의 제출완료 내역/.test(body), '리뷰어 화면 부작용을 말한다');
+    assert.ok(!/데이터는 지우지 않습니다/.test(body),
+      '"데이터를 지우지 않는다"는 부정확한 설명이 되살아나면 안 된다(전체 빌드가 원본을 지운다)');
   });
   t('8c: 실패는 자리표시자를 남기지 않는다(무한 로딩 금지)', () => {
     const i = FE.indexOf('async function _ptScan');
     const body = FE.slice(i, FE.indexOf('function _ptRender'));
     assert.ok(/catch\s*\(e\)\s*\{[\s\S]{0,400}다시 시도/.test(body), '예외 시 사유 + 다시 시도');
+  });
+
+  /* ── 9) 순서: 연도 확인 먼저 → 정리 ─────────────────────── */
+  t('9a: 연도 미확정이 있으면 [① 연도 확인] 을 먼저 권한다', () => {
+    const i = FE.indexOf('function _ptProbeBlock');
+    assert.ok(i > 0, '_ptProbeBlock 정의');
+    const body = FE.slice(i, FE.indexOf('async function _ptProbe'));
+    // ★ 대상은 year_unknown 만이 아니다 — weak_signal(등록일 폴백)이 실제로는 더 많다.
+    //   하나만 세면 "연도 확인이 필요 없다"고 잘못 말한다.
+    const u = FE.slice(FE.indexOf('function _ptUnconfirmed'), i);
+    assert.ok(/h\.year_unknown/.test(u) && /h\.weak_signal/.test(u), '두 사유를 함께 센다');
+    assert.ok(/if\(!n\) return ''/.test(body), '연도 미확정이 없으면 안내를 띄우지 않는다');
+    assert.ok(/시트 읽기 1회/.test(body), '비용을 말한다');
+  });
+  t('9b: 연도 확인은 기존 도구를 그대로 부른다(판정·엔드포인트 신설 0)', () => {
+    const i = FE.indexOf('async function _ptProbe');
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    assert.ok(/\/api\/trackb\/sheet-sync\/year-probe/.test(body), '기존 year-probe 사용');
+    assert.ok(!/past-tabs\/probe|year-probe2/.test(FE), '전용 엔드포인트 신설 금지');
+  });
+  t('9c: 남은 대상이 있으면 이어서 부르되 무한 루프가 아니다', () => {
+    const i = FE.indexOf('async function _ptProbe');
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    assert.ok(/while\(round\s*<\s*\d+\)/.test(body), '회차 상한');
+    assert.ok(/if\(!r\.probed \|\| !r\.remaining\) break;/.test(body), '더 읽을 것이 없으면 중단');
+    assert.ok(/remaining\?/.test(body), '남은 건수를 말한다(조용한 절단 금지)');
+  });
+  t('9d: 연도 확인이 끝나면 자동으로 다시 살펴본다(두 단계가 끊기지 않게)', () => {
+    const i = FE.indexOf('async function _ptProbe');
+    const body = FE.slice(i, FE.indexOf('function _ptPicked'));
+    const probe = body.indexOf('year-probe');
+    const rescan = body.indexOf('await _ptScan()');
+    assert.ok(probe > 0 && rescan > probe, '확인 → 재스캔 순서');
+    assert.ok(/finally\{[^}]*disabled = false/.test(body.replace(/\s+/g, m => m.includes('\n') ? '' : m)) || /finally\{/.test(body),
+      '실패해도 버튼을 되살린다(죽은 화면 금지)');
   });
 
   console.log('\n✅ 통과 ' + pass + '건\n');

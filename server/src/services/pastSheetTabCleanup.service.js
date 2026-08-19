@@ -10,10 +10,20 @@
  *   **A:Z 로 읽고 장부를 다시 만든다**(무시트·아카이브·마감 탭만 제외).
  *   즉 몇 년 전 작업이 지금도 구글 쿼터를 쓰고, 옛 시트 값이 장부를 덮을 수 있다.
  *
- * ★★ 조작은 `tab_configs.is_closed = TRUE` **한 칸뿐** — 데이터를 지우지 않는다.
- *   `campaigns`·장부(review_index/index_master)·작업표·주문·시트 전부 무접촉.
- *   되돌리기 = 그 칸을 FALSE 로(`reopenTabs`). 그래서 오판해도 잃는 것이 없다
- *   = 이 기능의 안전 근거. (main 의 `sheetlessOrphanCleanup` 과 같은 규율)
+ * ★★★ 이 서비스가 쓰는 것은 `tab_configs.is_closed = TRUE` 한 칸이지만,
+ *   **그 한 칸의 효과는 "표시 변경"이 아니다** — 다음 04시 전체 빌드
+ *   (`indexBuilder` 0.5단계 `auto-clean-closed`)가 그 탭을 **아카이브로 옮긴다**:
+ *     ① index_master  → index_master_archive  (원본 DELETE)
+ *     ② review_index  → review_index_archive  (원본 DELETE)
+ *     ③ tab_configs 행 자체 DELETE
+ *   즉 마감은 **아카이브 예약**이다. 데이터는 아카이브 테이블에 보존되므로 소실은 아니지만,
+ *   되돌리기 비용이 시점에 따라 다르다:
+ *     · 전체 빌드 전  → `reopenTabs`(is_closed=FALSE)로 원복
+ *     · 전체 빌드 후  → tab_configs 행이 없어 reopenTabs 는 0건.
+ *                       복구는 **아카이브 복구**(`POST /api/archive/restore`)로만 가능.
+ *   ★ 부작용(반드시 고지): 그 작업에 참여했던 리뷰어의 **제출완료 내역이 화면에서 사라진다**
+ *     (리뷰 내역 완료 탭은 활성 `review_index` 의 뷰 — archive 테이블은 조회하지 않는다).
+ *   그래서 이 도구는 **과거 자료로 확인된 작업에만** 쓴다(아래 fail-closed 6갈래).
  *
  * ★★ 판정 사본 0 — "과거인가"는 `utils/tabActivity` 한 곳이 정한다.
  *   반영 점검·시트 우위 점검·전환 화면이 쓰는 **그 판정**을 그대로 쓴다.
