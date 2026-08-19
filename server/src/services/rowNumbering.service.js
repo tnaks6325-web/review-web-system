@@ -41,6 +41,16 @@ const MAX_ROWS = 5000;
 /** 스윕 1회에 훑는 탭 수 상한. */
 const SWEEP_TAB_CAP = 300;
 
+/**
+ * "채워진 줄" 판정 — 주문이 붙었거나 사람 정보가 하나라도 있는 줄.
+ * ★ 조각을 한 곳에 둔다 — 스캔(집계)과 정리(대상 선정)가 다른 기준을 쓰면
+ *   "목록엔 N줄인데 정리하면 다른 줄이 내려간다" 가 된다.
+ */
+const FILLED_SQL = `(p.order_submission_id IS NOT NULL
+   OR NULLIF(btrim(COALESCE(p.reviewer_name, '')), '') IS NOT NULL
+   OR NULLIF(btrim(COALESCE(p.recipient_name, '')), '') IS NOT NULL
+   OR NULLIF(btrim(COALESCE(p.phone8, '')), '') IS NOT NULL)`;
+
 /** 이 기능 전체 킬스위치 — 문제가 생기면 Railway 에서 `WORKTABLE_AUTO_NUMBER=0`. */
 function enabled() { return process.env.WORKTABLE_AUTO_NUMBER !== '0'; }
 
@@ -174,7 +184,7 @@ async function renumberTabInTx(client, { sheetId, tabName, by = 'auto-order' } =
  * 무시트 탭 전체 소급 정리 — 관리자가 [미리보기] 후 실행한다.
  * ★ 실패한 탭이 나머지를 죽이지 않는다(건별 독립) — 사유를 그대로 보고한다.
  */
-async function renumberAllSheetless({ dryRun = true, by = 'admin', limit = SWEEP_TAB_CAP } = {}) {
+async function renumberAllSheetless({ dryRun = true, by = 'admin', limit = SWEEP_TAB_CAP, cleanBlanks = false } = {}) {
   const db = getPool();
   const cap = Math.min(Math.max(parseInt(limit, 10) || SWEEP_TAB_CAP, 1), SWEEP_TAB_CAP);
   const { rows: tabs } = await db.query(
@@ -185,9 +195,17 @@ async function renumberAllSheetless({ dryRun = true, by = 'admin', limit = SWEEP
       LIMIT ${cap + 1}`);
   const truncated = tabs.length > cap;
   const list = tabs.slice(0, cap);
-  const out = { ok: true, dryRun: !!dryRun, tabs: list.length, truncated, changedTabs: 0, changedRows: 0, failed: [], details: [] };
+  const out = { ok: true, dryRun: !!dryRun, tabs: list.length, truncated, changedTabs: 0, changedRows: 0,
+                blankTabs: 0, blankRows: 0, failed: [], details: [] };
   for (const t of list) {
     try {
+      /* ★★ 정리가 먼저 — 재번호가 번호를 유일하게 만들면 짝 신호가 사라진다(스윕과 같은 순서). */
+      if (cleanBlanks) {
+        try {
+          const c = await cleanupPairedBlanks({ sheetId: t.sheetId, tabName: t.tabName, dryRun, by });
+          if (c && c.ok && (dryRun ? c.matched : c.retired)) { out.blankTabs++; out.blankRows += (dryRun ? c.matched : c.retired); }
+        } catch (e) { logger.warn(`[rowNumbering] 짝 빈 줄 정리 실패 tab=${t.tabName}: ${e.message}`); }
+      }
       const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, dryRun, by });
       if (r.ok && r.changed) { out.changedTabs++; out.changedRows += r.changed; }
       out.details.push({ tabName: t.tabName, changed: r.changed || 0, reason: r.reason || null });
@@ -215,39 +233,105 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
   const cap = Math.min(Math.max(parseInt(limit, 10) || SWEEP_TAB_CAP, 1), SWEEP_TAB_CAP);
   const { NUMBER_KEYS } = require('../utils/rowNumbering');
   const { rows } = await db.query(
-    `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
-            COALESCE(NULLIF(btrim(tc.display_name), ''), tc.tab_name) AS "displayName",
-            COUNT(p.id)::int AS total,
-            COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) = '')::int AS "blankNumber",
+    `WITH base AS (
+       SELECT tc.sheet_id, tc.tab_name,
+              COALESCE(NULLIF(btrim(tc.display_name), ''), tc.tab_name) AS display_name,
+              p.id, btrim(COALESCE(n.val, '')) AS num,
+              ${FILLED_SQL} AS filled
+         FROM tab_configs tc
+         JOIN campaign_participants p
+           ON p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
+          AND p.deleted_at IS NULL AND p.active = TRUE
+         LEFT JOIN LATERAL (
+           SELECT p.row_json->>k AS val
+             FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
+                                         THEN p.row_json ELSE '{}'::jsonb END) AS k
+            WHERE lower(btrim(k)) = ANY($1::text[])
+            LIMIT 1) n ON TRUE
+        WHERE COALESCE(tc.sheetless, FALSE) = TRUE
+     ), marked AS (
+       /* 같은 번호를 쓰는 줄 묶음에 **채워진 줄이 있는가** — 짝 빈 줄 판정의 근거.
+          번호가 빈 줄끼리는 묶지 않는다(빈 번호는 짝을 정할 근거가 아니다). */
+       SELECT b.*, bool_or(b.filled) FILTER (WHERE b.num <> '')
+                     OVER (PARTITION BY b.sheet_id, b.tab_name, b.num) AS grp_filled
+         FROM base b
+     )
+     SELECT sheet_id AS "sheetId", tab_name AS "tabName", display_name AS "displayName",
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE num = '')::int AS "blankNumber",
             /* 중복 번호 = 값 있는 줄 수 - 서로 다른 번호 수(= 같은 번호를 나눠 쓴 잉여 줄).
                중복 줄 정리 뒤 566,566,567,567 처럼 번호는 다 차 있는데 두 개씩인 표가 남는다.
                빈칸만 세면 그 표가 자동 스윕 대상에서 통째로 빠진다(실측 2026-08-19). */
-            (COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) <> '')
-             - COUNT(DISTINCT btrim(n.val)) FILTER (WHERE btrim(COALESCE(n.val, '')) <> ''))::int AS "dupNumber"
-       FROM tab_configs tc
-       JOIN campaign_participants p
-         ON p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
-        AND p.deleted_at IS NULL AND p.active = TRUE
-       LEFT JOIN LATERAL (
-         SELECT p.row_json->>k AS val
-           FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
-                                       THEN p.row_json ELSE '{}'::jsonb END) AS k
-          WHERE lower(btrim(k)) = ANY($1::text[])
-          LIMIT 1) n ON TRUE
-      WHERE COALESCE(tc.sheetless, FALSE) = TRUE
+            (COUNT(*) FILTER (WHERE num <> '')
+             - COUNT(DISTINCT num) FILTER (WHERE num <> ''))::int AS "dupNumber",
+            /* 짝 빈 줄 = 같은 번호를 쓰는 채워진 줄이 있는데 이 줄은 비어 있다(사용자 확정 조건). */
+            COUNT(*) FILTER (WHERE NOT filled AND num <> '' AND grp_filled)::int AS "pairedBlank"
+       FROM marked
       GROUP BY 1, 2, 3
-      ORDER BY "blankNumber" DESC, "dupNumber" DESC, "tabName"
+      ORDER BY "pairedBlank" DESC, "blankNumber" DESC, "dupNumber" DESC, "tabName"
       LIMIT ${cap + 1}`,
     [NUMBER_KEYS.map(k => String(k).toLowerCase())]);
   const truncated = rows.length > cap;
   const items = rows.slice(0, cap);
   return {
     ok: true, truncated, tabs: items.length,
-    needTabs: items.filter(r => r.blankNumber > 0 || r.dupNumber > 0).length,
+    needTabs: items.filter(r => r.blankNumber > 0 || r.dupNumber > 0 || r.pairedBlank > 0).length,
     blankNumberRows: items.reduce((s, r) => s + r.blankNumber, 0),
     dupNumberRows: items.reduce((s, r) => s + r.dupNumber, 0),
+    pairedBlankRows: items.reduce((s, r) => s + r.pairedBlank, 0),
     items,
   };
+}
+
+/**
+ * 짝 빈 줄 정리 — **채워진 줄과 번호가 겹치는 빈 줄만** 표에서 내린다(사용자 확정 2026-08-19).
+ *
+ * ★★ 왜 이 조건인가: 짝이 있다는 것 자체가 "그 자리는 이미 채워졌다"는 근거다. 날짜·모집량을
+ *   보지 않으므로 **아직 안 팔린 미래 자리를 지우지 않는다**(모집 계획 파괴 금지).
+ * ★★ **재번호보다 먼저 돌아야 한다** — 재번호가 번호를 1..N 로 유일하게 만들면 짝 신호가
+ *   사라져 이 정리가 영영 성립하지 않는다(스윕 순서를 회귀가드가 고정한다).
+ * ★ 지우는 것이 아니라 **내리는 것**(소프트) — 실행은 `sheetlessLedger.retireRows` 위임이라
+ *   무시트 게이트·쓰기 소유자·"soft-delete → 장부 재생성" 순서 계약을 그대로 상속한다.
+ * ★ fail-closed: 주문이 붙은 줄·이름/수취인/연락처가 있는 줄은 **조건에서 제외**(대상이 될 수 없다).
+ */
+async function cleanupPairedBlanks({ sheetId, tabName, dryRun = true, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('cleanupPairedBlanks: sheetId, tabName 필수');
+  if (!enabled()) return { ok: false, reason: 'disabled' };
+  const db = getPool();
+  const { NUMBER_KEYS } = require('../utils/rowNumbering');
+  const { rows } = await db.query(
+    `WITH base AS (
+       SELECT p.id, p.seq, btrim(COALESCE(n.val, '')) AS num, ${FILLED_SQL} AS filled
+         FROM campaign_participants p
+         LEFT JOIN LATERAL (
+           SELECT p.row_json->>k AS val
+             FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
+                                         THEN p.row_json ELSE '{}'::jsonb END) AS k
+            WHERE lower(btrim(k)) = ANY($3::text[])
+            LIMIT 1) n ON TRUE
+        WHERE p.sheet_id = $1 AND p.tab_name = $2 AND p.deleted_at IS NULL AND p.active = TRUE
+     ), marked AS (
+       SELECT b.*, bool_or(b.filled) FILTER (WHERE b.num <> '') OVER (PARTITION BY b.num) AS grp_filled
+         FROM base b
+     )
+     SELECT seq, num FROM marked
+      WHERE NOT filled AND num <> '' AND grp_filled
+      ORDER BY seq
+      LIMIT ${MAX_ROWS}`,
+    [sheetId, tabName, NUMBER_KEYS.map(k => String(k).toLowerCase())]);
+
+  if (!rows.length) return { ok: true, matched: 0, retired: 0, dryRun: !!dryRun };
+  const seqs = rows.map(r => Number(r.seq));
+  const ledger = require('./sheetlessLedger.service');
+  try {
+    const r = await ledger.retireRows({ sheetId, tabName, seqs, dryRun: !!dryRun, by });
+    return { ok: true, dryRun: !!dryRun, matched: seqs.length,
+             retired: dryRun ? 0 : (r.retired || 0), sample: rows.slice(0, 10).map(x => ({ seq: Number(x.seq), number: x.num })),
+             indexRows: r.indexRows, ledgerError: r.ledgerError };
+  } catch (err) {
+    /* 무시트 아님 등 게이트 거부는 사유를 그대로 올린다(조용한 성공 금지). */
+    return { ok: false, reason: (err && err.code) || 'retire_failed', message: err && err.message, matched: seqs.length };
+  }
 }
 
 /**
@@ -272,12 +356,22 @@ async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
   }
   /* ★ 빈칸뿐 아니라 **중복 번호**도 대상 — 중복 줄 정리 뒤 남는 `566,566,567,567…` 표는
        빈칸이 0 이라 종전 조건으로는 영영 안 잡혔다(실측). */
-  const need = (scan.items || []).filter(r => r.blankNumber > 0 || r.dupNumber > 0);
+  const need = (scan.items || []).filter(r => r.blankNumber > 0 || r.dupNumber > 0 || r.pairedBlank > 0);
   const targets = need.slice(0, limit);
   const out = { scanned: scan.tabs, need: need.length, tabs: targets.length,
                 remaining: Math.max(0, need.length - targets.length), changedTabs: 0, changedRows: 0, failed: 0 };
+  out.blankTabs = 0; out.blankRows = 0;
   for (const t of targets) {
     try {
+      /* ★★ **정리가 먼저다** — 재번호가 번호를 1..N 로 유일하게 만들면 "채워진 줄과 겹치는 번호"라는
+         짝 신호가 사라져 그 뒤로는 영영 정리되지 않는다(순서를 회귀가드가 고정한다).
+         ★ 정리 실패는 재번호를 막지 않는다(둘은 독립된 일). */
+      if (t.pairedBlank > 0) {
+        try {
+          const c = await cleanupPairedBlanks({ sheetId: t.sheetId, tabName: t.tabName, dryRun: false, by });
+          if (c && c.ok && c.retired) { out.blankTabs++; out.blankRows += c.retired; }
+        } catch (e) { logger.warn(`[rowNumbering] 짝 빈 줄 정리 실패 tab=${t.tabName}: ${e.message}`); }
+      }
       const r = await renumberTab({ sheetId: t.sheetId, tabName: t.tabName, by });
       if (r && r.ok && r.changed) { out.changedTabs++; out.changedRows += r.changed; }
     } catch (err) {
@@ -288,4 +382,4 @@ async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
   return out;
 }
 
-module.exports = { renumberTab, renumberTabInTx, renumberAllSheetless, scanNumbering, sweepNumbering, enabled, __setPoolForTest };
+module.exports = { renumberTab, renumberTabInTx, renumberAllSheetless, scanNumbering, cleanupPairedBlanks, sweepNumbering, enabled, __setPoolForTest };
