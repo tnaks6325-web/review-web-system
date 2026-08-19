@@ -6080,7 +6080,11 @@ function _openCellMenu(x,y,td){
   const manualReview=one && statusKind==='review' && !((selectedRow&&selectedRow.submitted)) && (STATE.role==='master'||STATE.role==='admin');
   const canPaste=canE && g.some(l=>l.some(c=>c.classList.contains('gedit')));
   const hasEdited = canE && g.some(l=>l.some(c=>c.classList.contains('edited')));
-  const row=(icon,label,fn,dim,danger)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
+  const row=(icon,label,fn,dim,danger,title)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''}${title?` title="${esc(title)}"`:''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
+  // 주문(구매양식)이 연결된 행은 "명단에서 빼기"가 아니라 "구매기록 취소"다. 라벨이 그 사실을 말하고,
+  // 서버가 master/admin만 허용하므로 그 밖의 담당자에겐 눌러도 아무 일 없는 항목을 두지 않는다.
+  const menuRowHasOrder=!!(selectedRow&&selectedRow.hasOrder);
+  const menuCanOrderDelete=(STATE.role==='master'||STATE.role==='admin');
   m.innerHTML=
       (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable):'')
     + (manualReview?row('📎','관리자 수동 리뷰제출',"openManualReviewSubmission()"):'')
@@ -6094,7 +6098,15 @@ function _openCellMenu(x,y,td){
         _selRanges().length>1 ? `떨어진 <b>${_selRanges().length}개 범위</b>를 화면 열 순서대로 이어 복사합니다`
         : (one ? 'Ctrl(⌘)+드래그로 떨어진 범위를 더할 수 있습니다'
                : '끌어 잡은 <b>직사각형 범위</b>만 복사됩니다 · Ctrl(⌘)+드래그=범위 추가')}</div>`
-    + (canE&&STATE._gMenuRowId?`<div class="gcmdiv"></div>${row('🗑','행 삭제','_menuDeleteRow()',false,true)}`:'');
+    + (canE&&STATE._gMenuRowId?`<div class="gcmdiv"></div>${row(
+        '🗑',
+        menuRowHasOrder?'행 삭제 · 구매기록 취소':'행 삭제',
+        '_menuDeleteRow()',
+        menuRowHasOrder&&!menuCanOrderDelete,
+        true,
+        menuRowHasOrder
+          ? (menuCanOrderDelete?'이 행의 구매양식을 취소하고 작업표에서 제거합니다 · 총원·금액 반영':'구매기록이 연결된 행 삭제는 관리자(master/admin)만 할 수 있습니다')
+          : '이 행을 작업표와 리뷰어 참여내역에서 제거합니다')}`:'');
   m.classList.add('show');
   const w=m.offsetWidth||210, h=m.offsetHeight||160;
   m.style.left=Math.max(8,Math.min(x, window.innerWidth-w-10))+'px';
@@ -6155,7 +6167,24 @@ async function _manualReviewSubmit(){
     _manualReviewClose(); await reloadWorkdesk(); toast('관리자 수동 리뷰제출이 완료되었습니다.');
   }catch(e){ if(err)err.textContent=e&&e.message?e.message:'처리에 실패했습니다.'; state.saving=false; if(btn){btn.disabled=false;btn.textContent='첨부 후 제출처리';} }
 }
-function _menuDeleteRow(){ const rowId=STATE._gMenuRowId; _closeCellMenu(); if(rowId) hideRow(rowId); }
+// 우클릭 [행 삭제]는 그 행의 성격에 따라 갈린다.
+//  · 구매양식이 연결된 행 → deleteOrderRow(주문 취소 + 시트 주문값 비우기 + 총원·금액 반영)
+//  · 빈 슬롯·수동 행     → hideRow(작업표·참여내역에서 제거, 총 모집인원은 마지막 진행일로 보충)
+// 판정은 서버가 준 hasOrder 하나로만 한다(화면에서 다시 추측하면 두 경로가 갈린다).
+function _menuDeleteRow(){
+  const rowId=STATE._gMenuRowId; _closeCellMenu(); if(!rowId) return;
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(rowId));
+  if(r&&r.hasOrder){
+    if(!(STATE.role==='master'||STATE.role==='admin')){   // 메뉴에서 이미 잠갔지만 최종 방어
+      alert('구매기록이 연결된 행 삭제는 관리자(master/admin)만 할 수 있습니다.');
+      return;
+    }
+    // 주문 원장이 이미 취소된 행이라면 남은 작업표 행만 제거하는 길로 넘긴다(막다른 길 금지).
+    deleteOrderRow(rowId,{onNoOrder:()=>hideRow(rowId)});
+    return;
+  }
+  hideRow(rowId);
+}
 function _revertSelection(){
   const g=_selectionGrid(); _closeCellMenu();
   const tds=[].concat(...g).filter(td=>td.classList.contains('edited'));
@@ -11019,13 +11048,27 @@ async function assignUnslottedOrder(rowId){
   }catch(_){ toast('번호 배정에 실패했습니다.'); }
   finally{ STATE._assignUnslottedBusy=false; }
 }
-async function deleteOrderRow(rowId){
+// 구매양식 취소 경로. 호출부는 둘 — 이름 옆 [삭제] 버튼과 우클릭 [행 삭제 · 구매기록 취소].
+// opts.onNoOrder: 주문 원장이 이미 없는 행일 때 이어서 시도할 대체 경로(우클릭에서만 전달).
+async function deleteOrderRow(rowId, opts){
   if(STATE._orderDeleteBusy) return;
   const t=STATE.cur; if(!t) return;
   STATE._orderDeleteBusy=true;
+  let outcome=null;
+  try{ outcome=await _deleteOrderRowCore(t,rowId); }
+  finally{ STATE._orderDeleteBusy=false; }
+  if(outcome==='no_order'){
+    if(opts&&opts.onNoOrder) return opts.onNoOrder();
+    toast('삭제할 주문 행을 찾지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+  }
+}
+async function _deleteOrderRowCore(t,rowId){
   try{
     const preview=await api('/api/trackb/workdesk/order-delete-preview',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
-    if(!preview||!preview.ok){ toast((preview&&preview.error)||'삭제할 주문 행을 찾지 못했습니다. 새로고침 후 다시 시도해 주세요.'); return; }
+    if(!preview||!preview.ok){
+      if(preview&&preview.error==='row_not_found_or_not_order') return 'no_order';
+      toast((preview&&preview.error)||'삭제할 주문 행을 찾지 못했습니다. 새로고침 후 다시 시도해 주세요.'); return;
+    }
     const b=preview.before||{},a=preview.after||{},row=preview.row||{};
     const who=(row.name||'선택한 참여자')+(row.seq!=null?` · ${row.seq}번 행`:'');
     const message=`${who}의 선택한 한 행만 삭제합니다.\n\n총인원  ${_orderDeleteCount(b.total)} → ${_orderDeleteCount(a.total)}명\n제출완료  ${_orderDeleteCount(b.submitted)} → ${_orderDeleteCount(a.submitted)}명\n입금완료  ${_orderDeleteCount(b.paid)} → ${_orderDeleteCount(a.paid)}명\n결제금액  ${_orderDeleteCount(b.paymentAmount)} → ${_orderDeleteCount(a.paymentAmount)}원\n\n같은 리뷰어의 다른 행은 남습니다. 이 행의 주문값은 시트에서도 비워집니다. 계속할까요?`;
@@ -11035,7 +11078,6 @@ async function deleteOrderRow(rowId){
     toast(result.cleared?'선택한 1행을 삭제했고 시트 주문값을 비우는 중입니다.':'선택한 1행을 삭제했습니다.');
     await reloadWorkdesk();
   }catch(_){ toast('삭제 정보를 불러오지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.'); }
-  finally{ STATE._orderDeleteBusy=false; }
 }
 async function cleanupAutoTestRecord(rowId){
   if(!confirm('자동 테스트로 만든 구매양식·참여·작업보드 행·테스트 리뷰어를 모두 영구 제거할까요?')) return;
