@@ -164,6 +164,16 @@ t('★ 미리보기 부팅·바인딩 판정은 "패널이 그려졌나" 하나(
 t('⑦ 셀 범위를 잡고 있으면 방향키는 셀 이동이 우선 — 미리보기가 가로채지 않는다',
   /if\(STATE\.gSelRange\) return;/.test(fnBody(wd, 'function _rvBind(){')));
 
+console.log('\n── F2. 제목 행 정렬 ──');
+/* ★ 남는 폭은 오른쪽(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면 링크복사·모집인원조절·
+   마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다. 맨 뒤로 옮겨 전부 왼쪽에 붙인다. */
+t('★ 제목 행 스페이서(.sp)는 버튼 묶음 뒤 — 맨 마지막에 한 번만', (() => {
+  const mh = wd.slice(wd.indexOf('<div class="mh mh-wb">'), wd.indexOf('_scheduleBodyFlush();'));
+  const sp = (mh.match(/<span class="sp" style="flex:1"><\/span>/g) || []).length;
+  return sp === 1 && /<span class="sp" style="flex:1"><\/span><\/div>/.test(mh)
+    && mh.indexOf('${shareBtn}') < mh.indexOf('<span class="sp"');
+})());
+
 console.log('\n── G. CSS 계약 ──');
 t('★ 3분할 폭 = 439 / 439 / 659 비율 — 앞 두 칸은 같은 너비(고정 px 금지)',
   /\.tp3grid\.c3\{grid-template-columns:minmax\(230px,439fr\) minmax\(230px,439fr\) minmax\(330px,659fr\)/.test(wd));
