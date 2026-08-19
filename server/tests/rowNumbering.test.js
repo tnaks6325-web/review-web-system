@@ -277,6 +277,24 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 전체 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`무시트 작업 \$\{s\.needTabs\}개의 번호를/.test(fe));
     ok('★ 실패한 작업을 조용히 넘기지 않는다', /정리하지 못한 작업/.test(fe));
     ok('★ 목록이 잘리면 고지', /목록이 잘렸습니다/.test(fe));
+
+    /* ── 팝업 조작성(실측 신고 2026-08-19: 121개 목록이 세로로 무한히 길어 조작 불가) ── */
+    ok('★★ 모달 높이 상한(뷰포트를 넘지 않는다)', /#rnOv \.wbl-dlg\{[^}]*max-height:86vh/.test(fe));
+    ok('★★ 본문이 스크롤 컨테이너(min-height:0 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다)',
+      /#rnOv \.wbl-db\{[^}]*flex:1;min-height:0;overflow:auto/.test(fe));
+    ok('★★ 전역 table{overflow:hidden} 상쇄(없으면 sticky 표머리가 조용히 죽는다)',
+      /#rnOv \.wbl-wrt\{[^}]*overflow:visible/.test(fe));
+    ok('★ sticky 표머리 + border-collapse:separate(collapse 에서는 sticky 가 안 먹는다)',
+      /#rnOv \.wbl-wrt\{[^}]*border-collapse:separate/.test(fe) && /#rnOv \.wbl-wrt th\{position:sticky/.test(fe));
+    ok('★ 표를 감싸는 래퍼에 overflow 를 두지 않는다(sticky 기준을 가로챈다)',
+      !/#rnOv \.rn-tw\{[^}]*overflow/.test(fe));
+    ok('★★ 검색은 행만 갈아끼운다(입력칸 재생성 = 한글 IME 파괴)',
+      /oninput="_RN\.q=this\.value;_rnRows\(\)"/.test(fe) &&
+      /function _rnRows\(\)\{[\s\S]{0,400}getElementById\('rnRows'\)/.test(fe));
+    ok('★ 기본은 정리 대상만 보기(121개를 다 늘어놓지 않는다)', /_RN\.onlyNeed !== false/.test(fe));
+    ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
+      /const i = all\.indexOf\(r\);/.test(fe));
+    ok('★ 빈 목록도 사유를 말한다', /검색 결과가 없습니다/.test(fe) && /정리할 작업이 없습니다/.test(fe));
     ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
   }
 
