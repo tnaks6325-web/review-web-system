@@ -2620,6 +2620,28 @@ router.post('/worktable/retire-rows', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+/* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
+   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
+   ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
+   ★ 입금 회차(대기·완료)에 담긴 줄이 섞인 그룹은 서버가 **건드리지 않고 사유와 함께 보고**한다. */
+router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { dedupeRows, LedgerError } = require('../services/sheetlessLedger.service');
+    const b = req.body || {};
+    try {
+      res.json(await dedupeRows({
+        sheetId: b.sheetId, tabName: b.tabName, dryRun: b.dryRun !== false, by: _by(req),
+      }));
+    } catch (e) {
+      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 블로거 사전등록(M5-2) — 공고 밖에서 섭외한 블로거를 그 작업의 표에 한 줄로 넣는다.
    ★ 게이트 = `_ensureEditScope`(master/admin 전체 · staff 담당 탭 · 광고주 차단) — 그리드 셀 편집과 같은 범위.
      명단 한 줄 추가는 정원·총량을 바꾸지 않는다(정원 조작은 adminOrMaster 유지).

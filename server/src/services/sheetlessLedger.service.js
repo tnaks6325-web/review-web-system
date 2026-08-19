@@ -362,9 +362,112 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   return { ...r, sheetId, tabName, indexRows: ledger ? ledger.indexRows : null, ledgerError };
 }
 
+/**
+ * ★★ 작업보드 중복 줄 정리 (2026-08-19 사고 수습) — 예방(중복 차단)의 짝.
+ *
+ * 무엇을 중복으로 보나: 같은 탭 안에서 **주문번호(숫자만) + 연락처(숫자만)** 가 같은 줄들.
+ *   기록 단계 중복 차단과 **같은 키**를 쓴다(판정이 갈리면 "화면은 중복인데 정리는 안 되는" 상태가 된다).
+ *
+ * ★★ 남기는 줄 = 가장 이른 seq. 다만 **다음 그룹은 손대지 않고 보고만 한다**(사람이 판단):
+ *   ㉮ 지울 줄이 **입금 회차에 담겨 있다**(`payment_batch_items` pending/paid) — `uq_payment_items_active`
+ *      가 `(sheet_id,tab_name,row_index)` 기준이라 중복 줄이 각각 별개 이체 건으로 잡힌다.
+ *      여기서 조용히 지우면 **이미 나간 이체의 근거가 사라진다**.
+ *   ㉯ 지울 줄에 **리뷰제출·입금 표시가 있는데 남길 줄에는 없다** — 실제로 쓰인 줄이 뒤에 있다는 뜻.
+ * ★ dryRun 기본. 대상은 **서버가 조건으로 다시 고른다**(화면이 보낸 목록 불신).
+ * ★ 하드삭제 없음 — 줄은 `deleted_at`, 중복 주문은 `mirror_status='canceled'` 소프트 처리.
+ */
+async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
+  const db = getPool();
+
+  const { rows: tcRows } = await db.query(
+    `SELECT COALESCE(sheetless, FALSE) AS sheetless
+       FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+  if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다.');
+  if (!tcRows[0].sheetless) {
+    throw new LedgerError('not_sheetless',
+      '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하세요.');
+  }
+
+  const { rows } = await db.query(
+    `SELECT cp.seq, cp.order_submission_id AS osid, cp.reviewer_name AS name,
+            COALESCE(cp.is_submitted, FALSE) AS submitted, COALESCE(cp.is_paid, FALSE) AS paid,
+            regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g') AS ordnum,
+            regexp_replace(COALESCE(os.phone, ''), '\\D', '', 'g') AS ph,
+            EXISTS (SELECT 1 FROM payment_batch_items pi
+                     WHERE pi.sheet_id = cp.sheet_id AND pi.tab_name = cp.tab_name
+                       AND pi.row_index = cp.seq AND pi.status IN ('pending','paid')) AS in_payment
+       FROM campaign_participants cp
+       JOIN order_submissions os ON os.id = cp.order_submission_id
+      WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND os.deleted_at IS NULL
+        AND length(regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g')) >= 6
+      ORDER BY cp.seq`, [sheetId, tabName]);
+
+  const groups = new Map();
+  for (const r of rows) {
+    const key = `${r.ordnum}\u0000${r.ph}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+
+  const removeSeqs = [];
+  const removeOsIds = [];
+  const plan = [];
+  const skipped = [];
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const keep = list[0];                      // 가장 이른 seq (조회가 seq 오름차순)
+    const losers = list.slice(1);
+    const blockedPayment = losers.filter(r => r.in_payment);
+    const blockedUsed = losers.filter(r => (r.submitted && !keep.submitted) || (r.paid && !keep.paid));
+    if (blockedPayment.length || blockedUsed.length) {
+      skipped.push({
+        orderNum: keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
+        seqs: list.map(r => r.seq),
+        reason: blockedPayment.length ? 'in_payment_batch' : 'used_row_is_not_first',
+        detail: blockedPayment.length
+          ? '지울 줄이 입금 회차(대기·완료)에 담겨 있습니다 — 이체 내역을 먼저 확인하세요.'
+          : '지울 줄에 리뷰제출·입금 표시가 있고 남길 줄에는 없습니다 — 어느 줄을 남길지 사람이 정하세요.',
+      });
+      continue;
+    }
+    plan.push({
+      orderNum: keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
+      keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq),
+    });
+    for (const r of losers) { removeSeqs.push(r.seq); if (r.osid) removeOsIds.push(r.osid); }
+  }
+
+  const stat = {
+    sheetId, tabName, boardRows: rows.length,
+    groups: plan.length, removeRows: removeSeqs.length,
+    skippedGroups: skipped.length, plan: plan.slice(0, 100), skipped: skipped.slice(0, 100),
+  };
+  if (dryRun) return { ...stat, dryRun: true };
+  if (!removeSeqs.length) return { ...stat, removed: 0, canceledOrders: 0 };
+
+  /* ★ 작업표 쓰기는 participants.service 소유(쓰기 소유자 규율) — 여기는 판정·순서·장부만. */
+  const r = await require('./participants.service')
+    .retireRows({ sheetId, tabName, seqs: removeSeqs, dryRun: false, by: `dedupe:${by}` });
+  const canceled = await require('./orderLedger.service')
+    .softDeleteDuplicateOrders(removeOsIds, `dedupe:${by}`);
+
+  let ledger = null, ledgerError = null;
+  try {
+    ledger = await rebuildLedgers({ sheetId, tabName, by: `dedupe:${by}` });
+  } catch (e) {
+    ledgerError = (e && (e.code || e.message)) || 'rebuild_failed';
+    logger.warn(`[sheetlessLedger] 중복 정리 후 장부 재생성 실패 tab=${tabName} — ${ledgerError}`);
+  }
+  logger.info(`[sheetlessLedger] 중복 줄 정리 tab=${tabName} ${r.retired}줄 · 주문 ${canceled}건 취소 by=${by}`);
+  return { ...stat, removed: r.retired, canceledOrders: canceled,
+           indexRows: ledger ? ledger.indexRows : null, ledgerError };
+}
+
 module.exports = {
   rebuildLedgers,
   retireRows,
+  dedupeRows,
   resolveHeaders,
   buildValues,
   LedgerError,

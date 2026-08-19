@@ -1,6 +1,6 @@
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
 const { logger } = require('../utils/logger');
-const { findSameDayDuplicateInTx, sameDayDuplicateLockKey } = require('./orderDuplicate.service');
+const { findSameDayDuplicateInTx, findEquivalentOrderInTx, sameDayDuplicateLockKey } = require('./orderDuplicate.service');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
@@ -787,7 +787,12 @@ async function createOrderLedgerEntry(input) {
   const guardDuplicate = async (client) => {
     if (!sameDayDuplicateGuard) return null;
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [sameDayDuplicateLockKey(sameDayDuplicateGuard)]);
-    return findSameDayDuplicateInTx(client, sameDayDuplicateGuard);
+    const sameDay = await findSameDayDuplicateInTx(client, sameDayDuplicateGuard);
+    if (sameDay) return sameDay;
+    // ★ 무시트(탈시트) 경로만 날짜를 넘는 같은 구매까지 본다 — 그쪽은 claim(dedup_key 유니크)을
+    //   건너뛰어 수렴점이 없다. 시트 경로 동작은 한 줄도 바뀌지 않는다(crossDay 미전달).
+    if (!sameDayDuplicateGuard.crossDay) return null;
+    return findEquivalentOrderInTx(client, sameDayDuplicateGuard);
   };
 
   if (campaignHold && campaignHold.applicationId) {
@@ -1018,6 +1023,25 @@ async function markOrderWritten(orderSubmissionId, sheetRow, sig = null) {
       WHERE id = $1`,
     [orderSubmissionId, sheetRow || null, sig]
   );
+}
+
+/**
+ * 중복 주문 취소(소프트) — 작업보드 중복 줄 정리의 짝. 2026-08-19.
+ *
+ * ★ 이 함수는 **호출자가 이미 "중복이고 입금 회차에 걸리지 않는다"를 확인한 id 만** 받는다.
+ *   여기서 다시 판정하지 않는다(판정 단일 출처 = sheetlessLedger.dedupeRows).
+ * ★ 하드삭제 금지 — `deleted_at` + `mirror_status='canceled'`(migration 120 과 같은 표기)라
+ *   감사·복구 경로가 남는다. 이미 취소된 건은 건드리지 않는다(멱등).
+ */
+async function softDeleteDuplicateOrders(ids = [], by = 'dedupe') {
+  const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean).slice(0, 5000);
+  if (!list.length) return 0;
+  const { rowCount } = await getPool().query(
+    `UPDATE order_submissions
+        SET deleted_at = NOW(), canceled_by = $2, mirror_status = 'canceled', updated_at = NOW()
+      WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+    [list, String(by).slice(0, 100)]);
+  return rowCount;
 }
 
 async function markOrderMirrorFailed(orderSubmissionId, err) {
@@ -1806,6 +1830,7 @@ async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
 
 module.exports = {
   computeDedupKey,
+  softDeleteDuplicateOrders,
   buildCandidateRows,
   reconcileStuckOrders,
   // 시트 변경 감지용 공개 트리거: 가드 차단(=시트가 예상과 다름 신호) 시 그 시트만 자동 재미러+리컨실.

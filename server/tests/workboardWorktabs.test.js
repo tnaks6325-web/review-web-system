@@ -191,7 +191,10 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
 
   /* ── 6) 격리 ───────────────────────────────────────────────── */
   console.log('\n6) 격리');
-  const m2Block = (SVC_SRC.match(/\/\/ ══ M2: 열린 작업 줄[\s\S]*?^module\.exports/m) || [''])[0];
+  // ⚠ 종료 경계를 `module.exports` 로 두면 M2 구역 **아래에 붙은 다른 기능의 쿼리**까지 빨려 들어와
+  //   이 검사가 조용히 빨개진다(2026-08-18 실측). 소스의 `// ══ /M2` 닫는 마커까지만 자른다.
+  const m2Block = (SVC_SRC.match(/\/\/ ══ M2: 열린 작업 줄[\s\S]*?\/\/ ══ \/M2/m) || [''])[0];
+  assert.ok(m2Block, 'M2 구역 마커(// ══ M2 … // ══ /M2)를 찾지 못했다 — 마커를 지우지 말 것');
   // `ON CONFLICT ... DO UPDATE SET` 은 같은 문장의 upsert 절이라 대상 테이블이 아니다 → 제외 후 판정
   const m2Writes = m2Block.replace(/--[^\n]*/g, '').replace(/DO UPDATE SET/gi, '');
   t('★ 쓰기 표면은 신규 2테이블뿐(운영 테이블 무접촉)',

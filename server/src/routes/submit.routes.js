@@ -1039,7 +1039,8 @@ router.post('/order', async (req, res, next) => {
       campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone }, skipTabBinding: orderScope.sheetless } : undefined,
       // ★ 동일 캠페인에서 오늘 같은 모든 구매양식 값으로 이미 제출했으면 원장 INSERT 전에 차단.
       // orderLedger 트랜잭션의 advisory lock으로 동시 더블클릭도 한 건만 통과시킨다.
-      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData },
+      // crossDay: 무시트 경로는 claim(dedup_key 유니크)을 건너뛰므로 날짜를 넘는 같은 구매도 막는다.
+      sameDayDuplicateGuard: { sheetId: orderScope.sheetId, tabName: orderScope.tabName, campaignId: holdCtx && holdCtx.campaignId, orderData, crossDay: !!orderScope.sheetless },
     });
 
     if (ledger && ledger.duplicateOrderSubmissionId) {
