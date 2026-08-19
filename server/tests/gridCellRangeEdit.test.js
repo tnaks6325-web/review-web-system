@@ -144,9 +144,12 @@ console.log('\n[1B] 고정 헤더에 가린 띠 보정');
 ok('우클릭 핸들러에 좌표 폴백이 있다',
   /let td=e\.target\.closest\('#gbody td'\);\s*\n\s*if\(!td\) td=_cellUnderPoint\(e\.clientX, e\.clientY\);/.test(HTML));
 ok('★ 왼쪽 클릭(드래그 선택)에는 폴백을 넣지 않는다 — 헤더 열 메뉴 동작 무접촉', (() => {
-  const i = HTML.indexOf("addEventListener('mousedown'");
+  // ★ 파일에 mousedown 리스너가 여럿이라 첫 매칭으로 자르면 **엉뚱한 블록**을 검사한다(변이시험이 잡았다).
+  //   셀 범위 UI 안의 그 리스너로 스코프를 좁힌다.
+  const s0 = HTML.indexOf('function _ensureCellRangeUI');
+  const i = HTML.indexOf("addEventListener('mousedown'", s0);
   const body = HTML.slice(i, HTML.indexOf("addEventListener('mousemove'", i));
-  return i > 0 && !/_cellUnderPoint/.test(body);
+  return s0 > 0 && i > s0 && !/_cellUnderPoint/.test(body);
 })());
 {
   const sb = { document: null };
