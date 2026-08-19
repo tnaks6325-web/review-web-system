@@ -42,3 +42,20 @@
   #pmbody .pmworkpick{gap:7px;padding:9px}
   #pmbody .pmworkmeta{font-size:10px}
 }
+
+/* 작업 검색 — 담당자 토글 줄 오른쪽. 입력 중에는 이 input DOM 을 절대 다시 만들지 않는다
+   (재생성하면 한글 IME 조합이 파괴된다 — 홈 목록 검색 `ㅁ며면면` 실측 계열). */
+#pmbody .pmsearch{position:relative;margin-left:auto;display:flex;align-items:center}
+#pmbody .pmsearchin{width:210px;max-width:100%;border:1px solid #D9E1EC;border-radius:6px;background:#fff;color:#172033;font:inherit;font-size:11px;font-weight:700;padding:6px 26px 6px 26px;transition:border-color .16s,box-shadow .16s}
+#pmbody .pmsearchin::placeholder{color:#9AA7BB;font-weight:700}
+#pmbody .pmsearchin:focus{outline:none;border-color:#8FB2EC;box-shadow:0 0 0 3px rgba(47,112,232,.16)}
+#pmbody .pmsearchic{position:absolute;left:8px;font-size:10.5px;color:#9AA7BB;pointer-events:none;line-height:1}
+#pmbody .pmsearchx{position:absolute;right:4px;width:18px;height:18px;display:none;place-items:center;border:0;border-radius:50%;background:transparent;color:#75839A;font:inherit;font-size:12px;line-height:1;cursor:pointer}
+#pmbody .pmsearch.has .pmsearchx{display:grid}
+#pmbody .pmsearchx:hover{background:#EDF1F7;color:#2865D5}
+#pmbody .pmworkempty{padding:14px 10px;color:#75839A;font-size:11px;font-weight:700;text-align:center}
+
+@media(max-width:720px){
+  #pmbody .pmsearch{margin-left:0;width:100%}
+  #pmbody .pmsearchin{width:100%}
+}
