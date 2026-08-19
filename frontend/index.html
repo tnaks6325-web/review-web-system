@@ -1449,6 +1449,22 @@ function renderReviewSummary() {
 //   실측상 '캡처 미첨부' 알림의 85%가 진짜 미첨부인데, 리뷰어는 자기 주문에 캡처가 빠진 걸
 //   알 방법이 없었다. 홈에 남겨 스스로 채우게 하면 관리자 독촉 왕복이 사라진다.
 //   첨부는 기존 업로드 경로(/api/image/image-upload + orderSubmissionId) 재사용 = 신규 쓰기 표면 0.
+/** ★★ 리뷰어 화면에 보여줄 **작업 이름** — 단일 출처.
+ *  내부 키(`campaign:<공고ID>` 원장 좌표 · `wt_` 가상 시트)는 **절대 그리지 않는다**
+ *  (2026-08-19 신고: 구매 캡처 보완 카드에 `campaign:camp_0df34a3b8664` 가 그대로 찍혔다).
+ *  서버가 사람이 읽는 이름을 확정해 내려주지만, 배포 스큐·미연결 탭에서도 코드가 새지 않게
+ *  화면에서 한 번 더 거른다. 이름을 못 찾으면 빈 문자열이 아니라 '참여 작업'으로 말한다. */
+const _INTERNAL_KEY_RE = /^(campaign:|wt_)/i;
+function _taskLabel(item, fallback) {
+  const it = item || {};
+  const cands = [it.displayNameTC, it.tcDisplayName, it.displayName, it.campaignName, it.tabName];
+  for (const c of cands) {
+    const v = String(c == null ? '' : c).trim();
+    if (v && !_INTERNAL_KEY_RE.test(v)) return v;
+  }
+  return fallback === undefined ? '참여 작업' : fallback;
+}
+
 let _mcItems = [], _mcTargetId = '';
 async function _loadMissingCaptures(phone8) {
   const sec = document.getElementById('sectionMissingCapture');
@@ -1471,8 +1487,9 @@ function _renderMissingCaptures() {
   const esc2 = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   list.innerHTML = _mcItems.map(it => {
     const when = String(it.submittedAt || '').slice(5, 10).replace('-', '/');
+    // ★ 이름은 `_taskLabel` 한 곳 — tabName(원장 좌표)은 첨부 업로드용이지 사람이 읽는 이름이 아니다
     return `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:11px 12px;margin-bottom:8px">
-      <div style="font-size:.8rem;font-weight:700;color:#191F28;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(it.displayName || it.campaignName || it.tabName || '')}</div>
+      <div style="font-size:.8rem;font-weight:700;color:#191F28;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(_taskLabel(it))}</div>
       <div style="font-size:.7rem;color:#92400E;margin-top:3px">${esc2(when)} 제출 · 구매 캡처가 아직 없습니다</div>
       <button type="button" onclick="_mcPick('${esc2(it.id)}')" style="margin-top:8px;width:100%;padding:9px;border:none;border-radius:10px;background:#3182f6;color:#fff;font-size:.8rem;font-weight:750;cursor:pointer;font-family:inherit">📷 캡처 첨부하기</button>
     </div>`;
@@ -1660,7 +1677,7 @@ function renderReviewSubTab() {
         : "";
 
       const taskDate = item.startDate || "";
-      const taskName = item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || "";
+      const taskName = _taskLabel(item, "");
       const optionName = item.productName || "";
       const taskParts = [];
       if (taskDate) taskParts.push(taskDate);
@@ -1730,13 +1747,13 @@ function renderReviewSubTab() {
       // 다건 그룹 카드
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card" + (isDone ? " done" : "");
-      const campLabel = items[0].displayNameTC || items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
+      const campLabel = _taskLabel(items[0], "");
       const groupSubmitItems = items.filter(i => !i.isOrderPending);   // 주문(반영중) 항목은 제출 대상 아님
       const groupClickable = !isDone && groupSubmitItems.length > 0;
 
       const itemLines = items.map(item => {
         const taskDate = item.startDate || "";
-        const taskName = item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || "";
+        const taskName = _taskLabel(item, "");
         const optionName = item.productName || "";
         const roundTxt = item.round ? ` · ${item.round}` : "";
         const taskParts = [];
@@ -1805,7 +1822,7 @@ function _reEditRegister(item){
   const id = 're' + (_reEditSeq++);
   window._reEditReg[id] = {
     sheetId: item.sheetId, tabName: item.tabName, gid: item.gid, rowIndex: item.rowIndex,
-    label: item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || ''
+    label: _taskLabel(item, '')
   };
   return id;
 }
@@ -2036,7 +2053,7 @@ function closePartInfo(){ const o = document.getElementById('partInfoOvl'); if (
 
 function _partInfoLabel(it){
   const d = it.startDate || '';
-  const t = it.displayNameTC || it.tcDisplayName || it.tabName || it.campaignName || '';
+  const t = _taskLabel(it, '');
   const o = it.productName ? ('옵션:' + it.productName) : '';
   return [d, t, o].filter(Boolean).join(' ') || (it.displayName || '참여 작업');
 }
@@ -2055,7 +2072,7 @@ function openPartInfoSheet(items, opts){
   //   라벨은 카드와 같은 표시명(상품명 우선 → 탭명)만 쓴다.
   _partInfoCsCtx = (it.sheetId && it.tabName)
     ? { campaignKey: it.sheetId + '||' + it.tabName,
-        campaignLabel: (it.productName || it.displayNameTC || it.tcDisplayName || it.tabName || '문의') }
+        campaignLabel: (it.productName || _taskLabel(it, '문의')) }
     : null;
   // 이미지 확인·수정요청은 행 단위 작업이라 단건일 때만(다건 그룹은 목록의 줄별 버튼 유지)
   _partInfoReEditId = (done && list.length === 1) ? _reEditRegister(it) : '';

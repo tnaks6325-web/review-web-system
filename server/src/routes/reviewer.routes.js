@@ -504,18 +504,29 @@ router.get('/review-earnings', async (req, res, next) => {
               rc.thumbnail_url AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
          FROM order_submissions os
-         LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
+         LEFT JOIN campaign_participants cp
+           ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL
          LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
          LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
           AND ca.campaign_id IS NOT NULL
+          /* ★★ 이중 집계 방지 — 위치키만 보면 참여형(무시트) 주문은 **절대** 걸러지지 않는다:
+             원장 좌표가 campaign:<공고ID>(submit.routes _resolveCampaignOrderScope)이고
+             sheet_row 에는 작업표 seq 가 들어가 review_index 좌표와 계가 다르다.
+             그래서 같은 참여가 명단(review_index)과 주문원장 양쪽에서 세어져
+             "참여중 3건 / 49,800원"처럼 **건수와 금액이 함께 부풀었다**(2026-08-19 실측).
+             → 리뷰 내역 카드 dedup 과 **같은 키**(작업표 줄 = 주문 id 링크)로도 짝짓는다. */
           AND NOT EXISTS (
             SELECT 1 FROM review_index ri
              WHERE ri.phone8 = ANY($1)
-               AND ri.sheet_id = os.sheet_id
-               AND ri.tab_name = os.tab_name
-               AND ri.row_index = os.sheet_row
+               AND ((ri.sheet_id = os.sheet_id
+                     AND ri.tab_name = os.tab_name
+                     AND ri.row_index = os.sheet_row)
+                 OR (cp.id IS NOT NULL
+                     AND ri.sheet_id = cp.sheet_id
+                     AND ri.tab_name = cp.tab_name
+                     AND ri.row_index = cp.seq))
           )`,
       [phoneList]
     );
@@ -1103,12 +1114,25 @@ router.get('/my-missing-captures', async (req, res, next) => {
       cutoff = (cf[0] && cf[0].value) || null;
     } catch (_) { /* 못 읽으면 기간 조건만 적용 */ }
 
+    /* ★★ 리뷰어에게 보이는 이름은 **사람이 읽는 작업 이름**이어야 한다(2026-08-19 신고).
+       참여형(무시트) 주문의 원장 좌표는 `campaign:<공고ID>`(submit.routes `_resolveCampaignOrderScope`)라
+       `tc` 조인이 비어 화면에 그 내부 키가 그대로 찍혔다.
+       → 리뷰 내역 카드와 **같은 우선순위**로 이름을 정한다: 지금 적용된 공고 제목 →
+         공고에 연결된 작업표 탭 이름 → 원장 좌표의 탭 설정.
+       ★ `tabName`/`sheetId` 는 종전대로 내려보낸다 — 첨부 업로드의 폴더 좌표라 이름이 아니다
+         (화면은 이 값을 그리지 않는다). */
     const { rows } = await pool.query(`
       SELECT os.id, os.tab_name AS "tabName", os.recipient, os.orderer,
              os.submitted_at AS "submittedAt", os.sheet_id AS "sheetId",
-             tc.display_name AS "displayName", tc.campaign_name AS "campaignName"
+             COALESCE(NULLIF(rc.title, ''), NULLIF(wt.display_name, ''), NULLIF(wt.tab_name, ''),
+                      NULLIF(tc.display_name, ''), NULLIF(tc.campaign_name, '')) AS "displayName",
+             COALESCE(NULLIF(rc.title, ''), NULLIF(tc.campaign_name, '')) AS "campaignName"
         FROM order_submissions os
         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+        LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
+        LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+        LEFT JOIN tab_configs wt
+          ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
          AND os.deleted_at IS NULL
          AND os.capture_uploaded_at IS NULL
