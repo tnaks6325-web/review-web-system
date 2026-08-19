@@ -456,6 +456,53 @@ const mk = (n, field) => Array.from({ length: n }, (_, i) => ({ rowId: 'r' + i, 
     assert.ok(!/workdesk\/revert'/.test(undo) && !/workdesk\/edit'/.test(undo),
       '실행취소가 단건 경로로 되돌아가면 500칸 실행취소가 리미터에 다시 막힌다');
   });
+  // ★ 비동기 결과는 t() 밖에서 먼저 await 한다 — t() 는 동기라 promise 를 돌려주면
+  //   단언이 process.exit(0) 뒤로 밀려 조용히 실행되지 않는다(레포 실측 함정).
+  const undoProbe = await (async () => {
+    const vm = require('vm');
+    const grabF = (name) => {
+      const i = FE.indexOf('async function ' + name + '(') >= 0
+        ? FE.indexOf('async function ' + name + '(') : FE.indexOf('function ' + name + '(');
+      assert.ok(i > 0, name + ' 정의');
+      let d = 0, started = false;
+      for (let k = i; k < FE.length; k++) {
+        if (FE[k] === '{') { d++; started = true; }
+        else if (FE[k] === '}') { d--; if (started && d === 0) return FE.slice(i, k + 1); }
+      }
+      throw new Error(name + ' 본문 경계');
+    };
+    const sent = [];
+    const rows = {};
+    const sandbox = {
+      _PASTE_CHUNK: 50, console,
+      _gridRowById: id => rows[id],
+      _paintGridCell: () => {},
+      api: (url, opt) => {
+        const b = JSON.parse(opt.body);
+        const list = b.edits || b.reverts;
+        sent.push({ url: url, n: list.length });
+        return Promise.resolve({ ok: true, results: list.map((e, k) => ({ index: k, ok: true })) });
+      },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(grabF('_undoRunGroup'), sandbox);
+    const entries = Array.from({ length: 120 }, (_, k) => {
+      const id = 'r' + k;
+      rows[id] = { cellEdits: { 비고: 'v' + k } };
+      return { rowId: id, field: 'col:비고', value: 'v' + k, had: false, prev: undefined, td: null };
+    });
+    sandbox.group = { kind: 'paste', entries: entries, pending: 0 };
+    sandbox.t = { sheetId: 's', tabName: 'T' };
+    const out = await vm.runInContext('_undoRunGroup(group, t)', sandbox);
+    return { out, sent };
+  })();
+  t('9k2: 실행취소 묶음 분할을 실제 실행으로 센다(정적 검사는 상한 제거를 통과시킨다)', () => {
+    const { out, sent } = undoProbe;
+    assert.equal(out.ok, 120, '120칸 되돌림 (받음 ' + out.ok + ')');
+    assert.equal(sent.length, 3, '요청 3회 = 50+50+20 (받음 ' + sent.length + ')');
+    assert.deepEqual(sent.map(x => x.n), [50, 50, 20], '묶음 크기 (받음 ' + JSON.stringify(sent.map(x => x.n)) + ')');
+    assert.ok(sent.every(x => /revert-batch/.test(x.url)), '이전 값 없던 칸은 revert-batch 로');
+  });
   t('9l: 한 칸이 막혀도 전체를 포기하지 않는다(옛 경로는 첫 칸에서 중단했다)', () => {
     const i = FE.indexOf('async function _undoRunGroup');
     const body = FE.slice(i, FE.indexOf('\n}\n', i));
