@@ -156,6 +156,25 @@ const row = (o) => Object.assign({
       && r.groups[0].rows.every(x => x.ledgerOrderNum === '111111111'));
   }
 
+  {
+    // 취소(소프트삭제)된 주문에 매달린 줄 — dedupeRows 는 `os.deleted_at IS NULL` 이라 통째로 못 본다
+    const pool = makePool({
+      roster: [
+        row({ seq: 50, order_submission_id: 'os-a', row_json: { 주문번호: '202608182205' } }),
+        row({ seq: 51, order_submission_id: 'os-a', row_json: { 주문번호: '202608182205' } }),
+      ],
+      orders: [{ id: 'os-a', order_num: '202608182205', phone: '010-7586-0135', deleted_at: '2026-08-19T00:00:00Z' }],
+    });
+    const svc = loadSvc(pool);
+    const r = await svc.ambiguousRowReport({
+      sheetId: 'wt_x', tabName: 'T', dedupeFn: async () => ({ plan: [], skipped: [] }),
+    });
+    ok('★★ 취소된 주문 조회를 `deleted_at IS NULL` 로 막지 않는다(막으면 이 그룹을 설명할 수 없다)',
+      r.groups[0].rows.every(x => x.orderDeleted === true));
+    ok('★ 취소된 주문은 `no_order_link` 로 뭉뚱그리지 않는다(조치가 다르다)',
+      r.groups[0].reason === 'order_deleted' && /취소\(삭제\)된/.test(r.groups[0].detail));
+  }
+
   console.log('\n[C] 모르는 것을 0 으로 꾸미지 않는다 · fail-soft');
   {
     const pool = makePool({
