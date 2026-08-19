@@ -1146,8 +1146,10 @@ function onParticipationToggle(on) {
    저장은 평소와 같은 [저장] 버튼 → 같은 검증·같은 라우트를 탄다.
 
    ★ 왜 이 값들인가
-     - 상태 active + 리뷰어 숨김 : 리뷰어 목록엔 안 뜨지만 참여·제출은 진짜로 된다.
-       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막혀 테스트가 불가)
+     - 상태 active : 참여·제출이 실제로 되어야 테스트가 된다
+       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막힌다).
+       ⚠ 모달의 [리뷰어에게 숨김] 토글은 사용자 확정(2026-08-19)으로 제거됐다 —
+         테스트 공고도 모집중이면 리뷰어 목록에 뜬다. 테스트가 끝나면 게시(모집중) 토글을 내린다.
      - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
      - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 15/10분).
      - 구매 시간대 비움 = 자율주문(종일 오픈).
@@ -1175,7 +1177,6 @@ async function openTestCampaignModal() {
   chk("rf_multi_account", true, onMultiAccountToggle);    // 타계정 허용 = 일괄 제출의 전제
   set("rf_multi_daily", 5);              // 하루에 여러 명의로 참여 가능해야 배치가 켜진다
   set("rf_sub_ttl", 30);
-  chk("rf_reviewer_hidden", true);       // ★ 리뷰어 목록 미노출
 
   // 진행상품 표가 정원의 진실원본 — 한 줄 넣어 총모집/일건수를 파생시킨다
   try {
@@ -1904,42 +1905,29 @@ function addOptRow(data) {
   _syncGroupTotals();
 }
 
-/** ★★ 정원(총인원·일건수) 잠금 — **수정 모드 + 옵션 없는 작업**에서만 켠다.
- *  왜: 이 표의 총인원·일건수는 **캠페인 정원(recruit_total·daily_limit)의 파생 입력**인데,
- *  옵션 없는 작업은 원장(campaign_options)이 비어 있어 표를 **작업내용 상품 원문에서 다시
- *  파싱해** 만든다. 상품 원문이 두 줄 이상이면 파싱 결과에 인원이 없어 0(무제한)으로 떨어지고,
- *  그대로 저장하면 **총 200건이 무제한으로, 일건수가 엉뚱한 값으로 리셋**된다(실측 재현).
- *  정원의 진실원본은 [📅 모집인원 조절](차수·날짜별 계획)이므로, 수정 화면에서는 **읽기 전용**으로
- *  보여주기만 하고 저장에도 싣지 않는다(미전송 = 서버 COALESCE 유지).
- *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 오므로 파생이 정확 — 종전대로 편집 가능.
- *  ★ 신규 발행은 여기가 초도 정원을 정하는 유일한 창구라 잠그지 않는다. */
-/** ★★ 정원(총인원·일건수) 잠금 — **수정 모드 + 옵션 없는 작업**에서 켠다.
- *  사용자 확정(2026-08-19): 총인원·일건수는 **작업오더에서 받은 값 그대로 고정**하고,
- *  조절은 [📅 모집인원 조절]에서 **총건수가 지켜지는 범위 안에서만** 한다.
- *  왜 잠그나: 이 표의 두 칸은 캠페인 정원(recruit_total·daily_limit)의 **파생 입력**인데,
- *  옵션 없는 작업은 옵션 원장이 비어 있어 표를 작업내용 상품 원문에서 **다시 파싱**해 만든다.
- *  원문이 두 줄 이상이면 인원이 0(무제한)으로 떨어지고 그대로 저장돼 **총 200건이 리셋**됐다(실측).
- *  ★ 해제 버튼은 두지 않는다 — 창구가 둘이면 같은 사고가 그 문으로 다시 들어온다.
- *  ★ 신규 발행은 초도 정원을 정하는 유일한 창구라 잠그지 않는다.
- *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 와 파생이 정확하고, 옵션별 정원은
- *    [📅 인원]에서 바꿀 수 없다(잠그면 막다른 길) — 종전대로 편집 가능. */
-function _rfQuotaLocked() { return !!_recruitEditId && _prodMode() !== "opt"; }
+/** ★★ 정원(총인원·일건수)은 **수정 화면에서도 고칠 수 있다** (사용자 확정 2026-08-19 오후).
+ *  종전엔 이 두 칸을 읽기 전용으로 잠갔는데(작업오더 값 고정), 실제 운영에서는 초도 세팅이
+ *  잘못 들어온 공고를 여기서 바로잡아야 했다 → **잠금을 풀고 경고만 남긴다**.
+ *  ★ 대신 두 가지 안전장치는 그대로다: ① 프리필이 캠페인 원장 값을 첫 행에 싣는다
+ *    ② **수정 모드에서는 표의 합계로 다시 만들지 않고 첫 행 값을 그대로 쓴다**
+ *    (합계 규칙은 "하나라도 0이면 무제한"이라 상품 줄이 둘 이상이면 총량이 0 으로 리셋됐다 — 실사고).
+ *  ★ 차수(물량 추가)가 있는 공고는 서버가 recruit_total 직접 수정을 무시한다(roundsLockRecruitTotal). */
+function _rfQuotaNotice() { return !!_recruitEditId && _prodMode() !== "opt"; }
 
-/** 잠금 안내 줄 — "무엇이 고정됐는지 · 어디서 바꾸는지"를 문장으로 말한다(막다른 길 금지) */
+/** 경고 줄 — "함부로 고치지 말 것 · 조절은 [📅 인원]에서"를 문장으로 말한다(막지는 않는다) */
 function _syncQuotaLockUi() {
   const box = document.getElementById("rf_quota_lock");
   if (!box) return;
-  if (!_rfQuotaLocked()) { box.hidden = true; box.textContent = ""; return; }
+  if (!_rfQuotaNotice()) { box.hidden = true; box.textContent = ""; return; }
   const num = (v) => Number(v || 0);
   const rt = num(document.getElementById("rf_recruit_total")?.value);
   const dl = num(document.getElementById("rf_daily_limit")?.value);
   const fmt = (v, zero) => (v > 0 ? v.toLocaleString() + "명" : zero);
   box.hidden = false;
   box.innerHTML =
-    '<b>🔒 총인원 · 일건수는 작업오더 값으로 고정됩니다</b>' +
+    '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
     '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
-    '<span>조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 날짜별로 나눠 담습니다. ' +
-    '이 화면에서 저장해도 두 값은 바뀌지 않습니다.</span>';
+    '<span>날짜별 조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 나눠 담습니다.</span>';
 }
 
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
@@ -1970,15 +1958,11 @@ function _buildOptRowEl(data) {
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
   row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
-  /* ★ 정원 잠금(수정 + 옵션 없는 작업) — 표시만 하고 편집·저장 대상에서 뺀다 */
-  if (_rfQuotaLocked()) {
+  /* ★ 수정 모드에서는 편집은 열어 두되, 초기 세팅값임을 칸에서도 알린다(경고 전용) */
+  if (_rfQuotaNotice()) {
     [".rf-opt-rt", ".rf-opt-dl"].forEach(sel => {
       const el = row.querySelector(sel);
-      if (!el) return;
-      el.readOnly = true;
-      el.tabIndex = -1;
-      el.classList.add("rf-locked");
-      el.title = "총인원·일건수는 [📅 인원](모집인원 조절)에서 바꿉니다";
+      if (el) el.title = "초기 작업 세팅값입니다 — 함부로 수정하지 마세요. 날짜별 조절은 [📅 인원]에서 합니다";
     });
   }
   if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
@@ -2156,7 +2140,14 @@ function _syncPreviewFromOptRows() {
   /* ★★ 잠금 상태에서는 캠페인 정원을 표에서 다시 만들지 않는다 —
      옵션 없는 작업의 표는 상품 원문 파싱본이라 인원이 0으로 떨어질 수 있고,
      그 0 이 그대로 저장되면 총량이 '무제한'으로 리셋된다(이번 사고). */
-  if (!_rfQuotaLocked()) {
+  if (_rfQuotaNotice()) {
+    /* ★★ 수정 모드(옵션 없는 작업) — 캠페인 정원은 **첫 행 칸이 곧 그 값**이다.
+       합계 규칙("하나라도 0이면 무제한")을 쓰면 상품 줄이 둘 이상일 때 총량이 0(무제한)으로
+       리셋된다(실사고). 사람이 첫 행에서 고친 값은 그대로 저장된다. */
+    const head = live[0] || rows[0] || {};
+    if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
+    if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+  } else {
     if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
     if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
   }
@@ -2523,6 +2514,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _pp = document.getElementById("rf_product_preview"); if (_pp) _pp.style.display = "none";
   document.getElementById("rf_channel_custom").style.display = "none";
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
+  /* ★ 버튼군의 hidden 값도 함께 되돌린다 — 강조만 지우면 지난 공고의 값(예 'mixed')이
+     남아, 리뷰타입을 안 실은 신규 발행에서 혼합 입력칸이 빈 채로 켜져 저장이 막힌다.
+     편집·작업오더 프리필은 이 뒤에서 다시 고르므로 기존 동작은 그대로다. */
+  _rfPickBtn("review_type", "");
   _refreshBadgeWrap();
   document.getElementById("rf_linked_tab_info").style.display = "none";
   /* 🔗 연결 탭 안내·추천 초기화 — 지난번 공고의 사유가 새 모달에 남지 않게 */
@@ -2542,7 +2537,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
-  document.querySelectorAll('#rf_review_mix [data-mix-type]').forEach((el) => { el.value = '0'; });
+  // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
+  //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
+  resetRecruitReviewMixRender();
   syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
@@ -3005,18 +3002,39 @@ function _reviewMixTotalLabel(sum, expected, optionMode) {
     : `합계 ${sum}명 / 총모집인원 ${expected}명`;
 }
 
+/** 이 카드가 맞춰야 하는 인원 — 전역(옵션 없는 작업)은 총모집인원, 옵션 모드는 그 옵션의 인원.
+ *  ★ 기준값의 단일 출처다. 카드를 만든 시점 값(dataset.expected)을 그대로 재사용하면
+ *    총인원이 바뀌거나 다른 공고를 열었을 때 "합계 0명 / 총모집인원 500명"처럼
+ *    화면과 저장 검증(validateRecruitReviewTypeMix)이 서로 다른 기준을 말한다(실측 사고). */
+function _reviewMixExpectedFor(rows, optionMode, index) {
+  if (optionMode) return Math.max(0, Number(rows[index]?.querySelector('.rf-opt-rt')?.value) || 0);
+  return Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
+}
+
+/** 혼합 카드의 렌더 캐시를 비운다 — 모달 DOM 은 페이지당 한 번만 마운트돼 재사용되므로
+ *  캐시를 지우지 않으면 다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남는다. */
+function resetRecruitReviewMixRender() {
+  const root = document.getElementById('rf_review_mix_rows');
+  if (!root) return;
+  delete root.dataset.signature;
+  root.innerHTML = '';
+}
+
 function renderRecruitOptionReviewMix() {
   const root = document.getElementById('rf_review_mix_rows');
   if (!root) return;
   const optionMode = _isOptionReviewMix();
   const rows = optionMode ? _reviewMixRows() : [];
+  /* ★ 지문에 기준 인원을 포함한다 — 종전 전역 지문은 상수 'global' 이라
+     총인원이 바뀌어도 카드가 다시 그려지지 않았다(기준값 고착). */
   const signature = optionMode
     ? rows.map((row, index) => `${index}:${row.querySelector('.rf-opt-name')?.value || ''}:${row.querySelector('.rf-opt-rt')?.value || 0}`).join('|')
-    : 'global';
+    : `global:${_reviewMixExpectedFor(rows, optionMode, -1)}`;
   if (root.dataset.signature === signature) {
     root.querySelectorAll('[data-rf-review-mix-card]').forEach((box) => {
       const sum = Array.from(box.querySelectorAll('[data-mix-type]')).reduce((total, input) => total + (Number(input.value) || 0), 0);
-      const expected = Number(box.dataset.expected) || 0;
+      const expected = _reviewMixExpectedFor(rows, optionMode, Number(box.dataset.rfReviewMixCard));
+      box.dataset.expected = String(expected);
       const total = box.querySelector('.mixed-review-total');
       if (total) {
         total.textContent = _reviewMixTotalLabel(sum, expected, optionMode);
@@ -3032,13 +3050,13 @@ function renderRecruitOptionReviewMix() {
     row,
     index,
     label: String(row.querySelector('.rf-opt-name')?.value || '').trim() || '옵션명 입력 필요',
-    expected: Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0),
+    expected: _reviewMixExpectedFor(rows, optionMode, index),
     mix: _readOptionReviewMix(row),
   })) : [{
     row: null,
     index: -1,
     label: '전체 모집',
-    expected: Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0),
+    expected: _reviewMixExpectedFor(rows, optionMode, -1),
     mix: window._rfGlobalReviewTypeMix || [],
   }];
 
@@ -3553,19 +3571,42 @@ function _srcWords(sheetless) {
 /** 확정으로 안 잡힌 줄 목록 — "몇 행의 누구"인지 바로 짚어준다.
  *  ★ 캠페인 정원은 '위치'가 아니라 '숫자'(총원 − 확정)로 계산된다. 이 목록은 그 차이가
  *    시트의 어느 줄에서 비롯됐는지 찾아주는 것이지, 시스템이 그 줄을 비었다고 보는 게 아니다. */
-function _campUnmatchedRows(list, w) {
+function _campUnmatchedRows(list, w, counts, diff) {
   if (!Array.isArray(list) || !list.length) return "";
   w = w || _srcWords(false);
   const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const items = list.slice(0, 30).map(u =>
-    `<span style="display:inline-block;background:#fff;border:1px solid #FDE68A;border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
-    + `<b>${u.row != null ? u.row + "행" : "행?"}</b> ${esc(u.name) || "(이름 없음)"}`
-    + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
-    + `</span>`).join("");
+  /* ★★ 한 덩어리로 보여주지 않는다 — 종류마다 **할 일이 다르다**.
+       ㉮ 홀드 이력 있음(만료·취소·지각) = 만료·취소 목록에서 찾아 [수동확정]할 수 있는 유일한 갈래
+       ㉯ 홀드 없음 + 주문 있음 = 공고를 거치지 않은 정상 제출 → **조치 불필요**(만료·취소 목록에 없다)
+       ㉰ 홀드도 주문도 없음 = 직원이 직접 적은 줄인지 확인
+     종전엔 셋을 섞어 놓고 전부 "[수동확정]하세요"라고 안내해, 목록에 없는 건을 찾게 만들었다. */
+  const kindOf = u => (u.hasHold ? "hold" : (u.hasOrder ? "order" : "none"));
+  const TONE = { hold: ["#FFFBEB", "#FDE68A", "#92400E"], order: ["#F9FAFB", "#E5E7EB", "#6B7280"], none: ["#FEF2F2", "#FECACA", "#B91C1C"] };
+  const chip = u => {
+    const t = TONE[kindOf(u)] || TONE.hold;
+    return `<span style="display:inline-block;background:${t[0]};border:1px solid ${t[1]};color:${t[2]};border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
+      + `<b>${u.row != null ? u.row + "행" : "행?"}</b> ${esc(u.name) || "(이름 없음)"}`
+      + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
+      + `</span>`;
+  };
+  const items = list.slice(0, 30).map(chip).join("");
+  /* ★ 건수는 **서버가 준 값만** 쓴다(목록은 30건 상한이라 화면에서 세면 항상 30에서 멈춘다).
+     ★ 없으면(구버전 백엔드) 요약 줄 자체를 그리지 않는다 — 모르는 것을 0으로 꾸미지 않는다. */
+  const c = counts && typeof counts.total === "number" ? counts : null;
+  const line = (color, text) => `<div style="color:${color};font-size:.7rem">${text}</div>`;
+  const summary = !c ? "" : ""
+    + (c.hold > 0 ? line("#92400E", `· <b>${c.hold}건</b> — 참여 기록은 있는데 확정이 아닙니다(만료·취소·기구매). 만료·취소 목록에서 기구매(🛍) 건을 찾아 <b>[수동확정]</b>하세요.`) : "")
+    + (c.orderOnly > 0 ? line("#6B7280", `· <b>${c.orderOnly}건</b> — 공고를 거치지 않고 구매양식만 들어온 줄입니다(외부모집·직접 제출). <b>조치 불필요</b> — 만료·취소 목록에는 없습니다.`) : "")
+    + (c.neither > 0 ? line("#B91C1C", `· <b>${c.neither}건</b> — 참여 기록도 주문도 없습니다. 직원이 직접 입력한 줄인지 확인하세요.`) : "")
+    /* ★ 머리줄의 "차이"는 **줄 수 − 확정 수**라는 산수라 그대로 두고, 대조로 풀린 만큼을
+         여기서 밝힌다 — 두 숫자가 말없이 다르면 "왜 196인데 179만 나오나"가 된다. */
+    + (typeof diff === "number" && diff > c.total
+        ? line("#065F46", `· 나머지 <b>${diff - c.total}건</b>은 연락처가 달라도 <b>주문 기록·소유자 번호로 확정과 짝지어진</b> 줄입니다(타계정 참여·연락처 오타).`) : "");
   return `<div style="margin-top:5px">`
-    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 ${w.rows}</div>`
-    + items
-    + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">연락처(끝 8자리)로 대조합니다. 연락처가 비어 있는 행은 대조가 불가능해 항상 여기에 나옵니다.</div>`
+    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 ${w.rows}${c ? ` ${c.total}건` : ""}</div>`
+    + summary
+    + `<div style="margin-top:4px">${items}</div>`
+    + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">명의 연락처·소유자 연락처·주문 기록 세 가지로 대조합니다. 셋 다 짝이 없는 줄만 여기 나옵니다(연락처가 비어 있는 행은 대조가 불가능해 항상 나옵니다).</div>`
     + `</div>`;
 }
 
@@ -3585,8 +3626,8 @@ function _campSheetInfo(si) {
     parts.push(`<b>${w.roster}</b> ${si.rosterRows}행 · <b>확정</b> ${si.confirmed}건`
       + (diff > 0
         ? ` → <span style="color:#B45309;font-weight:800">차이 ${diff}건</span>`
-          + `<div style="color:#6B7280;font-size:.7rem">${w.src}에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
-          + _campUnmatchedRows(si.unmatched, w)
+          + `<div style="color:#6B7280;font-size:.7rem">${w.src}에는 자리가 있는데 확정으로 안 잡힌 건입니다. 아래에서 <b>종류별로</b> 할 일이 다릅니다.</div>`
+          + _campUnmatchedRows(si.unmatched, w, si.unmatchedCounts, diff)
         : diff < 0
           ? ` → <span style="color:#B45309;font-weight:800">확정이 ${-diff}건 더 많음</span>`
             + `<div style="color:#6B7280;font-size:.7rem">${w.behind}</div>`
@@ -4010,10 +4051,10 @@ async function saveRecruitPostImpl() {
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
       _syncPreviewFromOptRows();   // 표가 진실원본 — 저장 직전 파생값(상품 원문·정원) 최신화
-      /* ★★ 정원 잠금이면 총인원·일건수를 **아예 보내지 않는다**(미전송 = 서버 COALESCE 유지).
-         화면 잠금만으로는 부족하다 — 낡은 화면·파생 계산이 다시 0 을 만들어도 원장이 안 흔들린다.
-         변경 창구는 [📅 인원](차수·날짜별 조절) 하나. */
-      if (!_rfQuotaLocked()) {
+      /* ★★ 총인원·일건수는 이 화면에서도 고칠 수 있다(사용자 확정) — 고친 값이 그대로 저장된다.
+         0 리셋 방지는 위 파생(수정 모드 = 첫 행 값 그대로)과 프리필이 담당하고,
+         차수 있는 공고의 총모집은 서버가 무시한다(roundsLockRecruitTotal). */
+      {
         payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
         payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
         /* ★ 127: 블로그 공고의 일건수 정규화 — 표(진행상품)의 일건수가 비어도 총모집으로 채운다.

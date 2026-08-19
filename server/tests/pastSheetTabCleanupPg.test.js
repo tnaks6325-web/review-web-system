@@ -28,11 +28,15 @@ const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
 
 const DDL = `
 DROP TABLE IF EXISTS tab_configs, campaigns, order_submissions, recruit_campaigns,
-                     review_index, index_master, index_master_archive CASCADE;
+                     review_index, index_master, index_master_archive, raw_sheet_tabs CASCADE;
+CREATE TABLE raw_sheet_tabs (sheet_id text, tab_gid text, tab_name text, mirrored_at timestamptz DEFAULT NOW());
 CREATE TABLE tab_configs (
-  sheet_id text, tab_name text, tab_gid text, sheetless boolean DEFAULT FALSE,
+  sheet_id text, tab_name text, tab_gid text, campaign_name text, sheetless boolean DEFAULT FALSE,
   is_closed boolean DEFAULT FALSE, PRIMARY KEY (sheet_id, tab_name));
-CREATE TABLE campaigns (sheet_id text PRIMARY KEY, created_at timestamptz);
+-- ★★ 운영과 같은 제약: 한 시트에 여러 campaigns 행이 정상이다(UNIQUE(sheet_id, campaign_name)).
+--   픽스처가 sheet_id 를 PK 로 두면 **행 부풀리기 버그가 구조적으로 안 잡힌다**(실제로 놓쳤다).
+CREATE TABLE campaigns (sheet_id text, campaign_name text, created_at timestamptz,
+  UNIQUE (sheet_id, campaign_name));
 CREATE TABLE order_submissions (
   id serial PRIMARY KEY, sheet_id text, tab_name text, submitted_at timestamptz,
   deleted_at timestamptz, mirror_status text);
@@ -47,11 +51,14 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
 (async () => {
   await pool.query(DDL);
   const S = 'sheetA';
-  await pool.query(`INSERT INTO campaigns VALUES ($1, '2024-03-01')`, [S]);
+  // 한 시트에 campaigns 행 2개 — 시트 단위로 조인하면 그 시트의 모든 탭이 2배가 된다
+  await pool.query(`INSERT INTO campaigns VALUES ($1, '캠A', '2024-03-01')`, [S]);
+  await pool.query(`INSERT INTO campaigns VALUES ($1, '캠B', '2024-04-15')`, [S]);
   const mk = async (tab, opt = {}) => {
     await pool.query(
-      `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, sheetless, is_closed) VALUES ($1,$2,$3,$4,$5)`,
-      [S, tab, opt.gid || '', !!opt.sheetless, !!opt.closed]);
+      `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheetless, is_closed)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [S, tab, opt.gid || '', opt.campaign || '시트甲', !!opt.sheetless, !!opt.closed]);
     if (opt.startDate) await pool.query(
       `INSERT INTO review_index VALUES ($1,$2,1,$3)`, [S, tab, opt.startDate]);
     if (opt.orderAt) await pool.query(
@@ -81,6 +88,17 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   //   ⇒ "이미 아카이브"로 접으면 정리 대상이 조용히 사라진다(2026-08-19 「0개」 보고의 원인).
   await mk('리네임후_새이름', { startDate: '24.5.10', gid: '777' });
   await pool.query(`INSERT INTO index_master_archive VALUES ($1,'리네임전_옛이름','777')`, [S]);
+  // ★ 시트에서 이름이 바뀌었는데 tab_configs 는 옛 이름 — 마감 표시가 있어도 smartBuild 는
+  //   **시트의 현재 이름**으로 조회하므로 스킵이 빗나가 계속 읽는다(마감으로 못 멈춘다).
+  await mk('이름어긋남_옛', { startDate: '24.5.10', gid: '888', closed: true });
+  await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'888','이름어긋남_새')`, [S]);
+  // 대조군: 이름이 같으면 종전대로 조용하다
+  await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'4','이미마감')`, [S]);
+  // ★ 빈 껍데기: 시트의 현재 이름이 **이미 별도 행으로 등록**돼 있다 → 읽기는 그 행이 정하므로
+  //   이 행은 아무 일도 하지 않는다("지금도 읽습니다"에 세면 거짓).
+  await mk('유령_옛이름', { startDate: '24.5.10', gid: '999', closed: true });
+  await mk('유령_새이름', { startDate: '26.8.1', gid: '999b' });
+  await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'999','유령_새이름')`, [S]);
 
   // ── ① 스캔이 실제로 돈다 ─────────────────────────────────
   const scan = await svc.scanPastSheetTabs({ since: '2026-01-01' });
@@ -88,7 +106,7 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     [...scan.items, ...scan.holds].map(i => [i.tabName, i]));
   t('①: 스캔 SQL 이 진짜 PG 에서 실행되고 별칭이 맞는다', () => {
     assert.equal(scan.ok, true);
-    assert.equal(scan.total, 11, '탭 11개 (받음 ' + scan.total + ')');
+    assert.equal(scan.total, 14, '탭 14개 (받음 ' + scan.total + ')');
   });
   t('②: 판정이 5갈래로 갈린다', () => {
     assert.equal(by['과거_구매일2024'].reason, 'past');
@@ -98,9 +116,10 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
       '연도 없는 구매일 표기 → 등록일 폴백 → 닫지 않는다(진짜 PG 가 잡은 자리)');
     assert.equal(by['신호없음'].reason, 'weak_signal');
     // 이미 안 읽는 탭은 목록에 싣지 않고 **건수로** 말한다(payload 절약 + 조용한 누락 금지)
-    assert.equal(scan.alreadyQuiet, 3, '이미 조용한 탭 3개 (받음 ' + scan.alreadyQuiet + ')');
+    // 무시트·마감·아카이브 3개 + 빈 껍데기 1개(읽지 않는다)
+    assert.equal(scan.alreadyQuiet, 4, '이미 조용한 탭 4개 (받음 ' + scan.alreadyQuiet + ')');
     assert.equal(scan.quietBy.already_sheetless, 1);
-    assert.equal(scan.quietBy.already_closed, 1);
+    assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감만 조용하다');
     assert.equal(scan.quietBy.already_archived, 1);
   });
   t('②b: 구매일 신호가 우선 — 시트 등록일(2024)로 최근 작업을 과거로 몰지 않는다', () => {
@@ -115,12 +134,14 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   });
   t('③b: "지금도 읽히는 탭"과 "이미 안 읽는 탭"을 구분해 센다', () => {
     // 무시트·아카이브·마감 3개를 뺀 7개가 지금도 읽힌다
-    assert.equal(scan.stillReading, 8, 'stillReading (받음 ' + scan.stillReading + ')');
+    // ★ 유령 행은 읽는 것으로 세지 않는다(+1 은 '유령_새이름' = 최근 활동)
+    assert.equal(scan.stillReading, 10, 'stillReading (받음 ' + scan.stillReading + ')');
     assert.equal(scan.candidates, 3, '후보 3개 (받음 ' + scan.candidates + ')');
-    assert.equal(scan.heldBy.recent, 1);
+    assert.equal(scan.heldBy.recent, 2, "최근 2개('최근_2026' + '유령_새이름')");
     assert.equal(scan.heldBy.weak_signal, 2, '등록일만으로는 닫지 않는다');
     assert.equal(scan.heldBy.pending_orders, 1);
     assert.equal(scan.heldBy.active_campaign, 1);
+    assert.equal(scan.heldBy.name_drift, 1, '이름 어긋남은 후보가 아니라 사유로 말한다');
   });
 
   // ── ④ 닫기 ───────────────────────────────────────────────
@@ -138,6 +159,25 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     assert.equal(by['리네임후_새이름'].archivedGidOnly, true, '옛 이름 마커는 건수로만 말한다');
     assert.equal(scan.archivedByGidOnly, 1);
     assert.equal(scan.quietBy.already_archived, 1, '진짜 아카이브만 1건(이름 일치)');
+  });
+
+  t('③d: 시트에서 이름이 바뀐 마감 탭은 조용하지 않다(RAW 미러 조인 — 진짜 PG 로만)', () => {
+    const d = by['이름어긋남_옛'];
+    assert.equal(d.reason, 'name_drift');
+    assert.equal(d.reads, true, '마감 표시가 있어도 새 이름으로 읽힌다');
+    assert.equal(d.candidate, false, '마감해도 안 멈추므로 후보로 올리지 않는다');
+    assert.equal(d.liveTabName, '이름어긋남_새', '시트의 현재 이름을 말해 준다');
+    assert.equal(d.campaignName, '시트甲', '어느 시트인지 함께 말한다(같은 탭 이름 구분)');
+    // ★ 조용한 탭은 목록에 싣지 않고 건수로만 말한다 — `by` 에서 찾으면 안 된다
+    assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감은 종전대로 조용하다');
+  });
+
+  t('③e: 새 이름이 이미 등록된 행은 읽는 것으로 세지 않고 목록으로 준다', () => {
+    assert.equal(scan.ghosts.length, 1, '빈 껍데기 1개 (받음 ' + scan.ghosts.length + ')');
+    assert.equal(scan.ghosts[0].tabName, '유령_옛이름');
+    assert.equal(scan.ghosts[0].liveTabName, '유령_새이름');
+    assert.ok(!by['유령_옛이름'], '읽는 목록(items/holds)에는 없다');
+    assert.equal(scan.quietBy.ghost_row, 1, '조용한 쪽으로 센다');
   });
 
   t('④: 미리보기는 쓰지 않는다', () => {

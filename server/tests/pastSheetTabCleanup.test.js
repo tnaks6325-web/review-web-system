@@ -122,6 +122,9 @@ const ROWS = [
   { sheetId: 's', tabName: '이미마감', tabGid: '4', sampleStartDate: '24.5.1', isClosed: true },
   // 이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 탭 — smartBuild 는 새 이름으로 계속 읽는다
   { sheetId: 's', tabName: '리네임후', tabGid: '5', sampleStartDate: '24.5.1', archivedGidOnly: true },
+  // 마감인데 보관 기록만 옛 이름 — 읽히지 않으므로 gid-only 건수에 **세면 안 된다**
+  { sheetId: 's', tabName: '마감_gid만', tabGid: '6', sampleStartDate: '24.5.1',
+    archivedGidOnly: true, isClosed: true },
 ];
 
 (async () => {
@@ -131,18 +134,20 @@ const ROWS = [
   t('4a: 스캔은 읽기 전용 — 커넥션도 잡지 않고 쓰기 쿼리 0', () => {
     assert.equal(scan.candidates, 3);
     assert.equal(scan.stillReading, 4);
-    assert.equal(scan.alreadyQuiet, 1, '이미 조용한 탭 건수를 말한다');
+    assert.equal(scan.alreadyQuiet, 2, '이미 조용한 탭 건수를 말한다');
     assert.equal(p1.connects, 0, '읽기에 커넥션 불필요');
     // ★ `deleted_at IS NULL` 이 /DELETE/i 에 걸린다 — **문장 형태**로 본다(낱말 검사 금지)
     assert.ok(!p1.q.some(x => /\b(UPDATE\s+\w|INSERT\s+INTO|DELETE\s+FROM)/i.test(x.s)), '쓰기 쿼리 0');
   });
   t('4b: 후보가 아닌 사유를 건수로 말한다(조용한 누락 금지)', () => {
     assert.equal(scan.heldBy.recent, 1);
-    assert.equal(scan.quietBy.already_closed, 1);
+    assert.equal(scan.quietBy.already_closed, 2);
   });
   t('4c: 리네임 탭 건수를 응답이 실제로 싣는다(문자열 존재가 아니라 실행으로)', () => {
     // ★ SRC 에 이름이 있는지만 보면 **주석**이 대신 통과시킨다(변이시험 실측)
     assert.equal(scan.archivedByGidOnly, 1, '받음 ' + scan.archivedByGidOnly);
+    // ★★ 안 읽히는 탭까지 세면 "여전히 읽습니다"가 거짓이 된다(2026-08-19 실측 6개)
+    assert.ok(!scan.items.some(i => !i.reads), '후보는 전부 읽히는 탭');
     assert.ok(scan.items.some(i => i.tabName === '리네임후'), '아카이브로 접지 않고 후보로');
   });
 
@@ -258,6 +263,43 @@ const ROWS = [
     assert.ok(/catch\s*\(e\)\s*\{[\s\S]{0,400}다시 시도/.test(body), '예외 시 사유 + 다시 시도');
   });
 
+  /* ── 3g) 이름 어긋남 = 마감·아카이브 스킵이 빗나간다 ────── */
+  t('3g: 시트 탭 이름이 바뀌면 마감·아카이브여도 읽힌다(마감으로 못 멈춘다)', () => {
+    // smartBuild 의 tcMap/archivedSet 은 둘 다 sheet_id||tab_name 키다(gid 미참조)
+    const IB = R('server/src/services/indexBuilder.service.js');
+    assert.ok(/tcMap\[`\$\{r\.sheet_id\}\|\|\$\{r\.tab_name\}`\]/.test(IB), 'tcMap 키 = 이름');
+    assert.ok(/const key = `\$\{sheetId\}\|\|\$\{t\.properties\.title\}`/.test(IB),
+      '조회는 **시트의 현재 탭 이름**으로 한다 = 등록명이 다르면 빗나간다');
+    for (const flag of ['isClosed', 'isArchived']) {
+      const r = cls({ [flag]: true, liveTabName: '바뀐이름', sampleStartDate: '24.5.1' });
+      assert.equal(r.reads, true, flag + ': 여전히 읽힌다');
+      assert.equal(r.reason, 'name_drift');
+      assert.equal(r.candidate, false, '★ 마감해도 안 멈추므로 후보로 올리지 않는다(죽은 조작 금지)');
+    }
+    // 이름이 같으면 종전대로 조용하다(무회귀)
+    assert.equal(cls({ isClosed: true, liveTabName: 'T' }).reason, 'already_closed');
+    // 무시트는 gid 폴백이 있어(sheetlessScope) 이름이 바뀌어도 유효
+    assert.equal(cls({ sheetless: true, liveTabName: '바뀐이름' }).reason, 'already_sheetless');
+  });
+
+  t('4d: 행을 부풀리는 조인이 없다 — 탭 하나에 결과 한 줄', () => {
+    // ★★ `campaigns` 는 UNIQUE(sheet_id, campaign_name) 이라 **한 시트에 여러 행**이 정상이다.
+    //   시트 단위 JOIN 이면 그 시트의 **모든 탭이 배수**가 되어 총계·목록이 부푼다
+    //   (2026-08-19 실측: 화면에 같은 줄 2개, 진짜 PG 로 12→24 재현).
+    // ★ 낱말로 찾으면 **주석 문장**이 대신 걸린다(이 레포 상습 함정) — 문장 형태로 본다.
+    //   블록 주석을 정규식으로 지우는 방법은 금지(정규식 리터럴을 물어 파일을 통째로 먹는다).
+    assert.ok(!/^\s*(LEFT\s+)?JOIN\s+campaigns\b/im.test(SRC),
+      'campaigns 를 조인하지 않는다(스칼라 서브쿼리로 읽는다)');
+    assert.ok(/SELECT MIN\(c\.created_at\) FROM campaigns c/.test(SRC.replace(/\s+/g, ' ')),
+      '등록일은 시트 단위 최솟값 — 반영 점검과 같은 형태');
+    // 다른 LATERAL 들은 전부 집계/LIMIT 1 이라 행을 늘리지 않는다
+    const laterals = SRC.match(/LEFT JOIN LATERAL \(([\s\S]*?)\) \w+ ON TRUE/g) || [];
+    assert.ok(laterals.length >= 4, 'LATERAL 개수 (받음 ' + laterals.length + ')');
+    for (const l of laterals) {
+      assert.ok(/COUNT\(|MAX\(|MIN\(|LIMIT 1/.test(l), '행을 늘리지 않는 LATERAL: ' + l.slice(0, 60));
+    }
+  });
+
   /* ── 8d) 아카이브 판정 = smartBuild 와 같은 규칙 ─────────
    *  이 판정은 "그 탭이 무엇인가"가 아니라 **"저쪽(smartBuild)이 읽는가"** 다.
    *  더 넓게 잡으면(gid 폴백) 이름이 바뀐 탭이 "이미 안 읽음"으로 접혀 **정리 대상이 사라진다**
@@ -280,6 +322,76 @@ const ROWS = [
     assert.equal(c.reason, 'past', '정상 판정을 거쳐 후보가 된다');
     assert.equal(c.archivedGidOnly, true, '표식을 실어 건수로 말할 수 있게');
     assert.ok(/archivedByGidOnly/.test(SRC), '스캔 응답에 건수 동봉(조용한 변화 금지)');
+  });
+
+  t('8f: 이름 어긋난 탭을 목록으로 보여준다(건수만으로는 고칠 수 없다)', () => {
+    assert.ok(/function _ptDriftBlock/.test(FE), '목록 렌더러');
+    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    assert.ok(/\$\{_ptDriftBlock\(r\)\}/.test(rd), '렌더가 실제로 그린다');
+    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
+    assert.ok(/reason\s*===\s*'name_drift'/.test(b), '서버가 준 사유로 고른다(판정 사본 0)');
+    assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b),
+      '★ 탭명은 시트발 외부 문자열 — 반드시 escape');
+    // 어긋남이 없어도 **빈 껍데기 행은 보여준다**(그쪽도 사람이 알아야 한다)
+    assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(b), '없으면 빈 껍데기 블록만');
+    assert.ok(/sync-tab-names/.test(b), '고칠 곳을 말한다');
+    assert.ok(/index_master_archive/.test(b), '그 도구가 못 고치는 것까지 말한다(조용한 누락 금지)');
+  });
+  t('8f-2: 두 표 모두 시트를 함께 적는다 + 헤더 칸 수 ≡ 행 칸 수', () => {
+    // ★ tab_configs 는 UNIQUE(sheet_id, tab_name) 이라 **다른 시트에 같은 탭 이름**이 있을 수 있다
+    //   (시트 복사본이 흔하다) — 시트를 안 적으면 똑같아 보이는 줄이 여럿 생겨
+    //   어느 것을 고르는지 알 수 없다(2026-08-19 실측 4줄). 체크박스 표에서는 오조작이 된다.
+    assert.ok(/campaignName/.test(SRC), '서버가 시트명을 싣는다');
+    const drift = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
+    const rend = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    for (const [name, body] of [['drift', drift], ['candidates', rend]]) {
+      assert.ok(/esc\((h|it)\.campaignName/.test(body), name + ': 시트를 그린다(escape)');
+      const th = (body.match(/<th[ >]/g) || []).length;
+      const td = (body.match(/<td[ >]/g) || []).length;
+      assert.equal(th, td, name + ': 헤더 칸 수 ≡ 행 칸 수 (th ' + th + ' / td ' + td + ')');
+    }
+  });
+  t('3h: 새 이름이 이미 등록된 행은 아무 일도 하지 않는다 — 읽는 것으로 세지 않는다', () => {
+    // smartBuild 는 **시트의 현재 이름**으로 tcMap 을 찾으므로(indexBuilder:548) 읽기 여부는
+    // 새 이름 행이 정한다. 옛 이름 행은 빈 껍데기다 — "지금도 읽습니다"에 세면 거짓이 된다.
+    const IB = R('server/src/services/indexBuilder.service.js');
+    assert.ok(/const tc = tcMap\[key\]/.test(IB) && /if \(tc && tc\.is_closed\)/.test(IB),
+      '읽기 판정은 그 키의 tc 가 한다');
+    const g = cls({ isClosed: true, liveTabName: '새이름', liveNameRegistered: true });
+    assert.equal(g.reason, 'ghost_row');
+    assert.equal(g.reads, false, '★ 읽는 것으로 세지 않는다');
+    assert.equal(g.candidate, false);
+    // 등록돼 있지 않으면 종전대로 name_drift(읽힌다)
+    assert.equal(cls({ isClosed: true, liveTabName: '새이름' }).reason, 'name_drift');
+  });
+  t('8f-3: 빈 껍데기 행은 따로 보여주고 조치를 다르게 말한다', () => {
+    assert.ok(/liveNameRegistered/.test(SRC), '서버가 판정을 싣는다');
+    assert.ok(/ghosts: items\.filter\(i => i\.reason === 'ghost_row'\)/.test(SRC),
+      '건수만이 아니라 목록을 준다(어느 행인지 알아야 지운다)');
+    const b = FE.slice(FE.indexOf('function _ptGhostBlock'), FE.indexOf('function _ptRender'));
+    assert.ok(/r\.ghosts/.test(b) && /if\(!g\.length\) return ''/.test(b), '없으면 안 그린다');
+    assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b), 'escape');
+    assert.ok(/그대로 두셔도 됩니다/.test(b), '읽기에 영향 없음을 말한다');
+    assert.ok(/탭명 교정으로는 고칠 수 없고/.test(b), '되지 않는 조치를 시키지 않는다');
+    // 어긋남 목록이 비어도 빈 껍데기는 보여준다
+    const d = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
+    assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(d), '어긋남 0건이어도 표시');
+  });
+  t('9-sync: 탭명 교정이 마감·아카이브 탭의 gid 를 tab_configs 에서도 찾는다', () => {
+    // ★ auto-clean-closed 가 index_master 행을 지우므로 im.tab_gid 만 보면 gid 가 null →
+    //   그 탭의 리네임을 영영 못 잡는다("GID 없음 + 시트에 해당 탭명 없음"으로 스킵).
+    //   (2026-08-19 실측: 본섭 미리보기 「변경 0건 · 스킵 27건」 — 3건이 그 안에 묻혔다)
+    const TC = R('server/src/routes/tabconfig.routes.js');
+    const q = TC.slice(TC.indexOf("router.post('/sync-tab-names'"), TC.indexOf('2. 고유 sheet_id'));
+    assert.ok(/COALESCE\(NULLIF\(im\.tab_gid, ''\), NULLIF\(tc\.tab_gid, ''\)\)\s+AS tab_gid/.test(q),
+      'index_master 우선 · tab_configs 폴백');
+  });
+  t('8g: 「정리 대상에 포함」이라고 말하지 않는다(후보가 0일 수 있다)', () => {
+    const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
+    const i = rd.indexOf('archivedByGidOnly');
+    assert.ok(i > 0);
+    assert.ok(!/정리 대상에 포함/.test(rd.slice(i, i + 220)),
+      '읽히지만 후보가 아닌 탭이 있으므로 "포함"은 거짓이 될 수 있다(2026-08-19 실측)');
   });
 
   /* ── 9) 연도 확인 먼저 (사용자 확정 2026-08-19) ─────────

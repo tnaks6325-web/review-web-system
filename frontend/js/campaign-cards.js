@@ -194,6 +194,15 @@
       .pcard .pg-row{display:flex;justify-content:space-between;align-items:baseline;font-size:.66rem}
       .pcard .pg-lb{color:#6B7280;font-weight:700}
       .pcard .pg-vl{font-weight:800;font-variant-numeric:tabular-nums;color:#111827}
+      /* 게이지 줄 오른쪽 = [값][↗ 작업보드]. pg-row 는 space-between 2칸이라 ↗ 을 세 번째
+         자식으로 넣으면 값이 가운데로 밀린다 → 오른쪽 둘을 한 묶음으로 감싼다.
+         ★ 이 블록은 템플릿 리터럴 안이다 — 주석에 백틱·달러중괄호를 쓰면 CSS 가 그 자리에서
+           끊기고 뒤가 JS 로 파싱된다(실측: ReferenceError). */
+      .pcard .pg-rt{display:flex;align-items:baseline;gap:5px;min-width:0}
+      .pcard .pgwb{flex:0 0 auto;align-self:center;border:1px solid #D3DAE6;background:#fff;color:#2563EB;
+        border-radius:6px;font-size:.62rem;font-weight:900;line-height:1;padding:2px 5px;cursor:pointer}
+      .pcard .pgwb:hover{background:#EFF4FF;border-color:#A9C2F5}
+      .pcard .pgwb[disabled]{opacity:.35;cursor:default;color:#6B7280}
       .pcard .pg-vl b{color:#1b64da;font-size:.86rem}
       .pcard .pgauge.full .pg-vl b{color:#B45309}
       .pcard .pg-carry{display:inline-block;margin-right:5px;padding:1px 5px;border-radius:5px;
@@ -426,6 +435,24 @@
     return `<div class="prounds">${chips}<span>총 ${conf}/${total}</span></div>`;
   }
 
+  /** ↗ 작업보드 바로가기(새 탭) — 관리자 카드의 게이지 줄 오른쪽.
+   *  ★ 재료는 이미 카드에 있는 연결 탭(linked_*) 뿐이고, 이동은 리뷰어 로그가 쓰는 딥링크
+   *    (`workdesk.html#go={s,t,g}&sso=`) 재사용이라 **서버 변경 0**이다.
+   *  ★ 작업표가 아직 없는 공고는 **비활성 + 사유**(눌러도 아무 일 없는 버튼을 두지 않는다).
+   *  ★ 리뷰어 카드에는 그리지 않는다 — 호출부가 admin 분기 안에서만 부른다. */
+  function _worktableBtn(c) {
+    const stop = 'event.stopPropagation();event.preventDefault();';
+    const linked = !!(c && c.linked_sheet_id && c.linked_tab_name);
+    if (!linked) {
+      return '<button type="button" class="pgwb" disabled title="이 공고에 연결된 작업표가 아직 없습니다 — 접수 또는 첫 주문 때 만들어집니다">↗</button>';
+    }
+    if (!_realAdminTok()) {
+      return '<button type="button" class="pgwb" disabled title="작업보드는 관리자 로그인이 필요합니다">↗</button>';
+    }
+    return `<button type="button" class="pgwb" onclick="${stop}CampCards.openWorkdesk('${_esc(c.id)}')"
+      title="작업보드를 새 탭으로 열기 — ${_esc(c.linked_tab_name)}">↗</button>`;
+  }
+
   function _adminActions(c) {
     const id = _esc(c.id);
     const stop = 'event.stopPropagation();event.preventDefault();';
@@ -653,6 +680,8 @@
       ? `<div class="pgauge${pubFull ? ' full' : ''}"${todayFilled != null ? ` title="작업표에 오늘 채워진 줄 ${pubN}명 / 오늘 정원 ${quota}명 · 공고를 거쳐 확정된 건 ${today}명"` : ''}><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${pubN}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pubPct}%"></div></div></div>`
       : '';
     if (admin) {
+      // ↗ 작업보드 바로가기 — 게이지 유무·상태와 무관하게 **같은 자리**에 둔다(두 갈래 공용 조각)
+      const wbBtn = _worktableBtn(c);
       // 관리자 게이지 = 같은 자리에 확정/진행중을 나눠 담는다(리뷰어는 단색 1구간).
       //   진행중 = 유효 홀드 = 지금 15분 타이머를 안고 구매 중인 사람 → 가장 시간에 민감한 값.
       const holdNow = (c.ops && Number(c.ops.holdNow)) || 0;
@@ -698,7 +727,7 @@
             + (shownN !== confirmedN ? ` · 공고를 거쳐 확정된 건 ${confirmedN}명 — 차이 ${Math.abs(shownN - confirmedN)}명은 지각 참여 확정 대기 또는 수기 입력일 수 있습니다` : '')
           : `공고 기준(표 기준으로 세지 못했습니다) — 확정 ${confirmedN}명 · 진행중 ${holdNow}명`;
         gauge = `<div class="pgauge${shownFull ? ' full' : ''}" title="${_esc(gapTip)}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${chips}<b>${shownN}</b> / ${quota}명${shownFull ? ' 완료' : ''}</span></div>
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-rt"><span class="pg-vl">${chips}<b>${shownN}</b> / ${quota}명${shownFull ? ' 완료' : ''}</span>${wbBtn}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
           <div class="pg-key"><span><i class="sub"></i>${todayFilled != null ? '표' : '확정'} <b>${shownN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;
@@ -707,7 +736,7 @@
         //   — 종전엔 게시된 공고에도 "게시 전"이라고 적어 미게시로 오해됐다.
         const z = _zeroQuotaNote(c, isPre, isDraft);
         gauge = `<div class="pgauge">
-          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-vl">${chips}<span style="color:#B6BDC9">${z.label}</span></span></div>
+          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-rt"><span class="pg-vl">${chips}<span style="color:#B6BDC9">${z.label}</span></span>${wbBtn}</span></div>
           <div class="pg-track"></div>
           <div class="pg-key"><span style="color:#B6BDC9">${z.desc}</span></div>
         </div>`;
@@ -1283,22 +1312,63 @@
     };
   }
 
+  /** 연결 탭 문맥 보충 — 캐시에 없으면 관리자 조회로 채운다(수동제출·작업보드 바로가기 공용).
+   *  ★ 화면마다 도달 가능한 경로가 다르다: 리뷰웹시스템[3버전]은 `/api/trackb/campaigns/:id`,
+   *    관리자 대시보드는 공개 `/api/campaign/:id` + admin JWT(그 경로가 admin 이면 전체 행을 준다).
+   *    `_campAdminBase()+'/'+id` 를 무조건 쓰면 admin 호스트엔 GET /admin/:id 가 없어 404 다. */
+  async function _ensureCampCtx(id, tok) {
+    let ctx = _moCtx[String(id)];
+    if (ctx && ctx.sheetId && ctx.tabName) return ctx;
+    const base = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '';
+    const url = base ? (base + '/' + encodeURIComponent(id))
+                     : (_apiBase() + '/api/campaign/' + encodeURIComponent(id));
+    try {
+      const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tok } });
+      const j = await r.json();
+      const row = j && j.ok && (j.data || j.campaign);
+      if (row) { _cacheMoCtx(row); ctx = _moCtx[String(id)]; }
+    } catch (_) { /* 호출부 안내로 수렴 */ }
+    return ctx;
+  }
+
+  /** ↗ 작업보드를 새 탭으로 — 리뷰어 로그의 딥링크(`#go=`)와 **같은 방식**(신규 엔드포인트 0).
+   *  ★★ `window.open` 은 **await 앞에서** 부른다 — 비동기 뒤에 열면 브라우저가 팝업으로 막는다
+   *    (폴더 바로가기에서 실측한 규율). 문맥을 못 구하면 열어 둔 창을 닫고 사유를 말한다.
+   *  ★ 토큰을 프래그먼트로 함께 넘긴다: 새 탭은 sessionStorage 를 물려받지 못해 로그인 화면으로
+   *    떨어진다. 권한 확대가 아니다 — 새 탭도 서버 스코프 검증(canAccessTab)을 그대로 거친다. */
+  async function openWorkdesk(id) {
+    const tok = _realAdminTok();
+    if (!tok) { alert('작업보드는 관리자 로그인이 필요합니다.'); return; }
+    // ★★ 미리 여는 창에는 'noopener' 를 쓰지 않는다 — 그 옵션은 **핸들을 null 로 돌려주므로**
+    //   주소를 넣지 못하고 빈 탭 + 진짜 탭이 **두 개** 열린다(실브라우저 실측). 대신 주소를 넣은
+    //   직후 opener 를 끊어 같은 보호를 얻는다.
+    let w = null;
+    try { w = window.open('', '_blank'); } catch (_) { w = null; }
+    const ctx = await _ensureCampCtx(id, tok);
+    if (!ctx || !ctx.sheetId || !ctx.tabName) {
+      try { if (w) w.close(); } catch (_) {}
+      alert('이 공고에 연결된 작업표가 없어 작업보드를 열 수 없습니다.');
+      return;
+    }
+    const payload = { s: ctx.sheetId, t: ctx.tabName, g: ctx.gid || '' };
+    let url;
+    try { url = new URL('workdesk.html', location.href).href; }
+    catch (_) { url = 'workdesk.html'; }
+    url += '#go=' + encodeURIComponent(JSON.stringify(payload)) + '&sso=' + encodeURIComponent(tok);
+    if (w) {
+      try { w.opener = null; } catch (_) {}
+      try { w.location.replace(url); return; } catch (_) {}
+    }
+    window.open(url, '_blank', 'noopener');   // 팝업이 막힌 경우의 폴백
+  }
+
   /** 공고 id로 외부제출 모달 열기(카드 칩·관제 패널 공용) */
   async function openManualOrder(id) {
     if (!window.ManualOrder) { alert('수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.'); return; }
     const tok = _realAdminTok();
     if (!tok) { alert('관리자 로그인이 필요합니다.'); return; }
-    let ctx = _moCtx[String(id)];
-    if (!ctx || !ctx.sheetId || !ctx.tabName) {
-      // 공개 목록 응답엔 연결 탭이 없다 → 관리자 조회로 보충
-      try {
-        const r = await fetch(_apiBase() + '/api/campaign/' + encodeURIComponent(id), {
-          headers: { 'Authorization': 'Bearer ' + tok },
-        });
-        const j = await r.json();
-        if (j && j.ok && j.data) { _cacheMoCtx(j.data); ctx = _moCtx[String(id)]; }
-      } catch (_) { /* 아래 안내로 수렴 */ }
-    }
+    // 공개 목록 응답엔 연결 탭이 없다 → 관리자 조회로 보충(작업보드 바로가기와 같은 헬퍼)
+    const ctx = await _ensureCampCtx(id, tok);
     if (!ctx || !ctx.sheetId || !ctx.tabName) {
       alert('이 공고에 연결된 작업 탭이 없어 수동제출을 열 수 없습니다.\n공고 수정에서 연결 탭을 먼저 지정해 주세요.');
       return;
@@ -1310,5 +1380,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
+  window.CampCards = { renderInto, cardHtml, gridHtml, _more, _closeMenu, toggleArchive, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePopular, openManualOrder, openWorkdesk, sortByAvailability, initChipMarquee: _initChipMarquee, needsFieldCleanup: _campNeedsFieldCleanup, _caeCarry };
 })();

@@ -2027,10 +2027,10 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-menu button.danger{color:#b42318}
 /* 🗑 작업 삭제 확인창 — 지워질 표 목록이 길어 기본 460px·무한 높이로는 읽을 수 없다.
    ★ flex 자식 min-height:0 이 없으면 스크롤이 안 생긴다(레포 상습 함정). */
-#tdOv .wbl-dlg{width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column}
-#tdOv .wbl-db{flex:1;min-height:0;overflow:auto}
-#tdOv .tdrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px}
-#tdOv .tdrow b{font-variant-numeric:tabular-nums}
+#tdOv .wbl-dlg,#ocOv .wbl-dlg{width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column}
+#tdOv .wbl-db,#ocOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#tdOv .tdrow,#ocOv .tdrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px}
+#tdOv .tdrow b,#ocOv .tdrow b{font-variant-numeric:tabular-nums;white-space:nowrap}
 #tdOv .tdbad{margin-top:10px;padding:10px 12px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
 /* ⚠중복 진단 — 표가 7칸이라 기본 460px 로는 가로가 잘린다. **이 모달에만** 넓힘(다른 wbl 모달 불변).
    ★ flex 자식은 기본 min-height:auto 라 min-height:0 이 없으면 본문이 늘어나 스크롤이 안 생긴다. */
@@ -4735,21 +4735,28 @@ async function openTaskDelete(i){
     <div class="tdrow"><span>리뷰 캡처 기록</span><b>${num(c.reviewFiles)}건</b></div>
     <div class="tdrow"><span>지워질 전체 행</span><b>${num(j.totalRows)}행 (${(j.tables||[]).length}개 표)</b></div>
   </div>`;
-  const camps=(j.campaigns||[]).filter(x=>!x.archivedAt);
   const side=`<ul class="wbl-ul">
     <li>연결된 <b>작업오더 ${(j.workOrders||[]).length}건</b>은 지우지 않고 <b>연결만 해제</b>합니다 — 같은 오더를 다시 접수할 수 있습니다.</li>
-    <li>연결된 <b>모집공고 ${camps.length}건</b>은 지우지 않고 <b>보관 처리</b>합니다(참여 이력·리뷰비 기록 보존).</li>
+    <li>연결된 <b>모집공고 ${(j.campaigns||[]).length}건</b>도 <b>함께 삭제</b>됩니다 — 그 공고의 참여 신청·옵션·리뷰비 구간·차수·날짜별 인원도 같이 사라집니다.</li>
     <li>구글시트 파일·탭은 <b>건드리지 않습니다</b>(목록에서만 사라집니다).</li>
   </ul>`;
+  /* ★ 입금 기록이 걸린 작업 — 막지는 않되(사용자 확정 2026-08-19) **별도 체크 + 별도 버튼**으로만
+       진행한다. 실수로 눌리면 그 리뷰어가 미입금으로 보여 다음 회차에 다시 담길 수 있다. */
   if(j.blocked){
-    _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+    _tdShell(`<div class="wbl-dh">🗑 작업 삭제 — 입금 기록이 걸려 있습니다</div>
       <div class="wbl-db"><b>${esc(j.tab&&j.tab.displayName||t.tabName)}</b>
-        <div class="wbl-sub">${esc(t.tabName)}</div>${facts}
-        <div class="tdbad"><b>이 작업은 삭제할 수 없습니다 — 입금 기록이 걸려 있습니다.</b><br>
-          ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}<br>
-          지우면 남은 줄이 미입금으로 보여 <b>다음 회차에 다시 담기고 이중 송금</b>이 납니다.
-          입금관리에서 정리한 뒤 다시 시도하거나, [🏁 마감]으로 목록에서 내려 주세요.</div></div>
-      <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+        <div class="wbl-sub">${esc(t.tabName)} · ${esc(t.advertiserName||'업체 미지정')}</div>
+        ${facts}
+        <div class="tdbad"><b>이 작업에는 입금 기록이 있습니다 — ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}</b><br>
+          지우면 그 리뷰어 줄이 <b>미입금으로 보여 다음 회차에 다시 담기고 이중 송금</b>이 날 수 있습니다.
+          지우지 않고 목록에서만 내리려면 [🏁 마감]을 쓰세요.<br>
+          <span class="wbl-sub">입금 회차(배치) 자체는 남고, 이 작업의 항목만 지워집니다.</span></div>
+        ${side}
+        <label class="wbl-chk"><input type="checkbox" id="tdOk" onchange="_tdSync()">
+          입금 기록까지 <b>영구히 삭제</b>되는 것을 확인했습니다.
+          <span class="sub">복구 수단이 없습니다 — 지운 뒤에는 백업으로만 되살릴 수 있습니다.</span></label></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">취소</button>
+        <button class="wbl-b dark" id="tdGo" disabled onclick="_tdGo(true)">🗑 입금 기록까지 삭제</button></div>`);
     return;
   }
   _tdShell(`<div class="wbl-dh">🗑 작업 삭제 — 되돌릴 수 없습니다</div>
@@ -4764,21 +4771,25 @@ async function openTaskDelete(i){
 }
 function _tdSync(){ const ok=document.getElementById('tdOk'), b=document.getElementById('tdGo');
   if(b) b.disabled=!(ok&&ok.checked); }
-async function _tdGo(){
+async function _tdGo(forcePayment){
   const i=STATE.tdI, t=(STATE.tabs||[])[i], ok=document.getElementById('tdOk');
   if(!t||!(ok&&ok.checked)) return;
-  const b=document.getElementById('tdGo'); if(b){ b.disabled=true; b.textContent='삭제 중…'; }
+  const b=document.getElementById('tdGo'), label=b?b.textContent:'';
+  if(b){ b.disabled=true; b.textContent='삭제 중…'; }
   let j=null;
   try{ j=await api('/api/trackb/work-tab/delete',{method:'POST',
-    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,confirm:true})}); }
+    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,confirm:true,forcePayment:forcePayment===true})}); }
   catch(e){ j={ok:false,error:e&&e.message}; }
   if(!j||j.ok===false){
-    if(b){ b.disabled=false; b.textContent='🗑 삭제'; }
+    if(b){ b.disabled=false; b.textContent=label||'🗑 삭제'; }
+    // ★ 미리보기 이후에 입금 회차에 담긴 경우(TOCTOU) — 사유를 알리고 확인 화면을 다시 그린다.
+    if(j&&j.code==='payment_locked'){ toast('⚠ 그 사이 입금 기록이 생겼습니다 — 다시 확인해 주세요'); openTaskDelete(i); return; }
     toast('⚠ 삭제 실패: '+((j&&(j.error||j.message))||''));
     return;
   }
   _tdClose();
-  toast(`🗑 삭제 완료 — ${j.totalRows}행${j.campaignsArchived?` · 공고 ${j.campaignsArchived}건 보관`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
+  const pay=(j.paymentDeleted||[]).reduce((n,m)=>n+(m.count||0),0);
+  toast(`🗑 삭제 완료 — ${j.totalRows}행${pay?` · 입금 기록 ${pay}건 포함`:''}${j.campaignsDeleted?` · 공고 ${j.campaignsDeleted}건 삭제`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
   try{ await loadTabs(); }catch(_){ toast('삭제는 완료됐습니다. 목록 새로고침에 실패했으니 새로고침해 주세요.'); }
 }
 
@@ -7974,6 +7985,10 @@ async function renderCampaignsView(){
   //   스크롤 컨테이너에 섞여 팝업이 아니라 페이지 하단 블록으로 보인다(실측).
   if(window.RecruitModal) RecruitModal.mount();
   await _loadPerm();
+  /* ★ 머리말을 **먼저** 그린다 — 종전엔 카드 렌더 훅에서만 그려서 **공고가 0건이면 머리말 자체가
+     없었다**(＋새 공고·보관함·정리 버튼이 통째로 사라져 아무것도 시작할 수 없는 막다른 길).
+     건수는 목록이 도착하면 그 훅이 다시 채운다. */
+  _rcRenderHead(0);
   /* 연결 탭 드롭다운 재료 — 관리자 대시보드는 모집공고 탭 진입 시 목록과 **함께** 채운다
      (index-app.js switchAdminTab). 여기만 빠져 있어 카드 [✏️ 수정]으로 연 모달의
      시트 선택이 통째로 비어 있었다. 모달도 스스로 보장하지만(index-recruit), 뷰 진입 때
@@ -7989,11 +8004,90 @@ function _rcRenderHead(total){
     ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()" title="보관(폐기)한 공고 보기 — 끝난 공고는 카드 [⋯] → [📦 보관]">📦 보관함</button>
+    ${_taskDelAllowed()?'<button class="btn" onclick="openOrphanCampaigns()" title="작업이 삭제됐는데 남아 있는 공고를 찾아 정리합니다(무엇이 지워질지 먼저 보여줍니다)">🧹 지워진 작업의 공고</button>':''}
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
       ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용 — 발행·수정은 편집 허용명단에 있는 담당자만 가능합니다.</b>'}</div>`;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   🧹 지워진 작업의 남은 공고 정리 (admin/master) — 미리보기 → 체크 → 삭제
+   ★ 판정은 **서버**가 한다(화면은 보여주고 확인만 받는다 — 프론트 재판정 0).
+   ★ 확인창은 body 직속 · 바깥 클릭으로 닫히지 않는다(고른 것 보호) · onclick 은 인덱스 없음(전량 대상).
+   ══════════════════════════════════════════════════════════════════════════ */
+function _ocClose(){ const o=document.getElementById('ocOv'); if(o) o.remove(); STATE.ocItems=null; }
+function _ocShell(inner){
+  let ov=document.getElementById('ocOv');
+  if(!ov){ ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='ocOv'; document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="wbl-dlg">${inner}</div>`;
+  if(!ov.dataset.k){ ov.dataset.k='1'; document.addEventListener('keydown',e=>{ if(e.key==='Escape') _ocClose(); }); }
+}
+async function openOrphanCampaigns(){
+  if(!_taskDelAllowed()){ toast('관리자만 정리할 수 있습니다'); return; }
+  _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고</div>
+    <div class="wbl-db">남은 공고를 찾는 중…</div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_ocClose()">닫기</button></div>`);
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/orphan-campaigns'); }catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고</div>
+      <div class="wbl-db"><b class="bad">찾지 못했습니다</b>
+        <div class="wbl-sub">${esc((j&&(j.error||j.message))||'조회 실패')}</div>
+        <div class="wbl-sub">확인하지 못한 상태로는 지우지 않습니다.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="openOrphanCampaigns()">다시 시도</button>
+        <button class="wbl-b" onclick="_ocClose()">닫기</button></div>`);
+    return;
+  }
+  const items=j.items||[];
+  STATE.ocItems=items;
+  if(!items.length){
+    _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고</div>
+      <div class="wbl-db"><b class="good">정리할 공고가 없습니다</b>
+        <div class="wbl-sub">대상 = 연결된 작업이 <b>등록부·장부·시트 어디에도 없는</b> 공고입니다.
+          작업을 연결하지 않은 공고(미연결)는 대상이 아닙니다.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="_ocClose()">닫기</button></div>`);
+    return;
+  }
+  const rows=items.map(c=>`<div class="tdrow"><span>${esc(c.title||'(제목 없음)')}
+      <span class="wbl-sub">${esc(c.tabName||'')}${c.archivedAt?' · 보관됨':''}</span></span>
+    <b>참여 ${c.applications==null?'?':c.applications}건</b></div>`).join('');
+  _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고 ${items.length}건 — 되돌릴 수 없습니다</div>
+    <div class="wbl-db">연결된 작업이 <b>등록부·장부·시트 어디에도 없는</b> 공고입니다(작업이 이미 삭제됨).
+      <div class="wbl-facts">${rows}</div>
+      ${j.truncated?'<div class="wbl-sub">일부만 표시했습니다 — 정리 후 다시 열면 나머지가 보입니다.</div>':''}
+      <ul class="wbl-ul">
+        <li>그 공고의 <b>참여 신청·옵션·리뷰비 구간·차수·날짜별 인원</b>도 함께 사라집니다.</li>
+        <li>입금 회차 자체는 그대로 남습니다(회차 항목의 공고 연결만 비워집니다).</li>
+      </ul>
+      <label class="wbl-chk"><input type="checkbox" id="ocOk" onchange="_ocSync()">
+        위 ${items.length}건이 <b>영구히 삭제</b>되는 것에 동의합니다.
+        <span class="sub">복구 수단이 없습니다 — 지운 뒤에는 백업으로만 되살릴 수 있습니다.</span></label></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_ocClose()">취소</button>
+      <button class="wbl-b dark" id="ocGo" disabled onclick="_ocGo()">🗑 ${items.length}건 삭제</button></div>`);
+}
+function _ocSync(){ const ok=document.getElementById('ocOk'), b=document.getElementById('ocGo');
+  if(b) b.disabled=!(ok&&ok.checked); }
+async function _ocGo(){
+  const items=(STATE.ocItems||[]), ok=document.getElementById('ocOk');
+  if(!items.length||!(ok&&ok.checked)) return;
+  const b=document.getElementById('ocGo'), label=b?b.textContent:'';
+  if(b){ b.disabled=true; b.textContent='삭제 중…'; }
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/orphan-campaigns/delete',{method:'POST',
+    body:JSON.stringify({ids:items.map(c=>c.id),confirm:true})}); }
+  catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    if(b){ b.disabled=false; b.textContent=label||'🗑 삭제'; }
+    toast('⚠ 정리 실패: '+((j&&(j.error||j.message))||''));
+    return;
+  }
+  _ocClose();
+  // ★ 부분 결과를 "완료"로 꾸미지 않는다 — 그 사이 작업이 되살아난 건은 건너뛴다.
+  toast(j.skipped ? `🧹 ${j.deleted}건 정리 · ${j.skipped}건은 작업이 살아 있어 건너뜀`
+                  : `🧹 공고 ${j.deleted}건을 정리했습니다`);
+  if(typeof loadRecruitList==='function') loadRecruitList();
+}
 
 /* ── 편집 허용명단 관리(master/admin 전용) ─────────────────────
    후보는 **인트라넷 직원DB**에서 고른다(담당AE 자동완성과 같은 프록시 재사용).
@@ -10079,6 +10173,8 @@ const _PT_REASON = {
   weak_signal:'근거가 시트 등록일뿐', pending_orders:'미반영 주문 있음',
   active_campaign:'모집중 공고 연결', already_sheetless:'이미 무시트',
   already_archived:'이미 아카이브', already_closed:'이미 마감',
+  name_drift:'탭 이름이 어긋남(마감으로 못 멈춤)',
+  ghost_row:'옛 이름만 남은 빈 행',
 };
 let _PT = null;
 function _ptBox(){ return $('#ptBox'); }
@@ -10128,12 +10224,59 @@ async function _ptProbe(){
   }catch(e){ toast('연도 확인 실패 — '+String(e&&e.message||e)); }
   await _ptScan();                            // 확인 결과를 반영해 다시 판정
 }
+/* 시트에서 이름이 바뀐 탭 — 여기서 마감해도 안 멈추므로 **후보가 아니다**.
+   그래서 건수만 말하면 담당자가 무엇을 고쳐야 할지 알 수 없다 → 목록으로 보여준다.
+   ★ 서버가 준 등록명·현재 이름을 그대로 그린다(판정 사본 0). */
+function _ptDriftBlock(r){
+  const d = (r.holds||[]).filter(h=>h.reason==='name_drift');
+  if(!d.length) return _ptGhostBlock(r);
+  // ★ 시트를 함께 적는다 — 다른 시트에 같은 탭 이름이 있을 수 있어(시트 복사본) 없으면 구분이 안 된다
+  const rows = d.map(h=>`<tr><td style="color:var(--sub,#666)">${esc(h.campaignName||'-')}</td>
+      <td>${esc(h.tabName)}</td><td style="color:var(--sub,#666)">→</td>
+      <td><b>${esc(h.liveTabName||'?')}</b></td></tr>`).join('');
+  return `<div style="margin-top:10px;padding:9px 11px;border:1px solid var(--line,#e5a0a0);border-radius:6px;background:rgba(255,80,80,.07)">
+    <b>시트에서 탭 이름이 바뀐 작업 ${d.length}개는 마감 표시가 있어도 여전히 읽힙니다.</b>
+    시스템이 <b>등록된 옛 이름</b>으로 찾기 때문입니다 — <b>여기서 정리해도 멈추지 않습니다.</b>
+    <table class="lgtable" style="margin-top:8px">
+      <thead><tr><th style="width:30%">시트</th><th>등록된 이름</th><th style="width:24px"></th>
+        <th>시트의 현재 이름</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <div style="margin-top:6px;font-size:13px">
+      관리자 대시보드의 <b>탭명 교정(sync-tab-names)</b>으로 이름을 맞춘 뒤 여기서 다시 확인하세요.
+      ★ 이름을 맞추면 <b>마감 표시가 되살아나</b> 그 작업들은 다음 전체 빌드에서 아카이브됩니다
+      (참여 리뷰어의 제출완료 내역도 화면에서 사라집니다).
+      ⚠ 탭명 교정은 <b>보관 기록(index_master_archive)까지는 고치지 않습니다</b> —
+      교정 뒤에도 읽히는 탭이 남으면 그때는 여기서 정리하면 됩니다.
+    </div>
+  </div>` + _ptGhostBlock(r);
+}
+/* 옛 이름만 남은 빈 행 — 시트의 현재 이름이 **이미 따로 등록**돼 있어 이 행은 아무 일도 하지 않는다.
+   읽기 여부는 새 이름 행이 정하므로 "지금도 읽습니다" 에 세지 않는다(서버 판정 그대로). */
+function _ptGhostBlock(r){
+  const g = r.ghosts || []; if(!g.length) return '';
+  const rows = g.map(h=>`<tr><td style="color:var(--sub,#666)">${esc(h.campaignName||'-')}</td>
+      <td>${esc(h.tabName)}</td><td style="color:var(--sub,#666)">→</td>
+      <td><b>${esc(h.liveTabName||'?')}</b></td></tr>`).join('');
+  return `<div style="margin-top:10px;padding:9px 11px;border:1px solid var(--line,#ddd);border-radius:6px;background:rgba(120,120,120,.06)">
+    <b>옛 이름만 남은 빈 행 ${g.length}개</b> — 시트의 현재 이름이 <b>이미 따로 등록돼 있어</b>
+    이 행은 <b>시트를 읽지도, 무언가를 막지도 않습니다</b>(읽기는 새 이름 행이 정합니다).
+    <table class="lgtable" style="margin-top:8px">
+      <thead><tr><th style="width:30%">시트</th><th>등록된 이름</th><th style="width:24px"></th>
+        <th>시트의 현재 이름(이미 등록됨)</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <div style="margin-top:6px;font-size:13px">
+      <b>그대로 두셔도 됩니다.</b> 탭명 교정으로는 고칠 수 없고(같은 시트에 같은 이름을 둘 수 없어 충돌),
+      목록에서 헷갈리면 관리자에게 그 행의 삭제를 요청하세요.
+    </div>
+  </div>`;
+}
 function _ptRender(){
   const box=_ptBox(), r=_PT; if(!box||!r) return;
   const held = Object.keys(r.heldBy||{}).map(k=>`${_PT_REASON[k]||k} ${r.heldBy[k]}`).join(' · ');
   const quiet = Object.keys(r.quietBy||{}).map(k=>`${_PT_REASON[k]||k} ${r.quietBy[k]}`).join(' · ');
   const rows = (r.items||[]).map((it,i)=>`<tr>
       <td><input type="checkbox" class="ptck" data-i="${i}" checked></td>
+      <td style="color:var(--sub,#666)">${esc(it.campaignName||'-')}</td>
       <td>${esc(it.tabName)}</td>
       <td style="color:var(--sub,#666)">${esc(it.activityAt||'-')}</td>
       <td style="color:var(--sub,#666)">${esc(it.activitySource||'-')}</td>
@@ -10148,13 +10291,15 @@ function _ptRender(){
       그 작업에 참여한 <b>리뷰어의 제출완료 내역도 화면에서 사라집니다</b> — 끝난 작업만 고르세요.
       ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
       ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
-      ${r.archivedByGidOnly?`<br><b>이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 작업 ${r.archivedByGidOnly}개</b>
-        — 시스템은 새 이름으로 <b>여전히 읽습니다</b>. 위 정리 대상에 포함돼 있습니다.`:''}
+      ${r.archivedByGidOnly?`<br>이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 작업 ${r.archivedByGidOnly}개
+        — 아카이브로 접지 않고 위 판정을 그대로 거쳤습니다.`:''}
       ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
     </div>
+    ${_ptDriftBlock(r)}
     ${_ptProbeBlock(r)}
     ${r.candidates ? `<table class="lgtable" style="margin-top:10px">
-        <thead><tr><th style="width:34px"></th><th>작업</th><th style="width:110px">마지막 활동</th>
+        <thead><tr><th style="width:34px"></th><th style="width:24%">시트</th><th>작업</th>
+          <th style="width:110px">마지막 활동</th>
           <th style="width:110px">근거</th><th style="width:70px">명단</th></tr></thead>
         <tbody>${rows}</tbody></table>
       <div style="margin-top:8px">
@@ -14767,7 +14912,7 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/recruit-modal.js?v=20260819-quota-fixed"></script>
 <script src="js/manual-order.js"></script>
-<script src="js/index-recruit.js?v=20260819-quota-fixed"></script>
+<script src="js/index-recruit.js?v=20260819-reviewmix-cache"></script>
 <script>
 /* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.
    ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */

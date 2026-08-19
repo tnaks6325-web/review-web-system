@@ -10,6 +10,7 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 // 프리필 헬퍼는 공유 모듈(js/work-order-detail.js)로 이관 — 두 파일을 합쳐서 본다
 const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const recjs = readF('js/index-recruit.js');
+const modaljs = readF('js/recruit-modal.js');   // 공유 모달 마크업(미리보기 카드 부재 확인용)
 const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
 
 let passed = 0;
@@ -36,7 +37,14 @@ ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPl
 ok('prefill: 작업오더 첫 상품명·결제금액 헬퍼(_woFirstProductInfo)', /function _woFirstProductInfo/.test(app) && /product_options_json/.test(app));
 ok('prefill: product_name/price 프리필 전달', /_woFirstProductInfo\(o\)/.test(app) && /product_name:\s+_pi\.name/.test(app));
 ok('prefill: 공고 제목 = 상품명 우선(업체명·건수 미노출), 오더 제목 폴백', /title:\s+_pi\.name \|\| o\.title/.test(app));
-ok('modal: 작업오더 상품명·가격은 저장값으로만 유지(편집 화면 미리보기 제거)', /prefill\.product_name \|\| prefill\.price/.test(recjs) && !/rf_product_preview|rf_pp_name|rf_pp_price/.test(recjs));
+// ★ 규칙 = **공유 모달이 상품 미리보기 카드를 그리지 않는다**. index-recruit.js 에 남은 참조는
+//   구형 화면(admin-siand.html)에 아직 있는 그 요소를 **숨기는 초기화**뿐이라 규칙 위반이 아니다
+//   (문자열 존재만 금지하면 그 정리 코드까지 잡아 멀쩡한 상태를 회귀로 신고한다).
+ok('modal: 작업오더 상품명·가격은 저장값으로만 유지(편집 화면 미리보기 제거)',
+  /prefill\.product_name \|\| prefill\.price/.test(recjs)
+  && !/id="rf_product_preview"|rf_pp_name|rf_pp_price/.test(modaljs)
+  && (recjs.match(/rf_product_preview/g) || []).length <= 1
+  && /rf_product_preview"\); if \(_pp\) _pp\.style\.display = "none"/.test(recjs));
 ok('modal: 프리필 시 자동수집 1회 시도', /fetchProductInfo\(\{ auto: true \}\)/.test(recjs));
 ok('fetch: 성공 항목만 덮어씀(누락 항목은 기존 값 유지)', /if \(r\.name\)\s+nEl\.value = r\.name;/.test(recjs) && /if \(r\.price\) pEl\.value = r\.price;/.test(recjs));
 ok('fetch: 실패 시 작업오더 기본값 유지', /작업오더에 입력된 상품명\/가격을 유지합니다/.test(recjs));

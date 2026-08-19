@@ -248,6 +248,75 @@ function withStubPool(handler, run) {
     });
   });
 
+  /* ── 0원 = 무상 확정 (사용자 확정 2026-08-19) ─────────────────────────────
+     이 계정은 상품비만 주는 작업이 다수(실측 공고 32건 중 27건이 0원)라, 0 을 "미설정"으로
+     읽으면 입금관리가 상시 경고로 뒤덮여 진짜 신호(계좌·은행 미비)가 묻힌다.
+     ★ 종전 버그: 공고 로더가 COALESCE(...,0) + `|| 0` 로 0 과 NULL 을 같은 값으로 만들고,
+       campFee 가 truthiness 로 0 을 걸러 **무상 작업 전건이 경고**를 달았다(위프 800건 24/24). */
+  await ta('3c6 ★★ 공고 리뷰비 0원 = 사람이 정한 무상 — 경고를 띄우지 않는다', async () => {
+    await withStubPool(targetsHandler({
+      campRows: [{ id: 'C1', title: '무상 작업', sheetId: 'S1', tabName: 'T1', reviewFee: 0,
+        transferBank: 'kbank', transferMemo: 'M', campStartDate: null, goodsCostType: '' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '', depositName: '', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '22,000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.reviewFee, 0);
+      assert.strictEqual(it.feeSource, 'campaign', '0 도 "공고에서 온 값"이다');
+      assert.strictEqual(it.campaignReviewFee, 0, '★ 0 을 null 로 접으면 팝업 프리필도 비어 보인다');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'), '★ 0원 설정에는 경고가 없다');
+      assert.strictEqual(it.amount, 22000, '이체금액은 상품비 그대로');
+      assert.strictEqual(it.payable, true);
+    });
+  });
+
+  await ta('3c7 ★ 탭 리뷰비 0원도 무상 확정 · 근거가 아예 없을 때만 경고', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: 0, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.feeSource, 'tab');
+      assert.ok(!(it.warnings || []).includes('no_review_fee'));
+    });
+    // 공고도 탭도 없는 줄 = 근거 없음 → 경고 유지(3c3 과 같은 계약, 여기서도 못박는다)
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.feeSource, null);
+      assert.ok((it.warnings || []).includes('no_review_fee'), '★ 모르는 것은 계속 말한다');
+    });
+  });
+
+  await ta('3c7b ★ 공고는 있는데 리뷰비가 NULL = 미설정 — 0 으로 접지 않는다', async () => {
+    await withStubPool(targetsHandler({
+      campRows: [{ id: 'C1', title: '공고', sheetId: 'S1', tabName: 'T1', reviewFee: null,
+        transferBank: 'kbank', transferMemo: 'M', campStartDate: null, goodsCostType: '' }],
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '', depositName: '', reviewFee: null, goodsCostType: '' }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.campaignReviewFee, null, '★ NULL 을 0 으로 바꾸면 미설정이 무상으로 둔갑한다');
+      assert.strictEqual(it.feeSource, null);
+      assert.ok((it.warnings || []).includes('no_review_fee'), '★ 모르는 것은 계속 말한다');
+    });
+  });
+
+  await ta('3c8 ★ 공고 로더가 0 과 NULL 을 구분해 읽는다(COALESCE 로 접지 않는다)', async () => {
+    await withStubPool(targetsHandler({}), async (svc, calls) => {
+      await svc.listPaymentTargets();
+      const q = calls.find(c => /FROM recruit_campaigns c/.test(c.sql));
+      assert.ok(q, '공고 로더 쿼리를 찾지 못했다');
+      assert.ok(!/COALESCE\(c\.review_fee/.test(q.sql), '★ COALESCE 로 0 과 NULL 을 같은 값으로 만들지 않는다');
+    });
+  });
+
   await ta('3d ★ 상품비 시트 폴백 — 주문 원장이 없어도 금액이 선다', async () => {
     await withStubPool(targetsHandler({
       tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M', goodsCostType: '' }],

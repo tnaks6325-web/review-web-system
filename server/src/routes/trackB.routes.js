@@ -2877,6 +2877,30 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
+   작업표 줄 ↔ 주문 링크 교정 — admin/master 전용 (일회성 복구, 2026-08-19)
+   ★ 미리보기(dryRun 기본) → confirm:true 로 실행. 쓰기 표면은 링크 1칸(+중복정리가
+     취소한 주문의 되돌리기)뿐이고, 한 건이라도 조건을 못 지키면 전부 되돌린다.
+   ══════════════════════════════════════════════════════════════════════════ */
+router.post('/worktable/repair-link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { repairWorktableLinks, LinkRepairError } = require('../services/worktableLinkRepair.service');
+    const b = req.body || {};
+    try {
+      res.json(await repairWorktableLinks({
+        sheetId: b.sheetId, tabName: b.tabName, fixes: b.fixes,
+        dryRun: b.dryRun !== false, confirm: b.confirm === true, by: `repair:${_by(req)}`,
+      }));
+    } catch (e) {
+      if (e instanceof LinkRepairError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
    작업(탭) 통째 삭제 — admin/master 전용 (사용자 확정 2026-08-19)
    ★★ 되돌릴 수 없다. 그래서 ① 미리보기(GET, 쓰기 0) → ② `confirm:true` 실행 2단계이고,
       ③ 돈 기록(입금 회차·원장·수기 표기·미확인 이체)이 걸린 작업은 **확인해도 거부**한다.
@@ -2906,7 +2930,8 @@ router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (
     try {
       const out = await deleteTask({
         sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
-        confirm: b.confirm === true, by: _by(req),
+        // ★ 입금 기록까지 지우는 것은 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
+        confirm: b.confirm === true, forcePayment: b.forcePayment === true, by: _by(req),
       });
       // 검증 실패는 400대로 — errorHandler 의 500 마스킹에 사유가 묻히면 담당자가 손쓸 수 없다.
       if (!out.ok && (out.code === 'confirm_required' || out.code === 'payment_locked')) {
@@ -2920,6 +2945,32 @@ router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (
       }
       throw e;
     }
+  } catch (err) { next(err); }
+});
+
+/* 지워진 작업의 남은 공고 정리 — 미리보기(GET, 쓰기 0) → `confirm:true` 실행.
+   ★ 작업 삭제가 공고까지 지우기 전에 지운 작업들의 잔재를 치우는 창구(같은 게이트: adminOrMaster). */
+router.get('/work-tab/orphan-campaigns', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { findOrphanCampaigns } = require('../services/workTabDelete.service');
+    try {
+      res.json(await findOrphanCampaigns({ limit: req.query.limit }));
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+router.post('/work-tab/orphan-campaigns/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { deleteOrphanCampaigns } = require('../services/workTabDelete.service');
+    const b = req.body || {};
+    const out = await deleteOrphanCampaigns({ ids: b.ids, confirm: b.confirm === true, by: _by(req) });
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
   } catch (err) { next(err); }
 });
 

@@ -207,7 +207,7 @@ async function listPaymentTargets(opts = {}) {
     //   공고가 없는 작업(옛 작업·외부모집)은 리뷰비를 넣을 칸이 아예 없어 상품비만 이체돼 왔다.
     // ★ 스냅샷·구간표는 여전히 최우선(완화 금지) — 탭 값은 그 뒤의 폴백일 뿐이다.
     const tabFee = tab && tab.reviewFee != null ? tab.reviewFee : null;
-    const campFee = camp && camp.reviewFee ? camp.reviewFee : null;
+    const campFee = camp && camp.reviewFee != null ? camp.reviewFee : null;
     const feeInfo = resolveReviewFee({
       snapshot: ord ? ord.feeSnapshot : null,
       schedules: camp ? camp.schedules : [],
@@ -254,7 +254,13 @@ async function listPaymentTargets(opts = {}) {
     if (amount <= 0) issues.push('zero_amount');
     // 통장표시가 없어도 이체 자체는 되지만(양식상 필수 아님) 리뷰어가 무슨 돈인지 모른다 → 경고만.
     if (!memo) warnings.push('no_memo');
-    if (!fee) warnings.push('no_review_fee');
+    /* 리뷰비 경고는 **금액이 0이라서**가 아니라 **근거를 못 찾아서** 띄운다.
+         이 계정은 상품비만 주는 작업이 다수(실측 공고 32건 중 27건이 0원)라, 0 을 경고로 두면
+         입금관리가 상시 경고로 뒤덮여 진짜 신호(계좌·은행 미비)가 묻힌다.
+       ★ 공고·탭·스냅샷·구간표 어디서든 값이 왔으면(feeSource) 그 0 은 사람이 정한 무상이다.
+       ⚠ 한계: 발행 폼에서 리뷰비 칸을 비우면 서버가 0 으로 저장하므로 "0원으로 정함"과
+         "안 넣음"은 DB 에서 구분되지 않는다 — 사용자 확정(2026-08-19)으로 0 = 무상으로 읽는다. */
+    if (!fee && !feeSource) warnings.push('no_review_fee');
 
     return {
       sheetId: r.sheetId, tabName: r.tabName, rowIndex: r.rowIndex,
@@ -331,7 +337,7 @@ async function _loadCampaigns(sheetIds, tabNames) {
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (c.linked_sheet_id, c.linked_tab_name)
             c.id, c.title, c.linked_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
-            COALESCE(c.review_fee, 0) AS "reviewFee",
+            c.review_fee AS "reviewFee",
             c.transfer_bank AS "transferBank", c.transfer_memo AS "transferMemo",
             to_char(c.start_date,'YYYY-MM-DD') AS "campStartDate",
             wo.goods_cost_type AS "goodsCostType"
@@ -348,7 +354,10 @@ async function _loadCampaigns(sheetIds, tabNames) {
   );
   for (const c of rows) {
     map[c.sheetId + '||' + c.tabName] = {
-      id: c.id, title: c.title || '', reviewFee: c.reviewFee || 0,
+      /* 0 을 NULL 로 접지 말 것 — "0원으로 정한 무상 작업"과 "값이 없는 공고"는 다르다.
+         종전 COALESCE(...,0) + || 0 이 둘을 같은 값으로 만들어, 무상 작업 전건이
+         no_review_fee 경고를 달았다(실측 2026-08-19 위프 800건 24/24). */
+      id: c.id, title: c.title || '', reviewFee: (c.reviewFee == null ? null : Number(c.reviewFee)),
       transferBank: c.transferBank || null, transferMemo: c.transferMemo || '',
       campStartDate: c.campStartDate || null, goodsCostType: c.goodsCostType || '',
       schedules: [],

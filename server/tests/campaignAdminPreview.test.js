@@ -85,12 +85,27 @@ ok('③-5b Track B 경로 폴백은 401/403 에서만',
 
 // ── ④ 상태 변경 동작 차단 ──
 for (const [label, re] of [
-  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  // ★ 옵션변경은 "막기" 대신 **가상 시뮬레이션**으로 바뀌었다(관리자가 흐름을 끝까지 볼 수 있게).
+  //   규칙은 그대로다 — 서버 상태를 바꾸지 않는다. 아래에서 그 시뮬레이션에 **서버 호출이 0** 임을 못박는다.
+  ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvSimulateChangeOption/],
   // ★ 063 2단계 신규 진입점도 동일 차단(명의 선택·타계정 추가참여)
   ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['타계정 추가참여(onAddSubJoin)', /async function onAddSubJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
 ]) ok('④ 미리보기에서 ' + label + ' 차단', re.test(camp));
 ok('④ 미리보기에서 명의 전환(switchAcct)도 무동작', /async function switchAcct\(p8\)\{\s*\n\s*if\(PREVIEW\) return;/.test(camp));
+// ★★ 시뮬레이션 경로에 **서버 호출이 한 줄도 없어야** "미리보기는 서버 상태를 안 바꾼다"가 성립한다.
+//   (막는 대신 흉내내는 방식으로 바뀐 만큼, 이 검사가 그 전제를 대신 지킨다.)
+for (const fn of ['_pvSimulateChangeOption', '_pvSimulateApply']) {
+  const i = camp.indexOf('function ' + fn);
+  ok('④ ' + fn + ' 가 존재한다', i > -1);
+  const m = /\n(?:async )?function /g; m.lastIndex = i + 10;
+  const e = m.exec(camp);
+  const body = camp.slice(i, e ? e.index : i + 2000);
+  ok('★★ ' + fn + ' 는 서버를 부르지 않는다(가상 진행만)',
+    !/\bfetch\(|\bapi\(|_pvGet\(|\/apply|\/change-option/.test(body));
+}
+ok('★ 미리보기임을 화면이 말한다(실제 기록으로 오해 금지)',
+  /실제 참여 기록은 남지 않습니다/.test(camp));
 
 // ── ⑤ 구매양식 제출 차단 (최악 시나리오 방어) ──
 ok('⑤-1 preview 플래그는 embed 컨텍스트 안에서만 정의(embed=1 없으면 도달 불가)',

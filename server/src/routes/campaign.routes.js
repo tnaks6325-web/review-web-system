@@ -2509,28 +2509,74 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
         );
         const confirmed = rows.filter(r => r.status === 'submitted').length;
         const rosterRows = Number(ri[0]?.n) || 0;
-        // ★ 차이가 있을 때만 "어느 행이 확정에 없는지"를 찾는다(평상시 쿼리 0).
-        //   대조 키 = phone8(연락처 끝 8자리). 시스템의 신원키와 같아야 오탐이 없다.
+        /* ★ 차이가 있을 때만 "어느 행이 확정에 없는지"를 찾는다(평상시 쿼리 0).
+           ★★ 대조는 **세 키를 모두** 본다 — 종전처럼 명의 phone8 정확일치 하나만 보면
+              정상 확정이 무더기로 "미확정"으로 뜬다(실측 2026-08-19 위프 800건: 196건 중
+              17건이 이 사유였고, 같은 건들이 반대편에서는 "확정인데 줄이 없음"으로 또 세어졌다).
+              ㉮ 명의 `phone8`
+              ㉯ 소유자 `owner_phone8` — 타계정 참여에서 **작업표 연락처 칸에 소유자 번호**가
+                 적히는 정상 케이스(홀드 명의와 구매양식 연락처는 원래 다를 수 있다)
+              ㉰ ★ **주문 링크** — 그 줄의 `order_submission_id` 가 확정 홀드의 것과 같으면 확정이다.
+                 연락처 오타(끝 4자리 1글자 차이)·수취인 번호 기입은 번호로는 **영원히** 못 짝지어지는데,
+                 주문 id 는 이름·연락처·줄 번호가 바뀌어도 불변이다(리뷰어 홈 dedup 과 같은 규율).
+           ★★ 남은 미확정을 **한 덩어리로 보여주지 않는다**: 홀드 이력이 아예 없는 줄은
+              "공고를 거치지 않은 제출"이라 **만료·취소 목록에 애초에 없다** — 종전 화면은 그것까지
+              "[수동확정]하세요"로 안내해, 담당자가 찾을 수 없는 건을 찾게 만들었다(위프 800건에서
+              196건 중 163건이 그랬다). `hasHold`/`hasOrder` 로 갈라 세고 목록도 조치 대상을 먼저 낸다.
+           ★ 판정은 여전히 **관측 전용**이다 — 여기서 무엇이 나오든 캠페인 상태·정원을 바꾸지 않는다. */
         let unmatched = [];
+        let unmatchedCounts = null;
         if (rosterRows > confirmed) {
           const { rows: um } = await pool.query(
-            `SELECT ri.row_index AS row, ri.reviewer_name AS name, ri.phone8
-               FROM review_index ri
-              WHERE ri.sheet_id = $1 AND ri.tab_name = $2
-                AND NOT EXISTS (
-                  SELECT 1 FROM campaign_applications ca
-                   WHERE ca.campaign_id = $3 AND ca.status = 'submitted'
-                     AND ca.phone8 <> '' AND ca.phone8 = ri.phone8
-                )
-              ORDER BY ri.row_index
-              LIMIT 30`,
+            `WITH sub AS (
+                SELECT phone8, owner_phone8, order_submission_id
+                  FROM campaign_applications
+                 WHERE campaign_id = $3 AND status = 'submitted'
+              ), un AS (
+                SELECT ri.row_index AS row, ri.reviewer_name AS name, ri.phone8,
+                       EXISTS (
+                         SELECT 1 FROM campaign_applications ca
+                          WHERE ca.campaign_id = $3 AND COALESCE(ri.phone8, '') <> ''
+                            AND (ca.phone8 = ri.phone8 OR ca.owner_phone8 = ri.phone8)
+                       ) AS has_hold,
+                       EXISTS (
+                         SELECT 1 FROM order_submissions os
+                          WHERE os.sheet_id = $1 AND os.tab_name = $2
+                            AND COALESCE(ri.phone8, '') <> ''
+                            AND right(regexp_replace(COALESCE(os.phone, ''), '\\D', '', 'g'), 8) = ri.phone8
+                       ) AS has_order
+                  FROM review_index ri
+                 WHERE ri.sheet_id = $1 AND ri.tab_name = $2
+                   AND NOT EXISTS (SELECT 1 FROM sub s WHERE s.phone8 <> '' AND s.phone8 = ri.phone8)
+                   AND NOT EXISTS (SELECT 1 FROM sub s WHERE COALESCE(s.owner_phone8, '') <> '' AND s.owner_phone8 = ri.phone8)
+                   AND NOT EXISTS (
+                         SELECT 1 FROM campaign_participants cp
+                           JOIN sub s ON s.order_submission_id = cp.order_submission_id
+                          WHERE cp.sheet_id = $1 AND cp.tab_name = $2
+                            AND cp.seq = ri.row_index AND cp.deleted_at IS NULL
+                       )
+              )
+              SELECT un.*,
+                     count(*) OVER ()::int AS total_cnt,
+                     (count(*) FILTER (WHERE has_hold) OVER ())::int AS hold_cnt,
+                     (count(*) FILTER (WHERE NOT has_hold AND has_order) OVER ())::int AS order_only_cnt
+                FROM un
+               ORDER BY has_hold DESC, has_order ASC, row
+               LIMIT 30`,
             [c0.linked_sheet_id, c0.linked_tab_name, id]
           );
           unmatched = um.map(r => ({
             row: r.row, name: r.name || '',
             phone4: String(r.phone8 || '').replace(/\D/g, '').slice(-4),
             noPhone: !String(r.phone8 || '').trim(),
+            hasHold: r.has_hold === true,
+            hasOrder: r.has_order === true,
           }));
+          const total = um.length ? Number(um[0].total_cnt) || 0 : 0;
+          const hold = um.length ? Number(um[0].hold_cnt) || 0 : 0;
+          const orderOnly = um.length ? Number(um[0].order_only_cnt) || 0 : 0;
+          // ★ 세 칸의 합 ≡ total (화면이 나머지를 스스로 빼서 계산하지 않게 한다)
+          unmatchedCounts = { total, hold, orderOnly, neither: Math.max(0, total - hold - orderOnly) };
         }
         /* ★ 어휘 재료 — 이 작업이 무시트(작업표)인지 시트 기반인지. 화면은 **이 값으로만**
            "시트/작업표" 어휘를 가른다(ID 모양(`wt_`)으로 추측하지 않는다 — 이관된 작업은
@@ -2551,6 +2597,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
           confirmed,
           diff: rosterRows > 0 ? rosterRows - confirmed : null,
           unmatched,
+          unmatchedCounts,
           schedule: await describeTabDates(pool, c0.linked_sheet_id, c0.linked_tab_gid, new Date()),
         };
       }

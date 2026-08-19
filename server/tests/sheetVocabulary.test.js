@@ -95,7 +95,7 @@ const ir = rd('frontend/js/index-recruit.js');
   const body = stripComments(fnSrc(ir, '_campSheetInfo'));
   ok('★ 카드 본문에 하드코딩된 "시트" 0(주석 제외)', !body.includes('시트'));
   ok('카드가 어휘 함수를 쓴다', /_srcWords\(si\.sheetless\)/.test(body));
-  ok('미매칭 목록에도 같은 어휘를 넘긴다', /_campUnmatchedRows\(si\.unmatched, w\)/.test(body));
+  ok('미매칭 목록에도 같은 어휘를 넘긴다', /_campUnmatchedRows\(si\.unmatched, w, si\.unmatchedCounts, diff\)/.test(body));
   const um = stripComments(fnSrc(ir, '_campUnmatchedRows'));
   ok('★ 미매칭 목록 본문에도 하드코딩된 "시트" 0', !um.includes('시트'));
   ok('미매칭 목록의 어휘 폴백도 시트 기반', /w = w \|\| _srcWords\(false\)/.test(um));
