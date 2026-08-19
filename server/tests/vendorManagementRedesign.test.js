@@ -201,12 +201,16 @@ async function run() {
     out.body.items[1].works === 0 && out.body.items[1].noMatch === 0);
   t('접속링크 상태 병합 · 없는 업체는 null', out.body.items[0].link.loginRequired === true && out.body.items[1].link === null);
   t('★ overview 플래그를 응답에 실어 화면이 고지할 수 있게 한다', out.body.overview && out.body.overview.ok === true);
-  // ★ 접속링크 상태(공개/로그인/폐기·마지막 접속)는 보안 설정 메타 — 링크 CRUD 가 전부 adminOrMaster 인데
-  //   목록만 staff 에게 열면 서버가 프론트보다 넓어진다(프론트는 이미 admin 분기).
+  // ★ 접속링크 상태는 **내부인 전원**(AE 포함, 2026-08-19 사용자 확정) — 링크 CRUD(/advertiser-link)가
+  //   이미 internalMiddleware 라 목록만 admin 으로 좁히면 "서버는 허용하는데 화면은 —" 인 비대칭이 된다.
+  //   ★ 단 토큰은 어느 역할에도 싣지 않는다(hasToken 만 — 복사는 누를 때 ensure 로 받아온다).
   svc.__resetTabStatsCacheForTest();
   const staffOut = await runHandler(advL, { query: { overview: '1' }, admin: { role: 'staff', name: 'ae' } });
-  t('★ staff 응답에는 접속링크 상태가 실리지 않는다', staffOut.body.items.every(it => it.link === undefined),
+  t('★ staff 응답에도 접속링크 상태가 실린다(라우트 게이트와 1:1)',
+    staffOut.body.items[0].link && staffOut.body.items[0].link.active === true && staffOut.body.items[1].link === null,
     JSON.stringify(staffOut.body.items[0]).slice(0, 160));
+  t('★ 어느 역할에도 접속 토큰은 내려보내지 않는다(데이터 최소화)',
+    !/"token"/.test(JSON.stringify(staffOut.body.items)) && !/"token"/.test(JSON.stringify(out.body.items)));
   t('staff 도 작업수·미매칭·검수 집계는 받는다(담당 판단에 필요)', staffOut.body.items[0].works === 1);
   out = await runHandler(advL, { query: {}, admin: { role: 'admin', name: 'k' } });
   t('★ overview 미지정이면 종전 응답 그대로(기존 소비처 무영향)',

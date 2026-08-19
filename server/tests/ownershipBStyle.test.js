@@ -111,7 +111,11 @@ test('search compares lowercase on both sides and reports an empty result', () =
 
 test('every company row carries a viewer-link copy button that does not open the company', () => {
   assert.match(source, /class="ovm-lkcopy"[\s\S]{0,200}onclick="event\.stopPropagation\(\);_ovmCopyAdvLink\(\$\{i\},this\)"/);
-  assert.match(source, /class="ovm-lkcell">\$\{STATE\.role==='master'\|\|STATE\.role==='admin'\?\(lkb\+lkcopy\)/);
+  // 게이트 = 서버 라우트(internalMiddleware) 와 1:1 — AE 포함(2026-08-19 사용자 확정).
+  assert.match(source, /class="ovm-lkcell">\$\{_isInternalRole\(\)\?\(lkb\+lkcopy\)/);
+  assert.match(source, /const lkcopy = _isInternalRole\(\)/);
+  // 업체 패널의 접속 링크 섹션도 같은 게이트여야 한다(복사 버튼이 안내하는 [다시 활성]에 갈 곳이 있어야 한다).
+  assert.match(source, /function _advLinkHtml\(a\)\{[\s\S]{0,300}?if\(!_isInternalRole\(\)\) return '';/);
   // 헤더 칸 수 ≡ 행 칸 수 (열을 끼워 넣을 때 가장 흔히 깨지는 자리)
   const head = source.match(/<div class="ovm-ovt h">([\s\S]*?)<\/div>/);
   assert.ok(head, 'overview header should be extractable');
