@@ -3433,13 +3433,20 @@ async function _loadCampControl(campId) {
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-    body.innerHTML = sheetHtml + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+    // 126: 자동 정리 고지 — 화면이 무슨 일이 일어났는지 말한다(조용한 자동 처리 금지).
+    const autoNote = items.some(r => r.dismissed_by === "auto")
+      ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b> = 구매시간이 만료됐고 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 만료 뒤에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 제출확정]을 누르세요.</div>`
+      : "";
+    body.innerHTML = sheetHtml + autoNote + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
       const dismissed = !!r.dismissed_at;   // 취소확정(미참여) — 종료 마커
+      // 126: 시스템이 정리한 건(주문 흔적 0인 만료)과 사람이 판단한 건을 **구분해서 표기**한다.
+      //   같은 "취소확정"으로 뭉뚱그리면 누가 확정했는지 알 수 없다(조용한 자동 처리 금지).
+      const autoDismissed = dismissed && r.dismissed_by === "auto";
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
       else if (holdValid) st = chip("#FEF3C7", "#92400E", "⏳ 진행중");
-      else if (dismissed) st = chip("#E5E7EB", "#4B5563", "🚫 취소확정");
+      else if (dismissed) st = chip("#E5E7EB", "#4B5563", autoDismissed ? "🚫 미참여(자동)" : "🚫 취소확정");
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
       else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
@@ -3448,14 +3455,17 @@ async function _loadCampControl(campId) {
       // ★ 리뷰 #4: 확정 버튼은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
       //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
       //   취소확정(dismissed)된 건은 종료 처리라 버튼을 다시 띄우지 않는다("다시 알림 안 뜸").
-      const canConfirm = (r.status === "expired" || r.status === "cancelled") && !dismissed;
+      //   ★ 자동 취소확정(auto)된 건도 [제출확정]은 남긴다 — 시스템 주문 링크가 없는 실구매(외부 결제·수기 입력)를
+      //     확정할 길이 막히면 막다른 길이 된다. 서버 confirm 은 dismissed_at 을 되돌리므로 그대로 통과한다.
+      const canConfirm = (r.status === "expired" || r.status === "cancelled") && (!dismissed || autoDismissed);
+      const canDismiss = (r.status === "expired" || r.status === "cancelled") && !dismissed;
       const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const cid = String(campId).replace(/[^a-z0-9_]/gi, "");
       const aid = parseInt(r.id, 10);
       // 제출확정(구매완) = 실제 구매 확인 → 자리 확정 / 취소확정(미참여) = 종료 처리(이후 숨김)
-      const actions = canConfirm ? `<span style="display:inline-flex;gap:6px;flex-shrink:0">
-          <button onclick="campManualConfirm('${cid}',${aid},${r.late_order_id ? 1 : 0})" title="구매 완료 확인 → 자리 확정(카운터·모집 잔여 즉시 반영)" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✅ 제출확정<span style="font-weight:600;opacity:.72"> ·구매완</span></button>
-          <button onclick="campDismiss('${cid}',${aid})" title="미참여로 취소 확정 → 이후 관제·알림에서 숨김" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">🚫 취소확정<span style="font-weight:600;opacity:.72"> ·미참여</span></button>
+      const actions = (canConfirm || canDismiss) ? `<span style="display:inline-flex;gap:6px;flex-shrink:0">
+          ${canConfirm ? `<button onclick="campManualConfirm('${cid}',${aid},${r.late_order_id ? 1 : 0})" title="구매 완료 확인 → 자리 확정(카운터·모집 잔여 즉시 반영)" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✅ 제출확정<span style="font-weight:600;opacity:.72"> ·구매완</span></button>` : ""}
+          ${canDismiss ? `<button onclick="campDismiss('${cid}',${aid})" title="미참여로 취소 확정 → 이후 관제·알림에서 숨김" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">🚫 취소확정<span style="font-weight:600;opacity:.72"> ·미참여</span></button>` : ""}
         </span>` : "";
       return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
         <b style="min-width:64px">${escT(r.applicant_name)}</b>

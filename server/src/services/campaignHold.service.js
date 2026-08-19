@@ -14,6 +14,15 @@ const { logger } = require('../utils/logger');
 const _grace = parseInt(process.env.CAMPAIGN_HOLD_GRACE_SEC || '30', 10);
 const HOLD_GRACE_SEC = Number.isFinite(_grace) && _grace >= 0 ? _grace : 30;
 
+// 구매시간만료 자동 취소확정(사용자 확정 2026-08-19): **주문이 하나도 없는 만료 건만** 시스템이 정리한다.
+//   기구매(late_order_id) 건은 자동으로 자리를 확정하지 않는다 — 정원이 조용히 소진되고 총원 초과가 날 수 있어
+//   지금처럼 관제 [제출확정]으로 사람이 확인한다(수동확정이 유일 구제 경로라는 기존 계약 유지).
+// 킬스위치 CAMPAIGN_AUTO_DISMISS=0 = 종전 동작(전부 사람이 클릭).
+const AUTO_DISMISS_ON = process.env.CAMPAIGN_AUTO_DISMISS !== '0';
+// 사이클당 상한 — 배포 직후 쌓여 있던 백로그를 한 UPDATE 로 몰아치지 않는다(몇 분에 걸쳐 드레인 후 상시 0 수렴).
+const _cap = parseInt(process.env.CAMPAIGN_AUTO_DISMISS_CAP || '500', 10);
+const AUTO_DISMISS_CAP = Number.isFinite(_cap) && _cap > 0 ? _cap : 500;
+
 /** gid 우선(탭 리네임 불변) → gid 없으면 정규화 이름 비교 (레드 #6) */
 function tabMatchesCampaign(camp, sheetId, gid, tabName) {
   if (!camp || !camp.linked_sheet_id || String(camp.linked_sheet_id) !== String(sheetId || '')) return false;
@@ -169,6 +178,52 @@ async function sweepExpiredHolds(pool) {
       WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL
         AND a.status = 'expired' AND a.late_order_id IS NULL`
   );
+  // ③ 되살리기 — 자동 취소확정한 뒤에 주문이 붙은 건은 다시 관제 목록으로 올린다.
+  //   ★ 만료 직후 도착 주문은 confirmHoldInTx 의 late 경로가 status IN ('expired','cancelled') 조건으로
+  //     late_order_id 를 채우므로, 이미 dismissed 여도 링크는 남는다. 이 단계가 없으면 그 줄이
+  //     "취소확정"으로 가려져 **결제한 리뷰어가 조용히 누락된다**(자동화가 만드는 유일한 새 위험).
+  //   ★ 되살리는 것은 시스템이 확정한 건('auto')뿐 — 사람이 미참여로 판단한 건은 되돌리지 않는다.
+  //   ★ ② late 백필 **뒤**에 둔다(같은 사이클에서 방금 붙은 링크까지 본다).
+  let revived = 0, autoDismissed = 0;
+  if (AUTO_DISMISS_ON) {
+    try {
+      const rev = await pool.query(
+        `UPDATE campaign_applications a
+            SET dismissed_at = NULL, dismissed_by = NULL
+          WHERE a.dismissed_by = 'auto' AND a.dismissed_at IS NOT NULL
+            AND (a.late_order_id IS NOT NULL OR a.order_submission_id IS NOT NULL
+                 OR EXISTS (SELECT 1 FROM order_submissions o
+                             WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL))
+          RETURNING a.id`
+      );
+      revived = rev.rowCount;
+      if (revived) logger.info(`[campaignHold] 자동 취소확정 되살림(기구매 도착): ${rev.rows.map(r => r.id).join(',')}`);
+
+      // ④ 자동 취소확정 — 만료 && 주문 흔적 0. status 는 'expired' 그대로 두고 마커만 붙인다.
+      //   ★ status 를 'cancelled' 로 바꾸지 않는 이유 = ② late 백필이 status='expired' 조건이라,
+      //     바꾸면 뒤늦게 도착한 주문의 링크 백필 경로가 끊긴다(되살리기가 무력화).
+      //   ★ quota/유효홀드는 시각 기준이라 이 마커는 정원·상태 계산에 일절 영향 없다(078 규율).
+      const dis = await pool.query(
+        `UPDATE campaign_applications SET dismissed_at = NOW(), dismissed_by = 'auto'
+          WHERE id IN (
+            SELECT a.id FROM campaign_applications a
+             WHERE a.status = 'expired' AND a.dismissed_at IS NULL
+               AND a.late_order_id IS NULL AND a.order_submission_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM order_submissions o
+                                WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL)
+             ORDER BY a.id
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED)
+          RETURNING id`,
+        [AUTO_DISMISS_CAP]
+      );
+      autoDismissed = dis.rowCount;
+    } catch (e) {
+      // fail-soft: 자동 정리가 실패해도 만료 마킹·late 백필·closed 백스톱은 그대로 굴러가야 한다.
+      logger.warn(`[campaignHold] 자동 취소확정 스킵: ${e.message}`);
+    }
+  }
+
   // ③ closed 영속 백스톱(soft_full 영구표류 방지). ★ 후보를 먼저 뽑고 시트 일정 캠페인은 제외 —
   //    영속하면 시트에 날짜를 추가해도 재개되지 않기 때문(063 자동 재개 보장).
   const cand = await pool.query(
@@ -196,7 +251,7 @@ async function sweepExpiredHolds(pool) {
     closedCount = closed.rowCount;
     if (closedCount) logger.info(`[campaignHold] closed 영속(백스톱): ${closed.rows.map(r => r.id).join(',')}`);
   }
-  return { expired: exp.rowCount, closedPersisted: closedCount };
+  return { expired: exp.rowCount, autoDismissed, revived, closedPersisted: closedCount };
 }
 
 module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds };
