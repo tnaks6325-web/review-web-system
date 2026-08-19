@@ -2027,10 +2027,10 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-menu button.danger{color:#b42318}
 /* 🗑 작업 삭제 확인창 — 지워질 표 목록이 길어 기본 460px·무한 높이로는 읽을 수 없다.
    ★ flex 자식 min-height:0 이 없으면 스크롤이 안 생긴다(레포 상습 함정). */
-#tdOv .wbl-dlg{width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column}
-#tdOv .wbl-db{flex:1;min-height:0;overflow:auto}
-#tdOv .tdrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px}
-#tdOv .tdrow b{font-variant-numeric:tabular-nums}
+#tdOv .wbl-dlg,#ocOv .wbl-dlg{width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column}
+#tdOv .wbl-db,#ocOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#tdOv .tdrow,#ocOv .tdrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px}
+#tdOv .tdrow b,#ocOv .tdrow b{font-variant-numeric:tabular-nums;white-space:nowrap}
 #tdOv .tdbad{margin-top:10px;padding:10px 12px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
 /* ⚠중복 진단 — 표가 7칸이라 기본 460px 로는 가로가 잘린다. **이 모달에만** 넓힘(다른 wbl 모달 불변).
    ★ flex 자식은 기본 min-height:auto 라 min-height:0 이 없으면 본문이 늘어나 스크롤이 안 생긴다. */
@@ -7985,6 +7985,10 @@ async function renderCampaignsView(){
   //   스크롤 컨테이너에 섞여 팝업이 아니라 페이지 하단 블록으로 보인다(실측).
   if(window.RecruitModal) RecruitModal.mount();
   await _loadPerm();
+  /* ★ 머리말을 **먼저** 그린다 — 종전엔 카드 렌더 훅에서만 그려서 **공고가 0건이면 머리말 자체가
+     없었다**(＋새 공고·보관함·정리 버튼이 통째로 사라져 아무것도 시작할 수 없는 막다른 길).
+     건수는 목록이 도착하면 그 훅이 다시 채운다. */
+  _rcRenderHead(0);
   /* 연결 탭 드롭다운 재료 — 관리자 대시보드는 모집공고 탭 진입 시 목록과 **함께** 채운다
      (index-app.js switchAdminTab). 여기만 빠져 있어 카드 [✏️ 수정]으로 연 모달의
      시트 선택이 통째로 비어 있었다. 모달도 스스로 보장하지만(index-recruit), 뷰 진입 때
@@ -8000,11 +8004,90 @@ function _rcRenderHead(total){
     ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()" title="보관(폐기)한 공고 보기 — 끝난 공고는 카드 [⋯] → [📦 보관]">📦 보관함</button>
+    ${_taskDelAllowed()?'<button class="btn" onclick="openOrphanCampaigns()" title="작업이 삭제됐는데 남아 있는 공고를 찾아 정리합니다(무엇이 지워질지 먼저 보여줍니다)">🧹 지워진 작업의 공고</button>':''}
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
       ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용 — 발행·수정은 편집 허용명단에 있는 담당자만 가능합니다.</b>'}</div>`;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   🧹 지워진 작업의 남은 공고 정리 (admin/master) — 미리보기 → 체크 → 삭제
+   ★ 판정은 **서버**가 한다(화면은 보여주고 확인만 받는다 — 프론트 재판정 0).
+   ★ 확인창은 body 직속 · 바깥 클릭으로 닫히지 않는다(고른 것 보호) · onclick 은 인덱스 없음(전량 대상).
+   ══════════════════════════════════════════════════════════════════════════ */
+function _ocClose(){ const o=document.getElementById('ocOv'); if(o) o.remove(); STATE.ocItems=null; }
+function _ocShell(inner){
+  let ov=document.getElementById('ocOv');
+  if(!ov){ ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='ocOv'; document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="wbl-dlg">${inner}</div>`;
+  if(!ov.dataset.k){ ov.dataset.k='1'; document.addEventListener('keydown',e=>{ if(e.key==='Escape') _ocClose(); }); }
+}
+async function openOrphanCampaigns(){
+  if(!_taskDelAllowed()){ toast('관리자만 정리할 수 있습니다'); return; }
+  _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고</div>
+    <div class="wbl-db">남은 공고를 찾는 중…</div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_ocClose()">닫기</button></div>`);
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/orphan-campaigns'); }catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고</div>
+      <div class="wbl-db"><b class="bad">찾지 못했습니다</b>
+        <div class="wbl-sub">${esc((j&&(j.error||j.message))||'조회 실패')}</div>
+        <div class="wbl-sub">확인하지 못한 상태로는 지우지 않습니다.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="openOrphanCampaigns()">다시 시도</button>
+        <button class="wbl-b" onclick="_ocClose()">닫기</button></div>`);
+    return;
+  }
+  const items=j.items||[];
+  STATE.ocItems=items;
+  if(!items.length){
+    _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고</div>
+      <div class="wbl-db"><b class="good">정리할 공고가 없습니다</b>
+        <div class="wbl-sub">대상 = 연결된 작업이 <b>등록부·장부·시트 어디에도 없는</b> 공고입니다.
+          작업을 연결하지 않은 공고(미연결)는 대상이 아닙니다.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="_ocClose()">닫기</button></div>`);
+    return;
+  }
+  const rows=items.map(c=>`<div class="tdrow"><span>${esc(c.title||'(제목 없음)')}
+      <span class="wbl-sub">${esc(c.tabName||'')}${c.archivedAt?' · 보관됨':''}</span></span>
+    <b>참여 ${c.applications==null?'?':c.applications}건</b></div>`).join('');
+  _ocShell(`<div class="wbl-dh">🧹 지워진 작업의 공고 ${items.length}건 — 되돌릴 수 없습니다</div>
+    <div class="wbl-db">연결된 작업이 <b>등록부·장부·시트 어디에도 없는</b> 공고입니다(작업이 이미 삭제됨).
+      <div class="wbl-facts">${rows}</div>
+      ${j.truncated?'<div class="wbl-sub">일부만 표시했습니다 — 정리 후 다시 열면 나머지가 보입니다.</div>':''}
+      <ul class="wbl-ul">
+        <li>그 공고의 <b>참여 신청·옵션·리뷰비 구간·차수·날짜별 인원</b>도 함께 사라집니다.</li>
+        <li>입금 회차 자체는 그대로 남습니다(회차 항목의 공고 연결만 비워집니다).</li>
+      </ul>
+      <label class="wbl-chk"><input type="checkbox" id="ocOk" onchange="_ocSync()">
+        위 ${items.length}건이 <b>영구히 삭제</b>되는 것에 동의합니다.
+        <span class="sub">복구 수단이 없습니다 — 지운 뒤에는 백업으로만 되살릴 수 있습니다.</span></label></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_ocClose()">취소</button>
+      <button class="wbl-b dark" id="ocGo" disabled onclick="_ocGo()">🗑 ${items.length}건 삭제</button></div>`);
+}
+function _ocSync(){ const ok=document.getElementById('ocOk'), b=document.getElementById('ocGo');
+  if(b) b.disabled=!(ok&&ok.checked); }
+async function _ocGo(){
+  const items=(STATE.ocItems||[]), ok=document.getElementById('ocOk');
+  if(!items.length||!(ok&&ok.checked)) return;
+  const b=document.getElementById('ocGo'), label=b?b.textContent:'';
+  if(b){ b.disabled=true; b.textContent='삭제 중…'; }
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/orphan-campaigns/delete',{method:'POST',
+    body:JSON.stringify({ids:items.map(c=>c.id),confirm:true})}); }
+  catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    if(b){ b.disabled=false; b.textContent=label||'🗑 삭제'; }
+    toast('⚠ 정리 실패: '+((j&&(j.error||j.message))||''));
+    return;
+  }
+  _ocClose();
+  // ★ 부분 결과를 "완료"로 꾸미지 않는다 — 그 사이 작업이 되살아난 건은 건너뛴다.
+  toast(j.skipped ? `🧹 ${j.deleted}건 정리 · ${j.skipped}건은 작업이 살아 있어 건너뜀`
+                  : `🧹 공고 ${j.deleted}건을 정리했습니다`);
+  if(typeof loadRecruitList==='function') loadRecruitList();
+}
 
 /* ── 편집 허용명단 관리(master/admin 전용) ─────────────────────
    후보는 **인트라넷 직원DB**에서 고른다(담당AE 자동완성과 같은 프록시 재사용).

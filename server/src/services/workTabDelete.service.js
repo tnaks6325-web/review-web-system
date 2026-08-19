@@ -285,4 +285,74 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
   } finally { client.release(); }
 }
 
-module.exports = { previewTaskDelete, deleteTask, DELETE_TABLES, MONEY_TABLES, __setPoolForTest };
+/* ══════════════════════════════════════════════════════════════════════════
+   지워진 작업의 남은 공고 정리 (사용자 확정 2026-08-19)
+   ──────────────────────────────────────────────────────────────────────────
+   왜: 작업 삭제가 공고까지 지우기 **전에** 지운 작업들이 있어(그때는 보관 처리만 했다),
+   가리키는 작업이 없는 공고가 목록에 남아 있다. 그 잔재를 사람이 확인하고 치우는 창구다.
+
+   ★★ 판정은 fail-closed — "연결이 **명시돼 있는데** 그 작업이 어디에도 없다" 만 고른다.
+     · 연결 시트·탭이 **둘 다 적혀 있어야** 한다 — 빈 값은 "미연결 공고"(정상 발행 전 상태)라
+       대상이 아니다. 빈 값으로 매칭하면 멀쩡한 공고가 통째로 지워진다.
+     · `tab_configs`(등록부) · `index_master`(장부) · `raw_sheet_tabs`(시트 미러) **셋 다 없을 때만**.
+       하나라도 있으면 그 작업은 살아 있다(등록만 빠진 상태일 수 있다).
+     · 탭 이름이 바뀐 경우를 대비해 **gid 로도 찾아본다**(리네임을 삭제로 오인하지 않는다).
+   ★ 실행은 **id 를 받아** 그 시점에 다시 판정한다 — 낡은 화면이 보낸 id 라도 지금 살아 있는
+     작업의 공고면 건너뛰고 사유를 보고한다(조용한 파괴 금지).
+   ══════════════════════════════════════════════════════════════════════════ */
+const ORPHAN_CAMPAIGN_WHERE = `
+      COALESCE(rc.linked_sheet_id,'') <> '' AND COALESCE(rc.linked_tab_name,'') <> ''
+  AND NOT EXISTS (SELECT 1 FROM tab_configs tc
+                   WHERE tc.sheet_id = rc.linked_sheet_id
+                     AND (tc.tab_name = rc.linked_tab_name
+                          OR (COALESCE(rc.linked_tab_gid,'') <> '' AND tc.tab_gid = rc.linked_tab_gid)))
+  AND NOT EXISTS (SELECT 1 FROM index_master im
+                   WHERE im.sheet_id = rc.linked_sheet_id
+                     AND (im.tab_name = rc.linked_tab_name
+                          OR (COALESCE(rc.linked_tab_gid,'') <> '' AND im.tab_gid = rc.linked_tab_gid)))
+  AND NOT EXISTS (SELECT 1 FROM raw_sheet_tabs rst
+                   WHERE rst.sheet_id = rc.linked_sheet_id
+                     AND (rst.tab_name = rc.linked_tab_name
+                          OR (COALESCE(rc.linked_tab_gid,'') <> '' AND rst.tab_gid = rc.linked_tab_gid)))`;
+
+/** 미리보기 — **쓰기 0건**. 무엇이 지워질지 사람이 보고 판단한다. */
+async function findOrphanCampaigns({ limit = 200, pool } = {}) {
+  const db = pool || _db();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+  const { rows } = await db.query(
+    `SELECT rc.id, rc.title, rc.status, rc.archived_at AS "archivedAt", rc.created_at AS "createdAt",
+            rc.linked_sheet_id AS "sheetId", rc.linked_tab_name AS "tabName",
+            (SELECT COUNT(*) FROM campaign_applications ca WHERE ca.campaign_id = rc.id)::int AS applications
+       FROM recruit_campaigns rc
+      WHERE ${ORPHAN_CAMPAIGN_WHERE}
+      ORDER BY rc.created_at DESC LIMIT $1`, [lim]);
+  return { ok: true, items: rows || [], truncated: (rows || []).length >= lim };
+}
+
+/** 실행 — 고른 공고만, 그 시점에 다시 판정해서. 참여 신청 등은 FK CASCADE 로 함께 사라진다. */
+async function deleteOrphanCampaigns({ ids, confirm, by = 'admin', pool } = {}) {
+  if (confirm !== true) return { ok: false, code: 'confirm_required', error: '삭제 확인이 필요합니다.' };
+  const list = (Array.isArray(ids) ? ids : []).map(x => String(x || '')).filter(Boolean).slice(0, 500);
+  if (!list.length) return { ok: false, code: 'empty', error: '지울 공고를 고르지 않았습니다.' };
+
+  const db = pool || _db();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    // ★ 지금도 고아인 것만 지운다 — 그 사이 작업이 되살아났으면 건너뛴다(낡은 화면 방어).
+    const { rows } = await client.query(
+      `DELETE FROM recruit_campaigns rc
+        WHERE rc.id = ANY($1::text[]) AND ${ORPHAN_CAMPAIGN_WHERE}
+        RETURNING rc.id, rc.title`, [list]);
+    await client.query('COMMIT');
+    const deleted = rows || [];
+    const skipped = list.filter(id => !deleted.some(r => String(r.id) === id));
+    logger.info(`[workTabDelete/orphanCampaigns] ${deleted.length}건 삭제 by ${by}${skipped.length ? ` · 건너뜀 ${skipped.length}` : ''}`);
+    return { ok: true, deleted: deleted.length, items: deleted, skipped: skipped.length, skippedIds: skipped };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw err;
+  } finally { client.release(); }
+}
+
+module.exports = { previewTaskDelete, deleteTask, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, __setPoolForTest };
