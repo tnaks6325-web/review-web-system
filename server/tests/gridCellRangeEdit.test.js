@@ -222,7 +222,12 @@ console.log('\n[3] 붙여넣기 — 편집 가능한 칸에만');
   vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
   vm.runInContext('_selectionTsv()', sandbox);
   ok('열람 전용도 복사는 된다(선택은 유효)', vm.runInContext('_selectionTsv()', sandbox) === '이진우');
-  eq('열람 전용 계정에는 붙여넣기 이벤트가 애초에 걸리지 않는다(배선)', /if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
+  // 2026-08-19 사용자 확정: 업체(광고주)는 택배송장 칸만 편집·붙여넣기 한다 → 게이트가 `_canEditCells()` 로 바뀌었다.
+  //   (열람 전용 계정은 그 함수가 false 를 돌려주므로 차단은 그대로 — 실제 대상 판정은 `.gedit` 이 최종적으로 한다.)
+  eq('붙여넣기 이벤트는 "고칠 수 있는 칸이 있는 계정"에만 걸린다(배선)',
+    /if\(!_canEditCells\(\) \|\| !STATE\.gSelRange\) return;/.test(HTML), true);
+  eq('열람 전용(업체 아님)은 _canEditCells 가 false — 종전대로 차단',
+    /function _canEditCells\(\)\{\s*if\(STATE\.canEdit\) return true;\s*return STATE\.role==='advertiser'/.test(HTML), true);
   void commits; void toasts;
 }
 

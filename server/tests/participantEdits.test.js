@@ -175,11 +175,16 @@ async function run() {
   svc.__setPoolForTest(cp);
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r3', field: 'round', value: '9' });
   assert.ok(!e.ok && e.error === 'ambiguous_identity', '3d: 중복 identity 편집 거부');
-  // 3e: 앵커 전무 → 거부
+  // 3e: 앵커 전무(빈 준비 자리) → **물리행 앵커**로 저장한다(사용자 확정 2026-08-19).
+  //   종전엔 거부였는데, 그러면 아직 배정되지 않은 빈 줄에 송장·비고를 미리 적어 두는
+  //   시트 시절의 일상 작업이 작업보드에서 구조적으로 불가능했다. 물리행 id 는 투영 업서트가
+  //   (sheet_id, tab_name, seq) 로 보존하므로 manual 물리행과 같은 수준으로 안정적이다.
   cp = makeConnectPool({ row: { id: 'r6', source: 'import', order_submission_id: null, identity_key: null, phone8: '', recipient_name: null, option_text: null, row_json: {} } });
   svc.__setPoolForTest(cp);
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r6', field: 'round', value: '9' });
-  assert.ok(!e.ok && e.error === 'no_stable_anchor', '3e: 안정 앵커 없으면 거부');
+  assert.ok(e.ok && e.anchorType === 'manual', '3e: 앵커 없는 빈 줄은 물리행 앵커로 저장');
+  assert.strictEqual(cp.q.find(x => /INSERT INTO participant_edits/.test(x.s)).params[3], 'r6',
+    '3e-2: 그 앵커 값은 물리행 id 다(seq·정렬에 기대지 않는다)');
   // 3f: 화이트리스트 밖 field 거부(row 조회 전)
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'sheet_id', value: 'evil' });
   assert.ok(!e.ok && e.error === 'field_not_editable', '3f: 화이트리스트 외 field 거부');
