@@ -520,7 +520,9 @@
   .lock{font-size:10px;opacity:.5}
   tr.amb{background:color-mix(in srgb,var(--warn-soft) 40%,transparent)}
   .rmrow{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;font-size:13px;line-height:1} .rmrow:hover{color:var(--bad);border-color:var(--bad)}
-  .wchip{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--warn-soft);color:var(--warn);cursor:pointer} .wchip.bad{background:var(--bad-soft);color:var(--bad)}
+  .wchip{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--warn-soft);color:var(--warn);cursor:default} .wchip.bad{background:var(--bad-soft);color:var(--bad)}
+  /* ★ 누를 수 있는 칩만 손가락 커서 — 권한이 없어 동작이 없는 칩이 눌리는 것처럼 보이면 안 된다. */
+  .wchip[onclick]{cursor:pointer} .wchip.clk{text-decoration:underline dotted;text-underline-offset:2px}
   .addgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:8px 0} .addgrid input{padding:7px 10px;border:1px solid var(--line2);border-radius:7px;font:inherit;font-size:13px}
   .editnote{font-size:11px;color:var(--faint);margin-top:12px;line-height:1.5;padding:8px 10px;background:var(--card2);border-radius:8px}
   .hrow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12.5px;border-top:1px solid var(--line)}
@@ -3586,6 +3588,103 @@ async function ddRun(){
     if (idx >= 0) selTab(idx);
   } catch (e) { _DD.busy = false; _DD.err = '정리 실패: ' + (e.message || ''); _ddRender(); }
 }
+/* ── 🔎 ⚠중복 진단 (읽기 전용) ────────────────────────────────────────────────
+   왜: 상단 `중복 줄 N` 배지와 [♻ 중복 줄 정리]는 **보는 집합도 판정 키도 다르다**.
+     · 배지 = 앵커(주문 링크 id → 표 주문번호/수취인/연락처) 겹침. **주문 링크 없는 줄도 포함**.
+     · 정리 = 주문 기록에 연결된 줄만 + 표 주문번호·원장 주문번호·연락처 3개 일치.
+   그래서 "중복 줄 116 · 정리 대상 0" 이 정상적으로 나온다(2026-08-19 장수산업 실측).
+   이 창은 그 겹친 줄들이 **무엇이고 왜 정리 대상이 아닌지**를 그룹별로 보여주기만 한다.
+   ★ 판정·분류는 전부 서버(`/worktable/ambiguous-rows`) — 화면은 결과를 그대로 그린다(재판정 0).
+   ★ 읽기 전용 — 이 창에는 실행 버튼이 없다. */
+let _AB = null;
+/* ★ 서버 게이트(adminOrMaster)와 1:1 — 넓히면 눌러도 403 나는 죽은 버튼이 된다. */
+function _abCan(){ return STATE.role === 'master' || STATE.role === 'admin'; }
+function closeAmbiguousModal(){ const o = document.getElementById('abOv'); if (o) o.remove(); _AB = null; }
+if (!window._abKeyBound) {
+  window._abKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('abOv')) closeAmbiguousModal(); });
+}
+const _AB_KIND = {
+  order_link: '같은 주문 기록(주문 링크)을 여러 줄이 쓰고 있음',
+  row_order_num: '표에 보이는 주문번호가 같음 (주문 링크 없는 줄)',
+  recipient: '수취인 + 연락처가 같음 (주문 링크 없는 줄)',
+  phone8: '연락처가 같음 (주문번호·수취인 없음)',
+};
+function openAmbiguousModal(){
+  if (!_abCan() || !STATE.cur) return;
+  const t = STATE.cur;
+  _AB = { sheetId: t.sheetId, tabName: t.tabName, label: (t.displayName || t.tabName), rep: null, err: '', busy: true };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'abOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🔎 ⚠중복 진단 — 무엇이 겹쳤나</div>
+    <div class="wbl-db" id="abBody"></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="closeAmbiguousModal()">닫기</button></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
+  _abRender();
+  _abLoad();
+}
+async function _abLoad(){
+  const q = `?sheetId=${encodeURIComponent(_AB.sheetId)}&tabName=${encodeURIComponent(_AB.tabName)}`;
+  try {
+    const j = await api('/api/trackb/worktable/ambiguous-rows' + q);
+    if (!_AB) return;                                   // 그 사이 닫힘
+    if (!j || j.ok === false) { _AB.busy = false; _AB.err = (j && (j.error || j.message)) || '조회 실패'; _abRender(); return; }
+    _AB.busy = false; _AB.rep = j; _abRender();
+  } catch (e) {
+    /* ★ 자리표시자를 깐 창은 어떤 예외에도 화면을 종결시킨다(무한 '불러오는 중' 금지). */
+    if (!_AB) return;
+    _AB.busy = false; _AB.err = '조회 실패: ' + (e.message || ''); _abRender();
+  }
+}
+function _abGroupHtml(g, i){
+  const rows = (g.rows || []).map(r => {
+    const flags = [
+      r.hasOrder ? '' : '<span style="color:#b91c1c">주문 링크 없음</span>',
+      r.submitted ? '리뷰제출' : '',
+      r.paid ? '입금' : '',
+      r.inPayment === true ? '<span style="color:#b91c1c"><b>입금 회차에 담김</b></span>' : (r.inPayment === null ? '<span style="color:#6b7280">이체 담김 여부 모름</span>' : ''),
+    ].filter(Boolean).join(' · ');
+    return `<tr><td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
+      <td class="num">${esc(r.phone8 || '')}</td>
+      <td class="num">${esc(r.rowOrderNum || '—')}</td>
+      <td class="num">${esc(r.ledgerOrderNum || '—')}</td>
+      <td class="num">${esc(_ddDay(r.submittedAt))}</td>
+      <td>${flags}</td></tr>`;
+  }).join('');
+  return `<div style="margin:10px 0 0;padding:8px 10px;border:1px solid var(--line,#e5e7eb);border-radius:8px">
+    <div><b>#${i + 1}</b> · ${esc(String(g.rowCount))}줄 (줄 ${esc((g.seqs || []).join(', '))})
+      — ${esc(_AB_KIND[g.anchorKind] || g.anchorKind)}</div>
+    <div class="wbl-facts" style="margin:6px 0">${esc(g.detail || g.reason || '')}</div>
+    <table class="lgtable"><thead><tr><th>줄</th><th>참여자</th><th>연락처 뒤8</th>
+      <th>표 주문번호</th><th>주문기록 주문번호</th><th>제출시각</th><th>표시</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+}
+function _abRender(){
+  const b = document.getElementById('abBody'); if (!b || !_AB) return;
+  const r = _AB.rep;
+  if (_AB.busy) { b.innerHTML = `<b>${esc(_AB.label)}</b><div class="wbl-facts">불러오는 중…</div>`; return; }
+  if (_AB.err) {
+    b.innerHTML = `<b>${esc(_AB.label)}</b><div class="wbl-facts" style="color:#b91c1c">${esc(_AB.err)}</div>
+      <div><button class="wbl-b" onclick="_AB.busy=true;_AB.err='';_abRender();_abLoad()">다시 시도</button></div>`;
+    return;
+  }
+  const byR = r.byReason || {};
+  const summary = Object.keys(byR).map(k => `${esc(k)} ${byR[k]}`).join(' · ');
+  b.innerHTML = `<b>${esc(_AB.label)}</b>
+    <div class="wbl-facts">상단 배지 <b>중복 줄 ${esc(String(r.ambiguousRows))}</b> 는
+      <b>앵커(주문 링크 · 표 주문번호 · 수취인/연락처)가 겹쳐</b> 그 줄에 <b>수정 오버레이(직원이 손으로 적은
+      입금일·리뷰제출 표시)를 적용하지 않은</b> 줄 수입니다. [♻ 중복 줄 정리]는 <b>주문 기록에 연결된 줄만</b>,
+      그리고 <b>표 주문번호·주문기록 주문번호·연락처가 셋 다 같을 때만</b> 대상으로 잡습니다 —
+      그래서 두 숫자가 다를 수 있습니다. 이 창은 <b>읽기 전용</b>이고 아무것도 바꾸지 않습니다.</div>
+    <div>표 ${esc(String(r.totalRows))}줄 중 겹친 줄 <b>${esc(String(r.ambiguousRows))}</b>
+      · 그룹 <b>${esc(String(r.groupCount))}</b>${summary ? ` · 사유별 ${summary}` : ''}</div>
+    ${r.dedupeError ? `<div class="wbl-facts" style="color:#92400e">정리 도구와 대조하지 못했습니다(${esc(r.dedupeError)}) —
+      "정리 대상/보류" 표시는 이번 결과에 없습니다.</div>` : ''}
+    ${r.payUnavailable ? `<div class="wbl-facts" style="color:#b91c1c">입금 회차에 담긴 줄인지 확인하지 못했습니다 —
+      지우기 전에 입금관리에서 직접 확인하세요.</div>` : ''}
+    ${r.truncated ? `<div class="wbl-facts">그룹이 많아 상위 ${esc(String((r.groups || []).length))}개만 보여줍니다.</div>` : ''}
+    ${(r.groups || []).length ? (r.groups || []).map(_abGroupHtml).join('')
+      : `<div class="wbl-facts">겹친 줄이 없습니다.</div>`}`;
+}
 /* ── ＋ 블로거 추가 (블로그체험단 M5-2) ────────────────────────────────────────
    왜: 블로그체험단은 공고 밖(카톡·직접 섭외)으로 데려오는 블로거가 있는데, 그 사람은
    홀드를 잡지 않으므로 명단에 들어올 길이 없었다. 표를 눈으로 채워도 **연락처가 없으면**
@@ -4516,7 +4615,13 @@ function renderWorkdesk(wd){
   const warn=[];
   if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
   if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
-  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="같은 주문·신원이 여러 줄이라 수정 오버레이를 적용하지 않은 행 — 중복 줄을 먼저 정리해야 합니다">중복 줄 ${c.ambiguous}</span>`);
+  /* ★ 배지를 누르면 그 줄들의 실체를 본다(읽기 전용 진단). 클릭 가능은 **서버 게이트와 1:1**
+     (`/worktable/ambiguous-rows` = adminOrMaster) — AE 에게 열면 눌러도 403 나는 죽은 버튼이 된다.
+     AE 에게는 종전처럼 숫자만 보여준다(정보는 잃지 않는다). */
+  if(canEdit && c.ambiguous>0){
+    const ambCan = _abCan();
+    warn.push(`<span class="wchip${ambCan?' clk':''}" title="같은 주문·신원이 여러 줄이라 수정 오버레이(입금일 포함)를 적용하지 않은 행${ambCan?' — 눌러서 무엇이 겹쳤는지 봅니다':' — 관리자에게 확인을 요청하세요'}"${ambCan?' onclick="openAmbiguousModal()"':''}>중복 줄 ${c.ambiguous}${ambCan?' 🔎':''}</span>`);
+  }
   let tableSection;
   if(gridMode){
     tableSection = buildGrid(wd);

@@ -4203,7 +4203,157 @@ async function assignUnslottedOrderToOpenSlot({ sheetId, tabName, rowId, by = 'a
   } finally { client.release(); }
 }
 
+/* ── ⚠중복(앵커 겹침) 진단 — 읽기 전용 ────────────────────────────────────────
+   왜 필요한가: 그리드 상단 `중복 줄 N` 배지(= 앵커가 겹쳐 **수정 오버레이를 적용하지 못한** 줄)와
+   ♻ 중복 줄 정리(`sheetlessLedger.dedupeRows`)는 **보는 집합도 판정 키도 다르다**.
+     · 배지  = 앵커(order_submission_id → identity_key) 겹침. **주문 링크 없는 줄도 포함**.
+     · 정리  = `JOIN order_submissions`(링크된 줄만) + 표 주문번호·원장 주문번호·연락처 3개 일치.
+   그래서 "중복 줄 116 · 정리 대상 0" 이 정상적으로 나올 수 있다(2026-08-19 장수산업 실측).
+   담당자에게 그 116줄의 실체를 볼 창구가 없으면 원인을 엉뚱한 데서 찾는다.
+   ★★ 판정 사본 0 — 겹침은 그리드가 쓰는 `_deriveAnchor` 로 **그대로** 다시 세고,
+      "정리 도구가 이 그룹을 잡는가" 는 `dedupeRows({dryRun:true})` 를 **실제로 불러** 대조한다.
+      여기서 조건을 다시 쓰면 "진단은 잡힌다는데 정리하면 0" 이 된다.
+   ★ 쓰기 쿼리 0 · 시트/Drive 무접촉 · dedupe 대조 실패는 fail-soft(사유만 적는다).
+   ★ `dedupeFn` 은 테스트 주입용(모듈 내부 호출은 렉시컬이라 export 교체가 안 먹는다 —
+      `cutoverAll` 의 `overviewFn`/`flipFn`, `scanDuplicateRows` 의 `dedupeFn` 과 같은 선례). */
+const _AMB_REASON = {
+  dedupe_target:      '정리 도구가 이미 대상으로 잡는 그룹입니다 — [미리보기]에 나옵니다.',
+  dedupe_skipped:     '정리 도구가 보류한 그룹입니다 — 미리보기의 보류 사유를 보세요.',
+  no_order_link:      '주문 기록에 연결되지 않은 줄이 섞여 있습니다 — 정리 도구는 연결된 줄만 보므로 이 그룹은 조회 대상 밖입니다.',
+  row_order_num_missing: '표에 주문번호가 없거나 6자리 미만인 줄이 있습니다 — 정리 도구가 "모르면 안 지운다"로 제외합니다.',
+  row_order_num_differs: '표에 보이는 주문번호가 줄마다 다릅니다 — 정리 도구는 다른 구매로 봅니다(줄↔주문 링크가 어긋난 상태일 수 있습니다).',
+  ledger_order_num_differs: '주문 기록의 주문번호가 줄마다 다릅니다 — 정리 도구는 다른 구매로 봅니다.',
+  phone_differs:      '연락처가 줄마다 다릅니다 — 정리 도구는 다른 사람으로 봅니다.',
+  unknown:            '정리 도구의 대상에도 보류에도 잡히지 않았습니다 — 값을 직접 확인해 주세요.',
+};
+async function ambiguousRowReport({ sheetId, tabName, maxGroups = 200, dedupeFn } = {}) {
+  if (!sheetId || !tabName) throw new Error('ambiguousRowReport: sheetId, tabName 필수');
+  const db = getPool();
+
+  // 명단(활성) — 그리드(workdeskTab)와 **같은 조건**. 다르면 배지 숫자와 진단 숫자가 갈린다.
+  const { rows: roster } = await db.query(
+    `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8,
+            option_text AS option, source, order_submission_id, identity_key, row_json,
+            COALESCE(is_submitted, FALSE) AS submitted, COALESCE(is_paid, FALSE) AS paid
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE
+      ORDER BY seq`, [sheetId, tabName]);
+
+  const anchorCount = new Map();
+  for (const r of roster) {
+    const a = _deriveAnchor(r);
+    if (!a || a.type === 'manual') continue;
+    const k = _akey(a.type, a.value);
+    anchorCount.set(k, (anchorCount.get(k) || 0) + 1);
+  }
+
+  // 원장(주문 기록) — 링크된 줄만. 표 주문번호와 대조할 값이다.
+  const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
+  let ordMap = new Map();
+  if (orderIds.length) {
+    const { rows: ords } = await db.query(
+      `SELECT id, order_num, phone, submitted_at
+         FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+      [orderIds]).catch(() => ({ rows: [] }));
+    ordMap = new Map(ords.map(o => [String(o.id), o]));
+  }
+  // 입금 회차에 담긴 줄 — 지우기 전에 반드시 확인해야 하는 사실(이체 근거).
+  const payRows = new Set();
+  await db.query(
+    `SELECT row_index FROM payment_batch_items
+      WHERE sheet_id=$1 AND tab_name=$2 AND status IN ('pending','paid')`, [sheetId, tabName])
+    .then(({ rows }) => rows.forEach(r => payRows.add(Number(r.row_index))))
+    .catch(() => { /* fail-soft — 아래 payUnavailable 로 고지 */ payRows.add(NaN); });
+  const payUnavailable = payRows.has(NaN);
+
+  // ★ 정리 도구 대조 — 실제로 불러서 어느 줄을 잡는지 본다(사본 0).
+  let dedupePlanSeqs = null, dedupeSkipSeqs = null, dedupeError = '';
+  try {
+    const fn = dedupeFn || require('./sheetlessLedger.service').dedupeRows;
+    const d = await fn({ sheetId, tabName, dryRun: true, by: 'ambiguous-report' });
+    dedupePlanSeqs = new Set();
+    for (const g of (d.plan || [])) { dedupePlanSeqs.add(Number(g.keepSeq)); (g.removeSeqs || []).forEach(s => dedupePlanSeqs.add(Number(s))); }
+    dedupeSkipSeqs = new Set();
+    for (const g of (d.skipped || [])) (g.seqs || []).forEach(s => dedupeSkipSeqs.add(Number(s)));
+  } catch (e) {
+    dedupeError = (e && (e.message || e.code)) ? String(e.message || e.code) : '대조 실패';
+  }
+
+  const _dig = v => String(v == null ? '' : v).replace(/\D/g, '');
+  const groups = new Map();
+  let ambiguousRows = 0;
+  for (const r of roster) {
+    const a = _deriveAnchor(r);
+    if (!a || a.type === 'manual') continue;
+    const k = _akey(a.type, a.value);
+    if ((anchorCount.get(k) || 0) < 2) continue;
+    ambiguousRows++;
+    const os = r.order_submission_id ? ordMap.get(String(r.order_submission_id)) : null;
+    if (!groups.has(k)) groups.set(k, { anchorType: a.type, anchorValue: a.value, rows: [] });
+    groups.get(k).rows.push({
+      seq: Number(r.seq),
+      name: r.name || '',
+      recipient: r.recipient || '',
+      phone8: String(r.phone8 || '').slice(-8),
+      hasOrder: !!r.order_submission_id,
+      rowOrderNum: _dig(_ikFromRow(r).orderNum),        // 표(row_json)에 보이는 주문번호
+      ledgerOrderNum: _dig(os && os.order_num),          // 주문 기록의 주문번호
+      ledgerPhone: _dig(os && os.phone).slice(-8),
+      submittedAt: (os && os.submitted_at) || null,
+      submitted: !!r.submitted,
+      paid: !!r.paid,
+      inPayment: payUnavailable ? null : payRows.has(Number(r.seq)),
+    });
+  }
+
+  const _same = (list, f) => new Set(list.map(f)).size <= 1;
+  const out = [];
+  for (const g of groups.values()) {
+    g.rows.sort((a, b) => a.seq - b.seq);
+    const seqs = g.rows.map(r => r.seq);
+    let reason;
+    if (dedupePlanSeqs && seqs.every(s => dedupePlanSeqs.has(s))) reason = 'dedupe_target';
+    else if (dedupeSkipSeqs && seqs.every(s => dedupeSkipSeqs.has(s))) reason = 'dedupe_skipped';
+    else if (g.rows.some(r => !r.hasOrder)) reason = 'no_order_link';
+    else if (g.rows.some(r => r.rowOrderNum.length < 6)) reason = 'row_order_num_missing';
+    else if (!_same(g.rows, r => r.rowOrderNum)) reason = 'row_order_num_differs';
+    else if (!_same(g.rows, r => r.ledgerOrderNum)) reason = 'ledger_order_num_differs';
+    else if (!_same(g.rows, r => r.ledgerPhone)) reason = 'phone_differs';
+    else reason = 'unknown';
+    out.push({
+      anchorType: g.anchorType,
+      /* 앵커 종류 — 같은 주문 id 를 여러 줄이 쓰는지, 표 주문번호(num:)·수취인(rcp:)·연락처(phone8:)로
+         묶인 무링크 줄인지. "왜 겹쳤나" 의 1차 단서다. */
+      anchorKind: g.anchorType === 'order' ? 'order_link'
+        : (String(g.anchorValue).startsWith('num:') ? 'row_order_num'
+          : (String(g.anchorValue).startsWith('rcp:') ? 'recipient' : 'phone8')),
+      rowCount: g.rows.length,
+      seqs,
+      reason,
+      detail: _AMB_REASON[reason],
+      inPaymentCount: payUnavailable ? null : g.rows.filter(r => r.inPayment).length,
+      rows: g.rows,
+    });
+  }
+  out.sort((a, b) => b.rowCount - a.rowCount || a.seqs[0] - b.seqs[0]);
+  const byReason = {};
+  for (const g of out) byReason[g.reason] = (byReason[g.reason] || 0) + 1;
+
+  return {
+    ok: true, sheetId, tabName,
+    totalRows: roster.length,
+    ambiguousRows,                       // ★ 그리드 배지(`중복 줄 N`)와 같은 값이어야 한다
+    groupCount: out.length,
+    byReason,
+    payUnavailable,                      // 이체 담김 여부를 못 읽었다(0 으로 꾸미지 않는다)
+    dedupeError,                         // 정리 도구 대조 실패 사유(시트 기반 탭 등)
+    truncated: out.length > maxGroups,
+    groups: out.slice(0, maxGroups),
+  };
+}
+
 module.exports = {
+  ambiguousRowReport,
   getWorkdeskFavorites,
   setWorkdeskFavorites,
   getWorkdeskWorktabs,
