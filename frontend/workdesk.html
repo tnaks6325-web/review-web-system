@@ -10445,7 +10445,7 @@ function _renderRvBody(){
     </tr></thead><tbody>${rows.map((r,i)=>`
       <tr>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
-        <td class="c-ph">${dash(r.phone)}</td>
+        <td class="c-ph">${dash(r.phone)}<button type="button" class="btn" style="margin-left:6px;padding:1px 6px;font-size:.66rem;border-radius:6px" onclick="_rvPhone(${i})" title="로그인 번호를 변경합니다(새 번호=본계정, 지금 번호=타계정)">변경</button></td>
         <td class="c-addr" title="${esc(r.address||'')}">${dash(r.address)}</td>
         <td class="c-bank">${dash(r.bankName)}</td>
         <td class="c-num">${dash(r.bankAccount)}</td>
@@ -10588,6 +10588,106 @@ async function _rvSaveMemo(el){
   if(r&&r.ok){ row.memo=memo; if(btn) btn.classList.remove('pri'); _toast('메모를 저장했습니다.'); }
   else { el.value=row.memo||''; _toast('⚠ 메모 저장 실패'+(r&&r.error?': '+r.error:'')); }   // 실패 시 화면값을 원래대로 되돌린다
   _rvMemoDirty(el);
+}
+
+/* ══ 로그인 번호 변경(승격) ══════════════════════════════════════
+   서버(reviewerPhoneChange.service)가 판정·실행을 다 하고 **화면은 서버가 준 것을 그대로 그린다**
+   (프론트 재판정 0 = "화면은 통과인데 서버가 거부"가 구조적으로 불가능).
+   ★ 방식은 덮어쓰기가 아니라 **승격** — 새 번호가 본계정이 되고 옛 번호는 타계정으로 남아
+     과거 참여·리뷰 내역·입금 계좌 매칭이 그대로 유지된다.
+   ★ 팝업은 body 직속 · **바깥 클릭으로 닫지 않는다**(입력해 둔 번호 보호) · Esc/[취소]만.
+   ★ onclick 에는 **인덱스만** 넘긴다(이름·번호를 문자열로 심지 않는다). */
+function _rvPhClose(){
+  const el=document.getElementById('rvPhWrap'); if(el) el.remove();
+  if(window._rvPhEsc){ document.removeEventListener('keydown',window._rvPhEsc); window._rvPhEsc=null; }
+}
+function _rvPhone(i){
+  const row=(STATE.rv||[])[i]; if(!row) return;
+  _rvPhClose();
+  const d=document.createElement('div'); d.id='rvPhWrap';
+  d.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  d.innerHTML=`<div style="background:#fff;color:#111827;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:8px">
+      <b style="font-size:.95rem">로그인 번호 변경</b>
+      <span style="flex:1"></span>
+      <button type="button" class="btn" onclick="_rvPhClose()">닫기</button>
+    </div>
+    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:.82rem;color:#374151">
+        <b>${esc(row.name||'')}</b> · 현재 <b>${esc(row.phone||'')}</b>
+      </div>
+      <label style="font-size:.78rem;color:#6b7280">새 로그인 번호 (숫자 11자리)</label>
+      <input id="rvPhInput" class="ovsearch" inputmode="numeric" placeholder="01091869944" style="width:100%">
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:9px 11px;font-size:.74rem;color:#1e3a8a;line-height:1.55">
+        새 번호가 <b>본계정</b>이 되고 지금 번호는 <b>타계정으로 남습니다</b> —
+        과거 참여·리뷰 내역과 리뷰비 계좌 매칭은 그대로 유지됩니다.<br>
+        1:1문의방·공고별 참여 예외·공고수정 허용명단은 새 번호로 옮기고,
+        블랙리스트에 올라 있으면 <b>새 번호에도 함께</b> 등록합니다(번호를 갈아 차단을 피할 수 없게).
+      </div>
+      <div id="rvPhOut"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:2px">
+        <button type="button" class="btn" onclick="_rvPhClose()">취소</button>
+        <button type="button" class="btn pri" id="rvPhGo" onclick="_rvPhCheck(${i})">확인</button>
+      </div>
+    </div></div>`;
+  document.body.appendChild(d);
+  window._rvPhEsc=(e)=>{ if(e.key==='Escape') _rvPhClose(); };
+  document.addEventListener('keydown',window._rvPhEsc);
+  const inp=document.getElementById('rvPhInput'); if(inp) inp.focus();
+}
+/* 1단계 — 서버에 물어만 본다(쓰기 0). 차단 사유가 있으면 [변경] 버튼을 만들지 않는다. */
+async function _rvPhCheck(i){
+  const row=(STATE.rv||[])[i]; const inp=document.getElementById('rvPhInput');
+  const out=document.getElementById('rvPhOut'); const go=document.getElementById('rvPhGo');
+  if(!row||!inp||!out) return;
+  const phone=(inp.value||'').replace(/[^0-9]/g,'');
+  out.innerHTML='<div style="font-size:.78rem;color:#6b7280">확인 중…</div>';
+  if(go) go.disabled=true;
+  let r;
+  try{ r=await api('/api/trackb/reviewers/phone',{method:'POST',body:JSON.stringify({id:row.id,phone})}); }
+  catch(e){ r=null; }
+  if(go) go.disabled=false;
+  if(!r){ out.innerHTML='<div style="font-size:.78rem;color:#b91c1c">확인하지 못했습니다 — 잠시 후 다시 시도해주세요.</div>'; return; }
+  if(r.error && !r.needConfirm){
+    out.innerHTML=`<div style="font-size:.78rem;color:#b91c1c">${esc(r.error)}</div>`; return;
+  }
+  const bl=r.blockers||[], c=r.counts||{};
+  if(bl.length){
+    out.innerHTML=`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;font-size:.76rem;color:#991b1b;line-height:1.6">
+      <b>이 번호로는 바꿀 수 없습니다</b><ul style="margin:6px 0 0;padding-left:18px">
+      ${bl.map(b=>`<li>${esc(b.message||b.code||'')}</li>`).join('')}</ul></div>`;
+    return;
+  }
+  const line=(lb,n)=>`<div style="display:flex;justify-content:space-between"><span>${lb}</span><b>${n|0}건</b></div>`;
+  out.innerHTML=`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;font-size:.76rem;color:#334155;line-height:1.7">
+      <b>${esc(row.phone||'')} → ${esc(r.newPhone||phone)}</b>
+      ${line('구매양식 제출', c.orders)}${line('공고 참여', c.applications)}${line('1:1 문의방', c.inquiries)}
+      ${line('작업표 참여 행', c.reviewRows)}${line('공고별 참여 예외', c.gates)}
+      ${(c.blacklisted|0)>0?'<div style="color:#b91c1c">· 블랙리스트 등록 상태 — 새 번호에도 함께 등록됩니다</div>':''}
+      ${r.countsPartial?'<div style="color:#b45309">· 일부 항목은 세지 못했습니다(실제로는 더 있을 수 있습니다)</div>':''}
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px">
+      <button type="button" class="btn pri" onclick="_rvPhApply(${i})">이대로 변경</button>
+    </div>`;
+}
+/* 2단계 — 실제 변경. 서버가 잠금 트랜잭션 안에서 판정을 한 번 더 돌린다(그 사이 홀드가 생겼을 수 있다). */
+async function _rvPhApply(i){
+  const row=(STATE.rv||[])[i]; const inp=document.getElementById('rvPhInput');
+  const out=document.getElementById('rvPhOut'); if(!row||!inp||!out) return;
+  const phone=(inp.value||'').replace(/[^0-9]/g,'');
+  if(!confirm(`${row.name||''} 리뷰어의 로그인 번호를\n${row.phone} → ${phone} 로 변경할까요?\n\n· 지금 번호는 타계정으로 남아 과거 내역은 계속 조회됩니다.\n· 리뷰어에게 새 번호로 로그인해야 한다고 안내해 주세요.`)) return;
+  out.innerHTML='<div style="font-size:.78rem;color:#6b7280">변경 중…</div>';
+  const r=await api('/api/trackb/reviewers/phone',{method:'POST',body:JSON.stringify({id:row.id,phone,confirm:true})});
+  if(r&&r.ok){
+    const m=r.moved||{}, kept=((m.inquiries&&m.inquiries.kept)|0)+((m.gates&&m.gates.kept)|0);
+    _rvPhClose();
+    _toast(`번호를 변경했습니다 — ${r.oldPhone} → ${r.newPhone}`+(kept?` (옮기지 못한 항목 ${kept}건은 그대로 남았습니다)`:''));
+    _loadReviewers();
+    return;
+  }
+  const bl=(r&&r.blockers)||[];
+  out.innerHTML=`<div style="font-size:.78rem;color:#b91c1c;line-height:1.6">변경하지 못했습니다${r&&r.error?': '+esc(r.error):''}
+    ${bl.length?'<ul style="margin:6px 0 0;padding-left:18px">'+bl.map(b=>`<li>${esc(b.message||'')}</li>`).join('')+'</ul>':''}</div>`;
 }
 
 /* 리뷰어 삭제(완전삭제) — 서버가 2단으로 막는다.
