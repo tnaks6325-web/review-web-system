@@ -59,10 +59,12 @@ t('★★ 편집은 전부 editorOnlyMiddleware 뒤 — 이름 명단만 통과'
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
 });
-t('명단 관리는 master/admin 전용(AE 가 자기를 명단에 넣지 못하게)', () => {
+// ★ 2026-08 사용자 확정: 명단 관리도 내부 담당자(AE 포함)가 한다 — 광고주·리뷰어는 차단.
+//   ⚠ 명단이 자기 자신을 게이트하면(editorOnly) 명단에서 빠지는 순간 아무도 못 고치므로 그 금지는 유지.
+t('명단 관리는 내부 담당자 전용(광고주 차단)', () => {
   ['GET /workdesk-editors', 'POST /workdesk-editors', 'DELETE /workdesk-editors/:id'].forEach(k => {
     assert.ok(L[k], '없음: ' + k);
-    assert.ok(L[k].includes('adminOrMasterMiddleware'), k + ': adminOrMaster 게이트 없음');
+    assert.ok(L[k].includes('internalMiddleware'), k + ': internal 게이트 없음');
     assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 명단이 자기 자신을 게이트하면 안 됨');
   });
 });
@@ -108,7 +110,14 @@ const REC = F('js/index-recruit.js');
 t('★ 발행·수정 모달 마크업은 공유 모듈 한 벌뿐', () => {
   assert.strictEqual((ADM.match(/id="rf_title"/g) || []).length, 0,
     'admin.html 에 인라인 모달이 남아 있으면 두 벌이 된다');
-  assert.strictEqual((MODAL.match(/id="rf_title"/g) || []).length, 1, '공유 모듈에 모달이 없다');
+  // ★ 세는 대상은 **살아 있는 마크업 한 벌**이다 — 모듈 안의 `<template id="rf_legacy_*_markup">` 는
+  //   브라우저가 inert 로 다루는 보관용 조각이라 document 에 id 가 등록되지 않는다(중복 id 아님).
+  //   단순 문자열 계수로 두면 그 보관 조각 때문에 이 가드가 조용히 빨개진다.
+  const liveOnly = (src) => { let d = 0, out = ''; for (const line of src.split('\n')) {
+    const o = (line.match(/<template[\s>]/g) || []).length, c = (line.match(/<\/template>/g) || []).length;
+    if (d === 0) out += line + '\n'; d += o - c; } return out; };
+  assert.strictEqual((liveOnly(MODAL).match(/id="rf_title"/g) || []).length, 1,
+    '공유 모듈의 살아 있는 모달 마크업은 정확히 한 벌이어야 한다');
   assert.strictEqual((HTML.match(/id="rf_title"/g) || []).length, 0,
     '리뷰웹시스템[3버전]이 모달을 베끼면 안 된다 — 모듈을 마운트해야 한다');
 });
@@ -129,7 +138,7 @@ t('모달 로드 순서 — 마크업이 저장 로직보다 먼저', () => {
   });
 });
 t('★ 리뷰웹시스템[3버전]은 목록·저장 로직을 베끼지 않고 그대로 호출', () => {
-  assert.ok(/await loadRecruitList\(\)/.test(HTML), 'index-recruit.js 의 로더를 써야 한다');
+  assert.ok(/await (window\.)?loadRecruitList\(\)/.test(HTML), 'index-recruit.js 의 로더를 써야 한다');
   assert.ok(/openRecruitModal\(\)/.test(HTML), '발행 모달도 같은 함수');
   assert.ok(!/function loadRecruitList/.test(HTML), '사본 정의가 있으면 안 된다');
   assert.ok(!/function _renderRecruitCards\s*\(/.test(HTML), '카드 렌더 사본 금지');
@@ -198,12 +207,16 @@ t('열람 전용 계정에 이유를 알려준다(버튼만 사라지면 고장�
 });
 t('접수는 되돌리기 어려우니 확인을 받는다', () => {
   // ★ 확인 문구는 무시트/시트 두 갈래로 갈리지만(탈 구글시트 2026-08-10) confirm 게이트 자체는 유지된다.
-  assert.ok(/이 작업오더를 접수할까요\?/.test(HTML) && /if\(!pickGid && !confirm\(msg\)\) return false;/.test(HTML));
+  // ★ 재접수 우회 변수명은 바뀔 수 있다(pickGid → _confirmed) — 고정하는 것은 **confirm 게이트의 존재**다.
+  assert.ok(/이 작업오더를 접수할까요\?/.test(HTML) && /&& !confirm\(msg\)\) return false;/.test(HTML));
 });
 
-t('명단 관리 UI — 관리자에게만, 인트라넷 자동완성 재사용', () => {
-  assert.ok(/STATE\.role==='master'\|\|STATE\.role==='admin'\)\?'<button class="btn" onclick="openEditorList\(\)/.test(HTML),
-    '명단 버튼이 관리자 전용이 아님');
+// ★ 2026-08-19 사용자 확정(AE 권한 확대): 명단 관리는 **내부 담당자(AE 포함)** 가 한다.
+//   위 1) 절이 서버 게이트를 `internalMiddleware` 로 이미 고정하고 있으므로, 화면 게이트도 같아야
+//   서버보다 좁거나 넓은 버튼이 생기지 않는다(같은 파일 안에서 두 기준이 갈리던 것을 맞춘다).
+t('명단 관리 UI — 내부 담당자에게만(광고주 차단), 인트라넷 자동완성 재사용', () => {
+  assert.ok(/_isInternalRole\(\)\?'<button class="btn" onclick="openEditorList\(\)/.test(HTML),
+    '명단 버튼이 내부 담당자 게이트(_isInternalRole)를 쓰지 않는다 — 서버 게이트와 어긋난다');
   assert.ok(/async function openEditorList\(\)/.test(HTML));
   assert.ok(/api\('\/api\/trackb\/intranet\/users\?q='/.test(HTML),
     '후보는 인트라넷 직원DB에서 골라야 한다(기존 프록시 재사용)');
@@ -258,11 +271,12 @@ t('★ 상세 본문은 관리자 대시보드와 **같은 렌더러**(사본 �
 t('두 화면이 같은 모듈을 로드한다(admin·admin-siand·workdesk)', () => {
   ['admin.html', 'admin-siand.html'].forEach(p => {
     const s = F(p);
-    assert.ok(/<script src="js\/work-order-detail\.js"><\/script>/.test(s), p + ' 미로드');
+    // ★ 캐시버스팅 쿼리(?v=…)가 붙을 수 있다 — 고정하는 것은 **그 모듈을 로드한다**는 사실이다.
+    assert.ok(/<script src="js\/work-order-detail\.js(\?[^"]*)?"><\/script>/.test(s), p + ' 미로드');
     assert.ok(s.indexOf('js/work-order-detail.js') < s.indexOf('js/index-app.js'),
       p + ': 렌더러가 index-app.js 뒤에 있으면 호출 시점에 없다');
   });
-  assert.ok(/<script src="js\/work-order-detail\.js"><\/script>/.test(HTML), 'workdesk 미로드');
+  assert.ok(/<script src="js\/work-order-detail\.js(\?[^"]*)?"><\/script>/.test(HTML), 'workdesk 미로드');
 });
 t('★ 모듈은 호스트 전역에 기대지 않는다(리뷰웹시스템[3버전]엔 escHtml 이 없다)', () => {
   assert.ok(/function _escFallback\(s\)/.test(WOD) && /function escHtml\(s\)/.test(WOD),

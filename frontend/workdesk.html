@@ -3113,6 +3113,10 @@ function isFinishCandidate(t){
   const s=t&&t.stats; if(!s||!s.total) return false;
   return (s.submitted|0)>=s.total && (s.paid|0)>=s.total;
 }
+/* 내부 담당자(AE 포함) 판정 — 서버 internalMiddleware 와 같은 범위.
+   ★ 화면 게이트와 라우트 미들웨어는 반드시 같이 움직인다 — 넓으면 "눌러도 403"인 막다른 길,
+     좁으면 서버가 허용한 사람이 버튼을 못 본다. 지금 쓰는 곳 = 편집 허용명단 관리. */
+function _isInternalRole(){ const r = STATE.role; return r==='master' || r==='admin' || r==='staff'; }
 function _finCanEdit(){ return STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff'; }
 // ══ M2: 오늘 완료(전사 공통) — migration 089 ═══════════════════════════════════════════
 //   ★★ 마감과 **다른 상태**다: 마감은 보드에서 빼고(영구), 오늘 완료는 **뒤로 밀고 회색으로 표시**만
@@ -6419,7 +6423,7 @@ function _renderWoHead(){
     <input class="ovsearch" placeholder="작업명/담당 검색 후 Enter" value="${esc(STATE.woq||'')}"
       onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
     <button class="btn" onclick="_loadOrders()">새로고침</button>
-    ${(STATE.role==='master'||STATE.role==='admin')?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
+    ${_isInternalRole()?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
     <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 작업이 시스템에 등록되고 인덱스가 만들어집니다
       (구글시트탭URL이 없는 오더는 <b>시스템 작업표</b>가 자동 생성됩니다) —
       신규 탭이 등록되는 유일한 경로라 <b>편집 허용명단</b>에 있는 담당자만 누를 수 있습니다.

@@ -1436,18 +1436,21 @@ router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) =
   } catch (err) { next(err); }
 });
 
-// ── 편집 허용명단 관리 — master/admin 전용(후보는 인트라넷 직원DB에서 고른다) ──
-router.get('/workdesk-editors', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+/* ── 편집 허용명단 관리 — 내부 담당자 전용(AE 포함, 사용자 확정 2026-08) ──
+   ★ 후보는 인트라넷 직원DB에서 고른다.
+   ⚠ 명단이 **자기 자신을 게이트하면 안 된다**(editorOnly 금지) — 명단에서 빠지는 순간
+     아무도 명단을 고칠 수 없게 된다. 광고주·리뷰어는 internalMiddleware 가 차단한다. */
+router.get('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await wdEditors.listEditors() }); } catch (err) { next(err); }
 });
-router.post('/workdesk-editors', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/workdesk-editors', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const b = req.body || {};
     const out = await wdEditors.addEditor({ name: b.name, username: b.username, dept: b.dept, by: _by(req) });
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
-router.delete('/workdesk-editors/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.delete('/workdesk-editors/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const out = await wdEditors.removeEditor(req.params.id);
     res.status(out.ok ? 200 : 404).json(out);
