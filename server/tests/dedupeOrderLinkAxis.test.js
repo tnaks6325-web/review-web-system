@@ -1,6 +1,11 @@
 /**
  * 중복 줄 정리 — ㉯ 축(같은 주문 기록을 여러 줄이 씀) 회귀가드 · 2026-08-19
  *
+ * ⚠ 2026-08-19 2차 확정으로 이 축의 키가 좁아졌다 — **표 주문번호가 같을 때만** 묶는다.
+ *   링크(`order_submission_id`)는 투영이 연락처만으로 추측해 채우는 값이라, 그것만 믿으면
+ *   같은 사람의 **별개 참여가 중복으로 지워진다**. 그래서 픽스처의 표 주문번호를 맞췄고,
+ *   "다르면 안 묶는다 · 없으면 판정하지 않는다" 케이스를 아래 [A-2] 에 추가했다.
+ *
  * 왜 이 축이 생겼나(실측 · 0729)위드프렌즈_면마스크 200건):
  *   한 주문이 **7줄**에 기록됐다(제출시각이 7줄 모두 동일). 부팅 복구 잡이 배포마다 빈 자리를
  *   하나씩 더 먹은 자국이다. 그런데 뒤쪽 줄들은 **표 주문번호가 서로 달라** 종전 ㉮ 축
@@ -55,7 +60,7 @@ function stub(rows, { pay = [] } = {}) {
       // 실측 그대로: 한 주문(os-1)이 7줄, 원장 주문번호 빈 값, 표 주문번호는 줄마다 다름
       const rows = [
         R({ seq: 117, osid: 'os-1', roword: '2026080552706861', submitted: true, paid: true }),
-        ...[161, 173, 183, 193, 203, 213].map(s => R({ seq: s, osid: 'os-1', roword: '2026081822051841' })),
+        ...[161, 173, 183, 193, 203, 213].map(s => R({ seq: s, osid: 'os-1', roword: '2026080552706861' })),
       ];
       led.__setPoolForTest(stub(rows));
       const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
@@ -69,11 +74,35 @@ function stub(rows, { pay = [] } = {}) {
       led.__setPoolForTest(null);
     }
 
+    console.log('\n[A-2] ★★ 링크만으로는 묶지 않는다 — 표 주문번호가 판정 근거 (2026-08-19 2차 확정)');
+    {
+      // 표 주문번호가 서로 다르면 별개 구매다(링크가 같아도).
+      const rows = [
+        R({ seq: 10, osid: 'os-1', roword: '2026080552706861', submitted: true }),
+        R({ seq: 20, osid: 'os-1', roword: '2026081822051841' }),
+      ];
+      led.__setPoolForTest(stub(rows));
+      const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+      ok('★ 표 주문번호가 다르면 링크가 같아도 묶지 않는다', p.groups === 0 && p.removeRows === 0);
+      led.__setPoolForTest(null);
+    }
+    {
+      // 표 주문번호가 아예 없으면 판정 근거가 없다 — 사람이 [♻ 중복 줄 정리]로 고른다.
+      const rows = [
+        R({ seq: 10, osid: 'os-1', roword: '', submitted: true }),
+        R({ seq: 20, osid: 'os-1', roword: '' }),
+      ];
+      led.__setPoolForTest(stub(rows));
+      const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+      ok('★ 표 주문번호가 둘 다 없으면 링크가 같아도 묶지 않는다', p.groups === 0 && p.removeRows === 0);
+      led.__setPoolForTest(null);
+    }
+
     console.log('\n[B] ★★ 남길 줄이 쓰는 주문은 취소하지 않는다 (주문 소실 차단)');
     {
       const rows = [
         R({ seq: 10, osid: 'os-1', roword: 'AAAAAA111111', submitted: true }),
-        R({ seq: 20, osid: 'os-1', roword: 'BBBBBB222222' }),
+        R({ seq: 20, osid: 'os-1', roword: 'AAAAAA111111' }),
       ];
       led.__setPoolForTest(stub(rows));
       calls.retire = null; calls.cancel = null;
@@ -100,7 +129,7 @@ function stub(rows, { pay = [] } = {}) {
     {
       const rows = [
         R({ seq: 45, osid: 'os-1', roword: 'AAAAAA111111', submitted: true, paid: true, in_payment: true }),
-        R({ seq: 123, osid: 'os-1', roword: 'BBBBBB222222', submitted: true, paid: true, in_payment: true }),
+        R({ seq: 123, osid: 'os-1', roword: 'AAAAAA111111', submitted: true, paid: true, in_payment: true }),
       ];
       led.__setPoolForTest(stub(rows, { pay: [{ seq: 123, status: 'paid', amount: 9900, batchSeq: 3 }] }));
       const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
@@ -111,7 +140,7 @@ function stub(rows, { pay = [] } = {}) {
     {
       const rows = [
         R({ seq: 5, osid: 'os-1', roword: 'AAAAAA111111' }),
-        R({ seq: 9, osid: 'os-1', roword: 'BBBBBB222222', submitted: true }),
+        R({ seq: 9, osid: 'os-1', roword: 'AAAAAA111111', submitted: true }),
       ];
       led.__setPoolForTest(stub(rows));
       const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
@@ -161,7 +190,7 @@ function stub(rows, { pay = [] } = {}) {
        ㉯ 축의 지울 줄은 남길 줄과 같은 주문이라 그 시각은 발생 시각이 아니다. */
     const rows = [
       R({ seq: 10, osid: 'os-1', roword: 'AAAAAA111111', at: '2026-08-19T05:00:00Z', submitted: true }),
-      R({ seq: 20, osid: 'os-1', roword: 'BBBBBB222222', at: '2026-08-19T05:00:00Z' }),
+      R({ seq: 20, osid: 'os-1', roword: 'AAAAAA111111', at: '2026-08-19T05:00:00Z' }),
     ];
     led.__setPoolForTest(stub(rows));
     const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
