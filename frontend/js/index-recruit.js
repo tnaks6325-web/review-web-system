@@ -1140,7 +1140,6 @@ async function openTestCampaignModal() {
   chk("rf_multi_account", true, onMultiAccountToggle);    // 타계정 허용 = 일괄 제출의 전제
   set("rf_multi_daily", 5);              // 하루에 여러 명의로 참여 가능해야 배치가 켜진다
   set("rf_sub_ttl", 30);
-  chk("rf_reviewer_hidden", true);       // ★ 리뷰어 목록 미노출
 
   // 진행상품 표가 정원의 진실원본 — 한 줄 넣어 총모집/일건수를 파생시킨다
   try {

@@ -56,7 +56,6 @@
           <div class="rf-hrow rf-hrow-top"><span class="rf-hl">유의사항</span><div><textarea id="rf_notes" class="rform-input" rows="2" placeholder="참여 전 모두에게 공개되는 짧은 안내만 — 예) 와우회원 전용 · 계정당 1회" style="resize:vertical"></textarea><div class="rf-help">공고 카드에 노출되는 안내문</div><div id="rf_clean_notes"></div></div></div>
           <div class="rf-hrow"><span class="rf-hl">모집인원 <small>(레거시)</small></span><input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0"></div>
           <select id="rf_status" class="rform-input" onchange="RecruitModal.syncStatusButtons()" hidden><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select>
-          <div id="rf_hidden_box" class="rf-hidden-row"><label><input type="checkbox" id="rf_reviewer_hidden"> 🧪 리뷰어에게 숨김 <span>— 내부 테스트용</span></label><div>리뷰어 공고 목록에 뜨지 않지만, 공고 링크로 직접 테스트할 수 있습니다.</div></div>
           <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
         </div>
       </section>
@@ -448,18 +447,6 @@
           </select></div>
         <div class="rf-hrow"><span class="rf-hl">모집인원<br><span style="font-weight:400;font-size:.62rem">(레거시)</span></span>
           <input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0"></div>
-      </div>
-      <!-- 🧪 085: 리뷰어 미노출(비공개/테스트 공고) — ★ 참여형 여부와 무관하게 항상 보이는 자리.
-           참여형 섹션 안에 두면 레거시 공고는 숨길 수 없고, 평소엔 접혀 있어 존재를 모른다. -->
-      <div id="rf_hidden_box" style="border:1.5px dashed var(--border,#94A3B8);border-radius:9px;padding:9px 10px;background:#F8FAFC;margin-top:4px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:800;font-size:.78rem;color:#475569">
-          <input type="checkbox" id="rf_reviewer_hidden" style="width:15px;height:15px;accent-color:#475569">
-          🧪 리뷰어에게 숨김 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">— 내부 테스트용</span>
-        </label>
-        <div style="font-size:.64rem;color:var(--t3,#94A3B8);margin-top:4px;line-height:1.5">
-          리뷰어 공고 목록에 <b>뜨지 않습니다</b>. 참여·제출은 정상 동작하므로 <b>공고 링크로 직접 들어가</b> 테스트할 수 있어요.
-          <span style="color:#B45309">링크를 아는 사람은 들어올 수 있습니다.</span>
-        </div>
       </div>
       <!-- 게시 전 자동 점검 — 참여형 전용(레거시 공고엔 점검 항목이 없다) -->
       <div data-part-only class="rf-publish-check-note">자동 점검 결과는 왼쪽 하단에서 확인합니다.</div>
@@ -1006,9 +993,6 @@
 #recruitModal .rf-inline-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
 #recruitModal .rf-inline-inputs label{display:grid;gap:3px;color:#64748B;font-size:.64rem;font-weight:700}
 #recruitModal .rf-advanced{padding:7px 9px;border:1px solid #DCE3EC;border-top:0;background:#FBFCFE;color:#64748B;font-size:.68rem;font-weight:750}
-#recruitModal .rf-hidden-row{margin-top:6px;padding:7px 9px;border:1px dashed #C9D6E8;border-radius:6px;color:#64748B;font-size:.65rem;line-height:1.4}
-#recruitModal .rf-hidden-row label{font-size:.7rem;font-weight:800;cursor:pointer}
-#recruitModal .rf-hidden-row label span{color:#94A3B8;font-size:.63rem}
 #recruitModal>.modal-box>.modal-footer{display:flex}
 /* 승인 시안의 중앙 편집기 수치를 그대로 사용한다. */
 #recruitModal .rf-compact-main{display:flex;min-width:0;min-height:0;flex:1;overflow:hidden}
