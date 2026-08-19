@@ -30,8 +30,9 @@
  *
  * ★ 곁다리 정리 4종(전부 같은 트랜잭션):
  *   · 연결 작업오더는 **링크만 비운다**(삭제 아님) → 같은 오더를 **다시 접수**할 수 있다.
- *   · 연결 모집공고는 **보관 처리**(130 `archived_at`) → 지워진 작업으로 새 참여가 들어오지 않는다.
- *     ★ 공고 자체는 지우지 않는다(참여 이력·리뷰비 스냅샷이 매달려 있다).
+ *   · 연결 모집공고는 **함께 삭제**한다(사용자 확정 2026-08-19) — 작업이 사라졌는데 그 작업을
+ *     가리키는 공고만 남으면 갈 곳 없는 공고가 목록에 남는다. 참여 신청·옵션·리뷰비 구간·차수·
+ *     날짜별 계획·리뷰어 게이트는 FK CASCADE 로 함께 사라진다.
  *   · 업체 소유(`advertiser_campaigns`)는 **이 탭만 지정한 행**만 정리(시트 전체 소유는 남긴다).
  *   · 시트 등록행(`campaigns`)은 그 시트를 쓰는 탭이 하나도 남지 않았을 때만 정리.
  * ═══════════════════════════════════════════════════════════════════════
@@ -245,11 +246,15 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
       `UPDATE work_orders SET linked_tab_sheet_id='', linked_tab_name='', linked_tab_gid='', updated_at=NOW()
         WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2`, [sheetId, tabName]);
 
-    // ② 연결 모집공고 — 보관 처리(공고 자체는 지우지 않는다).
+    /* ② 연결 모집공고 — **함께 삭제**한다(사용자 확정 2026-08-19, 종전 보관 처리에서 변경).
+       작업이 사라졌는데 그 작업을 가리키는 공고만 남으면 갈 곳 없는 공고가 목록에 떠 있게 된다.
+       ★ 참여 신청·옵션·리뷰비 구간·차수·날짜별 계획·리뷰어 게이트는 FK CASCADE 로 함께 사라진다
+         (018·061·082·091·095·112·115 — 전부 CASCADE, RESTRICT 없음).
+       ★ 입금 회차 항목의 `campaign_id` 는 SET NULL(086)이라 회차 자체는 영향받지 않는다. */
     const rc = await client.query(
-      `UPDATE recruit_campaigns SET archived_at=NOW(), archived_by=$3
-        WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''), $2)=$2 AND archived_at IS NULL`,
-      [sheetId, tabName, String(by).slice(0, 100)]);
+      `DELETE FROM recruit_campaigns
+        WHERE linked_sheet_id=$1 AND COALESCE(NULLIF(linked_tab_name,''), $2)=$2`,
+      [sheetId, tabName]);
 
     // ③ 업체 소유 — 이 탭만 지정한 행만 정리(시트 전체 소유 행은 다른 탭의 근거라 남긴다).
     const ac = tabGid
@@ -267,11 +272,11 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
           AND NOT EXISTS (SELECT 1 FROM index_master im WHERE im.sheet_id=$1)`, [sheetId]);
 
     await client.query('COMMIT');
-    logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 보관 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`);
+    logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 삭제 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`);
     return {
       ok: true, sheetId, tabName, deleted, totalRows,
       paymentDeleted: (money.length && forcePayment === true) ? money : [],
-      workOrdersUnlinked: wo.rowCount || 0, campaignsArchived: rc.rowCount || 0,
+      workOrdersUnlinked: wo.rowCount || 0, campaignsDeleted: rc.rowCount || 0,
       ownershipRemoved: ac.rowCount || 0, sheetRowRemoved: cam.rowCount || 0,
     };
   } catch (err) {
