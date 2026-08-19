@@ -10971,9 +10971,35 @@ async function revertEdit(rowId, field){ const t=STATE.cur; if(!t)return;
   const r=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})});
   toast(r&&r.reverted?'되돌림':'되돌릴 편집 없음'); reloadWorkdesk();
 }
+// 행 삭제가 거부되는 사유는 서버만 알고 있다(연결 공고 없음·계획 없음 등 6갈래).
+// 종전처럼 '실패' 한 마디로 접으면 담당자가 무엇을 고쳐야 하는지 알 방법이 없어
+// "눌렀는데 아무 일도 안 일어난다"로 보인다. 사유와 다음 행동을 그대로 말한다.
+const _HIDE_ROW_ERRORS={
+  row_not_found:'그 행을 찾지 못했습니다 — 다른 담당자가 이미 지웠을 수 있습니다. 새로고침 후 확인해 주세요.',
+  row_changed:'그 사이 행이 바뀌었습니다. 새로고침 후 다시 시도해 주세요.',
+  row_campaign_not_found:'이 주문에 연결된 공고 참여 기록이 없습니다(공고 밖에서 들어온 주문 — 외부모집 수동제출·지각 확정·시트 이관분). 이 행은 이름 옆 [삭제] 버튼으로 주문까지 취소해 주세요.',
+  sheetless_campaign_not_found:'이 작업에 연결된 모집공고(게시 중 또는 임시저장)가 없습니다. 공고를 연결하거나 게시한 뒤 다시 시도해 주세요.',
+  ambiguous_campaign:'이 작업에 연결된 공고가 둘 이상이라 어느 공고의 인원을 조정할지 정할 수 없습니다. 지난 차수 공고를 마감한 뒤 다시 시도해 주세요.',
+  final_plan_not_found:'이 공고에 날짜별 모집인원 계획이 없어 보충할 날짜를 정할 수 없습니다. [📅 인원]에서 계획을 저장한 뒤 다시 시도해 주세요.',
+  removed_date_plan_invalid:'그 날짜의 모집 계획 수가 맞지 않습니다. [📅 인원]에서 계획을 확인해 주세요.',
+  final_plan_date_invalid:'마지막 진행일의 날짜 형식을 해석하지 못했습니다. [📅 인원]에서 계획 날짜를 확인해 주세요.',
+  worktable_date_column_not_found:'작업표에서 구매일자 칸을 찾지 못했습니다. 열 이름(구매일자 등)을 확인해 주세요.',
+  removed_row_date_invalid:'이 행의 구매일자를 해석하지 못했습니다. 날짜 값을 확인한 뒤 다시 시도해 주세요.',
+};
+function _hideRowErrorText(r){
+  const code=(r&&(r.error||r.code))||'';
+  const known=_HIDE_ROW_ERRORS[code];
+  if(known) return known+'\n\n(사유 코드: '+code+')';
+  if(code) return '행을 제거하지 못했습니다.\n\n서버 응답: '+code;
+  return '행을 제거하지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+}
 async function hideRow(rowId){ if(!confirm('이 참여자를 작업표와 리뷰어 참여내역에서 실제로 제거할까요? 총 모집인원은 유지되며 마지막 진행일에 미진행 1건이 보충됩니다. 주문 원장은 감사용으로 보관됩니다.'))return; const t=STATE.cur;
-  const r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
-  toast(r&&r.ok?'제거됨':'실패'); reloadWorkdesk();
+  let r=null;
+  try{ r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})}); }
+  catch(_){ r=null; }
+  if(r&&r.ok) toast('제거됨');
+  else alert(_hideRowErrorText(r));   // 자동으로 사라지는 토스트로 흘리지 않는다 — 사유를 읽고 조치해야 한다
+  reloadWorkdesk();
 }
 function _orderDeleteCount(n){ return (Number(n)||0).toLocaleString('ko-KR'); }
 async function assignUnslottedOrder(rowId){
