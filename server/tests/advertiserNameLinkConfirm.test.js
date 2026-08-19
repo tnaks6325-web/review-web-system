@@ -177,6 +177,27 @@ console.log('advertiser name conflict - confirm-then-link');
     && /payload\.linkAdvertiserId = linkAdvertiserId/.test(indexApp));
   ok('확인 팝업을 거친 재접수는 확인창을 다시 띄우지 않는다',
     /const _confirmed = !!pickGid \|\| !!\(opts&&opts\.linkAdvertiserId\)/.test(workdesk));
+  // 사업자번호 줄 — "미등록"과 "원본과 다름"은 다른 신호다(사용자 지적 2026-08-19).
+  {
+    const vm = require('vm');
+    const src = woDetail.slice(woDetail.indexOf('function _woAdvBizLine'),
+                               woDetail.indexOf('function woAdvertiserLinkPicker'));
+    const sandbox = { };
+    vm.createContext(sandbox);
+    vm.runInContext(src + '\nthis.fn = _woAdvBizLine;', sandbox);
+    const fn = sandbox.fn;
+    const empty = fn('', '365-87-02833');
+    ok('리뷰웹에 값이 없으면 "미등록 · 연결하면 채워집니다"로 말한다(대조 실패로 읽히지 않게)',
+      empty.tone === 'muted' && /미등록/.test(empty.text) && /채워집니다/.test(empty.text)
+      && !/없음/.test(empty.text));
+    ok('표기가 달라도 숫자가 같으면 일치로 본다',
+      fn('3658702833', '365-87-02833').tone === 'ok');
+    ok('값이 있는데 원본과 다르면 경고한다(막지는 않는다)',
+      fn('111-11-11111', '365-87-02833').tone === 'warn');
+    ok('원본에 사업자번호가 없으면 비교하지 않고 값만 보여준다',
+      fn('365-87-02833', '').tone === 'plain');
+  }
+
   const NUL = String.fromCharCode(0);
   ok('소스에 리터럴 NUL 이 없다', !svcSrc.includes(NUL) && !woDetail.includes(NUL));
 
