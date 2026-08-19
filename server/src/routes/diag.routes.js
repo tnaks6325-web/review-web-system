@@ -1536,6 +1536,15 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
       expectedChannel = exp.expectedChannel;
       reviewType = exp.reviewType;        // ★ 087: 구매확정 작업이면 1차 필터를 돌리지 않는다(안전핀)
       workKind = exp.workKind;            // ★ 099: 블로그체험단도 같은 안전핀(결과물이 포스팅URL)
+      /* ★ 행 단위 리뷰타입(리뷰옵션 칸) — 혼합 탭은 탭/공고 값이 null 이라 구매확정 **행**의
+         안전핀이 여기서만 켜진다. 행을 모르는 첨부(참여형 임베드 = 행 배정 전)는 종전 그대로.
+         fail-open: 조회 실패 = 탭 값 유지. */
+      if (rowIndex) {
+        try {
+          const rt = await require('../services/reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex });
+          if (rt) reviewType = rt;
+        } catch (_) {}
+      }
       // ★★ 조립은 submissionSamples 한 곳 — 업로드 검수·2차 검수와 같은 배열이어야
       //   캐시 지문(sampleSig)이 일치해 첨부 판정이 제출 때 히트한다(AI 콜 순증 0).
       samples = await inspect.submissionSamples({ expectedChannel, slotKey: 'review' });
@@ -1606,6 +1615,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   fail-soft(null = 종전 동작).
     let _tabReviewType = null;
     try { _tabReviewType = await reviewTypeForTab({ sheetId, tabName }); } catch (_) {}
+    /* ★ 행 단위 리뷰타입(리뷰옵션 칸) — AI 기대 화면 종류(verifyCapture)에만 쓴다.
+       혼합 탭에서 구매확정 행의 캡처가 "리뷰 화면 아님"으로 몰리지 않게 한다.
+       ★ 폴더 라벨(slotLabelOf)은 **탭 값 그대로** — 폴더 이름이 행마다 갈리면 안 된다. */
+    let _rowReviewType = null;
+    if (rowIndex) {
+      try { _rowReviewType = await require('../services/reviewTypeContext.service').reviewTypeForRow({ sheetId, tabName, rowIndex }); } catch (_) {}
+    }
+    const _effReviewType = _rowReviewType || _tabReviewType;
 
     let slotLabel = null;
     if (slot !== 'review') {
@@ -1751,7 +1768,8 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
         try {
           verdict = await verifyCapture({
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
-            slotKey: slot, companyBusinessNo: _companyBizNo, reviewType: _tabReviewType,
+            // ★ 행 우선 유효 리뷰타입 — 혼합 탭의 구매확정 행은 구매확정 화면이 정상 제출이다.
+            slotKey: slot, companyBusinessNo: _companyBizNo, reviewType: _effReviewType,
             // ★★ 아래 2차 검수와 **같은 예시이미지**를 넘긴다 — 다르면 캐시 키가 갈려
             //   같은 이미지에 AI 콜이 두 번 나간다(순증 0 이라는 전제가 깨진다).
             samples: _inspectSamples,

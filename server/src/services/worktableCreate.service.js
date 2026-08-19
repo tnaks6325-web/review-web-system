@@ -43,22 +43,28 @@ async function _loadWorkOrder(id) {
  * 계획을 시트 행 배열로 변환.
  * ★ 열 이름이 곧 어느 칸에 쓸지를 정한다 — `plan.columns[i].role` 로 판정하므로
  *   여기서 키워드 규칙을 다시 만들지 않는다(분류는 매퍼 파생 단일 출처).
- * ★ 시스템이 값을 넣는 칸은 **번호(seq)·구매일자(dateStr)·옵션(option)** 셋뿐이다.
- *   나머지는 빈 칸으로 두고 리뷰어 구매양식 제출이 채운다(기존 경로 그대로).
+ * ★ 시스템이 값을 넣는 칸은 **번호(seq)·구매일자(dateStr)·옵션(option)·리뷰옵션(리뷰형태)**
+ *   넷뿐이다. 나머지는 빈 칸으로 두고 리뷰어 구매양식 제출이 채운다(기존 경로 그대로).
+ * ★★ 상품옵션과 리뷰옵션은 **서로 다른 칸** — 상품옵션(`optionKey`)은 리뷰옵션 칸이 아닌
+ *   첫 옵션 열, 리뷰형태(`reviewOption`)는 리뷰옵션 칸에만 적는다(`isReviewOptionHeader`
+ *   단일 판정). 섞이면 8/3 상품명 오기입 사고(작업지시 칸 덮임)의 재판이 된다.
  */
 function planToSheetValues(plan) {
+  const { isReviewOptionHeader } = require('../utils/reviewType');
   const header = plan.columns.map(c => c.name);
   const idxSeq = plan.columns.findIndex(c => c.role === 'seq');
   const idxDate = plan.columns.findIndex(c => c.role === 'dateStr');
-  const idxOpt = plan.columns.findIndex(c => c.role === 'option');
+  const idxOpt = plan.columns.findIndex(c => c.role === 'option' && !isReviewOptionHeader(c.name));
+  const idxRt = plan.columns.findIndex(c => isReviewOptionHeader(c.name));
   const body = plan.rows.map(r => {
     const row = new Array(header.length).fill('');
     if (idxSeq >= 0) row[idxSeq] = String(r.seq);
     if (idxDate >= 0 && r.dateLabel) row[idxDate] = r.dateLabel;   // `M / D (요일)` — 063 시트 일정 인식이 읽는 형식
     if (idxOpt >= 0 && r.optionKey) row[idxOpt] = r.optionKey;
+    if (idxRt >= 0 && r.reviewOption) row[idxRt] = r.reviewOption; // `포토리뷰`·`텍스트`… — 검수 ① 행 우선이 되읽는다
     return row;
   });
-  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0 } };
+  return { header, body, filled: { seq: idxSeq >= 0, date: idxDate >= 0, option: idxOpt >= 0, reviewOption: idxRt >= 0 } };
 }
 
 /** A1 표기 열 문자(0-based index → 'A','B',…,'AA'). */

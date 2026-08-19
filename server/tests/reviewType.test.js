@@ -379,8 +379,12 @@ t('① 리뷰어 화면 슬롯 (search.service)',
 t('② 제출 완료 판정 (submit.routes)',
   /requiredSlotKeys\(ctxRows\[0\]\?\.capture_slots, ctxRows\[0\]\?\.income_type, _rt\)/.test(SUB));
 t('③ 업로드 폴더 라벨 + 검수 기대값 (diag review-upload)',
+  // ★ 폴더 라벨은 **탭 값 그대로**(행마다 폴더가 갈리면 안 된다), AI 기대 종류는 **행 우선**
+  //   (`_effReviewType = _rowReviewType || _tabReviewType`) — 혼합 탭의 구매확정 행 인정(2026-08-19).
   /slotLabelOf\(tabRows\[0\]\?\.capture_slots, tabRows\[0\]\?\.income_type, slot, _tabReviewType\)/.test(DIAG)
-  && /reviewType: _tabReviewType/.test(DIAG));
+  && /reviewType: _effReviewType/.test(DIAG)
+  && /const _effReviewType = _rowReviewType \|\| _tabReviewType/.test(DIAG)
+  && /reviewTypeForRow\(\{ sheetId, tabName, rowIndex \}\)/.test(DIAG));
 t('④ 교체요청 라벨 2곳 (reviewEdit)',
   (RE.match(/reviewTypeForTab\(/g) || []).length >= 2);
 t('★ 조회는 단일 출처 서비스 하나 — 네 곳이 각자 SQL 을 쓰면 조용히 갈라진다',

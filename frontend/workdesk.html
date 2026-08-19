@@ -6781,11 +6781,15 @@ function _wtpRender(){
   const opts=p.optionBuckets.length
     ? p.optionBuckets.map(b=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0">${esc(b.key)} <b>${b.count}</b></span>`).join(' ')
     : '<span style="font-size:12.5px;color:#9CA3AF">옵션 배분 없음</span>';
+  /* 리뷰 종류(포토리뷰/텍스트/구매확정/별점) 배분 — 서버 계획을 그대로 그린다(재계산 금지). */
+  const rmix=(p.reviewBuckets&&p.reviewBuckets.length)
+    ? p.reviewBuckets.map(b=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE">${esc(b.label)} <b>${b.count}</b></span>`).join(' ')
+    : '<span style="font-size:12.5px;color:#9CA3AF">리뷰 종류 배분 없음 — 혼합 오더(유형별 수량)일 때 리뷰옵션 칸에 나눠 적습니다</span>';
   const msg=(arr,color,bg,edge)=>arr.length?`<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">${arr.map(m=>`<div style="font-size:12.5px;color:${color};background:${bg};border:1px solid ${edge};border-radius:8px;padding:7px 10px">${esc(m.message)}</div>`).join('')}</div>`:'';
   const sample=p.rows.slice(0,3).concat(p.rows.length>3?[null]:[]).concat(p.rows.length>3?[p.rows[p.rows.length-1]]:[]);
   const sampleRows=sample.map(r=>r
-    ? `<tr><td style="padding:4px 8px;border:1px solid #E5E7EB">${r.seq}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.dateLabel||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.optionKey||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB;color:#9CA3AF">제출이 채웁니다</td></tr>`
-    : `<tr><td colspan="4" style="padding:4px 8px;border:1px solid #E5E7EB;text-align:center;color:#9CA3AF">⋮</td></tr>`).join('');
+    ? `<tr><td style="padding:4px 8px;border:1px solid #E5E7EB">${r.seq}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.dateLabel||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.optionKey||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.reviewOption||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB;color:#9CA3AF">제출이 채웁니다</td></tr>`
+    : `<tr><td colspan="5" style="padding:4px 8px;border:1px solid #E5E7EB;text-align:center;color:#9CA3AF">⋮</td></tr>`).join('');
 
   document.getElementById('wtPlanBox').innerHTML=`
     <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;gap:10px">
@@ -6822,12 +6826,14 @@ function _wtpRender(){
         <div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">공휴일·업체 휴무처럼 그날 진행하지 않는 날을 빼면 그만큼 뒤로 밀립니다.</div>
       </div>
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">옵션 배분</div>${opts}</div>
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">리뷰 종류 배분 <span style="font-weight:400;color:#9CA3AF">— 날짜별 비율을 유지해 리뷰옵션 칸에 적습니다</span></div>${rmix}</div>
 
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">만들어질 표 (${p.totals.rows}행)</div>
         <table style="border-collapse:collapse;font-size:12px"><thead><tr>
           <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">번호</th>
           <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">구매일자</th>
           <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">옵션</th>
+          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">리뷰옵션</th>
           <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">나머지 열</th>
         </tr></thead><tbody>${sampleRows}</tbody></table></div>
 
@@ -6873,9 +6879,12 @@ async function wtpAccept(){
   const tabName=((document.getElementById('wtpTabName')||{}).value||'').trim();
   btn.disabled=true; const old=btn.textContent; btn.textContent='접수 중…';
   if(msg) msg.textContent='작업표를 만들고 등록하는 중입니다…';
+  // ★ 휴무일은 화면에서 안 건드렸으면 **계획에 보인 값 그대로**(작업오더 신호 포함) —
+  //   빈 배열로 보내면 명시 "제외 없음"이 되어 오더의 휴무일이 조용히 지워진다.
   const okDone = await _woAccept(_WTP.id, null, { tabName, planOptions:{
     total:f.total, daily:f.daily, startDate:f.startDate,
-    skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[],
+    skipWeekends:f.skipWeekends!==false,
+    holidays:Array.isArray(f.holidays)?f.holidays:((_WTP.plan&&_WTP.plan.holidays)||[]),
     channel:f.channel||'', workTypes:f.workTypes||[] } });
   if(okDone){ closeWtPlan(); }
   else { btn.disabled=false; btn.textContent=old; if(msg) msg.innerHTML='<b style="color:#B91C1C">접수하지 못했습니다 — 위 안내를 확인하세요.</b>'; }
