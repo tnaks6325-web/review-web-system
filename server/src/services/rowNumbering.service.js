@@ -218,7 +218,12 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
     `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
             COALESCE(NULLIF(btrim(tc.display_name), ''), tc.tab_name) AS "displayName",
             COUNT(p.id)::int AS total,
-            COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) = '')::int AS "blankNumber"
+            COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) = '')::int AS "blankNumber",
+            /* 중복 번호 = 값 있는 줄 수 - 서로 다른 번호 수(= 같은 번호를 나눠 쓴 잉여 줄).
+               중복 줄 정리 뒤 566,566,567,567 처럼 번호는 다 차 있는데 두 개씩인 표가 남는다.
+               빈칸만 세면 그 표가 자동 스윕 대상에서 통째로 빠진다(실측 2026-08-19). */
+            (COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) <> '')
+             - COUNT(DISTINCT btrim(n.val)) FILTER (WHERE btrim(COALESCE(n.val, '')) <> ''))::int AS "dupNumber"
        FROM tab_configs tc
        JOIN campaign_participants p
          ON p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
@@ -231,15 +236,16 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
           LIMIT 1) n ON TRUE
       WHERE COALESCE(tc.sheetless, FALSE) = TRUE
       GROUP BY 1, 2, 3
-      ORDER BY "blankNumber" DESC, "tabName"
+      ORDER BY "blankNumber" DESC, "dupNumber" DESC, "tabName"
       LIMIT ${cap + 1}`,
     [NUMBER_KEYS.map(k => String(k).toLowerCase())]);
   const truncated = rows.length > cap;
   const items = rows.slice(0, cap);
   return {
     ok: true, truncated, tabs: items.length,
-    needTabs: items.filter(r => r.blankNumber > 0).length,
+    needTabs: items.filter(r => r.blankNumber > 0 || r.dupNumber > 0).length,
     blankNumberRows: items.reduce((s, r) => s + r.blankNumber, 0),
+    dupNumberRows: items.reduce((s, r) => s + r.dupNumber, 0),
     items,
   };
 }
@@ -252,8 +258,8 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
  *   (정리가 끝난 뒤에는 매 사이클 쿼리 1번으로 끝난다).
  * ★ 사이클당 상한(`cap`) — 한 번에 다 돌면 업무 시간에 DB 를 흔든다. 남은 것은 다음 사이클이 맡는다.
  * ★ 건별 독립 — 한 작업의 실패가 나머지를 죽이지 않는다. 어떤 실패도 throw 하지 않는다(크론 보호).
- * ★★ "번호는 차 있는데 순서만 어긋난" 작업은 여기서 안 잡힌다(스캔이 빈칸만 센다) — 그건
- *   **주문이 들어올 때 그 자리에서** 다시 매겨지므로(`renumberTabInTx`) 쌓이지 않는다.
+ * ★★ 대상 = **번호 빈칸 또는 중복 번호**. "번호가 다 차 있고 중복도 없는데 순서만 어긋난" 작업만
+ *   여기서 안 잡히는데, 그건 **주문이 들어올 때 그 자리에서** 다시 매겨지므로 쌓이지 않는다.
  */
 async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
   if (!enabled()) return { skipped: true, reason: 'disabled' };
@@ -264,7 +270,9 @@ async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
     logger.warn(`[rowNumbering] 스윕 스캔 실패: ${err.message}`);
     return { skipped: true, reason: 'scan_failed', message: err.message };
   }
-  const need = (scan.items || []).filter(r => r.blankNumber > 0);
+  /* ★ 빈칸뿐 아니라 **중복 번호**도 대상 — 중복 줄 정리 뒤 남는 `566,566,567,567…` 표는
+       빈칸이 0 이라 종전 조건으로는 영영 안 잡혔다(실측). */
+  const need = (scan.items || []).filter(r => r.blankNumber > 0 || r.dupNumber > 0);
   const targets = need.slice(0, limit);
   const out = { scanned: scan.tabs, need: need.length, tabs: targets.length,
                 remaining: Math.max(0, need.length - targets.length), changedTabs: 0, changedRows: 0, failed: 0 };
