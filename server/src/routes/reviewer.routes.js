@@ -504,18 +504,29 @@ router.get('/review-earnings', async (req, res, next) => {
               rc.thumbnail_url AS "thumbnailUrl",
               to_char(rc.start_date, 'YYYY-MM-DD') AS "campStartDate"
          FROM order_submissions os
-         LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
+         LEFT JOIN campaign_participants cp
+           ON cp.order_submission_id = os.id AND cp.deleted_at IS NULL
          LEFT JOIN campaign_applications ca ON ca.id = os.campaign_application_id
          LEFT JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
           AND ca.campaign_id IS NOT NULL
+          /* ★★ 이중 집계 방지 — 위치키만 보면 참여형(무시트) 주문은 **절대** 걸러지지 않는다:
+             원장 좌표가 campaign:<공고ID>(submit.routes _resolveCampaignOrderScope)이고
+             sheet_row 에는 작업표 seq 가 들어가 review_index 좌표와 계가 다르다.
+             그래서 같은 참여가 명단(review_index)과 주문원장 양쪽에서 세어져
+             "참여중 3건 / 49,800원"처럼 **건수와 금액이 함께 부풀었다**(2026-08-19 실측).
+             → 리뷰 내역 카드 dedup 과 **같은 키**(작업표 줄 = 주문 id 링크)로도 짝짓는다. */
           AND NOT EXISTS (
             SELECT 1 FROM review_index ri
              WHERE ri.phone8 = ANY($1)
-               AND ri.sheet_id = os.sheet_id
-               AND ri.tab_name = os.tab_name
-               AND ri.row_index = os.sheet_row
+               AND ((ri.sheet_id = os.sheet_id
+                     AND ri.tab_name = os.tab_name
+                     AND ri.row_index = os.sheet_row)
+                 OR (cp.id IS NOT NULL
+                     AND ri.sheet_id = cp.sheet_id
+                     AND ri.tab_name = cp.tab_name
+                     AND ri.row_index = cp.seq))
           )`,
       [phoneList]
     );

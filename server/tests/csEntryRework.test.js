@@ -37,8 +37,10 @@ ok('index: 참여상품 정보 팝업에 [1:1 문의하기] 버튼', /_partInfoC
 ok('index: 문의 문맥은 진행한 탭 기준(sheetId||tabName)',
   /_partInfoCsCtx\s*=\s*\(it\.sheetId && it\.tabName\)/.test(indexHtml) &&
   /campaignKey:\s*it\.sheetId \+ '\|\|' \+ it\.tabName/.test(indexHtml));
-ok('index: 문의 라벨에 시트제목 미사용(상품명 → 탭 표시명만)',
-  /campaignLabel:\s*\(it\.productName \|\| it\.displayNameTC \|\| it\.tcDisplayName \|\| it\.tabName/.test(indexHtml));
+// 2026-08-19: 이름 폴백이 `_taskLabel`(내부 키 노출 금지 단일 출처)로 모였다 — 검사 의미는 그대로
+// "상품명 우선, 그 다음 사람이 읽는 작업 이름. 시트제목은 쓰지 않는다".
+ok('index: 문의 라벨에 시트제목 미사용(상품명 → 작업 이름만)',
+  /campaignLabel:\s*\(it\.productName \|\| _taskLabel\(it, '문의'\)\)/.test(indexHtml));
 ok('index: 팝업 버튼에 그 방의 미확인 수 표기(_csUnreadForKey)', /_csUnreadForKey\(_partInfoCsCtx\.campaignKey\)/.test(indexHtml));
 ok('index: 이미지 확인·수정요청도 팝업 안(카드 겉면 통일) — 단건일 때만',
   /_partInfoReEditId = \(done && list\.length === 1\)/.test(indexHtml));
@@ -103,13 +105,16 @@ const RI_ROWS = [
 ];
 const PRICES = { 11: '20300', 12: '12400', 21: '18900', 22: '12400', 23: '9800' };
 pool.query = async (sql) => {
+  // ★ 무시트 주문원장 집계는 이 기존 시트행 전용 fixture에 포함하지 않는다.
+  //   같은 주문을 review_index와 양쪽에서 돌려 이중 집계하는 것을 막는 경로다.
+  //   ⚠ 이 분기는 `FROM review_index` 보다 **먼저** 와야 한다 — 그 쿼리의 이중집계 방지
+  //     NOT EXISTS 안에 `FROM review_index ri` 가 들어 있어(2026-08-19 주문 id 매칭 추가)
+  //     순서가 뒤면 명단 fixture 가 가로채 무시트 주문 5건으로 오인된다(스텁 매칭 함정).
+  if (/ca\.campaign_id IS NOT NULL/.test(sql)) return { rows: [] };
   if (/FROM review_index/.test(sql)) return { rows: RI_ROWS };
   if (/FROM recruit_campaigns/.test(sql)) {
     return { rows: [{ sheetId: 'S1', tabName: 'T1', reviewFee: 1000, thumbnailUrl: 'https://x/y.png' }] };
   }
-  // 무시트 주문원장 집계는 이 기존 시트행 전용 fixture에 포함하지 않는다.
-  // 같은 주문을 review_index와 양쪽에서 돌려 이중 집계하는 것을 막는 경로다.
-  if (/ca\.campaign_id IS NOT NULL/.test(sql)) return { rows: [] };
   if (/FROM order_submissions/.test(sql)) {
     return { rows: RI_ROWS.map(r => ({ sheetId: r.sheetId, tabName: r.tabName, sheetRow: r.rowIndex, price: PRICES[r.rowIndex] })) };
   }
