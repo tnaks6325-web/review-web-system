@@ -28,7 +28,6 @@ jobs:
           set -e
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
-          \timing off
 
           CREATE TEMP VIEW dup AS
           WITH n AS (
@@ -50,46 +49,31 @@ jobs:
           )
           SELECT n.* FROM n JOIN g USING (sheet_id, tab_name, onum, phone8);
 
-          \echo '=== ① 출처(source) · 생성시기 분포 ==='
-          SELECT tab_name, source, to_char(MIN(first_seen_at),'YY-MM-DD') AS 최초,
-                 to_char(MAX(first_seen_at),'YY-MM-DD') AS 최종, COUNT(*) AS 줄수
-            FROM dup GROUP BY 1,2 ORDER BY 1,2;
+          \echo '=== ⑥ 줄마다 매달린 것 (리뷰·입금·회차) ==='
+          SELECT d.tab_name, d.onum, d.seq, d.source,
+                 COALESCE(d.is_submitted,FALSE) AS 제출, COALESCE(d.is_paid,FALSE) AS 입금,
+                 (SELECT COUNT(*) FROM review_index ri
+                   WHERE ri.sheet_id=d.sheet_id AND ri.tab_name=d.tab_name AND ri.row_index=d.seq) AS 색인행,
+                 (SELECT COUNT(*) FROM review_submissions rs
+                   WHERE rs.sheet_id=d.sheet_id AND rs.tab_name=d.tab_name AND rs.row_index=d.seq) AS 리뷰이미지,
+                 (SELECT COUNT(*) FROM payment_batch_items pb
+                   WHERE pb.sheet_id=d.sheet_id AND pb.tab_name=d.tab_name AND pb.row_index=d.seq
+                     AND pb.status IN ('pending','paid')) AS 입금회차
+            FROM dup d ORDER BY 1,2,3;
 
           \echo ''
-          \echo '=== ② 묶음별 상세 (전체) ==='
-          SELECT tab_name, onum, phone8,
-                 string_agg(seq::text || ':' || COALESCE(source,'?') ||
-                            CASE WHEN order_submission_id IS NULL THEN '/링크X' ELSE '/링크O' END ||
-                            '/' || to_char(first_seen_at,'MM-DD'), '  ' ORDER BY seq) AS 줄들,
-                 COUNT(*) AS 줄수
-            FROM dup GROUP BY 1,2,3 ORDER BY 1, COUNT(*) DESC, 2;
-
-          \echo ''
-          \echo '=== ③ 줄끼리 내용이 같은가 (row_json 동일 여부) ==='
-          SELECT tab_name, onum, phone8,
-                 COUNT(DISTINCT row_json::text) AS 서로다른내용,
-                 COUNT(*) AS 줄수
-            FROM dup GROUP BY 1,2,3 ORDER BY 4 DESC, 1;
-
-          \echo ''
-          \echo '=== ④ 원장 대조: 그 명의+번호로 실제 주문이 몇 건인가 ==='
-          SELECT d.tab_name, d.onum, d.phone8, MAX(d.cnt) AS 표줄수,
-                 COUNT(DISTINCT os.id) AS 원장주문수
-            FROM (SELECT tab_name, onum, phone8, COUNT(*) OVER (PARTITION BY sheet_id,tab_name,onum,phone8) AS cnt,
-                         sheet_id FROM dup) d
-            LEFT JOIN order_submissions os
-              ON regexp_replace(COALESCE(os.order_num,''),'\D','','g') = d.onum
-             AND right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) = d.phone8
-             AND os.deleted_at IS NULL
-           GROUP BY 1,2,3 ORDER BY 1,2;
-
-          \echo ''
-          \echo '=== ⑤ 표 내용 미리보기 (앞 6묶음) ==='
-          SELECT tab_name, onum, seq, source,
-                 left(COALESCE(recipient_name,''),6) AS 수취인,
-                 left(row_json::text, 220) AS 내용
-            FROM dup
-           WHERE (tab_name, onum) IN (
-             SELECT tab_name, onum FROM dup GROUP BY 1,2 ORDER BY 1,2 LIMIT 6)
-           ORDER BY tab_name, onum, seq;
+          \echo '=== ⑦ 묶음 요약: 실적이 붙은 줄이 몇 개인가 ==='
+          WITH x AS (
+            SELECT d.tab_name, d.onum, d.seq,
+                   (CASE WHEN COALESCE(d.is_submitted,FALSE) OR COALESCE(d.is_paid,FALSE) THEN 1 ELSE 0 END
+                  + (SELECT COUNT(*) FROM review_submissions rs
+                      WHERE rs.sheet_id=d.sheet_id AND rs.tab_name=d.tab_name AND rs.row_index=d.seq)
+                  + (SELECT COUNT(*) FROM payment_batch_items pb
+                      WHERE pb.sheet_id=d.sheet_id AND pb.tab_name=d.tab_name AND pb.row_index=d.seq
+                        AND pb.status IN ('pending','paid'))) AS 실적
+              FROM dup d)
+          SELECT tab_name, onum, COUNT(*) AS 줄수,
+                 COUNT(*) FILTER (WHERE 실적>0) AS 실적있는줄,
+                 string_agg(seq::text || CASE WHEN 실적>0 THEN '★' ELSE '' END, ',' ORDER BY seq) AS 줄들
+            FROM x GROUP BY 1,2 ORDER BY 4 DESC, 1, 2;
           SQL
