@@ -14,6 +14,7 @@ const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
 const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
 const sheetlessStatus = require('../services/sheetlessStatus.service');
+const { isTrackingField } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 // ★ 이 파일은 예전부터 `logger` 를 최상위 import 없이 써 왔다(review-inspect 목록 실패 경로) —
 //   그 자리는 평소 안 타서 드러나지 않았을 뿐 ReferenceError 였다. 여기서 함께 바로잡는다.
 const { logger } = require('../utils/logger');
@@ -30,9 +31,17 @@ async function _ensureEditScope(req, sheetId, tabName) {
 
 // 작업표 셀 값 편집/붙여넣기는 내부 직원 모두에게 허용한다.
 // 마감·정산처럼 작업의 상태나 금액을 바꾸는 기능은 위의 담당 작업 스코프를 계속 사용한다.
-async function _ensureWorkdeskCellEditScope(req) {
+//
+// ★★ 광고주(업체)는 **택배송장 열 한 칸만** 편집한다(사용자 확정 2026-08-19) — 배송 대행 작업의
+//    송장 입력은 업체가 하는 일이라 그 칸만 열고 나머지 열은 종전대로 열람 전용으로 둔다.
+//    ① 열 판정은 `utils/trackingColumn` 단일 출처(화면 사본은 회귀가드가 일치를 고정)
+//    ② 탭 스코프는 스레드와 **같은 게이트**(`_ensureThreadScope` = canAccessTab + 브랜드 배정) —
+//       여기서 스코프 규칙을 새로 쓰면 남의 업체 탭에 도달하는 경로가 하나 더 생긴다.
+//    ③ field 가 없거나 송장 열이 아니면 종전대로 403(fail-closed).
+async function _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field } = {}) {
   const role = _role(req);
   if (role === 'master' || role === 'admin' || role === 'staff') return { ok: true };
+  if (role === 'advertiser' && isTrackingField(field)) return await _ensureThreadScope(req, sheetId, tabName);
   return { ok: false, code: 403, error: '편집 권한이 없습니다.' };
 }
 
@@ -1163,7 +1172,7 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, field, value } = req.body || {};
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
-    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value, by: _by(req) });
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
@@ -1172,7 +1181,7 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, field } = req.body || {};
     if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
-    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field }); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
 });

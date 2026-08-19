@@ -5490,6 +5490,20 @@ function _workdeskStatusKind(header){
 }
 function _workdeskStatusKindForField(field){ return String(field||'').indexOf('col:')===0?_workdeskStatusKind(String(field).slice(4)):''; }
 
+/* 택배송장 열 — 업체(광고주)도 이 칸만은 직접 입력한다(사용자 확정 2026-08-19).
+   ★ 정규식은 서버 `server/src/utils/trackingColumn.js` 와 **글자 그대로 같아야** 한다(회귀가드가 일치를 고정) —
+     갈리면 "화면에는 입력칸이 열리는데 저장은 403" 이 된다. 넓히지 말 것(배송비고 등 자유텍스트 보호). */
+const _TRACKING_HEADER_RE=/^\s*택배\s*송장\s*(?:번호)?\s*(?:\([^()]{1,60}\))?\s*$/;
+function _isTrackingHeader(h){ return _TRACKING_HEADER_RE.test(String(h==null?'':h)); }
+function _isTrackingField(field){ const f=String(field||''); return f.indexOf('col:')===0&&_isTrackingHeader(f.slice(4)); }
+/* 이 화면에서 "값을 고칠 수 있는 칸이 하나라도 있는가" — 붙여넣기·우클릭 메뉴의 게이트.
+   ★ `STATE.canEdit`(전 열 편집)과 구분한다: 배경색·행 삭제처럼 서버가 광고주를 막는 기능은 그대로 `STATE.canEdit` 를 쓴다
+     (열어 두면 눌러도 403 인 막다른 길이 된다). 실제 대상 판정은 `.gedit` 클래스가 최종적으로 한다. */
+function _canEditCells(){
+  if(STATE.canEdit) return true;
+  return STATE.role==='advertiser' && ((STATE.wd&&STATE.wd.roster)||[]).some(r=>r&&r.trackingEditable===true);
+}
+
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
   _ensureCellRangeUI();  // 셀 범위 드래그(복사·붙여넣기·배경색) + 우클릭 편집(1회 바인딩, 위임)
@@ -5539,6 +5553,8 @@ function buildGrid(wd){
     const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
     const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
     const canE = STATE.canEdit && r.editable!==false;
+    // 업체(광고주)는 전 열 열람 전용이지만 택배송장 칸만 예외 — 앵커가 있는 줄에서만(서버가 `trackingEditable` 로 판정).
+    const advTrackE = !canE && STATE.role==='advertiser' && r.trackingEditable===true;
     const canDeleteOrder = _isInternalRole() && r.hasOrder;
     // 주문은 있으나 번호 칸이 비어 있으면, 별도 행을 유지하지 않고 서버가 목표 인원 안의
     // 빈 슬롯을 찾아 재배정한다. 번호는 브라우저가 정하지 않는다.
@@ -5552,7 +5568,8 @@ function buildGrid(wd){
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> {
       const statusKind=_workdeskStatusKindForField(field);
       const locked=!!statusKind;
-      return canE
+      const cellE = canE || (advTrackE && _isTrackingField(field));   // 업체는 송장 칸만 편집 가능
+      return cellE
       ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 이 화면에서 직접 수정할 수 없습니다.'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':(edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:'')}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     };
@@ -5628,6 +5645,7 @@ function buildGrid(wd){
       ${groupOn?`<button class="btn xs" onclick="toggleAllGGroups()">${STATE.gCollapsed.size?'모두 펼치기':'모두 접기'}</button>`:''}
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
+      ${(!STATE.canEdit&&_canEditCells())?`<span class="gsmsg" title="다른 칸은 열람 전용입니다">택배송장 칸은 입력할 수 있습니다 — 셀 우클릭 → ✏️ 이 셀 편집</span>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
       ${_folBarHtml()}
@@ -6234,7 +6252,7 @@ function _ensureCellRangeUI(){
   });
   // 붙여넣기(Ctrl/Cmd+V) — 선택 범위 왼쪽 위부터 채운다(편집 권한·편집 가능 셀에만)
   document.addEventListener('paste',e=>{
-    if(!STATE.canEdit || !STATE.gSelRange) return;
+    if(!_canEditCells() || !STATE.gSelRange) return;
     const tag=(e.target&&e.target.tagName||'').toLowerCase();
     if(tag==='input'||tag==='textarea'||(e.target&&e.target.isContentEditable)) return;
     const text=(e.clipboardData&&e.clipboardData.getData('text/plain'))||'';
@@ -6365,7 +6383,7 @@ function _copyFallback(text, done){
 }
 function pasteCellSelection(){
   _closeCellMenu();
-  if(!STATE.canEdit){ toast('열람 전용 계정입니다'); return; }
+  if(!_canEditCells()){ toast('열람 전용 계정입니다'); return; }
   if(navigator.clipboard&&navigator.clipboard.readText){
     navigator.clipboard.readText().then(t=>{ if(t) _pasteIntoSelection(t); else toast('붙여넣을 내용이 없습니다'); })
       .catch(()=>toast('브라우저가 붙여넣기를 막았습니다 — 표에서 Ctrl+V 를 눌러주세요'));
@@ -6422,7 +6440,10 @@ function _openCellMenu(x,y,td){
   const m=$('#gcellmenu'); if(!m) return;
   const g=_selectionGrid(); const nCells=g.reduce((n,l)=>n+l.length,0);
   const one = nCells===1;
-  const canE = STATE.canEdit;
+  // ★ 편집·복사·붙여넣기는 "고칠 수 있는 칸이 있는가"(업체=송장 칸) 기준,
+  //   배경색·행 삭제는 여전히 `STATE.canEdit`(서버가 광고주를 막는 기능이라 열면 막다른 길).
+  const canE = _canEditCells();
+  const canPaint = STATE.canEdit;
   const editable = canE && td && td.classList.contains('gedit');
   STATE._gMenuRowId=td && (td.getAttribute('data-id')||td.getAttribute('data-rid'));
   const field=td && (td.getAttribute('data-field')||td.getAttribute('data-cfield'));
@@ -6443,14 +6464,14 @@ function _openCellMenu(x,y,td){
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
     + (hasEdited?row('↩','편집 되돌리기','_revertSelection()'):'')
-    + (canE?`<div class="gcmdiv"></div><div class="gcmsw">${
+    + (canPaint?`<div class="gcmdiv"></div><div class="gcmsw">${
         _CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
       }<span class="gcswatch gcclear" onclick="_applyRangeColor('')" title="배경색 지우기">✕</span></div>`:'')
     + `<div class="gcmhint">${
         _selRanges().length>1 ? `떨어진 <b>${_selRanges().length}개 범위</b>를 화면 열 순서대로 이어 복사합니다`
         : (one ? 'Ctrl(⌘)+드래그로 떨어진 범위를 더할 수 있습니다'
                : '끌어 잡은 <b>직사각형 범위</b>만 복사됩니다 · Ctrl(⌘)+드래그=범위 추가')}</div>`
-    + (canE&&STATE._gMenuRowId?`<div class="gcmdiv"></div>${row(
+    + (canPaint&&STATE._gMenuRowId?`<div class="gcmdiv"></div>${row(
         '🗑',
         menuRowHasOrder?'행 삭제 · 구매기록 취소':'행 삭제',
         '_menuDeleteRow()',

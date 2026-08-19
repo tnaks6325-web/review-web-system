@@ -17,6 +17,7 @@ const participants = require('./participants.service');
 const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 판정 단일 출처(순수함수)
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
+const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 
 let _pool;
 let _rebuildLedgersForTest = null;
@@ -2186,7 +2187,7 @@ const _ADV_COL_RULES = [
   ['주소',      /주소|배송지/],
   // 택배송장 = 업체가 발송 현황을 확인하는 배송 대행 업무 데이터. 택배·송장 조합만 정확히 허용해
   // 비고성 배송 컬럼을 넓게 노출하지 않으며, 원본 헤더명은 그대로 보존한다.
-  ['택배송장',  /^\s*택배\s*송장\s*(?:번호)?\s*(?:\([^()]{1,60}\))?\s*$/],
+  ['택배송장',  TRACKING_HEADER_RE],
   // 결제금액 = 결제/구매/상품/주문 금액 또는 단독 '금액'만(전체문자열). 바로 '금액' 부분일치 금지 →
   //   입금액·환급액·수수료금액 등 다른 금액 컬럼을 결제금액으로 오매칭해 노출하는 것 방지(요청 = 결제금액 하나).
   ['결제금액',  /결제\s*금액|구매\s*금액|상품\s*금액|주문\s*금액|결제액|결제가|^\s*금액\s*$/],
@@ -2497,7 +2498,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       const cur = {};
       for (const h of advHeaders) cur[h] = _advertiserColumnValue(rj, ov, h);
       syn.rowJson = cur;
-      syn.editable = false;   // 읽기전용
+      syn.editable = false;   // 읽기전용(다른 열은 종전대로)
+      // ★ 택배송장 열만 업체가 직접 입력한다(사용자 확정 2026-08-19). 편집은 오버레이라 **앵커가 있어야**
+      //   저장되고, 중복 앵커(ambiguous)면 어느 줄의 값인지 정할 수 없어 내부 화면과 같은 규율로 잠근다.
+      //   ⚠ `editable` 을 true 로 바꾸지 말 것 — 그러면 화면이 전 열을 편집 가능으로 그린다.
+      syn.trackingEditable = !!anchor && !ambiguous;
+      // 그 열의 편집 오버레이만 실어 준다(↩ 되돌리기 표시용). 다른 열의 편집 이력은 업체에 노출하지 않는다.
+      const tce = {};
+      for (const k in ov) { if (k.indexOf('col:') === 0 && isTrackingHeader(k.slice(4))) tce[k.slice(4)] = ov[k]; }
+      syn.cellEdits = tce;
     }
     out.push(syn);
   }
