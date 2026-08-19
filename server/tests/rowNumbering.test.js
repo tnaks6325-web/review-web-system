@@ -169,7 +169,9 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     let out;
     try { out = await S.renumberTabInTx(client, { sheetId: 's', tabName: 't' }); } catch (e) { threw = true; }
     ok('★★ 실패해도 throw 하지 않는다(주문 기록을 죽이지 않는다)', !threw && out && out.ok === false);
-    ok('★★ SAVEPOINT 로 격리한다', seen.some(s => /SAVEPOINT rn_renumber/.test(s)));
+    /* ★ "SAVEPOINT 문자열이 있나" 로 보면 ROLLBACK TO SAVEPOINT 가 대신 통과시킨다(변이시험 실측)
+         → **첫 쿼리가 SAVEPOINT 선언 자체**인지 본다. */
+    ok('★★ SAVEPOINT 로 격리한다(첫 쿼리가 SAVEPOINT 선언)', /^\s*SAVEPOINT rn_renumber\s*$/.test(seen[0] || ''), seen[0]);
     ok('★★ 실패하면 그 SAVEPOINT 로만 롤백한다', seen.some(s => /ROLLBACK TO SAVEPOINT rn_renumber/.test(s)));
     ok('★ 트랜잭션 전체를 ROLLBACK 하지 않는다', !seen.some(s => /^\s*ROLLBACK\s*$/.test(s)));
   }
