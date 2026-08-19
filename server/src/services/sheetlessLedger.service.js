@@ -313,6 +313,17 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
   };
 }
 
+/* ── 무시트 탭 게이트 (사본 0) ────────────────────────────────────────────────
+   왜 한 곳인가: 줄 정리·중복 정리·수동 정리 셋이 같은 전제("시트 기반 탭에 쓰면 다음 시트 반영이
+   되살린다")를 갖는데 각자 조건을 적으면 한쪽만 조용히 느슨해진다. */
+async function _assertSheetlessTab(db, sheetId, tabName, hint) {
+  const { rows } = await db.query(
+    `SELECT COALESCE(sheetless, FALSE) AS sheetless
+       FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
+  if (!rows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다.');
+  if (!rows[0].sheetless) throw new LedgerError('not_sheetless', hint);
+}
+
 /**
  * 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
  *
@@ -333,14 +344,8 @@ async function retireRows({ sheetId, tabName, rounds = [], seqs = [], dryRun = t
   if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
   const db = getPool();
 
-  const { rows: tcRows } = await db.query(
-    `SELECT COALESCE(sheetless, FALSE) AS sheetless
-       FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
-  if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다.');
-  if (!tcRows[0].sheetless) {
-    throw new LedgerError('not_sheetless',
-      '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하거나 이관 후 이용하세요.');
-  }
+  await _assertSheetlessTab(db, sheetId, tabName,
+    '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하거나 이관 후 이용하세요.');
 
   /* ★ 작업표 쓰기는 `participants.service` 가 소유한다(쓰기 소유자 규율) — 여기는 게이트·순서·장부만. */
   const r = await require('./participants.service')
@@ -380,14 +385,8 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
   const db = getPool();
 
-  const { rows: tcRows } = await db.query(
-    `SELECT COALESCE(sheetless, FALSE) AS sheetless
-       FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
-  if (!tcRows.length) throw new LedgerError('tab_not_registered', '등록되지 않은 탭입니다.');
-  if (!tcRows[0].sheetless) {
-    throw new LedgerError('not_sheetless',
-      '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하세요.');
-  }
+  await _assertSheetlessTab(db, sheetId, tabName,
+    '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하세요.');
 
   const { rows } = await db.query(
     `SELECT cp.seq, cp.order_submission_id AS osid, cp.reviewer_name AS name,
@@ -587,6 +586,145 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
 }
 
 /**
+ * ★★ ⚠중복 진단에서 **그룹 하나를 사람이 직접** 정리한다 (2026-08-19 사용자 요청).
+ *
+ * 왜 필요한가: `dedupeRows` 는 "확신할 때만" 잡는다 — 주문 링크가 없거나(무링크 줄),
+ * 연결된 주문이 취소됐거나, 표 주문번호가 줄마다 다르면 **조회 대상에서조차 빠진다**.
+ * 그런 그룹이 진단 창에 `정리 보류`·`주문 링크 없음` 으로 쌓이는데 손댈 창구가 없어
+ * 표에 같은 사람이 3~4줄로 남았고, **그 표를 그대로 보는 광고주가 혼동했다**(실측 신고).
+ *
+ * ★★ 자동 판정을 완화하지 않는다 — `dedupeRows` 의 키(표·원장 주문번호·연락처 3개 일치)는
+ *   그대로 두고, **사람이 그룹마다 남길 줄을 고르는** 경로를 따로 연다. 판정을 넓히면
+ *   "다른 구매인데 한 줄로 합쳐지는" 사고가 자동으로 일어난다.
+ * ★★ fail-closed 4종(완화 금지):
+ *   ㉮ **이체가 이미 나간 줄(paid)은 어떤 확인으로도 못 내린다** — 그 줄이 송금 근거다.
+ *   ㉯ 이체 대기(pending) 회차에 담긴 줄은 `ackPending` 명시 확인이 있어야 내린다.
+ *   ㉰ 이체 담김 여부를 **모르면 내리지 않는다**(조회 실패 = 거부 — 모르는 채로 지우지 않는다).
+ *   ㉱ 화면이 보낸 줄 번호는 **서버가 그 탭에서 다시 조회**한다(없으면 거부 — 낡은 화면 차단).
+ * ★ 주문 취소는 **그 주문을 쓰는 활성 줄이 하나도 안 남을 때만**(남길 줄뿐 아니라 이 그룹 밖의
+ *   다른 줄까지 본다 — 같은 주문 기록을 공유하는 그룹에서 살아남은 줄의 주문이 사라지면 안 된다).
+ * ★ 순서 계약은 `retireRows` 와 같다: **작업표 soft-delete → 장부 재생성**.
+ * ★ dryRun 기본 — 값이 빠진 요청이 곧바로 실행되지 않는다. 하드삭제 없음(되돌릴 수 있다).
+ */
+async function dedupeManual({ sheetId, tabName, keepSeq, removeSeqs = [],
+                              cancelOrders = true, ackPending = false,
+                              dryRun = true, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new LedgerError('bad_request', 'sheetId, tabName 필수');
+  const keep = parseInt(keepSeq, 10);
+  if (!Number.isFinite(keep)) throw new LedgerError('bad_request', '남길 줄을 고르지 않았습니다.');
+  const rem = [...new Set((Array.isArray(removeSeqs) ? removeSeqs : [])
+    .map(n => parseInt(n, 10)).filter(n => Number.isFinite(n)))].slice(0, 200);
+  if (!rem.length) throw new LedgerError('empty', '내릴 줄을 고르지 않았습니다.');
+  if (rem.includes(keep)) throw new LedgerError('keep_in_remove', '남길 줄은 내릴 줄에 함께 담을 수 없습니다.');
+
+  const db = getPool();
+  await _assertSheetlessTab(db, sheetId, tabName,
+    '시트 기반 탭입니다 — 표에서만 내려도 다음 시트 반영이 되살립니다. 시트에서 정리하세요.');
+
+  /* ㉱ 대상은 서버가 다시 읽는다 — `dedupeRows` 와 달리 **LEFT JOIN** 이라
+     무링크 줄·취소된 주문에 매달린 줄도 다룰 수 있다(그게 이 경로의 존재 이유다). */
+  const { rows } = await db.query(
+    `SELECT cp.seq, cp.reviewer_name AS name, cp.phone8, cp.order_submission_id::text AS osid,
+            COALESCE(cp.is_submitted, FALSE) AS submitted, COALESCE(cp.is_paid, FALSE) AS paid,
+            (os.id IS NOT NULL AND os.deleted_at IS NOT NULL) AS "orderDeleted",
+            regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g') AS ordnum
+       FROM campaign_participants cp
+       LEFT JOIN order_submissions os ON os.id = cp.order_submission_id
+      WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL
+        AND cp.seq = ANY($3::int[])
+      ORDER BY cp.seq`, [sheetId, tabName, [keep, ...rem]]);
+  const bySeq = new Map(rows.map(r => [Number(r.seq), r]));
+  const missing = [keep, ...rem].filter(s => !bySeq.has(s));
+  if (missing.length) {
+    throw new LedgerError('row_not_found',
+      `표에 없거나 이미 내려간 줄이 있습니다(줄 ${missing.join(', ')}) — 창을 새로 불러온 뒤 다시 시도하세요.`);
+  }
+
+  /* ㉰ 이체 담김 — 모르면 거부. 0 으로 꾸미지 않는다. */
+  let payBySeq = new Map();
+  try {
+    const { rows: p } = await db.query(
+      `SELECT pi.row_index AS seq, pi.status, b.seq AS "batchSeq", b.bank
+         FROM payment_batch_items pi
+         JOIN payment_batches b ON b.id = pi.batch_id
+        WHERE pi.sheet_id = $1 AND pi.tab_name = $2 AND pi.row_index = ANY($3::int[])
+          AND pi.status IN ('pending','paid')`, [sheetId, tabName, rem]);
+    for (const r of p) {
+      const k = Number(r.seq);
+      if (!payBySeq.has(k)) payBySeq.set(k, []);
+      payBySeq.get(k).push(r);
+    }
+  } catch (e) {
+    logger.warn(`[sheetlessLedger] 수동 정리 이체 담김 조회 실패 tab=${tabName} — ${e.message}`);
+    throw new LedgerError('payment_unknown',
+      '이체 회차에 담긴 줄인지 확인하지 못했습니다 — 모르는 채로 내리지 않습니다. 잠시 후 다시 시도하세요.');
+  }
+  const paidSeqs = rem.filter(s => (payBySeq.get(s) || []).some(x => x.status === 'paid'));
+  if (paidSeqs.length) {
+    throw new LedgerError('in_paid_batch',
+      `이미 이체가 나간 줄이 있습니다(줄 ${paidSeqs.join(', ')}) — 송금 근거라 내리지 않습니다. ` +
+      '그 줄을 남기고 다른 줄을 내리거나, 입금관리에서 먼저 확인하세요.');
+  }
+  const pendingSeqs = rem.filter(s => (payBySeq.get(s) || []).some(x => x.status === 'pending'));
+  if (pendingSeqs.length && ackPending !== true) {
+    throw new LedgerError('in_pending_batch',
+      `이체 대기 회차에 담긴 줄이 있습니다(줄 ${pendingSeqs.join(', ')}) — 줄을 내려도 그 회차 항목은 ` +
+      '자동으로 빠지지 않습니다. 입금관리에서 회차를 확인한 뒤 진행하세요.');
+  }
+
+  /* 주문 취소 대상 — 이 그룹 밖의 활성 줄까지 확인해 **아무도 안 쓰는 주문만** 취소한다. */
+  const removeOsIds = [...new Set(rem.map(s => bySeq.get(s).osid).filter(Boolean))];
+  let cancelIds = [];
+  if (cancelOrders !== false && removeOsIds.length) {
+    const { rows: still } = await db.query(
+      `SELECT DISTINCT order_submission_id::text AS id
+         FROM campaign_participants
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+          AND order_submission_id = ANY($3::uuid[])
+          AND NOT (seq = ANY($4::int[]))`, [sheetId, tabName, removeOsIds, rem]);
+    const inUse = new Set(still.map(r => r.id));
+    cancelIds = removeOsIds.filter(id => !inUse.has(id));
+  }
+
+  const detail = (seq) => {
+    const r = bySeq.get(seq);
+    return {
+      seq, name: r.name || '', phone8: String(r.phone8 || '').slice(-8),
+      hasOrder: !!r.osid, orderNum: r.ordnum || '', orderDeleted: !!r.orderDeleted,
+      submitted: !!r.submitted, paid: !!r.paid,
+      inPendingBatch: (payBySeq.get(seq) || []).some(x => x.status === 'pending'),
+    };
+  };
+  const stat = {
+    ok: true, sheetId, tabName,
+    keep: detail(keep), remove: rem.map(detail),
+    removeRows: rem.length, cancelOrders: cancelIds.length, pendingSeqs,
+    /* 지울 줄에만 표시가 있으면 사람이 다시 볼 신호다 — 막지는 않고 사실로 말한다. */
+    losesSubmitted: rem.some(s => bySeq.get(s).submitted) && !bySeq.get(keep).submitted,
+    losesPaid: rem.some(s => bySeq.get(s).paid) && !bySeq.get(keep).paid,
+  };
+  if (dryRun) return { ...stat, dryRun: true };
+
+  /* ★ 작업표 쓰기는 participants.service 소유(쓰기 소유자 규율) — 여기는 게이트·순서·장부만. */
+  const r = await require('./participants.service')
+    .retireRows({ sheetId, tabName, seqs: rem, dryRun: false, by: `dedupe-manual:${by}` });
+  const canceled = await require('./orderLedger.service')
+    .softDeleteDuplicateOrders(cancelIds, `dedupe-manual:${by}`);
+
+  let ledger = null, ledgerError = null;
+  try {
+    ledger = await rebuildLedgers({ sheetId, tabName, by: `dedupe-manual:${by}` });
+  } catch (e) {
+    ledgerError = (e && (e.code || e.message)) || 'rebuild_failed';
+    logger.warn(`[sheetlessLedger] 수동 정리 후 장부 재생성 실패 tab=${tabName} — ${ledgerError}`);
+  }
+  logger.info(`[sheetlessLedger] 중복 수동 정리 tab=${tabName} 남김 ${keep} · ${r.retired}줄 내림 · ` +
+    `주문 ${canceled}건 취소 by=${by}`);
+  return { ...stat, removed: r.retired, canceledOrders: canceled,
+           indexRows: ledger ? ledger.indexRows : null, ledgerError };
+}
+
+/**
  * ★★ 전체 작업 일괄 점검 — 어느 작업에 중복 줄이 남아 있는지 한 번에 찾는다(읽기 전용).
  *
  * ★ 판정 사본 0 — 탭마다 `dedupeRows({ dryRun: true })` 를 **그대로** 부른다. 여기서 조건을 다시
@@ -644,6 +782,7 @@ module.exports = {
   rebuildLedgers,
   retireRows,
   dedupeRows,
+  dedupeManual,
   scanDuplicateRows,
   resolveHeaders,
   buildValues,

@@ -2729,6 +2729,32 @@ router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+/* ⚠중복 진단에서 **그룹 하나를 사람이 직접** 정리한다 (2026-08-19 사용자 요청).
+   왜: 자동 정리(`dedupeRows`)는 무링크·취소주문·주문번호 불일치 그룹을 **조회 대상에서조차 뺀다**.
+   그 줄들이 표에 그대로 남아 광고주가 같은 사람을 여러 줄로 보고 혼동했다.
+   ★ 게이트 = adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 `dedupe-rows` 와 같은 급.
+   ★ dryRun 기본 — 값이 빠진 요청이 곧바로 실행되지 않는다(미리보기 → 확인 → 실행 2단계). */
+router.post('/worktable/dedupe-manual', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { dedupeManual, LedgerError } = require('../services/sheetlessLedger.service');
+    const b = req.body || {};
+    try {
+      res.json(await dedupeManual({
+        sheetId: b.sheetId, tabName: b.tabName,
+        keepSeq: b.keepSeq, removeSeqs: b.removeSeqs,
+        cancelOrders: b.cancelOrders !== false, ackPending: b.ackPending === true,
+        dryRun: b.dryRun !== false, by: _by(req),
+      }));
+    } catch (e) {
+      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* ⚠중복(앵커 겹침) 진단 — **읽기 전용**. 그리드 배지 `중복 줄 N` 의 실체를 그룹별로 보여준다.
    왜: 배지(앵커 겹침 · 무링크 줄 포함)와 ♻ 정리(`dedupeRows` · 링크된 줄 + 주문번호/연락처 3개 일치)는
    보는 집합도 키도 달라 "중복 줄 116 · 정리 대상 0" 이 정상적으로 나온다(2026-08-19 장수산업).

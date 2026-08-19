@@ -12,7 +12,7 @@
  * 이 가드가 고정하는 것
  *   1. 겹침 판정 사본 0 — 그리드가 쓰는 `_deriveAnchor` 를 그대로 쓴다(배지 숫자 ≡ 진단 숫자).
  *   2. "정리 도구가 잡는가" 는 `dedupeRows({dryRun:true})` 를 **실제로 불러** 대조한다(조건 재작성 금지).
- *   3. 읽기 전용 — 쓰기 SQL 0.
+ *   3. 진단 조회 자체는 읽기 전용 — 쓰기 SQL 0(정리 실행은 별도 경로 `dedupe-manual`).
  *   4. 모르는 것을 0 으로 꾸미지 않는다(이체 담김 조회 실패 = payUnavailable · inPayment null).
  *   5. dedupe 대조 실패해도 진단은 나온다(fail-soft) + 사유를 싣는다.
  *   6. 게이트 = adminOrMaster, 화면 버튼도 같은 조건(눌러도 403 나는 죽은 버튼 금지).
@@ -246,8 +246,11 @@ const row = (o) => Object.assign({
     ok('★ 사유 설명을 그룹마다 반복하지 않는다(창이 길어져 표를 못 본다) — title 로만',
       /class="abrs" title="\$\{esc\(g\.detail/.test(HTML));
     ok('★ 그룹이 많으면 나눠 그린다([더 보기])', /function abMore\(\)/.test(HTML) && /_AB_PAGE/.test(HTML));
-    ok('★ 읽기 전용 — 이 창에 실행 버튼이 없다',
-      !/id="abOv"[\s\S]{0,900}정리 실행/.test(HTML));
+    /* ⚠ 2026-08-19 사용자 확정으로 이 창은 더 이상 읽기 전용이 아니다 — 자동 정리가 손대지 못하는
+       그룹(무링크·취소주문·주문번호 불일치)이 표에 남아 **광고주가 혼동**했다. 그룹마다 사람이
+       남길 줄을 골라 나머지를 내린다. 실행 경로의 fail-closed 는 `dedupeManualResolve.test.js` 가 고정. */
+    ok('★★ 실행은 미리보기 확인창을 거친다(즉시 삭제 버튼 금지)',
+      /function abResolve\(/.test(HTML) && /dryRun: true/.test(HTML) && /confirm\(/.test(HTML));
   }
 
   console.log(`\n✅ ambiguousRowReport ${pass} 케이스 통과`);
