@@ -154,6 +154,35 @@ function stub(rows, { pay = [] } = {}) {
     led.__setPoolForTest(null);
   }
 
+  console.log('\n[G] 발생 시각 판정 — ㉯ 는 오탐을 만들지 않는다');
+  {
+    /* ★★ 실측 오탐(2026-08-19): 오늘 들어온 주문이 여러 줄에 기록되면, 그 주문의 제출 시각이
+       "중복 발생 시각" 으로 잡혀 **"재발 방지 배포 이후에 또 샜다" 는 빨간 경고**가 잘못 떴다.
+       ㉯ 축의 지울 줄은 남길 줄과 같은 주문이라 그 시각은 발생 시각이 아니다. */
+    const rows = [
+      R({ seq: 10, osid: 'os-1', roword: 'AAAAAA111111', at: '2026-08-19T05:00:00Z', submitted: true }),
+      R({ seq: 20, osid: 'os-1', roword: 'BBBBBB222222', at: '2026-08-19T05:00:00Z' }),
+    ];
+    led.__setPoolForTest(stub(rows));
+    const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+    ok('★★ 같은 주문 그룹은 발생 시각을 "모른다"로 둔다(오늘 날짜로 꾸미지 않는다)',
+      p.plan[0].lastAt === null && p.lastDupAt === null);
+    ok('★ 조용히 빼지 않고 건수를 고지한다', p.sameOrderGroups === 1);
+    led.__setPoolForTest(null);
+  }
+  {
+    // 재제출(주문이 서로 다름)은 종전대로 늦게 들어온 주문의 제출 시각을 쓴다 — 진짜 신호는 유지
+    const rows = [
+      R({ seq: 10, osid: 'os-a', ordnum: '111111111', roword: '111111111', at: '2026-07-01T00:00:00Z', submitted: true }),
+      R({ seq: 20, osid: 'os-b', ordnum: '111111111', roword: '111111111', at: '2026-08-19T05:00:00Z' }),
+    ];
+    led.__setPoolForTest(stub(rows));
+    const p = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T', dryRun: true });
+    ok('★ 재제출 중복은 종전대로 발생 시각을 말한다(진짜 신호 유지)',
+      p.plan[0].lastAt === '2026-08-19T05:00:00Z' && p.sameOrderGroups === 0);
+    led.__setPoolForTest(null);
+  }
+
   console.log('\n[F] 화면 — 규칙을 말한다(조용한 의미 변경 금지)');
   {
     const fs = require('fs'), path = require('path');
@@ -164,6 +193,20 @@ function stub(rows, { pay = [] } = {}) {
     ok('★ 규칙 표기는 서버 matchedBy 를 라벨로만 바꾼다(프론트 재판정 0)',
       /const _DD_AXIS = \{ keys: '주문번호 3키', order: '같은 주문 기록' \}/.test(HTML)
       && /_ddAxis\(g\.matchedBy\)/.test(HTML));
+    /* 창 정돈(사용자 신고 2026-08-19 "세로가 너무 길어서 조작이 어려움") — 되돌리면 다시 못 쓴다. */
+    ok('★ 폭·높이 확대는 이 모달에만(다른 wbl 모달 기본값 불변)',
+      /#ddOv \.wbl-dlg\{width:min\(\d{3,4}px,100%\);max-height:86vh/.test(HTML)
+      && /\.wbl-dlg\{width:min\(460px,100%\)/.test(HTML));
+    ok('★★ 본문만 스크롤 — flex 자식 min-height:0(없으면 창이 끝없이 길어진다)',
+      /#ddOv \.wbl-db\{flex:1;min-height:0;overflow:auto\}/.test(HTML));
+    ok('★ 작업명은 한 줄로 자르고 전체는 title 로 남긴다(줄 높이 폭발 방지)',
+      /#ddOv table\.wbl-t td:first-child\{max-width:\d+px;overflow:hidden;text-overflow:ellipsis\}/.test(HTML)
+      && /<td title="\$\{esc\(t\.label \|\| t\.tabName\)\}"/.test(HTML));
+    ok('★ 발생 시각 불명 건수를 화면이 말한다(미리보기·전체 점검 양쪽)',
+      /function _ddUnknownAt\(n\)/.test(HTML)
+      && (HTML.match(/\$\{_ddUnknownAt\(/g) || []).length >= 2);
+    ok('★ 판정 규칙은 접어 두되 문장은 그대로 남긴다(조용한 의미 변경 금지)',
+      /<details class="wbl-facts" id="ddRuleBox">/.test(HTML) && /같은 주문 기록을 여러 줄이 씀/.test(HTML));
     /* 열을 끼워 넣을 때 가장 흔히 깨지는 자리 — 헤더 칸 수 ≡ 행 칸 수 */
     const head = (HTML.match(/<th>참여자<\/th>[\s\S]{0,220}?<\/tr>/) || [''])[0];
     const body = (HTML.match(/\(p\.plan \|\| \[\]\)\.map\(g =>[\s\S]{0,600}?\)\.join\(''\)/) || [''])[0];

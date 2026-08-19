@@ -2020,6 +2020,21 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #abOv th:last-child,#abOv td:last-child{width:99%}
 #abOv .abchip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;
   background:var(--card2);border:1px solid var(--line);margin:0 5px 5px 0;cursor:help}
+/* ♻ 중복 줄 정리 — 표가 7칸이고 전체 점검 목록이 수십 줄이라 기본 460px·무한 높이로는 조작이 안 된다
+   (사용자 신고 2026-08-19). ★ **이 모달에만** 스코프 · flex 자식 min-height:0(없으면 스크롤이 안 생긴다). */
+#ddOv .wbl-dlg{width:min(1080px,100%);max-height:86vh;display:flex;flex-direction:column}
+#ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#ddOv table.wbl-t{font-size:11.5px}
+#ddOv table.wbl-t th{padding:5px 8px}
+#ddOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
+/* 작업명은 길어서 4줄로 접히며 줄 높이를 키운다 — 한 줄로 자르고 전체는 title 로 남긴다. */
+#ddOv table.wbl-t td:first-child{max-width:430px;overflow:hidden;text-overflow:ellipsis}
+#ddOv .wbl-facts{margin:6px 0 2px;padding:7px 10px}
+#ddOv .wbl-facts ul{max-height:220px;overflow:auto}
+#ddOv details.wbl-facts summary{list-style:none}
+#ddOv details.wbl-facts summary::-webkit-details-marker{display:none}
+#ddOv details.wbl-facts summary::before{content:'▸ ';color:#6b7280}
+#ddOv details[open].wbl-facts summary::before{content:'▾ '}
 .wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
 .wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
 /* 🧹 줄 정리 표 — 마감 확인창(.wbl-*)의 껍데기를 그대로 쓰고 표만 더한다 */
@@ -3234,6 +3249,11 @@ async function _finRefresh(){
   const bar=document.getElementById('finBar'); if(bar) bar.outerHTML=_finBarHtml();
 }
 
+/* ★ 마감/복귀 안내에서 "무엇이 그대로인가"를 그 작업에 맞게 말한다 — 무시트 작업(탈 구글시트)에
+   구글시트를 들먹이면 담당자가 있지도 않은 시트를 찾는다. 판정은 서버가 실어 준 `sheetless`
+   하나이고(ID 모양 추측 금지), **필드가 없으면 종전 문구**를 쓴다(모르는 것을 단정하지 않는다). */
+function _finUntouched(t){ return (t && t.sheetless === true) ? '리뷰어 화면·데이터' : '구글시트·리뷰어 화면·데이터'; }
+
 /* ── 작업보드 제목 행의 마감 조각 (시안 B) ───────────────────────────
    ★ 종전엔 전폭 띠(.wbl-finbar)로 한 줄을 상시 차지했다 — "가끔 한 번 누르는 버튼" 하나 때문에.
      이제 **작업명과 같은 행** 오른쪽 끝에 [안내 문구 + 버튼]으로 붙는다(사용자 확정).
@@ -3253,7 +3273,7 @@ function _finBarHtml(){
   const cand=isFinishCandidate(t);
   const txt=cand
     ? ['인원·제출·입금이 모두 채워졌습니다', ' — 작업이 끝났다면 마감해 주세요.']
-    : ['작업이 모두 끝나면 마감해 주세요.', ' 마감해도 시트·리뷰어 화면은 그대로입니다.'];
+    : ['작업이 모두 끝나면 마감해 주세요.', ` 마감해도 ${_finUntouched(t)}는 그대로입니다.`];
   return `<span class="tp3fin" id="finBar">${cand?'<span class="wbl-s cand">✓ 마감 후보</span>':''}` +
     `<span class="ft" title="${esc(txt[0]+txt[1])}">${esc(txt[0])}<span class="opt">${esc(txt[1])}</span></span>` +
     `<button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></span>`;
@@ -3427,6 +3447,15 @@ function _ddDay(v){
 }
 /* 배포 이후 = 아직 새는 구멍. 값이 없으면(구버전 백엔드·판정 불가) **아무 말도 하지 않는다**
    — 모르는 것을 "안전합니다" 로 꾸미면 막으려던 것을 놓친다. */
+/* ★ 발생 시각을 알 수 없는 그룹(㉯ = 같은 주문 기록)이 있으면 그 사실을 말한다 —
+   조용히 빼면 "배포 이후 유입 0" 으로 오독된다. 그 축의 지울 줄은 남길 줄과 **같은 주문**이라
+   주문 제출 시각이 곧 중복 발생 시각이 아니다(작업표 줄 생성 시각은 원장에 없다). */
+function _ddUnknownAt(n){
+  return Number(n) > 0
+    ? `<div class="wbl-facts"><b>${esc(String(n))}건</b>은 <b>같은 주문 기록을 여러 줄이 쓰는</b> 중복이라
+        <b>언제 생겼는지 알 수 없습니다</b> — 위 발생 시각 판정에는 들어가지 않았습니다.</div>`
+    : '';
+}
 function _ddVerdict(lastAt){
   if (!lastAt) return '';
   const after = new Date(lastAt) >= new Date(_DD_FIX_AT);
@@ -3489,18 +3518,19 @@ function _ddRender(){
       ${_ddSkipRows(g)}</li>`).join('') : '';
   b.innerHTML = `<b>${esc(tg.label || tg.tabName)}</b>${
     _DD.target ? ` <button class="wbl-b" style="margin-left:8px" onclick="ddBackToScan()">← 점검 목록으로</button>` : ''}
-    <div class="wbl-facts">중복으로 보는 경우는 <b>둘</b>입니다.
+    <details class="wbl-facts" id="ddRuleBox"><summary style="cursor:pointer;font-weight:700">판정 규칙 — ㉮ 주문번호 셋 다 같음 · ㉯ 같은 주문 기록을 여러 줄이 씀 <span style="font-weight:400;color:#6b7280">(눌러서 자세히)</span></summary>
+      <div style="margin-top:6px">중복으로 보는 경우는 <b>둘</b>입니다.
       ㉮ <b>표에 보이는 주문번호 + 주문 기록의 주문번호 + 연락처가 셋 다 같음</b>(재제출로 주문이 새로 생긴 중복) ·
       ㉯ <b>같은 주문 기록을 여러 줄이 씀</b>(한 주문이 여러 줄에 기록된 중복 — 표 주문번호가 달라도 대상).
       <b>같은 사람이라도 주문이 서로 다르면 각기 다른 참여건이라 중복이 아닙니다.</b>
       ㉮ 는 표에 주문번호가 없거나 6자리 미만인 줄을 <b>대상에서 제외</b>합니다.
-      해당 그룹은 <b>가장 이른 줄만 남기고</b> 나머지를 내리며, 구글시트는 건드리지 않고 되돌릴 수 있습니다.</div>
+      해당 그룹은 <b>가장 이른 줄만 남기고</b> 나머지를 내리며, 구글시트는 건드리지 않고 되돌릴 수 있습니다.</div></details>
     ${_DD.err ? `<div class="wbl-facts" style="color:#b91c1c">${esc(_DD.err)}</div>` : ''}
     ${!p ? `<div class="wbl-facts">[미리보기]를 눌러 무엇이 정리되고 무엇이 보류되는지 먼저 확인하세요.</div>` : `
       <div class="wbl-facts">표 ${esc(String(p.boardRows))}줄 중 <b>정리 대상 ${esc(String(p.removeRows))}줄</b>
         (${esc(String(p.groups))}건의 구매) · <b>보류 ${esc(String(p.skippedGroups))}건</b>${
         p.skippedNoRowOrder ? ` · 표에 주문번호가 없어 제외 ${esc(String(p.skippedNoRowOrder))}줄` : ''}</div>
-      ${_ddVerdict(p.lastDupAt)}
+      ${_ddVerdict(p.lastDupAt)}${_ddUnknownAt(p.sameOrderGroups)}
       ${p.removeRows ? `<table class="wbl-t"><thead><tr><th>참여자</th><th>연락처 뒤4</th><th>주문번호</th><th>규칙</th><th>남길 줄</th><th>내릴 줄</th><th>발생일</th></tr></thead>
         <tbody>${rows}</tbody></table>` : `<div class="wbl-facts">정리할 중복이 없습니다.</div>`}
       ${p.skippedGroups ? `<div class="wbl-facts"><b>⚠ 사람이 판단해야 하는 건</b> — 시스템이 건드리지 않았습니다.
@@ -3510,7 +3540,7 @@ function _ddRender(){
   if (_DD.scan && !_DD.target) {
     const sc = _DD.scan;
     const list = (sc.tabs || []).map((t, i) =>
-      `<tr${t.done ? ' style="opacity:.55"' : ''}><td><a href="#" onclick="ddPickScan(${i});return false">${esc(t.label || t.tabName)}</a></td>
+      `<tr${t.done ? ' style="opacity:.55"' : ''}><td title="${esc(t.label || t.tabName)}"><a href="#" onclick="ddPickScan(${i});return false">${esc(t.label || t.tabName)}</a></td>
         <td class="num">${esc(String(t.boardRows))}</td>
         <td class="num"><b>${esc(String(t.removeRows))}</b></td>
         <td class="num">${esc(String(t.skippedGroups))}</td>
@@ -3523,7 +3553,7 @@ function _ddRender(){
         정리 대상 <b>${esc(String(sc.totalRemoveRows || 0))}줄</b> · 보류 ${esc(String(sc.totalSkipped || 0))}건
         ${sc.failed ? ` · <span style="color:#b91c1c">점검 실패 ${esc(String(sc.failed))}개</span>` : ''}
         ${sc.truncated ? ' · ⚠ 작업이 많아 일부만 점검했습니다(다시 실행하면 이어서 보입니다)' : ''}</div>
-      ${_ddVerdict(sc.lastDupAt)}
+      ${_ddVerdict(sc.lastDupAt)}${_ddUnknownAt(sc.sameOrderGroups)}
       ${(sc.tabs || []).length ? `<table class="wbl-t"><thead><tr><th>작업</th><th>표 줄</th><th>정리 대상</th><th>보류</th><th>최근 발생</th><th>확인</th><th>이동</th></tr></thead>
         <tbody>${list}</tbody></table>
         <div class="wbl-facts">[확인·정리]를 누르면 <b>이 창에서 그 작업의 미리보기</b>가 열립니다 — 확인 후 정리하고
@@ -3824,7 +3854,7 @@ async function _finOpen(tab){
     ${(s&&!s.closeoutDate)?`<div class="wbl-warn">⚠ 마감자료가 아직 생성되지 않았습니다 — 필요한 작업이라면 정산 카드에서 먼저 생성해 주세요(마감은 그대로 진행할 수 있습니다).</div>`:''}
     <ul class="wbl-ul">
       <li>전 직원의 작업보드에서 <b>마감 보관함</b>으로 이동합니다.</li>
-      <li>구글시트·리뷰어 화면·데이터에는 <b>아무 영향이 없습니다.</b></li>
+      <li>${_finUntouched(t)}에는 <b>아무 영향이 없습니다.</b></li>
       <li>언제든 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</li>
     </ul>
     <label class="wbl-chk"><input type="checkbox" id="finChk" onchange="_finChk(this)">
