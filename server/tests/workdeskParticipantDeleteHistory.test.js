@@ -50,7 +50,9 @@ test('가상 삭제: 참여기록을 실제 삭제해도 마지막 진행일에 
       if (/SELECT id, seq, phone8, row_json, order_submission_id/.test(sql)) {
         return { rows: [{ id: 'row-1', seq: 77, phone8: '12345678', row_json: { '구매일자': '8/18 (화)' }, order_submission_id: '00000000-0000-0000-0000-000000000001' }] };
       }
-      if (/FROM recruit_campaigns rc/.test(sql)) return { rows: [{ campaign_id: 'camp-1' }] };
+      // 무시트 게이트가 공고 조회 SQL 밖 명시 검사로 빠졌다(공고 없이도 삭제 가능해지면서).
+      if (/COALESCE\(sheetless,FALSE\) AS sheetless/.test(sql)) return { rows: [{ sheetless: true }] };
+      if (/FROM recruit_campaigns rc/.test(sql)) return { rows: [{ campaign_id: 'camp-1', is_open: true, is_linked: true }] };
       if (/FROM campaign_daily_plans/.test(sql) && /plan_date=\$2::date/.test(sql)) return { rows: [{ date: '2026-08-18', planned_count: 30 }] };
       if (/FROM campaign_daily_plans/.test(sql)) return { rows: [{ date: '2026-08-21', planned_count: 10 }] };
       if (/SELECT seq, tab_gid, row_json/.test(sql)) return { rows: [

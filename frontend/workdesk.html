@@ -11322,9 +11322,10 @@ const _HIDE_ROW_ERRORS={
   invalid_order_id:'이 행에 연결된 주문 식별자가 올바르지 않습니다. 담당 개발자에게 알려주세요.',
   row_not_found:'그 행을 찾지 못했습니다 — 다른 담당자가 이미 지웠을 수 있습니다. 새로고침 후 확인해 주세요.',
   row_changed:'그 사이 행이 바뀌었습니다. 새로고침 후 다시 시도해 주세요.',
-  row_campaign_not_found:'이 주문에 연결된 공고를 하나로 좁히지 못했습니다. 이 작업에 연결된 공고를 정리한 뒤 다시 시도해 주세요.',
-  sheetless_campaign_not_found:'이 작업에 연결된 모집공고가 없어 총 모집인원을 어디에 보충할지 정할 수 없습니다. 공고를 이 작업에 연결한 뒤 다시 시도해 주세요.',
-  ambiguous_campaign:'이 작업에 연결된 공고가 둘 이상이라 어느 공고의 인원을 조정할지 정할 수 없습니다(그 주문이 어느 공고 참여인지도 기록에 없습니다). 지난 차수 공고를 마감·정리해 하나만 남긴 뒤 다시 시도해 주세요.',
+  not_sheetless:'구글시트를 아직 쓰는 작업이라 행을 지울 수 없습니다 — 다음 시트 반영 때 그 행이 되살아납니다. [탈시트 전환]으로 이 작업을 시스템 표 기준으로 옮긴 뒤 다시 시도해 주세요.',
+  row_campaign_not_found:'이 주문에 연결된 공고를 하나로 좁히지 못했습니다.',
+  sheetless_campaign_not_found:'이 작업에 연결된 모집공고를 찾지 못했습니다.',
+  ambiguous_campaign:'이 작업에 연결된 공고가 둘 이상이라 어느 공고인지 정할 수 없습니다.',
   final_plan_not_found:'이 공고에 날짜별 모집인원 계획이 없어 보충할 날짜를 정할 수 없습니다. [📅 인원]에서 계획을 저장한 뒤 다시 시도해 주세요.',
   removed_date_plan_invalid:'그 날짜의 모집 계획 수가 맞지 않습니다. [📅 인원]에서 계획을 확인해 주세요.',
   final_plan_date_invalid:'마지막 진행일의 날짜 형식을 해석하지 못했습니다. [📅 인원]에서 계획 날짜를 확인해 주세요.',
@@ -11354,7 +11355,13 @@ async function hideRow(rowId, opts){
   let r=null;
   try{ r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})}); }
   catch(_){ r=null; }
-  if(r&&r.ok) toast(r.orderCanceled?(r.sheetCleared?'구매기록을 취소했고 시트 주문값을 비우는 중입니다.':'구매기록을 취소하고 제거했습니다.'):'제거됨');
+  if(r&&r.ok){
+    // 무엇이 일어났는지 사실대로 — 공고를 못 고른 경우 계획 이동은 건너뛴다(빈 자리 보충은 항상 한다).
+    const base=r.orderCanceled?(r.sheetCleared?'구매기록을 취소했고 시트 주문값을 비우는 중입니다.':'구매기록을 취소하고 제거했습니다.'):'제거됨';
+    const seat=r.replenished?` · 빈 자리 1건 보충${r.replacementDate?`(${r.replacementDate})`:''}`:'';
+    const plan=(r.campaignScope&&r.campaignScope!=='linked')?' · 연결 공고를 못 골라 공고 계획은 그대로 둡니다':'';
+    toast(base+seat+plan);
+  }
   else alert(_hideRowErrorText(r));   // 자동으로 사라지는 토스트로 흘리지 않는다 — 사유를 읽고 조치해야 한다
   reloadWorkdesk();
 }

@@ -10,7 +10,8 @@ const cancelPath = require.resolve('../src/services/orderCancellation.service');
 
 const ORDER_ID = '11111111-2222-3333-4444-555555555555';
 
-function makeStubPool({ liveOrder = true, campaigns = [{ campaign_id: 'camp-1', is_open: true, is_linked: true }] } = {}) {
+function makeStubPool({ liveOrder = true, sheetless = true, plans = [{ date: '2026-08-25', planned_count: 5 }],
+  campaigns = [{ campaign_id: 'camp-1', is_open: true, is_linked: true }] } = {}) {
   const log = [];
   const answer = (sql, params) => {
     log.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
@@ -21,11 +22,12 @@ function makeStubPool({ liveOrder = true, campaigns = [{ campaign_id: 'camp-1', 
     if (q.includes('SELECT id, seq, phone8, row_json, order_submission_id')) {
       return { rows: [{ id: 'row-1', seq: 7, phone8: '12345678', row_json: { '구매일자': '8/19 (수)' }, order_submission_id: liveOrder ? ORDER_ID : null }] };
     }
+    if (q.includes('COALESCE(sheetless,FALSE) AS sheetless')) return { rows: [{ sheetless }] };
     if (q.includes('SELECT rc.id AS campaign_id')) return { rows: campaigns };
     if (q.includes('SELECT seq, tab_gid, row_json')) {
       return { rows: [{ seq: 7, tab_gid: '99', row_json: { '구매일자': '8/19 (수)' } }, { seq: 8, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } }] };
     }
-    if (q.includes('FROM campaign_daily_plans') && q.includes('LIMIT 1')) return { rows: [{ date: '2026-08-25', planned_count: 5 }] };
+    if (q.includes('FROM campaign_daily_plans') && q.includes('LIMIT 1')) return { rows: plans };
     if (q.includes('FROM campaign_daily_plans') && q.includes('plan_date=$2::date')) return { rows: [{ date: '2026-08-19', planned_count: 3 }] };
     if (q.includes('DELETE FROM campaign_participants')) return { rowCount: 1, rows: [] };
     if (q.includes('DELETE FROM participation_links')) return { rowCount: 1, rows: [] };
@@ -72,7 +74,7 @@ function restoreCancel() { delete require.cache[cancelPath]; }
   {
     const { pool, client } = makeStubPool({ liveOrder: true });
     pool.connect = async () => ({
-      query: async (sql) => (String(sql).includes('SELECT rc.id AS campaign_id') ? { rows: [] } : client.query(sql)),
+      query: async (sql) => (String(sql).includes('COALESCE(sheetless,FALSE)') ? { rows: [{ sheetless: false }] } : client.query(sql)),
       release() {},
     });
     svc.__setPoolForTest(pool);
@@ -88,7 +90,7 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     restoreCancel();
     assert.strictEqual(committed, false, '본문 실패는 주문 취소까지 롤백시켜야 합니다');
     assert.strictEqual(out.ok, false, '실패는 실패로 알려야 합니다');
-    assert.strictEqual(out.error, 'sheetless_campaign_not_found', '사유를 그대로 전달해야 합니다');
+    assert.strictEqual(out.error, 'not_sheetless', '사유를 그대로 전달해야 합니다');
   }
 
   // ③ 권한: 구매기록이 붙은 행은 master/admin 만 — 쓰기 쿼리 0
@@ -165,7 +167,7 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     assert.ok(planUpdate && planUpdate.params[0] === 'camp-solo', '연결된 그 공고의 계획에 보충해야 합니다');
   }
 
-  // ⑧ 연결 공고가 둘 이상이고 주문 참여 기록도 없으면 고르지 않고 거부한다
+  // ⑧ 연결 공고가 둘 이상이면 계획은 건드리지 않되, 행 삭제와 빈 자리 보충은 한다
   {
     const { pool, client, log } = makeStubPool({
       liveOrder: true,
@@ -176,13 +178,16 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     });
     svc.__setPoolForTest(pool);
     stubCancel(async (args) => { await args.beforeCancelCommit(client); return { ok: true, cleared: false }; });
-    let out;
-    try { out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' }); }
-    catch (e) { out = { ok: false, error: e && e.code }; }
+    svc.__setLedgerRebuildForTest(async () => {});
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
     restoreCancel();
-    assert.strictEqual(out.ok, false, '어느 공고인지 모르면 지우지 않습니다');
-    assert.strictEqual(out.error, 'ambiguous_campaign');
-    assert.ok(!log.some(l => /DELETE FROM campaign_participants/.test(l.sql)), '거부 시 행을 지우면 안 됩니다');
+    assert.strictEqual(out.ok, true, `공고가 모호해도 행 삭제는 되어야 합니다: ${JSON.stringify(out)}`);
+    assert.strictEqual(out.campaignScope, 'ambiguous', '공고를 못 골랐다는 사실을 알려야 합니다');
+    assert.strictEqual(out.replenished, 1, '보충은 작업보드에 한다');
+    assert.strictEqual(out.planMoved, false, '어느 공고인지 모르면 공고 계획은 건드리지 않는다');
+    assert.ok(!log.some(l => /campaign_daily_plans/.test(l.sql) && /UPDATE|INSERT/.test(l.sql)),
+      '모호할 때 공고 계획 쓰기가 있으면 안 됩니다');
+    assert.ok(log.some(l => /INSERT INTO campaign_participants/.test(l.sql)), '빈 자리는 만들어야 합니다');
   }
 
   // ⑨ 주문에 연결된 공고가 있으면 그 공고가 이긴다(다른 후보가 있어도)
@@ -232,6 +237,25 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
     assert.ok(planUpdate && planUpdate.params[0] === 'camp-live', '게시 중인 공고의 계획에 보충해야 합니다');
     void client;
+  }
+
+  // ⑫ 연결된 모집공고가 아예 없는 작업표(오늘 신고 — 네이버)0720_논알콜맥주3종)
+  //    → 삭제되고, 빈 자리는 작업표의 마지막 진행일 표기 그대로 보충된다
+  {
+    const { pool, client, log } = makeStubPool({ liveOrder: true, campaigns: [] });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    stubCancel(async (args) => { await args.beforeCancelCommit(client); return { ok: true, cleared: true }; });
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    restoreCancel();
+    assert.strictEqual(out.ok, true, `공고 없는 작업표도 삭제되어야 합니다: ${JSON.stringify(out)}`);
+    assert.strictEqual(out.campaignScope, 'none');
+    assert.strictEqual(out.replenished, 1, '총원은 작업보드 빈 자리로 유지한다');
+    assert.strictEqual(out.planMoved, false);
+    assert.strictEqual(out.replacementDate, '8/25 (월)', '작업표에서 가장 늦은 진행일 표기를 그대로 쓴다');
+    const ins = log.find(l => /INSERT INTO campaign_participants/.test(l.sql));
+    assert.ok(ins && ins.params[4] === '8/25 (월)', '보충 슬롯의 구매일자가 그 값이어야 합니다');
+    assert.ok(!log.some(l => /campaign_plan_events/.test(l.sql)), '공고가 없으면 공고 이력도 남기지 않는다');
   }
 
   svc.__setPoolForTest(null);
