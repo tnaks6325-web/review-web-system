@@ -106,12 +106,37 @@ async function _mergeOrderSubmissions(results, phoneList) {
     );
     const seen = new Set(seenRows.map(r => `${r.sheetId}||${r.tabName}||${r.rowIndex}`));
 
+    /* ★★ 참여형(무시트) 주문은 위치키로 짝지을 수 없다 — 원장 좌표가 `campaign:<공고ID>`라
+       작업표(review_index) 좌표와 **영원히** 일치하지 않는다(submit.routes `_resolveCampaignOrderScope`).
+       그래서 **주문 id**(`campaign_participants.order_submission_id`)로 짝짓는다. 이 키는 제목·탭명·
+       행번호가 바뀌어도 변하지 않아, 공고 제목을 고쳤다고 한 참여가 두 장으로 쪼개지지 않는다.
+       ★ `review_index` 와 조인해 "이 리뷰어에게 실제로 보이는 행"만 seen 으로 인정한다 —
+         위 위치키 dedup 과 같은 보장(안 그러면 화면에서 사라지는 참여가 생긴다).
+       ★ fail-soft: 이 조회가 실패해도 병합 자체는 계속된다(중복 노출 > 참여 실종). */
+    let seenOsid = new Set();
+    try {
+      const { rows: osidRows } = await pool.query(
+        `SELECT DISTINCT cp.order_submission_id AS "osid"
+           FROM campaign_participants cp
+           JOIN review_index ri
+             ON ri.sheet_id = cp.sheet_id AND ri.tab_name = cp.tab_name AND ri.row_index = cp.seq
+          WHERE cp.order_submission_id IS NOT NULL
+            AND cp.deleted_at IS NULL
+            AND ri.phone8 = ANY($1)`,
+        [phoneList]
+      );
+      seenOsid = new Set(osidRows.map(r => String(r.osid)));
+    } catch (e) {
+      logger.warn('[Search] 주문 id dedup 조회 실패(위치키만 사용): ' + e.message);
+    }
+
     // ★ mirror_status 리터럴 IN-list는 migration 051 부분 인덱스 predicate와 동일(파라미터 배열 금지).
     const { rows: orderRows } = await pool.query(
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               os.tab_gid AS "gid", os.sheet_row AS "sheetRow",
               os.mirror_status AS "mirrorStatus", os.recipient AS "recipientName",
-              COALESCE(rc.title, tc.display_name) AS "displayNameTC",
+              COALESCE(NULLIF(wt.display_name, ''), NULLIF(wt.tab_name, ''),
+                       NULLIF(tc.display_name, ''), rc.title) AS "displayNameTC",
               COALESCE(rc.title, tc.campaign_name) AS "campaignName",
               tc.manager, tc.review_type AS "reviewType",
               tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
@@ -123,6 +148,11 @@ async function _mergeOrderSubmissions(results, phoneList) {
            ON ca.id = os.campaign_application_id
          LEFT JOIN recruit_campaigns rc
            ON rc.id = ca.campaign_id
+         /* ★ 공고에 연결된 작업표 탭 — 카드 제목의 단일 출처.
+            rc.title 을 먼저 쓰면 색인행 카드(= tab_configs.display_name, 접수 시점 고정)와
+            갈려서 같은 참여가 옛 제목·새 제목 두 이름으로 보인다(2026-08-19 신고). */
+         LEFT JOIN tab_configs wt
+           ON wt.sheet_id = rc.linked_sheet_id AND wt.tab_name = rc.linked_tab_name
         WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
           AND os.deleted_at IS NULL
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
@@ -135,7 +165,12 @@ async function _mergeOrderSubmissions(results, phoneList) {
               SELECT 1
                 FROM review_index ri
                WHERE ri.phone8 = RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8)
-                 AND ri.tab_name = rc.title
+                 /* ★ 제목 문자열은 언제든 바뀐다 — 바뀌는 순간 이 dedup 이 통째로 풀려
+                    정리됐던 카드가 되살아난다. 연결 작업표 **좌표**로도 짝지어 준다(가산적). */
+                 AND (ri.tab_name = rc.title
+                      OR (NULLIF(rc.linked_tab_name, '') IS NOT NULL
+                          AND ri.sheet_id = rc.linked_sheet_id
+                          AND ri.tab_name = rc.linked_tab_name))
                  AND COALESCE(NULLIF(ri.row_json->>'주문번호', ''), '') <> ''
             )
           )
@@ -145,6 +180,8 @@ async function _mergeOrderSubmissions(results, phoneList) {
     );
 
     for (const o of orderRows) {
+      // ★ 주문 id 로 이미 작업표 행이 있으면 중복 — 위치키보다 **먼저** 본다(참여형은 위치키가 못 맞는다)
+      if (o.id != null && seenOsid.has(String(o.id))) continue;
       // 이미 시트반영→색인 대표행이 있으면 중복 제거(재배정으로 sheet_row NULL이면 스킵 안 함 → 다음 빌드까지 노출)
       if (o.sheetRow != null && seen.has(`${o.sheetId}||${o.tabName}||${o.sheetRow}`)) continue;
       // written=시트반영완료(반영완료), failed/stuck_manual=확인필요, 그 외(pending/queued/pending_no_row)=반영중
