@@ -111,8 +111,13 @@ function ok(name, cond, extra) {
     ok('연락처 칸에 [변경] 버튼 — onclick 은 인덱스만',
       /_rvPhone\(\$\{i\}\)/.test(wdk) && !/_rvPhone\('\$\{/.test(wdk));
     ok('팝업은 body 직속', /_rvPhone[\s\S]{0,2600}document\.body\.appendChild/.test(wdk));
+    // ★ 변이시험이 뚫은 자리: "인라인 onclick 문자열이 없다"만 보면 setAttribute·addEventListener·d.onclick
+    //   어느 쪽으로 붙여도 통과한다 → **_rvPhone 본문에 오버레이 클릭 핸들러 자체가 없음**을 고정한다.
+    const openFn = wdk.slice(wdk.indexOf('function _rvPhone(i){'), wdk.indexOf('async function _rvPhCheck'));
+    ok('Esc 로 닫는 길은 있다', /_rvPhEsc[\s\S]{0,200}Escape/.test(openFn));
     ok('★ 바깥 클릭으로 닫지 않는다(입력한 번호 보호) — Esc/[취소]만',
-      /_rvPhEsc[\s\S]{0,200}Escape/.test(wdk) && !/rvPhWrap[\s\S]{0,400}onclick="if\(event\.target/.test(wdk));
+      !/event\.target\s*===\s*this/.test(openFn) && !/d\.onclick/.test(openFn)
+      && !/setAttribute\(\s*'onclick'/.test(openFn) && !/addEventListener\(\s*'click'/.test(openFn));
     ok('Esc 리스너는 닫을 때 해제(중복 누적 방지)', /removeEventListener\('keydown',\s*window\._rvPhEsc\)/.test(wdk));
     const check = wdk.slice(wdk.indexOf('async function _rvPhCheck'), wdk.indexOf('async function _rvPhApply'));
     ok('1단계는 confirm 없이 물어본다(쓰기 0)', /reviewers\/phone[\s\S]{0,200}id:row\.id,phone\}/.test(check));
@@ -147,6 +152,7 @@ function ok(name, cond, extra) {
       await q(`DELETE FROM reviewer_account_change_audit a
                 USING reviewers r WHERE a.reviewer_id = r.id AND r.name LIKE '테스트%'`);
       await q(`DELETE FROM reviewers WHERE name LIKE '테스트%'`);
+      await q(`DELETE FROM blacklist WHERE phone = '01055550001'`);
     };
     await cleanup();
 
@@ -186,6 +192,17 @@ function ok(name, cond, extra) {
 
     // ── E-3. 새 번호로 이미 문의방이 있는 상태(이관 충돌) ──
     await q(`INSERT INTO cs_threads (reviewer_phone8, campaign_key, campaign_label) VALUES ('91869944','sheet_rpc','7월탭')`);
+
+    // ── E-3b. 프로브 하나가 42703/42P01 로 죽어도 점검·실행이 살아남는가(SAVEPOINT 격리) ──
+    //   ★ 진짜 PG 로만 재현된다 — 격리가 없으면 25P02 로 트랜잭션 전체가 죽어 변경이 통째로 실패한다.
+    await q('ALTER TABLE blacklist RENAME TO blacklist_rpc_tmp');
+    let isolated;
+    try { isolated = await svc.previewPhoneChange({ id: me.id, newPhone: '01091869944' }); }
+    catch (e) { isolated = { failedWith: e.message }; }
+    finally { await q('ALTER TABLE blacklist_rpc_tmp RENAME TO blacklist'); }
+    ok('E-3b 집계 프로브가 죽어도 **미리보기**는 끝까지 간다(pool 경로 fail-soft)',
+      !!isolated && !isolated.failedWith && isolated.countsPartial === true
+      && (isolated.counts.reviewRows | 0) === 2, isolated && (isolated.failedWith || isolated.counts));
 
     // ── E-4. 실행 ──
     r = await svc.applyPhoneChange({ id: me.id, newPhone: '010-9186-9944', by: '관리자테스트' });
@@ -237,6 +254,17 @@ function ok(name, cond, extra) {
     const { rows: [back] } = await q('SELECT phone, sub_accounts FROM reviewers WHERE id=$1', [me.id]);
     ok('E-5 왕복 후 본계정은 옛 번호, 새 번호가 타계정',
       back.phone === '01085926325' && back.sub_accounts.some(s => s.phone === '01091869944'), back);
+
+    // ── E-6. ★ 잠금 트랜잭션 안에서 프로브가 죽어도 변경은 완주하는가(SAVEPOINT 격리) ──
+    //   격리가 없으면 실패한 프로브 하나가 25P02 로 tx 전체를 죽여 **변경이 통째로 실패**한다.
+    //   (previewPhoneChange 는 pool 경로라 이 회귀를 못 잡는다 — 변이시험이 짚은 자리)
+    await q('ALTER TABLE blacklist RENAME TO blacklist_rpc_tmp');
+    let txSafe;
+    try { txSafe = await svc.applyPhoneChange({ id: me.id, newPhone: '01055550001', by: 'tester' }); }
+    catch (e) { txSafe = { ok: false, threw: e.message }; }
+    finally { await q('ALTER TABLE blacklist_rpc_tmp RENAME TO blacklist'); }
+    ok('E-6 ★★ 프로브 실패가 트랜잭션을 죽이지 않는다(SAVEPOINT 격리)',
+      txSafe && txSafe.ok === true, txSafe && (txSafe.threw || txSafe.blockers));
 
     await cleanup();
     await pool.end();
