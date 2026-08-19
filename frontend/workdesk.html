@@ -2017,6 +2017,21 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-chk input{margin-top:2px}
 .wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+/* 줄별 [⋯] 더보기 — **body 직속**(표는 가로 스크롤 컨테이너라 안에 그리면 잘린다: 공고 카드 [⋯]와 같은 처방).
+   ★ 색은 리터럴 폴백을 함께 둔다(테마 변수 없는 호스트에서도 같은 모양). */
+.wbl-menu{position:fixed;z-index:9500;min-width:168px;background:var(--card,#fff);border:1px solid var(--line,#e5e7eb);
+  border-radius:10px;box-shadow:0 14px 34px rgba(16,24,40,.18);padding:5px;font-size:12px}
+.wbl-menu button{display:block;width:100%;text-align:left;padding:7px 10px;border:0;background:transparent;
+  border-radius:7px;font-size:12px;color:var(--ink,#111827);cursor:pointer}
+.wbl-menu button:hover{background:var(--card2,#f3f4f6)}
+.wbl-menu button.danger{color:#b42318}
+/* 🗑 작업 삭제 확인창 — 지워질 표 목록이 길어 기본 460px·무한 높이로는 읽을 수 없다.
+   ★ flex 자식 min-height:0 이 없으면 스크롤이 안 생긴다(레포 상습 함정). */
+#tdOv .wbl-dlg{width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column}
+#tdOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#tdOv .tdrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px}
+#tdOv .tdrow b{font-variant-numeric:tabular-nums}
+#tdOv .tdbad{margin-top:10px;padding:10px 12px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
 /* ⚠중복 진단 — 표가 7칸이라 기본 460px 로는 가로가 잘린다. **이 모달에만** 넓힘(다른 wbl 모달 불변).
    ★ flex 자식은 기본 min-height:auto 라 min-height:0 이 없으면 본문이 늘어나 스크롤이 안 생긴다. */
 #abOv .wbl-dlg{width:min(1040px,100%);max-height:86vh;display:flex;flex-direction:column}
@@ -4644,6 +4659,129 @@ function _nsBadge(t){
     ? ' <span class="ns-b" title="구글시트를 쓰지 않는 작업입니다 — 표가 곧 원본이고, 시트를 열 필요가 없습니다">무시트</span>'
     : '';
 }
+/* ══════════════════════════════════════════════════════════════════════════
+   줄별 [⋯] 더보기 → [🗑 작업 삭제] (admin/master 전용, 사용자 확정 2026-08-19)
+   ★★ 서버 게이트(adminOrMaster)와 1:1 — AE·광고주에게는 **버튼 자체를 그리지 않는다**
+     (눌러도 403 인 막다른 길 금지). 칸은 항상 만든다(열 수가 사람마다 달라지면 눈이 헤맨다).
+   ★ onclick 에는 **인덱스만** 넘긴다 — 시트에서 온 탭명을 문자열로 넣으면 따옴표 하나로 탈출된다.
+   ══════════════════════════════════════════════════════════════════════════ */
+function _taskDelAllowed(){ return STATE.role==='master'||STATE.role==='admin'; }
+function _taskMoreCell(i){
+  return `<td class="wbl-c wbl-btncol">${_taskDelAllowed()
+    ? `<button class="wbl-b" onclick="event.stopPropagation();openTaskMenu(${i},this)" title="이 작업의 추가 도구">⋯</button>` : ''}</td>`;
+}
+let _tmBound=false;
+function _closeTaskMenu(){ const m=document.getElementById('tmMenu'); if(m) m.remove(); }
+function openTaskMenu(i,el){
+  const cur=document.getElementById('tmMenu'), same=cur&&cur.dataset.i===String(i);
+  _closeTaskMenu(); if(same) return;                     // 같은 버튼 재클릭 = 닫기
+  if(!_taskDelAllowed()) return;
+  const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
+  const m=document.createElement('div'); m.className='wbl-menu'; m.id='tmMenu'; m.dataset.i=String(i);
+  m.innerHTML=`<button class="danger" onclick="event.stopPropagation();openTaskDelete(${i})">🗑 작업 삭제</button>`;
+  document.body.appendChild(m);
+  const r=el.getBoundingClientRect(), w=m.offsetWidth||168, h=m.offsetHeight||44;
+  let top=r.bottom+4; if(top+h>window.innerHeight-8) top=Math.max(8,r.top-h-4);   // 아래가 좁으면 위로 뒤집는다
+  m.style.top=top+'px';
+  m.style.left=Math.max(8,Math.min(window.innerWidth-w-8,r.right-w))+'px';
+  // ★ 항목 onclick 이 stopPropagation 하므로 document 리스너까지 닿지 않는다 → 자기 자신에게 캡처 단계로 건다.
+  m.addEventListener('click',()=>setTimeout(_closeTaskMenu,0),true);
+  if(!_tmBound){ _tmBound=true;                          // ★ 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
+    document.addEventListener('click',e=>{ const mm=document.getElementById('tmMenu');
+      if(mm&&!mm.contains(e.target)) _closeTaskMenu(); },true);
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') _closeTaskMenu(); });
+    window.addEventListener('scroll',_closeTaskMenu,true);   // body 직속이라 표를 따라 움직이지 않는다
+    window.addEventListener('resize',_closeTaskMenu);
+  }
+}
+/* ── 삭제 확인창 — 미리보기(쓰기 0) → 체크 → 실행 ─────────────────────────────
+   ★★ 되돌릴 수 없는 조작이라 **무엇이 몇 건 지워지는지 먼저 보여준다**. 서버도 confirm 없이는 거부.
+   ★ 돈 기록(입금 회차·원장 등)이 걸린 작업은 서버가 거부하므로 실행 버튼 자체를 만들지 않고 사유를 적는다. */
+function _tdClose(){ const o=document.getElementById('tdOv'); if(o) o.remove(); STATE.tdPrev=null; }
+function _tdShell(inner){
+  let ov=document.getElementById('tdOv');
+  if(!ov){ ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='tdOv'; document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="wbl-dlg">${inner}</div>`;     // ★ 바깥 클릭으로 닫지 않는다(실수 클릭 보호) — [취소]·Esc 만
+  if(!ov.dataset.k){ ov.dataset.k='1'; document.addEventListener('keydown',e=>{ if(e.key==='Escape') _tdClose(); }); }
+}
+async function openTaskDelete(i){
+  _closeTaskMenu();
+  const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
+  if(!_taskDelAllowed()){ toast('관리자만 삭제할 수 있습니다'); return; }
+  STATE.tdI=i;
+  _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+    <div class="wbl-db">삭제 대상을 확인하는 중…<div class="wbl-sub">${esc(t.tabName||'')}</div></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/delete-preview?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName)); }
+  catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+      <div class="wbl-db"><b class="bad">삭제 대상을 확인하지 못했습니다</b>
+        <div class="wbl-sub">${esc((j&&(j.error||j.message))||'조회 실패')}</div>
+        <div class="wbl-sub">확인하지 못한 상태로는 지우지 않습니다.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="openTaskDelete(${i})">다시 시도</button>
+        <button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+    return;
+  }
+  STATE.tdPrev=j;
+  const c=j.counts||{};
+  const num=v=>(v==null?'—':String(v));
+  const facts=`<div class="wbl-facts">
+    <div class="tdrow"><span>작업표 줄</span><b>${num(c.boardRows)}줄</b></div>
+    <div class="tdrow"><span>참여자(연락처 있는 줄)</span><b>${num(c.participants)}명</b></div>
+    <div class="tdrow"><span>구매양식 주문</span><b>${num(c.orders)}건</b></div>
+    <div class="tdrow"><span>검색 명단</span><b>${num(c.roster)}줄</b></div>
+    <div class="tdrow"><span>리뷰 캡처 기록</span><b>${num(c.reviewFiles)}건</b></div>
+    <div class="tdrow"><span>지워질 전체 행</span><b>${num(j.totalRows)}행 (${(j.tables||[]).length}개 표)</b></div>
+  </div>`;
+  const camps=(j.campaigns||[]).filter(x=>!x.archivedAt);
+  const side=`<ul class="wbl-ul">
+    <li>연결된 <b>작업오더 ${(j.workOrders||[]).length}건</b>은 지우지 않고 <b>연결만 해제</b>합니다 — 같은 오더를 다시 접수할 수 있습니다.</li>
+    <li>연결된 <b>모집공고 ${camps.length}건</b>은 지우지 않고 <b>보관 처리</b>합니다(참여 이력·리뷰비 기록 보존).</li>
+    <li>구글시트 파일·탭은 <b>건드리지 않습니다</b>(목록에서만 사라집니다).</li>
+  </ul>`;
+  if(j.blocked){
+    _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+      <div class="wbl-db"><b>${esc(j.tab&&j.tab.displayName||t.tabName)}</b>
+        <div class="wbl-sub">${esc(t.tabName)}</div>${facts}
+        <div class="tdbad"><b>이 작업은 삭제할 수 없습니다 — 입금 기록이 걸려 있습니다.</b><br>
+          ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}<br>
+          지우면 남은 줄이 미입금으로 보여 <b>다음 회차에 다시 담기고 이중 송금</b>이 납니다.
+          입금관리에서 정리한 뒤 다시 시도하거나, [🏁 마감]으로 목록에서 내려 주세요.</div></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+    return;
+  }
+  _tdShell(`<div class="wbl-dh">🗑 작업 삭제 — 되돌릴 수 없습니다</div>
+    <div class="wbl-db"><b>${esc(j.tab&&j.tab.displayName||t.tabName)}</b>
+      <div class="wbl-sub">${esc(t.tabName)} · ${esc(t.advertiserName||'업체 미지정')}</div>
+      ${facts}${side}
+      <label class="wbl-chk"><input type="checkbox" id="tdOk" onchange="_tdSync()">
+        위 내용을 확인했고, 이 작업의 기록이 <b>영구히 삭제</b>되는 것에 동의합니다.
+        <span class="sub">복구 수단이 없습니다 — 지운 뒤에는 백업으로만 되살릴 수 있습니다.</span></label></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">취소</button>
+      <button class="wbl-b dark" id="tdGo" disabled onclick="_tdGo()">🗑 삭제</button></div>`);
+}
+function _tdSync(){ const ok=document.getElementById('tdOk'), b=document.getElementById('tdGo');
+  if(b) b.disabled=!(ok&&ok.checked); }
+async function _tdGo(){
+  const i=STATE.tdI, t=(STATE.tabs||[])[i], ok=document.getElementById('tdOk');
+  if(!t||!(ok&&ok.checked)) return;
+  const b=document.getElementById('tdGo'); if(b){ b.disabled=true; b.textContent='삭제 중…'; }
+  let j=null;
+  try{ j=await api('/api/trackb/work-tab/delete',{method:'POST',
+    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,confirm:true})}); }
+  catch(e){ j={ok:false,error:e&&e.message}; }
+  if(!j||j.ok===false){
+    if(b){ b.disabled=false; b.textContent='🗑 삭제'; }
+    toast('⚠ 삭제 실패: '+((j&&(j.error||j.message))||''));
+    return;
+  }
+  _tdClose();
+  toast(`🗑 삭제 완료 — ${j.totalRows}행${j.campaignsArchived?` · 공고 ${j.campaignsArchived}건 보관`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
+  try{ await loadTabs(); }catch(_){ toast('삭제는 완료됐습니다. 목록 새로고침에 실패했으니 새로고침해 주세요.'); }
+}
+
 function _finBodyHtml(){
   const fin=STATE.finTab==='fin';
   const all=STATE.tabs||[];
@@ -4684,10 +4822,10 @@ function _finBodyHtml(){
       <td>${st}</td>
       <td class="wbl-c wbl-btncol">${_folBtnsHtml(t,i)}</td>
       <td class="wbl-c wbl-btncol">${_campBtnHtml(t,i)}</td>
-      ${tdToday}${tdFinish}</tr>`;
+      ${tdToday}${tdFinish}${_taskMoreCell(i)}</tr>`;
   }).join(''):'';
   return rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th><th class="wbl-c">⋯</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }

@@ -131,7 +131,7 @@ const thCount = (thead.match(/<th[>\s]/g) || []).length;   // <thead 오계수 �
 const tb = html.indexOf('<tbody>');
 const firstRow = html.slice(tb, html.indexOf('</tr>', tb));   // 헤더의 </tr> 을 집지 않게 tbody 뒤에서 탐색
 const tdCount = (firstRow.match(/<td/g) || []).length;
-t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 11, `th=${thCount} td=${tdCount}`);
+t(`★ 헤더 칸 수 ≡ 행 칸 수 (${thCount})`, thCount === tdCount && thCount === 12, `th=${thCount} td=${tdCount}`);
 // 2026-08-19 사용자 확정: 목록에서 바로 공유 주소를 복사하는 [🔗 링크] 열이 작업표 옆에 붙었다.
 t('공유 열이 작업표 바로 뒤(작업표=내가 연다 / 공유=남에게 보낸다)',
   /작업표<\/th>\s*<th[^>]*>공유<\/th>/.test(thead));
@@ -177,7 +177,7 @@ sandbox._finRenderList();
 t('보관함에는 스위치 없음 + 필터 무시', !/wbl-sw/.test(host.innerHTML) && /끝난탭/.test(host.innerHTML));
 const finTb = host.innerHTML.indexOf('<tbody>');
 t('보관함 행도 칸 수 동일(빈 칸 유지 — 열 수가 사람·모드마다 달라지지 않는다)',
-  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 11);
+  (host.innerHTML.slice(finTb, host.innerHTML.indexOf('</tr>', finTb)).match(/<td/g) || []).length === 12);
 sandbox.STATE.finTab = 'run'; sandbox.STATE.finFilter = '';
 t('탭 전환이 필터를 초기화한다', (sandbox._finPickTab('fin'), sandbox.STATE.finFilter === ''));
 
