@@ -220,6 +220,29 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 화면 정렬 재료로 sheetless 를 싣는다', /COALESCE\(tc\.sheetless, FALSE\) AS sheetless/.test(tb));
   }
 
+  console.log('\n[H] 전체 작업 스캔 — 한 쿼리 집계 · 읽기 전용 · 키 목록 단일 출처');
+  {
+    const pool = makePool([[/FROM tab_configs/i, { rows: [
+      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', manager: '박은비', total: 187, blankNumber: 42, blankManager: 42 },
+      { sheetId: 'S2', tabName: 'T2', displayName: '정상', manager: '망고', total: 100, blankNumber: 0, blankManager: 0 },
+    ] }]]);
+    S.__setPoolForTest(pool);
+    const r = await S.scanNumbering({});
+    ok('스캔은 쿼리 한 번', pool.calls.length === 1, String(pool.calls.length));
+    ok('★ 읽기 전용(쓰기 쿼리 0)', !pool.calls.some(c => /^(UPDATE|INSERT|DELETE)\b/i.test(c.sql)));
+    ok('★ 무시트 탭만 센다', /COALESCE\(tc.sheetless, FALSE\) = TRUE/.test(pool.calls[0].sql));
+    ok('★ 활성 줄만 센다', /p.deleted_at IS NULL AND p.active = TRUE/.test(pool.calls[0].sql));
+    ok('정리 대상 작업 수·빈 줄 수 집계', r.needTabs === 1 && r.blankNumberRows === 42, JSON.stringify(r));
+    /* ★★ 칸 이름은 SQL 에 적지 않고 utils 목록을 파라미터로 넘긴다(판정 두 벌 금지) */
+    const U2 = require('../src/utils/rowNumbering');
+    ok('★★ 칸 이름 후보를 파라미터로 넘긴다', Array.isArray(pool.calls[0].params[0]) &&
+      pool.calls[0].params[0].join(',') === U2.NUMBER_KEYS.map(k => k.toLowerCase()).join(','));
+    ok('★ SQL 에 칸 이름 리터럴이 없다', !/'번호'|'담당자'/.test(pool.calls[0].sql));
+    ok('★★ 정규식은 그 목록에서 만든다(사본 0)',
+      U2.NUMBER_KEYS.every(k => U2.NUMBER_KEY_RE.test(k)) && U2.MANAGER_KEYS.every(k => U2.MANAGER_KEY_RE.test(k)));
+    ok('담당AE 는 담당자 칸이 아니다', !U2.MANAGER_KEY_RE.test('담당AE'));
+  }
+
   console.log('\n[G] 라우트·화면 배선');
   {
     const rt = noLineComments(read('src/routes/trackB.routes.js'));
@@ -239,6 +262,20 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 실행 전 confirm(번호가 바뀐다는 사실 고지)', /confirm\(`「\$\{_RN\.tabName\}」 표의 번호를/.test(fe));
     ok('★ 프론트에 정렬 재계산 사본 없음(서버 결과만 그린다)',
       !/orderRowsForNumbering|computeRenumberPlan/.test(fe));
+
+    ok('전체 조회 라우트 = adminOrMaster(읽기 전용)',
+      /router\.get\('\/worktable\/renumber-scan',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(rt));
+    ok('★ 전체 작업 진입점(탈시트 전환 헤더)', /openRenumberModal\(\{all:true\}\)"[^>]*>🔢 번호 정리/.test(fe));
+    ok('★ 모달은 한 벌 — 모드만 바뀐다(사본 금지)',
+      (fe.match(/function openRenumberModal\(/g) || []).length === 1 &&
+      /_RN\.mode === 'all'/.test(fe));
+    ok('★ 전체 모드는 작업을 안 골라도 열린다', /if \(!all && !_rnCanRenumber\(\)\) return;/.test(fe));
+    ok('★ 목록 행 실행은 인덱스만 넘긴다(작업명 보간 금지)',
+      /onclick="rnRunOne\(\$\{i\}\)"/.test(fe) && !/rnRunOne\('\$\{esc/.test(fe));
+    ok('★ 전체 실행 전 confirm(번호가 바뀐다는 사실 고지)', /무시트 작업 \$\{s\.needTabs\}개의 번호를/.test(fe));
+    ok('★ 실패한 작업을 조용히 넘기지 않는다', /정리하지 못한 작업/.test(fe));
+    ok('★ 목록이 잘리면 고지', /목록이 잘렸습니다/.test(fe));
+    ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
   }
 
   console.log(`\n✅ rowNumbering 회귀가드 통과 (${passed}케이스)`);

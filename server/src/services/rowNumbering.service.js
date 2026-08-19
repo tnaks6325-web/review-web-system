@@ -218,4 +218,59 @@ async function renumberAllSheetless({ dryRun = true, by = 'admin', limit = SWEEP
   return out;
 }
 
-module.exports = { renumberTab, renumberTabInTx, renumberAllSheetless, enabled, __setPoolForTest };
+/**
+ * 전체 무시트 작업 스캔 — **어느 작업에 번호·담당자 빈칸이 있는지**를 한 쿼리로 센다.
+ *
+ * ★★ 왜 dry-run 을 전 탭에 돌리지 않는가: `renumberTab({dryRun})` 은 그 탭의 **모든 줄과
+ *   `row_json` 을 통째로 읽는다**. 무시트 작업이 수백 개면 수백 MB 를 끌어오게 되어
+ *   조회 한 번이 서버를 흔든다. 그래서 목록은 **DB 안에서 세고 숫자만** 돌려준다
+ *   (정밀 미리보기는 사람이 그 작업을 고를 때 종전 경로로 한 번만 돈다).
+ * ★★ 칸 이름 후보는 `utils/rowNumbering` 의 목록을 **그대로 파라미터로** 넘긴다 —
+ *   SQL 에 이름을 적어 두면 판정이 두 벌이 된다(같은 이유로 정규식도 그 목록에서 만든다).
+ * ★ 읽기 전용(쓰기 쿼리 0) · 정렬 어긋남은 여기서 판정하지 않는다(날짜 파싱이 필요해 비싸다) —
+ *   화면이 그 사실을 말하고, 정확한 변경 줄 수는 작업별 미리보기가 보여준다.
+ */
+async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
+  const db = getPool();
+  const cap = Math.min(Math.max(parseInt(limit, 10) || SWEEP_TAB_CAP, 1), SWEEP_TAB_CAP);
+  const { NUMBER_KEYS, MANAGER_KEYS } = require('../utils/rowNumbering');
+  const lower = a => a.map(k => String(k).toLowerCase());
+  const { rows } = await db.query(
+    `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+            COALESCE(NULLIF(btrim(tc.display_name), ''), tc.tab_name) AS "displayName",
+            COALESCE(btrim(tc.manager), '') AS manager,
+            COUNT(p.id)::int AS total,
+            COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) = '')::int AS "blankNumber",
+            COUNT(p.id) FILTER (WHERE btrim(COALESCE(m.val, '')) = '')::int AS "blankManager"
+       FROM tab_configs tc
+       JOIN campaign_participants p
+         ON p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
+        AND p.deleted_at IS NULL AND p.active = TRUE
+       LEFT JOIN LATERAL (
+         SELECT p.row_json->>k AS val
+           FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
+                                       THEN p.row_json ELSE '{}'::jsonb END) AS k
+          WHERE lower(btrim(k)) = ANY($1::text[])
+          LIMIT 1) n ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT p.row_json->>k AS val
+           FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
+                                       THEN p.row_json ELSE '{}'::jsonb END) AS k
+          WHERE lower(btrim(k)) = ANY($2::text[])
+          LIMIT 1) m ON TRUE
+      WHERE COALESCE(tc.sheetless, FALSE) = TRUE
+      GROUP BY 1, 2, 3, 4
+      ORDER BY "blankNumber" DESC, "blankManager" DESC, "tabName"
+      LIMIT ${cap + 1}`,
+    [lower(NUMBER_KEYS), lower(MANAGER_KEYS)]);
+  const truncated = rows.length > cap;
+  const items = rows.slice(0, cap);
+  return {
+    ok: true, truncated, tabs: items.length,
+    needTabs: items.filter(r => r.blankNumber > 0 || (r.blankManager > 0 && r.manager)).length,
+    blankNumberRows: items.reduce((s, r) => s + r.blankNumber, 0),
+    items,
+  };
+}
+
+module.exports = { renumberTab, renumberTabInTx, renumberAllSheetless, scanNumbering, enabled, __setPoolForTest };
