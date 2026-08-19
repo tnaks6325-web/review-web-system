@@ -1,0 +1,12 @@
+name: oneoff-flow
+on:
+  push:
+    branches: [oneoff/flow]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          PGURL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: psql "$PGURL" -X -A -F $'\t' -P pager=off -f q.sql
