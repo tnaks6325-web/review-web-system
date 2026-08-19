@@ -136,6 +136,33 @@ function makeCtx(fake) {
   return { sandbox, commits, toasts };
 }
 
+/* ── 1B. 고정 헤더에 가린 띠에서도 우클릭 메뉴가 열린다 (2026-08-19 신고) ──────────
+   sticky thead 는 표를 조금만 스크롤해도 **맨 윗줄 데이터 행의 위쪽 띠를 덮는다**. 그 띠를 우클릭하면
+   이벤트 대상이 th(또는 그 안의 span)라 종전엔 메뉴가 통째로 안 떴다(브라우저 기본 메뉴만).
+   실브라우저 실측: 6px 스크롤이면 첫 행 상단, 30px 이면 첫 행 전체가 그 상태가 된다. */
+console.log('\n[1B] 고정 헤더에 가린 띠 보정');
+ok('우클릭 핸들러에 좌표 폴백이 있다',
+  /let td=e\.target\.closest\('#gbody td'\);\s*\n\s*if\(!td\) td=_cellUnderPoint\(e\.clientX, e\.clientY\);/.test(HTML));
+ok('★ 왼쪽 클릭(드래그 선택)에는 폴백을 넣지 않는다 — 헤더 열 메뉴 동작 무접촉', (() => {
+  const i = HTML.indexOf("addEventListener('mousedown'");
+  const body = HTML.slice(i, HTML.indexOf("addEventListener('mousemove'", i));
+  return i > 0 && !/_cellUnderPoint/.test(body);
+})());
+{
+  const sb = { document: null };
+  vm.createContext(sb);
+  vm.runInContext(grab('_cellUnderPoint'), sb);
+  const mkEl = (tag, td) => ({ tagName: tag, closest: sel => (sel === '#gbody td' ? td : null) });
+  const cell = { tagName: 'TD', name: '첫 행 송장 칸' };
+  sb.document = { elementsFromPoint: () => [mkEl('SPAN', null), mkEl('TH', null), mkEl('TD', cell)] };
+  eq('가려진 지점 아래에 깔린 셀을 찾는다', vm.runInContext('_cellUnderPoint(10,10)', sb), cell);
+  sb.document = { elementsFromPoint: () => [mkEl('TH', null), mkEl('DIV', null)] };
+  eq('★ 그 지점에 셀이 없으면(평소 헤더) 종전대로 null — 헤더 우클릭 동작 불변',
+    vm.runInContext('_cellUnderPoint(10,10)', sb), null);
+  sb.document = {};
+  eq('elementsFromPoint 미지원 브라우저도 죽지 않는다', vm.runInContext('_cellUnderPoint(10,10)', sb), null);
+}
+
 console.log('\n[2] 직사각형 선택 · 복사 (세로 드래그 = 그 열만)');
 {
   const fake = buildFakeGrid();

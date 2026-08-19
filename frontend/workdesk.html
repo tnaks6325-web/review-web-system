@@ -6229,6 +6229,15 @@ function deleteCustomColumnPrompt(colKey){
       건너뛰고 그 건수를 말한다(조용한 누락 금지). 저장은 기존 `commitCellEdit` 한 경로. */
 const _CELL_COLORS=['#ffe9a8','#ffd0d0','#ffdcb0','#c9f2c0','#c7e3ff','#e6d3ff','#d9d9d9'];
 const _PASTE_MAX=500;   // 한 번에 붙여넣을 수 있는 셀 수(셀당 저장 왕복 1회 — 폭주 차단)
+/* 좌표에 깔려 있는 표 셀 — 고정 헤더가 덮은 지점에서도 그 아래 셀을 찾는다.
+   ★ `elementsFromPoint` 는 그 점에 **실제로 겹쳐 있는** 요소만 돌려주므로, 헤더 아래에 데이터 행이
+     없는 평소(스크롤 최상단)에는 아무것도 못 찾아 종전 동작 그대로다(헤더 우클릭 = 브라우저 기본 메뉴). */
+function _cellUnderPoint(x,y){
+  if(!document.elementsFromPoint) return null;
+  const stack=document.elementsFromPoint(x,y)||[];
+  for(const el of stack){ const td=el&&el.closest?el.closest('#gbody td'):null; if(td) return td; }
+  return null;
+}
 function _ensureCellRangeUI(){
   if(STATE._gColorInit) return; STATE._gColorInit=true;
   if(!$('#gcellmenu')){ const p=document.createElement('div'); p.className='gcellmenu'; p.id='gcellmenu'; document.body.appendChild(p); }
@@ -6257,8 +6266,15 @@ function _ensureCellRangeUI(){
   });
   document.addEventListener('mouseup',()=>{ drag=null; });   // 선택은 유지 — 복사·붙여넣기·우클릭 메뉴의 대상
   // 우클릭 = 그 셀(또는 이미 잡아 둔 범위)에 대한 메뉴 — **편집 진입은 여기 하나뿐**
+  /* ★★ 상단 고정 헤더(sticky thead)가 **맨 윗줄 데이터 행의 위쪽 띠를 덮는다** — 그 띠를 우클릭하면
+     이벤트 대상이 `th`(또는 그 안의 span)라 종전엔 메뉴가 통째로 안 떴다(브라우저 기본 메뉴만 뜸).
+     실측: 표를 6px 만 스크롤해도 첫 행에서 재현되고, 30px 스크롤이면 그 행은 **가운데를 눌러도** 안 열린다
+     (2026-08-19 신고 "49번은 우클릭이 안 되고 50번은 된다" = 49번이 그때 맨 윗줄이었다).
+     → 그 좌표에 **깔려 있는** 셀을 찾아 그 셀의 메뉴를 연다. 왼쪽 클릭(헤더 열 메뉴·드래그 숨김)은 무접촉. */
   document.addEventListener('contextmenu',e=>{
-    const td=e.target.closest('#gbody td'); if(!td || td.closest('tr.grouphd')) return;
+    let td=e.target.closest('#gbody td');
+    if(!td) td=_cellUnderPoint(e.clientX, e.clientY);   // 고정 헤더에 가린 띠 보정
+    if(!td || td.closest('tr.grouphd')) return;
     if(td.querySelector('input')) return;                 // 편집 중인 셀은 브라우저 기본 메뉴(붙여넣기 등)를 살린다
     e.preventDefault();
     const pos=posOf(td); if(!pos) return;
