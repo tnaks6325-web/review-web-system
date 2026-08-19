@@ -1345,7 +1345,10 @@ async function loadReviewList(user, opts = {}) {
     // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
     const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1" });
     if (res.error && !Array.isArray(res.results) && !Array.isArray(res.data)) throw new Error(res.error);
-    const results = res.data || res.results || [];
+    const resultsRaw = res.data || res.results || [];
+    // ★ '확인필요'(orderStage='attention') 카드는 리뷰어에게 그리지 않는다 — 서버(search.service)가 이미 걸러내지만,
+    //   프론트/백엔드 배포 시점이 갈릴 수 있어 화면에서도 한 번 더 막는다(사용자 확정 2026-08-19, C/S 문의 급증).
+    const results = resultsRaw.filter(item => !(item && item.isOrderPending && item.orderStage === 'attention'));
     _reviewListData = {
       pending: results.filter(item => !item.isSubmitted),
       done:    results.filter(item => item.isSubmitted),
