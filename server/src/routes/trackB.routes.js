@@ -322,12 +322,14 @@ router.get('/overview', authMiddleware, internalMiddleware, async (req, res, nex
 const sheetSync = require('../services/sheetSyncAudit.service');
 router.get('/sheet-sync/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { before, limit, includeArchived, since, includeUnknown, includeIgnored } = req.query;
+    const { before, limit, includeArchived, since, includeUnknown, includeIgnored, includeSheetless } = req.query;
     res.json({ ok: true, ...(await sheetSync.auditSheetSync({
       before, limit, since,
       includeArchived: includeArchived === '1' || includeArchived === 'true',
       includeUnknown: includeUnknown === '1' || includeUnknown === 'true',
       includeIgnored: includeIgnored === '1' || includeIgnored === 'true',
+      // 무시트 작업은 기본 제외(점검 대상 아님) — 보고 싶을 때만 켠다.
+      includeSheetless: includeSheetless === '1' || includeSheetless === 'true',
     })) });
   } catch (err) { next(err); }
 });
@@ -369,7 +371,9 @@ router.post('/sheet-sync/repair', authMiddleware, adminOrMasterMiddleware, async
   try {
     const { sheetId, tabName } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    res.json(await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) }));
+    const out = await sheetSync.repairSheetSync({ sheetId, tabName, by: _by(req) });
+    // ★ 무시트 = 실행 불가(막다른 길 대신 사유) — 상태코드로도 "성공 아님"을 말한다.
+    res.status(out && out.code === 'sheetless' ? 409 : 200).json(out);
   } catch (err) { next(err); }
 });
 

@@ -96,7 +96,9 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
         { ...base, sheetId: 'S9', tabName: 'sheetless-migrated', displayName: 'sheetless-migrated', tabGid: '78', sheetless: true },
       ] }),
     });
-    const out = await svc.auditSheetSync({ before: null, includeUnknown: true });
+    // ★ 무시트는 이제 기본 제외(점검 대상 아님 — sheetSyncAudit.test.js §10)라 여기서는
+    //   `includeSheetless` 로 열어서 본다. 이 절의 검사 의미(무시트에는 시트 링크를 만들지 않는다)는 불변.
+    const out = await svc.auditSheetSync({ before: null, includeUnknown: true, includeSheetless: true });
     svc.__setPoolForTest(null);
     const byName = new Map(out.items.map(i => [i.tabName, i]));
 

@@ -74,13 +74,32 @@ function _gidOut(r, gid, source) {
 
 // ── 진단 분류(순수함수 — 회귀가드가 직접 실행) ──────────────────────────────
 // row: { rawRows, dataRows, mirroredAt, idxStatus, idxBuiltAt, idxErrorMsg, indexRows, boardRows, indexHint }
-// 반환: { flags: string[], severity: 'broken'|'behind'|'ok', reasonKo: string }
+// 반환: { flags: string[], severity: 'broken'|'behind'|'skip'|'ok', reasonKo: string }
 //   ★ 완화 금지: boardRows > indexRows 는 정상일 수 있다(수동 추가·작업표 스켈레톤 행)
 //     → 플래그가 아니라 정보(boardExtra)로만 둔다. 뒤짐(behind)은 index > board 만.
 //   ★★ 건수 판정은 `dataRows`(헤더 아래 실제 작업 행) 우선 — `rawRows`(미러 행 수)는
 //      상단 캠페인 정보·빈 줄·헤더까지 포함한 값이라 "15건 작업이 33행"으로 보인다(실측 오해).
 //      dataRows 를 못 구한 경우에만 rawRows 로 폴백한다.
 function classifySyncRow(r = {}) {
+  /* ★★ 무시트 작업은 **이 점검의 대상이 아니다**(탈 구글시트 이후 · 2026-08-19).
+   *   ① 판정 재료가 뒤집혀 있다 — 무시트 탭의 `raw_sheet_*` 는 시트 사본이 아니라
+   *      **작업표에서 재생성한 장부**(`sheetlessLedger.rebuildLedgers`)라, 이름이 아직 안 채워진
+   *      준비 자리만 있는 정상 작업이 `미러 500행 · 검색인덱스 0행` 으로 보여 `index_empty`
+   *      (헤더 인식 실패 의심)로 **오진**된다(운영 실측: 문제 7건 전부 이 모양).
+   *   ② 조치할 방법도 없다 — [반영](`repairSheetSync` = 미러 → 인덱스 빌드 → 투영)의 앞 두 단계가
+   *      `utils/sheetlessScope` 게이트로 무시트 탭을 건너뛰므로 **아무것도 바뀌지 않는다**(막다른 길).
+   *   ★ 그래서 "정상(ok)" 으로 꾸미지 않고 **`skip`(점검 대상 아님)** 으로 따로 말한다 —
+   *     ok 로 접으면 "점검해서 이상 없음" 으로 읽혀 거짓이 된다.
+   *   ★ 판정 근거는 서버가 실어 준 `sheetless` 플래그 하나 — ID 모양(`wt_`)으로 추측하지 않는다
+   *     (이관된 기존 작업은 진짜 시트 ID 를 그대로 쓰면서 무시트가 된다). */
+  if (r.sheetless === true) {
+    return {
+      flags: ['sheetless_excluded'],
+      severity: 'skip',
+      reasonKo: '무시트 작업 — 시트 반영 점검 대상이 아닙니다(작업표가 원본이고, 미러·인덱스 빌드가 이 탭을 건너뜁니다)',
+      boardExtra: 0,
+    };
+  }
   const rawRows = r.rawRows == null ? null : Number(r.rawRows);
   const dataRows = r.dataRows == null ? null : Number(r.dataRows);
   const workRows = dataRows != null ? dataRows : rawRows;   // 판정에 쓰는 "실제 작업 행" 추정치
@@ -154,7 +173,8 @@ function classifySyncRow(r = {}) {
 // ── 감사: 등록 작업 전수(또는 컷오프 이전) 반영 상태 ─────────────────────────
 const _AUDIT_TAB_CAP = 1500;
 async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeArchived = false,
-                                since = null, includeUnknown = false, includeIgnored = false } = {}) {
+                                since = null, includeUnknown = false, includeIgnored = false,
+                                includeSheetless = false } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || _AUDIT_TAB_CAP, 1), _AUDIT_TAB_CAP);
   // 컷오프는 KST 날짜 문자열(YYYY-MM-DD)만 받는다 — 형식이 아니면 무시(전수 감사).
   const cutoff = (typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before)) ? before : null;
@@ -223,7 +243,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
   const ignoreMap = await _loadIgnoreMap();
 
   const items = [];
-  let filteredOld = 0, yearUnknown = 0, ignoredCount = 0, purchaseUnconfirmed = 0;
+  let filteredOld = 0, yearUnknown = 0, ignoredCount = 0, purchaseUnconfirmed = 0, sheetlessCount = 0;
   for (const r of rows) {
     const regUnknown = !r.registeredAt;
     // ── 연도 하한: 과거 작업은 빼고, 연도를 모르는 작업은 따로 센다(조용한 누락 금지) ──
@@ -236,12 +256,17 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
     if (verdict === 'old') { filteredOld++; continue; }
     if (verdict === 'unknown') { yearUnknown++; continue; }
     if (ignoreMap[r.sheetId + '\t' + r.tabName] && !includeIgnored) { ignoredCount++; continue; }
+    /* ★ 무시트 작업은 기본 제외 — 다만 **조용히 숨기지 않는다**(건수를 고지하고 [보기]로 연다).
+     *   이 화면은 "구글시트 값이 반영 사슬 끝까지 갔나"를 보는 곳이라, 시트를 쓰지 않는 작업에는
+     *   질문 자체가 성립하지 않는다(위 classifySyncRow 주석 참조). */
+    if (r.sheetless === true && !includeSheetless) { sheetlessCount++; continue; }
     // 컷오프가 있으면: 이전 등록 + 등록일 미상(놓치면 안 되는 쪽)만 남긴다.
     if (cutoff && !regUnknown) {
       const regDay = new Date(r.registeredAt).toISOString().slice(0, 10);
       if (regDay >= cutoff) continue;
     }
     const cls = classifySyncRow({
+      sheetless: r.sheetless === true,
       rawRows: r.rawRows, mirroredAt: r.mirroredAt,
       idxStatus: r.idxStatus, idxBuiltAt: r.idxBuiltAt, idxErrorMsg: r.idxErrorMsg,
       indexRows: r.indexRows, boardRows: r.boardRows,
@@ -249,7 +274,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
     items.push({
       sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid || null,
       displayName: r.displayName, campaignName: r.campaignName || null,
-      registeredAt: r.registeredAt, regUnknown,
+      registeredAt: r.registeredAt, regUnknown, sheetless: r.sheetless === true,
       activityAt: act.activityAt, activitySource: act.activitySource, yearUnknown: act.yearUnknown,
       ignored: !!ignoreMap[r.sheetId + '\t' + r.tabName],
       rawRows: r.rawRows == null ? null : Number(r.rawRows),
@@ -265,7 +290,9 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
   //   ① 실제 작업 행 수(dataRows) — 미러 행 수는 상단 정보·헤더까지 세서 "15건이 33행"으로 보인다
   //   ② 검색인덱스에 왜 없는지(indexHint) — 아카이브/리네임/시트 전체 미빌드를 구분
   //   전 탭에 돌리면 탭당 쿼리라 무거우므로 **문제 탭만**(상한 초과분은 고지).
-  const flaggedIdx = items.map((it, i) => ({ it, i })).filter(x => x.it.severity !== 'ok');
+  // ★ 'skip'(무시트 = 점검 대상 아님)도 정밀 진단하지 않는다 — 탭당 쿼리라 비용만 든다.
+  const flaggedIdx = items.map((it, i) => ({ it, i }))
+    .filter(x => x.it.severity !== 'ok' && x.it.severity !== 'skip');
   const detail = flaggedIdx.slice(0, _DETAIL_CAP);
   const detailCapped = flaggedIdx.length > detail.length;
   if (detail.length) {
@@ -282,6 +309,7 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
       it.dataRows = dataRows;
       it.indexHint = indexHint;
       Object.assign(it, classifySyncRow({
+        sheetless: it.sheetless === true,
         rawRows: it.rawRows, dataRows, mirroredAt: it.mirroredAt,
         idxStatus: it.idxStatus, idxBuiltAt: it.idxBuiltAt, idxErrorMsg: it.idxErrorMsg,
         indexRows: it.indexRows, boardRows: it.boardRows, indexHint,
@@ -300,15 +328,17 @@ async function auditSheetSync({ before = null, limit = _AUDIT_TAB_CAP, includeAr
   }
 
   // 문제 있는 탭이 먼저 보이게(broken → behind → ok), 같은 급은 등록 오래된 순.
-  const rank = { broken: 0, behind: 1, ok: 2 };
+  const rank = { broken: 0, behind: 1, ok: 2, skip: 3 };
   items.sort((a, b) => (rank[a.severity] - rank[b.severity]) || String(a.registeredAt || '').localeCompare(String(b.registeredAt || '')));
   return {
     before: cutoff,
     total: items.length,
-    flagged: items.filter(i => i.severity !== 'ok').length,
+    // ★ 'skip' 은 문제가 아니다 — 문제 건수·[문제 작업 전체 반영] 대상에서 뺀다.
+    flagged: items.filter(i => i.severity !== 'ok' && i.severity !== 'skip').length,
     includeArchived: !!includeArchived,
     since: sinceDay, filteredOld, yearUnknown, includeUnknown: !!includeUnknown,
     ignoredCount, includeIgnored: !!includeIgnored, purchaseUnconfirmed,
+    sheetlessCount, includeSheetless: !!includeSheetless,
     detailCapped,
     truncated: rows.length >= lim,
     items,
@@ -395,6 +425,20 @@ async function _indexHints(tabs) {
 //     호출은 export 스터빙이 안 먹는다).
 async function repairSheetSync({ sheetId, tabName, by = 'sheet-sync-repair', deps = null } = {}) {
   if (!sheetId || !tabName) throw new Error('repairSheetSync: sheetId, tabName 필수');
+  /* ★★ 무시트 작업에는 **아무 일도 못 한다** — 그래서 누르게 두지 않고 사유를 말한다.
+   *   ①·② 단계(미러·인덱스 빌드)가 `utils/sheetlessScope` 게이트로 그 탭을 건너뛰므로
+   *   버튼을 눌러도 화면만 '반영 중…' 으로 남는 막다른 길이었다(운영 실측 2026-08-19).
+   *   ★ 판정 실패는 **막지 않는다**(`isSheetless` 가 조회 실패 시 false) — 복구 도구를
+   *     우리 조회 오류로 잠그지 않는다("모르면 막지 않는다").
+   *   ★ 이관 절차(`sheetlessCutover._reflectSheetOnce`)는 표식을 켜기 **전에** 부르므로
+   *     이 게이트에 걸리지 않는다(순서가 계약 — 그쪽 주석 참조). */
+  if (await require('../utils/sheetlessScope').isSheetless(_db(), sheetId, tabName)) {
+    return {
+      ok: false, code: 'sheetless', sheetId, tabName,
+      error: '무시트 작업이라 시트 반영을 실행할 수 없습니다 — 작업표가 원본이고, 시트 미러·인덱스 빌드가 이 탭을 건너뜁니다.',
+      steps: { mirror: null, build: null, project: null },
+    };
+  }
   const d = deps || {
     mirrorOneSheet: require('./rawMirror.service').mirrorOneSheet,
     buildOneSheet: require('./indexBuilder.service').buildOneSheet,

@@ -27,6 +27,8 @@
     .tag.broken { background:#fee2e2; color:#991b1b; }
     .tag.behind { background:#fef3c7; color:#92400e; }
     .tag.ok { background:#d1fae5; color:#065f46; }
+    /* 점검 제외(무시트) — 문제도 정상도 아니라는 것을 색으로도 구분한다(회색). */
+    .tag.skip { background:#e5e7eb; color:#374151; }
     .mono { font-family:monospace; font-size:11px; color:var(--t2); word-break:break-all; }
     .ns-b { display:inline-block; border-radius:999px; padding:1px 7px; font-size:10px; font-weight:750; white-space:nowrap;
             background:#e8f0fe; color:#1a56c4; border:1px solid #c7dbff; }
@@ -121,9 +123,13 @@
   let _incUnknown = false;   // 연도 미상 작업 포함 여부(버튼으로 토글 — 기본은 숨김)
 
   let _incIgnored = false;   // 제외한 작업 포함 여부(버튼 토글)
+  // 무시트 작업 포함 여부 — 기본 숨김(이 화면은 "구글시트 값이 반영됐나"를 보는 곳이라
+  // 시트를 쓰지 않는 작업에는 질문 자체가 성립하지 않는다). 숨긴 건수는 항상 고지한다.
+  let _incSheetless = false;
 
   function toggleUnknown() { _incUnknown = !_incUnknown; runAudit(); }
   function toggleIgnored() { _incIgnored = !_incIgnored; runAudit(); }
+  function toggleSheetless() { _incSheetless = !_incSheetless; runAudit(); }
 
   function tok() { return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || ''; }
   function hdrs() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok() }; }
@@ -165,6 +171,7 @@
       if (since) qs.push('since=' + encodeURIComponent(since));
       if (_incUnknown) qs.push('includeUnknown=1');
       if (_incIgnored) qs.push('includeIgnored=1');
+      if (_incSheetless) qs.push('includeSheetless=1');
       if (document.getElementById('incArchived').checked) qs.push('includeArchived=1');
       const q = qs.length ? ('?' + qs.join('&')) : '';
       const r = await fetch(API_BASE_URL + '/api/trackb/sheet-sync/audit' + q, { headers: hdrs() });
@@ -187,11 +194,14 @@
   function sevTag(s) {
     if (s === 'broken') return '<span class="tag broken">미반영</span>';
     if (s === 'behind') return '<span class="tag behind">뒤짐</span>';
+    // ★ 무시트는 '정상'이 아니라 '점검 제외' — ok 로 그리면 "점검해서 이상 없음"으로 읽혀 거짓이 된다.
+    if (s === 'skip') return '<span class="tag skip" title="무시트 작업 — 시트 반영 점검 대상이 아닙니다">점검 제외</span>';
     return '<span class="tag ok">정상</span>';
   }
 
   function render(meta) {
-    const flagged = ITEMS.filter(i => i.severity !== 'ok');
+    // ★ 'skip'(무시트 = 점검 대상 아님)은 문제가 아니다 — 서버 flagged 계수와 같은 기준.
+    const flagged = ITEMS.filter(i => i.severity !== 'ok' && i.severity !== 'skip');
     document.getElementById('summary').innerHTML =
       '점검 대상 <b>' + ITEMS.length + '</b>개 작업 중 문제 <b style="color:' + (flagged.length ? 'var(--err)' : 'var(--ok)') + '">' + flagged.length + '</b>개'
       + (meta.before ? ' · 기준: <b>' + esc(meta.before) + '</b> 이전 등록(등록일 미상 포함)' : ' · 전체 작업')
@@ -213,6 +223,16 @@
           + '</div>' : '')
       + (meta.includeUnknown ? '<span style="color:var(--warn)">연도 미상 작업 포함해서 보는 중</span>'
           + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleUnknown()">숨기기</button>' : '')
+      // ★ 무시트 작업 제외는 **조용히 하지 않는다** — 건수와 사유를 적고 [보기]로 열 수 있게 한다.
+      + (meta.sheetlessCount ? '<div style="margin-top:5px; color:var(--t2)">'
+          + '무시트 작업 <b>' + meta.sheetlessCount + '</b>건은 점검 대상이 아니라 제외했습니다'
+          + ' — 작업표가 원본이라 시트에서 가져올 것이 없습니다.'
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleSheetless()">보기</button>'
+          + '</div>' : '')
+      + (meta.includeSheetless ? '<div style="margin-top:5px; color:var(--t2)">'
+          + '무시트 작업까지 함께 보는 중입니다 — <b>점검 제외</b>로 표시되며 [반영]은 실행되지 않습니다.'
+          + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleSheetless()">숨기기</button>'
+          + '</div>' : '')
       + (meta.ignoredCount ? ((meta.filteredOld || meta.yearUnknown) ? ' · ' : '')
           + '<span style="color:var(--t2)">제외한 작업 <b>' + meta.ignoredCount + '</b>건</span>'
           + ' <button class="btn ghost" style="padding:3px 9px" onclick="toggleIgnored()">제외된 작업 보기</button>' : '')
@@ -273,7 +293,12 @@
     if (it.flags && it.flags.indexOf('index_archived') >= 0) {
       btns.push('<button class="btn warn" id="unarc' + i + '" onclick="unarchiveOne(' + i + ')">📦 복구+반영</button>');
     }
-    if (it.severity !== 'ok') {
+    // ★ 무시트 작업에는 [반영]을 만들지 않는다 — 눌러도 미러·인덱스 빌드가 그 탭을 건너뛰어
+    //   아무것도 바뀌지 않는다(막다른 길). 대신 왜 없는지를 그 자리에서 말한다.
+    if (it.sheetless === true) {
+      btns.push('<span style="color:var(--t2); font-size:12px"'
+        + ' title="작업표가 원본이라 시트에서 가져올 것이 없습니다. 표 자체를 손보려면 리뷰웹시스템[3버전] 작업보드에서 처리하세요.">시트 반영 없음</span>');
+    } else if (it.severity !== 'ok') {
       btns.push('<button class="btn" id="fix' + i + '" onclick="repairOne(' + i + ')">반영</button>');
     }
     // 복구할 필요 없는 작업 치우기 — 데이터는 지우지 않고 목록에서만 감춘다(되돌리기 가능)
@@ -411,7 +436,8 @@
   }
 
   async function repairAll() {
-    const flagged = ITEMS.map((it, i) => ({ it, i })).filter(x => x.it.severity !== 'ok');
+    const flagged = ITEMS.map((it, i) => ({ it, i }))
+      .filter(x => x.it.severity !== 'ok' && x.it.severity !== 'skip');
     if (!flagged.length) return;
     if (!confirm('문제로 표시된 ' + flagged.length + '개 작업의 시트를 순서대로 다시 읽어 반영합니다.\n(작업당 수 초~수십 초, 구글시트 읽기 한도를 지키며 순차 실행)\n진행할까요?')) return;
     _busy = true;
