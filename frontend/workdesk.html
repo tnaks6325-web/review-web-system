@@ -2004,6 +2004,22 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 .wbl-chk input{margin-top:2px}
 .wbl-chk .sub{display:block;font-weight:400;color:var(--warn);margin-top:2px}
 .wbl-df{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px;background:var(--card2);border-top:1px solid var(--line)}
+/* ⚠중복 진단 — 표가 7칸이라 기본 460px 로는 가로가 잘린다. **이 모달에만** 넓힘(다른 wbl 모달 불변).
+   ★ flex 자식은 기본 min-height:auto 라 min-height:0 이 없으면 본문이 늘어나 스크롤이 안 생긴다. */
+#abOv .wbl-dlg{width:min(1040px,100%);max-height:86vh;display:flex;flex-direction:column}
+#abOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#abOv .abg{margin:8px 0 0;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+#abOv .abgh{display:flex;gap:8px;align-items:center;padding:6px 10px;background:var(--card2);font-size:11.5px}
+#abOv .abgh b{font-size:12px}
+#abOv .abrs{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;background:var(--warn-soft);color:var(--warn);white-space:nowrap;cursor:help}
+#abOv table{width:100%;border-collapse:collapse;font-size:11px;table-layout:auto}
+#abOv th,#abOv td{padding:4px 8px;border-top:1px solid var(--line);text-align:left;white-space:nowrap}
+#abOv th{background:var(--card2);font-weight:700;color:var(--muted,#6b7280)}
+#abOv td.num{text-align:right;font-variant-numeric:tabular-nums}
+/* 마지막 칸이 남는 폭을 흡수 — 안 그러면 값들이 넓게 흩어져 대조가 어렵다(표 주문번호 ↔ 기록 주문번호). */
+#abOv th:last-child,#abOv td:last-child{width:99%}
+#abOv .abchip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;
+  background:var(--card2);border:1px solid var(--line);margin:0 5px 5px 0;cursor:help}
 .wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
 .wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
 /* 🧹 줄 정리 표 — 마감 확인창(.wbl-*)의 껍데기를 그대로 쓰고 표만 더한다 */
@@ -3605,11 +3621,21 @@ if (!window._abKeyBound) {
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('abOv')) closeAmbiguousModal(); });
 }
 const _AB_KIND = {
-  order_link: '같은 주문 기록(주문 링크)을 여러 줄이 쓰고 있음',
-  row_order_num: '표에 보이는 주문번호가 같음 (주문 링크 없는 줄)',
-  recipient: '수취인 + 연락처가 같음 (주문 링크 없는 줄)',
-  phone8: '연락처가 같음 (주문번호·수취인 없음)',
+  order_link: '같은 주문 기록 공유',
+  row_order_num: '표 주문번호 같음(링크 없음)',
+  recipient: '수취인+연락처 같음',
+  phone8: '연락처만 같음',
 };
+/* 사유는 그룹마다 같은 문장을 반복하면 창이 길어져 정작 표가 안 보인다.
+   → 짧은 라벨은 그룹 배지에, 긴 설명은 상단 범례와 title 에 한 번만. */
+const _AB_RLABEL = {
+  dedupe_target: '정리 대상', dedupe_skipped: '정리 보류',
+  no_order_link: '주문 링크 없음', order_deleted: '주문 취소됨',
+  row_order_num_missing: '표 주문번호 없음', row_order_num_differs: '표 주문번호 다름',
+  ledger_order_num_differs: '기록 주문번호 다름', phone_differs: '연락처 다름',
+  unknown: '미분류',
+};
+const _AB_PAGE = 20;   // 한 번에 그리는 그룹 수(나머지는 [더 보기])
 function openAmbiguousModal(){
   if (!_abCan() || !STATE.cur) return;
   const t = STATE.cur;
@@ -3638,11 +3664,12 @@ async function _abLoad(){
 function _abGroupHtml(g, i){
   const rows = (g.rows || []).map(r => {
     const flags = [
-      r.hasOrder ? '' : '<span style="color:#b91c1c">주문 링크 없음</span>',
+      r.hasOrder ? '' : '<span style="color:#b91c1c">링크 없음</span>',
       r.orderDeleted ? '<span style="color:#b91c1c">주문 취소됨</span>' : '',
       r.submitted ? '리뷰제출' : '',
       r.paid ? '입금' : '',
-      r.inPayment === true ? '<span style="color:#b91c1c"><b>입금 회차에 담김</b></span>' : (r.inPayment === null ? '<span style="color:#6b7280">이체 담김 여부 모름</span>' : ''),
+      r.inPayment === true ? '<span style="color:#b91c1c"><b>이체 회차</b></span>'
+        : (r.inPayment === null ? '<span style="color:#6b7280">이체 담김 모름</span>' : ''),
     ].filter(Boolean).join(' · ');
     return `<tr><td class="num">${esc(String(r.seq))}</td><td>${esc(r.name || '')}</td>
       <td class="num">${esc(r.phone8 || '')}</td>
@@ -3651,14 +3678,17 @@ function _abGroupHtml(g, i){
       <td class="num">${esc(_ddDay(r.submittedAt))}</td>
       <td>${flags}</td></tr>`;
   }).join('');
-  return `<div style="margin:10px 0 0;padding:8px 10px;border:1px solid var(--line,#e5e7eb);border-radius:8px">
-    <div><b>#${i + 1}</b> · ${esc(String(g.rowCount))}줄 (줄 ${esc((g.seqs || []).join(', '))})
-      — ${esc(_AB_KIND[g.anchorKind] || g.anchorKind)}</div>
-    <div class="wbl-facts" style="margin:6px 0">${esc(g.detail || g.reason || '')}</div>
-    <table class="lgtable"><thead><tr><th>줄</th><th>참여자</th><th>연락처 뒤8</th>
+  return `<div class="abg">
+    <div class="abgh"><b>#${i + 1}</b> ${esc(String(g.rowCount))}줄
+      <span style="color:#6b7280">줄 ${esc((g.seqs || []).join(', '))}</span>
+      <span style="flex:1"></span>
+      <span style="color:#6b7280">${esc(_AB_KIND[g.anchorKind] || g.anchorKind)}</span>
+      <span class="abrs" title="${esc(g.detail || g.reason || '')}">${esc(_AB_RLABEL[g.reason] || g.reason)}</span></div>
+    <table><thead><tr><th>줄</th><th>참여자</th><th>연락처 뒤8</th>
       <th>표 주문번호</th><th>주문기록 주문번호</th><th>제출시각</th><th>표시</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
 }
+function abMore(){ if (!_AB) return; _AB.shown = (_AB.shown || _AB_PAGE) + _AB_PAGE; _abRender(); }
 function _abRender(){
   const b = document.getElementById('abBody'); if (!b || !_AB) return;
   const r = _AB.rep;
@@ -3669,22 +3699,26 @@ function _abRender(){
     return;
   }
   const byR = r.byReason || {};
-  const summary = Object.keys(byR).map(k => `${esc(k)} ${byR[k]}`).join(' · ');
-  b.innerHTML = `<b>${esc(_AB.label)}</b>
-    <div class="wbl-facts">상단 배지 <b>중복 줄 ${esc(String(r.ambiguousRows))}</b> 는
-      <b>앵커(주문 링크 · 표 주문번호 · 수취인/연락처)가 겹쳐</b> 그 줄에 <b>수정 오버레이(직원이 손으로 적은
-      입금일·리뷰제출 표시)를 적용하지 않은</b> 줄 수입니다. [♻ 중복 줄 정리]는 <b>주문 기록에 연결된 줄만</b>,
-      그리고 <b>표 주문번호·주문기록 주문번호·연락처가 셋 다 같을 때만</b> 대상으로 잡습니다 —
-      그래서 두 숫자가 다를 수 있습니다. 이 창은 <b>읽기 전용</b>이고 아무것도 바꾸지 않습니다.</div>
-    <div>표 ${esc(String(r.totalRows))}줄 중 겹친 줄 <b>${esc(String(r.ambiguousRows))}</b>
-      · 그룹 <b>${esc(String(r.groupCount))}</b>${summary ? ` · 사유별 ${summary}` : ''}</div>
-    ${r.dedupeError ? `<div class="wbl-facts" style="color:#92400e">정리 도구와 대조하지 못했습니다(${esc(r.dedupeError)}) —
-      "정리 대상/보류" 표시는 이번 결과에 없습니다.</div>` : ''}
-    ${r.payUnavailable ? `<div class="wbl-facts" style="color:#b91c1c">입금 회차에 담긴 줄인지 확인하지 못했습니다 —
-      지우기 전에 입금관리에서 직접 확인하세요.</div>` : ''}
-    ${r.truncated ? `<div class="wbl-facts">그룹이 많아 상위 ${esc(String((r.groups || []).length))}개만 보여줍니다.</div>` : ''}
-    ${(r.groups || []).length ? (r.groups || []).map(_abGroupHtml).join('')
-      : `<div class="wbl-facts">겹친 줄이 없습니다.</div>`}`;
+  /* ★ 사유 설명은 여기(범례) 한 번만 — 그룹마다 반복하면 창이 길어져 표를 못 본다.
+     설명 문장은 서버가 준 그대로(프론트 재판정 0), 대표 그룹 하나에서 꺼내 title 로 붙인다. */
+  const detailOf = k => { const g = (r.groups || []).find(x => x.reason === k); return (g && g.detail) || k; };
+  const legend = Object.keys(byR).map(k =>
+    `<span class="abchip" title="${esc(detailOf(k))}">${esc(_AB_RLABEL[k] || k)} <b>${esc(String(byR[k]))}</b></span>`).join('');
+  const all = r.groups || [];
+  const shown = Math.min(_AB.shown || _AB_PAGE, all.length);
+  b.innerHTML = `<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+      <b>${esc(_AB.label)}</b>
+      <span style="color:#6b7280;font-size:11.5px">표 ${esc(String(r.totalRows))}줄 · 겹친 줄 <b>${esc(String(r.ambiguousRows))}</b> · 그룹 <b>${esc(String(r.groupCount))}</b></span></div>
+    <div class="wbl-facts">배지 <b>중복 줄 ${esc(String(r.ambiguousRows))}</b> 는 <b>앵커가 겹쳐 수정 오버레이(직원이 적은 입금일·리뷰제출 표시)를 적용하지 못한</b> 줄입니다.
+      [♻ 중복 줄 정리]는 <b>살아 있는 주문에 연결된 줄만</b>, <b>표·기록 주문번호와 연락처가 셋 다 같을 때만</b> 대상으로 잡아 두 숫자가 다를 수 있습니다.
+      이 창은 <b>읽기 전용</b>입니다.</div>
+    <div style="margin:8px 0 2px">${legend || ''}</div>
+    ${r.dedupeError ? `<div class="wbl-facts" style="color:#92400e">정리 도구와 대조하지 못했습니다(${esc(r.dedupeError)}) — "정리 대상/보류" 표시는 이번 결과에 없습니다.</div>` : ''}
+    ${r.payUnavailable ? `<div class="wbl-facts" style="color:#b91c1c">이체 회차에 담긴 줄인지 확인하지 못했습니다 — 지우기 전에 입금관리에서 직접 확인하세요.</div>` : ''}
+    ${r.truncated ? `<div class="wbl-facts">그룹이 많아 상위 ${esc(String(all.length))}개만 받았습니다.</div>` : ''}
+    ${all.length ? all.slice(0, shown).map(_abGroupHtml).join('') : `<div class="wbl-facts">겹친 줄이 없습니다.</div>`}
+    ${shown < all.length ? `<div style="margin:10px 0 2px;text-align:center">
+      <button class="wbl-b" onclick="abMore()">더 보기 (${esc(String(all.length - shown))}그룹 남음)</button></div>` : ''}`;
 }
 /* ── ＋ 블로거 추가 (블로그체험단 M5-2) ────────────────────────────────────────
    왜: 블로그체험단은 공고 밖(카톡·직접 섭외)으로 데려오는 블로거가 있는데, 그 사람은

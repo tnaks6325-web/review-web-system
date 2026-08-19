@@ -237,6 +237,15 @@ const row = (o) => Object.assign({
       /_AB\.busy = false; _AB\.err = '조회 실패/.test(HTML) && /다시 시도/.test(HTML));
     ok('★ 화면은 서버 사유를 그대로 그린다(프론트 재판정 0)',
       /esc\(g\.detail \|\| g\.reason/.test(HTML));
+    /* 표가 7칸이라 기본 460px 로는 가로가 잘린다(사용자 신고 2026-08-19). */
+    ok('★ 폭 확대는 이 모달에만 — 다른 wbl 모달 기본값은 그대로',
+      /#abOv \.wbl-dlg\{width:min\(\d{3,4}px,100%\)/.test(HTML)
+      && /\.wbl-dlg\{width:min\(460px,100%\)/.test(HTML));
+    ok('★★ 본문만 스크롤 — flex 자식 min-height:0(없으면 늘어나 스크롤이 안 생긴다)',
+      /#abOv \.wbl-db\{flex:1;min-height:0;overflow:auto\}/.test(HTML));
+    ok('★ 사유 설명을 그룹마다 반복하지 않는다(창이 길어져 표를 못 본다) — title 로만',
+      /class="abrs" title="\$\{esc\(g\.detail/.test(HTML));
+    ok('★ 그룹이 많으면 나눠 그린다([더 보기])', /function abMore\(\)/.test(HTML) && /_AB_PAGE/.test(HTML));
     ok('★ 읽기 전용 — 이 창에 실행 버튼이 없다',
       !/id="abOv"[\s\S]{0,900}정리 실행/.test(HTML));
   }
