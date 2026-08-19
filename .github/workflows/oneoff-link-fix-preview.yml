@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Preview2
+      - name: Preview3
         env:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
@@ -18,54 +18,43 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
 
-          \echo '=== ⓐ 표 주문번호를 명의 조건 없이 원장에서 찾기 (3건) ==='
-          SELECT q.num AS 표주문번호, os.id, os.recipient,
+          \echo '=== ⓔ 이지유 연락처(33536503)로 낸 모든 주문 ==='
+          SELECT os.id, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
+                 os.orderer AS 주문자, os.recipient AS 수취인,
                  right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
-                 os.tab_name, to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출, os.mirror_status,
-                 os.deleted_at IS NOT NULL AS 삭제됨
-            FROM (VALUES ('30101824728828'),('2026080390214241'),('11102128152660')) q(num)
-            LEFT JOIN order_submissions os
-              ON regexp_replace(COALESCE(os.order_num,''),'\D','','g') = q.num
-           ORDER BY 1;
-
-          \echo ''
-          \echo '=== ⓑ 링크가 끊길 두 주문 — 지금 그 주문을 가리키는 모든 줄 ==='
-          SELECT os.id, os.recipient AS 주문수취인,
-                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 주문연락처8,
-                 cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
-                 cp.recipient_name AS 줄참여자, cp.phone8 AS 줄연락처8,
-                 cp.deleted_at IS NOT NULL AS 내려간줄
+                 os.tab_name, to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출,
+                 os.mirror_status, os.sheet_row, os.deleted_at IS NOT NULL AS 삭제됨
             FROM order_submissions os
-            LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
-           WHERE os.id IN ('3c3729cb-77b3-49aa-b854-daf1d4007257',
-                           '2c2b82d5-a25e-45e9-b461-3fe4a155ed06')
-           ORDER BY os.id, cp.seq;
+           WHERE right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) = '33536503'
+           ORDER BY os.submitted_at;
 
           \echo ''
-          \echo '=== ⓒ 그 두 사람이 표에 자기 줄을 갖고 있는가 (이름/연락처로) ==='
-          SELECT cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
-                 cp.recipient_name, cp.phone8,
-                 COALESCE(cp.row_json->>'주문번호', cp.row_json->>'주문번호 ') AS 표주문번호,
-                 cp.order_submission_id IS NOT NULL AS 링크있음,
-                 cp.deleted_at IS NOT NULL AS 내려간줄
-            FROM campaign_participants cp
-           WHERE (cp.phone8 = '33536503' AND cp.tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건')
-              OR (cp.phone8 = '75860135' AND cp.tab_name = '8/3(네이버)우레온_바디미스트 100건')
-           ORDER BY cp.tab_name, cp.seq;
+          \echo '=== ⓕ 수취인이 이지유/노대송/김옥선 인 주문 (전 탭) ==='
+          SELECT os.id, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
+                 os.orderer AS 주문자, os.recipient AS 수취인,
+                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
+                 os.tab_name, to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출,
+                 os.mirror_status, os.sheet_row, os.deleted_at IS NOT NULL AS 삭제됨
+            FROM order_submissions os
+           WHERE btrim(COALESCE(os.recipient,'')) IN ('이지유','노대송','김옥선')
+              OR btrim(COALESCE(os.orderer,''))   IN ('이지유','노대송','김옥선')
+           ORDER BY os.submitted_at;
 
           \echo ''
-          \echo '=== ⓓ 문제의 3줄이 있는 탭에서 그 사람의 다른 줄 ==='
-          SELECT cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
-                 cp.recipient_name, cp.phone8,
+          \echo '=== ⓖ 장수돌침대 표에서 그 세 사람 줄 (내려간 줄 포함) ==='
+          SELECT cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
+                 cp.row_json->>'수취인' AS 수취인, cp.phone8,
+                 cp.row_json->>'구매일자' AS 구매일자,
                  regexp_replace(COALESCE((
                    SELECT string_agg(t.value,'' ORDER BY t.key)
                      FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
                     WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS 표주문번호,
-                 cp.order_submission_id IS NOT NULL AS 링크있음,
-                 cp.deleted_at IS NOT NULL AS 내려간줄
+                 cp.order_submission_id AS 링크, cp.source,
+                 cp.deleted_at IS NOT NULL AS 내려간줄,
+                 to_char(cp.deleted_at,'MM-DD HH24:MI') AS 내려간시각
             FROM campaign_participants cp
-           WHERE (cp.phone8='53849851' AND cp.tab_name='0721)장수돌침대_쿠팡_탄소매트 900건')
-              OR (cp.phone8='32250135' AND cp.tab_name='8/3(쿠팡)위프_블랙 탈취제 800건')
-              OR (cp.phone8='75860135' AND cp.tab_name='8/3(네이버)우레온_바디미스트 100건')
-           ORDER BY cp.tab_name, cp.seq;
+           WHERE cp.tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건'
+             AND (cp.row_json->>'수취인' IN ('이지유','노대송','김옥선')
+                  OR cp.phone8 IN ('33536503','53849851'))
+           ORDER BY cp.seq;
           SQL
