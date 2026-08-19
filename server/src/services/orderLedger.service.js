@@ -1100,6 +1100,10 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   params.push(limit);
   const limitIdx = params.length;
 
+  /* ★★ 참여형 무시트 주문의 원장 좌표는 `campaign:<공고ID>` 다 — 구글시트 탭이 아니라
+     **큐로는 영원히 복구되지 않는다**(RAW 메타가 없어 매 사이클 `skippedNoMeta` 로 스킵될 뿐).
+     그 건들이 `submitted_at ASC` 정렬의 앞자리를 차지하면 진짜 복구 대상이 LIMIT 밖으로 밀린다.
+     → 스캔에서 제외한다. 이 좌표의 반영은 제출 경로(작업보드 기록)와 무시트 복구 잡이 담당한다. */
   const { rows } = await db.query(
     `SELECT os.id, os.sheet_id, os.tab_name, os.gid, os.tab_gid, os.dedup_key,
             os.orderer, os.recipient, os.user_id, os.phone, os.address,
@@ -1107,6 +1111,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
             os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row, os.sheet_error
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
+        AND os.sheet_id NOT LIKE 'campaign:%'
         AND (os.mirror_status IN ('pending','pending_no_row','failed')
              OR (os.mirror_status = 'queued'
                  AND os.queued_at IS NOT NULL

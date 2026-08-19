@@ -34,8 +34,11 @@ const MAX_PLAN_DAYS = 400;   // 상한(비정상 데이터로 달력이 폭발�
 function _kstDateLabel(iso) {
   const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return '';
-  const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
-  return `${Number(m[2])}/${Number(m[3])} (${['일', '월', '화', '수', '목', '금', '토'][day]})`;
+  // ★★ 표기는 **작업표를 처음 만든 함수와 같은 것**을 쓴다(`worktablePlan.sheetDateStr`) —
+  //   종전엔 여기만 `8/19 (수)`(공백 없음)를 써서 같은 열에 `8 / 19 (수)` 와 두 표기가 섞였다(실측).
+  //   파서는 둘 다 읽지만 사람이 보는 표·CSV 가 갈리므로 사본을 두지 않는다.
+  const { sheetDateStr } = require('../utils/worktablePlan');
+  return sheetDateStr({ y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) });
 }
 
 /** 첫 조절 직전의 작업표 날짜별 인원을 보존한다. 이후 행을 재배치해도 [기본으로]의 기준은 바뀌지 않는다. */
@@ -95,7 +98,7 @@ async function _nextSeqStart(client, sheetId, tabName) {
   return (Number(rows[0] && rows[0].max_seq) || 0) + 1;
 }
 
-async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = [], today = '', by = 'system' } = {}) {
+async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = [], planned = null, today = '', by = 'system' } = {}) {
   if (!client || !sheetId || !tabName || !Array.isArray(set) || !set.length) {
     return { ok: true, skipped: true, reason: 'no_link_or_change', moved: 0, cleared: 0 };
   }
@@ -126,32 +129,68 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
   });
   const slots = rows.map((r, i) => ({ ...r, date: parsed[i] || '', empty: !String(r.reviewer_name || '').trim() && !String(r.recipient_name || '').trim() && !String(r.phone8 || '').trim() && !r.order_submission_id }));
   const editable = slots.filter(r => r.empty && (!r.date || !today || r.date >= today));
+  /* ★★ 그날 **이미 채워진 줄(참여·주문)** 도 그날 계획에 포함해서 센다 — 재구성 경로와 같은 규칙.
+     종전엔 빈 줄만 세어 "오늘 12명" 계획에 확정 3명이 있으면 빈 줄을 12개 더 만들어
+     표가 15줄이 됐다(계획보다 3줄 많음, 실측). 계획 = 그날 표의 줄 수여야 총건수가 맞는다. */
+  const fixedByDate = new Map();
+  for (const r of slots) if (!r.empty && r.date) fixedByDate.set(r.date, (fixedByDate.get(r.date) || 0) + 1);
+  /** 그 줄이 "여분"인가 — 계획 없는 날짜이거나, 그날 계획보다 많은 초과분일 때만 다른 날로 옮긴다. */
+  const _planFor = (dt) => {
+    if (wanted.has(dt)) return wanted.get(dt);
+    if (planned && Object.prototype.hasOwnProperty.call(planned, dt)) return Number(planned[dt]) || 0;
+    return null;   // 계획 없음 = 여분
+  };
+  const _spareLeft = new Map();   // 날짜별 남은 여분(초과분) 수
+  const _isSpare = (r) => {
+    if (!r.date) return true;                       // 날짜 없는 준비 행
+    const p = _planFor(r.date);
+    if (p === null) return true;                    // 계획이 없는 날짜
+    if (!_spareLeft.has(r.date)) {
+      const have = editable.filter(x => x.date === r.date).length + (fixedByDate.get(r.date) || 0);
+      _spareLeft.set(r.date, Math.max(0, have - p));
+    }
+    const left = _spareLeft.get(r.date);
+    if (left <= 0) return false;                    // 계획을 지켜야 하는 줄
+    _spareLeft.set(r.date, left - 1);
+    return true;
+  };
   const changed = [];
-  let moved = 0, cleared = 0, created = 0;
+  const freed = [];   // 이번 저장에서 비운(=계획 밖이 된) 빈 줄 — 재사용되지 않으면 정리한다
+  let moved = 0, cleared = 0, created = 0, nextSeq = 0;
 
   // 먼저 축소해 남는 빈 자리를 재사용 가능 상태로 만든다.
   for (const [date, count] of wanted) {
+    const keep = Math.max(0, count - (fixedByDate.get(date) || 0));   // 확정분이 먼저 자리를 차지한다
     const atDate = editable.filter(r => r.date === date);
-    for (const row of atDate.slice(Math.max(0, count))) {
+    for (const row of atDate.slice(keep)) {
       row.date = '';
-      changed.push({ id: row.id, value: '' });
+      row._freed = true;
+      freed.push(row);
       cleared++;
     }
   }
   // 증원은 날짜 없는 행을 우선하고, 부족하면 더 늦은 미래의 빈 준비 행만 당긴다.
   for (const [date, count] of [...wanted.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    let need = Math.max(0, count - editable.filter(r => r.date === date).length);
-    const donors = editable.filter(r => r.date !== date && (!r.date || r.date > date)).sort((a, b) => (a.date || '9999-12-31').localeCompare(b.date || '9999-12-31') || a.seq - b.seq);
+    let need = Math.max(0, count - (fixedByDate.get(date) || 0) - editable.filter(r => r.date === date).length);
+    /* ★★ 다른 날짜의 빈 줄을 당겨올 때 **그 날짜의 계획을 깨뜨리면 안 된다** —
+       종전엔 미래의 빈 줄을 무조건 가져와, 뺏긴 날짜는 계획 20인데 표가 18줄이 됐다(실측).
+       그래서 도너 = ① 날짜 없는 빈 줄 ② 계획에 없는 날짜의 빈 줄 ③ 계획보다 많은 잉여분. */
+    const donors = editable
+      .filter(r => r.date !== date && (!r.date || r.date > date) && _isSpare(r))
+      .sort((a, b) => (a.date || '9999-12-31').localeCompare(b.date || '9999-12-31') || a.seq - b.seq);
     for (const row of donors) {
       if (!need) break;
       row.date = date;
+      row._freed = false;   // 재사용됐다 — 정리 대상이 아니다
       changed.push({ id: row.id, value: _kstDateLabel(date) });
       moved++; need--;
     }
     if (need) {
       // 빈 준비 행이 모두 찼어도 날짜 조절 자체를 막지 않는다. 새 빈 작업표 행을
       // 같은 트랜잭션으로 만들어, 0명 날짜를 늘린 결과가 실제 표에도 보이게 한다.
-      const seqStart = await _nextSeqStart(client, sheetId, tabName);
+      // ★ 번호는 **함수 시작에 한 번** 구해 이어 쓴다 — 날짜마다 다시 구하면서 누적 카운터를
+      //   더하면 번호가 건너뛰며 폭주한다(실측: 200줄짜리 표에 seq 1100).
+      if (nextSeq === 0) nextSeq = await _nextSeqStart(client, sheetId, tabName);
       const blank = {};
       headers.forEach(h => { blank[h] = ''; });
       for (let i = 0; i < need; i++) {
@@ -161,11 +200,23 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
           `INSERT INTO campaign_participants
              (sheet_id, tab_gid, tab_name, seq, start_date, row_json, source, updated_by, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'worktable', $7, NOW())`,
-          [sheetId, rows[0].tab_gid || null, tabName, seqStart + created, value,
+          [sheetId, rows[0].tab_gid || null, tabName, nextSeq, value,
             JSON.stringify(rowJson), String(by).slice(0, 100)]);
-        created++; moved++;
+        nextSeq++; created++; moved++;
       }
     }
+  }
+  /* ★★ 계획을 줄여 비게 된 빈 줄은 **표에서 내린다**(사용자 확정 2026-08-19 —
+     "총건수보다 부족하게 저장하면 작업보드에도 줄어듦이 반영되도록").
+     ★ 참여자·주문이 붙은 줄은 애초에 editable 이 아니라 여기 올 수 없다.
+     ★ 소프트 삭제라 되돌릴 수 있고, 다시 늘리면 새 줄이 생긴다(seq 는 _nextSeqStart 가 뒤에서 준다). */
+  const trim = freed.filter(r => r._freed);
+  if (trim.length) {
+    await client.query(
+      `UPDATE campaign_participants
+          SET deleted_at = NOW(), active = FALSE, updated_by = $2, updated_at = NOW()
+        WHERE id = ANY($1::uuid[]) AND order_submission_id IS NULL`,
+      [trim.map(r => r.id), String(by).slice(0, 100)]);
   }
   for (const c of changed) {
     await client.query(
@@ -174,7 +225,7 @@ async function syncAdjustedPlansToWorktable({ client, sheetId, tabName, set = []
               start_date = $3, updated_by = $4, updated_at = NOW()
         WHERE id = $1`, [c.id, dateHeader, c.value, String(by).slice(0, 100)]);
   }
-  return { ok: true, dateHeader, moved, cleared, created, changed: changed.length };
+  return { ok: true, dateHeader, moved, cleared, created, trimmed: trim.length, changed: changed.length };
 }
 
 /**

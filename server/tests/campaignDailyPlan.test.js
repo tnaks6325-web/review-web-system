@@ -965,23 +965,29 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     /앞으로 진행할 날이 없어/.test(cdpSrc) && /시트에 진행 날짜를 더 넣어주세요/.test(cdpSrc)
     && /오늘 이미 확정·진행 중인 인원이 남은 배분수보다 많아/.test(cdpSrc));
   ok('★ 부족 상태는 균형 모드 안에서 사유·다음 행동을 말한다(조용한 파랑 금지)',
-    /bal && S\.shortBy > 0 && diffPlan\(\) < 0/.test(cdpSrc) && /명<\/b>이 모자랍니다/.test(cdpSrc)
-    && /합계가 맞는 순간 저장할 수 있습니다/.test(cdpSrc));
+    /bal && S\.shortBy > 0 && diffPlan\(\) < 0/.test(cdpSrc) && /명<\/b>이 모자랍니다/.test(cdpSrc));
+  ok('★ 부족은 저장 가능 — 총량보다 적게 모집한다고 말한다(2026-08-19 확정)',
+    /명 적게 모집합니다\. — <b>저장가능<\/b>/.test(cdpSrc)
+    && /총량보다 ' \+ \(-diff\) \+ '명 적게 모집합니다 — 저장하면 작업표도 그 수로 줄어듭니다/.test(cdpSrc));
 
   // 7A-11 ★★ 한 날에 평소 상한을 넘겨 여는 배치는 **경고한다**(막지는 않는다 — 사용자가 고른 방식)
   ok('7A-11 066 하루 상한 초과 경고 + 대안 제시',
     /자동 이월이었다면 오늘은 <b>' \+ Number\(j\.todayNaturalQuota \|\| 0\) \+ '명<\/b>까지만 열립니다/.test(cdpSrc)
     && /\[남은 날에 나눠 담기\]<\/b>를 고르세요/.test(cdpSrc));
-  ok('7A-11 경고일 뿐 저장을 막지 않는다(하드블록 금지 — 저장 게이트 조건 불변)',
-    /save\.disabled = killOff \|\| S\.saving \|\| diff !== 0 \|\| !dirty \|\| over;/.test(cdpSrc)
+  /* ★ 2026-08-19 사용자 확정: **초과만 막고 부족은 저장한다**(부족하게 저장하면 그만큼만 모집하고
+     작업표의 줄도 그 수로 줄어든다). 하드블록 금지 규율 자체는 그대로. */
+  ok('7A-11 경고일 뿐 저장을 막지 않는다(초과만 잠그고 부족은 저장 가능)',
+    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(cdpSrc)
     && !/todayNaturalQuota[^\n]*save\.disabled/.test(cdpSrc));
 
   /* ── 배선(정적) — 사용자 확정 문구·규율이 코드에 그대로 있는가 ── */
   const CDP = cdpSrc;
+  /* ★ 2026-08-19 확정으로 문구가 3갈래가 됐다 — 일치(저장가능) / 초과(저장불가) /
+     부족(저장가능 · 그만큼만 모집). 부족을 "저장불가"로 되돌리면 그 확정이 깨진다. */
   ok('7n 요구 ⑥ 문구(초과/부족/일치) — 사용자가 확정한 문장 그대로',
     /총량 <span class="num">' \+ target \+ '<\/span>명과 딱 맞습니다\. — <b>저장가능<\/b>/.test(CDP)
-    && /총량이 <span class="num">' \+ target \+ '<\/span>명보다 <span class="num">' \+ Math\.abs\(diff\) \+ '<\/span>명 '/.test(CDP)
-    && /\(diff > 0 \? '초과' : '부족'\) \+ '입니다\. — <b>저장불가<\/b>'/.test(CDP));
+    && /'<\/span>명 초과입니다\. — <b>저장불가<\/b>'/.test(CDP)
+    && /'<\/span>명 적게 모집합니다\. — <b>저장가능<\/b>'/.test(CDP));
   ok('7o ★ 알림창 높이는 "일치" 기준 41px 고정(상태마다 표가 흔들리면 조절하던 줄을 놓친다)',
     /\.cdp-bal\{box-sizing:border-box;position:sticky;top:0;z-index:5;border-radius:11px;height:41px/.test(CDP));
   ok('7p ★ 종료일 연장 문구 — 사용자 확정 문장(숫자는 실제 마지막 진행일에서 읽는다)',
@@ -989,9 +995,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     && /'<\/b>에 <b>' \+ \(lastD \? planFor\(lastD\) : 0\) \+ '명<\/b> 늘어납니다\./.test(CDP));
   ok('7q ★ 기본 보충 방식 = 다음날에 더하기(사용자 확정) — 여는 순간 적용',
     /applyCarryMode\('next'\);/.test(CDP) && /다음날에 더하기<span class="df">기본<\/span>/.test(CDP));
-  ok('7r ★ 저장 게이트 = 합계 일치 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
-    /save\.disabled = killOff \|\| S\.saving \|\| diff !== 0 \|\| !dirty \|\| over;/.test(CDP)
-    && /if \(balanceOn\(\) && \(diffPlan\(\) !== 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
+  ok('7r ★ 저장 게이트 = 초과 아님 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
+    /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(CDP)
+    && /if \(balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
   ok('7s ★ 저장 상한은 서버 MAX_PLAN_ENTRIES 와 같은 값(넘으면 사유를 말하고 잠근다)',
     A.MAX_ROWS === 120
     && /const MAX_PLAN_ENTRIES = 120;/.test(readS('services/campaignPlan.service.js'))
