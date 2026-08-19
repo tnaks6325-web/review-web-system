@@ -119,6 +119,13 @@ const mk = (n, field) => Array.from({ length: n }, (_, i) => ({ rowId: 'r' + i, 
     const iThrow = sq.findIndex((s, i) => /FOR UPDATE/.test(s) && p3.q[i].params && p3.q[i].params[0] === 'r5');
     assert.ok(iThrow > 0, 'r5 조회 지점');
     assert.ok(sq.slice(iThrow).some(s => /^ROLLBACK/.test(s)), '이후 ROLLBACK 존재');
+    // ★ 실행만 보면 _editOneInTx 자신의 ROLLBACK 이 대신 통과시킨다(변이시험 실측).
+    //   그 ROLLBACK 이 실패했을 때의 백스톱이 배치 catch 안에 있어야 한다 — 코드 모양으로 고정.
+    const B = stripLine(R('server/src/services/trackB.service.js'));
+    const i = B.indexOf('async function editWorkdeskRowsBatch');
+    const body = B.slice(i, B.indexOf('\n}\n', i));
+    assert.ok(/catch \(err\) \{[\s\S]{0,300}client\.query\('ROLLBACK'\)/.test(body),
+      '배치 catch 안에 ROLLBACK 백스톱이 있어야 한다');
   });
   t('3d: 빠진 인자는 쿼리 없이 그 칸만 거부한다', async () => {});
   const p4 = batchPool();
@@ -128,6 +135,9 @@ const mk = (n, field) => Array.from({ length: n }, (_, i) => ({ rowId: 'r' + i, 
   t('3e: rowId 없는 칸은 거부되고 나머지는 저장된다', () => {
     assert.equal(out4.succeeded, 1); assert.equal(out4.failed, 1);
     assert.equal(p4.q.filter(x => /^BEGIN/.test(x.s)).length, 1, '거부된 칸은 tx 조차 열지 않는다');
+    // ★ 사유를 뭉뚱그리지 않는다 — 배치가 선검사를 빼면 _editOneInTx 가 던져 'edit_failed' 로만 보인다
+    //   (변이시험 실측: 건수만 세면 그 회귀를 통과시킨다). 화면이 "무엇이 잘못됐는지"를 말할 수 있어야 한다.
+    assert.equal(out4.results[1].error, 'rowId, field 필수', '빠진 인자는 그 사유로 보고');
   });
 
   /* ── 4) 상한 ─────────────────────────────────────────── */
