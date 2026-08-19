@@ -125,6 +125,28 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     assert.strictEqual(out.error, 'order_lookup_failed', '모르면 지우지 않는다');
   }
 
+  // ⑥ 예상 밖 오류(SQL·제약 등)는 500 마스킹으로 흘리지 않고 원인 코드를 돌려준다
+  {
+    const { pool, client } = makeStubPool({ liveOrder: true });
+    const boom = Object.assign(new Error('column "nope" does not exist'), { code: '42703' });
+    pool.connect = async () => ({
+      query: async (sql) => (String(sql).includes('SELECT rc.id AS campaign_id') ? Promise.reject(boom) : client.query(sql)),
+      release() {},
+    });
+    svc.__setPoolForTest(pool);
+    stubCancel(async (args) => { await args.beforeCancelCommit(await pool.connect()); return { ok: true, cleared: false }; });
+    let threw = false;
+    let out;
+    try { out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' }); }
+    catch (_) { threw = true; }
+    restoreCancel();
+    assert.strictEqual(threw, false, '예상 밖 오류도 500 마스킹으로 흘리지 않고 응답으로 돌려줘야 합니다');
+    assert.strictEqual(out.ok, false);
+    assert.strictEqual(out.error, 'unexpected');
+    assert.strictEqual(out.pgCode, '42703', 'DB 오류코드를 그대로 전달해야 합니다');
+    assert.ok(/nope/.test(out.detail || ''), '오류 내용도 전달해야 합니다');
+  }
+
   svc.__setPoolForTest(null);
   svc.__setLedgerRebuildForTest(null);
   console.log('workdesk row delete → order cancel contract passed');

@@ -2990,7 +2990,16 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRol
     }
   } catch (e) {
     if (e instanceof HideRowError) return { ok: false, error: e.code };
-    throw e;
+    // 예상 밖 오류(SQL·제약·타임아웃 등)를 그대로 500 으로 올리면 errorHandler 가
+    // "서버 오류가 발생했습니다."로 마스킹해 담당자가 원인을 알 길이 없다.
+    // 이 라우트는 내부 관리자 전용이라 원인 코드를 그대로 돌려준다(관리자 도구 규율).
+    logger.error(`[trackB] 행 삭제 실패 tab=${tabName} row=${rowId} order=${liveOrderId || '-'}: ${(e && e.code) || ''} ${(e && e.message) || e}`);
+    return {
+      ok: false,
+      error: 'unexpected',
+      pgCode: (e && e.code) || null,
+      detail: String((e && e.message) || e).slice(0, 300),
+    };
   }
 
   let ledgerError = null;
