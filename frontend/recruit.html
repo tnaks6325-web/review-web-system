@@ -289,6 +289,13 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 
 <!-- 본문 -->
 <div class="rc-body">
+  <!-- 127: 체험단 종류 탭 (리뷰/블로그) — 화면 필터일 뿐, 카드 렌더러는 한 벌 -->
+  <div class="rc-kind-tabs" style="display:flex;gap:6px;margin:0 0 12px">
+    <button type="button" class="rc-kt" data-kind="review" onclick="setRecruitKind('review')"
+      style="flex:0 0 auto;font-size:.8rem;font-weight:800;padding:7px 16px;border-radius:999px;border:1.5px solid #E5E7EB;background:#fff;color:#6B7280;cursor:pointer">리뷰체험단</button>
+    <button type="button" class="rc-kt" data-kind="blog" onclick="setRecruitKind('blog')"
+      style="flex:0 0 auto;font-size:.8rem;font-weight:800;padding:7px 16px;border-radius:999px;border:1.5px solid #E5E7EB;background:#fff;color:#6B7280;cursor:pointer">블로그체험단</button>
+  </div>
   <div id="rcLoading" class="rc-loading">
     <i class="fas fa-circle-notch"></i>
     <p>캠페인 목록을 불러오는 중입니다...</p>
@@ -404,16 +411,38 @@ async function loadSettings() {
 /* ═══════════════════════════════════
    공고 목록 로드
 ═══════════════════════════════════ */
+/* 127: 체험단 종류 탭 — 판정은 서버 work_kind 정확 일치(빈 값·필드 부재 = 리뷰) */
+let _rcKind = (function(){ try{ const v = sessionStorage.getItem("rc_kind_v1"); return v === "blog" ? "blog" : "review"; }catch(_){ return "review"; } })();
+function _rcKindOf(c){ return c && c.work_kind === "blog" ? "blog" : "review"; }
+function setRecruitKind(k){
+  _rcKind = k === "blog" ? "blog" : "review";
+  try{ sessionStorage.setItem("rc_kind_v1", _rcKind); }catch(_){}
+  _rcPaintKindTabs();
+  const container = document.getElementById("rcList");
+  if (container) container.innerHTML = "";
+  document.getElementById("rcEmpty").style.display = "none";
+  loadCampaigns();
+}
+function _rcPaintKindTabs(){
+  document.querySelectorAll(".rc-kind-tabs .rc-kt").forEach(b => {
+    const on = b.dataset.kind === _rcKind;
+    b.style.background = on ? "#6C5CE7" : "#fff";
+    b.style.borderColor = on ? "#6C5CE7" : "#E5E7EB";
+    b.style.color = on ? "#fff" : "#6B7280";
+  });
+}
+
 async function loadCampaigns() {
+  _rcPaintKindTabs();
   try {
     const res  = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈로 렌더(campaign.html 상세로 이동).
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
     // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
-    const _partsRaw = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    const _partsRaw = (json.data || []).filter(c => c.participation_mode && c.status !== "closed" && _rcKindOf(c) === _rcKind);
     const parts = window.CampCards ? CampCards.sortByAvailability(_partsRaw) : _partsRaw;
-    const all  = (json.data || []).filter(c => !c.participation_mode);
+    const all  = (json.data || []).filter(c => !c.participation_mode && _rcKindOf(c) === _rcKind);
 
     document.getElementById("rcLoading").style.display = "none";
 

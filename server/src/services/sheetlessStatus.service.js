@@ -195,6 +195,36 @@ async function markSheetlessMemo({ sheetId, tabName, rowIndex, memo, blog = fals
   return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
 }
 
+/** 127: 포스팅제출일 자동 기록(blog 제출 완료 시) — memo 기록과 같은 규율·같은 실행부.
+ *  열 고르기는 utils/memoColumn.pickPostDateColumnName 단일 출처(시트 경로·큐 재시도와 동일). */
+async function markSheetlessPostDate({ sheetId, tabName, rowIndex, date, by = 'system' } = {}) {
+  if (!sheetId || !tabName || !rowIndex) return { handled: false };
+  const text = String(date == null ? '' : date).trim();
+  if (!text) return { handled: false };
+
+  const db = getPool();
+  let sheetless = false;
+  try {
+    sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName);
+  } catch (_) { return { handled: false }; }
+  if (!sheetless) return { handled: false };
+
+  let headers = [];
+  try {
+    const { rows } = await db.query(
+      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
+      [sheetId, tabName]);
+    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
+  } catch (e) {
+    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
+  }
+  const header = require('../utils/memoColumn').pickPostDateColumnName(headers);
+  if (!header) return { handled: true, ok: false, reason: 'no_post_date_column' };
+
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
+}
+
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
 async function _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by, mergeDeposit = false, deferRebuild = false }) {
   let nextValue = value;
@@ -346,6 +376,7 @@ module.exports = {
   markStatusCell,
   verifyStatusCell,
   markSheetlessMemo,
+  markSheetlessPostDate,
   backfillReviewSubmitTimes,
   REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
   SUBMIT_MARK,

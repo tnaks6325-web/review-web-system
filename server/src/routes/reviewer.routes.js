@@ -347,13 +347,14 @@ router.get('/my-status', async (req, res, next) => {
     try {
       const { rows: holdRows } = await pool.query(`
         SELECT ca.id, ca.campaign_id AS "campaignId", ca.applicant_name AS "name",
-               ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
+               ca.status, ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
                (ca.owner_phone8 IS NOT NULL AND ca.owner_phone8 <> ca.phone8) AS "isSub",
                rc.title, rc.thumbnail_url AS "thumbnailUrl"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
          WHERE (ca.phone8 = $1 OR ca.owner_phone8 = $1)
-           AND ca.status = 'applied' AND ca.expires_at > NOW()
+           AND ((ca.status = 'applied' AND ca.expires_at > NOW())
+                OR ca.status = 'blog_pending')
          ORDER BY ca.applied_at DESC
          LIMIT 20
       `, [phone8]);
@@ -372,7 +373,8 @@ router.get('/my-status', async (req, res, next) => {
           thumbnailUrl: h.thumbnailUrl || '',
           isSubmitted: false,
           paymentStatus: null,
-          stage: 'applied',           // 참여 확보 — 구매양식 제출 대기(만료 시 자동 제외)
+          // 127: 블로그 승인 대기(blog_pending)는 별도 stage — 화면이 "승인 대기 중"으로 구분 표기
+          stage: h.status === 'blog_pending' ? 'blog_pending' : 'applied',
           source: 'campaign_hold',
         });
       }

@@ -26,7 +26,9 @@ ok('apply: profile_missing 403 + missing 목록 반환', /reason: 'profile_missi
 {
   const _iGate = routes.indexOf("reason: 'profile_missing'");
   // ★ 파라미터는 컬럼이 늘 때마다 뒤에 붙는다 — 꼬리를 고정하지 않는다(101 blog_url 에서 실제로 드리프트)
-  const _iIns = routes.search(/VALUES \(\$1,\$2,\$3,\$4,\$5,'applied',\$6,\$7,\$8(,\$\d+)*\)/);
+  // ★ 127: status 는 리터럴 'applied' → $n 파라미터로 바뀌었다(블로그 승인제 blog_pending 분기).
+  //   검사 의미는 불변 — 게이트가 INSERT 보다 앞인지(자리 미점유)만 본다.
+  const _iIns = routes.search(/VALUES \(\$1,\$2,\$3,\$4,\$5,\$\d+,\$6,\$7,\$8(,\$\d+)*\)/);
   ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞 (063 owner_phone8 · 082 리뷰비 스냅샷 포함)',
     _iGate > 0 && _iIns > 0 && _iGate < _iIns);
 }
@@ -42,7 +44,8 @@ ok('work_detail 저장 시 sanitize(1차) — _prepWorkDetail', /_prepWorkDetail
 ok('work_detail: undefined=유지 시맨틱(CASE WHEN $29)', /work_detail = CASE WHEN \$29::boolean THEN \$30::jsonb ELSE work_detail END/.test(routes));
 
 // ── my-status 홀드 병합 ──
-ok("my-status: stage 'applied' 병합", /stage: 'applied'/.test(reviewer) && /source: 'campaign_hold'/.test(reviewer));
+// ★ 127: stage 는 blog_pending 분기가 붙어 삼항이 됐다(검사 의미 불변 — applied 병합 존재)
+ok("my-status: stage 'applied' 병합", /'blog_pending' \? 'blog_pending' : 'applied'/.test(reviewer) && /source: 'campaign_hold'/.test(reviewer));
 ok('my-status: 유효홀드 시각 기준(expires_at > NOW())', /ca\.status = 'applied' AND ca\.expires_at > NOW\(\)/.test(reviewer));
 ok('my-status: 병합 실패는 기존 응답을 막지 않음(try/catch)', /홀드 병합 실패/.test(reviewer));
 ok('my-status stats: applied 카운트 추가', /applied: items\.filter\(i => i\.stage === 'applied'\)/.test(reviewer));

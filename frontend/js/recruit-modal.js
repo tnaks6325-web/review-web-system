@@ -57,7 +57,7 @@
           <div class="rf-hrow"><span class="rf-hl">모집인원 <small>(레거시)</small></span><input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0"></div>
           <select id="rf_status" class="rform-input" onchange="RecruitModal.syncStatusButtons()" hidden><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select>
           <div id="rf_hidden_box" class="rf-hidden-row"><label><input type="checkbox" id="rf_reviewer_hidden"> 🧪 리뷰어에게 숨김 <span>— 내부 테스트용</span></label><div>리뷰어 공고 목록에 뜨지 않지만, 공고 링크로 직접 테스트할 수 있습니다.</div></div>
-          <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
+          <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none"><input type="hidden" id="rf_work_kind">
         </div>
       </section>
 
@@ -465,7 +465,7 @@
       <div data-part-only class="rf-publish-check-note">자동 점검 결과는 왼쪽 하단에서 확인합니다.</div>
       <!-- 참여형 여부(기본 ON) — v2에서 스위치 UI 를 없앴다. 값은 이 hidden 체크박스가 계속 들고 있어
            저장 페이로드·서버 분기·프리필(index-recruit.js)이 전부 무변경으로 동작한다. -->
-      <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none">
+      <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" style="display:none"><input type="hidden" id="rf_work_kind">
         </div>
       </div>
       </template>
@@ -511,7 +511,7 @@
                 <div class="form-row tall"><span class="form-label">특이사항</span><div class="form-control"><div class="work-compose"><textarea id="rf_wd_notes" class="rform-input"></textarea><div id="rf_ig_notes" class="work-image-strip ig-strip" data-igf="notes"></div><input id="rf_igf_notes" class="ig-file" type="file" accept="image/*" multiple onchange="igPickFiles('notes',this)"></div><div id="rf_igm_notes"></div></div></div>
               </div><input id="rf_landing_url" type="hidden"><input id="rf_thumbnail" type="hidden"><input id="rf_product_name" type="hidden"><input id="rf_price" type="hidden"></section>
             <section class="section" data-sec="cond" id="rf_part_section" data-part-only><div class="row-form"><div class="form-row"><span class="form-label">모집이월 방식</span><div class="form-control"><input id="rf_carry_mode" type="hidden" value="auto"><div class="square-toggle"><button type="button" id="rf_carry_auto" onclick="rfCarrySet('auto')">자동 반영</button><button type="button" id="rf_carry_hold" onclick="rfCarrySet('hold')">보류 후 수동 반영</button></div><div id="rf_carry_hold_note" hidden></div></div></div></div><details class="advanced"><summary>마감 · 보류 · 인원 제한 세부 설정</summary><div class="row-form"><div class="form-row"><span class="form-label">모집 마감</span><div class="form-control"><input id="rf_deadline" type="date" onchange="onRecruitDatesChange()"><span id="rf_deadline_day"></span></div></div><div class="form-row"><span class="form-label">최대 참여 제한</span><div class="form-control"><input id="rf_max_slots" type="number"></div></div><div class="form-row"><span class="form-label">마감 버퍼</span><div class="form-control"><input id="rf_close_buffer" type="number"><input id="rf_hold_ttl" type="number" hidden></div></div><div id="rf_deadline_warn" hidden></div></div></details></section>
-            <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden>
+            <input type="checkbox" id="rf_participation" checked onchange="onParticipationToggle(this.checked)" hidden><input type="hidden" id="rf_work_kind">
           </div>
           <footer class="footer modal-footer"><span class="footer-copy">필수 항목을 확인하면 게시할 수 있습니다.</span><div><button type="button" class="btn" onclick="closeRecruitModal()">취소</button><button type="button" id="recruitSaveBtnInline" class="rf-savebtn" onclick="saveRecruitPost()">변경 저장</button></div></footer>
         </section>

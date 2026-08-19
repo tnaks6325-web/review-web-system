@@ -1467,6 +1467,8 @@ const _campHandlers = {
   preview: _delegate(_campRoutes, 'get', '/admin/:id/preview'),   // 리뷰어 화면 미리보기
   detail: _delegate(_campRoutes, 'get', '/:id'),                  // 수정 모달 프리필(관리자 = 전체 행)
   dismiss: _delegate(_campRoutes, 'post', '/admin/:id/dismiss'),
+  blogApprove: _delegate(_campRoutes, 'post', '/admin/:id/blog-approve'),   // 127 블로그 승인
+  blogReject: _delegate(_campRoutes, 'post', '/admin/:id/blog-reject'),     // 127 블로그 반려
 };
 router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, res, next) => {
   // 편집 가능 여부를 함께 실어 준다 — 프론트가 버튼 노출을 정한다(서버 게이트가 최종 방어)
@@ -1509,6 +1511,11 @@ router.get('/campaigns/:id/preview', authMiddleware, internalMiddleware, (req, r
   _campHandlers.preview(req, res, next));
 router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.dismiss(req, res, next));
+// 127 블로그 승인제 — 승인/반려는 수동확정(confirm)과 같은 2단 게이트(내부인 + 편집 허용명단).
+router.post('/campaigns/:id/blog-approve', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.blogApprove(req, res, next));
+router.post('/campaigns/:id/blog-reject', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.blogReject(req, res, next));
 
 // ── 날짜별 모집인원 조절 + 차수(095) ─────────────────────────
 //   경로는 재기준 없이 양쪽 호스트 공용(리뷰어 게이트와 같은 판단): admin_token(관리자 대시보드)도

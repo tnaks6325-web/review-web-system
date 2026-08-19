@@ -1658,7 +1658,10 @@ function participationCheckErrors() {
   // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
   if ((ws || we) && (!ws || !we || we <= ws)) errs.push("구매시간은 시작<종료로 입력하거나, 자율주문이면 양쪽 모두 비워주세요");
   const dl = Number(document.getElementById("rf_daily_limit")?.value || 0);
-  if (!(dl >= 1)) errs.push("하루 진행 인원(1 이상)을 입력해주세요");
+  // ★ 127: 블로그는 '그날 정원' 개념이 없다(구매일 미정·승인제) — 일건수 요구를 면제한다.
+  //   저장 payload 가 총모집(무제한이면 9999)으로 자동 채우므로 서버 게이트도 통과한다.
+  const _wkBlog = (document.getElementById("rf_work_kind")?.value || "") === "blog";
+  if (!(dl >= 1) && !_wkBlog) errs.push("하루 진행 인원(1 이상)을 입력해주세요");
   return errs;
 }
 function renderPartCheck() {
@@ -2414,6 +2417,34 @@ function renderFeeSchedule() {
 /* ═══════════════════════════════════════
    모달 열기/닫기
 ═══════════════════════════════════════ */
+/* ═══ 127: 발행 모달 체험단 종류(work_kind) UI ═══
+   블로그 공고면 리뷰타입 카드(별도 축 — 블로그엔 없음)를 숨기고 안내 배너를 띄운다.
+   값은 hidden `rf_work_kind` 하나(작업오더 프리필·편집 로드가 채우고 저장 payload 가 읽는다).
+   ★ 종류 자체를 모달에서 바꾸는 스위치는 두지 않는다 — 종류는 작업오더(인트라넷 첫 선택)가
+     정하는 값이라, 발행 단계에서 뒤집으면 준비 행 기준·작업표 열 구성과 어긋난다. */
+function _rfApplyWorkKindUi() {
+  const isBlog = (document.getElementById("rf_work_kind")?.value || "") === "blog";
+  // 리뷰타입 UI(두 레이아웃 변형 모두) — 카드형은 .rf-hrow, 행형은 .rf-review-type-row
+  document.querySelectorAll("#rf_review_type_btns").forEach(btns => {
+    const row = btns.closest(".rf-hrow") || btns.closest(".rf-review-type-row") || btns.closest(".form-row");
+    if (row) row.style.display = isBlog ? "none" : "";
+  });
+  let note = document.getElementById("rf_blog_note");
+  if (isBlog) {
+    if (!note) {
+      note = document.createElement("div");
+      note.id = "rf_blog_note";
+      note.style.cssText = "margin:6px 0 10px;padding:9px 12px;background:#FAF5FF;border:1px solid #C4B5FD;border-radius:9px;font-size:.76rem;color:#6D28D9;line-height:1.6";
+      note.innerHTML = "📝 <b>블로그체험단 공고</b>입니다 — 블로거가 블로그 주소를 제출하면 관리자가 <b>승인/반려</b>하고, 승인된 블로거만 24시간 안에 구매를 진행합니다. 리뷰타입은 사용하지 않으며, 작업표에는 블로그URL·포스팅결과URL·포스팅제출일 열이 자동 포함됩니다.";
+      const anchor = document.querySelector("#rf_review_type_btns");
+      const host = anchor ? (anchor.closest(".rf-card") || anchor.closest(".rf-hrow") || anchor.parentElement) : null;
+      if (host && host.parentElement) host.parentElement.insertBefore(note, host);
+      else document.getElementById("recruitModalTitle")?.parentElement?.appendChild(note);
+    }
+    note.style.display = "";
+  } else if (note) note.style.display = "none";
+}
+
 async function openRecruitModal(id, prefill, woOrderId) {
   _recruitEditId = id || null;
   _woPrefillOrderId = (!id && woOrderId) ? woOrderId : null;
@@ -2425,6 +2456,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
+  { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = ""; _rfApplyWorkKindUi(); }   // ★ 127: 종류 초기화(기본=리뷰)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
   { const _sb = document.getElementById("recruitSaveBtn");
     if (_sb) { _sb.disabled = false; _sb.classList.remove("busy", "done"); _sb.innerHTML = '<i class="fas fa-save"></i> 저장'; } }
@@ -2629,6 +2661,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
         _setRecruitGlobalReviewTypeMix(savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
+        /* ★ 127: 체험단 종류 복원 — blog 면 리뷰타입 카드 숨김 + 안내 배너 */
+        { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (c.work_kind === "blog") ? "blog" : (c.work_kind || ""); _rfApplyWorkKindUi(); }
         /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
@@ -2705,6 +2739,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
+      /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
+      { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (String(prefill.work_kind || "").trim() === "blog") ? "blog" : ""; _rfApplyWorkKindUi(); }
 
       /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
          탭 리네임 대비로 gid 우선 재매칭 후 이름 폴백. 미접수 오더는 값이 없어 그대로 수동. */
@@ -3310,6 +3346,87 @@ async function openCampControl(campId, title) {
   await _loadCampControl(campId);
 }
 
+/* ═══ 📝 127 블로그 승인제 — 관제 승인 대기 큐 ═══
+   블로그 공고의 신청(blog_pending)을 목록으로 보여주고 그 자리에서 [승인]/[반려]한다.
+   ★ 블로그 링크는 https 검증 후에만 <a> 로(신뢰 베이스 재구성 규율) · onclick 은 인덱스만.
+   ★ 반려 사유는 브라우저 prompt 금지(레포 규율) — 행 안 인라인 입력칸으로 받는다. */
+let _bqRows = [];          // 대기 행(원본 순서 보존 — onclick 인덱스의 근거)
+let _bqCampId = null;
+function _campBlogQueue(rows, campId) {
+  _bqRows = (rows || []).filter(r => r.status === "blog_pending")
+    .sort((a, b) => new Date(a.applied_at) - new Date(b.applied_at));   // 오래 기다린 신청 먼저
+  _bqCampId = campId;
+  if (!_bqRows.length) return "";
+  const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  const body = _bqRows.map((r, i) => {
+    const url = String(r.blog_url || "").trim();
+    const safeUrl = /^https?:\/\/[^\s"'<>]+$/i.test(url) ? url : "";
+    const link = safeUrl
+      ? `<a href="${escT(safeUrl)}" target="_blank" rel="noopener" style="color:#1D4ED8;word-break:break-all;font-size:.74rem">${escT(safeUrl)}</a>`
+      : `<span style="color:#9CA3AF;font-size:.72rem">블로그 주소 없음</span>`;
+    return `<div style="padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem" data-bq="${i}">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px">
+        <b style="min-width:64px">${escT(r.applicant_name)}</b>
+        <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
+        <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}</span>
+        <span style="display:inline-flex;gap:6px;flex-shrink:0">
+          <button onclick="campBlogApprove(${i})" style="font-size:.7rem;font-weight:800;background:#D1FAE5;color:#065F46;border:1px solid #86EFAC;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✓ 승인</button>
+          <button onclick="campBlogRejectOpen(${i})" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✕ 반려</button>
+        </span>
+      </div>
+      <div style="margin-top:4px">📝 ${link}</div>
+      <div id="bqRejectBox_${i}" style="display:none;margin-top:7px;padding:8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px">
+        <textarea id="bqReason_${i}" rows="2" placeholder="반려 사유 (리뷰어에게 그대로 전달됩니다)" style="width:100%;box-sizing:border-box;font-size:.76rem;border:1px solid #E5E7EB;border-radius:6px;padding:6px"></textarea>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
+          <button onclick="campBlogRejectOpen(${i})" style="font-size:.7rem;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:6px;padding:4px 9px;cursor:pointer">취소</button>
+          <button onclick="campBlogReject(${i})" style="font-size:.7rem;font-weight:800;background:#DC2626;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">반려 확정</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div style="margin:2px 0 12px;border:1px solid #C4B5FD;border-radius:10px;padding:10px 12px;background:#FAF5FF">
+    <div style="font-size:.76rem;font-weight:800;color:#6D28D9;margin-bottom:4px">📝 블로그 참여 신청 — 승인 대기 ${_bqRows.length}건</div>
+    <div style="font-size:.68rem;color:#6B7280;margin-bottom:4px">블로그를 확인하고 승인하면 그 블로거가 <b>24시간 안에</b> 구매를 진행합니다. 승인한 사람만 모집 인원에 계수됩니다.</div>
+    ${body}
+  </div>`;
+}
+async function campBlogApprove(idx) {
+  const r = _bqRows[idx]; if (!r || !_bqCampId) return;
+  if (!confirm(`${r.applicant_name} 님의 블로그 참여를 승인할까요?\n승인하면 24시간 안에 구매를 진행해야 하고, 모집 인원에 즉시 계수됩니다.`)) return;
+  try {
+    const res = await fetch(_campApi(`/${encodeURIComponent(_bqCampId)}/blog-approve`), {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ applicationId: r.id }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    showToast("승인했습니다 — 블로거에게 안내가 전송됐어요", "success");
+    await _loadCampControl(_bqCampId);
+    if (typeof loadRecruitList === "function") loadRecruitList();   // 카드 배지 갱신
+  } catch (e) { showToast("승인 실패: " + e.message, "error"); }
+}
+function campBlogRejectOpen(idx) {
+  const box = document.getElementById("bqRejectBox_" + idx);
+  if (box) box.style.display = box.style.display === "none" ? "" : "none";
+}
+async function campBlogReject(idx) {
+  const r = _bqRows[idx]; if (!r || !_bqCampId) return;
+  const reason = (document.getElementById("bqReason_" + idx)?.value || "").trim();
+  if (!reason) { showToast("반려 사유를 입력해주세요 (리뷰어에게 그대로 전달됩니다)", "warning"); return; }
+  try {
+    const res = await fetch(_campApi(`/${encodeURIComponent(_bqCampId)}/blog-reject`), {
+      method: "POST", headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ applicationId: r.id, reason }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    showToast("반려했습니다 — 사유가 블로거에게 전달됐어요", "success");
+    await _loadCampControl(_bqCampId);
+    if (typeof loadRecruitList === "function") loadRecruitList();
+  } catch (e) { showToast("반려 실패: " + e.message, "error"); }
+}
+
 /** 🧩 관제 옵션별 현황표(061 3단계): 옵션 뷰(정원·상태) + 신청행 기반 오늘 집계.
  *  옵션 미등록 캠페인은 빈 문자열(표 미노출). */
 function _campOptionTable(options, rows, now, today, kstDay) {
@@ -3465,7 +3582,8 @@ async function _loadCampControl(campId) {
     const kstDay = ms => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
     const today = kstDay(now);
     let holds = 0, subs = 0, exps = 0;
-    const items = rows.filter(r => ["applied", "submitted", "expired", "cancelled"].includes(r.status));
+    // 127: blog_rejected 도 타임라인에 남긴다(반려 이력 확인). blog_pending 은 위 전용 큐가 담당.
+    const items = rows.filter(r => ["applied", "submitted", "expired", "cancelled", "blog_rejected"].includes(r.status));
     items.forEach(r => {
       const isToday = r.applied_at && kstDay(Date.parse(r.applied_at)) === today;
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
@@ -3478,6 +3596,8 @@ async function _loadCampControl(campId) {
     const _isSubRow = r => !!(r.owner_phone8 && String(r.owner_phone8) !== String(r.phone8));
     const todaySubCnt = items.filter(r => r.applied_at && kstDay(Date.parse(r.applied_at)) === today && _isSubRow(r)).length;
     if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}` + (todaySubCnt ? ` / 타계정 ${todaySubCnt}` : "");
+    // 📝 127 블로그 승인 대기 큐 — blog_pending 행이 있을 때만 표가 뜬다
+    const blogQueueHtml = _campBlogQueue(rows, campId);
     // 🧩 옵션별 현황표(061 3단계) — 옵션 등록 캠페인만
     const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay);
     // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
@@ -3485,7 +3605,7 @@ async function _loadCampControl(campId) {
     // 📋 시트 대조 — "시트엔 100행인데 확정 99" / "하루 완결이라 시트 일정 미적용"을 여기서 확인
     const sheetHtml = _campSheetInfo(j.sheetInfo);
     if (!items.length) {
-      body.innerHTML = sheetHtml + optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
+      body.innerHTML = blogQueueHtml + sheetHtml + optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
       return;
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
@@ -3494,7 +3614,7 @@ async function _loadCampControl(campId) {
     const autoNote = items.some(r => r.dismissed_by === "auto")
       ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b>·<b>취소 · 자동정리</b> = 구매시간이 만료됐거나 취소된 건 중 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 나중에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 제출확정]을 누르세요.</div>`
       : "";
-    body.innerHTML = sheetHtml + autoNote + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+    body.innerHTML = blogQueueHtml + sheetHtml + autoNote + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
       const dismissed = !!r.dismissed_at;   // 취소확정(미참여) — 종료 마커
       // 126: 시스템이 정리한 건(주문 흔적 0인 만료)과 사람이 판단한 건을 **구분해서 표기**한다.
@@ -3507,6 +3627,7 @@ async function _loadCampControl(campId) {
       else if (dismissed) st = chip("#E5E7EB", "#4B5563",
         autoDismissed ? (r.status === "cancelled" ? "🚫 취소 · 자동정리" : "🚫 미참여(자동)") : "🚫 취소확정");
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
+      else if (r.status === "blog_rejected") st = chip("#FEF3C7", "#92400E", "↩ 반려");
       else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
       // 👥 063: 명의 구분 — 타계정 건은 소유자(본계정) 뒤4자리를 함께 표기(묶음 추적)
@@ -3793,6 +3914,21 @@ async function saveRecruitPostImpl() {
     payload.review_type_mix = getRecruitReviewTypeMix();
   }
 
+  /* ★ 127 체험단 종류 — hidden 입력이 있는 화면에서만 전송(없으면 미전송 = 서버 CASE 유지).
+     blog 인데 일건수가 비면 총모집(무제한이면 9999)으로 채운다 — 블로그는 '그날 정원' 개념이
+     없어(구매일 미정·승인제) 활성화 게이트·daily_done 판정이 모집을 조용히 막으면 안 된다. */
+  {
+    const _wkEl = document.getElementById("rf_work_kind");
+    if (_wkEl) {
+      payload.work_kind = _wkEl.value || "";
+      if (payload.work_kind === "blog") {
+        payload.review_type = "";   // 별도 축 — 블로그 공고에 리뷰타입을 싣지 않는다
+        payload.review_type_mix = [];
+        // ★ 일건수 정규화는 아래 참여형 블록이 payload.daily_limit 을 채운 **뒤**에 한다(순서 함정)
+      }
+    }
+  }
+
   /* ⚡ 참여형(M2): 설정·작업내용 스냅샷 포함 + 게시 전 자동 점검(서버 게이트와 동일 3항목)
      ★ B1 가드: rf_participation 요소가 "존재하는 화면"에서만 전송 —
        참여형 UI가 없는 페이지(admin-siand.html 등)나 편집 로드 실패 시엔 미전송(undefined)
@@ -3823,6 +3959,12 @@ async function saveRecruitPostImpl() {
       if (!_rfQuotaLocked()) {
         payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
         payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
+        /* ★ 127: 블로그 공고의 일건수 정규화 — 표(진행상품)의 일건수가 비어도 총모집으로 채운다.
+           블로그는 '그날 정원' 개념이 없어(구매일 미정·승인제) daily=0 이면 daily_done 판정이
+           모집을 조용히 막는다. 서버 create 도 같은 정규화를 하지만(이중 방어) update 는 프론트가 담당. */
+        if (payload.work_kind === "blog" && !(Number(payload.daily_limit) > 0)) {
+          payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
+        }
       }
       const reviewMixError = validateRecruitReviewTypeMix();
       if (reviewMixError) { _rfSaveBlocked(reviewMixError); return; }
