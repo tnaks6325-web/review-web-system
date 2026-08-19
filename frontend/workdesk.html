@@ -1592,6 +1592,73 @@
   .tp3mbtn{margin-top:9px}
   .schip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
   .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
+  /* ══ 작업보드 상단 3분할(내부) — 시안 C 확정 2026-08-19 ══════════════════════════
+     시안 = frontend/docs/design-workboard-top-redesign.html (?v=C)
+     폭 = 작업조건 439 / 진행현황 242 / 미리보기 659 (종전 A안 439/483/439 기준 재분배)
+     ★ 고정 px 로 두면 좁은 화면에서 깨진다 — 같은 비율의 fr + minmax.
+     ★★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다(열 많은 작업에서
+        가로 스크롤이 늘어난다) → **상단 한 줄에서 끝내고** 높이만 왼쪽 카드에 맞춘다.
+     ★★ 높이를 px 로 못박지 않는다 — 작업 조건 카드는 상품명 2줄 + 9행 + 발주 줄이라
+        내용이 넘치면 발주 줄이 리뷰타입 줄 위로 겹친다(실측). min-height + stretch. */
+  .tp3grid.c3{grid-template-columns:minmax(230px,439fr) minmax(170px,242fr) minmax(330px,659fr);align-items:stretch}
+  .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:330px}
+  @media(max-width:1100px){.tp3grid.c3{grid-template-columns:1fr}
+    .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}}
+  /* ① 작업 조건 10항목 — 작고 조밀하게(11.5px · 줄높이 22px) */
+  .cndprod{font-size:12.5px;font-weight:750;line-height:1.35;margin-bottom:7px;
+           display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .cndl{display:grid;grid-template-columns:62px minmax(0,1fr);gap:0 8px;font-size:11.5px;align-content:start;margin:0}
+  .cndl dt{color:var(--faint);font-weight:650;padding:3px 0;border-top:1px solid var(--line)}
+  .cndl dd{margin:0;font-weight:700;padding:3px 0;border-top:1px solid var(--line);
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cndl dt:first-of-type,.cndl dd:first-of-type{border-top:0}
+  .cndl dd .u{font-size:10px;font-weight:600;color:var(--faint);margin-left:2px}
+  .cnna{color:var(--faint);font-weight:600}
+  .cndwarn{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10px;font-weight:700;
+           background:var(--warn-soft);color:var(--warn);border-radius:999px;padding:0 7px}
+  .yn{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;border-radius:999px;padding:0 7px;line-height:16px}
+  .yn.y{background:var(--safe-soft);color:var(--safe)} .yn.n{background:var(--card2);color:var(--faint)}
+  .yn.b{background:var(--accent-soft);color:var(--accent-deep)}
+  /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
+  .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
+  .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+  .tp3wo.lk .st{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:0 7px;font-weight:700;flex:none}
+  .tp3wo.lk .ic{flex:none}
+  .womenu{position:relative;margin-left:auto;flex:none}
+  .womenu>.btn{height:24px;padding:0 8px;font-size:12px;line-height:1}
+  .womm{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:60;background:var(--card);
+        border:1px solid var(--line2);border-radius:9px;box-shadow:0 8px 22px rgba(16,24,40,.14);padding:5px;min-width:170px}
+  .womenu.open .womm{display:flex;flex-direction:column;gap:3px}
+  .womm .btn{justify-content:flex-start;width:100%;height:28px;font-size:11.5px}
+  /* ② 진행 현황 2줄 배치(절반 폭에서는 한 줄 배치의 막대가 뭉갠다) */
+  .tp3g.cmp{display:block;padding:6px 0}
+  .tp3g.cmp .top{display:flex;align-items:baseline;gap:6px}
+  .tp3g.cmp .lb{width:auto;flex:none}
+  .tp3g.cmp .nm{width:auto;flex:1;text-align:right;font-size:15px}
+  .tp3g.cmp .pc{width:auto;flex:none}
+  .tp3g.cmp .track{display:block;width:100%;margin-top:4px;height:5px}
+  /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단 구역(#setlCell 계약 유지) */
+  .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2);cursor:pointer}
+  .setlin:hover{opacity:.9}
+  .setlin .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s}
+  .setlin.open .caret{transform:rotate(180deg)}
+  /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰이미지, 칸마다 한 장 */
+  .rv2{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
+             border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px 8px 6px}
+  .rv2 .rv2h{font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:6px;flex:none}
+  .rv2 .rv2h .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
+  .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column}
+  .rv2 .rvone{flex:1;min-height:0;width:100%;object-fit:contain;border:1px solid var(--line);border-radius:8px;
+              background:var(--card);cursor:pointer}
+  .rv2 .rvone:hover{border-color:var(--accent)}
+  .rv2 .rvpg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:5px;font-size:10px;color:var(--muted);font-weight:700}
+  .rv2 .rvpg .pgb{font:inherit;font-size:12px;line-height:1;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);
+                  background:var(--card);color:var(--ink);cursor:pointer}
+  .rv2 .rvpg .pgb:disabled{opacity:.35;cursor:default}
+  .rv2 .rvempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+                border:1px dashed var(--line2);border-radius:8px;font-size:10.5px;color:var(--faint);text-align:center;padding:10px}
+  .rv2 .rvempty b{font-size:11.5px;color:var(--muted)} .rv2 .rvempty.warn b{color:var(--warn)}
   .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
   /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
   /* 헤더 클릭 필터: ▾ 아이콘 제거, 컬럼명 자체가 트리거. 호버=깔때기 힌트(절대배치=폭 무증가) · 필터중=밑줄+색 · 정렬중=화살표 */
@@ -5446,7 +5513,7 @@ function renderWorkdesk(wd){
     ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
       ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
-      : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
+      : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div><div id="gridhost">${tableSection}</div>`}`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
   //   남은 청크가 없을 때(작은 표)는 여기서 바로 '못 찾음'까지 확정한다.
@@ -5459,7 +5526,9 @@ function renderWorkdesk(wd){
   // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0).
   //   ★ .catch() 필수 — finally 가 DOM 을 건드리므로 거기서 throw 하면 처리되지 않은 rejection 이 된다.
   _folEnsureCur().catch(()=>{});
-  if(STATE.role==='advertiser') _rvBoot(STATE.cur);   // 업체: 리뷰 이미지 미리보기 패널
+  /* 제출물 미리보기 — 업체 뷰어와 **같은 패널·같은 조작**을 내부 화면(작업보드 상단 ③)에도 쓴다.
+     ★ 판정은 "패널이 그려졌나" 하나 — 역할 문자열로 다시 나누면 화면마다 갈린다. */
+  if(document.getElementById('rvPane')) _rvBoot(STATE.cur);
 }
 
 // ══ 업체 뷰어 — 리뷰 이미지 미리보기(표 위 정보 조합 패널) ═══════════════════════════
@@ -5486,7 +5555,7 @@ async function _rvBoot(t){
 function _rvBind(){
   if(STATE._rvBound) return; STATE._rvBound=true;
   document.addEventListener('click', e=>{
-    if(STATE.role!=='advertiser' || !document.getElementById('rvPane')) return;
+    if(!document.getElementById('rvPane')) return;
     const tr=e.target&&e.target.closest?e.target.closest('#gbody tr[data-rid]'):null;
     if(tr) _rvSelect(tr.dataset.rid,{scroll:false});
   });
@@ -5497,8 +5566,11 @@ function _rvBind(){
       if(e.key==='ArrowDown'||e.key==='ArrowRight'){ e.preventDefault(); _rvPopStep(1); return; }
       return;
     }
-    if(STATE.role!=='advertiser' || !document.getElementById('rvPane')) return;
+    if(!document.getElementById('rvPane')) return;
     if(e.key!=='ArrowUp'&&e.key!=='ArrowDown') return;
+    /* ★ 내부 화면에서 셀 범위를 잡고 있으면 방향키는 **셀 이동이 우선**이다 —
+       가로채면 표를 편집하다 커서가 사라진다(업체 뷰어는 읽기 전용이라 이 상태가 없다). */
+    if(STATE.gSelRange) return;
     const el=e.target;   // 입력 중이거나 모달이 떠 있으면 방향키를 가로채지 않는다
     if(el&&(/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)||el.isContentEditable)) return;
     if(document.querySelector('.modalov,#woImgOv')) return;
@@ -5510,6 +5582,7 @@ function _rvBind(){
   });
 }
 function _rvSelect(rid,opt){
+  if(String(rid)!==String(STATE.rvSel)) STATE.rvIdx={};   // ★ 행이 바뀌면 첫 장부터 — 안 되돌리면 남의 2장째가 그대로 보인다
   STATE.rvSel=rid;
   document.querySelectorAll('#gbody tr.rvon').forEach(tr=>tr.classList.remove('rvon'));
   const tr=rid?document.querySelector(`#gbody tr[data-rid="${(rid+'').replace(/"/g,'')}"]`):null;
@@ -5518,7 +5591,7 @@ function _rvSelect(rid,opt){
 }
 // 필터·정렬·숨김 재렌더 후 선택 표시 복원(선택 행이 사라졌으면 첫 행으로)
 function _rvReapply(){
-  if(STATE.role!=='advertiser'||!document.getElementById('rvPane')) return;
+  if(!document.getElementById('rvPane')) return;
   const rows=[...document.querySelectorAll('#gbody tr[data-rid]')];
   if(!rows.length){ STATE.rvSel=null; _rvRender(); return; }
   const keep=rows.some(tr=>tr.dataset.rid===STATE.rvSel);
@@ -5526,6 +5599,7 @@ function _rvReapply(){
 }
 function _rvRender(){
   const pane=$('#rvPane'); if(!pane) return;
+  if(STATE.role!=='advertiser') return _rvRender2(pane);   // 내부 = 좌 구매캡처 / 우 리뷰이미지 두 칸
   const hd=`<div class="rvhd">리뷰 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
   if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
@@ -5551,6 +5625,53 @@ function _rvRender(){
   }).join('');
   pane.innerHTML=hd+who2+(imgs?`<div class="rvmedia">${imgs}</div>`:`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
 }
+/* ══ 내부 화면 제출물 미리보기 — 좌 🛒 구매 캡처 / 우 📷 리뷰 이미지, 칸마다 **한 장씩** ══
+   ★ 여러 장을 세로로 쌓으면 한 장이 작아지고 스크롤이 생겨 "나란히 대조"라는 목적이 무너진다
+     → 칸을 꽉 채워 한 장만 보이고, 2장 이상이면 아래 넘김 줄(‹ 1/2 ›)로 바꿔 본다.
+   ★ 넘김 줄은 1장일 때도 **자리를 비워 둔다**(visibility) — 없애면 두 칸의 이미지 높이가 어긋난다.
+   ★ 장수는 칸 머리 배지에 그대로 남긴다(조용한 누락 금지).
+   ★ "없다"(미제출)와 "모른다·미등록"(제출 표시는 있는데 이미지 없음)을 칸마다 따로 말한다. */
+const _RV_KIND={cap:'order_capture',rev:'review'};
+function _rvKindFiles(files,kind){
+  return (files||[]).filter(f=>kind==='cap' ? (f.slot==='order_capture') : (f.slot!=='order_capture'));
+}
+function _rvStep(kind,delta,n){
+  if(!STATE.rvIdx) STATE.rvIdx={};
+  STATE.rvIdx[kind]=Math.max(0,Math.min(n-1,(STATE.rvIdx[kind]||0)+delta));   // 끝에서 순환하지 않는다
+  _rvRender();
+}
+function _rvRender2(pane){
+  const hd=`<div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
+  if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
+  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`; return; }
+  const who=_rvWho(r);
+  const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
+  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
+  const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
+  const col=(kind,icon,title,emptyB,emptyS,warn)=>{
+    const list=_rvKindFiles(files,kind).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
+    const n=list.length;
+    const i=Math.min((STATE.rvIdx&&STATE.rvIdx[kind])||0,Math.max(0,n-1));
+    const gi=n?files.indexOf(_rvKindFiles(files,kind)[i]):-1;   // 크게 보기 팝업은 그 행의 전체 목록 기준
+    const body=n
+      ? `<img class="rvone" src="${esc(list[i].url)}" alt="${esc(title)}" loading="lazy" title="크게 보기"`+
+        ` data-rid="${esc(r.id)}" data-fidx="${gi}" onclick="_rvOpenByImage(this)">`+
+        `<div class="rvpg"${n>1?'':' style="visibility:hidden"'}>`+
+          `<button type="button" class="pgb"${i===0?' disabled':''} onclick="_rvStep('${kind}',-1,${n})">‹</button>`+
+          `<span>${i+1} / ${n}</span>`+
+          `<button type="button" class="pgb"${i===n-1?' disabled':''} onclick="_rvStep('${kind}',1,${n})">›</button></div>`
+      : `<div class="rvempty${warn?' warn':''}"><b>${esc(emptyB)}</b><span>${esc(emptyS)}</span></div>`;
+    return `<div class="rv2c"><div class="rv2h">${icon} ${esc(title)}<span class="cnt">${n}</span></div><div class="rv2b">${body}</div></div>`;
+  };
+  const left=col('cap','🛒','구매 캡처',
+    r.submitted?'캡처 없음':'미제출',
+    r.submitted?'구매 캡처가 등록되지 않았습니다.':'아직 구매 캡처가 제출되지 않았습니다.', !r.submitted);
+  const right=col('rev','📷','리뷰 이미지',
+    r.submitted?'이미지 미등록':'리뷰 미제출',
+    r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
+  pane.innerHTML=hd+who2+`<div class="rv2">${left}${right}</div>`;
+}
 function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
 function _rvOpen(rid,fileIndex){
   const people=_rvPeople(), idx=people.findIndex(p=>String(p.r.id)===String(rid)); if(idx<0) return;
@@ -5570,32 +5691,128 @@ function _rvPopRender(){
    시안 = frontend/docs/design-workboard-top-3section.html (사용자 확정 2026-08-06).
    ★ 값 계산(target·pT/pS/pP·광고주 렌즈 분기)은 종전 그대로 — 바뀐 것은 배치와 표시뿐이다.
    ★ 발주 '미연결' 배너는 ① 작업 조건 카드 안쪽 줄로 흡수한다(전폭 배너 제거).
-     업체 화면은 작업세부 펼침을 렌더하지 않고, 내부 화면만 renderWorkOrderSection 을 종전대로 아래에 그린다. */
+     ★ 「작업세부 펼치기」 상시 노출은 폐지 — 발주 원문은 작업 조건 카드 [⋯] → [발주 원문 보기] 팝업으로. */
 function summaryStrip(wd,d,m,c){
   const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
   const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
   const isAdv=STATE.role==='advertiser';
   // 광고주 렌즈: 담당자 표기(내부 실명) 대신 시작일 칸 — 정산 열도 없음(정산 카드가 항상 펼쳐져 있음).
-  const metaPairs=isAdv
-    ? [['상품',d.productOption||m.campaignName||'—'],['시작일',d.startDate?String(d.startDate).slice(0,10):'—'],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
-    : [['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']];
+  //   ★ 10항목 조건표(리뷰비·입금명 포함)는 **내부 전용**이라 광고주는 종전 4줄 그대로다.
+  const metaPairs=[['상품',d.productOption||m.campaignName||'—'],['시작일',d.startDate?String(d.startDate).slice(0,10):'—'],
+                   ['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']];
   const kv=metaPairs.map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
-  const cond=`<div class="tp3col"><div class="tp3t">작업 조건</div><dl class="tp3kv">${kv}</dl>${_woUnlinkedRow(wd)}</div>`;
+  const cond=isAdv
+    ? `<div class="tp3col"><div class="tp3t">작업 조건</div><dl class="tp3kv">${kv}</dl></div>`
+    : _condCardHtml(wd,d,m);
   const g=(lb,n,den,pc,cls)=>`<div class="tp3g"><span class="lb">${lb}</span>`+
     `<span class="nm">${n}<small>/${den}</small></span>`+
     `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
     `<span class="pc">${pc}%</span></div>`;
-  const prog=`<div class="tp3col"><div class="tp3t">진행 현황</div>`+
-    g('참여자',c.total||0,target||(c.total||0),pT)+
-    g('제출완료',c.submitted||0,c.total||0,pS,'s')+
-    g('입금완료',c.paid||0,c.total||0,pP)+
-    `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div></div>`;
-  // ★ 초기 상태도 setlSummaryHtml(null) 한 곳에서 만든다 — 여기서 따로 조립하면 로드 전/후 구조가 갈려
-  //   교체 후에만 단계 막대가 폭을 쓰는(=로드 전엔 flex 행에 갇히는) 어긋남이 생긴다(실브라우저로 잡았다).
-  const setl=isAdv?'':`<div class="tp3col setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
+  // ★ 내부 화면은 진행 현황 칸이 절반 폭이라 한 줄 배치(라벨·숫자·막대·%)가 성립하지 않는다
+  //   → 2줄 배치(윗줄 라벨·숫자·%, 아랫줄 전폭 막대). 광고주 화면은 종전 한 줄 그대로.
+  const g2=(lb,n,den,pc,cls)=>`<div class="tp3g cmp"><span class="top"><span class="lb">${lb}</span>`+
+    `<span class="nm">${n}<small>/${den}</small></span><span class="pc">${pc}%</span></span>`+
+    `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span></div>`;
+  const gg=isAdv?g:g2;
+  /* ★ 정산은 별도 칸(박스)이 아니라 **진행 현황 카드 하단 구역**이다(사용자 확정).
+     루트 id(#setlCell)·클래스(.setlsummary)·클릭(toggleSettleDetail) 계약은 그대로 —
+     갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
+  const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
+  const prog=`<div class="tp3col"><div class="tp3t">진행 현황</div>`+
+    gg('참여자',c.total||0,target||(c.total||0),pT)+
+    gg('제출완료',c.submitted||0,c.total||0,pS,'s')+
+    gg('입금완료',c.paid||0,c.total||0,pP)+
+    `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
   if(isAdv) return `<div class="advcondition">${cond}</div><div class="advprogress">${prog}</div>`;
-  return `<div class="tp3grid">${cond}${prog}${setl}</div>`;
+  /* 내부 = 상단 3분할(작업 조건 · 진행 현황+정산 · 제출물 미리보기).
+     ★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다 → 상단 한 줄에서 끝낸다. */
+  return `<div class="tp3grid c3">${cond}${prog}<aside class="rvpane" id="rvPane"></aside></div>`;
+}
+
+/* ══ 작업 조건 10항목(내부 화면) ══════════════════════════════════════════════
+   상품명 · 총건수 · 일건수 · 구매채널 · 유입방식 · 다계정 · 현금영수증 · 리뷰비 · 입금명 · 리뷰타입.
+   ★★ 값은 **서버가 준 wd.condition 을 그리기만** 한다 — 화면에서 다시 판정하면
+     모집공고 카드·입금관리와 숫자가 갈린다(리뷰비 구간·현영 슬롯·리뷰타입 규칙 전부 서버 단일 출처).
+     예외는 **구매채널의 URL 판정 하나** — 그 판정의 단일 출처가 공유 모듈
+     `work-order-detail.js._woChannelFromUrl` 이라 서버에 사본을 만들지 않았다.
+   ★ 서버가 못 주면(구버전 백엔드·조회 실패) 종전 4줄로 떨어지고 사유를 말한다(빈 값 위장 금지). */
+function _condCardHtml(wd,d,m){
+  const cd=wd&&wd.condition;
+  if(!cd){
+    const kv=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],
+              ['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
+      .map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
+    return `<div class="tp3col"><div class="tp3t">작업 조건<span class="cndwarn" title="작업 조건 요약을 불러오지 못했습니다 — 아래는 발주 값입니다.">요약 없음</span></div>`+
+      `<dl class="tp3kv">${kv}</dl>${_woUnlinkedRow(wd)}${_woLinkedRow(wd)}</div>`;
+  }
+  const na='<span class="cnna">—</span>';
+  const n=v=>(v==null?null:Number(v));
+  const cnt=v=>(n(v)==null?na:`${Number(v).toLocaleString()}<span class="u">건</span>`);
+  // 구매채널 — 공고에 명시된 값이 우선, 없으면 상품 URL 호스트로(판정 단일 출처는 공유 모듈)
+  let ch=cd.channel||'';
+  if(!ch && cd.productUrl && typeof _woChannelFromUrl==='function') ch=_woChannelFromUrl(cd.productUrl)||'';
+  const inflow=cd.inflowType
+    ? (cd.inflowType+(cd.inflowKeyword?(' · '+cd.inflowKeyword):''))
+    : (cd.inflowKeyword||'');
+  const ma=cd.multiAccount;
+  const maHtml=!ma?na:(ma.enabled
+    ? `<span class="yn y">허용</span>${ma.dailyLimit?`<span class="u">하루 ${ma.dailyLimit}건</span>`:'<span class="u">제한 없음</span>'}`
+    : '<span class="yn n">불가</span>');
+  const crHtml=cd.cashReceipt==null?na:(cd.cashReceipt?'<span class="yn y">대상</span>':'<span class="yn n">해당 없음</span>');
+  /* ★ 리뷰비 0원은 "미설정"이 아니다 — 이 계정은 상품비만 주는 작업이 많다(2026-08-19 확정).
+     근거(feeSource)가 있으면 사람이 정한 0원이고, 없을 때만 미설정으로 말한다. */
+  const feeHtml=cd.feeSource
+    ? `${Number(cd.reviewFee||0).toLocaleString()}<span class="u">원</span>${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`
+    : '<span class="cnna">미설정</span>';
+  const rt=cd.reviewTypeLabel||'';   // ★ 라벨은 서버(utils/reviewType.reviewTypeLabel)가 준 값 — 프론트에 표 사본을 두지 않는다
+  const rows=[
+    ['총건수', cnt(cd.recruitTotal)],
+    ['일건수', n(cd.dailyLimit)==null?na:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`],
+    ['구매채널', ch?esc(ch):na],
+    ['유입방식', inflow?esc(inflow):na],
+    ['다계정', maHtml],
+    ['현금영수증', crHtml],
+    ['리뷰비', feeHtml],
+    ['입금명', cd.depositName?esc(cd.depositName):'<span class="cnna">미설정</span>'],
+    ['리뷰타입', rt?`<span class="yn b">${esc(rt)}</span>`:na],
+  ].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
+  const prod=cd.productName||d.productOption||m.campaignName||'';
+  const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
+  return `<div class="tp3col"><div class="tp3t">작업 조건${many}</div>`+
+    `<div class="cndprod" title="${esc(prod)}">${esc(prod)||na}</div>`+
+    `<dl class="cndl">${rows}</dl>${_woUnlinkedRow(wd)}${_woLinkedRow(wd)}</div>`;
+}
+
+/* 발주 연결 줄 — 전폭 띠(.wobar)를 없애고 작업 조건 카드 **맨 아래 한 줄**로(사용자 확정).
+   ★ 조작(명단 준비·발주 변경·연결 해제·발주 원문)은 [⋯] 메뉴 안 — 주 화면에 파괴 버튼을 늘어놓지 않는다. */
+function _woLinkedRow(wd){
+  const d=wd&&wd.detail; if(!d) return '';
+  const isAdmin=(STATE.role==='master'||STATE.role==='admin');
+  const menu=isAdmin?`<span class="womenu" id="woRowMenu"><button class="btn" title="발주 도구" onclick="toggleWoRowMenu(event)">⋯</button>`+
+    `<span class="womm"><button class="btn" onclick="prepareRoster()" title="발주 모집 인원만큼 빈 명단 슬롯을 준비(부족분만 생성·멱등)">명단 준비 (모집 ${esc(d.recruitCount||0)})</button>`+
+    `<button class="btn" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">발주 원문 보기</button>`+
+    `<button class="btn" onclick="openWorkOrderPicker()">발주 변경</button>`+
+    `<button class="btn" onclick="unlinkWO()">연결 해제</button></span></span>`
+    : `<button class="btn xs" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">원문</button>`;
+  return `<div class="tp3wo lk"><span class="ic">📋</span><span class="nm" title="${esc(d.title||'')}">${esc(d.title||'(제목 없음)')}</span>`+
+    `<span class="st">${esc(d.status||'')}</span>${menu}</div>`;
+}
+function toggleWoRowMenu(ev){
+  if(ev){ ev.stopPropagation(); }
+  const el=document.getElementById('woRowMenu'); if(!el) return;
+  const on=el.classList.toggle('open');
+  if(on && !STATE._woRowMenuBound){   // ★ 바깥클릭 닫기는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
+    STATE._woRowMenuBound=true;
+    document.addEventListener('click',()=>{ const x=document.getElementById('woRowMenu'); if(x) x.classList.remove('open'); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const x=document.getElementById('woRowMenu'); if(x) x.classList.remove('open'); } });
+  }
+}
+/* 발주 원문 팝업 — 종전 「작업세부 펼치기」가 그리던 **같은 값·같은 순서**(렌더러 이동, 사본 아님) */
+function openWoRawModal(){
+  const wd=STATE.wd, d=wd&&wd.detail;
+  if(!d){ _toast('연결된 발주가 없습니다.'); return; }
+  _modal('📋 발주 원문 — '+(d.title||''), `<div class="wodetail open">${_woRawRowsHtml(d)}</div>`);
 }
 // 발주 미연결 줄 — 작업 조건 카드 안쪽(admin/master 만, 광고주·AE 에겐 종전대로 미노출)
 function _woUnlinkedRow(wd){
@@ -13176,11 +13393,10 @@ async function flipSoT(value, force){
 }
 
 // ══ 작업오더(발주) 연동 — 연결 상태 바 + 작업세부 표(펼침) + 명단 준비(admin/master) ══
-function renderWorkOrderSection(wd){
-  const d=wd.detail||null, isAdmin=(STATE.role==='master'||STATE.role==='admin');
-  // ★ 미연결 안내는 전폭 배너를 없애고 상단 3단의 ① 작업 조건 카드 안쪽 줄(_woUnlinkedRow)로 옮겼다.
-  //   여기서 또 그리면 같은 말이 두 번 나온다(시안 B · 사용자 확정).
-  if(!d) return '';
+/* 발주 정형 정보 행 — 종전 「작업세부 펼치기」의 필드 목록·순서를 **그대로** 옮겼다(사본 아님).
+   이제 상시 펼침이 아니라 작업 조건 카드 [⋯] → [발주 원문 보기] 팝업에서만 그린다. */
+function _woRawRowsHtml(d){
+  if(!d) return '<div class="worow"><span class="wv">세부 정보 없음</span></div>';
   const fields=[['상품',d.productOption],['모집 인원',d.recruitCount],['일건수',d.dailyCountText||d.dailyCount],
     ['구매시간',d.purchaseTime],['배송',d.deliveryType],['페이',d.payAmount?Number(d.payAmount).toLocaleString()+'원':''],
     ['리뷰타입',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],
@@ -13190,12 +13406,7 @@ function renderWorkOrderSection(wd){
   const opts=Array.isArray(d.options)?d.options:[];
   const optRow=opts.length?`<div class="worow"><span class="wk">옵션</span><span class="wv">${opts.map(o=>`<span class="wochip">${esc(o)}</span>`).join('')}</span></div>`:'';
   const rows=fields.filter(([k,v])=>v!=null&&String(v).trim()!=='').map(([k,v])=>`<div class="worow"><span class="wk">${esc(k)}</span><span class="wv">${esc(String(v))}</span></div>`).join('');
-  const adminCtl=isAdmin?`<span style="flex:1"></span>
-      <button class="btn xs" onclick="prepareRoster()" title="발주 모집 인원만큼 빈 명단 슬롯을 준비(부족분만 생성·멱등)">명단 준비 (모집 ${d.recruitCount||0})</button>
-      <button class="btn xs" onclick="openWorkOrderPicker()">발주 변경</button>
-      <button class="btn xs" onclick="unlinkWO()">연결 해제</button>`:'';
-  return `<div class="wobar"><span class="wt">📋 발주: ${esc(d.title||'(제목 없음)')}</span><span class="wsub">${esc(d.status||'')} · 모집 ${d.recruitCount||0}</span>${adminCtl}</div>
-    <details class="wodetail"><summary>작업세부 펼치기 (발주 정형 정보)</summary>${optRow}${rows||'<div class="worow"><span class="wv">세부 정보 없음</span></div>'}</details>`;
+  return optRow+(rows||'<div class="worow"><span class="wv">세부 정보 없음</span></div>');
 }
 async function openWorkOrderPicker(){
   const t=STATE.cur; if(!t)return;
