@@ -350,6 +350,25 @@ const ROWS = [
       assert.equal(th, td, name + ': 헤더 칸 수 ≡ 행 칸 수 (th ' + th + ' / td ' + td + ')');
     }
   });
+  t('8f-3: 탭명 교정으로 고칠 수 있는 것과 없는 것을 구분해 말한다', () => {
+    // 시트의 현재 이름이 이미 별도 행으로 등록돼 있으면 UNIQUE(sheet_id, tab_name) 충돌로
+    // 리네임이 실패한다 — "교정하세요"라고만 말하면 **되지 않는 조치**를 시키는 셈이다.
+    assert.ok(/liveNameRegistered/.test(SRC), '서버가 판정을 싣는다');
+    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptRender'));
+    assert.ok(/h\.liveNameRegistered/.test(b), '행에 표시');
+    assert.ok(/const ghost = d\.filter\(h=>h\.liveNameRegistered\)\.length/.test(b), '건수 계산');
+    assert.ok(/탭명 교정으로 고칠 수 없습니다/.test(b), '고칠 수 없다고 말한다');
+    assert.ok(/d\.length - ghost/.test(b), '교정 안내는 나머지에만');
+  });
+  t('9-sync: 탭명 교정이 마감·아카이브 탭의 gid 를 tab_configs 에서도 찾는다', () => {
+    // ★ auto-clean-closed 가 index_master 행을 지우므로 im.tab_gid 만 보면 gid 가 null →
+    //   그 탭의 리네임을 영영 못 잡는다("GID 없음 + 시트에 해당 탭명 없음"으로 스킵).
+    //   (2026-08-19 실측: 본섭 미리보기 「변경 0건 · 스킵 27건」 — 3건이 그 안에 묻혔다)
+    const TC = R('server/src/routes/tabconfig.routes.js');
+    const q = TC.slice(TC.indexOf("router.post('/sync-tab-names'"), TC.indexOf('2. 고유 sheet_id'));
+    assert.ok(/COALESCE\(NULLIF\(im\.tab_gid, ''\), NULLIF\(tc\.tab_gid, ''\)\)\s+AS tab_gid/.test(q),
+      'index_master 우선 · tab_configs 폴백');
+  });
   t('8g: 「정리 대상에 포함」이라고 말하지 않는다(후보가 0일 수 있다)', () => {
     const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
     const i = rd.indexOf('archivedByGidOnly');

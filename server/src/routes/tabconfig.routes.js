@@ -690,7 +690,13 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     const { rows: allTabs } = await pool.query(`
       SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
              tc.is_closed,
-             im.tab_gid, im.tab_name AS index_tab_name
+             -- ★★ gid 는 index_master 우선, 없으면 tab_configs 폴백 (2026-08-19).
+             --   마감·아카이브된 탭은 auto-clean-closed 가 index_master 행을 지우므로
+             --   im.tab_gid 만 보면 gid 가 null 이 되어 **리네임을 영영 못 잡는다**
+             --   (그 탭은 "GID 없음 + 시트에 해당 탭명 없음"으로 스킵된다).
+             --   그런 탭도 tab_configs.tab_gid 는 남아 있어 gid 매칭이 가능하다.
+             COALESCE(NULLIF(im.tab_gid, ''), NULLIF(tc.tab_gid, '')) AS tab_gid,
+             im.tab_name AS index_tab_name
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
       ORDER BY tc.campaign_name, tc.tab_name
