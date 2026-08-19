@@ -75,7 +75,8 @@ function withStub(rows, run) {
 
 const FIXTURE = {
   //  S1: 시트 기반 활성 탭 있음 / S2: 마감 탭만 / S3: campaigns 만(아카이브로 tab_configs 삭제) / S4: 전부 무시트(제외)
-  sheets: [{ sheet_id: 'S1' }, { sheet_id: 'S2' }, { sheet_id: 'S3' }, { sheet_id: 'S4' }],
+  //  ★ 입력 순서를 일부러 뒤집어 둔다 — 같은 순서면 '정렬을 아예 안 해도' 통과한다(변이시험 실측)
+  sheets: [{ sheet_id: 'S3' }, { sheet_id: 'S2' }, { sheet_id: 'S1' }, { sheet_id: 'S4' }],
   fully: [{ sheet_id: 'S4' }],
   tc: [
     { sheetId: 'S1', tabs: 3, sheetlessTabs: 2, liveSheetTabs: 1, closedSheetTabs: 0 },
