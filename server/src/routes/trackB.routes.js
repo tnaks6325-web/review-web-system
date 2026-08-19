@@ -1185,6 +1185,33 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
 });
+/* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
+ *  "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
+ *  조작은 tab_configs.is_closed 한 칸뿐이고 되돌릴 수 있다(서비스 주석 참조).
+ *  게이트는 이관(cutover)과 같은 adminOrMaster — 무엇을 읽을지 정하는 전사 조작이다. */
+const _pastTabs = require('../services/pastSheetTabCleanup.service');
+function _pastTabErr(res, err, next) {
+  if (err && typeof err.code === 'string' && !/^\d/.test(err.code)) {
+    const st = err.code === 'not_ready' ? 503 : 400;
+    return res.status(st).json({ ok: false, error: err.code, max: err.max, got: err.got });
+  }
+  return next(err);
+}
+router.get('/past-tabs/scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _pastTabs.scanPastSheetTabs({ since: req.query.since, limit: req.query.limit })); }
+  catch (err) { _pastTabErr(res, err, next); }
+});
+router.post('/past-tabs/close', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { tabs, since, dryRun } = req.body || {};
+    // 미리보기가 기본 — 값이 빠진 요청이 곧바로 닫으면 안 된다
+    res.json(await _pastTabs.closePastTabs({ tabs, since, by: _by(req), dryRun: dryRun !== false }));
+  } catch (err) { _pastTabErr(res, err, next); }
+});
+router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
+  catch (err) { _pastTabErr(res, err, next); }
+});
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
