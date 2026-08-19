@@ -151,14 +151,14 @@
        (반쪽짜리 균형 표시로 잘못된 확신을 주지 않는다). */
   var MAX_ROWS = 120;             // 서버 savePlans 의 MAX_PLAN_ENTRIES 와 같은 값
   var CARRY_MODES = ['next', 'spread', 'extend'];
-  /* ★★ 기본 이월 방식 = **남은 날에 나눠 담기**(사용자 확정 2026-08-19 — "다음날로 이월하는 것이
-     기본값이 되어선 안 된다"). 계기 = 위프 800건에서 이월이 625명까지 쌓였는데 기본값이
-     `next` 라 그대로 배치하면 **다음 진행일 하루에 625명**이 열린다(066 하루 상한 2×일건수를
-     훌쩍 넘고 리뷰어 화면에도 그 숫자가 그대로 나간다).
-     ★ `extend`(종료일 뒤에 붙이기)를 기본으로 두지 않는 이유 = 그건 **종료일이 조용히 밀리는**
-       선택이라 사람이 명시로 고를 일이지 기본값이 될 수 없다.
+  /* ★★ 기본 이월 방식 = **종료일 뒤에 붙이기**(사용자 확정 2026-08-19 2차 — 종전 `spread` 에서
+     뒤집혔다). 뜻 = **각 날 인원은 건드리지 않고** 못 채운 몫만 종료일 뒤로 넘긴다(총량 불변,
+     종료일만 밀린다). 하루에 몰아넣지 않으므로 066 하루 상한을 넘겨 여는 일이 구조적으로 없다.
+     ★ `next`(다음날에 더하기)를 기본으로 두지 않는 이유 = 위프 800건에서 이월이 625명까지
+       쌓였는데 그대로 배치하면 **다음 진행일 하루에 625명**이 열린다(리뷰어 화면에도 그 숫자가
+       그대로 나간다). `spread` 도 각 날 인원을 말없이 늘리므로 기본값에서 내렸다.
      ★ 이 값이 단일 출처다 — 폴백·되돌리기·'기본' 배지가 전부 이것을 본다(사본 금지). */
-  var DEFAULT_CARRY_MODE = 'spread';
+  var DEFAULT_CARRY_MODE = 'extend';
 
   /** 어제까지 확정 — 전체 확정에서 오늘 확정을 뺀다(오늘분은 오늘 줄 안에 들어 있다) */
   function doneBefore() {
@@ -294,6 +294,15 @@
   function carryOn(d) {
     var assigned = (S.carryMap && S.carryMap[d]) || 0;
     return Math.max(0, Math.min(assigned, planFor(d) - effBase(d)));
+  }
+
+  /** 이월 방식 세그먼트 버튼 한 칸 — mode 는 CARRY_MODES 의 고정 문자열만 넘긴다(보간 금지) */
+  function segBtn(m, label, desc) {
+    if (CARRY_MODES.indexOf(m) < 0) return '';   // 화이트리스트 밖 값은 그리지 않는다(보간 사고 차단)
+    return '<button type="button" onclick="CampaignDailyPlan._mode(\'' + m + '\')"'
+      + (S.carryMode === m ? ' class="on"' : '') + '>' + label
+      + (m === DEFAULT_CARRY_MODE ? '<span class="df">기본</span>' : '')
+      + '<small>' + desc + '</small></button>';
   }
 
   /** 방식 적용 — 구간·계획·이월 배치를 그 방식으로 다시 깐다(실패하면 균형 모드 해제) */
@@ -923,10 +932,11 @@
         + (j.carryMode === 'hold' ? ' 이 공고는 <b>이월 보류</b> 설정이라 저장하기 전까지는 자동으로 얹히지 않습니다.' : '')
         + '</div>'
         + '<div class="cdp-seg">'
-        // onclick 인자는 전부 **고정 문자열**(외부 값 보간 금지 — XSS 규율)
-        + '<button type="button" onclick="CampaignDailyPlan._mode(\'next\')"' + (S.carryMode === 'next' ? ' class="on"' : '') + '>다음날에 더하기<small>바로 다음 진행일에 몰아서</small></button>'
-        + '<button type="button" onclick="CampaignDailyPlan._mode(\'spread\')"' + (S.carryMode === 'spread' ? ' class="on"' : '') + '>남은 날에 나눠 담기<span class="df">기본</span><small>진행일에 고르게</small></button>'
-        + '<button type="button" onclick="CampaignDailyPlan._mode(\'extend\')"' + (S.carryMode === 'extend' ? ' class="on"' : '') + '>종료일 뒤에 붙이기<small>각 날 인원은 그대로</small></button>'
+        // ★ '기본' 배지는 DEFAULT_CARRY_MODE 에서 파생한다 — 배지를 손으로 달아 두면 기본값을
+        //   바꿀 때 화면과 코드가 갈린다(사본 금지). onclick 인자는 전부 **고정 문자열**(XSS 규율).
+        + segBtn('next', '다음날에 더하기', '바로 다음 진행일에 몰아서')
+        + segBtn('spread', '남은 날에 나눠 담기', '진행일에 고르게')
+        + segBtn('extend', '종료일 뒤에 붙이기', '각 날 인원은 그대로')
         + '</div><div class="where">' + where + '</div>'
         + '<div class="cmp">방식별 종료일 — 다음날에 <b>' + _esc(em('next')) + '</b> · 나눠 담기 <b>' + _esc(em('spread'))
         + '</b> · 뒤에 붙이기 <b>' + _esc(em('extend')) + '</b></div></div>';
@@ -941,16 +951,19 @@
       // ★ 문구는 한 줄(사용자 확정) — 상태·숫자·저장 가능 여부만 말한다.
       // ★ 사용자 확정(2026-08-19): **초과만 막고, 부족은 저장한다** — 부족하게 저장하면
       //   그만큼만 모집하고 작업표의 줄도 그 수로 줄어든다(총건수 축소가 실제로 반영된다).
+      // ★★ "총량 410명" 은 거짓말이다(사용자 신고 2026-08-19) — 이 공고의 총원은 500명이고
+      //   410 은 **남은 건수**(총원 − 확정)다. 그래서 진행 현황과 남은건수를 함께 말한다.
+      var pre = '<span class="num">' + done + '</span> / ' + tot + '건 진행중 · 남은건수 <span class="num">' + target + '</span>건';
       var l1 = diff === 0
-        ? '총량 <span class="num">' + target + '</span>명과 딱 맞습니다. — <b>저장가능</b>'
+        ? pre + ' 일치합니다. — <b>저장가능</b>'
         : diff > 0
-          ? '총량이 <span class="num">' + target + '</span>명보다 <span class="num">' + diff + '</span>명 초과입니다. — <b>저장불가</b>'
-          : '총량 <span class="num">' + target + '</span>명보다 <span class="num">' + (-diff) + '</span>명 적게 모집합니다. — <b>저장가능</b>';
+          ? pre + '보다 <span class="num">' + diff + '</span>건 초과입니다. — <b>저장불가</b>'
+          : pre + '보다 <span class="num">' + (-diff) + '</span>건 적게 모집합니다. — <b>저장가능</b>';
       balBlk = '<div class="cdp-bal ' + cls + '"><div class="ico">' + ico + '</div>'
         + '<div class="txt"><div class="l1">' + l1 + '</div></div>'
         + (diff === 0 ? ''
           : '<button type="button" class="cdp-btn sm" onclick="CampaignDailyPlan._autoFit()">자동으로 '
-            + Math.abs(diff) + '명 ' + (diff > 0 ? '줄이기' : '채우기') + '</button>')
+            + Math.abs(diff) + '건 ' + (diff > 0 ? '줄이기' : '채우기') + '</button>')
         + '</div>';
     }
 
@@ -1069,9 +1082,9 @@
       save.disabled = killOff || S.saving || diff > 0 || !dirty || over;
       hint.textContent = over
         ? '저장할 날짜가 ' + dirty + '일로 한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘었습니다 — 구간을 나눠 저장해주세요'
-        : diff > 0 ? '초과 ' + diff + '명 — 저장불가'
+        : diff > 0 ? '초과 ' + diff + '건 — 저장불가'
         : diff < 0 ? '총량보다 ' + (-diff) + '명 적게 모집합니다 — 저장하면 작업표도 그 수로 줄어듭니다'
-        : dirty ? '총량과 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다'
+        : dirty ? '남은건수와 딱 맞습니다 — [확정 저장]을 누르면 반영됩니다'
         // ★ "저장할 것 없음"을 그냥 말하면 화면에 이월이 얹혀 보이는데 저장이 잠겨 있어
         //   "반영이 안 된 것"으로 오독된다 — 이미 그렇게 돌고 있다는 사실을 말한다.
         : (carry > 0 && S.carryMode === 'next' && j.carryMode !== 'hold')
@@ -1080,7 +1093,7 @@
         //   그 사실을 말한다(사용자 신고: 방식을 골랐는데 저장 버튼이 잠겨 있다).
         : (!carry && S.carryMode && S.carryMode !== 'next')
           ? '지금은 이월 인원이 없어 방식별로 달라지는 것이 없습니다 — 저장할 변경이 없습니다'
-          : '총량과 딱 맞습니다 — 저장할 변경이 없습니다';
+          : '남은건수와 딱 맞습니다 — 저장할 변경이 없습니다';
     } else {
       save.disabled = killOff || S.saving || !dirty;
       hint.textContent = dirty
