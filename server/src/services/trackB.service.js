@@ -2807,27 +2807,39 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     // 진행일의 계획을 1건 늘리고, 같은 트랜잭션 안에 비어 있는 보충 슬롯을 만든다.
     // 내부 seq는 주문·리뷰 원장의 연결키이므로 재번호화하지 않는다. 화면의 #만
     // 표시 순번으로 계산해 1~총건수 범위를 유지한다.
-    // 여러 공고가 같은 작업표를 공유해도, 주문이 있는 참여행은 그 주문에 연결된
-    // campaign_application의 공고만 대상으로 삼는다. 주문 없는 빈/수동 행은 연결 공고가
-    // 정확히 하나일 때만 처리해 다른 공고의 마지막 날짜를 임의로 바꾸지 않는다.
-    const { rows: scopes } = await client.query(
-      `SELECT rc.id AS campaign_id
+    // 어느 공고의 날짜별 계획에 보충할지 고른다. 후보는 "이 작업표에 연결된 무시트 공고"이고,
+    // 그 안에서 아래 순서로 좁힌다. 어느 단계든 후보가 둘 이상이면 고르지 않고 거부한다
+    // (남의 공고 마지막 날짜를 임의로 바꾸지 않는다).
+    //   ① 그 주문에 연결된 공고(campaign_applications) — 한 작업표를 여러 공고가 쓸 때의 정답
+    //   ② 게시 중/임시저장 공고
+    //   ③ 그 외(마감 등)
+    // ★ ①이 비는 경우가 실제로 흔하다 — 홀드 없이 들어온 주문(외부모집 수동제출·지각 확정·
+    //   시트 이관분)은 campaign_applications 행 자체가 없다. 종전에는 그때 곧바로 거부해
+    //   그 행을 총원 유지로는 지울 방법이 없는 막다른 길이 됐다. 링크가 없을 뿐 후보가
+    //   하나면 모호하지 않으므로 ②·③으로 내려가 고른다(완화가 아니라 같은 규칙의 확장).
+    // ★ 무시트(sheetless) 게이트는 그대로 — 시트 기반 작업은 다음 빌드가 행을 되살린다.
+    const { rows: scopeRows } = await client.query(
+      `SELECT rc.id AS campaign_id,
+              (rc.status IN ('draft','active')) AS is_open,
+              EXISTS (
+                SELECT 1 FROM campaign_applications ca
+                 WHERE ca.campaign_id=rc.id AND ca.order_submission_id=$3::uuid
+              ) AS is_linked
          FROM recruit_campaigns rc
          JOIN tab_configs tc ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
         WHERE rc.linked_sheet_id=$1 AND rc.linked_tab_name=$2
-          AND rc.status IN ('draft','active') AND COALESCE(tc.sheetless,FALSE)=TRUE
-          AND ($3::uuid IS NULL OR EXISTS (
-            SELECT 1 FROM campaign_applications ca
-             WHERE ca.campaign_id=rc.id AND ca.order_submission_id=$3::uuid
-          ))
+          AND COALESCE(tc.sheetless,FALSE)=TRUE
         ORDER BY rc.updated_at DESC
-        LIMIT 2
+        LIMIT 10
         FOR UPDATE`,
       [sheetId, tabName, row.order_submission_id || null]);
-    if (scopes.length !== 1) {
-      throw new HideRowError(row.order_submission_id ? 'row_campaign_not_found' : (scopes.length ? 'ambiguous_campaign' : 'sheetless_campaign_not_found'));
-    }
-    const campaignId = scopes[0].campaign_id;
+    if (!scopeRows.length) throw new HideRowError('sheetless_campaign_not_found');
+    // 주문이 없는 행($3=NULL)이면 is_linked 는 전부 거짓이라 자연히 ②로 내려간다.
+    const linked = scopeRows.filter(r => r.is_linked);
+    const open = scopeRows.filter(r => r.is_open);
+    const tier = linked.length ? linked : (open.length ? open : scopeRows);
+    if (tier.length !== 1) throw new HideRowError('ambiguous_campaign');
+    const campaignId = tier[0].campaign_id;
     const { rows: tabRows } = await client.query(
       `SELECT seq, tab_gid, row_json
          FROM campaign_participants
