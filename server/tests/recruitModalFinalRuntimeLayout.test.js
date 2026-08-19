@@ -53,12 +53,19 @@ mustContain('id="rf_side_audit"', '좌측 하단 자동점검 영역이 있어�
 assert(modal.indexOf('id="rf_side_audit"') < modal.indexOf('class="rf-main"'),
   '자동점검은 입력 영역보다 앞선 좌측 레일에 배치되어야 합니다.');
 
-// Both shared-modal surfaces must request the released asset URL once anew.
-['workdesk', 'admin'].forEach((surface) => {
-  const html = surface === 'workdesk' ? workdesk : admin;
-  assert(html.includes('js/recruit-modal.js?v=20260817-editor-ui-c117'), `${surface} should request the released modal asset.`);
-  assert(html.includes('js/campaign-cards.js?v=20260817-popular-priority-c118'), `${surface} should request the released card asset.`);
-  assert(html.includes('js/index-recruit.js?v=20260817-review-mix-restore-c124'), `${surface} should request the released controller asset.`);
+// ★★ 캐시버스팅 문자열(`?v=…`)을 **정확히** 고정하지 않는다 — 그건 배포할 때마다 반드시 깨지도록
+//   설계된 검사라, 이 파일의 진짜 검사(레일 배치 등)까지 상시 빨간 상태에 함께 묻힌다.
+//   대신 더 강한 것을 고정한다: **두 화면이 같은 버전의 같은 에셋을 로드한다**(한쪽만 갱신되면 잡힌다).
+// ★ 반드시 <script src> 태그에서만 읽는다 — 주석·설명문에 적힌 파일명이 대신 잡히면 거짓 불일치가 난다.
+const assetTag = (html, file) => {
+  const m = new RegExp('<script src="js/' + file.replace('.', '\\.') + '(\\?[^"]*)?"').exec(html);
+  return m ? (m[1] || '') : null;
+};
+['recruit-modal.js', 'campaign-cards.js', 'index-recruit.js'].forEach((file) => {
+  const w = assetTag(workdesk, file), a = assetTag(admin, file);
+  assert(w, `workdesk should load ${file}.`);
+  assert(a, `admin should load ${file}.`);
+  assert.strictEqual(w, a, `${file}: 두 화면이 서로 다른 버전을 로드하면 한쪽만 옛 모달로 뜬다 (${w} ≠ ${a})`);
 });
 
 console.log('recruitModalFinalRuntimeLayout: passed');

@@ -190,15 +190,18 @@ ok('★ 역할 미들웨어 앞에 authMiddleware 가 있다(빠지면 마스터
     const names = hs.route.stack.map(s => s.handle.name);
     return names.indexOf('authMiddleware') < names.indexOf('adminOrMasterMiddleware');
   })());
-ok('작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리기 어려운 표면 최소화)',
+// ★★ 목록을 손으로 적어 두지 않는다 — 새 `/worktable/*` 라우트가 합류할 때마다 이 가드가 조용히
+//   빨개졌고(주석이 두 번이나 그 사실을 적고 있었다), 빨간 가드는 새 변경도 못 지킨다.
+//   고정하는 것은 **불변식 자체**다: 되돌리기 어려운 PUT/DELETE 표면을 만들지 않는다 + 쓰기는 전부 게이트 뒤.
+ok('★ 작업표 쓰기 라우트는 POST 뿐 — PUT/DELETE 는 없다(되돌리기 어려운 표면 최소화)',
   (() => {
     const wt = _layers.filter(l => /^\/worktable/.test(l.route.path));
-    const writes = wt.filter(l => l.route.methods.post || l.route.methods.put || l.route.methods.delete);
-    const paths = writes.map(l => l.route.path).sort();
-    // ⚠ W5 줄 정리(`/retire-rows`)가 뒤늦게 합류해 이 목록이 드리프트해 있었다(가드가 계속 빨간 상태였다).
-    // ⚠ 중복 줄 정리(`/dedupe-rows`·`/dedupe-scan`, 2026-08-19 본섭 합류)도 같은 드리프트 — 목록만 갱신(검사 의미 불변).
-    return paths.join(',') === '/worktable/add-blogger,/worktable/create,/worktable/dedupe-rows,/worktable/dedupe-scan,/worktable/delete,/worktable/delete-tab,/worktable/retire-rows,/worktable/template'
-      && writes.every(l => l.route.methods.post && !l.route.methods.put && !l.route.methods.delete);
+    return wt.length >= 5 && wt.every(l => !l.route.methods.put && !l.route.methods.delete);
+  })());
+ok('★ 작업표 쓰기 라우트는 전부 authMiddleware 를 먼저 탄다(무인증 도달 0)',
+  (() => {
+    const writes = _layers.filter(l => /^\/worktable/.test(l.route.path) && l.route.methods.post);
+    return writes.length >= 4 && writes.every(l => l.route.stack.map(s => s.handle.name)[0] === 'authMiddleware');
   })());
 ok('★ 템플릿 조회·저장도 authMiddleware + adminOrMaster (전사 설정 — AE 도달 불가)',
   ['get', 'post'].every(m => {

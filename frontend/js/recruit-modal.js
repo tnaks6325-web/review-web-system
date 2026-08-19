@@ -476,6 +476,12 @@
         <section class="editor">
           <header class="editor-head"><div><h2 id="rf_editor_title">연결 · 기본</h2><p id="rf_editor_description">작업보드와 공고의 기준 정보 및 입금 기준을 먼저 확인합니다.</p></div><span class="autosaved">자동 저장됨</span></header>
           <div class="title-control-bar"><label class="title-control-label" for="rf_title"><span>공고 제목</span><input id="rf_title" type="text" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100"></label><div id="rf_status_buttons" class="square-toggle"><button type="button" data-rf-status="active" onclick="RecruitModal.setStatus('active')">모집중</button><button type="button" data-rf-status="draft" onclick="RecruitModal.setStatus('draft')">일시대기</button><button type="button" data-rf-status="closed" onclick="RecruitModal.setStatus('closed')">마감</button></div><select id="rf_status" hidden onchange="RecruitModal.syncStatusButtons()"><option value="draft">임시저장</option><option value="active">모집중</option><option value="closed">마감</option></select></div>
+          <!-- 🧪 리뷰어에게 숨김(085) — ★ 참여형 전용 섹션 밖·상태 묶음 안에 둔다:
+               섹션 안에 두면 평소 접혀 있어 존재를 모르고, 레거시 공고는 숨길 수도 없다.
+               ⚠ v2 개편 때 이 줄이 보관용 template 태그 안으로만 남아 화면에서 사라져 있었다
+               (그 안은 브라우저가 inert 로 다뤄 document 에 존재하지 않는다)
+               ([🧪 테스트 공고]가 리뷰어 목록에 그대로 노출되던 회귀) — 되살린 자리다. -->
+          <div id="rf_hidden_box" class="rf-hidden-row"><label><input type="checkbox" id="rf_reviewer_hidden"> 🧪 리뷰어에게 숨김 <span>— 내부 테스트용</span></label><div>리뷰어 공고 목록에 뜨지 않지만, 공고 링크로 직접 테스트할 수 있습니다.</div></div>
           <div id="editorScroller" class="compact-editor-scroller" tabindex="0" aria-label="모집공고 수정 항목">
             <section class="section" data-sec="link">
               <div class="section-heading"><div><h3>기본 설정</h3><span class="section-hint">공고 운영과 입금 기준을 설정합니다.</span></div><span class="section-count">11개 항목</span></div>

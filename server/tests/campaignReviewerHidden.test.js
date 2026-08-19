@@ -84,22 +84,34 @@ ok('모달에 "리뷰어에게 숨김" 토글', /id="rf_reviewer_hidden"/.test(m
 ok('토글 설명에 "참여·제출은 정상" 명시(오해 방지)', /참여·제출은 정상 동작/.test(modal));
 // ★ 참여형 전용 섹션(rf_part_section) 안에 두면 평소 접혀 있어 존재를 모르고, 레거시 공고는 숨길 수도 없다.
 //   상태(rf_status)와 같은 "항상 보이는" 묶음에 있어야 한다. (브라우저 렌더로 실측해 잡은 회귀)
+// ★★ **살아 있는 마크업만 본다** — 이 모듈에는 `<template id="rf_legacy_*_markup">` 보관 조각이 있는데,
+//   브라우저는 그 안을 inert 로 다뤄 **document 에 존재하지 않는다**. 종전처럼 파일 전체를 훑으면
+//   토글이 화면에서 통째로 사라져도 그 보관 조각이 대신 잡혀 "위치가 이상하다"는 엉뚱한 실패로 보인다
+//   (실제로 v2 개편 때 그렇게 사라졌고, [🧪 테스트 공고]가 리뷰어 목록에 노출되고 있었다).
 {
-  // 참여형 전용 div(rf_part_section)의 실제 범위를 <div> 깊이로 계산해, 토글이 그 **밖**에 있는지 본다.
-  const partIdx = modal.indexOf('id="rf_part_section"');
-  const hidIdx  = modal.indexOf('id="rf_hidden_box"');
-  assert(partIdx > -1 && hidIdx > -1, 'rf_part_section / rf_hidden_box 를 찾지 못함');
-  let depth = 0, k = modal.lastIndexOf('<div', partIdx), end = -1;
-  const tag = /<div\b|<\/div>/g; tag.lastIndex = k;
-  for (let m; (m = tag.exec(modal)); ) {
-    depth += m[0] === '</div>' ? -1 : 1;
+  const live = (() => { let d = 0, out = '';
+    for (const line of modal.split('\n')) {
+      const o = (line.match(/<template[\s>]/g) || []).length, c = (line.match(/<\/template>/g) || []).length;
+      if (d === 0) out += line + '\n'; d += o - c; }
+    return out; })();
+  const partIdx = live.indexOf('id="rf_part_section"');
+  const hidIdx  = live.indexOf('id="rf_hidden_box"');
+  ok('★★ 토글이 **살아 있는 마크업**에 있다(보관용 <template> 안은 화면에 없다)', hidIdx > -1,
+    { hint: '<template> 안에만 있으면 관리자가 리뷰어 숨김을 켤 수 없다' });
+  assert(partIdx > -1, 'rf_part_section 을 찾지 못함');
+  let depth = 0, k = live.lastIndexOf('<section', partIdx);
+  if (k < 0 || live.lastIndexOf('<div', partIdx) > k) k = live.lastIndexOf('<div', partIdx);
+  let end = -1;
+  const tag = /<(?:div|section)\b|<\/(?:div|section)>/g; tag.lastIndex = k;
+  for (let m; (m = tag.exec(live)); ) {
+    depth += m[0].startsWith('</') ? -1 : 1;
     if (depth === 0) { end = m.index; break; }
   }
-  assert(end > -1, 'rf_part_section div 의 끝을 찾지 못함');
+  assert(end > -1, 'rf_part_section 의 끝을 찾지 못함');
   ok('★ 토글이 참여형 전용 섹션 밖(참여형을 꺼도 항상 보인다 · 레거시 공고도 숨길 수 있다)',
-    hidIdx > end, { hidIdx, partSectionEnd: end });
-  ok('토글이 상태(rf_status)와 같은 묶음(모집정보)', modal.indexOf('id="rf_status"') < hidIdx
-    && !modal.slice(modal.indexOf('id="rf_status"'), hidIdx).includes('</section>'));
+    hidIdx < live.lastIndexOf('<section', partIdx) || hidIdx > end, { hidIdx, partSectionEnd: end });
+  ok('토글이 상태(rf_status)와 같은 묶음(모집정보)', live.indexOf('id="rf_status"') < hidIdx
+    && !live.slice(live.indexOf('id="rf_status"'), hidIdx).includes('</section>'));
 }
 ok('★ 한계(링크를 아는 사람은 접근)를 화면에 고지', /링크를 아는 사람은 들어올 수 있습니다/.test(modal));
 ok('저장 payload 전송 — ★ 토글 UI 있는 화면에서만(축약 화면이 설정을 끄지 않게)',
