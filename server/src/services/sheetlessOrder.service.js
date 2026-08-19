@@ -352,9 +352,16 @@ async function reconcileCampaignWorktableLinks() {
   return { linked: rows.length, items: rows };
 }
 
-async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-order-recovery' } = {}) {
+/**
+ * @param {number}  [o.limit=100]
+ * @param {number|null} [o.sinceHours=null]  최근 N시간 내 제출분만(주기 잡용 폭발반경 제한).
+ *   ★ null = 전체(사람이 부르는 수동 복구). 주기 잡은 반드시 창을 준다 — 옛 고아 주문까지
+ *     자동으로 줄을 이어붙이면 8/18 중복 사고와 같은 대량 append 가 무인으로 일어난다.
+ */
+async function recoverUnwrittenSheetlessOrders({ limit = 100, sinceHours = null, by = 'sheetless-order-recovery' } = {}) {
   const db = getPool();
   const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
+  const win = (sinceHours == null) ? null : Math.min(Math.max(parseInt(sinceHours, 10) || 0, 1), 24 * 30);
   const links = await reconcileCampaignWorktableLinks();
   const { rows } = await db.query(
     `SELECT os.id, os.orderer, os.recipient, os.user_id, os.phone, os.address,
@@ -376,10 +383,11 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-or
           SELECT 1 FROM campaign_participants cp
            WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL
         )
+        AND ($2::int IS NULL OR os.submitted_at > NOW() - ($2 || ' hours')::interval)
       ORDER BY os.submitted_at ASC
-      LIMIT $1`, [lim]);
+      LIMIT $1`, [lim, win]);
 
-  const result = { linked: links.linked, scanned: rows.length, written: 0, failed: 0, noOpenSlot: 0, items: [] };
+  const result = { linked: links.linked, scanned: rows.length, sinceHours: win, written: 0, failed: 0, noOpenSlot: 0, items: [] };
   for (const row of rows) {
     let out;
     try {
@@ -412,8 +420,79 @@ async function recoverUnwrittenSheetlessOrders({ limit = 100, by = 'sheetless-or
   return result;
 }
 
+/**
+ * 작업보드 줄은 **이미 있는데** 원장만 미완결(`failed` 등)로 굳은 주문의 완결 표시를 정정한다.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * ★★ 왜 필요한가 — `writeOrderToWorktable` 이 줄을 **커밋한 뒤** 장부 재생성(`ledger_failed`)이나
+ *   예외로 빠지면 호출부가 그 주문을 `failed` 로 강등한다. 화면(작업보드·리뷰어 리뷰 내역)에는
+ *   이미 보이는데 원장만 미완결이라 ① `order_unmirrored` 비정상로그가 계속 쌓이고
+ *   ② 미반영 집계가 부풀어 **다음 진짜 사고를 가린다**. `campaign:*` 좌표는 큐 리컨실에서
+ *   제외돼(orderLedger `NOT LIKE 'campaign:%'`) 스스로 풀릴 길이 없다.
+ *
+ * ★★ 판정 근거는 딱 하나 — **`campaign_participants.order_submission_id` 링크**.
+ *   그 링크는 `writeOrderToWorktable` 이 **기록 성공 후에만** 남긴다(낙관적 선기입 금지 규율).
+ *   즉 링크가 있다 = 그 주문이 실제로 그 줄에 반영됐다. 복구 잡이 "이미 반영됨"을 판정하는
+ *   근거와 **같은 것**을 쓴다(사본 0).
+ * ★ 소프트삭제된 줄(`deleted_at`)은 근거가 아니다 — [줄 정리]로 내린 줄이면 그 주문은
+ *   반영된 게 아니다(그대로 미완결로 남겨 복구 잡이 다시 줄을 만들게 둔다).
+ * ★★ 상태 화이트리스트(완화 금지) — `failed`·`pending`·`pending_no_row` 만.
+ *   `canceled`(취소된 주문을 되살리면 안 됨) · `queued`(인플라이트) · `stuck_manual`(사람이
+ *   수동 입력해야 하는 표시) · `conflict` 는 건드리지 않는다.
+ * ★ 완결 표시는 `markOrderWritten` **단일 출처**로 한다(UPDATE 사본을 두면 `sheet_error`·
+ *   `sheet_written_at` 처리가 갈린다).
+ * ★ dryRun 기본 — 세어 보고 나서 사람이 실행한다.
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * @returns {Promise<{scanned:number, repaired:number, dryRun:boolean, byStatus:object, items:Array}>}
+ */
+const REPAIRABLE_MIRROR_STATUSES = ['failed', 'pending', 'pending_no_row'];
+
+async function repairWrittenMarkForBoardRows({ limit = 500, dryRun = true, by = 'mirror-repair' } = {}) {
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 2000);
+  const { rows } = await db.query(
+    `SELECT os.id, os.mirror_status, os.tab_name,
+            (SELECT MIN(cp.seq) FROM campaign_participants cp
+              WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL) AS seq
+       FROM order_submissions os
+      WHERE os.deleted_at IS NULL
+        AND os.sheet_id LIKE 'campaign:%'
+        AND os.mirror_status = ANY($1::text[])
+        AND EXISTS (SELECT 1 FROM campaign_participants cp
+                     WHERE cp.order_submission_id = os.id AND cp.deleted_at IS NULL)
+      ORDER BY os.submitted_at ASC
+      LIMIT $2`, [REPAIRABLE_MIRROR_STATUSES, lim]);
+
+  const byStatus = {};
+  rows.forEach(r => { byStatus[r.mirror_status] = (byStatus[r.mirror_status] || 0) + 1; });
+  const result = { scanned: rows.length, repaired: 0, dryRun: !!dryRun, byStatus, items: [] };
+  if (dryRun) {
+    result.items = rows.slice(0, 50).map(r => ({ orderSubmissionId: r.id, from: r.mirror_status, seq: r.seq }));
+    return result;
+  }
+
+  const { markOrderWritten } = require('./orderLedger.service');
+  for (const r of rows) {
+    try {
+      await markOrderWritten(r.id, r.seq);
+      result.repaired++;
+      result.items.push({ orderSubmissionId: r.id, from: r.mirror_status, seq: r.seq, ok: true });
+    } catch (err) {
+      logger.warn(`[sheetlessOrder] 완결 표시 정정 실패 os=${r.id}: ${err.message}`);
+      result.items.push({ orderSubmissionId: r.id, from: r.mirror_status, ok: false, error: err.message });
+    }
+  }
+  /* 원인이 사라진 리뷰어 비정상로그(`order_unmirrored`)는 그 함수가 스스로 정리한다 — 사본 0. */
+  try { await require('./reviewerEventLog.service').autoResolveHealed(); } catch (_) { /* fail-soft */ }
+  logger.info(`[sheetlessOrder] 완결 표시 정정 by=${by} scanned=${result.scanned} repaired=${result.repaired}`);
+  return result;
+}
+
 module.exports = {
   writeOrderToWorktable,
+  repairWrittenMarkForBoardRows,
+  REPAIRABLE_MIRROR_STATUSES,
   reconcileCampaignWorktableLinks,
   recoverUnwrittenSheetlessOrders,
   buildRowPatch,

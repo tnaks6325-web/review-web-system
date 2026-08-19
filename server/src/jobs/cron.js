@@ -248,6 +248,55 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 무시트 주문 작업보드 인계(자동 복구): 기본 ON · 최근 창만 ─────────────────────
+  //   ★★ 왜 필요한가 — 참여형(무시트) 주문의 원장 좌표는 `campaign:<공고ID>` 라 큐 리컨실이
+  //     **스캔에서 제외**한다(orderLedger `NOT LIKE 'campaign:%'` — 큐는 구글시트에 쓰므로
+  //     이 좌표로는 영원히 복구되지 않는다). 그래서 제출 경로에서 작업보드 기록이 한 번 실패하면
+  //     (배포 스큐·공고 작업표 미연결·일시 장애) **자동 복구 경로가 0** 이었다 — 사람이
+  //     `POST /api/diag/sheetless-worktable-recover` 를 부를 때까지 결제한 리뷰어가 어느 표에도
+  //     없고 리뷰어 "리뷰 내역"에도 안 뜬다(2026-08-19 실사고 85건).
+  //   ★★ 폭발반경 제한 3중(8/18 대량 append 사고의 교훈 — 그때 부팅 잡은 창도 상한도 없었다):
+  //     ① 최근 `SHEETLESS_RECOVER_WINDOW_HOURS`(기본 48) 시간 제출분만 — 옛 고아 주문까지
+  //        무인으로 줄을 이어붙이지 않는다(그건 사람이 수동 복구로 판단한다)
+  //     ② 사이클당 `SHEETLESS_RECOVER_CRON_LIMIT`(기본 50) 건
+  //     ③ `withJobLock('sheetless_worktable_recover')` — 수동 실행·다른 인스턴스와 상호배제
+  //   ★ 중복 줄 방어는 `writeOrderToWorktable` 안에 구조적으로 있다(같은 주문번호+연락처가 이미
+  //     반영돼 있으면 새 슬롯을 먹지 않고 `duplicate_row` 로 그 줄을 가리킨다).
+  //   ★ 구글시트·GAS 호출 0(DB→DB) — 시트 쿼터 무영향.
+  //   되돌리기 = Railway `SHEETLESS_RECOVER_CRON=0`.
+  if (process.env.SHEETLESS_RECOVER_CRON !== '0') {
+    const slrSchedule = process.env.SHEETLESS_RECOVER_CRON_SCHEDULE || '*/10 * * * *';
+    let slrRunning = false;
+    cron.schedule(slrSchedule, async () => {
+      if (slrRunning) return;
+      slrRunning = true;
+      try {
+        const { recoverUnwrittenSheetlessOrders } = require('../services/sheetlessOrder.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const limit = parseInt(process.env.SHEETLESS_RECOVER_CRON_LIMIT || '50', 10);
+        const sinceHours = parseInt(process.env.SHEETLESS_RECOVER_WINDOW_HOURS || '48', 10);
+        const r = await withJobLock('sheetless_worktable_recover', () =>
+          recoverUnwrittenSheetlessOrders({ limit, sinceHours, by: 'cron' }));
+        if (r && r.skipped) {
+          logger.debug('[CRON-SheetlessRecover] lock busy — 다른 실행 진행 중, 양보');
+        } else if (r && (r.written > 0 || r.failed > 0)) {
+          // ★ 조용히 넘기지 않는다 — 여기 숫자가 곧 "제출 경로가 새고 있다"는 신호다.
+          logger.warn(`[CRON-SheetlessRecover] scanned=${r.scanned} written=${r.written} failed=${r.failed} noOpenSlot=${r.noOpenSlot} linked=${r.linked}`);
+          if (r.failed > 0) {
+            logAbnormal({
+              flow: 'cron', step: 'sheetless_worktable_recover', severity: 'warn',
+              error: new Error(`작업보드 인계 실패 ${r.failed}건(복구 시도 후에도 미반영)`),
+              context: { job: 'sheetless_worktable_recover', scanned: r.scanned, written: r.written, failed: r.failed },
+            });
+          }
+        }
+      } catch (err) {
+        logger.error(`[CRON-SheetlessRecover] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'sheetless_worktable_recover', error: err, context: { job: 'sheetless_worktable_recover' } });
+      } finally { slrRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
   //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
   //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
