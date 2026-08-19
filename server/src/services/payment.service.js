@@ -29,6 +29,8 @@ const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
 const { isVirtualSheetId } = require('./sheetlessAccept.service');
+// 이름 정규화는 신원 판정(identity.service)과 **같은 함수**를 쓴다(사본 금지 — 판정이 갈리면 안 된다)
+const { normName } = require('./identity.service');
 
 const BANK_LABEL = { kbank: '케이뱅크', hana: '하나은행', manual: '수동 이력' };
 
@@ -176,12 +178,17 @@ async function listPaymentTargets(opts = {}) {
     _loadTabMeta(sheetIds, tabNames),
   ]);
 
+  // ★ 연락처(뒤 8자리)로 계좌를 못 찾은 행만 **소유자 링크**로 한 번 더 찾는다.
+  //   (타계정을 이름만 등록했거나 번호가 다르게 적힌 경우 — 실사고 2026-08-19)
+  const unresolved = rows.filter(r => !acctMap[r.phone8]);
+  const ownerAcctMap = unresolved.length ? await _loadOwnerAccountsByRow(unresolved) : {};
+
   const items = rows.map(r => {
     const key = r.sheetId + '||' + r.tabName;
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    const acct = acctMap[r.phone8] || null;
+    const acct = acctMap[r.phone8] || ownerAcctMap[key + '||' + r.rowIndex] || null;
 
     // 상품비 = 그 행의 실제 제출 결제금액(주문 원장).
     // ★ 주문 원장에 없는 행(옛 작업·직원 수기 입력)은 **시트 결제금액 칸**으로 폴백한다 —
@@ -263,9 +270,14 @@ async function listPaymentTargets(opts = {}) {
       accountOwner: acct ? (acct.ownerName || '') : '',
       // 계좌를 고칠 대상 지목 — ★ phone8 은 GENERATED·비유니크라 키로 쓰지 않는다(같은 뒤8자리 타인 행 오염).
       //   본계정은 reviewers.id, 타계정은 소유자 id + 그 명의 phone8.
+      // ★ 폴백(소유자 링크)로 찾은 건은 그 명의가 `sub_accounts` 에 **실제로 등록돼 있을 때만**
+      //   타계정으로 지목한다 — 없는 명의를 지목하면 보완 저장이 `sub_not_found` 로 죽는다.
       accountRef: acct && acct.reviewerId
-        ? { reviewerId: acct.reviewerId, subPhone8: acct.isSub ? r.phone8 : null }
+        ? { reviewerId: acct.reviewerId,
+            subPhone8: acct.isSub ? (acct.subPhone8 === undefined ? r.phone8 : acct.subPhone8) : null }
         : null,
+      // 계좌를 어떻게 찾았는지 — self/sub(연락처 매칭) · owner_order/owner_link(소유자 링크 폴백)
+      accountSource: acct ? (acct.source || (acct.isSub ? 'sub' : 'self')) : null,
       productPrice, reviewFee: fee, amount, priceSource,
       transferMemo: memo, memoSource,
       issues, warnings,
@@ -409,6 +421,126 @@ async function _loadAccounts(phone8s) {
                       isSub: false, name: r.name || '', ownerName: r.name || '' };
   }
   return map;
+}
+
+/**
+ * 계좌를 phone8 으로 못 찾은 행 → **소유자(로그인 리뷰어) 링크**로 역조회.
+ *
+ * ★★ 왜 필요한가(실사고 2026-08-19 "김수만/명지수"): 타계정 매칭 키는 `sub_accounts[].phone`
+ *    하나뿐이라, 소유자가 타계정을 **이름만** 등록했거나 번호를 다르게 적어 두면 그 참여 건이
+ *    `리뷰어 정보 없음` 으로 **영구 보류**된다. 계좌(김수만)는 멀쩡히 있는데 지목할 길이 없었다.
+ *
+ * ★★ **이름으로 소유자를 추측하지 않는다(완화 금지)** — 동명이인 한 번이면 남의 계좌로 송금이다.
+ *    근거는 그 행에 이미 박제된 **하드 링크 두 개**뿐:
+ *      ① 참여 원장 `campaign_applications.owner_phone8`(주문 id 로 그 행에 결속 — 홀드 생성 시
+ *         서버가 명의 검증을 거쳐 기록한 값이라 "이 명의는 이 소유자의 것"이 확정돼 있다)
+ *      ② 제출 신원 링크 `participation_links.phone8`(= 로그인 phone8). ★ 이쪽은 명의 대조가
+ *         없으므로 **소유자의 타계정 목록에 그 행 이름이 정확히 등록돼 있을 때만** 인정한다
+ *         (재배정된 행의 stale 링크가 엉뚱한 사람 계좌를 열지 못하게 — 검색 게이트와 같은 규율).
+ * ★ ① 이 ② 를 이긴다(원장이 더 강한 근거).
+ * ★ `reviewers.phone8` 은 GENERATED·비유니크 → **후보가 유일할 때만** 채택(모호 = 미채택).
+ * ★ 조회 실패는 throw 하지 않는다 — 폴백이 죽어도 입금대상 목록은 종전대로 나온다.
+ */
+async function _loadOwnerAccountsByRow(rows) {
+  const out = {};
+  if (!rows.length) return out;
+  const key = r => r.sheetId + '||' + r.tabName + '||' + r.rowIndex;
+  const sheetIds = rows.map(r => r.sheetId);
+  const tabNames = rows.map(r => r.tabName);
+  const rowIdx = rows.map(r => r.rowIndex);
+  const nameByRow = new Map(rows.map(r => [key(r), String(r.reviewerName || '')]));
+
+  try {
+    // ① 참여 원장 — 주문 id 로 그 행에 결속된 타계정 홀드의 소유자
+    const { rows: viaOrder } = await pool.query(
+      `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", t.row_index AS "rowIndex",
+              ca.owner_phone8 AS "ownerPhone8", ca.phone8 AS "subPhone8"
+         FROM unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+         JOIN order_submissions os
+           ON os.sheet_id = t.sheet_id AND os.tab_name = t.tab_name
+          AND os.sheet_row = t.row_index AND os.deleted_at IS NULL
+         JOIN campaign_applications ca ON ca.order_submission_id = os.id
+        WHERE COALESCE(ca.owner_phone8, '') <> ''`,
+      [sheetIds, tabNames, rowIdx]);
+
+    // ② 제출 신원 링크 — 그 행을 제출한 로그인 리뷰어(= 소유자)
+    const { rows: viaLink } = await pool.query(
+      `SELECT pl.sheet_id AS "sheetId", pl.tab_name AS "tabName", pl.row_index AS "rowIndex",
+              pl.phone8 AS "ownerPhone8"
+         FROM participation_links pl
+         JOIN unnest($1::text[], $2::text[], $3::int[]) AS t(sheet_id, tab_name, row_index)
+           ON pl.sheet_id = t.sheet_id AND pl.tab_name = t.tab_name AND pl.row_index = t.row_index
+        WHERE COALESCE(pl.phone8, '') <> ''`,
+      [sheetIds, tabNames, rowIdx]);
+
+    const owners = [...new Set([...viaOrder, ...viaLink].map(x => x.ownerPhone8).filter(Boolean))];
+    if (!owners.length) return out;
+
+    const { rows: revs } = await pool.query(
+      `SELECT id AS "reviewerId", phone8, COALESCE(name,'') AS "name",
+              bank_name AS "bankName", bank_account AS "bankAccount", account_holder AS "accountHolder",
+              CASE WHEN jsonb_typeof(sub_accounts) = 'array' THEN sub_accounts ELSE '[]'::jsonb END AS "subAccounts"
+         FROM reviewers WHERE phone8 = ANY($1)`, [owners]);
+    const byOwner = new Map();
+    for (const r of revs) {
+      if (!byOwner.has(r.phone8)) byOwner.set(r.phone8, []);
+      byOwner.get(r.phone8).push(r);
+    }
+    // ★ 소유자 후보가 둘 이상인 번호는 통째로 버린다(누구 계좌인지 정할 수 없다).
+    const uniqueOwner = p8 => {
+      const list = byOwner.get(p8) || [];
+      return list.length === 1 ? list[0] : null;
+    };
+    const pack = (owner, sub, source) => ({
+      reviewerId: owner.reviewerId,
+      bankName:      (sub && String(sub.bankName || '').trim())      || owner.bankName || '',
+      bankAccount:   (sub && String(sub.bankAccount || '').trim())   || owner.bankAccount || '',
+      accountHolder: (sub && String(sub.accountHolder || '').trim()) || owner.accountHolder || '',
+      isSub: true, source,
+      name: (sub && String(sub.name || '').trim()) || '',
+      ownerName: owner.name || '',
+      // ★ 지목 대상 = 그 명의 항목이 실제로 등록돼 있을 때만 타계정, 아니면 소유자 본계좌.
+      //   (등록돼 있지 않은 명의를 subPhone8 로 지목하면 보완 저장이 `sub_not_found` 로 죽는다)
+      subPhone8: (sub && sub.__phone8) || null,
+    });
+    const findSub = (owner, { subPhone8, name }) => {
+      const arr = Array.isArray(owner.subAccounts) ? owner.subAccounts : [];
+      const p8 = String(subPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
+      for (const s of arr) {
+        if (!s) continue;
+        const sp8 = String(s.phone || '').replace(/[^0-9]/g, '').slice(-8);
+        if (p8 && sp8 === p8) return { ...s, __phone8: sp8 };
+      }
+      const n = normName(name);
+      if (!n) return null;
+      const hits = arr.filter(s => s && normName(s.name) === n);
+      // ★ 같은 이름이 두 개면 어느 명의인지 정할 수 없다 → 미채택
+      if (hits.length !== 1) return null;
+      const sp8 = String(hits[0].phone || '').replace(/[^0-9]/g, '').slice(-8);
+      return { ...hits[0], __phone8: sp8 || null };
+    };
+
+    // ② 먼저 깔고 ① 로 덮는다(원장이 이긴다)
+    for (const x of viaLink) {
+      const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
+      if (out[k]) continue;
+      const owner = uniqueOwner(x.ownerPhone8);
+      if (!owner) continue;
+      // ★ 명의 대조 필수 — 소유자의 타계정 목록에 그 행 이름이 있어야 한다
+      const sub = findSub(owner, { name: nameByRow.get(k) });
+      if (!sub) continue;
+      out[k] = pack(owner, sub, 'owner_link');
+    }
+    for (const x of viaOrder) {
+      const k = x.sheetId + '||' + x.tabName + '||' + x.rowIndex;
+      const owner = uniqueOwner(x.ownerPhone8);
+      if (!owner) continue;
+      out[k] = pack(owner, findSub(owner, { subPhone8: x.subPhone8, name: nameByRow.get(k) }), 'owner_order');
+    }
+  } catch (e) {
+    logger.warn('[payment] 소유자 링크 계좌 폴백 실패(종전대로 보류): ' + e.message);
+  }
+  return out;
 }
 
 /**
