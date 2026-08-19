@@ -47,7 +47,8 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **fail-closed 3종**: 이미 다른 인트라넷 광고주에 연결된 업체는 거부(남의 원본 탈취 금지 — 팝업에서도 **비활성 + 사유**) · 그 사이 업체명이 바뀌면 거부(판단 근거가 달라졌다) · 백필 UPDATE 0행이면 실패(경합을 성공으로 읽지 않는다). 충돌은 **ROLLBACK** 이라 advertisers 에 INSERT/UPDATE 가 한 줄도 남지 않는다.
 - ★ **원본 ID 매칭이 최우선** — 확인값이 실려 와도 그 인트라넷 광고주가 이미 다른 업체에 연결돼 있으면 그 업체가 이긴다. **인트라넷 원본 ID 가 없는 오더는 무동작**(기존 동작 불변).
 - ★ **연결 로직은 서비스 한 곳** `advertiserProjection.service.js`(`projectIntranetAdvertiser`) — order.routes 의 인라인 사본을 이관(테스트 seam 확보 + 사본 금지). ★ 이름이 정말 다른 회사면 연결하지 말고 **업무포털 거래처 관리에서 기존 업체명을 구분되게 바꾼 뒤 재접수**(`advertisers.name` 이 UNIQUE 라 같은 이름으로는 새로 만들 수 없다 — 팝업이 이 사실을 문장으로 안내).
-- 회귀가드 `tests/advertiserNameLinkConfirm.test.js`(22케이스 — 스텁 pool 로 서비스 **실제 실행**(충돌 시 쓰기 0·blank-only·fail-closed 3종·원본 우선) + 라우트/화면 배선) + 실 http 오리진 브라우저 실측(body 직속·후보 렌더·비활성 후보·확인 후 id 반환). ⚠ 이 변경으로 `orderAcceptTabPicker` 의 재접수 배선 패턴(인자 추가)과 `reviewOrderAdvertiserProjection` 의 대상 파일을 함께 갱신했다(검사 의미 불변).
+- ★ **후보의 사업자번호는 "없음"이 아니라 "미등록"이라고 말한다**(`_woAdvBizLine` — 사용자 지적 2026-08-19): 리뷰웹 업체는 업체관리에서 만들면 그 칸이 **애초에 비어 있는데**(103 이전 개념·업체 추가 폼에 입력칸 없음) `사업자번호 없음` 으로 적으면 **대조 실패(= 다른 회사)** 로 읽혀 판단을 방해한다 → `사업자번호 미등록 · 연결하면 원본에서 채워집니다`. 값이 있는데 원본과 **다르면** 빨강 ⚠(경고만 — 막지 않는다), 같으면 초록 `원본과 일치`. **비교는 숫자만**(`365-87-02833` ↔ `3658702833` 를 다름으로 오판 금지).
+- 회귀가드 `tests/advertiserNameLinkConfirm.test.js`(26케이스 — 스텁 pool 로 서비스 **실제 실행**(충돌 시 쓰기 0·blank-only·fail-closed 3종·원본 우선) + 라우트/화면 배선) + 실 http 오리진 브라우저 실측(body 직속·후보 렌더·비활성 후보·확인 후 id 반환). ⚠ 이 변경으로 `orderAcceptTabPicker` 의 재접수 배선 패턴(인자 추가)과 `reviewOrderAdvertiserProjection` 의 대상 파일을 함께 갱신했다(검사 의미 불변).
 
 ### 작업오더 관리자 수동 수정 (인트라넷 보낸오더카드 동기화)
 - **시안** `frontend/docs/작업오더_관리자수정_와이어프레임.html`(2026-08-05 확정). `PUT /api/order/admin/edit`(adminOrMaster) + `PUT /api/trackb/work-orders/edit`(`_delegate` 위임, internal+**editorOnly** — 접수·상태변경과 같은 2단 권한). 화이트리스트 `ADMIN_EDIT_FIELDS` 부분수정(PATCH), **빈 값 = "지움"이 아니라 "변경 없음"**(칸 비우기 사고 방지), 같은 값 = no-op(메모 도배 방지).

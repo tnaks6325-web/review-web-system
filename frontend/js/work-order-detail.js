@@ -1088,6 +1088,29 @@ function woAcceptTabPicker(resp, onPick) {
      정산 계약·광고주 접속 링크가 남에게 열린다. 고르는 것은 항상 사람이다.
    ★ 이미 다른 인트라넷 광고주에 연결된 후보는 **비활성 + 사유**(눌러도 서버가 거부한다).
    ★ 업체명·담당자는 외부 문자열 — onclick 문자열 보간 금지, DOM 생성 + addEventListener. */
+/* 후보 업체의 사업자번호 줄 — "없음"과 "다름"은 전혀 다른 신호다.
+   ★ 리뷰웹 업체는 업체관리에서 만들면 사업자번호 칸이 애초에 비어 있다(103 이전 개념).
+     그걸 "사업자번호 없음"이라고만 적으면 **대조 실패(=다른 회사)** 로 읽혀, 사업자번호로
+     확인하려던 판단을 오히려 방해한다(2026-08-19 사용자 지적) → 미등록임을 말하고
+     연결하면 원본에서 채워진다는 사실까지 적는다.
+   ★ 값이 있는데 원본과 **다르면** 그때는 눈에 띄게 경고한다(다른 회사일 수 있다).
+     단 막지는 않는다 — 판단은 사람이 한다.
+   ★ 비교는 숫자만(표기 차이 `365-87-02833` ↔ `36587202833` 를 다름으로 오판하지 않게).
+   @returns {{text:string, tone:'plain'|'ok'|'warn'|'muted'}} */
+function _woAdvBizLine(candidateBiz, sourceBiz) {
+  var digits = function (v) { return String(v == null ? "" : v).replace(/[^0-9]/g, ""); };
+  var c = String(candidateBiz == null ? "" : candidateBiz).trim();
+  var srcRaw = String(sourceBiz == null ? "" : sourceBiz).trim();
+  if (!c) {
+    return srcRaw
+      ? { text: "사업자번호 미등록 · 연결하면 원본에서 채워집니다", tone: "muted" }
+      : { text: "사업자번호 미등록", tone: "muted" };
+  }
+  if (!srcRaw || !digits(srcRaw)) return { text: "사업자 " + c, tone: "plain" };
+  if (digits(c) === digits(srcRaw)) return { text: "사업자 " + c + " · 원본과 일치", tone: "ok" };
+  return { text: "⚠ 사업자 " + c + " · 원본(" + srcRaw + ")과 다릅니다", tone: "warn" };
+}
+
 function woAdvertiserLinkPicker(resp, onLink) {
   var c = (resp && resp.advertiserNameConflict) || {};
   var cands = c.candidates || [];
@@ -1130,15 +1153,21 @@ function woAdvertiserLinkPicker(resp, onLink) {
     var t = document.createElement("div");
     t.textContent = (a.name || "(이름 없음)") + (a.status === "ended" ? "  (종료된 거래처)" : "");
     t.style.cssText = "font-size:13.5px;font-weight:700;color:#111827;margin-bottom:3px";
+    // 사업자번호는 판단의 핵심 근거라 따로 한 줄(색으로 상태 구분).
+    var biz = _woAdvBizLine(a.businessNumber, c.businessNumber);
+    var bizEl = document.createElement("div");
+    bizEl.textContent = biz.text;
+    bizEl.style.cssText = "font-size:12px;line-height:1.5;margin-bottom:2px;color:"
+      + (biz.tone === "ok" ? "#047857" : biz.tone === "warn" ? "#B91C1C" : "#6B7280")
+      + (biz.tone === "warn" || biz.tone === "ok" ? ";font-weight:700" : "");
     var meta = document.createElement("div");
     var bits = [];
-    bits.push(a.businessNumber ? "사업자 " + a.businessNumber : "사업자번호 없음");
     if (a.contact) bits.push(a.contact);
     if (a.inadPm) bits.push("담당 " + a.inadPm);
     bits.push(a.ownedTabs == null ? "소유 작업 ?" : "소유 작업 " + a.ownedTabs + "건");
     meta.textContent = bits.join("  ·  ");
     meta.style.cssText = "font-size:12px;color:#6B7280;margin-bottom:8px;line-height:1.5";
-    row.appendChild(t); row.appendChild(meta);
+    row.appendChild(t); row.appendChild(bizEl); row.appendChild(meta);
 
     var b = document.createElement("button");
     b.type = "button";
@@ -1212,7 +1241,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
     _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
     _woOptionRows: _woOptionRows, _woProductMode: _woProductMode, _woCampaignPrefill: _woCampaignPrefill,
     woAcceptTabPicker: woAcceptTabPicker,
-    woAdvertiserLinkPicker: woAdvertiserLinkPicker,
+    woAdvertiserLinkPicker: woAdvertiserLinkPicker, _woAdvBizLine: _woAdvBizLine,
     woAdminEditModal: woAdminEditModal,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];
