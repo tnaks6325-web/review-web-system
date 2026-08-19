@@ -90,6 +90,8 @@ async function _getReviewerPhoneList(phone8) {
 const _ORDER_MERGE_LIMIT = 40;
 const _ORDER_MERGE_DAYS = 14;
 const _ORDER_ATTENTION_STATUSES = new Set(['failed', 'stuck_manual']);
+// 확인필요 상태를 리뷰어 화면에 노출할지(기본 미노출). 킬스위치: REVIEW_ORDER_ATTENTION_VISIBLE=1
+const _ORDER_ATTENTION_VISIBLE = process.env.REVIEW_ORDER_ATTENTION_VISIBLE === '1';
 
 async function _mergeOrderSubmissions(results, phoneList) {
   if (!Array.isArray(results) || !Array.isArray(phoneList) || phoneList.length === 0) return results;
@@ -148,6 +150,11 @@ async function _mergeOrderSubmissions(results, phoneList) {
       // written=시트반영완료(반영완료), failed/stuck_manual=확인필요, 그 외(pending/queued/pending_no_row)=반영중
       const orderStage = _ORDER_ATTENTION_STATUSES.has(o.mirrorStatus) ? 'attention'
         : (o.mirrorStatus === 'written' ? 'reflected' : 'processing');
+      // ★★ 확인필요(attention = failed/stuck_manual)는 리뷰어에게 노출하지 않는다(사용자 확정 2026-08-19).
+      //   시트 기록에 실패해 담당자가 손봐야 하는 내부 상태라, 리뷰어가 보면 "내 참여가 잘못됐나"로 읽혀
+      //   C/S 문의만 늘고 리뷰어가 할 수 있는 조치는 없다. 주문 원장·복구(reconcile)·관리자 알림은 그대로다.
+      //   되돌리기 = env REVIEW_ORDER_ATTENTION_VISIBLE=1.
+      if (orderStage === 'attention' && !_ORDER_ATTENTION_VISIBLE) continue;
       // 색인행 item shape와 정합(displayName=사람이름 자리=recipient, displayNameTC=탭표시명).
       // PII 최소: row:{}, submitCol:null, order_num 미노출. rowIndex:null → goToSubmit 대상 아님.
       results.push({

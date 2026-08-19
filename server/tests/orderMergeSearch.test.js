@@ -5,7 +5,7 @@
  *   2) includeSubmitted 없으면 병합 안 하고
  *   3) 색인행 뒤에 append 되어 기존 results[0..n-1] 순서를 깨지 않고
  *   4) 이미 색인 반영된 행(seen: sheetId||tabName||sheet_row)은 dedup 되고
- *   5) failed/stuck_manual 은 orderStage='attention'(확인필요), 그 외는 'processing'(반영중)이며
+ *   5) failed/stuck_manual(확인필요)은 리뷰어에게 미노출(env REVIEW_ORDER_ATTENTION_VISIBLE=1로만 복귀), 그 외는 'processing'(반영중)이며
  *   6) 병합 아이템이 PII 최소(row:{}, isSubmitted:false, isOrderPending:true) 형태인지 고정.
  * 실행: node tests/orderMergeSearch.test.js
  */
@@ -85,13 +85,22 @@ async function run() {
   assert.ok(!r2.results.some(x => x.isOrderPending), '2: seen 히트 주문은 dedup(미노출)');
   console.log('  2. dedup(seen 히트) ✓');
 
-  // ── 3) failed/stuck_manual → orderStage='attention'(확인필요) ──
+  // ── 3) failed/stuck_manual(확인필요)은 리뷰어에게 아예 노출하지 않는다 (사용자 확정 2026-08-19) ──
+  //   ★ 완화 금지: 리뷰어가 할 수 있는 조치가 없는 내부 상태라 카드가 뜨면 C/S 문의만 늘어난다.
+  //   되돌리기는 코드가 아니라 env REVIEW_ORDER_ATTENTION_VISIBLE=1.
   captured.queries = []; reviewRows = []; seenRows = [];
   orderRows = [orderRow({ mirrorStatus: 'failed' }), orderRow({ id: 'os2', sheetRow: 100, mirrorStatus: 'stuck_manual' })];
   const r3 = await searchByName('홍길동', '12345678', { includeSubmitted: true });
-  assert.ok(r3.results.every(x => !x.isOrderPending || x.orderStage === 'attention'), '3: failed/stuck_manual=attention');
-  assert.equal(r3.results.filter(x => x.isOrderPending).length, 2, '3: 두 주문 모두 병합');
-  console.log('  3. failed/stuck_manual → 확인필요(attention) ✓');
+  assert.equal(r3.results.filter(x => x.isOrderPending).length, 0, '3: 확인필요(failed/stuck_manual) 주문은 미노출');
+  assert.ok(!r3.results.some(x => x.orderStage === 'attention'), "3: orderStage='attention' 항목 0건");
+  // 3b) 정상 주문(반영중)은 그대로 노출 — 확인필요만 걸러내는지(과잉 필터 아님) 확인
+  captured.queries = []; reviewRows = []; seenRows = [];
+  orderRows = [orderRow({ mirrorStatus: 'failed' }), orderRow({ id: 'os3', sheetRow: 101, mirrorStatus: 'queued' })];
+  const r3b = await searchByName('홍길동', '12345678', { includeSubmitted: true });
+  const m3b = r3b.results.filter(x => x.isOrderPending);
+  assert.equal(m3b.length, 1, '3b: 확인필요만 제외하고 반영중 주문은 유지');
+  assert.equal(m3b[0].orderStage, 'processing', '3b: 남은 건은 processing');
+  console.log('  3. 확인필요(attention) 미노출 + 반영중은 유지 ✓');
 
   // ── 4) 이름 단독 분기: includeSubmitted 있어도 절대 병합 안 함(보안) ──
   captured.queries = []; reviewRows = [reviewRow()]; seenRows = []; orderRows = [orderRow()];
