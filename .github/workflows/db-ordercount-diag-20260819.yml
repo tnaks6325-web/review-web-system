@@ -33,33 +33,30 @@ jobs:
            GROUP BY 1,2 ORDER BY 1,4;
           SQL
 
-      - name: ② 표 번호로 원장을 전역 검색(탭 좌표 무관 — 참여형 주문은 campaign:* 좌표일 수 있다)
+      - name: ② 표 번호로 원장 전역 검색(좌표 무관)
         run: |
           psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
           SELECT regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
-                 os.recipient AS 수취인, os.sheet_id, os.tab_name,
-                 os.linked_tab_name AS 연결탭, os.mirror_status AS 상태,
+                 os.recipient AS 수취인, os.tab_name AS 원장좌표, os.mirror_status AS 상태,
                  to_char(os.submitted_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 제출,
                  CASE WHEN os.deleted_at IS NULL THEN '살아있음' ELSE '취소됨' END AS 생존
             FROM order_submissions os
            WHERE regexp_replace(COALESCE(os.order_num,''),'\D','','g')
                  IN ('5102385176784','31102386192599','25102387743327','32102390310440')
-           ORDER BY 1, 7;
+           ORDER BY 1, 5;
           SQL
 
-      - name: ③ 그 네 사람의 모든 주문(연결탭 기준)
+      - name: ③ 그 네 명의(연락처) 모든 주문 — 좌표 무관
         run: |
           psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
           SELECT os.recipient AS 수취인,
                  regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
-                 os.tab_name AS 원장탭, os.linked_tab_name AS 연결탭,
+                 os.tab_name AS 원장좌표,
                  to_char(os.submitted_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 제출,
                  os.mirror_status AS 상태,
                  CASE WHEN os.deleted_at IS NULL THEN '살아있음' ELSE '취소됨' END AS 생존
             FROM order_submissions os
            WHERE right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8)
                  IN ('84486997','89508885','91064144','76640008')
-             AND (os.tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건'
-                  OR os.linked_tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건')
-           ORDER BY 1, 5;
+           ORDER BY 1, 4;
           SQL
