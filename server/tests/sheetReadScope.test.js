@@ -163,6 +163,39 @@ let R = null;
       '★ onclick 에 외부 문자열이 들어간다');
   });
 
+  console.log('\n[6] 렌더러 실행 — 가짜 DOM 위에서');
+  t('6a 세 사유가 표에 그려지고 미반영 주문 경고가 붙는다', () => {
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    assert.ok(start >= 0 && end > start, '렌더러 블록을 잘못 잘랐다');
+    const box = { innerHTML: '' };
+    const sandbox = {
+      $: sel => (sel === '#rsBox' ? box : null),
+      esc: v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+      api: async () => ({ ok: true }), Date, console,
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(FE.slice(start, end), sandbox);
+    sandbox._RS = R;
+    vm.runInContext('_rsRender()', sandbox);
+    const h = box.innerHTML;
+    assert.ok(/읽는 시트 3개/.test(h), '요약이 없다: ' + h.slice(0, 120));
+    assert.ok(/시트 기반 작업이 아직 살아 있음/.test(h) && /마감 탭만 남았는데/.test(h) && /campaigns\) 행만 남음/.test(h),
+      '사유 세 갈래가 다 안 나온다');
+    assert.ok(/시트에 아직 못 쓴 주문 4건/.test(h), '★ 미반영 주문 경고가 없다(끄면 주문이 사라지는 상태를 못 말한다)');
+    assert.ok(/0801 살아있는작업/.test(h), '살아 있는 작업 이름이 없다');
+  });
+  t('6b 읽는 시트 0이면 "없습니다"로 끝낸다(빈 표를 그리지 않는다)', () => {
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const box = { innerHTML: '' };
+    const sandbox = { $: () => box, esc: v => String(v == null ? '' : v), api: async () => ({ ok: true }), Date, console };
+    vm.createContext(sandbox);
+    vm.runInContext(FE.slice(start, end), sandbox);
+    sandbox._RS = { ok: true, registered: 5, excludedSheetless: 5, reading: 0, byReason: {}, reasons: {}, items: [] };
+    vm.runInContext('_rsRender()', sandbox);
+    assert.ok(/지금 읽는 시트가 없습니다/.test(box.innerHTML), '0 상태 문구가 없다');
+    assert.ok(!/<table/.test(box.innerHTML), '0인데 빈 표를 그린다');
+  });
+
   console.log(`\n${fail ? '❌' : '✅'} sheetReadScope: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
