@@ -2314,6 +2314,11 @@ function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여
   const m=(STATE.wd&&STATE.wd.meta)||{};
   _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
                  '작업보드 링크 — '+(m.displayName||t.displayName||t.tabName||'')); }
+// 홈 작업목록 [🔗 링크] — 그 줄 작업의 공유 주소. 작업보드를 열지 않고 목록에서 바로 복사한다.
+//   ★ 인덱스만 넘긴다(시트에서 온 작업명을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다).
+function copyTaskLinkFromHome(i){ const t=(STATE.tabs||[])[i]; if(!t){ toast('작업을 찾지 못했습니다'); return; }
+  _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
+                 '작업보드 링크 — '+(t.displayName||t.tabName||'')); }
 // 업체관리 [🔗 이 업체 링크 복사] — 그 업체의 작업 목록으로 직행하는 주소(광고주 접속 링크와 다르다).
 function copyAdvertiserLink(){ const a=STATE.advCur; if(!a){ toast('업체를 먼저 선택하세요'); return; }
   _shareLinkCopy({ kind:'advertiser', advertiserId:a.id }, '업체 링크 — '+(a.name||'')); }
@@ -4637,6 +4642,9 @@ function _finBodyHtml(){
     //   열 정렬은 표 구조가 보장한다. 열람전용·보관함도 열 수는 같다(빈 칸 유지 — 사람마다 열이 달라지면 눈이 헤맨다).
     // ★ 인덱스만 넘긴다(위 _FIN 주석) — 시트에서 온 이름을 onclick 문자열에 넣으면 따옴표 하나로 탈출된다.
     const tdOpen=`<td class="wbl-c wbl-btncol"><button class="wbl-b" onclick="event.stopPropagation();openTaskFromHome(${i})">${fin?'열람':'열기'}</button></td>`;
+    // [🔗] — 그 줄 작업의 공유 주소를 복사한다(작업보드를 열지 않고 목록에서 바로).
+    //   ★ 마감 보관함에도 같은 칸을 둔다 — 열 수가 모드마다 달라지면 눈이 열을 다시 찾는다(v3 규율).
+    const tdLink=`<td class="wbl-c wbl-btncol"><button class="wbl-b" onclick="event.stopPropagation();copyTaskLinkFromHome(${i})" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 작업보드로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크</button></td>`;
     const tdToday=`<td class="wbl-c wbl-btncol">${(fin||!canEdit)?''
       :`<button class="wbl-b today${td?' on':''}" onclick="toggleTodayDone(${i},event)" title="${td?'오늘 완료됨 — 다시 누르면 해제됩니다':'오늘 할 일을 끝냈다면 클릭 — 다음날 자동으로 풀립니다'}">☑ 오늘 완료</button>`}</td>`;
     const tdFinish=`<td class="wbl-c wbl-btncol">${!canEdit?''
@@ -4644,7 +4652,7 @@ function _finBodyHtml(){
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
       <td><div class="wbl-nm">${esc(t.tabName)}${_nsBadge(t)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
-      ${tdOpen}
+      ${tdOpen}${tdLink}
       <td>${esc((s.manager)||'—')}</td>
       <td>${prog}</td>${last}
       <td>${st}</td>
@@ -4653,7 +4661,7 @@ function _finBodyHtml(){
       ${tdToday}${tdFinish}</tr>`;
   }).join(''):'';
   return rows.length?`<div class="wbl-tw"><table class="wbl-t"><thead><tr>
-      <th>작업명</th><th class="wbl-c">작업표</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th>
+      <th>작업명</th><th class="wbl-c">작업표</th><th class="wbl-c">공유</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th class="wbl-c">저장폴더</th><th class="wbl-c">모집공고</th><th class="wbl-c">오늘완료</th><th class="wbl-c">마감</th>
     </tr></thead><tbody>${body}</tbody></table></div>`
     : `<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr||filt)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`;
 }

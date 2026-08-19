@@ -180,6 +180,17 @@ ok('작업보드 상단에 [🔗 링크 복사] — 광고주 제외',
   /const shareBtn=STATE\.role==='advertiser'\?''/.test(workdesk) && /onclick="copyBoardLink\(\)"/.test(workdesk));
 ok('헤더에 실제로 그려진다', /\$\{shareBtn\}/.test(workdesk));
 ok('업체관리 패널에 [🔗 업체 링크 복사]', /onclick="copyAdvertiserLink\(\)"/.test(workdesk));
+ok('홈 작업목록 줄마다 [🔗 링크] — 인덱스만 넘긴다',
+  /onclick="event\.stopPropagation\(\);copyTaskLinkFromHome\(\$\{i\}\)"/.test(workdesk));
+ok('★ 줄 클릭(작업 열기)과 겹치지 않게 stopPropagation',
+  /copyTaskLinkFromHome[\s\S]{0,80}/.test(workdesk) && /event\.stopPropagation\(\);copyTaskLinkFromHome/.test(workdesk));
+ok('홈 목록 헤더에 공유 열(칸 수 ≡ 행 칸 수 — homeTasklistFilters 가 렌더 실행으로 계수)',
+  /<th class="wbl-c">작업표<\/th><th class="wbl-c">공유<\/th>/.test(workdesk));
+ok('★ 마감 보관함에도 같은 칸(모드마다 열 수가 달라지지 않는다) — tdLink 는 fin 분기가 없다',
+  /const tdLink=`<td[^`]*`;/.test(workdesk) && !/const tdLink=`\$\{fin\?/.test(workdesk));
+ok('복사 실행부는 _shareLinkCopy 한 벌(사본 금지)',
+  (workdesk.match(/async function _shareLinkCopy/g) || []).length === 1
+  && /function copyTaskLinkFromHome[\s\S]{0,320}_shareLinkCopy\(\{ kind:'tab'/.test(workdesk));
 ok('★ 링크의 업체를 목록에서 못 찾으면 사유를 말한다',
   /pendingAdv[\s\S]{0,600}업체를 목록에서 찾지 못했습니다/.test(workdesk));
 
