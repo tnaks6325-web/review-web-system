@@ -14,7 +14,9 @@ const { logger } = require('../utils/logger');
 const _grace = parseInt(process.env.CAMPAIGN_HOLD_GRACE_SEC || '30', 10);
 const HOLD_GRACE_SEC = Number.isFinite(_grace) && _grace >= 0 ? _grace : 30;
 
-// 구매시간만료 자동 취소확정(사용자 확정 2026-08-19): **주문이 하나도 없는 만료 건만** 시스템이 정리한다.
+// 만료·취소 줄 자동 취소확정(사용자 확정 2026-08-19): **주문이 하나도 없는 종료 건만** 시스템이 정리한다.
+//   대상 상태 = 구매시간만료(expired) + 취소(cancelled — 리뷰어 자발 취소·주문취소로 반환된 자리).
+//   둘 다 이미 자리를 반환한 종료 상태라 정원·유효홀드에는 영향이 없고, 남는 건 '목록 정리'뿐이다.
 //   기구매(late_order_id) 건은 자동으로 자리를 확정하지 않는다 — 정원이 조용히 소진되고 총원 초과가 날 수 있어
 //   지금처럼 관제 [제출확정]으로 사람이 확인한다(수동확정이 유일 구제 경로라는 기존 계약 유지).
 // 킬스위치 CAMPAIGN_AUTO_DISMISS=0 = 종전 동작(전부 사람이 클릭).
@@ -199,15 +201,17 @@ async function sweepExpiredHolds(pool) {
       revived = rev.rowCount;
       if (revived) logger.info(`[campaignHold] 자동 취소확정 되살림(기구매 도착): ${rev.rows.map(r => r.id).join(',')}`);
 
-      // ④ 자동 취소확정 — 만료 && 주문 흔적 0. status 는 'expired' 그대로 두고 마커만 붙인다.
-      //   ★ status 를 'cancelled' 로 바꾸지 않는 이유 = ② late 백필이 status='expired' 조건이라,
-      //     바꾸면 뒤늦게 도착한 주문의 링크 백필 경로가 끊긴다(되살리기가 무력화).
+      // ④ 자동 취소확정 — (만료 | 취소) && 주문 흔적 0. 상태는 그대로 두고 마커만 붙인다.
+      //   ★ status 는 손대지 않는다(만료는 'expired' 그대로) = ② late 백필이 status='expired' 조건이라,
+      //     'cancelled' 로 바꾸면 뒤늦게 도착한 주문의 링크 백필 경로가 끊긴다.
+      //     취소(cancelled) 줄에는 그 백필이 원래 닿지 않지만, 되살리기가 주문 원장 역참조(EXISTS)도
+      //     보므로 링크 컬럼 없이도 감지된다 — 그래서 백필 조건을 넓히지 않았다(지각 배지 노이즈 방지).
       //   ★ quota/유효홀드는 시각 기준이라 이 마커는 정원·상태 계산에 일절 영향 없다(078 규율).
       const dis = await pool.query(
         `UPDATE campaign_applications SET dismissed_at = NOW(), dismissed_by = 'auto'
           WHERE id IN (
             SELECT a.id FROM campaign_applications a
-             WHERE a.status = 'expired' AND a.dismissed_at IS NULL
+             WHERE a.status IN ('expired', 'cancelled') AND a.dismissed_at IS NULL
                AND a.late_order_id IS NULL AND a.order_submission_id IS NULL
                AND NOT EXISTS (SELECT 1 FROM order_submissions o
                                 WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL)

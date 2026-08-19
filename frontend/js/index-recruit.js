@@ -3435,7 +3435,7 @@ async function _loadCampControl(campId) {
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
     // 126: 자동 정리 고지 — 화면이 무슨 일이 일어났는지 말한다(조용한 자동 처리 금지).
     const autoNote = items.some(r => r.dismissed_by === "auto")
-      ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b> = 구매시간이 만료됐고 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 만료 뒤에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 제출확정]을 누르세요.</div>`
+      ? `<div style="margin:2px 0 8px;padding:7px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:.72rem;color:#4B5563">🚫 <b>미참여(자동)</b>·<b>취소 · 자동정리</b> = 구매시간이 만료됐거나 취소된 건 중 <b>연결된 구매 제출이 하나도 없어</b> 시스템이 정리한 건입니다. 나중에 구매 제출이 도착하면 자동으로 다시 목록에 올라옵니다. 실제 구매를 확인했다면 [✅ 제출확정]을 누르세요.</div>`
       : "";
     body.innerHTML = sheetHtml + autoNote + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
@@ -3446,7 +3446,9 @@ async function _loadCampControl(campId) {
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
       else if (holdValid) st = chip("#FEF3C7", "#92400E", "⏳ 진행중");
-      else if (dismissed) st = chip("#E5E7EB", "#4B5563", autoDismissed ? "🚫 미참여(자동)" : "🚫 취소확정");
+      //   자동 정리는 원래 상태를 밝혀 말한다 — 만료와 자발 취소는 사유가 다른데 한 라벨로 뭉치면 대조가 안 된다.
+      else if (dismissed) st = chip("#E5E7EB", "#4B5563",
+        autoDismissed ? (r.status === "cancelled" ? "🚫 취소 · 자동정리" : "🚫 미참여(자동)") : "🚫 취소확정");
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
       else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
