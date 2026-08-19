@@ -15,13 +15,20 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const svcPath = path.join(root, 'src/services/manualDepositRepair.service.js');
 
-function makePool(editRows) {
+function makePool(editRows, bank) {
   const writes = [];
   const client = {
     async query(sql, params) {
       const s = String(sql).replace(/\s+/g, ' ').trim();
       if (/^BEGIN|^COMMIT|^ROLLBACK|advisory_xact_lock/.test(s)) return { rows: [] };
       if (/FROM participant_edits pe/.test(s) && /JOIN campaign_participants/.test(s)) return { rows: editRows };
+      // ★ 더 좁은 조건을 먼저 — uploads 쿼리 안에도 `payment_batch_items` EXISTS 가 들어 있어
+      //   순서를 바꾸면 items 분기가 가로챈다(스텁 매칭 순서 함정, CLAUDE.md 규율).
+      if (/FROM payment_result_uploads u/.test(s)) return { rows: (bank && bank.uploads) || [] };
+      if (/FROM payment_batch_items i/.test(s) && /JOIN payment_batches b/.test(s)) {
+        if (bank && bank.itemsThrow) throw new Error('items down');
+        return { rows: (bank && bank.items) || [] };
+      }
       writes.push({ s, params });
       return { rows: [], rowCount: 1 };
     },
@@ -35,7 +42,7 @@ function row(o) {
     editId: o.editId || 'e1', sheetId: 's', tabName: 'T',
     anchorType: 'order', anchorValue: 'os-1', stamp: o.stamp || '8/11',
     createdBy: '직원', createdAt: o.createdAt || null, depositColKey: '입금', sheetless: o.sheetless !== false,
-    rowId: o.rowId, rowIndex: o.rowIndex, reviewerName: '박',
+    rowId: o.rowId, rowIndex: o.rowIndex, reviewerName: o.name || '박',
     paidValue: o.paidValue == null ? (o.stamp || '8/11') : o.paidValue,
     submitted: !!o.submitted, hasLedger: !!o.hasLedger,
     ledgerPaidAt: o.ledgerPaidAt || null, hasReviewFile: !!o.hasReviewFile,
@@ -240,6 +247,67 @@ function row(o) {
   await assert.rejects(() => svc.applyOverlayFanoutFix({ decisions: [{ editId: 'e1', rowId: 'a' }] }),
     /복원할 대상이 없습니다/, '12f: 시트 기반은 선택으로도 우회 불가');
 
+  /* 13. 보류건 은행 이체결과 대조 — 읽기 전용, PII 최소화, 실패는 사실대로 */
+  pool = makePool(
+    [row({ rowId: 'a', rowIndex: 60 }), row({ rowId: 'b', rowIndex: 178 })],
+    { items: [{ sheetId: 's', tabName: 'T', rowIndex: 60, reviewerName: '박', accountHolder: '박',
+                amount: 9900, status: 'paid', paidAt: '2026-08-11T02:00:00Z', failReason: null,
+                bankAccount: '110425327484', batchSeq: 3, bank: 'kbank' }],
+      uploads: [{ batchSeq: 3, bank: 'kbank', summary: { preview: { unmatchedResults: [
+        { seq: 8, holder: '박', amount: 9900, accountTail: '7484', transferredAt: '2026.08.11 10:00', success: true, memo: 'X' },
+        { seq: 9, holder: '다른사람', amount: 1000, accountTail: '1111', transferredAt: '', success: true, memo: 'Y' },
+      ] } } }] });
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  const bk = pv.items[0].bank;
+  assert.ok(bk, '13a: 보류건에 은행 이체결과를 붙인다');
+  assert.equal(bk.matched.length, 1, '13b: 그 이름으로 나간 회차 항목');
+  assert.equal(bk.matched[0].rowIndex, 60, '13c: 어느 줄에 기록됐는지가 핵심 정보다');
+  assert.equal(bk.matched[0].accountTail, '7484', '13d: 계좌는 뒤 4자리만');
+  assert.ok(!('bankAccount' in bk.matched[0]), '13e: 전체 계좌번호를 내보내지 않는다');
+  assert.equal(bk.unmatched.length, 1, '13f: 다른 사람 이체는 섞이지 않는다');
+  assert.equal(bk.unmatched[0].accountTail, '7484');
+  assert.equal(pool.writes.length, 0, '13g: 미리보기는 여전히 쓰기 0');
+
+  //  자동 확정 건에는 붙이지 않는다(보류건 판단용이다)
+  pool = makePool([row({ rowId: 'a', rowIndex: 1, submitted: true, paidValue: '' }), row({ rowId: 'b', rowIndex: 2 })],
+    { items: [{ sheetId: 's', tabName: 'T', rowIndex: 1, reviewerName: '박', accountHolder: '박',
+                amount: 1, status: 'paid', paidAt: null, bankAccount: '1', batchSeq: 1, bank: 'kbank' }] });
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].bank, null, '13h: 자동 확정 건에는 은행 표를 붙이지 않는다');
+
+  //  조회 실패는 사실대로(0건으로 꾸미지 않는다)
+  pool = makePool([row({ rowId: 'a', rowIndex: 1 }), row({ rowId: 'b', rowIndex: 2 })], { itemsThrow: true });
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.ok(pv.items[0].bankUnavailable, '13i: 조회 실패를 드러낸다');
+  assert.equal(pv.items[0].bank, null, '13j: 실패했는데 빈 표를 주지 않는다');
+
+  //  ★ 그룹별 스코프 — 다른 참여자의 이체가 남의 보류건에 뜨면 안 된다
+  pool = makePool(
+    [row({ editId: 'e1', rowId: 'a', rowIndex: 60, name: '박' }), row({ editId: 'e1', rowId: 'b', rowIndex: 178, name: '박' }),
+     row({ editId: 'e2', rowId: 'c', rowIndex: 70, name: '최' }), row({ editId: 'e2', rowId: 'd', rowIndex: 188, name: '최' })],
+    { items: [
+        { sheetId: 's', tabName: 'T', rowIndex: 60, reviewerName: '박', accountHolder: '박', amount: 1, status: 'paid', paidAt: null, bankAccount: '1111', batchSeq: 1, bank: 'kbank' },
+        { sheetId: 's', tabName: 'T', rowIndex: 70, reviewerName: '최', accountHolder: '최', amount: 2, status: 'paid', paidAt: null, bankAccount: '2222', batchSeq: 1, bank: 'kbank' },
+      ],
+      uploads: [{ batchSeq: 1, bank: 'kbank', summary: { preview: { unmatchedResults: [
+        { seq: 1, holder: '박', amount: 1, accountTail: '1111', transferredAt: '', success: true, memo: '' },
+        { seq: 2, holder: '최', amount: 2, accountTail: '2222', transferredAt: '', success: true, memo: '' },
+      ] } } }] });
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  const g박 = pv.items.find(x => x.reviewerName === '박');
+  const g최 = pv.items.find(x => x.reviewerName === '최');
+  assert.equal(g박.bank.matched.length, 1, '13k: 그 참여자 이체만');
+  assert.equal(g박.bank.matched[0].rowIndex, 60);
+  assert.equal(g박.bank.unmatched.length, 1);
+  assert.equal(g박.bank.unmatched[0].name, '박', '13l: 남의 미확인 이체가 섞이면 안 된다');
+  assert.equal(g최.bank.matched[0].rowIndex, 70, '13m: 각 그룹은 자기 참여자 것만 본다');
+  assert.equal(g최.bank.unmatched[0].name, '최');
+
+  console.log('deposit overlay bank evidence passed');
   console.log('deposit overlay hold-decision rules passed');
   console.log('deposit overlay restore rules passed');
 })().catch(e => { console.error(e); process.exit(1); });
@@ -277,7 +345,7 @@ assert.doesNotMatch(asrc, /submitted|keepRow\s*=/, '화면에서 원래 줄을 �
       // 보류건 라디오 — 사람이 고른 값을 읽는 경로
       querySelectorAll: () => picks },
     api: null, toast: m => toasts.push(m), confirm: () => confirmed,
-    _pmLoad: async () => {}, _pmOpenDepositAnomalies: async () => {}, console,
+    _pmNum: n => String(n), _pmLoad: async () => {}, _pmOpenDepositAnomalies: async () => {}, console,
   };
   vm.createContext(sandbox);
   vm.runInContext(workdesk.slice(st, en), sandbox);
@@ -292,7 +360,12 @@ assert.doesNotMatch(asrc, /submitted|keepRow\s*=/, '화면에서 원래 줄을 �
           { tabName: 'T', reviewerName: 'A', stamp: '8/11', rows: [38, 96], keepRow: 38, clearRows: [96], ledgerBlockedRows: [], submittedCount: 1, hold: null },
           { tabName: 'T', reviewerName: 'B', stamp: '8/11', rows: [118, 119], keepRow: 118, clearRows: [], ledgerBlockedRows: [119], submittedCount: 1, hold: null },
           { tabName: 'T', reviewerName: 'C', stamp: '8/12', rows: [295, 296], keepRow: null, clearRows: [], submittedCount: 0,
-            hold: 'no_submitted_row', holdReason: '리뷰 제출된 줄이 없습니다' },
+            hold: 'no_submitted_row', holdReason: '리뷰 제출된 줄이 없습니다',
+            candidates: [{ rowId: 'r1', rowIndex: 295 }, { rowId: 'r2', rowIndex: 296 }],
+            bank: { matched: [{ batchSeq: 3, name: 'C', amount: 9900, accountTail: '7484',
+                                paidAt: '2026-08-11T02:00:00Z', status: 'paid', rowIndex: 295 }],
+                    unmatched: [{ batchSeq: 3, name: 'C', amount: 9900, accountTail: '7484',
+                                  transferredAt: '2026.08.11 10:00', success: true }] } },
         ] };
     };
     await sandbox._pmOpenOverlayFix();
@@ -303,6 +376,10 @@ assert.doesNotMatch(asrc, /submitted|keepRow\s*=/, '화면에서 원래 줄을 �
     assert.ok(bd.innerHTML.includes('이대로 복원 (2건)'), '10e: 실행 건수를 버튼에 적는다');
     assert.ok(bd.innerHTML.includes('type="radio"'), '10e2: 보류건은 줄을 고를 수 있게 그린다');
     assert.ok(bd.innerHTML.includes('그대로 보류'), '10e3: 고르지 않는 선택지도 준다');
+    assert.ok(bd.innerHTML.includes('은행 이체결과'), '10e5: 보류건에 은행 이체결과 표를 그린다');
+    assert.ok(bd.innerHTML.includes('295번</b>에 기록'), '10e6: 그 이체가 어느 줄에 붙었는지 말한다');
+    assert.ok(bd.innerHTML.includes('어느 줄에도 안 붙음'), '10e7: 미확인 이체를 구분해 보여준다');
+    assert.ok(bd.innerHTML.includes('…7484'), '10e8: 계좌는 뒤 4자리만');
 
     // 사람이 고른 값이 그대로 서버로 간다
     picks = [{ dataset: { edit: 'e9', row: 'r9' } }, { dataset: { edit: 'e8', row: '' } }];
