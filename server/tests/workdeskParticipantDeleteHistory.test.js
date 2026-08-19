@@ -12,8 +12,10 @@ const serviceSrc = fs.readFileSync(path.join(root, 'src/services/trackB.service.
 const reviewerSrc = fs.readFileSync(path.join(root, 'src/routes/reviewer.routes.js'), 'utf8');
 const workdeskSrc = fs.readFileSync(path.join(root, '..', 'frontend/workdesk.html'), 'utf8');
 
+// 트랜잭션 본문(_hideParticipantInTx)과 그 진입점(hideWorkdeskRow)을 함께 본다.
+// 본문은 주문 취소와 한 트랜잭션으로 돌 수 있도록 client 를 주입받는 형태로 분리됐다.
 const block = serviceSrc.slice(
-  serviceSrc.indexOf('async function hideWorkdeskRow'),
+  serviceSrc.indexOf('class HideRowError'),
   serviceSrc.indexOf('// 주문이 연결된 한 행을 안전하게 취소한다.')
 );
 
@@ -66,7 +68,10 @@ test('가상 삭제: 참여기록을 실제 삭제해도 마지막 진행일에 
     },
     release() {},
   };
-  trackB.__setPoolForTest({ connect: async () => client });
+  // 이 시나리오는 "살아 있는 구매양식이 없는 행"이다(진입점의 선조회가 빈 결과).
+  // 구매기록이 붙은 행이 주문 취소와 한 트랜잭션으로 지워지는 경로는
+  // workdeskRowDeleteOrderCancel.test.js 가 따로 실행해 고정한다.
+  trackB.__setPoolForTest({ connect: async () => client, query: async () => ({ rows: [] }) });
   // 삭제 후 장부 재생성 호출 자체도 검증하되, 단위 테스트에서는 외부 DB를 열지 않는다.
   let ledgerArgs = null;
   trackB.__setLedgerRebuildForTest(async args => { ledgerArgs = args; return { ok: true, indexRows: 99 }; });

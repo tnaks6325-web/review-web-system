@@ -2761,11 +2761,16 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
   } finally { client.release(); }
 }
 
-async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
-  const db = getPool();
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
+
+// 행 삭제 실패 사유. 트랜잭션 본문은 이 예외로만 중단한다.
+class HideRowError extends Error {
+  constructor(code) { super(code); this.name = 'HideRowError'; this.code = code; }
+}
+
+// 주문(구매양식) 취소와 같은 트랜잭션 안에서 돌 수 있도록 client 를 주입받는다.
+// 실패는 반환이 아니라 throw 로 알린다 — 반환으로 접으면 바깥의 주문 취소가 그대로 커밋되어
+// "주문은 취소됐는데 작업표 행은 그대로"인 단절이 생긴다.
+async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     // 작업표 행과 리뷰어 참여내역은 같은 참여 단위다. 기존처럼 화면 오버레이만
     // 숨기면 review_index/order_submissions 쪽의 "내 참여내역"이 남아 서로 다른
     // 사실을 말하게 된다. 행을 잠근 뒤, 이 행에만 연결된 신원·참여 링크를 함께 해제한다.
@@ -2775,7 +2780,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL
         FOR UPDATE`,
       [rowId, sheetId, tabName]);
-    if (!rows.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    if (!rows.length) throw new HideRowError('row_not_found');
     const row = rows[0];
 
     // 행 삭제가 곧 총 모집수 축소가 되면 안 된다. 무시트 작업표에서는 마지막
@@ -2800,8 +2805,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
         FOR UPDATE`,
       [sheetId, tabName, row.order_submission_id || null]);
     if (scopes.length !== 1) {
-      await client.query('ROLLBACK');
-      return { ok: false, error: row.order_submission_id ? 'row_campaign_not_found' : (scopes.length ? 'ambiguous_campaign' : 'sheetless_campaign_not_found') };
+      throw new HideRowError(row.order_submission_id ? 'row_campaign_not_found' : (scopes.length ? 'ambiguous_campaign' : 'sheetless_campaign_not_found'));
     }
     const campaignId = scopes[0].campaign_id;
     const { rows: tabRows } = await client.query(
@@ -2816,7 +2820,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
     }
     const { findDateColumnIndex } = require('./campaignSchedule.service');
     const dateHeader = headers[findDateColumnIndex(headers)];
-    if (!dateHeader) { await client.query('ROLLBACK'); return { ok: false, error: 'worktable_date_column_not_found' }; }
+    if (!dateHeader) throw new HideRowError('worktable_date_column_not_found');
     const { rows: plans } = await client.query(
       `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
          FROM campaign_daily_plans
@@ -2824,14 +2828,14 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
         ORDER BY plan_date DESC
         LIMIT 1
         FOR UPDATE`, [campaignId]);
-    if (!plans.length) { await client.query('ROLLBACK'); return { ok: false, error: 'final_plan_not_found' }; }
+    if (!plans.length) throw new HideRowError('final_plan_not_found');
     const finalPlan = plans[0];
     const finalYearMonth = String(finalPlan.date).match(/^(\d{4})-(\d{2})/);
     const { parseDateColumn } = require('../utils/koreanDate');
     const [removedDate] = parseDateColumn([String((row.row_json || {})[dateHeader] || '')], {
       fallbackAnchor: finalYearMonth ? { y: Number(finalYearMonth[1]), m: Number(finalYearMonth[2]) } : undefined,
     });
-    if (!removedDate) { await client.query('ROLLBACK'); return { ok: false, error: 'removed_row_date_invalid' }; }
+    if (!removedDate) throw new HideRowError('removed_row_date_invalid');
     const blank = {};
     headers.forEach(h => { blank[h] = ''; });
     const finalDateLabel = (() => {
@@ -2840,7 +2844,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
       const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
       return `${Number(m[2])}/${Number(m[3])} (${['일','월','화','수','목','금','토'][day]})`;
     })();
-    if (!finalDateLabel) { await client.query('ROLLBACK'); return { ok: false, error: 'final_plan_date_invalid' }; }
+    if (!finalDateLabel) throw new HideRowError('final_plan_date_invalid');
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -2854,10 +2858,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
       `DELETE FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3`,
       [rowId, sheetId, tabName]);
-    if (removed.rowCount !== 1) {
-      await client.query('ROLLBACK');
-      return { ok: false, error: 'row_changed' };
-    }
+    if (removed.rowCount !== 1) throw new HideRowError('row_changed');
 
     // 시트 기반 보조 신원 링크도 정확히 이 행(seq)만 제거한다. 동명이인·다른
     // 작업의 링크는 전혀 건드리지 않는다.
@@ -2899,7 +2900,7 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
           WHERE campaign_id=$1 AND plan_date=$2::date
           FOR UPDATE`, [campaignId, removedDate]);
       const sourceCount = sourcePlans.length ? Number(sourcePlans[0].planned_count) : (dateCount.get(removedDate) || 0);
-      if (sourceCount < 1) { await client.query('ROLLBACK'); return { ok: false, error: 'removed_date_plan_invalid' }; }
+      if (sourceCount < 1) throw new HideRowError('removed_date_plan_invalid');
       await client.query(
         `UPDATE campaign_daily_plans
             SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
@@ -2916,25 +2917,87 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
       `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
        VALUES ($1,$2,'participant_delete_replenish',$3::jsonb)`,
       [campaignId, String(by).slice(0, 100), JSON.stringify({ removedSeq: row.seq, removedDate, finalDate: finalPlan.date, added: 1 })]);
-    await client.query('COMMIT');
-    let ledgerError = null;
-    try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by: `participant-delete:${by}` }); }
-    catch (e) { ledgerError = (e && (e.code || e.message)) || 'rebuild_failed'; logger.warn(`[trackB] 행 삭제 후 장부 재생성 실패 tab=${tabName}: ${ledgerError}`); }
     return {
-      ok: true,
-      mode: 'hard_deleted',
       removed: removed.rowCount,
       participationLinksRemoved: links.rowCount,
       applicationsCancelled: applications.rowCount,
       replenished: 1,
       finalPlanDate: finalPlan.date,
       replacementSeq: replacement.rows[0] && replacement.rows[0].seq,
-      ledgerError,
     };
+}
+
+
+// 작업보드 행 삭제. 이 행이 "실제 리뷰어의 구매기록"이면 그 구매양식까지 함께 취소한다.
+// ★ 총 모집인원은 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로 보충되어
+//   다시 모집할 수 있는 상태로 남는다(그 보충은 본문이 같은 트랜잭션에서 한다).
+// ★ 주문 취소와 행 제거는 반드시 한 트랜잭션 — 한쪽만 반영되면 원장과 작업표가 갈린다.
+async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin', actorRole = null } = {}) {
+  const db = getPool();
+  // 살아 있는 구매양식이 붙은 행인지 먼저 본다(짧은 조회 — 잠금 없음).
+  let liveOrderId = null;
+  try {
+    const { rows } = await db.query(
+      `SELECT cp.order_submission_id AS oid
+         FROM campaign_participants cp
+         JOIN order_submissions os ON os.id = cp.order_submission_id AND os.deleted_at IS NULL
+        WHERE cp.id = $1 AND cp.sheet_id = $2 AND cp.tab_name = $3 AND cp.deleted_at IS NULL`,
+      [rowId, sheetId, tabName]);
+    liveOrderId = rows.length ? rows[0].oid : null;
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    // 조회 실패를 "주문 없음"으로 접으면 구매양식이 남은 채 행만 사라진다.
+    logger.warn(`[trackB] 행 삭제 전 주문 조회 실패 tab=${tabName}: ${(e && e.message) || e}`);
+    return { ok: false, error: 'order_lookup_failed' };
+  }
+
+  // 구매기록 취소는 금액·시트 주문값을 함께 바꾸므로 order-delete 와 같은 권한을 요구한다.
+  // (actorRole 미전달 = 옛 호출부 → 종전대로 통과. 라우트가 항상 넘긴다.)
+  if (liveOrderId && actorRole && !(actorRole === 'master' || actorRole === 'admin')) {
+    return { ok: false, error: 'order_cancel_forbidden' };
+  }
+
+  const runInOwnTx = async () => {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const out = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by });
+      await client.query('COMMIT');
+      return out;
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      throw e;
+    } finally { client.release(); }
+  };
+
+  let result = null;
+  let orderCanceled = false;
+  let sheetCleared = false;
+  try {
+    if (liveOrderId) {
+      const { cancelOrderSubmission } = require('./orderCancellation.service');
+      const canceled = await cancelOrderSubmission({
+        orderSubmissionId: liveOrderId,
+        canceledBy: by,
+        // 행 제거·총원 보충을 주문 취소와 같은 트랜잭션에 둔다. 여기서 throw 하면 취소도 롤백된다.
+        beforeCancelCommit: async (client) => { result = await _hideParticipantInTx(client, { sheetId, tabName, rowId, by }); },
+      });
+      if (!canceled || !canceled.ok) return { ok: false, error: (canceled && canceled.code) || 'order_cancel_failed' };
+      // 그 사이 다른 경로가 먼저 취소했다면 본문이 돌지 않았다 — 행 제거만 이어서 한다.
+      if (!result) result = await runInOwnTx();
+      else { orderCanceled = true; sheetCleared = !!canceled.cleared; }
+    } else {
+      result = await runInOwnTx();
+    }
+  } catch (e) {
+    if (e instanceof HideRowError) return { ok: false, error: e.code };
     throw e;
-  } finally { client.release(); }
+  }
+
+  let ledgerError = null;
+  try { await _rebuildWorkdeskLedgers({ sheetId, tabName, by: `participant-delete:${by}` }); }
+  catch (e) { ledgerError = (e && (e.code || e.message)) || 'rebuild_failed'; logger.warn(`[trackB] 행 삭제 후 장부 재생성 실패 tab=${tabName}: ${ledgerError}`); }
+  _tabStatsCache = { at: 0, map: null };
+  return { ok: true, mode: 'hard_deleted', orderCanceled, sheetCleared, ...result, ledgerError };
 }
 
 // 주문이 연결된 한 행을 안전하게 취소한다. 시트 물리행은 유지하고 주문값만 큐로 비워 행 이동 오염을 막는다.
