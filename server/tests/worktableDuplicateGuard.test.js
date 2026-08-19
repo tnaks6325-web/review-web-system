@@ -149,17 +149,24 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   const led = require('../src/services/sheetlessLedger.service');
   const rowsFixture = [
     // 정상 중복(3줄) — 630 남기고 642·655 정리
-    { seq: 630, osid: 'os-a1', name: '김신혜', submitted: false, paid: false, ordnum: '29102369417861', ph: '01090411926', in_payment: false },
-    { seq: 642, osid: 'os-a2', name: '김신혜', submitted: false, paid: false, ordnum: '29102369417861', ph: '01090411926', in_payment: false },
-    { seq: 655, osid: 'os-a3', name: '김신혜', submitted: false, paid: false, ordnum: '29102369417861', ph: '01090411926', in_payment: false },
+    { seq: 630, osid: 'os-a1', name: '김신혜', submitted: false, paid: false, ordnum: '29102369417861', roword: '29102369417861', ph: '01090411926', in_payment: false },
+    { seq: 642, osid: 'os-a2', name: '김신혜', submitted: false, paid: false, ordnum: '29102369417861', roword: '29102369417861', ph: '01090411926', in_payment: false },
+    { seq: 655, osid: 'os-a3', name: '김신혜', submitted: false, paid: false, ordnum: '29102369417861', roword: '29102369417861', ph: '01090411926', in_payment: false },
+    // ★ 실사고(신다인): 같은 사람인데 **표에 보이는 주문번호가 서로 다르다** → 중복이 아니다.
+    //   원장(os.order_num)만 보면 같은 값이라 지워질 뻔했다.
+    { seq: 19,  osid: 'os-s1', name: '신다인', submitted: false, paid: false, ordnum: '23102041302915', roword: '23102041302915', ph: '01051475613', in_payment: false },
+    { seq: 407, osid: 'os-s2', name: '신다인', submitted: false, paid: false, ordnum: '23102041302915', roword: '23102367337800', ph: '01051475613', in_payment: false },
+    // ★ 표에 주문번호가 없는 줄은 판정 불가 → 대상 제외
+    { seq: 900, osid: 'os-n1', name: '무번호', submitted: false, paid: false, ordnum: '99999999999', roword: '', ph: '01011112222', in_payment: false },
+    { seq: 901, osid: 'os-n2', name: '무번호', submitted: false, paid: false, ordnum: '99999999999', roword: '', ph: '01011112222', in_payment: false },
     // 입금 회차에 담긴 줄이 섞인 그룹 — 손대지 않는다
-    { seq: 461, osid: 'os-b1', name: '김태헌', submitted: false, paid: false, ordnum: '22102148311', ph: '01050222120', in_payment: false },
-    { seq: 468, osid: 'os-b2', name: '김태헌', submitted: false, paid: true,  ordnum: '22102148311', ph: '01050222120', in_payment: true },
+    { seq: 461, osid: 'os-b1', name: '김태헌', submitted: false, paid: false, ordnum: '22102148311', roword: '22102148311', ph: '01050222120', in_payment: false },
+    { seq: 468, osid: 'os-b2', name: '김태헌', submitted: false, paid: true,  ordnum: '22102148311', roword: '22102148311', ph: '01050222120', in_payment: true },
     // 실제로 쓰인 줄이 뒤에 있는 그룹 — 손대지 않는다
-    { seq: 470, osid: 'os-c1', name: '심수영', submitted: false, paid: false, ordnum: '30102276911', ph: '01054465123', in_payment: false },
-    { seq: 477, osid: 'os-c2', name: '심수영', submitted: true,  paid: false, ordnum: '30102276911', ph: '01054465123', in_payment: false },
+    { seq: 470, osid: 'os-c1', name: '심수영', submitted: false, paid: false, ordnum: '30102276911', roword: '30102276911', ph: '01054465123', in_payment: false },
+    { seq: 477, osid: 'os-c2', name: '심수영', submitted: true,  paid: false, ordnum: '30102276911', roword: '30102276911', ph: '01054465123', in_payment: false },
     // 중복 아님(1줄)
-    { seq: 500, osid: 'os-d1', name: '홀로', submitted: false, paid: false, ordnum: '11111111111', ph: '01000000000', in_payment: false },
+    { seq: 500, osid: 'os-d1', name: '홀로', submitted: false, paid: false, ordnum: '11111111111', roword: '11111111111', ph: '01000000000', in_payment: false },
   ];
   const ledCalls = { retire: null, cancel: null, rebuild: 0 };
   const partMod2 = require('../src/services/participants.service');
@@ -185,6 +192,12 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('입금 회차에 담긴 그룹은 보류', prev.skipped.some(s => s.reason === 'in_payment_batch' && s.seqs.includes(468)));
     ok('쓰인 줄이 뒤에 있는 그룹은 보류', prev.skipped.some(s => s.reason === 'used_row_is_not_first' && s.seqs.includes(477)));
     ok('중복 아닌 줄은 대상이 아니다', !JSON.stringify(prev.plan).includes('500'));
+    ok('★★ 표에 보이는 주문번호가 다르면 중복이 아니다(신다인 실사고)',
+      !JSON.stringify(prev.plan).includes('407') && !JSON.stringify(prev.plan).includes('"keepSeq":19'));
+    ok('★ 표에 주문번호가 없는 줄은 대상에서 제외한다(모르면 안 지운다)',
+      !JSON.stringify(prev.plan).includes('901') && prev.skippedNoRowOrder === 2);
+    ok('미리보기 주문번호는 표 기준값으로 보여준다',
+      (prev.plan[0] || {}).orderNum === '29102369417861');
 
     const run = await led.dedupeRows({ sheetId: 'wt_x', tabName: 'T1', dryRun: false, by: '망고' });
     ok('실행하면 그 줄만 내린다', ledCalls.retire.seqs.join() === '642,655' && run.removed === 2);
@@ -212,7 +225,11 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   ok('중복 조회가 주문번호를 읽는다', /order_num[\s\S]{0,40}AS ordnum/.test(dedupeSrc));
   ok('★ 주문번호 6자리 미만은 조회에서 제외(주문번호 없는 줄은 절대 대상이 아니다)',
     /length\(regexp_replace\(COALESCE\(os\.order_num[\s\S]{0,60}\) >= 6/.test(dedupeSrc));
-  ok('★ 그룹 키 = 주문번호 + 연락처 둘 다', /const key = `\$\{r\.ordnum\}[\s\S]{0,20}\$\{r\.ph\}`/.test(dedupeSrc));
+  ok('★★ 그룹 키 = 표 주문번호 + 원장 주문번호 + 연락처 셋 다',
+    /const key = `\$\{r\.roword\}[\s\S]{0,30}\$\{r\.ordnum\}[\s\S]{0,30}\$\{r\.ph\}`/.test(dedupeSrc));
+  ok('★ 표에 보이는 주문번호(row_json)를 조회한다', /jsonb_each_text\(COALESCE\(cp\.row_json[\s\S]{0,200}주문번호[\s\S]{0,120}AS roword/.test(dedupeSrc));
+  ok('★ 표 주문번호가 6자리 미만이면 그룹에 넣지 않는다',
+    /String\(r\.roword \|\| ''\)\.length < 6[\s\S]{0,60}continue/.test(dedupeSrc));
   ok('취소된 주문은 대상이 아니다', /os\.deleted_at IS NULL/.test(dedupeSrc));
   {
     // 같은 사람(같은 연락처)이 **다른 주문번호**로 두 번 참여 → 중복이 아니다(실행으로 확인)
@@ -251,14 +268,49 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   ok('미리보기에 주문번호 열이 있다(사람이 판정 근거를 본다)',
     /<th>주문번호<\/th>/.test(wd) && /esc\(String\(g\.orderNum \|\| ''\)\)/.test(wd));
   ok('보류 목록에도 주문번호를 적는다', /주문번호 \$\{esc\(String\(g\.orderNum/.test(wd));
-  ok('판정 규칙을 화면이 문장으로 말한다(주문번호+연락처 · 주문번호 없으면 제외)',
-    /주문번호가 같고 연락처도 같은/.test(wd) && /6자리 미만인 줄은/.test(wd));
+  ok('판정 규칙을 화면이 문장으로 말한다(표 주문번호 기준 · 다르면 다른 참여건)',
+    /표에 보이는 주문번호가 같고/.test(wd) && /주문번호가 다르면 각기 다른 참여건/.test(wd)
+    && /6자리 미만인 줄은/.test(wd));
+  ok('표에 주문번호가 없어 제외된 줄 수를 고지한다', /skippedNoRowOrder/.test(wd));
   ok('오버레이는 body 직속', /appendChild\(ov\);\s*\/\/ ★ body 직속/.test(wd.slice(wd.indexOf('function openDedupeModal'))));
   ok('Esc 리스너는 최상위 1회', /window\._ddKeyBound/.test(wd));
   {
     const blk = wd.slice(wd.indexOf('function _ddRender'), wd.indexOf('async function ddPreview'));
     ok('서버발 문자열은 전부 escape 한다(onclick 보간 0)',
       !/\$\{(?!esc\()[^}]*(name|tabName|detail|reason)/.test(blk) && !/onclick="[^"]*\$\{(?!esc\()/.test(blk));
+  }
+
+  /* ── [F] 진짜 PG (선택) — 스텁은 SQL 을 해석하지 않는다 ──────────────────────
+     `PGTEST_URL=postgres://... node server/tests/worktableDuplicateGuard.test.js`
+     표 주문번호(row_json) 추출과 숫자 정규화가 **실제로** 도는지 확인한다. */
+  if (process.env.PGTEST_URL) {
+    const { Client } = require('pg');
+    const c = new Client({ connectionString: process.env.PGTEST_URL });
+    await c.connect();
+    await c.query(`DROP TABLE IF EXISTS campaign_participants, order_submissions, payment_batch_items`);
+    await c.query(`CREATE TABLE campaign_participants(seq int, sheet_id text, tab_name text,
+      order_submission_id uuid, reviewer_name text, is_submitted bool, is_paid bool, row_json jsonb, deleted_at timestamptz)`);
+    await c.query(`CREATE TABLE order_submissions(id uuid primary key, order_num text, phone text, deleted_at timestamptz)`);
+    await c.query(`CREATE TABLE payment_batch_items(sheet_id text, tab_name text, row_index int, status text)`);
+    // ★ 실사고 재현: 원장 주문번호는 같은데 **표에 보이는 주문번호가 다르다**
+    await c.query(`INSERT INTO order_submissions VALUES
+      ('11111111-1111-1111-1111-111111111111','231020413029 15','010-5147-5613',NULL),
+      ('22222222-2222-2222-2222-222222222222','231020413029 15','010-5147-5613',NULL)`);
+    await c.query(`INSERT INTO campaign_participants VALUES
+      (19 ,'wt_x','T1','11111111-1111-1111-1111-111111111111','신다인',false,false,
+        '{"번호":"1","주문번호":"23102041302915"}',NULL),
+      (407,'wt_x','T1','22222222-2222-2222-2222-222222222222','신다인',false,false,
+        '{"번호":"389","주문번호":"23102367337800"}',NULL)`);
+    const src = fs.readFileSync(path.join(__dirname, '../src/services/sheetlessLedger.service.js'), 'utf8');
+    const tpl = src.match(/`SELECT cp\.seq, cp\.order_submission_id AS osid[\s\S]*?ORDER BY cp\.seq`/)[0];
+    const { rows: r } = await c.query(eval(tpl), ['wt_x', 'T1']);   // eslint-disable-line no-eval
+    ok('PG: 쿼리가 실제로 실행된다(문법·jsonb 추출)', r.length === 2);
+    ok('PG: 숫자만 정규화된다', r[0].ordnum === '23102041302915' && r[0].ph === '01051475613');
+    ok('PG: 표 주문번호를 row_json 에서 뽑는다', r[0].roword === '23102041302915' && r[1].roword === '23102367337800');
+    ok('PG: 원장이 같아도 표가 다르면 다른 그룹', r[0].roword !== r[1].roword && r[0].ordnum === r[1].ordnum);
+    await c.end();
+  } else {
+    console.log('\n[F] 진짜 PG 검증 건너뜀 (PGTEST_URL 미설정)');
   }
 
   console.log(`\n총 ${pass}개 통과`);

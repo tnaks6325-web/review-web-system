@@ -394,6 +394,14 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
             COALESCE(cp.is_submitted, FALSE) AS submitted, COALESCE(cp.is_paid, FALSE) AS paid,
             regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g') AS ordnum,
             regexp_replace(COALESCE(os.phone, ''), '\\D', '', 'g') AS ph,
+            /* ★★ 작업보드 표에 **실제로 보이는** 주문번호. 원장(os.order_num)만 보면
+               "화면에는 서로 다른 주문번호인데 중복으로 잡히는" 일이 생긴다(2026-08-19 신다인 건).
+               담당자가 눈으로 판단하는 값과 시스템 판정이 같은 값을 봐야 한다. */
+            regexp_replace(COALESCE((
+              SELECT string_agg(t.value, '' ORDER BY t.key)
+                FROM jsonb_each_text(COALESCE(cp.row_json, '{}'::jsonb)) t(key, value)
+               WHERE t.key LIKE '%주문번호%'
+            ), ''), '\\D', '', 'g') AS roword,
             EXISTS (SELECT 1 FROM payment_batch_items pi
                      WHERE pi.sheet_id = cp.sheet_id AND pi.tab_name = cp.tab_name
                        AND pi.row_index = cp.seq AND pi.status IN ('pending','paid')) AS in_payment
@@ -403,9 +411,14 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
         AND length(regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g')) >= 6
       ORDER BY cp.seq`, [sheetId, tabName]);
 
+  /* ★★ 그룹 키 = 표 주문번호 + 원장 주문번호 + 연락처 **셋 다**(사용자 확정 2026-08-19).
+     ★ 표에 주문번호가 없거나 6자리 미만인 줄은 **판정 불가 → 대상에서 제외**한다(모르면 안 지운다).
+       원장 값만으로 지우면 화면에서 서로 다른 주문으로 보이는 줄이 사라져 근거를 잃는다. */
   const groups = new Map();
+  const noRowOrder = [];
   for (const r of rows) {
-    const key = `${r.ordnum}\u0000${r.ph}`;
+    if (String(r.roword || '').length < 6) { noRowOrder.push(r); continue; }
+    const key = `${r.roword}\u0000${r.ordnum}\u0000${r.ph}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   }
@@ -422,7 +435,7 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
     const blockedUsed = losers.filter(r => (r.submitted && !keep.submitted) || (r.paid && !keep.paid));
     if (blockedPayment.length || blockedUsed.length) {
       skipped.push({
-        orderNum: keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
+        orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
         seqs: list.map(r => r.seq),
         reason: blockedPayment.length ? 'in_payment_batch' : 'used_row_is_not_first',
         detail: blockedPayment.length
@@ -432,14 +445,14 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
       continue;
     }
     plan.push({
-      orderNum: keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
+      orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
       keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq),
     });
     for (const r of losers) { removeSeqs.push(r.seq); if (r.osid) removeOsIds.push(r.osid); }
   }
 
   const stat = {
-    sheetId, tabName, boardRows: rows.length,
+    sheetId, tabName, boardRows: rows.length, skippedNoRowOrder: noRowOrder.length,
     groups: plan.length, removeRows: removeSeqs.length,
     skippedGroups: skipped.length, plan: plan.slice(0, 100), skipped: skipped.slice(0, 100),
   };
