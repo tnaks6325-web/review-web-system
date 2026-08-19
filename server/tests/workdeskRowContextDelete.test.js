@@ -53,7 +53,8 @@ for (const m of block.matchAll(/'([a-z_]+)'\s*:\s*\(scopes/g)) codes.add(m[1]);
 for (const c of ['ambiguous_campaign', 'sheetless_campaign_not_found']) if (block.includes(`'${c}'`)) codes.add(c);
 // 주문 취소 서비스가 돌려주는 코드도 이 화면에 그대로 나온다.
 for (const c of ['concurrent_cancel', 'invalid_order_id']) codes.add(c);
-assert.ok(codes.size >= 12, `서버 사유 코드를 충분히 읽지 못했습니다(${codes.size}개) — 추출 정규식을 확인하세요`);
+assert.ok(codes.size >= 6, `서버 사유 코드를 충분히 읽지 못했습니다(${codes.size}개) — 추출 정규식을 확인하세요`);
+assert.ok(codes.has('not_sheetless'), '시트 기반 작업 거부 사유가 있어야 합니다(행이 되살아난다)');
 const msgMap = html.slice(html.indexOf('const _HIDE_ROW_ERRORS'), html.indexOf('function _hideRowErrorText'));
 // 'unexpected'(예상 밖 서버 오류)는 표 대신 전용 분기가 DB 오류코드·내용을 그대로 보여준다.
 codes.delete('unexpected');

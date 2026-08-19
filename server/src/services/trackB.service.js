@@ -2803,21 +2803,26 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     if (!rows.length) throw new HideRowError('row_not_found');
     const row = rows[0];
 
-    // 행 삭제가 곧 총 모집수 축소가 되면 안 된다. 무시트 작업표에서는 마지막
-    // 진행일의 계획을 1건 늘리고, 같은 트랜잭션 안에 비어 있는 보충 슬롯을 만든다.
+    // ★ 무시트(sheetless) 작업만 지울 수 있다 — 시트 기반 작업은 다음 시트 반영이
+    //   같은 행을 되살려 "지웠는데 돌아오는" 상태가 된다. 종전에는 이 게이트가 공고
+    //   조회 SQL 안에 묻혀 있었는데, 공고 없이도 삭제할 수 있게 되면서 명시 검사로 뺐다.
+    const { rows: tabCfg } = await client.query(
+      `SELECT COALESCE(sheetless,FALSE) AS sheetless
+         FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`, [sheetId, tabName]);
+    if (!tabCfg.length || tabCfg[0].sheetless !== true) throw new HideRowError('not_sheetless');
+
+    // 행 삭제가 곧 총 모집수 축소가 되면 안 된다. 지운 자리는 같은 트랜잭션 안에서
+    // 작업표의 마지막 진행일에 "빈 자리"로 다시 만든다(총 건수 불변).
     // 내부 seq는 주문·리뷰 원장의 연결키이므로 재번호화하지 않는다. 화면의 #만
     // 표시 순번으로 계산해 1~총건수 범위를 유지한다.
-    // 어느 공고의 날짜별 계획에 보충할지 고른다. 후보는 "이 작업표에 연결된 무시트 공고"이고,
-    // 그 안에서 아래 순서로 좁힌다. 어느 단계든 후보가 둘 이상이면 고르지 않고 거부한다
-    // (남의 공고 마지막 날짜를 임의로 바꾸지 않는다).
+    //
+    // 연결된 모집공고가 있으면 그 공고의 날짜별 계획도 함께 옮긴다(삭제된 날 -1 /
+    // 마지막 날 +1 — 총 계획량은 불변). 어느 공고인지는 아래 순서로 좁힌다.
     //   ① 그 주문에 연결된 공고(campaign_applications) — 한 작업표를 여러 공고가 쓸 때의 정답
-    //   ② 게시 중/임시저장 공고
-    //   ③ 그 외(마감 등)
-    // ★ ①이 비는 경우가 실제로 흔하다 — 홀드 없이 들어온 주문(외부모집 수동제출·지각 확정·
-    //   시트 이관분)은 campaign_applications 행 자체가 없다. 종전에는 그때 곧바로 거부해
-    //   그 행을 총원 유지로는 지울 방법이 없는 막다른 길이 됐다. 링크가 없을 뿐 후보가
-    //   하나면 모호하지 않으므로 ②·③으로 내려가 고른다(완화가 아니라 같은 규칙의 확장).
-    // ★ 무시트(sheetless) 게이트는 그대로 — 시트 기반 작업은 다음 빌드가 행을 되살린다.
+    //   ② 게시 중/임시저장 공고   ③ 그 외(마감 등)
+    // ★★ 공고를 하나로 좁히지 못해도 삭제를 막지 않는다 — 보충은 작업보드에 하면 되고,
+    //   계획 이동만 건너뛴다(남의 공고 계획을 추측해 바꾸지 않는다). 종전에는 공고가
+    //   없거나 둘 이상이면 거부해, 공고 없이 운영하는 작업표는 행을 지울 방법이 없었다.
     const { rows: scopeRows } = await client.query(
       `SELECT rc.id AS campaign_id,
               (rc.status IN ('draft','active')) AS is_open,
@@ -2826,20 +2831,18 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
                  WHERE ca.campaign_id=rc.id AND ca.order_submission_id=$3::uuid
               ) AS is_linked
          FROM recruit_campaigns rc
-         JOIN tab_configs tc ON tc.sheet_id=rc.linked_sheet_id AND tc.tab_name=rc.linked_tab_name
         WHERE rc.linked_sheet_id=$1 AND rc.linked_tab_name=$2
-          AND COALESCE(tc.sheetless,FALSE)=TRUE
         ORDER BY rc.updated_at DESC
         LIMIT 10
         FOR UPDATE`,
       [sheetId, tabName, row.order_submission_id || null]);
-    if (!scopeRows.length) throw new HideRowError('sheetless_campaign_not_found');
     // 주문이 없는 행($3=NULL)이면 is_linked 는 전부 거짓이라 자연히 ②로 내려간다.
     const linked = scopeRows.filter(r => r.is_linked);
     const open = scopeRows.filter(r => r.is_open);
     const tier = linked.length ? linked : (open.length ? open : scopeRows);
-    if (tier.length !== 1) throw new HideRowError('ambiguous_campaign');
-    const campaignId = tier[0].campaign_id;
+    const campaignId = tier.length === 1 ? tier[0].campaign_id : null;
+    const campaignScope = tier.length === 1 ? 'linked' : (scopeRows.length ? 'ambiguous' : 'none');
+
     const { rows: tabRows } = await client.query(
       `SELECT seq, tab_gid, row_json
          FROM campaign_participants
@@ -2851,32 +2854,50 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
       if (key && !headers.includes(key)) headers.push(key);
     }
     const { findDateColumnIndex } = require('./campaignSchedule.service');
-    const dateHeader = headers[findDateColumnIndex(headers)];
-    if (!dateHeader) throw new HideRowError('worktable_date_column_not_found');
-    const { rows: plans } = await client.query(
-      `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
-         FROM campaign_daily_plans
-        WHERE campaign_id=$1 AND planned_count > 0
-        ORDER BY plan_date DESC
-        LIMIT 1
-        FOR UPDATE`, [campaignId]);
-    if (!plans.length) throw new HideRowError('final_plan_not_found');
-    const finalPlan = plans[0];
-    const finalYearMonth = String(finalPlan.date).match(/^(\d{4})-(\d{2})/);
     const { parseDateColumn } = require('../utils/koreanDate');
-    const [removedDate] = parseDateColumn([String((row.row_json || {})[dateHeader] || '')], {
-      fallbackAnchor: finalYearMonth ? { y: Number(finalYearMonth[1]), m: Number(finalYearMonth[2]) } : undefined,
-    });
-    if (!removedDate) throw new HideRowError('removed_row_date_invalid');
-    const blank = {};
-    headers.forEach(h => { blank[h] = ''; });
-    const finalDateLabel = (() => {
-      const m = String(finalPlan.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const { kstTodayStr } = require('./campaignState.service');
+    const dateIdx = findDateColumnIndex(headers);
+    const dateHeader = dateIdx >= 0 ? headers[dateIdx] : null;
+
+    // 연결 공고가 있을 때만 계획 이동에 쓸 "마지막 계획일"을 읽는다.
+    let finalPlan = null;
+    if (campaignId) {
+      const { rows: plans } = await client.query(
+        `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
+           FROM campaign_daily_plans
+          WHERE campaign_id=$1 AND planned_count > 0
+          ORDER BY plan_date DESC
+          LIMIT 1
+          FOR UPDATE`, [campaignId]);
+      finalPlan = plans.length ? plans[0] : null;
+    }
+    const todayAnchor = (() => {
+      const m = String(kstTodayStr() || '').match(/^(\d{4})-(\d{2})/);
+      return m ? { y: Number(m[1]), m: Number(m[2]) } : undefined;
+    })();
+    const finalYearMonth = finalPlan ? String(finalPlan.date).match(/^(\d{4})-(\d{2})/) : null;
+    const anchor = finalYearMonth ? { y: Number(finalYearMonth[1]), m: Number(finalYearMonth[2]) } : todayAnchor;
+    const rawDates = dateHeader ? tabRows.map(r => String((r.row_json || {})[dateHeader] || '')) : [];
+    const parsedDates = dateHeader ? parseDateColumn(rawDates, { fallbackAnchor: anchor }) : [];
+    const removedRaw = dateHeader ? String((row.row_json || {})[dateHeader] || '') : '';
+    const [removedDate] = dateHeader ? parseDateColumn([removedRaw], { fallbackAnchor: anchor }) : [null];
+
+    // 보충할 자리의 구매일자.
+    //   ① 연결 공고의 마지막 계획일 → ② 작업표에서 가장 늦은 진행일(표기 그대로)
+    //   → ③ 삭제한 행의 그 날짜 값(같은 자리에 그대로 보충)
+    // ★ ②는 시트 표기를 그대로 옮겨 형식 드리프트를 만들지 않는다.
+    const planLabel = (() => {
+      const m = finalPlan ? String(finalPlan.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/) : null;
       if (!m) return '';
       const day = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
       return `${Number(m[2])}/${Number(m[3])} (${['일','월','화','수','목','금','토'][day]})`;
     })();
-    if (!finalDateLabel) throw new HideRowError('final_plan_date_invalid');
+    const lastSheetLabel = (() => {
+      let best = null; let bestRaw = '';
+      parsedDates.forEach((d, i) => { if (d && (!best || d > best)) { best = d; bestRaw = rawDates[i]; } });
+      return bestRaw;
+    })();
+    const finalDateLabel = planLabel || lastSheetLabel || removedRaw;
 
     // 행 자체는 실제 삭제한다. 삭제 표식은 별도 최소 테이블에 두어, 작업표 행을
     // 논리삭제 레코드로 남기지 않으면서도 재투영에 의해 같은 seq가 되살지 않게 한다.
@@ -2913,6 +2934,10 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
         [row.order_submission_id]);
     }
 
+    // ★ 보충 슬롯은 무조건 만든다 — 이것이 "총 모집인원은 줄지 않는다"의 실체다.
+    const blank = {};
+    headers.forEach(h => { blank[h] = ''; });
+    if (dateHeader) blank[dateHeader] = finalDateLabel;
     const maxSeq = tabRows.reduce((max, r) => Math.max(max, Number(r.seq) || 0), 0);
     const replacement = await client.query(
       `INSERT INTO campaign_participants
@@ -2920,13 +2945,13 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,'worktable',$7,NOW())
        RETURNING id, seq`,
       [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName, maxSeq + 1,
-        finalDateLabel, JSON.stringify({ ...blank, [dateHeader]: finalDateLabel }), String(by).slice(0, 100)]);
+        finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
+
     // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
-    if (removedDate !== finalPlan.date) {
+    // 공고를 못 고른 경우(none/ambiguous)와 날짜를 못 읽은 경우엔 계획을 건드리지 않는다.
+    let planMoved = false;
+    if (campaignId && finalPlan && removedDate && removedDate !== finalPlan.date) {
       const dateCount = new Map();
-      const parsedDates = parseDateColumn(tabRows.map(r => String((r.row_json || {})[dateHeader] || '')), {
-        fallbackAnchor: finalYearMonth ? { y: Number(finalYearMonth[1]), m: Number(finalYearMonth[2]) } : undefined,
-      });
       parsedDates.forEach(d => { if (d) dateCount.set(d, (dateCount.get(d) || 0) + 1); });
       const { rows: sourcePlans } = await client.query(
         `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count
@@ -2934,33 +2959,40 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
           WHERE campaign_id=$1 AND plan_date=$2::date
           FOR UPDATE`, [campaignId, removedDate]);
       const sourceCount = sourcePlans.length ? Number(sourcePlans[0].planned_count) : (dateCount.get(removedDate) || 0);
-      if (sourceCount < 1) throw new HideRowError('removed_date_plan_invalid');
-      await client.query(
-        `UPDATE campaign_daily_plans
-            SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
-          WHERE campaign_id=$1 AND plan_date=$2::date`,
-        [campaignId, finalPlan.date, `행삭제 보충:${by}`.slice(0, 100)]);
-      await client.query(
-        `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
-         VALUES ($1,$2::date,$3,$4,NOW())
-         ON CONFLICT (campaign_id,plan_date) DO UPDATE
-           SET planned_count=EXCLUDED.planned_count, updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
-        [campaignId, removedDate, sourceCount - 1, `행삭제 이동:${by}`.slice(0, 100)]);
+      if (sourceCount >= 1) {
+        await client.query(
+          `UPDATE campaign_daily_plans
+              SET planned_count=planned_count+1, updated_by=$3, updated_at=NOW()
+            WHERE campaign_id=$1 AND plan_date=$2::date`,
+          [campaignId, finalPlan.date, `행삭제 보충:${by}`.slice(0, 100)]);
+        await client.query(
+          `INSERT INTO campaign_daily_plans (campaign_id, plan_date, planned_count, updated_by, updated_at)
+           VALUES ($1,$2::date,$3,$4,NOW())
+           ON CONFLICT (campaign_id,plan_date) DO UPDATE
+             SET planned_count=EXCLUDED.planned_count, updated_by=EXCLUDED.updated_by, updated_at=NOW()`,
+          [campaignId, removedDate, sourceCount - 1, `행삭제 이동:${by}`.slice(0, 100)]);
+        planMoved = true;
+      }
     }
-    await client.query(
-      `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
-       VALUES ($1,$2,'participant_delete_replenish',$3::jsonb)`,
-      [campaignId, String(by).slice(0, 100), JSON.stringify({ removedSeq: row.seq, removedDate, finalDate: finalPlan.date, added: 1 })]);
+    if (campaignId) {
+      await client.query(
+        `INSERT INTO campaign_plan_events (campaign_id, actor, action, detail)
+         VALUES ($1,$2,'participant_delete_replenish',$3::jsonb)`,
+        [campaignId, String(by).slice(0, 100),
+          JSON.stringify({ removedSeq: row.seq, removedDate, finalDate: finalPlan && finalPlan.date, added: 1, planMoved })]);
+    }
     return {
       removed: removed.rowCount,
       participationLinksRemoved: links.rowCount,
       applicationsCancelled: applications.rowCount,
       replenished: 1,
-      finalPlanDate: finalPlan.date,
+      campaignScope,
+      planMoved,
+      finalPlanDate: finalPlan ? finalPlan.date : null,
+      replacementDate: finalDateLabel || null,
       replacementSeq: replacement.rows[0] && replacement.rows[0].seq,
     };
 }
-
 
 // 작업보드 행 삭제. 이 행이 "실제 리뷰어의 구매기록"이면 그 구매양식까지 함께 취소한다.
 // ★ 총 모집인원은 줄이지 않는다 — 지운 자리는 마지막 진행일의 빈 자리로 보충되어
