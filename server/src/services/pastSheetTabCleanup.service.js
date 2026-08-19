@@ -70,7 +70,8 @@ const _SCAN_SQL = `
          COALESCE(tc.tab_gid, '')          AS "tabGid",
          COALESCE(tc.sheetless, FALSE)     AS sheetless,
          COALESCE(tc.is_closed, FALSE)     AS "isClosed",
-         c.created_at                      AS "registeredAt",
+         (SELECT MIN(c.created_at) FROM campaigns c
+           WHERE c.sheet_id = tc.sheet_id) AS "registeredAt",
          ${ACTIVITY_SELECT_SQL},
          arch."isArchived",
          archg."archivedGidOnly",
@@ -78,9 +79,12 @@ const _SCAN_SQL = `
          ord."pendingOrders",
          camp."activeCampaigns",
          idx."indexRows"
+    /* ★★ campaigns 는 UNIQUE(sheet_id, campaign_name) — **한 시트에 여러 행**이 있을 수 있다.
+     *   여기를 LEFT JOIN campaigns ON sheet_id 로 붙이면 그 시트의 **모든 탭이 배수로 불어나**
+     *   총계·"지금도 읽는 수"·목록이 전부 부풀고, 화면에는 **똑같은 줄이 여러 개** 보인다
+     *   (2026-08-19 실측: 어니스트캄 시트의 탭들이 2줄씩). 등록일은 스칼라 서브쿼리로 읽는다
+     *   — 반영 점검(sheetSyncAudit)이 같은 자리를 이미 이렇게 쓰고 있다(같은 값·같은 형태). */
     FROM tab_configs tc
-    LEFT JOIN campaigns c
-      ON c.sheet_id = tc.sheet_id
     ${ACTIVITY_LATERAL_SQL}
     /* ★★ 아카이브 판정은 smartBuild 와 글자 그대로 같은 규칙이어야 한다 —
      *   indexBuilder 는 sheet_id||tab_name 키 집합으로만 스킵한다(이름만, gid 미참조).

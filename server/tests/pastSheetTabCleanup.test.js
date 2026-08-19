@@ -282,6 +282,24 @@ const ROWS = [
     assert.equal(cls({ sheetless: true, liveTabName: '바뀐이름' }).reason, 'already_sheetless');
   });
 
+  t('4d: 행을 부풀리는 조인이 없다 — 탭 하나에 결과 한 줄', () => {
+    // ★★ `campaigns` 는 UNIQUE(sheet_id, campaign_name) 이라 **한 시트에 여러 행**이 정상이다.
+    //   시트 단위 JOIN 이면 그 시트의 **모든 탭이 배수**가 되어 총계·목록이 부푼다
+    //   (2026-08-19 실측: 화면에 같은 줄 2개, 진짜 PG 로 12→24 재현).
+    // ★ 낱말로 찾으면 **주석 문장**이 대신 걸린다(이 레포 상습 함정) — 문장 형태로 본다.
+    //   블록 주석을 정규식으로 지우는 방법은 금지(정규식 리터럴을 물어 파일을 통째로 먹는다).
+    assert.ok(!/^\s*(LEFT\s+)?JOIN\s+campaigns\b/im.test(SRC),
+      'campaigns 를 조인하지 않는다(스칼라 서브쿼리로 읽는다)');
+    assert.ok(/SELECT MIN\(c\.created_at\) FROM campaigns c/.test(SRC.replace(/\s+/g, ' ')),
+      '등록일은 시트 단위 최솟값 — 반영 점검과 같은 형태');
+    // 다른 LATERAL 들은 전부 집계/LIMIT 1 이라 행을 늘리지 않는다
+    const laterals = SRC.match(/LEFT JOIN LATERAL \(([\s\S]*?)\) \w+ ON TRUE/g) || [];
+    assert.ok(laterals.length >= 4, 'LATERAL 개수 (받음 ' + laterals.length + ')');
+    for (const l of laterals) {
+      assert.ok(/COUNT\(|MAX\(|MIN\(|LIMIT 1/.test(l), '행을 늘리지 않는 LATERAL: ' + l.slice(0, 60));
+    }
+  });
+
   /* ── 8d) 아카이브 판정 = smartBuild 와 같은 규칙 ─────────
    *  이 판정은 "그 탭이 무엇인가"가 아니라 **"저쪽(smartBuild)이 읽는가"** 다.
    *  더 넓게 잡으면(gid 폴백) 이름이 바뀐 탭이 "이미 안 읽음"으로 접혀 **정리 대상이 사라진다**
