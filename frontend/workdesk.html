@@ -4371,14 +4371,14 @@ function renderWorkdesk(wd){
   const warn=[];
   if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
   if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
-  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원 행">중복 신원 ${c.ambiguous}</span>`);
+  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="같은 주문·신원이 여러 줄이라 수정 오버레이를 적용하지 않은 행 — 중복 줄을 먼저 정리해야 합니다">중복 줄 ${c.ambiguous}</span>`);
   let tableSection;
   if(gridMode){
     tableSection = buildGrid(wd);
   } else {
     const rows=(wd.roster||[]).map((r,displayIndex)=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${displayIndex+1}</td>`+
       `<td class="gidlock" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}`+
-      `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}</td>`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="같은 주문·신원이 여러 줄 — 이 행에는 수정 오버레이(입금일 포함)를 적용하지 않습니다">⚠중복</span>':''}</td>`+
       `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
@@ -8186,6 +8186,8 @@ async function _pmOpenDepositAnomalies(){
     ${r.ambiguousUnavailable?`<div class="muted">${esc(r.ambiguousUnavailable)}</div>`:rowsOf(r.ambiguousMarks,[['작업',x=>x.tabName],['앵커',x=>x.anchorType],['입금일',x=>x.stamp],['줄 수',x=>x.rowCount],['줄 번호',x=>(x.rows||[]).join(', ')]])}
     <div style="margin:16px 0 6px"><b>② 리뷰 미작성인데 입금 기록됨</b> — ${n(r.paidWithoutSubmitCount,r.paidWithoutSubmitUnavailable)}</div>
     ${r.paidWithoutSubmitUnavailable?`<div class="muted">${esc(r.paidWithoutSubmitUnavailable)}</div>`:rowsOf(r.paidWithoutSubmit,[['작업',x=>x.tabName],['줄',x=>x.rowIndex],['참여자',x=>x.reviewerName]])}
+    <div style="margin:16px 0 6px"><b>④ 수정 오버레이로 남은 입금 표기</b> — ${n(r.overlayMarkCount,r.overlayUnavailable)}${r.overlayUnavailable?'':` · 그중 여러 줄에 번지는 것 ${Number(r.overlaySpreadCount||0)}건`}</div>
+    ${r.overlayUnavailable?`<div class="muted">${esc(r.overlayUnavailable)}</div>`:`${r.overlayByDate&&Object.keys(r.overlayByDate).length?`<div class="muted" style="margin-bottom:6px">날짜별: ${Object.entries(r.overlayByDate).map(([d,v])=>`<b>${esc(d)}</b> ${v.marks}건(번짐 ${v.spread})`).join(' · ')}</div>`:''}${rowsOf(r.overlayMarks,[['작업',x=>x.tabName],['앵커',x=>x.anchorType],['입금일',x=>x.stamp],['가리키는 줄',x=>x.rowCount],['줄 번호',x=>(x.rows||[]).filter(v=>v!=null).join(', ')],['기록자',x=>x.createdBy]])}`}
     <div style="margin:16px 0 6px"><b>③ 같은 사람·같은 날짜 입금 원장 중복</b> — ${n(r.duplicateLedgerCount,r.duplicateLedgerUnavailable)}</div>
     ${r.duplicateLedgerUnavailable?`<div class="muted">${esc(r.duplicateLedgerUnavailable)}</div>`:rowsOf(r.duplicateLedger,[['작업',x=>x.tabName],['참여자',x=>x.reviewerName],['입금일',x=>String(x.paidDate||'').slice(0,10)],['원장 수',x=>x.records],['줄 번호',x=>(x.rows||[]).join(', ')]])}`;
 }
