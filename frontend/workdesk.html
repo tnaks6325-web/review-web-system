@@ -4741,15 +4741,23 @@ async function openTaskDelete(i){
     <li>연결된 <b>모집공고 ${camps.length}건</b>은 지우지 않고 <b>보관 처리</b>합니다(참여 이력·리뷰비 기록 보존).</li>
     <li>구글시트 파일·탭은 <b>건드리지 않습니다</b>(목록에서만 사라집니다).</li>
   </ul>`;
+  /* ★ 입금 기록이 걸린 작업 — 막지는 않되(사용자 확정 2026-08-19) **별도 체크 + 별도 버튼**으로만
+       진행한다. 실수로 눌리면 그 리뷰어가 미입금으로 보여 다음 회차에 다시 담길 수 있다. */
   if(j.blocked){
-    _tdShell(`<div class="wbl-dh">🗑 작업 삭제</div>
+    _tdShell(`<div class="wbl-dh">🗑 작업 삭제 — 입금 기록이 걸려 있습니다</div>
       <div class="wbl-db"><b>${esc(j.tab&&j.tab.displayName||t.tabName)}</b>
-        <div class="wbl-sub">${esc(t.tabName)}</div>${facts}
-        <div class="tdbad"><b>이 작업은 삭제할 수 없습니다 — 입금 기록이 걸려 있습니다.</b><br>
-          ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}<br>
-          지우면 남은 줄이 미입금으로 보여 <b>다음 회차에 다시 담기고 이중 송금</b>이 납니다.
-          입금관리에서 정리한 뒤 다시 시도하거나, [🏁 마감]으로 목록에서 내려 주세요.</div></div>
-      <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">닫기</button></div>`);
+        <div class="wbl-sub">${esc(t.tabName)} · ${esc(t.advertiserName||'업체 미지정')}</div>
+        ${facts}
+        <div class="tdbad"><b>이 작업에는 입금 기록이 있습니다 — ${j.money.map(m=>esc(m.label)+' '+m.count+'건').join(' · ')}</b><br>
+          지우면 그 리뷰어 줄이 <b>미입금으로 보여 다음 회차에 다시 담기고 이중 송금</b>이 날 수 있습니다.
+          지우지 않고 목록에서만 내리려면 [🏁 마감]을 쓰세요.<br>
+          <span class="wbl-sub">입금 회차(배치) 자체는 남고, 이 작업의 항목만 지워집니다.</span></div>
+        ${side}
+        <label class="wbl-chk"><input type="checkbox" id="tdOk" onchange="_tdSync()">
+          입금 기록까지 <b>영구히 삭제</b>되는 것을 확인했습니다.
+          <span class="sub">복구 수단이 없습니다 — 지운 뒤에는 백업으로만 되살릴 수 있습니다.</span></label></div>
+      <div class="wbl-df"><button class="wbl-b" onclick="_tdClose()">취소</button>
+        <button class="wbl-b dark" id="tdGo" disabled onclick="_tdGo(true)">🗑 입금 기록까지 삭제</button></div>`);
     return;
   }
   _tdShell(`<div class="wbl-dh">🗑 작업 삭제 — 되돌릴 수 없습니다</div>
@@ -4764,21 +4772,25 @@ async function openTaskDelete(i){
 }
 function _tdSync(){ const ok=document.getElementById('tdOk'), b=document.getElementById('tdGo');
   if(b) b.disabled=!(ok&&ok.checked); }
-async function _tdGo(){
+async function _tdGo(forcePayment){
   const i=STATE.tdI, t=(STATE.tabs||[])[i], ok=document.getElementById('tdOk');
   if(!t||!(ok&&ok.checked)) return;
-  const b=document.getElementById('tdGo'); if(b){ b.disabled=true; b.textContent='삭제 중…'; }
+  const b=document.getElementById('tdGo'), label=b?b.textContent:'';
+  if(b){ b.disabled=true; b.textContent='삭제 중…'; }
   let j=null;
   try{ j=await api('/api/trackb/work-tab/delete',{method:'POST',
-    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,confirm:true})}); }
+    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,confirm:true,forcePayment:forcePayment===true})}); }
   catch(e){ j={ok:false,error:e&&e.message}; }
   if(!j||j.ok===false){
-    if(b){ b.disabled=false; b.textContent='🗑 삭제'; }
+    if(b){ b.disabled=false; b.textContent=label||'🗑 삭제'; }
+    // ★ 미리보기 이후에 입금 회차에 담긴 경우(TOCTOU) — 사유를 알리고 확인 화면을 다시 그린다.
+    if(j&&j.code==='payment_locked'){ toast('⚠ 그 사이 입금 기록이 생겼습니다 — 다시 확인해 주세요'); openTaskDelete(i); return; }
     toast('⚠ 삭제 실패: '+((j&&(j.error||j.message))||''));
     return;
   }
   _tdClose();
-  toast(`🗑 삭제 완료 — ${j.totalRows}행${j.campaignsArchived?` · 공고 ${j.campaignsArchived}건 보관`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
+  const pay=(j.paymentDeleted||[]).reduce((n,m)=>n+(m.count||0),0);
+  toast(`🗑 삭제 완료 — ${j.totalRows}행${pay?` · 입금 기록 ${pay}건 포함`:''}${j.campaignsArchived?` · 공고 ${j.campaignsArchived}건 보관`:''}${j.workOrdersUnlinked?` · 작업오더 ${j.workOrdersUnlinked}건 연결 해제`:''}`);
   try{ await loadTabs(); }catch(_){ toast('삭제는 완료됐습니다. 목록 새로고침에 실패했으니 새로고침해 주세요.'); }
 }
 
