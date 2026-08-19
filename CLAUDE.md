@@ -40,6 +40,15 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **사고(2026-08-05)**: 작업시트탭URL의 gid가 그 시트에 없어(탭 삭제 후 재생성 = gid 변경 / 다른 시트의 gid) 접수가 404 막다른 길. `getSpreadsheetMeta`는 무캐시 실시간 조회라 이 404 = **시트에 그 gid 탭이 진짜 없음**이다.
 - **해결**: `/api/order/admin/accept` 404에 `gidNotFound`+`availableTabs`(실제 탭 목록) 동봉 → 공유 팝업 `woAcceptTabPicker`(work-order-detail.js, admin·workdesk 공용)에서 **사람이 탭을 골라** `body.gid`로 재접수. 서버는 고른 gid를 URL gid보다 우선하고 **`work_sheet_url`도 함께 교정**(COALESCE — 교정 시에만, 안 고치면 프리필·재접수가 계속 죽은 gid를 본다). ★ **자동 이름매칭 폴백 금지**(잘못된 탭 연결이 빈칸보다 나쁨) ★ 탭명은 시트발 외부 문자열 — 팝업은 textContent+addEventListener만(onclick 보간 금지). 회귀가드 `tests/orderAcceptTabPicker.test.js`(10케이스 — 팝업 vm 실행 XSS 포함).
 
+### ★★ 접수 시 "동일 이름의 기존 광고주" — 자동 병합 금지 / 사람이 확인하면 연결 (2026-08-19)
+- **사고**: 인트라넷 오더에 실려 오는 `intranet_advertiser_id` 로 업체를 연결하는데(103), **업체관리에서 먼저 만든 업체는 그 칸이 빈 값**이라 이름이 겹치는 순간 접수가 `409 광고주 작업 연결을 완료하지 못했습니다`로 **영구히 막혔다**. 그 칸을 채울 창구가 화면 어디에도 없어(쓰는 곳이 접수 경로 하나뿐) 오류 문구가 시키는 "원본 연결 확인"을 할 방법 자체가 없었다.
+- ★★ **이름으로 자동 병합하지 않는다(완화 금지)** — 업체는 작업 소유·정산 계약·**광고주 접속 링크(로그인 없이 열리는 URL)** 가 매달린 단위라, 동명 오판 한 번이 남의 작업·연락처·정산 금액을 통째로 여는 사고다. 판정 근거는 여전히 `intranet_advertiser_id` 하나(103 규율).
+- **해결 = 확인 후 연결**: 충돌 시 409 에 `advertiserNameConflict{ name, businessNumber, contact, candidates[] }`(후보의 사업자번호·연락처·담당AE·소유 작업 수)를 실어 주고, 공유 팝업 `woAdvertiserLinkPicker`(work-order-detail.js — 관리자 대시보드·리뷰웹시스템[3버전] 공용)에서 사람이 [같은 업체입니다 · 연결하고 접수]를 누르면 `body.linkAdvertiserId` 로 재접수한다. 서버는 그때만 그 업체에 원본 ID 를 **blank-only 백필**한다. gid 미발견 재접수(`woAcceptTabPicker`)와 같은 패턴.
+- ★ **fail-closed 3종**: 이미 다른 인트라넷 광고주에 연결된 업체는 거부(남의 원본 탈취 금지 — 팝업에서도 **비활성 + 사유**) · 그 사이 업체명이 바뀌면 거부(판단 근거가 달라졌다) · 백필 UPDATE 0행이면 실패(경합을 성공으로 읽지 않는다). 충돌은 **ROLLBACK** 이라 advertisers 에 INSERT/UPDATE 가 한 줄도 남지 않는다.
+- ★ **원본 ID 매칭이 최우선** — 확인값이 실려 와도 그 인트라넷 광고주가 이미 다른 업체에 연결돼 있으면 그 업체가 이긴다. **인트라넷 원본 ID 가 없는 오더는 무동작**(기존 동작 불변).
+- ★ **연결 로직은 서비스 한 곳** `advertiserProjection.service.js`(`projectIntranetAdvertiser`) — order.routes 의 인라인 사본을 이관(테스트 seam 확보 + 사본 금지). ★ 이름이 정말 다른 회사면 연결하지 말고 **업무포털 거래처 관리에서 기존 업체명을 구분되게 바꾼 뒤 재접수**(`advertisers.name` 이 UNIQUE 라 같은 이름으로는 새로 만들 수 없다 — 팝업이 이 사실을 문장으로 안내).
+- 회귀가드 `tests/advertiserNameLinkConfirm.test.js`(22케이스 — 스텁 pool 로 서비스 **실제 실행**(충돌 시 쓰기 0·blank-only·fail-closed 3종·원본 우선) + 라우트/화면 배선) + 실 http 오리진 브라우저 실측(body 직속·후보 렌더·비활성 후보·확인 후 id 반환). ⚠ 이 변경으로 `orderAcceptTabPicker` 의 재접수 배선 패턴(인자 추가)과 `reviewOrderAdvertiserProjection` 의 대상 파일을 함께 갱신했다(검사 의미 불변).
+
 ### 작업오더 관리자 수동 수정 (인트라넷 보낸오더카드 동기화)
 - **시안** `frontend/docs/작업오더_관리자수정_와이어프레임.html`(2026-08-05 확정). `PUT /api/order/admin/edit`(adminOrMaster) + `PUT /api/trackb/work-orders/edit`(`_delegate` 위임, internal+**editorOnly** — 접수·상태변경과 같은 2단 권한). 화이트리스트 `ADMIN_EDIT_FIELDS` 부분수정(PATCH), **빈 값 = "지움"이 아니라 "변경 없음"**(칸 비우기 사고 방지), 같은 값 = no-op(메모 도배 방지).
 - ★ **편집 불가 3종(완화 금지)**: `status`(전용 [상태 변경] 흐름) · 계약건 `sales_id/contract_number/quote_id`(인트라넷 발주 확정값·정산 매칭 보호) · `work_sheet_url`(접수·작업표 생성·gid 교정 재접수가 관리). `guide_images`는 1차 제외(업로드 UI 필요).
