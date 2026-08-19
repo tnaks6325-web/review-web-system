@@ -3495,11 +3495,32 @@ function _campOwnerTable(rows, now) {
   </div>`;
 }
 
-/** 확정으로 안 잡힌 시트 행 목록 — "몇 행의 누구"인지 바로 짚어준다.
+/** 📋 대조 카드 어휘 단일 출처 — 무시트 작업(탈 구글시트)에는 "시트"라고 쓰지 않는다.
+ *  ★★ 판정은 서버가 실어 준 `sheetInfo.sheetless` 하나다(ID 모양으로 추측하지 않는다 —
+ *     이관된 작업은 진짜 시트 ID 를 그대로 쓰면서 무시트가 된다).
+ *  ★ 필드가 아예 없으면(구버전 백엔드) 종전 어휘를 그대로 쓴다 — 모르는 것을 "작업표"로
+ *    단정하면 시트 기반 작업에서 담당자가 시트를 보지 않게 된다(그게 더 위험한 오표시).
+ *  ★ 어휘를 함수 하나에 모으는 이유: 종전엔 같은 카드 안에서 '시트 로스터'·'시트 행'·
+ *    '시트 반영'이 제각기 하드코딩돼, 한 곳만 고치면 카드 안에서 말이 갈렸다. */
+function _srcWords(sheetless) {
+  return sheetless === true
+    ? { src: '작업표', roster: '작업표 줄', rows: '작업표 줄', title: '작업표 대조',
+        sched: '작업표 일정', dates: '작업표 날짜',
+        // ★ 무시트는 큐를 타지 않는다 — 제출 경로가 작업표에 바로 쓰고, 실패분은 자동 인계(10분)가 메운다
+        behind: '작업표 기록이 아직 안 됐거나(자동 인계 대기 — 최대 10분) 줄이 정리됐을 수 있습니다.',
+        noMirror: '이 작업의 장부가 아직 만들어지지 않았습니다. 잠시 후 다시 확인하세요.' }
+    : { src: '시트', roster: '시트 로스터', rows: '시트 행', title: '시트 대조',
+        sched: '시트 일정', dates: '시트 날짜',
+        behind: '시트 반영이 아직 안 됐거나(큐 대기) 로스터 행이 지워졌을 수 있습니다.',
+        noMirror: '이 탭이 아직 미러링되지 않았습니다(최대 5분). 잠시 후 다시 확인하세요.' };
+}
+
+/** 확정으로 안 잡힌 줄 목록 — "몇 행의 누구"인지 바로 짚어준다.
  *  ★ 캠페인 정원은 '위치'가 아니라 '숫자'(총원 − 확정)로 계산된다. 이 목록은 그 차이가
  *    시트의 어느 줄에서 비롯됐는지 찾아주는 것이지, 시스템이 그 줄을 비었다고 보는 게 아니다. */
-function _campUnmatchedRows(list) {
+function _campUnmatchedRows(list, w) {
   if (!Array.isArray(list) || !list.length) return "";
+  w = w || _srcWords(false);
   const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const items = list.slice(0, 30).map(u =>
     `<span style="display:inline-block;background:#fff;border:1px solid #FDE68A;border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
@@ -3507,7 +3528,7 @@ function _campUnmatchedRows(list) {
     + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
     + `</span>`).join("");
   return `<div style="margin-top:5px">`
-    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 시트 행</div>`
+    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 ${w.rows}</div>`
     + items
     + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">연락처(끝 8자리)로 대조합니다. 연락처가 비어 있는 행은 대조가 불가능해 항상 여기에 나옵니다.</div>`
     + `</div>`;
@@ -3517,6 +3538,7 @@ function _campUnmatchedRows(list) {
  *  ★ 관측 전용이다. 여기 표시된 값이 캠페인 상태를 바꾸지 않는다(자동 종료 없음). */
 function _campSheetInfo(si) {
   if (!si) return "";
+  const w = _srcWords(si.sheetless);
   const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const box = (bg, bd, html) => `<div style="margin:2px 0 12px;background:${bg};border:1px solid ${bd};border-radius:10px;padding:10px 12px;font-size:.74rem;line-height:1.65">${html}</div>`;
   const md = d => { const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(d || ""); return m ? `${+m[1]}/${+m[2]}` : (d || ""); };
@@ -3525,14 +3547,14 @@ function _campSheetInfo(si) {
   // ① 로스터 대조 — 차이가 있으면 그 수만큼 "시트엔 있는데 확정이 아닌 자리"다
   if (si.rosterRows > 0) {
     const diff = Number(si.diff) || 0;
-    parts.push(`<b>시트 로스터</b> ${si.rosterRows}행 · <b>확정</b> ${si.confirmed}건`
+    parts.push(`<b>${w.roster}</b> ${si.rosterRows}행 · <b>확정</b> ${si.confirmed}건`
       + (diff > 0
         ? ` → <span style="color:#B45309;font-weight:800">차이 ${diff}건</span>`
-          + `<div style="color:#6B7280;font-size:.7rem">시트에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
-          + _campUnmatchedRows(si.unmatched)
+          + `<div style="color:#6B7280;font-size:.7rem">${w.src}에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
+          + _campUnmatchedRows(si.unmatched, w)
         : diff < 0
           ? ` → <span style="color:#B45309;font-weight:800">확정이 ${-diff}건 더 많음</span>`
-            + `<div style="color:#6B7280;font-size:.7rem">시트 반영이 아직 안 됐거나(큐 대기) 로스터 행이 지워졌을 수 있습니다.</div>`
+            + `<div style="color:#6B7280;font-size:.7rem">${w.behind}</div>`
           : ` <span style="color:#065F46;font-weight:800">✓ 일치</span>`));
   }
   // ② 시트 일정 적용 여부 — 미적용이면 왜인지(하루 완결·미러 미도달 등)
@@ -3541,23 +3563,23 @@ function _campSheetInfo(si) {
     const why = {
       applied: null,
       // ★ 기준이 시스템표(기본)일 때 — 시트에 날짜가 있어도 정원·마감은 시스템 값이 정한다
-      system_basis: "이 시스템은 <b>모집 인원 기준이 시스템표</b>입니다 — 시트에 진행 날짜가 있어도 그날 정원·마감일은 <b>일 모집인원 · 날짜별 조절 · 총모집(차수)</b>이 정합니다(아래 날짜는 시트 현황 참고용).",
-      single_date: `시트 날짜가 <b>${esc(md(s.firstDate))} 하루</b>뿐이라 <b>시트 일정이 적용되지 않습니다</b>(날짜 2종 이상일 때만 인식). 마감은 발행폼의 총 모집인원으로 판정됩니다.`,
-      no_parsable_date: "날짜 컬럼의 값을 해석하지 못해 시트 일정이 적용되지 않습니다.",
-      low_parse_ratio: "날짜 컬럼에 해석 불가한 값이 많아 시트 일정이 적용되지 않습니다.",
+      system_basis: `이 시스템은 <b>모집 인원 기준이 시스템표</b>입니다 — ${w.src}에 진행 날짜가 있어도 그날 정원·마감일은 <b>일 모집인원 · 날짜별 조절 · 총모집(차수)</b>이 정합니다(아래 날짜는 ${w.src} 현황 참고용).`,
+      single_date: `${w.dates}가 <b>${esc(md(s.firstDate))} 하루</b>뿐이라 <b>${w.sched}이 적용되지 않습니다</b>(날짜 2종 이상일 때만 인식). 마감은 발행폼의 총 모집인원으로 판정됩니다.`,
+      no_parsable_date: `날짜 컬럼의 값을 해석하지 못해 ${w.sched}이 적용되지 않습니다.`,
+      low_parse_ratio: `날짜 컬럼에 해석 불가한 값이 많아 ${w.sched}이 적용되지 않습니다.`,
       no_date_column: "연결 탭에서 날짜 컬럼(구매일자·시작일 등)을 찾지 못했습니다.",
-      no_mirror: "이 탭이 아직 미러링되지 않았습니다(최대 5분). 잠시 후 다시 확인하세요.",
+      no_mirror: w.noMirror,
       no_tab: "연결된 탭 정보가 없습니다.",
-      error: "시트 일정 조회 중 오류가 발생했습니다.",
+      error: `${w.sched} 조회 중 오류가 발생했습니다.`,
     }[s.reason];
     if (s.applied) {
-      parts.push(`<b>시트 일정</b> 적용 중 · ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · 날짜 ${s.distinctDates}종 / ${s.totalDated}행`);
+      parts.push(`<b>${w.sched}</b> 적용 중 · ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · 날짜 ${s.distinctDates}종 / ${s.totalDated}행`);
     } else if (s.reason === "system_basis") {
       // ★ 이건 이상 상황이 아니라 **정상 기준**이다 — 경고(노란 박스)로 몰지 않는다
       parts.push(`<b>모집 기준</b> 시스템표 · ${why}`
-        + (s.distinctDates ? `<div style="color:#6B7280;font-size:.7rem">시트 날짜: ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · ${s.distinctDates}종 / ${s.totalDated}행</div>` : ""));
+        + (s.distinctDates ? `<div style="color:#6B7280;font-size:.7rem">${w.dates}: ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · ${s.distinctDates}종 / ${s.totalDated}행</div>` : ""));
     } else if (why) {
-      parts.push(`<b>시트 일정</b> <span style="color:#B45309;font-weight:800">미적용</span> — ${why}`
+      parts.push(`<b>${w.sched}</b> <span style="color:#B45309;font-weight:800">미적용</span> — ${why}`
         + (s.distinctDates ? `<div style="color:#6B7280;font-size:.7rem">인식된 날짜: ${s.dates.map(d => esc(md(d.date)) + "(" + d.rows + "행)").join(" · ")}</div>` : ""));
     }
   }
@@ -3566,7 +3588,7 @@ function _campSheetInfo(si) {
   //   전 공고가 상시 노란 박스가 되면 진짜 불일치 신호가 묻힌다(늑대소년 방지).
   const warn = (Number(si.diff) || 0) !== 0 || (s && !s.applied && s.reason !== "system_basis");
   return box(warn ? "#FFFBEB" : "#F0FDF4", warn ? "#FDE68A" : "#BBF7D0",
-    `<div style="font-weight:800;color:${warn ? "#92400E" : "#065F46"};margin-bottom:4px">📋 시트 대조 — ${esc(si.tabName)}</div>` + parts.join('<div style="height:6px"></div>'));
+    `<div style="font-weight:800;color:${warn ? "#92400E" : "#065F46"};margin-bottom:4px">📋 ${w.title} — ${esc(si.tabName)}</div>` + parts.join('<div style="height:6px"></div>'));
 }
 
 async function _loadCampControl(campId) {

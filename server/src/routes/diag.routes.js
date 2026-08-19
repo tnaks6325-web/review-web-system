@@ -2462,6 +2462,22 @@ router.post('/sheetless-worktable-recover', authMiddleware, adminOrMasterMiddlew
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/order-mirror-repair — 작업보드 줄은 있는데 원장만 미완결(`failed` 등)로 굳은
+//   주문의 완결 표시를 정정한다. 판정 근거 = `campaign_participants.order_submission_id` 링크
+//   (기록 성공 후에만 남는 값 — 복구 잡이 "이미 반영됨"을 판정하는 근거와 같다).
+//   ★ dryRun 기본(세어 보고 나서 사람이 실행) · 쓰기 표면 = order_submissions 완결 표시뿐.
+router.post('/order-mirror-repair', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { repairWrittenMarkForBoardRows } = require('../services/sheetlessOrder.service');
+    const b = req.body || {};
+    const limit = Math.min(parseInt(b.limit, 10) || 500, 2000);
+    const dryRun = b.dryRun !== false;          // ★ 명시적으로 false 일 때만 실제 정정
+    const by = (req.admin && req.admin.name) || 'admin';
+    const out = await repairWrittenMarkForBoardRows({ limit, dryRun, by });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/order-flush-tab — 특정 탭만 우선 시트반영(FIFO 우회, 백그라운드)
 //   글로벌 큐는 created_at FIFO라 최근 캠페인 탭이 뒤로 밀린다. 이 엔드포인트는

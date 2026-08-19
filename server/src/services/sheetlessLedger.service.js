@@ -409,40 +409,90 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
        FROM campaign_participants cp
        JOIN order_submissions os ON os.id = cp.order_submission_id
       WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL AND os.deleted_at IS NULL
-        AND length(regexp_replace(COALESCE(os.order_num, ''), '\\D', '', 'g')) >= 6
       ORDER BY cp.seq`, [sheetId, tabName]);
 
-  /* ★★ 그룹 키 = 표 주문번호 + 원장 주문번호 + 연락처 **셋 다**(사용자 확정 2026-08-19).
-     ★ 표에 주문번호가 없거나 6자리 미만인 줄은 **판정 불가 → 대상에서 제외**한다(모르면 안 지운다).
-       원장 값만으로 지우면 화면에서 서로 다른 주문으로 보이는 줄이 사라져 근거를 잃는다. */
-  const groups = new Map();
+  /* ★★ 판정 축 2개 (사용자 확정 2026-08-19) ────────────────────────────────────────
+     ㉮ **표 주문번호 + 원장 주문번호 + 연락처 셋 다 일치** — 재제출로 *주문이 새로 생긴* 중복(종전 규칙 그대로).
+        ★ 표에 주문번호가 없거나 6자리 미만인 줄은 판정 불가 → 제외한다(모르면 안 지운다).
+        ★ 원장 주문번호가 6자리 미만인 줄도 이 축의 대상이 아니다(종전 WHERE 필터와 같은 의미).
+     ㉯ **같은 주문 기록(`order_submission_id`)을 여러 줄이 씀** — *한 주문이 여러 줄에 기록된* 중복.
+        왜 필요한가(실측 2026-08-19 위드프렌즈): 한 주문이 **7줄**에 기록됐는데 뒤쪽 줄들의
+        **표 주문번호가 서로 달라** ㉮ 로는 영원히 안 잡혔고, 그 원장의 주문번호가 비어 있어
+        (비번호 주문) **조회 대상에서조차 빠졌다**. 시스템이 스스로 "한 주문"이라고 말하는 값이라
+        근거가 가장 강하다("주문 1건 = 줄 1개" 를 강제하는 제약이 어디에도 없다는 그 구멍의 수습).
+     ★★ 두 축이 겹치는 줄이 있으면 **한 덩어리로 합쳐 결정을 한 번만** 내린다(같은 줄을 두 번 지우지
+        않고, 남길 줄도 하나만 정해진다). 겹치지 않으면 결과는 종전과 완전히 같다(무회귀). */
+  const parent = rows.map((_, i) => i);
+  const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; };
+
   const noRowOrder = [];
-  for (const r of rows) {
-    if (String(r.roword || '').length < 6) { noRowOrder.push(r); continue; }
-    const key = `${r.roword}\u0000${r.ordnum}\u0000${r.ph}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
-  }
+  const byKeys = new Map();     // ㉮
+  const byOrder = new Map();    // ㉯
+  rows.forEach((r, i) => {
+    if (r.osid) {
+      const k = 'os:' + String(r.osid);
+      if (!byOrder.has(k)) byOrder.set(k, []);
+      byOrder.get(k).push(i);
+    }
+    if (String(r.ordnum || '').length < 6) return;
+    if (String(r.roword || '').length < 6) { noRowOrder.push(r); return; }
+    const k = `${r.roword}\u0000${r.ordnum}\u0000${r.ph}`;
+    if (!byKeys.has(k)) byKeys.set(k, []);
+    byKeys.get(k).push(i);
+  });
+  for (const list of byKeys.values()) for (let j = 1; j < list.length; j++) union(list[0], list[j]);
+  for (const list of byOrder.values()) for (let j = 1; j < list.length; j++) union(list[0], list[j]);
+  // 어느 규칙으로 묶였는지 — 화면이 "왜 이 줄들이 한 묶음인지" 를 말할 수 있어야 한다.
+  const axisOf = new Map();
+  const tagAxis = (map, name) => {
+    for (const list of map.values()) {
+      if (list.length < 2) continue;
+      const root = find(list[0]);
+      if (!axisOf.has(root)) axisOf.set(root, new Set());
+      axisOf.get(root).add(name);
+    }
+  };
+  tagAxis(byKeys, 'keys'); tagAxis(byOrder, 'order');
+
+  const groups = new Map();
+  rows.forEach((r, i) => {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, { root, rows: [] });
+    groups.get(root).rows.push(r);
+  });
 
   const removeSeqs = [];
   const removeOsIds = [];
   const plan = [];
   const skipped = [];
-  for (const list of groups.values()) {
+  /* ★★ 남길 줄이 쓰는 주문은 **절대 취소하지 않는다** — ㉯ 축의 지울 줄들은 남길 줄과
+     **같은 주문 기록**을 공유하므로, 그대로 취소하면 살아남은 줄의 주문까지 함께 사라진다. */
+  const keepOsIds = new Set();
+  let sameOrderGroups = 0;   // 발생 시각을 알 수 없는 그룹(㉯ 축만) — 조용히 빼지 않고 고지한다
+  for (const g of groups.values()) {
+    const list = g.rows;
     if (list.length < 2) continue;
     const keep = list[0];                      // 가장 이른 seq (조회가 seq 오름차순)
     const losers = list.slice(1);
+    const matchedBy = [...(axisOf.get(g.root) || [])];
     const blockedPayment = losers.filter(r => r.in_payment);
     const blockedUsed = losers.filter(r => (r.submitted && !keep.submitted) || (r.paid && !keep.paid));
     /* ★★ "언제 생긴 중복인가" — 판정에는 쓰지 않고 **보여주기만** 한다.
        재발 방지(2026-08-19)가 실제로 듣고 있는지는 이 값 하나로 판별된다: 남은 목록이
        전부 그 이전 날짜면 **정리 안 한 과거분**이고, 그 이후 날짜가 보이면 **아직 새는 구멍**이 있다.
-       ★ 기준은 **늦게 들어온 줄(losers)** 의 제출 시각 — 먼저 들어온 줄은 정상 참여다. */
-    const _lastAt = losers.reduce((m, r) => (r.at && (!m || r.at > m) ? r.at : m), null);
+       ★ 기준은 **늦게 들어온 줄(losers)** 의 제출 시각 — 먼저 들어온 줄은 정상 참여다.
+       ★★ 단 **남길 줄과 같은 주문을 쓰는 줄(㉯ 축)은 세지 않는다** — 그 시각은 "중복이 생긴 때" 가
+          아니라 "그 주문이 접수된 때" 다. 오늘 들어온 주문이 여러 줄에 기록되면 발생 시점과 무관하게
+          오늘 날짜가 찍혀 **"배포 이후에 또 샜다" 는 빨간 경고가 오탐으로 뜬다**(2026-08-19 실측).
+          작업표 줄이 언제 만들어졌는지는 이 원장에 없으므로 **모른다고 둔다**(0 이나 오늘로 꾸미지 않는다). */
+    const _newOrderLosers = losers.filter(r => String(r.osid || '') !== String(keep.osid || ''));
+    const _lastAt = _newOrderLosers.reduce((m, r) => (r.at && (!m || r.at > m) ? r.at : m), null);
+    if (!_newOrderLosers.length) sameOrderGroups++;
     if (blockedPayment.length || blockedUsed.length) {
       skipped.push({
         orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
-        seqs: list.map(r => r.seq), lastAt: _lastAt,
+        seqs: list.map(r => r.seq), lastAt: _lastAt, matchedBy,
         reason: blockedPayment.length ? 'in_payment_batch' : 'used_row_is_not_first',
         keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq),
         detail: blockedPayment.length
@@ -453,9 +503,10 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
     }
     plan.push({
       orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
-      keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq), lastAt: _lastAt,
+      keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq), lastAt: _lastAt, matchedBy,
     });
-    for (const r of losers) { removeSeqs.push(r.seq); if (r.osid) removeOsIds.push(r.osid); }
+    if (keep.osid) keepOsIds.add(String(keep.osid));
+    for (const r of losers) { removeSeqs.push(r.seq); if (r.osid) removeOsIds.push(String(r.osid)); }
   }
 
   /* ★★ 보류 건에는 **이체 내역을 붙여 준다** — 보류의 대부분은 "지울 줄이 입금 회차에 담김" 인데,
@@ -498,11 +549,18 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
     }
   }
 
+  const cancelOsIds = [...new Set(removeOsIds)].filter(id => !keepOsIds.has(id));
   const lastDupAt = [...plan, ...skipped]
     .reduce((m, g) => (g.lastAt && (!m || g.lastAt > m) ? g.lastAt : m), null);
   const stat = {
     sheetId, tabName, boardRows: rows.length, skippedNoRowOrder: noRowOrder.length, lastDupAt,
-    groups: plan.length, removeRows: removeSeqs.length,
+    groups: plan.length, removeRows: removeSeqs.length, cancelOrders: cancelOsIds.length,
+    /* 발생 시각을 알 수 없는 그룹 수 — 화면이 "이만큼은 이 판정에 안 들어갔다" 고 말한다. */
+    sameOrderGroups,
+    /* 어느 규칙이 몇 그룹을 잡았는지 — ㉯(같은 주문 기록) 축이 실제로 듣고 있는지 이 값으로 갈린다. */
+    byAxis: [...plan, ...skipped].reduce((a, g) => {
+      for (const k of (g.matchedBy || [])) a[k] = (a[k] || 0) + 1; return a;
+    }, {}),
     skippedGroups: skipped.length, plan: plan.slice(0, 100), skipped: skipped.slice(0, 100),
   };
   if (dryRun) return { ...stat, dryRun: true };
@@ -511,8 +569,10 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   /* ★ 작업표 쓰기는 participants.service 소유(쓰기 소유자 규율) — 여기는 판정·순서·장부만. */
   const r = await require('./participants.service')
     .retireRows({ sheetId, tabName, seqs: removeSeqs, dryRun: false, by: `dedupe:${by}` });
+  /* ★★ 남길 줄이 그 주문을 쓰고 있으면 취소하지 않는다(위 keepOsIds 규율) — ㉯ 축에서는
+     지울 줄과 남길 줄이 **같은 주문 기록**을 공유하므로 그대로 넘기면 살아남은 줄의 주문이 사라진다. */
   const canceled = await require('./orderLedger.service')
-    .softDeleteDuplicateOrders(removeOsIds, `dedupe:${by}`);
+    .softDeleteDuplicateOrders(cancelOsIds, `dedupe:${by}`);
 
   let ledger = null, ledgerError = null;
   try {
@@ -559,7 +619,7 @@ async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeR
           sheetId: t.sheetId, tabName: t.tabName, label: t.label,
           boardRows: r.boardRows, groups: r.groups, removeRows: r.removeRows,
           skippedGroups: r.skippedGroups, skippedNoRowOrder: r.skippedNoRowOrder || 0,
-          lastDupAt: r.lastDupAt || null,
+          lastDupAt: r.lastDupAt || null, sameOrderGroups: r.sameOrderGroups || 0,
         });
       }
     } catch (e) {
@@ -573,6 +633,8 @@ async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeR
   out.totalSkipped = out.tabs.reduce((n, t) => n + t.skippedGroups, 0);
   /* ★ 전 작업 통틀어 가장 최근에 생긴 중복 — "지금도 늘어나는가" 의 답. */
   out.lastDupAt = out.tabs.reduce((m, t) => (t.lastDupAt && (!m || t.lastDupAt > m) ? t.lastDupAt : m), null);
+  /* 발생 시각을 알 수 없는 그룹(㉯ 축만) — 조용히 빼면 "배포 이후 유입 0" 으로 오독된다. */
+  out.sameOrderGroups = out.tabs.reduce((n, t) => n + (t.sameOrderGroups || 0), 0);
   logger.info(`[sheetlessLedger] 중복 일괄 점검 by=${by} 탭 ${out.scanned}개 · 해당 ${out.tabs.length}개 · ` +
     `정리대상 ${out.totalRemoveRows}줄 · 보류 ${out.totalSkipped}건 · 실패 ${out.failed}`);
   return out;
