@@ -2708,6 +2708,30 @@ router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+/* ⚠중복(앵커 겹침) 진단 — **읽기 전용**. 그리드 배지 `중복 줄 N` 의 실체를 그룹별로 보여준다.
+   왜: 배지(앵커 겹침 · 무링크 줄 포함)와 ♻ 정리(`dedupeRows` · 링크된 줄 + 주문번호/연락처 3개 일치)는
+   보는 집합도 키도 달라 "중복 줄 116 · 정리 대상 0" 이 정상적으로 나온다(2026-08-19 장수산업).
+   그 116줄이 무엇인지 볼 창구가 없으면 담당자가 원인을 엉뚱한 데서 찾는다.
+   ★ 게이트 = adminOrMaster — 결과에 참여자 이름·연락처 뒤8·주문번호가 실린다(정리 도구와 같은 급).
+     화면 버튼도 같은 조건에서만 그린다(눌러도 403 나는 죽은 버튼 금지).
+   ★ 쓰기 0(dedupe 대조도 dryRun) · 시트/Drive 무접촉. */
+router.get('/worktable/ambiguous-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { ambiguousRowReport } = require('../services/trackB.service');
+    try {
+      res.json(await ambiguousRowReport({
+        sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
+      }));
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      if (/필수/.test(String(e && e.message))) return res.status(400).json({ ok: false, error: e.message });
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 작업보드 중복 줄 **일괄 점검** — 어느 작업에 중복이 남아 있는지 한 번에 본다.
    ★ 읽기 전용(모든 판정이 dryRun) · 정리 실행은 여전히 작업별 `dedupe-rows` 로만.
    ★ adminOrMaster — 정리와 같은 게이트(결과에 참여자 이름·연락처 뒤4가 실린다). */
