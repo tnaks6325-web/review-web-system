@@ -8734,6 +8734,10 @@ async function submitOrderForm() {
   }
 
   // ★ 입금받을 계좌정보 저장 (1번 카드 은행/계좌/예금주 기준, 리뷰어 마스터에 영구 저장, 백그라운드)
+  // ★★ onlyIfEmpty = 빈 칸일 때만 채운다(덮어쓰지 않는다). 1번 카드가 타계정 명의면 그 계좌가
+  //   로그인 리뷰어의 마스터 계좌를 덮어 **본인 리뷰비가 타계정 계좌로 송금**된다(입금 대상 추출은
+  //   본인 건에 reviewers.bank_account 를 그대로 쓴다). 계좌는 제출 필수 게이트(profileMissing)라
+  //   이 호출이 닿는 시점엔 이미 등록돼 있어 사실상 덮어쓰기뿐이었다. 계좌 "변경"은 내정보 화면에서.
   if (successCount > 0 && (firstBank || firstAccount || firstDepositor)) {
     try {
       const authRawBank = localStorage.getItem("rapp_reviewer_auth");
@@ -8747,6 +8751,7 @@ async function submitOrderForm() {
           bankName:      firstBank,
           bankAccount:   firstAccount,
           accountHolder: firstDepositor,
+          onlyIfEmpty:   true,
         })
           .then(r => { if (r?.ok) console.log("[saveBankInfo] 저장 완료"); })
           .catch(e => console.warn("[saveBankInfo] 저장 실패:", e.message));
