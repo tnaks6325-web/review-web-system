@@ -188,7 +188,10 @@ async function listPaymentTargets(opts = {}) {
     const camp = campMap[key] || null;
     const tab = tabMap[key] || null;
     const ord = orderMap[key + '||' + r.rowIndex] || null;
-    const acct = acctMap[r.phone8] || ownerAcctMap[key + '||' + r.rowIndex] || null;
+    // 계좌 해석 순서 = ① 등록 계좌(연락처 매칭) → ② 소유자 링크 → ③ **그 건의 제출 계좌**
+    // ★ 등록 계좌가 언제나 이긴다(관리 원장이 진실원본 — 기존 동작 보존). ③ 은 등록된 계좌를
+    //   어디서도 못 찾았을 때만 쓰는 마지막 근거이고, accountRef 가 없어 화면 보완 대상이 아니다.
+    const acct = acctMap[r.phone8] || ownerAcctMap[key + '||' + r.rowIndex] || _orderAccount(ord, r) || null;
 
     // 상품비 = 그 행의 실제 제출 결제금액(주문 원장).
     // ★ 주문 원장에 없는 행(옛 작업·직원 수기 입력)은 **시트 결제금액 칸**으로 폴백한다 —
@@ -367,7 +370,10 @@ async function _loadOrderPrices(sheetIds, tabNames) {
     // ★ order_submissions 의 제출 시각 컬럼은 **submitted_at** 이다(created_at 이 아니다 — 001:179).
     //   틀리면 42703 으로 이 쿼리가 통째로 죽어 입금대상 화면이 서버오류가 된다.
     `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
-            price, review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt"
+            price, review_fee_snapshot AS "feeSnapshot", submitted_at AS "orderedAt",
+            -- ★ 그 건의 구매양식으로 **리뷰어가 직접 적어 낸 계좌**(035). 등록 계좌를 못 찾을 때의
+            --   마지막 근거다 — 이걸 안 보면 시트에 계좌가 멀쩡히 있는 건도 영구 보류된다.
+            bank AS "bank", account AS "account", depositor AS "depositor"
        FROM order_submissions
       WHERE deleted_at IS NULL AND sheet_row IS NOT NULL
         AND sheet_id = ANY($1) AND tab_name = ANY($2)`,
@@ -376,9 +382,33 @@ async function _loadOrderPrices(sheetIds, tabNames) {
   for (const o of rows) {
     map[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = {
       price: o.price, feeSnapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt),
+      bank: o.bank || '', account: o.account || '', depositor: o.depositor || '',
     };
   }
   return map;
+}
+
+/**
+ * 그 건의 구매양식으로 제출된 계좌(order_submissions.bank/account/depositor).
+ *
+ * ★★ 등록리뷰어DB에 계좌가 없어도 **그 건 자체에는 리뷰어가 적어 낸 계좌가 있다**(작업보드 표에
+ *    보이는 은행·계좌번호·예금주가 그 값이다). 이걸 안 보면 "시트엔 계좌가 멀쩡히 있는데
+ *    입금관리는 리뷰어 정보 없음" 이 된다(실사고 2026-08-19 최영순7).
+ * ★ **지목할 리뷰어가 없으므로 `reviewerId` 를 만들지 않는다** — 화면 계좌 보완 팝업의 대상이
+ *   아니고(고칠 대상은 등록리뷰어DB다) 회차 스냅샷 대조에서도 가드 밖(unverifiable)이다.
+ * ★ 세 값이 다 있어야 인정한다 — 반쪽 값으로 이체 파일을 만들면 은행이 통째로 거부한다.
+ */
+function _orderAccount(ord, row) {
+  if (!ord) return null;
+  const bankName = String(ord.bank || '').trim();
+  const account = normalizeAccount(ord.account || '');
+  const holder = String(ord.depositor || '').trim();
+  if (!bankName || !account || !holder) return null;
+  return {
+    reviewerId: null, bankName, bankAccount: account, accountHolder: holder,
+    isSub: false, source: 'order',
+    name: String((row && row.reviewerName) || ''), ownerName: '',
+  };
 }
 
 /**
@@ -657,7 +687,10 @@ async function createBatch({ bank, rows, by }) {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *`,
           [batch.id, it.sheetId, it.tabName, it.rowIndex, it.campaignId, it.reviewerName, it.phone8,
            it.bankName, it.bankCode, it.bankAccount, it.accountHolder,
-           it.accountRef && it.accountRef.reviewerId || null, it.accountRef ? (it.isSub ? 'sub' : 'self') : null,
+           it.accountRef && it.accountRef.reviewerId || null,
+           // ★ 'sub' 은 **등록된 명의**(subPhone8)를 가리킬 때만 — 없으면 값은 소유자 본계좌이므로
+           //   'self' 로 박제해야 다음 대조(reconcileAccountSnapshots)가 같은 곳을 본다.
+           it.accountRef ? (it.accountRef.subPhone8 ? 'sub' : 'self') : null,
            it.accountRef && it.accountRef.subPhone8 || null, accountFingerprint(it.bankAccount), snapshotFingerprint(it.bankName, it.bankAccount, it.accountHolder),
            it.productPrice, it.reviewFee, it.amount, it.transferMemo]);
         await client.query('RELEASE SAVEPOINT sp_item');
