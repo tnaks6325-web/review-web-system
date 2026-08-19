@@ -276,8 +276,64 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   ok('Esc 리스너는 최상위 1회', /window\._ddKeyBound/.test(wd));
   {
     const blk = wd.slice(wd.indexOf('function _ddRender'), wd.indexOf('async function ddPreview'));
-    ok('서버발 문자열은 전부 escape 한다(onclick 보간 0)',
-      !/\$\{(?!esc\()[^}]*(name|tabName|detail|reason)/.test(blk) && !/onclick="[^"]*\$\{(?!esc\()/.test(blk));
+    /* ★ 서버발 값(작업명·사유 등)은 전부 `esc()` 를 거쳐야 한다.
+       중첩 템플릿이 있어 정규식 한 방으로는 오탐이 나므로, **중괄호 안쪽 조각**을 하나씩 꺼내
+       그 안에 위험한 필드가 있으면 같은 조각에 `esc(` 도 있는지 본다. */
+    const risky = /\b(tabName|label|detail|reason|\.name)\b/;
+    const bad = (blk.match(/\$\{[^{}]*\}/g) || []).filter(x => risky.test(x) && !/esc\(/.test(x));
+    ok('서버발 문자열은 전부 escape 한다', bad.length === 0, bad.join(' | '));
+    // ★ onclick 에는 **배열 인덱스(`${i}`)만** 넣는다 — 작업명·주문번호 보간 금지.
+    ok('onclick 에는 인덱스만 넣는다', !/onclick="[^"]*\$\{(?!i\})/.test(blk));
+  }
+
+  console.log('\n[G] 전체 작업 일괄 점검 — 판정 사본 0 · 읽기 전용');
+  {
+    const led3 = require('../src/services/sheetlessLedger.service');
+    const seenDry = [];
+    // ★ 스캔이 판정 함수를 **그대로** 부르는지(사본 금지) + 전부 dryRun 인지 실행으로 본다.
+    //   모듈 내부 호출은 렉시컬이라 export 교체가 안 먹으므로 주입 인자를 쓴다(레포 선례와 동일).
+    const fakeDedupe = async (a) => {
+      seenDry.push(a);
+      if (a.tabName === 'T_ERR') { const e = new Error('boom'); e.code = 'not_sheetless'; throw e; }
+      return a.tabName === 'T_A'
+        ? { boardRows: 587, groups: 7, removeRows: 112, skippedGroups: 2, skippedNoRowOrder: 1 }
+        : { boardRows: 10, groups: 0, removeRows: 0, skippedGroups: 0, skippedNoRowOrder: 0 };
+    };
+    led3.__setPoolForTest({
+      query: async (sql) => {
+        if (/FROM tab_configs[\s\S]*sheetless/.test(sql)) return { rows: [
+          { sheetId: 'wt_a', tabName: 'T_A', label: '8/3 위프 800건' },
+          { sheetId: 'wt_b', tabName: 'T_B', label: '깨끗한 작업' },
+          { sheetId: 'wt_c', tabName: 'T_ERR', label: '점검 실패 작업' },
+        ] };
+        return { rows: [] };
+      },
+    });
+    const r = await led3.scanDuplicateRows({ by: '망고', dedupeFn: fakeDedupe });
+    ok('무시트 탭 전체를 훑는다', r.scanned === 3);
+    ok('★ 판정은 dedupeRows 를 그대로 재사용(사본 0)', seenDry.length === 3);
+    ok('★ 전부 dryRun — 쓰기 0', seenDry.every(a => a.dryRun === true));
+    ok('중복 있는 작업만 목록에 담는다', r.tabs.length === 1 && r.tabs[0].tabName === 'T_A');
+    ok('합계를 낸다', r.totalRemoveRows === 112 && r.totalSkipped === 2);
+    ok('★ 한 탭이 실패해도 나머지는 계속하고 사유를 보고한다',
+      r.failed === 1 && r.errors[0].tabName === 'T_ERR' && r.errors[0].reason === 'not_sheetless');
+    led3.__setPoolForTest(null);
+  }
+  {
+    const ledSrc2 = fs.readFileSync(path.join(__dirname, '../src/services/sheetlessLedger.service.js'), 'utf8');
+    const scanSrc = ledSrc2.slice(ledSrc2.indexOf('async function scanDuplicateRows('), ledSrc2.indexOf('module.exports'));
+    ok('★ 스캔은 무시트 탭만 고른다', /COALESCE\(sheetless, FALSE\) = TRUE/.test(scanSrc));
+    ok('★ 스캔 자체에 쓰기 쿼리가 없다', !/(INSERT INTO|UPDATE |DELETE FROM)/i.test(scanSrc));
+    ok('★ 판정 조건 사본이 없다(주문번호·연락처 비교를 다시 쓰지 않는다)',
+      !/order_num|row_json|주문번호/.test(scanSrc));
+    ok('상한을 넘으면 잘렸다고 말한다', /truncated/.test(scanSrc));
+    ok('★ 런타임 기본 판정은 dedupeRows(주입은 테스트용 기본값)', /dedupeFn = dedupeRows/.test(scanSrc));
+    const tb2 = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
+    ok('일괄 점검 라우트는 adminOrMaster',
+      /'\/worktable\/dedupe-scan', authMiddleware, adminOrMasterMiddleware/.test(tb2));
+    ok('화면에 [전체 작업 점검] 버튼', /onclick="ddScanAll\(\)"/.test(wd));
+    ok('결과에서 작업으로 이동(onclick 은 인덱스만)', /ddOpenTab\(\$\{i\}\)/.test(wd));
+    ok('목록에 없는 작업이면 사유를 말한다(막다른 길 금지)', /그 작업이 지금 목록에 없습니다/.test(wd));
   }
 
   /* ── [F] 진짜 PG (선택) — 스텁은 SQL 을 해석하지 않는다 ──────────────────────

@@ -477,10 +477,60 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
            indexRows: ledger ? ledger.indexRows : null, ledgerError };
 }
 
+/**
+ * ★★ 전체 작업 일괄 점검 — 어느 작업에 중복 줄이 남아 있는지 한 번에 찾는다(읽기 전용).
+ *
+ * ★ 판정 사본 0 — 탭마다 `dedupeRows({ dryRun: true })` 를 **그대로** 부른다. 여기서 조건을 다시
+ *   쓰면 "일괄 점검엔 뜨는데 그 작업을 열면 대상이 아닌" 상태가 생긴다.
+ * ★ 쓰기 0(모든 호출이 dryRun) · 시트/Drive 무접촉.
+ * ★ 대상은 **무시트 탭**뿐(시트 기반은 dedupeRows 가 거부한다). 탭 하나가 실패해도 나머지는 계속하고
+ *   그 탭의 사유를 보고한다(조용한 누락 금지).
+ */
+/* ★ `dedupeFn` 은 테스트 주입용 — 모듈 내부 호출은 렉시컬이라 export 를 갈아끼워도 안 먹는다
+   (`trackB.cutoverAll` 의 `overviewFn`/`flipFn` 과 같은 선례). 런타임 기본값은 항상 dedupeRows. */
+async function scanDuplicateRows({ limit = 300, by = 'admin', dedupeFn = dedupeRows } = {}) {
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 300, 1), 1000);
+  const { rows: tabs } = await db.query(
+    `SELECT sheet_id AS "sheetId", tab_name AS "tabName", COALESCE(display_name, tab_name) AS label
+       FROM tab_configs
+      WHERE COALESCE(sheetless, FALSE) = TRUE
+      ORDER BY updated_at DESC NULLS LAST, tab_name
+      LIMIT $1`, [lim + 1]);
+  const truncated = tabs.length > lim;
+  const list = truncated ? tabs.slice(0, lim) : tabs;
+
+  const out = { scanned: 0, failed: 0, truncated, tabs: [], errors: [] };
+  for (const t of list) {
+    out.scanned++;
+    try {
+      const r = await dedupeFn({ sheetId: t.sheetId, tabName: t.tabName, dryRun: true, by });
+      if (r.removeRows > 0 || r.skippedGroups > 0) {
+        out.tabs.push({
+          sheetId: t.sheetId, tabName: t.tabName, label: t.label,
+          boardRows: r.boardRows, groups: r.groups, removeRows: r.removeRows,
+          skippedGroups: r.skippedGroups, skippedNoRowOrder: r.skippedNoRowOrder || 0,
+        });
+      }
+    } catch (e) {
+      out.failed++;
+      out.errors.push({ sheetId: t.sheetId, tabName: t.tabName, label: t.label,
+        reason: (e && (e.code || e.message)) || 'unknown' });
+    }
+  }
+  out.tabs.sort((a, b) => (b.removeRows - a.removeRows) || (b.skippedGroups - a.skippedGroups));
+  out.totalRemoveRows = out.tabs.reduce((n, t) => n + t.removeRows, 0);
+  out.totalSkipped = out.tabs.reduce((n, t) => n + t.skippedGroups, 0);
+  logger.info(`[sheetlessLedger] 중복 일괄 점검 by=${by} 탭 ${out.scanned}개 · 해당 ${out.tabs.length}개 · ` +
+    `정리대상 ${out.totalRemoveRows}줄 · 보류 ${out.totalSkipped}건 · 실패 ${out.failed}`);
+  return out;
+}
+
 module.exports = {
   rebuildLedgers,
   retireRows,
   dedupeRows,
+  scanDuplicateRows,
   resolveHeaders,
   buildValues,
   LedgerError,
