@@ -1179,6 +1179,10 @@ function withStubPool(handler, run) {
     }
     assert.ok(!/function _pmOpenSheet|function _pmSheetBtn|function _pmSheetOk/.test(HTML),
       '★ 시트 열기 함수가 되살아났다(창구가 둘이 되면 시트에서 고친 값이 조용히 사라진다)');
+    /* ★ 안내 **문구**도 없는 버튼을 가리키면 안 된다 — 버튼은 [📋 작업보드]인데 문장만 [📄 시트]로
+         남아 담당자가 화면에 없는 버튼을 찾던 드리프트가 실제로 있었다(2026-08-19). */
+    assert.ok(!/\[📄 시트\]/.test(fix), '★ 보완 안내 문구가 아직 [📄 시트]를 가리킨다(그 버튼은 없다)');
+    assert.ok(/\[📋 작업보드\]/.test(fix), '보완 안내 문구가 작업보드 바로가기를 말해야 한다');
   });
 
   t('8f 작업보드 버튼 — 인덱스만 넘기고 카드·팝업이 **같은 렌더러**를 쓴다', () => {

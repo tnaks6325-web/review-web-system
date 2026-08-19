@@ -9047,7 +9047,7 @@ function _pmFixBlock(){
   return `<div class="pmfix">
     <h3>보완하면 풀리는 보류 — 작업 ${f.works.length}개</h3>
     <div class="sub">작업별로 모았습니다. 고치면 <b>그 작업의 보류가 한 번에</b> 풀리고 다음 회차부터 파일에 포함됩니다.
-      아직 구글시트를 직접 봐야 하는 값(결제금액 칸 등)은 <b>[📄 시트]</b>로 그 탭을 바로 엽니다.
+      결제금액 칸 등 표에서 확인해야 하는 값은 <b>[📋 작업보드]</b>로 그 작업의 표를 바로 엽니다.
       ${totals.length?`<br>화면에서 못 고치는 사유: ${totals.join(' · ')}`:''}</div>
     <div class="pmfixgrid">${cards}</div>
     ${rest>0?`<div class="pmfixmore">외 ${rest}개 작업 — 아래 표의 [보완] 버튼으로도 고칠 수 있습니다</div>`:''}</div>`;
@@ -10427,6 +10427,58 @@ const _PT_REASON = {
   ghost_row:'옛 이름만 남은 빈 행',
 };
 let _PT = null;
+/* ══════════════ 읽는 시트 진단(2026-08-19) ══════════════
+   "남음 0" 인데 시트 API 호출이 0이 아니던 실측을 설명하는 화면.
+   ★ 판정은 전부 서버(스윕과 같은 열거식·같은 게이트) — 화면은 **그리기만** 한다.
+   ★ 읽기 전용이라 조작 버튼을 두지 않는다(끄기 판단의 근거를 보여주는 것이 전부). */
+var _RS = null;
+function _rsBox(){ return $('#rsBox'); }
+async function _rsScan(){
+  const box=_rsBox(); if(!box) return;
+  box.innerHTML = `<div class="ovnote">지금 어느 시트를 읽는지 살펴보는 중…</div>`;
+  try{
+    const r = await api('/api/trackb/sheetless/read-scope');
+    if(!r||!r.ok) throw new Error((r&&r.error)||'조회 실패');
+    _RS = r; _rsRender();
+  }catch(e){
+    // 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다(무한 로딩 금지)
+    box.innerHTML = `<div class="ovnote"><b>읽는 시트를 불러오지 못했습니다</b> — ${esc(String(e&&e.message||e))}
+      <button class="btn" style="margin-left:6px" onclick="_rsScan()">다시 시도</button></div>`;
+  }
+}
+function _rsRender(){
+  const box=_rsBox(), r=_RS; if(!box||!r) return;
+  if(!r.reading){
+    box.innerHTML = `<div class="ovnote"><b>지금 읽는 시트가 없습니다</b> —
+      등록 시트 ${r.registered}개가 모두 무시트로 제외됩니다.
+      <button class="btn" style="margin-left:6px" onclick="_rsScan()">새로고침</button>
+      <button class="btn" onclick="_rsBox().innerHTML=''">닫기</button></div>`;
+    return;
+  }
+  const by=r.byReason||{}, rs=r.reasons||{};
+  const chips=Object.keys(by).map(k=>`<span class="bd">${esc(rs[k]||k)} ${by[k]}</span>`).join(' ');
+  const rows=(r.items||[]).map(it=>`<tr>
+      <td style="font-family:ui-monospace,monospace;font-size:11px">${esc(String(it.sheetId||'').slice(0,10))}…</td>
+      <td>${esc(it.reasonText||it.reason||'')}</td>
+      <td>${esc((it.liveTabNames||[]).join(' · '))}${it.liveSheetTabs>(it.liveTabNames||[]).length?` 외 ${it.liveSheetTabs-(it.liveTabNames||[]).length}개`:''}</td>
+      <td style="text-align:right">${it.tabs||0}</td>
+      <td style="text-align:right${it.pendingOrders?';color:#DC2626;font-weight:700':''}">${it.pendingOrders||0}</td>
+      <td style="font-size:11px;color:#8B94A1">${it.mirroredAt?esc(new Date(it.mirroredAt).toLocaleString('ko-KR')):'-'}</td>
+    </tr>`).join('');
+  box.innerHTML = `<div class="ovnote">
+      <b>읽는 시트 ${r.reading}개</b> — 등록 ${r.registered}개 중 무시트로 제외 ${r.excludedSheetless}개. ${chips}
+      <button class="btn" style="margin-left:6px" onclick="_rsScan()">새로고침</button>
+      <button class="btn" onclick="_rsBox().innerHTML=''">닫기</button>
+      <div style="margin-top:6px">탈시트 전환 화면의 <b>“남음”</b>은 마감 탭·아카이브만 남은 시트·연도 미확정 작업을 세지 않습니다 —
+        그 시트들도 주기 작업(RAW 미러·인덱스 빌드)은 계속 읽습니다.</div>
+      ${r.pendingOrdersTotal?`<div style="margin-top:6px;color:#DC2626"><b>⚠ 시트에 아직 못 쓴 주문 ${r.pendingOrdersTotal}건</b> —
+        지금 주기 작업을 끄면 이 주문들이 시트에 영영 기록되지 않습니다.</div>`:''}
+      ${r.truncated?`<div style="margin-top:6px">목록은 ${(r.items||[]).length}개까지만 보여줍니다(전체 ${r.reading}개).</div>`:''}
+    </div>
+    <table class="lgtable" style="margin-top:8px"><thead><tr>
+      <th>시트</th><th>읽는 사유</th><th>살아 있는 시트 작업</th><th style="text-align:right">등록 탭</th>
+      <th style="text-align:right">미반영 주문</th><th>마지막 미러</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function _ptBox(){ return $('#ptBox'); }
 async function _ptScan(){
   const box=_ptBox(); if(!box) return;
@@ -10630,12 +10682,14 @@ function _coRender(){
       <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_ptScan()">🧹 과거 작업 시트 읽기 정리</button>
+      <button class="btn" onclick="_rsScan()" title="주기 작업(RAW 미러·인덱스 빌드)이 지금 어느 시트를 왜 읽는지 — 읽기 전용">🔍 읽는 시트</button>
       <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
       <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
     <div id="coSweep"></div>
     <div id="ptBox"></div>
+    <div id="rsBox"></div>
     <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
       막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.

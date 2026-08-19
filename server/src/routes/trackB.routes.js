@@ -1235,6 +1235,22 @@ router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
     res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
   } catch (err) { next(err); }
 });
+/* 읽는 범위 진단 — "지금 어느 시트를 왜 읽는가"(2026-08-19).
+ *  ★ 읽기 전용(쓰기 0 · 시트/Drive API 0). 스윕과 **같은 열거식·같은 게이트**를 태운다.
+ *  ★ 게이트는 이관·정리와 같은 adminOrMaster(시트 목록·미반영 주문 수가 실린다). */
+const _readScope = require('../services/sheetReadScope.service');
+router.get('/sheetless/read-scope', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    res.json(await _readScope.readScope({ limit: req.query.limit }));
+  } catch (err) {
+    // 42P01/42703(미적용) 은 500 마스킹에 묻히면 원인을 알 수 없다 — 사유를 말한다.
+    if (err && (err.code === '42P01' || err.code === '42703')) {
+      return res.status(503).json({ ok: false, error: 'not_ready', detail: err.message });
+    }
+    return next(err);
+  }
+});
+
 /* 과거 작업이 아직 구글시트를 읽고 있는 것 정리 (2026-08-19).
  *  "이관하지 않는다"는 "시트를 그만 읽는다"가 아니다 — 크론이 지금도 그 탭을 A:Z 로 읽는다.
  *  조작은 tab_configs.is_closed 한 칸뿐이고 되돌릴 수 있다(서비스 주석 참조).

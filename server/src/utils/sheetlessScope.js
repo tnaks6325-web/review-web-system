@@ -15,6 +15,11 @@
  *   컬럼 미적용(42703)·테이블 부재(42P01)도 같은 취급 = 배포 순서 무관.
  */
 
+/** ★★ 주기 스윕이 "어느 시트를 후보로 삼는가" — RAW 미러·스마트빌드·읽는 범위 진단이 **같은 문장**을 쓴다.
+ *  사본을 두면 진단이 "안 읽는다"고 말하는 시트를 스윕은 계속 읽는 상태가 된다(관측이 거짓말이 되는 자리). */
+const REGISTERED_SHEET_IDS_SQL =
+  'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs';
+
 /** 시트 단위 스윕에서 제외할 sheet_id 목록 — 등록 탭이 **전부** 무시트인 시트만.
  *  (한 탭이라도 시트 기반이면 그 시트는 계속 읽어야 하므로 제외 대상이 아니다) */
 const FULLY_SHEETLESS_SHEET_IDS_SQL = `
@@ -85,6 +90,7 @@ async function isSheetless(db, sheetId, tabName) {
 }
 
 module.exports = {
+  REGISTERED_SHEET_IDS_SQL,
   FULLY_SHEETLESS_SHEET_IDS_SQL,
   SHEETLESS_TABS_SQL,
   tabKey,
