@@ -275,6 +275,37 @@ function finishRest() {
     /const pubToggle = c\.archived_at/.test(cards));
   ok('★ 확인창을 거친다', /window\.confirm\(msg\)/.test(cards));
   ok('★ 확인창이 되돌릴 수 있다는 사실을 말한다', /되돌릴 수 있습니다/.test(cards));
+  /* ★★ 문구가 "무엇이 닫히는가"를 정확히 말한다(사용자 신고 2026-08-19).
+     종전 '참여가 닫힙니다'는 **이미 참여한 리뷰어의 참여까지 끊긴다**로 읽혔다 —
+     실제로 닫히는 것은 새 참여 신청뿐이고, 리뷰 내역·제출·리뷰비는 그대로 진행된다.
+     ★ 아래 [J] 가 그 사실(리뷰어 경로에 보관 필터 0)을 함께 고정하므로 문구와 코드가 갈리지 않는다. */
+  ok('★★ 확인창이 "새 참여 신청"이 닫힌다고 말한다(이미 참여한 사람과 구분)',
+    /새 참여 신청이 닫힙니다/.test(cards));
+  ok('★★ 확인창이 이미 참여한 리뷰어는 영향 없음을 명시', /이미 참여한 리뷰어는 영향 없습니다/.test(cards));
+  ok('★ 오해를 부르던 옛 문구가 남아 있지 않다', !/리뷰어 목록에서 빠지고 참여가 닫힙니다/.test(cards));
+
+  // ── J. 리뷰어 대면 경로 무접촉 ──────────────────────────────
+  console.log('\n[J] 이미 참여한 리뷰어는 영향 없다');
+  {
+    /* 보관은 **노출 축**이다 — 리뷰 내역·리뷰 캡처 제출·받을 예정/누적 금액·입금 대상 추출·
+       이미지 교체요청은 review_index·order_submissions·campaign_participants 에서 나오므로
+       보관 필터가 그쪽에 **한 곳도 없어야** 한다(생기면 미제출·미입금 리뷰어의 화면이 사라진다). */
+    for (const f of ['services/search.service.js', 'routes/reviewer.routes.js',
+      'services/payment.service.js', 'routes/submit.routes.js', 'routes/reviewEdit.routes.js']) {
+      const src = read('src/' + f);
+      ok(`★★ ${f} 에 보관 필터 없음(미제출·미입금 리뷰어 화면 보존)`, !/archived_at/.test(src));
+    }
+  }
+
+  // ── K. 소스 위생 ───────────────────────────────────────────
+  console.log('\n[K] 소스 위생');
+  {
+    /* ★ 리터럴 NUL 금지 — git 이 파일을 **바이너리로 취급**해 grep·grep 기반 회귀가드가
+       그 파일에서 통째로 무력화된다(레포 실측 규율). 구분자는 '\u0000' 이스케이프 표기로. */
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'src/services/campaignArchive.service.js'));
+    ok('★★ 새 서비스에 리터럴 NUL 0개(가드 무력화 방지)', !raw.includes(0x00));
+    ok('구분자는 이스케이프 표기로 유지', /\$\{sheetId\}\\u0000\$\{tabName\}/.test(svcSrc));
+  }
   ok('★ 경로는 호스트가 재기준(_campAdminBase — 인트라넷 토큰은 /api/trackb/* 로만 닿는다)',
     /_apiBase\(\) \+ _campAdminBase\(\) \+ '\/' \+ encodeURIComponent\(campId\) \+ '\/archive'/.test(cards));
   ok('CampCards 에 export', /window\.CampCards = \{[^}]*toggleArchive/.test(cards));
@@ -321,8 +352,30 @@ function finishRest() {
     ok('★ 판정 재료가 없으면 아무 말도 하지 않는다', !hNone.includes('보관 제안') && !hNone.includes('보관됨'));
     ok('★ 리뷰어 화면(admin:false)에는 보관 표기가 나가지 않는다', !hRev.includes('보관됨'));
     ok('toggleArchive 가 export 되어 호출 가능', typeof CC.toggleArchive === 'function');
-  }
 
+    /* ★★ 확인창을 **실제로 띄워** 문구를 읽는다 — 정적 검사는 그 문자열이 다른 분기에
+       들어가도 통과한다. 취소(confirm=false)면 요청이 나가지 않는 것까지 함께 고정. */
+    const ss = { getItem: (k) => (k === 'admin_token' ? 't' : null) };
+    let asked = null, fetched = false;
+    const win2 = { location: { hostname: 'x' }, addEventListener() {}, sessionStorage: ss,
+      localStorage: { getItem: () => null }, confirm: (m) => { asked = m; return false; } };
+    const doc2 = { head: el(), body: el(), createElement: () => el(), getElementById: () => null,
+      querySelector: () => null, querySelectorAll: () => [], addEventListener() {} };
+    const sb2 = { window: win2, document: doc2, sessionStorage: ss, localStorage: { getItem: () => null },
+      console: { log() {}, warn() {}, error() {} }, setTimeout,
+      fetch: async () => { fetched = true; return { ok: true, json: async () => ({ ok: true }) }; }, API_BASE_URL: '' };
+    sb2.globalThis = sb2; win2.document = doc2;
+    vm.createContext(sb2); vm.runInContext(cards, sb2, { filename: 'campaign-cards.js' });
+    return sb2.window.CampCards.toggleArchive('c1', true).then(() => {
+      ok('★★ 확인창 실문구 — "새 참여 신청"이 닫힌다', /새 참여 신청이 닫힙니다/.test(asked || ''), asked);
+      ok('★★ 확인창 실문구 — 이미 참여한 리뷰어는 영향 없음', /이미 참여한 리뷰어는 영향 없습니다/.test(asked || ''));
+      ok('★ 취소하면 요청이 나가지 않는다', fetched === false);
+      done();
+    });
+  }
+}
+
+function done() {
   console.log(`\n✅ campaignArchive: ${passed} 케이스 통과`);
   process.exit(0);
 }
