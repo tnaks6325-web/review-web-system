@@ -55,7 +55,17 @@ for (const c of ['ambiguous_campaign', 'sheetless_campaign_not_found']) if (bloc
 for (const c of ['concurrent_cancel', 'invalid_order_id']) codes.add(c);
 assert.ok(codes.size >= 12, `서버 사유 코드를 충분히 읽지 못했습니다(${codes.size}개) — 추출 정규식을 확인하세요`);
 const msgMap = html.slice(html.indexOf('const _HIDE_ROW_ERRORS'), html.indexOf('function _hideRowErrorText'));
+// 'unexpected'(예상 밖 서버 오류)는 표 대신 전용 분기가 DB 오류코드·내용을 그대로 보여준다.
+codes.delete('unexpected');
 for (const c of codes) assert.ok(msgMap.includes(`${c}:`), `사유 코드 ${c}의 한국어 안내 문구가 없습니다`);
+
+// 예상 밖 오류를 "서버 오류가 발생했습니다"로 뭉뚱그리지 않는다 — 원인 코드와 내용을 그대로 보여준다.
+assert.match(block, /error: 'unexpected'[\s\S]{0,200}pgCode/, '서버는 예상 밖 오류의 DB 코드를 함께 돌려줘야 합니다');
+assert.match(block, /logger\.error\(/, '예상 밖 오류는 서버 로그에도 남아야 합니다');
+const unexpectedBranch = html.slice(html.indexOf("if(code==='unexpected')"), html.indexOf('const known=_HIDE_ROW_ERRORS[code]'));
+assert.ok(unexpectedBranch, '예상 밖 오류 전용 분기가 필요합니다');
+assert.match(unexpectedBranch, /r\.pgCode/, '화면이 DB 오류코드를 보여줘야 합니다');
+assert.match(unexpectedBranch, /r\.detail/, '화면이 오류 내용을 보여줘야 합니다');
 
 // 알 수 없는 코드도 조용히 삼키지 않는다.
 const fallback = html.slice(html.indexOf('function _hideRowErrorText'), html.indexOf('async function hideRow(rowId'));
