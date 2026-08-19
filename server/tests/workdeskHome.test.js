@@ -87,9 +87,14 @@ ok('★ renderHomeView 도 역할을 자기 스코프에서 구한다',
   // ★ 이 검사의 의미 = "새 선택자는 전용 접두를 써서 남의 화면을 오염시키지 않는다".
   //   holdover: 홈 아래 작업 목록 블록(migration 088)은 wbl- 접두를 쓴다 — 접두를 늘리는 것은 의미 불변,
   //   대신 **접두 없는 일반 선택자**(.card, table 같은 것)는 여전히 금지된다.
-  ok('★ 홈 CSS 선택자는 전부 #hmwrap/.hm-/.wbl- 스코프(남의 화면 오염 금지): ' + sels.length + '개',
-    sels.length > 5 && sels.every(s => s.split(',').every(p => /^(#hmwrap|\.hm-|\.wbl-|table\.wbl-)/.test(p.trim()))),
-    sels.filter(s => s.split(',').some(p => !/^(#hmwrap|\.hm-|\.wbl-|table\.wbl-)/.test(p.trim()))).join(' | '));
+  // holdover ②: 이 블록 추출은 `/* ══ 홈(첫 진입)` 부터 `</style>` 끝까지를 통째로 집으므로, 그 뒤에
+  //   덧붙은 **오버레이 전용 스타일**(`#abOv …`·`#rnOv …`·`#ddOv …`·`#hbOv …`)까지 함께 들어온다.
+  //   그것들도 "전용 스코프를 쓴다"는 이 검사의 의미를 지키고 있으므로(오버레이 id 로 스코프), 허용한다.
+  //   ★ 여전히 금지되는 것은 **스코프 없는 일반 선택자**(`.card`·`table`·`th` 같은 것)다.
+  const SCOPED = /^(#hmwrap|\.hm-|\.wbl-|table\.wbl-|#[A-Za-z][\w-]*Ov[\s.:[#>]|#[A-Za-z][\w-]*Ov$)/;
+  ok('★ 홈 CSS 선택자는 전부 전용 스코프(#hmwrap/.hm-/.wbl- 또는 오버레이 #…Ov): ' + sels.length + '개',
+    sels.length > 5 && sels.every(s => s.split(',').every(p => SCOPED.test(p.trim()))),
+    sels.filter(s => s.split(',').some(p => !SCOPED.test(p.trim()))).join(' | '));
 }
 
 /* ── B. 런타임(vm) — 실제 실행으로 프리변수·표시 규칙 고정 ─────────────── */

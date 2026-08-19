@@ -219,7 +219,8 @@ const isCampSelect = q => /FROM recruit_campaigns/.test(q) && /linked_sheet_id/.
   t('작업바 로드(stats 없음)에서 주석을 이월한다(버튼이 깜빡이며 사라지지 않게)', /_prevCamp\[k\]/.test(WD));
   t('여러 건은 생성일과 함께 고르게 한다(사용자 확정)', /_campPickerOpen/.test(WD) && /생성/.test(WD.slice(WD.indexOf('_campPickerOpen'), WD.indexOf('_campPickerClose'))));
   t('★ 선택 목록도 인덱스만 넘긴다', /_campPick\(\$\{i\},\$\{ci\}\)/.test(WD));
-  t('모달은 기존 공유 모달을 그대로 연다(사본 금지)', /openRecruitModal\(id\|\|null, prefill\)/.test(WD));
+  // ★ 인자 개수는 늘 수 있다(작업오더 id 전달 등) — 고정하는 것은 "공유 모달을 그대로 연다"는 사실이다.
+  t('모달은 기존 공유 모달을 그대로 연다(사본 금지)', /openRecruitModal\(id\|\|null, prefill[,)]/.test(WD));
   t('연결 탭 드롭다운 재료를 먼저 채운다(_recruitTabList 의존)', /loadRecruitTabOptions/.test(WD.slice(WD.indexOf('async function _campOpenModal'), WD.indexOf('function _campPickerOpen'))));
   t('미발행은 그 작업의 탭을 프리필한다', /linked_sheet_id:t\.sheetId, linked_tab_name:t\.tabName/.test(WD));
   t('★ 편집 권한은 홈 전용 플래그(STATE.campEdit) — 그리드 편집 플래그와 섞지 않는다',
