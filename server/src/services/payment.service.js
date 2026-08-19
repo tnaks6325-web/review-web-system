@@ -883,27 +883,97 @@ function _batchView(b) {
    3) 은행 서식 엑셀 생성
    ══════════════════════════════════════════════════════════ */
 
+
 /**
- * 은행별 다건이체 등록 서식(.xlsx).
+ * 은행별 다건이체 등록 서식.
  * ★ 헤더·열 순서는 각 은행 **공식 양식 그대로**다(케이뱅크는 공유받은 원본 양식 기준).
  *   임의로 바꾸면 은행 사이트가 파일을 거부한다.
+ *
+ * ★★ **파일 형식이 은행마다 다르다(완화 금지 — 2026-08-19 실측 사고)**
+ *   · 케이뱅크 = **.xlsx**(OOXML) — 종전 그대로.
+ *   · 하나은행 = **.xls(BIFF8 · OLE2)** — 하나 기업뱅킹 다건이체 업로드가 xlsx 를
+ *     `해당 파일은 엑셀파일이 아닙니다. 다시 올려주십시오.` 로 **통째로 거부**했다.
+ *     엑셀로 열어 다시 저장한 정상 xlsx 도 같은 거부였다 = 우리 파일이 깨진 게 아니라
+ *     그쪽이 **구형 형식만 읽는다**. 하나가 돌려주는 이체결과 파일도 실측상 OLE2 .xls
+ *     (`utils/paymentResultParse.js` 주석) — 같은 계열이다.
+ *   되돌리기 = env `PAYMENT_HANA_XLS=0`(하나도 종전 xlsx 로 생성).
+ *
+ * ★ 형식·확장자·MIME 는 `BANK_FILE_FORMAT` **단일 출처**다 — 내용은 .xls 인데 파일명만
+ *   .xlsx 로 나가면 은행 화면이 확장자만 보고 다시 거부한다(둘이 갈리면 안 된다).
  */
+const BANK_FILE_FORMAT = {
+  kbank: { kind: 'xlsx', ext: 'xlsx', sheet: '대량이체등록정보',
+    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  hana: { kind: 'xls', ext: 'xls', sheet: '다건이체',
+    mime: 'application/vnd.ms-excel' },
+};
+
+/** 그 회차 파일의 형식(확장자·MIME) — 파일명·응답 헤더·본문 생성이 같은 값을 본다. */
+function batchFileFormat(bank) {
+  const f = BANK_FILE_FORMAT[bank] || BANK_FILE_FORMAT.kbank;
+  if (bank === 'hana' && process.env.PAYMENT_HANA_XLS === '0') {
+    return { ...f, kind: 'xlsx', ext: 'xlsx', mime: BANK_FILE_FORMAT.kbank.mime };
+  }
+  return f;
+}
+
+/**
+ * OOXML(.xlsx) 직렬화 — 케이뱅크(+하나 킬스위치 복귀분).
+ * ★★ 계좌·은행코드는 **문자열 셀 + 텍스트 서식(`@`)** 으로 나간다 —
+ *    숫자로 해석되면 `0123…` 의 앞 0 이 날아가거나 긴 계좌가 지수표기(1.23E+12)로 바뀌어
+ *    은행 업로드가 통째로 거부된다(담당자가 매번 `'0123` 처럼 손으로 고치던 지점).
+ *    금액만 숫자 그대로 둔다(은행 양식이 수치를 요구).
+ */
+async function _writeXlsx(sheetName, rows, widths) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'review-web-system';
+  const ws = wb.addWorksheet(sheetName);
+  for (const r of rows) ws.addRow(r);
+  ws.columns = widths.map(w => ({ width: w }));
+  ws.eachRow((row, i) => {
+    if (i === 1) return;
+    row.eachCell(cell => { if (typeof cell.value === 'string') cell.numFmt = '@'; });
+  });
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+/**
+ * 구형 엑셀(.xls · BIFF8/OLE2) 직렬화 — 하나은행 전용.
+ * ★ 문자열/숫자 구분과 텍스트 서식(`@`) 규칙은 xlsx 경로와 **같다**(계좌 앞 0 보존).
+ * ★ SheetJS(`@e965/xlsx`)는 이미 이체결과 해석에 쓰는 의존성이라 신규 의존 0.
+ */
+function _writeXls(sheetName, rows, widths) {
+  const XLSX = require('@e965/xlsx');
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = 1; R <= range.e.r; R++) {           // 헤더(0행) 제외
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === 's') cell.z = '@';
+    }
+  }
+  ws['!cols'] = widths.map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  return Buffer.from(XLSX.write(wb, { bookType: 'biff8', type: 'buffer' }));
+}
+
 async function buildWorkbook(bank, items) {
   // ★ 서식에 찍히는 **정식 명칭**(`bankNameByCode`)이 오버레이 값이어야 한다 —
   //   화면에서 이름을 고쳐 놓고 파일엔 옛 이름이 나가면 은행이 거부한다.
   await _bankOv.ensureBankOverrides();
-  const ExcelJS = require('exceljs');
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'review-web-system';
+  const fmt = batchFileFormat(bank);
+  const rows = [];
+  let widths;
 
   if (bank === 'kbank') {
-    const ws = wb.addWorksheet('대량이체등록정보');
-    ws.addRow(['* 입금은행(코드/은행명/증권사명)', '* 입금계좌', '* 이체금액(원)', '받는분 통장표시 ', '예금주']);
+    rows.push(['* 입금은행(코드/은행명/증권사명)', '* 입금계좌', '* 이체금액(원)', '받는분 통장표시 ', '예금주']);
     for (const it of items) {
       // ★ 리뷰어가 적은 원문('신한')이 아니라 **표준코드에서 파생한 정식명**('신한은행')을 쓴다.
       //   양식 가이드가 "형식에 맞는 은행/증권사명 혹은 코드만" 허용하므로 원문은 거부될 수 있다.
       const code = String(it.bank_code || it.bankCode || '');
-      ws.addRow([
+      rows.push([
         bankNameByCode(code) || code,
         // ★ 계좌는 마지막까지 `normalizeAccount` 단일 출처로 숫자만 남긴다 —
         //   옛 원장 스냅샷에 '-' 가 섞여 있어도 은행 서식에는 절대 나가지 않게(업로드 거부 방지).
@@ -913,12 +983,11 @@ async function buildWorkbook(bank, items) {
         it.account_holder || it.accountHolder || '',
       ]);
     }
-    ws.columns = [{ width: 28 }, { width: 20 }, { width: 14 }, { width: 18 }, { width: 14 }];
+    widths = [28, 20, 14, 18, 14];
   } else {
-    const ws = wb.addWorksheet('다건이체');
-    ws.addRow(['입금은행코드', '입금계좌번호', '이체금액', '예상예금주', '보내는분 통장표시내용', '받는분 통장표시내용', 'CMS/모집인코드']);
+    rows.push(['입금은행코드', '입금계좌번호', '이체금액', '예상예금주', '보내는분 통장표시내용', '받는분 통장표시내용', 'CMS/모집인코드']);
     for (const it of items) {
-      ws.addRow([
+      rows.push([
         String(it.bank_code || it.bankCode || ''),     // ★ 문자열 — '045'의 앞 0이 사라지면 안 됨
         normalizeAccount(it.bank_account || it.bankAccount || ''),   // ★ 위와 같은 이유(숫자만 · 앞 0 보존)
         _int(it.amount),
@@ -928,25 +997,18 @@ async function buildWorkbook(bank, items) {
         '',
       ]);
     }
-    ws.columns = [{ width: 14 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }, { width: 20 }, { width: 16 }];
+    widths = [14, 22, 14, 14, 20, 20, 16];
   }
-  // ★★ 계좌·은행코드는 **문자열 셀 + 텍스트 서식(`@`)** 으로 나간다 —
-  //    숫자로 해석되면 `0123…` 의 앞 0 이 날아가거나 긴 계좌가 지수표기(1.23E+12)로 바뀌어
-  //    은행 업로드가 통째로 거부된다(담당자가 매번 `'0123` 처럼 손으로 고치던 지점).
-  //    금액만 숫자 그대로 둔다(은행 양식이 수치를 요구).
-  wb.worksheets[0].eachRow((row, i) => {
-    if (i === 1) return;
-    row.eachCell(cell => { if (typeof cell.value === 'string') cell.numFmt = '@'; });
-  });
-  return Buffer.from(await wb.xlsx.writeBuffer());
+
+  return fmt.kind === 'xls' ? _writeXls(fmt.sheet, rows, widths) : _writeXlsx(fmt.sheet, rows, widths);
 }
 
-/** 다운로드 파일명 — 예) 케이뱅크_다건이체_20260804_124.xlsx */
+/** 다운로드 파일명 — 예) 하나은행_다건이체_20260819_124.xls / 케이뱅크_…_124.xlsx */
 function batchFileName(batch) {
   const d = new Date(batch.createdAt || Date.now());
   const kst = new Date(d.getTime() + 9 * 3600 * 1000);
   const ymd = kst.toISOString().slice(0, 10).replace(/-/g, '');
-  return `${BANK_LABEL[batch.bank] || batch.bank}_다건이체_${ymd}_${batch.seq}.xlsx`;
+  return `${BANK_LABEL[batch.bank] || batch.bank}_다건이체_${ymd}_${batch.seq}.${batchFileFormat(batch.bank).ext}`;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1112,7 +1174,7 @@ async function saveReviewerAccount({ reviewerId, subPhone8, bankName, bankAccoun
 module.exports = {
   BANK_LABEL, bankFromGoodsCostType, normalizeBankChoice, tabBankLabel, tabSheetUrl,
   listPaymentTargets, createBatch, cancelBatch, listBatches, getBatch, markDownloaded,
-  buildWorkbook, batchFileName,
+  buildWorkbook, batchFileName, batchFileFormat,
   saveTransferSetting, saveReviewerAccount, checkBatchAccountSnapshots, reconcileAccountSnapshots,
   compareAccountSnapshot, accountFingerprint, PaymentFixError,
 };
