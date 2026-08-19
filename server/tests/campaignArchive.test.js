@@ -33,6 +33,16 @@ const recruitJs = read('../frontend/js/index-recruit.js');
 const adminHtml = read('../frontend/admin.html');
 const workdesk = read('../frontend/workdesk.html');
 
+/* 스텁 pool — 라우트를 **실제로 실행**하기 위해 require 캐시에 미리 심는다.
+   ★ 정적 검사만으로는 `if (false && …)` 같은 무력화를 통과시킨다(변이시험이 실제로 뚫었다). */
+const _poolPath = require.resolve('../src/db/pool');
+let _poolCalls = [];
+let _poolHandler = () => ({ rows: [] });
+require.cache[_poolPath] = {
+  id: _poolPath, filename: _poolPath, loaded: true,
+  exports: { query: async (sql, params) => { _poolCalls.push({ sql, params }); return _poolHandler(sql, params); } },
+};
+
 let passed = 0;
 function ok(name, cond, extra) {
   assert(cond, name + (extra !== undefined ? ' → ' + JSON.stringify(extra) : ''));
@@ -191,6 +201,43 @@ function finish() {
     ok('★ force 우회를 두지 않는다', !/(req\.(body|query)[^\n]*force|\bforce\b\s*(===|\?\?|\|\|))/.test(del));
   }
 
+  // ── E2. 삭제 게이트 **실행** ────────────────────────────────
+  console.log('\n[E2] 삭제 라우트 실제 실행');
+  {
+    const campRouter = require('../src/routes/campaign.routes');
+    const layer = campRouter.stack.find(l => l.route && l.route.path === '/admin/:id' && l.route.methods.delete);
+    assert(layer, 'DELETE /admin/:id 라우트를 찾지 못함');
+    const handle = layer.route.stack[layer.route.stack.length - 1].handle;
+    const run = async (appsCount, opts) => {
+      _poolCalls = [];
+      _poolHandler = (sql) => {
+        if (/FROM campaign_applications/.test(sql)) {
+          if (opts && opts.throwOnCount) throw new Error('count failed');
+          return { rows: [{ n: String(appsCount) }] };
+        }
+        if (/DELETE FROM recruit_campaigns/.test(sql)) return { rowCount: 1 };
+        return { rows: [] };
+      };
+      let code = 200, body = null;
+      const res = { status(c) { code = c; return this; }, json(b) { body = b; return this; } };
+      await handle({ params: { id: 'c1' }, body: {}, query: {}, admin: { name: 'master' } }, res, () => {});
+      return { code, body, deleted: _poolCalls.some(c => /DELETE FROM recruit_campaigns/.test(c.sql)) };
+    };
+    return Promise.resolve().then(async () => {
+      const r1 = await run(3);
+      ok('★★ 참여 이력이 있으면 409 로 거부하고 **DELETE 를 실행하지 않는다**',
+        r1.code === 409 && r1.body && r1.body.code === 'has_applications' && r1.deleted === false, r1);
+      const r2 = await run(0);
+      ok('참여 0건(오발행분)은 종전대로 삭제된다', r2.body && r2.body.ok === true && r2.deleted === true, r2);
+      const r3 = await run(0, { throwOnCount: true });
+      ok('★★ 세지 못하면 지우지 않는다(fail-closed) — DELETE 미실행',
+        r3.code === 503 && r3.body && r3.body.code === 'unknown_history' && r3.deleted === false, r3);
+      finishRest();
+    });
+  }
+}
+
+function finishRest() {
   // ── G. 권한·라우터 ──────────────────────────────────────────
   console.log('\n[G] 권한');
   {
