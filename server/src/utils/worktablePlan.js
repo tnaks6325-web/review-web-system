@@ -25,6 +25,7 @@ const { REVIEW_TYPE_SHEET_LABELS, isReviewOptionHeader } = require('./reviewType
 const { normalizeReviewTypeMix } = require('./reviewTypeMix');
 const { isBlogKind } = require('./workKind');
 const { isPostDateHeader } = require('./memoColumn');
+const { isTrackingHeader } = require('./trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
 
 const MAX_ROWS = 2000;          // prepareRosterSlots 상한과 같은 값(폭주 방지)
 const MAX_DAYS = 400;           // 날짜 분배 무한루프 백스톱
@@ -380,7 +381,7 @@ function isCourierProxyWorkOrder(wo = {}) {
 }
 
 function hasCourierTrackingColumn(columns = []) {
-  return columns.some((column) => /^\s*택배\s*송장\s*(?:번호)?\s*(?:\([^()]{1,60}\))?\s*$/.test(String(column && column.name || '')));
+  return columns.some((column) => isTrackingHeader(column && column.name));
 }
 
 function systemCourierTrackingColumn() {
