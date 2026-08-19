@@ -584,4 +584,233 @@ async function applyDepositFanoutCleanup({ sheetId = '', tabName = '', stamp = '
     rebuiltTabs: rebuilt, summary: _cleanupSummary(groups), items: _cleanupView(groups) };
 }
 
-module.exports = { previewManual811Transfer, depositAnomalyReport, previewDepositFanoutCleanup, applyDepositFanoutCleanup, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };
+
+/* ══════════════════════════════════════════════════════════════════
+   "직원이 최초로 적은 입금일" 복원 (사용자 확정 2026-08-19)
+   ──────────────────────────────────────────────────────────────────
+   상태: 직원이 8/11·8/12 를 작업보드 입금칸에 적은 것은 `participant_edits` **오버레이**로 남아 있고,
+   그 앵커(`order_submission_id`)가 무시트 중복 줄 사고로 **여러 줄을 가리키게** 됐다.
+
+   ★★ 오버레이만으로는 "원래 줄 하나"에 붙일 수 없다 — 합성은 **행에서 파생한 앵커**로 편집을 찾으므로
+      같은 주문 UUID 를 가진 두 줄은 **구조적으로 같은 키**가 된다. 그래서 게이트(2줄 이상 미적용)를
+      걸면 번짐은 멈추지만 **원래 줄에서도 값이 사라진다**. 원하는 상태는 그게 아니다.
+   → 해결: **원래 줄에는 값을 실제로 새기고(row_json), 오버레이는 이력으로 내린다(reverted_at).**
+      그러면 그 줄에만 남고 번진 줄에서는 사라지며, 앵커 모호성 자체가 소멸한다.
+
+   ★ 원래 줄 판정 = 사용자가 확정한 그 규칙 — **리뷰 제출된 줄이 정확히 1개**일 때만 자동,
+     0개·2개 이상은 **보류**(사람이 고른다). 미리보기에 입금 원장 유무를 함께 보여 눈으로 검증하게 한다.
+   ★ 값은 **직원이 친 그대로** 새긴다(`8/11`·`계좌 오류` 등) — "최초 입력 버전"이 목적이므로 해석하지 않는다.
+   ★ 번진 줄에서 지우는 것은 **그 값(날짜 토큰)만**이고, **입금 원장이 있는 줄은 건드리지 않는다**
+     (실제 이체된 줄일 수 있다 — fail-closed).
+   ══════════════════════════════════════════════════════════════════ */
+
+const OVERLAY_HOLD = {
+  no_submitted_row: '리뷰 제출된 줄이 없습니다 — 어느 줄이 원래 줄인지 사람이 판단해야 합니다.',
+  multiple_submitted_rows: '리뷰 제출된 줄이 2개 이상입니다 — 사람이 골라야 합니다.',
+  not_sheetless: '시트 기반 작업입니다 — 작업표에 새겨도 다음 빌드가 되돌립니다.',
+  deposit_column_missing: '입금 컬럼을 찾지 못했습니다.',
+};
+
+/** 같은 값인지(날짜는 토큰 기준, 그 외는 문자열 그대로) */
+function _sameStampValue(cellValue, stamp) {
+  const cur = String(cellValue == null ? '' : cellValue).trim();
+  if (!cur) return false;
+  if (removeDepositStamp(cur, stamp) !== cur) return true;      // 날짜 토큰이 들어 있다
+  return cur === String(stamp == null ? '' : stamp).trim();      // 비-날짜 표기(계좌 오류 등)
+}
+
+/** 그 값만 뺀 나머지 */
+function _withoutStamp(cellValue, stamp) {
+  const cur = String(cellValue == null ? '' : cellValue).trim();
+  const byToken = removeDepositStamp(cur, stamp);
+  if (byToken !== cur) return byToken;
+  return cur === String(stamp == null ? '' : stamp).trim() ? '' : cur;
+}
+
+/** 번진 입금 오버레이 + 처리 계획(판정 단일 출처). 읽기만 한다. */
+async function _overlayGroups(client, { sheetId = '', tabName = '' } = {}) {
+  const params = [];
+  const scope = [];
+  if (sheetId) { params.push(sheetId); scope.push(`pe.sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); scope.push(`pe.tab_name = $${params.length}`); }
+  const { rows } = await client.query(
+    `WITH col AS (
+       SELECT sheet_id, tab_name, MAX(NULLIF(submit_col2, '')) AS deposit_col
+         FROM review_index GROUP BY sheet_id, tab_name
+     )
+     SELECT pe.id::text AS "editId", pe.sheet_id AS "sheetId", pe.tab_name AS "tabName",
+            pe.anchor_type AS "anchorType", pe.anchor_value AS "anchorValue",
+            btrim(pe.value_text) AS stamp, pe.created_by AS "createdBy", pe.created_at AS "createdAt",
+            col.deposit_col AS "depositColKey",
+            COALESCE(tc.sheetless, FALSE) AS sheetless,
+            cp.id::text AS "rowId", cp.seq AS "rowIndex", cp.reviewer_name AS "reviewerName",
+            COALESCE(cp.row_json ->> col.deposit_col, '') AS "paidValue",
+            COALESCE(ri.is_submitted, FALSE) AS submitted,
+            (EXISTS (SELECT 1 FROM payment_records pr
+                      WHERE pr.sheet_id = cp.sheet_id AND pr.tab_name = cp.tab_name AND pr.row_index = cp.seq)
+             OR EXISTS (SELECT 1 FROM payment_batch_items pi
+                      WHERE pi.sheet_id = cp.sheet_id AND pi.tab_name = cp.tab_name AND pi.row_index = cp.seq
+                        AND pi.status = 'paid')) AS "hasLedger"
+       FROM participant_edits pe
+       JOIN campaign_participants cp
+         ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
+        AND cp.deleted_at IS NULL AND cp.active = TRUE
+        AND (( pe.anchor_type = 'order'    AND cp.order_submission_id::text = pe.anchor_value)
+          OR ( pe.anchor_type = 'manual'   AND cp.id::text = pe.anchor_value)
+          OR ( pe.anchor_type = 'identity' AND cp.identity_key = pe.anchor_value))
+       LEFT JOIN col ON col.sheet_id = pe.sheet_id AND col.tab_name = pe.tab_name
+       LEFT JOIN review_index ri
+         ON ri.sheet_id = pe.sheet_id AND ri.tab_name = pe.tab_name AND ri.row_index = cp.seq
+       LEFT JOIN tab_configs tc
+         ON tc.sheet_id = pe.sheet_id AND tc.tab_name = pe.tab_name
+      WHERE pe.field = 'col:입금' AND pe.kind = 'text' AND pe.reverted_at IS NULL
+        AND btrim(COALESCE(pe.value_text, '')) <> ''
+        ${scope.length ? 'AND ' + scope.join(' AND ') : ''}
+      ORDER BY pe.sheet_id, pe.tab_name, pe.id, cp.seq`, params);
+
+  const byEdit = new Map();
+  for (const r of rows) {
+    if (!byEdit.has(r.editId)) {
+      byEdit.set(r.editId, {
+        editId: r.editId, sheetId: r.sheetId, tabName: r.tabName,
+        anchorType: r.anchorType, anchorValue: r.anchorValue, stamp: r.stamp,
+        createdBy: r.createdBy || '', createdAt: r.createdAt,
+        depositColKey: r.depositColKey, sheetless: r.sheetless === true, targets: [],
+      });
+    }
+    byEdit.get(r.editId).targets.push({
+      rowId: r.rowId, rowIndex: Number(r.rowIndex), reviewerName: r.reviewerName || '',
+      paidValue: r.paidValue || '', submitted: r.submitted === true, hasLedger: r.hasLedger === true,
+    });
+  }
+
+  const groups = [];
+  for (const g of byEdit.values()) {
+    if (g.targets.length <= 1) continue;              // 번지지 않은 표기는 손대지 않는다
+    const submitted = g.targets.filter(t => t.submitted);
+    let hold = null;
+    if (!g.sheetless) hold = 'not_sheetless';
+    else if (!g.depositColKey) hold = 'deposit_column_missing';
+    else if (submitted.length === 0) hold = 'no_submitted_row';
+    else if (submitted.length > 1) hold = 'multiple_submitted_rows';
+    const keep = hold ? null : submitted[0];
+    // 번진 줄에서 지울 대상 = 그 값이 실제로 새겨져 있고 **입금 원장이 없는** 줄만(fail-closed)
+    const clear = hold ? [] : g.targets.filter(t =>
+      t.rowId !== keep.rowId && !t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
+    const ledgerBlocked = hold ? [] : g.targets.filter(t =>
+      t.rowId !== keep.rowId && t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
+    groups.push({ ...g, hold, holdReason: hold ? OVERLAY_HOLD[hold] : null, keep, clear, ledgerBlocked,
+      submittedCount: submitted.length });
+  }
+  return groups;
+}
+
+function _overlaySummary(groups) {
+  const act = groups.filter(g => !g.hold);
+  return {
+    groups: groups.length,
+    actionableGroups: act.length,
+    keepRows: act.length,
+    clearRows: act.reduce((n, g) => n + g.clear.length, 0),
+    ledgerBlockedRows: act.reduce((n, g) => n + g.ledgerBlocked.length, 0),
+    holdGroups: groups.filter(g => g.hold).length,
+    byStamp: groups.reduce((acc, g) => {
+      const k = g.stamp || '(빈값)';
+      if (!acc[k]) acc[k] = { groups: 0, hold: 0 };
+      acc[k].groups += 1; if (g.hold) acc[k].hold += 1;
+      return acc;
+    }, {}),
+  };
+}
+
+function _overlayView(groups) {
+  return groups.map(g => ({
+    tabName: g.tabName, stamp: g.stamp, anchorType: g.anchorType,
+    createdBy: g.createdBy, reviewerName: (g.targets[0] && g.targets[0].reviewerName) || '',
+    rows: g.targets.map(t => t.rowIndex),
+    keepRow: g.keep ? g.keep.rowIndex : null,
+    clearRows: g.clear.map(t => t.rowIndex),
+    ledgerBlockedRows: g.ledgerBlocked.map(t => t.rowIndex),
+    ledgerRows: g.targets.filter(t => t.hasLedger).map(t => t.rowIndex),
+    submittedCount: g.submittedCount,
+    hold: g.hold, holdReason: g.holdReason,
+  }));
+}
+
+async function previewOverlayFanoutFix({ sheetId = '', tabName = '' } = {}) {
+  const groups = await _overlayGroups(pool, { sheetId, tabName });
+  return { ok: true, dryRun: true, summary: _overlaySummary(groups), items: _overlayView(groups) };
+}
+
+/**
+ * 실행 — 원래 줄에 값을 새기고, 번진 줄에서 지우고, 오버레이를 이력으로 내린다.
+ */
+async function applyOverlayFanoutFix({ sheetId = '', tabName = '', by = 'payment-repair' } = {}) {
+  const client = await pool.connect();
+  let groups = [];
+  const touchedTabs = new Map();
+  let kept = 0, cleared = 0, reverted = 0;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('manual_deposit_overlay_fix'))`);
+    groups = await _overlayGroups(client, { sheetId, tabName });
+    const act = groups.filter(g => !g.hold);
+    if (!act.length) {
+      await client.query('ROLLBACK');
+      throw new ManualDepositRepairError('empty', '복원할 대상이 없습니다(모두 보류이거나 이미 처리됨).');
+    }
+    for (const g of act) {
+      // ① 원래 줄에 값을 실제로 새긴다(기존 입금일과 병합 — 다른 날짜를 지우지 않는다)
+      const nextKeep = mergeDepositStamps(g.keep.paidValue, g.stamp);
+      const k = await client.query(
+        `UPDATE campaign_participants
+            SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
+                is_paid = TRUE, updated_at = NOW(), updated_by = $4
+          WHERE id = $1 AND deleted_at IS NULL`,
+        [g.keep.rowId, g.depositColKey, nextKeep, by]);
+      kept += k.rowCount;
+
+      // ② 번진 줄에서 그 값만 지운다(입금 원장이 있는 줄은 위 필터에서 이미 제외됨)
+      for (const t of g.clear) {
+        const next = _withoutStamp(t.paidValue, g.stamp);
+        const c = await client.query(
+          `UPDATE campaign_participants
+              SET row_json = COALESCE(row_json, '{}'::jsonb) || jsonb_build_object($2::text, $3::text),
+                  is_paid = CASE WHEN $3::text = '' THEN FALSE ELSE is_paid END,
+                  updated_at = NOW(), updated_by = $4
+            WHERE id = $1 AND deleted_at IS NULL`,
+          [t.rowId, g.depositColKey, next, by]);
+        cleared += c.rowCount;
+        if (!next) {
+          await client.query(
+            `UPDATE review_index SET is_submitted2 = 'NONE'
+              WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 AND is_submitted2 = 'PAID'`,
+            [g.sheetId, g.tabName, t.rowIndex]);
+        }
+      }
+
+      // ③ 오버레이(그 편집 + 짝 is_paid 토글)를 이력으로 내린다 — 앵커 모호성 자체를 없앤다.
+      const rv = await client.query(
+        `UPDATE participant_edits SET reverted_at = NOW(), reverted_by = $1
+          WHERE sheet_id = $2 AND tab_name = $3 AND anchor_type = $4 AND anchor_value = $5
+            AND field IN ('col:입금', 'is_paid') AND reverted_at IS NULL`,
+        [String(by).slice(0, 100), g.sheetId, g.tabName, g.anchorType, g.anchorValue]);
+      reverted += rv.rowCount;
+      touchedTabs.set(`${g.sheetId}\t${g.tabName}`, { sheetId: g.sheetId, tabName: g.tabName });
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally { client.release(); }
+
+  const rebuilt = [];
+  for (const tab of touchedTabs.values()) {
+    try { await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: `overlay-fix:${by}` }); rebuilt.push(tab.tabName); }
+    catch (e) { rebuilt.push(`${tab.tabName}(재생성 실패: ${e.code || e.message})`); }
+  }
+  return { ok: true, dryRun: false, keptRows: kept, clearedRows: cleared, revertedEdits: reverted,
+    rebuiltTabs: rebuilt, summary: _overlaySummary(groups), items: _overlayView(groups) };
+}
+
+module.exports = { previewManual811Transfer, depositAnomalyReport, previewOverlayFanoutFix, applyOverlayFanoutFix, previewDepositFanoutCleanup, applyDepositFanoutCleanup, restoreManual811DepositDates, moveDepositDateBetweenRows, ManualDepositRepairError };

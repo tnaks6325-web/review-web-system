@@ -3039,6 +3039,31 @@ router.post('/payment/repair/manual-811-deposit-dates', authMiddleware, adminOrM
   } catch (err) { next(err); }
 });
 
+// "직원이 최초로 적은 입금일" 복원 — 원래 줄에 새기고, 번진 줄에서 지우고, 오버레이를 이력으로 내린다.
+//   판정: 리뷰 제출된 줄이 정확히 1개일 때만 자동. 0개·2개 이상은 보류(사람이 고른다).
+router.get('/payment/repair/deposit-overlay-fix', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    res.json(await manualDepositRepairSvc.previewOverlayFanoutFix({
+      sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || ''),
+    }));
+  } catch (err) { next(err); }
+});
+
+router.post('/payment/repair/deposit-overlay-fix', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) {
+      return res.status(400).json({ ok: false, code: 'need_confirm', error: '복원 내용을 확인해 주세요.' });
+    }
+    res.json(await manualDepositRepairSvc.applyOverlayFanoutFix({
+      sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''), by: _by(req),
+    }));
+  } catch (err) {
+    if (err && err.code) return res.status(400).json({ ok: false, code: err.code, error: err.message });
+    next(err);
+  }
+});
+
 // 번진 입금일 정리 — 미리보기(읽기 전용) / 실행(confirm 필수).
 //   판정: 그룹에 리뷰 제출된 줄이 정확히 1개일 때만 그 줄을 남기고 나머지에서 그 날짜를 회수한다.
 //   0개·2개 이상은 보류(사람이 고른다) — 서버가 임의로 정하지 않는다.
