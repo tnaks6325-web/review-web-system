@@ -7138,7 +7138,8 @@ const PAY_BANKS = [['kbank','케이뱅크'],['hana','하나은행']];
      근거다. 그 사실을 화면이 밝히지 않으면 "왜 이 사람 계좌로 나가지?"를 확인할 길이 없다. */
 function _pmAcctSrcTip(it){
   const m = { owner_order:'참여 원장에서 소유자(본계정) 계좌를 찾았습니다',
-              owner_link:'제출 신원 링크 + 소유자의 타계정 목록에서 계좌를 찾았습니다' };
+              owner_link:'제출 신원 링크 + 소유자의 타계정 목록에서 계좌를 찾았습니다',
+              order:'등록된 계좌가 없어 이 건의 구매양식으로 제출된 계좌를 씁니다' };
   const t = m[it && it.accountSource];
   return t ? ` title="${esc(t)}"` : '';
 }
@@ -7398,7 +7399,8 @@ function _pmTargetTable(items){
       <td>${it.payable?`<input type="checkbox" ${on?'checked':''} onchange="_pmToggle(${idx},this.checked)">`:'—'}</td>
       <td>${esc(it.tabLabel)}</td>
       <td>${badge}</td>
-      <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}</td>
+      <td>${esc(it.reviewerName)}${it.isSub?`<span class="pmauto"${_pmAcctSrcTip(it)}>타계정</span>`:''}${
+        it.accountSource==='order'?`<span class="pmauto"${_pmAcctSrcTip(it)}>양식계좌</span>`:''}</td>
       <td>${esc(it.startDate)}</td>
       <td class="mono">${esc(it.bankOfficial||it.bankName||'-')} ${esc(it.bankAccount||'')}</td>
       <td>${esc(it.accountHolder||'-')}</td>

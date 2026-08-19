@@ -76,7 +76,7 @@ function handler(opts) {
     if (/FROM participation_links pl/.test(sql)) return { rows: opts.viaLink || [] };
     // ── 폴백 소유자 조회
     if (/AS "subAccounts"/.test(sql)) return { rows: opts.owners || [] };
-    if (/FROM order_submissions/.test(sql)) return { rows: [] };   // 주문 원장 가격(폴백 아님)
+    if (/FROM order_submissions/.test(sql)) return { rows: opts.orderRows || [] };  // 가격 + 제출 계좌
     return { rows: [] };
   };
 }
@@ -183,6 +183,60 @@ const owner = (over = {}) => Object.assign({
       const it = (await svc.listPaymentTargets()).items[0];
       assert.ok(it.issues.includes('no_reviewer'));
     });
+  });
+
+  console.log('\n§2-2 그 건의 제출 계좌(구매양식) — 등록 계좌가 없을 때의 마지막 근거');
+
+  const ORDER_ROW = { sheetId: 'S1', tabName: 'T1', sheetRow: 10, price: '20000', feeSnapshot: null,
+                      orderedAt: null, bank: '케이뱅크', account: '100-234-102639', depositor: '최영순' };
+
+  await ta('2e ★ 등록 계좌가 없어도 구매양식으로 제출된 계좌로 통과한다(최영순7 사고)', async () => {
+    await withStubPool(handler({ orderRows: [ORDER_ROW] }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.payable, true, '남은 보류: ' + it.issues.join(','));
+      assert.strictEqual(it.accountSource, 'order');
+      assert.strictEqual(it.bankAccount, '100234102639', '계좌는 숫자만으로 정규화');
+      assert.strictEqual(it.accountHolder, '최영순');
+      assert.strictEqual(it.accountRef, null, '지목할 리뷰어가 없다 = 보완 팝업 대상 아님');
+    });
+  });
+
+  await ta('2f 등록 계좌가 언제나 이긴다(기존 동작 보존 — 제출 계좌가 덮지 않는다)', async () => {
+    await withStubPool(handler({
+      orderRows: [ORDER_ROW],
+      ownRows: [{ reviewerId: OWNER_ID, phone8: '87654321', name: '명지수', ...OWNER_ACCT }],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'self');
+      assert.strictEqual(it.bankAccount, '123456789');
+    });
+  });
+
+  await ta('2g 반쪽 값(은행·계좌·예금주 중 하나라도 빔)은 인정하지 않는다 — 은행이 거부하는 파일', async () => {
+    for (const gap of [{ bank: '' }, { account: '' }, { depositor: '' }]) {
+      await withStubPool(handler({ orderRows: [{ ...ORDER_ROW, ...gap }] }), async (svc) => {
+        const it = (await svc.listPaymentTargets()).items[0];
+        assert.ok(it.issues.includes('no_reviewer'), '빈 값을 채워 통과시키면 안 된다: ' + JSON.stringify(gap));
+      });
+    }
+  });
+
+  await ta('2h 소유자 링크가 제출 계좌보다 우선(등록된 계좌가 관리 원장)', async () => {
+    await withStubPool(handler({
+      orderRows: [ORDER_ROW],
+      viaOrder: [{ sheetId: 'S1', tabName: 'T1', rowIndex: 10, ownerPhone8: '11112222', subPhone8: '87654321' }],
+      owners: [owner()],
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.accountSource, 'owner_order');
+      assert.strictEqual(it.bankAccount, '123456789');
+    });
+  });
+
+  t('2i 회차 스냅샷 출처는 등록된 명의(subPhone8)가 있을 때만 sub — 없으면 소유자 본계좌(self)', () => {
+    const src = fs.readFileSync(SRC('services/payment.service.js'), 'utf8');
+    assert.ok(/accountRef\.subPhone8 \? 'sub' : 'self'/.test(src),
+      "subPhone8 없는 폴백 건을 'sub' 로 박제하면 다음 대조가 없는 명의를 찾아 mismatch 로 잡는다");
   });
 
   console.log('\n§3 폴백은 필요할 때만 · 실패해도 목록을 죽이지 않는다');
