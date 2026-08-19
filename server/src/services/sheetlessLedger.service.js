@@ -430,7 +430,14 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
   const byOrder = new Map();    // ㉯
   rows.forEach((r, i) => {
     if (r.osid) {
-      const k = 'os:' + String(r.osid);
+      /* ★★ 같은 주문 기록을 공유해도 **표 주문번호가 서로 다르면 묶지 않는다**
+         (2026-08-19 실사고 · 사용자 확정). 링크(`order_submission_id`)는 투영이 채우는 값이라
+         한 리뷰어의 여러 참여가 **한 주문**을 가리키도록 오염될 수 있다(장수산업 실측: 8/19 줄이
+         8/4 주문 링크를 들고 있었다). 그 상태에서 이 축만 믿으면 **별개 참여가 중복으로 지워진다**.
+         담당자가 표에서 눈으로 보는 값(주문번호)이 다르면 그건 다른 구매다 — 링크보다 그 값을 믿는다.
+         ★ 표 주문번호가 6자리 미만(비번호 주문·빈 칸)인 줄은 판정할 수 없으므로 종전대로 링크로만
+           묶되, **값이 있는 줄과는 섞지 않는다**(모르는 것을 같다고 하지 않는다 = 안 지우는 쪽). */
+      const k = 'os:' + String(r.osid) + '\u0000' + (String(r.roword || '').length >= 6 ? r.roword : '');
       if (!byOrder.has(k)) byOrder.set(k, []);
       byOrder.get(k).push(i);
     }

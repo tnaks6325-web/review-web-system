@@ -126,6 +126,25 @@ async function _enrichTab({ sheetId, tabName } = {}) {
     const prev = byPhone.get(p8);
     if (!prev || (o.mirror_status === 'written' && prev.mirror_status !== 'written')) byPhone.set(p8, o);
   }
+  /* ★★ 주문 **링크**는 phone8 만으로 정하지 않는다 (2026-08-19 실사고 — 장수산업).
+     한 리뷰어가 같은 작업에 여러 번 참여하면 `byPhone` 은 그중 **한 건만** 남기므로, 링크가 비어
+     있던 줄마다 **그 한 주문**이 붙는다 → 서로 다른 날의 별개 참여가 "한 주문이 여러 줄에 기록됨"
+     으로 보이고, 중복 정리가 뒤 줄을 내린다(실측: 8/19 줄이 8/4 주문 링크를 들고 있었다).
+     → 표에 적힌 주문번호와 원장 주문번호가 **같을 때만** 링크한다. 표 번호가 없을 때만 phone8 로
+     떨어지고, 그마저도 **그 사람 주문이 그 탭에 유일할 때만**(모호하면 링크하지 않는다).
+     ★ `identity_key` 계산은 종전 그대로 phone8 매칭을 쓴다 — 그 값은 편집 오버레이의 앵커라
+       바꾸면 사람이 적어 둔 값이 조용히 끊긴다(좁히는 것은 링크뿐). */
+  const byOrderNum = new Map();   // 주문번호(숫자만) → 주문 | '__AMBIG__'
+  for (const o of orders) {
+    const n = String(o.order_num || '').replace(/\D/g, '');
+    if (n.length < 6) continue;
+    byOrderNum.set(n, byOrderNum.has(n) ? '__AMBIG__' : o);
+  }
+  const phoneOrderCount = new Map();
+  for (const o of orders) {
+    const p8 = _phone8(o.phone);
+    if (p8) phoneOrderCount.set(p8, (phoneOrderCount.get(p8) || 0) + 1);
+  }
   let enriched = 0, orderLinked = 0;
   for (const p of prows) {
     const rj = (p.row_json && typeof p.row_json === 'object') ? p.row_json : {};
@@ -136,13 +155,25 @@ async function _enrichTab({ sheetId, tabName } = {}) {
       if (kl.includes('주문번호') || kl.includes('ordernum')) { orderNum = rj[k]; break; }
     }
     const ord = p.phone8 ? byPhone.get(p.phone8) : null;
+    /* 링크 대상은 위 규율대로 따로 고른다(표 주문번호 일치 우선 · 없으면 그 사람 주문이 유일할 때만). */
+    let linkOrd = null;
+    const rowNum = String(orderNum || '').replace(/\D/g, '');
+    if (rowNum.length >= 6) {
+      const hit = byOrderNum.get(rowNum);
+      if (hit && hit !== '__AMBIG__') linkOrd = hit;
+    } else if (p.phone8 && phoneOrderCount.get(p.phone8) === 1) {
+      linkOrd = ord || null;
+    }
     let ik, orderId = null, price = null;
     if (ord) {
       ik = ord.dedup_key || identityKey({ orderNum: ord.order_num, recipient: ord.recipient, phone8: ord.phone, dateStr: ord.date_str, optKey: ord.selected_opt_key });
-      orderId = ord.id; price = ord.price || null; orderLinked++;
+      if (linkOrd) { orderId = linkOrd.id; orderLinked++; }
+      price = ord.price || null;
     } else {
       ik = identityKey({ orderNum, recipient: p.recipient_name, phone8: p.phone8, dateStr: '', optKey: p.option_text });
     }
+    /* phone8 매칭이 없어도 표 주문번호가 원장과 정확히 맞으면 링크한다(그 반대는 하지 않는다). */
+    if (!orderId && linkOrd) { orderId = linkOrd.id; price = price || linkOrd.price || null; orderLinked++; }
     await db.query(
       `UPDATE campaign_participants
           SET identity_key = $2, order_submission_id = COALESCE($3, order_submission_id),
@@ -4434,6 +4465,7 @@ module.exports = {
   identityKey,
   classifyParity,
   projectTab,
+  _enrichTab,          // 회귀가드가 링크 규칙을 직접 실행해 확인한다(2026-08-19 링크 오염)
   projectActive,
   parityReport,
   parityAll,
