@@ -2877,6 +2877,30 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
+   작업표 줄 ↔ 주문 링크 교정 — admin/master 전용 (일회성 복구, 2026-08-19)
+   ★ 미리보기(dryRun 기본) → confirm:true 로 실행. 쓰기 표면은 링크 1칸(+중복정리가
+     취소한 주문의 되돌리기)뿐이고, 한 건이라도 조건을 못 지키면 전부 되돌린다.
+   ══════════════════════════════════════════════════════════════════════════ */
+router.post('/worktable/repair-link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { repairWorktableLinks, LinkRepairError } = require('../services/worktableLinkRepair.service');
+    const b = req.body || {};
+    try {
+      res.json(await repairWorktableLinks({
+        sheetId: b.sheetId, tabName: b.tabName, fixes: b.fixes,
+        dryRun: b.dryRun !== false, confirm: b.confirm === true, by: `repair:${_by(req)}`,
+      }));
+    } catch (e) {
+      if (e instanceof LinkRepairError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
    작업(탭) 통째 삭제 — admin/master 전용 (사용자 확정 2026-08-19)
    ★★ 되돌릴 수 없다. 그래서 ① 미리보기(GET, 쓰기 0) → ② `confirm:true` 실행 2단계이고,
       ③ 돈 기록(입금 회차·원장·수기 표기·미확인 이체)이 걸린 작업은 **확인해도 거부**한다.
