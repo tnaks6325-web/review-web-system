@@ -203,6 +203,34 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('시트 기반 탭은 거부(다음 시트 반영이 되살린다)', code === 'not_sheetless');
     led.__setPoolForTest(null);
   }
+  /* ★★ 판정 키에 **주문번호**가 반드시 들어간다(사용자 확정 2026-08-19).
+       스텁은 SQL 을 해석하지 않으므로 쿼리문 자체를 고정한다 — 이 조건이 빠지면 "같은 사람이 다른
+       주문으로 여러 번 참여한 것"까지 중복으로 지워진다. */
+  const ledSrc = fs.readFileSync(path.join(__dirname, '../src/services/sheetlessLedger.service.js'), 'utf8');
+  const dedupeSrc = ledSrc.slice(ledSrc.indexOf('async function dedupeRows('),
+                                ledSrc.indexOf('module.exports'));
+  ok('중복 조회가 주문번호를 읽는다', /order_num[\s\S]{0,40}AS ordnum/.test(dedupeSrc));
+  ok('★ 주문번호 6자리 미만은 조회에서 제외(주문번호 없는 줄은 절대 대상이 아니다)',
+    /length\(regexp_replace\(COALESCE\(os\.order_num[\s\S]{0,60}\) >= 6/.test(dedupeSrc));
+  ok('★ 그룹 키 = 주문번호 + 연락처 둘 다', /const key = `\$\{r\.ordnum\}[\s\S]{0,20}\$\{r\.ph\}`/.test(dedupeSrc));
+  ok('취소된 주문은 대상이 아니다', /os\.deleted_at IS NULL/.test(dedupeSrc));
+  {
+    // 같은 사람(같은 연락처)이 **다른 주문번호**로 두 번 참여 → 중복이 아니다(실행으로 확인)
+    const led2 = require('../src/services/sheetlessLedger.service');
+    led2.__setPoolForTest({
+      query: async (sql) => {
+        if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+        if (/JOIN order_submissions os ON os\.id = cp\.order_submission_id/.test(sql)) return { rows: [
+          { seq: 1, osid: 'o1', name: '김신혜', submitted: false, paid: false, ordnum: '11111111111', ph: '01090411926', in_payment: false },
+          { seq: 2, osid: 'o2', name: '김신혜', submitted: false, paid: false, ordnum: '22222222222', ph: '01090411926', in_payment: false },
+        ] };
+        return { rows: [] };
+      },
+    });
+    const r = await led2.dedupeRows({ sheetId: 'wt_x', tabName: 'T1' });
+    ok('★ 연락처만 같고 주문번호가 다르면 중복이 아니다', r.groups === 0 && r.removeRows === 0);
+    led2.__setPoolForTest(null);
+  }
   const tbSrc = fs.readFileSync(path.join(__dirname, '../src/routes/trackB.routes.js'), 'utf8');
   ok('정리 라우트는 adminOrMaster', /'\/worktable\/dedupe-rows', authMiddleware, adminOrMasterMiddleware/.test(tbSrc));
   ok('라우트도 dryRun 기본', /dedupe-rows[\s\S]{0,400}dryRun: b\.dryRun !== false/.test(tbSrc));
@@ -210,11 +238,21 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   console.log('\n[E] 화면 창구 — 미리보기 → 확인 → 실행');
   const wd = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
   ok('[⋯] 도구 메뉴에 중복 정리 버튼', /onclick="openDedupeModal\(\)"/.test(wd));
-  ok('게이트는 줄 정리와 같다(무시트 + master/admin)', /function _ddCan\(\)\{ return _wrCanRetire\(\); \}/.test(wd));
+  /* ★★ 화면 게이트 = 서버 게이트(adminOrMaster). `_wrCanRetire()` 재사용 금지 —
+     그쪽은 staff 까지 열려 있어 따라 넓히면 AE 에게 403 나는 죽은 버튼이 생긴다. */
+  ok('★ 게이트는 무시트 + master/admin(서버 adminOrMaster 와 1:1)',
+    /function _ddCan\(\)\{[\s\S]{0,240}sheetless === true[\s\S]{0,120}'master'[\s\S]{0,40}'admin'/.test(wd));
+  ok('★ staff 까지 열린 _wrCanRetire 를 재사용하지 않는다',
+    !/function _ddCan\(\)\{[^}]*_wrCanRetire\(\)/.test(wd));
   ok('미리보기는 dryRun:true', /ddPreview[\s\S]{0,400}dryRun: true/.test(wd));
   ok('실행은 확인창을 거친다', /async function ddRun[\s\S]{0,600}confirm\(/.test(wd));
   ok('미리보기 없이는 실행 버튼이 잠긴다', /go\.disabled = !\(p && p\.removeRows > 0\)/.test(wd));
   ok('보류 사유를 화면이 그대로 말한다(조용한 누락 금지)', /g\.detail \|\| g\.reason/.test(wd));
+  ok('미리보기에 주문번호 열이 있다(사람이 판정 근거를 본다)',
+    /<th>주문번호<\/th>/.test(wd) && /esc\(String\(g\.orderNum \|\| ''\)\)/.test(wd));
+  ok('보류 목록에도 주문번호를 적는다', /주문번호 \$\{esc\(String\(g\.orderNum/.test(wd));
+  ok('판정 규칙을 화면이 문장으로 말한다(주문번호+연락처 · 주문번호 없으면 제외)',
+    /주문번호가 같고 연락처도 같은/.test(wd) && /6자리 미만인 줄은/.test(wd));
   ok('오버레이는 body 직속', /appendChild\(ov\);\s*\/\/ ★ body 직속/.test(wd.slice(wd.indexOf('function openDedupeModal'))));
   ok('Esc 리스너는 최상위 1회', /window\._ddKeyBound/.test(wd));
   {
