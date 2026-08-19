@@ -78,19 +78,27 @@ console.log('\n[B] 바뀌는 줄만 · 같은 값 재기록 없음');
     U.computeRenumberPlan(rows, { hasNumberCol: false }).changes.length === 0);
 }
 
-console.log('\n[C] 담당자 — blank-only · 값 없으면 미기입');
+console.log('\n[C] 담당자 — 번호 정리는 담당자 칸을 건드리지 않는다(사용자 확정 2026-08-19)');
 {
+  /* 담당자는 작업보드 좌측 상단 [작업 조건]에 이미 있으므로 줄마다 반복할 이유가 없다.
+     ★ 이미 적혀 있는 값도 그대로 둔다 — 여기서 담당자를 쓰기 시작하면 그 규칙이 두 곳이 된다. */
   const rows = [
     { id: 'a', seq: 2, iso: '2026-08-01', number: '1', manager: '만두' },
     { id: 'b', seq: 3, iso: '2026-08-02', number: '2', manager: '' },
   ];
-  const p1 = U.computeRenumberPlan(rows, { hasNumberCol: true, hasManagerCol: true, manager: '망고' });
-  ok('★ 사람이 적어 둔 담당자는 덮지 않는다', !p1.changes.some(c => c.id === 'a'), JSON.stringify(p1.changes));
-  ok('빈 담당자만 채운다', p1.changes.length === 1 && p1.changes[0].managerTo === '망고');
-  const p2 = U.computeRenumberPlan(rows, { hasNumberCol: true, hasManagerCol: true, manager: '' });
-  ok('★ 채울 담당자가 없으면(랜덤·미매핑) 아무것도 하지 않는다', p2.changes.length === 0);
-  const p3 = U.computeRenumberPlan(rows, { hasNumberCol: true, hasManagerCol: false, manager: '망고' });
-  ok('담당자 칸이 없는 표는 담당자를 만들지 않는다', p3.changes.length === 0);
+  const plan = U.computeRenumberPlan(rows, { hasNumberCol: true, hasManagerCol: true, manager: '망고' });
+  ok('★★ 담당자만 비어 있는 줄은 변경 대상이 아니다', plan.changes.length === 0, JSON.stringify(plan.changes));
+  /* ★ 변경이 0건이면 "담당자 필드가 없다"는 공허하게 참이다(변이시험 실측) →
+       **번호가 실제로 바뀌는 계획**을 만들어 그 change 객체를 본다. */
+  const moved = U.computeRenumberPlan([
+    { id: 'x', seq: 9, iso: '2026-08-01', number: '', manager: '' },
+  ], { hasNumberCol: true, hasManagerCol: true, manager: '망고' });
+  ok('번호가 바뀌는 계획이 만들어진다(단언 전제)', moved.changes.length === 1, JSON.stringify(moved.changes));
+  ok('★★ 그 계획에도 담당자 필드가 없다',
+    !JSON.stringify(moved.changes).includes('manager') && Object.keys(moved.changes[0]).join(',') === 'id,seq,numberFrom,numberTo',
+    Object.keys(moved.changes[0]).join(','));
+  const src = noLineComments(read('src/utils/rowNumbering.js'));
+  ok('★ 담당자 칸 판정 자체를 두지 않는다(죽은 규칙 금지)', !/MANAGER_KEY|managerColumnKey/.test(src));
 }
 
 console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 · seq 무접촉');
@@ -100,14 +108,14 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     { id: '22222222-2222-2222-2222-222222222222', seq: 3, row_json: { '번호': '', '구매일자': '8 / 5 (수)', '담당자': '', '수취인': '장혜은' }, submitted_at: '2026-08-05T05:00:00Z' },
   ];
   const shapes = [
-    [/FROM tab_configs/i, { rows: [{ sheetless: true, manager: '망고' }] }],
+    [/FROM tab_configs/i, { rows: [{ sheetless: true }] }],
     [/FROM campaign_participants p/i, { rows: roster }],
     [/UPDATE campaign_participants/i, { rows: [], rowCount: 2 }],
   ];
 
   // ── 무시트가 아니면 거부 + 쓰기 0
   {
-    const pool = makePool([[/FROM tab_configs/i, { rows: [{ sheetless: false, manager: '망고' }] }]]);
+    const pool = makePool([[/FROM tab_configs/i, { rows: [{ sheetless: false }] }]]);
     S.__setPoolForTest(pool);
     const r = await S.renumberTab({ sheetId: 's', tabName: 't' });
     ok('★ 시트 기반 탭은 not_sheetless 로 거부', r.ok === false && r.reason === 'not_sheetless');
@@ -140,33 +148,15 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       !/SET[\s\S]*\bseq\s*=/i.test(upd[0].sql), upd[0].sql.slice(0, 200));
     ok('★ 쓰는 것은 row_json(+updated_*) 뿐',
       /SET\s+row_json\s*=/.test(upd[0].sql) && !/(reviewer_name|phone8|order_submission_id|is_paid|is_submitted)\s*=/i.test(upd[0].sql));
+    ok('★★ 담당자 칸을 쓰지 않는다(UPDATE 는 번호 칸 하나만 세팅)',
+      (upd[0].sql.match(/jsonb_set/g) || []).length === 1, upd[0].sql.slice(0, 200));
     ok('★ 대상은 활성 줄만', /deleted_at IS NULL/.test(upd[0].sql) && /active = TRUE/.test(upd[0].sql));
-    ok('번호 칸 이름은 표에서 찾은 값을 쓴다', upd[0].params[3] === '번호' && upd[0].params[4] === '담당자');
-    ok('담당자는 빈 줄만 채운다(param 배열)', upd[0].params[2].filter(Boolean).length === 1);
-  }
-  // ── 담당자 값 정규화(실명 → 닉네임) · 랜덤은 미기입
-  {
-    const st = shapes.map(x => x[0].source === undefined ? x : x);
-    const mk = (mgr) => makePool([
-      [/FROM tab_configs/i, { rows: [{ sheetless: true, manager: mgr }] }],
-      [/FROM campaign_participants p/i, { rows: [{ id: '33333333-3333-3333-3333-333333333333', seq: 2, row_json: { '번호': '1', '구매일자': '8 / 18 (화)', '담당자': '' }, submitted_at: null }] }],
-      [/UPDATE campaign_participants/i, { rows: [], rowCount: 1 }],
-    ]);
-    S.__setPoolForTest(mk('박은비'));
-    let r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
-    ok('★★ 실명 담당자는 닉네임으로 정규화(박은비 → 망고 — 같은 열에 두 표기가 섞이지 않게)',
-      r.manager === '망고', String(r.manager));
-    S.__setPoolForTest(mk('랜덤'));
-    r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
-    ok('★ 랜덤·미정은 채우지 않는다(사람이 정한다)', !r.manager && r.changed === 0, JSON.stringify(r));
-    S.__setPoolForTest(mk('이만수'));
-    r = await S.renumberTab({ sheetId: 's', tabName: 't', dryRun: true });
-    ok('★ 매핑에 없는 이름은 버리지 않고 그대로 쓴다(못 채우는 것보다 낫다)', r.manager === '이만수', String(r.manager));
+    ok('번호 칸 이름은 표에서 찾은 값을 쓴다', upd[0].params[2] === '번호');
   }
   // ── 번호·담당자 칸이 아예 없는 표
   {
     S.__setPoolForTest(makePool([
-      [/FROM tab_configs/i, { rows: [{ sheetless: true, manager: '망고' }] }],
+      [/FROM tab_configs/i, { rows: [{ sheetless: true }] }],
       [/FROM campaign_participants p/i, { rows: [{ id: 'x', seq: 2, row_json: { '수취인': 'A' }, submitted_at: null }] }],
     ]));
     const r = await S.renumberTab({ sheetId: 's', tabName: 't' });
@@ -223,8 +213,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
   console.log('\n[H] 전체 작업 스캔 — 한 쿼리 집계 · 읽기 전용 · 키 목록 단일 출처');
   {
     const pool = makePool([[/FROM tab_configs/i, { rows: [
-      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', manager: '박은비', total: 187, blankNumber: 42, blankManager: 42 },
-      { sheetId: 'S2', tabName: 'T2', displayName: '정상', manager: '망고', total: 100, blankNumber: 0, blankManager: 0 },
+      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', total: 187, blankNumber: 42 },
+      { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 100, blankNumber: 0 },
     ] }]]);
     S.__setPoolForTest(pool);
     const r = await S.scanNumbering({});
@@ -238,9 +228,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 칸 이름 후보를 파라미터로 넘긴다', Array.isArray(pool.calls[0].params[0]) &&
       pool.calls[0].params[0].join(',') === U2.NUMBER_KEYS.map(k => k.toLowerCase()).join(','));
     ok('★ SQL 에 칸 이름 리터럴이 없다', !/'번호'|'담당자'/.test(pool.calls[0].sql));
-    ok('★★ 정규식은 그 목록에서 만든다(사본 0)',
-      U2.NUMBER_KEYS.every(k => U2.NUMBER_KEY_RE.test(k)) && U2.MANAGER_KEYS.every(k => U2.MANAGER_KEY_RE.test(k)));
-    ok('담당AE 는 담당자 칸이 아니다', !U2.MANAGER_KEY_RE.test('담당AE'));
+    ok('★★ 정규식은 그 목록에서 만든다(사본 0)', U2.NUMBER_KEYS.every(k => U2.NUMBER_KEY_RE.test(k)));
+    ok('★★ 스캔도 담당자를 세지 않는다', !/manager|담당자/i.test(pool.calls[0].sql));
   }
 
   console.log('\n[G] 라우트·화면 배선');
@@ -295,6 +284,18 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
       /const i = all\.indexOf\(r\);/.test(fe));
     ok('★ 빈 목록도 사유를 말한다', /검색 결과가 없습니다/.test(fe) && /정리할 작업이 없습니다/.test(fe));
+
+    /* ★★ 헤더 칸 수 ≡ 행 칸 수 ≡ colspan — 열을 끼워 넣을 때 가장 흔히 깨지는 자리.
+         담당자 열이 되살아나면 여기서 걸린다(사용자 확정: 담당자는 번호 정리 대상 아님). */
+    const allBlk = fe.slice(fe.indexOf('function _rnRenderAll('), fe.indexOf('function _rnNeed('));
+    const rowsBlk = fe.slice(fe.indexOf('function _rnRows('), fe.indexOf('/* 서버가 준 사유를'));
+    const th = (allBlk.match(/<th>/g) || []).length;
+    const td = (rowsBlk.match(/<td[ >]/g) || []).length - (rowsBlk.match(/<td colspan/g) || []).length;  // 빈 목록 줄 제외
+    ok('★★ 전체 목록 표는 4칸(작업·표 줄·번호 빈칸·버튼)', th === 4, '헤더 ' + th);
+    ok('★★ 행 칸 수 = 헤더 칸 수', td === th, `헤더 ${th} · 행 ${td}`);
+    ok('★ 빈 목록 colspan 도 같은 칸 수', new RegExp('colspan="' + th + '"').test(rowsBlk));
+    const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));
+    ok('★★ 표에 담당자 열이 없다', !/담당자/.test(thead) && !/담당자|blankManager/.test(rowsBlk), thead.slice(0, 120));
     ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
   }
 
