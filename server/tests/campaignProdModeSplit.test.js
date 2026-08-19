@@ -155,7 +155,7 @@ function makeTable(opts) {
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows', 'renderOptRowsWithProduct',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
     'parseProductLinesToRows', 'applyProductRowsFromOrder',
-    '_renderProdModeHelp', '_rfQuotaApplicable', '_rfQuotaLocked', '_syncQuotaLockUi',
+    '_renderProdModeHelp', '_rfQuotaLocked', '_syncQuotaLockUi',
   ].forEach(fn => vm.runInContext(grab(recruitSrc, fn), sandbox));
   return { dom, sandbox, run: (code) => vm.runInContext(code, sandbox) };
 }

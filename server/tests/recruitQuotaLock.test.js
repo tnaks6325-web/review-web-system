@@ -6,9 +6,9 @@
  *   입력**인데, 옵션 없는 작업은 옵션 원장이 비어 있어 표를 작업내용 상품 원문에서 **다시 파싱**해
  *   만들고, 원문이 두 줄 이상이면 인원이 0 으로 떨어져 그대로 저장됐다(실브라우저 재현).
  *
- * 규칙(사용자 확정): 정원 변경 창구는 [📅 모집인원 조절] 하나 — 수정 화면은 보여주기만 한다.
- *   단 기본 일건수를 고칠 다른 창구가 없으므로 [🔓 직접 수정] 탈출구를 남기되,
- *   열면 "저장하면 무엇으로 덮이는지"를 화면이 말한다(조용한 리셋 금지).
+ * 규칙(사용자 확정 2026-08-19): 총인원·일건수는 **작업오더에서 받은 값으로 고정**하고,
+ *   조절은 [📅 모집인원 조절]에서 **총건수가 지켜지는 범위 안에서만** 한다.
+ *   ★ 수정 화면에는 해제(직접 수정) 창구를 두지 않는다 — 창구가 둘이면 같은 사고가 그 문으로 다시 들어온다.
  *
  * 실행: node tests/recruitQuotaLock.test.js
  */
@@ -26,18 +26,17 @@ const ok = (name, cond) => { assert.ok(cond, name); passed++; console.log('  ✓
 
 /* ── 판정(실행) ─────────────────────────────────────────────── */
 {
-  const src = ['_rfQuotaApplicable', '_rfQuotaLocked']
-    .map((fn) => app.match(new RegExp('function ' + fn + '\\([\\s\\S]*?\\n}'))[0]).join('\n');
-  const call = (editId, mode, unlocked) => {
-    const sandbox = { _recruitEditId: editId, _prodMode: () => mode, _rfQuotaUnlock: unlocked };
+  const src = app.match(/function _rfQuotaLocked\([\s\S]*?\n}/)[0];
+  const call = (editId, mode) => {
+    const sandbox = { _recruitEditId: editId, _prodMode: () => mode };
     vm.createContext(sandbox);
     vm.runInContext(src, sandbox);
     return vm.runInContext('_rfQuotaLocked()', sandbox);
   };
-  ok('수정 + 옵션 없는 작업 → 잠금', call('C1', 'none', false) === true);
-  ok('★ 신규 발행은 잠그지 않는다(초도 정원을 정하는 유일한 창구)', call(null, 'none', false) === false);
-  ok('★ 옵션 있는 작업은 잠그지 않는다(옵션 원장이 서버에서 와 파생이 정확)', call('C1', 'opt', false) === false);
-  ok('사람이 연 상태(직접 수정)는 잠금 해제', call('C1', 'none', true) === false);
+  ok('수정 + 옵션 없는 작업 → 잠금', call('C1', 'none') === true);
+  ok('★ 신규 발행은 잠그지 않는다(초도 정원을 정하는 유일한 창구)', call(null, 'none') === false);
+  ok('★ 옵션 있는 작업은 잠그지 않는다(옵션 원장이 서버에서 와 파생이 정확)', call('C1', 'opt') === false);
+  ok('★ 잠금을 푸는 조건이 없다(수정 화면에는 해제 창구가 없다)', !/_rfQuotaUnlock/.test(app));
 }
 
 /* ── 파생·전송 차단 ─────────────────────────────────────────── */
@@ -57,14 +56,11 @@ ok('안내 줄이 마크업에 있다(라이브 영역)', /id="rf_quota_lock"/.t
 ok('잠금 스타일이 모달 CSS 에 스코프되어 있다',
   /#recruitModal \.rf-quota-lock\{/.test(modal) && /#recruitModal \.rf-opt-row input\.rf-locked\{/.test(modal));
 ok('안내가 변경 창구([📅 인원])를 문장으로 알려준다', /모집인원 조절/.test(app) && /인원\]/.test(app));
-ok('★ 탈출구는 confirm 을 거치고 전역으로 노출된다',
-  /function rfQuotaUnlock\(\) \{\s*\n\s*if \(!confirm\(/.test(app)
-  && /window\.rfQuotaUnlock = rfQuotaUnlock;/.test(app)
-  && /window\.rfQuotaLock = rfQuotaLock;/.test(app));
-ok('★ 열린 상태에서는 저장 시 덮일 값을 문장으로 말한다(조용한 리셋 금지)',
-  /상태로 덮어씁니다/.test(app));
-ok('★ 모달을 열 때마다 잠금이 초기화된다(지난 공고의 해제가 새지 않게)',
-  /_rfQuotaUnlock = false;\s*\/\/ ★ 지난 공고에서 연 잠금이 다음 공고로 새지 않게/.test(app));
+ok('★ 해제 버튼·전역이 남아 있지 않다(창구는 [📅 인원] 하나)',
+  !/rfQuotaUnlock/.test(app) && !/window\.rfQuotaLock\b/.test(app)
+  && !/rf-qbtn/.test(app) && !/rf-qbtn/.test(modal));
+ok('안내가 "작업오더 값으로 고정"과 "총건수 안에서 조절"을 말한다',
+  /작업오더 값으로 고정/.test(app) && /총건수 안에서/.test(app));
 ok('입력이 바뀌면 안내 숫자도 따라온다', /_syncQuotaLockUi\(\);\s*\/\/ 해제 상태에서/.test(app));
 
 console.log(`\nrecruitQuotaLock: ${passed} passed`);

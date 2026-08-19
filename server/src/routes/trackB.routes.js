@@ -1508,6 +1508,7 @@ function _cdpFail(res, err) {
     not_found: 404, not_participation: 400, schedule_driven: 409, schedule_unknown: 503,
     empty: 400, too_many: 400, bad_date: 400, past_date: 400, bad_count: 400, dup_date: 400,
     below_used: 422, no_round: 400, below_confirmed: 422,
+    over_total: 422,   // 총 모집 인원을 넘는 조절(사용자 확정 2026-08-19 — 조절은 총량 안에서만)
     bad_carry: 400, carry_not_hold: 400,   // 098: 이월 반영 검증
     carry_stale: 409, carry_unknown: 503,  // 098: 잔량 경합·조회 실패(fail-closed — 코드리뷰 M2)
     worktable_slots_shortage: 409,

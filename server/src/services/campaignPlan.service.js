@@ -222,6 +222,15 @@ async function getPlanOverview(campaignId) {
  *   서버는 날짜별 계획값만 저장하고, 연장/분산은 저장 시점에 계획 행으로 풀린 상태로 받는다
  *   (런타임 분기 최소화 — 시안의 확정 저장 계약).
  */
+/** 이 공고의 **총 모집 인원**(0 = 무제한 = 검사 생략).
+ *  ★ 런타임 정원 판정(computeCampaignState)이 총량으로 쓰는 값과 같은 것을 본다 —
+ *    시트 일정 공고는 시트 행 수(totalSlots), 그 외는 `recruit_total`.
+ *    다른 값을 쓰면 "화면에서는 저장됐는데 실제로는 안 열리는" 계획이 생긴다. */
+function _totalCapFor(camp, schedule) {
+  if (schedule && schedule !== 'unknown' && Number(schedule.totalSlots) > 0) return Number(schedule.totalSlots);
+  return Number(camp && camp.recruit_total) || 0;
+}
+
 async function savePlans(campaignId, body, actor) {
   // ※ 킬스위치(CAMPAIGN_DAILY_PLAN=0)는 **판정만** 끈다 — 저장 원장은 유지해 재활성 시
   //   조절이 그대로 되살아난다(프론트가 planEnabled=false 로 저장을 잠가 실수 저장은 없다).
@@ -301,6 +310,54 @@ async function savePlans(campaignId, body, actor) {
           const e = new Error(`오늘은 이미 ${used}명이 확정·진행 중이라 ${effective}명으로 줄일 수 없습니다.`);
           e.code = 'below_used'; e.floor = used; throw e;
         }
+      }
+    }
+
+    /* ★★ 총량 게이트(사용자 확정 2026-08-19) — 조절은 **총 모집 인원 안에서만** 한다.
+       총인원·일건수는 작업오더가 준 값으로 고정되고(모집공고 수정에서 잠금), 날짜별 조절은
+       그 총량을 나눠 담는 일이다. 그래서 "이미 확정된 인원 + 앞으로의 계획"이 총량을 넘으면 거부한다.
+       ★ 계획이 없는 날의 자연 정원(기본 일건수·이월)은 세지 않는다 — 그쪽은 런타임 총량 clamp 가
+         이미 막으므로, 여기서 세면 멀쩡한 조절이 과대 거부된다(거부는 확실한 초과에만).
+       ★ 총량 0(무제한)·set 없음(해제만)은 검사 대상이 아니다.
+       ★ 조회 실패는 **통과**시키고 경고만 남긴다(fail-open) — 이 게이트가 죽었다고 조절 자체가
+         막히면 막다른 길이 되고, 실제로 총량을 넘겨 열리는 것은 런타임 clamp 가 막는다. */
+    const totalCap = _totalCapFor(camp, schedule);
+    if (totalCap > 0 && set.length) {
+      let sp = false;
+      try { await client.query('SAVEPOINT plan_total'); sp = true; } catch (_) {}
+      try {
+        const { rows: planRows } = await client.query(
+          `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
+             FROM campaign_daily_plans WHERE campaign_id = $1 AND plan_date >= $2::date`,
+          [campaignId, today]);
+        const { rows: cfRows } = await client.query(
+          `SELECT COUNT(*) AS all_n,
+                  COUNT(*) FILTER (WHERE submitted_at >= $2) AS today_n
+             FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`,
+          [campaignId, kstDayStartUtc().toISOString()]);
+        if (sp) await client.query('RELEASE SAVEPOINT plan_total');
+        const planned = new Map(planRows.map(r => [r.date, Number(r.count) || 0]));
+        for (const x of set) planned.set(x.date, x.count);
+        for (const dt of remove) planned.delete(dt);
+        const confirmedAll = Number(cfRows[0] && cfRows[0].all_n) || 0;
+        const confirmedToday = Number(cfRows[0] && cfRows[0].today_n) || 0;
+        let future = 0;
+        planned.forEach((c, dt) => { if (dt > today) future += c; });
+        // 오늘은 "그날 정원" 개념이라 이미 확정된 오늘분과 겹친다 — 큰 쪽 하나만 센다(이중 계수 방지).
+        const todayPart = planned.has(today) ? Math.max(planned.get(today), confirmedToday) : confirmedToday;
+        const need = (confirmedAll - confirmedToday) + todayPart + future;
+        if (need > totalCap) {
+          const e = new Error(
+            `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
+            + `확정 ${confirmedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
+            + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
+          e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = confirmedAll;
+          throw e;
+        }
+      } catch (e) {
+        if (e && e.code === 'over_total') throw e;
+        if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT plan_total'); } catch (_) {} }
+        logger.warn(`[campaignPlan] 총량 게이트 확인 실패(통과) camp=${campaignId}: ${e.message}`);
       }
     }
 
