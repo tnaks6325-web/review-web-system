@@ -1258,6 +1258,14 @@ router.post('/past-tabs/close', authMiddleware, adminOrMasterMiddleware, async (
     res.json(await _pastTabs.closePastTabs({ tabs, since, by: _by(req), dryRun: dryRun !== false }));
   } catch (err) { _pastTabErr(res, err, next); }
 });
+// 빈 껍데기 행 삭제 — 이 도구에서 **유일하게 되돌릴 수 없는** 조작이라 미리보기가 기본이고
+// 서버가 스캔을 다시 돌려 ghost 로 판정된 것만, 장부가 비어 있을 때만 지운다.
+router.post('/past-tabs/delete-ghost', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { tabs, dryRun } = req.body || {};
+    res.json(await _pastTabs.deleteGhostRows({ tabs, by: _by(req), dryRun: dryRun !== false }));
+  } catch (err) { _pastTabErr(res, err, next); }
+});
 router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
   catch (err) { _pastTabErr(res, err, next); }

@@ -323,7 +323,61 @@ async function reopenTabs({ tabs, by = 'admin' } = {}) {
   return { ok: true, reopened };
 }
 
+/**
+ * 빈 껍데기 행 삭제 — 옛 이름만 남은 등록 행을 지운다.
+ * ★★ 이것만 쓰기 표면이 `DELETE tab_configs` 다(이 서비스의 다른 조작은 `is_closed` 한 칸).
+ *   되돌릴 수 없으므로 아래 fail-closed 를 완화하지 말 것:
+ *   ① 화면이 보낸 목록을 믿지 않는다 — 서버가 스캔을 **다시 돌려** `ghost_row` 로 판정된 것만
+ *   ② 장부(`review_index`·`index_master`)에 한 줄이라도 있으면 **거부**
+ *      (지우면 그 줄들이 등록 없는 고아가 된다 — 기존 `delete-orphan` 과 같은 규율)
+ *   ③ 미리보기가 기본
+ *   ※ 주문(`order_submissions`)은 이 행을 참조하지 않는 과거 기록이라 **건수만 보고**한다.
+ */
+async function deleteGhostRows({ tabs, by = 'admin', dryRun = true } = {}) {
+  if (!Array.isArray(tabs) || tabs.length === 0) throw new PastTabError('tabs_required');
+  if (tabs.length > CLOSE_CAP) throw new PastTabError('too_many_tabs', { max: CLOSE_CAP, got: tabs.length });
+  const scan = await scanPastSheetTabs({});
+  const okKey = new Set((scan.ghosts || []).map(i => i.sheetId + KEY_SEP + i.tabName));
+  const db = _db();
+  const wanted = [], refused = [];
+  for (const t of tabs) {
+    const sid = String((t && t.sheetId) || ''), tab = String((t && t.tabName) || '');
+    if (!sid || !tab) { refused.push({ sheetId: sid, tabName: tab, reason: 'bad_key' }); continue; }
+    if (!okKey.has(sid + KEY_SEP + tab)) {
+      refused.push({ sheetId: sid, tabName: tab, reason: 'not_ghost' }); continue;
+    }
+    // 장부에 한 줄이라도 있으면 지우지 않는다
+    const { rows } = await db.query(
+      `SELECT (SELECT COUNT(*)::int FROM review_index WHERE sheet_id=$1 AND tab_name=$2) ri,
+              (SELECT COUNT(*)::int FROM index_master WHERE sheet_id=$1 AND tab_name=$2) im,
+              (SELECT COUNT(*)::int FROM order_submissions
+                WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL) os`, [sid, tab]);
+    const c = rows[0] || {};
+    if ((c.ri || 0) > 0 || (c.im || 0) > 0) {
+      refused.push({ sheetId: sid, tabName: tab, reason: 'has_ledger',
+        reviewRows: c.ri || 0, indexRows: c.im || 0 });
+      continue;
+    }
+    wanted.push({ sheetId: sid, tabName: tab, orderRows: c.os || 0 });
+  }
+  if (dryRun) return { ok: true, dryRun: true, wouldDelete: wanted.length, targets: wanted, refused };
+  let deleted = 0;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    for (const w of wanted) {
+      const r = await client.query(
+        `DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2`, [w.sheetId, w.tabName]);
+      deleted += r.rowCount || 0;
+    }
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+  finally { client.release(); }
+  logger.info('[pastTabs] 빈 껍데기 행 삭제', { by, deleted, asked: tabs.length, refused: refused.length });
+  return { ok: true, dryRun: false, deleted, targets: wanted, refused };
+}
+
 module.exports = {
-  scanPastSheetTabs, closePastTabs, reopenTabs,
+  scanPastSheetTabs, closePastTabs, reopenTabs, deleteGhostRows,
   classifyPastTab, PastTabError, SCAN_CAP, CLOSE_CAP, __setPoolForTest,
 };
