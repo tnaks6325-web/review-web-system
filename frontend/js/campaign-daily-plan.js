@@ -355,11 +355,22 @@
   function carryDays() {
     return (S.horiz || []).filter(function (d) { return carryOn(d) > 0; });
   }
-  /** 한 날에 넣을 수 있는 최대 = 배분해야 할 인원(요구 ① — 총원까지 남은 건수 안에서만) */
-  /** 한 날에 넣을 수 있는 최대 = 배분해야 할 인원(요구 ① — 총원까지 남은 건수 안에서만).
+  /** 한 날의 절대 상한 = 배분해야 할 인원(요구 ① — 총원까지 남은 건수 안에서만).
    *  ★ 서버 MAX_DAY_COUNT(9999)를 넘기면 savePlans 가 bad_count 로 **저장 전체를 거부**한다. */
   var MAX_DAY = 9999;
-  function maxFor() { return balanceOn() ? Math.min(MAX_DAY, Math.max(1, targetTotal())) : MAX_DAY; }
+  function dayCeil() { return balanceOn() ? Math.min(MAX_DAY, Math.max(1, targetTotal())) : MAX_DAY; }
+  /** ★★ 사람이 조절할 때의 상한 = **그 날 값 + 아직 남은 배분수**(사용자 확정 2026-08-19).
+   *   합계가 총건수를 넘는 값은 **경고가 아니라 아예 들어가지 않는다** — 게이지 드래그·[＋]·숫자
+   *   직접 입력 세 창구가 전부 commitValue/dragTo 를 거치므로 이 함수 하나가 단일 출처다.
+   *  ★ 이미 초과 상태로 열린 공고(작업표 프리필이 총량을 안 보고 심은 계획 등)는 여유가 음수라
+   *    상한 = 지금 값 → **늘리기만 막히고 줄이는 것은 언제나 가능**하다(되돌릴 길을 없애지 않는다).
+   *  ★ 균형 모드가 아니면 합계 개념 자체가 없다(성긴 14일 표) → 종전대로 MAX_DAY. */
+  function maxFor(d) {
+    if (!balanceOn()) return MAX_DAY;
+    var cur = (d == null) ? 0 : planFor(d);
+    var room = targetTotal() - sumPlan();               // 남은 배분수(음수 = 이미 초과)
+    return Math.min(MAX_DAY, Math.max(minFor(d), cur + Math.max(0, room)));
+  }
 
   /* 자동 맞춤 — 부족/초과분만 고른 방식대로 메운다(전체 재배치가 아니라 **차이만** 손댄다).
      ★ 남는 부족분은 종료일 뒤에 새 진행일을 붙여 흡수한다 — 총량은 어떤 조절로도 변하지 않는다. */
@@ -368,7 +379,7 @@
     var need = -diffPlan();                 // +면 채워야 함, −면 줄여야 함
     if (!need) return;
     var ds = (S.horiz || []).filter(function (d) { return baseFor(d) > 0 || planFor(d) > 0; });
-    var cap = maxFor(), guard = 0;
+    var cap = dayCeil(), guard = 0;
     if (S.carryMode === 'spread') {
       // ★ 한 명씩 돌리는 루프(최악 240만 회)는 큰 부족분에서 화면을 얼린다 — 몫/나머지로 한 번에.
       //   여력이 모자란 날이 있으면 남은 몫만 다시 돌린다(최대 몇 회).
@@ -419,7 +430,7 @@
     if (diffPlan() !== 0) {
       toast(diffPlan() > 0
         ? '오늘 확정·진행 인원 아래로는 줄일 수 없어 ' + diffPlan() + '명이 남았습니다'
-        : (-diffPlan()) + '명을 더 열 자리가 없습니다 — 한 날 최대(' + maxFor() + '명)·저장 상한('
+        : (-diffPlan()) + '명을 더 열 자리가 없습니다 — 한 날 최대(' + dayCeil() + '명)·저장 상한('
           + MAX_ROWS + '일)·남은 진행일을 확인해주세요');
     }
   }
@@ -1136,12 +1147,16 @@
 
   function commitValue(d, next) {
     if (S.data.planEnabled === false) return;
-    var cur = planFor(d);
-    // ★ 요구 ① — 한 날에 넣을 수 있는 최대는 "총원까지 남은 배분수"(균형 모드)
-    next = Math.max(minFor(d), Math.min(maxFor(), Math.round(next)));
+    var cur = planFor(d), want = Math.round(next), cap = maxFor(d);
+    // ★ 합계가 총건수를 넘는 값은 들어가지 않는다(경고가 아니라 차단 — 사용자 확정)
+    next = Math.max(minFor(d), Math.min(cap, want));
     if (next === cur) {
       if (next === minFor(d) && d === S.data.today && minFor(d) > 0) {
         toast('이미 확정·진행 중인 ' + minFor(d) + '명 아래로는 줄일 수 없습니다');
+      } else if (want > cap && balanceOn()) {
+        // ★ 막고 끝내지 않는다 — 왜 안 올라가는지와 다음 행동을 말한다(죽은 조작 금지)
+        toast('총 ' + totalFor() + '건을 넘길 수 없습니다 — 남은건수 '
+          + Math.max(0, targetTotal() - sumPlan()) + '건. 다른 날을 줄이거나 [차수 추가]로 총량을 늘려주세요');
       }
       if (S.sessions[d]) scheduleSettle(d);
       return;
@@ -1406,7 +1421,13 @@
       var n = parseInt(String(inp.value).replace(/[^\d]/g, ''), 10);
       if (!Number.isFinite(n)) { render(); return; }   // 숫자가 아니면 원래 값으로 되돌린다
       commitValue(d, n);
-      if (planFor(d) !== n) toast('한 날 최대 ' + maxFor() + '명 · 최소 ' + minFor(d) + '명 안에서만 조절됩니다');
+      if (planFor(d) !== n) {
+        // ★★ 거절된 입력은 **칸에 남겨두지 않는다** — commitValue 는 값이 안 바뀌면 재렌더하지
+        //   않으므로, 친 숫자(999)가 칸에 그대로 남아 "들어간 것처럼" 보인다(실브라우저 실측).
+        render();
+        // 상한에 막힌 경우의 사유는 commitValue 가 총건수 기준으로 말한다(중복 토스트 금지)
+        if (n <= maxFor(d)) toast('최소 ' + minFor(d) + '명 안에서만 조절됩니다');
+      }
     });
     wrap.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && ev.target.closest('.cdp-in')) { ev.preventDefault(); ev.target.blur(); }
@@ -1433,7 +1454,7 @@
     var ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
     var sc = drag.scale || gaugeScale();
     var v = Math.round(ratio * sc);
-    v = Math.max(minFor(drag.d), Math.min(maxFor(), v));
+    v = Math.max(minFor(drag.d), Math.min(maxFor(drag.d), v));
     if (v !== planFor(drag.d)) {
       S.plan[drag.d] = v;   // 드래그 중에는 그 줄만 가볍게 갱신(전체 재렌더 금지 — 드래그 끊김)
       var pw = Math.min(100, v / sc * 100);
