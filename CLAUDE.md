@@ -1603,6 +1603,19 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **`design-taste-frontend`**(MIT, tasteskill): 새 홍보/랜딩·포트폴리오·소비자용 페이지 신규 제작·리디자인용(React/Next.js+Tailwind 새 프로젝트에서 진가).
 - ★★ **트리거 경계(두 스킬 공통, description 에 새겨져 있음)**: 기존 리뷰웹시스템(workdesk/admin) 화면의 기능 수정·버그 수정·소규모 UI 조정에는 쓰지 않는다 — 이 CLAUDE.md 의 규율(단일 출처·회귀가드·기존 idiom·시안 문서의 오프라인·외부 리소스 0)이 우선한다. 수정은 각 SKILL.md 의 frontmatter description 뿐(본문 원본 무수정 — 설치 메모 주석 참조).
 
+## 브라우저 자동화(Playwright) — 모든 세션에서 바로 쓴다
+- **세션 시작 훅이 준비한다**(`.claude/hooks/session-start.sh`, `.claude/settings.json` 의 `SessionStart`). 레포에 커밋돼 있으므로 **모든 세션에서 자동 적용**된다.
+- 쓰는 법 — 이 두 줄이 전부다:
+  ```js
+  const { chromium } = require('playwright');
+  const b = await chromium.launch({ executablePath: process.env.PW_CHROMIUM });
+  ```
+- ★★ **`executablePath` 를 빼지 말 것** — 컨테이너의 Chromium 빌드 번호와 전역 playwright 가 기대하는 번호가 **다르다**(실측: 보유 1194 / 기대 1234). 빼면 `Executable doesn't exist` 로 죽는다. 훅이 실제 경로를 찾아 `PW_CHROMIUM` 에 넣어 준다(번호를 코드에 박지 않는다).
+- ★ **`npx playwright install` 을 실행하지 말 것**(환경 지침) — 브라우저는 이미 `/opt/pw-browsers` 에 있다. 훅도 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` 로만 모듈을 보충한다.
+- ★ 훅이 `NODE_PATH` 를 전역 모듈 경로로 세운다 — 그게 없으면 `playwright` 가 **설치돼 있는데도** `require` 가 실패한다(이 함정으로 브라우저 검증을 못 한 세션이 실제로 있었다).
+- ★ **로컬 개발 머신은 건드리지 않는다** — 관리형 컨테이너(`/opt/pw-browsers` 존재)이거나 `CLAUDE_CODE_REMOTE=true` 일 때만 동작하고, 이미 준비돼 있으면 아무것도 설치하지 않는다(멱등).
+- ★ 준비 실패는 **조용히 넘어가지 않는다** — 훅이 사유를 로그로 말한다(0건 위장 금지 규율과 같다).
+
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.
