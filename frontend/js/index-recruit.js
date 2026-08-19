@@ -1805,6 +1805,7 @@ function _renderProdTable(rows) {
   _optSummary();
   _syncPreviewFromOptRows();
   _syncGroupTotals();
+  _syncQuotaLockUi();
 }
 /** 상품 그룹(옵션 있는 작업) — 머리(상품명·총인원 자동합계) + 옵션 행 + [＋ 옵션 추가] */
 function _buildProdGroup(g) {
@@ -1865,6 +1866,59 @@ function addOptRow(data) {
   _syncGroupTotals();
 }
 
+/** ★★ 정원(총인원·일건수) 잠금 — **수정 모드 + 옵션 없는 작업**에서만 켠다.
+ *  왜: 이 표의 총인원·일건수는 **캠페인 정원(recruit_total·daily_limit)의 파생 입력**인데,
+ *  옵션 없는 작업은 원장(campaign_options)이 비어 있어 표를 **작업내용 상품 원문에서 다시
+ *  파싱해** 만든다. 상품 원문이 두 줄 이상이면 파싱 결과에 인원이 없어 0(무제한)으로 떨어지고,
+ *  그대로 저장하면 **총 200건이 무제한으로, 일건수가 엉뚱한 값으로 리셋**된다(실측 재현).
+ *  정원의 진실원본은 [📅 모집인원 조절](차수·날짜별 계획)이므로, 수정 화면에서는 **읽기 전용**으로
+ *  보여주기만 하고 저장에도 싣지 않는다(미전송 = 서버 COALESCE 유지).
+ *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 오므로 파생이 정확 — 종전대로 편집 가능.
+ *  ★ 신규 발행은 여기가 초도 정원을 정하는 유일한 창구라 잠그지 않는다. */
+let _rfQuotaUnlock = false;   // 사람이 명시적으로 연 경우만 true (모달을 열 때마다 리셋)
+
+function _rfQuotaApplicable() { return !!_recruitEditId && _prodMode() !== "opt"; }
+function _rfQuotaLocked() { return _rfQuotaApplicable() && !_rfQuotaUnlock; }
+
+/** 잠금/해제 안내 줄 — "왜 못 고치는가 · 어디서 고치는가 · 열면 무엇이 덮이는가"를 말한다.
+ *  ★ 잠그기만 하면 **기본 일건수를 고칠 창구가 사라진다**([📅 인원]은 날짜별 조절·차수 담당) —
+ *    그래서 [🔓 직접 수정] 탈출구를 두되, 열면 저장 시 덮일 값을 실시간으로 보여준다(조용한 리셋 금지). */
+function _syncQuotaLockUi() {
+  const box = document.getElementById("rf_quota_lock");
+  if (!box) return;
+  if (!_rfQuotaApplicable()) { box.hidden = true; box.textContent = ""; box.classList.remove("open"); return; }
+  const num = (v) => Number(v || 0);
+  const rt = num(document.getElementById("rf_recruit_total")?.value);
+  const dl = num(document.getElementById("rf_daily_limit")?.value);
+  const fmt = (v, zero) => (v > 0 ? v.toLocaleString() + "명" : zero);
+  box.hidden = false;
+  box.classList.toggle("open", !!_rfQuotaUnlock);
+  box.innerHTML = _rfQuotaUnlock
+    ? '<b>🔓 총인원 · 일건수를 직접 수정 중</b>' +
+      '<span>저장하면 <b>총 ' + fmt(rt, "무제한") + ' · 일건수 ' + fmt(dl, "무제한") + '</b> 상태로 덮어씁니다.</span>' +
+      '<span>표의 상품 줄에 인원이 비어 있으면 합계가 <b>무제한(0)</b> 이 됩니다 — 위 숫자를 확인하세요. ' +
+      '<button type="button" class="rf-qbtn" onclick="rfQuotaLock()">🔒 다시 잠그기</button></span>'
+    : '<b>🔒 총인원 · 일건수는 여기서 바꾸지 않습니다</b>' +
+      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
+      '<span>변경은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — 총량은 차수 추가, 그날 인원은 날짜별 조절로. ' +
+      '저장해도 이 값들은 바뀌지 않습니다. ' +
+      '<button type="button" class="rf-qbtn" onclick="rfQuotaUnlock()">🔓 직접 수정</button></span>';
+}
+
+/** 표를 지금 값 그대로 다시 그린다(잠금 상태만 바뀐다) */
+function _rfRerenderProdRows() {
+  const rows = _readProdRowsRaw().map(r => Object.assign({}, r, { status: r.closed ? "closed" : "active" }));
+  _renderProdTable(rows);
+}
+function rfQuotaUnlock() {
+  if (!confirm("총인원 · 일건수를 직접 수정할까요?\n\n저장하면 표에서 계산된 값으로 원장이 덮어써집니다.\n(정상 경로는 공고 카드의 [📅 인원] — 차수 추가 · 날짜별 조절입니다)")) return;
+  _rfQuotaUnlock = true;
+  _rfRerenderProdRows();
+}
+function rfQuotaLock() { _rfQuotaUnlock = false; _rfRerenderProdRows(); }
+window.rfQuotaUnlock = rfQuotaUnlock;
+window.rfQuotaLock = rfQuotaLock;
+
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
 function _buildOptRowEl(data) {
   const d = data || {};
@@ -1893,6 +1947,17 @@ function _buildOptRowEl(data) {
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
   row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
+  /* ★ 정원 잠금(수정 + 옵션 없는 작업) — 표시만 하고 편집·저장 대상에서 뺀다 */
+  if (_rfQuotaLocked()) {
+    [".rf-opt-rt", ".rf-opt-dl"].forEach(sel => {
+      const el = row.querySelector(sel);
+      if (!el) return;
+      el.readOnly = true;
+      el.tabIndex = -1;
+      el.classList.add("rf-locked");
+      el.title = "총인원·일건수는 [📅 인원](모집인원 조절)에서 바꿉니다";
+    });
+  }
   if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
   row.querySelectorAll("input").forEach(i => i.addEventListener("input", () => { _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); }));
   const del = row.querySelector(".rf-opt-del");
@@ -1970,12 +2035,13 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
     //   원문 분해(parseProductLinesToRows)가 상품명 속 하이픈·빗금을 옵션으로 쪼갰더라도
     //   그 추측을 옵션으로 승격시키지 않고 상품명으로 되붙인다(우레온 사고 경로 차단).
     const fallback = campaign || {};
-    const singleProduct = parsed.length === 1;
-    renderOptRows(parsed.map(r => ({
+    /* ★ 총인원·일건수는 캠페인 원장 값이다(상품 줄 수와 무관) — 종전엔 원문이 두 줄 이상이면
+       0 으로 떨어져 화면이 '무제한'을 보여주고, 저장하면 그대로 리셋됐다. 첫 행에만 싣는다. */
+    renderOptRows(parsed.map((r, i) => ({
       productName: [r.productName, r.optKey].filter(Boolean).join(" "),
       optKey: "", payAmount: r.payAmount,
-      recruitTotal: singleProduct ? (fallback.recruit_total ?? 0) : 0,
-      dailyLimit: singleProduct ? (fallback.daily_limit ?? 0) : 0,
+      recruitTotal: i === 0 ? (fallback.recruit_total ?? 0) : 0,
+      dailyLimit: i === 0 ? (fallback.daily_limit ?? 0) : 0,
     })), { mode: "none" });
     return;
   }
@@ -2064,13 +2130,19 @@ function _syncPreviewFromOptRows() {
   const rt = document.getElementById("rf_recruit_total");
   const dl = document.getElementById("rf_daily_limit");
   // 하나라도 0(무제한)이면 합계도 0(무제한) — 부분합이 상한처럼 보이면 조기 마감 사고가 난다
-  if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
-  if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
+  /* ★★ 잠금 상태에서는 캠페인 정원을 표에서 다시 만들지 않는다 —
+     옵션 없는 작업의 표는 상품 원문 파싱본이라 인원이 0으로 떨어질 수 있고,
+     그 0 이 그대로 저장되면 총량이 '무제한'으로 리셋된다(이번 사고). */
+  if (!_rfQuotaLocked()) {
+    if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
+    if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
+  }
   if (typeof syncRecruitReviewTypeMix === "function") syncRecruitReviewTypeMix();
   syncRecruitProductMainUrl();
   _markDupProductNames();
   _optSummary();     // 프로그램으로 표를 바꿔도(작업오더 자동 적용 등) 요약이 따라오게
   _syncGroupTotals();
+  _syncQuotaLockUi();   // 해제 상태에서 "저장하면 덮일 값"이 입력과 함께 따라오게
   if (typeof _renderPreview === "function") _renderPreview();
 }
 
@@ -2366,6 +2438,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._recruitEditLoadedOpts = null;  // 저장 후 "바뀐 항목" 대조용 옵션표 원본(로드 실패 시 null=대조 안 함)
   window._recruitEditLoadedFees = null;
   _rfLastScheduledPurchaseWindow = { start: "", end: "" };
+  _rfQuotaUnlock = false;   // ★ 지난 공고에서 연 잠금이 다음 공고로 새지 않게
   if (typeof recruitSaveBlockClear === "function") recruitSaveBlockClear();  // 지난번 차단 사유 잔류 방지
   _rfLinkedMiss = null; _rfSugCache = [];   // 지난 공고의 "탭 못 찾음" 사유가 새 모달에 남지 않게(로드보다 먼저)
   /* 저장 성공 시 버튼을 '✓ 저장됨'(비활성)으로 두고 모달을 닫으므로, 다시 열 때 되돌린다 */
@@ -3748,8 +3821,13 @@ async function saveRecruitPostImpl() {
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
       _syncPreviewFromOptRows();   // 표가 진실원본 — 저장 직전 파생값(상품 원문·정원) 최신화
-      payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
-      payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
+      /* ★★ 정원 잠금이면 총인원·일건수를 **아예 보내지 않는다**(미전송 = 서버 COALESCE 유지).
+         화면 잠금만으로는 부족하다 — 낡은 화면·파생 계산이 다시 0 을 만들어도 원장이 안 흔들린다.
+         변경 창구는 [📅 인원](차수·날짜별 조절) 하나. */
+      if (!_rfQuotaLocked()) {
+        payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
+        payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
+      }
       const reviewMixError = validateRecruitReviewTypeMix();
       if (reviewMixError) { _rfSaveBlocked(reviewMixError); return; }
       payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
