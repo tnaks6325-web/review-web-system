@@ -164,6 +164,17 @@ function stub(rows, { pay = [] } = {}) {
     ok('★ 규칙 표기는 서버 matchedBy 를 라벨로만 바꾼다(프론트 재판정 0)',
       /const _DD_AXIS = \{ keys: '주문번호 3키', order: '같은 주문 기록' \}/.test(HTML)
       && /_ddAxis\(g\.matchedBy\)/.test(HTML));
+    /* 창 정돈(사용자 신고 2026-08-19 "세로가 너무 길어서 조작이 어려움") — 되돌리면 다시 못 쓴다. */
+    ok('★ 폭·높이 확대는 이 모달에만(다른 wbl 모달 기본값 불변)',
+      /#ddOv \.wbl-dlg\{width:min\(\d{3,4}px,100%\);max-height:86vh/.test(HTML)
+      && /\.wbl-dlg\{width:min\(460px,100%\)/.test(HTML));
+    ok('★★ 본문만 스크롤 — flex 자식 min-height:0(없으면 창이 끝없이 길어진다)',
+      /#ddOv \.wbl-db\{flex:1;min-height:0;overflow:auto\}/.test(HTML));
+    ok('★ 작업명은 한 줄로 자르고 전체는 title 로 남긴다(줄 높이 폭발 방지)',
+      /#ddOv table\.wbl-t td:first-child\{max-width:\d+px;overflow:hidden;text-overflow:ellipsis\}/.test(HTML)
+      && /<td title="\$\{esc\(t\.label \|\| t\.tabName\)\}"/.test(HTML));
+    ok('★ 판정 규칙은 접어 두되 문장은 그대로 남긴다(조용한 의미 변경 금지)',
+      /<details class="wbl-facts" id="ddRuleBox">/.test(HTML) && /같은 주문 기록을 여러 줄이 씀/.test(HTML));
     /* 열을 끼워 넣을 때 가장 흔히 깨지는 자리 — 헤더 칸 수 ≡ 행 칸 수 */
     const head = (HTML.match(/<th>참여자<\/th>[\s\S]{0,220}?<\/tr>/) || [''])[0];
     const body = (HTML.match(/\(p\.plan \|\| \[\]\)\.map\(g =>[\s\S]{0,600}?\)\.join\(''\)/) || [''])[0];
