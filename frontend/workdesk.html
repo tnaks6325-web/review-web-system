@@ -3382,9 +3382,16 @@ function openDedupeModal(){
   document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
   _ddRender();
 }
+/* ★ 정리 대상 = 점검 목록에서 고른 작업이 있으면 그 작업, 없으면 지금 열어 둔 작업.
+   미리보기·실행·확인창이 **모두 이 한 곳**을 본다 — 갈라지면 "A 를 보고 B 를 정리"가 된다. */
+function _ddTarget(){
+  if (_DD && _DD.target) return _DD.target;
+  return { sheetId: (_DD || {}).sheetId, tabName: (_DD || {}).tabName, label: (_DD || {}).tabName };
+}
 function _ddRender(){
   const b = document.getElementById('ddBody'); if (!b || !_DD) return;
   const p = _DD.prev;
+  const tg = _ddTarget();
   const rows = p ? (p.plan || []).map(g =>
     `<tr><td>${esc(g.name || '')}</td><td class="num">${esc(String(g.phone8 || ''))}</td>
       <td class="num">${esc(String(g.orderNum || ''))}</td>
@@ -3393,7 +3400,8 @@ function _ddRender(){
   const skips = p ? (p.skipped || []).map(g =>
     `<li><b>${esc(g.name || '')}</b> · 주문번호 ${esc(String(g.orderNum || ''))} · 줄 ${esc((g.seqs || []).join(', '))}
       — ${esc(g.detail || g.reason || '')}</li>`).join('') : '';
-  b.innerHTML = `<b>${esc(_DD.tabName)}</b>
+  b.innerHTML = `<b>${esc(tg.label || tg.tabName)}</b>${
+    _DD.target ? ` <button class="wbl-b" style="margin-left:8px" onclick="ddBackToScan()">← 점검 목록으로</button>` : ''}
     <div class="wbl-facts"><b>표에 보이는 주문번호가 같고</b> 주문 기록의 주문번호와 연락처도 같은 줄만
       중복으로 봅니다. <b>같은 사람이라도 주문번호가 다르면 각기 다른 참여건이라 중복이 아닙니다.</b>
       표에 주문번호가 없거나 6자리 미만인 줄은 <b>대상에서 제외</b>합니다.
@@ -3407,21 +3415,29 @@ function _ddRender(){
         <tbody>${rows}</tbody></table>` : `<div class="wbl-facts">정리할 중복이 없습니다.</div>`}
       ${p.skippedGroups ? `<div class="wbl-facts"><b>⚠ 사람이 판단해야 하는 건</b> — 시스템이 건드리지 않았습니다.
         <ul style="margin:6px 0 0 16px">${skips}</ul></div>` : ''}`}`;
-  if (_DD.scan) {
+  /* ★ 한 작업을 고른 상태에서는 목록을 함께 그리지 않는다 — 지금 무엇을 정리하는지가 흐려진다.
+     ([← 점검 목록으로] 로 돌아간다) */
+  if (_DD.scan && !_DD.target) {
     const sc = _DD.scan;
     const list = (sc.tabs || []).map((t, i) =>
-      `<tr><td><a href="#" onclick="ddOpenTab(${i});return false">${esc(t.label || t.tabName)}</a></td>
+      `<tr${t.done ? ' style="opacity:.55"' : ''}><td><a href="#" onclick="ddPickScan(${i});return false">${esc(t.label || t.tabName)}</a></td>
         <td class="num">${esc(String(t.boardRows))}</td>
         <td class="num"><b>${esc(String(t.removeRows))}</b></td>
-        <td class="num">${esc(String(t.skippedGroups))}</td></tr>`).join('');
+        <td class="num">${esc(String(t.skippedGroups))}</td>
+        <td class="num">${t.done ? `✅ 정리함${t.removedRows ? ` ${esc(String(t.removedRows))}줄` : ''}`
+          : `<button class="wbl-b" onclick="ddPickScan(${i})">확인·정리</button>`}</td>
+        <td class="num"><button class="wbl-b" title="그 작업 화면으로 이동" onclick="ddOpenTab(${i})">↗</button></td></tr>`).join('');
     b.innerHTML += `<div class="wbl-facts" style="margin-top:10px"><b>🔎 전체 작업 점검</b> —
         무시트 작업 ${esc(String(sc.scanned))}개 중 <b>${esc(String((sc.tabs || []).length))}개 작업</b>에
         정리 대상 <b>${esc(String(sc.totalRemoveRows || 0))}줄</b> · 보류 ${esc(String(sc.totalSkipped || 0))}건
         ${sc.failed ? ` · <span style="color:#b91c1c">점검 실패 ${esc(String(sc.failed))}개</span>` : ''}
         ${sc.truncated ? ' · ⚠ 작업이 많아 일부만 점검했습니다(다시 실행하면 이어서 보입니다)' : ''}</div>
-      ${(sc.tabs || []).length ? `<table class="wbl-t"><thead><tr><th>작업</th><th>표 줄</th><th>정리 대상</th><th>보류</th></tr></thead>
+      ${(sc.tabs || []).length ? `<table class="wbl-t"><thead><tr><th>작업</th><th>표 줄</th><th>정리 대상</th><th>보류</th><th>확인</th><th>이동</th></tr></thead>
         <tbody>${list}</tbody></table>
-        <div class="wbl-facts">작업 이름을 누르면 그 작업으로 이동합니다 — 거기서 [미리보기] 확인 후 정리하세요.</div>`
+        <div class="wbl-facts">[확인·정리]를 누르면 <b>이 창에서 그 작업의 미리보기</b>가 열립니다 — 확인 후 정리하고
+          [← 점검 목록으로] 돌아와 다음 작업을 이어서 처리하세요. [↗]는 그 작업 화면으로 이동합니다.
+          ${sc.doneTabs ? `<b>${esc(String(sc.doneTabs))}개 작업 정리 완료</b> · ` : ''}남은 작업
+          ${esc(String((sc.tabs || []).filter(t => !t.done).length))}개</div>`
         : `<div class="wbl-facts">중복이 남아 있는 작업이 없습니다.</div>`}
       ${(sc.errors || []).length ? `<div class="wbl-facts"><b>점검하지 못한 작업</b><ul style="margin:6px 0 0 16px">${
         sc.errors.map(e => `<li>${esc(e.label || e.tabName)} — ${esc(e.reason)}</li>`).join('')}</ul></div>` : ''}`;
@@ -3432,10 +3448,11 @@ function _ddRender(){
 }
 async function ddPreview(){
   if (!_DD || _DD.busy) return;
+  const tg = _ddTarget();
   _DD.busy = true; _DD.err = ''; _ddRender();
   try {
     const j = await api('/api/trackb/worktable/dedupe-rows', { method: 'POST', body: JSON.stringify({
-      sheetId: _DD.sheetId, tabName: _DD.tabName, dryRun: true }) });
+      sheetId: tg.sheetId, tabName: tg.tabName, dryRun: true }) });
     if (!j || j.ok === false) { _DD.prev = null; _DD.err = (j && (j.error || j.message)) || '미리보기 실패'; }
     else _DD.prev = j;
   } catch (e) { _DD.prev = null; _DD.err = '미리보기 실패: ' + (e.message || ''); }
@@ -3443,7 +3460,7 @@ async function ddPreview(){
 }
 async function ddScanAll(){
   if (!_DD || _DD.busy) return;
-  _DD.busy = true; _DD.err = ''; _DD.scan = null; _ddRender();
+  _DD.busy = true; _DD.err = ''; _DD.scan = null; _DD.target = null; _DD.prev = null; _ddRender();
   const b = document.getElementById('ddBody');
   if (b) b.innerHTML += `<div class="wbl-facts">전체 작업을 훑는 중입니다 — 작업 수에 따라 시간이 걸립니다…</div>`;
   try {
@@ -3452,6 +3469,19 @@ async function ddScanAll(){
     else _DD.scan = j;
   } catch (e) { _DD.err = '전체 점검 실패: ' + (e.message || ''); }
   _DD.busy = false; _ddRender();
+}
+/* 점검 목록에서 한 작업을 골라 **이 창 안에서** 미리보기 — 모달을 벗어나지 않고 순차 처리한다.
+   ★ onclick 은 인덱스만(작업명은 시트발 문자열) */
+async function ddPickScan(i){
+  const t = _DD && _DD.scan && (_DD.scan.tabs || [])[i]; if (!t || _DD.busy) return;
+  _DD.target = { sheetId: t.sheetId, tabName: t.tabName, label: t.label || t.tabName, scanIndex: i };
+  _DD.prev = null; _DD.err = '';
+  await ddPreview();
+}
+function ddBackToScan(){
+  if (!_DD || _DD.busy) return;
+  _DD.target = null; _DD.prev = null; _DD.err = '';
+  _ddRender();
 }
 /* 점검 결과에서 작업으로 이동 — onclick 은 인덱스만(작업명은 시트발 문자열) */
 function ddOpenTab(i){
@@ -3463,8 +3493,8 @@ function ddOpenTab(i){
 }
 async function ddRun(){
   if (!_DD || _DD.busy || !_DD.prev || !_DD.prev.removeRows) return;
-  const p = _DD.prev;
-  if (!confirm(`「${_DD.tabName}」 표에서 중복 ${p.removeRows}줄을 내립니다.\n\n` +
+  const p = _DD.prev, tg = _ddTarget();
+  if (!confirm(`「${tg.label || tg.tabName}」 표에서 중복 ${p.removeRows}줄을 내립니다.\n\n` +
     `표에 보이는 주문번호와 연락처가 모두 같은 줄만 대상입니다(주문번호가 다르면 다른 참여건이라 제외).\n` +
     `가장 이른 줄은 남고, 내려간 줄의 중복 주문은 취소로 표시됩니다.\n` +
     (p.skippedGroups ? `보류 ${p.skippedGroups}건(입금 회차에 담김 등)은 손대지 않습니다.\n` : '') +
@@ -3472,13 +3502,23 @@ async function ddRun(){
   _DD.busy = true; _ddRender();
   try {
     const j = await api('/api/trackb/worktable/dedupe-rows', { method: 'POST', body: JSON.stringify({
-      sheetId: _DD.sheetId, tabName: _DD.tabName, dryRun: false }) });
+      sheetId: tg.sheetId, tabName: tg.tabName, dryRun: false }) });
     if (!j || j.ok === false) { _DD.busy = false; _DD.err = (j && (j.error || j.message)) || '정리 실패'; _ddRender(); return; }
-    const idx = STATE.tabs.indexOf(STATE.cur);
-    closeDedupeModal();
     toast(`중복 ${j.removed}줄 정리 · 주문 ${j.canceledOrders}건 취소` +
       (j.indexRows != null ? ` · 검색 명단 ${j.indexRows}명` : ''));
     if (j.ledgerError) alert('줄은 내려갔지만 검색 명단 재생성에 실패했습니다: ' + j.ledgerError + '\n잠시 후 다시 실행해 주세요.');
+    /* ★ 점검 목록에서 고른 작업이면 **창을 닫지 않고** 그 줄을 처리 완료로 바꾼 뒤 목록으로 돌아간다
+       — 24개를 하나씩 이어서 처리하려면 매번 다시 점검하게 만들면 안 된다. */
+    if (_DD.target && _DD.scan) {
+      const row = (_DD.scan.tabs || [])[_DD.target.scanIndex];
+      if (row) { row.done = true; row.removedRows = j.removed; row.removeRows = 0; row.skippedGroups = j.skippedGroups || 0; }
+      _DD.scan.doneTabs = (_DD.scan.tabs || []).filter(t => t.done).length;
+      _DD.scan.totalRemoveRows = (_DD.scan.tabs || []).reduce((n, t) => n + (t.removeRows || 0), 0);
+      _DD.busy = false; _DD.target = null; _DD.prev = null; _ddRender();
+      return;
+    }
+    const idx = STATE.tabs.indexOf(STATE.cur);
+    closeDedupeModal();
     if (idx >= 0) selTab(idx);
   } catch (e) { _DD.busy = false; _DD.err = '정리 실패: ' + (e.message || ''); _ddRender(); }
 }
