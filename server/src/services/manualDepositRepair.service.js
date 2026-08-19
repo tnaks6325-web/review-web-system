@@ -716,8 +716,15 @@ async function _overlayGroups(client, { sheetId = '', tabName = '' } = {}) {
       t.rowId !== keep.rowId && !t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
     const ledgerBlocked = hold ? [] : g.targets.filter(t =>
       t.rowId !== keep.rowId && t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
+    /* 왜 이 줄들이 한 묶음인가 — 화면이 이걸 말하지 않으면 "왜 내가 고르고 있지?"가 된다. */
+    const av = String(g.anchorValue || '');
+    const groupReason = g.anchorType === 'order'
+      ? '같은 주문(주문원장 1건)이 여러 줄에 걸려 있습니다 — 중복 줄입니다.'
+      : (av.startsWith('num:')
+        ? '같은 주문번호가 여러 줄에 걸려 있습니다 — 중복 줄입니다.'
+        : '같은 사람의 참여가 여러 건이라 표기가 그 줄들에 함께 걸렸습니다 — 이 표기가 어느 참여의 것인지 정하는 일입니다.');
     const grp = { ...g, hold, holdReason: hold ? OVERLAY_HOLD[hold] : null, keep, clear, ledgerBlocked,
-      submittedCount: submitted.length };
+      groupReason, submittedCount: submitted.length };
     // 보류건에만 추천을 붙인다(자동 확정 규칙은 불변 — 이미 확인한 미리보기가 달라지면 안 된다).
     if (hold === 'no_submitted_row' || hold === 'multiple_submitted_rows') {
       const sg = _suggestKeep(grp);
@@ -761,6 +768,7 @@ function _overlayView(groups) {
       paidValue: t.paidValue,
     })),
     suggest: g.suggest || null, suggestReason: g.suggestReason || null,
+    groupReason: g.groupReason || null,
     bank: g.bank || null, bankUnavailable: g.bankUnavailable || null,
     keepRow: g.keep ? g.keep.rowIndex : null,
     clearRows: g.clear.map(t => t.rowIndex),
@@ -791,7 +799,26 @@ function _overlayView(groups) {
    ★ 어느 단계도 1줄로 좁히지 못하면 추천하지 않는다(억지로 고르지 않는다).
    ══════════════════════════════════════════════════════════════════ */
 
+/** 원장 입금일(타임스탬프) → KST 'M/D' */
+function _kstMD(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d)) return '';
+  const p = Object.fromEntries(new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric',
+  }).formatToParts(d).map(x => [x.type, x.value]));
+  return (p.month && p.day) ? `${p.month}/${p.day}` : '';
+}
+/** 그 줄의 입금 원장 날짜가 표기와 **같은 날**인가 */
+function _ledgerMatchesStamp(paidAt, stamp) {
+  const md = _kstMD(paidAt);
+  if (!md) return false;
+  const cur = String(stamp == null ? '' : stamp).trim();
+  return !!cur && removeDepositStamp(cur, md) !== cur;   // 표기 안에 그 날짜 토큰이 있다
+}
+
 const SUGGEST_BASIS = {
+  ledger_same_date: '이 줄의 입금 원장 날짜가 표기와 같은 날입니다 — 그 표기는 이 줄의 것입니다.',
   ledger: '이 줄에만 입금 원장이 있습니다 — 실제로 이체된 줄입니다.',
   review_file: '이 줄에만 리뷰 캡처 업로드 기록이 있습니다.',
   filled_before_edit: '직원이 적은 시각보다 먼저 채워져 있던 유일한 줄입니다(중복 줄은 그 뒤에 생겼습니다).',
@@ -800,6 +827,13 @@ const SUGGEST_BASIS = {
 function _suggestKeep(group) {
   const t = group.targets || [];
   const only = (list) => (list.length === 1 ? list[0] : null);
+
+  /* ★★ 최상위 근거 — **원장 입금일이 그 표기와 같은 날**인 줄.
+     종전엔 "원장이 있는가"만 봐서, 같은 사람의 참여가 여러 건이면(각자 다른 날 입금)
+     전부 ✓ 가 되어 **명백한 답을 놓치고 보류**로 떨어뜨렸다(실사용 신고 2026-08-19:
+     `57번 원장 8/11` vs `434번 원장 날짜없음` 인데 "근거로 좁혀지지 않음"). */
+  const bySameDate = only(t.filter(x => x.hasLedger && _ledgerMatchesStamp(x.ledgerPaidAt, group.stamp)));
+  if (bySameDate) return { rowId: bySameDate.rowId, rowIndex: bySameDate.rowIndex, basis: 'ledger_same_date' };
 
   const byLedger = only(t.filter(x => x.hasLedger));
   if (byLedger) return { rowId: byLedger.rowId, rowIndex: byLedger.rowIndex, basis: 'ledger' };
