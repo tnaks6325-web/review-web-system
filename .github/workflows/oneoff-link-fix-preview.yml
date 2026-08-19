@@ -21,7 +21,7 @@ jobs:
           sudo apt-get install -y -qq postgresql-client-18
           echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
-      - name: Preview
+      - name: Preview2
         env:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
@@ -29,100 +29,54 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
 
-          CREATE TEMP VIEW tgt AS
-          SELECT * FROM (VALUES
-            ('8/3(쿠팡)위프_블랙 탈취제 800건', 23),
-            ('8/3(쿠팡)위프_블랙 탈취제 800건', 164),
-            ('8/3(쿠팡)위프_블랙 탈취제 800건', 166),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 28),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 95),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 96),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 517),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 98),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 420),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 101),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 293),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 102),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 292),
-            ('0721)장수돌침대_쿠팡_탄소매트 900건', 75),
-            ('8/3(네이버)우레온_바디미스트 100건', 19)
-          ) AS t(tab, seq);
+          \echo '=== ⓐ 표 주문번호를 명의 조건 없이 원장에서 찾기 (3건) ==='
+          SELECT q.num AS 표주문번호, os.id, os.recipient,
+                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
+                 os.tab_name, to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출, os.mirror_status,
+                 os.deleted_at IS NOT NULL AS 삭제됨
+            FROM (VALUES ('30101824728828'),('2026080390214241'),('11102128152660')) q(num)
+            LEFT JOIN order_submissions os
+              ON regexp_replace(COALESCE(os.order_num,''),'\D','','g') = q.num
+           ORDER BY 1;
 
-          CREATE TEMP VIEW rws AS
-          SELECT cp.id AS row_id, cp.sheet_id, cp.tab_name, cp.seq,
-                 cp.phone8, cp.recipient_name,
-                 COALESCE(cp.row_json->>'번호','') AS 번호칸,
-                 cp.order_submission_id AS cur_link,
+          \echo ''
+          \echo '=== ⓑ 링크가 끊길 두 주문 — 지금 그 주문을 가리키는 모든 줄 ==='
+          SELECT os.id, os.recipient AS 주문수취인,
+                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 주문연락처8,
+                 cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
+                 cp.recipient_name AS 줄참여자, cp.phone8 AS 줄연락처8,
+                 cp.deleted_at IS NOT NULL AS 내려간줄
+            FROM order_submissions os
+            LEFT JOIN campaign_participants cp ON cp.order_submission_id = os.id
+           WHERE os.id IN ('3c3729cb-77b3-49aa-b854-daf1d4007257',
+                           '2c2b82d5-a25e-45e9-b461-3fe4a155ed06')
+           ORDER BY os.id, cp.seq;
+
+          \echo ''
+          \echo '=== ⓒ 그 두 사람이 표에 자기 줄을 갖고 있는가 (이름/연락처로) ==='
+          SELECT cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
+                 cp.recipient_name, cp.phone8,
+                 COALESCE(cp.row_json->>'주문번호', cp.row_json->>'주문번호 ') AS 표주문번호,
+                 cp.order_submission_id IS NOT NULL AS 링크있음,
+                 cp.deleted_at IS NOT NULL AS 내려간줄
+            FROM campaign_participants cp
+           WHERE (cp.phone8 = '33536503' AND cp.tab_name = '0721)장수돌침대_쿠팡_탄소매트 900건')
+              OR (cp.phone8 = '75860135' AND cp.tab_name = '8/3(네이버)우레온_바디미스트 100건')
+           ORDER BY cp.tab_name, cp.seq;
+
+          \echo ''
+          \echo '=== ⓓ 문제의 3줄이 있는 탭에서 그 사람의 다른 줄 ==='
+          SELECT cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
+                 cp.recipient_name, cp.phone8,
                  regexp_replace(COALESCE((
                    SELECT string_agg(t.value,'' ORDER BY t.key)
                      FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
-                    WHERE t.key LIKE '%주문번호%'
-                 ),''),'\D','','g') AS onum
+                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS 표주문번호,
+                 cp.order_submission_id IS NOT NULL AS 링크있음,
+                 cp.deleted_at IS NOT NULL AS 내려간줄
             FROM campaign_participants cp
-            JOIN tgt ON tgt.tab = cp.tab_name AND tgt.seq = cp.seq
-           WHERE cp.deleted_at IS NULL;
-
-          CREATE TEMP VIEW cand AS
-          SELECT r.row_id, os.id AS os_id,
-                 regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS os_num,
-                 os.submitted_at
-            FROM rws r
-            JOIN order_submissions os
-              ON regexp_replace(COALESCE(os.order_num,''),'\D','','g') = r.onum
-             AND right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) = r.phone8
-             AND os.deleted_at IS NULL
-           WHERE length(r.onum) >= 6;
-
-          CREATE TEMP VIEW plan AS
-          SELECT r.*,
-                 (SELECT COUNT(*) FROM cand c WHERE c.row_id=r.row_id) AS 후보수,
-                 (SELECT c.os_id FROM cand c WHERE c.row_id=r.row_id LIMIT 1) AS 후보주문,
-                 CASE
-                   WHEN length(r.onum) < 6 THEN '비움(표 주문번호 없음)'
-                   WHEN (SELECT COUNT(*) FROM cand c WHERE c.row_id=r.row_id) = 0 THEN '비움(원장에 그 번호 없음)'
-                   WHEN (SELECT COUNT(*) FROM cand c WHERE c.row_id=r.row_id) > 1 THEN '손대지 않음(후보 여럿)'
-                   WHEN (SELECT c.os_id FROM cand c WHERE c.row_id=r.row_id LIMIT 1) = r.cur_link
-                        THEN '변경 없음(이미 올바름)'
-                   ELSE '연결 교체'
-                 END AS 조치
-            FROM rws r;
-
-          \echo '=== ① 줄별 미리보기 ==='
-          SELECT tab_name, 번호칸 AS "번호", seq AS "#", recipient_name AS 참여자,
-                 COALESCE(NULLIF(onum,''),'(빈칸)') AS 표주문번호,
-                 (SELECT regexp_replace(COALESCE(os.order_num,''),'\D','','g')
-                    FROM order_submissions os WHERE os.id=p.cur_link) AS 지금가리키는주문번호,
-                 후보수, 조치
-            FROM plan p ORDER BY tab_name, seq;
-
-          \echo ''
-          \echo '=== ② 조치별 건수 ==='
-          SELECT 조치, COUNT(*) FROM plan GROUP BY 1 ORDER BY 2 DESC;
-
-          \echo ''
-          \echo '=== ③ 정정 후 가리키는 줄이 없어지는 주문 ==='
-          WITH after AS (
-            SELECT row_id, cur_link,
-                   CASE WHEN 조치 = '연결 교체' THEN 후보주문
-                        WHEN 조치 LIKE '비움%' THEN NULL
-                        ELSE cur_link END AS new_link
-              FROM plan
-          ), lost AS (
-            SELECT DISTINCT a.cur_link AS os_id FROM after a
-             WHERE a.cur_link IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM after b WHERE b.new_link = a.cur_link)
-               AND NOT EXISTS (
-                 SELECT 1 FROM campaign_participants cp
-                  WHERE cp.order_submission_id = a.cur_link AND cp.deleted_at IS NULL
-                    AND cp.id NOT IN (SELECT row_id FROM after))
-          )
-          SELECT os.id, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
-                 os.recipient, right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS 연락처8,
-                 to_char(os.submitted_at,'YY-MM-DD HH24:MI') AS 제출시각, os.mirror_status
-            FROM lost JOIN order_submissions os ON os.id=lost.os_id
-           ORDER BY os.submitted_at;
-
-          \echo ''
-          \echo '=== ④ 쓰기 0건 확인 ==='
-          SELECT '이 조회는 SELECT 만 수행했습니다' AS 확인;
+           WHERE (cp.phone8='53849851' AND cp.tab_name='0721)장수돌침대_쿠팡_탄소매트 900건')
+              OR (cp.phone8='32250135' AND cp.tab_name='8/3(쿠팡)위프_블랙 탈취제 800건')
+              OR (cp.phone8='75860135' AND cp.tab_name='8/3(네이버)우레온_바디미스트 100건')
+           ORDER BY cp.tab_name, cp.seq;
           SQL
