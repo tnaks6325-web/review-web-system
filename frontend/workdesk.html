@@ -8337,8 +8337,66 @@ async function _pmOpenDepositAnomalies(){
     ${r.paidWithoutSubmitUnavailable?`<div class="muted">${esc(r.paidWithoutSubmitUnavailable)}</div>`:rowsOf(r.paidWithoutSubmit,[['작업',x=>x.tabName],['줄',x=>x.rowIndex],['참여자',x=>x.reviewerName]])}
     <div style="margin:16px 0 6px"><b>④ 수정 오버레이로 남은 입금 표기</b> — ${n(r.overlayMarkCount,r.overlayUnavailable)}${r.overlayUnavailable?'':` · 그중 여러 줄에 번지는 것 ${Number(r.overlaySpreadCount||0)}건`}</div>
     ${r.overlayUnavailable?`<div class="muted">${esc(r.overlayUnavailable)}</div>`:`${r.overlayByDate&&Object.keys(r.overlayByDate).length?`<div class="muted" style="margin-bottom:6px">날짜별: ${Object.entries(r.overlayByDate).map(([d,v])=>`<b>${esc(d)}</b> ${v.marks}건(번짐 ${v.spread})`).join(' · ')}</div>`:''}${rowsOf(r.overlayMarks,[['작업',x=>x.tabName],['앵커',x=>x.anchorType],['입금일',x=>x.stamp],['가리키는 줄',x=>x.rowCount],['줄 번호',x=>(x.rows||[]).filter(v=>v!=null).join(', ')],['기록자',x=>x.createdBy]])}`}
+    ${(!r.overlayUnavailable && Number(r.overlaySpreadCount||0)>0)?`<div style="margin:8px 0 2px"><button class="btn sm" onclick="_pmOpenOverlayFix()">직원이 적은 입금일 복원하기 →</button> <span class="muted">원래 줄(리뷰 제출된 줄)에는 그대로 남기고, 번져 나간 줄에서만 지웁니다(미리보기 먼저).</span></div>`:''}
     <div style="margin:16px 0 6px"><b>③ 같은 사람·같은 날짜 입금 원장 중복</b> — ${n(r.duplicateLedgerCount,r.duplicateLedgerUnavailable)}</div>
     ${r.duplicateLedgerUnavailable?`<div class="muted">${esc(r.duplicateLedgerUnavailable)}</div>`:rowsOf(r.duplicateLedger,[['작업',x=>x.tabName],['참여자',x=>x.reviewerName],['입금일',x=>String(x.paidDate||'').slice(0,10)],['원장 수',x=>x.records],['줄 번호',x=>(x.rows||[]).join(', ')]])}`;
+}
+
+/* 직원이 최초로 적은 입금일 복원 — 미리보기 → 확인 → 실행.
+   ★ 판정(원래 줄 = 리뷰 제출된 줄 1개)은 **서버가 한다**. 화면은 계획을 그대로 그리고 실행만 묻는다. */
+async function _pmOpenOverlayFix(){
+  const t=STATE.cur, q=[];
+  if(t&&t.sheetId) q.push('sheetId='+encodeURIComponent(t.sheetId));
+  if(t&&t.tabName) q.push('tabName='+encodeURIComponent(t.tabName));
+  let ov=document.getElementById('pmovfixov');
+  if(!ov){ ov=document.createElement('div'); ov.id='pmovfixov'; ov.className='modalov';
+    ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();}); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modalbox" style="width:860px"><div class="modalhd"><b>직원이 적은 입금일 복원 · ${esc((t&&t.tabName)||'전체 작업')}</b><button class="btn xs" onclick="document.getElementById('pmovfixov').remove()">닫기</button></div><div class="modalbd" id="pmovfixbd">불러오는 중…</div></div>`;
+  let r=null;
+  try{ r=await api('/api/trackb/payment/repair/deposit-overlay-fix'+(q.length?'?'+q.join('&'):'')); }catch(e){ r=null; }
+  const bd=document.getElementById('pmovfixbd'); if(!bd) return;
+  if(!r||!r.ok){ bd.innerHTML=`<div class="muted">미리보기를 불러오지 못했습니다. <button class="btn xs" onclick="_pmOpenOverlayFix()">다시 시도</button></div>`; return; }
+  STATE.pmOvFix=r;
+  const s2=r.summary||{}, items=r.items||[];
+  const act=items.filter(x=>!x.hold), hold=items.filter(x=>x.hold);
+  const tbl=(list,cols)=> !list.length ? '<div class="muted" style="padding:6px 0">해당 없음</div>'
+    : `<div class="lgwrap"><table class="lgtable pmtable"><thead><tr>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${list.slice(0,80).map(x=>`<tr>${cols.map(c=>`<td>${esc(String(c[1](x)??''))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${list.length>80?`<div class="muted">외 ${list.length-80}건</div>`:''}`;
+  const dates=Object.entries(s2.byStamp||{}).map(([d,v])=>`<b>${esc(d)}</b> ${v.groups}건${v.hold?`(보류 ${v.hold})`:''}`).join(' · ');
+  bd.innerHTML=`
+    <div style="padding:10px 12px;border:1px solid var(--line,#D9E1EC);border-radius:8px;background:#F0F7FF;margin-bottom:12px;line-height:1.65">
+      직원이 적은 값은 <b>수정 오버레이</b>로 남아 있는데, 그 표시가 중복 줄로 번졌습니다.<br>
+      <span class="muted">복원하면 <b>원래 줄(리뷰 제출된 줄)에는 그 값을 그대로 새기고</b>, 번져 나간 줄에서는 지웁니다.
+      값은 직원이 친 그대로 유지되고(<b>8/11</b>·<b>8/12</b>·메모 문구 포함), 같은 칸의 다른 입금일도 보존됩니다.<br>
+      ★ <b>입금 원장이 있는 줄은 지우지 않습니다</b> — 실제 이체된 줄일 수 있어 사람이 판단해야 합니다.</span>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin:0 0 10px">
+      <span class="muted">${dates||'대상 없음'}</span><span class="sp" style="flex:1"></span>
+      <span class="muted">복원 <b>${Number(s2.keepRows||0)}</b>줄 · 번짐 제거 <b>${Number(s2.clearRows||0)}</b>줄 · 원장 있어 보존 <b>${Number(s2.ledgerBlockedRows||0)}</b>줄 · 보류 <b>${Number(s2.holdGroups||0)}</b>건</span>
+    </div>
+    <div style="margin:12px 0 6px"><b>복원 대상</b></div>
+    ${tbl(act,[['작업',x=>x.tabName],['참여자',x=>x.reviewerName],['값',x=>x.stamp],['보이던 줄',x=>(x.rows||[]).join(', ')],['남길 줄',x=>x.keepRow],['지울 줄',x=>(x.clearRows||[]).join(', ')||'—'],['원장 있어 보존',x=>(x.ledgerBlockedRows||[]).join(', ')||'—']])}
+    <div style="margin:16px 0 6px"><b>보류</b> — 자동으로 정하지 않습니다</div>
+    ${tbl(hold,[['작업',x=>x.tabName],['참여자',x=>x.reviewerName],['값',x=>x.stamp],['줄',x=>(x.rows||[]).join(', ')],['제출된 줄 수',x=>x.submittedCount],['사유',x=>x.holdReason]])}
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+      <button class="btn" onclick="document.getElementById('pmovfixov').remove()">닫기</button>
+      <button class="btn pri" ${Number(s2.actionableGroups||0)?'':'disabled'} onclick="_pmApplyOverlayFix()">이대로 복원 (${Number(s2.actionableGroups||0)}건)</button>
+    </div>`;
+}
+
+async function _pmApplyOverlayFix(){
+  const R=STATE.pmOvFix; if(!R) return;
+  const s2=R.summary||{}, t=STATE.cur;
+  if(!confirm(`${Number(s2.actionableGroups||0)}건을 복원합니다.\n\n· 원래 줄 ${Number(s2.keepRows||0)}개에 직원이 적은 값을 그대로 새깁니다\n· 번져 나간 줄 ${Number(s2.clearRows||0)}개에서 그 값을 지웁니다\n· 입금 원장이 있는 ${Number(s2.ledgerBlockedRows||0)}줄은 건드리지 않습니다\n· 보류 ${Number(s2.holdGroups||0)}건은 그대로 둡니다\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+  const body={confirm:true};
+  if(t&&t.sheetId) body.sheetId=t.sheetId;
+  if(t&&t.tabName) body.tabName=t.tabName;
+  let r=null;
+  try{ r=await api('/api/trackb/payment/repair/deposit-overlay-fix',{method:'POST',body:JSON.stringify(body)}); }catch(e){ r=null; }
+  if(!r||!r.ok){ toast((r&&r.error)||'복원에 실패했습니다.'); return; }
+  document.getElementById('pmovfixov')?.remove();
+  toast(`복원 완료 · 원래 줄 ${r.keptRows||0}개 새김 · 번짐 제거 ${r.clearedRows||0}줄 · 표기 정리 ${r.revertedEdits||0}건`);
+  await _pmLoad();
+  _pmOpenDepositAnomalies();
 }
 
 /* 번진 입금일 정리 — 미리보기 → 확인 → 실행 2단계.
