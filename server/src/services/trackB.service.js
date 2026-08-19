@@ -61,8 +61,14 @@ function _deriveAnchor(row) {
   if (row.order_submission_id) return { type: 'order', value: String(row.order_submission_id) };
   if (row.source === 'manual') return { type: 'manual', value: String(row.id) };   // 재투영 면역 물리행
   const ik = row.identity_key || identityKey(_ikFromRow(row));
-  return ik ? { type: 'identity', value: ik } : null;
+  if (ik) return { type: 'identity', value: ik };
+  /* ★★ 아직 아무도 배정되지 않은 **빈 준비 자리**(작업표 슬롯)는 이름·연락처가 없어 identity 앵커를
+     만들 수 없다. 앵커 없음 = 그 줄 전체 편집 잠금이면 "빈 줄에 송장·비고를 미리 적어 두기"가
+     구조적으로 불가능하고, 편집은 됐는데 **되돌리기만 no_stable_anchor 로 죽는** 막다른 길이 생긴다.
+     → 물리행 id 를 앵커로 쓴다. 투영 업서트가 (sheet_id, tab_name, seq) 기준이라 재투영에도 보존된다. */
+  return _rowAnchorId(row) ? { type: 'manual', value: _rowAnchorId(row) } : null;
 }
+function _rowAnchorId(row) { return row && row.id != null ? String(row.id) : ''; }
 // 편집 가능 필드 → 형태(bool/text). '_hidden'=제거 오버레이(import행). 화이트리스트(인젝션·형오류 차단).
 const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
@@ -2453,6 +2459,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
         ambiguous = true; editable = false; ambiguousCount++;
         if (editMap.has(k)) consumed.add(k);          // 소비 표시(orphan 오분류 방지), 단 미적용
       } else if (editMap.has(k)) { ov = editMap.get(k); consumed.add(k); }
+      /* ★ 앵커 승격 대비 — 빈 자리였을 때 **물리행 앵커**로 저장해 둔 값(예: 미리 적어 둔 송장)이
+         주문이 붙어 order 앵커로 승격한 뒤에도 화면에서 사라지지 않게 밑에 깔아 합성한다.
+         같은 필드는 **현재 앵커 값이 이긴다**. `_hidden` 은 제외 — 빈 자리를 치웠던 제거 표시가
+         실제 참여자가 배정된 줄을 숨기면 안 된다. */
+      const rowKey = _akey('manual', _rowAnchorId(r));
+      if (!ambiguous && anchor.value !== _rowAnchorId(r) && editMap.has(rowKey)) {
+        const base = { ...editMap.get(rowKey) }; delete base._hidden;
+        ov = { ...base, ...ov }; consumed.add(rowKey);
+      }
     }
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
     const syn = {
