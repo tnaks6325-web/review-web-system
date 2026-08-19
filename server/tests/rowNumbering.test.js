@@ -213,8 +213,9 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
   console.log('\n[H] 전체 작업 스캔 — 한 쿼리 집계 · 읽기 전용 · 키 목록 단일 출처');
   {
     const pool = makePool([[/FROM tab_configs/i, { rows: [
-      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', total: 187, blankNumber: 42 },
-      { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 100, blankNumber: 0 },
+      { sheetId: 'S1', tabName: 'T1', displayName: '0729)위드프렌즈', total: 187, blankNumber: 42, dupNumber: 0 },
+      { sheetId: 'S2', tabName: 'T2', displayName: '정상', total: 100, blankNumber: 0, dupNumber: 0 },
+      { sheetId: 'S3', tabName: 'T3', displayName: '위프(중복줄 정리 뒤)', total: 800, blankNumber: 0, dupNumber: 233 },
     ] }]]);
     S.__setPoolForTest(pool);
     const r = await S.scanNumbering({});
@@ -222,7 +223,10 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 읽기 전용(쓰기 쿼리 0)', !pool.calls.some(c => /^(UPDATE|INSERT|DELETE)\b/i.test(c.sql)));
     ok('★ 무시트 탭만 센다', /COALESCE\(tc.sheetless, FALSE\) = TRUE/.test(pool.calls[0].sql));
     ok('★ 활성 줄만 센다', /p.deleted_at IS NULL AND p.active = TRUE/.test(pool.calls[0].sql));
-    ok('정리 대상 작업 수·빈 줄 수 집계', r.needTabs === 1 && r.blankNumberRows === 42, JSON.stringify(r));
+    ok('★★ 중복 번호만 있는 작업도 정리 대상(빈칸 0 이라 종전엔 통째로 빠졌다)',
+      r.needTabs === 2 && r.blankNumberRows === 42 && r.dupNumberRows === 233, JSON.stringify(r));
+    ok('★ 스캔 SQL 이 중복을 센다(DISTINCT 차)',
+      /COUNT\(DISTINCT btrim\(n\.val\)\)/.test(pool.calls[0].sql));
     /* ★★ 칸 이름은 SQL 에 적지 않고 utils 목록을 파라미터로 넘긴다(판정 두 벌 금지) */
     const U2 = require('../src/utils/rowNumbering');
     ok('★★ 칸 이름 후보를 파라미터로 넘긴다', Array.isArray(pool.calls[0].params[0]) &&
@@ -238,16 +242,17 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const opened = [];
     const pool = makePool([
       [/FROM tab_configs tc/i, { rows: [
-        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 100, blankNumber: 5 },
-        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 100, blankNumber: 0 },   // 이미 정리됨
-        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 2 },
+        { sheetId: 'S1', tabName: 'T1', displayName: 'A', total: 100, blankNumber: 5, dupNumber: 0 },
+        { sheetId: 'S2', tabName: 'T2', displayName: 'B', total: 100, blankNumber: 0, dupNumber: 0 },   // 이미 정리됨
+        { sheetId: 'S3', tabName: 'T3', displayName: 'C', total: 100, blankNumber: 0, dupNumber: 7 },   // 번호 중복만
       ] }],
       [/FROM tab_configs\s+WHERE sheet_id/i, (p) => { opened.push(p[1]); return { rows: [{ sheetless: true }] }; }],
       [/FROM campaign_participants p/i, { rows: [] }],
     ]);
     S.__setPoolForTest(pool);
     const r = await S.sweepNumbering({ cap: 10 });
-    ok('★ 번호 빈칸이 있는 작업만 연다', opened.join(',') === 'T1,T3', opened.join(','));
+    ok('★★ 빈칸 또는 중복이 있는 작업만 연다(정리 끝난 작업은 열지 않는다)',
+      opened.join(',') === 'T1,T3', opened.join(','));
     ok('스캔 결과를 보고한다', r.need === 2 && r.tabs === 2, JSON.stringify(r));
 
     /* 사이클 상한 — 남은 것은 다음 사이클(업무 시간에 DB 를 흔들지 않는다) */
@@ -344,6 +349,9 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       /oninput="_RN\.q=this\.value;_rnRows\(\)"/.test(fe) &&
       /function _rnRows\(\)\{[\s\S]{0,400}getElementById\('rnRows'\)/.test(fe));
     ok('★ 기본은 정리 대상만 보기(121개를 다 늘어놓지 않는다)', /_RN\.onlyNeed !== false/.test(fe));
+    ok('★★ 화면 판정도 중복을 포함한다(서버 대상과 갈리면 "목록엔 없는데 자동으로 바뀐다")',
+      /r\.blankNumber > 0 \|\| r\.dupNumber > 0/.test(fe));
+    ok('★ 빈 줄 자체를 내리는 창구를 안내한다(번호 정리가 줄을 지우지 않는다)', /🧹 줄 정리\]를 쓰세요/.test(fe));
     ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
       /const i = all\.indexOf\(r\);/.test(fe));
     ok('★ 빈 목록도 사유를 말한다', /검색 결과가 없습니다/.test(fe) && /정리할 작업이 없습니다/.test(fe));
@@ -354,12 +362,12 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const rowsBlk = fe.slice(fe.indexOf('function _rnRows('), fe.indexOf('/* 서버가 준 사유를'));
     const th = (allBlk.match(/<th>/g) || []).length;
     const td = (rowsBlk.match(/<td[ >]/g) || []).length - (rowsBlk.match(/<td colspan/g) || []).length;  // 빈 목록 줄 제외
-    ok('★★ 전체 목록 표는 4칸(작업·표 줄·번호 빈칸·버튼)', th === 4, '헤더 ' + th);
+    ok('★★ 전체 목록 표는 5칸(작업·표 줄·번호 빈칸·번호 중복·버튼)', th === 5, '헤더 ' + th);
     ok('★★ 행 칸 수 = 헤더 칸 수', td === th, `헤더 ${th} · 행 ${td}`);
     ok('★ 빈 목록 colspan 도 같은 칸 수', new RegExp('colspan="' + th + '"').test(rowsBlk));
     const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));
     ok('★★ 표에 담당자 열이 없다', !/담당자/.test(thead) && !/담당자|blankManager/.test(rowsBlk), thead.slice(0, 120));
-    ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다/.test(fe));
+    ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만<\/b> 어긋난 작업은 여기 숫자로 드러나지 않습니다/.test(fe));
     ok('★ 자동으로 돈다는 사실을 화면이 말한다(수동 버튼은 즉시 실행용)',
       /5분마다 자동으로 정리됩니다/.test(fe) && /5분 주기로 자동<\/b> 정리되므로/.test(fe));
   }

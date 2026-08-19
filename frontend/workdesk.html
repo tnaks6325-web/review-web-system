@@ -3502,24 +3502,27 @@ function _rnRenderAll(b, f, tabs){
       <button class="wbl-b" onclick="rnScan()">다시 조회</button>
       <button class="wbl-b dark" id="rnGoAll" ${(s && s.needTabs) ? '' : 'disabled'} onclick="rnRunAll()">🔢 전체 정리 실행</button>`;
   b.innerHTML = tabs + `
-    <div class="wbl-facts">무시트 작업 전체에서 <b>번호가 비어 있는 줄</b>을 셉니다.
+    <div class="wbl-facts">무시트 작업 전체에서 <b>번호가 비어 있거나 중복된 줄</b>을 셉니다.
       정리하면 그 작업의 번호가 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매겨집니다.<br>
       <b>5분마다 자동으로 정리됩니다</b> — 아래 버튼은 기다리지 않고 지금 바로 돌리는 용도입니다.<br>
-      <span style="color:var(--faint,#94a3b8)">※ 번호가 이미 다 차 있고 순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다 — 그 작업을 열어 [이 작업] 미리보기로 확인하세요.</span></div>
-    ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${_rnNeed().length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>
+      <span style="color:var(--faint,#94a3b8)">※ 번호가 다 차 있고 중복도 없이 <b>순서만</b> 어긋난 작업은 여기 숫자로 드러나지 않습니다(그런 작업은 주문이 들어올 때 그 자리에서 다시 매겨집니다). 빈 줄 자체를 표에서 내리려면 [⋯] → [🧹 줄 정리]를 쓰세요.</span></div>
+    ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${_rnNeed().length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>${s.dupNumberRows ? ` · 번호 중복 <b>${s.dupNumberRows}줄</b>` : ''}
         ${s.truncated ? ' <span style="color:var(--danger,#c22f2f)">(목록이 잘렸습니다 — 정리 후 다시 조회하세요)</span>' : ''}</div>
       <div class="rn-tools">
         <button class="wbl-b${_RN.onlyNeed === false ? '' : ' dark'}" id="rnOnly" onclick="_RN.onlyNeed=!(_RN.onlyNeed!==false);_rnRows()"></button>
         <input id="rnq" placeholder="작업 검색" value="${esc(_RN.q || '')}" oninput="_RN.q=this.value;_rnRows()">
       </div>
-      <div class="rn-tw"><table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th></th></tr></thead>
+      <div class="rn-tw"><table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th>번호 중복</th><th></th></tr></thead>
         <tbody id="rnRows"></tbody></table></div>` : ''}
     <div id="rnErr">${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}</div>`;
   if (s) _rnRows();
 }
-/* 정리 대상 = 번호가 빈 줄이 있는 작업 (담당자는 번호 정리의 대상이 아니다 — 사용자 확정) */
+/* 정리 대상 = 번호가 **비었거나 중복된** 줄이 있는 작업.
+   ★ 중복을 빼면 안 된다 — 중복 줄 정리 뒤 566,566,567,567 처럼 번호가 다 차 있는 표가
+     대상에서 통째로 빠져 사람이 누를 때까지 정리되지 않는다(실측 2026-08-19).
+   (담당자는 번호 정리의 대상이 아니다 — 사용자 확정) */
 function _rnNeed(){
-  return (((_RN.scan || {}).items) || []).filter(r => r.blankNumber > 0);
+  return (((_RN.scan || {}).items) || []).filter(r => r.blankNumber > 0 || r.dupNumber > 0);
 }
 /* ★★ 행만 갈아끼운다 — 검색 입력칸이 든 껍데기를 다시 그리면 **한글 IME 조합이 깨진다**
      (홈 목록 검색에서 실측된 `ㅁ며면면` 사고와 같은 자리). */
@@ -3535,12 +3538,13 @@ function _rnRows(){
   if (btn) { btn.textContent = only ? `정리 대상만 (${need.length})` : `전체 보기 (${all.length})`; btn.className = 'wbl-b' + (only ? ' dark' : ''); }
   tb.innerHTML = rows.length ? rows.map(r => {
     const i = all.indexOf(r);                       // ★ 실행에는 **원본 인덱스**를 넘긴다(필터된 순번이 아니라)
-    return `<tr class="${r.blankNumber ? 'on' : ''}">
+    return `<tr class="${(r.blankNumber || r.dupNumber) ? 'on' : ''}">
       <td style="text-align:left">${esc(r.displayName || r.tabName)}</td>
       <td>${r.total}</td>
       <td>${r.blankNumber ? '<b>' + r.blankNumber + '</b>' : '0'}</td>
+      <td>${r.dupNumber ? '<b>' + r.dupNumber + '</b>' : '0'}</td>
       <td><button class="wbl-b" onclick="rnRunOne(${i})">정리</button></td></tr>`;
-  }).join('') : `<tr><td colspan="4" style="text-align:left;color:var(--faint,#94a3b8)">${
+  }).join('') : `<tr><td colspan="5" style="text-align:left;color:var(--faint,#94a3b8)">${
     q ? '검색 결과가 없습니다.' : (only ? '정리할 작업이 없습니다 — 전체 작업의 번호가 모두 채워져 있습니다.' : '무시트 작업이 없습니다.')}</td></tr>`;
 }
 async function rnScan(){
@@ -3558,7 +3562,7 @@ async function rnRunOne(i){
   if (!_RN || _RN.busy || !_RN.scan) return;
   const r = (_RN.scan.items || [])[i]; if (!r) return;
   if (!confirm(`「${r.displayName || r.tabName}」의 번호를 구매일자 순으로 다시 매깁니다.\n\n` +
-    `번호 빈 줄 ${r.blankNumber}줄 · 표 ${r.total}줄 — 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n\n계속할까요?`)) return;
+    `번호 빈 줄 ${r.blankNumber}줄 · 중복 ${r.dupNumber || 0}줄 · 표 ${r.total}줄 — 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n\n계속할까요?`)) return;
   _RN.busy = true; _rnRender();
   try {
     const j = await api('/api/trackb/worktable/renumber', { method: 'POST', body: JSON.stringify({
@@ -3574,7 +3578,7 @@ async function rnRunAll(){
   if (!_RN || _RN.busy || !_RN.scan) return;
   const s = _RN.scan;
   if (!confirm(`무시트 작업 ${s.needTabs}개의 번호를 구매일자 순으로 다시 매깁니다.\n\n` +
-    `번호 빈 줄 ${s.blankNumberRows}줄이 채워지고, 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n` +
+    `번호 빈 줄 ${s.blankNumberRows}줄이 채워지고 중복 ${s.dupNumberRows || 0}줄이 정리되며, 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n` +
     `줄의 내용·주문·리뷰·입금 기록은 그대로입니다.\n\n계속할까요?`)) return;
   _RN.busy = true; _rnRender();
   try {
