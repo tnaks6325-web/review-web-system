@@ -2118,6 +2118,15 @@ let _GO=null, _VIEW='';
   // #view=logs — 대시보드 중요알림 요약 카드에서 '리뷰어 로그' 뷰로 바로 진입(초기 뷰 지정만)
   try{ const vm=(location.hash||'').match(/[#&]view=(\w+)/); if(vm) _VIEW=vm[1]; }catch(_){ }
 })();
+// ── 공유 링크(#w=<code>) 수신 — 메신저로 받은 "그 작업보드 주소" ──
+//   ★ 여기서는 코드만 집어 둔다. 로그인 전이면 boot 이 로그인 화면에서 되돌아오는데, _SHARE 는
+//     모듈 변수라 살아남아 **로그인 직후 boot 재실행 때 소비**된다(로그인 후 그 작업보드로 자동 이동).
+//   ★★ 링크는 권한이 아니다 — 되찾기(GET /share-link/:code)가 서버 스코프 검증(canAccessTab)을
+//     그대로 거치므로, 담당 밖 사람이 링크를 받아도 열리지 않는다.
+let _SHARE=null, _SHARE_ERR='';
+(function initShareLink(){
+  try{ const m=(location.hash||'').match(/[#&]w=([A-Za-z0-9_-]{4,64})(?:&|$)/); if(m) _SHARE=m[1]; }catch(_){ _SHARE=null; }
+})();
 (function initToken(){
   try{   // ① #sso — 디코드 실패해도 raw_sso 폴백이 죽지 않게 분리 try
     const m=(location.hash||'').match(/[#&]sso=([^&]+)/);
@@ -2230,10 +2239,13 @@ async function boot(){
   // 새로고침은 현재 브라우저 항목을 다시 읽되, 다른 계정이 남긴 이력은 복원하지 않는다.
   if(!_GO && _VIEW!=='logs' && _navCanRestore(history.state)) _navRestoreState(history.state);
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업보드 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
+  await _consumeShare();   // 공유 링크(#w=) → 그 작업보드/업체로 직행(서버가 대상과 스코프를 판정)
   // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
   if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
+  // 공유 링크 실패는 조용히 홈으로 떨어지지 않는다 — 왜 못 열었는지(폐기·담당 밖) 말한다.
+  if(_SHARE_ERR){ const msg=_SHARE_ERR; _SHARE_ERR=''; setTimeout(()=>alert(msg),50); }
 }
 // 딥링크 소비: 열 탭과 강조할 리뷰어를 예약하고 주소창에서 해시를 제거(새로고침 시 재발동·URL 공유로 PII 유출 방지).
 //   ★ 권한은 여기서 판단하지 않는다 — 새 탭도 평소와 똑같이 /api/trackb/tabs·/workdesk 를 호출하고
@@ -2246,6 +2258,65 @@ function _consumeGo(){
   STATE.pendingFocus={ phone8:String(g.p||''), name:String(g.n||'') };
   try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
 }
+// 공유 링크 소비: 코드를 서버에 물어 대상(작업 or 업체)을 받아 예약한다.
+//   ★ 대상 해석·스코프 판정은 **전적으로 서버** — 화면은 코드만 넘긴다(주소를 손으로 만들어도 권한이 안 넓어진다).
+//   ★ 실패 사유는 삼키지 않고 _SHARE_ERR 에 담아 렌더 뒤 화면이 말한다(조용히 홈으로 떨어지지 않는다).
+async function _consumeShare(){
+  if(!_SHARE) return;
+  const code=_SHARE; _SHARE=null;
+  try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }   // 새로고침 재발동·재공유 방지
+  let r=null; try{ r=await api('/api/trackb/share-link/'+encodeURIComponent(code)); }catch(_){ r=null; }
+  if(!r||!r.ok){ _SHARE_ERR=(r&&r.error)||'공유 링크를 열지 못했습니다.'; return; }
+  if(r.kind==='advertiser'){ STATE.view='ownership'; STATE.pendingAdv={ id:r.advertiserId }; return; }
+  STATE.view='workdesk';
+  STATE.pendingTab={ sheetId:r.sheetId, tabName:r.tabName, tabGid:r.tabGid||'' };
+}
+/* ══ 공유 링크 복사 — 메신저(카카오톡)로 "그 작업보드 주소"를 바로 전달 ═══════════════════════
+   ★ 코드는 **대상마다 하나**라 언제 눌러도 같은 주소가 나온다(이미 공유해 둔 링크가 죽지 않는다).
+   ★★ 링크는 권한이 아니다 — 받은 사람은 평소대로 로그인해야 하고, 담당 범위 밖이면 서버가 막는다.
+   ★ 클립보드는 브라우저·권한에 따라 **조용히 실패**한다 → 성공 여부와 무관하게 주소를 팝업으로
+     보여 손으로도 복사할 수 있게 한다(조용한 실패 금지). 팝업은 body 직속(스크롤 컨테이너 밖).       */
+async function _shareLinkCopy(body, title){
+  let r=null; try{ r=await api('/api/trackb/share-link',{method:'POST',body:JSON.stringify(body)}); }catch(_){ r=null; }
+  if(!r||!r.ok){ alert('링크를 만들지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
+  const url=location.origin+location.pathname+'#w='+r.code;
+  let copied=false;
+  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(url); copied=true; } }catch(_){ copied=false; }
+  _shareLinkPopup(title, url, copied);
+}
+function _shareLinkPopup(title, url, copied){
+  let ov=document.getElementById('shlov');
+  if(!ov){ ov=document.createElement('div'); ov.id='shlov'; ov.className='modalov';
+    ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
+  if(!window._shlKeyBound){ window._shlKeyBound=true;   // ★ 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
+    document.addEventListener('keydown',e=>{ if(e.key!=='Escape') return; const o=document.getElementById('shlov'); if(o) o.remove(); }); }
+  ov.innerHTML=`<div class="modalbox" style="width:560px"><div class="modalhd"><b>🔗 ${esc(title)}</b>
+      <span style="flex:1"></span><button class="btn xs" onclick="document.getElementById('shlov').remove()">닫기</button></div>
+    <div class="modalbd">
+      <div style="font-size:12px;color:#64748b;margin-bottom:6px">${copied?'주소를 복사했습니다 — 메신저에 그대로 붙여넣으세요.':'자동 복사가 막혀 있습니다 — 아래 주소를 직접 복사하세요.'}</div>
+      <input id="shlUrl" readonly value="${esc(url)}" onclick="this.select()"
+             style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box">
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn xs pri" onclick="_shareLinkCopyAgain()">주소 복사</button>
+        <span style="font-size:11px;color:#64748b">받은 사람은 로그인하면 이 화면으로 바로 들어옵니다. 담당 범위 밖이면 열리지 않습니다.</span>
+      </div></div></div>`;
+  const i=document.getElementById('shlUrl'); if(i){ i.focus(); i.select(); }
+}
+function _shareLinkCopyAgain(){ const i=document.getElementById('shlUrl'); if(!i) return; i.select();
+  let ok=false; try{ ok=document.execCommand('copy'); }catch(_){ ok=false; }
+  if(ok){ toast('주소를 복사했습니다'); return; }
+  if(navigator.clipboard){ navigator.clipboard.writeText(i.value)
+    .then(()=>toast('주소를 복사했습니다')).catch(()=>toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요')); return; }
+  toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요');
+}
+// 작업보드 상단 [🔗 링크 복사] — 지금 보고 있는 작업 하나로 직행하는 주소.
+function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
+  const m=(STATE.wd&&STATE.wd.meta)||{};
+  _shareLinkCopy({ kind:'tab', sheetId:t.sheetId, tabName:t.tabName, tabGid:t.tabGid||'' },
+                 '작업보드 링크 — '+(m.displayName||t.displayName||t.tabName||'')); }
+// 업체관리 [🔗 이 업체 링크 복사] — 그 업체의 작업 목록으로 직행하는 주소(광고주 접속 링크와 다르다).
+function copyAdvertiserLink(){ const a=STATE.advCur; if(!a){ toast('업체를 먼저 선택하세요'); return; }
+  _shareLinkCopy({ kind:'advertiser', advertiserId:a.id }, '업체 링크 — '+(a.name||'')); }
 function renderLogin(msg){
   document.body.classList.remove('advm','brandv','nostl','nofol');   // 광고주·브랜드 세션 잔재 정리(로그아웃/만료 후 상한·레이아웃·칸 원복)
   $('#app').innerHTML = `<div class="loginbox"><h2>리뷰웹시스템[3버전] 로그인</h2>
@@ -5178,12 +5249,15 @@ function renderWorkdesk(wd){
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
   //   (값이 사라진 게 아니라 자리를 옮긴 것). 시안 = docs/design-workboard-top-3section.html
   const workdeskTitle=m.displayName||STATE.cur.displayName||STATE.cur.tabName;
+  // [🔗 링크 복사] — 인수인계 때 상대가 검색으로 찾아 들어가던 것을 주소 한 줄로 대신한다(내부 역할만).
+  const shareBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="copyBoardLink()" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 화면으로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크 복사</button>`;
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
     ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     <span class="sp" style="flex:1"></span>
+    ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
     ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
@@ -12777,7 +12851,9 @@ async function renderOwnershipView(){
   // 뒤로/앞으로로 돌아온 경우엔 보던 업체 패널을 그대로 복원(기본 화면=전체 개요 로 덮지 않는다)
   if(STATE.pendingAdv){ const pa=STATE.pendingAdv; STATE.pendingAdv=null;
     const ix=STATE.advs.findIndex(a=>a.id===pa.id);
-    if(ix>=0){ selAdv(ix,{nav:!!pa.__nav}); return; } }
+    if(ix>=0){ selAdv(ix,{nav:!!pa.__nav}); return; }
+    // ★ 공유 링크로 들어왔는데 그 업체가 목록에 없으면(종료·삭제) 조용히 전체 개요로 떨어뜨리지 않는다.
+    if(!pa.__nav) setTimeout(()=>toast('링크의 업체를 목록에서 찾지 못했습니다(종료되었거나 삭제된 거래처일 수 있습니다)'),60); }
   _ovmRenderOverview();   // 기본 화면 = 전체 개요 표(빈 거래처추가 폼으로 시작하지 않는다)
 }
 
@@ -13526,6 +13602,8 @@ function renderOwnPanel(a, items){
       ${isAdmin?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('link')">🔗 접속 링크 ${lkb}</button>
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('acct')">👤 광고주 계정 ${accts?`<span class="ovm-fin">${accts}개</span>`:'<span class="ovm-fin cand">없음</span>'}</button>`:''}
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('own')">▦ 소유 시트 <span class="ovm-fin">${items.length}</span></button>
+      <button class="btn ovm-setbtn" onclick="copyAdvertiserLink()"
+        title="이 업체의 작업 목록으로 바로 가는 내부 담당자용 주소를 복사합니다. 위의 [접속 링크](광고주가 로그인 없이 여는 링크)와는 다릅니다.">🔗 업체 링크 복사</button>
       ${canImport?`<button class="btn ovm-setbtn" onclick="openSheetImport('${esc(a.id)}')"
         title="시스템에 없는 구글시트 탭 주소로 과거 작업을 가져옵니다">＋ 시트에서 가져오기</button>`:''}
       <span style="flex:1"></span>
