@@ -646,7 +646,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
     + '\nthis.api = { walkDays, buildHorizon, applyCarryMode, carryOn, carryPlaced, carryDays,'
     + ' autoFit, maxFor, sumPlan, diffPlan, targetTotal, doneBefore, changedFromOpen, effBase, planFor,'
     + ' payload, naturalFor, carryAmt, CARRY_MODES, MAX_ROWS, MAX_DAY,'
-    + ' holidayName, dayKind, fmtMD, FIXED_HOLIDAYS, LUNAR_HOLIDAYS };',
+    + ' holidayName, dayKind, fmtMD, FIXED_HOLIDAYS, LUNAR_HOLIDAYS, DEFAULT_CARRY_MODE };',
     sandbox);
   const A = sandbox.api;
 
@@ -934,6 +934,41 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('7A-5 이월 전액을 얹어도 9999 를 넘지 않는다',
     sandbox.S.horiz.every((x) => A.planFor(x) <= 9999), sandbox.S.horiz.map(A.planFor).slice(0, 3));
 
+  /* 7A-12 ★★ 부족(shortBy)일 때 "방식별 종료일"에 날짜를 단정하지 않는다 (위프 800건 실측).
+     `walkDays` 는 목표를 못 채워도 모아 둔 날을 돌려주고 탐색은 finitePlanLimit(마지막 날+13)에서
+     끊긴다 — 그 컷오프를 종료일로 찍으면 헤더의 '계산 불가' 와 정면으로 어긋나고, 세 방식이
+     전부 같은 날로 보여 "뒤에 붙여도 종료일이 안 밀린다" 는 잘못된 판단 근거가 된다. */
+  {
+    mkS({ data: {
+      recruitTotal: 800, submittedAll: 50, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0,
+      carryPending: 0, todayNaturalQuota: 40,
+      worktableDates: [{ date: '2026-08-08', slots: 40 }, { date: '2026-08-09', slots: 40 }],
+    } });
+    const h = A.buildHorizon('next');
+    ok('7A-12 작업표 자리가 목표보다 적으면 shortBy 로 모자란 인원을 보고한다', !!h && h.shortBy > 0,
+      h && JSON.stringify({ shortBy: h.shortBy, n: h.dates.length }));
+    const src = readF('js/campaign-daily-plan.js');
+    ok('7A-12 ★★ 부족이면 방식별 종료일을 날짜로 단정하지 않는다',
+      /if \(h\.shortBy > 0\) return '계산 불가';/.test(src));
+    ok('7A-12 옛 배선(마지막 날을 무조건 종료일로)이 남아 있지 않다',
+      !/var em = function \(m\) \{ var h = buildHorizon\(m\); return h && h\.dates\.length \?/.test(src));
+  }
+
+  /* 7A-13 ★★ 기본 이월 방식은 '다음날에 더하기' 가 아니다 (사용자 확정 2026-08-19).
+     이월이 크게 쌓인 공고(위프 625명)에서 next 가 기본이면 **다음 진행일 하루에 625명**이
+     열린다 — 066 하루 상한(2×일건수)을 훌쩍 넘고 리뷰어 화면에도 그대로 나간다. */
+  {
+    eq('7A-13 ★★ 기본 이월 방식 = 남은 날에 나눠 담기', A.DEFAULT_CARRY_MODE, 'spread');
+    ok('7A-13 기본값은 실제 선택지 안에 있다', A.CARRY_MODES.indexOf(A.DEFAULT_CARRY_MODE) >= 0);
+    const src = readF('js/campaign-daily-plan.js');
+    ok("7A-13 ★ 기본값 하드코딩('next') 부활 차단 — 폴백이 단일 출처를 본다",
+      /_loadMode\(\) \|\| DEFAULT_CARRY_MODE/.test(src)
+      && !/S\.carryMode \|\| _loadMode\(\) \|\| 'next'/.test(src));
+    ok("7A-13 ★ '기본' 배지도 같은 방식에 붙는다(화면과 코드가 갈리지 않는다)",
+      /_mode\(\\'spread\\'\)[\s\S]{0,160}<span class="df">기본<\/span>/.test(src)
+      && !/_mode\(\\'next\\'\)[\s\S]{0,160}<span class="df">기본<\/span>/.test(src));
+  }
+
   // 7A-6 ★ 시작일이 미래여도 오늘 이후의 저장된 계획은 삭제되지 않는다
   mkS({ data: { startDate: '2026-08-20', submittedAll: 0, todaySubmitted: 0, byDateSubmitted: {}, todayUsed: 0 },
         base: { '2026-08-10': 7 } });
@@ -1063,8 +1098,12 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   ok('7p ★ 종료일 연장 문구 — 사용자 확정 문장(숫자는 실제 마지막 진행일에서 읽는다)',
     /이월 <b>' \+ carry \+ '명<\/b>을 <b>종료일 연장<\/b>으로 넘겼습니다 — 추가된 종료일 <b>/.test(CDP)
     && /'<\/b>에 <b>' \+ \(lastD \? planFor\(lastD\) : 0\) \+ '명<\/b> 늘어납니다\./.test(CDP));
-  ok('7q ★ 기본 보충 방식 = 다음날에 더하기(사용자 확정) — 여는 순간 적용',
-    /applyCarryMode\('next'\);/.test(CDP) && /다음날에 더하기<span class="df">기본<\/span>/.test(CDP));
+  /* ⚠ 2026-08-19 사용자 확정으로 **기본값이 뒤집혔다** — "다음날로 이월하는 것이 기본값이
+     되어선 안 된다"(위프 800건 이월 625명이 다음 진행일 하루에 몰리는 것을 실측하고 결정).
+     되돌리면 그 사고가 재현된다. 상세는 7A-13. */
+  ok('7q ★ 기본 보충 방식 = 남은 날에 나눠 담기(사용자 확정 2026-08-19) — 여는 순간 적용',
+    /applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP)
+    && /남은 날에 나눠 담기<span class="df">기본<\/span>/.test(CDP));
   ok('7r ★ 저장 게이트 = 초과 아님 AND 저장할 것 있음 AND 상한 이내(버튼·본문 이중)',
     /save\.disabled = killOff \|\| S\.saving \|\| diff > 0 \|\| !dirty \|\| over;/.test(CDP)
     && /if \(balanceOn\(\) && \(diffPlan\(\) > 0 \|\| set\.length \+ remove\.length > MAX_ROWS\)\) return;/.test(CDP));
@@ -1139,9 +1178,9 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   console.log('\n[9] 이월 방식 유지 — 저장 후 게이지가 조절 전으로 되돌아가지 않는다');
   // ★ applyOverview 는 저장 직후에도 다시 도는데 무조건 'next' 로 깔면 이월이 오늘에 다시 얹혀
   //   **저장이 되돌아간 것처럼 보인다**(실제 저장값은 그대로 — 화면만 다른 방식으로 재제안).
-  ok('9-1 ★ 재조회 시 고른 방식을 그대로 쓴다(무조건 next 금지)',
-    /var want = S\.carryMode \|\| _loadMode\(\) \|\| 'next';/.test(CDP)
-    && /if \(!applyCarryMode\(want\) && want !== 'next'\) applyCarryMode\('next'\);/.test(CDP));
+  ok('9-1 ★ 재조회 시 고른 방식을 그대로 쓴다(무조건 기본값 금지)',
+    /var want = S\.carryMode \|\| _loadMode\(\) \|\| DEFAULT_CARRY_MODE;/.test(CDP)
+    && /if \(!applyCarryMode\(want\) && want !== DEFAULT_CARRY_MODE\) applyCarryMode\(DEFAULT_CARRY_MODE\);/.test(CDP));
   ok('9-1 옛 배선(무조건 next)이 남아 있지 않다', !/^\s*applyCarryMode\('next'\);$/m.test(CDP));
   ok('9-2 방식을 고르면 기억한다(재오픈에도 유지)',
     /_saveMode\(m\);/.test(CDP) && /MODE_KEY = 'cdp_carry_mode_'/.test(CDP));
