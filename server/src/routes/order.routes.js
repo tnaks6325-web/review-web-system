@@ -1164,17 +1164,42 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     let sheetlessPlan = null;      // 무시트일 때만 채워짐(작업표 행·열 구성)
 
     if (wantSheetless) {
-      const { createSheetlessWorktable, isVirtualSheetId } = require('../services/sheetlessAccept.service');
+      const { createSheetlessWorktable, isVirtualSheetId, virtualSheetIdForOrder } =
+        require('../services/sheetlessAccept.service');
       // ★ 재접수(2차 등)는 **새 작업표를 또 만들지 않는다** — 이미 연결된 가상 탭을 그대로 쓴다.
       //   (차수 구분은 시트 경로와 동일하게 '차수' 컬럼 → review_index.round 가 담당)
       const priorSheetId = String(o.linked_tab_sheet_id || '');
+      // ★★ 이 오더의 가상 시트ID = 오더 id 파생(결정적). 랜덤 발급이던 종전에는 링크 기록(8단계)
+      //   **전에** 실패해 빠져나가면 재시도가 매번 새 시트를 만들어 작업바에 같은 이름이 여러 줄
+      //   생겼다(2026-08-19 실사고 11줄). 지금은 아래 lookup + `ON CONFLICT (sheet_id, tab_name)`
+      //   업서트가 스스로 dedupe 한다.
+      const ownSheetId = virtualSheetIdForOrder(o.id);
+      // ★ 링크가 안 걸린 잔재(실패 후 재시도)도 흡수한다 — 그 시트에 이미 만들어 둔 탭이 있으면
+      //   **그것을 그대로 쓴다**(새 이름으로 또 만들지 않는다 = "동일 탭 재접수" 규율과 같다).
+      let priorOwn = null;
+      try {
+        const { rows: pr } = await pool.query(
+          `SELECT tab_name, tab_gid FROM tab_configs WHERE sheet_id = $1 ORDER BY updated_at ASC LIMIT 1`,
+          [ownSheetId]
+        );
+        priorOwn = pr[0] || null;
+      } catch (lookupErr) {
+        // 조회 실패는 접수를 막지 않는다 — 업서트 키가 결정적이라 중복 줄은 여전히 생기지 않는다.
+        logger.warn(`[order/accept] 기존 무시트 탭 조회 실패(접수는 계속): ${lookupErr.message}`);
+      }
       if (isVirtualSheetId(priorSheetId) && o.linked_tab_gid && o.linked_tab_name) {
         sheetId = priorSheetId; gid = String(o.linked_tab_gid); tabName = o.linked_tab_name;
         spreadsheetTitle = o.title || tabName; tabSheetUrl = '';
       } else {
+        // ★ 잔재가 있으면 **그 탭 이름으로** 계획을 만든다 — sheetId·gid 는 오더 파생이라 이미 같고,
+        //   작업표 줄 INSERT 는 `ON CONFLICT DO NOTHING`(멱등)이라 기존 줄은 그대로 보존된다.
+        //   그래서 "탭 줄만 남고 명단은 0" 인 실패 잔재가 재시도 한 번으로 정상 상태가 된다.
+        if (priorOwn && priorOwn.tab_name) {
+          logger.info(`[order/accept] 무시트 재시도 — 기존 작업표 재사용 tab="${priorOwn.tab_name}" sheet=${ownSheetId}`);
+        }
         const made = await createSheetlessWorktable({
           workOrder: o,
-          tabName: String((req.body || {}).tabName || '').trim(),
+          tabName: (priorOwn && priorOwn.tab_name) || String((req.body || {}).tabName || '').trim(),
           planOptions: (req.body || {}).planOptions || {},
           by: (req.admin?.name || 'admin'),
         });

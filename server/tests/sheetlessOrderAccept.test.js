@@ -110,12 +110,27 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
   /* ══════════════ B. 시트 없는 접수(F1) ══════════════ */
   console.log('\n[B] 시트 없는 접수 — 가상 탭 + 작업표');
   {
-    const id = slAccept.newVirtualSheetId();
+    /* ★★ 검사 의미 갱신(2026-08-19 실사고 — 작업바 11줄 중복): 가상 시트ID 는 **랜덤이 아니라
+       작업오더 id 파생(결정적)** 이다. 랜덤이면 링크 기록(8단계) 전에 실패해 재시도할 때마다
+       `ON CONFLICT (sheet_id, tab_name)` 이 안 걸려 탭이 하나씩 늘어난다. 랜덤 발급을 되살리면
+       아래 두 단언이 깨진다. */
+    const id = slAccept.virtualSheetIdForOrder('11111111-2222-3333-4444-555555555555');
     ok('가상 시트 ID 는 wt_ 접두 + 구글 ID 형식 길이(20자 이상)',
       /^wt_[0-9a-f]{20}$/.test(id) && /^[A-Za-z0-9_-]{20,}$/.test(id));
-    ok('가상 gid 는 숫자 문자열(여러 곳이 /^\\d+$/ 를 요구)', /^\d+$/.test(slAccept.newVirtualGid()));
+    ok('가상 gid 는 숫자 문자열(여러 곳이 /^\\d+$/ 를 요구)',
+      /^\d+$/.test(slAccept.virtualGidForOrder('11111111-2222-3333-4444-555555555555')));
     ok('가상 ID 판별', slAccept.isVirtualSheetId(id) && !slAccept.isVirtualSheetId('1AbCdEfGhIjKlMnOpQrStUvWxYz'));
-    ok('두 번 발급하면 다른 값(충돌 방지)', slAccept.newVirtualSheetId() !== slAccept.newVirtualSheetId());
+    ok('★ 같은 오더는 항상 같은 시트ID·gid (재시도 중복 차단)',
+      slAccept.virtualSheetIdForOrder('11111111-2222-3333-4444-555555555555') === id
+      && slAccept.virtualGidForOrder('11111111-2222-3333-4444-555555555555')
+         === slAccept.virtualGidForOrder('11111111-2222-3333-4444-555555555555'));
+    ok('★ 다른 오더는 다른 시트ID (오더끼리 섞이지 않는다)',
+      slAccept.virtualSheetIdForOrder('99999999-2222-3333-4444-555555555555') !== id);
+    ok('★ 오더 id 없이 발급하지 않는다(랜덤 폴백 금지)', (() => {
+      try { slAccept.virtualSheetIdForOrder(''); return false; } catch (_) { return true; }
+    })());
+    ok('★ 랜덤 발급 함수는 남아 있지 않다',
+      typeof slAccept.newVirtualSheetId === 'undefined' && typeof slAccept.newVirtualGid === 'undefined');
 
     const sa = noLineComments(srv('src/services/sheetlessAccept.service.js'));
     ok('접수 작업표 생성에 구글 API 호출 0',
@@ -334,6 +349,13 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('무시트는 시트 빌드·RAW 미러 대신 장부 생성기', /sheetlessPlan\.persist\(\)/.test(orN));
     ok('장부 생성 실패를 응답으로 알린다(조용한 누락 금지)', /worktable: wantSheetless \?/.test(orN));
     ok('재접수는 새 작업표를 또 만들지 않는다', /isVirtualSheetId\(priorSheetId\)/.test(orN));
+    ok('★ 링크 기록 전 실패 잔재도 흡수한다(오더 파생 시트ID lookup)',
+      /virtualSheetIdForOrder\(o\.id\)/.test(orN)
+      && /FROM tab_configs WHERE sheet_id = \$1/.test(orN)
+      && /priorOwn && priorOwn\.tab_name/.test(orN));
+    ok('★ 잔재 흡수 시에도 그 탭 이름으로 작업표를 채운다(명단 0 방치 금지)',
+      /tabName: \(priorOwn && priorOwn\.tab_name\) \|\|/.test(orN));
+    ok('★ 접수 경로에 랜덤 시트ID 발급이 없다', !/newVirtualSheetId|newVirtualGid/.test(orN));
 
     // 라우터 스택 실검사 — 게이트가 실제로 걸려 있는지
     const router = require('../src/routes/order.routes');

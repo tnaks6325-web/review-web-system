@@ -35,17 +35,41 @@ const { logger } = require('../utils/logger');
  */
 const VIRTUAL_SHEET_PREFIX = 'wt_';
 
-/** 가상 시트 ID (접두 3 + hex 20 = 23자 — 구글 ID 최소 길이 20자 이상) */
-function newVirtualSheetId() {
-  return VIRTUAL_SHEET_PREFIX + crypto.randomBytes(10).toString('hex');
+/**
+ * ★★ 가상 시트 ID·gid 는 **작업오더 id 에서 파생한다(결정적)** — 랜덤 발급 폐지.
+ *
+ *   실사고(2026-08-19 「8/19)유일기획_쿠팡_암막커튼 20건」 작업바 11줄 중복):
+ *   종전엔 호출마다 `crypto.randomBytes` 로 **새 시트ID를 발급**했다. 그런데 중복 방지 장치는
+ *   `work_orders.linked_tab_sheet_id`(접수 처리의 **마지막 단계**에서 기록) 하나뿐이라,
+ *   그 전에 실패해 빠져나가는 경로(광고주 연결 409 · 쿼리 예외 500)에서는
+ *   `campaigns`·`tab_configs` 줄만 남고 링크는 안 걸렸다 → 사람이 [접수하기]를 다시 누를 때마다
+ *   **매번 다른 시트ID** 라 `ON CONFLICT (sheet_id, tab_name)` 이 영영 걸리지 않아 탭이 하나씩 늘었다.
+ *
+ *   ★ 지금은 같은 오더면 언제 몇 번을 눌러도 **같은 ID** 라 그 업서트가 스스로 dedupe 한다
+ *     (링크 기록 시점·성공 여부와 무관 = 재시도 안전). 랜덤 발급 함수는 되살리지 말 것.
+ *   ★ 길이·문자 구성은 종전과 동일(접두 3 + hex 20 = 23자 · gid 는 숫자 문자열) — 곳곳의
+ *     형식 검증(`[A-Za-z0-9_-]{20,}` / `/^\d+$/`)을 그대로 통과한다.
+ *   ★ 오더 id 가 없으면 **던진다** — 여기서 랜덤으로 접으면 막으려던 중복이 조용히 되살아난다.
+ */
+function _orderKey(workOrderId) {
+  const key = String(workOrderId == null ? '' : workOrderId).trim();
+  if (!key) throw new Error('virtualSheetIdForOrder: workOrderId 필수(랜덤 폴백 금지)');
+  return key;
+}
+
+/** 가상 시트 ID = 접두 3 + sha256 앞 20hex = 23자 (작업오더 1개당 1개, 항상 같은 값) */
+function virtualSheetIdForOrder(workOrderId) {
+  const h = crypto.createHash('sha256').update('sheet:' + _orderKey(workOrderId)).digest('hex');
+  return VIRTUAL_SHEET_PREFIX + h.slice(0, 20);
 }
 
 /**
  * 가상 gid — 여러 곳이 `/^\d+$/` 를 요구한다(접수 검증·프리필 gid 우선 재매칭 등).
  * ★ 가상 시트 1개당 탭 1개라 시트 안에서의 충돌은 구조적으로 불가능하다.
  */
-function newVirtualGid() {
-  return String(100000000 + crypto.randomBytes(4).readUInt32BE(0) % 899999999);
+function virtualGidForOrder(workOrderId) {
+  const h = crypto.createHash('sha256').update('gid:' + _orderKey(workOrderId)).digest();
+  return String(100000000 + (h.readUInt32BE(0) % 899999999));
 }
 
 /** 이 sheetId 가 우리가 만든 가상 시트인가(표시·로그용 — 게이트 판정용 아님) */
@@ -105,8 +129,9 @@ async function createSheetlessWorktable({ workOrder: wo, tabName = '', planOptio
      데이터는 2행부터 = `seq`(작업표 행 번호). 이 번호가 곧 주문 배정·투영·claim 의 키다. */
   const headerRow = 1;
 
-  const sheetId = newVirtualSheetId();
-  const gid = newVirtualGid();
+  // ★ 결정적 파생 — 같은 오더를 몇 번 접수해도 같은 시트/탭이라 업서트가 dedupe 한다.
+  const sheetId = virtualSheetIdForOrder(wo.id);
+  const gid = virtualGidForOrder(wo.id);
   /* campaigns/tab_configs 의 `campaign_name` 은 시트 경로에서 **스프레드시트 파일 제목**이 들어가던 자리.
      무시트에는 파일이 없으므로 작업오더 제목을 쓴다. (Drive 폴더 이름은 여기가 아니라
      `folderTitle.service` 가 업체명 우선으로 따로 정한다 — D2-a) */
@@ -160,8 +185,8 @@ module.exports = {
   createSheetlessWorktable,
   persistSheetlessWorktable,
   resolveAcceptMode,
-  newVirtualSheetId,
-  newVirtualGid,
+  virtualSheetIdForOrder,
+  virtualGidForOrder,
   isVirtualSheetId,
   VIRTUAL_SHEET_PREFIX,
 };
