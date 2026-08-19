@@ -66,6 +66,7 @@ class PastTabError extends Error {
 const _SCAN_SQL = `
   SELECT tc.sheet_id                       AS "sheetId",
          tc.tab_name                       AS "tabName",
+         COALESCE(NULLIF(tc.campaign_name, ''), tc.sheet_id) AS "campaignName",
          COALESCE(tc.tab_gid, '')          AS "tabGid",
          COALESCE(tc.sheetless, FALSE)     AS sheetless,
          COALESCE(tc.is_closed, FALSE)     AS "isClosed",
@@ -142,6 +143,10 @@ function classifyPastTab(row, since) {
   const act = resolveActivity(row);
   const base = {
     sheetId: row.sheetId, tabName: row.tabName, tabGid: row.tabGid || '',
+    // ★ 시트가 다르면 탭 이름이 같을 수 있다(`UNIQUE(sheet_id, tab_name)` — 시트 복사본이 흔하다).
+    //   화면에 시트를 안 적으면 똑같아 보이는 줄이 여럿 생겨 **어느 것을 고르는지 알 수 없다**
+    //   (2026-08-19 실측: 「…50건」·「…50건의 사본」이 두 시트에 걸쳐 4줄).
+    campaignName: row.campaignName || '',
     activityAt: act.activityAt, activitySource: act.activitySource,
     indexRows: row.indexRows || 0,
     // 아카이브 마커가 옛 이름으로만 남은 탭 표식(판정에는 쓰지 않는다 — smartBuild 는 읽는다)

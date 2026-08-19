@@ -31,7 +31,7 @@ DROP TABLE IF EXISTS tab_configs, campaigns, order_submissions, recruit_campaign
                      review_index, index_master, index_master_archive, raw_sheet_tabs CASCADE;
 CREATE TABLE raw_sheet_tabs (sheet_id text, tab_gid text, tab_name text, mirrored_at timestamptz DEFAULT NOW());
 CREATE TABLE tab_configs (
-  sheet_id text, tab_name text, tab_gid text, sheetless boolean DEFAULT FALSE,
+  sheet_id text, tab_name text, tab_gid text, campaign_name text, sheetless boolean DEFAULT FALSE,
   is_closed boolean DEFAULT FALSE, PRIMARY KEY (sheet_id, tab_name));
 CREATE TABLE campaigns (sheet_id text PRIMARY KEY, created_at timestamptz);
 CREATE TABLE order_submissions (
@@ -51,8 +51,9 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   await pool.query(`INSERT INTO campaigns VALUES ($1, '2024-03-01')`, [S]);
   const mk = async (tab, opt = {}) => {
     await pool.query(
-      `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, sheetless, is_closed) VALUES ($1,$2,$3,$4,$5)`,
-      [S, tab, opt.gid || '', !!opt.sheetless, !!opt.closed]);
+      `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheetless, is_closed)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [S, tab, opt.gid || '', opt.campaign || '시트甲', !!opt.sheetless, !!opt.closed]);
     if (opt.startDate) await pool.query(
       `INSERT INTO review_index VALUES ($1,$2,1,$3)`, [S, tab, opt.startDate]);
     if (opt.orderAt) await pool.query(
@@ -154,6 +155,7 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     assert.equal(d.reads, true, '마감 표시가 있어도 새 이름으로 읽힌다');
     assert.equal(d.candidate, false, '마감해도 안 멈추므로 후보로 올리지 않는다');
     assert.equal(d.liveTabName, '이름어긋남_새', '시트의 현재 이름을 말해 준다');
+    assert.equal(d.campaignName, '시트甲', '어느 시트인지 함께 말한다(같은 탭 이름 구분)');
     // ★ 조용한 탭은 목록에 싣지 않고 건수로만 말한다 — `by` 에서 찾으면 안 된다
     assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감은 종전대로 조용하다');
   });
