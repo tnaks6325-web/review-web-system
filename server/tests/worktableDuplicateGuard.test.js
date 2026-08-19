@@ -13,13 +13,18 @@ function ok(name, cond) { assert.ok(cond, name); console.log('  ✓ ' + name); p
 const HEADERS = ['번호', '수취인', '연락처', '주소', '결제금액', '주문번호', '비고'];
 
 // ── 스텁 pool: 중복 줄 조회에만 응답하고 나머지는 빈 결과 ──────────────
-function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} } } = {}) {
+function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} } } = {}) {
   const log = { client: [], released: 0 };
   const client = {
     query: async (sql, params) => {
       const q = String(sql).trim();
       log.client.push({ sql: q, params });
-      if (/JOIN order_submissions os2/.test(q)) return { rows: dupRow ? [dupRow] : [] };
+      // ★★ **더 좁은 조건을 먼저** 둔다(CLAUDE.md 가 못박은 스텁 매칭 순서 함정):
+      //   2026-08-19 에 합류한 **2차 중복 판정**(표 주문번호 + 명의)은 SQL 안에 `order_submission_id IS NULL`
+      //   을 함께 갖고 있어, 빈 슬롯 분기를 먼저 두면 그 쿼리가 가로채여 **정상 주문이 중복으로 판정**된다
+      //   (실제로 이 가드가 그 이유로 빨간 상태였다 — 제품 버그가 아니라 스텁 노후).
+      if (/JOIN order_submissions os2/.test(q)) return { rows: dupRow ? [dupRow] : [] };   // 1차(링크 조인)
+      if (/%주문번호%/.test(q)) return { rows: dupTableRow ? [dupTableRow] : [] };          // 2차(표 주문번호+명의)
       if (/order_submission_id = \$3::uuid/.test(q)) return { rows: [] };          // 내 링크 없음
       if (/order_submission_id IS NULL/.test(q)) return { rows: openSlot ? [openSlot] : [] };
       return { rows: [], rowCount: 1 };
@@ -230,9 +235,24 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     /String\(r\.ordnum \|\| ''\)\.length < 6\) return;/.test(dedupeSrc));
   ok('★★ ㉮ 그룹 키 = 표 주문번호 + 원장 주문번호 + 연락처 셋 다',
     /const k = `\$\{r\.roword\}[\s\S]{0,30}\$\{r\.ordnum\}[\s\S]{0,30}\$\{r\.ph\}`/.test(dedupeSrc));
+  // ★ 거리 기반 정규식(`byOrder` 뒤 200자 안)은 **주석이 길어지면 조용히 깨진다** — 실제로 그랬다.
+  //   고정할 것은 "㉯ 축 키가 주문 기록(order_submission_id)에서 나온다"는 사실이다.
   ok('★★ ㉯ 축 = 같은 주문 기록(order_submission_id)을 여러 줄이 씀',
-    /byOrder[\s\S]{0,200}'os:' \+ String\(r\.osid\)/.test(dedupeSrc));
-  ok('★ 표에 보이는 주문번호(row_json)를 조회한다', /jsonb_each_text\(COALESCE\(cp\.row_json[\s\S]{0,200}주문번호[\s\S]{0,120}AS roword/.test(dedupeSrc));
+    /const byOrder = new Map\(\);/.test(dedupeSrc) && /'os:' \+ String\(r\.osid\)/.test(dedupeSrc));
+  // ★★ 2026-08-19 실사고(장수산업) — 링크가 오염돼 있어도 **표 주문번호가 다르면 묶지 않는다**.
+  //   이 조건이 빠지면 별개 참여가 중복으로 지워진다(오삭제의 직접 원인이었다).
+  ok('★★ ㉯ 축도 표 주문번호가 다르면 묶지 않는다',
+    /'os:' \+ String\(r\.osid\)[\s\S]{0,160}r\.roword/.test(dedupeSrc));
+  // ★★ 표 주문번호 SQL 은 **공유 조각 `utils/tableOrderNum`** 이 소유한다(중복 정리·주문 기록이 같은 값을
+  //   봐야 한다 — 서로 다른 규칙이면 한쪽은 지우고 다른 쪽은 또 만드는 상태가 된다). 인라인 사본 금지.
+  ok('★ 표에 보이는 주문번호를 공유 조각으로 읽는다(사본 금지)',
+    /\$\{tableOrderNumSql\('cp'\)\} AS roword/.test(dedupeSrc)
+    && /require\('\.\.\/utils\/tableOrderNum'\)/.test(ledSrc));
+  {
+    const tonSrc = fs.readFileSync(path.join(__dirname, '../src/utils/tableOrderNum.js'), 'utf8');
+    ok('★ 그 조각이 실제로 표(row_json)의 주문번호 칸을 읽는다',
+      /jsonb_each_text/.test(tonSrc) && /주문번호/.test(tonSrc));
+  }
   ok('★ 표 주문번호가 6자리 미만이면 ㉮ 축에 넣지 않는다',
     /String\(r\.roword \|\| ''\)\.length < 6\) \{ noRowOrder\.push\(r\); return; \}/.test(dedupeSrc));
   ok('취소된 주문은 대상이 아니다', /os\.deleted_at IS NULL/.test(dedupeSrc));
@@ -416,7 +436,9 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('미리보기 표 머리 칸 수 ≡ 행 칸 수(발생일 포함)',
       (prevHead.match(/<th>/g) || []).length === (prevBody.match(/<td/g) || []).length
       && /esc\(_ddDay\(g\.lastAt\)\)\}<\/td><\/tr>/.test(wdH));
-    const scanHead = (wdH.match(/<th>작업<\/th>[\s\S]{0,240}?<\/tr><\/thead>/) || [''])[0];
+    // ★ `<th>작업</th>` 로 시작하는 표가 여러 개다(번호 정리 표가 나중에 합류) — 이 표만의 칸
+    //   (`정리 대상`)으로 지목한다. 안 그러면 남의 표 머리를 세고 있다.
+    const scanHead = (wdH.match(/<tr><th>작업<\/th>[^<]*(?:<th>[^<]*<\/th>)*?<th>정리 대상<\/th>[\s\S]{0,240}?<\/tr><\/thead>/) || [''])[0];
     ok('일괄 점검 표 머리 칸 수 7(최근 발생 포함)', (scanHead.match(/<th>/g) || []).length === 7
       && /esc\(_ddDay\(t\.lastDupAt\)\)/.test(wdH));
     ok('KST 로 환산해 표기한다(UTC 자정 전후가 하루 밀리지 않게)',

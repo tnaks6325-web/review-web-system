@@ -120,6 +120,11 @@ const ROWS = [
   { sheetId: 's', tabName: '과거B', tabGid: '2', sampleStartDate: '24.6.1' },
   { sheetId: 's', tabName: '최근', tabGid: '3', sampleStartDate: '26.8.1' },
   { sheetId: 's', tabName: '이미마감', tabGid: '4', sampleStartDate: '24.5.1', isClosed: true },
+  // 이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 탭 — smartBuild 는 새 이름으로 계속 읽는다
+  { sheetId: 's', tabName: '리네임후', tabGid: '5', sampleStartDate: '24.5.1', archivedGidOnly: true },
+  // 마감인데 보관 기록만 옛 이름 — 읽히지 않으므로 gid-only 건수에 **세면 안 된다**
+  { sheetId: 's', tabName: '마감_gid만', tabGid: '6', sampleStartDate: '24.5.1',
+    archivedGidOnly: true, isClosed: true },
 ];
 
 (async () => {
@@ -127,16 +132,23 @@ const ROWS = [
   svc.__setPoolForTest(p1);
   const scan = await svc.scanPastSheetTabs({ since: SINCE });
   t('4a: 스캔은 읽기 전용 — 커넥션도 잡지 않고 쓰기 쿼리 0', () => {
-    assert.equal(scan.candidates, 2);
-    assert.equal(scan.stillReading, 3);
-    assert.equal(scan.alreadyQuiet, 1, '이미 조용한 탭 건수를 말한다');
+    assert.equal(scan.candidates, 3);
+    assert.equal(scan.stillReading, 4);
+    assert.equal(scan.alreadyQuiet, 2, '이미 조용한 탭 건수를 말한다');
     assert.equal(p1.connects, 0, '읽기에 커넥션 불필요');
     // ★ `deleted_at IS NULL` 이 /DELETE/i 에 걸린다 — **문장 형태**로 본다(낱말 검사 금지)
     assert.ok(!p1.q.some(x => /\b(UPDATE\s+\w|INSERT\s+INTO|DELETE\s+FROM)/i.test(x.s)), '쓰기 쿼리 0');
   });
   t('4b: 후보가 아닌 사유를 건수로 말한다(조용한 누락 금지)', () => {
     assert.equal(scan.heldBy.recent, 1);
-    assert.equal(scan.quietBy.already_closed, 1);
+    assert.equal(scan.quietBy.already_closed, 2);
+  });
+  t('4c: 리네임 탭 건수를 응답이 실제로 싣는다(문자열 존재가 아니라 실행으로)', () => {
+    // ★ SRC 에 이름이 있는지만 보면 **주석**이 대신 통과시킨다(변이시험 실측)
+    assert.equal(scan.archivedByGidOnly, 1, '받음 ' + scan.archivedByGidOnly);
+    // ★★ 안 읽히는 탭까지 세면 "여전히 읽습니다"가 거짓이 된다(2026-08-19 실측 6개)
+    assert.ok(!scan.items.some(i => !i.reads), '후보는 전부 읽히는 탭');
+    assert.ok(scan.items.some(i => i.tabName === '리네임후'), '아카이브로 접지 않고 후보로');
   });
 
   const p2 = stubPool(ROWS);
@@ -249,6 +261,49 @@ const ROWS = [
     const i = FE.indexOf('async function _ptScan');
     const body = FE.slice(i, FE.indexOf('function _ptRender'));
     assert.ok(/catch\s*\(e\)\s*\{[\s\S]{0,400}다시 시도/.test(body), '예외 시 사유 + 다시 시도');
+  });
+
+  /* ── 3g) 이름 어긋남 = 마감·아카이브 스킵이 빗나간다 ────── */
+  t('3g: 시트 탭 이름이 바뀌면 마감·아카이브여도 읽힌다(마감으로 못 멈춘다)', () => {
+    // smartBuild 의 tcMap/archivedSet 은 둘 다 sheet_id||tab_name 키다(gid 미참조)
+    const IB = R('server/src/services/indexBuilder.service.js');
+    assert.ok(/tcMap\[`\$\{r\.sheet_id\}\|\|\$\{r\.tab_name\}`\]/.test(IB), 'tcMap 키 = 이름');
+    assert.ok(/const key = `\$\{sheetId\}\|\|\$\{t\.properties\.title\}`/.test(IB),
+      '조회는 **시트의 현재 탭 이름**으로 한다 = 등록명이 다르면 빗나간다');
+    for (const flag of ['isClosed', 'isArchived']) {
+      const r = cls({ [flag]: true, liveTabName: '바뀐이름', sampleStartDate: '24.5.1' });
+      assert.equal(r.reads, true, flag + ': 여전히 읽힌다');
+      assert.equal(r.reason, 'name_drift');
+      assert.equal(r.candidate, false, '★ 마감해도 안 멈추므로 후보로 올리지 않는다(죽은 조작 금지)');
+    }
+    // 이름이 같으면 종전대로 조용하다(무회귀)
+    assert.equal(cls({ isClosed: true, liveTabName: 'T' }).reason, 'already_closed');
+    // 무시트는 gid 폴백이 있어(sheetlessScope) 이름이 바뀌어도 유효
+    assert.equal(cls({ sheetless: true, liveTabName: '바뀐이름' }).reason, 'already_sheetless');
+  });
+
+  /* ── 8d) 아카이브 판정 = smartBuild 와 같은 규칙 ─────────
+   *  이 판정은 "그 탭이 무엇인가"가 아니라 **"저쪽(smartBuild)이 읽는가"** 다.
+   *  더 넓게 잡으면(gid 폴백) 이름이 바뀐 탭이 "이미 안 읽음"으로 접혀 **정리 대상이 사라진다**
+   *  (2026-08-19 실측 「826개 중 0개」 보고로 발견). */
+  t('8d: 아카이브 판정은 이름만 본다 — indexBuilder 의 스킵 키와 같다', () => {
+    const IB = R('server/src/services/indexBuilder.service.js');
+    assert.ok(/archivedSet\.add\(`\$\{r\.sheet_id\}\|\|\$\{r\.tab_name\}`\)/.test(IB),
+      'smartBuild 스킵 키 = sheet_id||tab_name (규칙이 바뀌면 이 가드가 먼저 깨진다)');
+    // ★ 슬라이스를 넓게 잡으면 무관한 tab_gid 가 섞인다 — **아카이브 집합을 만드는 구간만** 본다
+    const seg0 = IB.slice(IB.indexOf('const { rows: archivedRows }'), IB.indexOf('archivedSheetCounts[r.sheet_id]'));
+    assert.ok(!/tab_gid/.test(seg0), 'smartBuild 는 아카이브 판정에 gid 를 안 본다');
+    assert.ok(/archivedSet\.has\(key\)/.test(IB), '스킵도 그 키로만');
+    const seg = SRC.slice(SRC.indexOf('AS "isArchived"'), SRC.indexOf(') arch ON TRUE'));
+    assert.ok(/ima\.tab_name = tc\.tab_name/.test(seg), '이름 일치');
+    assert.ok(!/tab_gid/.test(seg), '★ gid 폴백 부활 금지 — 정리 대상이 조용히 사라진다');
+  });
+  t('8e: 이름이 바뀐 탭은 아카이브로 접지 않고 정상 판정에 태운다 + 건수를 말한다', () => {
+    const c = cls({ tabName:'새이름', tabGid:'7', archivedGidOnly:true, sampleStartDate:'24.5.10' });
+    assert.equal(c.reads, true, '읽힌다고 봐야 한다');
+    assert.equal(c.reason, 'past', '정상 판정을 거쳐 후보가 된다');
+    assert.equal(c.archivedGidOnly, true, '표식을 실어 건수로 말할 수 있게');
+    assert.ok(/archivedByGidOnly/.test(SRC), '스캔 응답에 건수 동봉(조용한 변화 금지)');
   });
 
   /* ── 9) 연도 확인 먼저 (사용자 확정 2026-08-19) ─────────
