@@ -1171,7 +1171,9 @@ router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName, rowId } = req.body || {};
     if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
     const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req) }));
+    // 구매기록이 붙은 행 삭제 = 주문 취소이므로 order-delete 와 같은 권한을 서버가 판정한다.
+    const actorRole = _role(req) || 'staff';
+    res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req), actorRole }));
   } catch (err) { next(err); }
 });
 // 주문 행 삭제는 금액·정원·시트 주문값을 함께 바꾸므로 내부 담당자(master/admin/staff)만 실행한다(광고주 차단).
