@@ -352,7 +352,10 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     ok('★ 링크 기록 전 실패 잔재도 흡수한다(오더 파생 시트ID lookup)',
       /virtualSheetIdForOrder\(o\.id\)/.test(orN)
       && /FROM tab_configs WHERE sheet_id = \$1/.test(orN)
-      && /priorOwn && priorOwn\.tab_name/.test(orN));
+      && /priorOwn && priorOwn\.tab_name/.test(orN)
+      // ⚠ 변이시험이 잡은 구멍: SQL·조건문 문자열만 보면 `priorOwn = null` 로 무력화해도 통과한다
+      //   → **조회 결과를 실제로 대입하는 형태**까지 고정한다.
+      && /priorOwn = pr\[0\] \|\| null;/.test(orN));
     ok('★ 잔재 흡수 시에도 그 탭 이름으로 작업표를 채운다(명단 0 방치 금지)',
       /tabName: \(priorOwn && priorOwn\.tab_name\) \|\|/.test(orN));
     ok('★ 접수 경로에 랜덤 시트ID 발급이 없다', !/newVirtualSheetId|newVirtualGid/.test(orN));
