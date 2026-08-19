@@ -74,6 +74,87 @@ test('renders an error state instead of leaving the B-style screen loading after
   assert.equal(failure, 'mapping tabs unavailable');
 });
 
+/* ── 업체관리 개요 표: 검색 동작 + 업체별 뷰어 링크복사 (2026-08-19) ─────────────────────── */
+
+test('hides filtered-out rows for real (grid display beats the UA [hidden] rule)', () => {
+  // ★ 이 한 줄이 없으면 row.hidden 을 세워도 .ovm-ovt{display:grid} 가 이겨 검색이 무동작이 된다.
+  assert.match(source, /\.ovm-ovt\[hidden\]\{display:none\}/);
+  // 그 뒤에 .ovm-ovt 에 display 를 다시 세우는 규칙이 없어야 한다(있으면 다시 무동작).
+  const after = source.slice(source.indexOf('.ovm-ovt[hidden]{display:none}'));
+  assert.ok(!/\n\s*\.ovm-ovt(\.[a-z]+)?\{[^}]*display:/.test(after), '.ovm-ovt 에 display 재선언 금지');
+});
+
+test('search compares lowercase on both sides and reports an empty result', () => {
+  const fn = source.match(/function _ovmbFilterRows\(v\)\{[\s\S]*?\n\}/);
+  assert.ok(fn, 'filter helper should be extractable');
+  // 행 쪽 값도 소문자로 저장해야 영문 담당AE 가 걸린다.
+  assert.match(source, /data-ovmb-search="\$\{esc\(\(String\(a\.name\|\|''\)\+' '\+String\(a\.inadPm\|\|''\)\)\.toLowerCase\(\)\)\}"/);
+  const rows = [
+    { dataset: { ovmbSearch: '자연생각 김수만' }, hidden: false },
+    { dataset: { ovmbSearch: '어니스트캄 kim ae' }, hidden: false },
+  ];
+  const out = { textContent: '' };
+  const sandbox = { document: { querySelectorAll: () => rows }, $: sel => (sel === '#ovmbCnt' ? out : null) };
+  vm.createContext(sandbox);
+  vm.runInContext(fn[0], sandbox);
+  sandbox._ovmbFilterRows('어니');
+  assert.deepEqual(rows.map(r => r.hidden), [true, false]);
+  assert.equal(out.textContent, '1개 업체');
+  sandbox._ovmbFilterRows('KIM');           // 영문은 대소문 무관하게 걸려야 한다
+  assert.deepEqual(rows.map(r => r.hidden), [true, false]);
+  sandbox._ovmbFilterRows('없는업체');       // 0건은 조용히 빈 표로 두지 않는다
+  assert.match(out.textContent, /검색 결과 없음/);
+  sandbox._ovmbFilterRows('');
+  assert.deepEqual(rows.map(r => r.hidden), [false, false]);
+  assert.equal(out.textContent, '2개 업체');
+});
+
+test('every company row carries a viewer-link copy button that does not open the company', () => {
+  assert.match(source, /class="ovm-lkcopy"[\s\S]{0,200}onclick="event\.stopPropagation\(\);_ovmCopyAdvLink\(\$\{i\},this\)"/);
+  assert.match(source, /class="ovm-lkcell">\$\{STATE\.role==='master'\|\|STATE\.role==='admin'\?\(lkb\+lkcopy\)/);
+  // 헤더 칸 수 ≡ 행 칸 수 (열을 끼워 넣을 때 가장 흔히 깨지는 자리)
+  const head = source.match(/<div class="ovm-ovt h">([\s\S]*?)<\/div>/);
+  assert.ok(head, 'overview header should be extractable');
+  assert.equal((head[1].match(/<span>/g) || []).length, 7);
+});
+
+test('copy button fetches the token on demand and refuses to hand out a revoked link', async () => {
+  const parts = ['_ovmClipWrite', '_ovmCopyAdvLink', '_advLinkUrl'].map(name => {
+    const re = name === '_ovmCopyAdvLink'
+      ? /async function _ovmCopyAdvLink\(i, btn\)\{[\s\S]*?\n\}/
+      : (name === '_ovmClipWrite' ? /function _ovmClipWrite\(text\)\{[\s\S]*?\n\}/ : /function _advLinkUrl\(token\)\{[^\n]*\}/);
+    const m = source.match(re);
+    assert.ok(m, name + ' should be extractable');
+    return m[0];
+  });
+  const toasts = []; let calls = [];
+  const sandbox = {
+    STATE: { role: 'admin', advs: [{ id: 'a1', name: '어니스트캄' }] },
+    toast: t => toasts.push(t),
+    location: { origin: 'https://x.test' },
+    navigator: { clipboard: { writeText: async () => {} } },
+    document: { createElement: () => ({ style: {}, setAttribute() {}, select() {}, remove() {} }), body: { appendChild() {} } },
+    api: async (url, opt) => { calls.push([url, JSON.parse(opt.body)]); return { ok: true, link: { token: 'T1', active: true } }; },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(parts.join('\n'), sandbox);
+
+  const btn = { disabled: false, textContent: '🔗 링크복사' };
+  await sandbox._ovmCopyAdvLink(0, btn);
+  assert.deepEqual(calls[0], ['/api/trackb/advertiser-link', { action: 'ensure', advertiserId: 'a1' }]);
+  assert.match(toasts.pop(), /복사됨/);
+  assert.equal(btn.disabled, false);   // 실패·성공 어느 쪽이든 버튼은 되살아난다
+
+  sandbox.api = async () => ({ ok: true, link: { token: 'T1', active: false } });
+  await sandbox._ovmCopyAdvLink(0, btn);
+  assert.match(toasts.pop(), /폐기 상태/);   // ★ 죽은 링크는 복사하지 않는다
+
+  sandbox.api = async () => { throw new Error('net'); };
+  await sandbox._ovmCopyAdvLink(0, btn);
+  assert.match(toasts.pop(), /불러오지 못했습니다/);
+  assert.equal(btn.disabled, false);
+});
+
 async function run() {
   for (const { name, fn } of tests) {
     try {
