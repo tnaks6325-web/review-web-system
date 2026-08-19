@@ -120,6 +120,8 @@ const ROWS = [
   { sheetId: 's', tabName: '과거B', tabGid: '2', sampleStartDate: '24.6.1' },
   { sheetId: 's', tabName: '최근', tabGid: '3', sampleStartDate: '26.8.1' },
   { sheetId: 's', tabName: '이미마감', tabGid: '4', sampleStartDate: '24.5.1', isClosed: true },
+  // 이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 탭 — smartBuild 는 새 이름으로 계속 읽는다
+  { sheetId: 's', tabName: '리네임후', tabGid: '5', sampleStartDate: '24.5.1', archivedGidOnly: true },
 ];
 
 (async () => {
@@ -127,8 +129,8 @@ const ROWS = [
   svc.__setPoolForTest(p1);
   const scan = await svc.scanPastSheetTabs({ since: SINCE });
   t('4a: 스캔은 읽기 전용 — 커넥션도 잡지 않고 쓰기 쿼리 0', () => {
-    assert.equal(scan.candidates, 2);
-    assert.equal(scan.stillReading, 3);
+    assert.equal(scan.candidates, 3);
+    assert.equal(scan.stillReading, 4);
     assert.equal(scan.alreadyQuiet, 1, '이미 조용한 탭 건수를 말한다');
     assert.equal(p1.connects, 0, '읽기에 커넥션 불필요');
     // ★ `deleted_at IS NULL` 이 /DELETE/i 에 걸린다 — **문장 형태**로 본다(낱말 검사 금지)
@@ -137,6 +139,11 @@ const ROWS = [
   t('4b: 후보가 아닌 사유를 건수로 말한다(조용한 누락 금지)', () => {
     assert.equal(scan.heldBy.recent, 1);
     assert.equal(scan.quietBy.already_closed, 1);
+  });
+  t('4c: 리네임 탭 건수를 응답이 실제로 싣는다(문자열 존재가 아니라 실행으로)', () => {
+    // ★ SRC 에 이름이 있는지만 보면 **주석**이 대신 통과시킨다(변이시험 실측)
+    assert.equal(scan.archivedByGidOnly, 1, '받음 ' + scan.archivedByGidOnly);
+    assert.ok(scan.items.some(i => i.tabName === '리네임후'), '아카이브로 접지 않고 후보로');
   });
 
   const p2 = stubPool(ROWS);
