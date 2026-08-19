@@ -72,6 +72,7 @@ const _SCAN_SQL = `
          c.created_at                      AS "registeredAt",
          ${ACTIVITY_SELECT_SQL},
          arch."isArchived",
+         archg."archivedGidOnly",
          ord."pendingOrders",
          camp."activeCampaigns",
          idx."indexRows"
@@ -79,13 +80,26 @@ const _SCAN_SQL = `
     LEFT JOIN campaigns c
       ON c.sheet_id = tc.sheet_id
     ${ACTIVITY_LATERAL_SQL}
+    /* ★★ 아카이브 판정은 smartBuild 와 글자 그대로 같은 규칙이어야 한다 —
+     *   indexBuilder 는 sheet_id||tab_name 키 집합으로만 스킵한다(이름만, gid 미참조).
+     *   여기서 gid 폴백을 넣어 더 넓게 잡으면(레포의 "gid 우선 재매칭" 관용구),
+     *   탭 이름이 바뀐 뒤 아카이브 마커가 옛 이름으로 남은 탭이
+     *   "이미 안 읽음"으로 분류되는데 smartBuild 는 새 이름으로 계속 읽는다
+     *   => 정리해야 할 탭이 화면에서 조용히 사라진다(2026-08-19 실측 「826개 중 0개」 보고로 발견).
+     *   여기서 판정하는 것은 "그 탭이 무엇인가"가 아니라 "저쪽이 읽는가" 다.
+     *   ★ 그 차이(gid 로만 일치)는 버리지 않고 archivedByGidOnly 로 건수를 말한다. */
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int > 0 AS "isArchived"
         FROM index_master_archive ima
-       WHERE ima.sheet_id = tc.sheet_id
-         AND (ima.tab_name = tc.tab_name
-              OR (NULLIF(tc.tab_gid, '') IS NOT NULL AND ima.tab_gid = tc.tab_gid))
+       WHERE ima.sheet_id = tc.sheet_id AND ima.tab_name = tc.tab_name
     ) arch ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int > 0 AS "archivedGidOnly"
+        FROM index_master_archive ima
+       WHERE ima.sheet_id = tc.sheet_id
+         AND ima.tab_name <> tc.tab_name
+         AND NULLIF(tc.tab_gid, '') IS NOT NULL AND ima.tab_gid = tc.tab_gid
+    ) archg ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int AS "pendingOrders"
         FROM order_submissions os
@@ -115,6 +129,8 @@ function classifyPastTab(row, since) {
     sheetId: row.sheetId, tabName: row.tabName, tabGid: row.tabGid || '',
     activityAt: act.activityAt, activitySource: act.activitySource,
     indexRows: row.indexRows || 0,
+    // 아카이브 마커가 옛 이름으로만 남은 탭 표식(판정에는 쓰지 않는다 — smartBuild 는 읽는다)
+    archivedGidOnly: !!row.archivedGidOnly,
   };
   // (5) 이미 안 읽는 상태 — 할 일 없음
   if (row.sheetless)   return { ...base, reads: false, candidate: false, reason: 'already_sheetless' };
@@ -170,6 +186,9 @@ async function scanPastSheetTabs({ since, limit = SCAN_CAP } = {}) {
     stillReading: reading.length,
     alreadyQuiet: items.length - reading.length,
     quietBy: quiet,
+    // 이름이 바뀌어 아카이브 마커가 옛 이름으로만 남은 탭 — smartBuild 는 새 이름으로 계속 읽으므로
+    // "아카이브"로 접지 않고 정상 판정에 태운다. 건수를 말하는 이유 = 숫자가 왜 늘었는지 설명하려고.
+    archivedByGidOnly: items.filter(i => i.archivedGidOnly).length,
     candidates: candidates.length,
     heldBy: held,
     sheetsAffected: new Set(candidates.map(i => i.sheetId)).size,

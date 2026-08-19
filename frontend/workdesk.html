@@ -10148,6 +10148,8 @@ function _ptRender(){
       그 작업에 참여한 <b>리뷰어의 제출완료 내역도 화면에서 사라집니다</b> — 끝난 작업만 고르세요.
       ${held?`<br>정리 대상에서 뺀 것: ${esc(held)} <span style="opacity:.75">(모르면 건드리지 않습니다)</span>`:''}
       ${quiet?`<br>이미 안 읽는 작업: ${esc(quiet)}`:''}
+      ${r.archivedByGidOnly?`<br><b>이름이 바뀐 뒤 보관 기록이 옛 이름으로만 남은 작업 ${r.archivedByGidOnly}개</b>
+        — 시스템은 새 이름으로 <b>여전히 읽습니다</b>. 위 정리 대상에 포함돼 있습니다.`:''}
       ${r.truncated?'<br><b>목록이 잘렸습니다</b> — 나눠서 실행하세요.':''}
     </div>
     ${_ptProbeBlock(r)}
