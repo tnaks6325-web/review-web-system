@@ -55,7 +55,8 @@ async function readScope({ limit = LIST_CAP } = {}) {
   if (!reading.length) {
     return {
       ok: true, registered: all.length, excludedSheetless: all.length - reading.length,
-      reading: 0, byReason: {}, reasons: REASONS, pendingOrdersTotal: 0, items: [], truncated: false,
+      reading: 0, byReason: {}, reasons: REASONS,
+      pendingOrdersTotal: 0, pendingByStatus: {}, items: [], truncated: false,
     };
   }
 
@@ -85,14 +86,31 @@ async function readScope({ limit = LIST_CAP } = {}) {
     nameMap.set(r.sheetId, arr);
   }
 
-  // ⑤ 미반영 주문 — ★ 이게 있으면 크론을 끄면 그 주문이 시트에 영영 안 써진다(끄기 전 확인용)
+  /* ⑤ 미반영 주문 — ★ 이게 있으면 크론을 끄면 그 주문이 시트에 영영 안 써진다(끄기 전 확인용).
+     ★★ **건수만으로는 판단이 안 된다** — 상태와 나이를 함께 센다:
+        `stuck_manual` 은 reconcile 이 제외하므로 **재기록으로 영영 안 풀린다**(사람이 처리해야 한다),
+        `pending`/`queued` 는 지금 처리 중일 수 있고, 몇 달 전 `failed` 는 마감 전 잔재다.
+     ★ 나이는 **최근/최오래 제출 시각**으로 준다(임의 구간을 나누면 그게 또 하나의 판정 사본이 된다). */
   const { rows: pendRows } = await db.query(
-    `SELECT sheet_id AS "sheetId", COUNT(*)::int AS n
+    `SELECT sheet_id AS "sheetId",
+            COALESCE(mirror_status, 'pending') AS "status",
+            COUNT(*)::int AS n,
+            MIN(submitted_at) AS "oldest", MAX(submitted_at) AS "newest"
        FROM order_submissions
       WHERE sheet_id = ANY($1::text[]) AND deleted_at IS NULL
         AND COALESCE(mirror_status, 'pending') <> 'written'
-      GROUP BY sheet_id`, [reading]);
-  const pendMap = new Map(pendRows.map(r => [r.sheetId, r.n]));
+      GROUP BY sheet_id, COALESCE(mirror_status, 'pending')`, [reading]);
+  const pendMap = new Map();       // sheetId → { n, byStatus, oldest, newest }
+  const pendingByStatus = {};      // 전체 합계(화면 머리줄)
+  for (const r of pendRows) {
+    const cur = pendMap.get(r.sheetId) || { n: 0, byStatus: {}, oldest: null, newest: null };
+    cur.n += r.n;
+    cur.byStatus[r.status] = (cur.byStatus[r.status] || 0) + r.n;
+    if (r.oldest && (!cur.oldest || r.oldest < cur.oldest)) cur.oldest = r.oldest;
+    if (r.newest && (!cur.newest || r.newest > cur.newest)) cur.newest = r.newest;
+    pendMap.set(r.sheetId, cur);
+    pendingByStatus[r.status] = (pendingByStatus[r.status] || 0) + r.n;
+  }
 
   // ⑥ 마지막 미러 시각(그 시트를 실제로 읽고 있다는 증거)
   const { rows: mirRows } = await db.query(
@@ -110,7 +128,8 @@ async function readScope({ limit = LIST_CAP } = {}) {
     else if (tc.liveSheetTabs > 0) reason = 'sheet_tab_live';
     else reason = 'closed_only';                         // 남은 시트 탭이 전부 마감
     byReason[reason] = (byReason[reason] || 0) + 1;
-    const pending = pendMap.get(sheetId) || 0;
+    const pend = pendMap.get(sheetId) || null;
+    const pending = pend ? pend.n : 0;
     pendingOrdersTotal += pending;
     if (items.length < lim) {
       items.push({
@@ -122,6 +141,9 @@ async function readScope({ limit = LIST_CAP } = {}) {
         sheetUrl: tabSheetUrl({ sheetId }),
         liveTabNames: nameMap.get(sheetId) || [],
         pendingOrders: pending,
+        pendingByStatus: pend ? pend.byStatus : {},
+        pendingOldest: pend ? pend.oldest : null,
+        pendingNewest: pend ? pend.newest : null,
         mirroredAt: mirMap.get(sheetId) || null,
       });
     }
@@ -136,7 +158,7 @@ async function readScope({ limit = LIST_CAP } = {}) {
     excludedSheetless: all.length - reading.length,
     reading: reading.length,
     byReason, reasons: REASONS,
-    pendingOrdersTotal,
+    pendingOrdersTotal, pendingByStatus,
     items,
     truncated: reading.length > items.length,
   };
