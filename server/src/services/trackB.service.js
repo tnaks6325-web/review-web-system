@@ -2777,15 +2777,14 @@ async function editWorkdeskRowsBatch({ sheetId, tabName, edits, by = 'admin' } =
            wroteRowJson: results.filter(r => r && r.ok && r.writeThrough).length, results };
 }
 
-// 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
-async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin' } = {}) {
+/* 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
+   ★ 편집과 같은 구조: 실행부는 커넥션을 받고, 단건/일괄 래퍼가 그것을 태운다(사본 0). */
+async function _revertOneInTx(client, { sheetId, tabName, rowId, field, by = 'admin' } = {}) {
   if (!sheetId || !tabName || !rowId || !field) throw new Error('revertWorkdeskEdit: 필수 인자 누락');
   if (field === 'is_submitted' || field === 'is_paid' ||
       (typeof field === 'string' && field.startsWith('col:') && _linkedToggle(field.slice(4)))) {
     return { ok: false, error: 'status_column_locked', field };
   }
-  const db = getPool();
-  const client = await db.connect();
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
@@ -2849,7 +2848,58 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
              reason: supersededReason || undefined,
              message: supersededReason ? '표시는 되돌렸지만 원본 값은 그 사이 다른 경로가 바꿔 유지했습니다.' : undefined };
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
+}
+
+// 단건 되돌리기 — 커넥션 하나를 잡아 위 함수를 그대로 태운다(동작 불변).
+async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin' } = {}) {
+  const client = await getPool().connect();
+  try { return await _revertOneInTx(client, { sheetId, tabName, rowId, field, by }); }
   finally { client.release(); }
+}
+
+/* ★★ 일괄 되돌리기 — 붙여넣기 실행취소(Ctrl+Z)와 여러 칸 ↩ 의 창구.
+   편집과 **같은 이유**로 묶는다: 칸마다 왕복하면 전역 리미터(분당 120)에 잘리고
+   커넥션이 칸 수만큼 필요해진다(실측: 500칸 되돌리기에서 63건이 리미터로 실패).
+   상한·동시 실행 폭·건별 독립은 편집 배치와 같은 값을 쓴다(두 경로가 갈리지 않게). */
+async function revertWorkdeskEditsBatch({ sheetId, tabName, reverts, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('revertWorkdeskEditsBatch: 필수 인자 누락');
+  if (!Array.isArray(reverts) || reverts.length === 0) return { ok: false, error: 'reverts_required' };
+  if (reverts.length > EDIT_BATCH_MAX) {
+    return { ok: false, error: 'too_many_edits', max: EDIT_BATCH_MAX, got: reverts.length };
+  }
+  const db = getPool();
+  const results = new Array(reverts.length);
+  let next = 0;
+  const worker = async () => {
+    let client = null;
+    try {
+      while (true) {
+        const i = next++;
+        if (i >= reverts.length) return;
+        const e = reverts[i] || {};
+        const rowId = e.rowId, field = e.field;
+        if (!rowId || !field) {
+          results[i] = { index: i, rowId: rowId || null, field: field || null, ok: false, error: 'rowId, field 필수' };
+          continue;
+        }
+        if (!client) client = await db.connect();
+        let r;
+        try {
+          r = await _revertOneInTx(client, { sheetId, tabName, rowId, field, by });
+        } catch (err) {
+          try { await client.query('ROLLBACK'); } catch (_) {}
+          logger.warn('[trackB] 일괄 되돌리기 중 개별 실패', { sheetId, tabName, rowId, field, err: err && err.message });
+          r = { ok: false, error: 'revert_failed' };
+        }
+        results[i] = { index: i, rowId, field, ...r };
+      }
+    } finally { if (client) client.release(); }
+  };
+  await Promise.all(Array.from({ length: Math.min(EDIT_BATCH_CONCURRENCY, reverts.length) }, worker));
+  const succeeded = results.filter(r => r && r.ok).length;
+  return { ok: true, total: results.length, succeeded, failed: results.length - succeeded,
+           restored: results.filter(r => r && r.ok && r.rowJsonRestored).length,
+           superseded: results.filter(r => r && r.ok && r.reason === 'superseded').length, results };
 }
 
 // 제거: manual 물리행=soft-delete(재투영 부활 없음), import행=hidden 오버레이(앵커 불변).
@@ -4348,6 +4398,7 @@ module.exports = {
   EDIT_BATCH_MAX,
   EDIT_BATCH_CONCURRENCY,
   revertWorkdeskEdit,
+  revertWorkdeskEditsBatch,
   manualWorkdeskReviewSubmit,
   previewWorkdeskOrderDelete,
   deleteWorkdeskOrderRow,

@@ -202,7 +202,8 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
     const pt = tb.slice(tb.indexOf('async function projectTab'), tb.indexOf('async function projectTab') + 1400);
     assert.ok(/sheetless \? \{ deactivated: 0, reconcileSkipped: 'sheetless' \}/.test(pt), '건너뜀 분기 필요');
   });
-  const revert = tb.slice(tb.indexOf('async function revertWorkdeskEdit'));
+  // ★ 되돌리기 실행부는 `_revertOneInTx`(단건·일괄 공용) — 래퍼만 보면 본문 회귀를 놓친다.
+  const revert = tb.slice(tb.indexOf('async function _revertOneInTx'));
   t('4g-2: 빈 준비 자리도 되돌릴 수 있다 — 편집만 되고 ↩ 는 죽는 막다른 길 금지', () => {
     // 편집은 물리행 앵커로 저장되는데 _deriveAnchor 가 null 이면 revert 가 no_stable_anchor 로 죽는다(테섭 실측).
     assert.ok(/_rowAnchorId\(row\) \? \{ type: 'manual', value: _rowAnchorId\(row\) \} : null/.test(tb),
