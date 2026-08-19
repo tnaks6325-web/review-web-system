@@ -2346,6 +2346,38 @@ router.post('/reviewers/memo', authMiddleware, adminOrMasterMiddleware, async (r
   } catch (err) { next(err); }
 });
 
+/* 로그인 번호 변경(승격 방식) — master/admin. 판정·실행은 reviewerPhoneChange.service 단일 출처.
+   ★ 2단: confirm 없이 부르면 **쓰기 0**으로 차단 사유(blockers)와 영향 건수만 돌려준다(needConfirm).
+   ★ blockers 가 있으면 confirm 이어도 409 로 거부 — 전부 "그대로 두면 데이터가 어긋나는" 조건이라
+     force 우회를 두지 않는다(유효 홀드는 10~15분 뒤 저절로 풀린다).
+   ★ 리뷰어 화면(무인증 /api/reviewer/profile)에 두지 않는 이유: 그 경로는 이름+뒤8자리가 전부이고
+     서버가 `WHERE phone8 = $1` 만 보므로, 번호 변경을 열면 뒤 8자리만 아는 제3자가 남의 계정을
+     자기 번호로 가져갈 수 있다(주민번호·계좌·리뷰비까지). 그래서 관리자 전용이다. */
+router.post('/reviewers/phone', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const svc = require('../services/reviewerPhoneChange.service');
+    const b = req.body || {};
+    const id = String(b.id || '').trim();
+    if (b.confirm !== true) {
+      const pre = await svc.previewPhoneChange({ id, newPhone: b.phone });
+      return res.json({ ok: false, needConfirm: true, ...pre });
+    }
+    const out = await svc.applyPhoneChange({ id, newPhone: b.phone, by: _by(req) });
+    if (!out.ok) return res.status(409).json(out);
+    res.json(out);
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'not_found') return res.status(404).json({ ok: false, code, error: err.message });
+    if (code === 'bad_id' || code === 'bad_phone' || code === 'same_phone') {
+      return res.status(400).json({ ok: false, code, error: err.message });
+    }
+    if (code === '42P01') {
+      return res.json({ ok: false, code: 'not_ready', error: '번호 변경 준비 전입니다(migration 126 미적용) — 배포 완료 후 다시 시도해주세요.' });
+    }
+    next(err);
+  }
+});
+
 /* 리뷰어 삭제(완전삭제) — master/admin(사용자 확정).
    ★★ **이력은 함께 지워지지 않는다.** 주문·참여·문의는 전부 `phone8`(연락처 뒤 8자리)로 매달려
      있고 `reviewers(id)` 를 FK 로 참조하는 테이블이 하나도 없다(001 스키마 확인). 그래서 이 행만
@@ -2374,7 +2406,11 @@ router.post('/reviewers/delete', authMiddleware, adminOrMasterMiddleware, async 
     let countsPartial = false;
     if (p8) {
       const probes = [
-        ['orders', 'SELECT COUNT(*)::int AS n FROM order_submissions WHERE phone8 = $1'],
+        // ★ order_submissions 에는 phone8 컬럼이 없다(전체 번호 `phone` 뿐) — 종전 `WHERE phone8 =` 는
+        //   42703 으로 **항상** 실패해 확인창이 "구매양식 제출 0건"으로 조용히 속였다(진짜 PG 검증으로 발견).
+        ['orders', `SELECT COUNT(*)::int AS n FROM order_submissions
+                     WHERE RIGHT(regexp_replace(COALESCE(phone,''), '[^0-9]', '', 'g'), 8) = $1
+                       AND deleted_at IS NULL`],
         ['applications', 'SELECT COUNT(*)::int AS n FROM campaign_applications WHERE phone8 = $1 OR owner_phone8 = $1'],
         ['inquiries', 'SELECT COUNT(*)::int AS n FROM cs_threads WHERE reviewer_phone8 = $1'],
       ];
