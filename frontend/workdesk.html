@@ -3410,6 +3410,33 @@ function _ddVerdict(lastAt){
     : `<div class="wbl-facts" style="color:#166534">가장 최근 중복 발생 <b>${esc(_ddDay(lastAt))}</b>
         — 재발 방지 배포(8/19 11:48) <b>이전</b>입니다. 남은 것은 아직 정리하지 않은 과거분입니다.</div>`;
 }
+/* ★★ 보류 건의 이체 내역 — 판정하지 않고 **사실만** 적는다.
+   항목 키가 (시트, 탭, 줄번호)라 중복 줄은 서로 다른 이체 항목이 된다 → 한 구매에 '입금완료'가
+   둘이면 같은 사람에게 두 번 나간 것이다. 그건 강조하되, 무엇을 어떻게 할지는 사람이 정한다. */
+const _DD_PAY_LABEL = { pending: '이체 대기', paid: '입금완료', failed: '이체 실패', cancelled: '회차 취소' };
+const _DD_PAY_COLOR = { pending: '#92400e', paid: '#166534', failed: '#b91c1c', cancelled: '#6b7280' };
+const _DD_BANK_LABEL = { hana: '하나', kbank: '케이뱅크' };
+function _ddWon(n){ const v = Number(n); return Number.isFinite(v) ? v.toLocaleString('ko-KR') + '원' : ''; }
+function _ddPayLine(x){
+  const st = String(x.status || '');
+  const parts = [
+    `회차 #${esc(String(x.batchSeq || '?'))}${x.bank ? ' ' + esc(_DD_BANK_LABEL[x.bank] || x.bank) : ''}`,
+    `<b style="color:${_DD_PAY_COLOR[st] || '#374151'}">${esc(_DD_PAY_LABEL[st] || st || '상태 불명')}</b>`,
+    esc(_ddWon(x.amount)),
+  ];
+  if (x.paidAt) parts.push(esc(_ddDay(x.paidAt)));
+  /* 실패 사유는 내부 표기라 리뷰어에겐 안 나가지만, 관리자 화면에서는 판단 근거다. */
+  if (st === 'failed' && x.failReason) parts.push(esc(String(x.failReason).slice(0, 60)));
+  if (String(x.batchStatus || '') === 'cancelled') parts.push('(회차 취소됨)');
+  return parts.filter(Boolean).join(' · ');
+}
+function _ddSkipRows(g){
+  if (g.payUnavailable) return `<div style="margin:4px 0 0 12px;color:#b91c1c">이체 내역을 불러오지 못했습니다 — 입금관리에서 직접 확인하세요.</div>`;
+  if (!g.rows) return '';
+  return `<div style="margin:4px 0 0 12px">${g.rows.map(r =>
+    `<div>줄 <b>${esc(String(r.seq))}</b>${r.isKeep ? ' <span style="color:#166534">(남길 줄)</span>' : ''} —
+      ${r.pay.length ? r.pay.map(_ddPayLine).join(' / ') : '<span style="color:#6b7280">회차에 담긴 적 없음</span>'}</div>`).join('')}</div>`;
+}
 function _ddRender(){
   const b = document.getElementById('ddBody'); if (!b || !_DD) return;
   const p = _DD.prev;
@@ -3421,8 +3448,11 @@ function _ddRender(){
       <td class="num">${esc((g.removeSeqs || []).join(', '))}</td>
       <td class="num">${esc(_ddDay(g.lastAt))}</td></tr>`).join('') : '';
   const skips = p ? (p.skipped || []).map(g =>
-    `<li><b>${esc(g.name || '')}</b> · 주문번호 ${esc(String(g.orderNum || ''))} · 줄 ${esc((g.seqs || []).join(', '))}
-      ${g.lastAt ? `· ${esc(_ddDay(g.lastAt))} ` : ''}— ${esc(g.detail || g.reason || '')}</li>`).join('') : '';
+    `<li style="margin-bottom:6px"><b>${esc(g.name || '')}</b> · 주문번호 ${esc(String(g.orderNum || ''))} · 줄 ${esc((g.seqs || []).join(', '))}
+      ${g.lastAt ? `· ${esc(_ddDay(g.lastAt))} ` : ''}— ${esc(g.detail || g.reason || '')}
+      ${g.doublePaid ? `<div style="margin:4px 0 0 12px;color:#b91c1c"><b>⚠ 같은 구매에 입금완료가 ${esc(String((g.paidRows || []).length))}건입니다 —
+        이미 두 번 나갔을 수 있습니다.</b> 이체 내역을 확인하고, 회수·조정은 입금관리에서 하세요.</div>` : ''}
+      ${_ddSkipRows(g)}</li>`).join('') : '';
   b.innerHTML = `<b>${esc(tg.label || tg.tabName)}</b>${
     _DD.target ? ` <button class="wbl-b" style="margin-left:8px" onclick="ddBackToScan()">← 점검 목록으로</button>` : ''}
     <div class="wbl-facts"><b>표에 보이는 주문번호가 같고</b> 주문 기록의 주문번호와 연락처도 같은 줄만

@@ -423,6 +423,95 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
       && appSrc.indexOf('sheetlessRecoverOnBoot') < appSrc.indexOf('app.use(errorMetricsMiddleware)'));
   }
 
+  /* ── [J] 보류 건 이체 내역 — 이중 송금은 화면에서 바로 보여야 한다 ─────────── */
+  console.log('\n[J] 보류 건 이체 내역');
+  {
+    const ledJ = require('../src/services/sheetlessLedger.service');
+    const mk = (seq, osid, extra = {}) => ({
+      seq, osid, name: '김신혜', submitted: false, paid: false,
+      ordnum: '11111111111', roword: '11111111111', ph: '01090411926',
+      at: '2026-08-07T00:00:00.000Z', in_payment: false, ...extra,
+    });
+    let payQueried = 0, payParams = null;
+    ledJ.__setPoolForTest({
+      query: async (sql, params) => {
+        if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+        if (/JOIN order_submissions os ON os\.id = cp\.order_submission_id/.test(sql)) return { rows: [
+          mk(10, 'o1'), mk(20, 'o2', { in_payment: true }),
+        ] };
+        if (/FROM payment_batch_items pi/.test(sql)) {
+          payQueried++; payParams = params;
+          return { rows: [
+            { seq: 10, status: 'paid', amount: 12000, paidAt: '2026-08-13T12:44:00Z',
+              failReason: null, batchSeq: 11, bank: 'hana', batchStatus: 'applied', batchAt: '2026-08-13T00:00:00Z' },
+            { seq: 20, status: 'paid', amount: 12000, paidAt: '2026-08-13T12:44:00Z',
+              failReason: null, batchSeq: 11, bank: 'hana', batchStatus: 'applied', batchAt: '2026-08-13T00:00:00Z' },
+          ] };
+        }
+        return { rows: [] };
+      },
+    });
+    const rJ = await ledJ.dedupeRows({ sheetId: 'wt_x', tabName: 'T1' });
+    ok('보류로 잡힌다(지울 줄이 회차에 담김)', rJ.skippedGroups === 1 && rJ.removeRows === 0);
+    ok('★ 보류 건에 이체 내역이 붙는다', Array.isArray(rJ.skipped[0].rows)
+      && rJ.skipped[0].rows.length === 2 && rJ.skipped[0].rows[0].pay.length === 1);
+    ok('★ 남길 줄을 표시한다(어느 쪽이 남는지)',
+      rJ.skipped[0].rows.filter(r => r.isKeep).length === 1 && rJ.skipped[0].rows[0].isKeep === true);
+    ok('★★ 같은 구매에 입금완료 2건 = 이중 송금으로 드러낸다',
+      rJ.skipped[0].doublePaid === true && rJ.skipped[0].paidRows.join(',') === '10,20');
+    ok('★ 조회는 보류가 있을 때 1회 · 그 줄들만', payQueried === 1
+      && String(payParams[0]) === 'wt_x' && payParams[2].join(',') === '10,20');
+    ledJ.__setPoolForTest(null);
+
+    // 보류가 없으면 이체 조회를 하지 않는다(불필요한 왕복 0)
+    let q2 = 0;
+    ledJ.__setPoolForTest({
+      query: async (sql) => {
+        if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+        if (/JOIN order_submissions os ON os\.id = cp\.order_submission_id/.test(sql)) return { rows: [
+          mk(10, 'o1'), mk(20, 'o2'),
+        ] };
+        if (/FROM payment_batch_items pi/.test(sql)) { q2++; return { rows: [] }; }
+        return { rows: [] };
+      },
+    });
+    const rJ2 = await ledJ.dedupeRows({ sheetId: 'wt_x', tabName: 'T1' });
+    ok('보류 0이면 이체 조회 자체를 안 한다', rJ2.skippedGroups === 0 && q2 === 0);
+    ledJ.__setPoolForTest(null);
+
+    // 조회 실패 = "모른다"(0건으로 꾸미지 않는다)
+    ledJ.__setPoolForTest({
+      query: async (sql) => {
+        if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+        if (/JOIN order_submissions os ON os\.id = cp\.order_submission_id/.test(sql)) return { rows: [
+          mk(10, 'o1'), mk(20, 'o2', { in_payment: true }),
+        ] };
+        if (/FROM payment_batch_items pi/.test(sql)) throw new Error('42P01');
+        return { rows: [] };
+      },
+    });
+    const rJ3 = await ledJ.dedupeRows({ sheetId: 'wt_x', tabName: 'T1' });
+    ok('★ 이체 조회 실패는 보류 목록을 죽이지 않고 "모른다"로 말한다',
+      rJ3.skippedGroups === 1 && rJ3.skipped[0].payUnavailable === true && !rJ3.skipped[0].rows);
+    ledJ.__setPoolForTest(null);
+
+    const ledSrcJ = fs.readFileSync(path.join(__dirname, '../src/services/sheetlessLedger.service.js'), 'utf8');
+    ok('★ 계좌번호는 싣지 않는다(화면에 PII 를 늘리지 않는다)',
+      !/pi\.bank_account/.test(ledSrcJ) && !/account_holder/.test(ledSrcJ));
+    ok('★ 이체 내역 조회는 읽기 전용', !/UPDATE payment_batch_items|DELETE FROM payment_batch/.test(ledSrcJ));
+
+    const wdJ = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
+    ok('화면이 이체 상태를 한국어로 말한다',
+      /_DD_PAY_LABEL = \{ pending: '이체 대기', paid: '입금완료', failed: '이체 실패', cancelled: '회차 취소' \}/.test(wdJ));
+    ok('★★ 이중 송금은 빨강으로 못박는다',
+      /g\.doublePaid \?[\s\S]{0,200}이미 두 번 나갔을 수 있습니다/.test(wdJ));
+    ok('★ 회차에 담긴 적 없는 줄도 그렇게 말한다(빈칸으로 두지 않는다)',
+      /회차에 담긴 적 없음/.test(wdJ));
+    ok('★ 조회 실패는 "이체 내역 없음"이 아니라 사유로 말한다',
+      /g\.payUnavailable[\s\S]{0,160}불러오지 못했습니다/.test(wdJ));
+    ok('실패 사유는 관리자 화면에만(리뷰어 경로 아님)', /st === 'failed' && x\.failReason/.test(wdJ));
+  }
+
   /* ── [F] 진짜 PG (선택) — 스텁은 SQL 을 해석하지 않는다 ──────────────────────
      `PGTEST_URL=postgres://... node server/tests/worktableDuplicateGuard.test.js`
      표 주문번호(row_json) 추출과 숫자 정규화가 **실제로** 도는지 확인한다. */
@@ -452,6 +541,25 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('PG: 표 주문번호를 row_json 에서 뽑는다', r[0].roword === '23102041302915' && r[1].roword === '23102367337800');
     ok('PG: 원장이 같아도 표가 다르면 다른 그룹', r[0].roword !== r[1].roword && r[0].ordnum === r[1].ordnum);
     ok('PG: 제출 시각이 함께 실려 온다(발생일 표기 재료)', !!r[0].at && !!r[1].at && r[1].at > r[0].at);
+
+    /* 보류 건 이체 내역 SQL — 스텁은 SQL 을 해석하지 않으므로 진짜로 돌려 본다(별칭·ANY 배열·조인). */
+    await c.query(`DROP TABLE IF EXISTS payment_batch_items, payment_batches`);
+    await c.query(`CREATE TABLE payment_batches(id uuid primary key, seq bigint, bank text,
+      status text, created_at timestamptz)`);
+    await c.query(`CREATE TABLE payment_batch_items(batch_id uuid, sheet_id text, tab_name text,
+      row_index int, status text, amount int, paid_at timestamptz, fail_reason text)`);
+    await c.query(`INSERT INTO payment_batches VALUES
+      ('33333333-3333-3333-3333-333333333333',11,'hana','applied','2026-08-13T00:00:00Z')`);
+    await c.query(`INSERT INTO payment_batch_items VALUES
+      ('33333333-3333-3333-3333-333333333333','wt_x','T1',19,'paid',12000,'2026-08-13T12:44:00Z',NULL),
+      ('33333333-3333-3333-3333-333333333333','wt_x','T1',407,'paid',12000,'2026-08-13T12:44:00Z',NULL)`);
+    const paySql = src.match(/`SELECT pi\.row_index AS seq[\s\S]*?ORDER BY pi\.row_index, b\.created_at`/)[0];
+    const { rows: pr } = await c.query(eval(paySql), ['wt_x', 'T1', [19, 407]]);   // eslint-disable-line no-eval
+    ok('PG: 이체 내역 쿼리가 실제로 실행된다', pr.length === 2);
+    ok('PG: 별칭이 camelCase 로 온다(화면이 그대로 쓴다)',
+      pr[0].batchSeq === '11' || pr[0].batchSeq === 11);
+    ok('PG: 입금완료 2건이 잡힌다(이중 송금 신호)',
+      pr.filter(x => x.status === 'paid').length === 2 && pr[0].amount === 12000);
     await c.end();
   } else {
     console.log('\n[F] 진짜 PG 검증 건너뜀 (PGTEST_URL 미설정)');

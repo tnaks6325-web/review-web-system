@@ -444,6 +444,7 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
         orderNum: keep.roword || keep.ordnum, phone8: String(keep.ph).slice(-8), name: keep.name || '',
         seqs: list.map(r => r.seq), lastAt: _lastAt,
         reason: blockedPayment.length ? 'in_payment_batch' : 'used_row_is_not_first',
+        keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq),
         detail: blockedPayment.length
           ? '지울 줄이 입금 회차(대기·완료)에 담겨 있습니다 — 이체 내역을 먼저 확인하세요.'
           : '지울 줄에 리뷰제출·입금 표시가 있고 남길 줄에는 없습니다 — 어느 줄을 남길지 사람이 정하세요.',
@@ -455,6 +456,46 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
       keepSeq: keep.seq, removeSeqs: losers.map(r => r.seq), lastAt: _lastAt,
     });
     for (const r of losers) { removeSeqs.push(r.seq); if (r.osid) removeOsIds.push(r.osid); }
+  }
+
+  /* ★★ 보류 건에는 **이체 내역을 붙여 준다** — 보류의 대부분은 "지울 줄이 입금 회차에 담김" 인데,
+     그 줄이 실제로 **이체까지 됐는지**를 모르면 사람이 판단할 수가 없다(입금관리 화면을 따로 열어
+     대조해야 했다). 항목 키가 `(sheet_id, tab_name, row_index)` 라 **중복 줄은 서로 다른 이체 항목**이
+     되므로, 한 구매에 `paid` 가 둘이면 **같은 사람에게 두 번 나간 것**이다 — 돈 문제라 반드시 드러낸다.
+     ★ 읽기 전용·추가 쿼리 1회(보류가 있을 때만) · 계좌번호는 싣지 않는다(화면에 PII 를 늘리지 않는다). */
+  if (skipped.length) {
+    const seqs = [...new Set(skipped.flatMap(g => g.seqs))];
+    let payRows = [];
+    try {
+      ({ rows: payRows } = await db.query(
+        `SELECT pi.row_index AS seq, pi.status, pi.amount, pi.paid_at AS "paidAt",
+                pi.fail_reason AS "failReason", b.seq AS "batchSeq", b.bank,
+                b.status AS "batchStatus", b.created_at AS "batchAt"
+           FROM payment_batch_items pi
+           JOIN payment_batches b ON b.id = pi.batch_id
+          WHERE pi.sheet_id = $1 AND pi.tab_name = $2 AND pi.row_index = ANY($3::int[])
+          ORDER BY pi.row_index, b.created_at`, [sheetId, tabName, seqs]));
+    } catch (e) {
+      /* ★ 조회 실패는 보류 목록 자체를 죽이지 않는다 — 대신 "모른다" 로 말한다(0건으로 꾸미지 않는다). */
+      logger.warn(`[sheetlessLedger] 보류 건 이체 내역 조회 실패 tab=${tabName} — ${e.message}`);
+      for (const g of skipped) g.payUnavailable = true;
+      payRows = null;
+    }
+    if (payRows) {
+      const bySeq = new Map();
+      for (const r of payRows) {
+        if (!bySeq.has(r.seq)) bySeq.set(r.seq, []);
+        bySeq.get(r.seq).push(r);
+      }
+      for (const g of skipped) {
+        g.rows = g.seqs.map(sq => ({
+          seq: sq, isKeep: sq === g.keepSeq, pay: bySeq.get(sq) || [],
+        }));
+        /* 같은 구매에 이체 완료가 둘 이상 = 이중 송금. 판정이 아니라 **사실**이라 그대로 말한다. */
+        g.paidRows = g.rows.filter(r => r.pay.some(x => x.status === 'paid')).map(r => r.seq);
+        g.doublePaid = g.paidRows.length >= 2;
+      }
+    }
   }
 
   const lastDupAt = [...plan, ...skipped]
