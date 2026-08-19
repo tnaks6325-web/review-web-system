@@ -2645,6 +2645,24 @@ router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+/* 작업보드 중복 줄 **일괄 점검** — 어느 작업에 중복이 남아 있는지 한 번에 본다.
+   ★ 읽기 전용(모든 판정이 dryRun) · 정리 실행은 여전히 작업별 `dedupe-rows` 로만.
+   ★ adminOrMaster — 정리와 같은 게이트(결과에 참여자 이름·연락처 뒤4가 실린다). */
+router.post('/worktable/dedupe-scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { scanDuplicateRows } = require('../services/sheetlessLedger.service');
+    const b = req.body || {};
+    try {
+      res.json(await scanDuplicateRows({ limit: b.limit, by: _by(req) }));
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 블로거 사전등록(M5-2) — 공고 밖에서 섭외한 블로거를 그 작업의 표에 한 줄로 넣는다.
    ★ 게이트 = `_ensureEditScope`(master/admin 전체 · staff 담당 탭 · 광고주 차단) — 그리드 셀 편집과 같은 범위.
      명단 한 줄 추가는 정원·총량을 바꾸지 않는다(정원 조작은 adminOrMaster 유지).

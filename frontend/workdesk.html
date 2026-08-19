@@ -3376,6 +3376,7 @@ function openDedupeModal(){
   ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">♻ 중복 줄 정리</div>
     <div class="wbl-db" id="ddBody"></div>
     <div class="wbl-df"><button class="wbl-b" onclick="closeDedupeModal()">닫기</button>
+      <button class="wbl-b" id="ddScan" onclick="ddScanAll()" title="무시트 작업 전체를 같은 기준으로 훑어 중복이 남아 있는 작업을 찾는다(읽기 전용)">🔎 전체 작업 점검</button>
       <button class="wbl-b" id="ddPrev" onclick="ddPreview()">미리보기</button>
       <button class="wbl-b dark" id="ddGo" disabled onclick="ddRun()">♻ 정리 실행</button></div></div>`;
   document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
@@ -3406,8 +3407,28 @@ function _ddRender(){
         <tbody>${rows}</tbody></table>` : `<div class="wbl-facts">정리할 중복이 없습니다.</div>`}
       ${p.skippedGroups ? `<div class="wbl-facts"><b>⚠ 사람이 판단해야 하는 건</b> — 시스템이 건드리지 않았습니다.
         <ul style="margin:6px 0 0 16px">${skips}</ul></div>` : ''}`}`;
+  if (_DD.scan) {
+    const sc = _DD.scan;
+    const list = (sc.tabs || []).map((t, i) =>
+      `<tr><td><a href="#" onclick="ddOpenTab(${i});return false">${esc(t.label || t.tabName)}</a></td>
+        <td class="num">${esc(String(t.boardRows))}</td>
+        <td class="num"><b>${esc(String(t.removeRows))}</b></td>
+        <td class="num">${esc(String(t.skippedGroups))}</td></tr>`).join('');
+    b.innerHTML += `<div class="wbl-facts" style="margin-top:10px"><b>🔎 전체 작업 점검</b> —
+        무시트 작업 ${esc(String(sc.scanned))}개 중 <b>${esc(String((sc.tabs || []).length))}개 작업</b>에
+        정리 대상 <b>${esc(String(sc.totalRemoveRows || 0))}줄</b> · 보류 ${esc(String(sc.totalSkipped || 0))}건
+        ${sc.failed ? ` · <span style="color:#b91c1c">점검 실패 ${esc(String(sc.failed))}개</span>` : ''}
+        ${sc.truncated ? ' · ⚠ 작업이 많아 일부만 점검했습니다(다시 실행하면 이어서 보입니다)' : ''}</div>
+      ${(sc.tabs || []).length ? `<table class="wbl-t"><thead><tr><th>작업</th><th>표 줄</th><th>정리 대상</th><th>보류</th></tr></thead>
+        <tbody>${list}</tbody></table>
+        <div class="wbl-facts">작업 이름을 누르면 그 작업으로 이동합니다 — 거기서 [미리보기] 확인 후 정리하세요.</div>`
+        : `<div class="wbl-facts">중복이 남아 있는 작업이 없습니다.</div>`}
+      ${(sc.errors || []).length ? `<div class="wbl-facts"><b>점검하지 못한 작업</b><ul style="margin:6px 0 0 16px">${
+        sc.errors.map(e => `<li>${esc(e.label || e.tabName)} — ${esc(e.reason)}</li>`).join('')}</ul></div>` : ''}`;
+  }
   const go = document.getElementById('ddGo'); if (go) go.disabled = !(p && p.removeRows > 0) || !!_DD.busy;
   const pv = document.getElementById('ddPrev'); if (pv) pv.disabled = !!_DD.busy;
+  const sb = document.getElementById('ddScan'); if (sb) sb.disabled = !!_DD.busy;
 }
 async function ddPreview(){
   if (!_DD || _DD.busy) return;
@@ -3419,6 +3440,26 @@ async function ddPreview(){
     else _DD.prev = j;
   } catch (e) { _DD.prev = null; _DD.err = '미리보기 실패: ' + (e.message || ''); }
   _DD.busy = false; _ddRender();
+}
+async function ddScanAll(){
+  if (!_DD || _DD.busy) return;
+  _DD.busy = true; _DD.err = ''; _DD.scan = null; _ddRender();
+  const b = document.getElementById('ddBody');
+  if (b) b.innerHTML += `<div class="wbl-facts">전체 작업을 훑는 중입니다 — 작업 수에 따라 시간이 걸립니다…</div>`;
+  try {
+    const j = await api('/api/trackb/worktable/dedupe-scan', { method: 'POST', body: JSON.stringify({}) });
+    if (!j || j.ok === false) _DD.err = (j && (j.error || j.message)) || '전체 점검 실패';
+    else _DD.scan = j;
+  } catch (e) { _DD.err = '전체 점검 실패: ' + (e.message || ''); }
+  _DD.busy = false; _ddRender();
+}
+/* 점검 결과에서 작업으로 이동 — onclick 은 인덱스만(작업명은 시트발 문자열) */
+function ddOpenTab(i){
+  const t = _DD && _DD.scan && (_DD.scan.tabs || [])[i]; if (!t) return;
+  const idx = (STATE.tabs || []).findIndex(x => x.sheetId === t.sheetId && x.tabName === t.tabName);
+  if (idx < 0) { toast('그 작업이 지금 목록에 없습니다 — 업체를 고른 뒤 다시 시도하세요'); return; }
+  closeDedupeModal();
+  selTab(idx);
 }
 async function ddRun(){
   if (!_DD || _DD.busy || !_DD.prev || !_DD.prev.removeRows) return;
