@@ -84,6 +84,19 @@ jobs:
              ORDER BY cp.deleted_at DESC, cp.tab_name, cp.seq
              LIMIT 300;"
 
+      # 표에서 분리(보관)된 줄 — migration 129. 삭제와 다른 축이라 따로 본다.
+      #   ★ 컬럼이 아직 없는 배포 시점이면 조용히 넘어간다(continue-on-error).
+      - name: 진단 — 표에서 분리(보관)된 줄
+        continue-on-error: true
+        run: |
+          psql "$PGCONN" -P pager=off -c "
+            SELECT cp.tab_name AS 작업, cp.seq AS 줄, cp.reviewer_name AS 이름,
+                   (cp.held_at AT TIME ZONE 'Asia/Seoul')::timestamp(0) AS 분리시각,
+                   cp.held_by AS 분리주체, cp.held_reason AS 사유
+              FROM campaign_participants cp
+             WHERE cp.held_at IS NOT NULL AND cp.deleted_at IS NULL
+             ORDER BY cp.held_at DESC LIMIT 200;"
+
       # ── ② 복구: 장수산업 다섯 줄만 ────────────────────────────────────────────
       - name: 복구 전 상태
         run: |

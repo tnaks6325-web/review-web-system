@@ -2732,6 +2732,47 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { next(err); }
 });
 
+/* 작업표 줄 "표에서 분리"(보관) — 129. **삭제가 아니다**(사용자 확정 2026-08-19 "표에서만 빼기").
+   왜: 이체 근거가 걸려 지울 수 없는 중복 줄이 표에 남아 매일 눈에 걸린다. 지우면 그 줄의 입금
+   표시가 표에서 빠져 **남길 줄이 미입금으로 보이고 다음 회차에 다시 담겨 이중 송금**이 난다.
+   ★ 그래서 화면에서만 뺀다 — 장부 재생성·리뷰어 검색·입금대상 추출은 `deleted_at` 만 보므로 무접촉.
+   ★ 게이트 = adminOrMaster(중복 정리와 같은 급) · 되돌리기는 `hold:false`.
+   ★ GET 은 보관함 목록(읽기 전용) — 무엇을 되돌리는지 사람이 보고 판단한다. */
+router.get('/worktable/held-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { listHeldRows } = require('../services/participants.service');
+    try {
+      res.json({ ok: true, rows: await listHeldRows({
+        sheetId: String(req.query.sheetId || ''), tabName: String(req.query.tabName || '') }) });
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다(migration 129).' });
+      }
+      if (/필수/.test(String(e && e.message))) return res.status(400).json({ ok: false, error: e.message });
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+router.post('/worktable/hold-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const { holdRows } = require('../services/participants.service');
+    try {
+      res.json(await holdRows({
+        sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
+        seqs: b.seqs, hold: b.hold !== false, reason: b.reason, by: _by(req),
+      }));
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다(migration 129).' });
+      }
+      if (/필수/.test(String(e && e.message))) return res.status(400).json({ ok: false, error: e.message });
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
 /* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
    ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
    ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
