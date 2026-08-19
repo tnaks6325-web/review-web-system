@@ -1146,8 +1146,10 @@ function onParticipationToggle(on) {
    저장은 평소와 같은 [저장] 버튼 → 같은 검증·같은 라우트를 탄다.
 
    ★ 왜 이 값들인가
-     - 상태 active + 리뷰어 숨김 : 리뷰어 목록엔 안 뜨지만 참여·제출은 진짜로 된다.
-       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막혀 테스트가 불가)
+     - 상태 active : 참여·제출이 실제로 되어야 테스트가 된다
+       (status 를 draft 로 두면 상태엔진이 closed 로 판정해 참여 자체가 막힌다).
+       ⚠ 모달의 [리뷰어에게 숨김] 토글은 사용자 확정(2026-08-19)으로 제거됐다 —
+         테스트 공고도 모집중이면 리뷰어 목록에 뜬다. 테스트가 끝나면 게시(모집중) 토글을 내린다.
      - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
      - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 15/10분).
      - 구매 시간대 비움 = 자율주문(종일 오픈).
@@ -1175,7 +1177,6 @@ async function openTestCampaignModal() {
   chk("rf_multi_account", true, onMultiAccountToggle);    // 타계정 허용 = 일괄 제출의 전제
   set("rf_multi_daily", 5);              // 하루에 여러 명의로 참여 가능해야 배치가 켜진다
   set("rf_sub_ttl", 30);
-  chk("rf_reviewer_hidden", true);       // ★ 리뷰어 목록 미노출
 
   // 진행상품 표가 정원의 진실원본 — 한 줄 넣어 총모집/일건수를 파생시킨다
   try {
@@ -1904,42 +1905,29 @@ function addOptRow(data) {
   _syncGroupTotals();
 }
 
-/** ★★ 정원(총인원·일건수) 잠금 — **수정 모드 + 옵션 없는 작업**에서만 켠다.
- *  왜: 이 표의 총인원·일건수는 **캠페인 정원(recruit_total·daily_limit)의 파생 입력**인데,
- *  옵션 없는 작업은 원장(campaign_options)이 비어 있어 표를 **작업내용 상품 원문에서 다시
- *  파싱해** 만든다. 상품 원문이 두 줄 이상이면 파싱 결과에 인원이 없어 0(무제한)으로 떨어지고,
- *  그대로 저장하면 **총 200건이 무제한으로, 일건수가 엉뚱한 값으로 리셋**된다(실측 재현).
- *  정원의 진실원본은 [📅 모집인원 조절](차수·날짜별 계획)이므로, 수정 화면에서는 **읽기 전용**으로
- *  보여주기만 하고 저장에도 싣지 않는다(미전송 = 서버 COALESCE 유지).
- *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 오므로 파생이 정확 — 종전대로 편집 가능.
- *  ★ 신규 발행은 여기가 초도 정원을 정하는 유일한 창구라 잠그지 않는다. */
-/** ★★ 정원(총인원·일건수) 잠금 — **수정 모드 + 옵션 없는 작업**에서 켠다.
- *  사용자 확정(2026-08-19): 총인원·일건수는 **작업오더에서 받은 값 그대로 고정**하고,
- *  조절은 [📅 모집인원 조절]에서 **총건수가 지켜지는 범위 안에서만** 한다.
- *  왜 잠그나: 이 표의 두 칸은 캠페인 정원(recruit_total·daily_limit)의 **파생 입력**인데,
- *  옵션 없는 작업은 옵션 원장이 비어 있어 표를 작업내용 상품 원문에서 **다시 파싱**해 만든다.
- *  원문이 두 줄 이상이면 인원이 0(무제한)으로 떨어지고 그대로 저장돼 **총 200건이 리셋**됐다(실측).
- *  ★ 해제 버튼은 두지 않는다 — 창구가 둘이면 같은 사고가 그 문으로 다시 들어온다.
- *  ★ 신규 발행은 초도 정원을 정하는 유일한 창구라 잠그지 않는다.
- *  ★ 옵션 있는 작업은 옵션 원장이 서버에서 그대로 와 파생이 정확하고, 옵션별 정원은
- *    [📅 인원]에서 바꿀 수 없다(잠그면 막다른 길) — 종전대로 편집 가능. */
-function _rfQuotaLocked() { return !!_recruitEditId && _prodMode() !== "opt"; }
+/** ★★ 정원(총인원·일건수)은 **수정 화면에서도 고칠 수 있다** (사용자 확정 2026-08-19 오후).
+ *  종전엔 이 두 칸을 읽기 전용으로 잠갔는데(작업오더 값 고정), 실제 운영에서는 초도 세팅이
+ *  잘못 들어온 공고를 여기서 바로잡아야 했다 → **잠금을 풀고 경고만 남긴다**.
+ *  ★ 대신 두 가지 안전장치는 그대로다: ① 프리필이 캠페인 원장 값을 첫 행에 싣는다
+ *    ② **수정 모드에서는 표의 합계로 다시 만들지 않고 첫 행 값을 그대로 쓴다**
+ *    (합계 규칙은 "하나라도 0이면 무제한"이라 상품 줄이 둘 이상이면 총량이 0 으로 리셋됐다 — 실사고).
+ *  ★ 차수(물량 추가)가 있는 공고는 서버가 recruit_total 직접 수정을 무시한다(roundsLockRecruitTotal). */
+function _rfQuotaNotice() { return !!_recruitEditId && _prodMode() !== "opt"; }
 
-/** 잠금 안내 줄 — "무엇이 고정됐는지 · 어디서 바꾸는지"를 문장으로 말한다(막다른 길 금지) */
+/** 경고 줄 — "함부로 고치지 말 것 · 조절은 [📅 인원]에서"를 문장으로 말한다(막지는 않는다) */
 function _syncQuotaLockUi() {
   const box = document.getElementById("rf_quota_lock");
   if (!box) return;
-  if (!_rfQuotaLocked()) { box.hidden = true; box.textContent = ""; return; }
+  if (!_rfQuotaNotice()) { box.hidden = true; box.textContent = ""; return; }
   const num = (v) => Number(v || 0);
   const rt = num(document.getElementById("rf_recruit_total")?.value);
   const dl = num(document.getElementById("rf_daily_limit")?.value);
   const fmt = (v, zero) => (v > 0 ? v.toLocaleString() + "명" : zero);
   box.hidden = false;
   box.innerHTML =
-    '<b>🔒 총인원 · 일건수는 작업오더 값으로 고정됩니다</b>' +
+    '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
     '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
-    '<span>조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 날짜별로 나눠 담습니다. ' +
-    '이 화면에서 저장해도 두 값은 바뀌지 않습니다.</span>';
+    '<span>날짜별 조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 나눠 담습니다.</span>';
 }
 
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
@@ -1970,15 +1958,11 @@ function _buildOptRowEl(data) {
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
   row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
-  /* ★ 정원 잠금(수정 + 옵션 없는 작업) — 표시만 하고 편집·저장 대상에서 뺀다 */
-  if (_rfQuotaLocked()) {
+  /* ★ 수정 모드에서는 편집은 열어 두되, 초기 세팅값임을 칸에서도 알린다(경고 전용) */
+  if (_rfQuotaNotice()) {
     [".rf-opt-rt", ".rf-opt-dl"].forEach(sel => {
       const el = row.querySelector(sel);
-      if (!el) return;
-      el.readOnly = true;
-      el.tabIndex = -1;
-      el.classList.add("rf-locked");
-      el.title = "총인원·일건수는 [📅 인원](모집인원 조절)에서 바꿉니다";
+      if (el) el.title = "초기 작업 세팅값입니다 — 함부로 수정하지 마세요. 날짜별 조절은 [📅 인원]에서 합니다";
     });
   }
   if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
@@ -2156,7 +2140,14 @@ function _syncPreviewFromOptRows() {
   /* ★★ 잠금 상태에서는 캠페인 정원을 표에서 다시 만들지 않는다 —
      옵션 없는 작업의 표는 상품 원문 파싱본이라 인원이 0으로 떨어질 수 있고,
      그 0 이 그대로 저장되면 총량이 '무제한'으로 리셋된다(이번 사고). */
-  if (!_rfQuotaLocked()) {
+  if (_rfQuotaNotice()) {
+    /* ★★ 수정 모드(옵션 없는 작업) — 캠페인 정원은 **첫 행 칸이 곧 그 값**이다.
+       합계 규칙("하나라도 0이면 무제한")을 쓰면 상품 줄이 둘 이상일 때 총량이 0(무제한)으로
+       리셋된다(실사고). 사람이 첫 행에서 고친 값은 그대로 저장된다. */
+    const head = live[0] || rows[0] || {};
+    if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
+    if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+  } else {
     if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
     if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
   }
@@ -4033,10 +4024,10 @@ async function saveRecruitPostImpl() {
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
       _syncPreviewFromOptRows();   // 표가 진실원본 — 저장 직전 파생값(상품 원문·정원) 최신화
-      /* ★★ 정원 잠금이면 총인원·일건수를 **아예 보내지 않는다**(미전송 = 서버 COALESCE 유지).
-         화면 잠금만으로는 부족하다 — 낡은 화면·파생 계산이 다시 0 을 만들어도 원장이 안 흔들린다.
-         변경 창구는 [📅 인원](차수·날짜별 조절) 하나. */
-      if (!_rfQuotaLocked()) {
+      /* ★★ 총인원·일건수는 이 화면에서도 고칠 수 있다(사용자 확정) — 고친 값이 그대로 저장된다.
+         0 리셋 방지는 위 파생(수정 모드 = 첫 행 값 그대로)과 프리필이 담당하고,
+         차수 있는 공고의 총모집은 서버가 무시한다(roundsLockRecruitTotal). */
+      {
         payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
         payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
         /* ★ 127: 블로그 공고의 일건수 정규화 — 표(진행상품)의 일건수가 비어도 총모집으로 채운다.
