@@ -432,11 +432,19 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
          한 리뷰어의 여러 참여가 **한 주문**을 가리키도록 오염될 수 있다(장수산업 실측: 8/19 줄이
          8/4 주문 링크를 들고 있었다). 그 상태에서 이 축만 믿으면 **별개 참여가 중복으로 지워진다**.
          담당자가 표에서 눈으로 보는 값(주문번호)이 다르면 그건 다른 구매다 — 링크보다 그 값을 믿는다.
-         ★ 표 주문번호가 6자리 미만(비번호 주문·빈 칸)인 줄은 판정할 수 없으므로 종전대로 링크로만
-           묶되, **값이 있는 줄과는 섞지 않는다**(모르는 것을 같다고 하지 않는다 = 안 지우는 쪽). */
-      const k = 'os:' + String(r.osid) + '\u0000' + (String(r.roword || '').length >= 6 ? r.roword : '');
-      if (!byOrder.has(k)) byOrder.set(k, []);
-      byOrder.get(k).push(i);
+         ★★ **표 주문번호가 6자리 미만(비번호 주문·빈 칸)이면 이 축에서 아예 제외한다**
+           (2026-08-19 2차 확정 — 종전에는 빈 값끼리 묶었다). 링크는 투영이 **연락처만으로 추측해
+           채우는** 값이라, 표에 주문번호가 없는 줄들은 *같은 사람의 서로 다른 참여*가 한 주문에
+           함께 매달리기 쉽다(실측: 진행 중 무시트 작업에서 그런 줄이 82줄). 그 상태에서 이 축으로
+           묶으면 **별개 참여가 중복으로 지워진다**. 판정 근거가 없으면 판정하지 않는다.
+           ★ 그래서 이 갈래는 사람이 [♻ 중복 줄 정리]·[🧹 줄 정리]로 직접 고른다(자동 판정 금지).
+           ★ 표 주문번호가 있는 줄끼리는 종전 그대로 묶인다(무회귀). */
+      const _rw = String(r.roword || '');
+      if (_rw.length >= 6) {
+        const k = 'os:' + String(r.osid) + '\u0000' + _rw;
+        if (!byOrder.has(k)) byOrder.set(k, []);
+        byOrder.get(k).push(i);
+      }
     }
     if (String(r.ordnum || '').length < 6) return;
     if (String(r.roword || '').length < 6) { noRowOrder.push(r); return; }
