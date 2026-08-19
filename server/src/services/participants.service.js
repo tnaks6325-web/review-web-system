@@ -569,7 +569,56 @@ async function listActiveTabs({ limit = 500 } = {}) {
   return rows;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   표에서 분리(보관) — 2026-08-19 사용자 확정 "표에서만 빼기"
+   ──────────────────────────────────────────────────────────────────
+   왜: 중복 반영으로 생긴 줄 중 **이체 근거가 걸려 지울 수 없는 줄**(입금 회차에 담김)이
+   작업표에 남아 매일 눈에 걸린다. 그렇다고 지우면(soft delete) 그 줄이 들고 있던 입금 표시가
+   표에서 사라져 **남길 줄이 미입금으로 보이고 다음 회차에 다시 담겨 이중 송금**이 난다.
+   ★★ 그래서 이건 **삭제가 아니라 화면 분리**다 — `deleted_at` 을 건드리지 않는다.
+      장부 재생성·리뷰어 검색·입금대상 추출은 `deleted_at` 만 보므로 **한 글자도 안 바뀐다**.
+   ★ 되돌리기가 기본(`hold:false`) · 누가 왜 분리했는지 남긴다.
+   ★ 쓰기 소유자 규율 — `campaign_participants` 쓰기는 이 서비스가 한다.
+   ══════════════════════════════════════════════════════════════════ */
+async function holdRows({ sheetId, tabName, seqs, hold = true, reason = '', by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('holdRows: sheetId, tabName 필수');
+  const list = [...new Set((Array.isArray(seqs) ? seqs : []).map(v => parseInt(v, 10))
+    .filter(n => Number.isInteger(n) && n > 0))];
+  if (!list.length) return { ok: false, reason: 'empty', changed: 0 };
+  const db = getPool();
+  const { rowCount } = hold
+    ? await db.query(
+      `UPDATE campaign_participants
+          SET held_at = NOW(), held_reason = LEFT($4, 300), held_by = LEFT($5, 100), updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = ANY($3::int[])
+          AND deleted_at IS NULL AND held_at IS NULL`,
+      [sheetId, tabName, list, String(reason || ''), String(by || 'admin')])
+    : await db.query(
+      `UPDATE campaign_participants
+          SET held_at = NULL, held_reason = NULL, held_by = NULL, updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND seq = ANY($3::int[])
+          AND deleted_at IS NULL AND held_at IS NOT NULL`,
+      [sheetId, tabName, list]);
+  return { ok: true, changed: rowCount, hold: !!hold, seqs: list };
+}
+
+/** 분리된 줄 목록(보관함) — 읽기 전용. 되돌릴 때 사람이 무엇을 되돌리는지 보게 한다. */
+async function listHeldRows({ sheetId, tabName, limit = 300 } = {}) {
+  if (!sheetId || !tabName) throw new Error('listHeldRows: sheetId, tabName 필수');
+  const { rows } = await getPool().query(
+    `SELECT seq, reviewer_name AS name, recipient_name AS recipient, phone8,
+            held_at AS "heldAt", held_reason AS "heldReason", held_by AS "heldBy",
+            COALESCE(is_submitted, FALSE) AS submitted, COALESCE(is_paid, FALSE) AS paid,
+            row_json AS "rowJson"
+       FROM campaign_participants
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND held_at IS NOT NULL
+      ORDER BY seq
+      LIMIT $3`, [sheetId, tabName, Math.min(Math.max(parseInt(limit, 10) || 300, 1), 1000)]);
+  return rows;
+}
+
 module.exports = {
+  holdRows, listHeldRows,
   createWorktableSlots, createSlotsFromSheetRows, appendSlot, deleteWorktableRows, retireRows, retireInactiveImportRows,
   purgeImportedRows,
   importTabFromIndex,
