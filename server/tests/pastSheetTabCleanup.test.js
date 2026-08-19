@@ -251,6 +251,30 @@ const ROWS = [
     assert.ok(/catch\s*\(e\)\s*\{[\s\S]{0,400}다시 시도/.test(body), '예외 시 사유 + 다시 시도');
   });
 
+  /* ── 8d) 아카이브 판정 = smartBuild 와 같은 규칙 ─────────
+   *  이 판정은 "그 탭이 무엇인가"가 아니라 **"저쪽(smartBuild)이 읽는가"** 다.
+   *  더 넓게 잡으면(gid 폴백) 이름이 바뀐 탭이 "이미 안 읽음"으로 접혀 **정리 대상이 사라진다**
+   *  (2026-08-19 실측 「826개 중 0개」 보고로 발견). */
+  t('8d: 아카이브 판정은 이름만 본다 — indexBuilder 의 스킵 키와 같다', () => {
+    const IB = R('server/src/services/indexBuilder.service.js');
+    assert.ok(/archivedSet\.add\(`\$\{r\.sheet_id\}\|\|\$\{r\.tab_name\}`\)/.test(IB),
+      'smartBuild 스킵 키 = sheet_id||tab_name (규칙이 바뀌면 이 가드가 먼저 깨진다)');
+    // ★ 슬라이스를 넓게 잡으면 무관한 tab_gid 가 섞인다 — **아카이브 집합을 만드는 구간만** 본다
+    const seg0 = IB.slice(IB.indexOf('const { rows: archivedRows }'), IB.indexOf('archivedSheetCounts[r.sheet_id]'));
+    assert.ok(!/tab_gid/.test(seg0), 'smartBuild 는 아카이브 판정에 gid 를 안 본다');
+    assert.ok(/archivedSet\.has\(key\)/.test(IB), '스킵도 그 키로만');
+    const seg = SRC.slice(SRC.indexOf('AS "isArchived"'), SRC.indexOf(') arch ON TRUE'));
+    assert.ok(/ima\.tab_name = tc\.tab_name/.test(seg), '이름 일치');
+    assert.ok(!/tab_gid/.test(seg), '★ gid 폴백 부활 금지 — 정리 대상이 조용히 사라진다');
+  });
+  t('8e: 이름이 바뀐 탭은 아카이브로 접지 않고 정상 판정에 태운다 + 건수를 말한다', () => {
+    const c = cls({ tabName:'새이름', tabGid:'7', archivedGidOnly:true, sampleStartDate:'24.5.10' });
+    assert.equal(c.reads, true, '읽힌다고 봐야 한다');
+    assert.equal(c.reason, 'past', '정상 판정을 거쳐 후보가 된다');
+    assert.equal(c.archivedGidOnly, true, '표식을 실어 건수로 말할 수 있게');
+    assert.ok(/archivedByGidOnly/.test(SRC), '스캔 응답에 건수 동봉(조용한 변화 금지)');
+  });
+
   /* ── 9) 연도 확인 먼저 (사용자 확정 2026-08-19) ─────────
    *  시트 표기에 연도가 없으면(`7 / 12 (금)`) 판정이 시트 등록일로 폴백해
    *  `weak_signal` 이 되어 **정리 대상에서 빠진다**. 그래서 연도 확인이 먼저다. */
