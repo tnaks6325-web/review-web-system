@@ -52,7 +52,7 @@ jobs:
                  COUNT(*) AS 총줄, COUNT(*) FILTER (WHERE r.filled) AS 채워진줄,
                  COUNT(*) FILTER (WHERE NOT r.filled) AS 빈줄,
                  EXISTS (SELECT 1 FROM recruit_campaigns rc
-                          WHERE rc.linked_tab_sheet_id=r.sheet_id
+                          WHERE rc.linked_sheet_id=r.sheet_id
                             AND rc.linked_tab_name=r.tab_name
                             AND rc.status='active' AND rc.archived_at IS NULL) AS 공고게시중
             FROM rows_all r GROUP BY 1,2;
