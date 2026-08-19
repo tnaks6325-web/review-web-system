@@ -208,4 +208,45 @@ ok('★ 리스너는 최상위에 한 번만(열 때마다 겹쳐 쌓이지 않�
 api._more('없는id', btn1);
 ok('항목이 없으면 빈 메뉴를 열지 않는다', dom.body.children[dom.body.children.length - 1].style.display === 'none');
 
+/* ═══════════════════════════════════════════════════════════════
+   ④ ↗ 작업보드 바로가기 (사용자 확정 2026-08-19 — 게이지 줄 오른쪽)
+      ★ 주 줄(3개 + [⋯])에는 넣지 않는다 — 폭이 다시 깨진다(위 ① 규율).
+      ★ 관리자 카드 전용 · 작업표 없으면 비활성 + 사유 · 딥링크는 로그 탭과 같은 방식.
+   ═══════════════════════════════════════════════════════════════ */
+ok('④ ↗ 은 주 줄이 아니라 게이지 줄 안에 있다',
+  /<span class="pg-rt">[\s\S]{0,200}\$\{wbBtn\}<\/span><\/div>/.test(cc)
+  && !/class="pact"[\s\S]{0,400}pgwb/.test(cc));
+ok('④ 관리자 게이지 두 갈래가 **같은 조각**을 쓴다(사본 0)',
+  (cc.match(/\$\{wbBtn\}/g) || []).length === 2
+  && /const wbBtn = _worktableBtn\(c\);/.test(cc)
+  && (cc.match(/const wbBtn = _worktableBtn\(c\);/g) || []).length === 1);
+ok('④ 관리자 분기 안에서만 만든다(리뷰어 카드에는 안 그린다)',
+  /if \(admin\) \{\s*\n\s*\/\/[^\n]*\n\s*const wbBtn = _worktableBtn\(c\);/.test(cc));
+ok('④ 작업표 없음·비로그인은 비활성 + 사유(죽은 버튼 금지)',
+  /class="pgwb" disabled title="이 공고에 연결된 작업표가 아직 없습니다/.test(cc)
+  && /class="pgwb" disabled title="작업보드는 관리자 로그인이 필요합니다/.test(cc));
+ok('④ onclick 에는 공고 id 만(시트발 탭명은 title 속성에만 — XSS 규율)',
+  /CampCards\.openWorkdesk\('\$\{_esc\(c\.id\)\}'\)/.test(cc)
+  && !/openWorkdesk\('\$\{_esc\(c\.linked_tab_name\)/.test(cc)
+  && /title="작업보드를 새 탭으로 열기 — \$\{_esc\(c\.linked_tab_name\)\}"/.test(cc));
+/* ★★ 미리 여는 창에 noopener 를 쓰면 핸들이 null 이라 **빈 탭 + 진짜 탭 두 개**가 열린다(실측).
+   대신 주소를 넣은 직후 opener 를 끊는다 — 같은 보호, 탭은 하나. */
+ok('④ 팝업 차단 회피: window.open 은 await 앞 · noopener 대신 opener 끊기',
+  /let w = null;\s*\n\s*try \{ w = window\.open\(''\, '_blank'\); \}/.test(cc)
+  && /try \{ w\.opener = null; \} catch/.test(cc)
+  && cc.indexOf("w = window.open(''") < cc.indexOf('await _ensureCampCtx'));
+ok('④ 딥링크는 리뷰어 로그와 같은 방식(#go= + &sso=) — 서버 변경 0',
+  /'#go=' \+ encodeURIComponent\(JSON\.stringify\(payload\)\) \+ '&sso=' \+ encodeURIComponent\(tok\)/.test(cc)
+  && /new URL\('workdesk\.html', location\.href\)/.test(cc));
+ok('④ 연결 탭 문맥 조회는 수동제출과 같은 헬퍼(사본 0)',
+  (cc.match(/await _ensureCampCtx\(id, tok\)/g) || []).length === 2);
+ok('④ CampCards 로 노출(onclick 이 부를 수 있어야 한다)', /openManualOrder, openWorkdesk,/.test(cc));
+/* ★ 이 CSS 블록은 템플릿 리터럴 안이다 — 주석의 백틱 하나가 CSS 를 끊고 뒤를 JS 로 파싱시킨다
+   (실측: ReferenceError: row is not defined). 스타일 문자열에 백틱이 없어야 한다. */
+{
+  const m = /st\.textContent = `([\s\S]*?)`;/.exec(cc);
+  ok('④ 스타일 템플릿이 통째로 살아 있다(주석 백틱으로 끊기지 않음)',
+    !!m && /\.pcard \.pgwb\{/.test(m[1]) && /\.pcard \.pg-rt\{/.test(m[1]));
+}
+
 console.log(`\n✅ campaignCardActions: ${n}개 통과`);
