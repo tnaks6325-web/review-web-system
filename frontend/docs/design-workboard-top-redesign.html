@@ -216,9 +216,14 @@
   .rv2 .rv2h .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
   .rv2 .rv2b{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
   .rv2 .rv2b::-webkit-scrollbar{width:6px} .rv2 .rv2b::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
-  .rv2 .rvcell{border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer;
-               min-height:132px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--faint);text-align:center;padding:8px}
-  .rv2 .rvcell:hover{border-color:var(--accent)}
+  /* 칸을 꽉 채우는 한 장 */
+  .rv2 .rvone{flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer;
+              display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--faint);text-align:center;padding:8px}
+  .rv2 .rvone:hover{border-color:var(--accent)}
+  .rv2 .rvpg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:5px;font-size:10px;color:var(--muted);font-weight:700}
+  .rv2 .rvpg .pgb{font:inherit;font-size:12px;line-height:1;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);
+                  background:var(--card);color:var(--ink);cursor:pointer}
+  .rv2 .rvpg .pgb:disabled{opacity:.35;cursor:default}
   .rv2 .rvempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
                 border:1px dashed var(--line2);border-radius:8px;font-size:10.5px;color:var(--faint);text-align:center;padding:10px}
   .rv2 .rvempty b{font-size:11.5px;color:var(--muted)} .rv2 .rvempty.warn b{color:var(--warn)}
@@ -372,11 +377,11 @@
 <div class="card">
   <h3>C안에서 달라진 점</h3>
   <ul>
-    <li><b>미리보기가 좌우 두 칸</b> — 왼쪽 🛒 구매 캡처 / 오른쪽 📷 리뷰 이미지. 두 묶음이 <b>같은 높이에서 나란히</b> 보여 "산 것과 쓴 것"을 눈으로 바로 대조합니다(위아래로 쌓이면 스크롤을 오가야 합니다).</li>
+    <li><b>미리보기가 좌우 두 칸</b> — 왼쪽 🛒 구매 캡처 <b>1장</b> / 오른쪽 📷 리뷰 이미지 <b>1장</b>. 두 장이 <b>같은 높이에서 나란히</b> 보여 "산 것과 쓴 것"을 눈으로 바로 대조합니다(위아래로 쌓이면 스크롤을 오가야 합니다).</li>
     <li><b>진행 현황이 절반 폭</b> — 한 줄 배치(라벨·숫자·막대·%)가 성립하지 않습니다. 내부 폭 약 216px에 라벨 54 + 숫자 84 + % 34 = 190px라 <b>막대가 26px로 뭉갭니다</b>. 그래서 C안만 <b>2줄 배치</b>(윗줄 라벨·숫자·%, 아랫줄 전폭 막대)로 바꿨습니다 — 숫자 크기는 15px로 한 단계만 줄였습니다.</li>
     <li><b>정산 구역은 그대로</b> 진행 현황 카드 하단에 남습니다. 폭이 좁아 계약 칩과 안내 문구가 두 줄로 접힐 수 있습니다(4단계 막대는 전폭 유지).</li>
     <li><b>표 가로 폭은 침해되지 않습니다</b> — 미리보기가 상단 한 줄에서 끝나고 표 옆으로 내려오지 않습니다. B안과 달리 <b>[◀ 접기]</b>가 필요 없습니다.</li>
-    <li><b>대가</b> — 미리보기 높이가 왼쪽 카드에 묶여(≈385px) 캡처를 크게 볼 수 없고(썸네일 클릭 → 크게 보기 팝업으로 봅니다), <b>표를 아래로 스크롤하면 미리보기가 화면 밖으로 사라집니다</b>(A안과 같은 성질). 두 칸이 각각 독립 스크롤이라 장수가 많아도 칸 안에서 넘깁니다.</li>
+    <li><b>대가</b> — 미리보기 높이가 왼쪽 카드에 묶여(≈385px) 캡처를 크게 볼 수 없고(썸네일 클릭 → 크게 보기 팝업으로 봅니다), <b>표를 아래로 스크롤하면 미리보기가 화면 밖으로 사라집니다</b>(A안과 같은 성질). 한 칸에 2장 이상이면 아래 <b>‹ 1/2 ›</b> 넘김 줄이 생깁니다 — 장수는 칸 머리 배지에 그대로 남습니다.</li>
   </ul>
 </div>
 </section>
@@ -538,11 +543,14 @@ function rvHtml(which,big){
   return hd+who+body;
 }
 
-/* C안 미리보기 — 좌 구매캡처 / 우 리뷰이미지 두 칸.
+/* C안 미리보기 — 좌 구매캡처 / 우 리뷰이미지 두 칸, 칸마다 **한 장씩**.
+   ★ 여러 장을 세로로 쌓으면 한 장이 작아지고 스크롤이 생겨 "나란히 대조"라는 목적이 무너진다
+     → 칸을 꽉 채워 한 장만 보이고, 2장 이상이면 아래 넘김 줄(‹ 1/2 ›)로 바꿔 본다.
+   ★ 장수는 칸 머리 배지에 그대로 남긴다 — 몇 장인지 숨기지 않는다(조용한 누락 금지).
    ★ "없다"(미제출)와 "모른다·미등록"(제출 표시는 있는데 이미지 없음)을 칸마다 따로 말한다. */
-function cells(n,label){
-  var out=''; for(var i=0;i<n;i++){ out+='<div class="rvcell" title="크게 보기">'+label+' '+(i+1)+'</div>'; }
-  return out;
+var CIDX={cap:0,rev:0};                    // 칸별로 지금 보고 있는 장(행이 바뀌면 0으로)
+function rvStep(kind,d,n){                 // 넘김 — 끝에서 순환하지 않는다(어디까지 봤는지 잃지 않게)
+  CIDX[kind]=Math.max(0,Math.min(n-1,(CIDX[kind]||0)+d)); render();
 }
 function rvHtml2(which){
   var rid=SEL[which], r=null;
@@ -550,20 +558,29 @@ function rvHtml2(which){
   var hd='<div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓</span></div>';
   if(!r) return hd+'<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 누르면 그 줄의 제출물이 여기 표시됩니다.</span></div>';
   var who='<div class="rvwho">'+esc(r.name)+'<span>#'+r.seq+' · '+esc(r.phone)+'</span></div>';
-  function col(icon,title,n,label,emptyB,emptyS,warn){
-    var body = n ? cells(n,label)
+  function col(kind,icon,title,n,label,emptyB,emptyS,warn){
+    var i=Math.min(CIDX[kind]||0,Math.max(0,n-1));
+    var body = n
+      ? '<div class="rvone" title="크게 보기">'+label+' '+(i+1)+'</div>'+
+        /* ★ 넘김 줄은 1장일 때도 **자리를 비워 둔다**(visibility) — 없애면 두 칸의
+           이미지 높이가 어긋나 나란히 대조할 때 눈이 흔들린다(실측). */
+        '<div class="rvpg"'+(n>1?'':' style="visibility:hidden"')+'>'+
+          '<button type="button" class="pgb"'+(i===0?' disabled':'')+' onclick="rvStep(\''+kind+'\',-1,'+n+')">‹</button>'+
+          '<span>'+(i+1)+' / '+n+'</span>'+
+          '<button type="button" class="pgb"'+(i===n-1?' disabled':'')+' onclick="rvStep(\''+kind+'\',1,'+n+')">›</button></div>'
       : '<div class="rvempty'+(warn?' warn':'')+'"><b>'+emptyB+'</b><span>'+emptyS+'</span></div>';
     return '<div class="rv2c"><div class="rv2h">'+icon+' '+title+'<span class="cnt">'+n+'</span></div>'+
            '<div class="rv2b">'+body+'</div></div>';
   }
-  var left  = col('🛒','구매 캡처', r.cap,'구매',
-                  r.sub||r.cap?'캡처 없음':'미제출',
+  var left  = col('cap','🛒','구매 캡처', r.cap,'구매',
+                  r.sub?'캡처 없음':'미제출',
                   r.sub?'구매 캡처가 등록되지 않았습니다.':'아직 구매 캡처가 제출되지 않았습니다.', !r.sub);
-  var right = col('📷','리뷰 이미지', r.rev,'리뷰',
+  var right = col('rev','📷','리뷰 이미지', r.rev,'리뷰',
                   r.sub?'이미지 미등록':'리뷰 미제출',
                   r.sub?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.sub);
   return hd+who+'<div class="rv2">'+left+right+'</div>';
 }
+
 
 /* ── 목업 표 ── */
 function gridHtml(which){
@@ -596,6 +613,7 @@ document.addEventListener('click',function(e){
   var tr=e.target && e.target.closest ? e.target.closest('tr[data-seq]') : null;
   if(!tr) return;
   SEL[tr.getAttribute('data-w')]=+tr.getAttribute('data-seq');
+  CIDX={cap:0,rev:0};   // ★ 행이 바뀌면 첫 장부터 — 안 되돌리면 남의 2장째가 그대로 보인다
   render();
 });
 /* 안 전환 */
