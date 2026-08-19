@@ -302,6 +302,29 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
       swp.indexOf('cleanupPairedBlanks(') > 0 && swp.indexOf('cleanupPairedBlanks(') < swp.indexOf('renumberTab('),
       `clean=${swp.indexOf('cleanupPairedBlanks(')} renum=${swp.indexOf('renumberTab(')}`);
     ok('★ 정리 실패가 재번호를 막지 않는다(둘은 독립)', /catch \(e\) \{ logger\.warn\(`\[rowNumbering\] 짝 빈 줄 정리 실패/.test(swp));
+
+    /* ★★ 정적 순서 검사만으로는 "정리를 아예 안 부르게" 만든 변이를 놓친다(변이시험 실측) →
+         스윕을 **실제로 실행**해 짝 빈 줄이 있는 탭에서 정리가 재번호보다 먼저 불렸는지 본다. */
+    {
+      const order = [];
+      const pool2 = makePool([
+        [/WITH base AS[\s\S]*pairedBlank/i, { rows: [
+          { sheetId: 'S9', tabName: 'T9', displayName: 'X', total: 10, blankNumber: 0, dupNumber: 0, pairedBlank: 3 }] }],
+        [/WITH base AS/i, () => { order.push('clean-select'); return { rows: [{ seq: 2, num: '5' }] }; }],
+        [/FROM tab_configs\s+WHERE sheet_id/i, () => { order.push('renumber'); return { rows: [{ sheetless: true }] }; }],
+        [/FROM campaign_participants p/i, { rows: [] }],
+      ]);
+      S.__setPoolForTest(pool2);
+      const led2 = require('../src/services/sheetlessLedger.service');
+      const keep = led2.retireRows;
+      led2.retireRows = async (a) => { order.push('retire'); return { retired: (a.seqs || []).length }; };
+      const sw = await S.sweepNumbering({ cap: 5 });
+      led2.retireRows = keep;
+      ok('★★★ 스윕이 짝 빈 줄 정리를 실제로 부른다', order.includes('retire'), order.join('>'));
+      ok('★★★ 그리고 재번호보다 먼저 부른다',
+        order.indexOf('retire') < order.indexOf('renumber'), order.join('>'));
+      ok('정리한 줄 수를 보고한다', sw.blankRows === 1, JSON.stringify(sw));
+    }
     const allBlk2 = sweepBlk.slice(sweepBlk.indexOf('async function renumberAllSheetless('), sweepBlk.indexOf('async function scanNumbering('));
     ok('★★ 전체 정리도 같은 순서', allBlk2.indexOf('cleanupPairedBlanks(') > 0 && allBlk2.indexOf('cleanupPairedBlanks(') < allBlk2.indexOf('renumberTab('));
     ok('스캔 결과를 보고한다', r.need === 2 && r.tabs === 2, JSON.stringify(r));
