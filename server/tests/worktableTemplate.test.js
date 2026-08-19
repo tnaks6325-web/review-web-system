@@ -249,8 +249,12 @@ ok('★ 작업표는 상단 탭이 아니라 **설정 안**에 있다(사용자 
   && !/_wtRenderReport|_loadWorktableStats/.test(wdesk));
 // ★ 패널이 늘어도 통과하도록 **목록 전체**가 아니라 "관리자 목록에 worktable 이 있고
 //   AE 목록엔 없다"를 본다(검사 의미 불변 — 패널 하나 추가에 무관한 가드가 깨지지 않게).
-ok('리뷰웹시스템[3버전] 설정 패널 목록에 worktable 이 있다(관리자만 — 서버 adminOrMaster 와 1:1)',
-  /panels: isAdmin \? \[[^\]]*'worktable'[^\]]*\] : \['nickname'\]/.test(wdesk));
+// ★ AE 목록도 늘 수 있으므로(2026-08: gatecriteria 개방) "AE 목록에 worktable 이 **없다**"로 본다
+//   — 작업표 표준 열은 전사 설정이라 서버가 여전히 adminOrMaster 다.
+ok('리뷰웹시스템[3버전] 설정 패널 목록에 worktable 이 있다(관리자만 — 서버 adminOrMaster 와 1:1)', (() => {
+  const m = /panels: isAdmin \? \[([^\]]*)\] : \[([^\]]*)\]/.exec(wdesk);
+  return !!m && /'worktable'/.test(m[1]) && !/'worktable'/.test(m[2]);
+})());
 ok('관리자 대시보드 설정 탭에도 같은 패널이 뜬다(공유 모듈 — 두 화면이 갈라지지 않는다)',
   /panels: \[[^\]]*'worktable'[^\]]*\], autoload: false/.test(adminHtml)
   && /loadWorktableTemplate\(\)/.test(idxApp));

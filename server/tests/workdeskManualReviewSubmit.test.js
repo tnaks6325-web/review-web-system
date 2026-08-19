@@ -27,11 +27,12 @@ assert.match(manualBlock, /slot_key\s*=\s*'review'/, '리뷰 슬롯 파일만 �
 assert.match(manualBlock, /UPDATE review_index SET is_submitted = TRUE/, '리뷰 내역 상태를 제출 완료로 반영한다');
 assert.match(manualBlock, /is_submitted=TRUE/, '작업보드 참여자 상태도 제출 완료로 반영한다');
 
-// 관리자/마스터만 사용할 수 있는 별도 명령이어야 한다.
+// 내부 담당자(master/admin/staff)만 사용할 수 있는 별도 명령이어야 한다(광고주·리뷰어 차단).
 const routeAt = routes.indexOf("router.post('/workdesk/manual-review-submit'");
 assert.ok(routeAt >= 0, '관리자 수동 리뷰제출 라우트가 존재한다');
 const routeBlock = routes.slice(routeAt, routeAt + 1400);
-assert.match(routeBlock, /authMiddleware, adminOrMasterMiddleware/, '수동 리뷰제출은 관리자/마스터만 허용한다');
+// ★ 2026-08 사용자 확정: AE(staff)도 수동 리뷰제출을 한다 — 광고주·리뷰어는 계속 차단.
+assert.match(routeBlock, /authMiddleware, internalMiddleware/, '수동 리뷰제출은 내부 담당자만 허용한다');
 assert.match(routeBlock, /fileIds/, '첨부된 파일 ID 배열을 필수로 받는다');
 assert.match(routeBlock, /manualWorkdeskReviewSubmit/, '라우트가 전용 서비스로 연결된다');
 

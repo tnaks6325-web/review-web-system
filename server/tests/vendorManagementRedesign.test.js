@@ -260,8 +260,12 @@ async function run() {
   t('★ 설정 패널은 position:fixed(스크롤 컨테이너 안에 두면 화면 흐름에 섞인다)',
     /\.ovm-drawer\{position:fixed/.test(HTML) && /\.ovm-scrim\{position:fixed/.test(HTML));
   t('열 선택은 브라우저에 기억(localStorage)', /_OVM_COLS_KEY='wd_own_cols'/.test(HTML) && /localStorage\.setItem\(_OVM_COLS_KEY/.test(HTML));
-  t('staff 에게 접속링크·계정 버튼 미노출(서버 게이트와 1:1)',
-    /const isAdmin=STATE\.role==='master'\|\|STATE\.role==='admin';[\s\S]{0,2200}\$\{isAdmin\?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer\('link'\)/.test(HTML));
+  // ★ 2026-08 사용자 확정: 접속링크·광고주 계정도 AE 가 관리한다(서버 라우트 internalMiddleware).
+  //   그래서 검사는 "admin 만"이 아니라 **화면 판정이 서버 게이트와 같은 함수를 쓰는가**로 바꾼다 —
+  //   `_isInternalRole()` 이 사라지고 좁은/넓은 사본이 생기면 버튼과 서버가 다시 갈린다.
+  t('접속링크·계정 버튼 게이트 = 서버 게이트와 1:1(_isInternalRole 단일 판정)',
+    /const isAdmin=_isInternalRole\(\);[\s\S]{0,2200}\$\{isAdmin\?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer\('link'\)/.test(HTML)
+    && /function _isInternalRole\(\)\{[^}]*r==='master'[^}]*r==='admin'[^}]*r==='staff'/.test(HTML));
   t('개요·연결탭이 같은 판정을 쓴다(서버 불리언 소비 — 프론트 재계산 금지)',
     /t\.finishCand/.test(HTML) && !/function isOwnFinishCandidate/.test(HTML));
 
@@ -405,7 +409,9 @@ async function run() {
     sb.$ = sel => boxes[sel] || null;
     vm.createContext(sb);
     // 실제 헬퍼를 함께 올린다 — 배지 조건이 _ovmCandKnown 을 거치므로 플래그 로직까지 함께 실행된다.
-    vm.runInContext([grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmRenderAdvs')].join('\n'), sb);
+    // ★ _isInternalRole 도 함께 올린다 — 업체 삭제(×) 버튼 게이트가 그 함수를 부른다(스텁을 두면
+    //   역할 판정이 거기서만 딴판이 된다: workbarRecruitSort 가드의 WANT 목록과 같은 규율).
+    vm.runInContext([grab('_isInternalRole'), grab('_ovmCandKnown'), grab('_ovmCandWhy'), grab('_ovmAdvMatch'), grab('_ovmRenderAdvs')].join('\n'), sb);
     const render = (advs, ovMeta) => { sb.STATE.advs = advs; sb.STATE.ovMeta = ovMeta;
       boxes['#advs'].innerHTML = ''; vm.runInContext('_ovmRenderAdvs()', sb); return boxes['#advs'].innerHTML; };
     const A = [{ id: 'A', name: '업체A', inadPm: 'AE', owned: 1, finishCand: 3 }, { id: 'B', name: '업체B', inadPm: 'AE', owned: 1, finishCand: 0 }];

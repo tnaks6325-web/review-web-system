@@ -59,10 +59,12 @@ t('★★ 편집은 전부 editorOnlyMiddleware 뒤 — 이름 명단만 통과'
 t('★ 열람 라우트에는 편집 게이트를 걸지 않는다(읽기까지 막히면 탭이 무의미)', () => {
   READ.forEach(k => assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 열람에 편집 게이트'));
 });
-t('명단 관리는 master/admin 전용(AE 가 자기를 명단에 넣지 못하게)', () => {
+// ★ 2026-08 사용자 확정: 명단 관리도 내부 담당자(AE 포함)가 한다 — 광고주·리뷰어는 차단.
+//   ⚠ 명단이 자기 자신을 게이트하면(editorOnly) 명단에서 빠지는 순간 아무도 못 고치므로 그 금지는 유지.
+t('명단 관리는 내부 담당자 전용(광고주 차단)', () => {
   ['GET /workdesk-editors', 'POST /workdesk-editors', 'DELETE /workdesk-editors/:id'].forEach(k => {
     assert.ok(L[k], '없음: ' + k);
-    assert.ok(L[k].includes('adminOrMasterMiddleware'), k + ': adminOrMaster 게이트 없음');
+    assert.ok(L[k].includes('internalMiddleware'), k + ': internal 게이트 없음');
     assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 명단이 자기 자신을 게이트하면 안 됨');
   });
 });

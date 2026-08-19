@@ -186,8 +186,9 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     const routes = read('src/routes/trackB.routes.js');
     ok('POST /worktable/retire-rows 등록', /router\.post\('\/worktable\/retire-rows'/.test(routes));
     const line = /router\.post\('\/worktable\/retire-rows'[^\n]*/.exec(routes)[0];
-    ok('★ adminOrMaster — 검색 명단에서 사람을 빼는 조작(정원 변경과 같은 급)',
-      /authMiddleware/.test(line) && /adminOrMasterMiddleware/.test(line));
+    // ★ 2026-08 사용자 확정: 날짜별 인원 조절과 함께 AE(staff)에게 열었다 — internal(광고주 차단).
+    ok('★ internal — 검색 명단에서 사람을 빼는 조작(정원 변경과 같은 급, 광고주 차단)',
+      /authMiddleware/.test(line) && /internalMiddleware/.test(line));
     ok('★ 검증 오류는 400대로(errorHandler 마스킹 방지)', /LedgerError\) return res\.status\(400\)/.test(routes));
 
     const wd = read('../frontend/workdesk.html');

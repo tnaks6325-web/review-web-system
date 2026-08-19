@@ -530,7 +530,10 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
       /ImportError[\s\S]{0,200}res\.status\(400\)/.test(rt));
 
     const fh = readFront('workdesk.html');
-    ok('업체 패널에 진입점(관리자 전용)', /isAdmin\?`<button[^`]*openSheetImport\('\$\{esc\(a\.id\)\}'\)/.test(fh));
+    // ★ 2026-08: 같은 패널의 접속링크·계정 버튼이 AE 에게 열리면서 그쪽 변수명이 바뀌었다.
+    //   시트 가져오기는 **여전히 admin/master 전용**(등록 창구)이라 전용 판정 변수(canImport)를 쓴다.
+    ok('업체 패널에 진입점(관리자 전용)', /canImport\?`<button[^`]*openSheetImport\('\$\{esc\(a\.id\)\}'\)/.test(fh)
+      && /const canImport=STATE\.role==='master'\|\|STATE\.role==='admin';/.test(fh));
     ok('사이드바에도 진입점 — 업체를 모를 때 주소부터 넣는 경로', /openSheetImport\(''\)/.test(fh));
     /* ★★ 거래처 등록 드로어에도 안내 — 그 시트 드롭다운에는 **시스템이 아는 시트만** 나오므로,
        미등록 시트를 찾으러 온 사람이 여기서 막다른 길에 빠진다(실사용 신고 2026-08-10). */
