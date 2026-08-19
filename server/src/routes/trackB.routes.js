@@ -1164,6 +1164,24 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+/* ★★ 일괄 셀 편집(붙여넣기) — **왕복 1회**.
+ *  칸마다 요청을 보내면 전역 리미터(분당 120)와 PG 풀(20)에 먼저 막혀
+ *  500칸 붙여넣기가 구조적으로 완주할 수 없다(실측: 419/500 커넥션 타임아웃).
+ *  게이트·스코프·판정은 단건과 **같은 것**을 쓴다(권한이 넓어지지 않는다). */
+router.post('/workdesk/edit-batch', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, edits } = req.body || {};
+    if (!sheetId || !tabName || !Array.isArray(edits) || edits.length === 0) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, edits 필수' });
+    }
+    if (edits.length > svc.EDIT_BATCH_MAX) {
+      return res.status(400).json({ ok: false, error: 'too_many_edits', max: svc.EDIT_BATCH_MAX, got: edits.length });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.editWorkdeskRowsBatch({ sheetId, tabName, edits, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
 router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, field } = req.body || {};
