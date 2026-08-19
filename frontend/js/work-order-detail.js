@@ -1077,6 +1077,114 @@ function woAcceptTabPicker(resp, onPick) {
   document.body.appendChild(ov);
 }
 
+
+/* ══════════════════════════════════════════════════════════════
+   접수 실패(동일 이름 광고주) 확인 팝업 — 관리자 대시보드·리뷰웹시스템[3버전] 공용.
+
+   서버 /admin/accept 가 409 에 advertiserNameConflict(인트라넷 광고주 + 이름이 같은
+   기존 업체 후보)를 실어 주면, 사람이 "같은 업체입니다"를 확인해 body.linkAdvertiserId
+   로 재접수한다. 서버는 그때만 기존 업체에 인트라넷 원본 ID 를 채운다(blank-only).
+   ★ 자동 병합은 만들지 않는다 — 이름은 표시값이라 잘못 붙으면 그 업체의 작업 소유·
+     정산 계약·광고주 접속 링크가 남에게 열린다. 고르는 것은 항상 사람이다.
+   ★ 이미 다른 인트라넷 광고주에 연결된 후보는 **비활성 + 사유**(눌러도 서버가 거부한다).
+   ★ 업체명·담당자는 외부 문자열 — onclick 문자열 보간 금지, DOM 생성 + addEventListener. */
+function woAdvertiserLinkPicker(resp, onLink) {
+  var c = (resp && resp.advertiserNameConflict) || {};
+  var cands = c.candidates || [];
+  var old = document.getElementById("woAdvLinkModal");
+  if (old) old.remove();
+  var ov = document.createElement("div");
+  ov.id = "woAdvLinkModal";
+  ov.style.cssText = "position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px";
+  var box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.3);overflow:hidden";
+
+  var head = document.createElement("div");
+  head.style.cssText = "padding:16px 18px 12px;border-bottom:1px solid #E5E7EB";
+  var h = document.createElement("div");
+  h.textContent = "⚠ 같은 이름의 업체가 이미 있습니다";
+  h.style.cssText = "font-size:15px;font-weight:700;color:#B91C1C;margin-bottom:6px";
+  var p = document.createElement("div");
+  p.textContent = "이름만으로는 같은 회사인지 알 수 없어 자동으로 붙이지 않았습니다. 아래 업체가 이 광고주와 같은 회사라면 연결해 접수합니다(연결하면 이후 접수는 자동으로 이어집니다).";
+  p.style.cssText = "font-size:12.5px;color:#6B7280;line-height:1.5";
+  head.appendChild(h); head.appendChild(p);
+
+  // 인트라넷 원본(비교 기준)
+  var src = document.createElement("div");
+  src.style.cssText = "margin:12px 14px 0;padding:10px 12px;border:1.5px solid #C7D2FE;background:#EEF2FF;border-radius:8px;font-size:12.5px;line-height:1.6";
+  var srcT = document.createElement("div");
+  srcT.textContent = "작업오더의 광고주 (인트라넷 원본)";
+  srcT.style.cssText = "font-weight:700;color:#3730A3;margin-bottom:2px";
+  var srcB = document.createElement("div");
+  srcB.textContent = (c.name || "(이름 없음)")
+    + (c.businessNumber ? "  ·  사업자 " + c.businessNumber : "")
+    + (c.contact ? "  ·  " + c.contact : "");
+  src.appendChild(srcT); src.appendChild(srcB);
+
+  var list = document.createElement("div");
+  list.style.cssText = "overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px";
+  cands.forEach(function (a) {
+    var linked = String(a.intranetAdvertiserId || "");
+    var row = document.createElement("div");
+    row.style.cssText = "border:1.5px solid " + (linked ? "#E5E7EB" : "#D1D5DB") + ";border-radius:8px;padding:10px 12px;background:" + (linked ? "#F9FAFB" : "#fff");
+    var t = document.createElement("div");
+    t.textContent = (a.name || "(이름 없음)") + (a.status === "ended" ? "  (종료된 거래처)" : "");
+    t.style.cssText = "font-size:13.5px;font-weight:700;color:#111827;margin-bottom:3px";
+    var meta = document.createElement("div");
+    var bits = [];
+    bits.push(a.businessNumber ? "사업자 " + a.businessNumber : "사업자번호 없음");
+    if (a.contact) bits.push(a.contact);
+    if (a.inadPm) bits.push("담당 " + a.inadPm);
+    bits.push(a.ownedTabs == null ? "소유 작업 ?" : "소유 작업 " + a.ownedTabs + "건");
+    meta.textContent = bits.join("  ·  ");
+    meta.style.cssText = "font-size:12px;color:#6B7280;margin-bottom:8px;line-height:1.5";
+    row.appendChild(t); row.appendChild(meta);
+
+    var b = document.createElement("button");
+    b.type = "button";
+    if (linked) {
+      b.disabled = true;
+      b.textContent = "다른 인트라넷 광고주에 이미 연결됨";
+      b.title = "원본 ID=" + linked;
+      b.style.cssText = "width:100%;padding:9px 12px;border:1.5px solid #E5E7EB;border-radius:8px;background:#F3F4F6;color:#9CA3AF;font-size:13px;cursor:not-allowed";
+    } else {
+      b.textContent = "같은 업체입니다 · 연결하고 접수";
+      b.style.cssText = "width:100%;padding:9px 12px;border:1.5px solid #4F46E5;border-radius:8px;background:#4F46E5;color:#fff;font-size:13px;font-weight:700;cursor:pointer";
+      b.addEventListener("click", function () {
+        if (!confirm('"' + (a.name || "") + '" 업체를 이 광고주의 원본으로 연결하고 접수할까요?\n\n· 이 업체가 인트라넷 광고주와 같은 회사일 때만 눌러주세요.\n· 연결 후에는 이 광고주의 작업오더가 이 업체로 자동 연결됩니다.')) return;
+        ov.remove();
+        if (typeof onLink === "function") onLink(String(a.id || ""), a);
+      });
+    }
+    row.appendChild(b);
+    list.appendChild(row);
+  });
+  if (!cands.length) {
+    var empty = document.createElement("div");
+    empty.textContent = "겹치는 업체 정보를 가져오지 못했습니다. 업체관리에서 같은 이름의 업체를 확인해 주세요.";
+    empty.style.cssText = "font-size:13px;color:#6B7280;padding:14px";
+    list.appendChild(empty);
+  }
+
+  var note = document.createElement("div");
+  note.textContent = "다른 회사라면 연결하지 마세요. 업무포털 거래처 관리에서 기존 업체 이름을 구분되게 바꾼 뒤 다시 접수하면 새 업체로 등록됩니다.";
+  note.style.cssText = "margin:0 14px 10px;font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:9px 11px;line-height:1.5";
+
+  var foot = document.createElement("div");
+  foot.style.cssText = "padding:10px 14px;border-top:1px solid #E5E7EB;text-align:right";
+  var cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "취소";
+  cancel.style.cssText = "padding:8px 16px;border:1.5px solid #D1D5DB;border-radius:8px;background:#fff;font-size:13px;cursor:pointer";
+  cancel.addEventListener("click", function () { ov.remove(); });
+  foot.appendChild(cancel);
+
+  box.appendChild(head); box.appendChild(src); box.appendChild(list); box.appendChild(note); box.appendChild(foot);
+  ov.appendChild(box);
+  ov.addEventListener("click", function (e) { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+
   // 전역 공개 — index-app.js 의 기존 호출부와 onclick/onerror 문자열이 이름 그대로 쓴다.
   //   (모듈 안에서 선언만 하면 admin 화면의 기존 호출이 전부 깨진다)
   var EXPORTS = {
@@ -1104,6 +1212,7 @@ function woAcceptTabPicker(resp, onPick) {
     _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
     _woOptionRows: _woOptionRows, _woProductMode: _woProductMode, _woCampaignPrefill: _woCampaignPrefill,
     woAcceptTabPicker: woAcceptTabPicker,
+    woAdvertiserLinkPicker: woAdvertiserLinkPicker,
     woAdminEditModal: woAdminEditModal,
   };
   for (var k in EXPORTS) if (Object.prototype.hasOwnProperty.call(EXPORTS, k)) window[k] = EXPORTS[k];

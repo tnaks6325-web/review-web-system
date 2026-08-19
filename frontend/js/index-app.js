@@ -1759,7 +1759,7 @@ async function woSendMemo(id) {
 //   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 // ★ pickGid: 탭 교정 재접수 — URL의 gid가 시트에 없을 때(404 gidNotFound) 팝업에서
 //   사람이 고른 탭의 gid. 서버가 이 gid로 접수하고 work_sheet_url까지 교정한다.
-async function woAccept(id, pickGid) {
+async function woAccept(id, pickGid, linkAdvertiserId) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
@@ -1767,7 +1767,7 @@ async function woAccept(id, pickGid) {
   // ★★ 시트탭URL이 없는 오더는 **무시트로 접수**된다(시스템 작업표 생성 — 사용자 확정 2026-08-10).
   //   종전엔 여기서 막아 인트라넷 리뷰오더(시트URL 칸 없음)를 접수할 방법이 없었다.
   //   판정·생성은 서버(`sheetlessAccept.resolveAcceptMode`)가 하고 화면은 확인만 받는다.
-  if (!url) {
+  if (!url && !linkAdvertiserId) {
     if (!confirm("구글시트 없이 시스템 작업표로 접수할까요?\n\n· 모집인원만큼의 줄이 시스템 작업표로 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.")) return;
   }
   if (url && !/[#?&]gid=\d+/.test(url) && !pickGid) {
@@ -1780,13 +1780,22 @@ async function woAccept(id, pickGid) {
   try {
     // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
     const payload = pickGid ? { action: "orderAdminAccept", id, gid: pickGid } : { action: "orderAdminAccept", id };
+    // ★ 같은 이름의 기존 업체를 사람이 "같은 업체"라고 확인한 경우에만 실린다(자동 병합 금지).
+    if (linkAdvertiserId) payload.linkAdvertiserId = linkAdvertiserId;
     const r = await gasGet(payload, 60000);
     if (!(r && r.ok)) {
       // ★ URL의 gid가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서
       //   사람이 골라 재접수(교정 흐름). 공용 팝업 = work-order-detail.js woAcceptTabPicker.
       if (r && r.gidNotFound && typeof woAcceptTabPicker === "function") {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-        woAcceptTabPicker(r, g => woAccept(id, g));
+        woAcceptTabPicker(r, g => woAccept(id, g, linkAdvertiserId));
+        return;
+      }
+      // ★ 같은 이름의 기존 업체가 있어 자동 병합하지 않음 → 사람이 확인해 연결하고 재접수.
+      //   공용 팝업 = work-order-detail.js woAdvertiserLinkPicker.
+      if (r && r.advertiserNameConflict && typeof woAdvertiserLinkPicker === "function") {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
+        woAdvertiserLinkPicker(r, advId => woAccept(id, pickGid, advId));
         return;
       }
       // ★ 무시트 접수가 막힌 경우는 사유(건수 0·표준 열 미설정 등)를 그대로 보여준다.

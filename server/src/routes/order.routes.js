@@ -20,6 +20,7 @@ const { LEGACY_DELIVERY_VALUES, normalizeReviewType } = require('../utils/review
 const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
 const { workKindForStore } = require('../utils/workKind');   // 099 — 체험단 종류(리뷰/블로그)
 const { assertWorkOrderQuota, syncWorkOrderRecruitTotal } = require('../services/linkedRecruitQuota.service');
+const { projectIntranetAdvertiser, ADVERTISER_NAME_CONFLICT } = require('../services/advertiserProjection.service');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -350,102 +351,8 @@ function _emitWorkOrderNew(row, extra) {
 // 인트라넷(inadd-system)에서 직접 POST. created_by 는 페이로드의 requester_name.
 // 필요 env: ORDER_INTAKE_KEY
 // ═══════════════════════════════════════════════════════════
-function _portalWorkId() {
-  return 'pw_' + crypto.randomBytes(6).toString('hex');
-}
-
-function _sourceText(value, maxLength) {
-  return String(value == null ? '' : value).trim().slice(0, maxLength);
-}
-
-// 이름은 표시값이다. 원본 연결은 인트라넷 광고주 ID가 같을 때에만 허용한다.
-async function _upsertIntranetAdvertiserAndPortalWork(order, context) {
-  const intranetId = _sourceText(order.intranet_advertiser_id, 128);
-  if (!intranetId) return null;
-
-  const name = _sourceText(order.intranet_advertiser_name, 200);
-  if (!name) throw new Error('원본 광고주명이 없어 광고주를 연결할 수 없습니다.');
-  const contact = _sourceText(order.intranet_advertiser_contact, 300);
-  const businessNumber = _sourceText(order.intranet_advertiser_business_number, 80);
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { rows: existingRows } = await client.query(
-      `SELECT id, intranet_advertiser_id FROM advertisers
-        WHERE intranet_advertiser_id = $1
-        FOR UPDATE`,
-      [intranetId]
-    );
-
-    let advertiserId = existingRows[0] && existingRows[0].id;
-    if (!advertiserId) {
-      const { rows: sameNameRows } = await client.query(
-        `SELECT id, intranet_advertiser_id FROM advertisers WHERE name = $1 FOR UPDATE`, [name]
-      );
-      if (sameNameRows.length) {
-        throw new Error('동일 이름의 기존 광고주가 있어 자동 병합하지 않았습니다. 원본 연결을 확인해 주세요.');
-      }
-      const { rows: inserted } = await client.query(
-        `INSERT INTO advertisers
-           (id, name, intranet_advertiser_id, intranet_contact, intranet_business_number)
-         VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (intranet_advertiser_id) WHERE intranet_advertiser_id <> ''
-         DO UPDATE SET
-           name = EXCLUDED.name,
-           intranet_contact = COALESCE(NULLIF(EXCLUDED.intranet_contact, ''), advertisers.intranet_contact),
-           intranet_business_number = COALESCE(NULLIF(EXCLUDED.intranet_business_number, ''), advertisers.intranet_business_number),
-           updated_at = NOW()
-         RETURNING id`,
-        ['adv_' + crypto.randomBytes(6).toString('hex'), name, intranetId, contact, businessNumber]
-      );
-      advertiserId = inserted[0].id;
-    } else {
-      await client.query(
-        `UPDATE advertisers SET
-           name = $2,
-           intranet_contact = COALESCE(NULLIF($3, ''), intranet_contact),
-           intranet_business_number = COALESCE(NULLIF($4, ''), intranet_business_number),
-           updated_at = NOW()
-         WHERE id = $1`,
-        [advertiserId, name, contact, businessNumber]
-      );
-    }
-
-    const { rows: workRows } = await client.query(
-      `INSERT INTO portal_works
-         (id, advertiser_id, work_order_id, inad_manager, work_type, product, channel,
-          qty, progress_date, work_sheet_url, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       ON CONFLICT (work_order_id) WHERE work_order_id <> ''
-       DO UPDATE SET
-         advertiser_id = EXCLUDED.advertiser_id,
-         inad_manager = EXCLUDED.inad_manager,
-         work_type = EXCLUDED.work_type,
-         product = EXCLUDED.product,
-         channel = EXCLUDED.channel,
-         qty = EXCLUDED.qty,
-         progress_date = EXCLUDED.progress_date,
-         work_sheet_url = COALESCE(NULLIF(EXCLUDED.work_sheet_url, ''), portal_works.work_sheet_url),
-         updated_at = NOW()
-       RETURNING id`,
-      [
-        _portalWorkId(), advertiserId, order.id, _sourceText(order.manager_name || order.work_manager, 100),
-        order.work_kind === 'blog' ? '블로그 체험단' : '리뷰 체험단',
-        _sourceText(order.product_option || order.title, 1000), _sourceText(order.inflow_type, 100),
-        _intOrZero(order.recruit_count), _dateOrNull(order.start_date),
-        _sourceText(context && context.workSheetUrl, 1000), _sourceText(context && context.by, 100),
-      ]
-    );
-    await client.query(`UPDATE work_orders SET advertiser_id = $2, updated_at = NOW() WHERE id = $1`, [order.id, advertiserId]);
-    await client.query('COMMIT');
-    return { advertiserId, portalWorkId: workRows[0].id };
-  } catch (error) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    throw error;
-  } finally {
-    client.release();
-  }
-}
+// 인트라넷 광고주 → 업체/포털 작업 원본 연결은 서비스 한 곳(advertiserProjection.service)이 맡는다.
+//   동일 이름 충돌 시의 "사람 확인 후 연결" 규칙까지 그 안에 있다(사본 금지).
 
 router.post('/intake', async (req, res, next) => {
   try {
@@ -1446,15 +1353,21 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
     // ════════════════════════════════════════════════════════════════════
     let advertiserProjection = null;
     try {
-      advertiserProjection = await _upsertIntranetAdvertiserAndPortalWork(o, {
+      advertiserProjection = await projectIntranetAdvertiser(o, {
         workSheetUrl: wantSheetless ? '' : tabSheetUrl,
         by: req.admin?.name || '',
+        // ★ 사람이 "같은 업체입니다"라고 확인한 경우에만 기존 업체에 원본 ID 를 백필한다.
+        //   (자동 병합 금지 — 이름은 표시값이라 잘못 붙으면 남의 작업·정산·접속링크가 열린다)
+        linkAdvertiserId: String((req.body || {}).linkAdvertiserId || '').trim(),
       });
     } catch (projectionErr) {
+      const conflict = projectionErr && projectionErr.code === ADVERTISER_NAME_CONFLICT;
       return res.status(409).json({
         ok: false,
         error: `광고주 작업 연결을 완료하지 못했습니다: ${projectionErr.message}`,
         work_order_id: o.id,
+        // ★ 막다른 길로 두지 않는다 — 무엇과 겹쳤는지(후보)를 함께 내려 화면이 확인을 받게 한다.
+        ...(conflict ? { advertiserNameConflict: projectionErr.detail } : {}),
       });
     }
 

@@ -6649,10 +6649,13 @@ async function _woAccept(id, pickGid, opts){
   const msg = ns
     ? '이 작업오더를 접수할까요?\n\n· 구글시트 없이 시스템 작업표(모집인원만큼의 줄)를 만들어 등록합니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.'
     : '이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.';
-  if(!pickGid && !confirm(msg)) return false;
+  // ★ 팝업(탭 교정·광고주 연결)에서 이미 확인을 받았으면 확인창을 다시 띄우지 않는다.
+  const _confirmed = !!pickGid || !!(opts&&opts.linkAdvertiserId);
+  if(!_confirmed && !confirm(msg)) return false;
   const body = pickGid ? {id, gid:pickGid} : {id};
   if(opts&&opts.tabName) body.tabName=opts.tabName;
   if(opts&&opts.planOptions) body.planOptions=opts.planOptions;
+  if(opts&&opts.linkAdvertiserId) body.linkAdvertiserId=opts.linkAdvertiserId;
   const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify(body)});
   if(r&&r.ok){
     const wt = r.worktable && r.worktable.rows ? ' · 작업표 '+r.worktable.rows+'줄' : '';
@@ -6665,7 +6668,12 @@ async function _woAccept(id, pickGid, opts){
   // ★ URL 의 gid 가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서 사람이 골라
   //   재접수. 팝업은 관리자 대시보드와 공용(work-order-detail.js woAcceptTabPicker).
   else if(r&&r.gidNotFound&&typeof woAcceptTabPicker==='function'){
-    woAcceptTabPicker(r, g=>_woAccept(id, g));
+    woAcceptTabPicker(r, g=>_woAccept(id, g, opts));
+  }
+  // ★ 같은 이름의 기존 업체가 있어 자동 병합하지 않은 경우 — 사람이 "같은 업체"를 확인해
+  //   재접수한다(공용 팝업 woAdvertiserLinkPicker). 자동 병합은 만들지 않는다.
+  else if(r&&r.advertiserNameConflict&&typeof woAdvertiserLinkPicker==='function'){
+    woAdvertiserLinkPicker(r, advId=>_woAccept(id, pickGid, Object.assign({}, opts||{}, {linkAdvertiserId:advId})));
   }
   // ★ 무시트 접수가 막힌 경우는 **왜 못 만드는지**(건수 0·표준 열 미설정 등)를 그대로 보여준다.
   else if(r&&r.sheetless&&r.blockers&&r.blockers.length){
