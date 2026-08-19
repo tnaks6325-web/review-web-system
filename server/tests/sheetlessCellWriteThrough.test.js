@@ -201,6 +201,13 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
     assert.ok(/sheetless \? \{ deactivated: 0, reconcileSkipped: 'sheetless' \}/.test(pt), '건너뜀 분기 필요');
   });
   const revert = tb.slice(tb.indexOf('async function revertWorkdeskEdit'));
+  t('4g-2: 빈 준비 자리도 되돌릴 수 있다 — 편집만 되고 ↩ 는 죽는 막다른 길 금지', () => {
+    // 편집은 물리행 앵커로 저장되는데 _deriveAnchor 가 null 이면 revert 가 no_stable_anchor 로 죽는다(테섭 실측).
+    assert.ok(/_rowAnchorId\(row\) \? \{ type: 'manual', value: _rowAnchorId\(row\) \} : null/.test(tb),
+      '_deriveAnchor 에 물리행 앵커 폴백 필요');
+    assert.ok(/const rowKey = _akey\('manual', _rowAnchorId\(r\)\)/.test(tb),
+      '앵커 승격 후에도 그 값이 화면에서 사라지지 않게 밑에 깔아 합성해야 한다');
+  });
   t('4h: 되돌리기 — 원본이 그 사이 바뀌었으면 덮지 않는다(superseded)', () => {
     assert.ok(/supersededReason = 'superseded'/.test(revert.slice(0, 4000)), 'stale 감지 필요');
     assert.ok(/removeRowJsonCell/.test(revert.slice(0, 4000)), 'had_prev=false 면 키 삭제');
