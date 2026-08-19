@@ -170,7 +170,11 @@ function _pairView(p) {
     holder: it.accountHolder,
     memo: it.transferMemo,
     status: it.status,
+    /* ★ 이미 처리된 건(paid/failed)의 표시는 **항목 상태가 정한다** — 라벨링 2차가 결과 줄을
+         붙여도 판정을 바꾸지 않는다(2차는 이체시각을 채우려고 붙이는 것뿐이다).
+         이 분기가 없으면 실패로 확정된 건이 파일의 성공 줄과 짝지어져 '성공'으로 보인다. */
     outcome: it.status === 'paid' ? 'already_paid'
+           : it.status === 'failed' ? 'not_in_file'
            : !p.result ? 'not_in_file'
            : (p.success ? 'success' : 'failed'),
     resultStatus: p.result ? p.result.statusRaw : '',
@@ -211,8 +215,20 @@ async function _analyze(batchId, fileName, base64) {
   const targets = items.filter(it => it.status === 'pending');
   const m = matchResults(targets, parse.rows);
 
-  const donePairs = items.filter(it => it.status !== 'pending')
-    .map(it => ({ item: it, result: null, matchKey: '', success: false, reason: 'already' }));
+  /* ★★ 2차는 **라벨링 전용**(반영 대상 아님) — 이미 처리된 건에도 결과 줄을 붙여 본다.
+       왜: 반영이 끝난 뒤 같은 파일을 다시 올리면 pending 이 0 이라 파일의 **모든 줄이
+       "짝 없음"** 이 되어 화면이 그것을 "미확인 이체"라고 불렀다(2026-08-19 회차 #12:
+       실제 미확인은 1건인데 **518건**으로 표시). 미확인 행에는 [작업 검색·대조] → 승인
+       경로가 붙어 있어, 이미 입금된 517건에 **이중 입금**을 낼 입구가 열려 있었다.
+     ★★ **판별은 정보 일치(계좌 숫자 + 금액)뿐 — 줄 번호를 근거로 쓰지 않는다**(사용자 확정
+       2026-08-19): 은행 다건이체는 **내려받은 순서대로 이체되지 않는 경우가 있어** 결과 파일의
+       행 순서가 회차 순서와 다를 수 있다. `matchResults` 의 키가 이미 계좌+금액이라 순서가
+       뒤바뀌어도 같은 결과가 나온다(실측: 파일을 역순으로 뒤집어도 미확인 1건 동일).
+     ★ **1차에서 안 쓰인 줄만** 넘긴다 — 결과 줄은 1:1 로 소비되므로, 은행이 **진짜로 두 번**
+       보낸 경우 두 번째 줄은 짝지을 항목이 남지 않아 **그대로 미확인으로 남는다**(실측 확인).
+       즉 이 2차는 중복 이체를 숨기지 않는다. */
+  const labeled = matchResults(items.filter(it => it.status !== 'pending'), m.unmatchedResults);
+  const donePairs = labeled.pairs.map(p => ({ ...p, reason: 'already' }));
 
   return {
     batch: b,
@@ -220,7 +236,8 @@ async function _analyze(batchId, fileName, base64) {
     format: loaded.format,
     pairs: m.pairs,
     view: [...m.pairs, ...donePairs].map(_pairView),
-    unmatchedResults: m.unmatchedResults.map(r => ({
+    /* 미확인 = **양쪽 어디에도 짝이 없는 줄**(1차 pending · 2차 라벨링). */
+    unmatchedResults: labeled.unmatchedResults.map(r => ({
       seq: r.seq, accountTail: String(r.accountDigits || '').slice(-4),
       amount: r.amount, holder: r.holder, memo: r.memo || '',
       transferredAt: r.transferredStamp || '', status: r.statusRaw, success: r.success,
@@ -228,6 +245,9 @@ async function _analyze(batchId, fileName, base64) {
     orderAssigned: m.orderAssigned,
     summary: {
       ...m.summary,
+      /* ★ 반영 판정 수치(matched/success/failed/notInFile)는 **1차 그대로** — 반영 대상은
+           여전히 pending 뿐이다. 여기서 덮는 것은 "미확인" 집계 하나뿐이다. */
+      unmatchedResults: labeled.unmatchedResults.length,
       alreadyPaid: items.filter(it => it.status === 'paid').length,
       alreadyFailed: items.filter(it => it.status === 'failed').length,
     },
