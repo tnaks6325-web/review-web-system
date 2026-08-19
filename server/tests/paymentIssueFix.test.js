@@ -685,7 +685,7 @@ function withStubPool(handler, run) {
     const capLine = (HTML.match(/const _PM_FIX_CARD_CAP\s*=\s*\d+;/) || [])[0];
     assert.ok(capLine, '_PM_FIX_CARD_CAP 선언을 찾지 못했다');
     // vm 최상위 `const` 는 전역 객체에 안 붙는다 → 값을 밖에서도 읽도록 `var` 로만 바꿔 주입(값은 소스 그대로)
-    const src = [capLine.replace(/^const/, 'var'), pick('_pmSheetOk'), pick('_pmSheetBtn'),
+    const src = [capLine.replace(/^const/, 'var'), pick('_pmBoardBtn'),
       pick('_pmBuildFix'), pick('_pmAcctName'), pick('_pmAcctTail'), pick('_pmAcctLabel'),
       pick('_pmAcctPlain'), pick('_pmFixBlock'), pick('_pmFixWork'), pick('_pmFixAcct')].join('\n');
     const sandbox = {
@@ -1097,61 +1097,59 @@ function withStubPool(handler, run) {
     assert.ok(/tc\.tab_gid AS "tabGid"/.test(q), 'gid 를 안 읽으면 시트만 열려 엉뚱한 탭을 본다');
   });
 
-  t('8e 프론트 링크 검증 — docs.google.com 만 연다(응답에 임의 URL 이 실려도)', () => {
-    const S = loadFixFns();
-    assert.strictEqual(S._pmSheetOk('https://docs.google.com/spreadsheets/d/A/edit'), true);
-    for (const bad of ['javascript:alert(1)', 'http://docs.google.com/x', 'https://evil.com/docs.google.com/',
-      'https://docs.google.com.evil.kr/x', '']) {
-      assert.strictEqual(S._pmSheetOk(bad), false, '열면 안 되는 주소를 통과시켰다: ' + bad);
+  /* ── UI 는 **구글시트로 보내지 않는다**(사용자 확정 2026-08-19) ──
+       탈시트 이후 진실원본은 작업보드 표다. 시트를 열어 두면 거기서 고친 값이
+       시스템에 반영되지 않아 사고가 난다 → 보완 창구의 바로가기는 작업보드 하나. */
+  t('8e ★★ 보완 창구에 구글시트 링크·버튼이 남아 있지 않다', () => {
+    const blk = HTML.slice(HTML.indexOf('function _pmBoardBtn'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
+    assert.ok(blk.length > 100 && /_pmOpenBoard/.test(blk), '바로가기 블록을 잘못 잘랐다(빈 문자열은 무엇이든 통과한다)');
+    const fix = HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmFixAcct'));
+    for (const [n, src] of [['바로가기', blk], ['보완 카드·팝업', fix]]) {
+      assert.ok(!/docs\.google\.com/.test(src), n + ' 에 구글시트 주소가 남아 있다');
+      assert.ok(!/_pmOpenSheet|_pmSheetBtn|_pmSheetOk/.test(src), n + ' 에 옛 시트 버튼이 되살아났다');
     }
+    assert.ok(!/function _pmOpenSheet|function _pmSheetBtn|function _pmSheetOk/.test(HTML),
+      '★ 시트 열기 함수가 되살아났다(창구가 둘이 되면 시트에서 고친 값이 조용히 사라진다)');
   });
 
-  t('8f 시트 버튼 — 열 수 있으면 인덱스만 넘기고, 못 열면 사유를 말한다', () => {
+  t('8f 작업보드 버튼 — 인덱스만 넘기고 카드·팝업이 **같은 렌더러**를 쓴다', () => {
     const S = loadFixFns();
     S.STATE.pmFix = S._pmBuildFix([
       mkItem({ tabName: 'T1', tabLabel: 'A', issues: ['no_bank'] }),
-      // ★ 이관된 작업 = 링크 있음 → **활성**(경고는 클릭 후 팝업)
       mkItem({ tabName: 'T2', tabLabel: 'B', rowIndex: 2, issues: ['no_bank'], sheetless: true }),
-      // 시스템이 만든 무시트(가상 ID) = 링크 없음 → 비활성 + 사유
-      mkItem({ tabName: 'T3', tabLabel: 'C', rowIndex: 3, issues: ['no_bank'], sheetUrl: '', sheetless: true }),
-      mkItem({ tabName: 'T4', tabLabel: 'D', rowIndex: 4, issues: ['no_bank'], sheetUrl: '', sheetless: false }),
     ]);
     const html = S._pmFixBlock();
-    assert.strictEqual((html.match(/onclick="_pmOpenSheet\(\d+\)"/g) || []).length, 2,
-      '★ 링크가 있는 작업(이관 포함)은 눌러서 열 수 있어야 한다');
-    assert.ok(!/onclick="_pmOpenSheet\([^)]*'/.test(html), '★ onclick 에 문자열을 보간했다');
-    assert.ok(!/docs\.google\.com/.test(html), '★ URL 을 onclick·href 로 화면에 심지 않는다(인덱스 참조)');
-    assert.ok(/title="[^"]*참고용으로만[^"]*"[^>]*onclick="_pmOpenSheet/.test(html),
-      '이관 작업 버튼이 "참고용" 임을 말하지 않는다');
-    assert.strictEqual((html.match(/disabled title="[^"]*열 수 있는 구글시트가 없습니다/g) || []).length, 1,
-      '가상 시트 작업의 사유 안내가 없다');
-    assert.strictEqual((html.match(/disabled title="[^"]*시트 링크를 알 수 없습니다/g) || []).length, 1,
-      '★ "링크 없음"을 "시트 없음"으로 뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾는다');
-  });
-
-  t('8f2 ★★ 이관된 작업은 경고 팝업을 거쳐서만 열린다(사용자 확정 문구)', () => {
-    const src = HTML.slice(HTML.indexOf('function _pmOpenSheet'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
-    // 이관 아님 = 곧바로 열고, 이관 = 팝업
-    assert.ok(/if\(!w\.sheetless\)\{ window\.open\(/.test(src), '일반 작업은 곧바로 열려야 한다(불필요한 마찰 금지)');
-    assert.ok(/_pmDialog\(/.test(src), '이관 작업 경고 팝업이 없다');
-    for (const phrase of ['탈구글시트를 진행했습니다', '시스템에 반영되지 않으므로',
-      '시트를 편집하지 마시고', '참고용으로만', '확인하고 시트로 이동하기']) {
-      assert.ok(src.indexOf(phrase) > 0, '확정 문구 누락: ' + phrase);
-    }
-    // ★ window.open 은 onOk 동기 구간에서 — async 로 만들면 팝업 차단에 걸린다
-    assert.ok(/onOk:\s*\(\)=>\{ window\.open\(/.test(src),
-      '★ onOk 가 async 이거나 await 뒤에서 열면 브라우저가 팝업을 막는다');
-  });
-
-  t('8g 작업 보완 팝업에도 시트 바로가기가 있다(고치다가 시트를 확인한다)', () => {
+    assert.strictEqual((html.match(/onclick="_pmOpenBoard\(\d+\)"/g) || []).length, 2,
+      '★ 작업 카드마다 작업보드 버튼이 있어야 한다(이관 작업도 동일 — 표는 항상 있다)');
+    assert.ok(!/onclick="_pmOpenBoard\([^)]*['"]/.test(html), '★ onclick 에 문자열을 보간했다');
+    assert.ok(!/disabled/.test(html.slice(html.indexOf('작업보드') - 200, html.indexOf('작업보드') + 40)),
+      '작업보드는 항상 열 수 있다 — 비활성 버튼이 되면 안 된다');
+    // 사본 금지: 카드와 팝업이 같은 함수를 쓴다
     const work = HTML.slice(HTML.indexOf('function _pmFixWork'), HTML.indexOf('function _pmPickBank'));
-    assert.ok(/_pmSheetBtn\(i\)/.test(work), '팝업에 시트 버튼이 없다');
+    assert.ok(/_pmBoardBtn\(i\)/.test(work), '팝업에 작업보드 버튼이 없다');
+    assert.ok(/_pmBoardBtn\(i\)/.test(HTML.slice(HTML.indexOf('function _pmFixBlock'), HTML.indexOf('function _pmFixWork'))),
+      '카드에 작업보드 버튼이 없다');
   });
 
-  t('8h 새 창은 noopener 로 연다', () => {
-    const fn = HTML.slice(HTML.indexOf('function _pmOpenSheet'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
-    assert.ok(/_pmSheetOk\(w\.sheetUrl\)/.test(fn), '열기 직전 재검증이 없다');
-    assert.ok(/window\.open\(w\.sheetUrl,\s*'_blank',\s*'noopener'\)/.test(fn), 'noopener 가 없다');
+  t('8g ★ 작업보드 이동은 pendingTab 계약 그대로(사본 금지) + 팝업을 먼저 닫는다', () => {
+    const fn = HTML.slice(HTML.indexOf('function _pmOpenBoard'), HTML.indexOf('const _PM_FIX_CARD_CAP'));
+    const close = fn.indexOf('_pmCloseDialog()'), pend = fn.indexOf('STATE.pendingTab'), sw = fn.indexOf("switchView('workdesk')");
+    assert.ok(close >= 0, '팝업을 안 닫으면 오버레이가 작업보드를 가린다');
+    assert.ok(pend > close && sw > pend, '닫기 → 예약 → 화면 전환 순서여야 한다');
+    assert.ok(/sheetId:w\.sheetId, tabName:w\.tabName/.test(fn.replace(/\s+/g, ' ')), '탭 지목 재료가 없다');
+    assert.ok(/tabGid:w\.tabGid/.test(fn), '★ gid 를 빠뜨리면 목록에 없는 탭이 gid 없이 열린다');
+  });
+
+  await ta('8h ★ 작업보드 바로가기 재료(tabGid)를 서버가 실어 준다(화면이 추측하지 않게)', async () => {
+    await withStubPool(targetsHandler({
+      tabRows: [{ sheetId: 'S1', tabName: 'T1', label: 'T1', transferBank: '하나은행', depositName: 'M',
+        goodsCostType: '', tabGid: '77', sheetless: false }],
+      ownRows: [{ reviewerId: '11111111-1111-1111-1111-111111111111', phone8: '12345678', bankName: '국민은행', bankAccount: '1', accountHolder: '홍' }],
+      amountCells: { '결제금액': '1000' },
+    }), async (svc) => {
+      const it = (await svc.listPaymentTargets()).items[0];
+      assert.strictEqual(it.tabGid, '77');
+    });
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

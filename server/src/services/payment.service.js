@@ -263,6 +263,8 @@ async function listPaymentTargets(opts = {}) {
       // ★ 무시트/미등록이면 빈 값 = 화면이 버튼을 비활성으로 두고 **사유를 말한다**(죽은 링크 금지).
       sheetUrl: tab ? tab.sheetUrl : '',
       sheetless: !!(tab && tab.sheetless),
+      // 작업보드 바로가기 재료 — ★ 화면이 gid 를 추측하지 않게 서버가 실어 준다(리네임 대비).
+      tabGid: tab ? (tab.tabGid || '') : '',
       manager: tab ? (tab.manager || '') : '',
       reviewerName: r.reviewerName || '', phone8: r.phone8 || '',
       startDate: r.startDate || '', productName: r.productName || '',
@@ -619,6 +621,7 @@ async function _loadTabMeta(sheetIds, tabNames) {
         reviewFee: (t.reviewFee == null || t.reviewFee === '') ? null : Number(t.reviewFee),
         goodsCostType: t.goodsCostType || '',
         sheetless: t.sheetless === true,
+        tabGid: String(t.tabGid == null ? '' : t.tabGid),
         sheetUrl: tabSheetUrl({ sheetId: t.sheetId, tabGid: t.tabGid }),
       };
     }
