@@ -1,4 +1,4 @@
-name: Oneoff - 홈 진행중 무시트 작업 링크 오염 (읽기 전용)
+name: Oneoff - 진행중 무시트 중복링크 148줄 명단 (읽기 전용)
 on:
   push:
     branches: [ 'oneoff/home98' ]
@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Scan
+      - name: List
         env:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
@@ -15,84 +15,81 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
 
-          -- 홈 작업목록과 같은 정의 (participants.listActiveTabs)
-          CREATE TEMP TABLE lst AS
+          CREATE TEMP TABLE live_tabs AS
           WITH raw_tabs AS (
             SELECT rst.sheet_id AS sid, rst.tab_gid AS gid, rst.tab_name AS tab,
                    COALESCE(tc.sheetless, FALSE) AS sheetless
               FROM raw_sheet_tabs rst
-              LEFT JOIN tab_configs tc ON tc.sheet_id = rst.sheet_id AND tc.tab_name = rst.tab_name
+              LEFT JOIN tab_configs tc ON tc.sheet_id=rst.sheet_id AND tc.tab_name=rst.tab_name
              WHERE rst.is_system_tab = FALSE
                AND EXISTS (SELECT 1 FROM index_master im
                             WHERE im.status='active' AND im.sheet_id=rst.sheet_id
                               AND (im.tab_gid=rst.tab_gid OR im.tab_name=rst.tab_name))
-          ), sheetless_tabs AS (
+          ), sl AS (
             SELECT tc.sheet_id AS sid, tc.tab_gid AS gid, tc.tab_name AS tab, TRUE AS sheetless
               FROM tab_configs tc
-             WHERE COALESCE(tc.sheetless, FALSE) = TRUE
-               AND COALESCE(tc.is_closed, FALSE) = FALSE
+             WHERE COALESCE(tc.sheetless,FALSE)=TRUE AND COALESCE(tc.is_closed,FALSE)=FALSE
                AND NOT EXISTS (SELECT 1 FROM raw_sheet_tabs r2
-                                WHERE r2.sheet_id=tc.sheet_id AND r2.tab_name=tc.tab_name
-                                  AND r2.is_system_tab = FALSE)
-          )
-          SELECT * FROM raw_tabs UNION ALL SELECT * FROM sheetless_tabs;
+                                WHERE r2.sheet_id=tc.sheet_id AND r2.tab_name=tc.tab_name AND r2.is_system_tab=FALSE)
+          ), u AS (SELECT * FROM raw_tabs UNION ALL SELECT * FROM sl)
+          SELECT DISTINCT u.sid, u.tab FROM u
+           WHERE u.sheetless
+             AND NOT EXISTS (SELECT 1 FROM trackb_tab_finished f
+                              WHERE f.deleted_at IS NULL AND f.sheet_id=u.sid
+                                AND (f.tab_name=u.tab OR (COALESCE(u.gid,'')<>'' AND f.tab_gid=u.gid)));
 
-          -- 마감 제외 (이름 또는 gid 매칭)
-          CREATE TEMP TABLE live_tabs AS
-          SELECT DISTINCT l.sid, l.tab, l.sheetless FROM lst l
-           WHERE NOT EXISTS (
-             SELECT 1 FROM trackb_tab_finished f
-              WHERE f.deleted_at IS NULL AND f.sheet_id = l.sid
-                AND (f.tab_name = l.tab OR (COALESCE(l.gid,'') <> '' AND f.tab_gid = l.gid)));
-
-          \echo '=== 1. 목록 계수 (화면과 대조) ==='
-          SELECT COUNT(*) AS 전체목록,
-                 COUNT(*) FILTER (WHERE sheetless) AS 무시트,
-                 COUNT(*) FILTER (WHERE NOT sheetless) AS 시트기반
-            FROM live_tabs;
-          SELECT (SELECT COUNT(DISTINCT (sid, tab)) FROM lst) AS 마감포함_전체,
-                 (SELECT COUNT(*) FROM live_tabs) AS 진행중,
-                 (SELECT COUNT(DISTINCT (sid, tab)) FROM lst) - (SELECT COUNT(*) FROM live_tabs) AS 마감;
-
-          \echo ''
-          \echo '=== 2. 그 범위 안의 링크 오염 (이름·연락처 둘 다 다름) ==='
-          CREATE TEMP TABLE mm AS
-          SELECT cp.id, cp.sheet_id, cp.tab_name, cp.seq,
+          CREATE TEMP TABLE liv AS
+          SELECT cp.id, cp.sheet_id, cp.tab_name, cp.seq, cp.order_submission_id AS osid,
                  COALESCE(cp.row_json->>'번호','') AS num,
                  regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g') AS nm,
-                 regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g') AS onm,
-                 cp.phone8, right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS ophone8,
+                 cp.phone8,
                  regexp_replace(COALESCE((
                    SELECT string_agg(t.value,'' ORDER BY t.key)
                      FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
                     WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS tnum,
                  cp.is_submitted, cp.is_paid
             FROM campaign_participants cp
-            JOIN live_tabs lt ON lt.sid = cp.sheet_id AND lt.tab = cp.tab_name AND lt.sheetless
-            JOIN order_submissions os ON os.id = cp.order_submission_id
-           WHERE cp.deleted_at IS NULL
-             AND COALESCE(os.recipient,'') <> ''
-             AND regexp_replace(COALESCE(NULLIF(cp.row_json->>'수취인',''), cp.recipient_name),'[\s ]','','g')
-                 <> regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g')
-             AND cp.phone8 IS DISTINCT FROM right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8);
+            JOIN live_tabs lt ON lt.sid=cp.sheet_id AND lt.tab=cp.tab_name
+           WHERE cp.deleted_at IS NULL AND cp.order_submission_id IS NOT NULL;
 
-          SELECT COUNT(*) AS 오염줄, COUNT(DISTINCT tab_name) AS 작업수 FROM mm;
+          CREATE TEMP TABLE dup AS
+          SELECT l.*, regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS onum,
+                 regexp_replace(COALESCE(os.recipient,''),'[\s ]','','g') AS onm,
+                 right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) AS ophone8
+            FROM liv l JOIN order_submissions os ON os.id=l.osid
+           WHERE l.osid IN (SELECT osid FROM liv GROUP BY osid HAVING COUNT(*)>1);
 
-          \echo ''
-          \echo '=== 3. 작업별 ==='
-          SELECT tab_name AS 작업, COUNT(*) AS 오염줄,
-                 COUNT(*) FILTER (WHERE length(tnum) >= 6) AS 표번호있음,
-                 COUNT(*) FILTER (WHERE is_submitted) AS 리뷰제출끝,
-                 COUNT(*) FILTER (WHERE is_paid) AS 입금끝
-            FROM mm GROUP BY 1 ORDER BY 2 DESC;
+          \echo '=== 1. 요약 ==='
+          SELECT COUNT(*) AS 줄수, COUNT(DISTINCT osid) AS 묶음수, COUNT(DISTINCT tab_name) AS 작업수 FROM dup;
 
           \echo ''
-          \echo '=== 4. 한 주문을 여러 줄이 가리킴 (같은 범위) ==='
-          WITH liv AS (
-            SELECT cp.* FROM campaign_participants cp
-              JOIN live_tabs lt ON lt.sid=cp.sheet_id AND lt.tab=cp.tab_name AND lt.sheetless
-             WHERE cp.deleted_at IS NULL AND cp.order_submission_id IS NOT NULL)
-          SELECT COUNT(*) AS 중복링크줄, COUNT(DISTINCT tab_name) AS 작업수
-            FROM liv WHERE order_submission_id IN (
-              SELECT order_submission_id FROM liv GROUP BY 1 HAVING COUNT(*) > 1);
+          \echo '=== 2. 묶음 유형별 ==='
+          WITH g AS (
+            SELECT osid, COUNT(*) n,
+                   COUNT(DISTINCT nm) AS 이름종류,
+                   COUNT(DISTINCT phone8) AS 연락처종류,
+                   COUNT(*) FILTER (WHERE length(tnum)>=6 AND tnum=onum) AS 표번호일치줄,
+                   COUNT(*) FILTER (WHERE length(tnum)>=6 AND tnum<>onum) AS 표번호다름줄,
+                   COUNT(*) FILTER (WHERE length(tnum)<6) AS 표번호없음줄
+              FROM dup GROUP BY osid)
+          SELECT CASE
+                   WHEN 이름종류=1 AND 연락처종류=1 THEN 'A 같은 사람이 여러 줄'
+                   WHEN 표번호일치줄=1 THEN 'B 주인 1줄 + 나머지 오염'
+                   WHEN 표번호일치줄=0 THEN 'C 주인 없음'
+                   ELSE 'D 기타' END AS 유형,
+                 COUNT(*) AS 묶음수, SUM(n) AS 줄수
+            FROM g GROUP BY 1 ORDER BY 3 DESC;
+
+          \echo ''
+          \echo '=== 3. 전체 명단 (묶음별) ==='
+          SELECT d.tab_name AS 작업, d.onum AS 링크된주문, d.onm AS 주문수취인, d.ophone8 AS 주문연락처,
+                 d.num AS 번호, d.seq AS "#", d.nm AS 참여자, d.phone8 AS 줄연락처,
+                 d.tnum AS 표주문번호,
+                 CASE WHEN length(d.tnum)>=6 AND d.tnum=d.onum THEN '주인'
+                      WHEN length(d.tnum)>=6 THEN '다른구매'
+                      WHEN d.nm=d.onm AND d.phone8=d.ophone8 THEN '같은사람(번호없음)'
+                      ELSE '번호없음' END AS 판정,
+                 CASE WHEN d.is_submitted THEN 'O' ELSE '-' END AS 리뷰,
+                 CASE WHEN d.is_paid THEN 'O' ELSE '-' END AS 입금
+            FROM dup d ORDER BY d.tab_name, d.osid, d.seq;
           SQL
