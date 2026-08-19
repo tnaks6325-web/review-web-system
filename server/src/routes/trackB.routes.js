@@ -2924,6 +2924,32 @@ router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (
   } catch (err) { next(err); }
 });
 
+/* 지워진 작업의 남은 공고 정리 — 미리보기(GET, 쓰기 0) → `confirm:true` 실행.
+   ★ 작업 삭제가 공고까지 지우기 전에 지운 작업들의 잔재를 치우는 창구(같은 게이트: adminOrMaster). */
+router.get('/work-tab/orphan-campaigns', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { findOrphanCampaigns } = require('../services/workTabDelete.service');
+    try {
+      res.json(await findOrphanCampaigns({ limit: req.query.limit }));
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+router.post('/work-tab/orphan-campaigns/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { deleteOrphanCampaigns } = require('../services/workTabDelete.service');
+    const b = req.body || {};
+    const out = await deleteOrphanCampaigns({ ids: b.ids, confirm: b.confirm === true, by: _by(req) });
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 /* 작업표 줄 "표에서 분리"(보관) — 129. **삭제가 아니다**(사용자 확정 2026-08-19 "표에서만 빼기").
    왜: 이체 근거가 걸려 지울 수 없는 중복 줄이 표에 남아 매일 눈에 걸린다. 지우면 그 줄의 입금
    표시가 표에서 빠져 **남길 줄이 미입금으로 보이고 다음 회차에 다시 담겨 이중 송금**이 난다.

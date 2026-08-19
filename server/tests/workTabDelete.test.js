@@ -266,6 +266,68 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     ok('확인창은 바깥 클릭으로 닫히지 않는다(실수 클릭 보호)', /_tdShell[\s\S]{0,600}바깥 클릭으로 닫지 않는다/.test(WD));
   }
 
+  /* ── G. 지워진 작업의 남은 공고 정리 ─────────────────────────────── */
+  console.log('\n[G] 지워진 작업의 남은 공고 정리');
+  {
+    const src = readSrv('src/services/workTabDelete.service.js');
+    const i = src.indexOf('const ORPHAN_CAMPAIGN_WHERE');
+    const where = src.slice(i, src.indexOf('`;', i));
+    ok('★ 연결 시트·탭이 **둘 다 적힌** 공고만(빈 값 매칭은 멀쩡한 미연결 공고를 지운다)',
+      /COALESCE\(rc\.linked_sheet_id,''\) <> ''/.test(where) && /COALESCE\(rc\.linked_tab_name,''\) <> ''/.test(where));
+    for (const tbl of ['tab_configs', 'index_master', 'raw_sheet_tabs']) {
+      ok(`★ ${tbl} 에 없을 때만(하나라도 있으면 그 작업은 살아 있다)`,
+        new RegExp(`NOT EXISTS \\(SELECT 1 FROM ${tbl}`).test(where));
+    }
+    ok('★ 리네임 대비 gid 로도 찾는다(리네임을 삭제로 오인하지 않는다)',
+      (where.match(/linked_tab_gid/g) || []).length >= 3);
+    ok('판정 SQL 은 한 곳(목록·삭제가 같은 조건을 쓴다)',
+      (src.match(/ORPHAN_CAMPAIGN_WHERE/g) || []).length === 3);
+  }
+  {
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    const out = await svc.deleteOrphanCampaigns({ ids: ['c1'], pool });
+    ok('confirm 없으면 거부 · 쿼리 0', out.code === 'confirm_required' && pool.log.length === 0);
+    const out2 = await svc.deleteOrphanCampaigns({ ids: [], confirm: true, pool });
+    ok('고른 것이 없으면 거부 · 쿼리 0', out2.code === 'empty' && pool.log.length === 0);
+  }
+  {
+    const pool = stubPool((text) => {
+      if (/^\s*DELETE FROM recruit_campaigns/.test(text)) return { rows: [{ id: 'c1', title: '고아공고' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const out = await svc.deleteOrphanCampaigns({ ids: ['c1', 'c2'], confirm: true, by: '만두', pool });
+    ok('★ 실행도 같은 조건으로 다시 판정한다(낡은 화면 방어)',
+      pool.log.some(q => /DELETE FROM recruit_campaigns[\s\S]*NOT EXISTS \(SELECT 1 FROM tab_configs/.test(q.text)));
+    ok('★ 지우지 못한 건은 건너뛴 것으로 사실대로 보고한다',
+      out.ok === true && out.deleted === 1 && out.skipped === 1 && out.skippedIds[0] === 'c2');
+    ok('★ 공고 외의 표는 건드리지 않는다(참여 신청 등은 FK CASCADE 가 처리)',
+      !pool.log.some(q => /DELETE FROM (?!recruit_campaigns)/i.test(q.text)));
+    ok('COMMIT 으로 끝난다', pool.log.some(q => /COMMIT/.test(q.text)));
+  }
+  {
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    const list = await svc.findOrphanCampaigns({ pool });
+    ok('★ 목록은 읽기 전용(쓰기 0건)', list.ok === true && countWrites(pool.log) === 0);
+  }
+  {
+    const router = require('../src/routes/trackB.routes');
+    for (const [method, p2] of [['get', '/work-tab/orphan-campaigns'], ['post', '/work-tab/orphan-campaigns/delete']]) {
+      const layer = (router.stack || []).find(l => l.route && l.route.path === p2);
+      ok(`${method.toUpperCase()} ${p2} 등록`, !!layer && !!layer.route.methods[method]);
+      const names = layer.route.stack.map(s2 => s2.name);
+      ok(`${p2} — authMiddleware + adminOrMaster`, names[0] === 'authMiddleware' && names.some(n => /adminOrMaster/i.test(n)));
+    }
+    const WD = read('frontend/workdesk.html');
+    ok('★ 버튼은 master/admin 에만(서버 게이트와 1:1)',
+      /_taskDelAllowed\(\)\?'<button[^']*openOrphanCampaigns\(\)/.test(WD));
+    ok('★ 확인 체크 전에는 실행 버튼이 잠겨 있다', /id="ocGo" disabled/.test(WD));
+    ok('★ 미리보기 실패를 "정리 가능"으로 위장하지 않는다',
+      /확인하지 못한 상태로는 지우지 않습니다[\s\S]{0,900}openOrphanCampaigns\(\)/.test(WD));
+    ok('★ 부분 결과를 완료로 꾸미지 않는다(건너뛴 건수를 말한다)',
+      /건은 작업이 살아 있어 건너뜀/.test(WD));
+    ok('정리 후 공고 목록을 다시 읽는다', /_ocGo[\s\S]{0,1200}loadRecruitList\(\)/.test(WD));
+  }
+
   console.log(`\n✅ workTabDelete — ${passed} 케이스 통과`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });
