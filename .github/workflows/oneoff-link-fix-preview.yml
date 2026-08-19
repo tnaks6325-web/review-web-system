@@ -1,4 +1,4 @@
-name: Oneoff - 링크 정정 미리보기 (읽기 전용)
+name: Oneoff - 오삭제 19줄 되살리기
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Preview5
+      - name: Restore19
         env:
           DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
@@ -18,70 +18,74 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           \pset pager off
 
-          CREATE TEMP VIEW onum AS
-          SELECT cp.*,
-                 regexp_replace(COALESCE((
-                   SELECT string_agg(t.value,'' ORDER BY t.key)
-                     FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
-                    WHERE t.key LIKE '%주문번호%'),''),'\D','','g') AS onum
-            FROM campaign_participants cp;
+          BEGIN;
 
-          CREATE TEMP VIEW flagged AS
-          SELECT g.* FROM onum g
-           WHERE g.deleted_at >= '2026-08-19'::date
-             AND length(g.onum) >= 6
-             AND NOT EXISTS (SELECT 1 FROM onum s
-                              WHERE s.sheet_id=g.sheet_id AND s.tab_name=g.tab_name
-                                AND s.deleted_at IS NULL AND s.onum=g.onum AND s.phone8=g.phone8);
+          CREATE TEMP TABLE tgt(tab text, seq int, p8 text) ON COMMIT DROP;
+          INSERT INTO tgt VALUES
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 76,  '33536503'),
+            ('0721)장수돌침대_쿠팡_탄소매트 900건', 105, '57420174'),
+            ('5/20쿠팡_선크림', 58,  '32318337'),
+            ('5/20쿠팡_선크림', 64,  '44505536'),
+            ('5/20쿠팡_선크림', 75,  '75680537'),
+            ('5/20쿠팡_선크림', 84,  '20633418'),
+            ('5/20쿠팡_선크림', 89,  '32065020'),
+            ('5/20쿠팡_선크림', 94,  '85217240'),
+            ('5/20쿠팡_선크림', 105, '39291625'),
+            ('5/6(메이커스)메디슨벨_알약패치 200건', 74,  '26500532'),
+            ('5/6(메이커스)메디슨벨_알약패치 200건', 106, '57448945'),
+            ('5/6(메이커스)메디슨벨_알약패치 200건', 126, '39501432'),
+            ('5/6(메이커스)메디슨벨_알약패치 200건', 131, '97575079'),
+            ('5/6(메이커스)메디슨벨_알약패치 200건', 158, '72951991'),
+            ('6/18아르퓨레행주_쿠팡500건', 198, '52197890'),
+            ('6/25(공영쇼핑)시크릿에이지_선크림+아이크림 200건', 206, '47434797'),
+            ('7/28(쿠팡)넛세린_바디관리 2종세트 50건', 54, '48302320'),
+            ('7/28(쿠팡)넛세린_바디관리 2종세트 50건', 62, '34683476'),
+            ('7/28(쿠팡)넛세린_바디관리 2종세트 50건', 65, '39291625');
 
-          \echo '=== ⑤ 08-19 판정 요약 (전체) ==='
-          WITH gone AS (SELECT * FROM onum WHERE deleted_at >= '2026-08-19'::date)
-          SELECT CASE
-                   WHEN length(g.onum) < 6 THEN '판정불가(표 주문번호 없음)'
-                   WHEN EXISTS (SELECT 1 FROM onum s
-                                 WHERE s.sheet_id=g.sheet_id AND s.tab_name=g.tab_name
-                                   AND s.deleted_at IS NULL AND s.onum=g.onum AND s.phone8=g.phone8)
-                        THEN '정상 정리'
-                   ELSE '오삭제 의심'
-                 END AS 판정, COUNT(*)
-            FROM gone g GROUP BY 1 ORDER BY 2 DESC;
+          \echo '=== 되살릴 대상 확인 ==='
+          SELECT cp.tab_name, cp.seq AS "#", COALESCE(cp.row_json->>'번호','') AS 번호칸,
+                 cp.row_json->>'수취인' AS 수취인, cp.phone8,
+                 to_char(cp.deleted_at,'MM-DD HH24:MI') AS 내려간시각
+            FROM campaign_participants cp JOIN tgt t
+              ON t.tab=cp.tab_name AND t.seq=cp.seq AND t.p8=cp.phone8
+           WHERE cp.deleted_at >= '2026-08-19 07:00'::timestamp
+             AND cp.deleted_at <  '2026-08-19 08:00'::timestamp
+           ORDER BY cp.tab_name, cp.seq;
+
+          -- 대상이 정확히 19줄이 아니면 전체 취소
+          DO $$
+          DECLARE n int;
+          BEGIN
+            SELECT COUNT(*) INTO n
+              FROM campaign_participants cp JOIN tgt t
+                ON t.tab=cp.tab_name AND t.seq=cp.seq AND t.p8=cp.phone8
+             WHERE cp.deleted_at >= '2026-08-19 07:00'::timestamp
+               AND cp.deleted_at <  '2026-08-19 08:00'::timestamp;
+            IF n <> 19 THEN
+              RAISE EXCEPTION '대상이 19줄이 아닙니다 (실제 %줄) — 전체 취소', n;
+            END IF;
+          END $$;
+
+          UPDATE campaign_participants cp
+             SET deleted_at = NULL, active = TRUE
+            FROM tgt t
+           WHERE t.tab=cp.tab_name AND t.seq=cp.seq AND t.p8=cp.phone8
+             AND cp.deleted_at >= '2026-08-19 07:00'::timestamp
+             AND cp.deleted_at <  '2026-08-19 08:00'::timestamp;
 
           \echo ''
-          \echo '=== ⑥ 오삭제 의심 118줄 — 그 사람의 줄이 그 작업에 남아 있는가 ==='
-          SELECT CASE WHEN (SELECT COUNT(*) FROM onum s
-                             WHERE s.sheet_id=f.sheet_id AND s.tab_name=f.tab_name
-                               AND s.deleted_at IS NULL AND s.phone8=f.phone8) > 0
-                      THEN '㉮ 같은 사람 줄이 남아 있음(중복 정리로 볼 여지)'
-                      ELSE '㉯ 그 사람 줄이 하나도 없음 — 참여가 사라짐' END AS 구분,
-                 COUNT(*) AS 줄수, COUNT(DISTINCT f.tab_name||f.phone8) AS 사람수
-            FROM flagged f GROUP BY 1 ORDER BY 2 DESC;
+          \echo '=== 되살린 결과 ==='
+          SELECT cp.tab_name, cp.seq AS "#", cp.row_json->>'수취인' AS 수취인,
+                 cp.phone8, cp.deleted_at IS NULL AS 살아있음, cp.active
+            FROM campaign_participants cp JOIN tgt t
+              ON t.tab=cp.tab_name AND t.seq=cp.seq AND t.p8=cp.phone8
+           ORDER BY cp.tab_name, cp.seq;
 
           \echo ''
-          \echo '=== ⑦ ㉯ 참여가 통째로 사라진 건 (사람 단위) ==='
-          SELECT f.tab_name, f.row_json->>'수취인' AS 수취인, f.phone8,
-                 COUNT(*) AS 내려간줄수,
-                 string_agg(DISTINCT f.onum, ' / ') AS 표주문번호들,
-                 string_agg(DISTINCT to_char(f.deleted_at,'HH24:MI'), ',') AS 시각
-            FROM flagged f
-           WHERE NOT EXISTS (SELECT 1 FROM onum s
-                              WHERE s.sheet_id=f.sheet_id AND s.tab_name=f.tab_name
-                                AND s.deleted_at IS NULL AND s.phone8=f.phone8)
-           GROUP BY 1,2,3 ORDER BY 1,2;
+          \echo '=== 되살린 작업의 무시트 여부 (장부 재생성 대상 판별용) ==='
+          SELECT DISTINCT tc.sheet_id, tc.tab_name, COALESCE(tc.sheetless,FALSE) AS 무시트
+            FROM tab_configs tc JOIN tgt t ON t.tab = tc.tab_name
+           ORDER BY tc.tab_name;
 
-          \echo ''
-          \echo '=== ⑧ ㉮ 같은 사람 줄이 남아 있는 건 (사람 단위) ==='
-          SELECT f.tab_name, f.row_json->>'수취인' AS 수취인, f.phone8,
-                 COUNT(*) AS 내려간줄수,
-                 (SELECT COUNT(*) FROM onum s
-                   WHERE s.sheet_id=f.sheet_id AND s.tab_name=f.tab_name
-                     AND s.deleted_at IS NULL AND s.phone8=f.phone8) AS 남은줄수,
-                 string_agg(DISTINCT f.onum, ' / ') AS 내려간표번호,
-                 (SELECT string_agg(DISTINCT NULLIF(s.onum,''), ' / ') FROM onum s
-                   WHERE s.sheet_id=f.sheet_id AND s.tab_name=f.tab_name
-                     AND s.deleted_at IS NULL AND s.phone8=f.phone8) AS 남은표번호
-            FROM flagged f
-           WHERE EXISTS (SELECT 1 FROM onum s
-                          WHERE s.sheet_id=f.sheet_id AND s.tab_name=f.tab_name
-                            AND s.deleted_at IS NULL AND s.phone8=f.phone8)
-           GROUP BY 1,2,3 ORDER BY 4 DESC, 1;
+          COMMIT;
           SQL
