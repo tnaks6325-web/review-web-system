@@ -126,10 +126,15 @@ async function writeOrderToWorktable({
   //     재기록(reconcile)·관리자 편집과의 경합까지 직렬화한다.
   const client = await db.connect();
   let optionSuppressed = [];
+  // ★★ `seq` 는 try 밖에서 선언한다 — 아래 catch·완결 표시·신원 링크·로그가 전부 이 값을 쓴다.
+  //   try 안에서 `let` 으로 선언하면 블록 스코프라 커밋 뒤 `markOrderWritten(…, seq)` 부터
+  //   ReferenceError 가 나고, 마지막 logger.info 에서 함수 밖으로 던져진다. 그러면 행은 이미
+  //   기록됐는데 호출부가 예외를 잡아 주문을 'failed' 로 강등하고 리뷰어 화면엔 제출 실패로 보여
+  //   **재제출 → 새 주문 → 작업보드 중복 줄**이 된다(2026-08-19 실사고).
+  let seq = requestedSeq;
   try {
     await client.query('BEGIN');
     let cur;
-    let seq = requestedSeq;
     if (seq != null) {
       ({ rows: cur } = await client.query(
         `SELECT id, seq, row_json FROM campaign_participants
