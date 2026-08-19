@@ -3483,28 +3483,25 @@ function _rnRender(){
       <button class="wbl-b" id="rnPrev" onclick="rnPreview()">미리보기</button>
       <button class="wbl-b dark" id="rnGo" disabled onclick="rnRun()">🔢 번호 정리 실행</button>`;
   b.innerHTML = tabs + `<b>${esc(_RN.tabName)}</b>
-    <div class="wbl-facts">표의 <b>번호</b>를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매기고,
-      비어 있는 <b>담당자</b> 칸을 이 작업의 담당자로 채웁니다(이미 적힌 담당자는 그대로 둡니다).<br>
-      구매일자를 읽을 수 없는 줄은 맨 아래로 갑니다. 구글시트·주문 기록·리뷰·입금 기록은 건드리지 않습니다.</div>
-    ${p ? `<div class="wbl-facts">표 <b>${p.total}줄</b> 중 바뀌는 줄 <b>${p.changed}줄</b>
-        ${p.managerColumn ? ` · 담당자 칸 <b>${esc(p.managerColumn)}</b>${p.manager ? ` → <b>${esc(p.manager)}</b>` : ' <span style="color:var(--faint,#94a3b8)">(작업 담당자가 지정되어 있지 않아 담당자는 채우지 않습니다)</span>'}` : ''}</div>
-      ${(p.sample && p.sample.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>지금 번호</th><th>바뀔 번호</th><th>담당자</th></tr></thead><tbody>
+    <div class="wbl-facts">표의 <b>번호</b>를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매깁니다.<br>
+      구매일자를 읽을 수 없는 줄은 맨 아래로 갑니다. 담당자·줄 내용·구글시트·주문 기록·리뷰·입금 기록은 건드리지 않습니다.</div>
+    ${p ? `<div class="wbl-facts">표 <b>${p.total}줄</b> 중 바뀌는 줄 <b>${p.changed}줄</b></div>
+      ${(p.sample && p.sample.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>지금 번호</th><th>바뀔 번호</th></tr></thead><tbody>
         ${p.sample.map(x => `<tr><td>${x.seq}</td><td>${x.from ? esc(String(x.from)) : '<span style="color:var(--faint,#94a3b8)">(빈칸)</span>'}</td>
-          <td>${x.to == null ? '<span style="color:var(--faint,#94a3b8)">그대로</span>' : '<b>' + esc(String(x.to)) + '</b>'}</td>
-          <td>${x.manager ? esc(String(x.manager)) : ''}</td></tr>`).join('')}
+          <td><b>${esc(String(x.to))}</b></td></tr>`).join('')}
         </tbody></table>${p.changed > p.sample.length ? `<div class="wbl-facts">…외 ${p.changed - p.sample.length}줄</div>` : ''}` : ''}
       ${p.changed === 0 ? '<div class="wbl-facts">이미 정리된 상태입니다 — 바꿀 줄이 없습니다.</div>' : ''}` : ''}
     ${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}`;
   const go = document.getElementById('rnGo'); if (go) go.disabled = !(p && p.changed > 0) || _RN.busy;
 }
-/* 전체 작업 조회 — 어느 작업에 번호·담당자 빈칸이 있는지. 서버가 준 숫자를 그대로 그린다. */
+/* 전체 작업 조회 — 어느 작업에 번호 빈칸이 있는지. 서버가 준 숫자를 그대로 그린다. */
 function _rnRenderAll(b, f, tabs){
   const s = _RN.scan;
   if (f) f.innerHTML = `<button class="wbl-b" onclick="closeRenumberModal()">닫기</button>
       <button class="wbl-b" onclick="rnScan()">다시 조회</button>
       <button class="wbl-b dark" id="rnGoAll" ${(s && s.needTabs) ? '' : 'disabled'} onclick="rnRunAll()">🔢 전체 정리 실행</button>`;
   b.innerHTML = tabs + `
-    <div class="wbl-facts">무시트 작업 전체에서 <b>번호·담당자가 비어 있는 줄</b>을 셉니다.
+    <div class="wbl-facts">무시트 작업 전체에서 <b>번호가 비어 있는 줄</b>을 셉니다.
       정리하면 그 작업의 번호가 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매겨집니다.<br>
       <span style="color:var(--faint,#94a3b8)">※ 번호가 이미 다 차 있고 순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다 — 그 작업을 열어 [이 작업] 미리보기로 확인하세요.</span></div>
     ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${_rnNeed().length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>
@@ -3513,14 +3510,14 @@ function _rnRenderAll(b, f, tabs){
         <button class="wbl-b${_RN.onlyNeed === false ? '' : ' dark'}" id="rnOnly" onclick="_RN.onlyNeed=!(_RN.onlyNeed!==false);_rnRows()"></button>
         <input id="rnq" placeholder="작업 검색" value="${esc(_RN.q || '')}" oninput="_RN.q=this.value;_rnRows()">
       </div>
-      <div class="rn-tw"><table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th>담당자 빈칸</th><th>담당자</th><th></th></tr></thead>
+      <div class="rn-tw"><table class="wbl-wrt"><thead><tr><th>작업</th><th>표 줄</th><th>번호 빈칸</th><th></th></tr></thead>
         <tbody id="rnRows"></tbody></table></div>` : ''}
     <div id="rnErr">${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}</div>`;
   if (s) _rnRows();
 }
-/* 정리 대상 = 번호가 빈 줄이 있거나, 담당자가 비어 있고 채울 담당자가 정해진 작업 */
+/* 정리 대상 = 번호가 빈 줄이 있는 작업 (담당자는 번호 정리의 대상이 아니다 — 사용자 확정) */
 function _rnNeed(){
-  return (((_RN.scan || {}).items) || []).filter(r => r.blankNumber > 0 || (r.blankManager > 0 && r.manager));
+  return (((_RN.scan || {}).items) || []).filter(r => r.blankNumber > 0);
 }
 /* ★★ 행만 갈아끼운다 — 검색 입력칸이 든 껍데기를 다시 그리면 **한글 IME 조합이 깨진다**
      (홈 목록 검색에서 실측된 `ㅁ며면면` 사고와 같은 자리). */
@@ -3536,14 +3533,12 @@ function _rnRows(){
   if (btn) { btn.textContent = only ? `정리 대상만 (${need.length})` : `전체 보기 (${all.length})`; btn.className = 'wbl-b' + (only ? ' dark' : ''); }
   tb.innerHTML = rows.length ? rows.map(r => {
     const i = all.indexOf(r);                       // ★ 실행에는 **원본 인덱스**를 넘긴다(필터된 순번이 아니라)
-    return `<tr class="${(r.blankNumber || (r.blankManager && r.manager)) ? 'on' : ''}">
+    return `<tr class="${r.blankNumber ? 'on' : ''}">
       <td style="text-align:left">${esc(r.displayName || r.tabName)}</td>
       <td>${r.total}</td>
       <td>${r.blankNumber ? '<b>' + r.blankNumber + '</b>' : '0'}</td>
-      <td>${r.blankManager ? (r.manager ? '<b>' + r.blankManager + '</b>' : r.blankManager) : '0'}</td>
-      <td>${r.manager ? esc(r.manager) : '<span style="color:var(--faint,#94a3b8)">미지정</span>'}</td>
       <td><button class="wbl-b" onclick="rnRunOne(${i})">정리</button></td></tr>`;
-  }).join('') : `<tr><td colspan="6" style="text-align:left;color:var(--faint,#94a3b8)">${
+  }).join('') : `<tr><td colspan="4" style="text-align:left;color:var(--faint,#94a3b8)">${
     q ? '검색 결과가 없습니다.' : (only ? '정리할 작업이 없습니다 — 전체 작업의 번호가 모두 채워져 있습니다.' : '무시트 작업이 없습니다.')}</td></tr>`;
 }
 async function rnScan(){
@@ -5178,7 +5173,7 @@ function renderWorkdesk(wd){
     <span class="sp" style="flex:1"></span>
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매기고 비어 있는 담당자 칸을 채운다(미리보기 후 실행 · 줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
+    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
       ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
@@ -9810,7 +9805,7 @@ function _coRender(){
       <button class="btn pri" onclick="_coActiveServerOnlyCutover()">⚡ 활성 공고 전수 무시트 전환</button>
       <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
-      <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호·담당자 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
+      <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
       <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>

@@ -9,9 +9,11 @@
  *   그 줄은 영구히 번호·담당자가 빈칸으로 남았다.
  *
  * 무엇을 하는가:
- *   ① 그 탭의 활성 줄을 **구매일자 → 주문 제출 시각 → seq** 순으로 정렬해 `번호` 를 1..N 로 다시 매긴다
- *      (그래서 "8/18 이 145 번인데 아래에 8/5 주문건이 있으면 그 건이 위로 오고 145 가 146 이 된다")
- *   ② `담당자` 가 빈 줄에 `tab_configs.manager`(접수 때 만두/망고 매핑)를 **blank-only** 로 채운다
+ *   그 탭의 활성 줄을 **구매일자 → 주문 제출 시각 → seq** 순으로 정렬해 `번호` 를 1..N 로 다시 매긴다
+ *   (그래서 "8/18 이 145 번인데 아래에 8/5 주문건이 있으면 그 건이 위로 오고 145 가 146 이 된다").
+ *
+ * ★★ **`담당자` 칸은 건드리지 않는다**(사용자 확정 2026-08-19) — 담당자는 작업보드 좌측 상단
+ *   [작업 조건]에 이미 표기되므로 줄마다 반복할 이유가 없다. 이미 적혀 있는 값도 그대로 둔다.
  *
  * ★★ **DB `seq` 는 건드리지 않는다** — 이유는 `utils/rowNumbering` 머리말 참조(주문·리뷰·입금·
  *   투영·오버레이 앵커가 전부 그 번호에 매달려 있다). 바꾸는 것은 `row_json` 의 표시 칸뿐이다.
@@ -28,9 +30,7 @@
 
 const { logger } = require('../utils/logger');
 const pool = require('../db/pool');
-const {
-  numberColumnKey, managerColumnKey, computeRenumberPlan,
-} = require('../utils/rowNumbering');
+const { numberColumnKey, computeRenumberPlan } = require('../utils/rowNumbering');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
@@ -71,19 +71,11 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
   const db = client || getPool();
 
   const { rows: tc } = await db.query(
-    `SELECT COALESCE(sheetless, FALSE) AS sheetless, COALESCE(manager, '') AS manager
+    `SELECT COALESCE(sheetless, FALSE) AS sheetless
        FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`, [sheetId, tabName]);
   if (!tc.length) return { ok: false, reason: 'tab_not_registered' };
   /* ★ 시트 기반 탭은 거부 — 투영이 row_json 을 덮어 조용히 되돌아간다(위 머리말). */
   if (!tc[0].sheetless) return { ok: false, reason: 'not_sheetless' };
-  /* ★★ 담당자 값은 **닉네임으로 정규화**한다(`utils/workManager` 단일 출처) — 접수 시 매핑이
-     들어오기 전에 만들어진 탭은 `tab_configs.manager` 에 **실명**(박은비)이 남아 있어, 그대로
-     채우면 같은 열에 `망고`(기존 줄)와 `박은비`(새 줄)가 섞인다(실측 화면).
-     ★ 매핑에 없는 이름은 **버리지 않고 그대로** 쓴다 — 그건 담당자를 아예 못 채우는 것보다 낫다.
-     ★ 단 `랜덤`·`미정` 은 사람이 정해야 하는 값이라 **채우지 않는다**(자동 배정 금지 규율). */
-  const { mapWorkManager, isUndecidedWorkManager } = require('../utils/workManager');
-  const rawManager = String(tc[0].manager || '').trim();
-  const manager = isUndecidedWorkManager(rawManager) ? '' : (mapWorkManager(rawManager) || rawManager);
 
   /* 활성 줄 + 그 줄의 주문 제출 시각.
      ★ 주문이 취소(soft-delete)된 줄은 시각을 쓰지 않는다 — 살아 있는 주문만 순서의 근거다. */
@@ -99,17 +91,16 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
 
   const keys = _collectKeys(rows);
   const numKey = numberColumnKey(keys);
-  const mgrKey = managerColumnKey(keys);
-  /* 번호 칸도 담당자 칸도 없는 표라면 할 일이 없다 — 없는 칸을 새로 만들지 않는다
+  /* 번호 칸이 없는 표라면 할 일이 없다 — 없는 칸을 새로 만들지 않는다
      (열 구성은 `설정 › 작업표 표준 열`이 정한다. 여기서 열을 만들면 두 곳이 열을 정하게 된다). */
-  if (!numKey && !mgrKey) return { ok: true, changed: 0, total: rows.length, reason: 'no_target_column' };
+  if (!numKey) return { ok: true, changed: 0, total: rows.length, reason: 'no_target_column' };
 
   /* 구매일자 — 칸 찾기·파싱 모두 기존 단일 출처.
      ★★ `fallbackAnchor` 는 선택이 아니다: 작업표의 구매일자는 `M / D (요일)` 라 **연도가 하나도 없다**.
         앵커가 없으면 전 행 null 이 되어 재번호가 "전부 날짜 없음"으로 조용히 무너진다
         (탈시트 W2-b F-2 와 같은 자리). */
   let iso = rows.map(() => null);
-  if (numKey) {
+  {
     const { findDateColumnIndex } = require('./campaignSchedule.service');
     const di = findDateColumnIndex(keys);
     if (di >= 0) {
@@ -128,44 +119,33 @@ async function renumberTab({ sheetId, tabName, dryRun = false, by = 'auto', clie
     const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
     return {
       id: r.id, seq: r.seq, iso: iso[i] || null, submittedAt: r.submitted_at || null,
-      number: numKey ? rj[numKey] : '', manager: mgrKey ? rj[mgrKey] : '',
+      number: rj[numKey],
     };
-  }), { manager, hasNumberCol: !!numKey, hasManagerCol: !!mgrKey });
+  }), { hasNumberCol: true });
 
-  const sample = plan.changes.slice(0, 20).map(c => ({
-    seq: c.seq, from: c.numberFrom || null, to: c.numberTo, manager: c.managerTo || undefined,
-  }));
+  const sample = plan.changes.slice(0, 20).map(c => ({ seq: c.seq, from: c.numberFrom || null, to: c.numberTo }));
   if (dryRun) {
     return { ok: true, dryRun: true, total: rows.length, changed: plan.changes.length,
-             numberColumn: numKey, managerColumn: mgrKey, manager: manager || null, sample };
+             numberColumn: numKey, sample };
   }
   if (!plan.changes.length) {
-    return { ok: true, changed: 0, total: rows.length, numberColumn: numKey, managerColumn: mgrKey };
+    return { ok: true, changed: 0, total: rows.length, numberColumn: numKey };
   }
 
   /* 한 문장으로 일괄 갱신 — 줄 수만큼 왕복하면 주문 1건마다 수백 왕복이 된다.
-     ★ 바뀌는 줄만 실린다(계획이 이미 걸러냈다). ★ `번호`·`담당자` 두 칸 외에는 손대지 않는다. */
+     ★ 바뀌는 줄만 실린다(계획이 이미 걸러냈다). ★ **`번호` 칸 외에는 손대지 않는다.** */
   const ids = plan.changes.map(c => c.id);
-  const nums = plan.changes.map(c => c.numberTo);        // null = 이 줄은 번호 변경 없음
-  const mgrs = plan.changes.map(c => c.managerTo);       // null = 담당자 변경 없음
+  const nums = plan.changes.map(c => c.numberTo);
   const { rowCount } = await db.query(
     `UPDATE campaign_participants p
-        SET row_json = CASE WHEN u.mgr IS NULL THEN
-                         CASE WHEN u.num IS NULL THEN COALESCE(p.row_json, '{}'::jsonb)
-                              ELSE jsonb_set(COALESCE(p.row_json, '{}'::jsonb), ARRAY[$4::text], to_jsonb(u.num), TRUE) END
-                       ELSE
-                         CASE WHEN u.num IS NULL
-                              THEN jsonb_set(COALESCE(p.row_json, '{}'::jsonb), ARRAY[$5::text], to_jsonb(u.mgr), TRUE)
-                              ELSE jsonb_set(jsonb_set(COALESCE(p.row_json, '{}'::jsonb), ARRAY[$4::text], to_jsonb(u.num), TRUE),
-                                             ARRAY[$5::text], to_jsonb(u.mgr), TRUE) END
-                       END,
-            updated_by = $6, updated_at = NOW()
-       FROM (SELECT * FROM unnest($1::uuid[], $2::text[], $3::text[]) AS t(id, num, mgr)) u
+        SET row_json = jsonb_set(COALESCE(p.row_json, '{}'::jsonb), ARRAY[$3::text], to_jsonb(u.num), TRUE),
+            updated_by = $4, updated_at = NOW()
+       FROM (SELECT * FROM unnest($1::uuid[], $2::text[]) AS t(id, num)) u
       WHERE p.id = u.id AND p.deleted_at IS NULL AND p.active = TRUE`,
-    [ids, nums, mgrs, numKey || '번호', mgrKey || '담당자', String(by).slice(0, 100)]);
+    [ids, nums, numKey, String(by).slice(0, 100)]);
 
   return { ok: true, changed: rowCount, planned: plan.changes.length, total: rows.length,
-           numberColumn: numKey, managerColumn: mgrKey, manager: manager || null, sample };
+           numberColumn: numKey, sample };
 }
 
 /**
@@ -233,15 +213,12 @@ async function renumberAllSheetless({ dryRun = true, by = 'admin', limit = SWEEP
 async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
   const db = getPool();
   const cap = Math.min(Math.max(parseInt(limit, 10) || SWEEP_TAB_CAP, 1), SWEEP_TAB_CAP);
-  const { NUMBER_KEYS, MANAGER_KEYS } = require('../utils/rowNumbering');
-  const lower = a => a.map(k => String(k).toLowerCase());
+  const { NUMBER_KEYS } = require('../utils/rowNumbering');
   const { rows } = await db.query(
     `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
             COALESCE(NULLIF(btrim(tc.display_name), ''), tc.tab_name) AS "displayName",
-            COALESCE(btrim(tc.manager), '') AS manager,
             COUNT(p.id)::int AS total,
-            COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) = '')::int AS "blankNumber",
-            COUNT(p.id) FILTER (WHERE btrim(COALESCE(m.val, '')) = '')::int AS "blankManager"
+            COUNT(p.id) FILTER (WHERE btrim(COALESCE(n.val, '')) = '')::int AS "blankNumber"
        FROM tab_configs tc
        JOIN campaign_participants p
          ON p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
@@ -252,22 +229,16 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
                                        THEN p.row_json ELSE '{}'::jsonb END) AS k
           WHERE lower(btrim(k)) = ANY($1::text[])
           LIMIT 1) n ON TRUE
-       LEFT JOIN LATERAL (
-         SELECT p.row_json->>k AS val
-           FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
-                                       THEN p.row_json ELSE '{}'::jsonb END) AS k
-          WHERE lower(btrim(k)) = ANY($2::text[])
-          LIMIT 1) m ON TRUE
       WHERE COALESCE(tc.sheetless, FALSE) = TRUE
-      GROUP BY 1, 2, 3, 4
-      ORDER BY "blankNumber" DESC, "blankManager" DESC, "tabName"
+      GROUP BY 1, 2, 3
+      ORDER BY "blankNumber" DESC, "tabName"
       LIMIT ${cap + 1}`,
-    [lower(NUMBER_KEYS), lower(MANAGER_KEYS)]);
+    [NUMBER_KEYS.map(k => String(k).toLowerCase())]);
   const truncated = rows.length > cap;
   const items = rows.slice(0, cap);
   return {
     ok: true, truncated, tabs: items.length,
-    needTabs: items.filter(r => r.blankNumber > 0 || (r.blankManager > 0 && r.manager)).length,
+    needTabs: items.filter(r => r.blankNumber > 0).length,
     blankNumberRows: items.reduce((s, r) => s + r.blankNumber, 0),
     items,
   };
