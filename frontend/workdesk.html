@@ -1721,7 +1721,6 @@
 /* 화면에서 못 고치는 사유 줄 — 버튼 없이 조치 문장만(줄바꿈 허용) */
 .pmfixrow.info .nm{white-space:normal;font-size:11.5px;color:var(--t3,#8B94A1);line-height:1.5}
 /* 이관된 작업 시트 열기 경고 — 편집하면 시스템에 안 반영된다는 사실을 먼저 읽게 한다 */
-.pmsheetwarn{font-size:13px;line-height:1.7;color:#7a5a12;background:#FDF8EE;border:1px solid #E7D2A3;border-radius:10px;padding:12px 14px}
 /* 팝업 — ★ body 직속(뷰 스크롤 컨테이너에 넣으면 오버레이가 화면 흐름에 섞인다)
    ★ 바깥클릭으로 닫지 않는다(입력해 둔 계좌·통장표시가 실수 클릭 한 번에 날아가지 않게) */
 .pmov{position:fixed;inset:0;background:rgba(17,20,25,.44);z-index:9600;display:flex;align-items:center;justify-content:center;padding:18px}
@@ -7803,7 +7802,7 @@ function _pmBuildFix(items){
     if(!w) works.set(k, w={ key:k, sheetId:it.sheetId, tabName:it.tabName, tabLabel:it.tabLabel,
       campaignId:it.campaignId||null, campaignTitle:it.campaignTitle||'',
       // 시트 바로가기 재료는 **서버가 준 값 그대로**(프론트에서 sheetId 로 조립하면 무시트 작업이 죽은 링크가 된다)
-      sheetUrl:it.sheetUrl||'', sheetless:!!it.sheetless,
+      sheetUrl:it.sheetUrl||'', sheetless:!!it.sheetless, tabGid:it.tabGid||'',
       bank:it.bank||'', bankSource:it.bankSource||null,
       memo:it.transferMemo||'', memoSource:it.memoSource||null,
       // 리뷰비 — 화면은 **서버가 준 값만** 쓴다(어디서 왔는지도 서버 판정 `feeSource` 그대로).
@@ -7878,44 +7877,24 @@ function _pmBuildFix(items){
            noReviewer:noReviewer.size, noPrice:noPrice.size };
 }
 
-/** 구글시트 링크 검증 — ★ 신뢰 호스트 정확 접두만 연다(응답에 임의 URL 이 실려도 그대로 열지 않는다) */
-function _pmSheetOk(u){ return /^https:\/\/docs\.google\.com\//.test(String(u||'')); }
-
-/** 작업별 [📄 시트] 버튼 — ★ 못 여는 이유를 **말한다**(링크가 없다고 조용히 숨기지 않는다).
- *  ★★ **이관된 작업(sheetless)도 연다**(사용자 확정 2026-08-10) — 초도 보완에는 아직 시트를
- *     봐야 하는 값이 있다. "시스템 표가 진실원본"은 링크를 막는 근거가 아니라 **경고문의 근거**라
- *     클릭 시 "편집하지 말고 참고만" 팝업을 거친다(`_pmOpenSheet`).
- *  ★ 인자는 works 배열 인덱스(외부 문자열 보간 금지 — 탭명·URL 은 시트/DB 발 문자열) */
-function _pmSheetBtn(i){
+/** 작업별 [📋 작업보드] 버튼 — ★★ **구글시트가 아니라 작업보드로 보낸다**(사용자 확정 2026-08-19).
+ *  탈시트 이후 그 작업의 진실원본은 시스템 표이고, 시트를 열어 두면 거기서 고친 값이
+ *  시스템에 반영되지 않아 사고가 난다(그래서 옛 [📄 시트] 버튼은 제거했다).
+ *  ★ 인자는 works 배열 인덱스(외부 문자열 보간 금지 — 탭명은 시트/DB 발 문자열) */
+function _pmBoardBtn(i){
   const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return '';
-  if(_pmSheetOk(w.sheetUrl)){
-    const ttl = w.sheetless
-      ? '이관된 작업 — 참고용으로만 여세요(시트 편집은 시스템에 반영되지 않습니다)'
-      : '구글시트에서 이 작업 탭 열기';
-    return `<button class="btn sm" title="${esc(ttl)}" onclick="_pmOpenSheet(${i})">📄 시트${w.sheetless?'<span class="pmauto">참고</span>':''}</button>`;
-  }
-  // 링크가 없는 경우는 딱 둘 — 사유를 **구분해서** 말한다(뭉뚱그리면 원인을 엉뚱한 데서 찾는다)
-  const why = w.sheetless
-    ? '시스템에서 만든 무시트 작업이라 열 수 있는 구글시트가 없습니다'
-    : '시트 링크를 알 수 없습니다 — 작업 탭이 등록되지 않았거나 조회에 실패했습니다';
-  return `<button class="btn sm" disabled title="${esc(why)}">📄 시트</button>`;
+  return `<button class="btn sm" title="이 작업의 작업보드 표를 엽니다(구매일자·결제금액 확인)"
+    onclick="_pmOpenBoard(${i})">📋 작업보드</button>`;
 }
 
-/** 시트 열기 — ★ 이관된 작업은 **경고를 읽고 확인한 뒤에만** 이동한다.
- *  ★ `window.open` 은 클릭 핸들러 **동기 구간**에서 불러야 팝업 차단에 안 걸린다(onOk 는 async 아님). */
-function _pmOpenSheet(i){
+/** 작업보드에서 그 작업 열기 — ★ 관측 뷰·업체관리와 **같은 `pendingTab` 계약**(사본 금지).
+ *  ★ 팝업을 **먼저 닫는다** — 화면을 전환하는데 오버레이가 남으면 작업보드가 가려진다.
+ *  ★ 목록에 없는 탭이면 `switchView` 뒤 로더가 그대로 밀어 넣어 연다(막다른 길 없음). */
+function _pmOpenBoard(i){
   const w=(STATE.pmFix&&STATE.pmFix.works||[])[i]; if(!w) return;
-  if(!_pmSheetOk(w.sheetUrl)){ toast('이 작업은 열 수 있는 구글시트가 없습니다'); return; }
-  if(!w.sheetless){ window.open(w.sheetUrl, '_blank', 'noopener'); return; }
-  _pmDialog({
-    title:`⚠ 참고용 시트 — ${esc(w.tabLabel)}`,
-    body:`<div class="pmsheetwarn">
-      <b>탈구글시트를 진행했습니다.</b><br>
-      구글시트에 입력한 내용은 <b>시스템에 반영되지 않으므로</b><br>
-      시트를 편집하지 마시고 <b>참고용으로만</b> 사용하세요.</div>`,
-    okLabel:'확인하고 시트로 이동하기',
-    onOk: ()=>{ window.open(w.sheetUrl, '_blank', 'noopener'); return true; }
-  });
+  _pmCloseDialog();
+  STATE.pendingTab={ sheetId:w.sheetId, tabName:w.tabName, tabGid:w.tabGid||'', spreadsheetTitle:'' };
+  switchView('workdesk');
 }
 
 const _PM_FIX_CARD_CAP = 8;   // 카드로 펼치는 작업 수 상한(나머지는 아래 표의 [보완]으로)
@@ -7967,7 +7946,7 @@ function _pmFixBlock(){
       <span class="nm">💰 결제금액 없음 ${w.noPrice}건 — 시트 결제금액 칸을 채우면 다음 조회에서 자동으로 풀립니다</span></div>`);
     return `<div class="pmfixcard">
       <div class="wh"><span class="nm" title="${esc(w.tabLabel)}">${esc(w.tabLabel)}</span>
-        <span class="n">${w.rows}건</span>${_pmSheetBtn(i)}</div>
+        <span class="n">${w.rows}건</span>${_pmBoardBtn(i)}</div>
       <div class="pmfixlist">${lines.join('')}</div></div>`;
   }).join('');
 
@@ -8018,9 +7997,9 @@ function _pmFixWork(i){
       <div class="pmf"><label>리뷰비 (원 · 이 작업의 건당 리뷰비)</label>
         <input id="pmFeeIn" inputmode="numeric" value="${esc(String(feeVal))}" placeholder="예) 3000">
         <div class="hint">${feeHint} 이체금액 = <b>상품비 + 리뷰비</b>입니다. 비우면 미설정으로 되돌립니다.</div></div>
-      <div class="pmf"><label>구글시트</label>
-        <div>${_pmSheetBtn(i)}</div>
-        <div class="hint">시트에서 직접 봐야 하는 값(결제금액 칸 등)을 확인할 때 씁니다 — 새 창으로 열립니다.</div></div>
+      <div class="pmf"><label>작업보드</label>
+        <div>${_pmBoardBtn(i)}</div>
+        <div class="hint">이 작업의 표(구매일자·결제금액 등)를 확인할 때 씁니다 — <b>작업보드가 진실원본</b>이라 구글시트로는 보내지 않습니다.</div></div>
       <div class="pmscope">${scope}</div>`,
     okLabel:'저장',
     onOk: async ()=>{
