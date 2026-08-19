@@ -328,11 +328,12 @@ const ROWS = [
     assert.ok(/function _ptDriftBlock/.test(FE), '목록 렌더러');
     const rd = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
     assert.ok(/\$\{_ptDriftBlock\(r\)\}/.test(rd), '렌더가 실제로 그린다');
-    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptRender'));
+    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
     assert.ok(/reason\s*===\s*'name_drift'/.test(b), '서버가 준 사유로 고른다(판정 사본 0)');
     assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b),
       '★ 탭명은 시트발 외부 문자열 — 반드시 escape');
-    assert.ok(/if\(!d\.length\) return ''/.test(b), '없으면 안 그린다');
+    // 어긋남이 없어도 **빈 껍데기 행은 보여준다**(그쪽도 사람이 알아야 한다)
+    assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(b), '없으면 빈 껍데기 블록만');
     assert.ok(/sync-tab-names/.test(b), '고칠 곳을 말한다');
     assert.ok(/index_master_archive/.test(b), '그 도구가 못 고치는 것까지 말한다(조용한 누락 금지)');
   });
@@ -341,7 +342,7 @@ const ROWS = [
     //   (시트 복사본이 흔하다) — 시트를 안 적으면 똑같아 보이는 줄이 여럿 생겨
     //   어느 것을 고르는지 알 수 없다(2026-08-19 실측 4줄). 체크박스 표에서는 오조작이 된다.
     assert.ok(/campaignName/.test(SRC), '서버가 시트명을 싣는다');
-    const drift = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptRender'));
+    const drift = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
     const rend = FE.slice(FE.indexOf('function _ptRender'), FE.indexOf('function _ptPicked'));
     for (const [name, body] of [['drift', drift], ['candidates', rend]]) {
       assert.ok(/esc\((h|it)\.campaignName/.test(body), name + ': 시트를 그린다(escape)');
@@ -350,15 +351,31 @@ const ROWS = [
       assert.equal(th, td, name + ': 헤더 칸 수 ≡ 행 칸 수 (th ' + th + ' / td ' + td + ')');
     }
   });
-  t('8f-3: 탭명 교정으로 고칠 수 있는 것과 없는 것을 구분해 말한다', () => {
-    // 시트의 현재 이름이 이미 별도 행으로 등록돼 있으면 UNIQUE(sheet_id, tab_name) 충돌로
-    // 리네임이 실패한다 — "교정하세요"라고만 말하면 **되지 않는 조치**를 시키는 셈이다.
+  t('3h: 새 이름이 이미 등록된 행은 아무 일도 하지 않는다 — 읽는 것으로 세지 않는다', () => {
+    // smartBuild 는 **시트의 현재 이름**으로 tcMap 을 찾으므로(indexBuilder:548) 읽기 여부는
+    // 새 이름 행이 정한다. 옛 이름 행은 빈 껍데기다 — "지금도 읽습니다"에 세면 거짓이 된다.
+    const IB = R('server/src/services/indexBuilder.service.js');
+    assert.ok(/const tc = tcMap\[key\]/.test(IB) && /if \(tc && tc\.is_closed\)/.test(IB),
+      '읽기 판정은 그 키의 tc 가 한다');
+    const g = cls({ isClosed: true, liveTabName: '새이름', liveNameRegistered: true });
+    assert.equal(g.reason, 'ghost_row');
+    assert.equal(g.reads, false, '★ 읽는 것으로 세지 않는다');
+    assert.equal(g.candidate, false);
+    // 등록돼 있지 않으면 종전대로 name_drift(읽힌다)
+    assert.equal(cls({ isClosed: true, liveTabName: '새이름' }).reason, 'name_drift');
+  });
+  t('8f-3: 빈 껍데기 행은 따로 보여주고 조치를 다르게 말한다', () => {
     assert.ok(/liveNameRegistered/.test(SRC), '서버가 판정을 싣는다');
-    const b = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptRender'));
-    assert.ok(/h\.liveNameRegistered/.test(b), '행에 표시');
-    assert.ok(/const ghost = d\.filter\(h=>h\.liveNameRegistered\)\.length/.test(b), '건수 계산');
-    assert.ok(/탭명 교정으로 고칠 수 없습니다/.test(b), '고칠 수 없다고 말한다');
-    assert.ok(/d\.length - ghost/.test(b), '교정 안내는 나머지에만');
+    assert.ok(/ghosts: items\.filter\(i => i\.reason === 'ghost_row'\)/.test(SRC),
+      '건수만이 아니라 목록을 준다(어느 행인지 알아야 지운다)');
+    const b = FE.slice(FE.indexOf('function _ptGhostBlock'), FE.indexOf('function _ptRender'));
+    assert.ok(/r\.ghosts/.test(b) && /if\(!g\.length\) return ''/.test(b), '없으면 안 그린다');
+    assert.ok(/esc\(h\.tabName\)/.test(b) && /esc\(h\.liveTabName/.test(b), 'escape');
+    assert.ok(/그대로 두셔도 됩니다/.test(b), '읽기에 영향 없음을 말한다');
+    assert.ok(/탭명 교정으로는 고칠 수 없고/.test(b), '되지 않는 조치를 시키지 않는다');
+    // 어긋남 목록이 비어도 빈 껍데기는 보여준다
+    const d = FE.slice(FE.indexOf('function _ptDriftBlock'), FE.indexOf('function _ptGhostBlock'));
+    assert.ok(/if\(!d\.length\) return _ptGhostBlock\(r\)/.test(d), '어긋남 0건이어도 표시');
   });
   t('9-sync: 탭명 교정이 마감·아카이브 탭의 gid 를 tab_configs 에서도 찾는다', () => {
     // ★ auto-clean-closed 가 index_master 행을 지우므로 im.tab_gid 만 보면 gid 가 null →

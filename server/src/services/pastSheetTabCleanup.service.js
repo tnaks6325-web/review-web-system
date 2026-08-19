@@ -177,6 +177,13 @@ function classifyPastTab(row, since) {
   // ★★ 마감·아카이브 스킵은 **이름 기준**이라 이름이 어긋나면 빗나간다 → 여전히 읽힌다.
   //   그리고 이 상태는 **마감으로 고칠 수 없다**(마감 표시는 옛 이름 행에 붙는다)
   //   ⇒ 후보로 올리지 않고 사유를 말한다: 탭명 교정이 먼저다.
+  /* ★★ 시트의 현재 이름이 **이미 별도 행으로 등록**돼 있으면 이 행은 아무 일도 하지 않는다.
+   *   smartBuild 는 시트의 현재 이름으로 tcMap 을 찾으므로(indexBuilder:548) 읽기 여부는
+   *   **새 이름 행**의 마감 상태가 정한다. 이 행의 gid 도 그 행과 같아 registeredGids 에
+   *   보태는 것이 없다 ⇒ 빈 껍데기다. "지금도 읽습니다" 로 세면 **거짓**이 된다
+   *   (2026-08-19 실측: 3건 중 1건이 이 경우였다). 지울지는 사람이 정한다. */
+  if (base.nameDrift && base.liveNameRegistered)
+    return { ...base, reads: false, candidate: false, reason: 'ghost_row' };
   if (base.nameDrift && (row.isArchived || row.isClosed))
     return { ...base, reads: true, candidate: false, reason: 'name_drift' };
   if (row.isArchived)  return { ...base, reads: false, candidate: false, reason: 'already_archived' };
@@ -241,6 +248,9 @@ async function scanPastSheetTabs({ since, limit = SCAN_CAP } = {}) {
     sheetsAffected: new Set(candidates.map(i => i.sheetId)).size,
     items: candidates,
     holds: reading.filter(i => !i.candidate),
+    // 빈 껍데기 행 — 읽기에 영향은 없지만 **무엇인지 알 수 있게** 목록으로 준다
+    // (건수만 주면 어느 행을 지워야 할지 알 수 없다).
+    ghosts: items.filter(i => i.reason === 'ghost_row'),
   };
 }
 

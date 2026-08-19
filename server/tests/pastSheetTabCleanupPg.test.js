@@ -94,6 +94,11 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'888','이름어긋남_새')`, [S]);
   // 대조군: 이름이 같으면 종전대로 조용하다
   await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'4','이미마감')`, [S]);
+  // ★ 빈 껍데기: 시트의 현재 이름이 **이미 별도 행으로 등록**돼 있다 → 읽기는 그 행이 정하므로
+  //   이 행은 아무 일도 하지 않는다("지금도 읽습니다"에 세면 거짓).
+  await mk('유령_옛이름', { startDate: '24.5.10', gid: '999', closed: true });
+  await mk('유령_새이름', { startDate: '26.8.1', gid: '999b' });
+  await pool.query(`INSERT INTO raw_sheet_tabs (sheet_id, tab_gid, tab_name) VALUES ($1,'999','유령_새이름')`, [S]);
 
   // ── ① 스캔이 실제로 돈다 ─────────────────────────────────
   const scan = await svc.scanPastSheetTabs({ since: '2026-01-01' });
@@ -101,7 +106,7 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     [...scan.items, ...scan.holds].map(i => [i.tabName, i]));
   t('①: 스캔 SQL 이 진짜 PG 에서 실행되고 별칭이 맞는다', () => {
     assert.equal(scan.ok, true);
-    assert.equal(scan.total, 12, '탭 12개 (받음 ' + scan.total + ')');
+    assert.equal(scan.total, 14, '탭 14개 (받음 ' + scan.total + ')');
   });
   t('②: 판정이 5갈래로 갈린다', () => {
     assert.equal(by['과거_구매일2024'].reason, 'past');
@@ -111,7 +116,8 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
       '연도 없는 구매일 표기 → 등록일 폴백 → 닫지 않는다(진짜 PG 가 잡은 자리)');
     assert.equal(by['신호없음'].reason, 'weak_signal');
     // 이미 안 읽는 탭은 목록에 싣지 않고 **건수로** 말한다(payload 절약 + 조용한 누락 금지)
-    assert.equal(scan.alreadyQuiet, 3, '이미 조용한 탭 3개 (받음 ' + scan.alreadyQuiet + ')');
+    // 무시트·마감·아카이브 3개 + 빈 껍데기 1개(읽지 않는다)
+    assert.equal(scan.alreadyQuiet, 4, '이미 조용한 탭 4개 (받음 ' + scan.alreadyQuiet + ')');
     assert.equal(scan.quietBy.already_sheetless, 1);
     assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감만 조용하다');
     assert.equal(scan.quietBy.already_archived, 1);
@@ -128,9 +134,10 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
   });
   t('③b: "지금도 읽히는 탭"과 "이미 안 읽는 탭"을 구분해 센다', () => {
     // 무시트·아카이브·마감 3개를 뺀 7개가 지금도 읽힌다
-    assert.equal(scan.stillReading, 9, 'stillReading (받음 ' + scan.stillReading + ')');
+    // ★ 유령 행은 읽는 것으로 세지 않는다(+1 은 '유령_새이름' = 최근 활동)
+    assert.equal(scan.stillReading, 10, 'stillReading (받음 ' + scan.stillReading + ')');
     assert.equal(scan.candidates, 3, '후보 3개 (받음 ' + scan.candidates + ')');
-    assert.equal(scan.heldBy.recent, 1);
+    assert.equal(scan.heldBy.recent, 2, "최근 2개('최근_2026' + '유령_새이름')");
     assert.equal(scan.heldBy.weak_signal, 2, '등록일만으로는 닫지 않는다');
     assert.equal(scan.heldBy.pending_orders, 1);
     assert.equal(scan.heldBy.active_campaign, 1);
@@ -163,6 +170,14 @@ CREATE TABLE index_master_archive (sheet_id text, tab_name text, tab_gid text);
     assert.equal(d.campaignName, '시트甲', '어느 시트인지 함께 말한다(같은 탭 이름 구분)');
     // ★ 조용한 탭은 목록에 싣지 않고 건수로만 말한다 — `by` 에서 찾으면 안 된다
     assert.equal(scan.quietBy.already_closed, 1, '이름이 같은 마감은 종전대로 조용하다');
+  });
+
+  t('③e: 새 이름이 이미 등록된 행은 읽는 것으로 세지 않고 목록으로 준다', () => {
+    assert.equal(scan.ghosts.length, 1, '빈 껍데기 1개 (받음 ' + scan.ghosts.length + ')');
+    assert.equal(scan.ghosts[0].tabName, '유령_옛이름');
+    assert.equal(scan.ghosts[0].liveTabName, '유령_새이름');
+    assert.ok(!by['유령_옛이름'], '읽는 목록(items/holds)에는 없다');
+    assert.equal(scan.quietBy.ghost_row, 1, '조용한 쪽으로 센다');
   });
 
   t('④: 미리보기는 쓰지 않는다', () => {
