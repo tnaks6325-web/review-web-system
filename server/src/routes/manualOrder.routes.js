@@ -11,7 +11,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { parseSlashForm } = require('../utils/slashForm');
-const { submitExternalOrder } = require('../services/manualOrder.service');
+const { submitExternalOrder, dailyRemainingForCampaign } = require('../services/manualOrder.service');
 const { logger } = require('../utils/logger');
 
 const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로 수백 건이 들어가는 사고 방지)
@@ -82,6 +82,26 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
     const items = Array.isArray(b.items) ? b.items.slice(0, MAX_LINES) : [];
     if (!items.length) return res.status(400).json({ ok: false, error: '제출할 건이 없습니다' });
 
+    const allowOverDaily = b.allowOverDaily === true;
+
+    /* ★★ 일 정원(오늘 몫) 사전 판정 — 배치를 **시작하기 전에** 한 번만 본다.
+       건별로 막으면 "앞 3건은 들어가고 뒤 2건은 거절"이라는 부분 처리가 남아, 담당자가 무엇이
+       들어갔는지 모른 채 재붙여넣기를 하게 된다(중복 접수의 입구). 여기서 되돌리면 **쓰기 0건**.
+       ★ 막지 않는다 — 숫자를 돌려주고 확인창을 받는다(사용자 확정 "나"안).
+       ★ 판정 불가(null)는 통과 = 종전 동작(모르면 막지 않는다).
+       ★ 서버 최종 방어는 건별 게이트(`submitExternalOrder` ⓪-3)가 맡는다 — 낡은 화면이 이
+         사전 판정을 건너뛰고 호출해도 그쪽에서 다시 걸린다. */
+    if (campaignId && !allowOverDaily) {
+      const dq = await dailyRemainingForCampaign(pool, campaignId);
+      if (dq && items.length > dq.remaining) {
+        return res.json({
+          ok: false, needConfirm: 'over_daily',
+          quota: { ...dq, want: items.length, over: items.length - dq.remaining },
+          error: `오늘 모집인원 ${dq.quota}명 중 ${dq.todayCount}명이 찼습니다. 남은 자리 ${dq.remaining}명인데 ${items.length}건을 제출하면 ${items.length - dq.remaining}명 초과합니다.`,
+        });
+      }
+    }
+
     const adminName = (req.admin && req.admin.name) || '';
     const results = [];
     for (let i = 0; i < items.length; i++) {
@@ -108,7 +128,13 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           optionKey: it.optionKey || '',
           adminName,
           force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
+          allowOverDaily,            // 오늘 정원 초과 확인을 받은 뒤 재시도할 때만
         });
+        // ★ 초과 접수는 결과 화면에 남긴다 — 확인을 받았더라도 "조용히 넘어간" 것으로 보이면
+        //   이번에 문제가 된 상태(정원을 넘긴 줄 모름)가 그대로 되돌아온다.
+        if (allowOverDaily && r && r.ok) {
+          r.warnings = (r.warnings || []).concat('오늘 모집인원을 초과해 접수했습니다(관리자 확인됨)');
+        }
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {
         logger.error(`[manual-order] 건별 실패 idx=${i}: ${e.message}`);
