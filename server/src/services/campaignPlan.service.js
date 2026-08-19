@@ -154,16 +154,23 @@ async function getPlanOverview(campaignId) {
   // 기준선으로 내려준다. 없는 날짜를 0명으로 표현해야 주말/휴무일을 조절 대상으로
   // 표시해도 가짜 인원이 생기지 않는다.
   let worktableDates = null;
+  /* 무시트 작업표 연결 여부 — true=조절이 표의 줄까지 바꾼다 / false=정원만 바뀐다(전환 누락 신호)
+     / null=연결 없음·판정 실패(모름). ★ 화면이 이 값으로 [작업표 재구성] 활성·경고를 정한다.
+     worktableDates 유무로 추정하면 "행이 없다·날짜 열이 없다"까지 전환 누락으로 오독한다. */
+  let sheetlessLinked = null;
   try {
     const { isSheetless } = require('../utils/sheetlessScope');
-    if (camp.linked_sheet_id && camp.linked_tab_name
-      && await isSheetless(pool, camp.linked_sheet_id, camp.linked_tab_name)) {
-      const { readWorktableDates } = require('./sheetlessDailyPlan.service');
-      const read = await readWorktableDates({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name });
-      if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({ date, slots: read.byDate[date] }));
-      else logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 실패 camp=${camp.id}: ${read.reason}`);
+    if (camp.linked_sheet_id && camp.linked_tab_name) {
+      sheetlessLinked = await isSheetless(pool, camp.linked_sheet_id, camp.linked_tab_name);
+      if (sheetlessLinked) {
+        const { readWorktableDates } = require('./sheetlessDailyPlan.service');
+        const read = await readWorktableDates({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name });
+        if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({ date, slots: read.byDate[date] }));
+        else logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 실패 camp=${camp.id}: ${read.reason}`);
+      }
     }
   } catch (e) {
+    sheetlessLinked = null;   // 모르면 모른다고 한다(전환 누락으로 단정하지 않는다)
     logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 예외 camp=${camp.id}: ${e.message}`);
   }
 
@@ -200,6 +207,8 @@ async function getPlanOverview(campaignId) {
     scheduleDates: (schedule && schedule !== 'unknown')
       ? schedule.dates.map(d => ({ date: d.date, slots: d.slots })) : null,
     worktableDates,
+    // 조절이 작업표의 줄까지 바꾸는가(true) · 정원만 바꾸는가(false) · 모름(null)
+    worktableLinked: sheetlessLinked,
     plans: plansQ.rows.map(r => ({
       date: r.date, count: Number(r.count) || 0, updatedBy: r.updated_by || '', updatedAt: r.updated_at,
     })),
@@ -222,6 +231,15 @@ async function getPlanOverview(campaignId) {
  *   서버는 날짜별 계획값만 저장하고, 연장/분산은 저장 시점에 계획 행으로 풀린 상태로 받는다
  *   (런타임 분기 최소화 — 시안의 확정 저장 계약).
  */
+/** 이 공고의 **총 모집 인원**(0 = 무제한 = 검사 생략).
+ *  ★ 런타임 정원 판정(computeCampaignState)이 총량으로 쓰는 값과 같은 것을 본다 —
+ *    시트 일정 공고는 시트 행 수(totalSlots), 그 외는 `recruit_total`.
+ *    다른 값을 쓰면 "화면에서는 저장됐는데 실제로는 안 열리는" 계획이 생긴다. */
+function _totalCapFor(camp, schedule) {
+  if (schedule && schedule !== 'unknown' && Number(schedule.totalSlots) > 0) return Number(schedule.totalSlots);
+  return Number(camp && camp.recruit_total) || 0;
+}
+
 async function savePlans(campaignId, body, actor) {
   // ※ 킬스위치(CAMPAIGN_DAILY_PLAN=0)는 **판정만** 끈다 — 저장 원장은 유지해 재활성 시
   //   조절이 그대로 되살아난다(프론트가 planEnabled=false 로 저장을 잠가 실수 저장은 없다).
@@ -304,6 +322,54 @@ async function savePlans(campaignId, body, actor) {
       }
     }
 
+    /* ★★ 총량 게이트(사용자 확정 2026-08-19) — 조절은 **총 모집 인원 안에서만** 한다.
+       총인원·일건수는 작업오더가 준 값으로 고정되고(모집공고 수정에서 잠금), 날짜별 조절은
+       그 총량을 나눠 담는 일이다. 그래서 "이미 확정된 인원 + 앞으로의 계획"이 총량을 넘으면 거부한다.
+       ★ 계획이 없는 날의 자연 정원(기본 일건수·이월)은 세지 않는다 — 그쪽은 런타임 총량 clamp 가
+         이미 막으므로, 여기서 세면 멀쩡한 조절이 과대 거부된다(거부는 확실한 초과에만).
+       ★ 총량 0(무제한)·set 없음(해제만)은 검사 대상이 아니다.
+       ★ 조회 실패는 **통과**시키고 경고만 남긴다(fail-open) — 이 게이트가 죽었다고 조절 자체가
+         막히면 막다른 길이 되고, 실제로 총량을 넘겨 열리는 것은 런타임 clamp 가 막는다. */
+    const totalCap = _totalCapFor(camp, schedule);
+    if (totalCap > 0 && set.length) {
+      let sp = false;
+      try { await client.query('SAVEPOINT plan_total'); sp = true; } catch (_) {}
+      try {
+        const { rows: planRows } = await client.query(
+          `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
+             FROM campaign_daily_plans WHERE campaign_id = $1 AND plan_date >= $2::date`,
+          [campaignId, today]);
+        const { rows: cfRows } = await client.query(
+          `SELECT COUNT(*) AS all_n,
+                  COUNT(*) FILTER (WHERE submitted_at >= $2) AS today_n
+             FROM campaign_applications WHERE campaign_id = $1 AND status = 'submitted'`,
+          [campaignId, kstDayStartUtc().toISOString()]);
+        if (sp) await client.query('RELEASE SAVEPOINT plan_total');
+        const planned = new Map(planRows.map(r => [r.date, Number(r.count) || 0]));
+        for (const x of set) planned.set(x.date, x.count);
+        for (const dt of remove) planned.delete(dt);
+        const confirmedAll = Number(cfRows[0] && cfRows[0].all_n) || 0;
+        const confirmedToday = Number(cfRows[0] && cfRows[0].today_n) || 0;
+        let future = 0;
+        planned.forEach((c, dt) => { if (dt > today) future += c; });
+        // 오늘은 "그날 정원" 개념이라 이미 확정된 오늘분과 겹친다 — 큰 쪽 하나만 센다(이중 계수 방지).
+        const todayPart = planned.has(today) ? Math.max(planned.get(today), confirmedToday) : confirmedToday;
+        const need = (confirmedAll - confirmedToday) + todayPart + future;
+        if (need > totalCap) {
+          const e = new Error(
+            `총 모집 ${totalCap.toLocaleString()}명을 넘겨 조절할 수 없습니다 — `
+            + `확정 ${confirmedAll.toLocaleString()}명 + 앞으로의 계획을 합하면 ${need.toLocaleString()}명입니다. `
+            + `${(need - totalCap).toLocaleString()}명을 줄여주세요.`);
+          e.code = 'over_total'; e.cap = totalCap; e.need = need; e.confirmed = confirmedAll;
+          throw e;
+        }
+      } catch (e) {
+        if (e && e.code === 'over_total') throw e;
+        if (sp) { try { await client.query('ROLLBACK TO SAVEPOINT plan_total'); } catch (_) {} }
+        logger.warn(`[campaignPlan] 총량 게이트 확인 실패(통과) camp=${campaignId}: ${e.message}`);
+      }
+    }
+
     // ★★ 이월 반영 잔량 재검증(코드리뷰 M2 — 캠페인 행 잠금 **안**에서): 두 관리자가 동시에
     //   원클릭을 누르면 둘 다 낡은 잔량 H 를 들고 오는데, 첫 커밋이 carry_apply 를 남기므로
     //   두 번째는 여기서 잔량 0 을 다시 계산해 carry_stale 로 거부된다(이중 반영·원장 과차감 차단).
@@ -372,19 +438,62 @@ async function savePlans(campaignId, body, actor) {
           e.code = 'worktable_default_missing'; throw e;
         }
         const syncSet = set.concat(remove.map(date => ({ date, count: defaults.get(date) })));
+        /* ★ 이번에 손대지 않은 날의 **저장된 계획**도 함께 넘긴다 — 안 넘기면 다른 날의 빈 줄을
+           도너로 뺏어 그 날짜가 계획보다 적어진다(표 ≠ 계획, 실측). */
+        const plannedMap = {};
+        try {
+          const { rows: pr } = await client.query(
+            `SELECT to_char(plan_date,'YYYY-MM-DD') AS date, planned_count AS count
+               FROM campaign_daily_plans WHERE campaign_id = $1 AND plan_date >= $2::date`,
+            [campaignId, today]);
+          for (const r of pr) plannedMap[r.date] = Number(r.count) || 0;
+        } catch (e) {
+          logger.warn(`[campaignPlan] 저장된 계획 조회 실패(도너 보호 생략) camp=${campaignId}: ${e.message}`);
+        }
         worktableSync = await syncAdjustedPlansToWorktable({
           client,
           sheetId: camp.linked_sheet_id,
           tabName: camp.linked_tab_name,
           set: syncSet,
+          planned: plannedMap,
           today,
           by: actor || 'campaign-plan',
         });
         if (!worktableSync.skipped) {
           projectionTarget = { sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name };
         }
+        /* ★★ 조절을 저장하면 **오늘 이후 전체를 자동 재구성**한다(사용자 확정 2026-08-19).
+           종전엔 위 증분 동기화가 **이번에 저장한 날짜만** 손대서, 과거·꼬인 빈 줄이 미래에
+           그대로 남았다("8/20부터여야 하는데 26.8.26으로 스케줄링" 신고). 재구성은 관리자가
+           [작업표 재구성]으로 누르던 것과 **같은 함수**다(사본 0).
+           ★★ SAVEPOINT 격리 + 절대 throw 없음 — 재구성 실패(계획 없음·확정분 초과 등)로
+              **계획 저장 자체가 죽으면 안 된다**(082 apply 규율과 같은 자리). 실패는 사유만 싣고,
+              사람이 [작업표 재구성] 버튼으로 다시 시도할 수 있다.
+           ★ 킬스위치 `CAMPAIGN_PLAN_AUTO_REBUILD=0` = 종전 동작(증분 동기화만). */
+        if (!worktableSync.skipped && process.env.CAMPAIGN_PLAN_AUTO_REBUILD !== '0') {
+          const plansAll = Object.keys(plannedMap).sort().map(date => ({ date, count: plannedMap[date] }));
+          try {
+            await client.query('SAVEPOINT cp_auto_rebuild');
+            const { rebuildAdjustedPlansToWorktable } = require('./sheetlessDailyPlan.service');
+            worktableSync.rebuild = await rebuildAdjustedPlansToWorktable({
+              client, sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name,
+              plans: plansAll, today, by: actor || 'campaign-plan-autorebuild',
+            });
+            await client.query('RELEASE SAVEPOINT cp_auto_rebuild');
+          } catch (err) {
+            try { await client.query('ROLLBACK TO SAVEPOINT cp_auto_rebuild'); } catch (_) {}
+            try { await client.query('RELEASE SAVEPOINT cp_auto_rebuild'); } catch (_) {}
+            worktableSync.rebuild = { ok: false, reason: err.code || 'rebuild_failed', message: err.message };
+            logger.warn(`[campaignPlan] 저장 후 자동 재구성 실패(계획 저장은 유지) camp=${campaignId}: ${err.message}`);
+          }
+        }
       } else {
-        worktableSync = { ok: true, skipped: true, reason: 'not_sheetless', moved: 0, cleared: 0 };
+        /* ★★ 시트 기반 탭은 이제 정상 상태가 아니다(탈 구글시트 완료 — 2026-08 사용자 확정).
+           표식(tab_configs.sheetless)이 안 켜진 탭이면 조절은 **정원만 바꾸고 작업표는 그대로**인데,
+           그걸 조용히 넘기면 "조절했는데 표에 줄이 안 생긴다"가 원인 불명으로 남는다.
+           저장 자체는 막지 않되(정원 조절은 유효) 화면이 사유를 말하도록 신호를 올린다. */
+        worktableSync = { ok: true, skipped: true, reason: 'not_sheetless', warn: true, moved: 0, cleared: 0,
+          message: '이 작업은 아직 무시트 작업표로 전환되지 않아 표의 줄은 바뀌지 않았습니다 — 정원만 조절됐습니다.' };
       }
     }
     await client.query(
