@@ -1638,14 +1638,26 @@
   .setlin.open .caret{transform:rotate(180deg)}
   /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰이미지, 칸마다 한 장 */
   .rv2{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
+     행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
+  .tp3grid.c3 .rvpane{position:relative;overflow:hidden;padding:0}
+  .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:11px 12px}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px 8px 6px}
   .rv2 .rv2h{font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:6px;flex:none}
   .rv2 .rv2h .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
   .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column}
-  .rv2 .rvone{flex:1;min-height:0;width:100%;object-fit:contain;border:1px solid var(--line);border-radius:8px;
-              background:var(--card);cursor:pointer}
-  .rv2 .rvone:hover{border-color:var(--accent)}
+  /* ★★ 캡처는 세로로 매우 긴 경우가 흔하다(모바일 리뷰 전체 스크린샷) — 이미지를 그대로 두면
+     그 원본 높이가 grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고).
+     래퍼를 기준 삼아 이미지를 절대배치해 **레이아웃 높이 기여를 0** 으로 만든다:
+     칸 높이는 왼쪽 두 카드가 정하고, 캡처는 그 안에서 contain 으로 줄어든다(잘리지 않는다). */
+  .rv2 .rvhold{flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;
+               background:var(--card);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;cursor:pointer}
+  .rv2 .rvhold:hover{border-color:var(--accent)}
+  .rv2 .rvhold::-webkit-scrollbar{width:5px} .rv2 .rvhold::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  /* ★ 폭에 맞춰 축소하고 세로는 칸 안에서 스크롤한다 — contain 으로 통째로 욱여넣으면
+     모바일 전체 스크린샷(예 390×3200)이 220px 안에서 실낱이 되어 **아무것도 판독할 수 없다**. */
+  .rv2 .rvone{width:100%;height:auto;display:block}
   .rv2 .rvpg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:5px;font-size:10px;color:var(--muted);font-weight:700}
   .rv2 .rvpg .pgb{font:inherit;font-size:12px;line-height:1;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);
                   background:var(--card);color:var(--ink);cursor:pointer}
@@ -5636,12 +5648,12 @@ function _rvStep(kind,delta,n){
 }
 function _rvRender2(pane){
   const hd=`<div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
-  if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
+  if(STATE.rvImgs===null&&!STATE.rvSel){ _rvFill(pane, hd+`<div class="rvnone"><b>불러오는 중…</b></div>`); return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
-  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`; return; }
+  if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`); return; }
   const who=_rvWho(r);
   const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
-  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
+  if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   const col=(kind,icon,title,emptyB,emptyS,warn)=>{
     const list=_rvKindFiles(files,kind).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
@@ -5649,8 +5661,8 @@ function _rvRender2(pane){
     const i=Math.min((STATE.rvIdx&&STATE.rvIdx[kind])||0,Math.max(0,n-1));
     const gi=n?files.indexOf(_rvKindFiles(files,kind)[i]):-1;   // 크게 보기 팝업은 그 행의 전체 목록 기준
     const body=n
-      ? `<img class="rvone" src="${esc(list[i].url)}" alt="${esc(title)}" loading="lazy" title="크게 보기"`+
-        ` data-rid="${esc(r.id)}" data-fidx="${gi}" onclick="_rvOpenByImage(this)">`+
+      ? `<div class="rvhold"><img class="rvone" src="${esc(list[i].url)}" alt="${esc(title)}" loading="lazy" title="크게 보기"`+
+        ` data-rid="${esc(r.id)}" data-fidx="${gi}" onclick="_rvOpenByImage(this)"></div>`+
         `<div class="rvpg"${n>1?'':' style="visibility:hidden"'}>`+
           `<button type="button" class="pgb"${i===0?' disabled':''} onclick="_rvStep('${kind}',-1,${n})">‹</button>`+
           `<span>${i+1} / ${n}</span>`+
@@ -5664,8 +5676,14 @@ function _rvRender2(pane){
   const right=col('rev','📷','리뷰 이미지',
     r.submitted?'이미지 미등록':'리뷰 미제출',
     r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
-  pane.innerHTML=hd+who2+`<div class="rv2">${left}${right}</div>`;
+  _rvFill(pane, hd+who2+`<div class="rv2">${left}${right}</div>`);
 }
+/* ★★ 미리보기 칸이 **높이를 요구하지 않게** 절대배치 레이어로 감싼다.
+   캡처는 세로가 매우 긴 경우가 흔하고(모바일 전체 스크린샷), 정상 흐름에 두면 그 높이가
+   grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고). 레이어를 두면
+   행 높이는 왼쪽 두 카드가 정하고, 그 안에서 캡처가 폭에 맞춰 축소되며 세로로 스크롤된다.
+   ★ 광고주 뷰어(_rvRender)는 세로 레일이라 종전 그대로 — 이 래퍼는 내부 화면 전용이다. */
+function _rvFill(pane, html){ pane.innerHTML=`<div class="rvfill">${html}</div>`; }
 function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
 function _rvOpen(rid,fileIndex){
   const people=_rvPeople(), idx=people.findIndex(p=>String(p.r.id)===String(rid)); if(idx<0) return;

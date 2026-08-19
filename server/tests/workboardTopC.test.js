@@ -172,6 +172,23 @@ t('★ 높이는 px 로 못박지 않는다 — min-height + stretch(내용이 �
   && !/\.tp3grid\.c3 \.tp3col\{height:330px\}/.test(wd));
 t('★ 좁은 화면에서 세로로 접힌다', /@media\(max-width:1100px\)\{\.tp3grid\.c3\{grid-template-columns:1fr\}/.test(wd));
 t('★ 미리보기 두 칸은 1fr 1fr', /\.rv2\{[^}]*grid-template-columns:1fr 1fr/.test(wd));
+/* ★★ 캡처가 칸 높이를 밀어 올리지 않는다(실사용 신고 2026-08-19 · 모바일 전체 스크린샷 390×3200).
+   내용을 절대배치 레이어로 빼야 grid 행 높이를 왼쪽 두 카드가 정한다 — 이게 없으면
+   상단 카드가 화면 밖까지 늘어난다. 세로는 칸 안에서 스크롤(contain 으로 욱여넣으면 판독 불가). */
+t('★ 미리보기 내용은 절대배치 레이어(.rvfill) 안에서만 흐른다',
+  /\.tp3grid\.c3 \.rvpane\{position:relative;overflow:hidden;padding:0\}/.test(wd)
+  && /\.tp3grid\.c3 \.rvpane \.rvfill\{position:absolute;inset:0/.test(wd));
+t('★ 내부 미리보기 렌더는 반드시 _rvFill 을 거친다(한 갈래라도 새면 그 상태에서 높이가 튄다)', (() => {
+  const m = fnBody(wd, 'function _rvRender2(pane){');
+  return !!m && !/pane\.innerHTML=/.test(m) && (m.match(/_rvFill\(pane,/g) || []).length >= 4;
+})());
+t('★ 캡처는 폭에 맞춰 축소하고 세로는 칸 안에서 스크롤(contain 으로 욱여넣지 않는다)',
+  /\.rv2 \.rvhold\{flex:1;min-height:0;[^}]*overflow-y:auto/.test(wd)
+  && /\.rv2 \.rvone\{width:100%;height:auto;display:block\}/.test(wd));
+t('★ 광고주 뷰어(_rvRender)는 종전 그대로 — 이 래퍼는 내부 화면 전용', (() => {
+  const m = fnBody(wd, 'function _rvRender(){');
+  return !!m && !/_rvFill\(/.test(m) && /pane\.innerHTML=/.test(m);
+})());
 
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
