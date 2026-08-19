@@ -2872,9 +2872,11 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
     let applications = { rowCount: 0 };
     if (row.order_submission_id) {
       applications = await client.query(
+        // ★ campaign_applications 에는 updated_at 컬럼이 없다(018 생성 · 045/078/082/101 증설분에도 없음).
+        // 넣으면 42703 으로 이 트랜잭션 전체가 죽어 "구매기록이 붙은 행만 삭제 불가"가 된다.
         `UPDATE campaign_applications
             SET status='cancelled', submitted_at=NULL, order_submission_id=NULL,
-                expires_at=NOW(), hold_token=NULL, updated_at=NOW()
+                expires_at=NOW(), hold_token=NULL
           WHERE order_submission_id=$1::uuid AND status IN ('applied','submitted')`,
         [row.order_submission_id]);
     }
