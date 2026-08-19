@@ -2020,6 +2020,21 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #abOv th:last-child,#abOv td:last-child{width:99%}
 #abOv .abchip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;
   background:var(--card2);border:1px solid var(--line);margin:0 5px 5px 0;cursor:help}
+/* ♻ 중복 줄 정리 — 표가 7칸이고 전체 점검 목록이 수십 줄이라 기본 460px·무한 높이로는 조작이 안 된다
+   (사용자 신고 2026-08-19). ★ **이 모달에만** 스코프 · flex 자식 min-height:0(없으면 스크롤이 안 생긴다). */
+#ddOv .wbl-dlg{width:min(1080px,100%);max-height:86vh;display:flex;flex-direction:column}
+#ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#ddOv table.wbl-t{font-size:11.5px}
+#ddOv table.wbl-t th{padding:5px 8px}
+#ddOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
+/* 작업명은 길어서 4줄로 접히며 줄 높이를 키운다 — 한 줄로 자르고 전체는 title 로 남긴다. */
+#ddOv table.wbl-t td:first-child{max-width:430px;overflow:hidden;text-overflow:ellipsis}
+#ddOv .wbl-facts{margin:6px 0 2px;padding:7px 10px}
+#ddOv .wbl-facts ul{max-height:220px;overflow:auto}
+#ddOv details.wbl-facts summary{list-style:none}
+#ddOv details.wbl-facts summary::-webkit-details-marker{display:none}
+#ddOv details.wbl-facts summary::before{content:'▸ ';color:#6b7280}
+#ddOv details[open].wbl-facts summary::before{content:'▾ '}
 .wbl-df .wbl-b:disabled{opacity:.45;cursor:not-allowed}
 .wbl-warn{margin-top:9px;font-size:11px;color:var(--warn);background:var(--warn-soft);border:1px solid #f0dcb8;border-radius:8px;padding:7px 10px}
 /* 🧹 줄 정리 표 — 마감 확인창(.wbl-*)의 껍데기를 그대로 쓰고 표만 더한다 */
@@ -3489,12 +3504,13 @@ function _ddRender(){
       ${_ddSkipRows(g)}</li>`).join('') : '';
   b.innerHTML = `<b>${esc(tg.label || tg.tabName)}</b>${
     _DD.target ? ` <button class="wbl-b" style="margin-left:8px" onclick="ddBackToScan()">← 점검 목록으로</button>` : ''}
-    <div class="wbl-facts">중복으로 보는 경우는 <b>둘</b>입니다.
+    <details class="wbl-facts" id="ddRuleBox"><summary style="cursor:pointer;font-weight:700">판정 규칙 — ㉮ 주문번호 셋 다 같음 · ㉯ 같은 주문 기록을 여러 줄이 씀 <span style="font-weight:400;color:#6b7280">(눌러서 자세히)</span></summary>
+      <div style="margin-top:6px">중복으로 보는 경우는 <b>둘</b>입니다.
       ㉮ <b>표에 보이는 주문번호 + 주문 기록의 주문번호 + 연락처가 셋 다 같음</b>(재제출로 주문이 새로 생긴 중복) ·
       ㉯ <b>같은 주문 기록을 여러 줄이 씀</b>(한 주문이 여러 줄에 기록된 중복 — 표 주문번호가 달라도 대상).
       <b>같은 사람이라도 주문이 서로 다르면 각기 다른 참여건이라 중복이 아닙니다.</b>
       ㉮ 는 표에 주문번호가 없거나 6자리 미만인 줄을 <b>대상에서 제외</b>합니다.
-      해당 그룹은 <b>가장 이른 줄만 남기고</b> 나머지를 내리며, 구글시트는 건드리지 않고 되돌릴 수 있습니다.</div>
+      해당 그룹은 <b>가장 이른 줄만 남기고</b> 나머지를 내리며, 구글시트는 건드리지 않고 되돌릴 수 있습니다.</div></details>
     ${_DD.err ? `<div class="wbl-facts" style="color:#b91c1c">${esc(_DD.err)}</div>` : ''}
     ${!p ? `<div class="wbl-facts">[미리보기]를 눌러 무엇이 정리되고 무엇이 보류되는지 먼저 확인하세요.</div>` : `
       <div class="wbl-facts">표 ${esc(String(p.boardRows))}줄 중 <b>정리 대상 ${esc(String(p.removeRows))}줄</b>
@@ -3510,7 +3526,7 @@ function _ddRender(){
   if (_DD.scan && !_DD.target) {
     const sc = _DD.scan;
     const list = (sc.tabs || []).map((t, i) =>
-      `<tr${t.done ? ' style="opacity:.55"' : ''}><td><a href="#" onclick="ddPickScan(${i});return false">${esc(t.label || t.tabName)}</a></td>
+      `<tr${t.done ? ' style="opacity:.55"' : ''}><td title="${esc(t.label || t.tabName)}"><a href="#" onclick="ddPickScan(${i});return false">${esc(t.label || t.tabName)}</a></td>
         <td class="num">${esc(String(t.boardRows))}</td>
         <td class="num"><b>${esc(String(t.removeRows))}</b></td>
         <td class="num">${esc(String(t.skippedGroups))}</td>
