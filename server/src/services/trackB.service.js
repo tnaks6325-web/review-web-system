@@ -2344,6 +2344,16 @@ async function setWorkdeskTitle({ sheetId, tabName, displayName } = {}) {
 // ── 리뷰웹시스템[3버전] 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
 //   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
 //     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단).
+/** roster 의 row_json 키 모음(첫 줄 순서 우선) — 번호 칸 찾기용. */
+function _collectRowJsonKeys(rows) {
+  const keys = [];
+  for (const r of (rows || [])) {
+    const rj = (r && r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
+    if (!rj) continue;
+    for (const k of Object.keys(rj)) if (k && keys.indexOf(k) < 0) keys.push(k);
+  }
+  return keys;
+}
 async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
@@ -2361,7 +2371,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.display_name AS "displayName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
-            tc.source_of_truth AS "sourceOfTruth"
+            tc.source_of_truth AS "sourceOfTruth", COALESCE(tc.sheetless, FALSE) AS sheetless
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
@@ -2573,6 +2583,22 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       syn.cellEdits = tce;
     }
     out.push(syn);
+  }
+  /* ── 표시 순서 = 표의 `번호` 순(무시트 탭만) ─────────────────────────────────
+     ★★ 번호를 구매일자 순으로 다시 매겨도(`rowNumbering.service`) 화면이 `seq` 순이면
+        "8/5 건이 146 번인데 여전히 맨 아래" 가 된다. 그래서 **번호가 정한 순서**를 따른다.
+     ★ 번호가 없는 줄은 맨 아래(그 안에서는 seq) — 순서를 지어내지 않는다.
+     ★ **시트 기반 탭은 종전대로 `seq` 순** — 그쪽 번호는 시트가 정하고 우리는 재부여하지 않는다.
+     ★ 판정은 `utils/rowNumbering` 단일 출처(정렬 규칙 사본 금지). */
+  if (meta[0] && meta[0].sheetless) {
+    const { numberColumnKey, displaySortKey } = require('../utils/rowNumbering');
+    const nk = numberColumnKey(_collectRowJsonKeys(roster));
+    if (nk) {
+      const key = new Map();
+      for (const r of roster) key.set(String(r.id), displaySortKey(r, nk));
+      const k = r => key.get(String(r.id)) || { has: false, n: Number.MAX_SAFE_INTEGER, seq: r.seq || 0 };
+      out.sort((a, b) => { const x = k(a), y = k(b); return (x.n - y.n) || (x.seq - y.seq); });
+    }
   }
   // orphan: 활성 오버레이 중 어떤 활성 행에도 안 붙은 것(카운트/타입만 — PII·원장ID 비노출)
   let orphanCount = 0; const orphanByType = {};
