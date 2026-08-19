@@ -761,6 +761,7 @@ function _overlayView(groups) {
       paidValue: t.paidValue,
     })),
     suggest: g.suggest || null, suggestReason: g.suggestReason || null,
+    bank: g.bank || null, bankUnavailable: g.bankUnavailable || null,
     keepRow: g.keep ? g.keep.rowIndex : null,
     clearRows: g.clear.map(t => t.rowIndex),
     ledgerBlockedRows: g.ledgerBlocked.map(t => t.rowIndex),
@@ -815,8 +816,104 @@ function _suggestKeep(group) {
   return null;   // 좁혀지지 않으면 추천하지 않는다
 }
 
+
+/* ══════════════════════════════════════════════════════════════════
+   보류건 은행 이체결과 대조 (사용자 요청 2026-08-19) — 읽기 전용
+   ──────────────────────────────────────────────────────────────────
+   근거 사다리로도 안 좁혀지는 보류건은 결국 **은행이 실제로 무엇을 보냈나**로 판단해야 한다.
+   그 재료는 이미 DB 에 있다 — 새로 올릴 필요가 없다.
+     ㉮ `payment_batch_items` — 그 이체가 **어느 줄에 기록됐는지**(회차·이체시각·결과 표기)
+     ㉯ 결과 파일 요약의 **미확인 이체**(`summary.preview.unmatchedResults`) — 어느 줄에도 안 붙은 이체
+   ★ 계좌번호는 **뒤 4자리만** 내보낸다(화면에 PII 를 늘리지 않는다 — 회차 대조에 그만큼이면 충분).
+   ★ 조회 실패는 **필드 미동봉**(`bankUnavailable`) — 0 건으로 꾸미면 "이체가 없었다"로 오독된다.
+   ══════════════════════════════════════════════════════════════════ */
+
+const _BANK_UPLOAD_SCAN = 40;      // 최근 결과 파일 스캔 상한(요약 JSON 이라 무겁다)
+
+function _tail4(v) {
+  const d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+  return d ? d.slice(-4) : '';
+}
+function _normName(v) { return String(v == null ? '' : v).replace(/\s+/g, '').trim(); }
+
+async function _bankEvidenceForGroups(client, groups) {
+  const holds = groups.filter(g => g.hold === 'no_submitted_row' || g.hold === 'multiple_submitted_rows');
+  if (!holds.length) return;
+
+  const names = [...new Set(holds.map(g => (g.targets[0] && g.targets[0].reviewerName) || '').filter(Boolean))];
+  const sheetIds = [...new Set(holds.map(g => g.sheetId))];
+  const tabNames = [...new Set(holds.map(g => g.tabName))];
+  if (!names.length) return;
+
+  // ㉮ 그 이름으로 나간 회차 항목 — 어느 줄에 기록됐는지가 핵심이다.
+  let matched = [];
+  try {
+    const { rows } = await client.query(
+      `SELECT i.sheet_id AS "sheetId", i.tab_name AS "tabName", i.row_index AS "rowIndex",
+              i.reviewer_name AS "reviewerName", i.account_holder AS "accountHolder",
+              i.amount, i.status, i.paid_at AS "paidAt", i.fail_reason AS "failReason",
+              i.bank_account AS "bankAccount", b.seq AS "batchSeq", b.bank
+         FROM payment_batch_items i
+         JOIN payment_batches b ON b.id = i.batch_id
+        WHERE i.sheet_id = ANY($1::text[]) AND i.tab_name = ANY($2::text[])
+          AND (i.reviewer_name = ANY($3::text[]) OR i.account_holder = ANY($3::text[]))
+        ORDER BY b.seq, i.row_index`, [sheetIds, tabNames, names]);
+    matched = rows.map(r => ({
+      sheetId: r.sheetId, tabName: r.tabName, rowIndex: Number(r.rowIndex),
+      name: r.accountHolder || r.reviewerName || '', amount: Number(r.amount) || 0,
+      status: r.status, paidAt: r.paidAt, batchSeq: Number(r.batchSeq),
+      bank: r.bank, accountTail: _tail4(r.bankAccount), failReason: r.failReason || '',
+    }));
+  } catch (e) {
+    for (const g of holds) g.bankUnavailable = e.message;
+    return;
+  }
+
+  // ㉯ 어느 줄에도 안 붙은 이체(미확인) — 이게 있으면 "돈은 나갔는데 줄을 못 찾은" 상태다.
+  let unmatched = [];
+  try {
+    const { rows } = await client.query(
+      `SELECT u.summary, b.seq AS "batchSeq", b.bank
+         FROM payment_result_uploads u
+         JOIN payment_batches b ON b.id = u.batch_id
+        WHERE EXISTS (SELECT 1 FROM payment_batch_items i
+                       WHERE i.batch_id = u.batch_id
+                         AND i.sheet_id = ANY($1::text[]) AND i.tab_name = ANY($2::text[]))
+        ORDER BY u.created_at DESC
+        LIMIT ${_BANK_UPLOAD_SCAN}`, [sheetIds, tabNames]);
+    const want = new Set(names.map(_normName));
+    for (const r of rows) {
+      const list = r.summary && r.summary.preview && r.summary.preview.unmatchedResults;
+      if (!Array.isArray(list)) continue;
+      for (const x of list) {
+        if (!x || !want.has(_normName(x.holder))) continue;
+        unmatched.push({
+          name: String(x.holder || ''), amount: Number(x.amount) || 0,
+          accountTail: _tail4(x.accountTail || ''), transferredAt: x.transferredAt || '',
+          success: x.success === true, memo: String(x.memo || ''),
+          batchSeq: Number(r.batchSeq), bank: r.bank,
+        });
+      }
+    }
+  } catch (e) {
+    for (const g of holds) g.bankUnavailable = e.message;
+    return;
+  }
+
+  for (const g of holds) {
+    const nm = _normName((g.targets[0] && g.targets[0].reviewerName) || '');
+    g.bank = {
+      matched: matched.filter(m => m.sheetId === g.sheetId && m.tabName === g.tabName && _normName(m.name) === nm),
+      unmatched: unmatched.filter(u => _normName(u.name) === nm),
+    };
+  }
+}
+
 async function previewOverlayFanoutFix({ sheetId = '', tabName = '' } = {}) {
   const groups = await _overlayGroups(pool, { sheetId, tabName });
+  // 보류건에만 은행 이체결과를 붙인다(읽기 전용 · 실패해도 미리보기는 뜬다).
+  try { await _bankEvidenceForGroups(pool, groups); }
+  catch (e) { for (const g of groups) if (g.hold) g.bankUnavailable = e.message; }
   return { ok: true, dryRun: true, summary: _overlaySummary(groups), items: _overlayView(groups) };
 }
 

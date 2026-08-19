@@ -8411,11 +8411,28 @@ function _pmOvHoldHtml(hold){
       <div style="margin-bottom:6px"><b>${esc(g.tabName)}</b> · ${esc(g.reviewerName||'')} · 값 <b>${esc(g.stamp)}</b>
         <span class="muted"> — ${esc(g.holdReason||'')}</span></div>
       ${g.suggest?`<div class="muted" style="margin-bottom:6px">추천: <b>${esc(g.suggest.rowIndex)}번</b> (${esc(PM_OVFIX_BASIS[g.suggest.basis]||g.suggest.basis)}) — ${esc(g.suggestReason||'')}</div>`
-        :'<div class="muted" style="margin-bottom:6px">근거로 좁혀지지 않았습니다 — 은행 결과와 대조해 직접 고르세요.</div>'}
+        :'<div class="muted" style="margin-bottom:6px">근거로 좁혀지지 않았습니다 — 아래 은행 이체결과와 대조해 직접 고르세요.</div>'}
+      ${_pmOvBankHtml(g)}
       <div style="display:flex;flex-direction:column;gap:5px">${cands}
         <label style="display:flex;gap:8px;align-items:center;padding:5px 8px"><input type="radio" name="pmovfix_${gi}" data-edit="${esc(g.editId)}" data-row="" ${g.suggest?'':'checked'}> <span class="muted">고르지 않음(그대로 보류)</span></label>
       </div></div>`;
   }).join('');
+}
+/* 보류건 은행 이체결과 대조 — 서버가 준 것만 그린다(화면에서 매칭을 다시 하지 않는다).
+   ★ "조회 실패"와 "이체 없음"을 다른 문장으로 말한다 — 뭉뚱그리면 "안 나갔다"로 오독된다. */
+function _pmOvBankHtml(g){
+  if(g.bankUnavailable) return `<div class="muted" style="margin-bottom:6px">은행 이체결과를 불러오지 못했습니다 (${esc(g.bankUnavailable)})</div>`;
+  const b=g.bank||{}, m=b.matched||[], u=b.unmatched||[];
+  if(!m.length && !u.length) return '<div class="muted" style="margin-bottom:6px">이 참여자 이름으로 기록된 은행 이체결과가 없습니다.</div>';
+  const ST={paid:'이체완료',failed:'이체실패',pending:'대기',cancelled:'취소됨'};
+  const rows=[
+    ...m.map(x=>`<tr><td>#${esc(x.batchSeq)}</td><td>${esc(x.name)}</td><td>${_pmNum(x.amount)}</td><td>…${esc(x.accountTail||'')}</td><td>${esc(_pmOvDate(x.paidAt))}</td><td>${esc(ST[x.status]||x.status)}</td><td><b>${esc(x.rowIndex)}번</b>에 기록${x.failReason?` · ${esc(x.failReason)}`:''}</td></tr>`),
+    ...u.map(x=>`<tr><td>#${esc(x.batchSeq)}</td><td>${esc(x.name)}</td><td>${_pmNum(x.amount)}</td><td>…${esc(x.accountTail||'')}</td><td>${esc(String(x.transferredAt||'').slice(0,16))}</td><td>${x.success?'이체완료':'이체실패'}</td><td class="muted">어느 줄에도 안 붙음(미확인)</td></tr>`),
+  ].join('');
+  return `<div style="margin:2px 0 8px">
+    <div class="muted" style="margin-bottom:4px">은행 이체결과 — <b>${m.length+u.length}</b>건${u.length?` (미확인 ${u.length}건)`:''}</div>
+    <div class="lgwrap"><table class="lgtable pmtable"><thead><tr><th>회차</th><th>예금주</th><th>금액</th><th>계좌끝</th><th>이체시각</th><th>결과</th><th>기록 위치</th></tr></thead><tbody>${rows}</tbody></table></div>
+  </div>`;
 }
 function _pmOvDecisions(){
   const out=[];
