@@ -114,11 +114,14 @@ ok('최소 날짜 종수 상수는 2 유지', SCH.MIN_DISTINCT_DATES === 2);
     /catch \(siErr\) \{ logger\.warn\('\[campaign\/admin\/applications\] 시트 대조 실패/.test(rt));
   ok('★ 진단은 읽기 전용 — 상태를 바꾸는 코드가 없다',
     !/sheetInfo[\s\S]{0,400}UPDATE recruit_campaigns/.test(rt));
+  // ⚠ 무시트 어휘 정리(2026-08-19)로 이 문구들이 `_srcWords` 템플릿이 됐다 — 검사 의미는 불변
+  //   ("차이를 숫자로 말한다" · "자리는 있는데 확정이 아니다를 설명한다"). 어휘 자체는
+  //   sheetVocabulary 가드가 실행으로 고정한다.
   ok('관제 화면이 로스터 차이를 표시한다',
     /function _campSheetInfo/.test(rec) && /차이 \$\{diff\}건/.test(rec)
-    && /시트에는 자리가 있는데 확정으로 안 잡힌 건입니다/.test(rec));
+    && /\$\{w\.src\}에는 자리가 있는데 확정으로 안 잡힌 건입니다/.test(rec));
   ok('관제 화면이 "시트 일정 미적용" 사유를 설명한다',
-    /single_date:/.test(rec) && /시트 일정이 적용되지 않습니다/.test(rec)
+    /single_date:/.test(rec) && /\$\{w\.sched\}이 적용되지 않습니다/.test(rec)
     && /no_mirror:/.test(rec));
 
   /* ═══ 차이가 난 **행**을 짚어준다 ═══ */
@@ -132,7 +135,7 @@ ok('최소 날짜 종수 상수는 2 유지', SCH.MIN_DISTINCT_DATES === 2);
     /phone4: String\(r\.phone8 \|\| ''\)\.replace\(\/\\D\/g, ''\)\.slice\(-4\)/.test(rt)
     && !/phone8: r\.phone8/.test(rt));
   ok('관제가 불일치 행을 나열한다',
-    /function _campUnmatchedRows/.test(rec) && /확정으로 안 잡힌 시트 행/.test(rec));
+    /function _campUnmatchedRows/.test(rec) && /확정으로 안 잡힌 \$\{w\.rows\}/.test(rec));
   ok('★ "정원은 위치가 아니라 숫자"임을 코드에 남긴다(오해 방지)',
     /캠페인 정원은 '위치'가 아니라 '숫자'/.test(rec));
   ok('연락처 없는 행은 대조 불가임을 안내(영구 오탐 오해 방지)',

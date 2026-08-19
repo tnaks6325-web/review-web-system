@@ -3249,6 +3249,11 @@ async function _finRefresh(){
   const bar=document.getElementById('finBar'); if(bar) bar.outerHTML=_finBarHtml();
 }
 
+/* ★ 마감/복귀 안내에서 "무엇이 그대로인가"를 그 작업에 맞게 말한다 — 무시트 작업(탈 구글시트)에
+   구글시트를 들먹이면 담당자가 있지도 않은 시트를 찾는다. 판정은 서버가 실어 준 `sheetless`
+   하나이고(ID 모양 추측 금지), **필드가 없으면 종전 문구**를 쓴다(모르는 것을 단정하지 않는다). */
+function _finUntouched(t){ return (t && t.sheetless === true) ? '리뷰어 화면·데이터' : '구글시트·리뷰어 화면·데이터'; }
+
 /* ── 작업보드 제목 행의 마감 조각 (시안 B) ───────────────────────────
    ★ 종전엔 전폭 띠(.wbl-finbar)로 한 줄을 상시 차지했다 — "가끔 한 번 누르는 버튼" 하나 때문에.
      이제 **작업명과 같은 행** 오른쪽 끝에 [안내 문구 + 버튼]으로 붙는다(사용자 확정).
@@ -3268,7 +3273,7 @@ function _finBarHtml(){
   const cand=isFinishCandidate(t);
   const txt=cand
     ? ['인원·제출·입금이 모두 채워졌습니다', ' — 작업이 끝났다면 마감해 주세요.']
-    : ['작업이 모두 끝나면 마감해 주세요.', ' 마감해도 시트·리뷰어 화면은 그대로입니다.'];
+    : ['작업이 모두 끝나면 마감해 주세요.', ` 마감해도 ${_finUntouched(t)}는 그대로입니다.`];
   return `<span class="tp3fin" id="finBar">${cand?'<span class="wbl-s cand">✓ 마감 후보</span>':''}` +
     `<span class="ft" title="${esc(txt[0]+txt[1])}">${esc(txt[0])}<span class="opt">${esc(txt[1])}</span></span>` +
     `<button class="wbl-b dark" onclick="openFinishCur()">🏁 마감</button></span>`;
@@ -3840,7 +3845,7 @@ async function _finOpen(tab){
     ${(s&&!s.closeoutDate)?`<div class="wbl-warn">⚠ 마감자료가 아직 생성되지 않았습니다 — 필요한 작업이라면 정산 카드에서 먼저 생성해 주세요(마감은 그대로 진행할 수 있습니다).</div>`:''}
     <ul class="wbl-ul">
       <li>전 직원의 작업보드에서 <b>마감 보관함</b>으로 이동합니다.</li>
-      <li>구글시트·리뷰어 화면·데이터에는 <b>아무 영향이 없습니다.</b></li>
+      <li>${_finUntouched(t)}에는 <b>아무 영향이 없습니다.</b></li>
       <li>언제든 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</li>
     </ul>
     <label class="wbl-chk"><input type="checkbox" id="finChk" onchange="_finChk(this)">

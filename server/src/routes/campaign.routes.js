@@ -2445,8 +2445,21 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
             noPhone: !String(r.phone8 || '').trim(),
           }));
         }
+        /* ★ 어휘 재료 — 이 작업이 무시트(작업표)인지 시트 기반인지. 화면은 **이 값으로만**
+           "시트/작업표" 어휘를 가른다(ID 모양(`wt_`)으로 추측하지 않는다 — 이관된 작업은
+           진짜 시트 ID 를 그대로 쓰면서 무시트가 된다).
+           ★ 판정 단일 출처 = `sheetlessScope.isSheetless`(이름 → gid 폴백). 그 함수는 조회
+             실패를 false 로 접으므로 **모르면 종전(시트) 어휘**가 된다 — 표시 계층이라
+             그 방향이 안전하다(무시트 작업에 "시트"라고 적는 쪽이, 시트 작업에 "작업표"라고
+             적어 담당자가 시트를 안 보게 되는 쪽보다 덜 위험하다). */
+        let sheetless = false;
+        try {
+          sheetless = await require('../utils/sheetlessScope')
+            .isSheetless(pool, c0.linked_sheet_id, c0.linked_tab_name);
+        } catch (slErr) { sheetless = false; }
         sheetInfo = {
           tabName: c0.linked_tab_name,
+          sheetless,
           rosterRows,
           confirmed,
           diff: rosterRows > 0 ? rosterRows - confirmed : null,
