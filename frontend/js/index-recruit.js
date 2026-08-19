@@ -2523,6 +2523,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _pp = document.getElementById("rf_product_preview"); if (_pp) _pp.style.display = "none";
   document.getElementById("rf_channel_custom").style.display = "none";
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
+  /* ★ 버튼군의 hidden 값도 함께 되돌린다 — 강조만 지우면 지난 공고의 값(예 'mixed')이
+     남아, 리뷰타입을 안 실은 신규 발행에서 혼합 입력칸이 빈 채로 켜져 저장이 막힌다.
+     편집·작업오더 프리필은 이 뒤에서 다시 고르므로 기존 동작은 그대로다. */
+  _rfPickBtn("review_type", "");
   _refreshBadgeWrap();
   document.getElementById("rf_linked_tab_info").style.display = "none";
   /* 🔗 연결 탭 안내·추천 초기화 — 지난번 공고의 사유가 새 모달에 남지 않게 */
@@ -2542,7 +2546,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
-  document.querySelectorAll('#rf_review_mix [data-mix-type]').forEach((el) => { el.value = '0'; });
+  // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
+  //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
+  resetRecruitReviewMixRender();
   syncRecruitReviewTypeMix();
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
@@ -3005,18 +3011,39 @@ function _reviewMixTotalLabel(sum, expected, optionMode) {
     : `합계 ${sum}명 / 총모집인원 ${expected}명`;
 }
 
+/** 이 카드가 맞춰야 하는 인원 — 전역(옵션 없는 작업)은 총모집인원, 옵션 모드는 그 옵션의 인원.
+ *  ★ 기준값의 단일 출처다. 카드를 만든 시점 값(dataset.expected)을 그대로 재사용하면
+ *    총인원이 바뀌거나 다른 공고를 열었을 때 "합계 0명 / 총모집인원 500명"처럼
+ *    화면과 저장 검증(validateRecruitReviewTypeMix)이 서로 다른 기준을 말한다(실측 사고). */
+function _reviewMixExpectedFor(rows, optionMode, index) {
+  if (optionMode) return Math.max(0, Number(rows[index]?.querySelector('.rf-opt-rt')?.value) || 0);
+  return Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
+}
+
+/** 혼합 카드의 렌더 캐시를 비운다 — 모달 DOM 은 페이지당 한 번만 마운트돼 재사용되므로
+ *  캐시를 지우지 않으면 다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남는다. */
+function resetRecruitReviewMixRender() {
+  const root = document.getElementById('rf_review_mix_rows');
+  if (!root) return;
+  delete root.dataset.signature;
+  root.innerHTML = '';
+}
+
 function renderRecruitOptionReviewMix() {
   const root = document.getElementById('rf_review_mix_rows');
   if (!root) return;
   const optionMode = _isOptionReviewMix();
   const rows = optionMode ? _reviewMixRows() : [];
+  /* ★ 지문에 기준 인원을 포함한다 — 종전 전역 지문은 상수 'global' 이라
+     총인원이 바뀌어도 카드가 다시 그려지지 않았다(기준값 고착). */
   const signature = optionMode
     ? rows.map((row, index) => `${index}:${row.querySelector('.rf-opt-name')?.value || ''}:${row.querySelector('.rf-opt-rt')?.value || 0}`).join('|')
-    : 'global';
+    : `global:${_reviewMixExpectedFor(rows, optionMode, -1)}`;
   if (root.dataset.signature === signature) {
     root.querySelectorAll('[data-rf-review-mix-card]').forEach((box) => {
       const sum = Array.from(box.querySelectorAll('[data-mix-type]')).reduce((total, input) => total + (Number(input.value) || 0), 0);
-      const expected = Number(box.dataset.expected) || 0;
+      const expected = _reviewMixExpectedFor(rows, optionMode, Number(box.dataset.rfReviewMixCard));
+      box.dataset.expected = String(expected);
       const total = box.querySelector('.mixed-review-total');
       if (total) {
         total.textContent = _reviewMixTotalLabel(sum, expected, optionMode);
@@ -3032,13 +3059,13 @@ function renderRecruitOptionReviewMix() {
     row,
     index,
     label: String(row.querySelector('.rf-opt-name')?.value || '').trim() || '옵션명 입력 필요',
-    expected: Math.max(0, Number(row.querySelector('.rf-opt-rt')?.value) || 0),
+    expected: _reviewMixExpectedFor(rows, optionMode, index),
     mix: _readOptionReviewMix(row),
   })) : [{
     row: null,
     index: -1,
     label: '전체 모집',
-    expected: Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0),
+    expected: _reviewMixExpectedFor(rows, optionMode, -1),
     mix: window._rfGlobalReviewTypeMix || [],
   }];
 
