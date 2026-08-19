@@ -407,6 +407,14 @@
 - ⚠ 남은 한계(문서화): `duplicate_row` 는 주문을 `written` 으로 **찍지 않으므로** 그 주문은 복구 스캔 창(`SHEETLESS_RECOVER_WINDOW_HOURS` 48시간) 동안 매 주기 재시도되며 warn 을 남긴다(줄은 더 안 생긴다). 종전부터 있던 성질이다.
 - 회귀가드 `tests/sheetlessDupRowGuard.test.js`(스텁 pool 로 `writeOrderToWorktable` **실제 실행**: 1차 무회귀 · 2차 차단 · 링크 없는 줄 · fail-open 3갈래 · 사본 부재, **변이시험 7종 검출 확인**).
 
+### ★ 작업표 줄 ↔ 주문 링크 교정 도구 (2026-08-19 · 스키마 변경 0)
+- **왜**: "링크는 표 주문번호가 정한다"(같은 날 수정)는 **앞으로 채울 때의 규칙**이라 blank-only 다 — **이미 박힌 오염은 안 고쳐진다**. 위프 800건에 2묶음 5줄이 남아 있었고, 그 오염이 ㉮ 중복 정리로 **멀쩡한 주문을 취소**시키고(실측: `canceled_by='dedupe:…'`) ㉯ 관제 대조를 오표시했다. 사람이 지목해 고치는 창구가 필요했다.
+- **API** `POST /api/trackb/worktable/repair-link`(adminOrMaster) — `fixes:[{seq, action:'relink'|'unlink', expectOrderSubmissionId, orderNum}]`. **dryRun 기본** · 실행은 `confirm:true`.
+- ★★ **완화 금지 6종**: ① **자동 스캔·일괄 적용 없음**(줄과 **지금 값**을 명시 — 그 사이 바뀌었으면 `changed` 거부) ② **표 주문번호가 링크를 정한다**(원장에 없거나 둘 이상이면 **채우지 않는다** — 추측이 빈 링크보다 나쁘다) ③ **줄 번호가 일치할 때만**(`order.sheet_row === seq`) ④ **한 주문은 한 줄**(다른 살아있는 줄이 가리키면 거부 — 오염을 새로 만들지 않는다) ⑤ **전부 아니면 전무**(한 건이라도 실패하면 통째 ROLLBACK) ⑥ **취소 되돌리기는 중복 정리가 취소한 건에만**(`canceled_by` 가 `dedupe*`) — 사람이 [주문취소]한 건을 되살리면 정원·시트가 어긋난다(응답이 `orderStillCanceled` 로 사실을 말한다).
+- ★ **쓰기 표면 = `campaign_participants.order_submission_id` + (되돌리기 시) `order_submissions.deleted_at/canceled_by/mirror_status` 뿐** — 시트·장부·정원·홀드 무접촉, 하드삭제 0. **미리보기 ≡ 실행**(같은 코드 경로를 돌린 뒤 ROLLBACK).
+- ★ **취소 내력 진단**: `GET /api/diag/order-stuck-export` JSON 에 `canceledBy`·`deletedAt` 동봉(취소 경로가 넷인데 누가 취소했는지 볼 창구가 없었다). **CSV 열 구성은 불변**(head 배열이 칸을 정한다 — 회귀가드가 15칸 고정).
+- 회귀가드 `tests/worktableLinkRepair.test.js`(**진짜 PG16** — 미리보기 무쓰기·재링크·되돌리기·낙관적 동시성·전부아니면전무·사람취소 보존, **변이시험 6종 검출 확인**) · `tests/orderCancelProvenance.test.js`.
+
 ### ★ 작업표 중복 줄 감시망 (2026-08-19)
 - **왜**: 같은 구매가 표에 여러 줄로 늘어난 사고(권정현 11줄)를 **아무도 몰랐다** — 사람이 표를 보다 우연히 발견했다. 기록 경로의 2차 중복 판정이 최종 방어지만, **그것이 또 뚫려도 알 길이 없는 상태**를 없앤다.
 - **무엇을 보나**: 같은 **표 주문번호 + 명의(phone8)** 로 살아있는 줄이 2개 이상인 묶음. ★ 판정을 새로 만들지 않는다 — 번호는 `utils/tableOrderNum` 공유 조각(중복 정리·주문 기록과 같은 값), 키도 중복 방어와 같다.
