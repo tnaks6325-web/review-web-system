@@ -3393,14 +3393,15 @@ function _ddRender(){
     `<li><b>${esc(g.name || '')}</b> · 주문번호 ${esc(String(g.orderNum || ''))} · 줄 ${esc((g.seqs || []).join(', '))}
       — ${esc(g.detail || g.reason || '')}</li>`).join('') : '';
   b.innerHTML = `<b>${esc(_DD.tabName)}</b>
-    <div class="wbl-facts"><b>주문번호가 같고 연락처도 같은</b> 줄만 중복으로 봅니다
-      (주문번호가 없거나 6자리 미만인 줄은 <b>대상에서 제외</b>). 같은 사람이 서로 다른 주문번호로
-      여러 번 참여한 것은 중복이 아닙니다. 해당 그룹은 <b>가장 이른 줄만 남기고</b> 나머지를 내리며,
-      구글시트는 건드리지 않고 되돌릴 수 있습니다.</div>
+    <div class="wbl-facts"><b>표에 보이는 주문번호가 같고</b> 주문 기록의 주문번호와 연락처도 같은 줄만
+      중복으로 봅니다. <b>같은 사람이라도 주문번호가 다르면 각기 다른 참여건이라 중복이 아닙니다.</b>
+      표에 주문번호가 없거나 6자리 미만인 줄은 <b>대상에서 제외</b>합니다.
+      해당 그룹은 <b>가장 이른 줄만 남기고</b> 나머지를 내리며, 구글시트는 건드리지 않고 되돌릴 수 있습니다.</div>
     ${_DD.err ? `<div class="wbl-facts" style="color:#b91c1c">${esc(_DD.err)}</div>` : ''}
     ${!p ? `<div class="wbl-facts">[미리보기]를 눌러 무엇이 정리되고 무엇이 보류되는지 먼저 확인하세요.</div>` : `
       <div class="wbl-facts">표 ${esc(String(p.boardRows))}줄 중 <b>정리 대상 ${esc(String(p.removeRows))}줄</b>
-        (${esc(String(p.groups))}건의 구매) · <b>보류 ${esc(String(p.skippedGroups))}건</b></div>
+        (${esc(String(p.groups))}건의 구매) · <b>보류 ${esc(String(p.skippedGroups))}건</b>${
+        p.skippedNoRowOrder ? ` · 표에 주문번호가 없어 제외 ${esc(String(p.skippedNoRowOrder))}줄` : ''}</div>
       ${p.removeRows ? `<table class="wbl-t"><thead><tr><th>참여자</th><th>연락처 뒤4</th><th>주문번호</th><th>남길 줄</th><th>내릴 줄</th></tr></thead>
         <tbody>${rows}</tbody></table>` : `<div class="wbl-facts">정리할 중복이 없습니다.</div>`}
       ${p.skippedGroups ? `<div class="wbl-facts"><b>⚠ 사람이 판단해야 하는 건</b> — 시스템이 건드리지 않았습니다.
@@ -3423,7 +3424,8 @@ async function ddRun(){
   if (!_DD || _DD.busy || !_DD.prev || !_DD.prev.removeRows) return;
   const p = _DD.prev;
   if (!confirm(`「${_DD.tabName}」 표에서 중복 ${p.removeRows}줄을 내립니다.\n\n` +
-    `주문번호·연락처가 모두 같은 줄만 대상입니다. 가장 이른 줄은 남고, 내려간 줄의 중복 주문은 취소로 표시됩니다.\n` +
+    `표에 보이는 주문번호와 연락처가 모두 같은 줄만 대상입니다(주문번호가 다르면 다른 참여건이라 제외).\n` +
+    `가장 이른 줄은 남고, 내려간 줄의 중복 주문은 취소로 표시됩니다.\n` +
     (p.skippedGroups ? `보류 ${p.skippedGroups}건(입금 회차에 담김 등)은 손대지 않습니다.\n` : '') +
     `구글시트는 건드리지 않으며 되돌릴 수 있습니다.\n\n계속할까요?`)) return;
   _DD.busy = true; _ddRender();
