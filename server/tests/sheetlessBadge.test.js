@@ -96,7 +96,9 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
         { ...base, sheetId: 'S9', tabName: 'sheetless-migrated', displayName: 'sheetless-migrated', tabGid: '78', sheetless: true },
       ] }),
     });
-    const out = await svc.auditSheetSync({ before: null, includeUnknown: true });
+    // ★ 무시트는 이제 기본 제외(점검 대상 아님 — sheetSyncAudit.test.js §10)라 여기서는
+    //   `includeSheetless` 로 열어서 본다. 이 절의 검사 의미(무시트에는 시트 링크를 만들지 않는다)는 불변.
+    const out = await svc.auditSheetSync({ before: null, includeUnknown: true, includeSheetless: true });
     svc.__setPoolForTest(null);
     const byName = new Map(out.items.map(i => [i.tabName, i]));
 
@@ -147,19 +149,20 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
       f({ sheetless: 'false' }) === '' && f({ sheetless: 1 }) === '');
   }
 
-  /* ══════════════ E. 공고 카드 시트 버튼 ══════════════ */
-  console.log('\n[E] 모집공고 카드 [시트] 버튼 — 무시트면 죽은 링크를 안 만든다');
+  /* ══════════════ E. 공고 카드 — 시트 흔적 0 ══════════════ */
+  console.log('\n[E] 모집공고 카드 — 죽은 시트 링크도, 시트 연결 표기도 없다 (사용자 확정 2026-08-19)');
   {
+    // ⚠ 검사 의미 갱신: 카드의 [시트] 버튼이 제거되어(업체 링크 일원화) 이제 검사할 것은
+    //   "카드가 구글시트 URL 을 조립하지 않는다"는 **더 강한 불변식** 하나다.
+    //   버튼을 되살리려면 무시트 분기(가상 ID·sheetless 플래그)를 함께 되살려야 한다.
     const cc = readFe('js/campaign-cards.js');
-    const { VIRTUAL_SHEET_PREFIX } = require('../src/services/sheetlessAccept.service');
-    const mm = cc.match(/_VIRTUAL_SHEET_PREFIX\s*=\s*'([^']+)'/);
-    assert(mm, '프론트 접두 상수를 찾지 못함');
-    ok('★ 가상 시트ID 접두 사본이 서버 단일 출처와 일치한다', mm[1] === VIRTUAL_SHEET_PREFIX);
-    ok('무시트면 구글 URL 을 조립하지 않는다',
-      /const sheetUrl = \(sid && !sheetless\)/.test(cc));
-    ok('무시트 버튼은 비활성 + 사유를 말한다', /무시트 작업입니다 — 구글시트를 쓰지 않습니다/.test(cc));
-    ok('시트 기반 공고의 버튼 동작은 그대로(무회귀)',
-      /https:\/\/docs\.google\.com\/spreadsheets\/d\/' \+ sid \+ '\/edit/.test(cc));
+    ok('★ 카드는 구글시트 URL 을 조립하지 않는다(무시트 작업의 죽은 링크 원천 차단)',
+      !/docs\.google\.com\/spreadsheets/.test(cc));
+    ok('★ "시트 탭 미연결" 안내를 그리지 않는다 — 무시트라 연결할 시트탭이 없다',
+      !/시트 탭 미연결/.test(cc));
+    ok('★ 연결 탭 이름 줄(sp-link)도 그리지 않는다', !/<div class="sp-link">/.test(cc));
+    ok('★ 가상 시트ID 접두 사본이 남아 있지 않다(판정에 쓰지 않는다)',
+      !/_VIRTUAL_SHEET_PREFIX/.test(cc));
   }
 
   /* ══════════════ F. 업체 링크 일원화 ══════════════ */
