@@ -10,7 +10,7 @@ const cancelPath = require.resolve('../src/services/orderCancellation.service');
 
 const ORDER_ID = '11111111-2222-3333-4444-555555555555';
 
-function makeStubPool({ liveOrder = true } = {}) {
+function makeStubPool({ liveOrder = true, campaigns = [{ campaign_id: 'camp-1', is_open: true, is_linked: true }] } = {}) {
   const log = [];
   const answer = (sql, params) => {
     log.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
@@ -21,7 +21,7 @@ function makeStubPool({ liveOrder = true } = {}) {
     if (q.includes('SELECT id, seq, phone8, row_json, order_submission_id')) {
       return { rows: [{ id: 'row-1', seq: 7, phone8: '12345678', row_json: { '구매일자': '8/19 (수)' }, order_submission_id: liveOrder ? ORDER_ID : null }] };
     }
-    if (q.includes('SELECT rc.id AS campaign_id')) return { rows: [{ campaign_id: 'camp-1' }] };
+    if (q.includes('SELECT rc.id AS campaign_id')) return { rows: campaigns };
     if (q.includes('SELECT seq, tab_gid, row_json')) {
       return { rows: [{ seq: 7, tab_gid: '99', row_json: { '구매일자': '8/19 (수)' } }, { seq: 8, tab_gid: '99', row_json: { '구매일자': '8/25 (월)' } }] };
     }
@@ -88,7 +88,7 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     restoreCancel();
     assert.strictEqual(committed, false, '본문 실패는 주문 취소까지 롤백시켜야 합니다');
     assert.strictEqual(out.ok, false, '실패는 실패로 알려야 합니다');
-    assert.strictEqual(out.error, 'row_campaign_not_found', '사유를 그대로 전달해야 합니다');
+    assert.strictEqual(out.error, 'sheetless_campaign_not_found', '사유를 그대로 전달해야 합니다');
   }
 
   // ③ 권한: 구매기록이 붙은 행은 master/admin 만 — 쓰기 쿼리 0
@@ -145,6 +145,93 @@ function restoreCancel() { delete require.cache[cancelPath]; }
     assert.strictEqual(out.error, 'unexpected');
     assert.strictEqual(out.pgCode, '42703', 'DB 오류코드를 그대로 전달해야 합니다');
     assert.ok(/nope/.test(out.detail || ''), '오류 내용도 전달해야 합니다');
+  }
+
+  // ⑦ 홀드 없이 들어온 주문(참여 기록 없음)도 연결 공고가 하나면 지울 수 있다
+  //    — 종전에는 row_campaign_not_found 로 막혀 총원 유지로는 지울 방법이 없었다.
+  {
+    const { pool, client, log } = makeStubPool({
+      liveOrder: true,
+      campaigns: [{ campaign_id: 'camp-solo', is_open: true, is_linked: false }],
+    });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    stubCancel(async (args) => { await args.beforeCancelCommit(client); return { ok: true, cleared: false }; });
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    restoreCancel();
+    assert.strictEqual(out.ok, true, `참여 기록 없는 주문도 삭제되어야 합니다: ${JSON.stringify(out)}`);
+    assert.strictEqual(out.replenished, 1, '이 경로에서도 총원은 유지되어야 합니다');
+    const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
+    assert.ok(planUpdate && planUpdate.params[0] === 'camp-solo', '연결된 그 공고의 계획에 보충해야 합니다');
+  }
+
+  // ⑧ 연결 공고가 둘 이상이고 주문 참여 기록도 없으면 고르지 않고 거부한다
+  {
+    const { pool, client, log } = makeStubPool({
+      liveOrder: true,
+      campaigns: [
+        { campaign_id: 'camp-a', is_open: true, is_linked: false },
+        { campaign_id: 'camp-b', is_open: true, is_linked: false },
+      ],
+    });
+    svc.__setPoolForTest(pool);
+    stubCancel(async (args) => { await args.beforeCancelCommit(client); return { ok: true, cleared: false }; });
+    let out;
+    try { out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' }); }
+    catch (e) { out = { ok: false, error: e && e.code }; }
+    restoreCancel();
+    assert.strictEqual(out.ok, false, '어느 공고인지 모르면 지우지 않습니다');
+    assert.strictEqual(out.error, 'ambiguous_campaign');
+    assert.ok(!log.some(l => /DELETE FROM campaign_participants/.test(l.sql)), '거부 시 행을 지우면 안 됩니다');
+  }
+
+  // ⑨ 주문에 연결된 공고가 있으면 그 공고가 이긴다(다른 후보가 있어도)
+  {
+    const { pool, client, log } = makeStubPool({
+      liveOrder: true,
+      campaigns: [
+        { campaign_id: 'camp-new', is_open: true, is_linked: false },
+        { campaign_id: 'camp-linked', is_open: true, is_linked: true },
+      ],
+    });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    stubCancel(async (args) => { await args.beforeCancelCommit(client); return { ok: true, cleared: false }; });
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    restoreCancel();
+    assert.strictEqual(out.ok, true);
+    const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
+    assert.ok(planUpdate && planUpdate.params[0] === 'camp-linked', '그 주문이 참여한 공고가 우선이어야 합니다');
+  }
+
+  // ⑩ 마감된 공고 하나뿐이어도 지울 수 있다(계획 보충은 장부 정리일 뿐 재오픈이 아니다)
+  {
+    const { pool, client } = makeStubPool({
+      liveOrder: false,
+      campaigns: [{ campaign_id: 'camp-closed', is_open: false, is_linked: false }],
+    });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    assert.strictEqual(out.ok, true, `마감 공고 작업도 행 삭제가 되어야 합니다: ${JSON.stringify(out)}`);
+  }
+
+  // ⑪ 마감 공고와 게시 중 공고가 함께 있으면 게시 중인 쪽을 고른다(모호로 접지 않는다)
+  {
+    const { pool, client, log } = makeStubPool({
+      liveOrder: false,
+      campaigns: [
+        { campaign_id: 'camp-old', is_open: false, is_linked: false },
+        { campaign_id: 'camp-live', is_open: true, is_linked: false },
+      ],
+    });
+    svc.__setPoolForTest(pool);
+    svc.__setLedgerRebuildForTest(async () => {});
+    const out = await svc.hideWorkdeskRow({ sheetId: 's1', tabName: 't1', rowId: 'row-1', by: '망고', actorRole: 'admin' });
+    assert.strictEqual(out.ok, true, `게시 중 공고가 하나면 고를 수 있어야 합니다: ${JSON.stringify(out)}`);
+    const planUpdate = log.find(l => l.sql.includes('planned_count=planned_count+1'));
+    assert.ok(planUpdate && planUpdate.params[0] === 'camp-live', '게시 중인 공고의 계획에 보충해야 합니다');
+    void client;
   }
 
   svc.__setPoolForTest(null);
