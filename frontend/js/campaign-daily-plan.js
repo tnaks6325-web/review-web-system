@@ -151,6 +151,14 @@
        (반쪽짜리 균형 표시로 잘못된 확신을 주지 않는다). */
   var MAX_ROWS = 120;             // 서버 savePlans 의 MAX_PLAN_ENTRIES 와 같은 값
   var CARRY_MODES = ['next', 'spread', 'extend'];
+  /* ★★ 기본 이월 방식 = **남은 날에 나눠 담기**(사용자 확정 2026-08-19 — "다음날로 이월하는 것이
+     기본값이 되어선 안 된다"). 계기 = 위프 800건에서 이월이 625명까지 쌓였는데 기본값이
+     `next` 라 그대로 배치하면 **다음 진행일 하루에 625명**이 열린다(066 하루 상한 2×일건수를
+     훌쩍 넘고 리뷰어 화면에도 그 숫자가 그대로 나간다).
+     ★ `extend`(종료일 뒤에 붙이기)를 기본으로 두지 않는 이유 = 그건 **종료일이 조용히 밀리는**
+       선택이라 사람이 명시로 고를 일이지 기본값이 될 수 없다.
+     ★ 이 값이 단일 출처다 — 폴백·되돌리기·'기본' 배지가 전부 이것을 본다(사본 금지). */
+  var DEFAULT_CARRY_MODE = 'spread';
 
   /** 어제까지 확정 — 전체 확정에서 오늘 확정을 뺀다(오늘분은 오늘 줄 안에 들어 있다) */
   function doneBefore() {
@@ -648,8 +656,11 @@
     //   무조건 'next' 로 깔면 이월이 오늘에 다시 얹힌 배치가 그려져 **저장이 되돌아간 것처럼 보인다**
     //   (실제 저장값은 그대로다 — 화면만 다른 방식으로 다시 제안한 것). 기억은 화면 상태일 뿐이라
     //   sessionStorage 에 담고, 실패해도 무시한다(사생활 보호 모드 등).
-    var want = S.carryMode || _loadMode() || 'next';
-    if (!applyCarryMode(want) && want !== 'next') applyCarryMode('next');
+    var want = S.carryMode || _loadMode() || DEFAULT_CARRY_MODE;
+    /* ★ 고른 방식으로 못 펼치면 기본값 → 그것도 안 되면 next(가장 단순한 배치)로 접는다 —
+         어떤 경우에도 균형 표가 통째로 비지 않게. */
+    if (!applyCarryMode(want) && want !== DEFAULT_CARRY_MODE) applyCarryMode(DEFAULT_CARRY_MODE);
+    if (!S.carryMode) applyCarryMode('next');
     document.getElementById('cdpTitle').textContent = '모집인원 조절 — ' + (S.title || S.campId);
     render();
   }
@@ -896,15 +907,25 @@
           + _esc(fmtMD(cds[0])) + ' ~ ' + _esc(fmtMD(cds[cds.length - 1])) + ' (하루 +'
           + Math.min.apply(null, ons) + '~' + Math.max.apply(null, ons) + '명).';
       }
-      var em = function (m) { var h = buildHorizon(m); return h && h.dates.length ? fmtMD(h.dates[h.dates.length - 1]) : '-'; };
+      /* ★★ **부족(short)일 때 마지막 날을 종료일이라고 말하지 않는다** — `walkDays` 는 목표를
+         못 채워도 모아 둔 날을 그대로 돌려주고, 탐색은 `finitePlanLimit()`(작업표/시트 마지막
+         날 + 13일)에서 끊긴다. 그 컷오프를 종료일로 찍으면 ① 헤더의 '계산 불가'와 정면으로
+         어긋나고 ② 세 방식이 전부 같은 날로 보여 **"뒤에 붙여도 종료일이 안 밀린다"** 는
+         잘못된 판단 근거가 된다(위프 800건 실측). 부족은 부족이라고 말한다. */
+      var em = function (m) {
+        var h = buildHorizon(m);
+        if (!h || !h.dates.length) return '-';
+        if (h.shortBy > 0) return '계산 불가';   // buildHorizon 은 short 가 아니라 shortBy(모자란 인원)를 준다
+        return fmtMD(h.dates[h.dates.length - 1]);
+      };
       carryBlk = '<div class="cdp-carry"><div class="t">이월 <b>' + carry + '명</b> 보충 투입 방식</div>'
         + '<div class="d">어제까지 못 채운 <b>' + carry + '명</b>을 어느 날에 얹을지 정합니다. 총량은 어느 방식에서도 변하지 않고, <b>종료일만 달라집니다</b>.'
         + (j.carryMode === 'hold' ? ' 이 공고는 <b>이월 보류</b> 설정이라 저장하기 전까지는 자동으로 얹히지 않습니다.' : '')
         + '</div>'
         + '<div class="cdp-seg">'
         // onclick 인자는 전부 **고정 문자열**(외부 값 보간 금지 — XSS 규율)
-        + '<button type="button" onclick="CampaignDailyPlan._mode(\'next\')"' + (S.carryMode === 'next' ? ' class="on"' : '') + '>다음날에 더하기<span class="df">기본</span><small>바로 다음 진행일에 몰아서</small></button>'
-        + '<button type="button" onclick="CampaignDailyPlan._mode(\'spread\')"' + (S.carryMode === 'spread' ? ' class="on"' : '') + '>남은 날에 나눠 담기<small>진행일에 고르게</small></button>'
+        + '<button type="button" onclick="CampaignDailyPlan._mode(\'next\')"' + (S.carryMode === 'next' ? ' class="on"' : '') + '>다음날에 더하기<small>바로 다음 진행일에 몰아서</small></button>'
+        + '<button type="button" onclick="CampaignDailyPlan._mode(\'spread\')"' + (S.carryMode === 'spread' ? ' class="on"' : '') + '>남은 날에 나눠 담기<span class="df">기본</span><small>진행일에 고르게</small></button>'
         + '<button type="button" onclick="CampaignDailyPlan._mode(\'extend\')"' + (S.carryMode === 'extend' ? ' class="on"' : '') + '>종료일 뒤에 붙이기<small>각 날 인원은 그대로</small></button>'
         + '</div><div class="where">' + where + '</div>'
         + '<div class="cmp">방식별 종료일 — 다음날에 <b>' + _esc(em('next')) + '</b> · 나눠 담기 <b>' + _esc(em('spread'))
@@ -1209,7 +1230,7 @@
     if (!S || !S.data) return;
     if (balanceOn()) {
       // 균형 모드 = "이 방식의 기본 배치로" — 지금 고른 방식대로 다시 깐다(합계는 항상 딱 맞는다)
-      applyCarryMode(S.carryMode || 'next');
+      applyCarryMode(S.carryMode || DEFAULT_CARRY_MODE);
       S.notes = [];
       render();
       return;
