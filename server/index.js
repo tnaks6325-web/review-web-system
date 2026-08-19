@@ -58,6 +58,9 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'review_type_mix'],       // 106 — 혼합 리뷰 유형별 모집 수량(발행 전 합계 검증)
   ['campaign_options', 'review_type_mix'],        // 109 — 옵션별 혼합 리뷰 수량(옵션 정원별 검증)
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
+  // 130 — 보관(폐기). 공개 /list·관리자 /admin/list 의 WHERE 절에 들어가므로 컬럼이 없으면
+  //   **리뷰어 공고목록·관리자 모집공고 탭이 전면 42703**(무신호 장애) — 085 와 같은 규율.
+  ['recruit_campaigns', 'archived_at'],
   // 099 — 체험단 종류(리뷰/블로그) 축. 셋 다 INSERT·SET 목록에 들어가므로 하나라도 없으면
   //   ① 인트라넷 오더 접수 ② 작업오더 접수(tab_configs 업서트) ③ 공고 발행·수정이 전면 42703.
   ['work_orders', 'work_kind'],

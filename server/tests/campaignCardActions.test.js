@@ -40,8 +40,10 @@ ok('★ 주 줄 직접 버튼 = 3개(수정·관제·⋯) + ${viewBtn} 보간 1 
 ok('★ 주 줄에 시트·인원조절·리뷰어게이트 버튼이 없다(전부 [⋯] 안으로)',
   !/sheetBtn/.test(actHtml) && !/planBtn/.test(actHtml) && !/gateBtn/.test(actHtml));
 ok('[⋯] 버튼이 주 줄 마지막(게시 토글 앞)', /class="uic more"[\s\S]*\$\{pubToggle\}/.test(actHtml));
-ok('메뉴 항목은 인원조절·리뷰어게이트만 모은다(시트 열기 제거)',
-  /_ACT_MORE\[c\.id\] = \[planBtn, gateBtn\]\.filter\(Boolean\)\.join\(''\)/.test(cc)
+/* ★ 130: 보관/보관 해제(arcBtn)가 메뉴에 합류했다 — 주 줄은 여전히 3개 + [⋯](위 단언이 고정).
+   버튼이 더 늘어도 [⋯] 안으로 들어간다는 규율 그대로이므로 목록 패턴만 갱신한다(검사 의미 불변). */
+ok('메뉴 항목은 인원조절·리뷰어게이트·보관만 모은다(시트 열기 제거)',
+  /_ACT_MORE\[c\.id\] = \[planBtn, gateBtn, arcBtn\]\.filter\(Boolean\)\.join\(''\)/.test(cc)
   && !/sheetBtn/.test(cc));
 
 // ⑤ 관제 배지는 주 줄에

@@ -1519,6 +1519,7 @@ const _campHandlers = {
   dismiss: _delegate(_campRoutes, 'post', '/admin/:id/dismiss'),
   blogApprove: _delegate(_campRoutes, 'post', '/admin/:id/blog-approve'),   // 127 블로그 승인
   blogReject: _delegate(_campRoutes, 'post', '/admin/:id/blog-reject'),     // 127 블로그 반려
+  archive: _delegate(_campRoutes, 'post', '/admin/:id/archive'),           // 130 보관/보관 해제
 };
 router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, res, next) => {
   // 편집 가능 여부를 함께 실어 준다 — 프론트가 버튼 노출을 정한다(서버 게이트가 최종 방어)
@@ -1566,6 +1567,13 @@ router.post('/campaigns/:id/blog-approve', authMiddleware, internalMiddleware, e
   _campHandlers.blogApprove(req, res, next));
 router.post('/campaigns/:id/blog-reject', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.blogReject(req, res, next));
+/* 130 보관/보관 해제 — **게시 토글·삭제·발행과 같은 2단 게이트**(내부인 + 편집 허용명단).
+   ★ 원본(`/api/campaign/admin/:id/archive`)은 adminOrMaster 이므로 이 경로가 더 넓다 —
+     같은 파일의 status·delete·create 프록시가 이미 그 계약이고(공고 관리는 편집 허용명단이
+     담당), 보관은 **되돌릴 수 있고** 살아 있는 참여가 있으면 서비스가 거부한다(fail-closed).
+   ★ 명단에 없는 계정은 여기서 막히고, 관리자 대시보드는 종전 adminOrMaster 경로를 쓴다. */
+router.post('/campaigns/:id/archive', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.archive(req, res, next));
 
 // ── 날짜별 모집인원 조절 + 차수(095) ─────────────────────────
 //   경로는 재기준 없이 양쪽 호스트 공용(리뷰어 게이트와 같은 판단): admin_token(관리자 대시보드)도

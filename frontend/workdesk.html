@@ -7690,6 +7690,7 @@ function _rcRenderHead(total){
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
     ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
+    <button class="btn" id="recruitArchiveBtn" onclick="toggleRecruitArchivedView()" title="보관(폐기)한 공고 보기 — 끝난 공고는 카드 [⋯] → [📦 보관]">📦 보관함</button>
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
       ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용 — 발행·수정은 편집 허용명단에 있는 담당자만 가능합니다.</b>'}</div>`;
@@ -14389,6 +14390,9 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
     W._renderRecruitCards = function (list) {
       _origRender(list);
       try { if (STATE.view === 'campaigns') _rcRenderHead((list || []).length); } catch (_) {}
+      /* ★ 130: 머리말을 새로 그리면 [📦 보관함] 버튼도 새로 만들어진다 — 보관함 보기 상태와
+         건수를 다시 입혀야 "보관함을 보고 있는데 버튼은 📦 보관함" 으로 어긋나지 않는다. */
+      try { if (typeof W._syncArchiveBtn === 'function') W._syncArchiveBtn(); } catch (_) {}
     };
   }
 })();

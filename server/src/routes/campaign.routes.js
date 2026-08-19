@@ -773,6 +773,9 @@ router.get('/list', async (req, res, next) => {
                            --   정원, apply(SELECT *)는 보류 정원을 봐서 "카드는 열렸는데 참여 거부"
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
+          -- ★ 130: 보관(폐기)한 공고 제외. 모집이 끝난 공고가 리뷰어 목록에 영구히 남던 것을
+          --   여기 한 줄이 덮는다(085 reviewer_hidden 과 같은 자리 = 리뷰어 노출의 유일한 출처).
+          AND archived_at IS NULL
           -- ★ 085: 리뷰어 미노출(비공개/테스트) 공고 제외. 이 API 가 리뷰어 홈 미리보기·공고 목록·
           --   인기상품 게이트 모달의 유일한 출처라 여기 한 줄이 리뷰어 노출 경로 전체를 덮는다.
           --   관리자 목록·상세·참여(apply)는 무변경 → 링크로 들어가 실제 참여·제출 테스트가 가능하다.
@@ -1533,6 +1536,13 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
     }
     const camp = campRows[0];
 
+    /* ★★ 130: 보관된 공고는 참여를 받지 않는다. 목록에는 안 보이는데 링크로는 참여되는
+       상태를 만들지 않는다(085 리뷰어 숨김이 "링크를 알면 참여 가능"인 것과 의도적으로 다르다
+       — 저쪽은 테스트용 비공개, 이쪽은 끝난 공고다). 레거시·참여형 분기보다 앞에 둔다. */
+    if (camp.archived_at) {
+      return res.status(403).json({ ok: false, reason: 'archived', error: '모집이 종료된 공고입니다.' });
+    }
+
     const weekend = weekendPublicationState(camp);
     if (weekend.blocked) {
       return res.status(403).json({
@@ -1680,12 +1690,25 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
   try {
     await _ensureTables();
     const now = new Date();
+    /* ★ 130: 기본 목록은 **보관하지 않은 공고만**. `?archived=1` 이면 보관함(보관분만).
+       거르는 곳이 두 갈래인 이유 = 보관함을 보여줄 화면이 필요하기 때문(서버가 통째로
+       거르면 보관함이 영원히 빈다 — 088 마감 보관함과 같은 규율). */
+    const _archivedView = String(req.query.archived || '') === '1';
     const { rows } = await pool.query(`
       SELECT * FROM recruit_campaigns
+      WHERE archived_at IS ${_archivedView ? 'NOT NULL' : 'NULL'}
       ORDER BY
+        ${_archivedView ? 'archived_at DESC,' : ''}
         CASE WHEN status = 'active' THEN 0 WHEN status = 'draft' THEN 1 ELSE 2 END,
         created_at DESC
     `);
+    /* 보관함으로 넘어간 건수 — 목록에서 빠진 공고가 몇 건인지 화면이 말해야 한다
+       (조용히 사라지면 "공고가 없어졌다"가 된다). 실패는 null = 표시 안 함. */
+    let _archivedCount = null;
+    try {
+      const { rows: ac } = await pool.query('SELECT COUNT(*) AS n FROM recruit_campaigns WHERE archived_at IS NOT NULL');
+      _archivedCount = Number(ac[0] && ac[0].n) || 0;
+    } catch (e) { logger.warn(`[campaign] admin/list 보관 건수 조회 실패(표기 생략): ${e.message}`); }
     const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
     // 실패해도 목록 자체는 떠야 한다(관리 기능 마비 방지) — 집계만 비우고 진행.
     // carrySumMap: null = 반영 합계 모름(조회 실패) → 잔량도 null(부풀린 칩 금지 — 코드리뷰 M3)
@@ -1716,6 +1739,15 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
     } catch (e) {
       logger.warn(`[campaign] admin/list 표 기준 집계 실패 — 종전(공고 기준) 표기로 폴백: ${e.message}`);
     }
+    /* ★ 130: 보관 **제안** 재료 — 연결 작업표의 모든 줄이 채워졌는가(사용자 확정 조건).
+       자동 보관은 하지 않는다. 화면이 배지로 제안하고 실행은 사람이 누른다.
+       ★ null = 판정 실패 → 제안 없음(0/0 을 "다 찼다"로 읽지 않는다). */
+    let _archiveSuggest = null;
+    try {
+      const { archiveSuggestions } = require('../services/campaignArchive.service');
+      _archiveSuggest = await archiveSuggestions(pool, rows);
+    } catch (e) { logger.warn(`[campaign] admin/list 보관 제안 실패(제안 없이 계속): ${e.message}`); }
+
     const { isCarryHold, heldCarry, kstTodayStr } = require('../services/campaignState.service');
     const _todayStr = kstTodayStr(now);
     const displayTotals = new Map();
@@ -1725,7 +1757,9 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
     }));
     const data = rows.map(r => {
       const displayTotal = displayTotals.get(r.id) || { total: Number(r.recruit_total) || 0, source: 'campaign' };
-      if (!r.participation_mode) return { ...r, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source };
+      const _sug = _archiveSuggest ? (_archiveSuggest.get(r.id) || null) : null;
+      // archiveSuggest: {total, filled, full} — full=true 일 때만 화면이 [📦 보관 제안] 배지를 그린다.
+      if (!r.participation_mode) return { ...r, display_recruit_total: displayTotal.total, display_recruit_total_source: displayTotal.source, archiveSuggest: _sug };
       const cnt = countsMap.get(r.id) || {
         activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
       };
@@ -1733,6 +1767,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
       const st = computeCampaignState(r, cnt, now, _sch);
       return {
         ...r,
+        archiveSuggest: _sug,
         // 카드 표기 전용 값. recruit_total 원본은 참여 제한/기존 정책을 위해 그대로 둔다.
         display_recruit_total: displayTotal.total,
         display_recruit_total_source: displayTotal.source,
@@ -1774,8 +1809,38 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
         },
       };
     });
-    res.json({ ok: true, data, serverNow: now.toISOString() });
+    res.json({ ok: true, data, serverNow: now.toISOString(), archivedView: _archivedView, archivedCount: _archivedCount });
   } catch (err) {
+    next(err);
+  }
+});
+
+/* POST /api/campaign/admin/:id/archive {archived:true|false} — 보관/보관 해제 (130)
+   ★ 게이트는 adminOrMaster(정원·총량 변경과 같은 급 — 남의 업체 공고를 치울 수 있다).
+   ★ 스코프 토큰(via:'reviewer_campaign')은 PUT /api/campaign/admin/:id 끝앵커로만 허용되므로
+     이 POST 에 도달 불가(노출 권한 상승 차단 — flags 와 같은 규율). */
+router.post('/admin/:id/archive', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const want = (req.body || {}).archived;
+    if (typeof want !== 'boolean') {
+      return res.status(400).json({ ok: false, error: 'archived(true|false)를 명시하세요.' });
+    }
+    const svc = require('../services/campaignArchive.service');
+    const by = (req.admin && req.admin.name) || null;
+    const out = want ? await svc.archiveCampaign(pool, id, by) : await svc.unarchiveCampaign(pool, id);
+    // ★ /list 5초 캐시 즉시 무효화 — 보관하자마자 리뷰어 목록에서 빠지게(flags 와 같은 처리).
+    if (out.ok) _listCache = { at: 0, rows: null, countsMap: null, feeMap: null };
+    if (!out.ok) {
+      // 검증 실패는 400대로 — errorHandler 500 마스킹이면 담당자가 무엇을 고칠지 모른다.
+      return res.status(out.code === 'not_found' ? 404 : 409).json(out);
+    }
+    res.json(out);
+  } catch (err) {
+    if (err && err.code === '42703') {
+      logger.error(`[campaign] archived_at 컬럼 없음(migration 130 미적용): ${err.message}`);
+      return res.status(503).json({ ok: false, code: 'not_ready', error: '보관 기능이 아직 준비되지 않았습니다(migration 130 미적용) — 관리자에게 알려주세요.' });
+    }
     next(err);
   }
 });
@@ -2338,6 +2403,28 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
 router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
+    /* ★★ 130: 참여 이력이 있는 공고는 삭제하지 않는다 — 보관으로 안내한다.
+       이 DELETE 는 FK CASCADE 로 campaign_applications(참여 이력) · campaign_options ·
+       campaign_fee_schedules(참여 시점 리뷰비 스냅샷) · campaign_rounds ·
+       campaign_daily_plans · campaign_reviewer_gates 를 **함께 지우고**,
+       payment_batch_items.campaign_id 는 SET NULL 로 입금 회차의 공고 연결까지 끊는다.
+       → 리뷰어의 리뷰 내역·누적 금액·정산 근거가 조용히 사라진다.
+       삭제는 **발행 직후 오발행분**(참여 0건)에만 남긴다. force 우회는 두지 않는다. */
+    let _apps = null;
+    try {
+      const { rows: ac } = await pool.query(
+        'SELECT COUNT(*) AS n FROM campaign_applications WHERE campaign_id = $1', [id]);
+      _apps = Number(ac[0] && ac[0].n) || 0;
+    } catch (e) {
+      // ★ 세지 못하면 지우지 않는다(fail-closed — 모르는 채로 파괴하지 않는다).
+      logger.warn(`[campaign] 삭제 전 참여 이력 조회 실패 — 삭제 보류 camp=${id}: ${e.message}`);
+      return res.status(503).json({ ok: false, code: 'unknown_history',
+        error: '참여 이력을 확인하지 못해 삭제를 보류했습니다. 잠시 후 다시 시도하거나 [보관]을 이용하세요.' });
+    }
+    if (_apps > 0) {
+      return res.status(409).json({ ok: false, code: 'has_applications', count: _apps,
+        error: `참여 이력이 ${_apps}건 있어 삭제할 수 없습니다 — 대신 [📦 보관]으로 목록에서 내리세요(데이터는 그대로 남고 언제든 되돌릴 수 있습니다).` });
+    }
     const result = await pool.query('DELETE FROM recruit_campaigns WHERE id = $1', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });

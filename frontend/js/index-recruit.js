@@ -49,6 +49,9 @@ let _recruitTabList  = [];     // 인덱스 탭 목록 캐시 [{sheetId, tabName
    공고 목록 로드
 ═══════════════════════════════════════ */
 /* 삭제 모드 상태 — 켰을 때만 카드를 고를 수 있다(평상시 카드에는 삭제 수단이 없음) */
+/* ★ 130 보관함 보기 — 켜면 보관한 공고만 표시(끄면 보관하지 않은 공고만).
+   서버가 두 갈래를 모두 거르므로(admin/list `?archived=1`) 화면은 상태만 들고 있는다. */
+window._recruitArchivedView = false;
 window._recruitDelMode = false;
 window._recruitDelPicked = window._recruitDelPicked || new Set();
 let _recruitLastList = [];
@@ -62,15 +65,21 @@ async function loadRecruitList() {
   if (!wrap) return;
   wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
   try {
-    const res  = await fetch(_campApi("/list"), {
+    const res  = await fetch(_campApi("/list") + (window._recruitArchivedView ? "?archived=1" : ""), {
       headers: _getAuthHeaders()
     });
     const json = await res.json();
     const list = json.data || [];
     _recruitLastList = list;
+    /* 보관 건수 — 목록에서 빠진 공고가 몇 건인지 말한다(조용히 사라지면 "공고가 없어졌다"가 된다).
+       ★ null(구버전 백엔드·조회 실패)이면 버튼에 숫자를 붙이지 않는다(0 으로 위장 금지). */
+    window._recruitArchivedCount = (typeof json.archivedCount === 'number') ? json.archivedCount : null;
+    _syncArchiveBtn();
     if (json.serverNow && window.CampCards) CampCards.setServerNow(json.serverNow);
     if (list.length === 0) {
-      wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t4);font-size:.85rem"><i class="fas fa-bullhorn" style="font-size:1.5rem;display:block;margin-bottom:10px;opacity:.3"></i>등록된 공고가 없습니다.<br><small>우측 상단 [공고 등록] 버튼을 눌러 첫 공고를 작성해보세요.</small></div>`;
+      wrap.innerHTML = window._recruitArchivedView
+        ? `<div style="padding:40px;text-align:center;color:var(--t4);font-size:.85rem"><i class="fas fa-box-archive" style="font-size:1.5rem;display:block;margin-bottom:10px;opacity:.3"></i>보관한 공고가 없습니다.<br><small>끝난 공고는 카드 [⋯] → [📦 보관]으로 목록에서 내릴 수 있어요.</small></div>`
+        : `<div style="padding:40px;text-align:center;color:var(--t4);font-size:.85rem"><i class="fas fa-bullhorn" style="font-size:1.5rem;display:block;margin-bottom:10px;opacity:.3"></i>등록된 공고가 없습니다.<br><small>우측 상단 [공고 등록] 버튼을 눌러 첫 공고를 작성해보세요.</small></div>`;
       return;
     }
     _renderRecruitCards(list);
@@ -127,6 +136,32 @@ function updateRecruitPopularity(campId, on) {
 window.updateRecruitPopularity = updateRecruitPopularity;
 
 /* 삭제 모드 토글 — 카드에서 삭제를 뺀 대신, 켰을 때만 선택·삭제할 수 있다 */
+/* ★ 130 보관함 ↔ 일반 목록 전환. 삭제 모드가 켜져 있으면 끄고 전환한다
+   (선택 표시가 화면과 어긋나는 상태를 애초에 만들지 않는다). */
+function toggleRecruitArchivedView() {
+  window._recruitArchivedView = !window._recruitArchivedView;
+  if (window._recruitDelMode) {
+    window._recruitDelMode = false;
+    window._recruitDelPicked.clear();
+    if (typeof _syncDelBar === 'function') _syncDelBar();
+  }
+  _syncArchiveBtn();
+  loadRecruitList();
+}
+window.toggleRecruitArchivedView = toggleRecruitArchivedView;
+
+/** 보관함 버튼 표기(있는 화면에서만) — 건수는 **서버가 준 값만** 쓴다. */
+function _syncArchiveBtn() {
+  const btn = document.getElementById("recruitArchiveBtn");
+  if (!btn) return;
+  const n = window._recruitArchivedCount;
+  btn.textContent = window._recruitArchivedView
+    ? "↩ 목록으로"
+    : ("📦 보관함" + (typeof n === "number" && n > 0 ? " " + n : ""));
+  btn.classList.toggle("on", !!window._recruitArchivedView);
+}
+window._syncArchiveBtn = _syncArchiveBtn;
+
 function toggleRecruitDelMode() {
   window._recruitDelMode = !window._recruitDelMode;
   window._recruitDelPicked.clear();
