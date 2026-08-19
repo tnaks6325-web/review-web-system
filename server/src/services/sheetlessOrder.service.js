@@ -263,6 +263,14 @@ async function writeOrderToWorktable({
         [sheetId, gid || null, tabName, seq, reviewerName, recipientName, p8,
          optText || null, orderSubmissionId, JSON.stringify(merged)]);
     }
+    /* ── 번호·담당자 자동 채움 + 구매일자 기준 재번호 ────────────────────────────
+       ★ 이어붙인 줄은 `row_json` 이 비어 있어 `번호`·`담당자` 가 영구 빈칸으로 남았다
+         (매퍼가 그 두 칸을 쓰지 않는다). 여기서 그 탭 전체를 구매일자 순으로 다시 매긴다.
+       ★★ **DB `seq` 는 건드리지 않는다** — 표시 번호(`row_json`)만 바뀐다.
+       ★★ SAVEPOINT 격리 + 절대 throw 없음 — 번호 때문에 주문 기록을 잃지 않는다. */
+    await require('./rowNumbering.service')
+      .renumberTabInTx(client, { sheetId, tabName, by: 'auto-order' });
+
     await client.query('COMMIT');
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}

@@ -1238,6 +1238,35 @@ router.post('/workdesk/assign-unslotted-order', authMiddleware, internalMiddlewa
   } catch (err) { next(err); }
 });
 
+/* ── 번호 정리(표시 번호 재부여 + 담당자 blank-only 채움) ──────────────────────────
+   ★ 바꾸는 것은 `row_json` 의 `번호`·`담당자` 칸뿐 — DB `seq`(주문·리뷰·입금·투영 앵커)는 불변.
+   ★ `confirm !== true` 면 **쓰기 0 미리보기**(무엇이 몇 번으로 바뀌는지 먼저 보여준다).
+   ★ 게이트는 [번호 배정]과 같은 `internalMiddleware`(같은 표의 같은 성격 조작). */
+router.post('/worktable/renumber', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, confirm } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const out = await require('../services/rowNumbering.service')
+      .renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
+    const bad = { not_sheetless: 409, tab_not_registered: 404, disabled: 409 };
+    res.status(out.ok ? 200 : (bad[out.reason] || 400)).json(out);
+  } catch (err) {
+    if (err && (err.code === '42P01' || err.code === '42703')) {
+      return res.status(200).json({ ok: false, code: 'not_ready', error: '아직 준비되지 않았습니다(배포 반영 대기).' });
+    }
+    next(err);
+  }
+});
+/* 소급 정리 — 무시트 작업 전체. 되돌리기 어려운 광범위 조작이라 adminOrMaster. */
+router.post('/worktable/renumber-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { confirm, limit } = req.body || {};
+    const out = await require('../services/rowNumbering.service')
+      .renumberAllSheetless({ dryRun: confirm !== true, by: _by(req), limit });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
 // 테스트 자동제출 정리 — 테스트 전용 식별자가 모두 일치하는 경우에만 영구 제거한다.
 // 일반 주문은 이 경로로 절대 삭제할 수 없으며, 운영 주문 삭제는 위 order-delete만 사용한다.
 router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, res, next) => {

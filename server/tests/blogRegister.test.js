@@ -182,7 +182,9 @@ async function expectCode(st, args, code, label) {
     }
   }
   ok(/_brCanAdd\(\)\?`<button class="btn" onclick="openBloggerModal\(\)"/.test(HTML), '[⋯] 메뉴 항목 배선');
-  ok(/isMaster\|\|_wrCanRetire\(\)\|\|_brCanAdd\(\)/.test(HTML), '★ 메뉴 자체 표시 조건에 합류(항목만 넣으면 메뉴가 안 뜬다)');
+  /* ★ 조건 목록은 도구가 늘 때마다 길어진다(2026-08-19 [🔢 번호 정리] 합류) — **_brCanAdd 가 그 조건에
+       들어 있는가**만 본다. 전체 문자열을 박아 두면 무관한 도구 추가에 이 가드가 조용히 빨개진다. */
+  ok(/\(isMaster(?:\|\|[_A-Za-z0-9]+\(\))*\|\|_brCanAdd\(\)\)\?/.test(HTML), '★ 메뉴 자체 표시 조건에 합류(항목만 넣으면 메뉴가 안 뜬다)');
   {
     const i = HTML.indexOf('function openBloggerModal');
     const b = HTML.slice(i, i + 1600);

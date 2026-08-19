@@ -3405,6 +3405,89 @@ async function wrRun(){
     if (idx >= 0) selTab(idx);
   } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
 }
+/* ── 🔢 번호 정리 (무시트 작업 전용) ──────────────────────────────────────────
+   왜: 준비된 줄을 다 쓰고 나면 주문이 들어올 때 줄이 이어붙는데, 그 줄은 `번호`·`담당자` 가
+   영구 빈칸이었다(매퍼가 그 두 칸을 쓰지 않는다). 게다가 뒤늦게 들어온 지난 날짜 주문이
+   맨 아래에 남아 구매일자 순서가 깨졌다.
+   ★ 바꾸는 것은 **표에 보이는 번호와 담당자뿐** — 줄의 주소(내부 번호)는 그대로다.
+   ★ 미리보기(쓰기 0) → 실행 2단계. 판정·순서는 전부 서버가 한다(프론트 재계산 0). */
+let _RN = null;
+function _rnCanRenumber(){
+  return !!(STATE.cur && STATE.cur.sheetless === true && _isInternalRole());
+}
+function closeRenumberModal(){ const o = document.getElementById('rnOv'); if (o) o.remove(); _RN = null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if (!window._rnKeyBound) {
+  window._rnKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('rnOv')) closeRenumberModal(); });
+}
+function openRenumberModal(){
+  if (!_rnCanRenumber()) return;
+  const t = STATE.cur;
+  _RN = { sheetId: t.sheetId, tabName: t.tabName, prev: null, err: null, busy: false };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'rnOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🔢 번호 정리</div>
+    <div class="wbl-db" id="rnBody"></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="closeRenumberModal()">닫기</button>
+      <button class="wbl-b" id="rnPrev" onclick="rnPreview()">미리보기</button>
+      <button class="wbl-b dark" id="rnGo" disabled onclick="rnRun()">🔢 번호 정리 실행</button></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
+  _rnRender();
+  rnPreview();
+}
+function _rnRender(){
+  const b = document.getElementById('rnBody'); if (!b || !_RN) return;
+  const p = _RN.prev;
+  b.innerHTML = `<b>${esc(_RN.tabName)}</b>
+    <div class="wbl-facts">표의 <b>번호</b>를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매기고,
+      비어 있는 <b>담당자</b> 칸을 이 작업의 담당자로 채웁니다(이미 적힌 담당자는 그대로 둡니다).<br>
+      구매일자를 읽을 수 없는 줄은 맨 아래로 갑니다. 구글시트·주문 기록·리뷰·입금 기록은 건드리지 않습니다.</div>
+    ${p ? `<div class="wbl-facts">표 <b>${p.total}줄</b> 중 바뀌는 줄 <b>${p.changed}줄</b>
+        ${p.managerColumn ? ` · 담당자 칸 <b>${esc(p.managerColumn)}</b>${p.manager ? ` → <b>${esc(p.manager)}</b>` : ' <span style="color:var(--faint,#94a3b8)">(작업 담당자가 지정되어 있지 않아 담당자는 채우지 않습니다)</span>'}` : ''}</div>
+      ${(p.sample && p.sample.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>지금 번호</th><th>바뀔 번호</th><th>담당자</th></tr></thead><tbody>
+        ${p.sample.map(x => `<tr><td>${x.seq}</td><td>${x.from ? esc(String(x.from)) : '<span style="color:var(--faint,#94a3b8)">(빈칸)</span>'}</td>
+          <td>${x.to == null ? '<span style="color:var(--faint,#94a3b8)">그대로</span>' : '<b>' + esc(String(x.to)) + '</b>'}</td>
+          <td>${x.manager ? esc(String(x.manager)) : ''}</td></tr>`).join('')}
+        </tbody></table>${p.changed > p.sample.length ? `<div class="wbl-facts">…외 ${p.changed - p.sample.length}줄</div>` : ''}` : ''}
+      ${p.changed === 0 ? '<div class="wbl-facts">이미 정리된 상태입니다 — 바꿀 줄이 없습니다.</div>' : ''}` : ''}
+    ${_RN.err ? `<div class="wbl-warn">${esc(_RN.err)}</div>` : ''}`;
+  const go = document.getElementById('rnGo'); if (go) go.disabled = !(p && p.changed > 0) || _RN.busy;
+}
+/* 서버가 준 사유를 그대로 사람 말로 — "실패"로 뭉뚱그리면 무엇을 고칠지 알 수 없다. */
+const _RN_REASON = {
+  not_sheetless: '이 작업은 아직 구글시트를 진실원본으로 씁니다 — 표에서 번호를 고쳐도 시트를 다시 읽을 때 되돌아가므로 정리하지 않습니다.',
+  tab_not_registered: '등록되지 않은 작업입니다.',
+  no_target_column: '이 표에 번호·담당자 칸이 없습니다(설정 › 작업표 표준 열에서 칸을 추가하세요).',
+  disabled: '번호 자동 정리가 꺼져 있습니다(WORKTABLE_AUTO_NUMBER=0).',
+  not_ready: '아직 준비되지 않았습니다 — 배포 반영 후 다시 시도해 주세요.',
+};
+async function rnPreview(){
+  if (!_RN || _RN.busy) return;
+  _RN.busy = true; _RN.err = null; _rnRender();
+  try {
+    const j = await api('/api/trackb/worktable/renumber', { method: 'POST', body: JSON.stringify({
+      sheetId: _RN.sheetId, tabName: _RN.tabName }) });
+    if (!j || j.ok === false) { _RN.prev = null; _RN.err = _RN_REASON[(j && (j.reason || j.code))] || (j && (j.error || j.message)) || '미리보기 실패'; }
+    else { _RN.prev = j; if (j.reason && _RN_REASON[j.reason]) _RN.err = _RN_REASON[j.reason]; }
+  } catch (e) { _RN.prev = null; _RN.err = '미리보기 실패: ' + (e.message || ''); }
+  _RN.busy = false; _rnRender();
+}
+async function rnRun(){
+  if (!_RN || _RN.busy || !_RN.prev || !_RN.prev.changed) return;
+  if (!confirm(`「${_RN.tabName}」 표의 번호를 구매일자 순으로 다시 매깁니다.\n\n` +
+    `바뀌는 줄 ${_RN.prev.changed}줄 — 이미 인쇄·공유한 번호와 달라질 수 있습니다.\n` +
+    `줄의 내용·주문·리뷰·입금 기록은 그대로입니다.\n\n계속할까요?`)) return;
+  _RN.busy = true; _rnRender();
+  try {
+    const j = await api('/api/trackb/worktable/renumber', { method: 'POST', body: JSON.stringify({
+      sheetId: _RN.sheetId, tabName: _RN.tabName, confirm: true }) });
+    if (!j || j.ok === false) { _RN.busy = false; _RN.err = _RN_REASON[(j && (j.reason || j.code))] || (j && (j.error || j.message)) || '번호 정리 실패'; _rnRender(); return; }
+    const idx = STATE.tabs.indexOf(STATE.cur);
+    closeRenumberModal();
+    toast(`번호 정리 완료 — ${j.changed}줄`);
+    if (idx >= 0) selTab(idx);
+  } catch (e) { _RN.busy = false; _RN.err = '번호 정리 실패: ' + (e.message || ''); _rnRender(); }
+}
 /* ── ♻ 중복 줄 정리 (무시트 작업 전용) ────────────────────────────────────────
    왜: 2026-08-19 무시트 구매양식이 `failed` 로 강등돼 리뷰어 재제출을 유도했고, 그 중복이
    부팅 복구 잡과 겹쳐 같은 구매가 여러 줄로 쌓였다(참여자 870/800 · 901/900).
@@ -4947,7 +5030,7 @@ function renderWorkdesk(wd){
     <span class="sp" style="flex:1"></span>
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
+    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매기고 비어 있는 담당자 칸을 채운다(미리보기 후 실행 · 줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
       ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
