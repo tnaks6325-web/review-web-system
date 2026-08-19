@@ -130,6 +130,37 @@ function ok(name, cond, extra) {
     ok('옮기지 못한 항목(kept)을 조용히 넘기지 않는다', /kept/.test(apply.slice(0, 1600)));
   }
 
+  // ── F. 직원 안내서 ↔ 제품 문구 대조(드리프트 가드) ──
+  console.log('\n[F] 직원 안내서 — 화면·서버 문구와 어긋나지 않는가');
+  {
+    const doc = read('../frontend/docs/리뷰어_로그인번호_변경_안내.html');
+    ok('외부 리소스 0(오프라인 열람 가능)', !/(src|href)\s*=\s*["\']https?:/i.test(doc));
+    ok('업무가이드 목록에 등록됨(사본 금지 — WORK_GUIDES 한 곳)',
+      /file:'리뷰어_로그인번호_변경_안내\.html'/.test(wdk));
+    ok('화면 재현 목업은 라이트 고정(실물과 같아야 한다)', /color-scheme:light/.test(doc));
+
+    // 안내서가 가르치는 버튼·문구가 실제 화면에 있어야 한다
+    for (const label of ['변경', '이대로 변경', '확인']) {
+      ok(`화면에 실제로 있는 버튼: [${label}]`, wdk.includes('>' + label + '<'));
+    }
+    ok('안내서의 "옮기지 못한 항목" 문구가 실제 토스트와 같다',
+      doc.includes('옮기지 못한 항목') && wdk.includes('옮기지 못한 항목'));
+
+    // 차단 4종 — 안내서 표의 문구가 서버 메시지에서 온 것이어야 한다
+    const pairs = [
+      ['리뷰어의 번호입니다', '리뷰어의 번호입니다'],
+      ['뒤 8자리가', '뒤 8자리가'],
+      ['리뷰어의 타계정으로 등록돼 있습니다', '리뷰어의 타계정으로 등록돼 있습니다'],
+      ['진행 중인 참여(자리 확보)', '진행 중인 참여(자리 확보)'],
+    ];
+    for (const [inDoc, inSvc] of pairs) {
+      ok(`차단 문구 일치: ${inDoc}`, doc.includes(inDoc) && svcSrc.includes(inSvc));
+    }
+    ok('안내서가 "관리자 전용 · 리뷰어 내정보에서는 불가"를 말한다',
+      /내정보에서 바꿀 수 없습니다|리뷰어 본인은/.test(doc));
+    ok('안내서가 "리뷰어 안내는 사람이"를 말한다(자동 통지 없음)', /자동으로 알리지 않습니다/.test(doc));
+  }
+
   // ── E. 진짜 PG16 end-to-end ──
   if (!process.env.PGTEST_URL) {
     console.log('\n[E] (건너뜀) PGTEST_URL 이 없어 진짜 PG 시나리오는 실행하지 않았습니다.');
