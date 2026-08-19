@@ -791,12 +791,13 @@ router.get('/share-link/:code', authMiddleware, internalMiddleware, async (req, 
     const row = await shareLinks.resolveShareLink(req.params.code);
     if (!row) return res.status(404).json({ ok: false, error: '링크를 찾을 수 없습니다. 주소가 잘렸거나 폐기된 링크일 수 있습니다.' });
     if (row.kind === 'tab') {
-      const okc = await svc.canAccessTab({
-        role: _role(req), staffName: (req.admin && req.admin.name) || null,
-        advertiserId: (req.admin && req.admin.advertiser_id) || null,
-        sheetId: row.sheetId, tabName: row.tabName,
-      });
-      if (!okc) return res.status(403).json({ ok: false, error: '담당 범위 밖의 작업입니다. 관리자에게 문의하세요.' });
+      // ★★ 게이트는 **작업보드 본문(`/workdesk`)과 같은 규칙**이어야 한다(사용자 확정 2026-08-19).
+      //   내부 직원(master/admin/staff)은 이미 모든 작업보드를 열고 표까지 편집한다(`allowAllStaff`).
+      //   여기서만 담당 스코프를 걸면 **작업 목록에는 보이는데 링크로는 안 열리는 막다른 길**이 된다.
+      //   판정 사본을 만들지 않고 이 파일의 단일 출처 `_ensureEditScope`(내부=허용 · 광고주=차단)를 쓴다 —
+      //   나중에 내부 범위를 좁히면 작업보드와 이 링크가 **함께** 좁아진다.
+      const g = await _ensureEditScope(req, row.sheetId, row.tabName);
+      if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
       shareLinks.touchShareLink(row.code);
       return res.json({ ok: true, kind: 'tab', sheetId: row.sheetId, tabName: row.tabName, tabGid: row.tabGid || '' });
     }

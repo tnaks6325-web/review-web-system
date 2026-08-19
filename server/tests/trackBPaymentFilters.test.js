@@ -90,9 +90,12 @@ test('fast drag fills every work key between the last and current pointer row', 
 });
 
 test('work rows start and extend a pointer drag without double-toggling on click', () => {
-  const filterBar = sourceOf('_pmFilterBar');
-  assert.match(filterBar, /onpointerdown="_pmStartWorkDrag/);
-  assert.match(filterBar, /onpointerenter="_pmDragSelectWork/);
+  // ★ 작업 줄 마크업은 `_pmFilterBar` 안에서 `_pmWorkRowsHtml` 로 떨어져 나왔다(사본이 생긴 게 아니라
+  //   조각으로 분리된 것) — 검사 대상을 그 조각으로 옮긴다. 고정하는 것은 드래그 배선 자체다.
+  const workRows = sourceOf('_pmWorkRowsHtml');
+  assert.match(workRows, /onpointerdown="_pmStartWorkDrag/);
+  assert.match(workRows, /onpointerenter="_pmDragSelectWork/);
+  assert.match(sourceOf('_pmFilterBar'), /_pmWorkRowsHtml\(/);
   assert.match(sourceOf('_pmEndWorkDrag'), /pmWorkDragClickSuppressed/);
 });
 

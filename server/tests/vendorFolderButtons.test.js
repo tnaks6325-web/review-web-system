@@ -210,21 +210,30 @@ async function run() {
     const cached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'admin');
     t('재조회는 캐시(같은 탭을 다시 열어도 쿼리 순증 0)', cached.b.ok === true && calls.length === 1, 'queries=' + calls.length);
     t("★★ **캐시 응답에도** kind 표식(한 경로만 붙이면 스큐 판별이 샌다)", cached.b.kind === 'info', JSON.stringify(cached.b));
-    // ★★★ 블로커 재발 차단 — **캐시 히트가 스코프 게이트를 우회하지 않는다**:
-    //   admin 이 채운 캐시 키에 담당 밖 staff 가 접근해도 403 이어야 한다(종전엔 200 + Drive 링크 2개).
-    //   `canAccessTab` 을 스텁해 "담당 아님"을 만들고, **같은 키**로 두 번 부른다.
-    const realCanAccess = svc.canAccessTab;
-    svc.canAccessTab = async () => false;
+    // ★★ AE(staff) 범위 — **사용자 확정 2026-08-19: 담당이 아니어도 전부 연다.**
+    //   이 자리는 원래 "담당 밖 staff = 403(캐시가 스코프를 우회하지 않는다)" 를 고정했다. 그러나
+    //   그때 이미 `/workdesk`(작업보드 본문)·`/tabs`(작업 목록)가 `allowAllStaff` 로 전체를 열어 주고
+    //   있어 **폴더 버튼만 막는 반쪽 규칙**이었고, 지금 라우트는 그 사실을 주석으로 못박고 있다
+    //   (“staff는 작업보드 전체 운영 권한이므로 담당 여부와 무관하게 폴더를 연다”).
+    //   ★ 되돌린다면 `/workdesk`·`/tabs`·공유 링크(`/share-link/:code`)와 **함께** 좁혀야 한다.
     const staffCached = await run1({ kind: 'info', sheetId: 'S1', tabName: 'T1' }, 'staff');
-    t('★★ 캐시된 탭도 담당 밖 staff 는 403(캐시가 스코프를 우회하지 않는다)',
-      staffCached.code === 403 && !staffCached.b.folderUrl && !staffCached.b.captureFolderUrl, JSON.stringify(staffCached));
+    t('★★ AE 는 담당이 아니어도 연다 — 캐시된 탭에서도(작업보드와 같은 규칙)',
+      staffCached.b.ok === true && !!staffCached.b.folderUrl, JSON.stringify(staffCached));
     const staffCached2 = await run1({ sheetId: 'S1', tabName: 'T1' }, 'staff');   // 현영(receipt) 분기도 같은 규율
-    t('★★ 현영 분기도 캐시보다 스코프가 먼저(10분 캐시 창으로 새던 경로)',
-      staffCached2.code === 403 && !staffCached2.b.url, JSON.stringify(staffCached2));
-    svc.canAccessTab = realCanAccess;
-    t('★ 소스 순서 고정 — 스코프 검사가 캐시 조회보다 앞',
-      ROUTES_CODE.indexOf("_role(req) === 'staff'") < ROUTES_CODE.indexOf('_tabFolderInfoCache.get(key)')
-      && ROUTES_CODE.indexOf("_role(req) === 'staff'") < ROUTES_CODE.indexOf('_tabFolderCache.get(key)'));
+    // 현영(receipt) 분기도 같은 규칙 — 권한으로 막히지 않고 **실제 폴더 해석 로직까지 도달**한다
+    //   (이 픽스처는 리뷰 폴더가 없어 그 사유를 돌려주는 것이 정상 결과다).
+    t('★★ 현영 분기도 같은 규칙 — 권한으로 막히지 않는다(분기마다 기준이 갈리지 않는다)',
+      staffCached2.code !== 403 && !/권한|담당 범위/.test(staffCached2.b.error || ''), JSON.stringify(staffCached2));
+    t('★ 담당 스코프 판정을 이 라우트가 따로 만들지 않는다(작업보드와 갈리는 두 번째 기준 금지)',
+      !/tab-folders'[\s\S]{0,2600}canAccessTab/.test(ROUTES_CODE));
+    // ★ 남은 경계는 **광고주 차단**이고, 그것은 핸들러가 아니라 라우터 단계가 맡는다 —
+    //   미들웨어가 핸들러보다 앞이면 캐시 히트가 그 앞을 우회할 수 없다.
+    t('★ 광고주 차단은 라우터 단계(internalMiddleware 가 핸들러보다 앞)', (() => {
+      const layer = require('../src/routes/trackB.routes').stack.find(l => l.route && l.route.path === '/tab-folders');
+      const ns = layer.route.stack.map(x => x.name);
+      const k = ns.indexOf('internalMiddleware');
+      return k > -1 && k < ns.length - 1;
+    })());
     // 미등록 탭은 사유를 말한다(빈 값으로 위장하지 않는다)
     poolMod.query = async () => ({ rows: [] });
     const none = await run1({ kind: 'info', sheetId: 'S9', tabName: 'T9' }, 'admin');

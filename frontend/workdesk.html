@@ -796,6 +796,15 @@
   .btn.xs{font-size:11px;padding:3px 9px}
   /* ── 그리드 제거 × · 편집 이력 모달 ── */
   .rdel{margin-left:6px;padding:1px 5px;border:1px solid color-mix(in srgb,var(--bad) 35%,var(--line));border-radius:5px;background:var(--card);color:var(--bad);font:700 10.5px/1.35 inherit;cursor:pointer;opacity:0;transition:opacity .12s,background .12s,border-color .12s} tr:hover .rdel,.rdel:focus-visible{opacity:1}.rdel:hover{background:var(--bad-soft);border-color:var(--bad)}.rdel:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* 공유 링크 복사 완료 — 화면 중앙에서 천천히 사라지는 알림(사용자 확정 2026-08-19).
+     ★ pointer-events:none — 알림이 떠 있는 동안에도 화면 조작이 막히지 않는다.
+     ★ 애니메이션이 끝나면 요소를 제거한다(잔재가 클릭을 먹지 않게). */
+  #shlOk{position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  #shlOk .shlbox{background:rgba(17,24,39,.92);color:#fff;padding:16px 28px;border-radius:14px;font-size:15px;font-weight:750;
+    letter-spacing:-.2px;box-shadow:0 12px 34px rgba(0,0,0,.3);animation:shlFade 1.9s ease forwards}
+  @keyframes shlFade{0%{opacity:0;transform:scale(.94)}12%{opacity:1;transform:scale(1)}55%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1)}}
+  @media (prefers-reduced-motion:reduce){ #shlOk .shlbox{animation:shlFadeR 1.9s linear forwards} }
+  @keyframes shlFadeR{0%{opacity:0}8%{opacity:1}60%{opacity:1}100%{opacity:0}}
   .modalov{position:fixed;inset:0;background:rgba(15,35,42,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px}
   .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
@@ -2276,13 +2285,34 @@ async function _consumeShare(){
    ★★ 링크는 권한이 아니다 — 받은 사람은 평소대로 로그인해야 하고, 담당 범위 밖이면 서버가 막는다.
    ★ 클립보드는 브라우저·권한에 따라 **조용히 실패**한다 → 성공 여부와 무관하게 주소를 팝업으로
      보여 손으로도 복사할 수 있게 한다(조용한 실패 금지). 팝업은 body 직속(스크롤 컨테이너 밖).       */
+// ★★ 클릭 = 즉시 복사(사용자 확정 2026-08-19) — 주소를 눈으로 확인할 일이 없어 팝업을 거치지 않는다.
+//   성공하면 화면 중앙에 "복사되었습니다"가 천천히 사라진다. **복사가 막힌 경우에만** 주소 팝업을
+//   띄운다(조용한 실패 금지 — 복사된 줄 알고 빈 메시지를 보내는 것이 가장 나쁘다).
 async function _shareLinkCopy(body, title){
   let r=null; try{ r=await api('/api/trackb/share-link',{method:'POST',body:JSON.stringify(body)}); }catch(_){ r=null; }
   if(!r||!r.ok){ alert('링크를 만들지 못했습니다: '+((r&&r.error)||'서버 오류')); return; }
   const url=location.origin+location.pathname+'#w='+r.code;
-  let copied=false;
-  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(url); copied=true; } }catch(_){ copied=false; }
-  _shareLinkPopup(title, url, copied);
+  if(await _copyText(url)){ _shareLinkOk('링크가 복사되었습니다'); return; }
+  _shareLinkPopup(title, url, false);   // 자동 복사가 막힌 경우에만 — 손으로 복사할 길을 남긴다
+}
+// 복사 단일 출처: Clipboard API → 막히면 임시 textarea + execCommand 폴백(비보안 오리진·구브라우저).
+async function _copyText(t){
+  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(t); return true; } }catch(_){ }
+  try{ const ta=document.createElement('textarea'); ta.value=t;
+    ta.setAttribute('readonly',''); ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta); ta.select(); const okc=document.execCommand('copy'); ta.remove(); return !!okc;
+  }catch(_){ return false; }
+}
+// 화면 중앙 페이드아웃 알림 — body 직속(스크롤 컨테이너 밖) · 애니메이션 끝나면 제거(잔재 금지).
+function _shareLinkOk(msg){
+  const prev=document.getElementById('shlOk'); if(prev) prev.remove();   // 연타 시 겹치지 않게
+  const el=document.createElement('div'); el.id='shlOk';
+  el.innerHTML='<div class="shlbox"></div>';
+  el.firstChild.textContent=msg;   // ★ textContent — 문자열 보간 금지
+  document.body.appendChild(el);
+  const kill=()=>{ if(el.parentNode) el.remove(); };
+  el.firstChild.addEventListener('animationend', kill);
+  setTimeout(kill, 2600);   // 애니메이션 이벤트가 안 와도(탭 비활성 등) 반드시 사라진다
 }
 function _shareLinkPopup(title, url, copied){
   let ov=document.getElementById('shlov');
@@ -2293,7 +2323,7 @@ function _shareLinkPopup(title, url, copied){
   ov.innerHTML=`<div class="modalbox" style="width:560px"><div class="modalhd"><b>🔗 ${esc(title)}</b>
       <span style="flex:1"></span><button class="btn xs" onclick="document.getElementById('shlov').remove()">닫기</button></div>
     <div class="modalbd">
-      <div style="font-size:12px;color:#64748b;margin-bottom:6px">${copied?'주소를 복사했습니다 — 메신저에 그대로 붙여넣으세요.':'자동 복사가 막혀 있습니다 — 아래 주소를 직접 복사하세요.'}</div>
+      <div style="font-size:12px;color:#64748b;margin-bottom:6px">${copied?'주소를 복사했습니다 — 메신저에 그대로 붙여넣으세요.':'자동 복사가 브라우저에서 막혔습니다 — 아래 주소를 직접 복사해 주세요.'}</div>
       <input id="shlUrl" readonly value="${esc(url)}" onclick="this.select()"
              style="width:100%;padding:8px;font-size:12px;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box">
       <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -2303,12 +2333,8 @@ function _shareLinkPopup(title, url, copied){
   const i=document.getElementById('shlUrl'); if(i){ i.focus(); i.select(); }
 }
 function _shareLinkCopyAgain(){ const i=document.getElementById('shlUrl'); if(!i) return; i.select();
-  let ok=false; try{ ok=document.execCommand('copy'); }catch(_){ ok=false; }
-  if(ok){ toast('주소를 복사했습니다'); return; }
-  if(navigator.clipboard){ navigator.clipboard.writeText(i.value)
-    .then(()=>toast('주소를 복사했습니다')).catch(()=>toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요')); return; }
-  toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요');
-}
+  _copyText(i.value).then(okc=>{ if(okc){ const o=document.getElementById('shlov'); if(o) o.remove(); _shareLinkOk('링크가 복사되었습니다'); }
+    else toast('복사에 실패했습니다 — 주소를 직접 선택해 복사하세요'); }); }
 // 작업보드 상단 [🔗 링크 복사] — 지금 보고 있는 작업 하나로 직행하는 주소.
 function copyBoardLink(){ const t=STATE.cur; if(!t){ toast('작업을 먼저 여세요'); return; }
   const m=(STATE.wd&&STATE.wd.meta)||{};
