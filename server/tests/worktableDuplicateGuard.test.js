@@ -223,13 +223,18 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   const dedupeSrc = ledSrc.slice(ledSrc.indexOf('async function dedupeRows('),
                                 ledSrc.indexOf('module.exports'));
   ok('중복 조회가 주문번호를 읽는다', /order_num[\s\S]{0,40}AS ordnum/.test(dedupeSrc));
-  ok('★ 주문번호 6자리 미만은 조회에서 제외(주문번호 없는 줄은 절대 대상이 아니다)',
-    /length\(regexp_replace\(COALESCE\(os\.order_num[\s\S]{0,60}\) >= 6/.test(dedupeSrc));
-  ok('★★ 그룹 키 = 표 주문번호 + 원장 주문번호 + 연락처 셋 다',
-    /const key = `\$\{r\.roword\}[\s\S]{0,30}\$\{r\.ordnum\}[\s\S]{0,30}\$\{r\.ph\}`/.test(dedupeSrc));
+  /* ⚠ 2026-08-19: 판정 축이 2개가 되며 이 필터가 **WHERE 에서 ㉮ 축 안으로** 옮겨졌다
+     (㉯ = 같은 주문 기록 축은 원장 주문번호가 비어 있어도 성립해야 한다 — 실측 7줄 사례).
+     검사 의미는 그대로: **주문번호 없는 줄이 ㉮(주문번호 3키) 축에 들어가면 안 된다.** */
+  ok('★ 원장 주문번호 6자리 미만은 ㉮(주문번호 3키) 축 대상이 아니다',
+    /String\(r\.ordnum \|\| ''\)\.length < 6\) return;/.test(dedupeSrc));
+  ok('★★ ㉮ 그룹 키 = 표 주문번호 + 원장 주문번호 + 연락처 셋 다',
+    /const k = `\$\{r\.roword\}[\s\S]{0,30}\$\{r\.ordnum\}[\s\S]{0,30}\$\{r\.ph\}`/.test(dedupeSrc));
+  ok('★★ ㉯ 축 = 같은 주문 기록(order_submission_id)을 여러 줄이 씀',
+    /byOrder[\s\S]{0,200}'os:' \+ String\(r\.osid\)/.test(dedupeSrc));
   ok('★ 표에 보이는 주문번호(row_json)를 조회한다', /jsonb_each_text\(COALESCE\(cp\.row_json[\s\S]{0,200}주문번호[\s\S]{0,120}AS roword/.test(dedupeSrc));
-  ok('★ 표 주문번호가 6자리 미만이면 그룹에 넣지 않는다',
-    /String\(r\.roword \|\| ''\)\.length < 6[\s\S]{0,60}continue/.test(dedupeSrc));
+  ok('★ 표 주문번호가 6자리 미만이면 ㉮ 축에 넣지 않는다',
+    /String\(r\.roword \|\| ''\)\.length < 6\) \{ noRowOrder\.push\(r\); return; \}/.test(dedupeSrc));
   ok('취소된 주문은 대상이 아니다', /os\.deleted_at IS NULL/.test(dedupeSrc));
   {
     // 같은 사람(같은 연락처)이 **다른 주문번호**로 두 번 참여 → 중복이 아니다(실행으로 확인)
@@ -268,9 +273,11 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   ok('미리보기에 주문번호 열이 있다(사람이 판정 근거를 본다)',
     /<th>주문번호<\/th>/.test(wd) && /esc\(String\(g\.orderNum \|\| ''\)\)/.test(wd));
   ok('보류 목록에도 주문번호를 적는다', /주문번호 \$\{esc\(String\(g\.orderNum/.test(wd));
-  ok('판정 규칙을 화면이 문장으로 말한다(표 주문번호 기준 · 다르면 다른 참여건)',
-    /표에 보이는 주문번호가 같고/.test(wd) && /주문번호가 다르면 각기 다른 참여건/.test(wd)
-    && /6자리 미만인 줄은/.test(wd));
+  /* ⚠ 2026-08-19: 판정 축이 2개가 되어 문구가 바뀌었다(사용자 확정) — 검사 의미는 그대로
+     **화면이 판정 규칙을 문장으로 말한다**(조용한 의미 변경 금지). ㉯ 축은 dedupeOrderLinkAxis 가 본다. */
+  ok('판정 규칙을 화면이 문장으로 말한다(두 규칙 · 다르면 다른 참여건 · 6자리 미만 제외)',
+    /셋 다 같음/.test(wd) && /같은 주문 기록을 여러 줄이 씀/.test(wd)
+    && /주문이 서로 다르면 각기 다른 참여건/.test(wd) && /6자리 미만인 줄을/.test(wd));
   ok('표에 주문번호가 없어 제외된 줄 수를 고지한다', /skippedNoRowOrder/.test(wd));
   ok('오버레이는 body 직속', /appendChild\(ov\);\s*\/\/ ★ body 직속/.test(wd.slice(wd.indexOf('function openDedupeModal'))));
   ok('Esc 리스너는 최상위 1회', /window\._ddKeyBound/.test(wd));
@@ -399,8 +406,11 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
     ok('미리보기·일괄 점검 양쪽에 판정을 붙인다',
       (wdH.match(/\$\{_ddVerdict\(/g) || []).length >= 2);
     const prevHead = (wdH.match(/<th>참여자<\/th>[\s\S]{0,240}?<\/tr><\/thead>/) || [''])[0];
+    /* ⚠ 하드코딩(6)을 쓰지 않는다 — 열이 늘 때마다 조용히 빨개진다(2026-08-19 '규칙' 열 추가 때 실측).
+       검사 의미는 더 강해졌다: **머리 칸 수를 행 빌더의 실제 칸 수와 대조**한다. */
+    const prevBody = (wdH.match(/\(p\.plan \|\| \[\]\)\.map\(g =>[\s\S]{0,700}?\)\.join\(''\)/) || [''])[0];
     ok('미리보기 표 머리 칸 수 ≡ 행 칸 수(발생일 포함)',
-      (prevHead.match(/<th>/g) || []).length === 6
+      (prevHead.match(/<th>/g) || []).length === (prevBody.match(/<td/g) || []).length
       && /esc\(_ddDay\(g\.lastAt\)\)\}<\/td><\/tr>/.test(wdH));
     const scanHead = (wdH.match(/<th>작업<\/th>[\s\S]{0,240}?<\/tr><\/thead>/) || [''])[0];
     ok('일괄 점검 표 머리 칸 수 7(최근 발생 포함)', (scanHead.match(/<th>/g) || []).length === 7
