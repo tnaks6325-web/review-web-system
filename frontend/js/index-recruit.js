@@ -3553,19 +3553,42 @@ function _srcWords(sheetless) {
 /** 확정으로 안 잡힌 줄 목록 — "몇 행의 누구"인지 바로 짚어준다.
  *  ★ 캠페인 정원은 '위치'가 아니라 '숫자'(총원 − 확정)로 계산된다. 이 목록은 그 차이가
  *    시트의 어느 줄에서 비롯됐는지 찾아주는 것이지, 시스템이 그 줄을 비었다고 보는 게 아니다. */
-function _campUnmatchedRows(list, w) {
+function _campUnmatchedRows(list, w, counts, diff) {
   if (!Array.isArray(list) || !list.length) return "";
   w = w || _srcWords(false);
   const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const items = list.slice(0, 30).map(u =>
-    `<span style="display:inline-block;background:#fff;border:1px solid #FDE68A;border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
-    + `<b>${u.row != null ? u.row + "행" : "행?"}</b> ${esc(u.name) || "(이름 없음)"}`
-    + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
-    + `</span>`).join("");
+  /* ★★ 한 덩어리로 보여주지 않는다 — 종류마다 **할 일이 다르다**.
+       ㉮ 홀드 이력 있음(만료·취소·지각) = 만료·취소 목록에서 찾아 [수동확정]할 수 있는 유일한 갈래
+       ㉯ 홀드 없음 + 주문 있음 = 공고를 거치지 않은 정상 제출 → **조치 불필요**(만료·취소 목록에 없다)
+       ㉰ 홀드도 주문도 없음 = 직원이 직접 적은 줄인지 확인
+     종전엔 셋을 섞어 놓고 전부 "[수동확정]하세요"라고 안내해, 목록에 없는 건을 찾게 만들었다. */
+  const kindOf = u => (u.hasHold ? "hold" : (u.hasOrder ? "order" : "none"));
+  const TONE = { hold: ["#FFFBEB", "#FDE68A", "#92400E"], order: ["#F9FAFB", "#E5E7EB", "#6B7280"], none: ["#FEF2F2", "#FECACA", "#B91C1C"] };
+  const chip = u => {
+    const t = TONE[kindOf(u)] || TONE.hold;
+    return `<span style="display:inline-block;background:${t[0]};border:1px solid ${t[1]};color:${t[2]};border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
+      + `<b>${u.row != null ? u.row + "행" : "행?"}</b> ${esc(u.name) || "(이름 없음)"}`
+      + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
+      + `</span>`;
+  };
+  const items = list.slice(0, 30).map(chip).join("");
+  /* ★ 건수는 **서버가 준 값만** 쓴다(목록은 30건 상한이라 화면에서 세면 항상 30에서 멈춘다).
+     ★ 없으면(구버전 백엔드) 요약 줄 자체를 그리지 않는다 — 모르는 것을 0으로 꾸미지 않는다. */
+  const c = counts && typeof counts.total === "number" ? counts : null;
+  const line = (color, text) => `<div style="color:${color};font-size:.7rem">${text}</div>`;
+  const summary = !c ? "" : ""
+    + (c.hold > 0 ? line("#92400E", `· <b>${c.hold}건</b> — 참여 기록은 있는데 확정이 아닙니다(만료·취소·기구매). 만료·취소 목록에서 기구매(🛍) 건을 찾아 <b>[수동확정]</b>하세요.`) : "")
+    + (c.orderOnly > 0 ? line("#6B7280", `· <b>${c.orderOnly}건</b> — 공고를 거치지 않고 구매양식만 들어온 줄입니다(외부모집·직접 제출). <b>조치 불필요</b> — 만료·취소 목록에는 없습니다.`) : "")
+    + (c.neither > 0 ? line("#B91C1C", `· <b>${c.neither}건</b> — 참여 기록도 주문도 없습니다. 직원이 직접 입력한 줄인지 확인하세요.`) : "")
+    /* ★ 머리줄의 "차이"는 **줄 수 − 확정 수**라는 산수라 그대로 두고, 대조로 풀린 만큼을
+         여기서 밝힌다 — 두 숫자가 말없이 다르면 "왜 196인데 179만 나오나"가 된다. */
+    + (typeof diff === "number" && diff > c.total
+        ? line("#065F46", `· 나머지 <b>${diff - c.total}건</b>은 연락처가 달라도 <b>주문 기록·소유자 번호로 확정과 짝지어진</b> 줄입니다(타계정 참여·연락처 오타).`) : "");
   return `<div style="margin-top:5px">`
-    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 ${w.rows}</div>`
-    + items
-    + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">연락처(끝 8자리)로 대조합니다. 연락처가 비어 있는 행은 대조가 불가능해 항상 여기에 나옵니다.</div>`
+    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 ${w.rows}${c ? ` ${c.total}건` : ""}</div>`
+    + summary
+    + `<div style="margin-top:4px">${items}</div>`
+    + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">명의 연락처·소유자 연락처·주문 기록 세 가지로 대조합니다. 셋 다 짝이 없는 줄만 여기 나옵니다(연락처가 비어 있는 행은 대조가 불가능해 항상 나옵니다).</div>`
     + `</div>`;
 }
 
@@ -3585,8 +3608,8 @@ function _campSheetInfo(si) {
     parts.push(`<b>${w.roster}</b> ${si.rosterRows}행 · <b>확정</b> ${si.confirmed}건`
       + (diff > 0
         ? ` → <span style="color:#B45309;font-weight:800">차이 ${diff}건</span>`
-          + `<div style="color:#6B7280;font-size:.7rem">${w.src}에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
-          + _campUnmatchedRows(si.unmatched, w)
+          + `<div style="color:#6B7280;font-size:.7rem">${w.src}에는 자리가 있는데 확정으로 안 잡힌 건입니다. 아래에서 <b>종류별로</b> 할 일이 다릅니다.</div>`
+          + _campUnmatchedRows(si.unmatched, w, si.unmatchedCounts, diff)
         : diff < 0
           ? ` → <span style="color:#B45309;font-weight:800">확정이 ${-diff}건 더 많음</span>`
             + `<div style="color:#6B7280;font-size:.7rem">${w.behind}</div>`
