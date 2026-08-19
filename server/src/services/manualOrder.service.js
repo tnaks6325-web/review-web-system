@@ -147,6 +147,39 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
 }
 
 /**
+ * 오늘 남은 자리 — "일 정원(daily quota) 대비 몇 명 더 받을 수 있나".
+ *
+ * ★★ **판정 사본 금지** — 정원은 `computeCampaignState` 하나가 정한다(리뷰어 apply 게이트·카드
+ *    게이지·[📅 인원] 이 보는 그 값). 여기서 `daily_limit` 을 직접 세면 066 이월·095 날짜별 조절·
+ *    098 이월 보류·총량 clamp 를 모르는 두 번째 기준이 생겨 "화면은 15인데 서버는 20"으로 갈린다.
+ *
+ * ★ **모르면 막지 않는다(fail-soft)** — 조회 실패·판정 불가·무제한(quota<=0)은 `null` 을 돌려주고
+ *   호출부는 종전대로 통과시킨다. 외부모집은 이미 약속된 구매라, 우리 오류로 접수를 막는 쪽이 나쁘다.
+ *
+ * @returns {Promise<{remaining:number, quota:number, todayCount:number}|null>}
+ */
+async function dailyRemainingForCampaign(db, campaignId, now = new Date()) {
+  if (!campaignId) return null;
+  try {
+    const { rows } = await db.query('SELECT * FROM recruit_campaigns WHERE id = $1', [campaignId]);
+    if (!rows.length || rows[0].participation_mode !== true) return null;
+    const camp = rows[0];
+    const { fetchCampaignCounts, computeCampaignState } = require('./campaignState.service');
+    const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('./campaignSchedule.service');
+    const counts = await fetchCampaignCounts(db, [campaignId], now);
+    const sch = await deriveSchedules(db, tabsOfCampaigns([camp]), now);
+    const st = computeCampaignState(camp, counts.get(campaignId), now, scheduleFor(sch, camp));
+    const quota = Number(st.dailyQuota) || 0;
+    if (quota <= 0) return null;                      // 무제한·정원 개념 없음 = 판정하지 않는다
+    const todayCount = Number(st.todayCount) || 0;
+    return { remaining: Math.max(0, quota - todayCount), quota, todayCount };
+  } catch (e) {
+    logger.warn(`[manual-order] 일 정원 판정 실패(통과 처리) camp=${campaignId}: ${e.message}`);
+    return null;
+  }
+}
+
+/**
  * 참여형 캠페인 신청 행 생성 → 즉시 확정(submitted). 정원 차감의 유일한 수단
  * (정원 = campaign_applications.status='submitted' 행 수).
  * 잠금 계층 준수: recruit_campaigns FOR UPDATE → 신청 행.
@@ -224,6 +257,7 @@ async function confirmExternalApplication(client, {
  */
 async function submitExternalOrder({
   sheetId, tabName, gid, fields, campaignId, optionKey, adminName, allowOverCapacity = true, force = false,
+  allowOverDaily = false,
 }) {
   const warnings = [];
   const f = fields || {};
@@ -265,6 +299,24 @@ async function submitExternalOrder({
         return { ok: false, duplicate: true, error: `이 공고에 이미 확정된 참여(#${pre[0].id})가 있습니다` };
       }
     } catch (e) { warnings.push('참여 이력 확인 실패(제출은 계속): ' + e.message); }
+  }
+
+  // ⓪-3 일 정원(오늘 몫) 게이트 — **원장 기록 전에** 본다(⓪-2 와 같은 이유: 뒤에서 거절하면
+  //     시트 행만 생기고 정원은 안 깎이는 어긋난 상태가 남는다).
+  //   ★★ **막지 않는다 — 확인만 받는다**(사용자 확정 2026-08-19 "나"안): 외부모집은 **이미 구매가
+  //     끝난 건의 사후 등록**이라, 막으면 되돌릴 수 없는 구매가 시스템에 기록되지 않은 채 남는다
+  //     (초과를 막는 것보다 기록이 비는 쪽이 훨씬 나쁘다). 확인은 '허가'가 아니라 '고지'다. 대신 `allowOverDaily` 없이 오면 초과 사실과 숫자를
+  //     돌려주고, 담당자가 확인창에서 승인해 재전송하면 그대로 접수한다.
+  //   ★ 종전에는 총 정원(`recruit_total`)만 봤고 일 정원은 **아예 보지 않아**, 오늘 몫이 찬 뒤에도
+  //     아무 신호 없이 들어갔다(2026-08-19 실측: 정원 15인 두 공고에 각 +2, 확정 17).
+  if (campaignId && !allowOverDaily) {
+    const dq = await dailyRemainingForCampaign(pool, campaignId);
+    if (dq && dq.remaining <= 0) {
+      return {
+        ok: false, overDaily: true, quota: dq,
+        error: `오늘 모집인원(${dq.quota}명)이 이미 찼습니다 — 현재 ${dq.todayCount}명. 이미 구매가 끝난 건이므로 초과로 기록하려면 확인이 필요합니다`,
+      };
+    }
   }
 
   // ①-0 옵션 확정 — 화면 값 → 살아있는 홀드 → 공고에 옵션이 하나뿐이면 그것.
@@ -398,6 +450,7 @@ async function submitExternalOrder({
 
 module.exports = {
   submitExternalOrder,
+  dailyRemainingForCampaign,
   ensureExternalReviewer,
   confirmExternalApplication,
   todayKstDateStr,

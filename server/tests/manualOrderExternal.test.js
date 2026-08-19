@@ -655,6 +655,187 @@ console.log('\nI. 1단계 캡처 첨부');
   ok('I18 이미 붙은 캡처를 덮어쓰지 않는다', ROWS[0].capture.base64 === 'KEEP');
 }
 
+/* ══════════════════════════════════════════════════════════
+   J. 일 정원(오늘 몫) 확인 게이트 — 2026-08-19 사용자 확정 "나"안
+   ──────────────────────────────────────────────────────────
+   사고: 외부모집 수동제출이 **총 정원(recruit_total)만** 보고 일 정원은 아예 안 봐서,
+   정원 15인 공고 두 개에 각 +2 가 아무 신호 없이 들어갔다(운영 실측: 확정 17).
+   ★★ 막지 않는다 — 숫자를 보여주고 확인을 받는다. 확인하면 그대로 접수된다.
+   ══════════════════════════════════════════════════════════ */
+console.log('\nJ. 일 정원 확인 게이트');
+{
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realCounts = stateSvc.fetchCampaignCounts;
+  const realDerive = schedSvc.deriveSchedules;
+
+  // 정원 판정은 computeCampaignState 를 그대로 태운다 — 여기서는 그 입력만 스텁한다.
+  schedSvc.deriveSchedules = async () => new Map();
+  const setCounts = (todaySubmitted, todayActiveHolds) => {
+    stateSvc.fetchCampaignCounts = async (_db, ids) => new Map(ids.map(id => [id, {
+      activeHolds: todayActiveHolds, todayActiveHolds, submittedAll: todaySubmitted,
+      todaySubmitted, submittedBeforeToday: 0, carry: null, hold: null, plans: null,
+    }]));
+  };
+  const campRow = (over) => ({
+    id: 'c1', participation_mode: true, status: 'active', daily_limit: 15,
+    recruit_total: 0, window_start: null, window_end: null, start_date: null, ...over,
+  });
+  const dbWith = (row) => stubDb([[/FROM recruit_campaigns WHERE id/i, row ? [row] : []]]);
+
+  setCounts(10, 0);
+  const r1 = await svc.dailyRemainingForCampaign(dbWith(campRow()), 'c1');
+  ok('J1 남은 자리를 정원 판정(computeCampaignState)에서 그대로 읽는다',
+    r1 && r1.quota === 15 && r1.todayCount === 10 && r1.remaining === 5);
+
+  setCounts(12, 3);
+  const r2 = await svc.dailyRemainingForCampaign(dbWith(campRow()), 'c1');
+  ok('J2 ★ 진행 중 홀드도 자리를 차지한 것으로 센다', r2 && r2.remaining === 0);
+
+  setCounts(20, 0);
+  const r3 = await svc.dailyRemainingForCampaign(dbWith(campRow()), 'c1');
+  ok('J3 이미 초과면 남은 자리 0(음수로 새지 않는다)', r3 && r3.remaining === 0);
+
+  setCounts(0, 0);
+  ok('J4 참여형이 아니면 판정하지 않는다(레거시 무회귀)',
+    await svc.dailyRemainingForCampaign(dbWith(campRow({ participation_mode: false })), 'c1') === null);
+  ok('J5 공고를 못 찾으면 판정하지 않는다',
+    await svc.dailyRemainingForCampaign(dbWith(null), 'c1') === null);
+  ok('J6 campaignId 가 없으면 판정하지 않는다',
+    await svc.dailyRemainingForCampaign(dbWith(campRow()), '') === null);
+  ok('J7 ★ 일건수 0(무제한)은 판정하지 않는다',
+    await svc.dailyRemainingForCampaign(dbWith(campRow({ daily_limit: 0 })), 'c1') === null);
+
+  // ★ fail-soft — 조회가 터져도 null(통과). 외부모집은 약속된 구매라 우리 오류로 막지 않는다.
+  const boom = { query: async () => { throw new Error('DB down'); } };
+  ok('J8 ★ 조회 실패는 null = 통과(모르면 막지 않는다)',
+    await svc.dailyRemainingForCampaign(boom, 'c1') === null);
+
+  stateSvc.fetchCampaignCounts = realCounts;
+  schedSvc.deriveSchedules = realDerive;
+}
+{
+  // 게이트가 **원장 기록 전**에 걸리는지 = 주문만 접수되고 정원은 미반영인 어긋난 상태 금지.
+  // ★ 서비스가 모듈 스코프의 pool 을 직접 쓰므로 **pool 자체를 갈아끼운다** — 밖에서 export 를
+  //   감싸는 방식은 렉시컬 참조라 먹지 않는다(CS 뱃지 훅에서 겪은 그 함정).
+  const poolMod = require('../src/db/pool');
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realQuery = poolMod.query, realCounts = stateSvc.fetchCampaignCounts;
+  const realDerive = schedSvc.deriveSchedules;
+
+  poolMod.query = async (sql) => (/FROM recruit_campaigns WHERE id/i.test(String(sql))
+    ? { rows: [{ id: 'c1', participation_mode: true, status: 'active', daily_limit: 15, recruit_total: 0,
+                 window_start: null, window_end: null, start_date: null }] }
+    : { rows: [] });
+  schedSvc.deriveSchedules = async () => new Map();
+  stateSvc.fetchCampaignCounts = async (_db, ids) => new Map(ids.map(id => [id, {
+    activeHolds: 0, todayActiveHolds: 0, submittedAll: 15, todaySubmitted: 15,
+    submittedBeforeToday: 0, carry: null, hold: null, plans: null,
+  }]));
+  const fields = { recipient: '가나', phone: '010-1111-2222', address: 'a', bank: 'b', account: 'c', depositor: 'd' };
+  const args = { sheetId: 'S', tabName: 'T', gid: '', fields, campaignId: 'c1', adminName: 'A', force: true };
+
+  /* ★★ 원장 호출은 **스텁할 수 없다** — 서비스가 require 시점에 구조분해로 캡처하기 때문
+     (`const { createOrderLedgerEntry } = require(...)`). export 를 갈아끼워도 렉시컬 참조는
+     그대로다. 그래서 "스텁이 몇 번 불렸나" 대신 **실제로 거기까지 갔는지**로 고정한다:
+     이 테스트 환경엔 DB 가 없어 원장에 도달하면 반드시 그 안에서 예외가 난다. */
+  const run = async (over) => {
+    try { return { res: await svc.submitExternalOrder({ ...args, allowOverDaily: over }), atLedger: false }; }
+    catch (e) { return { res: null, atLedger: /orderLedger|createOrderLedgerEntry/.test(e.stack || '') }; }
+  };
+
+  const a = await run(false);
+  ok('J9 ★ 오늘 정원이 찼으면 확인 없이는 접수하지 않는다',
+    a.res && a.res.ok === false && a.res.overDaily === true);
+  ok('J10 ★★ 거절은 원장에 닿기 전에 일어난다(부분 처리 0)', a.atLedger === false);
+  ok('J11 거절 문구가 숫자를 말한다(무엇을 확인하는지)',
+    /15/.test(a.res.error) && !!a.res.quota && a.res.quota.quota === 15);
+
+  // 확인을 받으면 게이트를 지나 원장까지 간다 — 막는 기능이 아니다(사용자 확정).
+  const b = await run(true);
+  ok('J12 ★★ 확인하면 초과여도 원장까지 진행된다(외부모집 흐름을 죽이지 않는다)', b.atLedger === true);
+
+  poolMod.query = realQuery; stateSvc.fetchCampaignCounts = realCounts;
+  schedSvc.deriveSchedules = realDerive;
+}
+{
+  /* ★★ 정적 검사만으로는 "조건이 살아 있나"를 못 본다(변이시험이 `if (false)` 로 뚫었다).
+     → 라우트 핸들러를 **실제로 호출**해 쓰기 0건으로 되돌아오는지 확인한다. */
+  const poolMod = require('../src/db/pool');
+  const stateSvc = require('../src/services/campaignState.service');
+  const schedSvc = require('../src/services/campaignSchedule.service');
+  const realQuery = poolMod.query, realCounts = stateSvc.fetchCampaignCounts, realDerive = schedSvc.deriveSchedules;
+  let writes = 0;
+  poolMod.query = async (sql) => {
+    const q = String(sql);
+    if (!/^\s*SELECT/i.test(q)) writes++;
+    return /FROM recruit_campaigns WHERE id/i.test(q)
+      ? { rows: [{ id: 'c1', participation_mode: true, status: 'active', daily_limit: 15, recruit_total: 0,
+                   window_start: null, window_end: null, start_date: null }] }
+      : { rows: [] };
+  };
+  schedSvc.deriveSchedules = async () => new Map();
+  let todaySub = 14;   // 정원 15 → 남은 자리 1
+  stateSvc.fetchCampaignCounts = async (_db, ids) => new Map(ids.map(id => [id, {
+    activeHolds: 0, todayActiveHolds: 0, submittedAll: todaySub, todaySubmitted: todaySub,
+    submittedBeforeToday: 0, carry: null, hold: null, plans: null,
+  }]));
+
+  const router = require('../src/routes/manualOrder.routes');
+  const layer = router.stack.find(l => l.route && l.route.path === '/submit');
+  const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+  const f = { recipient: '가', phone: '010-1111-2222', address: 'a', bank: 'b', account: 'c', depositor: 'd' };
+  const call = async (body) => {
+    let out = null;
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(v) { out = v; return this; } };
+    await handler({ body, admin: { name: 'A' } }, res, (e) => { if (e) throw e; });
+    return out;
+  };
+
+  // 남은 자리 1(15-14)인데 3건 제출 → 확인 요구 + 쓰기 0건
+  const r = await call({ sheetId: 'S', tabName: 'T', campaignId: 'c1', items: [{ fields: f }, { fields: f }, { fields: f }] });
+  ok('J13 ★★ 남은 자리보다 많이 제출하면 확인을 요구한다', r && r.ok === false && r.needConfirm === 'over_daily');
+  ok('J14 ★★ 그때 쓰기는 0건이다(부분 처리 금지)', writes === 0);
+  ok('J15 초과 숫자를 그대로 알려준다', r.quota && r.quota.remaining === 1 && r.quota.want === 3 && r.quota.over === 2);
+
+  /* ★★ 확인한 뒤에는 **끝까지 통과해야 한다** — 라우트가 서비스에 확인값을 안 넘기면
+     건별 게이트가 다시 거절해 "확인했는데 계속 막히는" 막다른 길이 된다(변이시험이 잡은 구멍). */
+  //   ★ 자리가 **완전히 찬** 상태로 본다 — 남은 자리가 남아 있으면 건별 게이트가 애초에
+  //     발동하지 않아, 확인값이 서비스까지 갔는지 확인할 수 없다(변이시험으로 확인).
+  todaySub = 15;
+  const r3 = await call({ sheetId: 'S', tabName: 'T', campaignId: 'c1', allowOverDaily: true,
+                          items: [{ fields: f }, { fields: f }, { fields: f }] });
+  todaySub = 14;
+  ok('J16 ★★ 확인하면 건별 게이트도 통과한다(막다른 길 금지)',
+    r3 && r3.needConfirm !== 'over_daily'
+    && !(r3.results || []).some(x => /확인이 필요/.test(String(x.error || ''))));
+
+  // 남은 자리 안이면 확인 없이 종전대로 진행한다(무회귀)
+  const r2 = await call({ sheetId: 'S', tabName: 'T', campaignId: 'c1', items: [{ fields: f }] });
+  ok('J17 ★ 남은 자리 안이면 확인을 묻지 않는다(무회귀)', !r2 || r2.needConfirm !== 'over_daily');
+
+  poolMod.query = realQuery; stateSvc.fetchCampaignCounts = realCounts; schedSvc.deriveSchedules = realDerive;
+}
+{
+  const src = nc(R('src/routes/manualOrder.routes.js'));
+  ok('J18 라우트가 배치 시작 전에 1회 판정한다(부분 처리 방지)',
+    /dailyRemainingForCampaign\(pool, campaignId\)/.test(src) && /needConfirm: 'over_daily'/.test(src));
+  ok('J19 ★ 확인값은 프론트가 보낸 것만 인정(기본 false)',
+    /allowOverDaily = b\.allowOverDaily === true/.test(src));
+  ok('J20 ★ 확인 후 접수는 결과에 남는다(조용한 초과 금지)',
+    /초과해 접수했습니다/.test(src));
+  const svcSrc = nc(R('src/services/manualOrder.service.js'));
+  ok('J21 ★ 건별 게이트가 서버 최종 방어로 남는다(낡은 화면 우회 차단)',
+    /if \(campaignId && !allowOverDaily\)/.test(svcSrc));
+  ok('J22 ★★ 정원 판정 사본 금지 — daily_limit 을 직접 세지 않는다',
+    /computeCampaignState/.test(svcSrc) && !/daily_limit\s*-\s*/.test(svcSrc));
+  const fe = nc(F('js/manual-order.js'));
+  ok('J23 프론트가 확인창을 띄우고 allowOverDaily 로 재전송한다',
+    /needConfirm === 'over_daily'/.test(fe) && /post\(true\)/.test(fe));
+  ok('J24 ★ 취소하면 아무것도 보내지 않는다', /if \(!okGo\)/.test(fe));
+}
+
 console.log(`\n✅ manualOrderExternal 회귀가드 통과 — ${passed}건\n`);
 }
 

@@ -491,16 +491,41 @@
     const btn = document.getElementById('moSubmit');
     if (btn) { btn.disabled = true; btn.textContent = '제출 중…'; }
 
+    // ★ 오늘 정원 초과는 **막지 않고 확인만 받는다**(사용자 확정 2026-08-19). 서버가 배치를
+    //   시작하기 전에 판정해 `needConfirm`으로 되돌리므로, 이 시점까지 **쓰기는 0건**이다.
+    //   확인하면 `allowOverDaily`로 재전송한다.
+    const post = (allowOverDaily) => api('/api/manual-order/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',
+        campaignId: CTX.campaignId || null,
+        allowOverDaily: allowOverDaily === true,
+        items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '' })),
+      }),
+    });
+
     let out;
     try {
-      out = await api('/api/manual-order/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',
-          campaignId: CTX.campaignId || null,
-          items: targets.map(x => ({ fields: x.r.fields, optionKey: x.r.fields.optionKey || '' })),
-        }),
-      });
+      out = await post(false);
+      if (out && out.needConfirm === 'over_daily') {
+        const q = out.quota || {};
+        // ★ 외부모집은 **이미 구매가 끝난 건의 사후 등록**이다 — 취소해도 구매가 되돌아가지
+        //   않고 기록만 빠진다. 그래서 "진행할까요?"(취소가 안전해 보이는 질문)가 아니라
+        //   "초과로 기록됩니다"(고지) + 취소의 실제 의미를 문장으로 말한다(사용자 지적 2026-08-19).
+        const okGo = confirm(
+          `오늘 모집인원을 넘겨 기록됩니다.\n\n`
+          + `· 오늘 정원 ${q.quota}명 중 ${q.todayCount}명 접수됨 (남은 자리 ${q.remaining}명)\n`
+          + `· 지금 접수 ${q.want}건 → ${q.over}명 초과\n\n`
+          + `이미 구매가 끝난 건이라 접수를 미뤄도 구매는 취소되지 않습니다.\n`
+          + `[확인] 초과 상태로 그대로 기록합니다.\n`
+          + `[취소] 이 건은 시스템에 남지 않습니다 — 나중에 다시 접수해야 합니다.`);
+        if (!okGo) {
+          BUSY = false;
+          if (btn) { btn.disabled = false; btn.textContent = targets.length + '건 제출'; }
+          return;   // 서버는 아직 아무것도 쓰지 않았다
+        }
+        out = await post(true);
+      }
     } catch (e) { out = { ok: false, error: e.message }; }
 
     if (!out || !out.ok) {
