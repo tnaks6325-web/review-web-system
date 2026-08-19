@@ -12,11 +12,13 @@
  * ★★ 이 기능은 **되돌릴 수 없다**(사용자 확정: DB 행까지 실제 삭제). 그래서 방어를 셋 둔다.
  *   ① **미리보기 필수** — 무엇이 몇 건 지워지는지 먼저 보여주고 사람이 확인해야 실행된다
  *      (`confirm !== true` 면 서버가 거부 — 낡은 화면이 실행만 부르는 경로 차단).
- *   ② ★★★ **돈 기록이 걸린 작업은 확인해도 지우지 않는다(fail-closed · 완화 금지)** —
- *      입금 회차 항목·입금 원장·수기 입금 표기·미확인 이체 검토가 한 줄이라도 있으면 거부한다.
- *      그 줄을 지우면 **남은 줄이 미입금으로 보여 다음 회차에 다시 담기고 이중 송금**이 난다
- *      (129 "표에서만 빼기"가 존재하는 이유와 같은 자리). 고아 작업은 정의상 입금 0건이라
- *      막다른 길이 아니다.
+ *   ② **돈 기록은 기본 거부, 두 번째 확인으로만 통과**(사용자 확정 2026-08-19 — 종전의 절대 거부에서
+ *      완화) — 입금 회차 항목·입금 원장·수기 입금 표기·미확인 이체 검토가 한 줄이라도 있으면
+ *      기본 요청(`forcePayment` 없음)은 **쓰기 0건으로 거부**한다. 화면이 무엇이 걸렸는지 말하고
+ *      **별도 체크 + 별도 버튼**을 누른 요청만 그 기록까지 함께 지운다.
+ *      ★ 왜 한 단계를 남겼나: 지우면 그 리뷰어 줄이 **미입금으로 보여 다음 회차에 다시 담기고
+ *      이중 송금**이 날 수 있다(129 "표에서만 빼기"가 존재하는 이유). 막지는 않되, 실수로
+ *      눌리지는 않게 한다.
  *   ③ **표 분류는 전수 고정** — (sheet_id, tab_name) 을 가진 표는 전부 아래 두 목록 중
  *      하나에 있어야 한다(회귀가드가 마이그레이션을 읽어 대조). 새 표가 생겼는데 분류가 없으면
  *      테스트가 빨개진다 = "지워야 하는데 남는" 잔재도, "지우면 안 되는데 지워지는" 사고도 막는다.
@@ -80,7 +82,11 @@ const DELETE_TABLES = [
   'tab_configs',
 ];
 
-/* ── 돈 기록 — 한 줄이라도 있으면 **거부**한다(확인해도 뚫리지 않는다) ────────── */
+/* ── 돈 기록 — 기본은 거부, `forcePayment` 두 번째 확인일 때만 함께 삭제 ────────
+   ★ 삭제 순서가 계약이다: `payment_account_mismatch_reconciliations.batch_item_id` 가
+     `payment_batch_items` 를 **ON DELETE RESTRICT** 로 잡고 있어(119), 그 대조 이력을 먼저
+     지우지 않으면 회차 항목 삭제가 FK 로 튕긴다.
+   ★ 회차(`payment_batches`) 자체는 지우지 않는다 — 한 회차가 여러 작업에 걸쳐 있다. */
 const MONEY_TABLES = [
   { table: 'payment_batch_items', label: '입금 회차 항목' },
   { table: 'payment_records', label: '입금 원장' },
@@ -176,7 +182,7 @@ async function previewTaskDelete({ sheetId, tabName, pool } = {}) {
 /**
  * 실행 — 한 트랜잭션. 확인(`confirm===true`) 없이는 아무것도 지우지 않는다.
  */
-async function deleteTask({ sheetId, tabName, confirm, by = 'admin', pool } = {}) {
+async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by = 'admin', pool } = {}) {
   _args(sheetId, tabName);
   if (confirm !== true) return { ok: false, code: 'confirm_required', error: '삭제 확인이 필요합니다.' };
 
@@ -189,11 +195,11 @@ async function deleteTask({ sheetId, tabName, confirm, by = 'admin', pool } = {}
 
     // ★★ 돈 기록은 트랜잭션 안에서 다시 센다 — 미리보기 이후에 회차에 담겼을 수 있다(TOCTOU).
     const money = await _moneyRows((t, p) => client.query(t, p), sheetId, tabName);
-    if (money.length) {
+    if (money.length && forcePayment !== true) {
       await client.query('ROLLBACK');
       return {
         ok: false, code: 'payment_locked', money,
-        error: '이 작업에는 입금 기록이 걸려 있어 삭제할 수 없습니다(이중 송금 방지). 입금관리에서 확인해 주세요.',
+        error: '이 작업에는 입금 기록이 걸려 있습니다. 그대로 지우면 그 리뷰어가 미입금으로 보여 다음 회차에 다시 담길 수 있습니다 — 확인 후 [입금 기록까지 삭제]로 진행하세요.',
       };
     }
 
@@ -211,6 +217,24 @@ async function deleteTask({ sheetId, tabName, confirm, by = 'admin', pool } = {}
 
     const deleted = {};
     let totalRows = 0;
+
+    /* ★★ 두 번째 확인을 받은 경우에만 — 돈 기록도 함께 지운다(사용자 확정 2026-08-19).
+       ★ 순서 계약: 대조 이력(119, batch_item_id 가 RESTRICT)을 **먼저** 지워야 회차 항목이 지워진다.
+       ★ 회차(`payment_batches`) 자체는 남긴다 — 한 회차가 여러 작업에 걸쳐 있어 지우면 남의 작업의
+         입금 기록까지 사라진다(폭발반경 차단). */
+    if (money.length && forcePayment === true) {
+      const rec = await client.query(
+        `DELETE FROM payment_account_mismatch_reconciliations r
+          WHERE r.batch_item_id IN (SELECT id FROM payment_batch_items
+                                     WHERE sheet_id=$1 AND tab_name=$2)`, [sheetId, tabName]);
+      if (rec.rowCount) { deleted.payment_account_mismatch_reconciliations = rec.rowCount; totalRows += rec.rowCount; }
+      for (const m of MONEY_TABLES) {
+        const r = await client.query(`DELETE FROM ${m.table} WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+        if (r && r.rowCount) { deleted[m.table] = r.rowCount; totalRows += r.rowCount; }
+      }
+      logger.warn(`[workTabDelete] "${tabName}" (${sheetId}) — 입금 기록까지 삭제(확인: ${by}): ${money.map(x => `${x.label} ${x.count}`).join(' · ')}`);
+    }
+
     for (const t of DELETE_TABLES) {
       const r = await client.query(`DELETE FROM ${t} WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
       if (r && r.rowCount) { deleted[t] = r.rowCount; totalRows += r.rowCount; }
@@ -246,6 +270,7 @@ async function deleteTask({ sheetId, tabName, confirm, by = 'admin', pool } = {}
     logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 보관 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`);
     return {
       ok: true, sheetId, tabName, deleted, totalRows,
+      paymentDeleted: (money.length && forcePayment === true) ? money : [],
       workOrdersUnlinked: wo.rowCount || 0, campaignsArchived: rc.rowCount || 0,
       ownershipRemoved: ac.rowCount || 0, sheetRowRemoved: cam.rowCount || 0,
     };
