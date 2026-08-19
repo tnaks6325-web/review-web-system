@@ -207,6 +207,22 @@ function makeStub({ dupRow = null, openSlot = { id: 'p9', seq: 42, row_json: {} 
   ok('정리 라우트는 adminOrMaster', /'\/worktable\/dedupe-rows', authMiddleware, adminOrMasterMiddleware/.test(tbSrc));
   ok('라우트도 dryRun 기본', /dedupe-rows[\s\S]{0,400}dryRun: b\.dryRun !== false/.test(tbSrc));
 
+  console.log('\n[E] 화면 창구 — 미리보기 → 확인 → 실행');
+  const wd = fs.readFileSync(path.join(__dirname, '../../frontend/workdesk.html'), 'utf8');
+  ok('[⋯] 도구 메뉴에 중복 정리 버튼', /onclick="openDedupeModal\(\)"/.test(wd));
+  ok('게이트는 줄 정리와 같다(무시트 + master/admin)', /function _ddCan\(\)\{ return _wrCanRetire\(\); \}/.test(wd));
+  ok('미리보기는 dryRun:true', /ddPreview[\s\S]{0,400}dryRun: true/.test(wd));
+  ok('실행은 확인창을 거친다', /async function ddRun[\s\S]{0,600}confirm\(/.test(wd));
+  ok('미리보기 없이는 실행 버튼이 잠긴다', /go\.disabled = !\(p && p\.removeRows > 0\)/.test(wd));
+  ok('보류 사유를 화면이 그대로 말한다(조용한 누락 금지)', /g\.detail \|\| g\.reason/.test(wd));
+  ok('오버레이는 body 직속', /appendChild\(ov\);\s*\/\/ ★ body 직속/.test(wd.slice(wd.indexOf('function openDedupeModal'))));
+  ok('Esc 리스너는 최상위 1회', /window\._ddKeyBound/.test(wd));
+  {
+    const blk = wd.slice(wd.indexOf('function _ddRender'), wd.indexOf('async function ddPreview'));
+    ok('서버발 문자열은 전부 escape 한다(onclick 보간 0)',
+      !/\$\{(?!esc\()[^}]*(name|tabName|detail|reason)/.test(blk) && !/onclick="[^"]*\$\{(?!esc\()/.test(blk));
+  }
+
   console.log(`\n총 ${pass}개 통과`);
   process.exit(0);
 })();

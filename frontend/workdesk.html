@@ -3339,6 +3339,86 @@ async function wrRun(){
     if (idx >= 0) selTab(idx);
   } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
 }
+/* ── ♻ 중복 줄 정리 (무시트 작업 전용) ────────────────────────────────────────
+   왜: 2026-08-19 무시트 구매양식이 `failed` 로 강등돼 리뷰어 재제출을 유도했고, 그 중복이
+   부팅 복구 잡과 겹쳐 같은 구매가 여러 줄로 쌓였다(참여자 870/800 · 901/900).
+   ★ 판정·대상 선정은 **전부 서버**(주문번호+연락처). 화면은 미리보기 결과를 그대로 그린다.
+   ★ 미리보기 → 확인창 → 실행 2단계. 보류 그룹은 **사유를 그대로** 보여준다(조용한 누락 금지).
+   ★ 입금 회차에 담긴 줄이 섞인 그룹은 서버가 손대지 않는다 — 화면이 그 사실을 문장으로 말한다. */
+let _DD = null;
+function _ddCan(){ return _wrCanRetire(); }   // 무시트 + master/admin — 줄 정리와 같은 게이트
+function closeDedupeModal(){ const o = document.getElementById('ddOv'); if (o) o.remove(); _DD = null; }
+if (!window._ddKeyBound) {
+  window._ddKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('ddOv')) closeDedupeModal(); });
+}
+function openDedupeModal(){
+  if (!_ddCan()) return;
+  const t = STATE.cur;
+  _DD = { sheetId: t.sheetId, tabName: t.tabName, prev: null, err: '', busy: false };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'ddOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">♻ 중복 줄 정리</div>
+    <div class="wbl-db" id="ddBody"></div>
+    <div class="wbl-df"><button class="wbl-b" onclick="closeDedupeModal()">닫기</button>
+      <button class="wbl-b" id="ddPrev" onclick="ddPreview()">미리보기</button>
+      <button class="wbl-b dark" id="ddGo" disabled onclick="ddRun()">♻ 정리 실행</button></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
+  _ddRender();
+}
+function _ddRender(){
+  const b = document.getElementById('ddBody'); if (!b || !_DD) return;
+  const p = _DD.prev;
+  const rows = p ? (p.plan || []).map(g =>
+    `<tr><td>${esc(g.name || '')}</td><td class="num">${esc(String(g.phone8 || ''))}</td>
+      <td class="num">${esc(String(g.keepSeq))}</td>
+      <td class="num">${esc((g.removeSeqs || []).join(', '))}</td></tr>`).join('') : '';
+  const skips = p ? (p.skipped || []).map(g =>
+    `<li><b>${esc(g.name || '')}</b> · 줄 ${esc((g.seqs || []).join(', '))} — ${esc(g.detail || g.reason || '')}</li>`).join('') : '';
+  b.innerHTML = `<b>${esc(_DD.tabName)}</b>
+    <div class="wbl-facts">같은 구매(<b>주문번호 + 연락처</b>)가 여러 줄인 경우 <b>가장 이른 줄만 남기고</b>
+      나머지를 내립니다. 구글시트는 건드리지 않고, 내려간 줄은 되돌릴 수 있습니다.</div>
+    ${_DD.err ? `<div class="wbl-facts" style="color:#b91c1c">${esc(_DD.err)}</div>` : ''}
+    ${!p ? `<div class="wbl-facts">[미리보기]를 눌러 무엇이 정리되고 무엇이 보류되는지 먼저 확인하세요.</div>` : `
+      <div class="wbl-facts">표 ${esc(String(p.boardRows))}줄 중 <b>정리 대상 ${esc(String(p.removeRows))}줄</b>
+        (${esc(String(p.groups))}건의 구매) · <b>보류 ${esc(String(p.skippedGroups))}건</b></div>
+      ${p.removeRows ? `<table class="wbl-t"><thead><tr><th>참여자</th><th>연락처 뒤4</th><th>남길 줄</th><th>내릴 줄</th></tr></thead>
+        <tbody>${rows}</tbody></table>` : `<div class="wbl-facts">정리할 중복이 없습니다.</div>`}
+      ${p.skippedGroups ? `<div class="wbl-facts"><b>⚠ 사람이 판단해야 하는 건</b> — 시스템이 건드리지 않았습니다.
+        <ul style="margin:6px 0 0 16px">${skips}</ul></div>` : ''}`}`;
+  const go = document.getElementById('ddGo'); if (go) go.disabled = !(p && p.removeRows > 0) || !!_DD.busy;
+  const pv = document.getElementById('ddPrev'); if (pv) pv.disabled = !!_DD.busy;
+}
+async function ddPreview(){
+  if (!_DD || _DD.busy) return;
+  _DD.busy = true; _DD.err = ''; _ddRender();
+  try {
+    const j = await api('/api/trackb/worktable/dedupe-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: _DD.sheetId, tabName: _DD.tabName, dryRun: true }) });
+    if (!j || j.ok === false) { _DD.prev = null; _DD.err = (j && (j.error || j.message)) || '미리보기 실패'; }
+    else _DD.prev = j;
+  } catch (e) { _DD.prev = null; _DD.err = '미리보기 실패: ' + (e.message || ''); }
+  _DD.busy = false; _ddRender();
+}
+async function ddRun(){
+  if (!_DD || _DD.busy || !_DD.prev || !_DD.prev.removeRows) return;
+  const p = _DD.prev;
+  if (!confirm(`「${_DD.tabName}」 표에서 중복 ${p.removeRows}줄을 내립니다.\n\n` +
+    `같은 구매의 가장 이른 줄은 남고, 내려간 줄의 중복 주문은 취소로 표시됩니다.\n` +
+    (p.skippedGroups ? `보류 ${p.skippedGroups}건(입금 회차에 담김 등)은 손대지 않습니다.\n` : '') +
+    `구글시트는 건드리지 않으며 되돌릴 수 있습니다.\n\n계속할까요?`)) return;
+  _DD.busy = true; _ddRender();
+  try {
+    const j = await api('/api/trackb/worktable/dedupe-rows', { method: 'POST', body: JSON.stringify({
+      sheetId: _DD.sheetId, tabName: _DD.tabName, dryRun: false }) });
+    if (!j || j.ok === false) { _DD.busy = false; _DD.err = (j && (j.error || j.message)) || '정리 실패'; _ddRender(); return; }
+    const idx = STATE.tabs.indexOf(STATE.cur);
+    closeDedupeModal();
+    toast(`중복 ${j.removed}줄 정리 · 주문 ${j.canceledOrders}건 취소` +
+      (j.indexRows != null ? ` · 검색 명단 ${j.indexRows}명` : ''));
+    if (j.ledgerError) alert('줄은 내려갔지만 검색 명단 재생성에 실패했습니다: ' + j.ledgerError + '\n잠시 후 다시 실행해 주세요.');
+    if (idx >= 0) selTab(idx);
+  } catch (e) { _DD.busy = false; _DD.err = '정리 실패: ' + (e.message || ''); _ddRender(); }
+}
 /* ── ＋ 블로거 추가 (블로그체험단 M5-2) ────────────────────────────────────────
    왜: 블로그체험단은 공고 밖(카톡·직접 섭외)으로 데려오는 블로거가 있는데, 그 사람은
    홀드를 잡지 않으므로 명단에 들어올 길이 없었다. 표를 눈으로 채워도 **연락처가 없으면**
@@ -4301,7 +4381,7 @@ function renderWorkdesk(wd){
     <span class="sp" style="flex:1"></span>
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
+    ${(isMaster||_wrCanRetire()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
     ${STATE.role==='advertiser'
       ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>${renderWorkOrderSection(wd)}<div id="gridhost">${tableSection}</div>`}`;
