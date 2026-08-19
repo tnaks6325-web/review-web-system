@@ -3483,7 +3483,8 @@ function _rnRender(){
       <button class="wbl-b" id="rnPrev" onclick="rnPreview()">미리보기</button>
       <button class="wbl-b dark" id="rnGo" disabled onclick="rnRun()">🔢 번호 정리 실행</button>`;
   b.innerHTML = tabs + `<b>${esc(_RN.tabName)}</b>
-    <div class="wbl-facts">표의 <b>번호</b>를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매깁니다.<br>
+    <div class="wbl-facts">표의 <b>번호</b>를 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매깁니다.
+      주문이 들어올 때와 <b>5분 주기로 자동</b> 정리되므로, 이 버튼은 지금 바로 돌리고 싶을 때만 쓰면 됩니다.<br>
       구매일자를 읽을 수 없는 줄은 맨 아래로 갑니다. 담당자·줄 내용·구글시트·주문 기록·리뷰·입금 기록은 건드리지 않습니다.</div>
     ${p ? `<div class="wbl-facts">표 <b>${p.total}줄</b> 중 바뀌는 줄 <b>${p.changed}줄</b></div>
       ${(p.sample && p.sample.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>지금 번호</th><th>바뀔 번호</th></tr></thead><tbody>
@@ -3503,6 +3504,7 @@ function _rnRenderAll(b, f, tabs){
   b.innerHTML = tabs + `
     <div class="wbl-facts">무시트 작업 전체에서 <b>번호가 비어 있는 줄</b>을 셉니다.
       정리하면 그 작업의 번호가 <b>구매일자 → 주문 제출 시각</b> 순으로 다시 매겨집니다.<br>
+      <b>5분마다 자동으로 정리됩니다</b> — 아래 버튼은 기다리지 않고 지금 바로 돌리는 용도입니다.<br>
       <span style="color:var(--faint,#94a3b8)">※ 번호가 이미 다 차 있고 순서만 어긋난 작업은 여기 숫자로는 드러나지 않습니다 — 그 작업을 열어 [이 작업] 미리보기로 확인하세요.</span></div>
     ${s ? `<div class="wbl-facts">작업 <b>${s.tabs}개</b> 중 정리 대상 <b>${_rnNeed().length}개</b> · 번호 빈 줄 <b>${s.blankNumberRows}줄</b>
         ${s.truncated ? ' <span style="color:var(--danger,#c22f2f)">(목록이 잘렸습니다 — 정리 후 다시 조회하세요)</span>' : ''}</div>
