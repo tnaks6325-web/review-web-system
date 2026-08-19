@@ -18,6 +18,9 @@
  * ★ 읽기 전용 — 쓰기 쿼리 0 · 구글 시트/Drive API 호출 0(전부 DB 조회).
  */
 const { REGISTERED_SHEET_IDS_SQL, fullySheetlessSheetIds } = require('../utils/sheetlessScope');
+/* ★ 시트 주소 조립은 `payment.service.tabSheetUrl` 단일 출처 — 가상 시트ID(`wt_`)면 빈 값이다
+   (빈 링크 > 죽은 링크, 레포 규율). 화면이 sheetId 로 직접 조립하면 그 판정이 사라진다. */
+const { tabSheetUrl } = require('./payment.service');
 
 /* ★★ `db/pool` 은 **풀 자체를 export** 한다(`module.exports = pool`) — `{ getPool }` 로 구조분해하면
    undefined 라 호출 순간 TypeError → 마스킹된 500("서버 오류가 발생했습니다") 이 된다.
@@ -116,6 +119,7 @@ async function readScope({ limit = LIST_CAP } = {}) {
         sheetlessTabs: tc ? tc.sheetlessTabs : 0,
         liveSheetTabs: tc ? tc.liveSheetTabs : 0,
         closedSheetTabs: tc ? tc.closedSheetTabs : 0,
+        sheetUrl: tabSheetUrl({ sheetId }),
         liveTabNames: nameMap.get(sheetId) || [],
         pendingOrders: pending,
         mirroredAt: mirMap.get(sheetId) || null,

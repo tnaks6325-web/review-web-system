@@ -94,6 +94,7 @@ const FIXTURE = {
   //  S1: 시트 기반 활성 탭 있음 / S2: 마감 탭만 / S3: campaigns 만(아카이브로 tab_configs 삭제) / S4: 전부 무시트(제외)
   //  ★ 입력 순서를 일부러 뒤집어 둔다 — 같은 순서면 '정렬을 아예 안 해도' 통과한다(변이시험 실측)
   sheets: [{ sheet_id: 'S3' }, { sheet_id: 'S2' }, { sheet_id: 'S1' }, { sheet_id: 'S4' }],
+  // (가상 시트ID 케이스는 6c 에서 따로 본다)
   fully: [{ sheet_id: 'S4' }],
   tc: [
     { sheetId: 'S1', tabs: 3, sheetlessTabs: 2, liveSheetTabs: 1, closedSheetTabs: 0 },
@@ -178,6 +179,21 @@ let R = null;
     const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _ptBox'));
     assert.ok(!/onclick="[^"]*\$\{(?!esc)/.test(blk.replace(/onclick="_rs[A-Za-z]*\(\)"/g, '')),
       '★ onclick 에 외부 문자열이 들어간다');
+  });
+
+  console.log('\n[5.5] 시트 주소');
+  t('5e ★ 서버가 시트 주소를 준다(가상 시트ID 는 빈 값 — 죽은 링크 금지)', () => {
+    const s1 = R.items.find(i => i.sheetId === 'S1');
+    assert.ok(/^https:\/\/docs\.google\.com\/spreadsheets\/d\/S1\/edit$/.test(s1.sheetUrl || ''),
+      '실제 시트에 주소가 없다: ' + s1.sheetUrl);
+    assert.ok(/tabSheetUrl/.test(svcSrc) && !/docs\.google\.com/.test(svcSrc),
+      '★ 주소 조립 사본이 생겼다(가상 시트ID 판정이 갈린다)');
+  });
+  t('5f ★ 화면은 서버가 준 주소만 쓴다(sheetId 로 조립하지 않는다)', () => {
+    const blk = FE.slice(FE.indexOf('function _rsRender'), FE.indexOf('function _ptBox'));
+    assert.ok(/it\.sheetUrl/.test(blk), '서버 주소를 안 쓴다');
+    assert.ok(!/spreadsheets\/d\/\$\{/.test(blk), '★ 화면이 주소를 조립한다(가상 시트에 죽은 링크가 생긴다)');
+    assert.ok(/rel="noopener"/.test(blk), 'noopener 가 없다');
   });
 
   console.log('\n[6] 렌더러 실행 — 가짜 DOM 위에서');
