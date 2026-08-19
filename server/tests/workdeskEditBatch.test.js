@@ -263,12 +263,46 @@ const mk = (n, field) => Array.from({ length: n }, (_, i) => ({ rowId: 'r' + i, 
     const all = FE.slice(i);
     assert.ok(/reasons\[w\]=\(reasons\[w\]\|\|0\)\+1/.test(all.replace(/\s+/g, '')), '사유를 건수로 집계');
   });
-  t('7g: 묶음을 나눠 순차로 보낸다(한 요청이 길어져 끊기지 않게)', () => {
-    const i = FE.indexOf('function _pasteCommitBatch');
-    const body = FE.slice(i, FE.indexOf('\nfunction _pasteApplyResults'));
-    assert.ok(/_PASTE_CHUNK/.test(body), '묶음 크기 사용');
-    assert.ok(/sendChunk\(from\s*\+\s*_PASTE_CHUNK\)/.test(body), '다음 묶음을 이어서(순차)');
-    assert.ok(/return api\(/.test(body), '앞 묶음이 끝난 뒤 다음 묶음 — 동시에 쏘지 않는다');
+  t('7g: 묶음을 나눠 순차로 보낸다 — 실제 실행으로 요청 수와 크기를 센다', () => {
+    // ★ 정적 검사만 하면 slice 의 상한을 지워도 통과한다(변이시험 실측). 돌려서 센다.
+    const vm = require('vm');
+    const grab = (name) => {
+      const i = FE.indexOf('function ' + name + '(');
+      assert.ok(i > 0, name + ' 정의');
+      let d = 0, started = false;
+      for (let k = i; k < FE.length; k++) {
+        if (FE[k] === '{') { d++; started = true; }
+        else if (FE[k] === '}') { d--; if (started && d === 0) return FE.slice(i, k + 1); }
+      }
+      throw new Error(name + ' 본문 경계');
+    };
+    const sent = [], toasts = [];
+    const syncThen = v => ({ then(f) { const r = f ? f(v) : v; return (r && typeof r.then === 'function') ? r : syncThen(r); }, catch() { return this; } });
+    const sandbox = {
+      STATE: { cur: { sheetId: 's', tabName: 'T' } },
+      toast: m => toasts.push(String(m)),
+      _PASTE_CHUNK: 50,
+      Promise: { resolve: v => syncThen(v) },
+      _applyCellLocal: () => ({ had: false, prev: undefined, rollback() {} }),
+      _recordCellUndo: () => {}, _finishCellUndoGroup: () => {}, _wtNotice: () => {},
+      reloadWorkdesk: () => {}, setTimeout: () => 0, console,
+      api: (url, opt) => {
+        const body = JSON.parse(opt.body);
+        sent.push(body.edits.length);
+        return syncThen({ ok: true, total: body.edits.length, succeeded: body.edits.length, failed: 0,
+                          results: body.edits.map((e, k) => ({ index: k, rowId: e.rowId, field: e.field, ok: true })) });
+      },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(grab('_pasteCommitBatch'), sandbox);
+    vm.runInContext(grab('_pasteApplyResults'), sandbox);
+    sandbox.jobs = Array.from({ length: 120 }, (_, k) => ({ rowId: 'r' + k, field: 'col:비고', val: 'v' + k, td: null }));
+    vm.runInContext('_pasteCommitBatch(jobs, {kind:"paste",entries:[],pending:0}, 0)', sandbox);
+    assert.equal(sent.length, 3, '120칸 = 50+50+20 → 요청 3회 (받음 ' + sent.length + ')');
+    assert.deepEqual(sent, [50, 50, 20], '묶음 크기 (받음 ' + JSON.stringify(sent) + ')');
+    assert.ok(sent.every(n => n <= sandbox._PASTE_CHUNK), '어떤 요청도 묶음 상한을 넘지 않는다');
+    assert.ok(toasts.some(x => /120개 칸 붙여넣음/.test(x)), '완료를 말한다 — ' + toasts.join('|'));
+    assert.ok(toasts.some(x => /50 \/ 120/.test(x)), '진행을 말한다 — ' + toasts.join('|'));
   });
   t('7h: 중간에 끊겨도 이미 저장된 앞 묶음은 되돌리지 않는다(화면만 지우면 더 어긋난다)', () => {
     const i = FE.indexOf('function _pasteCommitBatch');
