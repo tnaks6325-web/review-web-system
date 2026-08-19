@@ -1257,6 +1257,18 @@ router.post('/worktable/renumber', authMiddleware, internalMiddleware, async (re
     next(err);
   }
 });
+/* 전체 조회 — 어느 작업에 번호·담당자 빈칸이 있는지(읽기 전용·한 쿼리 집계). */
+router.get('/worktable/renumber-scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await require('../services/rowNumbering.service').scanNumbering({ limit: req.query.limit });
+    res.json(out);
+  } catch (err) {
+    if (err && (err.code === '42P01' || err.code === '42703')) {
+      return res.status(200).json({ ok: false, code: 'not_ready', error: '아직 준비되지 않았습니다(배포 반영 대기).' });
+    }
+    next(err);
+  }
+});
 /* 소급 정리 — 무시트 작업 전체. 되돌리기 어려운 광범위 조작이라 adminOrMaster. */
 router.post('/worktable/renumber-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

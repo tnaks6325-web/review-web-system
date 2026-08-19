@@ -20,14 +20,20 @@
  *   `utils/koreanDate.parseDateColumn` 으로 미리 해서 넘긴다(파서 사본 금지).
  */
 
+/* ★★ 칸 이름 후보는 **목록이 원본**이고 정규식은 거기서 만든다 —
+     전체 작업 스캔(SQL)이 같은 목록을 파라미터로 받아 쓰기 때문이다.
+     정규식을 따로 적어 두면 "화면 목록엔 뜨는데 정리는 안 되는" 칸이 생긴다. */
 /** `번호` 계열 칸 — `trackB.service._displayNumber` 가 쓰던 규칙을 여기로 승격(사본 금지). */
-const NUMBER_KEY_RE = /^(번호|no|no\.|#|순번)$/i;
-
+const NUMBER_KEYS = ['번호', 'no', 'no.', '#', '순번'];
 /**
  * `담당자` 계열 칸.
  * ★ `담당AE` 는 제외한다 — 그건 영업 담당자(실명)라 작업 담당자 닉네임(만두/망고)과 다른 칸이다.
  */
-const MANAGER_KEY_RE = /^(담당|담당자|작업담당|작업담당자)$/;
+const MANAGER_KEYS = ['담당', '담당자', '작업담당', '작업담당자'];
+
+const _esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const NUMBER_KEY_RE = new RegExp('^(' + NUMBER_KEYS.map(_esc).join('|') + ')$', 'i');
+const MANAGER_KEY_RE = new RegExp('^(' + MANAGER_KEYS.map(_esc).join('|') + ')$', 'i');
 
 function _keys(src) {
   if (Array.isArray(src)) return src;
@@ -117,7 +123,7 @@ function displaySortKey(row, numberKey) {
 }
 
 module.exports = {
-  NUMBER_KEY_RE, MANAGER_KEY_RE,
+  NUMBER_KEYS, MANAGER_KEYS, NUMBER_KEY_RE, MANAGER_KEY_RE,
   numberColumnKey, managerColumnKey,
   orderRowsForNumbering, computeRenumberPlan, displaySortKey,
 };
