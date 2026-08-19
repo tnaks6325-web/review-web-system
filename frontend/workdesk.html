@@ -7251,6 +7251,9 @@ function _cellUnderPoint(x,y){
   for(const el of stack){ const td=el&&el.closest?el.closest('#gbody td'):null; if(td) return td; }
   return null;
 }
+// ★ 저장은 이 크기로 나눠 보낸다 — 한 요청이 길어지면 게이트웨이가 끊어
+//   "저장은 됐는데 결과를 모르는" 상태가 된다(테섭 실측 502). 묶음당 왕복 1회.
+const _PASTE_CHUNK=50;
 function _ensureCellRangeUI(){
   if(STATE._gColorInit) return; STATE._gColorInit=true;
   if(!$('#gcellmenu')){ const p=document.createElement('div'); p.className='gcellmenu'; p.id='gcellmenu'; document.body.appendChild(p); }
@@ -7548,28 +7551,38 @@ function _pasteCommitBatch(jobs, undoGroup, locked){
   if(!staged.length){ _finishCellUndoGroup(undoGroup); return; }
   undoGroup.pending+=staged.length;
   toast(staged.length+'개 칸 저장 중…'+(locked?(' · 잠긴 칸 '+locked+'개 건너뜀'):''));
-  const edits=staged.map(x=>({rowId:x.job.rowId, field:x.job.field, value:x.job.val}));
-  api('/api/trackb/workdesk/edit-batch',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,edits:edits})})
-    .then(resp=>{
-      undoGroup.pending=Math.max(0,undoGroup.pending-staged.length);
-      if(!resp||!resp.ok||!Array.isArray(resp.results)){
-        staged.forEach(x=>x.st.rollback()); _finishCellUndoGroup(undoGroup);
-        toast(resp&&resp.error?('붙여넣기 거부: '+resp.error):'붙여넣기 실패'); return;
-      }
-      let okN=0, noticed=false; const reasons={};
-      resp.results.forEach((r,i)=>{
-        const x=staged[i]; if(!x) return;
-        if(r&&r.ok){
-          okN++;
-          if(!noticed){ _wtNotice(r); noticed=true; }
-          _recordCellUndo({rowId:x.job.rowId, field:x.job.field, value:x.job.val, had:x.st.had, prev:x.st.prev, td:x.job.td}, undoGroup);
-          if(x.job.td&&x.job.td.classList){ const td=x.job.td; td.classList.add('cellsaved'); setTimeout(function(){ td.classList.remove('cellsaved'); },600); }
-        } else {
-          x.st.rollback();
-          const why=(r&&r.error)||'실패'; reasons[why]=(reasons[why]||0)+1;
+  /* ★ 한 요청이 길어지지 않게 나눠 보낸다 — DB 왕복이 느린 배포에서 500칸을 한 요청에 담으면
+     게이트웨이가 끊어(실측 502) **저장은 됐는데 결과를 모르는** 최악의 상태가 된다.
+     칸당 왕복(옛 경로)이 아니라 묶음당 왕복이라 리미터(분당 120)에는 여유가 크다. */
+  let done=0, okN=0, noticed=false; const reasons={}; let aborted=false;
+  const sendChunk=(from)=>{
+    if(aborted) return Promise.resolve();
+    const part=staged.slice(from, from+_PASTE_CHUNK);
+    if(!part.length) return Promise.resolve();
+    const edits=part.map(x=>({rowId:x.job.rowId, field:x.job.field, value:x.job.val}));
+    return api('/api/trackb/workdesk/edit-batch',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,edits:edits})})
+      .then(resp=>{
+        if(!resp||!resp.ok||!Array.isArray(resp.results)){
+          aborted=true;
+          part.forEach(x=>x.st.rollback());
+          toast(resp&&resp.error?('붙여넣기 거부: '+resp.error):'붙여넣기 실패');
+          return;
         }
+        _pasteApplyResults(part, resp.results, undoGroup, s=>{ okN+=s.ok; s.reasons.forEach(w=>{ reasons[w]=(reasons[w]||0)+1; }); if(!noticed&&s.notice){ _wtNotice(s.notice); noticed=true; } });
+        done+=part.length;
+        if(done<staged.length) toast(done+' / '+staged.length+'칸 저장 중…');
+        return sendChunk(from+_PASTE_CHUNK);
       });
+  };
+  sendChunk(0)
+    .then(()=>{
+      undoGroup.pending=Math.max(0,undoGroup.pending-staged.length);
       _finishCellUndoGroup(undoGroup);
+      if(aborted){
+        // 이미 저장된 앞 묶음은 되돌리지 않는다 — 서버에 남은 값을 화면에서만 지우면 더 어긋난다
+        if(okN) toast(okN+'개까지 저장됨 · 나머지는 중단되었습니다');
+        return;
+      }
       const failN=staged.length-okN;
       if(!failN){ toast(okN+'개 칸 붙여넣음'); return; }
       const top=Object.keys(reasons).sort(function(a,b){ return reasons[b]-reasons[a]; })[0];
@@ -7578,9 +7591,26 @@ function _pasteCommitBatch(jobs, undoGroup, locked){
     })
     .catch(()=>{
       undoGroup.pending=Math.max(0,undoGroup.pending-staged.length);
-      staged.forEach(x=>x.st.rollback()); _finishCellUndoGroup(undoGroup);
-      toast('붙여넣기 실패 — 네트워크');
+      _finishCellUndoGroup(undoGroup);
+      toast(okN?(okN+'개까지 저장됨 · 네트워크 오류로 중단'):'붙여넣기 실패 — 네트워크');
     });
+}
+/* 묶음 응답 반영 — 성공한 칸만 확정하고 실패한 칸만 되돌린다(단건과 같은 규칙). */
+function _pasteApplyResults(part, results, undoGroup, report){
+  let ok=0, notice=null; const reasons=[];
+  results.forEach((r,i)=>{
+    const x=part[i]; if(!x) return;
+    if(r&&r.ok){
+      ok++;
+      if(!notice) notice=r;
+      _recordCellUndo({rowId:x.job.rowId, field:x.job.field, value:x.job.val, had:x.st.had, prev:x.st.prev, td:x.job.td}, undoGroup);
+      if(x.job.td&&x.job.td.classList){ const td=x.job.td; td.classList.add('cellsaved'); setTimeout(function(){ td.classList.remove('cellsaved'); },600); }
+    } else {
+      x.st.rollback();
+      reasons.push((r&&r.error)||'실패');
+    }
+  });
+  report({ok:ok, reasons:reasons, notice:notice});
 }
 /* 우클릭 메뉴 — 편집·복사·붙여넣기·되돌리기·배경색을 한 곳에서.
    ★ **body 직속**(표는 가로 스크롤 컨테이너 안이라 그 안에 그리면 잘린다) · onclick 에 시트 문자열 보간 없음. */

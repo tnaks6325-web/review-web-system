@@ -2761,14 +2761,22 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
 // 시트 컬럼(col:<헤더>) 편집 허용 검증 — 그리드 표시와 동일 소스로 "실재 컬럼"만 허용(임의 컬럼·인젝션 차단).
 //   ★ 그리드 헤더와 정합: gid-우선 detected_headers → NULL이면 그 행 row_json 키 폴백(workdeskTab 헤더 산출과 동형).
 //   client(in-tx)로 조회해 잠근 행 문맥과 일관. tabGid 없거나 동명탭이면 gid 우선, 그다음 tab_name.
-async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson) {
+async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson, headersCache) {
   if (!colName) return false;
-  const { rows } = await client.query(
-    `SELECT detected_headers FROM raw_sheet_tabs
-      WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
-      ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
-    [sheetId, tabGid, tabName]).catch(() => ({ rows: [] }));
-  const dh = rows[0] && rows[0].detected_headers;
+  // ★ 헤더 목록은 행과 무관하다 — 붙여넣기 배치 안에서 재사용한다(칸마다 같은 조회를 반복하지 않는다).
+  //   row_json 키 폴백은 행마다 다르므로 **캐시하지 않는다**(아래에서 그 행으로 판정).
+  const ck = headersCache ? (sheetId + String.fromCharCode(0) + tabName + String.fromCharCode(0) + (tabGid || '')) : null;
+  let dh;
+  if (ck && headersCache.has(ck)) dh = headersCache.get(ck);
+  else {
+    const { rows } = await client.query(
+      `SELECT detected_headers FROM raw_sheet_tabs
+        WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
+        ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
+      [sheetId, tabGid, tabName]).catch(() => ({ rows: [] }));
+    dh = rows[0] && rows[0].detected_headers;
+    if (ck) headersCache.set(ck, dh);
+  }
   if (Array.isArray(dh) && dh.some(h => String(h == null ? '' : h).trim() === colName)) return true;
   return !!(rowJson && typeof rowJson === 'object' && Object.prototype.hasOwnProperty.call(rowJson, colName));
 }
@@ -2802,7 +2810,8 @@ async function _editOneInTx(client, { sheetId, tabName, rowId, field, value, by 
       if (_linkedToggle(field.slice(4))) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
       }
-      if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
+      if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json,
+                              decideCache ? (decideCache.headers || (decideCache.headers = new Map())) : null)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'field_not_editable', field };
       }
       kind = 'text';
@@ -2931,35 +2940,52 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
  *    붙여넣기는 원래 **칸마다 성패가 갈리는** 조작이라 건별 독립이 의미상으로도 맞다.
  *  ★ 한 건이 던져도 배치를 죽이지 않는다(그 칸만 실패로 보고) — 화면이 그 칸만 되돌린다. */
 const EDIT_BATCH_MAX = 500;
+/* ★★ 동시 실행 폭 — **칸 수와 무관하게 상한이 있다**(그게 이 변경의 핵심이다).
+   1 로 두면 DB 왕복이 느린 배포(테섭 실측 statement 당 ~200ms)에서 50칸에 80초가 걸려
+   게이트웨이가 요청을 끊는다(실측 502). 크게 두면 다시 풀(20)을 위협한다.
+   기본 6 = 동시에 세 명이 붙여넣어도 18 커넥션(풀 20 안). */
+const EDIT_BATCH_CONCURRENCY = Math.max(1, Math.min(16,
+  parseInt(process.env.EDIT_BATCH_CONCURRENCY || '', 10) || 6));
 async function editWorkdeskRowsBatch({ sheetId, tabName, edits, by = 'admin' } = {}) {
   if (!sheetId || !tabName) throw new Error('editWorkdeskRowsBatch: 필수 인자 누락');
   if (!Array.isArray(edits) || edits.length === 0) return { ok: false, error: 'edits_required' };
   if (edits.length > EDIT_BATCH_MAX) {
     return { ok: false, error: 'too_many_edits', max: EDIT_BATCH_MAX, got: edits.length };
   }
-  const client = await getPool().connect();
-  const decideCache = new Map();
-  const results = [];
-  try {
-    for (let i = 0; i < edits.length; i++) {
-      const e = edits[i] || {};
-      const rowId = e.rowId, field = e.field;
-      if (!rowId || !field) { results.push({ index: i, rowId: rowId || null, field: field || null, ok: false, error: 'rowId, field 필수' }); continue; }
-      let r;
-      try {
-        r = await _editOneInTx(client, { sheetId, tabName, rowId, field, value: e.value, by, decideCache });
-      } catch (err) {
-        // 그 건의 tx 는 _editOneInTx 안에서 이미 롤백됐다. 커넥션을 재사용하기 전에 한 번 더 확실히 푼다.
-        try { await client.query('ROLLBACK'); } catch (_) {}
-        logger.warn('[trackB] 일괄 편집 중 개별 실패', { sheetId, tabName, rowId, field, err: err && err.message });
-        r = { ok: false, error: 'edit_failed' };
+  const db = getPool();
+  const decideCache = new Map();          // (탭,열) 판정 + 헤더 목록 — 행과 무관해 배치 안에서 재사용
+  const results = new Array(edits.length);
+  let next = 0;
+  const worker = async () => {
+    let client = null;
+    try {
+      while (true) {
+        const i = next++;
+        if (i >= edits.length) return;
+        const e = edits[i] || {};
+        const rowId = e.rowId, field = e.field;
+        if (!rowId || !field) {
+          results[i] = { index: i, rowId: rowId || null, field: field || null, ok: false, error: 'rowId, field 필수' };
+          continue;
+        }
+        if (!client) client = await db.connect();      // 일감이 있을 때만 잡는다(빈 워커는 커넥션 0)
+        let r;
+        try {
+          r = await _editOneInTx(client, { sheetId, tabName, rowId, field, value: e.value, by, decideCache });
+        } catch (err) {
+          // 그 건의 tx 는 _editOneInTx 안에서 이미 롤백됐다. 커넥션을 재사용하기 전에 한 번 더 확실히 푼다.
+          try { await client.query('ROLLBACK'); } catch (_) {}
+          logger.warn('[trackB] 일괄 편집 중 개별 실패', { sheetId, tabName, rowId, field, err: err && err.message });
+          r = { ok: false, error: 'edit_failed' };
+        }
+        results[i] = { index: i, rowId, field, ...r };
       }
-      results.push({ index: i, rowId, field, ...r });
-    }
-  } finally { client.release(); }
-  const succeeded = results.filter(r => r.ok).length;
+    } finally { if (client) client.release(); }
+  };
+  await Promise.all(Array.from({ length: Math.min(EDIT_BATCH_CONCURRENCY, edits.length) }, worker));
+  const succeeded = results.filter(r => r && r.ok).length;
   return { ok: true, total: results.length, succeeded, failed: results.length - succeeded,
-           wroteRowJson: results.filter(r => r.ok && r.writeThrough).length, results };
+           wroteRowJson: results.filter(r => r && r.ok && r.writeThrough).length, results };
 }
 
 // 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
@@ -4818,6 +4844,7 @@ module.exports = {
   editWorkdeskRow,
   editWorkdeskRowsBatch,
   EDIT_BATCH_MAX,
+  EDIT_BATCH_CONCURRENCY,
   revertWorkdeskEdit,
   manualWorkdeskReviewSubmit,
   previewWorkdeskOrderDelete,
