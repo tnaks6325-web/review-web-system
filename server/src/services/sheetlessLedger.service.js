@@ -29,6 +29,7 @@
 
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { tableOrderNumSql } = require('../utils/tableOrderNum');
 const { computeChecksum } = require('../utils/checksum');
 
 let _pool = null;
@@ -397,11 +398,7 @@ async function dedupeRows({ sheetId, tabName, dryRun = true, by = 'admin' } = {}
             /* ★★ 작업보드 표에 **실제로 보이는** 주문번호. 원장(os.order_num)만 보면
                "화면에는 서로 다른 주문번호인데 중복으로 잡히는" 일이 생긴다(2026-08-19 신다인 건).
                담당자가 눈으로 판단하는 값과 시스템 판정이 같은 값을 봐야 한다. */
-            regexp_replace(COALESCE((
-              SELECT string_agg(t.value, '' ORDER BY t.key)
-                FROM jsonb_each_text(COALESCE(cp.row_json, '{}'::jsonb)) t(key, value)
-               WHERE t.key LIKE '%주문번호%'
-            ), ''), '\\D', '', 'g') AS roword,
+            ${tableOrderNumSql('cp')} AS roword,
             EXISTS (SELECT 1 FROM payment_batch_items pi
                      WHERE pi.sheet_id = cp.sheet_id AND pi.tab_name = cp.tab_name
                        AND pi.row_index = cp.seq AND pi.status IN ('pending','paid')) AS in_payment

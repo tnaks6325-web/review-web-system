@@ -30,6 +30,7 @@
 'use strict';
 
 const { logger } = require('../utils/logger');
+const { tableOrderNumSql } = require('../utils/tableOrderNum');
 const pool = require('../db/pool');
 
 let _pool = null;
@@ -161,7 +162,7 @@ async function writeOrderToWorktable({
       //   ★ 판정 키 = 주문번호(숫자만) + 연락처(숫자만). 주문번호가 없으면(비번호 쿠팡 등) 판정하지
       //     않고 종전대로 진행한다 — 모르면 막지 않는다(fail-open).
       if (!cur.length && _digits(orderData.orderNum).length >= 6) {
-        const { rows: dup } = await client.query(
+        let { rows: dup } = await client.query(
           `SELECT cp.seq, cp.order_submission_id
              FROM campaign_participants cp
              JOIN order_submissions os2 ON os2.id = cp.order_submission_id
@@ -174,15 +175,44 @@ async function writeOrderToWorktable({
             LIMIT 1`,
           [sheetId, tabName, orderSubmissionId,
            _digits(orderData.orderNum), _digits(orderData.phone)]);
+        /* ★★ 2차 방어 — **링크를 타지 않고 표에 적힌 주문번호로도** 본다 (2026-08-19 실사고).
+             위 1차 방어는 `cp.order_submission_id → os2` 조인으로 판정한다. 그래서 그 **링크가
+             오염되면**(다른 주문을 가리키면) 이미 반영된 줄을 보지 못하고 새 빈 슬롯을 먹는다 —
+             10분 복구 크론이 매 주기 한 줄씩, 「8/3(쿠팡)위프_블랙 탈취제」 권정현 한 사람에게만
+             11줄을 만들었다(16:40~18:20). 링크 오염 하나가 줄 오삭제와 줄 중복 생성 두 방향으로
+             동시에 사고를 냈다.
+             ★ 판정 값은 **담당자가 표에서 눈으로 보는 주문번호** — 중복 정리(`dedupeRows`)와
+               **같은 SQL 조각**(`tableOrderNumSql`)을 쓴다. 두 기능이 다른 규칙으로 "표 주문번호"를
+               뽑으면 한쪽은 지우고 다른 쪽은 또 만드는 상태가 된다.
+             ★ **명의(phone8)까지 같을 때만** 중복으로 본다 — 표 주문번호만으로는 담당자가 옆 줄에
+               같은 번호를 적어 둔 경우까지 막아 정상 주문이 표에 못 들어간다(모르면 막지 않는다).
+             ★ 연락처를 8자리로 못 만들면 이 검사를 건너뛴다(fail-open). */
+        if (!dup.length && String(_digits(orderData.phone)).length >= 8) {
+          const { rows: dupRow } = await client.query(
+            `SELECT cp.seq, cp.order_submission_id
+               FROM campaign_participants cp
+              WHERE cp.sheet_id = $1 AND cp.tab_name = $2 AND cp.deleted_at IS NULL
+                AND (cp.order_submission_id IS NULL OR cp.order_submission_id <> $3::uuid)
+                AND ${tableOrderNumSql('cp')} = $4
+                AND cp.phone8 = $5
+              ORDER BY cp.seq
+              LIMIT 1`,
+            [sheetId, tabName, orderSubmissionId,
+             _digits(orderData.orderNum), String(_digits(orderData.phone)).slice(-8)]);
+          if (dupRow.length) dup = dupRow;
+        }
         if (dup.length) {
           // 이미 반영된 구매다. 새 줄을 만들지 않고 그 줄을 가리켜 돌려준다.
           //   ★ 기존 줄의 `order_submission_id` 는 **바꾸지 않는다** — 링크를 빼앗으면 원래 주문이
           //     "미반영"으로 되살아나 복구 잡이 다시 줄을 만든다(막으려던 사고의 재현).
           await client.query('ROLLBACK');
+          /* ★ 표 주문번호로 찾은 줄은 **링크가 비어 있을 수 있다**(담당자 수기 입력 줄).
+               그때 `String(null)` 은 문자열 "null" 이 되어 로그·응답이 거짓을 말한다. */
+          const dupOf = dup[0].order_submission_id ? String(dup[0].order_submission_id) : null;
           logger.warn(`[sheetlessOrder] 같은 구매가 이미 반영됨 tab=${tabName} seq=${dup[0].seq} ` +
-            `os=${orderSubmissionId} 기존os=${dup[0].order_submission_id} — 새 줄을 만들지 않는다`);
+            `os=${orderSubmissionId} 기존os=${dupOf || '(링크 없음 — 표 주문번호로 확인)'} — 새 줄을 만들지 않는다`);
           return { ok: true, written: false, reason: 'duplicate_row',
-                   seq: Number(dup[0].seq), duplicateOf: String(dup[0].order_submission_id) };
+                   seq: Number(dup[0].seq), duplicateOf: dupOf };
         }
       }
       if (!cur.length) {
