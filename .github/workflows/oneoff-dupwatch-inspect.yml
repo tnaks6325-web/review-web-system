@@ -1,0 +1,93 @@
+name: Oneoff - 중복 줄 성격 조사 (읽기 전용)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Inspect
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -e
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \pset pager off
+          \timing off
+
+          CREATE TEMP VIEW dup AS
+          WITH n AS (
+            SELECT cp.*,
+                   regexp_replace(COALESCE((
+                     SELECT string_agg(t.value, '' ORDER BY t.key)
+                       FROM jsonb_each_text(COALESCE(cp.row_json,'{}'::jsonb)) t(key,value)
+                      WHERE t.key LIKE '%주문번호%'
+                   ),''), '\D','','g') AS onum
+              FROM campaign_participants cp
+              JOIN tab_configs tc ON tc.sheet_id=cp.sheet_id AND tc.tab_name=cp.tab_name
+               AND COALESCE(tc.sheetless,FALSE)=TRUE
+             WHERE cp.deleted_at IS NULL
+               AND length(COALESCE(cp.phone8,''))>=8
+          ), g AS (
+            SELECT sheet_id, tab_name, onum, phone8
+              FROM n WHERE length(onum)>=6
+             GROUP BY 1,2,3,4 HAVING COUNT(*)>1
+          )
+          SELECT n.* FROM n JOIN g USING (sheet_id, tab_name, onum, phone8);
+
+          \echo '=== ① 출처(source) · 생성시기 분포 ==='
+          SELECT tab_name, source, to_char(MIN(first_seen_at),'YY-MM-DD') AS 최초,
+                 to_char(MAX(first_seen_at),'YY-MM-DD') AS 최종, COUNT(*) AS 줄수
+            FROM dup GROUP BY 1,2 ORDER BY 1,2;
+
+          \echo ''
+          \echo '=== ② 묶음별 상세 (전체) ==='
+          SELECT tab_name, onum, phone8,
+                 string_agg(seq::text || ':' || COALESCE(source,'?') ||
+                            CASE WHEN order_submission_id IS NULL THEN '/링크X' ELSE '/링크O' END ||
+                            '/' || to_char(first_seen_at,'MM-DD'), '  ' ORDER BY seq) AS 줄들,
+                 COUNT(*) AS 줄수
+            FROM dup GROUP BY 1,2,3 ORDER BY 1, COUNT(*) DESC, 2;
+
+          \echo ''
+          \echo '=== ③ 줄끼리 내용이 같은가 (row_json 동일 여부) ==='
+          SELECT tab_name, onum, phone8,
+                 COUNT(DISTINCT row_json::text) AS 서로다른내용,
+                 COUNT(*) AS 줄수
+            FROM dup GROUP BY 1,2,3 ORDER BY 4 DESC, 1;
+
+          \echo ''
+          \echo '=== ④ 원장 대조: 그 명의+번호로 실제 주문이 몇 건인가 ==='
+          SELECT d.tab_name, d.onum, d.phone8, MAX(d.cnt) AS 표줄수,
+                 COUNT(DISTINCT os.id) AS 원장주문수
+            FROM (SELECT tab_name, onum, phone8, COUNT(*) OVER (PARTITION BY sheet_id,tab_name,onum,phone8) AS cnt,
+                         sheet_id FROM dup) d
+            LEFT JOIN order_submissions os
+              ON regexp_replace(COALESCE(os.order_num,''),'\D','','g') = d.onum
+             AND right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8) = d.phone8
+             AND os.deleted_at IS NULL
+           GROUP BY 1,2,3 ORDER BY 1,2;
+
+          \echo ''
+          \echo '=== ⑤ 표 내용 미리보기 (앞 6묶음) ==='
+          SELECT tab_name, onum, seq, source,
+                 left(COALESCE(recipient_name,''),6) AS 수취인,
+                 left(row_json::text, 220) AS 내용
+            FROM dup
+           WHERE (tab_name, onum) IN (
+             SELECT tab_name, onum FROM dup GROUP BY 1,2 ORDER BY 1,2 LIMIT 6)
+           ORDER BY tab_name, onum, seq;
+          SQL
