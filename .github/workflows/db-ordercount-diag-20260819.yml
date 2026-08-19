@@ -33,23 +33,33 @@ jobs:
            GROUP BY 1,2 ORDER BY 1,4;
           SQL
 
-      - name: ② 그 표의 8/19 줄 — 사람별 줄 수 vs 원장 주문 수
+      - name: ② 표 번호로 원장을 전역 검색(탭 좌표 무관 — 참여형 주문은 campaign:* 좌표일 수 있다)
         run: |
           psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
-          WITH rows19 AS (
-            SELECT cp.phone8, cp.recipient_name AS 이름,
-                   regexp_replace(COALESCE(cp.row_json->>'주문번호',''),'\D','','g') AS 표번호,
-                   COUNT(*) AS 표줄수
-              FROM campaign_participants cp
-             WHERE cp.tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건' AND cp.deleted_at IS NULL
-               AND cp.row_json->>'구매일자' = '8 / 19 (수)'
-             GROUP BY 1,2,3
-          )
-          SELECT r.이름, r.표번호, r.표줄수,
-                 (SELECT COUNT(*) FROM order_submissions os
-                   WHERE os.tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건' AND os.deleted_at IS NULL
-                     AND regexp_replace(COALESCE(os.order_num,''),'\D','','g') = r.표번호) AS 원장주문수
-            FROM rows19 r
-           WHERE r.표줄수 > 1
-           ORDER BY r.표줄수 DESC, r.이름;
+          SELECT regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
+                 os.recipient AS 수취인, os.sheet_id, os.tab_name,
+                 os.linked_tab_name AS 연결탭, os.mirror_status AS 상태,
+                 to_char(os.submitted_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 제출,
+                 CASE WHEN os.deleted_at IS NULL THEN '살아있음' ELSE '취소됨' END AS 생존
+            FROM order_submissions os
+           WHERE regexp_replace(COALESCE(os.order_num,''),'\D','','g')
+                 IN ('5102385176784','31102386192599','25102387743327','32102390310440')
+           ORDER BY 1, 7;
+          SQL
+
+      - name: ③ 그 네 사람의 모든 주문(연결탭 기준)
+        run: |
+          psql "$PGCONN" -P pager=off -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT os.recipient AS 수취인,
+                 regexp_replace(COALESCE(os.order_num,''),'\D','','g') AS 주문번호,
+                 os.tab_name AS 원장탭, os.linked_tab_name AS 연결탭,
+                 to_char(os.submitted_at AT TIME ZONE 'Asia/Seoul','MM-DD HH24:MI') AS 제출,
+                 os.mirror_status AS 상태,
+                 CASE WHEN os.deleted_at IS NULL THEN '살아있음' ELSE '취소됨' END AS 생존
+            FROM order_submissions os
+           WHERE right(regexp_replace(COALESCE(os.phone,''),'\D','','g'),8)
+                 IN ('84486997','89508885','91064144','76640008')
+             AND (os.tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건'
+                  OR os.linked_tab_name = '8/3(쿠팡)위프_블랙 탈취제 800건')
+           ORDER BY 1, 5;
           SQL
