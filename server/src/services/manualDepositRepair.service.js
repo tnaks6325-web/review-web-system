@@ -650,7 +650,22 @@ async function _overlayGroups(client, { sheetId = '', tabName = '' } = {}) {
                       WHERE pr.sheet_id = cp.sheet_id AND pr.tab_name = cp.tab_name AND pr.row_index = cp.seq)
              OR EXISTS (SELECT 1 FROM payment_batch_items pi
                       WHERE pi.sheet_id = cp.sheet_id AND pi.tab_name = cp.tab_name AND pi.row_index = cp.seq
-                        AND pi.status = 'paid')) AS "hasLedger"
+                        AND pi.status = 'paid')) AS "hasLedger",
+            -- ── 보류건 판단 근거(읽기 전용) ──
+            (SELECT MAX(pr.paid_at) FROM payment_records pr
+              WHERE pr.sheet_id = cp.sheet_id AND pr.tab_name = cp.tab_name AND pr.row_index = cp.seq) AS "ledgerPaidAt",
+            EXISTS (SELECT 1 FROM review_submissions rs
+                     WHERE rs.sheet_id = cp.sheet_id AND rs.tab_name = cp.tab_name AND rs.row_index = cp.seq) AS "hasReviewFile",
+            -- 그 줄이 "언제부터 채워져 있었나" — 직원이 적은 시각보다 나중에 채워진 줄은 그때 화면에 없었다.
+            LEAST(
+              (SELECT MIN(COALESCE(rs.uploaded_at, rs.created_at)) FROM review_submissions rs
+                WHERE rs.sheet_id = cp.sheet_id AND rs.tab_name = cp.tab_name AND rs.row_index = cp.seq),
+              (SELECT MIN(pl.created_at) FROM participation_links pl
+                WHERE pl.sheet_id = cp.sheet_id AND pl.tab_name = cp.tab_name AND pl.row_index = cp.seq),
+              (SELECT MIN(os.submitted_at) FROM order_submissions os
+                WHERE os.sheet_id = cp.sheet_id AND os.tab_name = cp.tab_name AND os.sheet_row = cp.seq
+                  AND os.deleted_at IS NULL)
+            ) AS "firstSeenAt"
        FROM participant_edits pe
        JOIN campaign_participants cp
          ON cp.sheet_id = pe.sheet_id AND cp.tab_name = pe.tab_name
@@ -681,6 +696,8 @@ async function _overlayGroups(client, { sheetId = '', tabName = '' } = {}) {
     byEdit.get(r.editId).targets.push({
       rowId: r.rowId, rowIndex: Number(r.rowIndex), reviewerName: r.reviewerName || '',
       paidValue: r.paidValue || '', submitted: r.submitted === true, hasLedger: r.hasLedger === true,
+      ledgerPaidAt: r.ledgerPaidAt || null, hasReviewFile: r.hasReviewFile === true,
+      firstSeenAt: r.firstSeenAt || null,
     });
   }
 
@@ -699,8 +716,14 @@ async function _overlayGroups(client, { sheetId = '', tabName = '' } = {}) {
       t.rowId !== keep.rowId && !t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
     const ledgerBlocked = hold ? [] : g.targets.filter(t =>
       t.rowId !== keep.rowId && t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
-    groups.push({ ...g, hold, holdReason: hold ? OVERLAY_HOLD[hold] : null, keep, clear, ledgerBlocked,
-      submittedCount: submitted.length });
+    const grp = { ...g, hold, holdReason: hold ? OVERLAY_HOLD[hold] : null, keep, clear, ledgerBlocked,
+      submittedCount: submitted.length };
+    // 보류건에만 추천을 붙인다(자동 확정 규칙은 불변 — 이미 확인한 미리보기가 달라지면 안 된다).
+    if (hold === 'no_submitted_row' || hold === 'multiple_submitted_rows') {
+      const sg = _suggestKeep(grp);
+      if (sg) { grp.suggest = sg; grp.suggestReason = SUGGEST_BASIS[sg.basis]; }
+    }
+    groups.push(grp);
   }
   return groups;
 }
@@ -725,9 +748,19 @@ function _overlaySummary(groups) {
 
 function _overlayView(groups) {
   return groups.map(g => ({
+    editId: g.editId,
     tabName: g.tabName, stamp: g.stamp, anchorType: g.anchorType,
-    createdBy: g.createdBy, reviewerName: (g.targets[0] && g.targets[0].reviewerName) || '',
+    createdBy: g.createdBy, createdAt: g.createdAt,
+    reviewerName: (g.targets[0] && g.targets[0].reviewerName) || '',
     rows: g.targets.map(t => t.rowIndex),
+    // 보류건을 사람이 고를 수 있도록 줄별 근거를 함께 준다(화면은 이것만 보고 그린다).
+    candidates: g.targets.map(t => ({
+      rowId: t.rowId, rowIndex: t.rowIndex, submitted: t.submitted,
+      hasLedger: t.hasLedger, ledgerPaidAt: t.ledgerPaidAt,
+      hasReviewFile: t.hasReviewFile, firstSeenAt: t.firstSeenAt,
+      paidValue: t.paidValue,
+    })),
+    suggest: g.suggest || null, suggestReason: g.suggestReason || null,
     keepRow: g.keep ? g.keep.rowIndex : null,
     clearRows: g.clear.map(t => t.rowIndex),
     ledgerBlockedRows: g.ledgerBlocked.map(t => t.rowIndex),
@@ -735,6 +768,51 @@ function _overlayView(groups) {
     submittedCount: g.submittedCount,
     hold: g.hold, holdReason: g.holdReason,
   }));
+}
+
+
+/* ══════════════════════════════════════════════════════════════════
+   보류건 판단 기준 (사용자 요청 2026-08-19)
+   ──────────────────────────────────────────────────────────────────
+   자동 확정 규칙(= 리뷰 제출된 줄 1개)으로 못 정한 그룹에, **증거 사다리**를 적용해
+   "어느 줄이 직원이 적은 그 줄인가"를 추천한다.
+
+   ★★ 자동 확정 규칙은 **바꾸지 않는다** — 이미 사람이 미리보기로 확인한 결과가
+      배포 한 번에 달라지면 안 된다. 사다리는 **보류건에만**, 그리고 **추천까지만** 한다.
+      최종 확정은 사람이 고른다(`decisions`).
+
+   사다리(위에서부터, 정확히 1줄로 좁혀질 때만 인정):
+     ① 입금 원장이 있는 줄        — 실제로 돈이 나간 줄이면 그 줄이 직원이 표기한 줄이다
+     ② 리뷰 캡처 원장이 있는 줄    — `is_submitted`(파생값)와 달리 **파일 업로드 사실**이라
+                                    장부 재생성에 흔들리지 않는다
+     ③ 직원이 적은 시각보다 **먼저 채워져 있던** 줄
+                                  — 8/18~19 사고로 생긴 중복 줄은 8/11 에는 화면에 없었다
+   ★ 어느 단계도 1줄로 좁히지 못하면 추천하지 않는다(억지로 고르지 않는다).
+   ══════════════════════════════════════════════════════════════════ */
+
+const SUGGEST_BASIS = {
+  ledger: '이 줄에만 입금 원장이 있습니다 — 실제로 이체된 줄입니다.',
+  review_file: '이 줄에만 리뷰 캡처 업로드 기록이 있습니다.',
+  filled_before_edit: '직원이 적은 시각보다 먼저 채워져 있던 유일한 줄입니다(중복 줄은 그 뒤에 생겼습니다).',
+};
+
+function _suggestKeep(group) {
+  const t = group.targets || [];
+  const only = (list) => (list.length === 1 ? list[0] : null);
+
+  const byLedger = only(t.filter(x => x.hasLedger));
+  if (byLedger) return { rowId: byLedger.rowId, rowIndex: byLedger.rowIndex, basis: 'ledger' };
+
+  const byFile = only(t.filter(x => x.hasReviewFile));
+  if (byFile) return { rowId: byFile.rowId, rowIndex: byFile.rowIndex, basis: 'review_file' };
+
+  const editedAt = group.createdAt ? new Date(group.createdAt).getTime() : null;
+  if (editedAt) {
+    const before = t.filter(x => x.firstSeenAt && new Date(x.firstSeenAt).getTime() <= editedAt);
+    const byTime = only(before);
+    if (byTime) return { rowId: byTime.rowId, rowIndex: byTime.rowIndex, basis: 'filled_before_edit' };
+  }
+  return null;   // 좁혀지지 않으면 추천하지 않는다
 }
 
 async function previewOverlayFanoutFix({ sheetId = '', tabName = '' } = {}) {
@@ -745,7 +823,17 @@ async function previewOverlayFanoutFix({ sheetId = '', tabName = '' } = {}) {
 /**
  * 실행 — 원래 줄에 값을 새기고, 번진 줄에서 지우고, 오버레이를 이력으로 내린다.
  */
-async function applyOverlayFanoutFix({ sheetId = '', tabName = '', by = 'payment-repair' } = {}) {
+/**
+ * @param {object} o
+ * @param {Array<{editId:string,rowId:string}>} [o.decisions]
+ *   보류건에 대해 **사람이 고른 원래 줄**. 서버가 그 그룹의 실제 줄인지 재검증한다
+ *   (화면이 보낸 rowId 를 그대로 믿으면 남의 줄에 입금일을 새길 수 있다).
+ */
+async function applyOverlayFanoutFix({ sheetId = '', tabName = '', by = 'payment-repair', decisions = null } = {}) {
+  const picked = new Map();
+  for (const d of (Array.isArray(decisions) ? decisions : [])) {
+    if (d && d.editId && d.rowId) picked.set(String(d.editId), String(d.rowId));
+  }
   const client = await pool.connect();
   let groups = [];
   const touchedTabs = new Map();
@@ -754,6 +842,18 @@ async function applyOverlayFanoutFix({ sheetId = '', tabName = '', by = 'payment
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('manual_deposit_overlay_fix'))`);
     groups = await _overlayGroups(client, { sheetId, tabName });
+    // 사람이 고른 보류건을 대상으로 승격 — ★ 고른 줄이 **그 그룹의 실제 줄**일 때만.
+    for (const g of groups) {
+      if (!g.hold || !picked.has(g.editId)) continue;
+      if (g.hold === 'not_sheetless' || g.hold === 'deposit_column_missing') continue;  // 사람이 골라도 안 되는 사유
+      const chosen = g.targets.find(t => t.rowId === picked.get(g.editId));
+      if (!chosen) continue;                       // 그 그룹에 없는 줄 → 무시(조용히 남의 줄에 쓰지 않는다)
+      g.hold = null; g.holdReason = null; g.keep = chosen; g.pickedByHuman = true;
+      g.clear = g.targets.filter(t =>
+        t.rowId !== chosen.rowId && !t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
+      g.ledgerBlocked = g.targets.filter(t =>
+        t.rowId !== chosen.rowId && t.hasLedger && _sameStampValue(t.paidValue, g.stamp));
+    }
     const act = groups.filter(g => !g.hold);
     if (!act.length) {
       await client.query('ROLLBACK');
@@ -810,6 +910,7 @@ async function applyOverlayFanoutFix({ sheetId = '', tabName = '', by = 'payment
     catch (e) { rebuilt.push(`${tab.tabName}(재생성 실패: ${e.code || e.message})`); }
   }
   return { ok: true, dryRun: false, keptRows: kept, clearedRows: cleared, revertedEdits: reverted,
+    pickedByHuman: groups.filter(g => g.pickedByHuman).length,
     rebuiltTabs: rebuilt, summary: _overlaySummary(groups), items: _overlayView(groups) };
 }
 
