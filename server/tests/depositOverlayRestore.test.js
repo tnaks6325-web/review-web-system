@@ -34,10 +34,12 @@ function row(o) {
   return {
     editId: o.editId || 'e1', sheetId: 's', tabName: 'T',
     anchorType: 'order', anchorValue: 'os-1', stamp: o.stamp || '8/11',
-    createdBy: '직원', createdAt: null, depositColKey: '입금', sheetless: o.sheetless !== false,
+    createdBy: '직원', createdAt: o.createdAt || null, depositColKey: '입금', sheetless: o.sheetless !== false,
     rowId: o.rowId, rowIndex: o.rowIndex, reviewerName: '박',
     paidValue: o.paidValue == null ? (o.stamp || '8/11') : o.paidValue,
     submitted: !!o.submitted, hasLedger: !!o.hasLedger,
+    ledgerPaidAt: o.ledgerPaidAt || null, hasReviewFile: !!o.hasReviewFile,
+    firstSeenAt: o.firstSeenAt || null, createdAt: o.createdAt || null,
   };
 }
 
@@ -155,6 +157,90 @@ function row(o) {
   assert.equal(w8.find(w => w.params[0] === 'c').params[2], '8/12', '8b: 각 값이 자기 줄에 새겨진다');
   assert.equal(out.keptRows, 2); assert.equal(out.clearedRows, 2);
 
+  /* 11. 보류건 판단 사다리 — 추천은 하되 자동 확정하지 않는다 */
+  //  ① 입금 원장이 1줄에만
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, hasLedger: true, ledgerPaidAt: '2026-08-11T00:00:00Z' }),
+    row({ rowId: 'b', rowIndex: 2 }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].hold, 'no_submitted_row', '11a: 자동 확정 규칙은 그대로(보류 유지)');
+  assert.equal(pv.items[0].suggest.rowIndex, 1, '11b: 입금 원장 있는 줄을 추천');
+  assert.equal(pv.items[0].suggest.basis, 'ledger');
+  assert.equal(pool.writes.length, 0, '11c: 추천만으로는 아무것도 쓰지 않는다');
+
+  //  ② 리뷰 캡처가 1줄에만
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1 }),
+    row({ rowId: 'b', rowIndex: 2, hasReviewFile: true }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].suggest.basis, 'review_file', '11d: 캡처 원장으로 좁힌다');
+  assert.equal(pv.items[0].suggest.rowIndex, 2);
+
+  //  ③ 편집 시각 이전에 채워진 줄이 1개
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, firstSeenAt: '2026-08-05T00:00:00Z', createdAt: '2026-08-11T05:00:00Z' }),
+    row({ rowId: 'b', rowIndex: 2, firstSeenAt: '2026-08-18T00:00:00Z', createdAt: '2026-08-11T05:00:00Z' }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].suggest.basis, 'filled_before_edit', '11e: 적은 시각 이전에 있던 줄');
+  assert.equal(pv.items[0].suggest.rowIndex, 1);
+
+  //  ④ 좁혀지지 않으면 추천하지 않는다(억지로 고르지 않는다)
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, hasLedger: true }),
+    row({ rowId: 'b', rowIndex: 2, hasLedger: true }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].suggest, null, '11f: 근거가 2줄이면 추천 없음');
+
+  //  ⑤ ★ 자동 확정 규칙은 사다리에 흔들리지 않는다 — 이미 확인한 미리보기가 배포로 달라지면 안 된다.
+  //     (리뷰 제출된 줄은 1번인데 입금 원장은 2번에 있는 상황: keep 은 여전히 1번, 추천은 붙지 않는다)
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, submitted: true, paidValue: '' }),
+    row({ rowId: 'b', rowIndex: 2, hasLedger: true, hasReviewFile: true }),
+  ]);
+  svc = install(pool);
+  pv = await svc.previewOverlayFanoutFix({});
+  assert.equal(pv.items[0].hold, null, '11g: 제출 1개면 자동 확정 그대로');
+  assert.equal(pv.items[0].keepRow, 1, '11h: 사다리가 자동 확정을 덮지 않는다');
+  assert.equal(pv.items[0].suggest, null, '11i: 자동 확정 건에는 추천을 붙이지 않는다(혼동 방지)');
+
+  /* 12. 사람이 고른 줄로만 복원 — 서버가 그 그룹의 실제 줄인지 검증 */
+  const holdRows = [
+    row({ rowId: 'a', rowIndex: 1, paidValue: '' }),
+    row({ rowId: 'b', rowIndex: 2 }),
+  ];
+  pool = makePool(holdRows); svc = install(pool);
+  out = await svc.applyOverlayFanoutFix({ decisions: [{ editId: 'e1', rowId: 'a' }] });
+  let cw2 = pool.writes.filter(w => /UPDATE campaign_participants/.test(w.s));
+  assert.equal(out.pickedByHuman, 1, '12a: 사람이 고른 건수를 보고한다');
+  assert.equal(cw2[0].params[0], 'a', '12b: 고른 줄에 새긴다');
+  assert.equal(cw2[0].params[2], '8/11');
+  assert.equal(cw2[1].params[0], 'b', '12c: 나머지에서 지운다');
+  assert.equal(cw2[1].params[2], '');
+
+  //  그 그룹에 없는 줄을 보내면 무시(남의 줄에 쓰지 않는다)
+  pool = makePool(holdRows); svc = install(pool);
+  await assert.rejects(() => svc.applyOverlayFanoutFix({ decisions: [{ editId: 'e1', rowId: 'zzz' }] }),
+    /복원할 대상이 없습니다/, '12d: 그룹 밖 rowId 는 무시하고 아무것도 하지 않는다');
+  assert.equal(pool.writes.length, 0, '12e: 검증 실패 시 쓰기 0');
+
+  //  시트 기반 보류는 사람이 골라도 열리지 않는다
+  pool = makePool([
+    row({ rowId: 'a', rowIndex: 1, sheetless: false, paidValue: '' }),
+    row({ rowId: 'b', rowIndex: 2, sheetless: false }),
+  ]);
+  svc = install(pool);
+  await assert.rejects(() => svc.applyOverlayFanoutFix({ decisions: [{ editId: 'e1', rowId: 'a' }] }),
+    /복원할 대상이 없습니다/, '12f: 시트 기반은 선택으로도 우회 불가');
+
+  console.log('deposit overlay hold-decision rules passed');
   console.log('deposit overlay restore rules passed');
 })().catch(e => { console.error(e); process.exit(1); });
 
@@ -182,11 +268,14 @@ assert.doesNotMatch(asrc, /submitted|keepRow\s*=/, '화면에서 원래 줄을 �
   const mk = () => ({ id: '', className: '', innerHTML: '', value: '', addEventListener() {}, appendChild() {}, remove() {} });
   const ov = mk(); const bd = mk();
   let posted = null; let confirmed = true; const toasts = [];
+  let picks = [];
   const sandbox = {
     STATE: { cur: { sheetId: 'sh', tabName: 'T' } },
     esc: v => String(v == null ? '' : v),
     document: { createElement: () => ov, body: { appendChild() {} },
-      getElementById: id => (id === 'pmovfixbd' ? bd : (id === 'pmovfixov' ? ov : null)) },
+      getElementById: id => (id === 'pmovfixbd' ? bd : (id === 'pmovfixov' ? ov : null)),
+      // 보류건 라디오 — 사람이 고른 값을 읽는 경로
+      querySelectorAll: () => picks },
     api: null, toast: m => toasts.push(m), confirm: () => confirmed,
     _pmLoad: async () => {}, _pmOpenDepositAnomalies: async () => {}, console,
   };
@@ -212,6 +301,15 @@ assert.doesNotMatch(asrc, /submitted|keepRow\s*=/, '화면에서 원래 줄을 �
     assert.ok(bd.innerHTML.includes('<td>119</td>'), '10c: 원장 있어 보존하는 줄을 드러낸다');
     assert.ok(bd.innerHTML.includes('리뷰 제출된 줄이 없습니다'), '10d: 보류 사유');
     assert.ok(bd.innerHTML.includes('이대로 복원 (2건)'), '10e: 실행 건수를 버튼에 적는다');
+    assert.ok(bd.innerHTML.includes('type="radio"'), '10e2: 보류건은 줄을 고를 수 있게 그린다');
+    assert.ok(bd.innerHTML.includes('그대로 보류'), '10e3: 고르지 않는 선택지도 준다');
+
+    // 사람이 고른 값이 그대로 서버로 간다
+    picks = [{ dataset: { edit: 'e9', row: 'r9' } }, { dataset: { edit: 'e8', row: '' } }];
+    await sandbox._pmApplyOverlayFix();
+    assert.deepEqual(posted.decisions, [{ editId: 'e9', rowId: 'r9' }],
+      '10e4: 고른 것만 보내고, 고르지 않은 건은 보내지 않는다');
+    picks = [];
 
     await sandbox._pmApplyOverlayFix();
     assert.equal(posted && posted.confirm, true, '10f: confirm 을 보낸다');

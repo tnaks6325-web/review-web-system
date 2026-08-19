@@ -3057,6 +3057,7 @@ router.post('/payment/repair/deposit-overlay-fix', authMiddleware, adminOrMaster
     }
     res.json(await manualDepositRepairSvc.applyOverlayFanoutFix({
       sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''), by: _by(req),
+      decisions: Array.isArray(b.decisions) ? b.decisions.slice(0, 500) : null,
     }));
   } catch (err) {
     if (err && err.code) return res.status(400).json({ ok: false, code: err.code, error: err.message });
