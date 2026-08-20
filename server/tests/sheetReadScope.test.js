@@ -66,7 +66,9 @@ t('2a 쓰기 쿼리 0 · 시트/Drive API 0', () => {
 });
 
 console.log('\n[3] 사유 분류 — 스텁 pool 로 실제 실행');
+let lastErrSql = null;
 function withStub(rows, run) {
+  lastErrSql = null;
   const poolPath = require.resolve('../src/db/pool');
   const orig = require.cache[poolPath];
   const stub = { query: async (sql) => {
@@ -74,6 +76,11 @@ function withStub(rows, run) {
     if (/HAVING BOOL_AND/.test(sql)) return { rows: rows.fully };
     if (/FILTER \(WHERE COALESCE\(sheetless, FALSE\)\)/.test(sql)) return { rows: rows.tc };
     if (/ORDER BY sheet_id, tab_name/.test(sql)) return { rows: rows.names || [] };
+    // ★★ 더 좁은 조건을 먼저 — 두 쿼리 모두 order_submissions 라 순서를 바꾸면
+    //   실패 사유 조회가 상태 집계 fixture 를 받아 조용히 통과한다(csEntryRework 실측 함정).
+    if (/FROM order_submissions/.test(sql) && /GROUP BY 1, 2, 3/.test(sql)) {
+      lastErrSql = sql; return { rows: rows.errs || [] };
+    }
     if (/FROM order_submissions/.test(sql)) return { rows: rows.pend || [] };
     if (/FROM raw_sheet_tabs/.test(sql)) return { rows: rows.mir || [] };
     throw new Error('예상 못한 쿼리: ' + sql.slice(0, 60));
@@ -106,6 +113,14 @@ const FIXTURE = {
     { sheetId: 'S1', status: 'failed', n: 1, oldest: '2026-08-18T00:00:00Z', newest: '2026-08-18T00:00:00Z' },
     // ★ 실측 최다 상태 — 크론이 손대지 않는 갈래(주문 자체는 이미 written)
     { sheetId: 'S2', status: 'conflict', n: 2, oldest: '2026-07-01T00:00:00Z', newest: '2026-07-02T00:00:00Z' },
+  ],
+  // 실패 사유 묶음 — S1 은 ERROR_CAP(5) 초과 확인용으로 6가지를 준다
+  errs: [
+    { sheetId: 'S1', tabName: '0801 살아있는작업', error: 'RAW 메타 없음', n: 4,
+      oldest: '2026-08-18T00:00:00Z', newest: '2026-08-18T00:00:00Z' },
+    ...Array.from({ length: 5 }, (_, i) => ({
+      sheetId: 'S1', tabName: 'T' + i, error: '사유' + i, n: 1,
+      oldest: '2026-08-18T00:00:00Z', newest: '2026-08-18T00:00:00Z' })),
   ],
   mir: [{ sheetId: 'S1', mirroredAt: '2026-08-19T10:00:00Z' }],
 };
@@ -282,6 +297,47 @@ let R = null;
     const map = FE.slice(FE.indexOf('var _RS_STATUS = {'), FE.indexOf('function _rsStatusLine'));
     for (const st of ['conflict', 'stuck_manual', 'canceled_sheet_dirty', 'pending_no_row'])
       assert.ok(new RegExp(st + "\\s*:").test(map), `★ '${st}' 라벨이 없다 — 화면에 영문이 그대로 나간다`);
+  });
+
+  console.log('\n[8] 실패 사유 — 무엇이 왜 막혔는지');
+  await withStub(FIXTURE, async (svc) => {
+    const r = await svc.readScope({});
+    const s1 = r.items.find(i => i.sheetId === 'S1');
+    t('8a ★ 재시도 대상 상태만 조회한다(conflict 의 셀 원문을 화면으로 끌어오지 않는다)', () => {
+      assert.ok(lastErrSql, '★ 실패 사유 조회가 아예 없다');
+      assert.ok(/mirror_status, 'pending'\) = ANY\(\$2/.test(lastErrSql),
+        '★ 상태 목록으로 좁히지 않는다 — conflict·stuck_manual 이 섞인다');
+      assert.ok(!svc.RETRYABLE_STATUSES.includes('conflict') && !svc.RETRYABLE_STATUSES.includes('stuck_manual'),
+        '★ 재시도 목록이 넓어졌다');
+    });
+    t('8b 사유 묶음이 그 시트 행에 실린다', () => {
+      assert.ok(Array.isArray(s1.pendingErrors) && s1.pendingErrors.length, '★ 사유가 안 실렸다');
+      assert.strictEqual(s1.pendingErrors[0].error, 'RAW 메타 없음');
+      assert.strictEqual(s1.pendingErrors[0].n, 4);
+      assert.ok(s1.pendingErrors[0].tabName, '★ 어느 탭인지 없으면 찾아갈 수 없다');
+    });
+    t('8c ★ 상한 초과분을 조용히 자르지 않는다(건수로 고지)', () => {
+      assert.strictEqual(s1.pendingErrors.length, svc.ERROR_CAP);
+      assert.strictEqual(s1.pendingErrorsMoreGroups, 1);
+      assert.strictEqual(s1.pendingErrorsMoreOrders, 1);
+    });
+    t('8d 사유 없는 시트는 빈 배열(0 으로 꾸미지 않는다)', () => {
+      const s2 = r.items.find(i => i.sheetId === 'S2');
+      assert.deepStrictEqual(s2.pendingErrors, []);
+    });
+  });
+  t('8e ★ 화면은 서버 묶음을 그대로 그리고 사유를 escape 한다', () => {
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const seen = [];
+    const sandbox = { $: () => ({ innerHTML: '' }), esc: v => { seen.push(String(v == null ? '' : v)); return String(v == null ? '' : v).replace(/</g, '&lt;'); }, api: async () => ({}), Date, console };
+    vm.createContext(sandbox);
+    vm.runInContext(FE.slice(start, end), sandbox);
+    sandbox.__it = { pendingErrors: [{ tabName: '<b>탭</b>', error: '<img src=x onerror=1>', n: 2, oldest: '2026-08-18T00:00:00Z' }],
+      pendingErrorsMoreGroups: 2, pendingErrorsMoreOrders: 9 };
+    const out = vm.runInContext('_rsErrLines(__it)', sandbox);
+    assert.ok(!/<img src=x/.test(out), '★ 사유 원문이 escape 없이 나간다(시트 API 문자열)');
+    assert.ok(/2건/.test(out) && /외 2가지 사유 9건/.test(out), '★ 건수·잘린 고지가 없다');
+    assert.strictEqual(vm.runInContext('_rsErrLines({})', sandbox), '', '★ 사유 없으면 빈 줄을 그린다');
   });
 
   console.log(`\n${fail ? '❌' : '✅'} sheetReadScope: ${pass} passed, ${fail} failed`);

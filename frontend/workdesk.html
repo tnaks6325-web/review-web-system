@@ -10565,6 +10565,20 @@ function _rsPendTitle(it){
   var b = it.pendingNewest ? new Date(it.pendingNewest).toLocaleDateString('ko-KR') : '';
   return (a && b) ? ('제출 ' + a + ' ~ ' + b) : '';
 }
+/* 실패 사유 — ★ 서버가 준 묶음을 **그대로** 그린다(화면에서 분류하지 않는다).
+   ★ 사유 문자열은 시트 API 원문이라 반드시 escape. ★ 잘린 묶음은 건수로 고지(조용한 누락 금지). */
+function _rsErrLines(it){
+  var list = it.pendingErrors;
+  if(!Array.isArray(list) || !list.length) return '';
+  var rows = list.map(function(e){
+    var when = e.oldest ? new Date(e.oldest).toLocaleDateString('ko-KR') : '';
+    return '<div title="'+esc(e.tabName||'')+(when?(' · 최초 '+esc(when)):'')+'">'+
+      '<b>'+e.n+'건</b> '+esc(e.tabName||'')+' — '+esc(e.error||'')+'</div>';
+  }).join('');
+  if(it.pendingErrorsMoreGroups) rows += '<div>외 '+it.pendingErrorsMoreGroups+'가지 사유 '+
+    it.pendingErrorsMoreOrders+'건</div>';
+  return '<div style="margin-top:4px;font-weight:400;font-size:10.5px;color:#B45309;line-height:1.5;text-align:left">'+rows+'</div>';
+}
 /* ★★ 크론이 재시도하는 건과 손대지 않는 건을 **갈라서** 말한다 — 합치면 "끄면 안 된다"는 틀린 결론이 된다.
    판정 목록은 서버(`retryableStatuses`)가 준다(화면에 사본 금지). 못 받으면(구버전 백엔드) 종전 문구로 접는다. */
 function _rsPendingBanner(r){
@@ -10604,7 +10618,7 @@ function _rsRender(){
       <td style="text-align:right">${it.tabs||0}</td>
       <td style="text-align:right${it.pendingOrders?';color:#DC2626;font-weight:700':''}"
           title="${esc(_rsPendTitle(it))}">${it.pendingOrders||0}${
-        it.pendingOrders?`<div style="font-weight:400;font-size:10.5px;color:#8B94A1">${esc(_rsStatusLine(it.pendingByStatus, true))}</div>`:''}</td>
+        it.pendingOrders?`<div style="font-weight:400;font-size:10.5px;color:#8B94A1">${esc(_rsStatusLine(it.pendingByStatus, true))}</div>`:''}${_rsErrLines(it)}</td>
       <td style="font-size:11px;color:#8B94A1">${it.mirroredAt?esc(new Date(it.mirroredAt).toLocaleString('ko-KR')):'-'}</td>
     </tr>`).join('');
   box.innerHTML = `<div class="ovnote">

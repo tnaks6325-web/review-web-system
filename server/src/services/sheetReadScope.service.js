@@ -30,6 +30,8 @@ function _db() { return _pool || (_pool = require('../db/pool')); }
 
 const LIST_CAP = 300;      // 목록 상한(초과분은 건수로만 — 조용히 자르지 않는다)
 const NAME_CAP = 5;        // 시트당 보여줄 탭 이름 수
+const ERROR_CAP = 5;       // 시트당 보여줄 실패 사유 묶음 수(초과분은 건수로만)
+const ERROR_TEXT_CAP = 200;// 사유 문자열 상한 — 시트 API 원문이 길다
 
 /**
  * ★★ 미반영 주문의 상태는 **두 부류로 갈린다 — 뭉뚱그리면 판단이 뒤집힌다** (2026-08-20 실측).
@@ -126,6 +128,30 @@ async function readScope({ limit = LIST_CAP } = {}) {
     pendingByStatus[r.status] = (pendingByStatus[r.status] || 0) + r.n;
   }
 
+  /* ⑤-2 실패 사유 — ★ **재시도 대상 상태만** 본다.
+     그 밖(`conflict`·`stuck_manual`)은 크론이 손대지 않으므로 "왜 아직 못 썼나"의 답이 아니고,
+     `conflict` 의 `sheet_error` 에는 **시트 셀 원문**이 실려 있어 굳이 화면으로 끌어올 이유가 없다.
+     ★ 사유는 그대로 세어 보여줄 뿐 분류하지 않는다(사유 표를 만들면 그게 또 하나의 판정 사본이 된다). */
+  const { rows: errRows } = await db.query(
+    `SELECT sheet_id AS "sheetId",
+            COALESCE(NULLIF(tab_name, ''), '(탭 미상)') AS "tabName",
+            LEFT(COALESCE(NULLIF(sheet_error, ''), '(사유 기록 없음)'), $3::int) AS "error",
+            COUNT(*)::int AS n,
+            MIN(submitted_at) AS "oldest", MAX(submitted_at) AS "newest"
+       FROM order_submissions
+      WHERE sheet_id = ANY($1::text[]) AND deleted_at IS NULL
+        AND COALESCE(mirror_status, 'pending') = ANY($2::text[])
+      GROUP BY 1, 2, 3
+      ORDER BY n DESC`, [reading, RETRYABLE_STATUSES, ERROR_TEXT_CAP]);
+  const errMap = new Map();        // sheetId -> { list, moreGroups, moreOrders }
+  for (const r of errRows) {
+    const cur = errMap.get(r.sheetId) || { list: [], moreGroups: 0, moreOrders: 0 };
+    if (cur.list.length < ERROR_CAP) {
+      cur.list.push({ tabName: r.tabName, error: r.error, n: r.n, oldest: r.oldest, newest: r.newest });
+    } else { cur.moreGroups += 1; cur.moreOrders += r.n; }   // 조용히 자르지 않는다
+    errMap.set(r.sheetId, cur);
+  }
+
   // ⑥ 마지막 미러 시각(그 시트를 실제로 읽고 있다는 증거)
   const { rows: mirRows } = await db.query(
     `SELECT sheet_id AS "sheetId", MAX(mirrored_at) AS "mirroredAt"
@@ -156,6 +182,9 @@ async function readScope({ limit = LIST_CAP } = {}) {
         liveTabNames: nameMap.get(sheetId) || [],
         pendingOrders: pending,
         pendingByStatus: pend ? pend.byStatus : {},
+        pendingErrors: (errMap.get(sheetId) || { list: [] }).list,
+        pendingErrorsMoreGroups: (errMap.get(sheetId) || {}).moreGroups || 0,
+        pendingErrorsMoreOrders: (errMap.get(sheetId) || {}).moreOrders || 0,
         pendingOldest: pend ? pend.oldest : null,
         pendingNewest: pend ? pend.newest : null,
         mirroredAt: mirMap.get(sheetId) || null,
@@ -184,4 +213,4 @@ async function readScope({ limit = LIST_CAP } = {}) {
   };
 }
 
-module.exports = { readScope, REASONS, LIST_CAP, RETRYABLE_STATUSES };
+module.exports = { readScope, REASONS, LIST_CAP, RETRYABLE_STATUSES, ERROR_CAP };
