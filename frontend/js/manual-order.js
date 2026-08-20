@@ -30,6 +30,17 @@
   }
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  /* ★★ 경로는 호스트가 재기준한다(`window.MANUAL_ORDER_API` — CAMPAIGN_ADMIN_API·CS_API_BASE 와 같은 장치).
+     리뷰웹시스템[3버전]은 인트라넷 SSO 토큰(via:'intranet')을 쓰는데 그 토큰은 authMiddleware 에서
+     `/api/trackb/*` 로만 도달 가능하다 → `/api/manual-order/...` 하드코딩이면 미리보기·제출이
+     403("인트라넷 연동 계정은 …Track B…에서만")으로 죽고 화면엔 '분해 실패'로만 보인다.
+     전역 미설정 = 종전 경로(관리자 대시보드·리뷰어 홈 동작 불변). 이미지 업로드/추출(/api/image/*)은
+     무인증 라우트라 재기준하지 않는다. */
+  function _moBase() {
+    var b = window.MANUAL_ORDER_API;
+    return (typeof b === 'string' && b) ? b.replace(/\/$/, '') : '/api/manual-order';
+  }
+
   async function api(path, opts) {
     const o = Object.assign({ headers: {} }, opts || {});
     o.headers['Authorization'] = 'Bearer ' + tok();
@@ -301,7 +312,7 @@
     if (!text.trim()) { alert('붙여넣은 내용이 없습니다.'); return; }
     let r;
     try {
-      r = await api('/api/manual-order/preview', { method: 'POST', body: JSON.stringify({ text }) });
+      r = await api(_moBase() + '/preview', { method: 'POST', body: JSON.stringify({ text }) });
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null }));
@@ -494,7 +505,7 @@
     // ★ 오늘 정원 초과는 **막지 않고 확인만 받는다**(사용자 확정 2026-08-19). 서버가 배치를
     //   시작하기 전에 판정해 `needConfirm`으로 되돌리므로, 이 시점까지 **쓰기는 0건**이다.
     //   확인하면 `allowOverDaily`로 재전송한다.
-    const post = (allowOverDaily) => api('/api/manual-order/submit', {
+    const post = (allowOverDaily) => api(_moBase() + '/submit', {
       method: 'POST',
       body: JSON.stringify({
         sheetId: CTX.sheetId, tabName: CTX.tabName, gid: CTX.gid || '',

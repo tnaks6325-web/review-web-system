@@ -1609,6 +1609,23 @@ router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnly
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _adminEditHandler(req, res, next));
 
+// ── 외부모집 구매양식 수동제출 ──────────────────────────────
+//   원본 `/api/manual-order/*` 는 adminOrMaster 전용인데, 인트라넷 SSO 토큰(via:'intranet')은
+//   authMiddleware 에서 `/api/trackb/*` 밖으로 나갈 수 없어 **작업보드에서 누르면 403**이었다
+//   ("인트라넷 연동 계정은 리뷰웹시스템[3버전](Track B)에서만 사용할 수 있습니다" — 붙여넣은 양식이
+//   서버에 닿지도 못하고 화면엔 '분해 실패'로 보인다). ⭐ 별표·설정 탭과 같은 재기준 누락 계열.
+//   ★ 권한 = 접수·발행과 같은 2단(내부인 열람 · 편집 허용명단만 실행) — 이 창구는 리뷰어 등록·
+//     주문 원장 기록·정원 차감·시트 쓰기를 일으키므로 보는 사람 전부에게 열지 않는다.
+//   ★ 로직 복제 0 — 기존 핸들러를 그대로 태운다(원본 라우트·게이트는 무변경).
+const _moRoutes = require('./manualOrder.routes');
+const _moPreview = _delegate(_moRoutes, 'post', '/preview');
+const _moSubmit = _delegate(_moRoutes, 'post', '/submit');
+
+router.post('/manual-order/preview', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moPreview(req, res, next));
+router.post('/manual-order/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moSubmit(req, res, next));
+
 // ── 모집공고 ────────────────────────────────────────────────
 //   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.
 //   ★ 카드는 프론트에서 **공용 렌더러(campaign-cards.js)** 로 그린다 — 관리자 대시보드와

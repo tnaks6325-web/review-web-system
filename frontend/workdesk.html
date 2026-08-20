@@ -5549,7 +5549,6 @@ function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
-  const canExternalManualOrder=STATE.role==='master'||STATE.role==='admin';
   const canDeleteOrder=_isInternalRole();
   // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
@@ -5583,7 +5582,7 @@ function renderWorkdesk(wd){
       (canEdit?`<td>${canDeleteOrder&&r.hasOrder?`<button class="rdel" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${r.id}')">삭제</button>`:''}${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
       +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
     tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
-      <div id="addbox"></div>${canExternalManualOrder?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}
+      <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>
       ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
   }
   const sot=wd.sourceOfTruth||'sheet';
@@ -5618,6 +5617,7 @@ function renderWorkdesk(wd){
   if(gridMode) _fitGrid();   // 표폭 = 고정폭 합
   if(!STATE._fitResizeBound){ STATE._fitResizeBound=true; let t=null;
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
+  _emoSyncBtn();   // 외부모집 수동제출 버튼 — 편집 허용명단이 도착하면 그 자리에 채운다(AE 포함)
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
   // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0).
@@ -6768,7 +6768,7 @@ function buildGrid(wd){
       ${_folBarHtml()}
       <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
-    <div id="addbox"></div>${canOpenExternalManualOrder()?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}`;
+    <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
@@ -13548,7 +13548,22 @@ function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
   const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';
   const box=$('#addbox'); if(box){ box.innerHTML=`<div class="add" style="margin-top:10px"><label>숨김 참여자 (${wd.hiddenRows.length})</label>${list}</div>`; box.scrollIntoView({behavior:'smooth'}); }
 }
-function canOpenExternalManualOrder(){ return STATE.role==='master'||STATE.role==='admin'; }
+/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = 내부인 + 편집 허용명단)와 1:1.
+ *  ★ AE(staff)도 명단에 있으면 실행할 수 있다(사용자 확정 2026-08-20). 명단 판정이 아직 안 왔으면
+ *    버튼을 그리지 않는다 — "눌러도 403 나는 버튼"을 만들지 않는다(도착하면 `_emoSyncBtn` 이 채운다). */
+function canOpenExternalManualOrder(){
+  if(STATE.role==='master'||STATE.role==='admin') return true;
+  return STATE.role==='staff' && STATE.campEdit===true;
+}
+function _emoBtnHtml(){ return canOpenExternalManualOrder()
+  ? `<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>` : ''; }
+/** 편집 허용명단 도착 후 버튼 자리를 채운다(홈의 [＋공고발행]과 같은 재료·같은 1회 조회). */
+function _emoSyncBtn(){
+  if(!_isInternalRole()) return;
+  const fill=()=>{ const b=document.getElementById('emoBtnBox'); if(b) b.innerHTML=_emoBtnHtml(); };
+  if(STATE.campEdit!=null){ fill(); return; }
+  if(typeof _loadCampPerm==='function') _loadCampPerm().then(fill).catch(()=>{});
+}
 function openExternalManualOrder(){
   const t=STATE.cur;
   if(!t){ toast('작업을 먼저 선택해 주세요.'); return; }
@@ -15380,6 +15395,10 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/recruit-modal.js?v=20260819-quota-fixed"></script>
+<!-- 외부모집 구매양식 수동제출 — 관리자 대시보드와 같은 공용 모달. 서버 경로만 Track B
+     네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/manual-order/* 에 도달 자체가 불가능
+     → /api/trackb/manual-order/* 프록시, 권한은 편집 허용명단). -->
+<script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
 <script src="js/manual-order.js"></script>
 <script src="js/index-recruit.js?v=20260819-reviewmix-cache"></script>
 <script>
