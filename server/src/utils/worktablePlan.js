@@ -583,6 +583,23 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     });
   }
 
+  /* ★★ 상품옵션 칸도 **없으면 자동으로 덧붙인다**(2026-08-20 · 리뷰옵션과 대칭).
+     종전에는 배분만 해 두고 칸이 없으면 `no_option_column` **경고만** 냈다 — 그런데 그 경고는
+     발행 미리보기 한 번만 스쳐 지나가고, 만들어진 표에는 옵션이 들어갈 칸이 영영 없어
+     **리뷰어가 고른 옵션이 조용히 사라진다**(8/20 실측 사고). 칸이 없으면 배분이 사라진다는
+     점에서 리뷰옵션·택배송장번호와 같은 성질이라 같은 규율로 처리한다.
+     ★ 자리 = 자동 열(번호·구매일자) 바로 뒤(작업지시 칸은 앞쪽). 분류는 classifyHeaders 단일 출처.
+     ★ 리뷰옵션 칸이 있어도 그건 상품옵션 기입처가 아니다 — 따로 만든다(경고 판정과 같은 규칙). */
+  if (buckets.length && !columns.some(c => c.role === 'option' && !isReviewOptionHeader(c.name))) {
+    const [oc] = classifyHeaders(['옵션'], {});
+    let at = 0;
+    while (at < columns.length && columns[at].tier === 'auto') at++;
+    columns.splice(at, 0, {
+      name: oc.header, role: oc.role, label: oc.label, tier: oc.tier,
+      conflict: oc.conflict || null, origin: 'system', typeKey: null,
+    });
+  }
+
   const rows = [];
   for (let i = 0; i < total; i++) {
     rows.push({
@@ -643,9 +660,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     const outside = holidays.filter(h => h < first || h > last);
     if (outside.length) warnings.push({ code: 'holiday_outside', message: `제외 날짜 중 진행 기간 밖이라 영향이 없는 날: ${outside.join(', ')}` });
   }
-  // ★ 리뷰옵션 칸은 상품옵션 기입처가 아니다 — 그 칸만 있고 상품옵션 칸이 없으면 여전히 경고.
-  if (buckets.length && !columns.some(c => c.role === 'option' && !isReviewOptionHeader(c.name))) {
-    warnings.push({ code: 'no_option_column', message: '옵션을 나눴지만 표에 옵션 열이 없어 기입되지 않습니다. 공통 열에 옵션 칸을 추가하세요.' });
+  /* ★ 옵션 칸은 위에서 **자동으로 덧붙였다** — 템플릿에 없어서 시스템이 만든 경우 그 사실을 알린다
+     (조용한 자동 추가 금지). 종전 `no_option_column` 경고(칸이 없어 기입 안 됨)는 도달 불가. */
+  if (buckets.length && columns.some(c => c.origin === 'system' && c.role === 'option' && !isReviewOptionHeader(c.name))) {
+    warnings.push({ code: 'option_column_added', message: '표준 열에 옵션 칸이 없어 시스템이 「옵션」 열을 추가했습니다(리뷰어가 고른 옵션이 이 칸에 기입됩니다).' });
   }
   if (optionCountFallbackSum != null) {
     warnings.push({ code: 'option_count_mismatch', message: `작업오더의 옵션별 수량 합계(${optionCountFallbackSum}건)가 총 건수(${total}건)와 달라 균등 배분했습니다.` });

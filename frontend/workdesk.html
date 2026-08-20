@@ -3619,6 +3619,92 @@ async function wrRun(){
     if (idx >= 0) selTab(idx);
   } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
 }
+/* ── 🧩 옵션 열 (무시트 작업 전용, 2026-08-20) ────────────────────────────────
+   왜: 리뷰어가 참여할 때 고른 옵션은 원장(`order_submissions.selected_opt_key`)에 살아 있는데,
+   작업표에 **옵션 칸이 없으면** 기입될 곳이 없어 표에도 안 뜨고 조용히 사라졌다.
+   (작업표 열 구성은 작업오더의 옵션만 보고, 공고 옵션은 참조하지 않는다.)
+   ★ 이 창구는 **칸을 만들고 이미 들어온 주문의 선택값을 소급 기입**한다.
+   ★ 미리보기(쓰기 0) → 실행 2단계. 판정·값은 전부 서버가 정한다(프론트 재계산 0).
+   ★ 기입은 blank-only — 관리자가 적어 둔 작업지시('텍스트'·'포토리뷰')는 덮지 않는다. */
+let _OC = null;
+function _ocCan(){
+  return !!(STATE.cur && STATE.cur.sheetless === true
+    && (STATE.role === 'master' || STATE.role === 'admin'));   // 서버 게이트(adminOrMaster)와 1:1
+}
+function closeOptColModal(){ const o = document.getElementById('ocOv'); if (o) o.remove(); _OC = null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if (!window._ocKeyBound) {
+  window._ocKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('ocOv')) closeOptColModal(); });
+}
+function openOptColModal(){
+  if (!_ocCan()) return;
+  const t = STATE.cur;
+  _OC = { sheetId: t.sheetId, tabName: t.tabName, prev: null, err: null, busy: false };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'ocOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🧩 옵션 열</div>
+    <div class="wbl-db" id="ocBody"></div>
+    <div class="wbl-df" id="ocFoot"></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
+  _ocRender(); ocPreview();
+}
+function _ocRender(){
+  const b = document.getElementById('ocBody'); if (!b || !_OC) return;
+  const f = document.getElementById('ocFoot');
+  const p = _OC.prev;
+  if (f) f.innerHTML = `<button class="wbl-b" onclick="closeOptColModal()">닫기</button>
+      <button class="wbl-b" onclick="ocPreview()">미리보기</button>
+      <button class="wbl-b dark" id="ocGo" disabled onclick="ocRun()">🧩 옵션 열 만들기 · 소급 기입</button>`;
+  b.innerHTML = `<b>${esc(_OC.tabName || '')}</b>
+    <div class="wbl-facts">표에 <b>옵션</b> 칸을 만들고, 리뷰어가 참여할 때 고른 옵션을 <b>이미 들어온 주문에도 소급 기입</b>합니다.<br>
+      값이 이미 적혀 있는 칸은 덮지 않습니다(관리자 작업지시 보호). 구글시트·주문 기록·정원·리뷰·입금 기록은 건드리지 않습니다.</div>
+    ${p ? `<div class="wbl-facts">
+        ${p.alreadyHadColumn ? '옵션 칸은 <b>이미 있습니다</b>.' : `옵션 칸 <b>「${esc(p.headerName)}」</b>을 새로 만듭니다.`}
+        · 소급 기입 <b>${p.backfillCount}줄</b>
+        ${p.skippedAlreadyFilled ? ` · 이미 값이 있어 건너뜀 ${p.skippedAlreadyFilled}줄` : ''}
+        ${p.skippedNoOrderOption ? ` · 고른 옵션 기록이 없는 줄 ${p.skippedNoOrderOption}줄` : ''}</div>
+      ${(p.rows && p.rows.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>기입할 옵션</th></tr></thead><tbody>
+        ${p.rows.map(x => `<tr><td>${x.seq}</td><td><b>${esc(String(x.optKey))}</b></td></tr>`).join('')}
+        </tbody></table>${p.rowsTruncated ? `<div class="wbl-facts">…외 ${p.rowsTruncated}줄</div>` : ''}` : ''}
+      ${(!p.headerAdded && !p.backfillCount) ? '<div class="wbl-facts">이미 정리된 상태입니다 — 바꿀 것이 없습니다.</div>' : ''}` : ''}
+    ${_OC.err ? `<div class="wbl-warn">${esc(_OC.err)}</div>` : ''}`;
+  const go = document.getElementById('ocGo');
+  if (go) go.disabled = !(p && (p.headerAdded || p.backfillCount > 0)) || _OC.busy;
+}
+async function ocPreview(){
+  if (!_OC || _OC.busy) return;
+  _OC.busy = true; _OC.err = null; _ocRender();
+  try {
+    _OC.prev = await api('/api/trackb/worktable/option-column', {
+      method: 'POST', body: JSON.stringify({ sheetId: _OC.sheetId, tabName: _OC.tabName }) });
+    if (_OC.prev && _OC.prev.ok === false) { _OC.err = _OC.prev.error || '미리보기에 실패했습니다.'; _OC.prev = null; }
+  } catch (e) { _OC.err = (e && e.message) || '미리보기에 실패했습니다.'; _OC.prev = null; }
+  _OC.busy = false; _ocRender();
+}
+async function ocRun(){
+  if (!_OC || _OC.busy || !_OC.prev) return;
+  const p = _OC.prev;
+  const msg = `${_OC.tabName}\n\n`
+    + (p.headerAdded ? `· 표에 「${p.headerName}」 칸을 만듭니다\n` : '')
+    + (p.backfillCount ? `· 이미 들어온 주문 ${p.backfillCount}줄에 고른 옵션을 적습니다(빈 칸만)\n` : '')
+    + '\n실행할까요?';
+  if (!confirm(msg)) return;
+  _OC.busy = true; _OC.err = null; _ocRender();
+  try {
+    const r = await api('/api/trackb/worktable/option-column', {
+      method: 'POST', body: JSON.stringify({ sheetId: _OC.sheetId, tabName: _OC.tabName, confirm: true }) });
+    if (r && r.ok === false) throw new Error(r.error || '실행에 실패했습니다.');
+    if (r && r.rebuildError) toast('열은 만들었지만 장부 재생성에 실패했습니다 — [⋯] → 작업표 재구성을 실행하세요.');
+    else toast(`옵션 열 정리 완료 — ${r.headerAdded ? '칸 생성 · ' : ''}소급 ${r.backfillCount || 0}줄`);
+    closeOptColModal();
+    await reloadWorkdesk().catch(() => {});
+  } catch (e) {
+    if (_OC) { _OC.err = (e && e.message) || '실행에 실패했습니다.'; _OC.busy = false; _ocRender(); }
+    return;
+  }
+  if (_OC) _OC.busy = false;   // 성공 경로는 이미 닫혔다(_OC=null) — 닫힌 뒤 상태를 만지지 않는다
+}
+
 /* ── 🔢 번호 정리 (무시트 작업 전용) ──────────────────────────────────────────
    왜: 준비된 줄을 다 쓰고 나면 주문이 들어올 때 줄이 이어붙는데, 그 줄은 `번호`·`담당자` 가
    영구 빈칸이었다(매퍼가 그 두 칸을 쓰지 않는다). 게다가 뒤늦게 들어온 지난 날짜 주문이
@@ -5515,7 +5601,7 @@ function renderWorkdesk(wd){
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
+    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_ocCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ocCan()?`<button class="btn" onclick="openOptColModal()" title="표에 옵션 칸을 만들고, 리뷰어가 참여할 때 고른 옵션을 이미 들어온 주문에도 소급 기입한다(미리보기 후 실행 · 값이 있는 칸은 안 덮음)">🧩 옵션 열</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
          [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->

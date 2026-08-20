@@ -2901,6 +2901,33 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
+   작업표 옵션 열 보장 + 선택 옵션 소급 기입 — admin/master 전용 (2026-08-20)
+   ★ 리뷰어가 고른 옵션은 원장에 살아 있는데 작업표에 칸이 없어 기입되지 않던 작업의 복구
+     창구. **미리보기(dryRun 기본) → confirm:true 로 실행**, 쓰기 표면은 장부 헤더 +
+     `row_json` 두 곳뿐이고 기입은 blank-only 다(관리자 작업지시를 덮지 않는다).
+   ══════════════════════════════════════════════════════════════════════════ */
+router.post('/worktable/option-column', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { ensureOptionColumn, OptionColumnError } = require('../services/worktableOptionColumn.service');
+    const b = req.body || {};
+    try {
+      res.json(await ensureOptionColumn({
+        sheetId: b.sheetId, tabName: b.tabName,
+        dryRun: b.confirm !== true,
+        backfill: b.backfill !== false,
+        by: _by(req),
+      }));
+    } catch (e) {
+      if (e instanceof OptionColumnError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
    작업표 줄 ↔ 주문 링크 교정 — admin/master 전용 (일회성 복구, 2026-08-19)
    ★ 미리보기(dryRun 기본) → confirm:true 로 실행. 쓰기 표면은 링크 1칸(+중복정리가
      취소한 주문의 되돌리기)뿐이고, 한 건이라도 조건을 못 지키면 전부 되돌린다.
