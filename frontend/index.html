@@ -18,6 +18,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
+  <!-- 업로드 직전 이미지 축소(단일 출처) — 구매 캡처 보완 첨부가 413 되는 것 방지 -->
+  <script src="js/image-shrink.js"></script>
   <script src="js/campaign-cards.js?v=20260817-hidden-prerequisite-c119"></script>
   <script src="js/campaign-workdetail.js"></script>
   <!-- 외부모집 수동제출(공용 모달) — 진짜 admin_token 보유자가 참여형 카드에서 여는 경로 -->
@@ -1475,19 +1477,27 @@ function _mcOnFile(input) {
   const it = _mcItems.find(x => String(x.id) === String(_mcTargetId));
   if (!it) return;
   if (f.size > 12 * 1024 * 1024) { alert('이미지가 너무 큽니다(12MB 이하).'); return; }
-  const rd = new FileReader();
-  rd.onload = async () => {
-    const dataUrl = String(rd.result || '');
-    const b64 = dataUrl.split(',')[1];
+  /* ★★ 업로드 직전 축소(단일 출처 ImageShrink) — 서버 본문 상한이 10MB 인데 base64 는 원본의
+     약 1.33배라 큰 캡처는 413 으로 통째로 실패한다. 여기서 실패하면 리뷰어는 "첨부했다"고 믿는데
+     주문에는 여전히 캡처가 없어 독촉이 다시 나간다. 예산 안이면 원본 그대로 보낸다. */
+  (async () => {
+    let b64 = '', mime = f.type || 'image/jpeg';
+    if (window.ImageShrink) {
+      const got = await window.ImageShrink.fromFile(f, 1920, 0.8);
+      if (got && got.base64) { b64 = got.base64; mime = got.mime || mime; }
+    }
+    if (!b64) {   // 모듈 부재·축소 실패 → 원본으로 폴백(첨부 자체를 막지 않는다)
+      b64 = await new Promise(res => { const r0 = new FileReader(); r0.onload = () => res(String(r0.result || '').split(',')[1] || ''); r0.onerror = () => res(''); r0.readAsDataURL(f); });
+    }
     if (!b64) { alert('이미지를 읽지 못했습니다.'); return; }
-    const ext = f.type === 'image/png' ? 'png' : (f.type === 'image/webp' ? 'webp' : 'jpg');
+    const ext = mime === 'image/png' ? 'png' : (mime === 'image/webp' ? 'webp' : 'jpg');
     const nameBase = (it.recipient || it.orderer || '주문캡처');
     try {
       const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
       const r = await fetch(base + '/api/image/image-upload', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: b64, mimeType: f.type || 'image/jpeg', fileName: nameBase + '.' + ext,
+          imageBase64: b64, mimeType: mime, fileName: nameBase + '.' + ext,
           displayName: it.displayName || '', tabName: it.tabName || '', sheetId: it.sheetId || '',
           orderSubmissionId: it.id,        // ← 이 키로 서버가 capture_uploaded_at 을 채운다
         }),
@@ -1499,8 +1509,7 @@ function _mcOnFile(input) {
     } catch (e) {
       alert('업로드에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.');
     } finally { _mcTargetId = ''; }
-  };
-  rd.readAsDataURL(f);
+  })();
 }
 
 // '구매양식 반영중' 주문이 남아있을 때만 가벼운 자동 재조회(가시상태 한정·상한 6회≈3분).
