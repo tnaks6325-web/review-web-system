@@ -2401,20 +2401,36 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
         ORDER BY (status = 'active') DESC, created_at DESC`,
       [sheetId, tabName, gid]).catch(() => ({ rows: [] }));
     const c = camps[0] || null;
+    /* ★★ **값이 있는 최신 공고**(utils/campaignTabLateral 규율) — 차수 재발행으로 한 탭에 공고가
+       여럿일 때 기준 공고 하나만 보면 **최신 공고의 빈 칸이 옛 공고의 값을 가린다**. 리뷰타입에서
+       한 번 밟은 사고와 같은 자리다(그때는 구매확정 설정이 조용히 풀렸다). '미지정'은 관리자가
+       정하지 않은 것이라 가리지 않는다 — 최신이 명시돼 있으면 최신이 그대로 이긴다.
+       ★ **0 은 값이다**(무상 작업) — 빈 문자열·NULL 만 건너뛴다.
+       ★ 정원(총건수·일건수·다계정)에는 쓰지 않는다 — 그건 카드·apply 게이트가 보는 **그 공고**의
+         값이라, 다른 공고에서 주워 오면 화면과 게이트가 갈린다. */
+    const pick = (key) => {
+      for (const x of camps) { const v = x[key]; if (v != null && String(v).trim() !== '') return x; }
+      return null;
+    };
+    const feeCamp = pick('reviewFee');
+    const typeCamp = pick('reviewType');
+    const memoCamp = pick('transferMemo');
 
-    // 기간별 리뷰비 구간(082) — 실패해도 기존 review_fee 로 떨어진다(fail-soft)
+    /* 기간별 리뷰비 구간(082) — **리뷰비를 준 그 공고** 기준이어야 금액과 구간이 갈리지 않는다.
+       실패해도 기존 review_fee 로 떨어진다(fail-soft). */
     let schedules = [];
-    if (c) {
+    const schedCamp = feeCamp || c;
+    if (schedCamp) {
       const { rows: fs } = await db.query(
         `SELECT to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom", review_fee AS "reviewFee"
            FROM campaign_fee_schedules WHERE campaign_id = $1 ORDER BY effective_from`,
-        [c.id]).catch(() => ({ rows: [] }));
+        [schedCamp.id]).catch(() => ({ rows: [] }));
       schedules = fs;
     }
     /* ★ 0 을 null 로 접지 말 것 — "0원으로 정한 무상 작업"과 "값이 없는 공고"는 다르다.
        폴백 순서(공고 → 탭)는 입금관리(payment.service)와 **같아야** 한다. */
     const num = v => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
-    const campFee = num(c && c.reviewFee);
+    const campFee = num(feeCamp && feeCamp.reviewFee);
     const tabFee  = num(meta.tabReviewFee);
     const { resolveReviewFee } = require('../utils/campaignFee');
     const feeInfo = resolveReviewFee({ schedules, fallback: campFee != null ? campFee : (tabFee != null ? tabFee : 0) });
@@ -2440,10 +2456,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
       cashReceipt,
       reviewFee: feeInfo.fee, feeSource,
-      depositName: (meta.depositName || (c && c.transferMemo) || '') || null,
-      reviewType: (() => { const k = resolveReviewType({ campaignType: c && c.reviewType, tabReviewType: meta.reviewType }); return k; })(),
+      depositName: (meta.depositName || (memoCamp && memoCamp.transferMemo) || '') || null,
+      reviewType: resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType }),
       reviewTypeLabel: (() => {
-        const k = resolveReviewType({ campaignType: c && c.reviewType, tabReviewType: meta.reviewType });
+        const k = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
         return k ? (reviewTypeLabel(k) || k) : null;
       })(),
       campaignId: c ? c.id : null,

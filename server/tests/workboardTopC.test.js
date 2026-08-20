@@ -75,6 +75,26 @@ t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광�
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
 
+/* ★★ 값이 있는 최신 공고(campaignTabLateral 규율) — 차수 재발행 탭에서 **최신 공고의 빈 칸이
+   옛 공고의 값을 가리면** 리뷰비 1,500원짜리 작업이 "미설정"으로, 구매확정 작업이 리뷰타입
+   "—" 로 뜬다(리뷰타입에서 한 번 밟은 사고와 같은 자리). 0 은 값이다(무상 작업). */
+t('★ 리뷰비·리뷰타입·입금명은 "값이 있는 최신 공고"에서 고른다', (() => {
+  return /const pick = \(key\) => \{[\s\S]*?String\(v\)\.trim\(\) !== ''/.test(cond)
+    && /const feeCamp = pick\('reviewFee'\)/.test(cond)
+    && /const typeCamp = pick\('reviewType'\)/.test(cond)
+    && /const memoCamp = pick\('transferMemo'\)/.test(cond)
+    && /const campFee = num\(feeCamp && feeCamp\.reviewFee\)/.test(cond)
+    // ★ 개수를 센다 — reviewType·reviewTypeLabel 두 곳이라 존재만 보면 한 곳만 되돌린 변이를 놓친다(실측)
+    && (cond.match(/campaignType: typeCamp && typeCamp\.reviewType/g) || []).length === 2
+    && /memoCamp && memoCamp\.transferMemo/.test(cond);
+})());
+t('★ 리뷰비 구간은 리뷰비를 준 그 공고 기준(금액과 구간이 갈리지 않게)',
+  /const schedCamp = feeCamp \|\| c;/.test(cond) && /WHERE campaign_id = \$1[\s\S]{0,80}\[schedCamp\.id\]/.test(cond));
+t('★ 정원(총건수·일건수·다계정)에는 그 폴백을 쓰지 않는다 — 카드·apply 게이트가 보는 그 공고여야 한다',
+  /recruitTotal: num\(c && c\.recruitTotal\)/.test(cond)
+  && /dailyLimit:   num\(c && c\.dailyLimit\)/.test(cond)
+  && /multiAccount: c \?/.test(cond));
+
 console.log('\n── B. 서버: 구매 캡처 묶음 ──');
 const rv = fnBody(svc, 'async function reviewImagesForTab(');
 t('④ 구매 캡처 짝짓기는 sheet_row 하나 — 오염된 링크(order_submission_id)로 붙이지 않는다',
