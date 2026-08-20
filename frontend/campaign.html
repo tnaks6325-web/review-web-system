@@ -530,6 +530,8 @@ function renderPre(){
   if(_gateMask === 'policy'){ jb.disabled = true; jb.textContent = '참여 불가'; }
   renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
   renderPopNotice();    // ★ 064: 인기상품 참여 조건 안내(인기 공고만)
+  _applyPopLock();      // ★ 참여권 0건이면 [참여하기] 잠금(모르면 잠그지 않는다 — 서버가 최종 권위)
+  loadPopCredit();      // ★ 1회 조회(비차단) — 도착하면 안내·버튼을 다시 그린다
   renderCrNotice();     // ★ D안 ①: 현금영수증 대상 공고 참여 전 예고
   show('vPre');
 }
@@ -562,6 +564,46 @@ function renderCrNotice(){
    선행참여 우선순위가 있는 인기 공고는 명의별 "구매양식 제출완료" 이력을 기준으로
    첫 미완료 일반(비인기) 공고를 먼저 요구한다.
    서버 게이트(apply 403 popular_locked)가 최종 권위 — 여기 안내·목록은 UX 보조. */
+/* ★ 참여권 상태(popular-status). null = 모름(구버전 백엔드·조회 실패·비로그인·미리보기)
+   — **모르면 잠그지 않는다**(fail-open). 서버 apply 403 이 최종 권위이고 여기는 "누르기 전 고지"일 뿐. */
+let _popCredit = null;
+let _popCreditTried = false;   // 폴링·재렌더가 renderPre 를 반복 호출하므로 조회는 1회만
+
+function _setPopCredit(o){
+  if(!o) return;
+  const nd = Number(o.normalDone) || 0, pu = Number(o.popularUsed) || 0;
+  _popCredit = { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu) };
+}
+/** 인기 공고 + 로그인 세션이 있을 때만 1회 조회 → 안내 문구·참여 버튼 갱신. */
+async function loadPopCredit(){
+  if(_popCreditTried) return;
+  if(!(_camp && _camp.is_popular === true)) return;
+  if(PREVIEW) return;                                  // 미리보기는 진행 화면 확인이 목적 — 잠그지 않는다
+  const s = getSession();
+  if(!s || !s.phone8) return;                          // 비로그인은 종전대로(참여 클릭 시 로그인·내정보 유도)
+  _popCreditTried = true;
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/popular-status?phone8=' + encodeURIComponent(s.phone8));
+    const j = await r.json();
+    if(!(r.ok && j && j.ok)) return;                   // 실패 = 모름(잠그지 않음)
+    _setPopCredit(j);
+  }catch(_){ return; }
+  if($('vPre').style.display !== 'none'){ renderPopNotice(); _applyPopLock(); }
+}
+/** ★ 잠금은 "본계정 명의로만 참여하는 공고"에서만 — 크레딧은 명의별이라 타계정 참여가 열린 공고에서는
+   소유자 크레딧 0 이어도 그 타계정 명의로는 참여할 수 있다(잘못 잠그면 정당한 참여를 막는다). */
+function _popLockable(){
+  return !!(_camp && _camp.is_popular === true && _camp.multi_account_mode !== true
+            && !PREVIEW && _popCredit && _popCredit.credits === 0);
+}
+function _applyPopLock(){
+  const jb = $('joinBtn');
+  if(!jb || !_popLockable()) return;
+  if(jb.disabled) return;                              // 마감·옵션 마감 등 다른 사유가 이미 잠갔으면 그 문구를 유지
+  jb.disabled = true;
+  jb.textContent = '🔒 일반 모집 제출완료 후 참여 가능';
+}
+
 function renderPopNotice(){
   let box = $('popNotice');
   if(!(_camp && _camp.is_popular === true)){ if(box) box.style.display='none'; return; }
@@ -574,10 +616,17 @@ function renderPopNotice(){
     sec.insertBefore(box, $('preCard').nextSibling);
   }
   box.style.display = '';
+  // ★ 수치는 서버가 준 값만 그린다(모르면 줄 자체를 그리지 않는다 — 0건으로 꾸미지 않는다).
+  const c = _popCredit;
+  const line = !c ? ''
+    : (c.credits > 0
+        ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 제출완료 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
+        : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 제출완료 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
   box.innerHTML =
     '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
     '<div style="font-size:.82rem;line-height:1.65"><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
-    '<span class="muted">원하는 일반 모집을 선택해 제출완료한 뒤 인기상품으로 돌아오세요.</span></div>' +
+    '<span class="muted">참여 신청만 하고 취소하면 인정되지 않아요 — 구매양식 제출까지 완료해야 해요.</span></div>' +
+    line +
     '<button class="btn ghost" style="margin-top:10px;padding:10px" onclick="openPopGate()">📋 지금 참여 가능한 일반 모집 보기</button>';
 }
 
@@ -588,9 +637,12 @@ async function openPopGate(gateInfo){
   ovl.style.display = 'flex';
   const body = $('popGateBody');
   const cnt = $('popGateCount');
-  const normalDone = Number(gateInfo && gateInfo.normalDone) || 0;
-  const popularUsed = Number(gateInfo && gateInfo.popularUsed) || 0;
-  cnt.textContent = gateInfo
+  // ★ 수치 출처는 한 곳 — 클릭으로 받은 서버 응답(gateInfo) 없으면 이미 조회해 둔 참여권 상태를 쓴다.
+  //   둘 다 없으면(모름) 줄을 비운다 — 0건으로 꾸미지 않는다.
+  const info = gateInfo || _popCredit;
+  const normalDone = Number(info && info.normalDone) || 0;
+  const popularUsed = Number(info && info.popularUsed) || 0;
+  cnt.textContent = info
     ? `제출완료 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
     : '';
   body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 일반 모집을 불러오는 중…</div>';
@@ -1048,7 +1100,11 @@ async function _doApply(optionKey, sub){
     // ★ 공고별 참여 리뷰어 게이트(091) — 자리 미점유 상태에서 차단 안내(마감 위장/사유 고지)
     if(j.reason === 'reviewer_blocked'){ _renderGateBlocked(j); return; }
     // ★ 064: 인기상품 선행조건 미충족 → 일반 모집 목록 모달(테이블+참여 CTA)
-    if(j.reason === 'popular_locked'){ toast('선행 공고의 구매양식을 먼저 제출해주세요'); openPopGate(j); return; }
+    if(j.reason === 'popular_locked'){
+      // ★ 서버가 준 최신 수치로 화면을 맞춘다(다음 클릭부터는 누르기 전에 잠겨 보인다)
+      _setPopCredit(j); _popCreditTried = true; renderPopNotice(); _applyPopLock();
+      toast('선행 공고의 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
+    }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
     if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable'].includes(j.reason)){
