@@ -91,6 +91,57 @@ async function _saveBoardWriteOutcome({ batchId, outcome, stamp, by }) {
     [batchId, outcome.recorded, outcome.queued, outcome.skipped, outcome.failed, stamp || '', by || 'payment']);
 }
 
+/**
+ * 회차 단위 작업보드 입금칸 기록 — 결과 반영·소급 백필의 **공용 실행부**.
+ *
+ * ★★ **건별 장부 재생성 금지(완화 금지 — 2026-08-19 회차 #12 실사고)**
+ *   종전 결과 반영 경로는 `markDepositCells` 를 기본값으로 불러, 한 건 쓸 때마다 그 탭 장부를
+ *   통째로 다시 만들었다(`sheetlessStatus._writeCellAndRebuild`). 517건·20탭 회차에서 300~800행
+ *   재생성이 **517번 직렬**로 돌아 커밋 뒤 루프가 **6번째에서 끊겼고**, 입금 원장은 517건인데
+ *   작업보드 입금일은 **5건만** 남았다. 게다가 루프 끝의 `_saveBoardWriteOutcome` 에 도달하지
+ *   못해 `board_*` 가 전부 0 → 화면은 "입금일 미기록"이라고만 말했다.
+ *   → 쓰기는 모아서 하고 **탭당 1회만** 재생성한다(같은 회차 실측: 517건 약 40초).
+ *
+ * ★ 재생성은 **탭 단위로 격리**한다 — 한 탭이 실패해도 나머지 탭은 계속 간다. 값은 이미
+ *   작업표(`campaign_participants.row_json`)에 있으므로 다음 재생성에 자동 반영된다.
+ * ★ 무시트 판정은 `utils/sheetlessScope` 단일 출처(시트 기반 탭은 애초에 재생성 대상이 아니다).
+ *   백필 경로처럼 호출부가 `sheetless` 를 이미 알고 있으면 그 값을 쓴다(조회 순증 0).
+ * ★ 반환 모양은 종전과 동일하다(`recorded/queued/skipped/failed`) — 호출부가 자기 사유
+ *   (날짜 없는 건 등)를 `skipped` 에 더한다.
+ */
+async function _rebuildTouchedLedgers(items, by) {
+  const tabs = [...new Map((items || [])
+    .map(x => [`${x.sheetId}\u0000${x.tabName}`, x])).values()];
+  for (const tab of tabs) {
+    if (!tab.sheetId || !tab.tabName) continue;
+    try {
+      if (tab.sheetless !== true) {
+        const sheetless = await require('../utils/sheetlessScope').isSheetless(_db(), tab.sheetId, tab.tabName);
+        if (!sheetless) continue;   // 시트 기반 탭 — 장부는 시트에서 만들어진다
+      }
+      await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
+    } catch (e) {
+      logger.warn(`[paymentResult] 입금일 기록 후 장부 재생성 실패(값은 작업표에 남음) tab=${tab.tabName}: ${e.message}`);
+    }
+  }
+}
+
+async function _writeBoardDeposits(items, { by } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const writeResult = await paymentApply.markDepositCells(list,
+    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
+  await _rebuildTouchedLedgers(list, by);
+  const verification = await paymentApply.verifyDepositCells(list) || {};
+  const queued = Number(writeResult.queued) || 0;
+  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
+  return {
+    recorded: Number(verification.verified) || 0,
+    queued,
+    skipped: Number(writeResult.skipped) || 0,
+    failed: (Number(writeResult.failed) || 0) + verificationMissing,
+  };
+}
+
 /** DB 행 → 짝맞추기 입력 모양(파서는 DB 컬럼명을 모른다) */
 function _itemView(r) {
   return {
@@ -119,7 +170,11 @@ function _pairView(p) {
     holder: it.accountHolder,
     memo: it.transferMemo,
     status: it.status,
+    /* ★ 이미 처리된 건(paid/failed)의 표시는 **항목 상태가 정한다** — 라벨링 2차가 결과 줄을
+         붙여도 판정을 바꾸지 않는다(2차는 이체시각을 채우려고 붙이는 것뿐이다).
+         이 분기가 없으면 실패로 확정된 건이 파일의 성공 줄과 짝지어져 '성공'으로 보인다. */
     outcome: it.status === 'paid' ? 'already_paid'
+           : it.status === 'failed' ? 'not_in_file'
            : !p.result ? 'not_in_file'
            : (p.success ? 'success' : 'failed'),
     resultStatus: p.result ? p.result.statusRaw : '',
@@ -160,8 +215,20 @@ async function _analyze(batchId, fileName, base64) {
   const targets = items.filter(it => it.status === 'pending');
   const m = matchResults(targets, parse.rows);
 
-  const donePairs = items.filter(it => it.status !== 'pending')
-    .map(it => ({ item: it, result: null, matchKey: '', success: false, reason: 'already' }));
+  /* ★★ 2차는 **라벨링 전용**(반영 대상 아님) — 이미 처리된 건에도 결과 줄을 붙여 본다.
+       왜: 반영이 끝난 뒤 같은 파일을 다시 올리면 pending 이 0 이라 파일의 **모든 줄이
+       "짝 없음"** 이 되어 화면이 그것을 "미확인 이체"라고 불렀다(2026-08-19 회차 #12:
+       실제 미확인은 1건인데 **518건**으로 표시). 미확인 행에는 [작업 검색·대조] → 승인
+       경로가 붙어 있어, 이미 입금된 517건에 **이중 입금**을 낼 입구가 열려 있었다.
+     ★★ **판별은 정보 일치(계좌 숫자 + 금액)뿐 — 줄 번호를 근거로 쓰지 않는다**(사용자 확정
+       2026-08-19): 은행 다건이체는 **내려받은 순서대로 이체되지 않는 경우가 있어** 결과 파일의
+       행 순서가 회차 순서와 다를 수 있다. `matchResults` 의 키가 이미 계좌+금액이라 순서가
+       뒤바뀌어도 같은 결과가 나온다(실측: 파일을 역순으로 뒤집어도 미확인 1건 동일).
+     ★ **1차에서 안 쓰인 줄만** 넘긴다 — 결과 줄은 1:1 로 소비되므로, 은행이 **진짜로 두 번**
+       보낸 경우 두 번째 줄은 짝지을 항목이 남지 않아 **그대로 미확인으로 남는다**(실측 확인).
+       즉 이 2차는 중복 이체를 숨기지 않는다. */
+  const labeled = matchResults(items.filter(it => it.status !== 'pending'), m.unmatchedResults);
+  const donePairs = labeled.pairs.map(p => ({ ...p, reason: 'already' }));
 
   return {
     batch: b,
@@ -169,7 +236,8 @@ async function _analyze(batchId, fileName, base64) {
     format: loaded.format,
     pairs: m.pairs,
     view: [...m.pairs, ...donePairs].map(_pairView),
-    unmatchedResults: m.unmatchedResults.map(r => ({
+    /* 미확인 = **양쪽 어디에도 짝이 없는 줄**(1차 pending · 2차 라벨링). */
+    unmatchedResults: labeled.unmatchedResults.map(r => ({
       seq: r.seq, accountTail: String(r.accountDigits || '').slice(-4),
       amount: r.amount, holder: r.holder, memo: r.memo || '',
       transferredAt: r.transferredStamp || '', status: r.statusRaw, success: r.success,
@@ -177,6 +245,9 @@ async function _analyze(batchId, fileName, base64) {
     orderAssigned: m.orderAssigned,
     summary: {
       ...m.summary,
+      /* ★ 반영 판정 수치(matched/success/failed/notInFile)는 **1차 그대로** — 반영 대상은
+           여전히 pending 뿐이다. 여기서 덮는 것은 "미확인" 집계 하나뿐이다. */
+      unmatchedResults: labeled.unmatchedResults.length,
       alreadyPaid: items.filter(it => it.status === 'paid').length,
       alreadyFailed: items.filter(it => it.status === 'failed').length,
     },
@@ -926,17 +997,8 @@ async function applyResultFile({ batchId, fileName, base64, uploadId, by, notify
        ★ 날짜는 결과파일의 건별 실제 이체일(item.stamp)만 사용한다. */
   const boardItems = paidItems.filter(x => x.stamp);
   const undatedPaid = paidItems.length - boardItems.length;
-  const writeResult = await paymentApply.markDepositCells(boardItems, { by: by || 'payment' }) || {};
-  const verification = await paymentApply.verifyDepositCells(boardItems) || {};
-  const verified = Number(verification.verified) || 0;
-  const queued = Number(writeResult.queued) || 0;
-  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
-  const board = {
-    recorded: verified,
-    queued,
-    skipped: (Number(writeResult.skipped) || 0) + undatedPaid,
-    failed: (Number(writeResult.failed) || 0) + verificationMissing,
-  };
+  const board = await _writeBoardDeposits(boardItems, { by: by || 'payment' });
+  board.skipped += undatedPaid;
   const boardStamp = [...new Set(boardItems.map(x => x.stamp))].join(', ');
   await _saveBoardWriteOutcome({ batchId, outcome: board, stamp: boardStamp, by: by || 'payment' });
 
@@ -1091,22 +1153,8 @@ async function backfillPaidDepositStamp({ batchId, by }) {
 
   const datedItems = items.filter(x => x.stamp);
   const normalizedStamp = [...new Set(datedItems.map(x => x.stamp))].join(', ');
-  const writeResult = await paymentApply.markDepositCells(datedItems,
-    { by: by || 'payment', deferSheetlessRebuild: true }) || {};
-  const sheetlessTabs = [...new Map(datedItems.filter(x => x.sheetless)
-    .map(x => [`${x.sheetId}\t${x.tabName}`, x])).values()];
-  for (const tab of sheetlessTabs) {
-    await rebuildLedgers({ sheetId: tab.sheetId, tabName: tab.tabName, by: by || 'payment' });
-  }
-  const verification = await paymentApply.verifyDepositCells(datedItems) || {};
-  const queued = Number(writeResult.queued) || 0;
-  const verificationMissing = Math.max(0, (Number(verification.missing) || 0) - queued);
-  const outcome = {
-    recorded: Number(verification.verified) || 0,
-    queued,
-    skipped: (Number(writeResult.skipped) || 0) + (items.length - datedItems.length),
-    failed: (Number(writeResult.failed) || 0) + verificationMissing,
-  };
+  const outcome = await _writeBoardDeposits(datedItems, { by: by || 'payment' });
+  outcome.skipped += (items.length - datedItems.length);
   await _saveBoardWriteOutcome({ batchId, outcome, stamp: normalizedStamp, by: by || 'payment' });
   return { ok: true, candidates: items.length, stamp: normalizedStamp, verified: outcome.recorded, ...outcome };
 }

@@ -1594,13 +1594,14 @@
   .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
   /* ══ 작업보드 상단 3분할(내부) — 시안 C 확정 2026-08-19 ══════════════════════════
      시안 = frontend/docs/design-workboard-top-redesign.html (?v=C)
-     폭 = 작업조건 439 / 진행현황 242 / 미리보기 659 (종전 A안 439/483/439 기준 재분배)
+     폭 = 작업조건 439 / 진행현황 439 / 미리보기 659 — 앞 두 칸은 **같은 너비**(사용자 확정 2026-08-19,
+        종전 242 에서 넓힘). 합이 상한(1380)을 넘으므로 세 칸이 같은 비율로 줄어든다(1 : 1 : 1.5).
      ★ 고정 px 로 두면 좁은 화면에서 깨진다 — 같은 비율의 fr + minmax.
      ★★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다(열 많은 작업에서
         가로 스크롤이 늘어난다) → **상단 한 줄에서 끝내고** 높이만 왼쪽 카드에 맞춘다.
      ★★ 높이를 px 로 못박지 않는다 — 작업 조건 카드는 상품명 2줄 + 9행 + 발주 줄이라
         내용이 넘치면 발주 줄이 리뷰타입 줄 위로 겹친다(실측). min-height + stretch. */
-  .tp3grid.c3{grid-template-columns:minmax(230px,439fr) minmax(170px,242fr) minmax(330px,659fr);align-items:stretch}
+  .tp3grid.c3{grid-template-columns:minmax(230px,439fr) minmax(230px,439fr) minmax(330px,659fr);align-items:stretch}
   .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:330px}
   @media(max-width:1100px){.tp3grid.c3{grid-template-columns:1fr}
     .tp3grid.c3 .tp3col,.tp3grid.c3 .rvpane{min-height:0}.tp3grid.c3 .rvpane{min-height:340px}}
@@ -1630,13 +1631,6 @@
         border:1px solid var(--line2);border-radius:9px;box-shadow:0 8px 22px rgba(16,24,40,.14);padding:5px;min-width:170px}
   .womenu.open .womm{display:flex;flex-direction:column;gap:3px}
   .womm .btn{justify-content:flex-start;width:100%;height:28px;font-size:11.5px}
-  /* ② 진행 현황 2줄 배치(절반 폭에서는 한 줄 배치의 막대가 뭉갠다) */
-  .tp3g.cmp{display:block;padding:6px 0}
-  .tp3g.cmp .top{display:flex;align-items:baseline;gap:6px}
-  .tp3g.cmp .lb{width:auto;flex:none}
-  .tp3g.cmp .nm{width:auto;flex:1;text-align:right;font-size:15px}
-  .tp3g.cmp .pc{width:auto;flex:none}
-  .tp3g.cmp .track{display:block;width:100%;margin-top:4px;height:5px}
   /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단 구역(#setlCell 계약 유지) */
   .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2);cursor:pointer}
   .setlin:hover{opacity:.9}
@@ -1644,14 +1638,26 @@
   .setlin.open .caret{transform:rotate(180deg)}
   /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰이미지, 칸마다 한 장 */
   .rv2{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
+     행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
+  .tp3grid.c3 .rvpane{position:relative;overflow:hidden;padding:0}
+  .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:11px 12px}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px 8px 6px}
   .rv2 .rv2h{font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:6px;flex:none}
   .rv2 .rv2h .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
   .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column}
-  .rv2 .rvone{flex:1;min-height:0;width:100%;object-fit:contain;border:1px solid var(--line);border-radius:8px;
-              background:var(--card);cursor:pointer}
-  .rv2 .rvone:hover{border-color:var(--accent)}
+  /* ★★ 캡처는 세로로 매우 긴 경우가 흔하다(모바일 리뷰 전체 스크린샷) — 이미지를 그대로 두면
+     그 원본 높이가 grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고).
+     래퍼를 기준 삼아 이미지를 절대배치해 **레이아웃 높이 기여를 0** 으로 만든다:
+     칸 높이는 왼쪽 두 카드가 정하고, 캡처는 그 안에서 contain 으로 줄어든다(잘리지 않는다). */
+  .rv2 .rvhold{flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;
+               background:var(--card);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;cursor:pointer}
+  .rv2 .rvhold:hover{border-color:var(--accent)}
+  .rv2 .rvhold::-webkit-scrollbar{width:5px} .rv2 .rvhold::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  /* ★ 폭에 맞춰 축소하고 세로는 칸 안에서 스크롤한다 — contain 으로 통째로 욱여넣으면
+     모바일 전체 스크린샷(예 390×3200)이 220px 안에서 실낱이 되어 **아무것도 판독할 수 없다**. */
+  .rv2 .rvone{width:100%;height:auto;display:block}
   .rv2 .rvpg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:5px;font-size:10px;color:var(--muted);font-weight:700}
   .rv2 .rvpg .pgb{font:inherit;font-size:12px;line-height:1;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);
                   background:var(--card);color:var(--ink);cursor:pointer}
@@ -5507,11 +5513,14 @@ function renderWorkdesk(wd){
     ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
     ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
-    <span class="sp" style="flex:1"></span>
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}</div>
+    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
+    <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
+         [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
+         맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
+    <span class="sp" style="flex:1"></span></div>
     ${STATE.role==='advertiser'
       ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div><div id="gridhost">${tableSection}</div>`}`;
@@ -5643,12 +5652,12 @@ function _rvStep(kind,delta,n){
 }
 function _rvRender2(pane){
   const hd=`<div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
-  if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
+  if(STATE.rvImgs===null&&!STATE.rvSel){ _rvFill(pane, hd+`<div class="rvnone"><b>불러오는 중…</b></div>`); return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
-  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`; return; }
+  if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`); return; }
   const who=_rvWho(r);
   const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
-  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
+  if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   const col=(kind,icon,title,emptyB,emptyS,warn)=>{
     const list=_rvKindFiles(files,kind).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
@@ -5656,8 +5665,8 @@ function _rvRender2(pane){
     const i=Math.min((STATE.rvIdx&&STATE.rvIdx[kind])||0,Math.max(0,n-1));
     const gi=n?files.indexOf(_rvKindFiles(files,kind)[i]):-1;   // 크게 보기 팝업은 그 행의 전체 목록 기준
     const body=n
-      ? `<img class="rvone" src="${esc(list[i].url)}" alt="${esc(title)}" loading="lazy" title="크게 보기"`+
-        ` data-rid="${esc(r.id)}" data-fidx="${gi}" onclick="_rvOpenByImage(this)">`+
+      ? `<div class="rvhold"><img class="rvone" src="${esc(list[i].url)}" alt="${esc(title)}" loading="lazy" title="크게 보기"`+
+        ` data-rid="${esc(r.id)}" data-fidx="${gi}" onclick="_rvOpenByImage(this)"></div>`+
         `<div class="rvpg"${n>1?'':' style="visibility:hidden"'}>`+
           `<button type="button" class="pgb"${i===0?' disabled':''} onclick="_rvStep('${kind}',-1,${n})">‹</button>`+
           `<span>${i+1} / ${n}</span>`+
@@ -5671,8 +5680,14 @@ function _rvRender2(pane){
   const right=col('rev','📷','리뷰 이미지',
     r.submitted?'이미지 미등록':'리뷰 미제출',
     r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
-  pane.innerHTML=hd+who2+`<div class="rv2">${left}${right}</div>`;
+  _rvFill(pane, hd+who2+`<div class="rv2">${left}${right}</div>`);
 }
+/* ★★ 미리보기 칸이 **높이를 요구하지 않게** 절대배치 레이어로 감싼다.
+   캡처는 세로가 매우 긴 경우가 흔하고(모바일 전체 스크린샷), 정상 흐름에 두면 그 높이가
+   grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고). 레이어를 두면
+   행 높이는 왼쪽 두 카드가 정하고, 그 안에서 캡처가 폭에 맞춰 축소되며 세로로 스크롤된다.
+   ★ 광고주 뷰어(_rvRender)는 세로 레일이라 종전 그대로 — 이 래퍼는 내부 화면 전용이다. */
+function _rvFill(pane, html){ pane.innerHTML=`<div class="rvfill">${html}</div>`; }
 function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
 function _rvOpen(rid,fileIndex){
   const people=_rvPeople(), idx=people.findIndex(p=>String(p.r.id)===String(rid)); if(idx<0) return;
@@ -5709,12 +5724,10 @@ function summaryStrip(wd,d,m,c){
     `<span class="nm">${n}<small>/${den}</small></span>`+
     `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
     `<span class="pc">${pc}%</span></div>`;
-  // ★ 내부 화면은 진행 현황 칸이 절반 폭이라 한 줄 배치(라벨·숫자·막대·%)가 성립하지 않는다
-  //   → 2줄 배치(윗줄 라벨·숫자·%, 아랫줄 전폭 막대). 광고주 화면은 종전 한 줄 그대로.
-  const g2=(lb,n,den,pc,cls)=>`<div class="tp3g cmp"><span class="top"><span class="lb">${lb}</span>`+
-    `<span class="nm">${n}<small>/${den}</small></span><span class="pc">${pc}%</span></span>`+
-    `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span></div>`;
-  const gg=isAdv?g:g2;
+  /* ★ 게이지는 내부·광고주 **한 벌**(한 줄 배치)이다 — 종전에는 내부 진행 현황이 절반 폭이라
+     막대가 26px 로 뭉개져 2줄 배치를 따로 뒀는데, 폭을 작업 조건과 같게 맞추면서(사용자 확정
+     2026-08-19) 그 근거가 사라졌다. 사본을 남겨 두면 두 화면이 계속 다른 모양으로 갈린다. */
+  const gg=g;
   /* ★ 정산은 별도 칸(박스)이 아니라 **진행 현황 카드 하단 구역**이다(사용자 확정).
      루트 id(#setlCell)·클래스(.setlsummary)·클릭(toggleSettleDetail) 계약은 그대로 —
      갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
@@ -8926,7 +8939,7 @@ function _pmBatchResult(b){
   const unconfirmed=Number(b.resultUnconfirmedCount||0);
   return `<span style="display:inline-flex;flex-wrap:wrap;gap:4px 7px;font-size:11.5px;line-height:1.6"><span>${b.itemCount}건 업로드</span><b style="color:#167450">${b.resultSuccessCount||0}건 성공</b><b style="color:#B24A3A">${b.resultFailedCount||0}건 실패</b>${unconfirmed?`<b style="color:#A66A10">미확인 ${unconfirmed}건</b>`:''}</span>`;
 }
-function _pmBatchWorkboard(b){
+function _pmBatchWorkboard(b,i){
   const recorded = b.boardRecordedCount||0;
   const queued = b.boardQueuedCount||0;
   const skipped = b.boardSkippedCount||0;
@@ -8935,10 +8948,33 @@ function _pmBatchWorkboard(b){
     const parts = [`${recorded}건 기록됨`, `기록실패 ${failed}건`];
     if(queued) parts.push(`${queued}건 대기`);
     if(skipped) parts.push(`${skipped}건 제외`);
-    return `<span class="pmauto">${esc(b.boardStamp||'-')}<br>${parts.join(' · ')}</span>`;
+    // 기록실패가 남아 있으면 여기서 바로 다시 시도할 수 있어야 한다(미기록 회차와 같은 창구).
+    const retry = failed ? `<br><button class="btn xs" onclick="_pmDepositBackfill(${i})">입금일 다시 기록</button>` : '';
+    return `<span class="pmauto">${esc(b.boardStamp||'-')}<br>${parts.join(' · ')}${retry}</span>`;
+  }
+  // ★ 입금 원장은 남았는데 작업보드 기록이 한 줄도 없는 상태 — 사람이 고칠 수 있어야 한다.
+  //   (2026-08-19 회차 #12: 반영 도중 끊겨 512건의 입금일이 비어 있었는데, 화면이 사유만
+  //    말하고 조치 수단을 주지 않아 아무도 치우지 못했다.)
+  if((b.resultAppliedCount||0)>0 && b.status!=='cancelled'){
+    return `<span class="pmauto">입금일 미기록<br><button class="btn xs" onclick="_pmDepositBackfill(${i})">입금일 기록</button></span>`;
   }
   if((b.resultAppliedCount||0)>0) return '<span class="pmauto">입금일 미기록</span>';
   return '<span class="pmauto">-</span>';
+}
+
+/* 작업보드 입금일 기록(소급) — 입금 원장·회차 상태는 건드리지 않고 입금칸만 다시 적는다.
+   서버는 `paid` 항목의 실제 이체시각(paid_at)으로만 값을 만든다(화면이 날짜를 정하지 않는다). */
+async function _pmDepositBackfill(i){
+  const b=(STATE.pmBatches||[])[i]; if(!b) return;
+  if(!confirm(`#${b.seq} 회차의 작업보드 입금일을 기록할까요?\n\n· 이미 이체 완료된 ${b.resultAppliedCount||b.paidCount||0}건의 입금일을 작업보드에 적습니다\n· 입금 기록(원장)과 회차 상태는 바뀌지 않습니다\n· 이미 적혀 있는 값은 그대로 유지됩니다`)) return;
+  toast('입금일을 기록하는 중…');
+  const r=await api('/api/trackb/payment/batch/'+b.id+'/deposit-date-backfill',{method:'POST',body:JSON.stringify({})});
+  if(!r||!r.ok){ toast('입금일 기록 실패'+(r&&r.error?' — '+r.error:'')); return; }
+  const msg=[`입금일 ${r.recorded||0}건 기록`];
+  if(r.failed) msg.push(`실패 ${r.failed}건`);
+  if(r.skipped) msg.push(`제외 ${r.skipped}건`);
+  toast(msg.join(' · '));
+  await _pmLoad();
 }
 function _pmBoardApplyText(board){
   const b=board||{};
@@ -8974,7 +9010,7 @@ function _pmBatchTable(list){
     ${list.map((b,i)=>`<tr><td class="mono">#${b.seq}</td><td class="mono">${esc(_pmDate(b.createdAt))}</td>
       <td>${esc(b.bankLabel)}</td><td class="num">${b.itemCount}</td><td class="num">${_pmNum(b.totalAmount)}</td>
       <td>${esc(b.createdBy||'-')}</td><td class="mono">${b.downloadCount||0}회${b.lastDownloadedBy?' · '+esc(b.lastDownloadedBy):''}</td>
-      <td>${_pmBatchResult(b)}</td><td>${_pmBatchWorkboard(b)}</td><td>${st(b)}</td><td>${_pmBatchActions(b,i)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td>${_pmBatchResult(b)}</td><td>${_pmBatchWorkboard(b,i)}</td><td>${st(b)}</td><td>${_pmBatchActions(b,i)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function _pmDate(v){ if(!v) return '-'; const d=new Date(v); if(isNaN(d)) return '-';
   const k=new Date(d.getTime()+9*3600*1000); return k.toISOString().slice(5,16).replace('T',' '); }
@@ -9159,7 +9195,7 @@ function _pmFixBlock(){
   return `<div class="pmfix">
     <h3>보완하면 풀리는 보류 — 작업 ${f.works.length}개</h3>
     <div class="sub">작업별로 모았습니다. 고치면 <b>그 작업의 보류가 한 번에</b> 풀리고 다음 회차부터 파일에 포함됩니다.
-      아직 구글시트를 직접 봐야 하는 값(결제금액 칸 등)은 <b>[📄 시트]</b>로 그 탭을 바로 엽니다.
+      결제금액 칸 등 표에서 확인해야 하는 값은 <b>[📋 작업보드]</b>로 그 작업의 표를 바로 엽니다.
       ${totals.length?`<br>화면에서 못 고치는 사유: ${totals.join(' · ')}`:''}</div>
     <div class="pmfixgrid">${cards}</div>
     ${rest>0?`<div class="pmfixmore">외 ${rest}개 작업 — 아래 표의 [보완] 버튼으로도 고칠 수 있습니다</div>`:''}</div>`;
@@ -10539,6 +10575,81 @@ const _PT_REASON = {
   ghost_row:'옛 이름만 남은 빈 행',
 };
 let _PT = null;
+/* ══════════════ 읽는 시트 진단(2026-08-19) ══════════════
+   "남음 0" 인데 시트 API 호출이 0이 아니던 실측을 설명하는 화면.
+   ★ 판정은 전부 서버(스윕과 같은 열거식·같은 게이트) — 화면은 **그리기만** 한다.
+   ★ 읽기 전용이라 조작 버튼을 두지 않는다(끄기 판단의 근거를 보여주는 것이 전부). */
+var _RS = null;
+function _rsBox(){ return $('#rsBox'); }
+async function _rsScan(){
+  const box=_rsBox(); if(!box) return;
+  box.innerHTML = `<div class="ovnote">지금 어느 시트를 읽는지 살펴보는 중…</div>`;
+  try{
+    const r = await api('/api/trackb/sheetless/read-scope');
+    if(!r||!r.ok) throw new Error((r&&r.error)||'조회 실패');
+    _RS = r; _rsRender();
+  }catch(e){
+    // 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다(무한 로딩 금지)
+    box.innerHTML = `<div class="ovnote"><b>읽는 시트를 불러오지 못했습니다</b> — ${esc(String(e&&e.message||e))}
+      <button class="btn" style="margin-left:6px" onclick="_rsScan()">다시 시도</button></div>`;
+  }
+}
+/* 막힌 주문 상태를 사람 말로 — ★ 판정이 아니라 **표기**다(서버 값 그대로 세어 보여줄 뿐).
+   `stuck_manual` 은 reconcile 이 제외해 재기록으로 안 풀린다 → 사람이 처리해야 함을 이름으로 말한다. */
+var _RS_STATUS = {
+  pending:'대기', queued:'큐 대기', failed:'실패', pending_no_row:'행 못 찾음',
+  stuck_manual:'수동 처리 필요', canceled:'취소됨'
+};
+function _rsStatusLine(by, short){
+  var ks = Object.keys(by||{}); if(!ks.length) return '';
+  ks.sort(function(a,b){ return by[b]-by[a]; });
+  var parts = ks.map(function(k){ return (_RS_STATUS[k]||k) + ' ' + by[k]; });
+  return short ? parts.join(' · ') : '— ' + parts.join(' · ');
+}
+function _rsPendTitle(it){
+  var a = it.pendingOldest ? new Date(it.pendingOldest).toLocaleDateString('ko-KR') : '';
+  var b = it.pendingNewest ? new Date(it.pendingNewest).toLocaleDateString('ko-KR') : '';
+  return (a && b) ? ('제출 ' + a + ' ~ ' + b) : '';
+}
+function _rsRender(){
+  const box=_rsBox(), r=_RS; if(!box||!r) return;
+  if(!r.reading){
+    box.innerHTML = `<div class="ovnote"><b>지금 읽는 시트가 없습니다</b> —
+      등록 시트 ${r.registered}개가 모두 무시트로 제외됩니다.
+      <button class="btn" style="margin-left:6px" onclick="_rsScan()">새로고침</button>
+      <button class="btn" onclick="_rsBox().innerHTML=''">닫기</button></div>`;
+    return;
+  }
+  const by=r.byReason||{}, rs=r.reasons||{};
+  const chips=Object.keys(by).map(k=>`<span class="bd">${esc(rs[k]||k)} ${by[k]}</span>`).join(' ');
+  const rows=(r.items||[]).map(it=>`<tr>
+      <td style="font-family:ui-monospace,monospace;font-size:11px">${
+        it.sheetUrl && /^https:\/\/docs\.google\.com\//.test(it.sheetUrl)
+          ? `<a href="${esc(it.sheetUrl)}" target="_blank" rel="noopener" title="${esc(it.sheetId||'')}">${esc(it.sheetId||'')}</a>`
+          : `<span title="구글시트가 아닌 작업(시스템이 만든 무시트 좌표)">${esc(it.sheetId||'')}</span>`}</td>
+      <td>${esc(it.reasonText||it.reason||'')}</td>
+      <td>${esc((it.liveTabNames||[]).join(' · '))}${it.liveSheetTabs>(it.liveTabNames||[]).length?` 외 ${it.liveSheetTabs-(it.liveTabNames||[]).length}개`:''}</td>
+      <td style="text-align:right">${it.tabs||0}</td>
+      <td style="text-align:right${it.pendingOrders?';color:#DC2626;font-weight:700':''}"
+          title="${esc(_rsPendTitle(it))}">${it.pendingOrders||0}${
+        it.pendingOrders?`<div style="font-weight:400;font-size:10.5px;color:#8B94A1">${esc(_rsStatusLine(it.pendingByStatus, true))}</div>`:''}</td>
+      <td style="font-size:11px;color:#8B94A1">${it.mirroredAt?esc(new Date(it.mirroredAt).toLocaleString('ko-KR')):'-'}</td>
+    </tr>`).join('');
+  box.innerHTML = `<div class="ovnote">
+      <b>읽는 시트 ${r.reading}개</b> — 등록 ${r.registered}개 중 무시트로 제외 ${r.excludedSheetless}개. ${chips}
+      <button class="btn" style="margin-left:6px" onclick="_rsScan()">새로고침</button>
+      <button class="btn" onclick="_rsBox().innerHTML=''">닫기</button>
+      <div style="margin-top:6px">탈시트 전환 화면의 <b>“남음”</b>은 마감 탭·아카이브만 남은 시트·연도 미확정 작업을 세지 않습니다 —
+        그 시트들도 주기 작업(RAW 미러·인덱스 빌드)은 계속 읽습니다.</div>
+      ${r.pendingOrdersTotal?`<div style="margin-top:6px;color:#DC2626"><b>⚠ 시트에 아직 못 쓴 주문 ${r.pendingOrdersTotal}건</b> —
+        지금 주기 작업을 끄면 이 주문들이 시트에 영영 기록되지 않습니다.
+        ${_rsStatusLine(r.pendingByStatus)}</div>`:''}
+      ${r.truncated?`<div style="margin-top:6px">목록은 ${(r.items||[]).length}개까지만 보여줍니다(전체 ${r.reading}개).</div>`:''}
+    </div>
+    <table class="lgtable" style="margin-top:8px"><thead><tr>
+      <th>시트</th><th>읽는 사유</th><th>살아 있는 시트 작업</th><th style="text-align:right">등록 탭</th>
+      <th style="text-align:right">미반영 주문</th><th>마지막 미러</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function _ptBox(){ return $('#ptBox'); }
 async function _ptScan(){
   const box=_ptBox(); if(!box) return;
@@ -10742,12 +10853,14 @@ function _coRender(){
       <button class="btn" onclick="_coReleaseTodayUnsubmittedHolds()">↺ 오늘 미제출 제한 해제</button>
       <button class="btn" onclick="_coSweep()">🔎 준비 자리 일괄 점검</button>
       <button class="btn" onclick="_ptScan()">🧹 과거 작업 시트 읽기 정리</button>
+      <button class="btn" onclick="_rsScan()" title="주기 작업(RAW 미러·인덱스 빌드)이 지금 어느 시트를 왜 읽는지 — 읽기 전용">🔍 읽는 시트</button>
       <button class="btn" onclick="openRenumberModal({all:true})" title="무시트 작업 전체에서 번호 빈칸을 조회하고 정리한다(작업별 정리 · 전체 정리)">🔢 번호 정리</button>
       <button class="btn" onclick="_coOrphans()">🧹 중복 잔재 정리</button>
       <button class="btn" onclick="_coAudit()">↗ 반영 점검</button>
       <button class="btn" onclick="_coLoad()">새로고침</button></div>
     <div id="coSweep"></div>
     <div id="ptBox"></div>
+    <div id="rsBox"></div>
     <div class="ovnote">이관하면 그 작업의 <b>구글시트를 더 이상 읽지도 쓰지도 않습니다</b> — 시스템 표가 곧 원본이 됩니다.
       점검표 5가지가 모두 초록일 때만 이관할 수 있고, <b>모르는 항목도 통과가 아닙니다</b>.
       막힌 항목에는 <b>그 자리에 조치 버튼</b>이 붙습니다 — [↻ 시트 새로고침]은 누르면 바로 다시 읽고 재점검합니다.
