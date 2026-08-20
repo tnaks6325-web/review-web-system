@@ -149,29 +149,15 @@ table.cmp td b{font-weight:800}
 .stripB .th .no{font-size:8px;padding:0 3px;left:1px;bottom:1px}
 .stripB .addb{width:auto;height:auto;font-size:8.5px}
 .stripB .addb .plus{font-size:11px}
-/* C안: 대표 1장 + 스택 */
-.stack{position:relative;flex:none;width:74px;height:100%;border-radius:6px;cursor:pointer;border:1px solid var(--line2);
-  overflow:hidden;background:#eef1f6;padding:0}
-.stack img{width:100%;height:100%;object-fit:cover;display:block;filter:brightness(.55)}
-.stack .sn{position:absolute;inset:0;display:grid;place-content:center;color:#fff;font-size:12px;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.4)}
-.stack .sn small{font-size:8.5px;font-weight:700;opacity:.85}
-/* C안 관리 팝업 */
-.pop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;place-items:center;z-index:50}
-.pop.on{display:grid}
-.pop .pbox{width:min(480px,92vw);background:#fff;border-radius:14px;box-shadow:var(--sh3);overflow:hidden}
-.pop .ph{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
-.pop .ph b{font-size:13px}
-.pop .ph button{border:none;background:none;font-size:15px;color:var(--muted);cursor:pointer}
-.pop .pb{padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.pop .pth{position:relative;border-radius:9px;overflow:hidden;border:1px solid var(--line2);aspect-ratio:16/10;background:#eef1f6}
-.pop .pth img{width:100%;height:100%;object-fit:cover;display:block}
-.pop .pth .x{position:absolute;top:5px;right:5px;width:22px;height:22px;border:none;border-radius:50%;cursor:pointer;
-  background:rgba(15,23,42,.62);color:#fff;font-size:11px;display:grid;place-items:center}
-.pop .pth .x:hover{background:rgba(220,38,38,.92)}
-.pop .pth .no{position:absolute;left:5px;bottom:5px;font-size:9.5px;font-weight:800;color:#fff;background:rgba(15,23,42,.55);border-radius:5px;padding:1px 5px}
-.pop .padd{border:1.5px dashed var(--line2);border-radius:9px;aspect-ratio:16/10;display:grid;place-content:center;gap:3px;
-  color:var(--faint);font-size:11px;font-weight:700;background:#fbfcfe;cursor:pointer;text-align:center}
-.pop .pf{padding:10px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--faint)}
+/* C안: 입력창 좁힘 + 우측 4열 고정 그리드 */
+.composeC{display:grid;grid-template-columns:minmax(190px,1fr) 292px;gap:6px;align-items:stretch}
+.stripC{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:1fr;gap:5px;height:58px;padding:4px}
+.stripC .th{width:auto;height:auto;min-height:0;border-radius:5px}
+.stripC .th .x{width:15px;height:15px;font-size:9px;top:2px;right:2px}
+.stripC .th .no{font-size:8.5px;padding:0 3px;left:2px;bottom:2px}
+.stripC .addb{width:auto;height:auto;font-size:9px}
+.stripC .addb .plus{font-size:12px}
+.stripC .slot{border:1px dashed var(--line);border-radius:5px;background:#fff}
 @media (max-width:900px){.msplit{flex-direction:column}.rail{width:100%;flex-direction:row;align-items:center}.rail .audit{display:none}.pv{width:100%}}
 </style></head><body><div class="page">
 
@@ -179,12 +165,12 @@ table.cmp td b{font-weight:800}
 <p class="lead">유입 가이드·리뷰 가이드·특이사항의 첨부 이미지 칸이 <b>128px 고정폭 + 잘림(overflow:hidden)</b>인데
 썸네일은 한 장 <b>74px 고정</b>이라, <b>2장째는 ✕(빼기) 버튼이 잘려나가고 3장째부터는 첨부됐다는 사실 자체가 안 보입니다.</b>
 장수 표시도 가로 스크롤도 없어 "안 보임 = 없음"으로 읽히는 것이 핵심 문제입니다.</p>
-<p class="meta">2026-08-20 · 대상: 모집공고 편집(수정) 모달 (recruit-modal.js compact v2) · 시안 3안 · 가짜 데이터로 실제 동작(✕ 빼기 · ＋ 추가 · 팝업)</p>
+<p class="meta">2026-08-20 · 대상: 모집공고 편집(수정) 모달 (recruit-modal.js compact v2) · v2 (2026-08-20 사용자 요청: C안 = 입력창 좁힘 + 우측 4열 그리드로 교체) · 가짜 데이터로 실제 동작(✕ 빼기 · ＋ 추가)</p>
 <div class="vswitch" id="vsw">
   <a href="?" data-v="">전체 보기</a>
   <a href="?v=A" data-v="A">A안 — 아래 전폭 스트립 (추천)</a>
   <a href="?v=B" data-v="B">B안 — 제자리 2×2 그리드</a>
-  <a href="?v=C" data-v="C">C안 — 대표 1장 + N장 팝업</a>
+  <a href="?v=C" data-v="C">C안 — 입력창 좁히고 우측 4열 그리드</a>
 </div>
 
 <!-- ════════ 0. 현재 상태 재현 ════════ -->
@@ -221,40 +207,35 @@ table.cmp td b{font-weight:800}
 
 <!-- ════════ C안 ════════ -->
 <section class="sec" data-sec="C">
-  <h2><span class="n">C</span>C안 — 대표 1장 + "N장" 스택 → 클릭하면 관리 팝업</h2>
-  <p class="sub">칸에는 <b>첫 장 + 나머지 장수를 겹친 스택 타일</b>만 보여주고, 스택을 클릭하면
-  <b>관리 팝업</b>이 떠서 큰 썸네일로 전체를 보고 ✕로 빼고 ＋로 추가합니다. 칸 크기 불변 · 관리 공간은 가장 넓지만
-  <b>팝업이 새로 하나 생기고</b>, 한 눈에 보이는 것은 여전히 1장뿐입니다.</p>
+  <h2><span class="n">C</span>C안 — 입력창을 좁히고, 우측에 <u>4열 고정 그리드</u>로 전부 표시 <span class="tag">v2 · 사용자 요청 반영</span></h2>
+  <p class="sub">텍스트 입력창을 좁혀 오른쪽에 <b>4칸짜리 고정 그리드</b>를 확보합니다.
+  사진은 왼쪽부터 <b>항상 같은 열 자리</b>에 들어가고(1장이든 4장이든 크기·위치 동일 = 열 규칙),
+  빈 열은 점선 자리로 남아 <b>몇 장을 더 넣을 수 있는지</b>가 한눈에 보입니다.
+  ✕(빼기)와 [＋추가]도 전부 제자리에서 — 줄 높이는 지금과 같아 <b>화면 세로 변화가 없습니다.</b></p>
   <div id="mock-C"></div>
+  <div class="note blue">세 줄(유입·리뷰·특이사항)의 그리드 열이 <b>세로로 정확히 맞아떨어져</b> 위아래로 훑기 좋습니다.
+  대신 텍스트 입력창 폭이 약 40% 줄어 긴 안내문은 줄바꿈이 잦아집니다(입력창은 세로로 늘릴 수 있음).</div>
 </section>
 
 <!-- ════════ 결정 ════════ -->
 <section class="sec" data-sec="">
   <h2><span class="n">✓</span>비교와 추천</h2>
   <table class="cmp">
-    <thead><tr><th style="width:110px">기준</th><th>A안 — 아래 전폭 <span class="tag rec">추천</span></th><th>B안 — 2×2 그리드</th><th>C안 — 스택+팝업</th></tr></thead>
+    <thead><tr><th style="width:110px">기준</th><th>A안 — 아래 전폭 <span class="tag rec">추천</span></th><th>B안 — 2×2 그리드</th><th>C안 — 입력창 좁힘 + 4열 그리드</th></tr></thead>
     <tbody>
-      <tr><td><b>4장 전부 보임</b></td><td>◎ 82px 크기로 전부</td><td>○ 전부 보이나 매우 작음</td><td>△ 1장 + "N장" 표기만</td></tr>
-      <tr><td><b>✕(빼기) 접근</b></td><td>◎ 모든 장에서 17px</td><td>△ 13px로 작음</td><td>◎ 팝업 안 22px</td></tr>
-      <tr><td><b>화면 변화</b></td><td>줄이 최대 72px 높아짐<br>(첨부 있을 때만)</td><td>없음</td><td>없음(팝업 1개 추가)</td></tr>
-      <tr><td><b>구현 범위</b></td><td><b>CSS + 스트립 위치만</b><br>(_igRender·업로드·순서·확대 무변경)</td><td>CSS + 렌더 분기</td><td>관리 팝업 신규<br>(위임·Esc·body 직속 규율)</td></tr>
-      <tr><td><b>남는 위험</b></td><td>거의 없음</td><td>오터치(작은 ✕)</td><td>클릭 한 번 더 · 팝업 코드 유지비</td></tr>
+      <tr><td><b>4장 전부 보임</b></td><td>◎ 82px 크기로 전부</td><td>○ 전부 보이나 매우 작음</td><td>◎ 66×48px · 4열 정렬로 전부</td></tr>
+      <tr><td><b>✕(빼기) 접근</b></td><td>◎ 모든 장에서 17px</td><td>△ 13px로 작음</td><td>○ 15px(제자리 상시)</td></tr>
+      <tr><td><b>화면 변화</b></td><td>줄이 최대 72px 높아짐<br>(첨부 있을 때만)</td><td>없음</td><td>세로 불변 ·<br>입력창 폭 약 40% 축소</td></tr>
+      <tr><td><b>구현 범위</b></td><td><b>CSS + 스트립 위치만</b><br>(_igRender·업로드·순서·확대 무변경)</td><td>CSS + 렌더 분기</td><td>CSS + 렌더 분기<br>(4열 그리드 · 빈 자리 표시)</td></tr>
+      <tr><td><b>남는 위험</b></td><td>거의 없음</td><td>오터치(작은 ✕)</td><td>긴 안내문의 줄바꿈 잦아짐</td></tr>
     </tbody>
   </table>
-  <div class="note blue"><b>추천 = A안.</b> 이 문제의 본질은 "첨부를 확인·관리할 수 없다"인데, A안은 확인(전부 보임)과
-  관리(✕ 상시 노출)를 동시에 해결하면서 기존 동작 코드를 한 줄도 바꾸지 않습니다.
+  <div class="note blue"><b>A안(아래 전폭)과 C안(우측 4열 그리드)이 확인·관리를 모두 해결합니다.</b>
+  A안은 입력창 폭을 지키는 대신 첨부가 있을 때 줄이 높아지고, C안은 줄 높이를 지키는 대신 입력창 폭을 양보합니다.
   어느 안으로 할지 골라주시면 그대로 구현합니다.</div>
 </section>
 
 </div>
-
-<!-- C안 관리 팝업 -->
-<div class="pop" id="cpop"><div class="pbox">
-  <div class="ph"><b>📷 유입 가이드 사진 관리 <span style="color:var(--faint);font-weight:700;font-size:11px" id="cpop-n"></span></b>
-    <button onclick="cpopClose()" title="닫기">✕</button></div>
-  <div class="pb" id="cpop-body"></div>
-  <div class="pf">✕ = 이 사진 빼기 · 사진 클릭 = 크게 보기(기존 확대 팝업) · 최대 4장</div>
-</div></div>
 
 <script>
 /* ── 가짜 사진(외부 리소스 0 — 인라인 SVG) ─────────────────── */
@@ -323,13 +304,13 @@ function stripB(list){
   return h;
 }
 function stripC(list){
-  let h = '<div class="compose"><textarea placeholder="__PH__"></textarea><div class="strip" style="width:128px">';
-  if(!list.length) h += '<button class="emptyb" data-add="1"><span class="t1">＋ 사진 넣기</span><span>Ctrl+V · 클릭</span></button>';
-  else {
-    h += thumbHtml(list[0],0);
-    if(list.length>1) h += '<button type="button" class="stack" data-stack="1" title="사진 관리 열기"><img src="'+list[1]+'" alt="">'
-      + '<span class="sn">+'+(list.length-1)+'장<small>관리</small></span></button>';
-    else h += '<button class="addb" data-add="1" style="width:auto;flex:1"><span class="plus">＋</span></button>';
+  // 입력창을 좁히고 오른쪽에 4열 고정 그리드 — 사진은 왼쪽 열부터 항상 같은 자리(열 규칙),
+  // 다음 빈 열이 [＋추가], 나머지 빈 열은 점선 자리(몇 장 더 넣을 수 있는지 보인다)
+  let h = '<div class="composeC"><textarea placeholder="__PH__"></textarea><div class="strip stripC">';
+  for(let i=0;i<4;i++){
+    if(i<list.length) h += thumbHtml(list[i],i);
+    else if(i===list.length) h += '<button class="addb" data-add="1" title="사진 추가"><span class="plus">＋</span>추가</button>';
+    else h += '<span class="slot"></span>';
   }
   h += '</div></div>';
   return h;
@@ -389,7 +370,6 @@ function sayMsg(variant, field, text, kind){
 document.addEventListener('click', function(e){
   const del = e.target.closest('[data-del]');
   const add = e.target.closest('[data-add]');
-  const stk = e.target.closest('[data-stack]');
   const row = e.target.closest('.frow[data-f]');
   const ed  = e.target.closest('.ed[data-variant]');
   if(!row || !ed) return;
@@ -404,40 +384,7 @@ document.addEventListener('click', function(e){
     if(list.length>=4){ sayMsg(variant, field, '사진은 칸마다 최대 4장까지예요.', 'warn'); return; }
     list.push(svgImg('가이드 '+(list.length+1), PALETTE[list.length%4][0], PALETTE[list.length%4][1]));
     renderAll(); sayMsg(variant, field, '사진을 넣었습니다. ('+list.length+'/4)', 'ok');
-  } else if(stk){
-    cpopOpen(field);
   }
-});
-
-/* ── C안 관리 팝업 ─────────────────────────────────────────── */
-let _cpopField = null;
-function cpopOpen(field){
-  _cpopField = field;
-  cpopPaint();
-  document.getElementById('cpop').classList.add('on');
-}
-function cpopPaint(){
-  const list = STATE.C[_cpopField] || [];
-  document.getElementById('cpop-n').textContent = list.length + ' / 4장';
-  let h = '';
-  list.forEach((s,i)=>{
-    h += '<div class="pth"><img src="'+s+'" alt=""><span class="no">'+(i+1)+'</span>'
-      + '<button class="x" data-pdel="'+i+'" title="이 사진 빼기">✕</button></div>';
-  });
-  if(list.length<4) h += '<button class="padd" data-padd="1"><span style="font-size:16px">＋</span>사진 추가</button>';
-  document.getElementById('cpop-body').innerHTML = h;
-}
-function cpopClose(){ document.getElementById('cpop').classList.remove('on'); renderAll(); }
-document.getElementById('cpop').addEventListener('click', function(e){
-  if(e.target===this){ cpopClose(); return; }
-  const del = e.target.closest('[data-pdel]');
-  const add = e.target.closest('[data-padd]');
-  const list = STATE.C[_cpopField] || [];
-  if(del){ list.splice(Number(del.dataset.pdel),1); cpopPaint(); }
-  else if(add && list.length<4){ list.push(svgImg('가이드 '+(list.length+1), PALETTE[list.length%4][0], PALETTE[list.length%4][1])); cpopPaint(); }
-});
-document.addEventListener('keydown', function(e){
-  if(e.key==='Escape' && document.getElementById('cpop').classList.contains('on')) cpopClose();
 });
 
 /* ── ?v= 단독 보기 ─────────────────────────────────────────── */
