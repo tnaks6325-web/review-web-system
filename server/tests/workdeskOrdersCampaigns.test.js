@@ -36,7 +36,10 @@ const READ = ['GET /work-orders/list', 'GET /campaigns/list', 'GET /campaigns/:i
 const WRITE = ['POST /work-orders/accept', 'PUT /work-orders/status',
   'POST /campaigns/create', 'PUT /campaigns/:id', 'POST /campaigns/:id/flags',
   'DELETE /campaigns/:id', 'POST /campaigns/:id/confirm', 'PUT /campaigns/:id/status',
-  'POST /campaigns/:id/dismiss'];
+  'POST /campaigns/:id/dismiss',
+  // 외부모집 구매양식 수동제출 — 리뷰어 등록·주문 원장·정원 차감·시트 쓰기를 일으키는 창구라
+  // 접수·발행과 같은 2단 권한(내부인 열람 · 편집 허용명단만 실행).
+  'POST /manual-order/preview', 'POST /manual-order/submit'];
 
 t('열람 라우트가 전부 등록돼 있다', () => {
   READ.forEach(k => assert.ok(L[k], '없음: ' + k));
@@ -67,6 +70,37 @@ t('명단 관리는 내부 담당자 전용(광고주 차단)', () => {
     assert.ok(L[k].includes('internalMiddleware'), k + ': internal 게이트 없음');
     assert.ok(!L[k].includes('editorOnlyMiddleware'), k + ': 명단이 자기 자신을 게이트하면 안 됨');
   });
+});
+
+/* ── 1-b) 외부모집 수동제출 프록시 ─────────────────────────── */
+//  인트라넷 SSO 토큰(via:'intranet')은 authMiddleware 에서 `/api/trackb/*` 밖으로 못 나가,
+//  `/api/manual-order/*` 하드코딩이 리뷰웹시스템[3버전]에서 403("Track B에서만")으로 죽었다.
+console.log('\n1-b) 외부모집 수동제출');
+const _moRouter = require('../src/routes/manualOrder.routes');
+const _moHandler = (m, p) => {
+  const l = _moRouter.stack.find(x => x.route && x.route.path === p && x.route.methods[m]);
+  assert.ok(l, '원본 라우트 없음: ' + m + ' ' + p);
+  return l.route.stack;
+};
+t('★ 로직 복제 0 — 원본 핸들러를 그대로 태운다', () => {
+  [['preview', 'post', '/preview'], ['submit', 'post', '/submit']].forEach(([name, m, p]) => {
+    const src = _moHandler(m, p);
+    const proxy = router.stack.find(l => l.route && l.route.path === '/manual-order/' + name);
+    assert.ok(proxy, '프록시 없음: ' + name);
+    assert.strictEqual(proxy.route.stack[proxy.route.stack.length - 1].handle.name,
+      src[src.length - 1].handle.name, name + ': 위임 대상이 원본 핸들러가 아니다(사본 의심)');
+  });
+});
+t('★ 원본 /api/manual-order/* 게이트는 무변경(adminOrMaster)', () => {
+  ['/preview', '/submit'].forEach(p => {
+    const names = _moHandler('post', p).map(s => s.name);
+    assert.ok(names.includes('authMiddleware') && names.includes('adminOrMasterMiddleware'),
+      p + ': 원본 게이트가 느슨해졌다');
+  });
+});
+t('★ 오류 메시지를 마스킹하지 않는다(관리자 도구는 실패 원인이 곧 조치 안내)', () => {
+  const em = R('src/middleware/error.middleware.js');
+  assert.ok(em.includes("startsWith('/api/trackb/manual-order/')"));
 });
 
 /* ── 2) 편집 판정 로직 ─────────────────────────────────────── */

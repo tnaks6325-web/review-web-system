@@ -300,8 +300,13 @@ console.log('\nD. 프론트 배선');
   ok('D2c ★ 셀 수정 시 오류 재판정이 양방향 — 지운 칸이 정상으로 남지 않는다',
     /it\.ok = !bad;/.test(mo) && /const missing = REQUIRED\.filter/.test(mo));
   ok('D3 파싱은 서버 파서에 맡긴다(프론트 사본 금지)',
-    mo.includes('/api/manual-order/preview') && !/split\('\/'\)/.test(mo));
-  ok('D4 제출은 인증 라우트로만', mo.includes('/api/manual-order/submit'));
+    /_moBase\(\) \+ '\/preview'/.test(mo) && !/split\('\/'\)/.test(mo));
+  ok('D4 제출은 인증 라우트로만', /_moBase\(\) \+ '\/submit'/.test(mo));
+  // ★ 경로 재기준(호스트가 정한다) — 하드코딩이면 리뷰웹시스템[3버전]의 인트라넷 SSO 토큰이 403.
+  ok('D4b 경로는 window.MANUAL_ORDER_API 로 재기준하되 미설정 = 종전 경로',
+    /window\.MANUAL_ORDER_API/.test(mo) && /'\/api\/manual-order'/.test(mo));
+  ok('D4c 이미지 경로는 재기준하지 않는다(무인증 라우트)',
+    mo.includes("'/api/image/image-upload'") && mo.includes("'/api/image/image-extract'"));
   ok('D5 캡처는 기존 업로드 경로 재사용 + 주문에 연결',
     mo.includes('/api/image/image-upload') && mo.includes('orderSubmissionId: res.orderSubmissionId'));
   ok('D6 캡처 붙여넣기(Ctrl+V)를 지원', mo.includes('clipboardData') && mo.includes('getAsFile'));
@@ -405,6 +410,7 @@ console.log('\nE. 데이터 보전 가드');
 {
   const em = R('src/middleware/error.middleware.js');
   ok('E18 관리자 전용 도구라 오류 메시지를 마스킹하지 않는다', em.includes("startsWith('/api/manual-order/')"));
+  ok('E18b Track B 프록시 경로도 같은 안내를 준다', em.includes("startsWith('/api/trackb/manual-order/')"));
 }
 {
   const mo = F('js/manual-order.js');
@@ -412,7 +418,7 @@ console.log('\nE. 데이터 보전 가드');
     /toDataURL\('image\/jpeg', 0\.75\)/.test(mo));
   ok('E20 ★ 업로드 응답을 확인한 뒤에만 "첨부됨"으로 보고', /res\.captureAttached = !!\(up && up\.ok\)/.test(mo));
   ok('E21 분해 요청도 오류를 잡는다(프록시 HTML 응답에 버튼이 죽던 문제)',
-    /try \{\s*r = await api\('\/api\/manual-order\/preview'/.test(mo));
+    /try \{\s*r = await api\(_moBase\(\) \+ '\/preview'/.test(mo));
   ok('E22 결과↔제출건 매칭은 서버가 준 index 로', /res\.index === 'number'\) \? targets\[res\.index\]/.test(mo));
   ok('E23 셀을 고치면 옛 오류 문구도 지운다', /querySelectorAll\('\.mo-msg'\)\.forEach\(el => el\.remove\(\)\)/.test(mo));
 }

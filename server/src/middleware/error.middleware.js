@@ -96,8 +96,11 @@ function errorHandler(err, req, res, next) {
   // 기본: GAS 호환 에러 응답 (HTTP 200, error 필드)
   // ★ 관리자 API 및 캠페인 API는 디버깅을 위해 실제 에러 메시지 포함
   // /api/manual-order/ = 관리자 전용 대리제출 도구 — 실패 원인이 곧 조치 안내라 마스킹하면 못 쓴다
+  //   ★ 리뷰웹시스템[3버전]은 같은 도구를 /api/trackb/manual-order/* 프록시로 쓴다(인트라넷 SSO
+  //     토큰이 Track A 경로에 도달 불가) — 화면이 같으니 안내도 같아야 한다.
   const isAdminApi = req.path && (req.path.startsWith('/api/admin/') || req.path.startsWith('/api/campaign/')
-    || req.path.startsWith('/api/order/') || req.path.startsWith('/api/manual-order/'));
+    || req.path.startsWith('/api/order/') || req.path.startsWith('/api/manual-order/')
+    || req.path.startsWith('/api/trackb/manual-order/'));
   res.status(200).json({
     error: (process.env.NODE_ENV === 'production' && !isAdminApi)
       ? '서버 오류가 발생했습니다.'
