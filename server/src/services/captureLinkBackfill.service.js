@@ -62,7 +62,7 @@ async function auditCaptureLinks(opts = {}) {
   } catch (_) { /* 못 읽으면 구분 없이 보고(판정은 그대로 유효) */ }
 
   const { rows: orders } = await db().query(
-    `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+    `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName", os.tab_gid AS "tabGid",
             os.recipient, os.orderer, os.submitted_at AS "submittedAt",
             ($3::timestamptz IS NOT NULL AND os.submitted_at <= $3::timestamptz) AS "preCutoff",
             EXISTS(SELECT 1 FROM reviewer_event_logs l
@@ -80,10 +80,12 @@ async function auditCaptureLinks(opts = {}) {
 
   // 탭 단위로 묶어 Drive 조회 횟수를 최소화(탭당 1회 재귀 조회)
   const byTab = new Map();
+  const gidOf = new Map();   // 탭키 → 그 탭의 gid(주문 원장이 기록해 둔 값)
   for (const o of orders) {
     const k = `${o.sheetId}\t${o.tabName}`;
     if (!byTab.has(k)) byTab.set(k, []);
     byTab.get(k).push(o);
+    if (!gidOf.get(k) && o.tabGid) gidOf.set(k, String(o.tabGid));
   }
   const tabKeys = [...byTab.keys()].slice(0, maxTabs);
   const tabsSkipped = byTab.size - tabKeys.length;
@@ -94,9 +96,19 @@ async function auditCaptureLinks(opts = {}) {
     const group = byTab.get(k);
     let files = null, folderErr = '';
     try {
+      /* ★★ 이름 → gid 폴백 (2026-08-20 실측): 시트 탭은 건수가 바뀌며 **리네임된다**
+         (`…_500건` → `…_443건`). 주문 원장은 제출 당시 이름을 그대로 들고 있고 `tab_configs` 는
+         현재 이름이라, 이름으로만 조인하면 **폴더가 멀쩡히 있는데 `no_capture_folder`** 로 떨어진다
+         (실측: 미링크 808건 중 상당수). 레포가 반복해 못박은 gid 폴백 규율을 여기에도 적용한다.
+         ★ 이름 일치가 우선(같은 gid 를 여러 탭이 쓰는 일은 없지만 이름이 더 강한 신호다).
+         ★ 빈 gid 는 절을 켜지 않는다 — 켜면 gid 없는 행이 전부 매칭된다. */
+      const gid = gidOf.get(k) || '';
       const { rows: cfg } = await db().query(
-        'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-        [sheetId, tabName]
+        `SELECT capture_folder_url FROM tab_configs
+          WHERE sheet_id = $1 AND (tab_name = $2 OR ($3 <> '' AND tab_gid = $3))
+          ORDER BY (tab_name = $2) DESC
+          LIMIT 1`,
+        [sheetId, tabName, gid]
       );
       const url = cfg[0] && cfg[0].capture_folder_url;
       const folderId = url ? drv().extractFolderIdFromUrl(url) : null;

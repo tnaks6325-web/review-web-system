@@ -93,6 +93,36 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
     /os\.deleted_at IS NULL AND os\.capture_uploaded_at IS NULL/.test(SRC)
     && /os\.submitted_at < NOW\(\) - interval '20 minutes'/.test(SRC));
 
+  {
+    /* ★★ 탭 리네임 폴백 (2026-08-20 실측) — 시트 탭은 건수가 바뀌며 이름이 바뀐다
+       (`…_500건` → `…_443건`). 주문 원장은 제출 당시 이름을 들고 있어 **이름으로만 조인하면
+       폴더가 멀쩡히 있는데 `no_capture_folder`** 로 떨어진다. gid 로도 찾아야 한다. */
+    ok('★ 폴더 조회에 gid 폴백이 있다(이름 우선)',
+      /WHERE sheet_id = \$1 AND \(tab_name = \$2 OR \(\$3 <> '' AND tab_gid = \$3\)\)/.test(SRC)
+      && /ORDER BY \(tab_name = \$2\) DESC/.test(SRC));
+    ok('★ 빈 gid 는 절을 켜지 않는다(켜면 gid 없는 행이 전부 매칭)', /\$3 <> ''/.test(SRC));
+    ok('★ 주문의 tab_gid 를 실제로 읽는다', /os\.tab_gid AS "tabGid"/.test(SRC));
+    // 실행으로 확인 — 이름이 바뀐 탭도 폴더를 찾아 판정이 unknown 에서 벗어난다
+    let seenParams = null;
+    const pool = { query: async (sql, params) => {
+      if (/app_settings/.test(sql)) return { rows: [] };
+      if (/FROM order_submissions os/.test(sql)) return { rows: [order({ tabGid: '777', tabName: '옛이름_500건' })] };
+      if (/capture_folder_url FROM tab_configs/.test(sql)) {
+        seenParams = params;
+        // 이름은 안 맞지만 gid 로 찾은 상황을 흉내낸다
+        return { rows: [{ capture_folder_url: 'https://drive.google.com/drive/folders/F' }] };
+      }
+      return { rows: [] };
+    } };
+    SVC.__setDepsForTest(pool, { extractFolderIdFromUrl: () => 'F', listFolderFilesRecursive: async () => [file()] },
+                         async (n, fn) => fn());
+    const r = await SVC.auditCaptureLinks({ days: 30 });
+    ok('★★ 리네임된 탭도 gid 로 폴더를 찾아 판정된다(unknown 아님)',
+      r.items[0].verdict === 'attachedButUnlinked', r.items[0].verdict + '/' + (r.items[0].reason || ''));
+    ok('★ gid 를 조회 파라미터로 넘긴다', seenParams && seenParams[2] === '777', JSON.stringify(seenParams));
+    SVC.__setDepsForTest(null, null, null);
+  }
+
   console.log('\nB) fail-closed — 무엇을 자동으로 붙이지 않는가');
   {
     const hi = { verdict: 'attachedButUnlinked', confidence: 'high', fileId: 'F1', winCandidates: 1, candidates: 1 };
