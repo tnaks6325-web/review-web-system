@@ -1272,7 +1272,7 @@
 - 회귀가드 `tests/participantAddSheetless.test.js`(스텁 pool 로 **실제 실행**: 실제 대역·row_json·worktable·장부 1회 / 시트 기반 무회귀 / fail-closed 쓰기 0 / buildValues 대역 방어 / 형제 경로 FILTER). ⚠ 이 변경으로 `worktablePlan` 가드의 `_MANUAL_SEQ_BASE` 부재 패턴을 갱신했다(검사 의미 불변 — 대역을 **배정에** 쓰는 것만 금지, 제외 FILTER 는 허용).
 
 ### ★★ 작업보드 구매일자 = 달력 편집 (무시트 진짜 기록 · 2026-08-21, 스키마 변경 0)
-- **사용자 확정**: 구매일자 열은 셀 직접 타이핑 편집 X — 우클릭 → [📅 날짜 선택] 미니달력 모달(`openWdDatePicker`/`#wdDatePick`, body 직속·onclick 은 숫자만·Esc/바깥클릭 닫기·주말색만(공휴일 표 사본 금지 — 틀린 빨간 날 > 빈 표시)).
+- **사용자 확정**: 구매일자 열은 셀 직접 타이핑 편집 X — 우클릭 → [📅 날짜 선택] 미니달력(`openWdDatePicker`/`#wdDatePick`, body 직속·onclick 은 숫자만·Esc/바깥클릭 닫기·주말색만(공휴일 표 사본 금지 — 틀린 빨간 날 > 빈 표시)). ★ **달력은 화면 중앙이 아니라 편집 셀에 붙는 인라인 팝오버**(사용자 확정 2026-08-21 2차 — `_wdDpPlace` 가 셀 rect 기준 아래·왼쪽 정렬, 화면 밖이면 위/안쪽 클램프 = 우클릭 메뉴와 같은 계산). ★ **스크롤·리사이즈는 닫는다**(앵커 셀을 따라가지 못하는 팝오버는 닫는 것이 정직 — 캡처 리스너로 그리드 내부 스크롤까지).
 - ★★ **저장 경로가 탭 종류로 갈린다**: 무시트 탭 = `POST /api/trackb/workdesk/purchase-date`(셀 편집과 같은 스코프) → **진짜 기록**(row_json·장부·재번호까지) / 시트 기반 탭 = 종전 오버레이(`commitCellEdit`) 그대로(시트가 진실원본 — 표시 전용이라는 성질도 종전과 동일). 그리드 오버레이는 재번호·장부가 못 읽는다는 사실이 이 기능의 존재 이유다.
 - ★★ **주문 연결 줄은 원장 먼저**(`setWorkdeskPurchaseDate` — trackB.service): `order_submissions.date_str` 갱신(last_edit_seq 단조증가) 후 **order-edit 무시트 경로와 같은 실행부**(`writeOrderToWorktable`)로 재기록 — row_json 만 고치면 다음 주문 재기록이 옛 날짜를 도로 덮는다(원장·작업표 드리프트). 주문 없는 줄만 `sheetlessStatus.markSheetlessPurchaseDate`(칸 판정 = `campaignSchedule.findDateColumnIndex` · 표기 = `worktablePlan.sheetDateStr` 단일 출처) + 재번호 fail-soft.
 - ★ **클라 날짜 칸 판정(`_WD_DATE_KEYWORDS`)은 서버 `DATE_HEADER_KEYWORDS` 의 최소 사본** — 회귀가드가 두 목록 일치를 고정한다(workManager 규율).
