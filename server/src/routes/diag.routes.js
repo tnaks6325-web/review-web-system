@@ -2646,18 +2646,42 @@ router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, 
         `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
                 last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
           WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, mirror_status`,
+        RETURNING id, mirror_status, sheet_id, tab_name, tab_gid, gid, sheet_row`,
         [...vals, editSeq]
       );
       if (!rows.length) return { notFound: true };
-      await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
-      return { mirrorStatus: rows[0].mirror_status };
+      /* ★★ 무시트 탭은 큐 대신 작업표에 바로 재기록한다 (2026-08-21 실측 결함 수정).
+         종전엔 order_update 를 그대로 큐에 넣었는데 큐 실행부의 무시트 백스톱이 그 항목을
+         "작업표 기록 경로가 담당"이라며 done 으로 삼켰고, **update 는 그 경로가 없어** 관리자
+         주문 편집이 원장(DB)에만 남고 작업표 row_json·장부(검색·리뷰어 화면)에는 영영 반영되지
+         않았다(조용한 소실). 실행부는 manualOrder ④ 와 같은 `writeOrderToWorktable` 한 벌 —
+         기존 연결 행(order_submission_id)을 잠가 최신 DB 값으로 병합하고 장부까지 재생성한다.
+         ★ 판정 실패·기록 실패는 종전 경로(enqueue) 폴백 — 백스톱이 삼키는 건 같지만 동작이
+           조용히 나빠지지는 않고, 응답 `sheetlessApplied` 로 사실을 말한다(조용한 누락 금지). */
+      const os = rows[0];
+      let sheetlessApplied = null;
+      let isSl = false;
+      try { isSl = await require('../utils/sheetlessScope').isSheetless(pool, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
+      if (isSl && os.sheet_row) {
+        try {
+          const { rows: full } = await pool.query(`SELECT * FROM order_submissions WHERE id = $1`, [orderSubmissionId]);
+          const { _osRowToOrderData } = require('../services/orderLedger.service');
+          sheetlessApplied = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
+            sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid || '',
+            sheetRow: os.sheet_row, orderData: _osRowToOrderData(full[0]), orderSubmissionId,
+          });
+        } catch (e) { sheetlessApplied = { ok: false, reason: 'exception', message: e.message }; }
+      }
+      if (!sheetlessApplied || !sheetlessApplied.ok) {
+        await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
+      }
+      return { mirrorStatus: os.mirror_status, sheetlessApplied };
     });
     if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
     if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
     require('../jobs/queuePump').kickQueuePump();
     require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
-    res.json({ ok: true, queued: true, editSeq });
+    res.json({ ok: true, queued: !(out.sheetlessApplied && out.sheetlessApplied.ok), editSeq, sheetlessApplied: out.sheetlessApplied || null });
   } catch (err) { next(err); }
 });
 
