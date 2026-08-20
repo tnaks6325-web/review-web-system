@@ -202,7 +202,7 @@ const PARTS = [
     const im = srv('src/services/indexBuilder.service.js');
     const rm = srv('src/services/rawMirror.service.js');
     const sb = srv('src/services/smartBuild.service.js');
-    ok('RAW 미러 스윕: 전부 무시트인 시트 제외', /fullySheetlessSheetIds\(pool\)/.test(rm) && /sheetIds\.filter\(id => !_slSheets\.has\(id\)\)/.test(rm));
+    ok('RAW 미러 스윕: 전부 무시트인 시트 제외', /sweepSkipSheetIds\(pool\)/.test(rm) && /sheetIds\.filter\(id => !_slSheets\.has\(id\)\)/.test(rm));
     ok('RAW 미러 요약에 제외 건수 고지(조용한 누락 금지)', /sheetlessSkipped/.test(rm));
     // ★★ 시트를 실제로 읽는 크론은 셋 — smartBuild(5분) · buildIndexSmart(전체빌드) · checkDirtySheets(변경감지).
     //   ★ smartBuild 를 빠뜨리면 이관한 탭을 5분마다 다시 읽어 **작업표로 만든 장부를 옛 시트 값으로 덮는다**
@@ -225,7 +225,7 @@ const PARTS = [
     // 판정 유틸 실행 — fail-open(조회 실패는 빈 집합 = 종전 동작)
     const boom = { query: () => Promise.reject(new Error('42703')) };
     ok('컬럼 미적용/조회 실패는 fail-open(스윕이 멈추지 않는다)',
-      (await scope.fullySheetlessSheetIds(boom)).size === 0 &&
+      (await scope.sweepSkipSheetIds(boom)).size === 0 &&
       (await scope.sheetlessTabKeys(boom)).size === 0 &&
       (await scope.isSheetless(boom, 'S', 'T')) === false);
     // ★ 손으로 만든 Set 이 아니라 **실제 조회 결과**로 검증한다 —
@@ -337,7 +337,7 @@ const PARTS = [
         r2.mirrorRows === r.mirrorRows && r2.indexRows === r.indexRows && r2.headerSource === 'stored');
 
       // 크론 게이트 — 전부 무시트인 시트는 스윕에서 빠진다
-      const sl = await scope.fullySheetlessSheetIds(pool);
+      const sl = await scope.sweepSkipSheetIds(pool);
       ok('전부 무시트인 시트가 스윕 제외 집합에 잡힌다', sl.has(S));
 
       await pool.query('DELETE FROM tab_configs WHERE sheet_id=$1', [S]);
