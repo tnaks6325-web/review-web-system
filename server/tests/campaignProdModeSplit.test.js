@@ -314,6 +314,12 @@ else {
   const sb = { console };
   sb.window = sb; vm.createContext(sb);
   sb.reviewOrderIsSheetReferenceMode = () => false;
+  // ⚠ 134: reviewOrderOptionsPayload 가 유입방식 게이트를 부른다(가이드유입일 때만 선택지 가이드 동봉).
+  //   스텁이 아니라 실물을 꺼내 쓴다 — 여기서만 다른 판정을 두면 옵션 구조 신호가 딴판이 된다.
+  sb.document = { querySelector: sel => (/review-order-inflow-type/.test(sel) ? { value: '링크유입' } : null) };
+  vm.runInContext(grab(intranet, 'reviewOrderChecked'), sb);
+  vm.runInContext(grab(intranet, 'reviewOrderInflowTypeCode'), sb);
+  vm.runInContext(grab(intranet, 'reviewOrderIsGuideInflow'), sb);
   vm.runInContext(grab(intranet, 'reviewOrderFormatOption'), sb);
   vm.runInContext(grab(intranet, 'reviewOrderOptionsPayload'), sb);
   sb._p = [{ name: '우레온', url: 'https://x', basePrice: 22000, baseCount: 5, options: [] }];
