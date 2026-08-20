@@ -217,9 +217,6 @@
       .pcard .pg-tq{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;
         font-size:.56rem;font-weight:800;background:#FEF3C7;color:#92400E}
       .pcard .pg-tq.on{background:#FEE2E2;color:#B91C1C}
-      /* 누적 표기의 [표] 출처 배지(1단계) — 표 기준 숫자일 때만 붙는다 */
-      .pcard .sp-src{font-style:normal;font-size:.52rem;font-weight:800;color:#1550b8;
-        background:#EEF3FD;border-radius:4px;padding:0 3px;margin-left:2px;vertical-align:1px}
       /* 095: 차수 구분 줄(관리자 카드 전용) — 1차 200/200 완료 · 2차 12/100 · 총 212/300 */
       .pcard .prounds{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:.62rem;color:#6B7280}
       .pcard .prounds .rchip{background:#F1F5F9;border-radius:999px;padding:1px 7px;font-weight:800;color:#334155}
@@ -398,9 +395,10 @@
     const tip = tf != null
       ? `작업보드 표에 채워진 줄 ${tf}줄 (표 ${Number(sug.total) || 0}줄) · 공고를 거쳐 확정된 건 ${done}명 · 차수·이월 칩은 공고 확정 기준`
       : '표 기준 집계를 받지 못해 공고 확정 기준으로 표기 중';
+    // ★ 출처는 툴팁이 말한다 — [표] 배지는 제거(사용자 확정 2026-08-20).
     const totTxt = `<span title="${_esc(tip)}">`
       + (total > 0 ? `총 <b>${n}</b>/${total}명` : (n ? `누적 <b>${n}</b>명` : '총 <b>0</b>명'))
-      + (tf != null ? ' <i class="sp-src">표</i>' : '') + '</span>';
+      + '</span>';
     /* ★★ 시트 탭 연결 표기는 그리지 않는다 (탈 구글시트 · 사용자 확정 2026-08-19).
        리뷰웹시스템은 무시트라 담당자가 시트 탭을 고를 일이 없고, 공고의 작업보드는
        접수 또는 첫 주문 때 시스템이 확보한다(`campaignWorktable.ensureCampaignWorktable`).

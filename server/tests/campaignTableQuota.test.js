@@ -219,13 +219,13 @@ const ok = (name, cond, extra) => {
       recruit_total: 200, daily_limit: 10, dailyQuota: 10, todayCount: 0,
       ops: { totalConfirmed: 49, holdNow: 0 } };
     const hTf = CC.cardHtml({ ...base, archiveSuggest: { total: 200, filled: 169, full: false } }, { admin: true });
-    ok('★★ 1단계 — 누적 분자 = 표 채워진 줄(169) + [표] 출처 배지',
-      /총 <b>169<\/b>\/200명/.test(hTf) && /sp-src/.test(hTf));
+    ok('★★ 1단계 — 누적 분자 = 표 채워진 줄(169) · [표] 배지 없음(사용자 확정 2026-08-20 — 출처는 툴팁만)',
+      /총 <b>169<\/b>\/200명/.test(hTf) && !/sp-src/.test(hTf));
     ok('★ 툴팁이 공고 확정(49명)을 병기(차이 = 신호를 잃지 않는다)',
       /공고를 거쳐 확정된 건 49명/.test(hTf));
     const hNo = CC.cardHtml({ ...base }, { admin: true });
-    ok('★ 재료 부재 = 종전(49) 폴백 + 폴백 사실을 툴팁으로("표" 배지 없음 — 거짓 표 기준 표기 금지)',
-      /총 <b>49<\/b>\/200명/.test(hNo) && !/sp-src/.test(hNo) && /공고 확정 기준으로 표기 중/.test(hNo));
+    ok('★ 재료 부재 = 종전(49) 폴백 + 폴백 사실을 툴팁으로(거짓 표 기준 표기 금지)',
+      /총 <b>49<\/b>\/200명/.test(hNo) && /공고 확정 기준으로 표기 중/.test(hNo));
     const hObs = CC.cardHtml({ ...base, archiveSuggest: { total: 200, filled: 40, full: false },
       tableQuota: { mode: 'observe', orders: 40, ordersAll: 40, sharedTab: false, wouldClose: true } }, { admin: true });
     ok('★ observe 칩 = "표 기준이면 마감"(참여는 안 막는다는 문구)',
@@ -238,7 +238,8 @@ const ok = (name, cond, extra) => {
     const hRv = CC.cardHtml({ ...base, archiveSuggest: { total: 200, filled: 169, full: false },
       tableQuota: { mode: 'observe', orders: 169, ordersAll: 169, sharedTab: false, wouldClose: true } }, { admin: false });
     ok('★★ 리뷰어 카드에는 표 기준 표기·칩이 없다(관리자 분기 전용)', !/sp-src|pg-tq/.test(hRv));
-    ok('CSS 주입(.pg-tq/.sp-src)', /\.pcard \.pg-tq\{/.test(cards) && /\.pcard \.sp-src\{/.test(cards));
+    ok('CSS 주입(.pg-tq) + sp-src 배지 흔적 0(부활 금지)',
+      /\.pcard \.pg-tq\{/.test(cards) && !/sp-src/.test(cards));
     ok('★ _roundsLine 은 공고 기준 유지(차수 차오름은 시간 순서 전제 — filled 에는 시간축이 없다)',
       /_roundsLine/.test(cards) && /ops && Number\(c\.ops\.totalConfirmed\)\) \|\| 0;\n    const prev/.test(cards.replace(/\r/g, '')) ||
       /function _roundsLine[\s\S]{0,400}totalConfirmed/.test(cards));
