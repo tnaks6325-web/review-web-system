@@ -1730,8 +1730,8 @@
   .gcmrow.danger{color:var(--bad)} .gcmrow.danger:hover{background:var(--bad-soft)}
   .gcmrow.dim{opacity:.4;cursor:not-allowed} .gcmrow.dim:hover{background:none}
   /* 구매일자 미니달력 — body 직속 오버레이, var 폴백(테마 없는 화면 대비) */
-  #wdDatePick{position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:1200;display:flex;align-items:center;justify-content:center}
-  #wdDatePick .wdp-box{background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 18px 44px rgba(15,23,42,.22);padding:12px;width:264px;box-sizing:border-box}
+  #wdDatePick{position:fixed;inset:0;background:transparent;z-index:1200}
+  #wdDatePick .wdp-box{position:fixed;background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 10px 32px rgba(15,23,42,.24);padding:12px;width:264px;box-sizing:border-box}
   #wdDatePick .wdp-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:13.5px}
   #wdDatePick .wdp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
   #wdDatePick .wdp-w{font-size:11px;color:var(--faint,#94a3b8);text-align:center;padding:3px 0}
@@ -7460,15 +7460,31 @@ function openWdDatePicker(td){
   _wdDpClose();
   const cur=_wdDpParse(td.getAttribute('data-val')||'');
   const now=new Date();
-  _wdDpState={rowId, field, td, y:(cur?cur.y:now.getFullYear()), mo:(cur?cur.mo:now.getMonth()+1), sel:cur, busy:false};
+  // ★ 인라인 앵커(사용자 확정 2026-08-21): 달력은 화면 중앙이 아니라 **편집하려는 셀에 붙여** 띄운다.
+  //   rect 는 열 때 1회 저장 — 스크롤로 셀이 움직이면 따라가는 대신 닫는다(우클릭 메뉴와 같은 규율).
+  const rect=td.getBoundingClientRect();
+  _wdDpState={rowId, field, td, y:(cur?cur.y:now.getFullYear()), mo:(cur?cur.mo:now.getMonth()+1), sel:cur, busy:false,
+    anchor:{left:rect.left, top:rect.top, bottom:rect.bottom}};
   const ov=document.createElement('div'); ov.id='wdDatePick';
   ov.innerHTML='<div class="wdp-box" role="dialog" aria-label="구매일자 선택"></div>';
   document.body.appendChild(ov);
   ov.addEventListener('mousedown',e=>{ if(e.target===ov) _wdDpClose(); });   // 바깥 클릭 = 취소(입력값 없음 — 보호할 타이핑이 없다)
   if(!window._wdDpKeyBound){ window._wdDpKeyBound=true;
     document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('wdDatePick')){ e.stopPropagation(); _wdDpClose(); } }, true);
+    // 표가 스크롤되면 앵커 셀이 움직인다 — 따라가지 못하는 팝오버는 닫는 것이 정직하다(캡처 = 그리드 내부 스크롤도 잡는다).
+    window.addEventListener('scroll',()=>{ if(document.getElementById('wdDatePick')) _wdDpClose(); }, true);
+    window.addEventListener('resize',()=>{ if(document.getElementById('wdDatePick')) _wdDpClose(); });
   }
   _wdDpRender();
+}
+/* 앵커 셀 기준 배치 — 기본은 셀 바로 아래·왼쪽 정렬, 화면 밖이면 위/안쪽으로 클램프(우클릭 메뉴와 같은 계산). */
+function _wdDpPlace(){
+  const S=_wdDpState; const box=document.querySelector('#wdDatePick .wdp-box'); if(!S||!box||!S.anchor)return;
+  const w=box.offsetWidth||264, h=box.offsetHeight||320, a=S.anchor;
+  let left=Math.max(8, Math.min(a.left, window.innerWidth-w-10));
+  let top=a.bottom+4;
+  if(top+h>window.innerHeight-8) top=Math.max(8, a.top-h-4);   // 아래 공간 부족 → 셀 위로
+  box.style.left=left+'px'; box.style.top=top+'px';
 }
 function _wdDpNav(d){ const S=_wdDpState; if(!S)return; S.mo+=d; if(S.mo<1){S.mo=12;S.y--;} if(S.mo>12){S.mo=1;S.y++;} _wdDpRender(); }
 function _wdDpRender(){
@@ -7491,6 +7507,7 @@ function _wdDpRender(){
     `<div class="wdp-grid">${['일','월','화','수','목','금','토'].map((w,i)=>`<span class="wdp-w ${i===0?'sun':(i===6?'sat':'')}">${w}</span>`).join('')}${cells}</div>`+
     `<div class="wdp-ft">${S.busy?'저장 중…':'날짜를 누르면 바로 저장됩니다'}<span class="sp" style="flex:1"></span>`+
     `<button class="btn" onclick="_wdDpClose()">취소</button></div>`;
+  _wdDpPlace();   // 월 이동으로 높이가 변해도 다시 클램프
 }
 function _wdDpPick(d){
   const S=_wdDpState; if(!S||S.busy)return;

@@ -149,6 +149,12 @@ async function run() {
     assert.ok(/if\(!sheetless\)\{[\s\S]*commitCellEdit\(S\.rowId, S\.field, iso, td\)/.test(pick), '시트 기반 = 종전 오버레이 경로 유지');
     assert.ok(/onclick="_wdDpPick\(\$\{d\}\)"/.test(html), 'onclick 은 숫자만(문자열 보간 금지)');
     assert.ok(/#wdDatePick\{position:fixed/.test(html), '오버레이 body 직속(fixed)');
+    // 인라인 앵커(사용자 확정 2026-08-21): 셀 rect 기준 배치 + 스크롤 시 닫기(따라가지 못하는 팝오버는 닫는다)
+    assert.ok(/const rect=td\.getBoundingClientRect\(\)/.test(html), '달력은 편집 셀에 붙는다(앵커 rect)');
+    assert.ok(/function _wdDpPlace\(/.test(html) && /_wdDpPlace\(\);/.test(html), '렌더마다 앵커 배치·클램프');
+    assert.ok(/addEventListener\('scroll',\(\)=>\{ if\(document\.getElementById\('wdDatePick'\)\) _wdDpClose\(\); \}, true\)/.test(html), '스크롤 시 닫기(캡처 — 그리드 내부 스크롤 포함)');
+    assert.ok(/\.wdp-box\{position:fixed/.test(html), '박스가 셀 좌표에 고정(중앙 flex 아님)');
+    assert.ok(!/#wdDatePick\{[^}]*align-items:center/.test(html), '중앙 정렬 백드롭 부활 금지');
     console.log('  F. 프론트 배선 통과');
 
     // ── G. 라우트 배선 ──
