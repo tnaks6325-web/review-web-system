@@ -1151,7 +1151,7 @@ function onParticipationToggle(on) {
        ⚠ 모달의 [리뷰어에게 숨김] 토글은 사용자 확정(2026-08-19)으로 제거됐다 —
          테스트 공고도 모집중이면 리뷰어 목록에 뜬다. 테스트가 끝나면 게시(모집중) 토글을 내린다.
      - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
-     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 15/10분).
+     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 30/15분).
      - 구매 시간대 비움 = 자율주문(종일 오픈).
    ★ 연결 탭만 사람이 고른다 — 어느 시트에 테스트 행을 쓸지는 시스템이 정할 수 없다.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -2549,7 +2549,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _maEl = document.getElementById("rf_multi_account");
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
   const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "1";
-  const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "10";
+  const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "15";
   /* ★ v2: 참여형이 기본 — 신규 공고는 항상 켜져 열린다(스위치 UI 제거·hidden 체크박스 유지).
      레거시(일반) 공고를 편집할 땐 아래 프리필의 else 분기가 다시 끈다. */
   const _partEl = document.getElementById("rf_participation");
@@ -2678,7 +2678,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const _ma = document.getElementById("rf_multi_account");
           if (_ma) { _ma.checked = c.multi_account_mode === true; onMultiAccountToggle(_ma.checked); }
           const _md = document.getElementById("rf_multi_daily"); if (_md) _md.value = c.multi_daily_limit ?? 0;
-          const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 10;
+          const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 15;
         }
         /* 🧪 085 리뷰어 미노출 복원 */
         {
@@ -4076,7 +4076,7 @@ async function saveRecruitPostImpl() {
       if (document.getElementById("rf_multi_account")) {
         payload.multi_account_mode = !!document.getElementById("rf_multi_account").checked;
         payload.multi_daily_limit  = Math.max(0, parseInt(document.getElementById("rf_multi_daily")?.value, 10) || 0);
-        payload.sub_hold_ttl_min   = Math.max(1, parseInt(document.getElementById("rf_sub_ttl")?.value, 10) || 10);
+        payload.sub_hold_ttl_min   = Math.max(1, parseInt(document.getElementById("rf_sub_ttl")?.value, 10) || 15);
       }
       /* 🧪 085 리뷰어 미노출 — ★ 토글 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 기존값 유지) */
       if (document.getElementById("rf_reviewer_hidden")) {
