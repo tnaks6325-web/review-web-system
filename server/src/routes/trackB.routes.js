@@ -363,6 +363,7 @@ router.post('/sheet-sync/gid-backfill', authMiddleware, adminOrMasterMiddleware,
 //   여기 두는 이유는 C/S·설정과 같다: 인트라넷 SSO 토큰(via:'intranet')은 /api/archive/* 에 도달 불가.
 //   ★ 게이트는 원본(authMiddleware)보다 좁힌다(adminOrMaster) — 프록시가 원본보다 넓어지면 안 된다.
 const _archiveRoutes = require('./archive.routes');
+const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 const _archiveRestore = _delegate(_archiveRoutes, 'post', '/restore');
 router.post('/sheet-sync/unarchive', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _archiveRestore(req, res, next));
@@ -2879,6 +2880,36 @@ router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, asy
   try {
     const { watchDuplicateRows } = require('../services/worktableDupWatch.service');
     res.json(await watchDuplicateRows({ by: _by(req), record: false }));
+  } catch (err) { next(err); }
+});
+
+/* ═══ 구매 캡처 ↔ 주문 연결 (감사 · 백필) ═══════════════════════════════════════
+   Drive 엔 캡처가 있는데 링크(`capture_file_id`)만 비어 있는 주문을 찾아 이어 붙인다.
+   ★ 리뷰어에게 다시 받을 필요가 없는 건들이다(이미 낸 증빙).
+   ★ 경로가 /api/trackb/* 인 이유 = 인트라넷 SSO 토큰(via:'intranet')은 /api/diag/* 에 도달 불가.
+   ★ 게이트는 원본 감사(/api/diag/no-capture-audit)와 같은 adminOrMaster — 넓히지 않는다
+     (파일명·수취인 등 PII 가 실린다). */
+router.get('/capture-link/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const r = await captureLinkBackfill.auditCaptureLinks({
+      days: req.query.days, limit: req.query.limit, maxTabs: req.query.maxTabs,
+    });
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
+router.post('/capture-link/backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    /* ★ dryRun 기본 · confirm !== true 면 서비스가 쓰기 0건으로 끝낸다(되돌리기 어려운 값이라
+       미리보기 → 사람 확인 2단계). allowLow 는 "이름은 같은데 시각이 먼" 약한 신호까지 여는
+       명시 옵션 — 기본은 닫혀 있다. */
+    const r = await captureLinkBackfill.backfillCaptureLinks({
+      days: b.days, limit: b.limit, maxTabs: b.maxTabs,
+      dryRun: b.dryRun !== false, confirm: b.confirm === true, allowLow: b.allowLow === true,
+      by: _by(req),
+    });
+    res.json({ ok: true, ...r });
   } catch (err) { next(err); }
 });
 
