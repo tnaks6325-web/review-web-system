@@ -2384,6 +2384,12 @@ function applyProductRowsFromOrder(prefill) {
   const sourceMode = p.productMode === "opt" ? "opt" : "";
   const sourceOptions = (Array.isArray(p.options) ? p.options : []).map(o => ({
       productName: o.productName || p.product_name || "",
+      // ★★ 134 — 선택 단위(옵션/옵션 없는 상품)와 그 선택지 전용 유입가이드를 **그대로 통과**시킨다.
+      //   여기서 떨어뜨리면 복합 작업의 "상품B" 가 이름 없는 옵션 줄이 되어 저장조차 안 되고,
+      //   인트라넷이 보낸 선택지별 가이드가 발행 단계에서 통째로 사라진다.
+      unitKind: (o.unitKind ?? o.unit_kind) === "product" ? "product" : "option",
+      inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
+      inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
       optionUrl: o.optionUrl || o.option_url || o.url || "",
       optKey: o.optKey || o.opt_key || "",
       payAmount: o.payAmount || o.pay_amount || 0,

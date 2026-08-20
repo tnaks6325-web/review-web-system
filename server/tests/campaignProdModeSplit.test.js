@@ -326,7 +326,11 @@ else {
 {
   const sb = { console };
   sb.window = sb; vm.createContext(sb);
-  vm.runInContext(grab(wodSrc, '_woOptionRows'), sb);
+  // ⚠ _woOptionRows 가 새 전역을 부르면 이 목록도 함께 늘린다(스텁을 두면 규칙이 거기서만 딴판이 된다).
+  //   134: 선택지 전용 유입가이드 정규화(_woUnitGuide) + 그 평문→HTML 변환 의존 3종.
+  vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), sb);
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woOptionRows']
+    .forEach(n => vm.runInContext(grab(wodSrc, n), sb));
   sb._o = { product_options_json: JSON.stringify([{ name: '힙스', base: { pay: 0 }, options: [
     { label: '콰이어트', pay: 31400, count: 20 }, { label: '어나더', pay: 31400, count: 25 }] }]) };
   const rows = vm.runInContext('_woOptionRows(_o)', sb);
