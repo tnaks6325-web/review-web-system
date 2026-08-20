@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 모집공고 편집창 첨부 이미지: 2장부터 안 보이는 문제</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   모집공고 편집(수정) 모달의 유입가이드·리뷰가이드·특이사항 첨부 이미지 스트립이
+   2장째부터 ✕(빼기)가 안 보이고 3장째부터는 첨부 여부조차 안 보이는 문제의 해결 시안.
+
+   ▸ 원인(실측 · recruit-modal.js):
+     - 새 편집창(compact v2)에서 스트립 칸이 `width:128px !important` + `overflow:hidden`
+     - 썸네일은 한 장이 `74px 고정폭`(+간격 5px)
+     → 안쪽 가용폭 118px에 1장(74px)만 온전히 들어가고,
+       2장째는 39px만 보여 오른쪽 위 ✕가 잘려나가며, 3·4장째와 [＋추가]는 통째로 밖.
+       가로 스크롤도 없고(overflow:hidden) 장수 표시도 없어 "안 보임 = 없음"으로 읽힌다.
+
+   ▸ 시안 3안: ?v=A|B|C 로 단독 보기. 외부 리소스 0(오프라인 열람) · 가짜 데이터로 실제 동작
+     (✕로 빼기 · ＋로 추가 · C안 관리 팝업까지 눌러볼 수 있음).
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#fff;--card2:#f1f4f8;--ink:#101828;--muted:#5d6b7f;--faint:#8b95a6;
+  --line:#e6eaf0;--line2:#d0d9e4;
+  --accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#15803d;--safe-soft:#e9f7ee;--safe-line:#cfe9d8;
+  --warn:#b45309;--warn-soft:#fdf6ec;--warn-line:#f0e0c4;
+  --bad:#c92a2e;--bad-soft:#fdf0f0;--bad-line:#f3d4d4;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sh2:0 2px 10px rgba(16,24,40,.06);--sh3:0 12px 40px rgba(16,24,40,.16);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+::selection{background:#dbe6ff}
+code{font-family:var(--mono);font-size:.88em;background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.page{max-width:1240px;margin:0 auto;padding:30px 20px 120px}
+h1{font-size:23px;font-weight:800;letter-spacing:-.025em;margin:0 0 8px}
+.lead{color:var(--muted);font-size:13.5px;margin:0 0 8px;max-width:940px}
+.lead b{color:var(--ink)}
+.meta{font-size:12px;color:var(--faint);margin:0 0 10px}
+.vswitch{display:flex;gap:6px;margin:14px 0 0;flex-wrap:wrap}
+.vswitch a{font-size:11.5px;font-weight:700;text-decoration:none;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--line2);color:var(--muted);background:var(--card)}
+.vswitch a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.sec{margin-top:46px}
+.sec>h2{font-size:16.5px;font-weight:800;letter-spacing:-.02em;margin:0 0 5px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sec>h2 .n{width:22px;height:22px;border-radius:7px;background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line);
+  font-size:11px;font-weight:800;display:grid;place-items:center;flex:none}
+.tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line)}
+.tag.rec{color:var(--safe);background:var(--safe-soft);border-color:var(--safe-line)}
+.tag.warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
+.tag.bad{color:var(--bad);background:var(--bad-soft);border-color:var(--bad-line)}
+.sec>.sub{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:940px}
+.sec>.sub b{color:var(--ink)}
+.note{margin:14px 0 0;padding:11px 14px;border-radius:10px;font-size:12.5px;max-width:940px;
+  background:var(--warn-soft);border:1px solid var(--warn-line);color:var(--warn)}
+.note.blue{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+
+/* 장단점·결정 표 */
+table.cmp{border-collapse:separate;border-spacing:0;width:100%;max-width:940px;background:var(--card);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:12.5px;box-shadow:var(--sh2)}
+table.cmp th,table.cmp td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+table.cmp thead th{background:var(--card2);font-size:11.5px;color:var(--muted)}
+table.cmp tr:last-child td{border-bottom:none}
+table.cmp td b{font-weight:800}
+
+/* ══════ 모집공고 편집창(실물 축소 재현) ══════ */
+.modal{max-width:1124px;background:#fff;border:1px solid var(--line2);border-radius:16px;overflow:hidden;
+  box-shadow:var(--sh3);margin-top:6px}
+.mhd{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line)}
+.mhd b{font-size:14px;font-weight:800}
+.mhd .x{width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--card2);
+  display:grid;place-items:center;color:var(--muted);font-size:13px}
+.msplit{display:flex;min-height:430px}
+/* 좌측 레일 */
+.rail{flex:none;width:176px;border-right:1px solid var(--line);padding:14px 12px;background:#fbfcfe;
+  display:flex;flex-direction:column;gap:6px}
+.rail .rt{font-size:12.5px;font-weight:800}
+.rail .rs{font-size:10.5px;color:var(--faint);margin-bottom:6px}
+.rail .step{display:flex;align-items:center;gap:7px;padding:8px 9px;border-radius:9px;font-size:11.5px;font-weight:700;
+  color:var(--muted);border:1px solid transparent}
+.rail .step.on{background:var(--safe-soft);border-color:var(--safe-line);color:var(--safe)}
+.rail .step .no{width:17px;height:17px;border-radius:50%;border:1px solid currentColor;display:grid;place-items:center;
+  font-size:9.5px;flex:none}
+.rail .audit{margin-top:auto;display:flex;flex-direction:column;gap:5px}
+.rail .audit .at{font-size:10.5px;font-weight:800;color:var(--muted)}
+.rail .chip{font-size:10px;font-weight:700;color:var(--safe);background:var(--safe-soft);border:1px solid var(--safe-line);
+  border-radius:8px;padding:5px 8px}
+/* 중앙 편집부 */
+.ed{flex:1;min-width:0;padding:14px 18px 18px;display:flex;flex-direction:column;gap:0}
+.ed .eh{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:3px}
+.ed .eh h3{margin:0;font-size:15px;font-weight:800}
+.ed .eh .save{font-size:10px;font-weight:800;color:var(--warn);background:var(--warn-soft);border:1px solid var(--warn-line);
+  border-radius:999px;padding:2px 8px}
+.ed .ep{margin:0 0 10px;font-size:11.5px;color:var(--faint)}
+.frow{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:start;
+  padding:9px 0;border-top:1px solid var(--line)}
+.frow>.fl{font-size:11.5px;font-weight:800;color:#3c4a5f;padding-top:7px}
+.frow input[type=text],.frow textarea{width:100%;border:1px solid var(--line2);border-radius:7px;background:#fff;
+  padding:7px 9px;font:inherit;font-size:12px;color:var(--ink);resize:none}
+.frow textarea{height:58px;line-height:1.45}
+.badgerow{display:flex;gap:5px;flex-wrap:wrap}
+.badge{font-size:10.5px;font-weight:700;color:var(--muted);background:var(--card2);border:1px solid var(--line2);
+  border-radius:6px;padding:3px 8px}
+.badge.on{color:var(--accent-deep);background:var(--accent-soft);border-color:var(--accent-line)}
+/* 우측 미리보기 */
+.pv{flex:none;width:270px;border-left:1px solid var(--line);background:#fbfcfe;padding:14px;font-size:11px;color:var(--muted)}
+.pv .pt{font-size:11px;font-weight:800;color:var(--accent-deep);margin-bottom:8px}
+.pv .card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh2)}
+.pv .thumb{height:120px;background:linear-gradient(135deg,#e8edf4,#d6dde8);display:grid;place-items:center;color:var(--faint);font-size:10px}
+.pv .cb{padding:9px 11px}
+.pv .cb b{display:block;font-size:11.5px;color:var(--ink);margin-bottom:3px}
+.mft{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+.mft .btn{font-size:12px;font-weight:800;border-radius:8px;padding:8px 16px;border:1px solid var(--line2);background:#fff;color:var(--muted)}
+.mft .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* ══════ 스트립(공통 부품) ══════ */
+.compose{display:grid;grid-template-columns:minmax(0,1fr) 128px;gap:6px;align-items:stretch}
+.compose.col{grid-template-columns:minmax(0,1fr)}   /* A안: 세로 배치 */
+.strip{border:1px dashed #c9d6e8;border-radius:6px;background:#fbfcfe;padding:4px;display:flex;gap:5px;align-items:stretch;
+  height:58px;position:relative}
+.strip.clip{overflow:hidden}                        /* 현재 상태 재현용 */
+.th{position:relative;flex:none;width:74px;height:100%;border-radius:6px;overflow:hidden;border:1px solid var(--line2);
+  background:#eef1f6;cursor:zoom-in;padding:0}
+.th img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.th .x{position:absolute;top:3px;right:3px;width:17px;height:17px;border-radius:50%;cursor:pointer;
+  background:rgba(15,23,42,.62);color:#fff;font-size:10px;line-height:1;display:grid;place-items:center;padding:0}
+.th .x:hover{background:rgba(220,38,38,.92)}
+.th .no{position:absolute;left:3px;bottom:3px;font-size:9px;font-weight:800;color:#fff;background:rgba(15,23,42,.55);
+  border-radius:5px;padding:1px 4px;pointer-events:none}
+.addb{flex:none;width:74px;height:100%;border:1px dashed var(--line2);border-radius:6px;background:#fff;color:var(--faint);
+  font-size:10px;font-weight:700;display:grid;place-content:center;gap:2px;cursor:pointer;text-align:center;padding:0}
+.addb:hover{border-color:var(--accent);color:var(--accent)}
+.addb .plus{font-size:14px;line-height:1;font-weight:400}
+.emptyb{flex:1;border:none;background:transparent;color:var(--faint);font-size:10px;font-weight:700;cursor:pointer;
+  display:grid;place-content:center;gap:2px;text-align:center}
+.emptyb .t1{font-size:11px;font-weight:800;color:var(--muted)}
+.igmsg{font-size:10.5px;font-weight:700;color:var(--faint);margin-top:3px;min-height:14px}
+.igmsg.ok{color:var(--safe)}.igmsg.warn{color:var(--warn)}
+/* A안: 전폭 스트립 */
+.stripA{height:66px;flex-wrap:nowrap;overflow-x:auto}
+.stripA .th{width:82px}
+.cnt{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);
+  border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+/* B안: 128px 안 2열 그리드 */
+.stripB{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:3px;height:58px;padding:3px}
+.stripB .th{width:auto;height:auto;min-height:0;border-radius:4px}
+.stripB .th .x{width:13px;height:13px;font-size:8px;top:1px;right:1px}
+.stripB .th .no{font-size:8px;padding:0 3px;left:1px;bottom:1px}
+.stripB .addb{width:auto;height:auto;font-size:8.5px}
+.stripB .addb .plus{font-size:11px}
+/* C안: 대표 1장 + 스택 */
+.stack{position:relative;flex:none;width:74px;height:100%;border-radius:6px;cursor:pointer;border:1px solid var(--line2);
+  overflow:hidden;background:#eef1f6;padding:0}
+.stack img{width:100%;height:100%;object-fit:cover;display:block;filter:brightness(.55)}
+.stack .sn{position:absolute;inset:0;display:grid;place-content:center;color:#fff;font-size:12px;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+.stack .sn small{font-size:8.5px;font-weight:700;opacity:.85}
+/* C안 관리 팝업 */
+.pop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;place-items:center;z-index:50}
+.pop.on{display:grid}
+.pop .pbox{width:min(480px,92vw);background:#fff;border-radius:14px;box-shadow:var(--sh3);overflow:hidden}
+.pop .ph{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.pop .ph b{font-size:13px}
+.pop .ph button{border:none;background:none;font-size:15px;color:var(--muted);cursor:pointer}
+.pop .pb{padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pop .pth{position:relative;border-radius:9px;overflow:hidden;border:1px solid var(--line2);aspect-ratio:16/10;background:#eef1f6}
+.pop .pth img{width:100%;height:100%;object-fit:cover;display:block}
+.pop .pth .x{position:absolute;top:5px;right:5px;width:22px;height:22px;border:none;border-radius:50%;cursor:pointer;
+  background:rgba(15,23,42,.62);color:#fff;font-size:11px;display:grid;place-items:center}
+.pop .pth .x:hover{background:rgba(220,38,38,.92)}
+.pop .pth .no{position:absolute;left:5px;bottom:5px;font-size:9.5px;font-weight:800;color:#fff;background:rgba(15,23,42,.55);border-radius:5px;padding:1px 5px}
+.pop .padd{border:1.5px dashed var(--line2);border-radius:9px;aspect-ratio:16/10;display:grid;place-content:center;gap:3px;
+  color:var(--faint);font-size:11px;font-weight:700;background:#fbfcfe;cursor:pointer;text-align:center}
+.pop .pf{padding:10px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--faint)}
+@media (max-width:900px){.msplit{flex-direction:column}.rail{width:100%;flex-direction:row;align-items:center}.rail .audit{display:none}.pv{width:100%}}
+</style></head><body><div class="page">
+
+<h1>모집공고 편집창 첨부 이미지 — 2장부터 안 보이는 문제</h1>
+<p class="lead">유입 가이드·리뷰 가이드·특이사항의 첨부 이미지 칸이 <b>128px 고정폭 + 잘림(overflow:hidden)</b>인데
+썸네일은 한 장 <b>74px 고정</b>이라, <b>2장째는 ✕(빼기) 버튼이 잘려나가고 3장째부터는 첨부됐다는 사실 자체가 안 보입니다.</b>
+장수 표시도 가로 스크롤도 없어 "안 보임 = 없음"으로 읽히는 것이 핵심 문제입니다.</p>
+<p class="meta">2026-08-20 · 대상: 모집공고 편집(수정) 모달 (recruit-modal.js compact v2) · 시안 3안 · 가짜 데이터로 실제 동작(✕ 빼기 · ＋ 추가 · 팝업)</p>
+<div class="vswitch" id="vsw">
+  <a href="?" data-v="">전체 보기</a>
+  <a href="?v=A" data-v="A">A안 — 아래 전폭 스트립 (추천)</a>
+  <a href="?v=B" data-v="B">B안 — 제자리 2×2 그리드</a>
+  <a href="?v=C" data-v="C">C안 — 대표 1장 + N장 팝업</a>
+</div>
+
+<!-- ════════ 0. 현재 상태 재현 ════════ -->
+<section class="sec" data-sec="">
+  <h2><span class="n">0</span>지금 화면 — 문제 그대로 재현 <span class="tag bad">현재</span></h2>
+  <p class="sub">유입 가이드에 <b>사진이 4장</b> 첨부돼 있지만 화면에는 1.5장만 보입니다.
+  2장째의 ✕는 잘린 영역에 있어 <b>뺄 방법이 없고</b>, 3·4장째와 [＋추가]는 통째로 화면 밖입니다.</p>
+  <div id="mock-now"></div>
+  <div class="note">칸 안쪽 가용폭 118px − 1장 74px − 간격 5px = <b>39px</b>만 남아 2장째가 반쯤 걸칩니다.
+  ✕ 버튼은 썸네일(74px)의 오른쪽 위에 붙으므로 <b>항상 잘리는 영역</b>에 놓입니다.</div>
+</section>
+
+<!-- ════════ A안 ════════ -->
+<section class="sec" data-sec="A">
+  <h2><span class="n">A</span>A안 — 첨부가 생기면 스트립이 입력창 <u>아래 전폭 줄</u>로 <span class="tag rec">추천</span></h2>
+  <p class="sub">첨부 0장일 때는 지금처럼 오른쪽 128px [＋ 사진 넣기] 칸 그대로(평소 화면 불변).
+  <b>1장이라도 첨부되면</b> 스트립이 입력창 아래 <b>전폭 줄</b>로 내려와 4장 + [＋추가]가 전부 보이고,
+  ✕도 모든 장에서 보입니다. 라벨 옆에 <b>사진 N장</b> 표기가 붙어 접힌 상태에서도 장수를 알 수 있습니다.</p>
+  <div id="mock-A"></div>
+  <div class="note blue">동작(업로드·순서 바꾸기·확대 팝업·4장 상한)은 기존 <code>_ig*</code> 함수 그대로 —
+  바뀌는 것은 <b>CSS와 스트립의 위치뿐</b>이라 위험이 가장 작습니다. 세 줄이 각각 최대 72px 정도 높아지지만
+  편집부는 원래 세로 스크롤 영역이라 문제 없습니다.</div>
+</section>
+
+<!-- ════════ B안 ════════ -->
+<section class="sec" data-sec="B">
+  <h2><span class="n">B</span>B안 — 128px 칸 안에서 2×2 그리드로 전부 표시</h2>
+  <p class="sub">칸 크기(128×58)는 그대로 두고, 장수에 따라 <b>1장=전폭 / 2장=좌우 / 3~4장=2×2</b>로 나눠 담습니다.
+  전부 보이고 ✕도 각 장에 있지만, 4장이면 한 장이 <b>약 55×23px</b>로 작아져 "무슨 사진인지"는 클릭(확대)해야 알 수 있습니다.</p>
+  <div id="mock-B"></div>
+  <div class="note">레이아웃 변화가 없다는 장점이 있지만, ✕가 13px로 작아져 누르기 어렵고
+  4장일 때는 [＋추가] 자리가 없어 <b>4장을 채우기 전에만 추가 칸이 보입니다</b>(3장 + 추가칸 = 2×2).</div>
+</section>
+
+<!-- ════════ C안 ════════ -->
+<section class="sec" data-sec="C">
+  <h2><span class="n">C</span>C안 — 대표 1장 + "N장" 스택 → 클릭하면 관리 팝업</h2>
+  <p class="sub">칸에는 <b>첫 장 + 나머지 장수를 겹친 스택 타일</b>만 보여주고, 스택을 클릭하면
+  <b>관리 팝업</b>이 떠서 큰 썸네일로 전체를 보고 ✕로 빼고 ＋로 추가합니다. 칸 크기 불변 · 관리 공간은 가장 넓지만
+  <b>팝업이 새로 하나 생기고</b>, 한 눈에 보이는 것은 여전히 1장뿐입니다.</p>
+  <div id="mock-C"></div>
+</section>
+
+<!-- ════════ 결정 ════════ -->
+<section class="sec" data-sec="">
+  <h2><span class="n">✓</span>비교와 추천</h2>
+  <table class="cmp">
+    <thead><tr><th style="width:110px">기준</th><th>A안 — 아래 전폭 <span class="tag rec">추천</span></th><th>B안 — 2×2 그리드</th><th>C안 — 스택+팝업</th></tr></thead>
+    <tbody>
+      <tr><td><b>4장 전부 보임</b></td><td>◎ 82px 크기로 전부</td><td>○ 전부 보이나 매우 작음</td><td>△ 1장 + "N장" 표기만</td></tr>
+      <tr><td><b>✕(빼기) 접근</b></td><td>◎ 모든 장에서 17px</td><td>△ 13px로 작음</td><td>◎ 팝업 안 22px</td></tr>
+      <tr><td><b>화면 변화</b></td><td>줄이 최대 72px 높아짐<br>(첨부 있을 때만)</td><td>없음</td><td>없음(팝업 1개 추가)</td></tr>
+      <tr><td><b>구현 범위</b></td><td><b>CSS + 스트립 위치만</b><br>(_igRender·업로드·순서·확대 무변경)</td><td>CSS + 렌더 분기</td><td>관리 팝업 신규<br>(위임·Esc·body 직속 규율)</td></tr>
+      <tr><td><b>남는 위험</b></td><td>거의 없음</td><td>오터치(작은 ✕)</td><td>클릭 한 번 더 · 팝업 코드 유지비</td></tr>
+    </tbody>
+  </table>
+  <div class="note blue"><b>추천 = A안.</b> 이 문제의 본질은 "첨부를 확인·관리할 수 없다"인데, A안은 확인(전부 보임)과
+  관리(✕ 상시 노출)를 동시에 해결하면서 기존 동작 코드를 한 줄도 바꾸지 않습니다.
+  어느 안으로 할지 골라주시면 그대로 구현합니다.</div>
+</section>
+
+</div>
+
+<!-- C안 관리 팝업 -->
+<div class="pop" id="cpop"><div class="pbox">
+  <div class="ph"><b>📷 유입 가이드 사진 관리 <span style="color:var(--faint);font-weight:700;font-size:11px" id="cpop-n"></span></b>
+    <button onclick="cpopClose()" title="닫기">✕</button></div>
+  <div class="pb" id="cpop-body"></div>
+  <div class="pf">✕ = 이 사진 빼기 · 사진 클릭 = 크게 보기(기존 확대 팝업) · 최대 4장</div>
+</div></div>
+
+<script>
+/* ── 가짜 사진(외부 리소스 0 — 인라인 SVG) ─────────────────── */
+function svgImg(label, h1, h2){
+  const s = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160">'
+    + '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+    + '<stop offset="0" stop-color="'+h1+'"/><stop offset="1" stop-color="'+h2+'"/></linearGradient></defs>'
+    + '<rect width="240" height="160" fill="url(#g)"/>'
+    + '<circle cx="52" cy="52" r="22" fill="rgba(255,255,255,.5)"/>'
+    + '<rect x="24" y="96" width="192" height="10" rx="5" fill="rgba(255,255,255,.65)"/>'
+    + '<rect x="24" y="114" width="130" height="10" rx="5" fill="rgba(255,255,255,.45)"/>'
+    + '<text x="120" y="60" font-family="sans-serif" font-size="20" font-weight="700" fill="rgba(30,41,59,.55)" text-anchor="middle">'+label+'</text>'
+    + '</svg>';
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(s);
+}
+const PALETTE = [['#bcd4f6','#8fb4ec'],['#f6d9bc','#ecba8f'],['#c9ecc4','#96d693'],['#e4c9f0','#c79ade']];
+function mkList(n){ const a=[]; for(let i=0;i<n;i++) a.push(svgImg('가이드 '+(i+1), PALETTE[i%4][0], PALETTE[i%4][1])); return a; }
+
+/* ── 각 목업의 상태(칸별 첨부 목록) — ✕/＋를 실제로 동작시킨다 ── */
+const STATE = {
+  now: { inflow: mkList(4), review: mkList(2), notes: [] },
+  A:   { inflow: mkList(4), review: mkList(2), notes: [] },
+  B:   { inflow: mkList(4), review: mkList(2), notes: [] },
+  C:   { inflow: mkList(4), review: mkList(2), notes: [] },
+};
+const FIELDS = [
+  { key:'inflow', label:'유입 가이드', ph:'상품 1,2번 가이드 - 1번이미지\n1.갈고 순살듀오 세트 73000\n2.갈옥 순살 듀오세트 85000' },
+  { key:'review', label:'리뷰 가이드', ph:'별점 5점\n상품정보 참고하여 자연스러운 리뷰' },
+  { key:'notes',  label:'특이사항',   ph:'포토있습니다 포토대기' },
+];
+
+/* ── 스트립 렌더러(안별) ───────────────────────────────────── */
+function thumbHtml(src, i, extraCls){
+  return '<button type="button" class="th'+(extraCls||'')+'" title="클릭하면 크게 보기">'
+    + '<img src="'+src+'" alt=""><span class="no">'+(i+1)+'</span>'
+    + '<span class="x" role="button" data-del="'+i+'" title="이 사진 빼기">✕</span></button>';
+}
+function stripNow(list){
+  // 현재 상태 그대로: 128px + overflow:hidden — 2장째부터 잘린다
+  let h = '<div class="strip clip" style="width:128px;flex:none">';
+  if(!list.length) h += '<button class="emptyb"><span class="t1">＋ 사진 넣기</span><span>끌어다 놓기 · Ctrl+V</span></button>';
+  else { list.forEach((s,i)=>{ h += thumbHtml(s,i); }); if(list.length<4) h += '<button class="addb"><span class="plus">＋</span>추가</button>'; }
+  h += '</div>';
+  return h;
+}
+function stripA(list){
+  if(!list.length) return '<div class="compose"><textarea placeholder="__PH__"></textarea>'
+    + '<div class="strip" style="width:128px"><button class="emptyb" data-add="1"><span class="t1">＋ 사진 넣기</span><span>끌어다 놓기 · Ctrl+V</span></button></div></div>';
+  let h = '<div class="compose col"><textarea placeholder="__PH__"></textarea><div class="strip stripA">';
+  list.forEach((s,i)=>{ h += thumbHtml(s,i); });
+  if(list.length<4) h += '<button class="addb" data-add="1"><span class="plus">＋</span>추가</button>';
+  h += '</div></div>';
+  return h;
+}
+function stripB(list){
+  let h = '<div class="compose"><textarea placeholder="__PH__"></textarea>';
+  if(!list.length) h += '<div class="strip" style="width:128px"><button class="emptyb" data-add="1"><span class="t1">＋ 사진 넣기</span><span>Ctrl+V · 클릭</span></button></div>';
+  else if(list.length===1) h += '<div class="strip" style="width:128px">'+thumbHtml(list[0],0)+(list.length<4?'<button class="addb" data-add="1" style="width:auto;flex:1"><span class="plus">＋</span></button>':'')+'</div>';
+  else {
+    h += '<div class="strip stripB" style="width:128px">';
+    list.forEach((s,i)=>{ h += thumbHtml(s,i); });
+    if(list.length<4) h += '<button class="addb" data-add="1"><span class="plus">＋</span></button>';
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+function stripC(list){
+  let h = '<div class="compose"><textarea placeholder="__PH__"></textarea><div class="strip" style="width:128px">';
+  if(!list.length) h += '<button class="emptyb" data-add="1"><span class="t1">＋ 사진 넣기</span><span>Ctrl+V · 클릭</span></button>';
+  else {
+    h += thumbHtml(list[0],0);
+    if(list.length>1) h += '<button type="button" class="stack" data-stack="1" title="사진 관리 열기"><img src="'+list[1]+'" alt="">'
+      + '<span class="sn">+'+(list.length-1)+'장<small>관리</small></span></button>';
+    else h += '<button class="addb" data-add="1" style="width:auto;flex:1"><span class="plus">＋</span></button>';
+  }
+  h += '</div></div>';
+  return h;
+}
+
+/* ── 모달 골격(실물 재현) ──────────────────────────────────── */
+function buildModal(mountId, variant){
+  const st = STATE[variant];
+  const stripFns = { now: stripNow, A: stripA, B: stripB, C: stripC };
+  const rows = FIELDS.map(f=>{
+    const list = st[f.key];
+    let cnt = '';
+    if(variant==='now' && list.length>1) cnt = '<span class="cnt" style="color:var(--bad);background:var(--bad-soft);border-color:var(--bad-line)">실제 '+list.length+'장 첨부됨</span>';
+    if(variant==='A' && list.length) cnt = '<span class="cnt">사진 '+list.length+'장</span>';
+    if(variant==='C' && list.length) cnt = '<span class="cnt">사진 '+list.length+'장</span>';
+    let control;
+    if(variant==='now'){
+      control = '<div class="compose"><textarea placeholder="__PH__"></textarea>'+stripNow(list)+'</div>';
+    } else control = stripFns[variant](list);
+    control = control.replace('__PH__', f.ph.replace(/\n/g,'&#10;'));
+    const msg = '<div class="igmsg" data-msg="'+f.key+'"></div>';
+    return '<div class="frow" data-f="'+f.key+'"><span class="fl">'+f.label+cnt+'</span><div>'+control+msg+'</div></div>';
+  }).join('');
+  document.getElementById(mountId).innerHTML =
+  '<div class="modal"><div class="mhd"><b>✏️ 모집공고 수정</b><span class="x">✕</span></div>'
+  +'<div class="msplit">'
+  +'<div class="rail"><div class="rt">모집공고 편집</div><div class="rs">현재 단계가 자동으로 바뀝니다.</div>'
+  +'<div class="step"><span class="no">1</span>연결 · 기본</div>'
+  +'<div class="step on"><span class="no">2</span>진행상품 · 상품 정보</div>'
+  +'<div class="step"><span class="no">3</span>모집 조건</div>'
+  +'<div class="audit"><div class="at">자동 점검</div><div class="chip">✓ 시트 탭 연결됨 (gid)</div><div class="chip">✓ 하루 진행 인원 입력됨</div></div></div>'
+  +'<div class="ed" data-variant="'+variant+'"><div class="eh"><h3>진행상품 · 상품 정보</h3><span class="save">자동 저장됨</span></div>'
+  +'<p class="ep">작업 안내와 첨부 이미지를 확인합니다. (아래 세 칸은 참여한 리뷰어에게만 공개)</p>'
+  +'<div class="frow"><span class="fl">안내배지</span><div class="badgerow"><span class="badge on">일반결제 ✕</span><span class="badge">＋ 3.3% 공제</span><span class="badge">＋ 텍스트 제공</span><span class="badge">＋ 옵션지정</span></div></div>'
+  +'<div class="frow"><span class="fl">공고 썸네일 URL</span><div><input type="text" value="https://shop-phinf.pstatic.net/20260810_276/…" readonly></div></div>'
+  + rows
+  +'</div>'
+  +'<div class="pv"><div class="pt">👁 미리보기</div><div class="card"><div class="thumb">상품 썸네일</div><div class="cb"><b>8/20 제주도아 프리미엄 제주 선물세트</b>⏱ 12:00 ~ 18:00 · 바로참여</div></div></div>'
+  +'</div>'
+  +'<div class="mft"><button class="btn">취소</button><button class="btn pri">💾 저장</button></div></div>';
+}
+
+function renderAll(){
+  buildModal('mock-now','now');
+  buildModal('mock-A','A');
+  buildModal('mock-B','B');
+  buildModal('mock-C','C');
+}
+renderAll();
+
+/* ── 상호작용(위임 · 인덱스만) ─────────────────────────────── */
+function sayMsg(variant, field, text, kind){
+  const ed = document.querySelector('.ed[data-variant="'+variant+'"]');
+  const m = ed && ed.querySelector('[data-msg="'+field+'"]');
+  if(m){ m.textContent = text; m.className = 'igmsg ' + (kind||''); }
+}
+document.addEventListener('click', function(e){
+  const del = e.target.closest('[data-del]');
+  const add = e.target.closest('[data-add]');
+  const stk = e.target.closest('[data-stack]');
+  const row = e.target.closest('.frow[data-f]');
+  const ed  = e.target.closest('.ed[data-variant]');
+  if(!row || !ed) return;
+  const variant = ed.dataset.variant, field = row.dataset.f;
+  if(variant==='now') return;              // 현재 재현은 문제를 보여주는 용도라 조작 없음
+  const list = STATE[variant][field];
+  if(del){
+    e.stopPropagation();
+    list.splice(Number(del.dataset.del),1);
+    renderAll(); sayMsg(variant, field, '사진을 뺐습니다.', 'ok');
+  } else if(add){
+    if(list.length>=4){ sayMsg(variant, field, '사진은 칸마다 최대 4장까지예요.', 'warn'); return; }
+    list.push(svgImg('가이드 '+(list.length+1), PALETTE[list.length%4][0], PALETTE[list.length%4][1]));
+    renderAll(); sayMsg(variant, field, '사진을 넣었습니다. ('+list.length+'/4)', 'ok');
+  } else if(stk){
+    cpopOpen(field);
+  }
+});
+
+/* ── C안 관리 팝업 ─────────────────────────────────────────── */
+let _cpopField = null;
+function cpopOpen(field){
+  _cpopField = field;
+  cpopPaint();
+  document.getElementById('cpop').classList.add('on');
+}
+function cpopPaint(){
+  const list = STATE.C[_cpopField] || [];
+  document.getElementById('cpop-n').textContent = list.length + ' / 4장';
+  let h = '';
+  list.forEach((s,i)=>{
+    h += '<div class="pth"><img src="'+s+'" alt=""><span class="no">'+(i+1)+'</span>'
+      + '<button class="x" data-pdel="'+i+'" title="이 사진 빼기">✕</button></div>';
+  });
+  if(list.length<4) h += '<button class="padd" data-padd="1"><span style="font-size:16px">＋</span>사진 추가</button>';
+  document.getElementById('cpop-body').innerHTML = h;
+}
+function cpopClose(){ document.getElementById('cpop').classList.remove('on'); renderAll(); }
+document.getElementById('cpop').addEventListener('click', function(e){
+  if(e.target===this){ cpopClose(); return; }
+  const del = e.target.closest('[data-pdel]');
+  const add = e.target.closest('[data-padd]');
+  const list = STATE.C[_cpopField] || [];
+  if(del){ list.splice(Number(del.dataset.pdel),1); cpopPaint(); }
+  else if(add && list.length<4){ list.push(svgImg('가이드 '+(list.length+1), PALETTE[list.length%4][0], PALETTE[list.length%4][1])); cpopPaint(); }
+});
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape' && document.getElementById('cpop').classList.contains('on')) cpopClose();
+});
+
+/* ── ?v= 단독 보기 ─────────────────────────────────────────── */
+(function(){
+  const v = new URLSearchParams(location.search).get('v') || '';
+  document.querySelectorAll('#vsw a').forEach(a=>{ if((a.dataset.v||'')===v) a.classList.add('on'); });
+  if(v==='A'||v==='B'||v==='C'){
+    document.querySelectorAll('.sec[data-sec]').forEach(s=>{
+      const k = s.dataset.sec;
+      if(k && k!==v) s.style.display='none';
+    });
+  }
+})();
+</script>
+</body></html>
