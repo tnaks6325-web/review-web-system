@@ -656,7 +656,9 @@ function _woOptionRows(o) {
     //   공고 공통 랜딩 하나로는 "그 선택지의 상품 페이지"가 되지 않는다).
     const prodUrl = clean(prod.url || prod.product_url || "");
     const basePay = Number(prod.base && prod.base.pay) || 0;
-    const baseDaily = Math.max(0, Number(prod.base && (prod.base.daily_limit ?? prod.base.dailyLimit)) || 0);
+    // ★ 인트라넷은 일건수를 `daily` 로 보낸다(reviewOrderOptionsPayload) — 그 키를 안 읽으면
+  //   오더가 정한 하루 진행 인원이 항상 0 으로 떨어져 발행 자동점검이 계속 빨간 상태가 된다.
+  const baseDaily = Math.max(0, Number(prod.base && (prod.base.daily_limit ?? prod.base.dailyLimit ?? prod.base.daily)) || 0);
     if (opts.length) {
       for (const op of opts) {
         const lab = clean(op.label);
@@ -679,7 +681,7 @@ function _woOptionRows(o) {
           payAmount: Number(op.pay) || basePay,
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
           recruitTotal: Math.max(0, Number(op.count) || 0),
-          dailyLimit: Math.max(0, Number(op.daily_limit ?? op.dailyLimit) || 0),
+          dailyLimit: Math.max(0, Number(op.daily_limit ?? op.dailyLimit ?? op.daily) || 0),
           reviewTypeMix: optionReviewTypeMix(op),
         });
       }
