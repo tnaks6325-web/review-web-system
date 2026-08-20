@@ -313,8 +313,12 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const svcSrc = noLineComments(read('src/services/rowNumbering.service.js'));
     const blk = svcSrc.slice(svcSrc.indexOf('async function cleanupPairedBlanks('), svcSrc.indexOf('async function sweepNumbering('));
     ok('★★ 대상은 비어 있는 줄만(채워진 줄은 조건에서 제외)', /WHERE NOT filled AND num <> '' AND grp_filled/.test(blk));
+    // ⚠ 조각은 `utils/rowNumbering.filledSql` 로 이관됐다(작업보드 참여자 게이지가 같은 판정을 JS 로
+    //   써야 해서다 — `workboardFilledGauge.test.js`). 검사 의미는 그대로: **네 칸을 본다**.
     ok('★★ "채워짐" 판정은 주문·이름·수취인·연락처(조각 단일 출처)',
-      /FILLED_SQL/.test(blk) && /order_submission_id IS NOT NULL[\s\S]{0,200}reviewer_name[\s\S]{0,120}recipient_name[\s\S]{0,120}phone8/.test(svcSrc));
+      /FILLED_SQL/.test(blk)
+      && /const FILLED_SQL = filledSql\('p'\);/.test(svcSrc)
+      && /order_submission_id IS NOT NULL[\s\S]{0,200}reviewer_name[\s\S]{0,120}recipient_name[\s\S]{0,120}phone8/.test(RN.filledSql('p')));
     ok('★ 활성 줄만 본다', /p\.deleted_at IS NULL AND p\.active = TRUE/.test(blk));
     ok('★★ 지우지 않고 내린다 — 실행은 sheetlessLedger.retireRows 위임(무시트 게이트·장부 순서 상속)',
       /sheetlessLedger\.service/.test(blk) && /\.retireRows\(/.test(blk) && !/DELETE FROM/i.test(blk));

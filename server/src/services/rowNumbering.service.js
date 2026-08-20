@@ -30,7 +30,7 @@
 
 const { logger } = require('../utils/logger');
 const pool = require('../db/pool');
-const { numberColumnKey, computeRenumberPlan } = require('../utils/rowNumbering');
+const { numberColumnKey, computeRenumberPlan, filledSql } = require('../utils/rowNumbering');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
@@ -43,13 +43,11 @@ const SWEEP_TAB_CAP = 300;
 
 /**
  * "채워진 줄" 판정 — 주문이 붙었거나 사람 정보가 하나라도 있는 줄.
- * ★ 조각을 한 곳에 둔다 — 스캔(집계)과 정리(대상 선정)가 다른 기준을 쓰면
- *   "목록엔 N줄인데 정리하면 다른 줄이 내려간다" 가 된다.
+ * ★★ 조각은 `utils/rowNumbering.filledSql` **한 곳**이 만든다 — 스캔(집계)·정리(대상 선정)에
+ *   더해 작업보드 [진행 현황] 참여자 게이지(JS `isFilledRow`)까지 같은 기준을 봐야 한다.
+ *   여기에 사본을 되살리면 "게이지는 134명인데 정리는 다른 줄을 빈 줄로 본다" 가 된다.
  */
-const FILLED_SQL = `(p.order_submission_id IS NOT NULL
-   OR NULLIF(btrim(COALESCE(p.reviewer_name, '')), '') IS NOT NULL
-   OR NULLIF(btrim(COALESCE(p.recipient_name, '')), '') IS NOT NULL
-   OR NULLIF(btrim(COALESCE(p.phone8, '')), '') IS NOT NULL)`;
+const FILLED_SQL = filledSql('p');
 
 /** 이 기능 전체 킬스위치 — 문제가 생기면 Railway 에서 `WORKTABLE_AUTO_NUMBER=0`. */
 function enabled() { return process.env.WORKTABLE_AUTO_NUMBER !== '0'; }
