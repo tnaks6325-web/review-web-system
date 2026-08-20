@@ -437,6 +437,79 @@ router.post('/intake', async (req, res, next) => {
   }
 });
 
+// ── 계약 후속 매칭(인트라넷) 판정 ────────────────────────────────────────────
+// 인트라넷의 "계약 후속 매칭"은 접수가 끝난 뒤에 온다(공고가 이미 붙은 오더가 대부분).
+// 그래서 원본 수정 잠금(공고·광고주 확정)을 그대로 적용하면 계약을 영영 못 붙인다.
+// 대신 "작업 내용이 하나도 안 바뀐 요청"인지 값으로 확인해, 그때만 계약·광고주 칸을 갱신한다.
+// ★ 아래 목록은 원본 수정 UPDATE 의 컨텐츠 칸과 1:1 이어야 한다 — 어긋나면 실제로 바뀐 내용을
+//   "계약만 바뀐 요청"으로 오판해 잠금이 뚫린다.
+function _sourceContentNextValues(b, derived) {
+  return {
+    title: String(b.title || '').trim(),
+    start_date: _dateOrNull(b.start_date),
+    product_option: b.product_option || '',
+    product_options_json: derived.optionsJson,
+    pay_amount: _intOrZero(b.pay_amount),
+    review_fee: _intOrZero(b.review_fee),
+    daily_count: _intOrZero(b.daily_count),
+    daily_count_text: b.daily_count_text || '',
+    purchase_channel: String(b.purchase_channel || '').trim(),
+    purchase_time: b.purchase_time || '',
+    inflow_keyword: b.inflow_keyword || '',
+    inflow_type: b.inflow_type || '',
+    inflow_guide: b.inflow_guide || '',
+    guide_images: _guideImagesJson(b.guide_images),
+    delivery_type: derived.deliveryType,
+    courier_proxy: derived.courierProxy,
+    review_type: b.review_type || '',
+    review_type_mix: _reviewTypeMixJson(b.review_type_mix, b.review_type),
+    recruit_count: _intOrZero(b.recruit_count),
+    review_guide: b.review_guide || '',
+    special_notes: b.special_notes || '',
+    product_url: b.product_url || '',
+    work_sheet_url: String(b.work_sheet_url || '').trim(),
+    goods_cost_type: b.goods_cost_type || '',
+    manager_name: b.manager_name || '',
+    work_manager: pickWorkManager(b),
+    skip_weekends: _boolOrNull(b.skip_weekends),
+    holidays: _holidaysJson(b.holidays),
+    work_kind: workKindForStore(b.work_kind),
+  };
+}
+
+const _SOURCE_JSON_COLUMNS = new Set(['product_options_json', 'guide_images', 'review_type_mix', 'holidays']);
+
+// 표기 차이(키 순서·공백·NULL/빈문자·DATE 객체)로 "바뀌었다"고 오판하지 않게 값을 맞춘다.
+function _sourceCanonicalJson(value) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return '';
+    try { parsed = JSON.parse(text); } catch (_) { return text; }
+  }
+  if (parsed === null || parsed === undefined) return '';
+  const sort = v => (Array.isArray(v) ? v.map(sort)
+    : (v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sort(v[k])])) : v));
+  try { return JSON.stringify(sort(parsed)); } catch (_) { return String(value); }
+}
+
+function _sourceCompareValue(column, value) {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  if (_SOURCE_JSON_COLUMNS.has(column)) return _sourceCanonicalJson(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value).trim();
+}
+
+// 실제로 달라진 컨텐츠 칸만 돌려준다. 빈 배열 = 계약·광고주 칸만 바뀐 요청.
+function _sourceContentChanges(current, b, derived) {
+  const next = _sourceContentNextValues(b, derived);
+  return Object.keys(next).filter(column =>
+    _sourceCompareValue(column, next[column]) !== _sourceCompareValue(column, current[column]));
+}
+
 // Intranet review-order revisions use a source identity rather than the
 // work-order id.  This deliberately updates only source-owned values: the
 // receiving team keeps control of status, assignee, notes, sheet/tab links,
@@ -479,12 +552,29 @@ async function _intakeSourceRevisionHandler(req, res, next) {
     if (!current) {
       return res.status(404).json({ ok: false, error: '수정할 원본 작업오더를 찾을 수 없습니다.' });
     }
-    if (current.deleted_at || current.status === 'done' || current.status === 'published'
-      || current.linked_campaign_id || current.advertiser_id) {
+    const optionsJson = typeof b.product_options_json === 'string'
+      ? b.product_options_json
+      : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
+    const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
+    const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+
+    // 접수·게시 기준이 확정된 오더는 원본에서 내용을 바꾸지 못한다.
+    // 단 계약 후속 매칭(작업 내용은 그대로 · 계약/광고주 칸만 채움)은 예외다 —
+    // 그 매칭은 접수가 끝난 뒤에 오는 것이 정상이라, 여기서 막으면 계약을 붙일 길이 없다.
+    const sourceEditLocked = Boolean(current.deleted_at || current.status === 'done' || current.status === 'published'
+      || current.linked_campaign_id || current.advertiser_id);
+    // 삭제된 작업오더에는 예외를 두지 않는다 — 없는 오더에 계약을 붙일 이유가 없다.
+    const contractMatchAllowed = sourceEditLocked && !current.deleted_at;
+    const contentChanges = contractMatchAllowed
+      ? _sourceContentChanges(current, b, { optionsJson, deliveryType, courierProxy })
+      : [];
+    const contractOnly = contractMatchAllowed && contentChanges.length === 0;
+    if (sourceEditLocked && !contractOnly) {
       return res.status(409).json({
         ok: false,
         error: '이미 접수·게시 기준이 확정된 작업오더는 원본 리뷰오더에서 변경할 수 없습니다.',
         work_order_id: current.id,
+        changed_fields: contentChanges,
       });
     }
 
@@ -511,11 +601,32 @@ async function _intakeSourceRevisionHandler(req, res, next) {
       });
     }
 
-    const optionsJson = typeof b.product_options_json === 'string'
-      ? b.product_options_json
-      : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
-    const deliveryType = _canonicalDeliveryType(b.delivery_type, b.courier_proxy);
-    const courierProxy = _courierProxyFromDelivery(deliveryType, b.courier_proxy);
+    // 계약 후속 매칭 — 계약·광고주 칸만 갱신한다. 작업 내용·인원이 그대로라 정원 검증과
+    // 작업표 동기화는 건드리지 않는다(접수팀이 잡아둔 상태를 그대로 보존).
+    if (contractOnly) {
+      const { rows: matched } = await pool.query(
+        `UPDATE work_orders SET
+           sales_id = $2, contract_number = $3, quote_id = $4,
+           source_revision = $5, intake_idempotency_key = $6,
+           intranet_advertiser_id = $7, intranet_advertiser_name = $8,
+           intranet_advertiser_contact = $9, intranet_advertiser_business_number = $10,
+           updated_at = NOW()
+         WHERE id = $1 AND source_review_order_id = $11
+         RETURNING *`,
+        [
+          current.id,
+          String(b.sales_id || '').trim(), String(b.contract_number || '').trim(), String(b.quote_id || '').trim(),
+          source.sourceRevision, source.idempotencyKey,
+          source.intranetAdvertiserId, source.intranetAdvertiserName,
+          source.intranetAdvertiserContact, source.intranetAdvertiserBusinessNumber,
+          sourceReviewOrderId,
+        ]
+      );
+      const linked = matched[0];
+      _emitWorkOrderNew(linked, { event: 'source_contract_match', source_revision: source.sourceRevision });
+      return res.json({ ok: true, data: linked, contract_only: true });
+    }
+
     // 원본 리뷰오더의 목표 인원이 바뀌면 연결된 공고도 같은 값으로 저장한다.
     // 실제 UPDATE 전에 하한을 검증해, 이미 참여한 인원보다 낮춘 값으로 반쪽만 남지 않게 한다.
     await assertWorkOrderQuota({ workOrderId: current.id, recruitTotal: _intOrZero(b.recruit_count) });
