@@ -401,23 +401,10 @@ function _batchSaveCaps() {
 
 /** dataURL → 축소 dataURL(가로 1080px 상한, JPEG 0.6). 첨부 시점에 **한 번만** 만든다. */
 function _batchShrinkDataUrl(dataUrl) {
-  return new Promise(resolve => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const scale = Math.min(1, 1080 / (img.width || 1080));
-          const cv = document.createElement("canvas");
-          cv.width = Math.max(1, Math.round((img.width || 1080) * scale));
-          cv.height = Math.max(1, Math.round((img.height || 1080) * scale));
-          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-          resolve(cv.toDataURL("image/jpeg", 0.6));
-        } catch (_) { resolve(""); }
-      };
-      img.onerror = () => resolve("");
-      img.src = dataUrl;
-    } catch (_) { resolve(""); }
-  });
+  // ★ 축소 규칙 단일 출처 = ImageShrink(js/image-shrink.js). 값(1080/0.6)은 종전 그대로 —
+  //   여기는 sessionStorage 복원용 축소본이라 업로드 예산(1920/0.8)과 목적이 다르다.
+  if (!window.ImageShrink) return Promise.resolve("");
+  return window.ImageShrink.fromDataUrl(dataUrl, 1080, 0.6);
 }
 
 function _batchRestoreCaps() {
@@ -8515,6 +8502,18 @@ async function submitOrderForm() {
   // ── 각 주문 순차 제출 ──
   let successCount = 0;
   let firstCaptureFolderUrl = "";
+  /* ★ 업로드가 순차 큐로 바뀌면서 완료 시점이 제출 루프보다 늦어질 수 있다 →
+     캡처폴더 URL 저장은 "먼저 성공한 업로드가 한 번만" 하는 헬퍼로 옮긴다(중복 저장 방지). */
+  let _capFolderSaved = false;
+  const _saveCaptureFolderOnce = async (url) => {
+    if (!url || _capFolderSaved) return;
+    _capFolderSaved = true;
+    firstCaptureFolderUrl = url;
+    try {
+      const sfJ = await gasPost({ action:"saveCaptureFolder", sheetId:ctx.sheetId||"", sheetUrl:ctx.sheetUrl||"", tabName:ctx.tabName, captureFolderUrl:url });
+      if (sfJ?.ok) console.log("[캡처폴더] 저장 완료");
+    } catch(sfErr) { console.warn("[캡처폴더] 저장 실패:", sfErr.message); }
+  };
   const mirrorStatuses = [];   // ★ 제출 응답의 시트반영 상태(queued/failed/pending_no_row) 수집 → 완료화면 즉시 안내용
 
   const results = [];   // ★ 배치: 명의별 결과(부모 화면이 단수 값 하나로 거짓말하지 않게)
@@ -8667,36 +8666,63 @@ async function submitOrderForm() {
       (window._capUploads = window._capUploads || []).push(_capSlot);
       if (o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")) {
         _capSlot.status = "uploading";
-        const _imgCtx = { base64: o.imgThumbSrc.split(",")[1], mime: o.mimeType || "image/jpeg", recipient: o.recipient, orderer: o.orderer };
-        // 비동기 처리 — await 없이 실행 (제출 성공 여부와 무관)
-        (async () => {
+        const _imgCtx = { dataUrl: o.imgThumbSrc, base64: o.imgThumbSrc.split(",")[1], mime: o.mimeType || "image/jpeg", recipient: o.recipient, orderer: o.orderer };
+        const _osId = (res && res.orderSubmissionId) || "";
+        const _idx = i + 1;
+        /* ★★ 순차 큐: 카드별 업로드를 동시에 쏘면 무인증 IP 리미터(분당)에 한꺼번에 부딪혀
+           **뒤 카드의 캡처가 통째로 유실**된다. 제출 자체는 막지 않으므로(await 없음) 리뷰어 대기 0. */
+        window._capUploadChain = (window._capUploadChain || Promise.resolve()).then(async () => {
           try {
-            const ext = _imgCtx.mime==="image/png"?"png":_imgCtx.mime==="image/webp"?"webp":"jpg";
+            let b64 = _imgCtx.base64, mime = _imgCtx.mime;
+            /* ★★ 업로드 직전 축소: 서버 본문 상한 10MB 인데 base64 는 원본의 약 1.33배라
+               7.5MB 넘는 캡처는 413 으로 전부 실패한다(요즘 폰 전체화면 캡처가 그 구간).
+               예산 안이면 원본 그대로 보낸다 — 증빙 화질을 이유 없이 깎지 않는다.
+               ★ AI 추출은 첨부 시점에 **원본**으로 이미 끝났으므로 판독 정확도에 영향 없다. */
+            const _BUD = (window.ImageShrink && window.ImageShrink.UPLOAD_BUDGET) || 6000000;
+            if (b64.length > _BUD && window.ImageShrink) {
+              const small = await window.ImageShrink.fromDataUrl(_imgCtx.dataUrl, 1920, 0.8);
+              const sb = small ? (small.split(",")[1] || "") : "";
+              if (sb) { b64 = sb; mime = "image/jpeg"; }   // 축소 실패는 원본 시도(첨부를 막지 않는다)
+            }
+            const _ext = (m) => m==="image/png"?"png":m==="image/webp"?"webp":"jpg";
             const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
             // ★ 캡처↔주문 연결(062): 제출 응답의 orderSubmissionId 를 실어 서버가 order_submissions 에
             //   capture_file_id/capture_uploaded_at 을 기록 → "캡처 미첨부" 자동 감지·중요알림의 근거.
-            const upPayload = { action:"uploadOrderImage", imageBase64:_imgCtx.base64, mimeType:_imgCtx.mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:(res && res.orderSubmissionId) || "" };
-            // ★ 재시도(3회, 지수 백오프): 이 업로드가 실패하면 서버는 capture_uploaded_at 이 비어 있어
+            const upPayload = { action:"uploadOrderImage", imageBase64:b64, mimeType:mime, fileName:namePart+"."+_ext(mime), displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:_osId };
+            // ★ 재시도: 이 업로드가 실패하면 서버는 capture_uploaded_at 이 비어 있어
             //   "구매캡쳐 미첨부"로 자동 감지한다 → 실제로는 첨부한 리뷰어에게 잘못된 독촉이 나간다.
             //   과거엔 1회 실패 시 console.warn 만 하고 조용히 끝나 이 오탐의 주원인이었다.
-            let upJson = null, upErrLast = null;
-            for (let attempt = 0; attempt < 3; attempt++) {
+            let upJson = null, upErrLast = null, shrunkFor413 = false;
+            for (let attempt = 0; attempt < 4; attempt++) {
+              upJson = null;
               try { upJson = await gasPostUpload(upPayload, 180000); if (upJson?.ok) break; upErrLast = new Error(upJson?.error || "업로드 응답 오류"); }
               catch (e) { upErrLast = e; }
-              if (attempt < 2) await new Promise(r2 => setTimeout(r2, 1500 * Math.pow(2, attempt)));   // 1.5s → 3s
+              const st = (upJson && upJson._httpStatus) || 0;
+              // 구버전 백엔드는 413 을 200+error 로 접어 보낸다 → 문구로도 한 번 더 알아본다.
+              const tooLarge = st === 413 || /too large|용량이 초과|entity\.too\.large/i.test(String((upJson && upJson.error) || ""));
+              /* ★ 413(본문 초과) — 기다려도 절대 통과하지 않는다. 한 번만 더 줄여서 즉시 재시도. */
+              if (tooLarge && !shrunkFor413 && window.ImageShrink) {
+                shrunkFor413 = true;
+                const smaller = await window.ImageShrink.fromDataUrl(_imgCtx.dataUrl, 1280, 0.7);
+                const sb2 = smaller ? (smaller.split(",")[1] || "") : "";
+                if (sb2) { upPayload.imageBase64 = sb2; upPayload.mimeType = "image/jpeg"; upPayload.fileName = namePart + ".jpg"; continue; }
+              }
+              if (attempt >= 3) break;
+              /* ★★ 429(분당 상한) — 짧은 백오프는 **전부 같은 창 안**이라 세 번 다 실패한다.
+                 창이 지나야 풀리므로 62초 기다린다(완료화면은 '업로드 중'을 유지해 창을 닫지 않게 안내). */
+              const wait = st === 429 ? 62000 : 1500 * Math.pow(2, attempt);   // 1.5s → 3s → 6s
+              await new Promise(r2 => setTimeout(r2, wait));
             }
-            if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
-              firstCaptureFolderUrl = upJson.captureFolderUrl;
-            }
+            if (upJson?.ok && upJson.captureFolderUrl) _saveCaptureFolderOnce(upJson.captureFolderUrl);
             // ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 리뷰어는 첨부했다고 믿고 창을 닫아버린다.
             if (!upJson?.ok) {
-              console.warn(`[이미지 업로드 ${i+1}] 최종 실패:`, upErrLast && upErrLast.message);
+              console.warn(`[이미지 업로드 ${_idx}] 최종 실패:`, upErrLast && upErrLast.message);
               _capSlot.status = "fail";
-              try { showToast(`${i+1}번째 주문의 구매캡쳐 업로드에 실패했습니다. 네트워크 확인 후 캡처를 다시 첨부해주세요.`, "error"); } catch(_) {}
+              try { showToast(`${_idx}번째 주문의 구매캡쳐 업로드에 실패했습니다. 네트워크 확인 후 캡처를 다시 첨부해주세요.`, "error"); } catch(_) {}
             } else { _capSlot.status = "ok"; }
-          } catch(upErr) { _capSlot.status = "fail"; console.warn(`[이미지 업로드 ${i+1}] 백그라운드 오류:`, upErr.message); }
+          } catch(upErr) { _capSlot.status = "fail"; console.warn(`[이미지 업로드 ${_idx}] 백그라운드 오류:`, upErr.message); }
           try { _renderCaptureChecklist(); } catch(_) {}   // 완료화면이 떠 있으면 즉시 반영
-        })();
+        }).catch(() => {});   // 한 건의 예외가 큐를 끊지 않게
       }
     } catch(err) {
       results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: err.message });
@@ -8758,15 +8784,7 @@ async function submitOrderForm() {
     } catch(bankErr) { console.warn("[saveBankInfo] 오류:", bankErr.message); }
   }
 
-  // 캡처폴더 URL 저장 (첫 번째 성공건)
-  if (firstCaptureFolderUrl) {
-    try {
-      const sfP = { action:"saveCaptureFolder", sheetId:ctx.sheetId||"", sheetUrl:ctx.sheetUrl||"", tabName:ctx.tabName, captureFolderUrl:firstCaptureFolderUrl };
-      // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
-      const sfJ = await gasPost(sfP);
-      if (sfJ?.ok) console.log("[캡처폴더] 저장 완료");
-    } catch(sfErr) { console.warn("[캡처폴더] 저장 실패:", sfErr.message); }
-  }
+  // 캡처폴더 URL 저장은 _saveCaptureFolderOnce(업로드 성공 시점)가 한 번만 수행한다.
 
   window._submitOrderFormInProgress = false;
 

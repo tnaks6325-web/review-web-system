@@ -84,6 +84,14 @@ function errorHandler(err, req, res, next) {
   if (err.status === 401) {
     return res.status(401).json({ error: err.message });
   }
+  /* ★★ 본문 크기 초과(413) — GAS 호환 200 으로 접지 않는다.
+     이건 "기다리면 풀리는 실패"가 아니라 **더 줄여 보내야 풀리는 실패**라, 클라이언트가
+     429(분당 상한)와 구분할 수 있어야 재시도 전략이 갈린다(구매 캡처 업로드 경로).
+     본문에 `error` 는 그대로 실어 기존 소비처(res.error 검사) 계약은 유지한다. */
+  if (err.status === 413 || err.statusCode === 413 || err.type === 'entity.too.large') {
+    return res.status(413).json({ ok: false, error: '전송 용량이 초과되었습니다. 이미지 크기를 줄여 다시 시도해주세요.' });
+  }
+
 
   // 기본: GAS 호환 에러 응답 (HTTP 200, error 필드)
   // ★ 관리자 API 및 캠페인 API는 디버깅을 위해 실제 에러 메시지 포함
