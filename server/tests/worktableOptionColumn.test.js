@@ -61,7 +61,7 @@ console.log('\n[B] 소급 기입 값 — 매퍼가 정한다');
 }
 
 /* ── C·D. 서비스 실제 실행 ──────────────────────────────────────────────── */
-function makePool({ sheetless = true, registered = true, headers = ['번호', '구매일자', '수취인'], parts = [], orders = [] } = {}) {
+function makePool({ sheetless = true, registered = true, headers = ['번호', '구매일자', '수취인'], parts = [], orders = [], liveOpts = [{ opt_key: '1.갈고 순살듀오 세트' }, { opt_key: '2.갈옥 순살 듀오세트' }, { opt_key: '3.정성 500갈치 1호' }] } = {}) {
   const seen = [];
   const client = {
     query: async (sql, params) => {
@@ -76,6 +76,7 @@ function makePool({ sheetless = true, registered = true, headers = ['번호', '�
     seen.push({ q, params });
     if (/FROM tab_configs/.test(q)) return { rows: registered ? [{ tab_gid: '1', sheetless }] : [] };
     if (/FROM raw_sheet_tabs/.test(q)) return { rows: [{ detected_headers: headers, headers }] };
+    if (/FROM recruit_campaigns/.test(q)) return { rows: liveOpts };   // 살아있는 공고 옵션(★ 더 좁은 조건을 먼저)
     if (/FROM campaign_participants/.test(q)) return { rows: parts };
     if (/FROM order_submissions/.test(q)) return { rows: orders };
     return { rows: [] };
@@ -112,6 +113,7 @@ console.log('\n[C] 게이트 · 미리보기');
     ok('미리보기는 쓰기 0', !p.seen.some(s => /UPDATE |INSERT |DELETE /i.test(s.q)));
     ok('옵션 칸을 만든다고 말한다', r.headerAdded === true && r.headerName === '옵션');
     ok('소급 대상 1줄', r.backfillCount === 1 && r.rows[0].seq === 2);
+    ok('이 공고의 옵션 목록을 함께 알려준다', (r.liveOptionKeys || []).length === 3);
   }
 
   console.log('\n[D] blank-only · 링크 없는 줄');
@@ -145,6 +147,68 @@ console.log('\n[C] 게이트 · 미리보기');
     ok('★ 주문 원장·정원·홀드는 무접촉',
       !writes.some(w => /order_submissions|recruit_campaigns|campaign_applications/.test(w.q)));
     ok('실행 결과가 소급 줄 수를 말한다', r && (r.backfillCount === 1 || r.err));
+  }
+
+  /* ── D2. ★★★ 옵션 없는 작업 / 옵션이 아닌 값 (2026-08-20 운영 실측) ───── */
+  console.log('\n[D2] "옵션이 있는 작업" = 살아있는 공고 옵션이 있는 작업');
+  {
+    const p = makePool({ liveOpts: [], parts: [{ seq: 2, row_json: {}, order_submission_id: OID }],
+      orders: [{ id: OID, selected_opt_key: '상품명 전문이 옵션으로 남은 값' }] });
+    SVC.__setPoolForTest(p);
+    let err = null;
+    try { await SVC.ensureOptionColumn({ sheetId: 's', tabName: 't' }); } catch (e) { err = e; }
+    ok('★★ 살아있는 옵션이 없으면 거부한다(옵션 없는 작업엔 칸도 안 만든다)',
+      err && err.code === 'no_live_options', err && err.code);
+    ok('거부 시 쓰기 0', !p.seen.some(s => /UPDATE |INSERT |DELETE /i.test(s.q)));
+  }
+  {
+    // 위프 실측: 살아있는 옵션은 있는데 주문 원장에는 상품명 전문이 남아 있는 줄
+    const p = makePool({
+      parts: [
+        { seq: 2, row_json: {}, order_submission_id: OID },
+        { seq: 3, row_json: {}, order_submission_id: '22222222-2222-2222-2222-222222222222' },
+      ],
+      orders: [
+        { id: OID, selected_opt_key: '[공식몰] 위프 탈취제 … 부아누아 블랙, 300g, 1개' },   // 옵션 아님
+        { id: '22222222-2222-2222-2222-222222222222', selected_opt_key: '3.정성 500갈치 1호' },
+      ],
+    });
+    SVC.__setPoolForTest(p);
+    const r = await SVC.ensureOptionColumn({ sheetId: 's', tabName: 't' });
+    ok('★★ 목록에 없는 값은 표에 넣지 않는다', r.backfillCount === 1 && r.rows[0].seq === 3);
+    ok('★ 조용히 버리지 않는다 — 건수를 말한다', r.skippedNotAnOption === 1);
+  }
+  {
+    const p = makePool({
+      liveOpts: [{ opt_key: '3.정성 500갈치 1호' }],
+      parts: [{ seq: 2, row_json: {}, order_submission_id: OID }],
+      orders: [{ id: OID, selected_opt_key: ' 3.정성 500갈치 1호 ' }],
+    });
+    SVC.__setPoolForTest(p);
+    const r = await SVC.ensureOptionColumn({ sheetId: 's', tabName: 't' });
+    ok('공백 차이로 정상 값을 놓치지 않는다', r.backfillCount === 1);
+  }
+  {
+    const p = makePool();
+    p.query = async (sql) => {
+      const q = String(sql).replace(/\s+/g, ' ');
+      p.seen.push({ q });
+      if (/FROM tab_configs/.test(q)) return { rows: [{ tab_gid: '1', sheetless: true }] };
+      if (/FROM raw_sheet_tabs/.test(q)) return { rows: [{ detected_headers: ['번호', '수취인'] }] };
+      if (/FROM recruit_campaigns/.test(q)) throw Object.assign(new Error('boom'), { code: '42P01' });
+      return { rows: [] };
+    };
+    SVC.__setPoolForTest(p);
+    let err = null;
+    try { await SVC.ensureOptionColumn({ sheetId: 's', tabName: 't' }); } catch (e) { err = e; }
+    ok('★ 옵션 목록 조회 실패도 거부(fail-closed — 모르는 채로 박지 않는다)',
+      err && err.code === 'live_options_unknown', err && err.code);
+  }
+  {
+    const src = read('src/services/worktableOptionColumn.service.js');
+    ok('★ 연결은 이름 → gid 폴백', /linked_tab_name = \$2 OR \(\$3 <> '' AND c\.linked_tab_gid = \$3\)/.test(src));
+    ok('★ 빈 gid 는 절을 켜지 않는다', /\$3 <> ''/.test(src));
+    ok('closed 옵션은 살아있지 않다', /<> 'closed'/.test(src));
   }
 
   /* ── E. 작업표 생성 자동 추가 ─────────────────────────────────────────── */
@@ -239,6 +303,8 @@ console.log('\n[C] 게이트 · 미리보기');
     ok('실행은 confirm 경유', /function ocRun\(\)[\s\S]{0,900}if \(!confirm\(/.test(h));
     ok('★ 실행 요청에만 confirm:true', /ocRun[\s\S]{0,1200}confirm: true/.test(h));
     ok('onclick 에 시트발 문자열 보간 없음', !/openOptColModal\('/.test(h));
+    ok('★ 이 공고의 옵션 목록을 화면이 보여준다', /liveOptionKeys/.test(h));
+    ok('★ 옵션이 아니라 건너뛴 줄을 말한다', /skippedNotAnOption/.test(h));
   }
 
   console.log(`\n✅ worktableOptionColumn — ${passed} 케이스 통과`);

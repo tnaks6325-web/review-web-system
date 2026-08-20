@@ -30,6 +30,16 @@
  *     들어갈 값을 읽는다(`|` 다중 옵션 분해까지 앞으로의 쓰기와 한 글자도 같다).
  *   · **미리보기 기본**(`dryRun`) — 실행은 명시 요청일 때만.
  *
+ * ★★★ **"옵션이 있는 작업" = 살아있는 공고 옵션이 있는 작업** (2026-08-20 운영 실측으로 추가)
+ *   운영 전수 점검에서 옵션 칸이 없는 무시트 탭 5개(521줄)가 소급 대상으로 잡혔는데, 그 값이
+ *   **상품옵션이 아니었다** — 상품명 전문 · 상품 URL 조각 · 리뷰형태('텍스트') ·
+ *   `포토|리뷰 본문 전체|11번가` 같은 다른 폼의 값이 `selected_opt_key` 에 남아 있었다
+ *   (전부 살아있는 공고 옵션 0개 = 옵션 없는 작업). 그대로 넣었으면 800건 작업 419줄에
+ *   상품명이 박혔다 — **막으려던 소실보다 큰 오염**이다.
+ *   → ① 살아있는 옵션이 없는 탭은 **거부**(`no_live_options`) — 옵션 없는 작업엔 칸도 만들지 않는다.
+ *     ② 기입은 **그 공고의 옵션 목록에 있는 값만**(`skippedNotAnOption` 으로 건수를 말한다).
+ *   ★ 완화 금지 — 숫자만 보고 누르는 사람을 막는 것이 이 게이트의 존재 이유다.
+ *
  * ★ 쓰기 표면 = `raw_sheet_tabs.headers/detected_headers` + `campaign_participants.row_json`
  *   두 곳뿐. 주문 원장·정원·홀드·시트는 무접촉(구글 API 호출 0).
  */
@@ -80,6 +90,27 @@ function withOptionColumn(headers) {
   const at = optionInsertIndex(list);
   const next = list.slice(0, at).concat([OPTION_HEADER], list.slice(at));
   return { headers: next, added: true, index: at };
+}
+
+/** 옵션명 비교 정규화 — 공백 차이·대소문자로 정상 값을 놓치지 않는다(판정은 여전히 정확일치). */
+function normOptKey(v) { return String(v == null ? '' : v).replace(/\s+/g, '').toLowerCase(); }
+
+/**
+ * 그 탭에 연결된 공고들의 **살아있는 옵션 목록**(status <> 'closed').
+ * ★ 연결은 이름 → gid 폴백(탭 리네임으로 연결이 조용히 풀리면 옵션 작업이 "옵션 없음"이 된다).
+ * ★ 빈 gid 는 절을 켜지 않는다(켜면 gid 없는 공고가 전부 매칭된다 — 레포 규율).
+ * ★ 차수 재발행으로 공고가 여럿이면 **합집합**(어느 차수의 옵션이든 그 표에 적힌 적이 있다).
+ */
+async function liveOptionKeys(db, { sheetId, tabName, tabGid }) {
+  const { rows } = await db.query(
+    `SELECT DISTINCT o.opt_key
+       FROM recruit_campaigns c
+       JOIN campaign_options o ON o.campaign_id = c.id
+      WHERE c.linked_sheet_id = $1
+        AND (c.linked_tab_name = $2 OR ($3 <> '' AND c.linked_tab_gid = $3))
+        AND COALESCE(o.status, 'active') <> 'closed'`,
+    [sheetId, tabName, String(tabGid || '')]);
+  return rows.map(r => String(r.opt_key || '')).filter(Boolean);
 }
 
 /** 그 헤더 구성에서 주문의 옵션값이 어느 칸에 무엇으로 들어가는가 — **매퍼가 정한다**(사본 0). */
@@ -139,9 +170,26 @@ async function ensureOptionColumn({ sheetId, tabName, dryRun = true, backfill = 
 
   const { headers: next, added, index } = withOptionColumn(cur);
 
+  /* ★★★ 게이트 — 살아있는 공고 옵션이 있어야 "옵션이 있는 작업"이다(위 주석의 실측 근거).
+     조회 실패도 거부한다(fail-closed — 모르는 채로 표에 값을 박지 않는다). */
+  let liveKeys = null;
+  try { liveKeys = await liveOptionKeys(db, { sheetId, tabName, tabGid }); }
+  catch (e) {
+    throw new OptionColumnError('live_options_unknown',
+      '연결 공고의 옵션을 확인하지 못했습니다 — 확인 전에는 표에 값을 넣지 않습니다.');
+  }
+  /* ★ 여기는 1종 이상이면 허용한다(공고 저장 훅은 배분 의미가 있는 2종 이상일 때만 부른다) —
+     옵션 1종이면 리뷰어가 자동 선택하고 그 값이 곧 정답이라 표에 적는 것이 맞다. */
+  if (!liveKeys.length) {
+    throw new OptionColumnError('no_live_options',
+      '이 작업에 연결된 공고에 살아있는 옵션이 없습니다 — 옵션이 없는 작업이라 옵션 칸을 만들지 않습니다. '
+      + '(주문 원장에 남은 값은 상품명·URL·리뷰형태 등 다른 경로에서 온 값일 수 있습니다.)');
+  }
+  const liveSet = new Set(liveKeys.map(normOptKey));
+
   // ── 소급 기입 대상 — 링크된 주문의 선택 옵션(blank-only) ──
   const plan = [];
-  let noOrder = 0, alreadyFilled = 0;
+  let noOrder = 0, alreadyFilled = 0, notOption = 0;
   if (backfill) {
     const ids = [...new Set(parts.map(p => p.order_submission_id).filter(Boolean).map(String))];
     let optByOrder = new Map();
@@ -157,13 +205,17 @@ async function ensureOptionColumn({ sheetId, tabName, dryRun = true, backfill = 
       if (!key) { noOrder++; continue; }
       const rj = (p.row_json && typeof p.row_json === 'object') ? p.row_json : {};
       const patch = {};
+      let notAnOption = false;
       for (const [h, v] of optionCellValues(next, key)) {
+        /* ★★ 그 공고의 옵션 목록에 없는 값은 **넣지 않는다** — 상품명 전문·URL·리뷰형태가
+           `selected_opt_key` 에 남아 있는 탭이 실제로 있다(운영 실측). */
+        if (!liveSet.has(normOptKey(v))) { notAnOption = true; continue; }
         // ★ blank-only — 관리자가 적어 둔 작업지시를 덮지 않는다.
         const now = String(rj[h] == null ? '' : rj[h]).trim();
         if (now) continue;
         patch[h] = v;
       }
-      if (!Object.keys(patch).length) { alreadyFilled++; continue; }
+      if (!Object.keys(patch).length) { notAnOption ? notOption++ : alreadyFilled++; continue; }
       plan.push({ seq: p.seq, optKey: key, patch });
     }
   }
@@ -174,9 +226,11 @@ async function ensureOptionColumn({ sheetId, tabName, dryRun = true, backfill = 
     headerAdded: added, insertIndex: added ? index : -1,
     alreadyHadColumn: !added,
     headers: next,
+    liveOptionKeys: liveKeys,
     backfillCount: plan.length,
     skippedNoOrderOption: noOrder,
     skippedAlreadyFilled: alreadyFilled,
+    skippedNotAnOption: notOption,
     rows: plan.slice(0, 50).map(p => ({ seq: p.seq, optKey: p.optKey })),
     rowsTruncated: Math.max(0, plan.length - 50),
   };
@@ -228,6 +282,8 @@ async function ensureOptionColumn({ sheetId, tabName, dryRun = true, backfill = 
 
 module.exports = {
   ensureOptionColumn,
+  liveOptionKeys,
+  normOptKey,
   productOptionColumns,
   withOptionColumn,
   optionInsertIndex,
