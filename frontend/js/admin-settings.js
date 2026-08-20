@@ -2113,6 +2113,110 @@ async function reviewTypeCleanupRun(dryRun) {
 function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
 
 /* ══════════════════════════════════════════════════════════════
+   📎 구매 캡처 연결 복구 — Drive 엔 있는데 링크만 빈 주문을 이어 붙인다
+   ★ 경로는 재기준하지 않는다(RTC_EP 와 같은 판단 — 양쪽 호스트에서 그대로 닿는다).
+   ══════════════════════════════════════════════════════════════ */
+var CLB_EP = '/api/trackb/capture-link/backfill';
+
+function _captureLinkHtml() {
+  return `
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">📎 구매 캡처 연결 복구</span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
+          리뷰어는 캡처를 올렸는데 <b>주문과의 연결만 끊긴</b> 건을 찾아 이어 붙입니다.
+          그 탭의 <b>[구매캡처] 폴더</b>를 실제로 훑어 파일명(수취인)이 맞는 파일을 찾습니다.<br>
+          ★ <b>파일이 아예 없는 건은 여기서 복구할 수 없습니다</b> — 그건 리뷰어가 다시 올려야 하고,
+          리뷰어 홈의 <b>보완 첨부 카드</b>가 그 창구입니다.<br>
+          ★ 파일을 만들거나 옮기거나 지우지 않습니다. 바뀌는 것은 주문의 <b>캡처 연결 두 칸</b>뿐입니다.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+          <label style="font-size:.78rem;color:var(--t2)">최근
+            <input id="clbDays" type="number" min="1" max="3650" value="30" style="width:74px;padding:5px 7px;border:1px solid var(--border,#e5e8eb);border-radius:6px;font-size:.78rem;font-family:inherit"> 일
+          </label>
+          <label style="font-size:.78rem;color:var(--t2);display:flex;align-items:center;gap:5px">
+            <input id="clbAllowLow" type="checkbox"> 시각이 먼 파일까지 포함
+          </label>
+          <span style="font-size:.72rem;color:var(--t3)">(기본은 제출 시각 근처 파일만 — 동명이인·과거 회차 오연결 방지)</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="as-btn" id="clbPreviewBtn" onclick="captureLinkRun(true)">🔍 미리보기</button>
+          <button class="as-btn" id="clbApplyBtn" style="display:none" onclick="captureLinkRun(false)">연결하기</button>
+        </div>
+        <div id="clbResult" style="font-size:.8rem;color:var(--t2);line-height:1.7"></div>`;
+}
+
+/** 판정 보류 사유 — 폴더 미연결과 Drive 조회 실패는 **다른 문제**다(고칠 곳이 다르다).
+    ★ "모른다"를 "없다"로 말하면 담당자가 원인을 엉뚱한 데서 찾는다. */
+function _clbUnknownWhy(j) {
+  var rs = j.unknownReasons || {};
+  var noFolder = rs.no_capture_folder || 0;
+  var total = 0;
+  for (var k in rs) if (Object.prototype.hasOwnProperty.call(rs, k)) total += rs[k] || 0;
+  var other = total - noFolder;
+  if (noFolder && !other) return '캡처 폴더가 연결돼 있지 않습니다';
+  if (!noFolder && other) return 'Drive 를 훑지 못했습니다(잠시 후 다시 시도)';
+  if (total) return '폴더 미연결 ' + noFolder + '건 · Drive 조회 실패 ' + other + '건';
+  return '사유를 확인하지 못했습니다';
+}
+
+/** 미리보기·실행 공용. ★ 실행은 미리보기를 본 뒤에만 눌릴 수 있다(그전엔 버튼 숨김) + confirm 경유. */
+async function captureLinkRun(dryRun) {
+  var out = document.getElementById('clbResult');
+  var applyBtn = document.getElementById('clbApplyBtn');
+  if (!out) return;
+  var days = Math.min(Math.max(parseInt((document.getElementById('clbDays') || {}).value, 10) || 30, 1), 3650);
+  var allowLow = !!(document.getElementById('clbAllowLow') || {}).checked;
+  /* ★ 가장 위험한 선택(시각이 먼 파일까지 포함)은 확인창이 그 사실을 말한다 — 늘 같은 문장이면
+     사람이 무엇을 켠 채 누르는지 모른다. */
+  if (!dryRun && !confirm('찾은 캡처를 주문에 연결합니다.\n\n· 파일을 만들거나 옮기거나 지우지 않습니다\n· 이미 연결된 주문은 건드리지 않습니다\n· 기록되는 시각은 그 파일이 올라간 실제 시각입니다'
+      + (allowLow ? '\n\n⚠ [시각이 먼 파일까지 포함]이 켜져 있습니다 — 과거 회차 캡처가 붙을 수 있습니다.' : '')
+      + '\n\n진행할까요?')) return;
+  out.innerHTML = '<span style="color:var(--t3)">' + (dryRun ? '폴더를 훑는 중… (탭이 많으면 시간이 걸립니다)' : '연결하는 중…') + '</span>';
+  var prevBtn = document.getElementById('clbPreviewBtn');
+  if (applyBtn) applyBtn.disabled = true;
+  if (prevBtn) prevBtn.disabled = true;      // ★ 연타 금지 — 클릭 한 번이 최대 60탭 재귀 Drive 조회다
+  try {
+    var j = await _postAt(CLB_EP, { days: days, allowLow: allowLow, limit: 2000, maxTabs: 60,
+                                    dryRun: !!dryRun, confirm: !dryRun });
+    if (!j || j.ok === false) throw new Error((j && j.error) || '실패');
+    var sum = j.verdicts || {};   // ★ 분류 수는 서버가 센다(응답에 items 를 싣지 않는다 = PII 최소화)
+    var head = '<div style="margin-bottom:6px">미링크 주문 <b>' + (j.scanned || 0) + '건</b> 확인'
+      + ' · 작업 ' + (j.tabs || 0) + '개' + (j.tabsSkipped ? ' <span style="color:#B42318">(작업 ' + j.tabsSkipped + '개는 이번 범위 밖 — 기간을 나눠 다시 돌리세요)</span>' : '') + '</div>';
+    var rows = '<ul style="margin:0;padding-left:18px">'
+      + '<li><b>' + (j.planned || 0) + '건</b> 연결 가능 — Drive 에 그 사람 캡처가 있습니다</li>'
+      + '<li>' + (sum.notAttached || 0) + '건 파일 없음 — <b>리뷰어에게 다시 요청해야 합니다</b></li>'
+      + ((sum.unknown || 0) ? '<li>' + sum.unknown + '건 판정 보류 — ' + _clbUnknownWhy(j) + '</li>' : '')
+      + (j.skipped ? '<li>' + j.skipped + '건 보류 — 후보가 여럿이거나 시각이 멀어 <b>자동으로 붙이지 않았습니다</b></li>' : '')
+      + '</ul>';
+    if (j.dryRun) {
+      var sample = (j.plannedItems || []).slice(0, 8).map(function (x) {
+        return '<li>' + escHtml(x.tabName || '') + ' · ' + escHtml(x.recipient || x.orderer || '') + ' → ' + escHtml(x.file || '') + '</li>';
+      }).join('');
+      out.innerHTML = head + rows
+        + (sample ? '<div style="margin-top:10px;color:var(--t3)">연결 예정(앞 8건)</div><ul style="margin:0;padding-left:18px;font-size:.76rem">' + sample + '</ul>' : '')
+        + '<div style="margin-top:10px;color:var(--t3)">숫자를 확인한 뒤 [연결하기]를 누르세요.</div>';
+      if (applyBtn) applyBtn.style.display = (j.planned > 0) ? '' : 'none';
+    } else {
+      out.innerHTML = head
+        + '<div style="color:#0F7B4F;font-weight:700;margin-top:6px">연결 완료 — ' + (j.linked || 0) + '건</div>'
+        + ((j.conflicts || j.raced) ? '<div style="color:var(--t3)">그 사이 다른 주문이 쓰고 있던 파일 ' + (j.conflicts || 0) + '건 · 이미 연결된 주문 ' + (j.raced || 0) + '건은 건드리지 않았습니다</div>' : '')
+        + '<div style="margin-top:6px;color:var(--t3)">' + (sum.notAttached || 0) + '건은 파일이 없어 리뷰어 재요청 대상입니다.</div>';
+      if (applyBtn) applyBtn.style.display = 'none';
+      _setNavBadge('capturelink', (j.linked || 0) + '건 연결');
+    }
+  } catch (e) {
+    out.innerHTML = '<span style="color:#B42318">실패: ' + escHtml(e.message) + '</span>';
+  } finally {
+    if (applyBtn) applyBtn.disabled = false;
+    if (prevBtn) prevBtn.disabled = false;
+  }
+}
+
+/** ★ 펼칠 때 자동으로 돌리지 않는다 — Drive 를 훑는 작업이라 사람이 누를 때만 돈다. */
+function loadCaptureLinkBackfill() { _setNavBadge('capturelink', '점검'); }
+
+/* ══════════════════════════════════════════════════════════════
    ★ 블랙리스트 관리기준 (091 · 사용자 확정 Q4 — 판정 일수 별도 설정)
    공고별 참여 리뷰어 관리(🚫) 화면의 "이전 리뷰" 판정에 쓰는 기준 일수 두 개.
    ★ 판정 자체는 서버(utils/reviewerGate)가 하고 여기는 일수만 저장한다 —
@@ -2175,8 +2279,8 @@ async function saveGateCriteria() {
   }
 }
 
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, inspectmsg: _inspectmsgHtml, worktable: _worktableHtml, reviewtype: _reviewTypeHtml, capturelink: _captureLinkHtml, gatecriteria: _gateCriteriaHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, inspectmsg: loadInspectMessages, worktable: loadWorktableTemplate, reviewtype: loadReviewTypeCleanup, capturelink: loadCaptureLinkBackfill, gatecriteria: loadGateCriteria, notice: loadReviewerNoticesAdmin };
   /* 목차 라벨·아이콘 — 시안 B(design-admin-settings-wireframe.html ?v=B).
      ★ 키는 PANELS 와 같은 이름을 쓴다(둘이 갈리면 목차에 빈 칸이 생긴다). */
   var PANEL_NAV = {
@@ -2186,6 +2290,7 @@ async function saveGateCriteria() {
     inspectmsg: { ic: '💬', nm: '리뷰어 안내문구' },
     worktable: { ic: '📋', nm: '작업표 표준 열' },
     reviewtype: { ic: '✅', nm: '리뷰타입 정리' },
+    capturelink: { ic: '📎', nm: '구매 캡처 연결 복구' },
     gatecriteria: { ic: '🚫', nm: '블랙리스트 관리기준' },
     notice:    { ic: '📣', nm: '리뷰어 공지' },
   };
@@ -2589,6 +2694,7 @@ async function saveGateCriteria() {
   window.runRouteSweep = runRouteSweep;           // 오제출 소급 정리(실행)
   window.loadReviewTypeCleanup = loadReviewTypeCleanup;
   window.reviewTypeCleanupRun = reviewTypeCleanupRun;
+  window.captureLinkRun = captureLinkRun;   // 📎 구매 캡처 연결 복구(onclick 에서 부른다)
   window.saveGateCriteria = saveGateCriteria;       /* 블랙리스트 관리기준(091) 저장 버튼 onclick */
   window.loadGateCriteria = loadGateCriteria;
   window.loadWorktableTemplate = loadWorktableTemplate;

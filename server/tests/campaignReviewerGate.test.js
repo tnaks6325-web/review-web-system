@@ -253,8 +253,15 @@ const gate = require('../src/utils/reviewerGate');
     && /gatecriteria: \{ ic: '🚫'/.test(settings));
   ok('설정 경로는 /api/trackb/settings/*(양쪽 호스트 공용 — 재기준 금지)',
     /RGC_EP = '\/api\/trackb\/settings\/reviewer-gate-criteria'/.test(settings));
-  ok('admin.html 설정 마운트에 gatecriteria 포함', /'worktable', 'gatecriteria'/.test(adminHtml));
-  ok('workdesk 설정 마운트에 gatecriteria 포함(관리자만)', /'worktable','gatecriteria','notice'/.test(workdesk));
+  /* ⚠ 종전에는 마운트 목록의 **인접 문자열**(`'worktable', 'gatecriteria'`)을 고정했다 —
+     목록에 항목이 하나만 끼어도 조용히 깨지는 패턴이라(레포에서 반복된 함정) **그 마운트 호출
+     안에 키가 있는가**로 바꾼다. 검사 의미는 불변: gatecriteria 가 실제로 마운트된다. */
+  const _mountCall = (src) => {
+    const i = src.indexOf("AdminSettings.mount('adminSettingsMount'");
+    return i < 0 ? '' : src.slice(i, src.indexOf(')', src.indexOf('panels', i)) + 1);
+  };
+  ok('admin.html 설정 마운트에 gatecriteria 포함', /'gatecriteria'/.test(_mountCall(adminHtml)));
+  ok('workdesk 설정 마운트에 gatecriteria 포함(관리자만)', /'gatecriteria'/.test(_mountCall(workdesk)));
   ok('admin 탭 전환 시 loadGateCriteria 호출', /loadGateCriteria\(\)/.test(indexApp));
   ok('전역 노출(onclick 이 부를 이름)', /window\.saveGateCriteria = saveGateCriteria/.test(settings));
 
