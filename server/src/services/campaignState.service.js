@@ -624,6 +624,14 @@ function computeOptionView(opt, cnt, campState) {
     optKey: opt.opt_key,
     // 참여 후 작업가이드에서 선택한 상품의 링크를 열 수 있도록 옵션 URL도 보존한다.
     optionUrl: String(opt.option_url || ''),
+    // ★ 134 복합 작업: 이 선택 단위가 속한 상품명과 종류('option'|'product').
+    //   목록 SELECT 에 컬럼이 없으면(구버전 조회) 종전 값으로 접는다 — 추측 승격 금지.
+    productName: String(opt.product_name || ''),
+    unitKind: String(opt.unit_kind || '') === 'product' ? 'product' : 'option',
+    // ★ 선택지별 유입가이드. 공개 뷰(_publicOptionView)는 이 두 필드를 싣지 않는다 —
+    //   가이드 공개는 홀드 게이트(work-detail) 뒤에서만.
+    inflowGuideHtml: String(opt.inflow_guide_html || ''),
+    inflowGuideImages: Array.isArray(opt.inflow_guide_images) ? opt.inflow_guide_images : [],
     payAmount: Math.max(0, Number(opt.pay_amount) || 0),
     recruitTotal, dailyLimit,
     used, remaining, todayUsed, todayRemaining,

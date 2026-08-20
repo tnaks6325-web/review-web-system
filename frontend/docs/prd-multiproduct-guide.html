@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PRD — 복합 작업의 선택지별 유입가이드</title>
+<style>
+  :root{color-scheme:light}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:#F3F4F6;color:#1F2937;line-height:1.65;padding:28px 16px 80px}
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:1.45rem;font-weight:800;margin-bottom:6px}
+  .sub{font-size:.85rem;color:#6B7280;margin-bottom:22px}
+  .sub b{color:#374151}
+  .warn-top{background:#FFFBEB;border:1px solid #FCD34D;border-radius:10px;padding:12px 16px;font-size:.85rem;margin-bottom:26px}
+  .warn-top b{color:#92400E}
+  section{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:22px 24px;margin-bottom:20px}
+  .secno{display:inline-block;background:#1E3A8A;color:#fff;font-size:.72rem;font-weight:800;border-radius:6px;padding:2px 8px;margin-right:8px;vertical-align:2px}
+  h2{font-size:1.08rem;font-weight:800;margin-bottom:14px}
+  h3{font-size:.93rem;font-weight:800;margin:18px 0 8px;color:#111827}
+  p{font-size:.87rem;margin-bottom:10px}
+  ul,ol{font-size:.87rem;margin:0 0 12px 20px}
+  li{margin-bottom:5px}
+  code{background:#EEF2FF;color:#3730A3;border-radius:4px;padding:1px 5px;font-size:.8em;font-family:'SF Mono',Consolas,monospace;word-break:break-all}
+  pre{background:#111827;color:#E5E7EB;border-radius:10px;padding:14px 16px;font-size:.76rem;line-height:1.6;overflow-x:auto;margin:10px 0 14px;font-family:'SF Mono',Consolas,monospace}
+  pre .cm{color:#9CA3AF}
+  pre .hl{color:#FBBF24;font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:.82rem;margin:10px 0 14px}
+  th{background:#F9FAFB;border:1px solid #E5E7EB;padding:7px 10px;text-align:left;font-weight:700;white-space:nowrap}
+  td{border:1px solid #E5E7EB;padding:7px 10px;vertical-align:top}
+  .ok{color:#047857;font-weight:700}
+  .no{color:#B91C1C;font-weight:700}
+  .half{color:#B45309;font-weight:700}
+  .rule{background:#FEF2F2;border-left:4px solid #DC2626;border-radius:0 8px 8px 0;padding:10px 14px;font-size:.85rem;margin:10px 0}
+  .rule b{color:#991B1B}
+  .note{background:#EFF6FF;border-left:4px solid #3B82F6;border-radius:0 8px 8px 0;padding:10px 14px;font-size:.85rem;margin:10px 0}
+  .note b{color:#1D4ED8}
+  .good{background:#ECFDF5;border-left:4px solid #10B981;border-radius:0 8px 8px 0;padding:10px 14px;font-size:.85rem;margin:10px 0}
+  .good b{color:#047857}
+  .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:.8rem;margin:12px 0}
+  .flow .fbox{background:#F9FAFB;border:1.5px solid #D1D5DB;border-radius:8px;padding:8px 12px;font-weight:700;text-align:center;line-height:1.4}
+  .flow .fbox small{display:block;font-weight:500;color:#6B7280;font-size:.72rem}
+  .flow .arr{color:#9CA3AF;font-weight:800;font-size:1rem}
+  .dcard{border:1.5px solid #E5E7EB;border-radius:10px;padding:14px 16px;margin-bottom:12px}
+  .dcard.rec{border-color:#6366F1;background:#F5F7FF}
+  .dcard h4{font-size:.9rem;font-weight:800;margin-bottom:8px}
+  .dcard .badge-rec{display:inline-block;background:#4F46E5;color:#fff;font-size:.68rem;font-weight:800;border-radius:20px;padding:2px 9px;margin-left:8px;vertical-align:1px}
+  .dcard .why{font-size:.82rem;color:#4B5563}
+  .dcard .alt{font-size:.8rem;color:#6B7280;margin-top:8px;padding-top:8px;border-top:1px dashed #E5E7EB}
+  .fileref{font-size:.76rem;color:#6B7280}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:0;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;font-size:.83rem;margin:10px 0 14px}
+  .kv > div{padding:7px 12px;border-bottom:1px solid #F3F4F6}
+  .kv > div:nth-child(odd){background:#F9FAFB;font-weight:700}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px}
+  .toc a{font-size:.78rem;background:#fff;border:1px solid #E5E7EB;border-radius:20px;padding:5px 12px;text-decoration:none;color:#374151;font-weight:600}
+  .toc a:hover{border-color:#6366F1;color:#4338CA}
+  .linkbtn{display:inline-block;background:#4F46E5;color:#fff;font-size:.82rem;font-weight:700;border-radius:8px;padding:8px 16px;text-decoration:none;margin:4px 6px 4px 0}
+  .linkbtn.ghost{background:#fff;color:#4338CA;border:1.5px solid #6366F1}
+  .unitchip{display:inline-block;background:#EEF2FF;border:1px solid #C7D2FE;color:#3730A3;border-radius:6px;padding:1px 8px;font-size:.78rem;font-weight:700;margin:1px 2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>PRD — 복합 작업의 선택지별 유입가이드</h1>
+<div class="sub">한 작업에 <b>옵션 있는 상품과 옵션 없는 상품이 섞일 때</b>, 리뷰어가 고른 선택지에 맞는 <b>유입가이드(또는 유입 링크)</b>가 제시되도록
+인트라넷 리뷰오더 · 리뷰웹 작업오더 · 모집공고 편집 세 화면의 입력 구조를 하나로 잇습니다.<br>
+PRD v1.0 (착수 전 · <b>결정 사안 D1~D6 대기</b>) · 대상 저장소 = review-web-system + inadd-webapp · 작성 2026-08-20</div>
+
+<div class="warn-top"><b>⚠ 이 문서는 아직 확정본이 아닙니다.</b> §11의 결정 사안 D1~D6을 골라 주셔야 구현에 들어갑니다. 각 항목에 권장안을 표시해 두었습니다.
+화면 모양은 <a href="복합작업_선택지별_유입가이드_와이어프레임.html">와이어프레임 시안</a>에서 실제로 눌러 보실 수 있습니다.</div>
+
+<div class="toc">
+  <a href="#s01">01 요구</a><a href="#s02">02 현재 실측</a><a href="#s03">03 목표 모델</a><a href="#s04">04 데이터 계약</a>
+  <a href="#s05">05 인트라넷</a><a href="#s06">06 작업오더</a><a href="#s07">07 모집공고</a><a href="#s08">08 리뷰어 화면</a>
+  <a href="#s09">09 시트·작업표</a><a href="#s10">10 불변식</a><a href="#s11">11 결정 사안</a><a href="#s12">12 구현 순서</a>
+</div>
+
+<!-- ═══════════════════════ 01 ═══════════════════════ -->
+<section id="s01">
+<h2><span class="secno">01</span>무엇을 요구받았나</h2>
+<p><b>시나리오(사용자 제시 그대로)</b> — 하나의 작업 안에:</p>
+<table>
+  <tr><th>상품</th><th>구성</th><th>리뷰어에게 제시되는 선택지</th></tr>
+  <tr><td><b>상품A</b> (메인 URL 1개)</td><td>옵션 있는 작업 — 옵션A · 옵션B</td><td><span class="unitchip">① 상품A · 옵션A</span> <span class="unitchip">② 상품A · 옵션B</span></td></tr>
+  <tr><td><b>상품B</b> (메인 URL 1개)</td><td>옵션 없는 작업</td><td><span class="unitchip">③ 상품B</span></td></tr>
+</table>
+<p>리뷰어가 참여할 때 선택지는 <b>3가지</b>이고, 어떤 선택지를 골라도 그에 맞는 안내가 나가야 합니다:</p>
+<ul>
+  <li><b>링크유입 세팅</b> → 선택지별 <b>링크</b> 제시 (①의 링크 / ②의 링크 / ③의 링크)</li>
+  <li><b>가이드유입 세팅</b> → 선택지별 <b>유입가이드</b> 제시 (①의 가이드 / ②의 가이드 / ③의 가이드 — 각각 글 + 첨부 이미지)</li>
+</ul>
+<p>그리고 이 구조가 성립하려면 <b>세 화면이 같은 편집 양식(삼위일체)</b>을 가져야 합니다:</p>
+<div class="flow">
+  <div class="fbox">① 인트라넷<small>리뷰오더 작성·수정</small></div><div class="arr">→</div>
+  <div class="fbox">② 리뷰웹<small>작업오더 수신·상세</small></div><div class="arr">→</div>
+  <div class="fbox">③ 리뷰웹<small>모집공고 발행·편집</small></div><div class="arr">→</div>
+  <div class="fbox">④ 리뷰어<small>참여·가이드 열람</small></div>
+</div>
+</section>
+
+<!-- ═══════════════════════ 02 ═══════════════════════ -->
+<section id="s02">
+<h2><span class="secno">02</span>현재 구조 실측 — 무엇이 되어 있고 무엇이 없나</h2>
+
+<h3>2-1. 이미 되어 있는 것 <span class="ok">✅ 선택지별 링크(링크유입)</span></h3>
+<p>「옵션별 유입링크」 선행 작업으로 <b>링크유입 쪽 배관은 이미 끝까지 뚫려 있습니다.</b></p>
+<table>
+  <tr><th>층</th><th>현재 상태</th><th>근거(파일:줄)</th></tr>
+  <tr><td>인트라넷 폼</td><td>상품 메인 URL 칸(필수) + <b>옵션별 URL 칸</b>(필수)</td><td class="fileref">review-orders.js:1796-1806, :1823-1828</td></tr>
+  <tr><td>전송 구조</td><td><code>product_options_json</code> = <code>[{name, url, base:{pay,count,daily}, options:[{label, url, pay, count, daily, review_type_mix}]}]</code></td><td class="fileref">review-orders.js:1961-1980</td></tr>
+  <tr><td>공고 원장</td><td><code>campaign_options.option_url</code> (migration 108)</td><td class="fileref">server/migrations/108</td></tr>
+  <tr><td>모집공고 모달</td><td>진행상품 표에 <b>옵션 URL 칸</b> + 상품메인 URL 칸</td><td class="fileref">recruit-modal.js:491, index-recruit.js:1945-1952</td></tr>
+  <tr><td>리뷰어 화면</td><td>[🔗 선택 옵션 링크 열기] — 고른 옵션의 <code>optionUrl</code> 우선, 없으면 <code>landing_url</code> 폴백</td><td class="fileref">campaign-workdetail.js:212-222</td></tr>
+</table>
+
+<h3>2-2. 없는 것 ① <span class="no">❌ 혼합 작업(옵션 있는 상품 + 없는 상품)이 어느 층에서도 성립하지 않는다</span></h3>
+<table>
+  <tr><th>층</th><th>막히는 지점</th><th>근거(파일:줄)</th></tr>
+  <tr><td>인트라넷 폼</td><td>작업 종류가 <b>전역 토글 1개</b>(옵션 없는 작업/옵션 있는 작업) — 모든 상품에 일괄 적용. <code>none</code>이면 DOM의 옵션 행까지 <b>전부 무시</b>하고, <code>opt</code>면 옵션 없는 상품에도 옵션을 자동 삽입.</td><td class="fileref">review-orders.js:1765-1784, :1882</td></tr>
+  <tr><td>모집공고 모달</td><td><code>rf_prod_mode</code>도 전역 2모드(<code>none</code>|<code>opt</code>). <code>readOptRows()</code>는 opt가 아니면 무조건 <code>[]</code>, opt여도 <b>옵션명 빈 행은 제외</b>.</td><td class="fileref">index-recruit.js:2079, :2083</td></tr>
+  <tr><td>참여 게이트</td><td>살아있는 옵션이 1개라도 있으면 <b>옵션 선택 필수</b>(<code>option_required</code>). opt 모드에 옵션 없는 상품 행을 끼워 넣으면 → 정원 합계에는 계수되는데 <b>선택할 방법이 없는 상품</b>이 된다.</td><td class="fileref">campaign.routes.js:1226-1239, index-recruit.js:2151-2152</td></tr>
+</table>
+<div class="rule"><b>★ 지금 혼합을 흉내 내면 사고가 난다</b> — opt 모드에서 상품B를 "옵션명 = 상품명"으로 넣으면 상품명이 시트 옵션 칸에 기입되는 구조가 되는데,
+이것이 정확히 <b>8/3 우레온 잠금 사고</b>(상품명이 옵션으로 승격 → 소진 → 공고 전체 영구 잠금)의 재현입니다. 이 길은 이미 코드가 막고 있고(옵션 원장 없으면 승격 금지), 풀면 안 됩니다.</div>
+
+<h3>2-3. 없는 것 ② <span class="no">❌ 유입가이드는 공고당 1벌뿐</span></h3>
+<table>
+  <tr><th>층</th><th>현재 상태</th><th>근거(파일:줄)</th></tr>
+  <tr><td>인트라넷 폼</td><td>유입가이드 = <b>textarea 1칸</b> + 첨부 이미지 1버킷(<code>guide_images.inflow</code>, 최대 4장). 옵션·상품별 가이드 칸 없음.</td><td class="fileref">review-orders.js:283, :2149-2158, :2609-2613</td></tr>
+  <tr><td>작업오더</td><td><code>inflow_guide</code> TEXT 1칸 + <code>guide_images</code> <code>{inflow,review,notes}</code> 구역 객체(구역당 8장). 단위별 구분 없음.</td><td class="fileref">order.routes.js:186-199</td></tr>
+  <tr><td>공고</td><td><code>work_detail.inflowGuideHtml</code> 1벌. <code>campaign_options</code>에 가이드 컬럼 없음(opt_key·option_url·금액·정원·일건수·mix·상태뿐).</td><td class="fileref">campaign.routes.js:42-53, migrations/061·108·109</td></tr>
+  <tr><td>리뷰어 화면</td><td>렌더러의 옵션별 분기는 딱 두 곳 — ✅ 내가 참여한 옵션 카드, 랜딩 버튼 URL. <b>유입가이드 본문은 공통 1벌</b>.</td><td class="fileref">campaign-workdetail.js:152-160, :191-223</td></tr>
+</table>
+
+<h3>2-4. 참고 — 죽어 있는 배선</h3>
+<ul>
+  <li><code>_woProductMode</code>·<code>explicitOptionMode</code>가 <code>products[0].product_mode</code>를 읽지만 <b>인트라넷이 그 필드를 보내는 코드가 없어 dead path</b>입니다(work-order-detail.js:512-520, :587). 이번 작업에서 이 배선을 진짜 신호로 살립니다(§05).</li>
+  <li><code>_woOptionRows</code>는 옵션 없는 상품을 <code>optKey:""</code> 행으로 이미 표현하지만, 반환 게이트가 「optKey 있는 행 ≥ 2」라서 <b>옵션 1개 + 옵션 없는 상품 1개 조합은 빈 배열</b>로 떨어집니다(work-order-detail.js:573, :588).</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════ 03 ═══════════════════════ -->
+<section id="s03">
+<h2><span class="secno">03</span>목표 모델 — 「선택 단위(unit)」 하나로 통일</h2>
+<p>세 층이 공유할 개념을 하나만 둡니다:</p>
+<div class="note"><b>선택 단위(unit)</b> = 리뷰어가 참여할 때 고르는 선택지 하나.<br>
+· 옵션 있는 상품의 <b>옵션 하나</b> = unit 1개 (기존 <code>campaign_options</code> 행 그대로)<br>
+· 옵션 없는 상품 <b>그 자체</b> = unit 1개 (<b>신규</b> — <code>unit_kind='product'</code> 행)</div>
+<p>시나리오를 이 모델로 옮기면:</p>
+<table>
+  <tr><th>unit</th><th>종류</th><th>유입 링크(링크유입)</th><th>유입가이드(가이드유입)</th><th>시트 옵션칸 기입</th></tr>
+  <tr><td>① 상품A · 옵션A</td><td>option</td><td>옵션A의 URL (<span class="ok">기존</span>)</td><td>옵션A의 가이드 (<span class="no">신규</span>)</td><td>옵션A (기존)</td></tr>
+  <tr><td>② 상품A · 옵션B</td><td>option</td><td>옵션B의 URL (<span class="ok">기존</span>)</td><td>옵션B의 가이드 (<span class="no">신규</span>)</td><td>옵션B (기존)</td></tr>
+  <tr><td>③ 상품B</td><td><b>product</b> (신규)</td><td>상품B의 메인 URL</td><td>상품B의 가이드 (<span class="no">신규</span>)</td><td><b>기입 안 함</b> (§09·D3)</td></tr>
+</table>
+<p>유입 안내 규칙은 유입방식과 무관하게 한 문장으로 정리됩니다:</p>
+<div class="good"><b>리뷰어가 고른 unit의 안내를 보여준다.</b> 링크유입이면 그 unit의 URL, 가이드유입이면 그 unit의 가이드.
+unit에 가이드가 없으면 <b>공고 공통 유입가이드(<code>work_detail.inflowGuideHtml</code>)로 폴백</b>한다 — 그래서 기존 공고(단위별 가이드 0건)는 동작이 한 글자도 안 바뀐다.</div>
+</section>
+
+<!-- ═══════════════════════ 04 ═══════════════════════ -->
+<section id="s04">
+<h2><span class="secno">04</span>데이터 계약 — 세 층을 잇는 두 가지 확장</h2>
+
+<h3>4-1. <code>product_options_json</code> v2 (인트라넷 → 작업오더 → 프리필)</h3>
+<p>기존 구조에 <b>키를 더하기만</b> 합니다(가산적 — 모르는 키는 양쪽 다 무시하므로 배포 순서 무관).</p>
+<pre>[
+  {
+    "name": "상품A",
+    "url": "https://smartstore.naver.com/…/A",
+    "product_mode": "opt",                <span class="cm">// ★ 신규 — 상품별 작업 종류('opt'|'none'). 죽어 있던 배선을 진짜 신호로</span>
+    "base": { "pay": 0, "count": 0, "daily": 0 },
+    "options": [
+      { "label": "옵션A", "url": "https://…/A?opt=a", "pay": 73000, "count": 5, "daily": 5,
+        "review_type_mix": [],
+        <span class="hl">"guide": { "text": "옵션A 검색 유입 안내…", "images": ["https://…/guide-image/xxx", "…"] }</span> },
+      { "label": "옵션B", "url": "https://…/A?opt=b", "pay": 85000, "count": 5, "daily": 5,
+        <span class="hl">"guide": { "text": "…", "images": [] }</span> }
+    ]
+  },
+  {
+    "name": "상품B",
+    "url": "https://smartstore.naver.com/…/B",
+    "product_mode": "none",
+    "base": { "pay": 111000, "count": 5, "daily": 5,
+      <span class="hl">"guide": { "text": "상품B 유입 안내…", "images": ["…"] }</span> },
+    "options": []                          <span class="cm">// 옵션 없음 확정 신호(기존 계약 그대로)</span>
+  }
+]</pre>
+<ul>
+  <li><code>guide.text</code> = 평문(전송 시 HTML 아님 — 공고 저장 시점에 escape+&lt;br&gt; 조립, 기존 <code>_igComposeInflow</code> 규율과 동일).</li>
+  <li><code>guide.images</code> = 이미 업로드된 프록시 URL 배열(기존 <code>POST /api/order/guide-image</code> 재사용, <b>unit당 최대 4장</b> — D5).</li>
+  <li>가이드유입이 아니면(<code>inflow_type='link'</code>) <code>guide</code>는 <b>미전송</b>.</li>
+  <li>공통(폴백) 유입가이드·<code>guide_images.inflow</code>는 <b>기존 그대로 유지</b> — unit 가이드는 이를 대체하는 게 아니라 위에 얹는 층입니다.</li>
+</ul>
+
+<h3>4-2. <code>campaign_options</code> 확장 (공고 원장) — migration 1xx(다음 번호)</h3>
+<pre><span class="cm">-- 컬럼 추가만 · 백필 0 · CHECK 없음(087 규율) · FK 없음 → 배포 즉시 동작 불변</span>
+ALTER TABLE campaign_options ADD COLUMN IF NOT EXISTS product_name        TEXT  NOT NULL DEFAULT '';
+ALTER TABLE campaign_options ADD COLUMN IF NOT EXISTS unit_kind           TEXT  NOT NULL DEFAULT 'option';  <span class="cm">-- 'option' | 'product'</span>
+ALTER TABLE campaign_options ADD COLUMN IF NOT EXISTS inflow_guide_html   TEXT  NOT NULL DEFAULT '';
+ALTER TABLE campaign_options ADD COLUMN IF NOT EXISTS inflow_guide_images JSONB NOT NULL DEFAULT '[]';</pre>
+<ul>
+  <li><code>unit_kind='product'</code> 행의 <code>opt_key</code> = 상품명(유니크 키 <code>UNIQUE(campaign_id, opt_key)</code>를 그대로 만족) — 단 <b>시트 옵션칸에는 절대 쓰지 않는다</b>(§09).</li>
+  <li><code>inflow_guide_html</code>은 저장 시 <code>sanitizeGuideHtml</code>, <code>inflow_guide_images</code>는 <code>sanitizeGuideImages</code>(https·프록시 정확일치·4장 컷)를 <b>저장·응답 양쪽</b>에서 통과(기존 <code>work_detail</code> 3칸 이미지와 같은 규율).</li>
+  <li><b>REQUIRED_SCHEMA 등록</b>: <code>campaign_options.unit_kind</code>·<code>inflow_guide_html</code> — 공고 저장 INSERT/UPDATE 목록에 들어가므로 컬럼이 없으면 발행·수정이 전면 42703(082 규율).</li>
+  <li><code>_saveCampaignOptions</code> upsert는 <b>미전송 필드 = 유지</b>(<code>COALESCE</code> 센티널) — 가이드 칸 없는 화면이 옵션을 저장해도 단위별 가이드가 지워지지 않는다(이체설정·리뷰타입과 같은 계약).</li>
+</ul>
+
+<h3>4-3. 응답 계약(리뷰어·관리자)</h3>
+<div class="kv">
+  <div>공개 <code>GET /:id</code></div><div><code>_publicOptionView</code>에 <code>productName</code>·<code>unitKind</code> <b>추가</b> — 선택 시트의 상품 그룹핑 재료. 금액·URL·가이드는 종전대로 <b>미노출</b>("금액·가이드는 참여 후 공개" 원칙 유지).</div>
+  <div><code>GET /:id/work-detail</code></div><div><code>options[]</code>·<code>selectedOption</code>에 <code>productName</code>·<code>unitKind</code>·<code>inflowGuideHtml</code>·<code>inflowGuideImages</code> 추가(홀드 이중열쇠 게이트 뒤에만 — 종전과 동일).</div>
+  <div>관리자 <code>_loadOptionsRaw</code></div><div>가이드 4필드 포함(수정 모달 프리필).</div>
+</div>
+</section>
+
+<!-- ═══════════════════════ 05 ═══════════════════════ -->
+<section id="s05">
+<h2><span class="secno">05</span>① 인트라넷 리뷰오더 — 상품별 작업 종류 + 단위별 가이드 첨부</h2>
+
+<h3>5-1. 작업 종류: 전역 토글 → 상품별 토글</h3>
+<ul>
+  <li>기존 전역 토글(<code>review-order-task-none/opt</code>, review-orders.js:249)은 <b>"새 상품의 기본값 + 전체 일괄 적용" 단축키</b>로 남긴다(누르면 confirm 후 전 상품에 적용 — 기존 습관 보존).</li>
+  <li>상품 카드 헤더에 <b>상품별 [옵션 없음 | 옵션 있음] 토글</b> 신설 → <code>reviewOrderSetTaskMode</code>(:1765)의 전 상품 순회를 상품 단위 함수로 분해.</li>
+  <li><code>reviewOrderCollectProducts</code>(:1882)의 옵션 수집 조건을 <code>_reviewOrderTaskMode === 'opt'</code> → <b>그 상품의 모드</b>(<code>productEl.dataset.mode</code>)로 변경. 수집 결과에 <code>product_mode</code> 동봉.</li>
+  <li>합계(<code>reviewOrderTotals</code> :1930)·요약 문장(<code>reviewOrderProductSummary</code> :1990)은 이미 상품별 <code>options.length</code> 분기라 <b>무수정</b>.</li>
+</ul>
+
+<h3>5-2. 단위별 유입가이드 첨부 (가이드유입일 때만)</h3>
+<ul>
+  <li>옵션 행마다 / 옵션 없는 상품의 base 블록마다 <b>[📷 유입가이드 n]</b> 버튼 → 행 아래 접이식 편집(텍스트 textarea + 이미지 드롭존).</li>
+  <li>이미지는 기존 3버킷 인프라(<code>reviewOrderIngestImageFiles</code> :2208 — 4장·5MB·압축·프록시 업로드)를 <b>unit 키(상품id·옵션id)로 일반화</b>해 재사용. 업로드 프록시(<code>POST /api/review-order/guide-image</code>, api.ts:4075)는 무수정.</li>
+  <li>유입방식이 <b>링크유입이면 가이드 버튼 비활성</b> + "옵션 URL이 유입 링크로 사용됩니다" 안내(옵션별 URL 선행 작업의 안내와 한 벌).</li>
+  <li>공통 유입가이드 칸(<code>review-order-inflow-guide-text</code>)은 유지하되 라벨을 <b>"공통 유입가이드 (선택지별 가이드가 없는 선택지의 폴백)"</b>으로 명시.</li>
+</ul>
+
+<h3>5-3. 전송·왕복·검증</h3>
+<ul>
+  <li><code>reviewOrderOptionsPayload</code>(:1961)에 <code>product_mode</code>·<code>guide</code> 동봉(빈 가이드는 미전송).</li>
+  <li>원본 수정 왕복: <code>reviewOrderProductsFromOrder</code>(:3603)·<code>reviewOrderApplyProducts</code>(:3687)가 <code>product_mode</code>·<code>guide</code>를 복원 — <b>왕복 계약 테스트</b>(tests/review-order-edit-roundtrip.test.mjs:97 "재전송값 = 최초 전송값") 케이스에 혼합+가이드 픽스처 추가.</li>
+  <li>검증(<code>reviewOrderValidate</code> :2474): 옵션 URL·옵션명 필수 규칙은 <b>옵션 있는 상품에만</b> 적용되도록 상품 모드 분기. 업로드 중/실패 이미지 전송 차단 가드(:2555)에 unit 버킷 합류.</li>
+  <li>임시저장(draft :526)의 <code>state</code>에 unit 가이드 버킷 동봉.</li>
+</ul>
+<div class="note"><b>배포 순서 무관(가산적)</b> — 인트라넷만 먼저 배포되면: 리뷰웹 구버전은 <code>product_options_json</code>을 TEXT 그대로 저장하고 모르는 키를 무시 → 종전 동작.
+리뷰웹만 먼저면: <code>guide</code>·<code>product_mode</code>가 안 실려 와 단위별 가이드가 빈 값 → 공통 폴백 = 종전 동작.</div>
+</section>
+
+<!-- ═══════════════════════ 06 ═══════════════════════ -->
+<section id="s06">
+<h2><span class="secno">06</span>② 리뷰웹 작업오더 — 수신·상세·프리필</h2>
+<ul>
+  <li><b>수신(intake)은 사실상 무수정</b> — <code>product_options_json</code>은 문자열 그대로 저장(order.routes.js:258-260). 방어 1건만 추가: JSON 길이 상한(예 200KB — 폭주 방지, 초과 시 가이드만 잘라내지 말고 <b>접수 거부 + 사유</b>).</li>
+  <li><b>상세 렌더</b>(<code>_woDetailHtml</code> :306): 상품·옵션 줄 아래에 <b>선택지별 가이드 블록</b>(unit 라벨 + 텍스트 + 썸네일) 추가. 이미지는 기존 <code>_woReviewImgHtml</code>(:618 — 프록시/Drive만·토큰 중복제거·신뢰 베이스 재구성) 재사용. 텍스트는 escape(원문 보존 원칙 — 상세는 무접촉 정책이므로 <b>표시만 추가</b>).</li>
+  <li><b>관리자 수정</b>: <code>ADMIN_EDIT_LONGTEXT</code>에 <code>product_options_json</code>이 이미 있어(order.routes.js:1556-1572) 서버는 무수정. 모달(<code>woAdminEditModal</code>)에서 단위별 가이드까지 편집할지는 1차 제외(공고 편집에서 하면 된다 — guide_images 1차 제외 선례).</li>
+  <li><b>프리필</b>(work-order-detail.js):
+    <ul>
+      <li><code>_woOptionRows</code>(:524): 행에 <code>unitKind</code>·<code>productUrl</code>·<code>guideText</code>·<code>guideImages</code> 추가. <b>반환 게이트 교체</b> — 「optKey 행 ≥ 2」 → <b>「<code>product_mode</code> 신호가 있으면 그것을 따르고, 없으면(구버전 오더) 종전 추론 규칙 유지」</b>. 이것으로 dead path였던 :587이 진짜 신호로 살아난다.</li>
+      <li><code>_woCampaignPrefill</code>(:737): <code>options[]</code>에 위 필드 동봉 + 혼합이면 <code>productMode:'mixed'</code>.</li>
+    </ul>
+  </li>
+</ul>
+</section>
+
+<!-- ═══════════════════════ 07 ═══════════════════════ -->
+<section id="s07">
+<h2><span class="secno">07</span>③ 모집공고 편집 모달 — 혼합 표 + 행별 가이드 편집</h2>
+
+<h3>7-1. 진행상품 표: 2모드 → 혼합 수용</h3>
+<ul>
+  <li>전역 <code>rf_prod_mode</code>는 유지하되 <code>opt</code> 모드의 의미를 <b>"상품·옵션 구성(혼합 포함)"</b>으로 확장:
+    상품 그룹(<code>.rf-gp</code>, index-recruit.js:1850)에 <b>옵션 0개를 허용</b>하고, 그 그룹 헤더가 곧 <b>상품 단위 행</b>(URL·결제금액·인원·일건수 입력)이 된다.</li>
+  <li><code>readOptRows</code>(:2077): 옵션명 빈 행 제외 규칙은 유지하되, <b>옵션 0개 그룹은 <code>unitKind:'product'</code> 항목으로 전송</b> — <code>{ optKey: 상품명, unitKind:'product', productName, optionUrl: 상품URL, payAmount, recruitTotal, dailyLimit, guideText, guideImages }</code>.</li>
+  <li>정원 파생(<code>_syncPreviewFromOptRows</code> :2126)·작업내용 원문(<code>rf_wd_product</code>)은 unit 목록 기준으로 그대로 합산(하나라도 0이면 무제한 규칙 불변).</li>
+</ul>
+
+<h3>7-2. 행별 유입가이드 편집기</h3>
+<ul>
+  <li>각 unit 행 끝에 <b>[📷 n]</b> 버튼(가이드유입일 때만 활성) → 행 아래 인라인 확장: textarea + 이미지 스트립.</li>
+  <li>이미지 스트립은 기존 <code>_ig*</code> 위젯(index-recruit.js:1300-1600)을 <b>고정 3필드(<code>_IG_FIELDS</code>)에서 동적 키(unit)로 일반화</b>해 재사용 — 파일선택·붙여넣기·드롭 3경로가 <code>_igUpload</code> 한 함수로 수렴하는 규율 그대로.</li>
+  <li>저장: <code>payload.options[]</code>에 <code>guideText</code>·<code>guideImages</code> 동봉 → 서버 <code>_saveCampaignOptions</code>(campaign.routes.js:226)가 <code>guideText</code>를 escape+&lt;br&gt;+&lt;img&gt;로 조립(<code>_igComposeInflow</code> :1354와 같은 조립 규칙을 <b>서버 한 곳</b>에 두어 저장·미리보기 불일치 차단) 후 <code>sanitizeGuideHtml</code> 통과 저장.</li>
+  <li><b>자동점검(경고 전용 — 하드블록 금지)</b>: 「가이드유입 + 선택지 N개 중 가이드 없는 선택지 M개 → 공통 유입가이드로 폴백됩니다」 안내. 공통 가이드조차 없으면 ⚠ 강조.</li>
+</ul>
+
+<h3>7-3. 프리필·수정 프리필</h3>
+<ul>
+  <li>발행: <code>applyProductRowsFromOrder</code>(:2227)가 <code>unitKind</code>·<code>guide</code>를 행·가이드 편집기에 주입. <b>옵션 원장이 비면 텍스트 추측을 옵션으로 승격하지 않는 규칙은 불변</b>.</li>
+  <li>수정: <code>_loadOptionsRaw</code>(campaign.routes.js:406)가 가이드 4필드 반환 → <code>renderOptRowsWithProduct</code>(:2035)가 복원. 상품명은 이제 <code>product_name</code> 컬럼이 원장이므로 <code>work_detail.productLines</code> 역파싱 의존이 줄어든다(역파싱은 구공고 폴백으로 유지).</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════ 08 ═══════════════════════ -->
+<section id="s08">
+<h2><span class="secno">08</span>④ 리뷰어 화면 — 선택 3지 + 고른 선택지의 가이드</h2>
+<ul>
+  <li><b>참여 게이트</b>(campaign.routes.js:1226): 판정은 종전대로 <code>liveOptions</code> 기준 — <code>unit_kind='product'</code> 행도 살아있는 unit이므로 <b>혼합 공고에서 상품B가 정식 선택지가 된다</b>(= "참여 경로 없는 상품" 문제 해소). 옵션 소진·오늘 마감·자리 계산(<code>computeOptionView</code>)은 행 단위라 무수정.</li>
+  <li><b>선택 시트</b>(campaign.html:688-707): <code>productName</code>으로 상품 그룹 헤더를 그리고, <code>unit_kind='product'</code>는 상품명 단독 행으로 표시. 참여 전 읽기전용 목록(<code>renderPreOptions</code> :672)도 같은 그룹핑.</li>
+  <li><b>가이드 렌더</b>(campaign-workdetail.js): 유입가이드 카드 재료를
+    <code>selectedOption.inflowGuideHtml || workDetail.inflowGuideHtml</code>로 교체(★ 폴백 규칙 — D2). 링크유입 분기(:212-222)는 무수정(이미 unit URL 우선).</li>
+  <li><b>옵션 변경</b>: <code>_doChangeOption</code> → <code>enterJoined()</code> 재조회가 이미 있으므로 가이드도 자동으로 새 unit 것으로 갱신. 구매양식 iframe 재로드(TOCTOU 봉합)도 종전 그대로.</li>
+  <li><b>embed</b>(search-app.js): <code>optionKey</code> 전달·<code>_lockEmbedOption</code> 무수정 — unit_kind='product'의 <code>optionKey</code>는 상품명이지만 시트 기입은 §09 규칙이 막는다.</li>
+  <li><b>홀드 서버권위 불변</b>: 제출 시 <code>selectedOptKey</code>는 홀드의 <code>option_key</code>가 override(submit.routes) — unit도 같은 경로.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════ 09 ═══════════════════════ -->
+<section id="s09">
+<h2><span class="secno">09</span>시트·작업표 연계 — 상품 단위는 옵션칸을 쓰지 않는다</h2>
+<div class="rule"><b>★ unit_kind='product'의 opt_key(상품명)는 시트 옵션칸에 절대 기입하지 않는다(D3 권장).</b>
+제출 확정 시 서버가 홀드의 <code>option_key</code>를 <code>selectedOptKey</code>로 override하기 전에 <b>unit_kind를 확인해 product면 빈 값으로 눕힌다</b> —
+옵션 없는 공고의 제출과 동일한 경로가 되어, 상품명이 옵션칸에 승격되는 우레온 계열 사고가 구조적으로 불가능해진다.
+(옵션칸 쓰기 단일 출처 <code>optionWriteColumns</code>·blank-only 필터는 무접촉.)</div>
+<ul>
+  <li><b>행배정 성질(문서화된 한계)</b>: 상품B 참여는 옵션칸 매칭 없이 빈 행 폴백으로 배정된다 — 옵션 불일치 시 빈 행 폴백이라는 기존 성질과 동일. 상품별 행 블록을 시트에 미리 구분하고 싶으면 작업표 생성(worktablePlan) 쪽 후속 과제로 분리(이번 범위 밖).</li>
+  <li><b>작업표 생성</b>: 옵션 배분(<code>planToSheetValues</code>)은 옵션 unit만 옵션칸에 배분하고 product unit 행은 빈칸으로 둔다(건수 배분에는 포함).</li>
+  <li><b>원장·관제</b>: <code>campaign_applications.option_key</code>에는 unit 키(상품명 포함)가 그대로 남아 관제 옵션표(<code>_campOptionTable</code>)·CSV에서 선택지별 집계가 된다.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════ 10 ═══════════════════════ -->
+<section id="s10">
+<h2><span class="secno">10</span>지켜야 할 불변식 (완화 금지)</h2>
+<ul>
+  <li><b>★ 텍스트 추측을 옵션으로 승격하지 않는다</b> — 옵션 원장(<code>options[]</code>/<code>product_options_json</code>)이 없으면 혼합·가이드도 없다(구버전 오더는 종전 경로).</li>
+  <li><b>★ unit 가이드가 없으면 공통 유입가이드로 폴백</b> — 기존 공고·기존 오더는 동작 불변(opt-in).</li>
+  <li><b>★ 미전송 = 유지</b> — 가이드 편집 UI 없는 화면의 저장이 단위별 가이드를 지우지 않는다(<code>_saveCampaignOptions</code> COALESCE 센티널).</li>
+  <li><b>★ sanitize 이중 적용</b> — <code>inflow_guide_html</code>·<code>inflow_guide_images</code>는 저장과 응답 양쪽에서 정화(https·프록시 정확일치·장수 컷). 리뷰어 화면 <code>&lt;img&gt;</code> 호스트는 신뢰 베이스로 재구성.</li>
+  <li><b>★ 참여 전 공개 범위 불변</b> — 공개 뷰에는 <code>productName</code>·<code>unitKind</code>·잔여만. 금액·URL·가이드는 참여(홀드 이중열쇠) 후에만.</li>
+  <li><b>★ 스코프 토큰 격리 불변</b> — 리뷰어앱 공고수정 스코프 토큰(<code>via:'reviewer_campaign'</code>)은 옵션(=unit) 편집 불가 그대로.</li>
+  <li><b>★ 자동점검은 경고 전용</b> — 가이드 누락·혼합 구성으로 발행을 막지 않는다(하드블록 금지 규율).</li>
+  <li><b>★ closed-only = 옵션 없는 공고 참여 허용 / soldout 우회 금지</b> — 우레온 확정 규칙 무회귀.</li>
+</ul>
+</section>
+
+<!-- ═══════════════════════ 11 ═══════════════════════ -->
+<section id="s11">
+<h2><span class="secno">11</span>결정 사안 D1~D6</h2>
+
+<div class="dcard rec"><h4>D1. 옵션 없는 상품(선택지 ③)의 저장 위치<span class="badge-rec">권장</span></h4>
+<p class="why"><b>권장 = <code>campaign_options</code> 행 + <code>unit_kind='product'</code>.</b> 정원·일건수·소진·옵션변경·관제 집계·시트 기입까지 기존 옵션 배관을 전부 재사용하고, 참여 게이트가 자동으로 "정식 선택지"로 인정한다.</p>
+<p class="alt">대안: <code>work_detail</code> JSON 맵(<code>{unitKey: guide}</code>) — 정원·소진 계산이 안 붙고, opt_key 개명 시 키가 끊기며, work_detail 통째 교체 저장이라 유실 위험. 비권장.</p></div>
+
+<div class="dcard rec"><h4>D2. unit 가이드가 있을 때 공통 유입가이드는?<span class="badge-rec">권장</span></h4>
+<p class="why"><b>권장 = 대체(unit 가이드만 표시, 공통은 폴백 전용).</b> 병기하면 선택지 무관 안내(검색어 등)가 중복되고 리뷰어가 어느 쪽을 따를지 모호해진다.</p>
+<p class="alt">대안: 공통 + unit 병기(공통을 위에, unit을 아래에). 공통 칸을 "전 선택지 공통 안내"로 쓰는 운영이라면 이쪽 — 골라 주시면 됩니다.</p></div>
+
+<div class="dcard rec"><h4>D3. 상품 단위(③)의 시트 옵션칸<span class="badge-rec">권장</span></h4>
+<p class="why"><b>권장 = 기입하지 않음(빈칸).</b> 상품명을 옵션칸에 쓰는 순간 우레온 사고 모양(상품명=옵션 승격)이 재현된다. 관제·원장에는 unit 키가 남으므로 집계 손실 없음.</p>
+<p class="alt">대안: 상품명 기입 — 시트에서 눈으로 구분은 되지만 blank-only·옵션 매칭 규율과 충돌. 비권장.</p></div>
+
+<div class="dcard rec"><h4>D4. 인트라넷 작업 종류 토글의 형태<span class="badge-rec">권장</span></h4>
+<p class="why"><b>권장 = 상품별 토글 + 기존 전역 토글은 "일괄 적용" 단축으로 유지.</b> 단일 상품 작업(대다수)의 입력 습관이 안 바뀌고, 혼합은 필요한 상품에서만 켠다.</p>
+<p class="alt">대안: 전역 토글 폐지·상품별만 — 화면은 단순해지나 기존 사용 습관이 바뀐다.</p></div>
+
+<div class="dcard rec"><h4>D5. unit 가이드 이미지 상한<span class="badge-rec">권장</span></h4>
+<p class="why"><b>권장 = unit당 4장</b>(기존 칸당 상한 <code>_IG_MAX</code>·인트라넷 4장과 동일 — 규칙이 하나면 화면 간 드리프트가 없다). 서버 정규화도 4장 컷.</p>
+<p class="alt">대안: unit당 8장(작업오더 구역 상한과 동일) — 전송량·화면 밀도 부담.</p></div>
+
+<div class="dcard rec"><h4>D6. 기존(이미 발행된) 공고의 소급<span class="badge-rec">권장</span></h4>
+<p class="why"><b>권장 = 자동 소급 없음.</b> 새 컬럼 DEFAULT로 전부 폴백(공통 가이드) 동작. 필요한 공고만 수정 모달을 열어 단위별 가이드를 채우면 그때부터 적용.</p>
+<p class="alt">대안: 없음(자동 소급은 잘못된 가이드를 만들 근거가 없다).</p></div>
+</section>
+
+<!-- ═══════════════════════ 12 ═══════════════════════ -->
+<section id="s12">
+<h2><span class="secno">12</span>구현 순서 · 검증 계획</h2>
+<p>각 단계가 <b>가산적</b>이라 순서대로 배포해도, 일부만 배포돼도 종전 동작이 유지됩니다.</p>
+<table>
+  <tr><th>순서</th><th>저장소</th><th>내용</th></tr>
+  <tr><td>1</td><td>review-web</td><td>migration(§4-2) + <code>_saveCampaignOptions</code>·응답 3종·sanitize + REQUIRED_SCHEMA + 제출 시 product unit의 <code>selectedOptKey</code> 눕히기(§09)</td></tr>
+  <tr><td>2</td><td>review-web</td><td>모집공고 모달 — 혼합 표 + 행별 가이드 편집기 + 자동점검(§07)</td></tr>
+  <tr><td>3</td><td>review-web</td><td>리뷰어 화면 — 선택 시트 그룹핑 + 렌더러 폴백(§08)</td></tr>
+  <tr><td>4</td><td>review-web</td><td>작업오더 상세 렌더 + 프리필(<code>_woOptionRows</code> 게이트 교체)(§06)</td></tr>
+  <tr><td>5</td><td>inadd-webapp</td><td>리뷰오더 폼 — 상품별 토글 + 단위별 가이드 첨부 + 왕복(§05)</td></tr>
+</table>
+<h3>회귀가드 계획</h3>
+<ul>
+  <li><b>review-web</b> <code>tests/campaignUnitGuide.test.js</code>(가칭): 저장 시 sanitize 실행·미전송=유지·product unit의 시트 미기입(스텁 pool로 제출 경로 실행)·렌더러 폴백 vm 실행(unit 가이드 有/無/링크유입 3분기)·<code>readOptRows</code> 혼합 payload·프리필 왕복(같은 입력 → 같은 options[]) + 진짜 PG로 migration idempotent.</li>
+  <li><b>inadd-webapp</b> <code>tests/review-order-edit-roundtrip.test.mjs</code> 확장: 혼합+가이드 픽스처 왕복(재전송값 ≡ 최초 전송값). <code>test/review-order-mapping.test.ts</code>의 기존 가드(리뷰가이드 조립 부활 금지 등) 무접촉.</li>
+  <li>실브라우저(http 오리진): 모달 혼합 편집→저장→수정 재열기 값 보존 / 리뷰어 선택 3지→가이드 전환 / IME·팝업 규율.</li>
+</ul>
+<p style="margin-top:14px">
+  <a class="linkbtn" href="복합작업_선택지별_유입가이드_와이어프레임.html">와이어프레임 시안 열기 →</a>
+  <a class="linkbtn ghost" href="prd-option-landing-url.html">선행 PRD(옵션별 유입링크) 보기</a>
+</p>
+</section>
+
+</div>
+</body>
+</html>

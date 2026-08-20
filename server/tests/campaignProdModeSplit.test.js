@@ -44,6 +44,13 @@ function grab(src, name) {
   }
   throw new Error('중괄호 불균형: ' + name);
 }
+/** 한 줄짜리 const 선언(화살표 함수·상수표)을 그대로 꺼낸다 */
+function grabConst(src, name) {
+  const re = new RegExp('^const ' + name + '\\b.*$', 'm');
+  const m = re.exec(src);
+  assert(m, 'const 없음: ' + name);
+  return m[0];
+}
 
 /* ══════════════ 가짜 DOM (querySelector 후손 선택자 지원) ══════════════ */
 function makeDom() {
@@ -141,11 +148,23 @@ function makeTable(opts) {
     _renderPreview: () => {},
     syncRecruitProductMainUrl: () => {},
     showToast: () => {},
+    escHtml: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    // 선택지별 유입가이드(134) 위젯의 화면 조작부는 스텁 — 이 가드가 보는 것은 "모드와 저장 페이로드"다
+    _igBind: () => {},
+    _igRender: () => {},
+    _readOptionReviewMix: () => [],
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
+  // ⚠ 표 함수가 새 전역을 부르면 이 목록도 함께 늘린다(스텁을 두면 규칙이 거기서만 딴판이 된다)
+  ['_IG_MAX', '_IG_FIELDS', '_IG_TA', '_IG_URL_RE', '_igTok', '_igOk', '_igUrls', '_igImgTags', '_UG_KEY_RE']
+    .forEach(c => vm.runInContext(grabConst(recruitSrc, c), sandbox));
+  vm.runInContext('window._igState = { inflow: [], review: [], notes: [] };', sandbox);
+  vm.runInContext('let _ugSeq = 0;', sandbox);
   [
-    '_prodMode', '_applyProdModeUi', '_setProdModeNote', 'setProdMode', '_convertProdRows',
+    '_htmlToPlainPreview', '_igSetList', '_igSplitInflow', '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName',
+    '_ugNewKey', '_ugRegister', '_ugDrop', '_ugDropAll', '_ugDropBox', '_ugBuild', '_ugLoad', '_ugCompose', '_ugMark', '_ugAttachAll',
+    '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', 'setProdMode', '_convertProdRows',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows', 'renderOptRowsWithProduct',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
@@ -289,6 +308,12 @@ else {
   const sb = { console };
   sb.window = sb; vm.createContext(sb);
   sb.reviewOrderIsSheetReferenceMode = () => false;
+  // ⚠ 134: reviewOrderOptionsPayload 가 유입방식 게이트를 부른다(가이드유입일 때만 선택지 가이드 동봉).
+  //   스텁이 아니라 실물을 꺼내 쓴다 — 여기서만 다른 판정을 두면 옵션 구조 신호가 딴판이 된다.
+  sb.document = { querySelector: sel => (/review-order-inflow-type/.test(sel) ? { value: '링크유입' } : null) };
+  vm.runInContext(grab(intranet, 'reviewOrderChecked'), sb);
+  vm.runInContext(grab(intranet, 'reviewOrderInflowTypeCode'), sb);
+  vm.runInContext(grab(intranet, 'reviewOrderIsGuideInflow'), sb);
   vm.runInContext(grab(intranet, 'reviewOrderFormatOption'), sb);
   vm.runInContext(grab(intranet, 'reviewOrderOptionsPayload'), sb);
   sb._p = [{ name: '우레온', url: 'https://x', basePrice: 22000, baseCount: 5, options: [] }];
@@ -307,7 +332,11 @@ else {
 {
   const sb = { console };
   sb.window = sb; vm.createContext(sb);
-  vm.runInContext(grab(wodSrc, '_woOptionRows'), sb);
+  // ⚠ _woOptionRows 가 새 전역을 부르면 이 목록도 함께 늘린다(스텁을 두면 규칙이 거기서만 딴판이 된다).
+  //   134: 선택지 전용 유입가이드 정규화(_woUnitGuide) + 그 평문→HTML 변환 의존 3종.
+  vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), sb);
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woOptionRows']
+    .forEach(n => vm.runInContext(grab(wodSrc, n), sb));
   sb._o = { product_options_json: JSON.stringify([{ name: '힙스', base: { pay: 0 }, options: [
     { label: '콰이어트', pay: 31400, count: 20 }, { label: '어나더', pay: 31400, count: 25 }] }]) };
   const rows = vm.runInContext('_woOptionRows(_o)', sb);
