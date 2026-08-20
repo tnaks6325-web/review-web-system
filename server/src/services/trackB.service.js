@@ -2455,6 +2455,9 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       inflowKeyword: (wo && wo.inflowKeyword) || null,
       multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
       cashReceipt,
+      /* 1건당 상품 결제금액(사용자 확정 2026-08-20) — 진행 현황의 '결제금액'은 활성 주문 행의
+         **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
+      payAmount: num(wo && wo.payAmount),
       reviewFee: feeInfo.fee, feeSource,
       depositName: (meta.depositName || (memoCamp && memoCamp.transferMemo) || '') || null,
       reviewType: resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType }),
@@ -2464,6 +2467,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       })(),
       campaignId: c ? c.id : null,
       campaignCount: camps.length,
+      workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
     };
   } catch (e) {
     logger.warn(`[trackB] tabConditionSummary 실패(작업 조건 축약 표시): ${e.message}`);
