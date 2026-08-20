@@ -44,6 +44,13 @@ function grab(src, name) {
   }
   throw new Error('중괄호 불균형: ' + name);
 }
+/** 한 줄짜리 const 선언(화살표 함수·상수표)을 그대로 꺼낸다 */
+function grabConst(src, name) {
+  const re = new RegExp('^const ' + name + '\\b.*$', 'm');
+  const m = re.exec(src);
+  assert(m, 'const 없음: ' + name);
+  return m[0];
+}
 
 /* ══════════════ 가짜 DOM (querySelector 후손 선택자 지원) ══════════════ */
 function makeDom() {
@@ -141,11 +148,23 @@ function makeTable(opts) {
     _renderPreview: () => {},
     syncRecruitProductMainUrl: () => {},
     showToast: () => {},
+    escHtml: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    // 선택지별 유입가이드(134) 위젯의 화면 조작부는 스텁 — 이 가드가 보는 것은 "모드와 저장 페이로드"다
+    _igBind: () => {},
+    _igRender: () => {},
+    _readOptionReviewMix: () => [],
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
+  // ⚠ 표 함수가 새 전역을 부르면 이 목록도 함께 늘린다(스텁을 두면 규칙이 거기서만 딴판이 된다)
+  ['_IG_MAX', '_IG_FIELDS', '_IG_TA', '_IG_URL_RE', '_igTok', '_igOk', '_igUrls', '_igImgTags', '_UG_KEY_RE']
+    .forEach(c => vm.runInContext(grabConst(recruitSrc, c), sandbox));
+  vm.runInContext('window._igState = { inflow: [], review: [], notes: [] };', sandbox);
+  vm.runInContext('let _ugSeq = 0;', sandbox);
   [
-    '_prodMode', '_applyProdModeUi', '_setProdModeNote', 'setProdMode', '_convertProdRows',
+    '_htmlToPlainPreview', '_igSetList', '_igSplitInflow', '_rfHttpUrl', '_rfGroupUnit', '_rfRowProductName',
+    '_ugNewKey', '_ugRegister', '_ugDrop', '_ugDropAll', '_ugDropBox', '_ugBuild', '_ugLoad', '_ugCompose', '_ugMark', '_ugAttachAll',
+    '_prodMode', '_applyProdModeUi', '_setProdModeNote', '_renderProdModeHelp', 'setProdMode', '_convertProdRows',
     '_renderProdTable', '_buildProdGroup', '_syncGroupTotals', 'addOptRow', '_buildOptRowEl',
     '_lastOptProductName', '_markDupProductNames', 'renderOptRows', 'renderOptRowsWithProduct',
     'readOptRows', '_readProdRows', '_readProdRowsRaw', '_syncPreviewFromOptRows', '_optSummary',
