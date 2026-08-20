@@ -70,6 +70,9 @@
     .obadge.soldout{background:#F3F4F6;color:var(--t3)}
     .obadge.hot{background:var(--warn-light);color:#92400E}
     .obadge.cur{background:var(--ok-light);color:#0ca678}
+    /* 복합 작업(134) — 상품이 둘 이상이면 선택지를 상품별로 묶어 보여준다 */
+    .optgrp{font-size:.74rem;font-weight:800;color:var(--t2);margin:12px 0 -2px}
+    .optgrp:first-child{margin-top:2px}
     .optnote{font-size:.72rem;color:var(--t3);margin:8px 2px 2px;line-height:1.5}
     .myopt{display:flex;align-items:center;gap:10px}
     .myopt .oi{flex:1}
@@ -621,6 +624,35 @@ function _optBadgeHtml(o, isCur){
   if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
   return '';
 }
+/**
+ * ★★ 복합 작업(134) — 선택지를 **상품별로 묶어** 그린다.
+ *
+ * 한 작업에 상품A(옵션 2개) + 상품B(옵션 없음)가 있으면 선택지는 3가지인데,
+ * 옵션명만 늘어놓으면 어느 상품의 옵션인지 알 수 없다.
+ * ★ 묶음 머리는 **필요할 때만** 그린다:
+ *   - 옵션 없는 상품 = 그 줄 이름이 곧 상품명이라 머리를 또 달면 같은 말이 두 번이다.
+ *   - 상품명이 아예 없는 옛 공고는 머리 없이 종전 화면 그대로(무회귀).
+ * ★ 순서는 서버가 준 그대로 유지한다(정렬을 새로 하면 관리자가 정한 배치가 깨진다).
+ * @returns {Array<{header?:string, opt?:object}>}
+ */
+function _optListItems(opts){
+  const items = [];
+  let curName = null;
+  (opts || []).forEach(o => {
+    const name = String(o.productName || '').trim();
+    const isProdUnit = o.unitKind === 'product';
+    if (name && !isProdUnit && name !== curName) { items.push({ header: name }); curName = name; }
+    if (!name || isProdUnit) curName = null;   // 머리 없는 줄 뒤에는 묶음이 끊긴다
+    items.push({ opt: o });
+  });
+  return items;
+}
+function _optGroupEl(text){
+  const d = document.createElement('div');
+  d.className = 'optgrp';
+  d.textContent = text;          // 상품명은 관리자 입력값 — textContent 로만 넣는다
+  return d;
+}
 // 관리자 미리보기는 실제 공고의 게시·시간 상태를 무시하고, 마감되지 않은 옵션을 가상으로 선택한다.
 // 실제 리뷰어 화면은 서버가 계산한 selectable 값을 그대로 사용한다.
 function _pvOptionSelectable(o){ return !!(o && o.status === 'open'); }
@@ -631,7 +663,9 @@ function renderPreOptions(){
   if(!opts.length){ box.style.display = 'none'; return; }
   box.style.display = '';
   const wrap = $('preOptions'); wrap.innerHTML = '';
-  opts.forEach(o => {
+  _optListItems(opts).forEach(it => {
+    if (it.header) { wrap.appendChild(_optGroupEl(it.header)); return; }
+    const o = it.opt;
     const dim = o.status !== 'open';   // 마감/오늘마감만 흐리게, 열린 옵션은 정상 표시(읽기전용)
     const div = document.createElement('div');
     div.className = 'optrow' + (dim ? ' dis' : '');
@@ -643,7 +677,9 @@ function renderPreOptions(){
 // 옵션 선택/변경 시트 렌더
 function _renderOptSheetList(opts, curKey){
   const list = $('optSheetList'); list.innerHTML = ''; _optSheetSel = null;
-  (opts || []).forEach(o => {
+  _optListItems(opts).forEach(it => {
+    if (it.header) { list.appendChild(_optGroupEl(it.header)); return; }
+    const o = it.opt;
     const isCur = curKey && o.optKey === curKey;
     const pickable = (PREVIEW ? _pvOptionSelectable(o) : o.selectable) && !isCur;
     const div = document.createElement('div');
@@ -1195,7 +1231,12 @@ function renderJoinedOption(j){
   const so = j && j.selectedOption;
   if(!(j && j.options && j.options.length && so)){ box.style.display = 'none'; return; }
   box.style.display = '';
-  const sub = so.payAmount ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '';
+  // ★ 134 — 복합 작업은 상품이 둘 이상이라 옵션명만으론 어느 상품인지 못 가린다.
+  //   옵션 없는 상품(unitKind='product')은 줄 이름이 곧 상품명이라 상품 표기를 겹쳐 적지 않는다.
+  const sub = [
+    (so.unitKind !== 'product' && so.productName) ? ('상품 ' + so.productName) : '',
+    so.payAmount ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '',
+  ].filter(Boolean).join(' · ');
   $('joinedOption').innerHTML =
     '<div class="oi"><div class="nm">' + _escAttr(so.optKey) + '</div>' +
     (sub ? '<div class="sub">' + _escAttr(sub) + '</div>' : '') + '</div>' +
