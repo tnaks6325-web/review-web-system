@@ -240,6 +240,19 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
     const aePart = wdCall.slice(wdCall.indexOf(':', wdCall.indexOf('isAdmin ?')));
     ok('★ AE 목록에는 넣지 않는다(서버 게이트와 1:1 — 죽은 버튼 금지)', !/'capturelink'/.test(aePart));
   }
+  {
+    /* ★★★ 일반 규칙 — **등록만 하고 마운트를 빠뜨리는 실수**를 이 자리에서 끝낸다.
+       `PANELS` 에 있어도 어느 호스트의 `mount({panels:[...]})` 에도 없으면 사람이 열 방법이 없다
+       (실제로 capturelink 가 그랬고, [✅ 리뷰타입 정리]는 그 상태로 오래 방치돼 있었다).
+       ★ 어느 호스트에 두는지는 기능마다 다르므로 **최소 한 곳**만 요구한다. */
+    const hosts = ADM + '\n' + WD + '\n' + front('admin-siand.html');
+    const keys = (/var PANELS = \{([^}]*)\}/.exec(AS) || [, ''])[1]
+      .split(',').map(x => x.split(':')[0].trim()).filter(Boolean);
+    ok('PANELS 키를 읽었다(3개 이상)', keys.length >= 3, keys.join('|'));
+    const orphan = keys.filter(k => !new RegExp("'" + k + "'").test(hosts));
+    ok('★★★ 등록된 설정 패널은 어느 호스트든 최소 한 곳에서 마운트된다(도달 불가 패널 0)',
+      orphan.length === 0, '마운트 안 된 패널: ' + orphan.join(', '));
+  }
   ok('실행 핸들러가 전역에 노출된다(onclick 에서 부른다)', /window\.captureLinkRun = captureLinkRun/.test(AS));
   {
     const fn = AS.slice(AS.indexOf('async function captureLinkRun'), AS.indexOf('function loadCaptureLinkBackfill'));
