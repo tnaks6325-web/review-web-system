@@ -4,7 +4,7 @@ const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
-const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
+const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
 const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middleware');
@@ -1321,7 +1321,7 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 //   2. tab_configs.capture_folder_url (DB)
 //   3. 자동 생성 (ensureCaptureFolderPath)
 // ═══════════════════════════════════════════════════════════
-router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
+router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
   try {
     const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId, savedCaptureFolderUrl } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });

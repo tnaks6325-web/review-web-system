@@ -73,7 +73,8 @@ t('8. 업로드 진행/성공/실패가 추적된다(과거엔 실패해도 화�
 });
 
 t('9. 업로드 재시도가 유지된다(1회 실패로 미링크 되지 않게)', () => {
-  assert.ok(/for \(let attempt = 0; attempt < 3/.test(SA), '재시도 루프 유실');
+  // ⚠ 재시도 횟수는 3 → 4 로 늘었다(429 대기 갈래 추가). 검사 의미는 불변 = "재시도 루프가 있다".
+  assert.ok(/for \(let attempt = 0; attempt < [34];/.test(SA), '재시도 루프 유실');
   assert.ok(/orderSubmissionId/.test(SA), '주문 연결 키 유실 → 링크 실패');
 });
 

@@ -184,8 +184,12 @@ t('21. 감사 엔드포인트는 admin/master 전용 · 읽기 전용(DB/Drive �
 
 t('22. 구매캡쳐 업로드가 재시도 + 실패 시 리뷰어에게 고지(오탐 근본원인)', () => {
   const sa = fs.readFileSync(path.join(__dirname, '../../frontend/js/search-app.js'), 'utf8');
-  const i = sa.indexOf('uploadOrderImage');
-  const blk = sa.slice(i - 600, i + 2200);
+  /* ⚠ 고정 길이 슬라이스로 자르면 그 블록이 자라는 순간 조용히 빨개진다(레포 규율).
+     업로드 블록을 **경계 문자열**로 잘라 본다 — 검사 의미는 불변. */
+  const i = sa.indexOf('const _capSlot = {');
+  assert.ok(i > 0, '업로드 블록을 찾지 못함');
+  const blk = sa.slice(i, sa.indexOf('_renderCaptureChecklist();', i));
+  assert.ok(/uploadOrderImage/.test(blk), '업로드 액션 유실');
   assert.ok(/attempt < 3|attempt \+\+|for \(let attempt/.test(blk), '업로드 재시도 없음 — 1회 실패로 미첨부 오탐');
   assert.ok(/showToast\(/.test(blk), '최종 실패를 리뷰어에게 안 알리면 첨부했다고 믿고 창을 닫는다');
   assert.ok(/orderSubmissionId/.test(blk), '주문 연결 키 누락 → 폴백 매칭에만 의존');
