@@ -489,7 +489,12 @@ function renderPre(){
   const c = _camp;
   $('hdTitle').textContent = c.title || '캠페인';
   CampCards.startTicker(loadCampaign);   // 카드 CSS 주입 + preopen 카운트다운 틱(S2)
-  $('preCard').innerHTML = CampCards.cardHtml({ ...c });
+  // ★ 미리보기 '모집중 가정' — 카드도 열린 모습으로 그린다(리본 '모집 종료'·회색 오버레이 제거).
+  //   서버 데이터(_camp)는 건드리지 않고 **그리는 값만** 덮는다(토글을 끄면 즉시 실제 상태로 복귀).
+  const _cardData = _pvOpenSim()
+    ? { ...c, state:'open', stateReason:'', status:'active' }
+    : { ...c };
+  $('preCard').innerHTML = CampCards.cardHtml(_cardData);
   // 상세 페이지 안의 카드는 클릭(자기 자신 이동) 비활성
   const pc = $('preCard').querySelector('.pcard');
   if(pc){ pc.onclick = null; pc.style.cursor='default';
@@ -633,6 +638,8 @@ function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '
 let _optSheetMode = 'join';   // 'join' | 'change'
 let _optSheetSel  = null;     // 시트에서 선택된 optKey
 function _optRemainText(o){
+  // ★ 관리자 미리보기 '모집중 가정' — 마감 상태를 잔여 문구로 드러내지 않는다(진행 화면 확인이 목적)
+  if(_pvOpenSim() && o.status !== 'open') return '모집중 가정(미리보기)';
   if(o.status === 'soldout' || o.status === 'closed') return '마감';
   if(o.status === 'today_done') return '오늘 마감 (내일 가능)';
   const parts = [];
@@ -647,14 +654,20 @@ function _optSubText(o){
 }
 function _optBadgeHtml(o, isCur){
   if(isCur) return '<span class="obadge cur">현재</span>';
+  if(_pvOpenSim()) return '';   // ★ 모집중 가정: 마감 배지를 붙이지 않는다
   if(o.status === 'soldout' || o.status === 'closed') return '<span class="obadge soldout">마감</span>';
   if(o.status === 'today_done') return '<span class="obadge soldout">오늘마감</span>';
   if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
   return '';
 }
-// 관리자 미리보기는 실제 공고의 게시·시간 상태를 무시하고, 마감되지 않은 옵션을 가상으로 선택한다.
-// 실제 리뷰어 화면은 서버가 계산한 selectable 값을 그대로 사용한다.
-function _pvOptionSelectable(o){ return !!(o && o.status === 'open'); }
+/** ★ 미리보기 '모집중 가정' 판정 단일 출처 — 카드·옵션·참여 버튼이 같은 값을 본다.
+ *  (판정이 갈리면 "카드는 열렸는데 옵션은 전부 마감"처럼 반쪽 시뮬레이션이 된다) */
+function _pvOpenSim(){ return PREVIEW && _pvForceOpen; }
+// 관리자 미리보기는 실제 공고의 게시·시간 상태를 무시하고 옵션을 가상으로 선택한다.
+// ★ '모집중 가정'에서는 마감된 옵션도 선택 가능 — 마감 공고의 진행 화면을 확인하는 것이 이 모드의 목적이다.
+//   ('실제 상태' 토글로 언제든 서버 판정 그대로 볼 수 있다.)
+// 실제 리뷰어 화면은 서버가 계산한 selectable 값을 그대로 사용한다(PREVIEW=false면 이 함수 미도달).
+function _pvOptionSelectable(o){ return !!o && (_pvOpenSim() || o.status === 'open'); }
 // 참여 전: 옵션명+잔여 읽기전용 표시
 function renderPreOptions(){
   const opts = (_camp && _camp.options) || [];
@@ -663,7 +676,7 @@ function renderPreOptions(){
   box.style.display = '';
   const wrap = $('preOptions'); wrap.innerHTML = '';
   opts.forEach(o => {
-    const dim = o.status !== 'open';   // 마감/오늘마감만 흐리게, 열린 옵션은 정상 표시(읽기전용)
+    const dim = !_pvOpenSim() && o.status !== 'open';   // 마감/오늘마감만 흐리게, 열린 옵션은 정상 표시(읽기전용)
     const div = document.createElement('div');
     div.className = 'optrow' + (dim ? ' dis' : '');
     div.style.cursor = 'default';
@@ -1230,7 +1243,8 @@ function _renderJoinedView(j, h){
       //   ★ 미리보기는 '선택 가능한' 옵션일 때만 — 마감 옵션을 참여 옵션처럼 고정 표시하면 실제로
       //     리뷰어가 도달할 수 없는 화면을 보여주게 된다.
       const _selOpt = j.selectedOption;
-      const _pvOptBlocked = PREVIEW && !(_selOpt && _selOpt.selectable);
+      //     ★ '모집중 가정'에서는 마감 옵션도 그대로 넘긴다 — 그것이 이 모드의 목적이다.
+      const _pvOptBlocked = PREVIEW && !_pvOpenSim() && !(_selOpt && _selOpt.selectable);
       if(!_pvOptBlocked){
         if(j.application && j.application.optionKey) qp.set('optionKey', j.application.optionKey);
       }
