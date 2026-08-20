@@ -324,7 +324,7 @@ function _woUnitGuideBlock(o) {
         units.push({ label: (name ? name + " · " : "") + (lab || "(옵션명 없음)"), g: _woUnitGuide(op) });
       }
     } else if (name) {
-      units.push({ label: name, g: _woUnitGuide(prod.base || prod) });
+      units.push({ label: name, g: _woUnitGuide(_woProductUnitSrc(prod)) });
     }
   }
   const live = units.filter(u => u.g.html || u.g.images.length);
@@ -581,6 +581,20 @@ const _WO_UNIT_GUIDE_IMG_MAX = 4;
  *   그대로 나가는 경로를 만들지 않는다(서버가 최종 정화하지만 여기서도 좁힌다).
  * @returns {{html:string, images:string[]}}  값이 없으면 {html:'', images:[]} = 공통 가이드로 접힘
  */
+/**
+ * 옵션 없는 상품(= 그 상품 자체가 선택지 하나)의 유입가이드 원본을 고른다.
+ * ★★ 인트라넷 계약(PRD §04-1)은 상품 가이드를 **상품 최상위**(`product.guide`)에 싣는다.
+ *   `prod.base` 는 {pay,count,daily} 라 항상 존재하므로 `prod.base || prod` 로 읽으면
+ *   **상품 단위 가이드가 통째로 유실**된다(테섭 실측: 선택지 3개 중 2개만 가이드가 붙었다).
+ *   옛 초안이 base 에 실어 보낸 경우도 있어 그때만 base 를 본다.
+ */
+function _woProductUnitSrc(prod) {
+  const p = prod || {};
+  const base = p.base;
+  if (base && typeof base === "object" && (base.guide || base.inflow_guide || base.guide_images)) return base;
+  return p;
+}
+
 function _woUnitGuide(src) {
   const s = src || {};
   // ★ 계약(PRD §04-1)은 `guide: { text, images }` 객체다. 문자열로 온 경우(옛 초안·수기 편집)도
@@ -650,7 +664,7 @@ function _woOptionRows(o) {
         const isNone = !lab || /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(lab);
         // ★ 134 — 옵션에 붙은 유입가이드는 그 옵션이 곧 선택지이므로 그대로 따라간다.
         //   "옵션 없음"류로 떨어진 줄은 그 상품 자체가 선택지라 상품(base) 가이드를 쓴다.
-        const ug = _woUnitGuide(isNone ? (prod.base || prod) : op);
+        const ug = _woUnitGuide(isNone ? _woProductUnitSrc(prod) : op);
         rows.push({
           productName: name,
           // 옵션 없음으로 접힌 줄은 **상품 단위**(그 상품 자체가 선택지 하나)
@@ -672,10 +686,13 @@ function _woOptionRows(o) {
     } else if (name) {
       // ★ 옵션이 없는 상품 — 상품명을 옵션명으로 승격시키지 않는다(상품명 칸으로만 간다).
       //   ★★ 134: 그 상품 자체가 리뷰어의 선택지 하나다(unitKind='product') — 자기 링크·가이드를 갖는다.
-      const ug = _woUnitGuide(prod.base || prod);
+      const ug = _woUnitGuide(_woProductUnitSrc(prod));
       rows.push({
         productName: name, optKey: "", unitKind: "product",
-        payAmount: basePay, optionUrl: prodUrl, recruitTotal: 0, dailyLimit: baseDaily,
+        payAmount: basePay, optionUrl: prodUrl,
+        // ★ 옵션 줄이 `op.count` 를 그대로 쓰듯, 옵션 없는 상품도 오더가 정한 인원(base.count)을 따른다.
+        //   0 으로 두면 그 선택지만 "무제한"이 되어 복합 작업의 정원 합계가 통째로 무너진다(테섭 실측).
+        recruitTotal: Math.max(0, Number(prod.base && prod.base.count) || 0), dailyLimit: baseDaily,
         inflowGuideHtml: ug.html, inflowGuideImages: ug.images,
       });
     }
