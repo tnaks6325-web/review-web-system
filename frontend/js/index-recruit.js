@@ -1475,10 +1475,123 @@ function _igLoadInflowHtml(rawHtml) {
   return textHtml;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   🧭 선택지별 유입가이드 (migration 134) — 위 위젯을 "선택 단위 키"로 일반화
+
+   복합 작업(상품A 옵션2 + 상품B 옵션없음)에서 리뷰어의 참여 선택지는 3가지이고,
+   가이드유입이면 그 3가지가 **각각 다른 유입가이드**를 봐야 한다.
+   ★★ 위젯은 `field` 문자열 하나로 DOM(rf_ig_<f>·rf_igm_<f>·rf_igf_<f>·본문 textarea)과
+      상태(window._igState[f])를 찾으므로, 동적 키를 `_IG_FIELDS`/`_IG_TA` 에 등록하기만 하면
+      **같은 코드가 그대로 돈다**(사본 0 — 한쪽만 장수·용량 제한이 풀리는 드리프트가 없다).
+   ★ 키(u0,u1…)는 그 행이 살아 있는 동안만 유효 — 표를 다시 그리면 새로 발급하고 옛 키는 버린다.
+   ★ 비우면 저장값도 빈 문자열 = 공고 공통 유입가이드로 접힌다(서버가 그렇게 읽는다).
+   ═══════════════════════════════════════════════════════════════════════ */
+const _UG_KEY_RE = /^u\d+$/;
+let _ugSeq = 0;
+function _ugNewKey() { return "u" + (_ugSeq++); }
+function _ugRegister(key, label) {
+  _IG_FIELDS[key] = label || "선택지 유입가이드";
+  _IG_TA[key] = "rf_wd_" + key;
+  if (!window._igState[key]) window._igState[key] = [];
+}
+function _ugDrop(key) {
+  if (!key || !_UG_KEY_RE.test(key)) return;     // 고정 3칸(inflow/review/notes)은 절대 안 지운다
+  delete _IG_FIELDS[key]; delete _IG_TA[key]; delete window._igState[key];
+}
+/** 표를 통째로 다시 그리기 전에 — 사라진 행의 키가 `_igBusy`·`_igRenderAll` 에 남지 않게 */
+function _ugDropAll() { Object.keys(_IG_FIELDS).forEach(k => { if (_UG_KEY_RE.test(k)) _ugDrop(k); }); }
+function _ugDropBox(box) {
+  if (!box) return;
+  box.querySelectorAll(".rf-opt-row").forEach(r => _ugDrop(r.dataset.ig));
+}
+
+/** 선택지 가이드 편집 블록(행 아래 접힘) — 파일 입력은 onclick 문자열 보간 없이 배선 */
+function _ugBuild(key) {
+  const box = document.createElement("div");
+  box.className = "rf-ug";
+  box.dataset.ug = key;
+  box.innerHTML =
+    '<div class="rf-ug-h">🧭 이 선택지 전용 유입가이드' +
+      '<span class="rf-ug-note">비우면 공고 공통 유입가이드가 그대로 보입니다</span></div>' +
+    '<div class="work-compose ig-wrap">' +
+      '<textarea id="rf_wd_' + key + '" class="rform-input" rows="3" ' +
+        'placeholder="이 선택지를 고른 리뷰어에게만 보일 유입 경로 안내"></textarea>' +
+      '<div class="work-image-strip ig-strip" id="rf_ig_' + key + '" tabindex="0" data-igf="' + key + '"></div>' +
+      '<input type="file" id="rf_igf_' + key + '" accept="image/*" multiple class="ig-file">' +
+    '</div>' +
+    '<div class="ig-msg" id="rf_igm_' + key + '"></div>';
+  const f = box.querySelector("#rf_igf_" + key);
+  if (f) f.addEventListener("change", () => igPickFiles(key, f));
+  return box;
+}
+
+/** 저장값(HTML+배열) → 편집 상태. 원본 HTML 은 그대로 보관했다가 미수정이면 되돌려준다. */
+function _ugLoad(row, key, rawHtml, images) {
+  const raw = String(rawHtml || "");
+  const { textHtml, urls } = _igSplitInflow(raw);
+  // 배열(inflow_guide_images)과 본문 <img> 를 합친다 — 중복 토큰은 `_igSetList` 가 접는다
+  _igSetList(key, urls.concat(Array.isArray(images) ? images : []));
+  const plain = _htmlToPlainPreview(textHtml);
+  const ta = document.getElementById(_IG_TA[key]);
+  if (ta) ta.value = plain;
+  row.dataset.ugRaw = raw;
+  row.dataset.ugPlain = plain;
+  row.dataset.ugTok = _igOk(key).map(x => x.tok).join(",");
+}
+
+/** 편집 상태 → 저장값. 글도 사진도 그대로면 **원본 HTML 바이트 그대로**(단락·링크 보존). */
+function _ugCompose(row, key) {
+  if (!key || !window._igState[key]) return { html: "", images: [] };
+  const ta = document.getElementById(_IG_TA[key]);
+  const plain = String(ta ? ta.value : "").trim();
+  const toks = _igOk(key).map(x => x.tok).join(",");
+  const images = _igUrls(key);
+  const raw = String(row.dataset.ugRaw || "");
+  if (raw && plain === String(row.dataset.ugPlain || "").trim() && toks === String(row.dataset.ugTok || "")) {
+    return { html: raw, images };
+  }
+  if (!plain && !toks) return { html: "", images: [] };
+  const escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return { html: escT(plain).replace(/\n/g, "<br>") + _igImgTags(key), images };
+}
+
+/** 행의 🧭 버튼에 "가이드 있음" 표시 — 접혀 있어도 설정 상태가 보이게 */
+function _ugMark(row) {
+  const key = row && row.dataset.ig;
+  if (!key) return;
+  const ta = document.getElementById(_IG_TA[key]);
+  const has = !!(String(ta ? ta.value : "").trim() || _igOk(key).length);
+  row.classList.toggle("ug-has", has);
+  const btn = row.querySelector(".rf-ug-btn");
+  if (btn) btn.title = has ? "이 선택지 전용 유입가이드가 설정되어 있습니다" : "이 선택지 전용 유입가이드";
+}
+
+/**
+ * ★ DOM 에 붙은 **뒤에** 위젯을 살린다 — `_igBind`/`_igRender`/`_ugLoad` 는 전부
+ *   `document.getElementById` 로 요소를 찾으므로 만들 때(detached) 부르면 조용히 no-op 이 된다.
+ *   `_igBind` 는 멱등(strip.dataset.igBound)이라 여러 번 불러도 안전.
+ */
+function _ugAttachAll() {
+  document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
+    const key = r.dataset.ig;
+    if (!key) return;
+    if (r._ugPending) { _ugLoad(r, key, r._ugPending.html, r._ugPending.images); r._ugPending = null; }
+    _igBind(key);
+    _igRender(key);
+    const ta = document.getElementById(_IG_TA[key]);
+    if (ta && ta.dataset.ugBound !== "1") {
+      ta.dataset.ugBound = "1";
+      ta.addEventListener("input", () => { _ugMark(r); if (typeof _onPreviewInput === "function") _onPreviewInput(); });
+    }
+    _ugMark(r);
+  });
+}
+
 /** 세 칸 초기화(모달 열 때)
  *  ★ 배선도 여기서 한 번 더 시도한다(멱등) — 리뷰웹시스템[3버전]은 모달을 **뷰를 열 때** 마운트하므로
  *    스크립트 로드 시점 배선만 두면 그 화면에서는 스트립이 통째로 죽는다. */
 function _igResetAll() {
+  if (typeof _ugDropAll === "function") _ugDropAll();   // 선택지별 가이드 키(u0…)도 함께 버린다
   window._igState = { inflow: [], review: [], notes: [] };
   window._wdInflowTextHtml = "";
   window._wdInflowOrigTokens = "";
@@ -1922,34 +2035,53 @@ function _convertProdRows(rows, m) {
 function _renderProdTable(rows) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
+  _ugDropAll();                 // 표를 통째로 갈아치우므로 옛 선택지 가이드 키를 먼저 버린다
   wrap.innerHTML = "";
   const list = rows || [];
   if (_prodMode() === "opt") {
     const groups = [];
     list.forEach(r => {
+      // ★ 상품 단위(옵션 없는 상품)는 **묶지 않는다** — 그 자체가 하나의 선택지다
+      const unit = (r.unitKind === "product" || r.unit_kind === "product") ? "product" : "option";
       const key = r.productName || "";
-      const g = groups.length && groups[groups.length - 1].name === key ? groups[groups.length - 1] : null;
-      if (g) g.rows.push(r); else groups.push({ name: key, rows: [r] });
+      const last = groups.length ? groups[groups.length - 1] : null;
+      const g = (last && unit === "option" && last.unit === "option" && last.name === key) ? last : null;
+      if (g) g.rows.push(r); else groups.push({ name: key, unit, rows: [r] });
     });
-    if (!groups.length) groups.push({ name: "", rows: [{}] });
+    if (!groups.length) groups.push({ name: "", unit: "option", rows: [{}] });
     groups.forEach(g => wrap.appendChild(_buildProdGroup(g)));
   } else {
     (list.length ? list : []).forEach(r => wrap.appendChild(_buildOptRowEl(r)));
   }
+  _ugAttachAll();
   _markDupProductNames();
   _optSummary();
   _syncPreviewFromOptRows();
   _syncGroupTotals();
   _syncQuotaLockUi();
 }
-/** 상품 그룹(옵션 있는 작업) — 머리(상품명·총인원 자동합계) + 옵션 행 + [＋ 옵션 추가] */
+/**
+ * 상품 그룹 — 머리(상품명 · [옵션 있음|옵션 없음] · 총인원 자동합계) + 행 + [＋ 옵션 추가]
+ * ★★ 134 복합 작업: 한 작업 안에 **옵션 있는 상품과 옵션 없는 상품이 함께** 있을 수 있다.
+ *    그룹의 `data-unit` 이 그 상품의 선택 단위를 정한다 —
+ *      'option'  = 옵션 하나하나가 리뷰어의 선택지(종전 그대로)
+ *      'product' = 그 상품 자체가 선택지 하나(옵션명 칸이 아예 없다)
+ *    그래서 옵션 없는 상품도 자기 유입가이드·정원·금액을 가질 수 있다.
+ */
 function _buildProdGroup(g) {
   const box = document.createElement("div");
   box.className = "rf-gp";
+  const unit0 = (g && g.unit === "product") ? "product" : "option";
+  box.dataset.unit = unit0;
+  box.classList.toggle("rf-gp-noopt", unit0 === "product");
   const head = document.createElement("div");
   head.className = "rf-gp-head";
   head.innerHTML =
     '<input class="rform-input rf-gp-name" placeholder="상품명">' +
+    '<span class="rf-gp-unit" role="group" aria-label="이 상품의 옵션 유무">' +
+      '<button type="button" data-unit="option">옵션 있음</button>' +
+      '<button type="button" data-unit="product">옵션 없음</button>' +
+    '</span>' +
     '<span class="rf-gp-total" title="옵션인원 합계(자동)">–</span>' +
     '<button type="button" class="btn-icon-sm rf-gp-del" title="이 상품(옵션 전체) 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
   const nameEl = head.querySelector(".rf-gp-name");
@@ -1960,6 +2092,7 @@ function _buildProdGroup(g) {
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   });
   head.querySelector(".rf-gp-del").onclick = () => {
+    _ugDropBox(box);
     box.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
   };
   box.appendChild(head);
@@ -1971,9 +2104,38 @@ function _buildProdGroup(g) {
   add.type = "button"; add.className = "rf-gp-add"; add.textContent = "＋ 옵션 추가";
   add.onclick = () => {
     body.appendChild(_buildOptRowEl({ productName: nameEl.value }));
+    _ugAttachAll();
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
   };
   box.appendChild(add);
+
+  /** 옵션 유무 전환(사람이 누름) — 옵션을 없애는 방향일 때만 확인창(조용한 값 소실 금지) */
+  const paintUnit = () => {
+    const u = box.dataset.unit === "product" ? "product" : "option";
+    box.classList.toggle("rf-gp-noopt", u === "product");
+    head.querySelectorAll(".rf-gp-unit button").forEach(b => b.classList.toggle("on", b.dataset.unit === u));
+  };
+  head.querySelectorAll(".rf-gp-unit button").forEach(btn => {
+    btn.onclick = () => {
+      const u = btn.dataset.unit === "product" ? "product" : "option";
+      if (box.dataset.unit === u) return;
+      if (u === "product") {
+        const rows = Array.from(box.querySelectorAll(".rf-opt-row"));
+        const live = rows.filter(r => String(r.querySelector(".rf-opt-name").value || "").trim());
+        if (live.length > 1 && !confirm(
+          "이 상품의 옵션 " + live.length + "종을 하나로 합칩니다(옵션 없는 상품 = 선택지 1개).\n" +
+          "첫 줄만 남고 나머지 줄의 금액·정원·전용 유입가이드는 사라집니다.\n\n계속할까요?")) return;
+        // 첫 줄만 남긴다 — 남길 줄이 어느 것인지 사람이 보고 있는 순서 그대로
+        rows.slice(1).forEach(r => { _ugDrop(r.dataset.ig); (r.closest(".rf-unit") || r).remove(); });
+        const first = box.querySelector(".rf-opt-row");
+        if (first) first.querySelector(".rf-opt-name").value = "";   // 숨은 칸 잔여값이 옵션으로 새지 않게
+      }
+      box.dataset.unit = u;
+      paintUnit();
+      _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
+    };
+  });
+  paintUnit();
   return box;
 }
 /** 상품 그룹 머리의 총인원(옵션인원 합계) 갱신 — 하나라도 0(무제한)이면 '무제한' */
@@ -1991,10 +2153,15 @@ function addOptRow(data) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   if (_prodMode() === "opt") {
-    wrap.appendChild(_buildProdGroup({ name: (data && (data.productName ?? data.product_name)) || "", rows: [data || {}] }));
+    wrap.appendChild(_buildProdGroup({
+      name: (data && (data.productName ?? data.product_name)) || "",
+      unit: (data && (data.unitKind ?? data.unit_kind)) === "product" ? "product" : "option",
+      rows: [data || {}],
+    }));
   } else {
     wrap.appendChild(_buildOptRowEl(data));
   }
+  _ugAttachAll();
   _markDupProductNames();
   _optSummary();
   _syncPreviewFromOptRows();
@@ -2068,10 +2235,17 @@ function _syncRecruitTotalCells() {
   });
 }
 
-/** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
+
+/**
+ * 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다.
+ * ★ 반환값은 **`.rf-unit` 껍데기**(행 + 접힌 선택지 가이드 블록) — 기존 셀렉터(`.rf-opt-row`)는
+ *   전부 후손 조회라 그대로 동작한다. 삭제만 껍데기를 지운다(가이드가 고아로 남지 않게).
+ */
 function _buildOptRowEl(data) {
   const d = data || {};
   const status = (d.status === "closed") ? "closed" : "active";   // ★ 마감 상태 보존(리뷰 #1 — 저장 라운드트립에서 재활성화 방지)
+  const unitEl = document.createElement("div");
+  unitEl.className = "rf-unit";
   const row = document.createElement("div");
   row.className = "rf-opt-row";
   row.dataset.status = status;
@@ -2087,12 +2261,18 @@ function _buildOptRowEl(data) {
     '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액">' +
     '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="총">' +
     '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="일">' +
-    lastBtn;
+    '<span class="rf-opt-acts">' +
+      '<button type="button" class="btn-icon-sm rf-ug-btn" title="이 선택지 전용 유입가이드">🧭</button>' +
+      lastBtn +
+    '</span>';
   const rt = d.recruitTotal ?? d.recruit_total, dl = d.dailyLimit ?? d.daily_limit, pay = d.payAmount ?? d.pay_amount;
   // 상품명은 옵션 테이블에 없던 값 — 넘겨받지 않았으면 바로 위 행에서 따라온다(반복 입력 제거)
   row.querySelector(".rf-opt-prod").value = d.productName ?? d.product_name ?? _lastOptProductName();
   row.querySelector(".rf-opt-url").value = d.optionUrl ?? d.option_url ?? d.url ?? "";
-  row.querySelector(".rf-opt-name").value = d.optKey ?? d.opt_key ?? "";
+  // ★ 상품 단위(옵션 없는 상품)는 키가 곧 상품명이므로 옵션명 칸을 비워 둔다
+  //   (숨은 칸에 남은 값이 "상품명 - 옵션명" 원문·옵션 원장으로 새어 나가지 않게)
+  row.querySelector(".rf-opt-name").value =
+    ((d.unitKind ?? d.unit_kind) === "product") ? "" : (d.optKey ?? d.opt_key ?? "");
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
   row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
@@ -2105,20 +2285,41 @@ function _buildOptRowEl(data) {
   }
   if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
   row.querySelectorAll("input").forEach(i => i.addEventListener("input", () => { _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); }));
+  const dropUnit = () => {   // ★ 껍데기째 — 행만 지우면 선택지 가이드 블록이 고아로 남는다
+    _ugDrop(row.dataset.ig);
+    unitEl.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); _syncGroupTotals();
+  };
   const del = row.querySelector(".rf-opt-del");
-  if (del) del.onclick = () => { row.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); };
+  if (del) del.onclick = dropUnit;
   const reopen = row.querySelector(".rf-opt-reopen");
   if (reopen) reopen.onclick = () => {   // 마감 옵션 재개 → active + 삭제 버튼으로 교체(재개는 명시적 의도로만)
     row.dataset.status = "active"; row.style.opacity = "";
     reopen.outerHTML = '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
-    row.querySelector(".rf-opt-del").onclick = () => { row.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); };
+    row.querySelector(".rf-opt-del").onclick = dropUnit;
     row.querySelector(".rf-opt-name").title = "";
     _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   };
   // 옵션인원이 바뀌면 상품 그룹 머리의 총인원(자동합계)도 따라온다
   const rtEl = row.querySelector(".rf-opt-rt");
   if (rtEl) rtEl.addEventListener("input", _syncGroupTotals);
-  return row;
+
+  /* ── 🧭 이 선택지 전용 유입가이드(134) — 행 아래 접힘 ── */
+  unitEl.appendChild(row);
+  const ugKey = _ugNewKey();
+  row.dataset.ig = ugKey;
+  _ugRegister(ugKey, "선택지 유입가이드");
+  unitEl.appendChild(_ugBuild(ugKey));
+  // 값 주입은 DOM 에 붙은 뒤(`_ugAttachAll`) — 여기서 getElementById 를 부르면 조용히 no-op 이 된다
+  row._ugPending = {
+    html: d.inflowGuideHtml ?? d.inflow_guide_html ?? "",
+    images: d.inflowGuideImages ?? d.inflow_guide_images ?? [],
+  };
+  const ugBtn = row.querySelector(".rf-ug-btn");
+  if (ugBtn) ugBtn.onclick = () => {
+    unitEl.classList.toggle("ug-on");
+    if (unitEl.classList.contains("ug-on")) { _igBind(ugKey); _igRender(ugKey); }
+  };
+  return unitEl;
 }
 
 /** 마지막 행의 상품명 — 옵션을 추가할 때 자동으로 따라오게(같은 상품의 다른 옵션이 대부분) */
@@ -2153,16 +2354,25 @@ function renderOptRows(options, opts) {
   _setProdModeNote((forced || !list.length) ? "" : (live.length
     ? "옵션 " + live.length + "종이 확인되어 자동 선택됨"
     : "옵션 정보가 없어 자동 선택됨"));
-  _renderProdTable(list.map(o => ({
-    productName: o.productName ?? o.product_name ?? "",
-    optionUrl:   o.optionUrl ?? o.option_url ?? o.url ?? "",
-    optKey:      o.optKey ?? o.opt_key ?? "",
-    payAmount:   o.payAmount ?? o.pay_amount ?? 0,
-    recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
-    dailyLimit:  o.dailyLimit ?? o.daily_limit ?? 0,
-    reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
-    status:      o.status === "closed" ? "closed" : "active",
-  })));
+  _renderProdTable(list.map(o => {
+    const unitKind = (o.unitKind ?? o.unit_kind) === "product" ? "product" : "option";
+    // 상품 단위는 키가 곧 상품명 — 원장에 product_name 이 비어 있어도(구버전 행) 키로 되살린다
+    const productName = String(o.productName ?? o.product_name ?? "")
+      || (unitKind === "product" ? String(o.optKey ?? o.opt_key ?? "") : "");
+    return {
+      productName,
+      unitKind,
+      optionUrl:   o.optionUrl ?? o.option_url ?? o.url ?? "",
+      optKey:      o.optKey ?? o.opt_key ?? "",
+      payAmount:   o.payAmount ?? o.pay_amount ?? 0,
+      recruitTotal: o.recruitTotal ?? o.recruit_total ?? 0,
+      dailyLimit:  o.dailyLimit ?? o.daily_limit ?? 0,
+      reviewTypeMix: o.reviewTypeMix ?? o.review_type_mix ?? [],
+      inflowGuideHtml: o.inflowGuideHtml ?? o.inflow_guide_html ?? "",
+      inflowGuideImages: o.inflowGuideImages ?? o.inflow_guide_images ?? [],
+      status:      o.status === "closed" ? "closed" : "active",
+    };
+  }));
 }
 
 /**
@@ -2227,20 +2437,49 @@ function _rfHttpUrl(value) {
   }
 }
 
+/** 그룹(상품)의 선택 단위 — 'product' = 옵션 없는 상품 자체가 선택지 하나 */
+function _rfGroupUnit(row) {
+  const box = row && row.closest ? row.closest(".rf-gp") : null;
+  return (box && box.dataset.unit === "product") ? "product" : "option";
+}
+/** 그 행이 속한 상품명 — 그룹 머리 우선(숨은 칸은 그 값의 사본일 뿐) */
+function _rfRowProductName(row) {
+  const box = row && row.closest ? row.closest(".rf-gp") : null;
+  const el = box ? box.querySelector(".rf-gp-name") : (row && row.querySelector(".rf-opt-prod"));
+  return String((el && el.value) || "").trim();
+}
+
 function readOptRows() {
   const out = [];
   if (_prodMode() !== "opt") return out;
+  const seenProductBox = new Set();
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const optionUrl = String(r.querySelector(".rf-opt-url")?.value || "").trim();
-    const optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
-    if (!optKey) return;                       // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
+    const productName = _rfRowProductName(r);
+    const unitKind = _rfGroupUnit(r);
+    let optKey;
+    if (unitKind === "product") {
+      // ★★ 옵션 없는 상품 = 선택지 하나 — **키가 곧 상품명**이라 이름이 없으면 만들 수 없다
+      const box = r.closest(".rf-gp");
+      if (!productName || seenProductBox.has(box)) return;
+      seenProductBox.add(box);
+      optKey = productName.replace(/\|/g, "").trim();
+    } else {
+      optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
+      if (!optKey) return;                     // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
+    }
+    const guide = _ugCompose(r, r.dataset.ig);
     out.push({
       optKey,
+      productName,
+      unitKind,
       optionUrl,
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
       recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
       dailyLimit:    Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0),
       reviewTypeMix: typeof _readOptionReviewMix === "function" ? _readOptionReviewMix(r) : [],
+      inflowGuideHtml: guide.html,
+      inflowGuideImages: guide.images,
       status:        r.dataset.status === "closed" ? "closed" : "active",   // ★ 마감상태 보존(리뷰 #1)
     });
   });
@@ -2260,7 +2499,9 @@ function _readProdRowsRaw() {
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const productName = String(r.querySelector(".rf-opt-prod").value || "").trim();
     const optionUrl   = String(r.querySelector(".rf-opt-url")?.value || "").trim();
-    const optKey      = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
+    // ★ 옵션 없는 상품 그룹의 행은 옵션명이 없다 — 숨은 칸 잔여값이 원문("상품명 - 옵션명")으로 새지 않게
+    const optKey      = _rfGroupUnit(r) === "product"
+      ? "" : String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
     const payAmount   = Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0);
     const recruitTotal = Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0);
     const dailyLimit   = Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0);
@@ -2438,9 +2679,17 @@ function _optSummary() {
   const names = opts.map(o => o.optKey.toLowerCase());
   const dup = names.some((n, i) => names.indexOf(n) !== i);
   if (!el) return { dup, count: opts.length };
+  // ★★ 134 — "상품명이 없어 저장되지 않는다"는 사실은 **저장 대상이 0개일 때가 오히려 더 중요**하다.
+  //   (그 줄 하나뿐이면 readOptRows()가 빈 배열이라 아래 요약문을 아예 못 만든다 →
+  //    화면은 "상품을 추가하세요"만 말하고 이미 적어 둔 줄이 왜 빠졌는지 침묵한다 = 조용한 누락)
+  const namelessProduct = Array.from(document.querySelectorAll("#rf_opt_rows .rf-gp"))
+    .filter(b => b.dataset.unit === "product" && !String(b.querySelector(".rf-gp-name")?.value || "").trim()).length;
+  const namelessMsg = namelessProduct
+    ? "⚠ 옵션 없는 상품 " + namelessProduct + "개에 상품명이 없어 선택지로 저장되지 않습니다"
+    : "";
   if (!opts.length) {
-    el.textContent = _prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요.";
-    el.style.color = "var(--t3)";
+    el.innerHTML = namelessMsg || (_prodMode() === "opt" ? "옵션을 추가하세요." : "상품을 추가하세요.");
+    el.style.color = namelessMsg ? "#B45309" : "var(--t3)";
     return { dup, count: 0 };
   }
   const active = opts.filter(o => o.status !== "closed");
@@ -2451,8 +2700,20 @@ function _optSummary() {
   const dlSum = active.reduce((a, o) => a + o.dailyLimit, 0);
   // ★ 캠페인 정원(rf_recruit_total·rf_daily_limit)은 이제 표에서 파생되는 값이라
   //   "총모집≠정원합" 같은 불일치 경고는 성립하지 않는다(항상 일치) → 합계만 알린다.
-  const msgs = ["옵션 " + active.length + "종" + (closedN ? "(+마감 " + closedN + ")" : "") + " · 정원합 " + (anyUnlimited ? "무제한" : rtSum + "명") + (allHaveDaily && dlSum ? (" · 하루합 " + dlSum + "건") : "")];
+  // ★★ 134 복합 작업 — 옵션 단위와 상품 단위가 섞이면 "선택지"로 세어 말한다
+  //   (리뷰어가 실제로 고르는 것의 개수 = campaign_options 행 수)
+  const prodUnits = active.filter(o => o.unitKind === "product").length;
+  const label = prodUnits
+    ? "선택지 " + active.length + "개(옵션 " + (active.length - prodUnits) + " · 상품 " + prodUnits + ")"
+    : "옵션 " + active.length + "종";
+  const msgs = [label + (closedN ? "(+마감 " + closedN + ")" : "") + " · 정원합 " + (anyUnlimited ? "무제한" : rtSum + "명") + (allHaveDaily && dlSum ? (" · 하루합 " + dlSum + "건") : "")];
   if (dup) msgs.push("⚠ 옵션명 중복(저장 불가)");
+  // 경고 전용 자동점검 — 게시를 막지 않는다(옵션 칸 자동점검과 같은 규율)
+  if (namelessMsg) msgs.push(namelessMsg);
+  const withGuide = active.filter(o => String(o.inflowGuideHtml || "").trim()).length;
+  if (withGuide && withGuide < active.length) {
+    msgs.push("⚠ 선택지 전용 유입가이드가 " + withGuide + "/" + active.length + "개만 설정됨 — 나머지는 공고 공통 가이드가 보입니다");
+  }
   el.innerHTML = msgs.join(" · ");
   el.style.color = (msgs.length > 1) ? "#B45309" : "var(--t3)";
   return { dup, count: opts.length };
