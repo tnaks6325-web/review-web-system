@@ -2610,7 +2610,7 @@ body{ letter-spacing:-.01em; }
     function _mountAdminSettings() {
       if (!window.AdminSettings) return;
       AdminSettings.mount('rvNoticeMount', { panels: ['notice'], autoload: false });
-      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'aisamples', 'inspectmsg', 'worktable', 'gatecriteria'], autoload: false });
+      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'aisamples', 'inspectmsg', 'worktable', 'gatecriteria', 'capturelink'], autoload: false });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _mountAdminSettings);
     else _mountAdminSettings();
