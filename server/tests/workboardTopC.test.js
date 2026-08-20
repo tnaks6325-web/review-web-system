@@ -138,7 +138,8 @@ t('_condCardHtml 이 있다', !!cc);
 /* ★★ 값이 있으면 배지 없이 검은 글씨 · 배지는 미설정에만(사용자 확정 2026-08-20).
    종전 .yn(허용/해당없음/포토) 배지를 되살리면 "손봐야 하는 칸"으로 가야 할 눈이 흩어진다. */
 t('★ 값이 있는 항목은 배지가 아니라 단순 텍스트(.yn 잔재 0)',
-  !/class="yn/.test(wd) && !/\.yn\{/.test(wd) && /const val=\(html\)=>`<dd>\$\{html\}<\/dd>`/.test(cc));
+  !/class="yn/.test(wd) && !/\.yn\{/.test(wd)
+  && !/<span class="cndbadge/.test(cc));   // 값 쪽에 배지 마크업이 다시 들어오지 않는다
 t('★ [미설정]은 버튼이고 열 수 없으면 비활성 + 사유(눌러도 아무 일 없는 버튼 금지)',
   /class="cndset"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
   && /class="cndset off" disabled title="\$\{esc\(g\.tip\)\}"/.test(cc));
@@ -162,11 +163,42 @@ t('★ 모달에는 작업오더 **원본 행**을 넘긴다(작업보드 detail
   && /woAdminEditModal\(o,/.test(fix));
 t('★ 이 화면에 새 저장 API 를 만들지 않았다(condition 전용 저장 경로 0)',
   !/condition\/save|\/api\/trackb\/condition/.test(wd));
-t('★ 권한·연결이 없으면 비활성 + 사유(quota=공고, order=발주, tab=탭 설정)',
+t('★ 권한·연결이 없으면 비활성 + 사유(quota=공고, order=발주)',
   /if\(!STATE\.canEdit\) return \{can:false/.test(gate)
-  && /kind==='tab'\) return \{can:false/.test(gate)
   && /kind==='order'\) return cd\.workOrderId/.test(gate)
   && /kind==='quota'\) return cd\.campaignId/.test(gate));
+/* ★ 값이 있어도 고칠 수 있어야 쓸모가 있다 — 모양은 검은 글씨 그대로(요구 ②),
+   창구가 열리는 항목만 눌린다. 창구가 없으면 평범한 텍스트(죽은 버튼 금지). */
+/* ★ 존재 검사만 하면 **함수 첫 줄에 early return 을 넣은 변이**를 놓친다(실측) —
+   게이트 호출이 곧바로 오는지(= 판정을 실제로 거치는지) 형태로 고정한다. */
+t('★ 값이 있는 항목도 창구가 있으면 누를 수 있다(모양은 검은 글씨 그대로)',
+  /const val=\(html,kind\)=>\{\s*\n?\s*const g=_cndFixGate\(cd,kind\);/.test(cc)
+  && /class="cndval"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
+  && /: `<dd>\$\{html\}<\/dd>`/.test(cc)
+  && /\.cndval\{[^}]*color:var\(--ink\)/.test(wd));
+
+console.log('\n── D3. 현금영수증 설정(진행방식) ──');
+const cash = fnBody(wd, 'function _cndCashModal(){');
+t('★ 현금영수증도 이 화면에서 설정한다(tab 게이트가 열려 있다)',
+  /kind==='tab'\) return \{can:true/.test(gate) && /if\(kind==='tab'\) return _cndCashModal\(\);/.test(fix));
+t('★★ 저장은 기존 창구 하나(POST /api/tab/config {incomeType}) — 새 저장 경로 0',
+  /'\/api\/trackb\/tab\/config'/.test(wd) && /incomeType:v/.test(wd)
+  && !/income_type\s*=/.test(wd));
+t('★ 진행방식 문자열을 화면이 대신 지어내지 않는다 — 사람이 보고 고친다', (() => {
+  // 체크박스로 '현영'을 붙였다 뗐다 하면 '사업자현영' 같은 값이 망가진다(시스템이 못 하는 판단).
+  return /<input id="cndIncome"/.test(cash) && /oninput="_cndCashPreview\(\)"/.test(cash);
+})());
+t('★ 지금 값이면 결과가 어떻게 되는지 실시간으로 말한다(판정 규칙 = 진행방식에 현영)',
+  /const _CR_RE=\/현영\//.test(wd) && /_CR_RE\.test\(el\.value\|\|''\)/.test(wd));
+t('★★ 캡처 칸이 직접 설정된 탭이면 "바꿔도 안 바뀐다"고 먼저 말한다(고쳤는데 그대로 방지)',
+  /cd\.slotsPinned\?`<div class="cndwarnbox">/.test(cash)
+  && /slotsPinned: Array\.isArray\(meta\.captureSlots\)/.test(cond));
+t('★ 이 API 는 오류도 200 + {error} 로 온다 — 상태코드만 보고 성공으로 읽지 않는다',
+  /if\(!r\|\|r\.error\)\{ _toast\('저장하지 못했습니다'/.test(wd));
+t('★ 팝업은 body 직속 · 바깥 클릭으로 닫지 않는다(입력값 보호) · Esc 리스너는 닫을 때 해제',
+  /document\.body\.appendChild\(ov\)/.test(cash) && !/ov\.onclick=/.test(cash)
+  && /removeEventListener\('keydown',STATE\._cndCashEsc\)/.test(wd));
+t('★ 저장 뒤 작업 조건을 다시 읽는다', /_cndCashClose\(\); _toast\('🧾 진행방식 저장됨'\); _cndReload\(\);/.test(wd));
 t('★ 저장 뒤 작업 조건을 다시 읽는다 — 공고 저장 훅(CAMP_ON_SAVED)에도 합류(사본 금지)',
   /function _cndReload\(\)\{[\s\S]*?selTab\(i,\{nav:true\}\)/.test(wd)
   && /typeof _cndReload==='function'\) _cndReload\(\)/.test(wd)

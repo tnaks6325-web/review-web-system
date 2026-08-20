@@ -1623,6 +1623,21 @@
           border:1px solid var(--warn-soft);background:var(--warn-soft);color:var(--warn);cursor:pointer}
   .cndset:hover{border-color:var(--warn);}
   .cndset.off{background:var(--card2);color:var(--faint);border-color:transparent;cursor:default}
+  /* 값이 있는 항목 — 검은 글씨 그대로, 창구가 있을 때만 점선 밑줄 */
+  .cndval{font:inherit;font-size:11.5px;font-weight:700;color:var(--ink);background:none;border:0;padding:0;
+          cursor:pointer;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+          text-decoration:underline dotted var(--line2);text-underline-offset:3px}
+  .cndval:hover{text-decoration-color:var(--accent)}
+  /* 현금영수증 설정 팝업 */
+  .cndlb{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:2px 0 5px}
+  .cndchips{display:flex;gap:6px;margin-top:7px}
+  .cndchips .wbl-b{font-size:11px;padding:3px 10px}
+  .cndpv{margin-top:10px;font-size:12px;font-weight:700;border-radius:8px;padding:8px 10px}
+  .cndpv.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .cndpv.off{background:var(--card2);color:var(--muted)}
+  .cndnote{margin-top:9px;font-size:11.5px;color:var(--muted);line-height:1.5}
+  .cndwarnbox{background:var(--warn-soft);border:1px solid #f3e2c4;border-radius:9px;padding:9px 11px;
+              font-size:11.5px;color:var(--ink);margin-bottom:11px;line-height:1.5}
   /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
   .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -5866,7 +5881,14 @@ function _condCardHtml(wd,d,m){
   const won=v=>`${Number(v).toLocaleString()}<span class="u">원</span>`;
   /* ★★ 값이 있으면 **배지 없이 검은 글씨**(사용자 확정 2026-08-20) — '해당 없음'·'허용'·'포토' 도
      설정된 값이라 배지로 강조할 이유가 없다. 배지는 **미설정에만** 남겨 눈이 그쪽으로 가게 한다. */
-  const val=(html)=>`<dd>${html}</dd>`;
+  /* ★ 값이 있어도 **고칠 수 있어야** 쓸모가 있다 — 모양은 검은 글씨 그대로 두고(요구 ②)
+     창구가 열리는 항목만 점선 밑줄로 누를 수 있음을 알린다. 창구가 없으면 평범한 텍스트. */
+  const val=(html,kind)=>{
+    const g=_cndFixGate(cd,kind);
+    return g.can
+      ? `<dd><button type="button" class="cndval" title="${esc(g.tip)}" onclick="_cndFix('${kind}')">${html}</button></dd>`
+      : `<dd>${html}</dd>`;
+  };
   /* [미설정] 배지 — 누르면 **그 값의 정식 창구**를 연다(사용자 확정).
      ★★ 새 저장 경로를 만들지 않는다 — 저장처가 둘이 되면 작업오더·모집공고·입금관리가
        서로 다른 값을 보게 된다(레포가 반복해서 겪은 사고). 창구가 하나라 동기화가 구조적이다.
@@ -5898,7 +5920,7 @@ function _condCardHtml(wd,d,m){
     ['리뷰비','camp',    cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','camp',    cd.depositName?esc(cd.depositName):null],
     ['리뷰타입','camp',  cd.reviewTypeLabel?esc(cd.reviewTypeLabel):null],
-  ].map(([k,kind,v])=>`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v)}`).join('');
+  ].map(([k,kind,v])=>`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`).join('');
   const prod=cd.productName||d.productOption||m.campaignName||'';
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
   return `<div class="tp3col"><div class="tp3t">작업 조건${many}</div>`+
@@ -5912,7 +5934,7 @@ function _condCardHtml(wd,d,m){
    tab    현금영수증 → 탭 설정(캡처 슬롯) — 이 화면엔 창구가 없어 사유만 말한다 */
 function _cndFixGate(cd,kind){
   if(!STATE.canEdit) return {can:false,tip:'설정은 담당자만 할 수 있습니다.'};
-  if(kind==='tab') return {can:false,tip:'현금영수증 여부는 탭 설정(캡처 슬롯)에서 정합니다 — 관리자 대시보드 › 작업 탭 관리.'};
+  if(kind==='tab') return {can:true,tip:'진행방식을 고쳐 현금영수증 캡처 칸 여부를 정합니다 — 리뷰어 제출 화면에 바로 반영됩니다.'};
   if(kind==='order') return cd.workOrderId
     ? {can:true,tip:'작업오더 수정 창을 엽니다 — 저장하면 이 작업 조건과 인트라넷 보낸오더에 함께 반영됩니다.'}
     : {can:false,tip:'연결된 작업오더가 없습니다 — 작업오더를 먼저 연결하세요.'};
@@ -5926,6 +5948,7 @@ function _cndFixGate(cd,kind){
 async function _cndFix(kind){
   const cd=(STATE.wd&&STATE.wd.condition)||null; if(!cd) return;
   const g=_cndFixGate(cd,kind); if(!g.can){ _toast(g.tip); return; }
+  if(kind==='tab') return _cndCashModal();
   if(kind==='quota') return openCurrentCampaignDailyPlan();
   if(kind==='order'){
     if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
@@ -5942,6 +5965,60 @@ async function _cndFix(kind){
   }
   if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
   await openRecruitModal(String(cd.campaignId));
+}
+/* ══ 현금영수증 설정 — 진행방식(tab_configs.income_type) 편집 ══════════════════════
+   ★★ 켜기/끄기 둘 다 **진행방식 문자열**을 거친다 — 판정 규칙이 그렇게 돼 있다
+     (utils/captureSlots: 캡처 칸 명시 설정이 최우선 → 없으면 진행방식에 '현영'이 있으면 2칸).
+     그래서 화면이 **체크박스로 문자열을 대신 지어내지 않는다** — 값을 사람이 보고 고치게 하고,
+     그 값이면 결과가 어떻게 되는지를 실시간으로 말한다("고쳤는데 그대로"를 없애는 유일한 방법).
+     예: '사업자현영' 에서 '현영'만 빼면 '사업자'가 남는다 — 그런 판단은 시스템이 할 수 없다.
+   ★ 저장은 기존 창구 하나(POST /api/tab/config {incomeType}) — 새 저장 경로 0.
+   ★ 캡처 칸이 직접 설정된 탭이면 진행방식을 바꿔도 판정이 안 바뀐다 → 그 사실을 먼저 말한다. */
+const _CR_RE=/현영/;
+function _cndCashClose(){ const o=document.getElementById('cndCashOv'); if(o) o.remove();
+  if(STATE._cndCashEsc){ document.removeEventListener('keydown',STATE._cndCashEsc); STATE._cndCashEsc=null; } }
+function _cndCashModal(){
+  const cd=(STATE.wd&&STATE.wd.condition)||{}; const t=STATE.cur; if(!t) return;
+  _cndCashClose();
+  const cur=String(cd.incomeType||'');
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cndCashOv';
+  // ★ 바깥 클릭으로 닫지 않는다 — 입력해 둔 값을 실수 클릭 한 번에 잃지 않게(Esc·[취소]만).
+  ov.innerHTML=`<div class="wbl-dlg" style="max-width:520px"><div class="wbl-dh">🧾 현금영수증 — 진행방식 설정</div>`+
+    `<div class="wbl-db">`+
+      (cd.slotsPinned?`<div class="cndwarnbox">이 작업은 <b>캡처 칸이 직접 설정</b>돼 있어 진행방식을 바꿔도 현금영수증 칸 여부는 바뀌지 않습니다. 칸 구성은 관리자 대시보드 › 작업 탭 관리에서 고칩니다.</div>`:'')+
+      `<label class="cndlb" for="cndIncome">진행방식</label>`+
+      `<input id="cndIncome" class="inp" value="${esc(cur)}" placeholder="예: 현영 · 사업자현영 (비우면 현금영수증 대상 아님)" oninput="_cndCashPreview()">`+
+      `<div class="cndchips">${['현영','사업자현영',''].map(v=>`<button type="button" class="wbl-b" onclick="_cndCashSet('${esc(v)}')">${v?esc(v):'비우기'}</button>`).join('')}</div>`+
+      `<div id="cndCashPv" class="cndpv"></div>`+
+      `<div class="cndnote">진행방식에 <b>현영</b>이 들어가면 리뷰어 제출 화면에 <b>현금영수증 캡처 칸</b>이 생깁니다(그 칸은 선택 제출 — 완료를 막지 않습니다).</div>`+
+    `</div>`+
+    `<div class="wbl-df"><button class="wbl-b" onclick="_cndCashClose()">취소</button>`+
+    `<button class="wbl-b pri" onclick="_cndCashSave()">저장</button></div></div>`;
+  document.body.appendChild(ov);
+  STATE._cndCashEsc=e=>{ if(e.key==='Escape') _cndCashClose(); };
+  document.addEventListener('keydown',STATE._cndCashEsc);
+  _cndCashPreview();
+}
+function _cndCashSet(v){ const el=document.getElementById('cndIncome'); if(!el) return; el.value=v; _cndCashPreview(); }
+/* 지금 입력값이면 결과가 어떻게 되는지 — 판정 규칙(진행방식에 '현영')을 그대로 보여준다 */
+function _cndCashPreview(){
+  const el=document.getElementById('cndIncome'), pv=document.getElementById('cndCashPv');
+  if(!el||!pv) return;
+  const on=_CR_RE.test(el.value||'');
+  const cd=(STATE.wd&&STATE.wd.condition)||{};
+  pv.className='cndpv '+(on?'on':'off');
+  pv.textContent=cd.slotsPinned
+    ? (on?'이 값은 현금영수증 대상이지만, 캡처 칸 설정이 이겨 화면은 바뀌지 않습니다.':'이 값은 대상이 아니지만, 캡처 칸 설정이 이겨 화면은 바뀌지 않습니다.')
+    : (on?'→ 현금영수증 대상 · 제출 화면에 캡처 칸이 생깁니다':'→ 해당 없음 · 캡처 칸이 없습니다');
+}
+async function _cndCashSave(){
+  const el=document.getElementById('cndIncome'); const t=STATE.cur; if(!el||!t) return;
+  const v=String(el.value||'').trim();
+  const r=await api('/api/trackb/tab/config',{method:'POST',
+    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||'',incomeType:v})}).catch(()=>null);
+  // ★ 이 API 는 오류도 200 + {error} 로 돌려준다(GAS 호환) — 상태코드만 보고 성공으로 읽지 않는다.
+  if(!r||r.error){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return; }
+  _cndCashClose(); _toast('🧾 진행방식 저장됨'); _cndReload();
 }
 /* 저장 뒤 작업 조건을 다시 읽는다 — 값이 어디에 저장됐든 화면이 같은 원장을 다시 본다. */
 function _cndReload(){

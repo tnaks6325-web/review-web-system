@@ -1589,6 +1589,17 @@ function _delegate(routerRef, method, path) {
   // 마지막 스택 = 실제 핸들러(앞은 authMiddleware 등 — 여기선 우리 게이트를 이미 통과했다)
   return layer.route.stack[layer.route.stack.length - 1].handle;
 }
+/* ── 탭 설정(진행방식) 프록시 — 작업 조건 카드의 [현금영수증] 설정 창구 ────────────────
+   ★★ 새 저장 경로를 만들지 않는다 — `tab_configs.income_type` 의 writer 는 `POST /api/tab/config`
+     한 곳뿐이고, 그 값은 현금영수증 캡처 슬롯 판정(utils/captureSlots)의 규칙 축이다.
+     사본을 두면 "작업보드에서 켰는데 리뷰어 화면엔 칸이 안 생긴다"가 된다.
+   ★ Track B 경로에 두는 이유 = 인트라넷 SSO 토큰(via:'intranet')은 `/api/tab/*` 에 도달할 수 없다.
+   ★ 게이트는 **내부인**(원본은 authMiddleware 만 — 광고주만 좁힌다. 탭 설정은 담당자 업무다). */
+const _tabConfigRoutes = require('./tabconfig.routes');
+const _tabConfigHandler = _delegate(_tabConfigRoutes, 'post', '/config');
+router.post('/tab/config', authMiddleware, internalMiddleware, (req, res, next) =>
+  _tabConfigHandler(req, res, next));
+
 const _orderRoutes = require('./order.routes');
 const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');

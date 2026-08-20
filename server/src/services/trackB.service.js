@@ -2455,6 +2455,13 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       inflowKeyword: (wo && wo.inflowKeyword) || null,
       multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
       cashReceipt,
+      /* [현금영수증] 설정 팝업 재료 — **판정은 서버 단일 출처가 이미 했다**(cashReceipt).
+         여기 둘은 "무엇을 고치는지" 화면이 설명하기 위한 것:
+         · incomeType  = 지금 진행방식 원문(팝업 프리필)
+         · slotsPinned = 캡처 칸이 직접 설정된 탭인가 — 그러면 진행방식을 바꿔도 판정이 안 바뀐다
+           (capture_slots 명시가 최우선). 화면이 그 사실을 말해야 "고쳤는데 그대로"가 안 된다. */
+      incomeType: meta.incomeType || '',
+      slotsPinned: Array.isArray(meta.captureSlots) && meta.captureSlots.filter(x => x && x.key).length > 0,
       /* 1건당 상품 결제금액(사용자 확정 2026-08-20) — 진행 현황의 '결제금액'은 활성 주문 행의
          **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
       payAmount: num(wo && wo.payAmount),
