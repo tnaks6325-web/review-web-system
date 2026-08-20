@@ -23,7 +23,9 @@ const campaign = fs.readFileSync(path.join(root, 'frontend', 'campaign.html'), '
 assert(campaign.includes("'/api/campaign/popular-status?phone8='"),
   '리뷰어 화면이 참여권 상태를 조회해야 한다(누르기 전 고지)');
 {
-  const pre = campaign.slice(campaign.indexOf('function renderPre(){'), campaign.indexOf("  show('vPre');"));
+  // ★ 줄 주석을 지우고 본다 — 호출을 주석 처리한 변이를 "있다"로 읽으면 안 된다(변이시험 실측).
+  const pre = campaign.slice(campaign.indexOf('function renderPre(){'), campaign.indexOf("  show('vPre');"))
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   const iNotice = pre.indexOf('renderPopNotice();');
   const iLock = pre.indexOf('_applyPopLock();');
   const iLoad = pre.indexOf('loadPopCredit();');
