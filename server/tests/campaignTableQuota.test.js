@@ -180,6 +180,10 @@ const ok = (name, cond, extra) => {
     /submitted_at >= COALESCE\(\(rc\.start_date::text \|\| 'T00:00:00\+09:00'\)::timestamptz, rc\.created_at\)/.test(loaderBody));
   ok("★ 빈 gid 는 절을 켜지 않는다(NULLIF 게이트)",
     /NULLIF\(rc\.linked_tab_gid,''\) IS NOT NULL/.test(loaderBody));
+  ok("★★ 주문 좌표 합집합 — 공고 경유(campaign:<id>) + 연결 탭 두 계열을 다 센다(탭만 보면 확정 67에 orders 0)",
+    /os\.sheet_id = 'campaign:' \|\| rc\.id AND os\.tab_name = 'campaign:' \|\| rc\.id/.test(loaderBody));
+  ok("★ 앵커는 탭 좌표에만(campaign: 좌표는 귀속 자명 — 자르면 공고 경유 확정 과소집계)",
+    /WHERE os\.sheet_id = 'campaign:' \|\| rc\.id\n\s+OR os\.submitted_at >= COALESCE/.test(loaderBody));
   ok('★★ 게이트 재료에 작업표 줄 없음(campaign_participants 참조 0 — 선기입·링크 오염 면역)',
     !/campaign_participants/.test(loaderBody));
   ok('★ 시트 API 호출 0', !/sheets|spreadsheet|googleapis/i.test(loaderBody));
@@ -302,6 +306,17 @@ const ok = (name, cond, extra) => {
     ok('PG: 주문 0건 탭 = orders 0(LEFT JOIN)', L('c3') && L('c3').orders === 0 && !L('c3').noTab, L('c3'));
     ok('PG: ★ sharedTab — 같은 탭 활성 공고 2개면 양쪽 다 true', L('c4').sharedTab === true && L('c5').sharedTab === true);
     ok('PG: 미연결 = noTab', L('c6') && L('c6').noTab === true, L('c6'));
+
+    // ★★ 좌표 합집합(프로덕션 실측 회귀) — c1 에 공고 경유 주문 2건(campaign: 좌표, 앵커 이전
+    //   시각이어도 orders 에 포함) 추가 → orders 3+2=5 · ordersAll 5+2=7. 같은 주문이 두 절에
+    //   동시에 걸릴 수 없는 좌표라 DISTINCT 로 이중계수 0.
+    await pool.query(`INSERT INTO order_submissions(sheet_id, tab_name, submitted_at) VALUES
+      ('campaign:c1','campaign:c1','2026-07-10T00:00:00Z'), ('campaign:c1','campaign:c1','2026-08-15T00:00:00Z')`);
+    S.__resetTableQuotaCacheForTest();
+    const out2 = await S.fetchCampaignCounts(pool, ['c1']);
+    const L1b = out2.get('c1').linked;
+    ok('PG: ★★ 공고 경유(campaign: 좌표) 주문 합류 — orders 5(탭 3 + 공고 2, 앵커는 탭에만)',
+      L1b.orders === 5 && L1b.ordersAll === 7, L1b);
 
     // ★★ apply 잠금 tx — **로더 쿼리에만** 진짜 PG 오류(42P01)를 주입해 tx 를 실제로 오염시키고,
     //   SAVEPOINT ROLLBACK 이 그 오염을 걷어내 같은 tx 의 참여 INSERT 가 사는지(25P02 격리 실증).

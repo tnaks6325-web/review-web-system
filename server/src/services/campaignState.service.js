@@ -604,10 +604,18 @@ async function _loadLinkedOrderCounts(db, ids, now = new Date()) {
     try { await db.query('SAVEPOINT ctq_orders'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
   }
   try {
+    // ★★ 주문 좌표는 두 계열이다(프로덕션 실측 2026-08-20): 공고 경유(홀드 확정) 주문은
+    //   `campaign:<공고ID>` 좌표(submit.routes._resolveCampaignOrderScope), 공고 미경유
+    //   (외부모집 수동제출·직접 제출·시트 시절)는 연결 탭 좌표. 탭 좌표만 보면 공고 경유분이
+    //   통째로 빠져(확정 67인데 orders 0) 관측·게이트가 과소해진다 → **합집합**으로 센다.
+    //   `DISTINCT os.id` 라 과거 시트 시절(공고 경유도 탭 좌표) 겹침도 이중계수가 없다.
+    // ★ 앵커(start_date 절단)는 **탭 좌표에만** 건다 — campaign: 좌표는 그 공고 귀속이 자명해
+    //   재사용 탭의 과거 블록 문제가 없고, 잘라내면 공고 경유 확정이 과소집계된다.
     const { rows } = await db.query(`
       SELECT rc.id,
              COUNT(DISTINCT os.id) FILTER (
-               WHERE os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)
+               WHERE os.sheet_id = 'campaign:' || rc.id
+                  OR os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)
              )::int AS orders,
              COUNT(DISTINCT os.id)::int AS orders_all,
              shared.n::int AS live_campaigns
@@ -622,10 +630,13 @@ async function _loadLinkedOrderCounts(db, ids, now = new Date()) {
         ) shared ON TRUE
         LEFT JOIN order_submissions os
           ON os.deleted_at IS NULL
-         AND os.sheet_id = rc.linked_sheet_id
-         AND (os.tab_name = rc.linked_tab_name
-              OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
-                  AND NULLIF(os.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+         AND (
+              (os.sheet_id = 'campaign:' || rc.id AND os.tab_name = 'campaign:' || rc.id)
+           OR (os.sheet_id = rc.linked_sheet_id
+               AND (os.tab_name = rc.linked_tab_name
+                    OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                        AND NULLIF(os.tab_gid,'') = NULLIF(rc.linked_tab_gid,''))))
+         )
        WHERE rc.id = ANY($1) AND rc.participation_mode
          AND NULLIF(rc.linked_sheet_id,'') IS NOT NULL AND NULLIF(rc.linked_tab_name,'') IS NOT NULL
        GROUP BY rc.id, shared.n`, [ids]);
