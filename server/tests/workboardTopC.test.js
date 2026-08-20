@@ -133,8 +133,44 @@ t('★ 게이지는 내부·광고주 한 벌(사본 금지) — 2줄 배치 잔
 console.log('\n── D. 화면: 작업 조건 10항목 ──');
 const cc = fnBody(wd, 'function _condCardHtml(wd,d,m){');
 t('_condCardHtml 이 있다', !!cc);
-['총건수', '일건수', '구매채널', '유입방식', '다계정', '현금영수증', '리뷰비', '입금명', '리뷰타입']
+['총건수', '일건수', '결제금액', '구매채널', '유입방식', '다계정', '현금영수증', '리뷰비', '입금명', '리뷰타입']
   .forEach(k => t(`항목 "${k}" 이 있다`, new RegExp("\\['" + k + "'").test(cc)));
+/* ★★ 값이 있으면 배지 없이 검은 글씨 · 배지는 미설정에만(사용자 확정 2026-08-20).
+   종전 .yn(허용/해당없음/포토) 배지를 되살리면 "손봐야 하는 칸"으로 가야 할 눈이 흩어진다. */
+t('★ 값이 있는 항목은 배지가 아니라 단순 텍스트(.yn 잔재 0)',
+  !/class="yn/.test(wd) && !/\.yn\{/.test(wd) && /const val=\(html\)=>`<dd>\$\{html\}<\/dd>`/.test(cc));
+t('★ [미설정]은 버튼이고 열 수 없으면 비활성 + 사유(눌러도 아무 일 없는 버튼 금지)',
+  /class="cndset"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
+  && /class="cndset off" disabled title="\$\{esc\(g\.tip\)\}"/.test(cc));
+t('★ 결제금액은 1건당 금액(진행 현황의 합계와 다른 값) — 서버가 작업오더에서 싣는다',
+  /payAmount: num\(wo && wo\.payAmount\)/.test(cond) && /\['결제금액','order'/.test(cc));
+
+console.log('\n── D2. [미설정] → 정식 창구 ──');
+/* ★★ 새 저장 경로를 만들지 않는다(사용자 확정) — 저장처가 둘이 되면 작업오더·모집공고·입금관리가
+   서로 다른 값을 보게 된다. 창구가 하나뿐이라 동기화가 구조적으로 보장된다. */
+const gate = fnBody(wd, 'function _cndFixGate(cd,kind){');
+const fix  = fnBody(wd, 'async function _cndFix(kind){');
+t('★ 정원(총건수·일건수)은 [📅 모집인원 조절] 창구로 — 차수·이월·날짜별 조절을 아는 유일한 곳',
+  /if\(kind==='quota'\) return openCurrentCampaignDailyPlan\(\);/.test(fix));
+t('★ 공고 값은 모집공고 수정 모달로', /openRecruitModal\(String\(cd\.campaignId\)\)/.test(fix));
+t('★ 작업오더 값은 작업오더 수정 모달로 + 저장 경로는 기존 편집 허용명단 게이트',
+  /woAdminEditModal\(o,\{/.test(fix) && /'\/api\/trackb\/work-orders\/edit'/.test(fix));
+/* ★ 문자열 존재만 보면 **호출을 죽인 변이**(const r=null)를 놓친다(실측) — 호출 형태를 고정한다. */
+t('★ 모달에는 작업오더 **원본 행**을 넘긴다(작업보드 detail 은 camelCase 라 폼이 빈다)',
+  /const r=await api\(`\/api\/trackb\/work-orders\?sheetId=/.test(fix)
+  && /const o=\(\(r&&r\.items\)\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(cd\.workOrderId\)\)/.test(fix)
+  && /woAdminEditModal\(o,/.test(fix));
+t('★ 이 화면에 새 저장 API 를 만들지 않았다(condition 전용 저장 경로 0)',
+  !/condition\/save|\/api\/trackb\/condition/.test(wd));
+t('★ 권한·연결이 없으면 비활성 + 사유(quota=공고, order=발주, tab=탭 설정)',
+  /if\(!STATE\.canEdit\) return \{can:false/.test(gate)
+  && /kind==='tab'\) return \{can:false/.test(gate)
+  && /kind==='order'\) return cd\.workOrderId/.test(gate)
+  && /kind==='quota'\) return cd\.campaignId/.test(gate));
+t('★ 저장 뒤 작업 조건을 다시 읽는다 — 공고 저장 훅(CAMP_ON_SAVED)에도 합류(사본 금지)',
+  /function _cndReload\(\)\{[\s\S]*?selTab\(i,\{nav:true\}\)/.test(wd)
+  && /typeof _cndReload==='function'\) _cndReload\(\)/.test(wd)
+  && (wd.match(/function _cndReload\(/g) || []).length === 1);
 t('상품명은 별도 줄(2줄 허용)', /class="cndprod"/.test(cc));
 t('① 값은 서버 condition 을 그리기만 한다 — 화면에서 리뷰비·현영·리뷰타입을 다시 판정하지 않는다',
   !/campaign_fee|hasCashReceiptSlot|resolveReviewType/.test(cc));

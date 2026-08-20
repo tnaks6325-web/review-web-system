@@ -1617,9 +1617,12 @@
   .cnna{color:var(--faint);font-weight:600}
   .cndwarn{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10px;font-weight:700;
            background:var(--warn-soft);color:var(--warn);border-radius:999px;padding:0 7px}
-  .yn{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;border-radius:999px;padding:0 7px;line-height:16px}
-  .yn.y{background:var(--safe-soft);color:var(--safe)} .yn.n{background:var(--card2);color:var(--faint)}
-  .yn.b{background:var(--accent-soft);color:var(--accent-deep)}
+  /* ★ 값이 있는 항목은 배지 없이 검은 글씨(사용자 확정 2026-08-20) — 배지는 **미설정에만** 남겨
+     눈이 "손봐야 하는 칸"으로 가게 한다. 종전 .yn(허용/해당없음/포토) 배지는 폐기. */
+  .cndset{font:inherit;font-size:10.5px;font-weight:800;line-height:16px;padding:0 8px;border-radius:999px;
+          border:1px solid var(--warn-soft);background:var(--warn-soft);color:var(--warn);cursor:pointer}
+  .cndset:hover{border-color:var(--warn);}
+  .cndset.off{background:var(--card2);color:var(--faint);border-color:transparent;cursor:default}
   /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
   .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -4796,6 +4799,9 @@ window.CAMPAIGN_DAILY_PLAN_SAVED=function(ev){
    ★ 서버 30초 캐시 때문에 그냥 새로고침하면 방금 발행한 공고가 한동안 안 잡혀
      [＋공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
 window.CAMP_ON_SAVED=function(){
+  /* ★ 작업보드가 열려 있으면 **작업 조건도 다시 읽는다** — 공고 수정 모달에서 고친 값이
+     그 자리에서 반영되지 않으면 "저장했는데 미설정 그대로"로 보인다(저장은 됐는데). */
+  if(document.getElementById('rvPane') && STATE.cur && typeof _cndReload==='function') _cndReload();
   if(!document.getElementById('wblMount')) return;
   api('/api/trackb/tabs?limit=300&stats=1&fresh=1').then(r=>{
     if(r&&r.ok&&Array.isArray(r.tabs)){ _finAbsorb(r); STATE._finStatsAt=Date.now(); _finRenderList(); }
@@ -5856,9 +5862,22 @@ function _condCardHtml(wd,d,m){
     return `<div class="tp3col"><div class="tp3t">작업 조건<span class="cndwarn" title="작업 조건 요약을 불러오지 못했습니다 — 아래는 발주 값입니다.">요약 없음</span></div>`+
       `<dl class="tp3kv">${kv}</dl>${_woUnlinkedRow(wd)}${_woLinkedRow(wd)}</div>`;
   }
-  const na='<span class="cnna">—</span>';
   const n=v=>(v==null?null:Number(v));
-  const cnt=v=>(n(v)==null?na:`${Number(v).toLocaleString()}<span class="u">건</span>`);
+  const won=v=>`${Number(v).toLocaleString()}<span class="u">원</span>`;
+  /* ★★ 값이 있으면 **배지 없이 검은 글씨**(사용자 확정 2026-08-20) — '해당 없음'·'허용'·'포토' 도
+     설정된 값이라 배지로 강조할 이유가 없다. 배지는 **미설정에만** 남겨 눈이 그쪽으로 가게 한다. */
+  const val=(html)=>`<dd>${html}</dd>`;
+  /* [미설정] 배지 — 누르면 **그 값의 정식 창구**를 연다(사용자 확정).
+     ★★ 새 저장 경로를 만들지 않는다 — 저장처가 둘이 되면 작업오더·모집공고·입금관리가
+       서로 다른 값을 보게 된다(레포가 반복해서 겪은 사고). 창구가 하나라 동기화가 구조적이다.
+     ★ 열 수 없는 경우(공고·발주 미연결, 권한 없음)는 **비활성 + 사유** — 눌러도 아무 일 없는
+       버튼은 두지 않는다. */
+  const unset=(kind)=>{
+    const g=_cndFixGate(cd,kind);
+    return g.can
+      ? `<dd><button type="button" class="cndset" title="${esc(g.tip)}" onclick="_cndFix('${kind}')">미설정</button></dd>`
+      : `<dd><button type="button" class="cndset off" disabled title="${esc(g.tip)}">미설정</button></dd>`;
+  };
   // 구매채널 — 공고에 명시된 값이 우선, 없으면 상품 URL 호스트로(판정 단일 출처는 공유 모듈)
   let ch=cd.channel||'';
   if(!ch && cd.productUrl && typeof _woChannelFromUrl==='function') ch=_woChannelFromUrl(cd.productUrl)||'';
@@ -5866,32 +5885,68 @@ function _condCardHtml(wd,d,m){
     ? (cd.inflowType+(cd.inflowKeyword?(' · '+cd.inflowKeyword):''))
     : (cd.inflowKeyword||'');
   const ma=cd.multiAccount;
-  const maHtml=!ma?na:(ma.enabled
-    ? `<span class="yn y">허용</span>${ma.dailyLimit?`<span class="u">하루 ${ma.dailyLimit}건</span>`:'<span class="u">제한 없음</span>'}`
-    : '<span class="yn n">불가</span>');
-  const crHtml=cd.cashReceipt==null?na:(cd.cashReceipt?'<span class="yn y">대상</span>':'<span class="yn n">해당 없음</span>');
   /* ★ 리뷰비 0원은 "미설정"이 아니다 — 이 계정은 상품비만 주는 작업이 많다(2026-08-19 확정).
      근거(feeSource)가 있으면 사람이 정한 0원이고, 없을 때만 미설정으로 말한다. */
-  const feeHtml=cd.feeSource
-    ? `${Number(cd.reviewFee||0).toLocaleString()}<span class="u">원</span>${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`
-    : '<span class="cnna">미설정</span>';
-  const rt=cd.reviewTypeLabel||'';   // ★ 라벨은 서버(utils/reviewType.reviewTypeLabel)가 준 값 — 프론트에 표 사본을 두지 않는다
   const rows=[
-    ['총건수', cnt(cd.recruitTotal)],
-    ['일건수', n(cd.dailyLimit)==null?na:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`],
-    ['구매채널', ch?esc(ch):na],
-    ['유입방식', inflow?esc(inflow):na],
-    ['다계정', maHtml],
-    ['현금영수증', crHtml],
-    ['리뷰비', feeHtml],
-    ['입금명', cd.depositName?esc(cd.depositName):'<span class="cnna">미설정</span>'],
-    ['리뷰타입', rt?`<span class="yn b">${esc(rt)}</span>`:na],
-  ].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
+    ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`],
+    ['일건수','quota',   n(cd.dailyLimit)==null?null:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`],
+    ['결제금액','order', n(cd.payAmount)==null?null:won(cd.payAmount)],
+    ['구매채널','camp',  ch?esc(ch):null],
+    ['유입방식','order', inflow?esc(inflow):null],
+    ['다계정','camp',    !ma?null:(ma.enabled?`허용${ma.dailyLimit?` <span class="u">하루 ${ma.dailyLimit}건</span>`:' <span class="u">제한 없음</span>'}`:'불가')],
+    ['현금영수증','tab', cd.cashReceipt==null?null:(cd.cashReceipt?'대상':'해당 없음')],
+    ['리뷰비','camp',    cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
+    ['입금명','camp',    cd.depositName?esc(cd.depositName):null],
+    ['리뷰타입','camp',  cd.reviewTypeLabel?esc(cd.reviewTypeLabel):null],
+  ].map(([k,kind,v])=>`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v)}`).join('');
   const prod=cd.productName||d.productOption||m.campaignName||'';
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
   return `<div class="tp3col"><div class="tp3t">작업 조건${many}</div>`+
-    `<div class="cndprod" title="${esc(prod)}">${esc(prod)||na}</div>`+
+    `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`+
     `<dl class="cndl">${rows}</dl>${_woUnlinkedRow(wd)}${_woLinkedRow(wd)}</div>`;
+}
+/* [미설정] 창구 — 항목마다 **이미 있는 창구**로 보낸다(새 저장 경로 0).
+   quota  총건수·일건수 → [📅 모집인원 조절](정원 창구 · 차수·이월·날짜별 조절을 아는 유일한 곳)
+   camp   구매채널·다계정·리뷰비·입금명·리뷰타입 → 모집공고 수정 모달
+   order  결제금액·유입방식 → 작업오더 관리자 수정 모달
+   tab    현금영수증 → 탭 설정(캡처 슬롯) — 이 화면엔 창구가 없어 사유만 말한다 */
+function _cndFixGate(cd,kind){
+  if(!STATE.canEdit) return {can:false,tip:'설정은 담당자만 할 수 있습니다.'};
+  if(kind==='tab') return {can:false,tip:'현금영수증 여부는 탭 설정(캡처 슬롯)에서 정합니다 — 관리자 대시보드 › 작업 탭 관리.'};
+  if(kind==='order') return cd.workOrderId
+    ? {can:true,tip:'작업오더 수정 창을 엽니다 — 저장하면 이 작업 조건과 인트라넷 보낸오더에 함께 반영됩니다.'}
+    : {can:false,tip:'연결된 작업오더가 없습니다 — 작업오더를 먼저 연결하세요.'};
+  if(kind==='quota') return cd.campaignId
+    ? {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'}
+    : {can:false,tip:'연결된 모집공고가 없습니다 — 공고를 발행하면 정원을 정할 수 있습니다.'};
+  return cd.campaignId
+    ? {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'}
+    : {can:false,tip:'연결된 모집공고가 없습니다 — 공고를 발행하면 설정할 수 있습니다.'};
+}
+async function _cndFix(kind){
+  const cd=(STATE.wd&&STATE.wd.condition)||null; if(!cd) return;
+  const g=_cndFixGate(cd,kind); if(!g.can){ _toast(g.tip); return; }
+  if(kind==='quota') return openCurrentCampaignDailyPlan();
+  if(kind==='order'){
+    if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
+    /* ★ 모달은 작업오더 **원본 행**(snake_case)을 프리필로 받는다 — 작업보드 응답의 detail 은
+       camelCase 라 그대로 넘기면 폼이 빈 채로 열린다(그 상태로 저장하면 값이 지워진 것처럼 보인다). */
+    const t=STATE.cur; if(!t) return;
+    const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+    const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
+    if(!o){ _toast('작업오더를 불러오지 못했습니다. 작업오더 탭에서 수정해 주세요.'); return; }
+    return woAdminEditModal(o,{
+      save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id:o.id,...fields})}),
+      onSaved: ()=>{ _toast('✏ 수정 저장됨'); _cndReload(); }
+    });
+  }
+  if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
+  await openRecruitModal(String(cd.campaignId));
+}
+/* 저장 뒤 작업 조건을 다시 읽는다 — 값이 어디에 저장됐든 화면이 같은 원장을 다시 본다. */
+function _cndReload(){
+  const i=(STATE.tabs||[]).findIndex(x=>x===STATE.cur);
+  if(i>=0) selTab(i,{nav:true});
 }
 
 /* 발주 연결 줄 — 전폭 띠(.wobar)를 없애고 작업 조건 카드 **맨 아래 한 줄**로(사용자 확정).
