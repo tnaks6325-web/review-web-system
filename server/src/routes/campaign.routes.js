@@ -479,6 +479,19 @@ function _publicOptionView(v) {
   };
 }
 
+/** 홀드 게이트 뒤(work-detail·관리자 미리보기)로 나가는 **옵션 목록**에서 선택지별 유입가이드를 덜어낸다(134).
+ *  목록은 옵션 변경 시트·잠금표시용이라 가이드를 쓰지 않는다 — 리뷰어가 고르지도 않은 선택지의
+ *  안내 HTML·이미지를 통째로 실어 보낼 이유가 없다(데이터 최소화 + 페이로드).
+ *  ★★ `selectedOption` 은 목록과 **같은 객체를 가리키므로 반드시 먼저 골라 두고** 목록만 사본으로 바꾼다
+ *    (여기서 원본을 지우면 내가 참여한 선택지의 가이드까지 함께 사라진다).
+ *  ★ 제거는 rest 문법(가산적) — computeOptionView 에 필드가 늘어도 그대로 흐른다. */
+function _optionListForReviewer(options) {
+  return (options || []).map(v => {
+    const { inflowGuideHtml, inflowGuideImages, ...rest } = v || {};
+    return rest;
+  });
+}
+
 /** 목록용 배치 옵션 조회(캠페인 N개 → 옵션행+카운트 2쿼리). 5초 리스트 캐시로 비용 상각.
  *  @returns Map campaignId → [{ row, cnt }]  (정렬 유지) */
 async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
@@ -1176,6 +1189,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now, scheduleFor(_sm, camp));
       options = await _loadOptionViews(pool, id, st, now);
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
+      options = _optionListForReviewer(options);   // ★ 고른 뒤에 덜어낸다(selectedOption 은 원본 유지)
     }
     // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상일 때만 허용
     const canChangeOption = validHold && options.length >= 2;
@@ -2945,9 +2959,10 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
 
     const now = new Date();
     const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now);
-    const options = await _loadOptionViews(pool, id, st, now);
+    const optionsRaw = await _loadOptionViews(pool, id, st, now);
     // 미리보기용 대표 옵션 — 선택 가능한 첫 옵션(없으면 첫 옵션). 실제 선택이 아니라 화면 예시.
-    const sample = options.find(o => o.selectable) || options[0] || null;
+    const sample = optionsRaw.find(o => o.selectable) || optionsRaw[0] || null;
+    const options = _optionListForReviewer(optionsRaw);   // ★ 실제 리뷰어 응답과 같은 모양(미리보기 ≠ 실화면 금지)
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
