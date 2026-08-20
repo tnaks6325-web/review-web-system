@@ -11,13 +11,13 @@
  *     ㉰ 연도 필터로 목록에서 빠진 시트 기반 활성 탭
  *   끄기(크론 정지)를 판단하려면 **무엇을 끄면 무엇이 멈추는지**를 먼저 알아야 한다.
  *
- * ★★ 판정 사본 0 — 열거식(`REGISTERED_SHEET_IDS_SQL`)과 제외 게이트(`fullySheetlessSheetIds`)를
+ * ★★ 판정 사본 0 — 열거식(`REGISTERED_SHEET_IDS_SQL`)과 제외 게이트(`sweepSkipSheetIds`)를
  *   스윕이 쓰는 **그 함수/상수 그대로** 태운다. 여기서 조건을 다시 쓰면 진단이 "안 읽는다"고 말하는
  *   시트를 스윕은 계속 읽는 상태가 된다(관측이 거짓말이 되는 자리).
  *
  * ★ 읽기 전용 — 쓰기 쿼리 0 · 구글 시트/Drive API 호출 0(전부 DB 조회).
  */
-const { REGISTERED_SHEET_IDS_SQL, fullySheetlessSheetIds } = require('../utils/sheetlessScope');
+const { REGISTERED_SHEET_IDS_SQL, sweepSkipSheetIds } = require('../utils/sheetlessScope');
 /* ★ 시트 주소 조립은 `payment.service.tabSheetUrl` 단일 출처 — 가상 시트ID(`wt_`)면 빈 값이다
    (빈 링크 > 죽은 링크, 레포 규율). 화면이 sheetId 로 직접 조립하면 그 판정이 사라진다. */
 const { tabSheetUrl } = require('./payment.service');
@@ -64,7 +64,7 @@ async function readScope({ limit = LIST_CAP } = {}) {
   // ① 스윕과 같은 열거 → ② 스윕과 같은 게이트
   const { rows: idRows } = await db.query(REGISTERED_SHEET_IDS_SQL);
   const all = [...new Set(idRows.map(r => r.sheet_id).filter(Boolean))];
-  const excluded = await fullySheetlessSheetIds(db);
+  const excluded = await sweepSkipSheetIds(db);
   const reading = all.filter(id => !excluded.has(id));
 
   if (!reading.length) {

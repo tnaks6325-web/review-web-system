@@ -22,7 +22,7 @@ const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { throttledCall, driveThrottledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { allowAutoRegister } = require('../utils/tabRegistration');
-const { fullySheetlessSheetIds, sheetlessTabKeys, isSheetlessTab, REGISTERED_SHEET_IDS_SQL } = require('../utils/sheetlessScope');
+const { sweepSkipSheetIds, sheetlessTabKeys, isSheetlessTab, REGISTERED_SHEET_IDS_SQL } = require('../utils/sheetlessScope');
 
 // ═══════════════════════════════════════════════════════════
 // 상수 및 상태
@@ -535,7 +535,7 @@ async function runSmartBuild({ noYield = false } = {}) {
     // ★★ 무시트 작업 제외(탈 구글시트 W1, 판정 단일 출처 `sheetlessScope`)
     //   등록 탭이 **전부** 무시트인 시트는 구글에 없거나 더는 읽을 이유가 없다 —
     //   안 걸러내면 매 사이클 Drive 404 가 반복된다. 한 탭이라도 시트 기반이면 그 시트는 계속 읽는다.
-    const _slSheets = await fullySheetlessSheetIds(pool);
+    const _slSheets = await sweepSkipSheetIds(pool);
     const sheetIds = [...new Set(campaignRows.map(r => r.sheet_id))]
       .filter(Boolean).filter(id => !_slSheets.has(id));
     result.sheetsChecked = sheetIds.length;

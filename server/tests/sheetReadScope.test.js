@@ -38,7 +38,7 @@ t('1b ★ 스윕 3곳이 그 상수를 쓴다(인라인 문자열 사본 0)', ()
   }
 });
 t('1c ★ 제외 게이트도 사본 없이 같은 함수', () => {
-  assert.ok(/fullySheetlessSheetIds/.test(svcSrc), '진단이 게이트 함수를 안 쓴다');
+  assert.ok(/sweepSkipSheetIds/.test(svcSrc), '진단이 게이트 함수를 안 쓴다');
   // ★ 주석의 설명(BOOL_AND 가 깨진다)은 사본이 아니다 — SQL 절(HAVING)로 판정한다.
   assert.ok(!/HAVING\s+BOOL_AND/i.test(svcSrc), '★ 진단에 게이트 SQL 사본이 생겼다');
 });
@@ -71,18 +71,25 @@ function withStub(rows, run) {
   lastErrSql = null;
   const poolPath = require.resolve('../src/db/pool');
   const orig = require.cache[poolPath];
-  const stub = { query: async (sql) => {
-    if (/UNION SELECT DISTINCT sheet_id FROM tab_configs/.test(sql)) return { rows: rows.sheets };
+  /* ★ 스텁도 `sheet_id = ANY($1)` 를 흉내 낸다 — 걸러 주지 않으면 **제외된 시트의 주문·이름·미러**가
+     응답에 섞여 들어와, 게이트가 제대로 걸렀는지를 이 가드가 영영 못 본다(스텁은 SQL 을 해석하지 않는다). */
+  const only = (list, ids) => (Array.isArray(ids) && Array.isArray(list))
+    ? list.filter(r => ids.includes(r.sheetId || r.sheet_id)) : (list || []);
+  const stub = { query: async (sql, params) => {
+    const ids = params && Array.isArray(params[0]) ? params[0] : null;
+    // ★★ 스윕 제외 게이트는 열거식을 **서브쿼리로 품고 있다** → 더 좁은 이 분기를 먼저 둔다.
+    //   뒤에 두면 게이트가 열거 fixture 를 받아 전 시트가 "제외" 로 판정된다(실측 함정).
     if (/HAVING BOOL_AND/.test(sql)) return { rows: rows.fully };
-    if (/FILTER \(WHERE COALESCE\(sheetless, FALSE\)\)/.test(sql)) return { rows: rows.tc };
-    if (/ORDER BY sheet_id, tab_name/.test(sql)) return { rows: rows.names || [] };
+    if (/UNION SELECT DISTINCT sheet_id FROM tab_configs/.test(sql)) return { rows: rows.sheets };
+    if (/FILTER \(WHERE COALESCE\(sheetless, FALSE\)\)/.test(sql)) return { rows: only(rows.tc, ids) };
+    if (/ORDER BY sheet_id, tab_name/.test(sql)) return { rows: only(rows.names, ids) };
     // ★★ 더 좁은 조건을 먼저 — 두 쿼리 모두 order_submissions 라 순서를 바꾸면
     //   실패 사유 조회가 상태 집계 fixture 를 받아 조용히 통과한다(csEntryRework 실측 함정).
     if (/FROM order_submissions/.test(sql) && /GROUP BY 1, 2, 3/.test(sql)) {
-      lastErrSql = sql; return { rows: rows.errs || [] };
+      lastErrSql = sql; return { rows: only(rows.errs, ids) };
     }
-    if (/FROM order_submissions/.test(sql)) return { rows: rows.pend || [] };
-    if (/FROM raw_sheet_tabs/.test(sql)) return { rows: rows.mir || [] };
+    if (/FROM order_submissions/.test(sql)) return { rows: only(rows.pend, ids) };
+    if (/FROM raw_sheet_tabs/.test(sql)) return { rows: only(rows.mir, ids) };
     throw new Error('예상 못한 쿼리: ' + sql.slice(0, 60));
   } };
   // ★★ 스텁은 **실제 모듈과 같은 모양**이어야 한다 — `db/pool` 은 풀 자체를 export 한다.
@@ -102,7 +109,9 @@ const FIXTURE = {
   //  ★ 입력 순서를 일부러 뒤집어 둔다 — 같은 순서면 '정렬을 아예 안 해도' 통과한다(변이시험 실측)
   sheets: [{ sheet_id: 'S3' }, { sheet_id: 'S2' }, { sheet_id: 'S1' }, { sheet_id: 'S4' }],
   // (가상 시트ID 케이스는 6c 에서 따로 본다)
-  fully: [{ sheet_id: 'S4' }],
+  // ★ 게이트(`sweepSkipSheetIds`)가 실제로 돌려주는 값 — 5단계 확장으로 마감만(S2)·등록 탭 0(S3)도 포함된다.
+  //   좁은(구) 규칙으로 되돌린 경우는 3c-2 가 `fully: [S4]` 로 따로 본다.
+  fully: [{ sheet_id: 'S4' }, { sheet_id: 'S2' }, { sheet_id: 'S3' }],
   tc: [
     { sheetId: 'S1', tabs: 3, sheetlessTabs: 2, liveSheetTabs: 1, closedSheetTabs: 0 },
     { sheetId: 'S2', tabs: 2, sheetlessTabs: 1, liveSheetTabs: 0, closedSheetTabs: 1 },
@@ -125,43 +134,56 @@ const FIXTURE = {
   mir: [{ sheetId: 'S1', mirroredAt: '2026-08-19T10:00:00Z' }],
 };
 
-let R = null;
+let R = null, RN = null;
+/* ★ FIXTURE_NARROW = 킬스위치(`SHEET_SWEEP_SKIP_WIDE=0`) 로 되돌린 조건 — 게이트가 무시트 시트만 제외한다.
+   세 사유가 함께 보이는 상태라 정렬·화면 렌더·사유 표기 검사는 이쪽으로 본다. */
+const FIXTURE_NARROW = { ...FIXTURE, fully: [{ sheet_id: 'S4' }] };
 (async () => {
   await withStub(FIXTURE, async svc => { R = await svc.readScope(); });
+  await withStub(FIXTURE_NARROW, async svc => { RN = await svc.readScope(); });
 
-  t('3a 무시트로 전부 덮인 시트는 목록에서 빠진다', () => {
+  t('3a 게이트가 제외한 시트는 목록에서 빠진다', () => {
     assert.strictEqual(R.registered, 4);
-    assert.strictEqual(R.excludedSheetless, 1);
-    assert.strictEqual(R.reading, 3);
+    assert.strictEqual(R.excludedSheetless, 3);   // S4(무시트) + S2(마감만) + S3(등록 탭 0)
+    assert.strictEqual(R.reading, 1);
     assert.ok(!R.items.some(i => i.sheetId === 'S4'), 'S4 가 남았다');
   });
-  t('3b ★ 마감 탭만 남은 시트도 "읽는 시트"로 잡힌다(BOOL_AND 가 깨진다)', () => {
-    const s2 = R.items.find(i => i.sheetId === 'S2');
-    assert.ok(s2, 'S2 가 목록에 없다');
-    assert.strictEqual(s2.reason, 'closed_only');
+  /* ★★ 3b·3c 는 **의미가 바뀐 자리다**(5단계 사용자 확정 2026-08-20).
+     종전에는 "마감만 남은 시트·등록 탭 0 인 시트도 계속 읽힌다"는 **누수 증상**을 고정했고,
+     그것이 이 진단을 만든 이유였다. 지금은 게이트(`sweepSkipSheetIds`)가 그 둘을 제외하므로
+     **읽는 목록에서 빠지는 것**이 정답이다. 진단은 게이트를 그대로 태우므로 자동으로 일치한다.
+     ★ 사유 분류(`closed_only`·`campaigns_only`)는 지우지 않는다 — 킬스위치
+       `SHEET_SWEEP_SKIP_WIDE=0` 으로 되돌리면 그 시트들이 다시 목록에 뜨고 사유가 필요하다. */
+  t('3b ★ 마감 탭만 남은 시트는 이제 스윕에서 빠진다(5단계 게이트 확장)', () => {
+    assert.ok(!R.items.some(i => i.sheetId === 'S2'), 'S2 가 아직 읽는 시트로 남았다');
   });
-  t('3c ★ 등록 탭이 없고 campaigns 행만 남은 시트도 잡힌다(아카이브 잔존)', () => {
-    const s3 = R.items.find(i => i.sheetId === 'S3');
-    assert.ok(s3, 'S3 가 목록에 없다');
-    assert.strictEqual(s3.reason, 'campaigns_only');
-    assert.strictEqual(s3.tabs, 0);
+  t('3c ★ 등록 탭 0(campaigns 행만) 시트도 빠진다', () => {
+    assert.ok(!R.items.some(i => i.sheetId === 'S3'), 'S3 가 아직 읽는 시트로 남았다');
+  });
+  t('3c-2 ★ 킬스위치로 되돌리면 그 둘이 다시 잡히고 사유를 말한다(막다른 길 금지)', () => {
+    const s2 = RN.items.find(i => i.sheetId === 'S2');
+    const s3 = RN.items.find(i => i.sheetId === 'S3');
+    assert.ok(s2 && s2.reason === 'closed_only', '마감만 남은 시트의 사유가 없다');
+    assert.ok(s3 && s3.reason === 'campaigns_only' && s3.tabs === 0, 'campaigns 잔존 사유가 없다');
   });
   t('3d 살아 있는 시트 작업은 사유·이름·미반영 주문을 함께 말한다', () => {
     const s1 = R.items.find(i => i.sheetId === 'S1');
     assert.strictEqual(s1.reason, 'sheet_tab_live');
     assert.deepStrictEqual(s1.liveTabNames, ['0801 살아있는작업']);
     assert.strictEqual(s1.pendingOrders, 4);
-    assert.strictEqual(R.pendingOrdersTotal, 6);
+    // ★ 제외된 시트의 주문은 세지 않는다 — 스윕이 안 읽는 시트라 "크론을 끄면 못 쓴다"의 대상이 아니다
+    assert.strictEqual(R.pendingOrdersTotal, 4);
   });
   t('3d-2 ★★ 막힌 주문을 상태·기간으로 갈라 준다(건수만으로는 잔재인지 살아있는지 못 가린다)', () => {
     const s1 = R.items.find(i => i.sheetId === 'S1');
     assert.deepStrictEqual(s1.pendingByStatus, { stuck_manual: 3, failed: 1 });
-    assert.deepStrictEqual(R.pendingByStatus, { stuck_manual: 3, failed: 1, conflict: 2 });
+    assert.deepStrictEqual(R.pendingByStatus, { stuck_manual: 3, failed: 1 });
     assert.ok(s1.pendingOldest && s1.pendingNewest, '제출 기간이 없다');
     assert.ok(new Date(s1.pendingOldest) < new Date(s1.pendingNewest), '최오래/최근이 뒤바뀌었다');
   });
   t('3e 조치가 필요한 순서로 정렬한다(살아있음 → 마감만 → campaigns만)', () => {
-    assert.deepStrictEqual(R.items.map(i => i.reason), ['sheet_tab_live', 'closed_only', 'campaigns_only']);
+    // ★ 정렬은 세 사유가 함께 있을 때만 의미가 있다 → 좁은 규칙(킬스위치) 조건에서 본다.
+    assert.deepStrictEqual(RN.items.map(i => i.reason), ['sheet_tab_live', 'closed_only', 'campaigns_only']);
   });
   t('3f 사유 문구는 서버 한 곳(REASONS)에서 나온다', () => {
     assert.ok(R.reasons && R.reasons.closed_only && R.items.every(i => i.reasonText),
@@ -235,7 +257,7 @@ let R = null;
     };
     vm.createContext(sandbox);
     vm.runInContext(FE.slice(start, end), sandbox);
-    sandbox._RS = R;
+    sandbox._RS = RN;   // ★ 세 사유가 함께 보이는 조건(좁은 규칙)에서 화면을 본다
     vm.runInContext('_rsRender()', sandbox);
     const h = box.innerHTML;
     assert.ok(/읽는 시트 3개/.test(h), '요약이 없다: ' + h.slice(0, 120));
@@ -283,7 +305,7 @@ let R = null;
   t('7c 서버가 갈라 센 값이 상태별 합계와 맞는다', () => {
     assert.strictEqual(R.pendingRetryable + R.pendingManual, R.pendingOrdersTotal);
     assert.strictEqual(R.pendingRetryable, 1);
-    assert.strictEqual(R.pendingManual, 5);
+    assert.strictEqual(R.pendingManual, 3);   // stuck_manual 3 (conflict 는 제외된 시트라 세지 않는다)
     assert.deepStrictEqual(R.retryableStatuses, require('../src/services/sheetReadScope.service').RETRYABLE_STATUSES);
   });
   t('7d ★ 구버전 백엔드(목록 미동봉)면 종전 문구로 접는다(빈 화면·거짓 분해 금지)', () => {
@@ -303,7 +325,7 @@ let R = null;
   });
 
   console.log('\n[8] 실패 사유 — 무엇이 왜 막혔는지');
-  await withStub(FIXTURE, async (svc) => {
+  await withStub(FIXTURE_NARROW, async (svc) => {
     const r = await svc.readScope({});
     const s1 = r.items.find(i => i.sheetId === 'S1');
     t('8a ★ 재시도 대상 상태만 조회한다(conflict 의 셀 원문을 화면으로 끌어오지 않는다)', () => {
