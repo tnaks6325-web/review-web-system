@@ -1638,6 +1638,8 @@
   .cndnote{margin-top:9px;font-size:11.5px;color:var(--muted);line-height:1.5}
   .cndwarnbox{background:var(--warn-soft);border:1px solid #f3e2c4;border-radius:9px;padding:9px 11px;
               font-size:11.5px;color:var(--ink);margin-bottom:11px;line-height:1.5}
+  /* 리뷰타입 칩 선택 표시(미니 팝업) */
+  #cndRtChips .wbl-b.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
   .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -5917,9 +5919,9 @@ function _condCardHtml(wd,d,m){
     ['유입방식','order', inflow?esc(inflow):null],
     ['다계정','camp',    !ma?null:(ma.enabled?`허용${ma.dailyLimit?` <span class="u">하루 ${ma.dailyLimit}건</span>`:' <span class="u">제한 없음</span>'}`:'불가')],
     ['현금영수증','tab', cd.cashReceipt==null?null:(cd.cashReceipt?'대상':'해당 없음')],
-    ['리뷰비','camp',    cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
-    ['입금명','camp',    cd.depositName?esc(cd.depositName):null],
-    ['리뷰타입','camp',  cd.reviewTypeLabel?esc(cd.reviewTypeLabel):null],
+    ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
+    ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
+    ['리뷰타입','rtype', cd.reviewTypeLabel?esc(cd.reviewTypeLabel):null],
   ].map(([k,kind,v])=>`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`).join('');
   const prod=cd.productName||d.productOption||m.campaignName||'';
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
@@ -5932,39 +5934,151 @@ function _condCardHtml(wd,d,m){
    camp   구매채널·다계정·리뷰비·입금명·리뷰타입 → 모집공고 수정 모달
    order  결제금액·유입방식 → 작업오더 관리자 수정 모달
    tab    현금영수증 → 탭 설정(캡처 슬롯) — 이 화면엔 창구가 없어 사유만 말한다 */
+/* ★★ 공고가 없어도 막다른 길을 만들지 않는다(사용자 확정 2026-08-20):
+     · 리뷰비·입금명·리뷰타입 = **탭에 저장할 수 있다** — 판정 순서가 전부 "공고 → 탭"이라
+       (resolveReviewFee 128 · 입금관리 통장표시 · resolveReviewType), 나중에 공고를 만들면
+       **공고 값이 자동으로 이긴다**(동기화를 코드로 잇는 게 아니라 판정 규칙이 보장한다).
+     · 구매채널·다계정 = 공고에만 있는 개념(탭 저장소가 없다) → **공고 발행 화면을 연다**
+       (탭·작업오더 프리필). 발행하면 그 값이 이 카드에 반영된다.
+     · 총건수·일건수 = 발주가 있으면 **작업오더 수정**(공고 발행 프리필의 원천 — 나중에 공고를
+       만들면 그 값으로 채워지고, 공고가 생기면 공고 정원이 우선), 없으면 공고 발행으로.
+   ★ 리뷰비·입금명 저장 창구(transfer-setting)는 adminOrMaster — AE 에게는 사유를 말한다. */
 function _cndFixGate(cd,kind){
   if(!STATE.canEdit) return {can:false,tip:'설정은 담당자만 할 수 있습니다.'};
+  const isAdmin=(STATE.role==='master'||STATE.role==='admin');
   if(kind==='tab') return {can:true,tip:'진행방식을 고쳐 현금영수증 캡처 칸 여부를 정합니다 — 리뷰어 제출 화면에 바로 반영됩니다.'};
   if(kind==='order') return cd.workOrderId
     ? {can:true,tip:'작업오더 수정 창을 엽니다 — 저장하면 이 작업 조건과 인트라넷 보낸오더에 함께 반영됩니다.'}
     : {can:false,tip:'연결된 작업오더가 없습니다 — 작업오더를 먼저 연결하세요.'};
-  if(kind==='quota') return cd.campaignId
-    ? {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'}
-    : {can:false,tip:'연결된 모집공고가 없습니다 — 공고를 발행하면 정원을 정할 수 있습니다.'};
+  if(kind==='quota'){
+    if(cd.campaignId) return {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'};
+    if(cd.workOrderId) return {can:true,tip:'작업오더 수정 창을 엽니다(모집 인원·일건수) — 공고를 발행하면 이 값이 프리필되고, 발행 뒤에는 공고 정원이 우선합니다.'};
+    return {can:true,tip:'공고 발행 화면을 엽니다(이 작업 프리필) — 정원은 공고에서 정합니다.'};
+  }
+  if(kind==='fee'||kind==='memo'){
+    if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
+    return isAdmin
+      ? {can:true,tip:'탭 설정에 저장합니다 — 나중에 공고를 발행하면 공고 값이 우선합니다.'}
+      : {can:false,tip:'공고가 없는 작업의 '+(kind==='fee'?'리뷰비':'입금명')+' 저장은 관리자만 할 수 있습니다.'};
+  }
+  if(kind==='rtype'){
+    if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
+    return {can:true,tip:'탭 설정에 저장합니다(제출 화면·검수에 바로 적용) — 나중에 공고를 발행하면 공고 값이 우선합니다.'};
+  }
   return cd.campaignId
     ? {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'}
-    : {can:false,tip:'연결된 모집공고가 없습니다 — 공고를 발행하면 설정할 수 있습니다.'};
+    : {can:true,tip:'공고 발행 화면을 엽니다(이 작업·작업오더 프리필) — 발행하면 그 값이 이 카드에 반영됩니다.'};
 }
 async function _cndFix(kind){
   const cd=(STATE.wd&&STATE.wd.condition)||null; if(!cd) return;
   const g=_cndFixGate(cd,kind); if(!g.can){ _toast(g.tip); return; }
   if(kind==='tab') return _cndCashModal();
-  if(kind==='quota') return openCurrentCampaignDailyPlan();
-  if(kind==='order'){
-    if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
-    /* ★ 모달은 작업오더 **원본 행**(snake_case)을 프리필로 받는다 — 작업보드 응답의 detail 은
-       camelCase 라 그대로 넘기면 폼이 빈 채로 열린다(그 상태로 저장하면 값이 지워진 것처럼 보인다). */
-    const t=STATE.cur; if(!t) return;
-    const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
-    const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
-    if(!o){ _toast('작업오더를 불러오지 못했습니다. 작업오더 탭에서 수정해 주세요.'); return; }
-    return woAdminEditModal(o,{
-      save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id:o.id,...fields})}),
-      onSaved: ()=>{ _toast('✏ 수정 저장됨'); _cndReload(); }
-    });
+  if(kind==='quota'){
+    if(cd.campaignId) return openCurrentCampaignDailyPlan();
+    if(cd.workOrderId) return _cndOrderModal(cd);          // 정원 프리필 원천 = 작업오더
+    return _cndPublish(cd);                                 // 발주도 없으면 발행으로
   }
+  if(kind==='order') return _cndOrderModal(cd);
+  if((kind==='fee'||kind==='memo')&&!cd.campaignId) return _cndTabValueModal(kind,cd);
+  if(kind==='rtype'&&!cd.campaignId) return _cndRtypeModal(cd);
+  if(!cd.campaignId) return _cndPublish(cd);               // 구매채널·다계정 — 공고 발행으로
   if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
   await openRecruitModal(String(cd.campaignId));
+}
+/* 작업오더 수정 — 원본 행(snake_case)을 다시 받아 넘긴다. 작업보드 응답의 detail 은 camelCase 라
+   그대로 넘기면 폼이 빈 채로 열린다(그 상태로 저장하면 값이 지워진 것처럼 보인다). */
+async function _cndOrderModal(cd){
+  if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
+  const t=STATE.cur; if(!t) return;
+  const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
+  if(!o){ _toast('작업오더를 불러오지 못했습니다. 작업오더 탭에서 수정해 주세요.'); return; }
+  return woAdminEditModal(o,{
+    save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id:o.id,...fields})}),
+    onSaved: ()=>{ _toast('✏ 수정 저장됨'); _cndReload(); }
+  });
+}
+/* ══ 공고 없는 작업의 설정 3종 ══════════════════════════════════════════════════
+   ★★ "동기화"를 코드로 잇지 않는다 — 판정 순서가 전부 **공고 → 탭**이라(리뷰비 resolveReviewFee
+     128 · 입금명 payment.service campMemo→tabMemo · 리뷰타입 resolveReviewType), 지금 탭에 넣은
+     값은 그대로 쓰이다가 **공고를 발행하는 순간 공고 값이 자동으로 이긴다**. 별도 복사·동기화
+     코드를 두면 그 코드가 곧 두 번째 진실이 되어 갈라진다.
+   ★ 저장 창구도 기존 것: 리뷰비·입금명 = 입금관리 보완 API(transfer-setting — campaignId 없이
+     부르면 서버가 탭에 저장한다) / 리뷰타입 = 탭 설정(POST /api/tab/config) 프록시. 신규 경로 0. */
+function _cndTabValueModal(kind,cd){
+  const fee=kind==='fee';
+  const cur=fee?(cd.feeSource?String(cd.reviewFee??''):''):(cd.depositName||'');
+  _cndMini({
+    title: fee?'💰 리뷰비 — 탭 설정':'🏷 입금명 — 탭 설정',
+    body: `<label class="cndlb" for="cndMiniIn">${fee?'리뷰비(원)':'입금명(통장표시 · 8자)'}</label>`+
+      `<input id="cndMiniIn" class="inp" value="${esc(cur)}" ${fee?'inputmode="numeric" placeholder="예: 1500 · 0 = 무상 · 비우면 미설정"':'maxlength="8" placeholder="예: 파우더망고"'}>`+
+      `<div class="cndnote">아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 입금관리·리뷰어 화면이 이 값을 씁니다.<br>나중에 공고를 발행하면 <b>공고에 적은 값이 우선</b>합니다(자동).</div>`,
+    onSave: async ()=>{
+      const t=STATE.cur; const v=String(($('#cndMiniIn')||{}).value||'').trim();
+      if(fee && v!=='' && !/^[\d,]+$/.test(v)){ _toast('리뷰비는 숫자로 입력해 주세요.'); return false; }
+      const body={sheetId:t.sheetId,tabName:t.tabName};
+      if(fee) body.reviewFee=v; else body.memo=v;
+      const r=await api('/api/trackb/payment/transfer-setting',{method:'POST',body:JSON.stringify(body)}).catch(()=>null);
+      if(!r||!r.ok){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return false; }
+      return true;
+    }
+  });
+}
+function _cndRtypeModal(cd){
+  /* 선택지 = 공유 표 RF_REVIEW_TYPE_LABELS(index-recruit.js — 회귀가드가 서버 REVIEW_TYPES 와
+     일치를 고정). ★ 사본을 새로 적지 않는다. ★ '혼합'은 탭 창구에서 제외 — 행별 판정이라
+     저장해도 카드가 계속 — 로 남아 "저장했는데 그대로"가 된다(공고 모달에는 있다). */
+  if(typeof RF_REVIEW_TYPE_LABELS==='undefined'){ _toast('리뷰타입 목록 모듈을 불러오지 못했습니다.'); return; }
+  const opts=RF_REVIEW_TYPE_LABELS.filter(([k])=>k!=='mixed');
+  _cndMini({
+    title:'✅ 리뷰타입 — 탭 설정',
+    body: `<div class="cndchips" id="cndRtChips">${opts.map(([k,l])=>`<button type="button" class="wbl-b" data-v="${esc(l)}" onclick="_cndRtPick(this)">${esc(l)}</button>`).join('')}<button type="button" class="wbl-b" data-v="" onclick="_cndRtPick(this)">비우기</button></div>`+
+      `<div class="cndnote">제출 화면의 캡처 안내와 리뷰검수 판정이 이 값을 봅니다.<br>아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 공고를 발행하면 <b>공고 리뷰타입이 우선</b>합니다(자동).</div>`,
+    onSave: async ()=>{
+      const sel=document.querySelector('#cndRtChips .wbl-b.on');
+      if(!sel){ _toast('리뷰타입을 선택해 주세요.'); return false; }
+      const t=STATE.cur;
+      const r=await api('/api/trackb/tab/config',{method:'POST',
+        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||'',reviewType:sel.dataset.v})}).catch(()=>null);
+      if(!r||r.error){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return false; }
+      return true;
+    }
+  });
+  // 현재 값 표시
+  const curLb=cd.reviewTypeLabel||'';
+  document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>{ if(b.dataset.v===curLb) b.classList.add('on'); });
+}
+function _cndRtPick(el){ document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
+/* 공고 발행 — 이 작업(탭)·작업오더 프리필로 발행 모달을 연다. 발행하면 CAMP_ON_SAVED 훅이
+   작업 조건을 다시 읽어 그 값이 카드에 반영된다. 발행 권한(편집 허용명단)은 서버가 최종 방어. */
+async function _cndPublish(cd){
+  if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
+  if(!(await _loadCampPerm())){ _toast('공고 발행은 편집 허용명단 담당자만 할 수 있습니다.'); return; }
+  const t=STATE.cur; if(!t) return;
+  if(cd.workOrderId){
+    const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+    const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
+    if(o && typeof _woCampaignPrefill==='function') return openRecruitModal(null,_woCampaignPrefill(o),o.id);
+  }
+  return openRecruitModal(null,{linked_sheet_id:t.sheetId,linked_tab_name:t.tabName,linked_tab_gid:t.tabGid||''});
+}
+/* 공용 미니 팝업 — 현금영수증 팝업과 같은 계약(body 직속 · 바깥 클릭으로 안 닫힘 · Esc 해제) */
+function _cndMiniClose(){ const o=document.getElementById('cndMiniOv'); if(o) o.remove();
+  if(STATE._cndMiniEsc){ document.removeEventListener('keydown',STATE._cndMiniEsc); STATE._cndMiniEsc=null; } }
+function _cndMini({title,body,onSave}){
+  _cndMiniClose();
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cndMiniOv';
+  ov.innerHTML=`<div class="wbl-dlg" style="max-width:460px"><div class="wbl-dh">${title}</div>`+
+    `<div class="wbl-db">${body}</div>`+
+    `<div class="wbl-df"><button class="wbl-b" onclick="_cndMiniClose()">취소</button>`+
+    `<button class="wbl-b pri" id="cndMiniSave">저장</button></div></div>`;
+  document.body.appendChild(ov);
+  document.getElementById('cndMiniSave').onclick=async ()=>{
+    const ok=await onSave();
+    if(ok){ _cndMiniClose(); _toast('저장됨 — 공고를 발행하면 공고 값이 우선합니다'); _cndReload(); }
+  };
+  STATE._cndMiniEsc=e=>{ if(e.key==='Escape') _cndMiniClose(); };
+  document.addEventListener('keydown',STATE._cndMiniEsc);
 }
 /* ══ 현금영수증 설정 — 진행방식(tab_configs.income_type) 편집 ══════════════════════
    ★★ 켜기/끄기 둘 다 **진행방식 문자열**을 거친다 — 판정 규칙이 그렇게 돼 있다
