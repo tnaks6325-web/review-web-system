@@ -239,10 +239,52 @@ function makeStub({ dupRow = null, dupTableRow = null, openSlot = { id: 'p9', se
   //   고정할 것은 "㉯ 축 키가 주문 기록(order_submission_id)에서 나온다"는 사실이다.
   ok('★★ ㉯ 축 = 같은 주문 기록(order_submission_id)을 여러 줄이 씀',
     /const byOrder = new Map\(\);/.test(dedupeSrc) && /'os:' \+ String\(r\.osid\)/.test(dedupeSrc));
-  // ★★ 2026-08-19 실사고(장수산업) — 링크가 오염돼 있어도 **표 주문번호가 다르면 묶지 않는다**.
-  //   이 조건이 빠지면 별개 참여가 중복으로 지워진다(오삭제의 직접 원인이었다).
-  ok('★★ ㉯ 축도 표 주문번호가 다르면 묶지 않는다',
-    /'os:' \+ String\(r\.osid\)[\s\S]{0,160}r\.roword/.test(dedupeSrc));
+  /* ★★ 2026-08-19 실사고(장수산업) — 링크가 오염돼 있어도 **표 주문번호가 다르면 묶지 않는다**.
+     이 조건이 빠지면 별개 참여가 중복으로 지워진다(오삭제의 직접 원인이었다).
+     ⚠⚠ 이 단언은 원래 거리 기반 정규식(`'os:' + String(r.osid)` 뒤 160자 안에 `r.roword`)이었는데,
+        그 값을 **지역변수로 뽑는 리팩터**(65020a6) 하나에 리터럴이 앞으로 이동해 조용히 빨개졌다.
+        바로 윗줄이 같은 함정을 경고하고 있었는데도 같은 방식으로 다시 밟은 자리다.
+        → 규칙을 **실행으로** 고정한다(문자열 배치가 어떻게 바뀌든 동작이 규칙을 지키면 초록). */
+  {
+    const led4 = require('../src/services/sheetlessLedger.service');
+    const b = { name: '김신혜', submitted: false, paid: false, in_payment: false, ordnum: '', ph: '01090411926' };
+    const runAxis = async (rows) => {
+      led4.__setPoolForTest({
+        query: async (sql) => {
+          if (/FROM tab_configs/.test(sql)) return { rows: [{ sheetless: true }] };
+          if (/JOIN order_submissions os ON os\.id = cp\.order_submission_id/.test(sql)) return { rows };
+          return { rows: [] };
+        },
+      });
+      const r = await led4.dedupeRows({ sheetId: 'wt_x', tabName: 'T1' });
+      led4.__setPoolForTest(null);
+      return r;
+    };
+    // ① 표 주문번호까지 같으면 종전대로 한 묶음(무회귀 — 이 축이 존재하는 이유)
+    const same = await runAxis([
+      { ...b, seq: 1, osid: 'o1', roword: '16102387707847' },
+      { ...b, seq: 2, osid: 'o1', roword: '16102387707847' },
+    ]);
+    ok('★★ ㉯ 축: 같은 주문 기록 + 표 주문번호 같음 → 한 묶음', same.groups === 1 && same.removeRows === 1);
+    // ② 링크는 같은데 표 주문번호가 다르다 = 다른 구매(장수산업 실사고)
+    const diff = await runAxis([
+      { ...b, seq: 1, osid: 'o1', roword: '16102387707847' },
+      { ...b, seq: 2, osid: 'o1', roword: '16102062667987' },
+    ]);
+    ok('★★ ㉯ 축도 표 주문번호가 다르면 묶지 않는다', diff.groups === 0 && diff.removeRows === 0);
+    // ③ 표 주문번호가 비어 있으면 판정 근거가 없다 → 묶지 않는다(2026-08-19 2차 확정)
+    const blank = await runAxis([
+      { ...b, seq: 1, osid: 'o1', roword: '' },
+      { ...b, seq: 2, osid: 'o1', roword: '' },
+    ]);
+    ok('★★ 표 주문번호가 없으면 링크만으로 묶지 않는다', blank.groups === 0 && blank.removeRows === 0);
+    // ④ 한쪽만 값이 있는 것도 "같다"로 읽지 않는다(모르는 것을 같다고 하지 않는다)
+    const half = await runAxis([
+      { ...b, seq: 1, osid: 'o1', roword: '16102387707847' },
+      { ...b, seq: 2, osid: 'o1', roword: '' },
+    ]);
+    ok('★ 한쪽만 표 주문번호가 있으면 묶지 않는다', half.groups === 0 && half.removeRows === 0);
+  }
   // ★★ 표 주문번호 SQL 은 **공유 조각 `utils/tableOrderNum`** 이 소유한다(중복 정리·주문 기록이 같은 값을
   //   봐야 한다 — 서로 다른 규칙이면 한쪽은 지우고 다른 쪽은 또 만드는 상태가 된다). 인라인 사본 금지.
   ok('★ 표에 보이는 주문번호를 공유 조각으로 읽는다(사본 금지)',
