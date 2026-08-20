@@ -55,8 +55,9 @@ ok('index-app: _woOptionRows(product_options_json → 옵션행)', /function _wo
 //   (옛 패턴 `rows.length >= 2` 를 그대로 두면 배선 변경을 못 보고 통과한다 — grep 가드 갱신 규율)
 ok('index-app: 새 오더의 명시적 옵션 모드를 우선하고, 옛 오더는 옵션 2개 이상일 때만 옵션 작업으로 본다',
   /function _woProductMode\(o\)/.test(app)
-  && /const explicitOptionMode = String\(\(arr\[0\] \|\| \{\}\)\.product_mode \|\| ""\) === "opt"/.test(app)
-  && /return explicitOptionMode \|\| rows\.filter\(r => r\.optKey\)\.length >= 2 \? rows : \[\]/.test(app));
+  // ⚠ 134 — 복합 작업은 상품마다 모드가 다르다 → 첫 상품만 보던 판정을 전 상품으로 넓혔다(검사 의미 = 새 규칙).
+  && /const explicitMode = arr\.some\(p => p && String\(p\.product_mode \|\| ""\)\)/.test(app)
+  && /return explicitMode \|\| rows\.filter\(r => r\.optKey\)\.length >= 2 \? rows : \[\]/.test(app));
 // ⚠ 134(선택 단위별 유입가이드)로 옵션 없는 상품 행에 unitKind·optionUrl·가이드가 끼면서
 //   `optKey: "", payAmount: basePay` 가 더는 붙어 있지 않다 → 두 조건을 따로 본다(검사 의미 불변).
 ok('★ index-app: 상품명을 옵션명(optKey)으로 승격하지 않는다 — 시트 옵션칸 상품명 오기입 차단',

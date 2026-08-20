@@ -2628,7 +2628,8 @@ function applyProductRowsFromOrder(prefill) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   const p = prefill || {};
-  const sourceMode = p.productMode === "opt" ? "opt" : "";
+  // ★★ 134 — 작업오더가 "옵션 없음"을 **명시**한 경우도 신호다(빈 값 = 명시 없음 = 종전 추론).
+  const sourceMode = p.productMode === "opt" ? "opt" : (p.productMode === "none" ? "none" : "");
   const sourceOptions = (Array.isArray(p.options) ? p.options : []).map(o => ({
       productName: o.productName || p.product_name || "",
       // ★★ 134 — 선택 단위(옵션/옵션 없는 상품)와 그 선택지 전용 유입가이드를 **그대로 통과**시킨다.
