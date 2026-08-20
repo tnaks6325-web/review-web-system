@@ -2140,7 +2140,7 @@ function _captureLinkHtml() {
         </div>
         <p style="font-size:.78rem;color:var(--t3);margin:0 0 12px;line-height:1.6">
           리뷰어는 캡처를 올렸는데 <b>주문과의 연결만 끊긴</b> 건을 찾아 이어 붙입니다.
-          그 탭의 <b>[구매캡처] 폴더</b>를 실제로 훑어 파일명(수취인)이 맞는 파일을 찾습니다.<br>
+          그 탭의 <b>[구매캡처] 폴더</b>를 실제로 훑어 <b>파일명의 수취인명이 그 행의 수취인명과 같은</b> 파일을 찾습니다.<br>
           ★ <b>파일이 아예 없는 건은 여기서 복구할 수 없습니다</b> — 그건 리뷰어가 다시 올려야 하고,
           리뷰어 홈의 <b>보완 첨부 카드</b>가 그 창구입니다.<br>
           ★ 파일을 만들거나 옮기거나 지우지 않습니다. 바뀌는 것은 주문의 <b>캡처 연결 두 칸</b>뿐입니다.
@@ -2150,9 +2150,9 @@ function _captureLinkHtml() {
             <input id="clbDays" type="number" min="1" max="3650" value="30" style="width:74px;padding:5px 7px;border:1px solid var(--border,#e5e8eb);border-radius:6px;font-size:.78rem;font-family:inherit"> 일
           </label>
           <label style="font-size:.78rem;color:var(--t2);display:flex;align-items:center;gap:5px">
-            <input id="clbAllowLow" type="checkbox"> 시각이 먼 파일까지 포함
+            <input id="clbAllowLow" type="checkbox"> 수취인명 없는 건도 이름만 보고 포함
           </label>
-          <span style="font-size:.72rem;color:var(--t3)">(기본은 제출 시각 근처 파일만 — 동명이인·과거 회차 오연결 방지)</span>
+          <span style="font-size:.72rem;color:var(--t3)">(기본: <b>수취인명이 같으면</b> 제출 시각과 무관하게 연결 — 후보가 둘 이상이거나 한 파일을 두 주문이 노리면 건너뜁니다)</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <button class="as-btn" id="clbPreviewBtn" onclick="captureLinkRun(true)">🔍 미리보기</button>
