@@ -287,6 +287,10 @@ console.log('\n[F] 동적 키 정리 — 고정 3칸(유입/리뷰/특이) 보�
   ok('_ugDropAll 후 동적 키 0', t.run('Object.keys(_IG_FIELDS).filter(k => /^u\\d+$/.test(k)).length') === 0);
   ok('고정 3칸은 남는다', t.run("['inflow','review','notes'].every(k => !!_IG_FIELDS[k] && !!_IG_TA[k] && !!window._igState[k])") === true);
   ok('고정 3칸의 값도 그대로', t.run("window._igState.inflow.length") === 1);
+  // ★ 방어는 두 겹 — 목록 필터(_ugDropAll)와 _ugDrop 자신. 안쪽 것도 따로 고정한다
+  //   (한쪽만 지워도 통과하면 다음 사람이 "중복"이라며 안쪽을 걷어낸다)
+  t.run("_ugDrop('inflow')");
+  ok('_ugDrop 자체가 고정 3칸을 거절한다', t.run("!!_IG_FIELDS.inflow && window._igState.inflow.length === 1") === true);
 
   // 표를 다시 그리면 옛 키가 남지 않는다(사라진 행의 상태가 위젯에 유령으로 남는 것 차단)
   const t2 = mixedTable();
@@ -305,6 +309,16 @@ console.log('\n[G] 작업내용 원문 — 상품 단위는 "상품명 - 옵션�
   ok('원문에 "상품B - 상품B" 오염 없음', !/상품B - 상품B/.test(t.dom.byId.rf_wd_product.value));
   ok('원문에 상품B 금액은 살아 있다', /상품B - 결제금액 19,000원/.test(t.dom.byId.rf_wd_product.value));
   ok('옵션 단위는 종전대로 "상품명 - 옵션명"', /상품A - 옵션A - 결제금액/.test(t.dom.byId.rf_wd_product.value));
+
+  // ★★ 숨은 옵션명 칸에 잔여값이 남아 있어도(모드 전환·프리필 잔재) 원문으로 새지 않는다
+  //    — 판정은 "그 칸이 비었나"가 아니라 **그룹의 선택 단위**여야 한다
+  const bRowEl = t.dom.byId.rf_opt_rows.querySelectorAll('.rf-gp')[1].querySelectorAll('.rf-opt-row')[0];
+  bRowEl.querySelector('.rf-opt-name').value = '잔재옵션';
+  const raw2 = JSON.parse(t.run('JSON.stringify(_readProdRowsRaw())'));
+  ok('상품 단위는 숨은 옵션명 잔재를 무시한다',
+    raw2.filter(r => r.productName === '상품B')[0].optKey === '');
+  t.run('_syncPreviewFromOptRows()');
+  ok('원문에도 잔재 옵션명이 안 샌다', !/잔재옵션/.test(t.dom.byId.rf_wd_product.value));
 }
 
 /* ══════════════ H. 자동점검 = 경고 전용 ══════════════ */
@@ -332,6 +346,15 @@ console.log('\n[I] 화면 계약 — 접힘 · 행 끝 도구칸 · 옵션명 �
     /\.rf-pm-opt \.rf-prod-head\[data-pm="opt"\],#recruitModal \.rf-pm-opt \.rf-opt-row\{grid-template-columns:[^}]*48px\}/.test(modalSrc));
   ok('머리줄과 행이 같은 규칙으로 함께 움직인다(열 어긋남 차단)',
     /\.rf-prod-head\[data-pm="opt"\],#recruitModal \.rf-pm-opt \.rf-opt-row\{grid-template-columns/.test(modalSrc));
+  // ★★ 나중에 머리줄만 따로 덮는 규칙이 생기면 같은 특이성이라 그쪽이 이겨 열이 어긋난다
+  //    (합쳐진 규칙이 "있다"만 보면 이 회귀를 통과시킨다 — 변이시험이 실제로 뚫었다)
+  {
+    const last = modalSrc.lastIndexOf('.rf-prod-head[data-pm="opt"],#recruitModal .rf-pm-opt .rf-opt-row{grid-template-columns');
+    const headOnly = /\.rf-pm-opt \.rf-prod-head\[data-pm="opt"\]\{[^}]*grid-template-columns/g;
+    let m, after = false;
+    while ((m = headOnly.exec(modalSrc))) if (m.index > last) after = true;
+    ok('머리줄만 따로 덮는 나중 규칙이 없다', last > 0 && !after);
+  }
   ok('옵션 없는 작업(none) 모드에는 선택지 가이드 버튼이 없다(저장되지 않는 칸을 그리지 않는다)',
     /\.rf-pm-none \.rf-ug-btn\{display:none\}/.test(modalSrc));
   ok('상품 그룹 머리는 4칸(상품명·옵션 유무·총인원·삭제)',
@@ -358,7 +381,11 @@ console.log('\n[J] 배선 — 값 주입은 DOM 에 붙은 뒤 · onclick 문자
   ok('선택지 가이드 파일 입력은 addEventListener 로만 배선(onclick 보간 0)',
     /addEventListener\("change", \(\) => igPickFiles\(key, f\)\)/.test(grab(recruitSrc, '_ugBuild')) &&
     !/onclick=/.test(grab(recruitSrc, '_ugBuild')));
-  ok('소스에 리터럴 NUL 없음', recruitSrc.indexOf(' ') < 0 && modalSrc.indexOf(' ') < 0);
+  // ★ NUL 은 글자 그대로 적지 않는다 — 이 가드 파일까지 바이너리가 되어 grep 이 죽는다
+  const NUL = String.fromCharCode(0);
+  ok('소스에 리터럴 NUL 없음', recruitSrc.indexOf(NUL) < 0 && modalSrc.indexOf(NUL) < 0);
+  ok('이 가드 파일에도 리터럴 NUL 없음',
+    fs.readFileSync(__filename, 'utf8').indexOf(NUL) < 0);
 }
 
 console.log('\n✅ campaignUnitGuideFront: ' + passed + '개 통과');
