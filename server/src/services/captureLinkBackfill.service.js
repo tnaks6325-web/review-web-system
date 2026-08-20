@@ -159,12 +159,23 @@ async function auditCaptureLinks(opts = {}) {
   return { days, cutoff, scanned: items.length, tabs: tabKeys.length, tabsSkipped, items };
 }
 
+/* ★★ 수취인명이 같으면 시각 창은 보지 않는다 (사용자 확정 2026-08-20)
+     — "행에 있는 수취인명과 주문캡쳐본에 있는 수취인명이 일치하면 매칭해도 된다".
+     파일명의 첫 토큰은 **항상 수취인**(search-app.js 가 제출 폼의 수취인 칸으로 짓는다)이라,
+     같은 탭 안에서 그 이름으로 걸린 파일은 그 주문의 캡처로 본다.
+     ★ 푸는 것은 **시각 창 하나뿐** — 후보 유일성(ambiguous)·역유일성(ambiguous_file)·
+       주문자만 매칭(orderer_only) 게이트는 그대로다(모르면 붙이지 않는다).
+     ★ 되돌리기 = env `CAPTURE_LINK_NAME_ONLY=0`(시각 창 게이트 복귀). */
+const NAME_ONLY = process.env.CAPTURE_LINK_NAME_ONLY !== '0';
+
 /** 백필 대상 판정 — ★ 완화 금지. 틀린 파일을 붙이면 남의 캡처가 그 주문의 정산 증빙이 된다. */
 function backfillEligibility(item, { allowLow = false } = {}) {
   if (!item || item.verdict !== 'attachedButUnlinked') return { ok: false, reason: 'not_attached' };
   if (!item.fileId) return { ok: false, reason: 'no_file_id' };
-  // ★ 시각 창 밖(low)은 "이름만 같은" 신호다 — 동명이인·과거 회차 파일일 수 있어 자동 대상이 아니다.
-  if (item.confidence !== 'high' && !allowLow) return { ok: false, reason: 'low_confidence' };
+  /* ★ 시각 창 밖(low)이어도 **수취인명으로 걸렸다면** 통과시킨다(위 확정).
+     수취인 칸이 비어 주문자 이름으로만 걸린 건은 대조할 이름이 없으므로 종전대로 창을 본다. */
+  const nameOk = NAME_ONLY && item.matchedBy === 'recipient';
+  if (item.confidence !== 'high' && !allowLow && !nameOk) return { ok: false, reason: 'low_confidence' };
   // ★★ 후보가 여럿이면 붙이지 않는다 — 어느 것이 그 주문의 캡처인지 정할 근거가 없다.
   //    (감사는 사람이 보라고 첫 후보를 보여 주지만, 자동 반영은 유일할 때만 한다.)
   const n = item.confidence === 'high' ? item.winCandidates : item.candidates;

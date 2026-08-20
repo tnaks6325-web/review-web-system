@@ -127,9 +127,15 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
   {
     const hi = { verdict: 'attachedButUnlinked', confidence: 'high', fileId: 'F1', winCandidates: 1, candidates: 1 };
     ok('시각 창 안 · 후보 유일 → 대상', SVC.backfillEligibility(hi).ok === true);
-    ok('★ 시각 창 밖(low)은 기본 제외',
-      SVC.backfillEligibility({ ...hi, confidence: 'low' }).reason === 'low_confidence');
-    ok('★ low 는 명시 옵션으로만 열린다(그때도 후보 유일 조건은 남는다)',
+    /* ★★ 사용자 확정(2026-08-20): 행 수취인명 == 캡처 수취인명이면 시각 창은 보지 않는다.
+       푸는 것은 **시각 창 하나뿐** — 아래 유일성 게이트들은 그대로 남아야 한다. */
+    ok('★★ 수취인명으로 걸렸으면 시각 창 밖이어도 대상',
+      SVC.backfillEligibility({ ...hi, confidence: 'low', matchedBy: 'recipient', hasRecipient: true }).ok === true);
+    ok('★★ 시각 창을 풀어도 후보 유일성은 남는다',
+      SVC.backfillEligibility({ ...hi, confidence: 'low', matchedBy: 'recipient', hasRecipient: true, candidates: 2 }).reason === 'ambiguous');
+    ok('★ 대조할 수취인명이 없으면(주문자만 매칭) 종전대로 시각 창을 본다',
+      SVC.backfillEligibility({ ...hi, confidence: 'low', matchedBy: 'orderer', hasRecipient: false }).reason === 'low_confidence');
+    ok('★ low 는 명시 옵션으로도 열린다(그때도 후보 유일 조건은 남는다)',
       SVC.backfillEligibility({ ...hi, confidence: 'low', candidates: 1 }, { allowLow: true }).ok === true
       && SVC.backfillEligibility({ ...hi, confidence: 'low', candidates: 2 }, { allowLow: true }).reason === 'ambiguous');
     ok('★★ 후보가 여럿이면 붙이지 않는다(어느 것인지 정할 근거가 없다)',
@@ -138,6 +144,14 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
       SVC.backfillEligibility({ verdict: 'notAttached' }).reason === 'not_attached'
       && SVC.backfillEligibility({ verdict: 'unknown' }).reason === 'not_attached');
     ok('fileId 가 없으면 붙이지 않는다', SVC.backfillEligibility({ ...hi, fileId: '' }).reason === 'no_file_id');
+
+    /* ★ 되돌리기 스위치는 require 시점에 읽히므로 자식 프로세스로 확인한다. */
+    const { execFileSync } = require('child_process');
+    const probe = "const S=require('" + require.resolve('../src/services/captureLinkBackfill.service.js') + "');"
+      + "process.stdout.write(String(S.backfillEligibility({verdict:'attachedButUnlinked',confidence:'low',fileId:'F1',winCandidates:1,candidates:1,matchedBy:'recipient',hasRecipient:true}).reason||'ok'));";
+    let off = '';
+    try { off = execFileSync(process.execPath, ['-e', probe], { env: { ...process.env, CAPTURE_LINK_NAME_ONLY: '0' } }).toString(); } catch (e) { off = 'ERR:' + e.message; }
+    ok('★ 킬스위치 CAPTURE_LINK_NAME_ONLY=0 이면 시각 창 게이트로 복귀', off === 'low_confidence', off);
   }
 
   {
