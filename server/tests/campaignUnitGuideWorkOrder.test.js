@@ -53,7 +53,7 @@ function woSandbox() {
   sb.window = sb;
   vm.createContext(sb);
   vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), sb);
-  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woOptionRows', '_woUnitGuideBlock']
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woProductUnitSrc', '_woOptionRows', '_woUnitGuideBlock']
     .forEach(n => vm.runInContext(grab(wodSrc, n), sb));
   return sb;
 }
@@ -191,7 +191,7 @@ console.log('\n[B2] product_mode — 상품별 명시 신호');
   sb.window = sb;
   vm.createContext(sb);
   vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), sb);
-  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woOptionRows', '_woProductMode']
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woProductUnitSrc', '_woOptionRows', '_woProductMode']
     .forEach(n => vm.runInContext(grab(wodSrc, n), sb));
 
   const mixed = {
@@ -294,6 +294,41 @@ console.log('\n[D] 배선 — 상세 본문 · 발행 프리필');
   ok('snake_case 별칭도 받는다(서버·인트라넷 표기 차 흡수)', mapped[1].unitKind === 'product');
   ok('모르는 unitKind 는 option 으로 접는다(종전 동작)',
     (sb.p.options = [{ optKey: 'x', unitKind: 'weird' }], vm.runInContext('(' + mapExpr + ')', sb)[0].unitKind === 'option'));
+}
+
+/* ══════════════ D2. 인트라넷이 실제로 보내는 모양 (테섭 실측 2026-08-20) ══════════════ */
+console.log('\n[D2] 상품 단위 — 인트라넷 실측 페이로드');
+{
+  const s2 = woSandbox();
+  // ★★ 인트라넷 `reviewOrderOptionsPayload` 는 상품 가이드를 **상품 최상위**(product.guide)에 싣고
+  //    base 에는 {pay,count,daily} 만 담는다. 종전 픽스처는 가이드를 base 안에 넣어 두어
+  //    `prod.base || prod` 오독을 통과시켰다 — 실제 화면에서는 선택지 3개 중 2개만 가이드가 붙었다.
+  const LIVE = { product_options_json: JSON.stringify([
+    { name: '비타민', url: 'https://smartstore.naver.com/x/9001', product_mode: 'opt',
+      base: { pay: 0, count: 0, daily: 0 },
+      options: [
+        { label: '옵션A', url: 'https://smartstore.naver.com/x/9001?opt=A', pay: 19900, count: 6, daily: 3,
+          guide: { text: '옵션A 유입', images: [img('a'.repeat(24))] } },
+        { label: '옵션B', pay: 34900, count: 4, daily: 2,
+          guide: { text: '옵션B 유입', images: [img('b'.repeat(24))] } },
+      ] },
+    { name: '유산균', url: 'https://www.coupang.com/vp/products/9002', product_mode: 'none',
+      guide: { text: '유산균 유입', images: [img('c'.repeat(24))] },
+      base: { pay: 24900, count: 5, daily: 2 }, options: [] },
+  ]) };
+  const rows = s2._woOptionRows(LIVE);
+  ok('선택지 3개(옵션 2 · 상품 1)', rows.length === 3 && rows[2].unitKind === 'product');
+  ok('★★ 상품 최상위 guide 를 읽는다 — base 를 먼저 보면 상품 단위 가이드가 통째로 유실된다',
+    /유산균 유입/.test(rows[2].inflowGuideHtml) && rows[2].inflowGuideImages.length === 1);
+  ok('★ 세 선택지 모두 자기 가이드를 갖는다(2/3 만 붙던 실측 재발 차단)',
+    rows.every(r => r.inflowGuideHtml && r.inflowGuideImages.length === 1));
+  ok('★★ 옵션 없는 상품의 정원은 base.count 를 따른다(0=무제한 으로 새지 않는다)',
+    rows[2].recruitTotal === 5 && rows[0].recruitTotal === 6 && rows[1].recruitTotal === 4);
+  ok('상세 펼침도 세 선택지 가이드를 모두 보여준다',
+    (h => /옵션A/.test(h) && /옵션B/.test(h) && /유산균/.test(h))(s2._woUnitGuideBlock(LIVE)));
+  // 옛 초안(base 안에 guide)도 계속 읽는다 — 기존 픽스처가 그 형태다(무회귀).
+  ok('옛 초안(base 안 guide)도 그대로 읽는다',
+    /상품B 유입/.test(s2._woOptionRows(COMPOSITE).find(r => r.unitKind === 'product').inflowGuideHtml));
 }
 
 /* ══════════════ E. 위생 ══════════════ */
