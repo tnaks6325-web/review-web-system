@@ -209,6 +209,15 @@ function _normalizeOptionsInput(arr) {
     out.push({
       optKey,
       optionUrl: _normalizeOptionUrl(obj.optionUrl ?? obj.option_url ?? obj.url),
+      // ★ 134 복합 작업: 선택 단위(unit)의 소속 상품명과 종류.
+      //   unit_kind='product' = 옵션 없는 상품 자체가 선택지 → 시트 옵션 칸에 쓰지 않는다(submit.routes).
+      //   모르는 값은 'option'(종전 동작) — 추측해서 상품 단위로 승격하지 않는다.
+      productName: _normOptKey(obj.productName ?? obj.product_name),
+      unitKind: (String(obj.unitKind ?? obj.unit_kind ?? '') === 'product') ? 'product' : 'option',
+      // ★ 선택지별 유입가이드 — 저장 시 1차 정화(응답 직전 재정화와 이중 적용, §03-E 규율).
+      //   빈 값 = "이 선택지 전용 가이드 없음" = 공고 공통 가이드로 접힌다(자동 폴백).
+      inflowGuideHtml: sanitizeGuideHtml(obj.inflowGuideHtml ?? obj.inflow_guide_html ?? ''),
+      inflowGuideImages: sanitizeGuideImages(obj.inflowGuideImages ?? obj.inflow_guide_images),
       payAmount: _optNum(obj.payAmount ?? obj.pay_amount),
       recruitTotal: _optNum(obj.recruitTotal ?? obj.recruit_total),
       dailyLimit: _optNum(obj.dailyLimit ?? obj.daily_limit),
@@ -238,13 +247,18 @@ async function _saveCampaignOptions(campaignId, options) {
     if (!lock.length) { await client.query('ROLLBACK'); return; }
     for (const o of options) {
       await client.query(
-        `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),NOW())
+        `INSERT INTO campaign_options (campaign_id, opt_key, option_url, pay_amount, recruit_total, daily_limit, review_type_mix, sort_order, status,
+                                      product_name, unit_kind, inflow_guide_html, inflow_guide_images, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,COALESCE($9,'active'),$10,$11,$12,$13::jsonb,NOW())
          ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
            option_url=EXCLUDED.option_url, pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
            daily_limit=EXCLUDED.daily_limit, review_type_mix=EXCLUDED.review_type_mix, sort_order=EXCLUDED.sort_order,
-           status=COALESCE($9, campaign_options.status), updated_at=NOW()`,
-        [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status]);
+           status=COALESCE($9, campaign_options.status),
+           product_name=EXCLUDED.product_name, unit_kind=EXCLUDED.unit_kind,
+           inflow_guide_html=EXCLUDED.inflow_guide_html, inflow_guide_images=EXCLUDED.inflow_guide_images,
+           updated_at=NOW()`,
+        [campaignId, o.optKey, o.optionUrl, o.payAmount, o.recruitTotal, o.dailyLimit, JSON.stringify(o.reviewTypeMix || []), o.sortOrder, o.status,
+         o.productName || '', o.unitKind || 'option', o.inflowGuideHtml || '', JSON.stringify(o.inflowGuideImages || [])]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
     for (const e of existing) {
@@ -432,18 +446,32 @@ function _applyCurrentFee(view, schedules, now) {
 /** 캠페인 옵션 뷰 목록(정렬: 활성 먼저, 마감 하단). campState 반영해 selectable 계산. 옵션 없으면 []. */
 async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
   const { rows } = await db.query(
-    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status
+    `SELECT opt_key, option_url, pay_amount, recruit_total, daily_limit, status,
+            product_name, unit_kind, inflow_guide_html, inflow_guide_images
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
   if (!rows.length) return [];
   const counts = await fetchOptionCounts(db, campaignId, now);
-  return rows.map(r => computeOptionView(r, counts.get(r.opt_key), campState));
+  // ★ 134: 선택지별 유입가이드는 리뷰어 화면(work-detail)으로 나가는 HTML이므로 **응답 직전 재정화**
+  //   (저장 시 1차 정화와 이중 적용 — §03-E 규율. 옛 행·직접 DB 수정분을 신뢰하지 않는다).
+  return rows.map(r => {
+    const v = computeOptionView(r, counts.get(r.opt_key), campState);
+    v.inflowGuideHtml = sanitizeGuideHtml(v.inflowGuideHtml);
+    v.inflowGuideImages = sanitizeGuideImages(v.inflowGuideImages);
+    return v;
+  });
 }
 
-/** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외). */
+/** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외).
+ *  ★ 134: 선택지 묶음 머리에 쓸 상품명·단위 종류는 공개(민감정보 아님 — 참여 전 카드에서
+ *    "상품A의 옵션1 / 상품A의 옵션2 / 상품B" 를 구분해 보여줘야 한다).
+ *  ★★ 선택지별 유입가이드(inflowGuideHtml/Images)는 **여기에 절대 싣지 않는다** —
+ *    가이드는 종전 공통 가이드와 같이 홀드 게이트(work-detail) 뒤에서만 공개한다. */
 function _publicOptionView(v) {
   return {
     optKey: v.optKey,
+    productName: v.productName || '',
+    unitKind: v.unitKind || 'option',
     remaining: v.remaining,           // null=무제한
     todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
     status: v.status,                 // open|soldout|today_done|closed
@@ -459,7 +487,7 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
   if (!list.length) return out;
   const dayStart = kstDayStartUtc(now).toISOString();
   const { rows: optRows } = await db.query(
-    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status
+    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status, product_name, unit_kind
        FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
   if (!optRows.length) return out;
   const { rows: cntRows } = await db.query(
@@ -489,10 +517,17 @@ async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
 async function _loadOptionsRaw(db, campaignId) {
   const { rows } = await db.query(
     `SELECT opt_key AS "optKey", option_url AS "optionUrl", pay_amount AS "payAmount", recruit_total AS "recruitTotal", review_type_mix AS "reviewTypeMix",
-            daily_limit AS "dailyLimit", sort_order AS "sortOrder", status
+            daily_limit AS "dailyLimit", sort_order AS "sortOrder", status,
+            product_name AS "productName", unit_kind AS "unitKind",
+            inflow_guide_html AS "inflowGuideHtml", inflow_guide_images AS "inflowGuideImages"
        FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
     [campaignId]);
-  return rows;
+  // ★ 응답 직전 재정화(§03-E 이중 적용) — 저장 시 정화본이라도 옛 행·직접 DB 수정분을 신뢰하지 않는다.
+  return rows.map(r => ({
+    ...r,
+    inflowGuideHtml: sanitizeGuideHtml(r.inflowGuideHtml),
+    inflowGuideImages: sanitizeGuideImages(r.inflowGuideImages),
+  }));
 }
 
 // ═══════════════════════════════════════════════════════════
