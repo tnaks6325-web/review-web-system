@@ -103,7 +103,20 @@ function resolveHeaders({ storedHeaders, columns, rows }) {
  * ★ seq 자리를 지키는 이유: 주문 배정·투영·claim 이 전부 이 번호를 키로 쓴다(어긋나면 표가 두 겹).
  */
 function buildValues({ headers, rows }) {
-  const seqs = (rows || []).map(r => Number(r.seq)).filter(n => Number.isFinite(n) && n > 0);
+  /* ★★ 900000 대역(수동 격리 대역 — "시트 행을 모를 때"용, participants.MANUAL_SEQ_BASE)은
+     시트 모양 배열에 넣지 않는다: seq 자리가 곧 배열 크기라 줄 하나에 90만 칸을 할당하고,
+     그 자리는 어떤 시트 행 번호와도 대응하지 않는다(2026-08-21 실측 결함 방어).
+     ★ 조용한 누락 금지 — 뺀 줄 수(manualBandSkipped)와 그중 값이 있는 줄 수
+       (manualBandWithData)를 반환값으로 알린다(호출부가 warn 으로 드러낸다). */
+  const MANUAL_BAND = require('./participants.service').MANUAL_SEQ_BASE;
+  const all = (rows || []).filter(r => Number.isFinite(Number(r.seq)) && Number(r.seq) > 0);
+  const band = all.filter(r => Number(r.seq) >= MANUAL_BAND);
+  const kept = all.filter(r => Number(r.seq) < MANUAL_BAND);
+  const manualBandWithData = band.filter(r => {
+    const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
+    return Object.values(rj).some(v => String(v == null ? '' : v).trim() !== '');
+  }).length;
+  const seqs = kept.map(r => Number(r.seq));
   const minSeq = seqs.length ? Math.min(...seqs) : 2;
   const maxSeq = seqs.length ? Math.max(...seqs) : 1;
   const headerRow = Math.max(1, minSeq - 1);     // 헤더는 첫 데이터 바로 위
@@ -111,7 +124,7 @@ function buildValues({ headers, rows }) {
   for (let i = 0; i < Math.max(headerRow, maxSeq); i++) values.push([]);
   values[headerRow - 1] = headers.slice();
   const byRow = new Map();
-  for (const r of (rows || [])) {
+  for (const r of kept) {
     const seq = Number(r.seq);
     if (!Number.isFinite(seq) || seq < 1 || seq === headerRow) continue;
     const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
@@ -121,7 +134,8 @@ function buildValues({ headers, rows }) {
     });
     byRow.set(seq, seq);
   }
-  return { values, headerRow, rowIndexOf: byRow };
+  return { values, headerRow, rowIndexOf: byRow,
+           manualBandSkipped: band.length, manualBandWithData };
 }
 
 /**
@@ -185,7 +199,11 @@ async function rebuildLedgers({ sheetId, tabName, columns = null, dryRun = false
       '열 구성을 알 수 없습니다 — 작업표를 먼저 만들거나 열 목록을 함께 보내주세요.');
   }
 
-  const { values, headerRow } = buildValues({ headers, rows: parts });
+  const { values, headerRow, manualBandSkipped, manualBandWithData } = buildValues({ headers, rows: parts });
+  if (manualBandWithData) {
+    // 900000 대역에 값이 든 줄 = 옛 [＋ 줄 추가] 결함의 잔재 — 장부에 실리지 않으니 사람이 옮겨야 한다.
+    logger.warn(`[sheetlessLedger] 900000 대역에 값이 있는 줄 ${manualBandWithData}건 제외 tab=${tabName} — 실제 행으로 옮기지 않으면 검색·입금대상에 실리지 않습니다`);
+  }
 
   // ── 검색 명단(review_index) 재료 = **시트 경로와 같은 파서** ──
   //   ★ 사본 금지: 이름열 우선순위·제출/입금 판정·phone8 추출·submit_col 감지가 여기서 갈리면

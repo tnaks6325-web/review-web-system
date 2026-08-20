@@ -94,6 +94,30 @@ const file = (over) => ({ id: 'F1', name: '김신혜.jpg', mimeType: 'image/jpeg
     && /os\.submitted_at < NOW\(\) - interval '20 minutes'/.test(SRC));
 
   {
+    /* ★★ 탭 좁히기(시범 실행) — **정확일치만**. 부분일치면 `…100건` 이 `…1000건` 까지 끌어와
+       "한 탭만 돌린다"는 약속이 조용히 깨진다. 미지정이면 종전 동작(전 탭). */
+    ok('★ 탭/시트 좁히기는 SQL 에서 정확일치(LIKE 금지)',
+      /\(\$4::text IS NULL OR os\.tab_name = \$4\)/.test(SRC)
+      && /\(\$5::text IS NULL OR os\.sheet_id = \$5\)/.test(SRC)
+      && !/tab_name LIKE/.test(SRC));
+    let seen = null;
+    const pool = { query: async (sql, params) => {
+      if (/app_settings/.test(sql)) return { rows: [] };
+      if (/FROM order_submissions os/.test(sql)) { seen = params; return { rows: [] }; }
+      return { rows: [] };
+    } };
+    SVC.__setDepsForTest(pool, { extractFolderIdFromUrl: () => null, listFolderFilesRecursive: async () => [] },
+                         async (n, fn) => fn());
+    let r = await SVC.auditCaptureLinks({ days: 30, tabName: '  모키위키 100건  ', sheetId: 'SH1' });
+    ok('★ 지정한 탭/시트가 쿼리 파라미터로 나간다(트림)', seen && seen[3] === '모키위키 100건' && seen[4] === 'SH1', JSON.stringify(seen));
+    ok('★ 응답이 좁힌 대상을 밝힌다(조용한 축소 금지)', r.onlyTab === '모키위키 100건' && r.onlySheet === 'SH1');
+    r = await SVC.auditCaptureLinks({ days: 30 });
+    ok('★ 미지정이면 종전 동작 — 필터 절이 꺼진다(NULL)', seen && seen[3] === null && seen[4] === null, JSON.stringify(seen));
+    ok('★ 빈 문자열도 미지정으로 접는다', (await SVC.auditCaptureLinks({ days: 30, tabName: '   ' })) && seen[3] === null);
+    SVC.__setDepsForTest(null, null, null);
+  }
+
+  {
     /* ★★ 탭 리네임 폴백 (2026-08-20 실측) — 시트 탭은 건수가 바뀌며 이름이 바뀐다
        (`…_500건` → `…_443건`). 주문 원장은 제출 당시 이름을 들고 있어 **이름으로만 조인하면
        폴더가 멀쩡히 있는데 `no_capture_folder`** 로 떨어진다. gid 로도 찾아야 한다. */

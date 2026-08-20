@@ -151,22 +151,65 @@ console.log('\n── D2. [미설정] → 정식 창구 ──');
    서로 다른 값을 보게 된다. 창구가 하나뿐이라 동기화가 구조적으로 보장된다. */
 const gate = fnBody(wd, 'function _cndFixGate(cd,kind){');
 const fix  = fnBody(wd, 'async function _cndFix(kind){');
-t('★ 정원(총건수·일건수)은 [📅 모집인원 조절] 창구로 — 차수·이월·날짜별 조절을 아는 유일한 곳',
-  /if\(kind==='quota'\) return openCurrentCampaignDailyPlan\(\);/.test(fix));
+const orderM = fnBody(wd, 'async function _cndOrderModal(cd){');
+t('★ 정원(총건수·일건수)은 공고가 있으면 [📅 모집인원 조절] 창구로 — 차수·이월·날짜별 조절을 아는 유일한 곳',
+  /if\(cd\.campaignId\) return openCurrentCampaignDailyPlan\(\);/.test(fix));
 t('★ 공고 값은 모집공고 수정 모달로', /openRecruitModal\(String\(cd\.campaignId\)\)/.test(fix));
 t('★ 작업오더 값은 작업오더 수정 모달로 + 저장 경로는 기존 편집 허용명단 게이트',
-  /woAdminEditModal\(o,\{/.test(fix) && /'\/api\/trackb\/work-orders\/edit'/.test(fix));
+  /woAdminEditModal\(o,\{/.test(orderM) && /'\/api\/trackb\/work-orders\/edit'/.test(orderM));
 /* ★ 문자열 존재만 보면 **호출을 죽인 변이**(const r=null)를 놓친다(실측) — 호출 형태를 고정한다. */
 t('★ 모달에는 작업오더 **원본 행**을 넘긴다(작업보드 detail 은 camelCase 라 폼이 빈다)',
-  /const r=await api\(`\/api\/trackb\/work-orders\?sheetId=/.test(fix)
-  && /const o=\(\(r&&r\.items\)\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(cd\.workOrderId\)\)/.test(fix)
-  && /woAdminEditModal\(o,/.test(fix));
+  /const r=await api\(`\/api\/trackb\/work-orders\?sheetId=/.test(orderM)
+  && /const o=\(\(r&&r\.items\)\|\|\[\]\)\.find\(x=>String\(x\.id\)===String\(cd\.workOrderId\)\)/.test(orderM)
+  && /woAdminEditModal\(o,/.test(orderM));
 t('★ 이 화면에 새 저장 API 를 만들지 않았다(condition 전용 저장 경로 0)',
   !/condition\/save|\/api\/trackb\/condition/.test(wd));
-t('★ 권한·연결이 없으면 비활성 + 사유(quota=공고, order=발주)',
+t('★ 권한 없으면 비활성 + 발주 없는 order 는 비활성(사유)',
   /if\(!STATE\.canEdit\) return \{can:false/.test(gate)
-  && /kind==='order'\) return cd\.workOrderId/.test(gate)
-  && /kind==='quota'\) return cd\.campaignId/.test(gate));
+  && /kind==='order'\) return cd\.workOrderId/.test(gate));
+
+console.log('\n── D2b. 공고 없는 작업 — 막다른 길 제거(사용자 확정 2026-08-20) ──');
+/* ★★ "동기화"를 코드로 잇지 않는다 — 판정 순서가 전부 공고 → 탭이라(리뷰비 resolveReviewFee
+   128 · 입금명 campMemo→tabMemo · 리뷰타입 resolveReviewType), 탭에 넣은 값은 공고를 발행하는
+   순간 자동으로 공고 값에 밀린다. 복사·동기화 코드를 두면 그 코드가 두 번째 진실이 된다. */
+t('★ 리뷰비·입금명 — 공고 없으면 기존 입금관리 보완 API(transfer-setting)로 탭 저장',
+  /if\(\(kind==='fee'\|\|kind==='memo'\)&&!cd\.campaignId\) return _cndTabValueModal\(kind,cd\);/.test(fix)
+  && /'\/api\/trackb\/payment\/transfer-setting'/.test(fnBody(wd,'function _cndTabValueModal(kind,cd){')));
+t('★ 리뷰비·입금명의 탭 저장은 admin/master 만(transfer-setting 이 adminOrMaster) — AE 는 사유',
+  /kind==='fee'\|\|kind==='memo'/.test(gate) && /isAdmin\s*\n?\s*\?\s*\{can:true/.test(gate.replace(/\n/g,' ')) || (() => {
+    return /return isAdmin/.test(gate) && /관리자만/.test(gate);
+  })());
+t('★ 리뷰타입 — 공고 없으면 탭 설정(POST /api/tab/config 프록시)에 저장', (() => {
+  const m = fnBody(wd, 'function _cndRtypeModal(cd){');
+  return /if\(kind==='rtype'&&!cd\.campaignId\) return _cndRtypeModal\(cd\);/.test(fix)
+    && /'\/api\/trackb\/tab\/config'/.test(m) && /reviewType:sel\.dataset\.v/.test(m);
+})());
+t('★ 리뷰타입 선택지는 공유 표 RF_REVIEW_TYPE_LABELS — 사본 금지 · 혼합은 탭 창구에서 제외', (() => {
+  const m = fnBody(wd, 'function _cndRtypeModal(cd){');
+  return /RF_REVIEW_TYPE_LABELS\.filter\(\(\[k\]\)=>k!=='mixed'\)/.test(m)
+    && !/\['photo',\s*'포토'\]/.test(wd);   // workdesk 에 라벨 표 사본을 새로 적지 않는다
+})());
+t('★ 구매채널·다계정 — 공고 없으면 발행 모달(탭·작업오더 프리필)로 유도', (() => {
+  const m = fnBody(wd, 'async function _cndPublish(cd){');
+  return /if\(!cd\.campaignId\) return _cndPublish\(cd\);/.test(fix)
+    && /openRecruitModal\(null,_woCampaignPrefill\(o\),o\.id\)/.test(m)
+    && /openRecruitModal\(null,\{linked_sheet_id:t\.sheetId,linked_tab_name:t\.tabName/.test(m)
+    && /_loadCampPerm\(\)/.test(m);   // 발행 권한(편집 허용명단) 확인 — 눌러도 아무 일 없는 버튼 금지
+})());
+t('★ 정원 — 공고 없고 발주 있으면 작업오더 수정(발행 프리필의 원천), 둘 다 없으면 발행으로',
+  /if\(cd\.workOrderId\) return _cndOrderModal\(cd\);/.test(fix)
+  && /return _cndPublish\(cd\);\s*\/\/ 발주도 없으면/.test(fix.replace(/\u0020{2,}/g,' ')) || (() => {
+    const i=fix.indexOf("if(kind==='quota'){"); const blk=fix.slice(i, fix.indexOf('}', i)+1);
+    return /_cndOrderModal\(cd\)/.test(blk) && /_cndPublish\(cd\)/.test(blk);
+  })());
+t('★ 미니 팝업은 body 직속 · Esc 리스너는 닫을 때 해제 · 저장 실패는 팝업 유지', (() => {
+  const m = fnBody(wd, 'function _cndMini({title,body,onSave}){');
+  return /document\.body\.appendChild\(ov\)/.test(m)
+    && /removeEventListener\('keydown',STATE\._cndMiniEsc\)/.test(wd)
+    && /const ok=await onSave\(\);\s*\n?\s*if\(ok\)\{/.test(m);
+})());
+t('★★ 입금명 순서 = 공고 → 탭(입금관리 campMemo→tabMemo 와 같은 순서 — 공고를 만들면 공고가 이긴다)',
+  /depositName: \(\(memoCamp && memoCamp\.transferMemo\) \|\| meta\.depositName \|\| ''\) \|\| null,/.test(cond));
 /* ★ 값이 있어도 고칠 수 있어야 쓸모가 있다 — 모양은 검은 글씨 그대로(요구 ②),
    창구가 열리는 항목만 눌린다. 창구가 없으면 평범한 텍스트(죽은 버튼 금지). */
 /* ★ 존재 검사만 하면 **함수 첫 줄에 early return 을 넣은 변이**를 놓친다(실측) —

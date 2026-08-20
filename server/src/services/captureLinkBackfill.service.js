@@ -50,6 +50,10 @@ async function auditCaptureLinks(opts = {}) {
   const days = _clamp(opts.days, 3, 1, 3650);
   const limit = _clamp(opts.limit, 200, 1, 2000);
   const maxTabs = _clamp(opts.maxTabs, 20, 1, 60);
+  /* ★ 탭 좁히기(시범 실행용) — **정확일치만**. 부분일치로 두면 `…100건` 이 `…1000건` 까지
+     끌어와 "한 탭만 돌린다"는 약속이 조용히 깨진다. 미지정이면 종전 동작(전 탭). */
+  const onlyTab = String(opts.tabName == null ? '' : opts.tabName).trim() || null;
+  const onlySheet = String(opts.sheetId == null ? '' : opts.sheetId).trim() || null;
 
   // ★ 컷오프 = 캡처↔주문 연결 기능 배포 시각. 그 이전 주문은 링크가 비어 있는 게 정상이라
   //   감지기(detectMissingCaptures)도 알림을 내지 않는다 — 화면이 두 구간을 갈라 보여줘야
@@ -72,11 +76,13 @@ async function auditCaptureLinks(opts = {}) {
       WHERE os.deleted_at IS NULL AND os.capture_uploaded_at IS NULL
         AND os.submitted_at < NOW() - interval '20 minutes'
         AND os.submitted_at > NOW() - ($1 || ' days')::interval
+        AND ($4::text IS NULL OR os.tab_name = $4)
+        AND ($5::text IS NULL OR os.sheet_id = $5)
       ORDER BY os.submitted_at DESC
       LIMIT $2`,
-    [String(days), limit, cutoff]
+    [String(days), limit, cutoff, onlyTab, onlySheet]
   );
-  if (!orders.length) return { days, cutoff, scanned: 0, tabs: 0, tabsSkipped: 0, items: [] };
+  if (!orders.length) return { days, cutoff, onlyTab, onlySheet, scanned: 0, tabs: 0, tabsSkipped: 0, items: [] };
 
   // 탭 단위로 묶어 Drive 조회 횟수를 최소화(탭당 1회 재귀 조회)
   const byTab = new Map();
@@ -156,7 +162,7 @@ async function auditCaptureLinks(opts = {}) {
       });
     }
   }
-  return { days, cutoff, scanned: items.length, tabs: tabKeys.length, tabsSkipped, items };
+  return { days, cutoff, onlyTab, onlySheet, scanned: items.length, tabs: tabKeys.length, tabsSkipped, items };
 }
 
 /* ★★ 수취인명이 같으면 시각 창은 보지 않는다 (사용자 확정 2026-08-20)

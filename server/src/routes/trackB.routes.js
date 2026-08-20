@@ -2921,6 +2921,7 @@ router.get('/capture-link/audit', authMiddleware, adminOrMasterMiddleware, async
   try {
     const r = await captureLinkBackfill.auditCaptureLinks({
       days: req.query.days, limit: req.query.limit, maxTabs: req.query.maxTabs,
+      tabName: req.query.tabName, sheetId: req.query.sheetId,
     });
     res.json({ ok: true, ...r });
   } catch (err) { next(err); }
@@ -2934,6 +2935,8 @@ router.post('/capture-link/backfill', authMiddleware, adminOrMasterMiddleware, a
        명시 옵션 — 기본은 닫혀 있다. */
     const r = await captureLinkBackfill.backfillCaptureLinks({
       days: b.days, limit: b.limit, maxTabs: b.maxTabs,
+      /* ★ 시범 실행용 탭 좁히기 — 정확일치(서비스가 검증). 미지정이면 전 탭(종전 동작). */
+      tabName: b.tabName, sheetId: b.sheetId,
       dryRun: b.dryRun !== false, confirm: b.confirm === true, allowLow: b.allowLow === true,
       by: _by(req),
     });

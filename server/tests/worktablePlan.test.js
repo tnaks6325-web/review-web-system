@@ -504,7 +504,12 @@ ok('★ 900000+ 대역(prepareRosterSlots)을 쓰지 않는다 — 그건 시트
   (() => {
     const i = partSrc.indexOf('async function createWorktableSlots');
     const j = partSrc.indexOf('async function deleteWorktableRows');
-    return !/_MANUAL_SEQ_BASE/.test(partSrc.slice(i, j));
+    // ★ 대역을 **배정에** 쓰는 것을 막는 가드다 — appendSlot 의 `FILTER (WHERE seq < ${_MANUAL_SEQ_BASE})` 는
+    //   반대로 그 대역을 **제외**하는 방어(2026-08-21 [＋ 줄 추가] 결함 수정)라 허용한다(검사 의미 불변).
+    const region = partSrc.slice(i, j)
+      .replace(/MAX\(seq\) FILTER \(WHERE seq < \$\{_MANUAL_SEQ_BASE\}\)/g, '')
+      .replace(/900000 대역[^\n]*/g, '');
+    return !/_MANUAL_SEQ_BASE/.test(region);
   })());
 ok('★ 멱등·비파괴 — ON CONFLICT DO NOTHING(이미 주문이 들어온 줄을 덮지 않는다)',
   /VALUES \$\{ph\.join\(','\)\}\s*\n\s*ON CONFLICT \(sheet_id, tab_name, seq\) DO NOTHING/.test(partSrc));
