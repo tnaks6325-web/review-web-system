@@ -141,7 +141,7 @@ table.cmp td b{font-weight:800}
 .stripA{height:66px;flex-wrap:nowrap;overflow-x:auto}
 .stripA .th{width:82px}
 .cnt{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);
-  border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+  border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:1px;display:inline-block;white-space:nowrap}
 /* B안: 128px 안 2열 그리드 */
 .stripB{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:3px;height:58px;padding:3px}
 .stripB .th{width:auto;height:auto;min-height:0;border-radius:4px}
@@ -149,15 +149,15 @@ table.cmp td b{font-weight:800}
 .stripB .th .no{font-size:8px;padding:0 3px;left:1px;bottom:1px}
 .stripB .addb{width:auto;height:auto;font-size:8.5px}
 .stripB .addb .plus{font-size:11px}
-/* C안: 입력창 좁힘 + 우측 4열 고정 그리드 */
-.composeC{display:grid;grid-template-columns:minmax(190px,1fr) 292px;gap:6px;align-items:stretch}
-.stripC{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:1fr;gap:5px;height:58px;padding:4px}
-.stripC .th{width:auto;height:auto;min-height:0;border-radius:5px}
+/* C안: 첨부한 만큼만 칸이 늘고(장당 66px 고정) 남는 폭 전부를 입력창이 가진다 */
+.composeC{display:flex;gap:6px;align-items:stretch}
+.composeC textarea{flex:1;min-width:190px}
+.stripC{flex:none;display:flex;gap:5px;height:58px;padding:4px}
+.stripC .th{width:66px;height:auto;min-height:0;border-radius:5px}
 .stripC .th .x{width:15px;height:15px;font-size:9px;top:2px;right:2px}
 .stripC .th .no{font-size:8.5px;padding:0 3px;left:2px;bottom:2px}
-.stripC .addb{width:auto;height:auto;font-size:9px}
+.stripC .addb{width:66px;height:auto;font-size:9px}
 .stripC .addb .plus{font-size:12px}
-.stripC .slot{border:1px dashed var(--line);border-radius:5px;background:#fff}
 @media (max-width:900px){.msplit{flex-direction:column}.rail{width:100%;flex-direction:row;align-items:center}.rail .audit{display:none}.pv{width:100%}}
 </style></head><body><div class="page">
 
@@ -165,12 +165,12 @@ table.cmp td b{font-weight:800}
 <p class="lead">유입 가이드·리뷰 가이드·특이사항의 첨부 이미지 칸이 <b>128px 고정폭 + 잘림(overflow:hidden)</b>인데
 썸네일은 한 장 <b>74px 고정</b>이라, <b>2장째는 ✕(빼기) 버튼이 잘려나가고 3장째부터는 첨부됐다는 사실 자체가 안 보입니다.</b>
 장수 표시도 가로 스크롤도 없어 "안 보임 = 없음"으로 읽히는 것이 핵심 문제입니다.</p>
-<p class="meta">2026-08-20 · 대상: 모집공고 편집(수정) 모달 (recruit-modal.js compact v2) · v2 (2026-08-20 사용자 요청: C안 = 입력창 좁힘 + 우측 4열 그리드로 교체) · 가짜 데이터로 실제 동작(✕ 빼기 · ＋ 추가)</p>
+<p class="meta">2026-08-20 · 대상: 모집공고 편집(수정) 모달 (recruit-modal.js compact v2) · v3 (2026-08-20 사용자 요청: C안 = 첨부한 만큼만 칸이 늘고 입력창이 가변으로 줄어드는 방식) · 가짜 데이터로 실제 동작(✕ 빼기 · ＋ 추가)</p>
 <div class="vswitch" id="vsw">
   <a href="?" data-v="">전체 보기</a>
   <a href="?v=A" data-v="A">A안 — 아래 전폭 스트립 (추천)</a>
   <a href="?v=B" data-v="B">B안 — 제자리 2×2 그리드</a>
-  <a href="?v=C" data-v="C">C안 — 입력창 좁히고 우측 4열 그리드</a>
+  <a href="?v=C" data-v="C">C안 — 첨부한 만큼만 옆으로 (입력창 가변)</a>
 </div>
 
 <!-- ════════ 0. 현재 상태 재현 ════════ -->
@@ -207,31 +207,34 @@ table.cmp td b{font-weight:800}
 
 <!-- ════════ C안 ════════ -->
 <section class="sec" data-sec="C">
-  <h2><span class="n">C</span>C안 — 입력창을 좁히고, 우측에 <u>4열 고정 그리드</u>로 전부 표시 <span class="tag">v2 · 사용자 요청 반영</span></h2>
-  <p class="sub">텍스트 입력창을 좁혀 오른쪽에 <b>4칸짜리 고정 그리드</b>를 확보합니다.
-  사진은 왼쪽부터 <b>항상 같은 열 자리</b>에 들어가고(1장이든 4장이든 크기·위치 동일 = 열 규칙),
-  빈 열은 점선 자리로 남아 <b>몇 장을 더 넣을 수 있는지</b>가 한눈에 보입니다.
-  ✕(빼기)와 [＋추가]도 전부 제자리에서 — 줄 높이는 지금과 같아 <b>화면 세로 변화가 없습니다.</b></p>
+  <h2><span class="n">C</span>C안 — 첨부한 만큼만 사진 칸이 옆으로 늘고, 입력창이 그만큼 줄어든다 <span class="tag">v3 · 사용자 요청 반영</span></h2>
+  <p class="sub">고정 그리드 없이 <b>첨부 수만큼만</b> 칸을 만듭니다 —
+  미첨부 = <b>[＋추가]</b> 한 칸 · 1장 = <b>[첨부1][＋추가]</b> 두 칸 · … · <b>4장(최대) = 네 칸</b>(추가칸 사라짐).
+  사진이 한 장 늘 때마다 왼쪽 <b>텍스트 편집창 너비가 그만큼 줄어들고</b>, 빼면 다시 넓어집니다.
+  첨부가 없는 줄은 입력창이 거의 전폭이라 <b>평소 화면 손해가 없습니다.</b>
+  아래 목업이 실제로 그렇게 동작합니다(＋로 넣고 ✕로 빼면서 입력창 폭 변화를 확인해 보세요).</p>
   <div id="mock-C"></div>
-  <div class="note blue">세 줄(유입·리뷰·특이사항)의 그리드 열이 <b>세로로 정확히 맞아떨어져</b> 위아래로 훑기 좋습니다.
-  대신 텍스트 입력창 폭이 약 40% 줄어 긴 안내문은 줄바꿈이 잦아집니다(입력창은 세로로 늘릴 수 있음).</div>
+  <div class="note blue">칸은 장당 66px 고정이라 4장을 다 채워도 사진 영역은 약 290px —
+  입력창은 최소 190px을 보장합니다. 줄 높이는 지금과 같아 <b>화면 세로 변화가 없습니다.</b>
+  줄마다 첨부 수가 다르면 입력창 폭도 줄마다 달라진다는 점만 유의(위 목업의 유입 4장 / 리뷰 2장 / 특이사항 0장 비교).</div>
 </section>
 
 <!-- ════════ 결정 ════════ -->
 <section class="sec" data-sec="">
   <h2><span class="n">✓</span>비교와 추천</h2>
   <table class="cmp">
-    <thead><tr><th style="width:110px">기준</th><th>A안 — 아래 전폭 <span class="tag rec">추천</span></th><th>B안 — 2×2 그리드</th><th>C안 — 입력창 좁힘 + 4열 그리드</th></tr></thead>
+    <thead><tr><th style="width:110px">기준</th><th>A안 — 아래 전폭 <span class="tag rec">추천</span></th><th>B안 — 2×2 그리드</th><th>C안 — 첨부한 만큼 가변 폭</th></tr></thead>
     <tbody>
-      <tr><td><b>4장 전부 보임</b></td><td>◎ 82px 크기로 전부</td><td>○ 전부 보이나 매우 작음</td><td>◎ 66×48px · 4열 정렬로 전부</td></tr>
+      <tr><td><b>4장 전부 보임</b></td><td>◎ 82px 크기로 전부</td><td>○ 전부 보이나 매우 작음</td><td>◎ 66×48px · 첨부 수만큼 전부</td></tr>
       <tr><td><b>✕(빼기) 접근</b></td><td>◎ 모든 장에서 17px</td><td>△ 13px로 작음</td><td>○ 15px(제자리 상시)</td></tr>
-      <tr><td><b>화면 변화</b></td><td>줄이 최대 72px 높아짐<br>(첨부 있을 때만)</td><td>없음</td><td>세로 불변 ·<br>입력창 폭 약 40% 축소</td></tr>
-      <tr><td><b>구현 범위</b></td><td><b>CSS + 스트립 위치만</b><br>(_igRender·업로드·순서·확대 무변경)</td><td>CSS + 렌더 분기</td><td>CSS + 렌더 분기<br>(4열 그리드 · 빈 자리 표시)</td></tr>
-      <tr><td><b>남는 위험</b></td><td>거의 없음</td><td>오터치(작은 ✕)</td><td>긴 안내문의 줄바꿈 잦아짐</td></tr>
+      <tr><td><b>화면 변화</b></td><td>줄이 최대 72px 높아짐<br>(첨부 있을 때만)</td><td>없음</td><td>세로 불변 ·<br>입력창이 첨부 수만큼 줄어듦<br>(0장이면 거의 전폭)</td></tr>
+      <tr><td><b>구현 범위</b></td><td><b>CSS + 스트립 위치만</b><br>(_igRender·업로드·순서·확대 무변경)</td><td>CSS + 렌더 분기</td><td>CSS + 렌더 분기<br>(칸 수 = 첨부 수 + 추가칸)</td></tr>
+      <tr><td><b>남는 위험</b></td><td>거의 없음</td><td>오터치(작은 ✕)</td><td>줄마다 입력창 폭이 달라짐 ·<br>4장이면 폭 약 40% 축소</td></tr>
     </tbody>
   </table>
-  <div class="note blue"><b>A안(아래 전폭)과 C안(우측 4열 그리드)이 확인·관리를 모두 해결합니다.</b>
-  A안은 입력창 폭을 지키는 대신 첨부가 있을 때 줄이 높아지고, C안은 줄 높이를 지키는 대신 입력창 폭을 양보합니다.
+  <div class="note blue"><b>A안(아래 전폭)과 C안(가변 폭)이 확인·관리를 모두 해결합니다.</b>
+  A안은 입력창 폭을 지키는 대신 첨부가 있을 때 줄이 높아지고,
+  C안은 줄 높이를 지키는 대신 첨부한 수만큼 입력창 폭을 내어줍니다(0장이면 손해 없음).
   어느 안으로 할지 골라주시면 그대로 구현합니다.</div>
 </section>
 
@@ -304,14 +307,12 @@ function stripB(list){
   return h;
 }
 function stripC(list){
-  // 입력창을 좁히고 오른쪽에 4열 고정 그리드 — 사진은 왼쪽 열부터 항상 같은 자리(열 규칙),
-  // 다음 빈 열이 [＋추가], 나머지 빈 열은 점선 자리(몇 장 더 넣을 수 있는지 보인다)
+  // 칸 수 = 첨부 수 + [＋추가] 1칸(4장이면 추가칸 없음 = 최대 4칸).
+  // 스트립은 내용 폭만 차지(flex:none)하고, 남는 폭 전부를 입력창(flex:1)이 갖는다
+  // → 사진이 늘수록 입력창이 그만큼 좁아지고, 빼면 도로 넓어진다.
   let h = '<div class="composeC"><textarea placeholder="__PH__"></textarea><div class="strip stripC">';
-  for(let i=0;i<4;i++){
-    if(i<list.length) h += thumbHtml(list[i],i);
-    else if(i===list.length) h += '<button class="addb" data-add="1" title="사진 추가"><span class="plus">＋</span>추가</button>';
-    else h += '<span class="slot"></span>';
-  }
+  list.forEach((src,i)=>{ h += thumbHtml(src,i); });
+  if(list.length<4) h += '<button class="addb" data-add="1" title="사진 추가 (최대 4장)"><span class="plus">＋</span>추가</button>';
   h += '</div></div>';
   return h;
 }
