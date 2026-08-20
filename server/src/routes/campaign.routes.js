@@ -1812,6 +1812,8 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
         display_recruit_total: displayTotal.total,
         display_recruit_total_source: displayTotal.source,
         state: st.state, stateReason: st.stateReason || null,
+        // 표(주문 원장) 기준 총량(2단계) — null = 집계 불가/연결 없음(카드는 표 기준 문구를 그리지 않는다)
+        tableQuota: st.tableQuota || null,
         todayCount: st.todayCount, dailyQuota: st.dailyQuota,
         // 표 기준 오늘 참여 인원(B안) — null = 셀 수 없음(연결 탭 없음·조회 실패).
         //   화면은 이 값이 있으면 이것을 쓰고, 없으면 종전 todayCount 로 폴백하며 그 사실을 말한다.

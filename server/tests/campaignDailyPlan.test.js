@@ -519,7 +519,7 @@ console.log('\n[3] 계획 로더 fail-open + counts 동봉');
   // ★★ 오늘 정원 0인 카드도 칩(이월·조절·보류)을 그린다 — 종전엔 자리표시자가 통째로 덮어써
   //   휴무일·일정종료 공고의 이월이 화면 어디에도 없었다(사용자 신고 2026-08-07).
   ok('★ 칩은 게이지 분기 밖에서 만든다(정원 0 카드에서도 표시)',
-    /const chips = `\$\{holdTip\}\$\{planTip\}\$\{carryTip\}`;/.test(cards)
+    /const chips = `\$\{tqChip\}\$\{holdTip\}\$\{planTip\}\$\{carryTip\}`;/.test(cards)
     && (cards.match(/\$\{chips\}/g) || []).length >= 2);
   ok('★ 정원 0 사유를 사실대로(게시된 공고를 "게시 전"으로 위장 금지)',
     /function _zeroQuotaNote\(c, isPre, isDraft\)/.test(cards)

@@ -50,9 +50,14 @@ eq('총원 무제한(0)이면 총원 판정이 끼어들지 않는다',
 
 ok('★★ 참여 차단은 두 상태 모두 동일 — 순서 변경이 참여 동작을 바꾸지 않는다',
   S.APPLY_BLOCK_REASON.soft_full === 'soft_full' && S.APPLY_BLOCK_REASON.daily_done === 'daily_done');
-ok('총원 판정이 일일 마감보다 앞에 있다(순서 고정)',
-  /usedAll >= rt\) return \{ \.\.\.payload, state: 'soft_full' \};[\s\S]{0,220}if \(todayCount >= quota\)/.test(
-    readS('services/campaignState.service.js')));
+// ★ 패턴 갱신(2026-08-20, 검사 의미 불변): 표 기준 총량 게이트 블록이 두 판정 사이에 끼어
+//   고정 폭(220자) 창으로는 못 본다 → 존재 확인 후 인덱스 비교(-1 < n 함정 방지 — 레포 규율).
+{
+  const src = readS('services/campaignState.service.js');
+  const iFull = src.indexOf("usedAll >= rt) return { ...payload, state: 'soft_full' }");
+  const iDaily = src.indexOf('if (todayCount >= quota)');
+  ok('총원 판정이 일일 마감보다 앞에 있다(순서 고정)', iFull >= 0 && iDaily >= 0 && iFull < iDaily);
+}
 
 /* 시트 일정 캠페인도 같은 규율 — totalSlots 충족 시 soft_full */
 {
