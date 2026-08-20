@@ -68,7 +68,10 @@ ok('★ 공통에 있는 이름은 채널에서 건너뛴다(같은 열 2번 생
   (() => {
     const t = { core: ['수취인', '쿠팡ID'], channels: { coupang: ['쿠팡ID'] } };
     const p = P.buildWorktablePlan({ workOrder: WO, template: t });
-    return p.columns.length === 2 && p.columns.filter(c => c.name === '쿠팡ID').length === 1;
+    /* ★ 2026-08-20: 옵션이 2종 이상이면 시스템이 옵션 칸을 자동으로 덧붙인다(송장 열과 같은 규율).
+       이 검사의 대상은 **템플릿에서 온 열의 중복**이므로 시스템 열은 세지 않는다(검사 의미 불변). */
+    const fromTpl = p.columns.filter(c => c.origin !== 'system');
+    return fromTpl.length === 2 && p.columns.filter(c => c.name === '쿠팡ID').length === 1;
   })());
 ok('★ 열 분류는 매퍼 파생 단일 출처(classifyHeaders) — 여기서 키워드 표를 만들지 않는다',
   /require\('\.\/worktableTemplate'\)/.test(planSrc)
@@ -243,9 +246,17 @@ ok('★ 시작일 없음·채널 미상·역할 중복은 **경고만**(정상 �
       && p.warnings.some(w => w.code === 'unknown_channel')
       && p.warnings.some(w => w.code === 'duplicate_role');
   })());
-ok('옵션은 나눴는데 옵션 열이 없으면 경고(조용한 누락 금지)',
-  P.buildWorktablePlan({ workOrder: { recruit_count: 6 }, template: { core: ['수취인'], channels: {} }, options: { options: ['A', 'B'] } })
-    .warnings.some(w => w.code === 'no_option_column'));
+/* ★★ 2026-08-20(사용자 확정): 옵션을 나눴는데 표준 열에 옵션 칸이 없으면 **경고에서 그치지 않고
+   자동으로 덧붙인다**(리뷰옵션·택배송장번호와 같은 규율). 종전 경고(`no_option_column`)만으로는
+   만들어진 표에 칸이 영영 없어 리뷰어가 고른 옵션이 조용히 사라졌다(「선물세트 3종 빈박스」).
+   검사 의미는 그대로 "조용한 누락 금지" — 칸이 생기고, 그 사실을 말하는지 본다. */
+ok('★ 옵션은 나눴는데 옵션 열이 없으면 자동으로 만들고 그 사실을 알린다(조용한 누락 금지)',
+  (() => {
+    const p = P.buildWorktablePlan({ workOrder: { recruit_count: 6 }, template: { core: ['수취인'], channels: {} }, options: { options: ['A', 'B'] } });
+    return p.columns.some(c => c.role === 'option' && c.origin === 'system')
+      && p.warnings.some(w => w.code === 'option_column_added')
+      && !p.warnings.some(w => w.code === 'no_option_column');
+  })());
 ok('상태 칸 겹침도 경고로 노출된다',
   (() => {
     const p = P.buildWorktablePlan({ workOrder: { recruit_count: 3 }, template: { core: ['입금일자'], channels: {} } });
@@ -649,7 +660,12 @@ ok('★ 리뷰옵션 칸은 상품옵션 기입처로 세지 않는다 — no_op
     const wo = { recruit_count: 10, review_type_mix: JSON.stringify([{ type: 'photo', quantity: 5 }, { type: 'text', quantity: 5 }]),
       product_options_json: JSON.stringify([{ options: [{ label: 'A' }, { label: 'B' }] }]) };
     const p = P.buildWorktablePlan({ workOrder: wo, template: t });
-    return p.warnings.some(w => w.code === 'no_option_column')
+    /* ★ 2026-08-20: 리뷰옵션 칸만 있으면 상품옵션 칸을 **따로 만든다**(리뷰옵션은 기입처가 아니다).
+       종전 기대값(`no_option_column` 경고)은 자동 추가로 대체됐고, 검사의 요지
+       "리뷰옵션을 상품옵션으로 세지 않는다"는 그대로다. */
+    return p.columns.filter(c => c.role === 'option').length === 2      // 리뷰옵션 + 새로 만든 옵션
+      && p.columns.some(c => c.name === '옵션' && c.origin === 'system')
+      && p.warnings.some(w => w.code === 'option_column_added')
       && !p.warnings.some(w => w.code === 'duplicate_role' && /option/.test(w.message));
   })());
 ok('★★ 행배정 매칭은 리뷰옵션 칸을 대조하지 않는다 — 포함하면 상품옵션 매칭이 구조적으로 전패한다',

@@ -62,6 +62,7 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
 
   const patch = {};
   const optionSuppressed = [];
+  let optionWritten = false;
   (headers || []).forEach((h, i) => {
     const val = mapped[i];
     if (val === null || val === undefined) return;          // 매퍼가 "쓰지 않음"이라 한 칸
@@ -71,9 +72,19 @@ function buildRowPatch(headers, orderData, currentRowJson = {}) {
       const cur = String((currentRowJson || {})[name] == null ? '' : (currentRowJson || {})[name]).trim();
       if (cur) { optionSuppressed.push({ header: name, want: String(val), cur }); return; }
     }
+    if (optCols.has(i) && String(val).trim()) optionWritten = true;
     patch[name] = String(val);
   });
-  return { patch, optionSuppressed };
+
+  /* ★★ 조용한 누락 차단 (2026-08-20) — 리뷰어가 고른 옵션이 있는데 **기입할 칸이 없는** 경우.
+     매퍼는 '옵션' 헤더가 없으면 그 값을 `null` 로 떨어뜨리고, 종전에는 경고도 로그도 없이
+     사라졌다(8/20 「선물세트 3종 빈박스」 — 원장에는 3종 선택이 남았는데 표에는 흔적 0).
+     ★ 보존(blank-only)으로 안 쓴 것과는 **다른 신호**다 — 그쪽은 값이 이미 있는 정상 동작이고,
+       이쪽은 **칸 자체가 없다**(사람이 칸을 만들어야 풀린다). */
+  const wantOpt = String((orderData || {}).selectedOptKey || '').trim();
+  const optionUnmapped = (wantOpt && !optionWritten && !optionSuppressed.length) ? wantOpt : '';
+
+  return { patch, optionSuppressed, optionUnmapped };
 }
 
 /**
@@ -129,6 +140,7 @@ async function writeOrderToWorktable({
   //     재기록(reconcile)·관리자 편집과의 경합까지 직렬화한다.
   const client = await db.connect();
   let optionSuppressed = [];
+  let optionUnmapped = '';
   // ★★ `seq` 는 try 밖에서 선언한다 — 아래 catch·완결 표시·신원 링크·로그가 전부 이 값을 쓴다.
   //   try 안에서 `let` 으로 선언하면 블록 스코프라 커밋 뒤 `markOrderWritten(…, seq)` 부터
   //   ReferenceError 가 나고, 마지막 logger.info 에서 함수 밖으로 던져진다. 그러면 행은 이미
@@ -255,6 +267,7 @@ async function writeOrderToWorktable({
     const currentRowJson = (cur[0] && cur[0].row_json && typeof cur[0].row_json === 'object') ? cur[0].row_json : {};
     const built = buildRowPatch(headers, orderData, currentRowJson);
     optionSuppressed = built.optionSuppressed;
+    optionUnmapped = built.optionUnmapped || '';
     const merged = { ...currentRowJson, ...built.patch };
 
     const reviewerName = String(loginName || orderData.orderer || orderData.recipient || '').slice(0, 200);
@@ -345,8 +358,22 @@ async function writeOrderToWorktable({
       optionSuppressed.map(s => `${s.header}: "${s.cur}" 유지`).join(' · '));
   }
 
+  /* ★ 기입할 옵션 칸이 아예 없으면 **소리 내어 알린다** — 조용히 사라지지 않게(2026-08-20).
+     조치는 [⋯] → [🧩 옵션 열](칸 생성 + 소급 기입). 관측 실패가 완결을 막지 않는다. */
+  if (optionUnmapped) {
+    logger.warn(`[sheetlessOrder] ⚠️ 옵션 기입 칸 없음 — 리뷰어가 고른 옵션이 표에 안 들어감 ` +
+      `tab=${tabName} seq=${seq} 선택="${optionUnmapped}" os=${orderSubmissionId}`);
+    try {
+      require('./errorLog.service').logAbnormal({
+        flow: 'order_mirror', step: 'option_column_missing', severity: 'warn',
+        error: new Error(`option column missing: "${optionUnmapped}"`),
+        context: { sheetId, tabName, tabGid: gid, sheetRow: seq, orderSubmissionId },
+      });
+    } catch (_) { /* 관측 실패가 쓰기를 막지 않는다 */ }
+  }
+
   logger.info(`[sheetlessOrder] 즉시 완결 tab=${tabName} seq=${seq} os=${orderSubmissionId}${recovered ? ' (복구)' : ''}`);
-  return { ok: true, written: true, seq, ledger, optionSuppressed };
+  return { ok: true, written: true, seq, ledger, optionSuppressed, optionUnmapped };
 }
 
 /**

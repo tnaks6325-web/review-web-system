@@ -263,6 +263,46 @@ async function _saveCampaignOptions(campaignId, options) {
   }
 }
 
+/**
+ * ★★ 공고 옵션 ↔ 작업표 옵션 칸 정합 (2026-08-20 실측 사고) ─────────────────────
+ * 작업표 열 구성(`worktablePlan.buildColumns`)은 **작업오더의 옵션만** 본다 —
+ * `campaign_options` 는 참조하지 않는다. 그래서 "작업오더엔 옵션이 없고 공고에서 옵션을
+ * 나눈" 작업은 **옵션 칸 없이** 만들어졌고, 리뷰어가 고른 옵션이 원장에는 남는데
+ * 작업표·화면에는 **경고 한 줄 없이 사라졌다**.
+ *
+ * → 옵션이 2종 이상인 공고를 저장하면 연결된 무시트 작업표에 옵션 칸을 **보장**한다
+ *   (이미 있으면 아무 것도 하지 않는 조회 3번 = 사실상 무비용).
+ *
+ * ★ 완화 금지: 실행부는 `worktableOptionColumn.service` **한 벌**(복구 창구와 같은 함수) —
+ *   여기서 헤더를 직접 만지면 두 경로가 다른 칸을 만든다.
+ * ★ **절대 throw 하지 않는다** — 정합 보조가 공고 저장을 죽이면 안 된다(082 apply 규율).
+ * ★ 시트 기반 탭·미등록 탭은 서비스가 fail-closed 로 거부한다(열은 시트가 정한다).
+ */
+async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.linked_tab_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+              (SELECT COUNT(*) FROM campaign_options o
+                WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed') AS "liveOpts"
+         FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    if (Number(r.liveOpts || 0) < 2) return null;   // 선택지가 하나면 기입 의미가 없다(배분 규칙과 같은 기준)
+    const { ensureOptionColumn } = require('../services/worktableOptionColumn.service');
+    const out = await ensureOptionColumn({
+      sheetId: r.sheetId, tabName: r.tabName, dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && (out.headerAdded || out.backfillCount)) {
+      logger.info(`[campaign/options] 작업표 옵션 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${out.headerAdded} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_sheetless·tab_not_registered·no_headers 는 정상적인 "해당 없음" 이다.
+    logger.warn(`[campaign/options] 작업표 옵션 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 기간별 리뷰비(082) — 구간표 저장·조회
 //   판정 자체는 utils/campaignFee.js 가 **단일 출처**(화면마다 규칙을 따로 만들면
@@ -2026,6 +2066,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
+    if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     // 작업오더와 모집공고는 별도 값이 아니라 같은 목표 인원이다. 생성 시에도 서버가
     // 역방향 링크와 작업오더 정원을 함께 저장해, 프론트 후속 호출 실패로 드리프트하지 않게 한다.
     let quotaSync = null;
@@ -2369,6 +2410,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
     const normFees = normalizeFeeSchedules(fee_schedules);
