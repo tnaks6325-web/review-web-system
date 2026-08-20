@@ -121,8 +121,54 @@ function displaySortKey(row, numberKey) {
   return { has, n: has ? n : Number.MAX_SAFE_INTEGER, seq: Number(row && row.seq) || 0 };
 }
 
+/* ══ "채워진 줄" 판정 — 표에 사람이 들어온 줄인가 ═══════════════════════════════
+   ★★ **단일 출처**다. 소비처가 둘이라 갈리면 곧바로 사고가 된다:
+     ① SQL(`filledSql`) — 번호 재부여·짝 빈 줄 정리·전체 스캔(`rowNumbering.service`)
+     ② JS(`isFilledRow`) — 작업보드 상단 [진행 현황] 참여자 게이지(`trackB.workdeskTab`)
+     기준이 다르면 "게이지는 134명인데 정리는 다른 줄을 빈 줄로 본다" 가 된다.
+   ★ 판정 = 주문이 붙었거나(order_submission_id) 사람 정보(이름·수취인·연락처) 중
+     하나라도 값이 있는 줄. 공백만 있는 칸은 빈 칸으로 본다.
+   ★ 작업표 생성 때 미리 깔아 둔 **빈 슬롯**은 여기서 false 다 — 그게 이 판정의 존재 이유다
+     (종전에는 게이지가 줄 수를 세어 6명만 들어온 200줄 작업이 `200/200 · 100%` 로 보였다). */
+
+/** 판정에 쓰는 칸 — SQL·JS 가 같은 목록을 본다(사본 금지). `js` = 그 칸의 JS 별칭들. */
+const FILLED_FIELDS = [
+  { col: 'order_submission_id', text: false, js: ['order_submission_id', 'orderSubmissionId', 'hasOrder'] },
+  { col: 'reviewer_name', text: true, js: ['reviewer_name', 'name'] },
+  { col: 'recipient_name', text: true, js: ['recipient_name', 'recipient'] },
+  { col: 'phone8', text: true, js: ['phone8'] },
+];
+
+/**
+ * "채워진 줄" SQL 조각. `alias` 는 `campaign_participants` 별칭(예 `'p'`).
+ * ★ 별칭은 정규식으로 검증한다(문자열 보간 주입 차단 — `utils/tableOrderNum` 과 같은 규율).
+ */
+function filledSql(alias = 'p') {
+  const a = String(alias);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(a)) throw new Error('filledSql: alias 형식 오류');
+  const parts = FILLED_FIELDS.map(f => (f.text
+    ? `NULLIF(btrim(COALESCE(${a}.${f.col}, '')), '') IS NOT NULL`
+    : `${a}.${f.col} IS NOT NULL`));
+  return `(${parts.join('\n   OR ')})`;
+}
+
+/**
+ * "채워진 줄" JS 판정 — DB 행(`reviewer_name`…)과 합성 행(`name`·`hasOrder`…) 양쪽을 받는다.
+ * ★ **마스킹 전 원본으로 부를 것** — 광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어
+ *   전 줄이 "채워짐" 으로 뒤집힌다(참여횟수 배지가 마스킹 전에 세는 것과 같은 이유).
+ */
+function isFilledRow(row) {
+  if (!row || typeof row !== 'object') return false;
+  return FILLED_FIELDS.some(f => f.js.some(k => {
+    if (!Object.prototype.hasOwnProperty.call(row, k)) return false;
+    const v = row[k];
+    if (v == null || v === false) return false;
+    return f.text ? _txt(v) !== '' : true;
+  }));
+}
+
 module.exports = {
-  NUMBER_KEYS, NUMBER_KEY_RE,
-  numberColumnKey,
+  NUMBER_KEYS, NUMBER_KEY_RE, FILLED_FIELDS,
+  numberColumnKey, filledSql, isFilledRow,
   orderRowsForNumbering, computeRenumberPlan, displaySortKey,
 };

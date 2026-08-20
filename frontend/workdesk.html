@@ -5708,8 +5708,17 @@ function _rvPopRender(){
    ★ 발주 '미연결' 배너는 ① 작업 조건 카드 안쪽 줄로 흡수한다(전폭 배너 제거).
      ★ 「작업세부 펼치기」 상시 노출은 폐지 — 발주 원문은 작업 조건 카드 [⋯] → [발주 원문 보기] 팝업으로. */
 function summaryStrip(wd,d,m,c){
-  const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
-  const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
+  /* ★★ 게이지 기준 = **채워진 줄**(사용자 확정 2026-08-20) — 줄 수가 아니다.
+     작업표 생성 때 미리 깔아 둔 빈 슬롯까지 세면 6명만 들어온 200줄 작업이
+     `참여자 200/200 · 100%` 로 보인다(신고 건). 판정은 서버 단일 출처(`counts.filled`).
+     ★ 구버전 백엔드(필드 부재)는 `total` 로 접어 **종전 동작 그대로**(0 위장 금지).
+     ★ 제출·입금의 분모도 같은 값이어야 한다 — 분자만 바꾸면 "134/200 인데 참여자는 134" 로 갈린다.
+     ★ 줄 수(준비된 슬롯)는 사라지지 않는다 — 참여자 게이지 툴팁이 말한다(조용한 누락 금지). */
+  const filled=(c.filled==null)?(c.total||0):(+c.filled||0);
+  const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||filled||0;
+  const pT=target?Math.round(filled/target*100):0, pS=filled?Math.round((c.submitted||0)/filled*100):0, pP=filled?Math.round((c.paid||0)/filled*100):0;
+  const slots=+c.total||0, empty=Math.max(0,slots-filled);
+  const filledTip=(c.filled==null)?'':`채워진 줄 ${filled}명 · 준비된 줄 ${slots}줄${empty?` (빈 슬롯 ${empty}줄)`:''}`;
   const isAdv=STATE.role==='advertiser';
   // 광고주 렌즈: 담당자 표기(내부 실명) 대신 시작일 칸 — 정산 열도 없음(정산 카드가 항상 펼쳐져 있음).
   //   ★ 10항목 조건표(리뷰비·입금명 포함)는 **내부 전용**이라 광고주는 종전 4줄 그대로다.
@@ -5719,7 +5728,7 @@ function summaryStrip(wd,d,m,c){
   const cond=isAdv
     ? `<div class="tp3col"><div class="tp3t">작업 조건</div><dl class="tp3kv">${kv}</dl></div>`
     : _condCardHtml(wd,d,m);
-  const g=(lb,n,den,pc,cls)=>`<div class="tp3g"><span class="lb">${lb}</span>`+
+  const g=(lb,n,den,pc,cls,ti)=>`<div class="tp3g"${ti?` title="${esc(ti)}"`:''}><span class="lb">${lb}</span>`+
     `<span class="nm">${n}<small>/${den}</small></span>`+
     `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
     `<span class="pc">${pc}%</span></div>`;
@@ -5733,9 +5742,9 @@ function summaryStrip(wd,d,m,c){
   const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
   const prog=`<div class="tp3col"><div class="tp3t">진행 현황</div>`+
-    gg('참여자',c.total||0,target||(c.total||0),pT)+
-    gg('제출완료',c.submitted||0,c.total||0,pS,'s')+
-    gg('입금완료',c.paid||0,c.total||0,pP)+
+    gg('참여자',filled,target||filled,pT,'',filledTip)+
+    gg('제출완료',c.submitted||0,filled,pS,'s')+
+    gg('입금완료',c.paid||0,filled,pP)+
     `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
   if(isAdv) return `<div class="advcondition">${cond}</div><div class="advprogress">${prog}</div>`;
   /* 내부 = 상단 3분할(작업 조건 · 진행 현황+정산 · 제출물 미리보기).

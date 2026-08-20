@@ -18,6 +18,7 @@ const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
+const { isFilledRow: _isFilledRow } = require('../utils/rowNumbering');   // "채워진 줄" 판정 단일 출처(SQL `filledSql` 과 한 벌)
 
 let _pool;
 let _rebuildLedgersForTest = null;
@@ -2623,6 +2624,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const visitSeen = new Map();
   const out = [], hiddenList = [];
   let ambiguousCount = 0;
+  /* ★★ 채워진 줄 수 — [진행 현황] 참여자 게이지의 분자(사용자 확정 2026-08-20).
+     종전 게이지는 `out.length`(= 줄 수)를 세어, 작업표 생성 때 미리 깔아 둔 **빈 슬롯**까지
+     사람으로 계산했다 → 6명만 들어온 200줄 작업이 `참여자 200/200 · 100%` 로 보였다.
+     ★ 판정은 `utils/rowNumbering.isFilledRow` 단일 출처 — 번호 재부여·짝 빈 줄 정리가 쓰는
+       SQL(`filledSql`)과 같은 기준이라 "게이지와 정리가 다른 줄을 빈 줄로 본다" 가 불가능하다.
+     ★ **마스킹 전**에 센다(광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어 전 줄이 뒤집힌다).
+     ★ 화면에서 뺀 줄(`_hidden`)은 세지 않는다 — 카운트는 `continue` 뒤에서 한다(참여횟수 배지와 같은 자리). */
+  let filledCount = 0;
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
     let ov = {}, editable = !!anchor, ambiguous = false;
@@ -2659,6 +2668,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
       continue;
     }
+    if (_isFilledRow(syn)) filledCount++;
     const _vp8 = String(syn.phone8 == null ? '' : syn.phone8).trim();
     if (_vp8) { const n = (visitSeen.get(_vp8) || 0) + 1; visitSeen.set(_vp8, n); syn.visitNo = n; }
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
@@ -2720,6 +2730,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   }
   const counts = {
     total: out.length,
+    /* 채워진 줄(사람이 들어온 줄) — 참여자 게이지의 분자. `total`(줄 수)과의 차이 = 빈 슬롯. */
+    filled: filledCount,
     submitted: out.filter(r => r.submitted).length,
     paid: out.filter(r => r.paid).length,
     // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
