@@ -141,7 +141,7 @@
     <div class="sec">
       <div class="cardbx lockcard">
         <div class="e">🧾</div><div class="m">내 정보를 먼저 등록해주세요</div>
-        <div class="s">참여 후에는 <b id="missTtl">15분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
+        <div class="s">참여 후에는 <b id="missTtl">30분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
         <div class="misslist" id="missList"></div>
         <button class="btn" onclick="location.href='/'">리뷰어 홈에서 내 정보 등록하기</button>
         <button class="btn ghost" style="margin-top:8px" onclick="showPre()">다음에 할게요</button>
@@ -632,7 +632,7 @@ function goPopNormal(id){
   try{ sessionStorage.setItem('pop_return_camp', JSON.stringify({ campaignId:CAMP_ID })); }catch(_){}
   location.href = 'campaign.html?id=' + encodeURIComponent(id);
 }
-function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
+function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 30) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
 
 /* ═══ 상품옵션 (061 2단계) ═══ */
 let _optSheetMode = 'join';   // 'join' | 'change'

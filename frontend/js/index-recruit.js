@@ -2541,7 +2541,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
   syncRecruitReviewTypeMix();
-  const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
+  const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "30";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
   /* ⏸ 098 이월 반영 초기화 — 신규 공고 기본 [자동](현행) */
   if (typeof rfCarrySet === "function" && document.getElementById("rf_carry_mode")) rfCarrySet("auto", { silent: true });
@@ -2669,7 +2669,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_recruit_total", c.recruit_total ?? "");
         setV("rf_landing_url", c.landing_url || "");
         setV("rf_product_url", c.landing_url || "");
-        setV("rf_hold_ttl", c.hold_ttl_min ?? 15);
+        setV("rf_hold_ttl", c.hold_ttl_min ?? 30);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
         /* ⏸ 098 이월 반영 방식 복원 */
         if (typeof rfCarrySet === "function") rfCarrySet(c.carry_mode === "hold" ? "hold" : "auto", { silent: true });
@@ -4066,7 +4066,7 @@ async function saveRecruitPostImpl() {
       }
       const reviewMixError = validateRecruitReviewTypeMix();
       if (reviewMixError) { _rfSaveBlocked(reviewMixError); return; }
-      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
+      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 30;
       /* ⏸ 098 이월 반영 방식 — ★ 세그먼트 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 유지) */
       if (document.getElementById("rf_carry_mode")) {
         payload.carry_mode = document.getElementById("rf_carry_mode").value === "hold" ? "hold" : "auto";
@@ -4379,7 +4379,7 @@ function _renderPreview() {
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");
   if (ttlEl) {
-    const ttl = Number(_v("rf_hold_ttl")) || 15;
+    const ttl = Number(_v("rf_hold_ttl")) || 30;
     ttlEl.textContent = String(ttl).padStart(2, "0") + ":00";
   }
 

@@ -1448,7 +1448,7 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
-    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 15);
+    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 30);
     const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
     const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
@@ -2004,7 +2004,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         window_start || null,
         window_end || null,
         Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
-        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 15,
+        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 30,
         _prepWorkDetail(work_detail) ?? null,
         source_work_order_id || '',
         start_date || null,
@@ -2635,7 +2635,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
-    const ttlMin = Number(camp.hold_ttl_min) || 15;
+    const ttlMin = Number(camp.hold_ttl_min) || 30;
 
     res.json({
       ok: true,
