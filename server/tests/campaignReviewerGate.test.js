@@ -253,7 +253,14 @@ const gate = require('../src/utils/reviewerGate');
     && /gatecriteria: \{ ic: '🚫'/.test(settings));
   ok('설정 경로는 /api/trackb/settings/*(양쪽 호스트 공용 — 재기준 금지)',
     /RGC_EP = '\/api\/trackb\/settings\/reviewer-gate-criteria'/.test(settings));
-  ok('admin.html 설정 마운트에 gatecriteria 포함', /'worktable', 'gatecriteria'/.test(adminHtml));
+  /* ⚠ 종전에는 마운트 목록의 **인접 문자열**(`'worktable', 'gatecriteria'`)을 고정했다 —
+     목록에 항목이 하나만 끼어도 조용히 깨지는 패턴이라(레포에서 반복된 함정) **그 마운트 호출
+     안에 키가 있는가**로 바꾼다. 검사 의미는 불변: gatecriteria 가 실제로 마운트된다. */
+  const _mountCall = (src) => {
+    const i = src.indexOf("AdminSettings.mount('adminSettingsMount'");
+    return i < 0 ? '' : src.slice(i, src.indexOf(')', src.indexOf('panels', i)) + 1);
+  };
+  ok('admin.html 설정 마운트에 gatecriteria 포함', /'gatecriteria'/.test(_mountCall(adminHtml)));
   // ★ 2026-08 사용자 확정: 공고별 [🚫 참여 리뷰어 관리]를 AE 도 쓰므로, 그 판정 기준인
   //   gatecriteria 패널은 admin/staff **양쪽 마운트 목록**에 있어야 한다(한쪽만 있으면 AE 가
   //   기준을 못 보고 관리만 하게 된다). 다른 패널 목록이 늘어도 깨지지 않게 두 목록을 따로 본다.
