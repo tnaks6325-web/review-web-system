@@ -302,6 +302,45 @@ function _woProductLines(o) {
   return withUrl.map((l, i) => `${i + 1}.${l}`).join("\n");  // 2개+ → 번호+줄바꿈
 }
 
+/**
+ * ★★ 134 — 상세 펼침의 「선택지별 유입가이드」 블록.
+ *
+ * 복합 작업(상품A의 옵션1·옵션2 / 상품B)은 선택지마다 들어가는 길이 달라서 공통 가이드 하나로는
+ * 표현되지 않는다. 그 값이 실려 왔는지 **접수 전에 눈으로 확인**할 수 있어야 한다.
+ * ★ 원문(product_options_json)은 손대지 않는다 — 표시만 추가한다.
+ * ★ 가이드가 하나도 없는 오더(지금까지의 전부)는 **빈 문자열** = 화면이 종전 그대로.
+ */
+function _woUnitGuideBlock(o) {
+  let arr = null;
+  try { const p = JSON.parse(o.product_options_json || "[]"); if (Array.isArray(p) && p.length) arr = p; } catch (_) { return ""; }
+  if (!arr) return "";
+  const units = [];
+  for (const prod of arr) {
+    const name = String(prod.name || "").trim();
+    const opts = Array.isArray(prod.options) ? prod.options : [];
+    if (opts.length) {
+      for (const op of opts) {
+        const lab = String(op.label || "").trim();
+        units.push({ label: (name ? name + " · " : "") + (lab || "(옵션명 없음)"), g: _woUnitGuide(op) });
+      }
+    } else if (name) {
+      units.push({ label: name, g: _woUnitGuide(prod.base || prod) });
+    }
+  }
+  const live = units.filter(u => u.g.html || u.g.images.length);
+  if (!live.length) return "";
+  const body = live.map(u =>
+    '<div style="margin-top:6px">'
+    + '<div style="font-size:.76rem;font-weight:800;color:#1D4ED8">' + escHtml(u.label) + '</div>'
+    + '<div style="font-size:.79rem;color:#374151;line-height:1.6;word-break:break-word">' + u.g.html + '</div>'
+    + u.g.images.map(src => '<img src="' + escHtml(src) + '" alt="선택지 유입가이드 이미지">').join('')
+    + '</div>').join('');
+  // ★ 전부 실려 왔는지 알 수 있게 **몇 개 중 몇 개**인지 말한다(일부만 온 것을 조용히 넘기지 않는다)
+  const head = '<span style="color:#3182f6;font-weight:700">▶</span> <b>선택지별 유입가이드</b> '
+    + '<span style="font-size:.74rem;color:#6B7280">(선택지 ' + units.length + '개 중 ' + live.length + '개)</span> :';
+  return '<div style="margin-top:4px"><div style="font-size:.8rem;color:#1F2937;line-height:1.6">' + head + '</div>' + body + '</div>';
+}
+
 // 작업오더 상세 본문 (카드/간편보기 공용) — 카톡 ▶형식
 function _woDetailHtml(o) {
   const prodText = _woProductLines(o);
@@ -328,6 +367,8 @@ function _woDetailHtml(o) {
     //   = 종전 화면 그대로. 블로그 오더에서만 새 줄이 보인다.
     _woKv("체험단 종류", _woWorkKindLabel(o.work_kind)),
     _woSection("상품·옵션", prodText, txtR),
+    // ★ 134 — 「상품·옵션」 바로 아래(같은 문맥)에 선택지별 가이드. 값 없으면 빈 문자열 = 종전 화면.
+    _woUnitGuideBlock(o),
     // ★ 시작일 — 모집공고 발행 프리필이 **이 값을 그대로 복사**하는데(062, `_woCampaignPrefill`)
     //   상세 화면에는 없어서, 목록의 '제출/접수' 날짜와 공고의 '모집 시작일'이 다르면
     //   어디서 온 값인지 확인할 길이 없었다(2026-08-21 신고: 접수 8/19인데 공고 시작일 8/12).
@@ -546,6 +587,43 @@ function _woProductMode(o) {
   }
 }
 
+/** 선택지 전용 유입가이드 첨부 상한 — 모집공고 모달·서버 정화와 같은 값(넘겨 보내면 저장 때 잘린다). */
+const _WO_UNIT_GUIDE_IMG_MAX = 4;
+
+/**
+ * ★★ 134 — 선택지(옵션 · 옵션 없는 상품) 하나에 실린 **유입가이드**를 모집공고 저장 형태로 정규화한다.
+ *
+ * 인트라넷은 평문 `guide` + 첨부 주소 `guide_images` 를 보낸다(product_options_json 안).
+ * ★ 평문 → HTML 변환은 **공통 유입가이드와 같은 방식**(`_woPlainGuideToHtml`)을 쓴다 —
+ *   사본을 두면 "공통 가이드는 사진이 뜨는데 선택지 가이드는 주소 글자만" 으로 갈린다.
+ * ★ 첨부는 **우리 프록시 주소(https)만** 인정한다 — 임의 호스트가 리뷰어 화면의 `<img src>` 로
+ *   그대로 나가는 경로를 만들지 않는다(서버가 최종 정화하지만 여기서도 좁힌다).
+ * @returns {{html:string, images:string[]}}  값이 없으면 {html:'', images:[]} = 공통 가이드로 접힘
+ */
+function _woUnitGuide(src) {
+  const s = src || {};
+  const raw = String(s.guide ?? s.inflow_guide ?? s.inflowGuide ?? "");
+  let html = "";
+  if (raw.trim()) {
+    html = /<[a-z][^>]*>/i.test(raw)
+      ? raw
+      // ★ 첨부가 섞인 평문은 공통 유입가이드와 **같은 함수**로 변환한다(사진이 <img> 로 살아난다).
+      //   그 함수는 **사진이 하나도 없으면 빈 문자열**을 돌려주므로(설계상 이미지 승격 전용),
+      //   글자만 있는 가이드는 여기서 escape 해 보존한다 — 안 그러면 안내문이 통째로 사라진다.
+      : ((typeof _woPlainGuideToHtml === "function" ? _woPlainGuideToHtml(raw) : "")
+        || raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;").replace(/\n/g, "<br>"));
+  }
+  const list = s.guide_images ?? s.guideImages ?? s.inflow_guide_images ?? [];
+  const images = [];
+  (Array.isArray(list) ? list : []).forEach(u => {
+    const v = String(u || "").trim();
+    if (!/^https:\/\/\S*\/api\/order\/guide-image\/[-\w]{20,}$/.test(v)) return;
+    if (images.indexOf(v) < 0 && images.length < _WO_UNIT_GUIDE_IMG_MAX) images.push(v);
+  });
+  return { html, images };
+}
+
 /** 작업오더 product_options_json → 캠페인 옵션표 행 [{optKey,payAmount,recruitTotal,dailyLimit}].
  *  옵션 2개 이상일 때만 반환(단일=옵션 없는 상품). 정원·하루건수는 오더에 없어 0(관리자 입력). */
 function _woOptionRows(o) {
@@ -575,6 +653,9 @@ function _woOptionRows(o) {
   for (const prod of arr) {
     const name = clean(prod.name);
     const opts = Array.isArray(prod.options) ? prod.options : [];
+    // ★ 134 — 상품마다 자기 메인 URL 을 갖는다(복합 작업은 상품이 둘 이상이라
+    //   공고 공통 랜딩 하나로는 "그 선택지의 상품 페이지"가 되지 않는다).
+    const prodUrl = clean(prod.url || prod.product_url || "");
     const basePay = Number(prod.base && prod.base.pay) || 0;
     const baseDaily = Math.max(0, Number(prod.base && (prod.base.daily_limit ?? prod.base.dailyLimit)) || 0);
     if (opts.length) {
@@ -582,12 +663,20 @@ function _woOptionRows(o) {
         const lab = clean(op.label);
         // "옵션 없음"류는 옵션명이 아니라 '옵션이 없다'는 서술 — 옵션 없는 상품 행으로 떨군다.
         const isNone = !lab || /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(lab);
+        // ★ 134 — 옵션에 붙은 유입가이드는 그 옵션이 곧 선택지이므로 그대로 따라간다.
+        //   "옵션 없음"류로 떨어진 줄은 그 상품 자체가 선택지라 상품(base) 가이드를 쓴다.
+        const ug = _woUnitGuide(isNone ? (prod.base || prod) : op);
         rows.push({
           productName: name,
+          // 옵션 없음으로 접힌 줄은 **상품 단위**(그 상품 자체가 선택지 하나)
+          unitKind: isNone ? "product" : "option",
+          inflowGuideHtml: ug.html,
+          inflowGuideImages: ug.images,
           // ★ 옵션명에 상품명을 붙이지 않는다 — opt_key 는 시트 옵션열에 그대로 기입되므로
           //   상품명이 섞이면 리뷰형태(텍스트/포토리뷰) 칸이 상품명으로 덮이는 사고가 난다.
           optKey: isNone ? "" : lab,
-          optionUrl: clean(op.url || op.option_url || ""),
+          // 옵션 링크가 비면 그 상품의 메인 URL 로 접는다(공고 공통 랜딩으로 떨어지면 남의 상품이 열린다)
+          optionUrl: clean(op.url || op.option_url || "") || prodUrl,
           payAmount: Number(op.pay) || basePay,
           // 옵션별 정원·일건수까지 오더 입력값을 그대로 모집공고 표에 적용한다.
           recruitTotal: Math.max(0, Number(op.count) || 0),
@@ -597,7 +686,13 @@ function _woOptionRows(o) {
       }
     } else if (name) {
       // ★ 옵션이 없는 상품 — 상품명을 옵션명으로 승격시키지 않는다(상품명 칸으로만 간다).
-      rows.push({ productName: name, optKey: "", payAmount: basePay, optionUrl: "", recruitTotal: 0, dailyLimit: baseDaily });
+      //   ★★ 134: 그 상품 자체가 리뷰어의 선택지 하나다(unitKind='product') — 자기 링크·가이드를 갖는다.
+      const ug = _woUnitGuide(prod.base || prod);
+      rows.push({
+        productName: name, optKey: "", unitKind: "product",
+        payAmount: basePay, optionUrl: prodUrl, recruitTotal: 0, dailyLimit: baseDaily,
+        inflowGuideHtml: ug.html, inflowGuideImages: ug.images,
+      });
     }
   }
   // 서로 다른 상품에 같은 옵션명이 있을 때만 상품명을 붙여 구분(옵션명은 공고 안에서 유일해야 한다).
@@ -1299,6 +1394,7 @@ function woAdvertiserLinkPicker(resp, onLink) {
     _woBuildInflowHtml: _woBuildInflowHtml, _woFirstProductInfo: _woFirstProductInfo,
     _woStripReviewMeta: _woStripReviewMeta, _woGuideImages: _woGuideImages,
     _woOptionRows: _woOptionRows, _woProductMode: _woProductMode, _woCampaignPrefill: _woCampaignPrefill,
+    _woUnitGuide: _woUnitGuide, _woUnitGuideBlock: _woUnitGuideBlock,
     woAcceptTabPicker: woAcceptTabPicker,
     woAdvertiserLinkPicker: woAdvertiserLinkPicker, _woAdvBizLine: _woAdvBizLine,
     woAdminEditModal: woAdminEditModal,

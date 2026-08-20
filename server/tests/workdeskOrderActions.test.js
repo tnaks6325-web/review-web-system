@@ -304,9 +304,11 @@ const callDetail = (req) => new Promise((resolve) => {
   t('legacy campaign trusted detail keeps stored options', () => {
     assert.ok(legacyTrusted.body && legacyTrusted.body.ok);
     assert.strictEqual(legacyTrusted.body.data.participation_mode, false);
+    // 134: _loadOptionsRaw 가 선택지별 유입가이드를 항상 정화해 실어 준다(빈 값이면 빈 문자열/빈 배열).
     assert.deepStrictEqual(legacyTrusted.body.options, [{
       optKey: 'standard option', optionUrl: 'https://example.com/option', payAmount: 12000,
       recruitTotal: 15, dailyLimit: 5, status: 'active',
+      inflowGuideHtml: '', inflowGuideImages: [],
     }]);
   });
   t('\u2605 플래그는 요청으로 만들 수 없다 — 오염 방어(자기 프로퍼티만 인정)', () => {

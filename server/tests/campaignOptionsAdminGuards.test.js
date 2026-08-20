@@ -57,8 +57,12 @@ ok('index-app: 새 오더의 명시적 옵션 모드를 우선하고, 옛 오더
   /function _woProductMode\(o\)/.test(app)
   && /const explicitOptionMode = String\(\(arr\[0\] \|\| \{\}\)\.product_mode \|\| ""\) === "opt"/.test(app)
   && /return explicitOptionMode \|\| rows\.filter\(r => r\.optKey\)\.length >= 2 \? rows : \[\]/.test(app));
+// ⚠ 134(선택 단위별 유입가이드)로 옵션 없는 상품 행에 unitKind·optionUrl·가이드가 끼면서
+//   `optKey: "", payAmount: basePay` 가 더는 붙어 있지 않다 → 두 조건을 따로 본다(검사 의미 불변).
 ok('★ index-app: 상품명을 옵션명(optKey)으로 승격하지 않는다 — 시트 옵션칸 상품명 오기입 차단',
-  !/optKey: name\.replace/.test(app) && /optKey: "", payAmount: basePay/.test(app));
+  !/optKey: name\.replace/.test(app)
+  && /optKey: "", unitKind: "product"/.test(app)
+  && /payAmount: basePay/.test(app));
 ok('★ index-app: 다상품이어도 옵션명 앞에 상품명을 붙이지 않는다(중복 옵션명일 때만 예외)',
   !/\(multiProduct && name \? name \+ " " : ""\)/.test(app) && /dup\.get\(r\.optKey\) > 1/.test(app));
 ok('★ index-recruit: 옵션명이 상품명과 같거나 상품명으로 시작하면 옵션이 아니다',
