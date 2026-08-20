@@ -2466,7 +2466,11 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
       payAmount: num(wo && wo.payAmount),
       reviewFee: feeInfo.fee, feeSource,
-      depositName: (meta.depositName || (memoCamp && memoCamp.transferMemo) || '') || null,
+      /* ★ 입금명 순서 = **공고 → 탭** — 입금관리(payment.service `campMemo || tabMemo`)와 같은
+         순서라야 한다. 탭을 앞세우면 "공고를 만들었는데 카드가 옛 탭 값을 계속 보여주는" 상태가
+         되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
+         공고를 나중에 만들면 공고 설정값이 우선한다). */
+      depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
       reviewType: resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType }),
       reviewTypeLabel: (() => {
         const k = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
