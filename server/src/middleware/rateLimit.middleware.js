@@ -57,6 +57,25 @@ const imageApiLimiter = rateLimit({
   },
 });
 
+// ── 구매 캡처 업로드 전용 ──────────────────────────────────────────────────────
+// ★★ AI 분석(image-extract)과 **버킷을 나눈다**: 둘이 같은 통(분당 10)을 쓰면 카드 5장짜리
+//   다건 제출이 "추출 5 + 업로드 5 = 정확히 10"이라 재시도 한 번에 429 로 밀리고,
+//   그때 **유실되는 것은 정산 증빙(구매 캡처)** 이다. 업로드는 AI 콜이 아니라 Drive 저장이라
+//   비용 성격도 다르다. 무제한이 아니라 통만 분리한다(남용 방어 유지).
+const imageUploadLimiter = rateLimit({
+  windowMs: 60 * 1000,  // 1분
+  max: 30,              // 분당 30회 (비로그인 리뷰어 — 다건 제출 + 재시도 여유)
+  message: { ok: false, error: '이미지 업로드 요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return false;
+    try { jwt.verify(token, process.env.JWT_SECRET); return true; } catch (_) { return false; }
+  },
+});
+
 // ── 광고주 접속 링크 교환(무인증 공개 경로) 전용 — 토큰 브루트포스 완화. IP당 분당 30회. ──
 const advertiserLinkLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -76,4 +95,4 @@ const campaignTokenLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { rateLimiter, registerLimiter, imageApiLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter };
+module.exports = { rateLimiter, registerLimiter, imageApiLimiter, imageUploadLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter };

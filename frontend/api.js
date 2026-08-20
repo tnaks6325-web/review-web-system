@@ -604,8 +604,14 @@ function _xhrPost(url, jsonBody, timeoutMs, onProgress) {
     }
 
     xhr.onload = function() {
-      try { resolve(JSON.parse(xhr.responseText)); }
-      catch(_) { resolve({ error: '서버 응답 파싱 실패 (HTTP ' + xhr.status + ')' }); }
+      // ★ 상태코드를 **가산 필드**로 실어 준다(기존 소비처 계약 불변) — 호출부가 429(분당 상한)와
+      //   413(본문 초과)을 구분해야 재시도 전략이 갈린다. 429는 창이 지나야 풀리고,
+      //   413은 아무리 기다려도 안 풀려 더 줄여 보내야 한다.
+      let out;
+      try { out = JSON.parse(xhr.responseText); }
+      catch(_) { out = { error: '서버 응답 파싱 실패 (HTTP ' + xhr.status + ')' }; }
+      if (out && typeof out === 'object') { try { out._httpStatus = xhr.status; } catch(_) {} }
+      resolve(out);
     };
     xhr.onerror = function() { reject(new Error('네트워크 오류 — 인터넷 연결을 확인하세요.')); };
     xhr.ontimeout = function() { reject(new Error('timeout')); };
