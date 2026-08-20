@@ -1448,7 +1448,7 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
-    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 30);
+    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || 30);
     const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
     const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
@@ -2011,7 +2011,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         multi_account_mode === true,                            // ★ 063 §09-1: 기본 [불가]
         Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
-          ? 10 : Math.max(1, Number(sub_hold_ttl_min) || 10),   // ★ 063 §09-2: 타계정 10분(≥1 클램프 — 0=즉시만료 footgun 차단)
+          ? 15 : Math.max(1, Number(sub_hold_ttl_min) || 15),   // ★ 063 §09-2: 타계정 15분(133, ≥1 클램프 — 0=즉시만료 footgun 차단)
         reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
         _normTransferBank(transfer_bank),                       // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정)
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(), // ★ 086
@@ -2342,7 +2342,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
-        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 10), // $35
+        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 15), // $35
         (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
         (transfer_bank === undefined || transfer_bank === null) ? null : (_normTransferBank(transfer_bank) || ''), // $37 ★ 086
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
