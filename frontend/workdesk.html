@@ -3662,7 +3662,9 @@ function _ocRender(){
         ${p.alreadyHadColumn ? '옵션 칸은 <b>이미 있습니다</b>.' : `옵션 칸 <b>「${esc(p.headerName)}」</b>을 새로 만듭니다.`}
         · 소급 기입 <b>${p.backfillCount}줄</b>
         ${p.skippedAlreadyFilled ? ` · 이미 값이 있어 건너뜀 ${p.skippedAlreadyFilled}줄` : ''}
-        ${p.skippedNoOrderOption ? ` · 고른 옵션 기록이 없는 줄 ${p.skippedNoOrderOption}줄` : ''}</div>
+        ${p.skippedNoOrderOption ? ` · 고른 옵션 기록이 없는 줄 ${p.skippedNoOrderOption}줄` : ''}
+        ${p.skippedNotAnOption ? ` · <b style="color:var(--danger,#c22f2f)">이 공고의 옵션이 아니라 건너뛴 줄 ${p.skippedNotAnOption}줄</b>` : ''}</div>
+      ${(p.liveOptionKeys && p.liveOptionKeys.length) ? `<div class="wbl-facts" style="color:var(--faint,#94a3b8)">이 공고의 옵션: ${p.liveOptionKeys.map(k => esc(String(k))).join(' · ')}<br>표에는 <b>이 목록에 있는 값만</b> 적습니다(주문 원장에 남은 다른 값은 건너뜁니다).</div>` : ''}
       ${(p.rows && p.rows.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>기입할 옵션</th></tr></thead><tbody>
         ${p.rows.map(x => `<tr><td>${x.seq}</td><td><b>${esc(String(x.optKey))}</b></td></tr>`).join('')}
         </tbody></table>${p.rowsTruncated ? `<div class="wbl-facts">…외 ${p.rowsTruncated}줄</div>` : ''}` : ''}
