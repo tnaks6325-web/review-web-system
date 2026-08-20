@@ -104,6 +104,8 @@ const FIXTURE = {
   pend: [
     { sheetId: 'S1', status: 'stuck_manual', n: 3, oldest: '2026-06-01T00:00:00Z', newest: '2026-06-02T00:00:00Z' },
     { sheetId: 'S1', status: 'failed', n: 1, oldest: '2026-08-18T00:00:00Z', newest: '2026-08-18T00:00:00Z' },
+    // ★ 실측 최다 상태 — 크론이 손대지 않는 갈래(주문 자체는 이미 written)
+    { sheetId: 'S2', status: 'conflict', n: 2, oldest: '2026-07-01T00:00:00Z', newest: '2026-07-02T00:00:00Z' },
   ],
   mir: [{ sheetId: 'S1', mirroredAt: '2026-08-19T10:00:00Z' }],
 };
@@ -134,12 +136,12 @@ let R = null;
     assert.strictEqual(s1.reason, 'sheet_tab_live');
     assert.deepStrictEqual(s1.liveTabNames, ['0801 살아있는작업']);
     assert.strictEqual(s1.pendingOrders, 4);
-    assert.strictEqual(R.pendingOrdersTotal, 4);
+    assert.strictEqual(R.pendingOrdersTotal, 6);
   });
   t('3d-2 ★★ 막힌 주문을 상태·기간으로 갈라 준다(건수만으로는 잔재인지 살아있는지 못 가린다)', () => {
     const s1 = R.items.find(i => i.sheetId === 'S1');
     assert.deepStrictEqual(s1.pendingByStatus, { stuck_manual: 3, failed: 1 });
-    assert.deepStrictEqual(R.pendingByStatus, { stuck_manual: 3, failed: 1 });
+    assert.deepStrictEqual(R.pendingByStatus, { stuck_manual: 3, failed: 1, conflict: 2 });
     assert.ok(s1.pendingOldest && s1.pendingNewest, '제출 기간이 없다');
     assert.ok(new Date(s1.pendingOldest) < new Date(s1.pendingNewest), '최오래/최근이 뒤바뀌었다');
   });
@@ -224,9 +226,10 @@ let R = null;
     assert.ok(/읽는 시트 3개/.test(h), '요약이 없다: ' + h.slice(0, 120));
     assert.ok(/시트 기반 작업이 아직 살아 있음/.test(h) && /마감 탭만 남았는데/.test(h) && /campaigns\) 행만 남음/.test(h),
       '사유 세 갈래가 다 안 나온다');
-    assert.ok(/시트에 아직 못 쓴 주문 4건/.test(h), '★ 미반영 주문 경고가 없다(끄면 주문이 사라지는 상태를 못 말한다)');
-    assert.ok(/수동 처리 필요 3/.test(h) && /실패 1/.test(h),
-      '★ 상태 분해가 화면에 없다 — 재기록으로 안 풀리는 건(stuck_manual)을 구분 못 한다');
+    assert.ok(/재시도 중인 주문 1건/.test(h), '★ 재시도 중인 주문 경고가 없다(끄면 사라지는 건을 못 말한다)');
+    assert.ok(/사람이 처리해야 하는 주문 5건/.test(h), '★ 사람이 처리할 건을 따로 말하지 않는다');
+    assert.ok(/수동 처리 필요 3/.test(h) && /실패 1/.test(h) && /편집 충돌/.test(h),
+      '★ 상태 분해가 화면에 없다 — 재기록으로 안 풀리는 건(stuck_manual·conflict)을 구분 못 한다');
     assert.ok(/0801 살아있는작업/.test(h), '살아 있는 작업 이름이 없다');
   });
   t('6b 읽는 시트 0이면 "없습니다"로 끝낸다(빈 표를 그리지 않는다)', () => {
@@ -239,6 +242,46 @@ let R = null;
     vm.runInContext('_rsRender()', sandbox);
     assert.ok(/지금 읽는 시트가 없습니다/.test(box.innerHTML), '0 상태 문구가 없다');
     assert.ok(!/<table/.test(box.innerHTML), '0인데 빈 표를 그린다');
+  });
+
+  console.log('\n[7] ★★ 재시도 갈래 — reconcile 이 실제로 보는 상태와 대조');
+  t('7a 재시도 목록의 모든 상태가 reconcile WHERE 절에 실제로 있다', () => {
+    const rec = fs.readFileSync(path.join(__dirname, '../src/services/orderLedger.service.js'), 'utf8');
+    const m = rec.match(/mirror_status IN \('pending','pending_no_row','failed'\)[\s\S]{0,400}?mirror_status = 'queued'/);
+    assert.ok(m, '★ reconcile 의 WHERE 절 모양이 바뀌었다 — 재시도 목록을 다시 맞춰야 한다');
+    const svc = require('../src/services/sheetReadScope.service');
+    for (const st of svc.RETRYABLE_STATUSES) {
+      assert.ok(new RegExp("mirror_status\\s*(=\\s*|IN \\([^)]*)'" + st + "'").test(m[0]),
+        `★ '${st}' 를 재시도로 세는데 reconcile 은 안 본다 — 끄기 판단이 뒤집힌다`);
+    }
+  });
+  t('7b ★ 크론이 손대지 않는 상태를 재시도로 세지 않는다(완화 금지)', () => {
+    const svc = require('../src/services/sheetReadScope.service');
+    for (const st of ['conflict', 'stuck_manual', 'canceled_sheet_dirty']) {
+      assert.ok(!svc.RETRYABLE_STATUSES.includes(st),
+        `★ '${st}' 를 재시도로 세면 "크론을 끄면 안 된다"는 틀린 결론이 나온다(reconcile 제외 대상)`);
+    }
+  });
+  t('7c 서버가 갈라 센 값이 상태별 합계와 맞는다', () => {
+    assert.strictEqual(R.pendingRetryable + R.pendingManual, R.pendingOrdersTotal);
+    assert.strictEqual(R.pendingRetryable, 1);
+    assert.strictEqual(R.pendingManual, 5);
+    assert.deepStrictEqual(R.retryableStatuses, require('../src/services/sheetReadScope.service').RETRYABLE_STATUSES);
+  });
+  t('7d ★ 구버전 백엔드(목록 미동봉)면 종전 문구로 접는다(빈 화면·거짓 분해 금지)', () => {
+    const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
+    const sandbox = { $: () => ({ innerHTML: '' }), esc: v => String(v == null ? '' : v), api: async () => ({}), Date, console };
+    vm.createContext(sandbox);
+    vm.runInContext(FE.slice(start, end), sandbox);
+    sandbox.__r = { pendingOrdersTotal: 7, pendingByStatus: { conflict: 7 } };
+    const out = vm.runInContext('_rsPendingBanner(__r)', sandbox);
+    assert.ok(/7건/.test(out), '★ 구버전에서 경고가 통째로 사라진다');
+    assert.ok(!/재시도 중인 주문/.test(out), '★ 목록도 없이 갈라 말한다(근거 없는 분해)');
+  });
+  t('7e ★ 라벨 없는 상태를 영문 그대로 내보내지 않는다', () => {
+    const map = FE.slice(FE.indexOf('var _RS_STATUS = {'), FE.indexOf('function _rsStatusLine'));
+    for (const st of ['conflict', 'stuck_manual', 'canceled_sheet_dirty', 'pending_no_row'])
+      assert.ok(new RegExp(st + "\\s*:").test(map), `★ '${st}' 라벨이 없다 — 화면에 영문이 그대로 나간다`);
   });
 
   console.log(`\n${fail ? '❌' : '✅'} sheetReadScope: ${pass} passed, ${fail} failed`);

@@ -31,6 +31,19 @@ function _db() { return _pool || (_pool = require('../db/pool')); }
 const LIST_CAP = 300;      // 목록 상한(초과분은 건수로만 — 조용히 자르지 않는다)
 const NAME_CAP = 5;        // 시트당 보여줄 탭 이름 수
 
+/**
+ * ★★ 미반영 주문의 상태는 **두 부류로 갈린다 — 뭉뚱그리면 판단이 뒤집힌다** (2026-08-20 실측).
+ *   ㉮ **크론이 재시도하는 상태**(`reconcileStuckOrders` 의 WHERE 절과 같은 목록) — 주기 작업을 끄면
+ *      그 재시도가 멈추므로 "끄면 영영 안 써진다" 가 사실이다.
+ *   ㉯ **크론이 아예 손대지 않는 상태**(`conflict`·`stuck_manual`·`canceled_sheet_dirty`) — reconcile 이
+ *      제외하므로 **켜 둬도 영영 안 풀린다**. 사람이 처리해야 하는 건이고, 크론 정지와는 무관하다.
+ *      특히 `conflict` 는 `order_update` 가 **이미 written 된 행**의 편집을 반영하려다 그 칸을 사람이
+ *      다르게 고쳐 놔 안전정지한 것이라 — **주문 자체는 시트에 이미 기록돼 있다**(주문 유실 아님).
+ * ★ 둘을 합쳐 "못 쓴 주문 N건"으로만 말하면 "크론을 끄면 안 된다"는 **틀린 결론**을 준다.
+ * ★★ 목록은 reconcile SQL 과 **회귀가드가 대조**한다(사본이 조용히 갈라지는 자리).
+ */
+const RETRYABLE_STATUSES = ['pending', 'queued', 'failed', 'pending_no_row'];
+
 /** 남는 사유 — 화면 문구까지 여기 한 곳(사본 금지). */
 const REASONS = {
   sheet_tab_live: '시트 기반 작업이 아직 살아 있음',
@@ -56,7 +69,8 @@ async function readScope({ limit = LIST_CAP } = {}) {
     return {
       ok: true, registered: all.length, excludedSheetless: all.length - reading.length,
       reading: 0, byReason: {}, reasons: REASONS,
-      pendingOrdersTotal: 0, pendingByStatus: {}, items: [], truncated: false,
+      pendingOrdersTotal: 0, pendingByStatus: {}, pendingRetryable: 0, pendingManual: 0,
+      retryableStatuses: RETRYABLE_STATUSES, items: [], truncated: false,
     };
   }
 
@@ -152,16 +166,22 @@ async function readScope({ limit = LIST_CAP } = {}) {
   const rank = { sheet_tab_live: 0, closed_only: 1, campaigns_only: 2 };
   items.sort((a, b) => (rank[a.reason] - rank[b.reason]) || (b.pendingOrders - a.pendingOrders));
 
+  let pendingRetryable = 0, pendingManual = 0;
+  for (const [st, n] of Object.entries(pendingByStatus)) {
+    if (RETRYABLE_STATUSES.includes(st)) pendingRetryable += n; else pendingManual += n;
+  }
+
   return {
     ok: true,
     registered: all.length,
     excludedSheetless: all.length - reading.length,
     reading: reading.length,
     byReason, reasons: REASONS,
-    pendingOrdersTotal, pendingByStatus,
+    pendingOrdersTotal, pendingByStatus, pendingRetryable, pendingManual,
+    retryableStatuses: RETRYABLE_STATUSES,
     items,
     truncated: reading.length > items.length,
   };
 }
 
-module.exports = { readScope, REASONS, LIST_CAP };
+module.exports = { readScope, REASONS, LIST_CAP, RETRYABLE_STATUSES };
