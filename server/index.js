@@ -58,6 +58,12 @@ const REQUIRED_SCHEMA = [
   ['recruit_campaigns', 'cash_receipt_required'], // 105 — 모집공고 현금영수증 직접 설정·공개 안내
   ['recruit_campaigns', 'review_type_mix'],       // 106 — 혼합 리뷰 유형별 모집 수량(발행 전 합계 검증)
   ['campaign_options', 'review_type_mix'],        // 109 — 옵션별 혼합 리뷰 수량(옵션 정원별 검증)
+  // 134 — 복합 작업(옵션 있는 상품 + 없는 상품)의 선택 단위·선택지별 유입가이드.
+  //   넷 다 옵션 저장 INSERT 한 문장에 들어가므로 하나라도 없으면 **공고 발행·수정의 옵션 저장이 전면 42703**.
+  ['campaign_options', 'product_name'],
+  ['campaign_options', 'unit_kind'],
+  ['campaign_options', 'inflow_guide_html'],
+  ['campaign_options', 'inflow_guide_images'],
   ['recruit_campaigns', 'carry_mode'],            // 098 — 공고 create/update INSERT·SET + 공개 /list 명시 SELECT(없으면 발행·수정·목록 42703)
   // 099 — 체험단 종류(리뷰/블로그) 축. 셋 다 INSERT·SET 목록에 들어가므로 하나라도 없으면
   //   ① 인트라넷 오더 접수 ② 작업오더 접수(tab_configs 업서트) ③ 공고 발행·수정이 전면 42703.
