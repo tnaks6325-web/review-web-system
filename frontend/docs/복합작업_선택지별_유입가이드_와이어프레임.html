@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>와이어프레임 — 복합 작업의 선택지별 유입가이드</title>
+<style>
+  :root{color-scheme:light}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:#EEF0F4;color:#1F2937;line-height:1.6;padding:26px 14px 90px}
+  .wrap{max-width:1060px;margin:0 auto}
+  h1{font-size:1.35rem;font-weight:800;margin-bottom:4px}
+  .sub{font-size:.83rem;color:#6B7280;margin-bottom:18px}
+  a{color:#4338CA}
+  .scenario{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:14px 18px;font-size:.84rem;margin-bottom:16px}
+  .scenario b{color:#111827}
+  .unitchip{display:inline-block;background:#EEF2FF;border:1px solid #C7D2FE;color:#3730A3;border-radius:6px;padding:1px 8px;font-size:.78rem;font-weight:700;margin:1px 2px}
+
+  /* 전역 유입방식 토글 */
+  .gbar{position:sticky;top:0;z-index:50;background:#111827;color:#fff;border-radius:12px;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+  .gbar .glabel{font-size:.8rem;font-weight:700;color:#D1D5DB}
+  .sw{display:inline-flex;border:1.5px solid #4B5563;border-radius:8px;overflow:hidden}
+  .sw button{border:0;background:transparent;color:#9CA3AF;font-size:.8rem;font-weight:800;padding:6px 14px;cursor:pointer}
+  .sw button.on{background:#4F46E5;color:#fff}
+  .gbar .gnote{font-size:.74rem;color:#9CA3AF}
+
+  /* 화면 탭 */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .tabs button{border:1.5px solid #D1D5DB;background:#fff;border-radius:20px;padding:7px 14px;font-size:.8rem;font-weight:700;color:#4B5563;cursor:pointer}
+  .tabs button.on{background:#1E3A8A;border-color:#1E3A8A;color:#fff}
+  .screen{display:none}
+  .screen.on{display:block}
+
+  /* 공통 프레임 */
+  .frame{background:#fff;border:1px solid #D1D5DB;border-radius:14px;overflow:hidden;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+  .frame-hd{background:#F9FAFB;border-bottom:1px solid #E5E7EB;padding:10px 16px;font-size:.8rem;font-weight:800;color:#374151;display:flex;align-items:center;gap:8px}
+  .frame-hd .crumb{font-weight:500;color:#9CA3AF}
+  .frame-bd{padding:18px}
+  .explain{background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:10px 14px;font-size:.8rem;margin-bottom:14px}
+  .explain b{color:#92400E}
+  .newtag{display:inline-block;background:#DC2626;color:#fff;font-size:.62rem;font-weight:800;border-radius:4px;padding:1px 5px;vertical-align:2px;margin-left:4px}
+  .keeptag{display:inline-block;background:#6B7280;color:#fff;font-size:.62rem;font-weight:800;border-radius:4px;padding:1px 5px;vertical-align:2px;margin-left:4px}
+
+  /* 폼 요소(목업) */
+  .fl{font-size:.76rem;font-weight:700;color:#6B7280;margin-bottom:3px;display:block}
+  .fi{width:100%;border:1px solid #D1D5DB;border-radius:7px;padding:7px 10px;font-size:.8rem;background:#fff;color:#111827}
+  .fi[readonly]{background:#F9FAFB;color:#6B7280}
+  .fi.dis{background:#F3F4F6;color:#9CA3AF}
+  textarea.fi{resize:vertical;min-height:64px;line-height:1.5;font-family:inherit}
+  .row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .row > div{flex:1;min-width:120px}
+
+  /* 상품 카드 (인트라넷) */
+  .pcard{border:1.5px solid #D1D5DB;border-radius:12px;margin-bottom:14px;overflow:hidden}
+  .pcard-hd{background:#F3F4F6;padding:9px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid #E5E7EB}
+  .pcard-hd .pno{background:#1E3A8A;color:#fff;font-size:.7rem;font-weight:800;border-radius:6px;padding:2px 8px}
+  .pcard-hd .pname{flex:1;min-width:180px;font-size:.84rem;font-weight:700}
+  .msw{display:inline-flex;border:1.5px solid #C7D2FE;border-radius:7px;overflow:hidden;background:#fff}
+  .msw span{font-size:.72rem;font-weight:800;padding:4px 10px;color:#9CA3AF;cursor:default}
+  .msw span.on{background:#4F46E5;color:#fff}
+  .pcard-bd{padding:12px 14px}
+
+  /* 옵션/단위 행 */
+  .urow{display:grid;grid-template-columns:1fr 150px 92px 64px 64px 88px;gap:8px;align-items:center;margin-bottom:8px}
+  .urow .cell input{width:100%}
+  .uhead{display:grid;grid-template-columns:1fr 150px 92px 64px 64px 88px;gap:8px;font-size:.68rem;font-weight:800;color:#9CA3AF;margin-bottom:5px;padding:0 2px}
+  .gbtn{border:1.5px solid #D1D5DB;background:#fff;border-radius:7px;font-size:.72rem;font-weight:800;padding:6px 4px;cursor:pointer;color:#374151;white-space:nowrap}
+  .gbtn.has{border-color:#059669;color:#047857;background:#ECFDF5}
+  .gbtn.off{background:#F3F4F6;color:#B0B6BF;border-color:#E5E7EB;cursor:not-allowed}
+  .gbtn.openit{outline:2px solid #6366F1;outline-offset:1px}
+
+  /* 인라인 가이드 편집기 */
+  .gedit{grid-column:1 / -1;background:#F5F7FF;border:1.5px solid #C7D2FE;border-radius:10px;padding:12px;margin:-2px 0 8px}
+  .gedit .gtt{font-size:.75rem;font-weight:800;color:#3730A3;margin-bottom:8px}
+  .imgstrip{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .thumb{width:64px;height:64px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:800;color:#fff;text-align:center;line-height:1.3;position:relative}
+  .thumb .x{position:absolute;top:-6px;right:-6px;background:#111827;color:#fff;border-radius:50%;width:16px;height:16px;font-size:.6rem;display:flex;align-items:center;justify-content:center}
+  .t1{background:linear-gradient(135deg,#6366F1,#8B5CF6)}
+  .t2{background:linear-gradient(135deg,#0EA5E9,#22D3EE)}
+  .t3{background:linear-gradient(135deg,#F59E0B,#F97316)}
+  .t4{background:linear-gradient(135deg,#10B981,#34D399)}
+  .addth{width:64px;height:64px;border:1.5px dashed #C7D2FE;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.6rem;color:#6366F1;font-weight:700;background:#fff}
+
+  /* 작업오더 상세(카톡형) */
+  .wodetail{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:10px;padding:14px 16px;font-size:.82rem;line-height:1.9}
+  .wodetail .lb{font-weight:800;color:#1E3A8A}
+  .woguide{background:#fff;border:1px solid #E5E7EB;border-left:4px solid #6366F1;border-radius:8px;padding:10px 12px;margin:6px 0 10px;font-size:.8rem}
+  .woguide .ut{font-weight:800;color:#3730A3;font-size:.76rem;margin-bottom:4px}
+  .mini{display:flex;gap:6px;margin-top:6px}
+  .mini .thumb{width:44px;height:44px;font-size:.55rem}
+
+  /* 모집공고 모달 목업 */
+  .modal{border:1.5px solid #C7CBD4;border-radius:14px;overflow:hidden}
+  .modal-hd{background:#fff;border-bottom:1px solid #E5E7EB;padding:12px 18px;font-weight:800;font-size:.9rem;display:flex;justify-content:space-between;align-items:center}
+  .modal-bd{display:flex;min-height:380px}
+  .rail{width:158px;background:#F9FAFB;border-right:1px solid #E5E7EB;padding:14px 10px;flex-shrink:0}
+  .rail .rt{font-size:.78rem;font-weight:800;margin-bottom:10px}
+  .rail .rstep{display:flex;align-items:center;gap:7px;font-size:.76rem;font-weight:700;color:#6B7280;padding:7px 8px;border-radius:8px;margin-bottom:3px}
+  .rail .rstep.on{background:#E0E7FF;color:#3730A3}
+  .rail .rstep .no{background:#C7D2FE;color:#3730A3;border-radius:50%;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;flex-shrink:0}
+  .audit{margin-top:16px;border-top:1px dashed #E5E7EB;padding-top:10px}
+  .audit .at{font-size:.7rem;font-weight:800;color:#6B7280;margin-bottom:6px}
+  .aitem{font-size:.68rem;border-radius:6px;padding:4px 7px;margin-bottom:4px;font-weight:700}
+  .aitem.ok{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0}
+  .aitem.warn{background:#FFFBEB;color:#92400E;border:1px solid #FDE68A}
+  .mmain{flex:1;padding:16px 18px;min-width:0}
+  .card{border:1px solid #E5E7EB;border-radius:10px;margin-bottom:12px;overflow:hidden}
+  .card-hd{background:#F9FAFB;border-bottom:1px solid #F3F4F6;padding:8px 12px;font-size:.78rem;font-weight:800;color:#374151;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .card-bd{padding:12px}
+  .gp{border:1.5px solid #E5E7EB;border-radius:10px;margin-bottom:10px;overflow:hidden}
+  .gp-hd{background:#F3F4F6;padding:8px 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .gp-hd .gpname{flex:1;min-width:160px}
+  .gp-hd .gptotal{font-size:.75rem;font-weight:800;color:#B91C1C;white-space:nowrap}
+  .gp-bd{padding:10px 12px}
+  .gp-add{border-top:1px dashed #E5E7EB;padding:7px 12px;font-size:.74rem;font-weight:700;color:#4F46E5;background:#FAFAFF}
+
+  /* 리뷰어 화면 */
+  .phone{max-width:390px;margin:0 auto;border:1.5px solid #C7CBD4;border-radius:22px;overflow:hidden;background:#fff}
+  .phone-hd{background:#111827;color:#fff;font-size:.72rem;text-align:center;padding:6px}
+  .phone-bd{padding:14px}
+  .sheet{border:1.5px solid #E5E7EB;border-radius:14px;overflow:hidden;margin-bottom:14px}
+  .sheet-hd{background:#F9FAFB;padding:10px 14px;font-size:.8rem;font-weight:800;border-bottom:1px solid #F3F4F6}
+  .sheet-grp{background:#F3F4F6;padding:5px 14px;font-size:.68rem;font-weight:800;color:#6B7280}
+  .opt{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #F3F4F6;cursor:pointer;font-size:.82rem}
+  .opt:hover{background:#FAFAFF}
+  .opt.sel{background:#EEF2FF;box-shadow:inset 3px 0 0 #4F46E5}
+  .opt .on1{font-weight:700}
+  .opt .rem{font-size:.7rem;color:#059669;font-weight:800;white-space:nowrap}
+  .selcard{background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:12px;padding:10px 14px;font-size:.8rem;margin-bottom:12px}
+  .selcard b{color:#166534}
+  .wdcard{border:1.5px solid #FDE68A;background:#FFFBEB;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  .wdcard .wt{font-size:.78rem;font-weight:800;color:#92400E;margin-bottom:6px}
+  .wdcard .wtx{font-size:.8rem;white-space:pre-line}
+  .linkcard{border:1.5px solid #BFDBFE;background:#EFF6FF;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  .linkbtn2{display:block;text-align:center;background:#2563EB;color:#fff;border-radius:9px;padding:10px;font-size:.83rem;font-weight:800;margin-top:6px}
+  .fallback{font-size:.7rem;color:#92400E;background:#FEF3C7;border-radius:6px;padding:4px 8px;margin-top:8px;display:inline-block}
+
+  .flownote{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:14px 18px;font-size:.8rem;margin-top:6px}
+  .flownote b{color:#111827}
+  @media (max-width:760px){ .urow,.uhead{grid-template-columns:1fr 1fr 70px 50px 50px 70px} .modal-bd{flex-direction:column} .rail{width:100%;display:flex;gap:8px;flex-wrap:wrap} .rail .audit{display:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>와이어프레임 — 복합 작업의 선택지별 유입가이드</h1>
+<div class="sub">배경·데이터 설계는 <a href="prd-multiproduct-guide.html">구현계획 PRD</a> 참고 · 가짜 데이터로 실제로 눌러 볼 수 있습니다 · 2026-08-20</div>
+
+<div class="scenario">
+  <b>예시 작업(가짜 데이터)</b> — 「8/20 제주도아 프리미엄 제주 선물세트」 · 상품 2개 · 선택지 3개<br>
+  <span class="unitchip">① 상품A · 1.갈치 순살듀오 세트 (73,000원)</span>
+  <span class="unitchip">② 상품A · 2.갈치옥돔 순살듀오 세트 (85,000원)</span>
+  <span class="unitchip">③ 상품B · 정성 갈치 500 1호 (111,000원 · 옵션 없음)</span>
+</div>
+
+<div class="gbar">
+  <span class="glabel">유입방식 (모든 화면에 함께 적용)</span>
+  <span class="sw">
+    <button id="swGuide" class="on" onclick="setInflow('guide')">가이드유입</button>
+    <button id="swLink" onclick="setInflow('link')">링크유입</button>
+  </span>
+  <span class="gnote" id="gnote">가이드유입 — 선택지마다 유입가이드(글+사진)를 첨부합니다</span>
+</div>
+
+<div class="tabs">
+  <button id="tb0" class="on" onclick="showScr(0)">화면① 인트라넷 리뷰오더</button>
+  <button id="tb1" onclick="showScr(1)">화면② 리뷰웹 작업오더 상세</button>
+  <button id="tb2" onclick="showScr(2)">화면③ 모집공고 편집</button>
+  <button id="tb3" onclick="showScr(3)">화면④ 리뷰어 참여</button>
+</div>
+
+<!-- ═══════════ 화면 ① 인트라넷 리뷰오더 ═══════════ -->
+<div class="screen on" id="scr0">
+  <div class="explain"><b>바뀌는 것</b> — ㉮ 작업 종류가 전역 1개 → <b>상품별 토글</b>(전역 토글은 "전체 일괄 적용" 단축으로 유지)
+  ㉯ 가이드유입이면 옵션 행·옵션 없는 상품마다 <b>[📷 유입가이드]</b> 접이식 편집. 링크유입이면 그 버튼이 잠기고 URL 칸이 유입 링크가 됩니다.</div>
+
+  <div class="frame">
+    <div class="frame-hd">인트라넷 › 리뷰오더 작성 <span class="crumb">— 진행상품 섹션</span></div>
+    <div class="frame-bd">
+
+      <div class="row" style="align-items:center">
+        <div style="flex:0 0 auto"><span class="fl" style="margin:0">작업 종류(일괄 적용)<span class="keeptag">유지</span></span></div>
+        <div style="flex:0 0 auto"><span class="msw"><span>옵션 없는 작업</span><span>옵션 있는 작업</span></span>
+          <span style="font-size:.7rem;color:#9CA3AF"> ← 누르면 전 상품에 일괄 적용(confirm) · 새 상품의 기본값</span></div>
+      </div>
+
+      <!-- 상품 A -->
+      <div class="pcard">
+        <div class="pcard-hd">
+          <span class="pno">상품 1</span>
+          <span class="pname">제주도아 프리미엄 제주 은갈치 옥돔 순살 갈치 선물세트</span>
+          <span style="font-size:.68rem;color:#6B7280;font-weight:700">작업 종류<span class="newtag">신규</span></span>
+          <span class="msw"><span>옵션 없음</span><span class="on">옵션 있음</span></span>
+        </div>
+        <div class="pcard-bd">
+          <span class="fl">상품 메인 URL (항상 필수)</span>
+          <input class="fi" readonly value="https://smartstore.naver.com/jejudoa/products/13689658224" style="margin-bottom:10px">
+          <div class="uhead"><span>옵션 URL</span><span>옵션명</span><span>결제금액</span><span>인원</span><span>일건수</span><span>유입가이드</span></div>
+
+          <div class="urow">
+            <span class="cell"><input class="fi iurl" readonly value="https://smartstore.naver.com/…?opt=duo1"></span>
+            <span class="cell"><input class="fi" readonly value="1.갈치 순살듀오 세트"></span>
+            <span class="cell"><input class="fi" readonly value="73,000"></span>
+            <span class="cell"><input class="fi" readonly value="5"></span>
+            <span class="cell"><input class="fi" readonly value="5"></span>
+            <button class="gbtn has gA1" onclick="tgl('gedA1',this)">📷 가이드 2장</button>
+          </div>
+          <div class="gedit" id="gedA1" hidden>
+            <div class="gtt">선택지 ① 「1.갈치 순살듀오 세트」의 유입가이드 <span style="color:#6B7280;font-weight:500">— 이 옵션을 고른 리뷰어에게만 보입니다</span></div>
+            <textarea class="fi">네이버에서 "제주 은갈치 선물세트" 검색 → 광고 아래 스토어 진입
+→ 옵션에서 [1.갈치 순살듀오 세트] 선택 후 구매</textarea>
+            <div class="imgstrip">
+              <div class="thumb t1">검색화면<div class="x">×</div></div>
+              <div class="thumb t2">옵션선택<div class="x">×</div></div>
+              <div class="addth">＋<br>끌어다 놓기<br>Ctrl+V</div>
+            </div>
+          </div>
+
+          <div class="urow">
+            <span class="cell"><input class="fi iurl" readonly value="https://smartstore.naver.com/…?opt=duo2"></span>
+            <span class="cell"><input class="fi" readonly value="2.갈치옥돔 순살듀오 세트"></span>
+            <span class="cell"><input class="fi" readonly value="85,000"></span>
+            <span class="cell"><input class="fi" readonly value="5"></span>
+            <span class="cell"><input class="fi" readonly value="5"></span>
+            <button class="gbtn has gA2" onclick="tgl('gedA2',this)">📷 가이드 1장</button>
+          </div>
+          <div class="gedit" id="gedA2" hidden>
+            <div class="gtt">선택지 ② 「2.갈치옥돔 순살듀오 세트」의 유입가이드</div>
+            <textarea class="fi">"옥돔 갈치 세트" 검색 → 스토어 진입 → [2.갈치옥돔 순살듀오 세트] 선택 후 구매</textarea>
+            <div class="imgstrip"><div class="thumb t3">검색화면<div class="x">×</div></div><div class="addth">＋<br>끌어다 놓기</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 상품 B -->
+      <div class="pcard">
+        <div class="pcard-hd">
+          <span class="pno">상품 2</span>
+          <span class="pname">제주도아 정성 갈치 500 선물세트 1호</span>
+          <span style="font-size:.68rem;color:#6B7280;font-weight:700">작업 종류<span class="newtag">신규</span></span>
+          <span class="msw"><span class="on">옵션 없음</span><span>옵션 있음</span></span>
+        </div>
+        <div class="pcard-bd">
+          <span class="fl">상품 메인 URL (링크유입이면 이 주소가 유입 링크)</span>
+          <input class="fi iurl" readonly value="https://smartstore.naver.com/jejudoa/products/99887766" style="margin-bottom:10px">
+          <div class="uhead"><span style="grid-column:span 2">— 옵션 없음 · 상품 자체가 선택지 ③</span><span>결제금액</span><span>인원</span><span>일건수</span><span>유입가이드</span></div>
+          <div class="urow">
+            <span class="cell" style="grid-column:span 2"><input class="fi" readonly value="(옵션 입력 없음)" style="background:#F9FAFB;color:#9CA3AF"></span>
+            <span class="cell"><input class="fi" readonly value="111,000"></span>
+            <span class="cell"><input class="fi" readonly value="5"></span>
+            <span class="cell"><input class="fi" readonly value="5"></span>
+            <button class="gbtn has gB" onclick="tgl('gedB',this)">📷 가이드 1장</button>
+          </div>
+          <div class="gedit" id="gedB" hidden>
+            <div class="gtt">선택지 ③ 「정성 갈치 500 1호」(상품 단위)의 유입가이드</div>
+            <textarea class="fi">"정성 갈치 선물세트" 검색 → 스토어 진입 → 옵션 선택 없이 바로 구매</textarea>
+            <div class="imgstrip"><div class="thumb t4">검색화면<div class="x">×</div></div><div class="addth">＋</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <span class="fl">공통 유입가이드<span class="keeptag">유지</span> — 선택지별 가이드가 없는 선택지의 폴백</span>
+          <textarea class="fi" id="commonGuide" readonly>리뷰어 공통 안내 — 구매 시간대 12:00~18:00 준수, 타 상품 함께 구매 금지</textarea>
+        </div>
+      </div>
+      <div id="linkNote1" class="explain" hidden><b>링크유입 상태</b> — 유입가이드 버튼이 전부 잠기고, 리뷰어에게는 <b>고른 선택지의 URL</b>(옵션 URL 또는 상품 메인 URL)이 유입 링크로 제시됩니다.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 화면 ② 작업오더 상세 ═══════════ -->
+<div class="screen" id="scr1">
+  <div class="explain"><b>바뀌는 것</b> — 접수 데이터는 기존 <code style="background:#EEF2FF;border-radius:4px;padding:1px 4px">product_options_json</code>에 키만 늘어 그대로 담기고,
+  상세 펼침의 「상품·옵션」 아래에 <b>선택지별 가이드 블록</b>이 추가됩니다(원문 무접촉 — 표시만 추가).</div>
+
+  <div class="frame">
+    <div class="frame-hd">리뷰웹시스템[3버전] › 작업오더 <span class="crumb">— 행 클릭 → 펼침 상세</span></div>
+    <div class="frame-bd">
+      <div class="wodetail">
+        <div><span class="lb">▶ 담당AE :</span> 홍길동 · <span class="lb">작업담당 :</span> 망고</div>
+        <div><span class="lb">▶ 상품·옵션 :</span></div>
+        <div style="padding-left:12px">
+          1. 제주도아 프리미엄 … 선물세트 — 1.갈치 순살듀오 세트 - 결제금액 73,000원 (5명)<br>
+          2. 제주도아 프리미엄 … 선물세트 — 2.갈치옥돔 순살듀오 세트 - 결제금액 85,000원 (5명)<br>
+          3. 제주도아 정성 갈치 500 1호 - 결제금액 111,000원 (5명) <span style="color:#6B7280;font-size:.72rem">← 옵션 없음(상품 단위)</span>
+        </div>
+        <div><span class="lb">▶ 모집인원 :</span> 15명 · <span class="lb">일일진행건수 :</span> 15건 · <span class="lb">유입방식 :</span> <b id="woInflow">유입가이드</b></div>
+
+        <div id="woGuides">
+          <div style="margin-top:6px"><span class="lb">▶ 선택지별 유입가이드 <span class="newtag">신규</span> :</span></div>
+          <div class="woguide"><div class="ut">① 1.갈치 순살듀오 세트</div>네이버 "제주 은갈치 선물세트" 검색 → 스토어 진입 → 옵션 [1.갈치 순살듀오 세트] 구매<div class="mini"><div class="thumb t1">img</div><div class="thumb t2">img</div></div></div>
+          <div class="woguide"><div class="ut">② 2.갈치옥돔 순살듀오 세트</div>"옥돔 갈치 세트" 검색 → 스토어 진입 → 옵션 [2.갈치옥돔 순살듀오 세트] 구매<div class="mini"><div class="thumb t3">img</div></div></div>
+          <div class="woguide"><div class="ut">③ 정성 갈치 500 1호 (상품 단위)</div>"정성 갈치 선물세트" 검색 → 스토어 진입 → 바로 구매<div class="mini"><div class="thumb t4">img</div></div></div>
+          <div><span class="lb">▶ 공통 유입가이드(폴백) :</span> 구매 시간대 12:00~18:00 준수 …</div>
+        </div>
+        <div id="woLinks" hidden>
+          <div style="margin-top:6px"><span class="lb">▶ 선택지별 유입 링크 :</span></div>
+          <div style="padding-left:12px;font-size:.78rem">
+            ① https://smartstore.naver.com/…?opt=duo1<br>② https://smartstore.naver.com/…?opt=duo2<br>③ https://smartstore.naver.com/jejudoa/products/99887766 <span style="color:#6B7280">(상품 메인 URL)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 화면 ③ 모집공고 편집 ═══════════ -->
+<div class="screen" id="scr2">
+  <div class="explain"><b>바뀌는 것</b> — ㉮ 「옵션 있는 작업」 모드가 혼합을 수용: 상품 그룹에 <b>옵션 0개 허용</b>(그룹 헤더가 곧 선택지 ③)
+  ㉯ 각 선택지 행에 <b>[📷] 가이드 편집</b>(가이드유입일 때만) ㉰ 자동점검이 가이드 채움 상태를 알려줍니다(경고 전용 — 발행은 막지 않음).</div>
+
+  <div class="frame">
+    <div class="frame-hd">모집공고 수정 <span class="crumb">— ② 진행상품 · 상품 정보 단계</span></div>
+    <div class="modal">
+      <div class="modal-hd"><span>✏️ 모집공고 수정</span><span style="color:#9CA3AF">✕</span></div>
+      <div class="modal-bd">
+        <div class="rail">
+          <div class="rt">모집공고 편집</div>
+          <div class="rstep"><span class="no">1</span>연결 · 기본</div>
+          <div class="rstep on"><span class="no">2</span>진행상품 · 상품 정보</div>
+          <div class="rstep"><span class="no">3</span>모집 조건</div>
+          <div class="audit">
+            <div class="at">자동 점검</div>
+            <div class="aitem ok">✓ 시트 탭 연결됨 (gid)</div>
+            <div class="aitem ok">✓ 선택지 3개 · 정원 합 15명</div>
+            <div class="aitem ok" id="auditGuide">✓ 유입가이드 3/3 선택지 첨부</div>
+            <div class="aitem warn" id="auditGuideWarn" hidden>⚠ 가이드 없는 선택지 1개 — 공통 가이드로 폴백</div>
+          </div>
+        </div>
+        <div class="mmain">
+          <div class="card">
+            <div class="card-hd">작업 종류 <span class="msw"><span>옵션 없는 작업</span><span class="on">옵션 있는 작업 (혼합 포함)<span class="newtag">확장</span></span></span></div>
+            <div class="card-bd">
+
+              <!-- 상품 A 그룹 -->
+              <div class="gp">
+                <div class="gp-hd"><input class="fi gpname" readonly value="제주도아 프리미엄 제주 은갈치 옥돔 순살 갈치 선물세트"><span class="gptotal">10명</span><span style="color:#DC2626;font-weight:800">×</span></div>
+                <div class="gp-bd">
+                  <div class="uhead"><span>옵션 URL</span><span>옵션명</span><span>결제금액</span><span>인원</span><span>일건수</span><span>가이드</span></div>
+                  <div class="urow">
+                    <span class="cell"><input class="fi iurl" readonly value="https://smartstore.naver.com/…?opt=duo1"></span>
+                    <span class="cell"><input class="fi" readonly value="1.갈치 순살듀오 세트"></span>
+                    <span class="cell"><input class="fi" readonly value="73000"></span>
+                    <span class="cell"><input class="fi" readonly value="5"></span>
+                    <span class="cell"><input class="fi" readonly value="5"></span>
+                    <button class="gbtn has gA1" onclick="tgl('medA1',this)">📷 2장</button>
+                  </div>
+                  <div class="gedit" id="medA1" hidden>
+                    <div class="gtt">선택지 ① 유입가이드 — 저장 시 <b>campaign_options.inflow_guide_html</b>로(정화 후)</div>
+                    <textarea class="fi">네이버 "제주 은갈치 선물세트" 검색 → 스토어 진입 → 옵션 [1.갈치 순살듀오 세트] 구매</textarea>
+                    <div class="imgstrip"><div class="thumb t1">img<div class="x">×</div></div><div class="thumb t2">img<div class="x">×</div></div><div class="addth">＋ 4장까지</div></div>
+                  </div>
+                  <div class="urow">
+                    <span class="cell"><input class="fi iurl" readonly value="https://smartstore.naver.com/…?opt=duo2"></span>
+                    <span class="cell"><input class="fi" readonly value="2.갈치옥돔 순살듀오 세트"></span>
+                    <span class="cell"><input class="fi" readonly value="85000"></span>
+                    <span class="cell"><input class="fi" readonly value="5"></span>
+                    <span class="cell"><input class="fi" readonly value="5"></span>
+                    <button class="gbtn has gA2" onclick="tgl('medA2',this)">📷 1장</button>
+                  </div>
+                  <div class="gedit" id="medA2" hidden>
+                    <div class="gtt">선택지 ② 유입가이드</div>
+                    <textarea class="fi">"옥돔 갈치 세트" 검색 → 스토어 진입 → 옵션 [2.갈치옥돔 순살듀오 세트] 구매</textarea>
+                    <div class="imgstrip"><div class="thumb t3">img<div class="x">×</div></div><div class="addth">＋</div></div>
+                  </div>
+                </div>
+                <div class="gp-add">＋ 옵션 추가</div>
+              </div>
+
+              <!-- 상품 B — 옵션 0개 그룹 = 상품 단위 행 -->
+              <div class="gp">
+                <div class="gp-hd">
+                  <input class="fi gpname" readonly value="제주도아 정성 갈치 500 선물세트 1호">
+                  <span style="font-size:.66rem;background:#EDE9FE;color:#5B21B6;border-radius:5px;padding:2px 6px;font-weight:800">옵션 없음 — 상품이 곧 선택지<span class="newtag">신규</span></span>
+                </div>
+                <div class="gp-bd">
+                  <div class="uhead"><span>상품 URL(=유입 링크)</span><span>—</span><span>결제금액</span><span>인원</span><span>일건수</span><span>가이드</span></div>
+                  <div class="urow">
+                    <span class="cell"><input class="fi iurl" readonly value="https://smartstore.naver.com/jejudoa/products/99887766"></span>
+                    <span class="cell"><input class="fi" readonly value="" placeholder="옵션 없음" style="background:#F9FAFB"></span>
+                    <span class="cell"><input class="fi" readonly value="111000"></span>
+                    <span class="cell"><input class="fi" readonly value="5"></span>
+                    <span class="cell"><input class="fi" readonly value="5"></span>
+                    <button class="gbtn has gB" onclick="tgl('medB',this)">📷 1장</button>
+                  </div>
+                  <div class="gedit" id="medB" hidden>
+                    <div class="gtt">선택지 ③ (상품 단위) 유입가이드 — <b>시트 옵션칸에는 기입되지 않습니다</b></div>
+                    <textarea class="fi">"정성 갈치 선물세트" 검색 → 스토어 진입 → 바로 구매</textarea>
+                    <div class="imgstrip"><div class="thumb t4">img<div class="x">×</div></div><div class="addth">＋</div></div>
+                  </div>
+                </div>
+                <div class="gp-add">＋ 옵션 추가 <span style="color:#9CA3AF;font-weight:500">(누르면 이 상품이 옵션 있는 상품으로 바뀝니다)</span></div>
+              </div>
+
+              <div style="font-size:.75rem;color:#6B7280">합계 — 선택지 3개 · 총인원 15명 · 일건수 15건 (하나라도 0이면 무제한 — 기존 규칙 그대로)</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-hd">공통 유입가이드 <span class="keeptag">유지</span><span style="font-weight:500;color:#9CA3AF;font-size:.72rem">— 선택지별 가이드가 없는 선택지에만 폴백으로 노출</span></div>
+            <div class="card-bd"><textarea class="fi" readonly>리뷰어 공통 안내 — 구매 시간대 12:00~18:00 준수, 타 상품 함께 구매 금지</textarea></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 화면 ④ 리뷰어 참여 ═══════════ -->
+<div class="screen" id="scr3">
+  <div class="explain"><b>바뀌는 것</b> — ㉮ 선택 시트가 <b>상품으로 그룹핑</b>되고 옵션 없는 상품도 정식 선택지가 됩니다
+  ㉯ 참여 후 작업내용의 유입 안내가 <b>고른 선택지의 것</b>으로 나옵니다(없으면 공통 폴백). 아래에서 선택지를 눌러 바꿔 보세요.</div>
+
+  <div class="phone">
+    <div class="phone-hd">campaign.html — 참여 화면(목업)</div>
+    <div class="phone-bd">
+      <div class="sheet">
+        <div class="sheet-hd">참여할 상품(선택지)을 골라주세요</div>
+        <div class="sheet-grp">제주도아 프리미엄 제주 은갈치 옥돔 순살 갈치 선물세트</div>
+        <div class="opt sel" id="opt0" onclick="pick(0)"><span class="on1">1.갈치 순살듀오 세트</span><span class="rem">잔여 3</span></div>
+        <div class="opt" id="opt1" onclick="pick(1)"><span class="on1">2.갈치옥돔 순살듀오 세트</span><span class="rem">잔여 5</span></div>
+        <div class="sheet-grp">제주도아 정성 갈치 500 선물세트 1호 <span style="color:#5B21B6">· 옵션 없음</span></div>
+        <div class="opt" id="opt2" onclick="pick(2)"><span class="on1">이 상품으로 참여</span><span class="rem">잔여 4</span></div>
+      </div>
+
+      <div class="selcard">✅ <b>내가 참여한 선택지</b> — <span id="selName">1.갈치 순살듀오 세트</span> · <span id="selPay">73,000원</span></div>
+
+      <div class="wdcard" id="guideCard">
+        <div class="wt">🧭 유입가이드 <span style="font-weight:500;color:#B45309" id="guideSrc">(이 선택지 전용)</span></div>
+        <div class="wtx" id="guideText"></div>
+        <div class="imgstrip" id="guideImgs"></div>
+      </div>
+
+      <div class="linkcard" id="linkCard" hidden>
+        <div style="font-size:.78rem;font-weight:800;color:#1D4ED8">🔗 링크유입 — 아래 버튼으로 상품 페이지에 진입하세요</div>
+        <a class="linkbtn2" id="linkBtn">선택 옵션 링크 열기</a>
+        <div style="font-size:.68rem;color:#6B7280;margin-top:4px" id="linkUrl"></div>
+      </div>
+
+      <div style="font-size:.7rem;color:#9CA3AF">이후 구매양식 제출(embed)은 기존 그대로 — 고른 선택지가 optionKey로 잠깁니다.<br>선택지 ③(상품 단위)은 시트 옵션칸에 기입되지 않습니다.</div>
+    </div>
+  </div>
+</div>
+
+<div class="flownote">
+  <b>데이터가 흐르는 길(요약)</b> — 인트라넷 선택지별 가이드 입력 → <code>product_options_json</code>(options[].guide / base.guide) → 작업오더 저장·상세 표시
+  → 공고 발행 프리필 → <code>campaign_options</code>(unit_kind · inflow_guide_html · inflow_guide_images) → 참여 후 <code>work-detail</code> 응답의 selectedOption → 리뷰어 화면 렌더(없으면 공통 폴백).<br>
+  결정이 필요한 항목(D1~D6)은 <a href="prd-multiproduct-guide.html">PRD §11</a>에 있습니다.
+</div>
+
+</div>
+<script>
+  var INFLOW = 'guide';
+  var UNITS = [
+    { name:'1.갈치 순살듀오 세트', pay:'73,000원',
+      guide:'네이버에서 "제주 은갈치 선물세트" 검색\n→ 광고 아래 스토어 진입\n→ 옵션 [1.갈치 순살듀오 세트] 선택 후 구매',
+      imgs:['t1','t2'], url:'https://smartstore.naver.com/…?opt=duo1', label:'선택 옵션 링크 열기' },
+    { name:'2.갈치옥돔 순살듀오 세트', pay:'85,000원',
+      guide:'"옥돔 갈치 세트" 검색\n→ 스토어 진입\n→ 옵션 [2.갈치옥돔 순살듀오 세트] 선택 후 구매',
+      imgs:['t3'], url:'https://smartstore.naver.com/…?opt=duo2', label:'선택 옵션 링크 열기' },
+    { name:'정성 갈치 500 1호 (상품 단위)', pay:'111,000원',
+      guide:'"정성 갈치 선물세트" 검색\n→ 스토어 진입\n→ 옵션 선택 없이 바로 구매',
+      imgs:['t4'], url:'https://smartstore.naver.com/jejudoa/products/99887766', label:'상품 페이지 열기' }
+  ];
+  var CUR = 0;
+
+  function showScr(i){
+    for (var k=0;k<4;k++){
+      document.getElementById('scr'+k).classList.toggle('on', k===i);
+      document.getElementById('tb'+k).classList.toggle('on', k===i);
+    }
+  }
+  function tgl(id, btn){
+    var el = document.getElementById(id);
+    if (INFLOW === 'link') return;
+    var show = el.hidden;
+    el.hidden = !show;
+    if (btn) btn.classList.toggle('openit', show);
+  }
+  function setInflow(mode){
+    INFLOW = mode;
+    document.getElementById('swGuide').classList.toggle('on', mode==='guide');
+    document.getElementById('swLink').classList.toggle('on', mode==='link');
+    document.getElementById('gnote').textContent = mode==='guide'
+      ? '가이드유입 — 선택지마다 유입가이드(글+사진)를 첨부합니다'
+      : '링크유입 — 선택지마다 URL이 유입 링크가 됩니다(가이드 첨부 잠김)';
+    var isLink = (mode==='link');
+    var btns = document.querySelectorAll('.gbtn');
+    for (var i=0;i<btns.length;i++){ btns[i].classList.toggle('off', isLink); if (isLink) btns[i].classList.remove('openit'); }
+    var eds = document.querySelectorAll('.gedit');
+    for (var j=0;j<eds.length;j++){ if (isLink) eds[j].hidden = true; }
+    document.getElementById('linkNote1').hidden = !isLink;
+    document.getElementById('woInflow').textContent = isLink ? '링크유입' : '유입가이드';
+    document.getElementById('woGuides').hidden = isLink;
+    document.getElementById('woLinks').hidden = !isLink;
+    document.getElementById('auditGuide').hidden = isLink;
+    renderReviewer();
+  }
+  function pick(i){
+    CUR = i;
+    for (var k=0;k<3;k++) document.getElementById('opt'+k).classList.toggle('sel', k===i);
+    renderReviewer();
+  }
+  function renderReviewer(){
+    var u = UNITS[CUR];
+    document.getElementById('selName').textContent = u.name;
+    document.getElementById('selPay').textContent = u.pay;
+    var isLink = (INFLOW==='link');
+    document.getElementById('guideCard').hidden = isLink;
+    document.getElementById('linkCard').hidden = !isLink;
+    if (isLink){
+      document.getElementById('linkBtn').textContent = '🔗 ' + u.label;
+      document.getElementById('linkUrl').textContent = u.url;
+    } else {
+      document.getElementById('guideText').textContent = u.guide;
+      var strip = document.getElementById('guideImgs');
+      strip.textContent = '';
+      for (var m=0;m<u.imgs.length;m++){
+        var d = document.createElement('div');
+        d.className = 'thumb ' + u.imgs[m];
+        d.textContent = '가이드 이미지';
+        strip.appendChild(d);
+      }
+    }
+  }
+  renderReviewer();
+</script>
+</body>
+</html>
