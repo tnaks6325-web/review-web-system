@@ -246,6 +246,9 @@ let R = null;
     assert.ok(/수동 처리 필요 3/.test(h) && /실패 1/.test(h) && /편집 충돌/.test(h),
       '★ 상태 분해가 화면에 없다 — 재기록으로 안 풀리는 건(stuck_manual·conflict)을 구분 못 한다');
     assert.ok(/0801 살아있는작업/.test(h), '살아 있는 작업 이름이 없다');
+    // ★ 사유를 표에 실제로 그리는지 — 렌더러만 따로 검사하면 '호출을 아예 안 하는' 회귀를 놓친다(변이시험 실측)
+    assert.ok(/RAW 메타 없음/.test(h) && /외 1가지 사유 1건/.test(h),
+      '★ 실패 사유가 표에 안 그려진다 — 무엇이 왜 막혔는지 화면이 말하지 않는다');
   });
   t('6b 읽는 시트 0이면 "없습니다"로 끝낸다(빈 표를 그리지 않는다)', () => {
     const start = FE.indexOf('var _RS = null;'), end = FE.indexOf('function _ptBox');
