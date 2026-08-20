@@ -549,12 +549,20 @@ function _woChannel(o) {
       || _woChannelFromUrl((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "");
 }
 
-/** 작업오더가 명시한 진행상품 모드. 옛 오더는 빈 값으로 두고 기존 추론 규칙을 따른다. */
+/** 작업오더가 명시한 진행상품 모드. 옛 오더는 빈 값으로 두고 기존 추론 규칙을 따른다.
+ *  ★★ 134 — 복합 작업은 상품마다 모드가 다르다(상품A=옵션 있음 / 상품B=옵션 없음).
+ *    그래서 **첫 상품만** 보던 종전 판정을 전 상품으로 넓힌다 — 하나라도 'opt' 면 표는 옵션 모드로 연다
+ *    (상품 단위 줄은 행마다 `unitKind:'product'` 로 구분되므로 표 모드와 충돌하지 않는다).
+ *  ★ 전부 'none' 이라고 **명시**했으면 그것도 신호다 — 'none' 을 돌려줘 옵션 칸 없는 표로 연다.
+ *  ★ 명시가 하나도 없으면(구버전 오더) 빈 값 = 종전 추론 규칙(동작 불변). */
 function _woProductMode(o) {
   try {
     const products = JSON.parse(o.product_options_json || "[]");
-    const mode = Array.isArray(products) && products.length ? String(products[0].product_mode || "") : "";
-    return mode === "opt" ? "opt" : "";
+    if (!Array.isArray(products) || !products.length) return "";
+    const modes = products.map(p => String((p && p.product_mode) || ""));
+    if (modes.some(m => m === "opt")) return "opt";
+    if (modes.some(m => m === "none")) return "none";
+    return "";
   } catch (_) {
     return "";
   }
@@ -575,7 +583,11 @@ const _WO_UNIT_GUIDE_IMG_MAX = 4;
  */
 function _woUnitGuide(src) {
   const s = src || {};
-  const raw = String(s.guide ?? s.inflow_guide ?? s.inflowGuide ?? "");
+  // ★ 계약(PRD §04-1)은 `guide: { text, images }` 객체다. 문자열로 온 경우(옛 초안·수기 편집)도
+  //   그대로 글로 읽는다 — `String({})` 이 "[object Object]" 로 새는 것만은 막는다.
+  const g = s.guide;
+  const gObj = (g && typeof g === "object" && !Array.isArray(g)) ? g : null;
+  const raw = String((gObj ? gObj.text : g) ?? s.inflow_guide ?? s.inflowGuide ?? "");
   let html = "";
   if (raw.trim()) {
     html = /<[a-z][^>]*>/i.test(raw)
@@ -587,7 +599,7 @@ function _woUnitGuide(src) {
         || raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
              .replace(/"/g, "&quot;").replace(/\n/g, "<br>"));
   }
-  const list = s.guide_images ?? s.guideImages ?? s.inflow_guide_images ?? [];
+  const list = (gObj && gObj.images) ?? s.guide_images ?? s.guideImages ?? s.inflow_guide_images ?? [];
   const images = [];
   (Array.isArray(list) ? list : []).forEach(u => {
     const v = String(u || "").trim();
@@ -679,8 +691,11 @@ function _woOptionRows(o) {
   //  → 종전대로 빈 배열을 돌려 텍스트 분해 경로(parseProductLinesToRows)로 넘긴다(동작 불변).
   // 이 함수는 작업오더 화면·단독 회귀 테스트에서도 실행된다. 별도 보조함수에 의존하지 않고
   // 같은 JSON에서 명시 모드를 읽어, 기존 오더의 2개 이상 추론 규칙과 함께 유지한다.
-  const explicitOptionMode = String((arr[0] || {}).product_mode || "") === "opt";
-  return explicitOptionMode || rows.filter(r => r.optKey).length >= 2 ? rows : [];
+  // ★★ 134 — 상품마다 모드가 다를 수 있으므로 **어느 상품이든** 명시가 있으면 그 구조를 그대로 믿는다.
+  //   (첫 상품만 보던 종전 판정은 "상품A=옵션 있음 / 상품B=옵션 없음" 복합 작업에서
+  //    상품B 만 있는 순서로 오면 구조를 통째로 버렸다.)
+  const explicitMode = arr.some(p => p && String(p.product_mode || ""));
+  return explicitMode || rows.filter(r => r.optKey).length >= 2 ? rows : [];
 }
 
 // 평문 유입가이드 → 리뷰어 노출용 HTML: 첨부 이미지 URL(guide-image 프록시·Drive)을 실제 <img>로,

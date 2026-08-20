@@ -103,6 +103,13 @@ console.log('\n[A] _woUnitGuide — 평문→HTML · 첨부 정화');
   // ⚠ `const` 는 컨텍스트 객체의 프로퍼티가 되지 않는다 — 식으로 평가해 읽는다(레포 실측 함정)
   ok('상한 상수가 4로 고정돼 있다', vm.runInContext('_WO_UNIT_GUIDE_IMG_MAX', s) === 4);
 
+  // ★★ 계약(PRD §04-1)은 객체다: guide:{ text, images }
+  const obj = g({ guide: { text: '검색 유입 안내', images: [img('n'.repeat(24)), 'https://evil/x.png'] } });
+  ok('★★ 계약 형태 guide:{text,images} 를 그대로 읽는다',
+    /검색 유입 안내/.test(obj.html) && obj.images.length === 1);
+  ok('★ 객체가 와도 "[object Object]" 로 새지 않는다', !/object Object/.test(obj.html));
+  ok('객체인데 글이 비면 빈 값(공통 가이드로 접힘)', g({ guide: { images: [] } }).html === '');
+
   ok('별칭 키(guideImages·inflow_guide_images)도 받는다',
     g({ guideImages: [img('k'.repeat(24))] }).images.length === 1
     && g({ inflow_guide_images: [img('l'.repeat(24))] }).images.length === 1);
@@ -175,6 +182,47 @@ const COMPOSITE = {
   ok('깨진 JSON·빈 값은 종전대로 빈 배열',
     s._woOptionRows({ product_options_json: '{oops' }).length === 0
     && s._woOptionRows({}).length === 0);
+}
+
+/* ══════════════ B2. product_mode — 상품마다 다른 모드(복합) ══════════════ */
+console.log('\n[B2] product_mode — 상품별 명시 신호');
+{
+  const sb = { console };
+  sb.window = sb;
+  vm.createContext(sb);
+  vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), sb);
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woOptionRows', '_woProductMode']
+    .forEach(n => vm.runInContext(grab(wodSrc, n), sb));
+
+  const mixed = {
+    product_options_json: JSON.stringify([
+      { name: '상품B', product_mode: 'none', base: { pay: 9000 }, options: [] },
+      { name: '상품A', product_mode: 'opt', base: { pay: 0 }, options: [{ label: '옵션1', pay: 12000 }] },
+    ]),
+  };
+  ok('★★ 상품마다 모드가 달라도(복합) 옵션 모드로 연다 — 첫 상품만 보지 않는다',
+    sb._woProductMode(mixed) === 'opt');
+  ok('★★ 순서가 뒤바뀐 복합 오더도 구조를 버리지 않는다(옵션 줄 1개여도 반환)',
+    sb._woOptionRows(mixed).length === 2);
+
+  const allNone = {
+    product_options_json: JSON.stringify([
+      { name: '상품X', product_mode: 'none', base: { pay: 1000 }, options: [] },
+      { name: '상품Y', product_mode: 'none', base: { pay: 2000 }, options: [] },
+    ]),
+  };
+  ok('★ 전부 "옵션 없음"이라 명시하면 그것도 신호다(none)', sb._woProductMode(allNone) === 'none');
+  ok('★ 명시가 있으면 옵션 줄이 0개여도 상품 줄을 그대로 넘긴다',
+    sb._woOptionRows(allNone).length === 2 && sb._woOptionRows(allNone).every(r => r.unitKind === 'product'));
+
+  const legacy = { product_options_json: JSON.stringify([{ name: '옛상품', base: { pay: 5000 }, options: [{ label: 'a', pay: 5000 }] }]) };
+  ok('★ 명시가 하나도 없으면 빈 값 = 종전 추론 규칙(동작 불변)',
+    sb._woProductMode(legacy) === '' && sb._woOptionRows(legacy).length === 0);
+
+  // 발행 프리필이 "none" 명시를 받아들이는지
+  const apply = grab(recruitSrc, 'applyProductRowsFromOrder');
+  ok('★ 발행 프리필이 "옵션 없음" 명시를 신호로 받는다(옵션 표로 잘못 열리지 않는다)',
+    /p\.productMode === "none" \? "none"/.test(apply));
 }
 
 /* ══════════════ C. _woUnitGuideBlock — 상세 표시 ══════════════ */
