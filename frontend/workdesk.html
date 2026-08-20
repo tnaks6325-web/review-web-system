@@ -1729,6 +1729,20 @@
   .gcmrow:hover{background:var(--card2)}
   .gcmrow.danger{color:var(--bad)} .gcmrow.danger:hover{background:var(--bad-soft)}
   .gcmrow.dim{opacity:.4;cursor:not-allowed} .gcmrow.dim:hover{background:none}
+  /* 구매일자 미니달력 — body 직속 오버레이, var 폴백(테마 없는 화면 대비) */
+  #wdDatePick{position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:1200;display:flex;align-items:center;justify-content:center}
+  #wdDatePick .wdp-box{background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 18px 44px rgba(15,23,42,.22);padding:12px;width:264px;box-sizing:border-box}
+  #wdDatePick .wdp-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:13.5px}
+  #wdDatePick .wdp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  #wdDatePick .wdp-w{font-size:11px;color:var(--faint,#94a3b8);text-align:center;padding:3px 0}
+  #wdDatePick .wdp-d{border:0;background:none;border-radius:7px;font-size:12.5px;padding:6px 0;text-align:center;cursor:pointer;color:var(--t1,#0f172a);font-family:inherit;box-sizing:border-box}
+  #wdDatePick .wdp-d:hover{background:var(--card2,#f1f5f9)}
+  #wdDatePick .wdp-blank{cursor:default}
+  #wdDatePick .wdp-d.sun,#wdDatePick .wdp-w.sun{color:#dc2626}
+  #wdDatePick .wdp-d.sat,#wdDatePick .wdp-w.sat{color:#2563eb}
+  #wdDatePick .wdp-d.today{outline:1px dashed var(--faint,#94a3b8);outline-offset:-1px}
+  #wdDatePick .wdp-d.cur{background:#2563eb;color:#fff}
+  #wdDatePick .wdp-ft{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:11.5px;color:var(--faint,#64748b)}
   .gcmrow .i{width:16px;text-align:center}
   .gcmdiv{height:1px;background:var(--line);margin:5px 4px}
   .gcmsw{display:flex;align-items:center;gap:5px;padding:3px 7px 5px}
@@ -7425,11 +7439,91 @@ function _undoLatestCellGroup(){
   return true;
 }
 window.WorkdeskUndo=_undoLatestCellGroup;
+/* ── 미니달력 모달 (#wdDatePick · body 직속 — 표는 가로 스크롤 컨테이너라 안에 그리면 잘린다) ──
+   ★ 색은 주말만(일=빨강·토=파랑) — 공휴일 표는 여기 사본을 두지 않는다(틀린 빨간 날 > 빈 표시).
+   ★ 저장 후 무시트 탭은 reloadWorkdesk(재번호로 줄 순서·번호가 함께 바뀐다 — 부분 갱신이면 화면이 거짓말). */
+let _wdDpState=null;
+function _wdDpClose(){ const ov=document.getElementById('wdDatePick'); if(ov)ov.remove(); _wdDpState=null; }
+function _wdDpParse(v){ // 현재 값에서 초기 표시 월 추정(표기 다양 — 실패 시 오늘)
+  const t=String(v==null?'':v).trim();
+  let m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  if(m) return {y:+m[1],mo:+m[2],d:+m[3]};
+  m=/(\d{1,2})\s*\/\s*(\d{1,2})/.exec(t);
+  if(m){ const now=new Date(); return {y:now.getFullYear(),mo:+m[1],d:+m[2]}; }
+  return null;
+}
+function openWdDatePicker(td){
+  if(!td||!td.getAttribute) return;
+  const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field');
+  if(!rowId||!field||field.indexOf('col:')!==0) return;
+  if(!td.classList.contains('gedit')) return;              // 잠긴 칸은 열지 않는다(편집 게이트와 동일)
+  _wdDpClose();
+  const cur=_wdDpParse(td.getAttribute('data-val')||'');
+  const now=new Date();
+  _wdDpState={rowId, field, td, y:(cur?cur.y:now.getFullYear()), mo:(cur?cur.mo:now.getMonth()+1), sel:cur, busy:false};
+  const ov=document.createElement('div'); ov.id='wdDatePick';
+  ov.innerHTML='<div class="wdp-box" role="dialog" aria-label="구매일자 선택"></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov) _wdDpClose(); });   // 바깥 클릭 = 취소(입력값 없음 — 보호할 타이핑이 없다)
+  if(!window._wdDpKeyBound){ window._wdDpKeyBound=true;
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('wdDatePick')){ e.stopPropagation(); _wdDpClose(); } }, true);
+  }
+  _wdDpRender();
+}
+function _wdDpNav(d){ const S=_wdDpState; if(!S)return; S.mo+=d; if(S.mo<1){S.mo=12;S.y--;} if(S.mo>12){S.mo=1;S.y++;} _wdDpRender(); }
+function _wdDpRender(){
+  const S=_wdDpState; const box=document.querySelector('#wdDatePick .wdp-box'); if(!S||!box)return;
+  const first=new Date(Date.UTC(S.y,S.mo-1,1)), startDow=first.getUTCDay();
+  const days=new Date(Date.UTC(S.y,S.mo,0)).getUTCDate();
+  const today=new Date(); const tY=today.getFullYear(), tM=today.getMonth()+1, tD=today.getDate();
+  let cells='';
+  for(let i=0;i<startDow;i++) cells+='<span class="wdp-d wdp-blank"></span>';
+  for(let d=1;d<=days;d++){
+    const dow=(startDow+d-1)%7;
+    const cls=['wdp-d', dow===0?'sun':(dow===6?'sat':''),
+      (S.sel&&S.sel.y===S.y&&S.sel.mo===S.mo&&S.sel.d===d)?'cur':'',
+      (tY===S.y&&tM===S.mo&&tD===d)?'today':''].filter(Boolean).join(' ');
+    cells+=`<button class="${cls}" onclick="_wdDpPick(${d})">${d}</button>`;   // onclick 은 숫자만
+  }
+  box.innerHTML=
+    `<div class="wdp-hd"><button class="btn" onclick="_wdDpNav(-1)">‹</button>`+
+    `<b>${S.y}년 ${S.mo}월</b><button class="btn" onclick="_wdDpNav(1)">›</button></div>`+
+    `<div class="wdp-grid">${['일','월','화','수','목','금','토'].map((w,i)=>`<span class="wdp-w ${i===0?'sun':(i===6?'sat':'')}">${w}</span>`).join('')}${cells}</div>`+
+    `<div class="wdp-ft">${S.busy?'저장 중…':'날짜를 누르면 바로 저장됩니다'}<span class="sp" style="flex:1"></span>`+
+    `<button class="btn" onclick="_wdDpClose()">취소</button></div>`;
+}
+function _wdDpPick(d){
+  const S=_wdDpState; if(!S||S.busy)return;
+  const iso=`${S.y}-${String(S.mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  const t=STATE.cur; if(!t){ _wdDpClose(); return; }
+  const sheetless=!!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless);
+  if(!sheetless){
+    // 시트 기반 탭 = 종전 오버레이 경로 그대로(값만 달력이 만든 ISO — 표시 전용이라는 성질도 종전과 동일)
+    const td=S.td; _wdDpClose(); commitCellEdit(S.rowId, S.field, iso, td); return;
+  }
+  S.busy=true; _wdDpRender();
+  api('/api/trackb/workdesk/purchase-date',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:S.rowId,date:iso})})
+    .then(r=>{
+      _wdDpClose();
+      if(r&&r.ok){ toast(`구매일자 저장: ${r.value||iso}`+(r.via==='order'?' · 주문 원장도 함께 교정':'')); reloadWorkdesk(); }
+      else toast(r&&r.error==='not_sheetless'?'이 작업은 시트 기반이라 시트에서 고쳐야 합니다':(r&&r.error?('저장 거부: '+r.error):'저장 실패'));
+    })
+    .catch(()=>{ _wdDpClose(); toast('저장 실패 — 네트워크'); });
+}
+/* ── 구매일자 달력 편집 (사용자 확정 2026-08-21: 구매일자 칸은 직접 타이핑 편집 X · 미니달력 선택) ──
+   ★ 어느 칸이 구매일자인가 = 서버 campaignSchedule.DATE_HEADER_KEYWORDS 의 최소 사본 —
+     회귀가드가 두 목록의 일치를 고정한다(사본 드리프트 차단, workManager 규율).
+   ★ 무시트 탭 = 서버 /workdesk/purchase-date 로 진짜 기록(row_json·원장·재번호까지) /
+     시트 기반 탭 = 종전 오버레이(commitCellEdit) 그대로 — 저장 경로 의미는 종전과 동일하고
+     바뀐 것은 입력 수단(달력)뿐이다. */
+const _WD_DATE_KEYWORDS = ['구매일', '구매날짜', '구매 날짜', '시작일', '주문일', '배정일', '진행일'];
+function _isPurchaseDateHeader(h){ const t=String(h==null?'':h).trim(); return !!t && _WD_DATE_KEYWORDS.some(k=>t.includes(k)); }
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
   if(!field||!(field.indexOf('col:')===0||field.indexOf('ccol:')===0)) return;
   if(_workdeskStatusKindForField(field)) return;
+  if(field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4))){ openWdDatePicker(td); return; }
   td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
   const inp=td.querySelector('input'); inp.focus(); inp.select();
   let done=false;
@@ -7893,8 +7987,9 @@ function _openCellMenu(x,y,td){
   // 서버가 master/admin만 허용하므로 그 밖의 담당자에겐 눌러도 아무 일 없는 항목을 두지 않는다.
   const menuRowHasOrder=!!(selectedRow&&selectedRow.hasOrder);
   const menuCanOrderDelete=(STATE.role==='master'||STATE.role==='admin');
+  const isDateCol = field && field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4));
   m.innerHTML=
-      (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')
+      (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')
     + (manualReview?row('📎','관리자 수동 리뷰제출',"openManualReviewSubmission()"):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')

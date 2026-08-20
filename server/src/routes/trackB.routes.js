@@ -1298,6 +1298,28 @@ router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware
     res.status(out.ok ? 200 : (out.error === 'already_submitted' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+// 구매일자 달력 편집(무시트 전용) — 그리드 오버레이(표시 전용)와 달리 row_json·원장까지 진짜로 쓴다.
+//   시트 기반 탭은 409(화면은 종전 오버레이 경로 유지). 스코프는 셀 편집과 동일(내부 직원).
+router.post('/workdesk/purchase-date', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, date } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !date) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, date 필수' });
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field: 'col:구매일자' });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+// 리뷰제출일 백필(무시트 전용 · adminOrMaster) — 외부모집 사후 등록 건처럼 캡처 원장이 없는 줄의
+//   제출 표시를 명시 날짜로 기록한다(입금일 기록과 같은 성격). 증빙 게이트가 있는 [수동 리뷰제출]과 별개.
+router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, value } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
 router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId } = req.body || {};

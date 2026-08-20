@@ -1271,6 +1271,14 @@
 - ★★ **관리자 주문 편집(order-edit)도 무시트 탭에서 조용히 소실됐다(같은 날 함께 수정)**: `order_update` 큐를 무시트 백스톱이 "작업표 기록 경로가 담당"이라며 done 으로 삼키는데 **update 를 담당하는 경로가 없어** 편집(구매일자 교정 등)이 원장(DB)에만 남고 작업표·장부에 영영 반영되지 않았다. → order-edit 가 무시트면 **큐 대신 `writeOrderToWorktable` 로 기존 연결 행(sheet_row)을 즉시 재기록**(manualOrder ④와 같은 실행부·사본 0, 최신 DB 원장 `_osRowToOrderData` 값), 실패·비무시트는 종전 enqueue 폴백 + 응답 `sheetlessApplied` 고지. ★ 그리드 셀 편집(`workdesk/edit`)은 여전히 **오버레이 전용**(화면 표시만) — 무시트 탭에서 구매일자·금액을 장부까지 고치는 정식 창구는 **order-edit(주문 원장 편집)** 이다(재번호·검색 명단·리뷰어 화면이 전부 row_json 을 본다). 회귀가드 `tests/orderEditSheetless.test.js`.
 - 회귀가드 `tests/participantAddSheetless.test.js`(스텁 pool 로 **실제 실행**: 실제 대역·row_json·worktable·장부 1회 / 시트 기반 무회귀 / fail-closed 쓰기 0 / buildValues 대역 방어 / 형제 경로 FILTER). ⚠ 이 변경으로 `worktablePlan` 가드의 `_MANUAL_SEQ_BASE` 부재 패턴을 갱신했다(검사 의미 불변 — 대역을 **배정에** 쓰는 것만 금지, 제외 FILTER 는 허용).
 
+### ★★ 작업보드 구매일자 = 달력 편집 (무시트 진짜 기록 · 2026-08-21, 스키마 변경 0)
+- **사용자 확정**: 구매일자 열은 셀 직접 타이핑 편집 X — 우클릭 → [📅 날짜 선택] 미니달력 모달(`openWdDatePicker`/`#wdDatePick`, body 직속·onclick 은 숫자만·Esc/바깥클릭 닫기·주말색만(공휴일 표 사본 금지 — 틀린 빨간 날 > 빈 표시)).
+- ★★ **저장 경로가 탭 종류로 갈린다**: 무시트 탭 = `POST /api/trackb/workdesk/purchase-date`(셀 편집과 같은 스코프) → **진짜 기록**(row_json·장부·재번호까지) / 시트 기반 탭 = 종전 오버레이(`commitCellEdit`) 그대로(시트가 진실원본 — 표시 전용이라는 성질도 종전과 동일). 그리드 오버레이는 재번호·장부가 못 읽는다는 사실이 이 기능의 존재 이유다.
+- ★★ **주문 연결 줄은 원장 먼저**(`setWorkdeskPurchaseDate` — trackB.service): `order_submissions.date_str` 갱신(last_edit_seq 단조증가) 후 **order-edit 무시트 경로와 같은 실행부**(`writeOrderToWorktable`)로 재기록 — row_json 만 고치면 다음 주문 재기록이 옛 날짜를 도로 덮는다(원장·작업표 드리프트). 주문 없는 줄만 `sheetlessStatus.markSheetlessPurchaseDate`(칸 판정 = `campaignSchedule.findDateColumnIndex` · 표기 = `worktablePlan.sheetDateStr` 단일 출처) + 재번호 fail-soft.
+- ★ **클라 날짜 칸 판정(`_WD_DATE_KEYWORDS`)은 서버 `DATE_HEADER_KEYWORDS` 의 최소 사본** — 회귀가드가 두 목록 일치를 고정한다(workManager 규율).
+- ★ **리뷰제출일 백필** `POST /api/trackb/workdesk/review-submit-date`(**adminOrMaster** — 증빙 없는 상태 확정이라 [수동 리뷰제출](internal·캡처 게이트)보다 좁다): 외부모집 사후 등록 건처럼 캡처 원장이 없는 줄의 제출 표시를 명시 날짜로 기록(입금일 기록과 같은 성격). 실행부 = `markStatusCell(kind:'submit')` 한 벌, **값은 날짜로 해석 가능해야**(`parseDateToken` — '완료' 류 차단), cp 물리 토글은 `source` 무접촉('manual' 이면 투영이 얼린다).
+- 회귀가드 `tests/workdeskPurchaseDate.test.js`(스텁 pool 실행 · 프론트 배선 · 키워드 사본 일치) + 실 http 오리진 브라우저 실측(렌더·월 이동·Esc·일반 칸 무회귀).
+
 ### 블로그체험단 (work_kind='blog') — 지금 지켜야 하는 규율
 - **M1~M6 완료 + 프로덕션 E2E 완주(2026-08-19)**. 단계별 구현 기록·사고 경위는 **`docs/history/블로그체험단.md`**, 기획은 `frontend/docs/prd-blog-campaign.html`.
 - ★★ **분류는 별도 축 `work_kind`(migration 099)** — 리뷰타입의 하위 값이 아니다(블로그엔 리뷰타입이 없다). 판정 단일 출처 `utils/workKind.js`(`resolveWorkKind` = 공고 > 탭), 조회는 `workKindContext.service`(60초 캐시·fail-soft). **빈 값 = review = 종전 동작 100%**. `workKindForStore` 는 `''` 를 `''` 로 남긴다(접수 blank-only 가 무력화된다).
