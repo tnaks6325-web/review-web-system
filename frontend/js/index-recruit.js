@@ -2414,7 +2414,18 @@ function renderOptRowsWithProduct(options, productLines, campaign) {
   renderOptRows(opts.map((o, i) => {
     const key = o.optKey || o.opt_key || "";
     const hit = byOpt.get(key);
-    const row = { ...o, productName: (hit && hit.productName) || firstProd || "" };
+    // ★★ 134 복합 작업 — 저장된 상품명이 최우선이다.
+    //   `byOpt` 는 **옵션 키가 있는 줄만** 담으므로 옵션 없는 상품(unit_kind='product')은
+    //   여기서 절대 매칭되지 않는다. 그 갈래를 `firstProd` 로 접으면 두 번째 상품의 이름이
+    //   **첫 상품 이름으로 덮여** 화면에 같은 이름의 그룹이 둘 생기고, 그대로 저장하면
+    //   리뷰어 화면의 상품 묶음 머리가 남의 상품명이 된다(테섭 실측: 유산균 → 종합비타민).
+    //   ★ 상품 단위는 opt_key 가 곧 상품명이므로 마지막 폴백으로 그것까지 본다.
+    const saved = o.productName ?? o.product_name;
+    const unit = String(o.unitKind ?? o.unit_kind ?? "");
+    const row = { ...o, productName: String(saved || "").trim()
+      || (hit && hit.productName)
+      || (unit === "product" ? key : "")
+      || firstProd || "" };
     if (!hasLiveOpt && i === 0) {
       if (Number(campQuota.recruit_total) > 0) row.recruitTotal = Number(campQuota.recruit_total);
       if (Number(campQuota.daily_limit)   > 0) row.dailyLimit   = Number(campQuota.daily_limit);

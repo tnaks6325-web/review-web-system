@@ -106,6 +106,8 @@ function makeDom() {
       remove() { if (node.parent) node.parent.children = node.parent.children.filter(x => x !== node); },
       addEventListener(ev, fn) { (node._li = node._li || {}); (node._li[ev] = node._li[ev] || []).push(fn); },
       fire(ev) { ((node._li || {})[ev] || []).forEach(f => f()); },
+      // 134: `.rf-gp` 그룹(상품 단위 판정·그룹 상품명)이 closest 로만 잡히므로 실제 DOM 과 같게 거슬러 올라간다
+      closest(sel) { let n = node; const simple = String(sel).trim(); while (n) { if (matches(n, simple)) return n; n = n.parent; } return null; },
       querySelector(sel) { return queryAll(node, sel)[0] || null; },
       querySelectorAll(sel) { return queryAll(node, sel); },
     };
@@ -341,7 +343,7 @@ else {
   // ⚠ _woOptionRows 가 새 전역을 부르면 이 목록도 함께 늘린다(스텁을 두면 규칙이 거기서만 딴판이 된다).
   //   134: 선택지 전용 유입가이드 정규화(_woUnitGuide) + 그 평문→HTML 변환 의존 3종.
   vm.runInContext(grabConst(wodSrc, '_WO_UNIT_GUIDE_IMG_MAX'), sb);
-  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woOptionRows']
+  ['_woCleanGuide', '_driveId', '_woPlainGuideToHtml', '_woUnitGuide', '_woProductUnitSrc', '_woOptionRows']
     .forEach(n => vm.runInContext(grab(wodSrc, n), sb));
   sb._o = { product_options_json: JSON.stringify([{ name: '힙스', base: { pay: 0 }, options: [
     { label: '콰이어트', pay: 31400, count: 20 }, { label: '어나더', pay: 31400, count: 25 }] }]) };
@@ -356,6 +358,45 @@ else {
   ok('리뷰웹: 옵션별 건수 → 옵션 정원 프리필', rows.length === 2 && rows[0].recruitTotal === 20 && rows[1].recruitTotal === 25);
   sb._o2 = { product_options_json: JSON.stringify([{ name: '우레온', base: { pay: 22000, count: 5 }, options: [] }]) };
   ok('리뷰웹: 옵션 없는 구조 → 옵션행 0(종전 규칙 유지)', vm.runInContext('_woOptionRows(_o2)', sb).length === 0);
+}
+
+
+/* ══════════════ G. 134 복합 작업 — 저장된 상품명이 최우선 ══════════════ */
+console.log('\n[G] 편집 프리필 — 상품 단위(unit_kind=product)의 상품명 보존');
+{
+  // 테섭 실측(2026-08-20): 상품A(옵션 2) + 상품B(옵션 없음) 공고를 수정 모달로 열면
+  // 두 그룹 머리가 **둘 다 상품A 이름**으로 떠서, 그대로 저장하면 상품 단위의
+  // product_name·opt_key 가 남의 상품명으로 덮인다(리뷰어 화면 상품 묶음 머리가 뒤바뀐다).
+  const t = makeTable();
+  t.run(`renderOptRowsWithProduct([
+    { optKey:'옵션A (30일분)',        unitKind:'option',  productName:'하루한포 종합비타민', payAmount:19900, recruitTotal:6, dailyLimit:3, status:'active' },
+    { optKey:'옵션B (대용량 90일분)', unitKind:'option',  productName:'하루한포 종합비타민', payAmount:34900, recruitTotal:4, dailyLimit:2, status:'active' },
+    { optKey:'속편한 유산균',          unitKind:'product', productName:'속편한 유산균',       payAmount:24900, recruitTotal:5, dailyLimit:2, status:'active' }
+  ], '하루한포 종합비타민 - 옵션A (30일분) - 결제금액 19,900원\\n하루한포 종합비타민 - 옵션B (대용량 90일분) - 결제금액 34,900원')`);
+  const rows = JSON.parse(t.run('JSON.stringify(_readProdRowsRaw())'));
+  ok('상품 단위 줄의 상품명이 첫 상품 이름으로 덮이지 않는다',
+    rows.length === 3 && rows[2].productName === '속편한 유산균');
+  ok('옵션 줄의 상품명은 종전대로 유지', rows[0].productName === '하루한포 종합비타민' && rows[1].productName === '하루한포 종합비타민');
+  ok('저장 페이로드도 같은 상품명(리뷰어 화면 상품 묶음 머리)',
+    (JSON.parse(t.run('JSON.stringify(readOptRows())')).find(o => o.optKey === '속편한 유산균') || {}).productName === '속편한 유산균');
+
+  // ★ 상품 단위는 opt_key 가 곧 상품명 — 저장된 productName 이 비어도 첫 상품으로 접지 않는다
+  const t2 = makeTable();
+  t2.run(`renderOptRowsWithProduct([
+    { optKey:'옵션A', unitKind:'option',  productName:'상품A', status:'active' },
+    { optKey:'상품B', unitKind:'product', status:'active' }
+  ], '상품A - 옵션A - 결제금액 10,000원')`);
+  const r2 = JSON.parse(t2.run('JSON.stringify(_readProdRowsRaw())'));
+  ok('상품명 미저장 상품 단위 → opt_key(=상품명) 폴백', r2[1].productName === '상품B');
+
+  // 무회귀: 옵션 단위인데 저장 상품명이 없으면 종전대로 원문 매칭 → 첫 상품 폴백
+  const t3 = makeTable();
+  t3.run(`renderOptRowsWithProduct([
+    { optKey:'콰이어트', status:'active' },
+    { optKey:'어나더',   status:'active' }
+  ], '힙스 - 콰이어트 - 결제금액 31,400원\\n힙스 - 어나더 - 결제금액 31,400원')`);
+  const r3 = JSON.parse(t3.run('JSON.stringify(_readProdRowsRaw())'));
+  ok('옵션 단위 무저장: 원문에서 상품명을 찾아 채운다(무회귀)', r3[0].productName === '힙스' && r3[1].productName === '힙스');
 }
 
 console.log(`\n✅ campaignProdModeSplit: ${passed}개 통과${skipped ? ` (${skipped}개 skip)` : ''}`);
