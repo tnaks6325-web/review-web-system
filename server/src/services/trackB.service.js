@@ -3359,6 +3359,101 @@ async function deleteWorkdeskOrderRow(args) {
 // 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
 async function addWorkdeskRow(args) { return participants.addParticipant(args); }
 
+/**
+ * 작업보드 구매일자 달력 편집 (무시트 전용 · 2026-08-21).
+ *
+ * ★★ 무시트 탭의 구매일자는 row_json 이 진실이라 그리드 오버레이(표시 전용)로는 재번호·장부에
+ *   인식되지 않는다 → 여기서 진짜로 쓴다. 시트 기반 탭은 거부(시트가 진실원본 — 화면은 종전
+ *   오버레이 경로를 그대로 쓴다).
+ * ★★ 주문이 연결된 줄은 **원장(date_str)을 먼저 고치고 order-edit 무시트 경로와 같은 실행부**
+ *   (`writeOrderToWorktable`)로 재기록한다 — row_json 만 고치면 다음 주문 재기록이 옛 날짜를
+ *   도로 덮는다(원장·작업표 드리프트). 주문 없는 줄만 `markSheetlessPurchaseDate` 직접 기록.
+ * ★ 재번호는 fail-soft — 날짜는 이미 박혔고 5분 스윕이 백스톱이다.
+ */
+async function setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
+  if (!dm) return { ok: false, error: 'bad_date' };
+  const db = getPool();
+
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
+  catch (_) { sheetless = false; }
+  if (!sheetless) return { ok: false, error: 'not_sheetless' };
+
+  const { rows: pr } = await db.query(
+    `SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
+    [rowId, sheetId, tabName]);
+  if (!pr.length) return { ok: false, error: 'row_not_found' };
+  const row = pr[0];
+  const fmt = require('../utils/worktablePlan').sheetDateStr({ y: +dm[1], m: +dm[2], d: +dm[3] });
+
+  if (row.order_submission_id) {
+    // 원장 먼저(진실원본) — last_edit_seq 단조증가로 역동기·stale 편집 보호(order-edit 와 동일).
+    const { rowCount } = await db.query(
+      `UPDATE order_submissions SET date_str = $2, updated_at = NOW(),
+              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+        WHERE id = $1 AND deleted_at IS NULL`,
+      [row.order_submission_id, fmt, Date.now()]);
+    if (!rowCount) return { ok: false, error: 'order_not_found' };
+    const { rows: full } = await db.query(`SELECT * FROM order_submissions WHERE id = $1`, [row.order_submission_id]);
+    const { _osRowToOrderData } = require('./orderLedger.service');
+    const w = await require('./sheetlessOrder.service').writeOrderToWorktable({
+      sheetId, tabName, tabGid: row.tab_gid || '', sheetRow: row.seq,
+      orderData: _osRowToOrderData(full[0]), orderSubmissionId: row.order_submission_id,
+    });
+    return w && w.ok ? { ok: true, seq: row.seq, value: fmt, via: 'order' }
+                     : { ok: false, error: (w && w.reason) || 'write_failed', via: 'order' };
+  }
+
+  const r = await require('./sheetlessStatus.service').markSheetlessPurchaseDate({
+    sheetId, tabName, rowIndex: row.seq, dateYmd: String(date).trim(), by });
+  if (!r || r.handled === false || !r.ok) {
+    return { ok: false, error: (r && r.reason) || 'write_failed', via: 'cell' };
+  }
+  try { await require('./rowNumbering.service').renumberTab({ sheetId, tabName, by }); } catch (_) { /* 5분 스윕 백스톱 */ }
+  return { ok: true, seq: row.seq, value: fmt, via: 'cell' };
+}
+
+/**
+ * 리뷰제출일 백필 (무시트 전용 · adminOrMaster · 2026-08-21).
+ *
+ * ★ 외부모집 사후 등록 건은 리뷰가 시스템 밖(카톡 수집)에서 제출돼 캡처 원장이 없다 —
+ *   증빙 게이트가 있는 [수동 리뷰제출](manualWorkdeskReviewSubmit)로는 기록할 수 없어서,
+ *   입금일 기록(deposit-date-backfill)과 같은 성격의 관리자 백필 창구를 둔다.
+ * ★ 값은 날짜로 해석 가능해야 한다(parseDateToken — '완료' 같은 임의 문구 차단).
+ * ★ 기록 실행부 = `sheetlessStatus.markStatusCell` 한 벌(리뷰어 제출과 같은 경로 · 사본 0).
+ */
+async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
+  const text = String(value == null ? '' : value).trim().slice(0, 40);
+  if (!text) return { ok: false, error: 'empty_value' };
+  const { parseDateToken } = require('../utils/koreanDate');
+  let parsed = null;
+  try { parsed = parseDateToken(text, { fallbackAnchor: new Date() }); } catch (_) { parsed = null; }
+  if (!parsed) return { ok: false, error: 'bad_date', hint: '날짜로 읽히는 값만 기록할 수 있습니다(예: 8/1)' };
+
+  const db = getPool();
+  const { rows: pr } = await db.query(
+    `SELECT id, seq FROM campaign_participants
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
+    [rowId, sheetId, tabName]);
+  if (!pr.length) return { ok: false, error: 'row_not_found' };
+  const seq = pr[0].seq;
+
+  const r = await require('./sheetlessStatus.service').markStatusCell({
+    sheetId, tabName, rowIndex: seq, kind: 'submit', value: text, by });
+  if (!r || r.handled === false) return { ok: false, error: 'not_sheetless' };
+  if (!r.ok) return { ok: false, error: r.reason || 'write_failed' };
+  // 화면 즉시 일치용 물리 토글 — source 는 건드리지 않는다('manual' 로 두면 투영 상태 CASE 가 얼린다).
+  await db.query(
+    `UPDATE campaign_participants SET is_submitted = TRUE, updated_by = $4, updated_at = NOW()
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3`,
+    [rowId, sheetId, tabName, String(by).slice(0, 100)]);
+  return { ok: true, seq, value: text, column: r.column || null };
+}
+
 // ── 편집 이력(감사): 이 탭의 최근 편집(활성+되돌림)을 시각·편집자·필드·값·상태로. 앵커→참여자명 best-effort. ──
 async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
   if (!sheetId || !tabName) throw new Error('listEdits: sheetId, tabName 필수');
@@ -4728,6 +4823,8 @@ module.exports = {
   _writebackEngine,
   workdeskTab,
   setWorkdeskTitle,
+  setWorkdeskPurchaseDate,
+  backfillWorkdeskReviewSubmitDate,
   editWorkdeskRow,
   revertWorkdeskEdit,
   manualWorkdeskReviewSubmit,
