@@ -173,6 +173,12 @@ console.log('\n[D] 살아 있는 참여가 있으면 보관 거부');
     const dbFail = { query: async () => { throw new Error('boom'); } };
     const sugF = await svc.archiveSuggestions(dbFail, [{ id: 'x', linked_sheet_id: 's', linked_tab_name: 't' }]);
     ok('★ 조회 실패 = null(제안 없음, 목록은 그대로 뜬다)', sugF === null);
+    // ★ 2026-08-20 명시적 의미 변경: filled 판정 = rowNumbering.filledSql 단일 출처 합류
+    //   (종전 2칸 → 작업보드 게이지와 같은 4칸. 카드 누적 표기(1단계)의 재료를 겸하므로
+    //    두 화면이 같은 숫자를 봐야 한다 — 사본이 되살아나면 여기서 잡는다.)
+    ok('★★ filled 판정 = filledSql 단일 출처(2칸 사본 부활 금지)',
+      /require\('\.\.\/utils\/rowNumbering'\)/.test(svcSrc) && /filledSql\('p'\)/.test(svcSrc)
+      && !/NULLIF\(TRIM\(phone8\)/.test(svcSrc));
 
     const sugArc = await svc.archiveSuggestions({ query: async () => { throw new Error('불려선 안 됨'); } },
       [{ id: 'a', linked_sheet_id: 's', linked_tab_name: 't', archived_at: '2026-01-01' }]);

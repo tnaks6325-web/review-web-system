@@ -104,6 +104,21 @@ const CARRY_ENABLED = process.env.CAMPAIGN_DAILY_CARRY !== '0';
 // 킬스위치: CAMPAIGN_DAILY_PLAN=0 이면 계획표 전체 무시(전건 기존 동작 즉시 복귀).
 const PLAN_ENABLED = process.env.CAMPAIGN_DAILY_PLAN !== '0';
 
+// ── 표(주문 원장) 기준 총량 게이트(2단계) ──
+// 'off' | 'observe'(기본) | 'on'. off = 집계 쿼리 0(완전 킬스위치 · 되돌리기 = env 만).
+// observe = counts.linked 만 싣고 게이트 무변경 — 관제·카드가 "표 기준이면 마감"을 먼저 관측한다
+// (AUTO_FILE_ROUTE dry 와 같은 규율: 관측 후 출시 결정은 사람이).
+// on = soft_full 게이트 반영(stateReason:'table_over_total' · 비영속 — maybePersistClosed 무접촉).
+// ★★ 게이트 재료는 campaign_participants(작업표 줄)가 아니라 order_submissions(주문 원장) —
+//   선기입 이름만 줄(참여 소각)·링크 오염·투영 지연이 정원 계산에 못 들어오게 하는 구조적 선택.
+//   표시(카드 누적)는 작업표 줄(archiveSuggest.filled)이 맡는다 — 두 재료의 용도가 다르다.
+const TABLE_QUOTA_MODE = (() => {
+  const v = String(process.env.CAMPAIGN_TABLE_QUOTA || 'observe').toLowerCase();
+  if (['0', 'false', 'off'].includes(v)) return 'off';
+  if (['1', 'true', 'on'].includes(v)) return 'on';
+  return 'observe';
+})();
+
 /** 그날의 명시 조절값(없으면 null) — dailyQuota 와 computeCampaignState 표시 재료가
  *  **같은 판정**을 쓴다(사본을 두면 정원과 표시가 갈린다). 킬스위치도 여기서 함께 판정. */
 function planOverrideFor(plans, dateStr) {
@@ -274,6 +289,28 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
   };
 
+  // ★★ 표(주문 원장) 기준 소비량(2단계) — payload 에 먼저 싣는다: closed·preopen·daily_done 로
+  //   반환되는 카드에도 관측 칩이 떠야 observe 가 관측 구실을 한다. 게이트 판정(wouldClose)은
+  //   아래 soft_full 지점에서만 상태를 바꾼다.
+  // ★ rt 공식은 여기서 한 번만 계산해 아래 soft_full 판정과 공유한다(판정 사본 0).
+  const rtTotal = sch ? (Number(sch.totalSlots) || 0) : (Number(c.recruit_total) || 0);
+  {
+    const L = counts.linked;
+    if (L && L.ok && !L.noTab) {
+      // ★ max() = 이중계수 없음: 주문 행은 제출 완료 순간에만 생기고 그때 신청은 submitted(≠applied)라
+      //   activeHolds 와 교집합이 없다(승인제 blog 홀드도 구매 전 = 주문 없음).
+      //   잔여 엣지 = 홀드확정 SAVEPOINT 실패 직후 ≤TTL 동안 1건 이중계수(과차단 방향·자연 해소).
+      const usedTable = Math.max(Number(counts.submittedAll) || 0, Number(L.orders) || 0)
+                      + (Number(counts.activeHolds) || 0);
+      payload.tableQuota = {
+        mode: TABLE_QUOTA_MODE, orders: L.orders, ordersAll: L.ordersAll, sharedTab: !!L.sharedTab,
+        // ★ sharedTab(한 탭에 살아있는 참여형 공고 2개↑)은 게이트 비활성 — 같은 주문을 두 공고
+        //   rt 에 각각 얹으면 이중 차단(귀속 배분은 범위 밖, 관제가 사실을 말한다).
+        wouldClose: rtTotal > 0 && !L.sharedTab && usedTable >= rtTotal,
+      };
+    }
+  }
+
   if (c.status !== 'active') return { ...payload, state: 'closed' }; // closed는 영속값(제출확정 도달 시 저장)
 
   const startMin = timeStrToMinutes(c.window_start);
@@ -346,9 +383,17 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   //   apply 게이트는 soft_full·daily_done 둘 다 차단이라 **참여 동작은 이 순서와 무관**하다
   //   (바뀌는 것은 관리자·리뷰어에게 보이는 상태 문구뿐).
   //   ★ soft_full 에는 reopensAt 을 싣지 않는다 — 총원이 찼으니 "다시 열림"이 아니다.
-  const rt = sch ? sch.totalSlots : (Number(c.recruit_total) || 0);
+  const rt = rtTotal;   // (payload 부착 지점에서 한 번만 계산 — 표 기준 게이트와 같은 값)
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);
   if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 총원 충족 — 신청 차단
+
+  // ★★ 표(주문 원장) 기준 총량 게이트(2단계) — 공고를 안 거친 실구매(외부모집 수동제출·수기 원장
+  //   기록·지각 구매)가 총량을 소비했으면 신규 신청을 닫는다. observe 는 payload 만 싣고 통과.
+  //   ★ 영속하지 않는다(maybePersistClosed 무접촉) — 주문 취소·앵커 정정 시 자동 재오픈.
+  //   ★ soft_full 규율 그대로 reopensAt 없음. noTab·null(모름)은 종전 판정(정원을 좁히지 않는다).
+  if (TABLE_QUOTA_MODE === 'on' && payload.tableQuota && payload.tableQuota.wouldClose) {
+    return { ...payload, state: 'soft_full', stateReason: 'table_over_total' };
+  }
 
   // 금일완료(홀드 만료 반환 시 open 복귀)
   if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
@@ -383,6 +428,7 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
     carry: carryStart ? { startDate: carryStart, submittedSince: 0 } : null,
     hold: holdStart ? { startDate: holdStart, submittedSince: 0 } : null,
     plans: null,
+    linked: null,
   });
   for (const id of ids) out.set(id, blank());
   if (!ids.length) return out;
@@ -430,6 +476,17 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
     for (const id of ids) {
       const o = out.get(id);
       if (o) o.plans = planMaps.get(id) || null;
+    }
+  }
+  // ★ 표(주문 원장) 기준 소비량(2단계) — **반드시 이 깔때기에 싣는다**(목록/상세/apply/외부접수가
+  //   같은 정원을 본다 — 별도 인자로 흩으면 "카드는 열렸는데 참여 거부"). 시그니처 무변경 =
+  //   소비처 4파일(campaign.routes·trackB·manualOrder·campaignPlan) 호출부 변경 0.
+  //   ★ planMaps 뒤에 둔다 — 쿼리 순서를 보는 기존 회귀가드(066 q[0]/q[1])의 계약을 흔들지 않는다.
+  const linkedMap = await _loadLinkedOrderCounts(pool, ids, now);
+  if (linkedMap) {
+    for (const id of ids) {
+      const o = out.get(id);
+      if (o) o.linked = linkedMap.get(id) || null;
     }
   }
   return out;
@@ -519,6 +576,78 @@ async function _loadPlanMaps(db, ids) {
   }
 }
 function __resetPlanCacheForTest() { _planTableMissingAt = 0; }
+
+/**
+ * 연결 탭의 "실구매 소비량"(주문 원장 기준) 일괄 로드 (2단계 표 기준 게이트 재료)
+ *   → Map(campaignId → {ok:true, orders, ordersAll, sharedTab} | {ok:true, noTab:true}) | null
+ * ★ 재료는 order_submissions 뿐 — 작업표 줄(campaign_participants)·order_submission_id 링크를
+ *   읽지 않는다(선기입 이름만 줄·링크 오염·투영 지연 면역). 시트 API 호출 0.
+ * ★ 앵커 = start_date(KST 자정) ?? created_at — 재사용 탭의 과거 블록 주문 배제.
+ *   (`NULL::text || '…' = NULL` → COALESCE 가 created_at 으로 폴백한다.)
+ * ★ fail 방향: off·조회 실패 = null = counts.linked 미부착 = 기존 동작 100%.
+ *   "없다"(noTab = 연결 탭 없음)와 "모른다"(null)를 구분해 화면이 다르게 말한다.
+ * ★★ 잠금 tx(client)에서는 SAVEPOINT 격리 — 실패 쿼리 하나가 apply tx 를 25P02 로 죽이면
+ *   참여 INSERT 가 전멸한다(_loadPlanMaps 와 같은 자리·같은 이유·같은 판정식).
+ * ★ 캐시는 pool 경로 전용 + 성공 결과만 담는다(client 게이트는 항상 신선 조회 = 잠금 안 최신 판정).
+ */
+let _ctqCache = new Map();               // campaignId → {at, val}
+const CTQ_CACHE_MS = 10 * 1000;
+const CTQ_CACHE_MAX = 800;               // 무한 성장 방지(넘으면 통째 비움 — LRU 불필요한 규모)
+async function _loadLinkedOrderCounts(db, ids, now = new Date()) {
+  if (TABLE_QUOTA_MODE === 'off' || !ids || !ids.length || !db || typeof db.query !== 'function') return null;
+  const inClient = typeof db.release === 'function';   // 체크아웃된 클라이언트 = 잠금 tx 가능성
+  if (!inClient && ids.every(id => { const c = _ctqCache.get(id); return c && now.getTime() - c.at < CTQ_CACHE_MS; })) {
+    return new Map(ids.map(id => [id, _ctqCache.get(id).val]));
+  }
+  let sp = false;
+  if (inClient) {
+    try { await db.query('SAVEPOINT ctq_orders'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
+  }
+  try {
+    const { rows } = await db.query(`
+      SELECT rc.id,
+             COUNT(DISTINCT os.id) FILTER (
+               WHERE os.submitted_at >= COALESCE((rc.start_date::text || 'T00:00:00+09:00')::timestamptz, rc.created_at)
+             )::int AS orders,
+             COUNT(DISTINCT os.id)::int AS orders_all,
+             shared.n::int AS live_campaigns
+        FROM recruit_campaigns rc
+        JOIN LATERAL (
+          SELECT COUNT(*) AS n FROM recruit_campaigns rc2
+           WHERE rc2.participation_mode AND rc2.status = 'active' AND rc2.archived_at IS NULL
+             AND rc2.linked_sheet_id = rc.linked_sheet_id
+             AND (rc2.linked_tab_name = rc.linked_tab_name
+                  OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                      AND NULLIF(rc2.linked_tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+        ) shared ON TRUE
+        LEFT JOIN order_submissions os
+          ON os.deleted_at IS NULL
+         AND os.sheet_id = rc.linked_sheet_id
+         AND (os.tab_name = rc.linked_tab_name
+              OR (NULLIF(rc.linked_tab_gid,'') IS NOT NULL
+                  AND NULLIF(os.tab_gid,'') = NULLIF(rc.linked_tab_gid,'')))
+       WHERE rc.id = ANY($1) AND rc.participation_mode
+         AND NULLIF(rc.linked_sheet_id,'') IS NOT NULL AND NULLIF(rc.linked_tab_name,'') IS NOT NULL
+       GROUP BY rc.id, shared.n`, [ids]);
+    if (sp) { try { await db.query('RELEASE SAVEPOINT ctq_orders'); } catch (_) {} }
+    const m = new Map();
+    for (const r of rows) {
+      if (!r || r.id == null) continue;   // 범용 스텁 폴백 행 방어(id 없는 행은 재료가 아니다)
+      m.set(r.id, { ok: true, orders: Number(r.orders) || 0, ordersAll: Number(r.orders_all) || 0,
+                    sharedTab: Number(r.live_campaigns) > 1 });
+    }
+    for (const id of ids) if (!m.has(id)) m.set(id, { ok: true, noTab: true });
+    if (!inClient) {
+      if (_ctqCache.size > CTQ_CACHE_MAX) _ctqCache = new Map();
+      for (const [id, val] of m) _ctqCache.set(id, { at: now.getTime(), val });
+    }
+    return m;
+  } catch (e) {
+    if (sp) { try { await db.query('ROLLBACK TO SAVEPOINT ctq_orders'); } catch (_) {} }
+    return null;   // 모른다 = 미부착 = 게이트·표시 전부 종전 동작(모른다고 정원을 좁히지 않는다)
+  }
+}
+function __resetTableQuotaCacheForTest() { _ctqCache = new Map(); }
 
 /**
  * 이월 기준선(app_settings.campaign_carry_start, 066) — 프로세스 캐시.
@@ -675,5 +804,7 @@ module.exports = {
   heldCarry,
   __resetCarryCacheForTest,
   __resetPlanCacheForTest,
+  TABLE_QUOTA_MODE,
+  __resetTableQuotaCacheForTest,
   __resetHoldCacheForTest,
 };

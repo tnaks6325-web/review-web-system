@@ -15,6 +15,7 @@
 //   ("투입 총량을 모집해 모든 행을 채웠다" = 그 작업의 모집이 끝났다는 뜻).
 // ═══════════════════════════════════════════════════════════════════════════
 const { logger } = require('../utils/logger');
+const { filledSql } = require('../utils/rowNumbering');
 
 /** 탭 키 — 복합키 구분자는 **이스케이프 표기**로 쓴다(소스에 리터럴 NUL·탭 금지: git 이
  *  파일을 바이너리로 취급해 grep·회귀가드가 그 파일에서 통째로 무력화된다 — 실측 규율). */
@@ -84,15 +85,20 @@ async function archiveSuggestions(db, campaigns) {
   try {
     const sheets = list.map(c => c.linked_sheet_id);
     const tabs = list.map(c => c.linked_tab_name);
+    // ★★ "채워진 줄" 판정 = utils/rowNumbering.filledSql 단일 출처 합류(2026-08-20 명시적 의미 변경).
+    //   종전 2칸(phone8/reviewer_name)은 작업보드 게이지·번호 정리의 4칸 판정
+    //   (order_submission_id·reviewer_name·recipient_name·phone8)과 갈라져 "게이지는 169인데
+    //   보관 제안 filled 는 다른 수"가 됐다. 이 값은 관리자 카드 누적 표기(1단계)의 재료도 겸하므로
+    //   두 화면이 같은 숫자를 봐야 한다. 넓어지는 방향(주문 링크만·수취인만 있는 줄도 채워짐)이고,
+    //   보관은 제안 전용 + 실행 게이트(유효 홀드·blog_pending 거부)가 따로 있어 안전하다.
     const { rows } = await db.query(
-      `SELECT sheet_id, tab_name,
+      `SELECT p.sheet_id, p.tab_name,
               COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE COALESCE(NULLIF(TRIM(phone8), ''),
-                                              NULLIF(TRIM(reviewer_name), '')) IS NOT NULL) AS filled
-         FROM campaign_participants
-        WHERE deleted_at IS NULL AND active
-          AND (sheet_id, tab_name) IN (SELECT * FROM UNNEST($1::text[], $2::text[]))
-        GROUP BY sheet_id, tab_name`, [sheets, tabs]);
+              COUNT(*) FILTER (WHERE ${filledSql('p')}) AS filled
+         FROM campaign_participants p
+        WHERE p.deleted_at IS NULL AND p.active
+          AND (p.sheet_id, p.tab_name) IN (SELECT * FROM UNNEST($1::text[], $2::text[]))
+        GROUP BY p.sheet_id, p.tab_name`, [sheets, tabs]);
     const byTab = new Map();
     for (const r of rows) {
       byTab.set(_TKEY(r.sheet_id, r.tab_name), {

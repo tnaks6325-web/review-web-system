@@ -213,6 +213,13 @@
       .pcard .pg-hold{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;cursor:pointer;
         background:#EDE9FE;color:#6D28D9;border:1px solid #DDD6FE;font-size:.62rem;font-weight:800;vertical-align:1px}
       .pcard .pg-hold:hover{background:#DDD6FE}
+      /* 표(주문 원장) 기준 총량 칩(2단계) — observe=앰버(관측), on=빨강(실제 마감) */
+      .pcard .pg-tq{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;
+        font-size:.56rem;font-weight:800;background:#FEF3C7;color:#92400E}
+      .pcard .pg-tq.on{background:#FEE2E2;color:#B91C1C}
+      /* 누적 표기의 [표] 출처 배지(1단계) — 표 기준 숫자일 때만 붙는다 */
+      .pcard .sp-src{font-style:normal;font-size:.52rem;font-weight:800;color:#1550b8;
+        background:#EEF3FD;border-radius:4px;padding:0 3px;margin-left:2px;vertical-align:1px}
       /* 095: 차수 구분 줄(관리자 카드 전용) — 1차 200/200 완료 · 2차 12/100 · 총 212/300 */
       .pcard .prounds{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:.62rem;color:#6B7280}
       .pcard .prounds .rchip{background:#F1F5F9;border-radius:999px;padding:1px 7px;font-weight:800;color:#334155}
@@ -381,7 +388,19 @@
     // 원본 recruit_total=0은 무제한 정책값이라 여기서 덮어쓰지 않는다.
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
-    const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
+    // ★★ 1단계(표 기준 누적): 분자 = 작업보드 표의 "채워진 줄"(archiveSuggest.filled — 서버가
+    //   rowNumbering.filledSql 로 센 값 = 작업보드 게이지와 같은 판정). null/부재 = 셀 수 없음 →
+    //   종전(공고 확정)으로 폴백하고 툴팁이 그 사실을 말한다(0 위장·거짓 "표 기준" 표기 금지).
+    // ★ 차이(표 ≠ 공고 확정)는 외부모집·수기 입력·지각 확정 대기 신호 — 툴팁이 병기해 신호를 남긴다.
+    const sug = c.archiveSuggest;
+    const tf = (sug && Number.isFinite(Number(sug.filled))) ? Number(sug.filled) : null;
+    const n = tf != null ? tf : done;
+    const tip = tf != null
+      ? `작업보드 표에 채워진 줄 ${tf}줄 (표 ${Number(sug.total) || 0}줄) · 공고를 거쳐 확정된 건 ${done}명 · 차수·이월 칩은 공고 확정 기준`
+      : '표 기준 집계를 받지 못해 공고 확정 기준으로 표기 중';
+    const totTxt = `<span title="${_esc(tip)}">`
+      + (total > 0 ? `총 <b>${n}</b>/${total}명` : (n ? `누적 <b>${n}</b>명` : '총 <b>0</b>명'))
+      + (tf != null ? ' <i class="sp-src">표</i>' : '') + '</span>';
     /* ★★ 시트 탭 연결 표기는 그리지 않는다 (탈 구글시트 · 사용자 확정 2026-08-19).
        리뷰웹시스템은 무시트라 담당자가 시트 탭을 고를 일이 없고, 공고의 작업보드는
        접수 또는 첫 주문 때 시스템이 확보한다(`campaignWorktable.ensureCampaignWorktable`).
@@ -712,7 +731,15 @@
           ? `<span class="pg-hold" onclick="event.stopPropagation();event.preventDefault();CampaignDailyPlan.quickApplyHeld('${_esc(c.id)}')" title="보류된 이월 ${heldN}명 — 누르면 오늘 정원에 반영할지 물어봅니다 (세부 선택은 [📅 인원])">⏸ 보류 ${heldN}</span>`
           : `<span class="pg-hold" title="보류된 이월 ${heldN}명 — 반영은 관리자 화면 [📅 인원]에서">⏸ 보류 ${heldN}</span>`)
         : '';
-      const chips = `${holdTip}${planTip}${carryTip}`;
+      // ★ 표(주문 원장) 기준 총량(2단계) — 서버 payload 가 있을 때만 그린다(없으면 한 글자도
+      //   안 그린다 = 구버전 백엔드·조회 실패에서 "표 기준 적용 중"이라는 거짓 표시 금지).
+      const tq = c.tableQuota;
+      const tqChip = (showChips && tq && tq.wouldClose)
+        ? (tq.mode === 'on'
+          ? `<span class="pg-tq on" title="주문 원장 ${Number(tq.orders) || 0}건이 총모집을 채워 표 기준으로 마감 중입니다. 상태 저장이 아니라 주문이 줄면 자동 재오픈됩니다(게시 토글 무관).">표 기준 마감</span>`
+          : `<span class="pg-tq" title="관측 모드: 표 기준을 켜면 이 공고는 마감됩니다(주문 원장 ${Number(tq.orders) || 0}건 ≥ 총모집). 지금은 표시만 하고 참여는 막지 않습니다.">표 기준이면 마감</span>`)
+        : '';
+      const chips = `${tqChip}${holdTip}${planTip}${carryTip}`;
       if (quota > 0 && !isPre) {
         const confirmedN = Math.max(0, today - holdNow);     // todayCount = 제출확정 + 유효홀드
         // 표기 숫자 = 표 기준(있으면). 게이지 채움·완료 판정도 같은 값을 따라간다(숫자와 색이 어긋나지 않게).
