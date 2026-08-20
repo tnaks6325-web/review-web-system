@@ -324,6 +324,8 @@ console.log('\n[D2] 상품 단위 — 인트라넷 실측 페이로드');
     rows.every(r => r.inflowGuideHtml && r.inflowGuideImages.length === 1));
   ok('★★ 옵션 없는 상품의 정원은 base.count 를 따른다(0=무제한 으로 새지 않는다)',
     rows[2].recruitTotal === 5 && rows[0].recruitTotal === 6 && rows[1].recruitTotal === 4);
+  ok('★ 일건수는 인트라넷 표기(`daily`)도 읽는다 — 안 읽으면 오더가 정한 하루 인원이 항상 0 이 된다',
+    rows[0].dailyLimit === 3 && rows[1].dailyLimit === 2 && rows[2].dailyLimit === 2);
   ok('상세 펼침도 세 선택지 가이드를 모두 보여준다',
     (h => /옵션A/.test(h) && /옵션B/.test(h) && /유산균/.test(h))(s2._woUnitGuideBlock(LIVE)));
   // 옛 초안(base 안에 guide)도 계속 읽는다 — 기존 픽스처가 그 형태다(무회귀).
