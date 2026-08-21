@@ -52,6 +52,14 @@ assert(campaign.includes("'/api/campaign/popular-status?phone8='"),
 }
 assert(campaign.includes('const info = gateInfo || _popCredit;'),
   '게이트 모달 수치 출처는 한 곳(gateInfo → 조회해 둔 상태)');
+{
+  // 게이트 모달도 명의별 참여권을 말한다 — 안내 카드와 **같은 함수**를 쓴다(문장이 갈리면 안 된다)
+  const gate = campaign.slice(campaign.indexOf('async function openPopGate('), campaign.indexOf('function goPopNormal('));
+  assert(gate.includes('_popSubsWithCredit()'), '게이트 모달의 명의 표기는 안내 카드와 같은 출처를 쓴다');
+  assert(/multiEnabled\(\) && _popSubCredits/.test(gate), '타계정 허용 공고 + 조회 완료일 때만 말한다(모르면 침묵)');
+  assert(gate.includes('_popEsc('), '명의 이름은 사용자 입력 — escape 한다');
+  assert(campaign.includes('id="popGateSubs"'), '표기 자리(마크업)가 있어야 한다');
+}
 
 // ── 함수 블록을 실제로 실행 ──
 const start = campaign.indexOf('let _popCredit = null;');
@@ -173,6 +181,13 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
   const r = run({ camp: POP, credit: { normalDone: 1, popularUsed: 3 } });
   assert.equal(r.state.credits, 0);
   assert.equal(r.locked, true);
+}
+
+// ⑪-1 안내 카드의 명의 이름도 escape 한다(사용자 입력이 innerHTML 로 들어간다)
+{
+  const notice = campaign.slice(campaign.indexOf('function renderPopNotice(){'),
+                                campaign.indexOf('async function openPopGate('));
+  assert(/_popEsc\(v\.name/.test(notice), '안내 카드의 타계정 이름은 escape 해야 한다');
 }
 
 // ⑪-2 안내 문구는 "없다"와 "모른다"를 구분한다(조회 실패·타계정 0개를 "없어요"로 단정하지 않는다)

@@ -26,13 +26,36 @@ function _addUtcDays(parts, days) {
   };
 }
 
+/** 'YYYY-MM-DD' → 요일(0=일 … 6=토). 형식이 아니면 null(추측하지 않는다). */
+function _isoWeekday(isoDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || '').trim());
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+}
+
+/**
+ * 이 공고가 **그 날짜(KST)에 주말 미게시로 닫히는가**.
+ * ★★ 주말 판정의 단일 출처 — 게시 차단(weekendPublicationState)과 카드의 "다시 오픈" 날짜
+ *   계산(campaignState.nextOpenDate)이 **같은 함수**를 본다. 사본을 두면 "카드는 토요일 오픈이라
+ *   하는데 서버는 토요일에 막는" 상태가 되살아난다(2026-08-21 신고 건).
+ * ★ 판정 불가(형식 밖 값)는 **막지 않는다** — 모른다고 날짜를 건너뛰면 카운트다운이 엉뚱한
+ *   날을 가리킨다(막는 쪽은 weekendPublicationState 가 오늘 기준으로 최종 판정한다).
+ */
+function isWeekendClosedOn(campaign, isoDate) {
+  if (!campaign || campaign.skip_weekends !== true) return false;
+  const weekday = _isoWeekday(isoDate);
+  if (weekday === null) return false;
+  return weekday === 0 || weekday === 6;
+}
+
 function weekendPublicationState(campaign, now = new Date()) {
   if (!campaign || campaign.skip_weekends !== true) {
     return { blocked: false, reason: null, message: null, resumesOn: null };
   }
   const today = _kstDateParts(now);
-  const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
-  if (weekday !== 0 && weekday !== 6) {
+  const todayIso = _kstIsoDate(today);
+  const weekday = _isoWeekday(todayIso);
+  if (!isWeekendClosedOn(campaign, todayIso)) {
     return { blocked: false, reason: null, message: null, resumesOn: null };
   }
   const daysUntilMonday = weekday === 6 ? 2 : 1;
@@ -44,4 +67,4 @@ function weekendPublicationState(campaign, now = new Date()) {
   };
 }
 
-module.exports = { weekendPublicationState };
+module.exports = { weekendPublicationState, isWeekendClosedOn };

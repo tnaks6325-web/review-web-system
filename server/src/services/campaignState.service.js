@@ -11,6 +11,9 @@
  *  - participation_mode=false(레거시 공고)는 이 엔진을 타지 않는다(현행 status+max_slots 로직 유지).
  */
 
+// 주말 미게시(104) 판정은 게시 차단과 같은 함수를 쓴다(사본 금지 — 카드 표기 ≡ apply 게이트).
+const { isWeekendClosedOn } = require('./campaignWeekend.service');
+
 const KST_OFFSET_MS = 9 * 3600 * 1000; // Asia/Seoul 고정 +9 (DST 없음)
 
 /** 'HH:MM' | 'HH:MM:SS' → 자정 기준 분. 잘못된 값은 null */
@@ -54,12 +57,6 @@ function kstDateAtIso(isoDate, minutesOfDay) {
   return new Date(base + (minutesOfDay || 0) * 60000).toISOString();
 }
 
-/** 오늘(KST) 기준 내일 날짜 'YYYY-MM-DD' */
-function kstTomorrowStr(now = new Date()) {
-  const k = new Date(now.getTime() + KST_OFFSET_MS + 24 * 3600 * 1000);
-  return k.toISOString().slice(0, 10);
-}
-
 /** DATE 값(문자열 'YYYY-MM-DD' 또는 pg Date 객체) → 'YYYY-MM-DD' 문자열. 무효/없음은 null */
 function dateOnlyStr(v) {
   if (!v) return null;
@@ -87,6 +84,63 @@ function plannedThrough(schedule, isoDate) {
 function nextWorkDate(schedule, isoDate) {
   for (const { date } of schedule.dates) if (date > isoDate) return date;
   return null;
+}
+
+/** 'YYYY-MM-DD' + n일 → 'YYYY-MM-DD'. 형식 밖이면 null.
+ *  ★ Date 산술이 아니라 UTC 자정으로만 다룬다(서버 TZ 무관 — koreanDate 규율). */
+function addIsoDays(isoDate, n) {
+  const base = Date.parse(String(isoDate || '') + 'T00:00:00Z');
+  if (Number.isNaN(base)) return null;
+  return new Date(base + n * 86400000).toISOString().slice(0, 10);
+}
+
+/** 그날의 오픈 시각(자정 기준 분) — 자율주문은 0(KST 자정), 시간창이 있으면 window_start.
+ *  ★★ "다시 열리는 시각"을 만드는 자리가 셋(금일마감·휴무일·주말 재개)이라 **한 곳**에서 정한다.
+ *    사본을 두면 자율주문 공고에서 한쪽만 9시로 찍히는 식으로 조용히 갈린다. */
+function openMinutesFor(c) {
+  const allDay = !c || (!c.window_start && !c.window_end);
+  return allDay ? 0 : (timeStrToMinutes(c.window_start) || 0);
+}
+
+// "다시 오픈" 후보를 훑는 최대 일수. 60일 안에 못 찾으면 종전 동작(첫 후보)으로 접는다.
+const NEXT_OPEN_SCAN_DAYS = 60;
+
+/**
+ * fromDateStr **다음**으로 실제로 열리는 날('YYYY-MM-DD') — 카드의 "다시 오픈" 표기 기준.
+ *
+ * 건너뛰는 날 2종(둘 다 **이미 존재하는 판정**을 그대로 쓴다 — 사본 0):
+ *   ① 주말 미게시(104) — `isWeekendClosedOn`(campaignWeekend.service). apply 게이트가 막는 날과
+ *      **같은 판정**이라 "카드는 토요일 오픈이라 했는데 토요일엔 막히는" 상태가 생길 수 없다.
+ *   ② 그날 명시 조절이 **0명**(095) — `planOverrideFor`. 0 = "그날은 안 연다"가 095 의 뜻이고,
+ *      아래 휴무일·일정종료 판정(`!(ovToday > 0)`)이 이미 같은 의미로 쓰고 있다.
+ *
+ * ★ 시트 일정(063)이 있으면 후보는 그 진행일만 훑는다(종전 nextWorkDate 계약 유지).
+ * ★★ 못 찾으면 **null 이 아니라 첫 후보(=종전 동작)** 로 접는다 — 카운트다운이 사라지면 카드가
+ *   아무 말도 못 하게 된다(모르는 것을 감추기보다 종전 표기를 유지한다).
+ */
+function nextOpenDate(c, fromDateStr, sch, plans) {
+  const first = sch ? nextWorkDate(sch, fromDateStr) : addIsoDays(fromDateStr, 1);
+  if (!first) return null;
+  let d = first;
+  for (let i = 0; i < NEXT_OPEN_SCAN_DAYS && d; i++) {
+    const closed = isWeekendClosedOn(c, d) || planOverrideFor(plans, d) === 0;
+    if (!closed) return d;
+    d = sch ? nextWorkDate(sch, d) : addIsoDays(d, 1);
+  }
+  return first;   // 스캔 안에서 못 찾음 = 종전 동작 유지(빈 값으로 두지 않는다)
+}
+
+/**
+ * 다음 오픈 순간 — { date:'YYYY-MM-DD', iso:UTC ISO } (계산 불가면 null).
+ * 상태엔진 밖(카드 투영 = 주말 미게시 재개 표기)에서도 **같은 판정**을 쓰게 하는 창구.
+ */
+function nextOpenAt(c, counts, now = new Date(), schedule = null) {
+  if (!c) return null;
+  const sch = isUsableSchedule(schedule) ? schedule : null;
+  const plans = (PLAN_ENABLED && counts && counts.plans) || null;
+  const date = nextOpenDate(c, kstTodayStr(now), sch, plans);
+  if (!date) return null;
+  return { date, iso: kstDateAtIso(date, openMinutesFor(c)) };
 }
 
 /** 시트 일정으로 볼 수 있는 값인지(날짜 2종 이상 + 정렬된 dates 보유) */
@@ -352,10 +406,13 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   // ★ daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준.
   //   기존 `opensAt`은 **오늘의** window_start(=이미 지난 시각)이고 자율주문은 아예 null이라
   //   그대로 쓰면 카운트다운이 0에 붙는다 → 다음 오픈 시각을 별도 필드로 준다.
-  //   다음 오픈일 = 시트 일정이 있으면 다음 진행일, 없으면 내일. 시각 = window_start(자율주문은 자정).
+  //   다음 오픈일 = nextOpenDate(실제로 열리는 첫날). 시각 = window_start(자율주문은 자정).
+  //   ★★ 2026-08-21: 주말 미게시(104)·0명 조절(095) 인 날은 건너뛴다 — 종전에는 무조건 "내일"이라
+  //     주말 제외 공고가 금요일 마감 시 "(토) 다시 오픈"이라 말하고 정작 토요일엔 "월요일 재개"로
+  //     문구가 뒤집혔다(사용자 신고). 판정은 nextOpenDate 하나(= apply 게이트와 같은 근거).
   const _reopenIso = () => kstDateAtIso(
-    sch ? nextWorkDate(sch, todayStr) : kstTomorrowStr(now),
-    allDay ? 0 : startMin);
+    nextOpenDate(c, todayStr, sch, counts.plans || null),
+    openMinutesFor(c));
 
   const t = kstMinutesOfDay(now);
   if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
@@ -366,14 +423,15 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   // ★ 위 종료 판정과 같은 규율 — 오늘 명시 조절값(1명 이상)이 있으면 휴무일이어도 연다
   //   ("오늘은 진행일이 아니지만 10명만 더 받자"가 [📅 인원]의 정상 사용례).
   if (sch && !sch.byDate[todayStr] && !(ovToday > 0)) {
-    const nw = nextWorkDate(sch, todayStr);
+    // ★ 다음 진행일도 주말 미게시·0명 조절을 건너뛴다(카드 "다음 진행일" 표기 = 실제 열리는 날).
+    const nw = nextOpenDate(c, todayStr, sch, counts.plans || null);
     // 다음 진행일까지 카운트다운을 줄 수 있게 opensAt을 그날 오픈 시각으로 —
     // 주말 하루 공백이든, 종료 후 새 블록이 붙은 긴 공백이든 같은 표기로 "다시 열림"이 보인다.
-    const openUtc = nw ? new Date(Date.parse(nw + 'T00:00:00+09:00') + (allDay ? 0 : startMin * 60000)) : null;
+    const openIso = kstDateAtIso(nw, openMinutesFor(c));
     return {
       ...payload, state: 'daily_done', stateReason: 'rest_day', nextWorkDate: nw,
-      opensAt: openUtc ? openUtc.toISOString() : payload.opensAt,
-      reopensAt: openUtc ? openUtc.toISOString() : null,
+      opensAt: openIso || payload.opensAt,
+      reopensAt: openIso || null,
     };
   }
 
@@ -806,6 +864,10 @@ module.exports = {
   dateOnlyStr,
   plannedThrough,
   nextWorkDate,
+  nextOpenDate,
+  nextOpenAt,
+  openMinutesFor,
+  addIsoDays,
   isUsableSchedule,
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
