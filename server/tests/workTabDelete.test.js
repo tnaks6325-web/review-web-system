@@ -210,8 +210,11 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
   console.log('\n[F] 시트 무접촉 · 라우터 · 화면 배선');
   {
     const src = readSrv('src/services/workTabDelete.service.js');
+    /* ⚠ 2026-08-21 사용자 확정으로 **드라이브는 이 축에서 빠졌다** — 작업을 지울 때 그 작업의
+       캡처 폴더도 함께 치운다(별도 체크 · 휴지통만 · 공유 폴더 건너뜀은 아래 절이 고정한다).
+       **구글시트 무접촉은 그대로** — 시트 탭 삭제는 여전히 이 기능의 일이 아니다. */
     ok('★ 시트 API 를 부르지 않는다(사용자 확정 — 시트 탭 삭제는 이 기능의 일이 아니다)',
-      !/sheets\.service|getSpreadsheetMeta|batchUpdate|drive\.service/.test(src));
+      !/sheets\.service|getSpreadsheetMeta|batchUpdate|writeSheet\(|clearSheetValues/.test(src));
     ok('★ 큐에 넣지 않는다(시트 쓰기 경로 0)', !/enqueue\(/.test(src));
     ok('돈 집계는 한 함수(_moneyRows) — 미리보기·실행이 같은 판정',
       (src.match(/function _moneyRows/g) || []).length === 1
@@ -262,7 +265,10 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
       /확인하지 못한 상태로는 지우지 않습니다/.test(WD));
     ok('★ 화면이 "공고도 함께 삭제된다"를 말한다(조용한 파괴 금지)',
       /모집공고 \$\{\(j\.campaigns\|\|\[\]\)\.length\}건<\/b>도 <b>함께 삭제<\/b>/.test(WD));
-    ok('삭제 후 목록을 다시 읽는다', /_tdGo[\s\S]{0,1200}loadTabs\(\)/.test(WD));
+    /* ⚠ 고정 길이 창(_tdGo…{0,1200})으로 보면 그 사이에 줄이 늘어나는 순간 조용히 빨개진다
+       (드라이브 결과 고지가 들어오며 밟았다). 함수 본문을 잘라서 본다. */
+    const _tdGoBody = (() => { const i = WD.indexOf('async function _tdGo('); const j = WD.indexOf('\nfunction ', i); return i < 0 ? '' : WD.slice(i, j < 0 ? i + 4000 : j); })();
+    ok('삭제 후 목록을 다시 읽는다', /loadTabs\(\)/.test(_tdGoBody));
     ok('확인창은 바깥 클릭으로 닫히지 않는다(실수 클릭 보호)', /_tdShell[\s\S]{0,600}바깥 클릭으로 닫지 않는다/.test(WD));
   }
 
@@ -326,6 +332,73 @@ console.log('\n[B] 입금 기록 — 기본 거부(쓰기 0건) · 두 번째 �
     ok('★ 부분 결과를 완료로 꾸미지 않는다(건너뛴 건수를 말한다)',
       /건은 작업이 살아 있어 건너뜀/.test(WD));
     ok('정리 후 공고 목록을 다시 읽는다', /_ocGo[\s\S]{0,1200}loadRecruitList\(\)/.test(WD));
+  }
+
+  /* ── 구글 드라이브 폴더 삭제 (사용자 확정 2026-08-21) ─────────────────────── */
+  {
+    const SRC = read('server/src/services/workTabDelete.service.js');
+    ok('★★ 휴지통만 — 영구삭제 API 를 쓰지 않는다(30일 복구창)',
+      /trashFiles/.test(SRC) && !/files\.delete|permanently|emptyTrash/i.test(SRC));
+    /* ★ 순서 단언은 **deleteTask 본문**으로 잘라서 본다 — 파일 전체로 보면 미리보기 쪽의
+       같은 문자열(`for (const t of DELETE_TABLES)`)이 먼저 걸려 항상 참이 된다(실측). */
+    const DEL = (() => { const i = SRC.indexOf('async function deleteTask('); return i < 0 ? '' : SRC.slice(i); })();
+    ok('★ 좌표는 지우기 전에 읽는다(tab_configs 가 사라지면 어느 폴더인지 알 수 없다)',
+      DEL.indexOf('_tabDriveFolders((t, p) => client.query') >= 0
+      && DEL.indexOf('_tabDriveFolders((t, p) => client.query') < DEL.indexOf('for (const t of DELETE_TABLES)'));
+    ok('★ Drive 는 커밋 뒤에만 건드린다(게이트를 다 통과한 뒤 외부 저장을 손댄다)',
+      DEL.indexOf("await client.query('COMMIT')") >= 0
+      && DEL.indexOf("await client.query('COMMIT')") < DEL.indexOf('_trashDriveFolders(driveTargets'));
+    ok('★ 대상은 그 탭의 두 폴더뿐(리뷰·구매캡처) — 다른 폴더는 건드리지 않는다',
+      /folder_url', label: '리뷰 캡처 폴더'/.test(SRC) && /capture_folder_url', label: '구매 캡처 폴더'/.test(SRC));
+
+    // 스텁 drive/pool 로 실제 실행 — 무접촉·휴지통·공유 건너뛰기 세 갈래
+    const REV = 'https://drive.google.com/drive/folders/1AAAAAAAAAAAAAAAAAAAA';
+    const CAP = 'https://drive.google.com/drive/folders/1BBBBBBBBBBBBBBBBBBBB';
+    const trashed = [];
+    require.cache[require.resolve('../src/services/drive.service')] = { id: 'd', filename: 'd', loaded: true, exports: {
+      extractFolderIdFromUrl: u => { const m = String(u || '').match(/\/folders\/([a-zA-Z0-9_-]{10,})/); return m ? m[1] : null; },
+      getFolderMeta: async id => ({ id, name: '폴더' }),
+      inspectFolder: async () => ({ fileCount: 512, subfolders: [] }),
+      trashFiles: async list => { trashed.push(...list.map(x => x.id)); return { success: list.length, failed: 0, errors: [] }; },
+    } };
+    delete require.cache[require.resolve('../src/services/workTabDelete.service')];
+    const svc2 = require('../src/services/workTabDelete.service');
+    const mkPool = shared => {
+      const q = async (sql) => {
+        const t = String(sql).replace(/\s+/g, ' ');
+        if (/SELECT folder_url AS review/.test(t)) return { rows: [{ review: REV, capture: CAP }] };
+        if (/FROM tab_configs WHERE NOT \(sheet_id/.test(t)) return { rows: shared ? [{ sheetId: 's2', tabName: '다른작업' }] : [] };
+        if (/FROM tab_configs tc WHERE/.test(t)) return { rows: [{ sheetId: 's', tabName: 'T', displayName: 'T' }] };
+        if (/COUNT\(\*\)::int AS n FROM/.test(t)) return { rows: [{ n: 0 }] };
+        if (/boardRows/.test(t)) return { rows: [{ boardRows: 1 }] };
+        return { rows: [], rowCount: 0 };
+      };
+      return { query: q, connect: async () => ({ query: q, release() {} }) };
+    };
+    const pv = await svc2.previewTaskDelete({ sheetId: 's', tabName: 'T', pool: mkPool(false) });
+    ok('미리보기가 폴더 이름·이미지 수를 말한다(무엇이 사라지는지 보고 누른다)',
+      pv.drive.folders.length === 2 && pv.drive.folders[0].files === 512);
+    const pvS = await svc2.previewTaskDelete({ sheetId: 's', tabName: 'T', pool: mkPool(true) });
+    ok('다른 작업도 쓰는 폴더는 미리보기가 먼저 알린다',
+      (pvS.drive.folders[0].sharedWith || []).length === 1);
+
+    const r1 = await svc2.deleteTask({ sheetId: 's', tabName: 'T', confirm: true, pool: mkPool(false) });
+    ok('★★ 체크하지 않으면 드라이브 무접촉(기존 동작 100%)', r1.driveTrashed.length === 0 && trashed.length === 0);
+    const r2 = await svc2.deleteTask({ sheetId: 's', tabName: 'T', confirm: true, deleteDrive: true, pool: mkPool(false) });
+    ok('체크하면 두 폴더가 휴지통으로', r2.driveTrashed.filter(x => x.ok).length === 2 && trashed.length === 2);
+    const r3 = await svc2.deleteTask({ sheetId: 's', tabName: 'T', confirm: true, deleteDrive: true, pool: mkPool(true) });
+    ok('★★ 공유 폴더는 건너뛰고 사유를 남긴다(남의 작업 캡처를 지우지 않는다)',
+      r3.driveTrashed.every(x => x.skipped === 'shared') && trashed.length === 2);
+    const r4 = await svc2.deleteTask({ sheetId: 's', tabName: 'T', confirm: false, deleteDrive: true, pool: mkPool(false) });
+    ok('★ 확인 없이는 드라이브도 안 건드린다', r4.ok === false && trashed.length === 2);
+
+    const WD2 = read('frontend/workdesk.html');
+    ok('★ 드라이브 삭제는 **별도 체크**(입금 기록 삭제와 같은 규율)', /id="tdDrive"/.test(WD2));
+    ok('★★ 화면이 "휴지통으로" 라고 정확히 말한다(영구삭제로 오인 금지)',
+      /휴지통으로<\/b> 보냅니다[\s\S]{0,200}30일 안에는/.test(WD2));
+    ok('★ 체크한 값만 서버로 간다(기본은 끔)', /deleteDrive:!!\(dvChk&&dvChk\.checked\)/.test(WD2));
+    ok('★ 못 치운 폴더는 조용히 넘기지 않고 사유·링크를 보여 준다',
+      /드라이브 폴더 일부를 치우지 못했습니다/.test(WD2));
   }
 
   console.log(`\n✅ workTabDelete — ${passed} 케이스 통과`);
