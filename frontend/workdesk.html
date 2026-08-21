@@ -6105,9 +6105,20 @@ function _condCardHtml(wd,d,m){
      `wd.todayProgress.quota` 를 그대로 쓴다(재계산 사본 0). 못 받으면 종전 값(공고→발주)으로 폴백. */
   const tq=(wd&&wd.todayProgress&&wd.todayProgress.ok!==false&&wd.todayProgress.quota!=null)
     ? Number(wd.todayProgress.quota) : null;
-  const daily=tq!=null
-    ? `${tq.toLocaleString()}<span class="u">건/일</span> <span class="cndchip" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">공고 기준</span>`
-    : (n(cd.dailyLimit)==null?null:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`);
+  /* ★★ 일건수는 **둘 다** 적는다(사용자 확정 2026-08-21): `발주 기준 10건/일 (공고 설정 오늘 16건)`.
+     왼쪽 = 발주서에 적힌 계약상 하루 건수(변하지 않는 기준선), 괄호 = 모집인원조절·이월이 반영된
+     오늘 실제 정원. 한쪽만 적으면 "계약은 10인데 오늘 왜 16?"을 화면에서 확인할 길이 없다.
+     ★ 없는 쪽은 지어내지 않는다 — 있는 값만 적고, 둘 다 없으면 [미설정]으로 떨어진다. */
+  const odc=n(cd.orderDailyCount);
+  const daily=(()=>{
+    const today=tq!=null?`공고 설정 오늘 ${tq.toLocaleString()}건`:'';
+    if(odc!=null&&odc>0){
+      const base=`발주 기준 ${odc.toLocaleString()}<span class="u">건/일</span>`;
+      return today?`${base} <span class="u" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">(${today})</span>`:base;
+    }
+    if(tq!=null) return `${tq.toLocaleString()}<span class="u">건/일</span> <span class="cndchip" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">공고 기준</span>`;
+    return n(cd.dailyLimit)==null?null:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`;
+  })();
   /* ★★ 결제금액(사용자 확정 2026-08-20 시안 v2):
        옵션 없음 = `상품결제금액 22,000원 / 총 17,600,000원` **한 줄** — 총액은 상품결제금액×총건수
        옵션 있음 = `블랙 22,000원(500건), 그린 24,000원(300건)` 평문 + 아랫줄 총결제금액
@@ -6135,7 +6146,10 @@ function _condCardHtml(wd,d,m){
     payRows=`<dt>결제금액</dt><dd>상품결제금액 ${per}${tot}</dd>`;
   }
   const rows=[
-    ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`],
+    /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
+       (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
+    ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
+      (cd.recruitTotalSource==='work_order'?' <span class="cndchip" title="모집공고에 총인원이 없어 발주서의 총건수가 정원으로 적용되고 있습니다.">발주 기준</span>':'')],
     ['일건수','quota',   daily],
     ['@pay',null,null],
     ['구매채널','camp',  ch?esc(ch):null],
