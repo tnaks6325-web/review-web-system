@@ -3174,7 +3174,9 @@ router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (
       const out = await deleteTask({
         sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
         // ★ 입금 기록까지 지우는 것은 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
-        confirm: b.confirm === true, forcePayment: b.forcePayment === true, by: _by(req),
+        confirm: b.confirm === true, forcePayment: b.forcePayment === true,
+        // ★ 드라이브 폴더 삭제도 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
+        deleteDrive: b.deleteDrive === true, by: _by(req),
       });
       // 검증 실패는 400대로 — errorHandler 의 500 마스킹에 사유가 묻히면 담당자가 손쓸 수 없다.
       if (!out.ok && (out.code === 'confirm_required' || out.code === 'payment_locked')) {
