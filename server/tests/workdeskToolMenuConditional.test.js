@@ -47,9 +47,9 @@ function makeSandbox({ role = 'master', roster = [], cur = { sheetId: 's1', tabN
   sb.STATE.cur = cur ? Object.assign({ sheetless: true, workKind }, cur) : null;
   vm.createContext(sb);
   vm.runInContext([
-    grab('_wrHasWork'), grab('_ddCount'), grab('_mhKey'),
+    grab('_ddCount'), grab('_mhKey'),
     grab('_mhToolsVisible'), grab('_mhMenuHtml'),
-    grab('_wrCanRetire'), grab('_ddCan'), grab('_brCanAdd'),
+    grab('_ddCan'), grab('_brCanAdd'),
     'function _isInternalRole(){ const r=STATE.role; return r==="master"||r==="admin"||r==="staff"; }',
   ].join('\n'), sb);
   return sb;
@@ -57,20 +57,12 @@ function makeSandbox({ role = 'master', roster = [], cur = { sheetId: 's1', tabN
 const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid: false });
 
 (async () => {
-  console.log('\n[A] 🧹 줄 정리 — 재료는 roster(모달과 같은 것) · 서버 호출 0');
+  console.log('\n[A] 🧹 줄 정리 — 제거 고정 (2026-08-21 사용자 확정)');
   {
-    const src = grab('_wrHasWork');
-    ok('roster 를 재료로 쓴다(모달 openRetireModal 과 같은 출처)', /STATE\.wd .*roster|roster/.test(src));
-    ok('서버를 부르지 않는다', !/api\(/.test(src));
-
-    ok('차수 2개 이상이면 노출',
-      makeSandbox({ roster: [R('1'), R('1'), R('2')] }).eval === undefined
-      && vm.runInContext('_wrHasWork()', makeSandbox({ roster: [R('1'), R('2')] })) === true);
-    ok('차수가 하나뿐이면 숨김(표 비우기는 정리가 아니다)',
-      vm.runInContext('_wrHasWork()', makeSandbox({ roster: [R('1'), R('1')] })) === false);
-    ok('차수가 전부 빈 값이어도 하나로 본다 → 숨김',
-      vm.runInContext('_wrHasWork()', makeSandbox({ roster: [R(''), R(null), R('  ')] })) === false);
-    ok('표가 비면 숨김', vm.runInContext('_wrHasWork()', makeSandbox({ roster: [] })) === false);
+    ok('★ [⋯] 메뉴에 [🧹 줄 정리] 가 없다', !/openRetireModal/.test(HTML));
+    ok('★ 모달·판정 코드도 남아 있지 않다(죽은 코드 금지)',
+      !/_wrCanRetire|_wrHasWork|function wrRun|_wrRender/.test(HTML));
+    ok('★ 제거된 HTTP 창구를 부르지 않는다', !/worktable\/retire-rows/.test(HTML));
   }
 
   console.log('\n[B] ★★ fail-open — 모르면 숨기지 않는다');
@@ -104,8 +96,7 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
 
     const sbW = makeSandbox({ roster: [R('1'), R('1')], dedupe: 0 });
     const hW = vm.runInContext('_mhMenuHtml()', sbW);
-    ok('둘 다 할 일이 없으면 정리 버튼이 하나도 안 뜬다',
-      !/openRetireModal/.test(hW) && !/openDedupeModal/.test(hW));
+    ok('할 일이 없으면 정리 버튼이 안 뜬다', !/openDedupeModal/.test(hW));
     ok('★ 정리 버튼이 없어도 다른 도구는 그대로', /showWritebackSim/.test(hW));
   }
 
@@ -114,10 +105,10 @@ const R = (round, name = '홍길동') => ({ round, name, submitted: false, paid:
     const admin = makeSandbox({ role: 'admin', roster: [R('1'), R('2')], dedupe: 5 });
     const ha = vm.runInContext('_mhMenuHtml()', admin);
     ok('★ admin 에게는 할 일이 있어도 정리 버튼을 안 띄운다(master 전용 유지)',
-      !/openRetireModal/.test(ha) && !/openDedupeModal/.test(ha));
+      !/openDedupeModal/.test(ha));
     const staff = makeSandbox({ role: 'staff', roster: [R('1'), R('2')], dedupe: 5 });
     const hs = vm.runInContext('_mhMenuHtml()', staff);
-    ok('★ staff 에게도 안 띄운다', !/openRetireModal/.test(hs) && !/openDedupeModal/.test(hs));
+    ok('★ staff 에게도 안 띄운다', !/openDedupeModal/.test(hs));
     ok('staff 는 ＋ 블로거 추가만', /openBloggerModal/.test(hs));
     ok('★ [⋯] 자체는 띄울 것이 있을 때만',
       vm.runInContext('_mhToolsVisible()', makeSandbox({ role: 'advertiser', cur: null })) === false);

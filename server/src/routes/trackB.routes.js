@@ -2896,26 +2896,18 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
-/* 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
-   ★★ 게이트 = adminOrMaster (2026-08-21 사용자 확정 — 종전 internal 에서 **좁혔다**).
-      줄을 내리면 검색 명단에서도 빠지므로 중복 정리(dedupe-rows)와 같은 급으로 맞춘다.
-      AE(staff) 는 더 이상 실행할 수 없다.
-   ★ dryRun 기본(`dryRun !== false`) — 값이 빠진 요청이 곧바로 실행되지 않는다. */
-router.post('/worktable/retire-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
-    const b = req.body || {};
-    try {
-      res.json(await retireRows({
-        sheetId: b.sheetId, tabName: b.tabName, rounds: b.rounds, seqs: b.seqs,
-        dryRun: b.dryRun !== false, by: _by(req),
-      }));
-    } catch (e) {
-      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
-      throw e;
-    }
-  } catch (err) { next(err); }
-});
+/* ── 🧹 줄 정리(은퇴) HTTP 창구는 제거됐다 (2026-08-21 사용자 확정) ──────────────
+   왜: 원래 목적(이관 때 되살아난 옛 차수 줄 되돌리기)은 이관이 **자동으로** 처리한다
+   (`sheetlessCutover` → `participants.retireInactiveImportRows`). 사람이 차수를 골라
+   줄을 내리는 화면·API 는 평시에 쓸 일이 없고, 잘못 쓰면 리뷰어의 온전한 구매기록이
+   붙은 줄을 검색 명단에서 사라지게 한다.
+   ★★ **서비스 함수 `sheetlessLedger.retireRows` 는 남아 있다** — 지우면 안 된다:
+      · `dedupeRows`/`dedupeManual`(♻ 중복 정리)의 실행부
+      · `rowNumbering.cleanupPairedBlanks`(🔢 번호 정리의 짝 빈 줄 정리)
+      즉 지금은 **내부 공용 실행부**일 뿐 사용자 기능이 아니다. 라우트를 되살리지 말 것.
+   ⚠ 잔여 위험(문서화): 이관의 자동 은퇴는 fail-soft 라 실패해도 이관이 진행된다. 그때
+      차수 단위로 되돌릴 창구가 없다(중복 정리는 주문 없는 줄을 조회조차 하지 않는다).
+      그런 사고가 나면 DB 직접 조치 또는 이 창구 재도입을 검토할 것. */
 
 /* 무시트 작업 **장부 재생성** — 작업표(진실원본) → 장부 3권(raw 미러·index_master·review_index).
    왜 필요한가(2026-08-19 실측): 작업표 줄을 DB 에서 직접 되살려도(오삭제 복구) 장부를 다시 만들
@@ -3153,7 +3145,7 @@ router.post('/worktable/hold-rows', authMiddleware, adminOrMasterMiddleware, asy
 });
 
 /* 작업보드 중복 줄 정리 — 2026-08-19 중복 반영 사고 수습용.
-   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 은퇴(retire-rows)와 같은 급.
+   ★ adminOrMaster — 줄을 내리고 주문을 취소하는 조작이라 되돌리기가 무겁다.
    ★ dryRun 기본 — 먼저 미리보기로 무엇이 지워지고 무엇이 보류되는지 본 뒤 실행한다.
    ★ 입금 회차(대기·완료)에 담긴 줄이 섞인 그룹은 서버가 **건드리지 않고 사유와 함께 보고**한다. */
 router.post('/worktable/dedupe-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
