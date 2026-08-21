@@ -132,6 +132,9 @@ function makeMixScreen() {
     '_reviewMixTotalLabel', '_reviewMixExpectedFor', 'resetRecruitReviewMixRender',
     'renderRecruitOptionReviewMix', 'getRecruitReviewTypeMix', 'syncRecruitReviewTypeMix',
     'validateRecruitReviewTypeMix',
+    /* ★ syncRecruitReviewTypeMix 가 부르는 의존이라 함께 꺼낸다(2026-08-21 조합 출처 안내).
+       스텁을 두면 그 함수의 회귀를 여기서만 못 보므로 **구현을 그대로** 넣는다. */
+    '_renderReviewMixOriginNote',
   ].forEach(fn => vm.runInContext(grab(src, fn), sandbox));
 
   const api = {

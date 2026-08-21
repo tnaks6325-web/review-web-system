@@ -926,7 +926,27 @@ router.get('/:id', async (req, res, next) => {
       // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = await _loadOptionsRaw(pool, id);
       const feeSchedules = await _loadFeeSchedules(pool, id);
-      return res.json({ ok: true, data: rows[0], options, feeSchedules });
+      /* ★★ 혼합 조합 프리필 보완(2026-08-21) — `review_type_mix`(106)는 2026-08-20 에 생긴
+         컬럼이고 **백필이 없다**. 그 전에 발행된 혼합 공고는 조합이 통째로 빈 배열이라
+         수정 화면이 전부 0 으로 열리고, 혼합 저장 검증(두 유형 이상)에 막혀 손댈 수가 없다.
+         → **연결 작업오더에 조합이 실려 있으면 그 값을 프리필 재료로 함께 내려준다.**
+         ★ 저장값(`review_type_mix`)은 **덮지 않는다** — 별도 필드로 주고 화면이 "작업오더에서
+           불러왔다"고 말한 뒤 사람이 저장할 때 반영된다(조용한 자동 적용 금지).
+         ★ 공고에 이미 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다).
+         ★ fail-soft — 못 읽어도 수정 모달은 그대로 열린다. */
+      let orderReviewTypeMix = null;
+      try {
+        const cur = normalizeReviewTypeMix(rows[0].review_type_mix);
+        if (normalizeReviewType(rows[0].review_type) === 'mixed' && !(cur.mix || []).length) {
+          const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+          const wo = await linkedWorkOrderForCampaign(rows[0], ['review_type_mix']);
+          const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
+          if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
+        }
+      } catch (e) {
+        logger.warn(`[campaign] 작업오더 혼합 조합 프리필 실패 camp=${id}: ${e.message}`);
+      }
+      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix });
     }
     const now = new Date();
     const row = rows[0];

@@ -2144,9 +2144,15 @@ function _syncPreviewFromOptRows() {
     /* ★★ 수정 모드(옵션 없는 작업) — 캠페인 정원은 **첫 행 칸이 곧 그 값**이다.
        합계 규칙("하나라도 0이면 무제한")을 쓰면 상품 줄이 둘 이상일 때 총량이 0(무제한)으로
        리셋된다(실사고). 사람이 첫 행에서 고친 값은 그대로 저장된다. */
-    const head = live[0] || rows[0] || {};
-    if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
-    if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+    /* ★★ 표가 **한 줄도 없으면** 정원을 다시 만들지 않는다(2026-08-21 실측 버그):
+       작업내용 상품 원문(productLines)이 빈 공고를 수정 화면에서 열면 표가 0행이 되어
+       `head = {}` → 총인원·일건수가 **0 으로 덮이고**, 그대로 저장하면 정원이 통째로
+       리셋됐다(실측: DB 500/30 인 공고가 화면에서 0/0). 프리필로 실린 원장 값을 지킨다. */
+    const head = live[0] || rows[0] || null;
+    if (head) {
+      if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
+      if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+    }
   } else {
     if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
     if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
@@ -2537,6 +2543,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
+  window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
@@ -2689,9 +2696,17 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
           try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
         })();
+        /* ★★ 혼합 조합이 비어 있으면 **연결 작업오더의 조합**으로 채운다(2026-08-21 확정).
+           `review_type_mix`(106)는 2026-08-20 에 생긴 컬럼이고 백필이 없어, 그 전에 발행된
+           혼합 공고는 조합이 전부 0 으로 열리고 저장 검증(두 유형 이상)에 막힌다.
+           ★ 저장값이 있으면 언제나 저장값이 이긴다 · 작업오더에도 없으면 빈 채로 두고
+             아래 안내가 "직접 입력해달라"고 말한다(없는 값을 지어내지 않는다). */
+        const orderReviewMix = Array.isArray(json.orderReviewTypeMix) ? json.orderReviewTypeMix : [];
+        const _useOrderMix = !savedReviewMix.length && orderReviewMix.length > 0;
+        window._rfMixOrigin = savedReviewMix.length ? '' : (_useOrderMix ? 'order' : 'empty');
         // 혼합 입력칸은 [혼합]을 선택할 때 동적으로 만들어진다. 먼저 진실원본을 채운 뒤
         // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
-        _setRecruitGlobalReviewTypeMix(savedReviewMix);
+        _setRecruitGlobalReviewTypeMix(_useOrderMix ? orderReviewMix : savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* ★ 127: 체험단 종류 복원 — blog 면 리뷰타입 카드 숨김 + 안내 배너 */
         { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (c.work_kind === "blog") ? "blog" : (c.work_kind || ""); _rfApplyWorkKindUi(); }
@@ -2769,6 +2784,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
       })();
       // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
+      window._rfMixOrigin = prefillReviewMix.length ? 'order' : 'empty';
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
@@ -3086,6 +3102,7 @@ function renderRecruitOptionReviewMix() {
         if (input.value === '0') input.value = '';
       });
       input.addEventListener('input', () => {
+        window._rfMixOrigin = '';   // 사람이 고친 순간부터는 사람이 정한 값 — 출처 안내를 지운다
         const next = RF_REVIEW_MIX_TYPES.map((key) => ({ type: key, quantity: Number(grid.querySelector(`[data-mix-type="${key}"]`)?.value) || 0 }));
         if (card.row) _writeOptionReviewMix(card.row, next);
         else window._rfGlobalReviewTypeMix = next.filter((entry) => entry.quantity > 0);
@@ -3100,6 +3117,33 @@ function renderRecruitOptionReviewMix() {
     total.textContent = _reviewMixTotalLabel(sum, card.expected, optionMode);
     total.classList.toggle('is-invalid', sum !== card.expected);
   });
+}
+
+/**
+ * 혼합 조합의 출처 안내 — 조용한 대체 금지.
+ *  · 'order' = 공고에 저장된 조합이 없어 **연결 작업오더 값을 불러왔다**(저장해야 반영된다)
+ *  · 'empty' = 작업오더에도 조합이 없다 → 직접 입력해야 저장할 수 있다(저장 검증이 막는다)
+ * ★ 사람이 숫자를 고치면 안내를 지운다 — 그 순간부터는 사람이 정한 값이다.
+ */
+function _renderReviewMixOriginNote() {
+  const root = document.getElementById('rf_review_mix');
+  if (!root) return;
+  let box = document.getElementById('rf_review_mix_note');
+  const origin = window._rfMixOrigin || '';
+  if (!origin) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'rf_review_mix_note';
+    box.style.cssText = 'margin-bottom:6px;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;line-height:1.5';
+    root.insertBefore(box, root.firstChild);
+  }
+  if (origin === 'order') {
+    box.style.background = '#ECFDF5'; box.style.color = '#065F46'; box.style.border = '1px solid #6EE7B7';
+    box.textContent = '작업오더에 적힌 리뷰 조합을 불러왔습니다 — 확인 후 저장하면 공고에 반영됩니다.';
+  } else {
+    box.style.background = '#FFFBEB'; box.style.color = '#92400E'; box.style.border = '1px solid #FCD34D';
+    box.textContent = '이 공고에는 리뷰 조합이 저장되어 있지 않고 작업오더에도 없습니다 — 유형별 인원을 직접 입력해주세요.';
+  }
 }
 
 function getRecruitReviewTypeMix() {
@@ -3125,7 +3169,7 @@ function syncRecruitReviewTypeMix() {
   const visible = reviewType === 'mixed';
   root.style.display = visible ? '' : 'none';
   if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
-  if (visible) renderRecruitOptionReviewMix();
+  if (visible) { renderRecruitOptionReviewMix(); _renderReviewMixOriginNote(); }
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);

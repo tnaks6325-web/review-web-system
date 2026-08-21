@@ -230,6 +230,27 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     ok('전송 실패 시 입력 내용을 지우지 않는다', /입력한 내용은 그대로 둔다/.test(WD));
     ok('★ 프론트에 판정 사본 0(owner_phone8·participation_links 문자열 없음)',
       !/owner_phone8/.test(WD) && !/participation_links/.test(WD));
+
+    /* ★★ 클래스 이름 충돌 — 실측 사고 2026-08-21.
+       `.rmrow` 는 이미 **명단에서 제거 × 버튼**(22×22 고정)이 쓰던 전역 클래스라, 팝업 줄이 그 크기에
+       갇혀 글자가 세로로 접히고 겹쳤다. 맨몸 `.why`/`.num`/`.tag` 도 다른 화면이 이미 쓴다.
+       → 이 팝업의 클래스는 **전부 `rm` 접두**로 스코프한다(레포 `ad*`·`wbl-` 규율과 같다). */
+    const rmJs = WD.slice(WD.indexOf('let _RM=null;'), WD.indexOf('/* ── 관리자 수동 리뷰제출'));
+    ok('★ 전역 `.rmrow`(× 버튼)와 겹치는 이름을 쓰지 않는다', !/class="rmrow"/.test(rmJs));
+    const bare = (rmJs.match(/class="(why|num|tag|row|item|who)"/g) || []);
+    ok('★ 맨몸 클래스(why·num·tag…)를 쓰지 않는다 — 남의 화면 규칙이 흘러든다', !bare.length, bare.join(','));
+    // 껍데기(wbl-*)·버튼(btn)은 **의도된 공용 클래스**다. 그 밖에는 전부 rm 접두여야 한다.
+    const own = (rmJs.match(/class="([a-z-]+)"/g) || []).filter(c => !/class="(wbl-[a-z]+|btn)"/.test(c));
+    ok('팝업 전용 클래스는 전부 rm 접두', own.every(c => /class="rm[a-z]*"/.test(c)), own.join(','));
+    ok('★ 전송 실패는 서버가 준 건별 사유를 그대로 보여준다(한 줄로 뭉개지 않는다)',
+      /d&&d\.failed/.test(rmJs) && /x\.reason/.test(rmJs));
+  }
+  {
+    const src = readSrv('src/services/csBridge.service.js');
+    ok('★ csBridge 는 실패 사유를 호출자에게 흘려보낸다(onError, 가산 옵션)',
+      /card, onError \} = \{\}\)/.test(src) && /typeof onError === 'function'/.test(src));
+    ok('★ 반환 계약은 그대로(성공 객체 | null) — 기존 호출부의 `if (!out)` 판정 불변',
+      /try \{ if \(typeof onError === 'function'\) onError\(err\); \} catch \(_\) \{\}\s*\n\s*return null;/.test(src));
   }
 
   console.log(`\n${fail ? '✗ 실패 ' + fail + '건 / ' : '✓ '}${n}개 검사 통과`);
