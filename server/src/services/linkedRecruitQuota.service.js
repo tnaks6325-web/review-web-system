@@ -119,14 +119,22 @@ async function rebuildWorktableProjection(worktable, by) {
   return { ...worktable, projection: { mirrorRows: rebuilt.mirrorRows, indexRows: rebuilt.indexRows } };
 }
 
-/** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
-async function displayRecruitTotalForCampaign(campaign) {
-  const primary = quota(campaign && campaign.recruit_total);
-  if (primary > 0) return { total: primary, source: 'campaign' };
-  if (!campaign || !campaign.id) return { total: 0, source: 'none' };
+/**
+ * 그 공고에 연결된 작업오더 1건(읽기 전용).
+ *
+ * ★★ **짝짓기 규칙 단일 출처** — 역방향 링크(`work_orders.linked_campaign_id`) 우선 →
+ *   정방향(`recruit_campaigns.source_work_order_id`), 같으면 최근 수정 오더. 067 백필·정원
+ *   폴백·혼합 조합 프리필이 **같은 오더**를 봐야 "정원은 A 오더, 조합은 B 오더"가 안 생긴다.
+ * ★ 소프트삭제된 오더는 근거가 아니다.
+ * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
+ */
+async function linkedWorkOrderForCampaign(campaign, columns = ['recruit_count']) {
+  if (!campaign || !campaign.id) return null;
+  const safe = (Array.isArray(columns) ? columns : []).filter(c => /^[a-z_][a-z0-9_]*$/.test(String(c)));
+  if (!safe.length) return null;
   const sourceId = String(campaign.source_work_order_id || '').trim();
   const { rows } = await pool.query(
-    `SELECT recruit_count
+    `SELECT ${safe.join(', ')}
        FROM work_orders
       WHERE deleted_at IS NULL
         AND ((linked_campaign_id = $1 AND $1 <> '') OR (id = $2 AND $2 <> ''))
@@ -134,7 +142,16 @@ async function displayRecruitTotalForCampaign(campaign) {
       LIMIT 1`,
     [String(campaign.id), sourceId]
   );
-  return displayRecruitTotal(primary, rows[0] && rows[0].recruit_count);
+  return rows[0] || null;
+}
+
+/** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
+async function displayRecruitTotalForCampaign(campaign) {
+  const primary = quota(campaign && campaign.recruit_total);
+  if (primary > 0) return { total: primary, source: 'campaign' };
+  if (!campaign || !campaign.id) return { total: 0, source: 'none' };
+  const wo = await linkedWorkOrderForCampaign(campaign, ['recruit_count']);
+  return displayRecruitTotal(primary, wo && wo.recruit_count);
 }
 
 /** 차수 공고에서는 뒤 차수를 보존하고 1차만 조절해 합계를 목표 정원과 일치시킨다. */
@@ -359,6 +376,7 @@ module.exports = {
   quota,
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
+  linkedWorkOrderForCampaign,
   worktableSlotDelta,
   firstRoundQuota,
   allocateOptionQuotas,
