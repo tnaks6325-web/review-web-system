@@ -2483,10 +2483,30 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     if (options.length < 2 && wo) options = _condWoOptions(wo.productOptionsJson);
     if (options.length < 2) options = [];
 
+    /* 적용 정원(공고 우선 · 0이면 발주) — 상태엔진과 **같은 함수**를 태운다(사본 0). */
+    const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
+    const _rt = displayRecruitTotal(c && c.recruitTotal, wo && wo.recruitCount);
+    const _dl = displayRecruitTotal(c && c.dailyLimit, wo && wo.dailyCount);
+    const campQuota = {
+      recruitTotal: _rt.total, dailyLimit: _dl.total,
+      totalSource: _rt.source, dailySource: _dl.source,
+    };
+
     return {
       productName: (wo && wo.productOption) || meta.campaignName || '',
-      recruitTotal: num(c && c.recruitTotal) != null ? num(c.recruitTotal) : num(wo && wo.recruitCount),
-      dailyLimit:   num(c && c.dailyLimit)   != null ? num(c.dailyLimit)   : num(wo && wo.dailyCount),
+      /* ★★ 총건수·일건수 = **정원 판정과 같은 값**(사용자 확정 2026-08-21) — 공고 값이 있으면
+         그 값, 0(미설정)이면 발주서 값이 **실제 정원으로 적용**된다(campaignState.effectiveQuota).
+         종전에는 `num(0) != null` 이 참이라 공고 0 을 그대로 실어 `총건수 0 건`으로 그렸고,
+         같은 화면의 참여자 게이지는 발주 총건수(/100)를 봐 **한 화면에 두 숫자**가 있었다.
+         ★ 규칙 사본을 만들지 않는다 — `displayRecruitTotal`(공고>0 이면 공고, 아니면 발주) 하나. */
+      recruitTotal: campQuota.recruitTotal || null,
+      dailyLimit:   campQuota.dailyLimit   || null,
+      /* 출처·발주 원값 — 화면이 "발주 기준"이라고 말하고, 일건수 칸이 발주값과 공고 오늘값을
+         나란히 적을 수 있게 한다(조용한 대체 금지). */
+      recruitTotalSource: campQuota.totalSource,
+      dailyLimitSource:   campQuota.dailySource,
+      orderRecruitCount: num(wo && wo.recruitCount),
+      orderDailyCount:   num(wo && wo.dailyCount),
       // 공고에 명시된 채널만(직접입력은 custom). 없으면 null → 화면이 상품 URL 로 판정한다.
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,

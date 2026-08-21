@@ -90,10 +90,17 @@ t('★ 리뷰비·리뷰타입·입금명은 "값이 있는 최신 공고"에서
 })());
 t('★ 리뷰비 구간은 리뷰비를 준 그 공고 기준(금액과 구간이 갈리지 않게)',
   /const schedCamp = feeCamp \|\| c;/.test(cond) && /WHERE campaign_id = \$1[\s\S]{0,80}\[schedCamp\.id\]/.test(cond));
+/* ★ 검사 의미 불변 — 정원은 "값이 있는 최신 공고"(pick) 폴백을 **쓰지 않고** 기준 공고 c 에서
+   읽는다. 2026-08-21 부터 그 위에 **발주 정원 폴백**(공고 0 = 미설정이면 발주서 값)이 얹혔고,
+   판정 규칙은 상태엔진과 같은 `displayRecruitTotal` 하나다(사본 금지). */
 t('★ 정원(총건수·일건수·다계정)에는 그 폴백을 쓰지 않는다 — 카드·apply 게이트가 보는 그 공고여야 한다',
-  /recruitTotal: num\(c && c\.recruitTotal\)/.test(cond)
-  && /dailyLimit:   num\(c && c\.dailyLimit\)/.test(cond)
+  /displayRecruitTotal\(c && c\.recruitTotal, wo && wo\.recruitCount\)/.test(cond)
+  && /displayRecruitTotal\(c && c\.dailyLimit, wo && wo\.dailyCount\)/.test(cond)
+  && !/displayRecruitTotal\(\s*pick\(/.test(cond)
   && /multiAccount: c \?/.test(cond));
+t('★ 정원 폴백 규칙은 사본을 만들지 않는다 — linkedRecruitQuota 한 곳을 태운다',
+  /require\('\.\/linkedRecruitQuota\.service'\)/.test(cond)
+  && /recruitTotalSource: campQuota\.totalSource/.test(cond));
 
 console.log('\n── B. 서버: 구매 캡처 묶음 ──');
 const rv = fnBody(svc, 'async function reviewImagesForTab(');
