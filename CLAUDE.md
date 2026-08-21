@@ -467,6 +467,17 @@
 - ⚠ 남은 한계(문서화): `duplicate_row` 는 주문을 `written` 으로 **찍지 않으므로** 그 주문은 복구 스캔 창(`SHEETLESS_RECOVER_WINDOW_HOURS` 48시간) 동안 매 주기 재시도되며 warn 을 남긴다(줄은 더 안 생긴다). 종전부터 있던 성질이다.
 - 회귀가드 `tests/sheetlessDupRowGuard.test.js`(스텁 pool 로 `writeOrderToWorktable` **실제 실행**: 1차 무회귀 · 2차 차단 · 링크 없는 줄 · fail-open 3갈래 · 사본 부재, **변이시험 7종 검출 확인**).
 
+### ★★ 작업보드 [⋯] 도구 메뉴 정리 (2026-08-21 · 사용자 확정)
+- **배경**: [⋯] 메뉴의 5개 버튼이 **전부 "할 일이 있는지"를 보지 않고** 역할·무시트 여부만으로 상시 노출돼, 대부분의 작업에서 5개가 할 일 없이 떠 있었다. 자동화가 이미 대신하는 것부터 걷어낸다.
+- **제거 2종**:
+  - **[🔢 번호 정리]** — `sweepNumbering` 크론이 `3-59/5 * * * *` 로 **빈칸·중복 번호·pairedBlank** 를 이미 잡는다. ★ **전체 작업 진입점(탈시트 전환 헤더 `openRenumberModal({all:true})`)은 남긴다** — 모달 안에서 `rnSetMode('tab')` 로 작업별 모드로 전환할 수 있어 작업별 정리 경로가 사라지지는 않는다. 모달·서버 라우트 전부 그대로.
+  - **[🧩 옵션 열]** — `worktablePlan` 이 옵션 배분이 있는데 칸이 없으면 **자동으로 덧붙이고**(`option_column_added`) 공고 저장도 연결 작업표에 칸을 보장하므로(2026-08-20 재발 방지 2곳), 지금 이후 만들어지는 작업에는 창구가 필요 없다. ★ **서버 창구 `POST /api/trackb/worktable/option-column` 은 그대로 남긴다** — 2026-08-20 이전 표의 소급 기입 경로까지 없애면 막다른 길이 된다. 화면 코드(모달 88줄)는 **죽은 코드를 남기지 않으려고 통째로 제거**했다.
+- ★★ **권한 ≠ 노출 (완화 금지)**: 남은 **[🧹 줄 정리]·[♻ 중복 정리]** 는 **서버 = adminOrMaster · 화면 버튼 = master 전용**이다. 화면이 서버보다 **일부러 좁다** — 같은 메뉴의 [write-back 시뮬]·[그림자 투영]과 같은 패턴이고, admin 이 써야 하면 API 로 쓴다. ★ **반대 방향(화면이 서버보다 넓어지는 것)은 금지** — "눌러도 403" 인 죽은 버튼이 된다. 회귀가드가 양방향을 고정한다.
+- ★ **줄 정리 게이트를 좁혔다**: `POST /worktable/retire-rows` 가 `internalMiddleware` → `adminOrMasterMiddleware`. 줄을 내리면 **검색 명단에서도 빠지므로** 중복 정리(dedupe-rows)와 같은 급으로 맞춘 것이고, 2026-08 의 "날짜별 인원 조절과 함께 AE 에게 열었다" 결정을 **뒤집는다**(AE 는 더 이상 실행 불가).
+- **남은 3종**: [🧹 줄 정리](master 노출) · [♻ 중복 정리](master 노출 — `worktableDupWatch` 감시망이 **읽기 전용**이라 고칠 경로가 이것뿐) · [＋ 블로거 추가](정리 도구가 아니라 **업무 입력** 창구).
+- **잔여(문서화)**: 게이트는 여전히 "할 일이 있는가"를 보지 않는다 — 조건부 노출·배지는 미착수. 재료는 이미 있다(`scanNumbering` · `app_settings.worktable_dup_watch` · retire 스캔). 고아 캡처 정리 버튼을 [⋯] 에 더한다면 **이 조건부 노출을 먼저** 하는 것이 낫다(놀고 있는 버튼 옆에 하나 더 놓는 셈이 된다).
+- 회귀가드 갱신 `tests/sheetlessRetireRows.test.js`(게이트 adminOrMaster · 화면 master · **서버보다 넓지 않음**) · `tests/worktableDuplicateGuard.test.js`(같은 축) · `tests/rowNumbering.test.js`([⋯] 부재 고정 · 전체 진입점 존재 유지) · `tests/worktableOptionColumn.test.js`(화면 부재 + 서버 존재로 **계약을 뒤집어** 고정).
+
 ### ★★ 고아 캡처 자동 정리 (2026-08-21 · 스키마 변경 0)
 - **발단(사용자 질문)**: "행삭제/구매기록 취소하면 Drive 캡처도 같이 지워지나?" → **아니다.** `orderCancellation.service`(전체 67줄)도 `workdeskOrderDelete` 도 Drive 참조가 **0건**이고, 되돌릴 수 없는 **작업 통째 삭제(`workTabDelete`)조차** `review_submissions`·`order_submissions` 행은 DELETE 하면서 **Drive 파일은 남긴다**. 그래서 지울수록 "폴더엔 캡처가 있는데 화면엔 리뷰 이미지 미등록"인 고아가 쌓이는데, 치우는 자동 경로가 **어디에도 없었다**(중복 정리 도구 `fileRoute`/`dedupe` 는 SHA-256 지문이 같은 **사본**만 잡는다).
 - **고아는 3종** — ㉮ **A 링크 끊김**(파일·원장은 있는데 그 파일을 붙들던 주문/명단 행이 사라짐) ㉯ **B 원장 없음**(폴더엔 있는데 원장 어디에도 없음) ㉰ **C 작업 소멸**(작업이 통째 삭제돼 폴더만 남음).

@@ -464,7 +464,11 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     const fe = read('../frontend/workdesk.html');
     ok('★ 창구는 무시트 + 내부인일 때만',
       /function _rnCanRenumber\(\)\{[\s\S]{0,200}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(fe));
-    ok('[⋯] 메뉴에 번호 정리 버튼', /openRenumberModal\(\)"[^>]*>🔢 번호 정리/.test(fe));
+    /* ★★ 2026-08-21 사용자 확정: [⋯] 메뉴의 [🔢 번호 정리] 는 **제거**했다 —
+         `sweepNumbering` 크론이 5분마다 빈칸·중복 번호를 잡으므로 작업별 버튼이 놀고 있었다.
+         **전체 작업 진입점(탈시트 전환 헤더)은 남긴다**(아래에서 존재를 고정) — 모달 안에서
+         [이 작업] 모드로 전환할 수 있어 작업별 정리 경로 자체가 사라지지는 않는다. */
+    ok('★ [⋯] 메뉴에는 번호 정리 버튼이 없다', !/openRenumberModal\(\)"/.test(fe));
     ok('★ 오버레이는 body 직속', /rnOv[\s\S]{0,600}document\.body\.appendChild\(ov\)/.test(fe));
     ok('★ Esc 리스너는 최상위 1회', /_rnKeyBound/.test(fe));
     /* ★ 문자열 존재만 보면 `if (false && !confirm(...))` 을 통과시킨다(변이시험 실측)

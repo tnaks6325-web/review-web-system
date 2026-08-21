@@ -2897,9 +2897,11 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
 });
 
 /* 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
-   ★ 내부 담당자(master/admin/staff) — 정원 변경(날짜별 인원)과 같은 급이고, 그것과 함께 AE 에게 열었다.
+   ★★ 게이트 = adminOrMaster (2026-08-21 사용자 확정 — 종전 internal 에서 **좁혔다**).
+      줄을 내리면 검색 명단에서도 빠지므로 중복 정리(dedupe-rows)와 같은 급으로 맞춘다.
+      AE(staff) 는 더 이상 실행할 수 없다.
    ★ dryRun 기본(`dryRun !== false`) — 값이 빠진 요청이 곧바로 실행되지 않는다. */
-router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async (req, res, next) => {
+router.post('/worktable/retire-rows', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
     const b = req.body || {};

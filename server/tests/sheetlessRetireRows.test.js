@@ -208,16 +208,23 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
     const routes = read('src/routes/trackB.routes.js');
     ok('POST /worktable/retire-rows 등록', /router\.post\('\/worktable\/retire-rows'/.test(routes));
     const line = /router\.post\('\/worktable\/retire-rows'[^\n]*/.exec(routes)[0];
-    // ★ 2026-08 사용자 확정: 날짜별 인원 조절과 함께 AE(staff)에게 열었다 — internal(광고주 차단).
-    ok('★ internal — 검색 명단에서 사람을 빼는 조작(정원 변경과 같은 급, 광고주 차단)',
-      /authMiddleware/.test(line) && /internalMiddleware/.test(line));
+    /* ★★ 2026-08-21 사용자 확정: 게이트를 internal → **adminOrMaster 로 좁혔다**.
+         줄을 내리면 검색 명단에서도 빠지므로 중복 정리(dedupe-rows)와 같은 급으로 맞춘 것.
+         AE(staff)는 더 이상 실행할 수 없다(종전 2026-08 의 "AE 에게 열었다" 결정을 뒤집는다). */
+    ok('★ adminOrMaster — 검색 명단에서 사람을 빼는 조작(중복 정리와 같은 급)',
+      /authMiddleware/.test(line) && /adminOrMasterMiddleware/.test(line));
+    ok('★ staff 는 더 이상 통과하지 못한다', !/internalMiddleware/.test(line));
     ok('★ 검증 오류는 400대로(errorHandler 마스킹 방지)', /LedgerError\) return res\.status\(400\)/.test(routes));
 
     const wd = read('../frontend/workdesk.html');
-    /* 2026-08-18 '작업보드 staff 전체권한' 으로 이 조작은 내부인 전체에 열렸다(라우트도 internalMiddleware).
-       ★ 검사의 의미는 그대로 — **화면 게이트 = 서버 게이트**. 무시트 조건은 유지된다. */
-    ok('★ 무시트 + 내부인일 때만 버튼(_wrCanRetire = 라우트 internalMiddleware 와 1:1)',
-      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(wd));
+    /* ★★ 2026-08-21 사용자 확정: 화면 노출은 **master 전용** — 서버(adminOrMaster)보다 **일부러 좁다**.
+       admin 도 권한은 있지만 [⋯] 메뉴에 버튼을 띄우지 않는다(같은 메뉴의 [write-back 시뮬]·
+       [그림자 투영]과 같은 패턴). 여기서 고정하는 것은 **서버보다 넓지 않다**는 것이다 —
+       넓히면 "눌러도 403" 인 죽은 버튼이 된다. */
+    ok('★ 무시트 + master 일 때만 버튼', 
+      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,80}STATE\.role === 'master'/.test(wd));
+    ok('★ 화면 게이트가 서버보다 넓지 않다(staff·admin 에게 안 띄운다)',
+      !/function _wrCanRetire\(\)\{[\s\S]{0,220}_isInternalRole\(\)/.test(wd));
     ok('도구 메뉴에 [🧹 줄 정리]', /openRetireModal\(\)/.test(wd) && /🧹 줄 정리/.test(wd));
     ok('★ 미리보기 → 실행 2단계(미리보기 전에는 실행 비활성)',
       /id="wrGo" disabled/.test(wd) && /go\.disabled = !\(_WR\.prev/.test(wd));
