@@ -410,7 +410,13 @@ console.log('\n[F] Drive 폴더 1단 = 무시트만 업체명 (시트 기반은 
     // 모듈 미로드 폴백도 무시트 방향이어야 한다(폴백이 반대면 그 화면만 시트 기반으로 말한다)
     ok('접수 확인창 폴백 = 무시트', /_woAcceptSheetless\(o\) : true;/.test(wdN));
     ok('미리보기 시트결속 폴백 = 아님', /_woAcceptSheetless\(wo\) : false;/.test(wdN));
-    ok('접수 버튼 툴팁 폴백 = 무시트', /typeof _woAcceptSheetless!=='function'\|\|_woAcceptSheetless\(o\)/.test(wdN));
+    /* ★ 사용자 확정 2026-08-21 — 접수 버튼 툴팁은 더 이상 시트/무시트로 갈리지 않는다.
+       3버전은 무시트 전용(`resolveAcceptMode` 가 항상 sheetless)이라 그 분기가 이미 유명무실했고,
+       지금은 "작업오더 값 그대로 만들고 곧바로 모집공고로" 라는 **두 단계**를 말한다.
+       ★ 확인창·미리보기의 폴백 방향(위 두 검사)은 그대로 = 무시트. */
+    ok('접수 버튼 툴팁이 두 단계를 말한다(시트/무시트 분기 없음)',
+      /작업오더 값 그대로 시스템 작업표를 만들고 곧바로 모집공고 설정으로 넘어갑니다/.test(wdN)
+      && !/_woEditActions\(o\)\{[\s\S]{0,1600}_woAcceptSheetless/.test(wdN));
 
     const ia = noLineComments(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend/js/index-app.js'), 'utf8'));
     const wa = /async function woAccept\(id, pickGid, linkAdvertiserId\) \{([\s\S]*?)\n\}/.exec(ia);
