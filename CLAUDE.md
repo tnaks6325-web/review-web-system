@@ -467,6 +467,19 @@
 - ⚠ 남은 한계(문서화): `duplicate_row` 는 주문을 `written` 으로 **찍지 않으므로** 그 주문은 복구 스캔 창(`SHEETLESS_RECOVER_WINDOW_HOURS` 48시간) 동안 매 주기 재시도되며 warn 을 남긴다(줄은 더 안 생긴다). 종전부터 있던 성질이다.
 - 회귀가드 `tests/sheetlessDupRowGuard.test.js`(스텁 pool 로 `writeOrderToWorktable` **실제 실행**: 1차 무회귀 · 2차 차단 · 링크 없는 줄 · fail-open 3갈래 · 사본 부재, **변이시험 7종 검출 확인**).
 
+### ★★ 고아 캡처 자동 정리 (2026-08-21 · 스키마 변경 0)
+- **발단(사용자 질문)**: "행삭제/구매기록 취소하면 Drive 캡처도 같이 지워지나?" → **아니다.** `orderCancellation.service`(전체 67줄)도 `workdeskOrderDelete` 도 Drive 참조가 **0건**이고, 되돌릴 수 없는 **작업 통째 삭제(`workTabDelete`)조차** `review_submissions`·`order_submissions` 행은 DELETE 하면서 **Drive 파일은 남긴다**. 그래서 지울수록 "폴더엔 캡처가 있는데 화면엔 리뷰 이미지 미등록"인 고아가 쌓이는데, 치우는 자동 경로가 **어디에도 없었다**(중복 정리 도구 `fileRoute`/`dedupe` 는 SHA-256 지문이 같은 **사본**만 잡는다).
+- **고아는 3종** — ㉮ **A 링크 끊김**(파일·원장은 있는데 그 파일을 붙들던 주문/명단 행이 사라짐) ㉯ **B 원장 없음**(폴더엔 있는데 원장 어디에도 없음) ㉰ **C 작업 소멸**(작업이 통째 삭제돼 폴더만 남음).
+- ★★ **자동 대상은 A 하나뿐**(사용자 확정 2026-08-21: 2단계 · DB 기준만 · 유예 7일). **B·C 는 이 범위에서 구조적으로 탐지 불가**이며 이것은 한계가 아니라 계약이다 — B 는 Drive 폴더를 읽어야 알 수 있고(범위 밖), **C 는 `workTabDelete` 가 원장 행을 실제 DELETE 해 DB 에 흔적이 0**이다. 조용히 "정리했다"고 말하지 말 것.
+- ★★★ **판정 근거는 `file_id` / `review_index_id` 뿐 — 위치키(`row_index`) 금지(완화 금지)**: `review_submissions.row_index` 는 위치키라 번호 정리·재배정·차수 변경으로 수시로 깨진다. 그것을 고아 근거로 쓰면 **멀쩡한 캡처를 지운다**(리뷰어 홈 dedup·관제 대조가 같은 함정을 이미 밟았다 — 좌표는 이름이 아니고 근거도 아니다). 좌표는 **사람이 읽을 표시용으로만** 싣는다. 회귀가드가 고아 근거 블록에 `row_index` 가 없음을 고정한다.
+- **고아 근거(OR 2종)**: ㉠ `order_submissions.capture_file_id = rs.file_id AND deleted_at IS NOT NULL`(그 파일을 붙들던 주문이 취소됨 = 행삭제의 결과) ㉡ `rs.review_index_id` 가 가리키는 `review_index` 행이 없음. ★ `review_index_id` 는 **결정적 매칭 시에만** 채워지므로(032) NULL 인 행은 근거가 없어 후보가 아니다(추측으로 지우지 않는다).
+- **제외 7종(fail-closed — 하나라도 걸리면 후보 아님)**: 이미 `slot_key='trashed'` · 유예 미경과 · **살아있는 주문**이 그 파일 참조(같은 파일의 재사용) · **살아있는 명단 행**이 대표로 참조(`review_index.review_file_id`) · **리뷰검수 이력**(사람이 이미 본 파일) · **리뷰 수정요청**(old/new 양쪽 — 진행 중 분쟁 증거) · 그 좌표에 **활성 작업표 줄**.
+- ★★ **삭제는 휴지통만**(`trashFiles`) — 영구삭제 API 호출 표면이 없다(`fileRoute.service.js:11` 규율 그대로, 30일 복구창). 원장 표기도 **같은 칸**을 쓴다(`slot_key='trashed'` + `routed_from_slot`/`routed_at`/`routed_by='orphan:<주체>'`) — 사본을 두면 "자동 정리분만 되돌리기가 안 되는" 드리프트가 생긴다. **표기는 휴지통 성공 뒤에만**(실패 시 원장 무변경 → 다음 회차 재시도로 수렴).
+- ★★ **TOCTOU 재검사** — 조회 직후 그 파일이 다시 쓰이기 시작했을 수 있다(재링크·수정요청·검수). 휴지통으로 보내기 **직전에** 같은 조건으로 그 한 건을 다시 확인하고, 풀렸으면 건너뛰며 **건수를 보고한다**(`skippedRecheck` — 조용한 no-op 금지). ★ 실행은 **후보를 서버가 다시 골라 교집합**만 처리한다(화면이 보낸 목록 불신 — `sheetlessOrphanCleanup` 과 같은 규율).
+- **크론** `40 4 * * *`(KST) + `withJobLock('orphan_capture_clean')`(기존 6개 락 이름과 해시 비충돌 확인) · 킬스위치 `ORPHAN_CAPTURE_CLEAN=0` · 유예 `ORPHAN_CAPTURE_GRACE_DAYS`(기본 7) · 회차 상한 `ORPHAN_CAPTURE_CLEAN_CAP`(기본 200) · **정리 실패가 크론을 죽이지 않는다**.
+- **수동 창구** `POST /api/drive/orphan-capture-cleanup`(adminOrMaster · **dryRun 기본**, 실행은 `dryRun:false` 명시) — 크론과 **같은 함수**를 부른다(사본 금지). 화면 버튼은 아직 없다(UI 시안 미확정).
+- 회귀가드 `tests/orphanCaptureCleanup.test.js`(35 — 위치키 금지 · 미리보기 무쓰기 · 교집합 · TOCTOU · 영구삭제 표면 부재 · 폴더 스캔 부재 · 원장 표기 순서 · 크론/라우트 배선, **변이시험 5종 검출 확인**).
+
 ### ★ 작업표 줄 ↔ 주문 링크 교정 도구 (2026-08-19 · 스키마 변경 0)
 - **왜**: "링크는 표 주문번호가 정한다"(같은 날 수정)는 **앞으로 채울 때의 규칙**이라 blank-only 다 — **이미 박힌 오염은 안 고쳐진다**. 위프 800건에 2묶음 5줄이 남아 있었고, 그 오염이 ㉮ 중복 정리로 **멀쩡한 주문을 취소**시키고(실측: `canceled_by='dedupe:…'`) ㉯ 관제 대조를 오표시했다. 사람이 지목해 고치는 창구가 필요했다.
 - **API** `POST /api/trackb/worktable/repair-link`(adminOrMaster) — `fixes:[{seq, action:'relink'|'unlink', expectOrderSubmissionId, orderNum}]`. **dryRun 기본** · 실행은 `confirm:true`.
