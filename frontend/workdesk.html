@@ -1904,6 +1904,9 @@
 .bnnm:hover{color:#1B4F9C;border-color:#1B4F9C}
 .bnnm .pen{font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
 .bnbase{font-size:11px;color:var(--t3,#8B94A1);display:block;margin-top:2px}
+/* ★ 이름이 아니라 코드가 서식에 나가는 기관(케이뱅크가 이름을 인식 못 함) — 화면이 그 사실을 말한다 */
+.bnbase.codeonly{color:var(--warn,#B45309)}
+.bnbase.codeonly b{font-weight:700}
 .bnkw{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
 .bnkwchip{display:inline-flex;align-items:center;gap:4px;padding:3px 5px 3px 9px;font-size:12px;border-radius:999px;
   border:1px solid var(--line,#D8DDE5);background:#F7F8FA;color:var(--t1,#1B1F24)}
@@ -10638,7 +10641,8 @@ function _bnRender(){
     return `<tr>
       <td class="code">${esc(r.code)}${r.custom?'<span class="pmauto man">추가</span>':''}</td>
       <td><span class="bnnm ${nameBad?'pmwarn':''}" onclick="_bnEditName(${i})">${esc(r.name)}<span class="pen">✎</span></span>
-        ${r.renamed?`<span class="bnbase">기본: ${esc(r.baseName)}</span>`:''}</td>
+        ${r.renamed?`<span class="bnbase">기본: ${esc(r.baseName)}</span>`:''}
+        ${r.formCodeOnly?`<span class="bnbase codeonly" title="케이뱅크 대량이체가 이 은행은 이름을 인식하지 못해 코드로만 통과합니다. 이름을 고쳐도 파일에는 ${esc(r.code)} 이 나갑니다.">이체 서식에는 <b>${esc(r.code)}</b> 로 나갑니다</span>`:''}</td>
       <td><div class="bnkw" id="bnkw${i}">${kw}<button class="bnkwadd" onclick="_bnAddKw(${i})">＋</button></div></td>
       <td class="num">${use==null?'<span class="pmauto">-</span>':(use?use+'건':'<span class="pmauto">0</span>')}</td>
     </tr>`;
