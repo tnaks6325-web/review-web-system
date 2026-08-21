@@ -24,7 +24,7 @@ const pool = require('../db/pool');           // ★ 이 모듈은 pool 을 직�
 const { logger } = require('../utils/logger'); // ★ 반대로 logger 는 { logger } 구조분해다
 const { PAYMENT_COL_KEYWORDS } = require('./search.service');
 const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
-const { resolveBank, bankNameByCode, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
+const { resolveBank, bankFormLabel, normalizeAccount, normalizeMemo } = require('../utils/bankCodes');
 const _bankOv = require('./bankNameOverride.service');   // 화면에서 고친 은행 표기 → 판정 표에 적용
 const { extractAmountNumber, EXACT_KEYS: AMOUNT_EXACT_KEYS } = require('../utils/paymentAmount');
 // 시트 링크를 만들 수 있는지(= 진짜 구글시트가 있는지) 판정 — 접두 사본 금지
@@ -969,7 +969,7 @@ function _writeXls(sheetName, rows, widths) {
 }
 
 async function buildWorkbook(bank, items) {
-  // ★ 서식에 찍히는 **정식 명칭**(`bankNameByCode`)이 오버레이 값이어야 한다 —
+  // ★ 서식에 찍히는 **정식 명칭**(`bankFormLabel`)이 오버레이 값이어야 한다 —
   //   화면에서 이름을 고쳐 놓고 파일엔 옛 이름이 나가면 은행이 거부한다.
   await _bankOv.ensureBankOverrides();
   const fmt = batchFileFormat(bank);
@@ -981,9 +981,12 @@ async function buildWorkbook(bank, items) {
     for (const it of items) {
       // ★ 리뷰어가 적은 원문('신한')이 아니라 **표준코드에서 파생한 정식명**('신한은행')을 쓴다.
       //   양식 가이드가 "형식에 맞는 은행/증권사명 혹은 코드만" 허용하므로 원문은 거부될 수 있다.
+      // ★★ 케이뱅크가 이름을 인식 못 하는 기관(031 대구은행 — 2026-08-21 실측)은
+      //   `bankFormLabel` 이 **코드**를 돌려준다. 판정은 `utils/bankCodes` 단일 출처이고
+      //   여기에 예외 사본을 만들지 않는다.
       const code = String(it.bank_code || it.bankCode || '');
       rows.push([
-        bankNameByCode(code) || code,
+        bankFormLabel(code) || code,
         // ★ 계좌는 마지막까지 `normalizeAccount` 단일 출처로 숫자만 남긴다 —
         //   옛 원장 스냅샷에 '-' 가 섞여 있어도 은행 서식에는 절대 나가지 않게(업로드 거부 방지).
         normalizeAccount(it.bank_account || it.bankAccount || ''),

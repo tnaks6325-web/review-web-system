@@ -65,7 +65,9 @@ t('★ 어떤 실패에도 throw 하지 않는다 — null 을 돌려주고 화�
 t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광고주 미노출)', (() => {
   const i = svc.indexOf('res.condition = await tabConditionSummary');
   if (i < 0) return false;
-  const before = svc.slice(Math.max(0, i - 700), i);
+  // ⚠ 고정 길이 슬라이스(i-700)로 보면 그 사이에 다른 줄이 늘어나는 순간 조용히 빨개진다
+  //    (실제로 `res.statusCols` 가 들어오며 밟았다). 바로 앞의 `if (showEdits) {` 를 찾아 그 구간만 본다.
+  const before = svc.slice(svc.lastIndexOf('if (showEdits) {', i), i);
   // 광고주 분기(else if) 블록 안에 condition 이 들어가지 않는다 — 전역 [\s\S]* 로 보면
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
