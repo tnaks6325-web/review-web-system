@@ -2418,6 +2418,12 @@ router.get('/cs/participant-recipients', authMiddleware, internalMiddleware, asy
   }
 });
 
+/* 첨부 업로드 — 실행부는 `/cs/upload` 와 **같은 핸들러**(Drive `[문의첨부]` 폴더 · 8MB · 프록시 URL).
+   ★ 게이트만 내부인이다: 메시지를 보낼 수 있는 사람은 사진도 붙일 수 있어야 한다(막다른 길 금지).
+     `/cs/upload`(관리자 C/S 대화창)는 종전 adminOrMaster 그대로 둔다. */
+router.post('/cs/notify-upload', authMiddleware, internalMiddleware, (req, res, next) =>
+  _csHandlers.upload(req, res, next));
+
 // 전송 — 서버가 **그 자리에서 다시 판정**한 뒤 방을 열고 메시지를 남긴다.
 router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async (req, res) => {
   try {
@@ -2426,9 +2432,10 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
     const tabName = String(b.tabName || '');
     const ids = _msgIds(b.participantIds);
     const content = String(b.content || '').trim();
+    const imageUrls = require('../utils/csImageUrls').sanitizeCsImageUrls(b.imageUrls);
     const expect = (b.expect && typeof b.expect === 'object') ? b.expect : null;
     if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, participantIds 가 필요합니다.' });
-    if (!content) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
+    if (!content && !imageUrls.length) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
     if (content.length > _MSG_MAX) return res.status(400).json({ ok: false, error: `내용은 ${_MSG_MAX}자까지 보낼 수 있습니다.` });
 
     const items = await _csRecipient.resolveRecipients({ sheetId, tabName, participantIds: ids });
@@ -2450,7 +2457,7 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
       let why = '';
       const out = await _csBridge.postAdminNotice({
         sheetId, tabName, rowIndex: it.seq,
-        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by,
+        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by, imageUrls,
         onError: (e) => { why = (e && (e.message || e.code)) ? `${e.message || ''}${e.code ? ` [${e.code}]` : ''}` : ''; },
       });
       if (!out) {
