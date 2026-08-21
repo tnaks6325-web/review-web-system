@@ -107,8 +107,8 @@ t('⑤ 상한은 묶음별로 센다(전체 개수로 자르면 나중 묶음이
 t('★ fail-soft — 캡처 조회가 실패해도 리뷰 이미지는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
 
 console.log('\n── C. 화면: 상단 3분할 · 작업세부 폐지 · 정산 통합 ──');
-t('★ 내부 렌더는 3분할(.tp3grid.c3) + 미리보기 칸',
-  /<div class="tp3grid c3">\$\{cond\}\$\{prog\}<aside class="rvpane" id="rvPane"><\/aside><\/div>/.test(wd));
+t('★ 내부 렌더는 3분할(.tp3grid.c3) + 미리보기 칸 (+저장된 접힘 상태 복원)',
+  /<div class="tp3grid c3\$\{_topFolded\(\)\?' fold':''\}">\$\{cond\}\$\{prog\}<aside class="rvpane" id="rvPane"><\/aside><\/div>/.test(wd));
 /* ★ 정의 부재만 보면 **호출만 되살린 변이**를 놓친다(변이시험 실측) — 호출 0 까지 함께 고정. */
 t('★ 작업세부 상시 펼침은 본문에서 사라졌다(정의·호출 모두)',
   !/function renderWorkOrderSection/.test(wd) && !/renderWorkOrderSection\(/.test(wd)
@@ -134,7 +134,8 @@ console.log('\n── D. 화면: 작업 조건 10항목 ──');
 const cc = fnBody(wd, 'function _condCardHtml(wd,d,m){');
 t('_condCardHtml 이 있다', !!cc);
 ['총건수', '일건수', '결제금액', '구매채널', '유입방식', '다계정', '현금영수증', '리뷰비', '입금명', '리뷰타입']
-  .forEach(k => t(`항목 "${k}" 이 있다`, new RegExp("\\['" + k + "'").test(cc)));
+  .forEach(k => t(`항목 "${k}" 이 있다`,
+    new RegExp("\\['" + k + "'").test(cc) || new RegExp('<dt>' + k + '</dt>').test(cc)));
 /* ★★ 값이 있으면 배지 없이 검은 글씨 · 배지는 미설정에만(사용자 확정 2026-08-20).
    종전 .yn(허용/해당없음/포토) 배지를 되살리면 "손봐야 하는 칸"으로 가야 할 눈이 흩어진다. */
 t('★ 값이 있는 항목은 배지가 아니라 단순 텍스트(.yn 잔재 0)',
@@ -144,7 +145,80 @@ t('★ [미설정]은 버튼이고 열 수 없으면 비활성 + 사유(눌러�
   /class="cndset"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
   && /class="cndset off" disabled title="\$\{esc\(g\.tip\)\}"/.test(cc));
 t('★ 결제금액은 1건당 금액(진행 현황의 합계와 다른 값) — 서버가 작업오더에서 싣는다',
-  /payAmount: num\(wo && wo\.payAmount\)/.test(cond) && /\['결제금액','order'/.test(cc));
+  /payAmount: num\(wo && wo\.payAmount\)/.test(cond) && /<dt>결제금액<\/dt>/.test(cc));
+
+/* ══ D4. 결제금액 v2 표기(사용자 확정 2026-08-20 시안 v2) ══════════════════════
+   옵션 없음 = "상품결제금액 X원 / 총 Y원" 한 줄(총액 = 상품결제금액 × 총건수, 자동·비편집).
+   옵션 있음 = "블랙 22,000원(500건), 그린 24,000원(300건)" 평문 + 아랫줄 총결제금액(Σ, 자동·비편집). */
+console.log('\n── D4. 결제금액 v2 · 유입방식 · 일건수 공고 기준 · 접기/펼치기 ──');
+t('★ 옵션 없음 = 한 줄 "상품결제금액 … / 총 …"',
+  /<dt>결제금액<\/dt><dd>상품결제금액 \$\{per\}\$\{tot\}<\/dd>/.test(cc)
+  && /Number\(cd\.payAmount\)\*Number\(cd\.recruitTotal\)/.test(cc));
+t('★ 총액(한 줄)은 자동계산 — 편집 창구(onclick) 없음 + 사유 툴팁',
+  /\/ 총 <b title="상품결제금액 × 총건수 — 자동계산이라 편집할 수 없습니다">/.test(cc));
+t('★ 총건수를 모르면 총액을 지어내지 않는다(상품결제금액만)',
+  /n\(cd\.recruitTotal\)!=null&&Number\(cd\.recruitTotal\)>0/.test(cc));
+t('★ 옵션 있음 판정 = 서버 options 2종 이상(화면 재판정 0)',
+  /Array\.isArray\(cd\.options\)/.test(cc) && /opts\.length>=2/.test(cc));
+t('★ 옵션 있음 = 배지 없는 평문 "라벨 금액(건수)" 나열(콤마 연결)',
+  /\$\{esc\(o\.label\)\} \$\{o\.pay!=null\?won\(o\.pay\)/.test(cc) && /\.join\(', '\)/.test(cc)
+  && !/class="op"/.test(cc));
+t('★ 옵션 총결제금액 = Σ(금액×건수) — 전부 있어야 계산, 아니면 — + 사유(0 위장 금지)',
+  /opts\.every\(o=>o\.pay!=null&&o\.count>0\)/.test(cc) && /sm\+o\.pay\*o\.count/.test(cc)
+  && /옵션별 금액과 인원이 모두 있어야 자동 계산됩니다/.test(cc));
+t('★ 옵션 총결제금액 dd 에는 클릭 창구가 없다(자동계산 = 편집 대상 아님)', (() => {
+  const i = cc.indexOf('<dt>총결제금액</dt>'); if (i < 0) return false;
+  const seg = cc.slice(i, cc.indexOf('</dd>', i));
+  return !/onclick/.test(seg) && !/_cndFix/.test(seg);
+})());
+t('★ 옵션 줄의 편집 창구는 공고 있으면 공고, 없으면 작업오더',
+  /const kp=cd\.campaignId\?'camp':'order';/.test(cc));
+
+// 서버: options 동봉 규칙
+t('★ 서버 options = 살아있는 공고 옵션 우선(status <> \'closed\') → 작업오더 구조화 폴백 → 2종 미만은 빈 배열',
+  /FROM campaign_options WHERE campaign_id = \$1 AND status <> 'closed'/.test(cond)
+  && /if \(options\.length < 2 && wo\) options = _condWoOptions\(wo\.productOptionsJson\);/.test(cond)
+  && /if \(options\.length < 2\) options = \[\];/.test(cond));
+t('★ _condWoOptions 는 구조화 옵션만(라벨 필수 · 0 보존) — 이름뿐인 레거시는 제외', (() => {
+  const b = fnBody(svc, 'function _condWoOptions(json) {');
+  return !!b && /Array\.isArray\(p\.options\)/.test(b) && /if \(!label\) continue;/.test(b)
+    && /x == null \|\| x === ''/.test(b);
+})());
+
+// 유입방식: 링크유입/가이드유입 둘 중 하나로만
+t('★ 유입방식은 링크유입/가이드유입 둘 중 하나로만 — 키워드 병기 제거',
+  /return '링크유입';/.test(cc) && /return '가이드유입';/.test(cc)
+  && !/inflowKeyword/.test(cc));
+t('★ 모르는 유입값은 강제 분류하지 않고 원문(오표기 금지)', /return t;\s*\}\)\(cd\.inflowType\);/.test(cc));
+
+// 일건수 = 공고 기준(todayProgress.quota — 정원 판정 단일 출처의 값)
+t('★ 일건수 = wd.todayProgress.quota(공고 기준 칩) — 재계산 사본 0, 못 받으면 종전 폴백',
+  /wd\.todayProgress\.quota!=null\)/.test(cc) && /공고 기준<\/span>/.test(cc)
+  && /n\(cd\.dailyLimit\)==null\?null/.test(cc));
+t('★ 상품명 앞 [상품/옵션/금액] 라벨 제거(표시만 — 원본 무접촉)',
+  /replace\(\/\^\\s\*\\\[상품\\\/옵션\\\/금액\\\]\\s\*\/,''\)/.test(cc));
+
+// 접기/펼치기 — 세 박스 일괄 + 하단선 일치
+t('★ 머리줄 3곳(작업조건 정상·폴백 / 진행현황 / 미리보기) 전부 _topToggle 로 수렴', (() => {
+  const n = (wd.match(/onclick="_topToggle\(\)"/g) || []).length;
+  return n === 4;   // 작업조건 2(정상+폴백) + 진행현황 1 + 미리보기(rvhd) 1
+})());
+t('★ 광고주 진행현황 머리줄에는 접기 창구가 없다(광고주는 종전 레이아웃)',
+  /isAdv\?'':' tp3h" onclick="_topToggle\(\)"/.test(wd));
+t('★ 접힘 상태는 localStorage 로 기억(작업 무관 공통) — 실패해도 무시',
+  /localStorage\.getItem\('wd_top3_fold'\)/.test(wd) && /localStorage\.setItem\('wd_top3_fold','1'\)/.test(wd));
+t('★ 토글은 CSS 클래스만 — 재렌더하지 않는다(미리보기 선택·스크롤 보존)', (() => {
+  const b = fnBody(wd, 'function _topToggle(){');
+  return !!b && /classList\.toggle\('fold',v\)/.test(b) && !/selTab|buildGrid|summaryStrip/.test(b);
+})());
+t('★ 접힘 CSS 한 벌: min-height 해제 + 본문 숨김 + rvfill static(하단선 일치)',
+  /\.tp3grid\.c3\.fold \.tp3col,\.tp3grid\.c3\.fold \.rvpane\{min-height:0\}/.test(wd)
+  && /\.tp3grid\.c3\.fold \.tp3col > :not\(\.tp3t\)\{display:none\}/.test(wd)
+  && /\.tp3grid\.c3\.fold \.rvpane \.rvfill\{position:static/.test(wd)
+  && /\.tp3grid\.c3\.fold \.rvfill > :not\(\.rvhd\)\{display:none\}/.test(wd));
+t('★ 시각 신호: ∨ 회전 + 호버 배경 + 접기/펼치기 힌트',
+  /\.tp3grid\.c3\.fold \.tp3chev\{transform:rotate\(-90deg\)\}/.test(wd)
+  && /\.tp3h:hover\{background/.test(wd) && /tp3hint">접기\/펼치기</.test(wd));
 
 console.log('\n── D2. [미설정] → 정식 창구 ──');
 /* ★★ 새 저장 경로를 만들지 않는다(사용자 확정) — 저장처가 둘이 되면 작업오더·모집공고·입금관리가

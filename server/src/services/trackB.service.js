@@ -1706,6 +1706,29 @@ async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
 //      (비적격 상태+linked_tab 설정 시 승인 멱등 skip, idempotent 판정). 그래서 Track B는 그 컬럼을 절대 안 쓰고
 //      **Track B 전용 링크 테이블(trackb_work_order_links, migration 051)** 에 발주↔탭 연결을 저장한다.
 //      작업세부 표시는 [Track B 링크] 우선 → 없으면 [work_orders.linked_tab](Track A 승인 링크) 폴백으로 읽기만.
+/* 작업 조건 카드의 옵션별 결제금액 표시 재료 — 인트라넷 구조화 신호(product_options_json 의
+   [{name,url,base:{pay,count},options:[{label,pay,count}]}])에서 **금액이 있는 옵션만** 뽑는다.
+   ★ 문자열·이름만 있는 레거시 배열은 제외 — 금액 없는 옵션을 "블랙 —원" 으로 그리느니
+     옵션 없는 표기(1건당 결제금액)로 떨어지는 쪽이 정직하다. `_parseWoOptions`(이름 전용)와
+     계약이 달라 별도 함수로 둔다(합치면 작업표 생성 쪽 소비처가 흔들린다). */
+function _condWoOptions(json) {
+  if (!json) return [];
+  let v; try { v = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return []; }
+  if (!Array.isArray(v)) return [];
+  const num = x => (x == null || x === '' ? null : (Number.isFinite(Number(x)) ? Number(x) : null));
+  const out = [];
+  for (const p of v) {
+    if (!p || typeof p !== 'object' || !Array.isArray(p.options)) continue;
+    for (const o of p.options) {
+      if (!o || typeof o !== 'object') continue;
+      const label = String(o.label || o.name || '').trim();
+      if (!label) continue;
+      out.push({ label, pay: num(o.pay), count: num(o.count) });
+    }
+  }
+  return out;
+}
+
 function _parseWoOptions(json) {
   if (!json) return [];
   let v; try { v = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return []; }
@@ -2444,6 +2467,22 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     let cashReceipt = null;
     try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
 
+    /* 옵션별 결제금액(사용자 확정 2026-08-20 시안 v2) — "옵션이 있는 작업" 판정은
+       worktableOptionColumn 규율과 같은 축: **살아있는(닫히지 않은) 공고 옵션**이 먼저고,
+       공고 옵션이 2종 미만이면 작업오더의 구조화 옵션으로 폴백한다. 2종 미만이면 빈 배열
+       = 옵션 없는 작업(1건당 결제금액 한 줄 표기). 표시 전용 — 정원·홀드 판정 무접촉. */
+    let options = [];
+    if (c) {
+      const { rows: opts } = await db.query(
+        `SELECT opt_key AS label, pay_amount AS pay, recruit_total AS count
+           FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed' ORDER BY id`,
+        [c.id]).catch(() => ({ rows: [] }));
+      options = opts.map(o => ({ label: String(o.label || '').trim(), pay: num(o.pay), count: num(o.count) }))
+                    .filter(o => o.label);
+    }
+    if (options.length < 2 && wo) options = _condWoOptions(wo.productOptionsJson);
+    if (options.length < 2) options = [];
+
     return {
       productName: (wo && wo.productOption) || meta.campaignName || '',
       recruitTotal: num(c && c.recruitTotal) != null ? num(c.recruitTotal) : num(wo && wo.recruitCount),
@@ -2465,6 +2504,9 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       /* 1건당 상품 결제금액(사용자 확정 2026-08-20) — 진행 현황의 '결제금액'은 활성 주문 행의
          **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
       payAmount: num(wo && wo.payAmount),
+      /* 옵션 2종 이상일 때만 채워진다 — 총결제금액은 싣지 않는다(자동계산은 화면 표시일 뿐
+         저장값이 아니고, 여기 실으면 "편집할 수 있는 값"처럼 보인다). */
+      options,
       reviewFee: feeInfo.fee, feeSource,
       /* ★ 입금명 순서 = **공고 → 탭** — 입금관리(payment.service `campMemo || tabMemo`)와 같은
          순서라야 한다. 탭을 앞세우면 "공고를 만들었는데 카드가 옛 탭 값을 계속 보여주는" 상태가

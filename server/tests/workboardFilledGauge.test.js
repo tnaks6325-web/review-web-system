@@ -106,7 +106,7 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
   const html = readRoot('frontend/workdesk.html');
   const start = html.indexOf('function summaryStrip(wd,d,m,c){');
   assert(start > 0, 'summaryStrip 을 찾지 못했다');
-  const end = html.indexOf('\n}', html.indexOf('return `<div class="tp3grid c3">', start)) + 2;
+  const end = html.indexOf('\n}', html.indexOf('return `<div class="tp3grid c3', start)) + 2;
   const code = html.slice(start, end);
   const sandbox = {
     esc: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
@@ -115,6 +115,7 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
     setlSummaryHtml: () => '<div class="setlsummary"></div>',
     _wonFmt: n => String(n),
     STATE: { role: 'master', cur: { tabName: 't' }, settleOpen: false },
+    _topFolded: () => false,   // 접힘 상태 복원(시안 v2) — 게이지 검사와 무관
   };
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox);
