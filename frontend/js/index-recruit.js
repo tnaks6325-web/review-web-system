@@ -882,6 +882,7 @@ function onRecruitDatesChange() {
   const sDay = document.getElementById("rf_start_day");
   const dDay = document.getElementById("rf_deadline_day");
   if (sDay && sd) sDay.textContent = _rfDow(sd.value);
+  _renderStartDateOriginNote();   // 날짜를 맞추면 대조 안내가 스스로 사라진다
   if (dDay && dl) dDay.textContent = _rfDow(dl.value);
   const warn = document.getElementById("rf_deadline_warn");
   if (!warn || !dl) return;
@@ -1235,6 +1236,34 @@ function rfSetInflowType(type, button, opts) {
  * 유입방식 출처 안내 — 조용한 대체 금지.
  * 작업오더에서 불러왔을 때만 한 줄로 말한다(저장해야 공고에 굳는다).
  */
+/**
+ * 연결 작업오더 시작일 대조 안내 — 값은 바꾸지 않고 "다르다"고만 말한다.
+ * ★ 경고(빨강)가 아니다 — 차수 재발행처럼 다른 것이 정상인 경우가 있고, 상시 경고가 되면
+ *   진짜 신호가 묻힌다. 사람이 위 날짜를 고쳐 저장하면 그때 반영된다.
+ * ★ 값이 같아지면 스스로 사라진다(날짜를 고치면 onRecruitDatesChange 가 다시 부른다).
+ */
+function _renderStartDateOriginNote() {
+  const el = document.getElementById("rf_start_date");
+  if (!el) return;
+  const row = el.closest(".rf-hrow") || el.closest(".form-row") || el.parentNode;
+  if (!row || !row.parentNode) return;
+  let box = document.getElementById("rf_start_date_order_note");
+  const wo = String(window._rfOrderStartDate || "");
+  const cur = String(el.value || "").slice(0, 10);
+  if (!wo || !cur || wo === cur) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "rf_start_date_order_note";
+    // ★ 행 **바깥**에 둔다 — 행에 날짜 피커 onclick 이 걸려 있어 안에 두면 안내를 누를 때마다 열린다.
+    box.style.cssText = "margin:4px 0 0;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;"
+      + "line-height:1.5;background:#EFF6FF;color:#1E40AF;border:1px solid #BFDBFE";
+    row.parentNode.insertBefore(box, row.nextSibling);
+  }
+  box.textContent = "연결된 작업오더의 시작일은 " + wo + " 입니다 — 이 공고에는 발행 당시 값 "
+    + cur + " 이 그대로 남아 있습니다(발행은 스냅샷이라 오더를 고쳐도 따라가지 않습니다). "
+    + "바꾸려면 위 날짜를 고쳐 저장하세요.";
+}
+
 function _renderInflowOriginNote() {
   const ui = document.getElementById("rf_inflow_type_ui");
   if (!ui || !ui.parentNode) return;
@@ -2569,6 +2598,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfGlobalReviewTypeMix = [];
   window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
+  window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
@@ -2688,6 +2718,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
         }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
         setV("rf_start_date", (c.start_date || "").slice(0, 10));
+        /* ★ 발행은 **스냅샷**이라 발행 뒤 작업오더 시작일이 바뀌어도 공고는 따라가지 않는다.
+           그 사실을 확인할 창구가 없어 "오더는 8/19인데 공고는 8/12"가 원인 불명으로 보였다
+           (2026-08-21 신고). → 값은 **덮지 않고** 다르면 사실만 한 줄로 말한다.
+           ★ 시작일은 저장값이 항상 있어 유입방식·혼합 조합의 blank-only 폴백이 성립하지 않는다. */
+        window._rfOrderStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(json.orderStartDate || ""))
+          ? String(json.orderStartDate) : "";
+        _renderStartDateOriginNote();
         const _skipWeekendsEl = document.getElementById("rf_skip_weekends");
         if (_skipWeekendsEl) _skipWeekendsEl.checked = c.skip_weekends === true;
         setV("rf_window_start", (c.window_start || "").slice(0, 5));
