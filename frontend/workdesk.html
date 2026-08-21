@@ -7824,6 +7824,18 @@ function beginEditCell(td){
     else if(e.key==='Escape'){ e.preventDefault(); cancel(); }
   });
 }
+/* 원장 되쓰기 결과 — **성공하면 아무 말도 하지 않는다**(담당자가 신경 쓸 일이 아니다).
+   실패했을 때만 한 줄 알린다: 표는 고쳐졌는데 주문원장·리뷰어 화면 금액은 옛 값으로 남는 상태라
+   사람이 모르고 지나가면 안 된다(조용한 실패 금지). 판정은 서버가 준 `ledgerSync` 그대로 쓴다. */
+function _warnLedgerSync(ls){
+  if(!ls || ls.ok) return;
+  const why = ls.disabled ? '원장 쓰기가 꺼져 있습니다(관리자 설정)'
+    : ls.notFound ? '연결된 주문을 찾지 못했습니다'
+    : ls.skipped ? '그 주문을 다른 작업이 편집 중입니다'
+    : ls.badField ? '원장에 되쓸 수 없는 칸입니다'
+    : '원장 반영에 실패했습니다';
+  toast('표는 저장됐지만 주문원장에는 반영되지 않았습니다 — ' + why);
+}
 // 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
 function commitCellEdit(rowId, field, value, td, opt){
   const r=_gridRowById(rowId); if(!r||!field) return;
@@ -7855,6 +7867,7 @@ function commitCellEdit(rowId, field, value, td, opt){
         _recordCellUndo({rowId,field,value,had,prev,td},undoGroup);
         if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); }
         undoGroup.pending=Math.max(0,undoGroup.pending-1); if(!(opt&&opt.undoGroup)) _finishCellUndoGroup(undoGroup);
+        _warnLedgerSync(resp.ledgerSync);   // 원장까지 못 갔으면 그 사실만 말한다(성공은 조용히)
         return true;
       }
       rollback();

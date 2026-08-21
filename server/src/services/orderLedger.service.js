@@ -1357,6 +1357,95 @@ function unmappedSubmittedFields(headers, orderData = {}) {
 //   apply가 order_update(매핑칸 in-place)만 타고 dedup_key/claims를 안 건드리므로 포함 가능(R6 방어).
 const REVERSE_SYNC_FIELDS = ['orderer', 'recipient', 'user_id', 'phone', 'address', 'bank', 'account', 'depositor', 'price', 'order_num', 'memo', 'date_str'];
 
+/** 원장에 **되쓸 수 있는** 필드 — 편집 창구(원장 화면·작업보드)가 공유하는 화이트리스트(사본 금지).
+ *  ★ `selected_opt_key`(옵션)는 역매핑이 비결정적이라 종전대로 화면 편집 대상에만 남긴다. */
+const ORDER_LEDGER_EDIT_FIELDS = [...REVERSE_SYNC_FIELDS, 'selected_opt_key'];
+
+/**
+ * 주문 원장 필드 편집 — **쓰기 단일 출처**.
+ *
+ * ★★ 이 함수를 쓰는 곳이 둘이다(사본 금지):
+ *   ① 관리자 대시보드 `📒 주문원장` 인라인 편집(`POST /api/diag/order-edit`) — 원래 이 코드가 있던 자리
+ *   ② 작업보드 셀 편집의 **원장 반영**(`trackB.editWorkdeskRow` — 사용자 확정 2026-08-21)
+ *   사본을 두면 "원장 화면으로 고치면 작업표까지 맞는데 작업보드로 고치면 원장만 남는" 식으로 갈린다.
+ *
+ * ★ 무시트 탭은 큐 대신 작업표에 바로 재기록한다 — 큐 실행부의 무시트 백스톱이 `order_update` 를
+ *   "작업표 기록 경로가 담당"이라며 done 으로 삼켜, 원장만 바뀌고 작업표·장부에는 영영 반영되지
+ *   않던 결함(2026-08-21)의 수정분을 그대로 옮겨 왔다.
+ * ★ 편집 **직전 값**을 `order_ledger_edit_log` 에 남긴다(134) — 원장 UPDATE 는 덮어쓰기라,
+ *   기록하지 않으면 **리뷰어가 실제로 제출한 값**이 영구히 사라진다(작업보드 오버레이가 append-only
+ *   인 것과 같은 규율). 직원 화면에는 아무 것도 늘지 않는다(마찰 0).
+ *
+ * @param {object} p
+ * @param {string} p.orderSubmissionId
+ * @param {Array<{field:string, oldValue?:string, newValue:string}>} p.edits
+ * @param {string} [p.by]      감사 이력에 남길 편집자
+ * @param {string} [p.source]  'ledger_screen' | 'workdesk_cell' — 어디서 고쳤는지(이력용)
+ * @returns {Promise<object>} { ok } | { skipped } | { notFound } | { disabled } | { badField }
+ */
+async function applyOrderEdit({ orderSubmissionId, edits, by = '', source = 'ledger_screen' } = {}) {
+  const db = getPool();
+  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { disabled: true };
+  const list = Array.isArray(edits) ? edits : [];
+  if (!orderSubmissionId || !list.length) return { badField: true, reason: 'empty' };
+  const clean = [];
+  for (const e of list) {
+    if (!e || !ORDER_LEDGER_EDIT_FIELDS.includes(e.field)) return { badField: true, field: e && e.field };
+    clean.push({ field: e.field, oldValue: e.oldValue == null ? '' : String(e.oldValue), newValue: e.newValue == null ? '' : String(e.newValue) });
+  }
+  const editSeq = Date.now(); // per-order 락 직렬화 하 단조(시트 stale 편집 무시 기준)
+  const { withJobLock } = require('../utils/jobLock');
+  const { enqueue } = require('./syncQueue.service');
+  const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+    // ★ 덮어쓰기 전에 **원장의 현재 값**을 읽어 둔다 — 요청이 실어 온 oldValue 는 화면이 보던
+    //   값이라 그 사이 바뀌었을 수 있다(이력은 DB 가 본 값으로 남겨야 진실이다).
+    const cols = [...new Set(clean.map(e => e.field))];
+    const { rows: before } = await db.query(
+      `SELECT ${cols.join(', ')} FROM order_submissions WHERE id = $1 AND deleted_at IS NULL`, [orderSubmissionId]);
+    if (!before.length) return { notFound: true };
+    const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
+    const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
+    // 심판[치명1]: 편집 확정 즉시 last_edit_seq 단조증가(큐워커 지연 무관) → 무인 역동기가 이 편집을 stale로 인식·보존.
+    const { rows } = await db.query(
+      `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
+              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
+        WHERE id = $1 AND deleted_at IS NULL
+      RETURNING id, mirror_status, sheet_id, tab_name, tab_gid, gid, sheet_row`,
+      [...vals, editSeq]
+    );
+    if (!rows.length) return { notFound: true };
+    const os = rows[0];
+    // 감사 이력 — 실패해도 편집 자체는 살린다(이력 쓰기가 돈 흐름을 막으면 안 된다). 다만 조용히 넘기지 않는다.
+    try {
+      for (const e of clean) {
+        await db.query(
+          `INSERT INTO order_ledger_edit_log (os_id, sheet_id, tab_name, sheet_row, field, old_value, new_value, source, edited_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [orderSubmissionId, os.sheet_id, os.tab_name, os.sheet_row, e.field,
+           before[0][e.field] == null ? '' : String(before[0][e.field]), e.newValue, source, String(by || '').slice(0, 100)]);
+      }
+    } catch (err) { logger.warn(`[orderLedger] 편집 이력 기록 실패 os=${orderSubmissionId}: ${err.message}`); }
+
+    let sheetlessApplied = null;
+    let isSl = false;
+    try { isSl = await require('../utils/sheetlessScope').isSheetless(db, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
+    if (isSl && os.sheet_row) {
+      try {
+        const { rows: full } = await db.query(`SELECT * FROM order_submissions WHERE id = $1`, [orderSubmissionId]);
+        sheetlessApplied = await require('./sheetlessOrder.service').writeOrderToWorktable({
+          sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid || '',
+          sheetRow: os.sheet_row, orderData: _osRowToOrderData(full[0]), orderSubmissionId,
+        });
+      } catch (e) { sheetlessApplied = { ok: false, reason: 'exception', message: e.message }; }
+    }
+    if (!sheetlessApplied || !sheetlessApplied.ok) {
+      await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
+    }
+    return { ok: true, mirrorStatus: os.mirror_status, sheetlessApplied };
+  });
+  return { ...(out || {}), editSeq };
+}
+
 // R1 provenance: DB가 "마지막으로 시트에 쓴 매핑칸 값"의 서명. 정방향 written 시 기록.
 //   detect가 "현재 시트값 == 이 서명"이면 내가 쓴 흔적 → 제외(핑퐁/노이즈 차단).
 //   detect의 _sigFromCells와 동일 필드·순서·정규화를 써야 일치한다.
@@ -1876,6 +1965,9 @@ module.exports = {
   recordReviewIdentity,
   getColLetter,
   computeRowWriteSig,
+  applyOrderEdit,
+  ORDER_LEDGER_EDIT_FIELDS,
+  REVERSE_SYNC_FIELDS,
   detectReverseSyncProposals,
   autoApplyReverseSync,
   rollbackAutoApplied,
