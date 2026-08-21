@@ -91,13 +91,17 @@ t('★ 잠금 tx(client) 에서는 SAVEPOINT 로 격리한다(082 규율)',
   /SAVEPOINT cs_order_quota/.test(svc) && /ROLLBACK TO SAVEPOINT cs_order_quota/.test(svc));
 t('★ 조회 실패는 null — 폴백 미적용(모르면 정원을 좁히지 않는다)',
   /return null;\s*\/\/ ★ 모르면 종전 동작/.test(svc));
-t('★ 소프트삭제된 오더는 근거가 아니다', /w\.deleted_at IS NULL/.test(svc));
+/* ★★ 짝짓기 규칙은 **공유 조각 한 곳**(linkedRecruitQuota)에만 있어야 한다 —
+   여기에 SQL 사본이 되살아나면 "정원은 A 오더, 유입방식은 B 오더"가 생긴다. */
+const lq = fs.readFileSync(path.join(root, 'server/src/services/linkedRecruitQuota.service.js'), 'utf8');
+t('★ 규칙 사본을 만들지 않는다 — 공유 배치 로더를 태운다',
+  /linkedWorkOrdersForCampaigns \} = require\('\.\/linkedRecruitQuota\.service'\)/.test(svc)
+  && !/JOIN work_orders/.test(svc));
+t('★ 소프트삭제된 오더는 근거가 아니다(공유 조각)', /w\.deleted_at IS NULL/.test(lq));
 t('★ 짝짓기 우선순위는 기존 규칙과 같다(역방향 링크 우선 → 정방향)',
-  /NULLIF\(w\.linked_campaign_id, ''\) = c\.id/.test(svc)
-  && /NULLIF\(c\.source_work_order_id, ''\) = w\.id/.test(svc)
-  && /ORDER BY c\.id, \(NULLIF\(w\.linked_campaign_id, ''\) = c\.id\) DESC/.test(svc));
-t('★ 규칙 사본을 만들지 않는다 — linkedRecruitQuota 를 태운다',
-  /require\('\.\/linkedRecruitQuota\.service'\)/.test(svc));
+  /NULLIF\(w\.linked_campaign_id, ''\) = c\.id/.test(lq)
+  && /NULLIF\(c\.source_work_order_id, ''\) = w\.id/.test(lq)
+  && /ORDER BY c\.id, \$\{LINKED_WO_ORDER\}/.test(lq));
 t('★ 이월(pendingCarry) 기준 일건수도 같은 적용값', /const dl = effectiveQuota\(c, counts\)\.dailyLimit;/.test(svc));
 
 /* ★ 여기부터는 실제 실행 검사(await) — CommonJS 라 async IIFE 로 감싼다. */

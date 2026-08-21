@@ -128,21 +128,45 @@ async function rebuildWorktableProjection(worktable, by) {
  * ★ 소프트삭제된 오더는 근거가 아니다.
  * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
  */
+/* ★★ 짝짓기 SQL 조각 — 소비처가 늘어도 **규칙은 여기 한 곳**이다.
+   역방향 링크(`work_orders.linked_campaign_id`) 우선 → 정방향(`recruit_campaigns.source_work_order_id`),
+   같으면 최근 수정 오더. 067 백필·정원 폴백·혼합 조합·유입방식이 전부 이 조각을 태운다. */
+const LINKED_WO_ON = `((NULLIF(w.linked_campaign_id, '') = c.id) OR (NULLIF(c.source_work_order_id, '') = w.id))`;
+const LINKED_WO_ORDER = `(NULLIF(w.linked_campaign_id, '') = c.id) DESC, w.updated_at DESC`;
+
+/**
+ * 공고들에 연결된 작업오더 일괄 조회 → Map(campaignId → 그 오더의 요청 컬럼).
+ *
+ * ★ 소프트삭제된 오더는 근거가 아니다.
+ * ★ 컬럼 이름은 화이트리스트 정규식으로 검증한다(문자열 조립 — 주입 차단).
+ * ★ `db` 를 받는다 — 잠금 트랜잭션의 client 로도 부를 수 있어야 한다(SAVEPOINT 격리는 호출부 몫).
+ */
+async function linkedWorkOrdersForCampaigns(db, ids, columns = ['recruit_count']) {
+  const list = (Array.isArray(ids) ? ids : []).filter(Boolean).map(String);
+  const safe = (Array.isArray(columns) ? columns : []).filter(c => /^[a-z_][a-z0-9_]*$/.test(String(c)));
+  if (!list.length || !safe.length || !db || typeof db.query !== 'function') return new Map();
+  const cols = safe.map(c => `w.${c}`).join(', ');
+  const { rows } = await db.query(
+    `SELECT DISTINCT ON (c.id) c.id AS campaign_id, ${cols}
+       FROM recruit_campaigns c
+       JOIN work_orders w ON ${LINKED_WO_ON}
+      WHERE c.id = ANY($1) AND w.deleted_at IS NULL
+      ORDER BY c.id, ${LINKED_WO_ORDER}`,
+    [list]
+  );
+  const out = new Map();
+  for (const r of rows) {
+    const { campaign_id: cid, ...rest } = r;
+    out.set(cid, rest);
+  }
+  return out;
+}
+
+/** 단건 — 배치와 **같은 규칙**을 태운다(사본 0). */
 async function linkedWorkOrderForCampaign(campaign, columns = ['recruit_count']) {
   if (!campaign || !campaign.id) return null;
-  const safe = (Array.isArray(columns) ? columns : []).filter(c => /^[a-z_][a-z0-9_]*$/.test(String(c)));
-  if (!safe.length) return null;
-  const sourceId = String(campaign.source_work_order_id || '').trim();
-  const { rows } = await pool.query(
-    `SELECT ${safe.join(', ')}
-       FROM work_orders
-      WHERE deleted_at IS NULL
-        AND ((linked_campaign_id = $1 AND $1 <> '') OR (id = $2 AND $2 <> ''))
-      ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
-      LIMIT 1`,
-    [String(campaign.id), sourceId]
-  );
-  return rows[0] || null;
+  const m = await linkedWorkOrdersForCampaigns(pool, [campaign.id], columns);
+  return m.get(String(campaign.id)) || null;
 }
 
 /** 연결 작업오더의 모집인원으로 레거시 공고의 표시 총정원을 보완한다(읽기 전용). */
@@ -377,6 +401,7 @@ module.exports = {
   displayRecruitTotal,
   displayRecruitTotalForCampaign,
   linkedWorkOrderForCampaign,
+  linkedWorkOrdersForCampaigns,
   worktableSlotDelta,
   firstRoundQuota,
   allocateOptionQuotas,
