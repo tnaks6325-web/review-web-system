@@ -97,8 +97,10 @@ console.log('\n[B2] 계산 위치 — 마스킹 전 · 뺀 줄(_hidden) 뒤');
   const iMask = src.indexOf('if (maskPII) { syn.phone8 = _mask(');
   ok('★ 카운트는 _hidden continue **뒤**(화면에서 뺀 줄은 안 센다)', iHidden > 0 && iFilled > iHidden);
   ok('★ 카운트는 마스킹 **앞**(광고주 렌즈를 거친 뒤 세면 전 줄이 채워짐으로 뒤집힌다)', iMask > 0 && iFilled < iMask);
+  // ⚠ 제출물 미리보기(2026-08-21)가 같은 import 에서 `numberColumnKey` 도 가져오며 형태가 바뀌었다.
+  //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
   ok('판정 사본 없음 — utils 를 import 해 쓴다',
-    /isFilledRow: _isFilledRow \} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
+    /isFilledRow: _isFilledRow[\s\S]{0,80}\} = require\('\.\.\/utils\/rowNumbering'\)/.test(src));
 }
 
 console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실행');
@@ -107,7 +109,11 @@ console.log('\n[C][D] 화면 게이지 — summaryStrip 을 vm 으로 실제 실
   const start = html.indexOf('function summaryStrip(wd,d,m,c){');
   assert(start > 0, 'summaryStrip 을 찾지 못했다');
   const end = html.indexOf('\n}', html.indexOf('return `<div class="tp3grid c3', start)) + 2;
-  const code = html.slice(start, end);
+  /* ★ 분모(`_rvFilledOf`)는 제출물 미리보기와 **같은 함수**를 쓴다(사본 0, 2026-08-21).
+     스텁으로 대신하면 그 단일 출처가 깨져도 이 가드가 통과하므로 **구현을 그대로 꺼내** 넣는다. */
+  const iF = html.indexOf('function _rvFilledOf(c){');
+  assert(iF > 0, '_rvFilledOf 을 찾지 못했다 — 게이지 분모가 다른 곳에서 만들어지고 있다');
+  const code = html.slice(iF, html.indexOf('\n', iF)) + '\n' + html.slice(start, end);
   const sandbox = {
     esc: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
     parseTabMeta: () => ({}),
