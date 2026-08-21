@@ -2621,67 +2621,26 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
 //   쓰기 3종은 ORDER_LEDGER_WRITE_ENABLED='true'에서만 동작(롤링배포·점진 활성 게이트).
 //   편집/취소는 per-order 락(order_ledger:<id>)로 DB UPDATE 직렬화 → 큐(order_update/order_cancel)로 in-place 시트반영.
 // ═══════════════════════════════════════════════════════════
-const _ORDER_LEDGER_EDIT_FIELDS = ['orderer','recipient','user_id','phone','address','bank','account','depositor','price','order_num','memo','date_str','selected_opt_key'];
-
-// POST /api/diag/order-edit — 주문 필드 편집 → DB 즉시 + 큐(order_update) in-place 시트반영
+// POST /api/diag/order-edit — 주문 필드 편집 → DB 즉시 + 작업표 재기록(무시트) 또는 큐(order_update) 시트반영
+//   ★★ 판정·쓰기는 `orderLedger.applyOrderEdit` **단일 출처**다(2026-08-21) — 작업보드 셀 편집의
+//     원장 반영이 같은 함수를 쓴다. 여기 사본을 되살리면 두 창구가 조용히 갈린다.
 router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
     const { orderSubmissionId } = req.body || {};
     const edits = Array.isArray(req.body?.edits) ? req.body.edits : [];
     if (!orderSubmissionId || !edits.length) return res.status(400).json({ ok: false, error: 'orderSubmissionId, edits 필수' });
-    const clean = [];
-    for (const e of edits) {
-      if (!e || !_ORDER_LEDGER_EDIT_FIELDS.includes(e.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 편집 필드: ${e && e.field}` });
-      clean.push({ field: e.field, oldValue: e.oldValue == null ? '' : String(e.oldValue), newValue: e.newValue == null ? '' : String(e.newValue) });
-    }
-    const editSeq = Date.now(); // per-order 락 직렬화 하 단조(시트 stale 편집 무시 기준)
-    const { withJobLock } = require('../utils/jobLock');
-    const { enqueue } = require('../services/syncQueue.service');
-    const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
-      const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
-      const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
-      // 심판[치명1]: 편집 확정 즉시 last_edit_seq 단조증가(큐워커 지연 무관) → 무인 역동기가 이 편집을 stale로 인식·보존.
-      const { rows } = await pool.query(
-        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
-                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
-          WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, mirror_status, sheet_id, tab_name, tab_gid, gid, sheet_row`,
-        [...vals, editSeq]
-      );
-      if (!rows.length) return { notFound: true };
-      /* ★★ 무시트 탭은 큐 대신 작업표에 바로 재기록한다 (2026-08-21 실측 결함 수정).
-         종전엔 order_update 를 그대로 큐에 넣었는데 큐 실행부의 무시트 백스톱이 그 항목을
-         "작업표 기록 경로가 담당"이라며 done 으로 삼켰고, **update 는 그 경로가 없어** 관리자
-         주문 편집이 원장(DB)에만 남고 작업표 row_json·장부(검색·리뷰어 화면)에는 영영 반영되지
-         않았다(조용한 소실). 실행부는 manualOrder ④ 와 같은 `writeOrderToWorktable` 한 벌 —
-         기존 연결 행(order_submission_id)을 잠가 최신 DB 값으로 병합하고 장부까지 재생성한다.
-         ★ 판정 실패·기록 실패는 종전 경로(enqueue) 폴백 — 백스톱이 삼키는 건 같지만 동작이
-           조용히 나빠지지는 않고, 응답 `sheetlessApplied` 로 사실을 말한다(조용한 누락 금지). */
-      const os = rows[0];
-      let sheetlessApplied = null;
-      let isSl = false;
-      try { isSl = await require('../utils/sheetlessScope').isSheetless(pool, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
-      if (isSl && os.sheet_row) {
-        try {
-          const { rows: full } = await pool.query(`SELECT * FROM order_submissions WHERE id = $1`, [orderSubmissionId]);
-          const { _osRowToOrderData } = require('../services/orderLedger.service');
-          sheetlessApplied = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
-            sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid || '',
-            sheetRow: os.sheet_row, orderData: _osRowToOrderData(full[0]), orderSubmissionId,
-          });
-        } catch (e) { sheetlessApplied = { ok: false, reason: 'exception', message: e.message }; }
-      }
-      if (!sheetlessApplied || !sheetlessApplied.ok) {
-        await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
-      }
-      return { mirrorStatus: os.mirror_status, sheetlessApplied };
+    const { applyOrderEdit } = require('../services/orderLedger.service');
+    const out = await applyOrderEdit({
+      orderSubmissionId, edits, source: 'ledger_screen',
+      by: (req.user && (req.user.username || req.user.name)) || '',
     });
-    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
-    if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
+    if (out.disabled) return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
+    if (out.badField) return res.status(400).json({ ok: false, error: `허용되지 않은 편집 필드: ${out.field}` });
+    if (out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
+    if (out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
     require('../jobs/queuePump').kickQueuePump();
     require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
-    res.json({ ok: true, queued: !(out.sheetlessApplied && out.sheetlessApplied.ok), editSeq, sheetlessApplied: out.sheetlessApplied || null });
+    res.json({ ok: true, queued: !(out.sheetlessApplied && out.sheetlessApplied.ok), editSeq: out.editSeq, sheetlessApplied: out.sheetlessApplied || null });
   } catch (err) { next(err); }
 });
 
@@ -2736,8 +2695,10 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
     if (!rows.length) return res.status(404).json({ ok: false, error: 'not_found_or_resolved' });
     const p = rows[0];
     if (p.proposal_type === 'cancel_suspect') return res.status(409).json({ ok: false, error: 'cancel은 order-cancel 엔드포인트로 명시 처리하세요' }); // R4
-    // G1: field 화이트리스트 재검증(인젝션/오염 방어).
-    if (!_ORDER_LEDGER_EDIT_FIELDS.includes(p.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 필드: ${p.field}` });
+    // G1: field 화이트리스트 재검증(인젝션/오염 방어). ★ 목록은 orderLedger 단일 출처(사본 금지).
+    if (!require('../services/orderLedger.service').ORDER_LEDGER_EDIT_FIELDS.includes(p.field)) {
+      return res.status(400).json({ ok: false, error: `허용되지 않은 필드: ${p.field}` });
+    }
 
     const by = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
     const editSeq = Date.now();
