@@ -336,7 +336,10 @@ async function run() {
     && /function _rvPopRender\(\)/.test(src)
     && /<aside class="rvplist">/.test(src)
     && /class="rvpclose"[^>]*onclick="_rvPopClose\(\)"/.test(src)
-    && /\.rvpop\{width:min\(1100px,calc\(100vw - 56px\)\);height:min\(720px,calc\(100vh - 56px\)\);[\s\S]{0,140}grid-template-columns:260px minmax\(0,1fr\)/.test(css));
+    // ⚠ 제출물 미리보기(2026-08-21) — 목록이 4열(번호/수취인/🛒/📷)이 되며 폭이 늘었고
+    //    무대가 좌우 2분할이 됐다. 검사 의미는 불변 — 팝업은 [작성자 목록 | 무대] 2단이다.
+    && /\.rvpop\{width:min\(\d+px,calc\(100vw - 56px\)\);height:min\(720px,calc\(100vh - 56px\)\);[\s\S]{0,140}grid-template-columns:\d+px minmax\(0,1fr\)/.test(css)
+    && /<div class="rvpcols">/.test(src));
 
   console.log(`\n✅ advertiserViewer: ${n} cases passed`);
 }
