@@ -81,8 +81,30 @@ console.log('\n[A] 정적 — meta 는 SQL 에서 접는다');
          JOIN cs_threads t ON t.id = m.thread_id WHERE t.reviewer_phone8 = $1`, [p8b]);
     ok('★ 카드 경로는 종전 그대로(meta 보존)',
       cr.length === 1 && cr[0].msg_type === 'inspect_result' && cr[0].kind === 'duplicate', JSON.stringify(cr));
+
+    /* ── C. 원자성 — 메시지가 실패하면 **빈 방을 남기지 않는다** ─────────────────────
+       종전 구조는 방을 먼저 만들며 `last_message_preview` 까지 채우고 메시지를 따로 넣어,
+       메시지가 실패하면 **목록에는 보낸 것처럼 보이는데 열면 비어 있는 방**이 남았다(실측 신고).
+       진짜 실패를 주입해 되돌려지는지 본다(스텁으로는 못 만드는 상황). */
+    const p8c = '97' + String(Date.now()).slice(-6);
+    await pool.query(`CREATE OR REPLACE FUNCTION _guard_boom() RETURNS trigger AS $$
+      BEGIN IF NEW.content = '__GUARD_BOOM__' THEN RAISE EXCEPTION 'boom'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER _guard_boom_t BEFORE INSERT ON cs_messages
+      FOR EACH ROW EXECUTE FUNCTION _guard_boom()`);
+    let boomErr = null;
+    const boom = await CSB.postAdminNotice({
+      sheetId: 'guard_sheet', tabName: tab + 'c', rowIndex: 3,
+      reviewerName: '가드', phone8: p8c, message: '__GUARD_BOOM__', by: '가드',
+      onError: (e) => { boomErr = e; },
+    });
+    await pool.query('DROP TRIGGER IF EXISTS _guard_boom_t ON cs_messages').catch(() => {});
+    await pool.query('DROP FUNCTION IF EXISTS _guard_boom()').catch(() => {});
+    ok('메시지 실패는 null 을 돌려준다(계약 유지·throw 없음)', boom === null && !!boomErr);
+    const { rows: ghost } = await pool.query(
+      `SELECT id, last_message_preview AS p FROM cs_threads WHERE reviewer_phone8=$1`, [p8c]);
+    ok('★★ 메시지가 실패하면 **빈 방이 남지 않는다**(트랜잭션 롤백)', ghost.length === 0, JSON.stringify(ghost));
   } finally {
-    await pool.query(`DELETE FROM cs_threads WHERE reviewer_phone8 LIKE '9%' AND campaign_key LIKE 'guard_sheet%'`).catch(() => {});
+    await pool.query(`DELETE FROM cs_threads WHERE campaign_key LIKE 'guard_sheet%'`).catch(() => {});
   }
   console.log(`\n${fail ? '✗ 실패 ' + fail + '건 / ' : '✓ '}${n}개 검사 통과`);
   process.exit(fail ? 1 : 0);
