@@ -100,6 +100,86 @@ t('★ 규칙 사본을 만들지 않는다 — linkedRecruitQuota 를 태운다
   /require\('\.\/linkedRecruitQuota\.service'\)/.test(svc));
 t('★ 이월(pendingCarry) 기준 일건수도 같은 적용값', /const dl = effectiveQuota\(c, counts\)\.dailyLimit;/.test(svc));
 
+/* ★ 여기부터는 실제 실행 검사(await) — CommonJS 라 async IIFE 로 감싼다. */
+(async () => {
+console.log('\n── E2. 로더 실행(정적 검사로는 못 잡는 자리) ──');
+{
+  /* ★★ 문자열 검사만으로는 "SAVEPOINT 를 잡는 줄만 지운" 변이를 통과시킨다(실측) —
+     잠금 tx 를 흉내 낸 스텁 client 로 **실제 실행**해 격리를 확인한다. */
+  const mkClient = (fail) => {
+    const seen = [];
+    return {
+      seen,
+      release() {},                       // ← 체크아웃된 클라이언트 = 잠금 tx 가능성
+      async query(sql, params) {
+        seen.push(String(sql).trim().split('\n')[0].trim());
+        if (/FROM work_orders|JOIN work_orders/.test(sql)) {
+          if (fail) throw Object.assign(new Error('boom'), { code: '42P01' });
+          return { rows: [{ campaign_id: 'c1', recruit_count: 100, daily_count: 9 }] };
+        }
+        return { rows: [] };
+      },
+    };
+  };
+  const ok = mkClient(false);
+  const m1 = await S.fetchCampaignCounts(ok, ['c1'], new Date());
+  t('잠금 tx(client) 에서 SAVEPOINT 를 실제로 잡는다',
+    ok.seen.some(q => /^SAVEPOINT cs_order_quota/.test(q)));
+  t('발주 정원이 counts 에 실제로 실린다', m1.get('c1').orderQuota.recruitCount === 100
+    && m1.get('c1').orderQuota.dailyCount === 9);
+
+  const bad = mkClient(true);
+  const m2 = await S.fetchCampaignCounts(bad, ['c1'], new Date());
+  t('★ 실패해도 ROLLBACK TO SAVEPOINT 로 tx 를 살린다(082 — 실패 쿼리 하나가 tx 전체를 죽이지 않게)',
+    bad.seen.some(q => /^ROLLBACK TO SAVEPOINT cs_order_quota/.test(q)));
+  t('★ 실패 = 재료 미부착(null) — 정원을 좁히지 않는다', m2.get('c1').orderQuota === null);
+}
+
+console.log('\n── E3. 작업 조건 재료(tabConditionSummary) 실행 ──');
+{
+  /* ★ 이 함수는 export 되지 않는다(workboardTopC 와 같은 방식으로 소스를 꺼내 실행).
+     정적 패턴만 보면 `campQuota` 를 계산해 두고 **쓰지 않는** 변이를 통과시킨다(실측). */
+  const tb = fs.readFileSync(path.join(root, 'server/src/services/trackB.service.js'), 'utf8');
+  const st = tb.indexOf('async function tabConditionSummary(');
+  const en = tb.indexOf('\nasync function ', st + 10) >= 0
+    ? tb.indexOf('\nasync function ', st + 10) : tb.indexOf('\nfunction ', st + 10);
+  const src = tb.slice(st, en);
+  const sandbox = {
+    require: (m) => require(m.startsWith('.') ? path.join(root, 'server/src/services', m) : m),
+    _condWoOptions: () => [],
+    logger: { warn() {}, info() {} },
+    module: {}, exports: {},
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(src + '\nmodule.exports = tabConditionSummary;', sandbox);
+  const run = sandbox.module.exports;
+  const db = { async query(sql) {
+    if (/FROM recruit_campaigns/.test(sql)) {
+      return { rows: [{ id: 'c1', title: 'T', recruitTotal: 0, dailyLimit: 0, channel: '네이버',
+        channelCustom: '', reviewType: '', reviewFee: 0, transferMemo: '모기만두',
+        multiAccount: false, multiDailyLimit: 0, status: 'active', participationMode: true }] };
+    }
+    return { rows: [] };
+  } };
+  const wo = { recruitCount: 100, dailyCount: 9, productOption: 'P', payAmount: 13800 };
+  const out = await run(db, { sheetId: 's1', tabName: 't1', meta: { tabGid: '1' }, wo });
+  t('★ 공고 0 이면 발주 총건수가 실린다 — `총건수 0 건` 을 그리지 않는다', out.recruitTotal === 100);
+  t('★ 일건수도 같은 규칙', out.dailyLimit === 9);
+  t('★ 출처를 함께 실어 화면이 "발주 기준"이라고 말할 수 있다',
+    out.recruitTotalSource === 'work_order' && out.dailyLimitSource === 'work_order');
+  t('★ 발주 원값도 함께 — 일건수 칸이 두 값을 나란히 적는 재료', out.orderDailyCount === 9);
+
+  const out2 = await run({ async query(sql) {
+    if (/FROM recruit_campaigns/.test(sql)) {
+      return { rows: [{ id: 'c1', recruitTotal: 30, dailyLimit: 5, channel: '', channelCustom: '',
+        reviewType: '', reviewFee: 0, transferMemo: '', multiAccount: false, multiDailyLimit: 0,
+        status: 'active', participationMode: true }] };
+    }
+    return { rows: [] };
+  } }, { sheetId: 's1', tabName: 't1', meta: {}, wo });
+  t('★ 공고에 값이 있으면 발주가 이기지 않는다', out2.recruitTotal === 30 && out2.recruitTotalSource === 'campaign');
+}
+
 console.log('\n── F. 비영속(완화 금지) ──');
 const hold = fs.readFileSync(path.join(root, 'server/src/services/campaignHold.service.js'), 'utf8');
 t('★ maybePersistClosed 는 DB recruit_total 만 본다 — 폴백으로 closed 가 굳지 않는다',
@@ -134,3 +214,4 @@ t('일건수는 발주값과 공고 오늘값을 함께 적는다(사용자 확�
 }
 
 console.log(`\n✅ orderQuotaFallback: ${pass} cases passed`);
+})().catch(e => { console.error(e); process.exit(1); });
