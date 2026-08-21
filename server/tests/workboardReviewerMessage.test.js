@@ -189,8 +189,10 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     const res = await call('post', '/cs/notify-participants', { body: { sheetId: 's', tabName: 't', participantIds: ['p1', 'p2'], content: '안내드립니다' } });
     ok('★ 같은 본계정은 한 번만 보낸다(같은 방에 같은 글 두 번 금지)', sentTo.length === 1, 'calls=' + sentTo.length);
     ok('합쳐진 줄을 조용히 버리지 않고 건수를 말한다', res.body.merged.length === 1);
-    ok('보낸 결과에 연락처 전체를 싣지 않는다(뒤 4자리만)',
-      res.body.sent[0].phone8Tail === '7191' && !JSON.stringify(res.body.sent).includes('82217191'));
+    /* 받는 사람 확인용 **전체 연락처**(사용자 확정 2026-08-21 — 뒤 4자리로는 누구인지 알 수 없다).
+       ★ 내부인 전용 화면이고 작업보드 표에도 연락처가 그대로 보인다(광고주는 라우터가 막는다). */
+    ok('보낸 결과에 받는 사람 연락처가 실린다(뒤 4자리는 폴백으로 유지)',
+      res.body.sent[0].phone8Tail === '7191' && 'phone' in res.body.sent[0]);
 
     // expect 불일치 = 미리보기 이후 대상이 바뀜 → 보내지 않는다
     sentTo.length = 0;
@@ -228,6 +230,9 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     ok('★ 문의방은 목록 행을 눌러서 연다(이름·연락처를 화면에 한 번 더 싣지 않는다)',
       /cs-room-row\[data-tid=/.test(WD) && /row\.click\(\)/.test(WD));
     ok('전송 실패 시 입력 내용을 지우지 않는다', /입력한 내용은 그대로 둔다/.test(WD));
+    ok('★ 연락처는 등록 원장 값을 쓴다 — phone8 앞에 010 을 지어내지 않는다',
+      /const full=String\(\(x&&x\.phone\)\|\|\(x&&x\.phoneFull\)\|\|''\)/.test(WD)
+      && !/'010-'\+.*phone8/.test(WD.slice(WD.indexOf('function _rmPhone'), WD.indexOf('function _rmSendable'))));
     ok('★ 프론트에 판정 사본 0(owner_phone8·participation_links 문자열 없음)',
       !/owner_phone8/.test(WD) && !/participation_links/.test(WD));
 

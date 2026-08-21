@@ -8426,7 +8426,7 @@ function _rmPaint(){
   const seen=new Set(), uniq=[]; oks.forEach(x=>{ if(seen.has(x.phone8)) return; seen.add(x.phone8); uniq.push(x); });
   const line=x=>`<div class="rmitem">
       <div class="rmwho"><b>${esc(x.name||x.rowName||'(이름 없음)')}</b>
-        <span class="rmnum">···${esc(String(x.phone8||'').slice(-4))}</span>
+        <span class="rmnum">${esc(_rmPhone(x))}</span>
         ${x.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>
       <span class="rmwhy">${x.isSub?`표의 명의는 <b>${esc(x.rowName||'')}</b> — 로그인 본계정으로 보냅니다`
         :(x.nameMismatch?`표 이름 <b>${esc(x.rowName||'')}</b> ↔ 등록 이름 <b>${esc(x.name||'')}</b> · 확인해 주세요`
@@ -8445,6 +8445,15 @@ function _rmPaint(){
   const old=document.getElementById('rmBad');
   if(old && !bad.length) old.remove();
   _rmPaintFoot();
+}
+/* 받는 사람 연락처 표기 — **등록된 실제 번호**를 그대로 보여준다(사용자 확정 2026-08-21:
+   뒤 4자리로는 누구인지 확인이 안 된다). ★ 번호를 못 받았으면(구버전 백엔드·모호) 뒤 4자리로 접는다 —
+   `phone8` 앞에 `010` 을 붙여 **지어내지 않는다**. 형식 통일은 표와 같은 `_fmtPhone` 단일 출처. */
+function _rmPhone(x){
+  const full=String((x&&x.phone)||(x&&x.phoneFull)||'').trim();
+  if(full) return _fmtPhone(full);
+  const tail=String((x&&x.phone8Tail)||String((x&&x.phone8)||'').slice(-4)||'').trim();
+  return tail?('···'+tail):'';
 }
 function _rmSendable(){ return !!(_RM && !_RM.busy && (_RM.items||[]).some(x=>x.ok)); }
 function _rmPaintFoot(){
@@ -8492,7 +8501,7 @@ function _rmRenderResult(){
   const b=document.getElementById('rmBody'), f=document.getElementById('rmFoot'); if(!b||!f) return;
   const d=_RM.sent||{}, sent=d.sent||[], failed=d.failed||[], merged=d.merged||[];
   b.innerHTML=`<div class="rmok"><b>${sent.length}명에게 보냈습니다.</b>
-      ${sent.slice(0,8).map(s=>`<div class="rmitem"><div class="rmwho"><b>${esc(s.name||'')}</b><span class="rmnum">···${esc(s.phone8Tail||'')}</span>${s.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>${s.isSub?'<span class="rmwhy">로그인 본계정으로 보냈습니다</span>':''}</div>`).join('')}
+      ${sent.slice(0,8).map(s=>`<div class="rmitem"><div class="rmwho"><b>${esc(s.name||'')}</b><span class="rmnum">${esc(_rmPhone(s))}</span>${s.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>${s.isSub?'<span class="rmwhy">로그인 본계정으로 보냈습니다</span>':''}</div>`).join('')}
       ${sent.length>8?`<div class="rmwhy">외 ${sent.length-8}명</div>`:''}</div>
     ${merged.length?`<div class="rmwarn">같은 리뷰어의 줄 ${merged.length}건은 <b>같은 문의방</b>이라 한 번만 보냈습니다.</div>`:''}
     ${failed.length?`<div class="rmbad"><b>보내지 못한 줄 ${failed.length}건</b>${
