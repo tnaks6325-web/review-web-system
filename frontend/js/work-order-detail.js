@@ -955,7 +955,7 @@ function woAdminEditModal(order, opts) {
   /* 공고가 이기는 칸에는 그 사실을 한 줄로 덧붙인다(조용한 no-op 오해 방지). */
   function ch(base, what) {
     if (!linkedCamp) return base || "";
-    var add = "연결된 모집공고의 " + what + "이(가) 리뷰어 화면·정원에 우선합니다.";
+    var add = "리뷰어 화면·정원에는 연결된 모집공고의 " + what + " 값이 우선합니다.";
     return base ? (base + " " + add) : add;
   }
 
