@@ -42,7 +42,12 @@ assert(campaign.includes("'/api/campaign/popular-status?phone8='"),
   assert(i > 0, 'apply 403 popular_locked 분기가 있어야 한다');
   const blk = campaign.slice(i, i + 900).split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   assert(blk.includes('_popSubCredits[_subP8]'), '타계정 시도의 수치는 그 명의 칸에 기록해야 한다');
-  assert(blk.includes('_setPopCredit(j)'), '본계정 시도는 본계정 수치를 갱신해야 한다');
+  // ★ 본계정 갱신은 **else 분기 안 한 번뿐** — 밖에서 한 번 더 부르면 타계정 수치가
+  //   본계정을 덮어 화면이 남의 명의 수치를 본계정으로 말한다(변이시험이 통과시켰던 구멍).
+  assert.equal((blk.match(/_setPopCredit\(j\)/g) || []).length, 1,
+    '본계정 수치 갱신은 else 분기 한 곳뿐이어야 한다');
+  assert(/\}else\{\s*_setPopCredit\(j\);\s*\}/.test(blk),
+    '본계정 시도(else 분기)에서만 본계정 수치를 갱신해야 한다');
   assert(blk.includes('_applyPopLock()'), '수치 갱신 뒤 잠금을 다시 적용해야 한다');
 }
 assert(campaign.includes('const info = gateInfo || _popCredit;'),
