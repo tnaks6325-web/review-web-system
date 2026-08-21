@@ -165,7 +165,10 @@ async function getPlanOverview(campaignId) {
       if (sheetlessLinked) {
         const { readWorktableDates } = require('./sheetlessDailyPlan.service');
         const read = await readWorktableDates({ sheetId: camp.linked_sheet_id, tabName: camp.linked_tab_name });
-        if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({ date, slots: read.byDate[date] }));
+        // filled = 그날 이미 참여·주문이 있는 줄 수 — 재배분이 "0 으로 닫아도 되는 날"을 가리는 하한
+        if (read.ok) worktableDates = Object.keys(read.byDate).sort().map(date => ({
+          date, slots: read.byDate[date], filled: (read.filledByDate || {})[date] || 0,
+        }));
         else logger.warn(`[campaignPlan] 작업표 날짜 기준 조회 실패 camp=${camp.id}: ${read.reason}`);
       }
     }
