@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
@@ -1852,6 +1852,29 @@ router.get('/image/:id', async (req, res) => {
     logger.warn(`[drive] image 프록시 실패(${id}): ${err.message} → thumbnail 폴백`);
     return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/orphan-capture-cleanup — 고아 캡처(A종류: 링크 끊김) 미리보기·정리
+//
+// 크론(매일 04:40, `ORPHAN_CAPTURE_CLEAN`)이 하는 일과 **완전히 같은 함수**를 부른다.
+//   사본을 두면 "자동 정리와 손으로 누른 정리가 다른 것을 지우는" 드리프트가 생긴다.
+//
+// body: { dryRun? (기본 true), fileIds?: string[] }
+//   ★ fileIds 를 줘도 서버가 후보를 다시 골라 **교집합**만 처리한다(화면 목록 불신).
+//   ★ 삭제는 휴지통만(30일 복구창) — 영구삭제 API 를 쓰지 않는다.
+// ═══════════════════════════════════════════════════════════
+router.post('/orphan-capture-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun, fileIds } = req.body || {};
+    const { trashOrphanCaptures } = require('../services/orphanCaptureCleanup.service');
+    const out = await trashOrphanCaptures({
+      dryRun: dryRun !== false,          // ★ 기본 미리보기 — 실행은 dryRun:false 를 명시해야만
+      fileIds: Array.isArray(fileIds) && fileIds.length ? fileIds : null,
+      by: (req.admin && req.admin.name) || 'admin',
+    });
+    return res.json(out);
+  } catch (err) { return next(err); }
 });
 
 module.exports = router;

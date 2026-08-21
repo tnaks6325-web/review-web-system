@@ -187,12 +187,15 @@ ok('★ _finBarHtml 루트가 id="finBar" 를 유지한다(_finRefresh 의 outer
   const roots = m[0].match(/<span class="tp3fin" id="finBar">/g) || [];
   return roots.length === 2 && /document\.getElementById\('finBar'\)/.test(src);
 })());
+/* ★ 2026-08-21 조건부 노출 도입 — 메뉴 내용은 `_mhMenuHtml()` 이 그리고, 진실원천 전환 버튼은
+     `STATE._flipBtnHtml` 로 넘어간다(헤더 렌더의 지역변수로는 재렌더 때 못 읽는다).
+     검사 의미는 그대로 — **master 도구 3종이 메뉴 안에 있고 제목 행에 낱개로 안 나온다**. */
 ok('★ master 도구 3종이 [⋯] 메뉴 안에 있다(주 행동 [마감]이 오른쪽 끝을 갖는다)', (() => {
-  const m = src.match(/<span class="mhtools" id="mhTools">[\s\S]*?<\/span><\/span>/);
+  const m = src.match(/function _mhMenuHtml\(\)\{[\s\S]*?\n\}/);
   if (!m) return false;
-  // 진실원천 전환 버튼은 const flipBtn 으로 조립돼 메뉴에 ${flipBtn} 으로 들어간다
-  return /\$\{flipBtn\}/.test(m[0]) && /showWritebackSim\(\)/.test(m[0]) && /id="projBtn"/.test(m[0])
-    && /const flipBtn=isMaster\?`<button class="btn" id="sotBtn"/.test(src);
+  return /STATE\._flipBtnHtml/.test(m[0]) && /showWritebackSim\(\)/.test(m[0]) && /id="projBtn"/.test(m[0])
+    && /STATE\._flipBtnHtml=isMaster\?`<button class="btn" id="sotBtn"/.test(src)
+    && /<span class="mhmenu" id="mhMenuBox">\$\{_mhMenuHtml\(\)\}<\/span>/.test(src);
 })());
 ok('★ 도구 버튼이 제목 행에 낱개로 남아 있지 않다(메뉴 밖 노출 0)', (() => {
   const mh = src.match(/<div class="mh mh-wb">[\s\S]*?<\/div>\n/);

@@ -291,20 +291,18 @@ console.log('\n[C] 게이트 · 미리보기');
   }
 
   /* ── I. 화면 ─────────────────────────────────────────────────────────── */
-  console.log('\n[I] 화면 배선');
+  /* ★★ 2026-08-21 사용자 확정: [🧩 옵션 열] 버튼을 [⋯] 메뉴에서 **제거**했다.
+       `worktablePlan` 이 옵션 배분이 있는데 칸이 없으면 자동으로 덧붙이고(`option_column_added`)
+       공고 저장도 연결 작업표에 칸을 보장하므로, 지금 이후 만들어지는 작업에는 이 창구가
+       필요 없다. **서버 창구(`POST /api/trackb/worktable/option-column`)는 그대로 남긴다**
+       — 2026-08-20 이전에 만들어진 표의 소급 기입 경로가 사라지면 막다른 길이 된다.
+       여기서는 그 계약을 뒤집어 고정한다: 화면에 없다 · 서버에는 있다. */
+  console.log('\n[I] 화면 배선 — 버튼 제거 고정');
   {
     const h = read('../frontend/workdesk.html');
-    ok('[⋯] 메뉴에 [🧩 옵션 열] 이 있다', /onclick="openOptColModal\(\)"/.test(h));
-    ok('메뉴 노출 조건에 합류했다', /_rnCanRenumber\(\)\|\|_ocCan\(\)/.test(h));
-    ok('★ 서버 게이트와 1:1(adminOrMaster)', /function _ocCan\(\)\{[\s\S]{0,220}role === 'master'[\s\S]{0,60}'admin'/.test(h));
-    ok('★ 무시트 탭에서만', /function _ocCan\(\)\{[\s\S]{0,160}sheetless === true/.test(h));
-    ok('★ 팝업은 body 직속', /ocOv[\s\S]{0,400}document\.body\.appendChild\(ov\)/.test(h));
-    ok('★ Esc 리스너는 최상위 1회', /window\._ocKeyBound/.test(h));
-    ok('실행은 confirm 경유', /function ocRun\(\)[\s\S]{0,900}if \(!confirm\(/.test(h));
-    ok('★ 실행 요청에만 confirm:true', /ocRun[\s\S]{0,1200}confirm: true/.test(h));
-    ok('onclick 에 시트발 문자열 보간 없음', !/openOptColModal\('/.test(h));
-    ok('★ 이 공고의 옵션 목록을 화면이 보여준다', /liveOptionKeys/.test(h));
-    ok('★ 옵션이 아니라 건너뛴 줄을 말한다', /skippedNotAnOption/.test(h));
+    ok('★ [⋯] 메뉴에 [🧩 옵션 열] 이 없다', !/openOptColModal/.test(h));
+    ok('★ 모달 코드도 남아 있지 않다(죽은 코드 금지)', !/_ocCan|_ocRender|function ocRun/.test(h));
+    ok('★ 메뉴 노출 조건에서도 빠졌다', !/_ocCan\(\)/.test(h));
   }
 
   console.log(`\n✅ worktableOptionColumn — ${passed} 케이스 통과`);

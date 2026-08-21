@@ -84,15 +84,14 @@ console.log('\n[A] 쓰기 소유자 — campaign_participants 쓰기는 particip
 
 console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부');
 {
-  ok('retireRows 를 내보낸다', typeof L.retireRows === 'function' && typeof P.retireRows === 'function');
-  /* ★ 파일 전체를 보면 다른 라우트(slot-backfill 등)의 같은 표현이 대신 통과시킨다 —
-     retire-rows 라우트 본문으로 스코프해서 본다. 경계는 `});` 가 아니라 다음 `router.`. */
-  const _rt = read('src/routes/trackB.routes.js');
-  const _i0 = _rt.indexOf("router.post('/worktable/retire-rows'");
-  const _body = _i0 > 0 ? _rt.slice(_i0, _rt.indexOf('\nrouter.', _i0 + 10)) : '';
-  ok('retire-rows 라우트 본문을 찾았다', !!_body);
-  ok('★ 라우트가 dryRun 기본(!== false) — 값이 빠진 요청이 곧바로 실행되지 않는다',
-    /dryRun: b\.dryRun !== false/.test(_body));
+  /* ★★ 2026-08-21: HTTP 창구는 제거됐다(아래 [F] 가 부재를 고정). 함수 자체는 ♻ 중복 정리·
+       🔢 번호 정리의 실행부라 남아 있고, 그 게이트(무시트만 · dryRun 기본 · 미선택 거부)는
+       내부 호출자에게도 그대로 적용돼야 하므로 여기서 계속 검사한다. */
+  ok('retireRows 를 내보낸다(내부 공용 실행부)',
+    typeof L.retireRows === 'function' && typeof P.retireRows === 'function');
+  ok('★ 함수 기본값이 dryRun — 인자가 빠진 호출이 곧바로 실행되지 않는다',
+    /async function retireRows\(\{[^}]*dryRun = true/.test(read('src/services/sheetlessLedger.service.js'))
+    && /async function retireRows\(\{[^}]*dryRun = true/.test(read('src/services/participants.service.js')));
 }
 
 (async () => {
@@ -203,41 +202,34 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
       cut.indexOf('SET sheetless = TRUE') < i1);
   }
 
-  console.log('\n[F] 라우트·화면 배선');
+  console.log('\n[F] 사용자 기능 제거 고정 (2026-08-21 사용자 확정)');
+  /* ★★ 왜 지웠나: 원래 목적(이관 때 되살아난 옛 차수 줄 되돌리기)은 이관이 **자동으로** 한다
+       (`sheetlessCutover` → `participants.retireInactiveImportRows`, 위 [E] 가 고정). 사람이 차수를
+       골라 줄을 내리는 화면·HTTP 창구는 평시에 쓸 일이 없고, 잘못 쓰면 **리뷰어의 온전한
+       구매기록이 붙은 줄**이 검색 명단에서 사라진다.
+     ★★ 그러나 **서비스 함수는 남는다** — 지우면 ♻ 중복 정리와 🔢 번호 정리가 깨진다.
+       여기서 고정하는 경계가 그것이다: 창구는 없고, 내부 실행부는 있다. */
   {
     const routes = read('src/routes/trackB.routes.js');
-    ok('POST /worktable/retire-rows 등록', /router\.post\('\/worktable\/retire-rows'/.test(routes));
-    const line = /router\.post\('\/worktable\/retire-rows'[^\n]*/.exec(routes)[0];
-    // ★ 2026-08 사용자 확정: 날짜별 인원 조절과 함께 AE(staff)에게 열었다 — internal(광고주 차단).
-    ok('★ internal — 검색 명단에서 사람을 빼는 조작(정원 변경과 같은 급, 광고주 차단)',
-      /authMiddleware/.test(line) && /internalMiddleware/.test(line));
-    ok('★ 검증 오류는 400대로(errorHandler 마스킹 방지)', /LedgerError\) return res\.status\(400\)/.test(routes));
+    ok('★ HTTP 창구 POST /worktable/retire-rows 가 없다',
+      !/router\.post\('\/worktable\/retire-rows'/.test(routes));
+    ok('★ 지운 경위가 코드에 남아 있다(모르고 되살리는 것 방지)',
+      /줄 정리\(은퇴\) HTTP 창구는 제거됐다/.test(routes));
 
     const wd = read('../frontend/workdesk.html');
-    /* 2026-08-18 '작업보드 staff 전체권한' 으로 이 조작은 내부인 전체에 열렸다(라우트도 internalMiddleware).
-       ★ 검사의 의미는 그대로 — **화면 게이트 = 서버 게이트**. 무시트 조건은 유지된다. */
-    ok('★ 무시트 + 내부인일 때만 버튼(_wrCanRetire = 라우트 internalMiddleware 와 1:1)',
-      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(wd));
-    ok('도구 메뉴에 [🧹 줄 정리]', /openRetireModal\(\)/.test(wd) && /🧹 줄 정리/.test(wd));
-    ok('★ 미리보기 → 실행 2단계(미리보기 전에는 실행 비활성)',
-      /id="wrGo" disabled/.test(wd) && /go\.disabled = !\(_WR\.prev/.test(wd));
-    ok('★ 실행 전 confirm — 명단에서도 빠진다는 사실을 말한다',
-      /confirm\(`「\$\{_WR\.tabName\}」[\s\S]{0,200}검색 명단에서도 빠집니다/.test(wd));
-    ok('★★ onclick 은 인덱스만(차수 문자열은 시트발 — 보간 금지)',
-      /wrToggle\(\$\{i\}\)/.test(wd) && !/wrToggle\('\$\{/.test(wd));
-    ok('★ 오버레이는 body 직속', /wrOv[\s\S]{0,400}document\.body\.appendChild\(ov\)/.test(wd));
-    ok('★ Esc 리스너는 최상위 1회(_wrKeyBound)', /window\._wrKeyBound/.test(wd));
-    ok('★ 바깥클릭으로 닫지 않는다(고른 것이 실수로 날아가지 않게)',
-      !/ov\.addEventListener\('click'[\s\S]{0,80}closeRetireModal/.test(wd));
-    ok('★ 재료는 이미 받아 둔 표에서 센다(신규 조회 0)', /STATE\.wd && STATE\.wd\.roster/.test(wd));
-    ok('★ 장부 재생성 실패는 화면이 말한다', /j\.ledgerError/.test(wd));
-    ok('★ CSS 는 wbl- 접두(홈 CSS 스코프 가드 계약 유지)',
-      /\.wbl-wrt\{/.test(wd) && !/(^|[^-\w])\.wrt\{/.test(wd));
+    ok('★ [⋯] 메뉴에 버튼이 없다', !/openRetireModal/.test(wd));
+    ok('★ 모달·게이트 코드도 남아 있지 않다(죽은 코드 금지)',
+      !/_wrCanRetire|_wrHasWork|_wrRender|window\._wrKeyBound/.test(wd));
+    ok('★ 화면이 제거된 창구를 부르지 않는다', !/worktable\/retire-rows/.test(wd));
 
-    ok('★ 전환 화면이 연도 미상 건수를 말한다(조용한 누락 금지)',
-      /m\.yearUnknown\?[\s\S]{0,200}과거 자료로 보고 목록에서 제외/.test(wd));
-    ok('★ [보기] 로 그 목록을 열 수 있다(막다른 길 금지)',
-      /function _coToggleUnknown\(\)/.test(wd) && /includeUnknown=1/.test(wd));
+    /* ★★★ 내부 실행부는 살아 있어야 한다 — 이걸 지우면 다른 두 기능이 조용히 깨진다. */
+    const ledger = read('src/services/sheetlessLedger.service.js');
+    const rn = read('src/services/rowNumbering.service.js');
+    ok('★★ sheetlessLedger.retireRows 는 남아 있다(내부 공용 실행부)',
+      /async function retireRows\(/.test(ledger) && /^\s*retireRows,$/m.test(ledger));
+    ok('★★ ♻ 중복 정리가 그것을 쓴다', /retireRows\(\{ sheetId, tabName, seqs: removeSeqs/.test(ledger));
+    ok('★★ ♻ 중복 정리(수동)도 그것을 쓴다', /retireRows\(\{ sheetId, tabName, seqs: rem/.test(ledger));
+    ok('★★ 🔢 번호 정리의 짝 빈 줄 정리도 그것을 쓴다', /ledger\.retireRows\(/.test(rn));
   }
 
   console.log(`\n✅ sheetlessRetireRows: ${passed} cases passed`);
