@@ -962,6 +962,9 @@
   .wolexpand{padding:12px 16px 14px}
   .wolmeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid var(--line)}
   .wolchip{font-size:11px;color:var(--muted);background:var(--card2);border-radius:6px;padding:2px 8px}
+  /* 작업표 삭제 표시(134) — 값이 있을 때만 그린다. 색은 리터럴(테마 없는 호스트 대비). */
+  .wodel{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:750;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:999px;padding:1px 8px;vertical-align:middle;white-space:nowrap}
+  .woldel{margin:8px 0 0;font-size:12.5px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:7px 10px}
   .wolchip b{color:var(--ink);font-weight:700}
   /* 본문은 공유 렌더러(_woDetailHtml)가 자체 인라인 스타일로 그린다 — 여기서는 폭·여백만 잡는다.
      ★ 색·글자크기를 덮어쓰지 않는다: 관리자 대시보드와 같은 모양이어야 사본 드리프트를 못 만든다. */
@@ -2264,8 +2267,30 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #rnOv .rn-tools input{flex:1;min-width:0;height:28px;padding:0 9px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card,#fff);color:var(--ink,#111827);box-sizing:border-box}
 /* 💬 리뷰어에게 메시지 — 받는 사람 목록이 다건이면 길어지므로 본문만 스크롤한다.
    ★ `min-height:0` 이 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다(레포 상습 함정). */
-#rmOv .wbl-dlg{width:min(520px,100%);max-height:86vh;display:flex;flex-direction:column}
-#rmOv .wbl-db{flex:1;min-height:0;overflow:auto}
+/* ★ 화면 중앙 모달이 아니라 **누른 셀 옆**에 띄운다(구매일자 달력·[리뷰 대신 제출] 과 같은 앵커 규율).
+   ★ 겉면은 **투명 레이어**(위치 계산용) — 표는 가로 스크롤 컨테이너라 팝오버는 **body 직속**이어야 한다.
+   ★★ 바깥 클릭으로 닫지 않는다 — 여기엔 사람이 친 본문과 붙여넣은 사진이 들어 있다(달력과 다른 점).
+   ★ 그래서 겉면은 `pointer-events:none` — 팝오버가 떠 있어도 **표를 계속 보고 조작**할 수 있다
+     (전면을 흡수하면 그건 인라인이 아니라 모달이다). 닫는 길은 [취소]·Esc 둘. */
+#rmOv{position:fixed;inset:0;background:transparent;display:block;z-index:9000;padding:0;pointer-events:none}
+#rmOv .rmbox{position:fixed;width:380px;max-height:82vh;box-sizing:border-box;display:flex;flex-direction:column;pointer-events:auto;
+  background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;
+  box-shadow:0 12px 34px rgba(15,23,42,.24);overflow:hidden}
+#rmOv .rmhd{padding:10px 13px;font-size:12.5px;font-weight:800;color:var(--ink,#0f172a);border-bottom:1px solid var(--line,#e2e8f0)}
+#rmOv .rmbd{padding:11px 13px;font-size:12px;color:var(--ink,#0f172a);line-height:1.6;flex:1;min-height:0;overflow:auto}
+#rmOv .rmft{display:flex;gap:7px;justify-content:flex-end;padding:9px 12px;background:var(--card2,#f8fafc);border-top:1px solid var(--line,#e2e8f0)}
+/* 첨부 — 붙여넣기(Ctrl+V)·드래그로만 받는다(파일 탐색기 창구를 두지 않는다: [리뷰 대신 제출] 과 같은 규율) */
+#rmOv .rmatt{margin-top:8px;border:1.5px dashed var(--line,#cbd5e1);border-radius:9px;background:var(--card2,#f8fafc);
+  padding:9px 10px;font-size:11px;color:var(--faint,#94a3b8);text-align:center}
+#rmOv .rmatt.over{border-color:#2563eb;background:#eff6ff}
+#rmOv .rmatt.has{text-align:left;padding:8px}
+#rmOv .rmths{display:flex;flex-wrap:wrap;gap:6px}
+#rmOv .rmth{position:relative;width:58px;height:58px;border-radius:8px;overflow:hidden;border:1px solid var(--line,#e2e8f0);background:#fff}
+#rmOv .rmth img{width:100%;height:100%;object-fit:cover;display:block}
+#rmOv .rmth .rmx{position:absolute;top:1px;right:1px;width:17px;height:17px;border:0;border-radius:50%;
+  background:rgba(15,23,42,.62);color:#fff;font-size:11px;line-height:17px;cursor:pointer;padding:0}
+#rmOv .rmth .rmbusy{position:absolute;inset:0;display:grid;place-items:center;background:rgba(255,255,255,.72);font-size:10px;color:#475569}
+#rmOv .rmth.bad{border-color:#f3c0c0}
 #rmOv .rmto{background:var(--info-soft,#eff6ff);border:1px solid var(--info-line,#bfdbfe);border-radius:9px;padding:8px 11px;font-size:11.5px}
 /* ★★ 한 줄에 이름·번호·사유를 flex 로 늘어놓으면 좁은 폭에서 사유가 **세로로 한 글자씩** 접힌다
    (실측 신고 2026-08-21). 이름+번호만 한 줄로 묶고 사유는 **아랫줄 블록**으로 내린다. */
@@ -8362,11 +8387,29 @@ function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.c
       판정은 **서버 단일 출처**(`csRecipient`)이고 화면은 그 결과를 **그리기만** 한다.
    ★ 광고주에게는 메뉴를 그리지 않는다(서버도 internalMiddleware 로 막는다). */
 let _RM=null;
-function _rmClose(){ const o=document.getElementById('rmOv'); if(o) o.remove(); _RM=null; }
+const _RM_MAX_FILES=5, _RM_MAX_ONE=8*1024*1024;
+function _rmClose(){
+  const o=document.getElementById('rmOv');
+  if(_RM) (_RM.files||[]).forEach(f=>{ try{ if(f.thumb) URL.revokeObjectURL(f.thumb); }catch(_){ } });
+  if(o) o.remove(); _RM=null;
+}
 /* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
 if(!window._rmKeyBound){
   window._rmKeyBound=true;
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('rmOv')) _rmClose(); });
+  /* 붙여넣기(Ctrl+V) 첨부 — 팝오버가 열려 있을 때만, **이미지일 때만** 가로챈다
+     (텍스트 붙여넣기 기본 동작 보존 — 1:1문의 첨부와 같은 규율). */
+  document.addEventListener('paste',e=>{
+    if(!_RM||!document.getElementById('rmOv')) return;
+    const items=[...((e.clipboardData&&e.clipboardData.items)||[])]
+      .filter(it=>it&&it.kind==='file'&&String(it.type||'').startsWith('image/'))
+      .map(it=>it.getAsFile()).filter(Boolean);
+    if(!items.length) return;
+    e.preventDefault(); _rmTake(items);
+  });
+  /* 표(가로 스크롤 컨테이너) 안쪽 스크롤까지 잡으려면 **캡처 단계**여야 한다 */
+  window.addEventListener('scroll',()=>{ if(_RM) _rmPlace(); },true);
+  window.addEventListener('resize',()=>{ if(_RM) _rmPlace(); });
 }
 /* 선택 범위에 걸린 **줄 id 목록**(화면 순서·중복 없음). 셀 여러 칸을 잡아도 줄은 한 번만 센다. */
 function _msgRowIds(){
@@ -8380,17 +8423,46 @@ function _msgRowIds(){
   return out;
 }
 function _msgCanSend(){ return !!(STATE.cur && _isInternalRole()); }
+/* 누른 셀 옆에 붙인다 — 아래 공간이 부족하면 위로 뒤집는다(구매일자 달력과 같은 계산).
+   ★ 앵커 **엘리먼트**를 들고 다니며 스크롤·리사이즈 때 다시 잰다 — 좌표만 저장해 두면 표를
+     조금만 굴려도 팝오버가 엉뚱한 자리에 남는다. 달력은 그럴 때 그냥 닫지만 여기는
+     **입력 중인 본문과 첨부가 있어 닫을 수 없다**(그래서 따라간다).
+   ★ 재렌더로 그 셀이 사라지면 마지막 좌표를 유지한다(위치를 잃었다고 팝오버를 지우지 않는다). */
+function _rmAnchorRect(){
+  const el=_RM&&_RM.anchorEl;
+  if(el&&el.isConnected){ const r=el.getBoundingClientRect();
+    if(r.width||r.height){ _RM.anchor={left:r.left,top:r.top,bottom:r.bottom}; } }
+  return _RM&&_RM.anchor;
+}
+function _rmPlace(){
+  const box=document.querySelector('#rmOv .rmbox'), a=_rmAnchorRect(); if(!box||!a) return;
+  const w=box.offsetWidth||380, vh=window.innerHeight;
+  const left=Math.max(8, Math.min(a.left, window.innerWidth-w-10));
+  const below=vh-a.bottom-12, above=a.top-12;
+  /* ★★ 양쪽 다 모자라면 **더 넓은 쪽에 붙이고 안에서 스크롤**시킨다 — 화면 위(top:8)로 튀면
+     그건 셀 옆이 아니라 그냥 뜬 창이다(사용자가 요청한 "가까이"가 무너진다, 실측으로 잡음). */
+    const down = below >= above;
+  const room=Math.max(220, Math.min(vh*0.82, down?below:above));
+  box.style.maxHeight=Math.round(room)+'px';
+  const h=Math.min(box.offsetHeight||320, room);
+  box.style.left=left+'px';
+  box.style.top=(down ? a.bottom+4 : Math.max(8, a.top-h-4))+'px';
+}
 function openReviewerMsg(){
   const t=STATE.cur, ids=_msgRowIds();
+  const td=_selAnchorTd();
+  const r=td?td.getBoundingClientRect():null;
   _closeCellMenu();
   if(!_msgCanSend() || !ids.length) return;
-  _RM={ sheetId:t.sheetId, tabName:t.tabName, ids, items:null, err:null, busy:false, canOpen:false, sent:null };
-  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='rmOv';
-  ov.innerHTML=`<div class="wbl-dlg"><div class="wbl-dh">💬 리뷰어에게 메시지</div>
-    <div class="wbl-db" id="rmBody"></div>
-    <div class="wbl-df" id="rmFoot"></div></div>`;
-  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(입력한 내용 보호)
-  _rmRenderForm(); _rmLoad();
+  _rmClose();
+  _RM={ sheetId:t.sheetId, tabName:t.tabName, ids, items:null, err:null, busy:false, canOpen:false, sent:null,
+        files:[], anchorEl:td||null, anchor:r?{left:r.left,top:r.top,bottom:r.bottom}:{left:120,top:120,bottom:150} };
+  const ov=document.createElement('div'); ov.id='rmOv';
+  ov.innerHTML=`<div class="rmbox"><div class="rmhd">💬 리뷰어에게 메시지</div>
+    <div class="rmbd" id="rmBody"></div>
+    <div class="rmft" id="rmFoot"></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(입력·첨부 보호)
+  _rmRenderForm(); _rmPlace(); _rmLoad();
 }
 async function _rmLoad(){
   if(!_RM) return;
@@ -8404,18 +8476,28 @@ async function _rmLoad(){
   _rmPaint();
 }
 /* 틀은 한 번만 그린다 — 재렌더로 textarea 를 다시 만들면 **한글 IME 조합이 깨진다**
-   (홈 목록 검색 `ㅁ며면면` 실측 계열). 목록·푸터만 갈아끼운다. */
+   (홈 목록 검색 `ㅁ며면면` 실측 계열). 목록·첨부·푸터만 갈아끼운다. */
 function _rmRenderForm(){
   const b=document.getElementById('rmBody'); if(!b) return;
   b.innerHTML=`<div id="rmList" class="rmto">받는 사람을 확인하는 중…</div>
     <textarea id="rmText" placeholder="보낼 내용을 입력하세요 (최대 1000자)"></textarea>
+    <div class="rmatt" id="rmAtt"></div>
     <div class="rmsub">보내면 리뷰어에게 <b>즉시 도착</b>합니다 · 보낸 메시지는 회수할 수 없습니다.</div>
     ${(STATE.role==='master'||STATE.role==='admin')?'':'<div class="rmwarn">보낸 뒤 리뷰어의 <b>답장은 관리자(master/admin)</b>가 C/S 문의창구에서 확인합니다.</div>'}`;
-  _rmPaintFoot();
+  const att=document.getElementById('rmAtt');
+  if(att){
+    // 드래그앤드롭도 붙여넣기와 **같은 함수**로 수렴한다(사본을 두면 한쪽만 제한이 풀린다)
+    att.addEventListener('dragover',e=>{ if(!(e.dataTransfer&&[...e.dataTransfer.types||[]].includes('Files'))) return;
+      e.preventDefault(); att.classList.add('over'); });
+    att.addEventListener('dragleave',()=>att.classList.remove('over'));
+    att.addEventListener('drop',e=>{ e.preventDefault(); att.classList.remove('over');
+      _rmTake(e.dataTransfer&&e.dataTransfer.files); });
+  }
+  _rmPaintAtt(); _rmPaintFoot();
 }
 function _rmPaint(){
   const l=document.getElementById('rmList'); if(!l) return;
-  if(_RM.err){ l.className='rmbad'; l.textContent=_RM.err; _rmPaintFoot(); return; }
+  if(_RM.err){ l.className='rmbad'; l.textContent=_RM.err; _rmPaintFoot(); _rmPlace(); return; }
   const items=_RM.items||[];
   if(!items.length){ l.className='rmto'; l.textContent='받는 사람을 확인하는 중…'; _rmPaintFoot(); return; }
   const oks=items.filter(x=>x.ok), bad=items.filter(x=>!x.ok);
@@ -8433,15 +8515,14 @@ function _rmPaint(){
     ? `<div style="font-weight:700;margin-bottom:4px">받는 사람 ${uniq.length}명</div>${uniq.map(line).join('')}`
       + (oks.length>uniq.length?`<div class="rmwhy" style="margin-top:5px">같은 리뷰어의 줄 ${oks.length-uniq.length}건은 <b>같은 문의방</b>이라 한 번만 보냅니다.</div>`:'')
     : '<b>보낼 수 있는 줄이 없습니다.</b>';
+  const old=document.getElementById('rmBad'); if(old) old.remove();
   if(bad.length){
     l.insertAdjacentHTML('afterend',
       `<div class="rmbad" id="rmBad"><b>보낼 수 없는 줄 ${bad.length}건</b>${
         bad.slice(0,8).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||('#'+(x.seq||'')))}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
       }${bad.length>8?`<div class="rmwhy">외 ${bad.length-8}건</div>`:''}</div>`);
   }
-  const old=document.getElementById('rmBad');
-  if(old && !bad.length) old.remove();
-  _rmPaintFoot();
+  _rmPaintFoot(); _rmPlace();
 }
 /* 받는 사람 연락처 표기 — **등록된 실제 번호**를 그대로 보여준다(사용자 확정 2026-08-21:
    뒤 4자리로는 누구인지 확인이 안 된다). ★ 번호를 못 받았으면(구버전 백엔드·모호) 뒤 4자리로 접는다 —
@@ -8452,20 +8533,77 @@ function _rmPhone(x){
   const tail=String((x&&x.phone8Tail)||String((x&&x.phone8)||'').slice(-4)||'').trim();
   return tail?('···'+tail):'';
 }
-function _rmSendable(){ return !!(_RM && !_RM.busy && (_RM.items||[]).some(x=>x.ok)); }
+/* ── 사진 첨부 — 붙여넣기·드래그가 **같은 함수**로 수렴 ─────────────────────────
+   ★ 붙이는 즉시 업로드하고(대화창 첨부와 같은 인프라) **업로드가 끝난 것만** 전송한다
+     (인플라이트 중 전송 차단 — 사본을 두면 한쪽만 제한이 풀린다). */
+function _rmTake(list){
+  if(!_RM||_RM.busy) return;
+  const imgs=[...(list||[])].filter(f=>f&&String(f.type||'').startsWith('image/'));
+  if(!imgs.length) return;
+  let err='';
+  for(const f of imgs){
+    if(_RM.files.length>=_RM_MAX_FILES){ err=`사진은 최대 ${_RM_MAX_FILES}장까지 첨부할 수 있습니다.`; break; }
+    if(f.size>_RM_MAX_ONE){ err='한 장당 8MB까지 첨부할 수 있습니다.'; continue; }
+    let thumb=''; try{ thumb=URL.createObjectURL(f); }catch(_){ }
+    const item={ name:f.name||'capture.png', thumb, url:'', busy:true, err:'' };
+    _RM.files.push(item); _rmUpload(f,item);
+  }
+  _RM.attErr=err; _rmPaintAtt(); _rmPaintFoot();
+}
+function _rmB64(file){ return new Promise((res,rej)=>{ const r=new FileReader();
+  r.onerror=()=>rej(new Error('파일을 읽지 못했습니다.')); r.onload=()=>{ const s=String(r.result||''); res(s.slice(s.indexOf(',')+1)); };
+  r.readAsDataURL(file); }); }
+async function _rmUpload(file,item){
+  try{
+    const b64=await _rmB64(file);
+    const d=await api('/api/trackb/cs/notify-upload',{method:'POST',body:JSON.stringify({
+      imageBase64:b64, mimeType:file.type||'image/png', fileName:file.name||'' })});
+    if(!_RM||_RM.files.indexOf(item)<0) return;      // 그 사이 팝오버를 닫았거나 첨부를 뺐다
+    if(!d||d.ok===false||!d.url){ item.busy=false; item.err=(d&&d.error)||'업로드 실패'; }
+    else { item.busy=false; item.url=d.url; }
+  }catch(e){ if(item){ item.busy=false; item.err=e.message||'업로드 실패'; } }
+  _rmPaintAtt(); _rmPaintFoot();
+}
+function _rmDropAt(i){
+  if(!_RM||_RM.busy) return;
+  const f=_RM.files[i]; if(!f) return;
+  try{ if(f.thumb) URL.revokeObjectURL(f.thumb); }catch(_){ }
+  _RM.files.splice(i,1); _RM.attErr=''; _rmPaintAtt(); _rmPaintFoot();
+}
+function _rmPaintAtt(){
+  const a=document.getElementById('rmAtt'); if(!a||!_RM) return;
+  const fs=_RM.files||[];
+  a.className='rmatt'+(fs.length?' has':'');
+  a.innerHTML= fs.length
+    ? `<div class="rmths">${fs.map((f,i)=>`<div class="rmth${f.err?' bad':''}" title="${esc(f.err||f.name)}">
+         ${f.thumb?`<img src="${esc(f.thumb)}" alt="">`:''}
+         ${f.busy?'<span class="rmbusy">올리는 중</span>':(f.err?'<span class="rmbusy">실패</span>':'')}
+         <button class="rmx" type="button" onclick="_rmDropAt(${i})" title="빼기">×</button></div>`).join('')}</div>
+       <div class="rmwhy" style="margin-top:5px">사진 ${fs.length}장 · 붙여넣기(Ctrl+V)나 끌어다 놓아 더할 수 있습니다${_RM.attErr?` · <b>${esc(_RM.attErr)}</b>`:''}</div>`
+    : `사진은 <b>Ctrl+V 붙여넣기</b>나 끌어다 놓기로 첨부합니다${_RM.attErr?` · <b>${esc(_RM.attErr)}</b>`:''}`;
+  _rmPlace();
+}
+function _rmSendable(){
+  if(!_RM||_RM.busy) return false;
+  if(!(_RM.items||[]).some(x=>x.ok)) return false;
+  if((_RM.files||[]).some(f=>f.busy)) return false;     // 업로드 중에는 보내지 않는다
+  return true;
+}
 function _rmPaintFoot(){
   const f=document.getElementById('rmFoot'); if(!f) return;
   const oks=((_RM&&_RM.items)||[]).filter(x=>x.ok);
   const seen=new Set(); oks.forEach(x=>seen.add(x.phone8));
+  const up=((_RM&&_RM.files)||[]).some(x=>x.busy);
   f.innerHTML=`<button class="btn" onclick="_rmClose()">취소</button>
     <button class="btn pri" onclick="_rmSend()"${_rmSendable()?'':' disabled'}>${
-      _RM&&_RM.busy?'보내는 중…':(seen.size>1?`${seen.size}명에게 보내기`:'보내기')}</button>`;
+      _RM&&_RM.busy?'보내는 중…':(up?'사진 올리는 중…':(seen.size>1?`${seen.size}명에게 보내기`:'보내기'))}</button>`;
 }
 async function _rmSend(){
   if(!_rmSendable()) return;
   const ta=document.getElementById('rmText');
   const content=String(ta&&ta.value||'').trim();
-  if(!content){ toast('보낼 내용을 입력하세요'); if(ta) ta.focus(); return; }
+  const imageUrls=(_RM.files||[]).map(f=>f.url).filter(Boolean);
+  if(!content && !imageUrls.length){ toast('보낼 내용을 입력하거나 사진을 첨부하세요'); if(ta) ta.focus(); return; }
   if(content.length>1000){ toast('내용은 1000자까지 보낼 수 있습니다'); return; }
   const oks=(_RM.items||[]).filter(x=>x.ok);
   // ★ 미리보기에서 본 대상 그대로 보낸다 — 그 사이 바뀌었으면 서버가 그 건을 보내지 않는다(TOCTOU).
@@ -8474,7 +8612,7 @@ async function _rmSend(){
   let d=null;
   try{
     d=await api('/api/trackb/cs/notify-participants',{method:'POST',body:JSON.stringify({
-      sheetId:_RM.sheetId, tabName:_RM.tabName, participantIds:oks.map(x=>x.participantId), content, expect })});
+      sheetId:_RM.sheetId, tabName:_RM.tabName, participantIds:oks.map(x=>x.participantId), content, imageUrls, expect })});
   }catch(e){ d={ok:false,error:'전송 실패 — '+(e.message||'네트워크 오류')}; }
   if(!_RM) return;
   _RM.busy=false;
@@ -8490,6 +8628,7 @@ async function _rmSend(){
     const l=document.getElementById('rmList');
     const prev=document.getElementById('rmSendErr'); if(prev) prev.remove();
     if(l) l.insertAdjacentHTML('afterend',`<div class="rmbad" id="rmSendErr"><b>보내지 못했습니다</b>${why}</div>`);
+    _rmPlace();
     return;   // ★ 입력한 내용은 그대로 둔다(다시 누르면 재시도)
   }
   _RM.sent=d; _rmRenderResult();
@@ -8497,7 +8636,8 @@ async function _rmSend(){
 function _rmRenderResult(){
   const b=document.getElementById('rmBody'), f=document.getElementById('rmFoot'); if(!b||!f) return;
   const d=_RM.sent||{}, sent=d.sent||[], failed=d.failed||[], merged=d.merged||[];
-  b.innerHTML=`<div class="rmok"><b>${sent.length}명에게 보냈습니다.</b>
+  const nImg=((_RM.files||[]).filter(x=>x.url)).length;
+  b.innerHTML=`<div class="rmok"><b>${sent.length}명에게 보냈습니다.</b>${nImg?` (사진 ${nImg}장)`:''}
       ${sent.slice(0,8).map(s=>`<div class="rmitem"><div class="rmwho"><b>${esc(s.name||'')}</b><span class="rmnum">${esc(_rmPhone(s))}</span>${s.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>${s.isSub?'<span class="rmwhy">로그인 본계정으로 보냈습니다</span>':''}</div>`).join('')}
       ${sent.length>8?`<div class="rmwhy">외 ${sent.length-8}명</div>`:''}</div>
     ${merged.length?`<div class="rmwarn">같은 리뷰어의 줄 ${merged.length}건은 <b>같은 문의방</b>이라 한 번만 보냈습니다.</div>`:''}
@@ -8507,6 +8647,7 @@ function _rmRenderResult(){
   // ★ [문의방 열기]는 **C/S 본문을 볼 수 있는 사람**(master/admin)에게만 — AE 에게 주면 막다른 길이다.
   f.innerHTML=`${(_RM.canOpen&&sent.length===1)?`<button class="btn" onclick="_rmOpenThread()">문의방 열기</button>`:''}
     <button class="btn pri" onclick="_rmClose()">닫기</button>`;
+  _rmPlace();
 }
 /* 보낸 방으로 이동 — C/S 화면 목록의 그 줄을 **눌러서** 연다(이름·연락처를 여기서 넘기지 않는다:
    그 값은 목록 행이 이미 들고 있고, 화면에 PII 를 한 번 더 실을 이유가 없다). */
@@ -8881,6 +9022,17 @@ function _woBStyleSummary(c){
     +'<button onclick="STATE.woStatus=&quot;revision&quot;;_loadOrders()"><span><b>보완 요청 오더</b><span>작업 정보와 연결 상태를 먼저 확인합니다.</span></span><em>'+n('revision')+'건 보기</em></button>'
     +'</section>';
 }
+/* 연결 작업(작업표)이 삭제된 오더 — "언제 무엇이 지워졌나"를 행에서 바로 읽는다(134).
+   ★ 값을 못 받으면(구버전 백엔드·삭제 이력 없음) **아무것도 그리지 않는다** — 0/미상을 지어내지 않는다.
+   ★ 재접수하면 서버가 이 값을 비우므로 배지도 함께 사라진다(거짓 표시 금지). */
+function _woDeletedBadge(o){
+  const at=o&&o.tab_deleted_at; if(!at) return '';
+  let when=''; try{ when=new Date(at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ when=String(at).slice(0,16); }
+  const tab=String((o.tab_deleted_tab||'')).trim();
+  const who=String((o.tab_deleted_by||'')).trim();
+  const tip=`작업표${tab?(' "'+tab+'"'):''}가 ${when}에 삭제되었습니다${who?(' (삭제: '+who+')'):''} — 다시 진행하려면 재접수하세요.`;
+  return ` <span class="wodel" title="${esc(tip)}">🗑 작업 삭제됨 · ${esc(when)}</span>`;
+}
 function _renderWoBody(){
   const summary=$('#wohead .wbcmd');
   if(!summary) $('#wohead').insertAdjacentHTML('beforeend',_woBStyleSummary(STATE.woCounts||{}));
@@ -8897,7 +9049,7 @@ function _renderWoBody(){
       <tr class="wolrow" id="wolrow-${i}" onclick="_woToggle(${i})" title="클릭하면 상세가 아래로 펼쳐집니다">
         <td><span class="wolchev" id="wolchev-${i}">▾</span></td>
         <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(_woLabel(o.status))}</span></td>
-        <td style="font-weight:700">${esc(o.title||'')}</td>
+        <td style="font-weight:700">${esc(o.title||'')}${_woDeletedBadge(o)}</td>
         <td>${esc(o.manager_name||o.created_by||'')}</td>
         <td style="text-align:right">${o.recruit_count||0}</td>
         <td style="text-align:right">${o.daily_count||0}</td>
@@ -8912,10 +9064,25 @@ function _renderWoBody(){
  *  ★ 접수는 **하기/완료를 눈으로 가른다**: 접수 가능 상태면 파란 [접수하기],
  *    이미 접수된 오더는 초록 [✓ 접수완료](비활성 + 등록된 탭 이름을 툴팁으로).
  *    판정은 공유 모듈 `_woAcceptable`(서버 ACCEPT_ELIGIBLE 과 같은 표) — 여기서 다시 세지 않는다. */
+/** 이 오더가 실제 작업(탭)에 연결돼 있나 — 링크가 있어야 그 작업보드를 열 수 있다. */
+function _woAcceptedTab(o){ return !!(o && String(o.linked_tab_sheet_id||'').trim() && String(o.linked_tab_name||'').trim()); }
+/** 그 오더의 작업보드 열기 — ★ 관측 뷰·업체관리와 **같은 `pendingTab` 계약**(사본 금지). */
+function _woOpenBoard(id){
+  const o=(STATE.wo||[]).find(x=>x.id===id);
+  if(!_woAcceptedTab(o)){ _toast('연결된 작업이 없습니다 — 먼저 접수하세요.'); return; }
+  STATE.pendingTab={ sheetId:o.linked_tab_sheet_id, tabName:o.linked_tab_name, tabGid:o.linked_tab_gid||'', spreadsheetTitle:'' };
+  switchView('workdesk');
+}
 function _woEditActions(o){
   if(!STATE.canEdit) return '';
   const id=esc(o.id);
-  const wt=` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${id}')" title="작업표 생성 미리보기">📋 작업표</button>`;
+  /* ★★ [📋 작업표] 는 **접수 전 창구**다 — 그 모달의 [✅ 이 구성으로 접수하기] 가 곧 접수이고,
+       접수하면 그 계획대로 작업표 줄이 만들어진다(모집공고 저장은 줄을 만들지 않는다).
+     ★ 접수 뒤에는 같은 모달이 "지금 만들면 이렇게 된다"는 **가정 계산**이라 실제 표(주문 유입·
+       번호 정리·중복 정리로 달라진 표)와 어긋난다 → 대신 **실제 작업보드로 가는 길**을 준다. */
+  const wt = _woAcceptedTab(o)
+    ? ` <button class="btn xs" onclick="event.stopPropagation();_woOpenBoard('${id}')" title="이 오더로 만들어진 실제 작업보드를 엽니다">📊 작업보드</button>`
+    : ` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${id}')" title="만들어질 표 구성을 보고 그 자리에서 접수합니다">📋 작업표</button>`;
   const acc = (typeof _woAcceptable==='function' ? _woAcceptable(o) : ['submitted','revision','rejected'].includes(o.status))
     ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="${(typeof _woAcceptSheetless!=='function'||_woAcceptSheetless(o))?'구글시트 없이 시스템 작업표를 만들어 등록합니다':'작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다'}">접수하기</button>`
     : `<button class="btn xs wodone" disabled title="${esc(o.linked_tab_name?('등록된 탭 — '+o.linked_tab_name):'이미 접수된 작업오더입니다')}">✓ 접수완료</button>`;
@@ -8966,7 +9133,13 @@ function _woFillDetail(i){
     o.created_at?`<span class="wolchip">제출 <b>${esc(fmt(o.created_at))}</b></span>`:'',
   ].filter(Boolean).join('');
   const acts=_woEditActions(o);
-  box.innerHTML=`<div class="wolmeta">${chips}<span style="flex:1"></span>${acts}</div>
+  /* 삭제 안내는 펼침에도 한 줄로 — 목록 배지는 좁아서 사유·조치를 다 못 적는다. */
+  const delNote=o.tab_deleted_at
+    ? `<div class="woldel">🗑 이 오더의 작업표${o.tab_deleted_tab?` <b>${esc(o.tab_deleted_tab)}</b>`:''}가 삭제되었습니다 — `
+      + `${esc((()=>{try{return new Date(o.tab_deleted_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});}catch(_){return String(o.tab_deleted_at);}})())}`
+      + `${o.tab_deleted_by?` · 삭제 <b>${esc(o.tab_deleted_by)}</b>`:''}. 다시 진행하려면 <b>접수하기</b>를 누르세요.</div>`
+    : '';
+  box.innerHTML=`<div class="wolmeta">${chips}<span style="flex:1"></span>${acts}</div>${delNote}
     <div class="woldoc">${_woDetailHtml(o)}${o.admin_memo?_woKv('관리자메모',o.admin_memo):''}</div>
     ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·보완&반려는 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
 }

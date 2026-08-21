@@ -712,16 +712,8 @@ function _normPhone8(v) {
 // ── 문의 첨부 이미지 URL 검증 ──
 //   화면에 <img src>로 나가므로 자유 문자열 금지 — 우리 서버의 guide-image 프록시 URL만 허용.
 //   (외부 URL 주입·트래킹 픽셀 차단)
-function _sanitizeCsImageUrls(v) {
-  const arr = Array.isArray(v) ? v : (v ? [v] : []);
-  const out = [];
-  for (const raw of arr.slice(0, 5)) {          // 메시지당 최대 5장
-    const s = String(raw || '').trim();
-    if (!/^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/.test(s)) continue;
-    out.push(s);
-  }
-  return out;
-}
+/** C/S 첨부 URL 화이트리스트 — 규칙은 `utils/csImageUrls` 단일 출처(사본 금지). */
+const { sanitizeCsImageUrls: _sanitizeCsImageUrls } = require('../utils/csImageUrls');
 
 // POST /api/reviewer/cs/upload — 문의 첨부 이미지 업로드(무인증, phone8 스코프)
 //   body: { phone8, imageBase64, mimeType?, fileName? } → { ok, url }

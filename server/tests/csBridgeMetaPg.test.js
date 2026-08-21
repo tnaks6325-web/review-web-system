@@ -82,6 +82,33 @@ console.log('\n[A] 정적 — meta 는 SQL 에서 접는다');
     ok('★ 카드 경로는 종전 그대로(meta 보존)',
       cr.length === 1 && cr[0].msg_type === 'inspect_result' && cr[0].kind === 'duplicate', JSON.stringify(cr));
 
+    /* ── B-2. 사진 첨부 — **저장·정화가 실제로 도는지** (작업보드 선톡 · 2026-08-21) ──────
+       ★ `image_urls` 도 NOT NULL 계열이라 맨 null 을 넘기면 같은 23502 를 밟는다.
+       ★ 화이트리스트(`utils/csImageUrls`)는 순수함수라 단위로도 검사하지만, **저장까지 도는지**는
+         여기서만 확인된다(본문 없이 사진만 보내는 갈래 포함). */
+    const OKURL = 'https://api.example.dev/api/order/guide-image/abcdefghij0123456789';
+    const p8i = '96' + String(Date.now()).slice(-6);
+    const outImg = await CSB.postAdminNotice({
+      sheetId: 'guard_sheet', tabName: tab + 'i', rowIndex: 4,
+      reviewerName: '가드', phone8: p8i, by: '가드',
+      message: '', imageUrls: [OKURL, 'https://evil.example/a.png'],   // ★ 본문 없이 사진만
+    });
+    ok('★ 본문이 비어도 사진만으로 보낼 수 있다', !!outImg);
+    const { rows: ir } = await pool.query(
+      `SELECT m.image_urls AS "u", m.content, t.last_message_preview AS "p"
+         FROM cs_messages m JOIN cs_threads t ON t.id = m.thread_id WHERE t.reviewer_phone8=$1`, [p8i]);
+    ok('첨부가 실제로 저장된다', ir.length === 1 && (ir[0].u || []).length === 1, JSON.stringify(ir[0] && ir[0].u));
+    ok('★ 우리 프록시 주소만 남는다(임의 URL 은 저장 전에 걸러진다)',
+      ir.length === 1 && (ir[0].u || [])[0] === OKURL, JSON.stringify(ir[0] && ir[0].u));
+    ok('★ 본문이 비면 미리보기는 "사진 N장"(빈 줄로 남기지 않는다)',
+      ir.length === 1 && ir[0].p === '사진 1장', ir[0] && ir[0].p);
+    const noneOut = await CSB.postAdminNotice({
+      sheetId: 'guard_sheet', tabName: tab + 'j', rowIndex: 5,
+      reviewerName: '가드', phone8: '95' + String(Date.now()).slice(-6), by: '가드',
+      message: '', imageUrls: ['https://evil.example/a.png'],
+    });
+    ok('★ 본문도 없고 통과한 사진도 없으면 보내지 않는다(빈 메시지 저장 금지)', noneOut === null);
+
     /* ── C. 원자성 — 메시지가 실패하면 **빈 방을 남기지 않는다** ─────────────────────
        종전 구조는 방을 먼저 만들며 `last_message_preview` 까지 채우고 메시지를 따로 넣어,
        메시지가 실패하면 **목록에는 보낸 것처럼 보이는데 열면 비어 있는 방**이 남았다(실측 신고).
