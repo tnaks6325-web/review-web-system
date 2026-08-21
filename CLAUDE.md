@@ -1310,6 +1310,8 @@
 - ★★ **붙여넣기만으로 자동 제출하지 않는다**: 제출은 작업표·`review_index`·누적금액까지 확정하는데 **되돌릴 창구가 없다** — 오붙여넣기 한 번이 그대로 사고가 된다. 붙이면 즉시 미리보기가 뜨고 **[제출 처리] 한 번**으로 끝난다(회귀가드가 `_manualReviewTake` 안에 제출 호출이 **없음**을 고정).
 - ★ **직접 편집을 잠근 대신 있던 길을 없애지 않는다** — 캡처가 아예 없는 건(외부모집 사후 등록)은 팝오버 아래 **[날짜만 기록]**(기존 `review-submit-date` 백필 라우트, **adminOrMaster + 무시트일 때만 렌더** = 서버 게이트와 1:1).
 - ★ **처리 실행부·서버 계약은 무변경**: `/api/image/review-upload`(원장 기록) → `/api/trackb/workdesk/manual-review-submit`(그 행 소유 파일 대조 후 `campaign_participants.is_submitted` + 리뷰제출 열 시각 + `review_index.is_submitted` 를 **한 트랜잭션**에서 확정) — 리뷰어 참여내역·제출완료 탭·누적금액 로직이 그대로 적용된다.
+- ★★ **상태 칸은 줄이 아니라 탭 단위다 (2026-08-21 실측 `submit_column_missing`)**: `campaign_participants.submit_col` 은 **`review_index` 복제 경로(`importTabFromIndex`)에서만** 채워져, `addParticipant`(수동 추가)·`prepareRosterSlots`·`appendSlot`·`createWorktableSlots` 로 만든 줄은 그 칸이 **NULL** 로 남는다 → 화면은 잠그고 메뉴도 띄우는데 제출만 거부되는 상태가 됐다. **줄에 값이 없으면 그 탭의 감지값으로 보완**하되(해석기는 무시트 상태 기록과 같은 `sheetlessStatus.statusHeaderForTab` — 사본 0, 잠근 tx 라 **`client`** 로 조회), **줄이 들고 있으면 그 값이 이긴다**(무회귀) · **탭에도 없으면 여전히 거부**(fail-closed — 추측해서 아무 칸에나 시각을 박으면 담당자가 적어 둔 값을 덮는다).
+- ★ **화면은 오류 코드가 아니라 다음 행동을 말한다**(`_MR_ERR`) — 모르는 코드는 **원문을 남긴다**(뭉뚱그리면 원인이 사라진다).
 - 회귀가드 `tests/workdeskManualReviewSubmit.test.js`(판정 단일 출처·메뉴 교체·파일 input 부재·붙여넣기·인라인 앵커·자동 제출 금지, **변이시험 8종 검출 확인**) + 실 http 오리진 브라우저 실측(메뉴 교체·팝오버 body 직속/앵커·붙여넣기 첨부·업로드→제출 왕복·차단 상태 2종·Esc·JS 오류 0). ⚠ 이 변경으로 착수 시점에 **이미 빨간 상태였던** `emptySlotCellEdit`(메뉴 항목이 조건부가 된 뒤 패턴 드리프트)과 `workboardTopC` ②(**고정 길이 슬라이스** `i-700` 이라 그 사이에 줄이 늘자 빨개졌다 → 바로 앞 `if (showEdits) {` 를 찾는 방식으로)를 함께 갱신했다(검사 의미 불변).
 
 ### 블로그체험단 (work_kind='blog') — 지금 지켜야 하는 규율
