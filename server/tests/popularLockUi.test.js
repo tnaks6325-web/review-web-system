@@ -283,8 +283,13 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
       const rowsSrc = campaign.slice(campaign.indexOf('function _acctRows(){'), campaign.indexOf('function renderAcctList(){'));
       Object.assign(c.sandbox, { _allHolds: () => ({}), _acctBlocked: {}, _subs: [{ name: 'S1', phone: '010-1111-2222' }] });
       vm.runInContext(rowsSrc, c.sandbox);
-      const rows = vm.runInContext('_acctRows()', c.sandbox);   // 참여권 조회 전
-      assert(rows.every(r => r.state === 'ok'), '모르면 명의를 잠그지 않는다');
+      // ★ 인기 공고가 아닌데 참여권 값이 남아 있어도 명의를 잠그면 안 된다(변이시험이 통과시켰던 구멍)
+      if (camp.is_popular === false) {
+        vm.runInContext("_popCredit = { normalDone:0, popularUsed:0, credits:0 }", c.sandbox);
+        vm.runInContext("_popSubCredits = { '11112222': { name:'S1', credits:0 } }", c.sandbox);
+      }
+      const rows = vm.runInContext('_acctRows()', c.sandbox);   // 참여권 조회 전(또는 비인기 공고)
+      assert(rows.every(r => r.state === 'ok'), '모르면·인기 공고가 아니면 명의를 잠그지 않는다');
     }
   }
   console.log('popularLockUi: passed');
