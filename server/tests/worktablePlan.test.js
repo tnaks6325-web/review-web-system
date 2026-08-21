@@ -386,9 +386,10 @@ ok('★ 시스템이 값을 넣는 칸은 번호·구매일자·옵션 셋뿐(�
         product_options_json: JSON.stringify([{ options: [{ label: 'A' }, { label: 'B' }] }]) },
       template: { core: ['번호', '구매일자', '옵션', '수취인', '연락처'], channels: { coupang: ['쿠팡ID'] } } });
     const v = C.planToSheetValues(plan2);
-    return v.header.join(',') === '번호,구매일자,옵션,수취인,연락처,쿠팡ID'
-      && v.body[0].join('|') === '1|8 / 10 (월)|A|||'
-      && v.body[1].join('|') === '2|8 / 11 (화)|B|||';
+    // ★ 템플릿에 제출 칸이 없으면 시스템이 '리뷰'를 붙인다(2026-08-21) — **값은 안 넣는다**(빈 칸).
+    return v.header.join(',') === '번호,구매일자,옵션,수취인,연락처,리뷰,쿠팡ID'
+      && v.body[0].join('|') === '1|8 / 10 (월)|A||||'
+      && v.body[1].join('|') === '2|8 / 11 (화)|B||||';
   })());
 ok('★★ 구매일자는 시트 형식 그대로 쓰인다(063 시트 일정 인식이 읽는 값)',
   (() => {

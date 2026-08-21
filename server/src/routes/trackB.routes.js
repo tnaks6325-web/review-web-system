@@ -1287,6 +1287,29 @@ router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async 
   try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
   catch (err) { _pastTabErr(res, err, next); }
 });
+/* 수동 리뷰제출 사전 확인 — **쓰기 0**.
+   ★ 화면이 캡처를 올리기 **전에** 부른다: 종전에는 업로드 뒤에 거부되어 **드라이브에는 파일이
+     남고 제출만 실패**했다(2026-08-21 실사고 — 재시도마다 같은 줄에 캡처가 쌓였다).
+   ★ 게이트는 실제 제출과 같은 함수를 지난다(사본 0). 그 줄에 **이미 올라온 리뷰 캡처**도 함께
+     돌려줘, 새로 붙여넣지 않고 그것으로 제출을 끝낼 수 있게 한다(쌓인 파일이 곧 근거다).
+   ★ 캡처 조회 실패는 fail-soft — 확인 결과 자체는 나가야 한다(붙여넣기 경로는 살아 있다). */
+router.get('/workdesk/manual-review-precheck', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.query || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, preflight: true, by: _by(req) });
+    let existing = [];
+    if (out.ok && out.rowIndex != null) {
+      try {
+        const map = await svc.reviewImagesForTab({ sheetId, tabName });
+        existing = (map[String(out.rowIndex)] || [])
+          .filter(f => f && f.slot === 'review' && f.fileId)
+          .map(f => ({ fileId: f.fileId, at: f.at || null }));
+      } catch (_) { existing = []; }
+    }
+    res.json({ ...out, existing });
+  } catch (err) { next(err); }
+});
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
@@ -2436,7 +2459,7 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
         continue;
       }
       seenPhone.set(it.phone8, it.participantId);
-      sent.push({ participantId: it.participantId, name: it.name, phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
+      sent.push({ participantId: it.participantId, name: it.name, phone: it.phoneFull || '', phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
     }
     res.json({ ok: sent.length > 0, sent, failed, merged, total: items.length });
   } catch (e) {
@@ -3151,7 +3174,9 @@ router.post('/work-tab/delete', authMiddleware, adminOrMasterMiddleware, async (
       const out = await deleteTask({
         sheetId: String(b.sheetId || ''), tabName: String(b.tabName || ''),
         // ★ 입금 기록까지 지우는 것은 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
-        confirm: b.confirm === true, forcePayment: b.forcePayment === true, by: _by(req),
+        confirm: b.confirm === true, forcePayment: b.forcePayment === true,
+        // ★ 드라이브 폴더 삭제도 **별도 확인**이다 — 일반 confirm 으로는 열리지 않는다.
+        deleteDrive: b.deleteDrive === true, by: _by(req),
       });
       // 검증 실패는 400대로 — errorHandler 의 500 마스킹에 사유가 묻히면 담당자가 손쓸 수 없다.
       if (!out.ok && (out.code === 'confirm_required' || out.code === 'payment_locked')) {

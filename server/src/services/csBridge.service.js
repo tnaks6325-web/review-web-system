@@ -225,8 +225,16 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     const text = _clip(String(message).trim(), 1000);
     const preview = _clip(text.replace(/\n/g, ' '), 120);
 
-    let threadId;
-    const { rows: tRows } = await pool.query(
+    /* ★★ 방 생성 · 메시지 · 방 갱신은 **한 트랜잭션**이다 (실사고 2026-08-21).
+       방을 먼저 만들고(그때 `last_message_preview` 까지 채운다) 메시지를 따로 넣던 구조라,
+       메시지 INSERT 가 실패하면 **미리보기만 있고 메시지가 0건인 빈 방**이 남았다 —
+       관리자 목록에는 보낸 것처럼 보이는데 열면 "아직 메시지가 없습니다" 인 상태(실측 신고).
+       실패하면 통째로 되돌려 **그런 방이 아예 안 생기게** 한다. */
+    const client = await pool.connect();
+    let threadId, mRows;
+    try {
+    await client.query('BEGIN');
+    const { rows: tRows } = await client.query(
       `SELECT id FROM cs_threads WHERE reviewer_phone8=$1 AND campaign_key=$2`,
       [phone8, campaignKey]
     );
@@ -234,7 +242,7 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     else {
       // ★ 기존 스레드의 campaign_label·reviewer_name 은 덮어쓰지 않는다(위 규율 그대로) —
       //   신규 생성 시 라벨은 탭 표시명(시트 제목 미노출 원칙).
-      const { rows } = await pool.query(`
+      const { rows } = await client.query(`
         INSERT INTO cs_threads
           (reviewer_phone8, reviewer_name, campaign_key, campaign_label, campaign_source,
            status, last_message_at, last_message_preview, admin_unread_count)
@@ -263,18 +271,28 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       matchAt: card.matchAt || null,
       to: _clip(card.to, 40),
     } : null;
-    const { rows: mRows } = await pool.query(
+    /* ★★ `meta` 는 **NOT NULL DEFAULT '{}'**(080) — 기본값은 컬럼을 **생략했을 때만** 적용된다.
+       카드 없는 안내(검수 반려 본문·입금 실패 안내·작업보드 선톡)는 여기서 `null` 을 넘겨
+       **23502 로 전건 실패**했고, 이 함수는 절대 throw 하지 않아 warn 로그로만 남아 있었다
+       (실측 2026-08-21 — 로컬 PG16 재현). 컬럼 목록은 그대로 두고 SQL 에서 접는다. */
+    ({ rows: mRows } = await client.query(
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
-       VALUES ($1,'admin',$2,$3,$4,$5::jsonb) RETURNING id, created_at AS "createdAt"`,
+       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb)) RETURNING id, created_at AS "createdAt"`,
       [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null]
-    );
-    await pool.query(
+    ));
+    await client.query(
       `UPDATE cs_threads
           SET reviewer_unread_count = reviewer_unread_count + 1,
               status = 'open', last_message_at = NOW(), last_message_preview = $2, updated_at = NOW()
         WHERE id = $1`,
       [threadId, preview]
     );
+    await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;                       // 바깥 catch 가 로그·onError·null 반환을 맡는다
+    } finally { client.release(); }
+    /* ── 여기부터는 커밋된 뒤의 후처리(실시간 푸시) — 실패해도 저장은 남는다 ── */
     try {
       const nickMap = await adminNickname.getNicknameMap().catch(() => null);
       emitCsReplyToReviewer(phone8, {
