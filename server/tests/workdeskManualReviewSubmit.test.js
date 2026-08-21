@@ -13,7 +13,10 @@ const routes = read('src/routes/trackB.routes.js');
 const workdesk = fs.readFileSync(path.join(root, '..', 'frontend', 'workdesk.html'), 'utf8');
 
 // 상태값은 일반 셀 편집 API로 우회할 수 없어야 한다.
-const editBlock = service.slice(service.indexOf('async function editWorkdeskRow'), service.indexOf('async function revertWorkdeskEdit'));
+/* ★ 편집 잠금 판정이 사는 곳 = 단건·일괄이 **함께 타는** in-tx 코어(`_editOneInTx`).
+   종전엔 `editWorkdeskRow` 안에 있었는데 일괄 편집 도입으로 코어가 위로 빠졌다 —
+   검사 의미는 그대로(잠금은 한 곳, 이름 목록 사본 금지)이고 오히려 강해졌다. */
+const editBlock = service.slice(service.indexOf('async function _editOneInTx'), service.indexOf('async function editWorkdeskRowsBatch'));
 assert.doesNotMatch(service.match(/const _EDIT_FIELD_KIND = \{[\s\S]*?\n\};/)[0], /is_submitted:\s*'bool'/, '리뷰제출 상태는 일반 편집 화이트리스트에서 제외한다');
 assert.doesNotMatch(service.match(/const _EDIT_FIELD_KIND = \{[\s\S]*?\n\};/)[0], /is_paid:\s*'bool'/, '입금 상태는 일반 편집 화이트리스트에서 제외한다');
 assert.match(editBlock, /status_column_locked/, '리뷰제출/입금 헤더 직접 편집을 서비스에서도 거부한다');
@@ -54,6 +57,13 @@ assert.match(workdesk, /\/api\/trackb\/workdesk\/manual-review-submit/, '업로�
 assert.match(service, /function _statusToggleForRow/, '상태 칸 판정은 그 행의 submit_col 을 먼저 본다');
 assert.match(editBlock, /_statusToggleForRow\(field\.slice\(4\), row\)/, '편집 잠금도 같은 판정을 쓴다(이름 목록 사본 금지)');
 assert.match(editBlock, /submit_col, submit_col2/, '판정 재료를 잠근 행에서 함께 읽는다');
+// ★★ 잠금 판정은 코어 한 곳뿐 — 단건·일괄이 그 코어를 타야 한다(어느 한쪽만 잠기는 드리프트 차단).
+assert.strictEqual((service.match(/_statusToggleForRow\(/g) || []).length, 2,
+  '상태 칸 판정은 정의 1 + 호출 1 — 사본이 생기면 한쪽 경로만 잠긴다');
+assert.match(service.slice(service.indexOf('async function editWorkdeskRow('), service.indexOf('async function editWorkdeskRowsBatch')),
+  /_editOneInTx\(client, \{/, '단건 편집은 코어에 위임한다(자체 구현 금지)');
+assert.match(service.slice(service.indexOf('async function editWorkdeskRowsBatch'), service.indexOf('async function revertWorkdeskEdit')),
+  /_editOneInTx\(/, '일괄 편집도 같은 코어를 탄다');
 const tabBlock = service.slice(service.indexOf('async function workdeskTab'), service.indexOf('async function editWorkdeskRow'));
 assert.match(tabBlock, /res\.statusCols = \{ submit:/, '내부 응답에 그 탭의 상태 칸 헤더명을 싣는다');
 assert.match(workdesk, /STATE\.wd&&STATE\.wd\.statusCols/, '화면은 서버가 준 상태 칸을 우선한다(이름 목록은 폴백)');
