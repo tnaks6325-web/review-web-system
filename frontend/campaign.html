@@ -675,7 +675,14 @@ function renderPopNotice(){
       line += '<div style="margin-top:4px;font-size:.8rem;color:#047857">타계정 ' +
         ok.map(v => _popEsc(v.name || '명의') + ' ' + v.credits + '건').join(' · ') + ' 명의로는 참여할 수 있어요</div>';
     }else if(c.credits === 0){
-      line += '<div style="margin-top:4px;font-size:.8rem;color:#DC2626">등록한 타계정 명의도 참여권이 없어요</div>';
+      // ★ "없다"와 "모른다"를 구분한다 — 조회 못 한 명의가 있으면 없다고 단정하지 않는다.
+      //   등록한 타계정이 아예 없으면 그 문장 자체가 성립하지 않으므로 그리지 않는다.
+      const _n = Object.keys(_popSubCredits).length;
+      if(_popUnknown){
+        line += '<div style="margin-top:4px;font-size:.8rem;color:#92400E">일부 타계정 명의는 확인하지 못했어요 — 참여를 누르면 확인해 드려요</div>';
+      }else if(_n){
+        line += '<div style="margin-top:4px;font-size:.8rem;color:#DC2626">등록한 타계정 ' + _n + '개 명의도 참여권이 없어요</div>';
+      }
     }
   }
   box.innerHTML =

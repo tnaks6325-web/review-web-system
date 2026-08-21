@@ -175,6 +175,16 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
   assert.equal(r.locked, true);
 }
 
+// ⑪-2 안내 문구는 "없다"와 "모른다"를 구분한다(조회 실패·타계정 0개를 "없어요"로 단정하지 않는다)
+{
+  const notice = campaign.slice(campaign.indexOf('function renderPopNotice(){'),
+                                campaign.indexOf('async function openPopGate('));
+  assert(/if\(_popUnknown\)\{[\s\S]{0,200}확인하지 못했어요/.test(notice),
+    '한 명의라도 모르면 "참여권이 없다"고 단정하지 않는다');
+  assert(/\}else if\(_n\)\{[\s\S]{0,200}명의도 참여권이 없어요/.test(notice),
+    '등록한 타계정이 있을 때만 "타계정 명의도 없다"를 말한다(0개면 그 문장이 성립하지 않는다)');
+}
+
 (async () => {
   // ⑫ 타계정 허용 공고: 명의별로 각각 조회한다(본계정 + 타계정 전부, 명의당 1회)
   {
