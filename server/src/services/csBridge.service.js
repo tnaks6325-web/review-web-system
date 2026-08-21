@@ -214,7 +214,10 @@ async function markReviewEditCancelled(r) {
  *   (교체요청 카드 upsert 와 달리 "관리자가 확인할 도착물"이 아니다).
  * ★ SSE 페이로드의 발신자 이름은 반드시 리뷰어용으로 치환(닉네임 fail-closed 규율).
  */
-async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card } = {}) {
+/* ★ `onError` 는 **가산 옵션**이다 — 반환 계약(성공 객체 | null)은 그대로 두고, 실패 사유만
+     호출자에게 흘려보낸다. 이게 없으면 화면이 "보내지 못했습니다" 한 줄로 뭉개 원인을 감춘다
+     (조용한 실패 금지). 기존 호출부는 넘기지 않으므로 동작 불변. */
+async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, onError } = {}) {
   try {
     if (!phone8 || !String(message || '').trim()) return null;
     const campaignKey = campaignKeyOf(sheetId, tabName);
@@ -285,7 +288,8 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
     try { broadcast('cs_message', { threadId, senderRole: 'admin', reviewerPhone8: phone8 }); } catch (_) {}
     return { threadId, messageId: mRows[0].id };
   } catch (err) {
-    logger.warn(`[csBridge] 검수 반려 통지 실패(${sheetId}/${tabName}/${rowIndex}): ${err.message}`);
+    logger.warn(`[csBridge] 검수 반려 통지 실패(${sheetId}/${tabName}/${rowIndex}): ${err.message} [${err.code || '-'}]`);
+    try { if (typeof onError === 'function') onError(err); } catch (_) {}
     return null;
   }
 }
