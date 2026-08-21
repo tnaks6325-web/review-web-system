@@ -217,13 +217,16 @@ async function markReviewEditCancelled(r) {
 /* ★ `onError` 는 **가산 옵션**이다 — 반환 계약(성공 객체 | null)은 그대로 두고, 실패 사유만
      호출자에게 흘려보낸다. 이게 없으면 화면이 "보내지 못했습니다" 한 줄로 뭉개 원인을 감춘다
      (조용한 실패 금지). 기존 호출부는 넘기지 않으므로 동작 불변. */
-async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, onError } = {}) {
+async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, phone8, message, by, card, imageUrls, onError } = {}) {
   try {
-    if (!phone8 || !String(message || '').trim()) return null;
+    /* ★ 첨부는 **우리 프록시 주소만**(`utils/csImageUrls` 단일 출처) — 리뷰어 화면에 그대로 <img> 로 나간다. */
+    const imgs = require('../utils/csImageUrls').sanitizeCsImageUrls(imageUrls);
+    if (!phone8) return null;
+    if (!String(message || '').trim() && !imgs.length) return null;   // 사진만 보내는 것도 허용(답장과 같은 규칙)
     const campaignKey = campaignKeyOf(sheetId, tabName);
     const name = _clip(reviewerName || '리뷰어', 100);
-    const text = _clip(String(message).trim(), 1000);
-    const preview = _clip(text.replace(/\n/g, ' '), 120);
+    const text = _clip(String(message == null ? '' : message).trim(), 1000);
+    const preview = _clip((text || `사진 ${imgs.length}장`).replace(/\n/g, ' '), 120);
 
     /* ★★ 방 생성 · 메시지 · 방 갱신은 **한 트랜잭션**이다 (실사고 2026-08-21).
        방을 먼저 만들고(그때 `last_message_preview` 까지 채운다) 메시지를 따로 넣던 구조라,
@@ -276,9 +279,11 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
        **23502 로 전건 실패**했고, 이 함수는 절대 throw 하지 않아 warn 로그로만 남아 있었다
        (실측 2026-08-21 — 로컬 PG16 재현). 컬럼 목록은 그대로 두고 SQL 에서 접는다. */
     ({ rows: mRows } = await client.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
-       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb)) RETURNING id, created_at AS "createdAt"`,
-      [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null]
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta, image_urls)
+       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb),COALESCE($6::jsonb,'[]'::jsonb))
+       RETURNING id, created_at AS "createdAt"`,
+      [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null,
+       JSON.stringify(imgs)]
     ));
     await client.query(
       `UPDATE cs_threads
@@ -298,7 +303,7 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       emitCsReplyToReviewer(phone8, {
         id: mRows[0].id, threadId, senderRole: 'admin',
         senderName: adminNickname.toReviewerName(senderName, nickMap),
-        content: text, imageUrls: [], createdAt: mRows[0].createdAt,
+        content: text, imageUrls: imgs, createdAt: mRows[0].createdAt,
         campaignLabel: tabName || '문의',
         msgType: meta ? 'inspect_result' : 'text', meta: meta || null,   // 실시간 푸시에도 카드가 그려지게
       });
