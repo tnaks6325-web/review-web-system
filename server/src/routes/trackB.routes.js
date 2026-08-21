@@ -2459,7 +2459,7 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
         continue;
       }
       seenPhone.set(it.phone8, it.participantId);
-      sent.push({ participantId: it.participantId, name: it.name, phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
+      sent.push({ participantId: it.participantId, name: it.name, phone: it.phoneFull || '', phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
     }
     res.json({ ok: sent.length > 0, sent, failed, merged, total: items.length });
   } catch (e) {
