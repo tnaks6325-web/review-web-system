@@ -2360,6 +2360,84 @@ router.post('/cs/status', authMiddleware, adminOrMasterMiddleware, (req, res, ne
 router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _csHandlers.memo(req, res, next));
 
+/* ── 작업보드 → 리뷰어에게 메시지 (관리자가 문의방을 먼저 연다) ──────────────────────
+   종전에는 **리뷰어가 먼저 문의를 보내야만** 방이 생겼다. 그런데 방을 여는 실행부는
+   이미 있다(`csBridge.postAdminNotice` — 리뷰검수 반려·입금 실패 안내가 쓰는 그 함수).
+   여기서는 **부르는 창구만** 연다: 로직 복제 0 · 마이그레이션 0 · 신규 저장소 0.
+
+   ★ 게이트 = 내부인 전원(광고주 차단, 사용자 확정 2026-08-21). C/S 본문 조회 8경로가
+     master/admin 전용인 것과 다른데, 이건 **보내는 창구**라 담당자가 쓰는 기능이다.
+     ⚠ 그래서 AE 는 보낼 수는 있어도 그 방의 대화는 C/S 탭에서 못 본다 — 화면이 그 사실을 말한다.
+   ★ 대상은 화면이 보낸 번호가 아니라 **서버가 줄에서 다시 도출**한다(`csRecipient` 단일 출처).
+     낡은 화면·조작 요청이 남의 방을 여는 경로를 만들지 않는다. */
+const _csRecipient = require('../services/csRecipient.service');
+const _csBridge = require('../services/csBridge.service');
+const _MSG_MAX = 1000;
+
+function _msgIds(v) {
+  const arr = Array.isArray(v) ? v : String(v || '').split(',');
+  return [...new Set(arr.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+}
+
+// 미리보기 — **쓰기 0건**. 받는 사람이 누구인지 보내기 전에 화면이 말하기 위한 재료.
+router.get('/cs/participant-recipients', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const sheetId = String(req.query.sheetId || '');
+    const tabName = String(req.query.tabName || '');
+    const ids = _msgIds(req.query.ids);
+    if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, ids 가 필요합니다.' });
+    const items = await _csRecipient.resolveRecipients({ sheetId, tabName, participantIds: ids });
+    res.json({ ok: true, items, canOpenThread: _role(req) === 'master' || _role(req) === 'admin' });
+  } catch (e) {
+    if (/42P01|42703/.test(e.code || '')) return res.status(503).json({ ok: false, code: 'not_ready', error: '문의 저장소가 아직 준비되지 않았습니다.' });
+    logger.warn(`[trackB] 수신자 미리보기 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '받는 사람을 확인하지 못했습니다.' });
+  }
+});
+
+// 전송 — 서버가 **그 자리에서 다시 판정**한 뒤 방을 열고 메시지를 남긴다.
+router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || '');
+    const tabName = String(b.tabName || '');
+    const ids = _msgIds(b.participantIds);
+    const content = String(b.content || '').trim();
+    const expect = (b.expect && typeof b.expect === 'object') ? b.expect : null;
+    if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, participantIds 가 필요합니다.' });
+    if (!content) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
+    if (content.length > _MSG_MAX) return res.status(400).json({ ok: false, error: `내용은 ${_MSG_MAX}자까지 보낼 수 있습니다.` });
+
+    const items = await _csRecipient.resolveRecipients({ sheetId, tabName, participantIds: ids });
+    const by = (req.admin && req.admin.name) || '관리자';
+    const sent = [], failed = [], merged = [];
+    const seenPhone = new Map();   // 같은 본계정 = 같은 방 → 같은 내용을 두 번 보내지 않는다
+
+    for (const it of items) {
+      if (!it.ok) { failed.push({ participantId: it.participantId, rowName: it.rowName || '', reason: it.reason }); continue; }
+      // ★ 미리보기 이후 그 줄의 주문이 취소·재배정돼 대상이 바뀌었으면 **보내지 않는다**(TOCTOU).
+      if (expect && Object.prototype.hasOwnProperty.call(expect, it.participantId)
+          && String(expect[it.participantId] || '') !== it.phone8) {
+        failed.push({ participantId: it.participantId, rowName: it.rowName || '', reason: '받는 사람이 방금 바뀌었습니다 — 다시 확인해 주세요.' });
+        continue;
+      }
+      const dup = seenPhone.get(it.phone8);
+      if (dup) { merged.push({ participantId: it.participantId, rowName: it.rowName || '', name: it.name, withParticipantId: dup }); continue; }
+      const out = await _csBridge.postAdminNotice({
+        sheetId, tabName, rowIndex: it.seq,
+        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by,
+      });
+      if (!out) { failed.push({ participantId: it.participantId, rowName: it.rowName || '', reason: '메시지 전송에 실패했습니다.' }); continue; }
+      seenPhone.set(it.phone8, it.participantId);
+      sent.push({ participantId: it.participantId, name: it.name, phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
+    }
+    res.json({ ok: sent.length > 0, sent, failed, merged, total: items.length });
+  } catch (e) {
+    logger.warn(`[trackB] 리뷰어 메시지 전송 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '메시지 전송에 실패했습니다.' });
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    설정 — 리뷰웹시스템[3버전] 상단탭 (내 닉네임 · 회사 사업자번호(제공정보) · 리뷰어 소식·공지)
 
