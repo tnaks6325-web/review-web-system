@@ -174,7 +174,13 @@ console.log('\n[6] 카드 렌더 실행');
   const order = CC.sortByAvailability([
     { id: 'a', state: 'weekend_unpublished' }, { id: 'b', state: 'open' },
   ]).map(x => x.id).join(',');
+  /* ★ 등급을 매기지 않으면 기본값 1(=곧 열림)이라 **오늘 마감 카드보다 위로** 올라온다 —
+     open 과의 비교만으로는 그 회귀를 못 잡는다(변이시험 실측). 같은 등급(2)끼리는 안정 정렬. */
+  const order2 = CC.sortByAvailability([
+    { id: 'd', state: 'daily_done' }, { id: 'w', state: 'weekend_unpublished' },
+  ]).map(x => x.id).join(',');
   ok('★ 주말 미게시 카드는 모집중 카드 위로 올라오지 않는다', order === 'b,a');
+  ok('★ 오늘 마감 카드와 같은 등급 — 원래 순서를 앞지르지 않는다', order2 === 'd,w');
 }
 
 console.log(failed ? `\ncampaignReopenWeekend: FAILED (${failed})` : '\ncampaignReopenWeekend: passed');
