@@ -181,10 +181,15 @@ async function expectCode(st, args, code, label) {
       ok(set(null, 'admin') === false, '작업 미선택이면 false');
     }
   }
-  ok(/_brCanAdd\(\)\?`<button class="btn" onclick="openBloggerModal\(\)"/.test(HTML), '[⋯] 메뉴 항목 배선');
+  /* ★ 2026-08-21 조건부 노출 도입으로 메뉴 내용 생성기가 `_mhMenuHtml()` 한 곳으로 모였다.
+       검사 의미는 그대로 — **_brCanAdd 가 그 항목의 게이트인가**. */
+  ok(/_brCanAdd\(\) \? `<button class="btn" onclick="openBloggerModal\(\)"/.test(HTML), '[⋯] 메뉴 항목 배선');
   /* ★ 조건 목록은 도구가 늘 때마다 길어진다(2026-08-19 [🔢 번호 정리] 합류) — **_brCanAdd 가 그 조건에
        들어 있는가**만 본다. 전체 문자열을 박아 두면 무관한 도구 추가에 이 가드가 조용히 빨개진다. */
-  ok(/\(isMaster(?:\|\|[_A-Za-z0-9]+\(\))*\|\|_brCanAdd\(\)\)\?/.test(HTML), '★ 메뉴 자체 표시 조건에 합류(항목만 넣으면 메뉴가 안 뜬다)');
+  /* ★ 메뉴 자체를 띄우는 판정은 `_mhToolsVisible()` 로 이동 — _brCanAdd 가 거기 들어 있어야
+       "항목만 넣었는데 메뉴가 안 뜨는" 사고가 안 난다(검사 의미 불변). */
+  ok(/function _mhToolsVisible\(\)\{[\s\S]{0,200}_brCanAdd\(\)/.test(HTML),
+    '★ 메뉴 자체 표시 조건에 합류(항목만 넣으면 메뉴가 안 뜬다)');
   {
     const i = HTML.indexOf('function openBloggerModal');
     const b = HTML.slice(i, i + 1600);
