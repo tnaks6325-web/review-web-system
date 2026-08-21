@@ -426,6 +426,41 @@ function systemBlogColumn(header) {
     origin: 'system', typeKey: 'blog',
   };
 }
+/* ── 리뷰제출 칸 보장 (사용자 확정 2026-08-21 · 표준 이름 = `리뷰`) ────────────
+   리뷰 제출 시각이 들어갈 칸이 없으면 **리뷰어가 리뷰를 내도 어디에도 기록되지 않는다**
+   (관리자 수동 제출은 `submit_column_missing` 으로 막히고, 자동 기록은 조용히 사라진다).
+   ★ 택배송장번호·블로그 3열과 같은 규율: 템플릿에 없어도 시스템이 붙인다.
+   ★★ 존재 판정은 **읽는 쪽과 같은 함수**(`columnResolver.findSubmitColumnIndex`) —
+     인덱스 빌드가 그 함수로 "이 칸이 리뷰제출 칸"이라고 정하므로, 여기서 다른 규칙을 쓰면
+     **만든 칸과 읽는 칸이 갈려** 열을 만들고도 기록이 안 되는 상태가 된다.
+   ★ 이미 인정되는 칸이 있으면 만들지 않는다(`리뷰제출`·`리뷰완료` 등 기존 이름 그대로 존중). */
+const REVIEW_SUBMIT_HEADER = '리뷰';
+
+function systemReviewColumn() {
+  const [classified] = classifyHeaders([REVIEW_SUBMIT_HEADER], {});
+  return {
+    name: classified.header, role: 'submit', label: '리뷰',
+    tier: 'status', conflict: classified.conflict || null,
+    origin: 'system', typeKey: null,
+  };
+}
+function ensureReviewColumn(columns) {
+  /* ★ 열이 하나도 없는 계획(= 표준 열 미설정)에는 넣지 않는다 — 넣으면 "먼저 설정하라"는 잠금이
+     풀려 **리뷰 한 칸짜리 작업표**가 만들어진다(회귀가드가 잡았다). 보장은 표가 성립할 때의 일이다. */
+  if (!Array.isArray(columns) || !columns.length) return columns;
+  const { findSubmitColumnIndex } = require('../services/columnResolver');
+  const names = (columns || []).map(c => c && c.name);
+  if (findSubmitColumnIndex(names) >= 0) return columns;
+  /* ★ 자리는 **공통(core) 열 바로 뒤** — 표준 열 배치에서 리뷰제출은 결제금액·주문번호 다음의
+     상태 칸이다. 맨 뒤에 붙이면 채널 열과 시스템 보장 열(택배송장·블로그 3열)보다 뒤로 가
+     "back 유형 열이 맨 뒤"라는 열 순서 계약이 깨진다(회귀가드가 잡았다). */
+  let at = -1;
+  for (let i = 0; i < columns.length; i++) if (columns[i] && columns[i].origin === 'common') at = i;
+  if (at >= 0) columns.splice(at + 1, 0, systemReviewColumn());
+  else columns.push(systemReviewColumn());
+  return columns;
+}
+
 function ensureBlogColumns(columns) {
   const have = new Set(columns.map(c => _blogColKind(c.name)).filter(Boolean));
   BLOG_REQUIRED_HEADERS.forEach(h => {
@@ -498,6 +533,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
      "정하지 않았는데 정해진" 표가 만들어진다(설정 프리셋과 같은 규율). */
   const workTypes = (Array.isArray(o.workTypes) ? o.workTypes : []).map(k => String(k || '').trim()).filter(Boolean);
   const columns = buildColumns({ template, channel, workTypes });
+  /* ★ 리뷰 제출 시각이 들어갈 칸은 어느 작업표에나 있어야 한다(2026-08-21).
+     ★ **택배송장·블로그 보장보다 먼저** 붙인다 — 나중에 붙이면 "back 유형 열이 맨 뒤"라는
+       열 순서 계약이 깨진다(회귀가드가 잡았다). 리뷰는 템플릿 열 바로 뒤(상태 칸 자리). */
+  ensureReviewColumn(columns);
   if (isCourierProxyWorkOrder(wo) && !hasCourierTrackingColumn(columns)) {
     columns.push(systemCourierTrackingColumn());
   }
@@ -738,6 +777,7 @@ module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
+  REVIEW_SUBMIT_HEADER, ensureReviewColumn,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,

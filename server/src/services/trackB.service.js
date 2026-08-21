@@ -82,7 +82,7 @@ const _EDIT_FIELD_KIND = {
 // 시트 컬럼(헤더)이 제출/입금 "상태 토글"열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
 //   ★ 정확 화이트리스트 — '입금자명/입금계좌/입금일'·'리뷰제출일/리뷰미제출'·'주문자제출' 등 정보열 오탐 차단.
 //   미매칭이면 null(연동 안 함, 안전). 새 상태열 명칭은 여기 추가.
-const _SUBMIT_HEADERS = new Set(['리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
+const _SUBMIT_HEADERS = new Set(['리뷰', '리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
 const _PAID_HEADERS = new Set(['입금', '입금여부', '입금완료']);
 function _linkedToggle(header) {
   const h = String(header || '').trim();
@@ -3056,10 +3056,19 @@ function _manualReviewFileIds(fileIds) {
   return ids;
 }
 
-async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin' } = {}) {
+/**
+ * 관리자 수동 리뷰제출.
+ *
+ * ★★ `preflight:true` = **쓰기 0 사전 확인**(2026-08-21 실사고): 종전에는 화면이 캡처를 먼저
+ *   업로드한 뒤 이 함수를 불렀는데, 여기서 거부되면 **드라이브에는 파일이 남고 제출만 실패**했다
+ *   (신고 건: 재시도할 때마다 같은 줄에 캡처가 쌓였다). 이제 화면이 **붙여넣기 전에** 이 경로로
+ *   물어보고, 통과했을 때만 업로드한다. 게이트는 실제 제출과 **같은 코드**를 지난다(사본 0) —
+ *   따로 만들면 "확인은 통과인데 제출은 거부"가 된다.
+ */
+async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin', preflight = false } = {}) {
   if (!sheetId || !tabName || !rowId) throw new Error('manualWorkdeskReviewSubmit: 필수 인자 누락');
-  const ids = _manualReviewFileIds(fileIds);
-  if (!ids) return { ok: false, error: 'invalid_review_files' };
+  const ids = preflight ? [] : _manualReviewFileIds(fileIds);
+  if (!preflight && !ids) return { ok: false, error: 'invalid_review_files' };
   const db = getPool();
   const client = await db.connect();
   try {
@@ -3097,6 +3106,12 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
     if (!ir.length) { await client.query('ROLLBACK'); return { ok: false, error: 'review_history_missing' }; }
     if (participant.is_submitted || ir[0].is_submitted) {
       await client.query('ROLLBACK'); return { ok: false, error: 'already_submitted' };
+    }
+
+    // 사전 확인은 여기까지 — **쓰기 없이** 되돌리고 그 줄의 제출 칸 이름을 돌려준다.
+    if (preflight) {
+      await client.query('ROLLBACK');
+      return { ok: true, preflight: true, rowIndex: participant.seq, submitColumn: submitCol };
     }
 
     // 파일 ID를 조작해 다른 행의 첨부를 제출하지 못하도록 업로드 원장을 대조한다.
