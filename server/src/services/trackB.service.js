@@ -18,7 +18,7 @@ const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
-const { isFilledRow: _isFilledRow } = require('../utils/rowNumbering');   // "채워진 줄" 판정 단일 출처(SQL `filledSql` 과 한 벌)
+const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 
 let _pool;
 let _rebuildLedgersForTest = null;
@@ -89,6 +89,18 @@ function _linkedToggle(header) {
   if (_SUBMIT_HEADERS.has(h)) return 'is_submitted';
   if (_PAID_HEADERS.has(h)) return 'is_paid';
   return null;
+}
+/* ★★ 그 탭이 실제로 쓰는 상태 칸은 **행이 들고 있는 `submit_col`/`submit_col2`** 다 (2026-08-21 실측).
+   `_SUBMIT_HEADERS` 는 정확일치 목록이라 헤더가 그냥 `리뷰` 인 탭(columnResolver 3단계가 정상 채택하는
+   실재 형태)을 못 잡았다 — 시스템은 그 칸에 제출 시각을 쓰는데 화면·편집 게이트만 "평범한 칸"으로 봐서
+   **관리자가 직접 타이핑할 수 있고 [📎 수동 리뷰제출] 메뉴는 안 뜨는** 상태가 됐다.
+   → 판정은 `submit_col`(그 탭의 진짜 상태 칸) 우선, 이름 목록은 그 값이 없을 때의 폴백. */
+function _statusToggleForRow(header, row) {
+  const h = String(header || '').trim();
+  if (!h) return null;
+  if (row && String(row.submit_col || '').trim() === h) return 'is_submitted';
+  if (row && String(row.submit_col2 || '').trim() === h) return 'is_paid';
+  return _linkedToggle(h);
 }
 
 // ── 그림자 투영: 임포트(participants) + 신원키/주문링크 강화 + seen-set 재투영 ──
@@ -2741,7 +2753,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
       continue;
     }
-    if (_isFilledRow(syn)) filledCount++;
+    /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
+       세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
+    syn.filled = _isFilledRow(syn);
+    if (syn.filled) filledCount++;
+    /* ★ 작업보드 표의 「번호」 칸 값 — 미리보기 팝업 목록이 쓴다. `seq`(시트 실제 행 번호)와는
+       다른 값이라(원래 1 차이) 화면이 둘을 헷갈리면 안 된다. 칸 이름 판정은 `numberColumnKey`
+       단일 출처이고, 담당자가 셀을 고쳤으면 그 값이 이긴다(표와 같게). 칸이 없으면 빈 값. */
+    const _nk = _numberColumnKey(r.row_json);
+    syn.boardNo = _nk ? String(pick('col:' + _nk, (r.row_json || {})[_nk]) ?? '').trim() : '';
     const _vp8 = String(syn.phone8 == null ? '' : syn.phone8).trim();
     if (_vp8) { const n = (visitSeen.get(_vp8) || 0) + 1; visitSeen.set(_vp8, n); syn.visitNo = n; }
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
@@ -2819,6 +2839,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
+    /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
+       화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
+       갈려 "직접 타이핑은 되는데 수동 제출 메뉴는 없는" 상태가 된다(2026-08-21 실측).
+       ★ 값이 없으면(구버전 데이터·미감지) 싣지 않는다 — 화면은 종전 이름 목록으로 폴백한다. */
+    const _scS = roster.find(r => r.submit_col) || {}, _scP = roster.find(r => r.submit_col2) || {};
+    if (_scS.submit_col || _scP.submit_col2) {
+      res.statusCols = { submit: _scS.submit_col || null, paid: _scP.submit_col2 || null };
+    }
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
     res.condition = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
@@ -2866,7 +2894,8 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
-      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
+              submit_col, submit_col2
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
       [rowId, sheetId, tabName]);
@@ -2875,7 +2904,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
     if (isCol) {
       // 상태값은 시스템 전용이다. 화면 잠금과 별개로 일반 셀 편집 API도 차단한다.
-      if (_linkedToggle(field.slice(4))) {
+      if (_statusToggleForRow(field.slice(4), row)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {

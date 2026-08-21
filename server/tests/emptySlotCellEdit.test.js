@@ -154,8 +154,10 @@ const edit = (type, value, field, text) =>
 
   /* ── 3) 화면: 잠긴 사유 ───────────────────────────────────── */
   console.log('\n3) 화면 — 잠긴 사유 표기');
+  // ⚠ 이 패턴은 메뉴 항목이 조건부로 바뀔 때마다 드리프트한다(구매일자 달력·리뷰 대신 제출).
+  //    검사 의미는 불변: **흐린 편집 항목에는 잠긴 사유가 title 로 붙는다**.
   t('흐린 [이 셀 편집]에 사유가 붙는다', () => {
-    assert.match(workdesk, /row\('✏️','이 셀 편집',"_menuEditCell\(\)",!editable,false,editable\?'':_cellLockReason\(td,selectedRow\)\)/);
+    assert.match(workdesk, /'이 셀 편집',"_menuEditCell\(\)",!editable,false,editable\?'':_cellLockReason\(td,selectedRow\)/);
   });
   const sandbox = { STATE: { role: 'master', canEdit: true },
     _workdeskStatusKindForField: f => (f === 'col:리뷰제출' ? 'review' : (f === 'col:입금' ? 'payment' : '')) };
