@@ -351,10 +351,15 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
       if (r && r.rowCount) { deleted[t] = r.rowCount; totalRows += r.rowCount; }
     }
 
-    // ① 연결 작업오더 — 링크만 비운다(오더는 남는다 → 같은 오더를 다시 접수할 수 있다).
+    /* ① 연결 작업오더 — 링크만 비운다(오더는 남는다 → 같은 오더를 다시 접수할 수 있다).
+       ★★ 종전엔 링크를 비우기만 해서 그 오더가 목록에서 **"아직 접수 안 한 오더"와 똑같이** 보였다
+         (언제 무엇이 지워졌는지 아무 데도 안 남았다) → 삭제 시각·삭제자·지워진 작업 이름을 함께
+         새긴다(134). 재접수하면 accept 가 이 세 칸을 비운다(화면이 거짓을 말하지 않게). */
     const wo = await client.query(
-      `UPDATE work_orders SET linked_tab_sheet_id='', linked_tab_name='', linked_tab_gid='', updated_at=NOW()
-        WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2`, [sheetId, tabName]);
+      `UPDATE work_orders SET linked_tab_sheet_id='', linked_tab_name='', linked_tab_gid='',
+              tab_deleted_at=NOW(), tab_deleted_by=$3, tab_deleted_tab=$2, updated_at=NOW()
+        WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2
+        RETURNING id, title, status, created_by`, [sheetId, tabName, String(by || '')]);
 
     /* ② 연결 모집공고 — **함께 삭제**한다(사용자 확정 2026-08-19, 종전 보관 처리에서 변경).
        작업이 사라졌는데 그 작업을 가리키는 공고만 남으면 갈 곳 없는 공고가 목록에 떠 있게 된다.
@@ -390,8 +395,14 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
       ? await _trashDriveFolders(driveTargets, by)
       : [];
 
+    /* ★ 인트라넷 "보낸 오더" 카드에도 알린다 — 그쪽 목록은 리뷰웹 원장을 실시간 조회하므로
+       `tab_deleted_at` 은 인트라넷이 그 필드를 읽도록 고친 뒤에야 보인다. 반면 처리메모
+       webhook 은 **지금 있는 채널**이라 인트라넷 배포 없이 그 자리에서 주황 메모로 뜬다.
+       ★ 실행부는 `intranetMemo.service` 한 벌(사본 금지) · fail-soft(절대 throw 없음). */
+    const orderNotices = await _notifyOrdersTabDeleted(wo.rows || [], tabName, by);
+
     return {
-      ok: true, sheetId, tabName, deleted, totalRows, driveTrashed,
+      ok: true, sheetId, tabName, deleted, totalRows, driveTrashed, orderNotices,
       paymentDeleted: (money.length && forcePayment === true) ? money : [],
       workOrdersUnlinked: wo.rowCount || 0, campaignsDeleted: rc.rowCount || 0,
       ownershipRemoved: ac.rowCount || 0, sheetRowRemoved: cam.rowCount || 0,
@@ -400,6 +411,29 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, del
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
   } finally { client.release(); }
+}
+
+/**
+ * 삭제된 작업의 연결 작업오더에 "언제 지워졌나"를 알린다.
+ * ★ memo_log 에 `kind:'tab_deleted'` 로 누적(이력 — 재접수해서 `tab_deleted_at` 이 비어도 남는다)
+ *   + 기존 처리메모 webhook 으로 push(인트라넷 수신부 무변경).
+ * ★ 절대 throw 없음 — 삭제는 이미 커밋됐다.
+ */
+async function _notifyOrdersTabDeleted(orders, tabName, by) {
+  if (!Array.isArray(orders) || !orders.length) return [];
+  const { pushIntranetMemo, appendMemoLog } = require('./intranetMemo.service');
+  const at = new Date().toISOString();
+  const memo = `[작업 삭제] "${tabName}" 작업표가 삭제되었습니다. 이 오더의 작업 연결이 해제되었습니다 — 다시 진행하려면 재접수하세요.`;
+  const out = [];
+  for (const o of orders) {
+    let delivered = false, deliverError = null;
+    try { ({ delivered, deliverError } = await pushIntranetMemo(o, memo, by, at)); }
+    catch (e) { deliverError = (e && e.message) || String(e); }
+    try { await appendMemoLog(_db(), o.id, { memo, by, at, delivered, error: deliverError, kind: 'tab_deleted' }); }
+    catch (_) { /* fail-soft */ }
+    out.push({ id: o.id, title: o.title, delivered, error: deliverError });
+  }
+  return out;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

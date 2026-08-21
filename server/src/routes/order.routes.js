@@ -697,7 +697,9 @@ router.get('/intake/list', async (req, res, next) => {
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
               inflow_type, work_kind, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo,
-              source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at
+              source_review_order_id, source_revision, intranet_advertiser_id, created_at, updated_at,
+              -- 134: 연결 작업(작업표)이 삭제된 시각 — 인트라넷 "보낸 오더" 카드가 그대로 표시한다.
+              tab_deleted_at, tab_deleted_tab
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
@@ -1558,6 +1560,9 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
          linked_tab_gid = $5,
          processed_by = $6,
          work_sheet_url = COALESCE($7, work_sheet_url),
+         -- ★ 재접수하면 "작업 삭제됨" 표시를 지운다(134) — 다시 연결됐는데 삭제 배지가
+         --   남아 있으면 화면이 거짓을 말한다. 이력은 memo_log(kind:'tab_deleted')에 남는다.
+         tab_deleted_at = NULL, tab_deleted_by = NULL, tab_deleted_tab = NULL,
          updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -1792,34 +1797,10 @@ router.put('/admin/edit', authMiddleware, adminOrMasterMiddleware, async (req, r
 //   인트라넷은 이 payload 를 review_order_memos 로 받아 "보낸 오더" 카드의
 //   주황 처리메모 블록에 표시한다(수신부 무변경). fail-soft(실패해도 호출측 저장은 성공).
 // 필요 env: INTRANET_MEMO_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
-async function _pushIntranetMemo(o, memo, sentBy, sentAt) {
-  let delivered = false, deliverError = null;
-  const hook = process.env.INTRANET_MEMO_WEBHOOK_URL;
-  if (hook) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
-      const resp = await fetch(hook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
-        body: JSON.stringify({
-          order_id: o.id, title: o.title, requester_name: o.created_by, status: o.status,
-          memo, sent_by: sentBy, sent_at: sentAt,
-        }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      delivered = resp.ok;
-      if (!resp.ok) deliverError = 'HTTP ' + resp.status;
-    } catch (e) {
-      deliverError = e.message;
-      logger.warn(`[order] 인트라넷 메모 webhook 실패: ${e.message}`);
-    }
-  } else {
-    deliverError = 'webhook 미설정';
-  }
-  return { delivered, deliverError };
-}
+// ★★ 실행부는 `services/intranetMemo.service.js` 한 벌 — 처리메모 전송·관리자 수정 알림·
+//    작업 삭제 알림이 같은 함수를 쓴다(사본 금지).
+const _pushIntranetMemo = (o, memo, sentBy, sentAt) =>
+  require('../services/intranetMemo.service').pushIntranetMemo(o, memo, sentBy, sentAt);
 
 // PUT /api/order/admin/send-memo — 처리메모 저장 + 인트라넷으로 즉시 push(webhook)
 // body: { id, memo }
