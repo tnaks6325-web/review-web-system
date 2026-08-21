@@ -79,15 +79,20 @@
 
   /** 오픈 안내 라벨: 오픈 시각이 오늘(KST·서버시간 보정)이면 "매일 HH:MM 오픈",
    *  미래 날짜(시작일 전 게시)면 "M/D(요일) 오픈"(자정 오픈은 시각 생략) */
-  function _fmtOpenLabel(iso) {
+  /** 오픈 "시점"만(뒤에 '오픈'·'다시 오픈'·'재개' 를 붙여 쓰는 조각) */
+  function _fmtOpenWhen(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     const now = new Date(_now());
     const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    if (sameDay) return '매일 ' + _fmtHM(iso) + ' 오픈';
+    if (sameDay) return '매일 ' + _fmtHM(iso);
     const yo = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
     const hm = _fmtHM(iso);
-    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm) + ' 오픈';
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm);
+  }
+  function _fmtOpenLabel(iso) {
+    const when = _fmtOpenWhen(iso);
+    return when ? when + ' 오픈' : '';
   }
 
   function _injectStyles() {
@@ -680,13 +685,13 @@
       overlay = `<div class="pt-ovl pre"><span class="ol">주말 미게시</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
     } else if (c.stateReason === 'rest_day' && c.opensAt) {
       // 휴무일(주말·공휴일·다음 블록 대기) — 다음 진행일까지 카운트다운
-      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenLabel(c.opensAt))} 오픈</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenWhen(c.opensAt))} 오픈</span></div>`;
     } else if (isPre) {
       overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? _esc(_fmtOpenLabel(c.opensAt)) : ''}</span></div>`;
     } else if (isDaily && c.reopensAt) {
       // 오늘 마감 = 썸네일을 덮어 회색으로 낮추고 가운데에 다시 열릴 때까지를 흰 글씨로 센다.
       // ★ 기준은 `reopensAt`(다음 오픈) — `opensAt`은 **오늘의** 오픈 시각이라 이미 지났다(카운트다운 0 고착).
-      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenLabel(c.reopensAt))} 다시 오픈</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenWhen(c.reopensAt))} 다시 오픈</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
