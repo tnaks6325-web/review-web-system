@@ -79,15 +79,20 @@
 
   /** 오픈 안내 라벨: 오픈 시각이 오늘(KST·서버시간 보정)이면 "매일 HH:MM 오픈",
    *  미래 날짜(시작일 전 게시)면 "M/D(요일) 오픈"(자정 오픈은 시각 생략) */
-  function _fmtOpenLabel(iso) {
+  /** 오픈 "시점"만(뒤에 '오픈'·'다시 오픈'·'재개' 를 붙여 쓰는 조각) */
+  function _fmtOpenWhen(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     const now = new Date(_now());
     const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    if (sameDay) return '매일 ' + _fmtHM(iso) + ' 오픈';
+    if (sameDay) return '매일 ' + _fmtHM(iso);
     const yo = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
     const hm = _fmtHM(iso);
-    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm) + ' 오픈';
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm);
+  }
+  function _fmtOpenLabel(iso) {
+    const when = _fmtOpenWhen(iso);
+    return when ? when + ' 오픈' : '';
   }
 
   function _injectStyles() {
@@ -653,16 +658,23 @@
       ? `<div class="pt-topleft">${popToggle}${arcBadge}${arcSuggestBadge}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
+    /* ★ 주말 미게시(104) — 썸네일에 "재개까지" 카운트다운. 종전에는 이 상태에서 오버레이가 통째로
+       사라져, 금요일에 본 "(토) 다시 오픈"이 토요일엔 아무 표기 없이 없어졌다(사용자 신고 ③).
+       재개일(resumesOn/resumesAt)은 서버가 apply 게이트와 같은 판정으로 계산한 값을 그대로 쓴다. */
+    const weekendUnpublished = c.stateReason === 'weekend_unpublished';
     let overlay = '';
-    if (c.stateReason === 'rest_day' && c.opensAt) {
+    if (weekendUnpublished && c.resumesAt) {
+      const wkLab = _fmtMD(c.resumesOn) ? _fmtMD(c.resumesOn) + ' 재개' : _fmtOpenLabel(c.resumesAt);
+      overlay = `<div class="pt-ovl pre"><span class="ol">주말 미게시</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
+    } else if (c.stateReason === 'rest_day' && c.opensAt) {
       // 휴무일(주말·공휴일·다음 블록 대기) — 다음 진행일까지 카운트다운
-      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenLabel(c.opensAt))} 오픈</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenWhen(c.opensAt))} 오픈</span></div>`;
     } else if (isPre) {
       overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? _esc(_fmtOpenLabel(c.opensAt)) : ''}</span></div>`;
     } else if (isDaily && c.reopensAt) {
       // 오늘 마감 = 썸네일을 덮어 회색으로 낮추고 가운데에 다시 열릴 때까지를 흰 글씨로 센다.
       // ★ 기준은 `reopensAt`(다음 오픈) — `opensAt`은 **오늘의** 오픈 시각이라 이미 지났다(카운트다운 0 고착).
-      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenLabel(c.reopensAt))} 다시 오픈</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenWhen(c.reopensAt))} 다시 오픈</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
@@ -744,7 +756,6 @@
     }
 
     // 시트 일정(063) 파생 표기: 휴무일이면 다음 진행일, 마감일 경과면 일정 종료
-    const weekendUnpublished = c.stateReason === 'weekend_unpublished';
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
@@ -755,7 +766,8 @@
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
     else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;
-    else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈'}</div>`;
+    // ★ '내일'을 문구에 박아 두면 주말 제외·0명 조절 공고에서 거짓이 된다 — reopensAt(서버 판정) 우선.
+    else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.reopensAt ? _esc(_fmtOpenLabel(c.reopensAt)) : (c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈')}</div>`;
     else if (c.state === 'soft_full') footer = `<button type="button" class="pbtn off">잔여 대기 중</button>`;
 
     if (admin) {
@@ -805,7 +817,7 @@
    *
    * 등급 0 지금 참여 가능 / 1 곧 열림·잔여 대기 / 2 오늘 마감(내일 다시 오픈) / 3 완전 종료
    */
-  const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, closed: 3 };
+  const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, weekend_unpublished: 2, closed: 3 };
   function sortByAvailability(list) {
     return (list || [])
       .map((c, i) => ({ c, i, r: _AVAIL_RANK[c && c.state] != null ? _AVAIL_RANK[c.state] : 1 }))
