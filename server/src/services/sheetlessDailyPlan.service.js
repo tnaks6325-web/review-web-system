@@ -343,7 +343,8 @@ async function readWorktableDates({ sheetId, tabName }) {
     const r = await db.query(
       // ★ 기준을 작업보드 그리드·조절 실행과 같게(active = TRUE) — 비활성 행까지 세면
       //   모달의 "기본 N명"이 실제 표보다 많아 보이고, 조절은 그 행을 옮기지도 못한다.
-      `SELECT row_json FROM campaign_participants
+      `SELECT row_json, order_submission_id, reviewer_name, recipient_name, phone8
+         FROM campaign_participants
         WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL AND active = TRUE
         ORDER BY seq`, [sheetId, tabName]);
     rows = r.rows;
@@ -381,12 +382,23 @@ async function readWorktableDates({ sheetId, tabName }) {
     fallbackAnchor: { y: kstToday.getUTCFullYear(), m: kstToday.getUTCMonth() + 1 },
   });
 
-  const byDate = {};
+  /* ★★ 날짜별 **채워진 줄** 수도 함께 센다 — 주말 정책 재배분(①②)이 "그 날을 0명으로
+     닫아도 되는가"를 판단하는 재료다. 이미 참여·주문이 있는 날을 0 으로 계획하면
+     rebuildAdjustedPlansToWorktable 이 worktable_rebuild_below_used 로 **재구성 전체를
+     거부**하므로, 화면이 애초에 그런 값을 만들지 않게 하한을 알려 준다.
+     ★ 판정은 `utils/rowNumbering.isFilledRow` 단일 출처(작업보드 게이지·번호 정리와 같은 네 칸). */
+  const { isFilledRow } = require('../utils/rowNumbering');
+  const byDate = {}, filledByDate = {};
   let parsed = 0;
-  iso.forEach(d => { if (d) { byDate[d] = (byDate[d] || 0) + 1; parsed++; } });
+  iso.forEach((d, i) => {
+    if (!d) return;
+    byDate[d] = (byDate[d] || 0) + 1;
+    if (isFilledRow(rows[i])) filledByDate[d] = (filledByDate[d] || 0) + 1;
+    parsed++;
+  });
   if (!parsed) return { ok: false, reason: 'unparsable', dateHeader };
 
-  return { ok: true, byDate, dateHeader, parsedRows: parsed, totalRows: rows.length };
+  return { ok: true, byDate, filledByDate, dateHeader, parsedRows: parsed, totalRows: rows.length };
 }
 
 /**
