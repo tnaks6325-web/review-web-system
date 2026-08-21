@@ -328,6 +328,13 @@ function _woDetailHtml(o) {
     //   = 종전 화면 그대로. 블로그 오더에서만 새 줄이 보인다.
     _woKv("체험단 종류", _woWorkKindLabel(o.work_kind)),
     _woSection("상품·옵션", prodText, txtR),
+    // ★ 시작일 — 모집공고 발행 프리필이 **이 값을 그대로 복사**하는데(062, `_woCampaignPrefill`)
+    //   상세 화면에는 없어서, 목록의 '제출/접수' 날짜와 공고의 '모집 시작일'이 다르면
+    //   어디서 온 값인지 확인할 길이 없었다(2026-08-21 신고: 접수 8/19인데 공고 시작일 8/12).
+    //   인트라넷 리뷰오더는 시작일을 월/일로 직접 입력하고 [이 오더로 다시 만들기]가 옛 값을
+    //   그대로 채우므로 접수일과 다른 것이 정상일 수 있다 — 그래서 **보여만 준다**(경고 아님).
+    //   ★ 값이 없는 과거 오더는 줄 자체가 안 나온다(_woKv 가 빈 값을 버림) = 종전 화면 그대로.
+    _woKv("시작일", String(o.start_date || "").slice(0, 10)),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
     _woKv("구매채널", _woChannel(o)),
