@@ -568,13 +568,28 @@ function renderCrNotice(){
    — **모르면 잠그지 않는다**(fail-open). 서버 apply 403 이 최종 권위이고 여기는 "누르기 전 고지"일 뿐. */
 let _popCredit = null;
 let _popCreditTried = false;   // 폴링·재렌더가 renderPre 를 반복 호출하므로 조회는 1회만
+/* ★ 타계정 명의별 참여권 — 크레딧은 **명의(연락처)별**이라 소유자가 0건이어도 그 타계정 명의로는
+   참여할 수 있다. 그래서 타계정 참여가 열린 공고는 **등록된 전 명의를 조회해 모두 0일 때만** 잠근다.
+   { p8: {normalDone, popularUsed, credits} } · null = 아직 모름(잠그지 않음). */
+let _popSubCredits = null;
+let _popUnknown = false;       // 한 명의라도 조회에 실패하면 true — 모르면 잠그지 않는다(fail-open)
 
-function _setPopCredit(o){
-  if(!o) return;
-  const nd = Number(o.normalDone) || 0, pu = Number(o.popularUsed) || 0;
-  _popCredit = { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu) };
+function _popCalc(o){
+  const nd = Number(o && o.normalDone) || 0, pu = Number(o && o.popularUsed) || 0;
+  return { normalDone: nd, popularUsed: pu, credits: Math.max(0, nd - pu) };
 }
-/** 인기 공고 + 로그인 세션이 있을 때만 1회 조회 → 안내 문구·참여 버튼 갱신. */
+function _setPopCredit(o){ if(o) _popCredit = _popCalc(o); }
+/** 한 명의의 참여권 조회. 실패는 null(= 모름) — 0건으로 꾸미지 않는다. */
+async function _fetchPopCredit(phone8){
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/popular-status?phone8=' + encodeURIComponent(phone8));
+    const j = await r.json();
+    if(!(r.ok && j && j.ok)) return null;
+    return _popCalc(j);
+  }catch(_){ return null; }
+}
+/** 인기 공고 + 로그인 세션이 있을 때만 1회 조회 → 안내 문구·참여 버튼 갱신.
+    타계정 참여가 열린 공고면 **등록된 타계정 명의까지 각각** 조회한다(명의당 1회, 명의별 리미터 버킷). */
 async function loadPopCredit(){
   if(_popCreditTried) return;
   if(!(_camp && _camp.is_popular === true)) return;
@@ -582,19 +597,40 @@ async function loadPopCredit(){
   const s = getSession();
   if(!s || !s.phone8) return;                          // 비로그인은 종전대로(참여 클릭 시 로그인·내정보 유도)
   _popCreditTried = true;
-  try{
-    const r = await fetch(API_BASE_URL + '/api/campaign/popular-status?phone8=' + encodeURIComponent(s.phone8));
-    const j = await r.json();
-    if(!(r.ok && j && j.ok)) return;                   // 실패 = 모름(잠그지 않음)
-    _setPopCredit(j);
-  }catch(_){ return; }
+  const own = await _fetchPopCredit(s.phone8);
+  if(!own){ _popUnknown = true; return; }              // 본계정 조회 실패 = 모름(잠그지 않음)
+  _popCredit = own;
+  if(multiEnabled()){
+    const subs = await loadSubs();                     // 실패 시 [] — 그때는 소유자 기준으로만 판정
+    const seen = {}, targets = [];
+    (subs || []).forEach(x => {
+      const p = _p8(x && x.phone);
+      if(p.length === 8 && p !== _p8(s.phone8) && !seen[p]){ seen[p] = 1; targets.push({ p8: p, name: (x && x.name) || '' }); }
+    });
+    const got = await Promise.all(targets.map(t => _fetchPopCredit(t.p8)));
+    const map = {};
+    targets.forEach((t, idx) => {
+      if(!got[idx]){ _popUnknown = true; return; }     // 한 명의라도 모르면 잠그지 않는다
+      map[t.p8] = Object.assign({ name: t.name }, got[idx]);
+    });
+    _popSubCredits = map;
+  }
   if($('vPre').style.display !== 'none'){ renderPopNotice(); _applyPopLock(); }
 }
-/** ★ 잠금은 "본계정 명의로만 참여하는 공고"에서만 — 크레딧은 명의별이라 타계정 참여가 열린 공고에서는
-   소유자 크레딧 0 이어도 그 타계정 명의로는 참여할 수 있다(잘못 잠그면 정당한 참여를 막는다). */
+/** ★ 잠금 = "참여할 수 있는 명의가 하나도 없음"이 확인된 경우에만.
+   본계정에 참여권이 있거나, 타계정 참여가 열린 공고에서 어느 타계정 명의든 참여권이 있으면 잠그지 않는다. */
 function _popLockable(){
-  return !!(_camp && _camp.is_popular === true && _camp.multi_account_mode !== true
-            && !PREVIEW && _popCredit && _popCredit.credits === 0);
+  if(!(_camp && _camp.is_popular === true)) return false;
+  if(PREVIEW) return false;
+  if(_popUnknown) return false;                        // 모르면 잠그지 않는다(서버가 최종 권위)
+  if(!_popCredit || _popCredit.credits > 0) return false;
+  if(multiEnabled()){
+    if(!_popSubCredits) return false;                  // 타계정 조회 전 = 모름
+    for(const k in _popSubCredits){
+      if(_popSubCredits[k] && _popSubCredits[k].credits > 0) return false;
+    }
+  }
+  return true;
 }
 function _applyPopLock(){
   const jb = $('joinBtn');
@@ -603,6 +639,16 @@ function _applyPopLock(){
   jb.disabled = true;
   jb.textContent = '🔒 일반 모집 제출완료 후 참여 가능';
 }
+/** 참여권이 남은 타계정 명의 목록(안내 문구용) — 이름은 사용자 입력이라 escape 한다. */
+function _popSubsWithCredit(){
+  const out = [];
+  for(const k in (_popSubCredits || {})){
+    const v = _popSubCredits[k];
+    if(v && v.credits > 0) out.push(v);
+  }
+  return out;
+}
+const _popEsc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function renderPopNotice(){
   let box = $('popNotice');
@@ -618,10 +664,20 @@ function renderPopNotice(){
   box.style.display = '';
   // ★ 수치는 서버가 준 값만 그린다(모르면 줄 자체를 그리지 않는다 — 0건으로 꾸미지 않는다).
   const c = _popCredit;
-  const line = !c ? ''
+  let line = !c ? ''
     : (c.credits > 0
         ? '<div style="margin-top:8px;font-size:.8rem;color:#047857"><b>남은 참여권 ' + c.credits + '건</b> · 제출완료 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>'
         : '<div style="margin-top:8px;font-size:.8rem;color:#DC2626"><b>남은 참여권 0건</b> — 아직 참여할 수 없어요 · 제출완료 일반 ' + c.normalDone + '건 · 사용한 인기 ' + c.popularUsed + '건</div>');
+  // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 "어느 명의로 참여할 수 있는지"를 말해준다.
+  if(c && multiEnabled() && _popSubCredits){
+    const ok = _popSubsWithCredit();
+    if(ok.length){
+      line += '<div style="margin-top:4px;font-size:.8rem;color:#047857">타계정 ' +
+        ok.map(v => _popEsc(v.name || '명의') + ' ' + v.credits + '건').join(' · ') + ' 명의로는 참여할 수 있어요</div>';
+    }else if(c.credits === 0){
+      line += '<div style="margin-top:4px;font-size:.8rem;color:#DC2626">등록한 타계정 명의도 참여권이 없어요</div>';
+    }
+  }
   box.innerHTML =
     '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
     '<div style="font-size:.82rem;line-height:1.65"><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>' +
@@ -1102,7 +1158,14 @@ async function _doApply(optionKey, sub){
     // ★ 064: 인기상품 선행조건 미충족 → 일반 모집 목록 모달(테이블+참여 CTA)
     if(j.reason === 'popular_locked'){
       // ★ 서버가 준 최신 수치로 화면을 맞춘다(다음 클릭부터는 누르기 전에 잠겨 보인다)
-      _setPopCredit(j); _popCreditTried = true; renderPopNotice(); _applyPopLock();
+      // ★ 응답 수치는 **시도한 명의**의 것 — 타계정으로 시도했으면 그 명의 칸을 갱신한다
+      //   (본계정 값을 덮으면 화면이 남의 명의 수치를 본계정으로 말한다).
+      const _subP8 = _p8(sub && sub.phone);
+      if(_subP8.length === 8 && _subP8 !== _p8(s.phone8)){
+        _popSubCredits = _popSubCredits || {};
+        _popSubCredits[_subP8] = Object.assign({ name: (sub && sub.name) || '' }, _popCalc(j));
+      }else{ _setPopCredit(j); }
+      _popCreditTried = true; renderPopNotice(); _applyPopLock();
       toast('선행 공고의 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
     }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
