@@ -8,7 +8,7 @@ const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.
 const { appendSheet, readSheet } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
 const {
-  computeCampaignState,
+  computeCampaignState, nextOpenAt,
   fetchCampaignCounts,
   fetchOptionCounts,
   computeOptionView,
@@ -482,23 +482,38 @@ function _pick(row, fields) {
   return out;
 }
 
+/**
+ * 주말 미게시(104)로 막힌 카드의 **재개 시점** — { date, iso } (차단 중이 아니거나 계산 불가면 null).
+ * ★★ 날짜는 정책값(다음 월요일)이 아니라 `nextOpenAt`(= 카드의 "다시 오픈"·apply 게이트와 **같은
+ *   판정**)이 정한다 — 월요일이 0명 조절이면 그날은 열리지 않으므로 "월요일 재개"가 거짓이 된다.
+ * ★ 계산 실패는 정책값으로 접는다(호출부에서 `|| weekend.resumesOn`) — 빈 값으로 두지 않는다.
+ */
+function _weekendResume(row, weekend, counts, now, schedule) {
+  if (!weekend || !weekend.blocked) return null;
+  try { return nextOpenAt(row, counts, now, schedule); }
+  catch (e) { logger.warn('[campaign] 주말 재개일 계산 실패(무시): ' + e.message); return null; }
+}
+
 /** 공개 뷰: 레거시/참여형 분기 + 참여형은 상태엔진 페이로드 병합 */
 function _publicView(row, counts, now, schedule) {
   if (!row.participation_mode) {
     const weekend = weekendPublicationState(row, now);
+    const resume = _weekendResume(row, weekend, counts, now, null);
     return {
       ..._pick(row, PUBLIC_FIELDS_LEGACY),
       participation_mode: false,
       state: weekend.blocked ? 'weekend_unpublished' : row.status,
       stateReason: weekend.blocked ? weekend.reason : null,
       stateMessage: weekend.blocked ? weekend.message : null,
-      resumesOn: weekend.resumesOn,
+      resumesOn: resume ? resume.date : weekend.resumesOn,
+      resumesAt: resume ? resume.iso : null,
     };
   }
   const st = computeCampaignState(row, counts || {
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
   }, now, schedule);
   const weekend = weekendPublicationState(row, now);
+  const resume = _weekendResume(row, weekend, counts, now, schedule);
   return {
     ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
     participation_mode: true,
@@ -515,7 +530,9 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: weekend.blocked ? weekend.reason : (st.stateReason || null),
     stateMessage: weekend.blocked ? weekend.message : null,
-    resumesOn: weekend.resumesOn,
+    resumesOn: resume ? resume.date : weekend.resumesOn,
+    // 주말 미게시 카드의 "재개까지" 카운트다운 기준(ISO). 차단 중이 아니면 null.
+    resumesAt: resume ? resume.iso : null,
     nextWorkDate: st.nextWorkDate || null,
     // daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준(오늘의 opensAt은 이미 지난 시각)
     reopensAt: st.reopensAt || null,
@@ -1805,13 +1822,22 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
       };
       const _sch = schedMap ? scheduleFor(schedMap, r) : null;
       const st = computeCampaignState(r, cnt, now, _sch);
+      /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
+         토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
+         카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
+      const _weekend = weekendPublicationState(r, now);
+      const _resume = _weekendResume(r, _weekend, cnt, now, _sch);
       return {
         ...r,
         archiveSuggest: _sug,
         // 카드 표기 전용 값. recruit_total 원본은 참여 제한/기존 정책을 위해 그대로 둔다.
         display_recruit_total: displayTotal.total,
         display_recruit_total_source: displayTotal.source,
-        state: st.state, stateReason: st.stateReason || null,
+        state: _weekend.blocked ? 'weekend_unpublished' : st.state,
+        stateReason: _weekend.blocked ? _weekend.reason : (st.stateReason || null),
+        stateMessage: _weekend.blocked ? _weekend.message : null,
+        resumesOn: _resume ? _resume.date : _weekend.resumesOn,
+        resumesAt: _resume ? _resume.iso : null,
         // 표(주문 원장) 기준 총량(2단계) — null = 집계 불가/연결 없음(카드는 표 기준 문구를 그리지 않는다)
         tableQuota: st.tableQuota || null,
         todayCount: st.todayCount, dailyQuota: st.dailyQuota,
