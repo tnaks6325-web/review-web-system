@@ -1362,6 +1362,26 @@ const REVERSE_SYNC_FIELDS = ['orderer', 'recipient', 'user_id', 'phone', 'addres
 const ORDER_LEDGER_EDIT_FIELDS = [...REVERSE_SYNC_FIELDS, 'selected_opt_key'];
 
 /**
+ * 원장 쓰기 게이트 — **창구마다 다르다(의도적)**.
+ *
+ * ★★ `ledger_screen`(관리자 주문원장 화면) = 종전 그대로 `ORDER_LEDGER_WRITE_ENABLED=true` 필요.
+ *   PR-B 시절의 **롤링배포·점진 활성 게이트**이고, 그 화면의 계약을 바꾸지 않는다.
+ *
+ * ★★ `workdesk_cell`(작업보드 셀 편집) = **기본 켜짐**. 이유:
+ *   ① 사용자 확정(2026-08-21)은 "표에서 고치면 원장도 그 값이 된다"이고, 그게 **환경변수 하나가
+ *      꺼져 있다는 이유로 조용히 안 되면** 담당자는 매번 실패 안내만 보게 된다(요구 자체가 무산).
+ *   ② 같은 화면의 **구매일자 편집(`setWorkdeskPurchaseDate`)은 이미 게이트 없이 원장을 고친다** —
+ *      작업보드발 원장 쓰기는 이 저장소에서 이미 게이트 밖 동작이다. 나머지 칸만 게이트에 묶어 두면
+ *      "날짜는 반영되는데 금액은 안 되는" 설명 못 할 차이가 남는다.
+ *   ★ 끄는 길은 남긴다 — `WORKDESK_LEDGER_WRITEBACK=off` (돈 칸을 건드리는 경로의 킬 스위치).
+ *     끄면 화면이 실패 사유를 말하므로 조용히 나빠지지 않는다.
+ */
+function _ledgerWriteAllowed(source) {
+  if (source === 'workdesk_cell') return process.env.WORKDESK_LEDGER_WRITEBACK !== 'off';
+  return process.env.ORDER_LEDGER_WRITE_ENABLED === 'true';
+}
+
+/**
  * 주문 원장 필드 편집 — **쓰기 단일 출처**.
  *
  * ★★ 이 함수를 쓰는 곳이 둘이다(사본 금지):
@@ -1385,7 +1405,7 @@ const ORDER_LEDGER_EDIT_FIELDS = [...REVERSE_SYNC_FIELDS, 'selected_opt_key'];
  */
 async function applyOrderEdit({ orderSubmissionId, edits, by = '', source = 'ledger_screen' } = {}) {
   const db = getPool();
-  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { disabled: true };
+  if (!_ledgerWriteAllowed(source)) return { disabled: true };
   const list = Array.isArray(edits) ? edits : [];
   if (!orderSubmissionId || !list.length) return { badField: true, reason: 'empty' };
   const clean = [];

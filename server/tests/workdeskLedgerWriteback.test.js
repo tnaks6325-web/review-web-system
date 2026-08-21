@@ -230,6 +230,46 @@ function stubLedger(result) {
     assert.ok(/주문원장/.test(fn), '무엇이 안 됐는지 사람 말로 설명하지 않는다');
   });
 
+  console.log('\n§4 쓰기 게이트 — 창구마다 다르다(환경변수 없이도 담당자 편집은 반영된다)');
+
+  /* ★ DB 접근 없이 게이트만 본다: 게이트를 통과하면 `edits: []` 가 `badField(empty)` 로 걸리고,
+       막히면 그 앞에서 `disabled` 로 끊긴다. 두 반환값의 차이가 곧 게이트 통과 여부다. */
+  const gate = (source, env) => {
+    const keep = { L: process.env.ORDER_LEDGER_WRITE_ENABLED, W: process.env.WORKDESK_LEDGER_WRITEBACK };
+    delete process.env.ORDER_LEDGER_WRITE_ENABLED; delete process.env.WORKDESK_LEDGER_WRITEBACK;
+    Object.assign(process.env, env || {});
+    return ol.applyOrderEdit({ orderSubmissionId: 'os-1', edits: [], source }).then(r => {
+      if (keep.L === undefined) delete process.env.ORDER_LEDGER_WRITE_ENABLED; else process.env.ORDER_LEDGER_WRITE_ENABLED = keep.L;
+      if (keep.W === undefined) delete process.env.WORKDESK_LEDGER_WRITEBACK; else process.env.WORKDESK_LEDGER_WRITEBACK = keep.W;
+      return r;
+    });
+  };
+
+  await ta('4a ★★ 작업보드 셀 편집은 ORDER_LEDGER_WRITE_ENABLED 없이도 원장까지 간다', async () => {
+    const r = await gate('workdesk_cell', {});
+    assert.ok(!r.disabled, '★ 환경변수 하나가 꺼져 있다고 담당자 편집이 원장에 안 가면 이 기능은 무산된다');
+    assert.strictEqual(r.badField, true, '게이트를 통과해 빈 edits 검증까지 갔어야 한다');
+  });
+
+  await ta('4b ★ 끄는 길은 남아 있다 — WORKDESK_LEDGER_WRITEBACK=off', async () => {
+    const r = await gate('workdesk_cell', { WORKDESK_LEDGER_WRITEBACK: 'off' });
+    assert.strictEqual(r.disabled, true, '돈 칸을 건드리는 경로에 킬 스위치가 없다');
+  });
+
+  await ta('4c ★ 주문원장 화면의 계약은 그대로 — 종전 게이트가 여전히 필요하다', async () => {
+    assert.strictEqual((await gate('ledger_screen', {})).disabled, true, '★ 남의 화면 게이트를 조용히 열었다');
+    assert.ok(!(await gate('ledger_screen', { ORDER_LEDGER_WRITE_ENABLED: 'true' })).disabled);
+  });
+
+  t('4d 게이트 판정이 한 곳에 모여 있다(창구별 분기 사본 금지)', () => {
+    const src = R('src/services/orderLedger.service.js');
+    assert.ok(/function _ledgerWriteAllowed\(source\)/.test(src), '게이트 판정 함수가 없다');
+    assert.ok(/if \(!_ledgerWriteAllowed\(source\)\) return \{ disabled: true \};/.test(src), 'applyOrderEdit 가 그 판정을 쓰지 않는다');
+    const fn = src.slice(src.indexOf('function _ledgerWriteAllowed('), src.indexOf('async function applyOrderEdit('));
+    assert.ok(/WORKDESK_LEDGER_WRITEBACK !== 'off'/.test(fn), '작업보드 기본 켜짐 규칙이 없다');
+    assert.ok(/ORDER_LEDGER_WRITE_ENABLED === 'true'/.test(fn), '원장 화면 게이트가 없다');
+  });
+
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);
 })();
