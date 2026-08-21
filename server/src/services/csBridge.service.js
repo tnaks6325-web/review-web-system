@@ -263,9 +263,13 @@ async function postInspectionReject({ sheetId, tabName, rowIndex, reviewerName, 
       matchAt: card.matchAt || null,
       to: _clip(card.to, 40),
     } : null;
+    /* ★★ `meta` 는 **NOT NULL DEFAULT '{}'**(080) — 기본값은 컬럼을 **생략했을 때만** 적용된다.
+       카드 없는 안내(검수 반려 본문·입금 실패 안내·작업보드 선톡)는 여기서 `null` 을 넘겨
+       **23502 로 전건 실패**했고, 이 함수는 절대 throw 하지 않아 warn 로그로만 남아 있었다
+       (실측 2026-08-21 — 로컬 PG16 재현). 컬럼 목록은 그대로 두고 SQL 에서 접는다. */
     const { rows: mRows } = await pool.query(
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
-       VALUES ($1,'admin',$2,$3,$4,$5::jsonb) RETURNING id, created_at AS "createdAt"`,
+       VALUES ($1,'admin',$2,$3,$4,COALESCE($5::jsonb,'{}'::jsonb)) RETURNING id, created_at AS "createdAt"`,
       [threadId, senderName, text, meta ? 'inspect_result' : 'text', meta ? JSON.stringify(meta) : null]
     );
     await pool.query(
