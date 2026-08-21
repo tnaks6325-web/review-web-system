@@ -183,6 +183,13 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
   assert.equal(r.locked, true);
 }
 
+// ⑪-1 안내 카드의 명의 이름도 escape 한다(사용자 입력이 innerHTML 로 들어간다)
+{
+  const notice = campaign.slice(campaign.indexOf('function renderPopNotice(){'),
+                                campaign.indexOf('async function openPopGate('));
+  assert(/_popEsc\(v\.name/.test(notice), '안내 카드의 타계정 이름은 escape 해야 한다');
+}
+
 // ⑪-2 안내 문구는 "없다"와 "모른다"를 구분한다(조회 실패·타계정 0개를 "없어요"로 단정하지 않는다)
 {
   const notice = campaign.slice(campaign.indexOf('function renderPopNotice(){'),
