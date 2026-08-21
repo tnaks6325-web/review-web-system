@@ -18,7 +18,7 @@ const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
-const { isFilledRow: _isFilledRow } = require('../utils/rowNumbering');   // "채워진 줄" 판정 단일 출처(SQL `filledSql` 과 한 벌)
+const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 
 let _pool;
 let _rebuildLedgersForTest = null;
@@ -2741,7 +2741,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
       continue;
     }
-    if (_isFilledRow(syn)) filledCount++;
+    /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
+       세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
+    syn.filled = _isFilledRow(syn);
+    if (syn.filled) filledCount++;
+    /* ★ 작업보드 표의 「번호」 칸 값 — 미리보기 팝업 목록이 쓴다. `seq`(시트 실제 행 번호)와는
+       다른 값이라(원래 1 차이) 화면이 둘을 헷갈리면 안 된다. 칸 이름 판정은 `numberColumnKey`
+       단일 출처이고, 담당자가 셀을 고쳤으면 그 값이 이긴다(표와 같게). 칸이 없으면 빈 값. */
+    const _nk = _numberColumnKey(r.row_json);
+    syn.boardNo = _nk ? String(pick('col:' + _nk, (r.row_json || {})[_nk]) ?? '').trim() : '';
     const _vp8 = String(syn.phone8 == null ? '' : syn.phone8).trim();
     if (_vp8) { const n = (visitSeen.get(_vp8) || 0) + 1; visitSeen.set(_vp8, n); syn.visitNo = n; }
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
