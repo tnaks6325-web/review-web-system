@@ -2260,9 +2260,17 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
 #rmOv .wbl-dlg{width:min(520px,100%);max-height:86vh;display:flex;flex-direction:column}
 #rmOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #rmOv .rmto{background:var(--info-soft,#eff6ff);border:1px solid var(--info-line,#bfdbfe);border-radius:9px;padding:8px 11px;font-size:11.5px}
-#rmOv .rmrow{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:11.5px}
-#rmOv .rmrow b{white-space:nowrap}
-#rmOv .rmrow .why{color:var(--muted,#6b7280);font-size:10.5px}
+/* ★★ 한 줄에 이름·번호·사유를 flex 로 늘어놓으면 좁은 폭에서 사유가 **세로로 한 글자씩** 접힌다
+   (실측 신고 2026-08-21). 이름+번호만 한 줄로 묶고 사유는 **아랫줄 블록**으로 내린다. */
+#rmOv .rmitem{padding:5px 0;font-size:11.5px}
+#rmOv .rmitem + .rmitem{border-top:1px solid rgba(15,23,42,.07)}
+#rmOv .rmwho{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;min-width:0}
+#rmOv .rmwho b{font-size:12px;font-weight:800;word-break:keep-all}
+#rmOv .rmwho .rmnum{font-size:11px;color:var(--muted,#6b7280);font-variant-numeric:tabular-nums;white-space:nowrap}
+#rmOv .rmwho .rmtag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;white-space:nowrap;
+  background:var(--warn-soft,#fdf6ec);color:var(--warn,#b45309)}
+#rmOv .rmitem .rmwhy{display:block;margin-top:2px;color:var(--muted,#6b7280);font-size:10.5px;
+  line-height:1.55;word-break:keep-all;overflow-wrap:anywhere}
 #rmOv .rmbad{margin-top:9px;padding:9px 11px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
 #rmOv .rmwarn{margin-top:9px;padding:9px 11px;border:1px solid #f0dcb8;background:var(--warn-soft,#fffbeb);border-radius:9px;font-size:11.5px}
 #rmOv textarea{width:100%;box-sizing:border-box;margin-top:10px;min-height:96px;resize:vertical;padding:9px;
@@ -8378,21 +8386,23 @@ function _rmPaint(){
   const oks=items.filter(x=>x.ok), bad=items.filter(x=>!x.ok);
   // 같은 본계정 = 같은 방 → 한 번만 보낸다(서버도 같은 규칙으로 합친다).
   const seen=new Set(), uniq=[]; oks.forEach(x=>{ if(seen.has(x.phone8)) return; seen.add(x.phone8); uniq.push(x); });
-  const line=x=>`<div class="rmrow"><b>${esc(x.name||x.rowName||'(이름 없음)')}</b>
-      <span class="mono">…${esc(String(x.phone8||'').slice(-4))}</span>
-      <span class="why">${x.isSub?`타계정 <b>${esc(x.rowName||'')}</b> 명의로 참여 · <b>본계정</b>으로 보냅니다`
-        :(x.nameMismatch?`표 이름 <b>${esc(x.rowName||'')}</b> ↔ 등록 이름 <b>${esc(x.name||'')}</b> — 확인해 주세요`
+  const line=x=>`<div class="rmitem">
+      <div class="rmwho"><b>${esc(x.name||x.rowName||'(이름 없음)')}</b>
+        <span class="rmnum">···${esc(String(x.phone8||'').slice(-4))}</span>
+        ${x.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>
+      <span class="rmwhy">${x.isSub?`표의 명의는 <b>${esc(x.rowName||'')}</b> — 로그인 본계정으로 보냅니다`
+        :(x.nameMismatch?`표 이름 <b>${esc(x.rowName||'')}</b> ↔ 등록 이름 <b>${esc(x.name||'')}</b> · 확인해 주세요`
         :esc(x.viaLabel||''))}</span></div>`;
   l.className='rmto';
   l.innerHTML= uniq.length
     ? `<div style="font-weight:700;margin-bottom:4px">받는 사람 ${uniq.length}명</div>${uniq.map(line).join('')}`
-      + (oks.length>uniq.length?`<div class="why" style="margin-top:5px">같은 리뷰어의 줄 ${oks.length-uniq.length}건은 <b>같은 문의방</b>이라 한 번만 보냅니다.</div>`:'')
+      + (oks.length>uniq.length?`<div class="rmwhy" style="margin-top:5px">같은 리뷰어의 줄 ${oks.length-uniq.length}건은 <b>같은 문의방</b>이라 한 번만 보냅니다.</div>`:'')
     : '<b>보낼 수 있는 줄이 없습니다.</b>';
   if(bad.length){
     l.insertAdjacentHTML('afterend',
       `<div class="rmbad" id="rmBad"><b>보낼 수 없는 줄 ${bad.length}건</b>${
-        bad.slice(0,8).map(x=>`<div class="rmrow"><b>${esc(x.rowName||('#'+(x.seq||'')))}</b><span class="why">${esc(x.reason||'')}</span></div>`).join('')
-      }${bad.length>8?`<div class="why">외 ${bad.length-8}건</div>`:''}</div>`);
+        bad.slice(0,8).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||('#'+(x.seq||'')))}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
+      }${bad.length>8?`<div class="rmwhy">외 ${bad.length-8}건</div>`:''}</div>`);
   }
   const old=document.getElementById('rmBad');
   if(old && !bad.length) old.remove();
@@ -8426,8 +8436,16 @@ async function _rmSend(){
   _RM.busy=false;
   if(!d||(d.ok===false&&!(d.sent&&d.sent.length))){
     _RM.err=null; _rmPaintFoot();
+    /* ★ 서버가 건별 사유(failed[].reason)를 준다 — 그걸 버리고 "보내지 못했습니다" 한 줄로 뭉개면
+         담당자가 원인을 찾을 수 없다(이번 실측 신고의 절반이 이것이었다). */
+    const fl=(d&&d.failed)||[];
+    const why = fl.length
+      ? fl.slice(0,5).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||'')}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
+        + (fl.length>5?`<div class="rmwhy">외 ${fl.length-5}건</div>`:'')
+      : `<div class="rmwhy">${esc((d&&d.error)||'서버가 사유를 알려주지 않았습니다.')}</div>`;
     const l=document.getElementById('rmList');
-    if(l) l.insertAdjacentHTML('afterend',`<div class="rmbad">${esc((d&&d.error)||'메시지를 보내지 못했습니다.')}</div>`);
+    const prev=document.getElementById('rmSendErr'); if(prev) prev.remove();
+    if(l) l.insertAdjacentHTML('afterend',`<div class="rmbad" id="rmSendErr"><b>보내지 못했습니다</b>${why}</div>`);
     return;   // ★ 입력한 내용은 그대로 둔다(다시 누르면 재시도)
   }
   _RM.sent=d; _rmRenderResult();
@@ -8436,12 +8454,12 @@ function _rmRenderResult(){
   const b=document.getElementById('rmBody'), f=document.getElementById('rmFoot'); if(!b||!f) return;
   const d=_RM.sent||{}, sent=d.sent||[], failed=d.failed||[], merged=d.merged||[];
   b.innerHTML=`<div class="rmok"><b>${sent.length}명에게 보냈습니다.</b>
-      ${sent.slice(0,8).map(s=>`<div class="rmrow"><b>${esc(s.name||'')}</b><span class="mono">…${esc(s.phone8Tail||'')}</span>${s.isSub?'<span class="why">타계정 참여 · 본계정으로 전송</span>':''}</div>`).join('')}
-      ${sent.length>8?`<div class="why">외 ${sent.length-8}명</div>`:''}</div>
+      ${sent.slice(0,8).map(s=>`<div class="rmitem"><div class="rmwho"><b>${esc(s.name||'')}</b><span class="rmnum">···${esc(s.phone8Tail||'')}</span>${s.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>${s.isSub?'<span class="rmwhy">로그인 본계정으로 보냈습니다</span>':''}</div>`).join('')}
+      ${sent.length>8?`<div class="rmwhy">외 ${sent.length-8}명</div>`:''}</div>
     ${merged.length?`<div class="rmwarn">같은 리뷰어의 줄 ${merged.length}건은 <b>같은 문의방</b>이라 한 번만 보냈습니다.</div>`:''}
     ${failed.length?`<div class="rmbad"><b>보내지 못한 줄 ${failed.length}건</b>${
-      failed.slice(0,8).map(x=>`<div class="rmrow"><b>${esc(x.rowName||'')}</b><span class="why">${esc(x.reason||'')}</span></div>`).join('')
-    }${failed.length>8?`<div class="why">외 ${failed.length-8}건</div>`:''}</div>`:''}`;
+      failed.slice(0,8).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||'')}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
+    }${failed.length>8?`<div class="rmwhy">외 ${failed.length-8}건</div>`:''}</div>`:''}`;
   // ★ [문의방 열기]는 **C/S 본문을 볼 수 있는 사람**(master/admin)에게만 — AE 에게 주면 막다른 길이다.
   f.innerHTML=`${(_RM.canOpen&&sent.length===1)?`<button class="btn" onclick="_rmOpenThread()">문의방 열기</button>`:''}
     <button class="btn pri" onclick="_rmClose()">닫기</button>`;
