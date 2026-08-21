@@ -82,8 +82,9 @@ async function runSeqCase() {
     /worktableLinked: sheetlessLinked/.test(planSrc) && /sheetlessLinked = null;   \/\/ 모르면/.test(planSrc));
 
   /* ── ③ 표시 기준 통일 ── */
+  // ⚠ SELECT 컬럼 목록은 늘어날 수 있다(날짜별 "채워진 줄" 수 집계) — 검사 의미는 **기준(WHERE)** 이다.
   ok('★ 모달 기준선도 active = TRUE 로 센다(그리드·실행과 같은 기준)',
-    /SELECT row_json FROM campaign_participants\s*\n\s*WHERE sheet_id = \$1 AND tab_name = \$2 AND deleted_at IS NULL AND active = TRUE/.test(src));
+    /FROM campaign_participants\s*\n\s*WHERE sheet_id = \$1 AND tab_name = \$2 AND deleted_at IS NULL AND active = TRUE/.test(src));
 
   console.log(`\nplanWorktableSeqReuse: ${passed} passed`);
   process.exit(0);

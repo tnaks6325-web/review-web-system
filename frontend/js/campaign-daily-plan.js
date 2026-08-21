@@ -106,6 +106,18 @@
   /** 무시트 작업표의 실제 날짜별 준비 행 수. 날짜가 없으면 0명이다.
    *  기본 일건수를 빈 날짜에 다시 채우면, 작업표에는 없는 주말/휴무일이 40명으로
    *  꾸며져 조절 화면과 작업표가 다시 갈린다. */
+  /** 그날 **이미 참여·주문이 있는 줄** 수 — 재배분이 그 아래로 못 내려가는 하한.
+   *  ★ 서버 rebuildAdjustedPlansToWorktable 이 이 수보다 적은 계획을 거부한다
+   *    (worktable_rebuild_below_used) — 화면이 애초에 그런 값을 만들지 않게 한다.
+   *  ★ 값을 못 받으면(구버전 백엔드) 0 = 종전 동작(서버가 최종 방어하고 사유를 말한다). */
+  function worktableFilledFor(d) {
+    if (!S.data._wtFill) {
+      var m = {};
+      (S.data.worktableDates || []).forEach(function (x) { m[x.date] = Number(x.filled) || 0; });
+      S.data._wtFill = m;
+    }
+    return S.data._wtFill[d] || 0;
+  }
   function worktableFor(d) {
     if (!S.data._wtMap) {
       var m = {};
@@ -116,9 +128,15 @@
   }
   /** 그날 조절이 없을 때의 기본 정원 — 시트 일정 공고는 **시트가**, 아니면 기본 일건수가 정한다.
    *  ★ 이 한 곳이 게이지·"기본 N" 표기·예상 종료일 계산의 공통 기준(사본을 두면 화면이 갈린다). */
+  /** 이 공고의 **주말 정책이 그날을 닫는가**(주말 제외 = 토·일·공휴일).
+   *  ★ baseFor 와 재배분이 같은 판정을 쓴다(사본을 두면 "표는 0인데 재배분은 30"이 된다). */
+  function policyClosed(d) {
+    if (!S || !S.data || S.data.skipWeekends !== true) return false;
+    var k = dayKind(d);
+    return k === 'sat' || k === 'hol';
+  }
   function baseFor(d) {
-    if (S.data.skipWeekends === true && dayKind(d) === 'sat') return 0;
-    if (S.data.skipWeekends === true && dayKind(d) === 'hol') return 0;
+    if (policyClosed(d)) return 0;
     if (S.data.scheduleDriven === true) return sheetFor(d);
     // worktableDates 가 있으면 이 공고는 무시트 작업표 연결 공고다. 없는 날짜는
     // "기본 일건수"가 아니라 실제로는 아직 행이 없는 0명으로 보여야 한다.
@@ -370,6 +388,142 @@
     var cur = (d == null) ? 0 : planFor(d);
     var room = targetTotal() - sumPlan();               // 남은 배분수(음수 = 이미 초과)
     return Math.min(MAX_DAY, Math.max(minFor(d), cur + Math.max(0, room)));
+  }
+
+  /* ══ 주말 정책 재배분 (사용자 요청 2026-08-21 ①②) ═══════════════════════
+     주말 포함/제외를 바꾸면 그 설정에 맞게 **오늘 이후 날짜별 인원을 다시 깐다**.
+     ★★ 총량은 변하지 않는다 — 목표(총량 − 어제까지 확정)를 채울 때까지 "여는 날"에 기본
+       일건수씩 깔고 마지막 날은 남은 만큼만. 그래서 **주말을 닫으면 종료일이 뒤로 밀리고,
+       주말을 열면 뒤에 붙어 있던 날이 0으로 닫히며 종료일이 앞당겨진다**(양방향 대칭).
+     ★★ **제안까지만 — 반영은 사람이 [확정 저장]을 누를 때** 기존 저장 경로(savePlans →
+       작업표 재구성)로 일어난다. 조용한 자동수정 금지(레포 규율) + 이미 채워진 줄·오늘
+       확정분은 서버가 최종 방어한다.
+     ★ 구간 뒤에 남는 자리는 **해제(remove)가 아니라 명시 0** 으로 닫는다 — 해제하면 작업표
+       행 수가 다시 기준이 되어 그 날이 계속 열린다(= 종료일이 안 당겨진다). */
+
+  /** 재배분 대상이 아닌 사유(대상이면 null) — 화면이 이 값으로 사유를 말한다. */
+  function rebalanceReason() {
+    if (!S || !S.data) return 'no_data';
+    var j = S.data;
+    if (j.planEnabled === false) return 'plan_off';
+    // 시트 일정 공고는 날짜를 시트가 정한다 — 여기서 다시 깔면 시트 우선권을 통째로 뺏는다.
+    if (j.scheduleDriven === true) return 'schedule_driven';
+    if ((Number(j.defaultDaily) || 0) <= 0) return 'no_daily';
+    var tot = totalFor();
+    if (tot <= 0) return 'unlimited';
+    // 하루에 전량을 여는 공고(블로그 등)는 날짜 배분 개념이 없다.
+    if (tot <= (Number(j.defaultDaily) || 0)) return 'single_day';
+    if (targetTotal() <= 0) return 'full';
+    if (minFor(j.today) > targetTotal()) return 'today_over';
+    return null;
+  }
+  var REBAL_WHY = {
+    plan_off: '날짜별 조절 기능이 꺼져 있어 재배분할 수 없습니다',
+    schedule_driven: '시트 일정 공고는 시트가 날짜를 정합니다 — 시트에서 진행 날짜를 조정해주세요',
+    no_daily: '하루 진행 인원(일건수)이 없어 재배분할 수 없습니다 — 공고 수정에서 먼저 입력해주세요',
+    unlimited: '총 모집인원이 무제한이라 재배분할 것이 없습니다',
+    single_day: '하루에 전량을 여는 공고라 날짜 배분이 없습니다',
+    full: '이미 총 모집인원을 다 채웠습니다',
+    today_over: '오늘 확정·진행 인원이 남은 배분수보다 많아 재배분할 수 없습니다',
+    too_long: '재배분 구간이 한 번에 저장 가능한 ' + MAX_ROWS + '일을 넘습니다 — 아래에서 날짜별로 조절해주세요',
+  };
+
+  /** 재배분 계산(순수) — 상태를 읽지 않고 인자만 본다(테스트·사본 방지).
+   *  o = { from, today, target, daily, floor, closed(d), keep:{d:n}, tail:[d…], maxRows }
+   *  반환 = { plan:{d:n}, dates:[d…], last, open:[d…], shut:[d…] } | null(상한 안에서 총량 미달) */
+  function planWeekendSpread(o) {
+    var plan = {}, dates = [], sum = 0, d = o.from, guard = 0;
+    var target = Math.max(0, Number(o.target) || 0);
+    var daily = Math.max(0, Number(o.daily) || 0);
+    var floor = Math.max(0, Number(o.floor) || 0);
+    var maxRows = Number(o.maxRows) || MAX_ROWS;
+    var floorFor = (typeof o.floorFor === 'function') ? o.floorFor : function () { return 0; };
+    var kept = [];   // 이미 채워져 있어 닫지 못한 날(화면이 사실대로 말한다)
+    while (guard++ < 400 && dates.length < maxRows) {
+      // ★★ 그날 하한 = 오늘 확정·진행 인원(오늘) 또는 **이미 채워진 작업표 줄 수**(미래 날짜).
+      //   이 아래로 내려간 계획은 서버 재구성이 통째로 거부한다(worktable_rebuild_below_used).
+      var lo = (d === o.today) ? Math.max(floor, floorFor(d)) : floorFor(d);
+      var cap = o.closed(d) ? 0 : daily;
+      if (cap < lo) cap = lo;
+      var v = Math.min(cap, Math.max(0, target - sum));
+      if (v < lo) v = lo;                              // 하한은 목표보다 우선(줄일 수 없다)
+      if (o.closed(d) && v > 0) kept.push(d);          // 닫으려 했으나 이미 사람이 있는 날
+      plan[d] = v; dates.push(d); sum += v;
+      if (sum >= target) break;
+      d = addDays(d, 1);
+    }
+    if (sum < target) return null;                     // 상한 안에서 총량을 못 채운다
+    var last = dates[dates.length - 1];
+    // 구간 뒤에 남은 자리는 명시 0 으로 닫는다(위 규율)
+    var shut = [];
+    (o.tail || []).forEach(function (x) {
+      if (x <= last || plan[x] != null) return;
+      var lo = floorFor(x);                            // 이미 채워진 줄은 닫을 수 없다(위와 같은 하한)
+      plan[x] = lo; dates.push(x);
+      if (lo === 0) shut.push(x); else kept.push(x);
+    });
+    // 시작일이 미래인 공고의 today ≤ d < 시작일 구간에 저장된 계획은 **손대지 않는다**
+    // (화면에서 빼면 저장 시 remove 로 나가 사람이 정해 둔 계획이 조용히 사라진다).
+    Object.keys(o.keep || {}).forEach(function (x) {
+      if (plan[x] == null) { plan[x] = o.keep[x]; dates.push(x); }
+    });
+    dates.sort();
+    return { plan: plan, dates: dates, last: last, shut: shut, kept: kept };
+  }
+
+  /** 지금 상태로 재배분안을 만든다(대상 아님·불가면 null) */
+  function buildWeekendPlan() {
+    if (rebalanceReason()) return null;
+    var j = S.data, today = j.today;
+    var tail = {};
+    Object.keys(S.base).forEach(function (x) { if (x >= today) tail[x] = 1; });
+    (j.worktableDates || []).forEach(function (x) {
+      var dd = String(x.date || '').slice(0, 10);
+      if (dd >= today && (Number(x.slots) || 0) > 0) tail[dd] = 1;
+    });
+    var keep = {};
+    var from = baseDate();
+    Object.keys(S.base).forEach(function (x) { if (x >= today && x < from) keep[x] = S.base[x]; });
+    return planWeekendSpread({
+      from: from, today: today, target: targetTotal(),
+      daily: Number(j.defaultDaily) || 0, floor: minFor(today),
+      closed: policyClosed, floorFor: minFor,
+      keep: keep, tail: Object.keys(tail).sort(), maxRows: MAX_ROWS,
+    });
+  }
+
+  /** 주말 정책과 어긋난 날 — 주말 제외인데 인원이 배정된 오늘 이후 날짜(그 날은 신청이 막힌다).
+   *  ★ 주말 **포함** 쪽은 감지하지 않는다(토/일 0 이 의도일 수 있다 — 구분 불가). */
+  function weekendConflicts() {
+    if (!S || !S.data || S.data.skipWeekends !== true) return [];
+    var today = S.data.today, seen = {}, out = [];
+    (S.horiz || []).concat(Object.keys(S.plan)).forEach(function (d) {
+      if (seen[d] || d < today) return;
+      seen[d] = 1;
+      if (policyClosed(d) && planFor(d) > 0) out.push(d);
+    });
+    return out.sort();
+  }
+
+  /** 재배분안을 화면에 펼친다(저장하지 않는다) — 반환 = 요약 | null */
+  function applyWeekendPlan() {
+    var r = buildWeekendPlan();
+    if (!r) return null;
+    S.plan = r.plan;
+    S.horiz = r.dates.slice();
+    S.balance = true;
+    S.balanceOff = null;
+    S.shortBy = 0;
+    S.outside = null;
+    // ★ 이월은 재배분에 이미 녹아 있다(목표 = 총량 − 어제까지 확정) — 이월 배치 블록을
+    //   그대로 두면 "이월 N명이 어디에도 얹혀 있지 않습니다"라는 거짓 문구가 남는다.
+    S.carryMap = {};
+    S.rebalanced = { last: r.last, shut: r.shut.length, kept: (r.kept || []).slice(0, 6),
+      keptN: (r.kept || []).length,
+      days: r.dates.filter(function (d) { return r.plan[d] > 0; }).length };
+    S.modePlan = JSON.parse(JSON.stringify(r.plan));
+    render();
+    return S.rebalanced;
   }
 
   /* 자동 맞춤 — 부족/초과분만 고른 방식대로 메운다(전체 재배치가 아니라 **차이만** 손댄다).
@@ -628,6 +782,26 @@
     }
   }
   function _retry() { if (S) open(S.campId); }
+
+  /** 주말 설정을 바꿔 저장한 직후 호출 — 조절 모달을 열고 **재배분안을 펼쳐 보여준다**.
+   *  ★ 저장하지 않는다(제안까지만) · 로드 실패면 open 이 이미 사유를 그렸으므로 조용히 끝낸다. */
+  async function openWeekendRebalance(campId) {
+    await open(campId);
+    if (!S || !S.data) return;
+    S.wkPrompt = true;
+    var why = rebalanceReason();
+    if (why) { render(); toast(REBAL_WHY[why] || '재배분 대상이 아닙니다'); return; }
+    if (!applyWeekendPlan()) { render(); toast(REBAL_WHY.too_long); return; }
+    toast('주말 설정에 맞춰 다시 배분했습니다 — 확인 후 [확정 저장]을 눌러주세요');
+  }
+  /** 배너 버튼 — 사람이 누를 때만 편다(조용한 자동수정 금지) */
+  function _rebalance() {
+    if (!S || !S.data) return;
+    var why = rebalanceReason();
+    if (why) { toast(REBAL_WHY[why] || '재배분 대상이 아닙니다'); return; }
+    if (!applyWeekendPlan()) { toast(REBAL_WHY.too_long); return; }
+    toast('주말 설정에 맞춰 다시 배분했습니다 — 확인 후 [확정 저장]을 눌러주세요');
+  }
   function close() {
     // ★ 균형 모드는 열자마자 구간을 펼쳐 두므로 dirty 가 항상 크다 — "사람이 실제로 바꾼 게 있나"로
     //   판정해야 아무것도 안 건드리고 닫을 때 매번 경고가 뜨지 않는다.
@@ -659,6 +833,8 @@
     S.plan = {};
     S.base = {};
     S.carryStage = 0;   // 이월 반영 스테이징은 저장/재조회 시 초기화(서버 잔량이 진실)
+    // ★ 재배분 배너는 "아직 저장 전"이라는 뜻이다 — 저장·재조회하면 그 말이 거짓이 되므로 지운다.
+    S.rebalanced = null; S.wkPrompt = false;
     // API의 today에는 시각이 붙을 수 있지만 계획 날짜는 YYYY-MM-DD다. 원문을
     // 비교하면 오늘의 저장 계획이 과거로 오인되어 S.base에 들어가지 않고, 재오픈할
     // 때 이월분이 또 더해진다. 날짜 키만 맞춰 비교한다.
@@ -714,7 +890,14 @@
     //   그래서 **이월이 있고 next 가 아닌 방식**일 때만 구간을 고정한다 — next 는 서버가 이미
     //   같은 일을 하므로 종전대로 보낼 것이 없고(유령 이월 방지), 이월이 없으면 고정할 이유도 없다.
     //   ★ 보류(carry_mode='hold') 공고는 서버가 애초에 얹지 않으므로 억제할 것이 없다 → 고정 안 함.
-    var pinAll = !!(S.carryMode && S.carryMode !== 'next' && (carryAmt() || 0) > 0
+    /* ★★★ 주말 재배분은 **구간 전체를 명시 계획으로 확정한다**(실브라우저가 잡은 결함).
+       종전 규칙("손대지 않은 값은 안 보낸다")대로 두면 **주말이 통째로 빠진다** —
+       주말 제외 공고의 토요일은 `baseFor` 가 정책상 0 이라 "0 으로 바꿔도 변경 없음"이 되는데,
+       작업표에는 그날 빈 줄 30 개가 그대로 남아 있다. 그 날짜가 저장 계획에 없으면
+       rebuildAdjustedPlansToWorktable 의 재구성 풀(managed)에 들어가지 못해 **줄이 옮겨지지
+       않고 뒤 날짜에 새 줄만 생겨 총 줄 수가 늘어난다.** 목적지 날짜도 같은 이유로 필요하다.
+       ★ 재배분 대상은 시트 일정 공고를 제외했으므로 "시트 우선권 상실" 우려는 없다. */
+    var pinAll = !!S.rebalanced || !!(S.carryMode && S.carryMode !== 'next' && (carryAmt() || 0) > 0
       && S.data.carryMode !== 'hold');
     Object.keys(S.plan).forEach(function (d) { if (d >= from) ds[d] = 1; });
     Object.keys(S.base).forEach(function (d) { if (d >= from) ds[d] = 1; });
@@ -898,8 +1081,45 @@
         + (j.scheduleDriven === true ? '. 시트에 진행 날짜를 더 넣어도 됩니다.' : '.') + '</div>';
     }
 
+    /* ── 주말 정책 재배분 배너(①②) ─────────────────────────────
+       ㉮ 방금 재배분한 상태 = 무엇이 어떻게 바뀌는지 + [확정 저장] 안내(초록)
+       ㉯ 주말 제외인데 주말에 인원이 남아 있음 = 그 날은 신청이 막힌다 → 제안(앰버)
+       ★ 주말 **포함** 전환은 감지하지 않는다 — 토/일 0 이 관리자의 의도일 수 있어
+         구분할 수 없다. 그래서 제안은 "주말 설정을 방금 바꿨을 때"만 자동으로 뜬다. */
+    var wkNote = '';
+    if (S.rebalanced) {
+      wkNote = '<div class="cdp-note" style="border-color:#86EFAC;background:#F0FDF4;color:#166534">'
+        + '↺ <b>주말 ' + (j.skipWeekends === true ? '제외' : '포함') + '</b> 설정에 맞춰 오늘 이후 일정을 다시 배분했습니다 — '
+        + '진행일 <b>' + S.rebalanced.days + '일</b> · 예상 종료일 <b>' + _esc(fmtMD(S.rebalanced.last)) + '</b>'
+        + (S.rebalanced.shut ? ' · 뒤에 남아 있던 <b>' + S.rebalanced.shut + '일</b>은 0명으로 닫음' : '')
+        + (S.rebalanced.keptN
+          ? ' · <b>' + S.rebalanced.keptN + '일</b>('
+            + _esc(S.rebalanced.kept.map(fmtMD).join(' · ')) + (S.rebalanced.keptN > S.rebalanced.kept.length ? ' 외' : '')
+            + ')은 <b>이미 참여·주문이 있어 닫지 못했습니다</b>'
+          : '')
+        + '. <b>총 모집인원은 변하지 않습니다.</b> 아래 표를 확인하고 <b>[확정 저장]</b>을 눌러야 작업표까지 반영됩니다'
+        + '(저장하지 않고 닫으면 아무것도 바뀌지 않습니다).</div>';
+    } else if (S.wkPrompt) {
+      var _why = rebalanceReason();
+      wkNote = '<div class="cdp-note warn">⚠ <b>주말 ' + (j.skipWeekends === true ? '제외' : '포함') + '</b>로 바꿨습니다 — '
+        + (_why
+          ? '자동 재배분은 하지 않았습니다: ' + _esc(REBAL_WHY[_why] || '대상이 아닙니다')
+          : '아래에서 <b>[주말 기준으로 재배분]</b>을 누르면 오늘 이후 일정을 새 설정으로 다시 깝니다(총량 유지).')
+        + '</div>';
+    } else {
+      var _wkBad = weekendConflicts();
+      if (_wkBad.length) {
+        wkNote = '<div class="cdp-note warn">⚠ 이 공고는 <b>주말 제외</b>인데 <b>' + _wkBad.length + '일</b>('
+          + _esc(_wkBad.slice(0, 4).map(fmtMD).join(' · ')) + (_wkBad.length > 4 ? ' 외' : '')
+          + ')에 인원이 배정돼 있습니다 — <b>그 날은 신청이 막혀 아무도 참여할 수 없습니다.</b>'
+          + ' <button type="button" class="cdp-btn sm" onclick="CampaignDailyPlan._rebalance()">주말 기준으로 재배분</button></div>';
+      }
+    }
+
     var carryBlk = '';
-    if (bal && carry !== null && carry > 0) {
+    // ★ 재배분 직후에는 이월 배치 블록을 그리지 않는다 — 이월은 재배분에 이미 녹아 있어
+    //   "이월 N명이 어디에도 얹혀 있지 않습니다"가 거짓 문구가 된다(창구도 둘이 된다).
+    if (bal && !S.rebalanced && carry !== null && carry > 0) {
       var placed = carryPlaced(), cds = carryDays(), where = '';
       if (S.carryMode === 'extend') {
         var lastD = null;
@@ -1026,6 +1246,7 @@
       + (killOff ? '<div class="cdp-note err">킬스위치(CAMPAIGN_DAILY_PLAN=0)로 날짜별 계획이 꺼져 있습니다 — 저장해도 정원에 반영되지 않아 조절을 잠갔습니다.</div>' : '')
       + wtNote
       + schNote
+      + wkNote
       + statBlk
       + offNote
       + carryBlk
@@ -1143,7 +1364,13 @@
     rowDates().forEach(function (d) { mx = Math.max(mx, planFor(d), baseFor(d) * 2); });
     return Math.max(10, mx);
   }
-  function minFor(d) { return d === S.data.today ? (S.data.todayUsed || 0) : 0; }
+  /** 그날 아래로 내려갈 수 없는 인원 — 오늘은 확정·진행 인원, 어느 날이든 **이미 채워진
+   *  작업표 줄** 수. 후자를 빼면 서버 재구성이 worktable_rebuild_below_used 로 통째로 거부해
+   *  "조절은 저장됐는데 표는 안 바뀐다"가 된다(막다른 길). 드래그·−/＋·자동 맞춤·주말 재배분이
+   *  전부 이 함수 하나를 본다(판정 사본 0). */
+  function minFor(d) {
+    return Math.max(d === S.data.today ? (S.data.todayUsed || 0) : 0, worktableFilledFor(d));
+  }
 
   function commitValue(d, next) {
     if (S.data.planEnabled === false) return;
@@ -1651,6 +1878,9 @@
 
   window.CampaignDailyPlan = {
     open: open, close: close,
+    openWeekendRebalance: openWeekendRebalance, _rebalance: _rebalance,
+    // 회귀가드용 — 순수 배분 함수(상태 미참조)
+    _wkSpread: planWeekendSpread,
     _save: _save, _rebuildWorktable: _rebuildWorktable, _retry: _retry, _revert: _revert, _mode: _mode, _autoFit: _autoFit,
     _chExtend: _chExtend, _chSpread: _chSpread, _chCancel: _chCancel,
     _roundForm: _roundForm, _roundAdd: _roundAdd, _roundRemove: _roundRemove,
