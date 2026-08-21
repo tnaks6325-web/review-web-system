@@ -2423,11 +2423,18 @@ router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async
       }
       const dup = seenPhone.get(it.phone8);
       if (dup) { merged.push({ participantId: it.participantId, rowName: it.rowName || '', name: it.name, withParticipantId: dup }); continue; }
+      // ★ 실패 사유를 그대로 화면에 올린다 — "보내지 못했습니다" 한 줄로 뭉개면 담당자가 손쓸 수 없다.
+      let why = '';
       const out = await _csBridge.postAdminNotice({
         sheetId, tabName, rowIndex: it.seq,
         reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by,
+        onError: (e) => { why = (e && (e.message || e.code)) ? `${e.message || ''}${e.code ? ` [${e.code}]` : ''}` : ''; },
       });
-      if (!out) { failed.push({ participantId: it.participantId, rowName: it.rowName || '', reason: '메시지 전송에 실패했습니다.' }); continue; }
+      if (!out) {
+        failed.push({ participantId: it.participantId, rowName: it.rowName || '',
+          reason: why ? `메시지 전송에 실패했습니다 — ${why}` : '메시지 전송에 실패했습니다.' });
+        continue;
+      }
       seenPhone.set(it.phone8, it.participantId);
       sent.push({ participantId: it.participantId, name: it.name, phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
     }
