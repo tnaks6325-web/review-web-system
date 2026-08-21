@@ -254,5 +254,38 @@ const POP_MULTI = { is_popular: true, multi_account_mode: true };
     await vm.runInContext('loadPopCredit()', c2.sandbox);
     assert.deepEqual(c2.calls, [], '미리보기는 조회하지 않는다');
   }
+  // ⑲ 명의 선택 시트: 참여권 0인 명의는 고를 수 없고, 남은 명의는 건수를 말한다
+  {
+    const c = ctx({ camp: POP_MULTI });
+    // 시트 렌더 블록은 별도 위치라 필요한 함수만 꺼내 같은 sandbox 에서 실행한다
+    const rowsSrc = campaign.slice(campaign.indexOf('function _acctRows(){'), campaign.indexOf('function renderAcctList(){'));
+    Object.assign(c.sandbox, {
+      _allHolds: () => ({}), _acctBlocked: {}, _subs: [{ name: 'S1', phone: '010-1111-2222' }, { name: 'S2', phone: '010-3333-4444' }],
+      _escAttr: (v) => String(v == null ? '' : v),
+    });
+    vm.runInContext(rowsSrc, c.sandbox);
+    vm.runInContext("_popCredit = { normalDone:0, popularUsed:0, credits:0 }", c.sandbox);
+    vm.runInContext("_popSubCredits = { '11112222': { name:'S1', normalDone:2, popularUsed:1, credits:1 }, '33334444': { name:'S2', normalDone:0, popularUsed:0, credits:0 } }", c.sandbox);
+    const rows = vm.runInContext('_acctRows()', c.sandbox);
+    const byName = Object.fromEntries(rows.map(r => [r.name, r]));
+    assert.equal(byName['나'].state, 'nocredit', '참여권 0인 본계정은 고를 수 없어야 한다');
+    assert.equal(byName['S1'].state, 'ok', '참여권이 있는 명의는 그대로 고를 수 있다');
+    assert.equal(byName['S1'].credits, 1);
+    assert.equal(byName['S2'].state, 'nocredit');
+    const txt = (r) => vm.runInContext('_acctStateText(' + JSON.stringify(r) + ')', c.sandbox);
+    assert(txt(byName['S1']).includes('참여권 1건'), '남은 참여권 건수를 말해야 한다');
+    assert(txt(byName['S2']).includes('참여권 없음'), '참여권 0은 사유를 말해야 한다');
+  }
+  // ⑳ 모르면(인기 공고 아님·조회 전) 시트를 손대지 않는다 — 종전 동작
+  {
+    for (const camp of [{ is_popular: false, multi_account_mode: true }, POP_MULTI]) {
+      const c = ctx({ camp });
+      const rowsSrc = campaign.slice(campaign.indexOf('function _acctRows(){'), campaign.indexOf('function renderAcctList(){'));
+      Object.assign(c.sandbox, { _allHolds: () => ({}), _acctBlocked: {}, _subs: [{ name: 'S1', phone: '010-1111-2222' }] });
+      vm.runInContext(rowsSrc, c.sandbox);
+      const rows = vm.runInContext('_acctRows()', c.sandbox);   // 참여권 조회 전
+      assert(rows.every(r => r.state === 'ok'), '모르면 명의를 잠그지 않는다');
+    }
+  }
   console.log('popularLockUi: passed');
 })();
