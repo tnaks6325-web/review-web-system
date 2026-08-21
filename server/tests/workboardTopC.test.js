@@ -154,20 +154,34 @@ t('★ 결제금액은 1건당 금액(진행 현황의 합계와 다른 값) —
    옵션 있음 = "블랙 22,000원(500건), 그린 24,000원(300건)" 평문 + 아랫줄 총결제금액(Σ, 자동·비편집). */
 console.log('\n── D4. 결제금액 v2 · 유입방식 · 일건수 공고 기준 · 접기/펼치기 ──');
 t('★ 옵션 없음 = 한 줄 "상품결제금액 … / 총 …"',
-  /<dt>결제금액<\/dt><dd>상품결제금액 \$\{per\}\$\{tot\}<\/dd>/.test(cc)
-  && /Number\(cd\.payAmount\)\*Number\(cd\.recruitTotal\)/.test(cc));
-t('★ 총액(한 줄)은 자동계산 — 편집 창구(onclick) 없음 + 사유 툴팁',
-  /\/ 총 <b title="상품결제금액 × 총건수 — 자동계산이라 편집할 수 없습니다">/.test(cc));
-t('★ 총건수를 모르면 총액을 지어내지 않는다(상품결제금액만)',
-  /n\(cd\.recruitTotal\)!=null&&Number\(cd\.recruitTotal\)>0/.test(cc));
+  /<dt>결제금액<\/dt><dd>\$\{per\}\$\{tot\}<\/dd>/.test(cc)
+  && /상품결제금액 \$\{clk\(won\(unitPay\)\)\}/.test(cc));
+/* ★★★ 이 가드가 이 절의 존재 이유다 — `work_orders.pay_amount` 는 **결제합계**(문서
+   prd-order-field-mapping: "일건수/모집건수/결제합계 → daily_count · recruit_count · pay_amount").
+   그걸 1건당으로 읽고 총건수를 곱해 60건 작업에 93,240,000원을 찍은 사고(2026-08-21)가 있었다.
+   **총액에 어떤 곱셈도 붙이지 않는다** — 되살리면 여기서 잡힌다. */
+t('★★ 결제합계에 곱셈을 붙이지 않는다(payAmount × 건수 부활 금지)',
+  !/payAmount\)?\s*\*/.test(cc) && !/\*\s*Number\(cd\.recruitTotal\)/.test(cc)
+  && !/payTotal\s*\*/.test(cc));
+t('★ 총액 = 작업오더 결제합계 그대로(계산값이 아니라고 툴팁이 말한다)',
+  /const payTotal=n\(cd\.payAmount\);/.test(cc)
+  && /작업오더의 결제합계입니다/.test(cc));
+t('★ 1건당 금액 출처는 공유 모듈 `_woFirstProductInfo` 하나(판정 사본 0)',
+  /_woFirstProductInfo\(\{product_options_json:/.test(cc)
+  && /typeof _woFirstProductInfo!=='function'/.test(cc));
+t('★ 단가를 못 읽으면 지어내지 않는다 — 총액÷건수 금지(차수로 총건수가 늘면 조용히 틀린다)',
+  !/payAmount\s*\//.test(cc) && !/payTotal\s*\//.test(cc) && /return v>0\?v:null;/.test(cc));
+t('★ 단가·총액 둘 다 없을 때만 [미설정]', /else if\(payTotal==null&&unitPay==null\)/.test(cc));
 t('★ 옵션 있음 판정 = 서버 options 2종 이상(화면 재판정 0)',
   /Array\.isArray\(cd\.options\)/.test(cc) && /opts\.length>=2/.test(cc));
 t('★ 옵션 있음 = 배지 없는 평문 "라벨 금액(건수)" 나열(콤마 연결)',
   /\$\{esc\(o\.label\)\} \$\{o\.pay!=null\?won\(o\.pay\)/.test(cc) && /\.join\(', '\)/.test(cc)
   && !/class="op"/.test(cc));
-t('★ 옵션 총결제금액 = Σ(금액×건수) — 전부 있어야 계산, 아니면 — + 사유(0 위장 금지)',
-  /opts\.every\(o=>o\.pay!=null&&o\.count>0\)/.test(cc) && /sm\+o\.pay\*o\.count/.test(cc)
-  && /옵션별 금액과 인원이 모두 있어야 자동 계산됩니다/.test(cc));
+t('★ 옵션 총결제금액 = 작업오더 결제합계 우선, 없으면 Σ(금액×건수) 계산 + 그 사실을 툴팁으로',
+  /const totHtml=payTotal!=null/.test(cc) && /opts\.every\(o=>o\.pay!=null&&o\.count>0\)/.test(cc)
+  && /sm\+o\.pay\*o\.count/.test(cc)
+  && /Σ\(옵션 결제금액 × 옵션 건수\)로 계산한 값입니다/.test(cc)
+  && /작업오더 결제합계가 없고, 옵션별 금액·인원도 모두 있어야 계산할 수 있습니다/.test(cc));
 t('★ 옵션 총결제금액 dd 에는 클릭 창구가 없다(자동계산 = 편집 대상 아님)', (() => {
   const i = cc.indexOf('<dt>총결제금액</dt>'); if (i < 0) return false;
   const seg = cc.slice(i, cc.indexOf('</dd>', i));
