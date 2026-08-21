@@ -4,7 +4,8 @@ const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
-const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
+const { imageApiLimiter, imageUploadLimiter } = require('../middleware/rateLimit.middleware');
+const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
 const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middleware');
@@ -1321,7 +1322,7 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 //   2. tab_configs.capture_folder_url (DB)
 //   3. 자동 생성 (ensureCaptureFolderPath)
 // ═══════════════════════════════════════════════════════════
-router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
+router.post('/image-upload', imageUploadLimiter, async (req, res, next) => {
   try {
     const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId, savedCaptureFolderUrl } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
@@ -2645,18 +2646,42 @@ router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, 
         `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
                 last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
           WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, mirror_status`,
+        RETURNING id, mirror_status, sheet_id, tab_name, tab_gid, gid, sheet_row`,
         [...vals, editSeq]
       );
       if (!rows.length) return { notFound: true };
-      await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
-      return { mirrorStatus: rows[0].mirror_status };
+      /* ★★ 무시트 탭은 큐 대신 작업표에 바로 재기록한다 (2026-08-21 실측 결함 수정).
+         종전엔 order_update 를 그대로 큐에 넣었는데 큐 실행부의 무시트 백스톱이 그 항목을
+         "작업표 기록 경로가 담당"이라며 done 으로 삼켰고, **update 는 그 경로가 없어** 관리자
+         주문 편집이 원장(DB)에만 남고 작업표 row_json·장부(검색·리뷰어 화면)에는 영영 반영되지
+         않았다(조용한 소실). 실행부는 manualOrder ④ 와 같은 `writeOrderToWorktable` 한 벌 —
+         기존 연결 행(order_submission_id)을 잠가 최신 DB 값으로 병합하고 장부까지 재생성한다.
+         ★ 판정 실패·기록 실패는 종전 경로(enqueue) 폴백 — 백스톱이 삼키는 건 같지만 동작이
+           조용히 나빠지지는 않고, 응답 `sheetlessApplied` 로 사실을 말한다(조용한 누락 금지). */
+      const os = rows[0];
+      let sheetlessApplied = null;
+      let isSl = false;
+      try { isSl = await require('../utils/sheetlessScope').isSheetless(pool, os.sheet_id, os.tab_name); } catch (_) { isSl = false; }
+      if (isSl && os.sheet_row) {
+        try {
+          const { rows: full } = await pool.query(`SELECT * FROM order_submissions WHERE id = $1`, [orderSubmissionId]);
+          const { _osRowToOrderData } = require('../services/orderLedger.service');
+          sheetlessApplied = await require('../services/sheetlessOrder.service').writeOrderToWorktable({
+            sheetId: os.sheet_id, tabName: os.tab_name, tabGid: os.tab_gid || os.gid || '',
+            sheetRow: os.sheet_row, orderData: _osRowToOrderData(full[0]), orderSubmissionId,
+          });
+        } catch (e) { sheetlessApplied = { ok: false, reason: 'exception', message: e.message }; }
+      }
+      if (!sheetlessApplied || !sheetlessApplied.ok) {
+        await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
+      }
+      return { mirrorStatus: os.mirror_status, sheetlessApplied };
     });
     if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
     if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
     require('../jobs/queuePump').kickQueuePump();
     require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
-    res.json({ ok: true, queued: true, editSeq });
+    res.json({ ok: true, queued: !(out.sheetlessApplied && out.sheetlessApplied.ok), editSeq, sheetlessApplied: out.sheetlessApplied || null });
   } catch (err) { next(err); }
 });
 
@@ -5284,93 +5309,17 @@ router.get('/unpaid-rows', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 3, 1), 30);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
-    const maxTabs = Math.min(Math.max(parseInt(req.query.maxTabs, 10) || 20, 1), 60);
-    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
-
-    // 감지기와 같은 기준(capture_uploaded_at IS NULL · 제출 20분 경과) + 현재 열린 알림 여부
-    // ★ 컷오프 = 캡처↔주문 연결 기능이 배포된 시각(app_settings.reviewer_log_capture_cutoff).
-    //   그 이전 주문은 capture_uploaded_at 을 채우는 코드 자체가 없었으므로 링크가 비어 있는 게 정상이고,
-    //   감지기(detectMissingCaptures)도 컷오프로 이들을 제외한다 — 즉 알림이 나간 적이 없다.
-    //   구분하지 않고 합산하면 "오탐 수백 건"으로 보이지만 대부분 과거 데이터라 조치 대상이 아니다.
-    let cutoff = null;
-    try {
-      const { rows: cf } = await pool.query(
-        `SELECT value FROM app_settings WHERE key = 'reviewer_log_capture_cutoff'`);
-      cutoff = (cf[0] && cf[0].value) || null;
-    } catch (_) { /* 컷오프를 못 읽으면 구분 없이 보고(판정은 그대로 유효) */ }
-
-    const { rows: orders } = await pool.query(
-      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
-              os.recipient, os.orderer, os.submitted_at AS "submittedAt",
-              ($3::timestamptz IS NOT NULL AND os.submitted_at <= $3::timestamptz) AS "preCutoff",
-              EXISTS(SELECT 1 FROM reviewer_event_logs l
-                      WHERE l.order_submission_id = os.id
-                        AND l.event_type = 'order_no_capture' AND l.resolved_at IS NULL) AS "hasOpenLog"
-         FROM order_submissions os
-        WHERE os.deleted_at IS NULL AND os.capture_uploaded_at IS NULL
-          AND os.submitted_at < NOW() - interval '20 minutes'
-          AND os.submitted_at > NOW() - ($1 || ' days')::interval
-        ORDER BY os.submitted_at DESC
-        LIMIT $2`,
-      [String(days), limit, cutoff]
-    );
-    if (!orders.length) return res.json({ ok: true, days, scanned: 0, summary: {}, items: [] });
-
-    // 탭 단위로 묶어 Drive 조회 횟수를 최소화
-    const byTab = new Map();
-    for (const o of orders) {
-      const k = `${o.sheetId}\t${o.tabName}`;
-      if (!byTab.has(k)) byTab.set(k, []);
-      byTab.get(k).push(o);
-    }
-    const tabKeys = [...byTab.keys()].slice(0, maxTabs);
-    const tabsSkipped = byTab.size - tabKeys.length;
-
-    const items = [];
-    for (const k of tabKeys) {
-      const [sheetId, tabName] = k.split('\t');
-      const group = byTab.get(k);
-      let files = null, folderErr = '';
-      try {
-        const { rows: cfg } = await pool.query(
-          'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
-          [sheetId, tabName]
-        );
-        const url = cfg[0] && cfg[0].capture_folder_url;
-        const folderId = url ? driveService.extractFolderIdFromUrl(url) : null;
-        if (!folderId) folderErr = 'no_capture_folder';
-        else files = await driveService.listFolderFilesRecursive(folderId);   // 회차 하위폴더 포함
-      } catch (e) { folderErr = e.message || 'drive_error'; }
-
-      // 파일명 → 정규화 인덱스(확장자 제거, '_' 앞 토큰 = 수취인, 공백 제거)
-      const idx = [];
-      for (const f of (files || [])) {
-        if (f.mimeType && String(f.mimeType).indexOf('image/') !== 0) continue;
-        const base = String(f.name || '').replace(/\.[^.]+$/, '');
-        idx.push({ full: norm(base), head: norm(base.split('_')[0]), createdTime: f.createdTime, name: f.name });
-      }
-
-      for (const o of group) {
-        if (!files) { items.push({ ...o, verdict: 'unknown', reason: folderErr }); continue; }
-        const rc = norm(o.recipient), od = norm(o.orderer);
-        const cands = idx.filter(f => (rc && (f.head === rc || f.full === rc))
-                                   || (od && (f.head === od || f.full === od)));
-        if (!cands.length) { items.push({ ...o, verdict: 'notAttached' }); continue; }
-        // 시각 창: 캡처는 제출 직전/직후에 올라간다. 동명이인·재제출 오매칭을 줄이려 창 밖이면 약한 신호로 표기.
-        const t0 = new Date(o.submittedAt).getTime() - 30 * 60 * 1000;
-        const t1 = new Date(o.submittedAt).getTime() + 6 * 60 * 60 * 1000;
-        const inWin = cands.find(f => { const c = Date.parse(f.createdTime); return c >= t0 && c <= t1; });
-        items.push({
-          ...o,
-          verdict: 'attachedButUnlinked',
-          confidence: inWin ? 'high' : 'low',      // low = 이름은 같은데 시각이 멀다(과거 회차 파일일 수 있음)
-          file: (inWin || cands[0]).name,
-          fileCreatedTime: (inWin || cands[0]).createdTime,
-        });
-      }
-    }
+    /* ★★ 판정은 `captureLinkBackfill.service` 한 곳이 소유한다 — 연결 백필이 **같은 함수**로
+       후보를 고르므로 "감사에선 A 인데 백필은 B 를 붙이는" 상태가 구조적으로 불가능하다.
+       응답 shape 은 종전 그대로(가산 필드 fileId/candidates/winCandidates 만 늘었다). */
+    /* ★ 이 라우트의 상한은 종전 그대로(days 1..30 · limit 1..1000) — 기존 계약이고,
+       그 값이 곧 탭당 재귀 Drive 조회량이다. 더 넓은 범위가 필요한 쪽은 백필 창구가 따로 있다. */
+    const r = await captureLinkBackfill.auditCaptureLinks({
+      days: Math.min(Math.max(parseInt(req.query.days, 10) || 3, 1), 30),
+      limit: Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000),
+      maxTabs: req.query.maxTabs,
+    });
+    if (!r.scanned) return res.json({ ok: true, days: r.days, scanned: 0, summary: {}, items: [] });
 
     const tally = (arr) => arr.reduce((a, x) => {
       a[x.verdict] = (a[x.verdict] || 0) + 1;
@@ -5378,18 +5327,18 @@ router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (
       if (x.hasOpenLog) a.openLogs = (a.openLogs || 0) + 1;
       return a;
     }, {});
-    const post = items.filter(x => !x.preCutoff);   // ← 판단은 이쪽만 보면 된다(실제 알림 대상)
-    const pre = items.filter(x => x.preCutoff);
+    const post = r.items.filter(x => !x.preCutoff);   // ← 판단은 이쪽만 보면 된다(실제 알림 대상)
+    const pre = r.items.filter(x => x.preCutoff);
     res.json({
-      ok: true, days, scanned: items.length, tabs: tabKeys.length, tabsSkipped,
-      cutoff,
-      summary: tally(items),                        // 전체(하위호환)
+      ok: true, days: r.days, scanned: r.scanned, tabs: r.tabs, tabsSkipped: r.tabsSkipped,
+      cutoff: r.cutoff,
+      summary: tally(r.items),                      // 전체(하위호환)
       current: tally(post),                         // 연결기능 배포 이후 = 지금도 유효한 신호
       legacy: tally(pre),                           // 배포 이전 = 링크 코드가 없던 시절, 알림 안 나감
-      note: cutoff
+      note: r.cutoff
         ? '판단은 current 기준. legacy 는 캡처↔주문 연결 배포 이전 주문이라 미링크가 정상이며 알림 대상이 아님.'
         : '컷오프를 읽지 못해 구간 구분 없음(summary 만 유효).',
-      items,
+      items: r.items,
     });
   } catch (err) { next(err); }
 });

@@ -11,13 +11,13 @@
  *     ㉰ 연도 필터로 목록에서 빠진 시트 기반 활성 탭
  *   끄기(크론 정지)를 판단하려면 **무엇을 끄면 무엇이 멈추는지**를 먼저 알아야 한다.
  *
- * ★★ 판정 사본 0 — 열거식(`REGISTERED_SHEET_IDS_SQL`)과 제외 게이트(`fullySheetlessSheetIds`)를
+ * ★★ 판정 사본 0 — 열거식(`REGISTERED_SHEET_IDS_SQL`)과 제외 게이트(`sweepSkipSheetIds`)를
  *   스윕이 쓰는 **그 함수/상수 그대로** 태운다. 여기서 조건을 다시 쓰면 진단이 "안 읽는다"고 말하는
  *   시트를 스윕은 계속 읽는 상태가 된다(관측이 거짓말이 되는 자리).
  *
  * ★ 읽기 전용 — 쓰기 쿼리 0 · 구글 시트/Drive API 호출 0(전부 DB 조회).
  */
-const { REGISTERED_SHEET_IDS_SQL, fullySheetlessSheetIds } = require('../utils/sheetlessScope');
+const { REGISTERED_SHEET_IDS_SQL, sweepSkipSheetIds } = require('../utils/sheetlessScope');
 /* ★ 시트 주소 조립은 `payment.service.tabSheetUrl` 단일 출처 — 가상 시트ID(`wt_`)면 빈 값이다
    (빈 링크 > 죽은 링크, 레포 규율). 화면이 sheetId 로 직접 조립하면 그 판정이 사라진다. */
 const { tabSheetUrl } = require('./payment.service');
@@ -30,6 +30,21 @@ function _db() { return _pool || (_pool = require('../db/pool')); }
 
 const LIST_CAP = 300;      // 목록 상한(초과분은 건수로만 — 조용히 자르지 않는다)
 const NAME_CAP = 5;        // 시트당 보여줄 탭 이름 수
+const ERROR_CAP = 5;       // 시트당 보여줄 실패 사유 묶음 수(초과분은 건수로만)
+const ERROR_TEXT_CAP = 200;// 사유 문자열 상한 — 시트 API 원문이 길다
+
+/**
+ * ★★ 미반영 주문의 상태는 **두 부류로 갈린다 — 뭉뚱그리면 판단이 뒤집힌다** (2026-08-20 실측).
+ *   ㉮ **크론이 재시도하는 상태**(`reconcileStuckOrders` 의 WHERE 절과 같은 목록) — 주기 작업을 끄면
+ *      그 재시도가 멈추므로 "끄면 영영 안 써진다" 가 사실이다.
+ *   ㉯ **크론이 아예 손대지 않는 상태**(`conflict`·`stuck_manual`·`canceled_sheet_dirty`) — reconcile 이
+ *      제외하므로 **켜 둬도 영영 안 풀린다**. 사람이 처리해야 하는 건이고, 크론 정지와는 무관하다.
+ *      특히 `conflict` 는 `order_update` 가 **이미 written 된 행**의 편집을 반영하려다 그 칸을 사람이
+ *      다르게 고쳐 놔 안전정지한 것이라 — **주문 자체는 시트에 이미 기록돼 있다**(주문 유실 아님).
+ * ★ 둘을 합쳐 "못 쓴 주문 N건"으로만 말하면 "크론을 끄면 안 된다"는 **틀린 결론**을 준다.
+ * ★★ 목록은 reconcile SQL 과 **회귀가드가 대조**한다(사본이 조용히 갈라지는 자리).
+ */
+const RETRYABLE_STATUSES = ['pending', 'queued', 'failed', 'pending_no_row'];
 
 /** 남는 사유 — 화면 문구까지 여기 한 곳(사본 금지). */
 const REASONS = {
@@ -49,14 +64,15 @@ async function readScope({ limit = LIST_CAP } = {}) {
   // ① 스윕과 같은 열거 → ② 스윕과 같은 게이트
   const { rows: idRows } = await db.query(REGISTERED_SHEET_IDS_SQL);
   const all = [...new Set(idRows.map(r => r.sheet_id).filter(Boolean))];
-  const excluded = await fullySheetlessSheetIds(db);
+  const excluded = await sweepSkipSheetIds(db);
   const reading = all.filter(id => !excluded.has(id));
 
   if (!reading.length) {
     return {
       ok: true, registered: all.length, excludedSheetless: all.length - reading.length,
       reading: 0, byReason: {}, reasons: REASONS,
-      pendingOrdersTotal: 0, pendingByStatus: {}, items: [], truncated: false,
+      pendingOrdersTotal: 0, pendingByStatus: {}, pendingRetryable: 0, pendingManual: 0,
+      retryableStatuses: RETRYABLE_STATUSES, items: [], truncated: false,
     };
   }
 
@@ -112,6 +128,30 @@ async function readScope({ limit = LIST_CAP } = {}) {
     pendingByStatus[r.status] = (pendingByStatus[r.status] || 0) + r.n;
   }
 
+  /* ⑤-2 실패 사유 — ★ **재시도 대상 상태만** 본다.
+     그 밖(`conflict`·`stuck_manual`)은 크론이 손대지 않으므로 "왜 아직 못 썼나"의 답이 아니고,
+     `conflict` 의 `sheet_error` 에는 **시트 셀 원문**이 실려 있어 굳이 화면으로 끌어올 이유가 없다.
+     ★ 사유는 그대로 세어 보여줄 뿐 분류하지 않는다(사유 표를 만들면 그게 또 하나의 판정 사본이 된다). */
+  const { rows: errRows } = await db.query(
+    `SELECT sheet_id AS "sheetId",
+            COALESCE(NULLIF(tab_name, ''), '(탭 미상)') AS "tabName",
+            LEFT(COALESCE(NULLIF(sheet_error, ''), '(사유 기록 없음)'), $3::int) AS "error",
+            COUNT(*)::int AS n,
+            MIN(submitted_at) AS "oldest", MAX(submitted_at) AS "newest"
+       FROM order_submissions
+      WHERE sheet_id = ANY($1::text[]) AND deleted_at IS NULL
+        AND COALESCE(mirror_status, 'pending') = ANY($2::text[])
+      GROUP BY 1, 2, 3
+      ORDER BY n DESC`, [reading, RETRYABLE_STATUSES, ERROR_TEXT_CAP]);
+  const errMap = new Map();        // sheetId -> { list, moreGroups, moreOrders }
+  for (const r of errRows) {
+    const cur = errMap.get(r.sheetId) || { list: [], moreGroups: 0, moreOrders: 0 };
+    if (cur.list.length < ERROR_CAP) {
+      cur.list.push({ tabName: r.tabName, error: r.error, n: r.n, oldest: r.oldest, newest: r.newest });
+    } else { cur.moreGroups += 1; cur.moreOrders += r.n; }   // 조용히 자르지 않는다
+    errMap.set(r.sheetId, cur);
+  }
+
   // ⑥ 마지막 미러 시각(그 시트를 실제로 읽고 있다는 증거)
   const { rows: mirRows } = await db.query(
     `SELECT sheet_id AS "sheetId", MAX(mirrored_at) AS "mirroredAt"
@@ -142,6 +182,9 @@ async function readScope({ limit = LIST_CAP } = {}) {
         liveTabNames: nameMap.get(sheetId) || [],
         pendingOrders: pending,
         pendingByStatus: pend ? pend.byStatus : {},
+        pendingErrors: (errMap.get(sheetId) || { list: [] }).list,
+        pendingErrorsMoreGroups: (errMap.get(sheetId) || {}).moreGroups || 0,
+        pendingErrorsMoreOrders: (errMap.get(sheetId) || {}).moreOrders || 0,
         pendingOldest: pend ? pend.oldest : null,
         pendingNewest: pend ? pend.newest : null,
         mirroredAt: mirMap.get(sheetId) || null,
@@ -152,16 +195,22 @@ async function readScope({ limit = LIST_CAP } = {}) {
   const rank = { sheet_tab_live: 0, closed_only: 1, campaigns_only: 2 };
   items.sort((a, b) => (rank[a.reason] - rank[b.reason]) || (b.pendingOrders - a.pendingOrders));
 
+  let pendingRetryable = 0, pendingManual = 0;
+  for (const [st, n] of Object.entries(pendingByStatus)) {
+    if (RETRYABLE_STATUSES.includes(st)) pendingRetryable += n; else pendingManual += n;
+  }
+
   return {
     ok: true,
     registered: all.length,
     excludedSheetless: all.length - reading.length,
     reading: reading.length,
     byReason, reasons: REASONS,
-    pendingOrdersTotal, pendingByStatus,
+    pendingOrdersTotal, pendingByStatus, pendingRetryable, pendingManual,
+    retryableStatuses: RETRYABLE_STATUSES,
     items,
     truncated: reading.length > items.length,
   };
 }
 
-module.exports = { readScope, REASONS, LIST_CAP };
+module.exports = { readScope, REASONS, LIST_CAP, RETRYABLE_STATUSES, ERROR_CAP };

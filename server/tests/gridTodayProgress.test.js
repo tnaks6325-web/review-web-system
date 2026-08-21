@@ -239,7 +239,9 @@ const CNT = (id, o) => Object.assign({
   t('표기 단일 출처 — 날짜는 _fmtKDate 를 쓴다(사본 금지)',
     /_fmtKDate\(String\(tp\.dateStr/.test(WD));
   t('★ 프론트에 정원 재계산 사본이 없다(daily_limit·이월을 다시 더하지 않는다)',
-    !/todayProgress[\s\S]{0,400}(carryAdded|daily_limit|dailyLimit)/.test(WD));
+    !/todayProgress[\s\S]{0,400}carryAdded/.test(WD)
+    && !/todayProgress\.quota\s*[+\-*]/.test(WD)          // quota 에 산술을 얹지 않는다
+    && !/dailyLimit\s*[+*]|daily_limit\s*[+*]/.test(WD)); // 기본+이월 재계산 부활 금지
   t('클릭 동작 없음 = 읽기 전용 표기', !/tprog[^>]*onclick/.test(WD));
   // 지금 tip 은 숫자·고정문구뿐이라 escape 를 빼도 당장은 안 터진다 — 그래서 **규칙 자체를 고정**한다.
   // (나중에 공고 제목 같은 외부 문자열을 툴팁에 넣는 순간 속성 탈출이 된다.)

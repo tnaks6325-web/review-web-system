@@ -177,15 +177,27 @@ t('21. 감사 엔드포인트는 admin/master 전용 · 읽기 전용(DB/Drive �
   const body = diag.slice(i, diag.indexOf('module.exports', i));
   assert.ok(/authMiddleware, adminOrMasterMiddleware/.test(body.slice(0, 200)), '권한 미들웨어 누락');
   assert.ok(!/\b(UPDATE|INSERT|DELETE)\b/i.test(body), '감사인데 쓰기 쿼리가 있음');
-  assert.ok(/listFolderFilesRecursive/.test(body), 'Drive 실물 대조를 안 함 → DB만 봐선 오탐을 못 가림');
-  assert.ok(/attachedButUnlinked/.test(body) && /notAttached/.test(body) && /unknown/.test(body),
+  /* ⚠ 판정이 `captureLinkBackfill.service` 로 이관됐다(연결 백필이 **같은 함수**로 후보를 고른다).
+     검사 의미는 불변 — "Drive 실물을 대조한다" + "3분류를 낸다". 다만 그 근거를 서비스에서 읽는다.
+     ★ 라우트가 자체 대조 사본을 되살리면(그러면 감사와 백필이 갈린다) 첫 단언이 잡는다. */
+  assert.ok(/captureLinkBackfill\.auditCaptureLinks\(/.test(body) && !/listFolderFilesRecursive/.test(body),
+    '감사가 판정 서비스를 태우지 않음(사본 부활)');
+  const svc = fs.readFileSync(path.join(__dirname, '../src/services/captureLinkBackfill.service.js'), 'utf8');
+  assert.ok(/listFolderFilesRecursive/.test(svc), 'Drive 실물 대조를 안 함 → DB만 봐선 오탐을 못 가림');
+  assert.ok(/attachedButUnlinked/.test(svc) && /notAttached/.test(svc) && /unknown/.test(svc),
     '판정 3분류(오탐/진짜 미첨부/보류)가 없음');
+  assert.ok(/summary: tally\(r\.items\)/.test(body) && /current: tally\(post\)/.test(body) && /legacy: tally\(pre\)/.test(body),
+    '감사 응답 계약(summary/current/legacy)이 깨졌다');
 });
 
 t('22. 구매캡쳐 업로드가 재시도 + 실패 시 리뷰어에게 고지(오탐 근본원인)', () => {
   const sa = fs.readFileSync(path.join(__dirname, '../../frontend/js/search-app.js'), 'utf8');
-  const i = sa.indexOf('uploadOrderImage');
-  const blk = sa.slice(i - 600, i + 2200);
+  /* ⚠ 고정 길이 슬라이스로 자르면 그 블록이 자라는 순간 조용히 빨개진다(레포 규율).
+     업로드 블록을 **경계 문자열**로 잘라 본다 — 검사 의미는 불변. */
+  const i = sa.indexOf('const _capSlot = {');
+  assert.ok(i > 0, '업로드 블록을 찾지 못함');
+  const blk = sa.slice(i, sa.indexOf('_renderCaptureChecklist();', i));
+  assert.ok(/uploadOrderImage/.test(blk), '업로드 액션 유실');
   assert.ok(/attempt < 3|attempt \+\+|for \(let attempt/.test(blk), '업로드 재시도 없음 — 1회 실패로 미첨부 오탐');
   assert.ok(/showToast\(/.test(blk), '최종 실패를 리뷰어에게 안 알리면 첨부했다고 믿고 창을 닫는다');
   assert.ok(/orderSubmissionId/.test(blk), '주문 연결 키 누락 → 폴백 매칭에만 의존');
@@ -195,11 +207,15 @@ t('23. 감사 결과를 컷오프 기준으로 분리한다(과거 미링크를 
   const diag = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
   const i = diag.indexOf("router.get('/no-capture-audit'");
   const body = diag.slice(i, diag.indexOf('module.exports', i));
-  assert.ok(/reviewer_log_capture_cutoff/.test(body), '컷오프를 읽지 않으면 배포 이전 주문까지 오탐으로 잡힌다');
-  assert.ok(/preCutoff/.test(body), '주문별 구간 표시 없음');
+  /* ⚠ 컷오프 조회·구간 표시는 판정 서비스로 이관됐다(감사·백필 공용). 검사 의미는 불변 —
+     "컷오프를 읽는다 · 주문별 구간을 표시한다 · 실패해도 감사가 죽지 않는다"를 서비스에서 본다.
+     라우트는 그 재료로 current/legacy 집계를 낸다는 계약만 남는다. */
+  const svc = fs.readFileSync(path.join(__dirname, '../src/services/captureLinkBackfill.service.js'), 'utf8');
+  assert.ok(/reviewer_log_capture_cutoff/.test(svc), '컷오프를 읽지 않으면 배포 이전 주문까지 오탐으로 잡힌다');
+  assert.ok(/preCutoff/.test(svc), '주문별 구간 표시 없음');
   assert.ok(/current:/.test(body) && /legacy:/.test(body), '구간별 집계(current/legacy) 없음');
   // 컷오프 조회 실패가 감사 전체를 죽이면 안 됨(fail-soft)
-  assert.ok(/catch \(_\) \{ \/\* 컷오프/.test(body), '컷오프 조회 실패 시 fail-soft 아님');
+  assert.ok(/catch \(_\) \{ \/\* 못 읽으면/.test(svc), '컷오프 조회 실패 시 fail-soft 아님');
 });
 
 t('24. 정밀확인 화면은 current 기준으로 집계하고 legacy 를 따로 고지한다', () => {

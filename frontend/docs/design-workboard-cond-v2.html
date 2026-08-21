@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>작업조건 표기 개선 + 접기/펼치기 시안</title>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:#f1f4f8;font-family:'Segoe UI','Malgun Gothic',sans-serif;color:#1e293b;font-size:13px}
+.wrap{max-width:1420px;margin:0 auto;padding:18px 20px 60px}
+h1{font-size:18px;margin:6px 0 2px}
+.sub{color:#64748b;font-size:12px;margin-bottom:14px}
+.note{background:#fff;border:1px solid #dbe3ee;border-radius:10px;padding:12px 16px;margin:10px 0 18px}
+.note b{color:#0f4bd8}
+.note ol{margin:6px 0 0 18px;padding:0;line-height:1.9}
+.note code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:12px}
+.tag{display:inline-block;background:#eef4ff;color:#2456c9;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;margin-right:4px}
+/* ── 상단 3분할 (C안 골격) ── */
+.mh{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin:14px 0 8px}
+.mh .ttl{font-size:16px;font-weight:800;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mh .st{color:#64748b;font-size:12px;white-space:nowrap}
+.wbl-b{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
+.wbl-b:hover{background:#f8fafc}
+.fin{color:#7c5e10;background:#fef7e0;border:1px solid #f3dfa0;border-radius:7px;padding:4px 10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.grid3{display:grid;grid-template-columns:minmax(230px,439fr) minmax(230px,439fr) minmax(330px,659fr);gap:12px;align-items:stretch}
+.box{background:#fff;border:1px solid #dbe3ee;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.box .bb{flex:1}
+/* ── 접기/펼치기 머리줄 ── */
+.bh{display:flex;align-items:center;gap:6px;padding:9px 14px;cursor:pointer;user-select:none;background:#fff;border-bottom:1px solid #eef2f7}
+.bh:hover{background:#f5f8fc}
+.bh .bt{font-size:12px;font-weight:800;color:#334155;letter-spacing:.02em}
+.bh .chev{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:#94a3b8;font-size:11px}
+.bh .chev .ic{display:inline-block;transition:transform .18s;font-size:12px;color:#64748b}
+.box.closed .chev .ic{transform:rotate(-90deg)}
+.box.closed .bb{display:none}
+.box.closed .bh{border-bottom:none}
+.bh .hint{opacity:0;transition:opacity .15s;color:#94a3b8;font-size:11px}
+.bh:hover .hint{opacity:1}
+.bb{padding:10px 14px 12px}
+.box:not(.closed) .bb{min-height:300px}
+/* ── 작업조건 카드 ── */
+.cndprod{font-size:12.5px;font-weight:700;line-height:1.45;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cndl{display:grid;grid-template-columns:74px 1fr;row-gap:5px;column-gap:8px;font-size:11.5px;align-items:baseline}
+.cndl dt{color:#8a97a8;font-weight:600;white-space:nowrap}
+.cndl dd{margin:0;color:#111;min-width:0}
+.cndl dd .mut{color:#94a3b8;font-size:10.5px;margin-left:5px}
+.cndl dd .auto{color:#64748b;background:#f1f5f9;border-radius:4px;padding:0 5px;font-size:10px;margin-left:5px}
+.cndval{background:none;border:none;padding:0;font:inherit;color:#111;cursor:pointer;border-bottom:1px dotted #94a3b8}
+.cndset{background:#fff;border:1px dashed #f0a2a2;color:#d33;border-radius:5px;padding:0 7px;font-size:10.5px;cursor:pointer}
+.optrow{display:flex;gap:6px;flex-wrap:wrap}
+.optrow .op{background:#f8fafc;border:1px solid #e2e8f0;border-radius:5px;padding:1px 7px;font-size:11px;white-space:nowrap}
+.optrow .op b{color:#0f4bd8;font-weight:700}
+.woline{margin-top:10px;padding-top:8px;border-top:1px dashed #e2e8f0;font-size:11px;color:#64748b;display:flex;align-items:center;gap:6px}
+.woline .wost{background:#eef4ff;color:#2456c9;border-radius:4px;padding:0 6px;font-size:10px}
+/* ── 진행현황 ── */
+.pgrow{margin:7px 0 12px}
+.pgrow .pl{display:flex;justify-content:space-between;font-size:11.5px;color:#475569;margin-bottom:3px}
+.bar{height:8px;background:#eef2f7;border-radius:5px;overflow:hidden}
+.bar i{display:block;height:100%;background:#3b82f6}
+.bar.g i{background:#10b981}
+.bar.a i{background:#6366f1}
+.setlin{margin-top:12px;padding-top:9px;border-top:1px dashed #e2e8f0;font-size:11.5px;color:#475569;cursor:pointer}
+.setlin:hover{color:#1e293b}
+.setlin .st4{display:flex;gap:4px;margin-top:5px}
+.setlin .st4 span{flex:1;text-align:center;font-size:10px;border-radius:4px;padding:2px 0;background:#f1f5f9;color:#94a3b8}
+.setlin .st4 span.on{background:#e5f0ff;color:#2456c9;font-weight:700}
+/* ── 미리보기 ── */
+.rvpane .bb{padding:0;position:relative}
+.rvin{display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:300px}
+.rvcol{border-right:1px solid #eef2f7;display:flex;flex-direction:column;min-width:0}
+.rvcol:last-child{border-right:none}
+.rvch{display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:11px;color:#64748b;border-bottom:1px solid #f1f5f9}
+.rvch .pg{margin-left:auto;display:flex;gap:2px;align-items:center;color:#94a3b8}
+.rvch .pg button{border:none;background:none;cursor:pointer;color:#64748b;font-size:12px;padding:0 3px}
+.rvhold{flex:1;min-height:0;overflow-y:auto;max-height:262px}
+.ph{width:100%;height:420px;display:flex;align-items:flex-start;justify-content:center;color:#b6c2d2;font-size:11px;padding-top:30px;background:repeating-linear-gradient(45deg,#f8fafc,#f8fafc 12px,#f2f6fb 12px,#f2f6fb 24px)}
+/* 스위치 */
+.vsw{display:flex;gap:6px;margin:16px 0 8px}
+.vsw button{border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:5px 12px;font-size:12px;cursor:pointer}
+.vsw button.on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+table.cmp{border-collapse:collapse;width:100%;background:#fff;border:1px solid #dbe3ee;border-radius:10px;overflow:hidden;font-size:12px}
+table.cmp th,table.cmp td{border-bottom:1px solid #eef2f7;padding:8px 12px;text-align:left;vertical-align:top}
+table.cmp th{background:#f8fafc;color:#475569;white-space:nowrap}
+table.cmp td.now{color:#94a3b8}
+@media(max-width:1100px){.grid3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>작업보드 상단 — 작업조건 표기 개선 + 접기/펼치기</h1>
+  <div class="sub">시안 v2 · 가짜 데이터로 실제 동작(클릭해 보세요) · 외부 리소스 0</div>
+
+  <div class="note">
+    <b>이번에 바뀌는 것 6가지</b>
+    <ol>
+      <li><b>상품명</b> — 앞의 <code>[상품/옵션/금액]</code> 라벨 제거(상품명만).</li>
+      <li><b>결제금액</b> — 옵션 없으면 <code>상품결제금액 22,000원 / 총 17,600,000원</code> 한 줄, 옵션 있으면 <code>블랙 22,000원(500건), 그린 24,000원(300건)</code> 평문 + 아랫줄 총결제금액. <b>총결제금액은 작업오더의 결제합계</b>(=<code>pay_amount</code>, 문서 <code>prd-order-field-mapping</code>)를 그대로 쓰고 <b>어떤 곱셈도 하지 않는다</b> — 1건당 금액은 상품정보(구조화 옵션·<code>결제금액 N원</code>)에서 읽고, 못 읽으면 총액만 표기(총액÷건수 금지).</li>
+      <li><b>유입방식</b> — <code>링크유입</code> / <code>가이드유입</code> 둘 중 하나로만 표기(<code>guide · 유입가이드</code> 같은 원문 병기 제거).</li>
+      <li><b>일건수</b> — 모집인원조절로 언제든 바뀌므로 <b>모집공고의 오늘 일건수 기준</b>으로 표기(<span class="tag">공고 기준</span> 배지).</li>
+      <li><b>박스 접기/펼치기</b> — 어느 박스의 머리줄을 눌러도 <b>세 박스가 함께</b> 접히고 펼쳐짐. 세 박스의 하단선(높이)은 항상 일치.</li>
+      <li>머리줄에 <b>∨ 표시 + 호버 시 배경색 + "접기/펼치기" 안내</b>로 클릭 가능함을 시각적으로 보여줌(접히면 ∨ 가 ▸ 로 회전).</li>
+    </ol>
+  </div>
+
+  <div class="vsw">
+    <button class="on" onclick="setVar('none',this)">옵션 없는 작업</button>
+    <button onclick="setVar('opt',this)">옵션 있는 작업</button>
+  </div>
+
+  <!-- 제목 행 -->
+  <div class="mh">
+    <span class="ttl">8/3(쿠팡)위프_블랙 탈취제 800건</span>
+    <span class="st">reviewing</span>
+    <button class="wbl-b">🔗 링크 복사</button>
+    <button class="wbl-b">📅 모집인원 조절</button>
+    <span class="fin">작업이 모두 끝나면 마감해 주세요 · 마감하면 보관함으로 이동합니다</span>
+    <button class="wbl-b">🏁 마감</button>
+    <span style="flex:1"></span>
+  </div>
+
+  <!-- 상단 3분할 -->
+  <div class="grid3">
+    <!-- 작업 조건 -->
+    <div class="box" id="bxCond">
+      <div class="bh" onclick="tgAll()" title="클릭하면 세 박스가 함께 접기/펼치기">
+        <span class="bt">작업 조건</span>
+        <span class="chev"><span class="hint">접기/펼치기</span><span class="ic">∨</span></span>
+      </div>
+      <div class="bb">
+        <div class="cndprod">1. [공식몰] 위프 탈취제 WHIFF 화장실 담배 새집증후군 홀애비 교실 초강력 냄새 제거 부아누아 블랙, 300g, 1개</div>
+        <dl class="cndl" id="condList"></dl>
+        <div class="woline">📦 발주 <span class="wost">reviewing</span> 8/3(쿠팡)위프_블랙 탈취제 800건 <span style="margin-left:auto;color:#94a3b8">⋯</span></div>
+      </div>
+    </div>
+
+    <!-- 진행 현황 -->
+    <div class="box" id="bxProg">
+      <div class="bh" onclick="tgAll()" title="클릭하면 세 박스가 함께 접기/펼치기">
+        <span class="bt">진행 현황</span>
+        <span class="chev"><span class="hint">접기/펼치기</span><span class="ic">∨</span></span>
+      </div>
+      <div class="bb">
+        <div class="pgrow"><div class="pl"><span>참여자</span><span><b>523</b>/800 · 65%</span></div><div class="bar"><i style="width:65%"></i></div></div>
+        <div class="pgrow"><div class="pl"><span>제출완료</span><span><b>441</b>/523 · 84%</span></div><div class="bar g"><i style="width:84%"></i></div></div>
+        <div class="pgrow"><div class="pl"><span>입금완료</span><span><b>398</b>/523 · 76%</span></div><div class="bar a"><i style="width:76%"></i></div></div>
+        <div class="pgrow"><div class="pl"><span>오늘 참여현황</span><span><b>34</b>/80명</span></div><div class="bar"><i style="width:42%"></i></div></div>
+        <div class="setlin" title="클릭하면 정산 상세">
+          <div>정산 — 계약 C-2607-118 · 총비용 17,600,000원</div>
+          <div class="st4"><span class="on">마감자료</span><span class="on">견적서</span><span>계산서</span><span>입금</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 제출물 미리보기 -->
+    <div class="box rvpane" id="bxRv">
+      <div class="bh" onclick="tgAll()" title="클릭하면 세 박스가 함께 접기/펼치기">
+        <span class="bt">제출물 미리보기 <span style="color:#94a3b8;font-weight:400">— 12행 김○○</span></span>
+        <span class="chev"><span class="hint">접기/펼치기</span><span class="ic">∨</span></span>
+      </div>
+      <div class="bb">
+        <div class="rvin">
+          <div class="rvcol">
+            <div class="rvch">🛒 구매캡처 <span class="pg"><button>‹</button>1/1<button>›</button></span></div>
+            <div class="rvhold"><div class="ph">구매캡처 이미지<br>(세로 스크롤)</div></div>
+          </div>
+          <div class="rvcol">
+            <div class="rvch">🖼 리뷰이미지 <span class="pg"><button>‹</button>1/3<button>›</button></span></div>
+            <div class="rvhold"><div class="ph">리뷰 이미지<br>(세로 스크롤)</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="color:#64748b;font-size:12px;margin:10px 0 26px">
+    ▸ 어느 박스의 머리줄을 눌러도 세 박스가 함께 접혀 상단이 한 줄 높이가 되고, 아래 작업표가 그만큼 위로 올라옵니다.
+    접힘 상태는 브라우저에 기억(작업 무관 공통)됩니다.
+  </div>
+
+  <h1 style="font-size:15px">표기 변경 대조표</h1>
+  <table class="cmp">
+    <tr><th style="width:110px">항목</th><th style="width:38%">지금</th><th>변경</th></tr>
+    <tr><td>상품명</td><td class="now">[상품/옵션/금액] 1. [공식몰] 위프 탈취제 …</td><td>1. [공식몰] 위프 탈취제 … (라벨 제거)</td></tr>
+    <tr><td>결제금액<br>(옵션 없음)</td><td class="now">결제금액 17,600,000 원</td><td>상품결제금액 <b>22,000원</b> / 총 <b>17,600,000원</b> (한 줄 · 총액 = 작업오더 결제합계 그대로)</td></tr>
+    <tr><td>결제금액<br>(옵션 있음)</td><td class="now">결제금액 한 줄(옵션 구분 없음)</td><td><b>블랙 22,000원(500건), 그린 24,000원(300건)</b> (배지 없는 평문)<br>총결제금액 = <b>작업오더 결제합계</b>(없을 때만 Σ(옵션 금액×건수) 계산 + 그 사실 툴팁 고지)</td></tr>
+    <tr><td>유입방식</td><td class="now">guide · 유입가이드</td><td><b>가이드유입</b> (링크유입/가이드유입 둘 중 하나만)</td></tr>
+    <tr><td>일건수</td><td class="now">작업오더의 일건수(80건/일 고정)</td><td><b>모집공고의 오늘 일건수</b> <span class="tag">공고 기준</span> — 모집인원조절·이월이 반영된 값. 공고가 없으면 종전대로 작업오더 값</td></tr>
+    <tr><td>접기/펼치기</td><td class="now">없음(항상 펼침)</td><td>어느 머리줄을 눌러도 세 박스 일괄 접기/펼치기. ∨ 회전 + 호버 강조 + "접기/펼치기" 힌트 · 하단선 높이 일치</td></tr>
+  </table>
+</div>
+
+<script>
+function tgAll(){ const c=!document.getElementById('bxCond').classList.contains('closed');
+  ['bxCond','bxProg','bxRv'].forEach(id=>document.getElementById(id).classList.toggle('closed',c)); }
+const WON=n=>n.toLocaleString('ko-KR')+'원';
+function rows(variant){
+  const common1=[
+    ['총건수','<b>800</b> 건'],
+    ['일건수','<b>92</b> 건/일 <span class="tag" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수">공고 기준</span>'],
+  ];
+  const pay = variant==='none' ? [
+    ['결제금액','상품결제금액 <span class="cndval">'+WON(22000)+'</span> / 총 <b title="작업오더의 결제합계입니다">'+WON(17600000)+'</b>'],
+  ] : [
+    ['결제금액','블랙 <span class="cndval">'+WON(22000)+'</span>(500건), 그린 <span class="cndval">'+WON(24000)+'</span>(300건)'],
+    ['총결제금액','<b>'+WON(22000*500+24000*300)+'</b> <span class="auto" title="작업오더의 결제합계(없으면 Σ 계산)">오더값</span>'],
+  ];
+  const rest=[
+    ['구매채널','쿠팡'],
+    ['유입방식','가이드유입'],
+    ['다계정','허용 · 하루 5건'],
+    ['현금영수증','해당 없음'],
+    ['리뷰비','0 원'],
+    ['입금명','탈취제망고'],
+    ['리뷰타입','포토'],
+  ];
+  return common1.concat(pay,rest);
+}
+function render(variant){
+  document.getElementById('condList').innerHTML =
+    rows(variant).map(([k,v])=>'<dt>'+k+'</dt><dd>'+v+'</dd>').join('');
+}
+function setVar(v,btn){
+  document.querySelectorAll('.vsw button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on'); render(v);
+}
+render('none');
+</script>
+</body>
+</html>

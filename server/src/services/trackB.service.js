@@ -18,6 +18,7 @@ const cm = require('../utils/contractMatch');   // 작업명↔계약 유사도 
 const { hasCashReceiptSlot, cashReceiptNote } = require('../utils/captureSlots');   // 현영 판정 단일 규칙(재구현 금지)
 const workdeskOrderDelete = require('./workdeskOrderDelete.service');
 const { TRACKING_HEADER_RE, isTrackingHeader } = require('../utils/trackingColumn');   // 택배송장 열 판정 단일 출처(사본 금지)
+const { isFilledRow: _isFilledRow, numberColumnKey: _numberColumnKey } = require('../utils/rowNumbering');   // "채워진 줄" 판정 · 표의 「번호」 칸 이름 — 단일 출처(SQL `filledSql` 과 한 벌)
 
 let _pool;
 let _rebuildLedgersForTest = null;
@@ -81,13 +82,25 @@ const _EDIT_FIELD_KIND = {
 // 시트 컬럼(헤더)이 제출/입금 "상태 토글"열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
 //   ★ 정확 화이트리스트 — '입금자명/입금계좌/입금일'·'리뷰제출일/리뷰미제출'·'주문자제출' 등 정보열 오탐 차단.
 //   미매칭이면 null(연동 안 함, 안전). 새 상태열 명칭은 여기 추가.
-const _SUBMIT_HEADERS = new Set(['리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
+const _SUBMIT_HEADERS = new Set(['리뷰', '리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
 const _PAID_HEADERS = new Set(['입금', '입금여부', '입금완료']);
 function _linkedToggle(header) {
   const h = String(header || '').trim();
   if (_SUBMIT_HEADERS.has(h)) return 'is_submitted';
   if (_PAID_HEADERS.has(h)) return 'is_paid';
   return null;
+}
+/* ★★ 그 탭이 실제로 쓰는 상태 칸은 **행이 들고 있는 `submit_col`/`submit_col2`** 다 (2026-08-21 실측).
+   `_SUBMIT_HEADERS` 는 정확일치 목록이라 헤더가 그냥 `리뷰` 인 탭(columnResolver 3단계가 정상 채택하는
+   실재 형태)을 못 잡았다 — 시스템은 그 칸에 제출 시각을 쓰는데 화면·편집 게이트만 "평범한 칸"으로 봐서
+   **관리자가 직접 타이핑할 수 있고 [📎 수동 리뷰제출] 메뉴는 안 뜨는** 상태가 됐다.
+   → 판정은 `submit_col`(그 탭의 진짜 상태 칸) 우선, 이름 목록은 그 값이 없을 때의 폴백. */
+function _statusToggleForRow(header, row) {
+  const h = String(header || '').trim();
+  if (!h) return null;
+  if (row && String(row.submit_col || '').trim() === h) return 'is_submitted';
+  if (row && String(row.submit_col2 || '').trim() === h) return 'is_paid';
+  return _linkedToggle(h);
 }
 
 // ── 그림자 투영: 임포트(participants) + 신원키/주문링크 강화 + seen-set 재투영 ──
@@ -1712,6 +1725,29 @@ async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
 //      (비적격 상태+linked_tab 설정 시 승인 멱등 skip, idempotent 판정). 그래서 Track B는 그 컬럼을 절대 안 쓰고
 //      **Track B 전용 링크 테이블(trackb_work_order_links, migration 051)** 에 발주↔탭 연결을 저장한다.
 //      작업세부 표시는 [Track B 링크] 우선 → 없으면 [work_orders.linked_tab](Track A 승인 링크) 폴백으로 읽기만.
+/* 작업 조건 카드의 옵션별 결제금액 표시 재료 — 인트라넷 구조화 신호(product_options_json 의
+   [{name,url,base:{pay,count},options:[{label,pay,count}]}])에서 **금액이 있는 옵션만** 뽑는다.
+   ★ 문자열·이름만 있는 레거시 배열은 제외 — 금액 없는 옵션을 "블랙 —원" 으로 그리느니
+     옵션 없는 표기(1건당 결제금액)로 떨어지는 쪽이 정직하다. `_parseWoOptions`(이름 전용)와
+     계약이 달라 별도 함수로 둔다(합치면 작업표 생성 쪽 소비처가 흔들린다). */
+function _condWoOptions(json) {
+  if (!json) return [];
+  let v; try { v = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return []; }
+  if (!Array.isArray(v)) return [];
+  const num = x => (x == null || x === '' ? null : (Number.isFinite(Number(x)) ? Number(x) : null));
+  const out = [];
+  for (const p of v) {
+    if (!p || typeof p !== 'object' || !Array.isArray(p.options)) continue;
+    for (const o of p.options) {
+      if (!o || typeof o !== 'object') continue;
+      const label = String(o.label || o.name || '').trim();
+      if (!label) continue;
+      out.push({ label, pay: num(o.pay), count: num(o.count) });
+    }
+  }
+  return out;
+}
+
 function _parseWoOptions(json) {
   if (!json) return [];
   let v; try { v = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return []; }
@@ -2407,20 +2443,36 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
         ORDER BY (status = 'active') DESC, created_at DESC`,
       [sheetId, tabName, gid]).catch(() => ({ rows: [] }));
     const c = camps[0] || null;
+    /* ★★ **값이 있는 최신 공고**(utils/campaignTabLateral 규율) — 차수 재발행으로 한 탭에 공고가
+       여럿일 때 기준 공고 하나만 보면 **최신 공고의 빈 칸이 옛 공고의 값을 가린다**. 리뷰타입에서
+       한 번 밟은 사고와 같은 자리다(그때는 구매확정 설정이 조용히 풀렸다). '미지정'은 관리자가
+       정하지 않은 것이라 가리지 않는다 — 최신이 명시돼 있으면 최신이 그대로 이긴다.
+       ★ **0 은 값이다**(무상 작업) — 빈 문자열·NULL 만 건너뛴다.
+       ★ 정원(총건수·일건수·다계정)에는 쓰지 않는다 — 그건 카드·apply 게이트가 보는 **그 공고**의
+         값이라, 다른 공고에서 주워 오면 화면과 게이트가 갈린다. */
+    const pick = (key) => {
+      for (const x of camps) { const v = x[key]; if (v != null && String(v).trim() !== '') return x; }
+      return null;
+    };
+    const feeCamp = pick('reviewFee');
+    const typeCamp = pick('reviewType');
+    const memoCamp = pick('transferMemo');
 
-    // 기간별 리뷰비 구간(082) — 실패해도 기존 review_fee 로 떨어진다(fail-soft)
+    /* 기간별 리뷰비 구간(082) — **리뷰비를 준 그 공고** 기준이어야 금액과 구간이 갈리지 않는다.
+       실패해도 기존 review_fee 로 떨어진다(fail-soft). */
     let schedules = [];
-    if (c) {
+    const schedCamp = feeCamp || c;
+    if (schedCamp) {
       const { rows: fs } = await db.query(
         `SELECT to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom", review_fee AS "reviewFee"
            FROM campaign_fee_schedules WHERE campaign_id = $1 ORDER BY effective_from`,
-        [c.id]).catch(() => ({ rows: [] }));
+        [schedCamp.id]).catch(() => ({ rows: [] }));
       schedules = fs;
     }
     /* ★ 0 을 null 로 접지 말 것 — "0원으로 정한 무상 작업"과 "값이 없는 공고"는 다르다.
        폴백 순서(공고 → 탭)는 입금관리(payment.service)와 **같아야** 한다. */
     const num = v => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
-    const campFee = num(c && c.reviewFee);
+    const campFee = num(feeCamp && feeCamp.reviewFee);
     const tabFee  = num(meta.tabReviewFee);
     const { resolveReviewFee } = require('../utils/campaignFee');
     const feeInfo = resolveReviewFee({ schedules, fallback: campFee != null ? campFee : (tabFee != null ? tabFee : 0) });
@@ -2434,10 +2486,46 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     let cashReceipt = null;
     try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
 
+    /* 옵션별 결제금액(사용자 확정 2026-08-20 시안 v2) — "옵션이 있는 작업" 판정은
+       worktableOptionColumn 규율과 같은 축: **살아있는(닫히지 않은) 공고 옵션**이 먼저고,
+       공고 옵션이 2종 미만이면 작업오더의 구조화 옵션으로 폴백한다. 2종 미만이면 빈 배열
+       = 옵션 없는 작업(1건당 결제금액 한 줄 표기). 표시 전용 — 정원·홀드 판정 무접촉. */
+    let options = [];
+    if (c) {
+      const { rows: opts } = await db.query(
+        `SELECT opt_key AS label, pay_amount AS pay, recruit_total AS count
+           FROM campaign_options WHERE campaign_id = $1 AND status <> 'closed' ORDER BY id`,
+        [c.id]).catch(() => ({ rows: [] }));
+      options = opts.map(o => ({ label: String(o.label || '').trim(), pay: num(o.pay), count: num(o.count) }))
+                    .filter(o => o.label);
+    }
+    if (options.length < 2 && wo) options = _condWoOptions(wo.productOptionsJson);
+    if (options.length < 2) options = [];
+
+    /* 적용 정원(공고 우선 · 0이면 발주) — 상태엔진과 **같은 함수**를 태운다(사본 0). */
+    const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
+    const _rt = displayRecruitTotal(c && c.recruitTotal, wo && wo.recruitCount);
+    const _dl = displayRecruitTotal(c && c.dailyLimit, wo && wo.dailyCount);
+    const campQuota = {
+      recruitTotal: _rt.total, dailyLimit: _dl.total,
+      totalSource: _rt.source, dailySource: _dl.source,
+    };
+
     return {
       productName: (wo && wo.productOption) || meta.campaignName || '',
-      recruitTotal: num(c && c.recruitTotal) != null ? num(c.recruitTotal) : num(wo && wo.recruitCount),
-      dailyLimit:   num(c && c.dailyLimit)   != null ? num(c.dailyLimit)   : num(wo && wo.dailyCount),
+      /* ★★ 총건수·일건수 = **정원 판정과 같은 값**(사용자 확정 2026-08-21) — 공고 값이 있으면
+         그 값, 0(미설정)이면 발주서 값이 **실제 정원으로 적용**된다(campaignState.effectiveQuota).
+         종전에는 `num(0) != null` 이 참이라 공고 0 을 그대로 실어 `총건수 0 건`으로 그렸고,
+         같은 화면의 참여자 게이지는 발주 총건수(/100)를 봐 **한 화면에 두 숫자**가 있었다.
+         ★ 규칙 사본을 만들지 않는다 — `displayRecruitTotal`(공고>0 이면 공고, 아니면 발주) 하나. */
+      recruitTotal: campQuota.recruitTotal || null,
+      dailyLimit:   campQuota.dailyLimit   || null,
+      /* 출처·발주 원값 — 화면이 "발주 기준"이라고 말하고, 일건수 칸이 발주값과 공고 오늘값을
+         나란히 적을 수 있게 한다(조용한 대체 금지). */
+      recruitTotalSource: campQuota.totalSource,
+      dailyLimitSource:   campQuota.dailySource,
+      orderRecruitCount: num(wo && wo.recruitCount),
+      orderDailyCount:   num(wo && wo.dailyCount),
       // 공고에 명시된 채널만(직접입력은 custom). 없으면 null → 화면이 상품 URL 로 판정한다.
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
@@ -2445,15 +2533,33 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       inflowKeyword: (wo && wo.inflowKeyword) || null,
       multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
       cashReceipt,
+      /* [현금영수증] 설정 팝업 재료 — **판정은 서버 단일 출처가 이미 했다**(cashReceipt).
+         여기 둘은 "무엇을 고치는지" 화면이 설명하기 위한 것:
+         · incomeType  = 지금 진행방식 원문(팝업 프리필)
+         · slotsPinned = 캡처 칸이 직접 설정된 탭인가 — 그러면 진행방식을 바꿔도 판정이 안 바뀐다
+           (capture_slots 명시가 최우선). 화면이 그 사실을 말해야 "고쳤는데 그대로"가 안 된다. */
+      incomeType: meta.incomeType || '',
+      slotsPinned: Array.isArray(meta.captureSlots) && meta.captureSlots.filter(x => x && x.key).length > 0,
+      /* 1건당 상품 결제금액(사용자 확정 2026-08-20) — 진행 현황의 '결제금액'은 활성 주문 행의
+         **합계**라 성질이 다르다(중복 표기가 아니다). 출처는 작업오더 한 곳. */
+      payAmount: num(wo && wo.payAmount),
+      /* 옵션 2종 이상일 때만 채워진다 — 총결제금액은 싣지 않는다(자동계산은 화면 표시일 뿐
+         저장값이 아니고, 여기 실으면 "편집할 수 있는 값"처럼 보인다). */
+      options,
       reviewFee: feeInfo.fee, feeSource,
-      depositName: (meta.depositName || (c && c.transferMemo) || '') || null,
-      reviewType: (() => { const k = resolveReviewType({ campaignType: c && c.reviewType, tabReviewType: meta.reviewType }); return k; })(),
+      /* ★ 입금명 순서 = **공고 → 탭** — 입금관리(payment.service `campMemo || tabMemo`)와 같은
+         순서라야 한다. 탭을 앞세우면 "공고를 만들었는데 카드가 옛 탭 값을 계속 보여주는" 상태가
+         되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
+         공고를 나중에 만들면 공고 설정값이 우선한다). */
+      depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
+      reviewType: resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType }),
       reviewTypeLabel: (() => {
-        const k = resolveReviewType({ campaignType: c && c.reviewType, tabReviewType: meta.reviewType });
+        const k = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
         return k ? (reviewTypeLabel(k) || k) : null;
       })(),
       campaignId: c ? c.id : null,
       campaignCount: camps.length,
+      workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다
     };
   } catch (e) {
     logger.warn(`[trackB] tabConditionSummary 실패(작업 조건 축약 표시): ${e.message}`);
@@ -2630,6 +2736,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const visitSeen = new Map();
   const out = [], hiddenList = [];
   let ambiguousCount = 0;
+  /* ★★ 채워진 줄 수 — [진행 현황] 참여자 게이지의 분자(사용자 확정 2026-08-20).
+     종전 게이지는 `out.length`(= 줄 수)를 세어, 작업표 생성 때 미리 깔아 둔 **빈 슬롯**까지
+     사람으로 계산했다 → 6명만 들어온 200줄 작업이 `참여자 200/200 · 100%` 로 보였다.
+     ★ 판정은 `utils/rowNumbering.isFilledRow` 단일 출처 — 번호 재부여·짝 빈 줄 정리가 쓰는
+       SQL(`filledSql`)과 같은 기준이라 "게이지와 정리가 다른 줄을 빈 줄로 본다" 가 불가능하다.
+     ★ **마스킹 전**에 센다(광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어 전 줄이 뒤집힌다).
+     ★ 화면에서 뺀 줄(`_hidden`)은 세지 않는다 — 카운트는 `continue` 뒤에서 한다(참여횟수 배지와 같은 자리). */
+  let filledCount = 0;
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
     let ov = {}, editable = !!anchor, ambiguous = false;
@@ -2666,6 +2780,15 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
       continue;
     }
+    /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
+       세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
+    syn.filled = _isFilledRow(syn);
+    if (syn.filled) filledCount++;
+    /* ★ 작업보드 표의 「번호」 칸 값 — 미리보기 팝업 목록이 쓴다. `seq`(시트 실제 행 번호)와는
+       다른 값이라(원래 1 차이) 화면이 둘을 헷갈리면 안 된다. 칸 이름 판정은 `numberColumnKey`
+       단일 출처이고, 담당자가 셀을 고쳤으면 그 값이 이긴다(표와 같게). 칸이 없으면 빈 값. */
+    const _nk = _numberColumnKey(r.row_json);
+    syn.boardNo = _nk ? String(pick('col:' + _nk, (r.row_json || {})[_nk]) ?? '').trim() : '';
     const _vp8 = String(syn.phone8 == null ? '' : syn.phone8).trim();
     if (_vp8) { const n = (visitSeen.get(_vp8) || 0) + 1; visitSeen.set(_vp8, n); syn.visitNo = n; }
     // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
@@ -2727,6 +2850,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   }
   const counts = {
     total: out.length,
+    /* 채워진 줄(사람이 들어온 줄) — 참여자 게이지의 분자. `total`(줄 수)과의 차이 = 빈 슬롯. */
+    filled: filledCount,
     submitted: out.filter(r => r.submitted).length,
     paid: out.filter(r => r.paid).length,
     // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
@@ -2741,6 +2866,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   if (showEdits) {
     res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
+    /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
+       화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
+       갈려 "직접 타이핑은 되는데 수동 제출 메뉴는 없는" 상태가 된다(2026-08-21 실측).
+       ★ 값이 없으면(구버전 데이터·미감지) 싣지 않는다 — 화면은 종전 이름 목록으로 폴백한다. */
+    const _scS = roster.find(r => r.submit_col) || {}, _scP = roster.find(r => r.submit_col2) || {};
+    if (_scS.submit_col || _scP.submit_col2) {
+      res.statusCols = { submit: _scS.submit_col || null, paid: _scP.submit_col2 || null };
+    }
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
     res.condition = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
@@ -2798,7 +2931,8 @@ async function _editOneInTx(client, { sheetId, tabName, rowId, field, value, by 
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
-      `SELECT id, seq, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid
+      `SELECT id, seq, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid,
+              submit_col, submit_col2
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
       [rowId, sheetId, tabName]);
@@ -2807,7 +2941,7 @@ async function _editOneInTx(client, { sheetId, tabName, rowId, field, value, by 
     // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
     if (isCol) {
       // 상태값은 시스템 전용이다. 화면 잠금과 별개로 일반 셀 편집 API도 차단한다.
-      if (_linkedToggle(field.slice(4))) {
+      if (_statusToggleForRow(field.slice(4), row)) {
         await client.query('ROLLBACK'); return { ok: false, error: 'status_column_locked', field };
       }
       if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json,
@@ -3122,10 +3256,19 @@ function _manualReviewFileIds(fileIds) {
   return ids;
 }
 
-async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin' } = {}) {
+/**
+ * 관리자 수동 리뷰제출.
+ *
+ * ★★ `preflight:true` = **쓰기 0 사전 확인**(2026-08-21 실사고): 종전에는 화면이 캡처를 먼저
+ *   업로드한 뒤 이 함수를 불렀는데, 여기서 거부되면 **드라이브에는 파일이 남고 제출만 실패**했다
+ *   (신고 건: 재시도할 때마다 같은 줄에 캡처가 쌓였다). 이제 화면이 **붙여넣기 전에** 이 경로로
+ *   물어보고, 통과했을 때만 업로드한다. 게이트는 실제 제출과 **같은 코드**를 지난다(사본 0) —
+ *   따로 만들면 "확인은 통과인데 제출은 거부"가 된다.
+ */
+async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by = 'admin', preflight = false } = {}) {
   if (!sheetId || !tabName || !rowId) throw new Error('manualWorkdeskReviewSubmit: 필수 인자 누락');
-  const ids = _manualReviewFileIds(fileIds);
-  if (!ids) return { ok: false, error: 'invalid_review_files' };
+  const ids = preflight ? [] : _manualReviewFileIds(fileIds);
+  if (!preflight && !ids) return { ok: false, error: 'invalid_review_files' };
   const db = getPool();
   const client = await db.connect();
   try {
@@ -3138,7 +3281,22 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
       [rowId, sheetId, tabName]);
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const participant = pr[0];
-    const submitCol = String(participant.submit_col || '').trim();
+    /* ★★ 수동·작업표로 추가한 줄은 `submit_col` 이 비어 있다 (2026-08-21 실측 `submit_column_missing`).
+       그 칸은 **`review_index` 복제 경로(importTabFromIndex)에서만** 채워지고, `addParticipant`·
+       `prepareRosterSlots`·`appendSlot` 등 사람이 만든 줄은 NULL 로 남는다 — 그런데 상태 칸은
+       **줄이 아니라 탭 단위 속성**이라 그 줄만 제출을 못 하는 것은 사실과 다르다.
+       → 그 탭의 감지값으로 보완한다. 해석기는 무시트 상태 기록과 **같은 것**(사본 0) — 각자 SQL 을
+       쓰면 "장부는 A 칸에 쓰는데 수동 제출은 B 칸에 쓰는" 상태가 된다.
+       ★ 잠근 tx 안이므로 pool 이 아니라 `client` 로 조회한다.
+       ★ 그래도 못 찾으면 **거부**(fail-closed) — 그 작업표에 리뷰제출 열이 정말 없다는 뜻이고,
+         추측해서 아무 칸에나 시각을 박으면 담당자가 적어 둔 값을 덮는다. */
+    let submitCol = String(participant.submit_col || '').trim();
+    if (!submitCol) {
+      try {
+        submitCol = String(await require('./sheetlessStatus.service')
+          .statusHeaderForTab(client, { sheetId, tabName, kind: 'submit' }) || '').trim();
+      } catch (_) { submitCol = ''; }
+    }
     if (!submitCol) { await client.query('ROLLBACK'); return { ok: false, error: 'submit_column_missing' }; }
 
     const { rows: ir } = await client.query(
@@ -3148,6 +3306,12 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
     if (!ir.length) { await client.query('ROLLBACK'); return { ok: false, error: 'review_history_missing' }; }
     if (participant.is_submitted || ir[0].is_submitted) {
       await client.query('ROLLBACK'); return { ok: false, error: 'already_submitted' };
+    }
+
+    // 사전 확인은 여기까지 — **쓰기 없이** 되돌리고 그 줄의 제출 칸 이름을 돌려준다.
+    if (preflight) {
+      await client.query('ROLLBACK');
+      return { ok: true, preflight: true, rowIndex: participant.seq, submitColumn: submitCol };
     }
 
     // 파일 ID를 조작해 다른 행의 첨부를 제출하지 못하도록 업로드 원장을 대조한다.
@@ -3515,6 +3679,101 @@ async function deleteWorkdeskOrderRow(args) {
 
 // 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
 async function addWorkdeskRow(args) { return participants.addParticipant(args); }
+
+/**
+ * 작업보드 구매일자 달력 편집 (무시트 전용 · 2026-08-21).
+ *
+ * ★★ 무시트 탭의 구매일자는 row_json 이 진실이라 그리드 오버레이(표시 전용)로는 재번호·장부에
+ *   인식되지 않는다 → 여기서 진짜로 쓴다. 시트 기반 탭은 거부(시트가 진실원본 — 화면은 종전
+ *   오버레이 경로를 그대로 쓴다).
+ * ★★ 주문이 연결된 줄은 **원장(date_str)을 먼저 고치고 order-edit 무시트 경로와 같은 실행부**
+ *   (`writeOrderToWorktable`)로 재기록한다 — row_json 만 고치면 다음 주문 재기록이 옛 날짜를
+ *   도로 덮는다(원장·작업표 드리프트). 주문 없는 줄만 `markSheetlessPurchaseDate` 직접 기록.
+ * ★ 재번호는 fail-soft — 날짜는 이미 박혔고 5분 스윕이 백스톱이다.
+ */
+async function setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
+  if (!dm) return { ok: false, error: 'bad_date' };
+  const db = getPool();
+
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
+  catch (_) { sheetless = false; }
+  if (!sheetless) return { ok: false, error: 'not_sheetless' };
+
+  const { rows: pr } = await db.query(
+    `SELECT id, seq, tab_gid, order_submission_id FROM campaign_participants
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
+    [rowId, sheetId, tabName]);
+  if (!pr.length) return { ok: false, error: 'row_not_found' };
+  const row = pr[0];
+  const fmt = require('../utils/worktablePlan').sheetDateStr({ y: +dm[1], m: +dm[2], d: +dm[3] });
+
+  if (row.order_submission_id) {
+    // 원장 먼저(진실원본) — last_edit_seq 단조증가로 역동기·stale 편집 보호(order-edit 와 동일).
+    const { rowCount } = await db.query(
+      `UPDATE order_submissions SET date_str = $2, updated_at = NOW(),
+              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+        WHERE id = $1 AND deleted_at IS NULL`,
+      [row.order_submission_id, fmt, Date.now()]);
+    if (!rowCount) return { ok: false, error: 'order_not_found' };
+    const { rows: full } = await db.query(`SELECT * FROM order_submissions WHERE id = $1`, [row.order_submission_id]);
+    const { _osRowToOrderData } = require('./orderLedger.service');
+    const w = await require('./sheetlessOrder.service').writeOrderToWorktable({
+      sheetId, tabName, tabGid: row.tab_gid || '', sheetRow: row.seq,
+      orderData: _osRowToOrderData(full[0]), orderSubmissionId: row.order_submission_id,
+    });
+    return w && w.ok ? { ok: true, seq: row.seq, value: fmt, via: 'order' }
+                     : { ok: false, error: (w && w.reason) || 'write_failed', via: 'order' };
+  }
+
+  const r = await require('./sheetlessStatus.service').markSheetlessPurchaseDate({
+    sheetId, tabName, rowIndex: row.seq, dateYmd: String(date).trim(), by });
+  if (!r || r.handled === false || !r.ok) {
+    return { ok: false, error: (r && r.reason) || 'write_failed', via: 'cell' };
+  }
+  try { await require('./rowNumbering.service').renumberTab({ sheetId, tabName, by }); } catch (_) { /* 5분 스윕 백스톱 */ }
+  return { ok: true, seq: row.seq, value: fmt, via: 'cell' };
+}
+
+/**
+ * 리뷰제출일 백필 (무시트 전용 · adminOrMaster · 2026-08-21).
+ *
+ * ★ 외부모집 사후 등록 건은 리뷰가 시스템 밖(카톡 수집)에서 제출돼 캡처 원장이 없다 —
+ *   증빙 게이트가 있는 [수동 리뷰제출](manualWorkdeskReviewSubmit)로는 기록할 수 없어서,
+ *   입금일 기록(deposit-date-backfill)과 같은 성격의 관리자 백필 창구를 둔다.
+ * ★ 값은 날짜로 해석 가능해야 한다(parseDateToken — '완료' 같은 임의 문구 차단).
+ * ★ 기록 실행부 = `sheetlessStatus.markStatusCell` 한 벌(리뷰어 제출과 같은 경로 · 사본 0).
+ */
+async function backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId) return { ok: false, error: 'bad_request' };
+  const text = String(value == null ? '' : value).trim().slice(0, 40);
+  if (!text) return { ok: false, error: 'empty_value' };
+  const { parseDateToken } = require('../utils/koreanDate');
+  let parsed = null;
+  try { parsed = parseDateToken(text, { fallbackAnchor: new Date() }); } catch (_) { parsed = null; }
+  if (!parsed) return { ok: false, error: 'bad_date', hint: '날짜로 읽히는 값만 기록할 수 있습니다(예: 8/1)' };
+
+  const db = getPool();
+  const { rows: pr } = await db.query(
+    `SELECT id, seq FROM campaign_participants
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3 AND deleted_at IS NULL LIMIT 1`,
+    [rowId, sheetId, tabName]);
+  if (!pr.length) return { ok: false, error: 'row_not_found' };
+  const seq = pr[0].seq;
+
+  const r = await require('./sheetlessStatus.service').markStatusCell({
+    sheetId, tabName, rowIndex: seq, kind: 'submit', value: text, by });
+  if (!r || r.handled === false) return { ok: false, error: 'not_sheetless' };
+  if (!r.ok) return { ok: false, error: r.reason || 'write_failed' };
+  // 화면 즉시 일치용 물리 토글 — source 는 건드리지 않는다('manual' 로 두면 투영 상태 CASE 가 얼린다).
+  await db.query(
+    `UPDATE campaign_participants SET is_submitted = TRUE, updated_by = $4, updated_at = NOW()
+      WHERE id = $1 AND sheet_id = $2 AND tab_name = $3`,
+    [rowId, sheetId, tabName, String(by).slice(0, 100)]);
+  return { ok: true, seq, value: text, column: r.column || null };
+}
 
 // ── 편집 이력(감사): 이 탭의 최근 편집(활성+되돌림)을 시각·편집자·필드·값·상태로. 앵커→참여자명 best-effort. ──
 async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
@@ -4891,6 +5150,8 @@ module.exports = {
   _writebackEngine,
   workdeskTab,
   setWorkdeskTitle,
+  setWorkdeskPurchaseDate,
+  backfillWorkdeskReviewSubmitDate,
   editWorkdeskRow,
   editWorkdeskRowsBatch,
   EDIT_BATCH_MAX,

@@ -1151,7 +1151,7 @@ function onParticipationToggle(on) {
        ⚠ 모달의 [리뷰어에게 숨김] 토글은 사용자 확정(2026-08-19)으로 제거됐다 —
          테스트 공고도 모집중이면 리뷰어 목록에 뜬다. 테스트가 끝나면 게시(모집중) 토글을 내린다.
      - 타계정 허용 + 하루한도 5 : 한 사람이 여러 명의로 같은 날 참여해야 일괄 제출이 켜진다.
-     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 15/10분).
+     - 자리 유효시간 30분 : 테스트 도중 만료로 막히지 않게(운영 기본값은 30/15분).
      - 구매 시간대 비움 = 자율주문(종일 오픈).
    ★ 연결 탭만 사람이 고른다 — 어느 시트에 테스트 행을 쓸지는 시스템이 정할 수 없다.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -2144,9 +2144,15 @@ function _syncPreviewFromOptRows() {
     /* ★★ 수정 모드(옵션 없는 작업) — 캠페인 정원은 **첫 행 칸이 곧 그 값**이다.
        합계 규칙("하나라도 0이면 무제한")을 쓰면 상품 줄이 둘 이상일 때 총량이 0(무제한)으로
        리셋된다(실사고). 사람이 첫 행에서 고친 값은 그대로 저장된다. */
-    const head = live[0] || rows[0] || {};
-    if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
-    if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+    /* ★★ 표가 **한 줄도 없으면** 정원을 다시 만들지 않는다(2026-08-21 실측 버그):
+       작업내용 상품 원문(productLines)이 빈 공고를 수정 화면에서 열면 표가 0행이 되어
+       `head = {}` → 총인원·일건수가 **0 으로 덮이고**, 그대로 저장하면 정원이 통째로
+       리셋됐다(실측: DB 500/30 인 공고가 화면에서 0/0). 프리필로 실린 원장 값을 지킨다. */
+    const head = live[0] || rows[0] || null;
+    if (head) {
+      if (rt) rt.value = Number(head.recruitTotal) > 0 ? Number(head.recruitTotal) : 0;
+      if (dl) dl.value = Number(head.dailyLimit)   > 0 ? Number(head.dailyLimit)   : 0;
+    }
   } else {
     if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
     if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
@@ -2537,11 +2543,12 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
+  window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
   syncRecruitReviewTypeMix();
-  const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
+  const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "30";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
   /* ⏸ 098 이월 반영 초기화 — 신규 공고 기본 [자동](현행) */
   if (typeof rfCarrySet === "function" && document.getElementById("rf_carry_mode")) rfCarrySet("auto", { silent: true });
@@ -2549,7 +2556,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _maEl = document.getElementById("rf_multi_account");
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
   const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "1";
-  const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "10";
+  const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "15";
   /* ★ v2: 참여형이 기본 — 신규 공고는 항상 켜져 열린다(스위치 UI 제거·hidden 체크박스 유지).
      레거시(일반) 공고를 편집할 땐 아래 프리필의 else 분기가 다시 끈다. */
   const _partEl = document.getElementById("rf_participation");
@@ -2669,7 +2676,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_recruit_total", c.recruit_total ?? "");
         setV("rf_landing_url", c.landing_url || "");
         setV("rf_product_url", c.landing_url || "");
-        setV("rf_hold_ttl", c.hold_ttl_min ?? 15);
+        setV("rf_hold_ttl", c.hold_ttl_min ?? 30);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
         /* ⏸ 098 이월 반영 방식 복원 */
         if (typeof rfCarrySet === "function") rfCarrySet(c.carry_mode === "hold" ? "hold" : "auto", { silent: true });
@@ -2678,7 +2685,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const _ma = document.getElementById("rf_multi_account");
           if (_ma) { _ma.checked = c.multi_account_mode === true; onMultiAccountToggle(_ma.checked); }
           const _md = document.getElementById("rf_multi_daily"); if (_md) _md.value = c.multi_daily_limit ?? 0;
-          const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 10;
+          const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 15;
         }
         /* 🧪 085 리뷰어 미노출 복원 */
         {
@@ -2689,9 +2696,17 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const savedReviewMix = Array.isArray(c.review_type_mix) ? c.review_type_mix : (() => {
           try { return JSON.parse(c.review_type_mix || '[]'); } catch (_) { return []; }
         })();
+        /* ★★ 혼합 조합이 비어 있으면 **연결 작업오더의 조합**으로 채운다(2026-08-21 확정).
+           `review_type_mix`(106)는 2026-08-20 에 생긴 컬럼이고 백필이 없어, 그 전에 발행된
+           혼합 공고는 조합이 전부 0 으로 열리고 저장 검증(두 유형 이상)에 막힌다.
+           ★ 저장값이 있으면 언제나 저장값이 이긴다 · 작업오더에도 없으면 빈 채로 두고
+             아래 안내가 "직접 입력해달라"고 말한다(없는 값을 지어내지 않는다). */
+        const orderReviewMix = Array.isArray(json.orderReviewTypeMix) ? json.orderReviewTypeMix : [];
+        const _useOrderMix = !savedReviewMix.length && orderReviewMix.length > 0;
+        window._rfMixOrigin = savedReviewMix.length ? '' : (_useOrderMix ? 'order' : 'empty');
         // 혼합 입력칸은 [혼합]을 선택할 때 동적으로 만들어진다. 먼저 진실원본을 채운 뒤
         // 버튼을 선택해야 저장된 구성(또는 작업오더 프리필)이 렌더링 첫 화면부터 보인다.
-        _setRecruitGlobalReviewTypeMix(savedReviewMix);
+        _setRecruitGlobalReviewTypeMix(_useOrderMix ? orderReviewMix : savedReviewMix);
         _rfPickBtn("review_type", _rfReviewTypeKey(c.review_type || ""));
         /* ★ 127: 체험단 종류 복원 — blog 면 리뷰타입 카드 숨김 + 안내 배너 */
         { const _wk = document.getElementById("rf_work_kind"); if (_wk) _wk.value = (c.work_kind === "blog") ? "blog" : (c.work_kind || ""); _rfApplyWorkKindUi(); }
@@ -2769,6 +2784,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         try { return JSON.parse(prefill.review_type_mix || '[]'); } catch (_) { return []; }
       })();
       // 작업오더 혼합 수량도 동적 입력칸보다 먼저 보관해, [혼합] 선택 시 그대로 렌더한다.
+      window._rfMixOrigin = prefillReviewMix.length ? 'order' : 'empty';
       _setRecruitGlobalReviewTypeMix(prefillReviewMix);
       if (prefill.review_type) _rfPickBtn("review_type", _rfReviewTypeKey(prefill.review_type));
       /* ★ 127: 작업오더의 체험단 종류 → 공고에 그대로 전파(blog 면 리뷰타입 카드 숨김) */
@@ -3086,6 +3102,7 @@ function renderRecruitOptionReviewMix() {
         if (input.value === '0') input.value = '';
       });
       input.addEventListener('input', () => {
+        window._rfMixOrigin = '';   // 사람이 고친 순간부터는 사람이 정한 값 — 출처 안내를 지운다
         const next = RF_REVIEW_MIX_TYPES.map((key) => ({ type: key, quantity: Number(grid.querySelector(`[data-mix-type="${key}"]`)?.value) || 0 }));
         if (card.row) _writeOptionReviewMix(card.row, next);
         else window._rfGlobalReviewTypeMix = next.filter((entry) => entry.quantity > 0);
@@ -3100,6 +3117,33 @@ function renderRecruitOptionReviewMix() {
     total.textContent = _reviewMixTotalLabel(sum, card.expected, optionMode);
     total.classList.toggle('is-invalid', sum !== card.expected);
   });
+}
+
+/**
+ * 혼합 조합의 출처 안내 — 조용한 대체 금지.
+ *  · 'order' = 공고에 저장된 조합이 없어 **연결 작업오더 값을 불러왔다**(저장해야 반영된다)
+ *  · 'empty' = 작업오더에도 조합이 없다 → 직접 입력해야 저장할 수 있다(저장 검증이 막는다)
+ * ★ 사람이 숫자를 고치면 안내를 지운다 — 그 순간부터는 사람이 정한 값이다.
+ */
+function _renderReviewMixOriginNote() {
+  const root = document.getElementById('rf_review_mix');
+  if (!root) return;
+  let box = document.getElementById('rf_review_mix_note');
+  const origin = window._rfMixOrigin || '';
+  if (!origin) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'rf_review_mix_note';
+    box.style.cssText = 'margin-bottom:6px;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;line-height:1.5';
+    root.insertBefore(box, root.firstChild);
+  }
+  if (origin === 'order') {
+    box.style.background = '#ECFDF5'; box.style.color = '#065F46'; box.style.border = '1px solid #6EE7B7';
+    box.textContent = '작업오더에 적힌 리뷰 조합을 불러왔습니다 — 확인 후 저장하면 공고에 반영됩니다.';
+  } else {
+    box.style.background = '#FFFBEB'; box.style.color = '#92400E'; box.style.border = '1px solid #FCD34D';
+    box.textContent = '이 공고에는 리뷰 조합이 저장되어 있지 않고 작업오더에도 없습니다 — 유형별 인원을 직접 입력해주세요.';
+  }
 }
 
 function getRecruitReviewTypeMix() {
@@ -3125,7 +3169,7 @@ function syncRecruitReviewTypeMix() {
   const visible = reviewType === 'mixed';
   root.style.display = visible ? '' : 'none';
   if (composer) { composer.hidden = !visible; composer.classList.toggle('is-visible', visible); }
-  if (visible) renderRecruitOptionReviewMix();
+  if (visible) { renderRecruitOptionReviewMix(); _renderReviewMixOriginNote(); }
   const mix = getRecruitReviewTypeMix();
   const sum = mix.reduce((total, row) => total + row.quantity, 0);
   const expected = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
@@ -3833,6 +3877,7 @@ const _RF_DIFF_FIELDS = [
   ["multi_account_mode","타계정 참여"],
   ["multi_daily_limit", "타계정 하루한도"],
   ["sub_hold_ttl_min",  "타계정 자리 유효시간"],
+  ["skip_weekends",     "주말 포함 여부"],
   ["reviewer_hidden",   "리뷰어에게 숨김"],
   ["transfer_bank",     "이체은행"],
   ["transfer_memo",     "통장표시"],
@@ -4066,7 +4111,7 @@ async function saveRecruitPostImpl() {
       }
       const reviewMixError = validateRecruitReviewTypeMix();
       if (reviewMixError) { _rfSaveBlocked(reviewMixError); return; }
-      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
+      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 30;
       /* ⏸ 098 이월 반영 방식 — ★ 세그먼트 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 유지) */
       if (document.getElementById("rf_carry_mode")) {
         payload.carry_mode = document.getElementById("rf_carry_mode").value === "hold" ? "hold" : "auto";
@@ -4076,7 +4121,7 @@ async function saveRecruitPostImpl() {
       if (document.getElementById("rf_multi_account")) {
         payload.multi_account_mode = !!document.getElementById("rf_multi_account").checked;
         payload.multi_daily_limit  = Math.max(0, parseInt(document.getElementById("rf_multi_daily")?.value, 10) || 0);
-        payload.sub_hold_ttl_min   = Math.max(1, parseInt(document.getElementById("rf_sub_ttl")?.value, 10) || 10);
+        payload.sub_hold_ttl_min   = Math.max(1, parseInt(document.getElementById("rf_sub_ttl")?.value, 10) || 15);
       }
       /* 🧪 085 리뷰어 미노출 — ★ 토글 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 기존값 유지) */
       if (document.getElementById("rf_reviewer_hidden")) {
@@ -4213,6 +4258,22 @@ async function saveRecruitPostImpl() {
     /* ★ 목록 밖에서 열린 모달(홈 작업목록 팝업)이 자기 화면을 갱신할 수 있게 알린다.
        훅 미설정 = 관리자 대시보드 동작 불변(레포의 CS_ON_BADGE 와 같은 방식). */
     try { if (typeof window.CAMP_ON_SAVED === "function") window.CAMP_ON_SAVED(); } catch(_) {}
+    /* ★★ 주말 포함/제외를 바꾸면 **날짜별 계획·작업표는 저절로 바뀌지 않는다**(설정은 그날
+       신청을 막을 뿐이다) — 그래서 바뀐 그 자리에서 [📅 인원] 재배분안을 펼쳐 보여준다.
+       ★ 여는 것까지가 자동이고 **반영은 사람이 [확정 저장]** 을 누를 때 일어난다(조용한
+         자동수정 금지 — 이미 채워진 줄·오늘 확정분은 서버가 최종 방어한다).
+       ★ 신규 발행은 대상 아님(계획이 아직 없다) · 모듈·참여형이 아니면 무동작(종전 그대로). */
+    try {
+      const _wkBefore = !!(window._recruitEditLoaded && window._recruitEditLoaded.skip_weekends === true);
+      const _wkAfter = payload.skip_weekends === true;
+      if (_wasEdit && newCampId && _wkBefore !== _wkAfter
+          && !window._recruitEditLoadFailed
+          && saved && saved.data && saved.data.participation_mode === true
+          && window.CampaignDailyPlan && typeof window.CampaignDailyPlan.openWeekendRebalance === "function") {
+        // 저장 안내(campSaveFeedback)를 먼저 읽히고 연다 — 조절 모달이 그 위를 덮는다(z-index)
+        setTimeout(function () { window.CampaignDailyPlan.openWeekendRebalance(newCampId); }, 1200);
+      }
+    } catch (error) { console.warn('[recruit] weekend rebalance skipped:', error); }
   } catch(e) {
     /* ★ 실패는 자동으로 사라지지 않는다 — 모달을 열어 둔 채 사유를 남긴다.
        (토스트로 내보내면 모달 덮개 아래로 깔려 "아무 반응 없음"이 된다) */
@@ -4379,7 +4440,7 @@ function _renderPreview() {
   // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
   const ttlEl = document.getElementById("rf_prev_ttl");
   if (ttlEl) {
-    const ttl = Number(_v("rf_hold_ttl")) || 15;
+    const ttl = Number(_v("rf_hold_ttl")) || 30;
     ttlEl.textContent = String(ttl).padStart(2, "0") + ":00";
   }
 

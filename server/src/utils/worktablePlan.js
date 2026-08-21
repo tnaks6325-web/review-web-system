@@ -426,6 +426,41 @@ function systemBlogColumn(header) {
     origin: 'system', typeKey: 'blog',
   };
 }
+/* ── 리뷰제출 칸 보장 (사용자 확정 2026-08-21 · 표준 이름 = `리뷰`) ────────────
+   리뷰 제출 시각이 들어갈 칸이 없으면 **리뷰어가 리뷰를 내도 어디에도 기록되지 않는다**
+   (관리자 수동 제출은 `submit_column_missing` 으로 막히고, 자동 기록은 조용히 사라진다).
+   ★ 택배송장번호·블로그 3열과 같은 규율: 템플릿에 없어도 시스템이 붙인다.
+   ★★ 존재 판정은 **읽는 쪽과 같은 함수**(`columnResolver.findSubmitColumnIndex`) —
+     인덱스 빌드가 그 함수로 "이 칸이 리뷰제출 칸"이라고 정하므로, 여기서 다른 규칙을 쓰면
+     **만든 칸과 읽는 칸이 갈려** 열을 만들고도 기록이 안 되는 상태가 된다.
+   ★ 이미 인정되는 칸이 있으면 만들지 않는다(`리뷰제출`·`리뷰완료` 등 기존 이름 그대로 존중). */
+const REVIEW_SUBMIT_HEADER = '리뷰';
+
+function systemReviewColumn() {
+  const [classified] = classifyHeaders([REVIEW_SUBMIT_HEADER], {});
+  return {
+    name: classified.header, role: 'submit', label: '리뷰',
+    tier: 'status', conflict: classified.conflict || null,
+    origin: 'system', typeKey: null,
+  };
+}
+function ensureReviewColumn(columns) {
+  /* ★ 열이 하나도 없는 계획(= 표준 열 미설정)에는 넣지 않는다 — 넣으면 "먼저 설정하라"는 잠금이
+     풀려 **리뷰 한 칸짜리 작업표**가 만들어진다(회귀가드가 잡았다). 보장은 표가 성립할 때의 일이다. */
+  if (!Array.isArray(columns) || !columns.length) return columns;
+  const { findSubmitColumnIndex } = require('../services/columnResolver');
+  const names = (columns || []).map(c => c && c.name);
+  if (findSubmitColumnIndex(names) >= 0) return columns;
+  /* ★ 자리는 **공통(core) 열 바로 뒤** — 표준 열 배치에서 리뷰제출은 결제금액·주문번호 다음의
+     상태 칸이다. 맨 뒤에 붙이면 채널 열과 시스템 보장 열(택배송장·블로그 3열)보다 뒤로 가
+     "back 유형 열이 맨 뒤"라는 열 순서 계약이 깨진다(회귀가드가 잡았다). */
+  let at = -1;
+  for (let i = 0; i < columns.length; i++) if (columns[i] && columns[i].origin === 'common') at = i;
+  if (at >= 0) columns.splice(at + 1, 0, systemReviewColumn());
+  else columns.push(systemReviewColumn());
+  return columns;
+}
+
 function ensureBlogColumns(columns) {
   const have = new Set(columns.map(c => _blogColKind(c.name)).filter(Boolean));
   BLOG_REQUIRED_HEADERS.forEach(h => {
@@ -498,6 +533,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
      "정하지 않았는데 정해진" 표가 만들어진다(설정 프리셋과 같은 규율). */
   const workTypes = (Array.isArray(o.workTypes) ? o.workTypes : []).map(k => String(k || '').trim()).filter(Boolean);
   const columns = buildColumns({ template, channel, workTypes });
+  /* ★ 리뷰 제출 시각이 들어갈 칸은 어느 작업표에나 있어야 한다(2026-08-21).
+     ★ **택배송장·블로그 보장보다 먼저** 붙인다 — 나중에 붙이면 "back 유형 열이 맨 뒤"라는
+       열 순서 계약이 깨진다(회귀가드가 잡았다). 리뷰는 템플릿 열 바로 뒤(상태 칸 자리). */
+  ensureReviewColumn(columns);
   if (isCourierProxyWorkOrder(wo) && !hasCourierTrackingColumn(columns)) {
     columns.push(systemCourierTrackingColumn());
   }
@@ -583,6 +622,23 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     });
   }
 
+  /* ★★ 상품옵션 칸도 **없으면 자동으로 덧붙인다**(2026-08-20 · 리뷰옵션과 대칭).
+     종전에는 배분만 해 두고 칸이 없으면 `no_option_column` **경고만** 냈다 — 그런데 그 경고는
+     발행 미리보기 한 번만 스쳐 지나가고, 만들어진 표에는 옵션이 들어갈 칸이 영영 없어
+     **리뷰어가 고른 옵션이 조용히 사라진다**(8/20 실측 사고). 칸이 없으면 배분이 사라진다는
+     점에서 리뷰옵션·택배송장번호와 같은 성질이라 같은 규율로 처리한다.
+     ★ 자리 = 자동 열(번호·구매일자) 바로 뒤(작업지시 칸은 앞쪽). 분류는 classifyHeaders 단일 출처.
+     ★ 리뷰옵션 칸이 있어도 그건 상품옵션 기입처가 아니다 — 따로 만든다(경고 판정과 같은 규칙). */
+  if (buckets.length && !columns.some(c => c.role === 'option' && !isReviewOptionHeader(c.name))) {
+    const [oc] = classifyHeaders(['옵션'], {});
+    let at = 0;
+    while (at < columns.length && columns[at].tier === 'auto') at++;
+    columns.splice(at, 0, {
+      name: oc.header, role: oc.role, label: oc.label, tier: oc.tier,
+      conflict: oc.conflict || null, origin: 'system', typeKey: null,
+    });
+  }
+
   const rows = [];
   for (let i = 0; i < total; i++) {
     rows.push({
@@ -643,9 +699,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     const outside = holidays.filter(h => h < first || h > last);
     if (outside.length) warnings.push({ code: 'holiday_outside', message: `제외 날짜 중 진행 기간 밖이라 영향이 없는 날: ${outside.join(', ')}` });
   }
-  // ★ 리뷰옵션 칸은 상품옵션 기입처가 아니다 — 그 칸만 있고 상품옵션 칸이 없으면 여전히 경고.
-  if (buckets.length && !columns.some(c => c.role === 'option' && !isReviewOptionHeader(c.name))) {
-    warnings.push({ code: 'no_option_column', message: '옵션을 나눴지만 표에 옵션 열이 없어 기입되지 않습니다. 공통 열에 옵션 칸을 추가하세요.' });
+  /* ★ 옵션 칸은 위에서 **자동으로 덧붙였다** — 템플릿에 없어서 시스템이 만든 경우 그 사실을 알린다
+     (조용한 자동 추가 금지). 종전 `no_option_column` 경고(칸이 없어 기입 안 됨)는 도달 불가. */
+  if (buckets.length && columns.some(c => c.origin === 'system' && c.role === 'option' && !isReviewOptionHeader(c.name))) {
+    warnings.push({ code: 'option_column_added', message: '표준 열에 옵션 칸이 없어 시스템이 「옵션」 열을 추가했습니다(리뷰어가 고른 옵션이 이 칸에 기입됩니다).' });
   }
   if (optionCountFallbackSum != null) {
     warnings.push({ code: 'option_count_mismatch', message: `작업오더의 옵션별 수량 합계(${optionCountFallbackSum}건)가 총 건수(${total}건)와 달라 균등 배분했습니다.` });
@@ -720,6 +777,7 @@ module.exports = {
   buildWorktablePlan, buildColumns, distributeDates, distributeOptions,
   distributeReviewTypes, reviewMixFromWorkOrder, optionReviewMixesFromWorkOrder,
   BLOG_REQUIRED_HEADERS, ensureBlogColumns, isBlogWorkOrder,
+  REVIEW_SUBMIT_HEADER, ensureReviewColumn,
   optionKeysFromWorkOrder, channelFromUrl, channelLabel, sheetDateStr,
   evalWorkTypeTrigger, workTypeTriggerReason,
   MAX_ROWS,

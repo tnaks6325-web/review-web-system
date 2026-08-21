@@ -320,7 +320,7 @@ ok('공통 기본값 프리셋 15열이 사용자 확정 목록과 일치한다'
     if (!m) return false;
     const got = m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
     const want = ['번호','구매일자','주문자','수취인','ID','연락처','주소','은행','계좌번호',
-                  '예금주','결제금액','주문번호','리뷰제출','입금','비고'];
+                  '예금주','결제금액','주문번호','리뷰','입금','비고'];   // ★ 리뷰제출 칸의 표준 이름 = '리뷰'(2026-08-21)
     return got.length === want.length && got.every((v, i) => v === want[i]);
   })());
 ok('★ 프리셋은 버튼으로만 — 저장값이 없을 때 조용히 적용되지 않는다(확정은 사람이)',
@@ -575,13 +575,21 @@ ok('★★ 작업유형은 **켠 것만** 반영된다 — 미전송이면 종�
   (() => {
     const off = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: {} });
     const base = planMod.buildColumns({ template: _tplD, channel: 'unknown' });
-    return off.columns.map(c => c.name).join('|') === base.map(c => c.name).join('|');
+    /* ★ 2026-08-20: 시스템이 보장하는 열(옵션·택배송장번호·블로그 3열)은 **작업유형이 아니다** —
+       칸이 없으면 값이 조용히 사라지는 자리라 origin:'system' 으로 따로 붙는다.
+       이 검사가 고정하는 것은 "작업유형(t1·t2) 열이 켜지지 않았다" 이므로 그것만 본다. */
+    const tplCols = off.columns.filter(c => c.origin !== 'system');
+    return tplCols.map(c => c.name).join('|') === base.map(c => c.name).join('|')
+      && !off.columns.some(c => c.typeKey === 't1' || c.typeKey === 't2');
   })());
 ok('★★ 제안(suggestedWorkTypes)은 계산만 하고 **자동 적용하지 않는다**(확정은 사람)',
   (() => {
     const p = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: {} });
+    /* ★ 2026-08-20: 시스템이 옵션 칸을 보장하므로 '옵션' 이라는 **이름의 열은 생긴다** —
+       그러나 그건 작업유형 t1 이 켜진 것이 아니다(typeKey 없음 · 유형의 나머지 열은 안 붙는다).
+       이 검사가 고정하는 것은 "제안을 자동 적용하지 않는다" 이므로 그 축으로 본다. */
     return p.suggestedWorkTypes.join(',') === 't1'          // 옵션 2종 → 상품옵션 제안
-      && !p.columns.some(c => c.name === '옵션')            // 그런데 열은 안 붙었다
+      && !p.columns.some(c => c.typeKey === 't1')           // 그런데 유형은 안 켜졌다
       && p.enabledWorkTypes.length === 0;
   })());
 ok('★ 제안 근거는 **열 역할 파생**(이름 매칭 아님) — 유형 이름을 바꿔도 따라온다',

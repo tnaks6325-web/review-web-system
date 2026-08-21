@@ -13,7 +13,7 @@ const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = 
 const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
 const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
 const { allowAutoRegister } = require('../utils/tabRegistration');
-const { fullySheetlessSheetIds, sheetlessTabKeys, isSheetlessTab } = require('../utils/sheetlessScope');
+const { sweepSkipSheetIds, sheetlessTabKeys, isSheetlessTab } = require('../utils/sheetlessScope');
 
 const DEFAULT_SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
 const DEFAULT_DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
@@ -242,7 +242,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     );
     // ★★ 무시트 작업 제외(탈 구글시트 W1, `sheetlessScope` 단일 출처) — 등록 탭이 전부 무시트인
     //   시트는 구글에 없거나 더는 읽을 이유가 없다. 안 걸러내면 매 사이클 404 반복.
-    const _slSheets = await fullySheetlessSheetIds(pool);
+    const _slSheets = await sweepSkipSheetIds(pool);
     const sheetIds = [...new Set(
       campaignRows.map(r => r.sheet_id)
     )].filter(Boolean).filter(id => !_slSheets.has(id));
@@ -1118,7 +1118,7 @@ async function checkDirtySheets() {
     'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
   );
   // ★ 변경감지도 같은 게이트 — 무시트 시트를 Drive 로 물으면 404(W1)
-  const _slSheets = await fullySheetlessSheetIds(pool);
+  const _slSheets = await sweepSkipSheetIds(pool);
   const sheetIds = [...new Set(
     campaignRows.map(r => r.sheet_id)
   )].filter(Boolean).filter(id => !_slSheets.has(id));

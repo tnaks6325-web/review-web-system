@@ -196,12 +196,32 @@ ok('⑦-R7 미리보기 로드 실패 시 단계 버튼 제거(가짜 완료화�
 ok('⑦-R8 카운트다운 0 재조회가 작업가이드·완료 화면을 되돌리지 않음(리뷰어 경로 포함)',
   /const onPre = \$\('vPre'\)\.style\.display !== 'none' \|\| \$\('vLoading'\)\.style\.display !== 'none';/.test(camp)
   && /if\(!onPre\) return;/.test(camp));
-ok('⑦-R10 미리보기는 선택 가능한 옵션만 고정표시(마감 옵션 오표시 방지) · 리뷰어 전달 경로는 불변',
-  /const _pvOptBlocked = PREVIEW && !\(_selOpt && _selOpt\.selectable\);/.test(camp)
+ok('⑦-R10 미리보기 실제 상태 모드는 선택 가능한 옵션만 고정표시(마감 옵션 오표시 방지) · 리뷰어 전달 경로는 불변',
+  /const _pvOptBlocked = PREVIEW && !_pvOpenSim\(\) && !\(_selOpt && _selOpt\.selectable\);/.test(camp)
   && /if\(j\.application && j\.application\.optionKey\) qp\.set\('optionKey', j\.application\.optionKey\)/.test(camp));
 ok('⑦-R11 팝업 차단 시 안내(무반응 방지)', /if \(!w\) showToast\("팝업이 차단되었습니다/.test(recjs));
 ok('⑦-R12 관리자 미리보기는 새 URL로 열려 이전 캐시가 아닌 현재 시뮬레이션 코드를 사용',
   /&preview=1&previewBuild=sim-20260814#tok=/.test(recjs)
   && /q\.delete\('previewBuild'\)/.test(camp));
+
+// ── ⑧ '모집중 가정' = 마감 공고도 끝까지 시뮬레이션 (사용자 확정 2026-08-20) ──
+//   마감된 공고는 카드·옵션·참여 버튼이 전부 잠겨 정작 확인하려는 진행 화면을 볼 수 없었다.
+//   판정은 _pvOpenSim() 하나로 모으고(사본 금지), 토글을 끄면 즉시 실제 상태로 복귀한다.
+ok('⑧-1 모집중 가정 판정 단일 출처 _pvOpenSim()',
+  /function _pvOpenSim\(\)\{ return PREVIEW && _pvForceOpen; \}/.test(camp));
+ok('⑧-2 모집중 가정에서는 마감 옵션도 선택 가능(실제 리뷰어 경로는 서버 selectable 그대로)',
+  /function _pvOptionSelectable\(o\)\{ return !!o && \(_pvOpenSim\(\) \|\| o\.status === 'open'\); \}/.test(camp)
+  && /o => PREVIEW \? _pvOptionSelectable\(o\) : o\.selectable/.test(camp));
+ok('⑧-3 카드도 열린 모습으로 그린다 — 단, 서버 데이터(_camp)는 안 건드린다',
+  /_pvOpenSim\(\)\s*\n?\s*\? \{ \.\.\.c, state:'open', stateReason:'', status:'active' \}/.test(camp)
+  && /CampCards\.cardHtml\(_cardData\)/.test(camp));
+ok('⑧-4 옵션 목록에 마감 표기·흐림 처리를 하지 않는다',
+  /if\(_pvOpenSim\(\) && o\.status !== 'open'\) return '모집중 가정\(미리보기\)';/.test(camp)
+  && /if\(_pvOpenSim\(\)\) return '';/.test(camp)
+  && /const dim = !_pvOpenSim\(\) && o\.status !== 'open';/.test(camp));
+ok('⑧-5 실제 상태 토글로 되돌릴 수 있다(가정은 표시 전용)',
+  /function pvToggleForce\(\)\{[\s\S]{0,320}_pvForceOpen = !_pvForceOpen;/.test(camp));
+ok('⑧-6 서버 상태 변경 0 유지 — 가상 참여는 여전히 _pvSimulateApply 로만',
+  /if\(PREVIEW\) return _pvSimulateApply\(optionKey\); \/\/ 어떤 경로로도/.test(camp));
 
 console.log(`\n✅ campaignAdminPreview: ${passed}개 통과`);

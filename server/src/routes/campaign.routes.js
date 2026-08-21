@@ -8,7 +8,7 @@ const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.
 const { appendSheet, readSheet } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
 const {
-  computeCampaignState,
+  computeCampaignState, nextOpenAt,
   fetchCampaignCounts,
   fetchOptionCounts,
   computeOptionView,
@@ -263,6 +263,46 @@ async function _saveCampaignOptions(campaignId, options) {
   }
 }
 
+/**
+ * ★★ 공고 옵션 ↔ 작업표 옵션 칸 정합 (2026-08-20 실측 사고) ─────────────────────
+ * 작업표 열 구성(`worktablePlan.buildColumns`)은 **작업오더의 옵션만** 본다 —
+ * `campaign_options` 는 참조하지 않는다. 그래서 "작업오더엔 옵션이 없고 공고에서 옵션을
+ * 나눈" 작업은 **옵션 칸 없이** 만들어졌고, 리뷰어가 고른 옵션이 원장에는 남는데
+ * 작업표·화면에는 **경고 한 줄 없이 사라졌다**.
+ *
+ * → 옵션이 2종 이상인 공고를 저장하면 연결된 무시트 작업표에 옵션 칸을 **보장**한다
+ *   (이미 있으면 아무 것도 하지 않는 조회 3번 = 사실상 무비용).
+ *
+ * ★ 완화 금지: 실행부는 `worktableOptionColumn.service` **한 벌**(복구 창구와 같은 함수) —
+ *   여기서 헤더를 직접 만지면 두 경로가 다른 칸을 만든다.
+ * ★ **절대 throw 하지 않는다** — 정합 보조가 공고 저장을 죽이면 안 된다(082 apply 규율).
+ * ★ 시트 기반 탭·미등록 탭은 서비스가 fail-closed 로 거부한다(열은 시트가 정한다).
+ */
+async function _ensureLinkedWorktableOptionColumn(campaignId, by = 'campaign') {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.linked_tab_sheet_id AS "sheetId", c.linked_tab_name AS "tabName",
+              (SELECT COUNT(*) FROM campaign_options o
+                WHERE o.campaign_id = c.id AND COALESCE(o.status,'active') <> 'closed') AS "liveOpts"
+         FROM recruit_campaigns c WHERE c.id = $1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.sheetId || !r.tabName) return null;
+    if (Number(r.liveOpts || 0) < 2) return null;   // 선택지가 하나면 기입 의미가 없다(배분 규칙과 같은 기준)
+    const { ensureOptionColumn } = require('../services/worktableOptionColumn.service');
+    const out = await ensureOptionColumn({
+      sheetId: r.sheetId, tabName: r.tabName, dryRun: false, backfill: true, by: `campaign:${by}`,
+    });
+    if (out && (out.headerAdded || out.backfillCount)) {
+      logger.info(`[campaign/options] 작업표 옵션 칸 정합 ${r.sheetId}/${r.tabName} 열추가=${out.headerAdded} 소급=${out.backfillCount}`);
+    }
+    return out;
+  } catch (e) {
+    // not_sheetless·tab_not_registered·no_headers 는 정상적인 "해당 없음" 이다.
+    logger.warn(`[campaign/options] 작업표 옵션 칸 정합 생략(${campaignId}): ${(e && e.message) || e}`);
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 기간별 리뷰비(082) — 구간표 저장·조회
 //   판정 자체는 utils/campaignFee.js 가 **단일 출처**(화면마다 규칙을 따로 만들면
@@ -442,23 +482,38 @@ function _pick(row, fields) {
   return out;
 }
 
+/**
+ * 주말 미게시(104)로 막힌 카드의 **재개 시점** — { date, iso } (차단 중이 아니거나 계산 불가면 null).
+ * ★★ 날짜는 정책값(다음 월요일)이 아니라 `nextOpenAt`(= 카드의 "다시 오픈"·apply 게이트와 **같은
+ *   판정**)이 정한다 — 월요일이 0명 조절이면 그날은 열리지 않으므로 "월요일 재개"가 거짓이 된다.
+ * ★ 계산 실패는 정책값으로 접는다(호출부에서 `|| weekend.resumesOn`) — 빈 값으로 두지 않는다.
+ */
+function _weekendResume(row, weekend, counts, now, schedule) {
+  if (!weekend || !weekend.blocked) return null;
+  try { return nextOpenAt(row, counts, now, schedule); }
+  catch (e) { logger.warn('[campaign] 주말 재개일 계산 실패(무시): ' + e.message); return null; }
+}
+
 /** 공개 뷰: 레거시/참여형 분기 + 참여형은 상태엔진 페이로드 병합 */
 function _publicView(row, counts, now, schedule) {
   if (!row.participation_mode) {
     const weekend = weekendPublicationState(row, now);
+    const resume = _weekendResume(row, weekend, counts, now, null);
     return {
       ..._pick(row, PUBLIC_FIELDS_LEGACY),
       participation_mode: false,
       state: weekend.blocked ? 'weekend_unpublished' : row.status,
       stateReason: weekend.blocked ? weekend.reason : null,
       stateMessage: weekend.blocked ? weekend.message : null,
-      resumesOn: weekend.resumesOn,
+      resumesOn: resume ? resume.date : weekend.resumesOn,
+      resumesAt: resume ? resume.iso : null,
     };
   }
   const st = computeCampaignState(row, counts || {
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
   }, now, schedule);
   const weekend = weekendPublicationState(row, now);
+  const resume = _weekendResume(row, weekend, counts, now, schedule);
   return {
     ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
     participation_mode: true,
@@ -475,7 +530,9 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: weekend.blocked ? weekend.reason : (st.stateReason || null),
     stateMessage: weekend.blocked ? weekend.message : null,
-    resumesOn: weekend.resumesOn,
+    resumesOn: resume ? resume.date : weekend.resumesOn,
+    // 주말 미게시 카드의 "재개까지" 카운트다운 기준(ISO). 차단 중이 아니면 null.
+    resumesAt: resume ? resume.iso : null,
     nextWorkDate: st.nextWorkDate || null,
     // daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준(오늘의 opensAt은 이미 지난 시각)
     reopensAt: st.reopensAt || null,
@@ -869,7 +926,27 @@ router.get('/:id', async (req, res, next) => {
       // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필) + 리뷰비 구간(082)
       const options = await _loadOptionsRaw(pool, id);
       const feeSchedules = await _loadFeeSchedules(pool, id);
-      return res.json({ ok: true, data: rows[0], options, feeSchedules });
+      /* ★★ 혼합 조합 프리필 보완(2026-08-21) — `review_type_mix`(106)는 2026-08-20 에 생긴
+         컬럼이고 **백필이 없다**. 그 전에 발행된 혼합 공고는 조합이 통째로 빈 배열이라
+         수정 화면이 전부 0 으로 열리고, 혼합 저장 검증(두 유형 이상)에 막혀 손댈 수가 없다.
+         → **연결 작업오더에 조합이 실려 있으면 그 값을 프리필 재료로 함께 내려준다.**
+         ★ 저장값(`review_type_mix`)은 **덮지 않는다** — 별도 필드로 주고 화면이 "작업오더에서
+           불러왔다"고 말한 뒤 사람이 저장할 때 반영된다(조용한 자동 적용 금지).
+         ★ 공고에 이미 조합이 있으면 조회하지 않는다(공고가 언제나 이긴다).
+         ★ fail-soft — 못 읽어도 수정 모달은 그대로 열린다. */
+      let orderReviewTypeMix = null;
+      try {
+        const cur = normalizeReviewTypeMix(rows[0].review_type_mix);
+        if (normalizeReviewType(rows[0].review_type) === 'mixed' && !(cur.mix || []).length) {
+          const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+          const wo = await linkedWorkOrderForCampaign(rows[0], ['review_type_mix']);
+          const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
+          if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
+        }
+      } catch (e) {
+        logger.warn(`[campaign] 작업오더 혼합 조합 프리필 실패 camp=${id}: ${e.message}`);
+      }
+      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix });
     }
     const now = new Date();
     const row = rows[0];
@@ -1448,7 +1525,7 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
-    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 15);
+    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 15) : (Number(camp.hold_ttl_min) || 30);
     const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
     const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
@@ -1765,13 +1842,24 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
       };
       const _sch = schedMap ? scheduleFor(schedMap, r) : null;
       const st = computeCampaignState(r, cnt, now, _sch);
+      /* ★ 주말 미게시(104)는 관리자 카드에도 그대로 보여준다 — 종전에는 공개 목록에만 적용돼
+         토요일 관리자 카드가 "오늘 모집 0/30 · 모집중"으로 보였다(리뷰어는 신청 불가인데).
+         카드 렌더러의 weekend 분기(_zeroQuotaNote·footer)가 이미 이 값을 기다리고 있었다. */
+      const _weekend = weekendPublicationState(r, now);
+      const _resume = _weekendResume(r, _weekend, cnt, now, _sch);
       return {
         ...r,
         archiveSuggest: _sug,
         // 카드 표기 전용 값. recruit_total 원본은 참여 제한/기존 정책을 위해 그대로 둔다.
         display_recruit_total: displayTotal.total,
         display_recruit_total_source: displayTotal.source,
-        state: st.state, stateReason: st.stateReason || null,
+        state: _weekend.blocked ? 'weekend_unpublished' : st.state,
+        stateReason: _weekend.blocked ? _weekend.reason : (st.stateReason || null),
+        stateMessage: _weekend.blocked ? _weekend.message : null,
+        resumesOn: _resume ? _resume.date : _weekend.resumesOn,
+        resumesAt: _resume ? _resume.iso : null,
+        // 표(주문 원장) 기준 총량(2단계) — null = 집계 불가/연결 없음(카드는 표 기준 문구를 그리지 않는다)
+        tableQuota: st.tableQuota || null,
         todayCount: st.todayCount, dailyQuota: st.dailyQuota,
         // 표 기준 오늘 참여 인원(B안) — null = 셀 수 없음(연결 탭 없음·조회 실패).
         //   화면은 이 값이 있으면 이것을 쓰고, 없으면 종전 todayCount 로 폴백하며 그 사실을 말한다.
@@ -2004,14 +2092,14 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         window_start || null,
         window_end || null,
         Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
-        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 15,
+        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 30,
         _prepWorkDetail(work_detail) ?? null,
         source_work_order_id || '',
         start_date || null,
         multi_account_mode === true,                            // ★ 063 §09-1: 기본 [불가]
         Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
         (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
-          ? 10 : Math.max(1, Number(sub_hold_ttl_min) || 10),   // ★ 063 §09-2: 타계정 10분(≥1 클램프 — 0=즉시만료 footgun 차단)
+          ? 15 : Math.max(1, Number(sub_hold_ttl_min) || 15),   // ★ 063 §09-2: 타계정 15분(133, ≥1 클램프 — 0=즉시만료 footgun 차단)
         reviewer_hidden === true,                               // ★ 085: 기본 FALSE(공개) — 명시로만 숨김
         _normTransferBank(transfer_bank),                       // ★ 086: 빈 값=NULL(작업오더 물건비에서 자동 판정)
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(), // ★ 086
@@ -2026,6 +2114,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
+    if (normOpts) await _ensureLinkedWorktableOptionColumn(rows[0].id, 'create');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     // 작업오더와 모집공고는 별도 값이 아니라 같은 목표 인원이다. 생성 시에도 서버가
     // 역방향 링크와 작업오더 정원을 함께 저장해, 프론트 후속 호출 실패로 드리프트하지 않게 한다.
     let quotaSync = null;
@@ -2342,7 +2431,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
         (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
         (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
-        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 10), // $35
+        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 15), // $35
         (reviewer_hidden === undefined || reviewer_hidden === null) ? null : reviewer_hidden === true, // $36 ★ 085: null=유지
         (transfer_bank === undefined || transfer_bank === null) ? null : (_normTransferBank(transfer_bank) || ''), // $37 ★ 086
         (transfer_memo === undefined || transfer_memo === null) ? null : String(transfer_memo).trim(),            // $38 ★ 086
@@ -2369,6 +2458,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     let optionsWarning = null;
     if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    if (normOpts) await _ensureLinkedWorktableOptionColumn(id, 'update');   // 옵션 2종+ → 연결 작업표에 옵션 칸 보장(fail-soft)
     // ★ 082: 기간별 리뷰비 구간 교체(배열 전달 시에만 — 미전달=기존 구간 유지).
     //   구간표 UI 가 없는 화면(리뷰어앱 인라인 편집 등)이 저장해도 구간이 사라지지 않는다.
     const normFees = normalizeFeeSchedules(fee_schedules);
@@ -2635,7 +2725,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
     const workDetail = sanitizeWorkDetail(camp.work_detail);
     // 미리보기에도 모집공고 직접 설정을 우선 적용한다.
     const inflowType = (workDetail && workDetail.inflowType) || (await _lookupInflowType(camp.id, camp.source_work_order_id)) || '';
-    const ttlMin = Number(camp.hold_ttl_min) || 15;
+    const ttlMin = Number(camp.hold_ttl_min) || 30;
 
     res.json({
       ok: true,

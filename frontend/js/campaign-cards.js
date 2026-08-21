@@ -79,15 +79,20 @@
 
   /** 오픈 안내 라벨: 오픈 시각이 오늘(KST·서버시간 보정)이면 "매일 HH:MM 오픈",
    *  미래 날짜(시작일 전 게시)면 "M/D(요일) 오픈"(자정 오픈은 시각 생략) */
-  function _fmtOpenLabel(iso) {
+  /** 오픈 "시점"만(뒤에 '오픈'·'다시 오픈'·'재개' 를 붙여 쓰는 조각) */
+  function _fmtOpenWhen(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     const now = new Date(_now());
     const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    if (sameDay) return '매일 ' + _fmtHM(iso) + ' 오픈';
+    if (sameDay) return '매일 ' + _fmtHM(iso);
     const yo = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
     const hm = _fmtHM(iso);
-    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm) + ' 오픈';
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm);
+  }
+  function _fmtOpenLabel(iso) {
+    const when = _fmtOpenWhen(iso);
+    return when ? when + ' 오픈' : '';
   }
 
   function _injectStyles() {
@@ -213,6 +218,10 @@
       .pcard .pg-hold{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;cursor:pointer;
         background:#EDE9FE;color:#6D28D9;border:1px solid #DDD6FE;font-size:.62rem;font-weight:800;vertical-align:1px}
       .pcard .pg-hold:hover{background:#DDD6FE}
+      /* 표(주문 원장) 기준 총량 칩(2단계) — observe=앰버(관측), on=빨강(실제 마감) */
+      .pcard .pg-tq{display:inline-block;margin-right:5px;padding:1px 6px;border-radius:5px;
+        font-size:.56rem;font-weight:800;background:#FEF3C7;color:#92400E}
+      .pcard .pg-tq.on{background:#FEE2E2;color:#B91C1C}
       /* 095: 차수 구분 줄(관리자 카드 전용) — 1차 200/200 완료 · 2차 12/100 · 총 212/300 */
       .pcard .prounds{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin:4px 0 0;font-size:.62rem;color:#6B7280}
       .pcard .prounds .rchip{background:#F1F5F9;border-radius:999px;padding:1px 7px;font-weight:800;color:#334155}
@@ -381,7 +390,20 @@
     // 원본 recruit_total=0은 무제한 정책값이라 여기서 덮어쓰지 않는다.
     const total = Number(c.display_recruit_total) || Number(c.recruit_total) || 0;
     const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
-    const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
+    // ★★ 1단계(표 기준 누적): 분자 = 작업보드 표의 "채워진 줄"(archiveSuggest.filled — 서버가
+    //   rowNumbering.filledSql 로 센 값 = 작업보드 게이지와 같은 판정). null/부재 = 셀 수 없음 →
+    //   종전(공고 확정)으로 폴백하고 툴팁이 그 사실을 말한다(0 위장·거짓 "표 기준" 표기 금지).
+    // ★ 차이(표 ≠ 공고 확정)는 외부모집·수기 입력·지각 확정 대기 신호 — 툴팁이 병기해 신호를 남긴다.
+    const sug = c.archiveSuggest;
+    const tf = (sug && Number.isFinite(Number(sug.filled))) ? Number(sug.filled) : null;
+    const n = tf != null ? tf : done;
+    const tip = tf != null
+      ? `작업보드 표에 채워진 줄 ${tf}줄 (표 ${Number(sug.total) || 0}줄) · 공고를 거쳐 확정된 건 ${done}명 · 차수·이월 칩은 공고 확정 기준`
+      : '표 기준 집계를 받지 못해 공고 확정 기준으로 표기 중';
+    // ★ 출처는 툴팁이 말한다 — [표] 배지는 제거(사용자 확정 2026-08-20).
+    const totTxt = `<span title="${_esc(tip)}">`
+      + (total > 0 ? `총 <b>${n}</b>/${total}명` : (n ? `누적 <b>${n}</b>명` : '총 <b>0</b>명'))
+      + '</span>';
     /* ★★ 시트 탭 연결 표기는 그리지 않는다 (탈 구글시트 · 사용자 확정 2026-08-19).
        리뷰웹시스템은 무시트라 담당자가 시트 탭을 고를 일이 없고, 공고의 작업보드는
        접수 또는 첫 주문 때 시스템이 확보한다(`campaignWorktable.ensureCampaignWorktable`).
@@ -653,16 +675,23 @@
       ? `<div class="pt-topleft">${popToggle}${arcBadge}${arcSuggestBadge}${hidBadge}${cleanBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
+    /* ★ 주말 미게시(104) — 썸네일에 "재개까지" 카운트다운. 종전에는 이 상태에서 오버레이가 통째로
+       사라져, 금요일에 본 "(토) 다시 오픈"이 토요일엔 아무 표기 없이 없어졌다(사용자 신고 ③).
+       재개일(resumesOn/resumesAt)은 서버가 apply 게이트와 같은 판정으로 계산한 값을 그대로 쓴다. */
+    const weekendUnpublished = c.stateReason === 'weekend_unpublished';
     let overlay = '';
-    if (c.stateReason === 'rest_day' && c.opensAt) {
+    if (weekendUnpublished && c.resumesAt) {
+      const wkLab = _fmtMD(c.resumesOn) ? _fmtMD(c.resumesOn) + ' 재개' : _fmtOpenLabel(c.resumesAt);
+      overlay = `<div class="pt-ovl pre"><span class="ol">주말 미게시</span><span class="ot" data-camp-countdown="${_esc(c.resumesAt)}">--:--:--</span><span class="ol">${_esc(wkLab)}</span></div>`;
+    } else if (c.stateReason === 'rest_day' && c.opensAt) {
       // 휴무일(주말·공휴일·다음 블록 대기) — 다음 진행일까지 카운트다운
-      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenLabel(c.opensAt))} 오픈</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenWhen(c.opensAt))} 오픈</span></div>`;
     } else if (isPre) {
       overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? _esc(_fmtOpenLabel(c.opensAt)) : ''}</span></div>`;
     } else if (isDaily && c.reopensAt) {
       // 오늘 마감 = 썸네일을 덮어 회색으로 낮추고 가운데에 다시 열릴 때까지를 흰 글씨로 센다.
       // ★ 기준은 `reopensAt`(다음 오픈) — `opensAt`은 **오늘의** 오픈 시각이라 이미 지났다(카운트다운 0 고착).
-      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenLabel(c.reopensAt))} 다시 오픈</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenWhen(c.reopensAt))} 다시 오픈</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
@@ -712,7 +741,15 @@
           ? `<span class="pg-hold" onclick="event.stopPropagation();event.preventDefault();CampaignDailyPlan.quickApplyHeld('${_esc(c.id)}')" title="보류된 이월 ${heldN}명 — 누르면 오늘 정원에 반영할지 물어봅니다 (세부 선택은 [📅 인원])">⏸ 보류 ${heldN}</span>`
           : `<span class="pg-hold" title="보류된 이월 ${heldN}명 — 반영은 관리자 화면 [📅 인원]에서">⏸ 보류 ${heldN}</span>`)
         : '';
-      const chips = `${holdTip}${planTip}${carryTip}`;
+      // ★ 표(주문 원장) 기준 총량(2단계) — 서버 payload 가 있을 때만 그린다(없으면 한 글자도
+      //   안 그린다 = 구버전 백엔드·조회 실패에서 "표 기준 적용 중"이라는 거짓 표시 금지).
+      const tq = c.tableQuota;
+      const tqChip = (showChips && tq && tq.wouldClose)
+        ? (tq.mode === 'on'
+          ? `<span class="pg-tq on" title="주문 원장 ${Number(tq.orders) || 0}건이 총모집을 채워 표 기준으로 마감 중입니다. 상태 저장이 아니라 주문이 줄면 자동 재오픈됩니다(게시 토글 무관).">표 기준 마감</span>`
+          : `<span class="pg-tq" title="관측 모드: 표 기준을 켜면 이 공고는 마감됩니다(주문 원장 ${Number(tq.orders) || 0}건 ≥ 총모집). 지금은 표시만 하고 참여는 막지 않습니다.">표 기준이면 마감</span>`)
+        : '';
+      const chips = `${tqChip}${holdTip}${planTip}${carryTip}`;
       if (quota > 0 && !isPre) {
         const confirmedN = Math.max(0, today - holdNow);     // todayCount = 제출확정 + 유효홀드
         // 표기 숫자 = 표 기준(있으면). 게이지 채움·완료 판정도 같은 값을 따라간다(숫자와 색이 어긋나지 않게).
@@ -744,7 +781,6 @@
     }
 
     // 시트 일정(063) 파생 표기: 휴무일이면 다음 진행일, 마감일 경과면 일정 종료
-    const weekendUnpublished = c.stateReason === 'weekend_unpublished';
     const restDay = c.stateReason === 'rest_day';
     const ended = c.stateReason === 'schedule_ended';
     let footer = '';
@@ -755,7 +791,8 @@
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
     else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
     else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;
-    else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈'}</div>`;
+    // ★ '내일'을 문구에 박아 두면 주말 제외·0명 조절 공고에서 거짓이 된다 — reopensAt(서버 판정) 우선.
+    else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.reopensAt ? _esc(_fmtOpenLabel(c.reopensAt)) : (c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈')}</div>`;
     else if (c.state === 'soft_full') footer = `<button type="button" class="pbtn off">잔여 대기 중</button>`;
 
     if (admin) {
@@ -805,7 +842,7 @@
    *
    * 등급 0 지금 참여 가능 / 1 곧 열림·잔여 대기 / 2 오늘 마감(내일 다시 오픈) / 3 완전 종료
    */
-  const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, closed: 3 };
+  const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, weekend_unpublished: 2, closed: 3 };
   function sortByAvailability(list) {
     return (list || [])
       .map((c, i) => ({ c, i, r: _AVAIL_RANK[c && c.state] != null ? _AVAIL_RANK[c.state] : 1 }))

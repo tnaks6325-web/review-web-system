@@ -238,7 +238,7 @@ t('★ 하나은행 은행코드는 문자열로 쓴다(앞 0 유실 방지)', (
 });
 
 t('★ 케이뱅크 은행명은 코드에서 파생한 정식명(리뷰어 원문 아님)', () => {
-  assert.ok(/bankNameByCode\(code\)/.test(_bwKbank),
+  assert.ok(/bankFormLabel\(code\)/.test(_bwKbank),
     "리뷰어 원문('신한')을 그대로 넣으면 양식 형식 검증에서 거부될 수 있다");
 });
 
@@ -440,6 +440,18 @@ t('회차 취소는 확인 + 이중입금 경고를 띄운다', () => {
     const cell = ws.getRow(2).getCell(1);
     assert.strictEqual(cell.value, '045', `은행코드가 ${cell.value} 로 나갔다`);
     assert.strictEqual(cell.numFmt, '@', '은행코드 셀에 텍스트 서식이 없다');
+  });
+
+  /* ★★ 2026-08-21 실측: 케이뱅크 대량이체는 031 대구은행을 `대구은행`·`대구`·`im뱅크`·
+     `IM뱅크` 어느 이름으로도 인식하지 못하고 **코드 `031`** 로만 통과한다. */
+  await ta('★★ 케이뱅크 서식 — 031 대구은행은 이름이 아니라 코드로 나간다', async () => {
+    const ws = await readBack('kbank', await paySvc.buildWorkbook('kbank',
+      [{ bank_code: '031', bank_account: '508-12-345678', amount: 15800, transfer_memo: '망고', account_holder: '김리뷰' },
+       { bank_code: '088', bank_account: '110123456789', amount: 15800, transfer_memo: '망고', account_holder: '박리뷰' }]));
+    assert.strictEqual(ws.getRow(2).getCell(1).value, '031',
+      `대구은행이 '${ws.getRow(2).getCell(1).value}' 로 나갔다 — 케이뱅크가 인식하지 못한다`);
+    assert.strictEqual(ws.getRow(3).getCell(1).value, '신한은행',
+      '나머지 은행까지 코드로 바뀌면 확인되지 않은 형식으로 회차 전체가 거부될 수 있다');
   });
 
   await ta('금액은 숫자 셀로 나간다(은행 양식이 수치를 요구)', async () => {

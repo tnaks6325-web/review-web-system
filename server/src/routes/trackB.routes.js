@@ -363,6 +363,7 @@ router.post('/sheet-sync/gid-backfill', authMiddleware, adminOrMasterMiddleware,
 //   여기 두는 이유는 C/S·설정과 같다: 인트라넷 SSO 토큰(via:'intranet')은 /api/archive/* 에 도달 불가.
 //   ★ 게이트는 원본(authMiddleware)보다 좁힌다(adminOrMaster) — 프록시가 원본보다 넓어지면 안 된다.
 const _archiveRoutes = require('./archive.routes');
+const captureLinkBackfill = require('../services/captureLinkBackfill.service');
 const _archiveRestore = _delegate(_archiveRoutes, 'post', '/restore');
 router.post('/sheet-sync/unarchive', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _archiveRestore(req, res, next));
@@ -1338,6 +1339,29 @@ router.post('/workdesk/revert-batch', authMiddleware, async (req, res, next) => 
     res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
+/* 수동 리뷰제출 사전 확인 — **쓰기 0**.
+   ★ 화면이 캡처를 올리기 **전에** 부른다: 종전에는 업로드 뒤에 거부되어 **드라이브에는 파일이
+     남고 제출만 실패**했다(2026-08-21 실사고 — 재시도마다 같은 줄에 캡처가 쌓였다).
+   ★ 게이트는 실제 제출과 같은 함수를 지난다(사본 0). 그 줄에 **이미 올라온 리뷰 캡처**도 함께
+     돌려줘, 새로 붙여넣지 않고 그것으로 제출을 끝낼 수 있게 한다(쌓인 파일이 곧 근거다).
+   ★ 캡처 조회 실패는 fail-soft — 확인 결과 자체는 나가야 한다(붙여넣기 경로는 살아 있다). */
+router.get('/workdesk/manual-review-precheck', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.query || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, preflight: true, by: _by(req) });
+    let existing = [];
+    if (out.ok && out.rowIndex != null) {
+      try {
+        const map = await svc.reviewImagesForTab({ sheetId, tabName });
+        existing = (map[String(out.rowIndex)] || [])
+          .filter(f => f && f.slot === 'review' && f.fileId)
+          .map(f => ({ fileId: f.fileId, at: f.at || null }));
+      } catch (_) { existing = []; }
+    }
+    res.json({ ...out, existing });
+  } catch (err) { next(err); }
+});
 // 관리자 수동 리뷰제출: 첨부가 기존 리뷰 업로드 원장에 실제로 연결된 경우에만 상태를 확정한다.
 router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
@@ -1347,6 +1371,28 @@ router.post('/workdesk/manual-review-submit', authMiddleware, internalMiddleware
     }
     const out = await svc.manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by: _by(req) });
     res.status(out.ok ? 200 : (out.error === 'already_submitted' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+// 구매일자 달력 편집(무시트 전용) — 그리드 오버레이(표시 전용)와 달리 row_json·원장까지 진짜로 쓴다.
+//   시트 기반 탭은 409(화면은 종전 오버레이 경로 유지). 스코프는 셀 편집과 동일(내부 직원).
+router.post('/workdesk/purchase-date', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, date } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !date) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, date 필수' });
+    const g = await _ensureWorkdeskCellEditScope(req, { sheetId, tabName, field: 'col:구매일자' });
+    if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.setWorkdeskPurchaseDate({ sheetId, tabName, rowId, date, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+// 리뷰제출일 백필(무시트 전용 · adminOrMaster) — 외부모집 사후 등록 건처럼 캡처 원장이 없는 줄의
+//   제출 표시를 명시 날짜로 기록한다(입금일 기록과 같은 성격). 증빙 게이트가 있는 [수동 리뷰제출]과 별개.
+router.post('/workdesk/review-submit-date', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, value } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    const out = await svc.backfillWorkdeskReviewSubmitDate({ sheetId, tabName, rowId, value, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'not_sheetless' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
 router.post('/workdesk/hide', authMiddleware, async (req, res, next) => {
@@ -1640,6 +1686,17 @@ function _delegate(routerRef, method, path) {
   // 마지막 스택 = 실제 핸들러(앞은 authMiddleware 등 — 여기선 우리 게이트를 이미 통과했다)
   return layer.route.stack[layer.route.stack.length - 1].handle;
 }
+/* ── 탭 설정(진행방식) 프록시 — 작업 조건 카드의 [현금영수증] 설정 창구 ────────────────
+   ★★ 새 저장 경로를 만들지 않는다 — `tab_configs.income_type` 의 writer 는 `POST /api/tab/config`
+     한 곳뿐이고, 그 값은 현금영수증 캡처 슬롯 판정(utils/captureSlots)의 규칙 축이다.
+     사본을 두면 "작업보드에서 켰는데 리뷰어 화면엔 칸이 안 생긴다"가 된다.
+   ★ Track B 경로에 두는 이유 = 인트라넷 SSO 토큰(via:'intranet')은 `/api/tab/*` 에 도달할 수 없다.
+   ★ 게이트는 **내부인**(원본은 authMiddleware 만 — 광고주만 좁힌다. 탭 설정은 담당자 업무다). */
+const _tabConfigRoutes = require('./tabconfig.routes');
+const _tabConfigHandler = _delegate(_tabConfigRoutes, 'post', '/config');
+router.post('/tab/config', authMiddleware, internalMiddleware, (req, res, next) =>
+  _tabConfigHandler(req, res, next));
+
 const _orderRoutes = require('./order.routes');
 const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
@@ -1659,6 +1716,23 @@ router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnly
 // 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · 편집 허용명단만 수정).
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _adminEditHandler(req, res, next));
+
+// ── 외부모집 구매양식 수동제출 ──────────────────────────────
+//   원본 `/api/manual-order/*` 는 adminOrMaster 전용인데, 인트라넷 SSO 토큰(via:'intranet')은
+//   authMiddleware 에서 `/api/trackb/*` 밖으로 나갈 수 없어 **작업보드에서 누르면 403**이었다
+//   ("인트라넷 연동 계정은 리뷰웹시스템[3버전](Track B)에서만 사용할 수 있습니다" — 붙여넣은 양식이
+//   서버에 닿지도 못하고 화면엔 '분해 실패'로 보인다). ⭐ 별표·설정 탭과 같은 재기준 누락 계열.
+//   ★ 권한 = 접수·발행과 같은 2단(내부인 열람 · 편집 허용명단만 실행) — 이 창구는 리뷰어 등록·
+//     주문 원장 기록·정원 차감·시트 쓰기를 일으키므로 보는 사람 전부에게 열지 않는다.
+//   ★ 로직 복제 0 — 기존 핸들러를 그대로 태운다(원본 라우트·게이트는 무변경).
+const _moRoutes = require('./manualOrder.routes');
+const _moPreview = _delegate(_moRoutes, 'post', '/preview');
+const _moSubmit = _delegate(_moRoutes, 'post', '/submit');
+
+router.post('/manual-order/preview', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moPreview(req, res, next));
+router.post('/manual-order/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _moSubmit(req, res, next));
 
 // ── 모집공고 ────────────────────────────────────────────────
 //   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.
@@ -2361,6 +2435,91 @@ router.post('/cs/status', authMiddleware, adminOrMasterMiddleware, (req, res, ne
 router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _csHandlers.memo(req, res, next));
 
+/* ── 작업보드 → 리뷰어에게 메시지 (관리자가 문의방을 먼저 연다) ──────────────────────
+   종전에는 **리뷰어가 먼저 문의를 보내야만** 방이 생겼다. 그런데 방을 여는 실행부는
+   이미 있다(`csBridge.postAdminNotice` — 리뷰검수 반려·입금 실패 안내가 쓰는 그 함수).
+   여기서는 **부르는 창구만** 연다: 로직 복제 0 · 마이그레이션 0 · 신규 저장소 0.
+
+   ★ 게이트 = 내부인 전원(광고주 차단, 사용자 확정 2026-08-21). C/S 본문 조회 8경로가
+     master/admin 전용인 것과 다른데, 이건 **보내는 창구**라 담당자가 쓰는 기능이다.
+     ⚠ 그래서 AE 는 보낼 수는 있어도 그 방의 대화는 C/S 탭에서 못 본다 — 화면이 그 사실을 말한다.
+   ★ 대상은 화면이 보낸 번호가 아니라 **서버가 줄에서 다시 도출**한다(`csRecipient` 단일 출처).
+     낡은 화면·조작 요청이 남의 방을 여는 경로를 만들지 않는다. */
+const _csRecipient = require('../services/csRecipient.service');
+const _csBridge = require('../services/csBridge.service');
+const _MSG_MAX = 1000;
+
+function _msgIds(v) {
+  const arr = Array.isArray(v) ? v : String(v || '').split(',');
+  return [...new Set(arr.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+}
+
+// 미리보기 — **쓰기 0건**. 받는 사람이 누구인지 보내기 전에 화면이 말하기 위한 재료.
+router.get('/cs/participant-recipients', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const sheetId = String(req.query.sheetId || '');
+    const tabName = String(req.query.tabName || '');
+    const ids = _msgIds(req.query.ids);
+    if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, ids 가 필요합니다.' });
+    const items = await _csRecipient.resolveRecipients({ sheetId, tabName, participantIds: ids });
+    res.json({ ok: true, items, canOpenThread: _role(req) === 'master' || _role(req) === 'admin' });
+  } catch (e) {
+    if (/42P01|42703/.test(e.code || '')) return res.status(503).json({ ok: false, code: 'not_ready', error: '문의 저장소가 아직 준비되지 않았습니다.' });
+    logger.warn(`[trackB] 수신자 미리보기 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '받는 사람을 확인하지 못했습니다.' });
+  }
+});
+
+// 전송 — 서버가 **그 자리에서 다시 판정**한 뒤 방을 열고 메시지를 남긴다.
+router.post('/cs/notify-participants', authMiddleware, internalMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const sheetId = String(b.sheetId || '');
+    const tabName = String(b.tabName || '');
+    const ids = _msgIds(b.participantIds);
+    const content = String(b.content || '').trim();
+    const expect = (b.expect && typeof b.expect === 'object') ? b.expect : null;
+    if (!sheetId || !tabName || !ids.length) return res.status(400).json({ ok: false, error: 'sheetId, tabName, participantIds 가 필요합니다.' });
+    if (!content) return res.status(400).json({ ok: false, error: '보낼 내용이 비어 있습니다.' });
+    if (content.length > _MSG_MAX) return res.status(400).json({ ok: false, error: `내용은 ${_MSG_MAX}자까지 보낼 수 있습니다.` });
+
+    const items = await _csRecipient.resolveRecipients({ sheetId, tabName, participantIds: ids });
+    const by = (req.admin && req.admin.name) || '관리자';
+    const sent = [], failed = [], merged = [];
+    const seenPhone = new Map();   // 같은 본계정 = 같은 방 → 같은 내용을 두 번 보내지 않는다
+
+    for (const it of items) {
+      if (!it.ok) { failed.push({ participantId: it.participantId, rowName: it.rowName || '', reason: it.reason }); continue; }
+      // ★ 미리보기 이후 그 줄의 주문이 취소·재배정돼 대상이 바뀌었으면 **보내지 않는다**(TOCTOU).
+      if (expect && Object.prototype.hasOwnProperty.call(expect, it.participantId)
+          && String(expect[it.participantId] || '') !== it.phone8) {
+        failed.push({ participantId: it.participantId, rowName: it.rowName || '', reason: '받는 사람이 방금 바뀌었습니다 — 다시 확인해 주세요.' });
+        continue;
+      }
+      const dup = seenPhone.get(it.phone8);
+      if (dup) { merged.push({ participantId: it.participantId, rowName: it.rowName || '', name: it.name, withParticipantId: dup }); continue; }
+      // ★ 실패 사유를 그대로 화면에 올린다 — "보내지 못했습니다" 한 줄로 뭉개면 담당자가 손쓸 수 없다.
+      let why = '';
+      const out = await _csBridge.postAdminNotice({
+        sheetId, tabName, rowIndex: it.seq,
+        reviewerName: it.name || it.rowName, phone8: it.phone8, message: content, by,
+        onError: (e) => { why = (e && (e.message || e.code)) ? `${e.message || ''}${e.code ? ` [${e.code}]` : ''}` : ''; },
+      });
+      if (!out) {
+        failed.push({ participantId: it.participantId, rowName: it.rowName || '',
+          reason: why ? `메시지 전송에 실패했습니다 — ${why}` : '메시지 전송에 실패했습니다.' });
+        continue;
+      }
+      seenPhone.set(it.phone8, it.participantId);
+      sent.push({ participantId: it.participantId, name: it.name, phone8Tail: it.phone8.slice(-4), threadId: out.threadId, isSub: !!it.isSub });
+    }
+    res.json({ ok: sent.length > 0, sent, failed, merged, total: items.length });
+  } catch (e) {
+    logger.warn(`[trackB] 리뷰어 메시지 전송 실패: ${e.message}`);
+    res.status(500).json({ ok: false, error: '메시지 전송에 실패했습니다.' });
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════
    설정 — 리뷰웹시스템[3버전] 상단탭 (내 닉네임 · 회사 사업자번호(제공정보) · 리뷰어 소식·공지)
 
@@ -2934,6 +3093,39 @@ router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, asy
   } catch (err) { next(err); }
 });
 
+/* ═══ 구매 캡처 ↔ 주문 연결 (감사 · 백필) ═══════════════════════════════════════
+   Drive 엔 캡처가 있는데 링크(`capture_file_id`)만 비어 있는 주문을 찾아 이어 붙인다.
+   ★ 리뷰어에게 다시 받을 필요가 없는 건들이다(이미 낸 증빙).
+   ★ 경로가 /api/trackb/* 인 이유 = 인트라넷 SSO 토큰(via:'intranet')은 /api/diag/* 에 도달 불가.
+   ★ 게이트는 원본 감사(/api/diag/no-capture-audit)와 같은 adminOrMaster — 넓히지 않는다
+     (파일명·수취인 등 PII 가 실린다). */
+router.get('/capture-link/audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const r = await captureLinkBackfill.auditCaptureLinks({
+      days: req.query.days, limit: req.query.limit, maxTabs: req.query.maxTabs,
+      tabName: req.query.tabName, sheetId: req.query.sheetId,
+    });
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
+router.post('/capture-link/backfill', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    /* ★ dryRun 기본 · confirm !== true 면 서비스가 쓰기 0건으로 끝낸다(되돌리기 어려운 값이라
+       미리보기 → 사람 확인 2단계). allowLow 는 "이름은 같은데 시각이 먼" 약한 신호까지 여는
+       명시 옵션 — 기본은 닫혀 있다. */
+    const r = await captureLinkBackfill.backfillCaptureLinks({
+      days: b.days, limit: b.limit, maxTabs: b.maxTabs,
+      /* ★ 시범 실행용 탭 좁히기 — 정확일치(서비스가 검증). 미지정이면 전 탭(종전 동작). */
+      tabName: b.tabName, sheetId: b.sheetId,
+      dryRun: b.dryRun !== false, confirm: b.confirm === true, allowLow: b.allowLow === true,
+      by: _by(req),
+    });
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { rebuildLedgers, LedgerError } = require('../services/sheetlessLedger.service');
@@ -2944,6 +3136,33 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
       }));
     } catch (e) {
       if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
+      if (e && (e.code === '42P01' || e.code === '42703')) {
+        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
+      }
+      throw e;
+    }
+  } catch (err) { next(err); }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   작업표 옵션 열 보장 + 선택 옵션 소급 기입 — admin/master 전용 (2026-08-20)
+   ★ 리뷰어가 고른 옵션은 원장에 살아 있는데 작업표에 칸이 없어 기입되지 않던 작업의 복구
+     창구. **미리보기(dryRun 기본) → confirm:true 로 실행**, 쓰기 표면은 장부 헤더 +
+     `row_json` 두 곳뿐이고 기입은 blank-only 다(관리자 작업지시를 덮지 않는다).
+   ══════════════════════════════════════════════════════════════════════════ */
+router.post('/worktable/option-column', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { ensureOptionColumn, OptionColumnError } = require('../services/worktableOptionColumn.service');
+    const b = req.body || {};
+    try {
+      res.json(await ensureOptionColumn({
+        sheetId: b.sheetId, tabName: b.tabName,
+        dryRun: b.confirm !== true,
+        backfill: b.backfill !== false,
+        by: _by(req),
+      }));
+    } catch (e) {
+      if (e instanceof OptionColumnError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
       if (e && (e.code === '42P01' || e.code === '42703')) {
         return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
       }

@@ -293,11 +293,31 @@
   .rvnone span{font-size:11px;color:var(--faint)}
   .rvnone.warn b{color:var(--warn)}
   .rvpopov{position:fixed;inset:0;z-index:240;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(15,35,42,.5)}
-  .rvpop{width:min(1100px,calc(100vw - 56px));height:min(720px,calc(100vh - 56px));background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28);display:grid;grid-template-columns:260px minmax(0,1fr)}
-  .rvplist{border-right:1px solid var(--line);overflow-y:auto;background:var(--card2);padding:12px}.rvplhd{font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
-  .rvplitem{width:100%;display:flex;align-items:center;gap:8px;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:8px 9px;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}.rvplitem:hover{background:var(--card);border-color:var(--line)}.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}.rvplitem span{margin-left:auto;color:var(--faint);font-size:10.5px}
-  .rvpstage{position:relative;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:42px 22px 22px;background:var(--card)}.rvpstage img{max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--line);border-radius:9px;background:var(--card2)}.rvpmeta{position:absolute;left:22px;top:15px;font-size:12px;font-weight:750;color:var(--muted)}.rvpmeta span{font-weight:600;color:var(--faint);margin-left:5px}.rvpclose{position:absolute;right:14px;top:12px;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;z-index:1}.rvpclose:hover{border-color:var(--accent-line);color:var(--accent-deep);background:var(--card2)}
-  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px}.rvpstage{padding:42px 12px 12px}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
+  .rvpop{width:min(1160px,calc(100vw - 56px));height:min(720px,calc(100vh - 56px));background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28);display:grid;grid-template-columns:318px minmax(0,1fr)}
+  .rvplist{border-right:1px solid var(--line);overflow-y:auto;background:var(--card2);padding:12px}.rvplhd{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--faint);letter-spacing:.04em;text-transform:uppercase;margin:3px 4px 9px}
+  /* ★ 목록 = 번호 / 수취인 / 🛒 / 📷 (사용자 확정) — 번호는 **작업보드 표의 「번호」**(seq 아님) */
+  .rvplcols{display:grid;grid-template-columns:38px minmax(0,1fr) 30px 30px;gap:6px;align-items:center;padding:4px 9px;font-size:9.5px;font-weight:800;color:var(--faint)}
+  .rvplcols .c{text-align:center}
+  .rvplitem{width:100%;display:grid;grid-template-columns:38px minmax(0,1fr) 30px 30px;gap:6px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 9px;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}.rvplitem:hover{background:var(--card);border-color:var(--line)}.rvplitem.on{background:var(--card);border-color:var(--accent-line);color:var(--accent-deep);font-weight:750}
+  .rvplitem .no{font-variant-numeric:tabular-nums;font-size:11px;color:var(--faint);font-weight:700}.rvplitem.on .no{color:var(--accent-deep)}
+  .rvplitem .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}
+  .rvplhd .cnt{margin-left:auto;font-weight:800;color:var(--muted)}
+  /* ★★ 무대는 좌우 2분할 — 구매 캡처와 리뷰 이미지를 **동시에** 본다(대조가 이 팝업의 목적) */
+  .rvpstage{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;padding:40px 16px 14px;background:var(--card)}
+  .rvpcols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .rvpc{min-width:0;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--card2);padding:9px}
+  .rvpch{flex:none;font-size:10.5px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:7px}
+  .rvpch .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
+  /* ★ min-height:0 이 없으면 세로로 긴 캡처가 칸을 뚫고 나온다(flex 상습 함정) */
+  .rvpbody{flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;background:var(--card);overflow-y:auto;overflow-x:hidden}
+  .rvpbody img{width:100%;display:block}
+  .rvpempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px dashed var(--line2);border-radius:8px;font-size:11px;color:var(--faint);text-align:center;padding:12px}
+  .rvpempty b{font-size:12px;color:var(--muted)}.rvpempty.warn b{color:var(--warn)}
+  .rvppg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:6px;font-size:10.5px;color:var(--muted);font-weight:700}
+  .rvppg button{font:inherit;font-size:12px;line-height:1;padding:3px 9px;border-radius:6px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
+  .rvppg button:disabled{opacity:.35;cursor:default}.rvpmeta{position:absolute;left:22px;top:15px;font-size:12px;font-weight:750;color:var(--muted)}.rvpmeta span{font-weight:600;color:var(--faint);margin-left:5px}.rvpclose{position:absolute;right:14px;top:12px;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;z-index:1}.rvpclose:hover{border-color:var(--accent-line);color:var(--accent-deep);background:var(--card2)}
+  @media(max-width:760px){.rvpopov{padding:14px}.rvpop{width:calc(100vw - 28px);height:calc(100vh - 28px);grid-template-columns:1fr;grid-template-rows:150px minmax(0,1fr)}.rvplist{border-right:0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow:auto;padding:10px}.rvplhd,.rvplcols{display:none}.rvplitem{width:auto;min-width:max-content;padding:7px 9px;display:flex;gap:7px}.rvpstage{padding:42px 12px 12px}.rvpcols{grid-template-columns:1fr;grid-template-rows:1fr 1fr}.rvpmeta{left:12px}.rvpclose{right:10px;top:8px}}
   .sheetgrid tbody tr.rvon>td{background:var(--accent-soft)}
   .sheetgrid tbody tr.rvon>td.gfz{background:var(--accent-soft)}
   /* 사이드바 그룹(진행 중 / 완료) 구분 */
@@ -809,7 +829,6 @@
   .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
   .modalbd{overflow:auto;padding:12px 16px}
-  .mrform{display:grid;gap:14px}.mrnotice{padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line));border-radius:9px;background:var(--accent-soft);font-size:12px;line-height:1.55}.mrfiles{display:grid;gap:7px;padding:12px;border:1px dashed color-mix(in srgb,var(--accent) 48%,var(--line));border-radius:9px;background:var(--card2)}.mrfile{display:flex;align-items:center;gap:8px;font-size:12px}.mrfile b{font-weight:650}.mrfile small{color:var(--faint)}.mrerr{min-height:18px;color:var(--bad);font-size:12px}.mrfoot{display:flex;justify-content:flex-end;gap:8px;padding-top:2px}
   /* ── 리뷰어 비정상 로그 표(컬럼 표기) — 한 줄 문장 대신 항목별 칸으로 ── */
   .lgwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
   table.lgtable{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:940px}
@@ -1617,9 +1636,29 @@
   .cnna{color:var(--faint);font-weight:600}
   .cndwarn{margin-left:auto;text-transform:none;letter-spacing:0;font-size:10px;font-weight:700;
            background:var(--warn-soft);color:var(--warn);border-radius:999px;padding:0 7px}
-  .yn{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;border-radius:999px;padding:0 7px;line-height:16px}
-  .yn.y{background:var(--safe-soft);color:var(--safe)} .yn.n{background:var(--card2);color:var(--faint)}
-  .yn.b{background:var(--accent-soft);color:var(--accent-deep)}
+  /* ★ 값이 있는 항목은 배지 없이 검은 글씨(사용자 확정 2026-08-20) — 배지는 **미설정에만** 남겨
+     눈이 "손봐야 하는 칸"으로 가게 한다. 종전 .yn(허용/해당없음/포토) 배지는 폐기. */
+  .cndset{font:inherit;font-size:10.5px;font-weight:800;line-height:16px;padding:0 8px;border-radius:999px;
+          border:1px solid var(--warn-soft);background:var(--warn-soft);color:var(--warn);cursor:pointer}
+  .cndset:hover{border-color:var(--warn);}
+  .cndset.off{background:var(--card2);color:var(--faint);border-color:transparent;cursor:default}
+  /* 값이 있는 항목 — 검은 글씨 그대로, 창구가 있을 때만 점선 밑줄 */
+  .cndval{font:inherit;font-size:11.5px;font-weight:700;color:var(--ink);background:none;border:0;padding:0;
+          cursor:pointer;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+          text-decoration:underline dotted var(--line2);text-underline-offset:3px}
+  .cndval:hover{text-decoration-color:var(--accent)}
+  /* 현금영수증 설정 팝업 */
+  .cndlb{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:2px 0 5px}
+  .cndchips{display:flex;gap:6px;margin-top:7px}
+  .cndchips .wbl-b{font-size:11px;padding:3px 10px}
+  .cndpv{margin-top:10px;font-size:12px;font-weight:700;border-radius:8px;padding:8px 10px}
+  .cndpv.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .cndpv.off{background:var(--card2);color:var(--muted)}
+  .cndnote{margin-top:9px;font-size:11.5px;color:var(--muted);line-height:1.5}
+  .cndwarnbox{background:var(--warn-soft);border:1px solid #f3e2c4;border-radius:9px;padding:9px 11px;
+              font-size:11.5px;color:var(--ink);margin-bottom:11px;line-height:1.5}
+  /* 리뷰타입 칩 선택 표시(미니 팝업) */
+  #cndRtChips .wbl-b.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   /* 발주 줄 — 전폭 띠(.wobar) 폐기, 카드 맨 아래 한 줄 */
   .tp3wo.lk{margin-top:auto;font-size:10.5px;color:var(--muted)}
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
@@ -1642,6 +1681,23 @@
      행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
   .tp3grid.c3 .rvpane{position:relative;overflow:hidden;padding:0}
   .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:11px 12px}
+  /* ── 접기/펼치기(시안 v2) — 머리줄 클릭 = 세 박스 일괄. 접히면 머리줄만 남는다.
+     ★ min-height 해제·rvfill static 전환이 한 벌 — 하나만 빠지면 접혀도 높이가 안 줄거나
+       미리보기만 껍데기 높이로 남아 하단선이 어긋난다. */
+  .tp3h{cursor:pointer;user-select:none;border-radius:7px}
+  .tp3h:hover{background:var(--chip,#f5f8fc)}
+  .tp3h .tp3hint{opacity:0;transition:opacity .15s;font-weight:600;letter-spacing:0;text-transform:none;font-size:10px;color:var(--faint);margin-left:auto}
+  .rvhd .tp3hint{margin-left:8px}   /* rvsub 가 이미 auto 마진이라 겹치지 않게 */
+  .tp3h:hover .tp3hint{opacity:1}
+  .tp3h .tp3chev{color:var(--faint);font-size:11px;transition:transform .18s;margin-left:4px}
+  .tp3grid.c3.fold .tp3chev{transform:rotate(-90deg)}
+  .tp3grid.c3.fold .tp3col,.tp3grid.c3.fold .rvpane{min-height:0}
+  .tp3grid.c3.fold .tp3col > :not(.tp3t){display:none}
+  .tp3grid.c3.fold .tp3col .tp3t{margin-bottom:0}
+  .tp3grid.c3.fold .rvpane .rvfill{position:static;padding:8px 12px}
+  .tp3grid.c3.fold .rvfill > :not(.rvhd){display:none}
+  .tp3grid.c3.fold .rvfill .rvhd{margin-bottom:0}
+  .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
              border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px 8px 6px}
   .rv2 .rv2h{font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:6px;flex:none}
@@ -1665,6 +1721,14 @@
   .rv2 .rvempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
                 border:1px dashed var(--line2);border-radius:8px;font-size:10.5px;color:var(--faint);text-align:center;padding:10px}
   .rv2 .rvempty b{font-size:11.5px;color:var(--muted)} .rv2 .rvempty.warn b{color:var(--warn)}
+  /* ★ 제출현황 — 제목 바로 아래. 분모는 상단 참여자 게이지와 **같은 값**(`_rvFilledOf`). */
+  .rvstat{flex:none;display:flex;gap:7px;margin-top:7px}
+  .rvstat .s{flex:1;min-width:0;display:flex;align-items:center;gap:6px;background:var(--card2);
+             border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+  .rvstat .s .ic{font-size:12px;flex:none} .rvstat .s .lb{font-size:10px;color:var(--faint);font-weight:700;flex:none}
+  .rvstat .s .nm{margin-left:auto;font-size:11.5px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+  .rvstat .s .nm small{font-weight:600;color:var(--faint)}
+  .rvstat .s.unk .nm{color:var(--faint)}
   .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
   /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
   /* 헤더 클릭 필터: ▾ 아이콘 제거, 컬럼명 자체가 트리거. 호버=깔때기 힌트(절대배치=폭 무증가) · 필터중=밑줄+색 · 정렬중=화살표 */
@@ -1709,6 +1773,48 @@
   .gcmrow:hover{background:var(--card2)}
   .gcmrow.danger{color:var(--bad)} .gcmrow.danger:hover{background:var(--bad-soft)}
   .gcmrow.dim{opacity:.4;cursor:not-allowed} .gcmrow.dim:hover{background:none}
+  /* 구매일자 미니달력 — body 직속 오버레이, var 폴백(테마 없는 화면 대비) */
+  #wdDatePick{position:fixed;inset:0;background:transparent;z-index:1200}
+  #wdDatePick .wdp-box{position:fixed;background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 10px 32px rgba(15,23,42,.24);padding:12px;width:264px;box-sizing:border-box}
+  #wdDatePick .wdp-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:13.5px}
+  #wdDatePick .wdp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  #wdDatePick .wdp-w{font-size:11px;color:var(--faint,#94a3b8);text-align:center;padding:3px 0}
+  #wdDatePick .wdp-d{border:0;background:none;border-radius:7px;font-size:12.5px;padding:6px 0;text-align:center;cursor:pointer;color:var(--t1,#0f172a);font-family:inherit;box-sizing:border-box}
+  #wdDatePick .wdp-d:hover{background:var(--card2,#f1f5f9)}
+  #wdDatePick .wdp-blank{cursor:default}
+  #wdDatePick .wdp-d.sun,#wdDatePick .wdp-w.sun{color:#dc2626}
+  #wdDatePick .wdp-d.sat,#wdDatePick .wdp-w.sat{color:#2563eb}
+  #wdDatePick .wdp-d.today{outline:1px dashed var(--faint,#94a3b8);outline-offset:-1px}
+  #wdDatePick .wdp-d.cur{background:#2563eb;color:#fff}
+  #wdDatePick .wdp-ft{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:11.5px;color:var(--faint,#64748b)}
+  /* 관리자 수동 리뷰제출 인라인 팝오버 — 셀 옆에 붙는다(중앙 모달 아님) · 붙여넣기 전용 */
+  #wdRevPop{position:fixed;inset:0;background:transparent;z-index:1210}
+  #wdRevPop .wrp-box{position:fixed;background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:12px;box-shadow:0 10px 32px rgba(15,23,42,.24);padding:11px;width:320px;box-sizing:border-box;outline:none}
+  #wdRevPop .wrp-hd{display:flex;align-items:baseline;gap:7px;margin-bottom:8px;font-size:13px}
+  #wdRevPop .wrp-who{font-size:11.5px;color:var(--faint,#64748b);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #wdRevPop .wrp-drop{border:1.5px dashed var(--line,#cbd5e1);border-radius:10px;background:var(--card2,#f8fafc);padding:14px 10px;text-align:center;min-height:86px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:4px}
+  #wdRevPop .wrp-drop.over{border-color:#2563eb;background:#eff6ff}
+  #wdRevPop .wrp-drop.has{padding:9px;min-height:0;text-align:left}
+  #wdRevPop .wrp-ico{font-size:20px;line-height:1}
+  #wdRevPop .wrp-msg{font-size:12.5px;color:var(--t1,#0f172a)}
+  #wdRevPop .wrp-sub{font-size:11px;color:var(--faint,#94a3b8)}
+  #wdRevPop .wrp-ths{display:flex;flex-wrap:wrap;gap:6px}
+  #wdRevPop .wrp-th{position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;border:1px solid var(--line,#e2e8f0);background:#fff}
+  #wdRevPop .wrp-th img{width:100%;height:100%;object-fit:cover;display:block}
+  #wdRevPop .wrp-x{position:absolute;top:2px;right:2px;width:17px;height:17px;line-height:15px;padding:0;border:0;border-radius:50%;background:rgba(15,23,42,.62);color:#fff;font-size:10px;cursor:pointer}
+  #wdRevPop .wrp-cnt{margin-top:6px;font-size:11px;color:var(--faint,#94a3b8)}
+  #wdRevPop .wrp-err{margin-top:7px;font-size:11.5px;color:var(--bad,#dc2626);line-height:1.45}
+  #wdRevPop .wrp-ft{display:flex;align-items:center;gap:6px;margin-top:9px}
+  #wdRevPop .wrp-note{flex:1;font-size:10.5px;color:var(--faint,#94a3b8);line-height:1.35}
+  #wdRevPop .wrp-alt{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line,#e2e8f0);font-size:11px;color:var(--faint,#64748b);display:flex;align-items:center;gap:5px}
+  #wdRevPop .wrp-alt input{font:inherit;font-size:11px;padding:2px 4px;border:1px solid var(--line,#e2e8f0);border-radius:6px;background:var(--card,#fff);color:var(--t1,#0f172a)}
+  #wdRevPop .wrp-pre{margin-bottom:7px;font-size:11.5px;color:var(--faint,#94a3b8)}
+  #wdRevPop .wrp-block{margin-bottom:8px;padding:8px 10px;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;border-radius:9px;font-size:11.5px;line-height:1.5}
+  #wdRevPop .wrp-exist{margin-bottom:9px;padding:9px;border:1px solid var(--line,#e2e8f0);border-radius:10px;background:var(--card2,#f8fafc)}
+  #wdRevPop .wrp-exhd{font-size:11.5px;color:var(--t1,#0f172a);margin-bottom:6px}
+  #wdRevPop .wrp-exhd small{color:var(--faint,#94a3b8)}
+  #wdRevPop .wrp-exgo{width:100%;margin-top:8px}
+  #wdRevPop .wrp-exnote{margin-top:5px;font-size:10.5px;color:var(--faint,#94a3b8);line-height:1.4}
   .gcmrow .i{width:16px;text-align:center}
   .gcmdiv{height:1px;background:var(--line);margin:5px 4px}
   .gcmsw{display:flex;align-items:center;gap:5px;padding:3px 7px 5px}
@@ -1853,6 +1959,9 @@
 .bnnm:hover{color:#1B4F9C;border-color:#1B4F9C}
 .bnnm .pen{font-size:10px;color:var(--t3,#8B94A1);margin-left:4px}
 .bnbase{font-size:11px;color:var(--t3,#8B94A1);display:block;margin-top:2px}
+/* ★ 이름이 아니라 코드가 서식에 나가는 기관(케이뱅크가 이름을 인식 못 함) — 화면이 그 사실을 말한다 */
+.bnbase.codeonly{color:var(--warn,#B45309)}
+.bnbase.codeonly b{font-weight:700}
 .bnkw{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
 .bnkwchip{display:inline-flex;align-items:center;gap:4px;padding:3px 5px 3px 9px;font-size:12px;border-radius:999px;
   border:1px solid var(--line,#D8DDE5);background:#F7F8FA;color:var(--t1,#1B1F24)}
@@ -2153,6 +2262,29 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   border-bottom:0;box-shadow:inset 0 -1px 0 var(--border,#e5e7eb)}
 #rnOv .rn-tools{display:flex;gap:6px;align-items:center;margin:8px 0 2px}
 #rnOv .rn-tools input{flex:1;min-width:0;height:28px;padding:0 9px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card,#fff);color:var(--ink,#111827);box-sizing:border-box}
+/* 💬 리뷰어에게 메시지 — 받는 사람 목록이 다건이면 길어지므로 본문만 스크롤한다.
+   ★ `min-height:0` 이 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다(레포 상습 함정). */
+#rmOv .wbl-dlg{width:min(520px,100%);max-height:86vh;display:flex;flex-direction:column}
+#rmOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#rmOv .rmto{background:var(--info-soft,#eff6ff);border:1px solid var(--info-line,#bfdbfe);border-radius:9px;padding:8px 11px;font-size:11.5px}
+/* ★★ 한 줄에 이름·번호·사유를 flex 로 늘어놓으면 좁은 폭에서 사유가 **세로로 한 글자씩** 접힌다
+   (실측 신고 2026-08-21). 이름+번호만 한 줄로 묶고 사유는 **아랫줄 블록**으로 내린다. */
+#rmOv .rmitem{padding:5px 0;font-size:11.5px}
+#rmOv .rmitem + .rmitem{border-top:1px solid rgba(15,23,42,.07)}
+#rmOv .rmwho{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;min-width:0}
+#rmOv .rmwho b{font-size:12px;font-weight:800;word-break:keep-all}
+#rmOv .rmwho .rmnum{font-size:11px;color:var(--muted,#6b7280);font-variant-numeric:tabular-nums;white-space:nowrap}
+#rmOv .rmwho .rmtag{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;white-space:nowrap;
+  background:var(--warn-soft,#fdf6ec);color:var(--warn,#b45309)}
+#rmOv .rmitem .rmwhy{display:block;margin-top:2px;color:var(--muted,#6b7280);font-size:10.5px;
+  line-height:1.55;word-break:keep-all;overflow-wrap:anywhere}
+#rmOv .rmbad{margin-top:9px;padding:9px 11px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
+#rmOv .rmwarn{margin-top:9px;padding:9px 11px;border:1px solid #f0dcb8;background:var(--warn-soft,#fffbeb);border-radius:9px;font-size:11.5px}
+#rmOv textarea{width:100%;box-sizing:border-box;margin-top:10px;min-height:96px;resize:vertical;padding:9px;
+  border:1px solid var(--line,#e5e7eb);border-radius:9px;font-size:12px;font-family:inherit;line-height:1.6;
+  background:var(--card,#fff);color:var(--ink,#111827);outline:none}
+#rmOv .rmsub{margin-top:5px;font-size:10.5px;color:var(--faint,#9ca3af)}
+#rmOv .rmok{margin-top:9px;padding:9px 11px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:9px;color:#166534;font-size:11.5px}
 #hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #ddOv table.wbl-t{font-size:11.5px}
@@ -3619,6 +3751,94 @@ async function wrRun(){
     if (idx >= 0) selTab(idx);
   } catch (e) { _WR.busy = false; _WR.err = '정리 실패: ' + (e.message || ''); _wrRender(); }
 }
+/* ── 🧩 옵션 열 (무시트 작업 전용, 2026-08-20) ────────────────────────────────
+   왜: 리뷰어가 참여할 때 고른 옵션은 원장(`order_submissions.selected_opt_key`)에 살아 있는데,
+   작업표에 **옵션 칸이 없으면** 기입될 곳이 없어 표에도 안 뜨고 조용히 사라졌다.
+   (작업표 열 구성은 작업오더의 옵션만 보고, 공고 옵션은 참조하지 않는다.)
+   ★ 이 창구는 **칸을 만들고 이미 들어온 주문의 선택값을 소급 기입**한다.
+   ★ 미리보기(쓰기 0) → 실행 2단계. 판정·값은 전부 서버가 정한다(프론트 재계산 0).
+   ★ 기입은 blank-only — 관리자가 적어 둔 작업지시('텍스트'·'포토리뷰')는 덮지 않는다. */
+let _OC = null;
+function _ocCan(){
+  return !!(STATE.cur && STATE.cur.sheetless === true
+    && (STATE.role === 'master' || STATE.role === 'admin'));   // 서버 게이트(adminOrMaster)와 1:1
+}
+function closeOptColModal(){ const o = document.getElementById('ocOv'); if (o) o.remove(); _OC = null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if (!window._ocKeyBound) {
+  window._ocKeyBound = true;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('ocOv')) closeOptColModal(); });
+}
+function openOptColModal(){
+  if (!_ocCan()) return;
+  const t = STATE.cur;
+  _OC = { sheetId: t.sheetId, tabName: t.tabName, prev: null, err: null, busy: false };
+  const ov = document.createElement('div'); ov.className = 'wbl-ov'; ov.id = 'ocOv';
+  ov.innerHTML = `<div class="wbl-dlg"><div class="wbl-dh">🧩 옵션 열</div>
+    <div class="wbl-db" id="ocBody"></div>
+    <div class="wbl-df" id="ocFoot"></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다
+  _ocRender(); ocPreview();
+}
+function _ocRender(){
+  const b = document.getElementById('ocBody'); if (!b || !_OC) return;
+  const f = document.getElementById('ocFoot');
+  const p = _OC.prev;
+  if (f) f.innerHTML = `<button class="wbl-b" onclick="closeOptColModal()">닫기</button>
+      <button class="wbl-b" onclick="ocPreview()">미리보기</button>
+      <button class="wbl-b dark" id="ocGo" disabled onclick="ocRun()">🧩 옵션 열 만들기 · 소급 기입</button>`;
+  b.innerHTML = `<b>${esc(_OC.tabName || '')}</b>
+    <div class="wbl-facts">표에 <b>옵션</b> 칸을 만들고, 리뷰어가 참여할 때 고른 옵션을 <b>이미 들어온 주문에도 소급 기입</b>합니다.<br>
+      값이 이미 적혀 있는 칸은 덮지 않습니다(관리자 작업지시 보호). 구글시트·주문 기록·정원·리뷰·입금 기록은 건드리지 않습니다.</div>
+    ${p ? `<div class="wbl-facts">
+        ${p.alreadyHadColumn ? '옵션 칸은 <b>이미 있습니다</b>.' : `옵션 칸 <b>「${esc(p.headerName)}」</b>을 새로 만듭니다.`}
+        · 소급 기입 <b>${p.backfillCount}줄</b>
+        ${p.skippedAlreadyFilled ? ` · 이미 값이 있어 건너뜀 ${p.skippedAlreadyFilled}줄` : ''}
+        ${p.skippedNoOrderOption ? ` · 고른 옵션 기록이 없는 줄 ${p.skippedNoOrderOption}줄` : ''}
+        ${p.skippedNotAnOption ? ` · <b style="color:var(--danger,#c22f2f)">이 공고의 옵션이 아니라 건너뛴 줄 ${p.skippedNotAnOption}줄</b>` : ''}</div>
+      ${(p.liveOptionKeys && p.liveOptionKeys.length) ? `<div class="wbl-facts" style="color:var(--faint,#94a3b8)">이 공고의 옵션: ${p.liveOptionKeys.map(k => esc(String(k))).join(' · ')}<br>표에는 <b>이 목록에 있는 값만</b> 적습니다(주문 원장에 남은 다른 값은 건너뜁니다).</div>` : ''}
+      ${(p.rows && p.rows.length) ? `<table class="wbl-wrt"><thead><tr><th>줄</th><th>기입할 옵션</th></tr></thead><tbody>
+        ${p.rows.map(x => `<tr><td>${x.seq}</td><td><b>${esc(String(x.optKey))}</b></td></tr>`).join('')}
+        </tbody></table>${p.rowsTruncated ? `<div class="wbl-facts">…외 ${p.rowsTruncated}줄</div>` : ''}` : ''}
+      ${(!p.headerAdded && !p.backfillCount) ? '<div class="wbl-facts">이미 정리된 상태입니다 — 바꿀 것이 없습니다.</div>' : ''}` : ''}
+    ${_OC.err ? `<div class="wbl-warn">${esc(_OC.err)}</div>` : ''}`;
+  const go = document.getElementById('ocGo');
+  if (go) go.disabled = !(p && (p.headerAdded || p.backfillCount > 0)) || _OC.busy;
+}
+async function ocPreview(){
+  if (!_OC || _OC.busy) return;
+  _OC.busy = true; _OC.err = null; _ocRender();
+  try {
+    _OC.prev = await api('/api/trackb/worktable/option-column', {
+      method: 'POST', body: JSON.stringify({ sheetId: _OC.sheetId, tabName: _OC.tabName }) });
+    if (_OC.prev && _OC.prev.ok === false) { _OC.err = _OC.prev.error || '미리보기에 실패했습니다.'; _OC.prev = null; }
+  } catch (e) { _OC.err = (e && e.message) || '미리보기에 실패했습니다.'; _OC.prev = null; }
+  _OC.busy = false; _ocRender();
+}
+async function ocRun(){
+  if (!_OC || _OC.busy || !_OC.prev) return;
+  const p = _OC.prev;
+  const msg = `${_OC.tabName}\n\n`
+    + (p.headerAdded ? `· 표에 「${p.headerName}」 칸을 만듭니다\n` : '')
+    + (p.backfillCount ? `· 이미 들어온 주문 ${p.backfillCount}줄에 고른 옵션을 적습니다(빈 칸만)\n` : '')
+    + '\n실행할까요?';
+  if (!confirm(msg)) return;
+  _OC.busy = true; _OC.err = null; _ocRender();
+  try {
+    const r = await api('/api/trackb/worktable/option-column', {
+      method: 'POST', body: JSON.stringify({ sheetId: _OC.sheetId, tabName: _OC.tabName, confirm: true }) });
+    if (r && r.ok === false) throw new Error(r.error || '실행에 실패했습니다.');
+    if (r && r.rebuildError) toast('열은 만들었지만 장부 재생성에 실패했습니다 — [⋯] → 작업표 재구성을 실행하세요.');
+    else toast(`옵션 열 정리 완료 — ${r.headerAdded ? '칸 생성 · ' : ''}소급 ${r.backfillCount || 0}줄`);
+    closeOptColModal();
+    await reloadWorkdesk().catch(() => {});
+  } catch (e) {
+    if (_OC) { _OC.err = (e && e.message) || '실행에 실패했습니다.'; _OC.busy = false; _ocRender(); }
+    return;
+  }
+  if (_OC) _OC.busy = false;   // 성공 경로는 이미 닫혔다(_OC=null) — 닫힌 뒤 상태를 만지지 않는다
+}
+
 /* ── 🔢 번호 정리 (무시트 작업 전용) ──────────────────────────────────────────
    왜: 준비된 줄을 다 쓰고 나면 주문이 들어올 때 줄이 이어붙는데, 그 줄은 `번호`·`담당자` 가
    영구 빈칸이었다(매퍼가 그 두 칸을 쓰지 않는다). 게다가 뒤늦게 들어온 지난 날짜 주문이
@@ -4708,6 +4928,9 @@ window.CAMPAIGN_DAILY_PLAN_SAVED=function(ev){
    ★ 서버 30초 캐시 때문에 그냥 새로고침하면 방금 발행한 공고가 한동안 안 잡혀
      [＋공고발행]이 그대로 남는다(사용자에겐 "저장이 안 된 것"으로 보인다). */
 window.CAMP_ON_SAVED=function(){
+  /* ★ 작업보드가 열려 있으면 **작업 조건도 다시 읽는다** — 공고 수정 모달에서 고친 값이
+     그 자리에서 반영되지 않으면 "저장했는데 미설정 그대로"로 보인다(저장은 됐는데). */
+  if(document.getElementById('rvPane') && STATE.cur && typeof _cndReload==='function') _cndReload();
   if(!document.getElementById('wblMount')) return;
   api('/api/trackb/tabs?limit=300&stats=1&fresh=1').then(r=>{
     if(r&&r.ok&&Array.isArray(r.tabs)){ _finAbsorb(r); STATE._finStatsAt=Date.now(); _finRenderList(); }
@@ -5462,7 +5685,6 @@ function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
-  const canExternalManualOrder=STATE.role==='master'||STATE.role==='admin';
   const canDeleteOrder=_isInternalRole();
   // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
@@ -5496,7 +5718,7 @@ function renderWorkdesk(wd){
       (canEdit?`<td>${canDeleteOrder&&r.hasOrder?`<button class="rdel" title="선택한 주문 행 삭제 · 총원·금액 반영" onclick="deleteOrderRow('${r.id}')">삭제</button>`:''}${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
       +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
     tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
-      <div id="addbox"></div>${canExternalManualOrder?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}
+      <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>
       ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
   }
   const sot=wd.sourceOfTruth||'sheet';
@@ -5516,7 +5738,7 @@ function renderWorkdesk(wd){
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
-    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
+    ${(isMaster||_wrCanRetire()||_rnCanRenumber()||_ocCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_wrCanRetire()?`<button class="btn" onclick="openRetireModal()" title="이 작업의 표에서 옛 차수 등 안 쓰는 줄을 내린다(검색 명단에서도 빠짐 · 되돌릴 수 있음)">🧹 줄 정리</button>`:''}${_rnCanRenumber()?`<button class="btn" onclick="openRenumberModal()" title="표의 번호를 구매일자 순으로 다시 매긴다(미리보기 후 실행 · 담당자·줄 내용·주문 기록은 그대로)">🔢 번호 정리</button>`:''}${_ocCan()?`<button class="btn" onclick="openOptColModal()" title="표에 옵션 칸을 만들고, 리뷰어가 참여할 때 고른 옵션을 이미 들어온 주문에도 소급 기입한다(미리보기 후 실행 · 값이 있는 칸은 안 덮음)">🧩 옵션 열</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
          [링크 복사]·[모집인원 조절]·마감 안내·[마감]이 창 오른쪽 끝으로 밀려 제목과 멀어진다.
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
@@ -5531,6 +5753,7 @@ function renderWorkdesk(wd){
   if(gridMode) _fitGrid();   // 표폭 = 고정폭 합
   if(!STATE._fitResizeBound){ STATE._fitResizeBound=true; let t=null;
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
+  _emoSyncBtn();   // 외부모집 수동제출 버튼 — 편집 허용명단이 도착하면 그 자리에 채운다(AE 포함)
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
   // 상단 폴더 3버튼 재료(그 탭 한 줄만 — 홈 stats 가 있으면 요청 0).
@@ -5548,7 +5771,35 @@ function renderWorkdesk(wd){
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
 const _RV_SLOT={review:'리뷰 캡처',cash_receipt:'현금영수증'};
 function _rvWho(r){ const rj=(r&&r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{}; return rj['수취인']||rj['수령인']||r&&r.recipient||r&&r.name||''; }
-function _rvPeople(){ return ((STATE.wd&&STATE.wd.roster)||[]).map(r=>({r,files:((STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[]).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url)})).filter(p=>p.files.length); }
+/* ★★ 참여자 목록 = **채워진 줄 전체**(B안, 사용자 확정 2026-08-21) — 구매도 리뷰도 안 낸 사람이
+   `✗ ✗` 로 보여야 "누가 빠졌나"를 이 팝업에서 찾을 수 있다(제출현황 `130/500` 을 본 다음 질문).
+   ★ "채워진 줄" 판정은 **서버가 실어 준 `r.filled`** — 게이지 분자와 같은 호출(`isFilledRow`)이라
+     화면에서 다시 세지 않는다(사본 0). 구버전 백엔드는 그 필드가 없어 **종전 동작(파일 있는 줄만)**.
+   ★ 파일이 있는 줄은 `filled` 와 무관하게 항상 넣는다 — 클릭한 줄이 목록에 없으면 팝업이 안 열린다. */
+function _rvPeople(){
+  return ((STATE.wd&&STATE.wd.roster)||[]).map(r=>({r,files:((STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[]).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url)}))
+    .filter(p=>p.files.length||p.r.filled===true);
+}
+/* ★ 분모 단일 출처 — 상단 참여자 게이지와 **같은 값**. 여기서 따로 세면
+   "게이지는 500 인데 미리보기는 512" 로 갈린다. 구버전 백엔드(필드 부재)는 줄 수로 접는다. */
+function _rvFilledOf(c){ c=c||{}; return (c.filled==null)?(+c.total||0):(+c.filled||0); }
+/* ★ 제출현황 — 몇 줄이 구매 캡처를/리뷰 이미지를 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
+   ★ 조회 실패(rvImgs===null)·분모 미상은 **`?`** 로 둔다(0 으로 꾸미지 않는다). */
+function _rvStatHtml(){
+  const den=_rvFilledOf(STATE.wd&&STATE.wd.counts);
+  let cap=null,rev=null;
+  if(STATE.rvImgs){
+    cap=0; rev=0;
+    for(const r of ((STATE.wd&&STATE.wd.roster)||[])){
+      const f=STATE.rvImgs[String(r.seq)]||[]; if(!f.length) continue;
+      if(_rvKindFiles(f,'cap').length) cap++;
+      if(_rvKindFiles(f,'rev').length) rev++;
+    }
+  }
+  const one=(ic,lb,n)=>`<div class="s${n==null?' unk':''}"><span class="ic">${ic}</span><span class="lb">${lb}</span>`+
+    `<span class="nm">${n==null?'?':n}<small> / ${den||'?'}</small></span></div>`;
+  return `<div class="rvstat">${one('🛒','구매 캡처',cap)}${one('📷','리뷰 이미지',rev)}</div>`;
+}
 async function _rvBoot(t){
   _rvPopClose();
   STATE.rvImgs=null; STATE.rvSel=null;
@@ -5651,7 +5902,7 @@ function _rvStep(kind,delta,n){
   _rvRender();
 }
 function _rvRender2(pane){
-  const hd=`<div class="rvhd">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
+  const hd=`<div class="rvhd tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+_rvStatHtml();
   if(STATE.rvImgs===null&&!STATE.rvSel){ _rvFill(pane, hd+`<div class="rvnone"><b>불러오는 중…</b></div>`); return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`); return; }
@@ -5689,18 +5940,64 @@ function _rvRender2(pane){
    ★ 광고주 뷰어(_rvRender)는 세로 레일이라 종전 그대로 — 이 래퍼는 내부 화면 전용이다. */
 function _rvFill(pane, html){ pane.innerHTML=`<div class="rvfill">${html}</div>`; }
 function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
+/* 팝업의 칸별 넘김 위치. 사람을 바꾸면 초기화한다(다른 사람의 2번째 장으로 튀지 않게). */
+function _rvPopIdx(){ const p=STATE.rvPop; if(!p) return {cap:0,rev:0}; if(!p.i2) p.i2={cap:0,rev:0}; return p.i2; }
 function _rvOpen(rid,fileIndex){
   const people=_rvPeople(), idx=people.findIndex(p=>String(p.r.id)===String(rid)); if(idx<0) return;
-  STATE.rvPop={people,idx,fileIndex:Math.max(0,Math.min(fileIndex||0,people[idx].files.length-1))}; _rvPopRender();
+  /* ★ 누른 그 장이 열려야 한다 — 전역 인덱스를 갈래(구매/리뷰)와 그 안의 순번으로 옮긴다. */
+  const files=people[idx].files, f=files[Math.max(0,Math.min(fileIndex||0,files.length-1))];
+  const i2={cap:0,rev:0};
+  if(f){ const k=(f.slot==='order_capture')?'cap':'rev';
+         i2[k]=Math.max(0,_rvKindFiles(files,k).findIndex(x=>x.fileId===f.fileId)); }
+  STATE.rvPop={people,idx,i2}; _rvPopRender();
 }
-function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.fileIndex=0; _rvPopRender(); }
-function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.fileIndex=0; _rvPopRender(); }
+function _rvPopPick(idx){ const p=STATE.rvPop; if(!p||!p.people[idx]) return; p.idx=idx; p.i2={cap:0,rev:0}; _rvPopRender(); }
+function _rvPopStep(delta){ const p=STATE.rvPop; if(!p||!p.people.length) return; p.idx=(p.idx+delta+p.people.length)%p.people.length; p.i2={cap:0,rev:0}; _rvPopRender(); }
+/* 칸 안에서 장 넘김 — ★ 끝에서 순환하지 않는다(어디까지 봤는지 잃는다). */
+function _rvPopStep2(kind,delta,n){ const i2=_rvPopIdx(); i2[kind]=Math.max(0,Math.min(n-1,(i2[kind]||0)+delta)); _rvPopRender(); }
 function _rvPopClose(){ STATE.rvPop=null; const ov=document.getElementById('rvpop'); if(ov) ov.remove(); }
+/* ★★ 무대 한 칸 — 갈래 판정은 `_rvKindFiles` 단일 출처(패널 `_rvRender2` 와 같은 함수).
+   사본을 두면 "패널은 1장인데 팝업은 0장" 으로 갈린다. */
+const _RV_POP_COL={cap:['🛒','구매 캡처','미제출','아직 구매 캡처가 제출되지 않았습니다.'],
+                   rev:['📷','리뷰 이미지','리뷰 미제출','아직 리뷰 이미지가 제출되지 않았습니다.']};
+function _rvPopCol(kind,files){
+  const m=_RV_POP_COL[kind], list=_rvKindFiles(files,kind), n=list.length, i2=_rvPopIdx();
+  const i=Math.min(i2[kind]||0,Math.max(0,n-1)); i2[kind]=i;
+  const body=n
+    ? `<div class="rvpbody"><img src="${esc(list[i].url)}" alt="${esc(m[1])}"></div>`+
+      `<div class="rvppg"${n>1?'':' style="visibility:hidden"'}>`+
+        `<button type="button"${i===0?' disabled':''} onclick="_rvPopStep2('${kind}',-1,${n})">‹</button>`+
+        `<span>${i+1} / ${n}</span>`+
+        `<button type="button"${i===n-1?' disabled':''} onclick="_rvPopStep2('${kind}',1,${n})">›</button></div>`
+    : `<div class="rvpempty warn"><b>${esc(m[2])}</b><span>${esc(m[3])}</span></div>`;
+  return `<div class="rvpc"><div class="rvpch">${m[0]} ${esc(m[1])}<span class="cnt">${n}</span></div>${body}</div>`;
+}
+/* 목록 한 줄 — ★ 번호는 **작업보드 표의 「번호」**(서버 `boardNo`), `seq`(시트 행 번호)가 아니다.
+   ★ 번호 칸이 비면 추측하지 않고 `—`, 시트 행 번호는 툴팁으로만 남긴다("모른다"와 "없다"를 구분).
+   ★ onclick 은 **인덱스만** — 수취인·번호는 시트발 문자열이라 보간하면 따옴표 하나로 탈출된다. */
+function _rvPopItem(x,i,on){
+  const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length;
+  const no=String(x.r.boardNo==null?'':x.r.boardNo).trim();
+  return `<button type="button" class="rvplitem${on?' on':''}" onclick="_rvPopPick(${i})" title="시트 행 ${esc(x.r.seq)}">`+
+    `<span class="no">${no?esc(no):'—'}</span>`+
+    `<span class="nm">${esc(_rvWho(x.r)||'—')}</span>`+
+    `<span class="mk ${nc?'y':'n'}">${nc?'✓':'✗'}</span>`+
+    `<span class="mk ${nr?'y':'n'}">${nr?'✓':'✗'}</span></button>`;
+}
 function _rvPopRender(){
   const p=STATE.rvPop; if(!p||!p.people.length){ _rvPopClose(); return; }
-  const cur=p.people[p.idx], file=cur.files[p.fileIndex]||cur.files[0], who=_rvWho(cur.r);
+  const cur=p.people[p.idx], who=_rvWho(cur.r);
+  const no=String(cur.r.boardNo==null?'':cur.r.boardNo).trim();
   let ov=document.getElementById('rvpop'); if(!ov){ ov=document.createElement('div'); ov.id='rvpop'; ov.className='rvpopov'; document.body.appendChild(ov); }
-  ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="리뷰 이미지 크게 보기"><aside class="rvplist"><div class="rvplhd">리뷰 작성자 · ${p.people.length}명</div>${p.people.map((x,i)=>`<button type="button" class="rvplitem${i===p.idx?' on':''}" onclick="_rvPopPick(${i})">${esc(_rvWho(x.r)||'—')}<span>#${esc(x.r.seq)}</span></button>`).join('')}</aside><div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button><div class="rvpmeta">${esc(who||'—')}<span>#${esc(cur.r.seq)} · ${p.idx+1}/${p.people.length}</span></div><img src="${esc(file.url)}" alt="${esc(who||'리뷰 작성자')} 리뷰 이미지"></div></section>`;
+  ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="제출물 크게 보기">`+
+    `<aside class="rvplist"><div class="rvplhd">참여자<span class="cnt">${p.people.length}명</span></div>`+
+      `<div class="rvplcols"><span>번호</span><span>수취인</span><span class="c">🛒</span><span class="c">📷</span></div>`+
+      p.people.map((x,i)=>_rvPopItem(x,i,i===p.idx)).join('')+
+    `</aside>`+
+    `<div class="rvpstage"><button type="button" class="rvpclose" aria-label="닫기" onclick="_rvPopClose()">×</button>`+
+      `<div class="rvpmeta">${esc(who||'—')}<span>${no?'번호 '+esc(no):'번호 —'} · ${p.idx+1}/${p.people.length}</span></div>`+
+      `<div class="rvpcols">${_rvPopCol('cap',cur.files)}${_rvPopCol('rev',cur.files)}</div>`+
+    `</div></section>`;
 }
 
 /* ── 시안 B: 상단 3단 — [작업 조건 · 진행 현황 · 정산] 3분할 카드 ──────────────────────
@@ -5709,8 +6006,17 @@ function _rvPopRender(){
    ★ 발주 '미연결' 배너는 ① 작업 조건 카드 안쪽 줄로 흡수한다(전폭 배너 제거).
      ★ 「작업세부 펼치기」 상시 노출은 폐지 — 발주 원문은 작업 조건 카드 [⋯] → [발주 원문 보기] 팝업으로. */
 function summaryStrip(wd,d,m,c){
-  const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
-  const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
+  /* ★★ 게이지 기준 = **채워진 줄**(사용자 확정 2026-08-20) — 줄 수가 아니다.
+     작업표 생성 때 미리 깔아 둔 빈 슬롯까지 세면 6명만 들어온 200줄 작업이
+     `참여자 200/200 · 100%` 로 보인다(신고 건). 판정은 서버 단일 출처(`counts.filled`).
+     ★ 구버전 백엔드(필드 부재)는 `total` 로 접어 **종전 동작 그대로**(0 위장 금지).
+     ★ 제출·입금의 분모도 같은 값이어야 한다 — 분자만 바꾸면 "134/200 인데 참여자는 134" 로 갈린다.
+     ★ 줄 수(준비된 슬롯)는 사라지지 않는다 — 참여자 게이지 툴팁이 말한다(조용한 누락 금지). */
+  const filled=_rvFilledOf(c);
+  const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||filled||0;
+  const pT=target?Math.round(filled/target*100):0, pS=filled?Math.round((c.submitted||0)/filled*100):0, pP=filled?Math.round((c.paid||0)/filled*100):0;
+  const slots=+c.total||0, empty=Math.max(0,slots-filled);
+  const filledTip=(c.filled==null)?'':`채워진 줄 ${filled}명 · 준비된 줄 ${slots}줄${empty?` (빈 슬롯 ${empty}줄)`:''}`;
   const isAdv=STATE.role==='advertiser';
   // 광고주 렌즈: 담당자 표기(내부 실명) 대신 시작일 칸 — 정산 열도 없음(정산 카드가 항상 펼쳐져 있음).
   //   ★ 10항목 조건표(리뷰비·입금명 포함)는 **내부 전용**이라 광고주는 종전 4줄 그대로다.
@@ -5720,7 +6026,7 @@ function summaryStrip(wd,d,m,c){
   const cond=isAdv
     ? `<div class="tp3col"><div class="tp3t">작업 조건</div><dl class="tp3kv">${kv}</dl></div>`
     : _condCardHtml(wd,d,m);
-  const g=(lb,n,den,pc,cls)=>`<div class="tp3g"><span class="lb">${lb}</span>`+
+  const g=(lb,n,den,pc,cls,ti)=>`<div class="tp3g"${ti?` title="${esc(ti)}"`:''}><span class="lb">${lb}</span>`+
     `<span class="nm">${n}<small>/${den}</small></span>`+
     `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
     `<span class="pc">${pc}%</span></div>`;
@@ -5733,15 +6039,15 @@ function summaryStrip(wd,d,m,c){
      갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
   const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
-  const prog=`<div class="tp3col"><div class="tp3t">진행 현황</div>`+
-    gg('참여자',c.total||0,target||(c.total||0),pT)+
-    gg('제출완료',c.submitted||0,c.total||0,pS,'s')+
-    gg('입금완료',c.paid||0,c.total||0,pP)+
+  const prog=`<div class="tp3col"><div class="tp3t${isAdv?'':' tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다'}">진행 현황${isAdv?'':'<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span>'}</div>`+
+    gg('참여자',filled,target||filled,pT,'',filledTip)+
+    gg('제출완료',c.submitted||0,filled,pS,'s')+
+    gg('입금완료',c.paid||0,filled,pP)+
     `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
   if(isAdv) return `<div class="advcondition">${cond}</div><div class="advprogress">${prog}</div>`;
   /* 내부 = 상단 3분할(작업 조건 · 진행 현황+정산 · 제출물 미리보기).
      ★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다 → 상단 한 줄에서 끝낸다. */
-  return `<div class="tp3grid c3">${cond}${prog}<aside class="rvpane" id="rvPane"></aside></div>`;
+  return `<div class="tp3grid c3${_topFolded()?' fold':''}">${cond}${prog}<aside class="rvpane" id="rvPane"></aside></div>`;
 }
 
 /* ══ 작업 조건 10항목(내부 화면) ══════════════════════════════════════════════
@@ -5751,51 +6057,365 @@ function summaryStrip(wd,d,m,c){
      예외는 **구매채널의 URL 판정 하나** — 그 판정의 단일 출처가 공유 모듈
      `work-order-detail.js._woChannelFromUrl` 이라 서버에 사본을 만들지 않았다.
    ★ 서버가 못 주면(구버전 백엔드·조회 실패) 종전 4줄로 떨어지고 사유를 말한다(빈 값 위장 금지). */
+/* ── 상단 세 박스 접기/펼치기(사용자 확정 2026-08-20 시안 v2) ──────────────────
+   ★ 어느 박스의 머리줄을 눌러도 **세 박스가 함께** 접히고 펼쳐진다(개별 접기 없음 —
+     하단선 높이가 항상 일치해야 한다는 확정과 한 몸). 상태는 localStorage(작업 무관 공통).
+   ★ 접힘은 CSS 클래스 토글만 — 재렌더하지 않는다(미리보기 선택·스크롤을 잃지 않게). */
+function _topFolded(){ try{ return localStorage.getItem('wd_top3_fold')==='1'; }catch(_){ return false; } }
+function _topToggle(){
+  const g=document.querySelector('.tp3grid.c3'); if(!g) return;
+  const v=!g.classList.contains('fold');
+  g.classList.toggle('fold',v);
+  try{ if(v) localStorage.setItem('wd_top3_fold','1'); else localStorage.removeItem('wd_top3_fold'); }catch(_){}
+}
 function _condCardHtml(wd,d,m){
   const cd=wd&&wd.condition;
   if(!cd){
     const kv=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],
               ['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
       .map(([k,v])=>`<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join('');
-    return `<div class="tp3col"><div class="tp3t">작업 조건<span class="cndwarn" title="작업 조건 요약을 불러오지 못했습니다 — 아래는 발주 값입니다.">요약 없음</span></div>`+
+    return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건<span class="cndwarn" title="작업 조건 요약을 불러오지 못했습니다 — 아래는 발주 값입니다.">요약 없음</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
       `<dl class="tp3kv">${kv}</dl>${_woUnlinkedRow(wd)}${_woLinkedRow(wd)}</div>`;
   }
-  const na='<span class="cnna">—</span>';
   const n=v=>(v==null?null:Number(v));
-  const cnt=v=>(n(v)==null?na:`${Number(v).toLocaleString()}<span class="u">건</span>`);
+  const won=v=>`${Number(v).toLocaleString()}<span class="u">원</span>`;
+  /* ★★ 값이 있으면 **배지 없이 검은 글씨**(사용자 확정 2026-08-20) — '해당 없음'·'허용'·'포토' 도
+     설정된 값이라 배지로 강조할 이유가 없다. 배지는 **미설정에만** 남겨 눈이 그쪽으로 가게 한다. */
+  /* ★ 값이 있어도 **고칠 수 있어야** 쓸모가 있다 — 모양은 검은 글씨 그대로 두고(요구 ②)
+     창구가 열리는 항목만 점선 밑줄로 누를 수 있음을 알린다. 창구가 없으면 평범한 텍스트. */
+  const val=(html,kind)=>{
+    const g=_cndFixGate(cd,kind);
+    return g.can
+      ? `<dd><button type="button" class="cndval" title="${esc(g.tip)}" onclick="_cndFix('${kind}')">${html}</button></dd>`
+      : `<dd>${html}</dd>`;
+  };
+  /* [미설정] 배지 — 누르면 **그 값의 정식 창구**를 연다(사용자 확정).
+     ★★ 새 저장 경로를 만들지 않는다 — 저장처가 둘이 되면 작업오더·모집공고·입금관리가
+       서로 다른 값을 보게 된다(레포가 반복해서 겪은 사고). 창구가 하나라 동기화가 구조적이다.
+     ★ 열 수 없는 경우(공고·발주 미연결, 권한 없음)는 **비활성 + 사유** — 눌러도 아무 일 없는
+       버튼은 두지 않는다. */
+  const unset=(kind)=>{
+    const g=_cndFixGate(cd,kind);
+    return g.can
+      ? `<dd><button type="button" class="cndset" title="${esc(g.tip)}" onclick="_cndFix('${kind}')">미설정</button></dd>`
+      : `<dd><button type="button" class="cndset off" disabled title="${esc(g.tip)}">미설정</button></dd>`;
+  };
   // 구매채널 — 공고에 명시된 값이 우선, 없으면 상품 URL 호스트로(판정 단일 출처는 공유 모듈)
   let ch=cd.channel||'';
   if(!ch && cd.productUrl && typeof _woChannelFromUrl==='function') ch=_woChannelFromUrl(cd.productUrl)||'';
-  const inflow=cd.inflowType
-    ? (cd.inflowType+(cd.inflowKeyword?(' · '+cd.inflowKeyword):''))
-    : (cd.inflowKeyword||'');
+  /* 유입방식은 **링크유입/가이드유입 둘 중 하나로만**(사용자 확정 2026-08-20 시안 v2) —
+     원문(guide)·키워드 병기는 하지 않는다. 모르는 값은 원문 그대로(둘 중 하나로 강제
+     오표기하지 않는다), 값이 없으면 미설정. */
+  const inflow=(v=>{
+    const t=String(v||'').trim(); if(!t) return '';
+    const l=t.toLowerCase();
+    if(l==='link'||t.startsWith('링크')) return '링크유입';
+    if(l==='guide'||t.startsWith('가이드')) return '가이드유입';
+    return t;
+  })(cd.inflowType);
   const ma=cd.multiAccount;
-  const maHtml=!ma?na:(ma.enabled
-    ? `<span class="yn y">허용</span>${ma.dailyLimit?`<span class="u">하루 ${ma.dailyLimit}건</span>`:'<span class="u">제한 없음</span>'}`
-    : '<span class="yn n">불가</span>');
-  const crHtml=cd.cashReceipt==null?na:(cd.cashReceipt?'<span class="yn y">대상</span>':'<span class="yn n">해당 없음</span>');
   /* ★ 리뷰비 0원은 "미설정"이 아니다 — 이 계정은 상품비만 주는 작업이 많다(2026-08-19 확정).
      근거(feeSource)가 있으면 사람이 정한 0원이고, 없을 때만 미설정으로 말한다. */
-  const feeHtml=cd.feeSource
-    ? `${Number(cd.reviewFee||0).toLocaleString()}<span class="u">원</span>${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`
-    : '<span class="cnna">미설정</span>';
-  const rt=cd.reviewTypeLabel||'';   // ★ 라벨은 서버(utils/reviewType.reviewTypeLabel)가 준 값 — 프론트에 표 사본을 두지 않는다
+  /* ★ 일건수 = **모집공고의 오늘 일건수**(사용자 확정 2026-08-20 시안 v2) — 모집인원조절·이월로
+     언제든 바뀌는 값이라, 정원 판정 단일 출처(`computeCampaignState.dailyQuota`)를 이미 실어 오는
+     `wd.todayProgress.quota` 를 그대로 쓴다(재계산 사본 0). 못 받으면 종전 값(공고→발주)으로 폴백. */
+  const tq=(wd&&wd.todayProgress&&wd.todayProgress.ok!==false&&wd.todayProgress.quota!=null)
+    ? Number(wd.todayProgress.quota) : null;
+  /* ★★ 일건수는 **둘 다** 적는다(사용자 확정 2026-08-21): `발주 기준 10건/일 (공고 설정 오늘 16건)`.
+     왼쪽 = 발주서에 적힌 계약상 하루 건수(변하지 않는 기준선), 괄호 = 모집인원조절·이월이 반영된
+     오늘 실제 정원. 한쪽만 적으면 "계약은 10인데 오늘 왜 16?"을 화면에서 확인할 길이 없다.
+     ★ 없는 쪽은 지어내지 않는다 — 있는 값만 적고, 둘 다 없으면 [미설정]으로 떨어진다. */
+  const odc=n(cd.orderDailyCount);
+  const daily=(()=>{
+    const today=tq!=null?`공고 설정 오늘 ${tq.toLocaleString()}건`:'';
+    if(odc!=null&&odc>0){
+      const base=`발주 기준 ${odc.toLocaleString()}<span class="u">건/일</span>`;
+      return today?`${base} <span class="u" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">(${today})</span>`:base;
+    }
+    if(tq!=null) return `${tq.toLocaleString()}<span class="u">건/일</span> <span class="cndchip" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">공고 기준</span>`;
+    return n(cd.dailyLimit)==null?null:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`;
+  })();
+  /* ★★★ 결제금액 — **`work_orders.pay_amount` 는 1건당이 아니라 결제합계다**
+     (`frontend/docs/prd-order-field-mapping.html`: "일건수/모집건수/**결제합계** → daily_count ·
+      recruit_count · pay_amount"). 실측도 총액이다 — 위프 800건 17,600,000(=22,000×800) ·
+     에셀라이트 60건 1,554,000(=25,900×60). 종전 코드가 그 값을 1건당으로 읽고 **총건수를 또
+     곱해** 60건 작업에 93,240,000원을 찍었다(2026-08-21 신고). **총액에는 어떤 곱셈도 하지 않는다.**
+     ★ 1건당 금액의 출처는 **공유 모듈 `_woFirstProductInfo` 하나**(구조화 옵션 JSON → 상품정보
+       텍스트의 `결제금액 N원`) — 여기서 규칙을 다시 만들면 작업오더 화면·공고 발행 프리필과
+       갈린다(구매채널 URL 판정을 서버에 사본 두지 않은 것과 같은 규율). 숫자 되읽기는 서식 해제일
+       뿐 판정이 아니다. 못 읽으면 **단가를 지어내지 않고**(총액÷건수 금지 — 차수로 총건수가 늘면
+       그 나눗셈이 조용히 틀린다) 총액만 말한다.
+     표기: 옵션 없음 = `상품결제금액 25,900원 / 총 1,554,000원`(단가 없으면 `총 …원`만)
+           옵션 있음 = `블랙 22,000원(500건), 그린 24,000원(300건)` + 아랫줄 총결제금액.
+     ★ 총결제금액은 **작업오더 결제합계가 진실원본**이고, 없을 때만 Σ(옵션 단가×건수)로 계산해
+       그 사실을 툴팁으로 밝힌다(계산값을 오더 값처럼 말하지 않는다). 클릭 창구는 두지 않는다. */
+  const unitPay=(()=>{
+    if(typeof _woFirstProductInfo!=='function') return null;
+    try{
+      const p=_woFirstProductInfo({product_options_json:(d&&d.productOptionsJson)||'',
+                                   product_option:(d&&d.productOption)||'',
+                                   product_url:(d&&d.productUrl)||cd.productUrl||''});
+      const v=Number(String((p&&p.price)||'').replace(/[^0-9]/g,''));
+      return v>0?v:null;
+    }catch(_){ return null; }
+  })();
+  const payTotal=n(cd.payAmount);          // = 작업오더 결제합계(총액). 곱하지 않는다.
+  const opts=Array.isArray(cd.options)?cd.options.filter(o=>o&&o.label):[];
+  let payRows;
+  if(opts.length>=2){
+    const kp=cd.campaignId?'camp':'order';
+    const txt=opts.map(o=>`${esc(o.label)} ${o.pay!=null?won(o.pay):'<span class="cnna">금액 미정</span>'}${o.count>0?`<span class="u">(${Number(o.count).toLocaleString()}건)</span>`:''}`).join(', ');
+    const sum=opts.every(o=>o.pay!=null&&o.count>0)?opts.reduce((sm,o)=>sm+o.pay*o.count,0):null;
+    const totHtml=payTotal!=null
+      ?`<b title="작업오더의 결제합계입니다 — 편집은 작업오더 수정에서 합니다">${won(payTotal)}</b>`
+      :(sum!=null
+        ?`<b title="작업오더에 결제합계가 없어 Σ(옵션 결제금액 × 옵션 건수)로 계산한 값입니다">${won(sum)}</b>`
+        :`<span class="cnna" title="작업오더 결제합계가 없고, 옵션별 금액·인원도 모두 있어야 계산할 수 있습니다">—</span>`);
+    payRows=`<dt>결제금액</dt>${val(txt,kp)}<dt>총결제금액</dt><dd>${totHtml}</dd>`;
+  }else if(payTotal==null&&unitPay==null){
+    payRows=`<dt>결제금액</dt>${unset('order')}`;
+  }else{
+    const g=_cndFixGate(cd,'order');
+    const clk=(html)=>g.can
+      ?`<button type="button" class="cndval" title="${esc(g.tip)}" onclick="_cndFix('order')">${html}</button>`
+      :html;
+    const per=unitPay!=null?`상품결제금액 ${clk(won(unitPay))}`:'';
+    const tot=payTotal!=null
+      ?`${per?' / ':''}총 ${per?`<b title="작업오더의 결제합계입니다">${won(payTotal)}</b>`:clk(won(payTotal))}`
+      :'';
+    payRows=`<dt>결제금액</dt><dd>${per}${tot}</dd>`;
+  }
   const rows=[
-    ['총건수', cnt(cd.recruitTotal)],
-    ['일건수', n(cd.dailyLimit)==null?na:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`],
-    ['구매채널', ch?esc(ch):na],
-    ['유입방식', inflow?esc(inflow):na],
-    ['다계정', maHtml],
-    ['현금영수증', crHtml],
-    ['리뷰비', feeHtml],
-    ['입금명', cd.depositName?esc(cd.depositName):'<span class="cnna">미설정</span>'],
-    ['리뷰타입', rt?`<span class="yn b">${esc(rt)}</span>`:na],
-  ].map(([k,v])=>`<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
-  const prod=cd.productName||d.productOption||m.campaignName||'';
+    /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
+       (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
+    ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
+      (cd.recruitTotalSource==='work_order'?' <span class="cndchip" title="모집공고에 총인원이 없어 발주서의 총건수가 정원으로 적용되고 있습니다.">발주 기준</span>':'')],
+    ['일건수','quota',   daily],
+    ['@pay',null,null],
+    ['구매채널','camp',  ch?esc(ch):null],
+    ['유입방식','order', inflow?esc(inflow):null],
+    ['다계정','camp',    !ma?null:(ma.enabled?`허용${ma.dailyLimit?` <span class="u">하루 ${ma.dailyLimit}건</span>`:' <span class="u">제한 없음</span>'}`:'불가')],
+    ['현금영수증','tab', cd.cashReceipt==null?null:(cd.cashReceipt?'대상':'해당 없음')],
+    ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
+    ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
+    ['리뷰타입','rtype', cd.reviewTypeLabel?esc(cd.reviewTypeLabel):null],
+  ].map(([k,kind,v])=>k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`).join('');
+  // 상품명 앞 [상품/옵션/금액] 라벨 제거(사용자 확정 2026-08-20 시안 v2) — 표시만, 원본 무접촉
+  const prod=String(cd.productName||d.productOption||m.campaignName||'').replace(/^\s*\[상품\/옵션\/금액\]\s*/,'');
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
-  return `<div class="tp3col"><div class="tp3t">작업 조건${many}</div>`+
-    `<div class="cndprod" title="${esc(prod)}">${esc(prod)||na}</div>`+
+  return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건${many}<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
+    `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`+
     `<dl class="cndl">${rows}</dl>${_woUnlinkedRow(wd)}${_woLinkedRow(wd)}</div>`;
+}
+/* [미설정] 창구 — 항목마다 **이미 있는 창구**로 보낸다(새 저장 경로 0).
+   quota  총건수·일건수 → [📅 모집인원 조절](정원 창구 · 차수·이월·날짜별 조절을 아는 유일한 곳)
+   camp   구매채널·다계정·리뷰비·입금명·리뷰타입 → 모집공고 수정 모달
+   order  결제금액·유입방식 → 작업오더 관리자 수정 모달
+   tab    현금영수증 → 탭 설정(캡처 슬롯) — 이 화면엔 창구가 없어 사유만 말한다 */
+/* ★★ 공고가 없어도 막다른 길을 만들지 않는다(사용자 확정 2026-08-20):
+     · 리뷰비·입금명·리뷰타입 = **탭에 저장할 수 있다** — 판정 순서가 전부 "공고 → 탭"이라
+       (resolveReviewFee 128 · 입금관리 통장표시 · resolveReviewType), 나중에 공고를 만들면
+       **공고 값이 자동으로 이긴다**(동기화를 코드로 잇는 게 아니라 판정 규칙이 보장한다).
+     · 구매채널·다계정 = 공고에만 있는 개념(탭 저장소가 없다) → **공고 발행 화면을 연다**
+       (탭·작업오더 프리필). 발행하면 그 값이 이 카드에 반영된다.
+     · 총건수·일건수 = 발주가 있으면 **작업오더 수정**(공고 발행 프리필의 원천 — 나중에 공고를
+       만들면 그 값으로 채워지고, 공고가 생기면 공고 정원이 우선), 없으면 공고 발행으로.
+   ★ 리뷰비·입금명 저장 창구(transfer-setting)는 adminOrMaster — AE 에게는 사유를 말한다. */
+function _cndFixGate(cd,kind){
+  if(!STATE.canEdit) return {can:false,tip:'설정은 담당자만 할 수 있습니다.'};
+  const isAdmin=(STATE.role==='master'||STATE.role==='admin');
+  if(kind==='tab') return {can:true,tip:'진행방식을 고쳐 현금영수증 캡처 칸 여부를 정합니다 — 리뷰어 제출 화면에 바로 반영됩니다.'};
+  if(kind==='order') return cd.workOrderId
+    ? {can:true,tip:'작업오더 수정 창을 엽니다 — 저장하면 이 작업 조건과 인트라넷 보낸오더에 함께 반영됩니다.'}
+    : {can:false,tip:'연결된 작업오더가 없습니다 — 작업오더를 먼저 연결하세요.'};
+  if(kind==='quota'){
+    if(cd.campaignId) return {can:true,tip:'모집인원 조절 창을 엽니다 — 정원은 차수·이월·날짜별 조절과 함께 그곳에서 정합니다.'};
+    if(cd.workOrderId) return {can:true,tip:'작업오더 수정 창을 엽니다(모집 인원·일건수) — 공고를 발행하면 이 값이 프리필되고, 발행 뒤에는 공고 정원이 우선합니다.'};
+    return {can:true,tip:'공고 발행 화면을 엽니다(이 작업 프리필) — 정원은 공고에서 정합니다.'};
+  }
+  if(kind==='fee'||kind==='memo'){
+    if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
+    return isAdmin
+      ? {can:true,tip:'탭 설정에 저장합니다 — 나중에 공고를 발행하면 공고 값이 우선합니다.'}
+      : {can:false,tip:'공고가 없는 작업의 '+(kind==='fee'?'리뷰비':'입금명')+' 저장은 관리자만 할 수 있습니다.'};
+  }
+  if(kind==='rtype'){
+    if(cd.campaignId) return {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'};
+    return {can:true,tip:'탭 설정에 저장합니다(제출 화면·검수에 바로 적용) — 나중에 공고를 발행하면 공고 값이 우선합니다.'};
+  }
+  return cd.campaignId
+    ? {can:true,tip:'모집공고 수정 창을 엽니다 — 저장하면 이 작업 조건과 공고 카드에 함께 반영됩니다.'}
+    : {can:true,tip:'공고 발행 화면을 엽니다(이 작업·작업오더 프리필) — 발행하면 그 값이 이 카드에 반영됩니다.'};
+}
+async function _cndFix(kind){
+  const cd=(STATE.wd&&STATE.wd.condition)||null; if(!cd) return;
+  const g=_cndFixGate(cd,kind); if(!g.can){ _toast(g.tip); return; }
+  if(kind==='tab') return _cndCashModal();
+  if(kind==='quota'){
+    if(cd.campaignId) return openCurrentCampaignDailyPlan();
+    if(cd.workOrderId) return _cndOrderModal(cd);          // 정원 프리필 원천 = 작업오더
+    return _cndPublish(cd);                                 // 발주도 없으면 발행으로
+  }
+  if(kind==='order') return _cndOrderModal(cd);
+  if((kind==='fee'||kind==='memo')&&!cd.campaignId) return _cndTabValueModal(kind,cd);
+  if(kind==='rtype'&&!cd.campaignId) return _cndRtypeModal(cd);
+  if(!cd.campaignId) return _cndPublish(cd);               // 구매채널·다계정 — 공고 발행으로
+  if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
+  await openRecruitModal(String(cd.campaignId));
+}
+/* 작업오더 수정 — 원본 행(snake_case)을 다시 받아 넘긴다. 작업보드 응답의 detail 은 camelCase 라
+   그대로 넘기면 폼이 빈 채로 열린다(그 상태로 저장하면 값이 지워진 것처럼 보인다). */
+async function _cndOrderModal(cd){
+  if(typeof woAdminEditModal!=='function'){ _toast('수정 모달 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
+  const t=STATE.cur; if(!t) return;
+  const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
+  if(!o){ _toast('작업오더를 불러오지 못했습니다. 작업오더 탭에서 수정해 주세요.'); return; }
+  return woAdminEditModal(o,{
+    save: fields=>api('/api/trackb/work-orders/edit',{method:'PUT',body:JSON.stringify({id:o.id,...fields})}),
+    onSaved: ()=>{ _toast('✏ 수정 저장됨'); _cndReload(); }
+  });
+}
+/* ══ 공고 없는 작업의 설정 3종 ══════════════════════════════════════════════════
+   ★★ "동기화"를 코드로 잇지 않는다 — 판정 순서가 전부 **공고 → 탭**이라(리뷰비 resolveReviewFee
+     128 · 입금명 payment.service campMemo→tabMemo · 리뷰타입 resolveReviewType), 지금 탭에 넣은
+     값은 그대로 쓰이다가 **공고를 발행하는 순간 공고 값이 자동으로 이긴다**. 별도 복사·동기화
+     코드를 두면 그 코드가 곧 두 번째 진실이 되어 갈라진다.
+   ★ 저장 창구도 기존 것: 리뷰비·입금명 = 입금관리 보완 API(transfer-setting — campaignId 없이
+     부르면 서버가 탭에 저장한다) / 리뷰타입 = 탭 설정(POST /api/tab/config) 프록시. 신규 경로 0. */
+function _cndTabValueModal(kind,cd){
+  const fee=kind==='fee';
+  const cur=fee?(cd.feeSource?String(cd.reviewFee??''):''):(cd.depositName||'');
+  _cndMini({
+    title: fee?'💰 리뷰비 — 탭 설정':'🏷 입금명 — 탭 설정',
+    body: `<label class="cndlb" for="cndMiniIn">${fee?'리뷰비(원)':'입금명(통장표시 · 8자)'}</label>`+
+      `<input id="cndMiniIn" class="inp" value="${esc(cur)}" ${fee?'inputmode="numeric" placeholder="예: 1500 · 0 = 무상 · 비우면 미설정"':'maxlength="8" placeholder="예: 파우더망고"'}>`+
+      `<div class="cndnote">아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 입금관리·리뷰어 화면이 이 값을 씁니다.<br>나중에 공고를 발행하면 <b>공고에 적은 값이 우선</b>합니다(자동).</div>`,
+    onSave: async ()=>{
+      const t=STATE.cur; const v=String(($('#cndMiniIn')||{}).value||'').trim();
+      if(fee && v!=='' && !/^[\d,]+$/.test(v)){ _toast('리뷰비는 숫자로 입력해 주세요.'); return false; }
+      const body={sheetId:t.sheetId,tabName:t.tabName};
+      if(fee) body.reviewFee=v; else body.memo=v;
+      const r=await api('/api/trackb/payment/transfer-setting',{method:'POST',body:JSON.stringify(body)}).catch(()=>null);
+      if(!r||!r.ok){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return false; }
+      return true;
+    }
+  });
+}
+function _cndRtypeModal(cd){
+  /* 선택지 = 공유 표 RF_REVIEW_TYPE_LABELS(index-recruit.js — 회귀가드가 서버 REVIEW_TYPES 와
+     일치를 고정). ★ 사본을 새로 적지 않는다. ★ '혼합'은 탭 창구에서 제외 — 행별 판정이라
+     저장해도 카드가 계속 — 로 남아 "저장했는데 그대로"가 된다(공고 모달에는 있다). */
+  if(typeof RF_REVIEW_TYPE_LABELS==='undefined'){ _toast('리뷰타입 목록 모듈을 불러오지 못했습니다.'); return; }
+  const opts=RF_REVIEW_TYPE_LABELS.filter(([k])=>k!=='mixed');
+  _cndMini({
+    title:'✅ 리뷰타입 — 탭 설정',
+    body: `<div class="cndchips" id="cndRtChips">${opts.map(([k,l])=>`<button type="button" class="wbl-b" data-v="${esc(l)}" onclick="_cndRtPick(this)">${esc(l)}</button>`).join('')}<button type="button" class="wbl-b" data-v="" onclick="_cndRtPick(this)">비우기</button></div>`+
+      `<div class="cndnote">제출 화면의 캡처 안내와 리뷰검수 판정이 이 값을 봅니다.<br>아직 모집공고가 없어 <b>탭 설정</b>에 저장합니다 — 공고를 발행하면 <b>공고 리뷰타입이 우선</b>합니다(자동).</div>`,
+    onSave: async ()=>{
+      const sel=document.querySelector('#cndRtChips .wbl-b.on');
+      if(!sel){ _toast('리뷰타입을 선택해 주세요.'); return false; }
+      const t=STATE.cur;
+      const r=await api('/api/trackb/tab/config',{method:'POST',
+        body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||'',reviewType:sel.dataset.v})}).catch(()=>null);
+      if(!r||r.error){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return false; }
+      return true;
+    }
+  });
+  // 현재 값 표시
+  const curLb=cd.reviewTypeLabel||'';
+  document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>{ if(b.dataset.v===curLb) b.classList.add('on'); });
+}
+function _cndRtPick(el){ document.querySelectorAll('#cndRtChips .wbl-b').forEach(b=>b.classList.remove('on')); el.classList.add('on'); }
+/* 공고 발행 — 이 작업(탭)·작업오더 프리필로 발행 모달을 연다. 발행하면 CAMP_ON_SAVED 훅이
+   작업 조건을 다시 읽어 그 값이 카드에 반영된다. 발행 권한(편집 허용명단)은 서버가 최종 방어. */
+async function _cndPublish(cd){
+  if(typeof openRecruitModal!=='function'){ _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
+  if(!(await _loadCampPerm())){ _toast('공고 발행은 편집 허용명단 담당자만 할 수 있습니다.'); return; }
+  const t=STATE.cur; if(!t) return;
+  if(cd.workOrderId){
+    const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+    const o=((r&&r.items)||[]).find(x=>String(x.id)===String(cd.workOrderId));
+    if(o && typeof _woCampaignPrefill==='function') return openRecruitModal(null,_woCampaignPrefill(o),o.id);
+  }
+  return openRecruitModal(null,{linked_sheet_id:t.sheetId,linked_tab_name:t.tabName,linked_tab_gid:t.tabGid||''});
+}
+/* 공용 미니 팝업 — 현금영수증 팝업과 같은 계약(body 직속 · 바깥 클릭으로 안 닫힘 · Esc 해제) */
+function _cndMiniClose(){ const o=document.getElementById('cndMiniOv'); if(o) o.remove();
+  if(STATE._cndMiniEsc){ document.removeEventListener('keydown',STATE._cndMiniEsc); STATE._cndMiniEsc=null; } }
+function _cndMini({title,body,onSave}){
+  _cndMiniClose();
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cndMiniOv';
+  ov.innerHTML=`<div class="wbl-dlg" style="max-width:460px"><div class="wbl-dh">${title}</div>`+
+    `<div class="wbl-db">${body}</div>`+
+    `<div class="wbl-df"><button class="wbl-b" onclick="_cndMiniClose()">취소</button>`+
+    `<button class="wbl-b pri" id="cndMiniSave">저장</button></div></div>`;
+  document.body.appendChild(ov);
+  document.getElementById('cndMiniSave').onclick=async ()=>{
+    const ok=await onSave();
+    if(ok){ _cndMiniClose(); _toast('저장됨 — 공고를 발행하면 공고 값이 우선합니다'); _cndReload(); }
+  };
+  STATE._cndMiniEsc=e=>{ if(e.key==='Escape') _cndMiniClose(); };
+  document.addEventListener('keydown',STATE._cndMiniEsc);
+}
+/* ══ 현금영수증 설정 — 진행방식(tab_configs.income_type) 편집 ══════════════════════
+   ★★ 켜기/끄기 둘 다 **진행방식 문자열**을 거친다 — 판정 규칙이 그렇게 돼 있다
+     (utils/captureSlots: 캡처 칸 명시 설정이 최우선 → 없으면 진행방식에 '현영'이 있으면 2칸).
+     그래서 화면이 **체크박스로 문자열을 대신 지어내지 않는다** — 값을 사람이 보고 고치게 하고,
+     그 값이면 결과가 어떻게 되는지를 실시간으로 말한다("고쳤는데 그대로"를 없애는 유일한 방법).
+     예: '사업자현영' 에서 '현영'만 빼면 '사업자'가 남는다 — 그런 판단은 시스템이 할 수 없다.
+   ★ 저장은 기존 창구 하나(POST /api/tab/config {incomeType}) — 새 저장 경로 0.
+   ★ 캡처 칸이 직접 설정된 탭이면 진행방식을 바꿔도 판정이 안 바뀐다 → 그 사실을 먼저 말한다. */
+const _CR_RE=/현영/;
+function _cndCashClose(){ const o=document.getElementById('cndCashOv'); if(o) o.remove();
+  if(STATE._cndCashEsc){ document.removeEventListener('keydown',STATE._cndCashEsc); STATE._cndCashEsc=null; } }
+function _cndCashModal(){
+  const cd=(STATE.wd&&STATE.wd.condition)||{}; const t=STATE.cur; if(!t) return;
+  _cndCashClose();
+  const cur=String(cd.incomeType||'');
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='cndCashOv';
+  // ★ 바깥 클릭으로 닫지 않는다 — 입력해 둔 값을 실수 클릭 한 번에 잃지 않게(Esc·[취소]만).
+  ov.innerHTML=`<div class="wbl-dlg" style="max-width:520px"><div class="wbl-dh">🧾 현금영수증 — 진행방식 설정</div>`+
+    `<div class="wbl-db">`+
+      (cd.slotsPinned?`<div class="cndwarnbox">이 작업은 <b>캡처 칸이 직접 설정</b>돼 있어 진행방식을 바꿔도 현금영수증 칸 여부는 바뀌지 않습니다. 칸 구성은 관리자 대시보드 › 작업 탭 관리에서 고칩니다.</div>`:'')+
+      `<label class="cndlb" for="cndIncome">진행방식</label>`+
+      `<input id="cndIncome" class="inp" value="${esc(cur)}" placeholder="예: 현영 · 사업자현영 (비우면 현금영수증 대상 아님)" oninput="_cndCashPreview()">`+
+      `<div class="cndchips">${['현영','사업자현영',''].map(v=>`<button type="button" class="wbl-b" onclick="_cndCashSet('${esc(v)}')">${v?esc(v):'비우기'}</button>`).join('')}</div>`+
+      `<div id="cndCashPv" class="cndpv"></div>`+
+      `<div class="cndnote">진행방식에 <b>현영</b>이 들어가면 리뷰어 제출 화면에 <b>현금영수증 캡처 칸</b>이 생깁니다(그 칸은 선택 제출 — 완료를 막지 않습니다).</div>`+
+    `</div>`+
+    `<div class="wbl-df"><button class="wbl-b" onclick="_cndCashClose()">취소</button>`+
+    `<button class="wbl-b pri" onclick="_cndCashSave()">저장</button></div></div>`;
+  document.body.appendChild(ov);
+  STATE._cndCashEsc=e=>{ if(e.key==='Escape') _cndCashClose(); };
+  document.addEventListener('keydown',STATE._cndCashEsc);
+  _cndCashPreview();
+}
+function _cndCashSet(v){ const el=document.getElementById('cndIncome'); if(!el) return; el.value=v; _cndCashPreview(); }
+/* 지금 입력값이면 결과가 어떻게 되는지 — 판정 규칙(진행방식에 '현영')을 그대로 보여준다 */
+function _cndCashPreview(){
+  const el=document.getElementById('cndIncome'), pv=document.getElementById('cndCashPv');
+  if(!el||!pv) return;
+  const on=_CR_RE.test(el.value||'');
+  const cd=(STATE.wd&&STATE.wd.condition)||{};
+  pv.className='cndpv '+(on?'on':'off');
+  pv.textContent=cd.slotsPinned
+    ? (on?'이 값은 현금영수증 대상이지만, 캡처 칸 설정이 이겨 화면은 바뀌지 않습니다.':'이 값은 대상이 아니지만, 캡처 칸 설정이 이겨 화면은 바뀌지 않습니다.')
+    : (on?'→ 현금영수증 대상 · 제출 화면에 캡처 칸이 생깁니다':'→ 해당 없음 · 캡처 칸이 없습니다');
+}
+async function _cndCashSave(){
+  const el=document.getElementById('cndIncome'); const t=STATE.cur; if(!el||!t) return;
+  const v=String(el.value||'').trim();
+  const r=await api('/api/trackb/tab/config',{method:'POST',
+    body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||'',incomeType:v})}).catch(()=>null);
+  // ★ 이 API 는 오류도 200 + {error} 로 돌려준다(GAS 호환) — 상태코드만 보고 성공으로 읽지 않는다.
+  if(!r||r.error){ _toast('저장하지 못했습니다'+(r&&r.error?' — '+r.error:'')); return; }
+  _cndCashClose(); _toast('🧾 진행방식 저장됨'); _cndReload();
+}
+/* 저장 뒤 작업 조건을 다시 읽는다 — 값이 어디에 저장됐든 화면이 같은 원장을 다시 본다. */
+function _cndReload(){
+  const i=(STATE.tabs||[]).findIndex(x=>x===STATE.cur);
+  if(i>=0) selTab(i,{nav:true});
 }
 
 /* 발주 연결 줄 — 전폭 띠(.wobar)를 없애고 작업 조건 카드 **맨 아래 한 줄**로(사용자 확정).
@@ -6503,10 +7123,21 @@ function _tpHtml(tp){
 // 시트형 그리드: 왼쪽 고정 = 참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 // `seq`는 서버의 행 앵커로만 유지한다. 무시트 운영 화면에는 과거 구글시트 행번호를 `#` 열로 노출하지 않는다.
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
-const _WD_SUBMIT_HEADERS=new Set(['리뷰제출','리뷰제출여부','리뷰제출완료','제출']);
+const _WD_SUBMIT_HEADERS=new Set(['리뷰','리뷰제출','리뷰제출여부','리뷰제출완료','제출']);
 const _WD_PAID_HEADERS=new Set(['입금','입금여부','입금완료']);
 function _workdeskStatusKind(header){
   const h=String(header||'').trim();
+  if(!h) return '';
+  /* ★★ 판정 단일 출처 = **서버가 준 그 탭의 상태 칸**(`statusCols` = campaign_participants.submit_col/2,
+     columnResolver 가 정한 값). 아래 이름 목록은 그 값을 못 받았을 때(구버전 백엔드·미감지)의 폴백일 뿐이다.
+     ★ 목록만 보던 시절, 헤더가 그냥 `리뷰` 인 탭에서는 **시스템이 그 칸에 제출 시각을 쓰는데 화면만
+       "평범한 칸"으로 보여** 직접 타이핑은 열려 있고 [📎 관리자 수동 리뷰제출] 은 안 뜨는 상태가 됐다
+       (2026-08-21 실측). 이름 목록을 늘려 때우지 말 것 — 탭마다 헤더가 다르다. */
+  const sc=(STATE.wd&&STATE.wd.statusCols)||null;
+  if(sc){
+    if(String(sc.submit||'').trim()===h) return 'review';
+    if(String(sc.paid||'').trim()===h) return 'payment';
+  }
   return _WD_SUBMIT_HEADERS.has(h)?'review':(_WD_PAID_HEADERS.has(h)?'payment':'');
 }
 function _workdeskStatusKindForField(field){ return String(field||'').indexOf('col:')===0?_workdeskStatusKind(String(field).slice(4)):''; }
@@ -6672,7 +7303,7 @@ function buildGrid(wd){
       ${_folBarHtml()}
       <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
     <div class="gswrap"><div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div><div class="gsmap" id="gsMap"></div></div>
-    <div id="addbox"></div>${canOpenExternalManualOrder()?`<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>`:''}`;
+    <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
@@ -7113,11 +7744,108 @@ async function _undoRunGroup(group, t){
   return {ok:ok, superseded:superseded, failed:failed, stale:stale};
 }
 window.WorkdeskUndo=_undoLatestCellGroup;
+/* ── 미니달력 모달 (#wdDatePick · body 직속 — 표는 가로 스크롤 컨테이너라 안에 그리면 잘린다) ──
+   ★ 색은 주말만(일=빨강·토=파랑) — 공휴일 표는 여기 사본을 두지 않는다(틀린 빨간 날 > 빈 표시).
+   ★ 저장 후 무시트 탭은 reloadWorkdesk(재번호로 줄 순서·번호가 함께 바뀐다 — 부분 갱신이면 화면이 거짓말). */
+let _wdDpState=null;
+function _wdDpClose(){ const ov=document.getElementById('wdDatePick'); if(ov)ov.remove(); _wdDpState=null; }
+function _wdDpParse(v){ // 현재 값에서 초기 표시 월 추정(표기 다양 — 실패 시 오늘)
+  const t=String(v==null?'':v).trim();
+  let m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  if(m) return {y:+m[1],mo:+m[2],d:+m[3]};
+  m=/(\d{1,2})\s*\/\s*(\d{1,2})/.exec(t);
+  if(m){ const now=new Date(); return {y:now.getFullYear(),mo:+m[1],d:+m[2]}; }
+  return null;
+}
+function openWdDatePicker(td){
+  if(!td||!td.getAttribute) return;
+  const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field');
+  if(!rowId||!field||field.indexOf('col:')!==0) return;
+  if(!td.classList.contains('gedit')) return;              // 잠긴 칸은 열지 않는다(편집 게이트와 동일)
+  _wdDpClose();
+  const cur=_wdDpParse(td.getAttribute('data-val')||'');
+  const now=new Date();
+  // ★ 인라인 앵커(사용자 확정 2026-08-21): 달력은 화면 중앙이 아니라 **편집하려는 셀에 붙여** 띄운다.
+  //   rect 는 열 때 1회 저장 — 스크롤로 셀이 움직이면 따라가는 대신 닫는다(우클릭 메뉴와 같은 규율).
+  const rect=td.getBoundingClientRect();
+  _wdDpState={rowId, field, td, y:(cur?cur.y:now.getFullYear()), mo:(cur?cur.mo:now.getMonth()+1), sel:cur, busy:false,
+    anchor:{left:rect.left, top:rect.top, bottom:rect.bottom}};
+  const ov=document.createElement('div'); ov.id='wdDatePick';
+  ov.innerHTML='<div class="wdp-box" role="dialog" aria-label="구매일자 선택"></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov) _wdDpClose(); });   // 바깥 클릭 = 취소(입력값 없음 — 보호할 타이핑이 없다)
+  if(!window._wdDpKeyBound){ window._wdDpKeyBound=true;
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('wdDatePick')){ e.stopPropagation(); _wdDpClose(); } }, true);
+    // 표가 스크롤되면 앵커 셀이 움직인다 — 따라가지 못하는 팝오버는 닫는 것이 정직하다(캡처 = 그리드 내부 스크롤도 잡는다).
+    window.addEventListener('scroll',()=>{ if(document.getElementById('wdDatePick')) _wdDpClose(); }, true);
+    window.addEventListener('resize',()=>{ if(document.getElementById('wdDatePick')) _wdDpClose(); });
+  }
+  _wdDpRender();
+}
+/* 앵커 셀 기준 배치 — 기본은 셀 바로 아래·왼쪽 정렬, 화면 밖이면 위/안쪽으로 클램프(우클릭 메뉴와 같은 계산). */
+function _wdDpPlace(){
+  const S=_wdDpState; const box=document.querySelector('#wdDatePick .wdp-box'); if(!S||!box||!S.anchor)return;
+  const w=box.offsetWidth||264, h=box.offsetHeight||320, a=S.anchor;
+  let left=Math.max(8, Math.min(a.left, window.innerWidth-w-10));
+  let top=a.bottom+4;
+  if(top+h>window.innerHeight-8) top=Math.max(8, a.top-h-4);   // 아래 공간 부족 → 셀 위로
+  box.style.left=left+'px'; box.style.top=top+'px';
+}
+function _wdDpNav(d){ const S=_wdDpState; if(!S)return; S.mo+=d; if(S.mo<1){S.mo=12;S.y--;} if(S.mo>12){S.mo=1;S.y++;} _wdDpRender(); }
+function _wdDpRender(){
+  const S=_wdDpState; const box=document.querySelector('#wdDatePick .wdp-box'); if(!S||!box)return;
+  const first=new Date(Date.UTC(S.y,S.mo-1,1)), startDow=first.getUTCDay();
+  const days=new Date(Date.UTC(S.y,S.mo,0)).getUTCDate();
+  const today=new Date(); const tY=today.getFullYear(), tM=today.getMonth()+1, tD=today.getDate();
+  let cells='';
+  for(let i=0;i<startDow;i++) cells+='<span class="wdp-d wdp-blank"></span>';
+  for(let d=1;d<=days;d++){
+    const dow=(startDow+d-1)%7;
+    const cls=['wdp-d', dow===0?'sun':(dow===6?'sat':''),
+      (S.sel&&S.sel.y===S.y&&S.sel.mo===S.mo&&S.sel.d===d)?'cur':'',
+      (tY===S.y&&tM===S.mo&&tD===d)?'today':''].filter(Boolean).join(' ');
+    cells+=`<button class="${cls}" onclick="_wdDpPick(${d})">${d}</button>`;   // onclick 은 숫자만
+  }
+  box.innerHTML=
+    `<div class="wdp-hd"><button class="btn" onclick="_wdDpNav(-1)">‹</button>`+
+    `<b>${S.y}년 ${S.mo}월</b><button class="btn" onclick="_wdDpNav(1)">›</button></div>`+
+    `<div class="wdp-grid">${['일','월','화','수','목','금','토'].map((w,i)=>`<span class="wdp-w ${i===0?'sun':(i===6?'sat':'')}">${w}</span>`).join('')}${cells}</div>`+
+    `<div class="wdp-ft">${S.busy?'저장 중…':'날짜를 누르면 바로 저장됩니다'}<span class="sp" style="flex:1"></span>`+
+    `<button class="btn" onclick="_wdDpClose()">취소</button></div>`;
+  _wdDpPlace();   // 월 이동으로 높이가 변해도 다시 클램프
+}
+function _wdDpPick(d){
+  const S=_wdDpState; if(!S||S.busy)return;
+  const iso=`${S.y}-${String(S.mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  const t=STATE.cur; if(!t){ _wdDpClose(); return; }
+  const sheetless=!!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless);
+  if(!sheetless){
+    // 시트 기반 탭 = 종전 오버레이 경로 그대로(값만 달력이 만든 ISO — 표시 전용이라는 성질도 종전과 동일)
+    const td=S.td; _wdDpClose(); commitCellEdit(S.rowId, S.field, iso, td); return;
+  }
+  S.busy=true; _wdDpRender();
+  api('/api/trackb/workdesk/purchase-date',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId:S.rowId,date:iso})})
+    .then(r=>{
+      _wdDpClose();
+      if(r&&r.ok){ toast(`구매일자 저장: ${r.value||iso}`+(r.via==='order'?' · 주문 원장도 함께 교정':'')); reloadWorkdesk(); }
+      else toast(r&&r.error==='not_sheetless'?'이 작업은 시트 기반이라 시트에서 고쳐야 합니다':(r&&r.error?('저장 거부: '+r.error):'저장 실패'));
+    })
+    .catch(()=>{ _wdDpClose(); toast('저장 실패 — 네트워크'); });
+}
+/* ── 구매일자 달력 편집 (사용자 확정 2026-08-21: 구매일자 칸은 직접 타이핑 편집 X · 미니달력 선택) ──
+   ★ 어느 칸이 구매일자인가 = 서버 campaignSchedule.DATE_HEADER_KEYWORDS 의 최소 사본 —
+     회귀가드가 두 목록의 일치를 고정한다(사본 드리프트 차단, workManager 규율).
+   ★ 무시트 탭 = 서버 /workdesk/purchase-date 로 진짜 기록(row_json·원장·재번호까지) /
+     시트 기반 탭 = 종전 오버레이(commitCellEdit) 그대로 — 저장 경로 의미는 종전과 동일하고
+     바뀐 것은 입력 수단(달력)뿐이다. */
+const _WD_DATE_KEYWORDS = ['구매일', '구매날짜', '구매 날짜', '시작일', '주문일', '배정일', '진행일'];
+function _isPurchaseDateHeader(h){ const t=String(h==null?'':h).trim(); return !!t && _WD_DATE_KEYWORDS.some(k=>t.includes(k)); }
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
   if(!field||!(field.indexOf('col:')===0||field.indexOf('ccol:')===0)) return;
   if(_workdeskStatusKindForField(field)) return;
+  if(field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4))){ openWdDatePicker(td); return; }
   td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
   const inp=td.querySelector('input'); inp.focus(); inp.select();
   let done=false;
@@ -7687,7 +8415,15 @@ function _openCellMenu(x,y,td){
   const statusKind=_workdeskStatusKindForField(field);
   STATE._gMenuCell={rowId:STATE._gMenuRowId,field,statusKind};
   const selectedRow=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(STATE._gMenuRowId));
-  const manualReview=one && statusKind==='review' && !((selectedRow&&selectedRow.submitted)) && _isInternalRole();
+  /* ★★ 리뷰제출 칸의 주 행동은 "편집"이 아니라 **[📎 관리자 수동 리뷰제출]** 이다(사용자 확정 2026-08-21).
+     그 칸은 어차피 직접 편집이 잠겨 있어(상태 칸) 흐린 [이 셀 편집] 만 남기면 **할 수 있는 일이 없는 메뉴**가 된다.
+     → 리뷰제출 칸에서는 편집 항목을 아예 그리지 않고 그 자리에 수동 제출을 둔다.
+     ★ 못 누르는 사유는 숨기지 않는다(이미 제출됨 / 내부 담당자 아님) — 흐린 항목 + 사유 툴팁. */
+  const isReviewCell = one && statusKind==='review';
+  const reviewBlockReason = !isReviewCell ? ''
+    : (!_isInternalRole() ? '리뷰제출 처리는 내부 담당자만 할 수 있습니다'
+      : ((selectedRow&&selectedRow.submitted) ? '이미 리뷰제출이 완료된 줄입니다'
+        : (selectedRow ? '' : '이 줄의 참여자 정보를 찾지 못했습니다')));
   const canPaste=canE && g.some(l=>l.some(c=>c.classList.contains('gedit')));
   const hasEdited = canE && g.some(l=>l.some(c=>c.classList.contains('edited')));
   const row=(icon,label,fn,dim,danger,title)=>`<button class="gcmrow${dim?' dim':''}${danger?' danger':''}"${dim?' disabled':''}${title?` title="${esc(title)}"`:''} onclick="${fn}"><span class="i">${icon}</span>${label}</button>`;
@@ -7695,9 +8431,19 @@ function _openCellMenu(x,y,td){
   // 서버가 master/admin만 허용하므로 그 밖의 담당자에겐 눌러도 아무 일 없는 항목을 두지 않는다.
   const menuRowHasOrder=!!(selectedRow&&selectedRow.hasOrder);
   const menuCanOrderDelete=(STATE.role==='master'||STATE.role==='admin');
+  const isDateCol = field && field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4));
+  /* 💬 리뷰어에게 메시지 — 그 줄(들)의 리뷰어에게 1:1 문의방을 열고 보낸다.
+     ★ 광고주에겐 그리지 않는다(서버 게이트와 1:1). 받는 사람 판정은 **서버가** 하므로
+       여기서는 "줄이 잡혀 있는가"만 본다(보낼 수 없는 줄의 사유는 팝업이 말한다). */
+  const msgRowIds=_msgCanSend()?_msgRowIds():[];
+  const msgN=new Set(msgRowIds).size;
   m.innerHTML=
-      (one?row('✏️','이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):'')
-    + (manualReview?row('📎','관리자 수동 리뷰제출',"openManualReviewSubmission()"):'')
+      (isReviewCell
+        ? row('📎','리뷰 대신 제출',"openManualReviewSubmission()",!!reviewBlockReason,false,
+              reviewBlockReason||'리뷰 캡처를 붙여넣으면 이 리뷰어의 리뷰제출이 완료 처리됩니다')
+        : (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):''))
+    + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
+        msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
     + (hasEdited?row('↩','편집 되돌리기','_revertSelection()'):'')
@@ -7724,58 +8470,372 @@ function _openCellMenu(x,y,td){
 }
 function _closeCellMenu(){ const m=$('#gcellmenu'); if(m) m.classList.remove('show'); }
 function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.classList.contains('gedit')) beginEditCell(td); }
-let _manualReviewState=null;
-function _manualReviewClose(){ const ov=document.getElementById('manualreviewov'); if(ov)ov.remove(); _manualReviewState=null; }
-function _manualReviewFileList(){
-  const host=document.getElementById('manualreviewfiles'), state=_manualReviewState;
-  if(!host||!state)return;
-  host.innerHTML=state.files.length
-    ? state.files.map(f=>`<div class="mrfile"><b>${esc(f.name)}</b><small>${Math.ceil(f.size/1024)} KB</small></div>`).join('')
-    : '<div class="mrfile"><small>아직 첨부된 리뷰 이미지가 없습니다.</small></div>';
-  const go=document.getElementById('manualreviewgo'); if(go)go.disabled=!state.files.length;
+
+/* ══ 💬 리뷰어에게 메시지 (우클릭 → 1:1 문의방을 관리자가 먼저 연다) ═══════════════
+   종전에는 **리뷰어가 먼저 문의를 보내야만** 방이 생겼다. 이제 표에서 그 줄을 우클릭해
+   바로 보낼 수 있다. 방을 여는 실행부는 서버의 `csBridge.postAdminNotice` 한 벌이다.
+   ★★ 받는 사람은 표의 명의가 아니라 **로그인 본계정**이다 — 리뷰어 문의함이 로그인 phone8
+      하나로만 조회하므로, 명의(타계정) 번호로 열면 리뷰어에게 안 보이는 유령 방이 된다.
+      판정은 **서버 단일 출처**(`csRecipient`)이고 화면은 그 결과를 **그리기만** 한다.
+   ★ 광고주에게는 메뉴를 그리지 않는다(서버도 internalMiddleware 로 막는다). */
+let _RM=null;
+function _rmClose(){ const o=document.getElementById('rmOv'); if(o) o.remove(); _RM=null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if(!window._rmKeyBound){
+  window._rmKeyBound=true;
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('rmOv')) _rmClose(); });
 }
-function _manualReviewChoose(input){
-  const state=_manualReviewState, err=document.getElementById('manualreviewerr');
-  if(!state||!input)return;
-  const files=[...input.files||[]]; input.value='';
-  if(!files.length)return;
-  if(files.length>5||files.some(f=>!String(f.type||'').startsWith('image/')||f.size>4*1024*1024)||files.reduce((n,f)=>n+f.size,0)>6*1024*1024){
-    if(err)err.textContent='이미지 최대 5개, 파일당 4MB·합계 6MB까지 첨부할 수 있습니다.';
-    return;
+/* 선택 범위에 걸린 **줄 id 목록**(화면 순서·중복 없음). 셀 여러 칸을 잡아도 줄은 한 번만 센다. */
+function _msgRowIds(){
+  const g=_selectionGrid(); const out=[], seen=new Set();
+  g.forEach(line=>{
+    for(const td of line){
+      const id=td.getAttribute('data-id')||td.getAttribute('data-rid');
+      if(id && !seen.has(id)){ seen.add(id); out.push(id); return; }
+    }
+  });
+  return out;
+}
+function _msgCanSend(){ return !!(STATE.cur && _isInternalRole()); }
+function openReviewerMsg(){
+  const t=STATE.cur, ids=_msgRowIds();
+  _closeCellMenu();
+  if(!_msgCanSend() || !ids.length) return;
+  _RM={ sheetId:t.sheetId, tabName:t.tabName, ids, items:null, err:null, busy:false, canOpen:false, sent:null };
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='rmOv';
+  ov.innerHTML=`<div class="wbl-dlg"><div class="wbl-dh">💬 리뷰어에게 메시지</div>
+    <div class="wbl-db" id="rmBody"></div>
+    <div class="wbl-df" id="rmFoot"></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(입력한 내용 보호)
+  _rmRenderForm(); _rmLoad();
+}
+async function _rmLoad(){
+  if(!_RM) return;
+  try{
+    const q=`?sheetId=${encodeURIComponent(_RM.sheetId)}&tabName=${encodeURIComponent(_RM.tabName)}&ids=${encodeURIComponent(_RM.ids.join(','))}`;
+    const d=await api('/api/trackb/cs/participant-recipients'+q);
+    if(!_RM) return;
+    if(!d||d.ok===false){ _RM.err=(d&&d.error)||'받는 사람을 확인하지 못했습니다.'; }
+    else { _RM.items=d.items||[]; _RM.canOpen=!!d.canOpenThread; }
+  }catch(e){ if(_RM) _RM.err='받는 사람을 확인하지 못했습니다 — '+(e.message||'네트워크 오류'); }
+  _rmPaint();
+}
+/* 틀은 한 번만 그린다 — 재렌더로 textarea 를 다시 만들면 **한글 IME 조합이 깨진다**
+   (홈 목록 검색 `ㅁ며면면` 실측 계열). 목록·푸터만 갈아끼운다. */
+function _rmRenderForm(){
+  const b=document.getElementById('rmBody'); if(!b) return;
+  b.innerHTML=`<div id="rmList" class="rmto">받는 사람을 확인하는 중…</div>
+    <textarea id="rmText" placeholder="보낼 내용을 입력하세요 (최대 1000자)"></textarea>
+    <div class="rmsub">보내면 리뷰어에게 <b>즉시 도착</b>합니다 · 보낸 메시지는 회수할 수 없습니다.</div>
+    ${(STATE.role==='master'||STATE.role==='admin')?'':'<div class="rmwarn">보낸 뒤 리뷰어의 <b>답장은 관리자(master/admin)</b>가 C/S 문의창구에서 확인합니다.</div>'}`;
+  _rmPaintFoot();
+}
+function _rmPaint(){
+  const l=document.getElementById('rmList'); if(!l) return;
+  if(_RM.err){ l.className='rmbad'; l.textContent=_RM.err; _rmPaintFoot(); return; }
+  const items=_RM.items||[];
+  if(!items.length){ l.className='rmto'; l.textContent='받는 사람을 확인하는 중…'; _rmPaintFoot(); return; }
+  const oks=items.filter(x=>x.ok), bad=items.filter(x=>!x.ok);
+  // 같은 본계정 = 같은 방 → 한 번만 보낸다(서버도 같은 규칙으로 합친다).
+  const seen=new Set(), uniq=[]; oks.forEach(x=>{ if(seen.has(x.phone8)) return; seen.add(x.phone8); uniq.push(x); });
+  const line=x=>`<div class="rmitem">
+      <div class="rmwho"><b>${esc(x.name||x.rowName||'(이름 없음)')}</b>
+        <span class="rmnum">···${esc(String(x.phone8||'').slice(-4))}</span>
+        ${x.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>
+      <span class="rmwhy">${x.isSub?`표의 명의는 <b>${esc(x.rowName||'')}</b> — 로그인 본계정으로 보냅니다`
+        :(x.nameMismatch?`표 이름 <b>${esc(x.rowName||'')}</b> ↔ 등록 이름 <b>${esc(x.name||'')}</b> · 확인해 주세요`
+        :esc(x.viaLabel||''))}</span></div>`;
+  l.className='rmto';
+  l.innerHTML= uniq.length
+    ? `<div style="font-weight:700;margin-bottom:4px">받는 사람 ${uniq.length}명</div>${uniq.map(line).join('')}`
+      + (oks.length>uniq.length?`<div class="rmwhy" style="margin-top:5px">같은 리뷰어의 줄 ${oks.length-uniq.length}건은 <b>같은 문의방</b>이라 한 번만 보냅니다.</div>`:'')
+    : '<b>보낼 수 있는 줄이 없습니다.</b>';
+  if(bad.length){
+    l.insertAdjacentHTML('afterend',
+      `<div class="rmbad" id="rmBad"><b>보낼 수 없는 줄 ${bad.length}건</b>${
+        bad.slice(0,8).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||('#'+(x.seq||'')))}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
+      }${bad.length>8?`<div class="rmwhy">외 ${bad.length-8}건</div>`:''}</div>`);
   }
-  state.files=files; if(err)err.textContent=''; _manualReviewFileList();
+  const old=document.getElementById('rmBad');
+  if(old && !bad.length) old.remove();
+  _rmPaintFoot();
+}
+function _rmSendable(){ return !!(_RM && !_RM.busy && (_RM.items||[]).some(x=>x.ok)); }
+function _rmPaintFoot(){
+  const f=document.getElementById('rmFoot'); if(!f) return;
+  const oks=((_RM&&_RM.items)||[]).filter(x=>x.ok);
+  const seen=new Set(); oks.forEach(x=>seen.add(x.phone8));
+  f.innerHTML=`<button class="btn" onclick="_rmClose()">취소</button>
+    <button class="btn pri" onclick="_rmSend()"${_rmSendable()?'':' disabled'}>${
+      _RM&&_RM.busy?'보내는 중…':(seen.size>1?`${seen.size}명에게 보내기`:'보내기')}</button>`;
+}
+async function _rmSend(){
+  if(!_rmSendable()) return;
+  const ta=document.getElementById('rmText');
+  const content=String(ta&&ta.value||'').trim();
+  if(!content){ toast('보낼 내용을 입력하세요'); if(ta) ta.focus(); return; }
+  if(content.length>1000){ toast('내용은 1000자까지 보낼 수 있습니다'); return; }
+  const oks=(_RM.items||[]).filter(x=>x.ok);
+  // ★ 미리보기에서 본 대상 그대로 보낸다 — 그 사이 바뀌었으면 서버가 그 건을 보내지 않는다(TOCTOU).
+  const expect={}; oks.forEach(x=>{ expect[x.participantId]=x.phone8; });
+  _RM.busy=true; _rmPaintFoot();
+  let d=null;
+  try{
+    d=await api('/api/trackb/cs/notify-participants',{method:'POST',body:JSON.stringify({
+      sheetId:_RM.sheetId, tabName:_RM.tabName, participantIds:oks.map(x=>x.participantId), content, expect })});
+  }catch(e){ d={ok:false,error:'전송 실패 — '+(e.message||'네트워크 오류')}; }
+  if(!_RM) return;
+  _RM.busy=false;
+  if(!d||(d.ok===false&&!(d.sent&&d.sent.length))){
+    _RM.err=null; _rmPaintFoot();
+    /* ★ 서버가 건별 사유(failed[].reason)를 준다 — 그걸 버리고 "보내지 못했습니다" 한 줄로 뭉개면
+         담당자가 원인을 찾을 수 없다(이번 실측 신고의 절반이 이것이었다). */
+    const fl=(d&&d.failed)||[];
+    const why = fl.length
+      ? fl.slice(0,5).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||'')}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
+        + (fl.length>5?`<div class="rmwhy">외 ${fl.length-5}건</div>`:'')
+      : `<div class="rmwhy">${esc((d&&d.error)||'서버가 사유를 알려주지 않았습니다.')}</div>`;
+    const l=document.getElementById('rmList');
+    const prev=document.getElementById('rmSendErr'); if(prev) prev.remove();
+    if(l) l.insertAdjacentHTML('afterend',`<div class="rmbad" id="rmSendErr"><b>보내지 못했습니다</b>${why}</div>`);
+    return;   // ★ 입력한 내용은 그대로 둔다(다시 누르면 재시도)
+  }
+  _RM.sent=d; _rmRenderResult();
+}
+function _rmRenderResult(){
+  const b=document.getElementById('rmBody'), f=document.getElementById('rmFoot'); if(!b||!f) return;
+  const d=_RM.sent||{}, sent=d.sent||[], failed=d.failed||[], merged=d.merged||[];
+  b.innerHTML=`<div class="rmok"><b>${sent.length}명에게 보냈습니다.</b>
+      ${sent.slice(0,8).map(s=>`<div class="rmitem"><div class="rmwho"><b>${esc(s.name||'')}</b><span class="rmnum">···${esc(s.phone8Tail||'')}</span>${s.isSub?'<span class="rmtag">타계정 참여</span>':''}</div>${s.isSub?'<span class="rmwhy">로그인 본계정으로 보냈습니다</span>':''}</div>`).join('')}
+      ${sent.length>8?`<div class="rmwhy">외 ${sent.length-8}명</div>`:''}</div>
+    ${merged.length?`<div class="rmwarn">같은 리뷰어의 줄 ${merged.length}건은 <b>같은 문의방</b>이라 한 번만 보냈습니다.</div>`:''}
+    ${failed.length?`<div class="rmbad"><b>보내지 못한 줄 ${failed.length}건</b>${
+      failed.slice(0,8).map(x=>`<div class="rmitem"><div class="rmwho"><b>${esc(x.rowName||'')}</b></div><span class="rmwhy">${esc(x.reason||'')}</span></div>`).join('')
+    }${failed.length>8?`<div class="rmwhy">외 ${failed.length-8}건</div>`:''}</div>`:''}`;
+  // ★ [문의방 열기]는 **C/S 본문을 볼 수 있는 사람**(master/admin)에게만 — AE 에게 주면 막다른 길이다.
+  f.innerHTML=`${(_RM.canOpen&&sent.length===1)?`<button class="btn" onclick="_rmOpenThread()">문의방 열기</button>`:''}
+    <button class="btn pri" onclick="_rmClose()">닫기</button>`;
+}
+/* 보낸 방으로 이동 — C/S 화면 목록의 그 줄을 **눌러서** 연다(이름·연락처를 여기서 넘기지 않는다:
+   그 값은 목록 행이 이미 들고 있고, 화면에 PII 를 한 번 더 실을 이유가 없다). */
+function _rmOpenThread(){
+  const s=((_RM&&_RM.sent&&_RM.sent.sent)||[])[0]; if(!s||!s.threadId) return;
+  const tid=s.threadId;
+  _rmClose(); switchView('cs');
+  let n=0;
+  const tick=()=>{
+    const row=document.querySelector(`.cs-room-row[data-tid="${tid}"]`);
+    if(row){ row.click(); row.scrollIntoView({block:'center'}); return; }
+    if(++n<40) setTimeout(tick,150);
+    else toast('문의방을 목록에서 찾지 못했습니다 — [새로고침]을 눌러 주세요');
+  };
+  setTimeout(tick,250);
+}
+/* ── 관리자 수동 리뷰제출 (인라인 팝오버 · 붙여넣기 전용, 사용자 확정 2026-08-21) ─────────────
+   ★ 화면 중앙 모달이 아니라 **누른 셀 옆**에 띄운다(구매일자 달력 `#wdDatePick` 과 같은 앵커 규율).
+     팝오버는 **body 직속** — 표는 가로 스크롤 컨테이너라 그 안에 그리면 잘린다.
+   ★ **파일 탐색기 창구를 두지 않는다**(사용자 확정) — 카톡방에서 복사한 이미지를 Ctrl+V 로 바로 붙인다.
+     드래그앤드롭도 같은 함수(`_manualReviewTake`)로 수렴한다 — 사본을 두면 한쪽만 장수·용량 제한이 풀린다
+     (1:1문의 첨부 3경로 수렴과 같은 규율).
+   ★ 붙여넣기만으로 **자동 제출하지는 않는다** — 제출은 리뷰내역·누적금액까지 확정하는데 되돌릴 창구가
+     없어, 오붙여넣기 한 번이 그대로 사고가 된다. 붙이면 즉시 미리보기가 뜨고 [제출 처리] 한 번으로 끝난다.
+   ★ 처리 실행부는 종전과 같다: `/api/image/review-upload`(원장 기록) → `/api/trackb/workdesk/manual-review-submit`
+     (그 행 소유 파일인지 대조 후 작업표·review_index 를 같은 트랜잭션에서 제출 완료로 확정). */
+const _MR_MAX_FILES=5, _MR_MAX_ONE=4*1024*1024, _MR_MAX_ALL=6*1024*1024;
+let _manualReviewState=null;
+function _manualReviewClose(){
+  const st=_manualReviewState;
+  if(st) (st.files||[]).forEach(f=>{ try{ if(f._url) URL.revokeObjectURL(f._url); }catch(_){ } });
+  const ov=document.getElementById('wdRevPop'); if(ov)ov.remove();
+  _manualReviewState=null;
+}
+/* 붙여넣기·드롭이 함께 쓰는 유일한 수납구. 장수·용량 초과는 **조용히 자르지 않고** 사유를 말한다. */
+function _manualReviewTake(list){
+  const st=_manualReviewState; if(!st||st.saving) return;
+  // ★★ 낼 수 없는 상태면 **받지도 않는다** — 종전엔 업로드가 먼저라, 제출이 거부되면
+  //    드라이브에 캡처만 쌓였다(2026-08-21 실사고: 재시도마다 같은 줄에 한 장씩).
+  if(st.pre==='loading'){ st.err='제출 가능 여부를 확인하는 중입니다 — 잠시 후 붙여넣어 주세요.'; _manualReviewRender(); return; }
+  if(st.pre&&st.pre.ok===false){ _manualReviewRender(); return; }
+  const imgs=[...(list||[])].filter(f=>f&&String(f.type||'').startsWith('image/'));
+  if(!imgs.length){ st.err='이미지가 아닙니다 — 캡처 이미지를 복사해 붙여넣어 주세요.'; _manualReviewRender(); return; }
+  let err='';
+  const next=st.files.slice();
+  for(const f of imgs){
+    if(next.length>=_MR_MAX_FILES){ err=`이미지는 최대 ${_MR_MAX_FILES}장까지 첨부할 수 있습니다.`; break; }
+    if(f.size>_MR_MAX_ONE){ err='한 장당 4MB까지 첨부할 수 있습니다.'; continue; }
+    if(next.reduce((n,x)=>n+x.size,0)+f.size>_MR_MAX_ALL){ err='첨부 합계 6MB를 넘을 수 없습니다.'; break; }
+    try{ f._url=URL.createObjectURL(f); }catch(_){ f._url=''; }
+    next.push(f);
+  }
+  st.files=next; st.err=err; _manualReviewRender();
+}
+function _manualReviewDrop(i){
+  const st=_manualReviewState; if(!st||st.saving) return;
+  const f=st.files[i]; if(!f) return;
+  try{ if(f._url) URL.revokeObjectURL(f._url); }catch(_){ }
+  st.files.splice(i,1); st.err=''; _manualReviewRender();
+}
+/* 서버 오류 코드는 그대로 보여 주면 담당자가 손쓸 수 없다 — **무엇이 문제이고 다음에 무엇을 하는지**로 옮긴다.
+   ★ 모르는 코드는 지어내지 않고 원문을 남긴다(조용히 "실패했습니다"로 뭉뚱그리면 원인이 사라진다). */
+const _MR_ERR={
+  already_submitted:'이미 리뷰제출 처리된 참여자입니다.',
+  row_not_found:'이 줄을 찾지 못했습니다 — 표를 새로고침한 뒤 다시 시도해 주세요.',
+  submit_column_missing:'이 작업표에 리뷰제출 열이 없습니다 — [설정 › 작업표 표준 열]에서 리뷰제출 칸을 만든 뒤 다시 시도해 주세요.',
+  review_history_missing:'이 줄이 아직 리뷰어 참여내역(검색 명단)에 없습니다 — 수동으로 추가한 줄이면 장부가 다시 만들어진 뒤에 처리할 수 있습니다.',
+  review_file_not_owned:'첨부가 이 줄의 것으로 기록되지 않았습니다 — 다시 붙여넣어 주세요.',
+  invalid_review_files:'첨부 파일 정보가 올바르지 않습니다 — 다시 붙여넣어 주세요.',
+};
+function _manualReviewErr(code, fallback){
+  const k=String(code||'').trim();
+  return _MR_ERR[k] || (k?`${fallback||'처리에 실패했습니다.'} (${k})`:(fallback||'처리에 실패했습니다.'));
 }
 function _manualReviewB64(file){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onerror=()=>reject(new Error('파일을 읽지 못했습니다.')); reader.onload=()=>{ const s=String(reader.result||''); resolve(s.slice(s.indexOf(',')+1)); }; reader.readAsDataURL(file); }); }
+/* 앵커 셀 기준 배치 — 셀 바로 아래·왼쪽 정렬, 화면 밖이면 위/안쪽으로 클램프(달력과 같은 계산). */
+function _manualReviewPlace(){
+  const st=_manualReviewState, box=document.querySelector('#wdRevPop .wrp-box'); if(!st||!box||!st.anchor)return;
+  const w=box.offsetWidth||320, h=box.offsetHeight||240, a=st.anchor;
+  const left=Math.max(8, Math.min(a.left, window.innerWidth-w-10));
+  let top=a.bottom+4;
+  if(top+h>window.innerHeight-8) top=Math.max(8, a.top-h-4);
+  box.style.left=left+'px'; box.style.top=top+'px';
+}
+/* 이미 올라온 캡처의 썸네일 — 기존 무인증 프록시가 스트리밍(신규 저장소 0). */
+function _manualReviewExistUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
+function _manualReviewRender(){
+  const st=_manualReviewState, box=document.querySelector('#wdRevPop .wrp-box'); if(!st||!box)return;
+  const n=st.files.length;
+  const pre=st.pre;
+  const blocked=!!(pre&&pre.ok===false);
+  const exist=(pre&&pre.ok&&Array.isArray(pre.existing))?pre.existing:[];
+  /* ★ 이미 이 줄에 올라온 리뷰 캡처가 있으면 **새로 붙여넣지 않고 그것으로** 끝낼 수 있다.
+     실패로 쌓인 파일이 곧 근거다(다시 올리면 같은 캡처가 또 쌓인다).
+     ★ 한 번에 보낼 수 있는 파일 수 상한(서버 5개)에 맞춰 **최근 5장**만 쓰고, 그 사실을 말한다. */
+  const useExist=exist.slice(-_MR_MAX_FILES);
+  const thumbs=st.files.map((f,i)=>`<span class="wrp-th"><img src="${esc(f._url||'')}" alt=""><button class="wrp-x" type="button" title="빼기" onclick="_manualReviewDrop(${i})"${st.saving?' disabled':''}>✕</button></span>`).join('');
+  box.innerHTML=
+    `<div class="wrp-hd"><b>📎 리뷰 대신 제출</b><span class="wrp-who" title="${esc(st.row.name||'')}">${esc(st.row.name||'참여자')}</span></div>`
+    + (pre==='loading'?'<div class="wrp-pre">제출 가능 여부를 확인하는 중…</div>':'')
+    + (blocked?`<div class="wrp-block">${esc(_manualReviewErr(pre.error,'지금은 제출할 수 없습니다.'))}</div>`:'')
+    + (useExist.length?`<div class="wrp-exist"><div class="wrp-exhd">이미 올라온 리뷰 캡처 <b>${exist.length}장</b>${exist.length>useExist.length?` <small>(최근 ${useExist.length}장으로 처리)</small>`:''}</div>`
+        + `<div class="wrp-ths">${useExist.map(f=>`<span class="wrp-th"><img src="${esc(_manualReviewExistUrl(f.fileId))}" alt="" loading="lazy"></span>`).join('')}</div>`
+        + `<button class="btn pri wrp-exgo" type="button" onclick="_manualReviewSubmitExisting()"${st.saving?' disabled':''}>이 캡처로 제출 처리</button>`
+        + `<div class="wrp-exnote">새로 붙여넣으면 캡처가 한 벌 더 쌓입니다 — 위 캡처가 맞으면 그대로 처리하세요.</div></div>`:'')
+    + (blocked?'':`<div class="wrp-drop${n?' has':''}" id="wrpDrop">${
+        n ? `<div class="wrp-ths">${thumbs}</div><div class="wrp-cnt">이미지 ${n}장 · 더 붙여넣을 수 있습니다</div>`
+          : `<div class="wrp-ico">📋</div><div class="wrp-msg"><b>Ctrl</b>(⌘)<b>+V</b> 로 리뷰 캡처를 붙여넣으세요</div><div class="wrp-sub">끌어다 놓아도 됩니다 · 최대 ${_MR_MAX_FILES}장</div>`}</div>`)
+    + (st.err?`<div class="wrp-err">${esc(st.err)}</div>`:'')
+    + `<div class="wrp-ft"><span class="wrp-note">${st.saving?'처리 중…':'제출하면 리뷰제출 열에 지금 시각이 기록되고 리뷰어 참여내역도 제출 완료가 됩니다'}</span>`
+    + `<button class="btn" type="button" onclick="_manualReviewClose()"${st.saving?' disabled':''}>취소</button>`
+    + `<button class="btn pri" type="button" onclick="_manualReviewSubmit()"${(!n||st.saving||blocked)?' disabled':''}>제출 처리</button></div>`
+    /* 캡처가 아예 없는 건(외부모집 사후 등록 등)은 날짜만 기록하는 별도 창구로 — 이 칸의 직접 편집을
+       잠근 대신, 있던 길을 조용히 없애지 않는다. 서버 게이트(adminOrMaster·무시트)와 1:1 로만 그린다. */
+    + (st.canDateOnly
+        ? `<div class="wrp-alt">캡처가 없다면 <input type="date" id="wrpDate" value="${esc(st.dateVal||'')}" onchange="_manualReviewState&&(_manualReviewState.dateVal=this.value)"> <button class="btn xs" type="button" onclick="_manualReviewDateOnly()"${st.saving?' disabled':''}>날짜만 기록</button></div>`
+        : '');
+  _manualReviewPlace();
+  const dz=document.getElementById('wrpDrop');
+  if(dz){
+    dz.addEventListener('dragover',e=>{ if(e.dataTransfer&&[...(e.dataTransfer.types||[])].includes('Files')){ e.preventDefault(); dz.classList.add('over'); } });
+    dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+    dz.addEventListener('drop',e=>{ e.preventDefault(); dz.classList.remove('over'); _manualReviewTake(e.dataTransfer&&e.dataTransfer.files); });
+  }
+  try{ box.focus({preventScroll:true}); }catch(_){ }
+}
 function openManualReviewSubmission(){
   const cell=STATE._gMenuCell, t=STATE.cur, row=(STATE.wd&&STATE.wd.roster||[]).find(r=>String(r.id)===String(cell&&cell.rowId));
+  const td=_selAnchorTd();
   _closeCellMenu();
   if(!t||!cell||cell.statusKind!=='review'||!row)return;
+  if(!_isInternalRole()){ toast('리뷰제출 처리는 내부 담당자만 할 수 있습니다.'); return; }
   if(row.submitted){ toast('이미 리뷰제출 처리된 참여자입니다.'); return; }
-  _manualReviewState={ t,row,field:cell.field,files:[],saving:false };
-  const ov=document.createElement('div'); ov.id='manualreviewov'; ov.className='modalov';
-  ov.addEventListener('click',e=>{if(e.target===ov)_manualReviewClose();});
-  ov.innerHTML=`<div class="modalbox" style="width:600px"><div class="modalhd"><b>관리자 수동 리뷰제출</b><button class="btn xs" type="button" id="manualreviewclose">닫기</button></div><div class="modalbd"><div class="mrform"><div class="mrnotice"><b>${esc(row.name||'참여자')}</b> · ${esc(t.tabName)}<br>리뷰 이미지를 첨부하면 리뷰제출 열에 현재 시각을 기록하고, 해당 리뷰어의 리뷰내역을 제출 완료로 처리합니다.</div><label class="btn" style="width:max-content">리뷰 이미지 첨부<input id="manualreviewinput" type="file" accept="image/*" multiple hidden></label><div id="manualreviewfiles" class="mrfiles"></div><div id="manualreviewerr" class="mrerr"></div><div class="mrfoot"><button class="btn" type="button" id="manualreviewcancel">취소</button><button class="btn pri" type="button" id="manualreviewgo" disabled>첨부 후 제출처리</button></div></div></div></div>`;
+  _manualReviewClose();
+  const rect=td&&td.getBoundingClientRect?td.getBoundingClientRect():{left:window.innerWidth/2-160,top:120,bottom:150};
+  const today=new Date(); const iso=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  _manualReviewState={ t,row,field:cell.field,files:[],saving:false,err:'',dateVal:iso,pre:'loading',
+    canDateOnly:(STATE.role==='master'||STATE.role==='admin')&&!!(STATE.wd&&STATE.wd.meta&&STATE.wd.meta.sheetless),
+    anchor:{left:rect.left, top:rect.top, bottom:rect.bottom} };
+  const ov=document.createElement('div'); ov.id='wdRevPop';
+  ov.innerHTML='<div class="wrp-box" role="dialog" aria-label="관리자 수동 리뷰제출" tabindex="-1"></div>';
   document.body.appendChild(ov);
-  document.getElementById('manualreviewclose').onclick=_manualReviewClose;
-  document.getElementById('manualreviewcancel').onclick=_manualReviewClose;
-  document.getElementById('manualreviewinput').onchange=e=>_manualReviewChoose(e.target);
-  document.getElementById('manualreviewgo').onclick=_manualReviewSubmit;
-  _manualReviewFileList();
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov&&!(_manualReviewState&&_manualReviewState.saving)) _manualReviewClose(); });
+  /* 리스너는 **최상위 1회만**(열 때마다 걸면 겹쳐 쌓인다) — 달력 팝오버와 같은 규율.
+     ★ 붙여넣기는 캡처 단계에서 가로챈다: 그리드의 셀 범위 붙여넣기(text/plain)와 섞이지 않게. */
+  if(!window._wdRevPopBound){ window._wdRevPopBound=true;
+    document.addEventListener('paste',e=>{
+      if(!_manualReviewState||!document.getElementById('wdRevPop')) return;
+      const items=(e.clipboardData&&e.clipboardData.files&&e.clipboardData.files.length)
+        ? [...e.clipboardData.files]
+        : [...((e.clipboardData&&e.clipboardData.items)||[])].filter(it=>it&&it.kind==='file').map(it=>it.getAsFile()).filter(Boolean);
+      e.preventDefault(); e.stopPropagation();
+      _manualReviewTake(items);
+    }, true);
+    document.addEventListener('keydown',e=>{
+      if(e.key!=='Escape'||!document.getElementById('wdRevPop')) return;
+      if(_manualReviewState&&_manualReviewState.saving) return;    // 처리 중에는 닫지 않는다
+      e.stopPropagation(); _manualReviewClose();
+    }, true);
+    // 표가 스크롤되면 앵커 셀이 움직인다 — 따라가지 못하는 팝오버는 닫는 것이 정직하다(캡처 = 그리드 내부 스크롤도).
+    window.addEventListener('scroll',()=>{ if(document.getElementById('wdRevPop')&&!(_manualReviewState&&_manualReviewState.saving)) _manualReviewClose(); }, true);
+    window.addEventListener('resize',()=>{ if(document.getElementById('wdRevPop')&&!(_manualReviewState&&_manualReviewState.saving)) _manualReviewClose(); });
+  }
+  _manualReviewRender();
+  /* ★ 붙여넣기 **전에** 제출 가능 여부를 묻는다 — 통과했을 때만 업로드한다(파일만 쌓이는 상태 차단).
+     ★ 확인 자체가 실패하면(구버전 백엔드·네트워크) **막지 않는다**(fail-open) — 서버가 최종 방어다. */
+  const want=_manualReviewState;
+  api(`/api/trackb/workdesk/manual-review-precheck?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&rowId=${encodeURIComponent(row.id)}`)
+    .then(r=>{ if(_manualReviewState===want){ _manualReviewState.pre=(r&&typeof r.ok==='boolean')?r:{ok:true,existing:[]}; _manualReviewRender(); } })
+    .catch(()=>{ if(_manualReviewState===want){ _manualReviewState.pre={ok:true,existing:[]}; _manualReviewRender(); } });
+}
+/* 이미 올라온 캡처로 제출 — **업로드하지 않는다**(같은 캡처를 또 쌓지 않는다). */
+async function _manualReviewSubmitExisting(){
+  const st=_manualReviewState;
+  if(!st||st.saving)return;
+  const ids=((st.pre&&st.pre.existing)||[]).slice(-_MR_MAX_FILES).map(f=>f&&f.fileId).filter(Boolean);
+  if(!ids.length)return;
+  st.saving=true; st.err=''; _manualReviewRender();
+  await _manualReviewFinish(ids);
+}
+/* 업로드 이후 공통 마무리 — 붙여넣기 경로와 기존 캡처 경로가 **같은 실행부**를 쓴다(사본 금지). */
+async function _manualReviewFinish(fileIds){
+  const state=_manualReviewState;
+  try{
+    const saved=await api('/api/trackb/workdesk/manual-review-submit',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,rowId:state.row.id,fileIds})});
+    if(!saved||!saved.ok) throw new Error(_manualReviewErr(saved&&saved.error,'제출 처리에 실패했습니다.'));
+    _manualReviewClose(); await reloadWorkdesk(); toast('관리자 수동 리뷰제출이 완료되었습니다.');
+  }catch(e){
+    if(_manualReviewState){ _manualReviewState.saving=false; _manualReviewState.err=(e&&e.message)?e.message:'처리에 실패했습니다.'; _manualReviewRender(); }
+  }
 }
 async function _manualReviewSubmit(){
-  const state=_manualReviewState, err=document.getElementById('manualreviewerr'), btn=document.getElementById('manualreviewgo');
+  const state=_manualReviewState;
   if(!state||state.saving||!state.files.length)return;
-  state.saving=true; if(btn){btn.disabled=true;btn.textContent='첨부 업로드 중…';} if(err)err.textContent='';
+  state.saving=true; state.err=''; _manualReviewRender();
+  let files=[], fileIds=[];
   try{
-    const files=await Promise.all(state.files.map(async f=>({data:await _manualReviewB64(f),mimeType:f.type||'image/jpeg',name:f.name})));
-    const up=await api('/api/image/review-upload',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,reviewerName:state.row.name||'',campaignName:state.t.tabName,rowIndex:state.row.seq,submitCol:state.field.slice(4),slotKey:'review',files})});
-    const fileIds=(up&&up.files||[]).map(f=>f&&f.fileId).filter(Boolean);
+    files=await Promise.all(state.files.map(async f=>({data:await _manualReviewB64(f),mimeType:f.type||'image/png',name:f.name||'review.png'})));
+    const up=await api('/api/image/review-upload',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,reviewerName:state.row.name||'',campaignName:state.t.tabName,rowIndex:state.row.seq,submitCol:String(state.field||'').slice(4),slotKey:'review',files})});
+    fileIds=(up&&up.files||[]).map(f=>f&&f.fileId).filter(Boolean);
     if(!up||!up.ok||fileIds.length!==files.length) throw new Error((up&&up.error)||'리뷰 이미지 업로드에 실패했습니다.');
-    if(btn)btn.textContent='제출 처리 중…';
-    const saved=await api('/api/trackb/workdesk/manual-review-submit',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,rowId:state.row.id,fileIds})});
-    if(!saved||!saved.ok) throw new Error((saved&&saved.error)==='already_submitted'?'이미 리뷰제출 처리된 참여자입니다.':((saved&&saved.error)||'제출 처리에 실패했습니다.'));
-    _manualReviewClose(); await reloadWorkdesk(); toast('관리자 수동 리뷰제출이 완료되었습니다.');
-  }catch(e){ if(err)err.textContent=e&&e.message?e.message:'처리에 실패했습니다.'; state.saving=false; if(btn){btn.disabled=false;btn.textContent='첨부 후 제출처리';} }
+  }catch(e){
+    if(_manualReviewState){ _manualReviewState.saving=false; _manualReviewState.err=(e&&e.message)?e.message:'처리에 실패했습니다.'; _manualReviewRender(); }
+    return;
+  }
+  await _manualReviewFinish(fileIds);
+}
+/* 캡처 없는 건의 날짜 백필 — 증빙 게이트가 있는 [제출 처리]와 **다른 창구**(서버도 라우트가 다르다). */
+async function _manualReviewDateOnly(){
+  const st=_manualReviewState; if(!st||st.saving)return;
+  const v=String(st.dateVal||'').trim();
+  if(!v){ st.err='기록할 날짜를 골라 주세요.'; _manualReviewRender(); return; }
+  if(!confirm(`${st.row.name||'참여자'} 님을 캡처 없이 ${v} 제출로 기록합니다.\n리뷰 캡처는 남지 않습니다. 진행할까요?`)) return;
+  st.saving=true; st.err=''; _manualReviewRender();
+  try{
+    const r=await api('/api/trackb/workdesk/review-submit-date',{method:'POST',body:JSON.stringify({sheetId:st.t.sheetId,tabName:st.t.tabName,rowId:st.row.id,value:v})});
+    if(!r||!r.ok) throw new Error((r&&r.hint)||(r&&r.error)||'기록에 실패했습니다.');
+    _manualReviewClose(); await reloadWorkdesk(); toast('리뷰제출일을 기록했습니다.');
+  }catch(e){
+    if(_manualReviewState){ _manualReviewState.saving=false; _manualReviewState.err=(e&&e.message)?e.message:'기록에 실패했습니다.'; _manualReviewRender(); }
+  }
 }
 // 우클릭 [행 삭제]는 그 행을 실제로 없앤다 — 구매양식(주문)이 붙어 있으면 그 구매기록까지
 // 함께 취소한다(서버가 한 트랜잭션으로 처리). ★ 총 모집인원은 줄지 않는다 — 지운 자리는
@@ -10258,7 +11318,8 @@ function _bnRender(){
     return `<tr>
       <td class="code">${esc(r.code)}${r.custom?'<span class="pmauto man">추가</span>':''}</td>
       <td><span class="bnnm ${nameBad?'pmwarn':''}" onclick="_bnEditName(${i})">${esc(r.name)}<span class="pen">✎</span></span>
-        ${r.renamed?`<span class="bnbase">기본: ${esc(r.baseName)}</span>`:''}</td>
+        ${r.renamed?`<span class="bnbase">기본: ${esc(r.baseName)}</span>`:''}
+        ${r.formCodeOnly?`<span class="bnbase codeonly" title="케이뱅크 대량이체가 이 은행은 이름을 인식하지 못해 코드로만 통과합니다. 이름을 고쳐도 파일에는 ${esc(r.code)} 이 나갑니다.">이체 서식에는 <b>${esc(r.code)}</b> 로 나갑니다</span>`:''}</td>
       <td><div class="bnkw" id="bnkw${i}">${kw}<button class="bnkwadd" onclick="_bnAddKw(${i})">＋</button></div></td>
       <td class="num">${use==null?'<span class="pmauto">-</span>':(use?use+'건':'<span class="pmauto">0</span>')}</td>
     </tr>`;
@@ -10596,9 +11657,11 @@ async function _rsScan(){
 }
 /* 막힌 주문 상태를 사람 말로 — ★ 판정이 아니라 **표기**다(서버 값 그대로 세어 보여줄 뿐).
    `stuck_manual` 은 reconcile 이 제외해 재기록으로 안 풀린다 → 사람이 처리해야 함을 이름으로 말한다. */
+/* ★ 라벨이 없는 상태는 영문 그대로 나가 화면이 읽히지 않는다(실측: `conflict` 노출) — 전 상태를 덮는다. */
 var _RS_STATUS = {
   pending:'대기', queued:'큐 대기', failed:'실패', pending_no_row:'행 못 찾음',
-  stuck_manual:'수동 처리 필요', canceled:'취소됨'
+  stuck_manual:'수동 처리 필요', canceled:'취소됨',
+  conflict:'편집 충돌(주문은 기록됨)', canceled_sheet_dirty:'취소분 시트 잔존'
 };
 function _rsStatusLine(by, short){
   var ks = Object.keys(by||{}); if(!ks.length) return '';
@@ -10610,6 +11673,38 @@ function _rsPendTitle(it){
   var a = it.pendingOldest ? new Date(it.pendingOldest).toLocaleDateString('ko-KR') : '';
   var b = it.pendingNewest ? new Date(it.pendingNewest).toLocaleDateString('ko-KR') : '';
   return (a && b) ? ('제출 ' + a + ' ~ ' + b) : '';
+}
+/* 실패 사유 — ★ 서버가 준 묶음을 **그대로** 그린다(화면에서 분류하지 않는다).
+   ★ 사유 문자열은 시트 API 원문이라 반드시 escape. ★ 잘린 묶음은 건수로 고지(조용한 누락 금지). */
+function _rsErrLines(it){
+  var list = it.pendingErrors;
+  if(!Array.isArray(list) || !list.length) return '';
+  var rows = list.map(function(e){
+    var when = e.oldest ? new Date(e.oldest).toLocaleDateString('ko-KR') : '';
+    return '<div title="'+esc(e.tabName||'')+(when?(' · 최초 '+esc(when)):'')+'">'+
+      '<b>'+e.n+'건</b> '+esc(e.tabName||'')+' — '+esc(e.error||'')+'</div>';
+  }).join('');
+  if(it.pendingErrorsMoreGroups) rows += '<div>외 '+it.pendingErrorsMoreGroups+'가지 사유 '+
+    it.pendingErrorsMoreOrders+'건</div>';
+  return '<div style="margin-top:4px;font-weight:400;font-size:10.5px;color:#B45309;line-height:1.5;text-align:left">'+rows+'</div>';
+}
+/* ★★ 크론이 재시도하는 건과 손대지 않는 건을 **갈라서** 말한다 — 합치면 "끄면 안 된다"는 틀린 결론이 된다.
+   판정 목록은 서버(`retryableStatuses`)가 준다(화면에 사본 금지). 못 받으면(구버전 백엔드) 종전 문구로 접는다. */
+function _rsPendingBanner(r){
+  if(!r.pendingOrdersTotal) return '';
+  var by = r.pendingByStatus||{}, list = r.retryableStatuses;
+  if(!Array.isArray(list)) return '<div style="margin-top:6px;color:#DC2626"><b>⚠ 시트에 아직 못 쓴 주문 '+
+    r.pendingOrdersTotal+'건</b> '+esc(_rsStatusLine(by))+'</div>';
+  var retryBy={}, manBy={};
+  Object.keys(by).forEach(function(k){ (list.indexOf(k)>=0?retryBy:manBy)[k]=by[k]; });
+  var out='';
+  if(r.pendingRetryable) out += '<div style="margin-top:6px;color:#DC2626"><b>⚠ 주기 작업이 아직 재시도 중인 주문 '+
+    r.pendingRetryable+'건</b> — 지금 주기 작업을 끄면 이 주문들은 시트에 기록되지 않습니다. '+
+    esc(_rsStatusLine(retryBy, true))+'</div>';
+  if(r.pendingManual) out += '<div style="margin-top:6px;color:#B45309"><b>사람이 처리해야 하는 주문 '+
+    r.pendingManual+'건</b> — 주기 작업이 손대지 않는 상태라 <b>켜 둬도 저절로 풀리지 않습니다</b>(크론 정지와 무관). '+
+    esc(_rsStatusLine(manBy, true))+'</div>';
+  return out;
 }
 function _rsRender(){
   const box=_rsBox(), r=_RS; if(!box||!r) return;
@@ -10632,7 +11727,7 @@ function _rsRender(){
       <td style="text-align:right">${it.tabs||0}</td>
       <td style="text-align:right${it.pendingOrders?';color:#DC2626;font-weight:700':''}"
           title="${esc(_rsPendTitle(it))}">${it.pendingOrders||0}${
-        it.pendingOrders?`<div style="font-weight:400;font-size:10.5px;color:#8B94A1">${esc(_rsStatusLine(it.pendingByStatus, true))}</div>`:''}</td>
+        it.pendingOrders?`<div style="font-weight:400;font-size:10.5px;color:#8B94A1">${esc(_rsStatusLine(it.pendingByStatus, true))}</div>`:''}${_rsErrLines(it)}</td>
       <td style="font-size:11px;color:#8B94A1">${it.mirroredAt?esc(new Date(it.mirroredAt).toLocaleString('ko-KR')):'-'}</td>
     </tr>`).join('');
   box.innerHTML = `<div class="ovnote">
@@ -10641,9 +11736,7 @@ function _rsRender(){
       <button class="btn" onclick="_rsBox().innerHTML=''">닫기</button>
       <div style="margin-top:6px">탈시트 전환 화면의 <b>“남음”</b>은 마감 탭·아카이브만 남은 시트·연도 미확정 작업을 세지 않습니다 —
         그 시트들도 주기 작업(RAW 미러·인덱스 빌드)은 계속 읽습니다.</div>
-      ${r.pendingOrdersTotal?`<div style="margin-top:6px;color:#DC2626"><b>⚠ 시트에 아직 못 쓴 주문 ${r.pendingOrdersTotal}건</b> —
-        지금 주기 작업을 끄면 이 주문들이 시트에 영영 기록되지 않습니다.
-        ${_rsStatusLine(r.pendingByStatus)}</div>`:''}
+      ${_rsPendingBanner(r)}
       ${r.truncated?`<div style="margin-top:6px">목록은 ${(r.items||[]).length}개까지만 보여줍니다(전체 ${r.reading}개).</div>`:''}
     </div>
     <table class="lgtable" style="margin-top:8px"><thead><tr>
@@ -11129,7 +12222,7 @@ async function renderSettingsView(){
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임과 블랙리스트 관리기준을 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
   // ★ gatecriteria(블랙리스트 관리기준)는 공고별 [🚫 참여 리뷰어 관리]의 판정 기준이라 그 기능과 같은 범위(내부 담당자)로 연다.
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','gatecriteria','homebanner','notice'] : ['nickname','gatecriteria'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','inspectmsg','worktable','reviewtype','gatecriteria','capturelink','homebanner','notice'] : ['nickname','gatecriteria'] });
 }
 
 /* ══ 홈(첫 진입) — 시안 B 타일 런처형 · ① nav 상시 유지 (frontend/docs/design-workdesk-home.html) ══
@@ -13578,7 +14671,22 @@ function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
   const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';
   const box=$('#addbox'); if(box){ box.innerHTML=`<div class="add" style="margin-top:10px"><label>숨김 참여자 (${wd.hiddenRows.length})</label>${list}</div>`; box.scrollIntoView({behavior:'smooth'}); }
 }
-function canOpenExternalManualOrder(){ return STATE.role==='master'||STATE.role==='admin'; }
+/** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = 내부인 + 편집 허용명단)와 1:1.
+ *  ★ AE(staff)도 명단에 있으면 실행할 수 있다(사용자 확정 2026-08-20). 명단 판정이 아직 안 왔으면
+ *    버튼을 그리지 않는다 — "눌러도 403 나는 버튼"을 만들지 않는다(도착하면 `_emoSyncBtn` 이 채운다). */
+function canOpenExternalManualOrder(){
+  if(STATE.role==='master'||STATE.role==='admin') return true;
+  return STATE.role==='staff' && STATE.campEdit===true;
+}
+function _emoBtnHtml(){ return canOpenExternalManualOrder()
+  ? `<button class="btn" style="margin-top:10px" onclick="openExternalManualOrder()">외부모집 수동제출</button>` : ''; }
+/** 편집 허용명단 도착 후 버튼 자리를 채운다(홈의 [＋공고발행]과 같은 재료·같은 1회 조회). */
+function _emoSyncBtn(){
+  if(!_isInternalRole()) return;
+  const fill=()=>{ const b=document.getElementById('emoBtnBox'); if(b) b.innerHTML=_emoBtnHtml(); };
+  if(STATE.campEdit!=null){ fill(); return; }
+  if(typeof _loadCampPerm==='function') _loadCampPerm().then(fill).catch(()=>{});
+}
 function openExternalManualOrder(){
   const t=STATE.cur;
   if(!t){ toast('작업을 먼저 선택해 주세요.'); return; }
@@ -15410,7 +16518,11 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
      리뷰웹시스템[3버전]에서만 미리보기가 비어 보인다(실측). -->
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/recruit-modal.js?v=20260819-quota-fixed"></script>
-<script src="js/manual-order.js"></script>
+<!-- 외부모집 구매양식 수동제출 — 관리자 대시보드와 같은 공용 모달. 서버 경로만 Track B
+     네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/manual-order/* 에 도달 자체가 불가능
+     → /api/trackb/manual-order/* 프록시, 권한은 편집 허용명단). -->
+<script>window.MANUAL_ORDER_API = '/api/trackb/manual-order';</script>
+<script src="js/manual-order.js?v=20260820-trackb-proxy"></script>
 <script src="js/index-recruit.js?v=20260819-reviewmix-cache"></script>
 <script>
 /* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 리뷰웹시스템[3버전] 것으로 잇는다.
@@ -15495,7 +16607,7 @@ function _coShowTodayHoldReleaseModal(campaigns){
   var old=document.getElementById('coReleaseTodayHoldModal'); if(old) old.remove();
   var ov=document.createElement('div'); ov.id='coReleaseTodayHoldModal'; ov.className='modalov';
   var rows=campaigns.map(function(c){ return '<button type="button" class="co-release-row" data-id="'+esc(String(c.id||''))+'"><span class="co-release-radio"></span><span class="co-release-copy"><b>'+esc(c.title||c.id)+'</b><small>모집 '+Number(c.ops&&c.ops.totalConfirmed||c.current_slots||0)+' / '+Number(c.display_recruit_total||c.recruit_total||c.max_slots||0)+'명 · '+esc(c.channel||'채널 미설정')+'</small></span><span class="bd g">활성</span></button>'; }).join('');
-  ov.innerHTML='<style>#coReleaseTodayHoldModal .modalbox{width:660px;max-width:96vw}#coReleaseTodayHoldModal .modalbd{padding:18px}#coReleaseTodayHoldModal .co-release-note{display:flex;gap:9px;padding:11px 12px;background:#fff7e8;border:1px solid #f3d595;border-radius:9px;color:#75500f;font-size:12px;line-height:1.55}#coReleaseTodayHoldModal .co-release-search{width:100%;margin:16px 0 9px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}#coReleaseTodayHoldModal .co-release-list{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:9px}#coReleaseTodayHoldModal .co-release-row{width:100%;display:flex;align-items:center;gap:10px;text-align:left;background:var(--card);border:0;border-bottom:1px solid var(--line);padding:12px;cursor:pointer;color:var(--ink)}#coReleaseTodayHoldModal .co-release-row:last-child{border-bottom:0}#coReleaseTodayHoldModal .co-release-row:hover{background:#f7faff}#coReleaseTodayHoldModal .co-release-row.on{background:#eef5ff}#coReleaseTodayHoldModal .co-release-radio{width:17px;height:17px;border:2px solid #aab8cb;border-radius:50%;flex:0 0 auto}#coReleaseTodayHoldModal .co-release-row.on .co-release-radio{border-color:var(--pri);box-shadow:inset 0 0 0 3px #eef5ff;background:var(--pri)}#coReleaseTodayHoldModal .co-release-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}#coReleaseTodayHoldModal .co-release-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#coReleaseTodayHoldModal .co-release-copy small{color:var(--muted);font-size:11px}#coReleaseTodayHoldModal .co-release-selected{margin-top:12px;padding:10px 12px;border-radius:8px;background:#f4f7fb;color:var(--muted);font-size:12px}#coReleaseTodayHoldModal .co-release-selected b{color:var(--ink)}#coReleaseTodayHoldModal .modalft{display:flex;align-items:center;gap:8px;padding:13px 16px;border-top:1px solid var(--line)}#coReleaseTodayHoldModal .modalft .sp{flex:1}</style><section class="modalbox" role="dialog" aria-modal="true" aria-labelledby="coReleaseTodayTitle"><header class="modalhd"><b id="coReleaseTodayTitle">오늘 미제출 제한 해제</b><button class="btn" type="button" data-close>닫기</button></header><div class="modalbd"><div class="co-release-note"><b>!</b><span>선택한 활성 공고에서만 오늘 미제출 제한을 해제합니다. 15분이 지나면 제한이 다시 적용되며, 구매양식·작업보드 기록은 변경되지 않습니다.</span></div><input class="co-release-search" type="search" placeholder="공고명 또는 채널로 검색" aria-label="활성 모집공고 검색"><div class="co-release-list">'+(rows||'<div class="empty" style="padding:28px">현재 활성 모집공고가 없습니다.</div>')+'</div><div class="co-release-selected">선택 공고: <b>아직 선택되지 않았습니다</b></div></div><footer class="modalft"><span class="comuted">실행자·공고·해제 건수는 운영 로그에 남습니다.</span><span class="sp"></span><button class="btn" type="button" data-close>취소</button><button class="btn pri" type="button" data-run disabled>제한 해제</button></footer></section>';
+  ov.innerHTML='<style>#coReleaseTodayHoldModal .modalbox{width:660px;max-width:96vw}#coReleaseTodayHoldModal .modalbd{padding:18px}#coReleaseTodayHoldModal .co-release-note{display:flex;gap:9px;padding:11px 12px;background:#fff7e8;border:1px solid #f3d595;border-radius:9px;color:#75500f;font-size:12px;line-height:1.55}#coReleaseTodayHoldModal .co-release-search{width:100%;margin:16px 0 9px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}#coReleaseTodayHoldModal .co-release-list{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:9px}#coReleaseTodayHoldModal .co-release-row{width:100%;display:flex;align-items:center;gap:10px;text-align:left;background:var(--card);border:0;border-bottom:1px solid var(--line);padding:12px;cursor:pointer;color:var(--ink)}#coReleaseTodayHoldModal .co-release-row:last-child{border-bottom:0}#coReleaseTodayHoldModal .co-release-row:hover{background:#f7faff}#coReleaseTodayHoldModal .co-release-row.on{background:#eef5ff}#coReleaseTodayHoldModal .co-release-radio{width:17px;height:17px;border:2px solid #aab8cb;border-radius:50%;flex:0 0 auto}#coReleaseTodayHoldModal .co-release-row.on .co-release-radio{border-color:var(--pri);box-shadow:inset 0 0 0 3px #eef5ff;background:var(--pri)}#coReleaseTodayHoldModal .co-release-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}#coReleaseTodayHoldModal .co-release-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#coReleaseTodayHoldModal .co-release-copy small{color:var(--muted);font-size:11px}#coReleaseTodayHoldModal .co-release-selected{margin-top:12px;padding:10px 12px;border-radius:8px;background:#f4f7fb;color:var(--muted);font-size:12px}#coReleaseTodayHoldModal .co-release-selected b{color:var(--ink)}#coReleaseTodayHoldModal .modalft{display:flex;align-items:center;gap:8px;padding:13px 16px;border-top:1px solid var(--line)}#coReleaseTodayHoldModal .modalft .sp{flex:1}</style><section class="modalbox" role="dialog" aria-modal="true" aria-labelledby="coReleaseTodayTitle"><header class="modalhd"><b id="coReleaseTodayTitle">오늘 미제출 제한 해제</b><button class="btn" type="button" data-close>닫기</button></header><div class="modalbd"><div class="co-release-note"><b>!</b><span>선택한 활성 공고에서만 오늘 미제출 제한을 해제합니다. 30분이 지나면 제한이 다시 적용되며, 구매양식·작업보드 기록은 변경되지 않습니다.</span></div><input class="co-release-search" type="search" placeholder="공고명 또는 채널로 검색" aria-label="활성 모집공고 검색"><div class="co-release-list">'+(rows||'<div class="empty" style="padding:28px">현재 활성 모집공고가 없습니다.</div>')+'</div><div class="co-release-selected">선택 공고: <b>아직 선택되지 않았습니다</b></div></div><footer class="modalft"><span class="comuted">실행자·공고·해제 건수는 운영 로그에 남습니다.</span><span class="sp"></span><button class="btn" type="button" data-close>취소</button><button class="btn pri" type="button" data-run disabled>제한 해제</button></footer></section>';
   document.body.appendChild(ov); var selected=null, search=ov.querySelector('.co-release-search'), run=ov.querySelector('[data-run]'), selectedBox=ov.querySelector('.co-release-selected b');
   ov.querySelectorAll('[data-close]').forEach(function(b){ b.onclick=function(){ ov.remove(); }; });
   ov.querySelectorAll('.co-release-row').forEach(function(row){ row.onclick=function(){ selected=campaigns.find(function(c){ return String(c.id)===row.dataset.id; })||null; ov.querySelectorAll('.co-release-row').forEach(function(x){ x.classList.toggle('on',x===row); }); selectedBox.textContent=selected?(selected.title||selected.id):'아직 선택되지 않았습니다'; run.disabled=!selected; }; });

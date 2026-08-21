@@ -45,6 +45,20 @@ function __setPoolForTest(p) { _pool = p; }
 /** 리뷰제출 칸에 쓰는 값 — Track B write-back(`_wantMark`)과 같은 표기 */
 const SUBMIT_MARK = 'O';
 
+/**
+ * 그 탭이 쓰는 상태 칸(리뷰제출·입금) 헤더명 — **줄이 아니라 탭 단위**로 해석한다.
+ * ★ 소비처가 둘이다: 무시트 상태 기록(markStatusCell)과 **관리자 수동 리뷰제출**
+ *   (수동/작업표로 추가한 줄은 `campaign_participants.submit_col` 이 비어 있다 —
+ *    그 칸은 `review_index` 복제 경로에서만 채워진다). 각자 SQL 을 쓰면 "장부는 A 칸에
+ *    쓰는데 수동 제출은 B 칸에 쓰는" 상태가 된다.
+ * @param {object} db  pool 또는 **트랜잭션 client**(잠근 tx 안에서 부를 수 있어야 한다)
+ */
+async function statusHeaderForTab(db, { sheetId, tabName, kind = 'submit' } = {}) {
+  if (!db || !sheetId || !tabName) return '';
+  const col = kind === 'paid' ? 'submit_col2' : 'submit_col';
+  return _resolveStatusHeader(db, { sheetId, tabName, col, kind });
+}
+
 async function _resolveStatusHeader(db, { sheetId, tabName, col, kind }) {
   const { rows } = await db.query(
     `SELECT ${col} AS h FROM review_index
@@ -223,6 +237,48 @@ async function markSheetlessPostDate({ sheetId, tabName, rowIndex, date, by = 's
   if (!header) return { handled: true, ok: false, reason: 'no_post_date_column' };
 
   return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value: text, by });
+}
+
+/**
+ * 무시트 탭의 **구매일자 칸**에 날짜를 기록한다 (2026-08-21 · 달력 편집 창구).
+ *
+ * ★ 어느 칸인가 = `campaignSchedule.findDateColumnIndex` 단일 출처(재번호·일정 인식과 같은 판정).
+ * ★ 표기 = `worktablePlan.sheetDateStr`(`M / D (요일)`) — 재번호 파서(parseDateColumn)가 그대로 읽는다.
+ * ★ 시트 기반 탭은 handled:false(시트가 진실원본 — 그쪽 편집은 시트에서).
+ * @param {string} o.dateYmd 'YYYY-MM-DD'
+ */
+async function markSheetlessPurchaseDate({ sheetId, tabName, rowIndex, dateYmd, by = 'system' } = {}) {
+  if (!sheetId || !tabName || !rowIndex) return { handled: false };
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateYmd || '').trim());
+  if (!m) return { handled: true, ok: false, reason: 'bad_date' };
+  const o = { y: +m[1], m: +m[2], d: +m[3] };
+  const chk = new Date(Date.UTC(o.y, o.m - 1, o.d));
+  if (chk.getUTCFullYear() !== o.y || chk.getUTCMonth() + 1 !== o.m || chk.getUTCDate() !== o.d) {
+    return { handled: true, ok: false, reason: 'bad_date' };
+  }
+
+  const db = getPool();
+  let sheetless = false;
+  try { sheetless = await require('../utils/sheetlessScope').isSheetless(db, sheetId, tabName); }
+  catch (_) { return { handled: false }; }
+  if (!sheetless) return { handled: false };
+
+  let headers = [];
+  try {
+    const { rows } = await db.query(
+      `SELECT COALESCE(detected_headers, headers) AS h FROM raw_sheet_tabs
+        WHERE sheet_id = $1 AND tab_name = $2 ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
+      [sheetId, tabName]);
+    headers = Array.isArray(rows[0] && rows[0].h) ? rows[0].h : [];
+  } catch (e) {
+    return { handled: true, ok: false, reason: 'lookup_failed', message: e.message };
+  }
+  const di = require('./campaignSchedule.service').findDateColumnIndex(headers);
+  if (di < 0) return { handled: true, ok: false, reason: 'no_date_column' };
+  const header = String(headers[di] || '').trim();
+
+  const value = require('../utils/worktablePlan').sheetDateStr(o);
+  return _writeCellAndRebuild(db, { sheetId, tabName, rowIndex, header, value, by });
 }
 
 /** 작업표 한 칸 기록 + 장부 재생성 — 상태 칸·memo 칸 공용(쓰기 규율 사본 금지) */
@@ -409,9 +465,11 @@ module.exports = {
   writeRowJsonCell,
   removeRowJsonCell,
   markLedgerDirty,
+  statusHeaderForTab,
   verifyStatusCell,
   markSheetlessMemo,
   markSheetlessPostDate,
+  markSheetlessPurchaseDate,
   backfillReviewSubmitTimes,
   REVIEW_SUBMIT_TIME_BACKFILL_DAYS,
   SUBMIT_MARK,
