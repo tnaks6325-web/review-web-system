@@ -1218,13 +1218,37 @@ function onMultiAccountToggle(on) {
   renderPartCheck();
 }
 
-function rfSetInflowType(type, button) {
+function rfSetInflowType(type, button, opts) {
   const value = type === "guide" ? "guide" : "link";
+  // ★ 사람이 누른 순간부터는 사람이 정한 값 — 출처 안내를 지운다.
+  //   (모달 오픈 말미의 동기화 호출은 `{silent:true}` 라 표식을 유지한다.)
+  if (!(opts && opts.silent)) window._rfInflowOrigin = "";
   const hidden = document.getElementById("rf_inflow_type_value");
   if (hidden) hidden.value = value;
   const root = document.getElementById("rf_inflow_type_ui");
   root?.querySelectorAll("button").forEach((el) => el.classList.toggle("active", el === button || el.dataset.inflow === value));
+  _renderInflowOriginNote();
   syncRecruitProductMainUrl();
+}
+
+/**
+ * 유입방식 출처 안내 — 조용한 대체 금지.
+ * 작업오더에서 불러왔을 때만 한 줄로 말한다(저장해야 공고에 굳는다).
+ */
+function _renderInflowOriginNote() {
+  const ui = document.getElementById("rf_inflow_type_ui");
+  if (!ui || !ui.parentNode) return;
+  let box = document.getElementById("rf_inflow_origin_note");
+  if (window._rfInflowOrigin !== "order") { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "rf_inflow_origin_note";
+    box.style.cssText = "margin-top:5px;padding:5px 7px;border-radius:6px;font-size:10px;font-weight:800;line-height:1.5;"
+      + "background:#ECFDF5;color:#065F46;border:1px solid #6EE7B7";
+    ui.parentNode.appendChild(box);
+  }
+  const v = document.getElementById("rf_inflow_type_value")?.value === "guide" ? "가이드유입" : "링크유입";
+  box.textContent = "이 공고에는 유입방식이 저장되어 있지 않아 작업오더 값(" + v + ")을 불러왔습니다 — 저장하면 공고에 반영됩니다.";
 }
 window.rfSetInflowType = rfSetInflowType;
 
@@ -2543,6 +2567,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   // 혼합 리뷰 프리필은 동적으로 생성되는 입력칸의 진실원본이다. 새 모달을 열 때 이전 공고의
   // 수량이 섞이지 않도록 함께 초기화한다.
   window._rfGlobalReviewTypeMix = [];
+  window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
@@ -2714,8 +2739,17 @@ async function openRecruitModal(id, prefill, woOrderId) {
         _rfPickTransferBank(c.transfer_bank || "");
         setV("rf_transfer_memo", c.transfer_memo || "");
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
+        /* ★★ 유입방식 — 저장값이 없을 때만 **연결 작업오더**의 값으로 채운다(2026-08-21).
+           종전엔 `wd.inflowType === "guide" ? "guide" : "link"` 라 **값이 없으면 무조건 링크유입**으로
+           열렸고, 그대로 저장하면 그 link 가 `work_detail` 에 굳어 리뷰어 화면의 작업오더 폴백
+           (`_lookupInflowType`)을 이긴다 → 가이드유입 공고에 [🔗 상품 페이지 열기]가 노출된다.
+           ★ 저장값이 있으면(`link` 포함) **절대 덮지 않는다** — 사람이 정한 값이다.
+           ★ 작업오더에도 없으면 종전 폴백(link) 그대로. */
+        const _savedInflow = (wd.inflowType === "guide" || wd.inflowType === "link") ? wd.inflowType : "";
+        const _orderInflow = (json.orderInflowType === "guide" || json.orderInflowType === "link") ? json.orderInflowType : "";
+        window._rfInflowOrigin = (!_savedInflow && _orderInflow) ? "order" : "";
         const _inflowInput = document.getElementById("rf_inflow_type_value");
-        if (_inflowInput) _inflowInput.value = wd.inflowType === "guide" ? "guide" : "link";
+        if (_inflowInput) _inflowInput.value = _savedInflow || _orderInflow || "link";
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
@@ -2850,7 +2884,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   onFeeScheduleToggle(!!document.getElementById("rf_fee_sched_on")?.checked);
   rfSetWeekendPolicy(!!document.getElementById("rf_skip_weekends")?.checked);
   rfSetMultiAccount(!!document.getElementById("rf_multi_account")?.checked);
-  rfSetInflowType(document.getElementById("rf_inflow_type_value")?.value || "link");
+  rfSetInflowType(document.getElementById("rf_inflow_type_value")?.value || "link", null, { silent: true });
   syncRecruitProductMainUrl();
   modal.classList.remove("hidden");
   modal.style.display = "";
@@ -3141,6 +3175,18 @@ function _renderReviewMixOriginNote() {
     root.insertBefore(box, root.firstChild);
   }
   if (origin === 'order') {
+    /* ★★ 합계가 총인원과 다르면 **저장이 막힌다**(validateRecruitReviewTypeMix) —
+       그런데도 "저장하면 반영됩니다"라고 말하면 화면이 거짓말을 한다(실측: 작업오더 조합
+       포토 70 + 텍스트 30 = 100건인데 총건수는 300건). 사실과 다음 행동을 말한다. */
+    const _mix = (typeof getRecruitReviewTypeMix === 'function') ? getRecruitReviewTypeMix() : [];
+    const _sum = _mix.reduce((t, r) => t + (Number(r.quantity) || 0), 0);
+    const _exp = Math.max(0, Number(document.getElementById('rf_recruit_total')?.value) || 0);
+    if (_exp > 0 && _sum !== _exp) {
+      box.style.background = '#FFFBEB'; box.style.color = '#92400E'; box.style.border = '1px solid #FCD34D';
+      box.textContent = '작업오더 조합(합계 ' + _sum.toLocaleString() + '건)이 총건수 '
+        + _exp.toLocaleString() + '건과 달라 그대로 저장할 수 없습니다 — 총건수에 맞춰 조정해주세요.';
+      return;
+    }
     box.style.background = '#ECFDF5'; box.style.color = '#065F46'; box.style.border = '1px solid #6EE7B7';
     box.textContent = '작업오더에 적힌 리뷰 조합을 불러왔습니다 — 확인 후 저장하면 공고에 반영됩니다.';
   } else {

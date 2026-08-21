@@ -196,8 +196,16 @@ t('두 조회 엔드포인트가 msgType·meta 를 내려준다', () => {
 t('★ 기존 CS 이미지 허용목록을 넓히지 않았다(파일ID로 그린다)', () => {
   assert.ok(/\/api\/drive\/image\/' \+ encodeURIComponent\(id\)/.test(CARD));
   assert.ok(/\/\^\[-\\w\]\{20,\}\$\/\.test\(id\)/.test(CARD), '파일ID 형식 검증 없이 <img src> 에 넣는다');
+  /* ⚠ 2026-08-21: 같은 정규식이 두 라우트에 복사돼 있던 것을 **단일 출처**로 옮겼다
+     (`utils/csImageUrls` — 한쪽만 넓히면 그 경로로 임의 URL 이 들어온다). 검사 의미는 불변:
+     "우리 프록시 주소만 통과한다". 소비처는 그 단일 출처를 부르는지만 본다. */
+  const U = require('../src/utils/csImageUrls');
+  assert.ok(U.sanitizeCsImageUrls(['https://x.dev/api/order/guide-image/abcdefghij0123456789']).length === 1,
+    '우리 프록시 주소가 막힌다');
+  assert.ok(U.sanitizeCsImageUrls(['https://evil.example/a.png',
+    'https://x.dev/api/order/guide-image/short']).length === 0, '이미지 허용목록이 바뀌었다');
   [['cs.routes.js', CSR], ['reviewer.routes.js', RVR]].forEach(([n, s]) =>
-    assert.ok(/\/api\\\/order\\\/guide-image\\\/\[-\\w\]\{20,\}\$/.test(s), n + ': 이미지 허용목록이 바뀌었다'));
+    assert.ok(/require\((['"]).*csImageUrls\1\)/.test(s), n + ': 허용목록 단일 출처를 부르지 않는다'));
 });
 
 /* ── 7) 사본 금지 · 배선 ───────────────────────────────────── */
