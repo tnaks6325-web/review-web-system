@@ -2255,6 +2255,21 @@ table.wbl-t tr.tdone .wbl-nm{color:var(--muted)}
   border-bottom:0;box-shadow:inset 0 -1px 0 var(--border,#e5e7eb)}
 #rnOv .rn-tools{display:flex;gap:6px;align-items:center;margin:8px 0 2px}
 #rnOv .rn-tools input{flex:1;min-width:0;height:28px;padding:0 9px;border:1px solid var(--line,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card,#fff);color:var(--ink,#111827);box-sizing:border-box}
+/* 💬 리뷰어에게 메시지 — 받는 사람 목록이 다건이면 길어지므로 본문만 스크롤한다.
+   ★ `min-height:0` 이 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다(레포 상습 함정). */
+#rmOv .wbl-dlg{width:min(520px,100%);max-height:86vh;display:flex;flex-direction:column}
+#rmOv .wbl-db{flex:1;min-height:0;overflow:auto}
+#rmOv .rmto{background:var(--info-soft,#eff6ff);border:1px solid var(--info-line,#bfdbfe);border-radius:9px;padding:8px 11px;font-size:11.5px}
+#rmOv .rmrow{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:11.5px}
+#rmOv .rmrow b{white-space:nowrap}
+#rmOv .rmrow .why{color:var(--muted,#6b7280);font-size:10.5px}
+#rmOv .rmbad{margin-top:9px;padding:9px 11px;border:1px solid #f3c0c0;background:#fef2f2;border-radius:9px;color:#b42318;font-size:11.5px}
+#rmOv .rmwarn{margin-top:9px;padding:9px 11px;border:1px solid #f0dcb8;background:var(--warn-soft,#fffbeb);border-radius:9px;font-size:11.5px}
+#rmOv textarea{width:100%;box-sizing:border-box;margin-top:10px;min-height:96px;resize:vertical;padding:9px;
+  border:1px solid var(--line,#e5e7eb);border-radius:9px;font-size:12px;font-family:inherit;line-height:1.6;
+  background:var(--card,#fff);color:var(--ink,#111827);outline:none}
+#rmOv .rmsub{margin-top:5px;font-size:10.5px;color:var(--faint,#9ca3af)}
+#rmOv .rmok{margin-top:9px;padding:9px 11px;border:1px solid #bbf7d0;background:#f0fdf4;border-radius:9px;color:#166534;font-size:11.5px}
 #hbOv table.wbl-t{font-size:11.5px} #hbOv table.wbl-t td{padding:4px 8px;white-space:nowrap}
 #ddOv .wbl-db{flex:1;min-height:0;overflow:auto}
 #ddOv table.wbl-t{font-size:11.5px}
@@ -6090,9 +6105,20 @@ function _condCardHtml(wd,d,m){
      `wd.todayProgress.quota` 를 그대로 쓴다(재계산 사본 0). 못 받으면 종전 값(공고→발주)으로 폴백. */
   const tq=(wd&&wd.todayProgress&&wd.todayProgress.ok!==false&&wd.todayProgress.quota!=null)
     ? Number(wd.todayProgress.quota) : null;
-  const daily=tq!=null
-    ? `${tq.toLocaleString()}<span class="u">건/일</span> <span class="cndchip" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">공고 기준</span>`
-    : (n(cd.dailyLimit)==null?null:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`);
+  /* ★★ 일건수는 **둘 다** 적는다(사용자 확정 2026-08-21): `발주 기준 10건/일 (공고 설정 오늘 16건)`.
+     왼쪽 = 발주서에 적힌 계약상 하루 건수(변하지 않는 기준선), 괄호 = 모집인원조절·이월이 반영된
+     오늘 실제 정원. 한쪽만 적으면 "계약은 10인데 오늘 왜 16?"을 화면에서 확인할 길이 없다.
+     ★ 없는 쪽은 지어내지 않는다 — 있는 값만 적고, 둘 다 없으면 [미설정]으로 떨어진다. */
+  const odc=n(cd.orderDailyCount);
+  const daily=(()=>{
+    const today=tq!=null?`공고 설정 오늘 ${tq.toLocaleString()}건`:'';
+    if(odc!=null&&odc>0){
+      const base=`발주 기준 ${odc.toLocaleString()}<span class="u">건/일</span>`;
+      return today?`${base} <span class="u" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">(${today})</span>`:base;
+    }
+    if(tq!=null) return `${tq.toLocaleString()}<span class="u">건/일</span> <span class="cndchip" title="모집인원조절·이월이 반영된 모집공고의 오늘 일건수입니다.">공고 기준</span>`;
+    return n(cd.dailyLimit)==null?null:`${Number(cd.dailyLimit).toLocaleString()}<span class="u">건/일</span>`;
+  })();
   /* ★★★ 결제금액 — **`work_orders.pay_amount` 는 1건당이 아니라 결제합계다**
      (`frontend/docs/prd-order-field-mapping.html`: "일건수/모집건수/**결제합계** → daily_count ·
       recruit_count · pay_amount"). 실측도 총액이다 — 위프 800건 17,600,000(=22,000×800) ·
@@ -6144,7 +6170,10 @@ function _condCardHtml(wd,d,m){
     payRows=`<dt>결제금액</dt><dd>${per}${tot}</dd>`;
   }
   const rows=[
-    ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`],
+    /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
+       (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
+    ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
+      (cd.recruitTotalSource==='work_order'?' <span class="cndchip" title="모집공고에 총인원이 없어 발주서의 총건수가 정원으로 적용되고 있습니다.">발주 기준</span>':'')],
     ['일건수','quota',   daily],
     ['@pay',null,null],
     ['구매채널','camp',  ch?esc(ch):null],
@@ -8243,11 +8272,18 @@ function _openCellMenu(x,y,td){
   const menuRowHasOrder=!!(selectedRow&&selectedRow.hasOrder);
   const menuCanOrderDelete=(STATE.role==='master'||STATE.role==='admin');
   const isDateCol = field && field.indexOf('col:')===0 && _isPurchaseDateHeader(field.slice(4));
+  /* 💬 리뷰어에게 메시지 — 그 줄(들)의 리뷰어에게 1:1 문의방을 열고 보낸다.
+     ★ 광고주에겐 그리지 않는다(서버 게이트와 1:1). 받는 사람 판정은 **서버가** 하므로
+       여기서는 "줄이 잡혀 있는가"만 본다(보낼 수 없는 줄의 사유는 팝업이 말한다). */
+  const msgRowIds=_msgCanSend()?_msgRowIds():[];
+  const msgN=new Set(msgRowIds).size;
   m.innerHTML=
       (isReviewCell
         ? row('📎','리뷰 대신 제출',"openManualReviewSubmission()",!!reviewBlockReason,false,
               reviewBlockReason||'리뷰 캡처를 붙여넣으면 이 리뷰어의 리뷰제출이 완료 처리됩니다')
         : (one?row(isDateCol?'📅':'✏️', isDateCol?'날짜 선택':'이 셀 편집',"_menuEditCell()",!editable,false,editable?'':_cellLockReason(td,selectedRow)):''))
+    + (msgN?row('💬', msgN>1?`리뷰어 ${msgN}명에게 메시지`:'리뷰어에게 메시지', "openReviewerMsg()", false, false,
+        msgN>1?'선택한 줄의 리뷰어들에게 같은 내용을 보냅니다(같은 리뷰어는 한 번만)':'이 줄 리뷰어의 1:1 문의방으로 보냅니다'):'')
     + row('📋', nCells>1?`복사 (${nCells}칸)`:'복사', 'copyCellSelection()')
     + (canPaste?row('📥','붙여넣기','pasteCellSelection()'):'')
     + (hasEdited?row('↩','편집 되돌리기','_revertSelection()'):'')
@@ -8274,6 +8310,157 @@ function _openCellMenu(x,y,td){
 }
 function _closeCellMenu(){ const m=$('#gcellmenu'); if(m) m.classList.remove('show'); }
 function _menuEditCell(){ const td=_selAnchorTd(); _closeCellMenu(); if(td&&td.classList.contains('gedit')) beginEditCell(td); }
+
+/* ══ 💬 리뷰어에게 메시지 (우클릭 → 1:1 문의방을 관리자가 먼저 연다) ═══════════════
+   종전에는 **리뷰어가 먼저 문의를 보내야만** 방이 생겼다. 이제 표에서 그 줄을 우클릭해
+   바로 보낼 수 있다. 방을 여는 실행부는 서버의 `csBridge.postAdminNotice` 한 벌이다.
+   ★★ 받는 사람은 표의 명의가 아니라 **로그인 본계정**이다 — 리뷰어 문의함이 로그인 phone8
+      하나로만 조회하므로, 명의(타계정) 번호로 열면 리뷰어에게 안 보이는 유령 방이 된다.
+      판정은 **서버 단일 출처**(`csRecipient`)이고 화면은 그 결과를 **그리기만** 한다.
+   ★ 광고주에게는 메뉴를 그리지 않는다(서버도 internalMiddleware 로 막는다). */
+let _RM=null;
+function _rmClose(){ const o=document.getElementById('rmOv'); if(o) o.remove(); _RM=null; }
+/* ★ Esc 리스너는 최상위에 한 번만 — 열 때마다 걸면 겹쳐 쌓인다 */
+if(!window._rmKeyBound){
+  window._rmKeyBound=true;
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&document.getElementById('rmOv')) _rmClose(); });
+}
+/* 선택 범위에 걸린 **줄 id 목록**(화면 순서·중복 없음). 셀 여러 칸을 잡아도 줄은 한 번만 센다. */
+function _msgRowIds(){
+  const g=_selectionGrid(); const out=[], seen=new Set();
+  g.forEach(line=>{
+    for(const td of line){
+      const id=td.getAttribute('data-id')||td.getAttribute('data-rid');
+      if(id && !seen.has(id)){ seen.add(id); out.push(id); return; }
+    }
+  });
+  return out;
+}
+function _msgCanSend(){ return !!(STATE.cur && _isInternalRole()); }
+function openReviewerMsg(){
+  const t=STATE.cur, ids=_msgRowIds();
+  _closeCellMenu();
+  if(!_msgCanSend() || !ids.length) return;
+  _RM={ sheetId:t.sheetId, tabName:t.tabName, ids, items:null, err:null, busy:false, canOpen:false, sent:null };
+  const ov=document.createElement('div'); ov.className='wbl-ov'; ov.id='rmOv';
+  ov.innerHTML=`<div class="wbl-dlg"><div class="wbl-dh">💬 리뷰어에게 메시지</div>
+    <div class="wbl-db" id="rmBody"></div>
+    <div class="wbl-df" id="rmFoot"></div></div>`;
+  document.body.appendChild(ov);   // ★ body 직속 · 바깥클릭으로 닫지 않는다(입력한 내용 보호)
+  _rmRenderForm(); _rmLoad();
+}
+async function _rmLoad(){
+  if(!_RM) return;
+  try{
+    const q=`?sheetId=${encodeURIComponent(_RM.sheetId)}&tabName=${encodeURIComponent(_RM.tabName)}&ids=${encodeURIComponent(_RM.ids.join(','))}`;
+    const d=await api('/api/trackb/cs/participant-recipients'+q);
+    if(!_RM) return;
+    if(!d||d.ok===false){ _RM.err=(d&&d.error)||'받는 사람을 확인하지 못했습니다.'; }
+    else { _RM.items=d.items||[]; _RM.canOpen=!!d.canOpenThread; }
+  }catch(e){ if(_RM) _RM.err='받는 사람을 확인하지 못했습니다 — '+(e.message||'네트워크 오류'); }
+  _rmPaint();
+}
+/* 틀은 한 번만 그린다 — 재렌더로 textarea 를 다시 만들면 **한글 IME 조합이 깨진다**
+   (홈 목록 검색 `ㅁ며면면` 실측 계열). 목록·푸터만 갈아끼운다. */
+function _rmRenderForm(){
+  const b=document.getElementById('rmBody'); if(!b) return;
+  b.innerHTML=`<div id="rmList" class="rmto">받는 사람을 확인하는 중…</div>
+    <textarea id="rmText" placeholder="보낼 내용을 입력하세요 (최대 1000자)"></textarea>
+    <div class="rmsub">보내면 리뷰어에게 <b>즉시 도착</b>합니다 · 보낸 메시지는 회수할 수 없습니다.</div>
+    ${(STATE.role==='master'||STATE.role==='admin')?'':'<div class="rmwarn">보낸 뒤 리뷰어의 <b>답장은 관리자(master/admin)</b>가 C/S 문의창구에서 확인합니다.</div>'}`;
+  _rmPaintFoot();
+}
+function _rmPaint(){
+  const l=document.getElementById('rmList'); if(!l) return;
+  if(_RM.err){ l.className='rmbad'; l.textContent=_RM.err; _rmPaintFoot(); return; }
+  const items=_RM.items||[];
+  if(!items.length){ l.className='rmto'; l.textContent='받는 사람을 확인하는 중…'; _rmPaintFoot(); return; }
+  const oks=items.filter(x=>x.ok), bad=items.filter(x=>!x.ok);
+  // 같은 본계정 = 같은 방 → 한 번만 보낸다(서버도 같은 규칙으로 합친다).
+  const seen=new Set(), uniq=[]; oks.forEach(x=>{ if(seen.has(x.phone8)) return; seen.add(x.phone8); uniq.push(x); });
+  const line=x=>`<div class="rmrow"><b>${esc(x.name||x.rowName||'(이름 없음)')}</b>
+      <span class="mono">…${esc(String(x.phone8||'').slice(-4))}</span>
+      <span class="why">${x.isSub?`타계정 <b>${esc(x.rowName||'')}</b> 명의로 참여 · <b>본계정</b>으로 보냅니다`
+        :(x.nameMismatch?`표 이름 <b>${esc(x.rowName||'')}</b> ↔ 등록 이름 <b>${esc(x.name||'')}</b> — 확인해 주세요`
+        :esc(x.viaLabel||''))}</span></div>`;
+  l.className='rmto';
+  l.innerHTML= uniq.length
+    ? `<div style="font-weight:700;margin-bottom:4px">받는 사람 ${uniq.length}명</div>${uniq.map(line).join('')}`
+      + (oks.length>uniq.length?`<div class="why" style="margin-top:5px">같은 리뷰어의 줄 ${oks.length-uniq.length}건은 <b>같은 문의방</b>이라 한 번만 보냅니다.</div>`:'')
+    : '<b>보낼 수 있는 줄이 없습니다.</b>';
+  if(bad.length){
+    l.insertAdjacentHTML('afterend',
+      `<div class="rmbad" id="rmBad"><b>보낼 수 없는 줄 ${bad.length}건</b>${
+        bad.slice(0,8).map(x=>`<div class="rmrow"><b>${esc(x.rowName||('#'+(x.seq||'')))}</b><span class="why">${esc(x.reason||'')}</span></div>`).join('')
+      }${bad.length>8?`<div class="why">외 ${bad.length-8}건</div>`:''}</div>`);
+  }
+  const old=document.getElementById('rmBad');
+  if(old && !bad.length) old.remove();
+  _rmPaintFoot();
+}
+function _rmSendable(){ return !!(_RM && !_RM.busy && (_RM.items||[]).some(x=>x.ok)); }
+function _rmPaintFoot(){
+  const f=document.getElementById('rmFoot'); if(!f) return;
+  const oks=((_RM&&_RM.items)||[]).filter(x=>x.ok);
+  const seen=new Set(); oks.forEach(x=>seen.add(x.phone8));
+  f.innerHTML=`<button class="btn" onclick="_rmClose()">취소</button>
+    <button class="btn pri" onclick="_rmSend()"${_rmSendable()?'':' disabled'}>${
+      _RM&&_RM.busy?'보내는 중…':(seen.size>1?`${seen.size}명에게 보내기`:'보내기')}</button>`;
+}
+async function _rmSend(){
+  if(!_rmSendable()) return;
+  const ta=document.getElementById('rmText');
+  const content=String(ta&&ta.value||'').trim();
+  if(!content){ toast('보낼 내용을 입력하세요'); if(ta) ta.focus(); return; }
+  if(content.length>1000){ toast('내용은 1000자까지 보낼 수 있습니다'); return; }
+  const oks=(_RM.items||[]).filter(x=>x.ok);
+  // ★ 미리보기에서 본 대상 그대로 보낸다 — 그 사이 바뀌었으면 서버가 그 건을 보내지 않는다(TOCTOU).
+  const expect={}; oks.forEach(x=>{ expect[x.participantId]=x.phone8; });
+  _RM.busy=true; _rmPaintFoot();
+  let d=null;
+  try{
+    d=await api('/api/trackb/cs/notify-participants',{method:'POST',body:JSON.stringify({
+      sheetId:_RM.sheetId, tabName:_RM.tabName, participantIds:oks.map(x=>x.participantId), content, expect })});
+  }catch(e){ d={ok:false,error:'전송 실패 — '+(e.message||'네트워크 오류')}; }
+  if(!_RM) return;
+  _RM.busy=false;
+  if(!d||(d.ok===false&&!(d.sent&&d.sent.length))){
+    _RM.err=null; _rmPaintFoot();
+    const l=document.getElementById('rmList');
+    if(l) l.insertAdjacentHTML('afterend',`<div class="rmbad">${esc((d&&d.error)||'메시지를 보내지 못했습니다.')}</div>`);
+    return;   // ★ 입력한 내용은 그대로 둔다(다시 누르면 재시도)
+  }
+  _RM.sent=d; _rmRenderResult();
+}
+function _rmRenderResult(){
+  const b=document.getElementById('rmBody'), f=document.getElementById('rmFoot'); if(!b||!f) return;
+  const d=_RM.sent||{}, sent=d.sent||[], failed=d.failed||[], merged=d.merged||[];
+  b.innerHTML=`<div class="rmok"><b>${sent.length}명에게 보냈습니다.</b>
+      ${sent.slice(0,8).map(s=>`<div class="rmrow"><b>${esc(s.name||'')}</b><span class="mono">…${esc(s.phone8Tail||'')}</span>${s.isSub?'<span class="why">타계정 참여 · 본계정으로 전송</span>':''}</div>`).join('')}
+      ${sent.length>8?`<div class="why">외 ${sent.length-8}명</div>`:''}</div>
+    ${merged.length?`<div class="rmwarn">같은 리뷰어의 줄 ${merged.length}건은 <b>같은 문의방</b>이라 한 번만 보냈습니다.</div>`:''}
+    ${failed.length?`<div class="rmbad"><b>보내지 못한 줄 ${failed.length}건</b>${
+      failed.slice(0,8).map(x=>`<div class="rmrow"><b>${esc(x.rowName||'')}</b><span class="why">${esc(x.reason||'')}</span></div>`).join('')
+    }${failed.length>8?`<div class="why">외 ${failed.length-8}건</div>`:''}</div>`:''}`;
+  // ★ [문의방 열기]는 **C/S 본문을 볼 수 있는 사람**(master/admin)에게만 — AE 에게 주면 막다른 길이다.
+  f.innerHTML=`${(_RM.canOpen&&sent.length===1)?`<button class="btn" onclick="_rmOpenThread()">문의방 열기</button>`:''}
+    <button class="btn pri" onclick="_rmClose()">닫기</button>`;
+}
+/* 보낸 방으로 이동 — C/S 화면 목록의 그 줄을 **눌러서** 연다(이름·연락처를 여기서 넘기지 않는다:
+   그 값은 목록 행이 이미 들고 있고, 화면에 PII 를 한 번 더 실을 이유가 없다). */
+function _rmOpenThread(){
+  const s=((_RM&&_RM.sent&&_RM.sent.sent)||[])[0]; if(!s||!s.threadId) return;
+  const tid=s.threadId;
+  _rmClose(); switchView('cs');
+  let n=0;
+  const tick=()=>{
+    const row=document.querySelector(`.cs-room-row[data-tid="${tid}"]`);
+    if(row){ row.click(); row.scrollIntoView({block:'center'}); return; }
+    if(++n<40) setTimeout(tick,150);
+    else toast('문의방을 목록에서 찾지 못했습니다 — [새로고침]을 눌러 주세요');
+  };
+  setTimeout(tick,250);
+}
 /* ── 관리자 수동 리뷰제출 (인라인 팝오버 · 붙여넣기 전용, 사용자 확정 2026-08-21) ─────────────
    ★ 화면 중앙 모달이 아니라 **누른 셀 옆**에 띄운다(구매일자 달력 `#wdDatePick` 과 같은 앵커 규율).
      팝오버는 **body 직속** — 표는 가로 스크롤 컨테이너라 그 안에 그리면 잘린다.
@@ -8313,6 +8500,20 @@ function _manualReviewDrop(i){
   const f=st.files[i]; if(!f) return;
   try{ if(f._url) URL.revokeObjectURL(f._url); }catch(_){ }
   st.files.splice(i,1); st.err=''; _manualReviewRender();
+}
+/* 서버 오류 코드는 그대로 보여 주면 담당자가 손쓸 수 없다 — **무엇이 문제이고 다음에 무엇을 하는지**로 옮긴다.
+   ★ 모르는 코드는 지어내지 않고 원문을 남긴다(조용히 "실패했습니다"로 뭉뚱그리면 원인이 사라진다). */
+const _MR_ERR={
+  already_submitted:'이미 리뷰제출 처리된 참여자입니다.',
+  row_not_found:'이 줄을 찾지 못했습니다 — 표를 새로고침한 뒤 다시 시도해 주세요.',
+  submit_column_missing:'이 작업표에 리뷰제출 열이 없습니다 — [설정 › 작업표 표준 열]에서 리뷰제출 칸을 만든 뒤 다시 시도해 주세요.',
+  review_history_missing:'이 줄이 아직 리뷰어 참여내역(검색 명단)에 없습니다 — 수동으로 추가한 줄이면 장부가 다시 만들어진 뒤에 처리할 수 있습니다.',
+  review_file_not_owned:'첨부가 이 줄의 것으로 기록되지 않았습니다 — 다시 붙여넣어 주세요.',
+  invalid_review_files:'첨부 파일 정보가 올바르지 않습니다 — 다시 붙여넣어 주세요.',
+};
+function _manualReviewErr(code, fallback){
+  const k=String(code||'').trim();
+  return _MR_ERR[k] || (k?`${fallback||'처리에 실패했습니다.'} (${k})`:(fallback||'처리에 실패했습니다.'));
 }
 function _manualReviewB64(file){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onerror=()=>reject(new Error('파일을 읽지 못했습니다.')); reader.onload=()=>{ const s=String(reader.result||''); resolve(s.slice(s.indexOf(',')+1)); }; reader.readAsDataURL(file); }); }
 /* 앵커 셀 기준 배치 — 셀 바로 아래·왼쪽 정렬, 화면 밖이면 위/안쪽으로 클램프(달력과 같은 계산). */
@@ -8400,7 +8601,7 @@ async function _manualReviewSubmit(){
     const fileIds=(up&&up.files||[]).map(f=>f&&f.fileId).filter(Boolean);
     if(!up||!up.ok||fileIds.length!==files.length) throw new Error((up&&up.error)||'리뷰 이미지 업로드에 실패했습니다.');
     const saved=await api('/api/trackb/workdesk/manual-review-submit',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,rowId:state.row.id,fileIds})});
-    if(!saved||!saved.ok) throw new Error((saved&&saved.error)==='already_submitted'?'이미 리뷰제출 처리된 참여자입니다.':((saved&&saved.error)||'제출 처리에 실패했습니다.'));
+    if(!saved||!saved.ok) throw new Error(_manualReviewErr(saved&&saved.error,'제출 처리에 실패했습니다.'));
     _manualReviewClose(); await reloadWorkdesk(); toast('관리자 수동 리뷰제출이 완료되었습니다.');
   }catch(e){
     if(_manualReviewState){ _manualReviewState.saving=false; _manualReviewState.err=(e&&e.message)?e.message:'처리에 실패했습니다.'; _manualReviewRender(); }

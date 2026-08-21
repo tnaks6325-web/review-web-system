@@ -2495,10 +2495,30 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     if (options.length < 2 && wo) options = _condWoOptions(wo.productOptionsJson);
     if (options.length < 2) options = [];
 
+    /* 적용 정원(공고 우선 · 0이면 발주) — 상태엔진과 **같은 함수**를 태운다(사본 0). */
+    const { displayRecruitTotal } = require('./linkedRecruitQuota.service');
+    const _rt = displayRecruitTotal(c && c.recruitTotal, wo && wo.recruitCount);
+    const _dl = displayRecruitTotal(c && c.dailyLimit, wo && wo.dailyCount);
+    const campQuota = {
+      recruitTotal: _rt.total, dailyLimit: _dl.total,
+      totalSource: _rt.source, dailySource: _dl.source,
+    };
+
     return {
       productName: (wo && wo.productOption) || meta.campaignName || '',
-      recruitTotal: num(c && c.recruitTotal) != null ? num(c.recruitTotal) : num(wo && wo.recruitCount),
-      dailyLimit:   num(c && c.dailyLimit)   != null ? num(c.dailyLimit)   : num(wo && wo.dailyCount),
+      /* ★★ 총건수·일건수 = **정원 판정과 같은 값**(사용자 확정 2026-08-21) — 공고 값이 있으면
+         그 값, 0(미설정)이면 발주서 값이 **실제 정원으로 적용**된다(campaignState.effectiveQuota).
+         종전에는 `num(0) != null` 이 참이라 공고 0 을 그대로 실어 `총건수 0 건`으로 그렸고,
+         같은 화면의 참여자 게이지는 발주 총건수(/100)를 봐 **한 화면에 두 숫자**가 있었다.
+         ★ 규칙 사본을 만들지 않는다 — `displayRecruitTotal`(공고>0 이면 공고, 아니면 발주) 하나. */
+      recruitTotal: campQuota.recruitTotal || null,
+      dailyLimit:   campQuota.dailyLimit   || null,
+      /* 출처·발주 원값 — 화면이 "발주 기준"이라고 말하고, 일건수 칸이 발주값과 공고 오늘값을
+         나란히 적을 수 있게 한다(조용한 대체 금지). */
+      recruitTotalSource: campQuota.totalSource,
+      dailyLimitSource:   campQuota.dailySource,
+      orderRecruitCount: num(wo && wo.recruitCount),
+      orderDailyCount:   num(wo && wo.dailyCount),
       // 공고에 명시된 채널만(직접입력은 custom). 없으면 null → 화면이 상품 URL 로 판정한다.
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
@@ -3052,7 +3072,22 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
       [rowId, sheetId, tabName]);
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const participant = pr[0];
-    const submitCol = String(participant.submit_col || '').trim();
+    /* ★★ 수동·작업표로 추가한 줄은 `submit_col` 이 비어 있다 (2026-08-21 실측 `submit_column_missing`).
+       그 칸은 **`review_index` 복제 경로(importTabFromIndex)에서만** 채워지고, `addParticipant`·
+       `prepareRosterSlots`·`appendSlot` 등 사람이 만든 줄은 NULL 로 남는다 — 그런데 상태 칸은
+       **줄이 아니라 탭 단위 속성**이라 그 줄만 제출을 못 하는 것은 사실과 다르다.
+       → 그 탭의 감지값으로 보완한다. 해석기는 무시트 상태 기록과 **같은 것**(사본 0) — 각자 SQL 을
+       쓰면 "장부는 A 칸에 쓰는데 수동 제출은 B 칸에 쓰는" 상태가 된다.
+       ★ 잠근 tx 안이므로 pool 이 아니라 `client` 로 조회한다.
+       ★ 그래도 못 찾으면 **거부**(fail-closed) — 그 작업표에 리뷰제출 열이 정말 없다는 뜻이고,
+         추측해서 아무 칸에나 시각을 박으면 담당자가 적어 둔 값을 덮는다. */
+    let submitCol = String(participant.submit_col || '').trim();
+    if (!submitCol) {
+      try {
+        submitCol = String(await require('./sheetlessStatus.service')
+          .statusHeaderForTab(client, { sheetId, tabName, kind: 'submit' }) || '').trim();
+      } catch (_) { submitCol = ''; }
+    }
     if (!submitCol) { await client.query('ROLLBACK'); return { ok: false, error: 'submit_column_missing' }; }
 
     const { rows: ir } = await client.query(
