@@ -623,19 +623,14 @@ async function _loadOrderQuota(db, ids, now = new Date()) {
     try { await db.query('SAVEPOINT cs_order_quota'); sp = true; } catch (_) { /* tx 밖 클라이언트 */ }
   }
   try {
-    const { rows } = await db.query(
-      `SELECT DISTINCT ON (c.id) c.id AS campaign_id,
-              w.recruit_count AS recruit_count, w.daily_count AS daily_count
-         FROM recruit_campaigns c
-         JOIN work_orders w
-           ON ((NULLIF(w.linked_campaign_id, '') = c.id) OR (NULLIF(c.source_work_order_id, '') = w.id))
-        WHERE c.id = ANY($1) AND w.deleted_at IS NULL
-        ORDER BY c.id, (NULLIF(w.linked_campaign_id, '') = c.id) DESC, w.updated_at DESC`,
-      [ids]);
+    /* ★★ 짝짓기 SQL 사본을 두지 않는다 — 공유 조각(linkedRecruitQuota) 한 곳을 태운다.
+       규칙이 두 벌이면 [📅 인원] 모달·유입방식 보정과 **다른 작업오더**를 볼 수 있다. */
+    const { linkedWorkOrdersForCampaigns } = require('./linkedRecruitQuota.service');
+    const rows = await linkedWorkOrdersForCampaigns(db, ids, ['recruit_count', 'daily_count']);
     if (sp) await db.query('RELEASE SAVEPOINT cs_order_quota').catch(() => {});
     const map = new Map();
-    for (const r of rows) {
-      map.set(r.campaign_id, {
+    for (const [cid, r] of rows) {
+      map.set(cid, {
         recruitCount: Math.max(0, Number(r.recruit_count) || 0),
         dailyCount: Math.max(0, Number(r.daily_count) || 0),
       });
