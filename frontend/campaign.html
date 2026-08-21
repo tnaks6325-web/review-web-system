@@ -534,7 +534,8 @@ function renderCrNotice(){
 /* ★ 참여권 상태(popular-status). null = 모름(구버전 백엔드·조회 실패·비로그인·미리보기)
    — **모르면 잠그지 않는다**(fail-open). 서버 apply 403 이 최종 권위이고 여기는 "누르기 전 고지"일 뿐. */
 let _popCredit = null;
-let _popCreditTried = false;   // 폴링·재렌더가 renderPre 를 반복 호출하므로 조회는 1회만
+let _popCreditPromise = null;  // 폴링·재렌더가 renderPre 를 반복 호출하므로 조회는 1회만
+                               // (promise 를 캐시해 명의 선택 시트가 도착을 기다릴 수 있게 한다)
 /* ★ 타계정 명의별 참여권 — 크레딧은 **명의(연락처)별**이라 소유자가 0건이어도 그 타계정 명의로는
    참여할 수 있다. 그래서 타계정 참여가 열린 공고는 **등록된 전 명의를 조회해 모두 0일 때만** 잠근다.
    { p8: {normalDone, popularUsed, credits} } · null = 아직 모름(잠그지 않음). */
@@ -557,13 +558,16 @@ async function _fetchPopCredit(phone8){
 }
 /** 인기 공고 + 로그인 세션이 있을 때만 1회 조회 → 안내 문구·참여 버튼 갱신.
     타계정 참여가 열린 공고면 **등록된 타계정 명의까지 각각** 조회한다(명의당 1회, 명의별 리미터 버킷). */
-async function loadPopCredit(){
-  if(_popCreditTried) return;
-  if(!(_camp && _camp.is_popular === true)) return;
-  if(PREVIEW) return;                                  // 미리보기는 진행 화면 확인이 목적 — 잠그지 않는다
+function loadPopCredit(){
+  if(_popCreditPromise) return _popCreditPromise;
+  if(!(_camp && _camp.is_popular === true)) return Promise.resolve();
+  if(PREVIEW) return Promise.resolve();                // 미리보기는 진행 화면 확인이 목적 — 잠그지 않는다
   const s = getSession();
-  if(!s || !s.phone8) return;                          // 비로그인은 종전대로(참여 클릭 시 로그인·내정보 유도)
-  _popCreditTried = true;
+  if(!s || !s.phone8) return Promise.resolve();        // 비로그인은 종전대로(참여 클릭 시 로그인·내정보 유도)
+  _popCreditPromise = _loadPopCredit(s);
+  return _popCreditPromise;
+}
+async function _loadPopCredit(s){
   const own = await _fetchPopCredit(s.phone8);
   if(!own){ _popUnknown = true; return; }              // 본계정 조회 실패 = 모름(잠그지 않음)
   _popCredit = own;
@@ -605,6 +609,14 @@ function _applyPopLock(){
   if(jb.disabled) return;                              // 마감·옵션 마감 등 다른 사유가 이미 잠갔으면 그 문구를 유지
   jb.disabled = true;
   jb.textContent = '🔒 일반 모집 제출완료 후 참여 가능';
+}
+/** 그 명의의 참여권. null = 모름(인기 공고가 아니거나 아직 조회 전·실패) — 모르면 막지 않는다. */
+function _popCreditFor(phone8){
+  if(!(_camp && _camp.is_popular === true)) return null;
+  const p = _p8(phone8);
+  const s = getSession();
+  if(s && p === _p8(s.phone8)) return _popCredit;
+  return (_popSubCredits && _popSubCredits[p]) || null;
 }
 /** 참여권이 남은 타계정 명의 목록(안내 문구용) — 이름은 사용자 입력이라 escape 한다. */
 function _popSubsWithCredit(){
@@ -883,13 +895,25 @@ function _acctRows(){
   });
   // 서버가 거절한 명의는 잠금(자리는 점유되지 않았고, 사유를 그대로 보여준다)
   rows.forEach(r => { if(_acctBlocked[r.phone8] && r.state === 'ok'){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
+  // ★ 인기 공고: 참여권은 명의별이라 어느 명의로 참여할 수 있는지 여기서 말해준다.
+  //   참여권 0이 확인된 명의는 고를 수 없게 한다(고르면 서버가 403 — 헛걸음을 만들지 않는다).
+  //   **모르면(조회 전·실패·인기 공고 아님) 손대지 않는다** — 우리 오류로 정당한 참여를 막지 않는다.
+  rows.forEach(r => {
+    if(r.state !== 'ok') return;
+    const cr = _popCreditFor(r.phone8);
+    if(!cr) return;
+    r.credits = cr.credits;
+    if(cr.credits === 0) r.state = 'nocredit';
+  });
   return rows;
 }
 function _acctStateText(r){
+  const base = r.type === 'self' ? '본계정 · ' : '';
   return r.state === 'joined' ? '이 공고에 참여중'
     : r.state === 'same_phone' ? '본계정과 같은 번호 — 별도 참여 불가'
     : r.state === 'invalid' ? '전화번호를 확인해주세요'
-    : (r.blockMsg || (r.type === 'self' ? '본계정 · 참여 가능' : '참여 가능'));
+    : r.state === 'nocredit' ? base + '참여권 없음 — 일반 모집 제출완료 후 가능'
+    : (r.blockMsg || base + '참여 가능' + (r.credits > 0 ? ' · 참여권 ' + r.credits + '건' : ''));
 }
 function renderAcctList(){
   const box = $('acctSheetList'); box.innerHTML = ''; _acctSel = null;
@@ -901,7 +925,9 @@ function renderAcctList(){
     div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(r.name) +
       (r.type === 'self' ? ' <span style="font-size:.62rem;color:var(--p-dark)">본계정</span>' : '') +
       '</div><div class="sub">' + _escAttr(_acctStateText(r)) + ' · ***' + _escAttr(r.phone8.slice(-4)) + '</div></div>' +
-      (r.state === 'joined' ? '<span class="obadge cur">참여중</span>' : (pickable ? '' : '<span class="obadge soldout">불가</span>'));
+      (r.state === 'joined' ? '<span class="obadge cur">참여중</span>'
+        : r.state === 'nocredit' ? '<span class="obadge soldout">참여권 0</span>'
+        : (pickable ? '' : '<span class="obadge soldout">불가</span>'));
     if(pickable){
       div.onclick = () => {
         _acctSel = r;
@@ -914,14 +940,18 @@ function renderAcctList(){
   });
   $('acctSheetGo').disabled = true;
   const canAny = rows.some(r => r.state === 'ok');
+  const onlyNoCredit = !canAny && rows.some(r => r.state === 'nocredit');
   $('acctSheetNote').textContent = canAny
     ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
-    : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
+    : onlyNoCredit
+      ? '참여권이 남은 명의가 없어요. 일반 모집을 구매양식 제출까지 완료하면 그 명의로 참여할 수 있어요.'
+      : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
 }
 async function openAcctSheet(optionKey){
   if(PREVIEW) return _pvBlock('참여하기');
   _acctOptKey = optionKey || null;
   await loadSubs();
+  await loadPopCredit();          // ★ 명의별 참여권이 도착한 뒤에 그린다(모르면 종전대로 그린다)
   // 타계정이 하나도 없고 본계정도 이미 참여중이면 → 등록 유도
   const rows = _acctRows();
   if(!(_subs || []).length && !rows.some(r => r.type === 'self' && r.state === 'ok')){
@@ -1164,7 +1194,7 @@ async function _doApply(optionKey, sub){
         _popSubCredits = _popSubCredits || {};
         _popSubCredits[_subP8] = Object.assign({ name: (sub && sub.name) || '' }, _popCalc(j));
       }else{ _setPopCredit(j); }
-      _popCreditTried = true; renderPopNotice(); _applyPopLock();
+      _popCreditPromise = _popCreditPromise || Promise.resolve(); renderPopNotice(); _applyPopLock();
       toast('선행 공고의 구매양식을 먼저 제출해주세요'); openPopGate(j); return;
     }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
