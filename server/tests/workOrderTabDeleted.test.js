@@ -99,11 +99,15 @@ console.log('\n[E] 화면 — 값이 있을 때만 그린다');
   ok('CSS 는 리터럴 색(테마 없는 호스트 대비)', /\.wodel\{[^}]*#B91C1C/.test(wd) && /\.woldel\{[^}]*#FEF2F2/.test(wd));
 }
 
-console.log('\n[F] [📋 작업표] 는 접수 전 창구 — 접수 뒤에는 실제 작업보드로');
+console.log('\n[F] 접수하기 → 모집공고 두 단계 (사용자 확정 2026-08-21)');
 {
   const i = wd.indexOf('function _woEditActions(o){');
   const fn = wd.slice(i, wd.indexOf('\n/* ✏ 관리자 수정', i));
-  ok('접수 전 = openWtPlan(구성 보고 그 자리에서 접수)', /_woAcceptedTab\(o\)[\s\S]{0,400}openWtPlan\('\$\{id\}'\)/.test(fn));
+  ok('★ [📋 작업표] 미리보기 버튼이 행에서 사라졌다(같은 일이 세 군데로 갈라져 번잡했다)',
+    !/openWtPlan/.test(fn) && !/>📋 작업표</.test(fn));
+  ok('★ 접수 전 = [접수하기] 하나', /_woAccept\('\$\{id\}'\)/.test(fn) && /접수하기<\/button>/.test(fn));
+  ok('★ 접수됐는데 공고가 없으면 [⚙ 작업 시작 설정](미완료로 눈에 띈다)',
+    /⚙ 작업 시작 설정/.test(fn) && /wostart/.test(fn));
   ok('★ 접수 후 = 실제 작업보드로 보낸다(가정 계산 미리보기 오해 차단)', /_woOpenBoard\('\$\{id\}'\)/.test(fn));
   ok('★ 이동은 pendingTab 계약 그대로(사본 금지)',
     /function _woOpenBoard\(id\)\{[\s\S]{0,400}STATE\.pendingTab=\{[\s\S]{0,200}switchView\('workdesk'\)/.test(wd));
@@ -111,6 +115,80 @@ console.log('\n[F] [📋 작업표] 는 접수 전 창구 — 접수 뒤에는 �
     /_woAcceptedTab\(o\)\)\{ _toast\('연결된 작업이 없습니다/.test(wd));
   ok('onclick 에는 id 만 — 오더 제목 같은 외부 문자열 보간 0',
     !/_woOpenBoard\('\$\{esc\(o\.(title|linked_tab_name)/.test(wd));
+
+  ok('★★ 접수가 끝나면 곧바로 모집공고를 연다(두 단계가 한 흐름)',
+    /_loadOrders\(\);[\s\S]{0,700}?await _woCampaign\(id\)/.test(wd));
+  ok('★ 이미 공고가 연결된 재접수에서는 열지 않는다', /!r\.skipped && !o\?\.linked_campaign_id/.test(wd));
+  ok('★ 공고 열기 실패가 접수를 무르지 않는다(fail-soft + 다음 행동 안내)',
+    /await _woCampaign\(id\); \}\s*\n\s*catch\(e\)\{ _toast\('접수는 끝났습니다/.test(wd));
+  ok('★ 확인창이 두 단계와 "여기서 못 고치는 것"을 말한다',
+    /접수 후 곧바로 모집공고 설정이 열립니다\(게시 전/.test(wd)
+    && /총건수·일건수·시작일·주말은 모집공고에서/.test(wd)
+    && /구매채널·작업유형\(작업표 열 구성\)은 접수 전/.test(wd));
+
+  // 미완료 배지 — 값이 있을 때만, 버튼과 같은 판정
+  const j = wd.indexOf('function _woStartBadge(o){');
+  const bfn = wd.slice(j, wd.indexOf('\nfunction ', j + 10));
+  const sb = { _woAcceptedTab: o => !!(o && o.linked_tab_sheet_id && o.linked_tab_name) };
+  vm.createContext(sb); vm.runInContext(bfn + '\n;this.__s=_woStartBadge;', sb);
+  ok('★ 미접수 오더에는 안 붙는다', sb.__s({}) === '');
+  ok('★ 공고가 있으면 안 붙는다',
+    sb.__s({ linked_tab_sheet_id: 'wt_1', linked_tab_name: 't', linked_campaign_id: 'c1' }) === '');
+  ok('접수됐는데 공고가 없으면 미완료 배지',
+    /작업 시작 설정 필요/.test(sb.__s({ linked_tab_sheet_id: 'wt_1', linked_tab_name: 't' })));
+}
+
+console.log('\n[F2] 모집공고 — 🚀 작업 시작 설정 줄');
+{
+  const rc = read('../frontend/js/index-recruit.js');
+  const rm = read('../frontend/js/recruit-modal.js');
+  ok('모달 라이브 마크업에 자리가 있다(보관 template 조각이 아니라)',
+    rm.slice(rm.lastIndexOf('</template>')).indexOf('id="rf_startcheck"') > -1);
+  ok('★ 판정은 한 함수 — 재료는 그 칸 자체(별도 상태 금지)',
+    /function _rfStartState\(\)/.test(rc) && /rf_transfer_memo/.test(rc) && /rf_chat_url/.test(rc)
+    && /rf_cash_receipt_required/.test(rc) && /rf_multi_account/.test(rc));
+  ok('★ 게시된 공고를 수정할 때는 뜨지 않는다(신규·게시 전에만)',
+    /function _rfStartVisible\(\)[\s\S]{0,260}!== "active"/.test(rc));
+  ok('★ 저장을 막지 않는다 — 저장 차단 경로에 이 판정이 없다',
+    !/_rfStartState|_rfStartVisible/.test(rc.slice(rc.indexOf('async function saveRecruitPostImpl'),
+      rc.indexOf('async function saveRecruitPostImpl') + 12000)));
+  ok('★ 정상 값도 "미설정"으로 단정하지 않는다(빈 값이 곤란한 둘만 miss)',
+    /miss: !memo/.test(rc) && /miss: !chat/.test(rc)
+    && /value: cash \? "발행" : "발행 안 함", miss: false/.test(rc)
+    && /value: multi \? "허용" : "미허용", miss: false/.test(rc));
+  ok('onclick 은 **인덱스만**(라벨·값 보간 0)', /onclick="rfStartGo\(\$\{i\}\)"/.test(rc));
+  ok('★ 값이 바뀌면 줄도 따라간다 — 위임 1회(입력칸을 다시 만들지 않아 IME 안전)',
+    /let _rfStartBound = false/.test(rc) && /host\.addEventListener\("input", refresh\)/.test(rc));
+  ok('모달을 열 때 1회 렌더 + 실패해도 모달을 막지 않는다',
+    /try \{ _rfBindStartCheck\(\); renderRecruitStartCheck\(\); \} catch/.test(rc));
+  ok('CSS 는 #recruitModal 스코프 + 리터럴 색', /#recruitModal \.rf-startcheck\{/.test(rm)
+    && /#recruitModal \.rf-startcheck \.scc\.miss\{[^}]*#B91C1C/.test(rm));
+
+  // 실제 실행 — 두 갈래
+  const sb2 = {
+    _recruitBadges: ['현영건'],
+    _recruitEditId: null,
+    escHtml: x => String(x == null ? '' : x),
+    document: {
+      getElementById: id => ({
+        rf_transfer_memo: { value: '' },
+        rf_chat_url: { value: 'https://open.kakao.com/x' },
+        rf_cash_receipt_required: { checked: true },
+        rf_multi_account: { checked: false },
+        rf_status: { value: 'draft' },
+      })[id] || null,
+    },
+  };
+  vm.createContext(sb2);
+  const pick = name => { const a = rc.indexOf('function ' + name); return rc.slice(a, rc.indexOf('\n}', a) + 2); };
+  vm.runInContext(pick('_rfStartState') + '\n' + pick('_rfStartVisible') + '\n;this.__st=_rfStartState;this.__vis=_rfStartVisible;', sb2);
+  const st = sb2.__st();
+  ok('★ 빈 입금명은 빨간 미입력, 채워진 팀채팅방은 통과',
+    st[0].miss === true && st[0].value === '미입력' && st[4].miss === false);
+  ok('★ 현금영수증·다계정은 지금 값을 그대로 말한다(미설정으로 단정 금지)',
+    st[2].value === '발행' && st[3].value === '미허용' && !st[2].miss && !st[3].miss);
+  ok('★ 배지는 개수로', st[1].value === '1개');
+  ok('게시 전이면 줄을 보여준다', sb2.__vis() === true);
 }
 
 console.log('\n[G] 관리자 수정 모달 — 발주서 원문임을 말한다');

@@ -963,6 +963,9 @@
   .wolmeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid var(--line)}
   .wolchip{font-size:11px;color:var(--muted);background:var(--card2);border-radius:6px;padding:2px 8px}
   /* 작업표 삭제 표시(134) — 값이 있을 때만 그린다. 색은 리터럴(테마 없는 호스트 대비). */
+  /* 접수 후 공고 미발행 — 목록 배지 + 버튼 강조(같은 상태를 두 곳이 같은 색으로 말한다) */
+  .wostartbd{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:750;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:999px;padding:1px 8px;vertical-align:middle;white-space:nowrap}
+  .btn.xs.wostart{color:#92400E;background:#FFFBEB;border-color:#FDE68A;font-weight:750}
   .wodel{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:750;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:999px;padding:1px 8px;vertical-align:middle;white-space:nowrap}
   .woldel{margin:8px 0 0;font-size:12.5px;color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:7px 10px}
   .wolchip b{color:var(--ink);font-weight:700}
@@ -8895,6 +8898,13 @@ function _woDeletedBadge(o){
   const tip=`작업표${tab?(' "'+tab+'"'):''}가 ${when}에 삭제되었습니다${who?(' (삭제: '+who+')'):''} — 다시 진행하려면 재접수하세요.`;
   return ` <span class="wodel" title="${esc(tip)}">🗑 작업 삭제됨 · ${esc(when)}</span>`;
 }
+/* 접수는 끝났는데 모집공고가 아직 없는 오더 — 그 작업은 **리뷰어에게 열리지 않은 상태**다.
+   ★ [나중에] 로 미룰 수 있게 한 대신(사용자 확정) 목록이 그 사실을 말한다.
+   ★ 판정은 `_woAcceptedTab` 하나 — 버튼(`_woEditActions`)과 같은 값이라 갈릴 수 없다. */
+function _woStartBadge(o){
+  if(!o || o.linked_campaign_id || !_woAcceptedTab(o)) return '';
+  return ' <span class="wostartbd" title="접수는 끝났고 모집공고가 아직 없습니다 — [⚙ 작업 시작 설정] 에서 마무리한 뒤 게시하세요.">⚙ 작업 시작 설정 필요</span>';
+}
 function _renderWoBody(){
   const summary=$('#wohead .wbcmd');
   if(!summary) $('#wohead').insertAdjacentHTML('beforeend',_woBStyleSummary(STATE.woCounts||{}));
@@ -8911,7 +8921,7 @@ function _renderWoBody(){
       <tr class="wolrow" id="wolrow-${i}" onclick="_woToggle(${i})" title="클릭하면 상세가 아래로 펼쳐집니다">
         <td><span class="wolchev" id="wolchev-${i}">▾</span></td>
         <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(_woLabel(o.status))}</span></td>
-        <td style="font-weight:700">${esc(o.title||'')}${_woDeletedBadge(o)}</td>
+        <td style="font-weight:700">${esc(o.title||'')}${_woDeletedBadge(o)}${_woStartBadge(o)}</td>
         <td>${esc(o.manager_name||o.created_by||'')}</td>
         <td style="text-align:right">${o.recruit_count||0}</td>
         <td style="text-align:right">${o.daily_count||0}</td>
@@ -8938,22 +8948,25 @@ function _woOpenBoard(id){
 function _woEditActions(o){
   if(!STATE.canEdit) return '';
   const id=esc(o.id);
-  /* ★★ [📋 작업표] 는 **접수 전 창구**다 — 그 모달의 [✅ 이 구성으로 접수하기] 가 곧 접수이고,
-       접수하면 그 계획대로 작업표 줄이 만들어진다(모집공고 저장은 줄을 만들지 않는다).
-     ★ 접수 뒤에는 같은 모달이 "지금 만들면 이렇게 된다"는 **가정 계산**이라 실제 표(주문 유입·
-       번호 정리·중복 정리로 달라진 표)와 어긋난다 → 대신 **실제 작업보드로 가는 길**을 준다. */
-  const wt = _woAcceptedTab(o)
-    ? ` <button class="btn xs" onclick="event.stopPropagation();_woOpenBoard('${id}')" title="이 오더로 만들어진 실제 작업보드를 엽니다">📊 작업보드</button>`
-    : ` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${id}')" title="만들어질 표 구성을 보고 그 자리에서 접수합니다">📋 작업표</button>`;
+  /* ★★ 흐름은 두 단계뿐이다(사용자 확정 2026-08-21): **접수하기 → 모집공고**.
+     ㉮ [접수하기] = 작업 시작 인지 — 작업오더 값 **그대로** 작업표를 만든다(조정 창구 없음).
+        총건수·일건수·시작일·주말은 **모집공고에서** 정하고, 그 저장이 작업표를 다시 배치한다(095).
+        열 구성을 정하는 채널·작업유형은 공고가 못 바꾸므로 접수 **전** [✏ 관리자 수정]이 담당한다.
+     ㉯ [⚙ 작업 시작 설정] = 접수 직후 자동으로 열리는 모집공고 — 사람이 마무리할 칸만 채우고 게시.
+     ★ 종전 [📋 작업표] 미리보기 버튼은 없앴다(같은 일이 세 군데로 갈라져 번잡했다). */
   const acc = (typeof _woAcceptable==='function' ? _woAcceptable(o) : ['submitted','revision','rejected'].includes(o.status))
-    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="${(typeof _woAcceptSheetless!=='function'||_woAcceptSheetless(o))?'구글시트 없이 시스템 작업표를 만들어 등록합니다':'작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다'}">접수하기</button>`
+    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="작업오더 값 그대로 시스템 작업표를 만들고 곧바로 모집공고 설정으로 넘어갑니다">접수하기</button>`
     : `<button class="btn xs wodone" disabled title="${esc(o.linked_tab_name?('등록된 탭 — '+o.linked_tab_name):'이미 접수된 작업오더입니다')}">✓ 접수완료</button>`;
+  /* 모집공고 — **미완료(공고 없음)면 눈에 띄게**, 있으면 열어 보는 버튼. */
   const camp = o.linked_campaign_id
     ? ` <button class="btn xs wolink" onclick="event.stopPropagation();_woCampaign('${id}')" title="연결된 모집공고를 열어 리뷰어 화면을 바로 확인합니다">👁 모집공고</button>`
-    : ` <button class="btn xs" onclick="event.stopPropagation();_woCampaign('${id}')" title="이 작업오더 내용으로 모집공고를 채워 열고, 리뷰어가 볼 화면을 바로 미리 봅니다">📢 모집공고</button>`;
+    : ` <button class="btn xs${_woAcceptedTab(o)?' wostart':''}" onclick="event.stopPropagation();_woCampaign('${id}')" title="${_woAcceptedTab(o)?'접수는 끝났고 모집공고가 아직 없습니다 — 마무리 설정 후 게시하세요':'이 작업오더 내용으로 모집공고를 채워 엽니다'}">${_woAcceptedTab(o)?'⚙ 작업 시작 설정':'📢 모집공고'}</button>`;
+  const board = _woAcceptedTab(o)
+    ? ` <button class="btn xs" onclick="event.stopPropagation();_woOpenBoard('${id}')" title="이 오더로 만들어진 실제 작업보드를 엽니다">📊 작업보드</button>`
+    : '';
   const remedy=((window.WO_TRANSITIONS||{})[o.status||'submitted']||[]).some(s=>s==='rejected'||s==='revision')
     ? ` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${id}')" title="반려 또는 보완요청 사유를 전달합니다">보완&반려</button>` : '';
-  return acc+wt+camp+remedy
+  return acc+camp+board+remedy
     +` <button class="btn xs" onclick="event.stopPropagation();_woAdminEdit('${id}')" title="작업오더 내용을 직접 수정합니다 (인트라넷 보낸오더 카드에도 반영)">✏ 관리자 수정</button>`;
 }
 /* ✏ 관리자 수정 — 공유 모달(js/work-order-detail.js woAdminEditModal) 한 벌.
@@ -9248,9 +9261,15 @@ async function _woAccept(id, pickGid, opts){
   //    판정은 공유 모듈 `_woAcceptSheetless`(표시용) 하나이고 최종 판정은 서버가 한다.
   const o=(STATE.wo||[]).find(x=>x.id===id);
   const ns = (typeof _woAcceptSheetless==='function') ? _woAcceptSheetless(o) : true;
-  const msg = ns
-    ? '이 작업오더를 접수할까요?\n\n· 구글시트 없이 시스템 작업표(모집인원만큼의 줄)를 만들어 등록합니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.'
-    : '이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.';
+  /* ★ 확인창이 **두 단계**를 그대로 말한다 — 접수는 오더 값을 그대로 믿고 만들고,
+       고칠 일은 모집공고에서 한다. 열 구성(채널·작업유형)만은 공고가 못 바꾸므로
+       접수 **전** [✏ 관리자 수정] 이 담당한다는 사실을 여기서 짚는다. */
+  const msg = (ns
+    ? '이 작업오더를 접수할까요?\n\n· 작업오더 값 그대로 시스템 작업표(모집인원만큼의 줄)를 만듭니다.\n'
+    : '이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n')
+    + '· 접수 후 곧바로 모집공고 설정이 열립니다(게시 전 — 리뷰어에게는 아직 안 보입니다).\n'
+    + '· 총건수·일건수·시작일·주말은 모집공고에서 고칠 수 있습니다.\n'
+    + '· 구매채널·작업유형(작업표 열 구성)은 접수 전 [✏ 관리자 수정] 에서만 정합니다.';
   // ★ 팝업(탭 교정·광고주 연결)에서 이미 확인을 받았으면 확인창을 다시 띄우지 않는다.
   const _confirmed = !!pickGid || !!(opts&&opts.linkAdvertiserId);
   if(!_confirmed && !confirm(msg)) return false;
@@ -9265,6 +9284,14 @@ async function _woAccept(id, pickGid, opts){
       :((r.gidCorrected?'🔧 URL 교정 후 ':'')+'접수 완료'+(r.tabName?' — '+r.tabName:'')+(r.sheetless?' (무시트)'+wt:'')));
     if(r.worktable&&r.worktable.error) _toast('⚠ 작업표 장부 생성 실패: '+r.worktable.error);
     _loadOrders();
+    /* ★★ 접수 → 모집공고는 **한 흐름**이다(사용자 확정 2026-08-21) — 접수가 끝나면 곧바로
+       그 오더 값으로 채운 모집공고를 연다(상태는 '게시 전'이 기본이라 리뷰어에게 안 보인다).
+       ★ 이미 공고가 연결된 오더(재접수)는 열지 않는다 — 사람이 [👁 모집공고]로 연다.
+       ★ 실패해도 접수는 유효하다 — 목록의 [⚙ 작업 시작 설정] 로 언제든 다시 이어 갈 수 있다. */
+    if(!r.skipped && !o?.linked_campaign_id){
+      try{ await _woCampaign(id); }
+      catch(e){ _toast('접수는 끝났습니다 — 모집공고는 목록의 [⚙ 작업 시작 설정] 에서 이어서 하세요.'); }
+    }
     return true;
   }
   // ★ URL 의 gid 가 시트에 없음(탭 삭제 후 재생성 등) → 시트의 실제 탭 목록에서 사람이 골라

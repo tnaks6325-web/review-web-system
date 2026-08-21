@@ -316,10 +316,15 @@ ok('깨진 options 쿼리는 작업오더 파생으로 폴백(fail-soft)',
    ══════════════════════════════════════════════════════════ */
 console.log('\nH. 프론트 배선');
 const wdesk = readF('workdesk.html');
-ok('작업오더 행에 [작업표] 버튼(접수·상태변경과 같은 편집 게이트)',
-  // ★ id 는 `const id=esc(o.id)` 로 한 번만 escape 해 네 버튼이 나눠 쓴다(배선 형태 변경 — 검사 의미 불변)
-  /openWtPlan\('\$\{id\}'\)/.test(wdesk)
-  && /function _woEditActions\(o\)\{[\s\S]{0,900}openWtPlan/.test(wdesk));
+/* ★★ 사용자 확정 2026-08-21 — 흐름은 **접수하기 → 모집공고** 두 단계다.
+   작업오더 행의 [📋 작업표] 미리보기 버튼은 없앴다(같은 일이 세 군데로 갈라져 번잡했다):
+   접수는 오더 값을 그대로 믿고 만들고, 총건수·일건수·시작일·주말은 모집공고에서 고친다.
+   ★ 모달·서버 계획 산출은 그대로 남겨 두었다(되살리기 쉽게) — 아래 검사들이 그것을 고정한다. */
+ok('★ 행에는 [작업표] 버튼이 없다 — 접수하기 → 모집공고 두 단계(사용자 확정)',
+  !/function _woEditActions\(o\)\{[\s\S]{0,1600}openWtPlan/.test(wdesk));
+ok('★ 접수 뒤에는 실제 작업보드로, 공고가 없으면 [⚙ 작업 시작 설정] 로 보낸다',
+  /function _woEditActions\(o\)\{[\s\S]{0,1600}_woOpenBoard\('\$\{id\}'\)/.test(wdesk)
+  && /⚙ 작업 시작 설정/.test(wdesk));
 ok('★★ 프론트가 날짜·옵션을 다시 계산하지 않는다(서버 계획을 그대로 렌더 — 미리보기 ≡ 실제 표)',
   (() => {
     const i = wdesk.indexOf('function _wtpRender()');

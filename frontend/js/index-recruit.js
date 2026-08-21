@@ -2868,6 +2868,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   /* 🔗 연결 탭이 비어 있으면 사유 + 제목 유사도 추천을 띄운다(선택돼 있으면 아무것도 안 뜬다) */
   try { _rfBindTitleSuggest(); _rfRefreshLinkedTabNote(); } catch (_) { /* 안내 실패가 모달을 막으면 안 된다 */ }
+
+  /* 🚀 작업 시작 설정 줄 — 접수 직후 마무리할 칸만 짚는다(경고 전용, 저장을 막지 않는다) */
+  try { _rfBindStartCheck(); renderRecruitStartCheck(); } catch (_) { /* 안내 실패가 모달을 막으면 안 된다 */ }
 }
 
 // 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
@@ -3223,6 +3226,88 @@ function _rfReviewTypeKey(raw) {
 }
 
 function selectChannel(btn) { selectRfBtn('channel', btn); }  /* 하위 호환 */
+
+
+/* ═══════════════════════════════════════
+   🚀 작업 시작 설정 — 접수 직후 사람이 마무리해야 하는 칸만 짚는다
+   (사용자 확정 2026-08-21: 접수하기 → 모집공고 두 단계로 합침)
+
+   ★★ 판정은 이 함수 **한 곳**이고 재료는 화면의 그 칸 자체다 — 별도 상태를 두면
+      "칩은 초록인데 저장하면 빈 값"으로 갈린다.
+   ★★ **막지 않는다**(경고 전용) — '현금영수증 발행 안 함'·'다계정 미허용'도 정상 값이라
+      미설정으로 단정할 수 없다. 그래서 그 셋은 **지금 값을 그대로 보여 주고**(눈으로 확인),
+      비어 있으면 곤란한 둘(입금명·팀채팅방)만 빨간 '미입력'으로 센다.
+   ★ 게시된 공고를 수정할 때는 뜨지 않는다(신규 발행 또는 게시 전 공고에서만).
+═══════════════════════════════════════ */
+const RF_START_ITEMS = [
+  { k: "transfer_memo", label: "입금명",   el: "rf_transfer_memo", required: true },
+  { k: "badges",        label: "안내배지", el: "rf_badge_input" },
+  { k: "cash_receipt",  label: "현금영수증", el: "rf_cashrcpt_toggle" },
+  { k: "multi_account", label: "다계정",   el: "rf_multi_account_toggle" },
+  { k: "chat_url",      label: "팀채팅방", el: "rf_chat_url", required: true },
+];
+
+/** 각 항목의 현재 상태 — { k, label, value, miss } */
+function _rfStartState() {
+  const v = id => String(document.getElementById(id)?.value || "").trim();
+  const memo = v("rf_transfer_memo");
+  const chat = v("rf_chat_url");
+  const cash = !!document.getElementById("rf_cash_receipt_required")?.checked;
+  const multi = !!document.getElementById("rf_multi_account")?.checked;
+  const nBadge = Array.isArray(_recruitBadges) ? _recruitBadges.length : 0;
+  return [
+    { k: "transfer_memo", label: "입금명",     value: memo || "미입력", miss: !memo },
+    { k: "badges",        label: "안내배지",   value: nBadge ? (nBadge + "개") : "없음", miss: false },
+    { k: "cash_receipt",  label: "현금영수증", value: cash ? "발행" : "발행 안 함", miss: false },
+    { k: "multi_account", label: "다계정",     value: multi ? "허용" : "미허용", miss: false },
+    { k: "chat_url",      label: "팀채팅방",   value: chat ? "입력됨" : "미입력", miss: !chat },
+  ];
+}
+
+/** 이 모달에서 줄을 보여줄 것인가 — 신규 발행이거나 아직 게시 전(draft)일 때만. */
+function _rfStartVisible() {
+  if (!_recruitEditId) return true;
+  return String(document.getElementById("rf_status")?.value || "") !== "active";
+}
+
+function renderRecruitStartCheck() {
+  const box = document.getElementById("rf_startcheck");
+  if (!box) return;
+  if (!_rfStartVisible()) { box.hidden = true; return; }
+  const st = _rfStartState();
+  const missN = st.filter(x => x.miss).length;
+  box.hidden = false;
+  box.className = "rf-startcheck" + (missN ? "" : " done");
+  box.innerHTML = `<span class="sct">${missN ? "🚀 작업 시작 설정 — " + missN + "개 남음" : "🚀 작업 시작 설정 — 모두 확인함"}</span>`
+    + st.map((x, i) => `<button type="button" class="scc${x.miss ? " miss" : ""}" onclick="rfStartGo(${i})"`
+      + ` title="${escHtml(x.label)} 칸으로 이동합니다">${escHtml(x.label)} <b>${escHtml(x.value)}</b></button>`).join("")
+    + `<span class="scn">나머지 값은 작업오더에서 자동으로 채워졌습니다</span>`;
+}
+
+/** 칩 클릭 → 그 칸으로 스크롤 + 포커스. ★ onclick 은 **인덱스만**(외부 문자열 보간 0). */
+function rfStartGo(i) {
+  const it = RF_START_ITEMS[i];
+  if (!it) return;
+  const el = document.getElementById(it.el);
+  if (!el) return;
+  const row = el.closest(".form-row") || el;
+  try { row.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { row.scrollIntoView(); }
+  if (typeof el.focus === "function") { try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); } }
+}
+
+/* 값이 바뀌면 줄도 따라간다 — 편집 영역에 **위임 1회**(입력칸 DOM 을 다시 만들지 않으므로
+   한글 IME 조합이 깨지지 않는다). 토글 버튼은 click 으로도 들어온다. */
+let _rfStartBound = false;
+function _rfBindStartCheck() {
+  if (_rfStartBound) return;
+  const host = document.getElementById("recruitModal");
+  if (!host) return;
+  _rfStartBound = true;
+  const refresh = () => { try { renderRecruitStartCheck(); } catch (_) {} };
+  host.addEventListener("input", refresh);
+  host.addEventListener("change", refresh);
+  host.addEventListener("click", () => setTimeout(refresh, 0));
+}
 
 /* ═══════════════════════════════════════
    배지 입력
