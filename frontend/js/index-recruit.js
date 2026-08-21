@@ -3833,6 +3833,7 @@ const _RF_DIFF_FIELDS = [
   ["multi_account_mode","타계정 참여"],
   ["multi_daily_limit", "타계정 하루한도"],
   ["sub_hold_ttl_min",  "타계정 자리 유효시간"],
+  ["skip_weekends",     "주말 포함 여부"],
   ["reviewer_hidden",   "리뷰어에게 숨김"],
   ["transfer_bank",     "이체은행"],
   ["transfer_memo",     "통장표시"],
@@ -4213,6 +4214,22 @@ async function saveRecruitPostImpl() {
     /* ★ 목록 밖에서 열린 모달(홈 작업목록 팝업)이 자기 화면을 갱신할 수 있게 알린다.
        훅 미설정 = 관리자 대시보드 동작 불변(레포의 CS_ON_BADGE 와 같은 방식). */
     try { if (typeof window.CAMP_ON_SAVED === "function") window.CAMP_ON_SAVED(); } catch(_) {}
+    /* ★★ 주말 포함/제외를 바꾸면 **날짜별 계획·작업표는 저절로 바뀌지 않는다**(설정은 그날
+       신청을 막을 뿐이다) — 그래서 바뀐 그 자리에서 [📅 인원] 재배분안을 펼쳐 보여준다.
+       ★ 여는 것까지가 자동이고 **반영은 사람이 [확정 저장]** 을 누를 때 일어난다(조용한
+         자동수정 금지 — 이미 채워진 줄·오늘 확정분은 서버가 최종 방어한다).
+       ★ 신규 발행은 대상 아님(계획이 아직 없다) · 모듈·참여형이 아니면 무동작(종전 그대로). */
+    try {
+      const _wkBefore = !!(window._recruitEditLoaded && window._recruitEditLoaded.skip_weekends === true);
+      const _wkAfter = payload.skip_weekends === true;
+      if (_wasEdit && newCampId && _wkBefore !== _wkAfter
+          && !window._recruitEditLoadFailed
+          && saved && saved.data && saved.data.participation_mode === true
+          && window.CampaignDailyPlan && typeof window.CampaignDailyPlan.openWeekendRebalance === "function") {
+        // 저장 안내(campSaveFeedback)를 먼저 읽히고 연다 — 조절 모달이 그 위를 덮는다(z-index)
+        setTimeout(function () { window.CampaignDailyPlan.openWeekendRebalance(newCampId); }, 1200);
+      }
+    } catch (error) { console.warn('[recruit] weekend rebalance skipped:', error); }
   } catch(e) {
     /* ★ 실패는 자동으로 사라지지 않는다 — 모달을 열어 둔 채 사유를 남긴다.
        (토스트로 내보내면 모달 덮개 아래로 깔려 "아무 반응 없음"이 된다) */
