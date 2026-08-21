@@ -230,7 +230,7 @@ function stubLedger(result) {
     assert.ok(/주문원장/.test(fn), '무엇이 안 됐는지 사람 말로 설명하지 않는다');
   });
 
-  console.log('\n§4 쓰기 게이트 — 창구마다 다르다(환경변수 없이도 담당자 편집은 반영된다)');
+  console.log('\n§4 쓰기 게이트 — 마스터 스위치 1개 + 작업보드 전용 킬 스위치');
 
   /* ★ DB 접근 없이 게이트만 본다: 게이트를 통과하면 `edits: []` 가 `badField(empty)` 로 걸리고,
        막히면 그 앞에서 `disabled` 로 끊긴다. 두 반환값의 차이가 곧 게이트 통과 여부다. */
@@ -245,20 +245,22 @@ function stubLedger(result) {
     });
   };
 
-  await ta('4a ★★ 작업보드 셀 편집은 ORDER_LEDGER_WRITE_ENABLED 없이도 원장까지 간다', async () => {
-    const r = await gate('workdesk_cell', {});
-    assert.ok(!r.disabled, '★ 환경변수 하나가 꺼져 있다고 담당자 편집이 원장에 안 가면 이 기능은 무산된다');
+  await ta('4a ★★ 마스터 스위치는 한 개다 — ORDER_LEDGER_WRITE_ENABLED 를 끄면 **모든 창구**가 멈춘다', async () => {
+    // "원장 쓰기를 멈춰라"는 운영 조치를 창구 하나가 빠져나가면 스위치가 스위치가 아니게 된다.
+    assert.strictEqual((await gate('workdesk_cell', {})).disabled, true, '★ 작업보드가 마스터 스위치를 빠져나갔다');
+    assert.strictEqual((await gate('ledger_screen', {})).disabled, true);
+  });
+
+  await ta('4b ★ 마스터가 켜져 있으면 담당자는 아무 것도 설정하지 않아도 원장까지 간다', async () => {
+    const r = await gate('workdesk_cell', { ORDER_LEDGER_WRITE_ENABLED: 'true' });
+    assert.ok(!r.disabled, '★ 추가 설정을 요구하면 "직원이 신경 쓰지 않게" 라는 요구가 무산된다');
     assert.strictEqual(r.badField, true, '게이트를 통과해 빈 edits 검증까지 갔어야 한다');
   });
 
-  await ta('4b ★ 끄는 길은 남아 있다 — WORKDESK_LEDGER_WRITEBACK=off', async () => {
-    const r = await gate('workdesk_cell', { WORKDESK_LEDGER_WRITEBACK: 'off' });
-    assert.strictEqual(r.disabled, true, '돈 칸을 건드리는 경로에 킬 스위치가 없다');
-  });
-
-  await ta('4c ★ 주문원장 화면의 계약은 그대로 — 종전 게이트가 여전히 필요하다', async () => {
-    assert.strictEqual((await gate('ledger_screen', {})).disabled, true, '★ 남의 화면 게이트를 조용히 열었다');
-    assert.ok(!(await gate('ledger_screen', { ORDER_LEDGER_WRITE_ENABLED: 'true' })).disabled);
+  await ta('4c ★ 작업보드 되쓰기만 따로 끄는 길 — WORKDESK_LEDGER_WRITEBACK=off', async () => {
+    const off = { ORDER_LEDGER_WRITE_ENABLED: 'true', WORKDESK_LEDGER_WRITEBACK: 'off' };
+    assert.strictEqual((await gate('workdesk_cell', off)).disabled, true, '돈 칸 자동 덮어쓰기에 킬 스위치가 없다');
+    assert.ok(!(await gate('ledger_screen', off)).disabled, '★ 그 스위치가 주문원장 화면까지 막으면 안 된다');
   });
 
   t('4d 게이트 판정이 한 곳에 모여 있다(창구별 분기 사본 금지)', () => {
@@ -266,8 +268,8 @@ function stubLedger(result) {
     assert.ok(/function _ledgerWriteAllowed\(source\)/.test(src), '게이트 판정 함수가 없다');
     assert.ok(/if \(!_ledgerWriteAllowed\(source\)\) return \{ disabled: true \};/.test(src), 'applyOrderEdit 가 그 판정을 쓰지 않는다');
     const fn = src.slice(src.indexOf('function _ledgerWriteAllowed('), src.indexOf('async function applyOrderEdit('));
-    assert.ok(/WORKDESK_LEDGER_WRITEBACK !== 'off'/.test(fn), '작업보드 기본 켜짐 규칙이 없다');
-    assert.ok(/ORDER_LEDGER_WRITE_ENABLED === 'true'/.test(fn), '원장 화면 게이트가 없다');
+    assert.ok(/ORDER_LEDGER_WRITE_ENABLED !== 'true'\) return false;/.test(fn), '마스터 스위치가 먼저 걸리지 않는다');
+    assert.ok(/WORKDESK_LEDGER_WRITEBACK !== 'off'/.test(fn), '작업보드 전용 킬 스위치가 없다');
   });
 
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

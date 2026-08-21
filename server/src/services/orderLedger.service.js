@@ -1362,23 +1362,22 @@ const REVERSE_SYNC_FIELDS = ['orderer', 'recipient', 'user_id', 'phone', 'addres
 const ORDER_LEDGER_EDIT_FIELDS = [...REVERSE_SYNC_FIELDS, 'selected_opt_key'];
 
 /**
- * 원장 쓰기 게이트 — **창구마다 다르다(의도적)**.
+ * 원장 쓰기 게이트.
  *
- * ★★ `ledger_screen`(관리자 주문원장 화면) = 종전 그대로 `ORDER_LEDGER_WRITE_ENABLED=true` 필요.
- *   PR-B 시절의 **롤링배포·점진 활성 게이트**이고, 그 화면의 계약을 바꾸지 않는다.
+ * ★★ **`ORDER_LEDGER_WRITE_ENABLED=true` 는 모든 창구의 마스터 스위치다(완화 금지)** —
+ *   그것을 끄는 것은 "원장 쓰기를 멈춰라"는 운영 조치이고, 창구 하나가 그 조치를 빠져나가면
+ *   스위치가 스위치가 아니게 된다. 본섭에는 이 값이 계속 켜져 있었다(2026-08-21 사용자 확인).
+ *   ⚠ 종전 주석에서 이 값이 꺼져 있을 수 있다고 가정해 작업보드만 기본 켜짐으로 뺀 적이 있는데,
+ *     그 전제가 사실이 아니었다 — 되돌렸다.
  *
- * ★★ `workdesk_cell`(작업보드 셀 편집) = **기본 켜짐**. 이유:
- *   ① 사용자 확정(2026-08-21)은 "표에서 고치면 원장도 그 값이 된다"이고, 그게 **환경변수 하나가
- *      꺼져 있다는 이유로 조용히 안 되면** 담당자는 매번 실패 안내만 보게 된다(요구 자체가 무산).
- *   ② 같은 화면의 **구매일자 편집(`setWorkdeskPurchaseDate`)은 이미 게이트 없이 원장을 고친다** —
- *      작업보드발 원장 쓰기는 이 저장소에서 이미 게이트 밖 동작이다. 나머지 칸만 게이트에 묶어 두면
- *      "날짜는 반영되는데 금액은 안 되는" 설명 못 할 차이가 남는다.
- *   ★ 끄는 길은 남긴다 — `WORKDESK_LEDGER_WRITEBACK=off` (돈 칸을 건드리는 경로의 킬 스위치).
- *     끄면 화면이 실패 사유를 말하므로 조용히 나빠지지 않는다.
+ * ★ 그 위에 **작업보드 되쓰기만 따로 끄는 길**을 더 둔다: `WORKDESK_LEDGER_WRITEBACK=off`.
+ *   돈 칸을 자동으로 덮는 새 경로라, 주문원장 화면을 살려 둔 채 이것만 멈출 수 있어야 한다.
+ *   (기본값은 켜짐 — 담당자가 아무 것도 설정하지 않아도 표에서 고친 값이 원장까지 간다.)
  */
 function _ledgerWriteAllowed(source) {
+  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return false;
   if (source === 'workdesk_cell') return process.env.WORKDESK_LEDGER_WRITEBACK !== 'off';
-  return process.env.ORDER_LEDGER_WRITE_ENABLED === 'true';
+  return true;
 }
 
 /**
