@@ -543,6 +543,24 @@ router.post('/sheetless/reconnect', authMiddleware, adminOrMasterMiddleware, asy
   } catch (err) { _cutoverErr(err, res, next); }
 });
 
+/* ── 무시트 장부 재생성 스윕 수동 실행(130) — adminOrMaster ──
+   ★★ 왜 수동 창구가 필요한가: 스윕은 1분 크론이 돌리지만 **크론이 없는 배포**가 있다
+      (`server/index.js` 는 `NODE_ENV==='production'` 일 때만 `startCronJobs()` 를 부른다 —
+      테스트 환경은 development 라 크론이 통째로 꺼져 있다). 그 환경에서는 편집이 원본에는
+      남지만 장부에 영영 반영되지 않으므로, 사람이 눌러 돌릴 수 있어야 한다.
+   ★ 응답의 `pending`·`oldestWaitSec` 은 "장부 반영이 얼마나 밀렸나"의 관측값이다
+      (스윕 실패가 로그에만 남는 상태를 없앤다).
+   ★ 크론과 **같은 함수·같은 락** — 사본 0. force=true 면 디바운스만 건너뛴다. */
+router.post('/sheetless/ledger-sweep', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { withJobLock } = require('../utils/jobLock');
+    const { sweepDirtyLedgers } = require('../services/sheetlessLedgerSweep.service');
+    const out = await withJobLock('sheetless_ledger_sweep',
+      () => sweepDirtyLedgers({ by: _by(req), force: req.body && req.body.force !== false }));
+    res.json({ ok: true, ...(out || {}) });
+  } catch (err) { next(err); }
+});
+
 /* ── 구글시트 주소로 작업 가져오기 (탈 구글시트 잔재 처리) — adminOrMaster ──
    preview : 시트를 1회 읽어 "무엇을 가져올지"만 돌려준다(**DB 쓰기 0**)
    run     : 등록 + 업체 소유 + 작업표 + 장부 + 무시트 표식 + 시트 안내문
@@ -1228,6 +1246,24 @@ router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
     res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+/* ★★ 일괄 셀 편집(붙여넣기) — **왕복 1회**.
+ *  칸마다 요청을 보내면 전역 리미터(분당 120)와 PG 풀(20)에 먼저 막혀
+ *  500칸 붙여넣기가 구조적으로 완주할 수 없다(실측: 419/500 커넥션 타임아웃).
+ *  게이트·스코프·판정은 단건과 **같은 것**을 쓴다(권한이 넓어지지 않는다). */
+router.post('/workdesk/edit-batch', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, edits } = req.body || {};
+    if (!sheetId || !tabName || !Array.isArray(edits) || edits.length === 0) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, edits 필수' });
+    }
+    if (edits.length > svc.EDIT_BATCH_MAX) {
+      return res.status(400).json({ ok: false, error: 'too_many_edits', max: svc.EDIT_BATCH_MAX, got: edits.length });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.editWorkdeskRowsBatch({ sheetId, tabName, edits, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
 router.post('/workdesk/revert', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rowId, field } = req.body || {};
@@ -1286,6 +1322,22 @@ router.post('/past-tabs/delete-ghost', authMiddleware, adminOrMasterMiddleware, 
 router.post('/past-tabs/reopen', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json(await _pastTabs.reopenTabs({ tabs: (req.body || {}).tabs, by: _by(req) })); }
   catch (err) { _pastTabErr(res, err, next); }
+});
+/* ★★ 일괄 되돌리기 — 붙여넣기 실행취소·여러 칸 ↩ 의 창구.
+ *  편집 배치와 같은 이유·같은 상한·같은 게이트(권한이 넓어지지 않는다). */
+router.post('/workdesk/revert-batch', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, reverts } = req.body || {};
+    if (!sheetId || !tabName || !Array.isArray(reverts) || reverts.length === 0) {
+      return res.status(400).json({ ok: false, error: 'sheetId, tabName, reverts 필수' });
+    }
+    if (reverts.length > svc.EDIT_BATCH_MAX) {
+      return res.status(400).json({ ok: false, error: 'too_many_edits', max: svc.EDIT_BATCH_MAX, got: reverts.length });
+    }
+    const g = await _ensureWorkdeskCellEditScope(req); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.revertWorkdeskEditsBatch({ sheetId, tabName, reverts, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
 });
 /* 수동 리뷰제출 사전 확인 — **쓰기 0**.
    ★ 화면이 캡처를 올리기 **전에** 부른다: 종전에는 업로드 뒤에 거부되어 **드라이브에는 파일이

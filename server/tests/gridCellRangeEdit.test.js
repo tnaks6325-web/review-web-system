@@ -29,7 +29,12 @@ ok('우클릭(contextmenu) 로 편집 메뉴를 연다', /addEventListener\('con
 ok('우클릭 메뉴에 [이 셀 편집] → beginEditCell', /_menuEditCell\(\)\s*\{[\s\S]{0,200}beginEditCell\(td\)/.test(HTML));
 ok('copy 이벤트로 선택 범위를 TSV 복사', /addEventListener\('copy'/.test(HTML) && /_selectionTsv\(\)/.test(HTML));
 ok('paste 이벤트로 선택 범위에 붙여넣기', /addEventListener\('paste'/.test(HTML) && /_pasteIntoSelection\(/.test(HTML));
-ok('붙여넣기 저장은 기존 commitCellEdit 한 경로(사본 없음)', /jobs\.map\(j=>commitCellEdit\(/.test(HTML));
+// ★ 붙여넣기 저장은 왕복 1회(edit-batch) — 칸마다 요청하면 리미터(분당 120)·PG 풀에 막힌다.
+//   낙관 반영·롤백은 단건과 같은 `_applyCellLocal` 한 벌(사본 없음).
+ok('붙여넣기 저장은 왕복 1회(edit-batch) 한 경로', /_pasteCommitBatch\(jobs,/.test(HTML)
+  && /\/api\/trackb\/workdesk\/edit-batch/.test(HTML));
+ok('낙관 반영·롤백은 단건과 같은 한 벌(_applyCellLocal)', /function _applyCellLocal\(/.test(HTML)
+  && (HTML.match(/_applyCellLocal\(/g) || []).length >= 3);
 ok('재렌더 시 선택 범위를 비운다(엉뚱한 칸 적용 차단)', /STATE\.gSelRange=null;/.test(HTML.slice(HTML.indexOf('function buildGrid'), HTML.indexOf('function buildGrid') + 1200)));
 ok('한 번에 붙여넣는 칸 수 상한', /_PASTE_MAX\s*=\s*\d+/.test(HTML));
 ok('입금 날짜 열은 내부·광고주 작업보드에서 지정 폭을 쓴다', /'입금':96/.test(HTML)
@@ -107,8 +112,16 @@ function buildFakeGrid() {
   return { body, rows, stat };
 }
 
+/* 동기로 해소되는 thenable — 붙여넣기가 묶음을 이어 보내는 체인을 그 자리에서 끝까지 태운다
+   (실제 Promise 를 쓰면 이 가드의 동기 단언이 완료 처리보다 먼저 실행된다). */
+function syncThen(v) {
+  return {
+    then(f) { const r = f ? f(v) : v; return (r && typeof r.then === 'function') ? r : syncThen(r); },
+    catch() { return this; },
+  };
+}
 function makeCtx(fake) {
-  const commits = [], toasts = [];
+  const commits = [], toasts = [], batches = [];
   const sandbox = {
     STATE: { canEdit: true, gSelRange: null, cur: { sheetId: 's', tabName: 't' } },
     $: sel => (sel === '#gbody' ? fake.body : (sel === '#gselstat' ? fake.stat : null)),
@@ -126,14 +139,32 @@ function makeCtx(fake) {
     commitCellEdit: (rowId, field, val) => commits.push({ rowId, field, val }),
     _beginCellUndoGroup: kind => ({ kind, entries: [], pending: 0 }),
     _finishCellUndoGroup: () => {},
+    // ★ 붙여넣기는 왕복 1회(`/workdesk/edit-batch`)로 나간다 — 저장 대상은 그 페이로드에서 센다.
+    //   (칸마다 commitCellEdit 을 부르던 옛 경로로 되돌아가면 아래 [3]이 전부 0건이 되어 잡힌다)
+    _applyCellLocal: (rowId, field, value, td) => ({ had: false, prev: undefined, rollback() {} }),
+    _recordCellUndo: () => {},
+    _wtNotice: () => {},
+    reloadWorkdesk: () => {},
+    setTimeout: () => 0,
+    api: (url, opt) => {
+      const body = JSON.parse(opt.body);
+      batches.push({ url, body });
+      (body.edits || []).forEach(e => commits.push({ rowId: e.rowId, field: e.field, val: e.value }));
+      // 성공 응답을 동기로 흘려 완료 처리(확정 토스트·되돌리기 기록)까지 실제로 태운다
+      const resp = { ok: true, total: (body.edits || []).length, succeeded: (body.edits || []).length, failed: 0,
+                     results: (body.edits || []).map((e, i) => ({ index: i, rowId: e.rowId, field: e.field, ok: true })) };
+      return syncThen(resp);
+    },
     _PASTE_MAX: 500,
+    _PASTE_CHUNK: 50,
+    Promise: { resolve: v => syncThen(v) },
     console,
   };
   vm.createContext(sandbox);
-  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_pasteCommitBatch', '_pasteApplyResults'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
-  return { sandbox, commits, toasts };
+  return { sandbox, commits, toasts, batches };
 }
 
 /* ── 1B. 고정 헤더에 가린 띠에서도 우클릭 메뉴가 열린다 (2026-08-19 신고) ──────────

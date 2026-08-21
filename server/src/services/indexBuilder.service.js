@@ -1098,7 +1098,13 @@ async function _resolveRecognizedTab(sheetId, tabName, tabGid) {
   } catch (_) {}
 }
 
-module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet, loadKeywordsFromDB: _loadKeywordsFromDB };
+// ★ 라이브 값을 읽어야 한다 — `loadKeywordsFromDB` 가 let 을 재대입하므로 스냅샷 export 금지.
+//   소비처: utils/sheetlessCellWrite(이름 열 거부 판정) — 사본을 두면 파서와 갈린다.
+function getKeywords() {
+  return { NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES };
+}
+
+module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet, loadKeywordsFromDB: _loadKeywordsFromDB, getKeywords };
 
 // ═══════════════════════════════════════════════════════════
 // ★ Phase 4: 경량 변경 감지 (Drive API만 사용, 인덱스 빌드 없음)
