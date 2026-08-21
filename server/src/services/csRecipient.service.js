@@ -119,7 +119,7 @@ async function resolveRecipients({ sheetId, tabName, participantIds } = {}) {
   const revByP8 = new Map();
   if (cand.length) {
     const { rows } = await pool.query(
-      `SELECT phone8, COALESCE(name,'') AS name,
+      `SELECT phone8, COALESCE(name,'') AS name, COALESCE(phone,'') AS phone,
               CASE WHEN jsonb_typeof(sub_accounts)='array' THEN sub_accounts ELSE '[]'::jsonb END AS "subAccounts"
          FROM reviewers WHERE phone8 = ANY($1::text[])`,
       [cand]).catch(e => { logger.warn(`[csRecipient] 리뷰어 조회 실패: ${e.message}`); return { rows: [] }; });
@@ -148,6 +148,14 @@ async function resolveRecipients({ sheetId, tabName, participantIds } = {}) {
     const list = revByP8.get(p8) || [];
     const names = [...new Set(list.map(r => String(r.name || '').trim()).filter(Boolean))];
     return names.length === 1 ? names[0] : (names[0] || '');
+  };
+  /* 받는 사람의 **전체 연락처**(사용자 확정 2026-08-21 — 뒤 4자리로는 누구인지 확인이 안 된다).
+     ★ 등록 원장의 `phone` 을 그대로 준다 — `phone8`(뒤 8자리)로 앞자리를 `010` 이라 **추측하지 않는다**.
+     ★ 같은 phone8 을 쓰는 행이 둘이면 값이 하나로 모일 때만 쓴다(모호하면 빈 값 → 화면이 뒤 4자리로 접는다). */
+  const displayPhone = p8 => {
+    const list = revByP8.get(p8) || [];
+    const ph = [...new Set(list.map(r => String(r.phone || '').trim()).filter(Boolean))];
+    return ph.length === 1 ? ph[0] : '';
   };
 
   return ids.map(id => {
@@ -188,7 +196,8 @@ async function resolveRecipients({ sheetId, tabName, participantIds } = {}) {
     const isSub = !!(out.rowPhone8 && out.rowPhone8 !== phone8);
     // 명의 이름과 본계정 이름이 다르면 **막지 않고 밝힌다**(타계정 참여의 정상 모습이기도 하다).
     const nameMismatch = !isSub && !!(out.rowName && name && normName(out.rowName) !== normName(name));
-    return { ...out, ok: true, phone8, name, via, viaLabel: VIA_LABEL[via] || via, isSub, nameMismatch };
+    return { ...out, ok: true, phone8, phoneFull: displayPhone(phone8), name, via,
+      viaLabel: VIA_LABEL[via] || via, isSub, nameMismatch };
   });
 }
 
