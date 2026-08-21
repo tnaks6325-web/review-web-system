@@ -78,4 +78,58 @@ const takeFn = popBlock.match(/function _manualReviewTake\(list\)\{[\s\S]*?\n\}/
 assert.doesNotMatch(takeFn, /_manualReviewSubmit/,
   '붙여넣는 즉시 자동 제출하지 않는다(오붙여넣기 = 되돌릴 수 없는 확정)');
 
-console.log('workdeskManualReviewSubmit.test.js: OK');
+/* ── 2026-08-21 실측 `submit_column_missing` ────────────────────────────────
+   수동·작업표로 추가한 줄은 `campaign_participants.submit_col` 이 비어 있다(그 칸은
+   `review_index` 복제 경로에서만 채워진다). 상태 칸은 **탭 단위 속성**이라 그 줄만
+   제출을 못 하는 것은 사실과 다르다 → 탭 감지값으로 보완하되, 그래도 없으면 거부. */
+assert.match(service, /statusHeaderForTab\(client, \{ sheetId, tabName, kind: 'submit' \}\)/,
+  '줄에 값이 없으면 그 탭의 감지값으로 보완한다(잠근 tx 라 client 로 조회)');
+assert.match(read('src/services/sheetlessStatus.service.js'), /^\s*statusHeaderForTab,$/m,
+  '해석기는 무시트 상태 기록과 같은 것을 쓴다(사본 금지)');
+assert.match(manualBlock, /submit_column_missing/, '그래도 못 찾으면 거부한다(추측 기입 금지)');
+assert.match(workdesk, /submit_column_missing:'이 작업표에 리뷰제출 열이 없습니다/,
+  '화면은 오류 코드가 아니라 무엇을 해야 하는지를 말한다');
+assert.match(workdesk, /_MR_ERR\[k\] \|\|/, '모르는 코드는 원문을 남긴다(뭉뚱그리지 않는다)');
+
+// 스텁 pool 로 실제 실행 — 줄 값 우선 · 탭 폴백 · fail-closed 세 갈래.
+(async () => {
+  process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
+  const svc = require('../src/services/trackB.service');
+  const FID = 'FILE1234567890';
+  const mk = (part, tabCol) => {
+    const client = {
+      async query(sql) {
+        const q = String(sql).replace(/\s+/g, ' ');
+        if (/^BEGIN|^ROLLBACK|^COMMIT/.test(q)) return { rows: [] };
+        if (/FROM campaign_participants WHERE id=\$1/.test(q)) return { rows: [part] };
+        if (/FROM review_index WHERE sheet_id = \$1 AND tab_name = \$2 AND COALESCE/.test(q)) return { rows: tabCol ? [{ h: tabCol }] : [] };
+        if (/SELECT is_submitted FROM review_index/.test(q)) return { rows: [{ is_submitted: false }] };
+        if (/FROM review_submissions/.test(q)) return { rows: [{ file_id: FID }] };
+        if (/UPDATE campaign_participants/.test(q)) return { rows: [{ submit_value: '8/21 15:00' }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      },
+      release() {},
+    };
+    return { async connect() { return client; } };
+  };
+  const base = { id: 'p1', seq: 444, reviewer_name: '최은지', submit_col: null, is_submitted: false,
+    source: 'manual', order_submission_id: null, identity_key: null, phone8: '0402',
+    recipient_name: '최은지', option_text: null, row_json: {} };
+  const call = () => svc.manualWorkdeskReviewSubmit({ sheetId: 's', tabName: 'T', rowId: 'p1', fileIds: [FID] });
+
+  svc.__setPoolForTest(mk(base, '리뷰제출'));
+  let r = await call();
+  assert.equal(r.ok, true, '수동 줄도 탭 감지값으로 제출된다: ' + r.error);
+  assert.equal(r.submitColumn, '리뷰제출');
+
+  svc.__setPoolForTest(mk(base, ''));
+  r = await call();
+  assert.equal(r.error, 'submit_column_missing', '탭에도 리뷰제출 열이 없으면 거부(fail-closed)');
+
+  svc.__setPoolForTest(mk({ ...base, submit_col: '리뷰' }, '리뷰제출'));
+  r = await call();
+  assert.equal(r.submitColumn, '리뷰', '줄이 들고 있는 값이 탭 폴백을 이긴다');
+
+  console.log('workdeskManualReviewSubmit.test.js: OK');
+  process.exit(0);
+})().catch(e => { console.error(e); process.exit(1); });

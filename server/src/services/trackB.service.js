@@ -3052,7 +3052,22 @@ async function manualWorkdeskReviewSubmit({ sheetId, tabName, rowId, fileIds, by
       [rowId, sheetId, tabName]);
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const participant = pr[0];
-    const submitCol = String(participant.submit_col || '').trim();
+    /* ★★ 수동·작업표로 추가한 줄은 `submit_col` 이 비어 있다 (2026-08-21 실측 `submit_column_missing`).
+       그 칸은 **`review_index` 복제 경로(importTabFromIndex)에서만** 채워지고, `addParticipant`·
+       `prepareRosterSlots`·`appendSlot` 등 사람이 만든 줄은 NULL 로 남는다 — 그런데 상태 칸은
+       **줄이 아니라 탭 단위 속성**이라 그 줄만 제출을 못 하는 것은 사실과 다르다.
+       → 그 탭의 감지값으로 보완한다. 해석기는 무시트 상태 기록과 **같은 것**(사본 0) — 각자 SQL 을
+       쓰면 "장부는 A 칸에 쓰는데 수동 제출은 B 칸에 쓰는" 상태가 된다.
+       ★ 잠근 tx 안이므로 pool 이 아니라 `client` 로 조회한다.
+       ★ 그래도 못 찾으면 **거부**(fail-closed) — 그 작업표에 리뷰제출 열이 정말 없다는 뜻이고,
+         추측해서 아무 칸에나 시각을 박으면 담당자가 적어 둔 값을 덮는다. */
+    let submitCol = String(participant.submit_col || '').trim();
+    if (!submitCol) {
+      try {
+        submitCol = String(await require('./sheetlessStatus.service')
+          .statusHeaderForTab(client, { sheetId, tabName, kind: 'submit' }) || '').trim();
+      } catch (_) { submitCol = ''; }
+    }
     if (!submitCol) { await client.query('ROLLBACK'); return { ok: false, error: 'submit_column_missing' }; }
 
     const { rows: ir } = await client.query(
