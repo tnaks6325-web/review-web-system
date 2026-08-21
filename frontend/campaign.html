@@ -259,6 +259,7 @@
     <p><b>일반 모집 구매양식 제출완료 1건</b>마다 인기상품에 1회 참여할 수 있어요.<br>
       어떤 일반 모집을 제출할지는 직접 선택할 수 있습니다.</p>
     <div class="muted" id="popGateCount" style="margin-bottom:8px"></div>
+    <div id="popGateSubs" style="display:none;margin:-4px 0 8px;font-size:.8rem;color:#047857"></div>
     <div id="popGateBody"></div>
     <button class="btn ghost" style="margin-top:12px" onclick="hidePopGate()">닫기</button>
   </div>
@@ -687,6 +688,16 @@ async function openPopGate(gateInfo){
   cnt.textContent = info
     ? `제출완료 일반 ${normalDone}건 · 사용한 인기 ${popularUsed}건 · 남은 참여권 ${Math.max(0, normalDone - popularUsed)}건`
     : '';
+  // ★ 타계정 참여가 열린 공고: 참여권은 명의별이라 위 한 줄(그 명의 기준)만으로는 오해가 생긴다
+  //   — 참여할 수 있는 다른 명의가 있으면 여기서도 말해준다(안내 카드와 같은 출처·같은 문장).
+  const _gsub = $('popGateSubs');
+  if(_gsub){
+    const _ok = (typeof multiEnabled === 'function' && multiEnabled() && _popSubCredits) ? _popSubsWithCredit() : [];
+    _gsub.innerHTML = _ok.length
+      ? '타계정 ' + _ok.map(v => _popEsc(v.name || '명의') + ' ' + v.credits + '건').join(' · ') + ' 명의로는 지금 참여할 수 있어요'
+      : '';
+    _gsub.style.display = _ok.length ? '' : 'none';
+  }
   body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 일반 모집을 불러오는 중…</div>';
   try{
     const r = await fetch(API_BASE_URL + '/api/campaign/list');
