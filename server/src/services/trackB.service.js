@@ -3498,6 +3498,15 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
       [sheetId, (tabRows[0] && tabRows[0].tab_gid) || null, tabName, maxSeq + 1,
         finalDateLabel || null, JSON.stringify(blank), String(by).slice(0, 100)]);
 
+    // ★★ 표시 번호를 그 자리에서 다시 매긴다 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호").
+    //   위 주석대로 seq 는 그대로 두고 화면 `#` 만 순번으로 계산하는데, **row_json 의 `번호` 칸**은
+    //   아무도 손대지 않아 `2,3,4…` 로 남았다. 보충 슬롯의 번호가 비어 주기 스윕이 결국 잡기는
+    //   하지만, 그 사이 담당자는 어긋난 번호를 본다(그리고 대상이 많으면 사이클 상한에 밀린다).
+    // ★ SAVEPOINT 격리 + 절대 throw 없음 — 번호 때문에 **행 삭제·주문 취소가 롤백되면 안 된다**.
+    //   실패해도 5분 스윕이 백스톱이다(구매일자 달력 편집과 같은 규율).
+    const renumbered = await require('./rowNumbering.service')
+      .renumberTabInTx(client, { sheetId, tabName, by: `row-delete:${by}`.slice(0, 100) });
+
     // 삭제된 날 -1 / 마지막 진행일 +1 = 날짜별 배치만 이동한다. 총 계획량은 바뀌지 않는다.
     // 공고를 못 고른 경우(none/ambiguous)와 날짜를 못 읽은 경우엔 계획을 건드리지 않는다.
     let planMoved = false;
@@ -3542,6 +3551,7 @@ async function _hideParticipantInTx(client, { sheetId, tabName, rowId, by }) {
       finalPlanDate: finalPlan ? finalPlan.date : null,
       replacementDate: finalDateLabel || null,
       replacementSeq: replacement.rows[0] && replacement.rows[0].seq,
+      renumbered: (renumbered && renumbered.changed) || 0,
     };
 }
 
