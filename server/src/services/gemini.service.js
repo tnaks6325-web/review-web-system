@@ -316,14 +316,18 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts
     : '';
 
   // 같은 파일 재업로드·재시도는 캐시로 상각(extractOrderFromImage와 같은 저장소, 키에 용도 접두)
-  // ★ 접두 'classify4:' (자동 분류에서 kind 에 order_capture 가 추가돼 한 번 더 올렸다 —
+  // ★ 접두 'classify5:' (purchase_confirm 판정 기준을 넓혔다 — "구매확정" 글자가 없어도
+  //   구매확정을 눌러야만 나오는 완료 신호(네이버페이 적립 완료 안내)를 인정한다.
+  //   **판정 기준을 바꾸면 접두를 반드시 올린다** — 안 올리면 같은 이미지의 옛 판정이 캐시에서
+  //   그대로 히트해 프롬프트 수정이 조용히 무효가 된다).
+  //   그 이전 4 (자동 분류에서 kind 에 order_capture 가 추가돼 한 번 더 올렸다 —
   //   옛 캐시는 새 종류를 모른 채 히트하므로 접두 상향이 필수. 087 2차와 같은 규율).
   //   그 이전 'classify3:' (087 2차에서 kind 에 purchase_confirm 이 추가돼 올렸다).
   //   옛 접두를 그대로 쓰면 새 종류를 모르는 판정이 히트한다. 원래 이유: 응답에 channel/reviewText 등이 추가됐다. 옛 접두를 그대로 쓰면
   //   배포 직후 옛 캐시(새 필드 없음)가 히트해 채널이 undefined 인 판정이 나간다.
   //   이 캐시는 **첨부 시점 1차 필터 → 제출 시점 2차 검수** 사이의 재사용이 핵심이라
   //   (같은 이미지 = 같은 해시) AI 콜이 사실상 늘지 않는다.
-  const cacheHash = _getCacheKey('classify4:' + sampleSig + ':' + base64Data);
+  const cacheHash = _getCacheKey('classify5:' + sampleSig + ':' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
 
@@ -337,8 +341,8 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts
 kind 판정 기준:
 - "review": 쇼핑몰 리뷰 화면. 별점(★), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임.
 - "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호, 사업자등록번호, 지출증빙, 거래일시 중 하나 이상이 보임.
-- "purchase_confirm": 구매확정 완료 화면. "구매확정" 문구와 함께 완료됨을 나타내는 표시(구매확정 완료, 구매확정됨, 확정일시, 구매확정 버튼이 비활성/완료 상태)가 주문 상세·주문내역 화면에 보임. 별점·리뷰 본문은 없어도 된다.
-- "order_capture": 구매캡처(주문/결제 내역) 화면. 주문번호·결제금액·배송지·주문상품 목록이 보이는 주문 상세/주문 완료/결제 내역 화면. 별점·리뷰 본문이 없고, "구매확정 완료" 표시도 없다("구매확정" 완료 표시가 있으면 purchase_confirm).
+- "purchase_confirm": 구매확정 완료 화면. "구매확정" 문구와 함께 완료됨을 나타내는 표시(구매확정 완료, 구매확정됨, 확정일시, 구매확정 버튼이 비활성/완료 상태)가 주문 상세·주문내역 화면에 보임. 별점·리뷰 본문은 없어도 된다. "구매확정" 글자가 화면에 없어도, 구매확정을 눌러야만 나타나는 완료 신호가 보이면 purchase_confirm 으로 본다 — 예: 네이버페이 주문/결제 화면(orders.pay.naver.com)의 "N원 적립되었어요" 같은 적립 완료 안내. 단 "리뷰 적립"·"리뷰 작성" 처럼 리뷰 작성에 대한 적립이라고 화면에 적혀 있으면 purchase_confirm 이 아니다.
+- "order_capture": 구매캡처(주문/결제 내역) 화면. 주문번호·결제금액·배송지·주문상품 목록이 보이는 주문 상세/주문 완료/결제 내역 화면. 별점·리뷰 본문이 없고, "구매확정 완료" 표시도 없다("구매확정" 완료 표시나 위의 구매확정 적립 완료 안내가 있으면 purchase_confirm).
 - "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).
 
 channel 판정 기준 (kind가 "review"일 때만, 확실하지 않으면 빈 문자):

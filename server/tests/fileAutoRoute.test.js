@@ -177,8 +177,11 @@ const fileRoute = require('../src/services/fileRoute.service');
   }
   {
     const gem = read('src/services/gemini.service.js');
-    assert.ok(gem.includes("'classify4:'"), '캐시 접두 상향(classify4:)');
-    assert.ok(!gem.includes("_getCacheKey('classify3:"), '옛 접두 키 생성 부재');
+    /* ★ 접두는 kind·판정 기준이 바뀔 때마다 오른다(4→5…). 상향은 허용하되 **되돌아가는 것**만 막는다.
+       ⚠ `includes("'classify4:'")` 처럼 문자열 존재만 보면 주석에 적힌 옛 접두가 대신 통과시킨다
+          (2026-08-23 실제로 밟았다) → **키 생성 자리**(`_getCacheKey('classifyN:'`)를 본다. */
+    assert.ok(/_getCacheKey\('classify[4-9]\d*:'/.test(gem), '캐시 접두 상향(classify4: 이상)');
+    assert.ok(!/_getCacheKey\('classify[1-3]?:'/.test(gem), '옛 접두 키 생성 부재');
     assert.ok(gem.includes('"order_capture"') || gem.includes("'order_capture'"), 'kind 에 order_capture');
     assert.ok(gem.includes("['review', 'receipt', 'purchase_confirm', 'order_capture', 'other']"), '검증 배열에 order_capture');
     // 오래 검증된 판정 기준(리뷰·영수증) 줄은 그대로
