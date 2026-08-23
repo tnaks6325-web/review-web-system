@@ -217,8 +217,10 @@ console.log('\nH) 미리보기 번호 = 작업보드 번호');
     /번호 —/.test(sb._rvNoHtml({ seq: 25 })) && /시트 행 25/.test(sb._rvNoHtml({ seq: 25 })));
   ok('★ 공백만 있는 값도 없는 것으로 본다', /번호 —/.test(sb._rvNoHtml({ boardNo: '  ', seq: 3 })));
 }
-ok('★ 미리보기 두 곳(내부·광고주)이 같은 헬퍼를 쓴다 — #seq 표기 부활 0',
-  (WD.match(/\$\{_rvNoHtml\(r\)\}/g) || []).length === 2 && !/<span>#\$\{esc\(r\.seq\)\}<\/span>/.test(WD));
+/* ★ 업체 뷰어의 세로 레일이 폐기되어(2026-08-23 통일) 미리보기 렌더러는 한 곳이다.
+   "같은 헬퍼를 쓴다"는 규칙은 팝업까지 포함해 아래 케이스가 함께 고정한다. */
+ok('★ 사람 줄 번호는 헬퍼 한 곳에서 — #seq 표기 부활 0',
+  (WD.match(/\$\{_rvNoHtml\(r\)\}/g) || []).length === 1 && !/<span>#\$\{esc\(r\.seq\)\}<\/span>/.test(WD));
 ok('★ 팝업도 같은 헬퍼(번호 판정 사본 0)',
   (WD.match(/_rvNo\((x|cur)\.r\)/g) || []).length === 2
   && !/boardNo==null\?''/.test(WD.replace(/function _rvNo\(r\)\{[^}]*\}/, '')));

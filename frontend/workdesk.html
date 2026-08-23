@@ -271,22 +271,19 @@
      왼쪽은 작업 조건·진행 현황·정산 현황을 순서대로 두고, 기존 진행 현황 자리는 리뷰가 쓴다.
      리뷰 캡처는 고정 높이의 스크롤 영역에서만 움직여 상단 조합 높이를 밀어내지 않는다.
      행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
-  .advwork{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(420px,1fr);grid-template-areas:"top preview" "tools preview" "grid grid";gap:12px;align-items:stretch;max-width:1380px}
-  .advtop{grid-area:top;display:grid;grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement";gap:12px}
-  .advcondition{grid-area:condition}.advprogress{grid-area:progress}.advsettle{grid-area:settlement}
-  .advtop .tp3col{height:100%}.advsettle.setldetail{margin-bottom:0}.advsettle .sect{margin-top:0!important}
+  /* ★★ 업체 뷰어도 **내부와 같은 상단 3분할**(사용자 확정 2026-08-23) — 세로 스택 + 표 옆
+     세로 레일을 폐기했다. 배치·여백·접기는 `.tp3grid.c3` 한 벌이 정하고, 여기서는 업체 화면의
+     폭 상한과 정산 카드 자리만 둔다(정산은 3분할 아래 별도 줄 — 업체 정산은 상시 펼침 6칸이라
+     내부의 '진행 현황 하단 접이식'과 성질이 다르다). */
+  .advwork{display:block;max-width:1380px}
+  .advwork .tp3grid.c3{margin-bottom:12px}
+  .advsettle.setldetail{margin-bottom:12px}.advsettle .sect{margin-top:0!important}
   .rvpane{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:11px 12px;display:flex;flex-direction:column;min-height:0}
-  .advwork .rvpane{grid-area:preview;position:sticky;top:12px;min-height:0;max-height:none;align-self:stretch;overflow-y:auto;overscroll-behavior:contain}
-  .advwork .advgw,.advwork #gridhost{display:contents}#gridhost>.gridbar{grid-area:tools}#gridhost>.gswrap{grid-area:grid}#gridhost>table{grid-area:grid}
-  @media(max-width:760px){.advwork{display:block}.advtop{grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement"}.advwork .rvpane{position:static;align-self:auto;height:420px;min-height:420px;margin-top:12px}.advwork .advgw,.advwork #gridhost{display:block}.advgw{margin-top:12px}}
   .rvpane .rvhd{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);
                 display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px}
   .rvpane .rvhd .rvsub{font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);font-size:10.5px;margin-left:auto}
   .rvwho{font-size:12.5px;font-weight:750;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rvwho span{font-weight:600;color:var(--faint);font-size:11px;margin-left:5px}
-  .rvmedia{display:grid;grid-auto-rows:minmax(180px,1fr);gap:8px;flex:1;min-height:0;overflow:auto}
-  .rvasset{display:flex;flex-direction:column;min-height:0}.rvasset .rvimg{display:block;width:100%;height:100%;min-height:0;object-fit:contain;border:1px solid var(--line);border-radius:9px;cursor:zoom-in;background:var(--card2)}
-  .rvslot{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px}
   .rvnone{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
           border:1px dashed var(--line2);border-radius:10px;background:var(--card2);text-align:center;padding:16px}
   .rvnone b{font-size:13px;font-weight:750;color:var(--muted)}
@@ -5844,7 +5841,7 @@ function renderWorkdesk(wd){
          맨 뒤로 옮기면 전부 제목 옆에 붙고, 좁은 화면의 축소 규칙(nowrap + min-width:0)은 그대로다. -->
     <span class="sp" style="flex:1"></span></div>
     ${STATE.role==='advertiser'
-      ? `<section class="advwork"><section class="advtop">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div></section><aside class="rvpane" id="rvPane"></aside><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
+      ? `<section class="advwork">${summaryStrip(wd,d,m,c)}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"></div></div><div class="advgw"><div id="gridhost">${tableSection}</div></div></section>`
       : `${summaryStrip(wd,d,m,c)}<div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div><div id="gridhost">${tableSection}</div>`}`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
@@ -5869,7 +5866,6 @@ function renderWorkdesk(wd){
 //   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
-const _RV_SLOT={review:'리뷰 캡처',cash_receipt:'현금영수증'};
 /* 사람 옆 번호 = **작업보드 표의 「번호」**(서버가 실어 주는 `boardNo`) — `seq`(시트 행 번호)가
    아니다. 담당자가 표에서 눈으로 보는 값과 같아야 "몇 번 줄 사람인지"가 통한다.
    ★ 판정(어느 칸이 번호인가)은 서버 `utils/rowNumbering.numberColumnKey` 단일 출처 — 화면은
@@ -5976,33 +5972,15 @@ function _rvReapply(){
   const keep=rows.some(tr=>tr.dataset.rid===STATE.rvSel);
   _rvSelect(keep?STATE.rvSel:rows[0].dataset.rid,{scroll:false});
 }
+/* ★★ 미리보기 렌더러는 **한 벌**(사용자 확정 2026-08-23) — 업체 뷰어의 세로 레일(여러 장을
+   쌓아 보여 주던 `리뷰 미리보기`)은 폐지하고 내부와 같은 두 칸(좌 구매 캡처 / 우 리뷰 캡처,
+   칸마다 한 장 + 넘김 줄)을 쓴다. 사본을 남기면 두 화면이 계속 다른 모양으로 갈린다.
+   ★ 업체에게 새로 열리는 정보는 없다 — 구매 캡처는 이미 서버가 같은 응답으로 내려주고 있었고
+     상단 [🛒 구매캡쳐 폴더] 로 폴더도 연다. 폴더 바로가기는 여전히 업체에게 그리지 않는다
+     (`_rvStatHtml` 의 role 게이트). */
 function _rvRender(){
   const pane=$('#rvPane'); if(!pane) return;
-  if(STATE.role!=='advertiser') return _rvRender2(pane);   // 내부 = 좌 구매캡처 / 우 리뷰캡처 두 칸
-  const hd=`<div class="rvhd">리뷰 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
-  if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
-  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
-  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 리뷰어의 리뷰 캡처가 여기 표시됩니다.</span></div>`; return; }
-  const who=_rvWho(r);
-  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
-  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>리뷰 캡처를 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
-  const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
-  if(!files.length){
-    // 시트에 제출 표시가 있는데 이미지가 없는 경우와, 아예 미제출인 경우를 구분해 알린다(둘 다 사실대로).
-    pane.innerHTML=hd+who2+(r.submitted
-      ? `<div class="rvnone"><b>리뷰 캡처 미등록</b><span>시트에는 제출로 표시되어 있지만 캡처 이미지가 등록되지 않았습니다.</span></div>`
-      : `<div class="rvnone warn"><b>리뷰 미작성 · 미제출</b><span>아직 이 리뷰어의 리뷰가 제출되지 않았습니다.</span></div>`);
-    return;
-  }
-  let lastSlot=null;
-  const imgs=files.map((f,i)=>{
-    const u=_rvUrl(f.fileId); if(!u) return '';
-    const slot=f.slot||'review';
-    const lbl=(files.some(x=>(x.slot||'review')!==slot)&&slot!==lastSlot)?`<div class="rvslot">${esc(_RV_SLOT[slot]||slot)}</div>`:'';
-    lastSlot=slot;
-    return `<div class="rvasset">${lbl}<img class="rvimg" src="${esc(u)}" alt="리뷰 캡처" loading="lazy" data-rid="${esc(r.id)}" data-fidx="${i}" onclick="_rvOpenByImage(this)"></div>`;
-  }).join('');
-  pane.innerHTML=hd+who2+(imgs?`<div class="rvmedia">${imgs}</div>`:`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
+  return _rvRender2(pane);
 }
 /* ══ 내부 화면 제출물 미리보기 — 좌 🛒 구매 캡처 / 우 📷 리뷰 캡처, 칸마다 **한 장씩** ══
    ★ 여러 장을 세로로 쌓으면 한 장이 작아지고 스크롤이 생겨 "나란히 대조"라는 목적이 무너진다
@@ -6166,13 +6144,15 @@ function summaryStrip(wd,d,m,c){
      갱신이 $('#setlCell .setlsummary').outerHTML 교체라 여기서 이름을 바꾸면 두 번째 갱신부터 죽는다. */
   const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
-  const prog=`<div class="tp3col"><div class="tp3t${isAdv?'':' tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다'}">진행 현황${isAdv?'':'<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span>'}</div>`+
+  const prog=`<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     gg('참여자',filled,target||filled,pT,'',filledTip)+
     gg('제출완료',c.submitted||0,filled,pS,'s')+
     gg('입금완료',c.paid||0,filled,pP)+
     `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
-  if(isAdv) return `<div class="advcondition">${cond}</div><div class="advprogress">${prog}</div>`;
-  /* 내부 = 상단 3분할(작업 조건 · 진행 현황+정산 · 제출물 미리보기).
+  /* ★★ 상단 3분할(작업 조건 · 진행 현황 · 제출물 미리보기)은 **내부·업체 뷰어 한 벌**이다
+     (사용자 확정 2026-08-23) — 종전에는 업체만 세로 스택 + 표 옆 세로 레일이라 같은 화면이
+     두 모양으로 갈렸다. 다른 것은 **작업 조건 카드의 내용뿐**(업체는 종전 4줄 유지 — 10항목
+     조건표는 리뷰비·입금명이 실려 내부 전용이다)과 정산 자리뿐이다.
      ★ 미리보기를 표 옆 세로 레일로 두면 그만큼 표의 가로 폭을 가져간다 → 상단 한 줄에서 끝낸다. */
   return `<div class="tp3grid c3${_topFolded()?' fold':''}">${cond}${prog}<aside class="rvpane" id="rvPane"></aside></div>`;
 }
