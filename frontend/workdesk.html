@@ -4524,22 +4524,17 @@ window.CAMP_ON_SAVED=function(){
      매번 새로 만들어져 **한글 IME 조합이 끊겼다**('면' → 'ㅁㅕㄴ'). 헤더 숫자(진행 중·오늘 완료·
      스위치 건수)는 전부 `all` 기준이라 검색으로 바뀌지 않으므로, 검색은 본문만 갈아 끼우면 된다.
    ★ 두 호출부(전체 렌더·검색)가 **같은 조각**을 쓴다 — 사본을 두면 검색 결과 행만 열 구성이 어긋난다. */
-/* ★★ 무시트 배지 — 화면이 "이 작업은 구글시트를 안 쓴다"고 말한다 (탈 구글시트 W3-b).
-   없으면 담당자가 어느 작업이 이관됐는지 화면만 봐서는 알 수 없어 시트를 찾으러 간다.
-   ★ 판정은 **서버가 실어 준 플래그 하나**(`sheetless`) — 시트 ID 모양(`wt_`)으로 추측하지 않는다.
-     이관된 기존 작업은 진짜 시트 ID 를 그대로 쓰면서 무시트가 되므로 모양으로는 못 잡는다.
-   ★ 필드 자체가 없으면(구버전 백엔드) **아무것도 그리지 않는다** — 모르는 것을
-     "시트를 쓴다"로 단정하지 않는다(조용한 오표시 금지).
-   ★ 렌더러는 한 벌 — 홈 목록·작업보드 상단·업체관리 표가 같은 것을 쓴다(사본을 두면 한쪽만 안 바뀐다). */
-/* ★★ "이 작업이 무시트인가" 판정 **단일 출처** — 무시트 배지와 **시트 라벨 숨김**이 같은 값을 본다.
+/* ★★ "이 작업이 무시트인가" 판정 **단일 출처** — 시트 제목 라벨 숨김·목록 4곳·
+     `준비된 줄 ≠ 총건수` 경고가 같은 값을 본다(제거 금지).
    ★ 필드가 없으면(구버전 백엔드·광고주 렌즈 미동봉) false = 종전 표기 유지 —
-     모르는 것을 "무시트"로 단정해 라벨을 지우면 시트 기반 작업의 소속을 잃는다. */
+     모르는 것을 "무시트"로 단정해 라벨을 지우면 시트 기반 작업의 소속을 잃는다.
+   ⚠ 「무시트」 배지(`_nsBadge`)는 제거했다(사용자 확정 2026-08-23) — 활성 작업이 전부
+     무시트라 모든 줄에 붙는 상시 표기가 되어 신호 구실을 못 했다. 시트 기반 작업이 다시
+     생기면 그 사실은 **그리드 모드 배지(`시트 그리드 · 열람`)와 시트 제목 라벨**이 말한다.
+     되살릴 때는 "무시트면 뜬다"가 아니라 **"시트 기반이면 뜬다"** 로 뒤집을 것.
+     ★ `.ns-b` CSS 는 남는다 — **탈시트 전환 화면(`_coRows`)** 이 계속 쓴다(그 화면에서는
+       "이관됐다/아니다"가 곧 그 화면의 주제라 배지가 신호로 작동한다). */
 function _isNoSheet(t){ return !!(t && t.sheetless===true); }
-function _nsBadge(t){
-  return _isNoSheet(t)
-    ? ' <span class="ns-b" title="구글시트를 쓰지 않는 작업입니다 — 표가 곧 원본이고, 시트를 열 필요가 없습니다">무시트</span>'
-    : '';
-}
 /* ══════════════════════════════════════════════════════════════════════════
    줄별 [⋯] 더보기 → [🗑 작업 삭제] (admin/master 전용, 사용자 확정 2026-08-19)
    ★★ 서버 게이트(adminOrMaster)와 1:1 — AE·광고주에게는 **버튼 자체를 그리지 않는다**
@@ -4789,7 +4784,7 @@ function _finBodyHtml(){
       :(fin?`<button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
     return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
-      <td><div class="wbl-nm">${esc(t.tabName)}${_nsBadge(t)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
+      <td><div class="wbl-nm">${esc(t.tabName)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
       ${tdOpen}${tdLink}
       <td>${esc((s.manager)||'—')}</td>
       <td>${prog}</td>${last}
@@ -5430,9 +5425,8 @@ function renderWorkdesk(wd){
   const shareBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="copyBoardLink()" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 화면으로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크 복사</button>`;
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
-    ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
     ${_curSheetLabel(noSheet)}
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?(noSheet?'<span class="bd" title="표 전체 컬럼 가로 펼침">표 · 전체 열</span>':'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>'):''}${warn.join('')}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${(gridMode&&!noSheet)?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
@@ -15842,7 +15836,7 @@ function _ownRowsHtml(){
     /* ★★ 시트 제목을 적지 않는다(사용자 확정 2026-08-23) — 업체관리의 단위는 작업(작업보드)이고
          진실원천은 작업오더다. 부제는 최초 등록일만 남긴다. */
     const osub=t.firstSeenAt?esc(String(t.firstSeenAt).slice(0,10)):'';
-    cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}${_nsBadge(t)}</b>
+    cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}</b>
         <span class="osub">${fbadge}${fbadge?' ':''}${osub}</span></div>`);
     if(c.info){
       // 지정 브랜드는 색 점 + 굵게(광고주가 정한 값), 추정 파싱은 종전 표기 그대로(회색 물음표 툴팁).
