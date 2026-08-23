@@ -231,8 +231,14 @@ t('★ 머리줄 3곳(작업조건 정상·폴백 / 진행현황 / 미리보기)
   const n = (wd.match(/onclick="_topToggle\(\)"/g) || []).length;
   return n === 4;   // 작업조건 2(정상+폴백) + 진행현황 1 + 미리보기(rvhd) 1
 })());
-t('★ 광고주 진행현황 머리줄에는 접기 창구가 없다(광고주는 종전 레이아웃)',
-  /isAdv\?'':' tp3h" onclick="_topToggle\(\)"/.test(wd));
+/* ★★ 업체 뷰어도 같은 3분할·같은 접기(사용자 확정 2026-08-23) — 종전의 "광고주는 접기 없음"
+   규칙은 폐기됐다. 다른 것은 작업 조건 카드의 **내용**(업체 4줄)과 정산 자리뿐이다. */
+t('★ 진행 현황 머리줄은 내부·업체 한 벌(역할 분기 잔재 0)',
+  /<div class="tp3t tp3h" onclick="_topToggle\(\)"[^>]*>진행 현황<span class="tp3hint">/.test(wd)
+  && !/isAdv\?'':' tp3h"/.test(wd));
+t('★ 업체 뷰어도 같은 3분할을 반환한다(전용 래퍼 advcondition/advprogress 폐기)',
+  !/class="advcondition"/.test(wd) && !/class="advprogress"/.test(wd)
+  && !/if\(isAdv\) return `<div class="advcondition"/.test(wd));
 t('★ 접힘 상태는 localStorage 로 기억(작업 무관 공통) — 실패해도 무시',
   /localStorage\.getItem\('wd_top3_fold'\)/.test(wd) && /localStorage\.setItem\('wd_top3_fold','1'\)/.test(wd));
 t('★ 토글은 CSS 클래스만 — 재렌더하지 않는다(미리보기 선택·스크롤 보존)', (() => {
@@ -437,9 +443,13 @@ t('★ 내부 미리보기 렌더는 반드시 _rvFill 을 거친다(한 갈래�
 t('★ 캡처는 폭에 맞춰 축소하고 세로는 칸 안에서 스크롤(contain 으로 욱여넣지 않는다)',
   /\.rv2 \.rvhold\{flex:1;min-height:0;[^}]*overflow-y:auto/.test(wd)
   && /\.rv2 \.rvone\{width:100%;height:auto;display:block\}/.test(wd));
-t('★ 광고주 뷰어(_rvRender)는 종전 그대로 — 이 래퍼는 내부 화면 전용', (() => {
+/* ★★ 미리보기 렌더러는 **한 벌**(사용자 확정 2026-08-23) — `_rvRender` 는 이제 위임만 한다.
+   종전에는 업체 뷰어가 세로 레일(pane.innerHTML 직접 조립)을 따로 그려 두 화면이 갈렸다.
+   ★ 절대배치 래퍼(`_rvFill`)를 거쳐야 캡처 높이가 상단 카드를 밀어내지 않는다. */
+t('★ 미리보기 렌더러 한 벌 — _rvRender 는 _rvRender2 위임만(세로 레일 조립 잔재 0)', (() => {
   const m = fnBody(wd, 'function _rvRender(){');
-  return !!m && !/_rvFill\(/.test(m) && /pane\.innerHTML=/.test(m);
+  return !!m && /return _rvRender2\(pane\);/.test(m) && !/pane\.innerHTML=/.test(m)
+    && !/rvmedia|rvasset|_RV_SLOT/.test(wd);
 })());
 
 console.log('\n── H. 시안 문서 ──');
