@@ -6822,6 +6822,9 @@ function _gridEditVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)
 function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
   if(_isDepositCol(h)) return _fmtMD(v);
   if(/일자|날짜|date/i.test(h)) return _fmtKDate(v);
+  /* ★ 리뷰제출 칸은 **위 두 갈래에 걸리지 않을 때만** 여기로 온다(헤더가 `리뷰`·`리뷰제출`·`리뷰제출일` 인 탭).
+     `리뷰제출일자` 처럼 날짜형 이름이면 위에서 이미 처리되므로 종전 표기가 그대로 유지된다. */
+  if(_workdeskStatusKind(h)==='review') return _fmtSubmitCell(v);
   if(_isPhoneHeader(h)) return _fmtPhone(v);
   return v; }
 // 연락처 표기 통일: 숫자만 추출 → 010-0000-0000(뒤8자리=phone8) 등 표준 대시 양식. 형식 불명은 원본 유지(오염 방지).
@@ -6861,6 +6864,27 @@ function _fmtMD(v){
     if(md) return `${+md[1]}/${+md[2]}`;
     return s;
   }).filter(Boolean).join(', ');
+}
+
+/* 리뷰제출 칸의 시트 일련번호 표기 보완 (2026-08-23 신고 "46139 등으로 깨진 값").
+   ★★ **일련번호만 바꾸고 나머지는 한 글자도 건드리지 않는다** — 이 칸은 담당자가 자유롭게 적는 칸이라
+     (실측: `5/4 20:09` · `완료` · `true` 가 한 열에 섞여 있다) 정규화하면 적어 둔 값이 사라진다.
+   ★ 어느 칸이 리뷰제출인가 = `_workdeskStatusKind`(서버 statusCols) **단일 출처** — 이름 목록을 새로 만들지 말 것.
+   ★ 표기는 그 칸의 집주인 형식인 **`M/D HH:MM`**(시각이 없는 정수 일련번호는 `M/D`) — `_fmtMD` 를 쓰면
+     시각이 잘려 이미 정상인 `5/4 20:09` 까지 `5/4` 로 줄어든다(정보 손실).
+   ★ 범위(4~6자리 + `_serialToDate` 의 2000~2100년 가드)는 종전 `_gridEditVal` 과 **같은 기준** —
+     넓히면 번호·금액이 날짜로 오인된다. 해석 실패는 원본 유지(fail-open). */
+function _serialToMDHM(n){
+  const iso=_serialToDate(Math.floor(n)); if(!iso) return null;
+  const md=`${+iso.slice(5,7)}/${+iso.slice(8,10)}`;
+  const frac=n-Math.floor(n); if(!(frac>0)) return md;
+  let mins=Math.round(frac*1440); if(mins>=1440) mins=1439;   // 23:59 로 붙인다 — 날짜가 하루 밀리는 것보다 낫다
+  return `${md} ${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
+}
+function _fmtSubmitCell(v){
+  const s=String(v==null?'':v).trim(); if(!s) return '';
+  if(!/^\d{4,6}(\.\d+)?$/.test(s)) return s;               // 일련번호가 아니면 원본 그대로
+  return _serialToMDHM(parseFloat(s)) || s;
 }
 
 function gCellDisp(r,h){
@@ -7070,6 +7094,10 @@ function buildGrid(wd){
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> {
       const statusKind=_workdeskStatusKindForField(field);
       const locked=!!statusKind;
+      /* 리뷰제출 칸은 편집이 잠겨 있어 `data-val`(편집 정본)을 읽는 곳이 **복사 하나뿐**이다(`_cellCopyText`).
+         일련번호를 그대로 복사시키면 화면에서 고친 표기가 붙여넣는 순간 다시 깨진다 → 보이는 값을 복사한다.
+         ★ 입금 칸은 건드리지 않는다(여러 날짜가 한 칸에 들어가는 등 성격이 달라 종전 정본 복사를 유지). */
+      if(statusKind==='review') editv=disp;
       const cellE = canE || (advTrackE && _isTrackingField(field));   // 업체는 송장 칸만 편집 가능
       return cellE
       ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 이 화면에서 직접 수정할 수 없습니다.'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':(edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:'')}</td>`
