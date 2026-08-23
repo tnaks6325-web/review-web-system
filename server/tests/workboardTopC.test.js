@@ -383,8 +383,21 @@ console.log('\n── E. 화면: 발주 줄 + 원문 팝업 ──');
 const lk = fnBody(wd, 'function _woLinkedRow(wd){');
 t('발주 줄이 카드 맨 아래 한 줄(.tp3wo.lk)', /class="tp3wo lk"/.test(lk));
 t('★ 조작은 [⋯] 메뉴 안 — 주 화면에 파괴 버튼을 늘어놓지 않는다',
-  /prepareRoster\(\)/.test(lk) && /openWorkOrderPicker\(\)/.test(lk) && /unlinkWO\(\)/.test(lk)
-  && /class="womenu"/.test(lk));
+  /openWoRawModal\(\)/.test(lk) && /openWorkOrderPicker\(\)/.test(lk) && /class="womenu"/.test(lk));
+/* ★★ 메뉴는 **원문 보기 + 발주 변경 둘뿐**(사용자 확정 2026-08-23).
+   · 명단 준비 = `prepareRosterSlots` 가 seq 900000 대역 + source='manual' + row_json 없이 넣어
+     장부에서 제외되고 상태가 얼어붙는다(접수의 `createWorktableSlots` 가 이미 정확한 줄을 깐다).
+   · 연결 해제 = Track B 링크만 지우는데 접수된 작업은 `work_orders.linked_tab_*` 폴백이 살아 있어
+     **아무 일도 안 일어나고 "해제됨"이라고 말한다** — 진짜 해제는 홈 [작업 삭제].
+   되붙이면 그 사고가 그대로 재현되므로 **부재를 고정한다**(서버 라우트는 그대로 살아 있다). */
+t('★ 명단 준비·연결 해제는 화면에서 제거됐다(되붙이면 위 사고 재현)',
+  !/onclick="prepareRoster/.test(wd) && !/onclick="unlinkWO/.test(wd)
+  && !/>명단 준비/.test(wd) && !/>연결 해제/.test(wd)
+  && !/function prepareRoster\(/.test(wd) && !/function unlinkWO\(/.test(wd));
+t('★ 발주 변경은 한계를 툴팁으로 말한다(작업오더 표시·작업표 줄은 안 따라온다)',
+  /openWorkOrderPicker\(\)" title="[^"]*작업오더[^"]*작업표/.test(lk));
+t('★ 미연결 줄 안내가 사라진 기능을 시키지 않는다(명단 준비 문구 0)',
+  !/명단을 준비할 수 있습니다/.test(wd));
 t('★ 메뉴 조작은 admin/master 만(종전 계약 유지)', /STATE\.role==='master'\|\|STATE\.role==='admin'/.test(lk));
 t('★ 바깥클릭·Esc 리스너는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)',
   /_woRowMenuBound/.test(wd) && (wd.match(/STATE\._woRowMenuBound=true/g) || []).length === 1);
