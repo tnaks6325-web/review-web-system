@@ -161,7 +161,9 @@ const CTX = require('../src/services/reviewTypeContext.service');
       '목록에 실린 건들의 탭만 조회');
     assert.ok(/let reviewTypes = \[\];[\s\S]{0,400}catch \(_\)/.test(tb),
       '★ 실패해도 목록은 나간다(표시 보조)');
-    assert.ok(/scoped: !!sc\.scoped, reviewTypes \}\)/.test(tb), '응답 동봉');
+    // ⚠ 응답 객체는 뒤로 계속 늘어난다(#1090 typeCounts) — 줄 끝(`})`)에 기대면 무관한 변경마다
+    //    이 가드가 조용히 빨개진다. **`reviewTypes` 가 응답에 실리는가**만 본다(검사 의미 불변).
+    assert.ok(/scoped: !!sc\.scoped, reviewTypes[,\s}]/.test(tb), '응답 동봉');
     ok('C1: 목록 응답 동봉 + fail-soft');
   }
 
