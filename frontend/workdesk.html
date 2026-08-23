@@ -4530,8 +4530,12 @@ window.CAMP_ON_SAVED=function(){
      모르는 것을 "무시트"로 단정해 라벨을 지우면 시트 기반 작업의 소속을 잃는다.
    ⚠ 「무시트」 배지(`_nsBadge`)는 제거했다(사용자 확정 2026-08-23) — 활성 작업이 전부
      무시트라 모든 줄에 붙는 상시 표기가 되어 신호 구실을 못 했다. 시트 기반 작업이 다시
-     생기면 그 사실은 **그리드 모드 배지(`시트 그리드 · 열람`)와 시트 제목 라벨**이 말한다.
+     생기면 그 사실은 **시트 제목 라벨과 `원본: 시트` 배지**가 말한다.
      되살릴 때는 "무시트면 뜬다"가 아니라 **"시트 기반이면 뜬다"** 로 뒤집을 것.
+     ⚠ 그리드 모드 배지(`표 · 전체 열` / `시트 그리드 · 열람`)도 **둘 다 제거**했다
+       (사용자 확정 2026-08-23). 시트 기반 작업임을 알리는 표기는 **시트 제목 라벨
+       (`_curSheetLabel`)과 `원본: 시트` 배지** 둘이 계속 맡는다 — 그 둘은 무시트면
+       스스로 숨으므로 신호가 유지된다.
      ★ `.ns-b` CSS 는 남는다 — **탈시트 전환 화면(`_coRows`)** 이 계속 쓴다(그 화면에서는
        "이관됐다/아니다"가 곧 그 화면의 주제라 배지가 신호로 작동한다). */
 function _isNoSheet(t){ return !!(t && t.sheetless===true); }
@@ -5426,7 +5430,7 @@ function renderWorkdesk(wd){
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${_curSheetLabel(noSheet)}
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${(gridMode&&!noSheet)?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${warn.join('')}
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
