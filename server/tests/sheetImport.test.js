@@ -529,78 +529,20 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     ok('★ ImportError 는 400대로 매핑(500 마스킹이면 무엇을 고칠지 모른다)',
       /ImportError[\s\S]{0,200}res\.status\(400\)/.test(rt));
 
+    /* ══ 화면(업체관리) — **제거됨**(사용자 확정 2026-08-23) ══════════════════════════
+       업체별 작업의 진실원천은 인트라넷 리뷰오더 → 리뷰웹 작업오더 → 작업보드 하나다. 업체관리는
+       구글시트를 찾아오지도·참조하지도·목록을 보여주지도 않으므로, 시트 가져오기 4단계 마법사는
+       화면에서 통째로 걷어냈다(진입점만 지우고 함수를 남기면 다음 사람이 되살린다).
+       ★ 서버(라우트·서비스·에러 매핑)는 그대로 남겨 둔다 — 위 절들이 계속 그것을 고정한다.
+       ★ 되살릴 거면 이 절과 화면을 **함께** 되돌릴 것. ══════════════════════════════════ */
     const fh = readFront('workdesk.html');
-    // ★ 2026-08: 같은 패널의 접속링크·계정 버튼이 AE 에게 열리면서 그쪽 변수명이 바뀌었다.
-    //   시트 가져오기는 **여전히 admin/master 전용**(등록 창구)이라 전용 판정 변수(canImport)를 쓴다.
-    ok('업체 패널에 진입점(관리자 전용)', /canImport\?`<button[^`]*openSheetImport\('\$\{esc\(a\.id\)\}'\)/.test(fh)
-      && /const canImport=STATE\.role==='master'\|\|STATE\.role==='admin';/.test(fh));
-    ok('사이드바에도 진입점 — 업체를 모를 때 주소부터 넣는 경로', /openSheetImport\(''\)/.test(fh));
-    /* ★★ 거래처 등록 드로어에도 안내 — 그 시트 드롭다운에는 **시스템이 아는 시트만** 나오므로,
-       미등록 시트를 찾으러 온 사람이 여기서 막다른 길에 빠진다(실사용 신고 2026-08-10). */
-    /* ★ 경계는 **실재하는 다음 함수**여야 한다 — 없는 이름을 쓰면 indexOf 가 -1 이라 파일 끝까지
-       잘리고, 사이드바의 같은 호출이 대신 통과시킨다(이 가드를 쓰다가 실제로 밟았다). */
-    const addStart = fh.indexOf('function _ovmAddAdvHtml(');
-    const addEnd = fh.indexOf('function _ovmAfterAddMount(');
-    ok('가드 경계가 실재한다(슬라이스가 파일 끝까지 번지지 않는다)', addStart > 0 && addEnd > addStart);
-    const addBlk = fh.slice(addStart, addEnd);
-    // ★ 목록 단위가 시트 → 작업(작업보드)으로 바뀌어(2026-08-23 사용자 확정) 제목도 "찾는 작업…" 이다.
-    ok('★★ 거래처 등록 창에 "찾는 작업이 목록에 없나요?" 안내 + 진입점',
-      /찾는 작업이 목록에 없나요/.test(addBlk) && /openSheetImport\(''\)/.test(addBlk));
-    ok('★ 그 안내도 관리자에게만(서버 게이트와 1:1)', /isAdmin\?`<div class="sect">[\s\S]{0,400}openSheetImport/.test(addBlk));
-    ok('★ 4단계 함수가 모두 있다',
-      ['openSheetImport', '_siPreview', '_siRun', '_siRevert', '_siClose'].every(f => fh.indexOf('function ' + f) >= 0));
-    ok('★ 팝업은 body 직속', /id='siPop'[\s\S]{0,200}document\.body\.appendChild/.test(fh) ||
-      /ov\.id\s*=\s*'siPop'[\s\S]{0,220}document\.body\.appendChild\(ov\)/.test(fh));
-    ok('★★ 바깥 클릭으로 닫지 않는다(붙여넣은 주소·고른 줄 보호) — Esc·[취소]만',
-      !/si-ov[^\n]*onclick=/.test(fh) && /Escape'&&_siS/.test(fh));
-    ok('★★ onclick 은 인덱스만 — 탭명·업체명 문자열을 보간하지 않는다',
-      !/_siPickTab\('/.test(fh) && !/_siToggle\('/.test(fh) &&
-      /_siPickTab\(\$\{i\}\)/.test(fh) && /_siToggle\(\$\{i\}\)/.test(fh));
-    ok('★ 실행은 confirm 을 거친다(되돌리기 있어도 파괴적 조작)', /_siRun\(\)[\s\S]{0,900}confirm\(/.test(fh));
-    ok('★ 주소 입력 중 재렌더하지 않는다(IME 조합 보호) — 값은 상태로만 받는다',
-      /oninput="_siS\.url=this\.value"/.test(fh));
-    /* ★★ 화면은 **서버가 준 blockers 로만 잠근다** — 사유 코드를 보고 스스로 "막을지"를 다시
-       판정하면 "화면은 초록인데 서버가 거부"가 구조적으로 가능해진다.
-       ★ 구분: 코드로 **조치를 고르는 것**(gid → 탭 고르기, not_in_list → 장부 재생성 버튼)은
-         재판정이 아니라 매핑이라 허용한다. 서버가 그 사유를 안 주면 버튼도 안 그려진다.
-         반면 **막을지 말지를 정하는 판정 코드**는 화면에 있으면 안 된다. */
-    ok('★★ 잠금은 서버 blockers 존재로만 판정한다',
-      /const blocked=\(p\.blockers\|\|\[\]\)\.length>0/.test(fh));
-    ok('★★ 판정 사본 0 — 막을지 말지를 정하는 사유 코드가 화면에 없다',
-      !/'no_phone_column'|'header_unrecognizable'|'no_rows'|'registered_empty'/.test(fh));
-    ok('★ 서버가 준 blockers 로 [다음] 을 잠근다',
-      /blocked\?'disabled':''/.test(fh));
-    /* ★★ 막을 때 사유·현재 상태를 그린다 — 이유 없이 막으면 "어디에도 못 찾겠다"가 된다(실사용 신고). */
-    ok('★★ 화면이 blocker 의 사유(reasons)를 그린다', /b\.reasons\|\|\[\]/.test(fh));
-    ok('★★ 등록 탭의 현재 상태를 숫자로 보여준다(_siDupTail)',
-      /function _siDupTail\(/.test(fh) && /표 \$\{n\(t\.boardRows\)\}줄/.test(fh) &&
-      /작업 등록부 \$\{t\.inMaster\?'있음':'없음'\}/.test(fh));
-    ok('★ 값이 없으면(구버전 백엔드) 아무것도 그리지 않는다', /if\(!t\) return '';/.test(fh));
-    /* ★ 호출은 **막는 쪽·알리는 쪽 둘 다** 확인한다 — 한쪽만 보면 다른 쪽 제거를 통과시킨다
-       (변이시험이 실제로 뚫었다: blocker 쪽 `_siDupTail(b.tab)` 을 지워도 초록이었다). */
-    ok('★★ 막을 때도 상태 숫자를 붙인다', /_siDupTail\(b\.tab\)/.test(fh));
-    ok('★ 경고에도 같은 사유·상태를 붙인다', /w\.reasons\|\|\[\]/.test(fh) && /_siDupTail\(w\.tab\)/.test(fh));
-    /* ★★ 수리 버튼 — "왜 안 보이는지는 알았는데 고칠 데가 없는" 두 번째 막다른 길 방지 */
-    /* ★ 호출 검사에서 **정의부를 먼저 지운다** — `function _siFixHtml(b)` 가 `_siFixHtml(b)` 에
-       그대로 매칭되어, 호출을 지워도 정의부가 대신 통과시킨다(변이시험이 실제로 뚫었다). */
-    const fhNoDef = fh.replace(/function\s+_siFixHtml\([^)]*\)/g, '');
-    ok('★★ 진단에 수리 버튼을 잇는다',
-      /_siFixHtml\(b\)/.test(fhNoDef) && /function _siFixHtml\(/.test(fh));
-    ok('★ 장부 재생성은 **무시트 작업에만** 버튼을 그린다(시트 기반은 사유만)',
-      /t\.sheetless[\s\S]{0,200}_siFix\('rebuild'\)/.test(fh) && /반영 점검/.test(fh));
-    ok('★ 업체 지정은 업체를 고른 뒤에만 보낸다(빈 값으로 요청하지 않는다)',
-      /if\(!advId\)\{ toast\('업체를 고르세요\.'\); return; \}/.test(fh));
-    ok('★★ 수리 대상은 **등록명**(리네임으로 시트 탭명과 다를 수 있다)',
-      /b\.tab&&b\.tab\.tabName\)\|\|p\.tabName/.test(fh));
-    ok('★ 고친 뒤 상태를 다시 읽어 화면에 반영한다', /_siFix[\s\S]{0,1200}await _siPreview\(\)/.test(fh));
-    ok('CSS 는 si- 접두로 스코프', /\.si-ov\{/.test(fh) && /\.si-mo\{/.test(fh));
-
-    /* ★★ 헤더 칸 수 ≡ 행 칸 수 — 열을 끼워 넣을 때 가장 흔히 깨지는 자리(업체관리 표와 같은 계약). */
-    const s3 = fh.slice(fh.indexOf('function _siStep3('), fh.indexOf('function _siAdv('));
-    const headCells = (s3.match(/<th[ >]/g) || []).length;
-    const bodyCells = (s3.match(/<td[ >]/g) || []).length;
-    ok('★★ 가져올 줄 표 — 헤더 칸 수 ≡ 행 칸 수', headCells === bodyCells && headCells === 9,
-      `th=${headCells} td=${bodyCells}`);
+    ok('★★ 업체관리에 시트 가져오기 진입점이 없다',
+      !/openSheetImport\(/.test(fh) && !/시트에서 가져오기<\/button>/.test(fh));
+    ok('★★ 마법사 함수도 화면에 남아 있지 않다(죽은 코드로 되살아나지 않게)',
+      ['openSheetImport', '_siPreview', '_siRun', '_siRevert', '_siClose'].every(f => fh.indexOf('function ' + f) < 0));
+    ok('★ 마법사 CSS(si- 접두)도 함께 걷어냈다', !/\.si-ov\{/.test(fh) && !/\.si-mo\{/.test(fh));
+    ok('★ 서버 창구는 살아 있다(되살릴 때 화면만 다시 붙이면 된다)',
+      /router\.post\('\/sheet-import\/run'/.test(read('src/routes/trackB.routes.js')));
 
     console.log(`\n✅ sheetImport 회귀가드 통과 (${passed}케이스)\n`);
     process.exit(0);

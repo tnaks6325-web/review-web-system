@@ -105,9 +105,9 @@ console.log('\n[C] 목록 4곳 — 같은 게이트 · 구분자가 앞에 남�
   ok('업체 전체 작업 표 서브라인', /class="asub">\$\{_isNoSheet\(it\)\?'':_awHi\(it\.spreadsheetTitle/.test(WD));
   ok('★ 업체 대시보드 줄 — 조각으로 이어 " · 목표 N명" 이 앞에 붙지 않는다',
     /\[_isNoSheet\(it\)\?'':esc\(it\.spreadsheetTitle\|\|''\),tgt\?`목표 \$\{tgt\}명`:''\]\.filter\(Boolean\)\.join\(' · '\)/.test(WD));
-  ok('★ 업체관리 연결탭 서브라인 — 조각으로 이어 " · 날짜" 가 앞에 붙지 않는다',
-    /const osub=\[_isNoSheet\(t\)\?'':esc\(t\.spreadsheetTitle\|\|sheetTitle\(t\.sheetId\)\),/.test(WD)
-    && /\.filter\(Boolean\)\.join\(' · '\);/.test(WD));
+  // ★★ 사용자 확정(2026-08-23): 업체관리는 시트 제목을 **아예** 그리지 않는다(무시트 여부와 무관) —
+  //    이 화면의 단위는 작업(작업보드)이고 진실원천은 작업오더다. 종전의 _isNoSheet 게이트보다 강한 규칙.
+  ok('★★ 업체관리 연결탭 서브라인에 시트 제목이 없다', /const osub=t\.firstSeenAt\?esc\(String\(t\.firstSeenAt\)\.slice\(0,10\)\):'';/.test(WD));
 }
 
 console.log('\n[D] 업체(광고주) 응답에 sheetless 가 실린다');
