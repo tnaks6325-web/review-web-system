@@ -310,6 +310,16 @@ router.get('/participation-brief', async (req, res) => {
       }
     } catch (_) { /* 표시용 — fail-soft */ }
 
+    /* ★ 주문취소 가능 여부 — **판정 단일 출처**(`assessReviewerCancel`)를 화면 게이트와
+       실제 실행이 함께 쓴다. 버튼을 그릴지 말지를 화면이 스스로 정하면 "보이는데 거부"가 된다.
+       ★ 읽기 전용·fail-soft — 실패하면 필드를 싣지 않고(=화면은 버튼 미표시) 나머지 brief 는 그대로. */
+    let cancelable = null;
+    try {
+      const roc = require('../services/reviewerOrderCancel.service');
+      const g = await roc.assessReviewerCancel(pool, { sheetId, tabName, rowIndex });
+      cancelable = { ok: g.cancelable, reason: g.reason, message: g.message, reasons: roc.CANCEL_REASONS };
+    } catch (_) { /* 표시용 — fail-soft */ }
+
     // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만). ★ D: 그래도 작업 옵션은 알려준다
     //   — 리뷰 형태는 공고가 아니라 **그 행**에 적힌 지시라 공고 유무와 무관하다.
     //   ★ 입금 결과도 공고와 무관하므로 같은 규율로 함께 내려준다.
@@ -317,6 +327,7 @@ router.get('/participation-brief', async (req, res) => {
       const only = {};
       if (workOptions.length) only.workOptions = workOptions;
       if (payment) only.payment = payment;
+      if (cancelable) only.cancelable = cancelable;
       return res.json({ ok: true, brief: Object.keys(only).length ? only : null });
     }
     const c = camps[0];
@@ -352,11 +363,50 @@ router.get('/participation-brief', async (req, res) => {
         reviewGuide,
         workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
         payment,              // ★ M2: {status:'paid', paidAt, amount, memo} | {status:'failed'} | null
+        cancelable,           // ★ 주문취소 게이트 {ok, reason, message, reasons[]} — 실패 시 null
       },
     });
   } catch (err) {
     logger.error(`[review-edit] participation-brief 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: '조회 중 오류가 발생했습니다.' });
+  }
+});
+
+/* ═══ POST /api/review-edit/order-cancel — 리뷰어 주문취소 (사용자 확정 2026-08-23) ═══
+   body: { phone8, sheetId, tabName, rowIndex, reasonKey, reasonEtc? }
+   ★★ 신규 인증 표면 0 — 이 파일의 강한-키 소유권(`_verifyRowOwnership`)을 그대로 쓴다.
+   ★★ 주문 번호는 **서버가 좌표로 다시 찾는다**(요청 본문 불신) — 낡은 화면·조작 요청이
+      남의 주문을 지목할 수 없다.
+   ★ 실행부는 작업보드 [행 삭제]와 같은 함수(사본 0) — 보충 슬롯·장부 재생성이 함께 온다. */
+router.post('/order-cancel', imageApiLimiter, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const p8 = _p8(b.phone8);
+    const sheetId = String(b.sheetId || '');
+    const tabName = String(b.tabName || '');
+    const rowIndex = parseInt(b.rowIndex, 10);
+    if (p8.length !== 8 || !sheetId || !tabName || !Number.isInteger(rowIndex)) {
+      return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
+    }
+    const phoneList = await _getReviewerPhoneList(p8);
+    if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
+      return res.status(403).json({ ok: false, error: '본인 참여 내역만 취소할 수 있습니다.' });
+    }
+    const roc = require('../services/reviewerOrderCancel.service');
+    // ★ 사유는 **필수**(선택지 밖 값은 거부) — 왜 취소가 느는지 모르면 손을 쓸 수 없다.
+    if (!roc.cancelReasonLabel(b.reasonKey)) {
+      return res.status(400).json({ ok: false, code: 'reason_required', error: '취소 사유를 선택해주세요.' });
+    }
+    const out = await roc.cancelOrderByReviewer({
+      sheetId, tabName, rowIndex, phone8: p8,
+      reviewerName: String(b.name || '').trim().slice(0, 60),
+      reasonKey: b.reasonKey, reasonEtc: b.reasonEtc,
+    });
+    if (!out.ok) return res.status(409).json(out);
+    res.json(out);
+  } catch (err) {
+    logger.error(`[review-edit] order-cancel 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '취소 처리 중 오류가 발생했습니다.' });
   }
 });
 
