@@ -113,9 +113,16 @@ async function projectTab({ sheetId, tabName, by = 'trackB' } = {}) {
   // 1) 로스터 임포트(review_index→campaign_participants). 기존 검증된 경로 재사용(시트 재읽기 0).
   const imp = await participants.importTabFromIndex({ sheetId, tabName, by });
   // 2) 신원키 + 주문링크 강화(라이브 order_submissions를 읽어 B에만 씀).
+  //    ★ 무시트 탭에서도 계속 돈다 — row_json 을 건드리지 않고 identity_key·주문링크만
+  //      blank-only 로 채우므로(되돌림과 무관) 관제 대조·중복 판정의 재료가 유지된다.
   const enr = await _enrichTab({ sheetId, tabName });
   // 3) seen-set: 이번 임포트에 안 보인 import행 → 비활성(하드삭제 아님, 이력 보존).
-  const rec = await _reconcileSeen({ sheetId, tabName, runStart });
+  /* ★★★ 임포트를 건너뛴 탭(무시트)에서는 **절대 돌리면 안 된다** — 이번 실행에 아무것도
+     임포트하지 않았으므로 `imported_at < runStart` 에 그 탭의 `source='import'` 활성 줄이
+     **전부** 걸려 통째로 비활성화된다(이관된 무시트 탭에 그런 줄이 남아 있다).
+     "시트에서 사라진 줄 정리" 라는 이 단계의 목적 자체가 무시트 탭에는 성립하지 않는다. */
+  const rec = (imp && imp.skipped) ? { deactivated: 0, reconcileSkipped: true }
+                                   : await _reconcileSeen({ sheetId, tabName, runStart });
   return { ...imp, ...enr, ...rec };
 }
 
