@@ -48,23 +48,28 @@ const svc = require('../src/services/trackB.service');
       ['FROM review_index', []],
       ['FROM tab_configs', [{ gid: '1443853889' }]],
       // 탭 좌표 주문(옛 외부모집분)
-      ["FROM order_submissions os WHERE os.sheet_id", [{ sheet_row: 100, capture_file_id: 'FILE_TAB', capture_uploaded_at: null }]],
-      // 공고 좌표 주문(참여형)
+      // ⚠ 규칙은 **실제 SQL 모양**(줄바꿈·별칭 없음)에 맞춘다 — 안 맞으면 그 조회가 빈 결과가 되어
+      //   "탭 좌표 조회를 지운" 변이를 놓친다(변이시험 실측).
+      ['FROM order_submissions\\s+WHERE sheet_id=', [{ sheet_row: 100, capture_file_id: 'FILE_TAB_ONLY', capture_uploaded_at: null }]],
+      // 공고 좌표 주문(참여형) — ★ 탭 좌표 결과와 **겹치지 않는 파일**이라야 한쪽을 지운 변이가 잡힌다
       ['JOIN recruit_campaigns rc', [
         { sheet_row: 118, capture_file_id: 'FILE_CAMP', capture_uploaded_at: null },
-        { sheet_row: 100, capture_file_id: 'FILE_TAB', capture_uploaded_at: null },   // 같은 파일 재등장
+        { sheet_row: 118, capture_file_id: 'FILE_CAMP', capture_uploaded_at: null },   // 같은 파일 재등장
       ]],
     ] };
     const out = await svc.reviewImagesForTab({ sheetId: 'S', tabName: 'T' });
     t('① 탭 좌표 주문의 캡처는 종전대로 실린다(무회귀)',
-      (out['100'] || []).some(f => f.fileId === 'FILE_TAB' && f.slot === 'order_capture'));
+      (out['100'] || []).some(f => f.fileId === 'FILE_TAB_ONLY' && f.slot === 'order_capture'));
     t('② 공고 좌표 주문의 캡처도 같은 sheet_row 로 실린다(신고 재현 지점)',
       (out['118'] || []).some(f => f.fileId === 'FILE_CAMP' && f.slot === 'order_capture'));
-    t('④ 같은 파일이 두 번 실리지 않는다', (out['100'] || []).filter(f => f.fileId === 'FILE_TAB').length === 1);
+    t('④ 같은 파일이 두 번 실리지 않는다', (out['118'] || []).filter(f => f.fileId === 'FILE_CAMP').length === 1);
 
     const campQ = seen.find(q => /JOIN recruit_campaigns rc/.test(q.sql));
+    /* ⚠ 스텁은 SQL 을 해석하지 않는다 — SELECT 를 `'' AS gid` 로 바꿔도 canned row 가 그대로
+       돌아와 파라미터 검사만으로는 못 잡는다(변이시험 실측). 조회 문장 자체를 고정한다. */
     t('③ gid 는 서버가 tab_configs 에서 다시 구해 넘긴다(화면 값 불신)',
-      seen.some(q => /FROM tab_configs WHERE sheet_id/.test(q.sql)) && campQ && campQ.params[2] === '1443853889');
+      /SELECT COALESCE\(tab_gid, ''\) AS gid FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2/.test(SRC)
+      && seen.some(q => /FROM tab_configs WHERE sheet_id/.test(q.sql)) && campQ && campQ.params[2] === '1443853889');
     t('③ 공고 매칭 = 이름 → gid 폴백 · 빈 gid 는 절을 켜지 않는다',
       /rc\.linked_tab_name = \$2 OR \(\$3 <> '' AND rc\.linked_tab_gid = \$3\)/.test(campQ.sql));
     t("★ 좌표는 'campaign:'||id 로 결합한다(submit.routes 규칙과 같은 모양)",
