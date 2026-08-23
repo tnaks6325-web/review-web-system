@@ -12890,6 +12890,18 @@ function _riConfirmMisset(r){
   return !!(rt && rt.type!=='confirm' && c.format && c.format.verdict==='fail'
             && _riFmtKind(c.format)==='purchase_confirm');
 }
+/** 이 건이 "구매확정 작업인데 주문내역(구매캡처)으로 판별돼 불량"인가.
+ *  ★★ 구매확정 작업이 정상으로 인정하는 종류는 `review`·`purchase_confirm` 둘뿐이라
+ *    `order_capture` 로 판별되면 **리뷰타입이 제대로 설정돼 있어도 무조건 불량**이다
+ *    (2026-08-23 신고의 원인). 리뷰타입을 다시 저장해도 결과가 안 바뀌므로,
+ *    "무엇을 해야 풀리는지"(판별 예시 등록 → 재검수)를 화면이 말한다.
+ *  ★ 위 `_riConfirmMisset`(리뷰타입 미설정)과는 **배타**다 — 한쪽은 rt!=='confirm',
+ *    이쪽은 rt==='confirm' 이라 두 안내가 같이 뜨지 않는다. */
+function _riConfirmNeedsSample(r){
+  const c=r.checks||{}, rt=_riRT(r);
+  return !!(rt && rt.type==='confirm' && c.format && c.format.verdict==='fail'
+            && _riFmtKind(c.format)==='order_capture');
+}
 /** 왜 그렇게 판정했는지 한 문장 — 상세 팝업의 '리뷰 화면·채널' 줄에 붙인다. */
 function _riRTNote(r){
   const rt=_riRT(r); if(!rt) return '';
@@ -12990,6 +13002,9 @@ function _riRenderBody(){
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
         ${relHtml}
         ${_riConfirmMisset(r)?`<div class="rirtfix">이 작업 <b>리뷰타입 미설정</b> — 공고에서 <b>구매확정</b>으로 저장한 뒤 다시 검수하면 통과됩니다
+          ${STATE.role==='master'||STATE.role==='admin'?`<button class="btn" style="margin-top:5px;font-size:11px;padding:3px 9px" onclick="event.stopPropagation();riReinspectTab(${i})">♻ 이 작업 재검수</button>`:''}</div>`:''}
+        ${_riConfirmNeedsSample(r)?`<div class="rirtfix">이 작업은 <b>구매확정</b>인데 캡처가 <b>주문내역(구매캡처)</b>으로 판별됐습니다 — 리뷰타입을 다시 저장해도 바뀌지 않습니다.
+          <b>설정 › AI 판별 예시</b>에 <b>구매확정 완료 화면</b>(모바일·PC)을 등록한 뒤 재검수하세요.
           ${STATE.role==='master'||STATE.role==='admin'?`<button class="btn" style="margin-top:5px;font-size:11px;padding:3px 9px" onclick="event.stopPropagation();riReinspectTab(${i})">♻ 이 작업 재검수</button>`:''}</div>`:''}
         ${reasons.length?`<div class="rireason">${reasons.map(esc).join('<br>')}</div>`:(relHtml?'':'<div class="rireason">—</div>')}
       </div>
