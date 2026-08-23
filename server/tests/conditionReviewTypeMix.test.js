@@ -131,6 +131,35 @@ t('★ 조합 정규화는 utils/reviewTypeMix 단일 출처', /require\('\.\.\/
 t('★ 작업오더 조합 파싱은 utils/reviewType.parseWorkOrderReviewType 단일 출처',
   /parseWorkOrderReviewType\(wo\.reviewType\)/.test(svcSrc));
 
+/* ══ D. 같은 계열 표기 — 리뷰검수 화면도 혼합을 "미지정"이라 말하지 않는다 ═══════════
+   ★ 같은 원인(판정 null 을 그대로 표기)이 리뷰검수 상세·카드 안내에도 있었다. 판정 사본을
+     화면에 만들지 않도록 **서버가 `mixed` 표식**을 함께 내려준다. */
+{
+  const ctx = fs.readFileSync(path.join(root, 'server/src/services/reviewTypeContext.service.js'), 'utf8');
+  t('★ 서버가 mixed 표식을 함께 내려준다(normalizeReviewType 단일 출처)',
+    /normalizeReviewType\(r\.camp_review_type\) === 'mixed'/.test(ctx)
+    && /normalizeReviewType\(r\.tab_review_type\) === 'mixed'/.test(ctx)
+    && /sheetId: r\.sheet_id, tabName: r\.tab_name, type, mixed,/.test(ctx));
+  t('★ 판정(type)은 여전히 resolveReviewType 그대로 — 혼합이면 null(검수 규율 불변)',
+    /const type = resolveReviewType\(\{ campaignType: r\.camp_review_type/.test(ctx));
+
+  const note = wd.slice(wd.indexOf('function _riRTNote(r){'));
+  const noteBody = note.slice(0, note.indexOf('\n}') + 2);
+  /* ★ 주석에도 '미지정'이 있으므로 **폴백 문장**의 위치와 비교한다(주석으로 판정하지 않는다). */
+  t('★ 혼합은 "미지정"이 아니라 사실대로 말한다 — 폴백보다 먼저 걸러진다',
+    /if\(rt\.mixed\) return/.test(noteBody)
+    && noteBody.indexOf('if(rt.mixed) return') < noteBody.indexOf('리뷰타입 <b>미지정</b>'));
+  t('★ 화면에 혼합 판정 사본을 만들지 않는다(서버 표식만 본다)',
+    !/혼합\|믹스|mixed\|mix/i.test(noteBody.replace(/'[^']*'/g, '')));
+
+  const mis = wd.slice(wd.indexOf('function _riConfirmMisset(r){'));
+  t('★ 혼합 작업에는 "공고를 구매확정으로 저장" 안내를 띄우지 않는다(포토 행까지 바뀐다)',
+    /!rt\.mixed && rt\.type!=='confirm'/.test(mis.slice(0, 400)));
+  t('★ 대신 "그 행의 리뷰옵션 칸" 안내가 있다(조치가 다르다)',
+    /function _riMixedRowNeeded\(r\)\{/.test(wd) && /_riMixedRowNeeded\(r\)\?/.test(wd)
+    && /리뷰옵션<\/b> 칸에 <b>구매확정<\/b>/.test(wd));
+}
+
 console.log(`\n✅ conditionReviewTypeMix: ${pass} cases passed`);
   process.exit(0);
 })();
