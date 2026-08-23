@@ -427,6 +427,17 @@ console.log('\n[9B] Ctrl(⌘)+방향키 — 데이터 끝으로');
   vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
   eq('★ 그룹 머리행을 건너뛰고 마지막 데이터 행으로', vm.runInContext('STATE.gSelRange.r1', sandbox), 4);
 }
+{ /* ★ 문자열이 "있는지"가 아니라 **불렸는지**를 본다 — 종전 패턴은 `if(false) _gsFlushAll()`
+     로 바꿔도 통과했다(변이시험 실측). Ctrl+↓ 는 이것에 특히 기댄다: 아직 안 그려진 행은
+     "값 없음"으로 보여 덩어리가 그 자리에서 끊긴다. */
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  let flushed = 0;
+  sandbox._gsFlushAll = () => { flushed++; };
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
+  ok('★ 점프 전에 안 그려진 청크를 실제로 그린다(호출 확인)', flushed === 1, 'flushed=' + flushed);
+}
 ok('★ 배선 — Ctrl(⌘) 를 jump 로 넘긴다(Shift 와 독립)',
   /_moveCellSel\(D\[0\],D\[1\],e\.shiftKey,e\.ctrlKey\|\|e\.metaKey\)/.test(HTML));
 ok('★ 값 판정 사본 금지 — 복사값(`_cellCopyText`)과 같은 함수를 쓴다',
