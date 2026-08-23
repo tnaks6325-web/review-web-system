@@ -5955,8 +5955,15 @@ function _condCardHtml(wd,d,m){
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
   ].map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`))).join('');
-  // 상품명 앞 [상품/옵션/금액] 라벨 제거(사용자 확정 2026-08-20 시안 v2) — 표시만, 원본 무접촉
-  const prod=String(cd.productName||d.productOption||m.campaignName||'').replace(/^\s*\[상품\/옵션\/금액\]\s*/,'');
+  /* 상품명 정리 — **표시만, 원본 무접촉**(`condition.productName` 은 작업오더 원문 그대로다).
+     ① `[상품/옵션/금액]` 라벨(사용자 확정 2026-08-20 시안 v2)
+     ② 목록 번호 `1. `(사용자 확정 2026-08-23) — 원문이 `[상품/옵션/금액]\n1. 곰도리 … ` 형태라
+        라벨만 벗기면 번호가 맨 앞에 남는다.
+     ★ 점 뒤 **공백을 필수**로 둔다 — `\d+\.` 만 보면 `1.5L 생수` 같은 상품명의 앞을 잘라먹는다.
+     ★ 여기서 URL 꼬리는 건드리지 않는다(요청 범위 밖 · 긴 이름은 `.cndprod` 가 한 줄로 접는다). */
+  const prod=String(cd.productName||d.productOption||m.campaignName||'')
+    .replace(/^\s*\[상품\/옵션\/금액\]\s*/,'')
+    .replace(/^\s*\d{1,3}\.\s+/,'');
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
   return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건${many}<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`+
