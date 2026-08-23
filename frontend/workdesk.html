@@ -6304,7 +6304,19 @@ function _condCardHtml(wd,d,m){
       :'';
     payRows=`<dt>결제금액</dt><dd>${per}${tot}</dd>`;
   }
+  /* 「일정」 — 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
+     ★ 서버가 표에서 파생해 실어 준다(`condition.schedule`) — 화면에서 다시 세지 않는다.
+     ★ 못 읽으면 **「—」**(사용자 확정) — [미설정] 버튼을 만들지 않는다. 여기엔 고칠 창구가 없고
+       날짜는 모집인원조절이 정하므로, 없는 창구로 보내는 죽은 버튼이 된다. */
+  const schedRow=(()=>{
+    const sc=cd.schedule;
+    const v=(sc&&sc.start&&sc.end)
+      ?`${esc(sc.start)}<span class="u">~</span>${esc(sc.end)}`
+      :'<span class="cnna" title="표의 구매일자에서 일정을 읽지 못했습니다 — 구매일자 칸이 없거나 비어 있습니다.">—</span>';
+    return `<dt>일정</dt><dd title="작업보드 표의 구매일자 중 가장 이른 날 ~ 가장 늦은 날입니다 — 모집인원 조절로 날짜가 바뀌면 함께 바뀝니다.">${v}</dd>`;
+  })();
   const rows=[
+    ['@sched',null,null],
     /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
        (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
     ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
@@ -6318,7 +6330,7 @@ function _condCardHtml(wd,d,m){
     ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
-  ].map(([k,kind,v])=>k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`).join('');
+  ].map(([k,kind,v])=>k==='@sched'?schedRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`)).join('');
   // 상품명 앞 [상품/옵션/금액] 라벨 제거(사용자 확정 2026-08-20 시안 v2) — 표시만, 원본 무접촉
   const prod=String(cd.productName||d.productOption||m.campaignName||'').replace(/^\s*\[상품\/옵션\/금액\]\s*/,'');
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
