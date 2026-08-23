@@ -9,7 +9,7 @@
  *
  * 고정하는 것:
  *  A. "채워진 줄" 판정은 **단일 출처**(`utils/rowNumbering`) — SQL·JS 가 같은 목록을 본다
- *  B. 서버가 `counts.filled` 를 준다 — 빈 슬롯은 안 세고, 마스킹 전에 세고, 뺀 줄(_hidden)은 안 센다
+ *  B. 서버가 `counts.filled` 를 준다 — 빈 슬롯은 안 세고, 마스킹 전에 센다
  *  C. 화면 게이지는 그 값을 분자·분모로 쓰고, 못 받으면 종전(`total`)으로 접는다
  *  D. 줄 수(준비된 슬롯)는 사라지지 않는다 — 참여자 게이지 툴팁이 말한다
  */
@@ -89,13 +89,15 @@ console.log('\n[B] 서버 counts.filled — 스텁 pool 로 workdeskTab 실제 �
   })().catch(e => { console.error(e); process.exit(1); });
 }
 
-console.log('\n[B2] 계산 위치 — 마스킹 전 · 뺀 줄(_hidden) 뒤');
+console.log('\n[B2] 계산 위치 — 마스킹 전');
 {
   const src = read('src/services/trackB.service.js');
-  const iHidden = src.indexOf("if (ov._hidden === true)");
   const iFilled = src.indexOf('_isFilledRow(syn)');
   const iMask = src.indexOf('if (maskPII) { syn.phone8 = _mask(');
-  ok('★ 카운트는 _hidden continue **뒤**(화면에서 뺀 줄은 안 센다)', iHidden > 0 && iFilled > iHidden);
+  /* ★★ 행 숨김 기능 폐기(사용자 확정 2026-08-23) — 화면에서만 줄을 빼는 경로가 없어졌다.
+     되살리면 게이지 분자와 표의 줄 수가 다시 갈린다(참여자 85명 → 82/100 실사고). */
+  ok('★ 숨김 오버레이 해석이 남아 있지 않다(표의 줄 수 ≡ 게이지 분모)',
+    src.indexOf('if (ov._hidden === true)') === -1);
   ok('★ 카운트는 마스킹 **앞**(광고주 렌즈를 거친 뒤 세면 전 줄이 채워짐으로 뒤집힌다)', iMask > 0 && iFilled < iMask);
   // ⚠ 제출물 미리보기(2026-08-21)가 같은 import 에서 `numberColumnKey` 도 가져오며 형태가 바뀌었다.
   //   검사 의미는 불변 — 판정을 베끼지 않고 utils 에서 가져다 쓴다.
