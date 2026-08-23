@@ -52,6 +52,25 @@ t('★ 칸 위치가 두 CTE 에서 같다(workKind 바로 뒤)', orderOk === 2,
 t('★ 원본은 tab_configs.display_name 하나(다른 칸을 작업명으로 지어내지 않는다)',
   LAT.split('\n').filter(l => /AS "displayName"/.test(l)).every(l => /tc\.display_name/.test(l)));
 
+/* ── 1b. 업체관리·광고주 화면이 쓰는 다른 두 재료 ──────────────────────────────
+   ★★ 코드리뷰 P2 로 잡힌 실측 갭: 이 두 화면은 `listActiveTabs` 가 아니라
+     `ownedTabsForAdvertiser`(업체관리 연결작업 표) → `advertiserWorkSummary`(광고주) 를 쓴다.
+     목록 API 만 고치면 그 화면들은 **라벨이 늘 탭 이름으로 접혀** 통일이 조용히 무력화된다. */
+const SVC = fs.readFileSync(path.join(__dirname, '../src/services/trackB.service.js'), 'utf8');
+const OTA_S = SVC.indexOf('async function ownedTabsForAdvertiser(');
+assert.ok(OTA_S > 0, 'ownedTabsForAdvertiser 를 찾지 못했습니다');
+const OTA = SVC.slice(OTA_S, SVC.indexOf('\nasync function ', OTA_S + 10));
+t('★ 업체관리 연결작업 표 재료에 displayName 이 있다',
+  /COALESCE\(tc\.display_name, ''\) AS "displayName"/.test(OTA));
+
+const AWS_S = SVC.indexOf('async function advertiserWorkSummary(');
+assert.ok(AWS_S > 0, 'advertiserWorkSummary 를 찾지 못했습니다');
+const AWS = SVC.slice(AWS_S, SVC.indexOf('\nasync function ', AWS_S + 10));
+t('★★ 광고주 렌즈(화이트리스트 재구성)가 displayName 을 명시로 싣는다',
+  /displayName: t\.displayName \|\| ''/.test(AWS));
+t('★ 광고주 렌즈는 여전히 스프레드가 아니다(필드가 늘 때 조용히 새지 않게)',
+  !/\.\.\.t[,\s}]/.test(AWS));
+
 /* ═══ 2. 라벨 단일 출처 + 폴백 (vm 실행) ═══ */
 console.log('\n2) 라벨 판정 단일 출처');
 t('★ _tabLabel 은 한 번만 선언된다(사본 금지)', (WD.match(/\nfunction _tabLabel\(/g) || []).length === 1);
