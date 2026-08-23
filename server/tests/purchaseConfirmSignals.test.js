@@ -131,6 +131,11 @@ const RI = require('../src/services/reviewInspect.service');
   ok('★ 구매확정 작업 + 주문내역 판별 + 불량 → 안내', f(row('confirm', 'order_capture', 'fail')) === true);
   ok('★ 리뷰타입 미설정이면 이 안내는 안 뜬다(기존 _riConfirmMisset 과 배타)',
     f(row(null, 'order_capture', 'fail')) === false);
+  /* ★★ 리뷰타입이 **설정돼 있지만 구매확정이 아닌** 작업(포토·텍스트…)에도 뜨면 안 된다 —
+       그쪽은 "구매확정 예시를 등록하라"가 틀린 조치다(변이시험이 잡은 빈틈 2026-08-23). */
+  for (const t of ['photo', 'text', 'star', 'mixed']) {
+    ok(`★ 리뷰타입 ${t} 작업에는 안 뜬다(틀린 조치 안내 금지)`, f(row(t, 'order_capture', 'fail')) === false);
+  }
   ok('통과 건에는 안 뜬다', f(row('confirm', 'order_capture', 'pass')) === false);
   ok('다른 종류로 판별된 불량에는 안 뜬다', f(row('confirm', 'other', 'fail')) === false);
   ok('★ 안내가 "리뷰타입을 다시 저장해도 안 바뀐다"고 못박는다(헛수고 방지)',
