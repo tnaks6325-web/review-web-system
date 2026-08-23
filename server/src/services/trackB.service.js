@@ -2988,6 +2988,26 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       out.sort((a, b) => { const x = k(a), y = k(b); return (x.n - y.n) || (x.seq - y.seq); });
     }
   }
+  /* ── 총건수 초과 표시 ────────────────────────────────────────────────────────
+     ★★ 정원(총건수)보다 많은 사람이 실제로 들어온 경우(외부모집 수동제출·지각 확정 등)
+        **줄을 강제로 정원에 맞추지 않고** 초과된 줄을 식별해 화면이 말하게 한다(사용자 확정 2026-08-24).
+        줄을 잘라 맞추면 이미 구매한 사람이 표에서 사라진다 — 사실을 감추는 쪽이 더 나쁘다.
+     ★★ cap 판정은 작업 조건 카드와 **같은 값**(`tabConditionSummary.recruitTotal`
+        = `linkedRecruitQuota.displayRecruitTotal` 단일 출처). 여기서 다시 세면 "카드는 500인데
+        표는 다른 기준"으로 갈린다. 게이지 분모도 이 값을 쓴다(`counts.cap`).
+     ★ **무시트 작업표만** — 시트 기반 탭의 행 수는 시트가 정하고 그 총건수는 공고 값과 정상적으로
+       다를 수 있어(과거 데이터) 빨갛게 칠하면 오탐이 된다(홈 「인원/제출」 ⚠ 와 같은 규율).
+     ★ **채워진 줄만** 센다(빈 슬롯은 사람이 아니다) · 화면과 **같은 정렬**(번호 순) 뒤에 센다.
+     ★ cap 을 모르면(공고 미연결·조회 실패) 아무 표시도 하지 않는다(0 위장 금지).
+     ★ 광고주에게도 보인다(사용자 확정) — 다만 `condition` 자체는 종전대로 내부 전용이다. */
+  const _cond = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+  const _cap = (meta[0] && meta[0].sheetless && _cond && Number(_cond.recruitTotal) > 0)
+    ? Number(_cond.recruitTotal) : null;
+  let overCount = 0;
+  if (_cap) {
+    let seen = 0;
+    for (const r of out) { if (!r.filled) continue; seen++; if (seen > _cap) { r.over = true; overCount++; } }
+  }
   // orphan: 활성 오버레이 중 어떤 활성 행에도 안 붙은 것(카운트/타입만 — PII·원장ID 비노출)
   let orphanCount = 0; const orphanByType = {};
   for (const [k] of editMap) {
@@ -3006,6 +3026,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     ambiguous: ambiguousCount,
     /* 표에서 분리한 줄(129) — 표에는 없지만 데이터는 그대로다. 숫자를 지우면 "사라진 줄" 이 된다. */
     held: heldCount, heldUnavailable: heldUnavailable || undefined,
+    /* 총건수(정원) — 게이지 분모의 단일 출처. 모르면 싣지 않는다(화면이 종전 폴백으로 접는다). */
+    cap: _cap || undefined,
+    /* 정원을 넘겨 채워진 줄 수. cap 을 모르면 undefined(0 과 구분). */
+    over: _cap ? overCount : undefined,
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
@@ -3022,7 +3046,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     }
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
-    res.condition = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+    res.condition = _cond;   // ★ 위에서 이미 한 번 구했다(호출 2회 금지 — 값이 갈릴 수 없다)
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
     //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });

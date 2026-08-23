@@ -530,6 +530,10 @@
      ★ 색은 3단계로 끝내고 **숫자가 실제 횟수를 말한다**(4회·5회도 빨강) — 색을 늘리면 한눈에 읽히는 신호가 약해진다.
      ★ 색은 리터럴 — 테마 토큰이 없는 호스트에 얹혀도 같은 색으로 보인다. */
   .visit{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:#dbeafe;color:#1d4ed8}
+  /* 총건수 초과 줄(2026-08-24) — 연한 배경으로 식별만. 셀에 담당자가 칠한 인라인 배경은 그대로 이긴다. */
+  .govb{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:#fee2e2;color:#b91c1c}
+  tr.gover>td{background:#fff5f5}
+  tr.gover>td:first-child{box-shadow:3px 0 0 #ef4444 inset}
   .visit.v2{background:#fef3c7;color:#b45309}
   .visit.v3{background:#fee2e2;color:#b91c1c}
   /* ── 편집 UI ── */
@@ -1543,6 +1547,9 @@
   .tp3g .lb{font-size:11px;color:var(--muted);font-weight:650;width:58px;flex:none}
   .tp3g .nm{font-size:16px;font-weight:800;letter-spacing:-.02em;width:92px;flex:none}
   .tp3g .nm small{font-size:10.5px;font-weight:600;color:var(--faint);margin-left:1px}
+  /* 총건수 초과(2026-08-24) — 숫자는 붉게, 초과분은 옆에 배지로. 자리를 지어내지 않는다. */
+  .tp3g .nm.isover{color:#b91c1c}
+  .tp3g .ovb{flex:none;font-style:normal;font-size:10px;font-weight:800;padding:1px 6px;border-radius:5px;background:#fee2e2;color:#b91c1c}
   .tp3g .track{flex:1;height:6px;border-radius:4px;background:var(--line);overflow:hidden;min-width:40px}
   .tp3g .track i{display:block;height:100%;border-radius:4px;background:var(--accent)}
   .tp3g .track i.s{background:var(--safe)}
@@ -2088,6 +2095,7 @@ table.wbl-t tr.fin td{color:var(--faint)}
 .wbl-g{display:inline-block;width:76px;height:8px;border-radius:5px;background:var(--line);position:relative;vertical-align:middle;margin-right:6px}
 .wbl-g i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:var(--accent)}
 .wbl-num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.wbl-num.isover{color:#b91c1c;font-weight:800}
 .wbl-s{display:inline-block;border-radius:999px;padding:1px 9px;font-size:10.5px;font-weight:750;white-space:nowrap}
 .wbl-s.run{background:var(--safe-soft);color:var(--safe)}
 .wbl-s.cand{background:var(--warn-soft);color:var(--warn)}
@@ -5143,15 +5151,19 @@ function _finProgHtml(t){
   /* ★ "준비된 줄 ≠ 총건수" 경고는 **무시트 작업에만** — 시트 기반 탭의 `준비된 줄`은 미리 깔아 둔
      슬롯이 아니라 **이미 이름이 적힌 행 수**라, 모집 중에는 총건수보다 적은 것이 정상이다. */
   const gap=(rt&&_isNoSheet(t)&&rows!==rt.total);
+  /* ★ 정원을 넘겨 채워진 경우 — 숫자는 이미 `501/500` 으로 보이므로 **색으로만** 말한다.
+     기준(총건수)은 작업보드 게이지·표 초과 판정과 같은 값(공고>0 이면 공고, 아니면 발주). */
+  const over=(rt&&filled>rt.total)?(filled-rt.total):0;
   const tip=[`채워진 줄 ${filled}명`,
     rt?`총건수 ${rt.total}건${rt.source==='work_order'?'(발주 기준)':''}`:'총건수 미상 — 준비된 줄 수로 표시합니다',
     `준비된 줄 ${rows}줄${blank?` (빈 슬롯 ${blank}줄)`:''}`,
     sub==null?null:`제출 ${sub}명`,
     s.paid==null?null:`입금 ${s.paid}명`,
+    over?`⚠ 총건수(${rt.total})를 ${over}명 넘겨 들어왔습니다 — 작업보드 표에서 붉은 줄로 표시합니다`:null,
     gap?`⚠ 준비된 줄(${rows})이 총건수(${rt.total})와 다릅니다 — [📅 인원]에서 날짜별 인원을 확인하세요`:null,
   ].filter(Boolean).join(' · ');
   return `<span class="wbl-g" title="${esc(tip)}"><i style="width:${pct}%"></i></span>`
-    +`<span class="wbl-num" title="${esc(tip)}">${filled}/${den}${rt?'':'*'}</span>`
+    +`<span class="wbl-num${over?' isover':''}" title="${esc(tip)}">${filled}/${den}${rt?'':'*'}</span>`
     +`<span class="wbl-sub" title="${esc(tip)}">제출 ${sub==null?'—':sub}${gap?` · <b style="color:var(--warn,#b26a00)">줄 ${rows}</b>`:''}</span>`;
 }
 
@@ -6115,7 +6127,13 @@ function summaryStrip(wd,d,m,c){
      ★ 제출·입금의 분모도 같은 값이어야 한다 — 분자만 바꾸면 "134/200 인데 참여자는 134" 로 갈린다.
      ★ 줄 수(준비된 슬롯)는 사라지지 않는다 — 참여자 게이지 툴팁이 말한다(조용한 누락 금지). */
   const filled=_rvFilledOf(c);
-  const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||filled||0;
+  /* ★★ 분모(총건수) = 서버가 준 `counts.cap` — 작업 조건 카드·표 초과 판정과 **같은 값**이다.
+     여기서 발주 값만 보면 "게이지는 500/500 인데 표에는 초과 배지"로 갈린다.
+     ★ 못 받으면(구버전 백엔드·cap 미상) 종전 폴백 그대로. */
+  const target=(c.cap!=null&&+c.cap>0)?+c.cap
+    :((d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||filled||0);
+  /* ★ 초과 수는 **서버 판정만** 쓴다 — 못 받으면 표시하지 않는다(화면에서 다시 세면 표와 갈린다). */
+  const overN=(c.over!=null)?Math.max(0,+c.over||0):0;
   const pT=target?Math.round(filled/target*100):0, pS=filled?Math.round((c.submitted||0)/filled*100):0, pP=filled?Math.round((c.paid||0)/filled*100):0;
   const slots=+c.total||0, empty=Math.max(0,slots-filled);
   const filledTip=(c.filled==null)?'':`채워진 줄 ${filled}명 · 준비된 줄 ${slots}줄${empty?` (빈 슬롯 ${empty}줄)`:''}`;
@@ -6128,8 +6146,8 @@ function summaryStrip(wd,d,m,c){
   const cond=isAdv
     ? `<div class="tp3col"><div class="tp3t">작업 조건</div><dl class="tp3kv">${kv}</dl></div>`
     : _condCardHtml(wd,d,m);
-  const g=(lb,n,den,pc,cls,ti)=>`<div class="tp3g"${ti?` title="${esc(ti)}"`:''}><span class="lb">${lb}</span>`+
-    `<span class="nm">${n}<small>/${den}</small></span>`+
+  const g=(lb,n,den,pc,cls,ti,ov)=>`<div class="tp3g"${ti?` title="${esc(ti)}"`:''}><span class="lb">${lb}</span>`+
+    `<span class="nm${ov?' isover':''}">${n}<small>/${den}</small></span>`+(ov?`<em class="ovb">+${ov} 초과</em>`:'')+
     `<span class="track"><i class="${cls||''}" style="width:${Math.max(0,Math.min(100,pc))}%"></i></span>`+
     `<span class="pc">${pc}%</span></div>`;
   /* ★ 게이지는 내부·광고주 **한 벌**(한 줄 배치)이다 — 종전에는 내부 진행 현황이 절반 폭이라
@@ -6142,7 +6160,7 @@ function summaryStrip(wd,d,m,c){
   const setlIn=isAdv?'':`<div class="setlin${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()">`+
     `<div class="tp3t">정산<span class="caret">▼</span></div>${setlSummaryHtml(null)}</div>`;
   const prog=`<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">진행 현황<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
-    gg('참여자',filled,target||filled,pT,'',filledTip)+
+    gg('참여자',filled,target||filled,pT,'',filledTip+(overN?`${filledTip?' · ':''}⚠ 총건수(${target})를 ${overN}명 넘겨 들어왔습니다 — 표에서 붉은 줄로 표시합니다`:''),overN)+
     gg('제출완료',c.submitted||0,filled,pS,'s')+
     gg('입금완료',c.paid||0,filled,pP)+
     `<div class="tp3money" title="현재 활성 주문 행의 결제금액 합계"><span>결제금액</span><b>${_wonFmt(c.paymentAmount||0)}</b></div>${setlIn}</div>`;
@@ -7332,6 +7350,7 @@ function buildGrid(wd){
     const numberKey=Object.keys(rj).find(k=>/^(번호|no|#)$/i.test(String(k).trim()));
     const canAssignUnslotted=canDeleteOrder && !String(numberKey?rj[numberKey]:'').trim();
     const badge = (r.source==='manual'?' <span class="src manual">수동</span>':'') + _visitBadge(r)
+                + (r.over===true?' <span class="govb" title="총건수(정원)를 넘겨 들어온 줄입니다 — 줄을 지우지 않고 표시만 합니다">초과</span>':'')
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
     // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
@@ -7366,7 +7385,9 @@ function buildGrid(wd){
     });
     // data-p8/data-nm = 리뷰어 로그 딥링크가 이 행을 찾아 강조하는 키(표시에는 영향 없음)
     // data-rid = 행 식별자(업체 뷰어의 리뷰 미리보기 선택 키) — 셀에만 있던 것을 행에도 올려 tr 단위로 잡는다.
-    return `<tr data-rid="${esc(r.id)}" data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
+    /* ★ 초과 줄은 배경으로 식별한다(사용자 확정 2026-08-24). 판정은 서버(`r.over`) 단일 출처 —
+       화면에서 다시 세면 게이지·표·홈이 갈린다. 담당자가 칠한 셀 배경색(인라인)은 그대로 이긴다. */
+    return `<tr${r.over===true?' class="gover"':''} data-rid="${esc(r.id)}" data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
   };
   // 본문 행 배열(청크 렌더용) — 그룹 여부에 따라
   let bodyArr=[], emptyBody='';
@@ -8282,7 +8303,7 @@ function _cellCopyText(td){
   const dv=td.getAttribute('data-val');
   if(dv!=null) return dv;
   const c=td.cloneNode(true);
-  c.querySelectorAll('.revb,.rdel,.src,.visit,.lock').forEach(x=>x.remove());
+  c.querySelectorAll('.revb,.rdel,.src,.visit,.lock,.govb').forEach(x=>x.remove());
   const s=(c.textContent||'').trim();
   return s==='—'?'':s;
 }
