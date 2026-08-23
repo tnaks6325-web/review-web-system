@@ -1686,7 +1686,7 @@
   /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
      행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
   .tp3grid.c3 .rvpane{position:relative;overflow:hidden;padding:0}
-  .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:11px 12px}
+  .tp3grid.c3 .rvpane .rvfill{position:absolute;inset:0;display:flex;flex-direction:column;padding:12px}
   /* ── 접기/펼치기(시안 v2) — 머리줄 클릭 = 세 박스 일괄. 접히면 머리줄만 남는다.
      ★ min-height 해제·rvfill static 전환이 한 벌 — 하나만 빠지면 접혀도 높이가 안 줄거나
        미리보기만 껍데기 높이로 남아 하단선이 어긋난다. */
@@ -1705,10 +1705,8 @@
   .tp3grid.c3.fold .rvfill .rvhd{margin-bottom:0}
   .cndchip{display:inline-block;background:var(--chip,#eef4ff);color:var(--p,#2456c9);border-radius:5px;padding:0 6px;font-size:10px;font-weight:700;vertical-align:1px}
   .rv2 .rv2c{min-width:0;min-height:0;display:flex;flex-direction:column;
-             border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px 8px 6px}
-  .rv2 .rv2h{font-size:10px;font-weight:800;color:var(--muted);display:flex;align-items:center;gap:5px;margin-bottom:6px;flex:none}
-  .rv2 .rv2h .cnt{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:0 6px;font-size:9.5px;color:var(--faint)}
-  .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column}
+             border:1px solid var(--line);border-radius:9px;background:var(--card2);padding:8px}
+  .rv2 .rv2b{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
   /* ★★ 캡처는 세로로 매우 긴 경우가 흔하다(모바일 리뷰 전체 스크린샷) — 이미지를 그대로 두면
      그 원본 높이가 grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고).
      래퍼를 기준 삼아 이미지를 절대배치해 **레이아웃 높이 기여를 0** 으로 만든다:
@@ -1720,9 +1718,15 @@
   /* ★ 폭에 맞춰 축소하고 세로는 칸 안에서 스크롤한다 — contain 으로 통째로 욱여넣으면
      모바일 전체 스크린샷(예 390×3200)이 220px 안에서 실낱이 되어 **아무것도 판독할 수 없다**. */
   .rv2 .rvone{width:100%;height:auto;display:block}
-  .rv2 .rvpg{flex:none;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:5px;font-size:10px;color:var(--muted);font-weight:700}
+  /* ★ 넘김 줄은 캡처 **위에 띄운다**(사용자 확정 2026-08-23) — 흐름에 두면 그 높이만큼
+     아래 여백만 넓어져 "좌우 여백만큼 상하도 같게" 가 성립하지 않는다. 여러 장일 때만 보이고,
+     알약 배경을 깔아 캡처 위에서도 읽힌다. */
+  .rv2 .rvpg{position:absolute;left:0;right:0;bottom:5px;z-index:1;
+             display:flex;align-items:center;justify-content:center;gap:8px;font-size:10px;color:var(--muted);font-weight:700}
   .rv2 .rvpg .pgb{font:inherit;font-size:12px;line-height:1;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);
-                  background:var(--card);color:var(--ink);cursor:pointer}
+                  background:var(--card);color:var(--ink);cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.16)}
+  .rv2 .rvpg > span{background:var(--card);border:1px solid var(--line2);border-radius:999px;padding:1px 8px;
+                    box-shadow:0 1px 3px rgba(15,23,42,.16)}
   .rv2 .rvpg .pgb:disabled{opacity:.35;cursor:default}
   .rv2 .rvempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
                 border:1px dashed var(--line2);border-radius:8px;font-size:10.5px;color:var(--faint);text-align:center;padding:10px}
@@ -6024,7 +6028,10 @@ function _rvRender2(pane){
   const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
-  const col=(kind,icon,title,emptyB,emptyS,warn)=>{
+  /* ★ 칸 제목(🛒 구매 캡처 / 📷 리뷰 캡처)은 그리지 않는다(사용자 확정 2026-08-23) —
+     왼쪽=구매·오른쪽=리뷰가 위 제출현황 줄에서 이미 같은 순서로 보이고, 제목 한 줄을
+     비운 만큼 캡처가 커진다. `title` 은 이미지 `alt`(접근성)과 빈 상태 문구에 그대로 쓴다. */
+  const col=(kind,title,emptyB,emptyS,warn)=>{
     const list=_rvKindFiles(files,kind).map(f=>Object.assign({},f,{url:_rvUrl(f.fileId)})).filter(f=>f.url);
     const n=list.length;
     const i=Math.min((STATE.rvIdx&&STATE.rvIdx[kind])||0,Math.max(0,n-1));
@@ -6040,12 +6047,12 @@ function _rvRender2(pane){
     /* ★ 칸 제목에는 폴더 바로가기를 두지 않는다(사용자 확정 2026-08-21) — 창구는 위의
        제출현황 요약 줄 하나다. 이 자리는 지금 보고 있는 **그 리뷰어의 제출물**을 말하는
        칸이라, 같은 자리에서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
-    return `<div class="rv2c"><div class="rv2h">${icon} ${esc(title)}<span class="cnt">${n}</span></div><div class="rv2b">${body}</div></div>`;
+    return `<div class="rv2c"><div class="rv2b">${body}</div></div>`;
   };
-  const left=col('cap','🛒','구매 캡처',
+  const left=col('cap','구매 캡처',
     r.submitted?'캡처 없음':'미제출',
     r.submitted?'구매 캡처가 등록되지 않았습니다.':'아직 구매 캡처가 제출되지 않았습니다.', !r.submitted);
-  const right=col('rev','📷','리뷰 캡처',
+  const right=col('rev','리뷰 캡처',
     r.submitted?'이미지 미등록':'리뷰 미제출',
     r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
   _rvFill(pane, hd+who2+`<div class="rv2">${left}${right}</div>`);

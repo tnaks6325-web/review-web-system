@@ -185,13 +185,27 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
 }
 /* ★★ 창구는 **요약 줄 하나**(사용자 확정 2026-08-21) — 칸 제목은 "지금 보고 있는 그 리뷰어의
    제출물"을 말하는 자리라, 거기서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
-ok('★ 칸 제목에는 폴더 바로가기가 없다(요약 줄 하나로 수렴)', (() => {
-  const i = WD.indexOf('const col=(kind,icon,title,emptyB,emptyS,warn)=>{');
+/* ★★ 칸 제목(🛒 구매 캡처 / 📷 리뷰 캡처)은 아예 그리지 않는다(사용자 확정 2026-08-23) —
+   좌=구매·우=리뷰는 위 제출현황 줄이 같은 순서로 말하고, 제목 한 줄을 비운 만큼 캡처가 커진다.
+   폴더 창구도 여기 없다(요약 줄 하나). */
+ok('★ 칸 제목 줄을 그리지 않는다 — 마크업·CSS 잔재 0', (() => {
+  const i = WD.indexOf('const col=(kind,title,emptyB,emptyS,warn)=>{');
   const seg = WD.slice(i, WD.indexOf('\n  const left=col(', i));
-  return i > 0 && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg) && !/rv2h\$\{/.test(seg);
+  return i > 0 && !/rv2h/.test(seg) && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg)
+    && !/rv2h/.test(WD);
 })());
-ok('★ 칸 제목 링크 CSS 도 남아 있지 않다(눌리는 것처럼 보이면 안 된다)',
-  !/rv2h\.lk/.test(WD));
+ok('★ 칸은 본문만 — .rv2c > .rv2b 한 겹',
+  /<div class="rv2c"><div class="rv2b">\$\{body\}<\/div><\/div>/.test(WD));
+ok('★ title 은 남는다 — 이미지 alt(접근성)·빈 상태 문구가 어느 칸인지 말한다',
+  /alt="\$\{esc\(title\)\}"/.test(WD) && /const left=col\('cap','구매 캡처'/.test(WD)
+  && /const right=col\('rev','리뷰 캡처'/.test(WD));
+ok('★ 캡처 칸 여백은 사방 같다(좌우=상하)', /border-radius:9px;background:var\(--card2\);padding:8px\}/.test(WD));
+ok('★ 미리보기 패널 여백도 사방 같다', /\.rvpane \.rvfill\{position:absolute;inset:0;display:flex;flex-direction:column;padding:12px\}/.test(WD));
+/* ★ 넘김 줄이 흐름에 있으면 그 높이만큼 **아래 여백만** 넓어져 사방 같기가 깨진다. */
+ok('★ 넘김 줄은 캡처 위에 띄운다(흐름 밖) — 아래 여백이 늘지 않는다',
+  /\.rv2 \.rvpg\{position:absolute;left:0;right:0;bottom:5px/.test(WD)
+  && /\.rv2 \.rv2b\{[^}]*position:relative\}/.test(WD)
+  && !/\.rv2 \.rvpg\{[^}]*margin-top/.test(WD));
 
 /* ══ H) 사람 옆 번호 = 작업보드 「번호」(boardNo) ══════════════════════════════ */
 console.log('\nH) 미리보기 번호 = 작업보드 번호');
