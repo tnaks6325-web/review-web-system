@@ -235,7 +235,9 @@ async function run() {
   t('★ renderOwnershipView 첫 동작 = pendingAdv 없으면 advCur 비움(히스토리 항목 ↔ 화면 일치)',
     /async function renderOwnershipView\(\)\{[\s\S]{0,500}if\(!STATE\.pendingAdv\) STATE\.advCur=null;/.test(HTML));
   t('뒤로가기 복원 경로 유지(pendingAdv → selAdv)', /STATE\.pendingAdv[\s\S]{0,300}selAdv\(ix,\{nav:!!pa\.__nav\}\)/.test(HTML));
-  for (const id of ['ownPanel', 'owntabsSect', 'advs', 'addSheet', 'taboptions', 'advSheet', 'advName',
+  // ★★ 사용자 확정(2026-08-23): 지정 단위가 **작업(작업보드)** 로 바뀌며 시트 선택 칸(#addSheet·#advSheet·
+  //    #taboptions)은 작업 선택 칸(#addTabSel·#advTabSel)으로 교체됐다 — 나머지 계약은 그대로.
+  for (const id of ['ownPanel', 'owntabsSect', 'advs', 'addTabSel', 'advTabSel', 'advName',
     'advSug', 'advNameChk', 'advPm', 'advPmChk', 'advCreateBtn', 'setvis', 'aebox']) {
     t(`기존 id 생존: #${id}`, new RegExp(`id="${id}"`).test(HTML));
   }

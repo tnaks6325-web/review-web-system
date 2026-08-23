@@ -26,15 +26,23 @@ test('renders B-style command dashboard and searchable company ledger', () => {
 test('shows manager-specific workload in the dashboard summary', () => {
   const match = source.match(/function _ovmbSummaryHtml\([^)]*\)\{[\s\S]*?\n\}/);
   assert.ok(match, 'summary helper should be extractable');
-  const sandbox = { esc: value => String(value) };
+  // ★ 지정 현황은 **작업(작업보드) 기준**(2026-08-23 사용자 확정) — 그 카운터는 스텁이 아니라
+  //   구현을 그대로 넣는다(스텁을 두면 그 함수의 회귀를 여기서만 못 본다).
+  const counts = source.match(/function _ovmTabCounts\(\)\{[\s\S]*?\n\}/);
+  const unass = source.match(/function _ovmUnassignedTabs\(\)\{[^\n]*\}/);
+  assert.ok(counts && unass, 'tab counters should be extractable');
+  const sandbox = { esc: value => String(value), Number, String, Object, Array,
+    STATE: { mapTabs: [{ sheetId: 'S1', tabGid: '1', advertiserId: 'adv_a' }, { sheetId: 'S1', tabGid: '2' }] } };
   vm.createContext(sandbox);
-  vm.runInContext(match[0], sandbox);
+  vm.runInContext(unass[0] + '\n' + counts[0] + '\n' + match[0], sandbox);
   const html = sandbox._ovmbSummaryHtml([
     { inadPm: '만두', works: 7, noMatch: 1, finishCand: 0 },
     { inadPm: '망고', works: 4, noMatch: 0, finishCand: 2 },
   ], 11, 6, 1, false, true, true);
   assert.match(html, /만두 1개 업체 · 7건/);
   assert.match(html, /망고 1개 업체 · 4건/);
+  assert.match(html, /업체 지정 작업/);            // 시트 개수가 아니라 작업 기준으로 말한다
+  assert.match(html, /활성 작업 2건 · 미지정 1건/);
 });
 
 test('keeps rows safe and selectable through the existing company selector', () => {
