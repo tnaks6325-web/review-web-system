@@ -3061,29 +3061,6 @@ router.post('/capture-link/backfill', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
-/* ⚠⚠ **일시 복구(2026-08-24)** — 위프 800건 작업표의 총건수 초과 빈 줄 113개를 내리기 위해
-   `29b7a09`(정리 도구 4종 → 1종)에서 제거한 창구를 **한 건 처리용으로만** 되살렸다.
-   제거 근거였던 "현재 대상 0건"이 깨졌다: 계획 재구성이 날짜 없는 빈 줄을 남기는데
-   `hide` 는 지운 자리를 보충하고 `worktable/delete` 는 전 줄을 지우며 `hold-rows` 는 표에서만 빼
-   그 줄에 다음 주문이 들어간다(빈 슬롯 선택 SQL에 `held_at` 조건이 없다) — 셋 다 못 다룬다.
-   ★ **처리 후 즉시 되돌린다** — 화면(모달·[⋯] 버튼)은 복구하지 않았고 라우트만 있다.
-   ★ 회귀가드 `sheetlessRetireRows` §B·§F 의 "창구 부재" 단언도 같은 사유로 일시 유예했다. */
-router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
-    const b = req.body || {};
-    try {
-      res.json(await retireRows({
-        sheetId: b.sheetId, tabName: b.tabName, rounds: b.rounds, seqs: b.seqs,
-        dryRun: b.dryRun !== false, by: _by(req),
-      }));
-    } catch (e) {
-      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
-      throw e;
-    }
-  } catch (err) { next(err); }
-});
-
 router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { rebuildLedgers, LedgerError } = require('../services/sheetlessLedger.service');
