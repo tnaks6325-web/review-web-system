@@ -1844,6 +1844,13 @@
 - ★★ **2026-08-19 추가 확정(빨간 가드 정리 중 드러남)**: **저장폴더(`/tab-folders`)·공유 링크(`/share-link/:code`)·편집 허용명단 UI** 도 같은 규칙이다 — AE 는 담당이 아니어도 연다. 그 셋은 이미 코드가 그렇게 동작하고 있었는데(`/tab-folders` 는 `staff는 작업보드 전체 운영 권한` 주석까지 달려 있었다) **가드와 CLAUDE.md 만 옛 규칙에 머물러 빨간 상태였다**. ★ 좁히기로 되돌린다면 `/workdesk`·`/tabs` 와 **함께** 좁혀야 한다(한 곳만 좁히면 "목록엔 보이는데 링크·폴더로는 안 열리는" 막다른 길). ★ 남은 경계는 **광고주 차단**이고 그것은 라우터 단계(`internalMiddleware`)가 맡으므로 캐시가 그 앞을 우회할 수 없다.
 - 회귀가드는 **의미를 바꿔 갱신**했다(기대값 = 새 사용자 확정): `ownershipTransfer`·`sheetlessRetireRows`·`workdeskOrderDelete`·`workdeskManualReviewSubmit`·`workdeskOrdersCampaigns`·`campaignReviewerGate`·`campaignDailyPlan`·`trackBProjectionCoverage`·`workdeskHome`·`vendorManagementRedesign`·`worktableTemplate`·`workdeskSettingsTab`·`sheetImport`. ★ 패널·타일 목록 가드는 "목록 전체 일치"가 아니라 **"관리자 목록에 있고 AE 목록엔 없다"** 로 바꿨다 — 목록이 늘 때마다 무관한 가드가 조용히 빨개지지 않게.
 
+### ★★★ 리뷰웹시스템[3버전] 전면 백지 — 인라인 스크립트 SyntaxError (2026-08-23 실사고)
+- **증상**: `pages.dev/workdesk` 가 **완전한 흰 화면**(제목만 뜨고 로그인 폼조차 없음). 콘솔 `Uncaught SyntaxError: Unexpected token '}' (workdesk:14771)` 한 줄이 유일한 신호.
+- ★★ **원인 = 함수를 지우고 남은 고아 `}` 한 줄**(#1120 에서 `unlinkWO`·`prepareRoster` 제거). 인라인 스크립트는 **블록 하나가 통째로 파싱 실패**하므로 그 안의 모든 함수(`STATE`·`boot`·렌더 전부)가 정의되지 않아 **아무것도 안 그려진다** — CSS `:root` 삼킴 사고와 같은 계열의 무신호 장애. 지운 자리에 설명 주석만 남아 **diff 에서는 자연스러워 보인다**(이번에 정확히 그랬고 머지 두 번이 통과시켰다). 핫픽스 = 372d196.
+- ★★★ **회귀가드는 이미 있었다 — 안 돌리고 머지한 것이 사고다**: `tests/workGuides.test.js` §1(모든 인라인 블록을 `new vm.Script` 로 파싱)이 그 커밋에서 **실패한다**(사후 확인: 10 통과 / 1 실패). ⇒ **`frontend/workdesk.html` 을 고쳤으면 머지 전에 `node tests/workGuides.test.js` 를 반드시 돌린다**(이름이 '업무가이드'라 연상되지 않지만 **인라인 스크립트 파싱 가드의 소유자**다).
+- ★ **서버 정상인데 백지면 코드 파싱을 먼저 의심한다** — 이번 실측에서 배포본은 `origin/main` 과 바이트 동일, 스크립트 12개 전부 200, `/health` 200·db connected, CORS 정상, 토큰 유효였다. **전부 정상인데 화면만 백지 = 파싱 실패**.
+- ★ 진단 순서: ① 콘솔 첫 빨간 줄의 **파일:줄** ② 배포본을 내려받아 인라인 블록을 `node --check` ③ 그래도 멀쩡하면 배포본·API·토큰을 각각 확인(전부 정상이면 브라우저·확장 문제).
+
 ## 디자인 스킬 2종 (.claude/skills)
 - `impeccable`(새 화면·전면 리디자인·디자인 오딧) · `design-taste-frontend`(새 홍보/랜딩·소비자용 페이지). 트리거는 각 SKILL.md 의 description 이 갖고 있다.
 - ★★ **기존 리뷰웹시스템(workdesk/admin) 화면의 기능 수정·버그 수정·소규모 UI 조정에는 쓰지 않는다** — 이 CLAUDE.md 의 규율(단일 출처·회귀가드·기존 idiom·시안 문서의 외부 리소스 0)이 우선한다. 필요하면 사용자가 `/impeccable` 로 명시 호출한다.
