@@ -6575,11 +6575,24 @@ function _cndReload(){
 function _woLinkedRow(wd){
   const d=wd&&wd.detail; if(!d) return '';
   const isAdmin=(STATE.role==='master'||STATE.role==='admin');
+  /* ★★ 메뉴는 **[발주 원문 보기] + [발주 변경]** 둘뿐이다(사용자 확정 2026-08-23).
+       종전에 있던 둘을 없앤 이유:
+       · **명단 준비** = 작업표 생성이 생기기 전(Track B 부품4b)의 유물. 지금 줄은 접수가
+         `createWorktableSlots` 로 정확히 깐다(seq=시트 실제 행번호 · `source='worktable'` ·
+         row_json 에 번호·구매일자). 이 버튼의 `prepareRosterSlots` 는 **seq 900000 격리 대역 +
+         `source='manual'` + row_json 없음** 이라 ① 장부 생성기가 그 줄을 제외하고
+         (`buildValues` manualBandSkipped → 검색 명단·입금대상에 안 실림) ② 투영 상태 CASE 가
+         얼려 리뷰제출·입금 표시가 영영 안 켜지고 ③ 표에 번호·날짜 없는 빈 줄이 남는다.
+         (본섭 실측: 활성 113 작업에 번호 빈칸 0줄 = 실제로 쓰이지 않았다.)
+       · **연결 해제** = `unlinkWorkOrder` 가 Track B 링크 행만 지우는데, 발주 조회는
+         `Track B 링크 → work_orders.linked_tab_* 폴백` 순이고 **접수된 작업은 그 폴백이 항상
+         있다**(접수 게이트 불변식) → 눌러도 발주가 그대로 남아 "해제됐다"고 거짓말을 한다.
+         진짜 해제는 홈 작업목록 [작업 삭제](링크 해제 + 134 삭제 표시)가 한다.
+     ★ 서버 라우트(`/work-order/prepare-roster`·`/unlink`)와 서비스는 **그대로 둔다** —
+       되살릴 일이 생기면 화면만 다시 붙이면 된다(시트 가져오기 화면과 같은 규율). */
   const menu=isAdmin?`<span class="womenu" id="woRowMenu"><button class="btn" title="발주 도구" onclick="toggleWoRowMenu(event)">⋯</button>`+
-    `<span class="womm"><button class="btn" onclick="prepareRoster()" title="발주 모집 인원만큼 빈 명단 슬롯을 준비(부족분만 생성·멱등)">명단 준비 (모집 ${esc(d.recruitCount||0)})</button>`+
-    `<button class="btn" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">발주 원문 보기</button>`+
-    `<button class="btn" onclick="openWorkOrderPicker()">발주 변경</button>`+
-    `<button class="btn" onclick="unlinkWO()">연결 해제</button></span></span>`
+    `<span class="womm"><button class="btn" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">발주 원문 보기</button>`+
+    `<button class="btn" onclick="openWorkOrderPicker()" title="엉뚱한 발주가 붙었을 때 고치는 창구입니다. ⚠ 이 화면의 연결만 바뀝니다 — 작업오더 탭의 연결 표시와 이미 만들어진 작업표 줄·정원은 따라오지 않습니다.">발주 변경</button></span></span>`
     : `<button class="btn xs" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">원문</button>`;
   return `<div class="tp3wo lk"><span class="ic">📋</span><span class="nm" title="${esc(d.title||'')}">${esc(d.title||'(제목 없음)')}</span>`+
     `<span class="st">${esc(d.status||'')}</span>${menu}</div>`;
@@ -6605,7 +6618,7 @@ function _woUnlinkedRow(wd){
   if(wd.detail) return '';
   if(!(STATE.role==='master'||STATE.role==='admin')) return '';
   return `<div class="tp3wo"><b>⚠ 작업발주 미연결</b>`+
-    `<button class="btn pri" title="발주(작업오더)를 연결하면 작업세부가 표시되고 모집 인원만큼 명단을 준비할 수 있습니다." onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
+    `<button class="btn pri" title="발주(작업오더)를 연결하면 이 카드의 작업 조건(결제금액·유입방식·정원 폴백)과 발주 원문이 표시됩니다." onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
 }
 // 정산 미니 셀 클릭 → 하단 상세(스텝퍼) 펼침/접기
 function toggleSettleDetail(){ STATE.settleOpen=!STATE.settleOpen; const dt=$('#setldetail'); if(dt) dt.hidden=!STATE.settleOpen; const c=$('#setlCell'); if(c) c.classList.toggle('open',STATE.settleOpen); }
@@ -15117,15 +15130,9 @@ async function linkWO(id){ const t=STATE.cur; if(!t)return;
   const ov=document.getElementById('woov'); if(ov)ov.remove();
   if(r&&r.ok){ toast('발주 연결됨'); reloadWorkdesk(); } else toast('연결 실패: '+((r&&r.error)||''));
 }
-async function unlinkWO(){ const t=STATE.cur; if(!t)return; if(!confirm('이 탭의 발주 연결을 해제할까요? (명단·데이터는 그대로)'))return;
-  const r=await api('/api/trackb/work-order/unlink',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
-  if(r&&r.ok){ toast('연결 해제됨'); reloadWorkdesk(); } else toast('해제 실패');
-}
-async function prepareRoster(){ const t=STATE.cur; if(!t)return;
-  if(!confirm('발주 모집 인원 기준으로 부족한 만큼 빈 명단 슬롯을 만듭니다(이미 충족이면 0개). 계속할까요?'))return;
-  const r=await api('/api/trackb/work-order/prepare-roster',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||null})});
-  if(r&&r.ok){ toast(r.created>0?`빈 슬롯 ${r.created}칸 생성 (모집 ${r.target}/현재 ${r.current})`:`이미 충족 — 생성 0 (모집 ${r.target}/현재 ${r.current})`); reloadWorkdesk(); }
-  else toast('명단 준비 실패: '+((r&&r.error)||''));
+/* ⚠ `unlinkWO` · `prepareRoster` 는 제거했다(사용자 확정 2026-08-23) — 위 `_woLinkedRow` 주석 참조.
+   서버 라우트는 살아 있으니 되살릴 때는 그 주석의 결함(900000 대역 · 폴백 때문에 무효인 해제)을
+   먼저 고칠 것. 그냥 버튼만 되붙이면 같은 사고가 그대로 재현된다. */
 }
 
 // ══ write-back 시뮬레이션(P2-2) — 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기(실제 시트 무접촉) ══
