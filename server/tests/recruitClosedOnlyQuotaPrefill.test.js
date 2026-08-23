@@ -81,6 +81,15 @@ console.log('\n§A 살아있는 옵션 판정');
   ok('A. 마감 옵션의 자기 값(7)이 첫 행에 남지 않는다', r.rows[0].recruitTotal !== 7);
 }
 
+{
+  /* ★ 살아있는 옵션 판정은 `renderOptRows` 의 live 필터와 **글자 그대로 같아야** 한다 —
+     옵션명이 빈 행은 그쪽이 live 로 안 세므로 여기서만 live 로 보면 mode 는 'none' 인데
+     원장 정원은 안 실려 다시 0 으로 덮인다(변이시험 실측). */
+  const noKey = [{ optKey: '', payAmount: 9900, recruitTotal: 7, dailyLimit: 5, status: 'active' }];
+  const r = render(noKey, LINES, CAMP);
+  ok('A. 옵션명이 빈 행은 살아있는 옵션이 아니다 (renderOptRows live 필터와 동일)', r.rows[0].recruitTotal === 200);
+}
+
 console.log('\n§B 살아있는 옵션이 있으면 종전 동작 불변');
 {
   const r = render(LIVE, LINES, CAMP);
