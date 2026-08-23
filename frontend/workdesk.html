@@ -1736,10 +1736,9 @@
   .rvstat .s .nm small{font-weight:600;color:var(--faint)}
   .rvstat .s.unk .nm{color:var(--faint)}
   /* ★ 폴더 바로가기(요약 줄·칸 제목) — 표 윗줄 버튼을 대체한 자리라 "눌린다"가 보여야 한다. */
-  .rvstat .s.lk,.rv2 .rv2h.lk{cursor:pointer}
+  .rvstat .s.lk{cursor:pointer}
   .rvstat .s.lk:hover{background:var(--chip,#eef4ff);border-color:var(--p,#2456c9)}
-  .rv2 .rv2h.lk:hover{color:var(--p,#2456c9)}
-  .rvstat .s .ext,.rv2 .rv2h .ext{opacity:.55;font-weight:700}
+  .rvstat .s .ext{opacity:.55;font-weight:700}
   .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
   /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
   /* 헤더 클릭 필터: ▾ 아이콘 제거, 컬럼명 자체가 트리거. 호버=깔때기 힌트(절대배치=폭 무증가) · 필터중=밑줄+색 · 정렬중=화살표 */
@@ -5867,6 +5866,16 @@ function renderWorkdesk(wd){
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
 function _rvUrl(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
 const _RV_SLOT={review:'리뷰 캡처',cash_receipt:'현금영수증'};
+/* 사람 옆 번호 = **작업보드 표의 「번호」**(서버가 실어 주는 `boardNo`) — `seq`(시트 행 번호)가
+   아니다. 담당자가 표에서 눈으로 보는 값과 같아야 "몇 번 줄 사람인지"가 통한다.
+   ★ 판정(어느 칸이 번호인가)은 서버 `utils/rowNumbering.numberColumnKey` 단일 출처 — 화면은
+     받은 값을 그리기만 한다. ★ 값이 없으면 지어내지 않고 `번호 —`(시트 행은 툴팁에 남긴다). */
+function _rvNo(r){ return String(r&&r.boardNo==null?'':r.boardNo).trim(); }
+function _rvNoHtml(r){
+  const no=_rvNo(r);
+  return `<span title="${esc(no?'작업보드 번호 '+no+' · 시트 행 '+(r&&r.seq)
+    :'작업보드 번호가 없습니다 · 시트 행 '+(r&&r.seq))}">${no?('번호 '+esc(no)):'번호 —'}</span>`;
+}
 function _rvWho(r){ const rj=(r&&r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{}; return rj['수취인']||rj['수령인']||r&&r.recipient||r&&r.name||''; }
 /* ★★ 참여자 목록 = **채워진 줄 전체**(B안, 사용자 확정 2026-08-21) — 구매도 리뷰도 안 낸 사람이
    `✗ ✗` 로 보여야 "누가 빠졌나"를 이 팝업에서 찾을 수 있다(제출현황 `130/500` 을 본 다음 질문).
@@ -5971,7 +5980,7 @@ function _rvRender(){
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 리뷰어의 리뷰 캡처가 여기 표시됩니다.</span></div>`; return; }
   const who=_rvWho(r);
-  const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
+  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
   if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>리뷰 캡처를 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   if(!files.length){
@@ -6012,7 +6021,7 @@ function _rvRender2(pane){
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
   if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 캡처가 여기 표시됩니다.</span></div>`); return; }
   const who=_rvWho(r);
-  const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
+  const who2=`<div class="rvwho">${esc(who||'—')}${_rvNoHtml(r)}</div>`;
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   const col=(kind,icon,title,emptyB,emptyS,warn)=>{
@@ -6028,11 +6037,10 @@ function _rvRender2(pane){
           `<span>${i+1} / ${n}</span>`+
           `<button type="button" class="pgb"${i===n-1?' disabled':''} onclick="_rvStep('${kind}',1,${n})">›</button></div>`
       : `<div class="rvempty${warn?' warn':''}"><b>${esc(emptyB)}</b><span>${esc(emptyS)}</span></div>`;
-    /* 칸 제목도 같은 폴더 바로가기(요약 줄과 **같은 판정**) — 사용자가 어느 쪽을 눌러도 열린다. */
-    const fk=kind==='cap'?'capture':'review';
-    const st=(STATE.role!=='advertiser'&&STATE.cur)?_folState(STATE.cur,'cur',fk):null;
-    const hAt=st?` title="${esc(st.on?st.tip:('폴더를 열 수 없습니다 — '+st.tip))}"${st.on?` onclick="_rvOpenFolder('${fk}')"`:''}`:'';
-    return `<div class="rv2c"><div class="rv2h${st&&st.on?' lk':''}"${hAt}>${icon} ${esc(title)}${st&&st.on?'<span class="ext"> ↗</span>':''}<span class="cnt">${n}</span></div><div class="rv2b">${body}</div></div>`;
+    /* ★ 칸 제목에는 폴더 바로가기를 두지 않는다(사용자 확정 2026-08-21) — 창구는 위의
+       제출현황 요약 줄 하나다. 이 자리는 지금 보고 있는 **그 리뷰어의 제출물**을 말하는
+       칸이라, 같은 자리에서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
+    return `<div class="rv2c"><div class="rv2h">${icon} ${esc(title)}<span class="cnt">${n}</span></div><div class="rv2b">${body}</div></div>`;
   };
   const left=col('cap','🛒','구매 캡처',
     r.submitted?'캡처 없음':'미제출',
@@ -6089,7 +6097,7 @@ function _rvPopCol(kind,files){
    ★ onclick 은 **인덱스만** — 수취인·번호는 시트발 문자열이라 보간하면 따옴표 하나로 탈출된다. */
 function _rvPopItem(x,i,on){
   const nc=_rvKindFiles(x.files,'cap').length, nr=_rvKindFiles(x.files,'rev').length;
-  const no=String(x.r.boardNo==null?'':x.r.boardNo).trim();
+  const no=_rvNo(x.r);
   return `<button type="button" class="rvplitem${on?' on':''}" onclick="_rvPopPick(${i})" title="시트 행 ${esc(x.r.seq)}">`+
     `<span class="no">${no?esc(no):'—'}</span>`+
     `<span class="nm">${esc(_rvWho(x.r)||'—')}</span>`+
@@ -6099,7 +6107,7 @@ function _rvPopItem(x,i,on){
 function _rvPopRender(){
   const p=STATE.rvPop; if(!p||!p.people.length){ _rvPopClose(); return; }
   const cur=p.people[p.idx], who=_rvWho(cur.r);
-  const no=String(cur.r.boardNo==null?'':cur.r.boardNo).trim();
+  const no=_rvNo(cur.r);
   let ov=document.getElementById('rvpop'); if(!ov){ ov=document.createElement('div'); ov.id='rvpop'; ov.className='rvpopov'; document.body.appendChild(ov); }
   ov.innerHTML=`<section class="rvpop" role="dialog" aria-modal="true" aria-label="제출물 크게 보기">`+
     `<aside class="rvplist"><div class="rvplhd">참여자<span class="cnt">${p.people.length}명</span></div>`+

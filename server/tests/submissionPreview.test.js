@@ -74,7 +74,7 @@ console.log('\nB) 제출현황 줄');
 
 console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 4열');
 {
-  const sb = grab(['_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   const rows = [
     { id: 'a', seq: 2, recipient: '심수현', boardNo: '1', filled: true },
     { id: 'b', seq: 3, recipient: '조성훈', boardNo: '2', filled: true },
@@ -111,7 +111,7 @@ console.log('\nC) 팝업 목록 — B안(채워진 줄 전체) · 4열');
 
 console.log('\nD) 팝업 무대 — 좌우 동시');
 {
-  const sb = grab(['_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
+  const sb = grab(['_rvNo', '_rvWho', '_rvKindFiles', '_rvUrl', '_rvPeople', '_rvPopIdx', '_rvPopStep2', '_RV_POP_COL', '_rvPopCol', '_rvPopItem']);
   sb.STATE.rvPop = { people: [], idx: 0, i2: { cap: 0, rev: 0 } };
   const files = [{ slot: 'order_capture', url: 'u1' }, { slot: 'order_capture', url: 'u2' }, { slot: 'review', url: 'u3' }];
   const cap = sb._rvPopCol('cap', files), rev = sb._rvPopCol('rev', files);
@@ -183,8 +183,33 @@ console.log('\nG) 구매 캡처·리뷰 캡처 = 폴더 바로가기');
   const ha = sb2._rvStatHtml();
   ok('★ 광고주에게는 폴더 창구를 그리지 않는다', asked === 0 && !/_rvOpenFolder/.test(ha));
 }
-ok('★ 칸 제목도 같은 창구 — cap→capture / rev→review 로 매핑',
-  /const fk=kind==='cap'\?'capture':'review';/.test(WD) && /onclick="_rvOpenFolder\('\$\{fk\}'\)"/.test(WD));
+/* ★★ 창구는 **요약 줄 하나**(사용자 확정 2026-08-21) — 칸 제목은 "지금 보고 있는 그 리뷰어의
+   제출물"을 말하는 자리라, 거기서 탭 전체 폴더가 열리면 무엇을 여는지 헷갈린다. */
+ok('★ 칸 제목에는 폴더 바로가기가 없다(요약 줄 하나로 수렴)', (() => {
+  const i = WD.indexOf('const col=(kind,icon,title,emptyB,emptyS,warn)=>{');
+  const seg = WD.slice(i, WD.indexOf('\n  const left=col(', i));
+  return i > 0 && !/_rvOpenFolder/.test(seg) && !/_folState/.test(seg) && !/rv2h\$\{/.test(seg);
+})());
+ok('★ 칸 제목 링크 CSS 도 남아 있지 않다(눌리는 것처럼 보이면 안 된다)',
+  !/rv2h\.lk/.test(WD));
+
+/* ══ H) 사람 옆 번호 = 작업보드 「번호」(boardNo) ══════════════════════════════ */
+console.log('\nH) 미리보기 번호 = 작업보드 번호');
+{
+  const sb = grab(['_rvNo', '_rvNoHtml']);
+  ok('★ 값이 있으면 "번호 N"(시트 행 seq 가 아니다)',
+    /번호 19/.test(sb._rvNoHtml({ boardNo: '19', seq: 25 })) && !/#25/.test(sb._rvNoHtml({ boardNo: '19', seq: 25 })));
+  ok('★ 없으면 지어내지 않는다 — "번호 —" + 시트 행은 툴팁으로',
+    /번호 —/.test(sb._rvNoHtml({ seq: 25 })) && /시트 행 25/.test(sb._rvNoHtml({ seq: 25 })));
+  ok('★ 공백만 있는 값도 없는 것으로 본다', /번호 —/.test(sb._rvNoHtml({ boardNo: '  ', seq: 3 })));
+}
+ok('★ 미리보기 두 곳(내부·광고주)이 같은 헬퍼를 쓴다 — #seq 표기 부활 0',
+  (WD.match(/\$\{_rvNoHtml\(r\)\}/g) || []).length === 2 && !/<span>#\$\{esc\(r\.seq\)\}<\/span>/.test(WD));
+ok('★ 팝업도 같은 헬퍼(번호 판정 사본 0)',
+  (WD.match(/_rvNo\((x|cur)\.r\)/g) || []).length === 2
+  && !/boardNo==null\?''/.test(WD.replace(/function _rvNo\(r\)\{[^}]*\}/, '')));
+ok('★ 번호 칸 판정은 서버 단일 출처(rowNumbering.numberColumnKey) — 프론트에 키 목록 사본 없음',
+  !/\['번호'\s*,\s*'no'/.test(WD));
 ok('★ 실행부는 기존 openTabFolder 하나(새 경로·사본 0)',
   /function _rvOpenFolder\(kind\)\{ if\(STATE\.role==='advertiser'\|\|!STATE\.cur\) return; openTabFolder\(0,kind,'cur'\); \}/.test(WD));
 ok('★ 명칭 통일 — 화면에 "리뷰 이미지" 라는 말이 남아 있지 않다(리뷰 캡처)',
