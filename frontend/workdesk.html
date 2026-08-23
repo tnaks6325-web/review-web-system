@@ -1628,12 +1628,6 @@
   .tp3wo.lk .nm{font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
   .tp3wo.lk .st{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:0 7px;font-weight:700;flex:none}
   .tp3wo.lk .ic{flex:none}
-  .womenu{position:relative;margin-left:auto;flex:none}
-  .womenu>.btn{height:24px;padding:0 8px;font-size:12px;line-height:1}
-  .womm{display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:60;background:var(--card);
-        border:1px solid var(--line2);border-radius:9px;box-shadow:0 8px 22px rgba(16,24,40,.14);padding:5px;min-width:170px}
-  .womenu.open .womm{display:flex;flex-direction:column;gap:3px}
-  .womm .btn{justify-content:flex-start;width:100%;height:28px;font-size:11.5px}
   /* 정산 = 별도 박스가 아니라 진행 현황 카드 하단 구역(#setlCell 계약 유지) */
   .setlin{margin-top:auto;padding-top:9px;border-top:1px dashed var(--line2);cursor:pointer}
   .setlin:hover{opacity:.9}
@@ -5920,6 +5914,19 @@ function _condCardHtml(wd,d,m){
       :'';
     payRows=`<dt>결제금액</dt><dd>${per}${tot}</dd>`;
   }
+  /* 메인URL(사용자 확정 2026-08-23) — 작업오더의 상품 URL. 이 카드의 구매채널 판정이 이미 쓰는 값이다.
+     ★ 링크 렌더는 공유 모듈 `_woLinkHtml` **단일 출처**(http(s) 만 링크화 · escape · noopener) —
+       여기서 <a> 를 손으로 조립하면 스킴 검사가 사본이 되어 한쪽만 풀린다.
+     ★ 값이 있을 때 `val()` 로 감싸지 않는다 — 그 래퍼는 `<button onclick=_cndFix>` 라
+       **링크를 누르면 수정 모달이 함께 열린다**(클릭이 둘로 갈린다). 수정은 [결제금액]·[유입방식]과
+       같은 작업오더 수정 창구에서 한다.
+     ★ 긴 주소는 `.cndl dd` 의 nowrap+ellipsis 가 한 줄로 접는다(세 박스 높이 일치 규율). */
+  const murlRow=(()=>{
+    const u=String(cd.productUrl||'').trim();
+    if(!u) return `<dt>메인URL</dt>${unset('order')}`;
+    const link=(typeof _woLinkHtml==='function')?_woLinkHtml(u):esc(u);
+    return `<dt>메인URL</dt><dd title="${esc(u)}">${link}</dd>`;
+  })();
   /* 「일정」 — 작업보드 표에 적힌 구매일자의 **가장 이른 날 ~ 가장 늦은 날**(사용자 확정 2026-08-23).
      ★ 서버가 표에서 파생해 실어 준다(`condition.schedule`) — 화면에서 다시 세지 않는다.
      ★ 못 읽으면 **「—」**(사용자 확정) — [미설정] 버튼을 만들지 않는다. 여기엔 고칠 창구가 없고
@@ -5932,6 +5939,7 @@ function _condCardHtml(wd,d,m){
     return `<dt>일정</dt><dd title="작업보드 표의 구매일자 중 가장 이른 날 ~ 가장 늦은 날입니다 — 모집인원 조절로 날짜가 바뀌면 함께 바뀝니다.">${v}</dd>`;
   })();
   const rows=[
+    ['@murl',null,null],
     ['@sched',null,null],
     /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
        (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
@@ -5946,7 +5954,7 @@ function _condCardHtml(wd,d,m){
     ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
-  ].map(([k,kind,v])=>k==='@sched'?schedRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`)).join('');
+  ].map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`))).join('');
   // 상품명 앞 [상품/옵션/금액] 라벨 제거(사용자 확정 2026-08-20 시안 v2) — 표시만, 원본 무접촉
   const prod=String(cd.productName||d.productOption||m.campaignName||'').replace(/^\s*\[상품\/옵션\/금액\]\s*/,'');
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
@@ -6169,39 +6177,30 @@ function _cndReload(){
    ★ 조작(명단 준비·발주 변경·연결 해제·발주 원문)은 [⋯] 메뉴 안 — 주 화면에 파괴 버튼을 늘어놓지 않는다. */
 function _woLinkedRow(wd){
   const d=wd&&wd.detail; if(!d) return '';
-  const isAdmin=(STATE.role==='master'||STATE.role==='admin');
-  /* ★★ 메뉴는 **[발주 원문 보기] + [발주 변경]** 둘뿐이다(사용자 확정 2026-08-23).
-       종전에 있던 둘을 없앤 이유:
+  /* ★★ 발주 줄의 조작은 **[원문] 하나**다(사용자 확정 2026-08-23) — [⋯] 메뉴는 없앴다.
+       종전에 있던 셋을 없앤 이유:
        · **명단 준비** = 작업표 생성이 생기기 전(Track B 부품4b)의 유물. 지금 줄은 접수가
          `createWorktableSlots` 로 정확히 깐다(seq=시트 실제 행번호 · `source='worktable'` ·
          row_json 에 번호·구매일자). 이 버튼의 `prepareRosterSlots` 는 **seq 900000 격리 대역 +
          `source='manual'` + row_json 없음** 이라 ① 장부 생성기가 그 줄을 제외하고
          (`buildValues` manualBandSkipped → 검색 명단·입금대상에 안 실림) ② 투영 상태 CASE 가
          얼려 리뷰제출·입금 표시가 영영 안 켜지고 ③ 표에 번호·날짜 없는 빈 줄이 남는다.
-         (본섭 실측: 활성 113 작업에 번호 빈칸 0줄 = 실제로 쓰이지 않았다.)
        · **연결 해제** = `unlinkWorkOrder` 가 Track B 링크 행만 지우는데, 발주 조회는
          `Track B 링크 → work_orders.linked_tab_* 폴백` 순이고 **접수된 작업은 그 폴백이 항상
          있다**(접수 게이트 불변식) → 눌러도 발주가 그대로 남아 "해제됐다"고 거짓말을 한다.
          진짜 해제는 홈 작업목록 [작업 삭제](링크 해제 + 134 삭제 표시)가 한다.
-     ★ 서버 라우트(`/work-order/prepare-roster`·`/unlink`)와 서비스는 **그대로 둔다** —
-       되살릴 일이 생기면 화면만 다시 붙이면 된다(시트 가져오기 화면과 같은 규율). */
-  const menu=isAdmin?`<span class="womenu" id="woRowMenu"><button class="btn" title="발주 도구" onclick="toggleWoRowMenu(event)">⋯</button>`+
-    `<span class="womm"><button class="btn" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">발주 원문 보기</button>`+
-    `<button class="btn" onclick="openWorkOrderPicker()" title="엉뚱한 발주가 붙었을 때 고치는 창구입니다. ⚠ 이 화면의 연결만 바뀝니다 — 작업오더 탭의 연결 표시와 이미 만들어진 작업표 줄·정원은 따라오지 않습니다.">발주 변경</button></span></span>`
-    : `<button class="btn xs" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">원문</button>`;
+       · **발주 변경** = 이 화면의 연결만 바꾸고 `work_orders.linked_tab_*`·작업오더 탭 표시·
+         이미 만들어진 작업표 줄·정원은 따라오지 않는 반쪽이라, 오연결 교정은 접수 경로에서 한다.
+     ★ 남은 항목이 하나뿐이면 [⋯] 는 껍데기다 — AE 가 이미 쓰던 **같은 직접 버튼**으로 합친다
+       (`.tp3wo .btn{margin-left:auto}` 라 자리도 종전 그대로 오른쪽 끝).
+     ★ 서버 라우트(`/work-order/prepare-roster`·`/unlink`·`/link`)와 서비스는 **그대로 둔다** —
+       되살릴 일이 생기면 화면만 다시 붙이면 된다(시트 가져오기 화면과 같은 규율).
+     ★ `openWorkOrderPicker` 는 **미연결 줄 [＋ 발주 연결]** 이 계속 쓴다(제거 금지). */
+  const menu=`<button class="btn xs" onclick="openWoRawModal()" title="발주에 적혀 온 정형 정보 전체를 팝업으로 봅니다">원문</button>`;
   return `<div class="tp3wo lk"><span class="ic">📋</span><span class="nm" title="${esc(d.title||'')}">${esc(d.title||'(제목 없음)')}</span>`+
     `<span class="st">${esc(d.status||'')}</span>${menu}</div>`;
 }
-function toggleWoRowMenu(ev){
-  if(ev){ ev.stopPropagation(); }
-  const el=document.getElementById('woRowMenu'); if(!el) return;
-  const on=el.classList.toggle('open');
-  if(on && !STATE._woRowMenuBound){   // ★ 바깥클릭 닫기는 최상위 1회만(열 때마다 걸면 겹쳐 쌓인다)
-    STATE._woRowMenuBound=true;
-    document.addEventListener('click',()=>{ const x=document.getElementById('woRowMenu'); if(x) x.classList.remove('open'); });
-    document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const x=document.getElementById('woRowMenu'); if(x) x.classList.remove('open'); } });
-  }
-}
+/* ⚠ `toggleWoRowMenu`(발주 줄 [⋯] 메뉴)는 제거했다 — 위 `_woLinkedRow` 주석 참조. */
 /* 발주 원문 팝업 — 종전 「작업세부 펼치기」가 그리던 **같은 값·같은 순서**(렌더러 이동, 사본 아님) */
 function openWoRawModal(){
   const wd=STATE.wd, d=wd&&wd.detail;
