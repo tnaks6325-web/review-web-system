@@ -42,17 +42,17 @@ console.log('\n[A] 판정 단일 출처 `_isNoSheet`');
 {
   const sandbox = { STATE: { cur: null }, esc: s => String(s == null ? '' : s), sheetTitle: sid => sid };
   vm.createContext(sandbox);
-  vm.runInContext(grab('_isNoSheet') + '\n' + grab('_nsBadge') + '\n' + grab('_curSheetLabel'), sandbox);
+  vm.runInContext(grab('_isNoSheet') + '\n' + grab('_curSheetLabel'), sandbox);
 
   ok('sheetless===true 만 무시트', sandbox._isNoSheet({ sheetless: true }) === true);
   ok('★ 필드 없음 = false(모르는 것을 무시트로 단정하지 않는다)',
     sandbox._isNoSheet({}) === false && sandbox._isNoSheet(null) === false && sandbox._isNoSheet(undefined) === false);
   ok('문자열 "true" 를 무시트로 읽지 않는다', sandbox._isNoSheet({ sheetless: 'true' }) === false);
 
-  ok('★ 무시트 배지가 같은 판정을 쓴다(사본 0)',
-    /_isNoSheet\(t\)/.test(grab('_nsBadge')) && !/t\.sheetless\s*===\s*true/.test(grab('_nsBadge')));
-  ok('무시트면 배지가 뜬다', sandbox._nsBadge({ sheetless: true }).indexOf('무시트') > 0);
-  ok('시트 기반이면 배지 없음', sandbox._nsBadge({ sheetless: false }) === '');
+  /* ⚠ 「무시트」 배지는 제거됐다(사용자 확정 2026-08-23) — 활성 작업이 전부 무시트라 상시
+     표기가 되어 신호 구실을 못 했다. 판정(`_isNoSheet`)은 시트 제목 라벨 숨김이 계속 쓴다. */
+  ok('★ 무시트 배지 렌더러는 없다(되붙이면 상시 표기로 되돌아간다)',
+    typeof sandbox._nsBadge === 'undefined');
 
   // _curSheetLabel — 실제 실행
   sandbox.STATE.cur = { sheetId: 'SID', spreadsheetTitle: '위드프렌즈 체험단 시트_2026' };
@@ -76,8 +76,10 @@ console.log('\n[B] 작업보드 머리 3종');
   ok('★ `원본: Track B` 는 시트 라벨이 아니라 그대로 남는다',
     /sot==='db'\?'Track B':'시트'/.test(WD));
 
-  ok('★ 무시트면 그리드 배지 문구에 "시트" 가 없다',
-    /noSheet\?'<span class="bd" title="표 전체 컬럼 가로 펼침">표 · 전체 열<\/span>'/.test(WD));
+  /* ★★ 무시트 쪽 그리드 배지(`표 · 전체 열`)는 제거했다 — 전 작업이 무시트라 상시 표기다.
+     ★ **시트 기반 배지는 남긴다** — 시트 기반 작업이 다시 생기면 화면이 그 사실을 말해야 한다. */
+  ok('★ 무시트면 그리드 배지를 아예 안 그린다',
+    /\$\{\(gridMode&&!noSheet\)\?'<span class="bd"/.test(WD) && !/표 · 전체 열/.test(WD));
   ok('시트 기반 그리드 배지는 종전 문구 그대로(무회귀)',
     /구글시트와 동일 컬럼·가로 펼침 \(열람 전용\)">시트 그리드 · 열람/.test(WD));
 
