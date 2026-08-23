@@ -2057,6 +2057,11 @@ function goToSubmit(items) {
 let _partInfoSubmitItems = null;   // [리뷰제출하기]가 넘길 대기 항목(완료 시 null)
 let _partInfoChatUrl = '';
 let _partInfoProductUrl = '';      // [상품 바로가기] 버튼용 상품 URL
+/* 🚫 주문취소 — 게이트 판정은 **서버(brief.cancelable)** 가 준 것만 쓴다.
+   화면이 스스로 정하면 "보이는데 거부"가 된다(판정 사본 0). */
+let _partInfoCancelable = null;    // {ok, reason, message, reasons[]} | null(=미상 → 버튼 미표시)
+let _partInfoCoord = null;         // {sheetId, tabName, rowIndex} — 취소 요청 좌표
+let _partInfoCoordLabel = '';      // 확인창에 보여줄 그 참여의 이름(카드와 같은 라벨)
 
 function _partInfoEnsure(){
   if (document.getElementById('partInfoOvl')) return;
@@ -2089,8 +2094,16 @@ function openPartInfoSheet(items, opts){
   _partInfoSubmitItems = done ? null : list;     // 리뷰제출하기는 대기 항목에만
   _partInfoChatUrl = '';
   _partInfoProductUrl = '';
+  _partInfoCancelable = null;
   _partInfoEnsure();
   const it = list[0];
+  /* ★ 제출완료 건에는 취소 좌표를 만들지 않는다 — 버튼 자체가 뜨지 않아야 한다(사용자 확정 2026-08-23).
+       서버도 `review_submitted` 로 거부하지만, 화면에서 먼저 없앤다. */
+  /* ★ 한 팝업에 여러 참여가 묶인 경우(같은 작업 다건)는 취소 버튼을 그리지 않는다 —
+       어느 건인지 화면이 특정할 수 없다. 그 경우는 1:1 문의로 간다. */
+  _partInfoCoord = (!done && list.length === 1 && it && it.sheetId && it.tabName && it.rowIndex != null)
+    ? { sheetId: it.sheetId, tabName: it.tabName, rowIndex: Number(it.rowIndex) } : null;
+  _partInfoCoordLabel = _partInfoCoord ? _partInfoLabel(it) : '';
   // 1:1 문의 문맥 — 문의 기준은 "진행한 탭"(sheetId||tabName). 리뷰어에겐 시트제목을 노출하지 않으므로
   //   라벨은 카드와 같은 표시명(상품명 우선 → 탭명)만 쓴다.
   _partInfoCsCtx = (it.sheetId && it.tabName)
@@ -2132,6 +2145,7 @@ async function _partInfoLoadBrief(it, done){
     const j = await r.json().catch(()=>({}));
     const brief = (r.ok && j.ok) ? j.brief : null;
     if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
+    _partInfoCancelable = brief.cancelable || null;
     const rows = [];
     // ★ D: 이 행의 작업 옵션(리뷰 형태 — '텍스트'/'포토리뷰' 등). 관리자가 로스터에 미리 적어둔
     //   작업지시이고 "어떻게 써야 하는가"라 **상품정보보다 위**에, 눈에 띄게 둔다.
@@ -2177,6 +2191,7 @@ async function _partInfoLoadBrief(it, done){
     _partInfoProductUrl = /^https?:\/\//i.test(pu) ? pu : '';
     if (rows.length){ if (detailEl){ detailEl.style.display=''; detailEl.style.color=''; detailEl.innerHTML = rows.join(''); } }
     else hide();
+    _partInfoCancelable = (brief && brief.cancelable) || null;
     _partInfoRenderBtns(done, brief.chatUrl || '', _partInfoProductUrl);
   }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
 }
@@ -2223,7 +2238,141 @@ function _partInfoRenderBtns(done, chatUrl, productUrl){
   }
   html += reEditHtml;
   html += csBtnHtml;
+  html += _partInfoCancelBtnHtml(done);
   box.innerHTML = html;
+}
+
+/* ═══ 🚫 주문취소 (사용자 확정 2026-08-23) ═══
+   ★ 리뷰 제출 완료 건에는 **버튼 자체를 그리지 않는다**(사용자 확정 ②).
+   ★ 못 누를 때는 **숨기지 않고 흐리게 + 사유** — 왜 못 누르는지 모르면 문의가 늘어난다.
+   ★ 판정은 서버가 준 값만(사본 0). 값이 없으면(구버전 백엔드·조회 실패) 그리지 않는다. */
+function _partInfoCancelBtnHtml(done){
+  if (done || !_partInfoCoord) return '';
+  const g = _partInfoCancelable;
+  if (!g) return '';
+  if (g.ok) {
+    return '<button onclick="_partInfoOpenCancel()" style="display:block;width:100%;text-align:center;'
+      + 'border:1.5px solid #FECACA;cursor:pointer;background:#fff;color:#B91C1C;font-size:.85rem;'
+      + 'font-weight:800;border-radius:11px;padding:12px;margin-top:8px">🚫 주문취소</button>';
+  }
+  /* 리뷰 제출 완료는 위에서 이미 걸러진다. 나머지 사유는 흐린 버튼 + 문장으로 말한다. */
+  return '<button disabled style="display:block;width:100%;text-align:center;border:1.5px solid #E5E7EB;'
+    + 'background:#fff;color:#9CA3AF;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;'
+    + 'margin-top:8px;cursor:not-allowed">🚫 주문취소</button>'
+    + '<div style="font-size:.7rem;color:#9CA3AF;text-align:center;margin-top:6px;line-height:1.5">'
+    + escHtml(g.message || '') + '</div>';
+}
+
+let _pcReason = '', _pcBusy = false;
+function _partInfoOpenCancel(){
+  const g = _partInfoCancelable;
+  if (!_partInfoCoord || !g || !g.ok) return;
+  _pcReason = ''; _pcBusy = false;
+  let ov = document.getElementById('pcOvl');
+  if (!ov){
+    ov = document.createElement('div'); ov.id = 'pcOvl';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(16,24,40,.42);display:none;'
+      + 'align-items:flex-end;justify-content:center;z-index:12000';
+    /* ★ 바깥 클릭으로 닫지 않는다 — 입력해 둔 사유를 실수로 잃지 않게(Esc·[그대로 두기]만). */
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  const reasons = (g.reasons || []).map(function(r){
+    return '<button class="pcrsn" data-k="' + escHtml(r.key) + '" onclick="_pcPick(this)" '
+      + 'style="display:block;width:100%;text-align:left;border:1.5px solid #D1D5DB;background:#fff;'
+      + 'border-radius:10px;padding:10px 12px;font-size:.8rem;font-weight:700;margin-bottom:6px;cursor:pointer">'
+      + escHtml(r.label) + '</button>';
+  }).join('');
+  ov.innerHTML = '<div style="width:100%;max-width:440px;background:#fff;border-radius:18px 18px 0 0;'
+    + 'padding:18px 16px 20px;max-height:92vh;overflow:auto">'
+    + '<div style="font-size:1rem;font-weight:800">주문을 취소할까요?</div>'
+    + '<div style="font-size:.76rem;color:#6B7280;margin:3px 0 13px">' + escHtml(_partInfoTitleText()) + '</div>'
+    + '<div style="font-size:.76rem;font-weight:800;margin-bottom:7px">취소 사유를 알려주세요</div>'
+    + reasons
+    + '<input id="pcEtc" maxlength="200" placeholder="직접 입력 (선택)" style="width:100%;border:1.5px solid #D1D5DB;'
+    + 'border-radius:10px;padding:10px 12px;font-size:.8rem;font-family:inherit;margin-top:2px">'
+    + '<label style="display:flex;gap:8px;align-items:flex-start;background:#FEF2F2;border:1px solid #FECACA;'
+    + 'border-radius:10px;padding:10px 11px;font-size:.74rem;line-height:1.55;margin:11px 0 4px;cursor:pointer">'
+    + '<input type="checkbox" id="pcChk" onchange="_pcSync()" style="margin-top:2px">'
+    + '<span><b>되돌릴 수 없습니다.</b> 제출한 구매양식이 무효가 되고 작업 명단에서도 빠집니다.</span></label>'
+    + '<button id="pcGo" disabled onclick="_pcSubmit()" style="display:block;width:100%;text-align:center;border:none;'
+    + 'background:#DC2626;color:#fff;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;margin-top:8px;'
+    + 'cursor:pointer;opacity:.45">주문 취소하기</button>'
+    + '<button onclick="_pcClose()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;'
+    + 'background:#EEF3FB;color:#1B4F9C;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;'
+    + 'margin-top:8px;cursor:pointer">그대로 두기</button></div>';
+  /* Esc 리스너는 **최상위 1회만**(열 때마다 걸면 겹쳐 쌓인다). */
+  if (!window._pcKeyBound){
+    window._pcKeyBound = true;
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') _pcClose(); });
+  }
+}
+function _partInfoTitleText(){ return _partInfoCoordLabel || ''; }
+function _pcClose(){ const ov = document.getElementById('pcOvl'); if (ov) ov.style.display = 'none'; }
+function _pcPick(btn){
+  _pcReason = btn.getAttribute('data-k') || '';
+  const box = document.getElementById('pcOvl'); if (!box) return;
+  box.querySelectorAll('.pcrsn').forEach(function(b){
+    const on = b === btn;
+    b.style.borderColor = on ? '#DC2626' : '#D1D5DB';
+    b.style.background  = on ? '#FEF2F2' : '#fff';
+    b.style.color       = on ? '#B91C1C' : '';
+  });
+  _pcSync();
+}
+/* ★ 2단 확인 — 사유 선택 **그리고** 체크가 둘 다여야 열린다. */
+function _pcSync(){
+  const go = document.getElementById('pcGo'); const chk = document.getElementById('pcChk');
+  if (!go) return;
+  const ok = !!_pcReason && !!(chk && chk.checked) && !_pcBusy;
+  go.disabled = !ok; go.style.opacity = ok ? '1' : '.45';
+}
+async function _pcSubmit(){
+  if (_pcBusy || !_pcReason || !_partInfoCoord) return;
+  const user = getSavedUser();
+  const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
+  if (phone8.length !== 8){ try{ showToast('로그인 후 이용해주세요'); }catch(_){} return; }
+  _pcBusy = true; _pcSync();
+  const go = document.getElementById('pcGo'); if (go) go.textContent = '취소하는 중…';
+  try{
+    const etcEl = document.getElementById('pcEtc');
+    const r = await fetch(API_BASE_URL + '/api/review-edit/order-cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone8: phone8, name: (user && user.name) || '',
+        sheetId: _partInfoCoord.sheetId, tabName: _partInfoCoord.tabName, rowIndex: _partInfoCoord.rowIndex,
+        reasonKey: _pcReason, reasonEtc: (etcEl && etcEl.value) || '',
+      }),
+    });
+    const j = await r.json().catch(function(){ return {}; });
+    if (!r.ok || !j.ok) throw new Error(j.error || '취소하지 못했습니다.');
+    _pcDone();
+  }catch(e){
+    /* ★ 실패해도 입력한 사유를 지우지 않는다 — 다시 누르면 그대로 이어서 보낸다. */
+    _pcBusy = false; if (go) go.textContent = '주문 취소하기'; _pcSync();
+    try{ showToast((e && e.message) || '취소하지 못했습니다.'); }catch(_){}
+  }
+}
+function _pcDone(){
+  const ov = document.getElementById('pcOvl');
+  if (ov) ov.innerHTML = '<div style="width:100%;max-width:440px;background:#fff;border-radius:18px 18px 0 0;'
+    + 'padding:26px 18px 24px;text-align:center">'
+    + '<div style="font-size:1.9rem">✓</div>'
+    + '<div style="font-size:.98rem;font-weight:800;margin-top:4px">주문이 취소되었습니다</div>'
+    + '<div style="font-size:.76rem;color:#6B7280;margin:7px 0 4px;line-height:1.6">'
+    + '구매양식 제출이 무효 처리되고<br>작업 명단에서도 빠졌어요.</div>'
+    + '<div style="font-size:.7rem;color:#9CA3AF">담당자에게도 취소 사유가 함께 전달됩니다.</div>'
+    + '<button onclick="_pcAfter()" style="display:block;width:100%;text-align:center;border:1.5px solid #CFE0FD;'
+    + 'background:#EEF3FB;color:#1B4F9C;font-size:.85rem;font-weight:800;border-radius:11px;padding:12px;'
+    + 'margin-top:16px;cursor:pointer">리뷰 내역으로</button></div>';
+}
+function _pcAfter(){
+  _pcClose(); closePartInfo();
+  /* 목록에서 사라지는 것이 정상 동작이라(사용자 확정 ③) 그 자리에서 다시 불러온다. */
+  try {
+    const u = getSavedUser();
+    if (u && typeof loadReviewList === 'function') loadReviewList(u, { silent: true });
+  } catch(_){}
 }
 
 /* ═══ 참여상품 정보 팝업 → 1:1 문의 ═══

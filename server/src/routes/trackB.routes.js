@@ -1475,6 +1475,27 @@ router.post('/workdesk/test-auto-delete-cleanup', authMiddleware, async (req, re
     } finally { client.release(); }
   } catch (err) { next(err); }
 });
+/* ── 작업 로그 — 이 작업에 무슨 일이 있었나 (2026-08-23 사용자 확정 ⑥-㉮ 6종 전부) ──
+   ★★ **읽기 전용 · 신규 저장소 0** — 이미 쌓이는 기록을 한 타임라인으로 모으기만 한다.
+   ★ 게이트는 편집 이력과 **같은 `_ensureEditScope`**(master/admin 전체 · staff 담당 탭 ·
+     광고주 차단) — 리뷰어 실명·연락처가 실리므로 열람 범위를 넓히지 않는다.
+   ★ gid 는 서버가 `tab_configs` 에서 다시 구한다(낡은 화면이 남의 공고 정원 이력을 보지 않게). */
+router.get('/workdesk/activity-log', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, kind, limit } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    let gid = '';
+    try {
+      const { rows } = await pool.query(
+        'SELECT tab_gid FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1', [sheetId, tabName]);
+      gid = (rows[0] && rows[0].tab_gid) || '';
+    } catch (_) { /* gid 미상 = 이름 매칭만(fail-soft) */ }
+    const { tabActivityLog } = require('../services/tabActivityLog.service');
+    res.json(await tabActivityLog({ sheetId, tabName, gid, kind, limit }));
+  } catch (err) { next(err); }
+});
+
 // ── 편집 이력(감사) — master/admin 전체 · staff 담당 탭만 ──
 router.get('/workdesk/edits', authMiddleware, async (req, res, next) => {
   try {

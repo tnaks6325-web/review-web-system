@@ -813,6 +813,32 @@
   .ovnm{cursor:pointer} .ovnm:hover b{color:var(--accent);text-decoration:underline} .ovsub{font-size:10.5px;color:var(--faint);font-weight:400}
   .ovtable .ok{color:var(--safe)} .ovtable .no{color:var(--bad)} .ovtable .vs{color:var(--line2);margin:0 1px} .ovtable .diff{color:var(--bad);font-weight:700}
   .btn.xs{font-size:11px;padding:3px 9px}
+  /* ── 작업 로그 팝업(2026-08-23) — 클래스는 전부 `tl` 접두(맨몸 이름은 다른 화면이 쓴다) ── */
+  .tlbox{width:min(880px,94vw);max-height:86vh;display:flex;flex-direction:column}
+  .tlsub{font-size:12px;color:var(--muted);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tltabs{display:flex;gap:5px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px solid var(--line)}
+  .tltab{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;
+         padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+  .tltab.on{background:color-mix(in srgb,var(--accent) 10%,#fff);border-color:var(--accent);color:var(--accent-deep)}
+  /* ★ flex 자식은 기본 min-height:auto — 없으면 스크롤이 안 생기고 내용만큼 늘어난다(레포 상습 함정). */
+  .tlbd{flex:1;min-height:0;overflow:auto;padding:12px 16px 18px}
+  .tlwarn{background:color-mix(in srgb,var(--warn) 9%,#fff);border:1px solid color-mix(in srgb,var(--warn) 30%,var(--line));
+          border-radius:9px;padding:8px 11px;font-size:12px;color:var(--warn);margin-bottom:10px}
+  .tlmore{text-align:center;color:var(--muted);font-size:11.5px;padding:10px 0 2px}
+  .tl{position:relative;padding-left:20px}
+  .tl::before{content:'';position:absolute;left:5px;top:4px;bottom:4px;width:2px;background:var(--line)}
+  .tlev{position:relative;padding:8px 0 8px 4px;border-bottom:1px dashed var(--line)}
+  .tlev:last-child{border-bottom:none}
+  .tlev::before{content:'';position:absolute;left:-18px;top:14px;width:9px;height:9px;border-radius:50%;
+                background:var(--muted);border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .tlev.k-order::before{background:#2563eb} .tlev.k-cancel::before{background:#7c3aed}
+  .tlev.k-review::before{background:#16a34a} .tlev.k-edit::before{background:#b45309}
+  .tlev.k-quota::before{background:#0d9488} .tlev.k-money::before{background:#0891b2}
+  .tlev.k-sys::before{background:#e5484d}
+  .tltop{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+  .tlwhen{font-size:11.3px;color:var(--muted);flex:none;font-variant-numeric:tabular-nums}
+  .tlmsg{font-size:12.8px;font-weight:600}
+  .tlwho{font-size:11.4px;color:var(--muted);margin-top:2px}
   /* ── 그리드 제거 × · 편집 이력 모달 ── */
   .rdel{margin-left:6px;padding:1px 5px;border:1px solid color-mix(in srgb,var(--bad) 35%,var(--line));border-radius:5px;background:var(--card);color:var(--bad);font:700 10.5px/1.35 inherit;cursor:pointer;opacity:0;transition:opacity .12s,background .12s,border-color .12s} tr:hover .rdel,.rdel:focus-visible{opacity:1}.rdel:hover{background:var(--bad-soft);border-color:var(--bad)}.rdel:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   /* 공유 링크 복사 완료 — 화면 중앙에서 천천히 사라지는 알림(사용자 확정 2026-08-19).
@@ -5430,10 +5456,15 @@ function renderWorkdesk(wd){
   // [🔗 링크 복사] — 인수인계 때 상대가 검색으로 찾아 들어가던 것을 주소 한 줄로 대신한다(내부 역할만).
   const shareBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="copyBoardLink()" title="이 작업보드로 바로 가는 고유 주소를 복사합니다. 메신저로 보내면 받은 사람이 로그인 후 이 화면으로 바로 들어옵니다(담당 범위 밖에는 열리지 않습니다).">🔗 링크 복사</button>`;
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
+  /* [🗒 로그] — 이 작업에 무슨 일이 있었나(주문·취소·리뷰·편집·정원·정산·시스템 한 타임라인).
+     ★ 내부 역할만 — 리뷰어 실명·연락처가 실린다(서버 게이트와 1:1).
+     ★ 옛 [편집 이력] 버튼은 이 안으로 흡수했다(같은 일을 하는 창구를 둘로 두지 않는다). */
+  const logBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openTabLog()" title="이 작업의 주문·취소·리뷰·편집·정원·정산 기록을 시간순으로 봅니다.">🗒 로그</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${warn.join('')}
     ${shareBtn}
     ${planBtn}
+    ${logBtn}
     ${_finBarHtml()}
     ${(isMaster||_ddCan()||_brCanAdd())?`<span class="mhtools" id="mhTools"><button class="btn" title="작업 도구" onclick="toggleMhTools(event)">⋯</button><span class="mhmenu">${flipBtn}${isMaster?`<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}${_ddCan()?`<button class="btn" onclick="openDedupeModal()" title="같은 구매(주문번호+연락처)가 여러 줄로 반영된 것을 가장 이른 줄만 남기고 정리한다(미리보기 후 실행 · 입금 회차에 담긴 줄은 보류)">♻ 중복 정리</button>`:''}${_brCanAdd()?`<button class="btn" onclick="openBloggerModal()" title="공고 밖에서 섭외한 블로거를 이 작업의 표에 한 줄로 등록한다(이름·연락처·블로그 주소)">＋ 블로거 추가</button>`:''}</span></span>`:''}
     <!-- ★ 남는 폭은 **오른쪽**에 둔다(사용자 확정 2026-08-19) — 스페이서가 제목 뒤에 있으면
@@ -7088,7 +7119,6 @@ function buildGrid(wd){
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${(!STATE.canEdit&&_canEditCells())?`<span class="gsmsg" title="다른 칸은 열람 전용입니다">택배송장 칸은 입력할 수 있습니다 — 셀 우클릭 → ✏️ 이 셀 편집</span>`:''}
-      ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
       ${_folBarHtml()}
       <output id="gselstat" class="gselstat" aria-live="polite" hidden></output></div>
@@ -8698,19 +8728,67 @@ function _applyRangeColor(color){
     .then(resp=>{ if(!resp||!resp.ok){ toast(resp&&resp.error?('배경색 저장 실패: '+resp.error):'배경색 저장 실패'); return _reloadWorkdeskAfterColorSaveFailure(t); } })
     .catch(()=>{ toast('배경색 저장 실패 — 서버 상태로 되돌립니다'); return _reloadWorkdeskAfterColorSaveFailure(t); });
 }
-// 편집 이력(감사) 모달
-async function showEditHistory(){
-  const t=STATE.cur; if(!t)return;
-  let ov=document.getElementById('histov');
-  if(!ov){ ov=document.createElement('div'); ov.id='histov'; ov.className='modalov'; ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();}); document.body.appendChild(ov); }
-  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>편집 이력 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('histov').remove()">닫기</button></div><div class="modalbd" id="histbd"><div class="empty">불러오는 중…</div></div></div>`;
-  const r=await api(`/api/trackb/workdesk/edits?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
-  const items=(r&&r.items)||[]; const bd=$('#histbd'); if(!bd)return;
-  bd.innerHTML= items.length
-    ? `<table class="histtable"><thead><tr><th>시각</th><th>참여자</th><th>필드</th><th>값</th><th>편집자</th><th>상태</th></tr></thead><tbody>${
-        items.map(e=>`<tr class="${e.reverted?'histrev':''}"><td class="hts">${esc(_fmtTs(e.at))}</td><td>${esc(e.name||'—')}</td><td>${esc(e.field)}</td><td class="hval">${esc(e.value)}</td><td>${esc(e.by)}</td><td>${e.reverted?'<span class="no">되돌림</span>':'<span class="ok">활성</span>'}</td></tr>`).join('')
-      }</tbody></table>`
-    : `<div class="empty">편집 이력 없음</div>`;
+/* ══ 작업 로그 — 이 작업에 무슨 일이 있었나 (2026-08-23 사용자 확정) ══
+   ★ 옛 [편집 이력] 모달을 대체한다 — 편집은 [편집] 탭 하나로 들어왔다.
+   ★ 유형 탭 목록은 **서버가 준 `kinds` 를 그대로** 그린다(라벨 사본 0).
+   ★ 읽기 전용 — 여기서 되돌리거나 고치지 않는다(조치는 각자의 자리에서). */
+var _tlKind='all', _tlData=null, _tlBusy=false;
+function openTabLog(){
+  const t=STATE.cur; if(!t){ toast('작업을 먼저 선택하세요.'); return; }
+  let ov=document.getElementById('tlov');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='tlov'; ov.className='modalov';
+    /* 로그는 읽기 전용이라 잃을 입력이 없다 → 바깥 클릭·Esc 로 닫는다(취소 시트와 반대). */
+    ov.addEventListener('click',e=>{ if(e.target===ov) closeTabLog(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display='flex';
+  ov.innerHTML=`<div class="modalbox tlbox"><div class="modalhd"><b>🗒 작업 로그</b>
+      <span class="tlsub" title="${esc(t.displayName||t.tabName)}">${esc(t.displayName||t.tabName)}</span>
+      <span style="flex:1"></span><button class="btn xs" onclick="closeTabLog()">닫기</button></div>
+    <div class="tltabs" id="tltabs"></div>
+    <div class="modalbd tlbd" id="tlbd"><div class="empty">불러오는 중…</div></div></div>`;
+  _tlKind='all'; _tlData=null; _tlLoad();
+}
+function closeTabLog(){ const ov=document.getElementById('tlov'); if(ov) ov.style.display='none'; }
+function tlPick(k){ if(_tlKind===k) return; _tlKind=k; _tlLoad(); }
+async function _tlLoad(){
+  const t=STATE.cur; if(!t||_tlBusy) return;
+  _tlBusy=true; _tlPaintTabs();
+  const bd=document.getElementById('tlbd'); if(bd) bd.innerHTML='<div class="empty">불러오는 중…</div>';
+  try{
+    const r=await api(`/api/trackb/workdesk/activity-log?sheetId=${encodeURIComponent(t.sheetId)}`
+      +`&tabName=${encodeURIComponent(t.tabName)}&kind=${encodeURIComponent(_tlKind)}`);
+    _tlData=(r&&r.ok)?r:null;
+    if(!_tlData) throw new Error((r&&r.error)||'조회 실패');
+  }catch(e){
+    /* ★ 자리표시자를 깐 함수는 어떤 예외에도 화면을 종결시킨다(무한 "불러오는 중" 금지). */
+    _tlData=null;
+    if(bd) bd.innerHTML=`<div class="empty">로그를 불러오지 못했습니다 — ${esc((e&&e.message)||'')}<br>
+      <button class="btn xs" style="margin-top:8px" onclick="_tlLoad()">다시 시도</button></div>`;
+    _tlBusy=false; _tlPaintTabs(); return;
+  }
+  _tlBusy=false; _tlPaintTabs(); _tlPaintBody();
+}
+function _tlPaintTabs(){
+  const box=document.getElementById('tltabs'); if(!box) return;
+  const kinds=(_tlData&&_tlData.kinds)||[];
+  box.innerHTML=[['all','전체']].concat(kinds.map(k=>[k.key,k.label]))
+    .map(([k,l])=>`<button class="tltab${_tlKind===k?' on':''}" onclick="tlPick('${k}')">${esc(l)}</button>`).join('');
+}
+function _tlPaintBody(){
+  const bd=document.getElementById('tlbd'); if(!bd||!_tlData) return;
+  const items=_tlData.items||[];
+  /* ★ 못 받은 소스는 **말한다** — 0건으로 꾸미면 "아무 일도 없었다"로 읽힌다. */
+  const failed=(_tlData.failed||[]).length
+    ? `<div class="tlwarn">기록 ${_tlData.failed.length}종을 불러오지 못했습니다 — 이 목록이 전부가 아닐 수 있어요.</div>` : '';
+  const more=_tlData.truncated?`<div class="tlmore">최근 기록만 표시했습니다.</div>`:'';
+  bd.innerHTML = failed + (items.length
+    ? `<div class="tl">${items.map(e=>
+        `<div class="tlev k-${esc(e.kind)}"><div class="tltop"><span class="tlwhen">${esc(_fmtTs(e.at))}</span>`
+        +`<span class="tlmsg">${esc(e.message)}</span></div>`
+        +(e.who?`<div class="tlwho">${esc(e.who)}</div>`:'')+`</div>`).join('')}</div>` + more
+    : `<div class="empty">${_tlKind==='all'?'아직 기록이 없습니다.':'이 유형의 기록이 없습니다.'}</div>`);
 }
 
 // ══ 관측 대시보드 뷰 ══
