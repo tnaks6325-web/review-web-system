@@ -3117,6 +3117,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     //   업체가 볼 것 = 오늘 몇 명이 채워졌나 / 오늘 몇 명 예정인가. 그 외(공고를 거친 확정 수·
     //   결제 중 홀드·합산 공고 수)는 **내부 운영 수치라 응답에서 폐기**한다 — 광고주 렌즈 규율.
     res.todayProgress = _tpAdvertiserLens(await tabTodayProgress(db, { sheetId, tabName }));
+    /* 작업 조건 카드 — 내부와 **같은 자리·같은 모양**(사용자 확정 2026-08-23). 단 렌즈를 거친다:
+       리뷰비·입금명·다계정·현금영수증·내부 식별자는 응답에서 폐기한다(위 `_condAdvertiserLens`). */
+    res.condition = _condAdvertiserLens(_cond);   // ★ 위에서 이미 구한 값(호출 2회 금지 — cap 과 갈릴 수 없다)
+    if (res.condition) res.condition.schedule = _condSchedule(out, headers);
   }
   return res;
 }
@@ -4709,6 +4713,36 @@ async function tabCampaignsMap({ force = false } = {}) {
  *  ★ `done` 은 화면이 폴백에 쓰는 값이라 **형태는 유지하되 표 기준과 같은 값**으로 둔다 →
  *    "공고를 거쳐 확정된 건 N명 · 차이 M명" 같은 **내부 문구가 애초에 만들어지지 않는다**.
  *  ★ `holds`(결제 중) · `campaignCount`(합산 공고 수)는 0/1 로 눕힌다(운영 정보). */
+/* 작업 조건 — **광고주 렌즈**(사용자 확정 2026-08-23: 업체 뷰어에도 같은 카드를 그린다).
+   ★★ **화이트리스트 재구성**(`{...cd}` 스프레드 금지) — 나중에 `tabConditionSummary` 에 필드가
+      늘어나면 스프레드는 그것을 **조용히 광고주에게 흘린다**(`_tpAdvertiserLens` 와 같은 규율).
+   ★ 내보내는 것 = 사용자가 지정한 10행의 재료뿐.
+   ★ **폐기**: `reviewFee`·`feeSource`·`depositName`(리뷰비·입금명 = 내부 정산 값) ·
+      `multiAccount`·`cashReceipt`·`incomeType`·`slotsPinned`(운영 설정) ·
+      `campaignId`·`workOrderId`·`campaignCount`(내부 식별자 — 화면 창구를 여는 열쇠이기도 하다).
+   ★ null 이면 null 그대로(카드가 종전 4줄로 떨어진다). */
+function _condAdvertiserLens(cd) {
+  if (!cd || typeof cd !== 'object') return cd || null;
+  return {
+    productName: cd.productName || '',
+    productUrl: cd.productUrl || null,
+    schedule: cd.schedule || null,
+    purchaseWindow: cd.purchaseWindow || null,
+    purchaseAllDay: !!cd.purchaseAllDay,
+    orderPurchaseTime: cd.orderPurchaseTime || null,
+    recruitTotal: cd.recruitTotal, recruitTotalSource: cd.recruitTotalSource,
+    orderRecruitCount: cd.orderRecruitCount,
+    dailyLimit: cd.dailyLimit, dailyLimitSource: cd.dailyLimitSource,
+    orderDailyCount: cd.orderDailyCount,
+    payAmount: cd.payAmount, options: Array.isArray(cd.options) ? cd.options : [],
+    channel: cd.channel || null,
+    inflowType: cd.inflowType || null,
+    reviewTypeLabel: cd.reviewTypeLabel || null,
+    reviewTypeMixed: !!cd.reviewTypeMixed,
+    reviewTypeMix: cd.reviewTypeMix || null,
+  };
+}
+
 function _tpAdvertiserLens(tp) {
   if (!tp || typeof tp !== 'object') return tp;
   const filled = (tp.sheetFilled == null) ? null : (Number(tp.sheetFilled) || 0);
