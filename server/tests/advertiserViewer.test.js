@@ -168,7 +168,12 @@ async function run() {
   ok('★ 원본(sot) 배지는 광고주에게 안 나간다(내부 용어)', /STATE\.role==='advertiser'\?'':sotBadge/.test(src));
   ok('정산 카드는 광고주 상단 조합 안에서 항상 펼침',
     /<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div>/.test(src));
-  ok('요약 스트립 광고주 = 시작일 칸(담당자 표기 없음)', /\[\['상품',d\.productOption\|\|m\.campaignName\|\|'—'\],\['시작일'/.test(src));
+  /* ⚠ 2026-08-23: 광고주 전용 4줄 요약(상품·시작일·구매시간·배송)은 폐기됐다 — 이제 내부와
+     **같은 작업 조건 카드**를 쓴다(일정·구매시간이 그 카드의 행으로 들어갔다).
+     ★ 담당자(내부 실명)를 안 붙인다는 규율은 그대로다 — 카드 폴백에서 고정한다. */
+  ok('★ 광고주 전용 4줄 요약 사본은 없다(카드 한 벌)',
+    !/\[\['상품',d\.productOption\|\|m\.campaignName\|\|'—'\],\['시작일'/.test(src));
+  ok('★ 담당자 실명은 광고주에게 안 붙는다(카드 폴백)', /\(!isAdv&&m\.manager\)/.test(src));
   ok('★ 정산 비공개·미연결은 광고주에게 같은 안내 한 줄(계약 연결·토글 용어 미노출)',
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
   ok('정산 카드 6칸(_advSettleFields): 견적서/계산서/총비용/입금액/입금일/남은 입금액',
@@ -307,7 +312,7 @@ async function run() {
      검사 의미는 그대로 — **행(tr)에 data-rid 가 실린다**(셀에만 있으면 tr 단위 선택이 죽는다). */
   ok('프론트: 그리드 행에 data-rid(선택 키)가 실린다', /<tr[^>]* data-rid="\$\{esc\(r\.id\)\}"/.test(src));
 /* ★★ 업체 뷰어 상단도 **내부와 같은 3분할**(사용자 확정 2026-08-23) — 종전 세로 스택 +
-   표 옆 세로 레일은 폐기했다. 다른 것은 작업 조건 카드의 **내용**(업체는 4줄)과 정산 자리뿐. */
+   표 옆 세로 레일은 폐기했다. 이제 작업 조건 카드까지 한 벌이라, 다른 것은 정산 자리뿐이다. */
   ok('프론트: 광고주 상세도 같은 3분할 + 정산 카드 + 표(중복 rvPane 없음)',
     /<section class="advwork">\$\{summaryStrip\(wd,d,m,c\)\}<div class="advsettle setldetail" id="setldetail"><div id="settlementsec"><\/div><\/div><div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><\/div><\/section>/.test(src)
     && !/class="advtop"/.test(src)
@@ -324,8 +329,45 @@ async function run() {
     /function _rvRender\(\)\{\s*const pane=\$\('#rvPane'\); if\(!pane\) return;\s*return _rvRender2\(pane\);\s*\}/.test(src)
     && !/rvmedia/.test(src) && !/rvasset/.test(src) && !/_RV_SLOT/.test(src)
     && !/rvmedia/.test(css) && !/rvasset/.test(css));
-  ok('★ 업체 뷰어도 작업 조건 카드 **내용은 종전 4줄**(10항목 조건표는 내부 전용)',
-    /const cond=isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건<\/div><dl class="tp3kv">\$\{kv\}<\/dl><\/div>`/.test(src));
+  /* ★★ 2026-08-23 사용자 확정: 업체 뷰어도 **같은 작업 조건 카드**를 쓴다(종전 4줄 요약 폐기).
+     무엇을 보여줄지는 **서버 렌즈**(`_condAdvertiserLens`)가 정하고 — 리뷰비·입금명·다계정·
+     현금영수증·내부 식별자는 응답에 아예 없다 — 화면은 광고주에게 셋만 다르게 한다:
+     ㉮ 지정 10행만 ㉯ [미설정](내부 창구 버튼) 대신 「—」 ㉰ 발주 줄 미표시(역할 게이트가 없다). */
+  ok('★ 업체 뷰어도 작업 조건 카드는 **한 벌**(광고주 전용 4줄 사본 0)',
+    /const cond=_condCardHtml\(wd,d,m\);/.test(src)
+    && !/isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건/.test(src));
+  ok('★ 광고주에게는 발주 줄(작업오더 제목·상태·[원문])을 그리지 않는다 — 그 줄엔 역할 게이트가 없다',
+    /const woRows=isAdv\?'':`\$\{_woUnlinkedRow\(wd\)\}\$\{_woLinkedRow\(wd\)\}`/.test(src)
+    && !/\$\{_woUnlinkedRow\(wd\)\}\$\{_woLinkedRow\(wd\)\}<\/div>`/.test(src));
+  ok('★ 광고주에게는 [미설정] 배지를 그리지 않는다(내부 창구를 여는 버튼이다)',
+    /if\(isAdv\) return '<dd><span class="cnna">—<\/span><\/dd>';/.test(src));
+  ok('★ 광고주 폴백(요약 없음)에도 담당자 실명을 붙이지 않는다',
+    /\(!isAdv&&m\.manager\)/.test(src));
+  ok('★ 지정 10행만 — 다계정·현금영수증·리뷰비·입금명은 화면에서도 뺀다', (() => {
+    const m = src.match(/\.filter\(\(\[k\]\)=>!isAdv\|\|\[([^\]]*)\]\.includes\(k\)\)/);
+    if (!m) return false;
+    const keys = m[1];
+    return /'@murl'/.test(keys) && /'@sched'/.test(keys) && /'@time'/.test(keys)
+      && /'총건수'/.test(keys) && /'일건수'/.test(keys) && /'@pay'/.test(keys)
+      && /'구매채널'/.test(keys) && /'유입방식'/.test(keys) && /'리뷰타입'/.test(keys)
+      && !/'리뷰비'/.test(keys) && !/'입금명'/.test(keys)
+      && !/'다계정'/.test(keys) && !/'현금영수증'/.test(keys);
+  })());
+  /* ★★ 서버 렌즈 = **화이트리스트 재구성**(스프레드 금지) — 나중에 조건 요약에 필드가 늘면
+     스프레드는 그것을 조용히 광고주에게 흘린다(`_tpAdvertiserLens` 와 같은 규율). */
+  ok('★ 서버 렌즈가 리뷰비·입금명·내부 식별자를 폐기한다', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    const i = SVC.indexOf('function _condAdvertiserLens(');
+    const blk = SVC.slice(i, SVC.indexOf('\n}', i));
+    return i > 0 && !/\.\.\.cd/.test(blk)
+      && !/reviewFee|feeSource|depositName|multiAccount|cashReceipt|incomeType|slotsPinned/.test(blk)
+      && !/campaignId|workOrderId|campaignCount/.test(blk)
+      && /productName|productUrl|schedule|purchaseWindow|recruitTotal|dailyLimit|payAmount|channel|inflowType|reviewTypeLabel/.test(blk);
+  })());
+  ok('★ 광고주 분기가 그 렌즈를 거친다(날것 `_cond` 금지)', (() => {
+    const SVC = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8');
+    return /res\.condition = _condAdvertiserLens\(_cond\)/.test(SVC);
+  })());
   ok('★ 이미지 URL 은 bare API_BASE 로 만든다(window.API_BASE_URL 은 최상위 const 라 항상 undefined)', (() => {
     const i = src.indexOf('function _rvUrl(');
     const body = src.slice(i, i + 260);

@@ -62,7 +62,7 @@ t('★ 구매채널은 서버가 URL 로 추측하지 않는다(판정 단일 �
   !/coupang|smartstore|naver\.com/i.test(cond));
 t('★ 어떤 실패에도 throw 하지 않는다 — null 을 돌려주고 화면이 사유를 말한다',
   /catch \(e\)[\s\S]*return null;/.test(cond));
-t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광고주 미노출)', (() => {
+t('② condition 은 두 갈래 모두 같은 호출 1회를 재사용한다(cap 과 갈릴 수 없다)', (() => {
   /* ⚠ 2026-08-24: 총건수 초과 표시가 들어오며 `tabConditionSummary` 를 **루프 뒤 한 번** 부르고
      그 결과를 재사용하게 됐다(호출 2회면 cap 과 조건 카드가 갈릴 수 있다). 검사 의미는 그대로 —
      "condition 은 showEdits 안에서만 응답에 실린다" + 이제 **호출 1회**까지 함께 고정한다. */
@@ -76,13 +76,16 @@ t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광�
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
                              svc.indexOf("else if (role === 'advertiser') {") + 900);
+  /* ★★ 2026-08-23 사용자 확정: 업체 뷰어에도 같은 카드를 그린다 — 광고주 분기에도 `condition` 이
+     실리되 **반드시 `_condAdvertiserLens` 를 거쳐야** 한다(리뷰비·입금명·내부 식별자 폐기).
+     날것(`= _cond`)으로 실으면 그 순간 전부 샌다. */
+  if (!/res\.condition = _condAdvertiserLens\(_cond\)/.test(advBlock)) return false;
+  if (/res\.condition = _cond;/.test(advBlock)) return false;
   /* `res.condition` 이 몇 번 나오든(일정 등 파생 필드가 붙는다) **전부 showEdits 블록 안**이어야 한다.
      개수로 고정하면 필드가 늘 때마다 무관한 가드가 조용히 빨개진다. */
   const blockStart = svc.lastIndexOf('if (showEdits) {', i);
   const advStart = svc.indexOf("else if (role === 'advertiser') {");
-  const all = []; for (let k = svc.indexOf('res.condition'); k >= 0; k = svc.indexOf('res.condition', k + 1)) all.push(k);
-  return /if \(showEdits\) \{/.test(before) && !/res\.condition/.test(advBlock)
-    && all.length > 0 && all.every(k => k > blockStart && k < advStart);
+  return /if \(showEdits\) \{/.test(before) && blockStart > 0 && advStart > blockStart;
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
 
@@ -141,10 +144,13 @@ t('★ 정산은 별도 칸이 아니라 진행 현황 하단 구역 — #setlCe
   /class="setlin\$\{STATE\.settleOpen\?' open':''\}" id="setlCell" onclick="toggleSettleDetail\(\)"/.test(wd)
   && !/tp3col setl/.test(wd)
   && /\$\('#setlCell \.setlsummary'\)/.test(wd));
-t('★ 광고주 화면은 종전 4줄(.tp3kv) 그대로 — 10항목 조건표는 내부 전용', (() => {
+/* ★★ 작업 조건 카드는 **내부·업체 한 벌**(사용자 확정 2026-08-23) — 종전에는 광고주만 4줄 요약을
+   따로 그려 두 화면이 계속 어긋났다. 무엇을 보여줄지는 **서버 렌즈**가 정하고, 화면이 광고주에게
+   따로 하는 일은 셋뿐: 10행만 그린다 · [미설정] 대신 「—」 · 발주 줄을 안 그린다. */
+t('★ 작업 조건 카드는 내부·업체 한 벌(광고주 전용 4줄 사본 0)', (() => {
   const m = fnBody(wd, 'function summaryStrip(wd,d,m,c){');
-  return /isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건<\/div><dl class="tp3kv">/.test(m)
-    && /: _condCardHtml\(wd,d,m\)/.test(m);
+  return /const cond=_condCardHtml\(wd,d,m\);/.test(m)
+    && !/isAdv\s*\?\s*`<div class="tp3col"><div class="tp3t">작업 조건/.test(m);
 })());
 /* ⚠ 2026-08-19 사용자 확정: 진행 현황 폭을 작업 조건과 같게 맞추면서 2줄 배치의 근거
    (절반 폭 → 막대 26px)가 사라졌다. 게이지는 내부·광고주 **한 벌**로 되돌린다. */
@@ -372,8 +378,9 @@ t('★★ 입금명 순서 = 공고 → 탭(입금관리 campMemo→tabMemo 와 
    창구가 열리는 항목만 눌린다. 창구가 없으면 평범한 텍스트(죽은 버튼 금지). */
 /* ★ 존재 검사만 하면 **함수 첫 줄에 early return 을 넣은 변이**를 놓친다(실측) —
    게이트 호출이 곧바로 오는지(= 판정을 실제로 거치는지) 형태로 고정한다. */
+/* ⚠ 광고주 갈래가 앞에 한 줄 붙었다(창구 없음 → 평범한 텍스트) — 내부 동작은 그대로다. */
 t('★ 값이 있는 항목도 창구가 있으면 누를 수 있다(모양은 검은 글씨 그대로)',
-  /const val=\(html,kind\)=>\{\s*\n?\s*const g=_cndFixGate\(cd,kind\);/.test(cc)
+  /const val=\(html,kind\)=>\{[\s\S]{0,140}?const g=_cndFixGate\(cd,kind\);/.test(cc)
   && /class="cndval"[^`]*onclick="_cndFix\('\$\{kind\}'\)"/.test(cc)
   && /: `<dd>\$\{html\}<\/dd>`/.test(cc)
   && /\.cndval\{[^}]*color:var\(--ink\)/.test(wd));
