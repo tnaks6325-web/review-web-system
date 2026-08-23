@@ -1015,6 +1015,25 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
+// ── 시트 전체 소유 → 작업(탭) 단위 펼치기 (사용자 확정 2026-08-23 — 업체 지정은 작업 단위 하나).
+//   ★ 미리보기 기본(confirm !== true 면 쓰기 0) · staff 는 자기 담당(inad_pm) 업체만(서비스와 이중 게이트).
+router.post('/ownership/expand', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { advertiserId, sheetId, confirm } = req.body || {};
+    if (advertiserId && !(await _ownershipWriteAllowed(req, advertiserId))) {
+      return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 변경할 수 없습니다.' });
+    }
+    const staffName = _role(req) === 'staff' ? String((req.admin && req.admin.name) || '').trim() : null;
+    if (_role(req) === 'staff' && !staffName) {
+      return res.status(403).json({ ok: false, error: '로그인 정보에 담당자명이 없습니다.' });
+    }
+    res.json(await svc.expandSheetOwnerships({
+      advertiserId: advertiserId || null, sheetId: sheetId || null,
+      confirm: confirm === true, by: _by(req), staffName,
+    }));
+  } catch (err) { next(err); }
+});
+
 // ── 작업(소유) 이관 — 시트 전체/특정 탭의 소유를 다른 거래처로. ★ 내부 담당자(master/admin/staff):
 //    사용자 확정(2026-08)으로 AE 도 업체 간 재배치를 한다(광고주는 차단). 대상 검증은 서비스가
 //    fail-closed 로 한다(업체 미존재 404 · 종료 거래처 거부 · 필수값 없으면 쓰기 0 + ROLLBACK). ──

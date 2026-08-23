@@ -543,8 +543,9 @@ console.log('\n[D] 미리보기 — 쓰기 0 · fail-closed');
     const addEnd = fh.indexOf('function _ovmAfterAddMount(');
     ok('가드 경계가 실재한다(슬라이스가 파일 끝까지 번지지 않는다)', addStart > 0 && addEnd > addStart);
     const addBlk = fh.slice(addStart, addEnd);
-    ok('★★ 거래처 등록 창에 "찾는 시트가 목록에 없나요?" 안내 + 진입점',
-      /찾는 시트가 목록에 없나요/.test(addBlk) && /openSheetImport\(''\)/.test(addBlk));
+    // ★ 목록 단위가 시트 → 작업(작업보드)으로 바뀌어(2026-08-23 사용자 확정) 제목도 "찾는 작업…" 이다.
+    ok('★★ 거래처 등록 창에 "찾는 작업이 목록에 없나요?" 안내 + 진입점',
+      /찾는 작업이 목록에 없나요/.test(addBlk) && /openSheetImport\(''\)/.test(addBlk));
     ok('★ 그 안내도 관리자에게만(서버 게이트와 1:1)', /isAdmin\?`<div class="sect">[\s\S]{0,400}openSheetImport/.test(addBlk));
     ok('★ 4단계 함수가 모두 있다',
       ['openSheetImport', '_siPreview', '_siRun', '_siRevert', '_siClose'].every(f => fh.indexOf('function ' + f) >= 0));
