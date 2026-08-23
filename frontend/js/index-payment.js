@@ -738,7 +738,7 @@ async function loadOrderMirrorStatus() {
   }
 }
 
-// ── 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체) ──
+// ── 리뷰 캡처 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체) ──
 function _escReviewEdit(s){ const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
 
 // 현재 렌더된 수정요청(id→row) — 비교보기 모달에서 old/new 파일ID·메타 조회용
@@ -1570,7 +1570,7 @@ function connectSSE() {
             if (typeof loadWorkOrders === 'function') { try { loadWorkOrders(); } catch(_) {} }
             if (typeof loadDashWorkOrders === 'function') { try { loadDashWorkOrders(); } catch(_) {} }
           }
-          // ★ 리뷰 이미지 수정요청 발생/처리 → 관리자 위젯 즉시 갱신
+          // ★ 리뷰 캡처 수정요청 발생/처리 → 관리자 위젯 즉시 갱신
           if (evtType === 'review_edit_request' && typeof loadReviewEditRequests === 'function') {
             try { loadReviewEditRequests(); } catch(_) {}
           }

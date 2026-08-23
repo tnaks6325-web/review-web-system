@@ -6,7 +6,7 @@
  *   무시트 탭의 `review_index` 는 지우고 작업표에서 다시 만들어지므로,
  *   시스템이 그 표에 직접 쓴 값은 **주문 한 건만 더 들어와도 증발**한다.
  *   · 시트에도 칸이 있는 값(리뷰제출·입금) → **작업표 칸에 쓴다**(진실원본 일원화)
- *   · 시트에 칸이 없는 값(대표 리뷰 이미지) → **재생성 시 보존한다**
+ *   · 시트에 칸이 없는 값(대표 리뷰 캡처) → **재생성 시 보존한다**
  */
 'use strict';
 const fs = require('fs');
@@ -121,7 +121,7 @@ console.log('\n[A] 무시트 상태 표시는 작업표 칸에 쓴다');
 }
 
 /* ══════════════ B. 재생성 시 시스템 전용 값 보존 ══════════════ */
-console.log('\n[B] 대표 리뷰 이미지는 재생성에도 살아남는다');
+console.log('\n[B] 대표 리뷰 캡처는 재생성에도 살아남는다');
 {
   const src = noLineComments(srv('src/services/sheetlessLedger.service.js'));
   const cols = ['review_file_id', 'review_file_url', 'review_file_name', 'review_file_count', 'review_file_at'];

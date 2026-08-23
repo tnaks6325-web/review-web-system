@@ -267,9 +267,9 @@
   .adtodo .tgo{font-size:10.5px;color:var(--accent);font-weight:700;flex:none}
   .adtodo.none{cursor:default;justify-content:center;color:var(--muted);font-size:12px;background:var(--card2)}
   .adtodo.none:hover{border-color:var(--line);background:var(--card2)}
-  /* ── 업체 뷰어: 표 위 2열 정보 조합의 리뷰 이미지 미리보기 ──
+  /* ── 업체 뷰어: 표 위 2열 정보 조합의 리뷰 캡처 미리보기 ──
      왼쪽은 작업 조건·진행 현황·정산 현황을 순서대로 두고, 기존 진행 현황 자리는 리뷰가 쓴다.
-     리뷰 이미지는 고정 높이의 스크롤 영역에서만 움직여 상단 조합 높이를 밀어내지 않는다.
+     리뷰 캡처는 고정 높이의 스크롤 영역에서만 움직여 상단 조합 높이를 밀어내지 않는다.
      행 클릭 또는 ↑↓ 로 선택이 이동하며 그 행의 리뷰 캡처를 즉시 보여준다. */
   .advwork{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(420px,1fr);grid-template-areas:"top preview" "tools preview" "grid grid";gap:12px;align-items:stretch;max-width:1380px}
   .advtop{grid-area:top;display:grid;grid-template-columns:1fr;grid-template-areas:"condition" "progress" "settlement";gap:12px}
@@ -303,7 +303,7 @@
   .rvplitem .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rvplitem .mk{text-align:center;font-size:12px;line-height:1}.rvplitem .mk.y{color:var(--safe)}.rvplitem .mk.n{color:var(--line2)}
   .rvplhd .cnt{margin-left:auto;font-weight:800;color:var(--muted)}
-  /* ★★ 무대는 좌우 2분할 — 구매 캡처와 리뷰 이미지를 **동시에** 본다(대조가 이 팝업의 목적) */
+  /* ★★ 무대는 좌우 2분할 — 구매 캡처와 리뷰 캡처를 **동시에** 본다(대조가 이 팝업의 목적) */
   .rvpstage{position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;padding:40px 16px 14px;background:var(--card)}
   .rvpcols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .rvpc{min-width:0;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--card2);padding:9px}
@@ -1681,7 +1681,7 @@
   .setlin:hover{opacity:.9}
   .setlin .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s}
   .setlin.open .caret{transform:rotate(180deg)}
-  /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰이미지, 칸마다 한 장 */
+  /* ③ 제출물 미리보기 — 좌 구매캡처 / 우 리뷰캡처, 칸마다 한 장 */
   .rv2{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:9px}
   /* ★ 미리보기 칸은 **높이를 요구하지 않는다** — 내용은 절대배치 레이어(.rvfill) 안에서만 흐르므로
      행 높이는 왼쪽 두 카드가 정한다(min-height 330 이 바닥). padding 은 레이어가 갖는다. */
@@ -1735,6 +1735,11 @@
   .rvstat .s .nm{margin-left:auto;font-size:11.5px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
   .rvstat .s .nm small{font-weight:600;color:var(--faint)}
   .rvstat .s.unk .nm{color:var(--faint)}
+  /* ★ 폴더 바로가기(요약 줄·칸 제목) — 표 윗줄 버튼을 대체한 자리라 "눌린다"가 보여야 한다. */
+  .rvstat .s.lk,.rv2 .rv2h.lk{cursor:pointer}
+  .rvstat .s.lk:hover{background:var(--chip,#eef4ff);border-color:var(--p,#2456c9)}
+  .rv2 .rv2h.lk:hover{color:var(--p,#2456c9)}
+  .rvstat .s .ext,.rv2 .rv2h .ext{opacity:.55;font-weight:700}
   .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
   /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
   /* 헤더 클릭 필터: ▾ 아이콘 제거, 컬럼명 자체가 트리거. 호버=깔때기 힌트(절대배치=폭 무증가) · 필터중=밑줄+색 · 정렬중=화살표 */
@@ -5292,21 +5297,34 @@ function _folMat(t,src){
   if(!t.stats) return {known:false,why:'수치를 불러오지 못해 폴더 정보를 알 수 없습니다(새로고침해 주세요)'};
   return {known:true,cap:t.stats.captureFolderUrl,rev:t.stats.folderUrl,cr:t.stats.cashReceipt,crNote:t.stats.cashReceiptNote};
 }
-function _folBtnsInner(t,i,src,big){
+/* ★ 폴더 판정(열 수 있는가·왜 못 여는가)은 `_folState` 한 곳 — 버튼도, 제출물 미리보기의
+   칸 제목도 같은 값을 본다. 사본을 두면 "버튼은 비활성인데 제목은 눌린다"로 갈린다. */
+function _folState(t,src,kind){
   const m=_folMat(t,src);
   const tipNoFolder='아직 폴더가 생성되지 않았습니다 — 첫 캡처 제출(또는 스마트빌드 주기) 시 자동 생성됩니다';
+  if(kind==='capture') return {on:m.known&&_folUrlOk(m.cap),tip:m.known?(_folUrlOk(m.cap)?'구매캡처 폴더 열기':tipNoFolder):m.why};
+  if(kind==='review')  return {on:m.known&&_folUrlOk(m.rev),tip:m.known?(_folUrlOk(m.rev)?'리뷰캡처 폴더 열기':tipNoFolder):m.why};
+  return {on:m.known&&m.cr===true,
+    tip:!m.known?m.why
+      :(m.cr===true?'현금영수증 폴더 열기'
+        :(m.cr===undefined?'현금영수증 대상 여부를 알 수 없습니다(서버 응답에 값이 없습니다)'
+          // 오설정(현영인데 슬롯에 현금영수증 칸 없음)은 서버가 준 문장을 그대로 — '대상 아님'으로 뭉개지 않는다.
+          :(m.crNote||'현금영수증 발행 대상 작업이 아닙니다'))),
+    cr:m.cr,known:m.known};
+}
+/* kinds = 그릴 버튼 목록(기본 3종). 작업보드 상단은 구매·리뷰를 제출물 미리보기 칸 제목으로
+   옮겼으므로 현영만 남긴다 — 목록·업체관리(3종)와 **같은 빌더**를 쓰고 목록만 고른다. */
+function _folBtnsInner(t,i,src,big,kinds){
   const arg=src&&src!=='home'?`,'${src}'`:'';
-  const b=(kind,label,on,tip)=>on
-    ? `<button class="wbl-b" onclick="event.stopPropagation();openTabFolder(${i},'${kind}'${arg})" title="${esc(tip)}">${label}${big?' ↗':''}</button>`
-    : `<button class="wbl-b dis" disabled onclick="event.stopPropagation()" title="${esc(m.known?tip:m.why)}">${label}</button>`;
-  const L=big?['🛒 구매캡처','📸 리뷰캡처','🧾 현금영수증']:['구매','리뷰','현영'];
-  return b('capture',L[0],m.known&&_folUrlOk(m.cap),_folUrlOk(m.cap)?'구매캡처 폴더 열기':tipNoFolder)
-    + b('review',L[1],m.known&&_folUrlOk(m.rev),_folUrlOk(m.rev)?'리뷰 폴더 열기':tipNoFolder)
-    + b('receipt',L[2],m.known&&m.cr===true,
-        m.cr===true?'현금영수증 폴더 열기'
-          :(m.cr===undefined?'현금영수증 대상 여부를 알 수 없습니다(서버 응답에 값이 없습니다)'
-            // 오설정(현영인데 슬롯에 현금영수증 칸 없음)은 서버가 준 문장을 그대로 — '대상 아님'으로 뭉개지 않는다.
-            :(m.crNote||'현금영수증 발행 대상 작업이 아닙니다')));
+  const b=(kind,label)=>{
+    const st=_folState(t,src,kind);
+    return st.on
+      ? `<button class="wbl-b" onclick="event.stopPropagation();openTabFolder(${i},'${kind}'${arg})" title="${esc(st.tip)}">${label}${big?' ↗':''}</button>`
+      : `<button class="wbl-b dis" disabled onclick="event.stopPropagation()" title="${esc(st.tip)}">${label}</button>`;
+  };
+  const L=big?{capture:'🛒 구매캡처',review:'📸 리뷰캡처',receipt:'🧾 현금영수증'}
+             :{capture:'구매',review:'리뷰',receipt:'현영'};
+  return (kinds||['capture','review','receipt']).map(k=>b(k,L[k])).join('');
 }
 function _folBtnsHtml(t,i,src){ return `<span class="wbl-fol">${_folBtnsInner(t,i,src||'home',false)}</span>`; }
 /* 작업보드 상단(툴바 오른쪽) — 작업이 **하나로 특정된** 자리라 라벨을 다 쓰는 큰 버튼을 쓴다.
@@ -5314,7 +5332,13 @@ function _folBtnsHtml(t,i,src){ return `<span class="wbl-fol">${_folBtnsInner(t,
      internalMiddleware 라 광고주가 누르면 403 막다른 길이 된다. */
 function _folBarHtml(){
   if(STATE.role==='advertiser'||!STATE.cur) return '';
-  return `<span class="wbl-fol folbig" id="folBar" style="margin-left:auto">${_folBtnsInner(STATE.cur,0,'cur',true)}</span>`;
+  /* ★★ 구매캡처·리뷰캡처 바로가기는 **제출물 미리보기의 칸 제목**으로 옮겼다(사용자 확정 2026-08-21)
+       — 같은 폴더로 가는 창구를 두 곳에 두면 한쪽만 판정이 바뀌었을 때 화면이 갈린다.
+     ★ 남는 것은 현금영수증 하나뿐이고, **대상이 아님이 확정된 작업에서는 줄 자체를 그리지 않는다**
+       (비활성 버튼 하나만 덩그러니 남는 노이즈 제거). '모름'(로딩 중·조회 실패)은 그리고 사유를 말한다. */
+  const st=_folState(STATE.cur,'cur','receipt');
+  if(st.known&&st.cr!==true) return `<span class="wbl-fol folbig" id="folBar" style="margin-left:auto"></span>`;
+  return `<span class="wbl-fol folbig" id="folBar" style="margin-left:auto">${_folBtnsInner(STATE.cur,0,'cur',true,['receipt'])}</span>`;
 }
 /* 작업보드용 폴더 재료 지연조회 — 그 탭 한 줄만 읽는 가벼운 경로(kind=info).
    ★ 홈처럼 stats=1 을 부르지 않는다(review_index 전체 GROUP BY 를 탭 전환마다 돌리지 않는다).
@@ -5339,7 +5363,10 @@ async function _folEnsureCur(){
     t._folLoad=false;
     // ★ 버튼 묶음만 갈아치운다(그리드 전체 재렌더 금지 — 편집 중 셀·검색 하이라이트를 잃는다).
     //   그 사이 다른 작업으로 옮겼으면 아무것도 하지 않는다(stale 렌더 방지).
-    const el=$('#folBar'); if(el&&STATE.cur===t) el.innerHTML=_folBtnsInner(t,0,'cur',true);
+    const el=$('#folBar'); if(el&&STATE.cur===t){
+      const st=_folState(t,'cur','receipt');
+      el.innerHTML=(st.known&&st.cr!==true)?'':_folBtnsInner(t,0,'cur',true,['receipt']);
+    }
   }
 }
 // 폴더 URL 은 Drive 호스트일 때만 연다(시트/DB 를 거쳐 온 문자열을 그대로 새창에 넣지 않는다).
@@ -5834,7 +5861,7 @@ function renderWorkdesk(wd){
   if(document.getElementById('rvPane')) _rvBoot(STATE.cur);
 }
 
-// ══ 업체 뷰어 — 리뷰 이미지 미리보기(표 위 정보 조합 패널) ═══════════════════════════
+// ══ 업체 뷰어 — 리뷰 캡처 미리보기(표 위 정보 조합 패널) ═══════════════════════════
 //   행 클릭 또는 ↑↓ 키로 선택이 이동하고 그 행의 리뷰 캡처를 즉시 보여준다.
 //   ★ 이미지 자체는 기존 무인증 프록시 /api/drive/image/<id> 가 스트리밍 — 파일ID만 받아 온다.
 //   ★ window.API_BASE_URL 은 존재하지 않는다(최상위 const) — 이 파일의 관용구는 bare API_BASE.
@@ -5853,7 +5880,7 @@ function _rvPeople(){
 /* ★ 분모 단일 출처 — 상단 참여자 게이지와 **같은 값**. 여기서 따로 세면
    "게이지는 500 인데 미리보기는 512" 로 갈린다. 구버전 백엔드(필드 부재)는 줄 수로 접는다. */
 function _rvFilledOf(c){ c=c||{}; return (c.filled==null)?(+c.total||0):(+c.filled||0); }
-/* ★ 제출현황 — 몇 줄이 구매 캡처를/리뷰 이미지를 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
+/* ★ 제출현황 — 몇 줄이 구매 캡처를/리뷰 캡처를 냈는가. 갈래 판정은 `_rvKindFiles` 한 곳.
    ★ 조회 실패(rvImgs===null)·분모 미상은 **`?`** 로 둔다(0 으로 꾸미지 않는다). */
 function _rvStatHtml(){
   const den=_rvFilledOf(STATE.wd&&STATE.wd.counts);
@@ -5866,9 +5893,17 @@ function _rvStatHtml(){
       if(_rvKindFiles(f,'rev').length) rev++;
     }
   }
-  const one=(ic,lb,n)=>`<div class="s${n==null?' unk':''}"><span class="ic">${ic}</span><span class="lb">${lb}</span>`+
-    `<span class="nm">${n==null?'?':n}<small> / ${den||'?'}</small></span></div>`;
-  return `<div class="rvstat">${one('🛒','구매 캡처',cap)}${one('📷','리뷰 이미지',rev)}</div>`;
+  /* ★★ 이 줄이 곧 **폴더 바로가기**다(사용자 확정 2026-08-21) — 표 윗줄에 있던
+     [🛒 구매캡처 ↗][📸 리뷰캡처 ↗] 버튼을 여기로 옮겼다. 판정은 `_folState` 한 곳이라
+     버튼 시절과 열리는 폴더·비활성 사유가 같다. 광고주는 그리지 않는다(/tab-folders 는 내부 전용). */
+  const one=(ic,lb,n,kind)=>{
+    const st=(STATE.role!=='advertiser'&&STATE.cur)?_folState(STATE.cur,'cur',kind):null;
+    const cls=`s${n==null?' unk':''}${st&&st.on?' lk':''}`;
+    const at=st?` title="${esc(st.on?st.tip:('폴더를 열 수 없습니다 — '+st.tip))}"${st.on?` onclick="_rvOpenFolder('${kind}')"`:''}`:'';
+    return `<div class="${cls}"${at}><span class="ic">${ic}</span><span class="lb">${lb}${st&&st.on?'<span class="ext"> ↗</span>':''}</span>`+
+      `<span class="nm">${n==null?'?':n}<small> / ${den||'?'}</small></span></div>`;
+  };
+  return `<div class="rvstat">${one('🛒','구매 캡처',cap,'capture')}${one('📷','리뷰 캡처',rev,'review')}</div>`;
 }
 async function _rvBoot(t){
   _rvPopClose();
@@ -5930,19 +5965,19 @@ function _rvReapply(){
 }
 function _rvRender(){
   const pane=$('#rvPane'); if(!pane) return;
-  if(STATE.role!=='advertiser') return _rvRender2(pane);   // 내부 = 좌 구매캡처 / 우 리뷰이미지 두 칸
+  if(STATE.role!=='advertiser') return _rvRender2(pane);   // 내부 = 좌 구매캡처 / 우 리뷰캡처 두 칸
   const hd=`<div class="rvhd">리뷰 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span></div>`;
   if(STATE.rvImgs===null&&!STATE.rvSel){ pane.innerHTML=hd+`<div class="rvnone"><b>불러오는 중…</b></div>`; return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
-  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 리뷰어의 리뷰 이미지가 여기 표시됩니다.</span></div>`; return; }
+  if(!r){ pane.innerHTML=hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 리뷰어의 리뷰 캡처가 여기 표시됩니다.</span></div>`; return; }
   const who=_rvWho(r);
   const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
-  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>리뷰 이미지를 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
+  if(STATE.rvImgs===null){ pane.innerHTML=hd+who2+`<div class="rvnone"><b>리뷰 캡처를 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`; return; }
   const files=(STATE.rvImgs&&STATE.rvImgs[String(r.seq)])||[];
   if(!files.length){
     // 시트에 제출 표시가 있는데 이미지가 없는 경우와, 아예 미제출인 경우를 구분해 알린다(둘 다 사실대로).
     pane.innerHTML=hd+who2+(r.submitted
-      ? `<div class="rvnone"><b>리뷰 이미지 미등록</b><span>시트에는 제출로 표시되어 있지만 캡처 이미지가 등록되지 않았습니다.</span></div>`
+      ? `<div class="rvnone"><b>리뷰 캡처 미등록</b><span>시트에는 제출로 표시되어 있지만 캡처 이미지가 등록되지 않았습니다.</span></div>`
       : `<div class="rvnone warn"><b>리뷰 미작성 · 미제출</b><span>아직 이 리뷰어의 리뷰가 제출되지 않았습니다.</span></div>`);
     return;
   }
@@ -5952,11 +5987,11 @@ function _rvRender(){
     const slot=f.slot||'review';
     const lbl=(files.some(x=>(x.slot||'review')!==slot)&&slot!==lastSlot)?`<div class="rvslot">${esc(_RV_SLOT[slot]||slot)}</div>`:'';
     lastSlot=slot;
-    return `<div class="rvasset">${lbl}<img class="rvimg" src="${esc(u)}" alt="리뷰 이미지" loading="lazy" data-rid="${esc(r.id)}" data-fidx="${i}" onclick="_rvOpenByImage(this)"></div>`;
+    return `<div class="rvasset">${lbl}<img class="rvimg" src="${esc(u)}" alt="리뷰 캡처" loading="lazy" data-rid="${esc(r.id)}" data-fidx="${i}" onclick="_rvOpenByImage(this)"></div>`;
   }).join('');
   pane.innerHTML=hd+who2+(imgs?`<div class="rvmedia">${imgs}</div>`:`<div class="rvnone"><b>표시할 이미지가 없습니다</b></div>`);
 }
-/* ══ 내부 화면 제출물 미리보기 — 좌 🛒 구매 캡처 / 우 📷 리뷰 이미지, 칸마다 **한 장씩** ══
+/* ══ 내부 화면 제출물 미리보기 — 좌 🛒 구매 캡처 / 우 📷 리뷰 캡처, 칸마다 **한 장씩** ══
    ★ 여러 장을 세로로 쌓으면 한 장이 작아지고 스크롤이 생겨 "나란히 대조"라는 목적이 무너진다
      → 칸을 꽉 채워 한 장만 보이고, 2장 이상이면 아래 넘김 줄(‹ 1/2 ›)로 바꿔 본다.
    ★ 넘김 줄은 1장일 때도 **자리를 비워 둔다**(visibility) — 없애면 두 칸의 이미지 높이가 어긋난다.
@@ -5975,7 +6010,7 @@ function _rvRender2(pane){
   const hd=`<div class="rvhd tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">제출물 미리보기<span class="rvsub">행 클릭 · ↑↓ 이동</span><span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+_rvStatHtml();
   if(STATE.rvImgs===null&&!STATE.rvSel){ _rvFill(pane, hd+`<div class="rvnone"><b>불러오는 중…</b></div>`); return; }
   const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(STATE.rvSel));
-  if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 이미지가 여기 표시됩니다.</span></div>`); return; }
+  if(!r){ _rvFill(pane, hd+`<div class="rvnone"><b>행을 선택하세요</b><span>표의 행을 클릭하거나 ↑↓ 키로 이동하면 그 줄의 구매 캡처·리뷰 캡처가 여기 표시됩니다.</span></div>`); return; }
   const who=_rvWho(r);
   const who2=`<div class="rvwho">${esc(who||'—')}<span>#${esc(r.seq)}</span></div>`;
   if(STATE.rvImgs===null){ _rvFill(pane, hd+who2+`<div class="rvnone"><b>제출물을 불러오지 못했습니다</b><span>잠시 후 다시 시도해 주세요.</span></div>`); return; }
@@ -5993,12 +6028,16 @@ function _rvRender2(pane){
           `<span>${i+1} / ${n}</span>`+
           `<button type="button" class="pgb"${i===n-1?' disabled':''} onclick="_rvStep('${kind}',1,${n})">›</button></div>`
       : `<div class="rvempty${warn?' warn':''}"><b>${esc(emptyB)}</b><span>${esc(emptyS)}</span></div>`;
-    return `<div class="rv2c"><div class="rv2h">${icon} ${esc(title)}<span class="cnt">${n}</span></div><div class="rv2b">${body}</div></div>`;
+    /* 칸 제목도 같은 폴더 바로가기(요약 줄과 **같은 판정**) — 사용자가 어느 쪽을 눌러도 열린다. */
+    const fk=kind==='cap'?'capture':'review';
+    const st=(STATE.role!=='advertiser'&&STATE.cur)?_folState(STATE.cur,'cur',fk):null;
+    const hAt=st?` title="${esc(st.on?st.tip:('폴더를 열 수 없습니다 — '+st.tip))}"${st.on?` onclick="_rvOpenFolder('${fk}')"`:''}`:'';
+    return `<div class="rv2c"><div class="rv2h${st&&st.on?' lk':''}"${hAt}>${icon} ${esc(title)}${st&&st.on?'<span class="ext"> ↗</span>':''}<span class="cnt">${n}</span></div><div class="rv2b">${body}</div></div>`;
   };
   const left=col('cap','🛒','구매 캡처',
     r.submitted?'캡처 없음':'미제출',
     r.submitted?'구매 캡처가 등록되지 않았습니다.':'아직 구매 캡처가 제출되지 않았습니다.', !r.submitted);
-  const right=col('rev','📷','리뷰 이미지',
+  const right=col('rev','📷','리뷰 캡처',
     r.submitted?'이미지 미등록':'리뷰 미제출',
     r.submitted?'제출 표시는 있으나 캡처가 등록되지 않았습니다.':'아직 리뷰가 제출되지 않았습니다.', !r.submitted);
   _rvFill(pane, hd+who2+`<div class="rv2">${left}${right}</div>`);
@@ -6008,6 +6047,9 @@ function _rvRender2(pane){
    grid 행 높이를 정해 **상단 카드가 화면 밖까지 늘어난다**(실사용 신고). 레이어를 두면
    행 높이는 왼쪽 두 카드가 정하고, 그 안에서 캡처가 폭에 맞춰 축소되며 세로로 스크롤된다.
    ★ 광고주 뷰어(_rvRender)는 세로 레일이라 종전 그대로 — 이 래퍼는 내부 화면 전용이다. */
+/* 제출물 미리보기 → 폴더 열기. 실행부는 기존 `openTabFolder` 하나(새 경로·사본 0).
+   ★ 지금 열려 있는 작업 한 건이라 인덱스는 항상 0/'cur'. */
+function _rvOpenFolder(kind){ if(STATE.role==='advertiser'||!STATE.cur) return; openTabFolder(0,kind,'cur'); }
 function _rvFill(pane, html){ pane.innerHTML=`<div class="rvfill">${html}</div>`; }
 function _rvOpenByImage(el){ _rvOpen(el&&el.dataset.rid, +(el&&el.dataset.fidx||0)); }
 /* 팝업의 칸별 넘김 위치. 사람을 바꾸면 초기화한다(다른 사람의 2번째 장으로 튀지 않게). */
@@ -6029,7 +6071,7 @@ function _rvPopClose(){ STATE.rvPop=null; const ov=document.getElementById('rvpo
 /* ★★ 무대 한 칸 — 갈래 판정은 `_rvKindFiles` 단일 출처(패널 `_rvRender2` 와 같은 함수).
    사본을 두면 "패널은 1장인데 팝업은 0장" 으로 갈린다. */
 const _RV_POP_COL={cap:['🛒','구매 캡처','미제출','아직 구매 캡처가 제출되지 않았습니다.'],
-                   rev:['📷','리뷰 이미지','리뷰 미제출','아직 리뷰 이미지가 제출되지 않았습니다.']};
+                   rev:['📷','리뷰 캡처','리뷰 미제출','아직 리뷰 캡처가 제출되지 않았습니다.']};
 function _rvPopCol(kind,files){
   const m=_RV_POP_COL[kind], list=_rvKindFiles(files,kind), n=list.length, i2=_rvPopIdx();
   const i=Math.min(i2[kind]||0,Math.max(0,n-1)); i2[kind]=i;
@@ -8881,7 +8923,7 @@ async function _manualReviewSubmit(){
     files=await Promise.all(state.files.map(async f=>({data:await _manualReviewB64(f),mimeType:f.type||'image/png',name:f.name||'review.png'})));
     const up=await api('/api/image/review-upload',{method:'POST',body:JSON.stringify({sheetId:state.t.sheetId,tabName:state.t.tabName,reviewerName:state.row.name||'',campaignName:state.t.tabName,rowIndex:state.row.seq,submitCol:String(state.field||'').slice(4),slotKey:'review',files})});
     fileIds=(up&&up.files||[]).map(f=>f&&f.fileId).filter(Boolean);
-    if(!up||!up.ok||fileIds.length!==files.length) throw new Error((up&&up.error)||'리뷰 이미지 업로드에 실패했습니다.');
+    if(!up||!up.ok||fileIds.length!==files.length) throw new Error((up&&up.error)||'리뷰 캡처 업로드에 실패했습니다.');
   }catch(e){
     if(_manualReviewState){ _manualReviewState.saving=false; _manualReviewState.err=(e&&e.message)?e.message:'처리에 실패했습니다.'; _manualReviewRender(); }
     return;
@@ -12635,8 +12677,8 @@ function _reRenderReviewPopup(){
     <header class="repopup-head"><div class="repopup-title"><b id="rePopupTitle">C/S · 이미지 교체요청</b><span>원본과 변경 요청 이미지를 대조합니다.</span></div>
       <div class="repopup-nav" aria-label="교체요청 이동"><button class="repopup-btn" type="button" onclick="_reMoveReviewPopup(-1)" ${prev}>이전 요청</button><b>${_RE_POPUP.index+1} / ${_RE_POPUP.rows.length}</b><button class="repopup-btn" type="button" onclick="_reMoveReviewPopup(1)" ${next}>다음 요청</button></div>
       <button class="repopup-btn repopup-close" type="button" onclick="_reCloseReviewPopup()">닫기</button></header>
-    <div class="repopup-body"><main class="repopup-main"><section class="repopup-summary"><div><h2>${product}</h2><p>리뷰 이미지 ${esc(r.slot_key||r.row_index||'-')}번 교체 요청</p></div><div class="repopup-reviewer"><span>요청 리뷰어</span><b>${reviewer}</b></div><span class="repopup-status">처리 대기</span></section>
-      <div class="repopup-caption"><h3>이미지 비교</h3><span>교체 대상은 동일한 리뷰 이미지 1장입니다.</span></div>
+    <div class="repopup-body"><main class="repopup-main"><section class="repopup-summary"><div><h2>${product}</h2><p>리뷰 캡처 ${esc(r.slot_key||r.row_index||'-')}번 교체 요청</p></div><div class="repopup-reviewer"><span>요청 리뷰어</span><b>${reviewer}</b></div><span class="repopup-status">처리 대기</span></section>
+      <div class="repopup-caption"><h3>이미지 비교</h3><span>교체 대상은 동일한 리뷰 캡처 1장입니다.</span></div>
       <section class="repopup-compare" aria-label="원본과 교체 요청 이미지 비교"><article class="repopup-image-card"><header><b>기존 등록 이미지</b><span>등록본</span></header>${_rePopupImage(r.old_file_id,'기존 등록')}</article><div class="repopup-swap" aria-hidden="true"><span>교체</span></div><article class="repopup-image-card pending"><header><b>변경 요청 이미지</b><span>요청 ${created}</span></header>${_rePopupImage(r.new_file_id,'변경 요청')}</article></section>
       <section class="repopup-reason"><b>요청 사유</b><p>${reason}</p></section><p class="repopup-key">팁: 좌우 방향키로 이전·다음 교체요청을 확인할 수 있습니다.</p></main>
       <aside class="repopup-side"><p class="repopup-side-label">현재 요청</p><h2>결정을 기록합니다</h2><p class="repopup-side-copy">결과는 리뷰어 C/S 대화에 안내되고, 승인 시 교체 이미지가 반영됩니다.</p><section class="repopup-meta"><dl><dt>요청 ID</dt><dd>${esc(_reRid(r)||'-')}</dd><dt>교체 대상</dt><dd>리뷰 ${esc(r.slot_key||r.row_index||'-')}번 이미지</dd><dt>요청 시각</dt><dd>${created}</dd><dt>처리 범위</dt><dd>${STATE.reScoped?'담당 업체':'전체'}</dd></dl></section><section class="repopup-rule"><b>판단 기준</b><p>리뷰 내용과 무관한 이미지, 상품과 다른 사진, 부적절한 이미지는 반려 사유를 남깁니다.</p></section><div class="repopup-actions"><button class="repopup-primary" type="button" onclick="_rePopupResolve('approved')">승인 · 다음 요청 보기</button><button class="repopup-reject" type="button" onclick="_rePopupToggleReject()">반려 사유 입력</button></div><div class="repopup-reject-form" id="rePopupRejectForm"><label for="rePopupRejectNote">반려 사유 (필수)</label><textarea id="rePopupRejectNote" placeholder="예: 상품과 무관한 이미지가 포함되어 있어 반려합니다."></textarea><p class="repopup-error" id="rePopupRejectError">반려 사유를 입력해 주세요.</p><button class="repopup-confirm" type="button" onclick="_rePopupResolve('rejected')">반려 확정 · 다음 요청 보기</button></div><section class="repopup-audit"><h4>처리 흐름</h4><p><span>결정 저장</span><b>즉시</b></p><p><span>리뷰어 알림</span><b>자동 발송</b></p><p><span>다음 대기 요청</span><b>자동 열기</b></p></section></aside></div>
@@ -16815,11 +16857,11 @@ window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
   /* 모듈이 미확인 수를 갱신할 때마다 nav 뱃지도 따라간다(집계 복제 0).
      ★ window.csUpdateBadge 를 감싸는 방식은 안 된다 — 모듈 내부 호출이 래퍼를 안 거친다. */
   window.CS_ON_BADGE = function (n) { try { _csSyncNavBadge(n); } catch (_) {} };
-  /* 리뷰이미지 교체요청도 같은 이유로 Track B 네임스페이스(AE 담당 탭 스코프는 서버가 건다).
+  /* 리뷰캡처 교체요청도 같은 이유로 Track B 네임스페이스(AE 담당 탭 스코프는 서버가 건다).
      ★ 버튼 노출은 true — 최종 판정은 서버(_reCanTouch). AE 는 애초에 담당 탭 건만 받는다. */
   window.REVIEW_EDIT_API_BASE = '/api/trackb/review-edit';
   window.CS_REVIEW_EDIT_CAN_ACT = function () { return true; };</script>
-<!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
+<!-- C/S 대화 안의 리뷰캡처 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
 <!-- 설정 탭(내 닉네임·회사 사업자번호·리뷰어 소식·공지) — 관리자 대시보드와 같은 화면 코드.

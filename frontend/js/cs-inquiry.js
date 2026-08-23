@@ -421,7 +421,7 @@ function _csRenderMessages(messages) {
         <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts1}</div>
       </div>`;
     }
-    // 리뷰이미지 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
+    // 리뷰캡처 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
     //   렌더러는 리뷰어 화면·전용 탭과 공용(js/cs-review-edit-card.js) — 사본 금지.
     if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
       const meta = m.meta || {};
@@ -557,7 +557,7 @@ function csOnSSE(evtType, data) {
   }
 }
 
-/* ── 리뷰이미지 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
+/* ── 리뷰캡처 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
    ★ 경로는 C/S 와 같은 방식으로 재기준한다(window.REVIEW_EDIT_API_BASE):
      관리자 대시보드 = /api/review-edit, 리뷰웹시스템[3버전] = /api/trackb/review-edit
      (인트라넷 SSO 토큰은 /api/review-edit/* 에 도달 자체가 불가능하다).
@@ -579,7 +579,7 @@ async function _reCall(path, body) {
 async function csApproveReviewEdit(requestId, opts) {
   if (!requestId) return;
   opts = opts || {};
-  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 이미지가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
+  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 캡처가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
   const r = await _reCall('/approve', { id: requestId });
   if (r && r.ok) {
     showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.');

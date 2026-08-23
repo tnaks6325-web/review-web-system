@@ -1,5 +1,5 @@
 /**
- * reviewEditCsBridge.test.js — 리뷰이미지 교체요청 ↔ C/S 문의창구 연동 회귀가드
+ * reviewEditCsBridge.test.js — 리뷰캡처 교체요청 ↔ C/S 문의창구 연동 회귀가드
  * 실행: node tests/reviewEditCsBridge.test.js
  *
  * 이 연동의 위험 네 가지를 고정한다.
@@ -21,7 +21,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ 리뷰이미지 교체요청 ↔ C/S 연동 회귀가드\n');
+console.log('\n▶ 리뷰캡처 교체요청 ↔ C/S 연동 회귀가드\n');
 
 const MIG = R('migrations/080_cs_message_card.sql');
 const BR = R('src/services/csBridge.service.js');
@@ -102,8 +102,8 @@ t('★★ 기존 스레드의 라벨·이름을 덮어쓰지 않는다(시트제
 });
 t('★ 승인/반려는 카드를 제자리 갱신 + 통지 메시지는 따로', () => {
   assert.ok(/SET meta = meta \|\| \$2::jsonb/.test(BR), 'meta 를 통째로 덮으면 requestId·파일ID 가 날아간다');
-  assert.ok(/리뷰이미지 수정요청이 승인되었습니다\./.test(BR));
-  assert.ok(/리뷰이미지 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
+  assert.ok(/리뷰캡처 수정요청이 승인되었습니다\./.test(BR));
+  assert.ok(/리뷰캡처 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
   assert.ok(/reviewer_unread_count = reviewer_unread_count \+ 1/.test(BR));
 });
 t('★ 처리 중 뒤늦은 스레드 생성은 "새 문의" 알림을 내지 않고, 재귀는 1회 제한', () => {
@@ -214,7 +214,7 @@ t('★ 카드 렌더러는 공유 모듈 하나뿐', () => {
   assert.ok(/window\.CsReviewEditCard = \{/.test(CARD));
   [['cs-inquiry.js', CSJ], ['reviewer-cs.js', RCS], ['workdesk.html', WD]].forEach(([n, s]) => {
     assert.ok(/CsReviewEditCard\.html\(/.test(s), n + ' 가 공용 렌더러를 안 쓴다');
-    assert.ok(!/리뷰이미지 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
+    assert.ok(!/리뷰캡처 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
   });
 });
 t('네 화면이 같은 모듈을 로드한다', () => {

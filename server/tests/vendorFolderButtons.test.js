@@ -245,11 +245,13 @@ async function run() {
   console.log('\n4) 폴더 버튼 렌더러(vm 실행)');
   t('★ 렌더러는 한 벌 — _folBtnsInner 정의는 1개', (HTML.match(/function _folBtnsInner\(/g) || []).length === 1);
   t('★ 재료 정규화도 한 벌 — _folMat 정의는 1개', (HTML.match(/function _folMat\(/g) || []).length === 1);
+  t('★ 열 수 있는가 판정도 한 벌 — _folState 정의는 1개(버튼·제출물 미리보기 공용)',
+    (HTML.match(/function _folState\(/g) || []).length === 1);
   t('★ URL 검증은 한 벌 — _folUrlOk 정의는 1개', (HTML.match(/function _folUrlOk\(/g) || []).length === 1);
   t('★ Drive 호스트만 연다(시트/DB 를 거쳐 온 문자열을 새창에 넣지 않는다)',
     /function _folUrlOk\(u\)\{ return \/\^https:\\\/\\\/drive\\\.google\\\.com\\\/\/\.test/.test(HTML));
 
-  const src = [grab('_folUrlOk'), grab('_folRow'), grab('_folMat'), grab('_folBtnsInner'), grab('_folBtnsHtml'), grab('_folBarHtml')].join('\n');
+  const src = [grab('_folUrlOk'), grab('_folRow'), grab('_folMat'), grab('_folState'), grab('_folBtnsInner'), grab('_folBtnsHtml'), grab('_folBarHtml')].join('\n');
   const mk = (extra = {}) => {
     const sb = Object.assign({
       STATE: { tabs: [], ownTabs: [], cur: null, role: 'admin' },
@@ -335,15 +337,28 @@ async function run() {
     sb.STATE.cur._fol = { folderUrl: D('r'), captureFolderUrl: D('c'), cashReceipt: true };
     const html = vm.runInContext('_folBarHtml()', sb);
     b = btns(html);
-    t('재료 도착 = 3버튼 활성', b.length === 3 && b.every(x => !x.dis));
-    t('큰 버튼 = 라벨 전체 + ↗(작업이 하나로 특정된 자리)',
-      /🛒 구매캡처 ↗/.test(b[0].label) && /📸 리뷰캡처 ↗/.test(b[1].label) && /🧾 현금영수증 ↗/.test(b[2].label), JSON.stringify(b.map(x => x.label)));
+    /* ★★ 사용자 확정 2026-08-21 — 구매캡처·리뷰캡처 바로가기는 **제출물 미리보기 칸 제목**으로
+       옮겼다. 상단 줄에 남는 것은 현금영수증 하나뿐이다(창구를 두 곳에 두지 않는다). */
+    t('★ 상단 줄 = 현금영수증 하나(구매·리뷰는 제출물 미리보기로 이동)',
+      b.length === 1 && !b[0].dis && /🧾 현금영수증 ↗/.test(b[0].label), JSON.stringify(b.map(x => x.label)));
+    t('★ 상단 줄에 구매캡처·리뷰캡처 버튼이 되살아나지 않는다',
+      !/구매캡처/.test(html) && !/리뷰캡처/.test(html));
     t('★ 갱신 대상 id(folBar) + folbig 클래스', /id="folBar"/.test(html) && /wbl-fol folbig/.test(html));
     // 홈에서 온 stats 가 있으면 그것을 쓴다(요청 0)
     const sb2 = mk({});
     sb2.STATE.cur = { sheetId: 'S1', tabName: 'C2', stats: { folderUrl: D('r'), captureFolderUrl: null, cashReceipt: false } };
-    b = btns(vm.runInContext('_folBarHtml()', sb2));
-    t('홈 stats 가 있으면 그 재료를 재사용(추가 조회 없음)', b[0].dis && !b[1].dis && b[2].dis);
+    const html2 = vm.runInContext('_folBarHtml()', sb2);
+    b = btns(html2);
+    /* ★ 현영 대상 아님이 **확정**이면 비활성 버튼 하나만 남는 노이즈를 만들지 않는다(줄은 비운다).
+       ★ 단 id/클래스는 유지해야 한다 — 지연조회 도착 시 `#folBar` 를 찾아 갈아끼운다. */
+    t('★ 현영 비대상 확정 = 버튼 0(빈 줄) + #folBar 자리 유지',
+      b.length === 0 && /id="folBar"/.test(html2));
+    // '모른다'는 지우지 않는다 — 사유를 말하는 비활성 버튼으로 남는다
+    const sb2b = mk({});
+    sb2b.STATE.cur = { sheetId: 'S1', tabName: 'C2b' };
+    const b2b = btns(vm.runInContext('_folBarHtml()', sb2b));
+    t('★ 현영 여부 미상(로딩·조회 실패)은 지우지 않고 사유를 말한다',
+      b2b.length === 1 && b2b[0].dis && /불러오는 중/.test(b2b[0].attrs), JSON.stringify(b2b));
     // ★ 광고주 격리
     const sb3 = mk({});
     sb3.STATE.role = 'advertiser';
@@ -382,7 +397,7 @@ async function run() {
   t('★★ 배포 스큐 — kind 표식이 없는 응답은 info 로 믿지 않는다',
     /if\(r&&r\.kind!=='info'\) t\._fol=\{err:'서버 업데이트 대기/.test(HTML) && /kind: 'info'/.test(ROUTES));
   t('★ 도착 후에는 버튼 묶음만 갈아치운다(그리드 전체 재렌더 금지 — 편집 셀·검색 하이라이트 보존)',
-    /const el=\$\('#folBar'\); if\(el&&STATE\.cur===t\) el\.innerHTML=_folBtnsInner/.test(HTML));
+    /const el=\$\('#folBar'\); if\(el&&STATE\.cur===t\)\{[\s\S]{0,220}el\.innerHTML=\(st\.known&&st\.cr!==true\)\?'':_folBtnsInner\(t,0,'cur',true,\['receipt'\]\)/.test(HTML));
   t('★ 다른 작업으로 옮긴 뒤 도착한 응답은 반영하지 않는다(STATE.cur===t 확인)', /STATE\.cur===t/.test(HTML));
   // 폭 — 헤더·도구줄·표 섹션 세 곳이 같은 값(버튼이 데이터 오른쪽 끝에 붙는다는 레포 규칙)
   const caps = (HTML.match(/max-width:1560px/g) || []).length;
