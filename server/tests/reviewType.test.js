@@ -270,6 +270,10 @@ t('★ 작업오더 제출 폼의 리뷰타입 안내가 표준 어휘를 보여
 })());
 t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지)',
   /'실배송': 'tc-review-실배송'/.test(APP) && /'믹스': 'tc-review-믹스'/.test(APP)
+  && /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
+  /* ★ 인라인 셀렉트가 쓰는 색 맵도 같다 — 여기서 옛 값을 빼면 그 탭의 기존 설정이
+     회색으로 바래 "설정 없음"처럼 보인다(선택지에서만 빼고 표시는 남긴다는 규율). */
+  && ['실배송', '빈박스', '믹스'].every(v => new RegExp(`"${v}":"#`).test(APP))
   && ['css/index.css', 'css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
   ['admin.html', 'admin-siand.html', 'staff.html', 'workdesk.html',
