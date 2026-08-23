@@ -297,6 +297,19 @@ console.log('\n[C] 게이트 · 미리보기');
       /_ensureLinkedWorktableOptionColumn/.test(camp) && /ensureOptionColumn\(\{/.test(camp));
     ok('★ 그 훅은 살아있는 옵션 2종 이상일 때만(배분 규칙과 같은 기준)',
       /Number\(r\.liveOpts \|\| 0\) < 2/.test(camp));
+    /* ★★★ 실사고 2026-08-23 — 훅이 `recruit_campaigns` 를 `c.linked_tab_sheet_id`(= work_orders 컬럼)
+       로 조회해 42703 이 났고, 자기 catch 가 "해당 없음" 으로 삼켜 **배포 이래 한 번도 안 돌았다**.
+       무신호라 아무도 몰랐다. 컬럼명을 표에 맞게 고정한다(되살아나면 옵션이 다시 조용히 사라진다). */
+    /* ⚠ 고정 폭 슬라이스 금지(함수가 자라면 조용히 어긋난다) — 함수 끝까지 자르고
+         **주석은 걷어낸다**(이 사고를 설명하는 주석 자체가 옛 컬럼명을 담고 있다). */
+    const _h0 = camp.indexOf('async function _ensureLinkedWorktableOptionColumn');
+    const hook = camp.slice(_h0, camp.indexOf('\n}', _h0) + 2)
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    ok('★★ 훅이 recruit_campaigns 의 실재 컬럼을 읽는다(linked_sheet_id)',
+      /FROM recruit_campaigns/.test(hook) && /c\.linked_sheet_id AS "sheetId"/.test(hook));
+    ok('★★ work_orders 전용 컬럼(linked_tab_sheet_id)을 쓰지 않는다', !/linked_tab_sheet_id/.test(hook));
+    ok('★ 그 컬럼이 실제로 recruit_campaigns 의 것임을 마이그레이션에서 확인',
+      /linked_sheet_id TEXT/.test(read('migrations/018_campaigns.sql')));
     ok('★★ 실행부 서비스는 그대로 있다',
       /function ensureOptionColumn/.test(read('src/services/worktableOptionColumn.service.js')));
   }
