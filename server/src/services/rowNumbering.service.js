@@ -30,14 +30,16 @@
 
 const { logger } = require('../utils/logger');
 const pool = require('../db/pool');
-const { numberColumnKey, computeRenumberPlan, filledSql } = require('../utils/rowNumbering');
+const { numberColumnKey, computeRenumberPlan, filledSql, hasNumberGap, MAX_RENUMBER_ROWS } = require('../utils/rowNumbering');
 
 let _pool = null;
 function getPool() { return _pool || pool; }
 function __setPoolForTest(p) { _pool = p; }
 
-/** 한 번에 다루는 줄 수 상한 — 비정상 데이터로 트랜잭션이 폭발하는 것 방지. */
-const MAX_ROWS = 5000;
+/** 한 번에 다루는 줄 수 상한 — 비정상 데이터로 트랜잭션이 폭발하는 것 방지.
+ *  ★ 값의 원본은 `utils/rowNumbering` — 스캔의 "번호 어긋남" 판정이 같은 상한을 봐야
+ *    상한을 넘는 표가 **매 주기 다시 쓰이는 무한 루프**가 되지 않는다. */
+const MAX_ROWS = MAX_RENUMBER_ROWS;
 /** 스윕 1회에 훑는 탭 수 상한. */
 const SWEEP_TAB_CAP = 300;
 
@@ -239,14 +241,14 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
     `WITH base AS (
        SELECT tc.sheet_id, tc.tab_name,
               COALESCE(NULLIF(btrim(tc.display_name), ''), tc.tab_name) AS display_name,
-              p.id, btrim(COALESCE(n.val, '')) AS num,
+              p.id, btrim(COALESCE(n.val, '')) AS num, (n.key IS NOT NULL) AS has_num_key,
               ${FILLED_SQL} AS filled
          FROM tab_configs tc
          JOIN campaign_participants p
            ON p.sheet_id = tc.sheet_id AND p.tab_name = tc.tab_name
           AND p.deleted_at IS NULL AND p.active = TRUE
          LEFT JOIN LATERAL (
-           SELECT p.row_json->>k AS val
+           SELECT k AS key, p.row_json->>k AS val
              FROM jsonb_object_keys(CASE WHEN jsonb_typeof(p.row_json) = 'object'
                                          THEN p.row_json ELSE '{}'::jsonb END) AS k
             WHERE lower(btrim(k)) = ANY($1::text[])
@@ -268,17 +270,36 @@ async function scanNumbering({ limit = SWEEP_TAB_CAP } = {}) {
             (COUNT(*) FILTER (WHERE num <> '')
              - COUNT(DISTINCT num) FILTER (WHERE num <> ''))::int AS "dupNumber",
             /* 짝 빈 줄 = 같은 번호를 쓰는 채워진 줄이 있는데 이 줄은 비어 있다(사용자 확정 조건). */
-            COUNT(*) FILTER (WHERE NOT filled AND num <> '' AND grp_filled)::int AS "pairedBlank"
+            COUNT(*) FILTER (WHERE NOT filled AND num <> '' AND grp_filled)::int AS "pairedBlank",
+            /* ★★ "번호 어긋남"(1번 줄을 지운 뒤 남는 2,3,4… 상태)의 **원재료만** 센다 —
+               판정은 utils/rowNumbering 의 hasNumberGap 한 곳이 한다(SQL 에 조건 사본 금지).
+               ★ 자릿수를 9 로 제한해 캐스팅이 터지지 않게 한다(그보다 긴 값은 "숫자 아님"
+                 으로 세어져 어차피 재번호가 다시 쓴다). */
+            COUNT(*) FILTER (WHERE num ~ '^[0-9]{1,9}$')::int AS "numericNumber",
+            MIN(CASE WHEN num ~ '^[0-9]{1,9}$' THEN num::int END)::int AS "minNumber",
+            MAX(CASE WHEN num ~ '^[0-9]{1,9}$' THEN num::int END)::int AS "maxNumber",
+            /* 표에 번호 칸 자체가 있는가 — 없으면 재번호가 no_target_column 으로 아무것도
+               못 한다. 그런 탭을 대상에 두면 **매 주기 상한(12탭)을 차지해** 진짜 대상이 밀린다. */
+            bool_or(has_num_key) AS "hasNumberCol"
        FROM marked
       GROUP BY 1, 2, 3
       ORDER BY "pairedBlank" DESC, "blankNumber" DESC, "dupNumber" DESC, "tabName"
       LIMIT ${cap + 1}`,
     [NUMBER_KEYS.map(k => String(k).toLowerCase())]);
   const truncated = rows.length > cap;
-  const items = rows.slice(0, cap);
+  /* ★★ "정리 대상인가" 를 **서버가 항목마다 판정해 싣는다**(`need`) — 스윕·화면이 각자
+     조건을 다시 쓰면 "목록엔 대상인데 스윕은 안 도는" 상태가 생긴다(판정 사본 0).
+     ★ 번호 칸이 없는 탭은 재번호가 할 일이 없으므로 대상이 아니다(사유는 `hasNumberCol`). */
+  const items = rows.slice(0, cap).map(r => {
+    const seqGap = r.hasNumberCol === true && hasNumberGap(r);
+    return { ...r, seqGap,
+             need: r.hasNumberCol === true
+                   && (r.blankNumber > 0 || r.dupNumber > 0 || r.pairedBlank > 0 || seqGap) };
+  });
   return {
     ok: true, truncated, tabs: items.length,
-    needTabs: items.filter(r => r.blankNumber > 0 || r.dupNumber > 0 || r.pairedBlank > 0).length,
+    needTabs: items.filter(r => r.need).length,
+    seqGapTabs: items.filter(r => r.seqGap).length,
     blankNumberRows: items.reduce((s, r) => s + r.blankNumber, 0),
     dupNumberRows: items.reduce((s, r) => s + r.dupNumber, 0),
     pairedBlankRows: items.reduce((s, r) => s + r.pairedBlank, 0),
@@ -357,9 +378,9 @@ async function sweepNumbering({ cap = 12, by = 'cron' } = {}) {
     logger.warn(`[rowNumbering] 스윕 스캔 실패: ${err.message}`);
     return { skipped: true, reason: 'scan_failed', message: err.message };
   }
-  /* ★ 빈칸뿐 아니라 **중복 번호**도 대상 — 중복 줄 정리 뒤 남는 `566,566,567,567…` 표는
-       빈칸이 0 이라 종전 조건으로는 영영 안 잡혔다(실측). */
-  const need = (scan.items || []).filter(r => r.blankNumber > 0 || r.dupNumber > 0 || r.pairedBlank > 0);
+  /* ★★ 대상 판정은 **스캔이 이미 실었다**(`need`) — 여기서 조건을 다시 쓰면 화면과 갈린다.
+       신호는 넷: 번호 빈칸 · 중복 번호 · 짝 빈 줄 · **번호 어긋남**(`1..N` 이 아님). */
+  const need = (scan.items || []).filter(r => r.need);
   const targets = need.slice(0, limit);
   const out = { scanned: scan.tabs, need: need.length, tabs: targets.length,
                 remaining: Math.max(0, need.length - targets.length), changedTabs: 0, changedRows: 0, failed: 0 };
