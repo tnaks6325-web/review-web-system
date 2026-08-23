@@ -2733,10 +2733,10 @@ let _csBadgeTimer = null;
 function _csStartBadgePoll(){
   _csBadgeRefresh();
   if(_csBadgeTimer) clearInterval(_csBadgeTimer);
-  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible') _csBadgeRefresh(); }, CS_BADGE_POLL_MS);
+  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); } }, CS_BADGE_POLL_MS);
   if(!_csStartBadgePoll._bound){
     _csStartBadgePoll._bound = true;
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _finDayRollCheck(); } });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ _csBadgeRefresh(); _rsBadgeRefresh(); _finDayRollCheck(); } });
   }
 }
 /** 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(직전 값 유지). */
@@ -9956,14 +9956,20 @@ function _rsSyncNavBadge(){
   if(_NAVRS.n===null) return;         // 모르면 0 으로 위장하지 않는다(조용한 정상 위장 금지)
   b.textContent = _NAVRS.n>0 ? (' 🔴'+_NAVRS.n) : '';
 }
-/** 부팅 시 1회 — 입금관리를 열지 않아도 쌓인 건수가 nav 에 보이게(C/S·로그 뱃지와 같은 규율).
- *  ★ limit=1 로 총계만 받는다(`total` = 자르기 전 개수). 목록 전체를 끌어오지 않는다. */
-async function _rsBootBadge(){
+/** 뱃지 건수만 받아 갱신. ★ limit=1 로 총계만 받는다(`total` = 자르기 전 개수) — 목록을 끌어오지 않는다.
+ *  실패는 조용히(직전 값 유지) — 역동기화 OFF·권한 없음 등이 뱃지를 0 으로 위장하면 안 된다. */
+async function _rsBadgeRefresh(){
   try{
     const r=await api('/api/diag/reverse-sync-list?status=open&type=edit&limit=1');
     if(r && r.ok) { _NAVRS.n = Number(r.total)||0; _rsSyncNavBadge(); }
-  }catch(_){ }                        // 역동기화 OFF·권한 없음 등은 조용히 — 뱃지만 안 뜬다
+  }catch(_){ }
 }
+/** 부팅 시 1회 — 입금관리를 열지 않아도 쌓인 건수가 nav 에 보이게(C/S·로그 뱃지와 같은 규율).
+ *  ★ 부팅 1회로 끝내면 안 된다(코드리뷰 지적, C/S 뱃지가 이미 같은 지적을 받았다) — 역동기화 detect 는
+ *    3분마다 돌고 다른 관리자도 제안을 만든다. 그 뒤 쌓인 건수가 새로고침 전까지 안 보이면
+ *    이 뱃지가 막으려던 **조용한 누적**이 그대로 재현된다. 갱신은 C/S 뱃지의 기존 타이머에
+ *    얹는다 — 타이머를 새로 만들지 않고(백그라운드 두드림 순증 0), 가려져 있으면 함께 쉰다. */
+async function _rsBootBadge(){ await _rsBadgeRefresh(); }
 
 /** 원장 칸 → 사람이 읽는 이름. 표시 전용(판정 아님) — 서버 필드명을 그대로 보여주면 담당자가 못 읽는다. */
 const _RS_FIELD = { price:'결제금액', account:'계좌번호', bank:'은행', depositor:'예금주',

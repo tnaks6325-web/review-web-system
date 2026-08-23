@@ -100,6 +100,18 @@ t('★ 모를 때 0 으로 위장하지 않는다(조용한 정상 위장 금지
 t('입금관리 nav 에 뱃지 자리가 있다', /data-v="payment"[^>]*>입금관리<span id="pmNavBadge"><\/span>/.test(html));
 t('★ 뱃지는 **손댈 수 있는 것만** 센다(type=edit) — 처리 불가한 삭제 의심까지 세면 곧 무시하게 된다',
   !/reverse-sync-list\?status=open&limit=1'/.test(html));
+/* ★★ 부팅 1회로 끝나면 안 된다(코드리뷰 지적). detect 는 3분 주기로 돌고 다른 관리자도 제안을
+   만든다 — 오래 켜 둔 세션에서 그 뒤 쌓인 건수가 안 보이면 이 뱃지가 막으려던 **조용한 누적**이
+   그대로 재현된다. C/S 뱃지가 이미 같은 지적을 받아 폴링을 갖고 있으므로 거기에 얹는다. */
+t('★★ 뱃지가 주기 갱신된다 — 부팅 1회로 끝나지 않는다',
+  /async function _rsBadgeRefresh\(/.test(html)
+  && /setInterval\(\(\)=>\{ if\(document\.visibilityState==='visible'\)\{ _csBadgeRefresh\(\); _rsBadgeRefresh\(\); \} \}, CS_BADGE_POLL_MS\)/.test(html));
+t('★ 화면 복귀 시에도 갱신한다(가려진 동안 쌓인 것)',
+  /visibilitychange'[\s\S]{0,160}?_rsBadgeRefresh\(\)/.test(html));
+t('★ 타이머를 새로 만들지 않는다 — 기존 C/S 폴링에 얹는다(백그라운드 두드림 순증 0)',
+  !/_rsBadgeTimer/.test(html));
+t('★ 부팅 배선은 그대로 남는다(첫 화면에서도 보여야 한다)',
+  /async function _rsBootBadge\(\)\{ await _rsBadgeRefresh\(\); \}/.test(html));
 
 // ══════════════════════════════════════════════════════════════
 // §4 정직성
@@ -114,6 +126,36 @@ t('★ 시트가 항상 맞다고 말하지 않는다(실측: 예금주가 시�
   /시트가 깨져 있는 경우도 있습니다/.test(html));
 t('★ 돈이 걸린 칸은 먼저 눈에 띈다', /_RS_MONEY = \['price','account','bank','depositor'\]/.test(html)
   && /\.rstbl tr\.rsmoney td\{/.test(html));
+
+// ══════════════════════════════════════════════════════════════
+// §5 형제 제안 이월 — 한 주문의 여러 칸을 다 고칠 수 있어야 한다
+// ══════════════════════════════════════════════════════════════
+/* 코드리뷰 지적(P1). detect 는 한 주문의 어긋난 칸마다 제안을 만들되 **같은**
+   detected_edit_seq·detected_sig 를 박는다(_replaceOpenProposalEdits). 그런데 apply 가
+   last_edit_seq 를 올리므로, 두 번째 형제부터는 G6 stale 검사에 걸려 **조용히 기각**됐다 —
+   은행·계좌·예금주가 함께 깨진 행(실측 존재)을 담당자가 끝까지 고칠 방법이 없었고,
+   못 고친 건은 목록에서 사라졌다. 이 화면이 막으려는 바로 그 조용한 누락이다. */
+console.log('\n5) 형제 제안 이월');
+const apply = handlerBody(diag, "router.post('/reverse-sync-apply'");
+t('reverse-sync-apply 핸들러가 있다', !!apply);
+t('★★ 적용 성공 뒤 형제 제안의 detected_edit_seq 를 이월한다',
+  /UPDATE reverse_sync_proposals SET detected_edit_seq = \$3/.test(apply));
+t('★ 자기 자신은 빼고, 열린 edit 제안만 이월한다',
+  /os_id = \$1 AND id <> \$2 AND status = 'open' AND proposal_type = 'edit'/.test(apply));
+t('★★ **같은 감지 회차**만 이월한다(detected_sig 일치) — 다른 회차 제안은 stale 로 남아야 한다',
+  /AND detected_sig IS NOT DISTINCT FROM \$5/.test(apply));
+t('★ 이월 대상은 감지 당시 seq 가 그대로인 것뿐이다(그 사이 끼어든 편집은 건드리지 않는다)',
+  /AND detected_edit_seq = \$4/.test(apply));
+t('★ detected_edit_seq 가 null 인 제안은 손대지 않는다(애초에 G6 검사 대상이 아니다)',
+  /if \(p\.detected_edit_seq != null\) \{[\s\S]{0,600}?UPDATE reverse_sync_proposals SET detected_edit_seq/.test(apply));
+t('★★ G6 stale 검사 자체는 그대로 있다 — 이월은 형제에 한정하지, 검사를 없애는 게 아니다',
+  /Number\(cur\[0\]\.last_edit_seq\) !== Number\(p\.detected_edit_seq\)\) return \{ stale: true \}/.test(apply));
+t('★ 이월은 per-order 락 안에서 돈다(경합 중 다른 편집과 갈리지 않게)', (() => {
+  const i = apply.indexOf("withJobLock('order_ledger:'");
+  const j = apply.indexOf('UPDATE reverse_sync_proposals SET detected_edit_seq');
+  const k = apply.indexOf('if (out && out.skipped)');
+  return i >= 0 && j > i && k > j;
+})());
 
 console.log(`\n▶ ${pass}건 통과`);
 console.log('reverseSyncProposalsScreen tests passed');

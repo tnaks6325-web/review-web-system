@@ -2768,6 +2768,24 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
         [p.os_id, p.new_value, editSeq]
       );
       if (!up.length) return { stale: true };
+      // ★ 같은 감지 묶음의 **형제 제안**을 살려 둔다.
+      //   한 주문에 은행·계좌·예금주가 함께 어긋나면 detect 는 같은 detected_edit_seq·detected_sig 로
+      //   제안을 여러 건 만든다(_replaceOpenProposalEdits — 실측 28건 중 세 칸이 모두 깨진 행이 있다).
+      //   그런데 바로 위 UPDATE 가 last_edit_seq 를 올리므로 두 번째 제안부터는 G6 가 stale 로 보고
+      //   **조용히 기각**해 버렸다 — 담당자가 세 칸을 다 고칠 방법이 없고, 못 고친 건은 목록에서 사라진다.
+      //   G6 가 막으려는 것은 "감지 뒤 **다른** 편집이 끼어든 경우"다. 방금 우리가 만든 편집은
+      //   같은 시트 읽기에서 나온 형제라 그 스냅샷을 무효화하지 않는다 → seq 만 이월한다.
+      //   detected_sig 까지 같을 때만 이월한다(다른 감지 회차의 제안은 그대로 stale 로 남아야 한다).
+      //   detected_edit_seq 가 null 인 제안은 애초에 G6 검사 대상이 아니므로 건드리지 않는다.
+      if (p.detected_edit_seq != null) {
+        await pool.query(
+          `UPDATE reverse_sync_proposals SET detected_edit_seq = $3
+             WHERE os_id = $1 AND id <> $2 AND status = 'open' AND proposal_type = 'edit'
+               AND detected_edit_seq = $4
+               AND detected_sig IS NOT DISTINCT FROM $5`,
+          [p.os_id, p.id, editSeq, p.detected_edit_seq, p.detected_sig]
+        );
+      }
       await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
       return { mirrorStatus: up[0].mirror_status };
     });
