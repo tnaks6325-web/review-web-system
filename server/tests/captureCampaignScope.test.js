@@ -22,6 +22,9 @@ const root = path.join(__dirname, '..', '..');
 const SRC = fs.readFileSync(path.join(root, 'server/src/services/trackB.service.js'), 'utf8');
 let pass = 0;
 const t = (name, cond) => { assert(cond, name); pass++; console.log('  ✓ ' + name); };
+/* ⚠ 정적 검사는 **그 함수 본문으로 잘라서** 본다 — 같은 SQL 문장이 파일 안 다른 곳에도 있어
+   (tab_gid 재조회는 2곳) 파일 전체로 보면 이 함수의 회귀를 놓친다(변이시험 실측). */
+const FN = (() => { const i = SRC.indexOf('async function reviewImagesForTab('); return SRC.slice(i, SRC.indexOf('\n}', i) + 2); })();
 
 /* 스텁 pool 로 실제 실행 */
 const poolPath = require.resolve('../src/db/pool');
@@ -68,7 +71,7 @@ const svc = require('../src/services/trackB.service');
     /* ⚠ 스텁은 SQL 을 해석하지 않는다 — SELECT 를 `'' AS gid` 로 바꿔도 canned row 가 그대로
        돌아와 파라미터 검사만으로는 못 잡는다(변이시험 실측). 조회 문장 자체를 고정한다. */
     t('③ gid 는 서버가 tab_configs 에서 다시 구해 넘긴다(화면 값 불신)',
-      /SELECT COALESCE\(tab_gid, ''\) AS gid FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2/.test(SRC)
+      /SELECT COALESCE\(tab_gid, ''\) AS gid FROM tab_configs WHERE sheet_id=\$1 AND tab_name=\$2/.test(FN)
       && seen.some(q => /FROM tab_configs WHERE sheet_id/.test(q.sql)) && campQ && campQ.params[2] === '1443853889');
     t('③ 공고 매칭 = 이름 → gid 폴백 · 빈 gid 는 절을 켜지 않는다',
       /rc\.linked_tab_name = \$2 OR \(\$3 <> '' AND rc\.linked_tab_gid = \$3\)/.test(campQ.sql));
@@ -91,8 +94,7 @@ const svc = require('../src/services/trackB.service');
 
   console.log('\n── C. 배선 ──');
   {
-    const i = SRC.indexOf('async function reviewImagesForTab(');
-    const body = SRC.slice(i, SRC.indexOf('\n}', i) + 2);
+    const body = FN;
     t('★ 조회 3종(원장·대표 이미지·탭 좌표 주문)은 그대로 남아 있다',
       /FROM review_submissions/.test(body) && /FROM review_index/.test(body)
       && /FROM order_submissions\s+WHERE sheet_id=\$1 AND tab_name=\$2/.test(body));
