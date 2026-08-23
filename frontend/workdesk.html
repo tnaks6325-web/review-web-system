@@ -3107,9 +3107,9 @@ function _renderAdvSidebar(){
   const itemHtml=it=>{
     const i=_awTabIdx(it); if(i<0) return '';
     const on=cur&&cur.sheetId===it.sheetId&&cur.tabName===it.tabName, st=_awStatus(it), n=_wUnseen(i);
-    return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(it.tabName)}${(!_isNoSheet(it)&&it.spreadsheetTitle)?' · '+esc(it.spreadsheetTitle):''}">
+    return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(_tabTip(it))}${(!_isNoSheet(it)&&it.spreadsheetTitle)?' · '+esc(it.spreadsheetTitle):''}">
       <span class="ava">${esc(_awDate(it))}</span>
-      <span class="nm">${_awHi(it.tabName)}<i>${esc(st.label)}</i></span>
+      <span class="nm">${_awHi(_tabLabel(it))}<i>${esc(st.label)}</i></span>
       ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb ${st.tone}">${st.label==='완료'?'완료':'진행'}</span></div>`;
   };
   const grp=(list,label)=> list.length?`<div class="awgh">${label} <span class="cnt">${list.length}</span></div>`+list.map(itemHtml).join(''):'';
@@ -3137,9 +3137,9 @@ function _awRowHtml(it){
   const qs=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||[s.quoteStatus,''])[0]:null, qt=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||['',''])[1]:'';
   const iv=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||[s.invoiceStatus,''])[0]:null, ivt=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||['','neutral'])[1]:'';
   const paidDate=s&&s.paidDate?_awMD(s.paidDate):'—';
-  return `<div class="awlrow" onclick="selTab(${i})" title="${esc(it.tabName)}">
+  return `<div class="awlrow" onclick="selTab(${i})" title="${esc(_tabTip(it))}">
     <span class="adate">${esc(_awDate(it))}</span>
-    <span class="anm"><b>${_awHi(it.tabName)}</b><span class="asub">${_isNoSheet(it)?'':_awHi(it.spreadsheetTitle||'')}</span></span>
+    <span class="anm"><b>${_awHi(_tabLabel(it))}</b><span class="asub">${_isNoSheet(it)?'':_awHi(it.spreadsheetTitle||'')}</span></span>
     <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
     <span class="acnt"><b>${it.total||0}</b>${_awTarget(it)?`/${_awTarget(it)}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
     <span class="afol">${_awFolderBtns(it)}</span>
@@ -3409,9 +3409,9 @@ function _renderAdvDash(){
     const pct=tgt?Math.round(tot/tgt*100):(tot?Math.round(sub/tot*100):null);
     const base=tgt||tot;
     const w1=base?Math.min(sub/base*100,100):0, w2=base?Math.max(Math.min((tot-sub)/base*100,100-w1),0):0;
-    return `<div class="adprow" onclick="selTab(${i})" title="${esc(it.tabName)}">
+    return `<div class="adprow" onclick="selTab(${i})" title="${esc(_tabTip(it))}">
       <span class="pd">${esc(_awDate(it))}</span>
-      <span class="pn"><b>${esc(it.tabName)}</b><i>${[_isNoSheet(it)?'':esc(it.spreadsheetTitle||''),tgt?`목표 ${tgt}명`:''].filter(Boolean).join(' · ')}</i></span>
+      <span class="pn"><b>${esc(_tabLabel(it))}</b><i>${[_isNoSheet(it)?'':esc(it.spreadsheetTitle||''),tgt?`목표 ${tgt}명`:''].filter(Boolean).join(' · ')}</i></span>
       <span class="adgauge"><span class="adbar"><i class="b1" style="width:${w1.toFixed(1)}%"></i><i class="b2" style="width:${w2.toFixed(1)}%"></i></span>
         <span class="adglab"><span>참여 <b>${tot}</b> · 제출 <b>${sub}</b></span><span>${tgt?`목표 ${tgt}`:''}</span></span></span>
       <span class="ppct"${tgt?'':' title="목표 미설정 — 제출률(제출/참여) 기준"'}>${pct!=null?pct+'%':'—'}</span></div>`;
@@ -3465,6 +3465,20 @@ function _favUser(){ return (STATE.name||'').trim()||'_'; }
 function _favLSKey(){ return 'wd_favs_v2_'+_favUser(); }
 function _favLoad(){ try{ return new Set(JSON.parse(localStorage.getItem(_favLSKey())||'[]')); }catch(_){ return new Set(); } }
 function _favSaveLocal(){ try{ localStorage.setItem(_favLSKey(), JSON.stringify([...(STATE.favs||[])])); }catch(_){ } }
+/* ══ 작업의 표시 이름 — 단일 출처 ══════════════════════════════════════════
+   작업명(`tab_configs.display_name`, 작업보드 헤더 옆 ✏️ 로 편집하는 그 값)이 있으면 그것,
+   없으면 탭 이름. 종전에는 목록 API 가 작업명을 안 실어 보내 **작업바·검색·홈 목록·업체관리·
+   광고주 화면이 전부 탭 이름**이었고, 작업보드 헤더만 작업명이라 같은 작업이 두 이름으로 보였다
+   (실측: 목록 「맛고」 ↔ 헤더 「0720수진코리아고양이캔」).
+   ★★ 사본을 두면 화면마다 이름이 갈린다 — 라벨이 필요한 곳은 전부 이 함수를 쓴다.
+   ★ 작업명이 비면 **종전 그대로 탭 이름**(구버전 백엔드에서 필드가 아예 없어도 동작 불변).
+   ★ 즐겨찾기 키(`_favKey`)·API 파라미터는 여전히 **탭 이름** — 그건 표시명이 아니라 주소다. */
+function _tabLabel(t){ return String((t&&t.displayName)||'').trim() || String((t&&t.tabName)||''); }
+/* 툴팁 — 작업명으로 바꿔 그릴 때 **원래 탭 이름을 잃지 않게** 함께 적는다.
+   작업명은 중복이 가능해(탭 이름은 시트 안에서 유일) 같은 이름 둘을 구분할 유일한 단서다. */
+function _tabTip(t){ const l=_tabLabel(t), n=String((t&&t.tabName)||''); return l===n?l:(l+' · 탭 '+n); }
+/* 검색 매칭 재료 — 작업명도 함께 본다(종전엔 작업명으로 검색하면 안 나왔다). */
+function _tabSearchText(t){ return String((t&&t.displayName)||'')+' '+String((t&&t.tabName)||''); }
 function _favKey(t){ return (t.sheetId||'')+'␟'+(t.tabName||'')+'␟'+(t.tabGid||''); }
 function isFav(t){ return !!(STATE.favs && STATE.favs.has(_favKey(t))); }
 async function _favSyncFromServer(){   // 부팅 시 서버 원본으로 정렬 — 개인화·기기 무관 유지
@@ -4352,7 +4366,7 @@ function _finVisible(){
   const mgr=STATE.finMgr||'';
   if(mgr) list=list.filter(t=>((t.stats&&t.stats.manager)||'')===mgr);
   const q=(STATE.finQ||'').trim().toLowerCase();
-  if(q) list=list.filter(t=>`${t.tabName||''} ${t.advertiserName||''} ${t.spreadsheetTitle||''} ${(t.stats&&t.stats.manager)||''}`.toLowerCase().includes(q));
+  if(q) list=list.filter(t=>`${_tabSearchText(t)} ${t.advertiserName||''} ${t.spreadsheetTitle||''} ${(t.stats&&t.stats.manager)||''}`.toLowerCase().includes(q));
   // 필터 3종(3분할 토글 스위치 — 진행 중 탭 전용). ★ 판정은 아래 _finMatchFilter 한 곳 —
   //   목록과 스위치 건수가 같은 함수를 봐야 "스위치는 21인데 목록은 19줄"로 갈라지지 않는다.
   const f=fin?'':(STATE.finFilter||'');
@@ -4813,8 +4827,8 @@ function _finBodyHtml(){
     const tdFinish=`<td class="wbl-c wbl-btncol">${!canEdit?''
       :(fin?`<button class="wbl-b" onclick="event.stopPropagation();doReopen(${i})">↩ 진행중으로 복귀</button>`
            :`<button class="wbl-b dark" onclick="event.stopPropagation();openFinishModal(${i})">🏁 마감</button>`)}</td>`;
-    return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(t.tabName)}">
-      <td><div class="wbl-nm">${esc(t.tabName)}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
+    return `<tr class="${fin?'fin':(td?'tdone':'')}" onclick="openTaskFromHome(${i})" title="${esc(_tabTip(t))}">
+      <td><div class="wbl-nm">${esc(_tabLabel(t))}</div><div class="wbl-sub">${esc(t.advertiserName||'미지정')}</div></td>
       ${tdOpen}${tdLink}
       <td>${esc((s.manager)||'—')}</td>
       <td>${prog}</td>${last}
@@ -5273,7 +5287,7 @@ function _renderTabList(){
     //   여기선 호버 툴팁으로만 확인 가능.
     // 정렬 등급을 점으로 — 왜 이 순서인지 눈으로 읽히게(초록=모집중 · 앰버=리뷰 대기 · 등급 2는 점 없음).
     const rk=_wTabRank(t), dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(_tabTip(t))}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(_tabLabel(t))}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`);
   // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
   seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
@@ -5292,7 +5306,7 @@ function wSearch(q){
   q=(q||'').trim(); const box=$('#sres'); if(!box) return; STATE.wKb=-1;
   if(!q){ box.classList.remove('show'); box.innerHTML=''; STATE.wRes=[]; return; }
   const ql=q.toLowerCase();
-  const hits=[]; STATE.tabs.forEach((t,i)=>{ if(`${t.tabName||''} ${t.advertiserName||''} ${t.spreadsheetTitle||''}`.toLowerCase().includes(ql)) hits.push(i); });
+  const hits=[]; STATE.tabs.forEach((t,i)=>{ if(`${_tabSearchText(t)} ${t.advertiserName||''} ${t.spreadsheetTitle||''}`.toLowerCase().includes(ql)) hits.push(i); });
   STATE.wRes=hits;
   // 하이라이트: 세 조각을 각각 esc → <mark>만 리터럴로 삽입(주입 통로 없음).
   //   길이는 소문자화한 쪽(ql) 기준 — q.length를 쓰면 대소문자 변환이 길이를 바꾸는 문자에서 구간이 어긋난다.
@@ -5301,7 +5315,7 @@ function wSearch(q){
   box.innerHTML = hits.length
     ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((i,ord)=>{ const t=STATE.tabs[i], n=_wUnseen(i);
         // ★ 검색은 마감 작업도 찾아준다(작업바에선 빠졌지만 "그 작업 어디 갔지"를 여기서 해결) — 대신 마감이라고 말해준다.
-        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${isFinished(t)?'🏁 마감 · ':''}${esc(t.advertiserName||'미지정')}${_isNoSheet(t)?'':' · '+esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(_tabLabel(t))}</span><span class="ss">${isFinished(t)?'🏁 마감 · ':''}${esc(t.advertiserName||'미지정')}${_isNoSheet(t)?'':' · '+esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
       }).join('')
     : `<div class="sempty">"${esc(q)}" 검색 결과 없음</div>`;
   box.classList.add('show');
@@ -15915,7 +15929,8 @@ function _ovmRowMatch(t,f,q){
   const nq=String(q||'').trim().toLowerCase(); if(!nq) return true;
   const pm=parseTabMeta(t.tabName);
   const ob=_ownBrand(t);   // 검색어는 지정 브랜드명으로도 걸린다(작업명에 없는 브랜드로 배정한 경우)
-  return [t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo]
+  // ★ 표에 그리는 이름(_tabLabel)도 검색 대상 — 안 넣으면 화면에 보이는 그 글자로 검색해도 안 걸린다.
+  return [_tabLabel(t),t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo]
     .some(v=>String(v==null?'':v).toLowerCase().includes(nq));
 }
 function _ownRowsHtml(){
@@ -15958,7 +15973,7 @@ function _ownRowsHtml(){
     /* ★★ 시트 제목을 적지 않는다(사용자 확정 2026-08-23) — 업체관리의 단위는 작업(작업보드)이고
          진실원천은 작업오더다. 부제는 최초 등록일만 남긴다. */
     const osub=t.firstSeenAt?esc(String(t.firstSeenAt).slice(0,10)):'';
-    cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}</b>
+    cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(_tabLabel(t),q)}</b>
         <span class="osub">${fbadge}${fbadge?' ':''}${osub}</span></div>`);
     if(c.info){
       // 지정 브랜드는 색 점 + 굵게(광고주가 정한 값), 추정 파싱은 종전 표기 그대로(회색 물음표 툴팁).
@@ -15980,7 +15995,7 @@ function _ownRowsHtml(){
     cells.push(`<span class="ocol omoney">${moneyCell}</span>`);
     cells.push(`<span class="ocol omemo" onclick="editTabMemo(event,${i})" title="클릭하여 비고 편집">${t.memo?_ovmHl(t.memo,q):'<i>비고…</i>'}</span>`);
     cells.push(`<span class="openb">열기 ›</span>`);
-    return `<div class="owntab" style="grid-template-columns:${g.cols};min-width:${g.min}px" onclick="openOwnTab(${i})" title="${esc(t.tabName)}">${cells.join('')}</div>`;
+    return `<div class="owntab" style="grid-template-columns:${g.cols};min-width:${g.min}px" onclick="openOwnTab(${i})" title="${esc(_tabTip(t))}">${cells.join('')}</div>`;
   }).join('');
   if(!list) return _ovmHead()+`<div class="ovm-empty"><b>조건에 맞는 작업이 없습니다</b>${q?`검색어 “${esc(q)}”`:'선택한 필터'}에 맞는 작업이 없습니다. 검색어를 지우거나 [전체]를 눌러보세요.</div>`;
   return _ovmHead()+list;

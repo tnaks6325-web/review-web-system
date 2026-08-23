@@ -926,6 +926,9 @@ async function ownedTabsForAdvertiser({ advertiserId, annotate = false } = {}) {
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
             tc.manager, tc.folder_url AS "folderUrl", tc.capture_folder_url AS "captureFolderUrl",
+            /* displayName = 화면이 그리는 작업명. 업체관리 연결작업 표와 광고주 화면은 이 응답을 쓰므로,
+               여기 없으면 라벨 함수가 늘 탭 이름으로 접혀 통일이 조용히 무력화된다(코드리뷰 P2). */
+            COALESCE(tc.display_name, '') AS "displayName",
             tc.capture_slots AS "captureSlots", tc.income_type AS "incomeType",
             COALESCE(tc.sheetless, FALSE) AS "sheetless",
             (tc.sheet_id IS NOT NULL) AS "hasTabConfig",
@@ -1573,6 +1576,10 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
       return {
         sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
+        // 작업명 — 업체 화면도 목록·헤더가 같은 이름을 쓰게 한다(사용자 확정 2026-08-24).
+        //   ★ 이 렌즈는 **화이트리스트 재구성**이라 명시로 실어야 한다(스프레드가 아니다).
+        //   ★ 빈 값이면 화면이 종전대로 탭 이름으로 접는다(동작 불변). 작업 이름일 뿐 PII 가 아니다.
+        displayName: t.displayName || '',
         // 무시트 여부 — 업체 화면이 시트 제목 라벨을 그릴지 정하는 표시용 불리언(민감정보 아님).
         // 없으면 화면이 종전대로 시트 제목을 그리므로, 이 한 칸이 빠지면 라벨 숨김이 조용히 무력화된다.
         sheetless: t.sheetless === true,
