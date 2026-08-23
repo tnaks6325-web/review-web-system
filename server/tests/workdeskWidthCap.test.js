@@ -171,8 +171,11 @@ ok('★ 종전 스트립(.stripA .mcell)은 남아 있지 않다(사본 금지 �
    ★★ flex 는 줄바꿈을 먼저 하고 축소는 그다음이라(줄나눔 판정 = 축소 전 max-content) nowrap 이 없으면
       좁은 폭에서 [마감]이 아랫줄로 떨어진다 — 시안 검증에서 실측. nowrap + min-width:0 이 한 벌. */
 ok('★ 작업보드 제목 행이 nowrap(줄바꿈 금지)', /\.mh\.mh-wb\{[^}]*flex-wrap:nowrap/.test(cssNoComment));
-ok('★ 제목·시트명이 축소 가능(min-width:0 + …축약)', (() => {
-  const m = cssNoComment.match(/\.mh\.mh-wb h1,\.mh\.mh-wb \.mhsheet\{[^}]*\}/);
+/* ⚠ 시트 제목 칩(`.mhsheet`)은 제거됐다(사용자 확정 2026-08-23) — 이제 제목 `h1` 하나다.
+   ★ `h1` 의 min-width:0 + ellipsis 는 **여전히 필수** — 제목 행이 nowrap 이라 축소가 막히면
+     긴 작업명이 [마감] 버튼을 아랫줄로 밀어낸다(§I 의 실측 사고). */
+ok('★ 제목이 축소 가능(min-width:0 + …축약)', (() => {
+  const m = cssNoComment.match(/\.mh\.mh-wb h1\{[^}]*\}/);
   return !!m && /min-width:0/.test(m[0]) && /text-overflow:ellipsis/.test(m[0]);
 })());
 ok('★ 마감 안내 문구도 축소 가능(.tp3fin .ft min-width:0)',
