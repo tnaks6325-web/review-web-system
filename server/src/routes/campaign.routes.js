@@ -2404,9 +2404,25 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       }
     } catch (_) { /* 기존 동작 */ }
 
-    // 총인원을 줄일 때는 실제 작업보드에 이미 채워진 행도 함께 검사한다.
-    // 이 검사를 UPDATE 앞에 두어, 저장은 실패했는데 공고 정원만 낮아지는 반쪽 상태를 막는다.
-    if (_rtEff !== undefined && _rtEff !== null && _rtEff !== '') {
+    /* 총인원을 줄일 때는 실제 작업보드에 이미 채워진 행도 함께 검사한다.
+       이 검사를 UPDATE 앞에 두어, 저장은 실패했는데 공고 정원만 낮아지는 반쪽 상태를 막는다.
+
+       ★★ 검사·동기화는 **총정원이 이번 저장에서 실제로 달라졌을 때만** 한다(2026-08-24 사용자 확정).
+         종전에는 전송만 되면(수정 모달은 진행상품 표 파생 hidden 값을 늘 재전송한다) 같은
+         값이어도 검사가 돌아, 채워진 줄이 정원보다 많은 **초과 상태 공고**에서는 제목·리뷰비만
+         고쳐도 저장이 실패로 보였다(본섭 실측 13개 작업). 게다가 그 throw 는 UPDATE·옵션·리뷰비가
+         모두 커밋된 **뒤**라 "저장은 됐는데 실패로 보고"였다. 초과는 감추지 않고 표시하는 것이
+         확정 정책이므로(41/40), 그 상태를 "저장 불가"로 대접하지 않는다.
+       ★ **줄이려는 조작은 종전대로 막는다** — 값이 달라질 때만 게이트를 건너뛰지 않는다.
+       ★ 이전 값을 못 읽으면(조회 실패·행 없음) **검사하는 쪽으로 접는다**(fail-closed). */
+    let _rtPrev = null;
+    try {
+      const { rows: prevRt } = await pool.query('SELECT recruit_total FROM recruit_campaigns WHERE id = $1', [id]);
+      if (prevRt.length) _rtPrev = Number(prevRt[0].recruit_total) || 0;
+    } catch (_) { _rtPrev = null; }
+    const _rtSent = _rtEff !== undefined && _rtEff !== null && _rtEff !== '';
+    const _rtChanged = _rtSent && (_rtPrev === null || (Number(_rtEff) || 0) !== _rtPrev);
+    if (_rtChanged) {
       await assertCampaignRecruitTotal({ campaignId: id, recruitTotal: Number(_rtEff) || 0 });
     }
 
@@ -2542,7 +2558,10 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     // 차수 합계 보정까지 끝난 최종 정원을 연결 작업오더에도 즉시 반영한다.
     // 이 호출이 공고 수정 → 작업오더 동기화의 단일 진입점이다.
     let quotaSync = null;
-    try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total }); }
+    // ★ 정원이 안 바뀐 저장에서는 작업보드 슬롯 맞추기를 건너뛴다(위 게이트와 같은 판정).
+    //   역방향 링크 백필은 그대로 수행된다. 차수 보정이 값을 바꿨을 수 있으므로 최종값으로 비교한다.
+    const _rtSkipWorktable = _rtPrev !== null && (Number(rows[0].recruit_total) || 0) === _rtPrev;
+    try { quotaSync = await syncCampaignRecruitTotal({ campaignId: id, recruitTotal: rows[0].recruit_total, skipWorktable: _rtSkipWorktable }); }
     catch (e) { logger.error('[campaign/update] 작업오더 정원 동기화 실패: ' + e.message); throw e; }
     res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id),
       feeSchedules: await _loadFeeSchedules(pool, id),
