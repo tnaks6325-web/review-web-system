@@ -124,6 +124,9 @@ console.log('\n── C. 배선 ──');
 t('★ 카드가 헬퍼를 쓴다(렌더 사본 0)', /\['리뷰타입','rtype', _cndRtypeHtml\(cd\)\]/.test(wd));
 t('★ 판정 규칙을 화면에서 다시 만들지 않는다(혼합 판정 사본 부재)',
   !/reviewTypeMixed\s*=\s*/.test(wd.slice(wd.indexOf('function _cndRtypeHtml'), wd.indexOf('function _condCardHtml'))));
+/* ⚠ 스텁 pool 은 SQL 을 해석하지 않는다 — 컬럼을 SELECT 에서 빼도 위 실행 검사는 통과한다
+   (변이시험 실측). 그래서 조회 문장 자체를 고정한다. */
+t('★ 공고 조회가 review_type_mix 를 실제로 읽는다', /review_type_mix AS "reviewTypeMix"/.test(svcSrc));
 t('★ 조합 정규화는 utils/reviewTypeMix 단일 출처', /require\('\.\.\/utils\/reviewTypeMix'\)/.test(svcSrc));
 t('★ 작업오더 조합 파싱은 utils/reviewType.parseWorkOrderReviewType 단일 출처',
   /parseWorkOrderReviewType\(wo\.reviewType\)/.test(svcSrc));
