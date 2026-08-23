@@ -1650,6 +1650,13 @@ const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
 const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
 const _updateHandler = _delegate(_orderRoutes, 'put', '/admin/update');
 const _adminEditHandler = _delegate(_orderRoutes, 'put', '/admin/edit');
+/* 🧪 테스트 작업오더 — 접수 → 모집공고 흐름을 실제로 눌러 보려면 `submitted` 오더가 하나 필요하다.
+   ★ 실행부는 AE 제출과 **같은 핸들러**(`POST /api/order/submit`) — 오더를 만드는 코드를 새로
+     쓰지 않는다(사본 0). 값은 화면이 채운다.
+   ★ 인트라넷 SSO 토큰(via:'intranet')은 `/api/order/*` 에 도달 불가라 여기로 위임한다.
+   ★ 게이트는 접수·발행과 같은 2단(내부인 열람 · **편집 허용명단만 생성**) — 원본(`authMiddleware`)
+     보다 **좁다**(프록시가 원본보다 넓어지면 안 된다). */
+const _woSubmitHandler = _delegate(_orderRoutes, 'post', '/submit');
 
 router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _acceptHandler(req, res, next));
@@ -1664,6 +1671,8 @@ router.put('/work-orders/update', authMiddleware, internalMiddleware, editorOnly
 // 편집은 접수·상태변경과 같은 2단 권한(내부인 열람 · 편집 허용명단만 수정).
 router.put('/work-orders/edit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _adminEditHandler(req, res, next));
+router.post('/work-orders/submit', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _woSubmitHandler(req, res, next));
 
 // ── 외부모집 구매양식 수동제출 ──────────────────────────────
 //   원본 `/api/manual-order/*` 는 adminOrMaster 전용인데, 인트라넷 SSO 토큰(via:'intranet')은
