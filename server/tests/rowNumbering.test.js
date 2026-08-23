@@ -685,6 +685,11 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     cli.query = (sql, p) => { if (/SAVEPOINT|RELEASE|ROLLBACK/i.test(sql)) return { rows: [] }; return mkPool(2).query(sql, p); };
     await S.renumberTabInTx(cli, { sheetId: 'S1', tabName: 'T1' });
     ok('★★ 트랜잭션 안(client)에서는 재생성하지 않는다', calls.length === 0);
+    /* ★★ rebuild:true 를 **명시로 넘겨도** client 가 있으면 하지 않는다 — 재생성은 자기 커넥션으로
+         도는 무거운 작업이라 남의 트랜잭션 안에서 돌리면 잠금을 오래 쥐고 커밋 경계를 흐린다.
+         (renumberTabInTx 가 rebuild 를 안 넘기는 것만 검사하면 이 가드 제거를 놓친다 — 변이시험 실측) */
+    calls = []; await S.renumberTab({ sheetId: 'S1', tabName: 'T1', client: cli, rebuild: true, by: 'x' });
+    ok('★★★ client + rebuild:true 여도 재생성하지 않는다(가드는 호출부가 아니라 여기 있다)', calls.length === 0);
 
     /* 재생성 실패는 조용히 넘기지 않는다 — 번호는 이미 박혔으므로 사유만 싣는다. */
     calls = []; led.rebuildLedgers = async () => { throw Object.assign(new Error('boom'), { code: 'rebuild_failed' }); };
