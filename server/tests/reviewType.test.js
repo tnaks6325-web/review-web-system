@@ -239,8 +239,41 @@ t('탭 설정 팝오버 선택지가 새 목록(두 화면 모두)', ['admin.htm
   return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
       && !/data-val="실배송"/.test(block) && !/data-val="믹스"/.test(block);
 }));
+/* ★★ 2026-08-23 전수 점검 — **입력 창구가 전부 새 어휘여야 한다**.
+   표시(배지)만 갱신하고 입력 창구를 옛 어휘로 두면, 거기서 고른 '실배송'이 그대로 저장되어
+   `resolveReviewType` 이 null 로 떨어진다 = "설정했는데 검수는 미지정"(2026-08-06 사고의 입구).
+   창구를 하나라도 빠뜨리면 정리 도구(087)가 고친 값을 그 화면이 다시 되돌린다. */
+t('★ 탭 설정 팝오버 = 세 화면 모두 새 목록(admin·admin-siand·search)',
+  ['admin.html', 'admin-siand.html', 'search.html'].every(f => {
+    const block = (F(f).match(/<div class="tc-option-row" id="tcOptReview">([\s\S]*?)<\/div>/) || [, ''])[1];
+    return RT.REVIEW_TYPE_LABELS.every(l => block.includes(`data-val="${l}"`))
+        && !/data-val="실배송"|data-val="빈박스"|data-val="믹스"/.test(block);
+  }));
+t('★ 관리자 대시보드 입력 2곳(빠른편집·인라인 셀렉트)은 목록을 다시 적지 않는다',
+  /const opts = _tcReviewOptions\(\)/.test(APP)
+  && /_inlineSelect\(t, "review_type", "reviewType", _tcReviewOptions\(\),/.test(APP)
+  && /RF_REVIEW_TYPE_LABELS\.map\(\(\[, l\]\) => l\)/.test(APP)
+  && !/\['실배송','빈박스','구매확정','믹스'\]/.test(APP)
+  && !/\["실배송","빈박스","구매확정","믹스"\]/.test(APP));
+t('★ 그 파생의 전제 — 두 관리자 화면이 index-recruit.js 를 로드한다',
+  ['admin.html', 'admin-siand.html'].every(f => /js\/index-recruit\.js/.test(F(f))));
+t('★ search-app 의 빠른편집은 그 화면 팝오버(#tcOptReview)에서 읽는다(사본 0)',
+  /querySelectorAll\('#tcOptReview \.tc-opt'\)/.test(F('js/search-app.js'))
+  && !/\['실배송','빈박스','구매확정','믹스'\]/.test(F('js/search-app.js')));
+/* ★ AE 작업오더 제출(staff.html)의 리뷰타입은 **자유 입력**이라 목록으로 강제할 수 없다.
+   그런데 종전 안내문이 `텍스트20·포토80` 같은 형태를 권해, 그렇게 적으면 `normalizeReviewType`
+   이 혼합을 못 읽고 **'포토' 단일로 판정**한다(혼합 키워드가 없다). 사람이 보는 유일한 지침이
+   그 placeholder 라 표준 어휘와 혼합 표기를 그대로 보여준다. */
+t('★ 작업오더 제출 폼의 리뷰타입 안내가 표준 어휘를 보여준다(혼합 표기 포함)', (() => {
+  const ph = (F('staff.html').match(/id="soReviewType"[^>]*placeholder="([^"]*)"/) || [, ''])[1];
+  return RT.REVIEW_TYPE_LABELS.every(l => ph.includes(l)) && /혼합\(포토 \d+건, 텍스트 \d+건\)/.test(ph);
+})());
 t('★ 옛 값 배지는 화면에서 사라지지 않는다(색 맵·CSS 유지)',
   /'실배송': 'tc-review-실배송'/.test(APP) && /'믹스': 'tc-review-믹스'/.test(APP)
+  && /'실배송': 'tc-review-실배송'/.test(F('js/search-app.js'))
+  /* ★ 인라인 셀렉트가 쓰는 색 맵도 같다 — 여기서 옛 값을 빼면 그 탭의 기존 설정이
+     회색으로 바래 "설정 없음"처럼 보인다(선택지에서만 빼고 표시는 남긴다는 규율). */
+  && ['실배송', '빈박스', '믹스'].every(v => new RegExp(`"${v}":"#`).test(APP))
   && ['css/index.css', 'css/search.css'].every(f => /\.tc-review-실배송\{/.test(F(f))));
 t('★ 라벨 어휘 통일 — 화면에 "리뷰유형" 표기가 남아 있지 않다',
   ['admin.html', 'admin-siand.html', 'staff.html', 'workdesk.html',
