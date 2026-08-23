@@ -2430,6 +2430,7 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     const { rows: camps } = await db.query(
       `SELECT id, title, recruit_total AS "recruitTotal", daily_limit AS "dailyLimit",
               channel, channel_custom AS "channelCustom", review_type AS "reviewType",
+              review_type_mix AS "reviewTypeMix",
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
               status, participation_mode AS "participationMode"
@@ -2476,8 +2477,33 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
 
-    const { resolveReviewType, reviewTypeLabel } = require('../utils/reviewType');
+    const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType } = require('../utils/reviewType');
+    const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
     const { hasCashReceiptSlot } = require('../utils/captureSlots');
+
+    /* ── 리뷰타입: 판정(행)과 표기(작업)를 분리한다 ─────────────────────────────
+       ★★ `resolveReviewType` 은 **혼합이면 null** 을 돌려준다(완화 금지) — 어느 행이 포토이고
+         어느 행이 텍스트인지는 시트 작업옵션 칸만 답할 수 있어서다. 그런데 작업 조건 카드는
+         **행이 아니라 작업**을 설명하는 자리라, 그 null 을 그대로 그리면 공고에 `혼합(포토 200 ·
+         텍스트 100)` 을 저장해 둔 작업이 `[미설정]` 로 보인다(2026-08-23 신고).
+       ★ 그래서 **판정값(`reviewType`)은 그대로 null 로 두고** 표기용 라벨·조합만 따로 싣는다
+         — 검수·캡처 슬롯이 보는 값은 한 글자도 바뀌지 않는다.
+       ★ 조합 우선순위 = **공고 저장값(106) → 연결 작업오더 문자열**(혼합 조합 프리필과 같은 순서).
+         작업오더 조합은 `parseWorkOrderReviewType` 단일 출처로 읽는다(사본 0).
+       ★ 혼합인데 조합을 모르면 **0 으로 꾸미지 않고** 빈 배열로 둔다 — 화면이 "유형별 인원
+         미입력"이라고 말한다. */
+    const rtKey = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
+    const rtMixed = !rtKey && (normalizeReviewType(typeCamp && typeCamp.reviewType) === 'mixed'
+                            || normalizeReviewType(meta.reviewType) === 'mixed');
+    let rtMix = [];
+    if (rtMixed) {
+      rtMix = (normalizeReviewTypeMix(typeCamp && typeCamp.reviewTypeMix).mix || []);
+      if (!rtMix.length && wo) {
+        const p = parseWorkOrderReviewType(wo.reviewType);
+        if (p.mixed) rtMix = Object.keys(p.counts).filter(k => p.counts[k] > 0)
+                                    .map(k => ({ type: k, quantity: p.counts[k] }));
+      }
+    }
 
     let cashReceipt = null;
     try { cashReceipt = hasCashReceiptSlot(meta.captureSlots, meta.incomeType); } catch (_) { cashReceipt = null; }
@@ -2548,11 +2574,12 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
          되고, 정작 이체 서식에는 공고 값이 찍혀 화면과 파일이 갈린다(사용자 확정 2026-08-20:
          공고를 나중에 만들면 공고 설정값이 우선한다). */
       depositName: ((memoCamp && memoCamp.transferMemo) || meta.depositName || '') || null,
-      reviewType: resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType }),
-      reviewTypeLabel: (() => {
-        const k = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
-        return k ? (reviewTypeLabel(k) || k) : null;
-      })(),
+      /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
+      reviewType: rtKey,
+      /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
+      reviewTypeLabel: rtKey ? (reviewTypeLabel(rtKey) || rtKey) : (rtMixed ? (reviewTypeLabel('mixed') || '혼합') : null),
+      reviewTypeMixed: rtMixed,
+      reviewTypeMix: rtMixed ? rtMix.map(m => ({ type: m.type, label: reviewTypeLabel(m.type) || m.type, quantity: m.quantity })) : null,
       campaignId: c ? c.id : null,
       campaignCount: camps.length,
       workOrderId: (wo && wo.id) || null,   // [미설정] → 작업오더 수정 창구를 열 때만 쓴다

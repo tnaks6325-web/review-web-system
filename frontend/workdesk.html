@@ -6138,6 +6138,21 @@ function _topToggle(){
   g.classList.toggle('fold',v);
   try{ if(v) localStorage.setItem('wd_top3_fold','1'); else localStorage.removeItem('wd_top3_fold'); }catch(_){}
 }
+/* 리뷰타입 표기 — 값은 서버가 준 것을 그리기만 한다(판정 사본 0).
+   ★★ 혼합은 `resolveReviewType` 이 **일부러 null** 을 돌려주는 값이라(어느 행이 무슨 유형인지는
+     시트만 안다) 종전엔 `혼합(포토 200 · 텍스트 100)` 으로 저장해 둔 작업이 `[미설정]` 로 보였다
+     (2026-08-23 신고). 서버가 `reviewTypeLabel='혼합'` + `reviewTypeMix` 를 따로 실어 준다.
+   ★ 조합을 모르면 **0 으로 꾸미지 않고** 그 사실을 말한다(공고에서 유형별 인원을 채우면 채워진다).
+   ★ 구버전 백엔드(필드 부재)는 종전 동작 그대로 — 라벨만 그린다. */
+function _cndRtypeHtml(cd){
+  if(!cd.reviewTypeLabel) return null;
+  const lb=esc(cd.reviewTypeLabel);
+  if(!cd.reviewTypeMixed) return lb;
+  const mix=Array.isArray(cd.reviewTypeMix)?cd.reviewTypeMix.filter(x=>x&&x.quantity>0):[];
+  if(!mix.length) return `${lb} <span class="cnna" title="공고에 유형별 인원이 아직 입력되지 않았습니다 — 모집공고 수정에서 채우면 여기에 표시됩니다.">유형별 인원 미입력</span>`;
+  const txt=mix.map(x=>`${esc(x.label||x.type)} ${Number(x.quantity).toLocaleString()}`).join(' · ');
+  return `${lb} <span class="u" title="모집공고에 저장된 유형별 인원입니다.">(${txt})</span>`;
+}
 function _condCardHtml(wd,d,m){
   const cd=wd&&wd.condition;
   if(!cd){
@@ -6268,7 +6283,7 @@ function _condCardHtml(wd,d,m){
     ['현금영수증','tab', cd.cashReceipt==null?null:(cd.cashReceipt?'대상':'해당 없음')],
     ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
-    ['리뷰타입','rtype', cd.reviewTypeLabel?esc(cd.reviewTypeLabel):null],
+    ['리뷰타입','rtype', _cndRtypeHtml(cd)],
   ].map(([k,kind,v])=>k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`).join('');
   // 상품명 앞 [상품/옵션/금액] 라벨 제거(사용자 확정 2026-08-20 시안 v2) — 표시만, 원본 무접촉
   const prod=String(cd.productName||d.productOption||m.campaignName||'').replace(/^\s*\[상품\/옵션\/금액\]\s*/,'');

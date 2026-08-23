@@ -86,8 +86,13 @@ t('★ 리뷰비·리뷰타입·입금명은 "값이 있는 최신 공고"에서
     && /const typeCamp = pick\('reviewType'\)/.test(cond)
     && /const memoCamp = pick\('transferMemo'\)/.test(cond)
     && /const campFee = num\(feeCamp && feeCamp\.reviewFee\)/.test(cond)
-    // ★ 개수를 센다 — reviewType·reviewTypeLabel 두 곳이라 존재만 보면 한 곳만 되돌린 변이를 놓친다(실측)
-    && (cond.match(/campaignType: typeCamp && typeCamp\.reviewType/g) || []).length === 2
+    /* ★ 판정은 **한 번만** 하고(rtKey) 판정값·표기값이 그것을 함께 쓴다(2026-08-23 혼합 표기 추가).
+       종전엔 같은 호출이 두 곳(reviewType·reviewTypeLabel)이라 개수를 셌다 — 지금은 단일 계산이
+       더 강한 보장이라 "그 계산이 typeCamp 를 보고, 두 필드가 모두 그것에서 나오는지"를 본다. */
+    && (cond.match(/campaignType: typeCamp && typeCamp\.reviewType/g) || []).length === 1
+    && /const rtKey = resolveReviewType\(\{ campaignType: typeCamp && typeCamp\.reviewType/.test(cond)
+    && /\n      reviewType: rtKey,/.test(cond)
+    && /reviewTypeLabel: rtKey \?/.test(cond)
     && /memoCamp && memoCamp\.transferMemo/.test(cond);
 })());
 t('★ 리뷰비 구간은 리뷰비를 준 그 공고 기준(금액과 구간이 갈리지 않게)',
@@ -352,8 +357,12 @@ t('③ 리뷰비 0원을 미설정으로 말하지 않는다(근거 feeSource �
   /cd\.feeSource\s*\?/.test(cc) && /미설정/.test(cc));
 t('★ 서버가 못 주면 종전 4줄로 떨어지고 사유를 말한다(빈 값 위장 금지)',
   /if\(!cd\)\{/.test(cc) && /요약 없음/.test(cc));
+/* ★ 2026-08-23: 혼합 표기가 붙으면서 렌더가 헬퍼(_cndRtypeHtml)로 빠졌다 — 검사 의미는 불변
+   (라벨·조합 모두 서버가 준 값을 그리기만 하고, 화면에 리뷰타입 표 사본을 두지 않는다). */
+const rth = fnBody(wd, 'function _cndRtypeHtml(cd){');
 t('★ 리뷰타입 라벨은 서버가 준 값(프론트에 표 사본 금지)',
-  /cd\.reviewTypeLabel/.test(cc) && !/RF_REVIEW_TYPE_LABELS/.test(cc));
+  /_cndRtypeHtml\(cd\)/.test(cc) && /cd\.reviewTypeLabel/.test(rth)
+  && !/RF_REVIEW_TYPE_LABELS/.test(rth) && !/RF_REVIEW_TYPE_LABELS/.test(cc));
 
 console.log('\n── E. 화면: 발주 줄 + 원문 팝업 ──');
 const lk = fnBody(wd, 'function _woLinkedRow(wd){');
