@@ -16241,7 +16241,7 @@ async function _relocateMakeReportPageLink() {
           <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
           <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
         </div>
-        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 캡처를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
         <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
       </div>`;
     showToast('업체 보고 링크 준비됨', 'success');
@@ -16302,7 +16302,7 @@ function _relocateCopyLink(inputId) {
 
 // ── 선택 탭 [리뷰] 폴더 이미지 연결 백필 — POST /api/drive/review-folder-backfill ──
 //   폴더 안 이미지를 파일명 이름↔행 결정적 매칭으로 원장(review_submissions)·대표 이미지에 연결.
-//   업체 뷰어 "리뷰 이미지 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
+//   업체 뷰어 "리뷰 캡처 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
 async function _reviewFolderBackfill(apply) {
   const t = _relocateTabs[_relocateSelIdx];
   if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }

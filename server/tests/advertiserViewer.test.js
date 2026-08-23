@@ -260,7 +260,7 @@ async function run() {
     /_advertiserColumns\(_advertiserHeaderCandidates\(raw, roster, advEditedHeaders\), \{[\s\S]*submitCol: sc\.submit_col,[\s\S]*submitCol2: sc2\.submit_col2,[\s\S]*\}\)/.test(
       fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
 
-  /* ═══ 7. 리뷰 이미지 미리보기(행별) ═══ */
+  /* ═══ 7. 리뷰 캡처 미리보기(행별) ═══ */
   {
     ok('\uAD11\uACE0\uC8FC \uCEEC\uB7FC \uAC12 \uD22C\uC601\uAE30\uAC00 \uD14C\uC2A4\uD2B8\uB85C \uB178\uCD9C\uB3FC \uC788\uB2E4', typeof advColumnValue === 'function');
     const trackedValue = typeof advColumnValue === 'function'
@@ -323,7 +323,7 @@ async function run() {
     && /INPUT\|SELECT\|TEXTAREA/.test(src));
   ok('행 클릭·키 이동이 위임 1회 바인딩(재렌더로 tbody 가 갈려도 유지)', /if\(STATE\._rvBound\) return; STATE\._rvBound=true;/.test(src));
   ok('★ 미제출 행은 패널 가운데에 "리뷰 미작성 · 미제출" 표기', /리뷰 미작성 · 미제출/.test(src));
-  ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 이미지 미등록/.test(src));
+  ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 캡처 미등록/.test(src));
   // 표 검색(_gsReapply) 도입으로 뒤에 호출이 하나 더 붙었다 — 검사 의미(재렌더 끝에 선택 복원 배선)는 불변.
   ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\);/.test(src));
   ok('미리보기 패널 CSS(남는 세로 공간을 이미지에 배정 · 고정 이미지 영역 스크롤 · 미제출 안내 박스)',
@@ -331,7 +331,7 @@ async function run() {
     && /\.rvmedia\{display:grid;grid-auto-rows:minmax\(180px,1fr\);gap:8px;flex:1;min-height:0;overflow:auto\}/.test(css)
     && /\.rvasset \.rvimg\{display:block;width:100%;height:100%;min-height:0;object-fit:contain/.test(css)
     && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
-  ok('리뷰 이미지는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
+  ok('리뷰 캡처는 작성자 목록 팝업으로 열리고, 바깥 클릭 대신 이미지 우측 상단 닫기 버튼만 둔다',
     /function _rvOpenByImage\(el\)\{ _rvOpen\(el&&el\.dataset\.rid, \+\(el&&el\.dataset\.fidx\|\|0\)\); \}/.test(src)
     && /function _rvPopRender\(\)/.test(src)
     && /<aside class="rvplist">/.test(src)

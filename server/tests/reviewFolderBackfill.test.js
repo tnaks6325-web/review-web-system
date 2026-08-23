@@ -1,7 +1,7 @@
 /**
  * reviewFolderBackfill.test.js — 탭 [리뷰] 폴더 스캔 → 파일↔행 링크 백필 회귀가드.
  *
- * 배경(실사용 신고): 업체 뷰어 리뷰 미리보기가 "리뷰 이미지 미등록"으로 뜨는 탭 —
+ * 배경(실사용 신고): 업체 뷰어 리뷰 미리보기가 "리뷰 캡처 미등록"으로 뜨는 탭 —
  *   폴더에는 캡처가 있는데 원장(review_submissions)·대표(review_index.review_file_*)가 빈 상태.
  *   POST /api/drive/review-folder-backfill 이 폴더를 스캔해 파일명 이름↔행 결정적 매칭으로 백필한다.
  *

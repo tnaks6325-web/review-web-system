@@ -118,7 +118,7 @@ t('④ 삭제된 주문은 근거가 아니다', /deleted_at IS NULL/.test(rv));
 t('★ 묶음 key 는 order_capture', /'order_capture'/.test(rv));
 t('⑤ 상한은 묶음별로 센다(전체 개수로 자르면 나중 묶음이 통째로 잘린다)',
   /arr\.filter\(f => f\.slot === sl\)\.length >= _RV_MAX_PER_ROW/.test(svc));
-t('★ fail-soft — 캡처 조회가 실패해도 리뷰 이미지는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
+t('★ fail-soft — 캡처 조회가 실패해도 리뷰 캡처는 나간다', /\.catch\(\(\) => \(\{ rows: \[\] \}\)\)/.test(rv));
 
 console.log('\n── C. 화면: 상단 3분할 · 작업세부 폐지 · 정산 통합 ──');
 t('★ 내부 렌더는 3분할(.tp3grid.c3) + 미리보기 칸 (+저장된 접힘 상태 복원)',
@@ -380,10 +380,10 @@ t('★ 발주 원문 팝업이 종전 「작업세부」와 같은 값을 그린
     && /STATE\.role!=='advertiser'\?\[\['담당',d\.managerName\]\]/.test(raw);   // 담당자 실명은 내부만
 })());
 
-console.log('\n── F. 화면: 제출물 미리보기(좌 구매캡처 / 우 리뷰이미지) ──');
+console.log('\n── F. 화면: 제출물 미리보기(좌 구매캡처 / 우 리뷰캡처) ──');
 const r2 = fnBody(wd, 'function _rvRender2(pane){');
 t('_rvRender2 가 있다', !!r2);
-t('★ 두 칸 — 좌 구매 캡처 / 우 리뷰 이미지', /col\('cap'[\s\S]*col\('rev'/.test(r2));
+t('★ 두 칸 — 좌 구매 캡처 / 우 리뷰 캡처', /col\('cap'[\s\S]*col\('rev'/.test(r2));
 t('★ 칸마다 한 장(.rvone)', /class="rvone"/.test(r2));
 t('⑥ 넘김 줄은 1장일 때도 자리를 비워 둔다(visibility) — 없애면 두 칸 높이가 어긋난다',
   /n>1\?'':' style="visibility:hidden"'/.test(r2));

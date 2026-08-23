@@ -1,5 +1,5 @@
 /**
- * csBridge.service.js — 리뷰이미지 교체요청 ↔ C/S 문의창구 연결의 **단일 출처**.
+ * csBridge.service.js — 리뷰캡처 교체요청 ↔ C/S 문의창구 연결의 **단일 출처**.
  *
  * 왜 필요한가
  *  · 지금까지 교체요청의 승인·반려 결과는 리뷰어에게 **전혀 통지되지 않았다**
@@ -49,7 +49,7 @@ async function postReviewEditRequest(r, opts) {
     const campaignKey = campaignKeyOf(r.sheet_id, r.tab_name);
     const label = _clip(r.campaign_label || r.tab_name || '문의', 200);
     const name = _clip(r.reviewer_name || '리뷰어', 100);
-    const preview = '🖼 리뷰이미지 교체요청';
+    const preview = '🖼 리뷰캡처 교체요청';
 
     // 리뷰어가 보낸 것과 동일한 upsert — admin_unread_count 를 올려 관리자 뱃지에 잡히게 한다
     //   (요청 자체가 "확인이 필요한 도착물"이라 미확인으로 세는 게 맞다).
@@ -85,7 +85,7 @@ async function postReviewEditRequest(r, opts) {
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, msg_type, meta)
        VALUES ($1,'reviewer',$2,$3,'review_edit',$4::jsonb)
        ON CONFLICT DO NOTHING`,
-      [threadId, name, '리뷰이미지 교체를 요청했습니다.', JSON.stringify(meta)]
+      [threadId, name, '리뷰캡처 교체를 요청했습니다.', JSON.stringify(meta)]
     );
 
     // ★ 승인/반려 도중 뒤늦게 만드는 경우(silent)에는 알림을 내지 않는다 —
@@ -150,8 +150,8 @@ async function postReviewEditDecision(r, decision, note, by, _depth) {
     // ② 자동 통지 — 관리자 발신 텍스트 메시지(리뷰어 채팅에 알림으로 뜬다)
     //   sender_name 은 로그인명으로 저장하고(책임추적), 읽는 시점에 adminNickname 이 역할별로 치환한다.
     const text = decision === 'approved'
-      ? '리뷰이미지 수정요청이 승인되었습니다.'
-      : `리뷰이미지 수정요청이 반려되었습니다.\n사유: ${_clip(note, 300)}`;
+      ? '리뷰캡처 수정요청이 승인되었습니다.'
+      : `리뷰캡처 수정요청이 반려되었습니다.\n사유: ${_clip(note, 300)}`;
     const senderName = _clip(by || '관리자', 100);
     const { rows: mRows } = await pool.query(
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content)

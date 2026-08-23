@@ -636,7 +636,7 @@ async function gasPostUpload(body, timeout) {
   // 진행률 오버레이 표시
   const actionLabels = {
     uploadOrderImage: '주문 캡처 업로드 중...',
-    uploadReviewImage: '리뷰 이미지 업로드 중...',
+    uploadReviewImage: '리뷰 캡처 업로드 중...',
     extractOrderImage: 'AI 이미지 분석 중...',
   };
   _uploadProgress.show(actionLabels[action] || '업로드 중...');

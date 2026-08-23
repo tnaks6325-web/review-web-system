@@ -1833,7 +1833,7 @@ function openSubmitMulti(items) {
   const subtitleName = firstForTitle.tcDisplayName || firstForTitle.tabName || firstForTitle.campaignName || "";
   if (subtitleName) subtitleParts.push(subtitleName);
   if (firstForTitle.productName) subtitleParts.push(`옵션:${firstForTitle.productName}`);
-  document.getElementById("submitTitle").textContent    = "리뷰 이미지 제출";
+  document.getElementById("submitTitle").textContent    = "리뷰 캡처 제출";
   document.getElementById("submitSubtitle").textContent = subtitleParts.join(" ") || "";
 
   // 상품 URL (첫 번째 항목 기준)

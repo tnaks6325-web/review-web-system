@@ -1574,7 +1574,7 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/image/review-upload — 리뷰 이미지 Drive 업로드 (새 4단계 구조)
+// POST /api/image/review-upload — 리뷰 캡처 Drive 업로드 (새 4단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰] → [옵션(선택)]
 // 파일명 규칙: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
@@ -1915,7 +1915,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
       // A-1: 대표 파일을 review_index 행에 기록
       //   ★ 대표 이미지는 기본 'review' 슬롯만 기록한다. 현금영수증 등 다른 슬롯이
-      //     대표 리뷰 이미지를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
+      //     대표 리뷰 캡처를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
       //   ★ 자동 분류로 슬롯 구성이 바뀐 호출은 아래 recomputePrimary 가 원장 기준으로
       //     대표를 다시 계산한다(여기 레거시 경로는 라우팅 없을 때 종전 그대로).
       const _routedAny = uploadResults.some(r => r && (r.routed || r.rejected));
@@ -2007,7 +2007,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     });
   } catch (err) {
     logger.error(`[review-upload] ${err.message}`);
-    res.json({ ok: false, error: err.message || '리뷰 이미지 업로드 중 오류가 발생했습니다.' });
+    res.json({ ok: false, error: err.message || '리뷰 캡처 업로드 중 오류가 발생했습니다.' });
   }
 });
 
