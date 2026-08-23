@@ -4445,6 +4445,17 @@ async function saveRecruitPostImpl() {
       throw new Error(errData.error || "저장 실패 (HTTP " + res.status + ")");
     }
     const saved = await res.json().catch(() => ({}));
+    /* ★★ **상태코드만으로 성공을 판정하지 않는다** (2026-08-23 실사고) —
+       이 API 의 errorHandler 는 GAS 호환으로 **HTTP 200 + `{ error }`** 를 돌려준다
+       (`server/src/middleware/error.middleware.js`: `res.status(200).json({ error })`).
+       그래서 서버가 거부한 저장(예: "이미 참여자 또는 구매양식이 있는 작업보드 인원보다 낮게
+       목표 인원을 설정할 수 없습니다")이 `res.ok === true` 로 통과해 **✓ 저장됨 → 모달 닫힘 →
+       「공고 수정이 반영되었습니다」 + 변경 목록에 '총 모집인원'** 까지 표시됐다. 아무것도
+       저장되지 않았는데 화면은 성공을 말하고, 다시 열면 옛 값이라 "저장해도 안 바뀐다"가 된다.
+       ★ 성공 응답에는 항상 `data` 가 있고 실패 응답에는 `error` 만 있다 — **본문으로 판정한다**. */
+    if (saved && (saved.ok === false || saved.error)) {
+      throw new Error(String(saved.error || "저장이 반영되지 않았습니다."));
+    }
     const newCampId = saved && saved.data && saved.data.id;
     /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
     if (!_recruitEditId && _woPrefillOrderId && newCampId) {
