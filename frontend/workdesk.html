@@ -3148,7 +3148,7 @@ function _renderAdvSidebar(){
   const itemHtml=it=>{
     const i=_awTabIdx(it); if(i<0) return '';
     const on=cur&&cur.sheetId===it.sheetId&&cur.tabName===it.tabName, st=_awStatus(it), n=_wUnseen(i);
-    return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(it.tabName)}${it.spreadsheetTitle?' · '+esc(it.spreadsheetTitle):''}">
+    return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(it.tabName)}${(!_isNoSheet(it)&&it.spreadsheetTitle)?' · '+esc(it.spreadsheetTitle):''}">
       <span class="ava">${esc(_awDate(it))}</span>
       <span class="nm">${_awHi(it.tabName)}<i>${esc(st.label)}</i></span>
       ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb ${st.tone}">${st.label==='완료'?'완료':'진행'}</span></div>`;
@@ -3180,7 +3180,7 @@ function _awRowHtml(it){
   const paidDate=s&&s.paidDate?_awMD(s.paidDate):'—';
   return `<div class="awlrow" onclick="selTab(${i})" title="${esc(it.tabName)}">
     <span class="adate">${esc(_awDate(it))}</span>
-    <span class="anm"><b>${_awHi(it.tabName)}</b><span class="asub">${_awHi(it.spreadsheetTitle||'')}</span></span>
+    <span class="anm"><b>${_awHi(it.tabName)}</b><span class="asub">${_isNoSheet(it)?'':_awHi(it.spreadsheetTitle||'')}</span></span>
     <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
     <span class="acnt"><b>${it.total||0}</b>${_awTarget(it)?`/${_awTarget(it)}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
     <span class="afol">${_awFolderBtns(it)}</span>
@@ -3452,7 +3452,7 @@ function _renderAdvDash(){
     const w1=base?Math.min(sub/base*100,100):0, w2=base?Math.max(Math.min((tot-sub)/base*100,100-w1),0):0;
     return `<div class="adprow" onclick="selTab(${i})" title="${esc(it.tabName)}">
       <span class="pd">${esc(_awDate(it))}</span>
-      <span class="pn"><b>${esc(it.tabName)}</b><i>${esc(it.spreadsheetTitle||'')}${tgt?` · 목표 ${tgt}명`:''}</i></span>
+      <span class="pn"><b>${esc(it.tabName)}</b><i>${[_isNoSheet(it)?'':esc(it.spreadsheetTitle||''),tgt?`목표 ${tgt}명`:''].filter(Boolean).join(' · ')}</i></span>
       <span class="adgauge"><span class="adbar"><i class="b1" style="width:${w1.toFixed(1)}%"></i><i class="b2" style="width:${w2.toFixed(1)}%"></i></span>
         <span class="adglab"><span>참여 <b>${tot}</b> · 제출 <b>${sub}</b></span><span>${tgt?`목표 ${tgt}`:''}</span></span></span>
       <span class="ppct"${tgt?'':' title="목표 미설정 — 제출률(제출/참여) 기준"'}>${pct!=null?pct+'%':'—'}</span></div>`;
@@ -4978,8 +4978,12 @@ window.CAMP_ON_SAVED=function(){
    ★ 필드 자체가 없으면(구버전 백엔드) **아무것도 그리지 않는다** — 모르는 것을
      "시트를 쓴다"로 단정하지 않는다(조용한 오표시 금지).
    ★ 렌더러는 한 벌 — 홈 목록·작업보드 상단·업체관리 표가 같은 것을 쓴다(사본을 두면 한쪽만 안 바뀐다). */
+/* ★★ "이 작업이 무시트인가" 판정 **단일 출처** — 무시트 배지와 **시트 라벨 숨김**이 같은 값을 본다.
+   ★ 필드가 없으면(구버전 백엔드·광고주 렌즈 미동봉) false = 종전 표기 유지 —
+     모르는 것을 "무시트"로 단정해 라벨을 지우면 시트 기반 작업의 소속을 잃는다. */
+function _isNoSheet(t){ return !!(t && t.sheetless===true); }
 function _nsBadge(t){
-  return (t && t.sheetless===true)
+  return _isNoSheet(t)
     ? ' <span class="ns-b" title="구글시트를 쓰지 않는 작업입니다 — 표가 곧 원본이고, 시트를 열 필요가 없습니다">무시트</span>'
     : '';
 }
@@ -5615,7 +5619,7 @@ function _renderTabList(){
     //   여기선 호버 툴팁으로만 확인 가능.
     // 정렬 등급을 점으로 — 왜 이 순서인지 눈으로 읽히게(초록=모집중 · 앰버=리뷰 대기 · 등급 2는 점 없음).
     const rk=_wTabRank(t), dot=rk===0?'<i class="tdot rec" title="모집중"></i>':(rk===1?'<i class="tdot pend" title="모집 종료 · 리뷰 대기"></i>':'');
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${(!_isNoSheet(t)&&t.spreadsheetTitle)?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span>${dot}<span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`);
   // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
   seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
@@ -5643,7 +5647,7 @@ function wSearch(q){
   box.innerHTML = hits.length
     ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((i,ord)=>{ const t=STATE.tabs[i], n=_wUnseen(i);
         // ★ 검색은 마감 작업도 찾아준다(작업바에선 빠졌지만 "그 작업 어디 갔지"를 여기서 해결) — 대신 마감이라고 말해준다.
-        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${isFinished(t)?'🏁 마감 · ':''}${esc(t.advertiserName||'미지정')} · ${esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${isFinished(t)?'🏁 마감 · ':''}${esc(t.advertiserName||'미지정')}${_isNoSheet(t)?'':' · '+esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
       }).join('')
     : `<div class="sempty">"${esc(q)}" 검색 결과 없음</div>`;
   box.classList.add('show');
@@ -5686,7 +5690,11 @@ async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t
   renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t); }
 // 선택된 작업이 소속한 시트제목 — 상단 2단 탭에서 뺀 정보를 여기서 한 번만 보여준다.
 //   탭 객체의 값이 없으면 sheetMap 폴백(관측·업체관리에서 넘어온 탭도 표기되게).
-function _curSheetLabel(){
+/* ★★ 무시트 작업에는 시트 제목을 그리지 않는다(사용자 확정 2026-08-23).
+   이관해도 `sheet_id` 는 좌표로 남아 제목 조회가 계속 성공하므로, 가만두면
+   "무시트" 배지 옆에 시트 이름이 나란히 떠 **아직 시트를 쓰는 작업처럼 읽힌다**. */
+function _curSheetLabel(noSheet){
+  if(noSheet) return '';
   const c=STATE.cur; if(!c) return '';
   let s=c.spreadsheetTitle||'';
   if(!s){ try{ s=sheetTitle(c.sheetId)||''; }catch(_){ s=''; } }
@@ -5741,6 +5749,9 @@ function renderWorkdesk(wd){
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
   const canDeleteOrder=_isInternalRole();
+  /* 무시트 판정은 여기서 한 번 — 헤더의 시트 표기 3종(시트 제목·원본·그리드 배지)이 같은 값을 본다.
+     meta 가 이 탭의 권위값이고, 없으면(구버전) 목록 항목으로 접는다. */
+  const noSheet=_isNoSheet(m)||_isNoSheet(STATE.cur);
   // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
@@ -5774,10 +5785,14 @@ function renderWorkdesk(wd){
       +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
     tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
       <div id="addbox"></div><span id="emoBtnBox">${_emoBtnHtml()}</span>
-      ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
+      ${canEdit?`<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — ${noSheet?'주문 기록은':'구글시트·주문은'} 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>`:''}`;
   }
   const sot=wd.sourceOfTruth||'sheet';
-  const sotBadge=`<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
+  /* ★ 무시트 작업에서는 `원본: 시트` 를 그리지 않는다 — 그 탭의 진실원천은 이 표이고,
+       write-back 도 무시트 경로(`_writebackSheetless`)로 빠져 시트를 건드리지 않는다.
+       `원본: Track B` 는 시트 라벨이 아니라 그대로 둔다(master 전환 버튼은 [⋯] 메뉴에 있어 무영향). */
+  const sotBadge=(noSheet && sot!=='db') ? ''
+    : `<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   // ★ 제목 행 = [작업명 · 시트 · 배지] ―― 남는 폭 ―― [마감 안내 + 🏁 마감] [⋯ 도구](master)
   //   「참여자 N」 초록 배지는 뺐다 — 바로 아래 [진행 현황] 열이 같은 값을 252/300 · 84% 로 더 크게 보여준다
@@ -5788,8 +5803,8 @@ function renderWorkdesk(wd){
   const planBtn=STATE.role==='advertiser'?'':`<button class="btn" type="button" onclick="openCurrentCampaignDailyPlan()" title="연결된 모집공고의 날짜별 모집인원을 조절합니다. 저장하면 무시트 작업표의 미배정 행도 같은 날짜 계획으로 재배치됩니다.">📅 모집인원 조절</button>`;
   $('#main').innerHTML=`<div class="mh mh-wb"><span class="mh-title"><h1 title="${esc(workdeskTitle)}">${esc(workdeskTitle)}</h1>${canEdit?'<button class="mh-title-edit" type="button" title="작업명 수정" aria-label="작업명 수정" onclick="editWorkdeskTitle()">✎</button>':''}</span>
     ${STATE.role==='advertiser'?'':_nsBadge(STATE.cur)}
-    ${_curSheetLabel()}
-    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${_curSheetLabel(noSheet)}
+    ${STATE.role==='advertiser'?'<span class="bd">업체 전용 열람</span>'+_awFolderHead():''}${STATE.role==='advertiser'?'':sotBadge}${gridMode?(noSheet?'<span class="bd" title="표 전체 컬럼 가로 펼침">표 · 전체 열</span>':'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>'):''}${warn.join('')}
     ${shareBtn}
     ${planBtn}
     ${_finBarHtml()}
@@ -16062,8 +16077,12 @@ function _ownRowsHtml(){
       : (t.finishCand ? '<span class="ovm-fin cand" title="인원 충족·전건 제출·전건 입금 — 이제 마감할 수 있습니다">마감자료 검수</span>' : '');
     const cells=[];
     cells.push(gauge);
+    /* ★ 무시트 작업은 시트 제목을 빼고 나머지 조각만 잇는다 — 빈칸을 남기면 ' · 2026-07-29' 처럼
+         구분자가 앞에 붙어 무엇이 빠졌는지 알 수 없는 줄이 된다. */
+    const osub=[_isNoSheet(t)?'':esc(t.spreadsheetTitle||sheetTitle(t.sheetId)),
+                t.firstSeenAt?esc(String(t.firstSeenAt).slice(0,10)):''].filter(Boolean).join(' · ');
     cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}${_nsBadge(t)}</b>
-        <span class="osub">${fbadge}${fbadge?' ':''}${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>`);
+        <span class="osub">${fbadge}${fbadge?' ':''}${osub}</span></div>`);
     if(c.info){
       // 지정 브랜드는 색 점 + 굵게(광고주가 정한 값), 추정 파싱은 종전 표기 그대로(회색 물음표 툴팁).
       cells.push(ob
