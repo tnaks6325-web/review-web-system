@@ -89,7 +89,11 @@ t('초과면 참여자 게이지 숫자가 붉어지고 +N 초과 배지가 붙�
   /nm\$\{ov\?' isover':''\}/.test(strip) && /class="ovb">\+\$\{ov\} 초과/.test(strip));
 
 const home = body(wd, 'function _finProgHtml(');
-t('홈도 총건수 기준으로 초과를 말한다', /const over=\(rt&&filled>rt\.total\)\?\(filled-rt\.total\):0;/.test(home));
+t('홈도 총건수 기준으로 초과를 말한다', /const over=\(rt&&_isNoSheet\(t\)&&filled>rt\.total\)/.test(home));
+/* ★★ 서버는 `meta.sheetless` 일 때만 행에 `over` 를 붙인다 — 홈에서 게이트를 빼면 시트 기반 탭에서
+   홈만 붉어지고 "표에서 붉은 줄로 표시합니다" 가 거짓말이 된다(코덱스 리뷰 P2, 2026-08-24). */
+t('★ 홈 초과 판정도 무시트 작업만(시트 기반 탭에 거짓 경고 금지)',
+  /_isNoSheet\(t\)&&filled>rt\.total/.test(home));
 t('홈 초과 표기는 색으로만(숫자는 이미 501/500 로 보인다)',
   /wbl-num\$\{over\?' isover':''\}/.test(home) && !/\+\$\{over\} 초과/.test(home));
 

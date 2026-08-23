@@ -5153,7 +5153,10 @@ function _finProgHtml(t){
   const gap=(rt&&_isNoSheet(t)&&rows!==rt.total);
   /* ★ 정원을 넘겨 채워진 경우 — 숫자는 이미 `501/500` 으로 보이므로 **색으로만** 말한다.
      기준(총건수)은 작업보드 게이지·표 초과 판정과 같은 값(공고>0 이면 공고, 아니면 발주). */
-  const over=(rt&&filled>rt.total)?(filled-rt.total):0;
+  /* ★★ **무시트 작업만** — 서버(`workdeskTab`)가 `meta.sheetless` 일 때만 행에 `over` 를 붙이므로,
+     여기서 게이트를 빼면 시트 기반 탭에서 홈만 붉어지고 "표에서 붉은 줄로 표시합니다"가 **거짓말**이 된다
+     (시트 탭의 준비된 줄은 이미 이름이 적힌 행 수라 총건수와 다른 것이 정상 — 바로 아래 `gap` 과 같은 규율). */
+  const over=(rt&&_isNoSheet(t)&&filled>rt.total)?(filled-rt.total):0;
   const tip=[`채워진 줄 ${filled}명`,
     rt?`총건수 ${rt.total}건${rt.source==='work_order'?'(발주 기준)':''}`:'총건수 미상 — 준비된 줄 수로 표시합니다',
     `준비된 줄 ${rows}줄${blank?` (빈 슬롯 ${blank}줄)`:''}`,
