@@ -1475,6 +1475,9 @@ async function advertiserWorkSummary({ advertiserId, brandId = null } = {}) {
       const s = setlByTab.get(t.sheetId + '\t' + t.tabName) || null;
       return {
         sheetId: t.sheetId, tabGid: t.tabGid, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle,
+        // 무시트 여부 — 업체 화면이 시트 제목 라벨을 그릴지 정하는 표시용 불리언(민감정보 아님).
+        // 없으면 화면이 종전대로 시트 제목을 그리므로, 이 한 칸이 빠지면 라벨 숨김이 조용히 무력화된다.
+        sheetless: t.sheetless === true,
         active: t.active !== false,
         total: t.bTotal || 0, submitted: t.bSub || 0, paid: t.bPaid || 0,
         target: t.woRecruit || null,
