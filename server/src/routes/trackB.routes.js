@@ -1419,7 +1419,8 @@ router.post('/worktable/renumber', authMiddleware, internalMiddleware, async (re
     if (cleanBlanks === true) {
       blank = await svcRn.cleanupPairedBlanks({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
     }
-    const out = await svcRn.renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
+    /* ★ 실행이면 장부까지 다시 만든다 — 안 하면 10분 투영이 되돌린다(핑퐁, 서비스 주석 참조). */
+    const out = await svcRn.renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req), rebuild: true });
     if (blank) out.blank = blank;
     const bad = { not_sheetless: 409, tab_not_registered: 404, disabled: 409 };
     res.status(out.ok ? 200 : (bad[out.reason] || 400)).json(out);
