@@ -69,10 +69,16 @@ ok('★ order_capture 줄이 배타 조건을 말한다(두 종류가 같은 화
 /* ═══ ③ 캐시 접두 ═════════════════════════════════════════════════ */
 console.log('\n▶ 캐시 접두');
 ok('★★ 접두를 올렸다 — 안 올리면 같은 이미지의 옛 판정이 히트해 프롬프트 수정이 무효가 된다',
-  /_getCacheKey\('classify6:'/.test(gem));
+  /_getCacheKey\('classify[6-9]\d*:'/.test(gem));
+/* ★ 접두는 kind·판정 기준이 바뀔 때마다 오른다 — **상향은 허용하고 되돌아가는 것만** 막는다
+     (숫자를 박아 두면 종류가 늘 때마다 무관한 가드가 빨개진다). */
 ok('★ 옛 접두로 되돌아가지 않는다', !/_getCacheKey\('classify[1-5]?:'/.test(gem));
-ok('kind 화이트리스트는 그대로(종류를 새로 만들지 않았다)',
-  gem.includes("['review', 'receipt', 'purchase_confirm', 'order_capture', 'other']"));
+/* ★ 종류가 늘어도(order_cancel 등) 이 검사는 "기존 종류가 빠지지 않았다"를 본다. */
+ok('kind 화이트리스트에서 기존 종류가 빠지지 않았다', (() => {
+  const m = /const kind = \[([^\]]*)\]\.includes\(p\.kind\)/.exec(gem);
+  const have = m ? m[1].split(',').map(x => x.trim().replace(/'/g, '')) : [];
+  return ['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'].every(k => have.includes(k));
+})());
 
 /* ═══ ④ 허용 목록은 그대로 — A안 미끄럼 방지 ═══════════════════════ */
 console.log('\n▶ 허용 목록(A안으로 미끄러지지 않는다)');

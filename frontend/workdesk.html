@@ -1096,6 +1096,12 @@
   .nc-th{height:150px;background:var(--bg2,#EFF1F4);display:grid;place-items:center;overflow:hidden;cursor:pointer;position:relative}
   .nc-th img{width:100%;height:100%;object-fit:cover}
   .nc-th .ribdg{position:absolute;top:7px;right:7px}
+  /* 돋보기 — 카드 클릭(상세)은 그대로 두고 이미지만 크게 보는 길을 따로 낸다 */
+  .rizoom{position:absolute;bottom:7px;right:7px;width:26px;height:26px;border-radius:7px;
+          border:1px solid rgba(255,255,255,.5);background:rgba(17,24,39,.55);color:#fff;
+          font-size:13px;line-height:1;cursor:zoom-in;display:grid;place-items:center;padding:0}
+  .rizoom:hover{background:rgba(17,24,39,.78)}
+  .rizoomable{cursor:zoom-in}
   .nc-body{padding:8px 11px 7px;cursor:pointer;flex:1}
   .nc-act{padding:0 11px 10px}
   /* ★★ 채움(filled) 버튼을 쓰지 않는다 — 빨강 카드가 100장 늘어서면 화면이 벽이 되고
@@ -12506,6 +12512,21 @@ window.CS_REVIEW_EDIT_ON_RESOLVED = function(){ try{ if(document.getElementById(
    ══════════════════════════════════════════════════════════════ */
 const _RI_LABEL = { fail:'불량', suspect:'의심', pass:'통과', pending:'미검수', unverifiable:'판정 불가', resolved:'확인됨' };
 const _RI_CHAN  = { coupang:'쿠팡', naver:'네이버', kakao:'카카오메이커스', oliveyoung:'올리브영' };
+/** 캡처 크게 보기(돋보기).
+ *  ★★ 실행부는 **공유 라이트박스 `woImageModal`**(js/work-order-detail.js) 한 벌 —
+ *    작업오더 첨부·교체요청이 쓰는 그것이다. 여기에 오버레이를 새로 만들면 원본크기보기·
+ *    닫기·스크롤 동작이 화면마다 갈린다(이 저장소의 반복된 사고).
+ *  ★ onclick 에는 **인덱스만** 넘긴다 — 파일ID는 시트/외부발 문자열이라 문자열 보간 금지.
+ *  ★ 모듈이 없으면 조용히 죽지 않고 사유를 말한다. */
+function riZoom(i, which){
+  const r=(STATE.ri||[])[Number(i)]; if(!r) return;
+  const c=r.checks||{};
+  const id = which==='dup' ? ((c.duplicate&&c.duplicate.matchFileId)||'') : (r.file_id||'');
+  const url=_riImg(id);
+  if(!url){ _toast('이 건에는 볼 수 있는 이미지가 없습니다.'); return; }
+  if(typeof woImageModal!=='function'){ _toast('이미지 보기 모듈(js/work-order-detail.js)을 불러오지 못했습니다.'); return; }
+  woImageModal(url);
+}
 function _riImg(id){ return /^[-\w]{20,}$/.test(String(id||'')) ? API_BASE+'/api/drive/image/'+encodeURIComponent(id) : ''; }
 
 async function renderInspectView(){
@@ -12606,9 +12627,12 @@ function _riRenderHead(sum){
      SQL 로 파생해 센다). 여기 있는 것은 화면 필터·재검수 대상 선정용 최소 사본이고,
      회귀가드(`tests/inspectTypeCounts.test.js`)가 같은 픽스처로 두 구현을 실행해 **결과 동일**을
      고정한다 — 한쪽만 고치면 그 자리에서 빨개진다. */
-const RI_TYPES=[['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
+const RI_TYPES=[['cancel','🚫 주문취소'],['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
 function _riIssueTypes(r){
   const c=(r&&r.checks)||{}, out=[];
+  /* ★ 주문취소 — 리뷰어가 그 작업을 취소한 신호. verdict 를 보지 않는다(취소 화면은
+       어느 작업에서도 정상 제출이 아니다). format_fail 과 겹쳐 세어지는 것은 의도. */
+  if(c.format&&(c.format.got||c.format.kind)==='order_cancel') out.push('cancel');
   if(c.format&&c.format.verdict==='fail') out.push('format_fail');
   if(c.format&&c.format.verdict==='warn'&&c.format.expectedChannel) out.push('channel');
   if(c.product&&c.product.verdict==='warn') out.push('product');
@@ -12758,7 +12782,7 @@ function _riRenderBody(){
     const subs = act ? (flat ? [{h:`riResolve('${esc(r.file_id)}','ok')`,t:'✓ 정상',cls:'ok'},{h:act.main.h,t:'✕ 불량',cls:'bad'}] : act.subs) : [];
     return `<div class="ricard${r.status==='resolved'?' ri-r':''}">
       <div class="nc-type ${meta?meta.cls:'t-none'}">${esc(_riTypeLabel(p,c))}${others?` <span style="font-weight:600;opacity:.7">＋${others}</span>`:''}<span class="tag">${meta?meta.tag:''}</span></div>
-      <div class="nc-th" onclick="riOpenDetail(${i})">${thumb?`<img src="${thumb}" alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}<span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span></div>
+      <div class="nc-th" onclick="riOpenDetail(${i})">${thumb?`<img src="${thumb}" alt="" loading="lazy">`:'<span class="rimeta">이미지 없음</span>'}<span class="ribdg ${cls}">${_RI_LABEL[r.status]||r.status}</span>${thumb?`<button class="rizoom" title="이미지 크게 보기" onclick="event.stopPropagation();riZoom(${i})">🔍</button>`:''}</div>
       <div class="nc-body" onclick="riOpenDetail(${i})">
         <div class="rirow"><b>${esc(r.reviewer_name||'이름없음')}${r.row_index?' · '+r.row_index+'행':''}</b></div>
         <div class="rimeta"><a href="javascript:void(0)" onclick="event.stopPropagation();riFilterTab(${i})">${esc(r.tab_name||'')}</a>${r.channel?' · '+(_RI_CHAN[r.channel]||r.channel):''}</div>
@@ -12794,17 +12818,22 @@ const RI_TYPE_META={
 };
 function _riPrimaryIssue(r){
   const t=_riIssueTypes(r);
-  for(const k of ['duplicate','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
+  // ★ 주문취소가 맨 앞 — 담당자에게 "리뷰 화면이 아님"보다 "취소됨"이 먼저 읽혀야 한다
+  for(const k of ['cancel','duplicate','format_fail','product','similarity','channel','author']) if(t.includes(k)) return k;
   return null;
 }
 /* ★★ AI 가 판별한 화면 종류의 **단일 출처** — 원장(2차 검수)은 `kind`, 자동분류 판정값은 `got`
    으로 이름이 갈려 있어(실측: 현금영수증으로 판별된 건이 카드엔 "종류 불명"으로 떨어져 이동
    버튼이 안 뜸) 여기 한 곳에서 흡수한다. 옛 레코드도 kind 를 갖고 있어 **재검수 없이 소급 적용**된다. */
-const _RI_KIND={receipt:'현금영수증',order_capture:'주문내역(구매캡처)',purchase_confirm:'구매확정 완료 화면',review:'리뷰 화면'};
+const _RI_KIND={receipt:'현금영수증',order_capture:'주문내역(구매캡처)',purchase_confirm:'구매확정 완료 화면',review:'리뷰 화면',order_cancel:'주문 취소 화면'};
 function _riFmtKind(fm){ return (fm&&(fm.got||fm.kind))||''; }
 function _riKindLabel(fm){ return _RI_KIND[_riFmtKind(fm)]||''; }
 function _riTypeLabel(p,c){
   if(!p) return '이상 없음';
+  /* ★★ 주문취소 = 리뷰어가 그 작업을 취소한 것 → **다른 칸으로 옮길 건이 아니다**.
+       주 조치는 [✕ 불량]으로 종결(반려 문구는 '주문취소' 유형이 따로 있다). 실제 주문
+       취소 처리는 작업보드에서 사람이 — 검수 화면에서 자동으로 하지 않는다(되돌리기 어렵다). */
+  if(p==='cancel') return {main:{...A.bad,m:'m-red'}, subs:[A.ok,A.detail], more:moves};
   if(p==='format_fail'){
     const gl=_riKindLabel(c&&c.format);
     return '📵 리뷰화면 아님'+(gl?' — '+gl+'으로 보임':'');
@@ -13101,7 +13130,7 @@ function riOpenDetail(i){
       <button class="btn" onclick="riCloseDetail()">닫기</button></div>
     <div class="rimbody">
       <div class="rimleft">
-        ${_riImg(r.file_id)?`<img src="${_riImg(r.file_id)}" alt="">`:'<div class="empty">이미지 없음</div>'}
+        ${_riImg(r.file_id)?`<img class="rizoomable" src="${_riImg(r.file_id)}" alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx})">`:'<div class="empty">이미지 없음</div>'}
         <div class="rimeta">${esc(r.file_name||'')}</div>
       </div>
       <div class="rimright">
@@ -13121,7 +13150,7 @@ function riOpenDetail(i){
               ? `"${esc(c.author.ocr||'')}" 가 <b>${esc((c.author.others||[]).join(', '))}</b> 제출에도 나타납니다 — 실명 대조가 아니라 <b>같은 표기의 재사용</b>만 봅니다`
               : '실명 대조는 하지 않습니다(화면에 마스킹되어 나옴). 같은 표기가 다른 리뷰어 제출에 반복되는지만 봅니다')}
         </table>
-        ${dup.verdict==='fail'&&dup.matchFileId?`<div class="risbs"><div><div class="rimeta">지금 제출</div><img src="${_riImg(r.file_id)}" alt=""></div><div><div class="rimeta">이전 제출 · ${esc(dup.matchReviewer||'')}</div><img src="${_riImg(dup.matchFileId)}" alt=""></div></div>`:''}
+        ${dup.verdict==='fail'&&dup.matchFileId?`<div class="risbs"><div><div class="rimeta">지금 제출</div><img class="rizoomable" src="${_riImg(r.file_id)}" alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx})"></div><div><div class="rimeta">이전 제출 · ${esc(dup.matchReviewer||'')}</div><img class="rizoomable" src="${_riImg(dup.matchFileId)}" alt="" title="클릭하면 크게 보기" onclick="riZoom(${idx},'dup')"></div></div>`:''}
         ${r.ocr_text?`<div class="riocr"><div class="rimeta">캡처에서 읽어낸 리뷰 글</div>${esc(r.ocr_text)}</div>`:''}
       </div>
     </div>
