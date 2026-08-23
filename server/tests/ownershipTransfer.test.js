@@ -118,7 +118,9 @@ async function run() {
   console.log('\n4) 화면 배선');
   const ownsBlock = HTML.slice(HTML.indexOf('function _ovmOwnsHtml('), HTML.indexOf('function _ovmAddOwnHtml('));
   t('소유 캠페인 줄에 [이관] 버튼', /ownTransfer\(/.test(ownsBlock));
-  t('★ 이관 버튼은 admin/master 에만(서버 게이트와 1:1)', /isAdmin\?`<button class="trb"/.test(ownsBlock.replace(/\s+/g, ' ')));
+  // ★ 사용자 확정(2026-08-23): 이관은 **작업 줄**에만 — 레거시 '전체' 줄은 [×] 해제로만 정리한다.
+  t('★ 이관 버튼은 내부 담당자 + 작업 줄에만(서버 게이트와 1:1)',
+    /isAdmin&&!whole\?`<button class="trb"/.test(ownsBlock.replace(/\s+/g, ' ')));
   t('★ onclick 은 인덱스만(문자열 보간 금지)', /onclick="ownTransfer\(\$\{i\}\)"/.test(ownsBlock));
   t('팝업은 body 직속', /document\.body\.appendChild\(ov\)/.test(HTML));
   t('Esc 로 닫힌다(리스너 최상위 1회)',

@@ -1430,60 +1430,7 @@
   .owntr .note{font-size:11.5px;color:var(--muted);margin-top:10px;line-height:1.55;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .owntr .chk{font-size:11.5px;margin-top:5px;min-height:15px}
   .owntr .ft{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-  /* ── 시트에서 가져오기(4단계) — 전부 si- 접두로 스코프. body 직속 오버레이라 남의 화면과 안 겹친다 ── */
-  .si-ov{position:fixed;inset:0;z-index:1200;background:rgba(15,23,42,.5);display:flex;align-items:flex-start;justify-content:center;padding:26px 16px;overflow:auto}
-  .si-mo{width:min(760px,96vw);background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.24);overflow:hidden}
-  .si-h{display:flex;align-items:center;gap:8px;padding:13px 18px;border-bottom:1px solid var(--line);background:var(--card2)}
-  .si-h h3{margin:0;font-size:14.5px}
-  .si-x{border:0;background:0;font-size:20px;line-height:1;color:var(--faint);cursor:pointer;padding:2px 6px}
-  .si-steps{display:flex;gap:5px;padding:10px 18px;background:var(--card2);border-bottom:1px solid var(--line)}
-  .si-steps .s{flex:1;text-align:center;font-size:11.5px;color:var(--faint);padding:5px 4px;border-radius:7px}
-  .si-steps .s .n{display:inline-block;width:18px;height:18px;line-height:18px;border-radius:50%;background:var(--line2);color:var(--card);font-size:10.5px;font-weight:700;margin-right:5px}
-  .si-steps .s.on{color:var(--accent);font-weight:700;background:var(--accent-soft)}
-  .si-steps .s.on .n{background:var(--accent);color:#fff}
-  .si-steps .s.dn{color:var(--safe)} .si-steps .s.dn .n{background:var(--safe);color:#fff}
-  .si-b{padding:16px 18px;max-height:64vh;overflow-y:auto}
-  .si-f{display:flex;gap:8px;align-items:center;padding:12px 18px;border-top:1px solid var(--line);background:var(--card2)}
-  .si-l{display:block;font-size:11px;color:var(--faint);font-weight:650;margin:12px 0 4px}
-  .si-tf{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink);box-sizing:border-box}
-  .si-hint{font-size:11.5px;color:var(--muted);line-height:1.55;font-weight:400}
-  .si-box{font-size:12.5px;color:var(--ink);background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:10px 0;line-height:1.6}
-  .si-box.tint{background:var(--accent-soft);border-color:var(--accent)}
-  .si-box.ok{background:var(--safe-soft,#f2fbf5);border-color:var(--safe)}
-  .si-warn{font-size:12px;background:#fff8f0;border:1px solid #f4d9b4;border-left:3px solid var(--warn,#e08a1e);border-radius:0 8px 8px 0;padding:8px 11px;margin:8px 0;line-height:1.55;color:var(--ink)}
-  .si-err,.si-lock{font-size:12.5px;background:#fff5f5;border:1px solid #f2c9c9;border-left:3px solid var(--bad);border-radius:0 8px 8px 0;padding:9px 12px;margin:9px 0;line-height:1.6;color:var(--ink)}
-  .si-lock>b:first-child{display:block;margin-bottom:2px}
-  .si-why{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line2);font-size:12px;color:var(--muted);line-height:1.6}
-  .si-dupst{margin-top:5px;font-size:11.5px;color:var(--faint)}
-  .si-fix{margin-top:9px;padding-top:9px;border-top:1px dashed var(--line2);display:flex;flex-direction:column;gap:7px;align-items:flex-start}
-  .si-fixnote{font-size:11.5px;color:var(--muted);line-height:1.55}
-  .si-fixrow{display:flex;gap:7px;align-items:center;width:100%;flex-wrap:wrap}
-  .si-fixrow .si-tf{flex:1;min-width:170px;width:auto}
-  .si-fix .btn.xs{padding:5px 11px;font-size:12px}
-  .si-kpis{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-  .si-kpis>div{flex:1 1 110px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 10px;text-align:center}
-  .si-kpis .k{font-size:10.5px;color:var(--faint)}
-  .si-kpis .v{font-size:19px;font-weight:750;letter-spacing:-.02em}
-  .si-kpis .v.ok{color:var(--safe)} .si-kpis .v.warn{color:var(--warn,#b45309)}
-  .si-maplist{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
-  .si-mp{border:1px solid var(--line2);border-radius:7px;padding:3px 8px;font-size:11.5px;background:var(--card)}
-  .si-r{font-size:10.5px;border-radius:999px;padding:1px 7px;margin-left:5px}
-  .si-r.key{background:var(--accent-soft);color:var(--accent)}
-  .si-r.st{background:#fdf0e3;color:#b45309}
-  .si-r.auto{background:var(--safe-soft,#eaf7ef);color:var(--safe)}
-  .si-r.keep{background:var(--card2);color:var(--muted)}
-  .si-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
-  .si-tab{font-size:11.5px;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer;font-family:inherit}
-  .si-tab:hover{border-color:var(--accent);color:var(--accent)}
-  .si-rows{max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:7px}
-  .si-rows table{width:100%;border-collapse:collapse;font-size:12px}
-  .si-rows th{position:sticky;top:0;background:var(--card2);font-size:11px;padding:6px 8px;text-align:left;border-bottom:1px solid var(--line);z-index:1;color:var(--faint)}
-  .si-rows td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
-  .si-rows td.c,.si-rows th.c{text-align:center}
-  .si-rows tr.off td{opacity:.5}
-  .si-rows tr.off td .why{color:var(--warn,#b45309);font-size:11px}
-  .si-chk{display:flex;align-items:flex-start;gap:7px;font-size:12.5px;margin:8px 0 0;cursor:pointer;line-height:1.5}
-  .si-chk input{margin-top:3px}
+  /* ── 시트에서 가져오기 CSS 제거됨(사용자 확정 2026-08-23 — 업체관리에서 구글시트 창구 폐지) ── */
   .ovm-unm.imp{margin-top:6px;color:var(--accent);border-color:var(--accent)}
   .add{border:1px dashed var(--line2);border-radius:11px;padding:15px;background:var(--card2)}
   .add label{font-size:11px;color:var(--faint);font-weight:650;display:block;margin-bottom:4px}
@@ -15190,22 +15137,20 @@ async function renderOwnershipView(){
     <div class="ovm-drawer" id="ovmDrawer" role="dialog" aria-modal="true" aria-label="업체 설정"></div>`;
   // ★★ 자리표시자('불러오는 중…')를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다 — 매핑용 탭 조회도
   //   같은 경계 안에 둬야 네트워크 오류가 B안의 숨은 목록 뒤에 남지 않는다.
-  let r=null, os=null, ac=null;
+  let r=null, ac=null;
   try{
     // 탭 인덱스(시트명/탭명 조회용): 매핑용 전체 목록(forMapping=1 — staff도 전체 탭명 수신, 미소유 시트 매핑 가능).
     // 작업보드 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
     if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
     buildTabIndex(STATE.mapTabs);
     const isAdminRole = _isInternalRole();   // 광고주 계정 목록 — 내부 담당자(AE 포함)
-    [r, os, ac]=await Promise.all([
+    [r, ac]=await Promise.all([
       // ?overview=1 — 업체별 작업수·계약 미매칭·마감자료 검수 대기·접속링크 상태를 같은 응답에 받는다
       //   (신규 엔드포인트 0 · 로컬 DB 집계라 인트라넷 무접촉). 실패 소스는 overview 플래그로 온다.
       api('/api/trackb/advertisers?overview=1'),
-      api('/api/trackb/owned-sheets').catch(()=>null),
       isAdminRole ? api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null) : Promise.resolve(null),
     ]);
   }catch(err){ _ovmLoadFailed(err&&err.message); return; }
-  STATE.ownedSheetIds = new Set((os&&os.ok&&os.sheetIds)||[]);   // 업체추가 시트 드롭다운 제외용
   STATE.advAccts = (ac&&ac.success&&ac.users)||[];               // 광고주 로그인 계정(업체별) — master/admin만
   if(!r||!r.ok){ _ovmLoadFailed((r&&r.error)||'업체 목록을 불러올 수 없습니다(admin/master 권한 필요)'); return; }
   STATE.advs=r.items||[];
@@ -15275,10 +15220,10 @@ function _ovmLinkKnown(){ const m=STATE.ovMeta; return !!(m && m.ok && !m.linksU
 // 업체 지정 현황 = **작업(작업보드) 기준** — 지정 단위가 작업이므로 시트 개수는 더 이상 세지 않는다.
 //   ★ 재료는 미지정 판정과 같은 mapTabs 하나(못 받았으면 known:false = 숫자를 지어내지 않는다).
 function _ovmTabCounts(){
-  const all=(STATE.mapTabs||[]);
-  return { known:all.length>0, total:all.length, un:_ovmUnassignedTabs().length };
+  const all=_ovmLiveTabs();   // ★ 분모·분자가 같은 집합이어야 "지정 N / 활성 M" 산수가 맞는다
+  return { known:(STATE.mapTabs||[]).length>0, total:all.length, un:_ovmUnassignedTabs().length };
 }
-function _ovmbSummaryHtml(advs, works, total, free, bad, matchKnown, candKnown){
+function _ovmbSummaryHtml(advs, works, bad, matchKnown, candKnown){
   const tc=_ovmTabCounts();
   const tv=n=>tc.known?Number(n).toLocaleString('ko-KR'):'?';
   const list=advs||[];
@@ -15294,7 +15239,7 @@ function _ovmbSummaryHtml(advs, works, total, free, bad, matchKnown, candKnown){
   return `<section class="ovm-bmetrics">
     <article class="ovm-bmetric"><span class="k">관리 업체</span><strong class="v">${list.length.toLocaleString('ko-KR')}</strong><span class="s">진행 작업 보유 ${bad?'?':list.filter(a=>(Number(a.works)||0)>0).length}개 업체</span><span class="loads">${loadText}</span></article>
     <article class="ovm-bmetric"><span class="k">진행 작업</span><strong class="v">${bad?'?':Number(works||0).toLocaleString('ko-KR')}</strong><span class="s">현재 업체 집계 기준</span></article>
-    <article class="ovm-bmetric good"><span class="k">업체 지정 작업</span><strong class="v">${tv(tc.total-tc.un)}</strong><span class="s">활성 작업 ${tv(tc.total)}건${tc.known&&tc.un?` · 미지정 ${tc.un}건`:''}</span></article>
+    <article class="ovm-bmetric good"><span class="k">업체 지정 작업</span><strong class="v">${tv(tc.total-tc.un)}</strong><span class="s">진행 중 작업 ${tv(tc.total)}건${tc.known&&tc.un?` · 미지정 ${tc.un}건`:''}</span></article>
     <article class="ovm-bmetric warn"><span class="k">확인 필요</span><strong class="v">${v(noMatch==null?finish:noMatch)}</strong><span class="s">${noMatch==null?'마감자료 점검': '계약 매칭 확인'}</span></article>
   </section>
   <section class="ovm-bupdates">
@@ -15368,31 +15313,18 @@ function _ovmRenderAdvs(){
       +`<span class="ovm-chip warn${_ovmAdvF==='todo'?' on':''}"${ovOk?'':' disabled title="'+_ovmCandWhy()+'"'} onclick="${ovOk?`_ovmAdvSetF('todo',this)`:''}">마감자료 검수 <b class="n">${ovOk?todo:'?'}</b></span>`;
   }
 }
-// 사이드바 하단 — 업체 미지정 시트(지정 전에는 계약·정산이 붙지 않는다). 상시 노출(종전엔 추가 폼 안에만 있었다).
+/* ── 사이드바 하단 — 업체 미지정 **작업**(지정 전에는 계약·정산이 붙지 않는다) ──
+   ★★ 진실원천은 **작업오더로 만들어진 작업보드**다(사용자 확정 2026-08-23) — 업체관리는
+      구글시트를 찾아오지도, 참조하지도, 시트 목록을 보여주지도 않는다. */
 function _ovmRenderFoot(){
   const el=$('#ovmFoot'); if(!el) return;
-  const isAdmin=STATE.role==='master'||STATE.role==='admin';
-  const owned=STATE.ownedSheetIds||new Set();
-  const total=Object.keys(STATE.sheetMap||{}).length;
-  const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid));
-  /* ★ 이 목록(미지정 시트)에는 **시스템이 아는 시트만** 뜬다 — 등록조차 안 된 시트는 여기에도
-     안 나오므로, 주소로 직접 가져오는 창구를 바로 아래 상시 노출한다(admin/master 만). */
-  const imp = isAdmin
-    ? `<button class="ovm-unm imp" onclick="openSheetImport('')"
-         title="업체관리·작업보드 어디에도 없는 시트를 주소로 가져옵니다">＋ 시트에서 가져오기</button>`
-    : '';
-  /* ★ 세는 단위 = **작업(탭)** — 시트 단위로 세면 "시트는 지정됐는데 그 안의 탭만 미지정"인 건이
-     통째로 안 보인다(작업바 '미지정' 그룹과 같은 판정을 쓴다). 재료(mapTabs)를 못 받았으면
-     0 으로 위장하지 않고 종전 시트 기준 표기로 접는다. */
-  const unTabs=_ovmUnassignedTabs().length, tabsKnown=(STATE.mapTabs||[]).length>0;
-  const main = tabsKnown
-    ? (unTabs
+  // ★ 재료(mapTabs)를 못 받았으면 0 으로 위장하지 않고 사유를 말한다.
+  const tabsKnown=(STATE.mapTabs||[]).length>0, unTabs=_ovmUnassignedTabs().length;
+  el.innerHTML = !tabsKnown
+    ? `<button class="ovm-unm" onclick="renderOwnershipView()" title="작업 목록을 불러오지 못했습니다 — 눌러서 다시 시도">작업 목록을 불러오지 못함<span class="n">?</span></button>`
+    : (unTabs
         ? `<button class="ovm-unm" onclick="_ovmOpenDrawer('unm')" title="업체를 지정하면 계약·정산이 붙습니다">⚠ 업체 미지정 작업<span class="n">${unTabs}</span></button>`
-        : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 작업이 지정됨<span class="n">${total}</span></button>`)
-    : (free.length
-        ? `<button class="ovm-unm" onclick="_ovmOpenDrawer('unm')" title="업체를 지정하면 계약·정산이 붙습니다">⚠ 업체 미지정 시트<span class="n">${free.length}</span></button>`
-        : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 시트가 지정됨<span class="n">${total}</span></button>`);
-  el.innerHTML = main + imp;
+        : `<button class="ovm-unm ok" onclick="_ovmOpenDrawer('unm')">✓ 모든 작업이 지정됨<span class="n">${_ovmLiveTabs().length}</span></button>`);
 }
 
 /* ── 전체 개요(업체 미선택) — 빈 폼 대신 "어느 업체를 봐야 하는가"를 먼저 보여준다 ──
@@ -15407,10 +15339,7 @@ function _ovmRenderOverview(opt){
   if(wasAdv && !(opt&&opt.nav) && typeof _navPush==='function') _navPush();
   const advs=STATE.advs||[];
   const meta=STATE.ovMeta;
-  const owned=STATE.ownedSheetIds||new Set();
-  const total=Object.keys(STATE.sheetMap||{}).length;
-  const free=Object.keys(STATE.sheetMap||{}).filter(sid=>!owned.has(sid)).length;
-  const unTabs=_ovmUnassignedTabs().length;   // 미지정 **작업(탭)** 수 — 시트 단위로는 안 보이는 건까지 센다
+  const unTabs=_ovmUnassignedTabs().length;   // 미지정 **작업(작업보드)** 수 — 화면의 유일한 지정 단위
   const works=advs.reduce((n,a)=>n+(+a.works||0),0);
   const bad=!meta||!meta.ok;
   // ★★ 열마다 재료가 달라 실패도 따로 온다 — 한 덩어리로 묶으면 "계약 링크만 죽었는데 미매칭 0"처럼
@@ -15441,14 +15370,14 @@ function _ovmRenderOverview(opt){
       +`<span class="ovm-lkcell">${_isInternalRole()?(lkb+lkcopy):'<span class="ovm-fin">—</span>'}</span>`
       +`<span class="c${acct?'':' dim'}">${STATE.role==='master'||STATE.role==='admin'?(acct?acct+'개':'없음'):'—'}</span>`
       +`</div>`;
-  }).join('') || '<div class="ovm-empty"><b>등록된 업체가 없습니다</b>업체 등록 후 소유 시트를 지정하세요.</div>';
+  }).join('') || '<div class="ovm-empty"><b>등록된 업체가 없습니다</b>업체를 등록한 뒤 작업을 지정하세요.</div>';
   p.innerHTML=`<div class="ovm-bpage">
     <header class="ovm-bhead"><div><h2>업체 관리</h2><p>관계 상태를 한 화면에서 확인하고, 업체 원장에서 바로 상세 업무로 이동합니다.</p></div>
-      <span class="ovm-bsp"></span>${_isInternalRole()?`<button class="btn" title="남아 있는 '시트 전체' 소유를 작업(작업보드) 단위로 펼칩니다 — 미리보기 후 실행" onclick="ownExpandAll()">▦ 시트 전체 소유 정리</button>`:''}<button class="btn" onclick="renderOwnershipView()">새로고침</button><button class="btn pri" onclick="showAddAdvertiser()">업체 등록</button></header>
-    ${_ovmbSummaryHtml(advs,works,total,free,bad,matchKnown,candKnown)}
+      <span class="ovm-bsp"></span><button class="btn" onclick="renderOwnershipView()">새로고침</button><button class="btn pri" onclick="showAddAdvertiser()">업체 등록</button></header>
+    ${_ovmbSummaryHtml(advs,works,bad,matchKnown,candKnown)}
     <section class="ovm-ov ovm-bledger">
     <div class="ovm-ovh"><h2>업체 ${advs.length}곳 · 작업 ${bad?'?':works.toLocaleString('ko-KR')}건</h2>
-      <span class="s">${(STATE.mapTabs||[]).length?`활성 작업 ${(STATE.mapTabs||[]).length}건 중 ${(STATE.mapTabs||[]).length-unTabs}건이 업체에 지정됨`:'작업 목록을 불러오지 못해 지정 현황을 셀 수 없습니다'}</span></div>
+      <span class="s">${(STATE.mapTabs||[]).length?`진행 중 작업 ${_ovmLiveTabs().length}건 중 ${_ovmLiveTabs().length-unTabs}건이 업체에 지정됨`:'작업 목록을 불러오지 못해 지정 현황을 셀 수 없습니다'}</span></div>
     <p class="ovm-lead">업체를 고르면 그 업체의 작업·정산·접속설정으로 들어갑니다. <b>마감자료 검수</b>가 있는 업체부터 보세요.
       ${(bad||!candKnown||!matchKnown||!linkKnown)?`<b style="color:var(--warn)"> · ${esc(bad?'집계를 불러오지 못해 숫자를 ?로 표시합니다':'일부 집계를 불러오지 못해 그 칸만 ?로 표시합니다')}</b>`:''}</p>
     ${unTabs?`<div class="ovm-cta"><span class="ct"><b>⚠ 업체가 지정되지 않은 작업 ${unTabs}개</b>
@@ -15487,7 +15416,7 @@ function _ovmCloseDrawer(silent){
   if(d){ d.classList.remove('on'); d.setAttribute('aria-hidden','true'); d.innerHTML=''; }
   if(sc) sc.classList.remove('on');
 }
-const _OVM_DTITLE={link:'접속 링크',acct:'광고주 계정',own:'소유 캠페인',add:'거래처 등록',unm:'업체 미지정 작업'};
+const _OVM_DTITLE={link:'접속 링크',acct:'광고주 계정',own:'소유 작업',add:'거래처 등록',unm:'업체 미지정 작업'};
 function _ovmDrawerHtml(tab,a){
   const isAdmin=_isInternalRole();   // 접속 링크·광고주 계정 = 내부 담당자(AE 포함, 서버 internalMiddleware 와 1:1)
   let body='';
@@ -15506,39 +15435,32 @@ function _ovmDrawerHtml(tab,a){
       <button class="btn xs" onclick="_ovmCloseDrawer()" aria-label="닫기">✕ 닫기</button></div>
     ${tabs}<div class="ovm-dbody">${body}</div>`;
 }
-// 소유 캠페인 목록(해제 버튼 포함) — 종전 renderOwnPanel 인라인 마크업을 그대로 옮긴 것.
+// 소유 작업 목록(해제 버튼 포함) — 종전 renderOwnPanel 인라인 마크업을 그대로 옮긴 것.
 function _ovmOwnsHtml(a){
   const items=STATE.ownItems||[];
   const isAdmin=_isInternalRole();   // ★ 이관 = 내부 담당자(AE 포함) — 서버 게이트와 1:1
+  /* ★★ 업체관리는 구글시트를 참조하지 않는다(사용자 확정 2026-08-23) — 줄 이름은 **작업 이름**이고
+     시트 제목은 어디에도 적지 않는다. 남아 있는 `tab_gid IS NULL` 소유(레거시)는 그 시트의 작업을
+     통째로 덮는 옛 지정이라 **전체(레거시)** 로만 표기하고, 정리는 [×] 해제로 한다. */
   const owns = items.map((o,i)=>{
     const whole = !o.tabGid;
-    const label = whole ? sheetTitle(o.sheetId) : (STATE.tabIndex[o.sheetId+'::'+o.tabGid] || ('탭 '+o.tabGid));
-    // ★ 시트 전체(▦)는 **레거시**다 — 지금 지정 창구는 작업 단위 하나이고, 이 행만 시트 축을 남긴다.
-    // ★ 무시트 작업은 시트 제목 = 작업명이라 그대로 적으면 같은 말이 두 줄이 된다.
-    const src = sheetTitle(o.sheetId);
-    const sub = whole ? '시트 전체 · 이 시트의 새 작업까지 자동 포함(레거시)' : (src===label ? '' : ('시트: '+src));
+    const label = whole ? '이 업체의 옛 지정' : (STATE.tabIndex[o.sheetId+'::'+o.tabGid] || ('작업 '+o.tabGid));
+    const sub = whole ? '작업 단위로 지정되기 전의 소유입니다 — [×]로 해제하고 작업마다 지정하세요' : '';
     return `<div class="own"><span class="ic">${whole?'▦':'▤'}</span><div class="info"><b>${esc(label)}</b><span>${esc(sub)}</span></div>
-      <span class="scope ${whole?'all':'tab'}">${whole?'시트 전체':'작업'}</span>
-      ${whole&&isAdmin?`<button class="trb" title="이 시트의 활성 작업들을 개별 소유로 펼칩니다(미리보기 후 실행)" onclick="ownExpandOne(${i})">작업 단위로 펼치기</button>`:''}
-      ${isAdmin?`<button class="trb" title="다른 거래처로 이관" onclick="ownTransfer(${i})">이관</button>`:''}
+      <span class="scope ${whole?'all':'tab'}">${whole?'전체(레거시)':'작업'}</span>
+      ${isAdmin&&!whole?`<button class="trb" title="다른 거래처로 이관" onclick="ownTransfer(${i})">이관</button>`:''}
       <button class="rm" title="소유 해제" onclick="rmOwn('${esc(o.sheetId)}','${esc(o.tabGid||'')}')">×</button></div>`;
-  }).join('') || `<div class="empty" style="padding:16px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
-  const wholes=items.filter(o=>!o.tabGid).length;
-  const note = wholes&&isAdmin
-    ? `<div class="empty" style="padding:10px 12px;text-align:left">▦ <b>시트 전체 소유 ${wholes}건</b>이 남아 있습니다 —
-        업체 지정은 이제 <b>작업(작업보드) 단위</b>라, [작업 단위로 펼치기]로 정리하면 그 시트에 새 작업이 생겨도
-        자동 포함되지 않고 <b>미지정</b>으로 뜹니다.</div>` : '';
-  return `<div class="sect"><div class="st">소유 캠페인 ${items.length}</div>${note}${owns}</div>`;
+  }).join('') || `<div class="empty" style="padding:16px">소유 작업 없음 — 아래에서 추가하세요.</div>`;
+  return `<div class="sect"><div class="st">소유 작업 ${items.length}</div>${owns}</div>`;
 }
 function _ovmAddOwnHtml(){
   // ★ 지정 단위는 **작업(탭) 하나** — 시트 전체 지정은 폐지(사용자 확정 2026-08-23).
   //   후보는 화면의 미지정 판정과 **같은 재료**(mapTabs 의 advertiserId 없음)라 두 목록이 갈릴 수 없다.
   const un=_ovmUnassignedTabs().filter(t=>_ovmTabGid(t));
   _ovmAddList=un;
-  const bySheet=new Map();
-  un.forEach((t,i)=>{ const k=sheetTitle(t.sheetId); if(!bySheet.has(k)) bySheet.set(k,[]); bySheet.get(k).push(i); });
-  const opts=[...bySheet.entries()].map(([title,idxs])=>
-    `<optgroup label="${esc(title)}">`+idxs.map(i=>`<option value="${i}">${esc(_ovmAddList[i].tabName)}</option>`).join('')+`</optgroup>`).join('');
+  // ★ 시트로 묶지 않는다 — 화면에 시트 개념을 남기지 않기 위해 작업 이름만 나열한다(가나다).
+  const opts=un.map((t,i)=>({i,n:String(t.tabName||'')})).sort((a,b)=>a.n.localeCompare(b.n,'ko'))
+    .map(x=>`<option value="${x.i}">${esc(x.n)}</option>`).join('');
   return `<div class="sect"><div class="st">소유 추가 <span class="sthint">업체 미지정 작업에서 고릅니다</span></div>
       <div class="add">
         ${un.length?`<label>작업(작업보드)</label>
@@ -15556,7 +15478,11 @@ function _ovmAddOwnHtml(){
      재료가 이미 받아 둔 `STATE.mapTabs` 하나뿐이라 **서버 변경 0**(신규 엔드포인트 0).
    ★ onclick 은 **인덱스만** — 탭명·시트명은 시트발 외부 문자열이다(문자열 보간 금지 규율). */
 let _ovmUnmList=[];
-function _ovmUnassignedTabs(){ return (STATE.mapTabs||[]).filter(t=>!t.advertiserId); }
+/* ★★ 업체관리가 다루는 것은 **진행 중인 작업**이다 — 마감(🏁)된 작업은 새로 업체를 지정할 이유가
+   없으므로 후보·집계에서 뺀다(이미 지정된 마감 작업은 소유 목록·연결탭 표에 그대로 남는다).
+   ★ `finished` 를 못 받으면(구버전 백엔드) 종전대로 포함한다 — 모르는 것을 숨기지 않는다. */
+function _ovmLiveTabs(){ return (STATE.mapTabs||[]).filter(t=>!t.finished); }
+function _ovmUnassignedTabs(){ return _ovmLiveTabs().filter(t=>!t.advertiserId); }
 // 탭 gid 는 시트/작업표발 값이라 표기가 흔들린다 — 판정은 이 한 함수로(사본 금지).
 function _ovmTabGid(t){ return String(t&&t.tabGid==null?'':t.tabGid).trim(); }
 function _ovmUnmatchedHtml(){
@@ -15568,14 +15494,12 @@ function _ovmUnmatchedHtml(){
   if(!tabs.length) return `<div class="sect"><div class="st">업체 미지정 작업</div>
     <div class="empty" style="padding:16px">모든 작업이 업체에 지정됐습니다.</div></div>`;
   const rows=tabs.map((t,i)=>{
-    // ★ 무시트 작업에는 시트 라벨을 그리지 않는다(판정 단일 출처 `_isNoSheet`) —
-    //   시트 제목이 작업명과 같은 경우도 같은 말이 두 줄이 되므로 함께 접는다(표시 중복 제거).
-    const gid=_ovmTabGid(t), src=sheetTitle(t.sheetId);
-    const sub=(_isNoSheet(t)||src===t.tabName)?'':src;
+    // ★ 시트 제목을 적지 않는다 — 업체관리의 단위는 작업(작업보드) 하나다.
+    const gid=_ovmTabGid(t);
     return `<div class="own"><span class="ic">▤</span>
-      <div class="info"><b>${esc(t.tabName)}</b><span>${esc(sub)}</span></div>
+      <div class="info"><b>${esc(t.tabName)}</b><span></span></div>
       ${gid?`<button class="btn xs pri" onclick="ownAssign(${i})">업체 지정</button>`
-           :`<button class="btn xs" disabled title="이 작업은 탭 gid 가 없어 지정할 수 없습니다 — [시트 반영 점검]의 gid 채우기로 gid 를 채운 뒤 지정하세요">지정 불가</button>`}</div>`;
+           :`<button class="btn xs" disabled title="이 작업은 식별자(gid)가 없어 지정할 수 없습니다 — 관리자에게 문의하세요">지정 불가</button>`}</div>`;
   }).join('');
   return `<div class="sect"><div class="st">업체 미지정 작업 ${tabs.length}
       <span class="sthint">지정 전에는 계약·정산이 붙지 않습니다</span></div>
@@ -15587,8 +15511,8 @@ function _ovmUnmatchedHtml(){
 function ownAssign(i){
   const t=_ovmUnmList[i]; if(!t) return;
   const gid=_ovmTabGid(t);
-  if(!gid){ toast('이 작업은 탭 gid 가 없어 지정할 수 없습니다 — [시트 반영 점검]에서 gid 를 채운 뒤 지정하세요'); return; }
-  _trOpen({kind:'assign', sheetId:t.sheetId, tabGid:gid, label:t.tabName+' · '+sheetTitle(t.sheetId)});
+  if(!gid){ toast('이 작업은 식별자(gid)가 없어 지정할 수 없습니다 — 관리자에게 문의하세요'); return; }
+  _trOpen({kind:'assign', sheetId:t.sheetId, tabGid:gid, label:t.tabName});
 }
 
 /* ── 거래처 등록 폼 — 종전 showAddAdvertiser 의 마크업을 그대로 패널로 옮긴 것(필드 id·검증 로직 불변) ── */
@@ -15596,11 +15520,9 @@ function _ovmAddAdvHtml(){
   // ★ 등록 = 업체 생성 + **작업(작업보드) 1건 소유 지정**(사용자 확정 2026-08-23 — 시트 전체 지정 폐지).
   const un=_ovmUnassignedTabs().filter(t=>_ovmTabGid(t));
   _ovmAddList=un;
-  const bySheet=new Map();
-  un.forEach((t,i)=>{ const k=sheetTitle(t.sheetId); if(!bySheet.has(k)) bySheet.set(k,[]); bySheet.get(k).push(i); });
   const tabOpts = un.length
-    ? [...bySheet.entries()].map(([title,idxs])=>
-        `<optgroup label="${esc(title)}">`+idxs.map(i=>`<option value="${i}">${esc(_ovmAddList[i].tabName)}</option>`).join('')+`</optgroup>`).join('')
+    ? un.map((t,i)=>({i,n:String(t.tabName||'')})).sort((a,b)=>a.n.localeCompare(b.n,'ko'))
+        .map(x=>`<option value="${x.i}">${esc(x.n)}</option>`).join('')
     : `<option value="" disabled>지정 가능한 미지정 작업 없음</option>`;
   const remainBar = un.length
     ? `<div class="remainbar warn">📋 거래처·담당자 매칭이 필요한 <b>업체 미지정 작업 ${un.length}건</b></div>`
@@ -15627,13 +15549,7 @@ function _ovmAddAdvHtml(){
         <button id="advCreateBtn" class="btn pri assignbtn" disabled onclick="createAdvertiser()">＋ 업체 등록 + 작업 소유 지정</button>
       </div>
     </div>
-    ${isAdmin?`<div class="sect"><div class="st">찾는 작업이 목록에 없나요?</div>
-      <div class="ovm-impbox">
-        <div>위 목록에는 <b>시스템이 이미 아는 작업</b>만 나옵니다. 접수를 거치지 않아
-          <b>업체관리·작업보드 어디에도 없는 시트</b>는 여기에 뜨지 않습니다.<br>
-          그런 시트는 <b>구글시트 탭 주소</b>를 붙여넣어 가져올 수 있습니다.</div>
-        <button class="btn pri" onclick="openSheetImport('')">＋ 시트에서 가져오기</button>
-      </div></div>`:''}`;
+`;
 }
 // 거래처 등록 폼 마운트 후 — AE 자동완성 목록 로드(종전 showAddAdvertiser 말미와 동일).
 function _ovmAfterAddMount(){
@@ -15651,7 +15567,7 @@ function _ovmAfterAddMount(){
 async function deleteAdv(i){
   const a=STATE.advs[i]; if(!a) return;
   const msg = a.owned>0
-    ? `'${a.name}' 업체를 목록에서 삭제할까요?\n연결된 소유 캠페인 ${a.owned}건도 함께 해제됩니다.\n(숨김 처리 — 필요 시 복구 가능)`
+    ? `'${a.name}' 업체를 목록에서 삭제할까요?\n연결된 소유 작업 ${a.owned}건도 함께 해제됩니다.\n(숨김 처리 — 필요 시 복구 가능)`
     : `'${a.name}' 업체를 목록에서 삭제할까요?`;
   if(!confirm(msg)) return;
   const r=await api('/api/trackb/advertisers/'+encodeURIComponent(a.id),{method:'DELETE'});
@@ -15676,8 +15592,7 @@ function onAdvTab(){
   const t=Number.isFinite(i)?_ovmAddList[i]:null;
   const nameEl=$('#advName'), prev=$('#advTabInfo');
   if(!t){ if(nameEl){ nameEl.disabled=true; nameEl.placeholder='먼저 작업을 선택하세요'; } if(prev) prev.textContent=''; return; }
-  const src=sheetTitle(t.sheetId);
-  if(prev) prev.textContent = (src===t.tabName?'':('시트: '+src));
+  if(prev) prev.textContent = '';
   if(nameEl){ nameEl.disabled=false; nameEl.placeholder='예: (주)콩고물'; nameEl.focus(); }
 }
 // 인트라넷 광고주DB 실시간 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시.
@@ -15951,7 +15866,9 @@ async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCu
 }
 // 연결된 탭 클릭 → 작업보드에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
 function openOwnTab(i){ const t=(STATE.ownTabs||[])[i]; if(!t) return;
-  STATE.pendingTab={sheetId:t.sheetId, tabGid:t.tabGid, tabName:t.tabName, spreadsheetTitle:t.spreadsheetTitle||sheetTitle(t.sheetId)};
+  // ★ 업체관리는 시트 제목을 만들지 않는다 — 서버가 준 값만 그대로 넘긴다(작업보드 머리가 알아서
+  //   무시트면 감춘다). 여기서 sheetTitle() 로 지어내면 이 화면에 시트 개념이 되살아난다.
+  STATE.pendingTab={sheetId:t.sheetId, tabGid:t.tabGid, tabName:t.tabName, spreadsheetTitle:t.spreadsheetTitle||''};
   switchView('workdesk'); }
 function sheetTitle(sid){ return (STATE.sheetMap[sid]&&STATE.sheetMap[sid].title)||sid; }
 function renderOwnPanel(a, items){
@@ -15959,7 +15876,6 @@ function renderOwnPanel(a, items){
   //   ★ 접속링크·계정·소유시트·거래처추가는 **우측 패널**로 옮겼다 — 매일 보는 연결탭 표가 화면 위를
   //     차지해야 한다(종전엔 설정 카드가 상단을 점유해 표가 화면 아래로 밀렸다).
   const isAdmin=_isInternalRole();                                   // 접속 링크·광고주 계정·업체 삭제 = 내부 담당자
-  const canImport=STATE.role==='master'||STATE.role==='admin';       // 시트 가져오기(등록 창구)는 종전대로 admin/master
   const lk=STATE.advLink;
   const lkb = !isAdmin ? '' : (!lk||!lk.token) ? '<span class="ovm-fin">준비중</span>'
     : !lk.active ? '<span class="ovm-fin cand">폐기</span>'
@@ -15968,18 +15884,17 @@ function renderOwnPanel(a, items){
   $('#ownPanel').innerHTML = `
     <div class="ph2 ovm-hd"><span class="big">${esc((a.name||'?').slice(0,1))}</span>
       <div style="flex:1;min-width:0"><h2>${esc(a.name)}</h2>
-        <div class="acc">거래처 ID: ${esc(a.id)} · 소유 캠페인 ${items.length} · 연결된 탭 ${(STATE.ownTabs||[]).length}</div></div>
+        <div class="acc">거래처 ID: ${esc(a.id)} · 소유 작업 ${items.length} · 연결된 작업 ${(STATE.ownTabs||[]).length}</div></div>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 리뷰웹시스템[3버전]에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
     <div class="ovm-hd r2">
       <span class="lbl">설정</span>
       ${isAdmin?`<button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('link')">🔗 접속 링크 ${lkb}</button>
       <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('acct')">👤 광고주 계정 ${accts?`<span class="ovm-fin">${accts}개</span>`:'<span class="ovm-fin cand">없음</span>'}</button>`:''}
-      <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('own')">▦ 소유 시트 <span class="ovm-fin">${items.length}</span></button>
+      <button class="btn ovm-setbtn" onclick="_ovmOpenDrawer('own')">▦ 소유 작업 <span class="ovm-fin">${items.length}</span></button>
       <button class="btn ovm-setbtn" onclick="copyAdvertiserLink()"
         title="이 업체의 작업 목록으로 바로 가는 내부 담당자용 주소를 복사합니다. 위의 [접속 링크](광고주가 로그인 없이 여는 링크)와는 다릅니다.">🔗 업체 링크 복사</button>
-      ${canImport?`<button class="btn ovm-setbtn" onclick="openSheetImport('${esc(a.id)}')"
-        title="시스템에 없는 구글시트 탭 주소로 과거 작업을 가져옵니다">＋ 시트에서 가져오기</button>`:''}
+
       <span style="flex:1"></span>
       <button class="btn xs" onclick="_ovmRenderOverview()">← 전체 개요</button>
       ${isAdmin?`<button class="btn xs" onclick="deleteAdv(${(STATE.advs||[]).findIndex(x=>x.id===a.id)})">업체 삭제</button>`:''}
@@ -16041,10 +15956,10 @@ function _ownTabsHtml(){
   if(!ot.length){
     // ★ 조회가 죽은 것과 정말 0건인 것을 구분한다 — 실패인데 "시트를 지정하세요"라고 하면 오독시킨다.
     if((STATE.ownTabMeta||{}).unreachable)
-      return `<div class="st">연결된 탭 <span class="sthint">불러오지 못함</span></div>
-        <div class="ovm-empty"><b>연결된 탭을 불러오지 못했습니다</b>잠시 후 다시 시도하세요.
+      return `<div class="st">연결된 작업 <span class="sthint">불러오지 못함</span></div>
+        <div class="ovm-empty"><b>연결된 작업을 불러오지 못했습니다</b>잠시 후 다시 시도하세요.
           <div style="margin-top:9px"><button class="btn xs" onclick="selAdv((STATE.advs||[]).findIndex(x=>STATE.advCur&&x.id===STATE.advCur.id))">다시 시도</button></div></div>`;
-    return `<div class="st">연결된 탭 0</div><div class="empty" style="padding:14px">연결된 탭 없음 — [소유 시트]에서 시트를 지정하면 그 시트의 탭이 여기 나옵니다.</div>`;
+    return `<div class="st">연결된 작업 0</div><div class="empty" style="padding:14px">연결된 작업 없음 — [소유 작업]에서 작업을 지정하면 여기 나옵니다.</div>`;
   }
   const meta=STATE.ownTabMeta||{};
   const warn=((meta.statsUnavailable||meta.finishedUnavailable)
@@ -16052,7 +15967,7 @@ function _ownTabsHtml(){
     // ★ 담당하지 않은 업체는 서버가 폴더 링크를 내려주지 않는다 — 그 사실을 말한다(회색 버튼만 두면 오독).
     + (meta.folderScoped===false
       ? `<div class="ovm-warn">⚠ 담당하지 않은 업체라 <b>[자료]</b> 폴더 링크는 표시되지 않습니다(담당 AE·관리자에게 문의).</div>` : '');
-  return `<div class="st">연결된 탭 ${ot.length} <span class="sthint">최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 탭만 표시</span></div>
+  return `<div class="st">연결된 작업 ${ot.length} <span class="sthint">최신순 — 클릭하면 작업보드로 열기 · [계약] 칸에서 바로 매칭할 수 있고, 견적·계산서·입금은 계약이 매칭된 작업만 표시</span></div>
     <div class="ovm-tools">
       <div class="tr">
         <label class="ovm-srch"><span class="ic">🔍</span>
@@ -16139,7 +16054,7 @@ function _ovmGrid(){
 }
 function _ovmHead(){
   const c=_ovmCols(), g=_ovmGrid(); const h=[];
-  h.push('<span>진행</span>','<span>캠페인 탭</span>');
+  h.push('<span>진행</span>','<span>작업</span>');
   if(c.info) h.push('<span>브랜드</span>','<span>상품</span>','<span>채널</span>','<span>목표·차수</span>','<span>담당</span>');
   if(c.prog) h.push('<span>참여·제출·입금</span>');
   if(c.mat)  h.push('<span>자료</span>');
@@ -16161,7 +16076,7 @@ function _ovmRowMatch(t,f,q){
   const nq=String(q||'').trim().toLowerCase(); if(!nq) return true;
   const pm=parseTabMeta(t.tabName);
   const ob=_ownBrand(t);   // 검색어는 지정 브랜드명으로도 걸린다(작업명에 없는 브랜드로 배정한 경우)
-  return [t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo,t.spreadsheetTitle]
+  return [t.tabName,ob&&ob.name,pm.brand,pm.product,t.contractNumber,t.memo]
     .some(v=>String(v==null?'':v).toLowerCase().includes(nq));
 }
 function _ownRowsHtml(){
@@ -16201,10 +16116,9 @@ function _ownRowsHtml(){
       : (t.finishCand ? '<span class="ovm-fin cand" title="인원 충족·전건 제출·전건 입금 — 이제 마감할 수 있습니다">마감자료 검수</span>' : '');
     const cells=[];
     cells.push(gauge);
-    /* ★ 무시트 작업은 시트 제목을 빼고 나머지 조각만 잇는다 — 빈칸을 남기면 ' · 2026-07-29' 처럼
-         구분자가 앞에 붙어 무엇이 빠졌는지 알 수 없는 줄이 된다. */
-    const osub=[_isNoSheet(t)?'':esc(t.spreadsheetTitle||sheetTitle(t.sheetId)),
-                t.firstSeenAt?esc(String(t.firstSeenAt).slice(0,10)):''].filter(Boolean).join(' · ');
+    /* ★★ 시트 제목을 적지 않는다(사용자 확정 2026-08-23) — 업체관리의 단위는 작업(작업보드)이고
+         진실원천은 작업오더다. 부제는 최초 등록일만 남긴다. */
+    const osub=t.firstSeenAt?esc(String(t.firstSeenAt).slice(0,10)):'';
     cells.push(`<div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${_ovmHl(t.tabName,q)}${_nsBadge(t)}</b>
         <span class="osub">${fbadge}${fbadge?' ':''}${osub}</span></div>`);
     if(c.info){
@@ -16360,8 +16274,9 @@ function _trRender(){
   const S=_trS; if(!S) return; const ov=document.getElementById('ownTrPop'); if(!ov) return;
   const asg=S.kind==='assign';                     // 미지정 → 기존 업체 지정
   const whole=!S.own.tabGid;
-  const srcLabel = S.srcLabel || (whole ? (sheetTitle(S.own.sheetId)+' — 시트 전체 소유')
-    : ((STATE.tabIndex[S.own.sheetId+'::'+S.own.tabGid]||('탭 '+S.own.tabGid))+' · '+sheetTitle(S.own.sheetId)));
+  // ★ 시트 제목을 적지 않는다 — 업체관리 화면의 단위는 작업(작업보드) 하나다.
+  const srcLabel = S.srcLabel || (whole ? '이 업체의 옛 지정(전체)'
+    : (STATE.tabIndex[S.own.sheetId+'::'+S.own.tabGid]||('작업 '+S.own.tabGid)));
   const advOpts=(STATE.advs||[]).filter(x=>!S.from||x.id!==S.from.id)
     .map(x=>`<option value="${esc(x.id)}" ${S.target===x.id?'selected':''}>${esc(x.name)}</option>`).join('');
   /* ★★ 범위 = 작업(탭) 단위 하나 — '시트 전체' 선택지는 폐지(사용자 확정 2026-08-23).
@@ -16481,86 +16396,11 @@ async function ownTransferGo(){
     const idx=(STATE.advs||[]).findIndex(x=>x.id===fromId); if(idx>=0) selAdv(idx);
   } finally { const b=document.getElementById('trGoBtn'); if(b){ b.disabled=false; b.textContent=asg?'지정하기':'이관하기'; } }
 }
-/* ── 시트 전체 소유 → 작업(작업보드) 단위로 펼치기 (사용자 확정 2026-08-23) ──────────────
-   ★★ 업체 지정 창구는 작업 단위 하나가 됐지만, 이미 저장된 '시트 전체' 소유(▦)는 그대로 살아
-      그 시트의 모든 작업을 계속 덮는다(새 작업이 생기면 자동 포함까지 된다). 그 축을 실제로
-      없애는 것이 이 펼치기다 — **무시트화(전환)로는 안 없어진다**(sheet_id 가 그대로 남는다).
-   ★ 미리보기 → 사람이 [펼치기] — 조용한 데이터 변경 금지. 판정·쓰기는 전부 서버가 한다.
-   ★ 팝업은 body 직속 · 바깥 클릭으로 닫지 않는다(Esc·[닫기]만) · onclick 은 인덱스 없음(대상은 상태로 기억). */
-let _expS=null;
-const _EXP_WHY={
-  no_active_tabs:'활성 작업이 없어 펼치지 않습니다 — 소유를 지우면 되살릴 근거가 사라집니다',
-  gidless_tab:'gid 없는 작업이 있어 펼치지 않습니다 — 펼치면 그 작업이 주인 없이 남습니다([시트 반영 점검]에서 gid 를 채운 뒤 다시)',
-  all_tabs_taken:'모든 작업이 이미 다른 업체에 지정돼 있습니다 — 사람이 확인 후 [×]로 해제하세요',
-  error:'실행 중 오류가 나 이 시트는 그대로 둡니다',
-};
-function ownExpandOne(i){ const a=STATE.advCur, o=(STATE.ownItems||[])[i]; if(!a||!o||o.tabGid) return;
-  _expOpen({advertiserId:a.id, advertiserName:a.name, sheetId:o.sheetId}); }
-function ownExpandAll(){ _expOpen({}); }
-function _expOpen(o){
-  _expS={ advertiserId:o.advertiserId||null, advertiserName:o.advertiserName||'', sheetId:o.sheetId||null,
-          loading:true, data:null, err:'', busy:false };
-  let ov=document.getElementById('ownExpPop');
-  if(!ov){ ov=document.createElement('div'); ov.id='ownExpPop'; ov.className='owntr-ov'; document.body.appendChild(ov); }
-  ov.style.display='flex'; _expRender(); _expLoad();
-}
-function _expClose(){ const ov=document.getElementById('ownExpPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _expS=null; }
-async function _expLoad(){
-  const S=_expS; if(!S) return;
-  const body={}; if(S.advertiserId) body.advertiserId=S.advertiserId; if(S.sheetId) body.sheetId=S.sheetId;
-  const r=await api('/api/trackb/ownership/expand',{method:'POST',body:JSON.stringify(body)}).catch(()=>null);
-  if(!_expS) return;                                     // 그 사이 닫혔으면 무시
-  S.loading=false;
-  if(r&&r.ok) S.data=r; else S.err=(r&&r.error)||'미리보기를 불러오지 못했습니다';
-  _expRender();
-}
-function _expRender(){
-  const S=_expS; if(!S) return; const ov=document.getElementById('ownExpPop'); if(!ov) return;
-  const scope=S.sheetId?('업체 ‘'+esc(S.advertiserName)+'’ · 시트 1개'):'모든 업체의 시트 전체 소유';
-  let body='';
-  if(S.loading) body='<div class="note">미리보기를 불러오는 중…</div>';
-  else if(S.err) body=`<div class="note" style="color:var(--bad)">${esc(S.err)}</div>`;
-  else {
-    const d=S.data, items=d.items||[];
-    if(!items.length) body='<div class="note">펼칠 <b>시트 전체 소유</b>가 없습니다 — 이미 모두 작업 단위입니다.</div>';
-    else body=`<div class="note">아래 <b>시트 전체 소유 ${d.expanded+d.skipped}건</b> 중 <b>${d.expanded}건</b>을 펼쳐
-        작업 <b>${d.assigned}건</b>을 개별 소유로 만듭니다. 펼친 뒤에는 그 시트에 새 작업이 생겨도
-        자동 포함되지 않고 <b>미지정</b>으로 뜹니다(그게 이 변경의 목적입니다).</div>
-      <div class="tabs" style="display:block;max-height:300px;overflow:auto">${items.map(it=>{
-        const why=it.skipped?`<span style="color:var(--warn)">건너뜀 — ${esc(_EXP_WHY[it.skipped]||it.skipped)}${it.error?(': '+esc(it.error)):''}</span>`
-          :`작업 ${it.tabs.length}건${it.keptTabOverrides&&it.keptTabOverrides.length?` · 다른 업체가 이미 가진 ${it.keptTabOverrides.length}건은 그대로 둡니다`:''}`;
-        return `<div class="own" style="margin:0 0 6px"><span class="ic">${it.skipped?'⚠':'▦'}</span>
-          <div class="info"><b>${esc(it.sheetTitle||it.sheetId)}</b><span>${esc(it.advertiserName)} · ${why}</span></div></div>`;
-      }).join('')}</div>`;
-  }
-  const canGo=!!(S.data&&S.data.expanded>0)&&!S.busy;
-  ov.innerHTML=`<div class="owntr">
-    <h3>시트 전체 소유 → 작업 단위로 펼치기</h3>
-    <div class="src"><b>${scope}</b><br>업체 지정은 작업(작업보드) 단위입니다 — 남아 있는 시트 전체 소유를 정리합니다.</div>
-    ${body}
-    <div class="ft"><button class="btn" onclick="_expClose()">닫기</button>
-      <button class="btn pri" id="expGoBtn" ${canGo?'':'disabled'} onclick="_expGo()">${S.busy?'펼치는 중…':'펼치기'}</button></div>
-  </div>`;
-}
-async function _expGo(){
-  const S=_expS; if(!S||!S.data||!S.data.expanded) return;
-  if(!confirm('시트 전체 소유 '+S.data.expanded+'건을 작업 '+S.data.assigned+'건의 개별 소유로 펼칠까요?\n\n펼친 뒤에는 그 시트에 새 작업이 생겨도 자동 포함되지 않습니다.\n(되돌리려면 업체 패널에서 소유를 다시 지정해야 합니다)')) return;
-  S.busy=true; _expRender();
-  const body={confirm:true}; if(S.advertiserId) body.advertiserId=S.advertiserId; if(S.sheetId) body.sheetId=S.sheetId;
-  const r=await api('/api/trackb/ownership/expand',{method:'POST',body:JSON.stringify(body)}).catch(()=>null);
-  if(!_expS) return;
-  S.busy=false;
-  if(!(r&&r.ok)){ S.err=(r&&r.error)||'펼치기 실패'; _expRender(); return; }
-  // ★ 부분 실패를 "완료"로 꾸미지 않는다 — 몇 건이 펼쳐졌는지 사실대로 말한다.
-  toast(r.skipped?('일부만 펼침 ('+r.expanded+'건, 건너뜀 '+r.skipped+'건) — 작업 '+r.assigned+'건 지정')
-                 :('펼치기 완료 — 시트 '+r.expanded+'건 → 작업 '+r.assigned+'건'));
-  const advId=S.advertiserId; _expClose();
-  await _ovmReloadMapTabs();
-  await renderOwnershipView();
-  const idx=(STATE.advs||[]).findIndex(x=>x.id===advId); if(idx>=0) selAdv(idx);
-}
-// ★ Esc = 펼치기 팝업 먼저 닫기(리스너는 최상위 1회 · 드로어까지 함께 닫히지 않게 stopImmediatePropagation).
-document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_expS){ e.stopImmediatePropagation(); _expClose(); } });
+/* ── 시트 전체 소유 펼치기 — **화면에서 제거됨**(사용자 확정 2026-08-23, 시트 UI 전부 제거) ──
+   ★ 기존 `tab_gid IS NULL`(시트 전체) 소유는 운영에서 이미 정리했고(27건 → 작업 91건), 남은
+     레거시 줄은 [×] 해제로 치운다. 화면에 시트 개념을 남기지 않기 위해 펼치기 팝업·버튼은 걷어냈다.
+   ★ 서버(`POST /api/trackb/ownership/expand` · expandSheetOwnerships)는 **그대로 남겼다** —
+     레거시 소유가 다시 생기면 화면 없이도 정리할 수 있고, 되살릴 땐 팝업만 다시 붙이면 된다. */
 
 // 매핑용 탭 목록 재조회 — 미지정 작업 판정(advertiserId)의 유일한 재료다. 실패하면 종전 목록을 유지한다.
 async function _ovmReloadMapTabs(){
@@ -16572,282 +16412,19 @@ async function _ovmReloadMapTabs(){
 document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_trS){ e.stopImmediatePropagation(); _trClose(); } });
 
 /* ══════════════════════════════════════════════════════════════════
-   시트에서 가져오기 — 시스템에 없는 구글시트 탭을 주소로 흡수 (4단계)
+   시트에서 가져오기 — **업체관리에서 제거됨**(사용자 확정 2026-08-23)
 
-   ★★ 판정은 **전부 서버**가 한다 — 화면은 서버가 준 blockers/warnings/counts 를 그리기만 한다.
-      여기서 다시 판정하면 "화면은 초록인데 서버가 거부"가 구조적으로 가능해진다.
-   ★ 팝업은 **body 직속**(뷰 스크롤 컨테이너 안에 두면 오버레이가 화면 흐름에 섞인다).
-   ★ **바깥 클릭으로 닫지 않는다** — 붙여넣은 주소·고른 줄이 실수 클릭 한 번에 날아가지 않게.
-     대신 닫는 길([취소]·×·Esc)은 반드시 남긴다.
-   ★ onclick 은 **인덱스만** — 탭명·업체명은 시트/외부에서 온 문자열이다(문자열 보간 금지).
-   ★ 주소 입력 중에는 팝업을 재렌더하지 않는다(IME 조합 보호 — 값은 이벤트에서 상태로만 받는다).
+   ★★ 업체별 작업의 진실원천은 **인트라넷 리뷰오더 → 리뷰웹 작업오더 → 작업보드** 하나다.
+      업체관리 화면은 구글시트를 찾아오지도(가져오기), 참조하지도(시트 제목), 목록을 보여주지도
+      않는다. 그래서 이 4단계 마법사(openSheetImport/_siPreview/_siRun/_siRevert)는 화면에서
+      통째로 걷어냈다 — 진입점만 지우고 함수를 남기면 다음 사람이 되살린다.
+   ★ 서버(`/api/trackb/sheet-import/*` · sheetImport.service)는 **그대로 남겼다** — 되살릴 일이
+      생기면 화면만 다시 붙이면 된다(라우트·게이트·회귀가드 무변경).
    ══════════════════════════════════════════════════════════════════ */
-let _siS=null;
-function openSheetImport(advId){
-  _siS={ step:1, url:'', adv:advId||'', pv:null, skip:{}, notice:true, busy:false, err:'', tabs:null, result:null };
-  let ov=document.getElementById('siPop');
-  if(!ov){ ov=document.createElement('div'); ov.id='siPop'; ov.className='si-ov'; document.body.appendChild(ov); }
-  ov.style.display='flex';
-  _siRender();
-}
-function _siClose(){ const ov=document.getElementById('siPop'); if(ov){ ov.style.display='none'; ov.innerHTML=''; } _siS=null; }
-document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&_siS&&!_siS.busy){ e.stopImmediatePropagation(); _siClose(); } });
-
-function _siSteps(n){
-  const names=['주소 넣기','읽어서 보기','업체 고르기','가져오기'];
-  return `<div class="si-steps">${names.map((t,i)=>{
-    const cl = n===i+1?'on':(n>i+1?'dn':'');
-    return `<div class="s ${cl}"><span class="n">${n>i+1?'✓':(i+1)}</span>${t}</div>`;
-  }).join('')}</div>`;
-}
-
-function _siRender(){
-  const S=_siS; if(!S) return; const ov=document.getElementById('siPop'); if(!ov) return;
-  let body='';
-  if(S.step===1) body=_siStep1();
-  else if(S.step===2) body=_siStep2();
-  else if(S.step===3) body=_siStep3();
-  else body=_siStep4();
-  ov.innerHTML=`<div class="si-mo">
-    <div class="si-h"><h3>시트에서 가져오기</h3><span style="flex:1"></span>
-      <button class="si-x" onclick="_siClose()" title="닫기">×</button></div>
-    ${_siSteps(S.step)}${body}</div>`;
-  if(S.step===1){ const el=document.getElementById('siUrl'); if(el) setTimeout(()=>el.focus(),30); }
-}
-
-function _siStep1(){
-  const S=_siS;
-  return `<div class="si-b">
-    <div class="si-box tint">가져올 <b>탭을 연 상태</b>에서 브라우저 주소창을 통째로 복사해 붙여넣으세요.
-      주소 끝의 <b>#gid=…</b> 가 "어느 탭인지"를 알려 줍니다.</div>
-    <label class="si-l">구글시트 탭 주소</label>
-    <input id="siUrl" class="si-tf" autocomplete="off" placeholder="https://docs.google.com/spreadsheets/d/... #gid=..."
-      value="${esc(S.url)}" oninput="_siS.url=this.value">
-    <div class="si-hint">탭 주소가 아니어도 됩니다 — 시트 안의 탭 목록에서 고를 수 있습니다.</div>
-    ${S.err?`<div class="si-err">${esc(S.err)}</div>`:''}
-    ${S.tabs?`<div class="si-box"><b>이 시트의 탭</b>
-      <div class="si-tabs">${S.tabs.map((t,i)=>`<button class="si-tab" onclick="_siPickTab(${i})">${esc(t.tabName)}</button>`).join('')}</div></div>`:''}
-    <div class="si-box">이 단계에서는 <b>아무것도 저장되지 않습니다</b> — 시트를 한 번 읽어 무엇이 들었는지만 보여줍니다.</div>
-  </div>
-  <div class="si-f"><span class="si-hint">시트는 읽기만 합니다.</span><span style="flex:1"></span>
-    <button class="btn" onclick="_siClose()">닫기</button>
-    <button class="btn pri" id="siGo" onclick="_siPreview()">시트 읽기 →</button></div>`;
-}
-function _siPickTab(i){ const S=_siS; const t=(S.tabs||[])[i]; if(!t) return; S.gid=t.gid; S.tabs=null; S.err=''; _siRender(); _siPreview(); }
-
-async function _siPreview(){
-  const S=_siS; if(!S||S.busy) return;
-  const el=document.getElementById('siUrl'); if(el) S.url=el.value;   // ★ 재렌더 없이 입력값만 회수(IME 보호)
-  if(!String(S.url||'').trim() && !S.gid){ S.err='주소를 넣어 주세요.'; _siRender(); return; }
-  S.busy=true; S.err=''; _siRender();
-  const btn=document.getElementById('siGo'); if(btn){ btn.disabled=true; btn.textContent='읽는 중…'; }
-  const r=await api('/api/trackb/sheet-import/preview',{method:'POST',
-    body:JSON.stringify({ url:S.url, gid:S.gid||'' })}).catch(()=>null);
-  S.busy=false;
-  if(!r){ S.err='시트를 읽지 못했습니다 — 잠시 후 다시 시도해 주세요.'; _siRender(); return; }
-  /* ★ 탭을 못 정한 경우는 오류가 아니라 **다음 행동**이다 — 목록을 그려 고르게 한다. */
-  if(r.availableTabs && (r.code==='gid_required'||r.code==='gid_not_found')){
-    S.tabs=r.availableTabs; S.err=r.error||''; _siRender(); return;
-  }
-  if(r.code||r.error){ S.err=r.error||'읽지 못했습니다.'; _siRender(); return; }
-  S.pv=r; S.skip={};
-  (r.rows||[]).forEach(row=>{ if(!row.include) S.skip[row.seq]=true; });   // 서버가 권한 제외를 그대로 반영
-  S.step=2; _siRender();
-}
-
-function _siStep2(){
-  const S=_siS, p=S.pv||{};
-  const c=p.counts||{};
-  const blocked=(p.blockers||[]).length>0;
-  const cols=(p.columns||[]).map(x=>{
-    const cls = x.isPhone||x.isName ? 'key' : (x.role==='submit'||x.role==='paid' ? 'st' : (x.role?'auto':'keep'));
-    const lab = x.isPhone ? '리뷰어 찾기 키' : x.isName ? '리뷰어 이름' : (x.label||'그대로 보관');
-    return `<span class="si-mp">${esc(x.header)}<span class="si-r ${cls}">${esc(lab)}</span></span>`;
-  }).join('');
-  return `<div class="si-b">
-    ${blocked?`<div class="si-lock"><b>가져올 수 없습니다</b>${(p.blockers||[]).map(b=>
-        /* ★ "왜 안 보이는지"를 서버가 준 사유 그대로 잇고, **고칠 수 있는 것은 그 자리에서** 고친다.
-           ★ 가져오기(덮어쓰기)는 여전히 막힌 채다 — 수리는 없는 것만 다시 만드는 별개 경로. */
-        esc(b.message)+((b.reasons||[]).length?'<div class="si-why">'+(b.reasons||[]).map(r=>'· '+esc(r.message)).join('<br>')+
-          (_siDupTail(b.tab))+_siFixHtml(b)+'</div>':'')).join('<br>')}</div>`
-      :`<div class="si-box ok"><b>✓ 읽었습니다</b><br>${esc(p.sheetTitle||'')} › 탭 <b>${esc(p.tabName||'')}</b> · 머리글은 ${p.headerRow}번째 줄</div>`}
-    <div class="si-kpis">
-      <div><div class="k">시트에 적힌 줄</div><div class="v">${c.total==null?'?':c.total}</div></div>
-      <div><div class="k">검색 명단이 될 줄</div><div class="v ok">${c.index==null?'?':c.index}</div></div>
-      <div><div class="k">제출 완료</div><div class="v">${c.submitted==null?'?':c.submitted}</div></div>
-      <div><div class="k">확인 필요</div><div class="v ${c.suspect?'warn':''}">${c.suspect||0}</div></div>
-    </div>
-    ${(p.warnings||[]).map(w=>`<div class="si-warn">${esc(w.message)}${
-        (w.reasons||[]).length?'<div class="si-why">'+(w.reasons||[]).map(r=>'· '+esc(r.message)).join('<br>')+_siDupTail(w.tab)+'</div>':''
-      }</div>`).join('')}
-    <label class="si-l">작업 이름 <span class="si-hint">시트 위쪽 안내에서 자동으로 채웠습니다 — 고칠 수 있습니다</span></label>
-    <input id="siName" class="si-tf" value="${esc((p.meta&&p.meta.campaignName)||p.tabName||'')}">
-    <div class="si-box"><b>칸을 이렇게 알아봤습니다</b><div class="si-maplist">${cols}</div>
-      ${(p.statusCols&&(p.statusCols.submit||p.statusCols.paid))?`<div class="si-hint" style="margin-top:6px">
-        진행 상태 칸: ${esc(p.statusCols.submit||'—')} · ${esc(p.statusCols.paid||'—')}</div>`:''}
-      <div class="si-hint" style="margin-top:6px">열 이름은 <b>바꾸지 않고</b> 그대로 옮깁니다.</div></div>
-  </div>
-  <div class="si-f"><span class="si-hint">아직 아무것도 저장되지 않았습니다.</span><span style="flex:1"></span>
-    <button class="btn" onclick="_siBack(1)">← 뒤로</button>
-    <button class="btn pri" ${blocked?'disabled':''} onclick="_siNext3()">다음 →</button></div>`;
-}
-/* 이미 등록된 탭의 **현재 상태를 숫자로** 붙인다 — "어디에도 없다"는 신고에 답하려면
-   담당자가 무엇이 있고 무엇이 없는지를 봐야 한다. 값이 없으면(구버전 백엔드) 아무것도 안 그린다. */
-function _siDupTail(t){
-  if(!t) return '';
-  const n=(v)=>(v==null?'?':v);
-  return `<div class="si-dupst">표 ${n(t.boardRows)}줄 · 검색 명단 ${n(t.indexRows)}명 · 주문 ${n(t.withOrder)}건`+
-    ` · 작업 등록부 ${t.inMaster?'있음':'없음'} · 시트 사본 ${t.inMirror?'있음':'없음'}`+
-    ` · 업체 ${t.advertiserName?esc(t.advertiserName):'미지정'}${t.sheetless?' · 무시트':''}</div>`;
-}
-/* ★★ 진단이 짚은 원인을 **그 자리에서** 고치는 버튼 — 없으면 "왜 안 보이는지는 알았는데
-   고칠 데가 없는" 또 다른 막다른 길이 된다. 버튼은 **고칠 수 있는 사유에만** 붙인다
-   (눌러도 아무 일 없는 버튼을 두지 않는다). */
-function _siFixHtml(b){
-  const t=b&&b.tab; if(!t) return '';
-  const codes=(b.reasons||[]).map(r=>r.code);
-  let h='';
-  if(codes.indexOf('not_in_list')>=0){
-    h += t.sheetless
-      ? `<button class="btn pri xs" onclick="_siFix('rebuild')">🔧 장부 다시 만들기</button>
-         <span class="si-fixnote">표 ${t.boardRows==null?'?':t.boardRows}줄에서 검색 명단·작업 등록부·시트 사본을 다시 만듭니다(내용은 그대로).</span>`
-      : `<span class="si-fixnote">시트 기반 작업이라 여기서 만들지 않습니다 — [반영 점검] 화면의 [↻ 시트 새로고침]을 이용하세요.</span>`;
-  }
-  if(codes.indexOf('no_advertiser')>=0){
-    const opts=(STATE.advs||[]).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
-    h += `<div class="si-fixrow"><select id="siFixAdv" class="si-tf"><option value="">— 업체를 고르세요 —</option>${opts}</select>
-      <button class="btn pri xs" onclick="_siFix('assign')">🔗 이 업체로 지정</button></div>`;
-  }
-  return h?`<div class="si-fix">${h}</div>`:'';
-}
-async function _siFix(action){
-  const S=_siS, p=S&&S.pv; if(!p||S.busy) return;
-  let advId='';
-  if(action==='assign'){
-    const el=document.getElementById('siFixAdv'); advId=(el&&el.value)||'';
-    if(!advId){ toast('업체를 고르세요.'); return; }
-  }
-  /* ★ 대상은 **서버가 등록부에서 다시 찾은 그 탭** — 등록명이 시트 탭명과 다를 수 있어
-     (리네임) 화면의 탭명이 아니라 blocker 가 알려 준 등록명을 보낸다. */
-  const b=(p.blockers||[]).find(x=>x.code==='already_registered');
-  const tabName=(b&&b.tab&&b.tab.tabName)||p.tabName;
-  S.busy=true; _siRender();
-  const r=await api('/api/trackb/sheet-import/repair',{method:'POST',
-    body:JSON.stringify({ sheetId:p.sheetId, tabName, action, advertiserId:advId })}).catch(()=>null);
-  S.busy=false;
-  if(!r||!r.ok){ toast((r&&r.error)||'고치지 못했습니다.'); _siRender(); return; }
-  const d=r.done||{};
-  toast(action==='rebuild'
-    ? `장부를 다시 만들었습니다 — 검색 명단 ${d.indexRows}명 · 시트 사본 ${d.mirrorRows}행`
-    : `${d.advertiserName} 업체로 지정했습니다`);
-  /* 상태를 다시 읽어 화면에 반영(고쳐졌는지 숫자로 보인다) + 업체 목록·개요도 갱신 */
-  await _siPreview();
-  try{ await refreshAdvCounts(); }catch(_){}
-}
-function _siBack(n){ const S=_siS; if(!S) return; if(n===1){ S.pv=null; S.tabs=null; S.gid=''; } S.step=n; S.err=''; _siRender(); }
-function _siNext3(){ const S=_siS; const el=document.getElementById('siName'); if(el) S.name=el.value; S.step=3; _siRender(); }
-
-function _siStep3(){
-  const S=_siS, p=S.pv||{};
-  const advOpts=(STATE.advs||[]).map(a=>`<option value="${esc(a.id)}" ${S.adv===a.id?'selected':''}>${esc(a.name)}</option>`).join('');
-  const rows=(p.rows||[]).map((r,i)=>{
-    const on=!S.skip[r.seq];
-    /* ★ 어느 칸이 구매일자·금액·제출·입금인지는 **서버가 골라 실어 준다** — 화면이 열 이름으로
-       꺼내면 이름이 다른 탭에서 통째로 빈 칸이 된다. */
-    return `<tr class="${on?'':'off'}">
-      <td class="c"><input type="checkbox" ${on?'checked':''} onchange="_siToggle(${i})"></td>
-      <td class="c">${r.seq}</td><td>${esc(r.date||'')}</td><td>${esc(r.name||'')}</td><td>${esc(r.phone||'')}</td>
-      <td>${esc(r.price||'')}</td><td>${esc(r.submit||'')}</td><td>${esc(r.paid||'')}</td>
-      <td>${r.why?`<span class="why">${esc(r.why)}</span>`:''}</td></tr>`;
-  }).join('');
-  const off=Object.keys(S.skip).filter(k=>S.skip[k]).length;
-  const take=(p.counts&&p.counts.total!=null)?(p.counts.total-off):null;
-  const shown=(p.rows||[]).length, total=(p.counts&&p.counts.total)||0;
-  return `<div class="si-b">
-    <label class="si-l">어느 업체의 작업인가요? <span style="color:var(--bad)">*</span></label>
-    <select class="si-tf" onchange="_siAdv(this.value)">
-      <option value="">— 업체를 고르세요 —</option>${advOpts}</select>
-    <div class="si-hint">${S.adv
-      ? '가져오면 그 업체 업체관리 표에 바로 나타납니다.'
-      : '업체를 골라야 가져올 수 있습니다 — 업체가 없으면 표에 나오지 않아 지금 문제가 그대로 반복됩니다.'}</div>
-    <div class="si-box"><b>가져올 줄</b> <span class="si-hint">${take==null?'':take+'줄 선택됨 · '}전체 ${total}줄 중 ${shown}줄 표시</span>
-      <div class="si-rows"><table>
-        <tr><th style="width:34px"></th><th>줄</th><th>구매일자</th><th>이름</th><th>연락처</th>
-          <th>결제금액</th><th>리뷰제출</th><th>입금</th><th>메모</th></tr>${rows}</table></div>
-      <div class="si-hint" style="margin-top:6px">번호가 없는 줄도 가져옵니다 — 번호를 안 매겼을 뿐 실제 진행 건입니다.
-        연습으로 보이는 줄만 체크를 풀어 두었고, <b>지우지 않고 보여만 줍니다.</b></div></div>
-    <div class="si-box"><b>가져온 뒤 구글시트</b>
-      <div class="si-hint" style="margin-top:4px">이 작업은 <b>더 이상 시트를 읽지 않습니다</b> — 지금부터 시스템 표가 유일한 기준이 됩니다.</div>
-      <label class="si-chk"><input type="checkbox" ${S.notice?'checked':''} onchange="_siS.notice=this.checked">
-        <span>시트 맨 윗줄 안내문을 갱신합니다 <span class="si-hint">— 시트에 값을 쓰는 것은 이 한 줄뿐입니다.</span></span></label></div>
-    ${S.err?`<div class="si-err">${esc(S.err)}</div>`:''}
-  </div>
-  <div class="si-f"><span class="si-hint">${S.adv?'준비되었습니다.':'업체를 골라 주세요.'}</span><span style="flex:1"></span>
-    <button class="btn" onclick="_siBack(2)">← 뒤로</button>
-    <button class="btn pri" id="siRun" ${S.adv?'':'disabled'} onclick="_siRun()">${take==null?'':take+'줄 '}가져오기</button></div>`;
-}
-function _siAdv(v){ const S=_siS; if(!S) return; S.adv=v||''; _siRender(); }
-function _siToggle(i){ const S=_siS; const r=(S.pv.rows||[])[i]; if(!r) return; S.skip[r.seq]=!S.skip[r.seq]; _siRender(); }
-
-async function _siRun(){
-  const S=_siS; if(!S||S.busy) return;
-  const p=S.pv||{};
-  const off=Object.keys(S.skip).filter(k=>S.skip[k]).map(n=>parseInt(n,10));
-  const advName=((STATE.advs||[]).find(a=>a.id===S.adv)||{}).name||'';
-  if(!confirm(`「${S.name||p.tabName}」을 ${advName} 작업으로 가져옵니다.\n\n`+
-    `· 시트에 적힌 줄을 시스템 표로 옮깁니다\n· 이 구글시트는 더 이상 읽지 않습니다\n`+
-    (S.notice?'· 시트 맨 윗줄에 이관 안내를 씁니다\n':'')+
-    '\n가져온 직후에는 되돌릴 수 있습니다.')) return;
-  S.busy=true; S.err=''; const btn=document.getElementById('siRun');
-  if(btn){ btn.disabled=true; btn.textContent='가져오는 중…'; }
-  const r=await api('/api/trackb/sheet-import/run',{method:'POST',body:JSON.stringify({
-    sheetId:p.sheetId, gid:p.gid, advertiserId:S.adv, displayName:S.name||'', skipSeqs:off, notice:!!S.notice,
-  })}).catch(()=>null);
-  S.busy=false;
-  if(!r||!r.ok){ S.err=(r&&r.error)||'가져오지 못했습니다.'; _siRender(); return; }
-  S.result=r; S.step=4; _siRender();
-  await refreshAdvCounts();
-  const idx=(STATE.advs||[]).findIndex(x=>x.id===S.adv); if(idx>=0) selAdv(idx);
-}
-
-function _siStep4(){
-  const S=_siS, r=S.result||{};
-  return `<div class="si-b">
-    <div class="si-box ok"><b>✓ 가져왔습니다</b><br>
-      <b>${esc(r.displayName||r.tabName||'')}</b> 이(가) <b>${esc(r.advertiserName||'')}</b> 작업으로 등록되었습니다.</div>
-    <div class="si-kpis">
-      <div><div class="k">만든 줄</div><div class="v ok">${r.created==null?'?':r.created}</div></div>
-      <div><div class="k">검색 명단</div><div class="v">${r.indexRows==null?'?':r.indexRows}</div></div>
-      <div><div class="k">제출 완료</div><div class="v">${r.submittedCount==null?'?':r.submittedCount}</div></div>
-      <div><div class="k">뺀 줄</div><div class="v">${r.skipped||0}</div></div>
-    </div>
-    ${r.ledgerError?`<div class="si-warn">검색 명단을 만들지 못했습니다(${esc(r.ledgerError)}) — 담당자에게 알려 주세요.</div>`:''}
-    ${(r.notice&&r.notice.ok===false)?`<div class="si-warn">시트 안내문은 갱신하지 못했습니다(${esc(r.notice.skipped||r.notice.error||'')}) — 가져오기 자체는 완료되었습니다.</div>`:''}
-    <div class="si-box"><b>아직 남은 일</b>
-      <div class="si-hint" style="margin-top:4px">· <b>계약 매칭</b>은 자동으로 붙지 않습니다 — 업체관리 표의 [계약] 칸에서 연결해 주세요.<br>
-        · <b>리뷰 캡처 이미지</b>는 함께 오지 않습니다.</div></div>
-  </div>
-  <div class="si-f"><button class="btn" onclick="_siRevert()">되돌리기</button>
-    <span style="flex:1"></span><button class="btn pri" onclick="_siClose()">닫기</button></div>`;
-}
-
-async function _siRevert(){
-  const S=_siS, r=S.result||{}; if(!r.tabName) return;
-  if(!confirm(`방금 가져온 「${r.displayName||r.tabName}」의 표 줄과 업체 연결을 되돌립니다.\n구글시트는 그대로 남습니다.`)) return;
-  const out=await api('/api/trackb/sheet-import/revert',{method:'POST',
-    body:JSON.stringify({ sheetId:r.sheetId, tabName:r.tabName })}).catch(()=>null);
-  if(!out){ toast('되돌리지 못했습니다.'); return; }
-  /* ★ 주문이 들어온 뒤라 거부된 경우는 사유를 그대로 보여준다(조용히 실패로 뭉뚱그리지 않는다). */
-  if(!out.ok){ toast(out.message||'되돌릴 수 없습니다.'); return; }
-  toast(out.message||'되돌렸습니다.');
-  _siClose();
-  await refreshAdvCounts();
-  _ovmRenderOverview();
-}
 async function refreshAdvCounts(){
-  // ★ 소유가 바뀌면 '업체 미지정 시트 N' 도 함께 바뀐다 — 사이드바에 상시 노출되므로 같이 갱신한다.
-  const os=await api('/api/trackb/owned-sheets').catch(()=>null);
-  if(os&&os.ok) STATE.ownedSheetIds=new Set(os.sheetIds||[]);
+  // ★ 소유가 바뀌면 '업체 미지정 작업 N' 도 함께 바뀐다 — 그 판정의 유일한 재료가 mapTabs 이므로
+  //   여기서 함께 다시 받는다(안 하면 [×] 해제 뒤에도 사이드바 숫자가 옛값으로 남는다).
+  await _ovmReloadMapTabs();
   const r=await api('/api/trackb/advertisers?overview=1').catch(()=>null); if(r&&r.ok){ STATE.advs=r.items||[];
   STATE.ovMeta=r.overview||STATE.ovMeta;
   // 목록을 다시 그린다 — 소유 수·처리필요 배지가 함께 바뀌므로 .ct 만 갱신하면 배지가 stale 로 남는다.

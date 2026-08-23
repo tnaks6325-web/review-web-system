@@ -48,24 +48,52 @@ function pool(routes) {
 const writes = db => db.q.filter(x => /^(INSERT|UPDATE|DELETE)/i.test(x.s));
 
 async function run() {
-  /* ═══ 1. 창구 — 시트 전체 선택지 폐지 ═══ */
-  console.log('\n1) 창구(화면) — 시트 전체 선택지 없음');
-  t('★★ 미지정 목록에 [시트 전체 지정]이 없다', !/ownAssignSheet/.test(HTML) && !/>시트 전체 지정</.test(HTML));
-  const addOwn = grab('_ovmAddOwnHtml');
-  t('★★ 소유 추가 폼에 "시트 전체(모든 탭)" 라디오가 없다',
-    !/시트 전체\(모든 탭\)/.test(addOwn) && !/setAddMode/.test(HTML));
-  t('소유 추가는 미지정 작업에서 고른다', /_ovmUnassignedTabs\(\)/.test(addOwn) && /addTabSel/.test(addOwn));
-  const addAdv = grab('_ovmAddAdvHtml');
-  t('★ 거래처 등록도 작업 선택(시트 드롭다운 폐지)',
-    /advTabSel/.test(addAdv) && !/id="advSheet"/.test(HTML));
+  /* ═══ 1. 창구 — 업체관리에 구글시트 흔적 0 ═══
+     ★★ 사용자 확정(2026-08-23): 업체별 작업의 진실원천은 **인트라넷 리뷰오더 → 리뷰웹 작업오더 →
+        작업보드** 하나다. 업체관리는 구글시트를 ① 찾아오지 않고(가져오기) ② 참조하지 않으며
+        (시트 제목·시트 링크) ③ 시트 목록을 보여주지 않는다. */
+  console.log('\n1) 업체관리 화면 — 구글시트 흔적 0');
+  // 업체관리 뷰 = renderOwnershipView ~ 시트 가져오기 자리(제거됨) 사이 전 구간
+  // ★ 주석은 지우고 본다 — "제거됨"이라 적어 둔 설명문이 검사에 걸리면(또는 통과시키면) 무의미해진다.
+  const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.replace(/^\s*\/\/.*$/, '')).join('\n');
+  const OWN = strip(HTML.slice(HTML.indexOf('function _ovmbSummaryHtml('), HTML.indexOf('async function refreshAdvCounts(')));
+  t('★★ 시트 가져오기 창구가 없다', !/openSheetImport\(/.test(OWN) && !/>＋ 시트에서 가져오기</.test(OWN));
+  // ★ 예외는 헬퍼 **정의** 한 줄뿐(작업보드 쪽이 계속 쓴다) — 업체관리에서 **부르는** 자리가 0 이어야 한다.
+  const sheetTitleCalls = (OWN.match(/.*sheetTitle\(.*/g) || []).filter(l => !/function sheetTitle\(sid\)/.test(l));
+  t('★★ 시트 제목을 그리지 않는다(업체관리에서 sheetTitle 호출 0)', sheetTitleCalls.length === 0,
+    sheetTitleCalls.slice(0, 3).join(' | '));
+  const CODE = strip(HTML);
+  t('★★ 시트 전체 지정·펼치기 창구가 없다',
+    !/ownAssignSheet/.test(CODE) && !/ownExpand/.test(CODE) && !/시트 전체 지정/.test(CODE));
+  t('★ 미지정 판정 재료는 mapTabs 하나(/owned-sheets 미조회)',
+    !/owned-sheets/.test(CODE) && !/ownedSheetIds/.test(CODE));
+  const addOwn = grab('_ovmAddOwnHtml'), addAdv = grab('_ovmAddAdvHtml');
+  t('★ 소유 추가·거래처 등록 후보는 작업 목록(optgroup 시트 묶음 없음)',
+    !/optgroup/.test(addOwn) && !/optgroup/.test(addAdv)
+    && /_ovmUnassignedTabs\(\)/.test(addOwn) && /_ovmUnassignedTabs\(\)/.test(addAdv));
   const trRender = grab('_trRender');
   t('★★ 지정·이관 팝업에 범위 라디오가 없다(작업만 고른다)',
     !/_trMode\(/.test(trRender) && !/시트 전체\(모든 탭\)/.test(trRender));
   // ★ 줄 주석을 지우고 본다 — 주석의 설명 문구가 대신 걸리면(또는 통과시키면) 검사가 무의미해진다.
   const go = grab('ownTransferGo').split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   t('★★ tabGid:null(시트 전체) 로 보내는 분기가 없다', !/tabGid:\s*null/.test(go), go);
-  t('★ onclick 은 인덱스만(시트발 문자열 보간 금지)',
-    /onclick="ownAssign\(\$\{i\}\)"/.test(HTML) && /onclick="ownExpandOne\(\$\{i\}\)"/.test(HTML));
+  t('★ onclick 은 인덱스만(시트발 문자열 보간 금지)', /onclick="ownAssign\(\$\{i\}\)"/.test(HTML));
+  /* ★★ 마감(🏁)된 작업은 지정 후보·집계에서 뺀다 — 업체관리가 다루는 것은 진행 중인 작업이다.
+     ★ `finished` 를 못 받으면(구버전 백엔드) 종전대로 포함(모르는 것을 숨기지 않는다). */
+  {
+    const sb = { STATE: { mapTabs: [
+      { sheetId: 'S1', tabGid: '1', tabName: 'A' },                        // 미지정·진행 중
+      { sheetId: 'S1', tabGid: '2', tabName: 'B', finished: true },        // 미지정이지만 마감
+      { sheetId: 'S1', tabGid: '3', tabName: 'C', advertiserId: 'adv_a' }, // 지정됨
+    ] } };
+    vm.createContext(sb);
+    vm.runInContext(grab('_ovmLiveTabs') + '\n' + grab('_ovmUnassignedTabs') + '\n' + grab('_ovmTabCounts'), sb);
+    t('★★ 마감된 작업은 미지정 후보에 안 뜬다', sb._ovmUnassignedTabs().map(x => x.tabName).join(',') === 'A');
+    const c = sb._ovmTabCounts();
+    t('★ 분모도 같은 집합(진행 중 2건 · 미지정 1건)', c.total === 2 && c.un === 1, JSON.stringify(c));
+  }
+  t('★ 사이드바·표도 작업 단위로 말한다',
+    /업체 미지정 작업/.test(OWN) && /소유 작업 /.test(OWN) && !/소유 시트/.test(OWN));
 
   /* ═══ 2. 펼치기 서비스 ═══ */
   console.log('\n2) expandSheetOwnerships(서비스 실행)');
@@ -151,16 +179,13 @@ async function run() {
     /\/ownership\/expand'[\s\S]{0,700}_ownershipWriteAllowed/.test(ROUTES));
   t('★ confirm === true 일 때만 실행(미리보기 기본)', /confirm: confirm === true/.test(ROUTES));
 
-  const expGo = grab('_expGo');
-  t('★ 실행 전 confirm(되돌리기 마찰)', /if\(!confirm\(/.test(expGo));
-  t('★★ 부분 실패를 "완료"로 꾸미지 않는다', /일부만 펼침/.test(expGo));
-  t('펼친 뒤 미지정 목록·화면 재조회', /_ovmReloadMapTabs\(\)/.test(expGo) && /renderOwnershipView\(\)/.test(expGo));
-  t('팝업은 body 직속', /ov\.id='ownExpPop'[\s\S]{0,160}document\.body\.appendChild\(ov\)/.test(HTML));
-  t('Esc 리스너는 최상위 1회',
-    (HTML.match(/document\.addEventListener\('keydown',function\(e\)\{ if\(e\.key==='Escape'&&_expS\)/g) || []).length === 1);
+  // ★ 펼치기 화면은 제거됐다(시트 UI 전면 제거) — 서버는 남겨 레거시 소유를 화면 없이도 정리한다.
+  t('★★ 펼치기 팝업·버튼이 화면에 없다', !/_expOpen|_expGo|ownExpandAll|ownExpandOne/.test(strip(HTML)));
+  t('★ 서버 창구는 살아 있다(되살릴 때 팝업만 다시 붙이면 된다)',
+    /expandSheetOwnerships/.test(require('fs').readFileSync(path.join(__dirname, '../src/services/trackB.service.js'), 'utf8')));
   const owns = HTML.slice(HTML.indexOf('function _ovmOwnsHtml('), HTML.indexOf('function _ovmAddOwnHtml('));
-  t('★ [작업 단위로 펼치기]는 시트 전체(▦) 줄에만', /whole&&isAdmin\?`<button class="trb"/.test(owns.replace(/\s+/g, ' ')));
-  t('개요 헤더에 일괄 정리 버튼(내부 담당자)', /_isInternalRole\(\)\?`<button class="btn"[^`]*ownExpandAll\(\)/.test(HTML.replace(/\s+/g, ' ')));
+  t('★ 레거시 전체 소유 줄은 [×] 해제만(이관 버튼 없음)', /isAdmin&&!whole\?`<button class="trb"/.test(owns.replace(/\s+/g, ' '))
+    && /전체\(레거시\)/.test(owns));
 
   console.log(`\n✅ ownershipTabUnit: ${pass}개 통과`);
   process.exit(0);

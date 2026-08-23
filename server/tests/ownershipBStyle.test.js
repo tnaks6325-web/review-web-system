@@ -17,7 +17,7 @@ test('uses the B-style full-width ownership shell instead of a visible sidebar',
 });
 
 test('renders B-style command dashboard and searchable company ledger', () => {
-  assert.match(source, /function _ovmbSummaryHtml\(advs, works, total, free, bad, matchKnown, candKnown\)/);
+  assert.match(source, /function _ovmbSummaryHtml\(advs, works, bad, matchKnown, candKnown\)/);   // 시트 개수 인자 제거(2026-08-23)
   assert.match(source, /class="[^"]*ovm-bledger/);
   assert.match(source, /id="ovmbQ"/);
   assert.match(source, /function _ovmbFilterRows\(v\)/);
@@ -29,20 +29,21 @@ test('shows manager-specific workload in the dashboard summary', () => {
   // ★ 지정 현황은 **작업(작업보드) 기준**(2026-08-23 사용자 확정) — 그 카운터는 스텁이 아니라
   //   구현을 그대로 넣는다(스텁을 두면 그 함수의 회귀를 여기서만 못 본다).
   const counts = source.match(/function _ovmTabCounts\(\)\{[\s\S]*?\n\}/);
+  const live = source.match(/function _ovmLiveTabs\(\)\{[^\n]*\}/);
   const unass = source.match(/function _ovmUnassignedTabs\(\)\{[^\n]*\}/);
-  assert.ok(counts && unass, 'tab counters should be extractable');
+  assert.ok(counts && unass && live, 'tab counters should be extractable');
   const sandbox = { esc: value => String(value), Number, String, Object, Array,
     STATE: { mapTabs: [{ sheetId: 'S1', tabGid: '1', advertiserId: 'adv_a' }, { sheetId: 'S1', tabGid: '2' }] } };
   vm.createContext(sandbox);
-  vm.runInContext(unass[0] + '\n' + counts[0] + '\n' + match[0], sandbox);
+  vm.runInContext(live[0] + '\n' + unass[0] + '\n' + counts[0] + '\n' + match[0], sandbox);
   const html = sandbox._ovmbSummaryHtml([
     { inadPm: '만두', works: 7, noMatch: 1, finishCand: 0 },
     { inadPm: '망고', works: 4, noMatch: 0, finishCand: 2 },
-  ], 11, 6, 1, false, true, true);
+  ], 11, false, true, true);
   assert.match(html, /만두 1개 업체 · 7건/);
   assert.match(html, /망고 1개 업체 · 4건/);
   assert.match(html, /업체 지정 작업/);            // 시트 개수가 아니라 작업 기준으로 말한다
-  assert.match(html, /활성 작업 2건 · 미지정 1건/);
+  assert.match(html, /진행 중 작업 2건 · 미지정 1건/);
 });
 
 test('keeps rows safe and selectable through the existing company selector', () => {
@@ -51,10 +52,14 @@ test('keeps rows safe and selectable through the existing company selector', () 
   assert.match(source, /document\.querySelectorAll\('\.advitem'\)/);
 });
 
-test('renders the ownership footer without relying on another function scope for admin access', () => {
+// ★ 사용자 확정(2026-08-23): 사이드바 하단에서 [시트에서 가져오기]가 사라져 역할 분기 자체가 없다.
+//   대신 재료(mapTabs)를 못 받았을 때 0 으로 위장하지 않는 것이 이 자리의 계약이다.
+test('ownership footer counts unassigned works and never fakes zero', () => {
   const footer = source.match(/function _ovmRenderFoot\(\)\{[\s\S]*?\n\}/);
   assert.ok(footer, 'ownership footer should be extractable');
-  assert.match(footer[0], /const isAdmin\s*=\s*STATE\.role==='master'\s*\|\|\s*STATE\.role==='admin';/);
+  assert.doesNotMatch(footer[0], /openSheetImport|ownedSheetIds|시트/);
+  assert.match(footer[0], /_ovmUnassignedTabs\(\)\.length/);
+  assert.match(footer[0], /불러오지 못함/);
 });
 
 test('ends the loading state when the mapping-tab request rejects', () => {

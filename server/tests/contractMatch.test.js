@@ -305,7 +305,8 @@ async function run() {
   //     사본을 두면 "업체관리에서 매칭했는데 작업보드는 미매칭"으로 갈린다.
   assert.ok(!/계약 연결 필요|>미연결</.test(HTML), '9a: 작업 정산 요약 어휘가 "계약 매칭"으로 통일(계약 연결 잔존 0)');
   assert.ok(/계약 매칭 필요/.test(HTML), '9a2: 미매칭 안내 문구');
-  assert.ok(!/정산 링크된 탭만/.test(HTML) && /계약이 매칭된 탭만 표시/.test(HTML), '9a3: 업체관리 안내도 매칭 어휘');
+  // ★ 어휘가 '탭' → '작업'으로 통일됐다(2026-08-23 — 업체관리에서 시트/탭 용어 제거). 검사 의미 불변.
+  assert.ok(!/정산 링크된 탭만/.test(HTML) && /계약이 매칭된 작업만 표시/.test(HTML), '9a3: 업체관리 안내도 매칭 어휘');
 
   // 팝업 단일 출처 — 정의 1개, 두 화면이 같은 함수를 부른다.
   assert.equal((HTML.match(/function openContractMatchModal\(/g) || []).length, 1, '9b: 계약 매칭 팝업 정의는 하나(사본 금지)');
