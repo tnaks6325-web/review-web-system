@@ -1987,22 +1987,32 @@ async function _riScopeQuery(req) {
   return { ok: true, sheetId: null, tabName: null, scoped: true, allow: tabs || [] };
 }
 
+/* 목록 상한 — 화면이 "최근 N건만 표시"라고 말할 수 있게 응답에 함께 싣는다. */
+const _RI_LIST_LIMIT = 200;
+
 router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res) => {
   try {
     const sc = await _riScopeQuery(req);
     if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
-    let items = await _inspectSvc.listInspections({
-      sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'open'),
+    const status = String(req.query.status || 'open');
+    /* ★ staff + 탭 미지정 → 담당 탭 스코프를 **SQL 로 내린다**(종전에는 전체에서 뽑은 200건을
+         라우트가 걸러 담당 건이 그 200건 밖이면 화면이 거의 비었고, 요약도 200 에서 잘렸다). */
+    const tabs = (sc.scoped && !sc.tabName) ? (sc.allow || []) : undefined;
+    const limit = _RI_LIST_LIMIT;
+    const items = await _inspectSvc.listInspections({
+      sheetId: sc.sheetId, tabName: sc.tabName, tabs, status, limit,
     });
-    let summary = await _inspectSvc.inspectionSummary({ sheetId: sc.sheetId, tabName: sc.tabName });
-    // staff + 탭 미지정 → 담당 탭만 남긴다(집계도 같은 기준으로 다시 센다)
-    if (sc.scoped && !sc.tabName) {
-      const allow = new Set((sc.allow || []).map(t => JSON.stringify([t.sheetId, t.tabName])));
-      items = items.filter(it => allow.has(JSON.stringify([it.sheet_id, it.tab_name])));
-      summary = { pass: 0, suspect: 0, fail: 0, pending: 0, unverifiable: 0, resolved: 0, open: 0 };
-      for (const it of items) if (summary[it.status] !== undefined) summary[it.status] += 1;
-      summary.open = summary.suspect + summary.fail;
-    }
+    const summary = await _inspectSvc.inspectionSummary({ sheetId: sc.sheetId, tabName: sc.tabName, tabs });
+    /* ★★ 오류유형별 건수는 **목록 상한과 무관한 전체 집계** — 화면이 세면 "불러온 200건"만
+         세어져 3,334건짜리 화면에 `전체 유형 200` 이 뜬다(이번 신고의 원인).
+       ★ fail-soft: 실패하면 필드를 **안 싣는다**(0 으로 꾸미지 않는다 — 화면이 종전 폴백으로
+         "표시된 N건 기준"이라고 말한다). */
+    let typeCounts = null;
+    try {
+      typeCounts = await _inspectSvc.inspectionTypeCounts({
+        sheetId: sc.sheetId, tabName: sc.tabName, tabs, status,
+      });
+    } catch (e) { logger.warn(`[review-inspect] 유형 집계 실패(무시): ${e.message}`); }
     // ★ 이 작업의 리뷰타입을 **판정 근거값과 함께** 실어 보낸다 — 구매확정 작업인데
     //   "리뷰 화면이 아님" 불량이 나오는 이유가 화면 어디에도 안 보이던 실사고(2026-08-06) 대응.
     //   읽기 전용·fail-soft(실패 = 빈 배열 = 표시만 생략, 목록은 그대로 뜬다).
@@ -2011,7 +2021,11 @@ router.get('/review-inspect/list', authMiddleware, _reInternal, async (req, res)
       reviewTypes = await require('../services/reviewTypeContext.service')
         .reviewTypeDetailsForTabs(items.map(it => ({ sheetId: it.sheet_id, tabName: it.tab_name })));
     } catch (_) { /* 표시 보조 — 목록을 죽이지 않는다 */ }
-    res.json({ ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped, reviewTypes });
+    res.json({
+      ok: true, items, summary, openCount: summary.open, scoped: !!sc.scoped, reviewTypes,
+      limit, truncated: items.length >= limit,
+      ...(typeCounts ? { typeCounts } : {}),
+    });
   } catch (err) {
     logger.warn(`[review-inspect] 목록 실패: ${err.message}`);
     res.status(500).json({ ok: false, error: '검수 목록을 불러오지 못했습니다.' });
@@ -2238,13 +2252,10 @@ router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req
   try {
     const sc = await _riScopeQuery(req);
     if (!sc.ok) return res.status(sc.code).json({ ok: false, error: sc.error });
-    let items = await _inspectSvc.listInspections({
+    const items = await _inspectSvc.listInspections({
       sheetId: sc.sheetId, tabName: sc.tabName, status: String(req.query.status || 'all'), limit: 500,
+      tabs: (sc.scoped && !sc.tabName) ? (sc.allow || []) : undefined,
     });
-    if (sc.scoped && !sc.tabName) {
-      const allow = new Set((sc.allow || []).map(t => JSON.stringify([t.sheetId, t.tabName])));
-      items = items.filter(it => allow.has(JSON.stringify([it.sheet_id, it.tab_name])));
-    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="review-inspect.csv"');
     res.send(_inspectSvc.inspectionsCsv(items));

@@ -12770,6 +12770,8 @@ async function renderInspectView(){
    ★ 그래서 이 함수는 **어떤 예외에도 반드시 화면을 종결**시킨다(교체요청·리뷰어DB 뷰의
      "불러오지 못했습니다" 종결과 같은 규율). 조용히 매달리는 화면을 만들지 않는다.
    ★ api() 의 401 경로는 여전히 영구 보류다 — 그건 화면이 로그인으로 교체된 뒤라 의도된 것. */
+/** 천단위 구분 — 3,334 처럼 큰 수가 나오는 화면이라 그냥 붙여 쓰면 읽히지 않는다. */
+function _riN(n){ const v=Number(n); return Number.isFinite(v)?v.toLocaleString('ko-KR'):String(n); }
 async function _loadInspect(){
   const b = $('#ribody');
   try{
@@ -12782,6 +12784,13 @@ async function _loadInspect(){
     STATE.ri = r.items || [];
     STATE.riSummary = r.summary || null;
     STATE.riScoped = !!r.scoped;
+    /* ★★ 오류유형 건수는 **서버 전체 집계**(`typeCounts`)를 그대로 그린다 — 화면에서 세면
+         목록 상한(200)만 세어져 "전체 유형 200"이 된다(3,334건짜리 화면의 실제 증상).
+       ★ 구버전 백엔드·집계 실패는 필드 자체가 없다 → null 로 두고 종전 폴백(표시된 건 기준)으로
+         그리되 **그 사실을 문장으로 말한다**(0 으로도, 전체인 척으로도 꾸미지 않는다). */
+    STATE.riTypeCounts = (r && r.typeCounts && typeof r.typeCounts === 'object') ? r.typeCounts : null;
+    STATE.riTruncated = !!(r && r.truncated);
+    STATE.riLimit = Number(r && r.limit) || 0;
     // ★ 리뷰타입 = "이 작업은 무슨 화면을 기대하는가" — 구매확정 작업인데 불량이 나오는
     //   이유가 화면에 안 보이던 실사고(2026-08-06) 대응. 필드 부재(구버전 백엔드) = 표시만 생략.
     STATE.riRT = new Map((r.reviewTypes||[]).map(x=>[x.sheetId+'\u0000'+x.tabName, x]));
@@ -12800,18 +12809,26 @@ function _riRenderHead(sum){
   // ★ 상태·탭 전환 시 유형 필터 초기화(남으면 "왜 안 보이지"가 된다 — 그리드 검색어 초기화 규율)
   const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.riStatus='${k}';STATE.riType='all';_loadInspect()">${l}</button>`;
   const t = STATE.riTab;
-  const tally = sum ? `<span class="ovnote-tally">통과 ${sum.pass} · 의심 ${sum.suspect} · 불량 ${sum.fail} · 미검수 ${sum.pending}</span>` : '';
-  // 오류유형 필터 — 판정 근거(checks)는 이미 목록에 실려 온다(서버 변경 0, 화면에서 세기만)
+  const tally = sum ? `<span class="ovnote-tally">통과 ${_riN(sum.pass)} · 의심 ${_riN(sum.suspect)} · 불량 ${_riN(sum.fail)} · 미검수 ${_riN(sum.pending)}</span>` : '';
+  /* 오류유형 필터 — 건수는 **서버 전체 집계**(typeCounts), 없으면 표시된 건 기준 폴백.
+     ★ 합계 ≠ 전체(한 건이 여러 유형이면 각 칩에 모두 세어진다) — 안내문이 그 사실을 말한다. */
   const _rows = STATE.ri || [];
+  const _srv = STATE.riTypeCounts;
   const _tcnt = {};
-  for(const r of _rows) for(const k of _riIssueTypes(r)) _tcnt[k]=(_tcnt[k]||0)+1;
+  if(_srv){ for(const [k] of RI_TYPES) if(Number(_srv[k])>0) _tcnt[k]=Number(_srv[k]); }
+  else { for(const r of _rows) for(const k of _riIssueTypes(r)) _tcnt[k]=(_tcnt[k]||0)+1; }
+  const _allN = _srv ? (Number(_srv.total)||0) : _rows.length;
   const curType = STATE.riType || 'all';
-  const tchip=(k,l,n)=>`<button class="btn${curType===k?' pri':''}" style="font-size:.72rem;padding:3px 10px" onclick="riTypeSet('${k}')">${l}${n!=null?' '+n:''}</button>`;
-  const typeRow = _rows.length
+  const tchip=(k,l,n)=>`<button class="btn${curType===k?' pri':''}" style="font-size:.72rem;padding:3px 10px" onclick="riTypeSet('${k}')">${l}${n!=null?' '+_riN(n):''}</button>`;
+  /* ★ 목록이 잘렸으면 **말한다** — 칩은 전체 건수인데 아래 카드는 최근 N건뿐이라,
+       고지가 없으면 "칩은 2,100인데 카드가 133장"으로 읽혀 숫자를 못 믿게 된다. */
+  const _trunc = STATE.riTruncated
+    ? `<span class="rimeta">· 목록은 최근 ${_riN(_rows.length)}건만 표시${_srv?'(칩 숫자는 전체 기준)':''}</span>` : '';
+  const typeRow = (_rows.length || _allN)
     ? `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
-        ${tchip('all','전체 유형',_rows.length)}
+        ${tchip('all','전체 유형',_allN)}
         ${RI_TYPES.map(([k,l])=>_tcnt[k]?tchip(k,l,_tcnt[k]):'').join('')}
-        <span class="rimeta">한 건이 여러 유형이면 각 칩에 모두 세어집니다</span></div>`
+        <span class="rimeta">한 건이 여러 유형이면 각 칩에 모두 세어집니다${_srv?'':' · 표시된 건 기준'}</span>${_trunc}</div>`
     : '';
   /* ★ 상태 칩은 **[의심＋불량] · [확인됨]** 둘뿐(사용자 확정 2026-08-06) — 이 화면의 목적이
        "의심·불량만 모아 보는 것"이라 통과·미검수·전체는 볼 것을 묻는다.
@@ -12836,7 +12853,11 @@ function _riRenderHead(sum){
       ${t?`<b style="color:var(--muted)"> · ${esc(t.tabName)}</b> <a href="javascript:void(0)" onclick="STATE.riTab=null;STATE.riType='all';_loadInspect()">전체 보기</a>`:''}
       ${tally}${typeRow}</div>`;
 }
-/* 오류유형 판정 — 카드 근거 문장(_riReasons)과 같은 분기(갈리면 "칩 건수 ≠ 카드 문장"이 된다) */
+/* 오류유형 판정 — 카드 근거 문장(_riReasons)과 같은 분기(갈리면 "칩 건수 ≠ 카드 문장"이 된다)
+   ★★ 판정의 **단일 출처는 서버 `server/src/utils/inspectIssueTypes.js`** 다(전체 집계가 그것을
+     SQL 로 파생해 센다). 여기 있는 것은 화면 필터·재검수 대상 선정용 최소 사본이고,
+     회귀가드(`tests/inspectTypeCounts.test.js`)가 같은 픽스처로 두 구현을 실행해 **결과 동일**을
+     고정한다 — 한쪽만 고치면 그 자리에서 빨개진다. */
 const RI_TYPES=[['format_fail','📵 리뷰화면 아님'],['channel','🔀 채널 다름'],['product','🏷 상품명 다름'],['duplicate','📄 같은 파일'],['similarity','✍ 본문 겹침'],['author','👤 작성자 표기']];
 function _riIssueTypes(r){
   const c=(r&&r.checks)||{}, out=[];
@@ -12935,7 +12956,17 @@ function _riRenderBody(){
   //   상세 열기·확인 처리가 필터와 무관하게 같은 건을 가리키게 한다.
   const curType = STATE.riType || 'all';
   const view = rows.map((r,i)=>[r,i]).filter(([r])=>curType==='all'||_riIssueTypes(r).includes(curType));
-  if(!view.length){ b.innerHTML=`<div class="empty">이 유형의 검수 건이 없습니다. <a href="javascript:void(0)" onclick="riTypeSet('all')">전체 유형 보기</a></div>`; return; }
+  if(!view.length){
+    /* ★ 칩 숫자(전체)와 목록(최근 200건)이 다르므로 **왜 비었는지**를 구분해 말한다 —
+         "없다"와 "이 화면에 안 실렸다"를 뭉뚱그리면 담당자가 원인을 엉뚱한 데서 찾는다. */
+    const n = Number((STATE.riTypeCounts||{})[curType]) || 0;
+    b.innerHTML = n
+      ? `<div class="empty">이 유형은 <b>${_riN(n)}건</b>이지만 지금 목록(최근 ${_riN(rows.length)}건)에는 없습니다.<br>
+           작업을 골라 보거나 확인 처리로 목록을 줄인 뒤 다시 보세요.
+           <a href="javascript:void(0)" onclick="riTypeSet('all')">전체 유형 보기</a></div>`
+      : `<div class="empty">이 유형의 검수 건이 없습니다. <a href="javascript:void(0)" onclick="riTypeSet('all')">전체 유형 보기</a></div>`;
+    return;
+  }
   b.innerHTML = `<div class="ricards">` + view.map(([r,i])=>{
     const c = r.checks || {};
     const reasons = _riReasons(c, {skipRel:true});   // 같은 파일·본문 겹침은 아래 관계 줄이 말한다
