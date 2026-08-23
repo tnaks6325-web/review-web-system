@@ -5937,9 +5937,23 @@ function _condCardHtml(wd,d,m){
       :'<span class="cnna" title="표의 구매일자에서 일정을 읽지 못했습니다 — 구매일자 칸이 없거나 비어 있습니다.">—</span>';
     return `<dt>일정</dt><dd title="작업보드 표의 구매일자 중 가장 이른 날 ~ 가장 늦은 날입니다 — 모집인원 조절로 날짜가 바뀌면 함께 바뀝니다.">${v}</dd>`;
   })();
+  /* 구매시간(사용자 확정 2026-08-23) — **실제로 참여를 여닫는 값은 공고 시간창**이고
+     작업오더 `구매시간` 은 그 발행 프리필 원본일 뿐이다(참여 판정에 안 쓰인다).
+     그래서 총건수·일건수와 **같은 규율**: 공고 값이 있으면 그것, 없으면 발주 원문 + 출처 칩.
+     ★ 참여형인데 시간창이 양쪽 다 비면 그건 빈 값이 아니라 **자율주문**(종일 열림)이다.
+     ★ 둘 다 없으면 [미설정] → 작업오더 수정(`purchase_time` 은 편집 가능 필드). */
+  const timeRow=(()=>{
+    const w=cd.purchaseWindow, ot=cd.orderPurchaseTime;
+    let v=null;
+    if(w&&w.start&&w.end) v=`${esc(w.start)}<span class="u">~</span>${esc(w.end)} <span class="cndchip" title="모집공고의 구매 시간창입니다 — 리뷰어 참여가 이 시간에만 열립니다.">공고 기준</span>`;
+    else if(cd.purchaseAllDay) v=`자율 <span class="cndchip" title="모집공고에 시간창이 없어 종일 열립니다(자율주문).">공고 기준</span>`;
+    else if(ot) v=`${esc(ot)}${cd.campaignId?' <span class="cndchip" title="모집공고에 시간창이 없어 작업오더에 적힌 값을 그대로 보여줍니다 — 실제 참여 시간은 공고가 정합니다.">발주 기준</span>':''}`;
+    return `<dt>구매시간</dt>${v==null?unset('order'):`<dd>${v}</dd>`}`;
+  })();
   const rows=[
     ['@murl',null,null],
     ['@sched',null,null],
+    ['@time',null,null],
     /* ★ 총건수 = 실제 적용 정원. 공고에 총인원이 없어 발주서 값이 적용된 경우 출처를 밝힌다
        (조용한 대체 금지 — 담당자가 "공고에 넣은 적 없는데 왜 100?"을 확인할 수 있어야 한다). */
     ['총건수','quota',   n(cd.recruitTotal)==null?null:`${Number(cd.recruitTotal).toLocaleString()}<span class="u">건</span>`+
@@ -5953,7 +5967,7 @@ function _condCardHtml(wd,d,m){
     ['리뷰비','fee',     cd.feeSource?`${won(cd.reviewFee||0)}${cd.feeSource==='schedule'?'<span class="u" title="기간별 리뷰비 구간(오늘 기준)">구간</span>':''}`:null],
     ['입금명','memo',    cd.depositName?esc(cd.depositName):null],
     ['리뷰타입','rtype', _cndRtypeHtml(cd)],
-  ].map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`))).join('');
+  ].map(([k,kind,v])=>k==='@murl'?murlRow:(k==='@sched'?schedRow:(k==='@time'?timeRow:(k==='@pay'?payRows:`<dt>${esc(k)}</dt>${v==null?unset(kind):val(v,kind)}`)))).join('');
   /* 상품명 정리 — **표시만, 원본 무접촉**(`condition.productName` 은 작업오더 원문 그대로다).
      ① `[상품/옵션/금액]` 라벨(사용자 확정 2026-08-20 시안 v2)
      ② 목록 번호 `1. `(사용자 확정 2026-08-23) — 원문이 `[상품/옵션/금액]\n1. 곰도리 … ` 형태라
@@ -5962,7 +5976,15 @@ function _condCardHtml(wd,d,m){
      ★ 여기서 URL 꼬리는 건드리지 않는다(요청 범위 밖 · 긴 이름은 `.cndprod` 가 한 줄로 접는다). */
   const prod=String(cd.productName||d.productOption||m.campaignName||'')
     .replace(/^\s*\[상품\/옵션\/금액\]\s*/,'')
-    .replace(/^\s*\d{1,3}\.\s+/,'');
+    .replace(/^\s*\d{1,3}\.\s+/,'')
+    /* ③ URL 꼬리 · ④ 금액/인원/소계 꼬리(사용자 확정 2026-08-23) — 둘 다 **이 카드의 다른 행이
+       이미 말하는 값**이라(메인URL · 결제금액 · 총건수) 작업명에 다시 붙으면 이름만 안 보인다.
+       ★ **줄 단위로만 자른다**(`[^\n]*`) — `[\s\S]*$` 로 자르면 여러 상품 줄에서 2번째부터가
+         통째로 사라져 툴팁(제목 전문)까지 잃는다.
+       ★ URL 을 먼저 자른다 — 주소 안의 `-` 를 금액 규칙이 먼저 물면 이름이 더 잘린다. */
+    .replace(/\s*\(\s*https?:\/\/[^\n]*/gi,'')
+    .replace(/\s*[-–—]\s*결제금액[^\n]*/g,'')
+    .trim();
   const many=cd.campaignCount>1?`<span class="cndwarn" title="이 작업에 연결된 공고가 ${cd.campaignCount}개입니다 — 살아있는 최신 공고 기준으로 표시합니다.">공고 ${cd.campaignCount}</span>`:'';
   return `<div class="tp3col"><div class="tp3t tp3h" onclick="_topToggle()" title="클릭하면 상단 세 박스가 함께 접히거나 펼쳐집니다">작업 조건${many}<span class="tp3hint">접기/펼치기</span><span class="tp3chev">∨</span></div>`+
     `<div class="cndprod" title="${esc(prod)}">${esc(prod)||'<span class="cnna">—</span>'}</div>`+

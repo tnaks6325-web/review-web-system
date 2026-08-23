@@ -258,6 +258,22 @@ t('★ 일건수 = wd.todayProgress.quota(공고 기준 칩) — 재계산 사�
   })());
   t('★ 뒤쪽 번호는 건드리지 않는다(첫 줄 앞머리만)',
     f('1. A\n2. B').indexOf('2. B') > 0);
+  /* ★★ URL 꼬리·금액 꼬리도 자른다(사용자 확정 2026-08-23) — 둘 다 **카드의 다른 행이 이미
+     말하는 값**이라(메인URL · 결제금액 · 총건수) 작업명에 다시 붙으면 이름이 안 보인다.
+     ⚠ 줄 단위로만 자를 것 — `[\s\S]*$` 로 자르면 여러 상품 줄에서 2번째부터가 통째로 사라진다. */
+  t('★ URL 꼬리 + 결제금액/인원/소계 꼬리를 자른다(사용자 신고 원문)', (() => {
+    const v = f('[상품/옵션/금액]\n1. 웰스앤헬스 천기 약도라지 삼백초캔디 목캔디, 1박스, 152g'
+      + ' (https://www.coupang.com/vp/products/9659949648?vendorItemId=95810751872)'
+      + ' - 결제금액 15,900원 / 500명 / 소계 7,950,000');
+    return v === '웰스앤헬스 천기 약도라지 삼백초캔디 목캔디, 1박스, 152g';
+  })(), JSON.stringify(f('[상품/옵션/금액]\n1. X (https://a.b/c) - 결제금액 1원 / 2명')));
+  t('★ URL 없이 금액 꼬리만 있어도 자른다', f('A상품 - 결제금액 1,000원 / 5명') === 'A상품');
+  t('⚠ 여러 상품 줄에서 2번째 줄이 사라지지 않는다(줄 단위로만 자른다)', (() => {
+    const v = f('1. A상품 (https://x.co/1) - 결제금액 1,000원 / 5명\n2. B상품 (https://x.co/2) - 결제금액 2,000원');
+    return /A상품/.test(v) && /B상품/.test(v);
+  })());
+  t('★ 상품명 속 하이픈은 자르지 않는다(`- 결제금액` 조합만)',
+    f('A-B 프리미엄 세트') === 'A-B 프리미엄 세트');
 }
 
 // 접기/펼치기 — 세 박스 일괄 + 하단선 일치
@@ -574,10 +590,51 @@ t('★ 화면은 서버 값을 그리기만 한다 — 총건수 위에 일정 �
 })());
 t('③ 값이 없으면 [미설정] 버튼이 아니라 「—」(고칠 창구가 없는 죽은 버튼 금지)', (() => {
   const m = fnBody(wd, 'function _condCardHtml(');
-  const i = m.indexOf('const schedRow='), j = m.indexOf('const rows=[', i);
-  const blk = m.slice(i, j);
+  /* ⚠ 슬라이스 끝을 `const rows=[` 로 두면 그 사이에 새 행(구매시간 등)이 들어올 때
+     그쪽의 `unset(...)` 이 걸려 조용히 빨개진다 — **바로 다음 선언**까지만 자른다. */
+  const i = m.indexOf('const schedRow='), j = m.indexOf('const timeRow=', i);
+  const blk = m.slice(i, j > i ? j : m.indexOf('const rows=[', i));
   return /cnna/.test(blk) && !/unset\(/.test(blk);
 })());
+
+console.log('\n── J. 구매시간 행(사용자 확정 2026-08-23) ──');
+/* ★★ **실제로 참여를 여닫는 값은 공고 시간창**(`computeCampaignState`)이고 작업오더
+   `purchase_time` 은 그 발행 프리필 원본일 뿐이다. 오더 텍스트만 그리면 "카드는 0~15시인데
+   실제로는 다른 시간에 열리는" 상태가 된다 → 총건수·일건수와 같은 규율(공고 우선·발주 폴백). */
+t('★ 서버가 공고 시간창을 싣는다(쿼리 순증 0 — 기존 캠페인 SELECT 에 2컬럼)',
+  /to_char\(window_start,'HH24:MI'\) AS "windowStart"/.test(cond)
+  && /to_char\(window_end,'HH24:MI'\)\s+AS "windowEnd"/.test(cond)
+  && /purchaseWindow:/.test(cond) && /orderPurchaseTime:/.test(cond));
+t('★ 시간창 개념은 참여형 공고에만 있다 — 레거시에는 싣지 않는다',
+  /purchaseWindow: \(c && c\.participationMode && c\.windowStart && c\.windowEnd\)/.test(cond)
+  && /purchaseAllDay: !!\(c && c\.participationMode && !c\.windowStart && !c\.windowEnd\)/.test(cond));
+t('★ 구매시간 행은 일정 바로 아래', (() => {
+  const m = fnBody(wd, 'function _condCardHtml(');
+  return m.indexOf("['@time'") > m.indexOf("['@sched'")
+    && m.indexOf("['@time'") < m.indexOf("['총건수'")
+    && /k==='@time'\?timeRow/.test(m);
+})());
+{
+  const vm = require('vm');
+  const m = fnBody(wd, 'function _condCardHtml(');
+  const i = m.indexOf('const timeRow='), j = m.indexOf('const rows=[', i);
+  const sb = { esc: s => String(s == null ? '' : s), unset: () => '<dd><button class="cndset">미설정</button></dd>' };
+  vm.createContext(sb);
+  vm.runInContext('this.f=function(cd){' + m.slice(i, j) + 'return timeRow;};', sb);
+  const f = sb.f;
+  t('★ 공고 시간창이 있으면 그것(공고 기준 칩)',
+    /00:00.*15:00/.test(f({ purchaseWindow: { start: '00:00', end: '15:00' } }))
+    && /공고 기준/.test(f({ purchaseWindow: { start: '00:00', end: '15:00' } })));
+  t('★ 참여형인데 시간창이 비면 **자율주문**(빈 값이 아니라 상태)',
+    /자율/.test(f({ purchaseAllDay: true })) && /공고 기준/.test(f({ purchaseAllDay: true })));
+  t('★ 공고 값이 없으면 발주 원문 + 발주 기준 칩',
+    /0시 ~ 15시/.test(f({ orderPurchaseTime: '0시 ~ 15시', campaignId: 'c1' }))
+    && /발주 기준/.test(f({ orderPurchaseTime: '0시 ~ 15시', campaignId: 'c1' })));
+  t('★ 공고가 없으면 출처 칩을 붙이지 않는다(대조할 기준이 없다)',
+    !/발주 기준/.test(f({ orderPurchaseTime: '자율' })));
+  t('★ 둘 다 없으면 [미설정] — 작업오더 수정 창구가 있다',
+    /cndset/.test(f({})));
+}
 
 console.log('\n── H. 시안 문서 ──');
 t('시안 문서에 C안이 있다', /id="secC"/.test(doc) && /\?v=C/.test(doc));
