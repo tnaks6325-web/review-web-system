@@ -114,6 +114,20 @@ const body = wd.slice(wd.indexOf('function _riRenderBody'), wd.indexOf('function
 ok('★ "없다"와 "이 목록에 안 실렸다"를 구분해 말한다',
   /지금 목록\(최근 \$\{_riN\(rows\.length\)\}건\)에는 없습니다/.test(body));
 
+/* ═══ ⑥-2 진단 스크립트 — 규칙 사본 0 · 읽기 전용 ═══════════════════
+ *  운영 DB 는 컨테이너 안에서만 닿아 `scripts/inspect-diag.js` 로 조회한다.
+ *  그 스크립트가 유형 규칙을 베껴 쓰면 화면 칩과 진단 숫자가 갈리고,
+ *  쓰기 구문이 섞이면 진단이 사고가 된다 → 둘 다 여기서 고정한다. */
+console.log('\n▶ 진단 스크립트');
+const diag = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'inspect-diag.js'), 'utf8');
+ok('★★ 유형 판정을 베끼지 않고 단일 출처에서 파생한다',
+  /require\([^)]*inspectIssueTypes[^)]*\)/.test(diag) && /issueTypeCountSql\('i\.checks'\)/.test(diag));
+ok('★★ 읽기 전용 — 쓰기 구문이 없다',
+  !/\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER)\s/i.test(diag.replace(/^\s*(\/\/|\*).*$/gm, '')));
+ok('★ DATABASE_URL 이 없으면 사유를 말하고 끝낸다(조용한 실패 금지)',
+  /DATABASE_URL 이 없습니다/.test(diag));
+ok('★ 한 절이 실패해도 나머지 진단은 남는다(fail-soft)', /조회 실패:/.test(diag));
+
 /* ═══ ⑦ 진짜 PG — JS 판정 ≡ SQL 집계 ═══════════════════════════════ */
 (async () => {
   if (!process.env.PGTEST_URL) {
