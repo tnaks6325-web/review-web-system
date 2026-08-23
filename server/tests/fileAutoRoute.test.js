@@ -183,7 +183,13 @@ const fileRoute = require('../src/services/fileRoute.service');
     assert.ok(/_getCacheKey\('classify[4-9]\d*:'/.test(gem), '캐시 접두 상향(classify4: 이상)');
     assert.ok(!/_getCacheKey\('classify[1-3]?:'/.test(gem), '옛 접두 키 생성 부재');
     assert.ok(gem.includes('"order_capture"') || gem.includes("'order_capture'"), 'kind 에 order_capture');
-    assert.ok(gem.includes("['review', 'receipt', 'purchase_confirm', 'order_capture', 'other']"), '검증 배열에 order_capture');
+    // ★ 종류는 계속 는다(order_cancel 등) → "빠지지 않았다"를 본다(검사 의미 불변)
+    {
+      const m = /const kind = \[([^\]]*)\]\.includes\(p\.kind\)/.exec(gem);
+      const have = m ? m[1].split(',').map(x => x.trim().replace(/'/g, '')) : [];
+      assert.ok(['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'].every(k => have.includes(k)),
+        '검증 배열에 order_capture');
+    }
     // 오래 검증된 판정 기준(리뷰·영수증) 줄은 그대로
     assert.ok(gem.includes('- "review": 쇼핑몰 리뷰 화면. 별점(★), 리뷰 본문, 상품평 목록'), 'review 판정 기준 불변');
     assert.ok(gem.includes('- "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호'), 'receipt 판정 기준 불변');

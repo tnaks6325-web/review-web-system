@@ -367,8 +367,13 @@ t('★★ kind 판정 기준 3줄은 한 글자도 안 바뀌었다(오래 검�
 t('purchase_confirm 종류 추가 + 화이트리스트 + JSON 형식',
   /- "purchase_confirm": 구매확정 완료 화면/.test(GEM)
   // 자동 분류(파일 라우팅)에서 order_capture 가 추가됐다 — purchase_confirm 생존 검사는 그대로
-  && /\['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'\]\.includes\(p\.kind\)/.test(GEM)
-  && /"kind":"review\|receipt\|purchase_confirm\|order_capture\|other"/.test(GEM));
+  // ★ 종류는 계속 는다 → 기존 종류의 **생존**만 본다(검사 의미 불변)
+  && (() => {
+    const m = /const kind = \[([^\]]*)\]\.includes\(p\.kind\)/.exec(GEM);
+    const have = m ? m[1].split(',').map(x => x.trim().replace(/'/g, '')) : [];
+    return ['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'].every(k => have.includes(k));
+  })()
+  && /"kind":"review\|receipt\|purchase_confirm\|order_capture\|/.test(GEM));
 t('★★ 캐시 접두 상향 — 옛 캐시가 새 종류를 모른 채 히트하는 것 차단',
   /_getCacheKey\('classify[4-9]\d*:'/.test(GEM) && !/_getCacheKey\('classify[23]:'/.test(GEM));
 

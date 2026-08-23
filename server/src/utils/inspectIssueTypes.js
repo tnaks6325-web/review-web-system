@@ -19,6 +19,17 @@
 /** 유형 키 순서 = 화면 칩 순서(RI_TYPES)와 같아야 한다 — 회귀가드가 고정. */
 const ISSUE_RULES = [
   {
+    key: 'cancel',
+    /* ★★ 주문취소 — 리뷰어가 그 작업을 취소한 신호(2026-08-23 신고).
+         `format_fail` 과 **겹쳐서** 세어진다(둘 다 fail) — 의도한 것이다: 담당자에게
+         "리뷰 화면이 아님"보다 "취소됨"이 먼저 읽혀야 하고, 칩은 원래 중복 계수다
+         (화면 안내문이 그 사실을 말한다). 화면 주 이슈 판정도 이 축을 먼저 본다.
+       ★ verdict 를 보지 않는다 — 취소 화면은 어느 작업에서도 정상 제출이 아니므로
+         판정이 무엇이든 담당자가 봐야 한다. */
+    js: (c) => !!(c.format && (c.format.got || c.format.kind) === 'order_cancel'),
+    sql: (a) => `COALESCE(${a}->'format'->>'got', ${a}->'format'->>'kind') = 'order_cancel'`,
+  },
+  {
     key: 'format_fail',
     // 리뷰 화면이 아님(확신 판정) — 유일한 fail 축
     js: (c) => !!(c.format && c.format.verdict === 'fail'),

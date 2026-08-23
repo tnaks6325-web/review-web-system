@@ -316,7 +316,9 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts
     : '';
 
   // 같은 파일 재업로드·재시도는 캐시로 상각(extractOrderFromImage와 같은 저장소, 키에 용도 접두)
-  // ★ 접두 'classify6:' (사용자 확정 2026-08-23 — 구매확정 작업의 증빙 범위를 넓혔다:
+  // ★ 접두 'classify7:' (kind 에 order_cancel(주문취소) 이 추가됐다 — 옛 캐시는 새 종류를
+  //   모른 채 히트하므로 접두 상향이 필수).
+  //   그 이전 6 (사용자 확정 2026-08-23 — 구매확정 작업의 증빙 범위를 넓혔다:
   //   "구매확정" 글자도 적립 완료도 없는 **리뷰 작성 대기 화면**(작성기한·리뷰쓰기 유도)까지
   //   구매확정 이후 단계로 인정한다. ⚠ 그 대신 "실제로 구매확정을 눌렀는가"는 더 이상 화면으로
   //   검증되지 않는다(사용자가 대가를 알고 고른 완화 — CLAUDE.md 참조).
@@ -331,7 +333,7 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg', opts
   //   배포 직후 옛 캐시(새 필드 없음)가 히트해 채널이 undefined 인 판정이 나간다.
   //   이 캐시는 **첨부 시점 1차 필터 → 제출 시점 2차 검수** 사이의 재사용이 핵심이라
   //   (같은 이미지 = 같은 해시) AI 콜이 사실상 늘지 않는다.
-  const cacheHash = _getCacheKey('classify6:' + sampleSig + ':' + base64Data);
+  const cacheHash = _getCacheKey('classify7:' + sampleSig + ':' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
 
@@ -346,7 +348,8 @@ kind 판정 기준:
 - "review": 쇼핑몰 리뷰 화면. 별점(★), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임.
 - "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호, 사업자등록번호, 지출증빙, 거래일시 중 하나 이상이 보임.
 - "purchase_confirm": 구매확정 완료 화면, 또는 구매확정 이후 단계임을 보여주는 주문 화면. 다음 중 하나라도 보이면 purchase_confirm 이다: (a) "구매확정" 문구와 함께 완료됨을 나타내는 표시(구매확정 완료, 구매확정됨, 확정일시, 구매확정 버튼이 비활성/완료 상태) (b) 적립이 이미 완료되었다는 표시 — 예: 네이버페이 주문/결제 화면(orders.pay.naver.com)의 "N원 적립되었어요" (c) 그 주문에 대한 리뷰 작성 대기 화면 — 상품과 함께 리뷰 작성기한("작성기한", "D-14")이나 "리뷰쓰기"·"리뷰 쓰고 N원 받기" 같은 리뷰 작성 유도가 보이는 마이쇼핑·주문내역 화면. 별점·리뷰 본문은 없어도 된다.
-- "order_capture": 구매캡처(주문/결제 내역) 화면. 주문번호·결제금액·배송지·주문상품 목록이 보이는 주문 상세/주문 완료/결제 내역 화면. 별점·리뷰 본문이 없고, 위 purchase_confirm 의 (a)(b)(c) 중 어느 것도 보이지 않는다(하나라도 보이면 purchase_confirm).
+- "order_cancel": 주문이 취소된 화면. "취소완료", "주문취소", "취소 신청", "취소된 주문"처럼 그 주문이 취소되었음을 나타내는 표시가 주문 상세·주문내역 화면에 보인다. 리뷰어가 작업을 취소한 신호다.
+- "order_capture": 구매캡처(주문/결제 내역) 화면. 주문번호·결제금액·배송지·주문상품 목록이 보이는 주문 상세/주문 완료/결제 내역 화면. 별점·리뷰 본문이 없고, 위 purchase_confirm 의 (a)(b)(c) 중 어느 것도 보이지 않는다(하나라도 보이면 purchase_confirm, 취소 표시가 보이면 order_cancel).
 - "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).
 
 channel 판정 기준 (kind가 "review"일 때만, 확실하지 않으면 빈 문자):
@@ -362,7 +365,7 @@ channel 판정 기준 (kind가 "review"일 때만, 확실하지 않으면 빈 �
 - signals: 위 판정의 근거가 된 화면 속 문구·요소 (최대 5개 문자열)
 
 JSON 형식:
-{"kind":"review|receipt|purchase_confirm|order_capture|other","confidence":0.0~1.0,"channel":"coupang|naver|kakao|oliveyoung 또는 빈문자","device":"pc|mobile 또는 빈문자","productName":"","reviewText":"","authorMask":"","signals":[],"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
+{"kind":"review|receipt|purchase_confirm|order_capture|order_cancel|other","confidence":0.0~1.0,"channel":"coupang|naver|kakao|oliveyoung 또는 빈문자","device":"pc|mobile 또는 빈문자","productName":"","reviewText":"","authorMask":"","signals":[],"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
 
   try {
     // 예시가 있으면 **먼저** 보여주고(라벨과 함께) 마지막에 판별 대상을 준다 —
@@ -390,7 +393,7 @@ JSON 형식:
     if (!text || !text.trim()) throw new Error('AI 응답이 비어 있습니다.');
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const p = JSON.parse(jsonStr);
-    const kind = ['review', 'receipt', 'purchase_confirm', 'order_capture', 'other'].includes(p.kind) ? p.kind : 'other';
+    const kind = ['review', 'receipt', 'purchase_confirm', 'order_capture', 'order_cancel', 'other'].includes(p.kind) ? p.kind : 'other';
     const CH = ['coupang', 'naver', 'kakao', 'oliveyoung'];
     const out = {
       kind,
