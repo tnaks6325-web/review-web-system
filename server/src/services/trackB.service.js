@@ -2565,7 +2565,8 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       : campFee != null ? 'campaign'
       : tabFee != null ? 'tab' : null;      // null = 근거를 못 찾음(0원이라서가 아니다)
 
-    const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType } = require('../utils/reviewType');
+    const { resolveReviewType, reviewTypeLabel, normalizeReviewType, parseWorkOrderReviewType,
+            isFreeChoiceReviewType, FREE_CHOICE_REVIEW_LABEL } = require('../utils/reviewType');
     const { normalizeReviewTypeMix } = require('../utils/reviewTypeMix');
     const { hasCashReceiptSlot } = require('../utils/captureSlots');
 
@@ -2583,6 +2584,10 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
     const rtKey = resolveReviewType({ campaignType: typeCamp && typeCamp.reviewType, tabReviewType: meta.reviewType });
     const rtMixed = !rtKey && (normalizeReviewType(typeCamp && typeCamp.reviewType) === 'mixed'
                             || normalizeReviewType(meta.reviewType) === 'mixed');
+    /* ★ `자율리뷰`도 "미설정"이 아니다 — 사람이 적어 둔 값이다(2026-08-23 사용자 확정).
+       판정(rtKey)은 여전히 null 이고 라벨만 적힌 그대로 말한다. ★ 혼합과 **배타**. */
+    const rtFree = !rtKey && !rtMixed
+      && (isFreeChoiceReviewType(typeCamp && typeCamp.reviewType) || isFreeChoiceReviewType(meta.reviewType));
     let rtMix = [];
     if (rtMixed) {
       rtMix = (normalizeReviewTypeMix(typeCamp && typeCamp.reviewTypeMix).mix || []);
@@ -2665,7 +2670,9 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       /* 판정값 — 혼합은 행 단위로 정할 수 없어 null(검수·슬롯이 보는 값, 규율 불변). */
       reviewType: rtKey,
       /* 표기값 — 혼합이면 '혼합' + 조합(아래 reviewTypeMix). 둘 다 없으면 null = [미설정]. */
-      reviewTypeLabel: rtKey ? (reviewTypeLabel(rtKey) || rtKey) : (rtMixed ? (reviewTypeLabel('mixed') || '혼합') : null),
+      reviewTypeLabel: rtKey ? (reviewTypeLabel(rtKey) || rtKey)
+        : rtMixed ? (reviewTypeLabel('mixed') || '혼합')
+        : rtFree ? FREE_CHOICE_REVIEW_LABEL : null,
       reviewTypeMixed: rtMixed,
       reviewTypeMix: rtMixed ? rtMix.map(m => ({ type: m.type, label: reviewTypeLabel(m.type) || m.type, quantity: m.quantity })) : null,
       campaignId: c ? c.id : null,
