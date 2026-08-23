@@ -1971,16 +1971,58 @@ function _rfQuotaNotice() { return !!_recruitEditId && _prodMode() !== "opt"; }
 function _syncQuotaLockUi() {
   const box = document.getElementById("rf_quota_lock");
   if (!box) return;
-  if (!_rfQuotaNotice()) { box.hidden = true; box.textContent = ""; return; }
+  if (!_rfQuotaNotice()) { box.hidden = true; box.textContent = ""; _syncRecruitTotalCells(); return; }
   const num = (v) => Number(v || 0);
   const rt = num(document.getElementById("rf_recruit_total")?.value);
   const dl = num(document.getElementById("rf_daily_limit")?.value);
   const fmt = (v, zero) => (v > 0 ? v.toLocaleString() + "명" : zero);
   box.hidden = false;
-  box.innerHTML =
-    '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
-    '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
-    '<span>날짜별 조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 나눠 담습니다.</span>';
+  /* ★★ 차수 원장이 있으면 **서버가 총모집 전송값을 무시한다**(roundsLockRecruitTotal).
+     종전에는 그 사실을 저장한 뒤에야 알 수 있어 "고쳐 저장했는데 다시 열면 그대로"가 됐다.
+     ★ 모름(null — 구버전 백엔드·조회 실패)이면 **잠겼다고 말하지 않는다**(없는 잠금을 지어내지 않는다). */
+  const lock = window._rfRoundsLock;
+  const locked = !!(lock && lock.locked);
+  box.innerHTML = locked
+    ? '<b>🔒 이 공고의 총건수는 <u>차수 원장</u>이 관리합니다 — 여기서 고쳐도 저장되지 않습니다</b>' +
+      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 차수 ' + (Number(lock.count) || 0) + '건 · 합계 ' +
+      ((Number(lock.total) || 0).toLocaleString()) + '명 · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
+      '<span>총건수를 바꾸려면 공고 카드의 <b>[📅 인원]</b> → <b>차수 추가/제거</b>로 하세요(일건수는 여기서 바꿀 수 있습니다).</span>'
+    : '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
+      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
+      '<span>날짜별 조절은 공고 카드의 <b>[📅 인원]</b>(모집인원 조절)에서 — <b>총건수 안에서</b> 나눠 담습니다.</span>'
+      /* ★ 상품 줄이 둘 이상이면 **첫 줄 총인원만** 저장된다 — 안 밝히면 둘째 줄에 친 값이 조용히 버려진다. */
+      + (document.querySelectorAll("#rf_opt_rows .rf-opt-row").length > 1
+          ? '<span>상품 줄이 여러 개예요 — <b>공고 총인원은 첫 줄 값</b>만 저장됩니다(둘째 줄부터의 총인원 칸은 반영되지 않습니다).</span>' : '');
+  _syncRecruitTotalCells();
+}
+
+/**
+ * 총인원 칸이 "고쳐도 저장되지 않는" 자리면 그 사실을 말한다.
+ * ★★ 두 자리가 조용히 버려지고 있었다(2026-08-21 실측):
+ *   ① 차수 원장이 있는 공고 — 서버가 총모집 전송값을 통째로 무시한다(roundsLockRecruitTotal).
+ *   ② '옵션 없는 작업' 수정 모드에서 **첫 줄이 아닌 행**의 총인원 —
+ *      캠페인 정원은 `_syncPreviewFromOptRows` 가 **첫 행 값**만 읽으므로 나머지 줄은 저장에 닿지 않는다.
+ * ★★ **잠그지 않는다(readOnly 금지)** — 2026-08-19 사용자 확정("총인원·일건수는 수정 화면에서도
+ *   고칠 수 있다, 경고 전용")을 되돌리지 않는다. 사유는 툴팁과 위 안내 문구가 말한다.
+ * ★ 옵션 있는 작업(opt)은 대상이 아니다 — 옵션인원은 옵션 원장 값이고 합계가 캠페인 정원이 된다.
+ */
+function _recruitTotalCellHint(index) {
+  if (!_rfQuotaNotice()) return "";
+  const lock = window._rfRoundsLock;
+  if (lock && lock.locked) return "차수 원장이 총건수를 관리합니다 — 여기서 고쳐도 저장되지 않습니다([📅 인원] → 차수 추가/제거)";
+  if (index > 0) return "공고 총인원은 첫 줄 값입니다 — 이 칸에 적은 값은 저장되지 않습니다";
+  return "";
+}
+
+function _syncRecruitTotalCells() {
+  Array.from(document.querySelectorAll("#rf_opt_rows .rf-opt-row")).forEach((row, i) => {
+    const el = row.querySelector(".rf-opt-rt");
+    if (!el) return;
+    const why = _recruitTotalCellHint(i);
+    el.title = why || (_rfQuotaNotice()
+      ? "초기 작업 세팅값입니다 — 함부로 수정하지 마세요. 날짜별 조절은 [📅 인원]에서 합니다"
+      : "");
+  });
 }
 
 /** 행 하나 생성(두 모드 공통 DOM) — 붙이는 곳은 호출부가 정한다 */
@@ -2599,6 +2641,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   window._rfInflowOrigin = '';   // 유입방식 출처(저장값/작업오더) — 지난 공고 안내 누수 방지
   window._rfMixOrigin = '';   // 혼합 조합 출처(저장값/작업오더/없음) — 지난 공고 안내 누수 방지
   window._rfOrderStartDate = '';  // 연결 작업오더 시작일(대조용) — 지난 공고 안내 누수 방지
+  window._rfRoundsLock = null;    // 차수 원장 잠금(모름=null) — 지난 공고 상태 누수 방지
   // ★ 카드는 렌더 캐시(signature)를 들고 재사용되는 DOM 이다 — 캐시를 비우지 않으면
   //   다음 공고를 열어도 이전 공고의 수량·기준값이 그대로 남아(early-return) 저장값이 안 보인다.
   resetRecruitReviewMixRender();
@@ -2650,6 +2693,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
         throw new Error("편집용 전체 공고 정보를 받지 못했습니다. 저장할 수 없습니다.");
       }
       window._recruitEditLoaded = c;   // ★ 064: sort_order 등 "UI 없는 서버 ||0 강제 필드"의 로드값 보존용
+      /* ★ 차수 원장 잠금 — 서버가 총모집 전송값을 무시하는지 **열 때부터** 안다(null=모름). */
+      window._rfRoundsLock = (json && json.roundsLock && typeof json.roundsLock === "object") ? json.roundsLock : null;
       window._recruitEditLoadedOpts = json.options || [];   // 저장 후 "바뀐 항목" 대조용(옵션표 원본)
       window._recruitEditLoadedFees = json.feeSchedules || [];
       document.getElementById("rf_title").value        = c.title || "";
@@ -4245,6 +4290,8 @@ async function saveRecruitPostImpl() {
        참여형 UI가 없는 페이지(admin-siand.html 등)나 편집 로드 실패 시엔 미전송(undefined)
        → 서버 COALESCE가 기존값 유지 = 참여형 공고의 레거시 강등 사고 차단. */
   const partEl = document.getElementById("rf_participation");
+  // 정원(총건수·일건수)을 미전송했는가 — 저장 안내가 사실대로 말한다(참여형 블록 밖에서 읽는다)
+  let _quotaSkipped = false;
   if (partEl && !(window._recruitEditLoadFailed && _recruitEditId)) {
     const isPart = !!partEl.checked;
     const preserveLegacyCampaign = Boolean(_recruitEditId && window._recruitEditLoaded?.participation_mode === false);
@@ -4268,6 +4315,15 @@ async function saveRecruitPostImpl() {
          0 리셋 방지는 위 파생(수정 모드 = 첫 행 값 그대로)과 프리필이 담당하고,
          차수 있는 공고의 총모집은 서버가 무시한다(roundsLockRecruitTotal). */
       {
+        /* ★★ 로드값에 정원이 없으면(공개 화이트리스트 뷰·구버전 백엔드·로드 실패) **보내지 않는다** —
+           화면이 모르는 값을 0 으로 보내면 서버가 그대로 저장해 총량이 '무제한'으로 리셋된다.
+           미전송 = 서버 COALESCE 유지(옵션표·work_detail 과 같은 원칙). 신규 발행은 항상 보낸다. */
+        const _loaded = window._recruitEditLoaded;
+        const _quotaKnown = !_recruitEditId
+          || (!window._recruitEditLoadFailed && _loaded
+              && _loaded.recruit_total !== undefined && _loaded.daily_limit !== undefined);
+        _quotaSkipped = !_quotaKnown;   // ★ 조용히 빼지 않는다 — 저장 안내가 사실을 말한다(아래 _changed)
+        if (!_quotaKnown) { /* 미전송 = 서버 COALESCE 유지 */ } else {
         payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
         payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
         /* ★ 127: 블로그 공고의 일건수 정규화 — 표(진행상품)의 일건수가 비어도 총모집으로 채운다.
@@ -4275,6 +4331,7 @@ async function saveRecruitPostImpl() {
            모집을 조용히 막는다. 서버 create 도 같은 정규화를 하지만(이중 방어) update 는 프론트가 담당. */
         if (payload.work_kind === "blog" && !(Number(payload.daily_limit) > 0)) {
           payload.daily_limit = (Number(payload.recruit_total) > 0) ? Number(payload.recruit_total) : 9999;
+        }
         }
       }
       const reviewMixError = validateRecruitReviewTypeMix();
@@ -4405,6 +4462,9 @@ async function saveRecruitPostImpl() {
        토스트가 아니라 가운데 안내(campSaveFeedback)의 목록 첫 줄로(#604 토스트 예산 규율). */
     if (saved && saved.recruitTotalLocked === true) {
       _changed.unshift("⚠ 총모집은 차수 원장이 관리해 변경되지 않음 — [📅 인원]의 차수 추가/제거로");
+    }
+    if (_quotaSkipped) {
+      _changed.unshift("⚠ 총건수·일건수는 건드리지 않았습니다 — 현재 값을 불러오지 못해 그대로 두었습니다");
     }
 
     /* ★ 버튼 ✓ → 모달 닫힘 → 화면 가운데 안내(시안 C 확정) 로 시선이 이어진다.

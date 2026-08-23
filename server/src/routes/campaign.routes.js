@@ -945,6 +945,19 @@ router.get('/:id', async (req, res, next) => {
          ★ 시작일은 **저장값이 항상 있어** 유입방식·혼합 조합처럼 blank-only 폴백이 성립하지
            않는다 → 값을 바꾸지 않고 화면이 "다르다"고 말하기만 한다. */
       let orderStartDate = null;
+      /* ★★ 차수 원장(095)이 있으면 **총모집 전송값을 서버가 무시한다**(`roundsLockRecruitTotal`).
+         종전에는 그 사실을 저장한 **뒤**에야(`recruitTotalLocked` → 잠깐 뜨는 안내) 알 수 있어
+         "총인원을 200 으로 고쳐 저장했는데 다시 열면 비어 있다"가 원인 불명으로 보였다
+         (2026-08-21 신고). → 수정 모달이 **열 때부터** 그 사실을 말하고 칸을 잠그도록 재료를 준다.
+         ★ 조회 실패·095 미적용 = **null(모름)** — 화면이 "잠금 없음"으로 꾸미지 않는다. */
+      let roundsLock = null;
+      try {
+        const { rows: _rr } = await pool.query(
+          `SELECT COUNT(*)::int AS n, COALESCE(SUM(slot_count), 0)::int AS total
+             FROM campaign_rounds WHERE campaign_id = $1`, [id]);
+        const _n = Number(_rr[0] && _rr[0].n) || 0;
+        roundsLock = { locked: _n > 0, count: _n, total: Number(_rr[0] && _rr[0].total) || 0 };
+      } catch (_) { /* 095 미적용·조회 실패 = 모름(null) */ }
       try {
         const cur = normalizeReviewTypeMix(rows[0].review_type_mix);
         const needMix = normalizeReviewType(rows[0].review_type) === 'mixed' && !(cur.mix || []).length;
@@ -974,7 +987,7 @@ router.get('/:id', async (req, res, next) => {
       } catch (e) {
         logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일) 실패 camp=${id}: ${e.message}`);
       }
-      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate });
+      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate, roundsLock });
     }
     const now = new Date();
     const row = rows[0];
