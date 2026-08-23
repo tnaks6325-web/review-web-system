@@ -78,6 +78,20 @@ async function run() {
   const go = grab('ownTransferGo').split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   t('★★ tabGid:null(시트 전체) 로 보내는 분기가 없다', !/tabGid:\s*null/.test(go), go);
   t('★ onclick 은 인덱스만(시트발 문자열 보간 금지)', /onclick="ownAssign\(\$\{i\}\)"/.test(HTML));
+  /* ★★ 마감(🏁)된 작업은 지정 후보·집계에서 뺀다 — 업체관리가 다루는 것은 진행 중인 작업이다.
+     ★ `finished` 를 못 받으면(구버전 백엔드) 종전대로 포함(모르는 것을 숨기지 않는다). */
+  {
+    const sb = { STATE: { mapTabs: [
+      { sheetId: 'S1', tabGid: '1', tabName: 'A' },                        // 미지정·진행 중
+      { sheetId: 'S1', tabGid: '2', tabName: 'B', finished: true },        // 미지정이지만 마감
+      { sheetId: 'S1', tabGid: '3', tabName: 'C', advertiserId: 'adv_a' }, // 지정됨
+    ] } };
+    vm.createContext(sb);
+    vm.runInContext(grab('_ovmLiveTabs') + '\n' + grab('_ovmUnassignedTabs') + '\n' + grab('_ovmTabCounts'), sb);
+    t('★★ 마감된 작업은 미지정 후보에 안 뜬다', sb._ovmUnassignedTabs().map(x => x.tabName).join(',') === 'A');
+    const c = sb._ovmTabCounts();
+    t('★ 분모도 같은 집합(진행 중 2건 · 미지정 1건)', c.total === 2 && c.un === 1, JSON.stringify(c));
+  }
   t('★ 사이드바·표도 작업 단위로 말한다',
     /업체 미지정 작업/.test(OWN) && /소유 작업 /.test(OWN) && !/소유 시트/.test(OWN));
 
