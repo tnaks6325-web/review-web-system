@@ -2518,6 +2518,9 @@ const _setHandlers = {
   //   인트라넷 SSO 토큰(via:'intranet')은 `/api/diag/*` 에 **도달 자체가 불가**라
   //   리뷰웹시스템[3버전]에서 이 정리를 부르려면 Track B 경로가 필요하다(로직 복제 0).
   reviewTypeCleanup: _delegate(require('./diag.routes'), 'post', '/review-type-cleanup'),
+  // ★ 065 후속: 담당자 실명(박세희·박은비) → 닉네임(만두·망고) 정리 — 원본은 `/api/diag/manager-cleanup`.
+  //   같은 이유(인트라넷 SSO 토큰은 `/api/diag/*` 미도달)로 Track B 경로를 함께 연다.
+  managerCleanup: _delegate(require('./diag.routes'), 'post', '/manager-cleanup'),
 };
 router.get('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
   _setHandlers.nicknameGet(req, res, next));
@@ -2544,6 +2547,9 @@ router.post('/settings/home-banner/save', authMiddleware, adminOrMasterMiddlewar
 // ★ 087: 원본과 같은 권한(admin/master). dryRun 기본은 원본 핸들러가 판정한다.
 router.post('/settings/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _setHandlers.reviewTypeCleanup(req, res, next));
+// ★ 065 후속: 원본과 같은 권한(admin/master). 기존 행을 건드리므로 dryRun 기본도 원본이 판정한다.
+router.post('/settings/manager-cleanup', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.managerCleanup(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
    시스템 오류로그 — 리뷰웹시스템[3버전] 「로그」 탭의 두 번째 서브탭
