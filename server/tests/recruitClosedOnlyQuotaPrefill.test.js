@@ -65,7 +65,9 @@ function render(options, productLines, campaign) {
 }
 
 const LINES = '이노크아든 빨아쓰는 면마스크 - 결제금액 9,900원';
-const CLOSED = [{ optKey: 'https: mkt.shopping.naver.com link abc', payAmount: 9900, recruitTotal: 0, dailyLimit: 30, status: 'closed' }];
+/* ★ 마감 옵션의 정원은 캠페인 원장과 **다른 값**이어야 한다 — 같은 값(0/30)으로 두면
+   "원장 값을 실었다"와 "옵션 값을 그대로 뒀다"가 구분되지 않아 가드가 공허해진다(변이시험 실측). */
+const CLOSED = [{ optKey: 'https: mkt.shopping.naver.com link abc', payAmount: 9900, recruitTotal: 7, dailyLimit: 5, status: 'closed' }];
 const LIVE   = [{ optKey: '옵션A', payAmount: 9900, recruitTotal: 150, dailyLimit: 20, status: 'active' }];
 const CAMP   = { recruit_total: 200, daily_limit: 30 };
 
@@ -76,7 +78,7 @@ console.log('\n§A 살아있는 옵션 판정');
   ok('B. 마감만 있는 공고 — 첫 행 총인원 = 캠페인 원장 200 (신고 케이스)', r.rows[0].recruitTotal === 200);
   ok('B. 마감만 있는 공고 — 첫 행 일건수 = 캠페인 원장 30', r.rows[0].dailyLimit === 30);
   ok('E. 마감 행이 표에서 사라지지 않는다', r.rows.length === CLOSED.length && r.rows[0].status === 'closed');
-  ok('A. 마감 옵션의 0 이 첫 행을 덮지 않는다', r.rows[0].recruitTotal !== 0);
+  ok('A. 마감 옵션의 자기 값(7)이 첫 행에 남지 않는다', r.rows[0].recruitTotal !== 7);
 }
 
 console.log('\n§B 살아있는 옵션이 있으면 종전 동작 불변');
@@ -87,18 +89,18 @@ console.log('\n§B 살아있는 옵션이 있으면 종전 동작 불변');
 {
   /* 마감 + 살아있는 옵션이 섞이면 살아있는 쪽이 있으므로 원장 값을 싣지 않는다 */
   const r = render([...CLOSED, ...LIVE], LINES, CAMP);
-  ok('C. 마감+활성 혼재 — 첫 행(마감)도 원장 값으로 덮지 않는다', r.rows[0].recruitTotal === 0);
+  ok('C. 마감+활성 혼재 — 첫 행(마감)도 원장 값으로 덮지 않는다', r.rows[0].recruitTotal === 7 && r.rows[0].dailyLimit === 5);
   ok('C. 마감+활성 혼재 — 행 수 보존', r.rows.length === 2);
 }
 
 console.log('\n§C 모르는 값은 지어내지 않는다');
 {
   const r0 = render(CLOSED, LINES, { recruit_total: 0, daily_limit: 0 });
-  ok('D. 원장 정원이 0 이면 건드리지 않는다', r0.rows[0].recruitTotal === 0 && r0.rows[0].dailyLimit === 30);
+  ok('D. 원장 정원이 0 이면 옵션 값을 0 으로 덮지 않는다', r0.rows[0].recruitTotal === 7 && r0.rows[0].dailyLimit === 5);
   const ru = render(CLOSED, LINES, {});
-  ok('D. 원장 정원이 미상(공개 뷰·구버전)이면 건드리지 않는다', ru.rows[0].recruitTotal === 0);
+  ok('D. 원장 정원이 미상(공개 뷰·구버전)이면 옵션 값 유지', ru.rows[0].recruitTotal === 7 && ru.rows[0].dailyLimit === 5);
   const rn = render(CLOSED, LINES, null);
-  ok('D. campaign 인자 자체가 없어도 죽지 않는다', rn.rows.length === 1);
+  ok('D. campaign 인자 자체가 없어도 죽지 않는다', rn.rows.length === 1 && rn.rows[0].recruitTotal === 7);
 }
 
 console.log('\n§D 옵션 0개 공고(종전 폴백) 무회귀');
