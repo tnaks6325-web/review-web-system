@@ -1984,7 +1984,7 @@ function _syncQuotaLockUi() {
   const locked = !!(lock && lock.locked);
   box.innerHTML = locked
     ? '<b>🔒 이 공고의 총건수는 <u>차수 원장</u>이 관리합니다 — 여기서 고쳐도 저장되지 않습니다</b>' +
-      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + '명 기준 · 차수 ' + (Number(lock.count) || 0) + '건 · 합계 ' +
+      '<span>지금 값 — 총 ' + fmt(rt, "무제한") + ' · 차수 ' + (Number(lock.count) || 0) + '건 · 합계 ' +
       ((Number(lock.total) || 0).toLocaleString()) + '명 · 기본 일건수 ' + fmt(dl, "미설정") + '</span>' +
       '<span>총건수를 바꾸려면 공고 카드의 <b>[📅 인원]</b> → <b>차수 추가/제거</b>로 하세요(일건수는 여기서 바꿀 수 있습니다).</span>'
     : '<b>⚠ 총건수과 일건수는 초기작업세팅값이므로 함부로 수정하지마세요, 필요시 모집인원조절 기능을 사용하세요</b>' +
