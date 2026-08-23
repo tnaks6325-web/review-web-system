@@ -75,6 +75,21 @@ function rowOptionReviewType(rowJson, optionHeaders = []) {
 }
 
 /**
+ * ★★ `자율리뷰` — **리뷰 형태를 리뷰어가 정한다**는 뜻이라 표준 리뷰타입이 아니다.
+ *   모집공고 모달의 `자율리뷰` 칩도 `data-val=""`(= 지정하지 않음)이고, 작업오더를 거쳐
+ *   `tab_configs.review_type` 에 이 문자열이 그대로 남는 탭이 있다(2026-08-23 운영 실측 4건).
+ *
+ * ★ **판정은 그대로 null 이다**(= 오늘 동작 그대로 · 리뷰 화면 기대) — 여기서 유형을 만들어
+ *   내면 검수·캡처 슬롯이 있지도 않은 기대를 갖는다. 이 값은 **표기 전용**이다:
+ *   사람이 그렇게 적어 뒀는데 화면이 "미설정"이라고 말하면 거짓이 된다(혼합과 같은 자리).
+ */
+const FREE_CHOICE_REVIEW_LABEL = '자율리뷰';
+/** 이 값이 '자율리뷰'인가 — 표기 전용(판정에는 쓰지 않는다). */
+function isFreeChoiceReviewType(raw) {
+  return String(raw == null ? '' : raw).trim() === FREE_CHOICE_REVIEW_LABEL;
+}
+
+/**
  * ★ 리뷰타입 칸에 잘못 들어가 있던 **배송유형** 값.
  *   판정에서는 무시(null)하되, 화면 표시와 이관 대상 판별에는 이 목록을 쓴다.
  *   (자동 이관은 `delivery_type` 이 비어 있을 때만 — 접수가 채운 값을 덮으면 안 된다)
@@ -196,6 +211,7 @@ function isPurchaseConfirm(p) {
 
 module.exports = {
   REVIEW_TYPES, REVIEW_TYPE_KEYS, REVIEW_TYPE_LABELS, REVIEW_TYPE_SHEET_LABELS, LEGACY_DELIVERY_VALUES,
+  FREE_CHOICE_REVIEW_LABEL, isFreeChoiceReviewType,
   reviewTypeLabel, normalizeReviewType, isLegacyDeliveryValue, isReviewOptionHeader, rowOptionReviewType,
   parseWorkOrderReviewType, resolveReviewType, isPurchaseConfirm,
 };

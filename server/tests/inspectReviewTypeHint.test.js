@@ -226,7 +226,10 @@ const CTX = require('../src/services/reviewTypeContext.service');
     // XSS — 설정값(tabRaw)이 화면으로 나가는 자리가 esc 를 거치는지 **소스로** 고정한다.
     //   (지금은 '실배송'·'빈박스' 두 리터럴일 때만 출력돼 값으로는 재현할 수 없다 —
     //    조건을 넓히는 순간 설정발 문자열이 그대로 나가므로 여기서 막아 둔다.)
-    const noteFn = WD.slice(WD.indexOf('function _riRTNote('), WD.indexOf('function _riRTNote(') + 700);
+    /* ★ 고정 폭 슬라이스 금지 — 함수가 길어지면 가드가 조용히 빨개진다(레포 규율).
+       최상위 함수는 열 0 의 `}` 로 닫힌다. */
+    const _nfI = WD.indexOf('function _riRTNote(');
+    const noteFn = WD.slice(_nfI, WD.indexOf('\n}', _nfI) + 2);
     const raws = noteFn.match(/\$\{[^}]*rt\.(tabRaw|campRaw)[^}]*\}/g) || [];
     assert.ok(raws.length > 0, 'tabRaw 를 화면에 쓰는 자리가 있다');
     assert.ok(raws.every(x => /esc\(/.test(x)), '★ 설정값 출력은 전부 esc 경유: ' + raws.join(' | '));

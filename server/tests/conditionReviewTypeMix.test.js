@@ -96,6 +96,32 @@ console.log('\n── A. 서버 재료(tabConditionSummary 실제 실행) ──
     out2.reviewTypeLabel === '혼합' && out2.reviewType === null);
 }
 
+/* ── A2. `자율리뷰` — 적어 둔 값이지 미설정이 아니다(사용자 확정 2026-08-23) ───────── */
+{
+  const out = await run(mkDb([]), { sheetId: 's1', tabName: 't1', meta: { reviewType: '자율리뷰' }, wo: null });
+  t('★ 자율리뷰는 적힌 그대로 라벨을 준다 — [미설정] 아님', out.reviewTypeLabel === '자율리뷰');
+  t('★ 판정값은 null(유형이 정해지지 않았다 — 검수·슬롯 규율 불변)', out.reviewType === null);
+  t('★ 혼합과 배타 · 조합 없음', out.reviewTypeMixed === false && out.reviewTypeMix === null);
+
+  const out2 = await run(mkDb([{ ...CAMP, reviewType: 'photo' }]),
+    { sheetId: 's1', tabName: 't1', meta: { reviewType: '자율리뷰' }, wo: null });
+  t('★ 공고에 유형이 있으면 그것이 이긴다(자율리뷰가 가리지 않는다)', out2.reviewTypeLabel === '포토');
+
+  const out3 = await run(mkDb([]), { sheetId: 's1', tabName: 't1', meta: { reviewType: '실배송' }, wo: null });
+  t('★★ 배송유형(실배송)은 여전히 [미설정] — 리뷰타입이 아니다(087 규율 · 완화 금지)',
+    out3.reviewTypeLabel === null);
+
+  const ctx = fs.readFileSync(path.join(root, 'server/src/services/reviewTypeContext.service.js'), 'utf8');
+  t('★ 리뷰검수 화면도 같은 표식을 받는다(free)',
+    /isFreeChoiceReviewType\(r\.camp_review_type\)/.test(ctx) && /type, mixed, free,/.test(ctx));
+  t('★ 판정 사본 0 — 자율리뷰 문자열을 화면·서비스에 다시 적지 않는다',
+    !/'자율리뷰'/.test(fs.readFileSync(path.join(root, 'server/src/services/trackB.service.js'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ''))
+    && /FREE_CHOICE_REVIEW_LABEL/.test(fs.readFileSync(path.join(root, 'server/src/services/trackB.service.js'), 'utf8')));
+  t('★ 리뷰검수 상세도 "미지정"이라 말하지 않는다',
+    /if\(rt\.free\) return '이 작업은 <b>자율리뷰<\/b>/.test(wd));
+}
+
 console.log('\n── B. 화면 렌더(_cndRtypeHtml 실제 실행) ──');
 {
   const i = wd.indexOf('function _cndRtypeHtml(cd){');
