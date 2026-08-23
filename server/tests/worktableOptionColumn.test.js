@@ -274,37 +274,31 @@ console.log('\n[C] 게이트 · 미리보기');
     ok('★ reviewer_event_logs 를 쓰지 않는다(도배 방지)', !/reviewer_event_logs/.test(src));
   }
 
-  /* ── H. 라우터 ───────────────────────────────────────────────────────── */
-  console.log('\n[H] 라우터 스택 실검사');
+  /* ── H. 수동 창구 제거 · 자동 경로 생존 (사용자 확정 2026-08-23) ──────────
+     왜: 칸은 이제 자동으로 보장된다 — 작업표 생성이 옵션 배분을 보고 덧붙이고,
+     공고 저장이 살아있는 옵션 2종 이상이면 연결 작업표에 칸을 보장한다.
+     전수 점검(무시트 113탭)에서 수동 소급 기입 대상이 0줄이라 창구만 없앴다.
+     ★ 실행부(`ensureOptionColumn`)는 그 두 자동 경로가 쓴다 — 지우면 원인이 되살아난다.
+     ───────────────────────────────────────────────────────────────────────── */
+  console.log('\n[H] 수동 창구 제거 — 자동 경로는 그대로');
   {
     const router = require('../src/routes/trackB.routes');
     const layer = (router.stack || []).find(l => l.route && l.route.path === '/worktable/option-column');
-    ok('등록돼 있다', !!layer && !!layer.route.methods.post);
-    const names = layer.route.stack.map(s => s.name);
-    ok('authMiddleware 를 먼저 탄다', names[0] === 'authMiddleware', names.join(','));
-    ok('★ adminOrMaster 게이트', names.some(n => /adminOrMaster/i.test(n)), names.join(','));
-    const src = read('src/routes/trackB.routes.js');
-    const i = src.indexOf("router.post('/worktable/option-column'");
-    const body = src.slice(i, src.indexOf('\nrouter.', i + 10));
-    ok('★ confirm:true 가 아니면 미리보기', /dryRun: b\.confirm !== true/.test(body));
-    ok('판정 사본 0 — 서비스를 그대로 부른다', /ensureOptionColumn\(\{/.test(body));
-  }
-
-  /* ── I. 화면 ─────────────────────────────────────────────────────────── */
-  console.log('\n[I] 화면 배선');
-  {
+    ok('★★ 수동 라우트가 없다', !layer);
     const h = read('../frontend/workdesk.html');
-    ok('[⋯] 메뉴에 [🧩 옵션 열] 이 있다', /onclick="openOptColModal\(\)"/.test(h));
-    ok('메뉴 노출 조건에 합류했다', /_rnCanRenumber\(\)\|\|_ocCan\(\)/.test(h));
-    ok('★ 서버 게이트와 1:1(adminOrMaster)', /function _ocCan\(\)\{[\s\S]{0,220}role === 'master'[\s\S]{0,60}'admin'/.test(h));
-    ok('★ 무시트 탭에서만', /function _ocCan\(\)\{[\s\S]{0,160}sheetless === true/.test(h));
-    ok('★ 팝업은 body 직속', /ocOv[\s\S]{0,400}document\.body\.appendChild\(ov\)/.test(h));
-    ok('★ Esc 리스너는 최상위 1회', /window\._ocKeyBound/.test(h));
-    ok('실행은 confirm 경유', /function ocRun\(\)[\s\S]{0,900}if \(!confirm\(/.test(h));
-    ok('★ 실행 요청에만 confirm:true', /ocRun[\s\S]{0,1200}confirm: true/.test(h));
-    ok('onclick 에 시트발 문자열 보간 없음', !/openOptColModal\('/.test(h));
-    ok('★ 이 공고의 옵션 목록을 화면이 보여준다', /liveOptionKeys/.test(h));
-    ok('★ 옵션이 아니라 건너뛴 줄을 말한다', /skippedNotAnOption/.test(h));
+    ok('★★ 화면에 옵션 열 창구가 없다',
+      !/openOptColModal|_ocCan\(\)|ocRun\(\)|liveOptionKeys/.test(h));
+
+    /* ★★ 지우면 안 되는 것 — 자동 경로 둘. 여기가 빨개지면 옵션이 다시 조용히 사라진다. */
+    ok('★★ 작업표 생성이 옵션 칸을 덧붙인다',
+      /option_column_added/.test(read('src/utils/worktablePlan.js')));
+    const camp = read('src/routes/campaign.routes.js').replace(/\u0000/g, '');
+    ok('★★ 공고 저장이 연결 작업표에 칸을 보장한다',
+      /_ensureLinkedWorktableOptionColumn/.test(camp) && /ensureOptionColumn\(\{/.test(camp));
+    ok('★ 그 훅은 살아있는 옵션 2종 이상일 때만(배분 규칙과 같은 기준)',
+      /Number\(r\.liveOpts \|\| 0\) < 2/.test(camp));
+    ok('★★ 실행부 서비스는 그대로 있다',
+      /function ensureOptionColumn/.test(read('src/services/worktableOptionColumn.service.js')));
   }
 
   console.log(`\n✅ worktableOptionColumn — ${passed} 케이스 통과`);

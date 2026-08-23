@@ -451,83 +451,32 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★ 다른 크론과 분이 겹치지 않는다(기본 스케줄)', /'3-59\/5 \* \* \* \*'/.test(cronSrc));
   }
 
-  console.log('\n[G] 라우트·화면 배선');
+  /* ══════════════════════════════════════════════════════════════════════════
+     [G] 수동 창구는 **제거됐다** (사용자 확정 2026-08-23)
+
+     왜: 전수 점검에서 무시트 작업 113개 전부 대상 0건이었다 — 주문이 들어올 때·줄을
+     내릴 때 그 자리에서 매기고, 5분 스윕이 백스톱이라 사람이 누를 일이 없다.
+     ★ 지운 것은 **창구뿐** — 자동 경로가 쓰는 서비스(rowNumbering.service)는 그대로다.
+     ══════════════════════════════════════════════════════════════════════════ */
+  console.log('\n[G] 수동 창구 제거 — 자동 경로는 그대로');
   {
-    const rt = noLineComments(read('src/routes/trackB.routes.js'));
-    const blk = rt.slice(rt.indexOf("router.post('/worktable/renumber'"), rt.indexOf("router.post('/worktable/renumber-all'"));
-    ok('탭 단위 정리 = authMiddleware + internalMiddleware',
-      /router\.post\('\/worktable\/renumber',\s*authMiddleware,\s*internalMiddleware/.test(rt));
-    ok('★ confirm !== true 면 미리보기(쓰기 0)', /dryRun:\s*confirm\s*!==\s*true/.test(blk));
-    ok('★★ 줄 내리기는 명시 요청일 때만(기본 계약 = 번호만)', /if \(cleanBlanks === true\)/.test(blk));
-    ok('★★ 라우트도 정리 → 재번호 순서', blk.indexOf('cleanupPairedBlanks(') < blk.indexOf('renumberTab('));
-    ok('전체 소급 정리는 adminOrMaster',
-      /router\.post\('\/worktable\/renumber-all',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(rt));
-
+    const rt = read('src/routes/trackB.routes.js');
     const fe = read('../frontend/workdesk.html');
-    ok('★ 창구는 무시트 + 내부인일 때만',
-      /function _rnCanRenumber\(\)\{[\s\S]{0,200}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(fe));
-    ok('[⋯] 메뉴에 번호 정리 버튼', /openRenumberModal\(\)"[^>]*>🔢 번호 정리/.test(fe));
-    ok('★ 오버레이는 body 직속', /rnOv[\s\S]{0,600}document\.body\.appendChild\(ov\)/.test(fe));
-    ok('★ Esc 리스너는 최상위 1회', /_rnKeyBound/.test(fe));
-    /* ★ 문자열 존재만 보면 `if (false && !confirm(...))` 을 통과시킨다(변이시험 실측)
-         → **게이트 형태(`if (!confirm(`)** 자체를 고정한다. */
-    ok('★ 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`「\$\{_RN\.tabName\}」 표의 번호를/.test(fe));
-    ok('★ 프론트에 정렬 재계산 사본 없음(서버 결과만 그린다)',
-      !/orderRowsForNumbering|computeRenumberPlan/.test(fe));
+    ok('★★ 수동 라우트 3종이 없다(renumber · renumber-scan · renumber-all)',
+      !/router\.(post|get)\('\/worktable\/renumber/.test(rt));
+    ok('★★ 화면에 번호 정리 창구가 없다',
+      !/openRenumberModal|_rnCanRenumber|_rnRender|rnRunOne/.test(fe));
+    ok('★ 전용 CSS 도 남기지 않는다(#rnOv)', !/#rnOv/.test(fe));
 
-    ok('전체 조회 라우트 = adminOrMaster(읽기 전용)',
-      /router\.get\('\/worktable\/renumber-scan',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(rt));
-    ok('★ 전체 작업 진입점(탈시트 전환 헤더)', /openRenumberModal\(\{all:true\}\)"[^>]*>🔢 번호 정리/.test(fe));
-    ok('★ 모달은 한 벌 — 모드만 바뀐다(사본 금지)',
-      (fe.match(/function openRenumberModal\(/g) || []).length === 1 &&
-      /_RN\.mode === 'all'/.test(fe));
-    ok('★ 전체 모드는 작업을 안 골라도 열린다', /if \(!all && !_rnCanRenumber\(\)\) return;/.test(fe));
-    ok('★ 목록 행 실행은 인덱스만 넘긴다(작업명 보간 금지)',
-      /onclick="rnRunOne\(\$\{i\}\)"/.test(fe) && !/rnRunOne\('\$\{esc/.test(fe));
-    ok('★ 전체 실행 전 confirm(번호가 바뀐다는 사실 고지)', /if \(!confirm\(`무시트 작업 \$\{s\.needTabs\}개의 번호를/.test(fe));
-    ok('★ 실패한 작업을 조용히 넘기지 않는다', /정리하지 못한 작업/.test(fe));
-    ok('★ 목록이 잘리면 고지', /목록이 잘렸습니다/.test(fe));
-
-    /* ── 팝업 조작성(실측 신고 2026-08-19: 121개 목록이 세로로 무한히 길어 조작 불가) ── */
-    ok('★★ 모달 높이 상한(뷰포트를 넘지 않는다)', /#rnOv \.wbl-dlg\{[^}]*max-height:86vh/.test(fe));
-    ok('★★ 본문이 스크롤 컨테이너(min-height:0 없으면 flex 자식이 내용만큼 늘어나 스크롤이 안 생긴다)',
-      /#rnOv \.wbl-db\{[^}]*flex:1;min-height:0;overflow:auto/.test(fe));
-    ok('★★ 전역 table{overflow:hidden} 상쇄(없으면 sticky 표머리가 조용히 죽는다)',
-      /#rnOv \.wbl-wrt\{[^}]*overflow:visible/.test(fe));
-    ok('★ sticky 표머리 + border-collapse:separate(collapse 에서는 sticky 가 안 먹는다)',
-      /#rnOv \.wbl-wrt\{[^}]*border-collapse:separate/.test(fe) && /#rnOv \.wbl-wrt th\{position:sticky/.test(fe));
-    ok('★ 표를 감싸는 래퍼에 overflow 를 두지 않는다(sticky 기준을 가로챈다)',
-      !/#rnOv \.rn-tw\{[^}]*overflow/.test(fe));
-    ok('★★ 검색은 행만 갈아끼운다(입력칸 재생성 = 한글 IME 파괴)',
-      /oninput="_RN\.q=this\.value;_rnRows\(\)"/.test(fe) &&
-      /function _rnRows\(\)\{[\s\S]{0,400}getElementById\('rnRows'\)/.test(fe));
-    ok('★ 기본은 정리 대상만 보기(121개를 다 늘어놓지 않는다)', /_RN\.onlyNeed !== false/.test(fe));
-    ok('★★ 화면 판정도 중복·짝 빈 줄을 포함한다(서버 대상과 갈리면 "목록엔 없는데 자동으로 바뀐다")',
-      /r\.blankNumber > 0 \|\| r\.dupNumber > 0 \|\| r\.pairedBlank > 0/.test(fe));
-    ok('★★ 실행 요청에 cleanBlanks 를 실어 보낸다', (fe.match(/cleanBlanks: true/g) || []).length === 2);
-    ok('★ 확인창이 "줄이 내려간다"를 말한다(되돌릴 수 있음 포함)', /짝 빈 줄 \$\{r\.pairedBlank\}줄은 표에서 내려갑니다\(되돌릴 수 있습니다\)/.test(fe));
-    ok('★ 짝 없는 빈 자리는 그대로 둔다고 화면이 말한다', /짝이 없는 빈 자리\(아직 안 팔린 미래 자리\)는 그대로 둡니다/.test(fe));
-    ok('★ 빈 줄 자체를 내리는 창구를 안내한다(번호 정리가 줄을 지우지 않는다)', /🧹 줄 정리\]를 쓰세요/.test(fe));
-    ok('★★ 필터·검색 중에도 실행은 원본 인덱스로(보이는 순번으로 넘기면 남의 작업을 정리한다)',
-      /const i = all\.indexOf\(r\);/.test(fe));
-    ok('★ 빈 목록도 사유를 말한다', /검색 결과가 없습니다/.test(fe) && /정리할 작업이 없습니다/.test(fe));
-
-    /* ★★ 헤더 칸 수 ≡ 행 칸 수 ≡ colspan — 열을 끼워 넣을 때 가장 흔히 깨지는 자리.
-         담당자 열이 되살아나면 여기서 걸린다(사용자 확정: 담당자는 번호 정리 대상 아님). */
-    const allBlk = fe.slice(fe.indexOf('function _rnRenderAll('), fe.indexOf('function _rnNeed('));
-    const rowsBlk = fe.slice(fe.indexOf('function _rnRows('), fe.indexOf('/* 서버가 준 사유를'));
-    const th = (allBlk.match(/<th>/g) || []).length;
-    const td = (rowsBlk.match(/<td[ >]/g) || []).length - (rowsBlk.match(/<td colspan/g) || []).length;  // 빈 목록 줄 제외
-    ok('★★ 전체 목록 표는 7칸(작업·표 줄·번호 빈칸·번호 중복·짝 빈 줄·번호 어긋남·버튼)', th === 7, '헤더 ' + th);
-    ok('★★ 행 칸 수 = 헤더 칸 수', td === th, `헤더 ${th} · 행 ${td}`);
-    ok('★ 빈 목록 colspan 도 같은 칸 수', new RegExp('colspan="' + th + '"').test(rowsBlk));
-    const thead = allBlk.slice(allBlk.indexOf('<thead>'), allBlk.indexOf('</thead>'));
-    ok('★★ 표에 담당자 열이 없다', !/담당자/.test(thead) && !/담당자|blankManager/.test(rowsBlk), thead.slice(0, 120));
-    ok('★ "순서만 어긋난 작업은 숫자로 안 드러난다" 한계를 화면이 말한다', /순서만<\/b> 어긋난 작업은 여기 숫자로 드러나지 않습니다/.test(fe));
-    ok('★ 자동으로 돈다는 사실을 화면이 말한다(수동 버튼은 즉시 실행용)',
-      /5분마다 자동으로 정리됩니다/.test(fe) && /5분 주기로 자동<\/b> 정리되므로/.test(fe));
+    /* ★★ 지우면 안 되는 것 — 자동 경로. 여기가 빨개지면 번호가 영영 안 매겨진다. */
+    const svc = read('src/services/rowNumbering.service.js');
+    ok('★★ 서비스는 그대로 있다', /renumberTabInTx/.test(svc) && /sweepNumbering/.test(svc));
+    ok('★★ 주문 기록이 그 자리에서 매긴다',
+      /renumberTabInTx/.test(read('src/services/sheetlessOrder.service.js')));
+    ok('★★ 줄 삭제도 그 자리에서 매긴다',
+      /renumberTabInTx/.test(read('src/services/trackB.service.js')));
+    ok('★★ 5분 스윕이 백스톱', /sweepNumbering/.test(read('src/jobs/cron.js')));
   }
-
 
   /* ══════════════════════════════════════════════════════════════════════════
      [K] 번호 어긋남 자동 정리 (2026-08-23 신고: "1번 행을 지웠는데 2번이 시작번호")
@@ -627,12 +576,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 훅은 절대 throw 하지 않는다(정리는 이미 끝났다 — 번호로 되돌리면 안 된다)',
       /try \{/.test(hookBlk) && /catch \(e\) \{/.test(hookBlk) && !/throw/.test(hookBlk));
 
-    /* ⑤ 화면은 서버 판정을 그대로 쓴다 + 구버전 백엔드 폴백 */
-    const fe2 = read('../frontend/workdesk.html');
-    ok('★★ 화면은 서버가 실은 need 를 그대로 쓴다(판정 사본 0)', /r\.need != null\)\s*\?\s*r\.need/.test(fe2.replace(/\s+/g, ' ')));
-    ok('★ need 가 없는 응답(구버전 백엔드)은 종전 세 신호로 접는다(목록이 비지 않게)',
-      /r\.blankNumber > 0 \|\| r\.dupNumber > 0 \|\| r\.pairedBlank > 0/.test(fe2));
-    ok('★ "모른다"(구버전)와 "없다"를 구분해 그린다', /r\.seqGap === false \? '-' : '\?'/.test(fe2));
+    /* ⑤ 화면 판정은 창구와 함께 사라졌다 — 이제 스윕만 need 를 본다(판정 사본이 구조적으로 0). */
+    ok('★ 화면에 need 판정 사본이 없다', !/openRenumberModal|_rnNeed/.test(read('../frontend/workdesk.html')));
   }
 
 
@@ -706,8 +651,8 @@ console.log('\n[D] 서비스 — 무시트 게이트 · 미리보기 쓰기 0 ·
     ok('★★ 주기 스윕이 재생성을 켠다', /renumberTab\(\{[^}]*rebuild: true/.test(swpBlk), swpBlk.slice(swpBlk.indexOf('renumberTab('), swpBlk.indexOf('renumberTab(') + 120));
     const allBlk3 = svc2.slice(svc2.indexOf('async function renumberAllSheetless('), svc2.indexOf('async function scanNumbering('));
     ok('★★ 전체 정리도 재생성을 켠다', /renumberTab\(\{[^}]*rebuild: true/.test(allBlk3));
-    const rt = noLineComments(read('src/routes/trackB.routes.js'));
-    ok('★★ 수동 [번호 정리] 라우트도 재생성을 켠다', /svcRn\.renumberTab\(\{[^}]*rebuild: true/.test(rt));
+    /* ★ 수동 [번호 정리] 라우트는 제거됐다(2026-08-23) — 재생성을 켜는 소비처는 자동 경로 둘뿐이다.
+         창구가 되살아나면 위 §G 가 먼저 빨개진다. */
 
     /* ★ 무시트 작업표에 row_json 을 쓰는 다른 실행부는 전부 이미 재생성한다 — 재번호만 예외였다.
          이 관행에서 다시 이탈하면 같은 핑퐁이 되살아난다. */

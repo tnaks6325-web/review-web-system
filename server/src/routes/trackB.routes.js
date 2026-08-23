@@ -1404,54 +1404,12 @@ router.post('/workdesk/assign-unslotted-order', authMiddleware, internalMiddlewa
   } catch (err) { next(err); }
 });
 
-/* ── 번호 정리(표시 번호 재부여 + 담당자 blank-only 채움) ──────────────────────────
-   ★ 바꾸는 것은 `row_json` 의 `번호`·`담당자` 칸뿐 — DB `seq`(주문·리뷰·입금·투영 앵커)는 불변.
-   ★ `confirm !== true` 면 **쓰기 0 미리보기**(무엇이 몇 번으로 바뀌는지 먼저 보여준다).
-   ★ 게이트는 [번호 배정]과 같은 `internalMiddleware`(같은 표의 같은 성격 조작). */
-router.post('/worktable/renumber', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabName, confirm, cleanBlanks } = req.body || {};
-    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const svcRn = require('../services/rowNumbering.service');
-    /* ★★ 짝 빈 줄 정리는 **명시 요청일 때만**(기본 계약 = 번호만 다시 매김) — 줄을 내리는 일이
-       "번호 정리" 라는 이름 뒤에 숨으면 안 된다. ★ 정리가 **재번호보다 먼저**여야 짝 신호가 남는다. */
-    let blank = null;
-    if (cleanBlanks === true) {
-      blank = await svcRn.cleanupPairedBlanks({ sheetId, tabName, dryRun: confirm !== true, by: _by(req) });
-    }
-    /* ★ 실행이면 장부까지 다시 만든다 — 안 하면 10분 투영이 되돌린다(핑퐁, 서비스 주석 참조). */
-    const out = await svcRn.renumberTab({ sheetId, tabName, dryRun: confirm !== true, by: _by(req), rebuild: true });
-    if (blank) out.blank = blank;
-    const bad = { not_sheetless: 409, tab_not_registered: 404, disabled: 409 };
-    res.status(out.ok ? 200 : (bad[out.reason] || 400)).json(out);
-  } catch (err) {
-    if (err && (err.code === '42P01' || err.code === '42703')) {
-      return res.status(200).json({ ok: false, code: 'not_ready', error: '아직 준비되지 않았습니다(배포 반영 대기).' });
-    }
-    next(err);
-  }
-});
-/* 전체 조회 — 어느 작업에 번호·담당자 빈칸이 있는지(읽기 전용·한 쿼리 집계). */
-router.get('/worktable/renumber-scan', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const out = await require('../services/rowNumbering.service').scanNumbering({ limit: req.query.limit });
-    res.json(out);
-  } catch (err) {
-    if (err && (err.code === '42P01' || err.code === '42703')) {
-      return res.status(200).json({ ok: false, code: 'not_ready', error: '아직 준비되지 않았습니다(배포 반영 대기).' });
-    }
-    next(err);
-  }
-});
-/* 소급 정리 — 무시트 작업 전체. 되돌리기 어려운 광범위 조작이라 adminOrMaster. */
-router.post('/worktable/renumber-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { confirm, limit, cleanBlanks } = req.body || {};
-    const out = await require('../services/rowNumbering.service')
-      .renumberAllSheetless({ dryRun: confirm !== true, by: _by(req), limit, cleanBlanks: cleanBlanks === true });
-    res.json(out);
-  } catch (err) { next(err); }
-});
+/* ★★ 번호 정리 **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+   번호는 이제 전부 자동으로 매겨진다: 주문이 들어올 때(`sheetlessOrder`)·줄을 내릴 때
+   (`_hideParticipantInTx`·`sheetlessLedger`)는 그 자리에서, 놓친 것은 5분 스윕
+   (`worktable_renumber_sweep`)이 메운다. 전수 점검 결과 수동 대상이 0건이라 창구만 없앴고,
+   서비스(`rowNumbering.service`)는 그 자동 경로가 쓰므로 그대로 있다.
+   옛 라우트: POST /worktable/renumber · GET /worktable/renumber-scan · POST /worktable/renumber-all */
 
 // 테스트 자동제출 정리 — 테스트 전용 식별자가 모두 일치하는 경우에만 영구 제거한다.
 // 일반 주문은 이 경로로 절대 삭제할 수 없으며, 운영 주문 삭제는 위 order-delete만 사용한다.
@@ -3057,36 +3015,12 @@ router.post('/worktable/delete-tab', authMiddleware, internalMiddleware, editorO
   } catch (err) { next(err); }
 });
 
-/* 무시트 탭 줄 정리(은퇴) — 작업표에서 고른 줄을 내리고 장부를 다시 만든다.
-   ★ 내부 담당자(master/admin/staff) — 정원 변경(날짜별 인원)과 같은 급이고, 그것과 함께 AE 에게 열었다.
-   ★ dryRun 기본(`dryRun !== false`) — 값이 빠진 요청이 곧바로 실행되지 않는다. */
-router.post('/worktable/retire-rows', authMiddleware, internalMiddleware, async (req, res, next) => {
-  try {
-    const { retireRows, LedgerError } = require('../services/sheetlessLedger.service');
-    const b = req.body || {};
-    try {
-      res.json(await retireRows({
-        sheetId: b.sheetId, tabName: b.tabName, rounds: b.rounds, seqs: b.seqs,
-        dryRun: b.dryRun !== false, by: _by(req),
-      }));
-    } catch (e) {
-      if (e instanceof LedgerError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
-      throw e;
-    }
-  } catch (err) { next(err); }
-});
+/* ★★ 줄 정리(은퇴) **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+   원인이던 탈시트 이관(옛 차수가 검색 명단에 되살아남)은 끝났다. 줄을 내리는 창구는
+   [행 삭제](실제 삭제 + 보충 슬롯) 와 [♻ 중복 정리] 둘이다.
+   ★ 실행부 `sheetlessLedger.retireRows` 는 **중복 정리가 그대로 쓴다** — 지우지 말 것.
+   옛 라우트: POST /worktable/retire-rows */
 
-/* 무시트 작업 **장부 재생성** — 작업표(진실원본) → 장부 3권(raw 미러·index_master·review_index).
-   왜 필요한가(2026-08-19 실측): 작업표 줄을 DB 에서 직접 되살려도(오삭제 복구) 장부를 다시 만들
-   창구가 어디에도 없어 **리뷰어 검색 명단·입금 대상에 그 줄이 영영 안 돌아왔다**. 지금까지 재생성은
-   정리·이관·접수의 부수효과로만 일어났다(그 자체를 부를 길이 없다 = 복구의 막다른 길).
-   ★ 게이트 = adminOrMaster — 장부를 통째로 다시 만드는 조작이라 줄 정리(retire)와 같은 급.
-   ★ 새 판정 0 — `rebuildLedgers` 를 그대로 부른다(무시트 아님·미등록·열 구성 불명은 그쪽 fail-closed).
-   ★ 시트·Drive 무접촉 · dryRun 기본(값이 빠진 요청이 곧바로 실행되지 않는다). */
-/* 작업표 중복 줄 감시 — **읽기 전용 조회**(사람이 지금 상태를 확인하는 창구).
-   ★ 크론이 같은 함수를 주기로 돌며 달라졌을 때만 알린다. 이 라우트는 **스냅샷을 갱신하지 않는다**
-     (사람이 눌러 본 것 때문에 다음 크론 알림이 조용해지면 안 된다).
-   ★ 게이트 = adminOrMaster — 탭명·명의·줄 번호가 실리므로 중복 정리와 같은 급. */
 router.post('/worktable/dup-watch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { watchDuplicateRows } = require('../services/worktableDupWatch.service');
@@ -3145,32 +3079,13 @@ router.post('/worktable/rebuild-ledgers', authMiddleware, adminOrMasterMiddlewar
   } catch (err) { next(err); }
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
-   작업표 옵션 열 보장 + 선택 옵션 소급 기입 — admin/master 전용 (2026-08-20)
-   ★ 리뷰어가 고른 옵션은 원장에 살아 있는데 작업표에 칸이 없어 기입되지 않던 작업의 복구
-     창구. **미리보기(dryRun 기본) → confirm:true 로 실행**, 쓰기 표면은 장부 헤더 +
-     `row_json` 두 곳뿐이고 기입은 blank-only 다(관리자 작업지시를 덮지 않는다).
-   ══════════════════════════════════════════════════════════════════════════ */
-router.post('/worktable/option-column', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const { ensureOptionColumn, OptionColumnError } = require('../services/worktableOptionColumn.service');
-    const b = req.body || {};
-    try {
-      res.json(await ensureOptionColumn({
-        sheetId: b.sheetId, tabName: b.tabName,
-        dryRun: b.confirm !== true,
-        backfill: b.backfill !== false,
-        by: _by(req),
-      }));
-    } catch (e) {
-      if (e instanceof OptionColumnError) return res.status(400).json({ ok: false, code: e.code, error: e.message });
-      if (e && (e.code === '42P01' || e.code === '42703')) {
-        return res.status(400).json({ ok: false, code: 'not_ready', error: '스키마가 아직 준비되지 않았습니다.' });
-      }
-      throw e;
-    }
-  } catch (err) { next(err); }
-});
+/* ★★ 옵션 열 **수동 창구는 제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+   칸은 이제 자동으로 보장된다: 작업표 생성이 옵션 배분을 보고 덧붙이고(`worktablePlan`),
+   공고 저장이 살아있는 옵션 2종 이상이면 연결 작업표에 칸을 보장한다(`campaign.routes`).
+   ★ 실행부 `worktableOptionColumn.ensureOptionColumn` 은 **그 두 자동 경로가 쓴다** — 지우지 말 것.
+   ⚠ 남은 갭: 공고 저장 훅은 *저장하는 순간에만* 돌아, 옵션 2종인데 칸이 없는 옛 작업이 남을 수 있다
+     (실측 1건). 그 경우 그 공고를 한 번 저장하면 칸이 생긴다.
+   옛 라우트: POST /worktable/option-column */
 
 /* ══════════════════════════════════════════════════════════════════════════
    작업표 줄 ↔ 주문 링크 교정 — admin/master 전용 (일회성 복구, 2026-08-19)
