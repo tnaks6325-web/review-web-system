@@ -939,6 +939,12 @@ router.get('/:id', async (req, res, next) => {
          ★ fail-soft — 못 읽어도 수정 모달은 그대로 열린다. */
       let orderReviewTypeMix = null;
       let orderInflowType = null;
+      /* ★ 연결 작업오더의 **시작일** — 대조 전용(저장값을 덮지 않는다).
+         발행은 스냅샷이라 발행 뒤 오더 시작일이 바뀌어도 공고는 따라가지 않는데,
+         그 사실을 확인할 창구가 어디에도 없었다(2026-08-21 신고: 오더 8/19 · 공고 8/12).
+         ★ 시작일은 **저장값이 항상 있어** 유입방식·혼합 조합처럼 blank-only 폴백이 성립하지
+           않는다 → 값을 바꾸지 않고 화면이 "다르다"고 말하기만 한다. */
+      let orderStartDate = null;
       try {
         const cur = normalizeReviewTypeMix(rows[0].review_type_mix);
         const needMix = normalizeReviewType(rows[0].review_type) === 'mixed' && !(cur.mix || []).length;
@@ -947,23 +953,28 @@ router.get('/:id', async (req, res, next) => {
            열리고, 그대로 저장하면 그 link 가 굳어 **리뷰어 화면의 폴백을 이긴다**
            (가이드유입 공고에 [상품 페이지 열기]가 노출 = 유입가이드 무력화). 모달도 같은 값을 보게 한다. */
         const needInflow = !_savedInflowType(rows[0].work_detail);
-        if (needMix || needInflow) {
-          // ★ 조회는 **한 번** — 두 값을 같은 오더에서 가져온다(같은 근거·쿼리 순증 0).
-          const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
-          const wo = await linkedWorkOrderForCampaign(rows[0], ['review_type_mix', 'inflow_type']);
-          if (needMix) {
-            const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
-            if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
-          }
-          if (needInflow) {
-            const v = String((wo && wo.inflow_type) || '');
-            if (v === 'guide' || v === 'link') orderInflowType = v;
-          }
+        // ★ 조회는 **한 번** — 세 값을 같은 오더에서 가져온다(같은 근거·쿼리 순증 0).
+        //   시작일은 늘 필요해 조건 없이 조회한다(모달 열 때 1회 — 목록이 아니다).
+        const { linkedWorkOrderForCampaign } = require('../services/linkedRecruitQuota.service');
+        const wo = await linkedWorkOrderForCampaign(rows[0], ['review_type_mix', 'inflow_type', 'start_date']);
+        if (needMix) {
+          const woMix = normalizeReviewTypeMix(wo && wo.review_type_mix);
+          if ((woMix.mix || []).length) orderReviewTypeMix = woMix.mix;
+        }
+        if (needInflow) {
+          const v = String((wo && wo.inflow_type) || '');
+          if (v === 'guide' || v === 'link') orderInflowType = v;
+        }
+        /* ★ 화면이 `(c.start_date||'').slice(0,10)` 로 읽는 것과 **같은 변환**을 쓴다 —
+           양쪽을 다른 방식으로 자르면 같은 날짜가 다르게 보인다. */
+        if (wo && wo.start_date) {
+          const iso = new Date(wo.start_date).toISOString().slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) orderStartDate = iso;
         }
       } catch (e) {
-        logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식) 실패 camp=${id}: ${e.message}`);
+        logger.warn(`[campaign] 작업오더 프리필(혼합 조합·유입방식·시작일) 실패 camp=${id}: ${e.message}`);
       }
-      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType });
+      return res.json({ ok: true, data: rows[0], options, feeSchedules, orderReviewTypeMix, orderInflowType, orderStartDate });
     }
     const now = new Date();
     const row = rows[0];
