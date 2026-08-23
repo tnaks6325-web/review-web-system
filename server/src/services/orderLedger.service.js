@@ -1684,7 +1684,8 @@ async function _replaceOpenProposalEdits(db, os, sheetId, tabName, tabGid, field
 //           (셋 중 하나라도 아니면 비활성 — 순수 옵트인, 기본 OFF, 되돌리기 쉬움).
 //   적대검증(레드→블루→심판) 방어:
 //     - 전용 락 reverse_sync_auto: 인스턴스/사이클 직렬화. order_reconcile·order_ledger와 키 비충돌 확인.
-//     - 안전필드 화이트리스트(_autoSafeFields): price/order_num/identity 하드 제외(돈·송장·오배송 비가역 차단).
+//     - 안전필드 화이트리스트(_autoSafeFields): price/order_num/identity/입금대상(bank·account·depositor)
+//       하드 제외(돈·송장·오배송·오입금 비가역 차단).
 //     - apply시점 라이브 재검증: 탭당 1 사각형 읽기로 (a)편집셀이 여전히 new_value (b)identity(연락처+수취인+주소) 재일치.
 //     - per-order 쿨다운(reverse_sync_last_auto_at): 자동적용 폭주/핑퐁 hysteresis.
 //     - per-order 락(order_ledger:<id>) + G6 edit_seq 불변 + written·미삭제 재확인 → 정식편집과 경합 차단.
@@ -1696,7 +1697,12 @@ function _autoSafeFields() {
   const set = new Set(String(raw).split(',').map(s => s.trim()).filter(Boolean));
   // 하드 제외(어떤 env 설정으로도 무인 자동적용 금지):
   //   price/order_num = 돈·송장(비가역 오염), phone/recipient/address = 신원(detect가 제안도 안 하지만 방어적으로).
-  for (const f of ['price', 'order_num', 'phone', 'recipient', 'address']) set.delete(f);
+  //   ★★ bank/account/depositor = **입금 대상**(2026-08-23 본섭 실측으로 추가). 종전에는 기본 안전필드
+  //     (orderer,user_id,memo,date_str)에 없다는 이유로만 빠져 있어, `REVERSE_SYNC_AUTO_FIELDS` 에 적기만
+  //     하면 **계좌번호가 사람 없이 자동으로 덮어써졌다**. 실제 열린 제안 28건을 보면 그 칸들은 이미
+  //     깨져 있다 — 예금주 칸에 은행명(`신한은행`), 은행 칸에 주소, 계좌 칸에 전화번호, 원장에 `1`.
+  //     그 값이 무인으로 원장에 들어가면 돈이 엉뚱한 곳으로 나가고 되돌릴 수 없다. price 와 같은 급이다.
+  for (const f of ['price', 'order_num', 'phone', 'recipient', 'address', 'bank', 'account', 'depositor']) set.delete(f);
   // 화이트리스트 교집합(REVERSE_SYNC_FIELDS에 있는 필드만 — 인젝션/오타 방어).
   return [...set].filter(f => REVERSE_SYNC_FIELDS.includes(f));
 }

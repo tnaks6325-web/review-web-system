@@ -149,7 +149,9 @@ const BODY = (field) => ({ sheetId: 's1', tabName: 't1', rowId: 'r1', field, val
   t('★ 셀 편집 가능 판정은 행 단위가 아니라 칸 단위(canE || 송장)', () => {
     assert.match(workdesk, /const advTrackE = !canE && STATE\.role==='advertiser' && r\.trackingEditable===true;/);
     assert.match(workdesk, /const cellE = canE \|\| \(advTrackE && _isTrackingField\(field\)\);/);
-    assert.match(workdesk, /const locked=!!statusKind;\s*\n\s*const cellE[\s\S]{0,120}return cellE/);
+    // 지키려는 것 = `cellE`(칸 단위 편집 판정)가 locked 바로 뒤에서 계산되고 그대로 반환된다는 순서다.
+    //   그 사이에 title 합성 같은 표시용 줄이 들어올 수 있으므로 길이 상한은 넉넉히 둔다(순서만 고정).
+    assert.match(workdesk, /const locked=!!statusKind;\s*\n\s*const cellE[\s\S]{0,400}return cellE/);
   });
   t('붙여넣기 게이트가 _canEditCells 로 열린다(송장 열 일괄 입력)', () => {
     assert.ok(!/if\(!STATE\.canEdit \|\| !STATE\.gSelRange\) return;/.test(workdesk),

@@ -601,6 +601,12 @@
   table.sheetgrid td.gstatuslock{cursor:default;background:color-mix(in srgb,var(--card2) 76%,var(--card));color:var(--t1)}
   table.sheetgrid td.gstatuslock .glockmark{margin-left:4px;color:var(--faint);font-size:10px}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
+  /* 결제금액 편차 경고칠 — 구매양식 제출값이 모집공고 설정 결제금액에서 ±10% 이상 벗어난 줄(사용자 확정 2026-08-23).
+     확인 팝업·승인 절차는 두지 않는다: 담당자가 그 행을 눌러 우측 구매캡처로 직접 확인하는 흐름이다.
+     ★ rgba 로 둔다 — 라이트/다크 어느 테마에서도 같은 "연주황"으로 읽히고, 담당자가 직접 칠한
+       인라인 배경색(migration 080)은 그대로 이긴다(사람이 정한 색 > 자동 경고). */
+  table.sheetgrid td.gcell.gpdev{background:rgba(255,146,42,.22);box-shadow:inset 0 0 0 1px rgba(255,146,42,.5)}
+  table.sheetgrid td.gedit.gpdev:hover{background:rgba(255,146,42,.32)}
   td.gidlock{cursor:default}   /* 참여자·연락처 = 실제 제출 신원(수정 불가) */
   .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
@@ -6967,6 +6973,16 @@ function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
   if(/일자|날짜|date/i.test(h)) return _fmtKDate(v);
   if(_isPhoneHeader(h)) return _fmtPhone(v);
   return v; }
+/* 결제금액 편차 경고칠 툴팁 — 셀에 마우스만 올려도 "무엇이 얼마나 다른지"를 알 수 있게 한다.
+   ★ 확인/승인 UI 는 두지 않는다(사용자 확정 2026-08-23) — 담당자는 그 행을 눌러 우측 구매캡처로
+     직접 확인한다. 팝업을 끼우면 그 마찰이 오히려 확인을 막는다.
+   ★ 숫자는 서버가 이미 판정해 보낸 값을 표기만 한다(화면에 판정 사본 금지). */
+function _pdevTip(pd){
+  if(!pd) return '';
+  const w=n=>Number(n).toLocaleString('ko-KR')+'원';
+  const p=Math.round(Number(pd.pct)*100);
+  return `⚠ 구매양식 제출 ${w(pd.submitted)} · 공고 설정 ${w(pd.expected)} (${p>0?'+':''}${p}%) — 행을 눌러 구매캡처를 확인하세요`;
+}
 // 연락처 표기 통일: 숫자만 추출 → 010-0000-0000(뒤8자리=phone8) 등 표준 대시 양식. 형식 불명은 원본 유지(오염 방지).
 //   ★ 실측(8/3): 시트/엑셀이 숫자화하며 앞자리 0을 흔히 떨어뜨린다 — "1093748442"(10자리, 0으로 시작 안 함)는
 //   "010-9374-8442"에서 0이 빠진 값. 0이 없는 10자리는 항상 010 휴대폰 번호이므로(유효 국내 유선은 반드시 0으로
@@ -7209,13 +7225,16 @@ function buildGrid(wd){
     // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
     const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
     const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
-    const eCell=(field, disp, edited, extraCls, styleI, editv)=> {
+    // tip = 셀 자체 값 말고 **덧붙일 설명**(결제금액 편차 경고 등). 값 title 뒤에 ' · ' 로 잇는다.
+    const eCell=(field, disp, edited, extraCls, styleI, editv, tip)=> {
       const statusKind=_workdeskStatusKindForField(field);
       const locked=!!statusKind;
       const cellE = canE || (advTrackE && _isTrackingField(field));   // 업체는 송장 칸만 편집 가능
+      const baseT = locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 이 화면에서 직접 수정할 수 없습니다.'):(disp||'');
+      const ttl = tip ? (baseT ? baseT+' · '+tip : tip) : baseT;
       return cellE
-      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(locked?(statusKind==='review'?'리뷰 제출은 관리자 우클릭 메뉴에서 처리합니다.':'입금 값은 이 화면에서 직접 수정할 수 없습니다.'):disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':(edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:'')}</td>`
-      : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
+      ? `<td ${cls(styleI,'gcell '+(locked?'gstatuslock':'gedit')+(edited&&!locked?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(ttl)}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-status-kind="${statusKind}" data-val="${esc(editv!=null?editv:disp)}">${esc(disp||'—')}${locked?'<span class="glockmark" aria-hidden="true">●</span>':(edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:'')}</td>`
+      : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(ttl)}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     };
     let tds='';
     vcols.forEach((c,i)=>{ const h=c.key;
@@ -7235,7 +7254,10 @@ function buildGrid(wd){
         const editv= ed?disp:_gridEditVal(h, raw);
         const ok=(_workdeskStatusKind(h)&&disp)?' gok':'';
         const ctr=_isCtrCol(h)?' gctr':'';   // 시트 날짜/연락처 열 가운데 정렬
-        tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv); }
+        /* 결제금액 편차 경고칠 — 어느 칸을 칠할지는 **서버가 정한다**(priceDev.col). 화면이 헤더
+           키워드로 다시 고르면 입금관리가 금액으로 읽는 칸과 갈릴 수 있다(판정 사본 금지). */
+        const pdev=(r.priceDev&&r.priceDev.col===h)?r.priceDev:null;
+        tds+=eCell('col:'+h, disp, ed, ok+ctr+(pdev?' gpdev':''), i, editv, pdev?_pdevTip(pdev):''); }
     });
     // data-p8/data-nm = 리뷰어 로그 딥링크가 이 행을 찾아 강조하는 키(표시에는 영향 없음)
     // data-rid = 행 식별자(업체 뷰어의 리뷰 미리보기 선택 키) — 셀에만 있던 것을 행에도 올려 tr 단위로 잡는다.

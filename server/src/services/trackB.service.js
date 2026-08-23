@@ -2560,6 +2560,57 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
   }
 }
 
+/**
+ * 결제금액 편차 경고칠 재료 — 행마다 `priceDev` 를 실어 준다(사용자 확정 2026-08-23).
+ *
+ * 구매양식 제출 금액(`order_submissions.price`)이 **모집공고에 설정된 1건당 결제금액**에서
+ * ±10% 이상 벗어나면, 화면이 그 줄의 **결제금액 칸**을 연주황으로 칠한다. 담당자는 그 행을 눌러
+ * 우측 구매캡처로 직접 확인한다 — **확인 팝업·승인 절차는 두지 않는다**(그 마찰이 확인을 막는다).
+ *
+ * ★★ 비교 대상이 "제출값" 인 이유: 나재형 건은 **작업보드 셀이 9,900 으로 정상**이었고 제출값만
+ *   99,000(0 하나 더) 이었다. 표시값끼리 비교하면 그 사고는 영영 안 잡힌다.
+ * ★ 기준 금액은 **옵션별 결제금액이 먼저**(그 줄이 고른 옵션) → 없으면 작업오더 1건당 금액.
+ *   재료는 `tabConditionSummary` 가 이미 만든 것을 그대로 쓴다(공고 조회 사본 0 · 쿼리 순증 0).
+ * ★ 판정(`resolvePriceDeviation`)·칸선택(`extractAmountEntry`) 둘 다 utils/paymentAmount 단일 출처다.
+ *   칠하는 칸은 **입금관리가 금액으로 읽는 그 칸**이라야 "칠은 A 칸인데 돈은 B 칸으로 나가는" 상태가 없다.
+ * @returns {number} 칠할 줄 수
+ */
+function _attachPriceDeviation(rows, condition) {
+  if (!condition || !Array.isArray(rows)) return 0;
+  const { resolvePriceDeviation, extractAmountEntry, isAmountCandidateHeader } = require('../utils/paymentAmount');
+  const norm = s => String(s == null ? '' : s).trim();
+  // 옵션별 결제금액(공고 옵션 원장). pay=0 은 "옵션 금액 미설정"이라 담지 않는다 → 작업오더 값으로 떨어진다.
+  const optPay = new Map();
+  for (const o of (condition.options || [])) {
+    const pay = Number(o && o.pay);
+    if (o && norm(o.label) && Number.isFinite(pay) && pay > 0) optPay.set(norm(o.label), pay);
+  }
+  const tabPay = Number(condition.payAmount);
+  let n = 0;
+  for (const r of rows) {
+    const ord = r && r.order;
+    if (!ord) continue;                                     // 주문 미연결 줄(빈 슬롯·수기) → 제출값이 없다
+    const expected = optPay.get(norm(ord.selectedOptKey)) || (Number.isFinite(tabPay) ? tabPay : 0);
+    const dev = resolvePriceDeviation({ submittedText: ord.price, expected });
+    if (!dev) continue;                                     // 공고 미설정·못 읽는 값·기준 미만 → 칠하지 않는다
+    const merged = Object.assign({},
+      (r.rowJson && typeof r.rowJson === 'object') ? r.rowJson : {}, r.cellEdits || {});
+    let col = extractAmountEntry(merged).key;
+    if (!col) {
+      /* 그 칸이 비어 있으면 값 기준 선택이 안 된다 — **같은 함수**에 자리표시값을 채워 태워
+         우선순위(정확일치 → 부분일치)를 그대로 따른다. 여기서 키워드 사본을 만들면
+         `옵션금액` 이 `결제금액` 을 이기는 오배치가 난다(입금관리가 이미 밟은 함정). */
+      const probe = {};
+      for (const k of Object.keys(merged)) if (isAmountCandidateHeader(k)) probe[k] = '0';
+      col = extractAmountEntry(probe).key;
+    }
+    if (!col) continue;                                     // 금액 칸 자체가 없는 표 → 칠할 자리가 없다
+    r.priceDev = { col, submitted: dev.submitted, expected: dev.expected, pct: dev.pct };
+    n++;
+  }
+  return n;
+}
+
 async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null, allowAllStaff = false, allowAllWorkdesk = false } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
@@ -2870,6 +2921,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     /* ★ 작업 조건 10항목 — **내부 화면 전용**(리뷰비·입금명은 광고주에게 나갈 값이 아니다).
        fail-soft: 실패하면 필드를 싣지 않고, 화면이 종전 4줄로 떨어진다(0·빈값 위장 금지). */
     res.condition = await tabConditionSummary(db, { sheetId, tabName, meta: meta[0] || {}, wo: wo[0] || null });
+    /* 결제금액 편차 경고칠 — 조건 카드가 만든 공고 금액을 그대로 재사용한다(쿼리 순증 0).
+       조건 조회가 실패해 null 이면 칠도 없다(근거 없는 경고 금지 — fail-soft). */
+    res.priceDevCount = _attachPriceDeviation(out, res.condition);
     // 오늘 참여현황(표 툴바 표기) — fail-soft: 실패해도 작업보드는 그대로 뜨고,
     //   화면이 "불러오지 못함"이라고 말한다(0/0 위장 금지).
     res.todayProgress = await tabTodayProgress(db, { sheetId, tabName });
@@ -4907,6 +4961,7 @@ module.exports = {
   tabCampaignsMap,
   tabTodayProgress,
   _tpAdvertiserLens,   // 회귀가드가 렌즈를 직접 실행해 필드 누수를 확인한다
+  _attachPriceDeviation,   // 회귀가드가 편차 경고칠 판정을 직접 실행해 확인한다(2026-08-23)
   identityKey,
   classifyParity,
   projectTab,

@@ -187,6 +187,41 @@ function resolveProductPrice({ board = null, boardEdit = null, ledgerText = null
 }
 
 /**
+ * 구매양식 제출 금액이 **모집공고 설정 결제금액**에서 얼마나 벗어났나 — 작업보드 경고칠 판정.
+ *
+ * ★★ 왜 "제출값" 과 "공고값" 을 비교하나(사용자 확정 2026-08-23):
+ *   위드프렌즈 53번 나재형은 **작업보드 셀이 9,900 으로 정상**이었는데 이체서식에 99,000 이 찍혔다
+ *   — 0 이 하나 더 붙은 값이 **주문원장(구매양식 제출값)** 에만 들어가 있었기 때문이다.
+ *   그러니 작업보드 표시값끼리 비교하면 이 사고는 영영 안 잡힌다(표시값은 정상이었다).
+ *   비교 대상은 **리뷰어가 구매양식에 적어 낸 값(order_submissions.price)** 이어야 한다.
+ *
+ * ★ 숫자 해석은 `parseAmountStrict` 하나만 쓴다(사본 0) — 느슨한 파서로 읽으면 `"9,900원 0"` 이
+ *   99,000 으로 이어붙어, **경고를 띄워야 할 값이 오히려 정상으로 보인다**.
+ * ★ 못 읽는 값·공고 미설정(0)은 **판정하지 않는다**(null). 근거 없는 경고칠은 담당자가 곧 무시하게 되고,
+ *   그러면 진짜 사고도 같이 묻힌다.
+ * ★ 위아래 양방향으로 본다 — 0 이 더 붙은 경우(+)뿐 아니라 덜 적힌 경우(−)도 확인 대상이다.
+ *
+ * @param {object} p
+ * @param {*}      p.submittedText  구매양식 제출 금액 원문(order_submissions.price — TEXT 자유입력)
+ * @param {*}      p.expected       모집공고/작업오더에 설정된 1건당 결제금액(0·null = 미설정)
+ * @param {number} [p.threshold]    편차 기준(비율). 기본 0.10 = 10%
+ * @returns {{submitted:number, expected:number, diff:number, pct:number}|null}
+ *   null = 판정 불가이거나 기준 미만(= 칠하지 않는다)
+ */
+const PRICE_DEV_THRESHOLD = 0.10;
+function resolvePriceDeviation({ submittedText = null, expected = null, threshold = PRICE_DEV_THRESHOLD } = {}) {
+  const exp = Number(expected);
+  if (!Number.isFinite(exp) || exp <= 0) return null;          // 공고 미설정 → 비교 기준이 없다
+  const parsed = parseAmountStrict(submittedText);
+  if (!parsed.ok) return null;                                  // 못 읽는 값을 추측해서 경고하지 않는다
+  const diff = parsed.value - exp;
+  const pct = diff / exp;
+  const lim = Number.isFinite(threshold) && threshold > 0 ? threshold : PRICE_DEV_THRESHOLD;
+  if (Math.abs(pct) < lim) return null;
+  return { submitted: parsed.value, expected: exp, diff, pct };
+}
+
+/**
  * 위 판정이 **볼 수도 있는** 헤더인가(상위집합 필터).
  * ★ 서버가 `row_json` 을 통째로 끌어오지 않기 위해 SQL 에서 후보 칸만 남길 때 쓴다 —
  *   여기서 넓게 거르고 **최종 판정은 위 함수가** 한다(SQL 에 판정 사본 금지).
@@ -202,4 +237,5 @@ module.exports = {
   extractAmountText, extractAmountNumber, extractAmountEntry,
   parseAmountStrict, extractAmountStrict, resolveProductPrice,
   isAmountCandidateHeader, EXACT_KEYS, PRICE_SOURCE,
+  resolvePriceDeviation, PRICE_DEV_THRESHOLD,
 };

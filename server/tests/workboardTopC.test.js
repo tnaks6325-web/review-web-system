@@ -72,8 +72,11 @@ t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광�
   // 파일 앞쪽의 무관한 `role === 'advertiser'` 가 걸려 항상 참이 된다(약한 단언 금지).
   const advBlock = svc.slice(svc.indexOf("else if (role === 'advertiser') {"),
                              svc.indexOf("else if (role === 'advertiser') {") + 900);
+  // ⚠ 세는 것은 **대입**(`res.condition =`)이다 — 단순 언급을 세면, 같은 showEdits 블록 안에서
+  //    그 값을 재사용하는 줄(편차 경고칠이 공고 금액을 그대로 쓴다)만 늘어도 빨개진다.
+  //    지키려는 것은 "condition 을 만드는 자리가 하나이고 광고주 분기에 없다" 이므로 대입만 센다.
   return /if \(showEdits\) \{/.test(before) && !/res\.condition/.test(advBlock)
-    && (svc.match(/res\.condition/g) || []).length === 1;
+    && (svc.match(/res\.condition\s*=[^=]/g) || []).length === 1;
 })());
 t('★ 쓰기 쿼리 0 — 조건 요약은 읽기 전용', !/INSERT|UPDATE|DELETE/i.test(cond));
 
