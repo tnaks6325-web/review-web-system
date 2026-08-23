@@ -73,6 +73,8 @@ async function run() {
       { anchor_type: 'order', anchor_value: 'ord-1', field: 'is_submitted', kind: 'bool', value_bool: false, value_text: null },
       { anchor_type: 'identity', anchor_value: 'phone8:33334444', field: 'reviewer_name', kind: 'text', value_bool: null, value_text: '편집B' },
       { anchor_type: 'identity', anchor_value: 'phone8:55556666', field: 'reviewer_name', kind: 'text', value_bool: null, value_text: '무시됨(ambiguous)' },
+      /* ★★ 폐기된 '_hidden'(행 숨김) 레코드가 남아 있어도 **행을 감추지 않는다**(사용자 확정 2026-08-23).
+         화면에서만 줄을 빼면 표의 줄 수와 진행 현황·마감자료가 다른 사실을 말한다(참여자 85명 → 게이지 82). */
       { anchor_type: 'order', anchor_value: 'ord-5', field: '_hidden', kind: 'bool', value_bool: true, value_text: null },
       // 앵커가 어떤 활성행에도 안 붙음 → orphan
       { anchor_type: 'identity', anchor_value: 'phone8:99999999', field: 'round', kind: 'text', value_bool: null, value_text: 'X' },
@@ -85,8 +87,10 @@ async function run() {
   assert.equal(byId.r2.name, '편집B', '1b: text 편집 합성');
   assert.ok(byId.r3.ambiguous === true && byId.r3.editable === false, '1c: 중복 identity → ambiguous·편집잠금');
   assert.equal(byId.r3.name, 'C1', '1d: ambiguous 행은 편집 미적용(물리값 유지)');
-  assert.ok(!byId.r5, '1e: _hidden 편집 행은 로스터 제외');
-  assert.equal(wd.hiddenRows.length, 1, '1f: 숨김 행은 hiddenRows 로 노출');
+  assert.ok(byId.r5, '1e: 옛 _hidden 레코드가 있어도 행은 로스터에 남는다(숨김 기능 폐기)');
+  assert.ok(!(byId.r5.editedFields || []).includes('_hidden'), '1e2: 폐기 필드는 편집 배지로 세지 않는다');
+  assert.ok(!('hiddenRows' in wd), '1f: hiddenRows 응답 자체가 없다(창구 제거)');
+  assert.ok(!('hidden' in wd.counts), '1f2: counts.hidden 도 없다');
   assert.equal(wd.orphanEdits.count, 1, '1g: 미부착 편집은 orphan 카운트');
   assert.equal(wd.orphanEdits.byType.identity, 1, '1h: orphan 타입별 집계');
   assert.equal(wd.counts.ambiguous, 2, '1i: ambiguous 카운트(중복 identity 2행 각각)');
@@ -196,13 +200,11 @@ async function run() {
   // 3h: bool 값은 value_bool 로 저장(캐스팅 예외 차단)
   cp = makeConnectPool({ row: { id: 'r1', source: 'import', order_submission_id: 'ord-1', identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {} } });
   svc.__setPoolForTest(cp);
-  // ★ 상태칸은 잠겼으므로 bool 저장 형태 검사는 편집 가능한 bool 필드(_hidden)로 한다.
+  /* ★★ 3h: '_hidden'(행 숨김)은 **저장 자체가 거부된다** — 화이트리스트에서 뺐다(사용자 확정 2026-08-23).
+     되살리면 "표의 줄 수 ≠ 진행 현황" 사고가 그대로 재현된다. 쓰기 0건까지 확인한다. */
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: '_hidden', value: 'true' });
-  const ins2 = cp.q.find(x => /INSERT INTO participant_edits/.test(x.s));
-  // params: [sheet,tab,type,val,field,kind,value_bool,value_text,by]
-  assert.equal(ins2.params[5], 'bool', '3h: kind=bool');
-  assert.equal(ins2.params[6], true, '3h2: value_bool=true');
-  assert.equal(ins2.params[7], null, '3h3: value_text=null');
+  assert.ok(!e.ok && e.error === 'field_not_editable', '3h: _hidden 편집 거부(숨김 기능 폐기)');
+  assert.ok(!cp.q.some(x => /INSERT INTO participant_edits/.test(x.s)), '3h2: 거부 시 쓰기 0건');
   // 3i: 23505 → concurrent_edit_conflict
   cp = makeConnectPool({ row: { id: 'r1', source: 'import', order_submission_id: 'ord-1', identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {} }, insertThrows: true });
   svc.__setPoolForTest(cp);

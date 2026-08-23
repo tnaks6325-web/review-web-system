@@ -5833,7 +5833,6 @@ function renderWorkdesk(wd){
   // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
   const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
-  if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
   /* ★ 표에서 분리(보관)한 줄 — **삭제가 아니다**. 숫자를 안 보여주면 "사라진 줄"이 된다.
      클릭 가능은 서버 게이트(adminOrMaster)와 1:1 — AE 에겐 숫자만(눌러도 403 나는 버튼 금지). */
   if(canEdit && c.held>0){
@@ -14985,10 +14984,6 @@ async function cleanupAutoTestRecord(rowId){
   if(!result||!result.ok){ toast((result&&result.error)||'자동 테스트 기록 정리에 실패했습니다.'); return; }
   toast('자동 테스트 기록을 모두 제거했습니다.');
   await reloadWorkdesk();
-}
-function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
-  const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';
-  const box=$('#addbox'); if(box){ box.innerHTML=`<div class="add" style="margin-top:10px"><label>숨김 참여자 (${wd.hiddenRows.length})</label>${list}</div>`; box.scrollIntoView({behavior:'smooth'}); }
 }
 /** 외부모집 수동제출 노출 게이트 — 서버(`/api/trackb/manual-order/*` = 내부인 + 편집 허용명단)와 1:1.
  *  ★ AE(staff)도 명단에 있으면 실행할 수 있다(사용자 확정 2026-08-20). 명단 판정이 아직 안 왔으면

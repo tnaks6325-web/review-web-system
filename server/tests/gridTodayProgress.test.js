@@ -136,7 +136,7 @@ const CNT = (id, o) => Object.assign({
   /* ══ 2) 배선 · 노출 범위 ══════════════════════════════════════════════════ */
   console.log('\n2) workdeskTab 배선 · 노출 범위');
   const wdBlock = SVC_SRC.slice(SVC_SRC.indexOf('async function workdeskTab('), SVC_SRC.indexOf('function tabTodayProgress') > 0 ? SVC_SRC.length : undefined);
-  const showEditsBlock = SVC_SRC.slice(SVC_SRC.indexOf('if (showEdits) {\n    res.hiddenRows'), SVC_SRC.indexOf('else if (role === \'advertiser\')'));
+  const showEditsBlock = SVC_SRC.slice(SVC_SRC.indexOf('if (showEdits) {\n    res.orphanEdits'), SVC_SRC.indexOf('else if (role === \'advertiser\')'));
   t('★ 내부인은 원본 그대로 받는다', /res\.todayProgress = await tabTodayProgress\(/.test(showEditsBlock));
   // ★★ 업체 뷰어에도 같은 표기를 넣되(사용자 확정 2026-08-10) **렌즈를 반드시 거친다** —
   //   원본을 그대로 실으면 공고 확정 수·결제 중 홀드·합산 공고 수가 외부로 샌다.

@@ -74,10 +74,13 @@ function _deriveAnchor(row) {
   return _rowAnchorId(row) ? { type: 'manual', value: _rowAnchorId(row) } : null;
 }
 function _rowAnchorId(row) { return row && row.id != null ? String(row.id) : ''; }
-// 편집 가능 필드 → 형태(bool/text). '_hidden'=제거 오버레이(import행). 화이트리스트(인젝션·형오류 차단).
+// 편집 가능 필드 → 형태(bool/text). 화이트리스트(인젝션·형오류 차단).
+// ★★ '_hidden'(행 숨김 오버레이)은 **제거됐다**(사용자 확정 2026-08-23) — 되살리지 말 것.
+//   행을 화면에서만 감추면 표의 줄 수와 진행 현황·마감자료가 서로 다른 사실을 말한다
+//   (실사고: 참여자 85명인데 게이지가 82/100). 줄을 내리는 창구는 [행 삭제]·[🧹 줄 정리] 뿐이다.
 const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
-  product_name: 'text', phone8: 'text', _hidden: 'bool',
+  product_name: 'text', phone8: 'text',
 };
 // 시트 컬럼(헤더)이 제출/입금 "상태 토글"열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
 //   ★ 정확 화이트리스트 — '입금자명/입금계좌/입금일'·'리뷰제출일/리뷰미제출'·'주문자제출' 등 정보열 오탐 차단.
@@ -1708,7 +1711,6 @@ async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
 //   ★ latestCloseout 정의 = settlementForTab 의 스텝퍼 ①(마감자료)이 이 시점부터 라이브(closeoutAvailable).
 // ══════════════════════════════════════════════════════════════════════════
 // 활성 명단(투영 물리행 + participant_edits 오버레이 합성) — 마감자료 CSV·건수의 단일 소스.
-//   ★ SF-3: 제거(_hidden) 오버레이 행은 제외(작업보드에서 안 보이는 행이 CSV에 재등장 방지),
 //     이름/수취인/차수/옵션/제출/입금 편집 보정도 반영 — workdeskTab 합성과 동일 규칙.
 async function _closeoutRoster(sheetId, tabName) {
   const db = getPool();
@@ -1745,7 +1747,6 @@ async function _closeoutRoster(sheetId, tabName) {
     if (anchor && !(anchor.type !== 'manual' && (anchorCount.get(_akey(anchor.type, anchor.value)) || 0) > 1)) {
       const k = _akey(anchor.type, anchor.value); if (editMap.has(k)) ov = editMap.get(k);
     }
-    if (ov._hidden === true) continue;   // 제거 오버레이 → 마감자료에서 제외
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
     out.push({
       seq: r.seq, name: pick('reviewer_name', r.name), recipient: pick('recipient_name', r.recipient),
@@ -2884,7 +2885,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ 명의를 모르는 줄(빈 슬롯·연락처 없음)은 **세지 않는다**(null) — 화면이 배지를 그리지 않는다.
      ★ 제거 오버레이로 화면에서 빠지는 줄은 세지 않는다(카운트는 `continue` 뒤에서 한다). */
   const visitSeen = new Map();
-  const out = [], hiddenList = [];
+  const out = [];
   let ambiguousCount = 0;
   /* ★★ 채워진 줄 수 — [진행 현황] 참여자 게이지의 분자(사용자 확정 2026-08-20).
      종전 게이지는 `out.length`(= 줄 수)를 세어, 작업표 생성 때 미리 깔아 둔 **빈 슬롯**까지
@@ -2892,7 +2893,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
      ★ 판정은 `utils/rowNumbering.isFilledRow` 단일 출처 — 번호 재부여·짝 빈 줄 정리가 쓰는
        SQL(`filledSql`)과 같은 기준이라 "게이지와 정리가 다른 줄을 빈 줄로 본다" 가 불가능하다.
      ★ **마스킹 전**에 센다(광고주 렌즈를 거친 뒤 세면 빈 칸도 마스킹 문자열이 되어 전 줄이 뒤집힌다).
-     ★ 화면에서 뺀 줄(`_hidden`)은 세지 않는다 — 카운트는 `continue` 뒤에서 한다(참여횟수 배지와 같은 자리). */
+     ★ 카운트는 마스킹 앞에서 한다(참여횟수 배지와 같은 자리). */
   let filledCount = 0;
   for (const r of roster) {
     const anchor = _deriveAnchor(r);
@@ -2905,12 +2906,10 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       } else if (editMap.has(k)) { ov = editMap.get(k); consumed.add(k); }
       // ★ 앵커 승격 대비 — 빈 자리였을 때 **물리행 앵커**로 저장해 둔 값(예: 미리 적어 둔 송장)이
       //   주문이 붙어 order 앵커로 승격한 뒤에도 화면에서 사라지지 않게 밑에 깔아 합성한다.
-      //   같은 필드는 **현재 앵커 값이 이긴다**(더 나중·더 구체적인 근거). `_hidden` 은 제외 —
-      //   빈 자리를 치웠던 제거 표시가 실제 참여자가 배정된 줄을 숨기면 안 된다.
+      //   같은 필드는 **현재 앵커 값이 이긴다**(더 나중·더 구체적인 근거).
       const rowKey = _akey('manual', _rowAnchorId(r));
       if (!ambiguous && anchor.value !== _rowAnchorId(r) && editMap.has(rowKey)) {
-        const base = { ...editMap.get(rowKey) }; delete base._hidden;
-        ov = { ...base, ...ov }; consumed.add(rowKey);
+        ov = { ...editMap.get(rowKey), ...ov }; consumed.add(rowKey);
       }
     }
     const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
@@ -2926,10 +2925,6 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       paid: !!pick('is_paid', r.paid),
       source: r.source, hasOrder: !!r.order_submission_id,
     };
-    if (ov._hidden === true) {                          // 제거 오버레이 → 본 목록서 제외
-      if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
-      continue;
-    }
     /* ★ 행마다 같은 판정을 실어 보낸다 — 제출물 미리보기 목록이 "채워진 줄"을 화면에서 다시
        세지 않게(사본 0). 게이지 분자(`filledCount`)와 **같은 호출**이라 갈릴 수가 없다. */
     syn.filled = _isFilledRow(syn);
@@ -2946,6 +2941,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (showEdits) {
       syn.anchorType = anchor ? anchor.type : null;
       syn.editable = editable; syn.ambiguous = ambiguous;
+      // 옛 '_hidden' 레코드(폐기된 필드)가 남아 있어도 편집 배지로 세지 않는다.
       syn.editedFields = Object.keys(ov).filter(f => f !== '_hidden');
       // 실 데이터 전량 투영: 시트 행 전체(row_json) + 제출 구매양식 원본(order). 상세 펼침용.
       syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
@@ -3007,14 +3003,14 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     // 주문 원장이 살아 있는 행의 결제금액 합계. 주문 행 삭제 뒤에는 원장 soft-delete와 함께 즉시 빠진다.
     paymentAmount: showEdits ? out.reduce((sum, r) => sum + (Number(String(r.order && r.order.price || '').replace(/[^0-9]/g, '')) || 0), 0) : undefined,
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
-    ambiguous: ambiguousCount, hidden: hiddenList.length,
+    ambiguous: ambiguousCount,
     /* 표에서 분리한 줄(129) — 표에는 없지만 데이터는 그대로다. 숫자를 지우면 "사라진 줄" 이 된다. */
     held: heldCount, heldUnavailable: heldUnavailable || undefined,
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   if (showEdits) {
-    res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType };
+    res.orphanEdits = { count: orphanCount, byType: orphanByType };
     res.headers = headers || []; res.customColumns = customCols;
     /* ★ 그 탭의 상태 칸(리뷰제출·입금) 헤더명 — 화면 잠금·[📎 수동 리뷰제출] 판정의 **단일 출처**.
        화면이 이름 목록 사본으로 판정하면 헤더가 그냥 `리뷰` 인 탭에서 서버(제출 시각을 그 칸에 쓴다)와
