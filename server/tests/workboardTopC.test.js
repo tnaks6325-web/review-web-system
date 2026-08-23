@@ -63,8 +63,12 @@ t('★ 구매채널은 서버가 URL 로 추측하지 않는다(판정 단일 �
 t('★ 어떤 실패에도 throw 하지 않는다 — null 을 돌려주고 화면이 사유를 말한다',
   /catch \(e\)[\s\S]*return null;/.test(cond));
 t('② condition 은 내부 화면(showEdits)에서만 응답에 실린다(광고주 미노출)', (() => {
-  const i = svc.indexOf('res.condition = await tabConditionSummary');
+  /* ⚠ 2026-08-24: 총건수 초과 표시가 들어오며 `tabConditionSummary` 를 **루프 뒤 한 번** 부르고
+     그 결과를 재사용하게 됐다(호출 2회면 cap 과 조건 카드가 갈릴 수 있다). 검사 의미는 그대로 —
+     "condition 은 showEdits 안에서만 응답에 실린다" + 이제 **호출 1회**까지 함께 고정한다. */
+  const i = svc.indexOf('res.condition =');
   if (i < 0) return false;
+  if ((svc.match(/await tabConditionSummary\(/g) || []).length !== 1) return false;
   // ⚠ 고정 길이 슬라이스(i-700)로 보면 그 사이에 다른 줄이 늘어나는 순간 조용히 빨개진다
   //    (실제로 `res.statusCols` 가 들어오며 밟았다). 바로 앞의 `if (showEdits) {` 를 찾아 그 구간만 본다.
   const before = svc.slice(svc.lastIndexOf('if (showEdits) {', i), i);

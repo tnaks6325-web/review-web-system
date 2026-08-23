@@ -303,6 +303,29 @@
       sum += v;
       if (sum >= target) break;   // 목표를 채웠으면 그 뒤 날은 구간에 넣지 않는다
     }
+    /* ★★ 구간 뒤에 남아 있는 **작업표 준비 줄**도 0 명으로 표에 올린다(2026-08-24).
+       walkDays 는 목표를 채우면 멈추므로, 그 뒤 날짜의 빈 줄은 화면에 아예 없었고 그래서
+       "총건수보다 많은 줄"을 내릴 창구가 없었다(신고: 총건수 500인데 작업표 581줄).
+       ★ 값이 0 이라 **합계는 그대로**다 — 균형 바가 초록이면 초록으로 남는다.
+       ★ 무시트 작업표 공고만 — 시트 일정 공고에 0 을 박으면 시트 우선권이 사라진다.
+       ★ **저장된 계획이 있는 날은 넣지 않는다** — 그건 applyCarryMode 의 S.outside 규율
+         ("구간 밖 저장 계획은 합계에 넣지도 지우지도 않는다")이 담당한다. 여기서 0 으로 덮으면
+         사람이 정해 둔 계획이 조용히 지워진다.
+       ★ **이미 채워진 줄이 있는 날도 넣지 않는다** — 0 으로 올리면 minFor 하한을 깨고 합계도 흔든다. */
+    if (S.data.scheduleDriven !== true && Array.isArray(S.data.worktableDates)) {
+      var have = {}; dates.forEach(function (x) { have[x] = 1; });
+      var from2 = baseDate();
+      S.data.worktableDates.forEach(function (x) {
+        var dd = String((x && x.date) || '').slice(0, 10);
+        if (!dd || dd < from2 || have[dd]) return;
+        if (S.base[dd] != null) return;
+        if ((Number(x.slots) || 0) <= 0) return;
+        if (worktableFilledFor(dd) > 0) return;
+        if (dates.length >= MAX_ROWS) return;
+        dates.push(dd); plan[dd] = 0; cmap[dd] = 0; have[dd] = 1;
+      });
+      dates.sort();
+    }
     // 부족분 = 지금 구간의 시트/저장 계획만으로는 모자라는 인원(0이면 정확히 맞는다)
     return { dates: dates, plan: plan, carry: cmap, shortBy: Math.max(0, target - sum) };
   }
@@ -570,6 +593,17 @@
           if (cut > 0) { S.plan[d2] = planFor(d2) - cut; need += cut; }
         }
       }
+    }
+    if (need > 0) {
+      /* ★ 구간에 이미 올라와 있는 **0 명 준비일**(작업표에 빈 줄이 남은 날)을 먼저 채운다 —
+         건너뛰고 새 날을 만들면 준비된 줄을 두고 뒤에 줄을 더 만드는 꼴이 된다.
+         next·spread 는 위 루프가 이미 채웠으므로 여기서는 no-op 이다(extend 전용 경로). */
+      (S.horiz || []).forEach(function (dz) {
+        if (need <= 0 || planFor(dz) > 0) return;
+        var bz = baseFor(dz); if (bz <= 0) return;
+        var putz = Math.min(bz, need, cap);
+        if (putz > 0) { S.plan[dz] = putz; need -= putz; }
+      });
     }
     if (need > 0) {
       var d3 = S.horiz.length ? addDays(S.horiz[S.horiz.length - 1], 1) : baseDate(), g2 = 0;
@@ -910,7 +944,10 @@
       //   총량 clamp 를 걸고, 고정하지 않으면 앞 날이 미달했을 때 그날이 온전히 열린다(더 안전).
       // ★ **시스템이 깐 값 그대로일 때만** 건너뛴다 — 그냥 `v === residual` 로 두면 균형이 맞은
       //   상태의 마지막 날은 항상 residual 이라 **사람이 의도적으로 줄인 마지막 날이 조용히 누락**된다.
-      if (v < nat && v === residual && S.base[d] == null && S.modePlan && v === S.modePlan[d]) return;
+      /* ★ **목표를 이미 채운 뒤(residual === 0)는 이 규칙을 적용하지 않는다** — 그때 v 는 0 이고,
+         그 0 은 '남은 만큼만 연 마지막 부분일'이 아니라 **작업표 빈 줄을 닫으려고 명시한 0** 이다.
+         걸러내면 구간 뒤 자리를 닫는 저장이 통째로 빠져 줄이 그대로 남는다(2026-08-24 실측). */
+      if (residual > 0 && v < nat && v === residual && S.base[d] == null && S.modePlan && v === S.modePlan[d]) return;
       // ★ 고정 모드라도 **이미 같은 값으로 저장돼 있는 날은 보내지 않는다** — 그 날은 이미 명시
       //   계획이라 자동 이월이 얹히지 않는다. 안 걸러내면 저장 직후에도 [확정 저장]이 계속 열려
       //   있어 "저장이 안 됐나?"로 오독된다.
@@ -1156,7 +1193,11 @@
         var h = buildHorizon(m);
         if (!h || !h.dates.length) return '-';
         if (h.shortBy > 0) return '계산 불가';   // buildHorizon 은 short 가 아니라 shortBy(모자란 인원)를 준다
-        return fmtMD(h.dates[h.dates.length - 1]);
+        /* ★ 종료일 = **실제로 사람을 받는 마지막 날**. 구간 끝에는 작업표 빈 줄을 닫으려고 올려 둔
+           0 명 날이 붙을 수 있어, 마지막 날을 그대로 쓰면 헤더의 예상 종료일(endDate)과 갈린다.
+           바로 위 extend 안내가 쓰는 것과 **같은 관용구**(사본이 아니라 같은 규칙). */
+        for (var li = h.dates.length - 1; li >= 0; li--) if (h.plan[h.dates[li]] > 0) return fmtMD(h.dates[li]);
+        return '-';
       };
       carryBlk = '<div class="cdp-carry"><div class="t">이월 <b>' + carry + '명</b> 보충 투입 방식</div>'
         + '<div class="d">어제까지 못 채운 <b>' + carry + '명</b>을 어느 날에 얹을지 정합니다. 총량은 어느 방식에서도 변하지 않고, <b>종료일만 달라집니다</b>.'
