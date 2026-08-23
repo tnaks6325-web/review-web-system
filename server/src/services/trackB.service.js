@@ -2600,6 +2600,8 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
               review_type_mix AS "reviewTypeMix",
               review_fee AS "reviewFee", transfer_memo AS "transferMemo",
               multi_account_mode AS "multiAccount", multi_daily_limit AS "multiDailyLimit",
+              to_char(window_start,'HH24:MI') AS "windowStart",
+              to_char(window_end,'HH24:MI')   AS "windowEnd",
               status, participation_mode AS "participationMode"
          FROM recruit_campaigns
         WHERE linked_sheet_id = $1
@@ -2724,6 +2726,16 @@ async function tabConditionSummary(db, { sheetId, tabName, meta = {}, wo = null 
       channel: (c && (String(c.channel || '').trim() === '직접입력' ? c.channelCustom : c.channel)) || null,
       productUrl: (wo && wo.productUrl) || null,
       inflowType: (wo && wo.inflowType) || null,
+      /* 구매시간(사용자 확정 2026-08-23) — **실제로 참여를 여닫는 값은 공고 시간창**이다
+         (`computeCampaignState` 가 그것을 본다). 작업오더 `purchase_time` 은 그 발행 프리필
+         원본일 뿐이라, 오더 텍스트만 그리면 "카드는 0~15시인데 실제로는 다른 시간에 열리는"
+         상태가 된다 → 총건수·일건수와 **같은 규율**로 공고 우선·발주 폴백을 화면에 넘긴다.
+         ★ 시간창 개념은 **참여형 공고에만** 있다(레거시는 없음) — 그래서 참여형일 때만 싣는다.
+         ★ 참여형인데 양쪽이 비면 그것이 곧 **자율주문**(종일 open)이다 — 빈 값이 아니라 상태다. */
+      purchaseWindow: (c && c.participationMode && c.windowStart && c.windowEnd)
+        ? { start: c.windowStart, end: c.windowEnd } : null,
+      purchaseAllDay: !!(c && c.participationMode && !c.windowStart && !c.windowEnd),
+      orderPurchaseTime: (wo && String(wo.purchaseTime || '').trim()) || null,
       inflowKeyword: (wo && wo.inflowKeyword) || null,
       multiAccount: c ? { enabled: !!c.multiAccount, dailyLimit: num(c.multiDailyLimit) } : null,
       cashReceipt,

@@ -10,7 +10,7 @@
  * 고정하는 것:
  *  A. 판정 **단일 출처** `_isNoSheet` — 무시트 배지와 라벨 숨김이 같은 값을 본다
  *     · 필드가 없으면 false(= 종전 표기 유지 · 모르는 것을 무시트로 단정하지 않는다)
- *  B. 작업보드 머리 — 시트 제목·`원본: 시트` 는 무시트면 안 그려지고, 그리드 모드 배지는 제거됨
+ *  B. 작업보드 머리 — 시트 표기(제목 칩·`원본: 시트`·그리드 모드 배지)는 **전부 제거됨**
  *     · `원본: Track B` 는 시트 라벨이 아니므로 그대로 남는다
  *  C. 목록 4곳(작업 탭바 · 통합검색 · 업체 사이드바/표/대시보드 · 업체관리 연결탭)도 같은 게이트
  *     · 라벨을 빼도 구분자(` · `)가 앞에 남지 않는다
@@ -42,7 +42,7 @@ console.log('\n[A] 판정 단일 출처 `_isNoSheet`');
 {
   const sandbox = { STATE: { cur: null }, esc: s => String(s == null ? '' : s), sheetTitle: sid => sid };
   vm.createContext(sandbox);
-  vm.runInContext(grab('_isNoSheet') + '\n' + grab('_curSheetLabel'), sandbox);
+  vm.runInContext(grab('_isNoSheet'), sandbox);
 
   ok('sheetless===true 만 무시트', sandbox._isNoSheet({ sheetless: true }) === true);
   ok('★ 필드 없음 = false(모르는 것을 무시트로 단정하지 않는다)',
@@ -54,27 +54,43 @@ console.log('\n[A] 판정 단일 출처 `_isNoSheet`');
   ok('★ 무시트 배지 렌더러는 없다(되붙이면 상시 표기로 되돌아간다)',
     typeof sandbox._nsBadge === 'undefined');
 
-  // _curSheetLabel — 실제 실행
-  sandbox.STATE.cur = { sheetId: 'SID', spreadsheetTitle: '위드프렌즈 체험단 시트_2026' };
-  ok('★ 무시트면 시트 제목 칩을 그리지 않는다', sandbox._curSheetLabel(true) === '');
-  const shown = sandbox._curSheetLabel(false);
-  ok('시트 기반이면 종전대로 제목을 그린다(무회귀)',
-    shown.indexOf('위드프렌즈 체험단 시트_2026') > 0 && shown.indexOf('mhsheet') > 0, shown);
-  sandbox.STATE.cur = { sheetId: 'SID' };
-  ok('제목을 모르면 종전대로 생략', sandbox._curSheetLabel(false) === '');
+  /* ⚠ `_curSheetLabel`(📄 시트 제목 칩)은 제거됐다(사용자 확정 2026-08-23) —
+     「무시트」·그리드 모드·「원본: 시트」 에 이은 시트 표기 정리의 마지막.
+     ★ 다시 만든다면 "무시트면 숨김"이 아니라 **"시트 기반이면 표시"** 여야 한다. */
+  ok('★ 시트 제목 칩 렌더러는 없다(되붙이면 상시 표기로 되돌아간다)',
+    typeof sandbox._curSheetLabel === 'undefined');
 }
 
 console.log('\n[B] 작업보드 머리 3종');
 {
   ok('무시트 판정을 렌더 시작부에서 1회만 구한다',
     /const noSheet=_isNoSheet\(m\)\|\|_isNoSheet\(STATE\.cur\);/.test(WD));
-  ok('★ 시트 제목 칩에 판정을 넘긴다', /\$\{_curSheetLabel\(noSheet\)\}/.test(WD));
-  ok('인자 없는 옛 호출이 남아 있지 않다', !/_curSheetLabel\(\)/.test(WD));
+  ok('★ 시트 제목 칩 호출·CSS 흔적 0', (() => {
+    const live = WD.replace(/\/\*[\s\S]*?\*\//g, '');   // 설명 주석이 대신 통과시키지 않게
+    return !/_curSheetLabel/.test(live) && !/mhsheet/.test(live);
+  })());
+  ok('★ 제목 행 h1 의 nowrap·ellipsis 는 남는다 — 없으면 [마감] 버튼이 아랫줄로 떨어진다',
+    /\.mh\.mh-wb h1\{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap/.test(WD));
+  ok('★ noSheet 판정은 남는다 — 리허설 안내문이 쓴다',
+    /\$\{noSheet\?'주문 기록은':'구글시트·주문은'\}/.test(WD));
 
-  ok('★ `원본: 시트` 는 무시트면 안 그린다',
-    /const sotBadge=\(noSheet && sot!=='db'\) \? ''/.test(WD));
-  ok('★ `원본: Track B` 는 시트 라벨이 아니라 그대로 남는다',
-    /sot==='db'\?'Track B':'시트'/.test(WD));
+  /* ★★ 「원본: 시트」 배지는 **제거**했다(사용자 확정 2026-08-23) — 시트 기반 작업에서도 안 뜬다.
+       본섭 실측(114 전수) 상 `source_of_truth` 는 전부 `sheet` 이라 종전 조건에서도 이미
+       안 보이고 있었다. 시트 기반 작업임을 알리는 표기는 이제 **시트 제목 라벨 하나**다.
+     ★ 「원본: Track B」 는 남는다 — 시트 표기가 아니라 **cutover 상태**이고 master 의
+       [⋯] 전환 버튼과 짝이다(없애면 전환 여부를 화면에서 알 수 없다). */
+  /* ⚠ 검사 범위는 **작업보드 상단 `sotBadge` 한 곳**이다 — 파일 전체로 보면 관측 뷰의
+     `원본` 열(`o.sourceOfTruth==='db'?'Track B':'시트'`)과 전환 토스트가 걸린다.
+     그 둘은 다른 화면·다른 목적이라 이번 정리 대상이 아니다. */
+  ok('★ 작업보드 상단 `원본: 시트` 는 어떤 경우에도 안 그린다', (() => {
+    const i = WD.indexOf('const sotBadge='), j = WD.indexOf('const flipBtn=', i);
+    const blk = WD.slice(i, j);
+    return i > 0 && j > i && !/시트/.test(blk);
+  })());
+  ok('★ `원본: Track B`(cutover 상태)는 그대로 남는다',
+    /const sotBadge=\(sot==='db'\)/.test(WD) && />원본: Track B</.test(WD));
+  ok('★ 전환 버튼도 그대로 — 상태 표기를 없앤 게 아니라 시트 표기만 뺐다',
+    /flipSoT\('\$\{sot==='db'\?'sheet':'db'\}'\)/.test(WD));
 
   /* ★★ 그리드 모드 배지는 **둘 다 제거**했다(사용자 확정 2026-08-23) —
        `표 · 전체 열`(무시트) 은 전 작업이 무시트라 상시 표기였고, `시트 그리드 · 열람`(시트 기반)
