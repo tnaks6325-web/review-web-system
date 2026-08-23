@@ -193,14 +193,20 @@ t('2a: 시트 기반 탭이면 쓰지 않는다(sheet_backed) — 무회귀', as
     assert.ok(/catch \(e\) \{ failed\+\+;/.test(sw), '실패 시 클리어로 넘어가면 안 된다');
   });
   const pa = R('server/src/services/participants.service.js');
-  t('4f: 투영이 무시트 row_json 을 덮지 않는다(10분 롤백 차단)', () => {
-    assert.ok(/row_json = CASE WHEN \$20 THEN campaign_participants\.row_json ELSE EXCLUDED\.row_json END/.test(pa),
-      'CASE 동결이 없으면 편집이 다음 투영에서 사라진다');
-    assert.ok(/isSheetless\(db, sheetId, tabName\)/.test(pa), '판정은 sheetlessScope 단일 출처');
+  /* ★ 4f/4g — 검사 의미는 그대로(무시트 탭에서 투영이 작업보드 편집을 되돌리지 않는다),
+     막는 방식만 더 강해졌다: `row_json` 칸만 동결하던 것 → **임포트 자체를 건너뛴다**.
+     복사의 방향이 반대(작업표 → review_index)라 되임포트는 정보 이득이 0이다. */
+  t('4f: 무시트 탭은 임포트 자체를 건너뛴다(10분 롤백 차단)', () => {
+    const imp = pa.slice(pa.indexOf('async function importTabFromIndex'), pa.indexOf('async function listParticipants'));
+    assert.ok(/isSheetless\(db, sheetId, tabName\)/.test(imp), '판정은 sheetlessScope 단일 출처');
+    assert.ok(/return \{ skipped: true, reason: 'sheetless'/.test(imp), '건너뛰지 않으면 결과물로 원본을 덮는다');
+    assert.ok(!/row_json = CASE WHEN/.test(imp), '동결 분기는 스킵으로 대체됐다(반쪽 방어 부활 금지)');
+    assert.ok(/TRACKB_PROJECT_SHEETLESS/.test(imp), '되돌리기 스위치');
   });
-  t('4g: 무시트 탭은 _reconcileSeen 을 건너뛴다(줄 소멸 차단)', () => {
-    const pt = tb.slice(tb.indexOf('async function projectTab'), tb.indexOf('async function projectTab') + 1400);
-    assert.ok(/sheetless \? \{ deactivated: 0, reconcileSkipped: 'sheetless' \}/.test(pt), '건너뜀 분기 필요');
+  t('4g: 임포트를 건너뛴 탭은 _reconcileSeen 도 건너뛴다(줄 소멸 차단)', () => {
+    const pt = tb.slice(tb.indexOf('async function projectTab'), tb.indexOf('async function projectTab') + 1600);
+    assert.ok(/imp && imp\.skipped\) \? \{ deactivated: 0, reconcileSkipped: true \}/.test(pt),
+      '건너뜀 분기 필요 — 없으면 그 탭의 import 활성 줄이 전부 비활성화된다');
   });
   // ★ 되돌리기 실행부는 `_revertOneInTx`(단건·일괄 공용) — 래퍼만 보면 본문 회귀를 놓친다.
   const revert = tb.slice(tb.indexOf('async function _revertOneInTx'));

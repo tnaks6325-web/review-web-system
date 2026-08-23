@@ -96,6 +96,99 @@ const MONEY_TABLES = [
 ];
 
 let _pool = null;
+/* ══════════════════════════════════════════════════════════════════════════
+   구글 드라이브 폴더 (사용자 확정 2026-08-21)
+   ──────────────────────────────────────────────────────────────────────────
+   작업을 지울 때 그 작업의 캡처 폴더도 함께 치운다. 대상은 `tab_configs` 가 들고 있는 두 폴더 —
+   리뷰(`folder_url`)·구매캡처(`capture_folder_url`). 현금영수증 등 하위 폴더와 그 안의 이미지는
+   부모 폴더에 들어 있으므로 부모를 치우면 함께 간다.
+
+   ★★ **휴지통으로 보낸다 — 영구삭제 API 는 쓰지 않는다**(레포 규율: 30일 복구창).
+     화면도 "휴지통으로 이동"이라고 정확히 말한다 — 사라진 줄 알았는데 복구 가능한 편이 그 반대보다 낫다.
+   ★★ **다른 탭이 같은 폴더를 가리키면 지우지 않는다**(fail-closed). 폴더는 탭별로 만들어지지만
+     이름 매칭으로 붙는 경로(`ensureReviewFolderPath`)가 있어 공유가 실제로 가능하다 —
+     남의 작업 캡처를 지우는 사고가 "폴더가 남는" 것보다 훨씬 크다.
+   ★ Drive 는 **DB 삭제가 커밋된 뒤**에 건드린다: 게이트(확인·입금 기록)를 다 통과한 뒤에만
+     외부 저장을 손대고, 실패해도 사유와 폴더 링크를 응답에 실어 사람이 손으로 치울 수 있게 한다.
+   ★ 기본은 **끔** — `deleteDrive === true` 일 때만 동작한다(입금 기록 삭제와 같은 별도 확인 규율).
+   ══════════════════════════════════════════════════════════════════════════ */
+const DRIVE_FOLDER_KINDS = [
+  { kind: 'review', column: 'folder_url', label: '리뷰 캡처 폴더' },
+  { kind: 'capture', column: 'capture_folder_url', label: '구매 캡처 폴더' },
+];
+
+function _drive() { return require('./drive.service'); }
+
+/**
+ * 그 탭이 가리키는 드라이브 폴더 목록(좌표만 — Drive 무접촉).
+ * `sharedWith` 가 비어 있지 않으면 다른 탭도 같은 폴더를 쓴다는 뜻이라 **지우지 않는다**.
+ */
+async function _tabDriveFolders(q, sheetId, tabName) {
+  const { rows } = await q(
+    `SELECT folder_url AS review, capture_folder_url AS capture
+       FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+  if (!rows.length) return [];
+  const { extractFolderIdFromUrl } = _drive();
+  const out = [];
+  for (const k of DRIVE_FOLDER_KINDS) {
+    const url = String(rows[0][k.kind === 'review' ? 'review' : 'capture'] || '').trim();
+    if (!url) continue;
+    const folderId = extractFolderIdFromUrl(url) || (/^[a-zA-Z0-9_-]{10,}$/.test(url) ? url : null);
+    if (!folderId) { out.push({ ...k, url, folderId: null, unreadable: true, sharedWith: [] }); continue; }
+    // 같은 폴더를 가리키는 **다른** 탭이 있는가(시트가 달라도 위험은 같다).
+    const { rows: sh } = await q(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName" FROM tab_configs
+        WHERE NOT (sheet_id=$1 AND tab_name=$2)
+          AND (COALESCE(folder_url,'') LIKE $3 OR COALESCE(capture_folder_url,'') LIKE $3)
+        LIMIT 5`, [sheetId, tabName, `%${folderId}%`]);
+    out.push({ ...k, url, folderId, sharedWith: sh || [] });
+  }
+  return out;
+}
+
+/** 미리보기용 — 폴더 이름·파일 수를 붙인다(사람이 "무엇이 사라지는지" 보고 누르게). fail-soft. */
+async function _describeDriveFolders(folders) {
+  const d = _drive();
+  for (const f of folders) {
+    if (!f.folderId) continue;
+    try {
+      const meta = await d.getFolderMeta(f.folderId);
+      if (meta) f.name = meta.name || '';
+    } catch (e) { f.metaError = e && e.message; }
+    try {
+      const ins = await d.inspectFolder(f.folderId);
+      if (ins) { f.files = ins.fileCount; f.subfolders = (ins.subfolders || []).length; }
+    } catch (e) { f.countError = e && e.message; }
+  }
+  return folders;
+}
+
+/**
+ * 실행 — 폴더를 **휴지통으로** 보낸다. 공유 폴더·좌표 불명은 건너뛰고 사유를 남긴다.
+ * ★ 절대 throw 하지 않는다 — DB 삭제는 이미 커밋됐고, 여기서 예외가 오르면 호출부가
+ *   "삭제 실패"로 보고해 사람이 같은 삭제를 다시 시도한다(이미 지워진 작업에).
+ */
+async function _trashDriveFolders(folders, by) {
+  const out = [];
+  for (const f of folders) {
+    const base = { kind: f.kind, label: f.label, url: f.url, folderId: f.folderId, name: f.name || '' };
+    if (!f.folderId) { out.push({ ...base, ok: false, skipped: 'unreadable_url' }); continue; }
+    if (f.sharedWith && f.sharedWith.length) {
+      out.push({ ...base, ok: false, skipped: 'shared', sharedWith: f.sharedWith });
+      continue;
+    }
+    try {
+      const r = await _drive().trashFiles([{ id: f.folderId, name: f.name || f.label }]);
+      const ok = !!(r && r.success);
+      out.push({ ...base, ok, error: ok ? null : ((r && r.errors && r.errors[0] && r.errors[0].error) || '휴지통 이동 실패') });
+      if (ok) logger.warn(`[workTabDelete] 드라이브 폴더 휴지통 이동(${by}): ${f.label} "${f.name || ''}" (${f.folderId})`);
+    } catch (e) {
+      out.push({ ...base, ok: false, error: (e && e.message) || String(e) });
+    }
+  }
+  return out;
+}
+
 function _db() { return _pool || (_pool = require('../db/pool')); }
 function __setPoolForTest(p) { _pool = p; }
 
@@ -169,6 +262,14 @@ async function previewTaskDelete({ sheetId, tabName, pool } = {}) {
       WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2 AND deleted_at IS NULL
       ORDER BY created_at DESC LIMIT 20`, [sheetId, tabName]);
 
+  /* 드라이브 폴더 — **좌표는 DB 에서, 이름·파일 수는 Drive 에서**(사람이 누른 미리보기에서만).
+     ★ fail-soft: Drive 가 막혀도 미리보기는 떠야 한다. 대신 "몇 장인지 모른다"를 화면이 말한다. */
+  let drive = { folders: [], unavailable: null };
+  try {
+    const folders = await _tabDriveFolders(q, sheetId, tabName);
+    drive.folders = await _describeDriveFolders(folders);
+  } catch (e) { drive = { folders: [], unavailable: (e && e.message) || String(e) }; }
+
   return {
     ok: true,
     tab: (tabRow.rows && tabRow.rows[0]) || { sheetId, tabName, tabGid: null, displayName: tabName, sheetless: null },
@@ -177,13 +278,14 @@ async function previewTaskDelete({ sheetId, tabName, pool } = {}) {
     tables, totalRows,
     money, blocked: money.length > 0,
     campaigns: camps || [], workOrders: wos || [],
+    drive,
   };
 }
 
 /**
  * 실행 — 한 트랜잭션. 확인(`confirm===true`) 없이는 아무것도 지우지 않는다.
  */
-async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by = 'admin', pool } = {}) {
+async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, deleteDrive = false, by = 'admin', pool } = {}) {
   _args(sheetId, tabName);
   if (confirm !== true) return { ok: false, code: 'confirm_required', error: '삭제 확인이 필요합니다.' };
 
@@ -216,6 +318,14 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
       [sheetId, tabName]);
     const tabGid = (gidRows && gidRows[0] && gidRows[0].gid) || '';
 
+    /* ★ 드라이브 폴더 좌표도 **지우기 전에** 읽어 둔다 — `tab_configs` 가 사라지면 그 작업의
+       폴더가 어느 것인지 알 방법이 없다(gid 와 같은 이유). Drive 호출은 커밋 뒤에 한다. */
+    let driveTargets = [];
+    if (deleteDrive === true) {
+      try { driveTargets = await _tabDriveFolders((t, p) => client.query(t, p), sheetId, tabName); }
+      catch (e) { driveTargets = []; logger.warn(`[workTabDelete] 드라이브 폴더 좌표 조회 실패: ${e && e.message}`); }
+    }
+
     const deleted = {};
     let totalRows = 0;
 
@@ -241,10 +351,15 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
       if (r && r.rowCount) { deleted[t] = r.rowCount; totalRows += r.rowCount; }
     }
 
-    // ① 연결 작업오더 — 링크만 비운다(오더는 남는다 → 같은 오더를 다시 접수할 수 있다).
+    /* ① 연결 작업오더 — 링크만 비운다(오더는 남는다 → 같은 오더를 다시 접수할 수 있다).
+       ★★ 종전엔 링크를 비우기만 해서 그 오더가 목록에서 **"아직 접수 안 한 오더"와 똑같이** 보였다
+         (언제 무엇이 지워졌는지 아무 데도 안 남았다) → 삭제 시각·삭제자·지워진 작업 이름을 함께
+         새긴다(134). 재접수하면 accept 가 이 세 칸을 비운다(화면이 거짓을 말하지 않게). */
     const wo = await client.query(
-      `UPDATE work_orders SET linked_tab_sheet_id='', linked_tab_name='', linked_tab_gid='', updated_at=NOW()
-        WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2`, [sheetId, tabName]);
+      `UPDATE work_orders SET linked_tab_sheet_id='', linked_tab_name='', linked_tab_gid='',
+              tab_deleted_at=NOW(), tab_deleted_by=$3, tab_deleted_tab=$2, updated_at=NOW()
+        WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2
+        RETURNING id, title, status, created_by`, [sheetId, tabName, String(by || '')]);
 
     /* ② 연결 모집공고 — **함께 삭제**한다(사용자 확정 2026-08-19, 종전 보관 처리에서 변경).
        작업이 사라졌는데 그 작업을 가리키는 공고만 남으면 갈 곳 없는 공고가 목록에 떠 있게 된다.
@@ -273,8 +388,21 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
 
     await client.query('COMMIT');
     logger.info(`[workTabDelete] "${tabName}" (${sheetId}) 삭제 by ${by} — 행 ${totalRows} · 공고 삭제 ${rc.rowCount} · 오더 링크 해제 ${wo.rowCount}`);
+
+    /* ★ 커밋 뒤에만 외부 저장을 손댄다. 실패해도 **삭제 자체는 성공**이므로 throw 하지 않고
+       결과를 실어 보낸다(화면이 폴더 링크와 사유를 보여 사람이 손으로 치울 수 있다). */
+    const driveTrashed = (deleteDrive === true && driveTargets.length)
+      ? await _trashDriveFolders(driveTargets, by)
+      : [];
+
+    /* ★ 인트라넷 "보낸 오더" 카드에도 알린다 — 그쪽 목록은 리뷰웹 원장을 실시간 조회하므로
+       `tab_deleted_at` 은 인트라넷이 그 필드를 읽도록 고친 뒤에야 보인다. 반면 처리메모
+       webhook 은 **지금 있는 채널**이라 인트라넷 배포 없이 그 자리에서 주황 메모로 뜬다.
+       ★ 실행부는 `intranetMemo.service` 한 벌(사본 금지) · fail-soft(절대 throw 없음). */
+    const orderNotices = await _notifyOrdersTabDeleted(wo.rows || [], tabName, by);
+
     return {
-      ok: true, sheetId, tabName, deleted, totalRows,
+      ok: true, sheetId, tabName, deleted, totalRows, driveTrashed, orderNotices,
       paymentDeleted: (money.length && forcePayment === true) ? money : [],
       workOrdersUnlinked: wo.rowCount || 0, campaignsDeleted: rc.rowCount || 0,
       ownershipRemoved: ac.rowCount || 0, sheetRowRemoved: cam.rowCount || 0,
@@ -283,6 +411,29 @@ async function deleteTask({ sheetId, tabName, confirm, forcePayment = false, by 
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     throw err;
   } finally { client.release(); }
+}
+
+/**
+ * 삭제된 작업의 연결 작업오더에 "언제 지워졌나"를 알린다.
+ * ★ memo_log 에 `kind:'tab_deleted'` 로 누적(이력 — 재접수해서 `tab_deleted_at` 이 비어도 남는다)
+ *   + 기존 처리메모 webhook 으로 push(인트라넷 수신부 무변경).
+ * ★ 절대 throw 없음 — 삭제는 이미 커밋됐다.
+ */
+async function _notifyOrdersTabDeleted(orders, tabName, by) {
+  if (!Array.isArray(orders) || !orders.length) return [];
+  const { pushIntranetMemo, appendMemoLog } = require('./intranetMemo.service');
+  const at = new Date().toISOString();
+  const memo = `[작업 삭제] "${tabName}" 작업표가 삭제되었습니다. 이 오더의 작업 연결이 해제되었습니다 — 다시 진행하려면 재접수하세요.`;
+  const out = [];
+  for (const o of orders) {
+    let delivered = false, deliverError = null;
+    try { ({ delivered, deliverError } = await pushIntranetMemo(o, memo, by, at)); }
+    catch (e) { deliverError = (e && e.message) || String(e); }
+    try { await appendMemoLog(_db(), o.id, { memo, by, at, delivered, error: deliverError, kind: 'tab_deleted' }); }
+    catch (_) { /* fail-soft */ }
+    out.push({ id: o.id, title: o.title, delivered, error: deliverError });
+  }
+  return out;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -355,4 +506,4 @@ async function deleteOrphanCampaigns({ ids, confirm, by = 'admin', pool } = {}) 
   } finally { client.release(); }
 }
 
-module.exports = { previewTaskDelete, deleteTask, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, __setPoolForTest };
+module.exports = { previewTaskDelete, deleteTask, DRIVE_FOLDER_KINDS, findOrphanCampaigns, deleteOrphanCampaigns, DELETE_TABLES, MONEY_TABLES, __setPoolForTest };

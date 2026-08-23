@@ -99,7 +99,7 @@ const cv = require('../src/services/captureVerify.service');
 
   await t('★★ AI 장애는 제출을 막지 않는다(fail-open)', 'throw', { base64: 'x', slotKey: 'review' }, 'skipped');
   await t('★★ 저확신도 통과 — 모호한 캡처로 리뷰어를 붙잡지 않는다', 'low', { base64: 'x', slotKey: 'review' }, 'skipped');
-  await t('리뷰 슬롯 + 리뷰 이미지 = 통과', 'ok', { base64: 'x', slotKey: 'review' }, 'ok');
+  await t('리뷰 슬롯 + 리뷰 캡처 = 통과', 'ok', { base64: 'x', slotKey: 'review' }, 'ok');
   await t('리뷰 슬롯에 영수증이 오면 경고', 'receipt', { base64: 'x', slotKey: 'review' }, 'mismatch');
   await t('영수증 슬롯 + 영수증 = 통과', 'receipt', { base64: 'x', slotKey: 'receipt' }, 'ok');
   await t('영수증 사업자번호가 회사와 다르면 경고', 'bizmismatch',

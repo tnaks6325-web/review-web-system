@@ -4,7 +4,10 @@
  *
  * 고정하는 것:
  *  A. 서버가 재료를 싣는다 — 화면 3곳(홈 목록·업체관리·반영 점검)이 쓸 `sheetless` 플래그
- *  B. 광고주에게는 안 나간다 — 화이트리스트 재구성이 유일한 방어
+ *  B. 광고주 렌즈는 화이트리스트 재구성 — 표시용 `sheetless` 한 칸만 허용
+ *     (2026-08-23 사용자 확정: 무시트 작업에는 시트 제목 라벨을 그리지 않는다. 업체 화면도
+ *      같은 규칙이라 그 판정 재료가 필요하다 — 무시트 여부는 표시용 불리언이고 내부 정보가
+ *      아니다. **다른 내부 필드는 여전히 폐기**하고 스프레드 재구성도 계속 금지한다.)
  *  C. 무시트 = 죽은 링크를 만들지 않는다 — 반영 점검 tabUrl null + 사유
  *  D. 배지 렌더러는 한 벌 — 정의 1 · 호출 3, "모르면 안 그린다"
  *  E. 공고 카드 시트 버튼 — 가상 시트ID 접두 사본 일치 + 무시트면 구글 URL 미생성
@@ -65,14 +68,15 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
   }
 
   /* ══════════════ B. 광고주에게는 안 나간다 ══════════════ */
-  console.log('\n[B] 광고주 응답에는 sheetless 가 실리지 않는다 (화이트리스트 재구성)');
+  console.log('\n[B] 광고주 렌즈 = 화이트리스트 재구성 (표시용 sheetless 한 칸만)');
   {
     const src = read('src/services/trackB.service.js');
     const i = src.indexOf('async function advertiserWorkSummary');
     assert(i > 0, 'advertiserWorkSummary 를 찾지 못함');
     const body = src.slice(i, src.indexOf('\n}', src.indexOf('items: tabs.map')) + 2);
-    ok('★ 광고주 렌즈(items.map)는 sheetless 를 재구성 목록에 넣지 않는다',
-      !/sheetless/.test(body));
+    ok('★ 표시용 sheetless 한 칸(시트 제목 라벨 숨김 재료) — 이것 말고는 없다',
+      /sheetless: t\.sheetless === true,/.test(body)
+      && noLineComments(body).split('sheetless').length - 1 === 2);   // 키 + 값 참조 1쌍뿐
     // 렌즈가 화이트리스트가 아니라 스프레드(...t)로 바뀌면 이 검사는 무의미해진다 → 그 형태를 금지
     ok('★ 광고주 항목을 스프레드로 만들지 않는다(화이트리스트 유지)',
       !/items:\s*tabs\.map\([^)]*=>\s*\(\{\s*\.\.\./.test(body));
@@ -122,31 +126,25 @@ console.log('\n[A] 서버가 sheetless 플래그를 화면 재료로 싣는다')
     });
   }
 
-  /* ══════════════ D. 배지 렌더러는 한 벌 ══════════════ */
-  console.log('\n[D] 무시트 배지 — 렌더러 한 벌 · "모르면 안 그린다"');
+  /* ══════════════ D. 무시트 배지 제거(사용자 확정 2026-08-23) ══════════════ */
+  console.log('\n[D] 「무시트」 배지 — 목록·작업보드·업체관리에서 제거됨');
   {
     const wd = readFe('workdesk.html');
-    const calls = (wd.match(/_nsBadge\(/g) || []).length;
-    ok('★ 배지 렌더러 정의 1 + 호출 3(홈 목록·작업보드 상단·업체관리) = 사본 0', calls === 4);
-    ok('홈 작업목록 줄에 배지를 붙인다', /class="wbl-nm">\$\{esc\(t\.tabName\)\}\$\{_nsBadge\(t\)\}/.test(wd));
-    ok('업체관리 연결탭 표에 배지를 붙인다', /_ovmHl\(t\.tabName,q\)\}\$\{_nsBadge\(t\)\}/.test(wd));
-    ok('작업보드 상단(광고주 제외)에 배지를 붙인다',
-      /STATE\.role==='advertiser'\?'':_nsBadge\(STATE\.cur\)/.test(wd));
-    ok('배지 CSS 는 ns- 접두 신설(남의 클래스와 충돌 없음)', /\.ns-b\{/.test(wd));
-
-    // vm 실행 — 세 상태(true / false / 필드 없음)
-    const m = wd.match(/function _nsBadge\(t\)\{[\s\S]*?\n\}/);
-    assert(m, '_nsBadge 정의를 찾지 못함');
-    const sandbox = {};
-    vm.createContext(sandbox);
-    vm.runInContext(m[0] + '\n;this.__f=_nsBadge;', sandbox);
-    const f = sandbox.__f;
-    ok('sheetless=true → 무시트 배지', /무시트/.test(f({ sheetless: true })));
-    ok('sheetless=false → 아무것도 안 그린다', f({ sheetless: false }) === '');
-    ok('★ 필드 자체가 없으면(구버전 백엔드) 안 그린다 — 모르는 것을 "시트 쓴다"로 단정하지 않는다',
-      f({}) === '' && f(null) === '' && f(undefined) === '');
-    ok('★ true 만 인정한다(문자열 "false"·1 등 느슨한 참 금지)',
-      f({ sheetless: 'false' }) === '' && f({ sheetless: 1 }) === '');
+    /* ★★ 활성 작업이 **전부 무시트**라(본섭 실측: 114 중 113, 나머지 1건은 마감) 모든 줄에
+       붙는 상시 표기가 되어 신호 구실을 못 했다 → 세 화면에서 제거.
+       ★ 되살릴 때는 "무시트면 뜬다"가 아니라 **"시트 기반이면 뜬다"** 로 뒤집을 것 —
+         그래야 희귀 케이스가 눈에 띈다(지금 그 일은 그리드 배지·시트 제목 라벨이 한다). */
+    ok('★ 렌더러·호출 전부 제거(되붙이면 상시 표기로 되돌아간다)',
+      !/_nsBadge/.test(noLineComments(wd).replace(/\/\*[\s\S]*?\*\//g, '')));
+    ok('★ 판정 단일 출처 `_isNoSheet` 는 남는다 — 시트 제목 라벨 숨김·목록·경고가 쓴다',
+      /function _isNoSheet\(t\)\{ return !!\(t && t\.sheetless===true\); \}/.test(wd)
+      && (wd.match(/_isNoSheet\(/g) || []).length >= 8);
+    ok('★ 서버 재료(`sheetless`)는 그대로 — 배지만 뺐지 판정을 없앤 게 아니다',
+      /sheetless/.test(read('src/services/trackB.service.js')));
+    /* ★ `.ns-b` CSS 와 「무시트」 문구는 **탈시트 전환 화면(`_coRows`)** 이 계속 쓴다 —
+       그 화면에서는 "이관됐다/아니다"가 곧 주제라 배지가 신호로 작동한다. */
+    ok('★ 탈시트 전환 화면의 무시트 표시는 남는다(그 화면의 주제다)',
+      /t\.sheetless\?'<span class="ns-b">무시트<\/span>':''/.test(wd) && /\.ns-b\{/.test(wd));
   }
 
   /* ══════════════ E. 공고 카드 — 시트 흔적 0 ══════════════ */

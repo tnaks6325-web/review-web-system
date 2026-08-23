@@ -155,16 +155,19 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
   const pane = document.getElementById("csConvPane");
   if (!pane) return;
   pane.innerHTML = `
-    <div style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
+    <div id="csConvHead" class="cs-conv-head" onclick="csToggleCtx(event)" title="클릭하면 아래 주문정보·참여이력이 접히거나 펼쳐집니다"
+         style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
       <i class="fas fa-comments" style="color:var(--p,#3182F6)"></i>
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:.9rem;color:var(--t1,#0F172A)">${escHtml(reviewerName)} <span style="color:#94a3b8;font-weight:400;font-size:.76rem;font-family:monospace">${escHtml(reviewerPhone8)}</span></div>
         <div id="csConvCampaign" style="font-size:.74rem;color:var(--t3,#94A3B8)">불러오는 중...</div>
       </div>
+      <span class="cs-conv-hint">주문정보 접기/펼치기</span>
+      <span id="csCtxChev" class="cs-conv-chev"${_csCtxFolded() ? ' data-fold="1"' : ''}>∨</span>
       <button id="csConvStatusBtn" onclick="csToggleStatus()" style="padding:5px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.74rem;font-weight:600;cursor:pointer">—</button>
     </div>
     <!-- ★ 미리 보는 정보: 이 캠페인에서 그 리뷰어의 주문정보 + 참여이력 -->
-    <div id="csCtxWrap" style="display:flex;gap:10px;padding:11px 15px;background:#fbfcfe;border-bottom:1px solid #eef2f7">
+    <div id="csCtxWrap" style="display:${_csCtxFolded() ? 'none' : 'flex'};gap:10px;padding:11px 15px;background:#fbfcfe;border-bottom:1px solid #eef2f7">
       <div style="flex:1;color:#9CA3AF;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 주문정보 불러오는 중...</div>
     </div>
     <div style="display:flex;flex:1;min-height:0">
@@ -275,6 +278,29 @@ function _csBindDropZone() {
     const files = [...(e.dataTransfer.files || [])];
     for (const f of files) await _csUploadFile(f);
   });
+}
+
+/* ── 주문정보·참여이력 접기/펼치기(사용자 확정 2026-08-21) ─────────────────────
+   대화 헤더([문의 종료] 가 있는 줄) **어디를 눌러도** 아래 두 카드가 접히고 펼쳐진다.
+   ★ 상태는 localStorage 로 기억한다 — 방을 옮길 때마다 `csOpenConversation` 이 대화창을
+     통째로 다시 그리므로, 기억하지 않으면 접어 둔 것이 매번 되살아난다.
+   ★ [문의 종료]·재오픈 버튼 클릭은 토글로 먹지 않는다(그 줄에 있는 유일한 조작 버튼이다).
+   ★ 접힘은 표시만 바꾼다 — `csLoadOrderContext` 는 `#csCtxWrap` 의 **innerHTML 만**
+     갈아끼우므로 접혀 있어도 데이터는 그대로 들어오고, 펼치면 바로 보인다. */
+var _CS_CTX_FOLD_KEY = "cs_ctx_fold_v1";
+function _csCtxFolded() {
+  try { return localStorage.getItem(_CS_CTX_FOLD_KEY) === "1"; } catch (_) { return false; }
+}
+function csToggleCtx(ev) {
+  // 헤더 안의 버튼(문의 종료/재오픈)을 누른 것이면 토글하지 않는다.
+  if (ev && ev.target && ev.target.closest && ev.target.closest("button")) return;
+  var wrap = document.getElementById("csCtxWrap");
+  if (!wrap) return;
+  var fold = wrap.style.display !== "none";
+  wrap.style.display = fold ? "none" : "flex";
+  var chev = document.getElementById("csCtxChev");
+  if (chev) { if (fold) chev.dataset.fold = "1"; else delete chev.dataset.fold; }
+  try { if (fold) localStorage.setItem(_CS_CTX_FOLD_KEY, "1"); else localStorage.removeItem(_CS_CTX_FOLD_KEY); } catch (_) {}
 }
 
 /* ── 미리 보는 정보(주문정보·참여이력) ── */
@@ -395,7 +421,7 @@ function _csRenderMessages(messages) {
         <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts1}</div>
       </div>`;
     }
-    // 리뷰이미지 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
+    // 리뷰캡처 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
     //   렌더러는 리뷰어 화면·전용 탭과 공용(js/cs-review-edit-card.js) — 사본 금지.
     if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
       const meta = m.meta || {};
@@ -531,7 +557,7 @@ function csOnSSE(evtType, data) {
   }
 }
 
-/* ── 리뷰이미지 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
+/* ── 리뷰캡처 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
    ★ 경로는 C/S 와 같은 방식으로 재기준한다(window.REVIEW_EDIT_API_BASE):
      관리자 대시보드 = /api/review-edit, 리뷰웹시스템[3버전] = /api/trackb/review-edit
      (인트라넷 SSO 토큰은 /api/review-edit/* 에 도달 자체가 불가능하다).
@@ -553,7 +579,7 @@ async function _reCall(path, body) {
 async function csApproveReviewEdit(requestId, opts) {
   if (!requestId) return;
   opts = opts || {};
-  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 이미지가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
+  if (!opts.skipConfirm && !confirm('이 교체요청을 승인할까요?\n\n· 리뷰 캡처가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return false;
   const r = await _reCall('/approve', { id: requestId });
   if (r && r.ok) {
     showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.');
@@ -604,7 +630,7 @@ function csReloadAfterReviewEdit() {
        고정)은 그대로 두고 대화창만 상한을 받으므로, 남는 폭은 부모 flex row(gap:12px)
        안에서 오른쪽으로 자연히 흘러간다 — 별도 스페이서 요소가 필요 없다(flex:1 이
        max-width 에서 멈추고, 형제가 없어 남는 공간을 아무도 못 가져간다). */
-  var HTML = "      <div id=\"tab-cs-inquiry\" class=\"admin-tab-pane\" style=\"padding:16px\">\n        <div class=\"admin-section-header\" style=\"margin-bottom:12px\">\n          <span style=\"font-size:.95rem;font-weight:700;color:var(--t1,#0F172A)\"><i class=\"fas fa-comments\" style=\"color:var(--p,#3182F6);margin-right:6px\"></i>\ub9ac\ubdf0\uc5b4 C/S \ubb38\uc758</span>\n          <div style=\"display:flex;gap:6px;margin-left:auto;align-items:center\">\n            <input id=\"csSearchInput\" type=\"text\" placeholder=\"\ub9ac\ubdf0\uc5b4/\ucea0\ud398\uc778 \uac80\uc0c9...\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none;width:150px\"\n              oninput=\"csFilterRooms(this.value)\">\n            <select id=\"csStatusFilter\" onchange=\"loadCsRooms()\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none\">\n              <option value=\"all\">\uc804\uccb4</option>\n              <option value=\"open\" selected>\uc9c4\ud589\uc911</option>\n              <option value=\"closed\">\uc885\ub8cc</option>\n            </select>\n            <button onclick=\"loadCsRooms()\" style=\"padding:6px 12px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px\">\n              <i class=\"fas fa-sync-alt\"></i> \uc0c8\ub85c\uace0\uce68\n            </button>\n          </div>\n        </div>\n        <style>\n          .cs-room-row{ cursor:pointer; transition:background .12s; }\n          .cs-room-row:hover{ background:#f9fafb; }\n          .cs-room-active{ background:#eef5ff !important; box-shadow:inset 3px 0 0 #3182f6; }\n        </style>\n        <!-- \uc88c\uce21: \ucc44\ud305\ubc29 \ubaa9\ub85d / \uc6b0\uce21: \ub300\ud654\ucc3d (\uc778\ub77c\uc778 \ubd84\ud560) -->\n        <div style=\"display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:480px\">\n          <div id=\"csRoomListWrap\" style=\"width:360px;flex-shrink:0;overflow-y:auto;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07))\">\n            <div style=\"padding:30px;text-align:center;color:var(--t3,#94A3B8)\">\n              <i class=\"fas fa-circle-notch fa-spin\"></i> \ubd88\ub7ec\uc624\ub294 \uc911...\n            </div>\n          </div>\n          <div id=\"csConvPane\" style=\"flex:1;min-width:0;max-width:860px;display:flex;flex-direction:column;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07));overflow:hidden\">\n            <div style=\"margin:auto;text-align:center;color:var(--t3,#94A3B8);padding:40px\">\n              <i class=\"fas fa-comments\" style=\"font-size:2rem;display:block;margin-bottom:10px;opacity:.4\"></i>\n              \uc67c\ucabd\uc5d0\uc11c \ubb38\uc758\ubc29\uc744 \uc120\ud0dd\ud558\uc138\uc694\n            </div>\n          </div>\n        </div>\n      </div><!-- /tab-cs-inquiry -->";
+  var HTML = "      <div id=\"tab-cs-inquiry\" class=\"admin-tab-pane\" style=\"padding:16px\">\n        <div class=\"admin-section-header\" style=\"margin-bottom:12px\">\n          <span style=\"font-size:.95rem;font-weight:700;color:var(--t1,#0F172A)\"><i class=\"fas fa-comments\" style=\"color:var(--p,#3182F6);margin-right:6px\"></i>\ub9ac\ubdf0\uc5b4 C/S \ubb38\uc758</span>\n          <div style=\"display:flex;gap:6px;margin-left:auto;align-items:center\">\n            <input id=\"csSearchInput\" type=\"text\" placeholder=\"\ub9ac\ubdf0\uc5b4/\ucea0\ud398\uc778 \uac80\uc0c9...\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none;width:150px\"\n              oninput=\"csFilterRooms(this.value)\">\n            <select id=\"csStatusFilter\" onchange=\"loadCsRooms()\"\n              style=\"padding:6px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;outline:none\">\n              <option value=\"all\">\uc804\uccb4</option>\n              <option value=\"open\" selected>\uc9c4\ud589\uc911</option>\n              <option value=\"closed\">\uc885\ub8cc</option>\n            </select>\n            <button onclick=\"loadCsRooms()\" style=\"padding:6px 12px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px\">\n              <i class=\"fas fa-sync-alt\"></i> \uc0c8\ub85c\uace0\uce68\n            </button>\n          </div>\n        </div>\n        <style>\n          .cs-room-row{ cursor:pointer; transition:background .12s; }\n          .cs-room-row:hover{ background:#f9fafb; }\n          .cs-room-active{ background:#eef5ff !important; box-shadow:inset 3px 0 0 #3182f6; }\n          .cs-conv-head{ cursor:pointer; user-select:none; transition:background .12s; }\n          .cs-conv-head:hover{ background:#f7fafd; }\n          .cs-conv-hint{ opacity:0; transition:opacity .15s; font-size:.68rem; color:#94A3B8; }\n          .cs-conv-head:hover .cs-conv-hint{ opacity:1; }\n          .cs-conv-chev{ color:#94A3B8; font-size:.78rem; transition:transform .18s; }\n          .cs-conv-chev[data-fold]{ transform:rotate(-90deg); }\n        </style>\n        <!-- \uc88c\uce21: \ucc44\ud305\ubc29 \ubaa9\ub85d / \uc6b0\uce21: \ub300\ud654\ucc3d (\uc778\ub77c\uc778 \ubd84\ud560) -->\n        <div style=\"display:flex;gap:12px;align-items:stretch;height:calc(100vh - 250px);min-height:480px\">\n          <div id=\"csRoomListWrap\" style=\"width:360px;flex-shrink:0;overflow-y:auto;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07))\">\n            <div style=\"padding:30px;text-align:center;color:var(--t3,#94A3B8)\">\n              <i class=\"fas fa-circle-notch fa-spin\"></i> \ubd88\ub7ec\uc624\ub294 \uc911...\n            </div>\n          </div>\n          <div id=\"csConvPane\" style=\"flex:1;min-width:0;max-width:860px;display:flex;flex-direction:column;background:var(--card,#FFFFFF);border-radius:var(--r,14px);border:1px solid var(--border,#E2E8F0);box-shadow:var(--sh,0 1px 4px rgba(15,23,42,.07));overflow:hidden\">\n            <div style=\"margin:auto;text-align:center;color:var(--t3,#94A3B8);padding:40px\">\n              <i class=\"fas fa-comments\" style=\"font-size:2rem;display:block;margin-bottom:10px;opacity:.4\"></i>\n              \uc67c\ucabd\uc5d0\uc11c \ubb38\uc758\ubc29\uc744 \uc120\ud0dd\ud558\uc138\uc694\n            </div>\n          </div>\n        </div>\n      </div><!-- /tab-cs-inquiry -->";
 
   function mount(hostId) {
     var host = document.getElementById(hostId || "csInquiryMount");
@@ -624,6 +650,8 @@ function csReloadAfterReviewEdit() {
     // 바깥에서 읽을 수 없어 **훅으로 노출**한다(전역 사본을 두면 두 값이 갈라진다).
     csReloadActiveConversation: function () { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); },
     csSendReply: csSendReply, csSaveMemo: csSaveMemo, csToggleStatus: csToggleStatus,
+    // 헤더 클릭 = 주문정보·참여이력 접기/펼치기(생성 HTML 의 onclick 문자열이 이름으로 찾는다)
+    csToggleCtx: csToggleCtx,
     csCloseConversation: csCloseConversation, csUpdateBadge: csUpdateBadge,
     csRefreshBadge: csRefreshBadge, csOnSSE: csOnSSE,
     csApproveReviewEdit: csApproveReviewEdit, csRejectReviewEdit: csRejectReviewEdit,

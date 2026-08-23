@@ -85,14 +85,13 @@ console.log('\n[A] 쓰기 소유자 — campaign_participants 쓰기는 particip
 console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대상 미선택 거부');
 {
   ok('retireRows 를 내보낸다', typeof L.retireRows === 'function' && typeof P.retireRows === 'function');
-  /* ★ 파일 전체를 보면 다른 라우트(slot-backfill 등)의 같은 표현이 대신 통과시킨다 —
-     retire-rows 라우트 본문으로 스코프해서 본다. 경계는 `});` 가 아니라 다음 `router.`. */
+  /* ★★ 수동 라우트는 제거됐다(사용자 확정 2026-08-23) — 실행부는 중복 정리가 계속 쓴다.
+     그래서 여기서 보는 것은 "창구가 없다 + 서비스는 살아 있다" 두 가지다. */
   const _rt = read('src/routes/trackB.routes.js');
-  const _i0 = _rt.indexOf("router.post('/worktable/retire-rows'");
-  const _body = _i0 > 0 ? _rt.slice(_i0, _rt.indexOf('\nrouter.', _i0 + 10)) : '';
-  ok('retire-rows 라우트 본문을 찾았다', !!_body);
-  ok('★ 라우트가 dryRun 기본(!== false) — 값이 빠진 요청이 곧바로 실행되지 않는다',
-    /dryRun: b\.dryRun !== false/.test(_body));
+  ok('★★ 수동 라우트가 없다(POST /worktable/retire-rows)',
+    !/router\.post\('\/worktable\/retire-rows'/.test(_rt));
+  ok('★★ 실행부는 그대로 — 중복 정리가 쓴다(지우면 그쪽이 죽는다)',
+    /retireRows\(\{[^}]*by: `dedupe:/.test(read('src/services/sheetlessLedger.service.js')));
 }
 
 (async () => {
@@ -203,37 +202,21 @@ console.log('\n[B] 정리 게이트 — 무시트 탭만 · dryRun 기본 · 대
       cut.indexOf('SET sheetless = TRUE') < i1);
   }
 
-  console.log('\n[F] 라우트·화면 배선');
+  console.log('\n[F] 수동 창구 제거 — 줄을 내리는 길은 [행 삭제]·[♻ 중복 정리] 둘');
   {
     const routes = read('src/routes/trackB.routes.js');
-    ok('POST /worktable/retire-rows 등록', /router\.post\('\/worktable\/retire-rows'/.test(routes));
-    const line = /router\.post\('\/worktable\/retire-rows'[^\n]*/.exec(routes)[0];
-    // ★ 2026-08 사용자 확정: 날짜별 인원 조절과 함께 AE(staff)에게 열었다 — internal(광고주 차단).
-    ok('★ internal — 검색 명단에서 사람을 빼는 조작(정원 변경과 같은 급, 광고주 차단)',
-      /authMiddleware/.test(line) && /internalMiddleware/.test(line));
-    ok('★ 검증 오류는 400대로(errorHandler 마스킹 방지)', /LedgerError\) return res\.status\(400\)/.test(routes));
-
     const wd = read('../frontend/workdesk.html');
-    /* 2026-08-18 '작업보드 staff 전체권한' 으로 이 조작은 내부인 전체에 열렸다(라우트도 internalMiddleware).
-       ★ 검사의 의미는 그대로 — **화면 게이트 = 서버 게이트**. 무시트 조건은 유지된다. */
-    ok('★ 무시트 + 내부인일 때만 버튼(_wrCanRetire = 라우트 internalMiddleware 와 1:1)',
-      /function _wrCanRetire\(\)\{[\s\S]{0,220}sheetless === true[\s\S]{0,80}_isInternalRole\(\)/.test(wd));
-    ok('도구 메뉴에 [🧹 줄 정리]', /openRetireModal\(\)/.test(wd) && /🧹 줄 정리/.test(wd));
-    ok('★ 미리보기 → 실행 2단계(미리보기 전에는 실행 비활성)',
-      /id="wrGo" disabled/.test(wd) && /go\.disabled = !\(_WR\.prev/.test(wd));
-    ok('★ 실행 전 confirm — 명단에서도 빠진다는 사실을 말한다',
-      /confirm\(`「\$\{_WR\.tabName\}」[\s\S]{0,200}검색 명단에서도 빠집니다/.test(wd));
-    ok('★★ onclick 은 인덱스만(차수 문자열은 시트발 — 보간 금지)',
-      /wrToggle\(\$\{i\}\)/.test(wd) && !/wrToggle\('\$\{/.test(wd));
-    ok('★ 오버레이는 body 직속', /wrOv[\s\S]{0,400}document\.body\.appendChild\(ov\)/.test(wd));
-    ok('★ Esc 리스너는 최상위 1회(_wrKeyBound)', /window\._wrKeyBound/.test(wd));
-    ok('★ 바깥클릭으로 닫지 않는다(고른 것이 실수로 날아가지 않게)',
-      !/ov\.addEventListener\('click'[\s\S]{0,80}closeRetireModal/.test(wd));
-    ok('★ 재료는 이미 받아 둔 표에서 센다(신규 조회 0)', /STATE\.wd && STATE\.wd\.roster/.test(wd));
-    ok('★ 장부 재생성 실패는 화면이 말한다', /j\.ledgerError/.test(wd));
-    ok('★ CSS 는 wbl- 접두(홈 CSS 스코프 가드 계약 유지)',
-      /\.wbl-wrt\{/.test(wd) && !/(^|[^-\w])\.wrt\{/.test(wd));
+    /* ★★ 사용자 확정 2026-08-23 — 원인이던 탈시트 이관이 끝나 수동 창구를 없앴다.
+       되살리면 "화면에서만 줄을 빼는" 계열 창구가 다시 늘어난다. */
+    ok('★★ 수동 라우트가 없다', !/router\.post\('\/worktable\/retire-rows'/.test(routes));
+    ok('★★ 화면에 줄 정리 창구가 없다',
+      !/openRetireModal|_wrCanRetire|_wrRender|wrToggle/.test(wd));
+    ok('★ 전용 CSS 도 남기지 않는다(.wbl-wrt)', !/\.wbl-wrt\{/.test(wd));
+    ok('★★ 남은 정리 창구는 [♻ 중복 정리] 하나 — admin/master 전용(서버와 1:1)',
+      /function _ddCan\(\)\{[\s\S]{0,200}STATE\.role === 'master' \|\| STATE\.role === 'admin'/.test(wd)
+      && /router\.post\('\/worktable\/dedupe-rows',\s*authMiddleware,\s*adminOrMasterMiddleware/.test(routes));
 
+    /* 아래 두 건은 탈시트 전환 화면(줄 정리와 무관) — 그대로 유지한다. */
     ok('★ 전환 화면이 연도 미상 건수를 말한다(조용한 누락 금지)',
       /m\.yearUnknown\?[\s\S]{0,200}과거 자료로 보고 목록에서 제외/.test(wd));
     ok('★ [보기] 로 그 목록을 열 수 있다(막다른 길 금지)',

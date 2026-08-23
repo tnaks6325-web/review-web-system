@@ -199,5 +199,40 @@ t('모듈 아이콘이 보이도록 폰트어썸을 admin 과 같은 CDN 으로 
   assert.ok(fa.test(WD) && fa.test(ADM), '두 화면의 아이콘 버전이 어긋난다');
 });
 
+/* ══ 주문정보·참여이력 접기/펼치기(사용자 확정 2026-08-21) ══════════════════════
+   대화 헤더([문의 종료] 가 있는 줄) 어디를 눌러도 아래 두 카드가 접히고 펼쳐진다. */
+t('★ 헤더 줄 전체가 클릭 대상 — csToggleCtx(event) 로 수렴', () => {
+  assert.ok(/id="csConvHead" class="cs-conv-head" onclick="csToggleCtx\(event\)"/.test(MOD),
+    '헤더에 토글 배선이 없다');
+  assert.ok(/csToggleCtx: csToggleCtx,/.test(MOD),
+    'onclick 문자열이 이름으로 찾는데 EXPORTS 에 없으면 클릭이 ReferenceError 로 죽는다');
+});
+t('★★ [문의 종료]·재오픈 버튼 클릭은 토글로 먹지 않는다(그 줄의 유일한 조작 버튼)', () => {
+  const b = MOD.slice(MOD.indexOf('function csToggleCtx(ev) {'));
+  assert.ok(/ev\.target\.closest\("button"\)\) return;/.test(b.slice(0, 400)),
+    '버튼 보호가 없으면 상태 변경을 누를 때마다 정보가 접힌다');
+  // 버튼 자체는 종전 배선 그대로여야 한다(별도 stopPropagation 사본을 만들지 않는다)
+  assert.ok(/id="csConvStatusBtn" onclick="csToggleStatus\(\)"/.test(MOD), '상태 버튼 배선이 바뀌었다');
+});
+t('★★ 접힘은 localStorage 로 기억 — 방을 옮기면 대화창을 통째로 다시 그린다', () => {
+  assert.ok(/_CS_CTX_FOLD_KEY = "cs_ctx_fold_v1"/.test(MOD), '기억 키가 없다');
+  // 렌더 시점에 저장된 상태를 반영해야 접어 둔 것이 되살아나지 않는다
+  assert.ok(/display:\$\{_csCtxFolded\(\) \? 'none' : 'flex'\}/.test(MOD), '렌더가 저장된 상태를 무시한다');
+  assert.ok(/_csCtxFolded\(\) \? ' data-fold="1"' : ''/.test(MOD), '∨ 표시가 저장된 상태를 무시한다');
+  assert.ok(/catch \(_\) \{ return false; \}/.test(MOD), '저장소 접근 실패가 화면을 죽이면 안 된다');
+});
+t('★ 접힘은 표시만 바꾼다 — 데이터 로드(csLoadOrderContext)는 그대로 innerHTML 만 갈아끼운다', () => {
+  const b = MOD.slice(MOD.indexOf('async function csLoadOrderContext(threadId) {'));
+  assert.ok(/wrap\.innerHTML = _csCtxHtml\(d\);/.test(b.slice(0, 900)), '로드 경로가 바뀌었다');
+  assert.ok(!/wrap\.style\.display/.test(b.slice(0, 900)),
+    '로드가 display 를 건드리면 접어 둔 것이 도착과 함께 되살아난다');
+});
+t('★ 시각 신호: 커서·호버 배경·∨ 회전·힌트(클릭할 수 있음을 알린다)', () => {
+  assert.ok(/\.cs-conv-head\{ cursor:pointer/.test(MOD) && /\.cs-conv-head:hover\{ background/.test(MOD),
+    '클릭 가능 표시가 없다');
+  assert.ok(/\.cs-conv-chev\[data-fold\]\{ transform:rotate\(-90deg\); \}/.test(MOD), '∨ 회전이 없다');
+  assert.ok(/cs-conv-hint">주문정보 접기\/펼치기</.test(MOD), '힌트 문구가 없다');
+});
+
 console.log(`\n✅ ${pass} checks passed\n`);
 process.exit(0);   // trackB.routes 를 require 하면 DB 풀 핸들이 열려 자연 종료가 안 됨

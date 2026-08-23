@@ -8,6 +8,9 @@ const { getSpreadsheetMeta, readSheet } = require('../services/sheets.service');
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
 const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB } = require('../services/indexScan.service');
 const { getTabRegistrationMode } = require('../utils/tabRegistration');
+// ★ 담당자 표기 단일 출처(065) — 실명(박세희·박은비)이 들어오면 닉네임(만두·망고)으로 접는다.
+//   여기서 접지 않으면 자유입력 한 번에 담당자 필터 칩이 다시 넷으로 갈린다.
+const { normalizeManagerForStore } = require('../utils/workManager');
 const {
   CASH_RECEIPT_CHANNELS, CASH_RECEIPT_SETTING_KEYS,
   cashReceiptSettingKey, isCashReceiptChannelKey, cashReceiptChannelLabel,
@@ -196,7 +199,9 @@ router.post('/config', authMiddleware, async (req, res, next) => {
     if (roundKey) {
       const metaUpdate = {};
       for (const [apiKey, dbKey] of Object.entries(ROUND_META_FIELDS)) {
-        if (b[apiKey] !== undefined) metaUpdate[dbKey] = b[apiKey];
+        if (b[apiKey] === undefined) continue;
+        // ★ 담당자는 저장 직전 정규화(만두/망고) — 본 칸과 같은 규칙(사본 금지).
+        metaUpdate[dbKey] = (apiKey === 'manager') ? normalizeManagerForStore(b[apiKey]) : b[apiKey];
       }
       if (Object.keys(metaUpdate).length > 0) {
         try {
@@ -256,7 +261,9 @@ router.post('/config', authMiddleware, async (req, res, next) => {
     // null 처리: undefined(미전송) = 기존값 보존, 빈문자열("") = 빈값 저장
     const fields = {
       sheet_url:    b.sheetUrl  || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit${b.tabGid ? '#gid=' + b.tabGid : ''}` : undefined),
-      manager:      b.manager      !== undefined ? b.manager      : undefined,
+      // ★★ 실명(박세희·박은비)으로 저장되던 것이 담당자 필터 칩이 넷으로 갈린 원인이다 —
+      //   저장 직전에 닉네임으로 접는다. 모르는 값은 원문 보존, 빈 값은 해제 그대로.
+      manager:      b.manager      !== undefined ? normalizeManagerForStore(b.manager) : undefined,
       time_range:   b.timeRange    !== undefined ? b.timeRange    : undefined,
       taekhap:      b.taekhap      !== undefined ? Boolean(b.taekhap) : undefined,
       review_type:  b.reviewType   !== undefined ? b.reviewType   : undefined,

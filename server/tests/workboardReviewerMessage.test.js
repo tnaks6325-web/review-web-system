@@ -9,6 +9,9 @@
  *      같은 본계정은 한 번만 발송 · expect 불일치(TOCTOU)는 미발송 · 실행부는 csBridge 한 벌.
  *   C. 화면 — 광고주 미노출 · body 직속 팝업 · 바깥클릭 미닫힘 · Esc 1회 · IME(재렌더 금지) ·
  *      onclick 문자열 보간 0 · 프론트 판정 사본 0.
+ *   D. 인라인 팝오버 + 사진 첨부(사용자 확정 2026-08-21) — 중앙 모달이 아니라 **누른 셀 옆** ·
+ *      겉면이 표 조작을 흡수하지 않는다 · 붙여넣기·드래그가 **한 함수**로 수렴 ·
+ *      파일 탐색기 창구 없음 · 업로드 인플라이트 중 전송 차단 · 첨부 URL 화이트리스트 **사본 0**.
  *
  * 실행: node tests/workboardReviewerMessage.test.js
  */
@@ -189,8 +192,10 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     const res = await call('post', '/cs/notify-participants', { body: { sheetId: 's', tabName: 't', participantIds: ['p1', 'p2'], content: '안내드립니다' } });
     ok('★ 같은 본계정은 한 번만 보낸다(같은 방에 같은 글 두 번 금지)', sentTo.length === 1, 'calls=' + sentTo.length);
     ok('합쳐진 줄을 조용히 버리지 않고 건수를 말한다', res.body.merged.length === 1);
-    ok('보낸 결과에 연락처 전체를 싣지 않는다(뒤 4자리만)',
-      res.body.sent[0].phone8Tail === '7191' && !JSON.stringify(res.body.sent).includes('82217191'));
+    /* 받는 사람 확인용 **전체 연락처**(사용자 확정 2026-08-21 — 뒤 4자리로는 누구인지 알 수 없다).
+       ★ 내부인 전용 화면이고 작업보드 표에도 연락처가 그대로 보인다(광고주는 라우터가 막는다). */
+    ok('보낸 결과에 받는 사람 연락처가 실린다(뒤 4자리는 폴백으로 유지)',
+      res.body.sent[0].phone8Tail === '7191' && 'phone' in res.body.sent[0]);
 
     // expect 불일치 = 미리보기 이후 대상이 바뀜 → 보내지 않는다
     sentTo.length = 0;
@@ -228,6 +233,9 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     ok('★ 문의방은 목록 행을 눌러서 연다(이름·연락처를 화면에 한 번 더 싣지 않는다)',
       /cs-room-row\[data-tid=/.test(WD) && /row\.click\(\)/.test(WD));
     ok('전송 실패 시 입력 내용을 지우지 않는다', /입력한 내용은 그대로 둔다/.test(WD));
+    ok('★ 연락처는 등록 원장 값을 쓴다 — phone8 앞에 010 을 지어내지 않는다',
+      /const full=String\(\(x&&x\.phone\)\|\|\(x&&x\.phoneFull\)\|\|''\)/.test(WD)
+      && !/'010-'\+.*phone8/.test(WD.slice(WD.indexOf('function _rmPhone'), WD.indexOf('function _rmSendable'))));
     ok('★ 프론트에 판정 사본 0(owner_phone8·participation_links 문자열 없음)',
       !/owner_phone8/.test(WD) && !/participation_links/.test(WD));
 
@@ -245,10 +253,93 @@ const one = async (args) => { setDb(rules(args)); const r = await SVC.resolveRec
     ok('★ 전송 실패는 서버가 준 건별 사유를 그대로 보여준다(한 줄로 뭉개지 않는다)',
       /d&&d\.failed/.test(rmJs) && /x\.reason/.test(rmJs));
   }
+  /* ═══ D. 인라인 팝오버 + 사진 첨부 (사용자 확정 2026-08-21) ═══ */
+  console.log('\n[D] 인라인 팝오버 · 붙여넣기 첨부');
+  {
+    const WD = readFront('workdesk.html');
+    const css = WD.slice(WD.indexOf('#rmOv{'), WD.indexOf('#hbOv table.wbl-t'));
+    const rmJs = WD.slice(WD.indexOf('let _RM=null;'), WD.indexOf('/* ── 관리자 수동 리뷰제출'));
+
+    ok('★ 중앙 모달이 아니라 누른 셀 옆에 붙는다(앵커 계산)',
+      /function _rmPlace\(\)[\s\S]{0,900}box\.style\.left=/.test(rmJs) && /_selAnchorTd\(\)/.test(rmJs));
+    ok('★ 아래 공간이 부족하면 위로 뒤집는다(화면 밖 금지)',
+      /a\.top-h-4/.test(rmJs) && /below\s*>=\s*above/.test(rmJs));
+    /* ★★ 양쪽 다 좁을 때 화면 위(top:8)로 클램프하면 그건 셀 옆이 아니라 그냥 뜬 창이다
+       (실브라우저가 잡았다) — 남은 공간에 맞춰 높이를 주고 **안에서 스크롤**시킨다. */
+    ok('★★ 양쪽이 좁으면 더 넓은 쪽에 붙이고 안에서 스크롤(위로 튀지 않는다)',
+      /box\.style\.maxHeight=/.test(rmJs) && /Math\.max\(220,/.test(rmJs));
+    ok('★★ 겉면이 표 조작을 흡수하지 않는다(pointer-events:none) — 흡수하면 그건 모달이다',
+      /#rmOv\{[^}]*pointer-events:none/.test(css) && /\.rmbox\{[^}]*pointer-events:auto/.test(css));
+    ok('★ 모달 껍데기(.wbl-dlg)를 쓰지 않는다', !/wbl-dlg/.test(rmJs));
+    ok('★ 스크롤·리사이즈에 앵커를 다시 잰다(입력 중이라 닫을 수 없다 — 달력과 다른 점)',
+      /window\.addEventListener\('scroll',\(\)=>\{ if\(_RM\) _rmPlace\(\); \},true\)/.test(WD)
+      && /el&&el\.isConnected/.test(rmJs));
+
+    ok('★ 붙여넣기(Ctrl+V) 첨부 — 이미지일 때만 가로챈다(텍스트 붙여넣기 기본 동작 보존)',
+      /addEventListener\('paste'[\s\S]{0,420}startsWith\('image\/'\)[\s\S]{0,160}e\.preventDefault\(\); _rmTake\(/.test(WD));
+    ok('★ 붙여넣기 리스너도 최상위 1회(열 때마다 걸면 겹쳐 쌓인다)',
+      (WD.match(/addEventListener\('paste'/g) || []).length >= 1 && (rmJs.match(/_rmKeyBound=true/g) || []).length === 1);
+    ok('★★ 붙여넣기·드래그가 **같은 함수**로 수렴(사본을 두면 한쪽만 장수·용량 제한이 풀린다)',
+      /drop['"],e=>\{[\s\S]{0,160}_rmTake\(e\.dataTransfer/.test(rmJs) && (rmJs.match(/function _rmTake\(/g) || []).length === 1);
+    ok('★ 드래그오버는 **파일 드래그일 때만** 반응(표 안 텍스트 선택과 섞이지 않게)',
+      /dataTransfer&&\[\.\.\.e\.dataTransfer\.types\|\|\[\]\]\.includes\('Files'\)/.test(rmJs));
+    ok('★ 파일 탐색기 창구를 두지 않는다(붙여넣기·드래그 전용 — [리뷰 대신 제출] 과 같은 규율)',
+      !/type=["']file["']/.test(rmJs));
+    ok('장수·용량 상한이 한 곳에 있다(5장 · 8MB)',
+      /_RM_MAX_FILES=5, _RM_MAX_ONE=8\*1024\*1024/.test(WD));
+    ok('★ 상한 초과는 조용히 버리지 않고 사유를 말한다',
+      /최대 \$\{_RM_MAX_FILES\}장/.test(rmJs) && /한 장당 8MB/.test(rmJs));
+    ok('★★ 업로드가 끝난 것만 보낸다(인플라이트 중 전송 차단)',
+      /function _rmSendable\(\)[\s\S]{0,320}files\|\|\[\]\)\.some\(f=>f\.busy\)\) return false/.test(rmJs));
+    ok('★ 첨부만 있고 본문이 비어도 보낼 수 있다(사진 안내)',
+      /!content && !imageUrls\.length/.test(rmJs));
+    ok('★ 첨부 빼기 onclick 은 **인덱스만**(파일명·URL 보간 0)',
+      /onclick="_rmDropAt\(\$\{i\}\)"/.test(rmJs) && !/_rmDropAt\('/.test(rmJs));
+    ok('전송 payload 에 imageUrls 를 싣는다',
+      /notify-participants[\s\S]{0,320}imageUrls,/.test(rmJs));
+    ok('★ 팝오버를 닫으면 미리보기 URL 을 반납한다(objectURL 누수 금지)',
+      /revokeObjectURL/.test(rmJs));
+  }
+  {
+    /* 업로드 창구 — 실행부는 `/cs/upload` 와 **같은 핸들러**(사본 0), 게이트만 내부인.
+       ★ 메시지를 보낼 수 있는 사람은 사진도 붙일 수 있어야 한다(눌러도 403 인 막다른 길 금지). */
+    const up = findLayer('post', '/cs/notify-upload');
+    ok('업로드 라우트가 등록돼 있다', !!up);
+    const names = up.route.stack.map(x => x.handle.name);
+    ok('★ 게이트 = 인증 + 내부인(광고주 차단)',
+      names.includes('authMiddleware') && names.includes('internalMiddleware') && !names.includes('adminOrMasterMiddleware'),
+      names.join(','));
+    const src = readSrv('src/routes/trackB.routes.js');
+    ok('★ 실행부는 기존 C/S 업로드 핸들러 한 벌(Drive 폴더·8MB·프록시 URL 규칙 복제 0)',
+      /notify-upload['"][\s\S]{0,220}_csHandlers\.upload\(req, res, next\)/.test(src));
+    ok("★ `/cs/upload`(관리자 대화창)의 종전 게이트는 그대로 둔다",
+      /router\.post\('\/cs\/upload', authMiddleware, adminOrMasterMiddleware/.test(src));
+  }
+  {
+    /* ★★ 첨부 URL 화이트리스트는 **단일 출처**(utils/csImageUrls) — 종전엔 같은 정규식이
+       cs.routes·reviewer.routes 두 곳에 복사돼 있었고, 한쪽만 넓히면 그 경로로 임의 URL 이 들어온다. */
+    const u = require('../src/utils/csImageUrls');
+    ok('우리 프록시 주소만 통과',
+      u.sanitizeCsImageUrls(['https://x.dev/api/order/guide-image/abcdefghij0123456789']).length === 1
+      && u.sanitizeCsImageUrls(['https://evil.example/a.png']).length === 0);
+    ok('★ 상한 5장', u.sanitizeCsImageUrls(new Array(9).fill('https://x.dev/api/order/guide-image/abcdefghij0123456789')).length === 5);
+    for (const f of ['src/routes/cs.routes.js', 'src/routes/reviewer.routes.js', 'src/services/csBridge.service.js']) {
+      const t = readSrv(f);
+      ok(`★ 사본 0 — ${f.split('/').pop()} 는 단일 출처를 부른다`,
+        /require\((['"]).*csImageUrls\1\)/.test(t) && !/guide-image\\\//.test(t.replace(/utils\/csImageUrls/g, '')),
+        (t.match(/api\\\/order\\\/guide-image/g) || []).join(','));
+    }
+    const cb = readSrv('src/services/csBridge.service.js');
+    ok('★ 저장 컬럼도 SQL 에서 접는다(image_urls 도 NOT NULL 계열 — 맨 null 금지)',
+      /COALESCE\(\$6::jsonb,\s*'\[\]'::jsonb\)/.test(cb));
+    ok('★ SSE 푸시에도 첨부가 실린다(목록 API 만 고치면 실시간 푸시에서 사진이 사라진다)',
+      /imageUrls: imgs,/.test(cb));
+  }
+
   {
     const src = readSrv('src/services/csBridge.service.js');
     ok('★ csBridge 는 실패 사유를 호출자에게 흘려보낸다(onError, 가산 옵션)',
-      /card, onError \} = \{\}\)/.test(src) && /typeof onError === 'function'/.test(src));
+      /card, imageUrls, onError \} = \{\}\)/.test(src) && /typeof onError === 'function'/.test(src));
     ok('★ 반환 계약은 그대로(성공 객체 | null) — 기존 호출부의 `if (!out)` 판정 불변',
       /try \{ if \(typeof onError === 'function'\) onError\(err\); \} catch \(_\) \{\}\s*\n\s*return null;/.test(src));
   }

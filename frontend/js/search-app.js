@@ -1833,7 +1833,7 @@ function openSubmitMulti(items) {
   const subtitleName = firstForTitle.tcDisplayName || firstForTitle.tabName || firstForTitle.campaignName || "";
   if (subtitleName) subtitleParts.push(subtitleName);
   if (firstForTitle.productName) subtitleParts.push(`옵션:${firstForTitle.productName}`);
-  document.getElementById("submitTitle").textContent    = "리뷰 이미지 제출";
+  document.getElementById("submitTitle").textContent    = "리뷰 캡처 제출";
   document.getElementById("submitSubtitle").textContent = subtitleParts.join(" ") || "";
 
   // 상품 URL (첫 번째 항목 기준)
@@ -3989,10 +3989,18 @@ function _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tR
     : empty;
 
   // 리뷰타입 열
+  /* 리뷰타입 배지 — 값 목록의 단일 출처는 server/src/utils/reviewType.js(087 어휘 통일).
+     ★ 목록에 없는 옛 값(실배송·빈박스·믹스)도 **그대로 표시**한다 — 선택지에서 빠졌다고
+       화면에서까지 지우면 그 탭에 무엇이 설정돼 있었는지 알 수 없다. */
   const reviewClass = {
+    '포토': 'tc-review-포토',
+    '텍스트': 'tc-review-텍스트',
+    '구매확정': 'tc-review-구매확정',
+    '별점': 'tc-review-별점',
+    '혼합': 'tc-review-혼합',
+    // 옛 값(선택지에는 없음)
     '실배송': 'tc-review-실배송',
     '빈박스': 'tc-review-빈박스',
-    '구매확정': 'tc-review-구매확정',
     '믹스': 'tc-review-믹스'
   }[t.reviewType] || '';
   const reviewCell = t.reviewType
@@ -9057,7 +9065,11 @@ async function quickEditCell(e, cell) {
     };
 
   } else if (field === '리뷰타입') {
-    const opts = ['실배송','빈박스','구매확정','믹스'];
+    /* ★★ 선택지는 **이 화면의 탭 설정 팝오버(#tcOptReview)** 에서 읽는다 — 목록을 여기에 다시
+       적으면 087 어휘 통일에서 빠져 옛 값(실배송·빈박스·믹스)을 저장하게 되고, 그 값은
+       `resolveReviewType` 에서 null 로 떨어져 "설정했는데 검수는 미지정"이 된다(2026-08-06 사고). */
+    const opts = [...document.querySelectorAll('#tcOptReview .tc-opt')]
+      .map(b => (b.dataset.val || '').trim()).filter(Boolean);
     popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
     getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
     popup.querySelectorAll(".qe-opt").forEach(btn => {

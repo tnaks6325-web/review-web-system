@@ -1574,7 +1574,7 @@ router.post('/review-precheck', imageApiLimiter, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/image/review-upload — 리뷰 이미지 Drive 업로드 (새 4단계 구조)
+// POST /api/image/review-upload — 리뷰 캡처 Drive 업로드 (새 4단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰] → [옵션(선택)]
 // 파일명 규칙: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
@@ -1915,7 +1915,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
       // A-1: 대표 파일을 review_index 행에 기록
       //   ★ 대표 이미지는 기본 'review' 슬롯만 기록한다. 현금영수증 등 다른 슬롯이
-      //     대표 리뷰 이미지를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
+      //     대표 리뷰 캡처를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
       //   ★ 자동 분류로 슬롯 구성이 바뀐 호출은 아래 recomputePrimary 가 원장 기준으로
       //     대표를 다시 계산한다(여기 레거시 경로는 라우팅 없을 때 종전 그대로).
       const _routedAny = uploadResults.some(r => r && (r.routed || r.rejected));
@@ -2007,7 +2007,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     });
   } catch (err) {
     logger.error(`[review-upload] ${err.message}`);
-    res.json({ ok: false, error: err.message || '리뷰 이미지 업로드 중 오류가 발생했습니다.' });
+    res.json({ ok: false, error: err.message || '리뷰 캡처 업로드 중 오류가 발생했습니다.' });
   }
 });
 
@@ -3633,6 +3633,74 @@ router.post('/review-type-cleanup', authMiddleware, adminOrMasterMiddleware, asy
 
     logger.info(`[review-type-cleanup] 배송유형 이관 ${moved}건 · 믹스→혼합 ${renamed}건`);
     res.json({ ok: true, dryRun: false, total, preview, moved, renamed });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/manager-cleanup — 담당자 칸에 남은 **실명**을 닉네임으로 정리 (★ 065 후속)
+//
+//   배경(2026-08-23 신고 — 담당자 칩이 만두/망고/박세희/박은비 넷으로 갈림):
+//     065 **이전** 접수는 `tab_configs.manager` 에 담당AE 실명(manager_name·created_by)을
+//     그대로 넣었다. 065 는 `work_orders` 에 컬럼만 추가했을 뿐 **백필이 없고**, 접수 업서트가
+//     blank-only(`COALESCE(NULLIF(tab_configs.manager,''), …)`)라 재접수·차수 추가로도
+//     영영 고쳐지지 않는다 → 실명 행이 그대로 남아 홈 작업목록 담당자 칩이 넷으로 갈렸다.
+//     게다가 소비처는 전부 닉네임 리터럴 비교라(색 배지·🥟🥭·카카오 ID) 실명 행은 **조용히** 빠진다.
+//
+//   ★★ 판정은 `utils/workManager.mapWorkManager` **단일 출처**다 — SQL 에 이름을 박지 않는다.
+//      그래서 표기 흔들림('박 세희'·'박은비(망고)')도 같은 규칙으로 접히고, 매핑에 사람이
+//      늘면 이 창구가 자동으로 따라온다.
+//   ★★ **매핑되는 값만** 바꾼다 — 모르는 이름(자유입력 담당자)은 손대지 않는다(빈 값으로
+//      접으면 막으려던 것보다 큰 손실). 이미 닉네임인 행도 대상이 아니다.
+//   ★ 쓰기 표면 = `manager` **한 칸**뿐. `updated_at` 도 건드리지 않는다 — 이 정리는 표기
+//      통일이지 내용 변경이 아니라, 타임스탬프를 흔들면 그것을 tiebreak 로 쓰는 곳이 함께 움직인다.
+//   ★ 기존 행을 건드리는 작업이라 **기본 dryRun**(리뷰타입 정리와 같은 규율) — 사람이 숫자를
+//      먼저 보고 [적용하기]. 안 돌려도 안전하다(칩만 갈려 보일 뿐 동작은 종전 그대로).
+//
+//   body: { dryRun? = true } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+/** 정리 대상 테이블 — 담당자 칸을 가진 곳. ★ 이름은 코드 안 리터럴이라 주입 여지가 없다. */
+const MANAGER_TABLES = [
+  { table: 'tab_configs',       label: '작업 탭 담당자' },   // 홈 작업목록 담당자 칩·필터의 재료
+  { table: 'recruit_campaigns', label: '모집공고 담당자' },  // 공고 카드 🥟🥭·카카오 ID 매핑의 재료
+];
+router.post('/manager-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { mapWorkManager } = require('../utils/workManager');
+    const dryRun = req.body?.dryRun !== false;   // 기본 미리보기
+
+    // 무엇이 바뀔지 먼저 센다(dryRun·실행 공통 — 실행 후 결과와 대조할 수 있게).
+    //   ★ 판정을 SQL 로 옮기지 않는다: 값 목록을 가져와 **매핑 함수로** 고른다(사본 0).
+    const preview = [];
+    for (const t of MANAGER_TABLES) {
+      const { rows } = await pool.query(
+        `SELECT manager AS raw, COUNT(*)::int AS cnt
+           FROM ${t.table}
+          WHERE COALESCE(btrim(manager), '') <> ''
+          GROUP BY manager
+          ORDER BY manager`);
+      for (const r of rows) {
+        const nick = mapWorkManager(r.raw);
+        if (!nick || nick === r.raw) continue;   // 매핑 밖 값·이미 닉네임 = 대상 아님
+        preview.push({ table: t.table, label: t.label, from: r.raw, to: nick, cnt: r.cnt });
+      }
+    }
+    const total = preview.reduce((a, r) => a + r.cnt, 0);
+    if (dryRun || total === 0) {
+      return res.json({ ok: true, dryRun: true, total, preview,
+        note: total === 0 ? '정리할 실명 표기가 없습니다.'
+                          : '실제 적용하려면 {dryRun:false} 로 다시 호출하세요.' });
+    }
+
+    let updated = 0;
+    for (const p of preview) {
+      // ★ 정확일치(`manager = $1`)로만 바꾼다 — 미리보기가 보여 준 그 값만 손댄다.
+      const { rowCount } = await pool.query(
+        `UPDATE ${p.table} SET manager = $2 WHERE manager = $1`, [p.from, p.to]);
+      p.updated = rowCount;
+      updated += rowCount;
+    }
+    logger.info(`[manager-cleanup] 담당자 표기 정리 ${updated}건 (${preview.map(p => `${p.table}:${p.from}→${p.to}`).join(' · ')})`);
+    res.json({ ok: true, dryRun: false, total, preview, updated });
   } catch (err) { next(err); }
 });
 

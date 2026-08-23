@@ -1252,22 +1252,21 @@ async function runInspectSweep({ limit } = {}) {
  * 관리자 검수 탭(M3) 조회
  * ════════════════════════════════════════════════════════════════ */
 
+const { ISSUE_KEYS, issueTypeCountSql } = require('../utils/inspectIssueTypes');
+
 const _LIST_STATUSES = ['pending', 'pass', 'suspect', 'fail', 'unverifiable', 'resolved'];
 
 /**
  * 검수 목록. 기본은 **손볼 것만**(의심+불량) — 통과 건까지 나열하면 정작 볼 게 묻힌다.
  * @param status 'open'(기본, suspect+fail) | 'all' | 개별 status
  */
-async function listInspections({ sheetId, tabName, status = 'open', limit = 200 } = {}) {
-  const where = [];
-  const params = [];
-  if (sheetId) { params.push(sheetId); where.push(`i.sheet_id = $${params.length}`); }
-  if (tabName) { params.push(tabName); where.push(`i.tab_name = $${params.length}`); }
-  if (status === 'open') {
-    where.push(`i.status IN ('suspect','fail')`);
-  } else if (status !== 'all' && _LIST_STATUSES.includes(status)) {
-    params.push(status); where.push(`i.status = $${params.length}`);
-  }
+async function listInspections({ sheetId, tabName, tabs, status = 'open', limit = 200 } = {}) {
+  /* ★ 스코프·상태 절은 집계(`inspectionSummary`/`inspectionTypeCounts`)와 **같은 조각**을 쓴다 —
+       따로 쓰면 "요약은 담당 탭 기준, 목록은 전체 기준"으로 갈린다.
+     ★ `tabs`(담당 AE 스코프)를 SQL 로 내리는 것이 중요하다: 종전처럼 전체에서 200건을 뽑아
+       라우트가 걸러내면, 담당 탭 건이 그 200건 밖에 있을 때 **화면이 거의 비어 보인다**. */
+  const { where, params } = _riScope({ sheetId, tabName, tabs });
+  _riStatusClause(status, where, params);
   params.push(Math.min(Number(limit) || 200, 500));
   const { rows } = await _db().query(
     `SELECT i.id, i.file_id, i.sheet_id, i.tab_name, i.row_index, i.reviewer_name, i.slot_key,
@@ -1285,21 +1284,74 @@ async function listInspections({ sheetId, tabName, status = 'open', limit = 200 
   return rows;
 }
 
-/** 탭별 검수 현황 집계(상단 요약 + nav 뱃지). */
-async function inspectionSummary({ sheetId, tabName } = {}) {
+/* ── 집계 스코프 ──────────────────────────────────────────────────
+ * ★★ `tabs`(담당 탭 목록)는 **staff 스코프를 SQL 안에서** 거르기 위한 것이다.
+ *   종전에는 라우트가 목록(`items`)을 걸러 다시 세었는데, 그 목록은 `LIMIT 200`
+ *   이라 **담당 AE 의 요약·건수가 200 에서 잘려 있었다**(조용한 절단). 집계는
+ *   목록과 달리 상한이 필요 없으므로 스코프를 그대로 SQL 로 내린다.
+ * ★ 빈 배열 = 담당 탭 0개 = 0건(모른다고 전체를 세지 않는다 — fail-closed).
+ */
+function _riScope({ sheetId, tabName, tabs } = {}, a = 'i') {
   const where = [];
   const params = [];
-  if (sheetId) { params.push(sheetId); where.push(`sheet_id = $${params.length}`); }
-  if (tabName) { params.push(tabName); where.push(`tab_name = $${params.length}`); }
+  if (sheetId) { params.push(sheetId); where.push(`${a}.sheet_id = $${params.length}`); }
+  if (tabName) { params.push(tabName); where.push(`${a}.tab_name = $${params.length}`); }
+  if (Array.isArray(tabs)) {
+    params.push(tabs.map(t => String((t && t.sheetId) || '')));
+    params.push(tabs.map(t => String((t && t.tabName) || '')));
+    where.push(`(${a}.sheet_id, ${a}.tab_name) IN `
+      + `(SELECT s, t FROM unnest($${params.length - 1}::text[], $${params.length}::text[]) AS x(s, t))`);
+  }
+  return { where, params };
+}
+
+/** 상태 필터 절 — 목록(`listInspections`)과 같은 의미(open = 의심+불량). */
+function _riStatusClause(status, where, params, a = 'i') {
+  if (status === 'open') {
+    where.push(`${a}.status IN ('suspect','fail')`);
+  } else if (status && status !== 'all' && _LIST_STATUSES.includes(status)) {
+    params.push(status); where.push(`${a}.status = $${params.length}`);
+  }
+}
+
+/** 탭별 검수 현황 집계(상단 요약 + nav 뱃지). */
+async function inspectionSummary({ sheetId, tabName, tabs } = {}) {
+  const { where, params } = _riScope({ sheetId, tabName, tabs });
   const { rows } = await _db().query(
-    `SELECT status, COUNT(*)::int AS c FROM review_inspections
+    `SELECT i.status, COUNT(*)::int AS c FROM review_inspections i
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      GROUP BY status`,
+      GROUP BY i.status`,
     params
   );
   const out = { pass: 0, suspect: 0, fail: 0, pending: 0, unverifiable: 0, resolved: 0, open: 0 };
   for (const r of rows) if (out[r.status] !== undefined) out[r.status] = r.c;
   out.open = out.suspect + out.fail;
+  return out;
+}
+
+/**
+ * 오류유형별 건수 — **목록 상한(200)과 무관한 전체 집계**.
+ *
+ * ★★ 이것이 없던 동안 화면 칩은 "불러온 200건"만 셌다 — 3,334건짜리 화면에서
+ *   `전체 유형 200` 으로 뜨는 것이 그 증상이고, 유형별 실제 분포는 시스템 어디에서도
+ *   볼 수 없었다. 판정은 `utils/inspectIssueTypes` 한 곳이 소유한다(사본 금지).
+ * ★ 한 건이 여러 유형이면 각 유형에 **모두** 세어지므로 `합계 ≠ total` 이다
+ *   (화면 안내문이 그 사실을 말한다 — 조용한 불일치 금지).
+ * ★ 읽기 전용 · 실패는 호출부에서 fail-soft(칩을 못 그릴 뿐 목록은 뜬다).
+ */
+async function inspectionTypeCounts({ sheetId, tabName, tabs, status = 'open' } = {}) {
+  const { where, params } = _riScope({ sheetId, tabName, tabs });
+  _riStatusClause(status, where, params);
+  const { rows } = await _db().query(
+    `SELECT COUNT(*)::int AS total,
+           ${issueTypeCountSql('i.checks')}
+       FROM review_inspections i
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,
+    params
+  );
+  const r = rows[0] || {};
+  const out = { total: Number(r.total) || 0 };
+  for (const k of ISSUE_KEYS) out[k] = Number(r[k]) || 0;
   return out;
 }
 
@@ -1520,7 +1572,7 @@ module.exports = {
   loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
   loadRouteSamples, routeSampleSettings, saveRouteSample, submissionSamples,
   findAuthorReuse, runInspectSweep, reinspectTab, inspectionsCsv,
-  listInspections, inspectionSummary, resolveInspection, resolveInspectionsBulk, inspectionScope,
+  listInspections, inspectionSummary, inspectionTypeCounts, resolveInspection, resolveInspectionsBulk, inspectionScope,
   notifyInspectionReject,
   resolveReviewerPhone8,
   classifyDuplicateContext,

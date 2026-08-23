@@ -261,8 +261,15 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
   ok('★ staff 는 담당 탭만 — 스코프 판정 실패는 거절(fail-closed)',
     /_riCanTouch/.test(tb) && /canAccessTab/.test(tb)
     && /return \{ ok: false, code: 503, error: '담당 범위를 확인하지 못했습니다\./.test(tb));
+  /* ★ 종전에는 전체에서 뽑은 200건을 라우트가 `allow.has(...)` 로 걸렀는데, 담당 건이 그 200건
+       밖이면 화면이 거의 비고 요약도 200 에서 잘렸다 → 스코프를 **SQL 로 내린다**(2026-08-23).
+       검사 의미는 같거나 더 강하다: 목록·요약·유형집계가 **같은 담당 탭 목록**을 받는다. */
   ok('★ 탭 미지정 staff 는 담당 탭 목록으로 거른다(넓게 보여주지 않는다)',
-    /scopedActiveTabs\(\{ role: 'staff'/.test(tb) && /allow\.has\(JSON\.stringify\(\[it\.sheet_id, it\.tab_name\]\)\)/.test(tb));
+    /scopedActiveTabs\(\{ role: 'staff'/.test(tb)
+    && /const tabs = \(sc\.scoped && !sc\.tabName\) \? \(sc\.allow \|\| \[\]\) : undefined;/.test(tb)
+    && /listInspections\(\{[\s\S]{0,200}tabs,/.test(tb)
+    && /inspectionSummary\(\{[^)]*tabs \}\)/.test(tb)
+    && /inspectionTypeCounts\(\{[\s\S]{0,200}tabs,/.test(tb));
 
   const wdk = readF('workdesk.html');
   ok('리뷰웹시스템[3버전]에 리뷰검수 탭 + 뱃지',

@@ -143,7 +143,7 @@
     }
     box.innerHTML = messages.map(m => {
       const mine = m.senderRole === 'reviewer';
-      // 리뷰이미지 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
+      // 리뷰캡처 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
       //   리뷰어가 자기 요청의 진행 상태를 채팅 안에서 그대로 확인한다.
       if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
         return `<div style="display:flex;flex-direction:column;align-items:${mine ? 'flex-end' : 'flex-start'}">

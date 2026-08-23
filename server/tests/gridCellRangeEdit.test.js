@@ -161,7 +161,7 @@ function makeCtx(fake) {
     console,
   };
   vm.createContext(sandbox);
-  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_pasteCommitBatch', '_pasteApplyResults'].forEach(n => {
+  ['_selRanges', '_setCellSel', '_updateActiveSel', '_paintSel', '_clearCellSel', '_selAnchorTd', '_selectionGrid', '_cellCopyText', '_selectionTsv', '_moveCellSel', '_selectionStats', '_syncSelectionStat', '_pasteIntoSelection', '_pasteCommitBatch', '_pasteApplyResults', '_dataEdgeIndex', '_cellHasValue', '_rowEdgeIndex', '_colEdgeIndex'].forEach(n => {
     vm.runInContext(grab(n), sandbox);
   });
   return { sandbox, commits, toasts, batches };
@@ -393,9 +393,92 @@ console.log('\n[9] 방향키 이동 · Shift 범위 확장');
 }
 ok('★ 모달·라이트박스가 떠 있으면 방향키를 가로채지 않는다',
   /ArrowUp:\[-1,0\][\s\S]{0,400}querySelector\('\.modalov,#woImgOv,#rvpop'\)/.test(HTML));
-ok('★ Ctrl/Alt/Cmd 조합은 가로채지 않는다', /if\(D && !e\.ctrlKey && !e\.altKey && !e\.metaKey\)/.test(HTML));
+ok('★ Alt 조합은 가로채지 않는다(브라우저 단축키 보존)', /if\(D && !e\.altKey\)/.test(HTML));
 ok('★ 안 그려진 청크를 먼저 그린다(표 아래쪽으로도 이동)',
   /function _moveCellSel[\s\S]{0,300}_gsFlushAll\(\)/.test(HTML));
+
+/* ── 9B. Ctrl(⌘)+방향키 = 데이터 끝으로 (엑셀과 같은 규칙, 사용자 확정 2026-08-23) ──────────
+   ★ 엑셀 규칙 그대로: 이어진 덩어리면 그 끝 · 그 밖이면 다음 값 있는 칸 · 없으면 표 끝.
+   ★ 정적 grep 으로는 규칙을 못 본다 → 순수함수와 실제 이동을 **돌려서** 대조한다. */
+console.log('\n[9B] Ctrl(⌘)+방향키 — 데이터 끝으로');
+{
+  const { sandbox } = makeCtx(buildFakeGrid());
+  const edge = (seq, i, step) => vm.runInContext(`_dataEdgeIndex(${JSON.stringify(seq)},${i},${step})`, sandbox);
+  const F = true, E = false;
+  eq('이어진 덩어리 → 그 끝', edge([F, F, F, E, F], 0, 1), 2);
+  eq('덩어리 끝에서 한 번 더 → 빈 구간을 건너뛴 다음 값', edge([F, F, F, E, F], 2, 1), 4);
+  eq('빈 칸에서 출발 → 그 방향 첫 값', edge([E, E, F, F], 0, 1), 2);
+  eq('그 방향에 값이 없으면 표 끝', edge([F, E, E, E], 0, 1), 3);
+  eq('역방향도 같은 규칙', edge([F, E, F, F], 3, -1), 2);
+  eq('★ 한 칸 뒤가 표 밖이면 제자리(선택이 사라지지 않는다)', edge([F, F], 1, 1), 1);
+  eq('★ 값이 하나도 없어도 표 끝까지만', edge([E, E, E], 0, 1), 2);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
+  eq('Ctrl+↓ = 값이 이어진 마지막 행으로', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 3, c0: 2, r1: 3, c1: 2 }));
+  vm.runInContext('_moveCellSel(0,1,false,true)', sandbox);
+  eq('Ctrl+→ = 그 행의 마지막 값 칸으로', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 3, c0: 5, r1: 3, c1: 5 }));
+  eq('★ 도착해도 한 칸 선택(직사각형 불변)', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 1);
+  ok('★ 표 끝에서 한 번 더 눌러도 제자리(기본 스크롤만 막는다)',
+    vm.runInContext('_moveCellSel(1,0,false,true)', sandbox) === true
+    && JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)) === JSON.stringify({ r0: 3, c0: 5, r1: 3, c1: 5 }));
+}
+{
+  const fake = buildFakeGrid();
+  fake.rows[2].children[2].setAttribute('data-val', '');   // 가운데가 빈 칸 = 덩어리가 끊긴다
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
+  eq('★ 빈 칸 앞에서 멈춘다(덩어리의 끝)', vm.runInContext('STATE.gSelRange.r1', sandbox), 1);
+  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
+  eq('★ 한 번 더 = 빈 칸을 건너뛴 다음 값', vm.runInContext('STATE.gSelRange.r1', sandbox), 3);
+}
+{
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,true,true)', sandbox);
+  eq('★ Ctrl+Shift+↓ = 시작 모서리 고정, 끝까지 확장', JSON.stringify(vm.runInContext('STATE.gSelRange', sandbox)),
+    JSON.stringify({ r0: 0, c0: 2, r1: 3, c1: 2 }));
+  eq('확장 범위 = 4칸', vm.runInContext('_selectionGrid().reduce((a,l)=>a+l.length,0)', sandbox), 4);
+}
+{ // 그룹 머리행은 셀이 없다 — 세로 점프에서 건너뛴다(멈추면 그 아래로 영영 못 간다)
+  const fake = buildFakeGrid();
+  const gh = mkRow([mkCell({ cls: ['ghd'], text: '그룹' })], true);
+  gh.parentBody = fake.body;
+  fake.rows.splice(2, 0, gh);
+  fake.body.children = fake.rows;
+  const { sandbox } = makeCtx(fake);
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
+  eq('★ 그룹 머리행을 건너뛰고 마지막 데이터 행으로', vm.runInContext('STATE.gSelRange.r1', sandbox), 4);
+}
+{ /* ★ 문자열이 "있는지"가 아니라 **불렸는지**를 본다 — 종전 패턴은 `if(false) _gsFlushAll()`
+     로 바꿔도 통과했다(변이시험 실측). Ctrl+↓ 는 이것에 특히 기댄다: 아직 안 그려진 행은
+     "값 없음"으로 보여 덩어리가 그 자리에서 끊긴다. */
+  const fake = buildFakeGrid();
+  const { sandbox } = makeCtx(fake);
+  let flushed = 0;
+  sandbox._gsFlushAll = () => { flushed++; };
+  vm.runInContext('_setCellSel({r0:0,c0:2,r1:0,c1:2})', sandbox);
+  vm.runInContext('_moveCellSel(1,0,false,true)', sandbox);
+  ok('★ 점프 전에 안 그려진 청크를 실제로 그린다(호출 확인)', flushed === 1, 'flushed=' + flushed);
+}
+ok('★ 배선 — Ctrl(⌘) 를 jump 로 넘긴다(Shift 와 독립)',
+  /_moveCellSel\(D\[0\],D\[1\],e\.shiftKey,e\.ctrlKey\|\|e\.metaKey\)/.test(HTML));
+ok('★ 값 판정 사본 금지 — 복사값(`_cellCopyText`)과 같은 함수를 쓴다',
+  /function _cellHasValue\([\s\S]{0,320}_cellCopyText\(td\)/.test(HTML));
+ok('★ 점프 전용 이동 경로를 따로 두지 않는다(범위·칠·스크롤은 _moveCellSel 하나)', (() => {
+  // 끝 판정 헬퍼는 **선언 1 + 호출 1**뿐이고 그 호출은 _moveCellSel 안에 있다.
+  const mv = grab('_moveCellSel');
+  return ['_rowEdgeIndex', '_colEdgeIndex'].every(n =>
+    (HTML.match(new RegExp(n + '\\(', 'g')) || []).length === 2 && mv.includes(n + '('));
+})());
 
 /* ── 10. 선택 요약은 빈 셀을 세지 않는다 (사용자 확정 2026-08-19) ─────────────────── */
 console.log('\n[10] 선택 요약 — 빈 셀 제외');

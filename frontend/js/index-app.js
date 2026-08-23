@@ -6912,7 +6912,12 @@ async function quickEditCell(e, cell) {
 
   } else if (field === '리뷰타입') {
     const _existingReview = (tcData.reviewType || '').trim();
-    const opts = ['실배송','빈박스','구매확정','믹스'];
+    const opts = _tcReviewOptions();          // ★ 단일 출처(위 _tcReviewOptions 주석 참조)
+    if (!opts.length) {
+      // 목록 모듈을 못 불러왔다 — 빈 선택지를 그려 "고를 게 없는 창"을 만들지 않는다.
+      popup.innerHTML += `<div style="font-size:.72rem;color:#B91C1C;padding:4px 2px">리뷰타입 목록 모듈을 불러오지 못했습니다 — 새로고침 후 다시 시도하세요.</div>`;
+      getValue = () => _existingReview;       // 저장해도 값이 바뀌지 않는다(조용한 해제 금지)
+    } else {
     popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
     getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
     // 기존값 pre-select
@@ -6927,6 +6932,7 @@ async function quickEditCell(e, cell) {
         btn.classList.add("sel");
       });
     });
+    }
 
   } else if (field === '담당자') {
     const _existingManager = (tcData.manager || '').trim();
@@ -12550,6 +12556,24 @@ async function _saveLinkInput(id, sheetId, tabName, apiKey, dbKey) {
 }
 
 /** 택일 팝업: 버튼 클릭 → 드롭다운 */
+/* ══ 리뷰타입 선택지 — **단일 출처는 서버 `utils/reviewType.REVIEW_TYPES`** ══════════════
+   화면 사본은 `index-recruit.js` 의 `RF_REVIEW_TYPE_LABELS` 하나뿐이고 회귀가드가 서버 목록과의
+   일치를 고정한다(workManager 사본 규율). 여기서 목록을 다시 적으면 안 되는 이유:
+   ★★ 옛 어휘(실배송·빈박스·믹스)를 고르면 `tab_configs.review_type` 에 **배송유형**이 들어가
+     `resolveReviewType` 이 null 로 떨어진다 → "설정했는데 검수는 미지정"(2026-08-06 실사고의 입구).
+   ★ 표시(배지)는 옛 값도 그대로 남긴다 — 입력 창구에서만 뺀다. */
+function _tcReviewOptions() {
+  return (typeof RF_REVIEW_TYPE_LABELS !== 'undefined')
+    ? RF_REVIEW_TYPE_LABELS.map(([, l]) => l) : [];
+}
+/* 배지 색 — 옛 값도 남긴다(그 탭에 무엇이 설정돼 있었는지 보여야 한다). 목록 밖은 회색 기본. */
+const TC_REVIEW_COLORS = {
+  "포토":"#5B21B6","포토_bg":"#EDE9FE","텍스트":"#075985","텍스트_bg":"#E0F2FE",
+  "구매확정":"#065F46","구매확정_bg":"#D1FAE5","별점":"#92400E","별점_bg":"#FEF3C7",
+  "혼합":"#9D174D","혼합_bg":"#FCE7F3",
+  "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe",
+  "믹스":"#D97706","믹스_bg":"#FEF3C7"
+};
 function _inlineSelect(t, dbKey, apiKey, options, colorMap, round) {
   const cur = t[dbKey] || "";
   const display = cur || "—";
@@ -12951,9 +12975,8 @@ function _cellVal(t, col) {
   if (k === "manager") return _inlineSelect(t, "manager", "manager", ["만두","망고"], {
     "만두":"#1D4ED8","만두_bg":"#DBEAFE","망고":"#D97706","망고_bg":"#FEF3C7"
   }, t._isRoundRow ? t._roundLabel : null);
-  if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", ["실배송","빈박스","구매확정","믹스"], {
-    "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe","구매확정":"#1D4ED8","구매확정_bg":"#DBEAFE","믹스":"#D97706","믹스_bg":"#FEF3C7"
-  }, t._isRoundRow ? t._roundLabel : null);
+  if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", _tcReviewOptions(),
+    TC_REVIEW_COLORS, t._isRoundRow ? t._roundLabel : null);
   if (k === "payment_type") return _inlineSelect(t, "payment_type", "paymentType", ["현금","현영","소득"], {
     "현금":"#0ca678","현금_bg":"#D1FAE5","현영":"#1D4ED8","현영_bg":"#DBEAFE","소득":"#3182f6","소득_bg":"#e8f1fe"
   }, t._isRoundRow ? t._roundLabel : null);
@@ -16218,7 +16241,7 @@ async function _relocateMakeReportPageLink() {
           <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
           <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
         </div>
-        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 캡처를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
         <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
       </div>`;
     showToast('업체 보고 링크 준비됨', 'success');
@@ -16279,7 +16302,7 @@ function _relocateCopyLink(inputId) {
 
 // ── 선택 탭 [리뷰] 폴더 이미지 연결 백필 — POST /api/drive/review-folder-backfill ──
 //   폴더 안 이미지를 파일명 이름↔행 결정적 매칭으로 원장(review_submissions)·대표 이미지에 연결.
-//   업체 뷰어 "리뷰 이미지 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
+//   업체 뷰어 "리뷰 캡처 미등록" 해소용. dryRun 미리보기 → [실제 연결 실행] 2단계.
 async function _reviewFolderBackfill(apply) {
   const t = _relocateTabs[_relocateSelIdx];
   if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
