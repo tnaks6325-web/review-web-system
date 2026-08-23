@@ -61,7 +61,7 @@ const rhas = (re, msg) => { if (!re.test(recruitSrc)) throw new Error(msg || `�
 t('서버가 연결 작업오더의 시작일을 대조용으로 함께 내려준다', () => {
   if (!/linkedWorkOrderForCampaign\(rows\[0\], \['review_type_mix', 'inflow_type', 'start_date'\]\)/.test(campSrc))
     throw new Error('시작일을 같은 조회에 합류시키지 않았다 — 사본 조회가 생기면 근거가 갈린다');
-  if (!/orderStartDate\s*\}\);/.test(campSrc)) throw new Error('응답에 orderStartDate 가 없다');
+  if (!/orderStartDate, roundsLock \}\);/.test(campSrc)) throw new Error('응답에 orderStartDate 가 없다');
   if (!/new Date\(wo\.start_date\)\.toISOString\(\)\.slice\(0, 10\)/.test(campSrc))
     throw new Error('화면과 같은 변환(ISO slice(0,10))을 써야 같은 날짜가 다르게 보이지 않는다');
 });

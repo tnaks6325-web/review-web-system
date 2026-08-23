@@ -217,7 +217,14 @@ console.log('\n[D] 프리필한 수량이 저장 페이로드에 실린다');
 console.log('\n[E] 배선 — 초기화가 캐시를 비우고 상수 지문이 되살아나지 않는다');
 {
   ok('모달 초기화가 렌더 캐시를 비운다',
-    /window\._rfGlobalReviewTypeMix = \[\];[\s\S]{0,400}?resetRecruitReviewMixRender\(\);/.test(src));
+    (() => {
+    const i = src.indexOf('window._rfGlobalReviewTypeMix = [];');
+    const j = src.indexOf('resetRecruitReviewMixRender();', i);
+    // ★ 고정 폭 창(구 {0,400})은 초기화 목록이 늘 때마다 조용히 빨개진다 —
+    //   '같은 초기화 블록 안에서 순서대로'만 고정한다(검사 의미 불변).
+    const end = src.indexOf('\n}', i);
+    return i > 0 && j > i && (end < 0 || j < end);
+  })());
   ok('전역 지문에 기준 인원이 들어간다', /`global:\$\{_reviewMixExpectedFor\(/.test(src));
   ok("상수 'global' 지문이 되살아나지 않는다", !/:\s*'global';/.test(src));
   ok('early-return 경로도 기준을 다시 읽는다(dataset.expected 고착 금지)',
